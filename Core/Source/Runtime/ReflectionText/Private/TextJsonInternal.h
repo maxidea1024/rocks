@@ -50,6 +50,12 @@ public:
     // 선택자 없는 끝 단계가 된다).
     Result<void> SetKey(NamePool* names, Allocator& allocator, const FieldValue& key) noexcept;
 
+    // 경로를 path로 바꾼다(단계와 key wire를 allocator로 복사한다 — 리플렉션 B9i 리뷰 반영의
+    // ReadOnly 대조가 대조 자리에서 시작한다). path의 끝 단계에는 선택자가 없어야 한다(뒤에 붙이는
+    // 선택자가 끝 key를 뗀다). 오류: MaxPropertyPathSteps를 넘으면 InvalidArgument, 할당
+    // 실패(경로는 빈 경로가 된다).
+    Result<void> Assign(PropertyPath path, Allocator& allocator) noexcept;
+
     // 끝 단계의 선택자를 지운다.
     void ClearSelector() noexcept {
         PathStep& last = steps_[count_ - 1];

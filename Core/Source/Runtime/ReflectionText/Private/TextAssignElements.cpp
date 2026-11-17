@@ -41,17 +41,20 @@ bool InsideRemoved(PropertyPath path, PropertyPath arrayPath,
     return step.selector == PathSelector::Index && stage.IsRemoved(step.index);
 }
 
-// 지운 원소 안의 값·참조 단위를 버린다(순서는 유지한다 — 할당하지 않는다).
+// 지운 원소 안의 값·참조 단위를 버린다(순서는 유지한다 — 할당하지 않는다). 그 단위가 만든 고정도
+// 놓는다(Publish의 대상 검사에서 빠진다 — 리플렉션 B9i 리뷰 반영).
 void DiscardRemovedUnits(AssignmentState& state, const ElementsUnit& unit) noexcept {
     const PropertyPath arrayPath = unit.Path();
     for (usize index = state.units.Size(); index != 0; --index) {
         if (InsideRemoved(state.units[index - 1]->Path(), arrayPath, unit.stage)) {
+            ReleasePins(state, state.units[index - 1].Get());
             (void)state.units.TryRemoveAt(index - 1);
         }
     }
 
     for (usize index = state.references.Size(); index != 0; --index) {
         if (InsideRemoved(state.references[index - 1]->Path(), arrayPath, unit.stage)) {
+            ReleasePins(state, state.references[index - 1].Get());
             (void)state.references.TryRemoveAt(index - 1);
         }
     }

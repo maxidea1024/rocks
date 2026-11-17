@@ -166,7 +166,9 @@ constexpr T Dot(const Vector2<T>& a, const Vector2<T>& b) noexcept {
     return xx + yy;
 }
 
-// 3차원 외적의 z 성분 a.x*b.y - a.y*b.x다. 양수면 b가 a의 반시계 방향(+Z에서 내려다볼 때)이다.
+// 3차원 외적의 z 성분 a.x*b.y - a.y*b.x다(UE FVector2D::operator^·CrossProduct와 같은 식). 양수면
+// b가 a에서 +X → +Y 쪽으로 돌아 있다. 월드 XY 평면(왼손, +Y 오른쪽)에서는 위(+Z)에서 내려다볼 때
+// 시계 방향, 즉 양의 yaw 방향이다. 화면·UV처럼 +Y가 아래인 2D 좌표에서는 화면상 시계 방향이다.
 template <typename T>
 constexpr T Cross(const Vector2<T>& a, const Vector2<T>& b) noexcept {
     const T xy = a.x * b.y;

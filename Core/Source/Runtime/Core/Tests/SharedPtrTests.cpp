@@ -92,13 +92,15 @@ struct RaceContext {
     int failures = 0;
 };
 
-// 각 작업자는 Lock 성공을 한 번 이상 알리고, 만료를 관찰할 때까지(최대 반복 수 이내) 계속 Lock한다.
-// 주 스레드는 모든 작업자의 성공 신호를 본 뒤 마지막 해제를 하므로 Lock과 해제가 실제로 겹친다.
+// 각 작업자는 Lock 성공을 한 번 이상 알리고, 만료를 관찰할 때까지 계속 Lock한다. 주 스레드는 모든
+// 작업자의 성공 신호를 본 뒤 반드시 마지막 해제를 하므로 Lock과 해제가 실제로 겹치고, 작업자는 반복
+// 수 상한 없이도 늘 만료를 관찰하고 끝난다(반복 수 상한은 스레드 일정에 따라 만료 전에 끝날 수 있어
+// 시험이 타이밍에 기대게 된다).
 void RaceEntry(void* raw) noexcept {
     auto* context = static_cast<RaceContext*>(raw);
     context->start->Wait();
     bool signaled = false;
-    for (int iteration = 0; iteration < 5000000; ++iteration) {
+    for (;;) {
         SharedPtr<Counted> locked = context->weak->Lock();
         if (locked) {
             ++context->observedAlive;

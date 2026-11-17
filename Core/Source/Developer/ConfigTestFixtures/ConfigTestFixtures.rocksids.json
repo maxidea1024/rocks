@@ -1,0 +1,229 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::FixtureLayer::names",
+      "id": "25838aedc8ff42468bd3d565a157a68f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::FixturePoint::x",
+      "id": "fcadcb66a868459abbb11c849b1d9718",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::FixturePoint::y",
+      "id": "8bb495af8ab845ee9bdc7df164bef3e6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::GameplaySettings::lives",
+      "id": "c43288390e234f7dad07fe6b5b7e33cd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::GameplaySettings::map",
+      "id": "dba9273c75ef45869b5f7e42d6bac2b6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::GameplaySettings::scoreLimit",
+      "id": "11ca8a66d228404894519d9d2a3c5f25",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::GameplaySettings::seed",
+      "id": "aae615026b554b5baea0acfba92422ae",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::GameplaySettings::sensitivity",
+      "id": "f6e5d90dc35d4546b16aa7787fb1326a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::GameplaySettings::title",
+      "id": "792f4863f0d74e6fb07dcd46654f1df2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::GraphSettings::byName",
+      "id": "63edfd7bd99d48f1a9b8496cd7a512b3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::GraphSettings::cacheDir",
+      "id": "eddd78bf244648748ce5513897a6d6a8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::GraphSettings::debugDraw",
+      "id": "582b0d3c19544bc7a1518715c88ecdcb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::GraphSettings::immediate",
+      "id": "e484f2956a8349758d4f7f7915dc2659",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::GraphSettings::layers",
+      "id": "80502e4abf1746d5bfa0211114b6dbd0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::GraphSettings::lodBias",
+      "id": "5abbd9901bcb49c1a4b91bf14e1d4f92",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::GraphSettings::maxPasses",
+      "id": "a54fb97770d8475a82fe4fdd1ea82431",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::GraphSettings::origin",
+      "id": "8c09345188e04fbba462c86d83f5dd3f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::GraphSettings::passes",
+      "id": "6e02d9c7fca4432882424095b8ba17fa",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::GraphSettings::points",
+      "id": "bd5e52f930b54996987fdd4e89b798ff",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::GraphSettings::qualities",
+      "id": "c58a70ae69dc493dbd40498b250d7e8c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::GraphSettings::quality",
+      "id": "d70722ca9cc444ffb082caf8f9beb186",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::GraphSettings::scales",
+      "id": "612e5680afd44e7c9af75a1882f8c5b2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::GraphSettings::tags",
+      "id": "db1af07b8a9a4e71af16ff8cbf282b31",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::GraphSettings::workers",
+      "id": "cd1c39c0c043495fac33ec10805c08b4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::ReloadArgs::count",
+      "id": "efc5379203d14fc98a01a2105a66a2a0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::ReloadArgs::target",
+      "id": "92459a1534954ae1a196ad9de3a1e9c9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::config_fixture::FixtureLayer",
+      "id": "85e4c03454d0426e949a41484cd2141e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::config_fixture::FixturePoint",
+      "id": "03341c0502514b8f81a40a73dace204b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::config_fixture::FixtureQuality",
+      "id": "4231bde79c5f45d796e876e6233bdf0e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::config_fixture::GameplaySettings",
+      "id": "da0f566d04b846e8860e982ffa835fcf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::config_fixture::GraphSettings",
+      "id": "f7d528f708334afdbfe7bd73c00f3631",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::config_fixture::ReloadArgs",
+      "id": "e27d8970abcc4c7cace3fa293346be4e",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

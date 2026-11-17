@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "id": "D3D12_SM6",
+  "status": "supported",
+  "backend": "D3D12",
+  "processor": { "module": "ShaderFormatD3D", "version": 1 },
+  "bindingConvention": 1,
+  "tools": ["DirectXShaderCompiler"],
+  "language": { "hlsl2021": true },
+  "compiler": {
+    "path": "DxcDxil",
+    "shaderModel": "6_6",
+    "imageFormat": "Empty"
+  },
+  "stages": ["vertex", "pixel", "compute"],
+  "limits": {
+    "constantBuffers": 14,
+    "sampledTextures": 128,
+    "storageBuffers": 128,
+    "storageImages": 8,
+    "samplers": 16,
+    "uavTotal": 8,
+    "uavStages": ["compute"],
+    "renderTargets": 8,
+    "interStageVectors": 16,
+    "rootConstantBytes": 128
+  },
+  "features": ["compute", "waveOperations"],
+  "deviceRequirements": ["D3D_FEATURE_LEVEL_11_0", "D3D12_SHADER_MODEL_6_6"],
+  "producers": [{ "host": "windows-x64" }]
+}

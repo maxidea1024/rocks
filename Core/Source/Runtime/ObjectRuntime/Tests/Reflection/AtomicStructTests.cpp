@@ -6,8 +6,8 @@
 
 // 리플렉션 B9b2 struct Atomic 시험이다(Docs/Design/ReflectionExtensions.ko.md 3.1·3.2절):
 // RegisterStruct의 struct 플래그 mask(Atomic만), 클래스 Atomic 비트 거부, StructView::IsAtomic과
-// 비전파, Core 값 타입 미러 17종 중 Transform을 뺀 16종의 Atomic, Transform3f·Transform3d 미러와
-// Core 타입의 멤버 대조. 차이 쓰기·override 단위(A5)는 여기서 다루지 않는다.
+// 비전파, Core 값 타입 미러 17종 중 Transform을 뺀 16종의 Atomic, Transform3f·Transform3d·Rotator
+// 미러와 Core 타입의 멤버 대조. 차이 쓰기·override 단위(A5)는 여기서 다루지 않는다.
 using namespace rocks;
 using core_type_bindings::Transform3dBinding;
 using core_type_bindings::Transform3fBinding;
@@ -44,6 +44,20 @@ static_assert(ROCKS_OFFSET_OF(Transform3dBinding, translation) <
                   ROCKS_OFFSET_OF(Transform3dBinding, rotation) <
                       ROCKS_OFFSET_OF(Transform3dBinding, scale),
               "Transform3dBinding members must follow the Transform3d declaration order");
+// Rotator 미러는 UE FRotator와 같은 pitch·yaw·roll(도) 순서다(Core/Math/Rotator.h).
+static_assert(ROCKS_OFFSET_OF(Rotator<float>, pitch) < ROCKS_OFFSET_OF(Rotator<float>, yaw) &&
+                  ROCKS_OFFSET_OF(Rotator<float>, yaw) < ROCKS_OFFSET_OF(Rotator<float>, roll),
+              "Rotator members must be declared pitch, yaw, roll like UE FRotator");
+static_assert(ROCKS_OFFSET_OF(core_type_bindings::RotatorBinding, pitch) <
+                      ROCKS_OFFSET_OF(core_type_bindings::RotatorBinding, yaw) &&
+                  ROCKS_OFFSET_OF(core_type_bindings::RotatorBinding, yaw) <
+                      ROCKS_OFFSET_OF(core_type_bindings::RotatorBinding, roll),
+              "RotatorBinding members must follow the Rotator declaration order");
+static_assert(ROCKS_OFFSET_OF(core_type_bindings::RotatordBinding, pitch) <
+                      ROCKS_OFFSET_OF(core_type_bindings::RotatordBinding, yaw) &&
+                  ROCKS_OFFSET_OF(core_type_bindings::RotatordBinding, yaw) <
+                      ROCKS_OFFSET_OF(core_type_bindings::RotatordBinding, roll),
+              "RotatordBinding members must follow the Rotator declaration order");
 // 생성 특수화는 실제 타입에 있고 멤버 미러(Vec3·Quat 등)를 담아 깊이 2다.
 static_assert(GeneratedType<Transform3f>::Depth == 2 && GeneratedType<Transform3d>::Depth == 2,
               "Transform3 mirrors nest one level of member mirrors");

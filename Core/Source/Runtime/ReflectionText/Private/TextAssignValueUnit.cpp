@@ -8,6 +8,14 @@ namespace rocks::reflection_text::detail {
 Result<void> Apply::Run() noexcept {
     const bool readOnly = state.target.GetKind() != AssignmentTarget::Kind::Staged &&
                           (slot.flags & static_cast<uint32>(FieldFlags::ReadOnly)) != 0;
+    // 값 단위의 ReadOnly 자리는 상자에 적용하고 호출 끝에 지금 값과 대조한다(리플렉션 B9i 리뷰
+    // 반영). 컨테이너 단위(Registry 컨테이너)의 ReadOnly는 같은 값만 받고 그 밖은 바로 진단이다.
+    const bool blocked = readOnly && !unit;
+    const auto defer = [&]() noexcept -> Result<void> {
+        readOnlyDeferred = true;
+        return NoteReadOnly(state, *unit, path, path.steps.Size() - relative.steps.Size(), source);
+    };
+
     const ValueKind fieldKind = slot.field->value.kind;
     switch (assignment.kind) {
     case AssignmentKind::Unset: {
@@ -16,8 +24,14 @@ Result<void> Apply::Run() noexcept {
                               "only an Optional property can be unset");
         }
 
-        if (readOnly) {
+        if (blocked) {
             return Diagnostic(TextDiagnosticCode::ReadOnly, "property is read-only");
+        }
+
+        if (readOnly) {
+            if (auto noted = defer(); !noted) {
+                return noted;
+            }
         }
 
         Result<void> done = Result<void>::Success();
@@ -38,8 +52,14 @@ Result<void> Apply::Run() noexcept {
                               "erase needs a key or an element index");
         }
 
-        if (readOnly) {
+        if (blocked) {
             return Diagnostic(TextDiagnosticCode::ReadOnly, "property is read-only");
+        }
+
+        if (readOnly) {
+            if (auto noted = defer(); !noted) {
+                return noted;
+            }
         }
 
         auto done =
@@ -60,8 +80,14 @@ Result<void> Apply::Run() noexcept {
             return Diagnostic(TextDiagnosticCode::InvalidValue, "a Set element takes no value");
         }
 
-        if (readOnly) {
+        if (blocked) {
             return Diagnostic(TextDiagnosticCode::ReadOnly, "property is read-only");
+        }
+
+        if (readOnly) {
+            if (auto noted = defer(); !noted) {
+                return noted;
+            }
         }
 
         auto inserted = PathInsertKey(Registry(), Access(), Start(), relative, &failure);
@@ -79,27 +105,46 @@ Result<void> Apply::Run() noexcept {
         return Result<void>::Success();
     }
 
-    auto pinned = PinReferences(state, value, source, assignment.path);
+    auto pinned = PinReferences(state, value, source, assignment.path, owner);
     if (!pinned || !pinned.Value()) {
         return pinned ? Result<void>::Success() : Result<void>::Failure(pinned.Error());
     }
 
+    // 지금 값과 같으면 무동작이다(ReadOnly·Deprecated ClassRef의 같은 값 재대입 포함 — 목록·항목
+    // 목록은 원소마다 비교한다, 리플렉션 B9i 리뷰 반영).
+    bool same = false;
     if (value.shape == TextValueShape::Single) {
-        // 지금 값과 같으면 무동작이다(ReadOnly·Deprecated ClassRef의 같은 값 재대입 포함).
         FieldValue current(state.allocator);
         PropertyPathFailure readFailure;
         auto read = PathRead(Registry(), Access(), Start(), relative, current, &readFailure);
-        if (!read && read.Error() == ErrorCode::OutOfMemory) {
+        if (!read && IsCallError(read.Error())) {
             return read;
         }
 
-        if (read && SameValue(current, value.single)) {
-            return readOnly ? Result<void>::Success() : AddOverride(state, path);
+        same = read && SameValue(current, value.single);
+    } else if (slot.part == TextSlotPart::Field &&
+               (value.shape == TextValueShape::List || value.shape == TextValueShape::Entries ||
+                value.shape == TextValueShape::Empty)) {
+        auto compared = SameContents(state, Start(), relative, *slot.field, value);
+        if (!compared) {
+            return Result<void>::Failure(compared.Error());
         }
+
+        same = compared.Value();
+    }
+
+    if (same) {
+        return readOnly ? Result<void>::Success() : AddOverride(state, path);
+    }
+
+    if (blocked) {
+        return Diagnostic(TextDiagnosticCode::ReadOnly, "property is read-only");
     }
 
     if (readOnly) {
-        return Diagnostic(TextDiagnosticCode::ReadOnly, "property is read-only");
+        if (auto noted = defer(); !noted) {
+            return noted;
+        }
     }
 
     return RunSet(value);

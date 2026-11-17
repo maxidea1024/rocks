@@ -265,10 +265,11 @@ TEST(TextJson_StrictDiagnosticsCarryJsonPositions) {
     REQUIRE(!prepared && prepared.Error() == ErrorCode::InvalidArgument);
     const TextDiagnostics& diagnostics = fixture.diagnostics;
     REQUIRE(diagnostics.Count() == 6);
+    // ReadOnly 자리는 import 끝에 대조하므로 그 진단은 맨 뒤다(리플렉션 B9i 리뷰 반영).
     const TextDiagnosticCode expected[] = {
         TextDiagnosticCode::DuplicateKey, TextDiagnosticCode::UnknownProperty,
-        TextDiagnosticCode::InvalidValue, TextDiagnosticCode::ReadOnly,
-        TextDiagnosticCode::InvalidValue, TextDiagnosticCode::InvalidValue};
+        TextDiagnosticCode::InvalidValue, TextDiagnosticCode::InvalidValue,
+        TextDiagnosticCode::InvalidValue, TextDiagnosticCode::ReadOnly};
     for (usize index = 0; index < diagnostics.Count(); ++index) {
         CHECK(diagnostics.Get(index).code == expected[index]);
         CHECK(diagnostics.Get(index).source.kind == TextSourceKind::Json);
@@ -278,7 +279,8 @@ TEST(TextJson_StrictDiagnosticsCarryJsonPositions) {
     CHECK(diagnostics.Get(1).source.position.line == 4 &&
           diagnostics.Get(1).source.position.column == 11);
     CHECK(diagnostics.Get(2).path == "label" && diagnostics.Get(2).source.position.line == 5);
-    CHECK(diagnostics.Get(5).path == "numbers" && diagnostics.Get(5).source.position.column == 18);
+    CHECK(diagnostics.Get(4).path == "numbers" && diagnostics.Get(4).source.position.column == 18);
+    CHECK(diagnostics.Get(5).path == "locked" && diagnostics.Get(5).source.position.line == 6);
     CHECK(Peek(fixture, object)->count == 0);
 
     // Deprecated 클래스 값을 담은 객체: 같은 값 재대입은 거부하지 않고 무동작이다.

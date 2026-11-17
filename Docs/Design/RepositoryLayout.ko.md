@@ -10,7 +10,7 @@ rocks/
   Core/                       기반 라이브러리(엔진 아님)
     Source/
       Runtime/                모듈: Base PlatformBase Core Compression TraceCapture Task AsyncCompression Serialization MetaSchema
-                              Localization ObjectRuntime ObjectSerialization ReflectionText
+                              Localization ObjectRuntime ObjectSerialization ReflectionText Config
       ThirdParty/             Core가 쓰는 고정 버전 외부 라이브러리(Lz4·Zstd·Zlib·Brotli·Sodium 원본, UnicodeData·
                               JsonTestSuite·Wycheproof 데이터). <Lib>/ThirdParty.json·<lib>-<version>/(릴리스 원본을
                               byte 그대로)·code 종류는 <Lib>.Build.cs와 필요 시 Rocks 글루 .c
