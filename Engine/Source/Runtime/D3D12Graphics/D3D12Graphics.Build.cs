@@ -1,7 +1,7 @@
 using Rocks.Build;
 using Rocks.Build.Rules;
 
-// Direct3D 12 그래픽 backend(Windows)다. 다른 플랫폼에서는 장치 생성이 Unsupported다.
+// Direct3D 12 graphics backend (Windows). On other platforms device creation is Unsupported.
 public sealed class D3D12Graphics : EngineModuleRules
 {
     protected override string ModuleName => "D3D12Graphics";
@@ -18,7 +18,7 @@ public sealed class D3D12Graphics : EngineModuleRules
             Sources = context.Sources(windows ? $"{backend}/Win64" : $"{backend}/Unsupported"),
             PublicIncludeDirectories = [context.PathInRoot($"{ModuleDirectory}/Public")],
             Dependencies = RequiredModules,
-            // 셰이더는 실행 시 D3DCompile(d3dcompiler_47, 시스템 DLL)로 컴파일한다. 오프라인 DXC 쿠킹은 후속이다.
+            // Shaders are compiled at run time with D3DCompile (d3dcompiler_47, system DLL). Offline DXC cooking comes later.
             SystemLibraries = windows ? ["d3d12", "dxgi", "d3dcompiler", "user32"] : []
         };
     }

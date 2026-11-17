@@ -1,6 +1,6 @@
 using Rocks.Build.Rules;
 
-// 지역화 Text·catalog·culture snapshot.
+// Localized Text, catalogs and culture snapshots.
 public sealed class Localization : CoreModuleRules
 {
     protected override string ModuleName => "Localization";

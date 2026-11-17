@@ -24,8 +24,8 @@ function Invoke-Git([string[]]$GitArguments) {
     } finally { $process.Dispose() }
 }
 
-# PR checkout의 실제 merge commit과 양 부모 및 유일한 merge base를 사용한다.
-# 히스토리가 없거나 복수 merge-base이면 임의로 선택하지 않고 실패한다.
+# Uses the PR checkout's actual merge commit, both parents and the single merge base.
+# Fails instead of picking one arbitrarily when there is no history or there are multiple merge bases.
 $parents = (Invoke-Git -GitArguments @('rev-list', '--parents', '-n', '1', 'HEAD')).Trim().Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
 if ($parents.Length -ne 3) { throw 'Identity merge check requires a two-parent PR merge commit.' }
 $bases = (Invoke-Git -GitArguments @('merge-base', '--all', $parents[1], $parents[2])).Trim().Split("`n", [StringSplitOptions]::RemoveEmptyEntries)
@@ -48,14 +48,14 @@ foreach ($revision in $revisions) {
 $temporary = Join-Path ([IO.Path]::GetTempPath()) ('rocks-identity-merge-' + [Guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($temporary)
 try {
-    # 리비전마다 모든 명세를 넘긴다. MetaCompiler가 측면별로 ID 기준으로 합쳐 비교하므로 명세를 다른 모듈 경로로
-    # 옮긴 PR(ids move)도 ID가 사라진 것으로 보지 않는다.
+    # Passes every spec for each revision. MetaCompiler merges and compares per side by ID, so a PR that moved a spec to another module path
+    # (ids move) is not treated as having lost IDs.
     $sides = @('--base', '--ours', '--theirs', '--merged')
     $arguments = @('ids', 'merge-check')
     for ($index = 0; $index -lt 4; $index++) {
         $count = 0
         foreach ($name in $sets[$index]) {
-            # 진단이 원래 명세 경로를 보이도록 <임시>/<측면>/<저장소 상대 경로>에 둔다.
+            # Placed at <temp>/<side>/<repository-relative path> so diagnostics show the original spec path.
             $file = Join-Path (Join-Path $temporary $sides[$index].TrimStart('-')) $name
             [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($file))
             $content = Invoke-Git -GitArguments @('show', ($revisions[$index] + ':' + $name))
@@ -70,6 +70,6 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Identity merge check failed.' }
     Write-Host "Stable identity history checked: $($all.Count) manifest path(s)."
 } finally {
-    # 이 스크립트가 생성한 무작위 하위 디렉터리만 제거한다.
+    # Removes only the random subdirectory this script created.
     if ([IO.Directory]::Exists($temporary)) { [IO.Directory]::Delete($temporary, $true) }
 }

@@ -31,10 +31,11 @@ void Check(bool condition, const char* what) noexcept {
     }
 }
 
-// 로컬 Y(왼쪽)·Z(위)를 clip X(오른쪽)·Y(위)로 보내는 변환이다. 단위 메시가 화면을 가득 채운다.
+// 로컬 Y(오른쪽)·Z(위)를 clip X(오른쪽)·Y(위)로 보내는 변환이다(+X를 바라보는 정면, UE 좌표).
+// 단위 메시가 화면을 가득 채운다.
 Mat4 FillClip() noexcept {
     Mat4 matrix = Mat4::Zero();
-    matrix.m[4] = -2.0f;
+    matrix.m[4] = 2.0f;
     matrix.m[9] = 2.0f;
     matrix.m[14] = 0.5f;
     matrix.m[15] = 1.0f;

@@ -1,7 +1,7 @@
 using Rocks.Build.Rules;
 
-// 리플렉션 값의 텍스트·JSON 표기와 대입 묶음(리플렉션 B9i — Docs/Design/ReflectionExtensions.ko.md 10절).
-// ObjectRuntime 밖에 두어 JSON·명령행 표기가 ObjectRuntime의 모든 사용자에게 끌려가지 않게 한다.
+// Text and JSON notation of reflected values and assignment batches (reflection B9i, Docs/Design/ReflectionExtensions.ko.md section 10).
+// Kept outside ObjectRuntime so JSON and command line notation are not pulled into every ObjectRuntime user.
 public sealed class ReflectionText : CoreModuleRules
 {
     protected override string ModuleName => "ReflectionText";

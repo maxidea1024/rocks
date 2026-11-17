@@ -2,7 +2,7 @@
 
 STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-driven 렌더러
 
-**설계 기준일 2026.11.16 · 개정 1.11 · 상태: 구현 제안 / 성능 미측정**
+**설계 기준일 2026.11.17 · 개정 1.12 · 상태: 구현 제안 / 성능 미측정**
 
 **추가 요구 반영:** Deferred·Forward 정식 지원, 업스케일링, 태깅·컴포넌트·프리팹, Unreal 참고 체계 확대, 컷씬 제작 핵심화, Blueprint 제외·자체 언어 채택, 하이엔드 포스트이펙트 전체 기능군, UBT 계열 자체 빌드 도구·분산 빌드·반복 개발 최적화, 정식 헤드리스 모드, 필수 노드 기반 머티리얼 에디터.
 
@@ -14,15 +14,17 @@ STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-d
 
 **1.5 공간 인덱스:** World의 런타임 공간 인덱스를 Unreal의 분담 방식으로 정의한다. 렌더 판정은 평면 SoA와 SceneCulling 유사 계층 공간 해시, 충돌 질의는 물리 scene query, 비충돌 게임플레이 질의는 2D 계층 공간 해시로 구분한다. 10.4절에 규약과 수용 시험 SI01–SI10을, 33.10절에 교차 검증 결과와 개정 범위를 기록한다.
 
-**1.6 물리 middleware:** Jolt 기본안을 PhysX 5로 전환한다. 모든 대상 플랫폼에서 O3DE 관리 fork의 플랫폼 patch를 기반으로 동일 commit의 PhysX 5를 source 빌드하며, UE 5.8 Chaos는 통합 구조의 참고로만 사용한다. 16.4·16.5절에 버전·빌드·결정성 범위·큰 월드 규약과 수용 시험 PC01–PC08을, 33.11절에 교차 검증 결과와 개정 범위를 기록한다.
+**1.6 물리 middleware:** Jolt 기본안을 PhysX 5로 전환한다. 모든 대상 플랫폼에서 O3DE 관리 fork의 플랫폼 patch를 기반으로 동일 commit의 PhysX 5를 source 빌드하며, UE 5.8 Chaos는 통합 구조의 참고로만 사용한다. 16.4·16.5절에 버전·빌드·결정성 범위·큰 월드 규약과 수용 시험 PC01–PC08을, 33.11절에 교차 검증 결과와 개정 범위를 기록한다. 이 전환은 개정 1.12에서 사용자 결정으로 되돌렸다(Jolt, 16절·33.17절).
 
 **1.7 게임플레이 언어 Sparks:** 자체 게임플레이 언어의 이름을 Sparks(소스 `.spark`, 모듈 `.sparkc`)로 정하고, 프로그래머가 아닌 사용자를 위한 방어적·단순한 설계, Unity 체계의 수명 hook, 메모리·리소스 누수 0, 비동기 로딩, 런타임 eval·AOT를 반영한다. 23절을 엔진 계약 중심으로 개정하고 전체 설계는 [Sparks 언어 설계](SparksLanguage.ko.md)에 둔다. 스크립트 단계의 파괴 지연(5.2절), 수명 hook 이름(20.2절), 로딩 계약 연결(9.2절), 누수 Gate NL09(29.6절)를 함께 개정한다. 교차 검증 결과와 개정 범위는 33.12절에 기록한다.
 
-**1.8 Sparks 언어 모호성 교차 검증:** 같은 규격을 읽은 구현자나 사용자가 다른 결론에 이를 수 있는 지점을 6개 관점으로 교차 검증하고, 스크립트 단계와 프레임 순서·인과 깊이 연쇄 상한·전달 순회·Changed 값 기준·격리·종료 경로별 hook·이름 해석·예약 이름·어휘를 확정하였다. 결정 SD11–SD21(재진입 정책 표시, Start 대기 범위, 이벤트 대기 결과, Array 파괴 처리, enum 한정, 범위 `..<`, 정수 나눗셈 오류, 미터·라디안 단위, 빈 Soft 제거, 종료 경로 hook, NextTick 시계)을 채택하였고, 사용자 결정으로 컴파일 모듈 확장자를 `.sparkc`로 정정하였다(SD1). 2.4·3.2·5.2·6.4·9.2·20.2·22.6·23·29.6(NL09)·31(R03)절과 33.1절 A04의 문구를 개정하고 결과는 33.13절에 기록한다.
+**1.8 Sparks 언어 모호성 교차 검증:** 같은 규격을 읽은 구현자나 사용자가 다른 결론에 이를 수 있는 지점을 6개 관점으로 교차 검증하고, 스크립트 단계와 프레임 순서·인과 깊이 연쇄 상한·전달 순회·Changed 값 기준·격리·종료 경로별 hook·이름 해석·예약 이름·어휘를 확정하였다. 결정 SD11–SD21(재진입 정책 표시, Start 대기 범위, 이벤트 대기 결과, Array 파괴 처리, enum 한정, 범위 `..<`, 정수 나눗셈 오류, 미터·라디안 단위(개정 1.12에서 UE와 같은 cm·도로 번복), 빈 Soft 제거, 종료 경로 hook, NextTick 시계)을 채택하였고, 사용자 결정으로 컴파일 모듈 확장자를 `.sparkc`로 정정하였다(SD1). 2.4·3.2·5.2·6.4·9.2·20.2·22.6·23·29.6(NL09)·31(R03)절과 33.1절 A04의 문구를 개정하고 결과는 33.13절에 기록한다.
 
 **1.9 UI 구조 전환:** 개정 1.4의 Godot 4.x 수준 단일 층 툴킷을 폐기하고 UE 5.8의 두 층 UI 구조(비객체 Element 층 + Object Widget 층)로 전환한다. 기본 스타일과 룩도 최초 구성에서는 UE 5.8 기본값을 따른다. 이름은 Rocks 고유 이름을 쓰고 UE 이름은 대응표에만 적는다. Godot 오라클 시험 GO1–GO6을 UE 5.8 소스 근거 기준값 시험 UV1–UV9로 대체한다. 1.4·2.5·3.1·3.2·21·21.1·21.2·21.3·21.4·21.5·22.1·29.2·30.1·30.2·31·32·33.2·33.9·34절을 개정하고 [UI 툴킷 설계](UiToolkit.ko.md)를 초안 2.0으로 다시 썼다. 개정 범위는 33.14절에 기록한다.
 
 **1.10 GC 대규모 처리 필수화:** 현재 `ObjectRegistry` GC는 객체 100만 개 규모에서 쓸 수 없다(2026-11-16 사용자 판단, 모델 측정 1M 표식 약 0.7초). 대규모 처리 보강을 선택 최적화가 아닌 **필수 작업**으로 정하고 6.6절과 [GC 대규모 처리 보강 설계](GarbageCollectionScale.ko.md)를 추가한다. 착수 시점은 사용자가 정하며 고정 구현 순서는 바꾸지 않는다.
+
+**1.12 좌표·단위 UE 전환과 물리 Jolt 복귀:** 사용자 요구(2026-11-17)에 따라 공간 좌표계·방향·회전 의미·행렬·Transform 규약·월드 단위와 물리량 단위를 UE 5.8과 같게 정한다(왼손 +X 전방·+Y 오른쪽·+Z 위, cm, `Rotator` 도, 행 벡터 `p·M`, `Local * Parent`). 이전 기본안(오른손·+Y 왼쪽·미터·라디안·column vector)은 요구와 달랐으며 Core 수학·World의 코드 전환을 마쳤다. 사용자 결정으로 물리 middleware 기준을 PhysX 5에서 Jolt로 되돌리고, Rocks와 Jolt 사이의 좌표·단위 변환 계약을 [물리 어댑터 경계](PhysicsJoltAdapter.ko.md)에 둔다. 2.1·2.2·2.3·3.1·3.3·10.2·10.4·16·17.2·23.1·28.1·31·33.2·33.11·33.13·34절을 개정하고 33.17절에 기록한다.
 
 ## 1. 목표와 실행 전략
 
@@ -113,7 +115,7 @@ CF01–CF12의 ID와 의미는 이 표를 정본으로 사용한다. 상세안 1
 | Host 도구 | LLVM/Clang, DXC, 임포터 및 빌드 도구 내부 STL 허용. 게임 배포물과 분리 | Host/Target 빌드 그래프 분리 |
 | ThirdParty 런타임 | 내부 STL은 허용하되 엔진 어댑터 밖으로 타입·예외·소유권을 노출하지 않음 | 버전별 헤더·심볼·할당 검토 |
 
-이 정책은 ‘엔진 작성 코드와 API의 STL 비사용’을 의미한다. ThirdParty 내부 사용까지 포함한 ‘배포 바이너리 전체 STL 0’은 별도 요구 수준이다. 그 수준을 적용하면 ThirdParty 의존성을 다시 검토하고, 교체·포크 비용을 일정에 반영해야 한다. PhysX 5의 공개 header는 표준 라이브러리 중 `<new>`·`<typeinfo>`·`<cmath>`만 포함하고 자체 container를 사용하므로 엔진 API 경계 정책과 정합한다. Extensions·Cooking·디버그 연결 계층은 채택 전 header·symbol을 감사한다. C ABI로 감싸는 것만으로 내부 STL 의존성이 제거되지는 않는다. 플랫폼 Atomics는 검증된 표준 메모리 모델을 우선하며, intrinsic 대체는 별도 검증 후 적용한다.
+이 정책은 ‘엔진 작성 코드와 API의 STL 비사용’을 의미한다. ThirdParty 내부 사용까지 포함한 ‘배포 바이너리 전체 STL 0’은 별도 요구 수준이다. 그 수준을 적용하면 ThirdParty 의존성을 다시 검토하고, 교체·포크 비용을 일정에 반영해야 한다. 물리 middleware Jolt(개정 1.12)의 공개 header가 포함하는 표준 라이브러리와 container 사용 범위는 채택 전 header·symbol을 감사한다([물리 어댑터 경계](PhysicsJoltAdapter.ko.md) J14). 개정 1.6에서 PhysX 5에 대해 확인한 header 사실은 더 이상 적용 대상이 아니다. C ABI로 감싸는 것만으로 내부 STL 의존성이 제거되지는 않는다. 플랫폼 Atomics는 검증된 표준 메모리 모델을 우선하며, intrinsic 대체는 별도 검증 후 적용한다.
 
 엔진 Runtime은 예외와 C++ RTTI를 사용하지 않는 기본안으로 구성한다. Object Reflection은 자체 TypeInfo를 사용한다. ThirdParty의 예외·RTTI 옵션은 별도 빌드하며 예외가 엔진 경계를 통과하지 않게 변환한다. 일반 실패는 Result/Error, 손상된 불변식은 assert/fatal, 회복 불가능한 전체 메모리 부족은 진단 후 종료로 처리한다. 스트리밍처럼 예산 부족이 정상인 경로에는 TryAllocate를 제공한다.
 
@@ -124,21 +126,23 @@ CF01–CF12의 ID와 의미는 이 표를 정본으로 사용한다. 상세안 1
 | 플랫폼 | Windows x64·macOS ARM64 개발/에디터·클라이언트, **Android(ARM64·x86_64)·iOS(ARM64) 클라이언트**(2026-11-11 요구 추가, 콘솔은 후속), Linux x64 서버·기반 테스트. 추가 아키텍처는 개별 지원 manifest로 관리. 모바일 Core 요구는 [Core 상세 명세](CoreDetailedSpec.ko.md) §3.5.1 |
 | 도구 | 자체 BuildDriver(Rocks Build)이 target/module/action graph를 소유한다. CMake는 bootstrap·외부 도구, Ninja는 선택 local executor다. clang-cl 우선·MSVC 호환, SDK 버전 고정 |
 | 그래픽 | D3D11/D3D12/Vulkan/Metal/OpenGL. 공통 material IR과 backend별 shader toolchain; 고급 capability는 독립 profile |
-| 좌표 | 오른손, +Z Up, +X Forward, 미터·라디안·초. 임포터에서 변환 |
-| 행렬 | column vector, p′=M×p, local-to-world=parent×local. HLSL 저장 규약과 전치 지점을 고정 |
+| 좌표 | UE 5.8과 같다(2026-11-17 사용자 요구). 왼손, +X Forward·+Y Right·+Z Up, 길이 cm·질량 kg·시간 초. `Rotator`는 도, quaternion 축-각·삼각함수·각속도는 라디안(각속도·토크 API는 UE처럼 이름에 단위). 외부 형식·물리 middleware와는 경계에서 변환([수학 구현](../Implementation/Math.ko.md) 2절, [물리 어댑터 경계](PhysicsJoltAdapter.ko.md)) |
+| 행렬 | UE 5.8과 같다. row vector p′=p·M, 행 우선 저장(이동은 마지막 행), A·B는 A를 먼저 적용, local-to-world=local×parentToWorld(UE `Child * Parent`). Transform 합성은 `TryMultiply(local, parentToWorld)`. 셰이더 전달 규약은 아래 view·깊이·앞면 행 |
 | view·깊이·앞면 | UE 5.8과 같다(2026-11-17 사용자 결정). view space는 +X 오른쪽·+Y 위·+Z 전방, 기본 원근은 reversed-Z(가까움 1·멂 0) 무한 원평면이고 투영 인자는 수평 반각(UE `FReversedZPerspectiveMatrix`), depth [0,1]. 앞면은 화면 반시계·뒤면 컬, 음수 행렬식이면 컬 반전([셰이더 시스템](ShaderSystem.ko.md) 7.2절 6·8항). 투영·컬링·피킹·속도 버퍼의 동일 규약 검증 |
-| 큰 월드 | 월드 위치 double, 회전·스케일 float, 렌더링은 카메라 상대 float. 물리는 float 전용 PhysX의 PhysicsRegion 지역 원점 변환(16.5절) |
+| 큰 월드 | 월드 위치 double(cm). `Transform`은 회전·이동·스케일 모두 double(UE FTransform)이고 대량 경로는 `Transform3f`. 렌더링은 카메라 상대 float. 물리는 Jolt adapter 경계에서 지역 원점 차감과 cm→m 변환(16.5절) |
 | 시간 | 시뮬레이션 기본 60Hz, 단조 증가 64-bit Tick. 렌더 보간과 오디오 sample clock 분리 |
 | 직렬화 | 명시적인 byte order, 고정 폭 정수, 길이 상한·체크섬. 구조체 메모리를 그대로 저장하지 않음 |
 | 문자열 | UTF-8 String/StringView, UI 입력·검색의 Unicode 정규화 정책 명시 |
+
+**2026-11-17 좌표·단위 규약 정정(개정 1.12).** 이 절의 이전 기본안은 오른손 좌표계(+X 전방·+Y 왼쪽·+Z 위)·미터·라디안, column vector `p′=M×p`·`world=parent×local`, 이동만 double인 Transform이었고, UE의 좌표·단위와는 임포터 경계에서 변환한다고 정했다. 사용자 요구는 UE 5.8과 같은 좌표계·단위였으므로 이 기본안은 요구와 달랐다. 코드 단계 C1–C5에서 Core 수학(축·방향 상수, `Rotator` 도·필드 순서·roll 부호, quaternion 회전 의미, 행 벡터 행렬, Transform 합성 순서와 double 성분, 기하 앞면 설명, `Ray` 기본 방향, 단위 경계 함수 `UnitConversion.h`)과 World `SceneComponent`·리플렉션 미러를 바꿨고 호환 계층은 두지 않았다([수학 구현](../Implementation/Math.ko.md) 2절). 위치·회전을 담은 저장 데이터가 없어 migration은 두지 않는다. view·깊이·앞면과 셰이더 행렬 전달은 렌더 문서가 정하며 렌더 코드 전환은 렌더 세션 몫이다. 카메라·물리·입력 이동은 아직 구현되지 않아 계약만 바꿨다.
 
 CPU/GPU 구조체는 크기·정렬·필드 오프셋을 자동 검사한다. SIMD 정렬을 파일 포맷이나 플러그인 ABI에 암묵적으로 전파하지 않는다. 플랫폼 기능은 DeviceCaps로 조회하며 고급 기능이 없는 장치에는 전통 LOD·일반 그림자·probe 조명 경로를 제공한다.
 
 ### 2.3 Core Transform의 표현과 실패 규약
 
-Core의 authoring LocalTransform은 translation(double)·quaternion·diagonal scale의 TRS로 정의하고, 계산용 WorldAffine은 parent×local의 affine 결과를 보존한다. 비균일 parent scale과 child rotation의 합성에는 shear가 생길 수 있으므로 world 결과를 매번 TRS로 분해하여 근사하지 않는다. 카메라 상대 GPU matrix는 이 affine 결과에서 생성한다. Core의 `Transform`(이동 double·회전·크기 float)이 이 authoring LocalTransform이다. 정밀도가 하나인 값 타입 `Transform3f`·`Transform3d`(UE FTransform3f·3d 대응 — 데이터 반입, GPU·애니메이션용 float, 도구용 double)도 같은 TRS 규약과 실패 규약(shear는 근사하지 않고 Unsupported)을 따른다([리플렉션 B9](ReflectionExtensions.ko.md) 3.2절).
+Core의 authoring LocalTransform은 quaternion·translation·diagonal scale의 TRS(모든 성분 double)로 정의하고, 계산용 WorldAffine은 local×parentToWorld(row vector, UE `Child * Parent`)의 affine 결과를 보존한다. 비균일 parent scale과 child rotation의 합성에는 shear가 생길 수 있으므로 world 결과를 매번 TRS로 분해하여 근사하지 않는다. 카메라 상대 GPU matrix는 이 affine 결과에서 생성한다. Core의 `Transform`(회전·이동·크기 모두 double — UE FTransform, 2026-11-17 전에는 이동만 double)이 이 authoring LocalTransform이며 합성은 `TryMultiply(local, parentToWorld)`다. 정밀도가 하나인 값 타입 `Transform3f`·`Transform3d`(UE FTransform3f·3d 대응 — 데이터 반입, GPU·애니메이션용 float, 도구용 double)도 같은 TRS 규약과 실패 규약(shear는 근사하지 않고 Unsupported)을 따른다([리플렉션 B9](ReflectionExtensions.ko.md) 3.2절).
 
-KeepWorld reparent는 inverse(parent)×world를 계산한 뒤 local TRS 표현 가능성과 허용 오차를 검증한다. shear가 필요한 경우 NonRepresentableTransform으로 실패하여 원래 계층을 보존한다. 명시적인 geometry bake는 별도 편집 명령과 Undo를 제공하며 묵시 근사를 금지한다. singular/zero scale은 역행렬이 필요한 작업에서 실패하고, 음수 determinant의 winding·normal inverse-transpose·bounds를 일관되게 처리한다. physics는 허용 scale과 shape recook 정책을 별도 선언한다.
+KeepWorld reparent는 world×inverse(newParentToWorld)를 계산한 뒤 local TRS 표현 가능성과 허용 오차를 검증한다. shear가 필요한 경우 NonRepresentableTransform으로 실패하여 원래 계층을 보존한다. 명시적인 geometry bake는 별도 편집 명령과 Undo를 제공하며 묵시 근사를 금지한다. singular/zero scale은 역행렬이 필요한 작업에서 실패하고, 음수 determinant의 winding·normal inverse-transpose·bounds를 일관되게 처리한다. physics는 허용 scale과 shape recook 정책을 별도 선언한다.
 
 CF04에 uniform/nonuniform/negative/zero scale × parent/child rotation × reparent/Undo/prefab bake를 포함한다. 허용 경로는 world vertex·normal·bounds를 비교하고 불허 경로는 변경 없는 실패를 확인한다. 이 계약은 Scene 구현 이후가 아니라 첫 Core Math 단계에서 고정한다.
 
@@ -236,7 +240,7 @@ Apple은 Windows용 Metal 제작 도구와 macOS/Windows용 Metal Shader Convert
 | RHI | Core, Task, graphics SDK adapter | device·offscreen은 Window 불필요, interactive swapchain만 Window 사용. World·Object 없음 |
 | RenderGraph / Renderer | RHI, Task, Core, RenderData, SpatialIndex | pass·GPU Scene·조명·메시·visibility 판정 인덱스. World 순회 없음 |
 | MaterialSchema / Compiler / Runtime | Core·Schema / Host ShaderWorker / RenderData·RHI | graph 계약·host 컴파일·cooked 실행 분리; 14.6절 세부 의존 |
-| Physics / Audio / Navigation | Core, Task, 각 vendor adapter | 독립 네이티브 runtime. Entity/Renderer 내부 주소 없음. PhysX 타입은 Physics adapter 내부에 한정 |
+| Physics / Audio / Navigation | Core, Task, 각 vendor adapter | 독립 네이티브 runtime. Entity/Renderer 내부 주소 없음. Jolt 타입과 좌표·단위 변환은 Physics adapter 내부에 한정([물리 어댑터 경계](PhysicsJoltAdapter.ko.md)) |
 | Animation / VFX | Core, Task, Asset 데이터 및 해당 backend | 데이터 처리·실행. World 연결은 통합 계층에서 수행 |
 | UiCore / UiFramework / TextLayout | Core, Task, TextLayout / UiCore / Core, Localization, shaping·폰트 adapter | 비객체 Element 트리·속성·무효화·레이아웃·그리기 목록·hit grid·스타일·batcher / 입력 라우팅·focus·표준 Element·명령·독 / shaping·BiDi·경계·글꼴 cache. Object·RHI·World·PlatformWindow 직접 의존 금지 |
 | UiWidget / UiScreens | ObjectRuntime, MetaSchema, UiFramework / UiWidget, Input | Element를 감싸는 Object Widget·slot 객체·WidgetAsset·바인딩·UI 애니메이션 / 화면 스택·입력 모드 |
@@ -304,7 +308,7 @@ Core는 엔진이 아니라 엔진·도구·게임이 함께 쓰는 기반 라�
 
 #### 좌표 규약·정확성·결정성
 
-기존 column vector 규약 `p′=M×p`, `world=parent×local`을 유지한다. row vector 라이브러리를 사용하는 경우 adapter에서 곱 순서·전치 의미를 변환한다. 메모리의 row/column-major 배치, 벡터의 행/열 의미, 좌우수 좌표계는 각각 별도 항목이다. 각도 단위, quaternion 순서·합성 방향·정규화 전제, clip depth·reverse-Z·projection·normal inverse-transpose를 명세하고 shader/physics/importer 경계의 변환 지점을 고정한다. 라이브러리 선택을 이유로 프로젝트 전체 규약을 묵시 변경하지 않는다.
+행렬 규약은 UE 5.8과 같은 row vector `p′=p·M`, `world=local×parent`다(2.2절, 2026-11-17 column vector `p′=M×p`·`world=parent×local`에서 전환). column vector 라이브러리를 사용하는 경우 adapter에서 곱 순서·전치 의미를 변환한다. 메모리의 row/column-major 배치, 벡터의 행/열 의미, 좌우수 좌표계는 각각 별도 항목이다. 각도 단위, quaternion 순서·합성 방향·정규화 전제, clip depth·reverse-Z·projection·normal inverse-transpose를 명세하고 shader/physics/importer 경계의 변환 지점을 고정한다. 라이브러리 선택을 이유로 프로젝트 전체 규약을 묵시 변경하지 않는다.
 
 일반 정밀도 경로와 빠른 근사 경로를 구분한다. 예를 들어 checked normalization/inverse와 명시적인 estimate API를 제공하되 수치 연산은 검증된 backend를 호출한다. ‘정확’은 명세된 오차 조건을 충족한다는 뜻이며 모든 함수의 수학적 exact·correct rounding을 약속하지 않는다. 허용오차는 f32/f64, 연산, 입력 범위, 길이·각도 단위, 행렬 condition에 따라 정한다. 하나의 전역 epsilon을 모든 검사에 사용하지 않는다.
 
@@ -328,7 +332,7 @@ ARM64는 NEON backend를 검증하며 macOS ARM64를 별도 CI/실기기 항목�
 |---|---|---|
 | MX01 · API·의존 | 동일 vector/transform 예제를 후보 adapter로 작성, 공개 header·dependency 검사 | `rocks::Vec3/Quat/Mat4` 스타일 유지, vendor 타입·호출 규약의 public ABI 노출 0건, 불필요한 STL/Window/RHI/Physics 의존 없음. 가독성·유지보수 판단 기록 |
 | MX02 · 일반·예외 수치 | upstream tests, 검증된 reference 데이터·독립 고정밀 도구와 비교; NaN/Inf·±0·subnormal·zero length·singular·near-singular 포함 | 연산별 오차·실패 정책 충족, 일반/estimate 경로 결과를 구분, 실패 시 잘못된 성공값·상태 변경 없음 |
-| MX03 · 규약 왕복 | 비대칭 행렬·서로 교환되지 않는 회전/이동·quaternion·TRS/shear·normal·projection fixture | parent×local 순서·handedness·storage 변환 일치, CPU/reference shader 규약 일치. 실제 GPU pixel 검증은 RHI 단계에서 별도 수행 |
+| MX03 · 규약 왕복 | 비대칭 행렬·서로 교환되지 않는 회전/이동·quaternion·TRS/shear·normal·projection fixture | local×parent 순서(UE `Child * Parent`)·handedness(UE 왼손)·storage 변환 일치, CPU/reference shader 규약 일치. 실제 GPU pixel 검증은 RHI 단계에서 별도 수행 |
 | MX04 · 대규모 위치 | 먼 f64 world 좌표의 작은 상대 이동, origin 변경·cell 경계·연속 왕복 | f64 차감 후 f32 변환, scene 요구 허용오차 충족, 입력 범위 초과·nonfinite 진단, 원점 변경에 의한 불연속 없음 |
 | MX05 · ISA·플랫폼 | Windows/Linux x64 baseline·선택 ISA, macOS ARM64; 미지원 CPU/OS feature masking | SSE2 baseline에서 불법 AVX 실행 0건, CPUID·OSXSAVE/XCR0 조건 일치, ARM64 NEON 경로 확인, SAL 등 후보 이식 의존과 지원 상태 명시 |
 | MX06 · batch·ABI | count 0/1/벡터폭±1·큰 batch, unaligned/alias 허용·금지 입력, AoS/SoA·module 경계 | tail/OOB·UB 0건, 규약에 따른 alias 처리, scalar와 허용오차 내 일치, padding/register 타입의 직렬화 유출 없음 |
@@ -930,7 +934,7 @@ reparent는 cycle 검사·world transform 유지 옵션·하위 dirty 전파를 
 
 ### 10.2 셀 스트리밍과 큰 월드
 
-World Partition은 actor descriptor, grid cell, data layer, streaming source, HLOD, persistent actor로 구성한다. 초기 cell edge 256 m를 제안하되 실제 geometry·collision·AI·IO 비용으로 조정한다. actor는 stable GUID와 canonical owning cell을 갖고, 여러 cell에 걸친 bounds는 검색 인덱스에 등록한다. 큰 landmark와 전역 시스템은 별도 persistent layer를 사용한다.
+World Partition은 actor descriptor, grid cell, data layer, streaming source, HLOD, persistent actor로 구성한다. 초기 cell edge 25,600 cm(256 m)를 제안하되 실제 geometry·collision·AI·IO 비용으로 조정한다. actor는 stable GUID와 canonical owning cell을 갖고, 여러 cell에 걸친 bounds는 검색 인덱스에 등록한다. 큰 landmark와 전역 시스템은 별도 persistent layer를 사용한다.
 
 셀 상태는 Unloaded → Requested → CPUReady → SystemsReady → Activated → Deactivating → Unloaded이다. activation은 render·collision·navigation의 필수 준비 mask를 만족한 tick 경계에서 수행한다. collision이 준비되지 않은 공간으로 캐릭터가 진입하면 이동 제한·선행 로드·loading gate 중 프로젝트가 선택한 정책을 적용한다. 화면에 보인다는 이유만으로 gameplay ready를 선언하지 않는다.
 
@@ -974,8 +978,8 @@ UE 5.4는 계층 instance culling(`r.SceneCulling`)을 기본 활성화하고, c
 3. **loose 범위.** cell의 loose 범위는 tight cell을 각 축으로 L_ℓ/2씩 확장한 한 변 2L_ℓ의 입방체다(k = 2). 삽입·CPU 질의 확장·GPU cell 판정은 단일 상수 (k−1)·L_ℓ/2에서 파생한다. 렌더 판정의 cell bounds는 loose 범위가 아니라 소속 chunk bounds의 합집합을 사용한다.
 4. **배치와 이동.** 대상은 중심이 속한 tight cell에 배치한다. loose 구조의 이점은 경계에 걸친 대상을 상위 level로 승격하지 않고 단일 cell에 O(1)로 배치하는 데 있으며, 직선 이동의 cell 변경 빈도는 같은 크기의 균일 grid와 같다. loose octree 원 설계도 반경으로 level을 결정하고 이동 시 cell 재배치 여부만 검사한다. [S84](https://tulrich.com/geekstuff/partitioning.html) 「현재 cell의 loose 범위 안이면 유지」하는 위치 hysteresis의 여유는 L_ℓ/2 − h(h는 최대 축 반길이)이며 level 경계 크기의 대상은 0이다. 이 규칙은 경계 부근 왕복 이동에 의한 변경만 제거한다. 렌더 해시에는 이동 대상을 등록하지 않으므로 위치 hysteresis는 SpatialQueryService에 한정하고 SI05 측정 결과로 채택을 판정한다.
 5. **block과 chunk.** cell을 8³ 단위 block으로 묶고 block별 점유 bitmask를 둔다. cell 안의 instance는 같은 primitive 기준 최대 64개 chunk로 묶는다. 판정은 block → cell → chunk → instance 순이다. 큰 질의는 점유 block 목록을 선형 판정하고, 작은 질의는 level별로 key를 열거하되 열거 수가 해당 level의 점유 cell 수를 넘으면 선형 판정으로 전환한다.
-6. **초기 매개변수(제안).** L_min 32 m, 최상위 16,384 m(10 level), block 8³ cell, chunk 64 instance로 시작한다. UE의 최소 cell 크기 기본값 4096 cm와 유사한 규모다(2차 출처 [S86](https://indxzero.github.io/ue544cvarwiki)). World Partition cell 한 변은 L_min의 2의 거듭제곱 배로 유지한다(초기 256 m). 장대 spline·landscape는 cook 시 분할하여 상위 level 집중을 방지하고, 최상위 level을 넘는 대상은 평면 SoA 경로에 등록하며 개수 상한 초과를 경고한다. 모든 값은 SI02 측정 후 확정한다.
-7. **정밀도.** bounds는 cell 정수 원점 기준 상대 float로 저장하고 외향 반올림한다. view frustum 평면은 block 원점 기준으로 double에서 이동한 뒤 float로 판정한다. 평면 SoA 경로는 2,048 m tile 단위 page에 tile 상대 float bounds를 저장한다. origin epoch가 변경되어도 저장된 bounds를 재계산하지 않는다.
+6. **초기 매개변수(제안).** L_min 3,200 cm(32 m), 최상위 1,638,400 cm(16,384 m, 10 level), block 8³ cell, chunk 64 instance로 시작한다. UE의 최소 cell 크기 기본값 4096 cm와 유사한 규모다(2차 출처 [S86](https://indxzero.github.io/ue544cvarwiki)). World Partition cell 한 변은 L_min의 2의 거듭제곱 배로 유지한다(초기 25,600 cm). 장대 spline·landscape는 cook 시 분할하여 상위 level 집중을 방지하고, 최상위 level을 넘는 대상은 평면 SoA 경로에 등록하며 개수 상한 초과를 경고한다. 모든 값은 SI02 측정 후 확정한다.
+7. **정밀도.** bounds는 cell 정수 원점 기준 상대 float로 저장하고 외향 반올림한다. view frustum 평면은 block 원점 기준으로 double에서 이동한 뒤 float로 판정한다. 평면 SoA 경로는 204,800 cm(2,048 m) tile 단위 page에 tile 상대 float bounds를 저장한다. origin epoch가 변경되어도 저장된 bounds를 재계산하지 않는다.
 8. **갱신과 동시성.** 등록·해제는 commit 또는 RenderScene update에서 cell key 순으로 정렬하여 일괄 적용한다. cell 내부는 swap-remove와 append로 갱신하며 entry의 역참조는 포인터가 아닌 index·key로 저장한다(재해시 시 값 주소 무효화). Core `HashMap`은 쓰기 단계에서만 사용한다. const 반복도 내부 반복 깊이를 변경하므로 worker 동시 읽기에 사용하지 않는다. 읽기 phase에는 key 순으로 정렬한 immutable block·cell·chunk 배열을 게시한다. stream-in 시 cell manifest 기준으로 용량을 예약하고 unload 후 compact한다.
 9. **정적 데이터 변경.** cook된 static chunk는 (offset, count) 범위로 연결하며 runtime에 재배열하지 않는다. 파괴·숨김·PIE 편집은 session별 hidden-instance bitmask와 별도 dynamic span으로 처리한다.
 
@@ -995,7 +999,7 @@ UE 5.4는 계층 instance culling(`r.SceneCulling`)을 기본 활성화하고, c
 
 #### 게임플레이 질의와 결정성
 
-overlap·trigger는 물리 sensor와 scene query로만 처리하며 SpatialQueryService는 trigger event를 생성하지 않는다. SpatialQueryService는 2D 계층 공간 해시(level 한 변 8·32·128·512 m, 비율 4)를 사용하고, entry에 double 중심·float extent·Z 범위·category mask·team·EntityHandle을 저장한다. Game lane이 commit에서 일괄 갱신하고 worker는 read phase에서 commit된 version을 조회한다. 결과는 (거리, stable EntityId) 순으로 정렬하며 해시 반복 순서에 의존하지 않는다. 고속·순간 이동 대상과 측정 cell 변경률이 frame당 0.25를 넘는 대상은 별도 목록에서 전수 판정한다.
+overlap·trigger는 물리 sensor와 scene query로만 처리하며 SpatialQueryService는 trigger event를 생성하지 않는다. SpatialQueryService는 2D 계층 공간 해시(level 한 변 800·3,200·12,800·51,200 cm(8·32·128·512 m), 비율 4)를 사용하고, entry에 double 중심·float extent·Z 범위·category mask·team·EntityHandle을 저장한다. Game lane이 commit에서 일괄 갱신하고 worker는 read phase에서 commit된 version을 조회한다. 결과는 (거리, stable EntityId) 순으로 정렬하며 해시 반복 순서에 의존하지 않는다. 고속·순간 이동 대상과 측정 cell 변경률이 frame당 0.25를 넘는 대상은 별도 목록에서 전수 판정한다.
 
 #### World Partition 연동
 
@@ -1010,18 +1014,18 @@ UE 5.4 runtime hash의 Loose Hierarchical Grid는 actor extent로 streaming cell
 
 #### 물리 scene query 연동
 
-충돌 질의는 16절 PhysX 5 adapter의 scene query 구조를 사용한다. PhysX 5의 scene query는 static·dynamic pruner 모두 dynamic AABB tree가 기본값이며 사전 계산 구조(`PxPruningStructure`)의 일괄 추가를 지원한다. [S83](https://nvidia-omniverse.github.io/PhysX/physx/5.6.1/docs/SceneQueries.html) WP cell collision은 cook 시 생성한 pruning structure로 일괄 등록한다.
+충돌 질의는 16절 Jolt adapter의 scene query 구조를 사용한다. WP cell collision은 cook 시 생성한 일괄 등록 구조로 등록하는 것을 목표로 하며, Jolt broadphase의 구조와 일괄 추가 수단은 채택 전 확인한다(16.4절 검증 항목). 개정 1.6에서 확인한 PhysX 5 pruner 사실([S83](https://nvidia-omniverse.github.io/PhysX/physx/5.6.1/docs/SceneQueries.html))은 개정 1.12로 적용 대상이 아니다.
 
 #### 수용 시험
 
 | ID | 시험 | 판정 기준(제안) |
 |---|---|---|
 | SI01 | 평면 SoA 판정: primitive 10k–1M × view, x64·Apple·Android big/little core | view당 primitive 판정 desktop 1.5 ns·mobile big core 4 ns 이하, 8 worker 확장 효율 0.7 이상 |
-| SI02 | 매개변수 sweep: L_min 8·16·32·64 m, chunk 32·64·128, block 4³·8³, 고밀도 foliage | chunk 점유율 50% 이상, instance 단위 정확 판정 대비 초과 제출 20% 이하, instance당 CPU 메모리 48 B 이하, 재해시 peak 기록 |
+| SI02 | 매개변수 sweep: L_min 800·1,600·3,200·6,400 cm, chunk 32·64·128, block 4³·8³, 고밀도 foliage | chunk 점유율 50% 이상, instance 단위 정확 판정 대비 초과 제출 20% 이하, instance당 CPU 메모리 48 B 이하, 재해시 peak 기록 |
 | SI03 | GPU 판정: instance 2M, main view·cascade 4·local light 32 | 기준 desktop GPU에서 0.5 ms 이하 |
 | SI04 | CPU 경로: instance 200k, main view·cascade 2, 중급 Android | worker CPU 합계 1.0 ms 이하 |
 | SI05 | cell 변경률: 기록 replay에서 중심 배치와 위치 hysteresis 비교 | 변경 30% 이상 감소·질의 비용 증가 10% 이하일 때만 hysteresis 채택. 이동 대상 1만 개 갱신 0.2 ms 이하 |
-| SI06 | 보수성 fuzz: 경계 왕복·음수 좌표·key 한계·원점에서 10⁷ m·NaN·origin epoch·WPO·보간·2단계 HZB | V_ref ⊆ V_submit 위반 0건 |
+| SI06 | 보수성 fuzz: 경계 왕복·음수 좌표·key 한계·원점에서 10⁹ cm(10⁷ m)·NaN·origin epoch·WPO·보간·2단계 HZB | V_ref ⊆ V_submit 위반 0건 |
 | SI07 | WP cell 활성화: instance 100k와 collision, 활성화 중 unload·PIE 2 session | lane당 frame 1 ms 이하, Activated 이전 누락 0건, lease 위반·누수 0건 |
 | SI08 | 충돌 질의 adapter 적합성: frame당 ray 10k·sweep 1k, channel·filter 조합 | filter 판정이 schema oracle과 100% 일치, hit가 허용 오차 내 일치 |
 | SI09 | 게임플레이 질의 결정성: entry 20k에 반경 질의 1k | 0.5 ms 이하, worker 0·1·N에서 결과와 순서 동일 |
@@ -1502,7 +1506,7 @@ M6의 basic rig·morph/facial editor → M7의 retarget·full-body IK·동작 �
 
 ### 16.1 통합 구조
 
-물리 middleware는 모든 대상 플랫폼에서 단일 버전의 PhysX 5를 사용하고 자체 PhysicsWorld·CharacterMovement와 통합한다. [S87](https://github.com/NVIDIA-Omniverse/PhysX) PhysX는 게임 객체와 별도 native 수명으로 관리하며 vendor 타입을 adapter 밖으로 노출하지 않는다. UE 5.8 Chaos의 통합 구조(game·physics 데이터 전달, 질의 전용 acceleration structure, 서버 권한 보정)는 참고로만 사용하고 Chaos 고유 기능은 재현 대상에 포함하지 않는다. 버전·플랫폼·빌드·결정성 범위는 16.4절, 큰 월드는 16.5절에 둔다.
+물리 middleware는 모든 대상 플랫폼에서 단일 고정 commit의 Jolt Physics를 사용하고 자체 PhysicsWorld·CharacterMovement와 통합한다(개정 1.12 — 2026-11-17 사용자 결정으로 PhysX 5에서 되돌림). [S10](https://github.com/jrouwe/JoltPhysics) Jolt는 게임 객체와 별도 native 수명으로 관리하며 vendor 타입을 adapter 밖으로 노출하지 않는다. Rocks(UE 5.8과 같은 왼손 +X 전방·+Y 오른쪽·+Z 위, cm)와 Jolt 사이의 축 사상, 극성·축성 벡터·quaternion·winding·heightfield 변환, 물리량별 단위 변환은 adapter 경계에서만 하며 계약과 검증 항목은 [물리 어댑터 경계](PhysicsJoltAdapter.ko.md)에 둔다. UE 5.8 Chaos의 통합 구조(game·physics 데이터 전달, 질의 전용 acceleration structure, 서버 권한 보정)는 참고로만 사용하고 Chaos 고유 기능은 재현 대상에 포함하지 않는다. 버전·플랫폼·빌드·결정성 범위는 16.4절, 큰 월드는 16.5절에 둔다. 아래에서 Jolt API의 이름·동작으로 적은 것 중 확인하지 않은 것은 어댑터 경계 문서 8절의 검증 항목이다.
 
 Collision은 raycast·sweep·overlap·trigger·filter, Dynamics는 rigid body·constraint·sleep·CCD를 담당한다. query-only collider를 지원한다. Sphere·Capsule·Box·Convex·Compound·TriangleMesh·Heightfield를 우선하며 dynamic body는 convex/compound를 기본으로 한다. 고밀도 virtual geometry와 collision mesh·nav geometry는 별도 cook 산출물이다.
 
@@ -1527,7 +1531,7 @@ public:
 };
 ~~~
 
-Step은 60Hz, 최대 substep 4를 초기 제안값으로 사용한다. 싱글플레이의 누적 지연 처리와 서버의 authoritative tick을 구분한다. 서버는 tick/input을 묵시적으로 건너뛰지 않고 admission·부하 제한·명시적 simulation-rate 정책으로 대응하며 변경을 protocol/replay에 기록한다. PhysX의 `PxCpuDispatcher`는 공통 Task Graph의 worker에 task를 제출하며 같은 worker를 이중 점유하는 별도 무제한 pool을 생성하지 않는다. dispatcher가 보고하는 worker 수는 Game·Render·IO 예약분을 제외한 physics 예산이다. `submitTask`는 실패를 반환할 수 없으므로 사전 예약한 node pool을 사용하고, 포화 시 task를 폐기하지 않고 제출 thread에서 즉시 실행한다. PhysX task는 취소할 수 없으므로 종료 절차는 실행 중 task의 완료를 기다린다. physics lock을 보유한 callback에서 게임 코드를 실행하지 않는다.
+Step은 60Hz, 최대 substep 4를 초기 제안값으로 사용한다. 싱글플레이의 누적 지연 처리와 서버의 authoritative tick을 구분한다. 서버는 tick/input을 묵시적으로 건너뛰지 않고 admission·부하 제한·명시적 simulation-rate 정책으로 대응하며 변경을 protocol/replay에 기록한다. Jolt의 작업 분배 연결 지점(job system)은 공통 Task Graph의 worker에 작업을 제출하며 같은 worker를 이중 점유하는 별도 무제한 pool을 생성하지 않는다. adapter가 보고하는 worker 수는 Game·Render·IO 예약분을 제외한 physics 예산이다. 제출 실패를 반환할 수 없는 연결 지점이면 사전 예약한 node pool을 사용하고, 포화 시 작업을 폐기하지 않고 제출 thread에서 즉시 실행한다. 실행 중 작업을 취소할 수 없으면 종료 절차는 그 완료를 기다린다(연결 지점의 실패 표현·취소 가능 여부는 검증 항목 J14). physics lock을 보유한 callback에서 게임 코드를 실행하지 않는다.
 
 ### 16.2 소유권과 event
 
@@ -1537,56 +1541,59 @@ Step은 60Hz, 최대 substep 4를 초기 제안값으로 사용한다. 싱글플
 | Dynamic / Ragdoll | Physics | step 완료 snapshot을 World에 반영 |
 | Character | CharacterMovement | capsule sweep·step·slide 결과를 이동 상태로 확정 |
 
-PhysX의 `PxSimulationEventCallback`은 `fetchResults` 안에서 호출되므로 값 복사만 수행한다. 접촉·trigger event는 tick, body handles, event type, pair ID를 값으로 복사한다. Game lane에서 generation과 owner weak handle을 재검증한 뒤 callback을 호출한다. callback 중 body 추가·삭제는 다음 command batch로 이월한다. body 삭제는 해당 step·query reader 완료 후 수행하며 삭제 이벤트 중복·역순 정책을 테스트한다.
+Jolt의 접촉 통지는 step 안에서 physics worker가 호출할 수 있다고 보고 값 복사만 수행한다(호출 thread·시점은 검증 항목). 접촉·trigger event는 tick, body handles, event type, pair ID를 값으로 복사한다. Game lane에서 generation과 owner weak handle을 재검증한 뒤 callback을 호출한다. callback 중 body 추가·삭제는 다음 command batch로 이월한다. body 삭제는 해당 step·query reader 완료 후 수행하며 삭제 이벤트 중복·역순 정책을 테스트한다.
 
-CharacterMovement는 경사·계단·ground snap·jump·moving platform·crouch·sweep depenetration을 독립 상태 머신으로 구현한다. 네트워크 예측 상태는 입력 sequence, 위치·속도·mode, base platform ID를 포함한다. PhysX `PxController`는 내부 cache 상태를 되감을 수 없으므로 사용하지 않고, CharacterMovement는 adapter의 sweep·`computePenetration`으로 구현한다. 일반 rigid-body 시뮬레이션의 완전한 cross-platform 결정성을 전제로 하지 않는다(16.4절).
+CharacterMovement는 경사·계단·ground snap·jump·moving platform·crouch·sweep depenetration을 독립 상태 머신으로 구현한다. 네트워크 예측 상태는 입력 sequence, 위치·속도·mode, base platform ID를 포함한다. middleware의 캐릭터 controller는 예측 재실행에 필요한 상태 되감기를 확인하기 전에는 기본 경로로 쓰지 않고(PhysX 5 검토에서 `PxController`를 같은 이유로 제외), CharacterMovement는 adapter의 sweep·침투 해소 질의로 구현한다. 이동 길이·속도는 UE CharacterMovement와 같은 cm·cm/s다(UE `CharacterMovementComponent.h`의 `ForceUnits`), 가속도는 cm/s²로 둔다(UE 속성에 단위 표기가 없어 차원으로 정함). 일반 rigid-body 시뮬레이션의 완전한 cross-platform 결정성을 전제로 하지 않는다(16.4절).
 
 검증 장면은 stack stability, fast bullet CCD, sliding slope, moving platform, ragdoll transition, streaming collider 제거다. 고정 seed 반복성·penetration·에너지 이상 증가·이벤트 중복을 측정한다. 파괴·vehicle·cloth/soft body·rope·buoyancy·physics field는 기본 이동과 joint 안정화 이후 개별 모듈로 추가한다.
 
 ### 16.3 Query·필터·물리 재질
 
-QueryReadScope는 해당 physics world가 step·구조 변경을 수행하지 않는 읽기 phase의 gate다. 외부 worker는 gate 안에서만 live broadphase를 조회하고 scope를 저장·yield하지 않는다. step과 겹쳐야 하는 async query는 step 경계에 batch 실행하여 값 결과를 전달한다. PhysX에서 QueryReadScope는 `fetchResults`와 `flushQueryUpdates` 이후 열리고 다음 command 적용·`simulate`·`shiftOrigin` 전에 닫힌다. 쓰기는 Physics lane의 command 단계에서만 수행하며 debug build는 `eREQUIRE_RW_LOCK`으로 위반을 검출한다. UE 5.8 Chaos는 game thread 질의를 위한 별도 acceleration structure를 frame 끝에 physics 결과로 갱신한다(`FChaosScene::EndFrame`이 `CopySolverAccelerationStructure`로 solver 구조를 통째 복사 — PhysicsCore/Private/ChaosScene.cpp 559행). [S92](https://github.com/EpicGames/UnrealEngine/tree/5.8.4-release) immutable QuerySnapshot이라는 이름만으로 vendor broadphase가 복제되어 있다고 가정하지 않는다. 독립 snapshot broadphase는 필요 시 별도 메모리·정합 비용을 검증한다.
+QueryReadScope는 해당 physics world가 step·구조 변경을 수행하지 않는 읽기 phase의 gate다. 외부 worker는 gate 안에서만 live broadphase를 조회하고 scope를 저장·yield하지 않는다. step과 겹쳐야 하는 async query는 step 경계에 batch 실행하여 값 결과를 전달한다. Jolt에서 QueryReadScope는 step 완료와 broadphase 갱신 반영 이후 열리고 다음 command 적용·step·원점 이동 전에 닫힌다(Jolt의 질의·수정 동시성 규약은 검증 항목). 쓰기는 Physics lane의 command 단계에서만 수행하며 debug build는 adapter가 위반을 검출한다. UE 5.8 Chaos는 game thread 질의를 위한 별도 acceleration structure를 frame 끝에 physics 결과로 갱신한다(`FChaosScene::EndFrame`이 `CopySolverAccelerationStructure`로 solver 구조를 통째 복사 — PhysicsCore/Private/ChaosScene.cpp 559행). [S92](https://github.com/EpicGames/UnrealEngine/tree/5.8.4-release) immutable QuerySnapshot이라는 이름만으로 vendor broadphase가 복제되어 있다고 가정하지 않는다. 독립 snapshot broadphase는 필요 시 별도 메모리·정합 비용을 검증한다.
 
-collision channel·object type·query filter·trigger·ignore pair·physical material/surface·friction combine·complex/simple collision을 data schema로 제공한다. body mass/inertia·COM·constraint editor·physics asset·debug recorder를 포함한다. fracture·vehicle·cloth·rope·buoyancy는 지원표와 sample을 갖고 rigid-body 지원으로 완료 처리하지 않는다. PhysX 5의 cloth·deformable·particle은 CUDA 전용이므로 선택 capability로 두고, vehicle은 PhysX 5 vehicle SDK(CPU)를 gameplay 계층 뒤에 둔다. fracture 구현 방식은 별도 모듈 단계에서 결정한다.
+collision channel·object type·query filter·trigger·ignore pair·physical material/surface·friction combine·complex/simple collision을 data schema로 제공한다. body mass/inertia·COM·constraint editor·physics asset·debug recorder를 포함한다. fracture·vehicle·cloth·rope·buoyancy는 지원표와 sample을 갖고 rigid-body 지원으로 완료 처리하지 않는다. soft body·vehicle은 Jolt가 제공하는 범위를 별도 모듈 단계에서 평가해 gameplay 계층 뒤에 두며, 차량 바퀴의 좌우처럼 이름이 붙은 방향은 수치 방향으로 대응한다([물리 어댑터 경계](PhysicsJoltAdapter.ko.md) 5절). fracture 구현 방식은 별도 모듈 단계에서 결정한다.
 
-### 16.4 PhysX 버전·빌드·결정성 범위
+### 16.4 Jolt 버전·빌드·결정성 범위
 
-**단일 버전.** Windows x64, Linux x64/aarch64, macOS x64/ARM64, iOS ARM64, Android ARM64/x86_64는 모두 동일 commit의 PhysX 5를 source에서 빌드한다. NVIDIA upstream은 Windows·Linux만 공식 지원하며 플랫폼 build 설정 PR을 받지 않는다. [S88](https://github.com/NVIDIA-Omniverse/PhysX/discussions/58) Rocks는 O3DE 관리 fork의 macOS·iOS·Android patch를 기반으로 자체 fork commit을 고정한다. [S89](https://github.com/o3de/PhysX) 초기 후보는 O3DE fork에 병합된 5.6.1이며 5.12 port의 안정화 시 재평가한다. PhysX 4.1은 cook 형식·API·마찰 기본값·질의 동작이 달라 어느 플랫폼에서도 혼용하지 않는다.
+개정 1.12(2026-11-17 사용자 결정)로 물리 middleware 기준을 PhysX 5에서 Jolt로 되돌렸다. 개정 1.6에서 PhysX 5에 대해 정한 계약(O3DE fork·CUDA·`Px*` 수명·`PxSerialization`·NEON 추정 경로)은 33.11절에 이력으로만 남긴다. 아래에서 Jolt의 build 옵션·API 이름·동작으로 적은 것은 S82(개정 1.6 검토 때 확인)를 빼면 이 개정에서 다시 확인하지 않았으며, 착수 전 [물리 어댑터 경계](PhysicsJoltAdapter.ko.md) 8절 검증 항목(J1–J15)으로 확인한다.
 
-**version manifest.** target별로 version·commit·patch 목록·build flag·scene 기본 설정·cook parameter·license와 NOTICE를 기록하며, gameplay에 영향을 주는 항목은 모든 target에서 같은 값이어야 한다. prebuilt binary와 build 시 package 자동 다운로드는 사용하지 않는다.
+**단일 버전.** Windows x64, Linux x64/aarch64, macOS x64/ARM64, iOS ARM64, Android ARM64/x86_64는 모두 같은 고정 commit의 Jolt를 source에서 빌드한다. [S10](https://github.com/jrouwe/JoltPhysics) 플랫폼별로 다른 version을 섞지 않는다.
 
-**빌드 설정 통일.** PhysX는 Rocks Build로 빌드하고 Core와 같은 `-ffp-contract=off`를 적용한다. upstream Windows 기본값인 `/fp:fast`(`PX_FLOAT_POINT_PRECISE_MATH` OFF)는 사용하지 않는다. 예외·RTTI는 끄고, gameplay 기준 경로는 CUDA를 비활성화한 CPU build(`DISABLE_CUDA_PHYSX`)다. solver·friction(`eIMPROVED_PATCH_FRICTION` 명시)·PCM·enhanced determinism·broadphase(PABP)·CCD 설정은 manifest에 고정하여 SDK 기본값 변경에 의존하지 않는다.
+**version manifest.** target별로 version·commit·patch 목록·build flag·physics system 기본 설정(길이 차원 설정값은 cm 설정을 adapter가 변환한 값)·cook parameter·축 사상·license와 NOTICE를 기록하며, gameplay에 영향을 주는 항목은 모든 target에서 같은 값이어야 한다. prebuilt binary와 build 시 package 자동 다운로드는 사용하지 않는다.
 
-**cook.** 같은 SDK 버전에서는 endianness가 같아 하나의 cook 결과를 모든 플랫폼에서 사용한다. 너겟 key에 PhysX version·commit·cook parameter·adapter cook schema를 포함하고, blob header 불일치는 load 시 거부한다. 플랫폼 tag와 version GUID의 완전 일치를 요구하는 `PxSerialization` binary는 asset에 사용하지 않고 cooked mesh stream을 사용한다. runtime cooking은 editor·개발 build에 한정한다. navigation은 PhysX blob이 아니라 중립 collision source에서 생성한다.
+**빌드 설정 통일.** Jolt는 Rocks Build로 빌드하고 Core와 같은 `-ffp-contract=off`를 적용한다. 예외·RTTI는 끈다. 결정성·정밀도에 관한 build 옵션(플랫폼 간 결정성 build, double 위치 build)은 manifest에 고정하여 SDK 기본값 변경에 의존하지 않는다.
 
-**결과 차이의 범위.** NVIDIA는 같은 release·같은 platform에서만 결과 반복을 보장한다. [S90](https://nvidia-omniverse.github.io/PhysX/physx/5.6.1/docs/RigidBodyDynamics.html) PhysX의 NEON 경로는 나눗셈·제곱근을 추정 명령과 Newton 반복으로 계산하므로, 같은 버전·같은 설정에서도 x64와 ARM64의 결과는 bit 단위로 일치하지 않는다. 결정성 범위는 동일 binary·동일 platform·동일 command 순서로 한정하며 로컬 replay와 회귀 시험에 사용한다. 플랫폼 간 결과 정합은 서버 권한과 field별 보정(17.2절)으로 확보한다. UE 5.8 Chaos도 플랫폼 간 결정성을 명시하지 않으며, 오차가 임계값을 넘을 때 보정하고 표시 상태를 보간한다(5.8 소스: `UPhysicsSettings`의 `ResimulationErrorPositionThreshold` — Engine/Classes/PhysicsEngine/PhysicsSettings.h 100행, 표시 보간 `p.RenderInterp.*` — Chaos/Private/Framework/PhysicsProxyBase.cpp 9·12행). [S91](https://dev.epicgames.com/documentation/en-us/unreal-engine/networked-physics-overview?application_version=5.8)
+**cook.** 너겟 key에 Jolt version·commit·cook parameter·adapter cook schema·축 사상과 단위 변환 version을 포함하고, 불일치는 load 시 거부한다. Jolt 형상 직렬화 결과가 플랫폼·version에 따라 달라지는지 확인하기 전에는 cook 결과를 플랫폼 사이에 공유하지 않는다. runtime cooking은 editor·개발 build에 한정한다. navigation은 Jolt blob이 아니라 중립 collision source에서 생성한다.
 
-**차이 축소 검토(PXD).** Rocks fork에서 NEON 추정 경로를 정확 연산으로 대체한 build와 원본 build의 플랫폼 간 상태 hash를 비교하여 차이 축소 효과와 성능 비용을 측정한다. 측정 전에는 플랫폼 간 결정성으로 표기하지 않는다.
+**결과 차이의 범위.** Jolt는 `CROSS_PLATFORM_DETERMINISTIC` build에서 x64·ARM64를 포함한 플랫폼 간 결정성을 문서화하고 CI hash로 검사한다(약 8% 비용, Android·iOS hash 미검사). [S82](https://github.com/jrouwe/JoltPhysics/blob/master/Docs/Architecture.md) 이 build의 채택은 비용과 PC04 결과로 정하며, 채택 전과 Android·iOS hash 확인 전에는 플랫폼 간 결정성으로 표기하지 않는다. 결정성 범위를 넓혀도 플랫폼 간 결과 정합의 기본은 서버 권한과 field별 보정(17.2절)이다. UE 5.8 Chaos도 플랫폼 간 결정성을 명시하지 않으며, 오차가 임계값을 넘을 때 보정하고 표시 상태를 보간한다(5.8 소스: `UPhysicsSettings`의 `ResimulationErrorPositionThreshold` — Engine/Classes/PhysicsEngine/PhysicsSettings.h 100행, 표시 보간 `p.RenderInterp.*` — Chaos/Private/Framework/PhysicsProxyBase.cpp 9·12행). [S91](https://dev.epicgames.com/documentation/en-us/unreal-engine/networked-physics-overview?application_version=5.8)
 
-**수명·callback.** process당 `PxFoundation`과 `PxPhysics`를 1개씩 두어 World·PIE session이 공유하고, `PxScene`은 session마다 분리한다. 종료는 `fetchResults` 완료 → scene 해제 → asset lease 종료 후 공유 mesh 해제 → `PxPhysics` → `PxFoundation` 순서다. `PxAllocatorCallback`은 Physics tag와 16-byte 정렬로 Rocks allocator에 연결하고 메모리 부족은 진단 후 fatal로 처리한다. `PxErrorCallback`은 구조화 로그에 연결하며 invalid parameter·internal error는 시험 실패로 판정한다. 두 callback에서 lock 획득과 게임 코드 실행을 금지한다.
+**수명·callback.** process 공유 자원(할당 연결·형상 등록 등)과 World·PIE session마다 분리한 physics system을 둔다. 종료는 진행 중 step 완료 → session physics system 해제 → asset lease 종료 후 공유 형상 해제 → process 공유 자원 해제 순서다(대응 Jolt 객체는 J14). 할당 hook은 Physics tag와 정렬 요구로 Rocks allocator에 연결하고 메모리 부족은 진단 후 fatal로 처리한다. 로그·assert hook은 구조화 로그에 연결하며 assert 실패는 시험 실패로 판정한다. 두 hook에서 lock 획득과 게임 코드 실행을 금지한다.
 
-**GPU·라이선스.** CUDA 기능은 NVIDIA 장치의 선택 capability이며 replicated·predicted gameplay에 영향을 주지 않는다. DedicatedServer는 CPU 전용이다. 5.10 이하는 BSD-3, 5.11 이상의 `physx/`는 Apache 2.0이므로 target별 license 고지와 수정 파일 표기를 manifest에서 관리한다.
+**좌표·단위.** Rocks 값은 UE 5.8과 같은 cm·kg·초, 왼손 +X 전방·+Y 오른쪽·+Z 위다. adapter는 행렬식 +1 축 사상과 물리량별 단위 함수(Core `UnitConversion.h`)로만 바꾸며, 거울 사상을 쓰지 않는다([물리 어댑터 경계](PhysicsJoltAdapter.ko.md) 2–4절).
+
+**라이선스.** Jolt는 MIT 라이선스다(33.11절 S82 검토 때 확인, 고정 commit에서 다시 확인 — J15). target별 license 고지와 수정 파일 표기를 manifest에서 관리한다.
 
 | ID | 수용 시험 | 판정 기준(제안) |
 |---|---|---|
 | PC01 | 전 target 빌드·실행: Windows x64, Linux x64/aarch64, macOS x64/ARM64, iOS 장치·simulator, Android ARM64/x86_64 | 동일 commit·manifest로 빌드, conformance suite 실행 |
-| PC02 | 질의 적합성: ray·sweep·overlap·filter를 x64 결과와 비교 | filter 100% 일치, hit 여부 99.9% 이상(불일치는 grazing contact 한정), 거리 차 1 mm + 1e-5·d 이하, 모서리 밖 normal 차 1° 이내 |
+| PC02 | 질의 적합성: ray·sweep·overlap·filter를 x64 결과와 비교 | filter 100% 일치, hit 여부 99.9% 이상(불일치는 grazing contact 한정), 거리 차 0.1 cm + 1e-5·d 이하, 모서리 밖 normal 차 1° 이내 |
 | PC03 | 동일 platform 반복성: 같은 binary·command 순서, worker 수 변경 | 상태 hash 일치 |
-| PC04 | 플랫폼 간 차이 계측: 고정 scene 장시간 시뮬레이션, x64 대 ARM64 | 차이 증가 곡선 기록. PXD 판정 근거로 사용하며 결정성으로 표기하지 않음 |
-| PC05 | 단일 cook blob의 전 target load, version·schema 불일치 | load 성공과 불일치 거부 100% |
-| PC06 | 수명·dispatcher: node pool 포화, PIE 2 session, 종료 중 실행 task | 누수 0건, task 유실 0건, 종료 정지 0건 |
-| PC07 | 큰 월드: region 경계 이동, `shiftOrigin`, 서버 다중 scene handoff | 정밀도 허용 오차 충족, epoch 위반 0건, handoff 중 접촉 누락 0건 |
+| PC04 | 플랫폼 간 차이 계측: 고정 scene 장시간 시뮬레이션, x64 대 ARM64, 플랫폼 간 결정성 build를 켠 것과 끈 것 | 차이 증가 곡선과 hash 일치 여부 기록. 켠 build의 hash가 모든 target에서 일치할 때만 플랫폼 간 결정성으로 표기 |
+| PC05 | cook 결과의 target별 load, version·schema·축 사상·단위 변환 version 불일치 | load 성공과 불일치 거부 100% |
+| PC06 | 수명·job 연결: node pool 포화, PIE 2 session, 종료 중 실행 작업 | 누수 0건, 작업 유실 0건, 종료 정지 0건 |
+| PC07 | 큰 월드: region 경계 이동·원점 이동·서버 다중 physics system handoff, double 위치 build와의 비용 비교 | 정밀도 허용 오차 충족, epoch 위반 0건, handoff 중 접촉 누락 0건, double build 비용 기록 |
 | PC08 | 혼합 플랫폼 네트워크: Linux 서버와 Windows·macOS·iOS·Android client, B6 network profile | client별 correction 빈도 기록, ARM64 client의 보정 빈도가 x64 client의 1.5배 이하 |
+| PC09 | 좌표·단위 경계: [물리 어댑터 경계](PhysicsJoltAdapter.ko.md) 9절 PA01–PA10 | 전부 통과 |
 
-M4 물리 착수 전 gate(PXG)는 PC01·PC02·PC05·PC06 통과와 manifest·license 고지·fork 관리 책임자 지정이다.
+M4 물리 착수 전 gate(PJG)는 어댑터 경계 문서의 검증 항목 J1–J15·U1 확인과 문서 갱신, PC01·PC02·PC05·PC06·PC09 통과, manifest·license 고지다.
 
 ### 16.5 큰 월드와 PhysicsRegion
 
-PhysX simulation은 float 전용이다. UE 5.8 Chaos는 `FReal`을 double로 정의하고(ChaosCore/Public/Chaos/Real.h 22행) constraint solver는 float로 계산한다(`CHAOS_CONSTRAINTSOLVER_LOWPRECISION 1`이면 `FSolverReal = FRealSingle` — Chaos/Public/Chaos/Evolution/SolverBody.h 15·38행). [S92](https://github.com/EpicGames/UnrealEngine/tree/5.8.4-release) Rocks는 double 월드 좌표(2.2절)를 PhysicsRegion 지역 원점으로 변환한다.
+Jolt는 기본 build에서 float 위치를 쓰고 선택 build에서 double 위치를 지원한다(33.11절 S82 검토 때 확인, build 이름·비용은 J10). UE 5.8 Chaos는 `FReal`을 double로 정의하고(ChaosCore/Public/Chaos/Real.h 22행) constraint solver는 float로 계산한다(`CHAOS_CONSTRAINTSOLVER_LOWPRECISION 1`이면 `FSolverReal = FRealSingle` — Chaos/Public/Chaos/Evolution/SolverBody.h 15·38행). [S92](https://github.com/EpicGames/UnrealEngine/tree/5.8.4-release) 기본안은 float build이며, Rocks는 double 월드 좌표(cm, 2.2절)에서 PhysicsRegion 지역 원점을 double로 먼저 뺀 뒤 m로 바꿔 넘긴다. double 위치 build의 채택 여부는 PC07 비용 측정으로 정하고, 채택하면 client 원점 이동은 없애되 서버 다중 physics system 분할은 별도로 판단한다.
 
-- region은 고정 grid이며 한 변 R은 World Partition cell 한 변의 2의 거듭제곱 배다(제안 8,192 m).
-- client는 단일 scene을 사용하고 region 원점으로만 `shiftOrigin`을 수행한다. 전환은 hysteresis를 두고 tick 경계에서 수행하며, 전환마다 physicsOriginEpoch를 증가시켜 world epoch(10.2절)에 포함한다. 이전 epoch의 질의·event·command는 거부한다.
-- 서버는 `shiftOrigin`을 사용하지 않고 활성 region마다 `PxScene`을 둔다. 인접 region 사이에는 최대 상호작용 거리 이상의 overlap band를 두어 body를 이관하며, band에 걸친 질의 결과는 (거리, stable ID) 순으로 병합한다.
+- region은 고정 grid이며 한 변 R은 World Partition cell 한 변의 2의 거듭제곱 배다(제안 819,200 cm = 8,192 m).
+- client는 단일 physics system을 사용하고 region 원점으로만 원점 이동을 수행한다(Jolt의 원점 이동 수단이 없으면 전환 때 body를 재배치한다). 전환은 hysteresis를 두고 tick 경계에서 수행하며, 전환마다 physicsOriginEpoch를 증가시켜 world epoch(10.2절)에 포함한다. 이전 epoch의 질의·event·command는 거부한다.
+- 서버는 원점 이동을 사용하지 않고 활성 region마다 physics system을 둔다. 인접 region 사이에는 최대 상호작용 거리 이상의 overlap band를 두어 body를 이관하며, band에 걸친 질의 결과는 (거리, stable ID) 순으로 병합한다.
 - client와 서버는 같은 region 원점을 사용하여 같은 지역 좌표에서 계산한다.
 
 ## 17. 네트워크·Replication·Prediction
@@ -1620,9 +1627,9 @@ delivery는 unreliable sequenced snapshot, 제한된 reliable control/RPC, 우�
 
 interest는 World Partition cell, 거리, team/owner, gameplay tag, relevancy rule을 조합한다. bandwidth budget을 넘으면 중요도·변경 빈도에 따라 상태 갱신을 조절한다. dormancy·wake·entity migration을 명시한다. 에셋 미상주 시 NetObject와 render-ready 상태를 구분하고 spawn resource prefetch·placeholder 정책을 적용한다.
 
-캐릭터는 client input sequence → local prediction → server authoritative simulation → ACK와 correction → 미확인 입력 replay로 구성한다. remote actor는 buffered interpolation을 사용한다. moving platform·root motion·teleport는 prediction state에 포함한다. 일반 physics body는 state replication과 correction을 기본으로 한다. client와 서버의 physics 결과는 CPU 구조에 따라 bit 단위로 다를 수 있으므로(16.4절) correction 임계값과 smoothing을 field별로 선언한다(제안: 위치 2 cm). 일반 physics body의 예측 재시뮬레이션은 초기 범위에서 제외한다. lag compensation은 서버의 제한된 hitbox history로 구현하고 full World rollback을 초기 범위에서 제외한다.
+캐릭터는 client input sequence → local prediction → server authoritative simulation → ACK와 correction → 미확인 입력 replay로 구성한다. remote actor는 buffered interpolation을 사용한다. moving platform·root motion·teleport는 prediction state에 포함한다. 일반 physics body는 state replication과 correction을 기본으로 한다. client와 서버의 physics 결과는 플랫폼 간 결정성 build를 확인하기 전까지 CPU 구조에 따라 bit 단위로 다를 수 있다고 보고(16.4절) correction 임계값과 smoothing을 field별로 선언한다(제안: 위치 2 cm). 일반 physics body의 예측 재시뮬레이션은 초기 범위에서 제외한다. lag compensation은 서버의 제한된 hitbox history로 구현하고 full World rollback을 초기 범위에서 제외한다.
 
-Replay는 input, authoritative event, RNG seed, schema/asset manifest, periodic snapshot을 기록한다. 결정적인 게임 로직과 비결정적인 physics/render를 구분한다. 영상 재생과 네트워크 디버그를 위한 상태 replay를 제공하고 모든 플랫폼의 bitwise physics 재현을 약속하지 않는다. physics replay는 PhysX version·build hash를 기록하며 다른 build·platform에서는 상태 snapshot 재생으로 전환한다.
+Replay는 input, authoritative event, RNG seed, schema/asset manifest, periodic snapshot을 기록한다. 결정적인 게임 로직과 비결정적인 physics/render를 구분한다. 영상 재생과 네트워크 디버그를 위한 상태 replay를 제공하고 모든 플랫폼의 bitwise physics 재현을 약속하지 않는다. physics replay는 Jolt version·build hash·축 사상과 단위 변환 version을 기록하며 다른 build·platform에서는 상태 snapshot 재생으로 전환한다.
 
 시험 profile은 RTT 0/50/100/200 ms, jitter 0/20 ms, loss 0/1/5%, reorder·duplicate·disconnect다. 서버 60Hz tick, per-client bandwidth·RPC queue·correction 거리·stale packet을 계측한다. 강제 despawn/respawn과 cell 이동 중 ID alias·use-after-free·권한 위반 0건을 필수 기준으로 한다.
 
@@ -1970,7 +1977,7 @@ import Gameplay.Interaction;      // event Entity.Interacted(actor: Entity);
 enum DoorState { Closed, Opening, Open }
 
 class DoorLogic : ScriptComponent {
-    @edit @save var OpenAngle: float = Math.Radians(90.0);   // 엔진 단위: 라디안
+    @edit @save var OpenAngle: float = 90.0;      // Rotator 각도: 도(UE FRotator와 같음)
     @edit var Hinge: TransformComponent;          // 같은 prefab 안의 필수 참조
     @net var State = DoorState.Closed;
     var Swing = 0.0;                              // 이 기기의 회전 진행률(복제하지 않음)
@@ -2408,7 +2415,7 @@ PR은 Core/Object·메타·언어·헤드리스 sample·schema·증분 cook·금
 | Profile | 필요한 기능 | 포함하지 않는 기본 의존성 |
 |---|---|---|
 | CoreTest | Core·Task·Object·최소 schema/GC harness | World·GPU·window·UI·audio device |
-| DedicatedServer | World·script·physics(CPU 전용 PhysX)/nav·network·game data | Renderer/RHI backend·window·게임 UI·audio device |
+| DedicatedServer | World·script·physics(Jolt)/nav·network·game data | Renderer/RHI backend·window·게임 UI·audio device |
 | Commandlet | 작업별 asset/schema/cook/build·선택 World | 기본 window·GPU·audio. 필요 capability는 명시 요청 |
 | Simulation/Replay | fixed clock·gameplay/AI/physics·state snapshot | presentation device, 선택 network |
 | EditorBackend | asset·transaction·prefab/script schema·자동화 API | Studio UI·native window. renderer는 별도 선택 |
@@ -2647,9 +2654,9 @@ RHI·UI 툴킷·언어·전문 빌드 도구의 본격 구현은 Foundation Gate
 | R19 · P1 | NullRHI로 영상/UI 성공을 오판 | CPU-only/GPU offscreen profile·capability 실패·실제 image 비교 |
 | R20 · P1 | UI designer/runtime 차이·binding root 누수 | 동일 evaluator/layout·typed binding·preview/cooked/headless 통합 |
 | R21 · P1 | 공간 인덱스의 bounds·key·HZB 경로 결함에 의한 가시 객체 누락, 다중 view 판정 비용 증가 | 단일 loose 상수·외향 반올림·block 계층·SI06 fuzz·SI03/SI04 예산. GPU-driven 판정 착수 전 SI06 통과 |
-| R22 · P1 | upstream 미지원 플랫폼(macOS·iOS·Android) PhysX patch의 toolchain 변화·보안 수정 부담 | O3DE fork 기반 고정 commit·Rocks fork 관리 책임자·PC01 CI. cooked blob은 서명·checksum 검증 package에서만 load |
-| R23 · P1 | x64·ARM64 간 physics 결과 차이에 의한 client 보정 증가·replay 불일치 | 동일 commit·빌드 설정·cook, 서버 권한과 field별 보정, PC04/PC08 계측, PXD 차이 축소 검토 |
-| R24 · P2 | float 전용 PhysX의 큰 월드 정밀도 저하·서버 다중 scene 비용 | PhysicsRegion·origin epoch·overlap band 이관·PC07 |
+| R22 · P1 | Rocks(UE 왼손·cm)와 Jolt 사이 좌표·단위 변환 오류(축성 벡터·quaternion·winding·heightfield·물리량별 계수), 미확인 Jolt 규약 | 행렬식 +1 축 사상·물리량별 경계 함수·Core `UnitConversion.h`만 사용, 검증 항목 J1–J15·U1, PC09(PA01–PA10) golden([물리 어댑터 경계](PhysicsJoltAdapter.ko.md)). cooked blob은 서명·checksum 검증 package에서만 load |
+| R23 · P1 | x64·ARM64 간 physics 결과 차이에 의한 client 보정 증가·replay 불일치 | 동일 commit·빌드 설정·cook, 서버 권한과 field별 보정, PC04/PC08 계측, 플랫폼 간 결정성 build 비용 평가 |
+| R24 · P2 | float 위치 build의 큰 월드 정밀도 저하·서버 다중 physics system 비용 | PhysicsRegion·origin epoch·overlap band 이관, double 위치 build 비교·PC07 |
 
 기능 계획의 P0는 안정성 선행 조건, P1은 제작·실행 필수, P2는 규모·품질 확장, P3는 연구·특수 기능이다. 위 위험표의 우선순위는 대응 시급성으로 별도 사용한다. 후속 전문 기능을 P3로 분류하여도 제품 범위에서 삭제한 것으로 해석하지 않는다. 다만 첫 실용 버전과 장기 전체 범위의 완료 시점을 구분한다.
 
@@ -2748,7 +2755,7 @@ RHI·UI 툴킷·언어·전문 빌드 도구의 본격 구현은 Foundation Gate
 | VirtualGeometry·GI·VSM·VT·RT | 대체 경로·page/representation·memory·capture 지원표 | 필수 장기 M8–M9 연구 gate |
 | 전체 post·upscale·HDR | 26절 catalog·두 경로·FSR/DLSS/XeSS·volume/shot·history | 필수 M4–M9 |
 | Skeletal·animation·rig·retarget·morph | blend/montage/sync/socket·IK/warp·pose search·skin/velocity | 필수 M4–M8, 고급 cloth/groom P3 |
-| Physics·collision·query·nav | PhysX 5 단일 버전·channel/material·constraint·character·async query·tile snapshot. Chaos 고유 기능은 참고 | 필수 M4–M7(M4 전 PXG gate); 파괴/softbody/vehicle 개별 P3 |
+| Physics·collision·query·nav | Jolt 단일 버전(개정 1.12)·좌표·단위 adapter 경계·channel/material·constraint·character·async query·tile snapshot. Chaos 고유 기능은 참고 | 필수 M4–M7(M4 전 PJG gate); 파괴/softbody/vehicle 개별 P3 |
 | World 공간 인덱스·visibility 판정 | 평면 SoA·SceneCulling 유사 계층 공간 해시·physics scene query·2D gameplay 해시 분담, 보수성·결정성 규약 | 필수 M3 CPU 경로, M4–M5 GPU-driven·WP 연동(제안); 10.4절 SI gate |
 | AI·EQS·State/Behavior·SmartObject·Mass | task budget·script predicate·예약·SoA/Entity bridge | 필수 M4–M7 |
 | Gameplay Ability·effect·cue | 태그·속성·stack·cost·duration·prediction·취소 | 필수 M5–M6 |
@@ -2917,6 +2924,8 @@ Jolt는 `CROSS_PLATFORM_DETERMINISTIC` build에서 x64·ARM64를 포함한 플�
 
 확인하지 못한 항목은 O3DE 5.12 port(PR #18)의 build·시험 통과, x64·ARM64 간 실제 차이의 크기, PhysX의 플랫폼 간 차이 측정 공개 자료다. 개정 범위는 표지·1·2.1·2.2·3.1·10.4·16·17.2·28.1·31(R22–R24)·33.2·33.10·33.11·34절이다. 본 개정은 문서 계약의 변경이며 구현·측정 결과가 아니다.
 
+이 전환은 개정 1.12에서 사용자 결정으로 되돌렸다(33.17절). 위 표의 PhysX 사실은 당시 판단의 근거로만 남긴다.
+
 ### 33.12 개정 1.7의 게임플레이 언어 Sparks
 
 검토 입력은 사용자 요구(정적 타입, 스펙 예시 수준의 평범한 문법, 코어·엔진·이벤트 접근, VM 실행, 사전 컴파일)와 이후 추가 요구(Unity 수준의 접근성, 프로그래머가 아닌 사용자를 위한 방어적·Go식 설계, 메모리·리소스 누수 0, 비동기 로딩, 런타임 eval, VS Code 자동완성, Verse 차용 검토)다. 설계는 초안 0.1–0.5를 거쳤고 각 초안마다 서브에이전트 교차 검증을 수행하였다.
@@ -2956,7 +2965,7 @@ Verse 조사에서 Epic의 "The road to UE6"(2026-06-17)는 게임플레이 프�
 | 스크립트가 호출하지 않은 C++ handler의 파괴 요청은 즉시 전이되어 "단계 끝까지 유효" 보장이 성립하지 않음 | 스크립트 단계가 열린 동안의 모든 Game lane 파괴 요청과 활성 전환을 지연(5.2절) |
 | "비활성화"가 Disable·Detach·격리를 함께 가리키고 PIE Stop에서 Destroy hook이 실행되지 않음 | fault 이후 상태를 격리 하나로 정의, 종료 경로별 hook(SD20, 20.2절) |
 | 기다리는 handler가 이벤트를 조용히 버림 | 재진입 정책 `@skipWhileBusy`·`@restart` 표시 필수(SD11, 23.2절) |
-| 예시가 cm·도로 적혀 있으나 엔진 규약은 미터·라디안(2.2절) | 단위 통일과 `Math.Radians` 상수식(SD18), 예시 수정(23.1절) |
+| 예시가 cm·도로 적혀 있으나 엔진 규약은 미터·라디안(2.2절) | 단위 통일과 `Math.Radians` 상수식(SD18), 예시 수정(23.1절). 개정 1.12에서 엔진 규약이 UE와 같은 cm·도가 되어 번복(33.17절) |
 | 문서 간 불일치: 오버로드 처리, session의 VM globals·root, 순환 import | 2.4·22.6·23.4절 정정 |
 
 반영 뒤 서브에이전트 2개로 다시 검증하여 상태 반영 위치(Enable), 문 예시의 회전 연출(Tick), 프레임 순서(8.2·20.2절)를 바로잡았고, 사용자 결정으로 컴파일 모듈 확장자를 `.sparkc`로 정정하였다(SD1). 개정 범위는 표지·2.4·3.2·5.2·6.4·9.2·20.2·22.6·23·29.6(NL09)·31(R03)·33.1(A04)·33.13절, [Sparks 언어 설계](SparksLanguage.ko.md) 초안 1.1, 입력 상세안 11.2·22.3·26.1절, UI 툴킷 7절이다. 본 개정은 문서 계약의 변경이며 구현·측정 결과가 아니다.
@@ -2989,6 +2998,23 @@ UE 5.8.4의 GC 구조도 대조하였다. 상세는 [GC 대규모 처리 보강 
 
 UE 5.8.4의 셰이딩 경로·GI·반사·path tracing 설정 구조와 모바일 Forward의 클러스터 조명을 대조하였다. 렌더 기반 층은 [렌더 기반](RenderBase.ko.md)에 둔다. 개정 범위는 표지·11.1·14.3·14.4·33.16·34절(S97)이다. 본 개정은 문서 계약의 변경이며 구현·실행 검증 결과가 아니다.
 
+### 33.17 개정 1.12의 좌표·단위 UE 전환과 물리 Jolt 복귀
+
+사용자 요구(2026-11-17)는 Rocks의 공간 좌표계·방향·회전 의미·행렬·Transform 규약·월드 단위와 물리량 단위를 UE 5.8과 **같게** 맞추는 것이며, 이전 규약을 위한 호환 계층을 두지 않는다. 이전 계획의 기본안은 이 요구와 달랐다.
+
+| 항목 | 이전 기본안 | 개정 1.12(UE 5.8과 같음) |
+|---|---|---|
+| 축·좌우수 | 오른손, +X 전방·+Y 왼쪽·+Z 위 | 왼손, +X 전방·+Y 오른쪽·+Z 위 |
+| 단위 | 미터·라디안·초, UE와는 임포터 경계에서 변환 | cm·kg·초, `Rotator` 도, quaternion 축-각·삼각함수·각속도 라디안 |
+| 행렬 | column vector `p′=M×p`, `world=parent×local` | row vector `p′=p·M`, `world=local×parent`(UE `Child * Parent`) |
+| Transform | 이동 double·회전·scale float, `TryCompose(parent, local)` | 모든 성분 double(UE FTransform), `TryMultiply(local, parentToWorld)` |
+| Sparks 단위(SD18) | 미터·라디안 | cm·도(`Rotator`), 삼각함수 라디안 |
+| 물리 middleware | PhysX 5(개정 1.6) | Jolt(사용자 결정) |
+
+Core 수학·World의 코드 전환(C1–C5)과 UE 원본 대조 근거는 [수학 구현](../Implementation/Math.ko.md) 2절과 5절에 있다. 문서 단계에서는 이 계획의 2.1·2.2·2.3·3.1·3.3·10.2·10.4·16·17.2·23.1·28.1·31(R22–R24)·33.2·33.11·33.13·34절, Core·리플렉션·World·공간 인덱스·Sparks 설계 문서, 구현 상태 문서를 고쳤다. 렌더 경계(2.2절 view·깊이·앞면 행, 11절, 셰이더 시스템·렌더 기반 문서)는 렌더 문서 소관이라 이 개정에서 바꾸지 않았다. 카메라·물리·입력 이동·에디터 표시 단위는 미구현이므로 계약만 바꿨고 구현 완료로 보지 않는다.
+
+물리 middleware는 사용자 결정으로 Jolt로 되돌렸다. 물리는 미구현이므로 Jolt를 들이지 않고, Rocks와 Jolt 사이의 축 사상(행렬식 +1, 거울 사상 금지), 극성·축성 벡터·quaternion·winding·heightfield 변환, 물리량별 단위 변환, 검증 항목과 수용 시험을 [물리 어댑터 경계](PhysicsJoltAdapter.ko.md)에 새로 썼다. Jolt의 좌우수·기본 up 축·단위·API 동작과 UE `AddForce`·`AddImpulse`·`AddTorque` 계열의 실제 단위, 공개 UE 연동 플러그인의 변환 방식은 확인하지 못해 그 문서의 검증 항목(J1–J15, U1–U3)으로 두었다. 개정 1.6의 PhysX 5 사실 확인(33.11절)은 이력으로 남긴다. 본 개정은 문서 계약의 변경이며 물리 구현·측정 결과가 아니다.
+
 ## 34. 참고 자료와 설계 근거
 
 이전 대화는 사용자 제공 참조 「3D 엔진 설계」와 현재 대화의 추가 요구를 기준으로 한다. 아래 공식 문서는 기술 개념과 API 경계를 확인하기 위한 자료다. 일정·API·예산·구현 단계는 이 계획의 제안이며 참고 자료의 성능 보증이 아니다. 온라인 문서는 변경될 수 있으므로 실제 구현 착수 시 선택 SDK 버전의 문서·commit을 build manifest에 고정한다. 조회일은 2026.11.10이며 S75–S92는 2026.11.11이다.
@@ -3004,7 +3030,7 @@ UE 5.8.4의 셰이딩 경로·GI·반사·path tracing 설정 구조와 모바�
 | S7 | [SIGGRAPH 2021 · Nanite 발표](https://advances.realtimerendering.com/s2021/index.html) | 가상화 geometry 공개 발표 |
 | S8 | [Epic · Lumen Technical Details](https://dev.epicgames.com/documentation/en-us/unreal-engine/lumen-technical-details-in-unreal-engine) | trace·surface cache 개념 |
 | S9 | [ACL · 공식 저장소](https://github.com/nfrechette/acl) | animation compression 후보 |
-| S10 | [Jolt · 공식 저장소](https://github.com/jrouwe/JoltPhysics) | physics integration 후보. 개정 1.6의 PhysX 5 전환으로 본문 인용 없음 |
+| S10 | [Jolt · 공식 저장소](https://github.com/jrouwe/JoltPhysics) | physics middleware(개정 1.12 — 16.1·16.4절) |
 | S11 | [miniaudio · Manual](https://miniaud.io/docs/manual/index.html) | audio backend 후보 |
 | S12 | [Recast/Detour · 공식 저장소](https://github.com/recastnavigation/recastnavigation) | tiled nav build·query |
 | S13 | [Microsoft · WebView2 Security](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/security) | host message·navigation 경계. 개정 1.4의 웹 에디터 미채택으로 본문 인용 없음 |
@@ -3077,14 +3103,14 @@ UE 5.8.4의 셰이딩 경로·GI·반사·path tracing 설정 구조와 모바�
 | S80 | [Epic 포럼 · Nanite pass 설명(Epic 직원)](https://forums.unrealengine.com/t/how-some-nanite-passes-work/2667840) | GPU hierarchy cell 판정 순서 |
 | S81 | [Epic 포럼 · Chaos TAABBTree(Epic DevRel)](https://forums.unrealengine.com/t/chaos-taabbtree-memory-consumption-and-weird-flat-structure/2589987) | scene query static/dynamic 트리 |
 | S82 | [Jolt · Architecture](https://github.com/jrouwe/JoltPhysics/blob/master/Docs/Architecture.md) | 플랫폼 간 결정성 build 비교(33.11절) |
-| S83 | [NVIDIA · PhysX 5.6.1 Scene Queries](https://nvidia-omniverse.github.io/PhysX/physx/5.6.1/docs/SceneQueries.html) | pruner 기본값·PxPruningStructure |
+| S83 | [NVIDIA · PhysX 5.6.1 Scene Queries](https://nvidia-omniverse.github.io/PhysX/physx/5.6.1/docs/SceneQueries.html) | pruner 기본값·PxPruningStructure(개정 1.12로 이력만) |
 | S84 | [T. Ulrich · Spatial partitioning](https://tulrich.com/geekstuff/partitioning.html) | loose octree 원 설계 |
 | S85 | [Epic · World Partition](https://dev.epicgames.com/documentation/en-us/unreal-engine/world-partition-in-unreal-engine) | runtime grid·cell 크기·loading range |
 | S86 | [UE 5.4.4 cvar 정리(2차 출처)](https://indxzero.github.io/ue544cvarwiki) | r.SceneCulling 계열 기본값. 1차 출처 미확인 |
-| S87 | [NVIDIA · PhysX 저장소](https://github.com/NVIDIA-Omniverse/PhysX) | PhysX 5 source·CHANGELOG·공식 지원 플랫폼·license |
-| S88 | [NVIDIA · PhysX discussion #58](https://github.com/NVIDIA-Omniverse/PhysX/discussions/58) | 플랫폼 build 설정 PR 미수용 |
-| S89 | [O3DE · PhysX fork](https://github.com/o3de/PhysX) | macOS·iOS·Android용 PhysX 5 patch |
-| S90 | [NVIDIA · PhysX 5.6.1 Rigid Body Dynamics](https://nvidia-omniverse.github.io/PhysX/physx/5.6.1/docs/RigidBodyDynamics.html) | 결정성 보장 범위 |
+| S87 | [NVIDIA · PhysX 저장소](https://github.com/NVIDIA-Omniverse/PhysX) | PhysX 5 source·CHANGELOG·공식 지원 플랫폼·license(개정 1.12로 33.11절 이력만) |
+| S88 | [NVIDIA · PhysX discussion #58](https://github.com/NVIDIA-Omniverse/PhysX/discussions/58) | 플랫폼 build 설정 PR 미수용(33.11절 이력) |
+| S89 | [O3DE · PhysX fork](https://github.com/o3de/PhysX) | macOS·iOS·Android용 PhysX 5 patch(33.11절 이력) |
+| S90 | [NVIDIA · PhysX 5.6.1 Rigid Body Dynamics](https://nvidia-omniverse.github.io/PhysX/physx/5.6.1/docs/RigidBodyDynamics.html) | 결정성 보장 범위(33.11절 이력) |
 | S91 | [Epic · Networked Physics Overview (5.8)](https://dev.epicgames.com/documentation/en-us/unreal-engine/networked-physics-overview?application_version=5.8) | 서버 권한 보정·재시뮬레이션 참고(2026-11-15 5.8 문서 확인: 차이가 충분히 크면 재시뮬레이션, 표시 상태 보간, 플랫폼 간 결정성 언급 없음) |
 | S92 | [Epic · UE 5.8.4-release 소스](https://github.com/EpicGames/UnrealEngine/tree/5.8.4-release) | Chaos `FReal`·`FSolverReal`·질의 acceleration structure 참고(commit `f45729c0b6f0`). Epic 계정 연결 필요 |
 | S93 | [Go · FAQ](https://go.dev/doc/faq) | 경고 없는 오류·암묵 변환 금지·한 가지 방법의 설계 근거 |

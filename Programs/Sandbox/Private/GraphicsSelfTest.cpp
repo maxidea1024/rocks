@@ -1,4 +1,5 @@
 #include "GraphicsSelfTest.h"
+#include "CullingSelfTest.h"
 #include "RenderLaneSelfTest.h"
 #include "TimingSelfTest.h"
 #include "UploadSelfTest.h"
@@ -22,10 +23,11 @@ using namespace rocks;
 
 constexpr uint32 Size = 64;
 
-// 로컬 Y(왼쪽)·Z(위)를 clip X(오른쪽)·Y(위)로 보내는 변환이다. 단위 메시가 화면을 가득 채운다.
+// 로컬 Y(오른쪽)·Z(위)를 clip X(오른쪽)·Y(위)로 보내는 변환이다(+X를 바라보는 정면, UE 좌표).
+// 단위 메시가 화면을 가득 채운다.
 Mat4 FillScreen() noexcept {
     Mat4 matrix = Mat4::Zero();
-    matrix.m[4] = -2.0f; // y → clip x(오른쪽이 -Y)
+    matrix.m[4] = 2.0f;  // y → clip x
     matrix.m[9] = 2.0f;  // z → clip y
     matrix.m[14] = 0.5f; // clip z
     matrix.m[15] = 1.0f; // w
@@ -586,6 +588,8 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     RunFenceChecks(name, device, renderer, target.Value(), result.triangle.GetAllocator());
     RunOwnershipChecks(name, device, renderer, target.Value(), result.triangle.GetAllocator());
     RunSwapChainChecks(name, device, renderer, result.triangle.GetAllocator());
+    // 좌표·앞면 규약(C7): 컬 모드·음수 행렬식 반전·행 우선 행렬을 창·offscreen 두 경로로 확인한다.
+    failures += RunCullingChecks(name, device, renderer, result.triangle.GetAllocator());
     Check(device.IgnoredDraws() == 0, name, "no ignored draws");
     // 정점 배치(GX3a): 형식 20종·stream·인스턴스·index·정점 버퍼 없는 그리기와 음성 대조.
     failures += RunVertexChecks(name, device, result.triangle.GetAllocator());

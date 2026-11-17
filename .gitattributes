@@ -6,15 +6,15 @@
 *.hpp text eol=lf
 *.h text eol=lf
 *.c text eol=lf
-# 외부 라이브러리 원본(<루트>/<Lib>/<lib>-<version>/, 루트는 Core/Source/ThirdParty·Engine/Source/ThirdParty)은 byte 그대로
-# 보존한다(줄끝 변환 금지). 각 라이브러리의 ThirdParty.json이 파일별 SHA-256으로 확인한다. Rocks 글루는 <Lib>/ 바로 아래에
-# 두어 이 규칙 밖이다.
+# External library sources (<root>/<Lib>/<lib>-<version>/, where the roots are Core/Source/ThirdParty and Engine/Source/ThirdParty) are kept
+# byte for byte (no line ending conversion). Each library's ThirdParty.json verifies them with per-file SHA-256. Rocks glue lives directly under <Lib>/
+# and is outside this rule.
 Core/Source/ThirdParty/*/*/** -text
 Engine/Source/ThirdParty/*/*/** -text
-# 추적 가능한 수정의 patch는 LF 그대로 둔다(ThirdPartyPatch가 CR을 거부하고, 문맥 줄 byte가 원본과 같아야 한다).
+# Patches of traceable modifications keep LF as is (ThirdPartyPatch rejects CR, and context line bytes must match the source).
 Core/Source/ThirdParty/*/*.patch text eol=lf
 Engine/Source/ThirdParty/*/*.patch text eol=lf
-# 미리 빌드한 바이너리의 오프라인 도구 빌드 스크립트·patch(<Lib>/Build/)는 Rocks가 쓴 파일이므로 원본 규칙에서 뺀다(뒤 규칙이 이긴다).
+# Offline tool build scripts and patches of prebuilt binaries (<Lib>/Build/) are written by Rocks, so they are excluded from the source rule (later rules win).
 Engine/Source/ThirdParty/*/Build/** text eol=lf
 *.pdf binary
 *.png binary

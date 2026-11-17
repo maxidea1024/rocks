@@ -1,5 +1,5 @@
-// 생성 파일이다. 직접 고치지 않는다: Rocks.ToolTests unicode-tables --root . --write
-// Unicode 18.0.0, 생성기 버전 1. 원본 SHA-256:
+// Generated file. Do not edit by hand: Rocks.ToolTests unicode-tables --root . --write
+// Unicode 18.0.0, generator version 1. Source SHA-256:
 //   CaseFolding.txt a004797658a457bec4dc11683e39f69249ea3b595b752dbea6721c4c9f587b0d
 //   CompositionExclusions.txt c759b100e9ae8960ae6b50fc5765950a7581fd9f30d4ef95f68f25a6d97e818e
 //   DerivedCoreProperties.txt 09c928886a178fcafd93c29e4bd59073a058e5a100b716d425cb563ab50f68c9
@@ -14,8 +14,8 @@ namespace rocks::detail::unicode {
 inline constexpr char UnicodeVersion[] = "18.0.0";
 inline constexpr uint32 MaxDecompositionLength = 4;
 
-// 코드 포인트 속성 조합: bit 0–7 결합 등급, 8–12 GeneralCategory, 13–14 NFC_QC(0 Yes·1 No·2 Maybe),
-// 15 NFD_QC(0 Yes·1 No), 16 Default_Ignorable.
+// Code point property records: bits 0-7 combining class, 8-12 GeneralCategory,
+// 13-14 NFC_QC (0 Yes, 1 No, 2 Maybe), 15 NFD_QC (0 Yes, 1 No), 16 Default_Ignorable.
 // clang-format off
 inline constexpr uint32 PropertyRecords[] = {
     6400, 5632, 4352, 4864, 3328, 3584, 4608, 3072,
@@ -37,7 +37,7 @@ inline constexpr uint32 PropertyRecords[] = {
 };
 inline constexpr usize PropertyRecordsCount = 127;
 
-// 상위 색인: 코드 포인트 >> 8 → 블록 번호.
+// Stage-1 index: code point >> 8 -> block number.
 inline constexpr uint16 PropertyStage1[] = {
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
     16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
@@ -314,7 +314,8 @@ inline constexpr uint16 PropertyStage1[] = {
 };
 inline constexpr usize PropertyStage1Count = 4352;
 
-// 블록(256칸)마다 속성 조합 번호. 블록 b의 칸 o = PropertyBlocks[b * 256 + o].
+// Property record number per block (256 entries each).
+// Entry o of block b = PropertyBlocks[b * 256 + o].
 inline constexpr uint16 PropertyBlocks[] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -3055,7 +3056,8 @@ inline constexpr uint16 PropertyBlocks[] = {
 };
 inline constexpr usize PropertyBlocksCount = 43776;
 
-// 정규 분해 색인(코드 포인트 순): { 코드 포인트, DecompositionData 시작, 길이 }. Hangul 음절은 알고리즘.
+// Canonical decomposition index (by code point): { code point, DecompositionData offset, length }.
+// Hangul syllables are algorithmic.
 struct DecompositionEntry {
     uint32 codePoint;
     uint32 offset;
@@ -4195,7 +4197,7 @@ inline constexpr uint32 DecompositionData[] = {
 };
 inline constexpr usize DecompositionDataCount = 3450;
 
-// 정규 합성 쌍(키 순): 키 = (앞 문자 << 21) | 뒤 문자.
+// Canonical composition pairs (by key): key = (first character << 21) | second character.
 struct CompositionEntry {
     uint64 key;
     uint32 composite;
@@ -4525,7 +4527,7 @@ inline constexpr CompositionEntry CompositionEntries[] = {
 };
 inline constexpr usize CompositionEntriesCount = 961;
 
-// 단순 case folding 구간: first..last에서 stride 간격의 코드 포인트를 delta만큼 옮긴다.
+// Simple case folding ranges: code points in first..last at stride intervals are shifted by delta.
 struct FoldingRange {
     uint32 first;
     uint32 last;

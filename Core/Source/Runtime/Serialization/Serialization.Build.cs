@@ -1,6 +1,6 @@
 using Rocks.Build.Rules;
 
-// Archive 계약·버전 규칙(Object 의존 없음).
+// Archive contract and versioning rules (no Object dependency).
 public sealed class Serialization : CoreModuleRules
 {
     protected override string ModuleName => "Serialization";

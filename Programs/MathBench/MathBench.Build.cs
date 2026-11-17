@@ -1,9 +1,9 @@
 using Rocks.Build;
 using Rocks.Build.Rules;
 
-// Core 수학 마이크로벤치마크 실행 파일이다(Docs/Implementation/Math.ko.md 5절 — float·double Transform
-// 비용). 시험이 아니라 측정용이며 제품 런타임에 들어가지 않는다.
-// `dotnet msbuild Rocks.proj /t:Build /p:RocksTarget=MathBench /p:Configuration=Release`로 빌드한다.
+// Core math microbenchmark executable (Docs/Implementation/Math.ko.md section 5: float vs. double Transform
+// cost). It is for measurement, not testing, and is not part of the product runtime.
+// Build with `dotnet msbuild Rocks.proj /t:Build /p:RocksTarget=MathBench /p:Configuration=Release`.
 public sealed class MathBenchProgram : ModuleRules
 {
     public override NativeModuleInput Configure(BuildContext context) => new()
