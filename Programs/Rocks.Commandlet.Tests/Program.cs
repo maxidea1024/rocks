@@ -36,6 +36,11 @@ await Check("invalid check argument", ["core-check", "한글🎮"], 2, "", "acce
 await Check("empty command", [""], 2, "", "Unknown command");
 await Check("oversized argument", [new string('a', 4097)], 2, "", "argument");
 
+// config-dump: 엔진 호스트와 같은 설정 부트를 거친 값과 출처(엔진 층 Engine.json의 TracePresets 포함).
+await Check("config dump", ["config-dump"], 0, "\"section\": \"TracePresets\"", "");
+await Check("config dump engine file", ["config-dump"], 0, "\"tag\": \"Engine.json\"", "");
+await Check("config dump usage", ["config-dump", "extra"], 2, "", "usage: config-dump");
+
 // trace-report: 사용법·파일 오류(원본 오류 코드 포함)·trace가 아닌 입력·머리만 있는 trace(표준 출력과 파일 출력).
 string traceDirectory = Path.Combine(Path.GetTempPath(), $"rocks-trace-report-{Environment.ProcessId}");
 Directory.CreateDirectory(traceDirectory);
