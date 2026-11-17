@@ -140,6 +140,25 @@ bool IsDeviceRemovedResult(HRESULT result) noexcept {
            result == DXGI_ERROR_DEVICE_HUNG || result == DXGI_ERROR_DRIVER_INTERNAL_ERROR;
 }
 
+const char* DeviceRemovedReasonName(HRESULT reason) noexcept {
+    switch (reason) {
+    case S_OK:
+        return "not removed";
+    case DXGI_ERROR_DEVICE_HUNG:
+        return "DXGI_ERROR_DEVICE_HUNG";
+    case DXGI_ERROR_DEVICE_REMOVED:
+        return "DXGI_ERROR_DEVICE_REMOVED";
+    case DXGI_ERROR_DEVICE_RESET:
+        return "DXGI_ERROR_DEVICE_RESET";
+    case DXGI_ERROR_DRIVER_INTERNAL_ERROR:
+        return "DXGI_ERROR_DRIVER_INTERNAL_ERROR";
+    case DXGI_ERROR_INVALID_CALL:
+        return "DXGI_ERROR_INVALID_CALL";
+    default:
+        return "unknown reason";
+    }
+}
+
 bool CopyTruncated(char* out, usize capacity, const char* text) noexcept {
     if (capacity == 0) {
         return *text != '\0';

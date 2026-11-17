@@ -16,3 +16,16 @@ TEST(PlatformWindow_ZeroSizeIsRejectedBeforeCreatingWindow) {
     CHECK(platform::Window::Create(allocator, desc).Error() == ErrorCode::InvalidArgument);
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+
+// report는 입력 오류에도 결과 코드를 채우고, OS 호출 전이라 호출 이름·OS 오류는 비어 있다.
+TEST(PlatformWindow_CreateReportCarriesInputFailure) {
+    SystemAllocator allocator;
+    platform::WindowDesc desc;
+    desc.height = 0;
+    platform::WindowCreateReport report;
+    report.osError = 5;
+    report.call[0] = 'x';
+    CHECK(platform::Window::Create(allocator, desc, &report).Error() == ErrorCode::InvalidArgument);
+    CHECK(report.code == ErrorCode::InvalidArgument && report.osError == 0 &&
+          report.call[0] == '\0' && !report.truncated);
+}

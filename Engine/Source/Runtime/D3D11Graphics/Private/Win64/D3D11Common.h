@@ -189,6 +189,9 @@ D3D11_TEXTURE_ADDRESS_MODE SamplerAddress(AddressMode mode) noexcept;
 // 장치 제거·재설정을 뜻하는 HRESULT인지다.
 bool IsDeviceRemovedResult(HRESULT result) noexcept;
 
+// GetDeviceRemovedReason 값의 이름이다(진단용, 정적 수명).
+const char* DeviceRemovedReasonName(HRESULT reason) noexcept;
+
 // text를 capacity byte 칸에 NUL로 끝나게 복사한다. 잘렸으면 true다.
 bool CopyTruncated(char* out, usize capacity, const char* text) noexcept;
 

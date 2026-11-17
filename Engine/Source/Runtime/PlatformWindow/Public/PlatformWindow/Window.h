@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/Diagnostics/LogCategory.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Text/StringView.h>
 #include <Input/InputEvent.h>
@@ -15,6 +16,30 @@ struct WindowDesc {
     uint32 height = 720;
     bool resizable = true;
     bool visible = true;
+};
+
+// 창 계층의 로그 카테고리다(Docs/Design/LoggingSystem.ko.md 13절). 창 생성 실패는 창을 여는
+// 호출자가 WindowCreateReport로 이 카테고리에 남긴다.
+inline constexpr LogCategory LogPlatformWindow{"Platform.Window"};
+
+// 창 생성 실패의 원인 기록이다(DeviceCreateReport와 같은 모양). 호출자 스택에 두고 Create에 넘긴다.
+// 힙을 쓰지 않으며 call은 실패한 OS 호출 이름(영어)이고 넘치면 자른다(truncated).
+//
+// 사용 예:
+//   platform::WindowCreateReport report;
+//   auto window = platform::Window::Create(allocator, desc, &report);
+//   if (!window) {
+//       Log::Error(LogPlatformWindow, "Window creation failed at {Call}: {OsError}", report.call,
+//                  report.osError);
+//   }
+struct WindowCreateReport {
+    // Create가 돌려준 오류와 같다(성공이면 None).
+    ErrorCode code = ErrorCode::None;
+    // 원본 OS 오류다(Windows GetLastError). 없으면 0이다.
+    int64 osError = 0;
+    // 실패한 OS 호출 이름이다(예: "CreateWindowExW").
+    char call[48]{};
+    bool truncated = false;
 };
 
 // 그래픽 backend가 swapchain·context를 만들 때 쓰는 OS 핸들이다. Windows: window = HWND,
@@ -48,8 +73,10 @@ struct NativeWindowHandle {
 class Window {
 public:
     // 창을 만든다. 크기 0은 InvalidArgument, 창 backend가 없는 플랫폼은 Unsupported, OS 실패는
-    // DependencyFailed다.
-    static Result<UniquePtr<Window>> Create(Allocator& allocator, const WindowDesc& desc) noexcept;
+    // DependencyFailed다. report가 null이 아니면 결과를 채운다(OS 실패면 실패한 호출과
+    // GetLastError). 실패 로그는 호출자가 남긴다.
+    static Result<UniquePtr<Window>> Create(Allocator& allocator, const WindowDesc& desc,
+                                            WindowCreateReport* report = nullptr) noexcept;
 
     virtual ~Window() = default;
 
