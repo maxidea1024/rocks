@@ -113,7 +113,7 @@ RenderCore는 Public 38,326줄·Private 63,918줄·Internal 1,239줄이다(`wc -
 | 작업 | `WorkerScheduler`(선행 작업·취소·Drain, 외부 이벤트 `WorkerTaskEvent`, `Core/Source/Runtime/Task/Public/Task/WorkerScheduler.h:93–149, 182–217`), `AsyncIoEvent`, `InlineExecutor`(동기 기준, `TaskScheduler.h:55–56`). 직렬 체인·ParallelFor·전용 스레드 lane 없음 | CP1·CP2 |
 | 할당기 | `StackAllocator`(단일 스레드 LIFO, `Core/Memory/StackAllocator.h:42`), `ArenaAllocator`(반환 안 된 할당이 있으면 Reset이 Busy, 프레임 일괄 무효화 없음, `ArenaAllocator.h:23–25`) | CP3 |
 | 설정 | 콘솔 변수·Config 계층 코드 없음(UnrealCoreFeatureAudit UE-C21·C29 **후속**). 계획 24.2절에 Config 우선순위만 있다 | CP4·CP8 |
-| 계측 | `ProfileScope`(한 스레드 `LogBuffer`에 기록, `Core/Diagnostics/ProfileScope.h:11`). 다중 스레드 trace·채널·GPU 상관 없음(UE-C23 **부분**) | CP5 |
+| 계측 | TraceCapture(다중 스레드 trace, [trace 설계](TraceSystem.ko.md)) TR1·TR2 구현: 채널·`CpuScope`·카운터·표지. 옛 `ProfileScope`는 지웠다. GPU 상관은 RB7(UE-C23 **부분**) | CP5 |
 | 리플렉션 | MetaSchema `TypeOf<T>()`(`Core/Source/Runtime/MetaSchema/Public/Meta/GeneratedType.h`), ObjectRuntime TypeRegistry. 객체 쪽 지연 회수 `BackendLease`(저장소 회수만 늦춘다. 주석에 "현재 실제 GPU/IO 작업과 연결되지는 않는다", `Core/Source/Runtime/ObjectRuntime/Public/Object/ObjectRefs.h:216–220`) | RB4(스키마), RB2(완료 통지) |
 | 그 밖 | `Delegate`·`MulticastDelegate`(`Core/Delegate.h:88,567`), JSON(`Core/Text/Json.h`), SHA-256, `Core/Hash.h`, Archive·Record, `Name`(`Core/Text/Name.h:22`, 엔진 전역 pool 미정) | CP7 |
 
@@ -127,7 +127,7 @@ ID는 이 문서가 붙인다. CP는 Core 선행, GX는 Graphics 확장, RB는 R
 | CP2 | 직렬 작업 체인·ParallelFor·작업 문맥 표지 | 미설계 | WorkerScheduler(구현) | RG3, RB3 일괄 생성 선택 | M | 4.3절 |
 | CP3 | 프레임 arena | 미설계 | Allocator(구현) | RG1, RB4(GLES `PerDraw`) | M | 4.3절 |
 | CP4 | 콘솔 설정(타입 있는 변수·명령·출처·렌더 snapshot) | 미설계, 별도 스펙 | CP8 | RB1 설정 snapshot, RG1 디버그 설정 | M | 12절 |
-| CP5 | 다중 스레드 CPU 구간 계측·카운터·GPU 상관 | 부분 | ProfileScope(구현) | RB7 | M | 13절 |
+| CP5 | 다중 스레드 CPU 구간 계측·카운터·GPU 상관 | 부분 | TraceCapture TR1·TR2(구현) | RB7 | M | 13절 |
 | CP6 | 엔진 종료 단계 hook(기존 `EngineSubsystem`·`EngineLoopHooks` 확장) | 미설계 | Engine(구현) | RB1 종료 순서 | S | 4.3절 |
 | CP7 | 엔진 전역 `Name` pool 결정 | 미결정 | Name(구현) | RB3 | S | 4.3절 |
 | CP8 | Config 계층(UE-C21) | 미설계, 별도 스펙 | — | CP4 | M | 12절 |
