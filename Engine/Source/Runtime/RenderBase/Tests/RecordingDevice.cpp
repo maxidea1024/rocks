@@ -616,6 +616,19 @@ void RecordingDevice::DrawIndexed(uint32 indexCount, uint32 instanceCount,
                                 (static_cast<uint64>(instanceCount) << 20) | firstIndex);
 }
 
+Result<void> RecordingDevice::CopyPassTarget(TextureHandle destination) noexcept {
+    if (!recording_) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (!textures_.IsValid(destination.slot)) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    Record(Op::CopyPassTarget, destination.slot.index);
+    return Result<void>::Success();
+}
+
 Result<uint64> RecordingDevice::WriteTimestamp() noexcept {
     if (!timestampsSupported_) {
         return Result<uint64>::Failure(ErrorCode::Unsupported);

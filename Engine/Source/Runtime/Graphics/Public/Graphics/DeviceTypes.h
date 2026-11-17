@@ -201,10 +201,23 @@ struct ShaderSource {
     StringView glsl;
 };
 
+// 삼각형 컬링이다(UE ERasterizerCullMode 대응). 앞면은 표시된 화면에서 반시계로 감긴 삼각형이다
+// (UE와 같다, ShaderSystem 7.2절 8항). 창·RenderTarget 어느 대상에 그려도 같은 삼각형이 같은 면으로
+// 판정되며, backend는 이 규약을 자기 API의 앞면·컬 설정으로 옮긴다(D3D12 FrontCounterClockwise,
+// OpenGL glFrontFace·glCullFace).
+enum class CullMode : uint8 {
+    // 컬링하지 않는다(양면).
+    None,
+    // 뒤면(화면에서 시계 방향)을 버린다. 일반 메시 그리기의 기본이다(UE CM_CW).
+    Back,
+    // 앞면(화면에서 반시계)을 버린다. 음수 행렬식 반전에 쓴다(UE CM_CCW).
+    Front
+};
+
 // 그리기 파이프라인 설정이다. 모든 파이프라인은 같은 고정 자원 배치를 쓴다: 그리기 상수
 // (DrawConstants, HLSL b0 / GLSL uniform uTransform·uColor)와 텍스처 하나(HLSL t0·s0 /
-// GLSL binding 0 uTexture). 샘플러는 묶은 텍스처의 TextureDesc::sampler를 따른다. 깊이·컬링은
-// 쓰지 않는다.
+// GLSL binding 0 uTexture). 샘플러는 묶은 텍스처의 TextureDesc::sampler를 따른다. 깊이는 쓰지
+// 않는다.
 //
 // 셰이더 입력 대조(RenderBase 10.4절): 정점 셰이더가 읽는 모든 location이 layout에 있어야 하고
 // 형식의 셰이더 타입 계열(VertexFormatShaderType)이 셰이더 입력 타입과 같아야 한다. 셰이더가 읽지
@@ -218,10 +231,20 @@ struct PipelineDesc {
     Format colorFormat = Format::RGBA8UnormSrgb;
     // 소스 알파로 섞는다(premultiplied가 아닌 일반 알파).
     bool alphaBlend = false;
+    // 버릴 면이다. 기본은 None이다(UE TStaticRasterizerState 기본 CM_None과 같고, 감김 순서를
+    // 정하지 않은 화면 채우기·시험 그리기가 그대로 보인다). 메시 그리기는 Back을 쓰고, 물체·view
+    // 행렬식이 음수면 Front 파이프라인으로 바꾼다(ShaderSystem 7.2절 8항).
+    CullMode cullMode = CullMode::None;
 };
 
-// 그리기마다 넘기는 상수다. transform은 열 우선(column-major) 4x4 행렬(Rocks Mat4 저장 순서
-// 그대로), color는 선형 RGBA다. 셰이더는 mul(transform, position)으로 쓴다.
+// 그리기마다 넘기는 상수다. color는 선형 RGBA다.
+//
+// transform은 행 벡터 규약(p' = p · M)의 4x4 행렬을 행 우선(row-major)으로 담는다: Core Mat4의 저장
+// 순서(m[row * 4 + column], 이동은 m[12..14]) 그대로이며 올릴 때 전치하지 않는다. 셰이더는
+// mul(float4(position, 1), transform)(GLSL은 vec4(position, 1) * uTransform)으로 쓰고, 장치가
+// 행렬을 행 우선으로 담는다(UE와 같다, ShaderSystem 7.2절 6항): D3D12는 HLSL을
+// D3DCOMPILE_PACK_MATRIX_ROW_MAJOR(FXC /Zpr)로 컴파일하고, OpenGL은 uniform을
+// glProgramUniformMatrix4fv(transpose = GL_TRUE)로 올린다.
 struct DrawConstants {
     float transform[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
     float color[4] = {1, 1, 1, 1};

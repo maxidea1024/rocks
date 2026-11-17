@@ -179,6 +179,8 @@ struct GlFunctions {
     void(APIENTRY* NamedFramebufferTexture)(GLuint, GLenum, GLuint, GLint) = nullptr;
     GLenum(APIENTRY* CheckNamedFramebufferStatus)(GLuint, GLenum) = nullptr;
     void(APIENTRY* BindFramebuffer)(GLenum, GLuint) = nullptr;
+    void(APIENTRY* BlitNamedFramebuffer)(GLuint, GLuint, GLint, GLint, GLint, GLint, GLint, GLint,
+                                         GLint, GLint, GLbitfield, GLenum) = nullptr;
     void(APIENTRY* BlendFuncSeparate)(GLenum, GLenum, GLenum, GLenum) = nullptr;
     void(APIENTRY* ClipControl)(GLenum, GLenum) = nullptr;
     void(APIENTRY* DebugMessageCallback)(GLDEBUGPROC, const void*) = nullptr;
@@ -256,6 +258,7 @@ bool LoadFunctions(GlFunctions& gl) noexcept {
            Bind(gl.NamedFramebufferTexture, "glNamedFramebufferTexture") &&
            Bind(gl.CheckNamedFramebufferStatus, "glCheckNamedFramebufferStatus") &&
            Bind(gl.BindFramebuffer, "glBindFramebuffer") &&
+           Bind(gl.BlitNamedFramebuffer, "glBlitNamedFramebuffer") &&
            Bind(gl.BlendFuncSeparate, "glBlendFuncSeparate") &&
            Bind(gl.ClipControl, "glClipControl") &&
            Bind(gl.DebugMessageCallback, "glDebugMessageCallback") &&
@@ -415,6 +418,16 @@ GLint WrapMode(AddressMode mode) noexcept {
     return GL_REPEAT;
 }
 
+// clip 원점별 앞면 감김이다(Graphics 규약: 표시된 화면에서 반시계가 앞면). 두 원점 모두 GL_CCW다:
+// GL_UPPER_LEFT는 window y를 뒤집지만 ARB_clip_control이 면 판정의 넓이 부호도 함께 뒤집으므로
+// 감김은 NDC 기준 그대로이고, 창(GL_LOWER_LEFT)과 RenderTarget(GL_UPPER_LEFT) 모두 화면 반시계가
+// 앞면이 된다(UE도 clip control에서 기본 GL_CCW에 CM_CW → GL_BACK, OpenGLState.cpp:50). Sandbox
+// 컬링 시험이 두 경로를 픽셀로 대조한다(창을 GL_CW로 두면 창 경로가 offscreen과 달라진다).
+GLenum FrontFaceFor(GLenum origin) noexcept {
+    (void)origin;
+    return GL_CCW;
+}
+
 GLenum InternalFormat(Format format) noexcept {
     switch (format) {
     case Format::RGBA8Unorm:
@@ -466,6 +479,7 @@ struct PipelineRecord {
     uint32 strides[MaxVertexStreams] = {};
     uint32 streamMask = 0;
     bool alphaBlend = false;
+    CullMode cullMode = CullMode::None;
 };
 
 struct SwapChainRecord {
@@ -1109,6 +1123,7 @@ public:
         record.transformLocation = gl_.GetUniformLocation(record.program, "uTransform");
         record.colorLocation = gl_.GetUniformLocation(record.program, "uColor");
         record.alphaBlend = desc.alphaBlend;
+        record.cullMode = desc.cullMode;
         for (usize index = 0; index < desc.layout.streams.Size(); ++index) {
             record.strides[index] = desc.layout.streams[index].stride;
             record.streamMask |= 1u << index;
@@ -1183,6 +1198,7 @@ public:
             width = static_cast<uint32>(client.right - client.left);
             height = static_cast<uint32>(client.bottom - client.top);
         }
+        pass_ = {0, width, height, Format::RGBA8UnormSrgb, {}};
         StartPass(width, height, clear);
         return Result<CommandContext*>::Success(this);
     }
@@ -1213,6 +1229,7 @@ public:
         // 결과 이 텍스처를 UV (0,0) = 좌상단으로 샘플링해도, 첫 행부터 읽어도 D3D12와 같다.
         SetClipOrigin(GL_UPPER_LEFT_VALUE);
         presentTarget_ = {};
+        pass_ = {record->framebuffer, record->width, record->height, record->format, handle};
         StartPass(record->width, record->height, clear);
         return Result<CommandContext*>::Success(this);
     }
@@ -1735,6 +1752,7 @@ private:
     void SetClipOrigin(GLenum origin) noexcept {
         if (clipOrigin_ != origin) {
             gl_.ClipControl(origin, GL_ZERO_TO_ONE_VALUE);
+            glFrontFace(FrontFaceFor(origin));
             clipOrigin_ = origin;
         }
     }
@@ -2013,6 +2031,13 @@ private:
         } else {
             glDisable(GL_BLEND);
         }
+        // 앞면 감김(glFrontFace)은 패스 대상의 clip 원점에 맞춰 SetClipOrigin이 정한다.
+        if (pipeline->cullMode == CullMode::None) {
+            glDisable(GL_CULL_FACE);
+        } else {
+            glEnable(GL_CULL_FACE);
+            glCullFace(pipeline->cullMode == CullMode::Back ? GL_BACK : GL_FRONT);
+        }
         constantsDirty_ = true;
         // 앞서 묶은 정점·index 버퍼를 새 파이프라인의 정점 배열·간격으로 다시 묶는다.
         for (uint32 stream = 0; stream < MaxVertexStreams; ++stream) {
@@ -2057,12 +2082,43 @@ private:
 
     void ApplyConstants(const PipelineRecord& pipeline) noexcept {
         if (constantsDirty_) {
-            // Rocks 행렬은 열 우선 저장이며 GLSL mat4도 열 우선이므로 전치하지 않는다.
-            gl_.ProgramUniformMatrix4fv(pipeline.program, pipeline.transformLocation, 1, GL_FALSE,
+            // transform은 행 우선 저장이다(DrawConstants). 기본 블록 uniform에는
+            // layout(row_major)를 쓸 수 없으므로(GLSL 4.50 4.4.5절: 행렬 배치 한정자는
+            // uniform·buffer block 전용) transpose = GL_TRUE로 행 우선으로 담는다. 셰이더는
+            // vec4(position, 1) * uTransform이다.
+            gl_.ProgramUniformMatrix4fv(pipeline.program, pipeline.transformLocation, 1, GL_TRUE,
                                         constants_.transform);
             gl_.ProgramUniform4fv(pipeline.program, pipeline.colorLocation, 1, constants_.color);
             constantsDirty_ = false;
         }
+    }
+
+    Result<void> CopyPassTarget(TextureHandle destination) noexcept override {
+        if (!recording_) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+        const TextureRecord* record = textures_.Find(destination.slot);
+        if (record == nullptr) {
+            return Result<void>::Failure(ErrorCode::StaleHandle);
+        }
+        if (record->framebuffer == 0 || destination == pass_.texture ||
+            record->width != pass_.width || record->height != pass_.height ||
+            record->format != pass_.format) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        // 창(기본 framebuffer)은 저장소 첫 행이 화면 아래쪽이고 RenderTarget은
+        // 위쪽이므로(GL_UPPER_LEFT 패스) 창에서 복사할 때만 위아래를 바꾼다. sRGB 변환 없이 byte를
+        // 그대로 옮긴다.
+        const GLint width = static_cast<GLint>(pass_.width);
+        const GLint height = static_cast<GLint>(pass_.height);
+        const bool window = pass_.framebuffer == 0;
+        glDisable(GL_FRAMEBUFFER_SRGB_VALUE);
+        gl_.BlitNamedFramebuffer(pass_.framebuffer, record->framebuffer, 0, 0, width, height, 0,
+                                 window ? height : 0, width, window ? 0 : height,
+                                 GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        glEnable(GL_FRAMEBUFFER_SRGB_VALUE);
+        return Result<void>::Success();
     }
 
     Result<uint64> WriteTimestamp() noexcept override {
@@ -2163,6 +2219,15 @@ private:
     int pixelFormat_ = 0;
     PIXELFORMATDESCRIPTOR pixelDescriptor_ = {};
     GLenum clipOrigin_ = 0;
+    // 기록 중인 패스의 대상이다(CopyPassTarget). 창이면 framebuffer 0·texture null이다.
+    struct PassTarget {
+        GLuint framebuffer = 0;
+        uint32 width = 0;
+        uint32 height = 0;
+        Format format = Format::Unknown;
+        TextureHandle texture;
+    };
+    PassTarget pass_;
     // 이방성 필터 최대 배율이다. 지원하지 않으면 0이다.
     GLfloat maxAnisotropy_ = 0.0f;
     TextureHandle white_;

@@ -168,6 +168,8 @@ bool CompileWithDxc(const shader::DxcFunctions& dxc, const ShaderInput& input, D
     arguments[count++] = entry;
     arguments[count++] = L"-T";
     arguments[count++] = profile;
+    // 행렬은 행 우선으로 담는다(ShaderSystem 7.2절 6항, UE D3DShaderCompilerDXC.cpp:189–190).
+    arguments[count++] = L"-Zpr";
     if (target == DxcTarget::Spirv) {
         arguments[count++] = L"-spirv";
         arguments[count++] = L"-fspv-target-env=vulkan1.1";
@@ -310,9 +312,9 @@ bool CompileWithFxc(const shader::FxcFunctions& fxc, StringView source, const ch
 
     ID3DBlob* object = nullptr;
     ID3DBlob* errors = nullptr;
-    const HRESULT compiled =
-        compile(source.Data(), source.ByteCount(), name, nullptr, nullptr, entry, profile,
-                D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &object, &errors);
+    const HRESULT compiled = compile(
+        source.Data(), source.ByteCount(), name, nullptr, nullptr, entry, profile,
+        D3DCOMPILE_OPTIMIZATION_LEVEL3 | D3DCOMPILE_PACK_MATRIX_ROW_MAJOR, 0, &object, &errors);
     if (errors != nullptr) {
         // FXC 문구 blob은 끝 NUL을 크기에 넣는다.
         const char* text = static_cast<const char*>(errors->GetBufferPointer());

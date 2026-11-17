@@ -45,6 +45,22 @@ public:
     virtual void DrawIndexed(uint32 indexCount, uint32 instanceCount = 1,
                              uint32 firstIndex = 0) noexcept = 0;
 
+    // 지금까지 그린 패스 대상(스왑체인 백버퍼 또는 BeginOffscreen의 RenderTarget)을 destination
+    // RenderTarget에 그대로 복사한다. 복사 결과는 이미지 위쪽이 첫 행인 배치라 ReadPixels로 읽으면
+    // offscreen 패스와 같은 배치다. 창 출력 확인(시험)·화면 캡처용이며, 복사 뒤에도 같은 패스에
+    // 계속 그릴 수 있다.
+    //
+    // 사용 예(창에 그린 프레임 읽기):
+    //   auto frame = device.BeginFrame(swapChain, clear);
+    //   ... 그리기 ...
+    //   frame.Value()->CopyPassTarget(capture);   // capture: 창과 같은 크기의 RenderTarget
+    //   device.EndFrame();
+    //   device.ReadPixels(capture, pixels);
+    //
+    // 실패: stale handle StaleHandle, RenderTarget이 아니거나 크기·형식이 패스 대상과 다르거나
+    // 패스 대상 자신이면 InvalidArgument, 기록 중이 아니면 InvalidArgument.
+    virtual Result<void> CopyPassTarget(TextureHandle destination) noexcept = 0;
+
     // --- GPU 계측(RenderBase 13.2절, GX9) ---
 
     // 이 지점(앞 명령이 끝난 GPU 시각)의 timestamp를 기록하고 결과를 맞춰 볼 번호를 돌려준다. 값은
