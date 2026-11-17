@@ -1,6 +1,6 @@
 # 렌더러(Renderer) 설계
 
-기준일: 2026-11-18, 개정 1(초안). UE 5.8 Renderer 모듈이 맡는 일 가운데 **렌더 경로**(Forward+·Deferred)와 그 위에 올라가는 그림자·투명·하늘·안개·후처리의 구조, GI 두 축과 PathTracing 모드의 연결점을 Rocks에 세우는 설계 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-18, 개정 2(초안). UE 5.8 Renderer 모듈이 맡는 일 가운데 **렌더 경로**(Forward+·Deferred)와 그 위에 올라가는 그림자·투명·하늘·안개·후처리의 구조, GI 두 축과 PathTracing 모드의 연결점을 Rocks에 세우는 설계 스펙이다. 범위는 다음과 같다.
 - 장면 표현과 게임 → 렌더 전달, view와 가시성
 - 공통 frame graph, Forward+와 Deferred가 갈라지는 곳
 - GBuffer layout, light grid, 조명 평가, 그림자, 투명·하늘·안개, 후처리·업스케일 연결
@@ -860,7 +860,7 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 
 ## 19. 결정 필요 사항과 미확인 목록
 
-### 19.1 결정 필요 사항
+### 19.1 결정 사항
 
 | ID | 결정 | 선택지와 권장 | 기한 |
 |---|---|---|---|
@@ -877,6 +877,8 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 | RN11 | 모듈·이름 | 2절 이름과 3.2절 배치(`RenderData`·`RendererShaders`·`Renderer` 셋). 대안: `RendererShaders`를 두지 않고 쿠커가 `Renderer`를 링크(Host 쿠커에 장치 모듈 의존이 생긴다) | 문서 확정 |
 | RN12 | Forward+ 보조 출력 배치 | 8.4절 roughness 자리(두 번째 `R8Unorm` 타깃 또는 법선 octahedral + roughness 한 타깃). 권장안은 RS10 측정 뒤 | RS10 전 |
 | RN13 | 단계당 SRV 16 상한 대응(7.4절) | (가) 권장: 자원 합치기(grid 버퍼 하나·shadow atlas 하나·atlas 묶기)로 모든 형식에 한 원문을 유지하고, 머티리얼 텍스처 상한을 (pass, 퍼뮤테이션)별 `16 − 렌더러 합계`로 공개해 쿠킹에서 검사. 선택 자원을 많이 켠 조합은 머티리얼 텍스처가 1–3개만 남는다. (나) 16-SRV 형식(GLES·`VULKAN_SM5`)용 pass 셰이더 타입을 따로 두어 데스크톱 D3D·Metal은 128을 쓴다(셰이더 타입 수 증가). (다) 공유 샘플러·bindless(셰이더 시스템 7.2절 9·10항 후속)를 앞당긴다 | RS1 전 |
+
+**결정(2026-11-18, 사용자 "결정사항들은 권장안대로 하면됨").** RN1–RN11·RN13은 각 행의 권장안으로 확정한다. RN12는 권장안이 정해지지 않은 항목이라 RS10에서 정한다. RN5(번호표 소유)는 머티리얼 스펙과의 교차 검증에서 경계를 맞춘다.
 
 ### 19.2 미확인 목록
 
@@ -900,3 +902,4 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 ## 20. 개정 이력
 
 - 개정 1(2026-11-18): 초안. 사용자 지시 "스펙 지금 시작해"에 따라 작성했다. UE 5.8.4 Renderer 네 갈래 조사(프레임 흐름·desktop forward·light grid·모바일 선택 / GBuffer·Substrate·shading model·deferred 조명·그림자·정적 조명 / 장면 표현·그리기 명령·GPU Scene·view·가시성·투명·하늘·안개·후처리 / GI·RT·path tracing 진입점)를 종합하고, 핵심 근거 약 40곳을 원문 줄로 다시 대조했다. 사용자 결정(렌더 경로 Forward+·Deferred 둘, GI 두 축, PathTracing 별도 모드, UE 좌표·행렬, Rocks 이름, 레거시 제외, 5개 backend와 지원표)을 1절에 반영했다. 머티리얼 쪽 계약은 동시에 작성 중인 머티리얼 시스템 스펙과 겹치지 않게 14.6절 경계표로 나눴다. 독립 리뷰 1건(UE 인용 약 75곳 대조, 차단 2·중요 11·사소 다수)을 반영했다: GLES image 형식에 맞춰 grid를 `R32Uint` 하나로(8.1절), 큰 월드 위치를 GPU Scene 상위·하위 + view 이동 보정으로(5.1절), light grid 셀 상한 없음과 넘침 보수 대체(8.1절), 그림자 깊이를 UE와 같은 보통 Z·`D16Unorm`으로(9.2절), 단계당 SRV 16 예산표(7.4절, 결정 RN13), 공유 상수와 자원 묶음 분리(15.2절), 간접 draw의 인스턴스 offset(15.2절), 조명 pass의 깊이·스텐실 attachment 제거(GLES feedback loop, 7.3절), Forward+ DBuffer decal(6.2절), skinned 단계 RS12, 텍스처 스트리밍 요구 RQ21, 인용 경로·줄 번호 정정, PostChain ID를 PC로 변경.
+- 개정 2(2026-11-18): 사용자 지시 "결정사항들은 권장안대로 하면됨"으로 RN1–RN11·RN13을 권장안으로 확정했다(19.1절). RN12는 RS10에서 정하고, RN5는 머티리얼 스펙과의 교차 검증에서 경계를 맞춘다.
