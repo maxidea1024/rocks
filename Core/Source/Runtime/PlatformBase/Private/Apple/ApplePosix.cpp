@@ -4,6 +4,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <mach/mach_time.h>
 #include <stdio.h>
 #include <sys/mman.h>
 #include <time.h>
@@ -46,6 +47,32 @@ uint64 PosixThreadId() noexcept {
         Fatal("pthread_threadid_np failed");
     }
     return static_cast<uint64>(identifier);
+}
+
+// mach_absolute_time은 절전 중 멈춘다(UE FPlatformTime::Cycles64와 같은 원천). 절전을 포함하는
+// mach_continuous_time은 쓰지 않는다.
+uint64 PosixMonotonicTicks() noexcept {
+    return static_cast<uint64>(mach_absolute_time());
+}
+
+// tick × numer / denom = ns이므로 초당 tick은 10^9 × denom / numer다. Apple Silicon(125/3 →
+// 24MHz)과 Intel(1/1 → 1GHz)은 나누어떨어진다. 나누어떨어지지 않는 timebase는 반올림한다.
+uint64 PosixMonotonicTickFrequency() noexcept {
+    mach_timebase_info_data_t timebase{};
+    if (mach_timebase_info(&timebase) != KERN_SUCCESS || timebase.numer == 0 ||
+        timebase.denom == 0) {
+        Fatal("mach_timebase_info failed");
+    }
+
+    constexpr uint64 NanosecondsPerSecond = 1000000000;
+    const uint64 scaled = NanosecondsPerSecond * static_cast<uint64>(timebase.denom);
+    const uint64 frequency =
+        (scaled + static_cast<uint64>(timebase.numer) / 2) / static_cast<uint64>(timebase.numer);
+    if (frequency == 0) {
+        Fatal("mach_timebase_info frequency is out of range");
+    }
+
+    return frequency;
 }
 
 void PosixInitializeCondition(pthread_cond_t* condition) noexcept {

@@ -67,6 +67,7 @@ Engine / Tools / Game         프로젝트·설치 구성과 상위 시스템
 | 스레드 | `Private/Common/Thread.cpp`의 공통 수명·join 상태기계, 플랫폼별 `Concurrency.cpp`의 native thread 생성·join | 종료·TLS·자기 join·실패·동시 제어를 유지하고 각 OS에서 실행 검증한다. |
 | 동기화 | `Private/Common/Sync.cpp`의 event·semaphore와 플랫폼별 mutex·condition variable | timeout·spurious wake·소유권·파괴 조건을 보존한다. RWLock 등은 별도 후속 항목이다. |
 | 일반 메모리·시계·Fatal | 플랫폼별 `Platform.cpp`의 할당·mutex·시계·thread ID·치명 오류 경로 | 기능별 분리와 Generic/플랫폼 경계를 검토한다. OS 동작이 필요한 부분을 임의 Generic 성공으로 대체하지 않는다. |
+| 단조 tick | `MonotonicTicks`·`MonotonicTickFrequency`(2026-11-17, [trace](TraceSystem.ko.md) 4.4절). 원천은 Windows QPC, Apple `mach_absolute_time`(POSIX hook), Android `CLOCK_MONOTONIC` ns다. `MonotonicNanoseconds`는 공통 `Private/Common/Clock.cpp`가 같은 tick을 정수 소수 버림으로 바꾼 값이다 | 두 API의 일관성 시험(`ClockTests.cpp`)은 Windows에서 실행했다. Apple은 `MonotonicNanoseconds` 원천이 `CLOCK_MONOTONIC`(절전 포함)에서 `mach_absolute_time`(절전 제외)으로 바뀌었고, macOS 실기기 빌드·실행은 아직 하지 않았다. |
 | 가상 메모리 | 공통 `VirtualMemoryRegion`의 소유·범위·poison 상태와 플랫폼별 reserve/commit/decommit/release backend | Windows와 macOS의 메모리 보장 차이를 유지한다. OS 실패 주입과 macOS 실기기 검증은 후속이다. |
 | 빌드 | `Foundation.Build.cs`가 Common과 지정된 플랫폼 소스를 선택한다. 현재 빌드 컨텍스트의 플랫폼 선택은 알려지지 않은 값을 명시적으로 거부한다. | 각 필수 기능의 구현이 정확히 하나 선택되는지, 신규 플랫폼과 target/architecture를 잘못 다른 플랫폼으로 처리하지 않는지 검증한다. |
 

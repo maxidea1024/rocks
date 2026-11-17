@@ -56,6 +56,28 @@ uint64 PosixThreadId() noexcept {
     return static_cast<uint64>(gettid());
 }
 
+// CLOCK_MONOTONIC의 ns를 그대로 tick으로 쓴다(주파수 10^9). 초를 ns로 바꾸기 전에 상한을 검사해
+// wrap된 값을 반환하지 않는다.
+uint64 PosixMonotonicTicks() noexcept {
+    timespec time{};
+    if (clock_gettime(CLOCK_MONOTONIC, &time) != 0 || time.tv_sec < 0) {
+        Fatal("clock_gettime failed");
+    }
+
+    constexpr uint64 NanosecondsPerSecond = 1000000000;
+    const uint64 seconds = static_cast<uint64>(time.tv_sec);
+    if (seconds >
+        (NumericLimits<uint64>::Max() - (NanosecondsPerSecond - 1)) / NanosecondsPerSecond) {
+        Fatal("Monotonic clock overflow");
+    }
+
+    return seconds * NanosecondsPerSecond + static_cast<uint64>(time.tv_nsec);
+}
+
+uint64 PosixMonotonicTickFrequency() noexcept {
+    return 1000000000;
+}
+
 // CLOCK_MONOTONIC 기준 조건 변수다. 시스템 시각 변경이 시한 대기에 영향을 주지 않는다.
 void PosixInitializeCondition(pthread_cond_t* condition) noexcept {
     pthread_condattr_t attributes;
