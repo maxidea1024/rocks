@@ -1,5 +1,6 @@
 #include "RecordingDevice.h"
 
+#include <Platform/Clock.h>
 #include <Platform/Fatal.h>
 
 namespace rocks::render::testing {
@@ -674,10 +675,20 @@ Result<ClockCalibration> RecordingDevice::CalibrateClocks() noexcept {
         return Result<ClockCalibration>::Failure(ErrorCode::Unsupported);
     }
 
+    // 시험이 정한 쌍이 있으면 그것을, 없으면 지금 GPU 시계와 CPU tick의 쌍을 준다.
     ClockCalibration calibration;
-    calibration.gpuTicks = tickClock_;
-    calibration.cpuNanoseconds = tickClock_;
-    calibration.gpuFrequency = TimestampFrequency;
+    if (fixedCalibration_.gpuFrequency != 0) {
+        calibration = fixedCalibration_;
+    } else {
+        calibration.gpuTicks = tickClock_;
+        calibration.cpuTicks = platform::MonotonicTicks();
+        calibration.cpuNanoseconds =
+            TicksToNanoseconds(calibration.cpuTicks, platform::MonotonicTickFrequency());
+        calibration.gpuFrequency = TimestampFrequency;
+        calibration.uncertaintyNanoseconds = CalibrationUncertaintyNanoseconds;
+    }
+
+    ++calibrations_;
     return Result<ClockCalibration>::Success(calibration);
 }
 

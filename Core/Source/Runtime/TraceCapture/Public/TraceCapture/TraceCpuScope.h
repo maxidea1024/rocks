@@ -40,6 +40,11 @@ private:
     uint64 cache_ = 0;
 };
 
+// 정적 이름의 현재 세션 이름 id를 돌려준다(없으면 이름 표에 넣고 이름 정의를 쓴다). 세션이 없거나
+// 이름 표가 가득 차면 0이다. CPU 구간 밖에서 같은 이름 표를 쓰는 기록(GPU 구간 등)이 쓴다. 어느
+// 스레드에서나 부를 수 있다.
+uint32 TraceResolveScopeName(TraceScopeName& name) noexcept;
+
 namespace detail {
 
 // CpuScope의 느린 경로다. 기록하면 세션 serial을, 기록하지 않았으면 0을 돌려준다.
