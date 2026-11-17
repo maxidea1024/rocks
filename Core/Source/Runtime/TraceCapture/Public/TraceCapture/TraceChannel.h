@@ -18,7 +18,7 @@ struct TraceChannelAccess;
 //
 // 사용 예:
 //   // 모듈 cpp의 정적 저장소(상수 초기화)
-//   TraceChannel FrameChannel{"frame", "프레임 경계"};
+//   TraceChannel FrameChannel{"frame", "Frame boundaries"};
 //   // 모듈 등록 함수
 //   session.RegisterChannel(FrameChannel, true);
 //   // 기록 지점: 꺼져 있으면 relaxed 읽기와 분기 하나로 끝난다

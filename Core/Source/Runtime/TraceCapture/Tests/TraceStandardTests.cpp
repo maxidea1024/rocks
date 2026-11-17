@@ -251,7 +251,7 @@ TEST(TraceScopeNameIdsConvergeAcrossThreads) {
 
 namespace {
 
-TraceChannel FillerChannel{"test.filler", "풀을 채우는 시험 기록"};
+TraceChannel FillerChannel{"test.filler", "Records that fill the pool"};
 
 struct FillerEvent {
     uint8 bytes[64];
