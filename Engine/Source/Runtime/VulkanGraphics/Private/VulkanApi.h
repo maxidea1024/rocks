@@ -30,6 +30,8 @@ namespace rocks::graphics::vulkan {
     X(vkGetPhysicalDeviceQueueFamilyProperties)                                                    \
     X(vkGetPhysicalDeviceMemoryProperties)                                                         \
     X(vkGetPhysicalDeviceFormatProperties)                                                         \
+    X(vkGetPhysicalDeviceImageFormatProperties)                                                    \
+    X(vkGetPhysicalDeviceFeatures2)                                                                \
     X(vkEnumerateDeviceExtensionProperties)                                                        \
     X(vkCreateDevice)                                                                              \
     X(vkGetDeviceProcAddr)

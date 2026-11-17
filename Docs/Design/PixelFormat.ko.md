@@ -891,6 +891,7 @@ D3D12의 능력 없음 26개는 DXGI 형식이 없는 ETC2·EAC 6, ASTC 15, `R8U
 | backend | 상태 | 위치 |
 |---|---|---|
 | D3D11 | **구현** | `D3D11Graphics/Private/Win64/D3D11PixelFormats.{h,cpp}`(대응 표·능력 질의·D3D11 메모리 배치 변환), 생성·view·readback은 `D3D11Resources.cpp`·`D3D11Upload.cpp` |
+| Vulkan | **구현** | `VulkanGraphics/Private/VulkanFormats.{h,cpp}`(대응 표·plane aspect·view 형식), 능력 질의·생성·view는 `VulkanResources.cpp`, 업로드·readback은 `VulkanUpload.cpp`, 기능 활성은 `VulkanDevice.cpp` |
 
 **D3D11(2026-11-18).**
 - 대응 표는 D3D12와 같은 DXGI 표다(8.4절). D3D12 표와 같은 행을 D3D11 모듈에 두었고, D3D 공용 도우미 모듈로 합치는 것은 후속이다(`D3D11Common.h` 주석의 기존 결정과 같다). `RGB9E5Ufloat`도 대응한다.
@@ -903,6 +904,18 @@ D3D12의 능력 없음 26개는 DXGI 형식이 없는 ETC2·EAC 6, ASTC 15, `R8U
 - `CreateTextureView`: 깊이·스텐실은 view 형식(`R24_UNORM_X8_TYPELESS`·`X24_TYPELESS_G8_UINT` 등)으로, 비디오는 `CreateShaderResourceView1`의 `PlaneSlice`로 plane을 고른다. view는 원 텍스처 COM 참조를 쥐므로 원 텍스처를 먼저 놓아도 산다. D3D11에는 장치 상태 추적이 없어 D3D12의 보류 Retire가 필요 없다.
 - NV12·P010은 D3D11에서도 생성·plane 업로드·readback·Y/UV view가 된다(UE D3D11은 SRV를 만들지 않는다, 4.8절).
 - 검증: Sandbox `--self-test`에서 D3D11·D3D11 WARP 모두 Sampled 60·RenderTarget 38/42·DepthStencil 5·능력 없음 26, "능력 ⇔ 생성"·바이트 왕복·view 샘플 실패 0, 검증 계층 오류 0.
+
+**Vulkan(2026-11-18).**
+- 대응 표는 8.5절과 같다. 형식마다 `TextureFormatInfo`(이미지 형식·aspect·성분 대응·비디오 plane 형식·MUTABLE 필요 여부) 한 행이다. 주의점 반영: `BC1Unorm`은 `BC1_RGBA_UNORM_BLOCK`, `RG8Snorm`은 `R8G8_SNORM`, `A8Unorm`은 `R8_UNORM` + (0,0,0,R), `RGB9E5Ufloat`는 `E5B9G9R9_UFLOAT_PACK32`.
+- 능력 질의(7절 Vulkan 열): optimal tiling 기능 bit에 더해, `CreateTexture`와 같은 usage·flags로 `vkGetPhysicalDeviceImageFormatProperties`가 성공해야 `Sampled`·`RenderTarget`을 준다(기능 bit만으로는 생성이 보장되지 않는다). `Mipmaps`는 `maxMipLevels > 1`, `Texture3D`·`TextureCube`는 그 차원(cube는 `CUBE_COMPATIBLE`, 층 6 이상) 질의 성공, `Gather`는 `shaderImageGatherExtended`(UE와 같다), storage·texel buffer는 기능 bit를 옮긴다. `Multisample`은 D3D와 같이 GX2로 미룬다. 성분 대응이 항등이 아닌 형식(`A8Unorm`)은 렌더 타깃·storage·texel buffer 능력을 주지 않는다.
+- 장치 기능: `textureCompressionBC`·`ETC2`·`ASTC_LDR`는 지원하면 켠다. ASTC HDR(`*_SFLOAT_BLOCK`)은 `VK_EXT_texture_compression_astc_hdr` 확장과 그 기능을 켠 장치에서만 질의·공개한다(인스턴스 API 1.1이라 1.3 core 기능은 쓰지 않는다. 확장 없이 질의하면 검증 계층 `VUID-VkImageCreateInfo-format-parameter`). 형식 능력은 켠 기능에 따라 달라지므로 논리 장치를 만든 뒤 질의한다.
+- 깊이·스텐실: 이미지 usage에 늘 `DEPTH_STENCIL_ATTACHMENT`를 넣고, barrier는 이미지 전체 aspect(DEPTH|STENCIL)로, 복사는 plane마다 aspect 하나(D24 4바이트·D32F 4바이트·스텐실 1바이트, Rocks plane 배치와 같다)로 한다. 기본 view는 깊이 aspect, 스텐실 view는 stencil aspect + mapping (R,R,0,1)로 값을 G에서 읽는다(10절).
+- 비디오: `G8_B8R8_2PLANE_420_UNORM`·`G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16` multi-planar 이미지(`MUTABLE_FORMAT`)에 plane view(`R8`·`R8G8`, `R10X6`·`R10X6G10X6`)를 만든다. Y′CbCr 변환 객체는 만들지 않지만 multi-planar 이미지 생성 조건인 `samplerYcbcrConversion` 기능(Vulkan 1.1 core 기능, 선택)을 켜야 하므로, 그 기능이 없는 장치에서는 NV12·P010이 능력 없음이다. P010의 하위 6비트는 Vulkan 형식이 정의하지 않으므로 self-test는 그 비트를 0으로 둔 데이터로 왕복을 확인한다.
+- 업로드: 원본(mip마다 plane을 잇는 배치)을 (mip, plane) 구역마다 복사 원본 정렬(texel 크기와 4의 최소공배수, 깊이·스텐실은 4의 배수 규칙)에 맞춰 ring에 옮긴다. `UploadTextureFromStaging`은 정렬이 맞는 단일 plane만 staging에서 바로 복사하고 나머지는 ring을 거친다.
+- `ReadTexture`: mip 하나의 plane 하나를 host 버퍼로 복사하고 fence를 기다린다. 업로드 기록에 쌓으므로 앞선 업로드 뒤에 실행되고 상태 중립이다(제출한 상태로 되돌린다, GX5).
+- `CreateTextureView`: sRGB 짝(같은 이미지, MUTABLE), 깊이·스텐실 plane, 비디오 plane view를 만든다. view 기록은 이미지·메모리를 쥐지 않고 상태 추적은 원 기록이 한다(전이·바인딩이 원 기록으로 간다). 원 텍스처를 먼저 Retire하면 원 기록은 남아 있다가 마지막 view를 놓을 때 함께 놓인다(D3D12와 같은 보류 Retire).
+- 렌더 파이프라인: `alphaBlend`이면 색 형식에 `Blendable`도 요구한다(D3D와 같다).
+- 검증: Sandbox `--self-test`에서 NVIDIA GTX 1060은 Sampled 58·RenderTarget 37·DepthStencil 5·능력 없음 24, lavapipe(llvmpipe)는 Sampled 60·RenderTarget 40·DepthStencil 5·능력 없음 23, 둘 다 "능력 ⇔ 생성"·바이트 왕복·view 샘플 실패 0, 검증 계층 오류 0(의도한 형식 불일치 탐지 시험 제외). D3D12와 수가 다른 것은 장치 차이다(예: GTX 1060은 `RGB32*`를 optimal tiling으로 샘플하지 못하고 `R8UnormSrgb`는 샘플한다). "능력 없음"은 능력 bit가 하나도 없는 형식 수다(샘플할 수 없어도 storage·texel buffer bit가 있는 형식은 들지 않는다).
 
 ## 15. A0-G와의 분담
 
@@ -953,4 +966,4 @@ D3D12의 능력 없음 26개는 DXGI 형식이 없는 ETC2·EAC 6, ASTC 15, `R8U
 - 개정 1(2026-11-17): 초안. UE 5.8.4 `EPixelFormat` 94개 값 전체, 정보 표·능력 플래그·판정 위치, D3D12·D3D11·Vulkan·OpenGL·Metal 형식 표, sRGB·깊이·스텐실·비디오 처리, 쿠킹 대상 위치를 조사하였다. OpenGL ES 3.2 사양서 Table 8.10·8.11·8.17·8.19·8.26과 NDK 헤더로 GLES 대응을 확인하였다. 사용자 지시 "PixelFormat으로", "언리얼에서 지원하는거 full로 지원", "시간이 걸리더라도 제대로해"에 따라 형식마다 근거를 달고 확인하지 못한 것은 미확인으로 남겼다.
 - 개정 2(2026-11-17): 사용자 결정 반영. PX1 (가) sRGB 별도 형식, PX2 계열별 번호 구간, PX3 비디오 형식은 D3D12 생성까지 지금 구현(권장안이던 "생성은 미디어 단계까지 계약"이 아님). 1·11·16절과 PF6 행을 고쳤다.
 - 개정 3(2026-11-17): PF2(D3D12)·PF3 틀·PF6(D3D12) 구현과 스펙 차이를 14.1절에 기록하였다. 깊이·스텐실 이미지 크기를 plane 합으로 바꾸었고, `TextureUsage::DepthStencil`·`CreateTextureView`·`ReadTexture`·`GetPixelFormatCaps`를 Graphics 계약에 더하였다.
-- 개정 4(2026-11-18): PF4 진행. D3D11 대응 표·능력 질의·깊이·스텐실·비디오·view·readback(14.2절).
+- 개정 4(2026-11-18): PF4 진행. D3D11·Vulkan 대응 표·능력 질의·깊이·스텐실·비디오·view·readback(14.2절).

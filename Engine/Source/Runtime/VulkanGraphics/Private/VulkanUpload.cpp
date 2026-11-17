@@ -1,4 +1,5 @@
 #include "VulkanDeviceImpl.h"
+#include "VulkanFormats.h"
 
 #include <Platform/Memory.h>
 
@@ -26,6 +27,33 @@ void GlobalBarrier(const Functions& functions, VkCommandBuffer buffer, VkPipelin
     barrier.srcAccessMask = fromAccess;
     barrier.dstAccessMask = toAccess;
     functions.vkCmdPipelineBarrier(buffer, from, to, 0, 1, &barrier, 0, nullptr, 0, nullptr);
+}
+
+// 버퍼→이미지 복사 원본 offset이 지켜야 할 정렬이다. 색은 texel(블록) 크기, 깊이·스텐실은 4의
+// 배수여야 한다(Vulkan 사양 VkBufferImageCopy). 둘의 최소공배수(4와의)를 써서 모든 plane에 맞춘다.
+uint64 CopyOffsetAlignment(PixelFormat format) noexcept {
+    const PixelFormatInfo& info = GetPixelFormatInfo(format);
+    uint64 alignment = 4;
+    for (uint32 plane = 0; plane < info.planeCount; ++plane) {
+        const PixelFormat planeFormat = info.planes[plane].format;
+        uint64 element = planeFormat == PixelFormat::Unknown
+                             ? info.blockBytes
+                             : GetPixelFormatInfo(planeFormat).blockBytes;
+        if (element == 0) {
+            continue;
+        }
+
+        uint64 a = alignment;
+        uint64 b = element;
+        while (b != 0) {
+            const uint64 rest = a % b;
+            a = b;
+            b = rest;
+        }
+        alignment = alignment / a * element;
+    }
+
+    return alignment;
 }
 
 } // namespace
@@ -249,48 +277,71 @@ Result<void> VulkanDevice::RecordBufferUpload(VkBuffer target, uint64 offset,
 }
 
 void VulkanDevice::RecordTextureCopy(const TextureRecord& record, uint32 mipLevel, VkBuffer source,
-                                     uint64 offset, bool initial) noexcept {
+                                     const uint64* offsets, bool initial) noexcept {
     // 업로드 기록은 프레임 기록보다 먼저 실행되므로 상태 중립이다(GX5): 처음 생성이면 내용이
     // 없으므로 UNDEFINED에서 복사 대상으로 바꿨다가 셰이더 읽기 상태로, 아니면 제출한 상태
-    // (committed)에서 바꿨다가 되돌린다.
+    // (committed)에서 바꿨다가 되돌린다. barrier는 이미지의 모든 aspect를 함께 옮긴다.
     const ResourceAccess resting =
         initial ? CanonicalAccess(ResourceAccess::SrvGraphics) : record.committed[mipLevel];
     (void)AccessBarrier(upload_, record.image, mipLevel, 1,
                         initial ? ResourceAccess::Unknown : resting,
-                        ResourceAccess::CopyDestination, false);
-    // 빽빽한 행이다(bufferRowLength = 0). Vulkan은 원본 offset이 texel 크기 배수이기만 하면 된다.
-    VkBufferImageCopy region = {};
-    region.bufferOffset = offset;
-    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, mipLevel, 0, 1};
-    region.imageExtent = {MipExtent(record.width, mipLevel), MipExtent(record.height, mipLevel), 1};
+                        ResourceAccess::CopyDestination, false, record.aspect);
+    // plane마다 빽빽한 행이다(bufferRowLength = 0). 깊이·스텐실 plane은 aspect 하나씩 복사하고
+    // 비디오 chroma plane은 축소 크기다.
+    const PixelFormatInfo& info = GetPixelFormatInfo(record.format);
+    VkBufferImageCopy regions[2] = {};
+    for (uint32 plane = 0; plane < info.planeCount; ++plane) {
+        const PixelFormatPlane& layout = info.planes[plane];
+        VkBufferImageCopy& region = regions[plane];
+        region.bufferOffset = offsets[plane];
+        region.imageSubresource = {PlaneAspect(record.format, plane), mipLevel, 0, 1};
+        region.imageExtent = {MipExtent(record.width, mipLevel) >> layout.widthShift,
+                              MipExtent(record.height, mipLevel) >> layout.heightShift, 1};
+    }
+
     functions_.vkCmdCopyBufferToImage(upload_, source, record.image,
-                                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+                                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, info.planeCount,
+                                      regions);
     (void)AccessBarrier(upload_, record.image, mipLevel, 1, ResourceAccess::CopyDestination,
-                        resting, false);
+                        resting, false, record.aspect);
 }
 
 Result<void> VulkanDevice::RecordTextureUpload(const TextureRecord& record, uint32 firstMip,
                                                uint32 count, Span<const uint8> pixels,
                                                bool initial) noexcept {
-    auto space = StageUpload(pixels.Size());
+    // 원본은 mip마다 plane을 잇는 빈틈 없는 배치다. 복사 원본 offset 규칙(texel 크기 배수, 깊이·
+    // 스텐실은 4의 배수)을 지키도록 (mip, plane) 구역마다 정렬해 옮긴다.
+    const uint32 planes = PixelFormatPlaneCount(record.format);
+    const uint64 alignment = CopyOffsetAlignment(record.format);
+    auto space = StageUpload(pixels.Size() + (count * planes + 1) * alignment);
     if (!space) {
         return Result<void>::Failure(space.Error());
     }
 
-    // 원본(빈틈 없는 행, mip을 잇는 배치)을 그대로 옮긴다. 장치 행 정렬로 다시 배치할 필요가 없다.
-    platform::MemoryCopy(space.Value().data, pixels.Data(), pixels.Size());
     auto opened = OpenUploadList();
     if (!opened) {
         return opened;
     }
 
     const VkBuffer source = space.Value().buffer;
-    uint64 offset = space.Value().offset;
+    const uint64 base = space.Value().offset;
+    uint64 target = base;
+    usize read = 0;
     for (uint32 index = 0; index < count; ++index) {
         const uint32 level = firstMip + index;
-        RecordTextureCopy(record, level, source, offset, initial);
-        offset += PixelFormatImageBytes(record.format, MipExtent(record.width, level),
-                                        MipExtent(record.height, level));
+        uint64 offsets[2] = {};
+        for (uint32 plane = 0; plane < planes; ++plane) {
+            const usize bytes = static_cast<usize>(
+                PixelFormatPlaneImageBytes(record.format, plane, MipExtent(record.width, level),
+                                           MipExtent(record.height, level)));
+            target = (target + alignment - 1) / alignment * alignment;
+            platform::MemoryCopy(space.Value().data + (target - base), pixels.Data() + read, bytes);
+            offsets[plane] = target;
+            target += bytes;
+            read += bytes;
+        }
+
+        RecordTextureCopy(record, level, source, offsets, initial);
     }
 
     return Result<void>::Success();
@@ -354,7 +405,7 @@ Result<void> VulkanDevice::UpdateTexture(TextureHandle handle, uint32 mipLevel,
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (mipLevel >= record->mipLevels ||
+    if (record->isView || mipLevel >= record->mipLevels ||
         pixels.Size() != PixelFormatImageBytes(record->format, MipExtent(record->width, mipLevel),
                                                MipExtent(record->height, mipLevel))) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -409,14 +460,15 @@ Result<void> VulkanDevice::UploadTextureFromStaging(TextureHandle handle, uint32
 
     const uint64 bytes = PixelFormatImageBytes(record->format, MipExtent(record->width, mipLevel),
                                                MipExtent(record->height, mipLevel));
-    if (mipLevel >= record->mipLevels || offset > memory.Value().size ||
-        bytes > memory.Value().size - offset) {
+    if (record->isView || mipLevel >= record->mipLevels || bytes == 0 ||
+        offset > memory.Value().size || bytes > memory.Value().size - offset) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     const TextureRecord copy = *record;
-    // 원본 offset이 texel 크기 배수가 아니면 ring으로 옮겨 올린다(vkCmdCopyBufferToImage 규칙).
-    if (offset % GetPixelFormatInfo(copy.format).blockBytes != 0) {
+    // 원본 offset이 복사 정렬을 지키지 않거나 plane이 둘이면(plane 사이 offset도 정렬해야 한다)
+    // ring으로 옮겨 올린다(vkCmdCopyBufferToImage 규칙).
+    if (offset % CopyOffsetAlignment(copy.format) != 0 || PixelFormatPlaneCount(copy.format) != 1) {
         return RecordTextureUpload(
             copy, mipLevel, 1,
             Span<const uint8>(memory.Value().data + offset, static_cast<usize>(bytes)), false);
@@ -433,7 +485,8 @@ Result<void> VulkanDevice::UploadTextureFromStaging(TextureHandle handle, uint32
     }
 
     const auto* block = static_cast<const StagingBlock*>(memory.Value().resource);
-    RecordTextureCopy(copy, mipLevel, block->buffer, offset, false);
+    const uint64 offsets[2] = {offset, 0};
+    RecordTextureCopy(copy, mipLevel, block->buffer, offsets, false);
     return Result<void>::Success();
 }
 
@@ -515,13 +568,15 @@ Result<ReadbackRequest> VulkanDevice::RequestReadbackLocked(TextureHandle target
     // 업로드 기록은 상태 중립이다: 제출한 상태에서 복사 원본으로 바꿨다가 되돌린다. 이미 복사 원본
     // 상태면(그래프가 CopySource로 끝냈다) barrier를 내지 않는다.
     const ResourceAccess resting = texture.committed[0];
-    (void)AccessBarrier(upload_, texture.image, 0, 1, resting, ResourceAccess::CopySource, false);
+    (void)AccessBarrier(upload_, texture.image, 0, 1, resting, ResourceAccess::CopySource, false,
+                        texture.aspect);
     VkBufferImageCopy region = {};
     region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
     region.imageExtent = {texture.width, texture.height, 1};
     functions_.vkCmdCopyImageToBuffer(upload_, texture.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                                       readback.buffer, 1, &region);
-    (void)AccessBarrier(upload_, texture.image, 0, 1, ResourceAccess::CopySource, resting, false);
+    (void)AccessBarrier(upload_, texture.image, 0, 1, ResourceAccess::CopySource, resting, false,
+                        texture.aspect);
     // fence 뒤 CPU가 읽도록 전송 쓰기를 host 읽기에 보인다.
     VkBufferMemoryBarrier host = {};
     host.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
@@ -677,6 +732,94 @@ Result<void> VulkanDevice::ReadPixels(TextureHandle handle, Span<uint8> out) noe
     }
 
     ReleaseReadbackLocked(readback);
+    return outcome;
+}
+
+// mip 하나의 plane 하나를 host 버퍼로 복사하고 완료를 기다린다(시험·캡처용 동기 경로). 업로드
+// 기록 위에 쌓으므로 앞선 초기 데이터·갱신 뒤에 실행되고, 상태 중립이다(제출한 상태로 되돌린다).
+Result<void> VulkanDevice::ReadTexture(TextureHandle handle, uint32 mipLevel, uint32 plane,
+                                       Span<uint8> out) noexcept {
+    auto owner = ownership_.Check();
+    if (!owner) {
+        return owner;
+    }
+
+    platform::LockGuard lock(gate_);
+    const TextureRecord* found = textures_.Find(handle.slot);
+    if (found == nullptr) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    if (recording_) {
+        return Result<void>::Failure(ErrorCode::Busy);
+    }
+
+    const TextureRecord texture = *found;
+    const uint32 width = MipExtent(texture.width, mipLevel);
+    const uint32 height = MipExtent(texture.height, mipLevel);
+    const uint64 bytes = PixelFormatPlaneImageBytes(texture.format, plane, width, height);
+    if (texture.isView || mipLevel >= texture.mipLevels ||
+        plane >= PixelFormatPlaneCount(texture.format) || bytes == 0 || out.Size() != bytes) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto reserved = ReserveRetireCapacity(1);
+    if (!reserved) {
+        return reserved;
+    }
+
+    Retired buffer;
+    auto created = CreateBufferWithMemory(bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                          MemoryUsage::Readback, buffer.buffer, buffer.memory);
+    if (!created) {
+        return created;
+    }
+
+    auto opened = OpenUploadList();
+    if (!opened) {
+        DestroyRetired(buffer);
+        return opened;
+    }
+
+    const ResourceAccess resting = texture.committed[mipLevel];
+    (void)AccessBarrier(upload_, texture.image, mipLevel, 1, resting, ResourceAccess::CopySource,
+                        false, texture.aspect);
+    const PixelFormatPlane& layout = GetPixelFormatInfo(texture.format).planes[plane];
+    VkBufferImageCopy region = {};
+    region.imageSubresource = {PlaneAspect(texture.format, plane), mipLevel, 0, 1};
+    region.imageExtent = {width >> layout.widthShift, height >> layout.heightShift, 1};
+    functions_.vkCmdCopyImageToBuffer(upload_, texture.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                      buffer.buffer, 1, &region);
+    (void)AccessBarrier(upload_, texture.image, mipLevel, 1, ResourceAccess::CopySource, resting,
+                        false, texture.aspect);
+    VkBufferMemoryBarrier host = {};
+    host.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    host.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    host.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    host.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    host.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    host.buffer = buffer.buffer;
+    host.size = VK_WHOLE_SIZE;
+    functions_.vkCmdPipelineBarrier(upload_, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                    VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1, &host, 0,
+                                    nullptr);
+    auto flushed = FlushUploadsLocked();
+    if (!flushed) {
+        KeepUntilDestruction(Move(buffer));
+        return Result<void>::Failure(flushed.Error());
+    }
+
+    Result<void> outcome = WaitFenceOwner(flushed.Value());
+    if (outcome) {
+        {
+            platform::LockGuard memoryLock(memoryGate_);
+            memory_.Invalidate(buffer.memory);
+        }
+
+        platform::MemoryCopy(out.Data(), buffer.memory.mapped, static_cast<usize>(bytes));
+    }
+
+    RetireEntry(Move(buffer));
     return outcome;
 }
 
