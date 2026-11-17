@@ -2,7 +2,7 @@
 
 정적 타입 · C 계열 문법 · 레지스터 VM · 비프로그래머 대상의 방어적 설계
 
-**설계 기준일 2026.11.12 · 초안 1.1 · 상태: 설계 제안 / 미구현 · 성능 미측정**
+**설계 기준일 2026.11.17 · 초안 1.2 · 상태: 설계 제안 / 미구현 · 성능 미측정**
 
 이 문서는 [전체 계획](EngineImplementationPlan.ko.md) §23이 요구하는 Rocks 게임플레이 언어 Sparks를 정의한다. 프로그래머가 아닌 사용자도 쓸 수 있도록 Go처럼 단순하게, 실수할 여지가 적게, 메모리·리소스 누수가 생길 수 없는 구조로 설계한다. 기준은 엔진 구현 상태가 아니라 전체 계획 §23과 이 언어가 연결되는 전체 계획 §5·§6·§8·§9·§10·§16·§17·§20·§21·§24·§29의 계약이다. 이 문서의 문법·이름·API는 설계 제안이며 구현·측정 결과가 아니다. 예시의 엔진 API 이름(`AddMovement`, `World.Spawn` 등)은 바인딩 규칙을 보이기 위한 예시이며 실제 이름은 각 모듈의 C++ 선언에서 생성된다.
 
@@ -83,10 +83,10 @@ import Items.Pickup;
 import Characters.Enemy;
 
 class PlayerCharacter : Character {                  // Entity 파생: 자기 자신은 this
-    @edit @net var MoveSpeed: float = 6.0;           // 초당 6 m
+    @edit @net var MoveSpeed: float = 600.0;         // 초당 600 cm
     @edit let MaxHealth: float = 100.0;              // 생성 후 바뀌지 않는다
 
-    let PickupRange = SphereCollider(Radius: 2.0);   // 소유 component
+    let PickupRange = SphereCollider(Radius: 200.0); // 소유 component, 반지름 cm
     let Move = Action("Gameplay.Move");              // 입력 action, 컴파일 시 검증
     let Jump = Action("Gameplay.Jump");
     var CurrentTarget: Enemy?;                       // 다른 Entity: 파괴되면 null (기본값 null)
@@ -97,12 +97,12 @@ class PlayerCharacter : Character {                  // Entity 파생: 자기 �
     }
 
     on Start() {
-        PickupRange.RelativeLocation = vec3(0.0, 0.0, 0.8);
+        PickupRange.RelativeLocation = vec3(0.0, 0.0, 80.0);   // cm
         Log("Rocks Engine & Sparks Ready!");
     }
 
     on Jump.Pressed() {
-        AddImpulse(vec3(0.0, 0.0, 5.0));
+        AddImpulse(vec3(0.0, 0.0, 500.0));          // kg·cm/s(단위 확인은 물리 어댑터 경계 U1)
     }
 
     on Tick() {                                      // 인자 dt는 필요할 때만 선언
@@ -138,7 +138,7 @@ import Items.Inventory;
 enum DoorState { Closed, Opening, Open }
 
 class DoorLogic : ScriptComponent {
-    @edit @save var OpenAngle: float = Math.Radians(90.0);
+    @edit @save var OpenAngle: float = 90.0;           // Rotator 각도: 도
     @edit var Hinge: TransformComponent;               // ? 없음: 같은 prefab 안에서 반드시 지정
     @edit @save var RequiredKey = Tag("Item.Key.Iron");
     @edit var SwingSeconds: float = 0.6;
@@ -202,16 +202,16 @@ class DoorLogic : ScriptComponent {
 5. 회전 연출은 모든 기기의 `Tick`이 복제된 `State`를 보고 진행하며 서버 handler는 상태만 변경한다.
 6. 전용 서버에서 `World.Audio.PlayAt`은 효과가 없는 호출이다. 서버와 클라이언트가 같은 코드를 실행해도 결과가 달라지지 않는다(§7.5).
 7. 여는 도중 비활성화되면 실행이 `await` 지점에서 취소된다. `await`는 실행이 끝날 수 있는 지점이므로(§6.1) `on Disable`에서 권한 측이 `State`를 되돌린다.
-8. 각도는 라디안이며 상수는 `Math.Radians(90.0)`처럼 도에서 변환한다(§4.2, SD18).
+8. `Rotator`(`RelativeRotation.Yaw` 등)의 각도는 UE `FRotator`와 같은 도다. 삼각함수(`Math.Sin` 등)와 quaternion 축-각은 라디안이며 `Math.Radians`·`Math.Degrees`로 바꾼다(§4.2, SD18).
 
 ### 2.3 제시한 표기의 반영
 
 | 제시 표기 | 반영 | 비고 |
 |---|---|---|
-| `var MoveSpeed: float = 600.0;`, `fn X(...): float`, PascalCase 멤버, 소문자 내장 타입, `Sword?`, `null`, `@edit @net`, `@edit let`, `if (...)`, 암묵적 `this`, `Log`, 파일 경로 import | 채택 | 수치의 단위는 엔진 규약(미터·라디안·초)이므로 예시 값은 `6.0`이다(§4.2) |
+| `var MoveSpeed: float = 600.0;`, `fn X(...): float`, PascalCase 멤버, 소문자 내장 타입, `Sword?`, `null`, `@edit @net`, `@edit let`, `if (...)`, 암묵적 `this`, `Log`, 파일 경로 import | 채택 | 수치의 단위는 엔진 규약(UE 5.8과 같은 cm·초)이므로 예시 값 `600.0`(cm/s)을 그대로 쓴다(§4.2, SD18 — 초안 1.1의 미터 규약에서 `6.0`으로 바꿨던 것을 되돌렸다) |
 | `on Start()`, `on Tick(dt: float)` | 채택 | hook은 Unity 체계를 따르고 이름은 Rocks 어휘(§5.1). 인자는 필요할 때만 선언 |
 | `Weak<Enemy>`, `Lock()` | 수정 | `Enemy?` 하나로 통합(§4.3). C++ 쪽은 `WeakRef<T>` 필드(리플렉션 B9 — ReflectionExtensions 5.1절) |
-| `var Trigger = SphereCollider(200.0);` | 수정 | 소유 component는 `let`, 생성 인자는 필드 이름, 필드 이름은 용도: `let PickupRange = SphereCollider(Radius: 2.0);` |
+| `var Trigger = SphereCollider(200.0);` | 수정 | 소유 component는 `let`, 생성 인자는 필드 이름, 필드 이름은 용도: `let PickupRange = SphereCollider(Radius: 200.0);`(cm) |
 | `Trigger.SetRelativeLocation(...)` | 수정 | 쓰기 가능한 속성이 있으면 setter 함수를 노출하지 않는다: `PickupRange.RelativeLocation = ...` |
 | `Input.GetAxis2D("MoveForward", "MoveRight")` | 수정 | action 필드 `let Move = Action("Gameplay.Move")`와 `Move.Value` |
 | `AddMovement(dir * MoveSpeed * dt)` | 수정 | 이동 API는 초당 속도를 받고 dt는 엔진이 적용(§10.3) |
@@ -237,7 +237,7 @@ class DoorLogic : ScriptComponent {
 | 파괴된 객체의 `== null` | `T?` 검사 | `?.`·`??`·`if (let)`·`== null`이 모두 같은 판정. 타입을 좁히는 형태는 `if (let)`과 `?? return`뿐 |
 | 정수 `/`(버림) | `Math.Div(a, b)` | `int / int`는 오류(SD17) |
 | `for (int i = 0; i < n; i++)` | `for (i in 0..<n)` | 끝은 포함하지 않는다(SD16) |
-| `Vector3.up`, 각도(도) | `vec3(0.0, 0.0, 1.0)`, 라디안 | 오른손 좌표계, +X 전방·+Y 왼쪽·+Z 위, yaw 양수는 왼쪽 회전, 미터·라디안·초. 도 상수는 `Math.Radians(90.0)`(SD18) |
+| `Vector3.up`, 각도(도) | `vec3(0.0, 0.0, 1.0)`, `Rotator` 각도는 도 | UE 5.8과 같은 왼손 좌표계, +X 전방·+Y 오른쪽·+Z 위, yaw 양수는 오른쪽 회전(위에서 볼 때 시계), cm·초. 삼각함수·quaternion 축-각은 라디안(SD18) |
 
 ## 3. 문법
 
@@ -476,7 +476,7 @@ full 프로필의 `interface`·`open` 선언 문법은 도입 단계 L0에서 �
 | 분류 | 타입 | 규칙 |
 |---|---|---|
 | 논리·숫자 | `bool`, `int`(64비트), `float`(64비트) | overflow·NaN·Inf는 fault. 엔진의 32비트 값과 주고받을 때(native 필드 쓰기·인자·반환) 범위를 검사하며 정수 범위 밖은 `IntegerOverflow`, float32 범위 밖은 `NonFinite`이고 상수는 컴파일 오류다. `float`를 float32로 바꿀 때는 최근접 짝수로 반올림한다 |
-| 수학 | `vec2`–`vec4`, `quat`, `mat4`, `WorldPosition`, `Transform`, `Color` | Core 수학 타입의 바인딩. 스크립트 안의 성분은 `float`(64비트)이고 엔진에 전달할 때 위 규칙으로 변환한다. 단위·축은 엔진 규약(오른손 좌표계, +X 전방·+Y 왼쪽·+Z 위, yaw 양수는 왼쪽 회전, 미터·라디안·초)을 따른다(전체 계획 §2.2, Math 구현 문서의 Rotator 규약). 각도 상수는 `Math.Radians(90.0)`으로 쓰며 언어 서버가 hover·자동완성에 단위를 표시한다(SD18) |
+| 수학 | `vec2`–`vec4`, `quat`, `mat4`, `WorldPosition`, `Transform`, `Color` | Core 수학 타입의 바인딩. 스크립트 안의 성분은 `float`(64비트)이고 엔진에 전달할 때 위 규칙으로 변환한다. 단위·축은 엔진 규약(UE 5.8과 같은 왼손 좌표계, +X 전방·+Y 오른쪽·+Z 위, yaw 양수는 오른쪽 회전, 길이 cm·질량 kg·시간 초, `Rotator` 도, 삼각함수·quaternion 축-각·각속도 라디안)을 따른다(전체 계획 §2.2, Math 구현 문서의 Rotator 규약). 각도 단위가 둘이므로 각도를 받는 native 함수·필드는 UE처럼 이름이나 타입으로 단위를 드러내고(`Rotator` 필드는 도, `…InRadians`·`…InDegrees`), 언어 서버가 hover·자동완성에 단위를 표시한다(SD18) |
 | 문자 | `string`, `Text` | 화면 표시 API는 `Text`만 받는다. `Text`는 `Loc(...)`로 생성 |
 | 엔진 데이터 | `Tag`, `TagSet`, `InputAction`, `Soft<T>`, `Row<T>` | §3.5 리터럴. `Soft<T>`·`Row<T>`에는 빈 값이 없으며 선택 값은 `Soft<T>?`다(SD19) |
 | 컨테이너 | `Array<T>`, `Map<K,V>`, `Set<T>` | 삽입 순서로 순회. 번호·키 읽기는 `T?`. 범위 밖 쓰기는 fault. Map의 `m[k] = v`는 삽입 또는 교체이고, 복합 대입과 경로 쓰기는 키가 없으면 fault. 무공변(`Array<Derived>`는 `Array<Base>`가 아니다). 타입 인자에는 `?`를 쓸 수 없다. C++ 쪽은 Core `OrderedMap`·`OrderedSet`(삽입 순서 보존)이고 키는 `==` 가능한 단일 값(정수·bool·enum·문자열·Name·Guid·Soft·클래스 참조 — 실수·객체 키는 저장할 수 없다)이다(리플렉션 B9 — ReflectionExtensions 7절) |
@@ -1104,7 +1104,7 @@ class Chest : ScriptComponent {
 
     fn ApplyLid() {
         if (IsOpened) {
-            Lid.RelativeRotation.Pitch = Math.Radians(110.0);
+            Lid.RelativeRotation.Pitch = 110.0;            // 도
         } else {
             Lid.RelativeRotation.Pitch = 0.0;
         }
@@ -1194,7 +1194,7 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 - **SD15. enum 값 표기:** 식에서는 항상 타입 이름으로 한정한다(`Clock.Game`). 짧은 이름은 attribute가 정의한 인자에만 쓴다(§3.3).
 - **SD16. 범위 표기:** `a..<b`(b 미포함)를 쓴다. 끝 포함 여부가 배경 언어마다 다르게 읽히는 `..`는 쓰지 않는다(§3.3).
 - **SD17. 정수 나눗셈:** `int / int`는 오류다. 몫은 `Math.Div`, 비율은 `float(a) / float(b)`로 쓴다(§3.3). 2차 검증의 "`/`는 항상 `float`"를 대체한다.
-- **SD18. 단위:** 스크립트의 값은 엔진 규약(미터·라디안·초)을 따른다. 각도 상수는 `Math.Radians(...)`로 쓰며 상수식에서 허용한다(§4.2·§4.5). Sparks와 편집기에서만 도를 쓰는 대안은 한 언어 안에 각도 단위 2개가 생겨 채택하지 않는다.
+- **SD18. 단위:** 스크립트의 값은 엔진 규약을 따르며 엔진 규약은 UE 5.8과 같다: 길이 cm, 질량 kg, 시간 초, `Rotator`(`Pitch`·`Yaw`·`Roll`) 도, 삼각함수·quaternion 축-각·각속도 라디안(각속도·토크 API는 `…InRadians`·`…InDegrees` 쌍). `Math.Radians(...)`·`Math.Degrees(...)`는 상수식에서 허용한다(§4.2·§4.5). 각도를 받는 native 함수·필드는 이름이나 타입으로 단위를 드러내고 언어 서버가 hover에 표시한다. **2026-11-17 번복:** 처음 결정은 미터·라디안이었고 "한 언어 안에 각도 단위 2개"를 피하려 했으나, 사용자 요구로 엔진 규약이 UE와 같은 cm·도(`Rotator`)·라디안(삼각함수)이 되어 이를 따른다. 두 각도 단위는 UE와 같이 API 이름·타입으로 구분한다.
 - **SD19. 빈 Soft·Row 제거:** `Soft<T>`·`Row<T>`에는 빈 값이 없고 선택 값은 `Soft<T>?`·`Row<T>?`로 쓴다. "없음"은 `null` 하나다(§3.2).
 - **SD20. 종료 경로별 hook:** `RequestDestroy`·부모 파괴·셀 unload·travel·PIE Stop·process 종료는 Disable(활성이면)·Destroy를 실행한 뒤 Detach한다. fault 격리와 GC 도달 불가 경로는 Disable을 실행하지 않는다(§5.1).
 - **SD21. NextTick의 시계:** `NextTick()`은 게임 시계를 따라 일시 정지 중 재개하지 않으며 `Time.Delta`는 GameClock delta다. UI 시계의 다음 프레임 대기는 `Delay(0.0, Clock.UI)`다(§6.1).
@@ -1216,7 +1216,7 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 | 이름 해석 | 가림 금지가 지역 변수에만 적용, 암묵 멤버 미예약, import 별칭 의미, 확장 이벤트 충돌, SD2 변환 충돌, Character의 `Owner` | 이름 하나에 대상 하나, 부록 A, 모듈 별칭, 확장 이벤트 유일성과 안정 ID, 메타 컴파일 오류, 기반 타입별 문맥 이름 | 3.1·3.4·3.7·5.2·10.3 |
 | 타입·값 | await 이후 `T?` 적용 대상, 중첩 optional, `?.` 단락 범위, `== null` 좁히기, `==`·보간 허용 타입, `let` 깊이, 버린 결과, `try` 실패 범위 | 흐름 기준 규칙과 제외 목록, `?` 중첩 금지, 한 단계 단락, 닫힌 허용 목록, 깊은 `let`, Execution 트리 종료, SD13·SD14·SD19 | 3.2·3.3·4.2·4.3·8.2 |
 | 구문·어휘 | `try`·`await` 적용 범위, `<` 판정, FloatLit 미정의로 `0..count` 오토큰화, 문자열 escape, 예약어 목록 부재, 미사용 인자를 피할 수 없음 | `Value` 문법, 계층형 EBNF, 어휘 규칙, `_` 인자, SD16 | 3.3·3.6·3.7 |
-| 사용자 오독 | 지역 유지 자원이 즉시 멈춤, `int / int`, 예시의 cm·도 수치와 엔진 미터·라디안의 불일치, 일시 상태에 묶은 소리, 모든 collider에서 오는 Trigger | await 없는 지역 자원 오류, SD17·SD18, 예시 수정, `trigger` 인자 판정 | 2·4.2·7.1 |
+| 사용자 오독 | 지역 유지 자원이 즉시 멈춤, `int / int`, 예시의 cm·도 수치와 엔진 미터·라디안의 불일치(2026-11-17 엔진 규약이 cm·도가 되어 해소 — SD18), 일시 상태에 묶은 소리, 모든 collider에서 오는 Trigger | await 없는 지역 자원 오류, SD17·SD18, 예시 수정, `trigger` 인자 판정 | 2·4.2·7.1 |
 | 문서 간 정합 | 오버로드 처리(노출 생략과 오류), session의 VM globals·root, 순환 import, CU9 정의 부재, LSP 도입 단계, Gate 번호 | 전체 계획·입력 상세안 정정, CU9 정의 | 10.3·13·17 |
 
 에이전트 간 권고가 일치하지 않은 6건은 다음과 같이 판정하였다.

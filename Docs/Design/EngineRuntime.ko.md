@@ -185,7 +185,7 @@ Uninitialized → Initializing → Running → Stopping → Stopped
 ### 7.3 Component
 
 - `Component`는 Actor에 속하고 `OnRegister`/`OnUnregister`(엔진 내부·backend 등록)와 위 hook을 가진다. Actor의 `FinishSpawning`이 Component를 등록한다(OnRegister → Actor OnAwake → Component OnAwake → OnEnable). 이미 초기화된 Actor에 추가된 Component는 추가 즉시 OnRegister·OnAwake·OnEnable을 받고 OnStart는 다음 프레임 시작에 받는다(다른 객체의 hook 실행 중 OnStart 재진입 방지). 정리는 OnDisable(Component 역순 → Actor) → OnDestroy(Component 역순 → Actor) → OnUnregister 순이며, OnDestroy는 OnAwake가 성공한 객체만 받는다.
-- `SceneComponent`는 부모·자식 계층, 상대 Transform, 월드 행렬(`Mat4d` affine)을 가진다. 월드 행렬 = 부모 월드 행렬 × 상대 TRS 행렬이며 dirty 플래그로 지연 계산한다. 행렬로 저장하므로 비균일 scale 부모 아래 회전한 자식(shear)도 정확하고, TRS가 필요할 때만 `TryWorldTransform`이 분해한다(shear면 Unsupported). 상대 Transform·부모 변경 시 하위 전체를 dirty로 표시한다. `AttachTo`는 순환(자기 자신·조상)과 장부 밖 객체를 `InvalidArgument`로 거부하며 같은 World 안에서만 붙인다. 부모가 파괴되면 자식은 루트가 된다. 영속 상태는 상대 Transform뿐이고 계층·월드 행렬은 저장하지 않는다(4.6절).
+- `SceneComponent`는 부모·자식 계층, 상대 Transform, 월드 행렬(`Mat4d` affine)을 가진다. 좌표·단위는 UE 5.8과 같다(왼손 +X 전방·+Y 오른쪽·+Z 위, 위치 cm, 회전 단위 quaternion — 도 단위 `Rotator`는 `ToQuaternion`으로 바꾼다, scale 무차원). 월드 행렬 = 상대 TRS 행렬 × 부모 월드 행렬(행 벡터 — UE `NewRelativeTransform * ParentToWorld`, 2026-11-17 전에는 column vector의 부모 × 상대)이며 dirty 플래그로 지연 계산한다. 행렬로 저장하므로 비균일 scale 부모 아래 회전한 자식(shear)도 정확하고, TRS가 필요할 때만 `TryWorldTransform`이 분해한다(shear면 Unsupported). 상대 Transform·부모 변경 시 하위 전체를 dirty로 표시한다. `AttachTo`는 순환(자기 자신·조상)과 장부 밖 객체를 `InvalidArgument`로 거부하며 같은 World 안에서만 붙인다. 부모가 파괴되면 자식은 루트가 된다. 영속 상태는 상대 Transform뿐이고 계층·월드 행렬은 저장하지 않는다(4.6절).
 
 ### 7.4 지연 작업과 안전 지점
 
@@ -211,6 +211,7 @@ Uninitialized → Initializing → Running → Stopping → Stopped
 - 프레임 순서는 계획 8.2절대로 입력 수집이 먼저다: hook `PumpEvents`가 메시지를 펌프하고 게임패드를 폴링한 뒤 `InputState::BeginFrame(queue)`가 큐를 소비해 새 스냅샷을 만든다. edge는 그 프레임에만 유효하다.
 - pause 중에도 펌프와 스냅샷 갱신은 계속한다. 게임플레이가 소비하지 못한 edge는 다음 프레임으로 넘기지 않으므로 resume 시 과거 edge를 재발사하지 않는다. 창이 포커스를 잃으면 눌린 키를 모두 해제 이벤트로 정리한다.
 - 액션 매핑·리바인딩·컨텍스트 우선순위는 이번 범위가 아니다. PlayerController(S12)가 LocalPlayer의 `InputState`를 읽는 경계까지만 만든다.
+- 입력을 월드 이동·시점으로 바꾸는 매핑은 아직 없다(계획). 만들 때는 UE 5.8과 같은 축을 쓴다: 앞 입력은 전방(+X, `GetForwardVector`), 오른쪽 입력(D 키·왼쪽 스틱 +X)은 오른쪽(+Y, `GetRightVector`), 이동 속도는 cm/s, 시점 회전은 `Rotator` 도이며 yaw +는 위에서 볼 때 시계 방향(전방이 오른쪽으로 돈다)이다([수학 구현](../Implementation/Math.ko.md) 2절).
 - Sandbox는 WASD·방향키로 스프라이트를 움직이고, 마우스 위치로 삼각형을 회전시키며, 좌클릭으로 색을 바꾸고, 게임패드 왼쪽 스틱도 같은 이동에 연결해 확인한다.
 
 ## 10. Graphics
