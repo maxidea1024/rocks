@@ -22,7 +22,8 @@
 // Release 문자열 제외 확인(LG5): Release 링크 결과 LogBench.exe에 Debug 템플릿 "compiled out
 // {Index} {Ratio}"는 없고 Info 템플릿 "enabled {Index} {Ratio}"는 있다(.obj는 ThinLTO
 // bitcode라 링크 결과를 본다). Windows clang-cl 21.1.6·lld-link 한 구성에서 확인한 사실이며
-// 일반 보장이 아니다(최적화가 참조 없는 리터럴을 버리는 데 기댄다).
+// 일반 보장이 아니다(최적화가 참조 없는 리터럴을 버리는 데 기댄다). self 시험
+// Log.ReleaseBinaryExcludesCompiledOutTemplates가 빌드된 Release LogBench를 이 기준으로 검사한다.
 namespace {
 
 using namespace rocks;
@@ -105,12 +106,12 @@ void Run(LogMode mode, const char* enabledName, uint32 count) {
         Report("compiled out", count, compiledOut);
 
         // 런타임 비활성: 전역 최소를 Warning으로 올리고 Info를 부른다(빠른 거부 하한 검사).
-        logs.SetGlobalMinimum(LogLevel::Warning);
+        (void)logs.SetGlobalMinimum(LogLevel::Warning);
         const uint64 disabled = Measure(logs, count, [](uint32 index) noexcept {
             Log::Info(LogBench, "disabled {Index} {Ratio}", index, 0.5);
         });
         Report("runtime disabled", count, disabled);
-        logs.SetGlobalMinimum(LogLevel::Info);
+        (void)logs.SetGlobalMinimum(LogLevel::Info);
     }
 
     const uint64 enabled = Measure(logs, count, [](uint32 index) noexcept {
@@ -135,8 +136,9 @@ int main(int argc, char** argv) {
             value = value * 10 + static_cast<uint64>(*digit - '0');
         }
 
-        if (!digits || value == 0 || value > MaxSamples) {
-            printf("usage: LogBench [samples (1-%u)]\n", MaxSamples);
+        // 묶음 평균이 건수를 BatchSize로 나누므로 BatchSize보다 작으면 0으로 나누게 된다.
+        if (!digits || value < BatchSize || value > MaxSamples) {
+            printf("usage: LogBench [samples (%u-%u)]\n", BatchSize, MaxSamples);
             return 2;
         }
 

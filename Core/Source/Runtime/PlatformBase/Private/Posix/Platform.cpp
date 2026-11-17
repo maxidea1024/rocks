@@ -51,6 +51,19 @@ void Mutex::Lock() noexcept {
     }
 }
 
+bool Mutex::TryLock() noexcept {
+    const int result = pthread_mutex_trylock(reinterpret_cast<pthread_mutex_t*>(storage_));
+    if (result == 0) {
+        return true;
+    }
+
+    if (result != EBUSY) {
+        Fatal("pthread_mutex_trylock failed");
+    }
+
+    return false;
+}
+
 void Mutex::Unlock() noexcept {
     if (pthread_mutex_unlock(reinterpret_cast<pthread_mutex_t*>(storage_)) != 0) {
         Fatal("pthread_mutex_unlock failed");

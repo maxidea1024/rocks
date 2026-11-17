@@ -412,6 +412,7 @@ internal static partial class SelfTests
             }
         });
         RegisterEnglishArtifacts(suite, options);
+        RegisterLogRelease(suite, options);
         suite.Add("Policy.RepositoryInitializerListDeductions",
             () => NoFailures(PolicyChecks.InitializerListDeductions(options.Root)));
         suite.Add("Policy.InitializerListDeductionControls", () =>

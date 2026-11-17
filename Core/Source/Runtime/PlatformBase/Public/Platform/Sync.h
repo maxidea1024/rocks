@@ -27,6 +27,13 @@ public:
     Mutex& operator=(Mutex&&) = delete;
 
     void Lock() noexcept;
+    // 기다리지 않고 잠가 본다. 잠갔으면 true이고 Unlock해야 한다. 다른 thread가 쥐고 있으면
+    // false다. 같은 thread가 이미 쥔 Mutex에 부르는 것은 Lock과 같은 계약 위반이다(결과는
+    // 플랫폼마다 다르다). 멈췄을 수 있는 쪽을 기다리면 안 되는 경로(예: Fatal 기록 전달)가 쓴다.
+    //
+    // 사용 예:
+    //   if (mutex.TryLock()) { Work(); mutex.Unlock(); }
+    bool TryLock() noexcept;
     void Unlock() noexcept;
 
 private:

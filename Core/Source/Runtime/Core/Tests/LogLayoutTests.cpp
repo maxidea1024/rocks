@@ -15,7 +15,7 @@
 using namespace rocks;
 
 namespace rocks::test {
-uint64 OperatorNewCallsOnThisThread() noexcept;
+uint64 OperatorNewCalls() noexcept;
 } // namespace rocks::test
 
 namespace {
@@ -274,7 +274,7 @@ TEST(DateTimeMillisecondFormatIsFixedWidth) {
 // compact·고정 frame·중복 키 확인 끔: 한 줄 출력, 고정 깊이, 할당 없음.
 TEST(JsonWriterCompactFixedFramesWithoutAllocation) {
     const uint64 attempts = detail::FixedStringBuilderAllocationAttempts();
-    const uint64 news = test::OperatorNewCallsOnThisThread();
+    const uint64 news = test::OperatorNewCalls();
     char storage[512];
     FixedStringBuilder text{Span<char>(storage)};
     JsonWriterOptions options;
@@ -295,7 +295,7 @@ TEST(JsonWriterCompactFixedFramesWithoutAllocation) {
 
     CHECK(text.View() == "{\"a\":1,\"b\":[true,null,0.5],\"a\":\"x\"}\n");
     CHECK(detail::FixedStringBuilderAllocationAttempts() == attempts);
-    CHECK(test::OperatorNewCallsOnThisThread() == news);
+    CHECK(test::OperatorNewCalls() == news);
 
     // 고정 frame은 FixedFrameCapacity 깊이까지다.
     text.Clear();
@@ -550,7 +550,7 @@ TEST(TextLogSinkSyncAndManualProduceIdenticalLines) {
 TEST(LogSinksDoNotAllocate) {
     ResetUninstalledDrops();
     const uint64 attempts = detail::FixedStringBuilderAllocationAttempts();
-    const uint64 news = test::OperatorNewCallsOnThisThread();
+    const uint64 news = test::OperatorNewCalls();
     FixedEvent fixed;
     {
         TextOutput text;
@@ -566,7 +566,7 @@ TEST(LogSinksDoNotAllocate) {
     }
 
     CHECK(detail::FixedStringBuilderAllocationAttempts() == attempts);
-    CHECK(test::OperatorNewCallsOnThisThread() == news);
+    CHECK(test::OperatorNewCalls() == news);
 
     CountingAllocator allocator;
     LogSystemConfig config;
@@ -591,7 +591,7 @@ TEST(LogSinksDoNotAllocate) {
     }
 
     CHECK(allocator.Allocations() == afterStart);
-    CHECK(test::OperatorNewCallsOnThisThread() == news);
+    CHECK(test::OperatorNewCalls() == news);
     CHECK(detail::FixedStringBuilderAllocationAttempts() == attempts);
     CHECK(text.View().Contains("World=Main", StringComparison::CaseSensitive));
 }
