@@ -361,6 +361,12 @@ private:
             Create(transaction, ClusterSoakNodeType,
                    outer == NoIndex ? ObjectHandle{} : entries_[outer].handle);
         const ObjectHandle levelHandle = entries_[level].handle;
+        // 밖 outer가 cutoff white(Sweeping 중 도달하지 않은 객체)면 생성이 거부된다(StaleHandle).
+        if (actor.IsNull() && outer != NoIndex) {
+            ++report_.rejectedWrites;
+            return;
+        }
+
         if (actor.IsNull() || !transaction.JoinCluster(actor, levelHandle)) {
             Fail("Actor creation failed", level, ErrorCode::InvalidArgument);
             return;

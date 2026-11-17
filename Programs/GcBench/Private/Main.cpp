@@ -33,6 +33,10 @@
 //   GcBench --soak 200000 [--seed 7] [--soak-objects 4000] [--soak-workers --workers 4]
 //                  [--soak-time-budget]
 //                                    장기 tick 시뮬레이터(GcSoak)를 돌리고 불변식 위반을 보고한다
+//   GcBench --cluster-soak 2000 [--packages] [--seed 7] [--soak-objects 1500] [--soak-workers]
+//                                    클러스터 장기 smoke(GcClusterSoak — Debug면 장부 검증 포함)
+//   GcBench --clusters               클러스터·영구 영역 시나리오(GC-S7, 패키지·World·영구 영역,
+//                                    간선 쓰기 비용 — 클러스터를 끈 경우와 번갈아 잰다)
 namespace {
 
 using namespace rocks;
@@ -41,6 +45,7 @@ constexpr uint32 GroupSize = 256;
 constexpr uint32 RandomRoots = 1000;
 constexpr TypeId NodeTypeId{0x4763424e4f444531ULL, 1};
 constexpr TypeId LeafTypeId{0x4763424c45414631ULL, 1};
+constexpr TypeId PackageTypeId{0x4763425041434b31ULL, 1};
 
 // 할당 범주다. ObjectRuntime의 할당 태그(ObjectRegistryCreate.cpp·ObjectRegistryArrayEdges.cpp)로
 // 나눈다.
@@ -174,6 +179,12 @@ public:
     ObjectRefArray<Object> refs;
 };
 
+// 패키지 정책 Registry의 패키지 객체다(클러스터 시나리오).
+class BenchPackage final : public Object {
+public:
+    BenchPackage() noexcept = default;
+};
+
 // 강한 참조가 없는 잎 객체다.
 class BenchLeaf final : public Object {
 public:
@@ -244,6 +255,9 @@ struct Options {
     uint32 reps = 0;
     uint32 workers = 8;
     bool allocators = false;
+    bool clusters = false;
+    bool packages = false;
+    uint64 clusterSoakTicks = 0;
     uint64 soakTicks = 0;
     uint64 seed = 7;
     uint32 soakObjects = 4000;
@@ -254,12 +268,24 @@ struct Options {
 struct TypeTokens {
     TypeRegistrationToken node;
     TypeRegistrationToken leaf;
+    TypeRegistrationToken package;
 };
 
 bool RegisterTypes(TypeRegistry& types, TypeTokens& tokens) noexcept {
     RuntimeTypeOps node = MakeRuntimeTypeOps<BenchNode>();
     node.parallelTraceSafe = true;
+    // Trace가 모든 강한 간선을 방문한다(클러스터 소속·영구 영역·패키지 정책의 조건).
+    node.completeFieldLayout = true;
     auto registeredNode = types.Register(TypeSchema{NodeTypeId, 1, {}, {}}, Move(node));
+    RuntimeTypeOps package = MakeRuntimeTypeOps<BenchPackage>();
+    package.parallelTraceSafe = true;
+    package.completeFieldLayout = true;
+    auto registeredPackage = types.Register(TypeSchema{PackageTypeId, 1, {}, {}}, Move(package));
+    if (!registeredPackage) {
+        return false;
+    }
+
+    tokens.package = registeredPackage.Value();
     RuntimeTypeOps leaf = MakeRuntimeTypeOps<BenchLeaf>();
     leaf.parallelTraceSafe = true;
     // 강한 참조가 없다(GC marker가 trace하지 않는다 — M2).
@@ -721,7 +747,8 @@ int RunScenario(const Scenario& scenario, const Options& options) noexcept {
             status = 7;
         }
 
-        if (!types.Unregister(tokens.leaf) || !types.Unregister(tokens.node) || !types.Shutdown()) {
+        if (!types.Unregister(tokens.leaf) || !types.Unregister(tokens.node) ||
+            !types.Unregister(tokens.package) || !types.Shutdown()) {
             status = 7;
         }
     }
@@ -734,6 +761,546 @@ int RunScenario(const Scenario& scenario, const Options& options) noexcept {
 
     fflush(stdout);
     return status;
+}
+
+// ---- 클러스터·영구 영역 시나리오(GC-S7, Docs/Design/GarbageCollectionScale.ko.md 13절) ----
+
+// 그래프 하나의 GC 측정이다: 정지형 직렬·병렬(worker N개) Collect 중앙값, 증분 기본(직렬)·기본과
+// 2ms(병렬). 실패하면 거짓.
+bool MeasureGraph(ObjectRegistry& registry, WorkerScheduler& scheduler, uint32 workers, uint32 reps,
+                  Allocator& memory) noexcept {
+    const auto access = registry.OwnerAccess();
+    Array<GcReport> reports(memory);
+    for (uint32 rep = 0; rep < reps; ++rep) {
+        auto collected = registry.Collect(access);
+        if (!collected || !reports.TryPushBack(collected.Value())) {
+            printf("Collect failed\n");
+            return false;
+        }
+    }
+
+    PrintPhases("Collect (median)", MedianOf(reports, memory));
+    printf("  %-28s marked %u, examined %u\n", "", reports[0].marked, reports[0].examined);
+    reports.Clear();
+    for (uint32 rep = 0; rep < reps; ++rep) {
+        auto collected = registry.Collect(access, &scheduler);
+        if (!collected || !reports.TryPushBack(collected.Value())) {
+            printf("parallel Collect failed\n");
+            return false;
+        }
+    }
+
+    char label[64];
+    snprintf(label, sizeof(label), "parallel Collect x%u", workers);
+    PrintPhases(label, MedianOf(reports, memory));
+    if (!RunIncremental(registry, "incremental default budget", GcBudget{}, nullptr, memory)) {
+        return false;
+    }
+
+    snprintf(label, sizeof(label), "incremental default x%u", workers);
+    if (!RunIncremental(registry, label, GcBudget{}, &scheduler, memory)) {
+        return false;
+    }
+
+    snprintf(label, sizeof(label), "incremental time 2ms x%u", workers);
+    return RunIncremental(registry, label, GcBudget{NumericLimits<uint32>::Max(), 2000000},
+                          &scheduler, memory);
+}
+
+// owner의 refs에 target을 붙인다(Borrow를 쥐고 편집한다).
+bool AddEdge(ObjectRegistry& registry, ObjectHandle owner, ObjectHandle target) noexcept {
+    auto borrowed = registry.Resolve<BenchNode>(registry.OwnerAccess(), owner);
+    if (!borrowed) {
+        return false;
+    }
+
+    auto pointer = borrowed.Value().Get();
+    return pointer &&
+           registry.AddReference(registry.OwnerAccess(), owner, pointer.Value()->refs, target);
+}
+
+// 간선 쓰기 비용: 무작위 노드에 간선 count개를 더한 뒤(AddReference) 끝에서 지운다
+// (RemoveReferenceAt). pick이 (소유자, 대상)을 고른다. 객체 Borrow 비용이 함께 들어간다.
+template <class Pick>
+bool MeasureEdgeWrites(ObjectRegistry& registry, uint32 count, Pick&& pick,
+                       Allocator& memory) noexcept {
+    const auto access = registry.OwnerAccess();
+    Array<ObjectHandle> owners(memory);
+    if (!owners.TryReserve(count)) {
+        return false;
+    }
+
+    const uint64 started = platform::MonotonicNanoseconds();
+    for (uint32 index = 0; index < count; ++index) {
+        ObjectHandle owner;
+        ObjectHandle target;
+        pick(owner, target);
+        if (!AddEdge(registry, owner, target) || !owners.TryPushBack(owner)) {
+            return false;
+        }
+    }
+
+    const uint64 added = platform::MonotonicNanoseconds();
+    for (usize index = owners.Size(); index-- != 0;) {
+        auto borrowed = registry.Resolve<BenchNode>(access, owners[index]);
+        if (!borrowed) {
+            return false;
+        }
+
+        auto pointer = borrowed.Value().Get();
+        if (!pointer || !registry.RemoveReferenceAt(access, owners[index], pointer.Value()->refs,
+                                                    pointer.Value()->refs.Size() - 1)) {
+            return false;
+        }
+    }
+
+    const uint64 removed = platform::MonotonicNanoseconds();
+    printf("  edge writes x%u: add %.1f ns/op, remove %.1f ns/op\n", count,
+           static_cast<double>(added - started) / count,
+           static_cast<double>(removed - added) / count);
+    return true;
+}
+
+constexpr uint32 Packages = 10000;
+constexpr uint32 PackageSize = 100;
+
+// 패키지형: 10K 패키지 × 100 객체(1M), 노드마다 평균 4개 간선, 그중 cross%는 다른 패키지로 간다.
+// clusters가 거짓이면 패키지 클러스터를 끈다(RegistryOptions::packageClusters).
+int RunPackageScenario(uint32 crossPercent, bool clusters, const Options& options) noexcept {
+    printf("\n== package graph: %u packages x %u, refs avg 4, cross %u%%, clusters %s ==\n",
+           Packages, PackageSize, crossPercent, clusters ? "on" : "off");
+    fflush(stdout);
+    BenchAllocator memory;
+    int status = 0;
+    {
+        TypeRegistry types(memory);
+        TypeTokens tokens;
+        if (!RegisterTypes(types, tokens)) {
+            return 2;
+        }
+
+        WorkerScheduler scheduler(memory);
+        if (!scheduler.Start({options.workers, 256, 16})) {
+            return 2;
+        }
+
+        {
+            RegistryOptions registryOptions;
+            registryOptions.policy.packageNativeType = NativeTypeKey<BenchPackage>();
+            registryOptions.packageClusters = clusters;
+            ObjectRegistry registry(memory, types, Guid{0x6764, crossPercent}, registryOptions);
+            const auto access = registry.OwnerAccess();
+            Rng rng{0x51ed270b9a3c4d21ULL ^ crossPercent};
+            constexpr uint32 Total = Packages * PackageSize;
+            Array<ObjectHandle> all(memory);
+            Array<RootRef<Object>> roots(memory);
+            if (!all.TryReserve(Total) || !roots.TryReserve(Packages)) {
+                return 3;
+            }
+
+            const uint64 started = platform::MonotonicNanoseconds();
+            char name[16];
+            for (uint32 package = 0; package < Packages; ++package) {
+                ConstructionContext construction(registry, access);
+                auto made = construction.Create<BenchPackage>(PackageTypeId);
+                if (!made || !all.TryPushBack(made.Value())) {
+                    return 3;
+                }
+
+                for (uint32 index = 1; index < PackageSize; ++index) {
+                    auto node = construction.Create<BenchNode>(NodeTypeId, made.Value(),
+                                                               NameOf(name, index));
+                    if (!node || !all.TryPushBack(node.Value())) {
+                        return 3;
+                    }
+                }
+
+                const ObjectHandle held[] = {made.Value()};
+                RootRef<Object> out[1];
+                if (!construction.Commit(held, out) || !roots.TryPushBack(Move(out[0]))) {
+                    return 3;
+                }
+            }
+
+            const uint64 created = platform::MonotonicNanoseconds();
+            auto pick = [&](ObjectHandle& owner, ObjectHandle& target) noexcept {
+                const uint32 package = rng.Below(Packages);
+                owner = all[package * PackageSize + 1 + rng.Below(PackageSize - 1)];
+                const uint32 targetPackage =
+                    rng.Below(100) < crossPercent ? rng.Below(Packages) : package;
+                target = all[targetPackage * PackageSize + rng.Below(PackageSize)];
+            };
+            for (uint32 package = 0; package < Packages; ++package) {
+                for (uint32 index = 1; index < PackageSize; ++index) {
+                    const ObjectHandle owner = all[package * PackageSize + index];
+                    const uint32 degree = rng.Below(9);
+                    for (uint32 edge = 0; edge < degree; ++edge) {
+                        const uint32 targetPackage =
+                            rng.Below(100) < crossPercent ? rng.Below(Packages) : package;
+                        if (!AddEdge(registry, owner,
+                                     all[targetPackage * PackageSize + rng.Below(PackageSize)])) {
+                            return 3;
+                        }
+                    }
+                }
+            }
+
+            const uint64 linked = platform::MonotonicNanoseconds();
+            const ObjectStats stats = registry.Stats();
+            printf("  create %.1f ms, link %.1f ms, clusters %u, members %u\n",
+                   Milliseconds(created - started), Milliseconds(linked - created), stats.clusters,
+                   stats.clusterMembers);
+            PrintMemory(memory, all.Size(), stats);
+            if (!MeasureEdgeWrites(registry, 200000, pick, memory) ||
+                !MeasureGraph(registry, scheduler, options.workers, 3, memory)) {
+                return 5;
+            }
+
+            fflush(stdout);
+            for (uint32 package = 0; package < Packages; ++package) {
+                if (!registry.Discard(access, all[package * PackageSize])) {
+                    return 6;
+                }
+            }
+
+            roots.Clear();
+            if (!registry.Shutdown(access)) {
+                status = 7;
+            }
+        }
+
+        if (!scheduler.Shutdown() || !types.Unregister(tokens.leaf) ||
+            !types.Unregister(tokens.node) || !types.Unregister(tokens.package) ||
+            !types.Shutdown()) {
+            status = 7;
+        }
+    }
+
+    fflush(stdout);
+    return memory.Allocations() == 0 ? status : 8;
+}
+
+constexpr uint32 Levels = 10;
+constexpr uint32 ActorsPerLevel = 30000;
+constexpr uint32 OutsideObjects = 200000;
+
+// World형: Level 10개 × Actor 30K × (Actor + Component 2개), Actor마다 같은 Level Actor 참조 1개,
+// Level 밖 일반 객체 200K(평균 간선 4, 그중 5%는 Level 소속을 하나 더 가리킨다), 일반 객체 churn.
+// clusters가 참이면 Level마다 클러스터를 지정한다(World와 같은 방식).
+int RunWorldScenario(bool clusters, const Options& options) noexcept {
+    printf("\n== world graph: %u levels x %u actors x (actor + 2 components), outside %u, "
+           "clusters %s ==\n",
+           Levels, ActorsPerLevel, OutsideObjects, clusters ? "on" : "off");
+    fflush(stdout);
+    BenchAllocator memory;
+    int status = 0;
+    {
+        TypeRegistry types(memory);
+        TypeTokens tokens;
+        if (!RegisterTypes(types, tokens)) {
+            return 2;
+        }
+
+        WorkerScheduler scheduler(memory);
+        if (!scheduler.Start({options.workers, 256, 16})) {
+            return 2;
+        }
+
+        {
+            RegistryOptions registryOptions;
+            registryOptions.clusters = clusters;
+            ObjectRegistry registry(memory, types, Guid{0x6765, clusters ? 1u : 0u},
+                                    registryOptions);
+            const auto access = registry.OwnerAccess();
+            Rng rng{0x6a09e667f3bcc909ULL};
+            Array<RootRef<Object>> levels(memory);
+            Array<ObjectHandle> actors(memory);
+            Array<ObjectHandle> members(memory);
+            if (!levels.TryReserve(Levels) || !actors.TryReserve(Levels * ActorsPerLevel) ||
+                !members.TryReserve(Levels * ActorsPerLevel * 3)) {
+                return 3;
+            }
+
+            const uint64 started = platform::MonotonicNanoseconds();
+            for (uint32 level = 0; level < Levels; ++level) {
+                ConstructionContext construction(registry, access);
+                auto made = construction.Create<BenchNode>(NodeTypeId);
+                if (!made || (clusters && !construction.SetClusterRoot(made.Value()))) {
+                    return 3;
+                }
+
+                const ObjectHandle held[] = {made.Value()};
+                RootRef<Object> out[1];
+                if (!construction.Commit(held, out) || !levels.TryPushBack(Move(out[0]))) {
+                    return 3;
+                }
+
+                const ObjectHandle levelHandle = levels[level].Handle();
+                for (uint32 actor = 0; actor < ActorsPerLevel; ++actor) {
+                    ConstructionContext spawn(registry, access);
+                    auto body = spawn.Create<BenchNode>(NodeTypeId);
+                    auto first = spawn.Create<BenchNode>(NodeTypeId);
+                    auto second = spawn.Create<BenchNode>(NodeTypeId);
+                    if (!body || !first || !second) {
+                        return 3;
+                    }
+
+                    if (clusters && (!spawn.JoinCluster(body.Value(), levelHandle) ||
+                                     !spawn.JoinCluster(first.Value(), levelHandle) ||
+                                     !spawn.JoinCluster(second.Value(), levelHandle))) {
+                        return 3;
+                    }
+
+                    auto pointer = spawn.Get<BenchNode>(body.Value());
+                    const ObjectHandle components[] = {first.Value(), second.Value()};
+                    if (!pointer ||
+                        !spawn.AssignReferences(body.Value(), pointer.Value()->refs,
+                                                Span<const ObjectHandle>(components, 2)) ||
+                        !spawn.Commit(Span<const ObjectHandle>{}, Span<RootRef<Object>>{})) {
+                        return 3;
+                    }
+
+                    // Level이 Actor를 소유한다(World의 Level 배열과 같다).
+                    if (!AddEdge(registry, levelHandle, body.Value()) ||
+                        !actors.TryPushBack(body.Value()) || !members.TryPushBack(body.Value()) ||
+                        !members.TryPushBack(first.Value()) ||
+                        !members.TryPushBack(second.Value())) {
+                        return 3;
+                    }
+                }
+            }
+
+            // 같은 Level 안 Actor 사이 참조.
+            for (uint32 index = 0; index < actors.Size(); ++index) {
+                const uint32 level = index / ActorsPerLevel;
+                if (!AddEdge(registry, actors[index],
+                             actors[level * ActorsPerLevel + rng.Below(ActorsPerLevel)])) {
+                    return 3;
+                }
+            }
+
+            const uint64 built = platform::MonotonicNanoseconds();
+            GraphBuilder builder{registry, rng, 0};
+            Array<ObjectHandle> outside(memory);
+            Array<ObjectHandle> outsideNodes(memory);
+            Array<RootRef<Object>> pins(memory);
+            if (!builder.CreateGroups(OutsideObjects, outside, outsideNodes, pins) ||
+                !builder.Link(outsideNodes, outside, 4)) {
+                return 3;
+            }
+
+            for (usize index = 0; index < outsideNodes.Size(); ++index) {
+                if (rng.Below(100) < 5 &&
+                    !AddEdge(registry, outsideNodes[index],
+                             members[rng.Below(static_cast<uint32>(members.Size()))])) {
+                    return 3;
+                }
+            }
+
+            Array<RootRef<Object>> roots(memory);
+            for (usize index = 0; index < pins.Size(); ++index) {
+                if (index % GroupSize == 0) {
+                    if (!roots.TryPushBack(Move(pins[index]))) {
+                        return 3;
+                    }
+                } else {
+                    pins[index].Reset();
+                }
+            }
+
+            pins.Clear();
+            const ObjectStats stats = registry.Stats();
+            printf("  build levels %.1f ms, clusters %u, members %u\n",
+                   Milliseconds(built - started), stats.clusters, stats.clusterMembers);
+            if (!registry.Collect(access)) {
+                return 4;
+            }
+
+            PrintMemory(memory, registry.Stats().liveObjects, registry.Stats());
+            auto pick = [&](ObjectHandle& owner, ObjectHandle& target) noexcept {
+                const uint32 index = rng.Below(static_cast<uint32>(actors.Size()));
+                owner = actors[index];
+                target =
+                    actors[(index / ActorsPerLevel) * ActorsPerLevel + rng.Below(ActorsPerLevel)];
+            };
+            if (!MeasureEdgeWrites(registry, 200000, pick, memory) ||
+                !MeasureGraph(registry, scheduler, options.workers, 3, memory)) {
+                return 5;
+            }
+
+            // 일반 객체 churn: Level 밖 객체 10%만큼 쓰레기 묶음(Level 소속·일반 객체를 가리킨다).
+            Array<GcReport> reports(memory);
+            for (uint32 rep = 0; rep < 3; ++rep) {
+                Array<ObjectHandle> garbage(memory);
+                Array<ObjectHandle> garbageNodes(memory);
+                Array<RootRef<Object>> garbagePins(memory);
+                if (!builder.CreateGroups(OutsideObjects / 10, garbage, garbageNodes,
+                                          garbagePins) ||
+                    !builder.Link(garbageNodes, members, 4)) {
+                    return 6;
+                }
+
+                garbagePins.Clear();
+                auto collected = registry.Collect(access, &scheduler);
+                if (!collected || !reports.TryPushBack(collected.Value())) {
+                    return 6;
+                }
+            }
+
+            char label[64];
+            snprintf(label, sizeof(label), "churn %u parallel x%u", OutsideObjects / 10,
+                     options.workers);
+            PrintPhases(label, MedianOf(reports, memory));
+            fflush(stdout);
+            roots.Clear();
+            levels.Clear();
+            if (!registry.Shutdown(access)) {
+                status = 7;
+            }
+        }
+
+        if (!scheduler.Shutdown() || !types.Unregister(tokens.leaf) ||
+            !types.Unregister(tokens.node) || !types.Unregister(tokens.package) ||
+            !types.Shutdown()) {
+            status = 7;
+        }
+    }
+
+    fflush(stdout);
+    return memory.Allocations() == 0 ? status : 8;
+}
+
+constexpr uint32 PermanentObjects = 100000;
+constexpr uint32 NormalObjects = 1000000;
+
+// 영구 영역: 영구 객체 100K(서로 평균 4개 간선) + 일반 객체 1M(평균 4개 간선, 그중 5%는 영구 객체를
+// 하나 더 가리킨다). region이 거짓이면 같은 그래프를 일반 객체로 만든다(묶음 머리를 루트로 쥔다).
+int RunPermanentScenario(bool region, const Options& options) noexcept {
+    printf("\n== permanent region: permanent %u + normal %u, refs avg 4, region %s ==\n",
+           PermanentObjects, NormalObjects, region ? "on" : "off");
+    fflush(stdout);
+    BenchAllocator memory;
+    int status = 0;
+    {
+        TypeRegistry types(memory);
+        TypeTokens tokens;
+        if (!RegisterTypes(types, tokens)) {
+            return 2;
+        }
+
+        WorkerScheduler scheduler(memory);
+        if (!scheduler.Start({options.workers, 256, 16})) {
+            return 2;
+        }
+
+        {
+            RegistryOptions registryOptions;
+            registryOptions.permanentRegion = region;
+            ObjectRegistry registry(memory, types, Guid{0x6766, region ? 1u : 0u}, registryOptions);
+            const auto access = registry.OwnerAccess();
+            Rng rng{0x2545f4914f6cdd1dULL};
+            GraphBuilder builder{registry, rng, 0};
+            Array<ObjectHandle> permanent(memory);
+            Array<ObjectHandle> permanentNodes(memory);
+            Array<RootRef<Object>> permanentPins(memory);
+            if (!builder.CreateGroups(PermanentObjects, permanent, permanentNodes, permanentPins) ||
+                !builder.Link(permanentNodes, permanent, 4) ||
+                !registry.ClosePermanentRegion(access)) {
+                return 3;
+            }
+
+            Array<RootRef<Object>> roots(memory);
+            for (usize index = 0; index < permanentPins.Size(); ++index) {
+                if (index % GroupSize == 0) {
+                    if (!roots.TryPushBack(Move(permanentPins[index]))) {
+                        return 3;
+                    }
+                } else {
+                    permanentPins[index].Reset();
+                }
+            }
+
+            permanentPins.Clear();
+            Array<ObjectHandle> normal(memory);
+            Array<ObjectHandle> normalNodes(memory);
+            Array<RootRef<Object>> pins(memory);
+            if (!builder.CreateGroups(NormalObjects, normal, normalNodes, pins) ||
+                !builder.Link(normalNodes, normal, 4)) {
+                return 3;
+            }
+
+            for (usize index = 0; index < normalNodes.Size(); ++index) {
+                if (rng.Below(100) < 5 &&
+                    !AddEdge(registry, normalNodes[index],
+                             permanent[rng.Below(static_cast<uint32>(permanent.Size()))])) {
+                    return 3;
+                }
+            }
+
+            for (usize index = 0; index < pins.Size(); ++index) {
+                if (index % GroupSize == 0) {
+                    if (!roots.TryPushBack(Move(pins[index]))) {
+                        return 3;
+                    }
+                } else {
+                    pins[index].Reset();
+                }
+            }
+
+            pins.Clear();
+            if (!registry.Collect(access)) {
+                return 4;
+            }
+
+            const ObjectStats stats = registry.Stats();
+            printf("  live %u, clusters %u, permanent members %u\n", stats.liveObjects,
+                   stats.clusters, stats.clusterMembers);
+            if (!MeasureGraph(registry, scheduler, options.workers, 3, memory)) {
+                return 5;
+            }
+
+            fflush(stdout);
+            roots.Clear();
+            if (!registry.Shutdown(access)) {
+                status = 7;
+            }
+        }
+
+        if (!scheduler.Shutdown() || !types.Unregister(tokens.leaf) ||
+            !types.Unregister(tokens.node) || !types.Unregister(tokens.package) ||
+            !types.Shutdown()) {
+            status = 7;
+        }
+    }
+
+    fflush(stdout);
+    return memory.Allocations() == 0 ? status : 8;
+}
+
+// 클러스터 시나리오 전체다. 같은 실행 안에서 클러스터를 켠 경우와 끈 경우를 번갈아 잰다.
+int RunClusterScenarios(const Options& options) noexcept {
+    const uint32 crossPercents[] = {1, 10, 30};
+    for (uint32 cross : crossPercents) {
+        for (uint32 on = 0; on < 2; ++on) {
+            if (const int status = RunPackageScenario(cross, on == 0, options); status != 0) {
+                return status;
+            }
+        }
+    }
+
+    for (uint32 on = 0; on < 2; ++on) {
+        if (const int status = RunWorldScenario(on == 0, options); status != 0) {
+            return status;
+        }
+    }
+
+    for (uint32 on = 0; on < 2; ++on) {
+        if (const int status = RunPermanentScenario(on == 0, options); status != 0) {
+            return status;
+        }
+    }
+
+    return 0;
 }
 
 // 할당자별 churn 회수 비교다. SystemAllocator·BinnedAllocator는 해제 때 원장을 선형 검색하므로 큰
@@ -857,6 +1424,60 @@ void PrintSoakReport(const GcSoakReport& report) noexcept {
     }
 }
 
+int RunClusterSoak(const Options& options) noexcept {
+    SystemAllocator memory;
+    GcClusterSoakReport report;
+    {
+        WorkerScheduler scheduler(memory);
+        if (options.soakWorkers && !scheduler.Start({options.workers, 256, 16})) {
+            return 2;
+        }
+
+        GcClusterSoakOptions soak;
+        soak.seed = options.seed;
+        soak.ticks = options.clusterSoakTicks;
+        soak.maxObjects = options.soakObjects;
+        soak.packages = options.packages;
+        soak.scheduler = options.soakWorkers ? &scheduler : nullptr;
+        const uint64 started = platform::MonotonicNanoseconds();
+        const bool passed = RunGcClusterSoak(memory, soak, report);
+        printf("cluster soak (%s) seed %llu ticks %llu: %s (%.1f s)\n",
+               options.packages ? "packages" : "world",
+               static_cast<unsigned long long>(options.seed),
+               static_cast<unsigned long long>(report.ticks), passed ? "PASS" : "FAIL",
+               static_cast<double>(platform::MonotonicNanoseconds() - started) * 1e-9);
+        printf("  created %llu, reclaimed %llu, cycles begun %llu / completed %llu, Collect %llu, "
+               "steps %llu, verifications %llu, edge writes %llu (rejected %llu), destroys %llu, "
+               "Discard %llu\n",
+               static_cast<unsigned long long>(report.created),
+               static_cast<unsigned long long>(report.reclaimed),
+               static_cast<unsigned long long>(report.cyclesBegun),
+               static_cast<unsigned long long>(report.cyclesCompleted),
+               static_cast<unsigned long long>(report.collects),
+               static_cast<unsigned long long>(report.steps),
+               static_cast<unsigned long long>(report.verifications),
+               static_cast<unsigned long long>(report.edgeWrites),
+               static_cast<unsigned long long>(report.rejectedWrites),
+               static_cast<unsigned long long>(report.destroys),
+               static_cast<unsigned long long>(report.discards));
+        if (report.failure != nullptr) {
+            printf("  FAILURE at tick %llu (object %u, error %u): %s\n",
+                   static_cast<unsigned long long>(report.failureTick), report.failureObject,
+                   static_cast<unsigned>(report.failureError), report.failure);
+        }
+
+        if (options.soakWorkers && !scheduler.Shutdown()) {
+            return 2;
+        }
+
+        if (!passed) {
+            return 9;
+        }
+    }
+
+    return memory.Stats().liveAllocations == 0 ? 0 : 8;
+}
+
 int RunSoak(const Options& options) noexcept {
     SystemAllocator memory;
     GcSoakReport report;
@@ -917,6 +1538,10 @@ bool Parse(int argc, char** argv, Options& options) noexcept {
         uint64 value = 0;
         if (platform::CStringEquals(argv[index], "--allocators")) {
             options.allocators = true;
+        } else if (platform::CStringEquals(argv[index], "--clusters")) {
+            options.clusters = true;
+        } else if (platform::CStringEquals(argv[index], "--packages")) {
+            options.packages = true;
         } else if (platform::CStringEquals(argv[index], "--soak-workers")) {
             options.soakWorkers = true;
         } else if (platform::CStringEquals(argv[index], "--soak-time-budget")) {
@@ -941,6 +1566,9 @@ bool Parse(int argc, char** argv, Options& options) noexcept {
         } else if (platform::CStringEquals(argv[index], "--soak")) {
             options.soakTicks = value;
             ++index;
+        } else if (platform::CStringEquals(argv[index], "--cluster-soak")) {
+            options.clusterSoakTicks = value;
+            ++index;
         } else if (platform::CStringEquals(argv[index], "--seed")) {
             options.seed = value;
             ++index;
@@ -960,8 +1588,16 @@ int Run(const Options& options) noexcept {
         return RunSoak(options);
     }
 
+    if (options.clusterSoakTicks != 0) {
+        return RunClusterSoak(options);
+    }
+
     if (options.allocators) {
         return RunAllocatorComparison(options);
+    }
+
+    if (options.clusters) {
+        return RunClusterScenarios(options);
     }
 
     if (options.objects != 0) {
@@ -995,8 +1631,8 @@ int main(int argc, char** argv) {
     Options options;
     if (!Parse(argc, argv, options)) {
         printf("usage: GcBench [--objects N] [--refs K] [--leaf P] [--reps R] [--workers W] "
-               "[--allocators] [--soak TICKS [--seed S] [--soak-objects N] [--soak-workers] "
-               "[--soak-time-budget]]\n");
+               "[--allocators] [--clusters] [--soak TICKS [--seed S] [--soak-objects N] "
+               "[--soak-workers] [--soak-time-budget]] [--cluster-soak TICKS [--packages]]\n");
         return 1;
     }
 
