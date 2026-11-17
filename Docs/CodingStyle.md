@@ -56,6 +56,27 @@
 
 `static_assert`의 메시지와 `#error` 문구는 영어로 쓴다(MetaCompiler가 생성 코드에 내는 static_assert 메시지도 영어다). 주석은 한국어로 쓴다. 정책 검사 `compile-time-message-english`(`PolicyChecks.CompileTimeMessages`)가 엔진 소유 C++ 소스 전체(시험 포함)에서 두 메시지에 한글이 있으면 거부한다(주석은 보지 않는다).
 
+## 결과물·빌드 설정·실행 중 메시지
+
+실행 중에 보이는 문자열(로그·추적 채널 설명·진단·오류·도움말), 생성기가 내는 파일(머리 주석과 본문 주석 포함), 빌드 설정 파일은 영어로 쓴다. 손으로 쓴 C++·C# 소스의 주석은 한국어로 쓴다. 단 빌드 설정에 속하는 파일(`*.Build.cs`·`*.Target.cs` 등)은 주석까지 영어다. 문체는 기존 영어 static_assert·오류 메시지처럼 간결하고 사실적으로 쓰며, 경로·명령·식별자는 그대로 둔다. 정책 검사 둘이 거부한다.
+
+- `source-literal-english`(`PolicyChecks.EnglishSourceLiterals`): `Core/Source/Runtime`·`Core/Source/Developer`·`Engine/Source/Runtime`·`Engine/Source/Developer`·`Engine/Plugins`·`Programs`·`Build`의 C++(.h·.c·.cpp·.mm)·C#(.cs) 소스에서 주석 밖의 한글(문자열·문자 리터럴 등)을 거부한다. 주석(`//`·`/* */`·`///`)은 보지 않는다.
+- `build-file-english`(`PolicyChecks.EnglishBuildFiles`): 다음 파일은 주석을 포함해 파일 전체에서 한글을 거부한다.
+  - 저장소 루트의 `Rocks.proj`·`.editorconfig`·`.gitattributes`·`.gitignore`·`.clang-format`·`global.json`·`Directory.Build.rsp`
+  - `.github/workflows/` 아래 파일
+  - 모든 `*.Build.cs`·`*.Target.cs`·`*.csproj`·`*.props`·`*.targets`·`*.slnx`·`*.proj`(시험 실행 파일·시험 fixture 모듈의 규칙 포함)
+  - `Build/` 아래 스크립트·설정(`*.ps1`·`*.sh`·`*.cmake`·`Build.version` 등). 규칙 기반 클래스(`Build/Rules/*.cs`)는 C# 소스라 문자열 규칙만 받는다.
+  - ThirdParty 라이브러리 폴더(`Core/Source/ThirdParty/<Lib>/`·`Engine/Source/ThirdParty/<Lib>/`)에서 Rocks가 쓴 파일: `ThirdParty.json`(notes·verification·modifications reason 등), `*.Build.cs`, 도구 빌드 스크립트·cmake(`Build/`), patch, unity 파일(예: `Lz4Unity.c`)
+  - `Templates/`(새 게임 프로젝트로 복사되는 결과물), `Programs/Scaffold/Templates/`(scaffold 생성 원본), `Engine/Config/`·`Core/Config/`
+  - 생성 파일(`*.generated.*`, 시험 디렉터리 안의 것 포함). 체크인된 생성 파일은 생성기를 고친 뒤 생성기로 다시 만든다(예: `Rocks.ToolTests unicode-tables --root . --write`).
+
+예외는 검사 코드(`PolicyChecks.EnglishArtifacts.cs`)에 명시 목록과 이유로 둔다.
+
+- 문서(`Docs/`·`*.md`·`*.svg`·`*.pdf`): 설계·사용 문서는 한국어로 쓴다.
+- 외부 원본(ThirdParty.json의 `upstreamDirectory`): 업스트림 byte를 그대로 보존한다(예: `UnicodeData/ucd-*/NormalizationTest.txt`).
+- 시험 소스(모듈 `Tests/`·`Programs/FoundationTests/`·C# 시험 프로젝트 `Programs/Rocks.*Tests/`)와 시험 fixture 모듈(`*TestFixtures`): 유니코드 처리를 시험하려고 한글 경로·문자열·DisplayName을 일부러 쓴다. 문자열 규칙(`source-literal-english`)만 면제하며, 이들의 빌드 규칙과 생성 파일은 `build-file-english` 대상이다. 모듈 `Private/Tests/`는 모듈에 컴파일되어 출하되므로 시험 소스가 아니다.
+- 빌드 출력 디렉터리(`Build/Artifacts/`·`Build/Cache/`, .gitignore 대상)
+
 ## 중괄호 목록 추론
 
 형식 추론이 `std::initializer_list`를 요구하는 문법을 쓰지 않는다. 엔진은 STL 헤더를 쓰지 않으므로 Android(NDK) 빌드에는 `<initializer_list>`가 없어 컴파일되지 않는다(Windows에서는 시스템 헤더가 간접으로 들여와 통과한다).
