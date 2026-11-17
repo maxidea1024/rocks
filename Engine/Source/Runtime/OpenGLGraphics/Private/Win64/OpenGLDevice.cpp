@@ -1689,14 +1689,19 @@ public:
         if (!MakeCurrentForResources()) {
             return FailWith<ClockCalibration>("OpenGL context is not current");
         }
-        const uint64 before = platform::MonotonicNanoseconds();
+        // GL_TIMESTAMP 조회를 CPU tick 두 번으로 감싸고 가운데를 같은 순간으로 본다. 조회 지연의
+        // 절반이 오차 반경이다.
+        const uint64 before = platform::MonotonicTicks();
         GLint64 gpu = 0;
         gl_.GetInteger64v(GL_TIMESTAMP_VALUE, &gpu);
-        const uint64 after = platform::MonotonicNanoseconds();
+        const uint64 after = platform::MonotonicTicks();
+        const uint64 frequency = platform::MonotonicTickFrequency();
         ClockCalibration calibration;
         calibration.gpuTicks = static_cast<uint64>(gpu);
-        calibration.cpuNanoseconds = before + (after - before) / 2;
+        calibration.cpuTicks = before + (after - before) / 2;
+        calibration.cpuNanoseconds = TicksToNanoseconds(calibration.cpuTicks, frequency);
         calibration.gpuFrequency = TimestampNanosecondFrequency;
+        calibration.uncertaintyNanoseconds = TicksToNanoseconds(after - before, frequency) / 2 + 1;
         return Result<ClockCalibration>::Success(calibration);
     }
 

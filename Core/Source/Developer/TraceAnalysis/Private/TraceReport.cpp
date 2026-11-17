@@ -368,6 +368,101 @@ void WriteCounters(JsonWriter& json, const TraceModel& model, Allocator& scratch
     json.Close(']');
 }
 
+// 정렬된 길이(ns)의 횟수·합계·백분위수를 쓴다.
+void WriteDurations(JsonWriter& json, const Array<uint64>& sorted) noexcept {
+    uint64 total = 0;
+    for (const uint64 value : sorted) {
+        total += value;
+    }
+
+    json.KeyUnsigned("count", sorted.Size());
+    json.KeyUnsigned("totalNs", total);
+    json.KeyUnsigned("p50Ns", Percentile(sorted, 50));
+    json.KeyUnsigned("p95Ns", Percentile(sorted, 95));
+    json.KeyUnsigned("p99Ns", Percentile(sorted, 99));
+}
+
+uint64 SpanNanoseconds(uint64 begin, uint64 end, uint64 frequency) noexcept {
+    return end >= begin ? TraceTicksToNanoseconds(end - begin, frequency) : 0;
+}
+
+void WriteGpu(JsonWriter& json, const TraceModel& model, Allocator& scratch, char (&buffer)[32],
+              char (&other)[32]) noexcept {
+    const uint64 frequency = model.Decoder().Header().tickFrequency;
+    Array<uint64> durations(scratch);
+    Array<uint32> ids(scratch);
+    json.Key("gpu");
+    json.Open('[');
+    for (const TraceModelGpuQueue& queue : model.GpuQueues()) {
+        json.Element();
+        json.Open('{');
+        json.KeyUnsigned("id", queue.id);
+        json.KeyString("name", queue.name);
+        json.KeyUnsigned("kind", queue.kind);
+        json.KeyBool("timing", queue.timing);
+        json.KeyUnsigned("calibrations", queue.calibrations);
+        json.KeyUnsigned("maxUncertaintyNs", queue.maxUncertaintyNanoseconds);
+
+        durations.Clear();
+        for (const TraceModelGpuFrame& frame : model.GpuFrames()) {
+            if (frame.queue == queue.id && !durations.TryPushBack(SpanNanoseconds(
+                                               frame.beginTick, frame.endTick, frequency))) {
+                return;
+            }
+        }
+
+        durations.Sort();
+        json.Key("frames");
+        json.Open('{');
+        WriteDurations(json, durations);
+        json.Close('}');
+
+        // 이름 id마다 묶는다. 표시 이름 순(같으면 id 순)으로 쓴다.
+        ids.Clear();
+        for (const TraceModelGpuScope& scope : model.GpuScopes()) {
+            if (scope.queue == queue.id && !ids.Contains(scope.nameId) &&
+                !ids.TryPushBack(scope.nameId)) {
+                return;
+            }
+        }
+
+        ids.Sort([&](uint32 left, uint32 right) noexcept {
+            const StringView a = DisplayName(model, left, buffer);
+            const StringView b = DisplayName(model, right, other);
+            if (LessText(a, b)) {
+                return true;
+            }
+
+            return !LessText(b, a) && left < right;
+        });
+
+        json.Key("scopes");
+        json.Open('[');
+        for (const uint32 id : ids) {
+            durations.Clear();
+            for (const TraceModelGpuScope& scope : model.GpuScopes()) {
+                if (scope.queue == queue.id && scope.nameId == id &&
+                    !durations.TryPushBack(
+                        SpanNanoseconds(scope.beginTick, scope.endTick, frequency))) {
+                    return;
+                }
+            }
+
+            durations.Sort();
+            json.Element();
+            json.Open('{');
+            json.KeyString("name", DisplayName(model, id, buffer));
+            WriteDurations(json, durations);
+            json.Close('}');
+        }
+
+        json.Close(']');
+        json.Close('}');
+    }
+
+    json.Close(']');
+}
+
 } // namespace
 
 Result<void> WriteTraceReportJson(const TraceModel& model, Array<uint8>& out) noexcept {
@@ -445,6 +540,7 @@ Result<void> WriteTraceReportJson(const TraceModel& model, Array<uint8>& out) no
         json.Close(']');
         WriteTasks(json, model, scratch);
         WriteCounters(json, model, scratch);
+        WriteGpu(json, model, scratch, buffer, other);
         json.Close('}');
         json.Raw("\n");
     }

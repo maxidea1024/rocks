@@ -232,3 +232,28 @@ TEST(Base_BuildConfigurationMacros) {
     printf("  build: debug=%d development=%d release=%d optimized=%d\n", int(IsDebugBuild),
            int(IsDevelopmentBuild), int(IsReleaseBuild), int(optimized));
 }
+
+TEST(Base_CacheLineSizeMatchesTarget) {
+    // UE5.8 PLATFORM_CACHE_LINE_SIZE와 같은 대상별 값이다: Apple Silicon macOS는 128, 나머지
+    // (Windows x64·Android arm64)는 64.
+    static_assert((CacheLineSize & (CacheLineSize - 1)) == 0,
+                  "cache line size must be a power of two");
+    // 구현식을 되풀이하지 않고 대상별 값을 그대로 적는다(OS 분기는 전처리기 대신 IsMac 상수).
+    static_assert(!(IsMac && IsArm64) || CacheLineSize == 128,
+                  "macOS arm64 cache line size must be 128 bytes");
+    static_assert((IsMac && IsArm64) || CacheLineSize == 64,
+                  "Windows x64 and Android arm64 cache line size must be 64 bytes");
+    if constexpr (IsMac && IsArm64) {
+        CHECK(CacheLineSize == 128);
+    } else {
+        CHECK(CacheLineSize == 64);
+    }
+
+    struct alignas(CacheLineSize) Padded {
+        uint64 value = 0;
+    };
+
+    Padded pair[2];
+    CHECK(sizeof(Padded) == CacheLineSize);
+    CHECK(reinterpret_cast<uptr>(&pair[1]) - reinterpret_cast<uptr>(&pair[0]) == CacheLineSize);
+}

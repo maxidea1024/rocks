@@ -104,10 +104,23 @@ public:
         timestampsSupported_ = supported;
     }
 
+    // CalibrateClocks가 돌려줄 쌍을 고정한다(gpuFrequency 0이면 고정을 푼다). GPU 구간 변환을
+    // 정확히 단언하는 시험이 쓴다.
+    void SetCalibration(const graphics::ClockCalibration& calibration) noexcept {
+        fixedCalibration_ = calibration;
+    }
+
+    // CalibrateClocks가 성공한 횟수다.
+    uint64 Calibrations() const noexcept {
+        return calibrations_;
+    }
+
     // 기록 backend의 timestamp 주파수(초당 tick)다. WriteTimestamp마다 TimestampTickStep씩 증가한
     // tick을 낸다.
     static constexpr uint64 TimestampFrequency = 1000000000;
     static constexpr uint64 TimestampTickStep = 100;
+    // 기본 calibration 쌍의 오차 반경(ns)이다(기록 장치는 쌍을 한 번에 읽는다고 가정한다).
+    static constexpr uint64 CalibrationUncertaintyNanoseconds = 250;
 
     // --- Device ---
     graphics::DeviceInfo Info() const noexcept override;
@@ -245,6 +258,8 @@ private:
     bool timestampsSupported_ = true;
     Call calls_[MaxCalls];
     usize callCount_ = 0;
+    graphics::ClockCalibration fixedCalibration_;
+    uint64 calibrations_ = 0;
     platform::Mutex gate_;
     platform::ManualResetEvent acquireOpen_{true};
     uint64 fenceValue_ = 0;

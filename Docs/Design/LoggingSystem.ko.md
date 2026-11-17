@@ -1,6 +1,6 @@
 # 로깅 시스템 설계
 
-기준일: 2026-11-17, 개정 3. 엔진 전반에서 쓰는 **로그**(사람이 읽는 사건 기록)의 호출 API, 카테고리·레벨 필터, 비동기 기록 경로, 출력 형식, 장애 격리, 엔진 적용 범위를 정한다.
+기준일: 2026-11-17, 개정 4. 엔진 전반에서 쓰는 **로그**(사람이 읽는 사건 기록)의 호출 API, 카테고리·레벨 필터, 비동기 기록 경로, 출력 형식, 장애 격리, 엔진 적용 범위를 정한다.
 
 요구는 다음 문서에서 온다.
 - [엔진 구현 계획](EngineImplementationPlan.ko.md) 29.4절(필수 로깅·프로파일러: level/category, UTC+monotonic, rate limit·중복 집계, compile/runtime level, error/fatal 비상 경로, 임계 구간에서 file IO·heap·lock wait 금지)
@@ -120,7 +120,7 @@ UE의 매크로 중심 API(`UE_LOG`, `DECLARE_LOG_CATEGORY_*`)는 따르지 않�
 - **비상 출력:** CRT `fwrite`가 아니라 OS 쓰기(`WriteFile`·`write(2)`)를 직접 부른다. `platform::Fatal`과 같은 방식이다(`Win64/Platform.cpp:82–96`). 그래야 출력 스레드의 stderr sink가 잡은 CRT stream lock에 막히지 않는다. lock은 없지만 OS I/O 대기는 남는다. PlatformBase에 `platform::WriteDiagnostic(StringView)`로 공개한다.
 - **설치 전·해제 후:** Warning 이상은 고정 1 KiB 스택 버퍼에 렌더해 비상 출력으로 쓴다(힙·lock 없음). 그 아래는 버리고 원자 카운터에 센다. 다음 설치 때 그 수를 한 번 알린다. backlog 재생은 하지 않는다(`LogBuffer`는 단일 스레드 전용이고, 재생에는 중복·순서·넘침 정책이 필요하다).
 - **시험 격리:** 시험마다 Manual 모드 LogSystem과 캡처 sink를 `LogInstallScope`로 설치한다. 레벨 재정의·sink·통계는 LogSystem 안에 있으므로 다른 시험으로 새지 않는다.
-- `LogBuffer`는 단일 스레드 초기 진단으로 남는다(TraceSystem T8). `ProfileScope`는 TR2에서 `CpuScope`로 바뀐다.
+- `LogBuffer`는 단일 스레드 초기 진단으로 남는다(TraceSystem T8). `ProfileScope`는 TraceCapture 병합(`2ff7fbc`)으로 삭제되었고 `CpuScope`가 대신한다.
 
 ## 6. API
 
@@ -258,7 +258,8 @@ LogContextScope stage("Stage", "BeginPlay");
 
 ### 8.3 기록 인코딩과 블록 풀
 
-- 슬롯(초기 512 B): 머리(레벨·카테고리 포인터·위치·EventId·단조 시각·스레드·프레임·플래그·값 수) + 값 영역.
+- 슬롯(초기 512 B): 머리(레벨·카테고리 이름 포인터와 길이·위치·EventId·단조 시각·스레드·프레임·플래그·값 수) + 값 영역.
+  - 카테고리는 `LogCategory` 객체 포인터가 아니라 **이름**을 담는다. 이름은 consteval 생성자가 받은 문자열 리터럴이라 정적 저장소이므로, 함수 지역 `constexpr LogCategory`로 기록해도 렌더 때 유효하다(LG2에서 객체 포인터로 인한 수명 결함을 확인함, LG3에서 바꿈).
 - 값: 정수·실수·bool·포인터·enum은 원시 값, 문자열은 바이트 복사, 사용자 `Formatter<T>` 타입은 **캡처할 때 준비 버퍼에 렌더링**한다(객체 수명이 끝날 수 있으므로). 이 비용은 호출 스레드에 남는다.
 - 렌더링에는 Core에 새로 추가하는 **잘림 모드 고정 버퍼 builder**(`FixedStringBuilder`, `StringBuilderBase` 파생, LG2)를 쓴다.
   - 외부 버퍼를 받고 할당하지 않는다.
@@ -431,7 +432,7 @@ public:
 | 장치 생성 성공 | Info | `Created {Backend} device on {Adapter} (validation {Validation})` | 생성 함수 |
 | 장치 생성 실패 | Warning / Error | fallback이면 Warning, 모든 후보 실패면 Error. HRESULT·단계 포함 | 호출자(선택자), `DeviceCreateReport` |
 | Present 실패·장치 제거 | Error | `Device removed during present: {Reason} (HRESULT {HResult:#x})`, lost 전이 때 1회 | 장치 내부 |
-| 셰이더 컴파일 실패 | Error | `Shader {Entry} ({Target}) failed to compile: {Diagnostics}` | Renderer |
+| 셰이더 컴파일 실패 | Error | `Shader {Entry} ({Target}) failed to compile: {Diagnostics}` | 파이프라인 생성을 결정하는 쪽(지금은 Sandbox `SampleRenderer`) |
 | 검증 계층 메시지 | Warning | 원문, 메시지 ID마다 1회, `Graphics.D3D12.Validation` | 장치 내부 |
 | 창 생성 실패 | Error | `Window creation failed at {Call}: {OsError}` | 호스트, `WindowCreateReport` |
 | ShaderToolLoader | Error / Debug | 필수 도구 실패 Error, 선택 도구 없음 Debug | 호출자 |
@@ -470,7 +471,14 @@ Result<UniquePtr<Device>> CreateD3D12Device(Allocator&, const DeviceDesc&, Devic
 
 ## 15. 다른 세션과의 조율
 
-`feature/engine-runtime` 밑에서 그래픽 관련 세션이 여럿 진행 중이다. 2026-11-17 기준 `feature/render-lane`(아직 병합 전)이 이 문서의 적용 대상 파일 다수를 고쳤다.
+`feature/engine-runtime` 밑에서 그래픽 관련 세션이 여럿 진행 중이다.
+
+**현황(2026-11-17, 개정 4):** 아래 셋이 engine-runtime에 합쳐졌고, `feature/logging`이 이를 병합했다(`4be868c`). 그래서 아래 표의 "병합 전" 조건은 모두 풀렸다.
+- render-lane(`f2cce3b`): 최소 Renderer가 Sandbox `SampleRenderer`로 옮겨졌고 `ThreadOptions::name`이 생겼다.
+- Config CF1·CF2(`c9fea72`)
+- TraceCapture TR1–TR4(`2ff7fbc`): `ProfileScope`를 삭제했고 `Clock.h`에 `MonotonicTicks`를 추가했다.
+
+아래 표는 병합 전 겹침 기록이다.
 
 | 파일 | render-lane | 로깅 단계 |
 |---|---|---|
@@ -539,3 +547,4 @@ Result<UniquePtr<Device>> CreateD3D12Device(Allocator&, const DeviceDesc&, Devic
   - render-lane 표 정정과 crypto 조율
 - 개정 2(2026-11-17): 기록 모드(5.1절, L11)를 추가했다. 명령줄 도구는 Sync, 엔진 호스트는 Async가 기본이며, 설정 `log.mode`로 고른다. 이를 위해 LG9(ConfigSystem CF2 연결)를 추가했다. trace 세션 답신에 따라 LG1에서 `LogBuffer`·`ProfileScope` 카테고리 교체를 뺐다(TR2가 `ProfileScope`를 지움). `Clock.h`가 TR1과 겹치는 것도 15절에 적었다.
 - 개정 3(2026-11-17): P7과 파일 sink·암호화(9.1절, L12·L13, LG10)를 추가했다. 기본은 암호화 끔이고, 켜면 KEM 봉인 파일 키와 SecretStream 묶음 봉인을 쓴다.
+- 개정 4(2026-11-17): 15절에 render-lane·Config·TraceCapture 병합 현황을 적었다(LG3 착수 조건 충족). 셰이더 컴파일 실패 로그 위치를 Sandbox `SampleRenderer`로 옮겼다. 캡처가 카테고리 객체 포인터 대신 이름을 담도록 바꿨다(8.3).

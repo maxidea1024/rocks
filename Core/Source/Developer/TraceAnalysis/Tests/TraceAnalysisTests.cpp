@@ -26,6 +26,10 @@ struct StandardIds {
     uint16 counterDefinition;
     uint16 counterInteger;
     uint16 mark;
+    uint16 gpuQueue;
+    uint16 gpuCalibration;
+    uint16 gpuScope;
+    uint16 gpuFrame;
 };
 
 StandardIds WriteSchemas(TraceTestWriter& writer, uint16 base, bool reversed) noexcept {
@@ -72,6 +76,29 @@ StandardIds WriteSchemas(TraceTestWriter& writer, uint16 base, bool reversed) no
         {"tick", TraceFieldType::UInt64, Format::MarkTickOffset},
         {"site", TraceFieldType::UInt32, Format::MarkSiteOffset},
         {"arguments", TraceFieldType::UInt8Array, TraceFormat::VariableFieldOffset}};
+    constexpr TestField GpuQueue[] = {
+        {"queue", TraceFieldType::UInt16, Format::GpuQueueIdOffset},
+        {"kind", TraceFieldType::UInt8, Format::GpuQueueKindOffset},
+        {"timing", TraceFieldType::Bool, Format::GpuQueueTimingOffset},
+        {"name", TraceFieldType::String, TraceFormat::VariableFieldOffset}};
+    constexpr TestField GpuCalibration[] = {
+        {"queue", TraceFieldType::UInt16, Format::GpuCalibrationQueueOffset},
+        {"gpuTicks", TraceFieldType::UInt64, Format::GpuCalibrationGpuTicksOffset},
+        {"cpuTick", TraceFieldType::UInt64, Format::GpuCalibrationCpuTickOffset},
+        {"gpuFrequency", TraceFieldType::UInt64, Format::GpuCalibrationFrequencyOffset},
+        {"uncertaintyNs", TraceFieldType::UInt64, Format::GpuCalibrationUncertaintyOffset}};
+    constexpr TestField GpuScope[] = {
+        {"queue", TraceFieldType::UInt16, Format::GpuScopeQueueOffset},
+        {"name", TraceFieldType::UInt32, Format::GpuScopeNameOffset},
+        {"depth", TraceFieldType::UInt32, Format::GpuScopeDepthOffset},
+        {"frame", TraceFieldType::UInt64, Format::GpuScopeFrameOffset},
+        {"begin", TraceFieldType::UInt64, Format::GpuScopeBeginOffset},
+        {"end", TraceFieldType::UInt64, Format::GpuScopeEndOffset}};
+    constexpr TestField GpuFrame[] = {
+        {"queue", TraceFieldType::UInt16, Format::GpuFrameQueueOffset},
+        {"frame", TraceFieldType::UInt64, Format::GpuFrameNumberOffset},
+        {"begin", TraceFieldType::UInt64, Format::GpuFrameBeginOffset},
+        {"end", TraceFieldType::UInt64, Format::GpuFrameEndOffset}};
 
     writer.Schema(TraceFormat::ChannelInfoTypeId, "Trace.ChannelInfo", TraceFormat::NoChannelId,
                   TraceFormat::TypeFlagDefinition, TraceFormat::ChannelInfoFixedBytes, ChannelInfo);
@@ -80,13 +107,14 @@ StandardIds WriteSchemas(TraceTestWriter& writer, uint16 base, bool reversed) no
     writer.Schema(TraceFormat::LossTypeId, "Trace.Loss", TraceFormat::NoChannelId, 0,
                   TraceFormat::LossFixedBytes, Loss);
 
-    StandardIds ids;
-    uint16 slots[6];
-    for (uint16 index = 0; index < 6; ++index) {
-        slots[index] = static_cast<uint16>(reversed ? base + 5 - index : base + index);
+    constexpr uint16 SlotCount = 10;
+    uint16 slots[SlotCount];
+    for (uint16 index = 0; index < SlotCount; ++index) {
+        slots[index] = static_cast<uint16>(reversed ? base + SlotCount - 1 - index : base + index);
     }
 
-    ids = {slots[0], slots[1], slots[2], slots[3], slots[4], slots[5]};
+    const StandardIds ids = {slots[0], slots[1], slots[2], slots[3], slots[4],
+                             slots[5], slots[6], slots[7], slots[8], slots[9]};
     writer.Schema(ids.scopeName, Format::ScopeNameType, 0, TraceFormat::TypeFlagDefinition,
                   Format::ScopeNameFixedBytes, ScopeName);
     writer.Schema(ids.scopeBatch, Format::CpuScopeBatchType, 0, 0, 0, Batch);
@@ -98,6 +126,13 @@ StandardIds WriteSchemas(TraceTestWriter& writer, uint16 base, bool reversed) no
     writer.Schema(ids.counterInteger, Format::CounterIntegerType, 2, TraceFormat::TypeFlagOrdered,
                   Format::CounterValueFixedBytes, CounterInteger);
     writer.Schema(ids.mark, Format::MarkType, 3, 0, Format::MarkFixedBytes, Mark);
+    writer.Schema(ids.gpuQueue, Format::GpuQueueType, 4, TraceFormat::TypeFlagDefinition,
+                  Format::GpuQueueFixedBytes, GpuQueue);
+    writer.Schema(ids.gpuCalibration, Format::GpuCalibrationType, 4,
+                  TraceFormat::TypeFlagDefinition, Format::GpuCalibrationFixedBytes,
+                  GpuCalibration);
+    writer.Schema(ids.gpuScope, Format::GpuScopeType, 4, 0, Format::GpuScopeFixedBytes, GpuScope);
+    writer.Schema(ids.gpuFrame, Format::GpuFrameType, 4, 0, Format::GpuFrameFixedBytes, GpuFrame);
     return ids;
 }
 
@@ -173,11 +208,58 @@ void WriteName(TraceTestWriter& writer, const StandardIds& ids, uint32 id,
     writer.Record(TraceFormat::DefinitionStreamId, ids.scopeName, fixed.View(), parts);
 }
 
+// GPU queue 정의를 쓴다.
+void WriteGpuQueue(TraceTestWriter& writer, const StandardIds& ids, uint16 queue, uint8 kind,
+                   bool timing, const char* name) noexcept {
+    const auto fixed = FixedBytes<Format::GpuQueueFixedBytes>()
+                           .U16(Format::GpuQueueIdOffset, queue)
+                           .U8(Format::GpuQueueKindOffset, kind)
+                           .U8(Format::GpuQueueTimingOffset, timing ? 1 : 0);
+    const Span<const uint8> parts[] = {Text(name)};
+    writer.Record(TraceFormat::DefinitionStreamId, ids.gpuQueue, fixed.View(), parts);
+}
+
+void WriteGpuCalibration(TraceTestWriter& writer, const StandardIds& ids, uint16 queue,
+                         uint64 cpuTick, uint64 uncertainty) noexcept {
+    const auto fixed = FixedBytes<Format::GpuCalibrationFixedBytes>()
+                           .U16(Format::GpuCalibrationQueueOffset, queue)
+                           .U64(Format::GpuCalibrationGpuTicksOffset, cpuTick * 1000)
+                           .U64(Format::GpuCalibrationCpuTickOffset, cpuTick)
+                           .U64(Format::GpuCalibrationFrequencyOffset, 1000000000)
+                           .U64(Format::GpuCalibrationUncertaintyOffset, uncertainty);
+    writer.Record(TraceFormat::DefinitionStreamId, ids.gpuCalibration, fixed.View(), {});
+}
+
+void WriteGpuScope(TraceTestWriter& writer, const StandardIds& ids, uint16 stream, uint32 name,
+                   uint32 depth, uint64 frame, uint64 begin, uint64 end) noexcept {
+    const auto fixed = FixedBytes<Format::GpuScopeFixedBytes>()
+                           .U16(Format::GpuScopeQueueOffset, 0)
+                           .U32(Format::GpuScopeNameOffset, name)
+                           .U32(Format::GpuScopeDepthOffset, depth)
+                           .U64(Format::GpuScopeFrameOffset, frame)
+                           .U64(Format::GpuScopeBeginOffset, begin)
+                           .U64(Format::GpuScopeEndOffset, end);
+    writer.Record(stream, ids.gpuScope, fixed.View(), {});
+}
+
+void WriteGpuFrame(TraceTestWriter& writer, const StandardIds& ids, uint16 stream, uint64 frame,
+                   uint64 begin, uint64 end) noexcept {
+    const auto fixed = FixedBytes<Format::GpuFrameFixedBytes>()
+                           .U16(Format::GpuFrameQueueOffset, 0)
+                           .U64(Format::GpuFrameNumberOffset, frame)
+                           .U64(Format::GpuFrameBeginOffset, begin)
+                           .U64(Format::GpuFrameEndOffset, end);
+    writer.Record(stream, ids.gpuFrame, fixed.View(), {});
+}
+
 // golden 입력이다. 1 tick = 1µs(주파수 10^6).
 // - 스레드 1 "Main": Frame[1000, 2000]{Update 300, Update 200}, Frame[3000, 4000]{Update 100},
 //   손실(cpu 5개), 끝 없는 Frame(스트림 끝), 표지 2개, 카운터 100 → 300(순서 번호 8이 빠짐).
 // - 스레드 2 "Worker.0": 시작 없는 끝 1개, Job 200·50, 손실(task 2개)로 끝을 잃은 Job, Job 100.
 // - task: 1 → 2, 1 → 3(실패), 4(취소). 임계 경로 1 → 2.
+// - GPU queue 0 "Graphics"(GPU 시간 있음, calibration 2개, 오차 250·400ns): 프레임 1 [1000, 1800],
+//   프레임 2 [3000, 3500], 구간 GpuPass 300·100, 중첩 Update 100. queue 1 "Compute"는 GPU 시간
+//   없음(구간 없음).
 Array<uint8> BuildGoldenInput(Allocator& allocator, uint16 base, bool reversed) noexcept {
     TraceTestWriter writer(allocator, 1000000);
     const StandardIds ids = WriteSchemas(writer, base, reversed);
@@ -207,6 +289,11 @@ Array<uint8> BuildGoldenInput(Allocator& allocator, uint16 base, bool reversed) 
     WriteName(writer, ids, 1, "Frame");
     WriteName(writer, ids, 2, "Update");
     WriteName(writer, ids, 3, "Job");
+    WriteName(writer, ids, 4, "GpuPass");
+    WriteGpuQueue(writer, ids, 0, 0, true, "Graphics");
+    WriteGpuQueue(writer, ids, 1, 1, false, "Compute");
+    WriteGpuCalibration(writer, ids, 0, 900, 250);
+    WriteGpuCalibration(writer, ids, 0, 2900, 400);
     {
         const auto fixed = FixedBytes<Format::CounterDefinitionFixedBytes>()
                                .U32(Format::CounterDefinitionIdOffset, 1)
@@ -261,6 +348,13 @@ Array<uint8> BuildGoldenInput(Allocator& allocator, uint16 base, bool reversed) 
     WriteTask(writer, ids, Worker, 19, 330, 3, Format::TaskFinished);
     WriteTask(writer, ids, Worker, 20, 340, 3, Format::TaskCompleted, 0, "InvalidArgument");
     WriteTask(writer, ids, Worker, 21, 350, 4, Format::TaskCancelled);
+    // GPU 기록은 완료 통지를 받은 스레드(여기서는 Main)의 스트림에 있다. 순서와 무관하게 시작 tick
+    // 순으로 모은다.
+    WriteGpuScope(writer, ids, Main, 2, 1, 1, 1150, 1250);
+    WriteGpuScope(writer, ids, Main, 4, 0, 1, 1100, 1400);
+    WriteGpuFrame(writer, ids, Main, 1, 1000, 1800);
+    WriteGpuScope(writer, ids, Main, 4, 0, 2, 3100, 3200);
+    WriteGpuFrame(writer, ids, Main, 2, 3000, 3500);
     return writer.Finish();
 }
 
@@ -275,7 +369,7 @@ StringView View(const Array<uint8>& bytes) noexcept {
 
 constexpr const char* GoldenReport = R"({
   "format": "rocks-trace-report",
-  "version": 1,
+  "version": 2,
   "session": {
     "guidHigh": "0x0000000000001234",
     "guidLow": "0x0000000000005678",
@@ -382,6 +476,57 @@ constexpr const char* GoldenReport = R"({
       "unit": 1,
       "samples": 2,
       "last": 300
+    }
+  ],
+  "gpu": [
+    {
+      "id": 0,
+      "name": "Graphics",
+      "kind": 0,
+      "timing": true,
+      "calibrations": 2,
+      "maxUncertaintyNs": 400,
+      "frames": {
+        "count": 2,
+        "totalNs": 1300000,
+        "p50Ns": 500000,
+        "p95Ns": 800000,
+        "p99Ns": 800000
+      },
+      "scopes": [
+        {
+          "name": "GpuPass",
+          "count": 2,
+          "totalNs": 400000,
+          "p50Ns": 100000,
+          "p95Ns": 300000,
+          "p99Ns": 300000
+        },
+        {
+          "name": "Update",
+          "count": 1,
+          "totalNs": 100000,
+          "p50Ns": 100000,
+          "p95Ns": 100000,
+          "p99Ns": 100000
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "name": "Compute",
+      "kind": 1,
+      "timing": false,
+      "calibrations": 0,
+      "maxUncertaintyNs": 0,
+      "frames": {
+        "count": 0,
+        "totalNs": 0,
+        "p50Ns": 0,
+        "p95Ns": 0,
+        "p99Ns": 0
+      },
+      "scopes": []
     }
   ]
 }

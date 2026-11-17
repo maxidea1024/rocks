@@ -105,25 +105,32 @@ uint32 ResolveTraceName(uint64 serial, StringView name, bool useThreadCache) noe
     return id;
 }
 
+namespace {
+
+uint32 ResolveStatic(TraceScopeName& name, uint64 serial) noexcept {
+    uint64* cache = TraceScopeNameAccess::Cache(name);
+    uint32 id = CachedSessionId(cache, serial);
+    if (id == 0) {
+        // 여러 스레드가 동시에 와도 이름 표가 같은 id를 돌려주므로 같은 값으로 수렴한다.
+        id = ResolveTraceName(serial, StringView(name.Name()), false);
+        if (id != 0) {
+            AtomicStore<MemoryOrder::Relaxed>(cache, PackSessionId(serial, id));
+        }
+    }
+
+    return id;
+}
+
+} // namespace
+
 uint64 BeginCpuScope(TraceScopeName& name) noexcept {
     const uint64 serial = AtomicLoad<MemoryOrder::Acquire>(&currentSessionSerial);
     if (serial == 0) {
         return 0;
     }
 
-    uint64* cache = TraceScopeNameAccess::Cache(name);
-    uint32 id = CachedSessionId(cache, serial);
-    if (id == 0) {
-        // 여러 스레드가 동시에 와도 이름 표가 같은 id를 돌려주므로 같은 값으로 수렴한다.
-        id = ResolveTraceName(serial, StringView(name.Name()), false);
-        if (id == 0) {
-            return 0;
-        }
-
-        AtomicStore<MemoryOrder::Relaxed>(cache, PackSessionId(serial, id));
-    }
-
-    return BeginWithName(serial, id);
+    const uint32 id = ResolveStatic(name, serial);
+    return id != 0 ? BeginWithName(serial, id) : 0;
 }
 
 uint64 BeginCpuScope(StringView name) noexcept {
@@ -172,3 +179,17 @@ void FlushCpuScopeBatch(TraceThreadSlot& slot) noexcept {
 }
 
 } // namespace rocks::detail
+
+namespace rocks {
+
+uint32 TraceResolveScopeName(TraceScopeName& name) noexcept {
+    const uint64 serial =
+        platform::AtomicLoad<platform::MemoryOrder::Acquire>(&detail::currentSessionSerial);
+    return serial != 0 ? detail::ResolveStatic(name, serial) : 0;
+}
+
+uint64 TraceCurrentSessionSerial() noexcept {
+    return platform::AtomicLoad<platform::MemoryOrder::Acquire>(&detail::currentSessionSerial);
+}
+
+} // namespace rocks

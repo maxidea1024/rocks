@@ -1638,6 +1638,11 @@ public:
         calibration.cpuNanoseconds =
             TicksToNanoseconds(cpu, static_cast<uint64>(frequency.QuadPart));
         calibration.gpuFrequency = timestampFrequency_;
+        // QPC는 platform::MonotonicTicks와 같은 원천이다(PlatformBase Win64).
+        calibration.cpuTicks = cpu;
+        // GPU·CPU 값을 한 호출이 함께 읽으므로 오차는 CPU tick 하나의 길이로 둔다.
+        calibration.uncertaintyNanoseconds =
+            TicksToNanoseconds(1, static_cast<uint64>(frequency.QuadPart));
         return Result<ClockCalibration>::Success(calibration);
     }
 

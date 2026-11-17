@@ -320,6 +320,44 @@ struct TraceStandardFormat {
     // task 실행 구간을 감싸는 CPU 구간 이름이다.
     static constexpr const char* TaskRunScopeName = "Task.Run";
 
+    // ---- GPU(RB7, Docs/Design/TraceSystem.ko.md 9절) ----
+    // 형은 RenderBase가 채널 "gpu"와 함께 등록한다(RegisterGpuTraceTypes). GPU 시간은 기록 전에
+    // calibration 쌍으로 trace tick(platform::MonotonicTicks)으로 바꾼다.
+    static constexpr const char* GpuQueueType = "Trace.GpuQueue";
+    static constexpr const char* GpuCalibrationType = "Trace.GpuCalibration";
+    static constexpr const char* GpuScopeType = "Trace.GpuScope";
+    static constexpr const char* GpuFrameType = "Trace.GpuFrame";
+    // GpuQueue(정의): u16 queue id | u8 종류(0 graphics) | u8 GPU 시간(0 없음, 1 있음), 가변:
+    // 이름(String). GPU 시간이 없으면(timestamp·calibration 미지원) 그 queue의 GPU 구간은 기록하지
+    // 않는다(추정값 없음).
+    static constexpr usize GpuQueueIdOffset = 0;
+    static constexpr usize GpuQueueKindOffset = 2;
+    static constexpr usize GpuQueueTimingOffset = 3;
+    static constexpr usize GpuQueueFixedBytes = 4;
+    // GpuCalibration(정의): u16 queue | u64 GPU tick | u64 CPU trace tick | u64 GPU 주파수
+    // | u64 오차(ns)
+    static constexpr usize GpuCalibrationQueueOffset = 0;
+    static constexpr usize GpuCalibrationGpuTicksOffset = 2;
+    static constexpr usize GpuCalibrationCpuTickOffset = 10;
+    static constexpr usize GpuCalibrationFrequencyOffset = 18;
+    static constexpr usize GpuCalibrationUncertaintyOffset = 26;
+    static constexpr usize GpuCalibrationFixedBytes = 34;
+    // GpuScope(스레드 스트림): u16 queue | u32 이름 id(Trace.ScopeName, CPU 구간과 같은 표) | u32
+    // 깊이 | u64 프레임 | u64 시작 tick | u64 끝 tick. tick은 trace 시간축으로 바꾼 값이다.
+    static constexpr usize GpuScopeQueueOffset = 0;
+    static constexpr usize GpuScopeNameOffset = 2;
+    static constexpr usize GpuScopeDepthOffset = 6;
+    static constexpr usize GpuScopeFrameOffset = 10;
+    static constexpr usize GpuScopeBeginOffset = 18;
+    static constexpr usize GpuScopeEndOffset = 26;
+    static constexpr usize GpuScopeFixedBytes = 34;
+    // GpuFrame(스레드 스트림): u16 queue | u64 프레임 | u64 시작 tick | u64 끝 tick
+    static constexpr usize GpuFrameQueueOffset = 0;
+    static constexpr usize GpuFrameNumberOffset = 2;
+    static constexpr usize GpuFrameBeginOffset = 10;
+    static constexpr usize GpuFrameEndOffset = 18;
+    static constexpr usize GpuFrameFixedBytes = 26;
+
     // ---- 스레드 정보 ----
     // 스레드 이름·묶음의 byte 상한이다. 넘으면 앞부분만 쓴다.
     static constexpr usize MaxThreadNameBytes = 63;

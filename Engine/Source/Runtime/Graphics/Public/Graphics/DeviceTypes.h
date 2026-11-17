@@ -404,12 +404,19 @@ struct TimestampSample {
 };
 
 // 같은 순간의 GPU tick과 CPU 시각 한 쌍이다(Device::CalibrateClocks). CPU 시각은
-// platform::MonotonicNanoseconds와 같은 시간축의 ns다.
+// platform::MonotonicNanoseconds 시간축의 ns와 platform::MonotonicTicks 시간축의 tick(trace 시간축,
+// Docs/Design/TraceSystem.ko.md 4.4절)으로 함께 준다.
 struct ClockCalibration {
     uint64 gpuTicks = 0;
     uint64 cpuNanoseconds = 0;
     // GPU tick의 초당 수다(DeviceInfo::timestampFrequency와 같다).
     uint64 gpuFrequency = 0;
+    // cpuNanoseconds와 같은 순간의 platform::MonotonicTicks 값이다(GPU 구간을 trace tick으로 바꿀
+    // 때 쓴다. ns를 다시 tick으로 바꾸는 반올림을 피한다).
+    uint64 cpuTicks = 0;
+    // 두 시각이 같은 순간이라는 추정의 오차 반경(ns)이다. D3D12는 queue clock calibration이 한 번에
+    // 읽은 쌍이라 CPU tick 하나의 길이, OpenGL은 GL_TIMESTAMP 조회 앞뒤 CPU 시각 차의 절반이다.
+    uint64 uncertaintyNanoseconds = 0;
 };
 
 // frequency(초당 tick) 기준 ticks를 ns로 바꾼다. 중간 곱이 넘치지 않으며 1초 미만 부분만 double로

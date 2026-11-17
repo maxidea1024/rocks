@@ -47,6 +47,9 @@ struct Vec2dBinding {
     ROCKS_PROPERTY() double y = 0;
 };
 
+// 3D 벡터다. 공간 위치·방향으로 쓰면 UE 5.8과 같은 왼손 +X 전방·+Y 오른쪽·+Z 위, 길이 cm다
+// (Core/Math/MathUtility.h 머리 주석). 저장 형식에는 단위를 기록하지 않으며 필드 값을 바꾸지 않고
+// UE FVector3f·FVector 값과 그대로 대응한다.
 ROCKS_STRUCT(Binds = "rocks::Vec3", Atomic, Version = 1)
 struct Vec3Binding {
     ROCKS_PROPERTY() float x = 0;
@@ -77,6 +80,8 @@ struct Vec4dBinding {
     ROCKS_PROPERTY() double w = 0;
 };
 
+// quaternion이다. 성분 순서 (x, y, z, w)와 회전 의미(양의 각은 왼손 회전)가 UE FQuat와 같다
+// (Core/Math/Quaternion.h).
 ROCKS_STRUCT(Binds = "rocks::Quat", Atomic, Version = 1)
 struct QuatBinding {
     ROCKS_PROPERTY() float x = 0;
@@ -146,6 +151,7 @@ struct IntVec3Binding {
 // 필터(includeFlags = SaveGame)는 멤버마다 자기 플래그를 보므로 멤버에 SaveGame을 단다(UE
 // FTransform 멤버와 같다 — 리플렉션 B9h1). Atomic 미러의 멤버는 통째 단위라 표시하지 않는다. 필드
 // ID는 이름 기반이라 순서· 정밀도를 바꿔도 그대로이고, 저장된 값이 없어 Version 1을 유지한다.
+// translation은 cm, scale은 무차원 배율이다(UE FTransform과 같다).
 ROCKS_STRUCT(Binds = "rocks::Transform", Version = 1)
 struct TransformBinding {
     ROCKS_PROPERTY(SaveGame) Quatd rotation;
