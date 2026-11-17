@@ -355,10 +355,16 @@ void RunOwnershipChecks(const char* name, graphics::Device& device, sample::Rend
 
 // 한 backend에서 삼각형·사각형을 그려 픽셀을 검사한다.
 void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
-                BackendResult& result) noexcept {
+                BackendResult& result,
+                const graphics::DeviceCreateReport* report = nullptr) noexcept {
     if (!created) {
         printf("  [NOT RUN] %s: device unavailable (error %u)\n", name,
                static_cast<unsigned>(created.Error()));
+        if (report != nullptr && report->stage[0] != 0) {
+            printf("    %s (native 0x%llX): %s\n", report->stage,
+                   static_cast<unsigned long long>(report->nativeCode), report->detail);
+        }
+
         return;
     }
     result.ran = true;
@@ -660,15 +666,29 @@ int RunGraphicsSelfTest(Allocator& allocator) noexcept {
     desc.enableValidation = true;
     BackendResult d3d12(allocator);
     BackendResult warp(allocator);
-    BackendResult opengl(allocator);
+    BackendResult glesProfile(allocator);
+    BackendResult glesDesktop(allocator);
     RunBackend("D3D12", graphics::CreateD3D12Device(allocator, desc), d3d12);
     graphics::DeviceDesc software = desc;
     software.preferSoftware = true;
     RunBackend("D3D12 WARP", graphics::CreateD3D12Device(allocator, software), warp);
-    RunBackend("OpenGL", graphics::CreateOpenGLDevice(allocator, desc), opengl);
-    Compare(d3d12, opengl, "D3D12 vs OpenGL");
+    // OpenGL ES 3.2 미리보기(GLES31_PC)를 두 context에서 돌린다: 진짜 ES 3.2 context(드라이버가 ES
+    // 밖 호출을 거부)와 UE 방식의 데스크톱 GL 4.3 core context.
+    graphics::OpenGLDeviceOptions esProfile;
+    esProfile.contextProfile = graphics::OpenGLContextProfile::EsProfile;
+    graphics::DeviceCreateReport esReport;
+    RunBackend("OpenGL ES", graphics::CreateOpenGLDevice(allocator, desc, esProfile, &esReport),
+               glesProfile, &esReport);
+    graphics::OpenGLDeviceOptions desktopCore;
+    desktopCore.contextProfile = graphics::OpenGLContextProfile::DesktopCore;
+    graphics::DeviceCreateReport desktopReport;
+    RunBackend("OpenGL ES on GL core",
+               graphics::CreateOpenGLDevice(allocator, desc, desktopCore, &desktopReport),
+               glesDesktop, &desktopReport);
+    Compare(d3d12, glesProfile, "D3D12 vs OpenGL ES");
+    Compare(d3d12, glesDesktop, "D3D12 vs OpenGL ES on GL core");
     Compare(d3d12, warp, "D3D12 vs WARP");
-    const bool anyRan = d3d12.ran || warp.ran || opengl.ran;
+    const bool anyRan = d3d12.ran || warp.ran || glesProfile.ran || glesDesktop.ran;
     printf("Graphics self-test: %s (%u failure%s)\n",
            failures == 0 && anyRan ? "PASS" : (anyRan ? "FAIL" : "NOT RUN"), failures,
            failures == 1 ? "" : "s");
