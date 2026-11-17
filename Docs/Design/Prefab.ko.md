@@ -1,6 +1,6 @@
 # prefab(원형 기반 재사용 객체 묶음) 설계
 
-기준일: 2026-11-17, 개정 2(초안). 개정 1은 사용자 지시("설계문서만 작성해놔")로 쓴 첫 초안이고, 개정 2는 교차검증 1차(치명 1·중요 14·사소 13·추가 2) 결과를 반영했다(9절). 구현하지 않는다. 착수 시점은 고정 구현 순서(리플렉션 B9j–B9m → Curve 데이터 계층 → A0-G → A1–A6 → 화면 마일스톤)를 따르며 이 문서는 그 순서를 바꾸지 않는다.
+기준일: 2026-11-17, 개정 3(결정 D1–D21 확정 — 4절). 개정 1은 사용자 지시("설계문서만 작성해놔")로 쓴 첫 초안이고, 개정 2는 교차검증 1차(치명 1·중요 14·사소 13·추가 2) 결과를 반영했다(9절). 구현하지 않는다. 착수 시점은 고정 구현 순서(리플렉션 B9j–B9m → Curve 데이터 계층 → A0-G → A1–A6 → 화면 마일스톤)를 따르며 이 문서는 그 순서를 바꾸지 않는다.
 
 근거: [엔진 구현 계획](EngineImplementationPlan.ko.md)(이하 EIP) 5.3절(클래스 기본값·서브오브젝트·공통 instancing)·20.3절(프리팹·중첩·변형·인스턴스 오버라이드)·20.5절(프리팹 식별자), [런타임 클래스 메타데이터](RuntimeClassMetadata.ko.md)(이하 RCM) '클래스 기본값 결정', [리플렉션 B9](ReflectionExtensions.ko.md)(이하 RX), [리플렉션·빌드 보강](ReflectionFoundations.ko.md)(이하 RF), [객체·그래프 보강](ObjectFoundations.ko.md)(이하 OF), [에셋 시스템](AssetSystem.ko.md)(이하 AS), [엔진 런타임](EngineRuntime.ko.md)(이하 ER), [GC 대규모 처리](GarbageCollectionScale.ko.md)(이하 GCS — 13절 클러스터는 개정 2, `experiment/gc-scale` 브랜치 `b293feb`), [Sparks 언어](SparksLanguage.ko.md)(이하 SL), 현재 코드(`Core/Source/Runtime/ObjectRuntime`·`ObjectSerialization`, `Engine/Source/Runtime/World`). UE 대조는 UE 5.8(5.8.4, `Engine/Build/Build.version` 5.8.4) 원본을 파일:행으로 확인했다(2절). 레거시·deprecated 코드는 대조에서 뺐다(2.0절).
 
@@ -433,7 +433,9 @@ Result<PrefabSpawnResult> World::SpawnPrefab(const AssetLease& prefab, const Spa
   - Apply to source는 3.7절.
 - 네트워크 spawn: 원형 AssetId·`resolvedRevision`·인스턴스 Guid·spawn 인자·권한 override를 보내고 받는 쪽이 같은 revision을 검증한 뒤 spawn한다(EIP 20.3절). 파생 ID가 결정적이므로 하위 객체 ID를 따로 보내지 않는다.
 
-## 4. 결정 필요 항목
+## 4. 결정 항목
+
+2026-11-17 사용자 확정: 모든 항목을 아래 "추천" 열대로 정한다. D1은 클래스 원형 + prefab 에셋((a)+(b), Level Instance식 별도 Level 로드는 후속 — (a)는 RCM 생성자 계약 개정이 선행), D9는 1차에 배치 기록 유지(UE식 쿡 때 굽기는 후속 최적화)다. 7절 "다른 문서와 맞출 점"은 PF0 착수 때 함께 고친다.
 
 | ID | 질문 | 선택지 | 추천 |
 |---|---|---|---|
@@ -602,3 +604,4 @@ PF1은 A5와 RCM 개정 뒤 언제든 할 수 있고, PF2 이후는 World 단계
   - 사소 S1–S13: 2.2·2.4·2.5·2.9절 정정, DuplicateTransient 보존(D20), D10 사용성 비용, 점진 한도·override 추가 중첩의 순환 검사, 정본 하나, `DeriveGuid` 형식, Unpack 선행·Make variant 이동 의미, `transformSpace` 삭제.
   - 추가: 부착 부모 있는 spawn 합성, 장부 지연 생성.
   - UE 이름 짓기 근거는 리뷰가 든 `MakeUniqueObjectName`이 아니라 `FindFirstFreeName`(ActorConstruction.cpp:1126)으로 확인해 적었다.
+- 개정 3(2026-11-17): 사용자 결정 — D1–D21 모두 추천안으로 확정(4절 머리).
