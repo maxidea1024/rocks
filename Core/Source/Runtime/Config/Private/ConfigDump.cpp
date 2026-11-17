@@ -28,20 +28,17 @@ bool LessBytes(StringView left, StringView right) noexcept {
     return left.ByteCount() < right.ByteCount();
 }
 
-Result<void> WriteStack(const ConfigState& state, const SourceStack& stack,
-                        JsonWriter& writer) noexcept {
-    Result<void> result = writer.BeginObject();
-    static_cast<void>(writer.Key("path"));
-    static_cast<void>(writer.String(stack.path.View()));
-    static_cast<void>(writer.Key("stack"));
+// 출처 목록(약한 것부터)을 배열 하나로 쓴다. writer 오류는 이후 호출이 모두 실패하는 것으로 전한다.
+void WriteSourceList(const ConfigState& state, Span<const uint64> entries,
+                     JsonWriter& writer) noexcept {
     static_cast<void>(writer.BeginArray());
-    for (usize index = 0; result && index < stack.entries.Size(); ++index) {
-        const ConfigEntry* entry = state.FindEntry(stack.entries[index]);
+    for (const uint64 sequence : entries) {
+        const ConfigEntry* entry = state.FindEntry(sequence);
         if (entry == nullptr) {
             continue;
         }
 
-        result = writer.BeginObject();
+        static_cast<void>(writer.BeginObject());
         static_cast<void>(writer.Key("layer"));
         static_cast<void>(writer.String(ConfigLayerName(entry->layer)));
         static_cast<void>(writer.Key("tag"));
@@ -52,7 +49,49 @@ Result<void> WriteStack(const ConfigState& state, const SourceStack& stack,
     }
 
     static_cast<void>(writer.EndArray());
+}
+
+Result<void> WriteStack(const ConfigState& state, const SourceStack& stack,
+                        JsonWriter& writer) noexcept {
+    static_cast<void>(writer.BeginObject());
+    static_cast<void>(writer.Key("path"));
+    static_cast<void>(writer.String(stack.path.View()));
+    static_cast<void>(writer.Key("stack"));
+    WriteSourceList(state, stack.entries.View(), writer);
     return writer.EndObject();
+}
+
+// 독립 콘솔 설정(설정 struct 필드가 아닌 것)을 이름 순서로 쓴다(필드 설정은 섹션 values·sources에
+// 있다).
+Result<void> WriteSettings(ConfigState& state, JsonWriter& writer) noexcept {
+    Array<const detail::ConsoleSettingState*> settings(state.allocator);
+    for (const UniquePtr<detail::ConsoleSettingState>& setting : state.settings) {
+        if (setting->section != IndexNone) {
+            continue;
+        }
+
+        if (auto pushed = settings.TryPushBack(setting.Get()); !pushed) {
+            return pushed;
+        }
+    }
+
+    settings.Sort([](const detail::ConsoleSettingState* left,
+                     const detail::ConsoleSettingState* right) noexcept {
+        return LessBytes(left->name.View(), right->name.View());
+    });
+    static_cast<void>(writer.BeginArray());
+    for (const detail::ConsoleSettingState* setting : settings) {
+        static_cast<void>(writer.BeginObject());
+        static_cast<void>(writer.Key("name"));
+        static_cast<void>(writer.String(setting->name.View()));
+        static_cast<void>(writer.Key("value"));
+        static_cast<void>(writer.String(setting->text.View()));
+        static_cast<void>(writer.Key("stack"));
+        WriteSourceList(state, setting->sources.View(), writer);
+        static_cast<void>(writer.EndObject());
+    }
+
+    return writer.EndArray();
 }
 
 Result<int32> RunConfigDump(void* context, Span<const StringView> arguments,
@@ -162,6 +201,11 @@ Result<void> WriteConfigDump(ConfigContext& context, JsonWriter& writer) noexcep
     static_cast<void>(writer.EndArray());
     if (!result) {
         return result;
+    }
+
+    static_cast<void>(writer.Key("settings"));
+    if (auto written = WriteSettings(*state, writer); !written) {
+        return written;
     }
 
     return writer.EndObject();

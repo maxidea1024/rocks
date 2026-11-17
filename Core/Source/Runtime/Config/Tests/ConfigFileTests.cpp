@@ -207,6 +207,7 @@ constexpr const char* DumpGolden = R"({
       "section": "RenderGraph",
       "values": {
         "debugDraw": false,
+        "lodBias": 1.0,
         "scales": [],
         "byName": {},
         "passes": [
@@ -271,7 +272,8 @@ constexpr const char* DumpGolden = R"({
         }
       ]
     }
-  ]
+  ],
+  "settings": []
 }
 )";
 

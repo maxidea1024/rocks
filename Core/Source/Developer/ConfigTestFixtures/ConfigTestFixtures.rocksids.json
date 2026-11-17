@@ -101,6 +101,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::config_fixture::GraphSettings::lodBias",
+      "id": "5abbd9901bcb49c1a4b91bf14e1d4f92",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::config_fixture::GraphSettings::maxPasses",
       "id": "a54fb97770d8475a82fe4fdd1ea82431",
       "aliases": [],
@@ -163,6 +170,20 @@
       "retired": false
     },
     {
+      "kind": "field",
+      "name": "rocks::config_fixture::ReloadArgs::count",
+      "id": "efc5379203d14fc98a01a2105a66a2a0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::ReloadArgs::target",
+      "id": "92459a1534954ae1a196ad9de3a1e9c9",
+      "aliases": [],
+      "retired": false
+    },
+    {
       "kind": "type",
       "name": "rocks::config_fixture::FixtureLayer",
       "id": "85e4c03454d0426e949a41484cd2141e",
@@ -194,6 +215,13 @@
       "kind": "type",
       "name": "rocks::config_fixture::GraphSettings",
       "id": "f7d528f708334afdbfe7bd73c00f3631",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::config_fixture::ReloadArgs",
+      "id": "e27d8970abcc4c7cace3fa293346be4e",
       "aliases": [],
       "retired": false
     }

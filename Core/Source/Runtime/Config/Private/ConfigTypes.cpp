@@ -60,6 +60,12 @@ StringView ConfigDiagnosticCodeName(ConfigDiagnosticCode code) noexcept {
         return "InvalidSetting";
     case ConfigDiagnosticCode::UnknownTarget:
         return "UnknownTarget";
+    case ConfigDiagnosticCode::ConsoleReadOnly:
+        return "ConsoleReadOnly";
+    case ConfigDiagnosticCode::NotQualityMember:
+        return "NotQualityMember";
+    case ConfigDiagnosticCode::ValueOutOfRange:
+        return "ValueOutOfRange";
     case ConfigDiagnosticCode::WeakWrite:
         return "WeakWrite";
     }

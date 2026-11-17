@@ -2,6 +2,7 @@
 
 #include <Base/Compiler.h>
 #include <Config/ConfigTypes.h>
+#include <Config/ConsoleSettings.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Meta/GeneratedType.h>
 #include <Meta/SettingsSchema.h>
@@ -9,10 +10,10 @@
 #include <Object/ObjectRegistry.h>
 #include <Platform/Fatal.h>
 
-// 설정 문맥이다(Docs/Design/ConfigSystem.ko.md 3·4·7·8절 — 설정 CF1). 한 실행(또는 시험 하나)의
-// 설정 계층을 소유한다: 등록한 설정 struct(섹션)마다 현재 값과 필드 경로별 출처 스택을 두고, 층
-// 입력(branch 파일·메모리 문자열·대입)을 큐에 쌓았다가 Sync에서만 합친다. 전역 싱글턴이 아니다(UE
-// `GConfig` 대응이지만 문맥 객체로 넘긴다).
+// 설정 문맥이다(Docs/Design/ConfigSystem.ko.md 3·4·5·7·8절 — 설정 CF1·CF2). 한 실행(또는 시험
+// 하나)의 설정 계층을 소유한다: 등록한 설정 struct(섹션)마다 현재 값과 필드 경로별 출처 스택을
+// 두고, 층 입력(branch 파일·메모리 문자열·대입)을 큐에 쌓았다가 Sync에서만 합친다. 전역 싱글턴이
+// 아니다(UE `GConfig` 대응이지만 문맥 객체로 넘긴다).
 //
 // 합치는 규칙:
 // - 층 순서는 ConfigLayer(약한 것 → 강한 것)이고 같은 층 안에서는 넣은 순서다. Sync는 섹션마다
@@ -83,6 +84,13 @@ void MoveAssignSettingsValue(void* destination, void* source) noexcept {
 }
 
 } // namespace detail
+
+// 리플렉션 struct(ROCKS_STRUCT — 생성 헤더를 include한 타입)인지다(콘솔 명령 인자 struct).
+template <class T>
+concept ReflectedStruct = requires {
+    GeneratedType<T>::Id();
+    GeneratedType<T>::Ops();
+};
 
 // 설정 struct(ROCKS_STRUCT(Settings(...)) — 생성 헤더를 include한 타입)인지다.
 template <class T>
@@ -200,8 +208,10 @@ public:
     // 대입 하나를 큐에 넣는다(세션 `--set=<target>=<value>`·시험 픽스처·코드의 임시 변경). target은
     // `<Branch>.<Section>.<필드 경로>`(필드 경로는 리플렉션 명령행 경로 —
     // `Inner.x`·`scores[a]`)이고 value는 명령행 값 표기다(ReflectionText 10.4절 — 목록은 쉼표,
-    // struct 기본값은 `{}`). 코드 기본값 위에 적용해 보아 검사한다(AddLayerText와 같다). 오류:
-    // target이 등록 섹션이 아니면 InvalidArgument(진단 UnknownTarget), 그 밖은 AddLayerText와 같다.
+    // struct 기본값은 `{}`). target이 콘솔 설정 이름(소문자 점 경로)이면 그 설정(필드 콘솔 이름이면
+    // 그 필드)에 쓰고, 등록되지 않은 이름이면 대기 값으로 받는다. 코드 기본값 위에 적용해 보아
+    // 검사한다(AddLayerText와 같다). 오류: target이 등록 섹션도 콘솔 이름도 아니면
+    // InvalidArgument(진단 UnknownTarget), 그 밖은 AddLayerText와 같다.
     Result<void> AddAssignment(ConfigLayer layer, StringView tag, StringView target,
                                StringView value) noexcept;
 
@@ -210,11 +220,14 @@ public:
     // 없는 태그는 무동작이다. 오류: layer 범위 InvalidArgument, 다른 스레드 WrongThread, 할당 실패.
     Result<void> Unset(ConfigLayer layer, StringView tag) noexcept;
 
-    // sync 지점이다(5.3절): 큐를 순서대로 적용하고 모든 섹션 값과 출처 스택을 다시 합친다. 새
-    // 입력이 더 강한 출처에 가려졌으면 진단 Note WeakWrite를 남긴다. 적용에 실패한 입력(이전 층에
-    // 따라 달라진 배열 연산 결과가 원소 수 한도를 넘는 등)은 그 섹션에서 건너뛰고 Error 진단을
-    // 남긴다(값은 나머지 입력으로 합친다). 큐가 비었으면 아무것도 하지 않는다. 오류: 다른 스레드
-    // WrongThread, 할당 실패(OutOfMemory — 그때 값은 Sync 전 그대로이고 큐도 그대로다).
+    // sync 지점이다(5.3절): 큐를 순서대로 적용하고 모든 섹션 값·콘솔 설정 값과 출처 스택을 다시
+    // 합친다. 그 뒤 큐에 든 콘솔 명령을 실행하고, 값이 바뀐 대상의 구독 콜백을 구독 순서대로
+    // 부르고, RenderRead 값이 바뀌었으면 새 설정 snapshot(세대 +1)을 만든다. 콜백 안에서 Sync를
+    // 부르면 Busy다. 새 입력이 더 강한 출처에 가려졌으면 진단 Note WeakWrite를 남긴다. 적용에
+    // 실패한 입력(이전 층에 따라 달라진 배열 연산 결과가 원소 수 한도를 넘는 등)은 그 섹션에서
+    // 건너뛰고 Error 진단을 남긴다(값은 나머지 입력으로 합친다). 큐가 비었으면 아무것도 하지
+    // 않는다. 오류: 다른 스레드 WrongThread, 할당 실패(OutOfMemory — 그때 값은 Sync 전 그대로이고
+    // 큐도 그대로다).
     Result<void> Sync() noexcept;
 
     // 다음 Sync가 적용할 입력이 큐에 있는지다.
@@ -230,6 +243,92 @@ public:
     // 진단 모음이다(AddLayerText·AddAssignment·Sync가 더한다 — 호출자가 Clear로 비운다).
     ConfigDiagnostics& Diagnostics() noexcept;
 
+    // ---- 콘솔 설정·명령(Docs/Design/ConfigSystem.ko.md 5절 — 설정 CF2) ----
+    //
+    // 콘솔 설정은 이름 하나에 값 하나다. 설정 struct 필드의 ConsoleName(RegisterSettings가 함께
+    // 등록한다)과 독립 설정(RegisterConsoleSetting)이 한 이름 공간이고 콘솔 명령과도 겹칠 수 없다.
+    // 값은 층 입력(branch 파일의 `Settings` 섹션, 콘솔 이름 대입)으로 들어오고 Sync에서만 바뀐다.
+    // 등록 전에 들어온 이름의 값은 대기 값으로 남았다가 등록 때 넘어간다.
+
+    // 영역 이름 공간(콘솔 이름의 첫 마디 — `[a-z][a-z0-9_]*`)을 더한다. 기본 표는
+    // DefaultConsoleRegions다. 오류: 형식 InvalidArgument, 이미 있으면 AlreadyExists, 다른 스레드
+    // WrongThread.
+    Result<void> RegisterConsoleRegion(StringView region) noexcept;
+
+    // 독립 콘솔 설정을 등록한다. 이미 들어온 층 입력의 대기 값을 바로 검사·적용한다(거부한 값은
+    // 진단을 남기고 건너뛴다 — 등록은 성공한다). 출시 규칙의 DevelopmentOnly 설정은 등록되지만
+    // 콘솔에 보이지 않고 값은 기본값으로 고정된다.
+    // 오류: 이름 문법·영역 표에 없음·help 비어 있음·모르는 플래그·범위(minimum > maximum, 수가 아닌
+    // 종류의 범위)·enum 아닌 종류의 enumType·기본값 표기 오류 InvalidArgument, Enum 종류의
+    // enumType이 없으면 NotFound, 이름이 이미 있으면 AlreadyExists, 다른 스레드 WrongThread, 할당
+    // 실패.
+    Result<ConsoleSettingId>
+    RegisterConsoleSetting(const ConsoleSettingDefinition& definition) noexcept;
+
+    // 이름의 콘솔 설정 핸들이다(필드 설정 포함, 출시 규칙에서 숨긴 것 제외). 오류: 없으면 NotFound,
+    // 다른 스레드 WrongThread.
+    Result<ConsoleSettingId> FindConsoleSetting(StringView name) const noexcept;
+
+    // 콘솔 설정의 현재 값이다(마지막 Sync 결과 — 다음 Sync까지 바뀌지 않는다). kind는 그 종류의
+    // ConsoleValueKind이고 Enum은 signedInteger·type이다. 전제: 유효한 핸들, 소유 스레드 — 아니면
+    // Fatal.
+    const FieldValue& ConsoleValue(ConsoleSettingId id) const noexcept;
+
+    // 인자 없는 콘솔 명령을 등록한다. 오류: 이름 문법·영역·help·execute 없음 InvalidArgument, 이름
+    // 겹침 AlreadyExists, 다른 스레드 WrongThread, 할당 실패.
+    Result<void> RegisterConsoleCommand(const ConsoleCommandDefinition& definition) noexcept;
+
+    // 인자 struct Args(리플렉션 struct — 강한 참조 없음)를 받는 콘솔 명령을 등록한다. 콘솔 입력
+    // `<명령> a=1 b=x`의 각 `<경로>=<값>`을 Args 기본값 위에 대입해(리플렉션 명령행 표기) execute에
+    // `const Args*`로 넘긴다. 오류: RegisterConsoleCommand와 같고, Args가 TypeRegistry에 없으면 그
+    // 오류.
+    template <ReflectedStruct Args>
+    Result<void> RegisterConsoleCommand(const ConsoleCommandDefinition& definition) noexcept {
+        detail::SettingsTypeOps ops;
+        ops.id = GeneratedType<Args>::Id();
+        ops.create = &detail::CreateSettingsValue<Args>;
+        ops.destroy = &detail::DestroySettingsValue<Args>;
+        return RegisterConsoleCommandType(definition, &ops);
+    }
+
+    // 콘솔 입력 한 줄을 처리한다(5.2절 문법): `<이름>`은 값과 출처 스택을, `<이름> ?`는 도움말을
+    // output에 쓴다. `<이름> <값>`은 콘솔 층(태그 `console`) 쓰기를, `<명령> <인자…>`는 명령 실행을
+    // 큐에 넣는다(다음 Sync에 적용·실행). 거부한 입력은 진단을 output에 쓰고 Rejected다. output은
+    // 큐에 넣은 명령이 실행되는 다음 Sync까지 살아 있어야 한다.
+    // 오류: 출시 규칙(출시 빌드에는 콘솔 입력이 없다) Unsupported, 빈 줄 InvalidArgument, 다른
+    // 스레드 WrongThread, output 쓰기 오류, 할당 실패.
+    Result<ConsoleLineResult> ExecuteConsoleLine(StringView line, ConsoleOutput output) noexcept;
+
+    // prefix로 시작하는 콘솔 설정·명령 이름을 이름 순서로 out에 쓴다(자동완성 — 출시 규칙에서 숨긴
+    // 설정 제외). view는 다음 등록까지 유효하다. 오류: 다른 스레드 WrongThread, 할당 실패.
+    Result<void> CompleteConsoleName(StringView prefix, Array<StringView>& out) const noexcept;
+
+    // 콘솔 설정 값이 바뀔 때 부를 콜백을 구독한다(Sync 끝, 구독 순서대로). 오류: 모르는 이름
+    // NotFound, callback 없음 InvalidArgument, 다른 스레드 WrongThread, 할당 실패.
+    Result<ConfigSubscriptionId> Subscribe(StringView name, ConfigChangeCallback callback,
+                                           void* context) noexcept;
+
+    // 설정 struct T의 값(어느 필드든)이 바뀔 때 부를 콜백을 구독한다. 오류: Subscribe와 같다(T를
+    // 등록 하지 않았으면 NotFound).
+    template <SettingsStruct T>
+    Result<ConfigSubscriptionId> SubscribeSettings(ConfigChangeCallback callback,
+                                                   void* context) noexcept {
+        return SubscribeSection(GeneratedType<T>::Id(), callback, context);
+    }
+
+    // 구독을 끝낸다(이번 Sync의 콜백 도중이면 그 콜백 다음부터 부르지 않는다). 오류: 없는 구독
+    // NotFound, 다른 스레드 WrongThread.
+    Result<void> Unsubscribe(ConfigSubscriptionId id) noexcept;
+
+    // 시작이 끝났음을 알린다. 그 뒤로 StartupOnly 값(콘솔 설정·설정 struct 필드)에 새로 들어오는
+    // 쓰기는 거부한다(이미 들어온 값은 그대로). 오류: 다른 스레드 WrongThread.
+    Result<void> CompleteStartup() noexcept;
+
+    // 마지막 Sync의 설정 snapshot이다(5.3절 — RenderRead 값의 불변 블록과 세대 번호). 첫 Sync
+    // 전에는 null이다. RenderRead 값이 바뀌지 않은 Sync는 같은 snapshot(같은 세대)을 돌려준다. 렌더
+    // lane은 이 snapshot만 읽는다(문맥은 읽지 않는다). 소유 스레드가 아니면 Fatal.
+    SharedPtr<ConfigSnapshot> Snapshot() const noexcept;
+
     // 내부 상태다(config-dump·파일 로더 등 모듈 안 구현이 쓴다). 초기화 전이면 null이다.
     detail::ConfigState* State() const noexcept {
         return state_.Get();
@@ -237,6 +336,10 @@ public:
 
 private:
     Result<void> RegisterSettingsType(const detail::SettingsTypeOps& ops) noexcept;
+    Result<void> RegisterConsoleCommandType(const ConsoleCommandDefinition& definition,
+                                            const detail::SettingsTypeOps* arguments) noexcept;
+    Result<ConfigSubscriptionId> SubscribeSection(TypeId settings, ConfigChangeCallback callback,
+                                                  void* context) noexcept;
 
     Allocator* allocator_;
     ObjectRegistry* objects_;

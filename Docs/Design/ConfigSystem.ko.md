@@ -1,6 +1,6 @@
 # 설정 계층과 콘솔 설정 설계
 
-기준일: 2026-11-17, 개정 1(초안). 엔진·프로젝트·플랫폼·기기·사용자·세션·콘솔에서 오는 설정 값을 하나의 우선순위로 합치는 **설정 계층**과, 실행 중 이름으로 읽고 바꾸는 **콘솔 설정**(변수·명령)을 정한다.
+기준일: 2026-11-17, 개정 2(CF1·CF2 구현 반영). 엔진·프로젝트·플랫폼·기기·사용자·세션·콘솔에서 오는 설정 값을 하나의 우선순위로 합치는 **설정 계층**과, 실행 중 이름으로 읽고 바꾸는 **콘솔 설정**(변수·명령)을 정한다.
 
 [렌더 기반](RenderBase.ko.md)의 선행 작업 CP8(Config 계층)·CP4(콘솔 설정)이며, [엔진 구현 계획](EngineImplementationPlan.ko.md)의 다음 요구를 구현 스펙으로 옮긴다.
 - 24.1절 표의 "Device Profile / Scalability / CVar" 행
@@ -8,7 +8,7 @@
 
 UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275b`, 로컬 클론)의 현재 기본 경로이고, 경로는 `Engine/Source/Runtime/` 기준이다. UE 이름은 대응표와 근거에만 적는다. 레거시·deprecated 경로는 보지 않았다.
 
-상태: **설계 확정**(결정 D1–D9). 구현 단계는 9절이다.
+상태: **설계 확정**(결정 D1–D9). 구현 단계는 9절이다. 구현: CF1·CF2(2026-11-17, Core 모듈 `Config` — `Core/Source/Runtime/Config`).
 
 ## 1. 결정 요약
 
@@ -118,7 +118,9 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - **등록**: 이름·타입·기본값·도움말(필수)·플래그·검증(범위·허용 값)을 받는다.
   - 모듈 등록 함수에서 명시적으로 등록한다. 전역 생성자는 금지다(UE 지침 `IConsoleManager.h:39–58`과 같다).
   - 등록 전에 층에서 들어온 값은 "대기 값"으로 보관했다가 등록 때 넘긴다. UE `CreatedFromIni`(`Core/Private/Misc/ConfigUtilities.cpp:419–422`)와 같다.
-- **이름 문법**: 소문자 점 구분 경로다. 첫 단어는 영역 이름 공간이다(`render.`·`graph.`·`stream.`·`shader.`·`quality.`·`net.`·`physics.`·`log.` 등). 영역 목록은 등록 표로 두고, 표에 없는 영역은 등록 오류다.
+- **이름 문법**: 소문자 점 구분 경로다(`[a-z][a-z0-9_]*`를 `.`으로 이은 마디 둘 이상). 첫 단어는 영역 이름 공간이다. 기본 표는 `render`·`graph`·`stream`·`shader`·`quality`·`net`·`physics`·`log`·`game`·`input`·`audio`·`ui`이고 `RegisterConsoleRegion`으로 더한다. 표에 없는 영역은 등록 오류다. 콘솔 설정(독립 설정과 설정 struct 필드의 `ConsoleName`)과 콘솔 명령이 한 이름 공간이다.
+- **값과 등록**: 값은 리플렉션 `FieldValue`로 담고 표기는 ReflectionText 명령행 단일 값 표기다(기본값도 이 표기의 텍스트로 받는다). 설정 struct 필드의 `ConsoleName`은 `RegisterSettings`가 함께 등록하고 그 필드와 값 저장소를 공유한다(출처 스택도 필드 경로의 것). 대기 값은 등록 때 바로 검사·적용하고, 형식·범위·층 허용에 맞지 않는 대기 값은 그 입력의 위치로 진단을 남기고 건너뛴다(등록은 성공한다).
+- **값의 JSON 모양**: `Settings` 섹션의 값은 bool·수·문자열이고 종류와 맞아야 한다(bool 설정은 JSON bool, 정수 설정은 정수, 실수 설정은 수, 문자열·Name·enum 설정은 문자열). 맞지 않으면 그 위치의 `InvalidSetting`이다.
 - **플래그**:
 
 | 플래그 | 뜻 | UE 대응 |
@@ -131,6 +133,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 | 품질 묶음 구성원 | 품질 묶음 층이 바꿀 수 있다. 다른 변수는 품질 묶음 층 쓰기를 거부한다 | `ECVF_Scalability` |
 | 출시 제외 | 쿠킹 결과에 넣지 않는다 | (거부 목록) |
 
+- 플래그 동작(구현): 콘솔 읽기 전용은 콘솔 층만 거부한다(`ConsoleReadOnly`). 품질 묶음 구성원이 아니면 콘솔 이름으로 오는 품질 층 쓰기를 거부한다(`NotQualityMember` — 설정 struct 필드의 콘솔 이름은 아직 구성원 지정자가 없어 늘 거부되고, 필드 지정자는 CF4가 더한다. 섹션 JSON으로 오는 품질 층 쓰기는 이 규칙 밖이다). 개발 전용은 출시 규칙에서 등록은 되지만 콘솔 조회·자동완성에 보이지 않고 어떤 층도 쓸 수 없어 코드 기본값으로 고정된다. 시작 뒤 고정은 `CompleteStartup` 뒤 새로 들어오는 쓰기를 거부한다(이미 들어온 값은 유지). 재시작 필요는 표시만 하고(CF3), 출시 제외는 쿠킹(CF5)이 쓴다.
 - 셰이더·쿠킹 결과에 영향을 주는 값은 콘솔 설정으로 두지 않고 셰이더 형식 정의·TargetProfile에 둔다. 쿠킹 키에 들어가야 하기 때문이다(RenderBase 12절). UE의 셰이더 변경 플래그(`IConsoleManager.h:1488–1496`)는 두지 않는다.
 
 ### 5.2 콘솔 명령
@@ -143,6 +146,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
   - `<이름> ?`: 도움말.
   - `<명령> <인자…>`: 명령 실행.
 - 자동완성은 이름 접두로 찾는다.
+- 명령 인자(구현): `<명령> <경로>=<값> <경로>=<값>…`처럼 공백으로 나눈 대입을 인자 struct 기본값 위에 적용한다(값 안의 공백·따옴표 묶기는 아직 없다). 인자 스키마 없는 명령에 인자를 주면 거부한다. 큐에 든 명령은 다음 Sync에서 값 적용 뒤, 변경 콜백 전에 실행하고 출력은 입력 때 받은 sink로 쓴다.
 - 출시 빌드에는 콘솔 입력이 없다(UE `ALLOW_CONSOLE_IN_SHIPPING` 기본 0, `Core/Public/Misc/Build.h:214–215`).
 
 ### 5.3 sync 지점과 설정 snapshot
@@ -150,6 +154,8 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - 값의 소유자는 게임 lane이다. 콘솔 입력·사용자 설정 변경·hot reload·기능 묶음 추가 같은 변경 요청은 큐에 쌓인다.
 - 엔진 프레임 3단계(프레임 시작) 전에 큐를 적용한다. 그 직후 바뀐 값의 콜백을 등록 순서대로 부른다. 다른 시점에는 값이 바뀌지 않는다.
 - 같은 sync 지점에서 "렌더 읽기" 변수의 불변 snapshot을 세대 번호와 함께 만든다. 바뀐 것이 없으면 이전 snapshot을 재사용한다.
+  - 구현: snapshot은 이름(byte 순서) → `FieldValue`의 불변 블록이고 `SharedPtr`로 넘긴다(참조 계수만 원자적). 이름은 콘솔 설정 이름이고, 콘솔 이름이 없는 RenderRead 설정 struct 필드는 `<Branch>.<Section>.<필드>`다. 첫 Sync가 세대 1을 만들고, RenderRead 값들의 표기 서명이 바뀐 Sync만 세대를 하나 올린다. 렌더 lane 연결(프레임 packet — RenderBase RB1)은 이 단계 밖이다.
+  - 변경 콜백은 콘솔 설정 하나 또는 설정 struct 하나를 구독한다. 설정 struct는 정규 JSON(ExportJson)이, 콘솔 설정은 값 표기가 바뀌었을 때만 부른다. 콜백 안의 층 입력·콘솔 입력은 다음 Sync에 적용되고, 콜백 안에서 Sync를 부르면 `Busy`다.
 - 프레임 packet은 snapshot을 참조한다. snapshot 수명은 그 프레임 slot이 끝날 때까지다.
 - 렌더 lane은 registry를 읽지 않는다(RenderBase 5.3·12절).
 - worker 작업은 시작 때 받은 snapshot이나 값 복사본을 쓴다. 게임 lane 밖에서 값을 바꾸는 API는 없다(UE는 주 스레드 밖 변경이 `check` 실패, `ConsoleManager.cpp:465–508`).
@@ -188,7 +194,8 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 | `DevelopmentOnly` | 출시 빌드에서 고정 | `Cheat` |
 
 - 설정 struct 값 읽기는 설정 문맥에서 타입으로 한다(`ConfigContext::Get<T>()`). 반환은 sync 지점 사이에 바뀌지 않는 불변 참조다.
-- 출처는 병합 묶음의 영향 경로(Touches)로 필드 경로별로 기록한다.
+- 출처는 병합 묶음의 영향 경로(Touches)로 필드 경로별로 기록한다. 구현은 게시한 묶음의 override 경로(`OverridePaths` — 컨테이너 필드는 그 필드 경로)를 도구 이름 경로 텍스트로 기록한다.
+- 지정자 구현: `Settings(...)`와 필드 지정자는 `FieldFlags`가 아니라 생성 `GeneratedType<S>::Settings()`의 `SettingsSchema`(`Meta/SettingsSchema.h`)에 실린다. 설정 struct는 강한 참조를 담을 수 없다(RMC2210). `ShippingExcluded`는 쿠킹(CF5) 때 더한다.
 
 ## 8. 저장·실행 중 변경·쿠킹·시험
 
@@ -253,4 +260,5 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 
 ## 12. 개정 이력
 
+- 개정 2(2026-11-17): CF1·CF2 구현을 반영했다. 배열 연산은 ReflectionText 확장이 아니라 Config 모듈의 import 앞 단계(4.2절), 경로 이름 문법(4.3절), 섹션 키 대소문자·대입 대상 문법(3.2절), 콘솔 이름 영역 표·값 모양·플래그 동작·명령 인자·snapshot·콜백 구현(5절), 지정자 실림 위치(7절).
 - 개정 1(2026-11-17): 초안. UE 5.8.4 config 계층·ini 문법·콘솔 변수·SetBy 우선순위·렌더 스레드 전파·Scalability·Device Profile 조사와 Rocks 현황(JSON·ReflectionText·Commandlet) 조사를 바탕으로 썼다. 사용자 결정 D1–D4를 반영했고, D5–D9는 권장안대로 확정했다.

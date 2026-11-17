@@ -58,6 +58,8 @@ struct GraphSettings {
     ROCKS_PROPERTY() Array<FixtureLayer> layers;
     ROCKS_PROPERTY(DevelopmentOnly, ConsoleName = "render.graph.debug_draw") bool debugDraw = false;
     ROCKS_PROPERTY(RestartRequired) int32 workers = 2;
+    // 콘솔 이름 없는 RenderRead 필드(snapshot 이름 `Render.RenderGraph.lodBias`).
+    ROCKS_PROPERTY(RenderRead) float lodBias = 1.0f;
 };
 
 ROCKS_STRUCT(Settings(Branch = "Game", Section = "Gameplay"))
@@ -71,6 +73,16 @@ struct GameplaySettings {
     ROCKS_PROPERTY(ConsoleName = "game.rules.map") Name map;
     ROCKS_PROPERTY(StartupOnly, ConsoleName = "game.rules.seed") int32 seed = 7;
     ROCKS_PROPERTY() int32 lives = 3;
+};
+
+// 콘솔 명령 인자 struct다(`render.reload count=2 target=all`).
+ROCKS_STRUCT()
+struct ReloadArgs {
+    explicit ReloadArgs(Allocator& allocator) noexcept : target(allocator) {
+    }
+
+    ROCKS_PROPERTY() int32 count = 1;
+    ROCKS_PROPERTY() String target;
 };
 
 } // namespace rocks::config_fixture

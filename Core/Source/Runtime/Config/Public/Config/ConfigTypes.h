@@ -107,6 +107,12 @@ enum class ConfigDiagnosticCode : uint8 {
     InvalidSetting,
     // 대입 대상 텍스트(`<Branch>.<Section>.<경로>`)가 등록된 섹션을 가리키지 않는다.
     UnknownTarget,
+    // 콘솔 층이 ConsoleReadOnly 콘솔 설정을 쓰려 했다(5.1절).
+    ConsoleReadOnly,
+    // 품질 묶음 층이 QualityMember가 아닌 콘솔 설정을 쓰려 했다(5.1절).
+    NotQualityMember,
+    // 콘솔 설정 값이 범위·허용 값 밖이다.
+    ValueOutOfRange,
     // 정보: 더 강한 출처가 이미 있어 값이 바뀌지 않은 쓰기다(출처 스택에는 남았다 — 3.1절).
     WeakWrite
 };

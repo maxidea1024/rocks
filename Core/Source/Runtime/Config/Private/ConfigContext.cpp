@@ -4,6 +4,7 @@
 #include <Core/ScopeExit.h>
 #include <Core/Text/StringBuilder.h>
 #include <Platform/Clock.h>
+#include <ReflectionText/TextJson.h>
 
 namespace rocks::config {
 
@@ -36,7 +37,9 @@ ConfigState::ConfigState(Allocator& allocator, ObjectRegistry& objects) noexcept
       platformParents(allocator),
       directories{String(allocator), String(allocator), String(allocator), String(allocator)},
       projectName(allocator), branches(allocator), sections(allocator), entries(allocator),
-      queue(allocator), diagnostics(allocator) {
+      queue(allocator), diagnostics(allocator), regions(allocator), settings(allocator),
+      commands(allocator), pendingCommands(allocator), subscriptions(allocator),
+      renderSignature(allocator) {
 }
 
 reflection_text::TextCodecOptions ConfigState::CodecOptions() const noexcept {
@@ -101,8 +104,8 @@ Result<void> Report(ConfigState& state, ConfigDiagnosticCode code, ConfigSeverit
     return state.diagnostics.Add(diagnostic);
 }
 
-StringView CheckLayerAllowed(const ConfigState& state, ConfigLayer layer,
-                             uint32 settingsFlags) noexcept {
+StringView CheckLayerAllowed(const ConfigState& state, ConfigLayer layer, uint32 settingsFlags,
+                             bool incoming) noexcept {
     if (state.releaseRules && HasFlag(settingsFlags, SettingsFieldFlags::DevelopmentOnly) &&
         layer != ConfigLayer::CodeDefault) {
         return "a DevelopmentOnly value keeps its code default under release rules";
@@ -110,6 +113,11 @@ StringView CheckLayerAllowed(const ConfigState& state, ConfigLayer layer,
 
     if (layer == ConfigLayer::User && !HasFlag(settingsFlags, SettingsFieldFlags::UserConfig)) {
         return "the user layer can write UserConfig fields only";
+    }
+
+    if (incoming && state.startupComplete &&
+        HasFlag(settingsFlags, SettingsFieldFlags::StartupOnly)) {
+        return "a StartupOnly value cannot change after startup";
     }
 
     return {};
@@ -166,95 +174,186 @@ Result<bool> CheckSettingsSection(ConfigState& state, const ConfigEntry& entry,
     return Result<bool>::Success(valid);
 }
 
-// 입력 하나를 섹션마다 기본값 위에 적용해 보아 검사한다(큐에 넣기 전). 반환: true면 문제없음.
-Result<bool> ValidateEntry(ConfigState& state, const ConfigEntry& entry) noexcept {
-    bool valid = true;
-    auto apply = [&](SectionState& section) noexcept -> Result<void> {
-        void* scratch = section.ops.create(state.allocator);
-        if (scratch == nullptr) {
-            return Result<void>::Failure(ErrorCode::OutOfMemory);
-        }
-
-        auto release =
-            MakeScopeExit([&]() noexcept { section.ops.destroy(state.allocator, scratch); });
-        Array<String> paths(state.allocator);
-        auto applied = ApplyEntryToSection(state, section, scratch, entry, paths);
-        if (!applied) {
-            return Result<void>::Failure(applied.Error());
-        }
-
-        valid = valid && applied.Value();
-        return Result<void>::Success();
-    };
-
-    if (entry.kind == EntryKind::Assignment) {
-        if (auto applied = apply(*state.sections[entry.section]); !applied) {
-            return Result<bool>::Failure(applied.Error());
-        }
-
-        return Result<bool>::Success(valid);
+// 독립 콘솔 설정에 들어오는 값 하나를 검사한다(등록되지 않은 이름은 대기 값으로 받는다).
+Result<bool> ValidateConsoleValue(ConfigState& state, const ConfigEntry& entry, StringView name,
+                                  StringView text, JsonValue json) noexcept {
+    const usize index = state.FindSetting(name);
+    if (index == IndexNone || state.settings[index]->section != IndexNone) {
+        return Result<bool>::Success(true);
     }
 
-    const JsonValue root = entry.document->Root();
-    for (usize member = 0; member < root.Size(); ++member) {
-        const StringView key = root.KeyAt(member);
-        const JsonValue value = root.ValueAt(member);
-        const JsonPosition at = value.Position();
-        // 섹션 키는 대소문자를 무시하므로 대소문자만 다른 두 키는 같은 섹션을 두 번 쓴다.
-        bool duplicate = false;
-        for (usize other = 0; other < member && !duplicate; ++other) {
-            duplicate = EqualsIgnoringAsciiCase(ToSpan(root.KeyAt(other)), ToSpan(key));
+    const ConsoleSettingState& setting = *state.settings[index];
+    const JsonPosition at = json.IsValid() ? json.Position() : JsonPosition{0, 0, 0};
+    const JsonPosition* position = json.IsValid() ? &at : nullptr;
+    String converted(state.allocator);
+    if (json.IsValid()) {
+        auto matched = ConsoleTextOfJson(json, setting.kind, converted);
+        if (!matched) {
+            return matched;
         }
 
-        StringView problem;
-        usize section = IndexNone;
-        ConfigDiagnosticCode code = ConfigDiagnosticCode::InvalidSection;
-        if (duplicate) {
-            problem = "the section appears twice (section keys ignore ASCII case)";
-        } else if (EqualsIgnoringAsciiCase(ToSpan(key), ToSpan(ConsoleSettingsSection))) {
-            auto checked = CheckSettingsSection(state, entry, value);
-            if (!checked) {
-                return checked;
+        if (!matched.Value()) {
+            if (auto reported =
+                    Report(state, ConfigDiagnosticCode::InvalidSetting, ConfigSeverity::Error,
+                           entry.layer, entry.sourceName.View(), position, name,
+                           "the JSON value type does not match the setting type");
+                !reported) {
+                return Result<bool>::Failure(reported.Error());
             }
 
-            valid = valid && checked.Value();
-            continue;
-        } else {
-            section = state.FindSection(entry.branch, key);
-            if (section == IndexNone) {
+            return Result<bool>::Success(false);
+        }
+
+        text = converted.View();
+    }
+
+    ConfigDiagnosticCode code = ConfigDiagnosticCode::InvalidSetting;
+    FieldValue parsed(state.allocator);
+    auto checked = CheckConsoleValue(state, setting, entry.layer, true, text, parsed, code);
+    if (!checked) {
+        return Result<bool>::Failure(checked.Error());
+    }
+
+    if (checked.Value().IsEmpty()) {
+        return Result<bool>::Success(true);
+    }
+
+    if (auto reported = Report(state, code, ConfigSeverity::Error, entry.layer,
+                               entry.sourceName.View(), position, name, checked.Value());
+        !reported) {
+        return Result<bool>::Failure(reported.Error());
+    }
+
+    return Result<bool>::Success(false);
+}
+
+// 입력 하나를 검사한다(큐에 넣기 전): Document의 모양(섹션 키·`Settings` 섹션), 닿는 섹션마다 코드
+// 기본값 위 적용, 독립 콘솔 설정 값. 반환: true면 문제없음.
+Result<bool> ValidateEntry(ConfigState& state, const ConfigEntry& entry) noexcept {
+    bool valid = true;
+    if (entry.kind == EntryKind::Document) {
+        const JsonValue root = entry.document->Root();
+        for (usize member = 0; member < root.Size(); ++member) {
+            const StringView key = root.KeyAt(member);
+            const JsonValue value = root.ValueAt(member);
+            const JsonPosition at = value.Position();
+            // 섹션 키는 대소문자를 무시하므로 대소문자만 다른 두 키는 같은 섹션을 두 번 쓴다.
+            bool duplicate = false;
+            for (usize other = 0; other < member && !duplicate; ++other) {
+                duplicate = EqualsIgnoringAsciiCase(ToSpan(root.KeyAt(other)), ToSpan(key));
+            }
+
+            StringView problem;
+            ConfigDiagnosticCode code = ConfigDiagnosticCode::InvalidSection;
+            if (duplicate) {
+                problem = "the section appears twice (section keys ignore ASCII case)";
+            } else if (EqualsIgnoringAsciiCase(ToSpan(key), ToSpan(ConsoleSettingsSection))) {
+                auto checked = CheckSettingsSection(state, entry, value);
+                if (!checked) {
+                    return checked;
+                }
+
+                valid = valid && checked.Value();
+                continue;
+            } else if (state.FindSection(entry.branch, key) == IndexNone) {
                 code = ConfigDiagnosticCode::UnknownSection;
                 problem = "no settings struct is registered for this section in this branch";
             } else if (!value.IsObject()) {
                 problem = "a section value is a JSON object";
             }
-        }
 
-        if (!problem.IsEmpty()) {
-            valid = false;
-            if (auto reported = Report(state, code, ConfigSeverity::Error, entry.layer,
-                                       entry.sourceName.View(), &at, key, problem);
-                !reported) {
-                return Result<bool>::Failure(reported.Error());
+            if (!problem.IsEmpty()) {
+                valid = false;
+                if (auto reported = Report(state, code, ConfigSeverity::Error, entry.layer,
+                                           entry.sourceName.View(), &at, key, problem);
+                    !reported) {
+                    return Result<bool>::Failure(reported.Error());
+                }
             }
-
-            continue;
         }
 
-        if (auto applied = apply(*state.sections[section]); !applied) {
-            return Result<bool>::Failure(applied.Error());
+        // 모양이 틀린 문서는 적용해 보지 않는다(같은 문제를 두 번 보고하지 않게).
+        if (!valid) {
+            return Result<bool>::Success(false);
         }
     }
 
+    for (usize index = 0; index < state.sections.Size(); ++index) {
+        if (!EntryTouchesSection(state, index, entry)) {
+            continue;
+        }
+
+        SectionState& section = *state.sections[index];
+        void* scratch = section.ops.create(state.allocator);
+        if (scratch == nullptr) {
+            return Result<bool>::Failure(ErrorCode::OutOfMemory);
+        }
+
+        auto release =
+            MakeScopeExit([&]() noexcept { section.ops.destroy(state.allocator, scratch); });
+        Array<String> paths(state.allocator);
+        auto applied = ApplyEntryToSection(state, section, scratch, entry, true, paths);
+        if (!applied) {
+            return applied;
+        }
+
+        valid = valid && applied.Value();
+    }
+
+    if (entry.kind == EntryKind::Console) {
+        auto checked =
+            ValidateConsoleValue(state, entry, entry.path.View(), entry.value.View(), JsonValue{});
+        if (!checked) {
+            return checked;
+        }
+
+        valid = valid && checked.Value();
+    }
+
+    const JsonValue settings = SettingsSectionOf(entry);
+    for (usize member = 0; settings.IsObject() && member < settings.Size(); ++member) {
+        auto checked = ValidateConsoleValue(state, entry, settings.KeyAt(member), {},
+                                            settings.ValueAt(member));
+        if (!checked) {
+            return checked;
+        }
+
+        valid = valid && checked.Value();
+    }
+
     return Result<bool>::Success(valid);
+}
+
+// 섹션 값 storage의 정규 JSON(Export — 변경 감지용)을 out에 쓴다.
+Result<void> ExportSection(ConfigState& state, const SectionState& section, void* storage,
+                           String& out) noexcept {
+    StringBuilder<512> text(state.allocator);
+    JsonWriter writer(text);
+    const reflection_text::TextCodecOptions options = state.CodecOptions();
+    if (auto exported = reflection_text::ExportJson(
+            reflection_text::AssignmentTarget::Value(state.objects, state.access, section.lease,
+                                                     storage, state.allocator),
+            writer, options);
+        !exported) {
+        return exported;
+    }
+
+    if (auto finished = writer.Finish(); !finished) {
+        return finished;
+    }
+
+    return out.TryAssign(text.View());
 }
 
 } // namespace detail
 
 using detail::ConfigEntry;
 using detail::ConfigState;
+using detail::ConsoleSettingState;
 using detail::EntryKind;
 using detail::QueuedChange;
 using detail::SectionState;
+using detail::SettingResult;
 using detail::SourceStack;
 
 namespace {
@@ -281,18 +380,26 @@ Result<void> RecomputeSection(ConfigState& state, SectionState& section, usize s
     }
 
     for (ConfigEntry* entry : order) {
-        const bool applies = entry->kind == EntryKind::Assignment
-                                 ? entry->section == sectionIndex
-                                 : entry->branch == section.branch &&
-                                       detail::FindMemberIgnoringCase(entry->document->Root(),
-                                                                      section.section.View())
-                                           .IsValid();
-        if (!applies) {
+        if (!detail::EntryTouchesSection(state, sectionIndex, *entry)) {
             continue;
         }
 
+        // 거부되면 그 입력의 부분 적용(섹션 객체 뒤 콘솔 값 거부 등)이 남지 않도록 사본에 적용해
+        // 보고 성공한 사본으로 바꾼다.
+        void* trial = section.ops.create(state.allocator);
+        if (trial == nullptr) {
+            return Result<void>::Failure(ErrorCode::OutOfMemory);
+        }
+
+        auto release =
+            MakeScopeExit([&]() noexcept { section.ops.destroy(state.allocator, trial); });
+        if (auto copied = section.lease.StructOps().copy(trial, out.value, state.allocator);
+            !copied) {
+            return copied;
+        }
+
         Array<String> paths(state.allocator);
-        auto applied = detail::ApplyEntryToSection(state, section, out.value, *entry, paths);
+        auto applied = detail::ApplyEntryToSection(state, section, trial, *entry, false, paths);
         if (!applied) {
             return Result<void>::Failure(applied.Error());
         }
@@ -301,6 +408,7 @@ Result<void> RecomputeSection(ConfigState& state, SectionState& section, usize s
             continue;
         }
 
+        section.ops.moveAssign(out.value, trial);
         for (String& path : paths) {
             SourceStack* stack = nullptr;
             for (UniquePtr<SourceStack>& existing : out.sources) {
@@ -396,6 +504,16 @@ Result<void> ConfigContext::Initialize() noexcept {
         copied = branch.TryAssign(DefaultConfigBranches[index]);
         if (copied) {
             copied = state.branches.TryPushBack(Move(branch));
+        }
+    }
+
+    for (usize index = 0;
+         copied && index < sizeof(DefaultConsoleRegions) / sizeof(DefaultConsoleRegions[0]);
+         ++index) {
+        String region(*allocator_);
+        copied = region.TryAssign(DefaultConsoleRegions[index]);
+        if (copied) {
+            copied = state.regions.TryPushBack(Move(region));
         }
     }
 
@@ -499,6 +617,21 @@ Result<void> ConfigContext::RegisterSettingsType(const detail::SettingsTypeOps& 
     }
 
     static_cast<void>(state->sections.TryPushBack(Move(made.Value()))); // 예약했다
+    // 기본값의 정규 JSON(변경 감지 기준)과 콘솔 이름 필드를 등록한다. 실패하면 섹션을 뺀다.
+    const usize index = state->sections.Size() - 1;
+    Result<void> registered =
+        detail::ExportSection(*state, *state->sections[index], state->sections[index]->value,
+                              state->sections[index]->exported);
+    if (registered) {
+        registered = detail::RegisterFieldSettings(*state, index);
+    }
+
+    if (!registered) {
+        ops.destroy(*allocator_, state->sections[index]->value);
+        static_cast<void>(state->sections.TryPopBack());
+        return registered;
+    }
+
     state->dirty = true;
     return Result<void>::Success();
 }
@@ -628,6 +761,49 @@ Result<void> ConfigContext::AddAssignment(ConfigLayer layer, StringView tag, Str
         return status;
     }
 
+    // 콘솔 설정 이름(소문자 점 경로)이면 콘솔 이름 대입이다. 등록되지 않은 이름이면 대기 값으로
+    // 받는다.
+    if (IsConsoleSettingName(target)) {
+        auto queued = UniquePtr<QueuedChange>::TryMake(*allocator_, *allocator_);
+        auto entry = UniquePtr<ConfigEntry>::TryMake(*allocator_, *allocator_);
+        if (!queued || !entry) {
+            return Result<void>::Failure(ErrorCode::OutOfMemory);
+        }
+
+        ConfigEntry& added = *entry.Value();
+        added.kind = EntryKind::Console;
+        added.layer = layer;
+        Result<void> assigned = added.tag.TryAssign(tag);
+        if (assigned) {
+            assigned = added.sourceName.TryAssign(source.View());
+        }
+
+        if (assigned) {
+            assigned = added.path.TryAssign(target);
+        }
+
+        if (assigned) {
+            assigned = added.value.TryAssign(value);
+        }
+
+        if (!assigned) {
+            return assigned;
+        }
+
+        auto valid = detail::ValidateEntry(*state, added);
+        if (!valid) {
+            return Result<void>::Failure(valid.Error());
+        }
+
+        if (!valid.Value()) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        added.sequence = state->nextSequence++;
+        queued.Value()->entry = Move(entry.Value());
+        return state->queue.TryPushBack(Move(queued.Value()));
+    }
+
     StringView branchName;
     StringView rest;
     StringView sectionName;
@@ -644,7 +820,7 @@ Result<void> ConfigContext::AddAssignment(ConfigLayer layer, StringView tag, Str
                 detail::Report(*state, ConfigDiagnosticCode::UnknownTarget, ConfigSeverity::Error,
                                layer, source.View(), nullptr, target,
                                "an assignment target is <Branch>.<Section>.<field path> of a "
-                               "registered settings struct");
+                               "registered settings struct or a console setting name");
             !reported) {
             return reported;
         }
@@ -719,7 +895,8 @@ Result<void> ConfigContext::Unset(ConfigLayer layer, StringView tag) noexcept {
 
 bool ConfigContext::HasPendingChanges() const noexcept {
     const ConfigState* state = state_.Get();
-    return state != nullptr && (!state->queue.IsEmpty() || state->dirty);
+    return state != nullptr &&
+           (!state->queue.IsEmpty() || state->dirty || !state->pendingCommands.IsEmpty());
 }
 
 Result<void> ConfigContext::Sync() noexcept {
@@ -730,6 +907,29 @@ Result<void> ConfigContext::Sync() noexcept {
 
     if (platform::CurrentThreadId() != state->owner) {
         return Result<void>::Failure(ErrorCode::WrongThread);
+    }
+
+    // 콜백 안에서 다시 부르면 값이 콜백 도중에 바뀌므로 거부한다.
+    if (state->syncing) {
+        return Result<void>::Failure(ErrorCode::Busy);
+    }
+
+    if (state->queue.IsEmpty() && !state->dirty && !state->pendingCommands.IsEmpty()) {
+        // 값은 그대로이고 큐에 든 명령만 실행한다.
+        Array<bool> none(*allocator_);
+        if (auto sized = none.TryResize(state->sections.Size() > state->settings.Size()
+                                            ? state->sections.Size()
+                                            : state->settings.Size());
+            !sized) {
+            return sized;
+        }
+
+        for (bool& flag : none) {
+            flag = false;
+        }
+
+        detail::RunCommandsAndCallbacks(*state, none.View(), none.View());
+        return Result<void>::Success();
     }
 
     if (state->queue.IsEmpty() && !state->dirty) {
@@ -804,6 +1004,8 @@ Result<void> ConfigContext::Sync() noexcept {
     }
 
     // 3. 새 입력이 더 강한 출처에 가려진 경로를 알린다(약한 쓰기 — 값은 바뀌지 않았다).
+    // TODO(log): 로깅 시스템(Docs/Design/LoggingSystem.ko.md)이 들어오면 Note 진단을 설정 로그
+    // 범주로도 남긴다.
     for (usize index = 0; index < results.Size(); ++index) {
         for (const UniquePtr<SourceStack>& stack : results[index]->sources) {
             for (usize position = 0; position < stack->entries.Size(); ++position) {
@@ -839,17 +1041,82 @@ Result<void> ConfigContext::Sync() noexcept {
         }
     }
 
-    // 4. 입력 소유권을 새 목록으로 옮길 자리를 먼저 잡는다(이 뒤로는 실패하지 않는다).
+    // 4. 콘솔 설정의 새 값, 섹션 값의 변경 여부(정규 JSON 비교), 설정 snapshot을 만든다.
+    Array<void*> values(*allocator_);
+    for (const UniquePtr<SectionResult>& result : results) {
+        if (auto pushed = values.TryPushBack(result->value); !pushed) {
+            return pushed;
+        }
+    }
+
+    Array<UniquePtr<SettingResult>> settingResults(*allocator_);
+    if (auto computed =
+            detail::ComputeSettingResults(*state, order.View(), values.View(), settingResults);
+        !computed) {
+        return computed;
+    }
+
+    Array<String> exports(*allocator_);
+    Array<bool> sectionChanged(*allocator_);
+    Array<bool> settingChanged(*allocator_);
+    for (usize index = 0; index < results.Size(); ++index) {
+        String exported(*allocator_);
+        if (auto written =
+                detail::ExportSection(*state, *state->sections[index], values[index], exported);
+            !written) {
+            return written;
+        }
+
+        if (auto pushed = sectionChanged.TryPushBack(exported.View() !=
+                                                     state->sections[index]->exported.View());
+            !pushed) {
+            return pushed;
+        }
+
+        if (auto pushed = exports.TryPushBack(Move(exported)); !pushed) {
+            return pushed;
+        }
+    }
+
+    for (const UniquePtr<SettingResult>& result : settingResults) {
+        if (auto pushed = settingChanged.TryPushBack(result->changed); !pushed) {
+            return pushed;
+        }
+    }
+
+    SharedPtr<ConfigSnapshot> snapshot;
+    String signature(*allocator_);
+    if (auto prepared = detail::PrepareSnapshot(*state, settingResults.View(), values.View(),
+                                                snapshot, signature);
+        !prepared) {
+        return prepared;
+    }
+
+    // 5. 입력 소유권을 새 목록으로 옮길 자리를 먼저 잡는다(이 뒤로는 실패하지 않는다).
     Array<UniquePtr<ConfigEntry>> next(*allocator_);
     if (auto reserved = next.TryReserve(plan.Size()); !reserved) {
         return reserved;
     }
 
-    // 5. 맞바꾼다: 값, 출처 스택, 입력 목록.
+    // 6. 맞바꾼다: 섹션 값·출처 스택·정규 JSON, 콘솔 설정 값, snapshot, 입력 목록.
     for (usize index = 0; index < results.Size(); ++index) {
         SectionState& section = *state->sections[index];
         section.ops.moveAssign(section.value, results[index]->value);
         section.sources = Move(results[index]->sources);
+        section.exported = Move(exports[index]);
+    }
+
+    for (usize index = 0; index < settingResults.Size(); ++index) {
+        ConsoleSettingState& setting = *state->settings[index];
+        setting.value = Move(settingResults[index]->value);
+        setting.text = Move(settingResults[index]->text);
+        setting.sources = Move(settingResults[index]->sources);
+    }
+
+    if (snapshot.Get() != nullptr) {
+        state->snapshot = Move(snapshot);
+        state->snapshotGeneration = state->snapshot->Generation();
+        state->renderSignature = Move(signature);
     }
 
     for (ConfigEntry* kept : plan) {
@@ -871,6 +1138,8 @@ Result<void> ConfigContext::Sync() noexcept {
     state->entries = Move(next);
     state->queue.Clear();
     state->dirty = false;
+    // 7. 값이 다 바뀐 뒤 명령을 실행하고 변경 콜백을 부른다(콜백은 새 값을 본다).
+    detail::RunCommandsAndCallbacks(*state, sectionChanged.View(), settingChanged.View());
     return Result<void>::Success();
 }
 

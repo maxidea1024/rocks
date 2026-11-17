@@ -19,9 +19,13 @@
 //             "stack": [ { "layer": "Engine", "tag": "Render.json", "source": "..." }, ... ] }
 //         ]
 //       }
+//     ],
+//     "settings": [                         // 독립 콘솔 설정(이름 byte 순서)
+//       { "name": "stream.pool_mb", "value": "512", "stack": [ ... ] }
 //     ]
 //   }
-// stack은 약한 것부터이고 마지막이 현재 값의 출처다. 기본값뿐인 필드는 sources에 없다.
+// stack은 약한 것부터이고 마지막이 현재 값의 출처다. 기본값뿐인 필드는 sources에 없다. 설정 struct
+// 필드의 콘솔 이름은 그 섹션의 values·sources에 있고 settings에는 독립 설정만 둔다.
 namespace rocks::config {
 
 // 값과 출처를 writer에 객체 하나로 쓴다(Finish는 호출자가 한다). 마지막 Sync의 상태를 쓴다(큐는
