@@ -3,6 +3,7 @@
 #include <Base/Compiler.h>
 #include <Object/ObjectRegistry.h>
 #include <Platform/Atomics.h>
+#include <Platform/Clock.h>
 #include <Platform/Fatal.h>
 
 // ObjectRegistry 클러스터다(GC-S7, Docs/Design/GarbageCollectionScale.ko.md 13절). 클러스터 장부
@@ -497,6 +498,10 @@ void ObjectRegistry::ProcessCluster(uint32 id, MarkState& state) noexcept {
         return;
     }
 
+    const uint64 started = state.counters != nullptr ? platform::MonotonicNanoseconds() : 0;
+    const usize queued = state.work->Size();
+    const uint32 marked = state.marked;
+
     // 경계 소속을 trace 항목으로 넣는다(mark 비트로 한 번만 — 꺼낼 때 소속이 아니어도 일반 trace와
     // 같다). 고리 안에 커서를 두고 slice를 넘기지 않는다(처리는 한 번에 끝난다).
     for (uint32 at = record.boundaryHead; at != NoSlot; at = CellOf(at).boundaryNext) {
@@ -512,14 +517,20 @@ void ObjectRegistry::ProcessCluster(uint32 id, MarkState& state) noexcept {
     }
 
     for (uint32 at = record.detachedHead; at != NoSlot; at = CellOf(at).listNext) {
-        const ErrorCode marked = MarkIndex(at, *state.work, state.marked);
-        if (marked != ErrorCode::None) {
-            state.error = marked;
+        const ErrorCode result = MarkIndex(at, *state.work, state.marked);
+        if (result != ErrorCode::None) {
+            state.error = result;
             return;
         }
     }
 
     StoreEpoch(record.processedEpoch, gcEpoch_);
+    if (state.counters != nullptr) {
+        ++state.counters->clusterItems;
+        state.counters->detachedMarks += state.marked - marked;
+        state.counters->boundaryPushes += state.work->Size() - queued;
+        state.counters->clusterProcessNanoseconds += platform::MonotonicNanoseconds() - started;
+    }
 }
 
 Result<void> ObjectRegistry::DesignateCluster(const ObjectAccessContext& access, uint64 transaction,

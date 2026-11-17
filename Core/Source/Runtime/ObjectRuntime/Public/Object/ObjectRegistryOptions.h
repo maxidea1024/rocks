@@ -86,6 +86,8 @@ struct RegistryOptions {
     bool permanentRegion = false;
     // 참조 위치 표(M3)를 쓴다(기본). 끄면 모든 타입을 trace로 표식한다(측정 비교용).
     bool referenceTables = true;
+    // 정지형 직렬 Collect의 작업 계수(GcReport::work)를 센다(측정용 — 간선마다 분기와 읽기가 는다).
+    bool countGcWork = false;
     // Debug에서 Begin·Collect마다 클러스터 장부(소속·inCount·outCount·경계·detached 목록)를
     // 처음부터 다시 계산해 비교하고, 어긋나면 Fatal로 멈춘다(비용이 커서 soak·시험만 켠다).
     // Release·Development에서는 무시한다.
@@ -129,6 +131,23 @@ struct ObjectStats {
 // 회수다. 증분 수집은 slice마다 그 phase에 쓴 시간을 더한다(잠금 대기와 slice 진입·종료 처리는 어느
 // phase에도 넣지 않으므로 넷의 합은 durationNanoseconds 이하다). GC 벤치(Programs/GcBench)와 진단이
 // 쓴다.
+// 직렬 표식의 작업 계수다(RegistryOptions::countGcWork를 켠 Registry의 정지형 직렬 Collect만 센다
+// — 클러스터 표식 비용을 나눠 보는 측정용). edges는 trace가 방문한 null 아닌 간선, clusteredEdges는
+// 그중 대상이 클러스터 소속인 간선, sameClusterEdges는 그중 trace하는 소유자와 같은 클러스터 소속인
+// 간선이다. boundaryPushes는 클러스터 처리가 넣은 경계 소속 항목, detachedMarks는 처리가 표식한
+// detached 수, clusterProcessNanoseconds는 클러스터 처리(경계 고리·detached 목록 순회) 시간의
+// 합이다.
+struct GcWorkCounters {
+    uint64 tracedObjects = 0;
+    uint64 edges = 0;
+    uint64 clusteredEdges = 0;
+    uint64 sameClusterEdges = 0;
+    uint64 clusterItems = 0;
+    uint64 boundaryPushes = 0;
+    uint64 detachedMarks = 0;
+    uint64 clusterProcessNanoseconds = 0;
+};
+
 struct GcReport {
     uint32 examined = 0;
     uint32 marked = 0;
@@ -139,6 +158,7 @@ struct GcReport {
     uint64 markNanoseconds = 0;
     uint64 sweepNanoseconds = 0;
     uint64 reclaimNanoseconds = 0;
+    GcWorkCounters work;
 };
 
 // StepCollection slice 하나의 시간 내역(ns)이다. 증분 수집의 Step 시간이 예산을 넘는 원인을 나눠 볼

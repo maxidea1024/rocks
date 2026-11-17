@@ -259,6 +259,11 @@ struct Options {
     bool packages = false;
     // 참조 위치 표(M3)를 끈다(RegistryOptions::referenceTables — 비교 측정).
     bool noTables = false;
+    // 패키지 시나리오 하나만 직렬 Collect를 반복해 작업 계수를 낸다(--package-profile CROSS —
+    // 표본 프로파일러를 붙이는 동안 돈다). packageClustersOff면 클러스터를 끈다.
+    uint32 packageProfile = 0;
+    bool packageProfileSet = false;
+    bool packageClustersOff = false;
     uint64 clusterSoakTicks = 0;
     uint64 soakTicks = 0;
     uint64 seed = 7;
@@ -897,6 +902,7 @@ int RunPackageScenario(uint32 crossPercent, bool clusters, const Options& option
             registryOptions.referenceTables = !options.noTables;
             registryOptions.policy.packageNativeType = NativeTypeKey<BenchPackage>();
             registryOptions.packageClusters = clusters;
+            registryOptions.countGcWork = options.packageProfileSet;
             ObjectRegistry registry(memory, types, Guid{0x6764, crossPercent}, registryOptions);
             const auto access = registry.OwnerAccess();
             Rng rng{0x51ed270b9a3c4d21ULL ^ crossPercent};
@@ -960,8 +966,36 @@ int RunPackageScenario(uint32 crossPercent, bool clusters, const Options& option
                    Milliseconds(created - started), Milliseconds(linked - created), stats.clusters,
                    stats.clusterMembers);
             PrintMemory(memory, all.Size(), stats);
-            if (!MeasureEdgeWrites(registry, 200000, pick, memory) ||
-                !MeasureGraph(registry, scheduler, options.workers, 3, memory)) {
+            if (options.packageProfileSet) {
+                // 작업 계수와 직렬 Collect 반복(표본 프로파일러용).
+                const uint32 reps = options.reps != 0 ? options.reps : 5;
+                Array<GcReport> reports(memory);
+                for (uint32 rep = 0; rep < reps; ++rep) {
+                    auto collected = registry.Collect(access);
+                    if (!collected || !reports.TryPushBack(collected.Value())) {
+                        return 4;
+                    }
+                }
+
+                PrintPhases("Collect (median)", MedianOf(reports, memory));
+                const GcWorkCounters& work = reports[0].work;
+                printf("  work: traced %llu, edges %llu, clustered edges %llu (same cluster %llu), "
+                       "cluster items %llu, boundary pushes %llu, detached marks %llu, cluster "
+                       "processing %.3f ms\n",
+                       static_cast<unsigned long long>(work.tracedObjects),
+                       static_cast<unsigned long long>(work.edges),
+                       static_cast<unsigned long long>(work.clusteredEdges),
+                       static_cast<unsigned long long>(work.sameClusterEdges),
+                       static_cast<unsigned long long>(work.clusterItems),
+                       static_cast<unsigned long long>(work.boundaryPushes),
+                       static_cast<unsigned long long>(work.detachedMarks),
+                       Milliseconds(work.clusterProcessNanoseconds));
+                fflush(stdout);
+            }
+
+            if (!options.packageProfileSet &&
+                (!MeasureEdgeWrites(registry, 200000, pick, memory) ||
+                 !MeasureGraph(registry, scheduler, options.workers, 3, memory))) {
                 return 5;
             }
 
@@ -1565,6 +1599,8 @@ bool Parse(int argc, char** argv, Options& options) noexcept {
             options.packages = true;
         } else if (platform::CStringEquals(argv[index], "--no-tables")) {
             options.noTables = true;
+        } else if (platform::CStringEquals(argv[index], "--clusters-off")) {
+            options.packageClustersOff = true;
         } else if (platform::CStringEquals(argv[index], "--soak-workers")) {
             options.soakWorkers = true;
         } else if (platform::CStringEquals(argv[index], "--soak-time-budget")) {
@@ -1588,6 +1624,10 @@ bool Parse(int argc, char** argv, Options& options) noexcept {
             ++index;
         } else if (platform::CStringEquals(argv[index], "--soak")) {
             options.soakTicks = value;
+            ++index;
+        } else if (platform::CStringEquals(argv[index], "--package-profile")) {
+            options.packageProfile = static_cast<uint32>(value > 100 ? 100 : value);
+            options.packageProfileSet = true;
             ++index;
         } else if (platform::CStringEquals(argv[index], "--cluster-soak")) {
             options.clusterSoakTicks = value;
@@ -1621,6 +1661,10 @@ int Run(const Options& options) noexcept {
 
     if (options.clusters) {
         return RunClusterScenarios(options);
+    }
+
+    if (options.packageProfileSet) {
+        return RunPackageScenario(options.packageProfile, !options.packageClustersOff, options);
     }
 
     if (options.objects != 0) {

@@ -156,6 +156,16 @@ void ObjectRegistry::MarkHandles(MarkState& state, const ObjectHandle* handles,
             return;
         }
 
+        if (state.counters != nullptr) {
+            ++state.counters->edges;
+            const uint32 target = handles[index].slot;
+            if ((BitsOf(target).clustered & BitOf(target)) != 0) {
+                ++state.counters->clusteredEdges;
+                state.counters->sameClusterEdges +=
+                    CellOf(target).state == state.ownerClusterState ? 1u : 0u;
+            }
+        }
+
         const ErrorCode marked = MarkIndex(handles[index].slot, *state.work, state.marked);
         if (marked != ErrorCode::None) {
             state.error = marked;
@@ -308,6 +318,13 @@ void ObjectRegistry::PrepareReferenceLayout(uint16 index, const Object& object) 
 
 void ObjectRegistry::TraceIndex(uint32 index, MarkState& state, TraceVisitor& visitor) noexcept {
     const GcHot& hot = HotOf(index);
+    if (state.counters != nullptr) {
+        ++state.counters->tracedObjects;
+        state.ownerClusterState = clustersEnabled_ && (BitsOf(index).clustered & BitOf(index)) != 0
+                                      ? CellOf(index).state
+                                      : 0;
+    }
+
     VisitStrongEdges(gcTypes_[hot.type], *hot.object, visitor);
     // 객체마다 비워 큐 순서를 간선마다 처리할 때와 같게 둔다(Trace 간선 → Outer → 자식).
     visitor.Flush();
@@ -1635,6 +1652,7 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access,
     report.beginNanoseconds = markStarted - started;
     usize cursor = 0;
     if (scheduler == nullptr) {
+        state.counters = options_.countGcWork ? &report.work : nullptr;
         (void)MarkSerial(work, cursor, state, NumericLimits<uint32>::Max(), 0);
     } else {
         bool completed = false;
