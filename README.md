@@ -19,7 +19,7 @@ C++23 기반 멀티플랫폼 3D 게임 엔진 프로젝트.
 
 ```text
 Core/        기반 라이브러리(엔진 아님): Base·PlatformBase·Core·Task·Compression·Crypto·Serialization·MetaSchema·
-             Localization·ObjectRuntime·ObjectSerialization·ReflectionText (Source/Runtime/<모듈>),
+             Localization·ObjectRuntime·ObjectSerialization·ReflectionText·Config (Source/Runtime/<모듈>),
              고정 버전 외부 라이브러리 원본(Source/ThirdParty/<Lib>: LZ4·zstd·zlib·Brotli·libsodium)
 Engine/      게임 엔진 계층(World·Renderer·Gameplay·Editor, 단계적으로 채움)과 엔진 플러그인
 Programs/    실행 프로그램: 테스트 실행 파일·Commandlet(C++), 빌드·메타·검사 도구(C#)

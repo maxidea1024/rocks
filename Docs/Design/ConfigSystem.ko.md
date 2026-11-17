@@ -68,6 +68,8 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 
 - **branch**는 파일 단위다: `Engine`·`Game`·`Input`·`Render`·`Quality`·`DeviceProfiles`·`Editor`. 목록은 이름 있는 상수 표로 두고, 플러그인은 자기 branch를 등록할 수 있다.
 - **섹션**은 branch 파일 안의 최상위 키이고 설정 struct 하나에 대응한다(예: `"RenderGraph": { ... }`). 콘솔 설정만 따로 두는 섹션은 `"Settings": { "render.graph.immediate": true }`처럼 이름 → 값이다.
+  - 섹션 키는 필드 키처럼 ASCII 대소문자를 무시한다. 대소문자만 다른 섹션 키 두 개는 오류다. 그 branch에 등록된 설정 struct가 없는 섹션 키는 오류(`UnknownSection`)다.
+  - 대입(세션 `--set`·시험 픽스처)의 대상은 `<Branch>.<Section>.<필드 경로>`이고 값은 리플렉션 명령행 표기다(ReflectionExtensions 10.4절). 콘솔 설정 이름(소문자 점 경로)도 대상이 된다(5.1절).
 
 ### 3.3 플랫폼 부모 사슬
 
@@ -96,14 +98,17 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 | 제거 | `"Items": { "$remove": [ ... ] }` | 같은 값의 원소를 모두 뺀다 | `-` |
 | 비우기 | `"Items": { "$clear": true }` | 빈 배열로 만든다 | `!`·`^` |
 
-- 한 연산 객체에 여러 연산을 함께 쓸 수 있다. 적용 순서는 `$clear` → `$remove` → `$add`·`$append`다.
-- 원소 비교는 리플렉션 값 동등성을 쓴다. 키가 있는 struct 배열(UE `@`·`*`)은 Map 필드로 표현하고 따로 두지 않는다.
-- 연산 객체는 배열·Set 필드에만 허용한다. 다른 자리의 `$` 키는 오류다.
-- 이 연산은 ReflectionText의 병합 기능으로 넣는다(9절 CF1).
+- 한 연산 객체에 여러 연산을 함께 쓸 수 있다. 적용 순서는 `$clear` → `$remove` → `$add` → `$append`다(객체 안 키 순서와 무관).
+- 원소 비교는 리플렉션 값 동등성을 쓴다. 구현은 리플렉션 정규 JSON 표기(`ExportJson`)의 동등성이다: 이전 값은 현재 값을 export한 배열이고, 연산 목록은 기본값 struct에 그 목록만 import했다가 다시 export해 같은 표기로 만든다. 그래서 enum 도구 이름의 대소문자, 실수 `1`과 `1.0`, struct 원소의 멤버 순서와 빠진 멤버(기본값)는 같은 값으로 본다. Name은 표시 문자열 그대로 비교한다. 키가 있는 struct 배열(UE `@`·`*`)은 Map 필드로 표현하고 따로 두지 않는다.
+- 연산 객체는 배열·Set 필드에만 허용한다. 다른 자리의 `$` 키(struct 멤버·Map 키)는 오류다. Set에는 `$append`를 쓸 수 없다(중복이 없으므로 `$add`). 정적 배열은 길이가 고정이라 연산을 받지 않는다.
+- 연산은 섹션 루트에서 struct 멤버로만 닿는 필드에 쓴다. 배열 원소·Map 값·Optional 안의 배열 필드는 층마다 이전 값이 정해지지 않으므로 연산 객체를 오류(`UnsupportedOperation`)로 거부한다.
+- 구현 위치: Config 모듈이 ReflectionText `ImportJson` 앞 단계에서 처리한다(ReflectionText는 고치지 않는다). 섹션을 스키마와 함께 걸으며 연산 객체를 이전 층까지의 값에 연산을 적용한 배열로 바꿔 쓰고, 다시 쓴 JSON의 노드마다 원문 위치를 기록해 import 진단의 줄·열을 원문 위치로 되돌린다(연산 결과 원소는 그 원소가 온 목록 원소 또는 연산 객체 위치). 다시 쓸 것이 없으면 원문 문서를 그대로 import한다.
 
 ### 4.3 경로 치환
 
 문자열 필드 값에서 `{EngineDir}`·`{ProjectDir}`·`{UserDataDir}`·`{SavedDir}`를 읽을 때 펼친다. UE `%GAMEDIR%` 등(`Core/Private/Misc/ConfigCacheIni.cpp:212–300`)에 대응한다. 목록은 이름 있는 상수 표다. 표에 없는 `{...}`는 오류다.
+- 이름은 `{` + `[A-Za-z0-9_]+` + `}`다. 이 모양이 아닌 `{`(`{x`·`{}`)는 글자 그대로다. 값은 설정 문맥 옵션의 디렉터리이고, 표에 있지만 그 문맥에서 값이 비어 있는 이름도 오류다.
+- 문자열 필드·문자열 원소·Map 문자열 값·Optional 문자열과 배열 연산 목록에서 펼친다. 대입(세션 `--set`·콘솔 쓰기)의 값 텍스트는 필드 종류를 보기 전에 펼친다(struct 기본값 `{}`는 이름 모양이 아니라 그대로다).
 
 ## 5. 콘솔 설정과 명령
 
@@ -212,7 +217,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 
 | 단계 | 내용 | 선행 | 완료 기준 |
 |---|---|---|---|
-| CF1 | 설정 문맥·층 로더(JSON 줄 주석 옵션, branch·섹션, 경로 치환, 플랫폼 부모 사슬)·출처 스택·`Unset`, 설정 struct `Settings` 지정자와 병합, 배열 연산(ReflectionText 확장), 봉인 모드, `config-dump` | ReflectionText(구현) | 층 순서·약한 쓰기 기록·`Unset` 복귀·배열 연산 각각과 적용 순서·모르는 키 오류(위치)·치환 오류·사슬 순서의 시험, golden dump |
+| CF1 | 설정 문맥·층 로더(JSON 줄 주석 옵션, branch·섹션, 경로 치환, 플랫폼 부모 사슬)·출처 스택·`Unset`, 설정 struct `Settings` 지정자와 병합, 배열 연산(Config 모듈의 import 앞 단계 — 4.2절), 봉인 모드, `config-dump` | ReflectionText(구현) | 층 순서·약한 쓰기 기록·`Unset` 복귀·배열 연산 각각과 적용 순서·모르는 키 오류(위치)·치환 오류·사슬 순서의 시험, golden dump |
 | CF2 | 콘솔 설정 registry(타입·검증·플래그·영역 이름 공간·대기 값)·콘솔 명령·sync 지점·콜백·설정 snapshot(세대) | CF1 | 등록 전 값 이관, 플래그별 거부(읽기 전용·품질 구성원·개발 전용), sync 지점 밖 값 불변, snapshot 세대·재사용, 콘솔 입력 문법 시험 |
 | CF3 | 사용자 층 저장(차이·원자적)·재시작 필요 표시·hot reload(개발 빌드) | CF2 | 저장 왕복과 차이만 기록, 오래된 사용자 파일 처리, 감시 이벤트를 gate로 막아 sync 지점 적용 단언 |
 | CF4 | 품질 묶음·기기 프로필(상속·메모리 등급·선택 규칙)·품질 조합 검증 | CF2, GX1(장치 능력) | 상속 우선순위, 등급 변경 `Unset`, 선택 순서, 불가능 조합 낮춤과 진단 |
