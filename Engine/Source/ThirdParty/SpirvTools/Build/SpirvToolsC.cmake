@@ -1,9 +1,9 @@
-# SPIRV-Tools C API 공유 라이브러리(SPIRV-Tools-c) CMake 래퍼다. Build.ps1·Build.sh가 작업 디렉터리에 CMakeLists.txt로 복사하고
-# -DROCKS_SPIRV_TOOLS_SOURCE=<원본 트리>로 구성한다. 업스트림 원본은 고치지 않는다.
+# CMake wrapper for the SPIRV-Tools C API shared library (SPIRV-Tools-c). Build.ps1 and Build.sh copy it into the work directory as CMakeLists.txt and
+# configure it with -DROCKS_SPIRV_TOOLS_SOURCE=<source tree>. Upstream sources are not modified.
 #
-# 업스트림 정적 라이브러리(SPIRV-Tools-static·SPIRV-Tools-opt)를 SPIRV_TOOLS_SHAREDLIB·SPIRV_TOOLS_IMPLEMENTATION으로 컴파일하면
-# libspirv.h의 SPIRV_TOOLS_EXPORT 선언(C API와 최적화기 C API)이 dllexport(Windows)·visibility default(macOS)가 된다. 두 정적
-# 라이브러리를 whole-archive로 공유 라이브러리 하나에 묶어 그 선언만 내보낸다(나머지는 숨김).
+# Compiling the upstream static libraries (SPIRV-Tools-static, SPIRV-Tools-opt) with SPIRV_TOOLS_SHAREDLIB and SPIRV_TOOLS_IMPLEMENTATION makes
+# libspirv.h's SPIRV_TOOLS_EXPORT declarations (the C API and the optimizer C API) dllexport (Windows) or visibility default (macOS). The two static
+# libraries are bundled with whole-archive into one shared library that exports only those declarations (everything else is hidden).
 cmake_minimum_required(VERSION 3.24)
 project(RocksSpirvToolsC LANGUAGES C CXX)
 
@@ -28,7 +28,7 @@ add_library(SPIRV-Tools-c SHARED ${CMAKE_CURRENT_BINARY_DIR}/SpirvToolsC.cpp)
 target_link_libraries(SPIRV-Tools-c PRIVATE
   "$<LINK_LIBRARY:WHOLE_ARCHIVE,SPIRV-Tools-opt>"
   "$<LINK_LIBRARY:WHOLE_ARCHIVE,SPIRV-Tools-static>")
-# SPIRV-Tools-opt가 SPIRV-Tools-static을 일반 의존으로도 링크하므로 같은 항목의 링크 방식을 whole-archive로 맞춘다.
+# SPIRV-Tools-opt also links SPIRV-Tools-static as a normal dependency, so the link mode of that same item is set to whole-archive.
 set_property(TARGET SPIRV-Tools-c PROPERTY LINK_LIBRARY_OVERRIDE_SPIRV-Tools-static WHOLE_ARCHIVE)
 set_target_properties(SPIRV-Tools-c PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}

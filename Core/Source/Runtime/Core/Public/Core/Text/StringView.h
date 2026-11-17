@@ -83,6 +83,80 @@ public:
     // InvalidArgument다. NUL은 유효한 U+0000이며 이 검사는 할당이나 정규화를 하지 않는다.
     Result<void> ValidateUtf8() const noexcept;
 
+    // ValidateUtf8와 같은 검사의 constexpr 판정이다(overlong·surrogate·U+10FFFF 초과·잘린
+    // sequence는 false). 컴파일 타임 검증(로그 메시지 템플릿 등)과 ValidateUtf8이 같은 구현을 쓴다.
+    constexpr bool IsValidUtf8() const noexcept {
+        usize offset = 0;
+        while (offset < bytes_) {
+            const auto leading = static_cast<uint8>(data_[offset]);
+            if (leading < 0x80u) {
+                ++offset;
+                continue;
+            }
+
+            usize width = 0;
+            uint32 scalar = 0;
+            uint32 minimum = 0;
+            if ((leading & 0xE0u) == 0xC0u) {
+                width = 2;
+                scalar = leading & 0x1Fu;
+                minimum = 0x80u;
+            } else if ((leading & 0xF0u) == 0xE0u) {
+                width = 3;
+                scalar = leading & 0x0Fu;
+                minimum = 0x800u;
+            } else if ((leading & 0xF8u) == 0xF0u) {
+                width = 4;
+                scalar = leading & 0x07u;
+                minimum = 0x10000u;
+            } else {
+                return false;
+            }
+
+            // 남은 길이부터 검사하여 잘린 입력에서 continuation byte를 범위 밖으로 읽지 않는다.
+            if (width > bytes_ - offset) {
+                return false;
+            }
+
+            for (usize index = 1; index < width; ++index) {
+                const auto next = static_cast<uint8>(data_[offset + index]);
+                if ((next & 0xC0u) != 0x80u) {
+                    return false;
+                }
+
+                scalar = (scalar << 6u) | (next & 0x3Fu);
+            }
+
+            // 같은 문자를 긴 sequence로 표현한 overlong과 UTF-16 surrogate는 UTF-8로 수용하지
+            // 않는다.
+            if (scalar < minimum || scalar > 0x10FFFFu ||
+                (scalar >= 0xD800u && scalar <= 0xDFFFu)) {
+                return false;
+            }
+
+            offset += width;
+        }
+
+        return true;
+    }
+
+    // maxBytes byte 이하이면서 UTF-8 문자 중간에서 끊기지 않는 가장 긴 앞부분이다. 잘라야 할 때
+    // 끊는 자리의 byte가 continuation byte면 그 문자 전체를 뺀다. 원본 전체를 검증하지는 않는다
+    // (유효한 UTF-8이면 결과도 유효하다). 고정 버퍼에 잘라 담을 때 쓴다.
+    // 예: "가나"(6 byte).LeftBytesAtCodePoint(4)는 "가"(3 byte).
+    constexpr StringView LeftBytesAtCodePoint(usize maxBytes) const noexcept {
+        if (maxBytes >= bytes_) {
+            return *this;
+        }
+
+        usize count = maxBytes;
+        while (count > 0 && (static_cast<uint8>(data_[count]) & 0xC0u) == 0x80u) {
+            --count;
+        }
+
+        return StringView(data_, count);
+    }
+
     // 원본 전체가 유효한 UTF-8인지와 양 끝이 code point 경계인지 검사한다.
     // byte 범위 초과·문자 중간 절단은 InvalidArgument다. 빈 slice도 UTF 경계가 필요하다.
     // 반환 view는 새 storage를 만들지 않으며 grapheme 경계까지 보장하지 않는다.
@@ -168,6 +242,30 @@ private:
     const char* data_ = nullptr;
     usize bytes_ = 0;
 };
+
+// ASCII 대소문자만 무시한 byte 같음이다(A–Z와 a–z만 접는다. 그 밖의 byte는 정확히 비교한다).
+// HashStringBytesIgnoringAsciiCase(Core/Hash.h)와 짝이 맞는 같음이며, constexpr이라 컴파일 타임
+// 비교에도 쓴다.
+//
+// 사용 예:
+//   static_assert(EqualsIgnoringAsciiCase("Graphics", "GRAPHICS"));
+constexpr bool EqualsIgnoringAsciiCase(StringView left, StringView right) noexcept {
+    if (left.ByteCount() != right.ByteCount()) {
+        return false;
+    }
+
+    for (usize index = 0; index < left.ByteCount(); ++index) {
+        char a = left.Data()[index];
+        char b = right.Data()[index];
+        a = a >= 'A' && a <= 'Z' ? static_cast<char>(a + ('a' - 'A')) : a;
+        b = b >= 'A' && b <= 'Z' ? static_cast<char>(b + ('a' - 'A')) : b;
+        if (a != b) {
+            return false;
+        }
+    }
+
+    return true;
+}
 
 // 검증된 UTF-8 view의 code point를 char32_t로 순회하는 range다. StringView::TryCodePoints로 만든다.
 //   auto points = view.TryCodePoints();

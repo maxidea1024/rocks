@@ -36,7 +36,7 @@
 
 #include <Base/Compiler.h>
 #include <Base/Endian.h>
-#include <Core/Diagnostics/Logger.h>
+#include <Core/Diagnostics/Log.h>
 #include <Core/Move.h>
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
@@ -45,6 +45,9 @@
 
 namespace rocks::crypto::detail {
 namespace {
+
+// 이 파일의 진단 카테고리다. 출력에 `[Error][Crypto.Aes] ...`로 나간다.
+constexpr LogCategory LogCryptoAes{"Crypto.Aes"};
 
 // GCM 한 번에서 CTR과 GHASH를 번갈아 부르는 조각 크기다. 조각이 L1 캐시에 남아 있는 동안 두 커널이
 // 같은 byte를 읽게 한다. x64 7블록·arm64 6블록 병렬 폭의 공배수(252블록, 4032 byte)라 조각 안에서는
@@ -169,11 +172,7 @@ AesKernels InitializeAesKernels() noexcept {
 
     const AesKernels checked = CheckAesKernels(candidate);
     if (!checked.IsComplete()) {
-        StderrLogSink sink;
-        const LogMessage message{
-            0, 0, 0, LogLevel::Error,
-            StringView("Crypto: AES lightweight layer self-test failed; AES is disabled")};
-        (void)sink.Write(message);
+        Log::Error(LogCryptoAes, "AES lightweight layer self-test failed; AES is disabled");
     }
 
     return checked;

@@ -6,7 +6,7 @@
   "source": {
     "url": "https://github.com/KhronosGroup/SPIRV-Reflect/archive/refs/tags/vulkan-sdk-1.4.363.0.tar.gz",
     "sha256": "e0b2914648ab2eac1c83851911199e73f868d966e183531e4c227a258ea07bc6",
-    "verification": "GitHub 태그 vulkan-sdk-1.4.363.0(커밋 f3e261fda74ca81b44d1941931c6b7b5fe236d0e)의 archive를 2026-11-16에 받아 SHA-256을 기록했다. 업스트림이 서명이나 해시를 게시하지 않으므로 태그 커밋과 archive 해시로 고정한다."
+    "verification": "The archive of GitHub tag vulkan-sdk-1.4.363.0 (commit f3e261fda74ca81b44d1941931c6b7b5fe236d0e) was downloaded on 2026-11-16 and its SHA-256 recorded. Upstream publishes no signatures or hashes, so it is pinned by the tag commit and the archive hash."
   },
   "licenses": [
     {
@@ -17,7 +17,7 @@
     },
     {
       "spdx": "MIT",
-      "upstreamExpression": "MIT (spirv.h 머리 주석, Khronos SPIR-V 헤더)",
+      "upstreamExpression": "MIT (spirv.h header comment, Khronos SPIR-V headers)",
       "file": "spirv-reflect-1.4.363.0/include/spirv/unified1/spirv.h",
       "binaryNoticeRequired": false
     }
@@ -45,8 +45,8 @@
   },
   "pragmaDirectives": [],
   "notes": [
-    "Vulkan SDK 1.4.363.0 태그로 고정한다(DXC v1.9.2609 submodule과 같은 SDK 태그, Vulkan-Headers와 같다).",
-    "C 번역 단위 spirv_reflect.c 하나와 그 헤더, 동봉 spirv.h만 둔다. C++ 래퍼(spirv_reflect.cpp)·예제·시험·도구는 넣지 않는다.",
-    "SPIRV_REFLECT_DISABLE_CPP_BINDINGS: spirv_reflect.h의 C++ 래퍼는 STL(<string>·<vector>)을 include하므로 C++ 소비 모듈은 C API만 쓴다."
+    "Pinned to the Vulkan SDK 1.4.363.0 tag (the same SDK tag as the DXC v1.9.2609 submodules, same as Vulkan-Headers).",
+    "Only the single C translation unit spirv_reflect.c, its header and the bundled spirv.h are kept. The C++ wrapper (spirv_reflect.cpp), examples, tests and tools are not included.",
+    "SPIRV_REFLECT_DISABLE_CPP_BINDINGS: the C++ wrapper in spirv_reflect.h includes the STL (<string>, <vector>), so C++ consumer modules use only the C API."
   ]
 }

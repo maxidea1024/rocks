@@ -125,6 +125,19 @@ DXGI_FORMAT ResourceFormat(Format format) noexcept {
     return DXGI_FORMAT_UNKNOWN;
 }
 
+// 컬 모드의 D3D12 값이다. 앞면 규약(FrontCounterClockwise = TRUE)과 함께 쓴다.
+D3D12_CULL_MODE RasterCullMode(CullMode mode) noexcept {
+    switch (mode) {
+    case CullMode::Back:
+        return D3D12_CULL_MODE_BACK;
+    case CullMode::Front:
+        return D3D12_CULL_MODE_FRONT;
+    case CullMode::None:
+        break;
+    }
+    return D3D12_CULL_MODE_NONE;
+}
+
 // 정점 원소 형식의 DXGI 형식이다(RenderBase 10.4절 표, UE D3D12VertexDeclaration.cpp:27–41).
 DXGI_FORMAT AttributeFormat(VertexFormat format) noexcept {
     switch (format) {
@@ -1031,7 +1044,9 @@ public:
         blend.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
         state.SampleMask = D3D12_DEFAULT_SAMPLE_MASK;
         state.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
-        state.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+        state.RasterizerState.CullMode = RasterCullMode(desc.cullMode);
+        // 앞면은 화면 반시계다(Graphics CullMode 규약, UE D3D12State.cpp:353과 같다).
+        state.RasterizerState.FrontCounterClockwise = TRUE;
         state.RasterizerState.DepthClipEnable = TRUE;
         state.DepthStencilState.DepthEnable = FALSE;
         state.DepthStencilState.StencilEnable = FALSE;
@@ -1089,8 +1104,13 @@ public:
         if (!begun) {
             return Result<CommandContext*>::Failure(begun.Error());
         }
-        target_ = {record->buffers[backBuffer].Get(), D3D12_RESOURCE_STATE_PRESENT,
-                   rtvs_.Cpu(record->rtv[backBuffer]), record->width, record->height};
+        target_ = {record->buffers[backBuffer].Get(),
+                   D3D12_RESOURCE_STATE_PRESENT,
+                   rtvs_.Cpu(record->rtv[backBuffer]),
+                   record->width,
+                   record->height,
+                   Format::RGBA8UnormSrgb,
+                   {}};
         presentTarget_ = handle;
         StartPass(clear);
         return Result<CommandContext*>::Success(this);
@@ -1120,8 +1140,13 @@ public:
         if (!begun) {
             return Result<CommandContext*>::Failure(begun.Error());
         }
-        target_ = {record->resource.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                   rtvs_.Cpu(record->rtv), record->width, record->height};
+        target_ = {record->resource.Get(),
+                   D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                   rtvs_.Cpu(record->rtv),
+                   record->width,
+                   record->height,
+                   record->format,
+                   handle};
         presentTarget_ = {};
         StartPass(clear);
         return Result<CommandContext*>::Success(this);
@@ -1641,6 +1666,10 @@ private:
         D3D12_CPU_DESCRIPTOR_HANDLE rtv = {};
         uint32 width = 0;
         uint32 height = 0;
+        // 패스 대상의 형식이다(스왑체인은 RGBA8UnormSrgb view).
+        Format format = Format::Unknown;
+        // offscreen 패스의 대상 텍스처다(스왑체인 패스는 null).
+        TextureHandle texture;
     };
 
     // 기록 중 묶인 정점·index 버퍼다(파이프라인을 바꾸면 그 stride로 다시 묶는다).
@@ -1930,7 +1959,9 @@ private:
     Result<void> Compile(StringView source, const char* entry, const char* target,
                          ComRef<ID3DBlob>& code) noexcept {
         ComRef<ID3DBlob> errors;
-        UINT flags = D3DCOMPILE_ENABLE_STRICTNESS;
+        // 행렬은 행 우선으로 담는다(DrawConstants 규약, ShaderSystem 7.2절 6항 FXC /Zpr). UE도 같은
+        // 플래그로 컴파일한다(D3DShaderCompiler.cpp:1337–1339).
+        UINT flags = D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_PACK_MATRIX_ROW_MAJOR;
         if (validation_) {
             flags |= D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
         } else {
@@ -2627,6 +2658,39 @@ private:
         }
         // base vertex·base instance는 0으로 고정한다.
         list_->DrawIndexedInstanced(indexCount, instanceCount, firstIndex, 0, 0);
+    }
+
+    Result<void> CopyPassTarget(TextureHandle destination) noexcept override {
+        platform::LockGuard lock(gate_);
+        if (!recording_) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+        const TextureRecord* record = textures_.Find(destination.slot);
+        if (record == nullptr) {
+            return Result<void>::Failure(ErrorCode::StaleHandle);
+        }
+        if (!record->renderTarget || destination == target_.texture ||
+            record->width != target_.width || record->height != target_.height ||
+            record->format != target_.format) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        // 백버퍼(R8G8B8A8_UNORM)와 RenderTarget(R8G8B8A8_UNORM_SRGB)은 같은 typeless 묶음이라
+        // CopyResource가 byte를 그대로 옮긴다.
+        const D3D12_RESOURCE_BARRIER toCopy[] = {
+            Transition(target_.resource, D3D12_RESOURCE_STATE_RENDER_TARGET,
+                       D3D12_RESOURCE_STATE_COPY_SOURCE),
+            Transition(record->resource.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                       D3D12_RESOURCE_STATE_COPY_DEST)};
+        list_->ResourceBarrier(2, toCopy);
+        list_->CopyResource(record->resource.Get(), target_.resource);
+        const D3D12_RESOURCE_BARRIER back[] = {
+            Transition(target_.resource, D3D12_RESOURCE_STATE_COPY_SOURCE,
+                       D3D12_RESOURCE_STATE_RENDER_TARGET),
+            Transition(record->resource.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
+                       D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)};
+        list_->ResourceBarrier(2, back);
+        return Result<void>::Success();
     }
 
     Result<uint64> WriteTimestamp() noexcept override {

@@ -7,7 +7,7 @@
   "source": {
     "url": "https://www.unicode.org/Public/18.0.0/ucd/UCD.zip",
     "sha256": "7b3e555514060b92290d154f53655c5eb0fa62b16eb04c03434ff72d1a66a0d8",
-    "verification": "unicode.org HTTPS 배포본(2026-09-01). 꺼낸 파일은 같은 디렉터리의 개별 배포 파일과 SHA-256이 같음을 확인했다(2026-11-12). Unicode는 서명을 제공하지 않는다."
+    "verification": "unicode.org HTTPS distribution (2026-09-01). The extracted files were confirmed to have the same SHA-256 as the individual distribution files in the same directory (2026-11-12). Unicode provides no signatures."
   },
   "licenses": [
     {
@@ -41,8 +41,8 @@
   },
   "pragmaDirectives": [],
   "notes": [
-    "UCD.zip에서 Unicode 정규화·simple case folding·General_Category·Default_Ignorable 표 생성과 시험에 쓰는 파일만 byte 그대로 꺼냈다(쓰지 않는 UCD 파일은 두지 않는다). 설계는 Docs/Design/CoreDataFoundations.ko.md 1절.",
-    "license.txt는 UCD 디렉터리 밖(https://www.unicode.org/license.txt)에서 받았다(licenseSource).",
-    "생성 표(Core/Source/Runtime/Core/Private/Text/UnicodeTables.generated.h)가 Core에 들어가므로 embeddedIn = Core — SDK가 Core를 담으면 이 라이선스를 배포한다."
+    "Only the files used to generate and test the Unicode normalization, simple case folding, General_Category and Default_Ignorable tables were extracted byte for byte from UCD.zip (unused UCD files are not kept). Design: Docs/Design/CoreDataFoundations.ko.md section 1.",
+    "license.txt was downloaded from outside the UCD directory (https://www.unicode.org/license.txt) (licenseSource).",
+    "The generated table (Core/Source/Runtime/Core/Private/Text/UnicodeTables.generated.h) goes into Core, so embeddedIn = Core; an SDK that contains Core distributes this license."
   ]
 }

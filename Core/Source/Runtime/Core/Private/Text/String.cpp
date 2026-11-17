@@ -12,56 +12,8 @@ bool IsContinuation(uint8 value) noexcept {
 } // namespace
 
 Result<void> StringView::ValidateUtf8() const noexcept {
-    usize offset = 0;
-    while (offset < bytes_) {
-        const uint8 leading = static_cast<uint8>(data_[offset]);
-        if (leading < 0x80u) {
-            ++offset;
-            continue;
-        }
-
-        usize width = 0;
-        uint32 scalar = 0;
-        uint32 minimum = 0;
-        if ((leading & 0xE0u) == 0xC0u) {
-            width = 2;
-            scalar = leading & 0x1Fu;
-            minimum = 0x80u;
-        } else if ((leading & 0xF0u) == 0xE0u) {
-            width = 3;
-            scalar = leading & 0x0Fu;
-            minimum = 0x800u;
-        } else if ((leading & 0xF8u) == 0xF0u) {
-            width = 4;
-            scalar = leading & 0x07u;
-            minimum = 0x10000u;
-        } else {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
-        }
-
-        // 남은 길이부터 검사하여 잘린 입력에서 continuation byte를 범위 밖으로 읽지 않는다.
-        if (width > bytes_ - offset) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
-        }
-
-        for (usize index = 1; index < width; ++index) {
-            const uint8 next = static_cast<uint8>(data_[offset + index]);
-            if (!IsContinuation(next)) {
-                return Result<void>::Failure(ErrorCode::InvalidArgument);
-            }
-
-            scalar = (scalar << 6u) | (next & 0x3Fu);
-        }
-
-        // 같은 문자를 긴 sequence로 표현한 overlong과 UTF-16 surrogate는 UTF-8로 수용하지 않는다.
-        if (scalar < minimum || scalar > 0x10FFFFu || (scalar >= 0xD800u && scalar <= 0xDFFFu)) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
-        }
-
-        offset += width;
-    }
-
-    return Result<void>::Success();
+    return IsValidUtf8() ? Result<void>::Success()
+                         : Result<void>::Failure(ErrorCode::InvalidArgument);
 }
 
 Result<StringView> StringView::TrySliceBytes(usize offset, usize byteCount) const noexcept {

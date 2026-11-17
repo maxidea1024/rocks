@@ -39,6 +39,10 @@ uint64 MonotonicTickFrequency() noexcept;
 // 쓴다. 윤초는 반영하지 않는다(OS가 돌려주는 POSIX/Windows 시각 그대로). OS 조회 실패나 표현
 // 범위(0001-01-01–9999-12-31) 밖이면 Fatal이다.
 int64 UtcTicks() noexcept;
+
+// UtcTicks와 같은 값을 ticks에 쓰고 true를 돌려준다. OS 조회 실패나 표현 범위 밖이면 Fatal 대신
+// false이고 ticks는 바꾸지 않는다. 실패해도 멈추면 안 되는 곳(로그 출력 스레드의 UTC 환산)이 쓴다.
+bool TryUtcTicks(int64& ticks) noexcept;
 // 현재 native thread의 식별 값이다. 종료된 thread의 ID는 OS가 재사용할 수 있으므로
 // 장기 보존하는 작업·객체의 generation이나 프로세스 간 식별자를 대체하지 않는다.
 uint64 CurrentThreadId() noexcept;

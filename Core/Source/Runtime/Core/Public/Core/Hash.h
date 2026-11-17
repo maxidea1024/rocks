@@ -42,7 +42,13 @@ struct Equal {
     }
 };
 
-inline uint64 HashStringBytes(StringView value) noexcept {
+// byte 열의 64비트 FNV-1a 위에 MixHash를 씌운 값이다. 실행 중 분포용이며 영속 식별자가 아니다
+// (알고리즘을 바꾸면 값이 달라진다). constexpr이라 컴파일 타임 키에도 쓰며, 컴파일 타임과 런타임에
+// 같은 문자열을 해시하면 같은 값이다.
+//
+// 사용 예:
+//   constexpr uint64 key = HashStringBytes("Graphics");
+constexpr uint64 HashStringBytes(StringView value) noexcept {
     uint64 hash = 14695981039346656037ull;
     for (usize index = 0; index < value.ByteCount(); ++index) {
         hash ^= static_cast<uint8>(value.Data()[index]);
@@ -57,9 +63,11 @@ inline uint64 HashStringBytes(StringView value) noexcept {
 // ASCII 대소문자 무시 같음과 짝이 맞는 해시다. Name pool의 bucket 해시(번호 접미를 뗀 base)와
 // TypeRegistry의 타입 도구 이름 색인이 같이 쓴다. 실행 중 분포용이며 영속 식별자가 아니다.
 //
+// constexpr이라 컴파일 타임 키에도 쓴다(LogCategory의 점 접두사 해시).
+//
 // 사용 예:
 //   const uint64 bucket = HashStringBytesIgnoringAsciiCase(name) & mask;
-inline uint64 HashStringBytesIgnoringAsciiCase(StringView value) noexcept {
+constexpr uint64 HashStringBytesIgnoringAsciiCase(StringView value) noexcept {
     uint64 hash = 14695981039346656037ull;
     for (usize index = 0; index < value.ByteCount(); ++index) {
         const uint8 byte = static_cast<uint8>(value.Data()[index]);

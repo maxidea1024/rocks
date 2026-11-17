@@ -7,7 +7,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Rocks.Tooling.Common/Rocks.Tooling.Common.csproj" />
-    <!-- Release 배제 정책(ReleaseExclusion)이 모듈·타깃 규칙을 평가한다(RuleLoader). -->
+    <!-- The Release exclusion policy (ReleaseExclusion) evaluates module and target rules (RuleLoader). -->
     <ProjectReference Include="../Rocks.Build.Abstractions/Rocks.Build.Abstractions.csproj" />
   </ItemGroup>
 </Project>

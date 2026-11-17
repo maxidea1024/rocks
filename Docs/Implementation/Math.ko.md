@@ -41,7 +41,7 @@ Core/Public/Core/Math        Vec·Quat·Mat4·Transform·Rotator·Rect·Color·R
 
 ### 좌표·단위 규약(UE 5.8과 같다)
 
-사용자 요구(2026-11-17)에 따라 공간 좌표계·회전 의미·단위를 UE 5.8(5.8.4, `f45729c0b6f0`)과 **같게** 바꾸고 있다. 이전 규약(오른손, +Y 왼쪽, 미터, Rotator 라디안·yaw·pitch·roll 순서·roll 부호 반대)을 위한 호환 계층은 두지 않는다. 1단계(축·방향 상수·외적 설명·Quaternion·Rotator·MathUtility 규약 문장과 golden), 2단계(행렬·Transform 행 벡터 전환, view·투영 생성 함수, 아래 "행렬·Transform·view 규약"), 3단계(도형 앞면 설명·Ray 기본 방향, 2.1절), 4단계(단위 경계 변환 `UnitConversion.h`, 아래 "단위 경계 변환"), 5단계(World `SceneComponent`·리플렉션 미러 계약 주석의 cm·회전 단위)를 반영했다. 문서 전수 정정과 렌더 경계(셰이더 `mul` 순서·packing), 물리 어댑터 설계는 후속 단계다. 아래 근거 행은 UE 5.8.4 원본(`Engine/Source/Runtime/Core/`)이며 부호·식은 좌우수로 추측하지 않고 UE 식을 옮긴 probe로 계산해 확인했다(5절).
+사용자 요구(2026-11-17)에 따라 공간 좌표계·회전 의미·단위를 UE 5.8(5.8.4, `f45729c0b6f0`)과 **같게** 바꾸고 있다. 이전 규약(오른손, +Y 왼쪽, 미터, Rotator 라디안·yaw·pitch·roll 순서·roll 부호 반대)을 위한 호환 계층은 두지 않는다. 1단계(축·방향 상수·외적 설명·Quaternion·Rotator·MathUtility 규약 문장과 golden), 2단계(행렬·Transform 행 벡터 전환, view·투영 생성 함수, 아래 "행렬·Transform·view 규약"), 3단계(도형 앞면 설명·Ray 기본 방향, 2.1절), 4단계(단위 경계 변환 `UnitConversion.h`, 아래 "단위 경계 변환"), 5단계(World `SceneComponent`·리플렉션 미러 계약 주석의 cm·회전 단위)를 반영했다. 6단계에서 Core 소관 설계 문서를 정정했고([전체 구현 계획](../Design/EngineImplementationPlan.ko.md) 개정 1.12 — 2.2절 기록·33.17절), 8단계에서 Jolt 연동의 좌표·단위 변환 계약을 [물리 어댑터 경계](../Design/PhysicsJoltAdapter.ko.md)에 썼다(설계만, 물리 미구현). 렌더 경계(셰이더 `mul` 순서·packing·앞면)는 렌더 세션 몫이다. 아래 근거 행은 UE 5.8.4 원본(`Engine/Source/Runtime/Core/`)이며 부호·식은 좌우수로 추측하지 않고 UE 식을 옮긴 probe로 계산해 확인했다(5절).
 
 | 항목 | 규약(UE와 같음) | UE 근거 |
 |---|---|---|
@@ -81,7 +81,7 @@ UE와 의도적으로 다른 점(규약이 아니라 안전성·정확도 정책
 | 관성 모멘트 | `KilogramSquareCentimetersToKilogramSquareMeters` / 반대 | 10000 | `Engine/Classes/Components/PrimitiveComponent.h:2863`(관성 텐서 kg·cm²) |
 | 질량·시간·각도·각속도 | 변환 없음(길이 차원 없음, 각속도는 API 이름의 rad/s·deg/s를 따른다) | — | `PrimitiveComponent.h:2852-2857`(kg), `:1860-1873`(InRadians/InDegrees) |
 
-함수는 float·double·`Vector3<float/double>`(성분별)을 받는다. m → cm는 정확한 정수 계수를 한 번 곱하고 cm → m는 같은 계수로 한 번 나누므로 결과는 정확한 값을 한 번 반올림한 값이다. UE 매크로 `UE_CM_TO_M`은 float `0.01f`라 double 값에 곱하면 상대 오차 약 2.2e-8이 생기는데 Rocks는 이를 따르지 않는다(정확도 정책 — 규약과 무관). 비유한 입력은 그대로 전파하고 범위 초과는 ±Inf다. UE `UnitConversion.h`의 `EUnit` 표시·파싱·자동 단위 선택 체계는 구현하지 않았다(에디터 표시 단위 단계). UE 물리 API(AddForce·AddImpulse·AddTorque)가 받는 단위가 위 cm 계열인지는 UE 소스에 표기가 없어(추론만) 물리 어댑터 설계(후속 단계)의 검증 항목이다. 극성·축성 벡터·quaternion의 좌우수 변환은 이 함수의 범위가 아니다.
+함수는 float·double·`Vector3<float/double>`(성분별)을 받는다. m → cm는 정확한 정수 계수를 한 번 곱하고 cm → m는 같은 계수로 한 번 나누므로 결과는 정확한 값을 한 번 반올림한 값이다. UE 매크로 `UE_CM_TO_M`은 float `0.01f`라 double 값에 곱하면 상대 오차 약 2.2e-8이 생기는데 Rocks는 이를 따르지 않는다(정확도 정책 — 규약과 무관). 비유한 입력은 그대로 전파하고 범위 초과는 ±Inf다. UE `UnitConversion.h`의 `EUnit` 표시·파싱·자동 단위 선택 체계는 구현하지 않았다(에디터 표시 단위 단계). UE 물리 API(AddForce·AddImpulse·AddTorque)가 받는 단위가 위 cm 계열인지는 UE 소스에 표기가 없어(추론만) [물리 어댑터 경계](../Design/PhysicsJoltAdapter.ko.md) 8절의 검증 항목 U1이다. 밀도(UE g/cm³)·각충격량·각 스프링 강성 변환 함수는 아직 없다(같은 문서 K1). 극성·축성 벡터·quaternion의 축 사상은 이 함수의 범위가 아니며 같은 문서 2절이 정한다.
 
 World 계층(5단계): `SceneComponent`의 위치·이동(`SetRelativeLocation`·`WorldLocation`·`Transform::translation`)은 cm, 회전은 단위 quaternion(UE FQuat 의미, 도 단위 `Rotator`는 `ToQuaternion`으로 바꾼다), scale은 무차원 배율이다(UE `WorldSettings.h:593-595`, `SceneComponent.cpp:732`). 리플렉션 미러 `Vec3Binding`·`QuatBinding`·`TransformBinding`의 주석도 같은 단위·의미를 적었다(저장 형식에는 단위를 기록하지 않으며 값과 필드 ID는 그대로다). World 시험의 위치 값(예: `(0, 0, 100)`·`(100, 0, 0)`)은 cm로 읽어도 의미가 같아 값을 바꾸지 않았다.
 

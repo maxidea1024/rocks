@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-# 배포 archive에서 네이티브 실행 파일만 추출한다. 패키지 언어의 런타임/설치 코드는 실행하지 않는다.
+# Extracts only the native executables from the release archive. Runtime or install code of the package language is never run.
 $platform = if ($IsWindows) { 'windows' } elseif ($IsMacOS) { 'macos' } else { throw 'Windows/macOS hosts only.' }
 $architecture = [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()
 $packages = @{

@@ -1,20 +1,20 @@
 name: Third-party tools
-# 미리 빌드한 바이너리(manifest kind: binary)의 오프라인 도구 빌드다(Docs/Design/ShaderSystem.ko.md 8절 4항).
-# 수동으로만 돈다. 라이브러리마다 Engine/Source/ThirdParty/<Lib>/Build/의 스크립트로 Windows x64·macOS arm64 archive를 만들고,
-# publish가 true면 그 manifest의 Release 태그(third-party-<이름>-<버전>-r<revision>)에 asset으로 올린다. 올린 뒤 각 archive의
-# <asset>.host.json을 manifest hosts에 옮겨 커밋한다(bootstrap이 그 SHA-256으로 검사한다).
-# 이 workflow는 기본 빌드·시험 경로가 아니다. 업스트림 빌드가 Python으로 표를 생성하므로 Python을 설치하며, 정책 검사
-# python-main-path는 이 파일만 명시 제외한다. 엔진 빌드·시험과 Foundation CI는 Python 없이 돈다.
+# Offline tool build of prebuilt binaries (manifest kind: binary) (Docs/Design/ShaderSystem.ko.md section 8, item 4).
+# Runs manually only. For each library the scripts in Engine/Source/ThirdParty/<Lib>/Build/ produce Windows x64 and macOS arm64 archives, and
+# when publish is true they are uploaded as assets to the manifest's Release tag (third-party-<name>-<version>-r<revision>). After upload, each archive's
+# <asset>.host.json is copied into the manifest hosts and committed (bootstrap verifies that SHA-256).
+# This workflow is not the default build and test path. The upstream build generates tables with Python, so Python is installed, and the policy check
+# python-main-path explicitly excludes only this file. Engine build and test and Foundation CI run without Python.
 on:
   workflow_dispatch:
     inputs:
       library:
-        description: 빌드할 라이브러리 폴더 이름(DirectXShaderCompiler, SpirvCross, SpirvTools)
+        description: Library folder name to build (DirectXShaderCompiler, SpirvCross, SpirvTools)
         required: true
         type: choice
         options: [DirectXShaderCompiler, SpirvCross, SpirvTools]
       publish:
-        description: Release에 asset으로 올린다
+        description: Upload as assets to the Release
         required: true
         type: boolean
         default: false
@@ -52,7 +52,7 @@ jobs:
           name: third-party-${{ inputs.library }}-${{ matrix.host }}
           path: ${{ runner.temp }}/archives/*
   publish:
-    # 두 호스트 archive가 모두 만들어진 뒤 한 번에 올린다(Release 생성이 겹치지 않게).
+    # Upload once after both host archives are built (so Release creation does not overlap).
     if: inputs.publish
     needs: build
     runs-on: ubuntu-latest
