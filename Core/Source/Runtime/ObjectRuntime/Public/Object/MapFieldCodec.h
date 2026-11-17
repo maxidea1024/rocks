@@ -819,4 +819,15 @@ void TraceMapField(const ObjectRefMap<K, T>& map, TraceVisitor& visitor) noexcep
     map.Trace(visitor);
 }
 
+// 생성 참조 위치 함수(M3)의 Map 필드 오버로드다: OrderedMap은 강한 참조가 없고 ObjectRefMap은 표로
+// 나타낼 수 없어 trace로 남긴다.
+template <class K, class V>
+void LayoutMapField(const OrderedMap<K, V>&, ReferenceLayoutBuilder&) noexcept {
+}
+
+template <class K, class T>
+void LayoutMapField(const ObjectRefMap<K, T>&, ReferenceLayoutBuilder& layout) noexcept {
+    layout.Unsupported();
+}
+
 } // namespace rocks::detail

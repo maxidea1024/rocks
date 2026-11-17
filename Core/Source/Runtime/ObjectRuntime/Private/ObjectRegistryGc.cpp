@@ -1,6 +1,7 @@
 #include "ObjectRegistryInternal.h"
 
 #include <Base/Compiler.h>
+#include <Core/Diagnostics/Log.h>
 #include <Object/ObjectRegistry.h>
 #include <Platform/Atomics.h>
 #include <Platform/Clock.h>
@@ -46,6 +47,8 @@ constexpr uint32 SweepTimeCheckInterval = 64;
 // 버퍼는 본체 배치를 알아야 하므로(M3) 미리 읽지 않는다.
 constexpr usize HotPrefetchDistance = 16;
 constexpr usize ObjectPrefetchDistance = 8;
+// 참조 위치 표(M3)의 배열 칸 버퍼를 몇 칸 앞에서 미리 읽는지다(본체는 8칸 앞에서 이미 당겼다).
+constexpr usize ArrayPrefetchDistance = 4;
 // 병렬 slice의 꼬리 시간 보정이 시간 예산에서 가져갈 수 있는 최대 몫(예산 / 이 값)이다. 선점 같은
 // 일회성 지연이 다음 slice의 표식 시간을 지나치게 줄이지 않게 한다.
 constexpr uint64 ParallelTailBudgetDivisor = 4;
@@ -55,6 +58,17 @@ constexpr uint32 GcPageTableTag = 0x47435054u; // 'GCPT'
 constexpr uint32 GcTypeTag = 0x47435459u;      // 'GCTY'
 constexpr uint32 RootListTag = 0x4743524cu;    // 'GCRL'
 constexpr uint32 GcBlockTag = 0x4743424bu;     // 'GCBK'
+
+// GC 사이클 통계 로그 카테고리다(Debug 레벨 — 객체마다 찍지 않는다).
+inline constexpr LogCategory LogObjectGC{"Object.GC"};
+
+void LogCycle(const char* kind, const GcReport& report) noexcept {
+    Log::Debug(LogObjectGC,
+               "{Kind} finished: examined {Examined}, marked {Marked}, retired {Retired}, "
+               "reclaimed {Reclaimed}, {Milliseconds:.3f} ms",
+               kind, report.examined, report.marked, report.retired, report.reclaimed,
+               static_cast<double>(report.durationNanoseconds) * 1e-6);
+}
 
 uint64 LoadMark(const uint64& word) noexcept {
     return platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&word);
@@ -157,9 +171,144 @@ void ObjectRegistry::MarkBatch(void* pointer, const ObjectHandle* handles, uint3
     }
 }
 
+void ObjectRegistry::VisitStrongEdges(const GcType& type, const Object& object,
+                                      TraceVisitor& visitor) const noexcept {
+    if (type.layout != GcType::Layout::Table) {
+        type.trace(object, visitor);
+        return;
+    }
+
+    const auto* base = reinterpret_cast<const unsigned char*>(&object);
+    for (uint16 at = 0; at < type.slotCount; ++at) {
+        const detail::ReferenceSlot& slot = type.slots[at];
+        if (slot.kind == detail::ReferenceSlotKind::Single) {
+            visitor.Visit(*reinterpret_cast<const ObjectHandle*>(base + slot.offset));
+            continue;
+        }
+
+        const auto& storage =
+            *reinterpret_cast<const detail::ObjectRefArrayStorage*>(base + slot.offset);
+        for (uint32 element = 0; element < storage.size; ++element) {
+            visitor.Visit(storage.data[element]);
+        }
+    }
+
+    if constexpr (IsDebugBuild) {
+        // 표가 trace와 같은 간선을 같은 순서로 방문하는지 대조한다(M3 — 표가 간선 하나를 빠뜨리면
+        // 회수 후 사용이 된다).
+        struct Compare {
+            const GcType* type;
+            const unsigned char* base;
+            uint16 slot = 0;
+            uint32 element = 0;
+            bool diverged = false;
+
+            ObjectHandle Next() noexcept {
+                while (slot < type->slotCount) {
+                    const detail::ReferenceSlot& at = type->slots[slot];
+                    if (at.kind == detail::ReferenceSlotKind::Single) {
+                        ++slot;
+                        const ObjectHandle handle =
+                            *reinterpret_cast<const ObjectHandle*>(base + at.offset);
+                        if (!handle.IsNull()) {
+                            return handle;
+                        }
+
+                        continue;
+                    }
+
+                    const auto& storage =
+                        *reinterpret_cast<const detail::ObjectRefArrayStorage*>(base + at.offset);
+                    while (element < storage.size) {
+                        const ObjectHandle handle = storage.data[element++];
+                        if (!handle.IsNull()) {
+                            return handle;
+                        }
+                    }
+
+                    element = 0;
+                    ++slot;
+                }
+
+                return {};
+            }
+        };
+
+        Compare compare{&type, base};
+        TraceVisitor check(
+            &compare, +[](void* pointer, ObjectHandle handle) noexcept {
+                auto& state = *static_cast<Compare*>(pointer);
+                if (!handle.IsNull() && !(state.Next() == handle)) {
+                    state.diverged = true;
+                }
+            });
+        type.trace(object, check);
+        if (compare.diverged || !compare.Next().IsNull()) {
+            platform::Fatal("Reference layout table diverged from the type Trace");
+        }
+    }
+}
+
+void ObjectRegistry::PrefetchArrays(uint32 index) const noexcept {
+    const GcHot& hot = HotOf(index);
+    const GcType& type = gcTypes_[hot.type];
+    if (!type.hasArray || hot.object == nullptr) {
+        return;
+    }
+
+    const auto* base = reinterpret_cast<const unsigned char*>(hot.object);
+    for (uint16 at = 0; at < type.slotCount; ++at) {
+        if (type.slots[at].kind == detail::ReferenceSlotKind::Array) {
+            const auto& storage = *reinterpret_cast<const detail::ObjectRefArrayStorage*>(
+                base + type.slots[at].offset);
+            if (storage.data != nullptr) {
+                platform::PrefetchRead(storage.data);
+            }
+        }
+    }
+}
+
+void ObjectRegistry::PrepareReferenceLayout(uint16 index, const Object& object) noexcept {
+    GcType& type = gcTypes_[index];
+    if (type.layout != GcType::Layout::Unknown) {
+        return;
+    }
+
+    type.layout = GcType::Layout::Trace;
+    if (type.referenceLayout == nullptr || !options_.referenceTables) {
+        return;
+    }
+
+    detail::ReferenceLayoutBuilder builder(&object);
+    type.referenceLayout(object, builder);
+    if (!builder.Supported()) {
+        return;
+    }
+
+    // 칸이 없는 타입은 빈 표다(표식이 trace를 부르지 않는다).
+    if (builder.Count() != 0) {
+        auto memory = allocator_.Allocate(sizeof(detail::ReferenceSlot) * builder.Count(),
+                                          alignof(detail::ReferenceSlot), GcTypeTag);
+        if (!memory) {
+            // 표 할당 실패는 trace로 남는다(정확성은 같다).
+            return;
+        }
+
+        type.slots = static_cast<detail::ReferenceSlot*>(memory.Value());
+        for (uint32 at = 0; at < builder.Count(); ++at) {
+            type.slots[at] = builder.Slots()[at];
+            type.hasArray =
+                type.hasArray || builder.Slots()[at].kind == detail::ReferenceSlotKind::Array;
+        }
+    }
+
+    type.slotCount = static_cast<uint16>(builder.Count());
+    type.layout = GcType::Layout::Table;
+}
+
 void ObjectRegistry::TraceIndex(uint32 index, MarkState& state, TraceVisitor& visitor) noexcept {
     const GcHot& hot = HotOf(index);
-    gcTypes_[hot.type].trace(*hot.object, visitor);
+    VisitStrongEdges(gcTypes_[hot.type], *hot.object, visitor);
     // 객체마다 비워 큐 순서를 간선마다 처리할 때와 같게 둔다(Trace 간선 → Outer → 자식).
     visitor.Flush();
     if (state.error != ErrorCode::None) {
@@ -210,6 +359,11 @@ uint32 ObjectRegistry::MarkSerial(Array<uint32>& work, usize& cursor, MarkState&
         if (cursor + ObjectPrefetchDistance < size &&
             (work[cursor + ObjectPrefetchDistance] & ClusterItem) == 0) {
             platform::PrefetchRead(HotOf(work[cursor + ObjectPrefetchDistance]).object);
+        }
+
+        if (cursor + ArrayPrefetchDistance < size &&
+            (work[cursor + ArrayPrefetchDistance] & ClusterItem) == 0) {
+            PrefetchArrays(work[cursor + ArrayPrefetchDistance]);
         }
 
         const uint32 item = work[cursor++];
@@ -295,10 +449,20 @@ Result<uint16> ObjectRegistry::AcquireGcType(const RuntimeTypeOps& ops) noexcept
     for (uint32 index = 1; index < gcTypeCount_; ++index) {
         GcType& type = gcTypes_[index];
         if (type.key == key) {
-            // 같은 주소를 새 레코드가 쓰는 경우(옛 레코드 해제 뒤)를 위해 값을 다시 채운다.
+            // 같은 주소를 새 레코드가 쓰는 경우(옛 레코드 해제 뒤)를 위해 값을 다시 채운다. 참조
+            // 위치 표는 함수가 바뀌었으면 다시 정한다(그때는 옛 타입의 객체가 남아 있지 않다).
             type.trace = ops.trace;
             type.parallelTraceSafe = ops.parallelTraceSafe;
             type.leaf = leaf;
+            if (type.referenceLayout != ops.referenceLayout) {
+                ReleaseRegistryMemory(allocator_, type.slots);
+                type.slots = nullptr;
+                type.slotCount = 0;
+                type.hasArray = false;
+                type.layout = GcType::Layout::Unknown;
+                type.referenceLayout = ops.referenceLayout;
+            }
+
             return Result<uint16>::Success(static_cast<uint16>(index));
         }
     }
@@ -329,6 +493,7 @@ Result<uint16> ObjectRegistry::AcquireGcType(const RuntimeTypeOps& ops) noexcept
     GcType& type = gcTypes_[gcTypeCount_];
     type.key = key;
     type.trace = ops.trace;
+    type.referenceLayout = ops.referenceLayout;
     type.parallelTraceSafe = ops.parallelTraceSafe;
     type.leaf = leaf;
     return Result<uint16>::Success(static_cast<uint16>(gcTypeCount_++));
@@ -786,6 +951,11 @@ struct ObjectRegistry::ParallelMark {
                         registry->HotOf(top->items[top->count - ObjectPrefetchDistance]).object);
                 }
 
+                if (top->count > ArrayPrefetchDistance &&
+                    (top->items[top->count - ArrayPrefetchDistance] & ClusterItem) == 0) {
+                    registry->PrefetchArrays(top->items[top->count - ArrayPrefetchDistance]);
+                }
+
                 return true;
             }
 
@@ -903,7 +1073,7 @@ struct ObjectRegistry::ParallelMark {
 
     void Trace(MarkParticipant& self, uint32 index, TraceVisitor& visitor) noexcept {
         const GcHot& hot = registry->HotOf(index);
-        registry->gcTypes_[hot.type].trace(*hot.object, visitor);
+        registry->VisitStrongEdges(registry->gcTypes_[hot.type], *hot.object, visitor);
         visitor.Flush();
         if (hot.outer != NoSlot) {
             const ErrorCode outer = Mark(self, hot.outer);
@@ -1383,21 +1553,30 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
     }
 
     const uint64 finished = platform::MonotonicNanoseconds();
-    platform::LockGuard lock(gate_);
-    cycleGc_.reclaimNanoseconds += finished - reclaimStarted;
-    slice.reclaim = finished - reclaimStarted;
-    cycleGc_.durationNanoseconds += finished - started;
-    if (gcPhase_ == GcPhase::Reclaiming && !HasReclaimableLocked()) {
-        gcPhase_ = GcPhase::Idle;
-        lastGc_ = cycleGc_;
-        gcWork_.Clear();
-        gcShade_.Clear();
-        ReleaseGrayBlocks();
-        gcCursor_ = 0;
+    GcProgress progress;
+    {
+        platform::LockGuard lock(gate_);
+        cycleGc_.reclaimNanoseconds += finished - reclaimStarted;
+        slice.reclaim = finished - reclaimStarted;
+        cycleGc_.durationNanoseconds += finished - started;
+        if (gcPhase_ == GcPhase::Reclaiming && !HasReclaimableLocked()) {
+            gcPhase_ = GcPhase::Idle;
+            lastGc_ = cycleGc_;
+            gcWork_.Clear();
+            gcShade_.Clear();
+            ReleaseGrayBlocks();
+            gcCursor_ = 0;
+        }
+
+        processing_ = false;
+        progress = {gcPhase_, processed, cycleGc_, slice};
     }
 
-    processing_ = false;
-    return Result<GcProgress>::Success({gcPhase_, processed, cycleGc_, slice});
+    if (progress.IsComplete()) {
+        LogCycle("Incremental GC cycle", progress.report);
+    }
+
+    return Result<GcProgress>::Success(progress);
 }
 
 Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access,
@@ -1498,6 +1677,7 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access,
         processing_ = false;
     }
 
+    LogCycle("Stop-the-world GC", report);
     return Result<GcReport>::Success(report);
 }
 

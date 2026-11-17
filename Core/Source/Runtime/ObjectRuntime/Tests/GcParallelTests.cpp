@@ -66,15 +66,26 @@ public:
     ObjectHandle poison;
 };
 
+// 참조 위치 표(M3)를 내는 수동 함수다(생성 코드와 같은 모양). 노드는 표로, 수동 노드는 trace로
+// 표식되어 두 경로가 한 그래프에 섞인다(Debug는 표와 trace의 간선을 대조한다).
+void ParallelNodeLayout(const Object& object, detail::ReferenceLayoutBuilder& layout) noexcept {
+    static_cast<const ParallelNode&>(object).items.ReportLayout(layout);
+}
+
 bool RegisterParallelTypes(TypeRegistry& types) noexcept {
     RuntimeTypeOps node = MakeRuntimeTypeOps<ParallelNode>();
     node.parallelTraceSafe = true;
+    node.referenceLayout = &ParallelNodeLayout;
     RuntimeTypeOps manual = MakeRuntimeTypeOps<ManualNode>();
     RuntimeTypeOps leaf = MakeRuntimeTypeOps<ParallelLeaf>();
     leaf.parallelTraceSafe = true;
     leaf.hasStrongReferences = false;
     RuntimeTypeOps poison = MakeRuntimeTypeOps<PoisonNode>();
     poison.parallelTraceSafe = true;
+    poison.referenceLayout =
+        +[](const Object& object, detail::ReferenceLayoutBuilder& layout) noexcept {
+            layout.Single(&static_cast<const PoisonNode&>(object).poison);
+        };
     return types.Register(TypeSchema{ParallelNodeType, 1, {}, {}}, Move(node)) &&
            types.Register(TypeSchema{ManualNodeType, 1, {}, {}}, Move(manual)) &&
            types.Register(TypeSchema{ParallelLeafType, 1, {}, {}}, Move(leaf)) &&

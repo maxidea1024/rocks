@@ -257,6 +257,8 @@ struct Options {
     bool allocators = false;
     bool clusters = false;
     bool packages = false;
+    // 참조 위치 표(M3)를 끈다(RegistryOptions::referenceTables — 비교 측정).
+    bool noTables = false;
     uint64 clusterSoakTicks = 0;
     uint64 soakTicks = 0;
     uint64 seed = 7;
@@ -276,6 +278,11 @@ bool RegisterTypes(TypeRegistry& types, TypeTokens& tokens) noexcept {
     node.parallelTraceSafe = true;
     // Trace가 모든 강한 간선을 방문한다(클러스터 소속·영구 영역·패키지 정책의 조건).
     node.completeFieldLayout = true;
+    // 참조 위치 표(M3): 리플렉션 클래스의 생성 함수와 같은 모양의 수동 함수다.
+    node.referenceLayout =
+        +[](const Object& object, detail::ReferenceLayoutBuilder& layout) noexcept {
+            static_cast<const BenchNode&>(object).refs.ReportLayout(layout);
+        };
     auto registeredNode = types.Register(TypeSchema{NodeTypeId, 1, {}, {}}, Move(node));
     RuntimeTypeOps package = MakeRuntimeTypeOps<BenchPackage>();
     package.parallelTraceSafe = true;
@@ -547,6 +554,7 @@ int RunScenario(const Scenario& scenario, const Options& options) noexcept {
         }
 
         RegistryOptions registryOptions;
+        registryOptions.referenceTables = !options.noTables;
         const uint64 wanted = uint64(scenario.objects) * 2 + 65536;
         registryOptions.maxSlots = wanted > NumericLimits<uint32>::Max() / 2
                                        ? NumericLimits<uint32>::Max() / 2
@@ -886,6 +894,7 @@ int RunPackageScenario(uint32 crossPercent, bool clusters, const Options& option
 
         {
             RegistryOptions registryOptions;
+            registryOptions.referenceTables = !options.noTables;
             registryOptions.policy.packageNativeType = NativeTypeKey<BenchPackage>();
             registryOptions.packageClusters = clusters;
             ObjectRegistry registry(memory, types, Guid{0x6764, crossPercent}, registryOptions);
@@ -1008,6 +1017,7 @@ int RunWorldScenario(bool clusters, const Options& options) noexcept {
 
         {
             RegistryOptions registryOptions;
+            registryOptions.referenceTables = !options.noTables;
             registryOptions.clusters = clusters;
             ObjectRegistry registry(memory, types, Guid{0x6765, clusters ? 1u : 0u},
                                     registryOptions);
@@ -1195,6 +1205,7 @@ int RunPermanentScenario(bool region, const Options& options) noexcept {
 
         {
             RegistryOptions registryOptions;
+            registryOptions.referenceTables = !options.noTables;
             registryOptions.permanentRegion = region;
             ObjectRegistry registry(memory, types, Guid{0x6766, region ? 1u : 0u}, registryOptions);
             const auto access = registry.OwnerAccess();
@@ -1542,6 +1553,8 @@ bool Parse(int argc, char** argv, Options& options) noexcept {
             options.clusters = true;
         } else if (platform::CStringEquals(argv[index], "--packages")) {
             options.packages = true;
+        } else if (platform::CStringEquals(argv[index], "--no-tables")) {
+            options.noTables = true;
         } else if (platform::CStringEquals(argv[index], "--soak-workers")) {
             options.soakWorkers = true;
         } else if (platform::CStringEquals(argv[index], "--soak-time-budget")) {
@@ -1632,10 +1645,12 @@ int main(int argc, char** argv) {
     if (!Parse(argc, argv, options)) {
         printf("usage: GcBench [--objects N] [--refs K] [--leaf P] [--reps R] [--workers W] "
                "[--allocators] [--clusters] [--soak TICKS [--seed S] [--soak-objects N] "
-               "[--soak-workers] [--soak-time-budget]] [--cluster-soak TICKS [--packages]]\n");
+               "[--soak-workers] [--soak-time-budget]] [--cluster-soak TICKS [--packages]] "
+               "[--no-tables]\n");
         return 1;
     }
 
-    printf("GcBench: workers %u\n", options.workers);
+    printf("GcBench: workers %u, reference tables %s\n", options.workers,
+           options.noTables ? "off" : "on");
     return Run(options);
 }

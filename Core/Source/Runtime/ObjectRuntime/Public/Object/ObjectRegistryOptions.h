@@ -84,6 +84,8 @@ struct RegistryOptions {
     // 패키지 정책과 함께 켜면 Registry 생성이 Fatal이다(자식 고리가 간선이라 창을 닫은 뒤 만든
     // 자식이 영구 → 일반 간선이 된다). Engine Registry가 서브시스템 초기화 동안만 연다.
     bool permanentRegion = false;
+    // 참조 위치 표(M3)를 쓴다(기본). 끄면 모든 타입을 trace로 표식한다(측정 비교용).
+    bool referenceTables = true;
     // Debug에서 Begin·Collect마다 클러스터 장부(소속·inCount·outCount·경계·detached 목록)를
     // 처음부터 다시 계산해 비교하고, 어긋나면 Fatal로 멈춘다(비용이 커서 soak·시험만 켠다).
     // Release·Development에서는 무시한다.

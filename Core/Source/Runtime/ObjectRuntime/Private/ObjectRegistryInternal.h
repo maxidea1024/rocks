@@ -350,8 +350,22 @@ struct ObjectRegistry::GcPage {
 // 안정하다 — 레코드가 해제되어 같은 주소를 다른 타입이 쓰면 찾을 때 값을 다시 채운다. 그때는
 // 옛 타입의 객체가 남아 있지 않다).
 struct ObjectRegistry::GcType {
+    // 참조 위치 표 상태다(M3).
+    enum class Layout : uint8 {
+        Unknown, // 아직 객체를 보지 못했다(첫 생성에서 정한다)
+        Table,   // slots로 표식한다
+        Trace    // 표가 없거나 나타낼 수 없다
+    };
+
     const void* key = nullptr;
     void (*trace)(const Object&, TraceVisitor&) noexcept = nullptr;
+    void (*referenceLayout)(const Object&, detail::ReferenceLayoutBuilder&) noexcept = nullptr;
+    // Table이면 Registry allocator로 받은 칸 표다(slotCount개).
+    detail::ReferenceSlot* slots = nullptr;
+    uint16 slotCount = 0;
+    Layout layout = Layout::Unknown;
+    // 표에 배열 칸이 있다(큐 앞쪽에서 배열 버퍼를 미리 읽는다).
+    bool hasArray = false;
     bool parallelTraceSafe = false;
     bool leaf = false;
 };

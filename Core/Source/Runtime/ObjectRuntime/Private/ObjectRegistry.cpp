@@ -97,6 +97,10 @@ ObjectRegistry::~ObjectRegistry() {
     }
 
     ReleaseRegistryMemory(allocator_, gcPages_);
+    for (uint32 index = 1; index < gcTypeCount_; ++index) {
+        ReleaseRegistryMemory(allocator_, gcTypes_[index].slots);
+    }
+
     ReleaseRegistryMemory(allocator_, gcTypes_);
     ReleaseRegistryMemory(allocator_, rootList_);
     ReleaseRegistryMemory(allocator_, clusters_);

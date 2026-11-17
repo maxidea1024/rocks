@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Object/ReferenceLayout.h>
 #include <Base/TypeTraits.h>
 #include <Core/Containers/Array.h>
 #include <Core/Encoding/Sha256.h>
@@ -595,6 +596,13 @@ struct RuntimeTypeOps {
     // 방문해야 한다 — 패키지 정책 ObjectRegistry는 이 선언이 있는 타입만 만든다(관찰자 계수가
     // 편집은 Registry API로, Commit·Discard는 trace로 센다).
     bool completeFieldLayout = false;
+    // 참조 위치 표(M3, Docs/Design/GarbageCollectionScale.ko.md 3.4절)를 만드는 함수다(선택). 객체
+    // 하나를 받아 강한 간선 칸(ObjectRef·ObjectRefArray 멤버)의 위치를 builder에 알린다. 있으면
+    // Registry가 타입마다 첫 객체에서 표를 한 번 만들고 GC 표식이 trace 대신 표의 위치에서 handle을
+    // 읽는다. 표는 trace와 같은 간선을 같은 순서로 방문해야 한다(Debug 표식이 대조한다). 생성
+    // 코드가 만들고(리플렉션 클래스), 표로 나타낼 수 없는 필드가 있으면 builder.Unsupported()로
+    // trace에 남는다.
+    void (*referenceLayout)(const Object&, detail::ReferenceLayoutBuilder&) noexcept = nullptr;
 };
 
 // noexcept T(Allocator&)가 있으면 registry allocator를 주입하고, 없으면 noexcept T()를 사용한다.

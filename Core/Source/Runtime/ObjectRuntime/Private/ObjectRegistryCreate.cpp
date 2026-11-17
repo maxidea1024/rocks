@@ -375,6 +375,8 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
 
     object->registry_ = this;
     object->handle_ = handle;
+    // 그 타입의 첫 객체면 참조 위치 표를 정한다(M3 — 처리 표시 아래라 marker와 겹치지 않는다).
+    PrepareReferenceLayout(gcType.Value(), *object);
     {
         platform::LockGuard lock(gate_);
         freeSlot->object = object;

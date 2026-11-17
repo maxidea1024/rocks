@@ -694,6 +694,14 @@ private:
     ErrorCode MarkIndex(uint32 index, Array<uint32>& work, uint32& marked) noexcept;
     // index 객체 하나를 trace한다(Trace 간선 → Outer → 패키지 정책이면 자식 고리).
     void TraceIndex(uint32 index, MarkState& state, TraceVisitor& visitor) noexcept;
+    // 객체의 강한 간선을 visitor에 넘긴다(참조 위치 표가 있으면 표로, 없으면 trace로 — M3). Debug는
+    // 표와 trace의 간선 순서를 대조한다.
+    void VisitStrongEdges(const GcType& type, const Object& object,
+                          TraceVisitor& visitor) const noexcept;
+    // 큐에서 몇 칸 앞 객체의 배열 버퍼를 미리 읽는다(참조 위치 표의 배열 칸만).
+    void PrefetchArrays(uint32 index) const noexcept;
+    // 잠금 밖·처리 표시 아래: 새 객체로 그 타입의 참조 위치 표를 정한다(첫 객체에서 한 번).
+    void PrepareReferenceLayout(uint16 type, const Object& object) noexcept;
     // 작업 큐 work를 cursor부터 trace한다(최대 maxObjects개, deadline이 0이 아니면 그때까지 —
     // 시계는 일정 개수마다 본다). 잠금 없이 처리 표시 아래에서 부른다. 반환은 trace한 객체 수이고
     // 오류는 state.error다.
