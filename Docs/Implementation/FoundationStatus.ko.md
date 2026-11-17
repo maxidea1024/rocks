@@ -50,7 +50,7 @@
 
 ### 엔진 렌더 기반(2026-11-17)
 
-Core 위 엔진 계층의 렌더 기반 첫 묶음([렌더 기반](../Design/RenderBase.ko.md) GX7·GX10·GX11·CP6·RB1·GX3a)을 구현했다. Graphics 장치의 제출 완료 지점(`GpuFencePoint`)·`Retire`·스레드 안전 fence 대기·통지·작업 이벤트(`Graphics/FenceTimeline.h`·`GpuFenceEvent.h`, OpenGL은 fence sync), 장치 소유 스레드 모델과 소유권 이관(`DeviceOwnership`), Engine 종료 단계 hook, 새 모듈 RenderBase의 렌더 lane(`RenderLane`·프레임 slot·전달 타입 등록·`RenderNotices`·`RenderHandleTable`), 정점 원소 형식 20종·정점 배치·index·instanced 그리기와 CPU 정점 패킹(`Core/Math/VertexPacking.h`)이다. CPU 시험은 EngineTests(기록 backend 대조 포함), GPU 시험은 `Sandbox --self-test`(D3D12·WARP·OpenGL)이며 GPU가 없는 환경에서는 NOT RUN이다. 계약과 남은 범위(lease·대체 자원·설정 snapshot·장치 재생성·D3D12 스레드 안전 생성)는 [렌더 기반 구현](RenderBase.ko.md)을 따른다.
+Core 위 엔진 계층의 렌더 기반 첫 묶음([렌더 기반](../Design/RenderBase.ko.md) GX7·GX10·GX11·CP6·RB1·GX3a)과 업로드·readback(GX8)·GPU 계측(GX9)을 구현했다. Graphics 장치의 제출 완료 지점(`GpuFencePoint`)·`Retire`·스레드 안전 fence 대기·통지·작업 이벤트(`Graphics/FenceTimeline.h`·`GpuFenceEvent.h`, OpenGL은 fence sync), 장치 소유 스레드 모델과 소유권 이관(`DeviceOwnership`), Engine 종료 단계 hook, 새 모듈 RenderBase의 렌더 lane(`RenderLane`·프레임 slot·전달 타입 등록·`RenderNotices`·`RenderHandleTable`), 정점 원소 형식 20종·정점 배치·index·instanced 그리기와 CPU 정점 패킹(`Core/Math/VertexPacking.h`), 업로드 ring·내용 갱신·스트리밍 staging pool·비동기 readback(D3D12 다른 스레드 생성 허용), timestamp 프레임 slot 링·debug marker·CPU·GPU 시간 대응이다. CPU 시험은 EngineTests(기록 backend 대조 포함), GPU 시험은 `Sandbox --self-test`(D3D12·WARP·OpenGL)이며 GPU가 없는 환경에서는 NOT RUN이다. 계약과 남은 범위(lease·대체 자원·설정 snapshot·장치 재생성·copy queue·`GpuScope`)는 [렌더 기반 구현](RenderBase.ko.md)을 따른다.
 
 ### 경로와 파일 I/O의 초기 구현
 

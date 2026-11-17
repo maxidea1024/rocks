@@ -1,6 +1,6 @@
 # 렌더 기반(RenderBase) 설계
 
-기준일: 2026-11-17, 개정 5(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-17, 개정 6(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
 - 렌더 lane과 프레임 전달, 장치 스레드 모델, 장치 자원 수명, 렌더 그래프
 - 셰이더 런타임 객체(셰이더 집합·파라미터 바인딩·상수 블록·파이프라인 캐시)
 - 정점 입력 타입, 공용 자원·그리기 유틸리티, GPU 계측
@@ -139,10 +139,10 @@ ID는 이 문서가 붙인다. CP는 Core 선행, GX는 Graphics 확장, RB는 R
 | GX5 | 명시 접근 상태와 전이 | 미설계 | GX2·GX4 | RG1 | M–L | 4.4절 |
 | GX6 | 파라미터 바인딩 런타임(상수 블록·묶음 설정·공유 slot) | 미설계 | P2·SH2 | RB4 | L | 4.4절, 9절 |
 | GX7 | 제출·완료·회수(계획 11.2), descriptor 회수, 스레드 안전 fence 대기 | 구현(lease는 RB2·RG1) | — | RB1·RB2 | L | 4.4절, 6절 |
-| GX8 | 업로드 ring·비동기 readback | 미설계 | GX7 | RB2, RB4, RG2 | M | 4.4절 |
-| GX9 | timestamp query·debug marker·CPU·GPU 시간 대응 | 미설계 | GX7 | RB7 | M | 4.4절, 13절 |
+| GX8 | 업로드 ring·비동기 readback | 구현 | GX7 | RB2, RB4, RG2 | M | 4.4절 |
+| GX9 | timestamp query·debug marker·CPU·GPU 시간 대응 | 구현(`GpuScope`는 RB7) | GX7 | RB7 | M | 4.4절, 13절 |
 | GX10 | 장치 소유 스레드 이관 | 구현 | GX11 | RB1 | S | 5.4절 |
-| GX11 | 장치 스레드 모델 | 구현(D3D12 스레드 안전 생성은 GX8과 함께) | GX7 | GX10, RB1–RB3 | M | 5.4절 |
+| GX11 | 장치 스레드 모델 | 구현 | GX7 | GX10, RB1–RB3 | M | 5.4절 |
 | GX12 | transient heap·aliasing barrier | 후속 | GX5 | RG5 | L | 4.4절 |
 | GX13 | subpass·framebuffer fetch(tiled GPU 병합용) | 후속 | GX4·GX5 | RG3 병합 | M | 4.4절 |
 | RB1 | 렌더 lane·프레임 slot·전달 타입 등록·완료 통지·`RenderHandle` 예약 | 구현(설정 snapshot은 CP4 뒤) | CP1·CP6·GX7·GX10·GX11 | RB2–RB7 | M | 5절 |
@@ -211,8 +211,10 @@ RenderCore가 쓰는 RHI 기능군과 Rocks Graphics의 차이다. "SH2" 열은 
   - 장치가 내부에서 프레임 2개를 돌리는 지금 방식은 프레임 slot(5.3절)이 넘겨받는다.
   - **구현(2026-11-17).** `Device::EndFrame`이 `GpuFencePoint`(device epoch·queue·value)를 돌려주고, `Destroy`를 `Retire`로 바꿔 자원·descriptor를 마지막 사용 fence 뒤에 해제한다(last-use는 장치 내부 집계: 기록 중 프레임이면 그 fence, 아니면 그때까지의 마지막 제출). 스레드 안전 `LastSubmittedFence`·`IsFenceComplete`·`WaitFence`·`NotifyFence`·`IsLost`는 공용 `FenceTimeline`(backend마다 관찰 스레드 하나)으로 구현했고, `Graphics/GpuFenceEvent.h`가 `WorkerTaskEvent`에 잇는다. OpenGL은 `glFenceSync`와 공유 context 관찰 스레드로 같은 계약을 따른다. 장치 손실은 기다리는 쪽을 `Destroyed`로 깨운다(Core에 장치 손실 전용 오류 코드가 없다). D3D12의 고정 프레임 2개는 기록 저장소 pool(상한 8)로 바꿨다. 남은 것: `RenderResourceLease`(병렬 기록·그래프 import가 생기는 RB2·RG1), 호출자 last-use 하한 인자(단일 queue에서는 내부 집계보다 늦을 수 없어 받지 않는다).
 - **GX8 업로드·readback.** 프레임 slot별 업로드 ring(map 쓰기 → 복사), staging과 fence 완료 이벤트에 의한 비동기 readback. `ReadPixels`(시험용 동기)는 남겨 두되 프레임 경로에서 쓰지 않는다.
+  - **구현(2026-11-17).** 업로드 ring은 프레임 slot별 고정 구간이 아니라 fence로 닫는 묶음의 원형 할당(`Graphics/UploadRing.h`, 기본 4 MiB)이다. 묶음은 GPU 완료 뒤에만 회수하고, 다 회수돼도 위치를 0으로 되돌리지 않아 결과가 GPU 완료 시점에 좌우되지 않는다. 자리가 없으면 소유 스레드는 열린 기록을 먼저 제출하고 가장 오래된 묶음을 기다리며, 그래도 안 되면 전용 staging으로 올린다(`UploadStats::dedicatedUploads`). 생성 초기 데이터와 `UpdateBuffer`·`UpdateTexture` 갱신은 별도 업로드 기록에 쌓이고 소유 스레드의 다음 제출(`EndFrame`·`SubmitUploads`·`WaitIdle`) 앞에 실행된다. 스트리밍 staging pool(`Graphics/StagingPool.h`, 기본 예산 256 MiB)은 CPU 가시 메모리를 IO 목적지로 주고(`AcquireStaging`), `UploadTextureFromStaging`·`UploadBufferFromStaging` 뒤 `ReleaseStaging`하면 업로드 fence가 끝난 뒤 재사용 목록으로 돌아간다. 비동기 readback은 `RequestReadback` → 완료 지점 → `TryReadback`(비차단) → `ReleaseReadback`이고, 렌더 lane은 `RenderLane::RequestReadback`·`TakeReadback`과 `RenderNoticeKind::ReadbackReady`로 넘긴다. D3D12는 내부 잠금으로 `concurrentResourceCreation`을 열었다. OpenGL은 갱신을 즉시 올리고 staging은 CPU 메모리, readback은 pixel pack buffer이며 생성은 소유 스레드 전용 그대로다. 렌더 lane 내용 갱신 작업은 `RenderLane::UpdateBuffer`·`UpdateTexture`다.
 - **GX9 timestamp·marker.** 13절.
-- **GX10·GX11.** 5.4절. **구현(2026-11-17).** `Device::IsOwnerThread`·`ReleaseOwnership`·`AcquireOwnership`·`RejectedCalls`, `DeviceInfo::concurrentResourceCreation`(지금 두 backend 모두 false — D3D12는 초기 데이터 업로드가 소유 스레드의 queue 제출이라 GX8과 함께 연다). 소유 스레드 전용 호출은 Debug·Development에서 `WrongThread`(반환값 없는 호출은 무시·계수), Release는 검사 생략이다. OpenGL은 이관 때 context를 떼고 새 스레드에 붙인다.
+  - **구현(2026-11-17).** Graphics 계약만 두었다(`GpuScope`는 RB7). `CommandContext::WriteTimestamp`(번호 반환)·`PushMarker`·`PopMarker`, `Device::CollectTimestamps`(비차단)·`CalibrateClocks`, `DeviceInfo`의 `timestamps`·`timestampFrequency`·`timestampDisjointDetection`·`clockCalibration`·`debugMarkers` 공개. 프레임 slot 링은 backend 공용 `Graphics/TimestampRing.h`(slot `TimestampFrameSlots` = 4, slot당 `MaxTimestampsPerFrame` = 256)이며 fence 완료 뒤에만 값을 내고 빈 slot이 없으면 기다리지 않고 `Busy`다. 렌더 lane은 프레임 GPU 완료 때 결과를 `RenderNoticeKind::GpuTimestamp`(frame = 번호, value = tick, 끊김이면 `Cancelled`)로 같은 프레임의 `FrameCompleted` 앞에 넣는다. D3D12: TIMESTAMP query heap과 제출 전 resolve, `GetClockCalibration`(QPC를 ns로), PIX 형식 `BeginEvent`·`EndEvent`. OpenGL: `GL_TIMESTAMP` query(counter bit가 0이면 "없음"), `GL_EXT_disjoint_timer_query`가 있을 때만 끊김 감지, `glGetInteger64v(GL_TIMESTAMP)`와 CPU 시각(앞뒤 가운데) 쌍, debug group. 프레임 끝에 열린 marker는 장치가 닫고 짝 없는 pop은 무시하고 `IgnoredDraws`를 올린다.
+- **GX10·GX11.** 5.4절. **구현(2026-11-17).** `Device::IsOwnerThread`·`ReleaseOwnership`·`AcquireOwnership`·`RejectedCalls`, `DeviceInfo::concurrentResourceCreation`(D3D12는 GX8 업로드 경로와 함께 true, OpenGL은 false). 소유 스레드 전용 호출은 Debug·Development에서 `WrongThread`(반환값 없는 호출은 무시·계수), Release는 검사 생략이다. OpenGL은 이관 때 context를 떼고 새 스레드에 붙인다.
 - **GX12 transient heap(후속).** heap 배치, aliasing barrier(acquire·discard). RG5가 쓴다.
 - **GX13 subpass·framebuffer fetch(후속).** Vulkan subpass, GLES framebuffer fetch 확장. RG3의 render pass 병합이 쓴다.
 
@@ -753,7 +755,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 
 - **`GpuScope`.** 이름 구간 하나가 debug marker push·pop과 timestamp 한 쌍을 함께 기록한다. 렌더 그래프는 pass마다 자동으로 구간을 둔다(계획 11.3절 "pass 이름 기록"). Release에서는 marker를 끄고 timestamp는 설정으로 켠다. CPU 쪽 구간은 CP5와 같은 trace에 상관시킨다.
 - **timestamp query**(GX9): 프레임 slot 링으로 회수하고 결과는 완료 통지 큐(5.2절)로 넘긴다. 결과가 아직 없으면 "미완료"다. disjoint 표시가 있으면 그 구간을 무효로 한다(계획 29.4절). GLES timestamp는 확장(`GL_EXT_disjoint_timer_query`)이 있을 때만이고, 없으면 GPU 시간을 "없음"으로 공개하며 추정값을 만들지 않는다(UE는 Android에서 같은 확장 함수를 쓴다, `OpenGLDrv/Private/Android/AndroidOpenGLFunctions.h:77`).
-- **CPU·GPU 시간 대응**(계획 29.1절 calibration pair): D3D12 queue clock calibration, Vulkan calibrated timestamps(13.1절과 같다). GLES·Metal은 GX9에서 정한다.
+- **CPU·GPU 시간 대응**(계획 29.1절 calibration pair): D3D12 queue clock calibration, Vulkan calibrated timestamps(13.1절과 같다). GLES는 `GL_TIMESTAMP` 조회(GLES는 `GL_EXT_disjoint_timer_query`의 `glGetInteger64vEXT`)와 CPU 시각을 잇달아 읽어 쌍을 만들고 조회 지연만큼 오차를 둔다(GX9 결정). 확장이 없으면 "없음"이다. Metal은 SH5 때 정한다.
 - **계수**: 그래프 pass 수·draw·dispatch 수·transient 최대 사용량·파이프라인 캐시 적중(계획 11.3절).
 - **후속(Developer 모듈)**: 캡처 도구 연동(RenderDoc·PIX), 그래프 자원 덤프, 텍스처 시각화, 셰이더 → CPU 메시지, GPU 오류 주입(개발 빌드 전용, 계획 11.2절 device loss 시험에 쓴다), 긴 GPU 작업 벤치마크.
 
@@ -954,3 +956,4 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 - 개정 3(2026-11-16): 6.5절 텍스처 플랫폼 데이터 입력 계약을 더했다. 사용자 결정 "화면 마일스톤과 텍스처 스트리밍 … 이것도 니가해"로 렌더 세션이 GPU 업로드·스트리밍을 맡고, 압축·색 보정은 에셋 세션이 맡는다. 배치·스트리밍 단위·정렬·직렬화는 에셋 세션과 합의했다. UE 5.8 근거는 플랫폼 데이터·mip 구조·cube face 배치·쿠킹 mip 분할이다. 15절 AssetSystem 행에 A5 착수 전 요구를 더했다.
 - 개정 4(2026-11-16): 18.1절 화면 마일스톤 범위를 정의했다. 사용자 결정은 다음과 같다: "원래 목표는 미니멀하게 테스트하고자 했던건데 이제 의미없음. 렌더코어 제대로 구현하는게 나음", 쿠킹 셰이더 위에서(셰이더 시스템 결정 11 (나)), 렌더 기반 구조 포함, A5 텍스처 전부, 검증 backend는 셰이더 경로를 따름. 결정 R10을 이에 맞췄다.
 - 개정 5(2026-11-17): GX7·GX10·GX11·CP6·RB1·GX3a 구현을 반영했다. 4.2절 상태 열과 RB1 행, 4.3·4.4·5.7·10.4절 구현 메모를 더했다. 스펙과 다르게 정한 것: 작업 함수를 캡처 없는 함수 포인터로 제한, `Retire`는 handle만 받음(호출자 last-use 하한 없음), D3D12 스레드 안전 생성은 GX8로 미룸, 장치 손실·미지원 능력은 기존 오류 코드(`Destroyed`·`Unsupported`), 정리 drain·closure·실행기 hook은 실행 파일 hook에만. 같은 날 사용자 결정으로 최소 렌더러(내장 메시·원문 셰이더)를 엔진 모듈에서 Sandbox 시험 샘플로 옮겼다.
+- 개정 6(2026-11-17): GX8·GX9 구현을 반영했다(4.2절 상태 열, 4.4절 구현 메모, 13.2절 GLES 시간 대응 결정). GX11 상태에서 "D3D12 스레드 안전 생성은 GX8과 함께"를 지웠다(GX8에서 열었다). 스펙과 다르게 정한 것: 업로드 ring은 프레임 slot별 고정 구간 대신 fence로 닫는 묶음의 원형 할당, timestamp 끊김은 `ErrorCode::Cancelled`로 통지, `GpuScope`는 RB7로 남김.
