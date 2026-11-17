@@ -19,6 +19,10 @@ namespace rocks {
 // - 여러 LogSystem에 등록한 sink는 동시 호출을 직접 보호한다.
 // - event의 view는 콜백 동안만 유효하다. 보관하려면 복사한다.
 // - 콜백 안에서 로그를 남기면 큐에 들어가지 않고 비상 경로(stderr 직접 쓰기)로만 간다.
+// - lock 계약: 콜백은 LogSystem의 sink lock 안에서 불린다. 콜백이 잡는 lock을 쥔 채로
+//   AddSink·RemoveSink를 부르지 않는다(출력 쪽은 sink lock을 쥐고 그 lock을, 호출자는 그 lock을
+//   쥐고 sink lock을 기다려 교착한다). 콜백 안의 AddSink·RemoveSink·SetGlobalMinimum·SetLevel·
+//   ClearLevel은 Busy다.
 // - 실패를 돌려주면 LogSystem이 센다. 연속 SinkFailureLimit번 실패하면 잠시 막고 다시 시도한다.
 //
 // 수명: 등록부터 RemoveSink(또는 LogSystem::Stop) 반환까지 살아 있어야 한다.

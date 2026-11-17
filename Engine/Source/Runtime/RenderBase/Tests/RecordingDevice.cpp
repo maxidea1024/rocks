@@ -9,8 +9,8 @@ using namespace rocks::graphics;
 
 RecordingDevice::RecordingDevice(Allocator& allocator) noexcept
     : timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics), buffers_(allocator),
-      textures_(allocator), pipelines_(allocator), swapChains_(allocator), retired_(allocator),
-      readbacks_(allocator),
+      textures_(allocator), transitions_(allocator), pipelines_(allocator), swapChains_(allocator),
+      retired_(allocator), readbacks_(allocator),
       staging_(allocator, stagingSource_, graphics::DefaultStagingBudgetBytes),
       timestamps_(allocator), timestampPool_(allocator) {
     stagingSource_.allocator = &allocator;
@@ -293,7 +293,7 @@ Result<BufferHandle> RecordingDevice::CreateBuffer(const BufferDesc& desc,
         return Result<BufferHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
-    auto added = buffers_.TryAdd(uint8{0});
+    auto added = buffers_.TryAdd(ResourceAccess::VertexOrIndex);
     if (!added) {
         return Result<BufferHandle>::Failure(added.Error());
     }
@@ -310,7 +310,13 @@ Result<TextureHandle> RecordingDevice::CreateTexture(const TextureDesc& desc,
     }
 
     (void)pixels;
-    auto added = textures_.TryAdd(uint8{0});
+    TextureState state;
+    state.mipLevels = desc.mipLevels == 0 || desc.mipLevels > MaxTrackedMips ? 1u : desc.mipLevels;
+    for (ResourceAccess& access : state.states) {
+        access = ResourceAccess::SrvGraphics;
+    }
+
+    auto added = textures_.TryAdd(state);
     if (!added) {
         return Result<TextureHandle>::Failure(added.Error());
     }
@@ -374,6 +380,8 @@ Result<CommandContext*> RecordingDevice::BeginOffscreen(TextureHandle target,
                                                            : ErrorCode::StaleHandle);
     }
 
+    // attachment 전이다(Device.h Transition 주석).
+    textures_.Find(target.slot)->states[0] = ResourceAccess::RenderTarget;
     recording_ = true;
     Record(Op::BeginOffscreen);
     return Result<CommandContext*>::Success(this);
@@ -566,11 +574,91 @@ StringView RecordingDevice::LastError() const noexcept {
 }
 
 uint64 RecordingDevice::IgnoredDraws() const noexcept {
-    return 0;
+    return ignoredDraws_;
 }
 
 uint64 RecordingDevice::ValidationErrorCount() const noexcept {
-    return 0;
+    return validationErrors_;
+}
+
+ResourceAccess RecordingDevice::TextureAccess(TextureHandle texture, uint32 mip) const noexcept {
+    const TextureState* state = textures_.Find(texture.slot);
+    if (state == nullptr || mip >= state->mipLevels) {
+        return ResourceAccess::Unknown;
+    }
+
+    return state->states[mip];
+}
+
+ResourceAccess RecordingDevice::BufferAccess(BufferHandle buffer) const noexcept {
+    const ResourceAccess* state = buffers_.Find(buffer.slot);
+    return state == nullptr ? ResourceAccess::Unknown : *state;
+}
+
+void RecordingDevice::CheckDeclared(ResourceAccess tracked, ResourceAccess declared) noexcept {
+    if (declared != ResourceAccess::Unknown && declared != ResourceAccess::Discard &&
+        declared != tracked) {
+        ++validationErrors_;
+    }
+}
+
+void RecordingDevice::Transition(Span<const ResourceTransition> transitions) noexcept {
+    if (!recording_) {
+        return;
+    }
+
+    for (const ResourceTransition& transition : transitions) {
+        if (!CanCombineAccess(transition.after)) {
+            ++ignoredDraws_;
+            continue;
+        }
+
+        TransitionCall call;
+        call.range = transition.range;
+        call.before = transition.before;
+        call.after = transition.after;
+        if (!transition.buffer.IsNull()) {
+            ResourceAccess* state = buffers_.Find(transition.buffer.slot);
+            if (state == nullptr) {
+                ++ignoredDraws_;
+                continue;
+            }
+
+            CheckDeclared(*state, transition.before);
+            if (transition.after != ResourceAccess::Discard) {
+                *state = transition.after;
+            }
+
+            call.texture = false;
+            call.index = transition.buffer.slot.index;
+        } else {
+            TextureState* state = textures_.Find(transition.texture.slot);
+            if (state == nullptr || transition.range.firstMip >= state->mipLevels) {
+                ++ignoredDraws_;
+                continue;
+            }
+
+            const uint32 available = state->mipLevels - transition.range.firstMip;
+            const uint32 count =
+                transition.range.mipCount < available ? transition.range.mipCount : available;
+            for (uint32 mip = transition.range.firstMip; mip < transition.range.firstMip + count;
+                 ++mip) {
+                CheckDeclared(state->states[mip], transition.before);
+                if (transition.after != ResourceAccess::Discard) {
+                    state->states[mip] = transition.after;
+                }
+            }
+
+            call.index = transition.texture.slot.index;
+        }
+
+        auto pushed = transitions_.TryPushBack(call);
+        if (!pushed) {
+            platform::Fatal("RecordingDevice transition log allocation failed");
+        }
+
+        Record(Op::Transition, transitions_.Size() - 1);
+    }
 }
 
 usize RecordingDevice::PendingRetireCount() const noexcept {
@@ -599,7 +687,17 @@ void RecordingDevice::SetIndexBuffer(BufferHandle buffer, IndexFormat format,
 }
 
 void RecordingDevice::SetTexture(TextureHandle texture) noexcept {
-    Record(Op::SetTexture, textures_.IsValid(texture.slot) ? 1u : 0u);
+    const TextureState* state = textures_.Find(texture.slot);
+    if (state != nullptr) {
+        for (uint32 mip = 0; mip < state->mipLevels; ++mip) {
+            if (!HasAnyAccess(state->states[mip], ResourceAccess::SrvGraphics)) {
+                ++validationErrors_;
+                break;
+            }
+        }
+    }
+
+    Record(Op::SetTexture, state != nullptr ? 1u : 0u);
 }
 
 void RecordingDevice::SetConstants(const DrawConstants& constants) noexcept {

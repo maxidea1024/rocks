@@ -19,7 +19,7 @@ public sealed class SandboxProgram : ModuleRules
             Sources = context.Sources("Programs/Sandbox/Private"),
             PrivateIncludeDirectories = [context.PathInRoot("Programs/Sandbox/Private")],
             PrivateDefines = [$"SANDBOX_SHADER_SOURCE_COMPILER={(shaderCompiler ? 1 : 0)}"],
-            Dependencies = ["Engine", "PlatformWindow", "RenderBase", "D3D12Graphics", "D3D11Graphics", "OpenGLGraphics", "VulkanGraphics",
+            Dependencies = ["Engine", "PlatformWindow", "RenderBase", "RenderGraph", "D3D12Graphics", "D3D11Graphics", "OpenGLGraphics", "VulkanGraphics",
                 .. (shaderCompiler ? ["ShaderFormatVulkan"] : Array.Empty<string>())]
         };
     }

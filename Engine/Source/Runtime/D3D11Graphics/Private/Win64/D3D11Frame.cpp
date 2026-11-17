@@ -296,6 +296,12 @@ void D3D11Device::DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 fi
     deferred_->DrawIndexedInstanced(indexCount, instanceCount, firstIndex, 0, 0);
 }
 
+// D3D11은 드라이버가 자원 상태와 UAV hazard를 암묵으로 관리하므로 명시 전이를 낮출 곳이
+// 없다(RenderBase GX5, UE D3D11 RHI도 전이가 빈 함수다).
+void D3D11Device::Transition(Span<const ResourceTransition> transitions) noexcept {
+    (void)transitions;
+}
+
 Result<void> D3D11Device::CopyPassTarget(TextureHandle destination) noexcept {
     platform::LockGuard lock(gate_);
     if (!recording_) {

@@ -90,8 +90,7 @@ public:
 
     // 사용자 Formatter 결과를 렌더한다. Formatter는 한 번만 부른다.
     // - 남은 영역이 블록보다 작으면 블록에 먼저 렌더하고, 결과가 남은 영역에 들어가면 옮긴 뒤
-    // 블록을
-    //   돌려준다.
+    //   블록을 돌려준다.
     // - 블록이 없거나(provider 없음·고갈) 너무 작으면 남은 영역에 렌더한다(넘치면 잘림).
     void StoreCustom(const FormatArg& arg, StringView spec, LogCaptureValue& value) noexcept {
         value.kind = static_cast<uint8>(FormatArgKind::Custom);

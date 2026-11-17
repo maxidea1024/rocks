@@ -15,6 +15,11 @@ class Engine;
 // 보고한다(계획 3.2절 "timeout은 실패").
 inline constexpr uint32 MaxShutdownCollectPasses = 8;
 
+// 파괴가 미뤄진 World(외부가 Borrow·RootRef를 보유해 Shutdown이 Busy)를 경고로 알리기까지의 프레임
+// 수다. 첫 지연은 Debug, 이 프레임 수를 넘도록 남아 있으면 Warning 한 번, 해소되면 Info 한 번을
+// 남긴다(Docs/Design/LoggingSystem.ko.md 13절). 벽 시간이 아니라 엔진 프레임 수로 센다.
+inline constexpr uint64 WorldDestroyWarnFrames = 300;
+
 // 엔진 실행 상태다.
 enum class EngineState : uint8 {
     Uninitialized,
@@ -242,6 +247,14 @@ struct EngineStats {
 //   Busy이므로 RequestExit 후 Run이 돌아온 뒤 호출한다.
 // - World는 Engine이 소유한다. 프레임 안에서 DestroyWorld를 호출하면 5단계(지연 작업)에서 파괴된다.
 //
+// 로그(Docs/Design/LoggingSystem.ko.md 13절, 카테고리 LogEngine): 초기화 성공·단계별 실패, Run
+// 종료 사유, 종료 시작·완료·실패, World 생성 실패·Tick 실패(연속 실패는 첫 번째와 요약 한 번)·지연
+// 파괴(Debug → WorldDestroyWarnFrames 넘으면 Warning 한 번 → 해소 Info)를 남기고, 초기화 단계마다
+// "Stage", World Tick마다 "World" 문맥을 걸고, 프레임마다 Log::SetFrame을 부른다. LogSystem은
+// 만들거나 설치하지 않는다(호스트가 LogInstallScope로 설치한다). 실패는 여기서 한 번 기록하므로
+// 호스트는 반환된 오류를 다시 기록하지 않는다. 호출 순서 오류(InvalidArgument·Busy)는 기록하지
+// 않는다.
+//
 // 스레드: 생성한 게임 스레드에서만 사용한다.
 class Engine {
 public:
@@ -330,14 +343,32 @@ private:
     struct WorldContext {
         UniquePtr<World> world;
         bool pendingDestroy = false;
+        // 파괴 시도가 실패해 미뤄진 상태다. 첫 실패 프레임부터 센다(WorldDestroyWarnFrames).
+        bool destroyDeferred = false;
+        bool destroyWarned = false;
+        ErrorCode destroyError = ErrorCode::None;
+        uint64 destroyDeferredFrame = 0;
+        // 연속 Tick 실패다. 첫 실패만 Error로 남기고 뒤따른 실패는 세어 두었다가 회복·파괴 때 한 번
+        // 요약한다.
+        bool tickFailing = false;
+        ErrorCode lastTickError = ErrorCode::None;
+        uint64 suppressedTickFailures = 0;
     };
 
-    void Teardown(uint32 completedSteps) noexcept;
+    // stage는 실패한 초기화 단계 이름이다(정리 실패 Fatal에 싣는다).
+    void Teardown(uint32 completedSteps, const char* stage) noexcept;
     // 종료 hook 단계(BeginShutdown 등)를 진행 정도에 맞춰 한 번씩 부른다.
     Result<void> RunShutdownHooksBeforeWorlds() noexcept;
-    Result<void> CloseAfterSubsystems() noexcept;
+    // failedStage는 첫 실패가 난 종료 단계 이름을 받는다(실패가 없으면 그대로).
+    Result<void> CloseAfterSubsystems(const char*& failedStage) noexcept;
     Result<void> DestroyWorldNow(usize index) noexcept;
     void ProcessDeferred() noexcept;
+    // World Tick 결과를 반영한다. 연속 실패는 첫 번째만 Error로 남긴다.
+    void NoteWorldTick(WorldContext& context, const Result<void>& ticked) noexcept;
+    // 연속 Tick 실패를 끝낸다. 첫 실패 뒤 더 실패한 것이 있으면 한 번 요약한다.
+    void EndTickFailureStreak(WorldContext& context) noexcept;
+    // 종료 실패를 남은 World·지연 파괴·살아 있는 객체 수와 함께 한 번 기록한다.
+    void LogShutdownFailure(const char* stage, ErrorCode error) const noexcept;
 
     Allocator& allocator_;
     EngineConfig config_;
@@ -358,6 +389,8 @@ private:
     uint32 shutdownProgress_ = 0;
     bool inFrame_ = false;
     bool exitRequested_ = false;
+    // maxFrames에 닿아 스스로 종료를 요청했는지다(Run 종료 사유).
+    bool maxFramesReached_ = false;
 };
 
 } // namespace rocks

@@ -93,6 +93,10 @@ FrameTicket& FrameTicket::operator=(FrameTicket&& other) noexcept {
     return *this;
 }
 
+FrameArena& RenderFrameContext::Arena() const noexcept {
+    return *lane_.arenas_[slot_];
+}
+
 graphics::Device& RenderLaneContext::Device() const noexcept {
     return lane_.device_;
 }
@@ -667,9 +671,30 @@ void RenderLane::RunRetire(RenderHandle handle) noexcept {
         return; // 이미 Retire한 handle의 중복 요청이다.
     }
 
-    const SlotHandle device = retired.Value().device;
+    {
+        platform::LockGuard lock(gate_);
+        ++stats_.retiresPending;
+    }
+
+    // lease가 남아 있으면 장치 Retire는 마지막 lease가 풀린 lane 작업 끝으로 미룬다(7.4절).
+    if (!retired.Value().deferred) {
+        RetireOnDevice(handle, retired.Value());
+    }
+}
+
+void RenderLane::FinishDeferredRetires() noexcept {
+    RenderHandle handle;
+    RenderHandleTable::RetiredResource retired;
+    while (handles_.TakeReleasedRetire(handle, retired)) {
+        RetireOnDevice(handle, retired);
+    }
+}
+
+void RenderLane::RetireOnDevice(RenderHandle handle,
+                                const RenderHandleTable::RetiredResource& retired) noexcept {
+    const SlotHandle device = retired.device;
     if (!device.IsNull()) {
-        switch (retired.Value().kind) {
+        switch (retired.kind) {
         case RenderResourceKind::Buffer:
             device_.Retire(graphics::BufferHandle{device});
             break;
@@ -684,7 +709,6 @@ void RenderLane::RunRetire(RenderHandle handle) noexcept {
 
     {
         platform::LockGuard lock(gate_);
-        ++stats_.retiresPending;
         ++outstandingNotifies_;
     }
 
