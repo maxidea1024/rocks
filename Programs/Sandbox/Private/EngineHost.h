@@ -24,7 +24,8 @@ struct EngineHostOptions {
 //   실행 파일 위쪽에서 찾은 Engine 폴더) → 3) --config 파일(Project 층) → 4) --set(Session 층) →
 //   Sync → 5) CompleteStartup → 6) LogHost 설치(기본 Async·stderr) → 7) trace 세션·콘솔 명령·
 //   --trace → 8) 엔진 루프(프레임마다 sync 지점) → 엔진 정리 → trace 정지 → 설치 해제 →
-//   LogHost::Stop → 설정 문맥 파괴.
+//   LogHost::Stop → 설정 문맥 파괴. LogHost가 멈춘 출력 스레드를 포기했으면(WriterAbandoned) 설정
+//   문맥·allocator를 파괴하지 않고 _Exit로 끝낸다.
 // 설치 전 설정 오류는 비상 경로(stderr)로만 나간다. 성공 0, 실패 1, 설정 오류 2다.
 int RunEngineHost(rocks::Allocator& allocator, const EngineHostOptions& options) noexcept;
 
