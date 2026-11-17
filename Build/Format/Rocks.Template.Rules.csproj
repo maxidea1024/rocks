@@ -1,10 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!--
-    게임 템플릿(Templates/**)의 모듈·타깃 규칙을 C# 서식 검사(Rocks.Format.slnx)에 넣는 프로젝트다. 이 규칙은 엔진 규칙
-    어셈블리(Build/Rules/Rocks.Engine.Rules.csproj)에 들어가지 않고, 게임 빌드가 설치형 SDK의 Rocks.Build 어셈블리를 참조해
-    따로 컴파일한다(InstalledSdk의 Rocks.Game.Rules). 그래서 어느 도구 프로젝트에도 속하지 않는데, 서식 검사는 프로젝트의
-    Compile 항목만 보므로 게임 빌드와 같은 파일(*.Build.cs·*.Target.cs)과 같은 참조로 여기서 묶는다.
-    빌드 bootstrap(Programs/Rocks.Tools.csproj)에는 넣지 않는다 — 템플릿 규칙의 컴파일은 통합 시험의 게임 빌드가 확인한다.
+    Project that puts the module and target rules of game templates (Templates/**) into the C# format check (Rocks.Format.slnx). These rules do not go into
+    the engine rules assembly (Build/Rules/Rocks.Engine.Rules.csproj); the game build compiles them separately against the installed SDK's Rocks.Build
+    assembly (Rocks.Game.Rules of InstalledSdk). So they belong to no tool project, and because the format check only looks at project
+    Compile items, they are grouped here with the same files (*.Build.cs and *.Target.cs) and the same references as the game build.
+    They are not added to the build bootstrap (Programs/Rocks.Tools.csproj); the integration test's game build verifies that the template rules compile.
   -->
   <PropertyGroup><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
   <ItemGroup>

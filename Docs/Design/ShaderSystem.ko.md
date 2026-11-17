@@ -1,6 +1,6 @@
 # 셰이더 시스템 설계
 
-기준일: 2026-11-17, 개정 9(초안). 셰이더 원문을 HLSL 하나로 쓰고 오프라인에서 D3D12·D3D11·Vulkan·Metal·OpenGL ES용 코드로 바꾸는 구조와, 그 구현에 앞서 갖춰야 할 **선행 작업**을 정한다. 개정 7은 현재 코드베이스(HEAD `0be1e64`, 2026-11-14)와 다른 설계 문서의 상태를 다시 조사해 선행 작업과 순서를 새로 세웠다(4–6절).
+기준일: 2026-11-17, 개정 10(초안). 셰이더 원문을 HLSL 하나로 쓰고 오프라인에서 D3D12·D3D11·Vulkan·Metal·OpenGL ES용 코드로 바꾸는 구조와, 그 구현에 앞서 갖춰야 할 **선행 작업**을 정한다. 개정 7은 현재 코드베이스(HEAD `0be1e64`, 2026-11-14)와 다른 설계 문서의 상태를 다시 조사해 선행 작업과 순서를 새로 세웠다(4–6절).
 
 UE 근거는 UE 5.8.4(EpicGames/UnrealEngine `release` 브랜치 commit `f45729c0b6f097038e72b52d366a62baeca3275b`)의 원본이다. 2026-11-14 사용자 지시로 기준을 5.6에서 5.8로 올렸고, 개정 6까지의 5.6 근거를 모두 5.8.4로 다시 확인했다(17절). 경로는 `Engine/Source/` 기준이며 `Engine/Shaders`·`Engine/Config`·`Engine/Build`는 그대로 적는다. UE 밖 도구(DXC·SPIRV-Cross·SPIRV-Tools·Vulkan)에 관한 사실은 그 출처를 따로 적는다. 개정 6까지의 조사 문서(UE 5.6 기준)는 [Rocks 셰이더 시스템](https://claude.ai/artifact/U5uNh2EWGvXKQiNYXnuc1Q)이다.
 
@@ -261,7 +261,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 | S2 | 개발 기계 GPU와 WARP의 D3D12 최대 셰이더 모델, Windows 10 Agility SDK 요건 | 결정 3 | GTX 1060 3GB(드라이버 32.0.15.6094)·WARP(10.0.26100.9818) 모두 최대 SM **6.8**, feature level 12.1, resource binding tier 3. Agility SDK 없이 OS 런타임(Windows 11 build 26200, `D3D12Core.dll` 10.0.26100.9818)에서 6.6 이상이 된다. Windows 10 요건은 Windows 10 기계가 없어 미측정 |
 | S3 | 결정성: 같은 호스트 반복, Debug·Release 워커, 작업 디렉터리 변경, FMA3 유무, OS 버전, **Windows·macOS 사이**(DXIL·SPIR-V·ESSL·MSL 텍스트)에서 형식별 바이트 동일 | 10절 결정성 | Windows 부분 byte 동일: 같은 입력 반복(Debug 2회·Release 3회), 작업 디렉터리 변경(Debug·Release 각 1회), Debug·Release 스파이크 빌드 사이에서 manifest의 산출물 44개(DXIL·SPIR-V·DXBC·ESSL·MSL·HLSL 5.0·리플렉션 덤프)가 모두 같다. 상수 초월 함수 fixture는 DXC가 DXIL·SPIR-V 모두 상수로 접었고(최적화 전 SPIR-V에도 `OpExtInst` 0), 접은 8개 값은 이 호스트 UCRT double 함수 결과를 float로 반올림한 값과 같다. FMA3 유무·OS 버전·Windows–macOS는 미측정(기계 하나) |
 | S4 | Vulkan 검증 레이어 공급, GPU 없는 CI의 소프트웨어 ICD | P9 | — |
-| S5 | D3D12·Vulkan·GLES 미리보기 픽셀 대조(행렬 옵션·앞면·Y 반전·루트 상수 대응) | 7.2절 6·8항 | — |
+| S5 | D3D12·Vulkan·GLES 미리보기 픽셀 대조(행렬 옵션·앞면·Y 반전·루트 상수 대응) | 7.2절 6·8항 | C7 런타임 경로(2026-11-17, Windows, GTX 1060·WARP·NVIDIA OpenGL 4.5, Sandbox self-test `RunCullingChecks`). 행렬: D3D12(`D3DCompile` + `D3DCOMPILE_PACK_MATRIX_ROW_MAJOR`)·WARP·OpenGL(`transpose = GL_TRUE`) 모두에서 비균등 scale 뒤 이동한 비대칭 행렬의 사각형이 기대 영역(64칸 격자의 열 32–63·행 8–23)만 덮는다. 앞면: D3D12 `FrontCounterClockwise = TRUE`, OpenGL은 창(`GL_LOWER_LEFT`)·RenderTarget(`GL_UPPER_LEFT`) 모두 `glFrontFace(GL_CCW)`에서 화면 반시계가 앞면이다. None·Back·Front 컬, 음수 scale·거울 view 반전, 둘 다 음수일 때 원래대로가 세 장치에서 기대대로이고, 창 경로(`CopyPassTarget`)와 offscreen 경로의 이미지가 byte 단위로 같다. 창을 `GL_CW`로 둔 음성 대조는 창 경로 6건 불일치로 실패한다. 기존 self-test 픽셀 검사와 backend 간 대조도 그대로 통과한다(차이 0). Vulkan·GLES 미리보기·쿠킹 경로(DXC `-Zpr`)와 루트 상수 대응은 SH2에서 잰다 |
 | S6 | 도구 빌드 컴파일러(clang-cl·MSVC)·빌드 시간·바이너리 크기 | 8절 4항 | P3 인용: Windows x64 도구는 Visual Studio C++ 도구(vcvarsall x64, MSVC, DLL 링커 버전 14.29)와 CMake·Ninja Release, 업스트림 빌드 설정으로 만들었다. 크기: `dxcompiler.dll` 21,943,296 B, `spirv-cross-c-shared.dll` 2,305,536 B, `SPIRV-Tools-c.dll` 3,644,416 B(PDB 별도). 빌드 시간은 P3에서 기록하지 않았고 clang-cl 비교와 macOS는 미측정 |
 | S7 | 자체 전처리 결과로 컴파일한 출력 = DXC 직접 전처리 출력(`#line` 포함) | 결정 6 구현의 정합성(SH1 완료 기준) | — |
 | S8 | 워커 기동·DLL 로드 비용, SHA-256 처리량 | 11절 묶음 크기 | 측정값만(Release 스파이크 3회, i5-13600KF): `ShaderToolSet::Open` 82.5 ms 가운데 runtime 파일 31.3 MiB의 SHA-256 대조가 약 74 ms(Core SHA-256 423–426 MiB/s)이고 나머지 로드는 약 9 ms. 첫 DXIL 컴파일 5.6–6.4 ms(다음 3.6–3.7 ms), 첫 SPIR-V 3.6–4.3 ms(다음 2.9–3.1 ms), SPIRV-Cross ESSL 첫 0.34–0.36 ms(다음 0.07–0.10 ms), 첫 `spirv-val` 0.43–0.46 ms. Debug 빌드는 SHA-256 26–27 MiB/s, 열기 1.2 s. 워커 프로세스 기동은 워커가 없어 미측정 |
@@ -362,7 +362,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
      - SPIR-V에서 나오는 Vulkan·Metal·GLES 경로도 행 우선이다. UE ShaderConductor 기본값은 `bPackMatricesInRowMajor = true`다(`Developer/ShaderCompilerCommon/Public/ShaderConductorContext.h:78`).
    - CPU 행렬의 메모리 배치는 전환 전후에 바이트 단위로 같다(이동이 평면 index 12–14). 그래서 상수를 올릴 때 전치하지 않는다.
    - 비대칭 행렬 픽셀 대조 시험(SH2, 측정 S5)은 옵션을 고르는 시험이 아니다. 형식마다 위 규약이 지켜지는지 확인하는 시험이다.
-   - 렌더 코드 반영(`DrawConstants`·샘플 렌더러 셰이더·Sandbox)은 Core Math 행 벡터 전환(C2) 뒤의 C7 작업이다.
+   - 렌더 코드 반영(C7, 2026-11-17 구현): `DrawConstants::transform`은 행 우선이고 샘플 렌더러 원문은 `mul(float4(position, 1), transform)`이다. SH2 전 런타임 경로에서 D3D12는 `D3DCompile`에 `D3DCOMPILE_PACK_MATRIX_ROW_MAJOR`(FXC `/Zpr`와 같은 플래그)를 준다. 원문에 `row_major`를 적지 않고 컴파일 옵션으로 담는 것은 위 DXC `-Zpr`·FXC `/Zpr` 규약과 같게 하려는 것이다. 그러면 SH2에서 쿠킹 경로로 바꿔도 원문이 그대로다. 손으로 쓴 GLSL은 기본 블록 uniform이라 `layout(row_major)`를 쓸 수 없다(GLSL 4.50 4.4.5절: 행렬 배치 한정자는 uniform·buffer block 전용). 그래서 OpenGL은 `glProgramUniformMatrix4fv(transpose = GL_TRUE)`로 담고 원문은 `vec4(position, 1) * uTransform`이다. 쿠킹된 ESSL(4항 `vec4` 배열 에뮬레이션)에서는 이 방식이 SH2에서 바뀐다. 스파이크(`Programs/ShaderToolSpike`)도 DXC `-Zpr`·FXC `D3DCOMPILE_PACK_MATRIX_ROW_MAJOR`로 컴파일한다. 그 산출에서 SPIRV-Cross ESSL·MSL은 기본(열 우선) `mat4`·`float4x4`와 `M * v`로, HLSL 5.0은 `row_major float4x4`와 `mul(v, M)`로 나온다. 둘은 같은 바이트를 같은 행렬로 읽는다(열 우선으로 읽은 행렬은 Mᵀ이고 Mᵀ·v = v·M). 시험 결과는 S5에 적었다.
 7. **정점 입력과 단계 사이 변수.** DXC `-spirv`는 입출력 location을 시맨틱 번호가 아니라 선언 순서로 준다(기본 `-fvk-stage-io-order=decl`). D3D11·D3D12는 VS 출력과 PS 입력을 register 위치로 맞추고 register는 선언 순서로 정해진다. 그래서 두 단계를 따로 컴파일해도 맞도록 다음을 지킨다.
    - 정점 입력 시맨틱은 `ATTRIBUTEn`이다(현재 `TEXCOORDn`, `DeviceTypes.h:130–136`). n은 `VertexAttribute::location`이다.
    - 단계 사이 변수는 하나의 struct로 선언하고 VS 출력과 PS 입력이 같은 struct를 쓴다(공용 `.rsh`). struct 멤버 순서는 `SV_Position` 다음 `TEXCOORDn`을 n 오름차순으로 둔다. 그러면 선언 순서 = location 순서라 FXC 경로(선언 순서)와 SPIRV-Cross 경로(location 순서)의 signature가 같다. PS 입력에 다른 struct를 쓰려면 VS 출력의 앞부분(같은 순서)이어야 한다.
@@ -384,7 +384,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
      - UE Vulkan은 `VK_FRONT_FACE_CLOCKWISE`와 `CM_CW → VK_CULL_MODE_FRONT_BIT`에 음수 viewport를 함께 쓴다(`Runtime/VulkanRHI/Private/VulkanPipeline.cpp:936`, `VulkanState.cpp:186–188`).
      - GLES Android는 `flip_vert_y` 때문에 컬 방향을 뒤집는다(위 항).
      - 매핑이 맞는지는 컬링 픽셀 대조로 확정한다(SH2 Vulkan·GLES 미리보기, SH5 Metal·D3D11, SH6 Android).
-   - 좌표 전환 전에는 래스터 상태의 앞면·컬 기본값을 코드에 굳히지 않는다. 지금 D3D12는 컬 없음 고정이다(`D3D12Device.cpp:1034`).
+   - 구현(C7, 2026-11-17): Graphics `PipelineDesc::cullMode`(None·Back·Front)가 컬을 정한다. 기본은 None이다. UE `TStaticRasterizerState`의 기본 `CM_None`과 같고(`RenderCore/Public/RHIStaticStates.h:86`), 감김을 정하지 않은 기존 화면 채우기·시험 그리기가 그대로 보인다. D3D12는 `FrontCounterClockwise = TRUE`와 `Back → D3D12_CULL_MODE_BACK`·`Front → D3D12_CULL_MODE_FRONT`로 옮긴다. OpenGL은 `glCullFace`(GL_BACK·GL_FRONT)를 쓰고, clip 원점별 `glFrontFace`는 장치가 `glClipControl`과 함께 정한다(S5). 샘플 렌더러는 뒤면 컬 파이프라인과 앞면 컬 파이프라인을 두고, 항목 world 행렬식과 view 행렬식 가운데 하나만 음수일 때 앞면 컬 파이프라인을 쓴다. 내장 메시는 UE 좌표(로컬 Y 오른쪽·Z 위)로 다시 적었고 감김을 화면 반시계(법선 `(C−A)×(B−A)` = −X)로 바꿨다.
 9. **텍스처와 샘플러.** 텍스처마다 샘플러를 정하는 현재 규칙(`DeviceTypes.h:126–127`, `Sampler.h:42`)을 유지한다. HLSL은 둘을 따로 선언하므로 짝 규칙을 둔다: 텍스처 `X`는 같은 단계의 `SamplerState XSampler`와 짝이다. 짝이 없는 텍스처·샘플러와, 한 샘플러를 여러 텍스처가 쓰는 경우는 컴파일 오류다. 이 규칙으로 GLES combined sampler가 짝마다 하나로 정해진다(UE는 텍스처마다 샘플러 하나로 합치려고 SPIRV-Cross를 고쳤다, `ShaderConductor.cpp:1745–1758`). 공유·정적 샘플러(UE space1000)는 후속이다.
 10. **bindless.** 기본 프로필에 넣지 않는다. 후속 bindless 프로필은 D3D12 `ResourceDescriptorHeap`(SM 6.6), Vulkan bindless(UE 5.8은 mutable descriptor 기반 set 3개와 descriptor buffer, 7.1절), Metal Shader Converter로 UE 구조를 따른다.
 11. **GLES 출력과 UE 수정 도구.** UE GLES 경로는 UE가 고친 SPIRV-Tools pass 셋(`--reduce-const-array-to-struct`, `--convert-composite-to-op-access-chain-pass`, `--adv-interface-variable-scalar-replacement=skip-matrices`, `ThirdParty/ShaderConductor/ShaderConductor/External/SPIRV-Tools/source/opt/optimizer.cpp:554–562, 674–688`, 사용 `OpenGLShaderCompiler.cpp:2835–2853`)과 SPIRV-Cross 수정(UBO padding `pad_ubo_blocks`, PC 형식의 `force_glsl_clipspace` 표시, 텍스처당 샘플러 결합, ES binding 버전 조건, ESSL `offset` 생략, `ThirdParty/ShaderConductor/ShaderConductor/External/SPIRV-Cross/spirv_glsl.hpp:195–201`, `ShaderConductor.cpp:1745–1748`, `spirv_glsl.cpp:2220–2225, 2242–2245`)에 기댄다. 상수 버퍼를 `vec4` 배열로 묶는 일은 UE ShaderFormatOpenGL의 텍스트 재작성이 한다(`OpenGLShaderCompiler.cpp:1137–1240, 1797–1890`). UE 수정은 가져올 수 없으므로 Rocks는 업스트림 옵션과 워커 재작성으로 같은 결과를 낸다.
@@ -778,3 +778,7 @@ SH0 진척(2026-11-17, `feature/shader-tools`, Windows 부분 구현):
   - 6항: 행 벡터·행 우선 규약으로 바꾸고 형식별 행 우선 옵션의 UE 근거를 확인했다. S5는 옵션을 고르는 시험에서 규약을 확인하는 시험으로 바꿨다.
   - 8항: 앞면 규약(화면 반시계·뒤면 컬), 음수 행렬식 반전, backend 매핑 근거를 더했다.
   - 근거: 좌표 전환 세션의 차이표(UE 5.8.4 소스·probe)와 이 문서의 UE 소스 재확인.
+- 개정 10(2026-11-17): 좌표 전환 C7(렌더 코드 반영)을 구현 상태로 적었다.
+  - 6항: 런타임 D3D12는 `D3DCOMPILE_PACK_MATRIX_ROW_MAJOR`, OpenGL은 `transpose = GL_TRUE`로 행렬을 행 우선으로 담는다. 손으로 쓴 GLSL에 `layout(row_major)`를 쓰지 않은 이유(기본 블록 uniform)도 적었다.
+  - 8항: Graphics `CullMode`와 기본값 None, backend 매핑, 샘플 렌더러의 음수 행렬식 반전을 적었다.
+  - S5: D3D12·WARP·OpenGL 런타임 경로 결과를 적었다.

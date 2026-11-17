@@ -1,13 +1,13 @@
-# SPIRV-Tools C API 공유 라이브러리 오프라인 빌드다(Windows x64). Docs/Design/ShaderSystem.ko.md 8절 4항.
-# libspirv.h의 C API(spvValidate·어셈블·역어셈블과 최적화기 C API spvOptimizer*)를 공유 라이브러리 하나(SPIRV-Tools-c.dll)로 만든다.
-# 업스트림의 공유 빌드(BUILD_SHARED_LIBS)는 SPIRV-Tools-opt가 core의 C++ 내부 심볼을 DLL 경계 너머로 쓰므로 Windows에서 링크되지
-# 않는다. 그래서 업스트림 정적 라이브러리(SPIRV-Tools-static·SPIRV-Tools-opt)를 SPIRV_TOOLS_SHAREDLIB·SPIRV_TOOLS_IMPLEMENTATION으로
-# 컴파일해(C API에 dllexport) CMake 래퍼(같은 폴더의 SpirvToolsC.cmake)에서 whole-archive로 묶는다. 업스트림 원본은 고치지 않는다.
-# SPIRV-Headers는 DXC 고정 릴리스의 submodule 커밋으로 맞춘다(manifest build.dependencies, spirv-val과 DXC의 SPIR-V 버전 정합).
-# 업스트림 CMake가 Python 3(PATH)으로 문법 표를 생성한다. 게시는 하지 않는다.
+# Offline build of the SPIRV-Tools C API shared library (Windows x64). Docs/Design/ShaderSystem.ko.md section 8, item 4.
+# Builds the C API of libspirv.h (spvValidate, assembly, disassembly and the optimizer C API spvOptimizer*) as one shared library (SPIRV-Tools-c.dll).
+# The upstream shared build (BUILD_SHARED_LIBS) does not link on Windows because SPIRV-Tools-opt uses core's internal C++ symbols across the DLL
+# boundary. So the upstream static libraries (SPIRV-Tools-static, SPIRV-Tools-opt) are compiled with SPIRV_TOOLS_SHAREDLIB and SPIRV_TOOLS_IMPLEMENTATION
+# (dllexport on the C API) and bundled with whole-archive in a CMake wrapper (SpirvToolsC.cmake in the same folder). Upstream sources are not modified.
+# SPIRV-Headers is aligned to the submodule commit of the pinned DXC release (manifest build.dependencies; spirv-val and DXC agree on the SPIR-V version).
+# The upstream CMake generates grammar tables with Python 3 (PATH). Does not publish.
 #
-# 사용: pwsh Engine/Source/ThirdParty/SpirvTools/Build/Build.ps1 [-WorkDirectory C:\rtb\SpirvTools] [-OutputDirectory <dir>]
-# 필요: CMake 3.24 이상, Ninja, Visual Studio C++ 도구, Python 3, git(patch 적용).
+# Usage: pwsh Engine/Source/ThirdParty/SpirvTools/Build/Build.ps1 [-WorkDirectory C:\rtb\SpirvTools] [-OutputDirectory <dir>]
+# Requires: CMake 3.24 or later, Ninja, Visual Studio C++ tools, Python 3, git (to apply patches).
 param(
     [string] $WorkDirectory = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'rtb\SpirvTools'),
     [string] $OutputDirectory = '',

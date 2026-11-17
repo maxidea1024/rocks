@@ -46,7 +46,7 @@
 | C11 | full STW와 점진 mark/sweep, 삽입 장벽·cutoff, 선택적 병렬 mark, soft 시간·작업량 예산, OOM 시 sweep 금지·독립 oracle | 다중 mutator·동시 필드 스캔, hard deadline, 병렬 sweep·cluster·대규모 성능 검증 |
 | C12 | logical destroy·retire·실제 회수 분리, Busy 종료·재시도, 모의 backend lease | 실제 GPU/IO/audio 연동, 장시간 시스템 스트레스 |
 | C13 subset | 자체 UTF-8 String/StringView 검색·분리·치환 일부와 code point 단위 Left/Right/Mid·개수·순회, Name의 ASCII 비교·표기·None·번호와 pool/lease 수명·intern 없는 조회·pool 없는 원문 비교, Path 문자열 처리와 String `/`·`/=` | Unicode case folding·정규화·format 등 전체 문자열 기능, 영속 Name identity, Guid 생성/parse, 암호학적·영속 hash 정책, 플랫폼 경로 보정·기본 디렉터리 조회 |
-| Core Math | CPU별 `PlatformMath`(Generic→Clang→SSE2/NEON)·4-lane 레지스터, 벡터·정수 벡터·행렬·투영/뷰 행렬 생성·quaternion·Rotator·Transform(혼합 정밀도)·Transform3f·Transform3d·Box2/IntRect·Interval·Float16·정점 패킹(snorm·unorm·10:10:10:2·법선)·보간·허용 오차 상수, 기본 도형 8종과 광선·선분·겹침·최근접 판정, Color/LinearColor, PCG32 RandomStream | frustum·swept shape·접촉 정보, AVX2/FMA dispatch·double 레지스터·SoA batch, Float16 색·noise·BoxSphereBounds, macOS·ARM64 실행 검증 |
+| Core Math | CPU별 `PlatformMath`(Generic→Clang→SSE2/NEON)·4-lane 레지스터, 벡터·정수 벡터·행렬·투영/뷰 행렬 생성·quaternion·Rotator·Transform(모든 성분 double — UE FTransform)·Transform3f·Transform3d·cm↔m 단위 경계 변환(`UnitConversion.h`)·Box2/IntRect·Interval·Float16·정점 패킹(snorm·unorm·10:10:10:2·법선)·보간·허용 오차 상수, 기본 도형 8종과 광선·선분·겹침·최근접 판정, Color/LinearColor, PCG32 RandomStream | frustum·swept shape·접촉 정보, AVX2/FMA dispatch·double 레지스터·SoA batch, Float16 색·noise·BoxSphereBounds, 밀도·각충격량 단위 변환, macOS·ARM64 실행 검증 |
 
 ### 엔진 렌더 기반(2026-11-17)
 
@@ -376,3 +376,12 @@ libsodium 1.0.22-stable 기반 범용 암호 모듈 `Crypto`를 추가했다(설
 - 읽기 코드 `Developer/ShaderCompiler`(`ShaderCompiler/ShaderFormatDefinition.h`, Core JSON): 모르는 속성·어휘 밖 값 거부, 도구 이름을 도구 표(P4)와 대조, backend–처리기–경로 짝, 프로필 형식의 해석(없음·자리만 둔 형식·생산 호스트 아님), 프로필 공통 상한 `CommonLimits`, 형식 정의 SHA-256(파일 byte, job 키 3항). 오류는 JSON 경로와 줄을 돌려준다.
 - 남은 것: job 키 계산(P5), 공통 상한의 워커 검사, 런타임 의존 파일 복사(Agility SDK `redist`, P6b 또는 SH2), macOS 실행 시험.
 - 검증(Windows x64 clang-cl, Debug): EngineTests `ShaderFormat_*` 8건(저장소 정의 8·프로필 2 전체 읽기, 결정·측정 값, Windows 프로필 공통 상한, 음성 대조 40건), format·policy.
+
+## 2026-11-17 좌표·단위 UE 5.8 전환(Core 수학·World)
+
+사용자 요구에 따라 공간 좌표계·회전 의미·행렬·Transform 규약·월드 단위를 UE 5.8과 같게 바꿨다. 이전 규약(오른손 +Y 왼쪽·미터·라디안·column vector)은 요구와 달랐으며 호환 계층은 두지 않았다. 규약·UE 근거·시험은 [수학 구현](Math.ko.md) 2절·5절에 있다.
+
+- Core 수학(C1–C4): 왼손 +X 전방·+Y 오른쪽·+Z 위 방향 상수와 외적 설명, quaternion 양의 각 = 왼손 회전, `Rotator` 도·`pitch, yaw, roll` 순서·UE 변환식·정규화, 행 벡터 `p·M`·행 우선 색인(메모리 바이트는 그대로)·`A * B`는 A 먼저, `Transform` 모든 성분 double·`TryMultiply(local, parentToWorld)`, UE 인자의 원근·직교·view 행렬, 기하 앞면은 UE `FPlane`·Chaos 식(렌더 메시 앞면과 반대임을 명시), `Ray` 기본 방향 +Z, cm↔m 경계 변환 `UnitConversion.h`.
+- World·리플렉션(C1·C2·C5): `SceneComponent` 위치 cm·월드 행렬 = 상대 × 부모, Core 값 미러(`Rotator` 필드 순서·도, `Transform` 멤버 순서·double) 주석과 시험. 위치·회전 저장 데이터가 없어 migration은 두지 않았다.
+- 문서(C6·C8): 전체 구현 계획 개정 1.12(2.2·2.3·10.4·16·33.17절 등), Core 상세 명세, 리플렉션·World·공간 인덱스(cm)·Sparks(SD18 번복) 설계를 고쳤고, 물리 기준을 PhysX 5에서 Jolt로 되돌리며 [물리 어댑터 경계](../Design/PhysicsJoltAdapter.ko.md)를 새로 썼다(설계만, Jolt 미도입).
+- 남은 것: 렌더 경계 코드(셰이더 행렬 전달·앞면·Sandbox 기대값, 렌더 세션 소관), 카메라·입력 이동·물리 구현(미구현, 계약만), Jolt 규약과 UE 물리 API 단위 검증 항목(물리 어댑터 경계 8절), 밀도·각충격량 단위 변환 함수.

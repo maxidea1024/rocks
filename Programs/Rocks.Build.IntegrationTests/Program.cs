@@ -686,7 +686,7 @@ try
     var oldSource = File.ReadAllText(changedSource);
     try
     {
-        File.WriteAllText(changedSource, oldSource.Replace("체력", "변경된 이름", StringComparison.Ordinal));
+        File.WriteAllText(changedSource, oldSource.Replace("\"Health\"", "\"Renamed health\"", StringComparison.Ordinal));
         try
         {
             InstalledSdk.PublishVerifiedGameResult(sdk, NativeConfiguration.Debug, toolchain, game, output,

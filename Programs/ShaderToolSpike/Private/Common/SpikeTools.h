@@ -12,6 +12,7 @@ namespace rocks::spike {
 
 // DXC 출력 종류다.
 enum class DxcTarget : uint8 {
+    // 두 출력 모두 -Zpr(행렬 행 우선)로 컴파일한다.
     // D3D12_SM6: DXIL(내장 validator 서명, -Qstrip_reflect로 리플렉션은 따로 받는다).
     Dxil,
     // VULKAN_SM5 이하 SPIR-V 경로: -spirv -fspv-target-env=vulkan1.1 -fvk-use-dx-position-w.
@@ -38,7 +39,8 @@ bool CompileWithDxc(const shader::DxcFunctions& dxc, const ShaderInput& input, D
 bool DumpDxilReflection(const shader::DxcFunctions& dxc, Span<const uint8> reflection,
                         Report& report) noexcept;
 
-// FXC(D3DCompile, 고정본 d3dcompiler_47)로 DXBC를 만든다. name은 진단에 쓰는 가상 이름이다.
+// FXC(D3DCompile, 고정본 d3dcompiler_47)로 DXBC를 만든다(/Zpr, 행렬 행 우선). name은 진단에 쓰는
+// 가상 이름이다.
 bool CompileWithFxc(const shader::FxcFunctions& fxc, StringView source, const char* name,
                     const char* entry, const char* profile, ByteArray& code,
                     StringBuilderBase& diagnostics) noexcept;

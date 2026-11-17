@@ -33,6 +33,7 @@ public:
         SetConstants,
         Draw,
         DrawIndexed,
+        CopyPassTarget,
         EndFrame,
         RetireBuffer,
         RetireTexture,
@@ -230,6 +231,7 @@ private:
     void SetConstants(const graphics::DrawConstants& constants) noexcept override;
     void Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept override;
     void DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept override;
+    Result<void> CopyPassTarget(graphics::TextureHandle destination) noexcept override;
     Result<uint64> WriteTimestamp() noexcept override;
     void PushMarker(StringView name) noexcept override;
     void PopMarker() noexcept override;

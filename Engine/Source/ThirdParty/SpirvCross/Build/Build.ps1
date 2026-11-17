@@ -1,9 +1,9 @@
-# SPIRV-Cross C API 공유 라이브러리(spirv-cross-c-shared) 오프라인 빌드다(Windows x64). Docs/Design/ShaderSystem.ko.md 8절 4항.
-# 입력은 같은 폴더 위 ThirdParty.json의 build(고정 태그·원본 SHA-256·patch)이고, 업스트림 빌드 설정(예외·RTTI)으로 엔진 빌드 밖에서
-# 컴파일한다(경고 정책의 미리 빌드한 바이너리 절). 결과는 tar.gz archive와 manifest hosts 항목 JSON이다. 게시는 하지 않는다.
+# Offline build of the SPIRV-Cross C API shared library (spirv-cross-c-shared) (Windows x64). Docs/Design/ShaderSystem.ko.md section 8, item 4.
+# The input is the build entry (pinned tag, source SHA-256, patches) of ThirdParty.json one folder up, compiled outside the engine build with the upstream
+# build settings (exceptions and RTTI) (the prebuilt binary section of the warning policy). The result is a tar.gz archive and a manifest hosts entry JSON. Does not publish.
 #
-# 사용: pwsh Engine/Source/ThirdParty/SpirvCross/Build/Build.ps1 [-WorkDirectory C:\rtb\SpirvCross] [-OutputDirectory <dir>]
-# 필요: CMake, Ninja, Visual Studio C++ 도구, git(patch 적용).
+# Usage: pwsh Engine/Source/ThirdParty/SpirvCross/Build/Build.ps1 [-WorkDirectory C:\rtb\SpirvCross] [-OutputDirectory <dir>]
+# Requires: CMake, Ninja, Visual Studio C++ tools, git (to apply patches).
 param(
     [string] $WorkDirectory = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'rtb\SpirvCross'),
     [string] $OutputDirectory = '',

@@ -79,8 +79,8 @@
     }
   },
   "notes": [
-    "DXC v1.9.2609의 external/SPIRV-Tools·external/SPIRV-Headers submodule 커밋으로 빌드한다(= Vulkan SDK 1.4.363.0 태그). 그래서 spirv-val이 DXC가 만든 SPIR-V와 같은 버전이다.",
-    "libspirv.h C API(spvValidate 등과 최적화기 C API)를 공유 라이브러리 하나(SPIRV-Tools-c)로 만든다. 업스트림 공유 빌드는 SPIRV-Tools-opt가 core의 C++ 내부 심볼을 DLL 경계 너머로 써서 Windows에서 링크되지 않으므로, 정적 라이브러리 둘을 C API만 내보내게 컴파일해 CMake 래퍼(Build/SpirvToolsC.cmake)에서 whole-archive로 묶는다. 업스트림 원본은 고치지 않는다.",
-    "macos-arm64 산출물은 아직 없다(Build.sh 미검증)."
+    "Built from the external/SPIRV-Tools and external/SPIRV-Headers submodule commits of DXC v1.9.2609 (= Vulkan SDK 1.4.363.0 tag). So spirv-val is the same version as the SPIR-V DXC produces.",
+    "The libspirv.h C API (spvValidate and the like, plus the optimizer C API) is built as one shared library (SPIRV-Tools-c). The upstream shared build does not link on Windows because SPIRV-Tools-opt uses core's internal C++ symbols across the DLL boundary, so the two static libraries are compiled to export only the C API and bundled with whole-archive in a CMake wrapper (Build/SpirvToolsC.cmake). Upstream sources are not modified.",
+    "There is no macos-arm64 output yet (Build.sh unverified)."
   ]
 }

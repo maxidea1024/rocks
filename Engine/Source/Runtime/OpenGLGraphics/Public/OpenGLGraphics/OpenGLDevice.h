@@ -22,7 +22,11 @@ namespace rocks::graphics {
 // WGL_EXT_swap_control이
 //   있을 때 창마다 적용한다.
 // - 셰이더는 GLSL 4.50이다. 정점 속성은 layout(location = N), 상수는 uniform mat4 uTransform과
-//   uniform vec4 uColor, 텍스처는 layout(binding = 0) uniform sampler2D uTexture다.
+//   uniform vec4 uColor, 텍스처는 layout(binding = 0) uniform sampler2D uTexture다. uTransform은
+//   행 우선으로 담기므로(transpose = GL_TRUE로 올린다, DrawConstants) vec4(position, 1) *
+//   uTransform으로 쓴다.
+// - 앞면은 표시된 화면에서 반시계다(CullMode). 창(GL_LOWER_LEFT)과 RenderTarget(GL_UPPER_LEFT)의
+//   clip 원점에 맞춘 glFrontFace는 장치가 정한다.
 Result<UniquePtr<Device>> CreateOpenGLDevice(Allocator& allocator, const DeviceDesc& desc) noexcept;
 
 } // namespace rocks::graphics

@@ -35,7 +35,7 @@ SamplerState linearClamp : register(s0);
 
 VSOutput VSMain(VSInput input) {
     VSOutput output;
-    output.position = mul(transform, float4(input.position, 1.0));
+    output.position = mul(float4(input.position, 1.0), transform);
     output.uv = input.uv;
     output.color = input.color * color;
     return output;
@@ -55,7 +55,7 @@ uniform vec4 uColor;
 layout(location = 0) out vec2 vUv;
 layout(location = 1) out vec4 vColor;
 void main() {
-    gl_Position = uTransform * vec4(aPosition, 1.0);
+    gl_Position = vec4(aPosition, 1.0) * uTransform;
     vUv = aUv;
     vColor = aColor * uColor;
 }
@@ -71,21 +71,22 @@ void main() {
 }
 )";
 
-// 로컬 Y(왼쪽)-Z(위) 평면의 단위 크기 메시다. 화면에서 오른쪽은 -Y다.
+// 로컬 Y(오른쪽)-Z(위) 평면의 단위 크기 메시다. +X를 바라보면 화면에서 오른쪽이 +Y다. 삼각형마다
+// 꼭짓점 A·B·C는 화면에서 반시계(앞면)이며 법선 (C−A)×(B−A)가 -X(카메라 쪽)다.
 constexpr Vertex TriangleVertices[] = {
     {{0.0f, 0.0f, 0.5f}, {0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
-    {{0.0f, -0.5f, -0.5f}, {1.0f, 1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
-    {{0.0f, 0.5f, -0.5f}, {0.0f, 1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}},
+    {{0.0f, -0.5f, -0.5f}, {0.0f, 1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}},
+    {{0.0f, 0.5f, -0.5f}, {1.0f, 1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}},
 };
 
-// 좌상단(+Y,+Z) UV (0,0), 우하단(-Y,-Z) UV (1,1). 삼각형 두 개.
+// 좌상단(-Y,+Z) UV (0,0), 우하단(+Y,-Z) UV (1,1). 삼각형 두 개(좌상·좌하·우하, 좌상·우하·우상).
 constexpr Vertex QuadVertices[] = {
-    {{0.0f, 0.5f, 0.5f}, {0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}},
-    {{0.0f, -0.5f, 0.5f}, {1.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}},
-    {{0.0f, -0.5f, -0.5f}, {1.0f, 1.0f}, {1.0f, 1.0f, 1.0f, 1.0f}},
-    {{0.0f, 0.5f, 0.5f}, {0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}},
-    {{0.0f, -0.5f, -0.5f}, {1.0f, 1.0f}, {1.0f, 1.0f, 1.0f, 1.0f}},
-    {{0.0f, 0.5f, -0.5f}, {0.0f, 1.0f}, {1.0f, 1.0f, 1.0f, 1.0f}},
+    {{0.0f, -0.5f, 0.5f}, {0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}},
+    {{0.0f, -0.5f, -0.5f}, {0.0f, 1.0f}, {1.0f, 1.0f, 1.0f, 1.0f}},
+    {{0.0f, 0.5f, -0.5f}, {1.0f, 1.0f}, {1.0f, 1.0f, 1.0f, 1.0f}},
+    {{0.0f, -0.5f, 0.5f}, {0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}},
+    {{0.0f, 0.5f, -0.5f}, {1.0f, 1.0f}, {1.0f, 1.0f, 1.0f, 1.0f}},
+    {{0.0f, 0.5f, 0.5f}, {1.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}},
 };
 
 template <usize Count>
@@ -128,9 +129,16 @@ Result<void> Renderer::Initialize(graphics::Device& device, graphics::Format col
     pipeline.layout = {attributes, streams};
     pipeline.colorFormat = colorFormat;
     pipeline.alphaBlend = true;
+    pipeline.cullMode = graphics::CullMode::Back;
     auto createdPipeline = device.CreatePipeline(pipeline);
     if (!createdPipeline) {
         return Result<void>::Failure(createdPipeline.Error());
+    }
+    pipeline.cullMode = graphics::CullMode::Front;
+    auto reversedPipeline = device.CreatePipeline(pipeline);
+    if (!reversedPipeline) {
+        device.Retire(createdPipeline.Value());
+        return Result<void>::Failure(reversedPipeline.Error());
     }
 
     graphics::BufferDesc triangleDesc;
@@ -141,6 +149,7 @@ Result<void> Renderer::Initialize(graphics::Device& device, graphics::Format col
     auto quad = device.CreateBuffer(quadDesc, Bytes(QuadVertices));
     if (!triangle || !quad) {
         device.Retire(createdPipeline.Value());
+        device.Retire(reversedPipeline.Value());
         if (triangle) {
             device.Retire(triangle.Value());
         }
@@ -152,6 +161,7 @@ Result<void> Renderer::Initialize(graphics::Device& device, graphics::Format col
 
     device_ = &device;
     pipeline_ = createdPipeline.Value();
+    reversedPipeline_ = reversedPipeline.Value();
     triangle_ = triangle.Value();
     quad_ = quad.Value();
     return Result<void>::Success();
@@ -162,10 +172,12 @@ void Renderer::Shutdown() noexcept {
         return;
     }
     device_->Retire(pipeline_);
+    device_->Retire(reversedPipeline_);
     device_->Retire(triangle_);
     device_->Retire(quad_);
     device_ = nullptr;
     pipeline_ = {};
+    reversedPipeline_ = {};
     triangle_ = {};
     quad_ = {};
 }
@@ -177,10 +189,20 @@ void Renderer::Draw(graphics::CommandContext& context, const RenderView& view,
         return;
     }
 
-    context.SetPipeline(pipeline_);
+    // 거울 view는 모든 항목의 감김을 뒤집는다.
+    const bool reversedView = view.worldToView.Determinant() < 0.0f;
+    graphics::PipelineHandle bound;
     for (const RenderItem& item : items) {
-        // 행 벡터 규약(UE LocalToWorld * WorldToClip): 월드 변환 먼저, view·투영 나중. 메모리
-        // 배치가 이전 열 벡터 규약의 viewProjection * world와 같아 상수 버퍼 바이트는 그대로다.
+        // 음수 scale(행렬식 < 0)도 감김을 뒤집는다. view와 함께 뒤집히면 원래대로다.
+        const bool reversed = (item.world.Determinant() < 0.0f) != reversedView;
+        const graphics::PipelineHandle wanted = reversed ? reversedPipeline_ : pipeline_;
+        if (bound != wanted) {
+            context.SetPipeline(wanted);
+            bound = wanted;
+        }
+
+        // 행 벡터 규약(UE LocalToWorld * WorldToClip): 월드 변환 먼저, view·투영 나중. 행 우선
+        // 저장 그대로 올리고 셰이더가 mul(v, transform)으로 쓴다(DrawConstants).
         const Mat4 clip = item.world * view.viewProjection;
         graphics::DrawConstants constants;
         for (uint32 index = 0; index < 16; ++index) {
@@ -198,6 +220,7 @@ void Renderer::Draw(graphics::CommandContext& context, const RenderView& view,
         context.Draw(triangle ? 3u : 6u);
         ++stats_.items;
         ++stats_.draws;
+        stats_.reversedCulling += reversed ? 1u : 0u;
     }
 }
 

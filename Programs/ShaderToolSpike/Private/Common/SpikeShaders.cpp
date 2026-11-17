@@ -7,7 +7,9 @@ namespace rocks::spike {
 
 namespace {
 
-// Engine/Source/Runtime/Renderer/Private/Renderer.cpp ShaderHlsl과 같은 원문이다(SH0 입력).
+// Programs/Sandbox/Private/SampleRenderer.cpp ShaderHlsl과 같은 행렬 규약의 원문이다(SH0 입력).
+// 행 벡터 mul(v, transform)이며 컴파일 옵션(-Zpr, FXC /Zpr)이 행렬을 행 우선으로 담는다
+// (ShaderSystem 7.2절 6항).
 constexpr char RendererHlsl[] = R"(
 cbuffer DrawConstants : register(b0) {
     float4x4 transform;
@@ -31,7 +33,7 @@ SamplerState linearClamp : register(s0);
 
 VSOutput VSMain(VSInput input) {
     VSOutput output;
-    output.position = mul(transform, float4(input.position, 1.0));
+    output.position = mul(float4(input.position, 1.0), transform);
     output.uv = input.uv;
     output.color = input.color * color;
     return output;

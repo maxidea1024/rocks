@@ -1,17 +1,17 @@
 #!/bin/sh
-# 미리 빌드한 바이너리(manifest kind: binary)의 오프라인 도구 빌드 공용 함수다(macOS arm64, POSIX sh).
-# 라이브러리별 스크립트(Engine/Source/ThirdParty/<Lib>/Build/Build.sh)가 `. <이 파일>`로 읽어 쓴다. Windows 판(ToolBuild.ps1)과
-# 같은 순서다: manifest의 원본을 받아 SHA-256 검사 → 원본 트리·patch → 커밋한 공개 헤더 대조 → (라이브러리 스크립트가 빌드)
-# → install name(@loader_path)·ad-hoc 서명·dSYM → tar.gz archive와 호스트 항목 JSON. 게시는 하지 않는다.
+# Shared functions for the offline tool build of prebuilt binaries (manifest kind: binary) (macOS arm64, POSIX sh).
+# Per-library scripts (Engine/Source/ThirdParty/<Lib>/Build/Build.sh) read this file with `. <this file>`. Same order as the Windows version
+# (ToolBuild.ps1): download the manifest sources and verify SHA-256 -> source tree and patches -> compare committed public headers -> (the library script builds)
+# -> install name (@loader_path), ad-hoc signing and dSYM -> tar.gz archive and host entry JSON. Does not publish.
 #
-# 상태: 미검증. 이 기계(Windows)에서 실행하지 못했다. 처음 실행하는 macOS 호스트에서 확인한다(ShaderSystem.ko.md 8절 진척).
-# manifest는 macOS 기본 도구 plutil로 읽는다(jq·Python에 기대지 않는다).
+# Status: unverified. It could not be run on this machine (Windows). Confirm on the first macOS host that runs it (ShaderSystem.ko.md section 8 progress).
+# The manifest is read with plutil, a default macOS tool (no reliance on jq or Python).
 
 set -eu
 
 ROCKS_TOOL_HOST="macos-arm64"
 
-# manifest 값 하나를 읽는다. 예: rocks_manifest "$library" build.source.url
+# Reads one manifest value. Example: rocks_manifest "$library" build.source.url
 rocks_manifest() {
     plutil -extract "$2" raw -o - "$1/ThirdParty.json"
 }
@@ -24,7 +24,7 @@ rocks_sha256() {
     shasum -a 256 "$1" | cut -d ' ' -f 1
 }
 
-# url sha256 destination downloads: 받아 SHA-256을 검사하고 최상위 디렉터리 하나를 벗겨 destination에 푼다.
+# url sha256 destination downloads: downloads, verifies SHA-256, strips the single top-level directory and extracts into destination.
 rocks_expand_verified_source() {
     url=$1
     sha=$2
@@ -57,7 +57,7 @@ rocks_expand_verified_source() {
     rm -rf "$destination.unpack"
 }
 
-# library work: 원본 트리를 만들고 patch를 적용한다. 결과 경로는 "$work/source"다.
+# library work: builds the source tree and applies patches. The result path is "$work/source".
 rocks_initialize_source_tree() {
     library=$1
     work=$2
@@ -81,8 +81,8 @@ rocks_initialize_source_tree() {
     done
 }
 
-# library source: 저장소에 커밋한 원본 디렉터리(upstreamDirectory)의 모든 파일이 원본 트리의 같은 경로와 byte 단위로 같은지
-# 본다(커밋한 파일과 manifest SHA-256의 일치는 정책 검사 third-party가 본다).
+# library source: checks that every file of the source directory committed to the repository (upstreamDirectory) matches the same path in the source tree
+# byte for byte (the match between committed files and the manifest SHA-256 is checked by the third-party policy check).
 rocks_assert_committed_files() {
     library=$1
     source=$2
@@ -94,7 +94,7 @@ rocks_assert_committed_files() {
         fi
     done
 }
-# dylib의 install name을 @loader_path/<이름>으로, 같은 디렉터리 의존도 @loader_path로 바꾸고 ad-hoc 서명한다.
+# Changes a dylib's install name to @loader_path/<name>, and same-directory dependencies to @loader_path, then signs it ad hoc.
 rocks_fix_dylib() {
     dylib=$1
     name=$(basename "$dylib")
@@ -108,7 +108,7 @@ rocks_fix_dylib() {
     codesign --force --sign - "$dylib"
 }
 
-# stage output files...: files는 "<stage 기준 경로>=<role>" 목록이다. archive와 호스트 항목 JSON을 output에 쓴다.
+# stage output files...: files is a list of "<path relative to stage>=<role>". Writes the archive and host entry JSON to output.
 rocks_tool_archive() {
     library=$1
     stage=$2

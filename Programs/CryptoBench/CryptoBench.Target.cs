@@ -1,12 +1,12 @@
 using Rocks.Build.Rules;
 
-// 암호 처리량 측정 타깃이다. 수치는 Release로 측정한다:
+// Crypto throughput benchmark target. Measure with Release:
 //   dotnet msbuild Rocks.proj /t:Build /p:RocksTarget=CryptoBench /p:Configuration=Release
 public sealed class CryptoBenchTarget : TargetRules
 {
     public override string Name => "CryptoBench";
 
-    // 개발 도구·시험 실행 파일이다(Release 배제 정책 대상이 아니다).
+    // Development tool and test executable (not subject to the Release exclusion policy).
     public override TargetType Type => TargetType.Program;
 
     public override IReadOnlyList<string> Modules => ["CryptoBench"];

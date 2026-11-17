@@ -13,12 +13,15 @@ namespace sandbox::sample {
 
 using namespace rocks;
 
-// 내장 메시다. 둘 다 원점 중심 단위 크기이며 로컬 Y(왼쪽)-Z(위) 평면에 놓인다(Rocks 좌표: +X 전방,
-// +Y 왼쪽, +Z 위). 카메라가 +X를 바라보면 정면으로 보인다.
+// 내장 메시다. 둘 다 원점 중심 단위 크기이며 로컬 Y(오른쪽)-Z(위) 평면에 놓인다(UE 좌표: +X 전방,
+// +Y 오른쪽, +Z 위). 앞면 법선은 -X다(렌더 메시 법선 (C−A)×(B−A), UE
+// MeshDescription.cpp:1311–1313). 그래서 +X를 바라보는 카메라에는 화면에서 반시계로 감긴 앞면으로
+// 보인다.
 enum class MeshKind : uint8 {
-    // 꼭짓점 색(빨강·초록·파랑)을 가진 삼각형이다. 위 꼭짓점 (0, 0, 0.5).
+    // 꼭짓점 색을 가진 삼각형이다. 위 꼭짓점 (0, 0, 0.5) 빨강, 왼쪽 아래 (0, -0.5, -0.5) 초록,
+    // 오른쪽 아래 (0, 0.5, -0.5) 파랑.
     Triangle,
-    // 텍스처 좌표를 가진 사각형이다. UV (0,0)이 화면 좌상단(로컬 +Y, +Z 모서리)이다.
+    // 텍스처 좌표를 가진 사각형이다. UV (0,0)이 화면 좌상단(로컬 -Y, +Z 모서리)이다.
     Quad
 };
 
@@ -37,12 +40,18 @@ struct RenderItem {
 struct RenderView {
     // 월드 → clip 변환(행 벡터 규약 worldToView × projection — 월드 → view 먼저)이다.
     Mat4 viewProjection;
+    // viewProjection 앞부분의 월드 → view 변환이다. 컬 방향에만 쓴다: 행렬식이 음수(거울 view)면
+    // 모든 항목의 컬을 뒤집는다(UE FSceneView::bReverseCulling, SceneView.cpp:1000). 기본은 단위
+    // 행렬이다.
+    Mat4 worldToView;
     graphics::ClearColor clear;
 };
 
 struct RenderStats {
     uint32 items = 0;
     uint32 draws = 0;
+    // 컬을 뒤집어(앞면 컬 파이프라인으로) 그린 항목 수다.
+    uint32 reversedCulling = 0;
 };
 
 // 장치 자원(메시 버퍼·파이프라인)을 소유하고 RenderItem 목록을 그린다.
@@ -75,7 +84,10 @@ public:
     // 장치 자원을 해제한다. 여러 번 호출해도 안전하다.
     void Shutdown() noexcept;
 
-    // 기록 중인 프레임에 items를 순서대로 그린다(뒤에 오는 항목이 위에 그려진다).
+    // 기록 중인 프레임에 items를 순서대로 그린다(뒤에 오는 항목이 위에 그려진다). 뒤면은 컬한다.
+    // 항목 world 행렬식과 view.worldToView 행렬식 가운데 하나만 음수면 그 항목은 앞면을 컬한다(음수
+    // scale·거울 view로 감김이 뒤집힌 메시가 그대로 보인다). 둘 다 음수면 원래대로다(UE
+    // StaticMeshSceneProxy.cpp:1318–1327, MeshPassProcessor.cpp:1697).
     void Draw(graphics::CommandContext& context, const RenderView& view,
               Span<const RenderItem> items) noexcept;
 
@@ -89,7 +101,9 @@ public:
 
 private:
     graphics::Device* device_ = nullptr;
+    // 뒤면 컬(일반) 파이프라인과 앞면 컬(반전) 파이프라인이다.
     graphics::PipelineHandle pipeline_;
+    graphics::PipelineHandle reversedPipeline_;
     graphics::BufferHandle triangle_;
     graphics::BufferHandle quad_;
     RenderStats stats_;
