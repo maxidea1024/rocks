@@ -147,7 +147,7 @@ uint8 LinearToSrgbByte(float linear) noexcept;   // 경계 표 이분 탐색. Na
 ### 3.3 읽기(`Core/Text/Json.h`)
 
 - 결과: `JsonDocument::Parse(input, options)`가 `JsonError { code, position }`를 돌려준다(성공이면 code None, 실패하면 문서가 빈다). 경고는 `Warnings()`(`JsonWarningCode::BomIgnored` 등), 설명 문자열은 `JsonErrorMessage(code)`다. 문서는 핸들(`JsonValue`)이 문서 포인터를 들고 있어 이동·복사하지 않으며, 다시 Parse·Clear하면 세대 번호로 이전 핸들이 무효가 된다.
-- 입력은 UTF-8. 맨 앞 BOM 하나는 건너뛰고 `BomIgnored` 경고를 남긴다(RFC 8259 §8.1의 MAY — PowerShell 5.1·Visual Studio가 기본으로 붙인다). 주석·끝 쉼표·작은따옴표·NaN/Infinity 리터럴·잘못된 UTF-8·짝 없는 surrogate 이스케이프(`\uD800`)는 거부.
+- 입력은 UTF-8. 맨 앞 BOM 하나는 건너뛰고 `BomIgnored` 경고를 남긴다(RFC 8259 §8.1의 MAY — PowerShell 5.1·Visual Studio가 기본으로 붙인다). 주석·끝 쉼표·작은따옴표·NaN/Infinity 리터럴·잘못된 UTF-8·짝 없는 surrogate 이스케이프(`\uD800`)는 거부. 예외: config 파일 읽기는 읽기 옵션 `JsonReadOptions::allowLineComments`로 값·키 사이 공백 자리의 `//` 줄 주석을 받는다(문자열 안의 `//`는 그대로, 주석 안도 UTF-8, 블록 주석·끝 쉼표·중복 키는 여전히 오류, 기본은 거짓 — [설정 계층](ConfigSystem.ko.md) 4.1절). 쿠킹 manifest·도구 보고서 등 다른 용도는 엄격한 기본값을 쓴다.
 - 같은 객체 안 중복 키는 오류다(조용히 덮어쓰지 않는다). 판정은 이스케이프를 푼 뒤 byte 비교이며 Unicode 정규화는 하지 않는다(키 `a`와 이스케이프로 쓴 키 `a`(역슬래시·u·0061)은 같은 키, NFC·NFD 차이는 다른 키).
 - 숫자 모델: 소수부·지수가 없는 토큰만 정수 종류(int64, 넘으면 uint64, 그보다 크면 double)이고 나머지는 double(3.2절 파서). double로도 표현할 수 없는 크기(예: `1e400`)는 `NumberOutOfRange` 오류다(±Inf로 바꾸지 않는다). `-0`은 double −0.0. 원문 토큰도 보관한다(Preserve 쓰기용). 값 비교는 수치 기준.
 - 위치: 줄·열은 1부터, CRLF는 줄바꿈 1개, CR 단독도 줄바꿈, 열은 코드 포인트 단위(tab은 1칸), byte offset을 함께 보고한다(`JsonPosition { line, column, byteOffset }`, 오류 위치는 잘못된 값·문자·이스케이프의 시작, 건너뛴 BOM은 세지 않는다).

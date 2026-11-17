@@ -19,7 +19,7 @@ public abstract class TestsModule : ModuleRules
     private static readonly string[] DeveloperTestModules = ["CompressionTraining"];
 
     // Object 계열 모듈의 테스트다(FoundationTests·EngineTests에 들어간다).
-    private static readonly string[] ObjectTestModules = ["ObjectRuntime", "ObjectSerialization", "ReflectionText"];
+    private static readonly string[] ObjectTestModules = ["ObjectRuntime", "ObjectSerialization", "ReflectionText", "Config"];
 
     // 엔진 계층 모듈의 테스트다(EngineTests에만 들어간다). 경로는 Engine/Source 아래 Group/Module이다.
     private static readonly string[] EngineTestModules = ["Runtime/Input", "Runtime/PlatformWindow", "Runtime/World", "Runtime/Engine", "Runtime/GraphicsTypes", "Runtime/Graphics", "Runtime/RenderBase", "Runtime/AssetRuntime", "Developer/AssetTools", "Developer/ShaderToolTable", "Developer/ShaderToolLoader", "Developer/ShaderCompiler"];
@@ -62,19 +62,19 @@ public abstract class TestsModule : ModuleRules
         string[] dependencies = Layer switch
         {
             TestLayer.Core => ["Task", "Localization", "Serialization", "Compression", "Crypto", .. DeveloperTestModules],
-            TestLayer.Foundation => ["ObjectSerialization", "ReflectionText", "Localization", "Compression", "Crypto", .. DeveloperTestModules],
-            _ => ["ObjectSerialization", "ReflectionText", "Localization", "Compression", "Crypto", .. DeveloperTestModules,
+            TestLayer.Foundation => ["ObjectSerialization", "ReflectionText", "Config", "Localization", "Compression", "Crypto", .. DeveloperTestModules],
+            _ => ["ObjectSerialization", "ReflectionText", "Config", "Localization", "Compression", "Crypto", .. DeveloperTestModules,
                 .. EngineTestDependencies]
         };
 
-        // Object 계열 시험은 리플렉션 fixture 모듈에 의존한다. 생성 헤더(<ReflectionTestFixtures/*.generated.h>)는
+        // Object 계열 시험은 리플렉션 fixture 모듈(설정 계층 시험은 ConfigTestFixtures)에 의존한다. 생성 헤더(<ReflectionTestFixtures/*.generated.h>)는
         // 그 모듈의 public include로 전파된다. 엔진 계층 시험은 World 리플렉션 fixture(WorldTestFixtures — World 타입을
         // 상속한 저장·경로 시험 타입)에도 의존한다.
         string[] fixtures = Layer switch
         {
             TestLayer.Core => [],
-            TestLayer.Foundation => ["ReflectionTestFixtures"],
-            _ => ["ReflectionTestFixtures", "WorldTestFixtures"]
+            TestLayer.Foundation => ["ReflectionTestFixtures", "ConfigTestFixtures"],
+            _ => ["ReflectionTestFixtures", "ConfigTestFixtures", "WorldTestFixtures"]
         };
         return new()
         {

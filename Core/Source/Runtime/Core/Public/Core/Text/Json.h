@@ -15,7 +15,8 @@
 // SHA-256이 쿠킹 키에 들어가므로 출력이 결정적이고(CRT·locale·부동소수점 환경 무관, byte 단위 고정
 // 규칙), 사람이 고친 파일을 읽으므로 엄격하고 오류 위치가 정확하다.
 //
-// 읽기 규칙: 입력은 UTF-8. 맨 앞 BOM 하나는 건너뛰고 JsonWarningCode::BomIgnored를 남긴다. 주석·끝
+// 읽기 규칙: 입력은 UTF-8. 맨 앞 BOM 하나는 건너뛰고 JsonWarningCode::BomIgnored를 남긴다.
+// 주석(config 파일 읽기는 줄 주석만 JsonReadOptions::allowLineComments로 받는다)·끝
 // 쉼표·작은따옴표·NaN/Infinity 리터럴·잘못된 UTF-8·짝 없는 surrogate 이스케이프·문자열 안 제어
 // 문자·같은 객체 안 중복 키(이스케이프를 푼 byte 비교)는 오류다. 숫자: 소수부·지수가 없는 토큰은
 // int64, 넘으면 uint64, 그보다 크면 double이고 나머지는 double(정확한 반올림). double로도 표현할 수
@@ -99,13 +100,25 @@ struct JsonWarning {
     JsonPosition position;
 };
 
-// 읽기 한도. 넘으면 해당 오류다. 깊이 한도는 JsonWriter의 기본 깊이 한도와 같다(더 깊게 읽은 문서는
-// 같은 maxDepth를 준 writer로 쓴다).
+// 읽기 한도와 읽기 규칙 옵션. 한도를 넘으면 해당 오류다. 깊이 한도는 JsonWriter의 기본 깊이 한도와
+// 같다(더 깊게 읽은 문서는 같은 maxDepth를 준 writer로 쓴다).
 struct JsonReadOptions {
     uint64 maxInputBytes = 64ull << 20;
     uint32 maxDepth = 128;
     uint64 maxStringBytes = 16ull << 20;
     uint32 maxNodes = 4194304;
+    // 줄 주석을 공백으로 받는다(사람이 고치는 config 파일 전용 — Docs/Design/ConfigSystem.ko.md
+    // 4.1절). 값·키 사이 공백 자리의 `//`부터 줄 끝(LF·CR, 줄바꿈은 남는다) 또는 입력 끝까지를
+    // 건너뛴다. 문자열 안의 `//`는 그대로 문자열이다. 주석 안도 UTF-8이어야 한다(아니면
+    // InvalidUtf8 — 위치는 잘못된 byte). 블록 주석 `/*`, 짝 없는 `/`, 끝 쉼표, 중복 키는 이 옵션과
+    // 무관하게 오류다. 기본은 거짓(엄격 — 쿠킹 manifest·도구 보고서 등)이다. 위치(line·column)는
+    // 주석을 포함한 원문 기준이다.
+    //
+    // 사용 예:
+    //   JsonReadOptions options;
+    //   options.allowLineComments = true;
+    //   document.Parse("{\n  // 그림자 품질\n  \"shadows\": 2\n}", options);
+    bool allowLineComments = false;
 };
 
 class JsonDocument;
