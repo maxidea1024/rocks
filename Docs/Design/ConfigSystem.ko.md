@@ -1,6 +1,6 @@
 # 설정 계층과 콘솔 설정 설계
 
-기준일: 2026-11-17, 개정 2(CF1·CF2 구현 반영). 엔진·프로젝트·플랫폼·기기·사용자·세션·콘솔에서 오는 설정 값을 하나의 우선순위로 합치는 **설정 계층**과, 실행 중 이름으로 읽고 바꾸는 **콘솔 설정**(변수·명령)을 정한다.
+기준일: 2026-11-18, 개정 3(엔진 연결 반영). 엔진·프로젝트·플랫폼·기기·사용자·세션·콘솔에서 오는 설정 값을 하나의 우선순위로 합치는 **설정 계층**과, 실행 중 이름으로 읽고 바꾸는 **콘솔 설정**(변수·명령)을 정한다.
 
 [렌더 기반](RenderBase.ko.md)의 선행 작업 CP8(Config 계층)·CP4(콘솔 설정)이며, [엔진 구현 계획](EngineImplementationPlan.ko.md)의 다음 요구를 구현 스펙으로 옮긴다.
 - 24.1절 표의 "Device Profile / Scalability / CVar" 행
@@ -8,7 +8,7 @@
 
 UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275b`, 로컬 클론)의 현재 기본 경로이고, 경로는 `Engine/Source/Runtime/` 기준이다. UE 이름은 대응표와 근거에만 적는다. 레거시·deprecated 경로는 보지 않았다.
 
-상태: **설계 확정**(결정 D1–D9). 구현 단계는 9절이다. 구현: CF1·CF2(2026-11-17, Core 모듈 `Config` — `Core/Source/Runtime/Config`).
+상태: **설계 확정**(결정 D1–D9). 구현 단계는 9절이다. 구현: CF1·CF2(2026-11-17, Core 모듈 `Config` — `Core/Source/Runtime/Config`), 엔진 연결(2026-11-18, 5.4절 — `HostConfig` 모듈·엔진 sync 지점·`--set`·`config-dump` 등록).
 
 ## 1. 결정 요약
 
@@ -160,6 +160,22 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - 렌더 lane은 registry를 읽지 않는다(RenderBase 5.3·12절).
 - worker 작업은 시작 때 받은 snapshot이나 값 복사본을 쓴다. 게임 lane 밖에서 값을 바꾸는 API는 없다(UE는 주 스레드 밖 변경이 `check` 실패, `ConsoleManager.cpp:465–508`).
 
+### 5.4 엔진 연결(구현 2026-11-18)
+
+- **문맥 하나.** 프로세스의 설정 문맥은 호스트(게임·에디터 main, Sandbox, RocksCommandlet)가 하나만 만든다. Core 모듈 `HostConfig`의 `HostSettings`가 문맥과 그 문맥이 쓰는 타입 등록·모듈 등록·객체 Registry를 소유한다(로그가 엔진보다 먼저 준비돼야 하므로 엔진 Registry와 따로 둔다). 엔진은 `EngineConfig::settings`로 빌려 쓰고 만들거나 파괴하지 않는다.
+- **부트 순서**(`HostSettings`):
+  1. 등록: 모듈 타입(TraceControl + 호스트 콜백) → 설정(`log.*` — LogHost, `trace.*`·`TracePresets`·`Trace` — TraceControl, 호스트 콜백). 파일을 읽기 전이다(모르는 섹션·설정은 오류이기 때문이다).
+  2. `LoadConfigFiles`: 엔진·프로젝트(·플랫폼·사용자) 층 파일. 엔진 폴더는 호스트가 정한다. Sandbox·RocksCommandlet은 실행 파일 위쪽에서 `Engine/Config`를 가진 첫 폴더를 찾는다(`FindEngineDirectory`).
+  3. 호스트의 추가 파일(Sandbox `--config` — Project 층).
+  4. 명령줄 `--set=<target>=<value>`(`AddCommandLineAssignments` — Session 층, 태그 `--set`, 값은 첫 `=` 뒤 전부).
+  5. Sync → `CompleteStartup`(StartupOnly 값 고정 — `log.mode`·`log.file.*` 등).
+  6. 그다음 LogHost 설치 → trace 세션·콘솔 명령·`--trace` → 엔진 루프.
+- **설정 오류의 출력.** 1–5단계의 거부는 `HostSettings`가 진단(파일·줄·열·코드·경로·메시지)과 함께 한 번 기록한다. LogHost 설치 전이므로 비상 경로(stderr, Warning 이상)로 나간다. 호출자는 다시 기록하지 않는다.
+- **sync 지점.** 엔진 `RunFrame`은 2단계(시간 갱신) 뒤, 3단계(프레임 시작 — hooks.BeginFrame·Subsystem.OnFrameBegin·client.OnEngineTick) 전에 `Sync`를 부른다. 그래서 프레임 사이 변경은 다음 프레임 시작부터 보이고, 프레임 안에서 넣은 변경은 그 프레임 동안 값을 바꾸지 않는다. Sync 실패는 그 프레임의 첫 오류로 돌려주고 프레임은 계속한다(연속 실패는 첫 번째만 Error 로그).
+- **종료 순서.** 엔진 정리 → trace 세션 정지 → 로그 설치 범위 해제 → `LogHost::Stop`(구독 해제) → 설정 문맥 파괴. 문맥은 LogHost·trace 제어기·엔진보다 오래 산다.
+- **config-dump.** RocksCommandlet이 같은 부트(1·2·5단계)로 문맥을 만들어 `config-dump`를 등록한다. 엔진 폴더를 못 찾으면 엔진 층 없이 코드 기본값을 낸다.
+- 스펙과 다른 점: 문맥·부트를 엔진 안이 아니라 호스트 모듈(`HostConfig`)에 둔다(로그 설정이 엔진 초기화보다 먼저 필요하다). 엔진은 문맥을 빌린다. 엔진 폴더는 실행 파일 위치에서 찾는다(설치 경로 규칙은 패키징 단계에서 정한다).
+
 ## 6. 품질 묶음과 기기 프로필
 
 ### 6.1 품질 묶음
@@ -260,5 +276,6 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 
 ## 12. 개정 이력
 
+- 개정 3(2026-11-18): 엔진 연결을 반영했다(5.4절). 호스트가 문맥 하나를 만드는 `HostConfig` 모듈과 부트 순서(등록 → 층 파일 → 추가 파일 → `--set` → `CompleteStartup` → LogHost → 엔진 루프), 엔진의 프레임 sync 지점, `AddCommandLineAssignments`, RocksCommandlet의 `config-dump` 등록, 실행 파일 위쪽에서 엔진 폴더를 찾는 규칙을 적었다.
 - 개정 2(2026-11-17): CF1·CF2 구현을 반영했다. 배열 연산은 ReflectionText 확장이 아니라 Config 모듈의 import 앞 단계(4.2절), 경로 이름 문법(4.3절), 섹션 키 대소문자·대입 대상 문법(3.2절), 콘솔 이름 영역 표·값 모양·플래그 동작·명령 인자·snapshot·콜백 구현(5절), 지정자 실림 위치(7절).
 - 개정 1(2026-11-17): 초안. UE 5.8.4 config 계층·ini 문법·콘솔 변수·SetBy 우선순위·렌더 스레드 전파·Scalability·Device Profile 조사와 Rocks 현황(JSON·ReflectionText·Commandlet) 조사를 바탕으로 썼다. 사용자 결정 D1–D4를 반영했고, D5–D9는 권장안대로 확정했다.
