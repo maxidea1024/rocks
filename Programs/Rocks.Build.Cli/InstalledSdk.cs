@@ -313,6 +313,12 @@ public static class InstalledSdk
         var rulesPath = Path.Combine(rulesDirectory, "bin/Debug/net10.0/Rocks.Game.Rules.dll");
         var context = new BuildContext(project, output, toolchain.Platform, toolchain.Architecture, configuration, sdk);
         var rules = RuleLoader.Load(rulesPath, options.GetValueOrDefault("target", "Game"), context);
+        // SDK 엔진 라이브러리는 구성 기본 로그 하한으로 미리 빌드됐다. 게임 타깃만 다른 값을 쓰면 Log.h inline 본문이 갈려 ODR 위반이다.
+        if (rules.Target.LogCompiledMinimum is not null)
+        {
+            throw new ArgumentException($"Target {rules.Target.Name}: LogCompiledMinimum cannot be overridden in an installed SDK game build " +
+                "(the prebuilt engine libraries use the configuration default).");
+        }
         // 규칙 모듈을 기술자와 대조하고, 켜지지 않은 플러그인·Editor·플랫폼 미지원 모듈 등을 뺀다.
         var projectModules = moduleSet.Apply(rules.Modules, rules.Target.Modules);
         // SDK 모듈은 다시 생성하지 않는다. 리플렉션 모듈이면 descriptor·명세를 ImportedMetadata로 넘긴다.

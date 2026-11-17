@@ -43,14 +43,14 @@ Result<void*> SystemAllocator::Allocate(usize bytes, usize alignment, uint32 tag
         return Result<void*>::Failure(ErrorCode::OutOfMemory);
     }
 
-    auto* record = ConstructAt<Record>(recordStorage, Record{address, bytes, tag, nullptr});
+    auto* record = InitializeAt<Record>(recordStorage, Record{address, bytes, tag, nullptr});
     {
         platform::LockGuard lock(mutex_);
         constexpr uint64 maximum = NumericLimits<uint64>::Max();
         if (stats_.liveBytes > maximum - bytes || stats_.liveAllocations == maximum ||
             stats_.totalAllocations == maximum) {
             platform::AlignedFree(address);
-            DestroyAt(record);
+            static_assert(IsTriviallyDestructibleV<RemovePointerT<decltype(record)>>);
             platform::AlignedFree(recordStorage);
             return Result<void*>::Failure(ErrorCode::Overflow);
         }
@@ -94,7 +94,7 @@ Result<void> SystemAllocator::Deallocate(void* address) noexcept {
     // 먼저 목록에서 제거하므로 두 thread가 같은 live record를 동시에 반환할 수 없다.
     // 실제 OS 회수는 lock 밖에서 수행하여 다른 ledger 조회를 불필요하게 막지 않는다.
     platform::AlignedFree(found->address);
-    DestroyAt(found);
+    static_assert(IsTriviallyDestructibleV<RemovePointerT<decltype(found)>>);
     platform::AlignedFree(found);
     return Result<void>::Success();
 }

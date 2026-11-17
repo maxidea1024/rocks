@@ -79,7 +79,7 @@ Result<ZlibState*> CreateState(CompressionFormat format, Allocator& allocator,
         return Result<ZlibState*>::Failure(ErrorCode::OutOfMemory);
     }
 
-    ZlibState* state = ConstructAt<ZlibState>(memory);
+    ZlibState* state = InitializeAt<ZlibState>(memory);
     *state = ZlibState{};
     state->allocator = &allocator;
     state->format = format;
@@ -127,7 +127,7 @@ struct InflateOutput {
         usize growth = produced > AppendInitialBytes ? produced : AppendInitialBytes;
         growth = Minimum(growth, limit - produced);
         // 늘린 구간은 inflate가 채우므로 0으로 채우지 않는다.
-        auto grown = array->TryAppendUninitialized(base + produced + growth - array->Size());
+        auto grown = AppendDecodeStorage(*array, base + produced + growth - array->Size());
         if (!grown) {
             return Result<void>::Failure(grown.Error());
         }

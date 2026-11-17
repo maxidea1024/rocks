@@ -29,6 +29,8 @@ UE5.8 Debug·Development·Shipping에 대응한다. 구성마다 `ROCKS_BUILD_DE
 
 - 계약 위반 검사(Fatal)는 모든 구성에서 유지한다. 구성 매크로로 빼는 것은 디버그 표시·치트·통계 같은 개발용 기능뿐이다.
 - 대상 OS 매크로 `ROCKS_PLATFORM_WINDOWS`·`ROCKS_PLATFORM_MAC`·`ROCKS_PLATFORM_ANDROID`도 빌드가 정확히 하나를 1로 정의하고, `Base/Compiler.h`가 컴파일 대상과 맞는지 검증한다. 아키텍처 매크로 `ROCKS_ARCH_X64`·`ROCKS_ARCH_ARM64`는 `Compiler.h`가 정한다. 모듈은 `ROCKS_BUILD_*`·`ROCKS_PLATFORM_*`·`ROCKS_ARCH_*`를 정의할 수 없다. 사용 규칙(원시 컴파일러 매크로 금지, include 순서, `defined()` 금지)은 [플랫폼 계층](../Docs/Design/PlatformLayer.ko.md)의 "플랫폼 선택과 실패 정책"을 따른다.
+- 로그 컴파일 하한 `ROCKS_LOG_COMPILED_MINIMUM`(`LogLevel` 숫자)은 빌드가 타깃의 모든 모듈에 같은 값으로 정의한다. 기본은 Debug·Asan Trace(0), Development Debug(1), Release Info(2)이고, 타깃이 `TargetRules.LogCompiledMinimum`으로 바꿀 수 있다. 모듈별 정의는 ODR 위반이라 거부하며, 설치 SDK export·SDK 게임 타깃은 미리 빌드한 엔진 라이브러리와 맞추려고 재정의를 거부한다([로깅 시스템](../Docs/Design/LoggingSystem.ko.md) 6.4절).
+- 모든 compile action은 `-fmacro-prefix-map=<저장소 루트><구분자>=`(clang-cl은 `/clang:` 접두, 설치 SDK 게임 빌드는 SDK 루트도)를 받아 `__FILE__`·`__builtin_FILE()`이 저장소 기준 상대 경로(예: `Core\Source\Runtime\Core\Private\...`)가 된다. 로그·assert 위치에 빌드 장소가 남지 않는다. 디버그 정보 경로는 바꾸지 않는다(`-ffile-prefix-map`이 아니다). 도구 빌드 ID는 루트를 경로 키(`src:`)로 정규화한다.
 - Release는 최적화된 모듈을 ThinLTO bitcode로 컴파일한다. 도구 탐색은 archiver·linker를 compiler와 같은 폴더에서 먼저 찾으며, Windows Release는 compiler 폴더의 `llvm-lib`·`lld-link`만 받는다(MSVC `lib.exe`·`link.exe`나 다른 LLVM 설치의 도구는 빌드 전에 거부). macOS는 compiler 옆에 `llvm-ar`가 없으면 Xcode `ar`(libLTO)를 쓴다. POSIX link driver에는 `-flto=thin`을 넘긴다.
 - 모든 구성이 디버그 정보를 만든다. Release PDB는 UE Shipping처럼 배포 파일과 분리해 크래시 덤프 심볼화에 쓴다.
 - 후속: ThinLTO 캐시(`/lldltocache`·`--thinlto-cache-dir`)가 없어 Release relink는 backend를 모두 다시 생성한다. 병렬 link 수와 LTO thread 수 조정도 측정 후 정한다.

@@ -25,6 +25,8 @@ namespace detail {
 
 // SharedPtr/WeakPtr가 공유하는 제어 블록이다. TryMake는 객체 저장소와 같은 할당에, TryAdopt는
 // deleter와 같은 할당에 둔다. destroyObject는 제어 블록을 받아 객체(와 deleter)를 정리한다.
+// TryMake의 T가 trivially destructible이면 할 일이 없으므로 nullptr이다(TryAdopt는 deleter를
+// 불러야 하므로 늘 설정한다).
 // - strong: 살아 있는 SharedPtr 수. 0이 되면 객체를 소멸한다.
 // - weak: 살아 있는 WeakPtr 수 + (strong > 0이면 1). 0이 되면 할당 전체를 allocator에 반환한다.
 // 계수는 Platform/Atomics.h 원자 연산으로 갱신한다. 일반 증가는 relaxed, WeakPtr::Lock의 조건부
@@ -63,7 +65,10 @@ struct SharedControlBlock {
         if (platform::AtomicFetchSub<platform::MemoryOrder::AcquireRelease>(&strong, 1) == 1) {
             // 객체 소멸자가 같은 객체의 WeakPtr를 해제해도 strong 그룹의 weak 토큰이 남아 있어
             // 저장소는 아직 유효하다. 소멸이 끝난 뒤 그 토큰을 반환한다.
-            destroyObject(this);
+            if (destroyObject != nullptr) {
+                destroyObject(this);
+            }
+
             ReleaseWeak();
         }
     }
@@ -88,7 +93,9 @@ struct SharedStorage {
     alignas(T) unsigned char object[sizeof(T)];
 
     static void Destroy(SharedControlBlock* control) noexcept {
-        DestroyAt(static_cast<T*>(control->object));
+        if constexpr (!IsTriviallyDestructibleV<T>) {
+            DestroyAt(static_cast<T*>(control->object));
+        }
     }
 };
 
@@ -161,7 +168,9 @@ void SharedAdoptedStorage<T, Deleter>::Destroy(SharedControlBlock* control) noex
         object->DetachSharedControl(control);
     }
     storage->deleter(object);
-    DestroyAt(&storage->deleter);
+    if constexpr (!IsTriviallyDestructibleV<Deleter>) {
+        DestroyAt(&storage->deleter);
+    }
 }
 
 } // namespace detail
@@ -204,9 +213,10 @@ public:
         // 저장소 객체의 수명을 먼저 시작한 뒤 그 안에 T를 생성한다. 제어 블록은 첫 멤버라 할당
         // 주소와 같으며, 마지막 ReleaseWeak가 그 주소로 저장소를 반환한다.
         static_assert(ROCKS_OFFSET_OF(Storage, control) == 0);
-        Storage* storage = ConstructAt<Storage>(memory.Value());
-        T* object = ConstructAt<T>(storage->object, Forward<Args>(args)...);
-        storage->control = detail::SharedControlBlock{1, 1, &allocator, object, &Storage::Destroy};
+        Storage* storage = InitializeAt<Storage>(memory.Value());
+        T* object = InitializeAt<T>(storage->object, Forward<Args>(args)...);
+        storage->control = detail::SharedControlBlock{
+            1, 1, &allocator, object, IsTriviallyDestructibleV<T> ? nullptr : &Storage::Destroy};
         if constexpr (IsBaseOfV<detail::SharedFromThisAnchor, T>) {
             object->AttachSharedControl(&storage->control);
         }
@@ -239,7 +249,7 @@ public:
         if (!memory) {
             return Result<SharedPtr>::Failure(memory.Error());
         }
-        Storage* storage = ConstructAt<Storage>(memory.Value(), Move(deleter));
+        Storage* storage = InitializeAt<Storage>(memory.Value(), Move(deleter));
         detail::SharedControlBlock* control = storage;
         if (static_cast<void*>(control) != memory.Value()) {
             platform::Fatal("SharedPtr adopted control block is not at the allocation start");

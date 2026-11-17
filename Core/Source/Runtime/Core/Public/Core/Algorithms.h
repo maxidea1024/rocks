@@ -28,10 +28,16 @@ void Swap(T& left, T& right) noexcept {
     }
 
     T temporary(Move(left));
-    DestroyAt(leftAddress);
-    ConstructAt<T>(leftAddress, Move(right));
-    DestroyAt(rightAddress);
-    ConstructAt<T>(rightAddress, Move(temporary));
+    if constexpr (!IsTriviallyDestructibleV<T>) {
+        DestroyAt(leftAddress);
+    }
+
+    InitializeAt<T>(leftAddress, Move(right));
+    if constexpr (!IsTriviallyDestructibleV<T>) {
+        DestroyAt(rightAddress);
+    }
+
+    InitializeAt<T>(rightAddress, Move(temporary));
 }
 
 template <typename T, typename Compare>

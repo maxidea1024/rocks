@@ -9,7 +9,37 @@
 
 using namespace rocks;
 
+// Rocks.Build가 타깃 전체에 정의한 로그 컴파일 하한이 이 모듈에도 왔는지 확인한다. 타깃 재정의가
+// 없으므로 구성 기본값이어야 한다.
+#ifndef ROCKS_LOG_COMPILED_MINIMUM
+#error "Rocks.Build must define ROCKS_LOG_COMPILED_MINIMUM for every module of the target"
+#endif
+
+static_assert(LogCompiledMinimum == (IsDebugBuild         ? LogLevel::Trace
+                                     : IsDevelopmentBuild ? LogLevel::Debug
+                                                          : LogLevel::Info),
+              "the Foundation target must use the configuration default log compiled minimum");
+
 namespace {
+// Rocks.Build가 -fmacro-prefix-map으로 저장소 루트를 떼므로 소스 경로는 저장소 기준 상대 경로다
+// (예: Core\Source\Runtime\Core\Tests\LoggerTests.cpp). 구분자는 host 철자라 '/'와 '\'를 같게
+// 본다.
+bool IsRepositoryPath(const char* file, StringView expected) noexcept {
+    const StringView path(file);
+    if (path.ByteCount() != expected.ByteCount()) {
+        return false;
+    }
+
+    for (usize index = 0; index < path.ByteCount(); ++index) {
+        const char actual = path.Data()[index] == '\\' ? '/' : path.Data()[index];
+        if (actual != expected.Data()[index]) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 constexpr LogCategory LogTests{"Tests"};
 constexpr LogCategory LogTestsAlpha{"Tests.Alpha"};
 constexpr LogCategory LogTestsBeta{"Tests.Beta"};
@@ -495,7 +525,7 @@ TEST(SourceLocationCapturesCaller) {
     CHECK(first.where.line != second.where.line);
     CHECK(StringView(first.where.function) == "CallFromFirstFunction");
     CHECK(StringView(second.where.function) == "CallFromSecondFunction");
-    CHECK(StringView(first.where.file).EndsWith("LoggerTests.cpp"));
+    CHECK(IsRepositoryPath(first.where.file, "Core/Source/Runtime/Core/Tests/LoggerTests.cpp"));
     CHECK(StringView(second.where.file) == StringView(first.where.file));
 
     // 본문에서 직접 부르면 그 줄이다.
@@ -517,7 +547,8 @@ TEST(LogSystemPassesCallerLocation) {
     Log::Info(LogTests, "where");
     const uint32 writeLine = __LINE__ - 1;
     CHECK(capture.lastLocation.line == writeLine);
-    CHECK(StringView(capture.lastLocation.file).EndsWith("LoggerTests.cpp"));
+    CHECK(IsRepositoryPath(capture.lastLocation.file,
+                           "Core/Source/Runtime/Core/Tests/LoggerTests.cpp"));
     CHECK(StringView(capture.lastLocation.function) == "RocksTest_LogSystemPassesCallerLocation");
 }
 
