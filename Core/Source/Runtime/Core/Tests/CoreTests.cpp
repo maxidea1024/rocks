@@ -305,7 +305,27 @@ TEST(CoreArrayReserveFailureAndOverflowPreserveState) {
 }
 
 TEST(CoreArrayAllocationFailureSweepClosesLifetimeLedger) {
-    for (uint64 failAt = 1; failAt <= 6; ++failAt) {
+    // 성공 경로의 실제 할당 수를 먼저 센다. slack 정책이 바뀌어도 모든 실패 지점을 검사한다.
+    uint64 allocationCount = 0;
+    {
+        LifetimeValue::Reset();
+        SystemAllocator backing;
+        test::NFailAllocator allocator(backing);
+        {
+            Array<LifetimeValue> values(allocator);
+            for (int32 value = 0; value < 32; ++value) {
+                REQUIRE(values.TryEmplaceBack(value));
+            }
+        }
+
+        allocationCount = allocator.Attempts();
+        CHECK(LifetimeValue::live == 0);
+        CHECK(LifetimeValue::constructed == LifetimeValue::destroyed);
+        CHECK(backing.Stats().liveAllocations == 0);
+    }
+
+    REQUIRE(allocationCount != 0);
+    for (uint64 failAt = 1; failAt <= allocationCount; ++failAt) {
         LifetimeValue::Reset();
         SystemAllocator backing;
         test::NFailAllocator allocator(backing);

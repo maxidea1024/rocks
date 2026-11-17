@@ -292,6 +292,21 @@ public:
         return Rehash(target);
     }
 
+    // 여유 용량이 UE 5.8 축소 임계값(Array::TryShrinkSlack과 같은 식, 원소당 byte는 슬롯 2개)을
+    // 넘을 때만 Compact한다. open addressing의 power-of-two 슬롯 수와 최대 부하율 1/2는 유지하므로
+    // 줄어든 크기는 Count()를 담는 최소 power-of-two다. Erase·EraseIf는 자동으로 줄이지 않는다.
+    // 오류: 순회 중이면 Busy, 재할당 실패는 allocator 오류이며 둘 다 내용·주소·용량을 보존한다.
+    // 실제로 줄면 모든 원소 포인터가 무효다.
+    Result<void> ShrinkSlack() noexcept {
+        if (iterationDepth_ != 0) {
+            return Result<void>::Failure(ErrorCode::Busy);
+        }
+
+        return detail::ShrinkCapacity(Capacity(), size_, sizeof(Slot) * 2) < Capacity()
+                   ? Compact()
+                   : Result<void>::Success();
+    }
+
     // 키가 존재하면 삭제 후 true, 없으면 false다. 삭제한 원소의 빌린 포인터는 무효다.
     // 동일 컨테이너 순회 중 구조 변경은 Fatal이다. 다른 스레드 접근도 외부 동기화가 필요하다.
     template <typename Q>
@@ -373,10 +388,27 @@ public:
     // 모든 원소와 할당된 저장소를 반환한다. 같은 allocator로 다시 사용할 수 있다.
     void Reset() noexcept {
         CheckNotIterating();
-        ClearSlots();
+        if constexpr (!IsTriviallyDestructibleV<K> || !IsTriviallyDestructibleV<V>) {
+            for (usize i = 0; i < slotCount_; ++i) {
+                Slot& slot = slots_[i];
+                if (slot.state == State::Occupied) {
+                    if constexpr (!IsTriviallyDestructibleV<V>) {
+                        DestroyAt(slot.Value());
+                    }
+
+                    if constexpr (!IsTriviallyDestructibleV<K>) {
+                        DestroyAt(slot.Key());
+                    }
+                }
+            }
+        }
+
         FreeSlots(slots_);
         slots_ = nullptr;
         slotCount_ = 0;
+        size_ = 0;
+        deleted_ = 0;
+        ++revision_;
     }
 
     // 순서와 순회 간 순서 안정성은 보장하지 않는다. 순회 중 중첩 읽기·순회 및 값 수정은
@@ -786,8 +818,6 @@ private:
             if constexpr (!IsTriviallyDestructibleV<K>) {
                 DestroyAt(old.Key());
             }
-
-            old.state = State::Empty;
         }
         FreeSlots(slots_);
         slots_ = replacement;

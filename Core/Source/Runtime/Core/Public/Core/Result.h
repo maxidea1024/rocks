@@ -46,7 +46,13 @@ public:
         return *this;
     }
 
-    ~Result() noexcept {
+    ~Result() noexcept
+        requires(IsTriviallyDestructibleV<T>)
+    = default;
+
+    ~Result() noexcept
+        requires(!IsTriviallyDestructibleV<T>)
+    {
         ResetValue();
     }
 

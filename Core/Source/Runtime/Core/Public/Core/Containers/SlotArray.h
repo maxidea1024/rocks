@@ -2,6 +2,7 @@
 
 #include <Base/TypeTraits.h>
 #include <Base/Checked.h>
+#include <Core/Containers/ContainerDetail.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Move.h>
 #include <Platform/Fatal.h>
@@ -456,13 +457,7 @@ private:
     }
 
     usize GrowthCapacity(usize required) const noexcept {
-        const usize maximum = Limit();
-        if (capacity_ == 0) {
-            return maximum < 4 || required > 4 ? required : 4;
-        }
-        const usize growth = capacity_ / 2 + 1;
-        const usize candidate = growth > maximum - capacity_ ? maximum : capacity_ + growth;
-        return candidate < required ? required : candidate;
+        return detail::GrowthCapacityWithin(capacity_, required, Limit());
     }
 
     void CheckHandle(SlotHandle handle) const noexcept {

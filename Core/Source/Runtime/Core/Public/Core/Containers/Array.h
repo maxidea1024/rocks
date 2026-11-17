@@ -10,8 +10,10 @@
 namespace rocks {
 
 // Array가 버퍼를 늘릴 때 고르는 새 용량(원소 수)이다. 지금 용량 capacity에서 required개를 담아야 할
-// 때, 빈 배열은 4(required가 더 크면 required), 그 밖은 capacity의 1.5배 + 1(required가 더 크면
-// required)이며 원소 수 × elementSize가 표현 범위를 넘지 않게 MaxSize / elementSize에서 포화한다.
+// 때, 빈 배열은 max(4, required), 그 밖은 required + floor(required * 3/8) + 16이다(UE 5.8
+// DefaultCalculateSlackGrow, quantization 없음). capacity는 첫 할당인지(0)만 가리고, 이후 크기는
+// 지금 용량이 아니라 required로 정한다. 원소 수 × elementSize가 표현 범위를 넘지 않게
+// MaxSize / elementSize에서 포화한다(곱셈·덧셈 overflow 없음).
 // Array 밖에서 같은 성장 규칙으로 새 버퍼를 미리 만들 때 쓴다 — 예를 들어 살아 있는 배열의 옛
 // 버퍼를 새 버퍼 게시 뒤에 반환하려고 임시 배열에 예약할 때(리플렉션 경로 삽입). elementSize는 0이
 // 아니어야 한다(sizeof(T)).
@@ -85,7 +87,7 @@ public:
     }
 
     // 원소 required개를 재할당 없이 담을 capacity를 확보한다. 이미 충분하면 아무것도 하지 않고,
-    // 모자라면 추가 경로와 같은 성장 규칙(ArrayGrowthCapacity — 지금 용량의 1.5배 + 1 이상)으로
+    // 모자라면 추가 경로와 같은 성장 규칙(ArrayGrowthCapacity — 요청 원소 수에 UE slack을 더함)으로
     // 늘린다. 그래서 "곧 하나를 추가할 자리 확보 -> 실패할 수 없는 추가"를 반복해도 할당은
     // 기하급수적으로만 일어난다(n번에 O(log n)번, 원소 이동은 상환 O(1)). required는 절대 원소
     // 수다 — 다른 컨테이너의 크기를 기준으로 잡을 수 있다(예: 큐가 담을 수 있는 최대 원소 수).
@@ -180,10 +182,14 @@ public:
         if (size_ < capacity_) {
             // 이동으로 입력 별칭이 바뀌기 전에 새 원소를 확보한다.
             T staged(Forward<Args>(args)...);
-            for (usize i = size_; i > index; --i) {
-                InitializeAt<T>(data_ + i, Move(data_[i - 1]));
-                if constexpr (!IsTriviallyDestructibleV<T>) {
-                    DestroyAt(data_ + i - 1);
+            if constexpr (CanBitwiseMove) {
+                platform::MemoryMove(data_ + index + 1, data_ + index, (size_ - index) * sizeof(T));
+            } else {
+                for (usize i = size_; i > index; --i) {
+                    InitializeAt<T>(data_ + i, Move(data_[i - 1]));
+                    if constexpr (!IsTriviallyDestructibleV<T>) {
+                        DestroyAt(data_ + i - 1);
+                    }
                 }
             }
 
@@ -201,13 +207,8 @@ public:
         T* replacement = allocation.Value();
         // 원본이 살아 있을 때 새 원소부터 만들어 자기 원소 인자를 보호한다.
         T* inserted = InitializeAt<T>(replacement + index, Forward<Args>(args)...);
-        for (usize i = 0; i < index; ++i) {
-            InitializeAt<T>(replacement + i, Move(data_[i]));
-        }
-
-        for (usize i = index; i < size_; ++i) {
-            InitializeAt<T>(replacement + i + 1, Move(data_[i]));
-        }
+        MoveConstructRange(replacement, data_, index);
+        MoveConstructRange(replacement + index + 1, data_ + index, size_ - index);
 
         if constexpr (!IsTriviallyDestructibleV<T>) {
             for (usize i = size_; i != 0; --i) {
@@ -247,9 +248,7 @@ public:
 
         const usize newSize = size_ + values.Size();
         if (newSize <= capacity_) {
-            for (usize i = 0; i < values.Size(); ++i) {
-                InitializeAt<T>(data_ + size_ + i, values[i]);
-            }
+            CopyConstructRange(data_ + size_, values.Data(), values.Size());
 
             size_ = newSize;
             return Result<void>::Success();
@@ -263,9 +262,7 @@ public:
 
         T* replacement = allocation.Value();
         // source가 자기 배열일 때도 relocation 전에 새 tail을 복사한다.
-        for (usize i = 0; i < values.Size(); ++i) {
-            InitializeAt<T>(replacement + size_ + i, values[i]);
-        }
+        CopyConstructRange(replacement + size_, values.Data(), values.Size());
 
         RelocateTo(replacement);
         data_ = replacement;
@@ -296,9 +293,7 @@ public:
 
         const usize newSize = size_ + values.size_;
         if (newSize <= capacity_) {
-            for (usize i = 0; i < values.size_; ++i) {
-                InitializeAt<T>(data_ + size_ + i, Move(values.data_[i]));
-            }
+            MoveConstructRange(data_ + size_, values.data_, values.size_);
 
             values.Clear();
             size_ = newSize;
@@ -312,9 +307,7 @@ public:
         }
 
         T* replacement = allocation.Value();
-        for (usize i = 0; i < values.size_; ++i) {
-            InitializeAt<T>(replacement + size_ + i, Move(values.data_[i]));
-        }
+        MoveConstructRange(replacement + size_, values.data_, values.size_);
 
         RelocateTo(replacement);
         values.Clear();
@@ -347,9 +340,7 @@ public:
         }
 
         if (newSize <= capacity_) {
-            for (usize i = size_; i < newSize; ++i) {
-                InitializeAt<T>(data_ + i);
-            }
+            ValueInitializeRange(data_ + size_, newSize - size_);
 
             size_ = newSize;
             return Result<void>::Success();
@@ -362,9 +353,7 @@ public:
         }
 
         T* replacement = allocation.Value();
-        for (usize i = size_; i < newSize; ++i) {
-            InitializeAt<T>(replacement + i);
-        }
+        ValueInitializeRange(replacement + size_, newSize - size_);
 
         RelocateTo(replacement);
         data_ = replacement;
@@ -407,7 +396,11 @@ public:
             capacity_ = capacity;
         }
 
-        T* begin = data_ + size_;
+        T* begin = data_ ? data_ + size_ : nullptr;
+        if (count != 0) {
+            ::new (begin) T[count];
+        }
+
         size_ = newSize;
         return Result<Span<T>>::Success(Span<T>(begin, count));
     }
@@ -430,10 +423,15 @@ public:
             }
         }
 
-        for (usize i = index + count; i < size_; ++i) {
-            InitializeAt<T>(data_ + i - count, Move(data_[i]));
-            if constexpr (!IsTriviallyDestructibleV<T>) {
-                DestroyAt(data_ + i);
+        if constexpr (CanBitwiseMove) {
+            platform::MemoryMove(data_ + index, data_ + index + count,
+                                 (size_ - index - count) * sizeof(T));
+        } else {
+            for (usize i = index + count; i < size_; ++i) {
+                InitializeAt<T>(data_ + i - count, Move(data_[i]));
+                if constexpr (!IsTriviallyDestructibleV<T>) {
+                    DestroyAt(data_ + i);
+                }
             }
         }
 
@@ -458,11 +456,15 @@ public:
             }
         }
 
-        for (usize i = 0; i < moved; ++i) {
-            const usize source = size_ - moved + i;
-            InitializeAt<T>(data_ + index + i, Move(data_[source]));
-            if constexpr (!IsTriviallyDestructibleV<T>) {
-                DestroyAt(data_ + source);
+        if constexpr (CanBitwiseMove) {
+            platform::MemoryCopy(data_ + index, data_ + size_ - moved, moved * sizeof(T));
+        } else {
+            for (usize i = 0; i < moved; ++i) {
+                const usize source = size_ - moved + i;
+                InitializeAt<T>(data_ + index + i, Move(data_[source]));
+                if constexpr (!IsTriviallyDestructibleV<T>) {
+                    DestroyAt(data_ + source);
+                }
             }
         }
 
@@ -657,7 +659,63 @@ public:
         return Result<void>::Success();
     }
 
+    // 여유 용량이 UE 5.8 축소 임계값을 넘을 때만 Size()에 정확히 맞게 줄인다(TryShrink). 조건은
+    // (여유 byte >= 16KiB 또는 Size() * 3 < Capacity() * 2) 그리고 (여유 원소 > 64 또는 빈
+    // 배열)이다. 삭제·Resize는 지금처럼 용량을 유지하므로, 큰 삭제가 끝난 안전한 시점에 caller가
+    // 부른다. 줄지 않으면 아무것도 하지 않는다. 실제로 줄면 모든 원소 주소와 view가 무효다. 오류:
+    // 재할당 실패는 allocator 오류이며 데이터·size·capacity·주소를 보존한다.
+    //
+    // 사용 예:
+    //   pending.TryRemoveAt(0, consumed);
+    //   (void)pending.TryShrinkSlack();   // 실패해도 내용은 그대로라 무시할 수 있다
+    Result<void> TryShrinkSlack() noexcept {
+        return detail::ShrinkCapacity(capacity_, size_, sizeof(T)) < capacity_
+                   ? TryShrink()
+                   : Result<void>::Success();
+    }
+
 private:
+    // 일반 Resize의 값 초기화다(int는 0). Uninitialized API와 달리 초기화를 생략하지 않는다.
+    // trivial 기본 생성·소멸 타입은 배열 값 초기화 한 번으로 수명을 시작해 memset으로 내려가게
+    // 하고, 소멸이 non-trivial이면 배열 new의 cookie 가능성을 피해 원소별로 초기화한다. count가
+    // 0이면 destination(nullptr일 수 있음)을 쓰지 않는다.
+    static void ValueInitializeRange(T* destination, usize count) noexcept {
+        if constexpr (IsTriviallyDefaultConstructibleV<T> && IsTriviallyDestructibleV<T>) {
+            if (count != 0) {
+                ::new (destination) T[count]();
+            }
+        } else {
+            for (usize i = 0; i < count; ++i) {
+                InitializeAt<T>(destination + i);
+            }
+        }
+    }
+
+    // trivial 소멸만으로 사용자 정의 이동/복사를 생략하지 않는다. volatile도 byte 복사하지 않는다.
+    static constexpr bool CanBitwiseMove =
+        IsTriviallyCopyableV<T> && IsTriviallyMoveConstructibleV<T> && !IsVolatileV<T>;
+
+    static void MoveConstructRange(T* destination, T* source, usize count) noexcept {
+        if constexpr (CanBitwiseMove) {
+            platform::MemoryCopy(destination, source, count * sizeof(T));
+        } else {
+            for (usize i = 0; i < count; ++i) {
+                InitializeAt<T>(destination + i, Move(source[i]));
+            }
+        }
+    }
+
+    static void CopyConstructRange(T* destination, const T* source, usize count) noexcept {
+        if constexpr (IsTriviallyCopyableV<T> && IsTriviallyCopyConstructibleV<T> &&
+                      !IsVolatileV<T>) {
+            platform::MemoryCopy(destination, source, count * sizeof(T));
+        } else {
+            for (usize i = 0; i < count; ++i) {
+                InitializeAt<T>(destination + i, source[i]);
+            }
+        }
+    }
+
     Result<T*> AllocateElements(usize capacity) noexcept {
         usize bytes = 0;
         if (!TryMultiply(capacity, sizeof(T), bytes)) {
@@ -702,12 +760,10 @@ private:
         }
     }
 
-    // byte 복사로 수명을 흉내 내지 않고 각 T를 이동 생성한 뒤 이전 객체를 소멸시킨다.
+    // trivial 이동은 byte 복사로 새 수명을 시작하고, 그 밖에는 이동 생성한다.
     // replacement의 충분한 공간과 비중첩은 이 함수를 호출하는 할당 경로가 보장한다.
     void RelocateTo(T* replacement) noexcept {
-        for (usize index = 0; index < size_; ++index) {
-            InitializeAt<T>(replacement + index, Move(data_[index]));
-        }
+        MoveConstructRange(replacement, data_, size_);
 
         if constexpr (!IsTriviallyDestructibleV<T>) {
             for (usize index = size_; index != 0; --index) {

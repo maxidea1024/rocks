@@ -300,7 +300,7 @@ Result<usize> DecompressAppend(const CodecLease& plugin, Span<const uint8> sourc
 
     while (true) {
         // 재시도 전 길이는 base다(축소는 저장소를 유지한다). 늘린 구간은 0으로 채우지 않는다.
-        auto grown = output.TryAppendUninitialized(capacity);
+        auto grown = AppendDecodeStorage(output, capacity);
         if (!grown) {
             RestoreLength(output, base);
             return Result<usize>::Failure(grown.Error());

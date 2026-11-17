@@ -246,7 +246,8 @@ public:
         }
 
         const usize position = used_;
-        Entry* entry = InitializeAt<Entry>(entries_ + position);
+        // raw payload는 뒤에서 K/V로 초기화한다. Entry 전체를 값 초기화하지 않는다.
+        Entry* entry = ::new (entries_ + position) Entry;
         InitializeAt<K>(entry->key, Forward<KeyArg>(key));
         InitializeAt<V>(entry->value, Forward<ValueArg>(value));
         entry->hash = hash;
@@ -380,6 +381,14 @@ public:
 
         CommitReserve(prepared.Value());
         return Result<void>::Success();
+    }
+
+    // 여유가 UE 5.8 축소 임계값을 넘을 때만 Compact한다. 원소당 byte는 항목 + 색인 2칸이다.
+    Result<void> ShrinkSlack() noexcept {
+        return detail::ShrinkCapacity(capacity_, count_, sizeof(Entry) + 2 * sizeof(uint32)) <
+                       capacity_
+                   ? Compact()
+                   : Result<void>::Success();
     }
 
     // 죽은 항목과 삭제 칸을 정리하고 최소 용량으로 줄인다. 비었으면 저장소를 반환한다. 실패하면
@@ -634,7 +643,7 @@ private:
                 continue;
             }
 
-            Entry* moved = InitializeAt<Entry>(entries + target);
+            Entry* moved = ::new (entries + target) Entry;
             InitializeAt<K>(moved->key, Move(*old.Key()));
             InitializeAt<V>(moved->value, Move(*old.Value()));
             moved->hash = old.hash;

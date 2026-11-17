@@ -64,7 +64,13 @@ public:
         }
     }
 
-    ~Optional() noexcept {
+    ~Optional() noexcept
+        requires(IsTriviallyDestructibleV<T>)
+    = default;
+
+    ~Optional() noexcept
+        requires(!IsTriviallyDestructibleV<T>)
+    {
         Reset();
     }
 

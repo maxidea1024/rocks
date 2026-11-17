@@ -142,7 +142,13 @@ public:
         MoveConstructFrom(other, MakeIndexSequence<Count>{});
     }
 
-    ~Variant() noexcept {
+    ~Variant() noexcept
+        requires((IsTriviallyDestructibleV<Types> && ...))
+    = default;
+
+    ~Variant() noexcept
+        requires(!(IsTriviallyDestructibleV<Types> && ...))
+    {
         DestroyCurrent(MakeIndexSequence<Count>{});
     }
 
