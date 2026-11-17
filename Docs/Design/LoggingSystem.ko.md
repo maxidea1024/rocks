@@ -1,6 +1,6 @@
 # 로깅 시스템 설계
 
-기준일: 2026-11-17, 개정 1. 엔진 전반에서 쓰는 **로그**(사람이 읽는 사건 기록)의 호출 API, 카테고리·레벨 필터, 비동기 기록 경로, 출력 형식, 장애 격리, 엔진 적용 범위를 정한다.
+기준일: 2026-11-17, 개정 2. 엔진 전반에서 쓰는 **로그**(사람이 읽는 사건 기록)의 호출 API, 카테고리·레벨 필터, 비동기 기록 경로, 출력 형식, 장애 격리, 엔진 적용 범위를 정한다.
 
 요구는 다음 문서에서 온다.
 - [엔진 구현 계획](EngineImplementationPlan.ko.md) 29.4절(필수 로깅·프로파일러: level/category, UTC+monotonic, rate limit·중복 집계, compile/runtime level, error/fatal 비상 경로, 임계 구간에서 file IO·heap·lock wait 금지)
@@ -20,7 +20,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론)의 현재 기본 경로다. 경�
 
 UE의 매크로 중심 API(`UE_LOG`, `DECLARE_LOG_CATEGORY_*`)는 따르지 않는다. 일반 로그는 함수 호출로 쓴다. 메시지 템플릿과 출력 레이아웃은 Serilog·log4j의 개념을 Rocks 이름으로 가져온다. UE 이름은 대응표(4절)에만 둔다.
 
-상태: **설계 확정**(결정 L1–L10, 17절). 단계는 14절이다. 다른 세션과의 순서는 15절이다.
+상태: **설계 확정**(결정 L1–L11, 17절). 단계는 14절이다. 다른 세션과의 순서는 15절이다.
 
 ## 1. 결정 요약
 
@@ -28,7 +28,7 @@ UE의 매크로 중심 API(`UE_LOG`, `DECLARE_LOG_CATEGORY_*`)는 따르지 않�
 |---|---|---|
 | 호출 | 매크로 없이 `Log::Info(LogEngine, "Engine initialized with {Count} subsystems", count)`. 반환은 `void` | UE는 `UE_LOG(Category, Verbosity, Fmt, ...)` 매크로다(`LM:278`, 형식 검증은 `UE_PRIVATE_LOG` 안 `LM:339`). 매크로라 인자 평가까지 지우지만 호출 모양이 무겁다 |
 | 비활성 비용 | 비활성 레벨은 메시지 서식화와 큐 기록을 하지 않는다. **일반 함수 인자는 평가된다**(C++ 함수 호출의 성질). 비싼 값은 `Log::DebugLazy` | UE는 `IsSuppressed` 검사 안에서 인자를 평가하므로 꺼진 로그의 인자도 평가하지 않는다(`LM:350–360`, `UE_LOG_ACTIVE` 정의 `LM:262`) |
-| 기록 경로 | **비동기.** 호출 스레드는 활성 검사·스레드별 준비 버퍼에 값 캡처·lock-free 유한 큐에 복사만 한다. 서식화·sink 출력은 LogSystem의 출력 스레드가 한다 | UE는 primary 스레드가 아닌 스레드의 기록을 **크기 제한 없는** `TMpscQueue`에 넣고(`OR:143`) 노드를 동시 선형 할당기로 **기록마다 할당**한다(`OR:49–51, 99`). 여러 스레드에서 안전한 장치는 호출 스레드에서 바로 부른다(분류 `OR:440–446`, 호출 `OR:844, 905`) |
+| 기록 경로 | **모드 선택: 비동기·동기.** 엔진 호스트(게임·에디터처럼 tick이 있음)는 기본이 비동기, 명령줄 도구는 기본이 동기다. 엔진 호스트는 설정 `log.mode`로 바꿀 수 있다(시작 뒤 고정). 비동기에서 호출 스레드는 활성 검사·스레드별 준비 버퍼에 값 캡처·lock-free 유한 큐에 복사만 하고, 서식화·sink 출력은 LogSystem의 출력 스레드가 한다. 동기는 호출 스레드가 렌더하고 sink까지 부른다 | UE는 primary 스레드가 아닌 스레드의 기록을 **크기 제한 없는** `TMpscQueue`에 넣고(`OR:143`) 노드를 동시 선형 할당기로 **기록마다 할당**한다(`OR:49–51, 99`). 여러 스레드에서 안전한 장치는 호출 스레드에서 바로 부른다(분류 `OR:440–446`, 호출 `OR:844, 905`) |
 | 큐가 찼을 때 | **기다리지 않고 버린다.** 큐의 마지막 10%는 Warning 이상 전용. 손실은 레벨별로 세고 공간이 생기면 한 줄로 알린다 | UE 큐는 유한하지 않아 메모리가 계속 는다. TraceSystem과 같은 비대기 방침이다 |
 | 메모리 | `LogSystem::Start`에서 전부 확보한다. 그 뒤 생산자·출력 스레드 모두 힙 할당 0 | UE는 기록마다 할당한다(위) |
 | 메시지 | Serilog식 **메시지 템플릿**: `{Name}`은 순서대로 인자에 묶이고 이름은 속성 키다. spec은 기존 Rocks 서식(`{HResult:#x}`). 템플릿 해시가 사건 id(`EventId`) | UE 5.8 `UE_LOGFMT`가 이름 있는 필드를 가진다(`SL:32–46`). 이것도 매크로다 |
@@ -47,7 +47,7 @@ UE의 매크로 중심 API(`UE_LOG`, `DECLARE_LOG_CATEGORY_*`)는 따르지 않�
 | 번호 | 원칙 | 주로 다루는 절 |
 |---|---|---|
 | P1 | **육하원칙으로 원인을 파악할 수 있어야 한다.** 언제·어디서·누가(무엇이)·무엇을·왜·어떻게가 한 기록에서 보인다 | 6.5, 12 |
-| P2 | **로깅이 메인 틱을 느리게 하지 않는다.** 비동기 위주. 호출 스레드에는 서식화·I/O·sink lock·힙 할당이 없고 큐가 차도 기다리지 않는다. 예외는 잠든 출력 스레드를 깨우는 생산자 하나의 짧은 말단 lock(8.4)이다 | 8 |
+| P2 | **로깅이 메인 틱을 느리게 하지 않는다.** tick이 있는 엔진 호스트는 기본이 비동기다(명령줄 도구는 동기로 충분하고, 설정으로 바꿀 수 있다 — 5.1). 호출 스레드에는 서식화·I/O·sink lock·힙 할당이 없고 큐가 차도 기다리지 않는다. 예외는 잠든 출력 스레드를 깨우는 생산자 하나의 짧은 말단 lock(8.4)이다 | 8 |
 | P3 | **로깅 오류로 엔진이 죽지 않는다.** 실패는 버리기·낮추기·집계로 끝난다 | 10 |
 | P4 | **log4j·Serilog식 서식.** 메시지 템플릿·속성, sink 레이아웃 패턴, JSON lines | 6.3, 9 |
 | P5 | **메시지는 영어로 쓴다.** 템플릿·자리 이름·카테고리·비상 문구·Fatal·assert 문구. 인자 값은 원문 그대로 | 12 |
@@ -93,6 +93,26 @@ UE의 매크로 중심 API(`UE_LOG`, `DECLARE_LOG_CATEGORY_*`)는 따르지 않�
   - 진행 중 호출 추적은 **세대 두 개의 전역 카운터 쌍**(SRCU 방식, `constinit`)이다. 호출은 현재 세대를 읽어 그 세대 카운터를 올리고, seq_cst로 포인터를 다시 읽고, 끝나면 내린다.
   - 해제는 포인터를 바꾼 뒤 세대를 뒤집고 **옛 세대 카운터만** 0이 되기를 기다린다. 새 호출은 새 세대로 가므로 계속 로그가 들어와도 해제가 굶지 않는다. 카운터가 LogSystem 밖에 있으므로 파괴된 객체를 증가시키는 일도 없다.
 - **정지:** `Stop()`(또는 소멸) = 새 기록 거부 → 큐 drain → sink flush → 출력 스레드 join → 메모리 반납. drain은 제한 시간 안의 best effort이고 남은 수는 비상 경로로 알린다.
+### 5.1 기록 모드
+
+| 모드 | 동작 | 기본으로 쓰는 호스트 |
+|---|---|---|
+| `LogMode::Async` | 8절 경로. 출력 스레드, lock-free 큐, 생산자 비차단 | tick이 있는 엔진 호스트(게임, 에디터, Sandbox `--engine`) |
+| `LogMode::Sync` | 호출 스레드가 활성 검사 → 스레드별 준비 버퍼에 렌더(`FixedStringBuilder`, 힙 없음) → sink fan-out(말단 sink mutex) → sink flush 정책까지 한다. 큐·블록 풀·출력 스레드를 만들지 않는다 | 명령줄 도구(Commandlet, 셰이더 컴파일 도구, 벤치, 빌드 도구) |
+| `LogMode::Manual` | Async와 같은 큐이지만 출력 스레드 없이 `Pump()`로 비운다 | 시험 |
+
+- 프리셋은 `LogSystemConfig::ForEngineHost()`(Async)와 `LogSystemConfig::ForTool()`(Sync)이다. 호스트가 고른다.
+- **설정 파일:** 엔진 호스트는 ConfigSystem 콘솔 설정 `log.mode`(`"async"` · `"sync"`, 플래그 **시작 뒤 고정**)를 읽어 프리셋을 덮어쓴다.
+  - 등록과 읽기는 ConfigSystem CF2에 잇는다. CF2 전에는 프리셋 기본값만 적용된다.
+  - 명령줄 도구도 같은 키를 읽을 수 있지만, 기본은 Sync다.
+- 모드는 `Start`에서 정해지고 실행 중에는 바꾸지 않는다. 바꾸려면 다시 시작한다.
+- **Sync에서 같은 것:** 무할당, 장애 격리(10절), 필터·템플릿·레이아웃, 출력 형식. 같은 기록 열은 두 모드에서 같은 출력을 낸다(6절 시험).
+- **Sync에서 다른 것:**
+  - 느린 sink가 호출 스레드를 늦춘다. 그래서 엔진 호스트를 Sync로 설정하면 메인 틱이 출력을 기다린다(설정 도움말에 적는다).
+  - sink 콜백 안의 로그 호출은 스레드별 재진입 표시로 비상 경로로 보낸다.
+  - `TextLogSink`는 기록마다 flush한다(도구 출력이 바로 보여야 하므로).
+  - `Log::Fatal`의 3단계는 sink에 직접 쓰는 것으로 바뀐다. 다만 이 스레드가 이미 sink 안에 있거나 sink mutex를 잡을 수 없으면 건너뛴다(try-lock).
+
 - **기존 `Logger`:** 공개 동기 API로 남기지 않는다. LogSystem 내부(Private)의 sink fan-out으로 다시 쓴다. `LogEvent`를 그대로 넘기고(시각·스레드를 다시 찍지 않음), sink별 결과를 돌려준다(10절 sink 차단에 필요). 큐를 우회하는 공개 경로는 없다.
 - **수동 Pump 모드:** `LogSystemConfig::threadMode = LogThreadMode::Manual`이면 출력 스레드를 만들지 않고 `Pump()`를 부른 스레드에서 비운다. 시험은 sleep 없이 Pump 뒤에 단언한다. 스레드 모드에서는 `Flush()`가 "이 호출 전에 넣은 기록이 모두 sink에 도달함"을 이벤트로 보장한다.
 - **비상 출력:** CRT `fwrite`가 아니라 OS 쓰기(`WriteFile`·`write(2)`)를 직접 부른다. `platform::Fatal`과 같은 방식이다(`Win64/Platform.cpp:82–96`). 그래야 출력 스레드의 stderr sink가 잡은 CRT stream lock에 막히지 않는다. lock은 없지만 OS I/O 대기는 남는다. PlatformBase에 `platform::WriteDiagnostic(StringView)`로 공개한다.
@@ -204,6 +224,8 @@ LogContextScope stage("Stage", "BeginPlay");
 | Release | Info | Info |
 
 ## 8. 기록 경로
+
+이 절은 Async·Manual 모드의 경로다. Sync는 5.1절이다.
 
 ### 8.1 생산자 연산(활성 기록 한 건)
 
@@ -402,14 +424,15 @@ Result<UniquePtr<Device>> CreateD3D12Device(Allocator&, const DeviceDesc&, Devic
 | 단계 | 내용 | 선행 | 완료 기준 |
 |---|---|---|---|
 | LG0 | 이 문서 | — | 교차 검증 반영 |
-| LG1 | `LogLevel`(Debug·Fatal), `LogCategory`(접두사 해시), `SourceLocation`, 기록 모델(속성·문맥·프레임·스레드 이름), `uint32` 카테고리 교체(`LogBuffer`·`ProfileScope`·`AesModes.cpp` 포함), Base 캐시 라인 상수 | LG0 | 기존 Logger·LogBuffer·ProfileScope·LoggerOutputTests 갱신 후 통과 |
+| LG1 | `LogLevel`(Debug·Fatal), `LogCategory`(접두사 해시), `SourceLocation`, 기록 모델(속성·문맥·프레임·스레드 이름), Logger·sink의 `uint32` 카테고리 교체(`AesModes.cpp` 포함), Base 캐시 라인 상수. **`LogBuffer`·`ProfileScope`의 카테고리 타입은 그대로 둔다**(15절) | LG0 | 기존 Logger·LogBuffer·ProfileScope·LoggerOutputTests 통과 |
 | LG2 | 공용 `constexpr` 서식 파서·이름 자리, `FixedStringBuilder`(잘림 모드), `LogTemplate` 검증, 위치 수집 시험, EventId, 값 캡처 인코딩, Lazy, 컴파일 실패 시험 체계(Rocks.ToolTests가 clang-cl `-fsyntax-only`) | LG1 | 템플릿·위치(TU 2개)·Lazy 0회/1회·잘림·컴파일 실패 시험 |
-| LG3 | `BoundedMpscQueue`, 블록 풀, 준비 버퍼, `LogSystem`(출력 스레드·깨우기·Manual Pump·Flush·포화·sink 명령·통계), fan-out 재작성, 세대 카운터 `LogInstallScope`, `platform::WriteDiagnostic`·`TryUtcTicks`, 설치 전후 경로, 장애 격리, `Log::Fatal`·`AssertFailed` | LG2 | 큐 스트레스·포화·wrap·멈춘 생산자 결정적 시험, **무할당 시험**(호출 수 세는 할당기로 Start 뒤 0회), 깨우기 유실 없음, 해제 기아 없음, 장애 주입, TSan·Asan, 호출 비용 측정 보고 |
+| LG3 | `BoundedMpscQueue`, 블록 풀, 준비 버퍼, `LogSystem`(Async·Sync·Manual 모드, 프리셋, 출력 스레드·깨우기·Pump·Flush·포화·sink 명령·통계), fan-out 재작성, 세대 카운터 `LogInstallScope`, `platform::WriteDiagnostic`·`TryUtcTicks`, 설치 전후 경로, 장애 격리, `Log::Fatal`·`AssertFailed` | LG2 | 큐 스트레스·포화·wrap·멈춘 생산자 결정적 시험, **무할당 시험**(호출 수 세는 할당기로 Start 뒤 0회), 깨우기 유실 없음, 해제 기아 없음, Sync와 Manual의 출력 동일·Sync 무할당, 장애 주입, TSan·Asan, 호출 비용 측정 보고 |
 | LG4 | 레이아웃 해석기, Text·Stderr sink 개편(묶음 flush), `JsonWriter` 옵션(한 줄·고정 frame·중복 색인 끔)·`JsonLinesLogSink`, `DateTime` 고정 폭 밀리초, `LogContextScope` | LG3 | 토큰별 결정적 출력, 잘못된 패턴 실패, JSON 왕복, 무할당 |
 | LG5 | `ROCKS_LOG_COMPILED_MINIMUM`, toolchain 단 `/clang:-ffile-prefix-map=`, Release 문자열 제외 검사, 템플릿 비ASCII 정책 검사 | LG2 | 구성별 빌드, 최종 링크 결과 검사 |
 | LG6 | Engine·World 적용(13절) | LG4, **15절 조건** | 단계별 실패 주입 → Stage, 파괴 지연 1000프레임 → Warning 정확히 1회·해소 Info 1회 |
 | LG7 | Graphics·창·셰이더 도구(report, HRESULT, 장치 제거 사유, 검증 메시지, 셰이더 진단) | LG4, **15절 조건** | 실패 주입 시험, Sandbox 자체 시험 |
-| LG8 | 호스트(Sandbox 헤드리스 `--engine`, L1), 사용 가이드 `Docs/Implementation/Logging.ko.md`, FoundationStatus·UE-C22·D01 갱신 | LG6, LG7 | Sandbox 실행으로 시작·종료·실패 원인 추적 확인 |
+| LG8 | 호스트: Sandbox 헤드리스 `--engine`(Async, L1), Commandlet 등 명령줄 도구(Sync). 사용 가이드 `Docs/Implementation/Logging.ko.md`, FoundationStatus·UE-C22·D01 갱신 | LG6, LG7 | Sandbox 실행으로 시작·종료·실패 원인 추적 확인 |
+| LG9 | 설정 `log.mode`(그리고 레벨 재정의) 등록·읽기 | LG8, ConfigSystem CF2 | 설정 파일 값으로 모드·레벨이 바뀌고, 실행 중 변경은 거부(시작 뒤 고정) |
 
 검증: 커밋마다 Debug 빌드·format·변경 부분 시험. 전체 체인(Asan·TSan)은 LG3과 LG8 끝에 한 번씩. 메인 트리 구현은 에이전트 하나가 순서대로 하고 커밋은 경로를 지정한다.
 
@@ -428,6 +451,10 @@ Result<UniquePtr<Device>> CreateD3D12Device(Allocator&, const DeviceDesc&, Devic
 규칙:
 - **LG0–LG5는 Core·Base·PlatformBase·빌드만 고친다.** 그래픽·Engine 파일을 건드리지 않으므로 지금 진행한다.
   - PlatformBase에서는 `WriteDiagnostic`·`TryUtcTicks` 추가만 한다. render-lane이 고친 `Thread.h`·`Thread.cpp`·`Concurrency.cpp`는 건드리지 않는다.
+- **trace 세션(`feature/trace-capture`)과의 겹침:**
+  - TR2는 `ProfileScope.h`·`ProfileScope.cpp`를 지우고 `Core/Tests/ReentryTests.cpp`의 사용을 `CpuScope`로 바꾼다(T8). 그래서 로깅은 `ProfileScope`와 `LogBuffer`의 카테고리 타입(`uint32`)을 바꾸지 않는다. `LogLevel`에 값을 더하는 것만으로는 두 파일에 영향이 없다. `LogBuffer` 카테고리 정리는 TR2 병합 뒤 별도로 판단한다.
+  - TR1은 PlatformBase `Clock.h`와 플랫폼별 `Platform.cpp`의 시계 부분(`MonotonicTicks`·`MonotonicTickFrequency`)을 고쳤다. LG3의 `TryUtcTicks`는 같은 파일이다. LG3 착수 때 TR1 병합 여부를 확인한다. 미병합이면 파일 끝 쪽에 따로 추가해 충돌을 줄이고, trace 세션에 알린다.
+  - 병합은 먼저 끝나는 쪽이 먼저 한다.
 - LG1은 `Crypto/Private/Aes/AesModes.cpp:172–176`(유일한 시험 밖 `StderrLogSink` 사용)을 고친다. `feature/crypto` 재병합 때 작은 충돌이 날 수 있으므로 커밋 메시지에 적는다.
 - **LG6–LG8은 render-lane이 `feature/engine-runtime`에 병합된 뒤 시작한다.** 병합 전에 시작해야 하면 해당 세션과 먼저 파일 단위로 맞춘다.
 - 출력 스레드 이름은 render-lane의 `ThreadOptions::name`이 병합되면 그것으로 붙인다. 그 전에는 이름 없이 시작하고 로그 쪽 스레드 이름 표에만 등록한다.
@@ -459,6 +486,7 @@ Result<UniquePtr<Device>> CreateD3D12Device(Allocator&, const DeviceDesc&, Devic
 | L8 | 메시지는 영어 | 결정됨(2026-11-17, 사용자 지시) |
 | L9 | 큐는 단일 lock-free 유한 MPSC로 시작, 측정에서 경합이 목표를 넘으면 스레드별 링으로 | 결정됨(2026-11-17, 사용자 지시·권장안) |
 | L10 | 하위 호환 없음: `uint32` 카테고리·`LogFilter`·기존 출력 형식을 바로 교체 | 결정됨(2026-11-17, 초기 단계 원칙) |
+| L11 | 비동기는 선택 사항이다. 명령줄 도구는 기본 Sync, tick이 있는 엔진 호스트(게임·에디터)는 기본 Async이며, 설정 파일 `log.mode`로 동기·비동기를 고른다(시작 뒤 고정) | 결정됨(2026-11-17, 사용자 지시) |
 
 ## 18. 개정 이력
 
@@ -475,3 +503,4 @@ Result<UniquePtr<Device>> CreateD3D12Device(Allocator&, const DeviceDesc&, Devic
   - fan-out 재작성
   - UE 인용 줄 정정
   - render-lane 표 정정과 crypto 조율
+- 개정 2(2026-11-17): 기록 모드(5.1절, L11)를 추가했다. 명령줄 도구는 Sync, 엔진 호스트는 Async가 기본이며, 설정 `log.mode`로 고른다. 이를 위해 LG9(ConfigSystem CF2 연결)를 추가했다. trace 세션 답신에 따라 LG1에서 `LogBuffer`·`ProfileScope` 카테고리 교체를 뺐다(TR2가 `ProfileScope`를 지움). `Clock.h`가 TR1과 겹치는 것도 15절에 적었다.
