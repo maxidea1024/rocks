@@ -1,6 +1,7 @@
 #include <Task/WorkerScheduler.h>
 #include <Base/Checked.h>
 #include <Platform/Clock.h>
+#include <TraceCapture/TraceTask.h>
 
 namespace rocks::detail {
 struct WorkerSlot {
@@ -45,6 +46,9 @@ struct WorkerRecord {
     // 수락 뒤 terminal 전까지 들어 있는 state.records 칸이다(회수·이벤트 완료가 선형 탐색하지
     // 않는다).
     uint32 slot = 0;
+    // trace 신원과 만들 때 저장한 문맥이다. records에 공개하기 전에 채우고 그 뒤 바꾸지 않는다.
+    // task 채널이 꺼져 있으면 id가 0이고, 모든 사건 지점이 분기 하나로 끝난다.
+    TraceTaskInfo trace;
 };
 } // namespace rocks::detail
 
@@ -155,6 +159,55 @@ bool CancelStalledEvents(WorkerState& state) noexcept {
         }
     }
     return changed;
+}
+
+// gate 안에서 부른다. 끝 상태를 trace 사건으로 남긴다(취소는 Cancelled, 그 밖은 Completed).
+void TraceTerminal(const WorkerRecord& record) noexcept {
+    if (!record.trace.id.IsTraced()) {
+        return;
+    }
+
+    if (record.status.state == WorkerTaskState::Cancelled) {
+        TraceTaskCancelled(record.trace.id);
+    } else {
+        TraceTaskCompleted(record.trace.id, record.status.error);
+    }
+}
+
+// gate 안에서 부른다. 의존이 모두 성공으로 끝났는지다.
+bool DependenciesSucceeded(const WorkerRecord& record) noexcept {
+    for (uint32 index = 0; index < record.dependencyCount; ++index) {
+        if (record.dependencies[index]->status.state != WorkerTaskState::Succeeded) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// gate 안에서 부른다. completed가 성공으로 끝나 실행 가능해진 작업의 Ready 사건을 낸다.
+void TraceDependentsReady(WorkerState& state, const WorkerRecord& completed) noexcept {
+    if (!completed.trace.id.IsTraced() || completed.status.state != WorkerTaskState::Succeeded) {
+        return;
+    }
+
+    for (uint32 index = 0; index < state.capacity; ++index) {
+        const WorkerRecord* record = state.records[index];
+        if (record == nullptr || record == &completed || !record->trace.id.IsTraced() ||
+            record->status.state != WorkerTaskState::Pending) {
+            continue;
+        }
+
+        bool dependsOnCompleted = false;
+        for (uint32 dependency = 0; dependency < record->dependencyCount; ++dependency) {
+            dependsOnCompleted =
+                dependsOnCompleted || record->dependencies[dependency] == &completed;
+        }
+
+        if (dependsOnCompleted && DependenciesSucceeded(*record)) {
+            TraceTaskReady(record->trace.id);
+        }
+    }
 }
 
 void EndReservation(WorkerState& state) noexcept {
@@ -290,6 +343,7 @@ Result<bool> WorkerTaskHandle::TryRevoke() const noexcept {
         platform::LockGuard lock(state.gate);
         record_->status.state = WorkerTaskState::Cancelled;
         record_->status.error = ErrorCode::Cancelled;
+        TraceTerminal(*record_);
         state.records[slot] = nullptr;
         --state.inFlight;
     }
@@ -307,17 +361,27 @@ Result<platform::WaitResult> WorkerTaskHandle::Wait(uint32 timeoutMs) const noex
         return Result<platform::WaitResult>::Failure(ErrorCode::WrongThread);
     }
     const uint64 start = platform::MonotonicNanoseconds();
-    platform::LockGuard lock(state.gate);
-    while (!IsTerminal(record_->status.state)) {
-        const uint32 remaining = Remaining(timeoutMs, start);
-        if (remaining == 0) {
-            return Result<platform::WaitResult>::Success(platform::WaitResult::TimedOut);
-        }
-        if (state.changed.Wait(state.gate, remaining) == platform::WaitResult::Failed) {
-            return Result<platform::WaitResult>::Success(platform::WaitResult::Failed);
+    // 기다림 시작·끝 사건이다. trace id는 공개 뒤 바뀌지 않으므로 gate 밖에서 읽는다.
+    const TraceTaskId traced = record_->trace.id;
+    TraceTaskWaitBegin(traced);
+    platform::WaitResult result = platform::WaitResult::Signaled;
+    {
+        platform::LockGuard lock(state.gate);
+        while (!IsTerminal(record_->status.state)) {
+            const uint32 remaining = Remaining(timeoutMs, start);
+            if (remaining == 0) {
+                result = platform::WaitResult::TimedOut;
+                break;
+            }
+            if (state.changed.Wait(state.gate, remaining) == platform::WaitResult::Failed) {
+                result = platform::WaitResult::Failed;
+                break;
+            }
         }
     }
-    return Result<platform::WaitResult>::Success(platform::WaitResult::Signaled);
+
+    TraceTaskWaitEnd(traced);
+    return Result<platform::WaitResult>::Success(result);
 }
 
 namespace {
@@ -339,6 +403,8 @@ Result<bool> CompleteEvent(WorkerRecord* record, ErrorCode error) noexcept {
         record->status.state =
             error == ErrorCode::None ? WorkerTaskState::Succeeded : WorkerTaskState::Failed;
         record->status.error = error;
+        TraceTerminal(*record);
+        TraceDependentsReady(state, *record);
         state.records[slot] = nullptr;
         --state.inFlight;
     }
@@ -589,6 +655,14 @@ WorkerScheduler::Submit(Function<void(WorkerTaskContext&)>&& body,
     for (uint32 index = 0; index < count; ++index) {
         record->dependencies[index] = retained[index];
     }
+    // trace 신원은 worker가 볼 수 있게 되기(records 공개) 전에 정한다. 채널이 꺼져 있으면 분기
+    // 하나다.
+    record->trace = TraceCreateTask();
+    if (record->trace.id.IsTraced()) {
+        for (uint32 index = 0; index < count; ++index) {
+            TraceTaskDependency(record->trace.id, retained[index]->trace.id);
+        }
+    }
     bool accepted = false;
     {
         platform::LockGuard lock(state->gate);
@@ -607,10 +681,16 @@ WorkerScheduler::Submit(Function<void(WorkerTaskContext&)>&& body,
                 }
             }
             ROCKS_ASSERT(accepted); // 예약이 capacity를 이미 확보하였다.
+            // 의존이 이미 모두 성공했으면 지금 실행 가능하다. gate 안에서 내야 worker의 Started보다
+            // 앞선다.
+            if (record->trace.id.IsTraced() && DependenciesSucceeded(*record)) {
+                TraceTaskReady(record->trace.id);
+            }
         }
     }
     state->changed.NotifyAll();
     if (!accepted) {
+        TraceTaskCancelled(record->trace.id);
         ClearDependencies(*record);
         ReleaseRecord(record);
         EndReservation(*state);
@@ -650,6 +730,7 @@ Result<WorkerTaskEvent> WorkerScheduler::TryCreateEvent() noexcept {
     }
     WorkerRecord* record = ConstructAt<WorkerRecord>(memory.Value(), *state);
     record->external = true;
+    record->trace = TraceCreateTask();
     bool accepted = false;
     {
         platform::LockGuard lock(state->gate);
@@ -671,6 +752,7 @@ Result<WorkerTaskEvent> WorkerScheduler::TryCreateEvent() noexcept {
     }
     state->changed.NotifyAll();
     if (!accepted) {
+        TraceTaskCancelled(record->trace.id);
         ReleaseRecord(record);
         EndReservation(*state);
         return Result<WorkerTaskEvent>::Failure(ErrorCode::ShuttingDown);
@@ -746,7 +828,13 @@ void WorkerScheduler::RunWorker(void* raw) noexcept {
         }
         if (run) {
             WorkerTaskContext context(selected);
-            body(context);
+            if (!selected->trace.id.IsTraced()) {
+                body(context);
+            } else {
+                // 시작·끝 사건, 저장한 문맥 복원, CPU 구간 "Task.Run"(TraceTaskScope).
+                TraceTaskScope traced(selected->trace);
+                body(context);
+            }
             error = context.Error();
             {
                 platform::LockGuard lock(state.gate);
@@ -766,6 +854,10 @@ void WorkerScheduler::RunWorker(void* raw) noexcept {
                 selected->status.error = ErrorCode::Cancelled;
             } else {
                 selected->status.state = WorkerTaskState::Succeeded;
+            }
+            if (selected->trace.id.IsTraced()) {
+                TraceTerminal(*selected);
+                TraceDependentsReady(state, *selected);
             }
             state.records[selectedIndex] = nullptr;
             --state.inFlight;

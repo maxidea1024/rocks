@@ -10,6 +10,7 @@ TraceChannel TraceMarkChannel{"mark", "표지"};
 TraceChannel TraceSpanChannel{"span", "스레드와 무관한 시간 띠"};
 TraceChannel TraceFrameChannel{"frame", "게임·렌더 프레임 경계"};
 TraceChannel TraceContextChannel{"context", "상관 id 문맥의 쌓기·복원"};
+TraceChannel TraceTaskChannel{"task", "task 수명·의존·기다림"};
 
 namespace detail {
 
@@ -91,6 +92,14 @@ constexpr TraceField ContextPushFields[] = {
     {"id", TraceFieldType::UInt32, Format::ContextPushIdOffset},
 };
 
+constexpr TraceField TaskFields[] = {
+    {"tick", TraceFieldType::UInt64, Format::TaskTickOffset},
+    {"task", TraceFieldType::Id, Format::TaskIdOffset},
+    {"related", TraceFieldType::Id, Format::TaskRelatedOffset},
+    {"kind", TraceFieldType::UInt8, Format::TaskKindOffset},
+    {"error", TraceFieldType::String, TraceField::Variable},
+};
+
 constexpr TraceField ContextPopFields[] = {
     {"tick", TraceFieldType::UInt64, Format::ContextPushTickOffset},
 };
@@ -130,11 +139,13 @@ TraceEventType TraceContextPushType{Format::ContextPushType, TraceContextChannel
                                     Format::ContextPushFixedBytes, ContextPushFields};
 TraceEventType TraceContextPopType{Format::ContextPopType, TraceContextChannel,
                                    Format::ContextPopFixedBytes, ContextPopFields};
+TraceEventType TraceTaskEventType{Format::TaskType, TraceTaskChannel, Format::TaskFixedBytes,
+                                  TaskFields, TraceEventFlags::Ordered};
 
 Result<void> RegisterStandardTraceTypes(TraceSession& session) noexcept {
-    TraceChannel* const channels[] = {&TraceCpuChannel,   &TraceCounterChannel,
-                                      &TraceMarkChannel,  &TraceSpanChannel,
-                                      &TraceFrameChannel, &TraceContextChannel};
+    TraceChannel* const channels[] = {&TraceCpuChannel,  &TraceCounterChannel, &TraceMarkChannel,
+                                      &TraceSpanChannel, &TraceFrameChannel,   &TraceContextChannel,
+                                      &TraceTaskChannel};
     for (TraceChannel* channel : channels) {
         if (auto registered = session.RegisterChannel(*channel, false); !registered) {
             return registered;
@@ -146,7 +157,7 @@ Result<void> RegisterStandardTraceTypes(TraceSession& session) noexcept {
         &TraceCounterIntegerType, &TraceCounterFloatType,  &TraceMarkSiteType,
         &TraceMarkEventType,      &TraceSpanBeginType,     &TraceSpanEndType,
         &TraceFrameBeginType,     &TraceFrameEndType,      &TraceContextDefinitionType,
-        &TraceContextPushType,    &TraceContextPopType};
+        &TraceContextPushType,    &TraceContextPopType,    &TraceTaskEventType};
     for (TraceEventType* type : types) {
         if (auto registered = session.RegisterEventType(*type); !registered) {
             return registered;

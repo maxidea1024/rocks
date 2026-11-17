@@ -14,6 +14,7 @@
 #include <TraceCapture/TraceCpuScope.h>
 #include <TraceCapture/TraceMark.h>
 #include <TraceCapture/TraceSession.h>
+#include <TraceCapture/TraceTask.h>
 #include <TraceCapture/TraceWrite.h>
 
 // TraceCapture 내부 구조다. 동시성 규약(누가 어떤 칸을 쓰고 어떤 순서로 공개하는지)을 칸 옆에
@@ -371,6 +372,8 @@ struct TraceThreadSlot {
     uint32 contextDepth = 0;
     // 깊이 상한을 넘어 세기만 한 쌓기 수다.
     uint32 contextOverflow = 0;
+    // 이 스레드에서 실행 중인 task의 trace id다(task 밖이면 0, TraceTaskScope가 바꾼다).
+    uint64 currentTask = 0;
 
     constexpr TraceThreadSlot() noexcept = default;
     TraceThreadSlot(const TraceThreadSlot&) = delete;
@@ -561,6 +564,7 @@ struct TraceSessionState {
     uint32 nextMarkSiteId = 0;
     uint32 nextContextId = 0;
     uint64 nextSpanId = 0;
+    uint64 nextTaskId = 0;
     // 순서 번호 발급기(relaxed fetch-add).
     uint64 nextOrder = 0;
     // 스레드 상태가 없어(등록 실패) 세지 못한 손실과 같은 스레드 재진입 손실이다.
@@ -691,6 +695,7 @@ extern TraceEventType TraceFrameEndType;
 extern TraceEventType TraceContextDefinitionType;
 extern TraceEventType TraceContextPushType;
 extern TraceEventType TraceContextPopType;
+extern TraceEventType TraceTaskEventType;
 
 // 표준 채널(꺼진 상태로)과 표준 형을 등록한다.
 Result<void> RegisterStandardTraceTypes(TraceSession& session) noexcept;

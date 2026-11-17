@@ -296,6 +296,30 @@ struct TraceStandardFormat {
     // 스레드 문맥 스택의 깊이 상한이다. 넘친 쌓기는 스택에 들어가지 않고 기록도 하지 않는다.
     static constexpr usize MaxContextDepth = 16;
 
+    // ---- task(TR3) ----
+    // Task(스레드 스트림, 순서 번호): u64 tick | u64 task id | u64 관련 task id | u8 사건 종류,
+    // 가변: 오류 이름(String, Completed의 실패만, 그 밖에는 빈 문자열).
+    // 관련 id: DependencyAdded는 앞 task(이 task가 기다리는 task), WaitBegin·WaitEnd는 기다리는
+    // 대상 task다(이때 task id는 기다리는 쪽에서 실행 중인 task이고, task 밖이면 0이다).
+    static constexpr const char* TaskType = "Trace.Task";
+    static constexpr usize TaskTickOffset = 0;
+    static constexpr usize TaskIdOffset = 8;
+    static constexpr usize TaskRelatedOffset = 16;
+    static constexpr usize TaskKindOffset = 24;
+    static constexpr usize TaskFixedBytes = 25;
+    // 사건 종류 값이다(스트림에 기록되므로 바꾸지 않는다).
+    static constexpr uint8 TaskCreated = 0;
+    static constexpr uint8 TaskReady = 1;
+    static constexpr uint8 TaskDependencyAdded = 2;
+    static constexpr uint8 TaskStarted = 3;
+    static constexpr uint8 TaskFinished = 4;
+    static constexpr uint8 TaskCompleted = 5;
+    static constexpr uint8 TaskCancelled = 6;
+    static constexpr uint8 TaskWaitBegin = 7;
+    static constexpr uint8 TaskWaitEnd = 8;
+    // task 실행 구간을 감싸는 CPU 구간 이름이다.
+    static constexpr const char* TaskRunScopeName = "Task.Run";
+
     // ---- 스레드 정보 ----
     // 스레드 이름·묶음의 byte 상한이다. 넘으면 앞부분만 쓴다.
     static constexpr usize MaxThreadNameBytes = 63;
