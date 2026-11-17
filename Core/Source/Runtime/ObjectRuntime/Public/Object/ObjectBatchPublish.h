@@ -34,6 +34,22 @@
 //   batch.Value().End();
 namespace rocks {
 
+namespace detail {
+
+// ObjectRefMap 옛 내용(OrderedMap<K, ObjectHandle>)에 value가 있는지다(묶음 게시의 retained —
+// 재확인에 실패한 값만 찾는다, 리플렉션 B9i5).
+template <class K>
+bool BatchMapHolds(const void* map, ObjectHandle value) noexcept {
+    bool found = false;
+    static_cast<const OrderedMap<K, ObjectHandle>*>(map)->ForEach(
+        [&found, value](const K&, const ObjectHandle& old) noexcept {
+            found = found || old == value;
+        });
+    return found;
+}
+
+} // namespace detail
+
 // 새 대상 하나의 재확인이다. target은 non-null이고 nativeType은 기대 타입(NativeTypeKey<T>() —
 // nullptr면 타입을 보지 않는다)이다. Hard(ObjectRef·컨테이너 원소)와 Weak(WeakRef) 새 대상을 모두
 // 넣는다.
@@ -234,9 +250,12 @@ void ObjectRegistry::PublishBatchMap(ObjectRefMap<K, T>& map,
 
     storage.map.ForEach(
         [this](const K&, ObjectHandle& value) noexcept { NoteBatchRemoved(value); });
+    // 옛 내용에 있던 값은 이미 게시된 간선이라 재확인하지 않는다(리플렉션 B9i5 —
+    // PublishBatchTarget).
     const void* nativeType = NativeTypeKey<T>();
-    prepared.ForEach([this, nativeType](const K&, ObjectHandle& value) noexcept {
-        PublishBatchTarget(value, nativeType);
+    const void* old = &storage.map;
+    prepared.ForEach([this, nativeType, old](const K&, ObjectHandle& value) noexcept {
+        PublishBatchTarget(value, nativeType, &detail::BatchMapHolds<K>, old);
     });
     // 이동은 할당하지 않는다(같은 allocator의 저장소를 옮긴다).
     OrderedMap<K, ObjectHandle> previous(Move(storage.map));

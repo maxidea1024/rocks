@@ -153,14 +153,39 @@ bool IsStructRefArraySlot(const TextSlot& slot) noexcept;
 
 // path 안 StructRefArray 원소 index(지금 index — 앞 대입이 지운 원소를 뺀 자리)를 묶을 때 index로
 // 옮겨 steps(MaxPropertyPathSteps칸)에 담는다. 그 배열의 원소 지우기 단위가 없으면 그대로다. 지금
-// 원소 수 밖이면 진단 OutOfRange를 남기고 false다.
+// 원소 수 밖이면 진단 OutOfRange를 남기고(diagnose가 거짓이면 남기지 않고) false다.
 Result<bool> MapElementIndices(AssignmentState& state, PropertyPath path, PathStep* steps,
-                               TextSource source, StringView pathText) noexcept;
+                               TextSource source, StringView pathText,
+                               bool diagnose = true) noexcept;
 
 // StructRefArray 필드·멤버 통째(비우기 `items=`)와 원소(지우기 `--erase items[i]`)의 대입이다
 // (TextAssignElements.cpp). path는 묶을 때 index로 옮긴 경로다.
 Result<void> ApplyElements(AssignmentState& state, const TextAssignment& assignment,
                            const TextSlot& slot, PropertyPath path, TextSource source) noexcept;
+
+// 대입 묶음이 더한 StructRefArray 원소(리플렉션 B9i5)다: 원소 지우기·추가 단위, path에서 배열 원소
+// 단계의 index, 추가 원소 id. 없으면 unit이 nullptr이다.
+struct AddedElement {
+    ElementsUnit* unit = nullptr;
+    usize step = 0;
+    uint32 id = 0;
+};
+
+// path(묶을 때 index로 옮긴 경로)가 더한 원소 자체나 그 안을 가리키면 그 원소다.
+AddedElement FindAddedElement(AssignmentState& state, PropertyPath path) noexcept;
+
+// `items[i]={}`의 i가 묶음 안 지금 원소 수면 끝에 기본 원소를 더한다(리플렉션 B9i5 — 원소 블록은
+// 여기서 할당한다). path는 지금 index 경로다. 더하는 대입이 아니면 false다(호출자가 그대로
+// 처리한다).
+Result<bool> AppendElement(AssignmentState& state, const TextAssignment& assignment,
+                           const TextSlot& slot, PropertyPath path, TextSource source) noexcept;
+
+// 더한 원소 안의 대입이다(리플렉션 B9i5 — 원소 자체의 다음 `{}`는 같은 경로라 DuplicateAssignment,
+// 지우기는 원소 지우기 단위). 그 블록에서 시작하는 경로 연산으로 바로 적용한다(강한 참조도 블록에
+// 직접 쓴다).
+Result<void> ApplyAddedElement(AssignmentState& state, const TextAssignment& assignment,
+                               const TextSlot& slot, PropertyPath path, TextSource source,
+                               const AddedElement& added) noexcept;
 
 // 배열 경로 arrayPath(선택자 없음)의 StructRefArray를 비운다(참조 struct `{}`의 멤버 — 이미
 // 비었으면 무동작, ReadOnly면 진단).

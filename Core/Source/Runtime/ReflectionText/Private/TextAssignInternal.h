@@ -159,9 +159,10 @@ struct ContainerUnit {
     bool dirty = false;
 };
 
-// StructRefArray 원소 지우기·비우기 단위다(리플렉션 B9i3c4): 배열 필드·멤버 경로(선택자 없음 — 앞
-// 단계는 인라인 struct), 준비물(지금 index → 묶을 때 index 표와 게시). 같은 묶음의 다른 단위는
-// 이 배열의 원소를 묶을 때 index로 가리킨다.
+// StructRefArray 원소 지우기·비우기·추가 단위다(리플렉션 B9i3c4·B9i5): 배열 필드·멤버 경로(선택자
+// 없음 — 앞 단계는 인라인 struct), 준비물(지금 index → 묶을 때 index 표, 추가 원소 블록과 게시).
+// 같은 묶음의 다른 단위는 이 배열의 원소를 묶을 때 index로 가리키고, 추가 원소 안 대입은 그 블록에
+// 바로 적용한다(단위를 따로 두지 않는다 — 고정의 owner는 블록 주소다).
 struct ElementsUnit {
     explicit ElementsUnit(Allocator& allocator) noexcept : steps(allocator), stage(allocator) {
     }
@@ -257,6 +258,12 @@ Result<ContainerUnit*> AcquireContainer(AssignmentState& state, PropertyPath uni
 // B9i3c4). 진단을 남겼으면 nullptr이다.
 Result<ElementsUnit*> AcquireElements(AssignmentState& state, PropertyPath unitPath,
                                       TextSource source, StringView pathText) noexcept;
+
+// 게시된 객체 대상의 묶음 게시 구간에 넘길 새 대상 재확인 목록과 간선 변경 목록을 만든다
+// (TextAssignPublishPlan.cpp — 리플렉션 B9i5). 컨테이너 단위는 옛 내용과 새 내용의 handle 다중집합
+// 차이만 넣는다(그대로 남는 대상은 이미 게시된 간선이라 재확인하지 않는다). 오류: 할당 실패.
+Result<void> PlanBatchPublish(AssignmentState& state, Array<BatchTargetCheck>& targets,
+                              Array<BatchEdgeChange>& edges) noexcept;
 
 // 끝 경로 path의 override 경로를 state에 넣는다(같은 경로가 있으면 무동작).
 Result<void> AddOverride(AssignmentState& state, PropertyPath path) noexcept;
