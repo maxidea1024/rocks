@@ -1,6 +1,6 @@
 # 렌더 기반(RenderBase) 설계
 
-기준일: 2026-11-17, 개정 9(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-17, 개정 10(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
 - 렌더 lane과 프레임 전달, 장치 스레드 모델, 장치 자원 수명, 렌더 그래프
 - 셰이더 런타임 객체(셰이더 집합·파라미터 바인딩·상수 블록·파이프라인 캐시)
 - 정점 입력 타입, 공용 자원·그리기 유틸리티, GPU 계측
@@ -59,6 +59,8 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 | 그래프 자원 풀 `GraphResourcePool` | `FRenderTargetPool`·`FRDGBufferPool` | 같은 desc 자원의 프레임 안팎 재사용 |
 | 그래프 공유 값 `GraphSharedData` | `FRDGBlackboard` | 그래프 수명 동안 pass 사이에 넘기는 타입별 값 |
 | 부수 효과 pass `HasSideEffects` | `ERDGPassFlags::NeverCull` | 미사용 제거 대상이 아닌 pass |
+| 그래프 접근 `GraphResourceAccess`, 접근 선언 builder `GraphPassAccesses` | `FRDGPass`의 자원 상태 목록(파라미터 구조체에서 수집) | pass 하나가 자원 subresource 범위를 어떤 접근으로 쓰는지(그래프 내부 접근 모델) |
+| 접근 상태 `ResourceAccess`, 전이 `ResourceTransition`·`CommandContext::Transition` | `ERHIAccess`, `FRHITransitionInfo` | GX5 명시 접근 상태와 장치 전이 |
 | 셰이더 집합 `ShaderSet` | `FShaderMap`(content·resource) | 라이브러리에서 연 셰이더 묶음과 장치 셰이더 |
 | 타입 있는 셰이더 참조 `TypedShader<T>` | `TShaderRef<T>`·`TShaderMapRef<T>` | 셰이더 타입과 집합의 쌍 |
 | 셰이더 공급자 `ShaderProvider` | (없음. UE는 엔진 안 컴파일 경로) | 쿠킹 라이브러리 대신 셰이더를 공급하는 Development 경로의 interface |
@@ -137,7 +139,7 @@ ID는 이 문서가 붙인다. CP는 Core 선행, GX는 Graphics 확장, RB는 R
 | GX3 | 파이프라인 완성(SH2 범위 밖 부분) | 미설계 | SH2·P2·P14 | RB4, RB5, RB6 | L | 4.4절 |
 | GX3a | 정점 배치 완성: 정점 원소 형식 20종·다중 stream·인스턴스 stream·index 버퍼·instanced·indexed draw·셰이더 입력 대조, CPU 패킹 helper | 구현 | — | RB5, 메시 에셋 | M | 10.4절 |
 | GX4 | 명령 기록 확장 | 미설계 | GX2·GX3 | RB5, RB6, RG1 | L | 4.4절 |
-| GX5 | 명시 접근 상태와 전이 | 미설계 | GX2·GX4 | RG1 | M–L | 4.4절 |
+| GX5 | 명시 접근 상태와 전이 | 구현(최소: 전이 API·D3D12·기록 장치. 분리 전이는 RG2, pipe는 RG4) | GX2·GX4 | RG1 | M–L | 4.4절 |
 | GX6 | 파라미터 바인딩 런타임(상수 블록·묶음 설정·공유 slot) | 미설계 | P2·SH2 | RB4 | L | 4.4절, 9절 |
 | GX7 | 제출·완료·회수(계획 11.2), descriptor 회수, 스레드 안전 fence 대기 | 구현(lease는 RB2·RG1) | — | RB1·RB2 | L | 4.4절, 6절 |
 | GX8 | 업로드 ring·비동기 readback | 구현 | GX7 | RB2, RB4, RG2 | M | 4.4절 |
@@ -147,6 +149,7 @@ ID는 이 문서가 붙인다. CP는 Core 선행, GX는 Graphics 확장, RB는 R
 | GX12 | transient heap·aliasing barrier | 후속 | GX5 | RG5 | L | 4.4절 |
 | GX13 | subpass·framebuffer fetch(tiled GPU 병합용) | 후속 | GX4·GX5 | RG3 병합 | M | 4.4절 |
 | RB1 | 렌더 lane·프레임 slot·전달 타입 등록·완료 통지·`RenderHandle` 예약 | 구현(설정 snapshot 포함, 12절) | CP1·CP6·GX7·GX10·GX11 | RB2–RB7 | M | 5절 |
+| RG1 | 최소 렌더 그래프 | 구현(명시 접근 목록 경로. 파라미터 구조체 경로는 RB4·SH2 뒤, (g)는 D3D12·D3D11(각 WARP 포함)·OpenGL ES 두 context) | RB7·GX5·CP3(RB4·GX1·GX2·GX4는 범위를 줄여 앞당김) | RG2 | L | 7·8절 |
 
 ### 4.3 Core 선행 작업
 
@@ -204,6 +207,7 @@ RenderCore가 쓰는 RHI 기능군과 Rocks Graphics의 차이다. "SH2" 열은 
   - Vulkan: pipeline barrier.
   - OpenGL ES: 전이는 대부분 생략하고, UAV(image·storage) 쓰기 뒤 읽기에는 접근 비트에서 고른 `glMemoryBarrier` bit를 둔다(UE는 dispatch 앞뒤에 전체 bit, `OpenGLDrv/Private/OpenGLCommands.cpp:2671–2673`).
   - D3D11·Metal: SH5에서 정한다(미확인).
+  - **구현(2026-11-17, RG1 최소 범위).** `Graphics/ResourceAccess.h`(`ResourceAccess`·mask·`CanCombineAccess`·`SubresourceRange`·`ResourceTransition`)와 `CommandContext::Transition(Span<const ResourceTransition>)`. 장치는 텍스처 mip마다 상태를 추적하고 `BeginFrame`·`BeginOffscreen`이 대상을 렌더 타깃으로 바꾼다(attachment 전이, GX4 attachment 시작 전까지). before `Unknown`은 장치 추적 상태에서 바꾼다는 뜻이다. D3D12: 휴지 상태(PSR) 관례를 없애고 mip별 `committed`(제출 끝)·`current`(기록 중) 추적, legacy resource barrier, UAV → UAV는 UAV barrier, 업로드 기록은 `committed` 기준 상태 중립, 검증 장치는 before 불일치를 `ValidationErrorCount`에 센다. 버퍼는 암묵 승격·복귀에 맡겨 UAV barrier만 낸다. 그래프 밖 그리기(`SetTexture`)는 암묵 전이로 메운다. OpenGL·D3D11은 빈 override(드라이버 암묵 전이), Vulkan은 같은 API를 pipeline barrier로 낮춘다(구현 중인 작업이 맞춘다). 분리 전이(begin·end)와 pipe는 넣지 않았다(RG2·RG4). 계약은 [렌더 기반 구현](../Implementation/RenderBase.ko.md) 8절.
 - **GX6 파라미터 바인딩 런타임.** 9.3–9.5절을 Graphics 쪽에서 받는 부분이다: 상수 블록 생성(수명 3종)·갱신, 파라미터 묶음 설정, 공유 상수 slot 표.
 - **GX7 제출·완료·회수.** 계획 11.2절 계약(`Submit`·`Retire`·`GpuFencePoint`·`RenderResourceLease`·device epoch)을 Graphics `Device`에 들인다.
   - OpenGL ES도 fence sync로 같은 계약을 따르고 "즉시 삭제" 예외를 없앤다.
@@ -457,6 +461,30 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 | RG4 | async compute overlap(fork/join, 수명 연장, 병합과 배타) | RG3·GX1(async compute 표시) | 계획 API06 직렬·비동기 결과 일치, 실제 queue 겹침 계측 |
 | RG5 | transient aliasing. 지원하지 않는 backend는 풀 | RG4·GX12 | alias 켬·끔 픽셀 동일, transient 최대 사용량 감소 계측, 검증 오류 0 |
 | (결정 R6) | copy queue | — | 결정 뒤 단계 위치를 정한다 |
+
+**구현(2026-11-17, RG1).** 새 모듈 `Engine/Source/Runtime/RenderGraph`(의존 RenderBase·Graphics·TraceCapture, 3절 배치). 계약은 [렌더 기반 구현](../Implementation/RenderBase.ko.md) 9절이다. 선행 가운데 RB4(파라미터 구조체)·GX1·GX2·GX4는 아직 없으므로 범위를 줄여 앞당겼다(사용자 지시 "렌더 그래프도 미리 하자").
+- 내부 접근 모델: pass마다 자원 접근 목록(`GraphResourceAccess`: 자원·subresource 범위·접근 상태·`NoUavBarrier` 표시)과 렌더 타깃 하나. 지금은 명시 선언 builder `GraphPassAccesses`가 목록을 만든다. 파라미터 구조체(결정 R4, 9.6절)가 들어오면 구조체 layout을 훑는 수집기가 같은 목록을 만들어 형식 지운 진입점 `RenderGraph::AddPassWithAccesses`로 넣는다(UE도 내부는 접근 목록이다, `RenderGraphBuilder.cpp:2384–2532`). 그래서 culling·수명·전이·검증은 수집 경로와 무관하다.
+- 완료 기준 상태:
+  - (a) 구현·시험: 점진 culling(부수 효과·스왑체인 타깃·import 자원 쓰기는 AddPass 때, export 마지막 생산자는 Execute 때 살린다), 생산자 체인 보존.
+  - (b) 구현·시험: 기대 전이 열(attachment 포함), 읽기 → 읽기 전이 0(연속 읽기를 한 상태로 합쳐 첫 pass에서 한 번), UAV → UAV는 생략 표시가 둘 다 없을 때 UAV barrier, mip 범위별 추적과 연속 mip 묶기, 장치에 내린 열 일치와 기록 장치 검증 오류 0.
+  - (c) 구현·시험: 첫·마지막 사용 pass와 참조 수(`GraphLifetime`), 제거된 pass는 수명에 들지 않음.
+  - (d) 구현·시험: 동치를 "전이를 뺀 장치 호출 열이 같고, 두 모드 모두 각 pass가 맞는 상태를 보며(기록 장치 검증 오류 0), 최종 상태가 같다"로 정했다. 읽기 병합은 앞을 내다봐야 하므로 즉시 모드는 전이가 더 많다. 병합이 없는 그래프는 전이까지 같다.
+  - (e) 구현·시험: 생산 전 읽기, 한 pass 안 상충 접근, Raster pass의 UAV, Retire된 자원 import(lease 실패), 그 밖에 생산 전 export·다른 그래프 handle·pass 종류 위반.
+  - (f) 구현·시험: 풀 축출은 마지막 사용 fence가 끝나기 전에는 일어나지 않는다(기록 장치 `HoldCompletions`·`CompleteAll` gate).
+  - (g) D3D12(하드웨어·WARP)·D3D11(하드웨어·WARP)·OpenGL ES 미리보기(ES 3.2 profile·GL 4.3 core context)에서 Sandbox self-test 픽셀 대조(그래프 텍스처 → SRV 합성, culling, history export → import)와 검증 오류 0(D3D12는 전이 before 불일치 포함). Vulkan은 그 backend가 들어온 뒤다.
+- 스펙과 다르게 한 점:
+  - 의존 선언은 파라미터 구조체가 아니라 명시 접근 목록이다(위). 결정 R4는 그대로이고 수집기가 같은 목록을 만든다.
+  - GX5는 최소 범위다: begin·end 분리 전이와 pipe가 없고, Raster pass 렌더 타깃 전이(attachment)는 장치 `BeginOffscreen`·`BeginFrame`이 낸다(GX4 attachment 시작이 기록 안으로 들어오면 그래프가 `Transition`으로 낸다). 만든 자원의 첫 전이 before는 `Unknown`(내용 불필요, 장치 추적 상태)이다.
+  - 실행 단위: Raster pass마다 장치 기록 하나를 열고(`BeginOffscreen`은 clear만 한다), Compute·Copy pass는 열린 기록에 이어 쓴다. 열린 기록이 없는 Compute·Copy pass와 attachment load(`GraphLoadAction::Load`)는 `Unsupported`다(GX4).
+  - 자원 desc는 지금 Graphics desc 그대로다(형식은 [픽셀 형식](PixelFormat.ko.md) PF1의 `PixelFormat`). 그래프 텍스처는 RenderTarget 용도·번호표 안의 비압축 형식만, import 텍스처는 mip 수를 `GraphImportOptions::mipLevels`로 받는다(장치에 desc 조회가 없다). 풀 byte 추정은 `PixelFormatInfo` 기준 `MipChainBytes`다. GX2(차원·array·샘플 수·버퍼 용도) 뒤에는 풀 키 비교 함수와 desc 검사만 넓히면 된다.
+  - 풀 키에 샘플러를 넣었다(7.4절은 제외). 지금 장치는 텍스처 desc의 샘플러로 묶으므로 빼면 다른 샘플러로 읽힌다. 결정 R12의 바인딩 때 샘플러 지정이 들어오면 뺀다.
+  - 해제 pass 번호는 계산·진단만 하고 풀 반환은 그래프 끝이다(프레임 안 재사용은 RG2 완료 기준이다).
+  - import lease는 `RenderHandleTable`에 두었다(`AcquireLease`·`ReleaseLease`·`TakeReleasedRetire`, RB2의 `DeviceResourceOwner` 전). lease가 남은 handle의 Retire는 장치 Retire를 미루고 렌더 lane이 lane 작업 끝에 잇는다. export는 새 `RenderHandle`로 소유를 넘기고 그 handle의 Retire가 수명을 정한다.
+  - 검증은 모든 구성에서 켜져 있고 실패하면 그래프 전체를 버린다(UE는 디버그 빌드 검사). 그래프 설정 변수(CP4 연결: 즉시 모드·검증 전환)는 아직 없다.
+  - `GraphSharedData`(7.3절)는 넣지 않았다.
+  - GPU 계측: 그래프의 장치 기록 전체를 GPU 프레임 하나로 묶는다(첫 기록에서 `GpuTrace::BeginFrame`, 마지막 기록에서 `EndFrame`). pass마다 `CpuScope`와 `GpuScope`(pass 이름은 정적 `TraceScopeName`)를 둔다(13.3절 스펙과 다른 점 (4) 해소).
+  - 렌더 lane 연결: `RenderFrameContext::Arena()`(그 slot의 FrameArena)를 더했다. 그래프 수명 표는 그 arena에 두고, pass 함수(람다)는 그래프 파괴 때 렌더 lane에서 부순다(arena Reset은 게임 lane에서 일어나기 때문이다).
+- 남은 것(RG1): 파라미터 구조체 수집기(RB4·SH2·P7), `GraphSharedData`, attachment load·MRT·깊이·렌더 타깃 없는 기록(GX4), 버퍼 용도·텍스처 차원·형식 확장(GX2·픽셀 형식), Vulkan 픽셀 대조, 그래프 설정 변수(CP4), 캡처 도구 수동 확인 기록(13.3절).
 
 ## 9. 셰이더 런타임
 
@@ -773,7 +801,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 - calibration: `ClockCalibration`에 `cpuTicks`(`platform::MonotonicTicks`, trace 시간축)와 `uncertaintyNanoseconds`를 더했다. D3D12는 queue clock calibration이 한 번에 읽은 QPC 값과 CPU tick 하나 길이, OpenGL은 `GL_TIMESTAMP` 조회를 CPU tick 두 번으로 감싼 가운데 값과 조회 지연의 절반이다. 쌍은 세션 첫 프레임과 `calibrationIntervalFrames`(기본 60)마다 다시 얻어 정의 기록(`Trace.GpuCalibration`)으로 남기고, 그 사이 구간은 가장 최근 쌍으로 바꾼다(두 시계의 drift는 보정하지 않는다).
 - GPU 구간 이름은 CPU 구간과 같은 세션 이름 표(`Trace.ScopeName`)를 쓴다(`TraceResolveScopeName`). 같은 pass 이름은 CPU·GPU에서 같은 id다.
 - 시험(`RenderBase/Tests/GpuTraceTests.cpp`, 기록 backend): GPU 완료 gate 전에는 구간 0·pending 3이고 gate 뒤 구간 2·프레임 1, 변환한 tick이 기록된 calibration 쌍으로 계산한 값과 정확히 같고 CPU 구간 시작 ≤ calibration CPU tick ≤ GPU 프레임 시작, 중첩 깊이 0·1과 marker push·push·pop·pop 순서, timestamp 미지원 장치의 "GPU 시간 없음" 공개(구간·calibration 기록 0, timestamp 쓰기 0), Release 기본 설정(marker·timestamp 0), 끊김 통지의 구간 무효.
-- 스펙과 다른 점: (1) GPU 구간은 시작·끝 기록 둘이 아니라 두 tick을 가진 기록 하나(`Trace.GpuScope`)다. 두 끝이 모두 온 뒤에만 쓰므로 짝을 잃은 반쪽이 생기지 않는다. (2) "GPU 시간 없음"은 별도 정의 형이 아니라 queue 정의의 GPU 시간 칸(0)이다. (3) 작업 시작·끝·fence signal·wait 사건은 아직 없다(다중 queue와 함께). (4) 렌더 그래프 pass 자동 구간은 RG1에서 붙인다. 지금은 렌더 코드가 `BeginFrame`·`GpuScope`·`EndFrame`을 직접 부른다. (5) queue는 `GpuTrace` 하나당 하나다(설정 `queueId`·`queueName`).
+- 스펙과 다른 점: (1) GPU 구간은 시작·끝 기록 둘이 아니라 두 tick을 가진 기록 하나(`Trace.GpuScope`)다. 두 끝이 모두 온 뒤에만 쓰므로 짝을 잃은 반쪽이 생기지 않는다. (2) "GPU 시간 없음"은 별도 정의 형이 아니라 queue 정의의 GPU 시간 칸(0)이다. (3) 작업 시작·끝·fence signal·wait 사건은 아직 없다(다중 queue와 함께). (4) 렌더 그래프 pass 자동 구간은 RG1에서 붙였다(그래프가 기록 전체를 GPU 프레임 하나로 묶고 pass마다 `GpuScope`를 둔다, 8절). 그래프 밖 렌더 코드는 `BeginFrame`·`GpuScope`·`EndFrame`을 직접 부른다. (5) queue는 `GpuTrace` 하나당 하나다(설정 `queueId`·`queueName`).
 - **캡처 도구 수동 확인 절차**(PIX·RenderDoc, 자동 시험 밖): Sandbox를 D3D12(PIX on Windows) 또는 OpenGL(RenderDoc)로 실행해 프레임을 캡처한다. 이벤트 목록에서 `GpuScope` 이름이 중첩 그대로 보이는지(바깥 구간 아래 안쪽 구간), 프레임 끝에 열린 marker가 남지 않는지를 본다. Release 구성에서는 marker가 보이지 않아야 한다. 결과는 날짜·backend·도구 판과 함께 이 절에 적는다(아직 기록 없음).
 
 ## 14. 후속·범위 밖
@@ -973,3 +1001,4 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 - 개정 8(2026-11-17): RB7 `GpuTrace`·`GpuScope` 구현과 RB1 설정 snapshot 연결을 반영했다(4.2절 CP4·CP5·CP8·GX9·RB1 상태, 5.7·12·13.3절 구현 메모, 캡처 도구 수동 확인 절차). 스펙과 다르게 정한 것: GPU 구간을 두 tick을 가진 기록 하나로, "GPU 시간 없음"을 queue 정의 칸으로, calibration은 세션 첫 프레임과 일정 프레임 간격의 정의 기록으로, 작업·fence 사건과 그래프 자동 구간은 뒤로, 설정 snapshot 참조는 타입 표지를 가진 공유 참조(`RenderSettingsRef`)로 둠.
 - 개정 7(2026-11-17): 1절에 좌표·행렬 규약 행을 더했다(사용자 결정: 좌표계·단위·행렬을 UE 5.8과 같게). 12절은 ConfigSystem, 13.2절은 TraceSystem을 참조하게 했다.
 - 개정 9(2026-11-17): [픽셀 형식](PixelFormat.ko.md) 설계(개정 1)와 교차 참조를 넣었다(4.2절 GX1 행, 4.4절 GX1·GX2, 6.5절 후속). 사용자 지시 "PixelFormat으로", "언리얼에서 지원하는거 full로 지원"에 따라 형식 부분은 A0-G에서 분리하여 PF1–PF3으로 먼저 한다.
+- 개정 10(2026-11-17): GX5(최소)·RG1 구현을 반영했다(2절 용어, 4.2절 GX5·RG1 행, 4.4절 GX5 구현 메모, 8절 구현 메모). 사용자 지시 "렌더 그래프도 미리 하자"에 따라 선행(RB4·GX1·GX2·GX4)이 없는 부분은 범위를 줄였다. 스펙과 다르게 정한 것: 의존 선언을 명시 접근 목록으로(파라미터 구조체 수집기가 같은 목록을 만든다), GX5 분리 전이·pipe 없음과 attachment 전이는 장치 Begin, 즉시·지연 동치의 정의, 풀 키에 샘플러 포함, 풀 반환은 그래프 끝, lease를 `RenderHandleTable`에, 검증 항상 켬, 그래프 기록 전체를 GPU 프레임 하나로. 픽셀 형식 PF1 병합 뒤 그래프 텍스처 desc는 `PixelFormat`이고, 풀 byte 추정은 `MipChainBytes(format, w, h, 1, mips)`(PixelFormatInfo), `CreateTexture`는 번호표 밖·블록 압축 형식을 거부한다.

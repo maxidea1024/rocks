@@ -3,6 +3,7 @@
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Result.h>
 #include <Graphics/DeviceTypes.h>
+#include <Graphics/ResourceAccess.h>
 #include <Platform/Sync.h>
 
 namespace rocks::graphics {
@@ -60,6 +61,36 @@ public:
     // 실패: stale handle StaleHandle, RenderTarget이 아니거나 크기·형식이 패스 대상과 다르거나
     // 패스 대상 자신이면 InvalidArgument, 기록 중이 아니면 InvalidArgument.
     virtual Result<void> CopyPassTarget(TextureHandle destination) noexcept = 0;
+
+    // --- 명시 접근 상태와 전이(RenderBase 4.4절 GX5) ---
+
+    // 자원 접근 상태를 바꾼다. 이 호출 앞에 기록한 명령의 접근이 끝난 뒤, 뒤에 기록할 명령 전에
+    // 바뀐다(begin·end를 한 지점에서 한다. 분리 전이는 RG2). 렌더 그래프가 pass prologue에서
+    // 부른다. 각 전이의 before·after 규칙은 ResourceTransition 주석이다.
+    //
+    // 사용 예(렌더 타깃으로 그린 텍스처를 다음 pass에서 읽기):
+    //   const ResourceTransition toRead{.texture = sceneColor,
+    //                                   .before = ResourceAccess::RenderTarget,
+    //                                   .after = ResourceAccess::SrvGraphics};
+    //   commands.Transition(Span<const ResourceTransition>(&toRead, 1));
+    //
+    // 장치는 텍스처 subresource마다 현재 상태를 추적한다. BeginFrame·BeginOffscreen은 대상을
+    // RenderTarget으로 바꾸고(attachment 전이), EndFrame은 offscreen 대상을 RenderTarget 그대로
+    // 두며 스왑체인 백버퍼만 Present로 돌린다. 명시 전이 없이 다른 상태의 텍스처를 읽는
+    // 호출(SetTexture 등)은 장치가 필요하면 암묵 전이로 메운다. 렌더 그래프는 모든 전이를 명시한다.
+    //
+    // backend 낮추기:
+    // - D3D12: 추적한 상태 → after의 resource barrier(mip 단위). UAV → UAV는 UAV barrier. 버퍼는
+    //   COMMON 암묵 승격·제출 끝 복귀에 맡기므로 UAV barrier 외에는 아무것도 하지 않는다(버퍼 쓰기
+    //   명령이 생기는 GX4에서 다시 본다).
+    // - Vulkan: pipeline barrier(image layout과 access·stage mask).
+    // - OpenGL ES·D3D11: 드라이버가 암묵 전이하므로 아무것도 하지 않는다. UAV(image·storage) 쓰기
+    // 뒤
+    //   읽기의 glMemoryBarrier는 그런 자원이 생기는 GX2에서 넣는다.
+    //
+    // 실패: 기록 중이 아니면 무시한다. stale handle·after가 Unknown이거나 성립하지 않는 조합인
+    // 전이는 그 전이만 무시하고 IgnoredDraws를 올린다.
+    virtual void Transition(Span<const ResourceTransition> transitions) noexcept = 0;
 
     // --- GPU 계측(RenderBase 13.2절, GX9) ---
 
@@ -337,7 +368,8 @@ public:
     virtual uint64 IgnoredDraws() const noexcept = 0;
 
     // 장치를 만든 뒤 검증 계층이 보고한 오류의 누적 수다(D3D12 debug layer·DXGI debug의
-    // ERROR·CORRUPTION, GL debug output의 ERROR·UNDEFINED_BEHAVIOR). 검증이 꺼져 있으면 0이다.
+    // ERROR·CORRUPTION, GL debug output의 ERROR·UNDEFINED_BEHAVIOR, 명시 전이의 before가 장치가
+    // 추적한 상태와 다른 수). 검증이 꺼져 있으면 0이다.
     // 시험이 "검증 오류 0"을 확인할 때 쓴다.
     virtual uint64 ValidationErrorCount() const noexcept = 0;
 

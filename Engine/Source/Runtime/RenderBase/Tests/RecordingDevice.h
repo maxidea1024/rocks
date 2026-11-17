@@ -46,8 +46,25 @@ public:
         RequestReadback,
         WriteTimestamp,
         PushMarker,
-        PopMarker
+        PopMarker,
+        // value는 TransitionLog의 순번이다.
+        Transition
     };
+
+    // 기록한 명시 전이 하나다(Op::Transition). texture가 false면 버퍼다. index는 handle의 slot
+    // 번호다.
+    struct TransitionCall {
+        bool texture = true;
+        uint32 index = 0;
+        graphics::SubresourceRange range;
+        graphics::ResourceAccess before = graphics::ResourceAccess::Unknown;
+        graphics::ResourceAccess after = graphics::ResourceAccess::Unknown;
+
+        bool operator==(const TransitionCall&) const noexcept = default;
+    };
+
+    // 기록 장치가 추적하는 텍스처 mip 수 상한이다(Graphics 텍스처 mip 상한과 같다).
+    static constexpr uint32 MaxTrackedMips = 16;
 
     struct Call {
         Op op = Op::WaitIdle;
@@ -84,6 +101,23 @@ public:
     Span<const Call> Calls() const noexcept {
         return Span<const Call>(calls_, callCount_);
     }
+
+    // 명시 전이 기록이다(GX5). 전이마다 하나다.
+    Span<const TransitionCall> TransitionLog() const noexcept {
+        return transitions_.View();
+    }
+
+    // 장치가 추적한 텍스처 mip의 접근 상태다(시험이 최종 상태를 단언한다). 모르는 handle은
+    // Unknown이다.
+    //
+    // 추적 규칙(D3D12 backend와 같다): 만든 텍스처는 SrvGraphics, 만든 버퍼는 VertexOrIndex에서
+    // 시작한다. BeginOffscreen은 대상 mip 0을 RenderTarget으로 바꾼다(attachment 전이). EndFrame은
+    // 상태를 바꾸지 않는다. Transition은 before가 Unknown이 아니면 추적 상태와 같은지
+    // 검사하고(다르면 검증 오류) after로 바꾼다. SetTexture는 SrvGraphics가 아닌 텍스처를 묶으면
+    // 검증 오류다(이 장치는 암묵 전이를 하지 않는다).
+    graphics::ResourceAccess TextureAccess(graphics::TextureHandle texture,
+                                           uint32 mip = 0) const noexcept;
+    graphics::ResourceAccess BufferAccess(graphics::BufferHandle buffer) const noexcept;
 
     uint64 Reclaimed() const noexcept {
         return reclaimed_;
@@ -201,6 +235,11 @@ private:
         uint64 bytes = 0;
     };
 
+    struct TextureState {
+        uint32 mipLevels = 1;
+        graphics::ResourceAccess states[MaxTrackedMips] = {};
+    };
+
     // CPU 메모리 staging이다.
     class CpuStaging final : public graphics::StagingSource {
     public:
@@ -235,14 +274,20 @@ private:
     Result<uint64> WriteTimestamp() noexcept override;
     void PushMarker(StringView name) noexcept override;
     void PopMarker() noexcept override;
+    void Transition(Span<const graphics::ResourceTransition> transitions) noexcept override;
 
     void Record(Op op, uint64 value = 0) noexcept;
+    void CheckDeclared(graphics::ResourceAccess tracked,
+                       graphics::ResourceAccess declared) noexcept;
     void Defer() noexcept;
 
     graphics::FenceTimeline timeline_;
     graphics::DeviceOwnership ownership_;
-    SlotArray<uint8> buffers_;
-    SlotArray<uint8> textures_;
+    SlotArray<graphics::ResourceAccess> buffers_;
+    SlotArray<TextureState> textures_;
+    Array<TransitionCall> transitions_;
+    uint64 validationErrors_ = 0;
+    uint64 ignoredDraws_ = 0;
     SlotArray<uint8> pipelines_;
     SlotArray<uint8> swapChains_;
     Array<Retired> retired_;
