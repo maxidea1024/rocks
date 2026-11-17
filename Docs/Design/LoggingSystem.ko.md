@@ -1,6 +1,6 @@
 # 로깅 시스템 설계
 
-기준일: 2026-11-18, 개정 7. 엔진 전반에서 쓰는 **로그**(사람이 읽는 사건 기록)의 호출 API, 카테고리·레벨 필터, 비동기 기록 경로, 출력 형식, 장애 격리, 엔진 적용 범위를 정한다.
+기준일: 2026-11-18, 개정 8. 엔진 전반에서 쓰는 **로그**(사람이 읽는 사건 기록)의 호출 API, 카테고리·레벨 필터, 비동기 기록 경로, 출력 형식, 장애 격리, 엔진 적용 범위를 정한다.
 
 요구는 다음 문서에서 온다.
 - [엔진 구현 계획](EngineImplementationPlan.ko.md) 29.4절(필수 로깅·프로파일러: level/category, UTC+monotonic, rate limit·중복 집계, compile/runtime level, error/fatal 비상 경로, 임계 구간에서 file IO·heap·lock wait 금지)
@@ -104,8 +104,8 @@ UE의 매크로 중심 API(`UE_LOG`, `DECLARE_LOG_CATEGORY_*`)는 따르지 않�
 | `LogMode::Manual` | Async와 같은 큐이지만 출력 스레드 없이 `Pump()`로 비운다 | 시험 |
 
 - 프리셋은 `LogSystemConfig::ForEngineHost()`(Async)와 `LogSystemConfig::ForTool()`(Sync)이다. 호스트가 고른다.
-- **설정 파일:** 엔진 호스트는 ConfigSystem 콘솔 설정 `log.mode`(`"async"` · `"sync"`, 플래그 **시작 뒤 고정**)를 읽어 프리셋을 덮어쓴다.
-  - 등록과 읽기는 ConfigSystem CF2에 잇는다. CF2 전에는 프리셋 기본값만 적용된다.
+- **설정 파일:** 엔진 호스트는 ConfigSystem 콘솔 설정 `log.mode`(`"default"` · `"async"` · `"sync"`, 플래그 **시작 뒤 고정**)를 읽는다. 기본값 `default`는 호스트 프리셋을 그대로 쓰고, `async`·`sync`만 프리셋을 덮어쓴다(기본값을 `async`로 두면 도구 프리셋까지 덮기 때문이다).
+  - 등록과 읽기는 `LogHost` 모듈(Core·Config·Crypto 위)이 한다(LG9). 설정 이름 전체는 9.2절.
   - 명령줄 도구도 같은 키를 읽을 수 있지만, 기본은 Sync다.
 - 모드는 `Start`에서 정해지고 실행 중에는 바꾸지 않는다. 바꾸려면 다시 시작한다.
 - **Sync에서 같은 것:** 무할당, 장애 격리(10절), 필터·템플릿·레이아웃, 출력 형식. 같은 기록 열은 두 모드에서 같은 출력을 낸다(6절 시험).
@@ -335,7 +335,7 @@ LogContextScope stage("Stage", "BeginPlay");
 
 ### 9.1 파일 sink와 암호화
 
-- `FileLogSink`(Core): 실행마다 새 파일(`<로그 폴더>/<호스트>-<UTC 시작 시각>.log`), 크기 상한을 넘으면 회전(`log.file.maxBytes`), 보관 개수 상한. 쓰기는 PlatformBase 파일 API를 쓴다. flush 묶음 단위로 쓰고, 버퍼는 Start에서 확보한다(무할당).
+- `FileLogSink`(Core): 실행마다 새 파일(`<로그 폴더>/<호스트>-<UTC 시작 시각>.log`), 크기 상한을 넘으면 회전(`log.file.max_bytes`), 보관 개수 상한(`log.file.retention`). 보관 정리는 `<호스트>-<YYYYMMDDTHHMMSSmmmZ>[-<숫자>].log` 모양에 정확히 맞는 파일만 센다(같은 폴더의 다른 호스트 파일을 지우지 않는다). 쓰기는 PlatformBase 파일 API를 쓴다. flush 묶음 단위로 쓰고, 버퍼는 Start에서 확보한다(무할당).
 - **암호화는 선택이고 기본은 끔이다**(`log.file.encrypt = false`). Core는 Crypto보다 아래 계층이라 Core에는 인터페이스만 둔다.
 
 ```cpp
@@ -358,7 +358,7 @@ public:
   - **봉인 단위:** flush 묶음 하나가 secretstream 메시지 하나다(tag `Message`, 정상 종료 때 `Final`). 묶음당 17 byte가 늘어난다. 비정상 종료로 `Final`이 없는 파일도 마지막으로 쓴 묶음까지 복호된다. 복호 도구는 "끝 표시 없음(비정상 종료)"을 알린다.
   - 봉인은 출력 스레드에서 한다(Async). 메인 틱 비용은 0이다. Sync 모드(도구)에서는 호출 스레드가 낸다. 출력 버퍼는 Start에서 확보한다. 키 상태는 Crypto 키 저장소 슬롯에 있고 파일을 열 때 한 번 만든다.
   - 암호화를 켰는데 키 준비(KEM·키 저장소)에 실패하면 **평문으로 내려가지 않는다.** 파일 sink를 끄고 비상 경로로 한 번 알린다(P3: 엔진은 계속 실행, 민감 로그는 평문으로 남지 않음).
-- **공개키 공급:** 엔진 호스트 설정 `log.file.recipientKey`(공개키, base64)를 쓴다. 프로젝트 설정 파일에 두며 비밀이 아니다. 키 쌍 생성과 개인키 보관은 개발자 도구(Commandlet `log keygen`)가 한다. 개인키는 저장소·쿠킹 결과에 넣지 않는다.
+- **공개키 공급:** 엔진 호스트 설정 `log.file.recipient_key`(공개키, base64)를 쓴다. `log keygen`이 이 설정 줄을 그대로 출력한다. 프로젝트 설정 파일에 두며 비밀이 아니다. 키 쌍 생성과 개인키 보관은 개발자 도구(Commandlet `log keygen`)가 한다. 개인키는 저장소·쿠킹 결과에 넣지 않는다.
 - **복호 도구:** Commandlet `log decode <file> --key <개인키 파일>`가 평문 텍스트나 JSON lines로 출력한다.
 - 콘솔(stderr) sink는 암호화하지 않는다. 출시 빌드에서 콘솔 출력이 문제라면 콘솔 sink 자체를 끈다(호스트 설정).
 
@@ -366,6 +366,28 @@ public:
 [2026-11-17T02:23:45.123Z][Info][Engine] Engine initialized with 3 subsystems
 [2026-11-17T02:23:47.456Z][Warning][World] World Main destroy deferred for 300 frames: external references World=Main (Engine/Private/Engine.cpp:262 ProcessDeferred)
 ```
+
+### 9.2 설정(`LogHost`)
+
+`LogHost` 모듈(`Core/Source/Runtime/LogHost`, 의존 Core·Config·Crypto)이 아래 콘솔 설정을 등록하고(`RegisterLogSettings`, 전역 생성자 없음), 그 값으로 LogSystem과 stderr·파일 sink를 만든다. Core는 Config·Crypto에 의존하지 않는다. 이름은 Config 이름 규칙(소문자 점 경로)을 따른다.
+
+| 이름 | 종류 | 기본값 | 허용 값·범위 | 변경 |
+|---|---|---|---|---|
+| `log.mode` | string | `default` | `default`(호스트 프리셋)·`async`·`sync` | 시작 뒤 고정 |
+| `log.level` | string | `info` | `trace`·`debug`·`info`·`warning`·`error`·`fatal` | 실행 중, sync 지점 |
+| `log.levels` | string | `""` | `"Graphics=warning,Engine.World=debug"`(접두사·레벨 대소문자 무시) | 실행 중, sync 지점 |
+| `log.file.enabled` | bool | `false` | | 시작 뒤 고정 |
+| `log.file.directory` | string | `Saved/Logs` | | 시작 뒤 고정 |
+| `log.file.format` | string | `text` | `text`·`jsonlines` | 시작 뒤 고정 |
+| `log.file.max_bytes` | int64 | `16777216` | 65536–1099511627776 | 시작 뒤 고정 |
+| `log.file.retention` | int32 | `8` | 1–256 | 시작 뒤 고정 |
+| `log.file.encrypt` | bool | `false` | | 시작 뒤 고정 |
+| `log.file.recipient_key` | string | `""` | X-Wing 공개키 base64(비밀 아님, 개인키 금지) | 시작 뒤 고정 |
+
+- **카테고리별 재정의**는 문자열 하나(`log.levels`, `접두사=레벨` 목록)다. Map 설정은 리플렉션 생성 struct가 필요해 쓰지 않았다. 잘못된 항목은 Warning을 남기고 건너뛴다.
+- **실행 중 변경:** `LogHost::Watch`가 `log.level`·`log.levels`를 구독하고 Config sync 지점에서 다시 적용한다. 다시 적용할 때 앞의 재정의를 지운다. 시작 뒤 고정 항목은 Config `StartupOnly` 플래그와 호스트의 `CompleteStartup`으로 거부된다.
+- **실패:** 암호화를 켰는데 키가 없거나 틀리면 파일 sink를 만들지 않고 Error를 한 번 남긴다(평문으로 기록하지 않음, L12). 파일 폴더를 열지 못하면 Error를 남기고 파일 없이 계속한다. `LogHost::Start`는 설치 전에 돌기 때문에 이 Error는 설치 전 비상 경로(stderr)로 나간다.
+- **호스트 순서(Sandbox `--engine --config <Engine.json>`):** 설정 문맥(TypeRegistry·NamePool·ObjectRegistry·ConfigContext) → `LogHost::Start(preset, &context, hostName)` → 설치 → `Watch` → `CompleteStartup` → 엔진 실행 → 엔진 종료 → `LogHost::Stop`.
 
 ## 10. 장애 격리
 
@@ -466,10 +488,10 @@ Result<UniquePtr<Device>> CreateD3D12Device(Allocator&, const DeviceDesc&, Devic
 | LG6 | Engine·World 적용(13절) | LG4, **15절 조건** | 단계별 실패 주입 → Stage, 파괴 지연 1000프레임 → Warning 정확히 1회·해소 Info 1회 |
 | LG7 | Graphics·창·셰이더 도구(report, HRESULT, 장치 제거 사유, 검증 메시지, 셰이더 진단) | LG4, **15절 조건** | 실패 주입 시험, Sandbox 자체 시험 |
 | LG8 | 호스트: Sandbox 헤드리스 `--engine`(Async, L1), Commandlet 등 명령줄 도구(Sync). 사용 가이드 `Docs/Implementation/Logging.ko.md`, FoundationStatus·UE-C22·D01 갱신 | LG6, LG7 | Sandbox 실행으로 시작·종료·실패 원인 추적 확인 |
-| LG9 | 설정 `log.mode`·`log.file.*`(그리고 레벨 재정의) 등록·읽기 | LG8, LG10, ConfigSystem CF2 | 설정 파일 값으로 모드·레벨·파일 기록이 바뀌고, 실행 중 변경은 거부(시작 뒤 고정) |
+| LG9 | 설정 `log.mode`·`log.level`·`log.levels`·`log.file.*` 등록·읽기(`LogHost` 모듈, 9.2절) | LG8, LG10, ConfigSystem CF2 | 설정 파일 값으로 모드·레벨·파일 기록이 바뀌고, 레벨은 sync 지점에서만 바뀌며, 시작 뒤 고정 항목의 실행 중 변경은 거부 |
 | LG10 | `FileLogSink`(실행별 파일·크기 회전·보관 상한), `LogFileCipher` 인터페이스(Core), `crypto::LogFileSealer`(Crypto: KEM 캡슐화 + SecretStream 묶음 봉인), Commandlet `log keygen`·`log decode` | LG4 | 평문·암호 파일 왕복, `Final` 없는 파일 부분 복호·경고, 변조 검출, 키 준비 실패 시 평문으로 내려가지 않음, 무할당(파일 열기 뒤) |
 
-검증: 커밋마다 Debug 빌드·format·변경 부분 시험. 전체 체인(Asan·TSan)은 LG3과 LG8 끝에 한 번씩. 메인 트리 구현은 에이전트 하나가 순서대로 하고 커밋은 경로를 지정한다.
+검증: 커밋마다 Debug 빌드·format·변경 부분 시험. 처음에는 전체 체인(Asan·TSan)을 LG3과 LG8 끝에 한 번씩 돌리기로 했으나, 2026-11-17 저장소 검증 기준이 바뀌어(Asan은 필요할 때만) 돌리지 않았다. 메인 트리 구현은 에이전트 하나가 순서대로 하고 커밋은 경로를 지정한다.
 
 ## 15. 다른 세션과의 조율
 
@@ -553,3 +575,4 @@ Result<UniquePtr<Device>> CreateD3D12Device(Allocator&, const DeviceDesc&, Devic
 - 개정 5(2026-11-17): LG5 구현 반영 — 소스 경로는 `-fmacro-prefix-map`(디버그 정보 경로 보존), 컴파일 타임 하한은 타깃 단위 재정의·모듈 재정의 거부, 한글 템플릿은 `source-literal-english` 정책이 막으므로 별도 검사 없음.
 - 개정 6(2026-11-17): LG6 구현과 LG3–LG5 리뷰 반영 — `ErrorCode::CycleDetected`, `World::AddActorTickPrerequisite`, Tick 실패 첫 1회+요약, `Log::SetFrame`, `SetGlobalMinimum`의 `Result<void>` 반환과 sink 안 레벨 변경 Busy, Sync Fatal은 `Mutex::TryLock`, Stop 시간 초과 포기 처리.
 - 개정 7(2026-11-18): LG7 구현 반영 — `CreateD3D12Device`·`Window::Create`에 report 인자(기본 nullptr), `Graphics/GraphicsLog.h` 카테고리와 `ValidationMessageFilter`, 셰이더 실패는 장치 LastError + 호출자 기록, Sandbox는 backend별 실행이라 "건너뛴 backend Warning·모두 실패 Error", OpenGL 기존 로그는 규칙 충족으로 유지.
+- 개정 8(2026-11-18): LG8·LG9 구현 반영 — 설정 이름을 Config 규칙에 맞춰 `log.file.max_bytes`·`log.file.recipient_key`로 바꿨다. `log.mode` 기본값 `default`(호스트 프리셋)를 더했다. 카테고리 재정의는 문자열 `log.levels`이고, 설정 처리는 새 `LogHost` 모듈에 둔다(9.2절). 보관 정리는 파일 이름 모양이 정확히 맞는 것만 센다. Asan·TSan 전체 체인은 저장소 검증 기준 변경으로 생략했다. Templates/Game은 tick·Engine이 없어 엔진 호스트로 다루지 않는다.
