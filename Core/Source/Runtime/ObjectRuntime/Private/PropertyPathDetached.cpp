@@ -25,7 +25,7 @@ void DetachedValue::Reset() noexcept {
     enter_ = nullptr;
     field_ = nullptr;
     effectiveFlags_ = 0;
-    fromStaged_ = false;
+    acceptsReadOnly_ = false;
     enumeration_ = nullptr;
     keyEnumeration_ = nullptr;
     target_ = StructView{};
@@ -150,7 +150,7 @@ Result<void> PathCursor::DetachValue(const RuntimeValueOps& ops, const void* val
     box.lease_ = Move(lease.Value());
     box.field_ = frame.field;
     box.effectiveFlags_ = frame.effectiveFlags;
-    box.fromStaged_ = AcceptsReadOnlyWrites();
+    box.acceptsReadOnly_ = AcceptsReadOnlyWrites();
     box.enumeration_ = frame.enumeration;
     box.keyEnumeration_ = frame.keyEnumeration;
     box.target_ = frame.target;

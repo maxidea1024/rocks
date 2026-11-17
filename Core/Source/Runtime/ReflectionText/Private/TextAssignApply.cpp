@@ -86,7 +86,7 @@ bool IsCallError(ErrorCode code) noexcept {
 // 새로 가리키는 Hard·Weak 대상을 고정한다(Publish가 다시 확인한다 — 고정은 GC 회수를 막지만
 // Discard는 막지 못한다). 살아 있지 않으면 진단이다.
 Result<bool> PinReferences(AssignmentState& state, const TextValue& value, TextSource source,
-                           StringView pathText) noexcept {
+                           StringView pathText, const void* owner) noexcept {
     const FieldValue* lists[] = {&value.single};
     const Span<const FieldValue> groups[] = {Span<const FieldValue>(lists[0], 1),
                                              value.elements.View(), value.values.View()};
@@ -124,9 +124,15 @@ Result<bool> PinReferences(AssignmentState& state, const TextValue& value, TextS
                 return Result<bool>::Success(false);
             }
 
+            if (auto reserved = state.pinOwners.TryReserve(state.pinOwners.Size() + 1); !reserved) {
+                return Result<bool>::Failure(reserved.Error());
+            }
+
             if (auto kept = state.pins.TryPushBack(Move(pinned.Value())); !kept) {
                 return Result<bool>::Failure(kept.Error());
             }
+
+            (void)state.pinOwners.TryPushBack(owner);
         }
     }
 
@@ -293,16 +299,15 @@ Result<void> ProcessResolvedAssignment(AssignmentState& state, const TextAssignm
 
     const PropertyPath path{Span<const PathStep>(mapped, resolvedPath.steps.Size()),
                             resolvedPath.keys};
-    PathKey keys[MaxPropertyPathSteps];
-    for (usize index = 0; index < state.assigned.Count(); ++index) {
-        if (SamePropertyPath(state.assigned.View(index, keys), path)) {
-            return Diagnose(state, TextDiagnosticCode::DuplicateAssignment, source, assignment.path,
-                            "the same path is assigned twice");
-        }
+    // 같은 경로 검사는 해시 색인이다(대입 수에 선형 — 리플렉션 B9i 리뷰 반영).
+    auto added = state.assigned.Add(path);
+    if (!added) {
+        return Result<void>::Failure(added.Error());
     }
 
-    if (auto kept = state.assigned.Append(path); !kept) {
-        return kept;
+    if (!added.Value()) {
+        return Diagnose(state, TextDiagnosticCode::DuplicateAssignment, source, assignment.path,
+                        "the same path is assigned twice");
     }
 
     auto unitEnd = FindUnitEnd(state, path);
@@ -341,7 +346,8 @@ Result<void> ProcessResolvedAssignment(AssignmentState& state, const TextAssignm
                     unit.dirty, nullptr,
                     assignment, slot,
                     path,       path,
-                    source,     {}};
+                    source,     {},
+                    nullptr,    &unit};
         return apply.Run();
     }
 
@@ -359,8 +365,50 @@ Result<void> ProcessResolvedAssignment(AssignmentState& state, const TextAssignm
                 path,
                 PropertyPath{path.steps.Mid(end), path.keys},
                 source,
-                {}};
+                {},
+                unit.Value(),
+                unit.Value()};
     return apply.Run();
+}
+
+Result<bool> PreparedContains(AssignmentState& state, PropertyPath path) noexcept {
+    ObjectRegistry& registry = state.target.Registry();
+    const ObjectAccessContext& access = state.target.Access();
+    PathTarget start = state.Root();
+    PropertyPath relative = path;
+    auto unitEnd = FindUnitEnd(state, path);
+    if (!unitEnd) {
+        return Result<bool>::Failure(unitEnd.Error());
+    }
+
+    // 그 자리의 값 단위가 이미 있으면 상자(같은 import의 앞 대입이 바꾼 상태)를 본다.
+    if (unitEnd.Value().kind == UnitKind::Value) {
+        const usize end = unitEnd.Value().index;
+        PathStep unitSteps[MaxPropertyPathSteps];
+        for (usize index = 0; index <= end; ++index) {
+            unitSteps[index] = path.steps[index];
+        }
+
+        unitSteps[end].selector = PathSelector::None;
+        unitSteps[end].index = 0;
+        const PropertyPath unitPath{Span<const PathStep>(unitSteps, end + 1), {}};
+        for (usize index = 0; index < state.units.Size(); ++index) {
+            if (SamePropertyPath(state.units[index]->Path(), unitPath)) {
+                start = PathTarget::Value(state.units[index]->box);
+                relative = PropertyPath{path.steps.Mid(end), path.keys};
+                break;
+            }
+        }
+    }
+
+    auto present = PathContains(registry, access, start, relative);
+    if (!present) {
+        // 닿을 수 없는 자리(unset Optional·범위 밖 index·없는 바깥 키 등)는 키가 없는 것이다.
+        return IsCallError(present.Error()) ? Result<bool>::Failure(present.Error())
+                                            : Result<bool>::Success(false);
+    }
+
+    return present;
 }
 
 } // namespace rocks::reflection_text::detail

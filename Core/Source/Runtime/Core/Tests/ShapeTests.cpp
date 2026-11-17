@@ -324,12 +324,12 @@ void CheckOrientedBox() {
                .IsValid());
     CHECK(!OrientedBox<T>(V<T>(0, 0, 0), Quaternion<T>::Identity(), V<T>(1, -0.5, 1)).IsValid());
 
-    // Z축 +90도: local X → world +Y(왼쪽), local Y → world -X.
+    // Z축 +90도(UE 왼손 양의 각): local X → world +Y(오른쪽), local Y → world -X.
     const Quaternion<T> quarterTurn =
         Quaternion<T>::FromUnitAxisAngle(Vector3<T>::Up(), math::HalfPi<T>);
     const OrientedBox<T> turned(V<T>(10, 0, 0), quarterTurn, V<T>(2, 1, 0.5));
     const T tolerance = Tolerance<T>() * 10;
-    CHECK(turned.AxisX().Equals(Vector3<T>::Left(), tolerance));
+    CHECK(turned.AxisX().Equals(Vector3<T>::Right(), tolerance));
     CHECK(turned.AxisY().Equals(Vector3<T>::Backward(), tolerance));
     CHECK(turned.AxisZ().Equals(Vector3<T>::Up(), tolerance));
     CHECK(turned.ToWorld(V<T>(2, 0, 0)).Equals(V<T>(10, 2, 0), tolerance * 10));

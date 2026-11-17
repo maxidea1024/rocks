@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "id": "METAL_SM5",
+  "status": "supported",
+  "backend": "Metal",
+  "processor": { "module": "ShaderFormatMetal", "version": 1 },
+  "bindingConvention": 1,
+  "tools": ["DirectXShaderCompiler", "SpirvTools", "SpirvCross", "MetalToolchain"],
+  "language": { "hlsl2021": true },
+  "compiler": {
+    "path": "DxcSpirvMsl",
+    "shaderModel": "6_0",
+    "imageFormat": "VkImageFormat",
+    "spirvTargetEnv": "vulkan1.1",
+    "dxPositionW": true,
+    "mslVersion": "2.4",
+    "mslPlatform": "macos"
+  },
+  "stages": ["vertex", "pixel", "compute"],
+  "limits": {
+    "constantBuffers": 12,
+    "sampledTextures": 128,
+    "storageBuffers": 4,
+    "storageImages": 4,
+    "samplers": 16,
+    "uavStages": ["compute"],
+    "renderTargets": 8,
+    "interStageVectors": 16,
+    "rootConstantBytes": 128
+  },
+  "features": ["compute"],
+  "deviceRequirements": [],
+  "producers": [
+    { "host": "macos-arm64", "systemTools": ["MetalToolchain"] },
+    { "host": "windows-x64", "systemTools": ["MetalToolchain"] }
+  ]
+}

@@ -14,9 +14,24 @@ bool SameValue(const FieldValue& left, const FieldValue& right) noexcept;
 // 호출 오류(대입 내용과 무관한 실패)인지다.
 bool IsCallError(ErrorCode code) noexcept;
 
-// 새로 가리키는 Hard·Weak 대상을 고정한다. 살아 있지 않으면 진단을 남기고 false다.
+// 새로 가리키는 Hard·Weak 대상을 고정한다(owner는 고정을 만든 단위 — ReleasePins). 살아 있지
+// 않으면 진단을 남기고 false다.
 Result<bool> PinReferences(AssignmentState& state, const TextValue& value, TextSource source,
-                           StringView pathText) noexcept;
+                           StringView pathText, const void* owner) noexcept;
+
+// 목록·항목 목록 값(List·Entries·Empty)이 start 기준 path 자리의 지금 내용과 같은지다(Array·
+// StaticArray는 원소 순서대로, Set·Map은 삽입 순서대로 키와 값 — 리플렉션 B9i 리뷰 반영). 같은 값
+// 재대입이 무동작이게 한다(ReadOnly·Deprecated 클래스 ClassRef 원소 포함). 읽을 수 없는 자리는
+// 거짓이다. 오류: 호출 오류(할당·대상 문맥).
+Result<bool> SameContents(AssignmentState& state, const PathTarget& start, PropertyPath path,
+                          const FieldSchema& field, const TextValue& value) noexcept;
+
+// 대상 기준 끝 경로 path의 ReadOnly 자리(ReadOnly가 처음 붙는 단계까지 — 값 단위보다 위면 단위
+// 경로)를 단위의 대조 목록에 넣고 상자가 ReadOnly 쓰기를 받게 한다(CheckReadOnlyUnits가 호출 끝에
+// 대조한다 — 리플렉션 B9i 리뷰 반영). end는 path에서 단위 필드·멤버 단계의 index다. 오류: 할당
+// 실패.
+Result<void> NoteReadOnly(AssignmentState& state, AssignmentUnit& unit, PropertyPath path,
+                          usize end, TextSource source) noexcept;
 
 // 대입 값을 out에 읽는다: JSON import가 미리 읽은 값(state.preparsed)이 있으면 그것을 옮기고,
 // 아니면 값 텍스트를 읽는다(ParseTextValue). false면 진단을 남겼다.
@@ -52,6 +67,10 @@ private:
 // 대입 하나의 적용 문맥이다. 값 단위는 상자(start = PathTarget::Value(box), relative는 상자 기준
 // 경로), Registry 컨테이너 단위는 준비 사본을 건 대상(start = Root().WithReferences, relative는
 // 대상 기준 경로 — box 없음)이다.
+//
+// 값 단위의 ReadOnly 자리(staged 대상 제외) 대입은 상자에 그대로 적용하되 override 경로에 넣지 않고
+// 단위를 dirty로 만들지 않으며, 그 자리를 호출 끝 대조 목록에 넣는다(readOnlyDeferred — 리플렉션
+// B9i 리뷰 반영: `opt={}` 뒤 `opt.x=5`처럼 여러 대입이 함께 지금 값을 다시 만드는 왕복을 받는다).
 struct Apply {
     AssignmentState& state;
     PathTarget start;
@@ -64,6 +83,11 @@ struct Apply {
     PropertyPath relative;
     TextSource source;
     PropertyPathFailure failure{};
+    // 값 단위(컨테이너 단위는 nullptr)와 고정의 owner(단위 주소).
+    AssignmentUnit* unit = nullptr;
+    const void* owner = nullptr;
+    // ReadOnly 자리를 호출 끝에 대조하는 대입이다(Run이 정한다).
+    bool readOnlyDeferred = false;
 
     ObjectRegistry& Registry() const noexcept {
         return state.target.Registry();
@@ -85,8 +109,13 @@ struct Apply {
         return ReportPathFailure(state, code, failure, source, assignment.path);
     }
 
-    // 사본을 바꾼 대입을 기록한다.
+    // 사본을 바꾼 대입을 기록한다(ReadOnly 대조 대입은 기록하지 않는다 — 대조가 같음을 확인하면
+    // 바뀐 것이 없다).
     Result<void> Changed() noexcept {
+        if (readOnlyDeferred) {
+            return Result<void>::Success();
+        }
+
         dirty = true;
         return AddOverride(state, path);
     }

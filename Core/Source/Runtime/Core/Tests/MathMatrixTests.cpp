@@ -201,8 +201,8 @@ TEST(Matrix4_TryInverseMatchesOracleAndFailsOnSingular) {
 
 TEST(MatrixFactory_RotationAxesFollowRightHandRule) {
     const double quarter = math::HalfPi<double>;
-    CHECK(MakeRotationZ(quarter).TransformVector(Vec3d::Forward()).Equals(Vec3d::Left(), 1.0e-15));
-    CHECK(MakeRotationX(quarter).TransformVector(Vec3d::Left()).Equals(Vec3d::Up(), 1.0e-15));
+    CHECK(MakeRotationZ(quarter).TransformVector(Vec3d::Forward()).Equals(Vec3d::Right(), 1.0e-15));
+    CHECK(MakeRotationX(quarter).TransformVector(Vec3d::Right()).Equals(Vec3d::Up(), 1.0e-15));
     CHECK(MakeRotationY(quarter).TransformVector(Vec3d::Up()).Equals(Vec3d::Forward(), 1.0e-15));
     // 회전 행렬과 같은 축의 quaternion은 같은 결과를 낸다.
     const Quatd q = Quatd::FromUnitAxisAngle(Vec3d::UnitY(), 0.7);

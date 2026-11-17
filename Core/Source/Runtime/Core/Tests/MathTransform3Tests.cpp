@@ -305,7 +305,7 @@ void CheckShearAndZeroScale() {
     CHECK(decomposed.Value().TransformPoint(p).Equals(mirrored.TransformPoint(p),
                                                       PrecisionTolerance<T>(1.0e-5, 1.0e-12)));
     const Transform3<T> uniformMirror(
-        V(1, 2, 3), Q::FromUnitAxisAngle(V::Left(), static_cast<T>(0.9)), V(2, -2, 2));
+        V(1, 2, 3), Q::FromUnitAxisAngle(V::Right(), static_cast<T>(0.9)), V(2, -2, 2));
     auto mirrorInverse = uniformMirror.TryInverse();
     REQUIRE(mirrorInverse);
     CHECK(mirrorInverse.Value().scale.x < 0);

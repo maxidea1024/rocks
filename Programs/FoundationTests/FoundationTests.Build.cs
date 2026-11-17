@@ -22,10 +22,10 @@ public abstract class TestsModule : ModuleRules
     private static readonly string[] ObjectTestModules = ["ObjectRuntime", "ObjectSerialization", "ReflectionText", "Config"];
 
     // 엔진 계층 모듈의 테스트다(EngineTests에만 들어간다). 경로는 Engine/Source 아래 Group/Module이다.
-    private static readonly string[] EngineTestModules = ["Runtime/Input", "Runtime/PlatformWindow", "Runtime/World", "Runtime/Engine", "Runtime/AssetRuntime", "Developer/AssetTools", "Developer/ShaderToolTable", "Developer/ShaderToolLoader"];
+    private static readonly string[] EngineTestModules = ["Runtime/Input", "Runtime/PlatformWindow", "Runtime/World", "Runtime/Engine", "Runtime/AssetRuntime", "Developer/AssetTools", "Developer/ShaderToolTable", "Developer/ShaderToolLoader", "Developer/ShaderCompiler"];
 
     // EngineTests가 링크하는 엔진 모듈이다(테스트가 쓰는 최상위 모듈만 둔다. 하위 의존은 전파된다).
-    private static readonly string[] EngineTestDependencies = ["PlatformWindow", "Engine", "SpirvReflect", "ShaderToolLoader"];
+    private static readonly string[] EngineTestDependencies = ["PlatformWindow", "Engine", "SpirvReflect", "ShaderToolLoader", "ShaderCompiler"];
 
     // EngineTests의 셰이더 도구 외부 라이브러리 시험(Programs/FoundationTests/Engine)이 include하는 라이브러리다. 헤더는 이 실행 파일의
     // Private include로만 들어가고(adapter 방식) 엔진 경고 규칙으로 경고 0이어야 한다(Docs/Design/ShaderSystem.ko.md 8절).

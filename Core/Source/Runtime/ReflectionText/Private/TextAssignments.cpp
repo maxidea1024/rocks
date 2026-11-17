@@ -1,5 +1,6 @@
 #include "TextAssignInternal.h"
 
+#include <Core/Text/Name.h>
 #include <Object/ConstructionContext.h>
 #include <Object/ObjectBatchPublish.h>
 
@@ -69,13 +70,93 @@ PropertyPath PathCopies::View(usize index, PathKey* keys) const noexcept {
         Span<const PathKey>(keys, entry.keyCount)};
 }
 
+void PathCopies::Clear() noexcept {
+    steps_.Clear();
+    keys_.Clear();
+    bytes_.Clear();
+    entries_.Clear();
+}
+
+uint64 PathSet::HashOf(PropertyPath path) const noexcept {
+    // 단계마다 필드 ID 두 word, 선택자·index 한 word, key 한 word(종류와 key wire의 해시)다.
+    constexpr usize WordsPerStep = 4;
+    uint64 words[MaxPropertyPathSteps * WordsPerStep];
+    usize count = 0;
+    for (usize index = 0; index < path.steps.Size() && index < MaxPropertyPathSteps; ++index) {
+        const PathStep& step = path.steps[index];
+        words[count++] = SeededHash<Guid>(seed_)(step.fieldId);
+        words[count++] = static_cast<uint64>(step.selector);
+        words[count++] = step.selector == PathSelector::Key ? 0 : uint64{step.index};
+        uint64 key = 0;
+        if (step.selector == PathSelector::Key && step.index < path.keys.Size()) {
+            const PathKey& wire = path.keys[step.index];
+            key = static_cast<uint64>(wire.kind);
+            StringView text;
+            if (wire.kind == ValueKind::Name && rocks::detail::PathKeyText(wire, text)) {
+                // SamePathKey의 Name 비교(NameTextEquals)와 같은 값끼리 같은 해시다: None 동치는
+                // 한 값, 그 밖은 소문자 base와 번호다.
+                const NameTextParts parts = SplitNameText(text);
+                const bool none =
+                    parts.base.IsEmpty() ||
+                    (!parts.HasNumber() && TextEqualsIgnoringCase(parts.base, "None"));
+                const uint64 named[] = {none ? 0 : SipHash24IgnoringAsciiCase(seed_, parts.base),
+                                        none ? 0 : uint64{parts.number}};
+                key ^= SipHash24Words(seed_, named, 2);
+            } else {
+                key ^= SipHash24(seed_, wire.wire.Data(), wire.wire.Size());
+            }
+        }
+
+        words[count++] = key;
+    }
+
+    return SipHash24Words(seed_, words, count);
+}
+
+Result<bool> PathSet::Add(PropertyPath path) noexcept {
+    const uint64 hash = HashOf(path);
+    usize* head = heads_.Find(hash);
+    PathKey keys[MaxPropertyPathSteps];
+    for (usize entry = head ? *head : IndexNone; entry != IndexNone; entry = next_[entry]) {
+        ++comparisons_;
+        if (SamePropertyPath(paths_.View(entry, keys), path)) {
+            return Result<bool>::Success(false);
+        }
+    }
+
+    // 용량을 먼저 잡아 실패해도 집합이 그대로이게 한다.
+    if (auto reserved = next_.TryReserve(next_.Size() + 1); !reserved) {
+        return Result<bool>::Failure(reserved.Error());
+    }
+
+    if (auto reserved = heads_.Reserve(heads_.Count() + 1); !reserved) {
+        return Result<bool>::Failure(reserved.Error());
+    }
+
+    if (auto copied = paths_.Append(path); !copied) {
+        return Result<bool>::Failure(copied.Error());
+    }
+
+    // Reserve가 칸을 옮겼을 수 있으므로 다시 찾는다.
+    const usize added = paths_.Count() - 1;
+    head = heads_.Find(hash);
+    (void)next_.TryPushBack(head ? *head : IndexNone);
+    if (head) {
+        *head = added;
+    } else {
+        (void)heads_.Insert(hash, added);
+    }
+
+    return Result<bool>::Success(true);
+}
+
 AssignmentState::AssignmentState(const AssignmentTarget& target_, const TextCodecOptions& options_,
                                  TextDiagnostics& diagnostics, Allocator& allocator_) noexcept
     : target(target_), options(options_),
       context(target_.Registry().Types(), options, diagnostics, allocator_), allocator(allocator_),
       units(allocator_), references(allocator_), containers(allocator_), elements(allocator_),
       assigned(allocator_), overrideSteps(allocator_), overrideEnds(allocator_),
-      overrideViews(allocator_), pins(allocator_) {
+      overrideViews(allocator_), pins(allocator_), pinOwners(allocator_) {
 }
 
 PathTarget AssignmentState::Root() const noexcept {
@@ -96,6 +177,28 @@ Result<void> Diagnose(AssignmentState& state, TextDiagnosticCode code, TextSourc
                       StringView pathText, StringView message) noexcept {
     state.failed = true;
     return state.context.Diagnostics().Add(code, source, pathText, message);
+}
+
+void ReleasePins(AssignmentState& state, const void* owner) noexcept {
+    usize kept = 0;
+    for (usize index = 0; index < state.pins.Size(); ++index) {
+        if (state.pinOwners[index] == owner) {
+            continue;
+        }
+
+        if (kept != index) {
+            state.pins[kept] = Move(state.pins[index]);
+            state.pinOwners[kept] = state.pinOwners[index];
+        }
+
+        ++kept;
+    }
+
+    // 뒤쪽 칸(놓을 고정과 옮겨진 빈 칸)을 지운다 — RootRef 소멸이 고정을 놓는다.
+    if (kept < state.pins.Size()) {
+        (void)state.pins.TryRemoveAt(kept, state.pins.Size() - kept);
+        (void)state.pinOwners.TryRemoveAt(kept, state.pinOwners.Size() - kept);
+    }
 }
 
 Result<void> ReportPathFailure(AssignmentState& state, ErrorCode code,
@@ -464,7 +567,16 @@ Result<void> PreparedAssignments::Append(const TextAssignment& assignment) noexc
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    if (auto processed = detail::ProcessAssignment(*state_, assignment); !processed) {
+    // 호출 오류(할당·Busy 등)도 묶음을 실패로 표시한다: 값 단위 적용은 상자를 고친 뒤에 실패할 수
+    // 있어(목록 대입의 비우기 뒤 넣기 등) 그 뒤의 묶음은 반쯤 적용된 상태다(리플렉션 B9i 리뷰
+    // 반영).
+    Result<void> processed = detail::ProcessAssignment(*state_, assignment);
+    if (processed) {
+        processed = detail::CheckReadOnlyUnits(*state_);
+    }
+
+    if (!processed) {
+        state_->failed = true;
         return processed;
     }
 
@@ -510,9 +622,13 @@ Result<PublishedAssignments> PreparedAssignments::Publish() noexcept {
     ObjectRegistry& registry = state.target.Registry();
     const ObjectAccessContext& access = state.target.Access();
     // 사본을 바꾸지 않은 단위(값이 같은 대입뿐)는 게시하지 않는다 — 먼저 앞으로 모으고 나머지를
-    // 비운다(게시 구간 밖).
+    // 비운다(게시 구간 밖). 게시하지 않는 단위의 고정도 놓는다(검사 대상에서 빠진다).
     usize kept = 0;
     for (usize index = 0; index < state.units.Size(); ++index) {
+        if (!state.units[index]->dirty) {
+            detail::ReleasePins(state, state.units[index].Get());
+        }
+
         if (state.units[index]->dirty) {
             if (kept != index) {
                 state.units[kept] = Move(state.units[index]);
@@ -529,6 +645,10 @@ Result<PublishedAssignments> PreparedAssignments::Publish() noexcept {
     // 컨테이너 단위도 사본을 바꾸지 않았으면 게시하지 않는다.
     kept = 0;
     for (usize index = 0; index < state.containers.Size(); ++index) {
+        if (!state.containers[index]->dirty) {
+            detail::ReleasePins(state, state.containers[index].Get());
+        }
+
         if (state.containers[index]->dirty) {
             if (kept != index) {
                 state.containers[kept] = Move(state.containers[index]);
@@ -669,9 +789,18 @@ Result<PublishedAssignments> PreparedAssignments::Publish() noexcept {
             }
         }
 
-        // Weak 고정은 생존만, 참조 단위의 새 대상은 자리의 C++ 대상 타입까지 본다.
+        // Weak 고정은 생존만, 참조 단위의 새 대상은 자리의 C++ 대상 타입까지 본다. 컨테이너 단위의
+        // 고정은 GC만 막는다 — 새 내용의 원소는 위에서 모두 검사하고, 사본에서 다시 빠진 대상(
+        // `group=/a` 뒤 `group=`)은 검사하지 않는다(리플렉션 B9i 리뷰 반영).
         for (usize index = 0; index < state.pins.Size(); ++index) {
-            (void)targets.TryPushBack(BatchTargetCheck{state.pins[index].Handle(), nullptr});
+            bool container = false;
+            for (usize unit = 0; unit < state.containers.Size() && !container; ++unit) {
+                container = state.pinOwners[index] == state.containers[unit].Get();
+            }
+
+            if (!container) {
+                (void)targets.TryPushBack(BatchTargetCheck{state.pins[index].Handle(), nullptr});
+            }
         }
 
         for (usize index = 0; index < state.references.Size(); ++index) {
@@ -845,6 +974,10 @@ Result<PreparedAssignments> PrepareAssignments(const AssignmentTarget& target,
         if (auto processed = detail::ProcessAssignment(state, assignments[index]); !processed) {
             return PrepareResult::Failure(processed.Error());
         }
+    }
+
+    if (auto checked = detail::CheckReadOnlyUnits(state); !checked) {
+        return PrepareResult::Failure(checked.Error());
     }
 
     if (state.failed) {
