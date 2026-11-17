@@ -33,7 +33,7 @@ Result<CommandContext*> D3D11Device::BeginFrame(SwapChainHandle handle,
                     record->buffer.Get(),
                     record->width,
                     record->height,
-                    Format::RGBA8UnormSrgb,
+                    PixelFormat::RGBA8UnormSrgb,
                     {}},
                    clear);
     presentTarget_ = handle;
