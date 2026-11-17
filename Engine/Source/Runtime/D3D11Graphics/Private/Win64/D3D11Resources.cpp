@@ -1,5 +1,6 @@
 #include "D3D11DeviceImpl.h"
 
+#include <Core/Text/StringBuilder.h>
 #include <Platform/Memory.h>
 
 #include <d3d11shader.h>
@@ -165,7 +166,8 @@ Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
                                                  Span<const uint8> pixels) noexcept {
     // 올바른 형식이지만 대응 표에 없으면 미지원이다(다른 형식으로 대신하지 않는다). 크기 검사보다
     // 먼저 본다(깊이 형식처럼 업로드 크기가 없는 형식도 Unsupported로 알린다).
-    if (IsValidPixelFormat(desc.format) && ResourceFormat(desc.format) == DXGI_FORMAT_UNKNOWN) {
+    if ((IsValidPixelFormat(desc.format) && ResourceFormat(desc.format) == DXGI_FORMAT_UNKNOWN) ||
+        desc.usage == TextureUsage::DepthStencil) {
         return Result<TextureHandle>::Failure(ErrorCode::Unsupported);
     }
 
@@ -244,6 +246,17 @@ Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
 }
 
 // 다른 스레드에서도 부를 수 있다(concurrentResourceCreation, 내부 잠금으로 직렬화한다).
+PixelFormatCaps D3D11Device::GetPixelFormatCaps(PixelFormat format) const noexcept {
+    if (ResourceFormat(format) == DXGI_FORMAT_UNKNOWN) {
+        return PixelFormatCaps::None;
+    }
+
+    // 표에 있는 형식(RGBA8 두 형식)은 2D 샘플·필터·mip·렌더 타깃·블렌드를 기능 수준 11에서
+    // 보장한다.
+    return PixelFormatCaps::Sampled | PixelFormatCaps::Filterable | PixelFormatCaps::Mipmaps |
+           PixelFormatCaps::RenderTarget | PixelFormatCaps::Blendable;
+}
+
 Result<PipelineHandle> D3D11Device::CreatePipeline(const PipelineDesc& desc) noexcept {
     platform::LockGuard lock(gate_);
     if (desc.vertex.hlsl.ByteCount() == 0 || desc.pixel.hlsl.ByteCount() == 0 ||
@@ -395,15 +408,23 @@ Result<void> D3D11Device::Compile(StringView source, const char* entry, const ch
     const HRESULT compiled = D3DCompile(source.Data(), source.ByteCount(), "RocksShader", nullptr,
                                         nullptr, entry, target, flags, 0, code.Out(), errors.Out());
     if (FAILED(compiled)) {
+        // 파이프라인을 만드는 호출자가 LastError로 기록한다(LoggingSystem 13절). 진단은 앞쪽
+        // MaxShaderDiagnosticLogBytes까지 싣는다.
+        auto failed = Fail("D3DCompile", compiled);
+        (void)failed;
+        StringView diagnostics("no compiler output");
         if (errors) {
-            auto assigned = lastError_.TryAssign(StringView(
-                static_cast<const char*>(errors->GetBufferPointer()), errors->GetBufferSize()));
-            (void)assigned;
-        } else {
-            auto failed = Fail("D3DCompile", compiled);
-            (void)failed;
+            diagnostics = StringView(static_cast<const char*>(errors->GetBufferPointer()),
+                                     errors->GetBufferSize())
+                              .LeftBytesAtCodePoint(MaxShaderDiagnosticLogBytes);
         }
 
+        char storage[MaxShaderDiagnosticLogBytes + 128];
+        FixedStringBuilder text{Span<char>(storage)};
+        (void)text.TryAppendFormat("Shader {} ({}) failed to compile (HRESULT {:#x}): {}", entry,
+                                   target, static_cast<uint32>(compiled), diagnostics);
+        auto assigned = lastError_.TryAssign(text.View());
+        (void)assigned;
         return Result<void>::Failure(ErrorCode::DependencyFailed);
     }
 

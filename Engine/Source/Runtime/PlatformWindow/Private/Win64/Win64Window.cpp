@@ -273,8 +273,11 @@ public:
         windowClass.hCursor = LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(IDC_ARROW));
         windowClass.lpszClassName = WindowClassName;
         // 같은 프로세스의 두 번째 창은 이미 등록된 클래스를 쓴다.
-        if (RegisterClassExW(&windowClass) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
-            return Result<void>::Failure(ErrorCode::DependencyFailed);
+        if (RegisterClassExW(&windowClass) == 0) {
+            const DWORD error = GetLastError();
+            if (error != ERROR_CLASS_ALREADY_EXISTS) {
+                return Fail("RegisterClassExW", error);
+            }
         }
 
         const DWORD style = desc.resizable
@@ -289,7 +292,7 @@ public:
                             rectangle.right - rectangle.left, rectangle.bottom - rectangle.top,
                             nullptr, nullptr, instance_, this);
         if (window_ == nullptr) {
-            return Result<void>::Failure(ErrorCode::DependencyFailed);
+            return Fail("CreateWindowExW", GetLastError());
         }
 
         width_ = desc.width;
@@ -300,6 +303,10 @@ public:
         }
         return Result<void>::Success();
     }
+
+    // 생성 실패의 OS 호출과 GetLastError다(WindowCreateReport).
+    const char* failedCall = nullptr;
+    DWORD failedError = 0;
 
     void PumpEvents(input::InputQueue& queue) noexcept override {
         queue_ = &queue;
@@ -361,6 +368,14 @@ public:
     }
 
 private:
+    // 실패한 OS 호출과 오류를 기억하고 DependencyFailed를 돌려준다(Window::Create가 report로
+    // 옮긴다).
+    Result<void> Fail(const char* call, DWORD error) noexcept {
+        failedCall = call;
+        failedError = error;
+        return Result<void>::Failure(ErrorCode::DependencyFailed);
+    }
+
     void Push(const input::InputEvent& event) noexcept {
         // 펌프 밖(예: 창 생성 중)에 온 메시지의 입력은 버린다.
         if (queue_ != nullptr) {
@@ -626,19 +641,41 @@ private:
 
 } // namespace
 
-Result<UniquePtr<Window>> Window::Create(Allocator& allocator, const WindowDesc& desc) noexcept {
+Result<UniquePtr<Window>> Window::Create(Allocator& allocator, const WindowDesc& desc,
+                                         WindowCreateReport* report) noexcept {
+    auto fail = [report](ErrorCode error, const char* call, DWORD osError) noexcept {
+        if (report != nullptr) {
+            *report = WindowCreateReport{};
+            report->code = error;
+            report->osError = static_cast<int64>(osError);
+            usize length = 0;
+            while (call != nullptr && call[length] != '\0' && length + 1 < sizeof(report->call)) {
+                report->call[length] = call[length];
+                ++length;
+            }
+
+            report->truncated = call != nullptr && call[length] != '\0';
+        }
+
+        return Result<UniquePtr<Window>>::Failure(error);
+    };
+
     if (desc.width == 0 || desc.height == 0) {
-        return Result<UniquePtr<Window>>::Failure(ErrorCode::InvalidArgument);
+        return fail(ErrorCode::InvalidArgument, nullptr, 0);
     }
 
     auto created = UniquePtr<Win64Window>::TryMake(allocator);
     if (!created) {
-        return Result<UniquePtr<Window>>::Failure(created.Error());
+        return fail(created.Error(), nullptr, 0);
     }
 
     auto opened = created.Value()->Create(desc);
     if (!opened) {
-        return Result<UniquePtr<Window>>::Failure(opened.Error());
+        return fail(opened.Error(), created.Value()->failedCall, created.Value()->failedError);
+    }
+
+    if (report != nullptr) {
+        *report = WindowCreateReport{};
     }
 
     return Result<UniquePtr<Window>>::Success(UniquePtr<Window>(Move(created.Value())));

@@ -149,10 +149,16 @@ constexpr uint32 IndexFormatSize(IndexFormat format) noexcept {
 }
 
 enum class TextureUsage : uint8 {
-    // 셰이더에서 샘플링한다(초기 픽셀 필요).
+    // 셰이더에서 샘플링한다(초기 픽셀 필요). 형식 능력 Sampled가 필요하고 mip이 2개 이상이면
+    // Mipmaps도 필요하다.
     Sampled,
-    // 렌더 타깃으로 그리고 ReadPixels로 읽거나 샘플링한다(초기 픽셀 없음).
-    RenderTarget
+    // 렌더 타깃으로 그리고 ReadPixels로 읽거나 샘플링한다(초기 픽셀 없음, mip 1). 형식 능력
+    // RenderTarget·Sampled가 필요하다.
+    RenderTarget,
+    // 깊이·스텐실 타깃이다(초기 픽셀 없음, mip 1). 형식 능력 DepthStencil이 필요하고, 형식이
+    // Sampled면 깊이 plane을 샘플할 수 있다. 깊이 그리기 경로는 GX2·GX3에서 연다(PixelFormat.ko.md
+    // 개정 3).
+    DepthStencil
 };
 
 // 텍스처 설정이다.
@@ -171,6 +177,31 @@ struct TextureDesc {
     // 이 텍스처를 묶을 때 쓰는 샘플러다.
     SamplerDesc sampler;
 };
+
+// 텍스처 view 설정이다(Device::CreateTextureView). 원 텍스처의 자원을 공유하고 형식·plane만 다르게
+// 읽는다(PixelFormat.ko.md 9·10·11절).
+// - format: Unknown이면 그 plane의 기본 형식이다. 색·압축 형식은 자기 형식이나 sRGB 짝,
+// 깊이·스텐실과
+//   비디오는 plane 형식(PixelFormatInfo::planes)만 받는다.
+// - plane: 단일 plane 형식은 0, 깊이·스텐실은 0(깊이)·1(스텐실, uint으로 읽고 값은 G 채널),
+//   비디오는 0(휘도 Y)·1(색차 CbCr)이다.
+//
+// 사용 예(NV12의 색차 plane을 RG8로 샘플):
+//   auto uv = device.CreateTextureView(video, {PixelFormat::Unknown, 1});
+//   commands.SetTexture(uv.Value());
+struct TextureViewDesc {
+    PixelFormat format = PixelFormat::Unknown;
+    uint32 plane = 0;
+};
+
+// texture 형식에 desc가 맞는지 확인하고 view가 읽는 픽셀 형식(plane 형식 또는 sRGB 짝)을 돌려준다.
+// 장치와 무관한 규칙이며 backend가 생성 전에 부른다. 실패: 무효 형식·plane 범위 밖·plane에 맞지
+// 않는 형식 InvalidArgument.
+Result<PixelFormat> ResolveTextureViewFormat(PixelFormat texture,
+                                             const TextureViewDesc& desc) noexcept;
+
+// usage로 mipLevels개 mip 텍스처를 만들 때 형식에 필요한 능력이다(TextureUsage 주석).
+PixelFormatCaps RequiredPixelFormatCaps(TextureUsage usage, uint32 mipLevels) noexcept;
 
 // 정점 배치 한계다(RenderBase 10.4절). 장치 최소 보장 쪽 값이다: 속성 16(Vulkan
 // maxVertexInputAttributes·GL_MAX_VERTEX_ATTRIBS 최소), stream 8(Metal 정점 buffer 상한), offset ≤

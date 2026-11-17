@@ -98,6 +98,7 @@ struct Exporter {
     JsonPathBuilder path;
 
     Result<void> WriteStruct(const SchemaScope& scope, uint32 flags) noexcept;
+    Result<void> WriteInstanced(uint32 flags) noexcept;
     Result<void> WriteField(const SchemaScope& scope, usize index, uint32 flags) noexcept;
     Result<void> WriteValue(const TextSlot& slot) noexcept;
     Result<void> WriteArray(const TextSlot& slot) noexcept;
@@ -111,6 +112,47 @@ Result<void> Exporter::WriteStruct(const SchemaScope& scope, uint32 flags) noexc
         return begun;
     }
 
+    const auto& fields = scope.Schema().fields;
+    for (usize index = 0; index < fields.Size(); ++index) {
+        if (auto written = WriteField(scope, index, flags); !written) {
+            return written;
+        }
+    }
+
+    return writer.EndObject();
+}
+
+// InstancedStruct 값(리플렉션 B9j — Docs/Design/ReflectionExtensions.ko.md 10.4절)은 비어 있으면
+// null, 아니면 `{"_structType": "<타입 도구 이름>", 멤버...}`다(멤버는 지금 담긴 struct의 경로로
+// 읽는다). 도구 이름이 없는 struct(수동 등록)는 Unsupported다.
+Result<void> Exporter::WriteInstanced(uint32 flags) noexcept {
+    auto type = PathReadInstancedType(registry, access, root, path.View());
+    if (!type) {
+        return Result<void>::Failure(type.Error());
+    }
+
+    if (!type.Value().IsValid()) {
+        return writer.Null();
+    }
+
+    const Span<const char> name = type.Value().Schema().toolName;
+    if (name.Size() == 0) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    if (auto begun = writer.BeginObject(); !begun) {
+        return begun;
+    }
+
+    if (auto keyed = writer.Key(detail::InstancedTypeKey); !keyed) {
+        return keyed;
+    }
+
+    if (auto named = writer.String(StringView(name.Data(), name.Size())); !named) {
+        return named;
+    }
+
+    const SchemaScope scope{nullptr, type.Value().Struct()};
     const auto& fields = scope.Schema().fields;
     for (usize index = 0; index < fields.Size(); ++index) {
         if (auto written = WriteField(scope, index, flags); !written) {
@@ -150,6 +192,8 @@ Result<void> Exporter::WriteValue(const TextSlot& slot) noexcept {
     switch (field.value.kind) {
     case ValueKind::Struct:
         return WriteStruct(SchemaScope{nullptr, slot.structView}, slot.flags);
+    case ValueKind::InstancedStruct:
+        return WriteInstanced(slot.flags);
     case ValueKind::Optional:
         if (field.element.kind == ValueKind::Struct) {
             auto set = PathIsOptionalSet(registry, access, root, path.View());
@@ -192,9 +236,10 @@ Result<void> Exporter::WriteArray(const TextSlot& slot) noexcept {
     const bool structElement = field.element.kind == ValueKind::Struct;
     for (usize index = 0; index < count; ++index) {
         path.SetIndex(static_cast<uint32>(index));
-        auto written = structElement
-                           ? WriteStruct(SchemaScope{nullptr, slot.structView}, slot.flags)
-                           : WriteRead(SlotValueType(slot));
+        auto written =
+            structElement ? WriteStruct(SchemaScope{nullptr, slot.structView}, slot.flags)
+            : field.element.kind == ValueKind::InstancedStruct ? WriteInstanced(slot.flags)
+                                                               : WriteRead(SlotValueType(slot));
         if (!written) {
             path.ClearSelector();
             return written;
@@ -250,7 +295,9 @@ Result<void> Exporter::WriteKeyed(const TextSlot& slot) noexcept {
         }
 
         auto written = structValue ? WriteStruct(SchemaScope{nullptr, slot.structView}, slot.flags)
-                                   : WriteRead(SlotValueType(slot));
+                       : field.element.kind == ValueKind::InstancedStruct
+                           ? WriteInstanced(slot.flags)
+                           : WriteRead(SlotValueType(slot));
         path.ClearSelector();
         if (!written) {
             return written;

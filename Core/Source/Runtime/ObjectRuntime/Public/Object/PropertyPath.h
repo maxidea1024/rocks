@@ -65,8 +65,13 @@ namespace rocks {
 //   NotMap            — Set 원소 key 단계의 값 읽기·쓰기(TypeMismatch — Set 원소는 키라 값이 없다,
 //                       PathContains·PathInsertKey·PathEraseKey를 쓴다)
 //   FixedLength       — 정적 배열(T x[N] — 리플렉션 B9g)의 원소 삽입·삭제·비우기(Unsupported —
-//   길이가
-//                       N으로 고정이다. 원소는 [i] 쓰기로 바꾼다)
+//                       길이가 N으로 고정이다. 원소는 [i] 쓰기로 바꾼다)
+//   NotCopyable       — 깊은 복사·무할당 교환을 할 수 없는 값(PathDetach·PathPrepareAttach —
+//                       리플렉션 B9i3c0, Unsupported)
+//   NotInstanced      — PathSetInstancedType·PathClearInstanced·PathReadInstancedType의 끝이
+//                       InstancedStruct가 아님(TypeMismatch — 리플렉션 B9j)
+//   InstancedEmpty    — 비어 있는 InstancedStruct의 멤버로 들어가는 단계(NotFound — 리플렉션 B9j,
+//                       먼저 PathSetInstancedType으로 값을 만든다)
 enum class PropertyPathError : uint8 {
     None,
     Syntax,
@@ -93,7 +98,11 @@ enum class PropertyPathError : uint8 {
     NotMap,
     FixedLength,
     // 깊은 복사·무할당 교환을 할 수 없는 값이다(PathDetach·PathPrepareAttach — 리플렉션 B9i3c0).
-    NotCopyable
+    NotCopyable,
+    // InstancedStruct 연산의 끝이 InstancedStruct가 아니다(리플렉션 B9j).
+    NotInstanced,
+    // 비어 있는 InstancedStruct의 멤버로 들어간다(리플렉션 B9j).
+    InstancedEmpty
 };
 
 // 경로 연산·문자열 해석의 실패 위치와 사유다. step은 실패한 단계의 index다: 경로 연산에서 문맥·
@@ -234,6 +243,20 @@ protected:
     ~PathKeyTextHook() = default;
 };
 
+// InstancedStruct 값 뒤 멤버 단계(`row.damage` — 리플렉션 B9j)를 해석할 때 그 자리에 지금 담긴
+// struct를 주는 hook이다. 담긴 타입은 값마다 실행 중에 정해지므로 스키마만으로는 멤버 이름·ID를
+// 풀 수 없다. 객체 문맥 판 ParsePropertyPath·FormatPropertyPath가 경로
+// 연산(PathReadInstancedType)으로 구현한 것을 쓴다.
+class PathInstancedTypeResolver {
+public:
+    // prefix(InstancedStruct 값으로 끝나는 경로 앞부분)의 지금 담긴 struct lease를 out에 둔다(비어
+    // 있으면 빈 lease). 오류는 ParsePropertyPath·FormatPropertyPath의 오류가 된다.
+    virtual Result<void> InstancedType(PropertyPath prefix, TypeLease& out) noexcept = 0;
+
+protected:
+    ~PathInstancedTypeResolver() = default;
+};
+
 // 문자열 경로를 type(클래스 또는 struct lease)의 스키마로 해석해 out에 쓴다. 문법은
 // `name ('.' name | '[' index ']' | '[' key ']')*`이다(`.`는 struct 값 — struct 필드·struct 원소·
 // Optional<값 struct> 필드·Map<K, 값 struct> 항목 — 뒤에만 온다): 이름은 ASCII 식별자이고 필드의
@@ -269,6 +292,10 @@ protected:
 //   Unsupported     — hook 없는 Soft·ClassRef 키(InvalidKey)
 //   hook의 오류      — 그 코드(InvalidKey)
 //
+// InstancedStruct 값 뒤의 `.`(리플렉션 B9j)는 instanced가 주는 지금 담긴 struct의 멤버다:
+// instanced가 없으면 TypeMismatch(NotStruct), 비어 있으면 NotFound(InstancedEmpty), instanced의
+// 오류는 그 코드다. 보통은 아래 객체 문맥 판을 쓴다.
+//
 // 사용 예:
 //   PropertyPathBuffer path;
 //   PropertyPathFailure failure;
@@ -276,6 +303,22 @@ protected:
 //       if (failure.reason == PropertyPathError::UnknownProperty) { ... }   // AS 4.6절 진단
 //   }
 Result<void> ParsePropertyPath(const TypeLease& type, StringView text, PropertyPathBuffer& out,
+                               PropertyPathFailure* failure = nullptr,
+                               PathKeyTextHook* hook = nullptr,
+                               PathInstancedTypeResolver* instanced = nullptr) noexcept;
+
+// 객체 문맥 판이다(리플렉션 B9j): 시작 위치 target(게시된 객체·staged 객체·struct 값 — 상자는
+// Unsupported)의 스키마로 해석하고 InstancedStruct 뒤 멤버는 그 자리의 지금 담긴 struct로 푼다(경로
+// 연산 PathReadInstancedType — 소유 스레드·문맥 규칙이 경로 연산과 같다). 시작 위치의 스키마 조회
+// 오류(StaleHandle·WrongContext 등)는 그대로 돌려준다. 그 밖은 lease 판과 같다.
+//
+// 사용 예:
+//   PropertyPathBuffer path;
+//   if (auto parsed = ParsePropertyPath(registry, access, table, "row.damage", path); parsed) {
+//       auto written = PathWrite(registry, access, table, path.View(), value);
+//   }
+Result<void> ParsePropertyPath(ObjectRegistry& registry, const ObjectAccessContext& access,
+                               const PathTarget& target, StringView text, PropertyPathBuffer& out,
                                PropertyPathFailure* failure = nullptr,
                                PathKeyTextHook* hook = nullptr) noexcept;
 
@@ -296,6 +339,13 @@ Result<void> ParsePropertyPath(const TypeLease& type, StringView text, PropertyP
 //   String text(allocator);
 //   if (auto formatted = FormatPropertyPath(lease, path.View(), text); formatted) { ... }
 Result<void> FormatPropertyPath(const TypeLease& type, PropertyPath path, String& out,
+                                PathKeyTextHook* hook = nullptr,
+                                PathInstancedTypeResolver* instanced = nullptr) noexcept;
+
+// 객체 문맥 판이다(리플렉션 B9j — ParsePropertyPath의 객체 문맥 판과 같은 규칙). InstancedStruct 뒤
+// 멤버 단계를 지금 담긴 struct의 도구 이름으로 쓴다.
+Result<void> FormatPropertyPath(ObjectRegistry& registry, const ObjectAccessContext& access,
+                                const PathTarget& target, PropertyPath path, String& out,
                                 PathKeyTextHook* hook = nullptr) noexcept;
 
 // ---- 경로 연산(소유 스레드 전용) ----
@@ -547,5 +597,55 @@ Result<void> PathResetOptional(ObjectRegistry& registry, const ObjectAccessConte
 Result<bool> PathIsOptionalSet(ObjectRegistry& registry, const ObjectAccessContext& access,
                                const PathTarget& target, PropertyPath path,
                                PropertyPathFailure* failure = nullptr) noexcept;
+
+// ---- InstancedStruct(리플렉션 B9j — Docs/Design/ReflectionExtensions.ko.md 11절) ----
+//
+// InstancedStruct 값(필드·struct 멤버·Array·정적 배열 원소·Map 값)은 aggregate다: 통째 PathRead·
+// PathWrite는 Unsupported(AggregateValue)이고 아래 연산으로 형을 바꾸고 비우며, 담긴 struct의
+// 멤버는 경로 `f.member`(지금 담긴 struct의 필드 ID 단계)로 읽고 쓴다. 멤버 단계는 연산마다 그
+// 자리의 지금 타입으로 해석하므로(같은 시작 위치에서 앞부분을 먼저 조회한다) 비어 있으면 NotFound
+// (InstancedEmpty), 지금 타입에 없는 멤버면 NotFound(UnknownField)다. Array<InstancedStruct<>>의
+// PathInsertElement는 빈 값을 넣고(값을 주면 Unsupported(AggregateValue)) Map 값은 PathInsertKey가
+// 빈 값을 넣는다.
+
+// path(마지막 단계는 InstancedStruct 값)를 struct type의 기본 값(S(Allocator&) 또는 S() — 객체면
+// ObjectRegistry::ObjectAllocator, 분리된 값이면 그 값의 allocator)으로 바꾼다(같은 타입이어도 기본
+// 값으로 바꾼다). 새 값은 고정 아래 만들고 owner를 다시 확인한 뒤 무할당 이동으로 게시하며 옛 값은
+// 게시 뒤 소멸한다. type은 이 Registry의 TypeRegistry(ObjectRegistry::Types)에 등록된 struct여야
+// 하고(미등록 NotFound, 클래스·enum InvalidArgument — 사유 InvalidValue) 담을 수 있는 struct
+// (detail::CheckInstancedStructContent)이며 끝 단계의 위치 깊이 + 그 struct 깊이 ≤
+// MaxStructDepth여야 한다(InvalidArgument(InvalidValue)). 끝이 InstancedStruct가 아니면
+// TypeMismatch(NotInstanced), 유효 플래그가 ReadOnly면 Unsupported(ReadOnly)다. 실패하면 대상은
+// 바뀌지 않는다.
+//
+// 사용 예:
+//   const PathStep steps[] = {{RowId}};
+//   auto made = PathSetInstancedType(registry, access, table, PropertyPath{steps},
+//                                    GeneratedType<WeaponRow>::Id());
+//   // 이어서 row.damage 같은 멤버를 PathWrite로 쓴다
+Result<void> PathSetInstancedType(ObjectRegistry& registry, const ObjectAccessContext& access,
+                                  const PathTarget& target, PropertyPath path, TypeId type,
+                                  PropertyPathFailure* failure = nullptr) noexcept;
+
+// path(마지막 단계는 InstancedStruct 값)를 비운다(이미 비어 있으면 아무것도 하지 않는다). 옛 값은
+// 게시 뒤 소멸한다(할당 없음). 오류는 PathSetInstancedType의 끝·ReadOnly 오류와 같다.
+//
+// 사용 예(asset-set의 row=none):
+//   auto cleared = PathClearInstanced(registry, access, table, PropertyPath{steps});
+Result<void> PathClearInstanced(ObjectRegistry& registry, const ObjectAccessContext& access,
+                                const PathTarget& target, PropertyPath path,
+                                PropertyPathFailure* failure = nullptr) noexcept;
+
+// path(마지막 단계는 InstancedStruct 값)에 담긴 struct의 lease를 돌려준다(비어 있으면 빈 lease —
+// IsValid 거짓). 텍스트 출력(`_structType`·`row=<타입 도구 이름>`)과 Undo 기록이 쓴다. 읽기라
+// owner를 바꾸지 않는다. lease 복제 오류(ShuttingDown·Overflow)와 끝이 InstancedStruct가 아니면
+// TypeMismatch(NotInstanced), 그 밖은 PathRead와 같다.
+//
+// 사용 예:
+//   auto type = PathReadInstancedType(registry, access, table, path.View());
+//   if (type && type.Value().IsValid()) { StringView name = ...; }
+Result<TypeLease> PathReadInstancedType(ObjectRegistry& registry, const ObjectAccessContext& access,
+                                        const PathTarget& target, PropertyPath path,
+                                        PropertyPathFailure* failure = nullptr) noexcept;
 
 } // namespace rocks

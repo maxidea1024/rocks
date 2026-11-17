@@ -34,6 +34,8 @@ Result<uint32> EncodeMemberValue(const Member& source, ArchiveWriter& out,
         return EncodeOptionalField(source, out, context);
     } else if constexpr (MapField<Member>::Supported) {
         return EncodeMapField(source, out, context);
+    } else if constexpr (InstancedStructField<Member>::Supported) {
+        return EncodeInstancedStructField(source, out, context);
     } else if constexpr (ReflectedStructField<Member>::Supported) {
         if (!MatchesStructView<Member>(context)) {
             return Result<uint32>::Failure(ErrorCode::TypeMismatch);
@@ -102,6 +104,9 @@ Result<void> DecodeStructMember(const RuntimeStructFieldOps&, ConstructionContex
     } else if constexpr (MapField<Member>::Supported) {
         return DecodeMapField(construction, owner, target ? &(target->*MemberPointer) : nullptr,
                               field, context);
+    } else if constexpr (InstancedStructField<Member>::Supported) {
+        return DecodeInstancedStructField(
+            construction, owner, target ? &(target->*MemberPointer) : nullptr, field, context);
     } else if constexpr (ReflectedStructField<Member>::Supported) {
         if (!MatchesStructView<Member>(context)) {
             return Result<void>::Failure(ErrorCode::TypeMismatch);
@@ -329,6 +334,21 @@ Result<void> DecodeGeneratedField(ConstructionContext* construction, ObjectHandl
         }
 
         return DecodeMapField(construction, handle, &(owner.Value()->*member), field, context);
+    } else if constexpr (InstancedStructField<Member>::Supported) {
+        // InstancedStruct 필드(리플렉션 B9j): 1단계는 값 없이 검증(담긴 struct 판정 기록), 2단계는
+        // 새 객체 안의 자리를 1단계 판정대로 바꾸고 해석한다(할당 말고는 실패하지 않는다).
+        if (!construction) {
+            return DecodeInstancedStructField<typename InstancedStructField<Member>::BaseType>(
+                nullptr, handle, nullptr, field, context);
+        }
+
+        auto owner = construction->GetForWrite<Owner>(handle);
+        if (!owner) {
+            return Result<void>::Failure(owner.Error());
+        }
+
+        return DecodeInstancedStructField(construction, handle, &(owner.Value()->*member), field,
+                                          context);
     } else if constexpr (ReflectedStructField<Member>::Supported) {
         // struct 필드: 1단계는 값 없이 검증(관찰은 scratch), 2단계는 새 객체 안의 멤버 주소에 쓴다.
         if (!MatchesStructView<Member>(context)) {

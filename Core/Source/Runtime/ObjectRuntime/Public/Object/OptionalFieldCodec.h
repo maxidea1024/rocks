@@ -2,7 +2,7 @@
 
 #include <Object/ArrayFieldCodec.h>
 
-// 필드 codec 사슬의 다섯째 조각으로 Optional 필드 codec이다(리플렉션 B9e — Docs/Design/
+// 필드 codec 사슬의 여섯째 조각으로 Optional 필드 codec이다(리플렉션 B9e — Docs/Design/
 // ReflectionExtensions.ko.md 1.2·6절). 쓰기(EncodeOptionalField — 단일 값 내부는 EncodeFieldWire,
 // 값 struct 내부는 EncodeOptionalStruct)와 읽기(DecodeOptionalField — 단일 값 내부는
 // ParseFieldValue, 값 struct 내부는 DecodeOptionalStruct)가 있다. wire는 Optional(14): present byte

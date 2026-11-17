@@ -1,12 +1,16 @@
 #pragma once
 
 #include <Config/ConfigContext.h>
+#include <Core/Diagnostics/Log.h>
 #include <Core/Text/Json.h>
 #include <Object/TypeLease.h>
 #include <ReflectionText/TextCodecOptions.h>
 
 // 설정 문맥의 내부 상태다(ConfigContext의 pimpl — 모듈 안 구현만 쓴다).
 namespace rocks::config::detail {
+
+// 설정 계층의 진단(약한 쓰기)과 콘솔 명령 실패를 남기는 로그 카테고리다.
+inline constexpr LogCategory LogConfig{"Config"};
 
 // 필드 경로 하나의 출처 스택이다. entries는 적용 순서(약한 것부터)의 입력
 // 순번(ConfigEntry::sequence)이다.

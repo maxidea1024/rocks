@@ -347,6 +347,22 @@ Result<BufferHandle> GlesDevice::CreateBuffer(const BufferDesc& desc,
     return Result<BufferHandle>::Success(BufferHandle{added.Value()});
 }
 
+PixelFormatCaps GlesDevice::GetPixelFormatCaps(PixelFormat format) const noexcept {
+    // 대응 표(GlesFormats.cpp)에 있고 이 장치에서 샘플할 수 있는 형식만 능력을
+    // 공개한다(PixelFormat.ko.md 14절 PF3, ES 3.2 조건표 전체는 PF4).
+    const GlesTextureFormat* entry = FindTextureFormat(format);
+    if (entry == nullptr || !SupportsTextureFormat(*entry, features_, false)) {
+        return PixelFormatCaps::None;
+    }
+    PixelFormatCaps caps =
+        PixelFormatCaps::Sampled | PixelFormatCaps::Filterable | PixelFormatCaps::Mipmaps;
+    if (SupportsTextureFormat(*entry, features_, true)) {
+        caps = caps | PixelFormatCaps::RenderTarget | PixelFormatCaps::Blendable;
+    }
+
+    return caps;
+}
+
 Result<TextureHandle> GlesDevice::CreateTexture(const TextureDesc& desc,
                                                 Span<const uint8> pixels) noexcept {
     auto owner = ownership_.Check();
@@ -359,8 +375,10 @@ Result<TextureHandle> GlesDevice::CreateTexture(const TextureDesc& desc,
     // 먼저 한다.
     const bool renderTarget = desc.usage == TextureUsage::RenderTarget;
     const GlesTextureFormat* format = FindTextureFormat(desc.format);
+    // 깊이·스텐실 타깃(TextureUsage::DepthStencil)은 깊이 형식 대응(PF4) 전까지 대응하지 않는다.
     if (IsValidPixelFormat(desc.format) &&
-        (format == nullptr || !SupportsTextureFormat(*format, features_, renderTarget))) {
+        (format == nullptr || desc.usage == TextureUsage::DepthStencil ||
+         !SupportsTextureFormat(*format, features_, renderTarget))) {
         Diagnostic message;
         message.Text("pixel format ")
             .Text(PixelFormatName(desc.format))

@@ -45,6 +45,22 @@ struct PathRunner {
         cursor.reference_ = &out;
     }
 
+    // QueryInstanced의 출력 lease를 건다(리플렉션 B9j).
+    static void BindInstancedType(PathCursor& cursor, TypeLease& out) noexcept {
+        cursor.instancedOut_ = &out;
+    }
+
+    // PathSetInstancedType의 새 타입 ID를 건다(리플렉션 B9j — 등록 struct 조회·담기 조건·깊이 합
+    // 검사는 Run의 검증 지점이 끝 단계 위치 깊이로 한다).
+    static void BindInstancedRequest(PathCursor& cursor, TypeId type) noexcept {
+        cursor.instancedRequest_ = type;
+    }
+
+    // InstancedStruct 단계 index의 담긴 타입을 같은 시작 위치에서 path 앞부분(그 단계까지)으로
+    // 조회해 그 단계의 대상 struct로 둔다(리플렉션 B9j). 비어 있으면 NotFound(InstancedEmpty)다.
+    static Result<void> ResolveInstancedStep(PathCursor& cursor, PropertyPath path,
+                                             usize index) noexcept;
+
     // PathReadKeys의 출력 키 목록을 건다(리플렉션 B9i4).
     static void BindKeys(PathCursor& cursor, Array<FieldValue>& out) noexcept {
         cursor.keys_ = &out;

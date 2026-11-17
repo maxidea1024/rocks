@@ -248,13 +248,20 @@ TEST(PixelFormat_BlockSizeReferenceValues) {
     CHECK(PixelFormatPlaneImageBytes(PixelFormat::NV12, 1, 4, 2) == 4);
     CHECK(PixelFormatImageBytes(PixelFormat::NV12, 3, 2) == 0);
     CHECK(PixelFormatPlaneImageBytes(PixelFormat::NV12, 2, 4, 2) == 0);
-    // 깊이·스텐실은 CPU 업로드 크기가 없고 plane별 크기만 있다.
-    CHECK(PixelFormatImageBytes(PixelFormat::D24UnormS8Uint, 4, 4) == 0);
+    // 깊이·스텐실은 plane 크기의 합이다(깊이 4바이트 + 스텐실 1바이트).
+    CHECK(PixelFormatImageBytes(PixelFormat::D24UnormS8Uint, 4, 4) == 64 + 16);
+    CHECK(PixelFormatPlaneCount(PixelFormat::D24UnormS8Uint) == 2);
+    CHECK(PixelFormatPlaneRowBytes(PixelFormat::D32FloatS8Uint, 1, 4) == 4);
+    CHECK(PixelFormatPlaneRows(PixelFormat::NV12, 1, 6) == 3);
+    CHECK(PixelFormatPlaneRows(PixelFormat::NV12, 1, 5) == 0);
+    CHECK(PixelFormatPlaneRows(PixelFormat::BC1Unorm, 0, 9) == 3);
     CHECK(PixelFormatPlaneImageBytes(PixelFormat::D24UnormS8Uint, 0, 4, 4) == 64);
     CHECK(PixelFormatPlaneImageBytes(PixelFormat::D32FloatS8Uint, 1, 4, 4) == 16);
     CHECK(PixelFormatPlaneImageBytes(PixelFormat::D16Unorm, 0, 2, 2) == 8);
     CHECK(PixelFormatPlaneImageBytes(PixelFormat::D16Unorm, 1, 2, 2) == 0);
-    CHECK(PixelFormatRowBytes(PixelFormat::D32Float, 4) == 0);
+    CHECK(PixelFormatRowBytes(PixelFormat::D32Float, 4) == 16);
+    CHECK(PixelFormatImageBytes(PixelFormat::D16Unorm, 2, 2) == 8);
+    CHECK(PixelFormatRowBytes(PixelFormat::NV12, 4) == 0);
     // 크기 0.
     CHECK(PixelFormatImageBytes(PixelFormat::RGBA8Unorm, 0, 4) == 0);
 }
@@ -271,8 +278,9 @@ TEST(PixelFormat_MipChainBytes) {
     // mip 수가 전체 mip 수를 넘거나 0이면 0이다.
     CHECK(MipChainBytes(PixelFormat::RGBA8Unorm, 4, 4, 1, 4) == 0);
     CHECK(MipChainBytes(PixelFormat::RGBA8Unorm, 4, 4, 1, 0) == 0);
-    // 깊이 형식과 무효 형식은 업로드 크기가 없다.
-    CHECK(MipChainBytes(PixelFormat::D32Float, 4, 4, 1, 1) == 0);
+    // 깊이 형식은 texel 크기로, 다중 plane은 mip마다 plane 합으로 센다. 무효 형식은 0이다.
+    CHECK(MipChainBytes(PixelFormat::D32Float, 4, 4, 1, 1) == 64);
+    CHECK(MipChainBytes(PixelFormat::NV12, 4, 4, 1, 2) == (16 + 8) + (4 + 2));
     CHECK(MipChainBytes(PixelFormat::Unknown, 4, 4, 1, 1) == 0);
     CHECK(FullMipCount(16, 1) == 5);
     CHECK(MipExtent(5, 1) == 2 && MipExtent(5, 3) == 1);

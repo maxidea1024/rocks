@@ -286,18 +286,43 @@ constexpr bool SrgbPairsConsistent() noexcept {
 
 static_assert(SrgbPairsConsistent(), "sRGB pairs must be symmetric and share storage");
 
-uint64 PlaneBytes(const PixelFormatInfo& info, uint32 plane, uint32 width, uint32 height) noexcept {
-    if (plane >= info.planeCount) {
-        return 0;
+// plane 하나의 (texel 바이트, 폭 축소, 높이 축소)다. 단일 plane 형식은 plane 0만 있고 블록 단위다.
+struct PlaneShape {
+    uint32 blockWidth = 0;
+    uint32 blockHeight = 0;
+    uint32 blockBytes = 0;
+    uint32 widthShift = 0;
+    uint32 heightShift = 0;
+};
+
+PlaneShape ShapeOf(const PixelFormatInfo& info, uint32 plane) noexcept {
+    PlaneShape shape;
+    switch (info.kind) {
+    case PixelFormatKind::Color:
+    case PixelFormatKind::Compressed:
+    case PixelFormatKind::Depth:
+        if (plane == 0) {
+            shape.blockWidth = info.blockWidth;
+            shape.blockHeight = info.blockHeight;
+            shape.blockBytes = info.blockBytes;
+        }
+        break;
+    case PixelFormatKind::DepthStencil:
+    case PixelFormatKind::Planar:
+        if (plane < info.planeCount) {
+            const PixelFormatPlane& layout = info.planes[plane];
+            shape.blockWidth = 1;
+            shape.blockHeight = 1;
+            shape.blockBytes = RowOf(layout.format).blockBytes;
+            shape.widthShift = layout.widthShift;
+            shape.heightShift = layout.heightShift;
+        }
+        break;
+    case PixelFormatKind::Unknown:
+        break;
     }
-    const PixelFormatPlane& layout = info.planes[plane];
-    const uint32 widthStep = 1u << layout.widthShift;
-    const uint32 heightStep = 1u << layout.heightShift;
-    if (width % widthStep != 0 || height % heightStep != 0) {
-        return 0;
-    }
-    const uint64 texel = RowOf(layout.format).blockBytes;
-    return static_cast<uint64>(width >> layout.widthShift) * (height >> layout.heightShift) * texel;
+
+    return shape;
 }
 
 } // namespace
@@ -352,58 +377,55 @@ uint32 PixelFormatBlockRows(PixelFormat format, uint32 height) noexcept {
     return (height + info.blockHeight - 1u) / info.blockHeight;
 }
 
-uint64 PixelFormatRowBytes(PixelFormat format, uint32 width) noexcept {
-    const PixelFormatInfo& info = RowOf(format);
-    if (info.kind != PixelFormatKind::Color && info.kind != PixelFormatKind::Compressed) {
-        return 0;
-    }
-
-    return static_cast<uint64>(PixelFormatBlockColumns(format, width)) * info.blockBytes;
+uint32 PixelFormatPlaneCount(PixelFormat format) noexcept {
+    return RowOf(format).planeCount;
 }
 
-uint64 PixelFormatImageBytes(PixelFormat format, uint32 width, uint32 height) noexcept {
-    const PixelFormatInfo& info = RowOf(format);
-    if (width == 0 || height == 0) {
+uint64 PixelFormatPlaneRowBytes(PixelFormat format, uint32 plane, uint32 width) noexcept {
+    const PlaneShape shape = ShapeOf(RowOf(format), plane);
+    if (shape.blockBytes == 0 || width == 0 || width % (1u << shape.widthShift) != 0) {
         return 0;
     }
-    switch (info.kind) {
-    case PixelFormatKind::Color:
-    case PixelFormatKind::Compressed:
-        return PixelFormatRowBytes(format, width) * PixelFormatBlockRows(format, height);
-    case PixelFormatKind::Planar: {
-        const uint64 luma = PlaneBytes(info, 0, width, height);
-        const uint64 chroma = PlaneBytes(info, 1, width, height);
-        return luma == 0 || chroma == 0 ? 0 : luma + chroma;
-    }
-    case PixelFormatKind::Depth:
-    case PixelFormatKind::DepthStencil:
-    case PixelFormatKind::Unknown:
-        break;
-    }
+    const uint32 planeWidth = width >> shape.widthShift;
+    const uint64 columns = (planeWidth + shape.blockWidth - 1u) / shape.blockWidth;
+    return columns * shape.blockBytes;
+}
 
-    return 0;
+uint32 PixelFormatPlaneRows(PixelFormat format, uint32 plane, uint32 height) noexcept {
+    const PlaneShape shape = ShapeOf(RowOf(format), plane);
+    if (shape.blockBytes == 0 || height == 0 || height % (1u << shape.heightShift) != 0) {
+        return 0;
+    }
+    const uint32 planeHeight = height >> shape.heightShift;
+    return (planeHeight + shape.blockHeight - 1u) / shape.blockHeight;
 }
 
 uint64 PixelFormatPlaneImageBytes(PixelFormat format, uint32 plane, uint32 width,
                                   uint32 height) noexcept {
-    const PixelFormatInfo& info = RowOf(format);
-    if (width == 0 || height == 0) {
+    return PixelFormatPlaneRowBytes(format, plane, width) *
+           PixelFormatPlaneRows(format, plane, height);
+}
+
+uint64 PixelFormatRowBytes(PixelFormat format, uint32 width) noexcept {
+    if (RowOf(format).planeCount != 1) {
         return 0;
     }
-    switch (info.kind) {
-    case PixelFormatKind::Color:
-    case PixelFormatKind::Compressed:
-        return plane == 0 ? PixelFormatImageBytes(format, width, height) : 0;
-    case PixelFormatKind::Depth:
-        return plane == 0 ? static_cast<uint64>(width) * height * info.blockBytes : 0;
-    case PixelFormatKind::DepthStencil:
-    case PixelFormatKind::Planar:
-        return PlaneBytes(info, plane, width, height);
-    case PixelFormatKind::Unknown:
-        break;
+
+    return PixelFormatPlaneRowBytes(format, 0, width);
+}
+
+uint64 PixelFormatImageBytes(PixelFormat format, uint32 width, uint32 height) noexcept {
+    const uint32 planes = RowOf(format).planeCount;
+    uint64 total = 0;
+    for (uint32 plane = 0; plane < planes; ++plane) {
+        const uint64 bytes = PixelFormatPlaneImageBytes(format, plane, width, height);
+        if (bytes == 0) {
+            return 0;
+        }
+        total += bytes;
     }
 
-    return 0;
+    return total;
 }
 
 uint64 MipChainBytes(PixelFormat format, uint32 width, uint32 height, uint32 depth,

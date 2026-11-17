@@ -207,6 +207,20 @@ Result<void> ValidateArrayEdit(const FieldWriteTarget& target, ArrayEdit edit) n
 //   if (auto valid = detail::ValidateOptionalEdit(target); !valid) { ... }
 Result<void> ValidateOptionalEdit(const FieldWriteTarget& target) noexcept;
 
+// InstancedStruct 값의 형 바꾸기(SetInstancedType)·비우기(ClearInstanced)의 검증 한 곳이다(리플렉션
+// B9j — Docs/Design/ReflectionExtensions.ko.md 11절). target.actual이 없거나 그 자리(원소 모드면
+// element — Array·정적 배열 원소·Map 값, 아니면 value)가 InstancedStruct가 아니면 TypeMismatch,
+// 유효 플래그(target.effectiveFlags — 바깥 struct·배열 필드에서 전파된다)가 ReadOnly면
+// Unsupported다. lease를 얻지 않는 순수 검사다(새 타입의 등록·담기 조건·깊이 합은 경로 실행기가
+// 본다).
+//
+// 사용 예:
+//   detail::FieldWriteTarget target;
+//   target.actual = &field;
+//   target.effectiveFlags = effectiveFlags;
+//   if (auto valid = detail::ValidateInstancedEdit(target); !valid) { ... }
+Result<void> ValidateInstancedEdit(const FieldWriteTarget& target) noexcept;
+
 // weak 참조 값(WeakObjectReference — 리플렉션 B9d1)의 대상을 검사한다(Docs/Design/
 // ReflectionExtensions.ko.md 5.1절 쓰기 검증). target이 null(IsNull — 비정규 null 포함)이면 성공,
 // 다른 Registry가 발급한 handle이면 WrongContext(ObjectRegistry::OwnsHandle)이고, 아니면

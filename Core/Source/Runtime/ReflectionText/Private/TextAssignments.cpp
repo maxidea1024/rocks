@@ -222,6 +222,11 @@ Result<void> ReportPathFailure(AssignmentState& state, ErrorCode code,
     case PropertyPathError::OptionalUnset:
         message = "optional value is unset";
         break;
+    case PropertyPathError::InstancedEmpty:
+        message = "instanced struct is empty";
+        break;
+    case PropertyPathError::NotInstanced:
+        break;
     case PropertyPathError::InvalidValue:
     case PropertyPathError::InvalidKey:
     case PropertyPathError::NotOptional:
@@ -401,7 +406,9 @@ Result<void> AddOverride(AssignmentState& state, PropertyPath path) noexcept {
         const bool atomic =
             field.value.kind == ValueKind::Struct && !slot.structView.IsEmpty() &&
             (slot.structView.Schema().flags & static_cast<uint32>(TypeFlags::Atomic)) != 0;
-        if (ValueKindIsContainer(field.value.kind) || atomic) {
+        // InstancedStruct는 통째 단위다(리플렉션 B9j — 담긴 struct의 멤버로 내려가지 않는다).
+        const bool instanced = field.value.kind == ValueKind::InstancedStruct;
+        if (ValueKindIsContainer(field.value.kind) || atomic || instanced) {
             count = index + 1;
             break;
         }
