@@ -49,6 +49,8 @@ struct PipelineRecord {
     // 정점 입력이 없는 배치면 비어 있다.
     ComRef<ID3D11InputLayout> inputLayout;
     bool alphaBlend = false;
+    // 버릴 면이다(장치의 모드별 래스터 상태를 고른다).
+    CullMode cullMode = CullMode::None;
     // stream별 stride와 배치가 선언한 stream mask다(그리기 때 묶인 정점 버퍼를 확인한다).
     uint32 strides[MaxVertexStreams] = {};
     uint32 streamMask = 0;
@@ -221,8 +223,14 @@ private:
     // 기록 대상(백버퍼 또는 RenderTarget 텍스처)이다.
     struct Target {
         ID3D11RenderTargetView* rtv = nullptr;
+        // 패스 대상 자원이다(CopyPassTarget의 원본).
+        ID3D11Resource* resource = nullptr;
         uint32 width = 0;
         uint32 height = 0;
+        // 패스 대상의 형식이다(스왑체인은 RGBA8UnormSrgb view).
+        Format format = Format::Unknown;
+        // offscreen 패스의 대상 텍스처다(스왑체인 패스는 null).
+        TextureHandle texture;
     };
 
     // 기록 중 묶인 정점·index 버퍼다(파이프라인을 바꾸면 그 stride로 다시 묶는다).
@@ -257,6 +265,7 @@ private:
     void SetConstants(const DrawConstants& constants) noexcept override;
     void Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept override;
     void DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept override;
+    Result<void> CopyPassTarget(TextureHandle destination) noexcept override;
     Result<uint64> WriteTimestamp() noexcept override;
     void PushMarker(StringView name) noexcept override;
     void PopMarker() noexcept override;
@@ -395,7 +404,8 @@ private:
     // 마지막으로 신호한 fence 값이다.
     uint64 fenceValue_ = 0;
     // 파이프라인끼리 공유하는 고정 상태다.
-    ComRef<ID3D11RasterizerState> rasterizer_;
+    // 컬 모드(CullMode 값 순서)별 래스터 상태다.
+    ComRef<ID3D11RasterizerState> rasterizers_[CullModeCount];
     ComRef<ID3D11DepthStencilState> depthDisabled_;
     ComRef<ID3D11BlendState> opaqueBlend_;
     ComRef<ID3D11BlendState> alphaBlend_;

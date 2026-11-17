@@ -297,7 +297,8 @@ D3D11은 필수 backend다(2026-11-13 사용자 결정). D3D12의 SM 6.6 기준�
 **파이프라인·정점 배치(GX3a).**
 - 입력 layout은 파이프라인마다 VS 바이트코드로 만든다. 시맨틱은 `ATTRIBUTEn`, `InputSlot`은 stream이고, 인스턴스 stream은 `D3D11_INPUT_PER_INSTANCE_DATA`·간격 1이다(UE `Private/D3D11VertexDeclaration.cpp:57–62`). 속성이 없으면 입력 layout을 묶지 않는다.
 - 셰이더 입력 대조는 `ID3D11ShaderReflection`으로 D3D12와 같은 규칙을 적용한다. `Bgra8Unorm`은 `CheckFormatSupport`의 IA 정점 버퍼 지원이 없으면 `Unsupported`다.
-- 래스터: `FrontCounterClockwise = TRUE`(UE `Private/D3D11State.cpp:211`, D3D12와 같다), 깊이 clip 켬, scissor 끔. 컬 모드는 `PipelineDesc`의 값을 따른다(C7 전에는 컬링 없음).
+- 래스터: `FrontCounterClockwise = TRUE`(UE `Private/D3D11State.cpp:211`, D3D12와 같다), 깊이 clip 켬, scissor 끔. 컬 모드(`PipelineDesc::cullMode`)마다 래스터 상태를 하나씩 만들어 파이프라인이 고른다. HLSL은 `D3DCOMPILE_PACK_MATRIX_ROW_MAJOR`로 컴파일한다(D3D12와 같은 행 우선 규약).
+- `CopyPassTarget`은 deferred context의 `CopyResource`다(백버퍼 `R8G8B8A8_UNORM`과 RenderTarget sRGB는 같은 typeless 묶음).
 - 블렌드·래스터·깊이 상태 객체는 장치가 한 번 만들어 파이프라인끼리 공유한다.
 - 자원 전이(GX5)는 없다. D3D11 runtime이 hazard를 추적한다.
 

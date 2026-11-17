@@ -303,16 +303,21 @@ Result<void> D3D11Device::CreateOnAdapter(IDXGIAdapter1* adapter, bool requestDe
 }
 
 Result<void> D3D11Device::CreateSharedStates() noexcept {
-    // 앞면은 화면 반시계다(UE D3D11State.cpp:211, ShaderSystem 7.2절 8항). 컬링·깊이는 아직
-    // PipelineDesc에 없다(쓰지 않는다).
-    D3D11_RASTERIZER_DESC raster = {};
-    raster.FillMode = D3D11_FILL_SOLID;
-    raster.CullMode = D3D11_CULL_NONE;
-    raster.FrontCounterClockwise = TRUE;
-    raster.DepthClipEnable = TRUE;
-    HRESULT result = device_->CreateRasterizerState(&raster, rasterizer_.Out());
-    if (FAILED(result)) {
-        return Fail("CreateRasterizerState", result);
+    // 앞면은 화면 반시계다(UE D3D11State.cpp:211, ShaderSystem 7.2절 8항, D3D12와 같다). 컬
+    // 모드마다 상태 하나를 만든다. 깊이는 아직 PipelineDesc에 없다(쓰지 않는다).
+    constexpr CullMode Modes[CullModeCount] = {CullMode::None, CullMode::Back, CullMode::Front};
+    HRESULT result = S_OK;
+    for (CullMode mode : Modes) {
+        D3D11_RASTERIZER_DESC raster = {};
+        raster.FillMode = D3D11_FILL_SOLID;
+        raster.CullMode = RasterCullMode(mode);
+        raster.FrontCounterClockwise = TRUE;
+        raster.DepthClipEnable = TRUE;
+        result =
+            device_->CreateRasterizerState(&raster, rasterizers_[static_cast<usize>(mode)].Out());
+        if (FAILED(result)) {
+            return Fail("CreateRasterizerState", result);
+        }
     }
 
     D3D11_DEPTH_STENCIL_DESC depth = {};

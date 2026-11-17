@@ -275,6 +275,11 @@ Result<PipelineHandle> D3D11Device::CreatePipeline(const PipelineDesc& desc) noe
 
     PipelineRecord record;
     record.alphaBlend = desc.alphaBlend;
+    if (static_cast<usize>(desc.cullMode) >= CullModeCount) {
+        return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    record.cullMode = desc.cullMode;
     HRESULT result =
         device_->CreateVertexShader(vertexCode->GetBufferPointer(), vertexCode->GetBufferSize(),
                                     nullptr, record.vertexShader.Out());
@@ -367,7 +372,9 @@ Result<ID3D11SamplerState*> D3D11Device::SamplerFor(const SamplerDesc& desc) noe
 Result<void> D3D11Device::Compile(StringView source, const char* entry, const char* target,
                                   ComRef<ID3DBlob>& code) noexcept {
     ComRef<ID3DBlob> errors;
-    UINT flags = D3DCOMPILE_ENABLE_STRICTNESS;
+    // 행렬은 행 우선으로 담는다(DrawConstants 규약, ShaderSystem 7.2절 6항 FXC /Zpr). D3D12와 UE도
+    // 같은 플래그다(D3DShaderCompiler.cpp:1337–1339).
+    UINT flags = D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_PACK_MATRIX_ROW_MAJOR;
     if (validation_) {
         flags |= D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
     } else {

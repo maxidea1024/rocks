@@ -29,7 +29,13 @@ Result<CommandContext*> D3D11Device::BeginFrame(SwapChainHandle handle,
         return FailWith<CommandContext*>("swap chain has no buffers after a failed resize");
     }
 
-    BeginRecording({record->rtv.Get(), record->width, record->height}, clear);
+    BeginRecording({record->rtv.Get(),
+                    record->buffer.Get(),
+                    record->width,
+                    record->height,
+                    Format::RGBA8UnormSrgb,
+                    {}},
+                   clear);
     presentTarget_ = handle;
     return Result<CommandContext*>::Success(this);
 }
@@ -56,7 +62,9 @@ Result<CommandContext*> D3D11Device::BeginOffscreen(TextureHandle handle,
         return Result<CommandContext*>::Failure(ErrorCode::Destroyed);
     }
 
-    BeginRecording({record->rtv.Get(), record->width, record->height}, clear);
+    BeginRecording({record->rtv.Get(), record->texture.Get(), record->width, record->height,
+                    record->format, handle},
+                   clear);
     presentTarget_ = {};
     return Result<CommandContext*>::Success(this);
 }
@@ -81,7 +89,7 @@ void D3D11Device::BeginRecording(const Target& target, const ClearColor& clear) 
     viewport.Height = static_cast<float>(target_.height);
     viewport.MaxDepth = 1.0f;
     context->RSSetViewports(1, &viewport);
-    context->RSSetState(rasterizer_.Get());
+    context->RSSetState(rasterizers_[static_cast<usize>(CullMode::None)].Get());
     context->OMSetDepthStencilState(depthDisabled_.Get(), 0);
     context->OMSetBlendState(opaqueBlend_.Get(), nullptr, D3D11_DEFAULT_SAMPLE_MASK);
     context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -192,6 +200,7 @@ void D3D11Device::SetPipeline(PipelineHandle handle) noexcept {
     context->VSSetShader(record->vertexShader.Get(), nullptr, 0);
     context->PSSetShader(record->pixelShader.Get(), nullptr, 0);
     context->IASetInputLayout(record->inputLayout.Get());
+    context->RSSetState(rasterizers_[static_cast<usize>(record->cullMode)].Get());
     context->OMSetBlendState(record->alphaBlend ? alphaBlend_.Get() : opaqueBlend_.Get(), nullptr,
                              D3D11_DEFAULT_SAMPLE_MASK);
     boundPipeline_ = handle.slot;
@@ -285,6 +294,28 @@ void D3D11Device::DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 fi
 
     // base vertex·base instance는 0으로 고정한다.
     deferred_->DrawIndexedInstanced(indexCount, instanceCount, firstIndex, 0, 0);
+}
+
+Result<void> D3D11Device::CopyPassTarget(TextureHandle destination) noexcept {
+    platform::LockGuard lock(gate_);
+    if (!recording_) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const TextureRecord* record = textures_.Find(destination.slot);
+    if (record == nullptr) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    if (!record->renderTarget || destination == target_.texture || record->width != target_.width ||
+        record->height != target_.height || record->format != target_.format) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 백버퍼(R8G8B8A8_UNORM)와 RenderTarget(R8G8B8A8_UNORM_SRGB)은 같은 typeless 묶음이라
+    // CopyResource가 byte를 그대로 옮긴다. 기록 순서대로 실행되므로 앞 그리기가 모두 들어간다.
+    deferred_->CopyResource(record->texture.Get(), target_.resource);
+    return Result<void>::Success();
 }
 
 // 묶인 정점 버퍼 하나를 지금 파이프라인의 stride로 IA에 건다.

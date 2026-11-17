@@ -33,9 +33,10 @@ namespace rocks::graphics {
 // - 업로드 ring·staging은 시스템 메모리이며 제출 때 UpdateSubresource로 올린다(D3D11에는 계속 map해
 //   둘 수 있는 업로드 heap이 없다). 생성 초기 데이터는 생성 호출 안에서 올린다.
 // - 스왑체인은 flip model(R8G8B8A8_UNORM 버퍼, RGBA8UnormSrgb RTV)이다.
-// - 셰이더는 HLSL을 실행 중 SM 5.0(vs_5_0·ps_5_0)으로 컴파일한다. 정점 입력 시맨틱은
+// - 셰이더는 HLSL을 실행 중 SM 5.0(vs_5_0·ps_5_0)으로, 행렬을 행 우선으로 담아
+//   (D3DCOMPILE_PACK_MATRIX_ROW_MAJOR) 컴파일한다. 정점 입력 시맨틱은
 //   ATTRIBUTE{location}, 그리기 상수는 b0 동적 상수 버퍼, 텍스처는 t0·s0이다.
-// - 래스터 앞면은 화면 반시계(FrontCounterClockwise = TRUE)다.
+// - 래스터 앞면은 화면 반시계(FrontCounterClockwise = TRUE)이고 PipelineDesc::cullMode를 따른다.
 // - CalibrateClocks는 제출한 GPU 작업이 끝나기를 기다린다(D3D11에 queue clock calibration이 없다).
 Result<UniquePtr<Device>> CreateD3D11Device(Allocator& allocator, const DeviceDesc& desc,
                                             DeviceCreateReport* report = nullptr) noexcept;

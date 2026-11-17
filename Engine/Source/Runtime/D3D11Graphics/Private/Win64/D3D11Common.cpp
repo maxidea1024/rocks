@@ -79,6 +79,19 @@ bool IsAttributeSemantic(const char* name) noexcept {
     return name[index] == 0;
 }
 
+D3D11_CULL_MODE RasterCullMode(CullMode mode) noexcept {
+    switch (mode) {
+    case CullMode::Back:
+        return D3D11_CULL_BACK;
+    case CullMode::Front:
+        return D3D11_CULL_FRONT;
+    case CullMode::None:
+        break;
+    }
+
+    return D3D11_CULL_NONE;
+}
+
 D3D11_FILTER SamplerFilter(Filter filter) noexcept {
     switch (filter) {
     case Filter::Nearest:
