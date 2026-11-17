@@ -2098,6 +2098,14 @@ private:
         }
     }
 
+    // OpenGL은 드라이버가 자원 상태를 암묵으로 관리하므로 명시 전이를 낮출 곳이 없다(RenderBase
+    // GX5, UE OpenGL RHI도 전이 함수가 비어 있다). UAV(image·storage buffer) 쓰기 뒤 읽기에 필요한
+    // glMemoryBarrier는 그런 자원이 아직 없어 넣지 않았다. GX2에서 storage 자원이 들어오면 after의
+    // 접근 비트(SrvGraphics → GL_TEXTURE_FETCH_BARRIER_BIT 등)로 bit를 골라 여기서 부른다.
+    void Transition(Span<const ResourceTransition> transitions) noexcept override {
+        (void)transitions;
+    }
+
     Result<void> CopyPassTarget(TextureHandle destination) noexcept override {
         if (!recording_) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
