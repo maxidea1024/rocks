@@ -142,3 +142,21 @@ TEST(GcSoak_ClusterSchedulerKeepsOracle) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+
+// 모델 상한(maxObjects)에 닿은 뒤에도 smoke가 모델을 키우지 않는다(Level 생성도 상한을 지킨다 —
+// 상한 없이 커지면 oracle 비용이 tick마다 늘어 긴 실행이 끝나지 않는다). 작은 상한과 긴 실행으로
+// 상한에 일찍 닿게 한다.
+TEST(GcSoak_ClusterWorldStaysWithinModelLimit) {
+    SystemAllocator allocator;
+    GcClusterSoakOptions options;
+    options.seed = 31;
+    options.ticks = 600;
+    options.maxObjects = 120;
+    GcClusterSoakReport report;
+    const bool passed = RunGcClusterSoak(allocator, options, report);
+    PrintClusterFailure(report);
+    CHECK(passed);
+    CHECK(report.ticks == options.ticks);
+    CHECK(report.created <= options.maxObjects);
+    CHECK(allocator.Stats().liveAllocations == 0);
+}

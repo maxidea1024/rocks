@@ -93,12 +93,19 @@ bool RunGcSoak(Allocator& allocator, const GcSoakOptions& options, GcSoakReport&
 //   World API 밖 Actor 파괴, Level 밖 일반 객체)이다.
 // - seed·ticks·maxObjects·scheduler는 GcSoakOptions와 같다. tick 하나는 증분 cycle 하나(slice마다
 //   무작위 객체 예산, slice 사이 변경)이고 7 tick마다 정지형 Collect로 정확성을 본다.
+struct GcClusterSoakReport;
+
 struct GcClusterSoakOptions {
     uint64 seed = 1;
     uint64 ticks = 200;
     uint32 maxObjects = 1500;
     bool packages = false;
     WorkerScheduler* scheduler = nullptr;
+    // 진행 표시(선택): progressInterval tick마다 그때까지의 보고로 부른다(긴 실행이 멈췄는지 느린지
+    // 구별하려고 — GcBench가 출력한다).
+    void (*progress)(const GcClusterSoakReport&, void* context) noexcept = nullptr;
+    void* progressContext = nullptr;
+    uint64 progressInterval = 0;
 };
 
 struct GcClusterSoakReport {

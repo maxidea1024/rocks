@@ -1450,6 +1450,16 @@ int RunClusterSoak(const Options& options) noexcept {
         soak.maxObjects = options.soakObjects;
         soak.packages = options.packages;
         soak.scheduler = options.soakWorkers ? &scheduler : nullptr;
+        // 진행 표시: 긴 실행이 멈췄는지 느린지 바깥에서 볼 수 있게 한다.
+        soak.progressInterval = soak.ticks >= 10 ? soak.ticks / 10 : 1;
+        soak.progress = +[](const GcClusterSoakReport& progress, void*) noexcept {
+            printf("  progress tick %llu: created %llu, reclaimed %llu, cycles %llu\n",
+                   static_cast<unsigned long long>(progress.ticks),
+                   static_cast<unsigned long long>(progress.created),
+                   static_cast<unsigned long long>(progress.reclaimed),
+                   static_cast<unsigned long long>(progress.cyclesCompleted));
+            fflush(stdout);
+        };
         const uint64 started = platform::MonotonicNanoseconds();
         const bool passed = RunGcClusterSoak(memory, soak, report);
         printf("cluster soak (%s) seed %llu ticks %llu: %s (%.1f s)\n",

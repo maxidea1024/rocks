@@ -106,7 +106,8 @@ public:
     ClusterSoak(Allocator& allocator, const GcClusterSoakOptions& options,
                 GcClusterSoakReport& report) noexcept
         : options_(options), report_(report), rng_{options.seed | 1u}, entries_(allocator),
-          stack_(allocator) {
+          stack_(allocator), memberHead_(allocator), memberNext_(allocator), childHead_(allocator),
+          childNext_(allocator) {
     }
 
     bool Run(ObjectRegistry& objects) noexcept {
@@ -121,6 +122,11 @@ public:
 
         for (uint64 tick = 0; tick < options_.ticks && report_.failure == nullptr; ++tick) {
             report_.ticks = tick + 1;
+            if (options_.progress != nullptr && options_.progressInterval != 0 &&
+                tick % options_.progressInterval == 0) {
+                options_.progress(report_, options_.progressContext);
+            }
+
             if (tick % 7 == 6) {
                 CheckExact();
                 continue;
@@ -389,6 +395,11 @@ private:
     // ---- World형 ----
 
     void CreateLevel() noexcept {
+        // 모델 크기 상한을 지킨다(상한 없이 Level을 만들면 모델이 끝없이 커진다).
+        if (entries_.Size() >= options_.maxObjects) {
+            return;
+        }
+
         ConstructionContext transaction(*objects_, Access());
         const ObjectHandle level = Create(transaction, ClusterSoakNodeType, {});
         if (level.IsNull() || !transaction.SetClusterRoot(level)) {
@@ -812,20 +823,47 @@ private:
     // oracle: 루트에서 간선·inner → outer·패키지 고리(Discard되지 않은 자식)·루트 → 소속으로 닿는
     // 객체.
     void Reach() noexcept {
-        stack_.Clear();
-        for (Entry& entry : entries_) {
-            entry.reachable = false;
+        // 루트 → 소속, 패키지 고리(outer → Discard되지 않은 inner) 인접 목록을 먼저 만든다(O(객체
+        // 수) — 도달한 루트마다 전체를 훑으면 slice마다 O(루트 × 객체)라 긴 실행이 끝나지 않는다).
+        const uint32 count = static_cast<uint32>(entries_.Size());
+        if (!memberHead_.TryResize(count) || !memberNext_.TryResize(count) ||
+            !childHead_.TryResize(count) || !childNext_.TryResize(count)) {
+            platform::Fatal("Cluster soak adjacency allocation failed");
         }
 
+        for (uint32 index = 0; index < count; ++index) {
+            memberHead_[index] = NoIndex;
+            childHead_[index] = NoIndex;
+            entries_[index].reachable = false;
+        }
+
+        for (uint32 index = 0; index < count; ++index) {
+            const Entry& entry = entries_[index];
+            if (entry.dead) {
+                continue;
+            }
+
+            if (entry.cluster != NoIndex && entry.cluster != index) {
+                memberNext_[index] = memberHead_[entry.cluster];
+                memberHead_[entry.cluster] = index;
+            }
+
+            if (options_.packages && entry.outer != NoIndex && !entry.discarded) {
+                childNext_[index] = childHead_[entry.outer];
+                childHead_[entry.outer] = index;
+            }
+        }
+
+        stack_.Clear();
         auto visit = [&](uint32 next) noexcept {
             if (next != NoIndex && !entries_[next].reachable) {
                 entries_[next].reachable = true;
                 if (!stack_.TryPushBack(next)) {
-                    platform::Fatal("Reserved cluster soak stack exhausted");
+                    platform::Fatal("Cluster soak stack allocation failed");
                 }
             }
         };
-        for (uint32 index = 0; index < entries_.Size(); ++index) {
+        for (uint32 index = 0; index < count; ++index) {
             if (!entries_[index].dead && !entries_[index].held.Handle().IsNull()) {
                 visit(index);
             }
@@ -841,21 +879,14 @@ private:
                 visit(entry.edges[edge]);
             }
 
-            const bool ring = options_.packages;
-            if (!entry.clusterRoot && !ring) {
-                continue;
+            if (entry.clusterRoot) {
+                for (uint32 at = memberHead_[index]; at != NoIndex; at = memberNext_[at]) {
+                    visit(at);
+                }
             }
 
-            for (uint32 other = 0; other < entries_.Size(); ++other) {
-                const Entry& candidate = entries_[other];
-                if (candidate.dead) {
-                    continue;
-                }
-
-                if ((entry.clusterRoot && candidate.cluster == index) ||
-                    (ring && candidate.outer == index && !candidate.discarded)) {
-                    visit(other);
-                }
+            for (uint32 at = childHead_[index]; at != NoIndex; at = childNext_[at]) {
+                visit(at);
             }
         }
     }
@@ -927,6 +958,11 @@ private:
     ObjectRegistry* objects_ = nullptr;
     Array<Entry> entries_;
     Array<uint32> stack_;
+    // oracle 인접 목록(Reach가 매번 다시 만든다): 클러스터 루트 → 소속, outer → 고리 자식.
+    Array<uint32> memberHead_;
+    Array<uint32> memberNext_;
+    Array<uint32> childHead_;
+    Array<uint32> childNext_;
     uint32 names_ = 0;
     // 살아 있는(파괴하지 않은) Level 수다.
     uint32 levels_ = 0;
