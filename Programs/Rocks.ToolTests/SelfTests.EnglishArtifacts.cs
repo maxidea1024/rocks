@@ -47,7 +47,7 @@ internal static partial class SelfTests
 
         NoFailures(PolicyChecks.EnglishSourceLiterals(temporary.Root));
 
-        // 시험이 아닌 런타임·개발 도구·프로그램·빌드 규칙 기반 소스의 한글 문자열은 어디서든 위반이다(모듈 Private/Tests/는 모듈에
+        // 시험이 아닌 런타임·개발 도구·프로그램 소스의 한글 문자열은 어디서든 위반이다(Build/ 아래는 파일 전체 규칙이 맡는다. 모듈 Private/Tests/는 모듈에
         // 컴파일되어 출하되므로 시험 소스가 아니다).
         string[] nativeSources = [
             "const char* text = \"한국어 메시지\";", "ROCKS_LOG(Warning, \"설정을 읽지 못했다: %s\", path);", "char16_t c = u'한';",
@@ -58,8 +58,7 @@ internal static partial class SelfTests
         foreach ((string file, string[] sources) in new[] {
             ("Core/Source/Runtime/Core/Private/Probe.cpp", nativeSources), ("Core/Source/Runtime/Core/Private/Tests/Probe.cpp", nativeSources),
             ("Engine/Source/Developer/Probe/Public/Probe.h", nativeSources), ("Programs/Sandbox/Private/Probe.cpp", nativeSources),
-            ("Programs/Rocks.Build/Probe.cs", csharpSources), ("Programs/Rocks.MetaCompiler/Probe.cs", csharpSources),
-            ("Build/Rules/Probe.cs", csharpSources) })
+            ("Programs/Rocks.Build/Probe.cs", csharpSources), ("Programs/Rocks.MetaCompiler/Probe.cs", csharpSources) })
         {
             foreach (string source in sources)
             {
@@ -81,10 +80,10 @@ internal static partial class SelfTests
         temporary.Write(ThirdPartyPolicyTests.Upstream + "/NormalizationTest.txt", "AC00;가\n");
         ThirdPartyPolicyTests.WriteFixture(temporary);
 
-        // 문서·외부 원본·빌드 출력 디렉터리, 빌드 규칙 기반 클래스의 주석은 허용한다. 시험 소스의 문자열은 파일 전체 규칙 대상이 아니다.
+        // 문서·외부 원본·빌드 출력 디렉터리의 주석은 허용한다. 시험 소스의 문자열은 파일 전체 규칙 대상이 아니다.
         foreach (string file in new[] { "Docs/Design/Probe.ko.md", "Build/README.md", "Templates/Game/Foundation/README.ko.md",
             "Core/Source/ThirdParty/Fake/README.md", "Docs/Design/Probe.json", "Build/Artifacts/Probe.ps1", "Build/Cache/Probe.sh",
-            "Build/Rules/ProbeRules.cs", "Core/Source/Runtime/Core/Tests/ProbeTests.cpp", "Programs/Rocks.ToolTests/Probe.cs" })
+            "Core/Source/Runtime/Core/Tests/ProbeTests.cpp", "Programs/Rocks.ToolTests/Probe.cs" })
         {
             temporary.Write(file, "// 한국어 주석\n");
         }
@@ -97,7 +96,7 @@ internal static partial class SelfTests
             ".github/workflows/foundation.yml", "Core/Source/Runtime/Probe/Probe.Build.cs", "Programs/Probe/Probe.Target.cs",
             "Programs/FoundationTests/FoundationTests.Build.cs", "Core/Source/Developer/ProbeTestFixtures/ProbeTestFixtures.Build.cs",
             "Programs/Rocks.Probe/Rocks.Probe.csproj", "Programs/Directory.Build.props", "Build/Format/Rocks.Format.slnx",
-            "Build/Probe.ps1", "Build/ThirdPartyTools/probe.sh", "Build/Probe.cmake", "Build/Build.version",
+            "Build/Probe.ps1", "Build/ThirdPartyTools/probe.sh", "Build/Probe.cmake", "Build/Build.version", "Build/Rules/ProbeRules.cs",
             ThirdPartyPolicyTests.Library + "/Glue.c", ThirdPartyPolicyTests.Library + "/Fake.patch",
             "Engine/Source/ThirdParty/Probe/ThirdParty.json", "Engine/Source/ThirdParty/Probe/Build/Build.ps1",
             "Templates/Game/Foundation/Game.rocksproject", "Templates/Game/Foundation/Source/Main.cpp",

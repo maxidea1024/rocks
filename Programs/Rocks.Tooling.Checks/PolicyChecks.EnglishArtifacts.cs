@@ -6,7 +6,7 @@ namespace Rocks.Tooling.Checks;
 public static partial class PolicyChecks
 {
     // 실행 중에 사용자·개발자에게 보이는 문자열(로그·추적·진단·오류·도움말)이 들어가는 소스의 루트다. 주석은 한국어로 둘 수 있고
-    // 주석 밖의 한글만 금지한다. Build/는 모듈·타깃 규칙 기반 클래스(Build/Rules/*.cs)가 빌드 도구 문구를 낸다.
+    // 주석 밖의 한글만 금지한다. Build/ 아래 파일은 빌드 설정이라 주석까지 영어다(IsEnglishBuildFile).
     private static readonly string[] EnglishMessageRoots =
         ["Core/Source/Runtime", "Core/Source/Developer", "Engine/Source/Runtime", "Engine/Source/Developer", "Engine/Plugins", "Programs", "Build"];
 
@@ -96,7 +96,7 @@ public static partial class PolicyChecks
     /// <item>저장소 루트의 Rocks.proj·.editorconfig·.gitattributes·.gitignore·.clang-format·global.json·Directory.Build.rsp</item>
     /// <item>.github/workflows/ 아래 파일</item>
     /// <item>모든 <c>*.Build.cs</c>·<c>*.Target.cs</c>·<c>*.csproj</c>·<c>*.props</c>·<c>*.targets</c>·<c>*.slnx</c>·<c>*.proj</c></item>
-    /// <item>Build/ 아래 스크립트·설정(ps1·sh·cmake 등, 규칙 기반 클래스 *.cs와 빌드 출력 디렉터리는 제외)</item>
+    /// <item>Build/ 아래 모든 파일(스크립트·설정·규칙 기반 클래스 *.cs, 빌드 출력 디렉터리는 제외)</item>
     /// <item>ThirdParty 라이브러리 폴더에서 Rocks가 쓴 파일(ThirdParty.json·Build.cs·도구 빌드 스크립트·patch·unity 파일 등,
     /// upstreamDirectory는 제외)</item>
     /// <item>Templates/·Programs/Scaffold/Templates/·Engine/Config/·Core/Config/ 아래 파일</item>
@@ -162,7 +162,7 @@ public static partial class PolicyChecks
 
         return relative.StartsWith(".github/workflows/", StringComparison.Ordinal) ||
                EnglishBuildFileSuffixes.Any(suffix => relative.EndsWith(suffix, StringComparison.Ordinal)) ||
-               (relative.StartsWith("Build/", StringComparison.Ordinal) && !relative.EndsWith(".cs", StringComparison.Ordinal)) ||
+               relative.StartsWith("Build/", StringComparison.Ordinal) ||
                EnglishWholeDirectories.Any(directory => relative.StartsWith(directory + "/", StringComparison.Ordinal)) ||
                IsGeneratedFile(relative);
     }

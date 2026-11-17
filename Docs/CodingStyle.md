@@ -65,7 +65,7 @@
   - 저장소 루트의 `Rocks.proj`·`.editorconfig`·`.gitattributes`·`.gitignore`·`.clang-format`·`global.json`·`Directory.Build.rsp`
   - `.github/workflows/` 아래 파일
   - 모든 `*.Build.cs`·`*.Target.cs`·`*.csproj`·`*.props`·`*.targets`·`*.slnx`·`*.proj`(시험 실행 파일·시험 fixture 모듈의 규칙 포함)
-  - `Build/` 아래 스크립트·설정(`*.ps1`·`*.sh`·`*.cmake`·`Build.version` 등). 규칙 기반 클래스(`Build/Rules/*.cs`)는 C# 소스라 문자열 규칙만 받는다.
+  - `Build/` 아래 모든 파일: 스크립트·설정(`*.ps1`·`*.sh`·`*.cmake`·`Build.version` 등)과 모듈·타깃 규칙 기반 클래스(`Build/Rules/*.cs`). 빌드 출력 디렉터리는 제외한다.
   - ThirdParty 라이브러리 폴더(`Core/Source/ThirdParty/<Lib>/`·`Engine/Source/ThirdParty/<Lib>/`)에서 Rocks가 쓴 파일: `ThirdParty.json`(notes·verification·modifications reason 등), `*.Build.cs`, 도구 빌드 스크립트·cmake(`Build/`), patch, unity 파일(예: `Lz4Unity.c`)
   - `Templates/`(새 게임 프로젝트로 복사되는 결과물), `Programs/Scaffold/Templates/`(scaffold 생성 원본), `Engine/Config/`·`Core/Config/`
   - 생성 파일(`*.generated.*`, 시험 디렉터리 안의 것 포함). 체크인된 생성 파일은 생성기를 고친 뒤 생성기로 다시 만든다(예: `Rocks.ToolTests unicode-tables --root . --write`).

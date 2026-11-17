@@ -2,67 +2,67 @@ using Rocks.Build;
 using Rocks.Build.Rules;
 
 /// <summary>
-/// 한 모듈 폴더를 기준으로 경로를 만드는 공통 규칙이다(UE ModuleRules의 ModuleDirectory 대응).
-/// 모듈 폴더 구조:
+/// Common rules that build paths from a single module folder (counterpart of UE ModuleRules.ModuleDirectory).
+/// Module folder layout:
 /// <code>
 /// &lt;Layer&gt;/Source/&lt;Group&gt;/&lt;Module&gt;/
-///   &lt;Module&gt;.Build.cs   이 모듈의 규칙(CoreModuleRules·EngineModuleRules를 상속)
-///   Public/              다른 모듈이 include하는 헤더
-///   Private/             구현(.cpp)과 모듈 내부 헤더
-///   Tests/               모듈 테스트(테스트 실행 파일 규칙이 모은다. 모듈 라이브러리에는 들어가지 않는다)
+///   &lt;Module&gt;.Build.cs   rules for this module (derives from CoreModuleRules or EngineModuleRules)
+///   Public/              headers that other modules include
+///   Private/             implementation (.cpp) and module-internal headers
+///   Tests/               module tests (collected by the test executable rules; not part of the module library)
 /// </code>
-/// Layer는 Core(기반 라이브러리) 또는 Engine(게임 엔진 계층)이다. Core 모듈은 Engine 모듈을 참조하지 않는다.
+/// Layer is Core (foundation libraries) or Engine (game engine layer). Core modules never reference Engine modules.
 /// </summary>
 public abstract class SourceModuleRules : ModuleRules
 {
-    /// <summary>모듈이 속한 최상위 계층 폴더(Core·Engine)다.</summary>
+    /// <summary>Top-level layer folder the module belongs to (Core or Engine).</summary>
     protected abstract string Layer { get; }
 
-    /// <summary>모듈 이름이다. 폴더 이름과 같아야 한다.</summary>
+    /// <summary>Module name. Must match the folder name.</summary>
     protected abstract string ModuleName { get; }
 
-    /// <summary>직접 의존하는 모듈 이름이다. 같은 계층의 아래 모듈이나 아래 계층 모듈만 둔다.</summary>
+    /// <summary>Names of direct module dependencies. Only lower modules of the same layer or modules of a lower layer.</summary>
     protected abstract string[] RequiredModules { get; }
 
-    /// <summary>Source 아래 그룹(Runtime·Developer·Editor)이다.</summary>
+    /// <summary>Group under Source (Runtime, Developer or Editor).</summary>
     protected virtual string Group => "Runtime";
 
-    /// <summary>Private/에 구현 소스가 있는지다. 헤더만 있는 모듈은 false로 둔다.</summary>
+    /// <summary>Whether Private/ contains implementation sources. Header-only modules set this to false.</summary>
     protected virtual bool HasSources => true;
 
     /// <summary>
-    /// 이 모듈의 최적화 재정의다(UE ModuleRules.OptimizeCode 대응). 기본값은 구성을 따른다.
-    /// 예: Development 빌드에서 이 모듈만 단계 실행하려면 임시로 Never를 둔다.
+    /// Optimization override for this module (counterpart of UE ModuleRules.OptimizeCode). The default follows the configuration.
+    /// Example: to step through only this module in a Development build, temporarily set Never.
     /// <code>
     /// protected override CodeOptimization Optimization => CodeOptimization.Never;
     /// </code>
-    /// Never는 Release에서도 최적화와 ThinLTO를 끄므로 커밋하지 않는다. Always는 Debug에서도 최적화한다.
+    /// Never also disables optimization and ThinLTO in Release, so do not commit it. Always optimizes even in Debug.
     /// </summary>
     protected virtual CodeOptimization Optimization => CodeOptimization.Default;
 
-    /// <summary>저장소 루트 기준 모듈 폴더다. 예: Core/Source/Runtime/Core.</summary>
+    /// <summary>Module folder relative to the repository root. Example: Core/Source/Runtime/Core.</summary>
     protected string ModuleDirectory => $"{Layer}/Source/{Group}/{ModuleName}";
 
     /// <summary>
-    /// 리플렉션 메타데이터 헤더(ROCKS_CLASS 선언)의 include 철자다. Public/ 또는 Private/ 기준이다. 비어 있지 않으면
-    /// 이 모듈 폴더에 identity 명세 <c>&lt;ModuleName&gt;.rocksids.json</c>이 있어야 한다. 예:
+    /// Include spellings of reflection metadata headers (ROCKS_CLASS declarations), relative to Public/ or Private/. When not empty,
+    /// the module folder must contain the identity manifest <c>&lt;ModuleName&gt;.rocksids.json</c>. Example:
     /// <code>
     /// protected override IReadOnlyList&lt;string&gt; Metadata =&gt; ["ReflectionTestFixtures/ReflectionFixture.h"];
     /// </code>
-    /// 생성 헤더는 <c>&lt;ReflectionTestFixtures/ReflectionFixture.generated.h&gt;</c>로 include한다.
-    /// 문자열 리터럴만 나열한 목록으로 쓴다(식별자·<c>new[] { }</c>·도우미 호출·spread·보간 문자열 금지). 정책 검사가 이 목록을
-    /// 문자 그대로 읽어 목록 밖 파일의 ROCKS_PROPERTY·ROCKS_NATIVE를 거부하므로, 리터럴이 아니면
-    /// <c>reflection-metadata-not-literal</c>로 보고한다.
+    /// The generated header is included as <c>&lt;ReflectionTestFixtures/ReflectionFixture.generated.h&gt;</c>.
+    /// Write it as a list of string literals only (no identifiers, <c>new[] { }</c>, helper calls, spreads or interpolated strings). The policy check
+    /// reads this list verbatim and rejects ROCKS_PROPERTY and ROCKS_NATIVE in files outside it, so anything other than literals is
+    /// reported as <c>reflection-metadata-not-literal</c>.
     /// </summary>
     protected virtual IReadOnlyList<string> Metadata => [];
 
     /// <summary>
-    /// 이 모듈 소스에만 쓰는 include 경로다(의존 모듈로 전파하지 않는다). 외부 라이브러리 adapter가 쓴다.
-    /// 예: <c>ThirdPartyModuleRules.ConsumerIncludeDirectories(context, "Zstd")</c>.
+    /// Include paths used only by this module's sources (not propagated to dependents). Used by third-party library adapters.
+    /// Example: <c>ThirdPartyModuleRules.ConsumerIncludeDirectories(context, "Zstd")</c>.
     /// </summary>
     protected virtual IReadOnlyList<string> PrivateIncludeDirectories(BuildContext context) => [];
 
-    /// <summary>이 모듈 소스에만 쓰는 정의다(의존 모듈로 전파하지 않는다).</summary>
+    /// <summary>Defines used only by this module's sources (not propagated to dependents).</summary>
     protected virtual IReadOnlyList<string> PrivateDefines(BuildContext context) => [];
 
     public override NativeModuleInput Configure(BuildContext context) => HasSources
@@ -89,8 +89,8 @@ public abstract class SourceModuleRules : ModuleRules
 }
 
 /// <summary>
-/// 기반 라이브러리(Core 계층) 모듈 규칙이다. 엔진이 아니라 엔진·도구·게임이 함께 쓰는 바탕이다.
-/// 사용 예(Core/Source/Runtime/Core/Core.Build.cs):
+/// Rules for foundation library (Core layer) modules: the base shared by the engine, tools and games rather than the engine itself.
+/// Usage example (Core/Source/Runtime/Core/Core.Build.cs):
 /// <code>
 /// public sealed class Core : CoreModuleRules
 /// {
@@ -104,7 +104,7 @@ public abstract class CoreModuleRules : SourceModuleRules
     protected override string Layer => "Core";
 }
 
-/// <summary>게임 엔진 계층(Engine/Source) 모듈 규칙이다. Core 모듈에 의존할 수 있다.</summary>
+/// <summary>Rules for game engine layer (Engine/Source) modules. May depend on Core modules.</summary>
 public abstract class EngineModuleRules : SourceModuleRules
 {
     protected override string Layer => "Engine";
