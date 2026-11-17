@@ -1,0 +1,325 @@
+#include "D3D11DeviceImpl.h"
+
+#include <Platform/Memory.h>
+
+namespace rocks::graphics::d3d11 {
+
+Result<CommandContext*> D3D11Device::BeginFrame(SwapChainHandle handle,
+                                                const ClearColor& clear) noexcept {
+    auto owner = ownership_.Check();
+    if (!owner) {
+        return Result<CommandContext*>::Failure(owner.Error());
+    }
+
+    platform::LockGuard lock(gate_);
+    SwapChainRecord* record = swapChains_.Find(handle.slot);
+    if (record == nullptr) {
+        return Result<CommandContext*>::Failure(ErrorCode::StaleHandle);
+    }
+
+    if (recording_) {
+        return Result<CommandContext*>::Failure(ErrorCode::Busy);
+    }
+
+    if (timeline_.IsLost()) {
+        return Result<CommandContext*>::Failure(ErrorCode::Destroyed);
+    }
+
+    if (record->broken) {
+        return FailWith<CommandContext*>("swap chain has no buffers after a failed resize");
+    }
+
+    BeginRecording({record->rtv.Get(), record->width, record->height}, clear);
+    presentTarget_ = handle;
+    return Result<CommandContext*>::Success(this);
+}
+
+Result<CommandContext*> D3D11Device::BeginOffscreen(TextureHandle handle,
+                                                    const ClearColor& clear) noexcept {
+    auto owner = ownership_.Check();
+    if (!owner) {
+        return Result<CommandContext*>::Failure(owner.Error());
+    }
+
+    platform::LockGuard lock(gate_);
+    TextureRecord* record = textures_.Find(handle.slot);
+    if (record == nullptr || !record->renderTarget) {
+        return Result<CommandContext*>::Failure(record == nullptr ? ErrorCode::StaleHandle
+                                                                  : ErrorCode::InvalidArgument);
+    }
+
+    if (recording_) {
+        return Result<CommandContext*>::Failure(ErrorCode::Busy);
+    }
+
+    if (timeline_.IsLost()) {
+        return Result<CommandContext*>::Failure(ErrorCode::Destroyed);
+    }
+
+    BeginRecording({record->rtv.Get(), record->width, record->height}, clear);
+    presentTarget_ = {};
+    return Result<CommandContext*>::Success(this);
+}
+
+// deferred context는 FinishCommandList(FALSE) 뒤 기본 상태다. 패스 상태를 처음부터 묶는다.
+void D3D11Device::BeginRecording(const Target& target, const ClearColor& clear) noexcept {
+    target_ = target;
+    recording_ = true;
+    markerDepth_ = 0;
+    boundPipeline_ = {};
+    for (BoundVertexBuffer& bound : boundVertex_) {
+        bound = {};
+    }
+
+    boundIndex_ = {};
+    ID3D11DeviceContext* context = deferred_.Get();
+    context->OMSetRenderTargets(1, &target_.rtv, nullptr);
+    const float color[4] = {clear.r, clear.g, clear.b, clear.a};
+    context->ClearRenderTargetView(target_.rtv, color);
+    D3D11_VIEWPORT viewport = {};
+    viewport.Width = static_cast<float>(target_.width);
+    viewport.Height = static_cast<float>(target_.height);
+    viewport.MaxDepth = 1.0f;
+    context->RSSetViewports(1, &viewport);
+    context->RSSetState(rasterizer_.Get());
+    context->OMSetDepthStencilState(depthDisabled_.Get(), 0);
+    context->OMSetBlendState(opaqueBlend_.Get(), nullptr, D3D11_DEFAULT_SAMPLE_MASK);
+    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    ID3D11Buffer* constants = constants_.Get();
+    context->VSSetConstantBuffers(0, 1, &constants);
+    context->PSSetConstantBuffers(0, 1, &constants);
+    const TextureRecord* white = textures_.Find(white_.slot);
+    if (white != nullptr) {
+        ID3D11ShaderResourceView* view = white->srv.Get();
+        context->PSSetShaderResources(0, 1, &view);
+        context->PSSetSamplers(0, 1, &white->sampler);
+    }
+
+    // deferred context의 동적 버퍼 내용은 그 기록 안에서 DISCARD로 쓰기 전까지 정해지지 않는다.
+    const DrawConstants identity;
+    WriteConstants(identity);
+}
+
+Result<GpuFencePoint> D3D11Device::EndFrame() noexcept {
+    auto owner = ownership_.Check();
+    if (!owner) {
+        return Result<GpuFencePoint>::Failure(owner.Error());
+    }
+
+    platform::LockGuard lock(gate_);
+    if (!recording_) {
+        return Result<GpuFencePoint>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    CloseMarkers();
+    const TimestampRange stamps = timestamps_.OpenRange();
+    recording_ = false;
+    ComRef<ID3D11CommandList> commands;
+    // 성공·실패와 무관하게 deferred context를 기본 상태로 되돌린다.
+    const HRESULT finished = deferred_->FinishCommandList(FALSE, commands.Out());
+    // 이 프레임 전에 쌓인 업로드(내용 갱신·staging 업로드)를 먼저 실행한다.
+    auto uploads = FlushUploadsLocked();
+    if (!uploads) {
+        AssignPendingRetires(fenceValue_);
+        timestamps_.Close(fenceValue_, false);
+        return Result<GpuFencePoint>::Failure(uploads.Error());
+    }
+
+    if (FAILED(finished)) {
+        // 아무것도 제출하지 않았다. 이 기록만 참조하던 자원은 지금까지의 제출 뒤에 놓아도 된다.
+        AssignPendingRetires(fenceValue_);
+        timestamps_.Close(fenceValue_, false);
+        return FailWith<GpuFencePoint>("ID3D11DeviceContext::FinishCommandList", finished);
+    }
+
+    // 이 프레임의 timestamp를 slot의 disjoint query로 감싼다(D3D11 timestamp는 disjoint 구간
+    // 안에서만 의미가 있다).
+    ID3D11Query* disjoint = nullptr;
+    if (stamps.count != 0) {
+        disjoint = disjointQueries_[stamps.first / MaxTimestampsPerFrame].Get();
+        immediate_->Begin(disjoint);
+    }
+
+    immediate_->ExecuteCommandList(commands.Get(), FALSE);
+    if (disjoint != nullptr) {
+        immediate_->End(disjoint);
+    }
+
+    commands.Reset();
+    Result<void> outcome = Result<void>::Success();
+    if (!presentTarget_.IsNull()) {
+        SwapChainRecord* record = swapChains_.Find(presentTarget_.slot);
+        if (record != nullptr) {
+            const HRESULT presented = record->swapChain->Present(record->vsync ? 1 : 0, 0);
+            if (FAILED(presented)) {
+                outcome = Fail("IDXGISwapChain::Present", presented);
+            }
+        }
+    }
+
+    auto signaled = SignalQueue();
+    if (!signaled) {
+        // 장치 제거 등으로 완료를 알 수 없다. 이 프레임이 쓴 자원은 소멸 때까지 놓지 않는다.
+        AssignPendingRetires(RetainUntilDestructionFence);
+        timestamps_.Close(RetainUntilDestructionFence, false);
+        DrainValidationMessages();
+        return Result<GpuFencePoint>::Failure(signaled.Error());
+    }
+
+    const uint64 value = signaled.Value();
+    AssignPendingRetires(value);
+    timestamps_.Close(value, true);
+    ProcessRetired();
+    DrainValidationMessages();
+    if (!outcome) {
+        return Result<GpuFencePoint>::Failure(outcome.Error());
+    }
+
+    return Result<GpuFencePoint>::Success(timeline_.Point(value));
+}
+
+// --- CommandContext ---
+
+void D3D11Device::SetPipeline(PipelineHandle handle) noexcept {
+    platform::LockGuard lock(gate_);
+    const PipelineRecord* record = pipelines_.Find(handle.slot);
+    if (record == nullptr) {
+        boundPipeline_ = {};
+        return;
+    }
+
+    ID3D11DeviceContext* context = deferred_.Get();
+    context->VSSetShader(record->vertexShader.Get(), nullptr, 0);
+    context->PSSetShader(record->pixelShader.Get(), nullptr, 0);
+    context->IASetInputLayout(record->inputLayout.Get());
+    context->OMSetBlendState(record->alphaBlend ? alphaBlend_.Get() : opaqueBlend_.Get(), nullptr,
+                             D3D11_DEFAULT_SAMPLE_MASK);
+    boundPipeline_ = handle.slot;
+    // 이미 묶인 정점 버퍼를 새 파이프라인의 stride로 다시 묶는다.
+    for (uint32 stream = 0; stream < MaxVertexStreams; ++stream) {
+        if (!boundVertex_[stream].buffer.IsNull()) {
+            ApplyVertexBuffer(stream);
+        }
+    }
+}
+
+void D3D11Device::SetVertexBuffers(uint32 firstStream,
+                                   Span<const VertexBufferBinding> buffers) noexcept {
+    platform::LockGuard lock(gate_);
+    for (usize index = 0; index < buffers.Size(); ++index) {
+        const usize stream = firstStream + index;
+        if (stream >= MaxVertexStreams) {
+            return;
+        }
+
+        boundVertex_[stream] = {buffers[index].buffer, buffers[index].offset};
+        ApplyVertexBuffer(static_cast<uint32>(stream));
+    }
+}
+
+void D3D11Device::SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64 offset) noexcept {
+    platform::LockGuard lock(gate_);
+    boundIndex_ = {buffer, format, offset};
+    const BufferRecord* record = buffers_.Find(buffer.slot);
+    if (record == nullptr || offset >= record->size) {
+        return;
+    }
+
+    deferred_->IASetIndexBuffer(record->buffer.Get(),
+                                format == IndexFormat::UInt16 ? DXGI_FORMAT_R16_UINT
+                                                              : DXGI_FORMAT_R32_UINT,
+                                static_cast<UINT>(offset));
+}
+
+void D3D11Device::SetTexture(TextureHandle handle) noexcept {
+    platform::LockGuard lock(gate_);
+    const TextureRecord* record = textures_.Find(handle.slot);
+    if (record == nullptr) {
+        record = textures_.Find(white_.slot);
+    }
+
+    if (record != nullptr) {
+        ID3D11ShaderResourceView* view = record->srv.Get();
+        deferred_->PSSetShaderResources(0, 1, &view);
+        deferred_->PSSetSamplers(0, 1, &record->sampler);
+    }
+}
+
+void D3D11Device::SetConstants(const DrawConstants& constants) noexcept {
+    // 기록 context는 소유 스레드만 쓰므로 장치 잠금이 필요 없다(D3D12 루트 상수와 같다).
+    WriteConstants(constants);
+}
+
+// 그리기 상수 버퍼를 갈아 끼운다(UE uniform buffer와 같은 WRITE_DISCARD). 앞 그리기는 앞 내용을
+// 그대로 본다.
+void D3D11Device::WriteConstants(const DrawConstants& constants) noexcept {
+    D3D11_MAPPED_SUBRESOURCE mapped = {};
+    const HRESULT result = deferred_->Map(constants_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+    if (FAILED(result)) {
+        ++ignoredDraws_;
+        return;
+    }
+
+    platform::MemoryCopy(mapped.pData, &constants, sizeof(constants));
+    deferred_->Unmap(constants_.Get(), 0);
+}
+
+void D3D11Device::Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept {
+    platform::LockGuard lock(gate_);
+    if (!StreamsBound()) {
+        ++ignoredDraws_;
+        return;
+    }
+
+    // base instance는 0으로 고정한다(RenderBase 10.4절).
+    deferred_->DrawInstanced(vertexCount, instanceCount, firstVertex, 0);
+}
+
+void D3D11Device::DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept {
+    platform::LockGuard lock(gate_);
+    const BufferRecord* index = buffers_.Find(boundIndex_.buffer.slot);
+    if (!StreamsBound() || index == nullptr || boundIndex_.offset >= index->size) {
+        ++ignoredDraws_;
+        return;
+    }
+
+    // base vertex·base instance는 0으로 고정한다.
+    deferred_->DrawIndexedInstanced(indexCount, instanceCount, firstIndex, 0, 0);
+}
+
+// 묶인 정점 버퍼 하나를 지금 파이프라인의 stride로 IA에 건다.
+void D3D11Device::ApplyVertexBuffer(uint32 stream) noexcept {
+    const BufferRecord* buffer = buffers_.Find(boundVertex_[stream].buffer.slot);
+    const PipelineRecord* pipeline = pipelines_.Find(boundPipeline_);
+    if (buffer == nullptr || boundVertex_[stream].offset >= buffer->size) {
+        return;
+    }
+
+    ID3D11Buffer* view = buffer->buffer.Get();
+    const UINT stride = pipeline != nullptr ? pipeline->strides[stream] : 0u;
+    const UINT offset = static_cast<UINT>(boundVertex_[stream].offset);
+    deferred_->IASetVertexBuffers(stream, 1, &view, &stride, &offset);
+}
+
+// 묶인 파이프라인이 선언한 stream에 모두 유효한 버퍼가 있는지다.
+bool D3D11Device::StreamsBound() const noexcept {
+    const PipelineRecord* pipeline = pipelines_.Find(boundPipeline_);
+    if (pipeline == nullptr) {
+        return false;
+    }
+
+    for (uint32 stream = 0; stream < MaxVertexStreams; ++stream) {
+        if ((pipeline->streamMask & (1u << stream)) == 0) {
+            continue;
+        }
+
+        const BufferRecord* buffer = buffers_.Find(boundVertex_[stream].buffer.slot);
+        if (buffer == nullptr || boundVertex_[stream].offset >= buffer->size) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+} // namespace rocks::graphics::d3d11
