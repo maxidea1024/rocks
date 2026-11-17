@@ -62,17 +62,21 @@ float4 VSMain(uint id : SV_VertexID) : SV_Position {
 uint4 PSMain(float4 position : SV_Position) : SV_Target { return uint4(1, 2, 3, 4); }
 )";
 
-constexpr char ColorVertexGlsl[] = R"(#version 450 core
+constexpr char ColorVertexGlsl[] = R"(#version 320 es
+precision highp float;
+precision highp int;
 void main() {
     vec2 uv = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
     gl_Position = vec4(uv * 2.0 - 1.0, 0.5, 1.0);
 }
 )";
 
-constexpr char ColorPixelGlsl[] = R"(#version 450 core
-layout(location = 0) out vec4 oColor;
+constexpr char ColorPixelGlsl[] = R"(#version 320 es
+precision highp float;
+precision highp int;
+layout(location = 0) out vec4 out_var_SV_Target0;
 void main() {
-    oColor = vec4(0.25, 0.5, 0.75, 1.0);
+    out_var_SV_Target0 = vec4(0.25, 0.5, 0.75, 1.0);
 }
 )";
 
