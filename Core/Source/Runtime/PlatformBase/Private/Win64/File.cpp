@@ -440,6 +440,20 @@ public:
                 return {FileCode::AlreadyExists, ERROR_ALREADY_EXISTS};
             }
         }
+        // 파일을 덮어쓰는 이동은 POSIX 의미 rename으로 한다. 일반 rename(MoveFileExW)은 다른
+        // 프로세스(백신·색인기 등)가 대상을 잠깐 열고 있기만 해도 ERROR_ACCESS_DENIED로 실패하지만,
+        // POSIX 의미 rename은 열린 대상(삭제 공유)도 이름에서 떼어 내고 바꾼다.
+        const bool sourceIsDirectory = (sourceAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 &&
+                                       !detail::PathIsLink(source.Value());
+        if (replaceExisting && !sourceIsDirectory) {
+            RenameInfo info;
+            const FileStatus built = info.Build(target.Value());
+            if (!built) {
+                return built;
+            }
+            const DWORD error = RenameReplacing(source.Value(), target.Value(), info);
+            return error == ERROR_SUCCESS ? FileStatus{} : NativeError(error);
+        }
         // MOVEFILE_COPY_ALLOWED를 쓰지 않으므로 다른 volume이면
         // ERROR_NOT_SAME_DEVICE(Unsupported)다.
         if (!MoveFileExW(source.Value(), target.Value(),
@@ -447,6 +461,79 @@ public:
             return NativeError(GetLastError());
         }
         return {};
+    }
+
+    // 대상 전체 경로를 담은 이름 변경 정보(FILE_RENAME_INFO)다. 소멸 때 놓는다.
+    struct RenameInfo {
+        FILE_RENAME_INFO* info = nullptr;
+        usize bytes = 0;
+        // 전체 경로의 UTF-16 단위 수(끝 NUL 제외)다.
+        DWORD units = 0;
+
+        RenameInfo() noexcept = default;
+        RenameInfo(const RenameInfo&) = delete;
+        RenameInfo& operator=(const RenameInfo&) = delete;
+
+        ~RenameInfo() noexcept {
+            if (info != nullptr) {
+                AlignedFree(info);
+            }
+        }
+
+        // target의 전체 경로로 덮어쓰기·POSIX 의미 이름 변경 정보를 만든다.
+        FileStatus Build(const wchar_t* target) noexcept {
+            const DWORD fullUnits = GetFullPathNameW(target, 0, nullptr, nullptr);
+            if (fullUnits == 0) {
+                return NativeError(GetLastError());
+            }
+            bytes = sizeof(FILE_RENAME_INFO) + fullUnits * sizeof(wchar_t);
+            info =
+                static_cast<FILE_RENAME_INFO*>(AlignedAllocate(bytes, alignof(FILE_RENAME_INFO)));
+            if (info == nullptr) {
+                return {FileCode::OutOfMemory, 0};
+            }
+            platform::MemorySet(info, 0, bytes);
+            units = GetFullPathNameW(target, fullUnits, info->FileName, nullptr);
+            if (units == 0 || units >= fullUnits) {
+                return NativeError(GetLastError());
+            }
+            info->Flags = FILE_RENAME_FLAG_REPLACE_IF_EXISTS | FILE_RENAME_FLAG_POSIX_SEMANTICS;
+            info->RootDirectory = nullptr;
+            info->FileNameLength = units * sizeof(wchar_t);
+            return {};
+        }
+    };
+
+    // source(파일·link 자체)를 info의 대상 이름으로 바꾸며 기존 대상을 덮어쓴다. POSIX 의미
+    // rename을 먼저 쓰고, 지원하지 않는 볼륨(FAT·일부 네트워크 FS)이면 일반 rename으로 대신한다.
+    // 일반 rename도 대상이 있으면 원자적으로 바꾸고 실패하면 대상을 건드리지 않는다(ReplaceFileW는
+    // 이전 대상의 속성·스트림을 합치고 일부 실패에서 대상을 지운 채 남기므로 쓰지 않는다). 두 경로
+    // 모두 이름만 바꾸므로 이전 대상의 속성·ACL·스트림을 승계하지 않는다. 성공이면
+    // ERROR_SUCCESS, 아니면 Win32 오류 코드다.
+    static DWORD RenameReplacing(const wchar_t* source, const wchar_t* target,
+                                 const RenameInfo& info) noexcept {
+        // OPEN_REPARSE_POINT: 검사 뒤 원본이 link로 바뀌어도 link를 따라가지 않는다.
+        // BACKUP_SEMANTICS: 디렉터리 link 자체도 연다.
+        HANDLE file = CreateFileW(
+            source, DELETE | SYNCHRONIZE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
+            nullptr);
+        if (file == INVALID_HANDLE_VALUE) {
+            return GetLastError();
+        }
+        const BOOL renamed = SetFileInformationByHandle(file, FileRenameInfoEx, info.info,
+                                                        static_cast<DWORD>(info.bytes));
+        const DWORD renameError = renamed ? ERROR_SUCCESS : GetLastError();
+        CloseHandle(file);
+        if (renamed) {
+            return ERROR_SUCCESS;
+        }
+        if (renameError != ERROR_INVALID_PARAMETER && renameError != ERROR_NOT_SUPPORTED &&
+            renameError != ERROR_INVALID_FUNCTION) {
+            return renameError;
+        }
+        return MoveFileExW(source, target, MOVEFILE_REPLACE_EXISTING) ? ERROR_SUCCESS
+                                                                      : GetLastError();
     }
 
     FileStatus Replace(const char* from, usize fromBytes, const char* to,
@@ -484,80 +571,39 @@ public:
             }
         }
         // 이름 변경 정보에는 대상의 전체 경로가 필요하다.
-        const DWORD fullUnits = GetFullPathNameW(target.Value(), 0, nullptr, nullptr);
-        if (fullUnits == 0) {
-            return NativeError(GetLastError());
+        RenameInfo info;
+        const FileStatus built = info.Build(target.Value());
+        if (!built) {
+            return built;
         }
-        const usize infoBytes = sizeof(FILE_RENAME_INFO) + fullUnits * sizeof(wchar_t);
-        auto* info =
-            static_cast<FILE_RENAME_INFO*>(AlignedAllocate(infoBytes, alignof(FILE_RENAME_INFO)));
-        if (info == nullptr) {
-            return {FileCode::OutOfMemory, 0};
-        }
-        platform::MemorySet(info, 0, infoBytes);
-        const DWORD written = GetFullPathNameW(target.Value(), fullUnits, info->FileName, nullptr);
-        if (written == 0 || written >= fullUnits) {
-            const DWORD error = GetLastError();
-            AlignedFree(info);
-            return NativeError(error);
-        }
-        info->Flags = FILE_RENAME_FLAG_REPLACE_IF_EXISTS | FILE_RENAME_FLAG_POSIX_SEMANTICS;
-        info->RootDirectory = nullptr;
-        info->FileNameLength = written * sizeof(wchar_t);
         // 이름 변경을 매체에 남기려면 대상의 부모 디렉터리를 flush해야 한다. 그 디렉터리는 rename
         // 전에 연다: 열기 실패를 교체 뒤에 알리면 호출자가 이전 내용이 남았다고 오판한다(POSIX와
         // 같다). 부모는 전체 경로의 마지막 구분자까지다(끝 구분자를 남겨 "C:\"·UNC share 루트도
         // 연다).
-        usize cut = written;
-        while (cut > 0 && info->FileName[cut - 1] != L'\\' && info->FileName[cut - 1] != L'/') {
+        usize cut = info.units;
+        while (cut > 0 && info.info->FileName[cut - 1] != L'\\' &&
+               info.info->FileName[cut - 1] != L'/') {
             --cut;
         }
         if (cut == 0) {
-            AlignedFree(info);
             return {FileCode::InvalidArgument, 0};
         }
         auto* parent =
             static_cast<wchar_t*>(AlignedAllocate((cut + 1) * sizeof(wchar_t), alignof(wchar_t)));
         if (parent == nullptr) {
-            AlignedFree(info);
             return {FileCode::OutOfMemory, 0};
         }
-        platform::MemoryCopy(parent, info->FileName, cut * sizeof(wchar_t));
+        platform::MemoryCopy(parent, info.info->FileName, cut * sizeof(wchar_t));
         parent[cut] = L'\0';
         HANDLE directory = OpenDirectoryForFlush(parent);
         AlignedFree(parent);
         if (directory == INVALID_HANDLE_VALUE) {
-            const DWORD error = GetLastError();
-            AlignedFree(info);
-            return ReplaceError(error);
+            return ReplaceError(GetLastError());
         }
-        // OPEN_REPARSE_POINT: 검사 뒤 원본이 link로 바뀌어도 link를 따라가지 않는다.
-        HANDLE file = CreateFileW(source.Value(), DELETE | SYNCHRONIZE,
-                                  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
-                                  OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
-        if (file == INVALID_HANDLE_VALUE) {
-            const DWORD error = GetLastError();
-            CloseHandle(directory);
-            AlignedFree(info);
-            return ReplaceError(error);
-        }
-        const BOOL renamed =
-            SetFileInformationByHandle(file, FileRenameInfoEx, info, static_cast<DWORD>(infoBytes));
-        const DWORD renameError = renamed ? ERROR_SUCCESS : GetLastError();
-        CloseHandle(file);
-        AlignedFree(info);
-        if (!renamed && renameError != ERROR_INVALID_PARAMETER &&
-            renameError != ERROR_NOT_SUPPORTED && renameError != ERROR_INVALID_FUNCTION) {
+        const DWORD renameError = RenameReplacing(source.Value(), target.Value(), info);
+        if (renameError != ERROR_SUCCESS) {
             CloseHandle(directory);
             return ReplaceError(renameError);
-        }
-        // POSIX 의미 rename을 지원하지 않는 볼륨(FAT·일부 네트워크 FS)이다. 일반 rename은 대상이
-        // 있으면 원자적으로 바꾸고, 실패하면 대상을 건드리지 않는다. ReplaceFileW는 이전 대상의
-        // 속성·스트림을 합치고 일부 실패에서 대상을 지운 채 남기므로 쓰지 않는다.
-        if (!renamed && !MoveFileExW(source.Value(), target.Value(), MOVEFILE_REPLACE_EXISTING)) {
-            const DWORD error = GetLastError();
-            CloseHandle(directory);
-            return ReplaceError(error);
         }
         // 교체는 이미 보인다. flush만 실패하면 되돌리지 않고 NotDurable로 알린다.
         const FileStatus flushed = FlushDirectoryHandle(directory);
