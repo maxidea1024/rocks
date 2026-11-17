@@ -27,8 +27,10 @@ constexpr EGLint DevicePbufferExtent = 1;
 constexpr EGLint EglOpenGlEs3Bit = 0x0040;
 constexpr EGLint EglContextMajorVersion = 0x3098;
 constexpr EGLint EglContextMinorVersion = 0x30FB;
-constexpr EGLint EglContextFlags = 0x30FC;
-constexpr EGLint EglContextDebugBit = 0x0001;
+// EGL 1.5 core의 debug context 속성이다. EGL_KHR_create_context의 EGL_CONTEXT_FLAGS_KHR debug
+// bit는 OpenGL context에만 정의되어 ES context에 주면 EGL_BAD_ATTRIBUTE일 수 있다.
+constexpr EGLint EglContextOpenGlDebug = 0x31B0;
+constexpr EGLint EglMinorVersionWithDebug = 5;
 constexpr EGLint EglGlColorspace = 0x309D;
 constexpr EGLint EglGlColorspaceSrgb = 0x3089;
 constexpr EGLenum EglSyncFence = 0x30F9;
@@ -142,16 +144,27 @@ public:
         // ES 3.2 context다. EGL_KHR_create_context가 있으면 버전과 debug flag를 요청하고, 없으면
         // client version 3으로 만든 뒤 실제 버전을 확인한다(UE는 3.1로 다시 시도하지만 Rocks는 3.2
         // 미만을 받지 않는다).
+        // debug context는 EGL 1.5 이상에서 EGL_CONTEXT_OPENGL_DEBUG로 요청한다. 거절되면 debug 없이
+        // 다시 만든다(debug output은 debug context가 아니어도 켤 수 있다).
+        const bool debugAttribute =
+            desc.enableValidation &&
+            (major > 1 || (major == 1 && minor >= EglMinorVersionWithDebug));
         const EGLint versioned[] = {EglContextMajorVersion,
                                     EsMajorVersion,
                                     EglContextMinorVersion,
                                     EsMinorVersion,
-                                    EglContextFlags,
-                                    desc.enableValidation ? EglContextDebugBit : 0,
+                                    debugAttribute ? EglContextOpenGlDebug : EGL_NONE,
+                                    EGL_TRUE,
                                     EGL_NONE};
         const EGLint legacy[] = {EGL_CONTEXT_CLIENT_VERSION, EsMajorVersion, EGL_NONE};
         context_ =
             eglCreateContext(display_, config_, EGL_NO_CONTEXT, createContext ? versioned : legacy);
+        if (context_ == EGL_NO_CONTEXT && createContext && debugAttribute) {
+            const EGLint plain[] = {EglContextMajorVersion, EsMajorVersion, EglContextMinorVersion,
+                                    EsMinorVersion, EGL_NONE};
+            context_ = eglCreateContext(display_, config_, EGL_NO_CONTEXT, plain);
+        }
+
         if (context_ == EGL_NO_CONTEXT) {
             return failure.Set(ErrorCode::Unsupported, "eglCreateContext", eglGetError(),
                                "OpenGL ES 3.2 context creation failed");
@@ -197,6 +210,8 @@ public:
         // Android에서 clip control을 쓰지 않는다(OpenGLDrv.cpp:469–475는 Windows·Linux만).
         info_.clip = ClipConvention::ShaderFlip;
         info_.desktopContext = false;
+        // ES 3.2 사양대로 blit이 sRGB 원본을 늘 디코딩한다고 본다(GlesPlatform.h PlatformInfo).
+        info_.rawSrgbBlit = false;
         info_.contextName = "OpenGL ES 3.2, EGL, GLES31_ANDROID";
         return ErrorCode::None;
     }

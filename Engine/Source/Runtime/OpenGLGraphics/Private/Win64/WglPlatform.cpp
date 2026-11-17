@@ -163,10 +163,17 @@ public:
         }
 
         if (result != ErrorCode::None && profile == OpenGLContextProfile::Automatic) {
-            Diagnostic first = failure.detail;
+            // 첫 시도(ES profile)의 단계·원본 오류·설명을 남겨 두고 두 번째 시도가 실패하면 함께
+            // 적는다.
+            const GlesCreateFailure first = failure;
             result = CreateContext(true, failure);
             if (result != ErrorCode::None) {
-                failure.detail.Text("; ES profile: ").Text(first.View());
+                failure.detail.Text("; ES profile: ")
+                    .Text(first.stage)
+                    .Text(" (native ")
+                    .Hex(static_cast<uint64>(first.nativeCode))
+                    .Text("): ")
+                    .Text(first.detail.View());
             }
         } else if (profile == OpenGLContextProfile::DesktopCore) {
             result = CreateContext(true, failure);
@@ -388,8 +395,15 @@ private:
             legacy = wglCreateContext(dc);
         }
 
-        const DWORD legacyError = legacy == nullptr ? GetLastError() : 0;
-        if (legacy != nullptr && wglMakeCurrent(dc, legacy)) {
+        DWORD legacyError = legacy == nullptr ? GetLastError() : 0;
+        const char* legacyStage = "wglCreateContext";
+        const bool legacyCurrent = legacy != nullptr && wglMakeCurrent(dc, legacy);
+        if (legacy != nullptr && !legacyCurrent) {
+            legacyError = GetLastError();
+            legacyStage = "wglMakeCurrent";
+        }
+
+        if (legacyCurrent) {
             choosePixelFormat_ = reinterpret_cast<WglChoosePixelFormat>(
                 LoadWglProc("wglChoosePixelFormatARB", nullptr));
             createContext_ = reinterpret_cast<WglCreateContextAttribs>(
@@ -411,8 +425,7 @@ private:
         ReleaseDC(dummy, dc);
         DestroyWindow(dummy);
         if (choosePixelFormat_ == nullptr || createContext_ == nullptr) {
-            return failure.Set(ErrorCode::Unsupported, "wglCreateContext",
-                               static_cast<int64>(legacyError),
+            return failure.Set(ErrorCode::Unsupported, legacyStage, static_cast<int64>(legacyError),
                                "WGL_ARB_pixel_format / WGL_ARB_create_context are not available");
         }
 
@@ -465,6 +478,8 @@ private:
         }
 
         info_.desktopContext = desktop;
+        // 두 context 모두 스스로 잰 결과다(OpenGLESGraphics 2.2절): 스위치를 끄면 byte가 그대로다.
+        info_.rawSrgbBlit = true;
         info_.clip = ClipConvention::ClipControlUpperLeft;
         info_.contextName = desktop ? "OpenGL 4.3 core, GLES31_PC preview"
                                     : "OpenGL ES 3.2, WGL ES profile, GLES31_PC preview";

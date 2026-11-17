@@ -231,7 +231,8 @@ private:
     bool MakeCurrentForResources() noexcept;
 
     // graphics queue에 fence를 넣고 다음 값을 돌려준다. fence를 만들지 못하면 glFinish로 끝내고
-    // token 없이 알린다(관찰 스레드가 곧바로 완료로 본다).
+    // token 없이 알린다(관찰 스레드가 곧바로 완료로 본다). context를 붙일 수 없으면 완료를 지어내지
+    // 않고 장치 손실로 게시하며 값을 올리지 않는다(돌려준 값이 직전 값과 같다).
     uint64 Submit() noexcept;
 
     void Defer(RetiredObject entry) noexcept;
@@ -266,7 +267,8 @@ private:
     void ApplyConstants(const PipelineRecord& pipeline) noexcept;
 
     // 스왑체인 텍스처를 창 표면의 기본 framebuffer에 Y를 뒤집어 blit한다(장치 context를 그
-    // 표면에 붙인다). 끝나면 기록 중인 패스 대상을 다시 묶는다.
+    // 표면에 붙인다). 끝나면 기록 중인 패스 대상과 viewport를 다시 묶는다. 표면에 붙이지 못하면
+    // 장치 표면으로 되돌리고 false다.
     bool PresentBlit(const SwapChainRecord& record) noexcept;
 
     String adapterName_;
@@ -330,6 +332,9 @@ private:
     bool recording_ = false;
     bool constantsDirty_ = false;
     bool validation_ = false;
+    // present·패스 복사 blit에서 sRGB 쓰기 스위치를 끄고 byte를 그대로 옮기는지다(PlatformInfo::
+    // rawSrgbBlit이고 스위치가 있을 때).
+    bool rawSrgbBlit_ = false;
 };
 
 } // namespace rocks::graphics::gles

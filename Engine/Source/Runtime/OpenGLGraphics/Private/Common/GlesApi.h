@@ -274,6 +274,9 @@ struct GlesFunctions {
 struct GlesTimerQueryFunctions {
     void (*QueryCounter)(GLuint, GLenum) = nullptr;
     void (*GetQueryObjectui64v)(GLuint, GLenum, GLuint64*) = nullptr;
+    // GL_TIMESTAMP의 counter bit 조회다. ES 3.2 core glGetQueryiv는 GL_TIMESTAMP 대상을 정의하지
+    // 않으므로 ES는 확장의 glGetQueryivEXT를 쓴다.
+    void (*GetQueryiv)(GLenum, GLenum, GLint*) = nullptr;
 };
 
 // 이름으로 GL 함수 주소를 얻는 플랫폼 함수다(wglGetProcAddress·eglGetProcAddress를 감싼다). 없으면
@@ -289,18 +292,19 @@ bool LoadCoreFunctions(GlesFunctions& gl, GlesProcLoader loader, void* context,
 struct GlesTimerQueryNames {
     const char* queryCounter = nullptr;
     const char* getQueryObjectui64v = nullptr;
+    const char* getQueryiv = nullptr;
 };
 
 // GL_EXT_disjoint_timer_query(ES)의 이름이다.
-inline constexpr GlesTimerQueryNames EsTimerQueryNames = {"glQueryCounterEXT",
-                                                          "glGetQueryObjectui64vEXT"};
+inline constexpr GlesTimerQueryNames EsTimerQueryNames = {
+    "glQueryCounterEXT", "glGetQueryObjectui64vEXT", "glGetQueryivEXT"};
 
 // 데스크톱 GL 3.3 core(ARB_timer_query)의 이름이다. Windows 미리보기의 데스크톱 core context만
 // 쓴다.
-inline constexpr GlesTimerQueryNames DesktopTimerQueryNames = {"glQueryCounter",
-                                                               "glGetQueryObjectui64v"};
+inline constexpr GlesTimerQueryNames DesktopTimerQueryNames = {
+    "glQueryCounter", "glGetQueryObjectui64v", "glGetQueryiv"};
 
-// timestamp query 함수를 names로 얻는다. 둘 다 얻으면 true다.
+// timestamp query 함수를 names로 얻는다. 모두 얻으면 true다.
 bool LoadTimerQueryFunctions(GlesTimerQueryFunctions& out, const GlesTimerQueryNames& names,
                              GlesProcLoader loader, void* context) noexcept;
 

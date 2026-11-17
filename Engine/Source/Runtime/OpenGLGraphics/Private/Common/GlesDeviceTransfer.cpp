@@ -201,7 +201,13 @@ Result<ReadbackRequest> GlesDevice::RequestReadback(TextureHandle target) noexce
                    format->externalFormat, format->externalType, nullptr);
     gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
     gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    const uint64 previous = fenceValue_;
     readback.fenceValue = Submit();
+    if (readback.fenceValue == previous) {
+        // context를 잃어 장치 손실로 게시했다. 버퍼는 context 삭제 때 드라이버가 회수한다.
+        return Result<ReadbackRequest>::Failure(ErrorCode::Destroyed);
+    }
+
     auto added = readbacks_.TryAdd(readback);
     if (!added) {
         gl_.DeleteBuffers(1, &readback.buffer);
@@ -303,10 +309,7 @@ void GlesDevice::InitializeTimestamps() noexcept {
     }
 
     GLint bits = 0;
-    gl_.GetQueryiv(GL_TIMESTAMP, GL_QUERY_COUNTER_BITS, &bits);
-    // 오류를 남기지 않도록 지운다(지원하지 않는 query 대상이면 GL_INVALID_ENUM이다).
-    while (gl_.GetError() != GL_NO_ERROR) {
-    }
+    timer_.GetQueryiv(GL_TIMESTAMP, GL_QUERY_COUNTER_BITS, &bits);
 
     if (bits <= 0 || !timestamps_.Reset(TimestampFrameSlots, MaxTimestampsPerFrame)) {
         return;

@@ -26,7 +26,7 @@ void FillReport(const GlesCreateFailure& failure, DeviceCreateReport& report) no
     const bool stageCut = CopyTruncated(report.stage, sizeof(report.stage), failure.stage);
     const bool detailCut =
         CopyTruncated(report.detail, sizeof(report.detail), failure.detail.CStr());
-    report.truncated = stageCut || detailCut;
+    report.truncated = stageCut || detailCut || failure.detail.Truncated();
 }
 
 } // namespace
@@ -160,6 +160,7 @@ Result<void> GlesDevice::Initialize(const DeviceDesc& desc, const OpenGLDeviceOp
                             ? static_cast<uint32>(maxTextureSize)
                             : MaxTextureExtent;
     features_ = DetectFeatures(gl_, context.desktopContext);
+    rawSrgbBlit_ = context.rawSrgbBlit && features_.srgbWriteControl;
 
     const uint64 stagingBudget =
         desc.stagingBudgetBytes != 0 ? desc.stagingBudgetBytes : DefaultStagingBudgetBytes;
@@ -177,6 +178,8 @@ Result<void> GlesDevice::Initialize(const DeviceDesc& desc, const OpenGLDeviceOp
         return Result<void>::Failure(watching.Error());
     }
 
+    // timestamp 조사는 debug output을 켜기 전에 한다(조사 호출이 검증 오류로 세어지지 않게).
+    InitializeTimestamps();
     if (desc.enableValidation) {
         // KHR_debug는 ES 3.2 core다. debug context가 아니어도 debug output은 켤 수 있다.
         gl_.Enable(GL_DEBUG_OUTPUT);
@@ -185,7 +188,6 @@ Result<void> GlesDevice::Initialize(const DeviceDesc& desc, const OpenGLDeviceOp
         validation_ = true;
     }
 
-    InitializeTimestamps();
     // 모든 패스가 같은 클립 공간 규약이므로 앞면 감김은 한 번만 정한다.
     gl_.FrontFace(FrontFaceFor(context.clip));
     gl_.Disable(GL_DEPTH_TEST);
@@ -706,6 +708,12 @@ bool GlesDevice::MakeCurrentForResources() noexcept {
 }
 
 uint64 GlesDevice::Submit() noexcept {
+    // 앞 단계(창 표면 전환)가 실패해 context가 풀렸으면 장치 표면에 다시 붙인다.
+    if (!MakeCurrentForResources()) {
+        timeline_.MarkLost();
+        return fenceValue_;
+    }
+
     void* token = platform_->InsertFence();
     if (token == nullptr) {
         gl_.Finish();
@@ -725,8 +733,13 @@ void GlesDevice::Defer(RetiredObject entry) noexcept {
     }
 
     if (recording_ || !MakeCurrentForResources()) {
-        // 기록 중인 프레임이 쓸 수 있거나 context가 없다. 지우지 않고 버린다(context 삭제 때
-        // 드라이버가 회수한다).
+        // 기록 중인 프레임이 쓸 수 있거나 context가 없다. GL 객체는 지우지 않고 버린다(context 삭제
+        // 때 드라이버가 회수한다). 창 표면은 GL 객체가 아니고 기록한 명령이 쓰지 않으므로(그리기는
+        // 스왑체인 텍스처에, present는 Retire로 생략된다) 바로 놓는다.
+        if (entry.kind == RetiredKind::SwapChain) {
+            platform_->DestroySurface(entry.surface);
+        }
+
         return;
     }
 

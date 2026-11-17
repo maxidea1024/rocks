@@ -104,7 +104,13 @@ Result<GpuFencePoint> GlesDevice::EndFrame() noexcept {
     }
 
     gl_.BindFramebuffer(GL_FRAMEBUFFER, 0);
+    const uint64 previous = fenceValue_;
     const uint64 value = Submit();
+    if (value == previous) {
+        // fence를 넣지 못했다(context를 잃음). Submit이 장치 손실로 게시했다.
+        return Result<GpuFencePoint>::Failure(ErrorCode::Destroyed);
+    }
+
     timestamps_.Close(value, true);
     AssignPendingRetires(value);
     DeleteRetired(timeline_.Completed());
@@ -179,6 +185,10 @@ void GlesDevice::BindPassTexture(const TextureRecord& record) noexcept {
 
 bool GlesDevice::PresentBlit(const SwapChainRecord& record) noexcept {
     if (!platform_->MakeCurrentOnSurface(record.surface)) {
+        // wglMakeCurrent·eglMakeCurrent가 실패하면 이 스레드의 context가 풀릴 수 있다. 장치
+        // 표면으로 되돌려 뒤의 GL 호출이 context 없이 실행되지 않게 한다(되돌리지 못하면 Submit이
+        // 손실로 게시한다).
+        platform_->MakeCurrent();
         return false;
     }
 
@@ -190,14 +200,15 @@ bool GlesDevice::PresentBlit(const SwapChainRecord& record) noexcept {
     }
 
     // 텍스처 첫 행(이미지 위쪽)을 창 위쪽에 두도록 대상 y를 뒤집는다(기본 framebuffer는 아래쪽이
-    // 원점). 창 크기가 다르면 늘려 그린다(D3D12 스왑체인의 표시 확대와 같다). sRGB byte는 변환 없이
+    // 원점). 창 크기가 다르면 늘려 그린다(D3D12 스왑체인의 표시 확대와 같다). sRGB byte는 그대로
     // 옮긴다(아래).
     gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, record.framebuffer);
     gl_.ReadBuffer(GL_COLOR_ATTACHMENT0);
     gl_.BindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-    // sRGB 쓰기 변환을 끌 수 있으면 끄고 옮긴다(UE도 표시 blit에서 GL_FRAMEBUFFER_SRGB를 끈다,
-    // WindowsOpenGLPlatform.cpp:505–517).
-    if (features_.srgbWriteControl) {
+    // 데스크톱식 드라이버는 sRGB 쓰기 스위치를 끄고 byte를 그대로 옮긴다(UE도 표시 blit에서
+    // GL_FRAMEBUFFER_SRGB를 끈다, WindowsOpenGLPlatform.cpp:505–517). ES 사양대로라면 스위치를 켠
+    // 채 sRGB 창 표면으로 옮겨 디코딩·인코딩이 상쇄된다(PlatformInfo::rawSrgbBlit).
+    if (rawSrgbBlit_) {
         gl_.Disable(GL_FRAMEBUFFER_SRGB);
     }
 
@@ -205,13 +216,18 @@ bool GlesDevice::PresentBlit(const SwapChainRecord& record) noexcept {
     gl_.BlitFramebuffer(0, 0, static_cast<GLint>(record.width), static_cast<GLint>(record.height),
                         0, static_cast<GLint>(height), static_cast<GLint>(width), 0,
                         GL_COLOR_BUFFER_BIT, sameSize ? GL_NEAREST : GL_LINEAR);
-    if (features_.srgbWriteControl) {
+    if (rawSrgbBlit_) {
         gl_.Enable(GL_FRAMEBUFFER_SRGB);
     }
 
     gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    // 기록 중(CopyPassTarget)이면 패스 대상을 다시 그리기 framebuffer로 둔다.
+    // 기록 중(CopyPassTarget)이면 패스 대상을 다시 그리기 framebuffer로 둔다. EGL은 context가
+    // 처음 표면에 붙을 때 viewport를 그 표면 크기로 바꾸므로 패스 viewport도 다시 둔다.
     gl_.BindFramebuffer(GL_DRAW_FRAMEBUFFER, recording_ ? pass_.framebuffer : 0u);
+    if (recording_) {
+        gl_.Viewport(0, 0, static_cast<GLsizei>(pass_.width), static_cast<GLsizei>(pass_.height));
+    }
+
     return true;
 }
 
@@ -397,14 +413,14 @@ Result<void> GlesDevice::CopyPassTarget(TextureHandle destination) noexcept {
     }
 
     gl_.BindFramebuffer(GL_DRAW_FRAMEBUFFER, record->framebuffer);
-    if (features_.srgbWriteControl) {
+    if (rawSrgbBlit_) {
         gl_.Disable(GL_FRAMEBUFFER_SRGB);
     }
 
     gl_.BlitFramebuffer(0, 0, sourceWidth, sourceHeight, 0, window ? height : 0, width,
                         window ? 0 : height, GL_COLOR_BUFFER_BIT,
                         sourceWidth == width && sourceHeight == height ? GL_NEAREST : GL_LINEAR);
-    if (features_.srgbWriteControl) {
+    if (rawSrgbBlit_) {
         gl_.Enable(GL_FRAMEBUFFER_SRGB);
     }
 

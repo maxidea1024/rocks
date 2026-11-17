@@ -40,6 +40,12 @@ struct PlatformInfo {
     // 데스크톱 GL core context다(Windows 미리보기의 대체 경로). timestamp query 이름이 GL 3.3
     // core이고 GL_FRAMEBUFFER_SRGB 스위치가 core다.
     bool desktopContext = false;
+    // sRGB 쓰기 스위치(GL_FRAMEBUFFER_SRGB)를 끄고 blit하면 sRGB 원본의 byte가 그대로 옮겨지는지다.
+    // 데스크톱 GL 4.4+ 드라이버는 원본 디코딩도 이 스위치에 묶어 true다(Windows 미리보기의 두
+    // context, OpenGLESGraphics 2.2절 측정). OpenGL ES 3.2 사양(16.2.1절)은 sRGB 원본을 늘
+    // 디코딩하고 스위치는 쓰기 인코딩만 정하므로 Android는 false다. 그때는 스위치를 켠 채 sRGB
+    // 대상(sRGB 창 표면·sRGB 텍스처)으로 옮겨 디코딩과 인코딩이 서로 상쇄되게 한다.
+    bool rawSrgbBlit = false;
     // "OpenGL ES 3.2 (WGL ES profile)" 같은 context 설명이다(adapter 이름 뒤에 붙인다).
     const char* contextName = "";
 };

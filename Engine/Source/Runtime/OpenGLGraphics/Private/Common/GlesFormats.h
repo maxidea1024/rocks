@@ -108,9 +108,18 @@ public:
         return StringView(buffer_, length_);
     }
 
+    // 칸이 모자라 자른 적이 있는지다(DeviceCreateReport::truncated).
+    bool Truncated() const noexcept {
+        return truncated_;
+    }
+
 private:
+    // 한 글자를 붙인다. 칸이 모자라면 잘림을 기록한다.
+    void Put(char character) noexcept;
+
     char buffer_[256] = {};
     usize length_ = 0;
+    bool truncated_ = false;
 };
 
 } // namespace rocks::graphics::gles

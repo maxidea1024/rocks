@@ -32,7 +32,8 @@ bool LoadTimerQueryFunctions(GlesTimerQueryFunctions& out, const GlesTimerQueryN
                              GlesProcLoader loader, void* context) noexcept {
     GlesTimerQueryFunctions loaded;
     if (!Bind(loaded.QueryCounter, names.queryCounter, loader, context) ||
-        !Bind(loaded.GetQueryObjectui64v, names.getQueryObjectui64v, loader, context)) {
+        !Bind(loaded.GetQueryObjectui64v, names.getQueryObjectui64v, loader, context) ||
+        !Bind(loaded.GetQueryiv, names.getQueryiv, loader, context)) {
         return false;
     }
 

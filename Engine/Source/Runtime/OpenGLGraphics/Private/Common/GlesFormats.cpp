@@ -186,21 +186,28 @@ GLint WrapMode(AddressMode mode) noexcept {
     return static_cast<GLint>(GL_REPEAT);
 }
 
+void Diagnostic::Put(char character) noexcept {
+    if (length_ + 1 < sizeof(buffer_)) {
+        buffer_[length_++] = character;
+        buffer_[length_] = 0;
+    } else {
+        truncated_ = true;
+    }
+}
+
 Diagnostic& Diagnostic::Text(const char* text) noexcept {
-    while (text != nullptr && *text != 0 && length_ + 1 < sizeof(buffer_)) {
-        buffer_[length_++] = *text++;
+    while (text != nullptr && *text != 0) {
+        Put(*text++);
     }
 
-    buffer_[length_] = 0;
     return *this;
 }
 
 Diagnostic& Diagnostic::Text(StringView text) noexcept {
-    for (usize index = 0; index < text.ByteCount() && length_ + 1 < sizeof(buffer_); ++index) {
-        buffer_[length_++] = text.Data()[index];
+    for (usize index = 0; index < text.ByteCount(); ++index) {
+        Put(text.Data()[index]);
     }
 
-    buffer_[length_] = 0;
     return *this;
 }
 
@@ -212,11 +219,10 @@ Diagnostic& Diagnostic::Number(uint64 value) noexcept {
         value /= 10;
     } while (value != 0);
 
-    while (count > 0 && length_ + 1 < sizeof(buffer_)) {
-        buffer_[length_++] = digits[--count];
+    while (count > 0) {
+        Put(digits[--count]);
     }
 
-    buffer_[length_] = 0;
     return *this;
 }
 
@@ -230,11 +236,10 @@ Diagnostic& Diagnostic::Hex(uint64 value) noexcept {
     } while (value != 0);
 
     Text("0x");
-    while (count > 0 && length_ + 1 < sizeof(buffer_)) {
-        buffer_[length_++] = digits[--count];
+    while (count > 0) {
+        Put(digits[--count]);
     }
 
-    buffer_[length_] = 0;
     return *this;
 }
 
