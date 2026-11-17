@@ -10,9 +10,13 @@
 #include <Graphics/GpuFenceEvent.h>
 #include <OpenGLGraphics/OpenGLDevice.h>
 #include <PlatformWindow/Window.h>
+#include <VulkanGraphics/VulkanDevice.h>
 #include "SampleRenderer.h"
 #include <stdio.h>
 #include <Platform/Memory.h>
+#if SANDBOX_SHADER_SOURCE_COMPILER
+#include <ShaderFormatVulkan/VulkanShaderCompiler.h>
+#endif
 
 namespace sandbox {
 
@@ -305,8 +309,8 @@ struct OwnerThreadRun {
 // 확인한다.
 void RunOwnershipChecks(const char* name, graphics::Device& device, sample::Renderer& renderer,
                         graphics::TextureHandle target, Allocator& allocator) noexcept {
-    // D3D12는 생성이 스레드 안전이고(GX8 업로드 경로), OpenGL은 소유 스레드 전용이다.
-    const bool concurrent = device.Info().backend == graphics::Backend::D3D12;
+    // D3D12·Vulkan은 생성이 스레드 안전이고(GX8 업로드 경로), OpenGL은 소유 스레드 전용이다.
+    const bool concurrent = device.Info().backend != graphics::Backend::OpenGL;
     Check(device.Info().concurrentResourceCreation == concurrent && device.IsOwnerThread(), name,
           "device starts owned by its creating thread");
     Check(device.ReleaseOwnership().IsOk() && !device.IsOwnerThread(), name,
@@ -592,9 +596,10 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     failures += RunTimingChecks(name, device, renderer, result.triangle.GetAllocator());
     Check(device.ValidationErrorCount() == 0, name, "no validation errors");
 
-    // 검증 오류 집계가 실제로 동작하는지 확인한다: D3D12는 파이프라인 RTV 형식과 다른 대상에
-    // 그리면 debug layer 오류다(OpenGL에는 대응 오류가 없다).
-    if (info.backend == graphics::Backend::D3D12 && info.validationEnabled) {
+    // 검증 오류 집계가 실제로 동작하는지 확인한다: 파이프라인 대상 형식과 다른 대상에 그리면
+    // D3D12는 debug layer(RTV 형식), Vulkan은 validation layer(render pass 호환성)
+    // 오류다(OpenGL에는 대응 오류가 없다).
+    if (info.backend != graphics::Backend::OpenGL && info.validationEnabled) {
         const uint64 before = device.ValidationErrorCount();
         sample::Renderer mismatched;
         if (mismatched.Initialize(device, graphics::Format::RGBA8Unorm)) {
@@ -649,6 +654,49 @@ void Compare(const BackendResult& left, const BackendResult& right, const char* 
     printf("  [%s] %s (%u differing channels)\n", same ? "PASS" : "FAIL", name, different);
 }
 
+// Vulkan 장치를 만들어 돌린다. 생성 실패는 report의 단계·원본 VkResult와 함께 NOT RUN으로 알린다.
+void RunVulkanDevice(const char* name, Allocator& allocator, const graphics::DeviceDesc& desc,
+                     BackendResult& result) noexcept {
+    graphics::DeviceCreateReport report;
+    auto created = graphics::CreateVulkanDevice(allocator, desc, &report);
+    if (!created) {
+        printf("  [NOT RUN] %s: %s (VkResult %lld)\n", name, report.detail,
+               static_cast<long long>(report.nativeCode));
+        return;
+    }
+
+    RunBackend(name, Move(created), result);
+}
+
+// Vulkan 하드웨어와 소프트웨어 ICD(lavapipe·SwiftShader, 측정 S4)를 돌린다. 실행 중 컴파일러가
+// 없으므로 개발용 컴파일 훅(ShaderFormatVulkan)이 있어야 한다(Release Sandbox는 NOT RUN).
+void RunVulkan(Allocator& allocator, const graphics::DeviceDesc& base, BackendResult& hardware,
+               BackendResult& software) noexcept {
+#if SANDBOX_SHADER_SOURCE_COMPILER
+    String diagnostics(allocator);
+    auto compiler = shader::VulkanShaderCompiler::Create(allocator, diagnostics);
+    if (!compiler) {
+        printf("  [NOT RUN] Vulkan: development shader compiler unavailable: %s\n",
+               diagnostics.CStr());
+        return;
+    }
+
+    graphics::DeviceDesc desc = base;
+    desc.shaderCompiler = compiler.Value().Get();
+    RunVulkanDevice("Vulkan", allocator, desc, hardware);
+    desc.preferSoftware = true;
+    RunVulkanDevice("Vulkan software", allocator, desc, software);
+#else
+    (void)allocator;
+    (void)base;
+    (void)hardware;
+    (void)software;
+    printf("  [NOT RUN] Vulkan: Release builds carry no shader compiler (cooked SPIR-V is "
+           "ShaderSystem SH2)
+");
+#endif
+}
+
 } // namespace
 
 int RunGraphicsSelfTest(Allocator& allocator) noexcept {
@@ -661,14 +709,19 @@ int RunGraphicsSelfTest(Allocator& allocator) noexcept {
     BackendResult d3d12(allocator);
     BackendResult warp(allocator);
     BackendResult opengl(allocator);
+    BackendResult vulkan(allocator);
+    BackendResult vulkanSoftware(allocator);
     RunBackend("D3D12", graphics::CreateD3D12Device(allocator, desc), d3d12);
     graphics::DeviceDesc software = desc;
     software.preferSoftware = true;
     RunBackend("D3D12 WARP", graphics::CreateD3D12Device(allocator, software), warp);
     RunBackend("OpenGL", graphics::CreateOpenGLDevice(allocator, desc), opengl);
+    RunVulkan(allocator, desc, vulkan, vulkanSoftware);
     Compare(d3d12, opengl, "D3D12 vs OpenGL");
     Compare(d3d12, warp, "D3D12 vs WARP");
-    const bool anyRan = d3d12.ran || warp.ran || opengl.ran;
+    Compare(d3d12, vulkan, "D3D12 vs Vulkan");
+    Compare(d3d12, vulkanSoftware, "D3D12 vs Vulkan software");
+    const bool anyRan = d3d12.ran || warp.ran || opengl.ran || vulkan.ran || vulkanSoftware.ran;
     printf("Graphics self-test: %s (%u failure%s)\n",
            failures == 0 && anyRan ? "PASS" : (anyRan ? "FAIL" : "NOT RUN"), failures,
            failures == 1 ? "" : "s");

@@ -321,7 +321,8 @@ uint32 RunUploadChecks(const char* name, Device& device, sample::Renderer& rende
                        Allocator& allocator) noexcept {
     failures = 0;
     backendName = name;
-    const bool d3d12 = device.Info().backend == Backend::D3D12;
+    // D3D12·Vulkan은 업로드 ring·staging을 fence 뒤에 회수한다(OpenGL은 client 메모리 업로드).
+    const bool fenceGated = device.Info().backend != Backend::OpenGL;
     Bench bench(allocator);
     bench.device = &device;
     bench.renderer = &renderer;
@@ -337,8 +338,8 @@ uint32 RunUploadChecks(const char* name, Device& device, sample::Renderer& rende
 
     bench.target = target.Value();
     RunTextureUpdate(bench);
-    RunRingWrap(bench, d3d12);
-    RunStaging(bench, d3d12);
+    RunRingWrap(bench, fenceGated);
+    RunStaging(bench, fenceGated);
     RunReadback(bench);
     RunOtherThreadCreation(bench);
     device.Retire(bench.target);

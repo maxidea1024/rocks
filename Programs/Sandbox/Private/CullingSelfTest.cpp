@@ -55,6 +55,31 @@ constexpr Vertex WindingVertices[] = {
 };
 constexpr uint32 WindingVertexCount = sizeof(WindingVertices) / sizeof(WindingVertices[0]);
 
+// 앞면 판정 대조 셰이더다. 컬링 없이 그려 셰이더가 본 앞면(SV_IsFrontFace·gl_FrontFacing)을 색으로
+// 낸다: 앞면 초록, 뒤면 빨강. 컬링 결과만으로는 backend가 앞면 정의를 뒤집어 컬도 함께 뒤집은
+// 경우(UE Vulkan 매핑)를 잡지 못한다(VulkanGraphics 11절).
+constexpr char FacingHlsl[] = R"(
+struct VSInput { float3 position : ATTRIBUTE0; };
+float4 VSMain(VSInput input) : SV_Position { return float4(input.position, 1.0); }
+float4 PSMain(float4 position : SV_Position, bool front : SV_IsFrontFace) : SV_Target {
+    return front ? float4(0.0, 1.0, 0.0, 1.0) : float4(1.0, 0.0, 0.0, 1.0);
+}
+)";
+
+constexpr char FacingVertexGlsl[] = R"(#version 450 core
+layout(location = 0) in vec3 aPosition;
+void main() {
+    gl_Position = vec4(aPosition, 1.0);
+}
+)";
+
+constexpr char FacingPixelGlsl[] = R"(#version 450 core
+layout(location = 0) out vec4 oColor;
+void main() {
+    oColor = gl_FrontFacing ? vec4(0.0, 1.0, 0.0, 1.0) : vec4(1.0, 0.0, 0.0, 1.0);
+}
+)";
+
 // 두 삼각형의 무게중심 픽셀과, 그것을 위아래로 뒤집은 픽셀이다.
 constexpr uint32 CounterClockwiseX = 16;
 constexpr uint32 ClockwiseX = 48;
@@ -240,6 +265,41 @@ void RunWindingChecks(Bench& bench, bool window, Array<uint8>& pixels) noexcept 
     }
 }
 
+// 셰이더가 보는 앞면이 화면 반시계인지 본다(D3D12 FrontCounterClockwise와 같은 뜻).
+void RunFacingChecks(Bench& bench, bool window, Array<uint8>& pixels) noexcept {
+    const VertexAttribute attributes[] = {
+        {0, VertexFormat::Float3, 0, ROCKS_OFFSET_OF(Vertex, position)}};
+    const VertexStream streams[] = {{sizeof(Vertex), VertexStepRate::Vertex}};
+    PipelineDesc desc;
+    const StringView hlsl(FacingHlsl, sizeof(FacingHlsl) - 1);
+    desc.vertex = {hlsl, StringView(FacingVertexGlsl, sizeof(FacingVertexGlsl) - 1)};
+    desc.pixel = {hlsl, StringView(FacingPixelGlsl, sizeof(FacingPixelGlsl) - 1)};
+    desc.layout = {attributes, streams};
+    desc.colorFormat = Format::RGBA8UnormSrgb;
+    auto pipeline = bench.device->CreatePipeline(desc);
+    Check(pipeline.IsOk(), "facing pipeline creation");
+    if (!pipeline) {
+        printf("    %.*s\n", static_cast<int>(bench.device->LastError().ByteCount()),
+               bench.device->LastError().Data());
+        return;
+    }
+
+    auto draw = [&](CommandContext& commands) {
+        commands.SetPipeline(pipeline.Value());
+        const VertexBufferBinding binding{bench.winding, 0};
+        commands.SetVertexBuffers(0, Span<const VertexBufferBinding>(&binding, 1));
+        commands.Draw(WindingVertexCount);
+    };
+    const char* what = "shader front face is the screen counter-clockwise triangle";
+    if (RenderBoth(bench, window, what, draw, pixels)) {
+        Check(Dominant(pixels, CounterClockwiseX, WindingY, 1) &&
+                  Dominant(pixels, ClockwiseX, WindingY, 0),
+              what);
+    }
+
+    bench.device->Retire(pipeline.Value());
+}
+
 // 샘플 렌더러의 음수 행렬식 컬 반전이다. 삼각형을 로컬 Y로 뒤집으면 화면에서 시계로 감기므로
 // 반전하지 않으면 뒤면 컬로 사라진다.
 void RunDeterminantChecks(Bench& bench, bool window, Array<uint8>& pixels) noexcept {
@@ -384,6 +444,7 @@ uint32 RunCullingChecks(const char* name, Device& device, sample::Renderer& rend
 
     Array<uint8> pixels(allocator);
     RunWindingChecks(bench, window, pixels);
+    RunFacingChecks(bench, window, pixels);
     RunDeterminantChecks(bench, window, pixels);
     RunRowMajorChecks(bench, window, pixels);
 

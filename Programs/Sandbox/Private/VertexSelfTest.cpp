@@ -395,6 +395,14 @@ void RunFormat(Bench& bench, VertexFormat format, bool openGl) noexcept {
         return;
     }
 
+    if (pipeline.Error() == ErrorCode::Unsupported &&
+        bench.device->Info().backend == Backend::Vulkan) {
+        // Vulkan은 형식마다 VERTEX_BUFFER 기능이 선택이라(B8G8R8A8_UNORM 등) 장치가 주지 않으면
+        // 다른 형식으로 바꾸지 않고 Unsupported로 공개한다.
+        printf("    %s: not a vertex format on this Vulkan device\n", VertexFormatName(format));
+        return;
+    }
+
     CheckFormat(pipeline.IsOk(), format, "pipeline accepts the format");
     if (!pipeline) {
         printf("    %.*s\n", static_cast<int>(bench.device->LastError().ByteCount()),
