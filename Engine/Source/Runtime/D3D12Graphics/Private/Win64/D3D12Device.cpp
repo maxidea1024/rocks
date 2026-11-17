@@ -113,15 +113,18 @@ private:
     T* pointer_ = nullptr;
 };
 
-DXGI_FORMAT ResourceFormat(Format format) noexcept {
+// 픽셀 형식의 DXGI 형식이다. PF1에서는 RGBA8 두 형식만 대응하고 나머지는 UNKNOWN이다(생성이
+// Unsupported, PixelFormat.ko.md 14절). 전체 대응 표는 PF2에서 D3D12PixelFormats.cpp로 옮긴다.
+DXGI_FORMAT ResourceFormat(PixelFormat format) noexcept {
     switch (format) {
-    case Format::RGBA8Unorm:
+    case PixelFormat::RGBA8Unorm:
         return DXGI_FORMAT_R8G8B8A8_UNORM;
-    case Format::RGBA8UnormSrgb:
+    case PixelFormat::RGBA8UnormSrgb:
         return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
-    case Format::Unknown:
+    default:
         break;
     }
+
     return DXGI_FORMAT_UNKNOWN;
 }
 
@@ -370,7 +373,7 @@ struct TextureRecord {
     uint32 width = 0;
     uint32 height = 0;
     uint32 mipLevels = 1;
-    Format format = Format::Unknown;
+    PixelFormat format = PixelFormat::Unknown;
     bool renderTarget = false;
     uint32 srv = 0;
     uint32 rtv = 0;
@@ -780,7 +783,7 @@ public:
         TextureDesc whiteDesc;
         whiteDesc.width = 1;
         whiteDesc.height = 1;
-        whiteDesc.format = Format::RGBA8Unorm;
+        whiteDesc.format = PixelFormat::RGBA8Unorm;
         auto whiteTexture = CreateTexture(whiteDesc, Span<const uint8>(white, 4));
         if (!whiteTexture) {
             return Result<void>::Failure(whiteTexture.Error());
@@ -965,8 +968,12 @@ public:
     // 다른 스레드에서도 부를 수 있다(concurrentResourceCreation). 초기 픽셀은 업로드 기록으로 간다.
     Result<TextureHandle> CreateTexture(const TextureDesc& desc,
                                         Span<const uint8> pixels) noexcept override {
+        if (IsValidPixelFormat(desc.format) && ResourceFormat(desc.format) == DXGI_FORMAT_UNKNOWN) {
+            platform::LockGuard lock(gate_);
+            return UnsupportedFormat<TextureHandle>(desc.format);
+        }
         const bool renderTarget = desc.usage == TextureUsage::RenderTarget;
-        const uint64 size = MipChainBytes(desc.width, desc.height, desc.mipLevels, desc.format);
+        const uint64 size = MipChainBytes(desc.format, desc.width, desc.height, 1, desc.mipLevels);
         if (desc.width > 16384 || desc.height > 16384 || size == 0 ||
             desc.mipLevels > MaxMipLevels || !IsValidSamplerDesc(desc.sampler) ||
             (renderTarget ? (pixels.Size() != 0 || desc.mipLevels != 1) : pixels.Size() != size)) {
@@ -1058,8 +1065,11 @@ public:
     Result<PipelineHandle> CreatePipeline(const PipelineDesc& desc) noexcept override {
         platform::LockGuard lock(gate_);
         if (desc.vertex.hlsl.ByteCount() == 0 || desc.pixel.hlsl.ByteCount() == 0 ||
-            ResourceFormat(desc.colorFormat) == DXGI_FORMAT_UNKNOWN) {
+            !IsValidPixelFormat(desc.colorFormat)) {
             return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
+        }
+        if (ResourceFormat(desc.colorFormat) == DXGI_FORMAT_UNKNOWN) {
+            return UnsupportedFormat<PipelineHandle>(desc.colorFormat);
         }
         auto layoutChecked = ValidateVertexLayout(desc.layout);
         if (!layoutChecked) {
@@ -1179,7 +1189,7 @@ public:
                    rtvs_.Cpu(record->rtv[backBuffer]),
                    record->width,
                    record->height,
-                   Format::RGBA8UnormSrgb,
+                   PixelFormat::RGBA8UnormSrgb,
                    {}};
         presentTarget_ = handle;
         StartPass(clear);
@@ -1318,8 +1328,8 @@ public:
         if (record == nullptr) {
             return Result<void>::Failure(ErrorCode::StaleHandle);
         }
-        const usize size =
-            static_cast<usize>(record->width) * record->height * BytesPerPixel(record->format);
+        const usize size = static_cast<usize>(
+            PixelFormatImageBytes(record->format, record->width, record->height));
         if (!record->renderTarget || out.Size() != size || recording_) {
             return Result<void>::Failure(recording_ ? ErrorCode::Busy : ErrorCode::InvalidArgument);
         }
@@ -1366,9 +1376,9 @@ public:
             return Result<void>::Failure(ErrorCode::StaleHandle);
         }
         if (mipLevel >= record->mipLevels ||
-            pixels.Size() != static_cast<usize>(MipExtent(record->width, mipLevel)) *
-                                 MipExtent(record->height, mipLevel) *
-                                 BytesPerPixel(record->format)) {
+            pixels.Size() != PixelFormatImageBytes(record->format,
+                                                   MipExtent(record->width, mipLevel),
+                                                   MipExtent(record->height, mipLevel))) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
         return RecordTextureUpload(*record, mipLevel, 1, pixels, true);
@@ -1415,8 +1425,8 @@ public:
         }
         const uint32 width = MipExtent(record->width, mipLevel);
         const uint32 height = MipExtent(record->height, mipLevel);
-        const uint64 rowBytes = static_cast<uint64>(width) * BytesPerPixel(record->format);
-        const uint64 bytes = rowBytes * height;
+        const uint64 rowBytes = PixelFormatRowBytes(record->format, width);
+        const uint64 bytes = PixelFormatImageBytes(record->format, width, height);
         if (mipLevel >= record->mipLevels || offset > memory.Value().size ||
             bytes > memory.Value().size - offset) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -1744,7 +1754,7 @@ private:
         uint32 width = 0;
         uint32 height = 0;
         // 패스 대상의 형식이다(스왑체인은 RGBA8UnormSrgb view).
-        Format format = Format::Unknown;
+        PixelFormat format = PixelFormat::Unknown;
         // offscreen 패스의 대상 텍스처다(스왑체인 패스는 null).
         TextureHandle texture;
     };
@@ -1861,6 +1871,22 @@ private:
         auto failed = Fail(message);
         (void)failed;
         return Result<T>::Failure(ErrorCode::DependencyFailed);
+    }
+
+    // 이 backend가 대응하지 않는 픽셀 형식이다. 다른 형식으로 바꾸지 않고 Unsupported로
+    // 실패한다(PixelFormat.ko.md 8.3절). 호출자는 gate_를 잡고 있어야 한다.
+    template <class T>
+    Result<T> UnsupportedFormat(PixelFormat format) noexcept {
+        constexpr const char* Prefix = "pixel format ";
+        constexpr const char* Suffix = " is not supported by the D3D12 backend";
+        const char* name = PixelFormatName(format);
+        auto assigned = lastError_.TryAssign(StringView(Prefix, platform::CStringLength(Prefix)));
+        auto named = lastError_.TryAppend(StringView(name, platform::CStringLength(name)));
+        auto ended = lastError_.TryAppend(StringView(Suffix, platform::CStringLength(Suffix)));
+        (void)assigned;
+        (void)named;
+        (void)ended;
+        return Result<T>::Failure(ErrorCode::Unsupported);
     }
 
     // desc와 같은 샘플러 칸을 돌려주고 없으면 만든다. 칸은 장치 수명 동안 유지한다(조합 수가
@@ -2339,13 +2365,14 @@ private:
             return Result<void>::Failure(space.Error());
         }
         // 원본은 빈틈 없는 행이고 GPU 복사는 256바이트 정렬 행 간격을 요구하므로 mip·행마다 옮긴다.
-        const uint32 bytesPerPixel = BytesPerPixel(record.format);
+        // 블록 압축 형식의 행은 블록 행이다.
         usize sourceOffset = 0;
         for (uint32 index = 0; index < count; ++index) {
             const uint32 level = firstMip + index;
             const uint32 width = MipExtent(record.width, level);
-            const uint32 height = MipExtent(record.height, level);
-            const usize rowBytes = static_cast<usize>(width) * bytesPerPixel;
+            const uint32 height =
+                PixelFormatBlockRows(record.format, MipExtent(record.height, level));
+            const usize rowBytes = static_cast<usize>(PixelFormatRowBytes(record.format, width));
             uint8* rows = space.Value().data + footprints[index].Offset;
             for (uint32 row = 0; row < height; ++row) {
                 platform::MemoryCopy(rows + static_cast<usize>(row) *
@@ -2417,7 +2444,7 @@ private:
         ReadbackRecord readback;
         readback.width = record->width;
         readback.height = record->height;
-        readback.bytesPerPixel = BytesPerPixel(record->format);
+        readback.bytesPerPixel = GetPixelFormatInfo(record->format).blockBytes;
         const D3D12_RESOURCE_DESC resourceDesc = record->resource->GetDesc();
         UINT64 total = 0;
         device_->GetCopyableFootprints(&resourceDesc, 0, 1, 0, &readback.footprint, nullptr,

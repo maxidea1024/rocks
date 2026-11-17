@@ -482,7 +482,7 @@ Result<MacState> MacState::TryCreate(const MacKey& key) noexcept {
     state.state_ = slot.Value();
     state.algorithm_ = key.Algorithm();
     if (state.algorithm_ == MacAlgorithm::AesCmac) {
-        auto* cmac = ConstructAt<CmacMacState>(state.state_);
+        auto* cmac = InitializeAt<CmacMacState>(state.state_);
         platform::MemoryZero(cmac, sizeof(CmacMacState));
         platform::MemoryCopy(&cmac->schedule, &CmacScheduleOf(key), sizeof(detail::AesSchedule));
     } else {

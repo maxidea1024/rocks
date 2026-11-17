@@ -234,7 +234,7 @@ Result<AesSchedule*> TryCreateAesSchedule(const AesKernels& kernels,
         return Result<AesSchedule*>::Failure(slot.Error());
     }
 
-    AesSchedule* schedule = ConstructAt<AesSchedule>(slot.Value());
+    AesSchedule* schedule = InitializeAt<AesSchedule>(slot.Value());
     kernels.expandKey(key.Data(), key.Size(), *schedule);
     return Result<AesSchedule*>::Success(schedule);
 }

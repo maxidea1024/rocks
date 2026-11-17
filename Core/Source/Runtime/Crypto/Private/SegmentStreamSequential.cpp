@@ -33,7 +33,7 @@ Result<T*> TryNewState(Allocator& allocator) noexcept {
         return Result<T*>::Failure(memory.Error());
     }
 
-    return Result<T*>::Success(ConstructAt<T>(memory.Value()));
+    return Result<T*>::Success(InitializeAt<T>(memory.Value()));
 }
 
 // 버퍼를 지우고 돌려준다. 해제 실패는 버퍼가 그 할당기 것이 아니라는 결함이다.

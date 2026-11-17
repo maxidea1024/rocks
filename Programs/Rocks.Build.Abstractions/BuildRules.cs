@@ -57,6 +57,18 @@ public abstract class TargetRules
     /// </summary>
     public virtual TargetType Type => TargetType.Game;
 
+    /// <summary>
+    /// 로그 컴파일 하한의 타깃 재정의다(UE <c>COMPILED_IN_MINIMUM_VERBOSITY</c> 대응). null(기본)이면 구성 기본값(Debug: Trace,
+    /// Development: Debug, Release: Info)이다. 이 레벨보다 낮은 로그 호출은 템플릿 문자열까지 바이너리에서 빠진다. 값은 타깃의 모든
+    /// 모듈에 <c>ROCKS_LOG_COMPILED_MINIMUM</c>으로 같게 정의된다(모듈별 재정의는 ODR 위반이라 빌드 검사가 거부한다). 설치 SDK의
+    /// 엔진 라이브러리는 구성 기본값으로 미리 빌드되므로 SDK export 타깃과 SDK 게임 타깃에서는 재정의할 수 없다(ArgumentException).
+    /// 사용 예:
+    /// <code>
+    /// public override LogLevel? LogCompiledMinimum => LogLevel.Warning;
+    /// </code>
+    /// </summary>
+    public virtual LogLevel? LogCompiledMinimum => null;
+
     public virtual bool CheckPublicHeaders => false;
 
     public virtual string? TestExecutable => null;

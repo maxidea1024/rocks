@@ -130,7 +130,7 @@ Result<CatalogSnapshot> CatalogSnapshot::Create(Allocator& allocator, StringView
     if (!memory.Value()) {
         platform::Fatal("Allocator returned null Catalog data");
     }
-    CatalogSnapshot owned(ConstructAt<detail::CatalogData>(memory.Value(), allocator));
+    CatalogSnapshot owned(InitializeAt<detail::CatalogData>(memory.Value(), allocator));
     owned.data_->revision = revision;
     auto copied = owned.data_->culture.TryAssign(culture);
     if (!copied) {

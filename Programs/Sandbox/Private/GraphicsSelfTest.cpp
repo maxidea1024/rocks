@@ -378,7 +378,7 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
            info.software ? ", software" : "");
 
     sample::Renderer renderer;
-    auto initialized = renderer.Initialize(device, graphics::Format::RGBA8UnormSrgb);
+    auto initialized = renderer.Initialize(device, graphics::PixelFormat::RGBA8UnormSrgb);
     if (!initialized) {
         printf("    %.*s\n", static_cast<int>(device.LastError().ByteCount()),
                device.LastError().Data());
@@ -389,7 +389,7 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     graphics::TextureDesc targetDesc;
     targetDesc.width = Size;
     targetDesc.height = Size;
-    targetDesc.format = graphics::Format::RGBA8UnormSrgb;
+    targetDesc.format = graphics::PixelFormat::RGBA8UnormSrgb;
     targetDesc.usage = graphics::TextureUsage::RenderTarget;
     auto target = device.CreateTexture(targetDesc, {});
     // 2x2 텍스처: 좌상 빨강, 우상 초록, 좌하 파랑, 우하 흰색(행 위→아래).
@@ -524,7 +524,7 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
         Array<uint8> chain(result.triangle.GetAllocator());
         bool built = chain
                          .TryResize(static_cast<usize>(graphics::MipChainBytes(
-                             MipSize, MipSize, levels, graphics::Format::RGBA8UnormSrgb)))
+                             graphics::PixelFormat::RGBA8UnormSrgb, MipSize, MipSize, 1, levels)))
                          .IsOk();
         usize offset = 0;
         for (uint32 level = 0; built && level < levels; ++level) {
@@ -607,7 +607,7 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     if (info.backend == graphics::Backend::D3D12 && info.validationEnabled) {
         const uint64 before = device.ValidationErrorCount();
         sample::Renderer mismatched;
-        if (mismatched.Initialize(device, graphics::Format::RGBA8Unorm)) {
+        if (mismatched.Initialize(device, graphics::PixelFormat::RGBA8Unorm)) {
             sample::RenderItem item;
             item.mesh = sample::MeshKind::Triangle;
             auto frame = device.BeginOffscreen(target.Value(), view.clear);

@@ -140,7 +140,7 @@ public:
         if (firstFree_ != NoIndex) {
             const usize index = firstFree_;
             Unlink(index);
-            ConstructAt<T>(&nodes_[index].value, Forward<Args>(args)...);
+            InitializeAt<T>(&nodes_[index].value, Forward<Args>(args)...);
             allocated_[index] = true;
             return Result<usize>::Success(index);
         }
@@ -158,7 +158,7 @@ public:
         }
         const usize index = allocated_.Find(false);
         Unlink(index);
-        ConstructAt<T>(&nodes_[index].value, Forward<Args>(args)...);
+        InitializeAt<T>(&nodes_[index].value, Forward<Args>(args)...);
         allocated_[index] = true;
         return Result<usize>::Success(index);
     }
@@ -176,7 +176,7 @@ public:
             return Result<usize>::Failure(ErrorCode::AlreadyExists);
         }
         Unlink(index);
-        ConstructAt<T>(&nodes_[index].value, Forward<Args>(args)...);
+        InitializeAt<T>(&nodes_[index].value, Forward<Args>(args)...);
         allocated_[index] = true;
         return Result<usize>::Success(index);
     }
@@ -190,7 +190,10 @@ public:
         if (!allocated_[index]) {
             return Result<void>::Failure(ErrorCode::NotFound);
         }
-        DestroyAt(&nodes_[index].value);
+        if constexpr (!IsTriviallyDestructibleV<T>) {
+            DestroyAt(&nodes_[index].value);
+        }
+
         allocated_[index] = false;
         PushFree(index);
         return Result<void>::Success();
@@ -243,6 +246,21 @@ public:
         return Result<void>::Success();
     }
 
+    // 마지막 사용 index 뒤의 빈 slot이 UE 5.8 축소 임계값을 넘을 때만 TryShrink로 회수한다. 살아
+    // 있는 index는 바뀌지 않는다(가운데 빈 칸은 그대로 — 당기려면 Compact). 삭제는 용량을
+    // 유지하므로 caller가 안전한 시점에 부른다. 오류: 재할당 실패는 allocator 오류이며 원소·index·
+    // 주소·용량을 보존한다. 실제로 줄면 원소 주소가 바뀐다.
+    Result<void> TryShrinkSlack() noexcept {
+        usize end = maxIndex_;
+        while (end != 0 && !allocated_[end - 1]) {
+            --end;
+        }
+
+        return detail::ShrinkCapacity(capacity_, end, sizeof(Node)) < capacity_
+                   ? TryShrink()
+                   : Result<void>::Success();
+    }
+
     // 끝 쪽 원소를 앞의 빈 자리로 옮겨 빈 slot을 없앤다(UE Compact). 순서는 보존하지 않으며 옮긴
     // 원소의 index가 바뀐다. 할당하지 않는다. 원소를 하나라도 옮겼으면 true다.
     bool Compact() noexcept {
@@ -254,8 +272,11 @@ public:
             do {
                 --last;
             } while (!allocated_[last]);
-            ConstructAt<T>(&nodes_[hole].value, Move(nodes_[last].value));
-            DestroyAt(&nodes_[last].value);
+            InitializeAt<T>(&nodes_[hole].value, Move(nodes_[last].value));
+            if constexpr (!IsTriviallyDestructibleV<T>) {
+                DestroyAt(&nodes_[last].value);
+            }
+
             allocated_[hole] = true;
             allocated_[last] = false;
             moved = true;
@@ -275,8 +296,11 @@ public:
                 continue;
             }
             if (read != write) {
-                ConstructAt<T>(&nodes_[write].value, Move(nodes_[read].value));
-                DestroyAt(&nodes_[read].value);
+                InitializeAt<T>(&nodes_[write].value, Move(nodes_[read].value));
+                if constexpr (!IsTriviallyDestructibleV<T>) {
+                    DestroyAt(&nodes_[read].value);
+                }
+
                 allocated_[write] = true;
                 allocated_[read] = false;
                 moved = true;
@@ -289,10 +313,8 @@ public:
 
     // 원소를 index 역순으로 소멸하고 용량은 유지한다. 모든 index가 무효가 된다.
     void Clear() noexcept {
-        for (usize index = maxIndex_; index != 0; --index) {
-            if (allocated_[index - 1]) {
-                DestroyAt(&nodes_[index - 1].value);
-            }
+        if constexpr (!IsTriviallyDestructibleV<T>) {
+            DestroyValues();
         }
         allocated_.Clear();
         maxIndex_ = 0;
@@ -410,7 +432,7 @@ private:
         }
         // 기존 저장소가 아직 유효할 때 먼저 생성하므로 인자가 기존 원소를 가리켜도 된다. 이후
         // 단계는 실패하지 않는다.
-        ConstructAt<T>(&target[index].value, Forward<Args>(args)...);
+        InitializeAt<T>(&target[index].value, Forward<Args>(args)...);
         if (replacement != nullptr) {
             AdoptStorage(replacement, capacity);
         }
@@ -456,7 +478,7 @@ private:
         // 활성 멤버(value·link)는 사용할 때 정한다.
         auto* nodes = static_cast<Node*>(allocation.Value());
         for (usize index = 0; index < capacity; ++index) {
-            ConstructAt<Node>(nodes + index);
+            InitializeAt<Node>(nodes + index);
         }
         return Result<Node*>::Success(nodes);
     }
@@ -471,8 +493,10 @@ private:
     void RelocateTo(Node* replacement) noexcept {
         for (usize index = 0; index < maxIndex_; ++index) {
             if (allocated_[index]) {
-                ConstructAt<T>(&replacement[index].value, Move(nodes_[index].value));
-                DestroyAt(&nodes_[index].value);
+                InitializeAt<T>(&replacement[index].value, Move(nodes_[index].value));
+                if constexpr (!IsTriviallyDestructibleV<T>) {
+                    DestroyAt(&nodes_[index].value);
+                }
             } else {
                 replacement[index].link = nodes_[index].link;
             }
@@ -553,14 +577,24 @@ private:
         }
     }
 
-    void Release() noexcept {
-        Clear();
-        FreeNodes(nodes_);
-        nodes_ = nullptr;
-        capacity_ = 0;
-        if (!allocated_.Trim()) {
-            platform::Fatal("SparseArray failed to release its allocation flags");
+    void DestroyValues() noexcept {
+        if constexpr (!IsTriviallyDestructibleV<T>) {
+            for (usize index = maxIndex_; index != 0; --index) {
+                if (allocated_[index - 1]) {
+                    DestroyAt(&nodes_[index - 1].value);
+                }
+            }
         }
+    }
+
+    void Release() noexcept {
+        if constexpr (!IsTriviallyDestructibleV<T>) {
+            DestroyValues();
+        }
+        FreeNodes(nodes_);
+        ForgetStorage();
+        // 반환 직전 bitmap을 0으로 덮지 않는다. nodes 다음 bitmap의 LIFO 반환 순서는 유지한다.
+        allocated_ = BitArray(*allocator_);
     }
 
     void ForgetStorage() noexcept {

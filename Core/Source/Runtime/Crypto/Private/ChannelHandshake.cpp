@@ -204,7 +204,7 @@ Result<void*> TryAllocateState() noexcept {
         return slot;
     }
 
-    ConstructAt<NoiseState>(slot.Value());
+    InitializeAt<NoiseState>(slot.Value());
     return slot;
 }
 

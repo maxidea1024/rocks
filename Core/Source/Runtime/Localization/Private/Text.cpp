@@ -78,7 +78,7 @@ Result<detail::TextNode*> NewNode(Allocator& allocator, detail::TextKind kind) n
         platform::Fatal("Allocator returned null Text node");
     }
     return Result<detail::TextNode*>::Success(
-        ConstructAt<detail::TextNode>(memory.Value(), allocator, kind));
+        InitializeAt<detail::TextNode>(memory.Value(), allocator, kind));
 }
 
 Result<void> CheckSource(StringView source, TextCreateLimits limits) noexcept {

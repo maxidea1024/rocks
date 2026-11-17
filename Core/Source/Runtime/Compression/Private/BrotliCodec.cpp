@@ -236,11 +236,11 @@ Result<void*> CreateStreamDecompressor(Allocator& allocator) noexcept {
         return Result<void*>::Failure(ErrorCode::OutOfMemory);
     }
 
-    StreamDecoder* decoder = ConstructAt<StreamDecoder>(memory);
+    StreamDecoder* decoder = InitializeAt<StreamDecoder>(memory);
     decoder->allocator = &allocator;
     auto created = CreateDecoder(allocator);
     if (!created) {
-        DestroyAt(decoder);
+        static_assert(IsTriviallyDestructibleV<RemovePointerT<decltype(decoder)>>);
         CodecFree(allocator, decoder);
         return Result<void*>::Failure(created.Error());
     }
@@ -257,7 +257,7 @@ void DestroyStreamDecompressor(void* codec) noexcept {
     auto* decoder = static_cast<StreamDecoder*>(codec);
     Allocator& allocator = *decoder->allocator;
     BrotliDecoderDestroyInstance(decoder->state);
-    DestroyAt(decoder);
+    static_assert(IsTriviallyDestructibleV<RemovePointerT<decltype(decoder)>>);
     CodecFree(allocator, decoder);
 }
 

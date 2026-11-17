@@ -428,15 +428,19 @@ GLenum FrontFaceFor(GLenum origin) noexcept {
     return GL_CCW;
 }
 
-GLenum InternalFormat(Format format) noexcept {
+// 픽셀 형식의 GL 내부 형식이다. PF1에서는 RGBA8 두 형식만 대응하고 나머지는 0이다(생성이
+// Unsupported, PixelFormat.ko.md 14절). 전체 대응 표(ES 3.2 조건 포함)는 PF2 이후 GLES 전환과 함께
+// 둔다.
+GLenum InternalFormat(PixelFormat format) noexcept {
     switch (format) {
-    case Format::RGBA8Unorm:
+    case PixelFormat::RGBA8Unorm:
         return GL_RGBA8;
-    case Format::RGBA8UnormSrgb:
+    case PixelFormat::RGBA8UnormSrgb:
         return GL_SRGB8_ALPHA8_VALUE;
-    case Format::Unknown:
+    default:
         break;
     }
+
     return 0;
 }
 
@@ -467,7 +471,7 @@ struct TextureRecord {
     uint32 width = 0;
     uint32 height = 0;
     uint32 mipLevels = 1;
-    Format format = Format::Unknown;
+    PixelFormat format = PixelFormat::Unknown;
 };
 
 struct PipelineRecord {
@@ -874,7 +878,7 @@ public:
         TextureDesc whiteDesc;
         whiteDesc.width = 1;
         whiteDesc.height = 1;
-        whiteDesc.format = Format::RGBA8Unorm;
+        whiteDesc.format = PixelFormat::RGBA8Unorm;
         auto whiteTexture = CreateTexture(whiteDesc, Span<const uint8>(white, 4));
         if (!whiteTexture) {
             return Result<void>::Failure(whiteTexture.Error());
@@ -995,9 +999,11 @@ public:
             return Result<TextureHandle>::Failure(owner.Error());
         }
 
-        const uint32 bytesPerPixel = BytesPerPixel(desc.format);
+        if (IsValidPixelFormat(desc.format) && InternalFormat(desc.format) == 0) {
+            return UnsupportedFormat<TextureHandle>(desc.format);
+        }
         const bool renderTarget = desc.usage == TextureUsage::RenderTarget;
-        const uint64 size = MipChainBytes(desc.width, desc.height, desc.mipLevels, desc.format);
+        const uint64 size = MipChainBytes(desc.format, desc.width, desc.height, 1, desc.mipLevels);
         if (desc.width > 16384 || desc.height > 16384 || size == 0 ||
             !IsValidSamplerDesc(desc.sampler) ||
             (renderTarget ? (pixels.Size() != 0 || desc.mipLevels != 1) : pixels.Size() != size)) {
@@ -1041,7 +1047,7 @@ public:
                 gl_.TextureSubImage2D(record.texture, static_cast<GLint>(level), 0, 0,
                                       static_cast<GLsizei>(width), static_cast<GLsizei>(height),
                                       GL_RGBA, GL_UNSIGNED_BYTE, pixels.Data() + offset);
-                offset += static_cast<usize>(width) * height * bytesPerPixel;
+                offset += static_cast<usize>(PixelFormatImageBytes(desc.format, width, height));
             }
         } else {
             gl_.CreateFramebuffers(1, &record.framebuffer);
@@ -1069,8 +1075,11 @@ public:
         }
 
         if (desc.vertex.glsl.ByteCount() == 0 || desc.pixel.glsl.ByteCount() == 0 ||
-            InternalFormat(desc.colorFormat) == 0) {
+            !IsValidPixelFormat(desc.colorFormat)) {
             return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
+        }
+        if (InternalFormat(desc.colorFormat) == 0) {
+            return UnsupportedFormat<PipelineHandle>(desc.colorFormat);
         }
         if (!ValidateVertexLayout(desc.layout)) {
             auto failed = Fail("vertex layout is invalid (RenderBase 10.4 limits)");
@@ -1198,7 +1207,7 @@ public:
             width = static_cast<uint32>(client.right - client.left);
             height = static_cast<uint32>(client.bottom - client.top);
         }
-        pass_ = {0, width, height, Format::RGBA8UnormSrgb, {}};
+        pass_ = {0, width, height, PixelFormat::RGBA8UnormSrgb, {}};
         StartPass(width, height, clear);
         return Result<CommandContext*>::Success(this);
     }
@@ -1277,7 +1286,8 @@ public:
         if (record == nullptr) {
             return Result<void>::Failure(ErrorCode::StaleHandle);
         }
-        const usize rowBytes = static_cast<usize>(record->width) * BytesPerPixel(record->format);
+        const usize rowBytes =
+            static_cast<usize>(PixelFormatRowBytes(record->format, record->width));
         if (record->framebuffer == 0 || out.Size() != rowBytes * record->height || recording_) {
             return Result<void>::Failure(recording_ ? ErrorCode::Busy : ErrorCode::InvalidArgument);
         }
@@ -1434,7 +1444,7 @@ public:
         const uint32 width = MipExtent(record->width, mipLevel);
         const uint32 height = MipExtent(record->height, mipLevel);
         if (mipLevel >= record->mipLevels ||
-            pixels.Size() != static_cast<usize>(width) * height * BytesPerPixel(record->format)) {
+            pixels.Size() != PixelFormatImageBytes(record->format, width, height)) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
         if (!MakeCurrentForResources()) {
@@ -1473,8 +1483,9 @@ public:
         if (!memory || record == nullptr) {
             return Result<void>::Failure(ErrorCode::StaleHandle);
         }
-        const uint64 bytes = static_cast<uint64>(MipExtent(record->width, mipLevel)) *
-                             MipExtent(record->height, mipLevel) * BytesPerPixel(record->format);
+        const uint64 bytes =
+            PixelFormatImageBytes(record->format, MipExtent(record->width, mipLevel),
+                                  MipExtent(record->height, mipLevel));
         if (offset > memory.Value().size || bytes > memory.Value().size - offset) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
@@ -1527,8 +1538,7 @@ public:
         ReadbackRecord readback;
         readback.width = record->width;
         readback.height = record->height;
-        const uint64 bytes =
-            static_cast<uint64>(record->width) * record->height * BytesPerPixel(record->format);
+        const uint64 bytes = PixelFormatImageBytes(record->format, record->width, record->height);
         gl_.CreateBuffers(1, &readback.buffer);
         gl_.NamedBufferStorage(readback.buffer, static_cast<GLsizeiptr>(bytes), nullptr, 0);
         gl_.BindFramebuffer(GL_FRAMEBUFFER_VALUE, record->framebuffer);
@@ -1734,6 +1744,22 @@ private:
         auto failed = Fail(message);
         (void)failed;
         return Result<T>::Failure(ErrorCode::DependencyFailed);
+    }
+
+    // 이 backend가 대응하지 않는 픽셀 형식이다. 다른 형식으로 바꾸지 않고 Unsupported로
+    // 실패한다(PixelFormat.ko.md 8.3절).
+    template <class T>
+    Result<T> UnsupportedFormat(PixelFormat format) noexcept {
+        constexpr const char* Prefix = "pixel format ";
+        constexpr const char* Suffix = " is not supported by the OpenGL backend";
+        const char* name = PixelFormatName(format);
+        auto assigned = lastError_.TryAssign(StringView(Prefix, platform::CStringLength(Prefix)));
+        auto named = lastError_.TryAppend(StringView(name, platform::CStringLength(name)));
+        auto ended = lastError_.TryAppend(StringView(Suffix, platform::CStringLength(Suffix)));
+        (void)assigned;
+        (void)named;
+        (void)ended;
+        return Result<T>::Failure(ErrorCode::Unsupported);
     }
 
     // 캐시 대신 실제 current 상태를 확인한다. 같은 스레드의 다른 장치·GL 라이브러리가 context를
@@ -2237,7 +2263,7 @@ private:
         GLuint framebuffer = 0;
         uint32 width = 0;
         uint32 height = 0;
-        Format format = Format::Unknown;
+        PixelFormat format = PixelFormat::Unknown;
         TextureHandle texture;
     };
     PassTarget pass_;

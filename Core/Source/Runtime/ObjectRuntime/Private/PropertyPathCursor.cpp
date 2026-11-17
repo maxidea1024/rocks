@@ -12,8 +12,8 @@ PathCursor::PathCursor(ObjectRegistry& registry, const ObjectAccessContext& acce
     : registry_(registry), access_(access), owner_(target.Object()), root_(target.GetKind()),
       construction_(target.Transaction()), rootLease_(target.Lease()), rootView_(target.View()),
       rootValue_(target.Storage()), rootAllocator_(target.ValueAllocator()), rootBox_(target.Box()),
-      stage_(target.References()), operation_(operation), input_(input), output_(output),
-      failure_(failure) {
+      stage_(target.References()), added_(target.AddedElements()), operation_(operation),
+      input_(input), output_(output), failure_(failure) {
     if (failure_) {
         *failure_ = {};
     }

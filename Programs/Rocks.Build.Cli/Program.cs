@@ -135,6 +135,13 @@ namespace Rocks.Build.Cli
             var context = new BuildContext(root, output, toolchain.Platform, toolchain.Architecture, configuration);
             var rulesPath = options.GetValueOrDefault("rules", HostTool(root, "Rocks.Engine.Rules"));
             var rules = RuleLoader.Load(rulesPath, targetName, context);
+            // 설치 SDK의 엔진 라이브러리는 구성 기본 로그 하한으로 빌드되어야 한다. 게임은 같은 기본값으로 컴파일되므로 다르면 ODR 위반이다.
+            if (args[0] == "sdk" && rules.Target.LogCompiledMinimum is not null)
+            {
+                throw new ArgumentException($"Target {targetName}: LogCompiledMinimum cannot be overridden for an installed SDK export " +
+                    "(game builds compile against the SDK with the configuration default).");
+            }
+
             Directory.CreateDirectory(output);
             await using var invocationLock = await OutputInvocationLock.AcquireAsync(output, cancellationToken);
             // 앞 실행의 PASS 보고서가 이번 실행의 실패(메타 단계·빌드 예외 포함)를 성공으로 보이게 하지 않는다.
@@ -210,6 +217,7 @@ namespace Rocks.Build.Cli
                 {
                     Toolchain = toolchain,
                     Configuration = configuration,
+                    LogCompiledMinimum = rules.Target.LogCompiledMinimum,
                     RootDirectory = root,
                     OutputDirectory = output,
                     Modules = modules,

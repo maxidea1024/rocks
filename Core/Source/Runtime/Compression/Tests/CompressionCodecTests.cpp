@@ -1162,7 +1162,7 @@ TEST(CompressionCodec_ConcurrentUseAndRegistration) {
             for (; rounds < 200 && busyBounded; ++rounds) {
                 auto memory = allocator.Allocate(sizeof(XorCodec), alignof(XorCodec));
                 REQUIRE(memory);
-                XorCodec* flipping = ConstructAt<XorCodec>(memory.Value());
+                XorCodec* flipping = InitializeAt<XorCodec>(memory.Value());
                 auto registered = TryRegisterCompressionCodec(
                     {StringView("test.flipping"), 1, TestLevels}, *flipping);
                 CHECK(registered);

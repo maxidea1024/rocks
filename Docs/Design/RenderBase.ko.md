@@ -134,7 +134,7 @@ ID는 이 문서가 붙인다. CP는 Core 선행, GX는 Graphics 확장, RB는 R
 | CP6 | 엔진 종료 단계 hook(기존 `EngineSubsystem`·`EngineLoopHooks` 확장) | 구현 | Engine(구현) | RB1 종료 순서 | S | 4.3절 |
 | CP7 | 엔진 전역 `Name` pool 결정 | 미결정 | Name(구현) | RB3 | S | 4.3절 |
 | CP8 | Config 계층(UE-C21) | 구현(ConfigSystem CF1) | — | CP4 | M | 12절 |
-| GX1 | 장치 능력 `DeviceCaps` | 미설계 | A0-G G1, 셰이더 시스템 P6a | RB3, RG1, RG4 | M | 4.4절 |
+| GX1 | 장치 능력 `DeviceCaps` | 미설계(픽셀 형식 능력은 [픽셀 형식](PixelFormat.ko.md) PF3 설계) | A0-G G1, 셰이더 시스템 P6a, PixelFormat PF2 | RB3, RG1, RG4 | M | 4.4절 |
 | GX2 | 자원 desc·view 확장, 샘플러 위치(R12)·비교 샘플러 | 미설계 | A0-G | RB2, RG1 | L | 4.4절 |
 | GX3 | 파이프라인 완성(SH2 범위 밖 부분) | 미설계 | SH2·P2·P14 | RB4, RB5, RB6 | L | 4.4절 |
 | GX3a | 정점 배치 완성: 정점 원소 형식 20종·다중 stream·인스턴스 stream·index 버퍼·instanced·indexed draw·셰이더 입력 대조, CPU 패킹 helper | 구현 | — | RB5, 메시 에셋 | M | 10.4절 |
@@ -198,8 +198,8 @@ RenderCore가 쓰는 RHI 기능군과 Rocks Graphics의 차이다. "SH2" 열은 
 
 각 GX의 내용:
 
-- **GX1 장치 능력.** 셰이더 형식 목록(셰이더 시스템 12.3절 런타임 형식 선택), 형식별 지원 표(A0-G G1), 전역 한도(dispatch 그룹 수·view 크기·MRT 수·상수 버퍼 크기·정점 속성 수), 동작 표시(자원 생성 스레드 안전 여부(GX11), native split barrier·async compute·transient aliasing·timestamp·tiled GPU 여부). 형식 정의(셰이더 시스템 12.1절)는 "쿠킹 때 가정하는 상한"이고 `DeviceCaps`는 "실행 장치의 실제 값"이다. 시작 때 장치 값이 형식 정의 상한 이상인지 검사하고, 아니면 그 형식을 고르지 않는다.
-- **GX2 자원 desc·view.** 버퍼 용도(정점·index·상수·structured·raw·간접 인자·UAV 조합), 텍스처 차원(A0-G)·깊이/스텐실 형식·MSAA·용도 플래그(샘플·렌더 타깃·깊이·UAV)·mip·array·clear 값, SRV/UAV view 객체(mip·slice 범위). 샘플러는 결정 R12(9.6절): 텍스처 desc의 샘플러는 기본값이고, 묶을 때 파라미터 멤버가 다른 샘플러를 지정할 수 있다. 비교 샘플러(깊이 비교 함수)를 `SamplerDesc`에 더한다(SX13, 그림자는 계획 11.1절 필수).
+- **GX1 장치 능력.** 셰이더 형식 목록(셰이더 시스템 12.3절 런타임 형식 선택), 형식별 지원 표(A0-G G1), 전역 한도(dispatch 그룹 수·view 크기·MRT 수·상수 버퍼 크기·정점 속성 수), 동작 표시(자원 생성 스레드 안전 여부(GX11), native split barrier·async compute·transient aliasing·timestamp·tiled GPU 여부). 형식 정의(셰이더 시스템 12.1절)는 "쿠킹 때 가정하는 상한"이고 `DeviceCaps`는 "실행 장치의 실제 값"이다. 시작 때 장치 값이 형식 정의 상한 이상인지 검사하고, 아니면 그 형식을 고르지 않는다. 픽셀 형식별 능력(`PixelFormatCaps`·MSAA 표본 수)과 backend 형식 대응 표는 [픽셀 형식](PixelFormat.ko.md) 7·8절(PF3)이 정한다.
+- **GX2 자원 desc·view.** 버퍼 용도(정점·index·상수·structured·raw·간접 인자·UAV 조합), 텍스처 차원(A0-G)·깊이/스텐실 형식·MSAA·용도 플래그(샘플·렌더 타깃·깊이·UAV)·mip·array·clear 값, SRV/UAV view 객체(mip·slice 범위). 샘플러는 결정 R12(9.6절): 텍스처 desc의 샘플러는 기본값이고, 묶을 때 파라미터 멤버가 다른 샘플러를 지정할 수 있다. 비교 샘플러(깊이 비교 함수)를 `SamplerDesc`에 더한다(SX13, 그림자는 계획 11.1절 필수). 깊이/스텐실 형식·스텐실 view plane·sRGB 짝 view 규칙은 [픽셀 형식](PixelFormat.ko.md) 9·10절이다.
 - **GX3 파이프라인 완성.** SH2가 하는 일(컴파일된 코드로 셰이더 생성·파이프라인 layout·root signature·래스터·깊이)에 더해 MRT 블렌드(타깃별)·스텐실, compute 파이프라인, 다중 stream 정점 배치(10.2절), 속성 없는 파이프라인(11.2절), 기본도형 종류(삼각형 목록·띠, 선, 점)를 넣는다. SH2 범위를 넓힐지는 결정 R8이다.
 - **GX4 명령 기록 확장.** index·instanced·간접 draw, 버퍼 없는 draw, dispatch(간접 포함), 버퍼·텍스처 복사, UAV clear, viewport·scissor, attachment 시작·끝(색 MRT·깊이·load/store·clear 값, mip·slice), 그리기별 상수의 임의 크기 바이트(`SetConstants` 고정 타입 일반화, SX2), 여러 기록 객체와 제출 순서. 지금의 `BeginFrame`·`BeginOffscreen`(색 1개 + clear 고정)을 attachment 시작으로 바꾼다.
 - **GX5 명시 접근 상태와 전이.** 추상 접근 비트(읽기: 정점·index·상수·SRV(그래픽·compute)·간접 인자·복사 원본·present / 쓰기: RTV·DSV·UAV·복사 대상 / 깊이 읽기 전용), pipe(그래픽·async compute), subresource 범위, 처음 상태 unknown·discard. 지금 D3D12의 휴지 상태 관례를 걷어 내고 전이를 호출자(렌더 그래프)가 정한다. 전이 API는 begin·end를 나눠 받되, native split을 지원하지 않는 backend는 end 지점에서 한 번에 낮춘다(UE D3D12도 native split barrier를 쓰지 않는다: `D3D12RHI/Private/D3D12LegacyBarriers.cpp:1111–1127, 1543–1660`, 표시 기본값 false `RHIGlobals.h:799`). backend lowering:
@@ -394,7 +394,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 - 차원·형식 조합을 장치가 지원하는지(`DeviceCaps`, GX1). 지원하지 않으면 `UnsupportedCapability`다.
 - 상주 꼬리만으로 GPU 자원을 만들 수 있는지(가장 큰 상주 mip 기준으로 만들고, 스트리밍 mip은 상주가 늘 때 채운다).
 
-**후속.** optional mip(선택 다운로드), 가상 텍스처(AssetSystem 12.4절), 플랫폼 tiling 배치. 블록 압축 형식 표(BC1–7·ASTC·ETC2와 GLES·Android 가용성)는 압축 단계 착수 전에 에셋 세션과 함께 확정한다.
+**후속.** optional mip(선택 다운로드), 가상 텍스처(AssetSystem 12.4절), 플랫폼 tiling 배치. 블록 압축 형식 표(BC1–7·ASTC·ETC2와 GLES·Android 가용성)는 압축 단계 착수 전에 에셋 세션과 함께 확정한다. 형식 정의·블록 크기·고정 번호표·backend 가용성은 [픽셀 형식](PixelFormat.ko.md) 5·6·8·12절이 정하고, 프로필별 형식 선택과 인코더가 에셋 세션 몫으로 남는다. 메타의 "sRGB" 항목은 픽셀 형식 결정 PX1에 따라 형식에 포함되거나 따로 남는다.
 
 ## 7. 렌더 그래프
 
@@ -1001,3 +1001,4 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 - 개정 8(2026-11-17): RB7 `GpuTrace`·`GpuScope` 구현과 RB1 설정 snapshot 연결을 반영했다(4.2절 CP4·CP5·CP8·GX9·RB1 상태, 5.7·12·13.3절 구현 메모, 캡처 도구 수동 확인 절차). 스펙과 다르게 정한 것: GPU 구간을 두 tick을 가진 기록 하나로, "GPU 시간 없음"을 queue 정의 칸으로, calibration은 세션 첫 프레임과 일정 프레임 간격의 정의 기록으로, 작업·fence 사건과 그래프 자동 구간은 뒤로, 설정 snapshot 참조는 타입 표지를 가진 공유 참조(`RenderSettingsRef`)로 둠.
 - 개정 9(2026-11-17): GX5(최소)·RG1 구현을 반영했다(2절 용어, 4.2절 GX5·RG1 행, 4.4절 GX5 구현 메모, 8절 구현 메모). 사용자 지시 "렌더 그래프도 미리 하자"에 따라 선행(RB4·GX1·GX2·GX4)이 없는 부분은 범위를 줄였다. 스펙과 다르게 정한 것: 의존 선언을 명시 접근 목록으로(파라미터 구조체 수집기가 같은 목록을 만든다), GX5 분리 전이·pipe 없음과 attachment 전이는 장치 Begin, 즉시·지연 동치의 정의, 풀 키에 샘플러 포함, 풀 반환은 그래프 끝, lease를 `RenderHandleTable`에, 검증 항상 켬, 그래프 기록 전체를 GPU 프레임 하나로.
 - 개정 7(2026-11-17): 1절에 좌표·행렬 규약 행을 더했다(사용자 결정: 좌표계·단위·행렬을 UE 5.8과 같게). 12절은 ConfigSystem, 13.2절은 TraceSystem을 참조하게 했다.
+- 개정 9(2026-11-17): [픽셀 형식](PixelFormat.ko.md) 설계(개정 1)와 교차 참조를 넣었다(4.2절 GX1 행, 4.4절 GX1·GX2, 6.5절 후속). 사용자 지시 "PixelFormat으로", "언리얼에서 지원하는거 full로 지원"에 따라 형식 부분은 A0-G에서 분리하여 PF1–PF3으로 먼저 한다.

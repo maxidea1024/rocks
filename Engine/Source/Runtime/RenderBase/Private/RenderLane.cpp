@@ -746,7 +746,7 @@ void RenderLane::OnRetireFence(ErrorCode result, void* context) noexcept {
     item.kind = InboxKind::RetireCompleted;
     item.error = result;
     item.handle = wait->handle;
-    DestroyAt(wait);
+    static_assert(IsTriviallyDestructibleV<RemovePointerT<decltype(wait)>>);
     (void)lane.allocator_.Deallocate(wait);
     lane.PushInbox(item);
     platform::LockGuard lock(lane.gate_);
@@ -870,7 +870,7 @@ void RenderLane::OnReadbackFence(ErrorCode result, void* context) noexcept {
     item.kind = InboxKind::ReadbackCompleted;
     item.error = result;
     item.frame = wait->id;
-    DestroyAt(wait);
+    static_assert(IsTriviallyDestructibleV<RemovePointerT<decltype(wait)>>);
     (void)lane.allocator_.Deallocate(wait);
     lane.PushInbox(item);
     platform::LockGuard lock(lane.gate_);

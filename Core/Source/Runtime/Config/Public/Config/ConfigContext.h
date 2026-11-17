@@ -67,12 +67,15 @@ void* CreateSettingsValue(Allocator& allocator) noexcept {
         return nullptr;
     }
 
-    return ConstructAt<T>(storage.Value(), rocks::detail::MakeAllocatedValue<T>(allocator));
+    return InitializeAt<T>(storage.Value(), rocks::detail::MakeAllocatedValue<T>(allocator));
 }
 
 template <class T>
 void DestroySettingsValue(Allocator& allocator, void* value) noexcept {
-    DestroyAt(static_cast<T*>(value));
+    if constexpr (!IsTriviallyDestructibleV<T>) {
+        DestroyAt(static_cast<T*>(value));
+    }
+
     if (!allocator.Deallocate(value)) {
         platform::Fatal("settings value deallocation failed");
     }

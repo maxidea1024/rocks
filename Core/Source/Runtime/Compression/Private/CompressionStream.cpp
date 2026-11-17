@@ -90,7 +90,7 @@ Result<StreamState*> AdoptCodec(StreamState initial) noexcept {
         return Result<StreamState*>::Failure(ErrorCode::OutOfMemory);
     }
 
-    return Result<StreamState*>::Success(ConstructAt<StreamState>(memory, initial));
+    return Result<StreamState*>::Success(InitializeAt<StreamState>(memory, initial));
 }
 
 template <typename T>

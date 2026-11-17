@@ -37,7 +37,7 @@ struct TextureRecord {
     uint32 width = 0;
     uint32 height = 0;
     uint32 mipLevels = 1;
-    Format format = Format::Unknown;
+    PixelFormat format = PixelFormat::Unknown;
     bool renderTarget = false;
     // 샘플러 캐시의 객체다(장치 수명 동안 산다).
     ID3D11SamplerState* sampler = nullptr;
@@ -228,7 +228,7 @@ private:
         uint32 width = 0;
         uint32 height = 0;
         // 패스 대상의 형식이다(스왑체인은 RGBA8UnormSrgb view).
-        Format format = Format::Unknown;
+        PixelFormat format = PixelFormat::Unknown;
         // offscreen 패스의 대상 텍스처다(스왑체인 패스는 null).
         TextureHandle texture;
     };

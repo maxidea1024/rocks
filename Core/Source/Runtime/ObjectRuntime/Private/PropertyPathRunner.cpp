@@ -330,6 +330,13 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         return cursor.Fail(ErrorCode::InvalidArgument);
     }
 
+    // 원소 추가 준비물의 게시 전 원소 블록(PathTarget::WithAddedElement — 리플렉션 B9i5)은 struct
+    // 값 시작 위치다.
+    if (cursor.added_ && (cursor.root_ != PathTarget::Kind::Struct || cursor.stage_ ||
+                          cursor.reference_ || cursor.elements_)) {
+        return cursor.Fail(ErrorCode::InvalidArgument);
+    }
+
     // 2. 문맥·수명. 게시된 객체는 소유 스레드·문맥·생존(staged·DestroyRequested 객체는 거부된다),
     // staged 객체는 그 트랜잭션의 AcquireType(registry가 트랜잭션의 것이 아니면 WrongContext)이다.
     // 소유 타입 lease는 완료까지 쥔다(해석한 스키마·함수표·StructView의 수명). 분리된 값은 lease가
