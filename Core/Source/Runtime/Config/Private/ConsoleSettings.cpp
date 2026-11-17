@@ -323,6 +323,14 @@ Result<void> CopyFieldValue(const FieldValue& value, FieldValue& out) noexcept {
         return assigned;
     }
 
+    // Text(리플렉션 B9l)는 out의 allocator로 새 노드를 만든다.
+    auto text = value.text.DeepClone(out.GetAllocator());
+    if (!text) {
+        return Result<void>::Failure(text.Error());
+    }
+
+    out.text = Move(text.Value());
+
     out.kind = value.kind;
     out.boolean = value.boolean;
     out.unsignedInteger = value.unsignedInteger;

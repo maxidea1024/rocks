@@ -149,6 +149,9 @@ Result<E> MakeParsedValue(Allocator& allocator, const ParsedValue& parsed) noexc
         }
 
         return Result<E>::Success(Move(value));
+    } else if constexpr (IsSameV<E, Text>) {
+        // Text 값(리플렉션 B9l)은 allocator로 노드를 만든다.
+        return MakeParsedText(allocator, parsed);
     } else {
         return Result<E>::Success(ParsedScalarValue<E>(parsed));
     }
@@ -217,7 +220,7 @@ Result<uint32> EncodeMapField(const Container& source, ArchiveWriter& out,
     constexpr bool variable = IsSameV<Key, String> || IsSameV<Key, Name> ||
                               SoftReferenceField<Key>::Supported || IsSameV<Value, String> ||
                               IsSameV<Value, Name> || SoftReferenceField<Value>::Supported ||
-                              structValue || instancedValue;
+                              structValue || instancedValue || IsSameV<Value, Text>;
 
     // 키 enum·값 enum은 비어 있지 않은 컨테이너마다 판정 집합을 한 번 만들고 원소 수만큼의 조회
     // 작업을 먼저 청구한다(로드 두 단계와 같은 조건).
@@ -331,6 +334,11 @@ Result<uint32> EncodeMapField(const Container& source, ArchiveWriter& out,
                 // InstancedStruct 값(리플렉션 B9j)은 u64 길이 + 내용이다.
                 if (auto written = EncodeInstancedStructElement(entry.value, out, context);
                     !written) {
+                    return Result<uint32>::Failure(written.Error());
+                }
+            } else if constexpr (IsSameV<Value, Text>) {
+                // Text 값(리플렉션 B9l)은 노드를 복사하지 않고 영속 형태를 쓴다.
+                if (auto written = WriteTextValue(out, entry.value); !written) {
                     return Result<uint32>::Failure(written.Error());
                 }
             } else if constexpr (structValue) {

@@ -63,7 +63,7 @@ constexpr TypeId SlotId{0x52434e, 3};
 constexpr uint32 EditorOnly = static_cast<uint32>(FieldFlags::EditorOnly);
 constexpr uint32 Required = static_cast<uint32>(FieldFlags::Required);
 
-Span<const char> Text(const char* text) noexcept {
+Span<const char> Chars(const char* text) noexcept {
     usize bytes = 0;
     while (text[bytes] != '\0') {
         ++bytes;
@@ -78,7 +78,7 @@ FieldSchema Scalar(Guid id, const char* name, ValueKind kind, TypeId type = {},
     field.id = id;
     field.kind = kind == ValueKind::ObjectReference ? FieldKind::ObjectReference : FieldKind::Value;
     field.flags = flags;
-    field.name = Text(name);
+    field.name = Chars(name);
     field.value = ValueType{kind, type};
     return field;
 }

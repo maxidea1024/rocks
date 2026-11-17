@@ -67,6 +67,15 @@ bool SameValue(const FieldValue& left, const FieldValue& right) noexcept {
         return left.digest == right.digest;
     case ValueKind::Name:
         return left.name == right.name;
+    case ValueKind::Text: {
+        // 같음은 저장 형태 byte다(리플렉션 B9l — 13절). 저장할 수 없는 이력(Format·Integer)은
+        // 같다고 보지 않는다.
+        TextPersistentView first;
+        TextPersistentView second;
+        return left.text.TryGetPersistentForm(first) && right.text.TryGetPersistentForm(second) &&
+               first.form == second.form && first.source == second.source &&
+               first.id == second.id && first.sourceRevision == second.sourceRevision;
+    }
     case ValueKind::ObjectReference:
     case ValueKind::WeakObjectReference:
         return left.reference == right.reference;

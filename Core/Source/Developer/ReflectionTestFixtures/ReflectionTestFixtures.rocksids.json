@@ -2799,6 +2799,62 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::TextFieldCaption::label",
+      "id": "bbc703355f21404a8611caaedf0f880f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::TextFieldCaption::order",
+      "id": "c07ec91c374f47a7b2206b7e4ddb3918",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::TextFieldHolder::byKey",
+      "id": "95a72b222e254bb0a58bc00273c5307d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::TextFieldHolder::caption",
+      "id": "1b183d6805414befa8ffb7a6268d866a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::TextFieldHolder::fixed",
+      "id": "eb7d79aa14f2423abbe196abae002362",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::TextFieldHolder::lines",
+      "id": "1a8c0d2265864f84bf5440e0c8f252d8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::TextFieldHolder::note",
+      "id": "aefbe7624ea64cd29c70cb34d5e207a3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::TextFieldHolder::title",
+      "id": "765e2f4d060a41e79f0e3fd592d56e53",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::TextHolder::anchor",
       "id": "98c52be347ce4c37a31c809133b653f9",
       "aliases": [],
@@ -4182,6 +4238,20 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::TextChannels",
       "id": "64809b28e07346eda59ea8bb2dbf374c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::TextFieldCaption",
+      "id": "bdab10422a224ceaac4bb8e7ad5e594a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::TextFieldHolder",
+      "id": "031dc88c68e2400c8e0d3ec8e6271063",
       "aliases": [],
       "retired": false
     },

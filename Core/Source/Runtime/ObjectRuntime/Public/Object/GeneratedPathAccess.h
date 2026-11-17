@@ -144,7 +144,10 @@ Result<void> PathValue(PathCursor& cursor, T& value) noexcept {
                 }
             }
 
-            if (auto written = WriteTargetValue<Target>(value, *cursor.Input()); !written) {
+            // Text(리플렉션 B9l)는 값의 allocator(객체면 객체 allocator)로 새 노드를 만든다.
+            if (auto written =
+                    WriteTargetValue<Target>(value, *cursor.Input(), &cursor.ValueAllocator());
+                !written) {
                 return cursor.FailValue(written.Error());
             }
 
@@ -244,7 +247,8 @@ Result<void> InsertArrayElement(PathCursor& cursor, Array<E>& array) noexcept {
     E element = MakePathElement<E>(allocator);
     // struct 원소는 기본 값, InstancedStruct 원소는 빈 값이다.
     if constexpr (Target != ValueKind::Struct && Target != ValueKind::InstancedStruct) {
-        if (auto written = WriteTargetValue<Target>(element, *cursor.Input()); !written) {
+        if (auto written = WriteTargetValue<Target>(element, *cursor.Input(), &allocator);
+            !written) {
             return cursor.FailValue(written.Error());
         }
     }

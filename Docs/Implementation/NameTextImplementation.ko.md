@@ -92,7 +92,7 @@ Name 10개·Localization 24개와 플랫폼 확장을 포함한 전체 110개가
 
 ## 5. 후속 범위
 
-리플렉션 B9c1이 `NamePool::TryFind`(intern하지 않는 조회)·pool 없는 Name 비교 `NameTextEquals`·base·번호 분해 `SplitNameText`를 더했다. Text의 영속 형태 조회 `TryGetPersistentForm`·깊은 복사 `DeepClone(Allocator&)`은 B9l이 더한다([리플렉션 B9](../Design/ReflectionExtensions.ko.md) 4·13절).
+리플렉션 B9c1이 `NamePool::TryFind`(intern하지 않는 조회)·pool 없는 Name 비교 `NameTextEquals`·base·번호 분해 `SplitNameText`를 더했다. 리플렉션 B9l이 Text의 영속 형태 조회 `TryGetPersistentForm(TextPersistentView&)`(비어 있음·Invariant·Localized — Format·Integer 이력은 Unsupported, 그래서 `Text::Integer`는 내부 형태 Integer를 갖는다)·깊은 복사 `DeepClone(Allocator&, TextResolveLimits = {})`(노드를 대상 allocator로 새로 만든다 — 깊이·작업 한도는 ResolveText와 같은 구조체)를 더했고, ResolveText 진단 구조체 이름을 `TextResolveDiagnostics`로 바꿨다(ReflectionText `TextDiagnostics`와 겹치지 않게 — [리플렉션 B9](../Design/ReflectionExtensions.ko.md) 4·13절).
 
 Name pool의 샤드 잠금/검색 최적화, Guid 생성·parse·format, 일반 hash/Path, catalog 추출·쿠킹·에셋 너겟·비동기 로더·request generation, locale별 숫자/통화/날짜·plural/select adapter, BiDi·shaping·폰트·IME/UI는 아직 후속이다. Text를 String의 별명으로 만들지 않고 이력과 snapshot 경계를 먼저 확보한 상태에서 확장한다.
 

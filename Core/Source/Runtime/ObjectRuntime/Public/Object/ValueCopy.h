@@ -17,6 +17,7 @@
 //   - String·SoftObjectRef는 TryClone이다.
 //   - Array·OrderedMap·OrderedSet·Optional·정적 배열(E[N])은 원소·키·값마다 복사한다.
 //   - InstancedStruct는 TryClone이다(리플렉션 B9j).
+//   - Text는 DeepClone이다(리플렉션 B9l — 노드를 allocator로 새로 만든다).
 //   - 생성 struct는 MetaCompiler가 내는 특수화가 GeneratedType<S>::CopyValue(PROPERTY·NATIVE 멤버
 //     모두)로 잇는다.
 //   - 그 밖의 C++ 타입은 noexcept 복사 생성·대입이 있으면 C++ 복사, 없으면 지원하지 않는다
@@ -241,6 +242,22 @@ struct ValueCopy<InstancedStruct<Base>> {
     static Result<void> Copy(InstancedStruct<Base>& destination,
                              const InstancedStruct<Base>& source, Allocator& allocator) noexcept {
         auto cloned = source.TryClone(allocator);
+        if (!cloned) {
+            return Result<void>::Failure(cloned.Error());
+        }
+
+        destination = Move(cloned.Value());
+        return Result<void>::Success();
+    }
+};
+
+// Text(리플렉션 B9l)는 DeepClone(allocator로 노드를 새로 만든다 — 원래 노드를 공유하지 않는다)이다.
+template <>
+struct ValueCopy<Text> {
+    static constexpr bool Supported = true;
+
+    static Result<void> Copy(Text& destination, const Text& source, Allocator& allocator) noexcept {
+        auto cloned = source.DeepClone(allocator);
         if (!cloned) {
             return Result<void>::Failure(cloned.Error());
         }
