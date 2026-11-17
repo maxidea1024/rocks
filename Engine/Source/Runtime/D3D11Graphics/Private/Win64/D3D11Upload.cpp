@@ -27,7 +27,8 @@ Result<void> D3D11Device::UpdateTexture(TextureHandle handle, uint32 mipLevel,
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (mipLevel >= record->mipLevels ||
+    if (record->view || record->renderTarget || record->depthTarget ||
+        mipLevel >= record->mipLevels ||
         pixels.Size() != PixelFormatImageBytes(record->format, MipExtent(record->width, mipLevel),
                                                MipExtent(record->height, mipLevel))) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -39,7 +40,7 @@ Result<void> D3D11Device::UpdateTexture(TextureHandle handle, uint32 mipLevel,
     }
 
     platform::MemoryCopy(space.Value().data, pixels.Data(), pixels.Size());
-    return RecordTextureUpload(*record, mipLevel, space.Value().data);
+    return RecordAnyUpload(*record, mipLevel, space.Value().data);
 }
 
 Result<GpuFencePoint> D3D11Device::SubmitUploads() noexcept {
@@ -89,7 +90,8 @@ Result<void> D3D11Device::UploadTextureFromStaging(TextureHandle handle, uint32 
 
     const uint64 bytes = PixelFormatImageBytes(record->format, MipExtent(record->width, mipLevel),
                                                MipExtent(record->height, mipLevel));
-    if (mipLevel >= record->mipLevels || offset > memory.Value().size ||
+    if (record->view || record->renderTarget || record->depthTarget ||
+        mipLevel >= record->mipLevels || bytes == 0 || offset > memory.Value().size ||
         bytes > memory.Value().size - offset) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -99,7 +101,7 @@ Result<void> D3D11Device::UploadTextureFromStaging(TextureHandle handle, uint32 
         return marked;
     }
 
-    return RecordTextureUpload(*record, mipLevel, memory.Value().data + offset);
+    return RecordAnyUpload(*record, mipLevel, memory.Value().data + offset);
 }
 
 Result<void> D3D11Device::UploadBufferFromStaging(BufferHandle handle, uint64 destinationOffset,
@@ -234,6 +236,147 @@ Result<void> D3D11Device::RecordTextureUpload(const TextureRecord& record, uint3
     return PushUpload(op);
 }
 
+Result<void> D3D11Device::RecordAnyUpload(const TextureRecord& record, uint32 mipLevel,
+                                          const uint8* pixels) noexcept {
+    const PixelFormatKind kind = GetPixelFormatInfo(record.format).kind;
+    if (kind == PixelFormatKind::Color || kind == PixelFormatKind::Compressed) {
+        return RecordTextureUpload(record, mipLevel, pixels);
+    }
+
+    return RecordStagedUpload(record, mipLevel, pixels);
+}
+
+Result<void> D3D11Device::RecordStagedUpload(const TextureRecord& record, uint32 mipLevel,
+                                             const uint8* pixels) noexcept {
+    const uint32 width = MipExtent(record.width, mipLevel);
+    const uint32 height = MipExtent(record.height, mipLevel);
+    const DeviceLayout layout = DeviceLayoutOf(record.format, width, height);
+    Array<uint8> converted(allocator_);
+    if (!converted.TryResize(static_cast<usize>(layout.rowBytes * layout.rows))) {
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    ToDeviceLayout(record.format, width, height, pixels, converted.Data());
+    D3D11_TEXTURE2D_DESC stagingDesc = {};
+    stagingDesc.Width = width;
+    stagingDesc.Height = height;
+    stagingDesc.MipLevels = 1;
+    stagingDesc.ArraySize = 1;
+    stagingDesc.Format = MappingOf(record.format).resource;
+    stagingDesc.SampleDesc.Count = 1;
+    stagingDesc.Usage = D3D11_USAGE_STAGING;
+    stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    D3D11_SUBRESOURCE_DATA initial = {};
+    initial.pSysMem = converted.Data();
+    initial.SysMemPitch = static_cast<UINT>(layout.rowBytes);
+    ComRef<ID3D11Texture2D> staging;
+    const HRESULT created = device_->CreateTexture2D(&stagingDesc, &initial, staging.Out());
+    if (FAILED(created)) {
+        return Fail("CreateTexture2D (upload staging)", created);
+    }
+
+    auto reserved = ReserveRetireCapacity(1);
+    if (!reserved) {
+        return reserved;
+    }
+
+    UploadOp op;
+    op.kind = UploadOp::Kind::CopyRegion;
+    op.destination = record.texture.Get();
+    op.subresource = mipLevel;
+    op.copySource = staging.Get();
+    op.sourceSubresource = 0;
+    auto pushed = PushUpload(op);
+    if (!pushed) {
+        return pushed;
+    }
+
+    // 업로드 기록이 실행될 때까지 회수 대기 항목이 staging을 붙든다(uploadPending).
+    Defer(Move(staging));
+    return Result<void>::Success();
+}
+
+Result<void> D3D11Device::ReadTexture(TextureHandle handle, uint32 mipLevel, uint32 plane,
+                                      Span<uint8> out) noexcept {
+    auto owner = ownership_.Check();
+    if (!owner) {
+        return owner;
+    }
+
+    platform::LockGuard lock(gate_);
+    const TextureRecord* record = textures_.Find(handle.slot);
+    if (record == nullptr) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    if (recording_) {
+        return Result<void>::Failure(ErrorCode::Busy);
+    }
+
+    const uint32 width = MipExtent(record->width, mipLevel);
+    const uint32 height = MipExtent(record->height, mipLevel);
+    if (record->view || mipLevel >= record->mipLevels ||
+        out.Size() != PixelFormatPlaneImageBytes(record->format, plane, width, height)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    D3D11_TEXTURE2D_DESC stagingDesc = {};
+    stagingDesc.Width = width;
+    stagingDesc.Height = height;
+    stagingDesc.MipLevels = 1;
+    stagingDesc.ArraySize = 1;
+    stagingDesc.Format = MappingOf(record->format).resource;
+    stagingDesc.SampleDesc.Count = 1;
+    stagingDesc.Usage = D3D11_USAGE_STAGING;
+    stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    ComRef<ID3D11Texture2D> staging;
+    const HRESULT created = device_->CreateTexture2D(&stagingDesc, nullptr, staging.Out());
+    if (FAILED(created)) {
+        return Fail("CreateTexture2D (readback staging)", created);
+    }
+
+    auto reserved = ReserveRetireCapacity(1);
+    if (!reserved) {
+        return reserved;
+    }
+
+    // 쌓인 초기 데이터·갱신 업로드 뒤에 복사를 붙인다.
+    UploadOp op;
+    op.kind = UploadOp::Kind::CopyRegion;
+    op.destination = staging.Get();
+    op.subresource = 0;
+    op.copySource = record->texture.Get();
+    op.sourceSubresource = mipLevel;
+    auto pushed = PushUpload(op);
+    if (!pushed) {
+        return pushed;
+    }
+
+    auto flushed = FlushUploadsLocked();
+    if (!flushed) {
+        ComRef<IUnknown> object;
+        object.Attach(staging.Detach());
+        KeepUntilDestruction(Move(object));
+        return Result<void>::Failure(flushed.Error());
+    }
+
+    Result<void> outcome = WaitFenceOwner(flushed.Value());
+    if (outcome) {
+        D3D11_MAPPED_SUBRESOURCE mapped = {};
+        const HRESULT result = immediate_->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &mapped);
+        if (FAILED(result)) {
+            outcome = Fail("ID3D11DeviceContext::Map (texture readback)", result);
+        } else {
+            FromDeviceLayout(record->format, plane, width, height,
+                             static_cast<const uint8*>(mapped.pData), mapped.RowPitch, out.Data());
+            immediate_->Unmap(staging.Get(), 0);
+        }
+    }
+
+    Defer(Move(staging));
+    return outcome;
+}
+
 // 쌓인 업로드를 immediate context에서 실행하고 신호한 fence 값을 돌려준다(잠금 안, 소유 스레드).
 // 없으면 0이다.
 Result<uint64> D3D11Device::FlushUploadsLocked() noexcept {
@@ -244,6 +387,9 @@ Result<uint64> D3D11Device::FlushUploadsLocked() noexcept {
     for (const UploadOp& op : uploadOps_) {
         if (op.kind == UploadOp::Kind::Copy) {
             immediate_->CopyResource(op.destination, op.copySource);
+        } else if (op.kind == UploadOp::Kind::CopyRegion) {
+            immediate_->CopySubresourceRegion(op.destination, op.subresource, 0, 0, 0,
+                                              op.copySource, op.sourceSubresource, nullptr);
         } else {
             immediate_->UpdateSubresource(op.destination, op.subresource,
                                           op.hasBox ? &op.box : nullptr, op.source, op.rowPitch,
@@ -394,7 +540,7 @@ Result<ReadbackRequest> D3D11Device::RequestReadbackLocked(TextureHandle target)
     stagingDesc.Height = record->height;
     stagingDesc.MipLevels = 1;
     stagingDesc.ArraySize = 1;
-    stagingDesc.Format = ResourceFormat(record->format);
+    stagingDesc.Format = MappingOf(record->format).resource;
     stagingDesc.SampleDesc.Count = 1;
     stagingDesc.Usage = D3D11_USAGE_STAGING;
     stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;

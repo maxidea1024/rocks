@@ -369,7 +369,7 @@ StringView View(const Array<uint8>& bytes) noexcept {
 
 constexpr const char* GoldenReport = R"({
   "format": "rocks-trace-report",
-  "version": 2,
+  "version": 3,
   "session": {
     "guidHigh": "0x0000000000001234",
     "guidLow": "0x0000000000005678",
@@ -390,6 +390,11 @@ constexpr const char* GoldenReport = R"({
     "unendedScopes": 2,
     "orderGaps": 1,
     "marks": 2,
+    "snapshot": false,
+    "snapshotIncomplete": false,
+    "recentDroppedChunks": 0,
+    "recentDroppedBytes": 0,
+    "snapshotSkippedChunks": 0,
     "channelLoss": [
       {
         "channel": 0,
@@ -528,7 +533,18 @@ constexpr const char* GoldenReport = R"({
       },
       "scopes": []
     }
-  ]
+  ],
+  "capture": {
+    "samples": 0,
+    "poolBytesPeak": 0,
+    "poolBytesLimit": 0,
+    "definitionStoreBytes": 0,
+    "lostRecords": 0,
+    "definitionRecordsDropped": 0,
+    "recentDroppedBytes": 0,
+    "outputBytes": 0,
+    "spanNs": 0
+  }
 }
 )";
 

@@ -243,7 +243,7 @@ void D3D11Device::SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64
 void D3D11Device::SetTexture(TextureHandle handle) noexcept {
     platform::LockGuard lock(gate_);
     const TextureRecord* record = textures_.Find(handle.slot);
-    if (record == nullptr) {
+    if (record == nullptr || !record->srv) {
         record = textures_.Find(white_.slot);
     }
 

@@ -536,14 +536,45 @@ void RunViewChecks(Device& device, Allocator& allocator) noexcept {
     device.Retire(bench.target);
 }
 
+// RGBA8 텍스처 하나로 ReadTexture·CreateTextureView 지원을 확인한다.
+void Probe(Device& device, Allocator& allocator, bool& readable, bool& views) noexcept {
+    const PixelFormat format = PixelFormat::RGBA8Unorm;
+    const uint8 texel[4] = {1, 2, 3, 4};
+    const uint8* texels[2] = {texel, nullptr};
+    const uint32 sizes[2] = {4, 0};
+    auto texture = Uniform(device, format, texels, sizes, allocator);
+    Check(texture.IsOk(), format, "probe texture is created");
+    if (!texture) {
+        return;
+    }
+    Array<uint8> read(allocator);
+    if (read.TryResize(static_cast<usize>(PixelFormatImageBytes(format, Extent, Extent)))) {
+        auto readback = device.ReadTexture(texture.Value(), 0, 0, read.View());
+        readable = readback.IsOk();
+        Check(readable || readback.Error() == ErrorCode::Unsupported, format,
+              "ReadTexture succeeds or is Unsupported");
+    }
+    auto view = device.CreateTextureView(texture.Value(), {});
+    views = view.IsOk();
+    Check(views || view.Error() == ErrorCode::Unsupported, format,
+          "CreateTextureView succeeds or is Unsupported");
+    if (view) {
+        device.Retire(view.Value());
+    }
+    device.Retire(texture.Value());
+}
+
 } // namespace
 
 uint32 RunFormatChecks(const char* name, Device& device, Allocator& allocator) noexcept {
     failures = 0;
     backendName = name;
     const bool openGl = device.Info().backend == Backend::OpenGL;
-    // ReadTexture·CreateTextureView를 지원하는 backend에서만 왕복·view 시험을 한다(PF2·PF6, D3D12).
-    const bool readable = device.Info().backend == Backend::D3D12;
+    // ReadTexture·CreateTextureView를 지원하는 backend에서만 왕복·view 시험을 한다. 지원하지 않으면
+    // Unsupported여야 한다(새 virtual의 기본 구현).
+    bool readable = false;
+    bool views = false;
+    Probe(device, allocator, readable, views);
     uint32 sampled = 0;
     uint32 renderTargets = 0;
     uint32 depthTargets = 0;
@@ -563,15 +594,15 @@ uint32 RunFormatChecks(const char* name, Device& device, Allocator& allocator) n
             RunRoundTrip(device, format, allocator);
         }
     }
-    if (readable) {
+    if (views) {
         RunViewChecks(device, allocator);
     }
     auto flushed = device.WaitIdle();
     Check(flushed.IsOk(), PixelFormat::Unknown, "WaitIdle after format checks");
     printf("  %s pixel formats: %u sampled, %u render target, %u depth stencil, %u unsupported, "
-           "%u failure%s\n",
-           name, sampled, renderTargets, depthTargets, unsupported, failures,
-           failures == 1 ? "" : "s");
+           "readback %s, views %s, %u failure%s\n",
+           name, sampled, renderTargets, depthTargets, unsupported, readable ? "yes" : "no",
+           views ? "yes" : "no", failures, failures == 1 ? "" : "s");
     return failures;
 }
 

@@ -209,6 +209,11 @@ Result<void> D3D11Device::Initialize(const DeviceDesc& desc) noexcept {
         return states;
     }
 
+    // 형식 능력은 장치 수명 동안 바뀌지 않으므로 한 번 질의해 둔다(PixelFormat.ko.md PF4).
+    for (uint32 number = 0; number <= MaxPixelFormatNumber; ++number) {
+        formatCaps_[number] = QueryFormatCaps(device_.Get(), static_cast<PixelFormat>(number));
+    }
+
     // 업로드 ring(GX8): 시스템 메모리 하나를 나눠 쓴다.
     const uint64 ringBytes =
         desc.uploadRingBytes != 0 ? desc.uploadRingBytes : DefaultUploadRingBytes;

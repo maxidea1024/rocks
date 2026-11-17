@@ -11,6 +11,7 @@ TraceChannel TraceSpanChannel{"span", "Thread-independent time spans"};
 TraceChannel TraceFrameChannel{"frame", "Game and render frame boundaries"};
 TraceChannel TraceContextChannel{"context", "Correlation id context push and restore"};
 TraceChannel TraceTaskChannel{"task", "Task lifetime, dependencies and waits"};
+TraceChannel TraceStatsChannel{"stats", "Trace capture statistics (pool, output, losses)"};
 
 namespace detail {
 
@@ -100,6 +101,19 @@ constexpr TraceField TaskFields[] = {
     {"error", TraceFieldType::String, TraceField::Variable},
 };
 
+constexpr TraceField StatsFields[] = {
+    {"tick", TraceFieldType::UInt64, Format::StatsTickOffset},
+    {"poolInUse", TraceFieldType::UInt64, Format::StatsPoolInUseOffset},
+    {"poolPeak", TraceFieldType::UInt64, Format::StatsPoolPeakOffset},
+    {"poolLimit", TraceFieldType::UInt64, Format::StatsPoolLimitOffset},
+    {"outputBytes", TraceFieldType::UInt64, Format::StatsOutputBytesOffset},
+    {"definitionStore", TraceFieldType::UInt64, Format::StatsDefinitionStoreOffset},
+    {"lostRecords", TraceFieldType::UInt64, Format::StatsLostRecordsOffset},
+    {"definitionsDropped", TraceFieldType::UInt64, Format::StatsDefinitionsDroppedOffset},
+    {"recentBytes", TraceFieldType::UInt64, Format::StatsRecentBytesOffset},
+    {"recentDropped", TraceFieldType::UInt64, Format::StatsRecentDroppedOffset},
+};
+
 constexpr TraceField ContextPopFields[] = {
     {"tick", TraceFieldType::UInt64, Format::ContextPushTickOffset},
 };
@@ -141,11 +155,13 @@ TraceEventType TraceContextPopType{Format::ContextPopType, TraceContextChannel,
                                    Format::ContextPopFixedBytes, ContextPopFields};
 TraceEventType TraceTaskEventType{Format::TaskType, TraceTaskChannel, Format::TaskFixedBytes,
                                   TaskFields, TraceEventFlags::Ordered};
+TraceEventType TraceStatsType{Format::StatsType, TraceStatsChannel, Format::StatsFixedBytes,
+                              StatsFields};
 
 Result<void> RegisterStandardTraceTypes(TraceSession& session) noexcept {
     TraceChannel* const channels[] = {&TraceCpuChannel,  &TraceCounterChannel, &TraceMarkChannel,
                                       &TraceSpanChannel, &TraceFrameChannel,   &TraceContextChannel,
-                                      &TraceTaskChannel};
+                                      &TraceTaskChannel, &TraceStatsChannel};
     for (TraceChannel* channel : channels) {
         if (auto registered = session.RegisterChannel(*channel, false); !registered) {
             return registered;
@@ -157,7 +173,8 @@ Result<void> RegisterStandardTraceTypes(TraceSession& session) noexcept {
         &TraceCounterIntegerType, &TraceCounterFloatType,  &TraceMarkSiteType,
         &TraceMarkEventType,      &TraceSpanBeginType,     &TraceSpanEndType,
         &TraceFrameBeginType,     &TraceFrameEndType,      &TraceContextDefinitionType,
-        &TraceContextPushType,    &TraceContextPopType,    &TraceTaskEventType};
+        &TraceContextPushType,    &TraceContextPopType,    &TraceTaskEventType,
+        &TraceStatsType};
     for (TraceEventType* type : types) {
         if (auto registered = session.RegisterEventType(*type); !registered) {
             return registered;
