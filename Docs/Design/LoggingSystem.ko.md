@@ -423,7 +423,7 @@ public:
 | 대상 | 레벨 | 템플릿 · 속성 | 기록 위치 |
 |---|---|---|---|
 | 초기화 시작·완료 | Info | `Engine initialized with {SubsystemCount} subsystems in {Ms} ms` | `Engine::Initialize`, 단계마다 `Stage` 문맥 |
-| 초기화 실패 | Error | `Engine initialization failed at {Stage}: {Error}` — Stage = TypeRegistry·ModuleRegistration·RegisterTypes·ObjectRegistry·Subsystems·ClientStart | Engine(호스트는 재기록하지 않음) |
+| 초기화 실패 | Error | `Engine initialization failed at {Stage}: {Error}` — Stage = TypeRegistry·ModuleRegistration·RegisterTypes·ObjectRegistry·Subsystems·PermanentRegion(GC 세션 영구 창 닫기, 병합 뒤)·ClientStart | Engine(호스트는 재기록하지 않음) |
 | Teardown 정리 실패 | Fatal | `Engine {Registry} could not shut down after initialization failure at {Stage}: {Error}` | 기존 `platform::Fatal` 대체 |
 | Run 종료 | Info | `Engine run finished after {Frames} frames: {Reason}` | `Engine::Run` |
 | World Tick 실패 | Error | `World {World} tick failed: {Error}` (EventId 반복 요약) | `Engine::RunFrame` |
