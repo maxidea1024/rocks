@@ -1,6 +1,6 @@
 # 셰이더 시스템 설계
 
-기준일: 2026-11-17, 개정 11(초안). 셰이더 원문을 HLSL 하나로 쓰고 오프라인에서 D3D12·D3D11·Vulkan·Metal·OpenGL ES용 코드로 바꾸는 구조와, 그 구현에 앞서 갖춰야 할 **선행 작업**을 정한다. 개정 7은 현재 코드베이스(HEAD `0be1e64`, 2026-11-14)와 다른 설계 문서의 상태를 다시 조사해 선행 작업과 순서를 새로 세웠다(4–6절).
+기준일: 2026-11-18, 개정 12(초안). 셰이더 원문을 HLSL 하나로 쓰고 오프라인에서 D3D12·D3D11·Vulkan·Metal·OpenGL ES용 코드로 바꾸는 구조와, 그 구현에 앞서 갖춰야 할 **선행 작업**을 정한다. 개정 7은 현재 코드베이스(HEAD `0be1e64`, 2026-11-14)와 다른 설계 문서의 상태를 다시 조사해 선행 작업과 순서를 새로 세웠다(4–6절).
 
 UE 근거는 UE 5.8.4(EpicGames/UnrealEngine `release` 브랜치 commit `f45729c0b6f097038e72b52d366a62baeca3275b`)의 원본이다. 2026-11-14 사용자 지시로 기준을 5.6에서 5.8로 올렸고, 개정 6까지의 5.6 근거를 모두 5.8.4로 다시 확인했다(17절). 경로는 `Engine/Source/` 기준이며 `Engine/Shaders`·`Engine/Config`·`Engine/Build`는 그대로 적는다. UE 밖 도구(DXC·SPIRV-Cross·SPIRV-Tools·Vulkan)에 관한 사실은 그 출처를 따로 적는다. 개정 6까지의 조사 문서(UE 5.6 기준)는 [Rocks 셰이더 시스템](https://claude.ai/artifact/U5uNh2EWGvXKQiNYXnuc1Q)이다.
 
@@ -25,7 +25,7 @@ UE 근거는 UE 5.8.4(EpicGames/UnrealEngine `release` 브랜치 commit `f45729c
 | HLSL 2021 | 형식 정의의 기본값과 셰이더 타입의 선택으로 정한다(결정 2, 2026-11-17). `D3D12_SM6`·`VULKAN_SM5`·`METAL_SM5`는 켜고 `D3D11_SM5`·GLES 형식은 끈다. `D3D11_SM5`에서 2021 셰이더는 SPIRV-Cross 경로를 탄다 | UE `EnablesHLSL2021ByDefault`: PCD3D_SM6·VULKAN·METAL 1, PCD3D_SM5·OPENGL_ES3_1_ANDROID 키 없음(15절 결정 2) |
 | 형식별 생산 호스트 | 형식 정의의 생산 호스트 규칙으로 둔다(결정 5, 2026-11-17). DXBC는 Windows, metallib은 macOS와 Apple Metal Developer Tools가 있는 Windows, 그 밖은 각 호스트. 도구가 없으면 `UnsupportedCapability` | UE 5.8은 Windows Metal Developer Tools를 지원한다(`Developer/Apple/MetalShaderFormat/Private/MetalShaderFormat.cpp:724–725`) |
 
-이 문서가 정한 규칙: 바인딩·상수 버퍼·단계 사이 변수(7절), ThirdParty 종류·오프라인 도구 빌드(8절), 도구 로드·Release 배제(9절), 셰이더 job 키(10절), 워커 통신(11절). 사용자가 정한 것: 확장자 `.rsf`·`.rsh`(결정 1), 도구 공급 UE 방식(결정 8), SH2 범위(결정 9, 2026-11-14 GLES 결정에 따라 개정), job 키 공통 규칙(결정 10), OpenGL ES 필수와 UE 방식(2026-11-14). 2026-11-17에 HLSL 2021 범위(결정 2), D3D12 셰이더 모델 6.6(결정 3), 형식별 생산 호스트(결정 5), 자체 전처리기(결정 6)를 정했다. 경고 정책(결정 7)과 셰이더 구현 착수 위치(결정 11)는 2026-11-16에 정했다. 남은 사용자 결정(15절)은 파라미터 선언(결정 4)이다.
+이 문서가 정한 규칙: 바인딩·상수 버퍼·단계 사이 변수(7절), ThirdParty 종류·오프라인 도구 빌드(8절), 도구 로드·Release 배제(9절), 셰이더 job 키(10절), 워커 통신(11절). 사용자가 정한 것: 확장자 `.rsf`·`.rsh`(결정 1), 도구 공급 UE 방식(결정 8), SH2 범위(결정 9, 2026-11-14 GLES 결정에 따라 개정), job 키 공통 규칙(결정 10), OpenGL ES 필수와 UE 방식(2026-11-14). 2026-11-17에 HLSL 2021 범위(결정 2), D3D12 셰이더 모델 6.6(결정 3), 형식별 생산 호스트(결정 5), 자체 전처리기(결정 6)를 정했다. 경고 정책(결정 7)과 셰이더 구현 착수 위치(결정 11)는 2026-11-16에 정했다. 파라미터 선언(결정 4)은 2026-11-18에 권장안(MetaCompiler 방식)으로 정했다. 남은 사용자 결정은 없다(15절).
 
 ## 2. 형식과 변환 경로
 
@@ -191,7 +191,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 
 **P6b TargetProfile 필드·매니페스트 v2·엔진 내장 라이브러리 — 설계(12.3절).** 의존: A1, A4(K1–K3), P6a, P14. 막는 것: SH2(런타임이 쿠킹된 라이브러리를 연다).
 
-**P7 MetaCompiler 셰이더 파라미터 — 설계(13절, 15절 결정 4를 MetaCompiler 방식으로 고를 때).** 의존: B1–B8(구현). 막는 것: SH3. P7 전에는 손으로 쓴 레이아웃 표를 쓴다(7.2절 5항).
+**P7 MetaCompiler 셰이더 파라미터 — 설계(13절, 15절 결정 4 확정).** 의존: B1–B8(구현). 막는 것: SH3. P7 전에는 손으로 쓴 레이아웃 표를 쓴다(7.2절 5항).
 
 **P8 다른 문서 개정 — 목록(14절).** AssetSystem 쪽(5.2절 요구)은 해당 단계(A0-G·A1·A2·A3·A4) 착수 전에, 나머지는 15절의 결정별 기한에 맞춰 한다. 측정 뒤에 정하는 결정(3·5·6)에 걸린 행은 그 결정 뒤에 고친다.
 
@@ -647,7 +647,7 @@ Rocks 규칙:
 
 ## 13. P7 MetaCompiler 셰이더 파라미터
 
-15절 결정 4의 권장안(MetaCompiler 방식)을 고를 때의 내용이다. 바탕인 A0-B(B1–B8)는 구현되었다.
+15절 결정 4(2026-11-18 확정, MetaCompiler 방식)의 내용이다. 바탕인 A0-B(B1–B8)는 구현되었다.
 
 - **선언.** `ROCKS_SHADER_PARAMETERS(Name)` 구조체 종류를 MetaCompiler에 더한다. 파서·descriptor는 B4 `ROCKS_STRUCT`([리플렉션 기반](ReflectionFoundations.ko.md) 4절)를 바탕으로 한다. 멤버는 ShaderCore 셰이더 전용 정렬 타입(7.2절 5항)과 셰이더 자원 값 타입(텍스처·샘플러·버퍼 SRV·UAV)만 받고, 다른 타입(Core `Matrix4`·`Vector3` 포함)은 MetaCompiler 오류다.
 - **identity와 등록.** 공통 규칙대로 셰이더 파라미터 구조체도 identity 명세(`<Module>.rocksids.json`)에 항목을 두고, `ROCKS_STRUCT`와 같은 경로로 `TypeSchema`·TypeRegistry에 등록한다. 셰이더 파라미터 종류는 그 위에 허용 타입 제약과 HLSL 생성만 더한다. 셰이더 자원 멤버를 담을 리플렉션 값 종류는 `ValueKind`에 더한다. `ValueKind`는 닫힌 열거라 값을 덧붙이고 TypeRegistry 경계를 올리는 방식이다(ReflectionFoundations 3절).
@@ -655,6 +655,7 @@ Rocks 규칙:
   - C++: 멤버별 offset·크기 static_assert, `ShaderBindingLayout`과 대조할 레이아웃 표.
   - HLSL: `<out>/Generated/<Module>/Shaders/<Name>.rsh`(기존 `<out>/Generated/<Module>` 규칙). 이름 있는 `cbuffer`로 낸다(7.2절 1항). 가상 경로 `/Engine/Generated/<Module>/<Name>.rsh`(플러그인·프로젝트는 각자의 `Generated`)로 연결하며, UE `/Engine/Generated/`에 해당한다(`ShaderCore.cpp:2490,3081,3096`). 생성 HLSL은 셰이더 맵 키의 include 폐포에 들어간다. 설치 SDK로 내보내는 경로는 후속이다.
 - **레이아웃 서명.** 정규화한 레이아웃(멤버 이름·타입·offset·크기, 자원 종류·순번)의 SHA-256이다. job 키 8항(10절)이다.
+- **`ShaderParameterLayout`(데이터 형식).** 위 레이아웃 표를 C++ 타입과 무관한 데이터 형식으로 정한다: 멤버(이름·타입·offset·크기), 자원(종류·순번, 텍스처·샘플러 짝), 서명. MetaCompiler 생성물은 이 형식의 상수 표를 내고, [머티리얼 시스템](MaterialSystem.ko.md)의 머티리얼 컴파일러는 C++ 구조체 없이 같은 형식의 **동적 layout**을 실행 중 데이터로 낸다(결정 MD3, 요구 MSR4). 워커의 리플렉션 대조(7.2절 5항), 바인딩 지도([렌더 기반](RenderBase.ko.md) 9.3절, 머티리얼 요구 MRB2), GLES 복사 표가 두 출처를 같은 경로 하나로 다룬다. UE도 머티리얼 uniform buffer는 매크로가 아니라 실행 중 layout으로 만든다(`Runtime/Engine/Private/Materials/MaterialUniformExpressions.cpp:524`). 형식 정의는 P7 착수 때 확정하고, 머티리얼 단계 MS2 전이어야 한다.
 - `DrawConstants`는 이 종류로 옮긴다.
 
 완료 기준: MetaCompiler 음성 대조(금지 타입), identity 명세 검증(일반 구조체와 같은 규칙), 7.3절 시험 (a)·(f)를 생성 구조체로 통과.
@@ -683,7 +684,7 @@ Rocks 규칙:
 | 〃 | 4.6절 진단 표(:115) | `IncompatibleCook`은 부분 쿠킹 병합 불가·런타임 프로파일 불일치 | 필요한 셰이더 형식·셰이더가 쿠킹 결과에 없음을 더한다(2절, 12절) |
 | 〃 | 9절(:267–292) | 에셋 중심 키(TypeId·입력 bulk·의존 목록, SCC 식) | N1–N3(5.2절) |
 | 〃 | 10절 TargetProfile(:296)·cookKey(:299)·매니페스트(:307)·결정성(:311) | 그래픽 backend 단일 항목, 기본 프로필 Windows·Android, 매니페스트 v1 | K1–K3(5.2절), 12절 `graphicsBackends`·`shaderFormats`·`MacOS` 프로필. 결정성 규칙은 그대로 셰이더에 적용한다(10절) |
-| ReflectionFoundations | 3절 값 종류, 4절 struct | — | 셰이더 파라미터 종류가 `ROCKS_STRUCT` 경로를 쓰고 셰이더 자원 값 종류를 더한다(13절, 결정 4를 고를 때) |
+| ReflectionFoundations | 3절 값 종류, 4절 struct | — | 셰이더 파라미터 종류가 `ROCKS_STRUCT` 경로를 쓰고 셰이더 자원 값 종류를 더한다(13절, 결정 4) |
 | PlatformLayer | P1 표 "동적 모듈", 모바일 절 | 동적 모듈 구현(P10, "동적 라이브러리" 절), Android는 시험 실행만 | P13 Android 실행 기반, P12 macOS 창(PlatformWindow) |
 | RepositoryLayout | 트리(:14·:29)·:52–56 | Engine에 Shaders·Config 없음, ThirdParty는 Core만 원본(:14 목록도 낡음) | 3절 구조와 8절 루트·`binary`·`headers` 종류 |
 | CompilerDiagnostics | :9·:25·:29·:36 | 생성 파일도 경고 검사, 외부 원본도 같은 경고 프로필로 컴파일, Core 루트만, "이 절 밖의 경고 억제 예외는 없다" | 15절 결정 7의 답에 따라: 두 루트, Rocks가 컴파일하지 않는 미리 빌드된 바이너리(오프라인 도구 빌드 포함) 승인 절과 그 공개 헤더의 경고 0 조건, 셰이더 경고 절(작성자 원문과 SPIRV-Cross가 다시 쓴 중간 원문 모두 경고를 오류로) |
@@ -694,12 +695,12 @@ Rocks 규칙:
 
 ## 15. 결정 필요 사항
 
-남은 결정의 기한(이 결정이 없으면 시작할 수 없는 작업 직전): 결정 7·11은 셰이더 구현 착수(A6 완료) 전, 결정 6은 SH1 전(측정 없이 정하고, 자체 구현의 정합성은 SH1 완료 기준인 S7로 확인한다), 결정 2·3·5는 형식 정의에 들어가므로 SH0 측정 S2·S9 뒤 P6a 전, 결정 4는 P14 전이다. 이 문서의 "확정"은 측정에 기대지 않는 내용의 승인이며, 측정 뒤에 정하는 결정과 그에 걸린 14절 개정은 해당 기한에 한다.
+2026-11-18 결정 4 확정으로 이 절의 결정은 모두 정해졌다. 아래는 각 결정의 기한(이 결정이 없으면 시작할 수 없는 작업 직전) 기록이다: 결정 7·11은 셰이더 구현 착수(A6 완료) 전, 결정 6은 SH1 전(측정 없이 정하고, 자체 구현의 정합성은 SH1 완료 기준인 S7로 확인한다), 결정 2·3·5는 형식 정의에 들어가므로 SH0 측정 S2·S9 뒤 P6a 전, 결정 4는 P14 전이었다. 이 문서의 "확정"은 측정에 기대지 않는 내용의 승인이며, 측정 뒤에 정하는 결정과 그에 걸린 14절 개정은 해당 기한에 한다.
 
 1. **확장자** — **결정됨(2026-11-13): `.rsf`(엔트리)·`.rsh`(include).** UE `.usf`/`.ush`의 역할 분리를 따르고 Rocks 명명(`.rasset`·`.rpkg`·`.rnug`)에 맞춘다. C++·HLSL 공용 헤더는 `.h`다(3절). 고려했던 대안은 `.hlsl`/`.hlsli`였다.
 2. **HLSL 2021 범위** — **결정됨(2026-11-17): 형식 정의 기본값 + 셰이더 타입 선택.** `D3D12_SM6`·`VULKAN_SM5`·`METAL_SM5`는 켜고 `D3D11_SM5`는 끈다. `D3D11_SM5`에서 2021 셰이더는 SPIRV-Cross 경로로 간다. GLES 형식은 UE `OPENGL_ES3_1_ANDROID`(키 없음)처럼 끈다(형식 정의 `language.hlsl2021`). 결정 전 기록: UE는 플랫폼 값 `EnablesHLSL2021ByDefault`(0 끔, 1 Global 셰이더 전부, 2 모든 셰이더, `Runtime/RHI/Public/DataDrivenShaderPlatformInfo.h:119`)에 레이 트레이싱 셰이더 강제(`Runtime/Engine/Private/ShaderCompiler/ShaderCompiler.cpp:3489–3498`)와 타입별 선택을 더한다. PCD3D_SM6·VULKAN_SM5·VULKAN_SM6·VULKAN_SM5_ANDROID·METAL_SM5·METAL_SM6·METAL_SM6_IOS는 1, PCD3D_SM5는 0(키 없음)이다(`Engine/Config/Windows/DataDrivenPlatformInfo.ini:130`, `Engine/Config/VulkanPC/DataDrivenPlatformInfo.ini:131·257`, `Engine/Config/Android/DataDrivenPlatformInfo.ini:128`, `Engine/Config/Mac/DataDrivenPlatformInfo.ini:53·94`, `Engine/Config/IOS/DataDrivenPlatformInfo.ini:106`). 권장: 형식 정의의 기본값 + 셰이더 타입 선택. `D3D11_SM5`에서 2021 셰이더는 SPIRV-Cross 경로를 탄다(`D3DShaderCompiler.cpp:807,873–890`).
 3. **D3D12 셰이더 모델** — **결정됨(2026-11-17): SM 6.6**(UE `PCD3D_SM6`과 같다). Windows 10에서는 Agility SDK(`D3D12Core.dll`)를 `redist` role로 재배포하며, 그에 필요한 런타임 의존 파일 복사는 P6b 또는 SH2에서 한다(9절). 결정 전 기록: 6.6(UE와 같음, `ShaderFormatD3D.cpp:107–110,139–142`) 또는 6.0~6.2 + bindless 프로필 6.6. 6.6은 Windows 10에서 Agility SDK가 Runtime 의존이 된다(9절). SH0에서 개발 기계 GPU·WARP 지원과 Windows 10 요건을 실측한 뒤 정한다(측정 S2). 측정 결과(S2, 2026-11-17): 이 기계(Windows 11 build 26200)의 GTX 1060 3GB와 WARP가 Agility SDK 없이 최대 SM 6.8, resource binding tier 3이다. Windows 10의 OS 런타임 지원은 Windows 10 기계가 없어 미측정이다.
-4. **파라미터 선언** — MetaCompiler 셰이더 파라미터 종류(권장, 13절, 리플렉션 단일 출처·생성 HLSL을 디스크에 둠) 또는 UE 매크로 방식(`SHADER_PARAMETER_*`, `Runtime/RenderCore/Public/ShaderParameterMacros.h`).
+4. **파라미터 선언** — **결정됨(2026-11-18, 권장안): MetaCompiler 셰이더 파라미터 종류(13절).** 사용자 지시 "결정사항들은 권장안대로 하면됨". 리플렉션이 단일 출처이고 생성 HLSL을 디스크에 둔다. 레이아웃 표는 `ShaderParameterLayout` 데이터 형식으로 정해, C++ 구조체 없이 만드는 머티리얼 동적 layout도 같은 형식을 낸다(13절, [머티리얼 시스템](MaterialSystem.ko.md) 결정 MD3·MSR4). 결정 전 기록: MetaCompiler 종류(권장) 또는 UE 매크로 방식(`SHADER_PARAMETER_*`, `Runtime/RenderCore/Public/ShaderParameterMacros.h`). 매크로 방식은 매크로 메타데이터와 머티리얼 동적 layout이 두 형식이 되어 변환층이 필요하다. UE도 머티리얼 uniform buffer는 매크로가 아니라 실행 중 layout으로 만든다(`Runtime/Engine/Private/Materials/MaterialUniformExpressions.cpp:524`).
 5. **형식별 생산 호스트** — **결정됨(2026-11-17): metallib은 Windows에서도 만들 수 있다.** Apple Metal Developer Tools가 있으면 만들고 없으면 `UnsupportedCapability`다. 형식 정의의 생산 호스트 규칙(`producers`의 `systemTools`)으로 둔다. 엔진 컴파일 프로필 `Engine-Windows`에는 Windows가 쓰지도 빌드하지도 않는 `METAL_SM5`를 넣지 않는다(12.1절). 결정 전 기록: 키가 호스트별이므로(10절) DXIL·SPIR-V·ESSL은 각 호스트가 직접 만든다. 한 호스트만 만들 수 있는 형식: DXBC는 Windows. metallib은 macOS(Xcode Metal 도구)를 기준으로 하고, Windows에도 Apple Metal Developer Tools(UE 5.8이 지원, 기대 버전 5.3, `MetalShaderFormat.cpp:724–725,1030–1137`)가 있으면 만들게 할지 정한다(권장: 허용, 형식 정의의 생산 호스트 규칙, 측정 S9). 만들 수 없는 호스트에서는 `UnsupportedCapability`이고, 원격 워커가 생기면 그쪽으로 보낸다.
 6. **전처리기** — **결정됨(2026-11-17): Rocks 자체 구현을 `Developer/ShaderCompiler`에 둔다.** 정합성은 측정 S7로 SH1에서 확인한다. 결정 전 기록: Rocks 자체 구현을 `Developer/ShaderCompiler`에 둔다(권장, UE처럼 메인 프로세스에서 실행. UE 전처리기 stb_preprocess는 Epic 저작권 원본이라 가져올 수 없다, `Developer/ShaderPreprocessor/Private/stb_preprocess/preprocessor.h:1`) 또는 라이선스를 확인한 외부 C 전처리기를 P3 C 원본 규칙으로 들인다. DXC `-P`는 메인 프로세스가 DXC를 열게 되어(9절 규칙 위반) 쓰지 않는다. 자체 구현의 정합성은 측정 S7로 확인한다.
 7. **경고 정책** — **결정됨(2026-11-16): 아래 (1)·(2)의 권장안.** CompilerDiagnostics에 "Rocks 빌드가 컴파일하지 않는 미리 빌드한 바이너리" 승인 절을 더하고(P3 구현 때 14절 CompilerDiagnostics 행대로 개정), 셰이더 컴파일 경고는 작성자 원문과 SPIRV-Cross가 다시 쓴 중간 원문 모두 오류로 한다. 결정 전 기록: CompilerDiagnostics는 "외부 원본도 엔진과 같은 경고 프로필로 컴파일한다"(:25), "생성 파일이라는 이유로 경고 검사를 생략하지 않는다"(:9), "이 절 밖의 경고 억제 예외는 없다"(:36)고 한다.
@@ -789,3 +790,4 @@ SH0 진척(2026-11-17, `feature/shader-tools`, Windows 부분 구현):
   - 6항: OpenGL의 행렬 업로드를 `transpose = GL_TRUE`에서 루트 상수 `vec4` 배열(쿠킹된 ESSL과 같은 방식)로 바꿨다.
   - 8항: 창 `GL_LOWER_LEFT` 규칙이 `GL_UPPER_LEFT` + offscreen 스왑체인 + Y 반전 blit으로 바뀌었다(SH2에서 P11로 앞당김). 앞면은 클립 공간 규약별(`GLES31_PC` `GL_CCW`, `GLES31_ANDROID` `GL_CW`).
   - S5·S12: GLES 미리보기 결과와 ES profile 측정을 더했다.
+- 개정 12(2026-11-18): 결정 4(파라미터 선언)를 권장안 MetaCompiler 방식으로 확정했다(사용자 지시 "결정사항들은 권장안대로 하면됨"). 15절 결정 4와 기한 문장, 서문의 남은 결정, 5.3절 P7 제목, 13절 서두, 14절 ReflectionFoundations 행의 "고를 때" 조건을 정리했다. 13절에 `ShaderParameterLayout` 데이터 형식 요구를 더해 머티리얼 동적 layout(머티리얼 시스템 결정 MD3·MSR4)과 연결했다.
