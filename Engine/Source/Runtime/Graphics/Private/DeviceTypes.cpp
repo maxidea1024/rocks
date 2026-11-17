@@ -18,6 +18,8 @@ const char* BackendName(Backend backend) noexcept {
     switch (backend) {
     case Backend::D3D12:
         return "D3D12";
+    case Backend::D3D11:
+        return "D3D11";
     case Backend::OpenGL:
         return "OpenGL";
     case Backend::Vulkan:
