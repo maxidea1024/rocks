@@ -2,6 +2,7 @@
 
 #include <Core/Memory/SystemAllocator.h>
 #include <Object/ConstructionContext.h>
+#include <Object/ObjectRefMap.h>
 #include <Object/ObjectRegistry.h>
 #include <Object/TypeRegistry.h>
 #include <Task/WorkerScheduler.h>
@@ -680,6 +681,94 @@ void RunClusterModel(uint64 seed, uint32 workers) noexcept {
         }
 
         REQUIRE(types.Shutdown());
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// ---- ObjectRefMap 편집(장부의 map 지점) ----
+
+constexpr TypeId MapNodeType{0x47436c7573744d35ULL, 1};
+
+class MapNode final : public Object {
+public:
+    explicit MapNode(Allocator& allocator) noexcept : values(allocator) {
+    }
+
+    void Trace(TraceVisitor& visitor) const noexcept {
+        values.Trace(visitor);
+    }
+
+    ObjectRefMap<uint32, Object> values;
+};
+
+// 소속 객체의 ObjectRefMap 넣기·교체·지우기·비우기가 장부를 맞춘다(Debug는 Collect마다 장부를 다시
+// 센다). 밖 객체는 map 값으로만 살고, 비우면 회수된다.
+TEST(ObjectGcCluster_MemberMapEditsKeepLedger) {
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterClusterTypes(types));
+        RuntimeTypeOps map = MakeRuntimeTypeOps<MapNode>();
+        map.completeFieldLayout = true;
+        REQUIRE(types.Register(TypeSchema{MapNodeType, 1, {}, {}}, Move(map)));
+        ObjectRegistry objects(allocator, types, Guid{0x4743, 9}, ClusterOptions());
+        const auto access = objects.OwnerAccess();
+        RootRef<Object> root;
+        ObjectHandle holder;
+        ObjectHandle sibling;
+        {
+            ConstructionContext transaction(objects, access);
+            auto made = transaction.Create<ClusterNode>(ClusterNodeType);
+            REQUIRE(made && transaction.SetClusterRoot(made.Value()));
+            auto member = transaction.Create<MapNode>(MapNodeType, made.Value(), "Map");
+            auto other = transaction.Create<ClusterNode>(ClusterNodeType, made.Value(), "Other");
+            REQUIRE(member && other);
+            REQUIRE(transaction.JoinCluster(member.Value(), made.Value()));
+            REQUIRE(transaction.JoinCluster(other.Value(), made.Value()));
+            holder = member.Value();
+            sibling = other.Value();
+            auto committed = transaction.Commit();
+            REQUIRE(committed);
+            root = Move(committed.Value());
+        }
+
+        auto first = objects.NewObject<ClusterNode>(access, PlainNodeType);
+        auto second = objects.NewObject<ClusterNode>(access, PlainNodeType);
+        REQUIRE(first && second);
+        const ObjectHandle firstHandle = first.Value().Handle();
+        const ObjectHandle secondHandle = second.Value().Handle();
+        first.Value().Reset();
+        second.Value().Reset();
+        auto edit = [&](auto&& body) noexcept {
+            auto borrowed = objects.Resolve<MapNode>(access, holder);
+            REQUIRE(borrowed);
+            auto pointer = borrowed.Value().Get();
+            REQUIRE(pointer);
+            body(pointer.Value()->values);
+        };
+        edit([&](ObjectRefMap<uint32, Object>& values) noexcept {
+            REQUIRE(objects.SetMapReference(access, holder, values, 1u, firstHandle));
+            REQUIRE(objects.SetMapReference(access, holder, values, 2u, sibling));
+            REQUIRE(objects.SetMapReference(access, holder, values, 3u, secondHandle));
+            // 같은 키 교체: 밖(second) → 소속(sibling).
+            REQUIRE(objects.SetMapReference(access, holder, values, 3u, sibling));
+        });
+        REQUIRE(objects.Collect(access));
+        CHECK(Exists(objects, firstHandle));
+        CHECK(!Exists(objects, secondHandle));
+        edit([&](ObjectRefMap<uint32, Object>& values) noexcept {
+            REQUIRE(objects.EraseMapReference(access, holder, values, 2u));
+        });
+        REQUIRE(objects.Collect(access));
+        edit([&](ObjectRefMap<uint32, Object>& values) noexcept {
+            REQUIRE(objects.ClearMapReferences(access, holder, values));
+        });
+        REQUIRE(objects.Collect(access));
+        CHECK(!Exists(objects, firstHandle));
+        CHECK(Exists(objects, sibling));
+        root.Reset();
+        REQUIRE(objects.Shutdown(access));
     }
 
     CHECK(allocator.Stats().liveAllocations == 0);

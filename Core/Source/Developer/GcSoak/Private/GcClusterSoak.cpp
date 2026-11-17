@@ -38,9 +38,12 @@ public:
     }
 
     void Trace(TraceVisitor& visitor) const noexcept {
+        visitor.Visit(single);
         items.Trace(visitor);
     }
 
+    // 단일 참조 필드(SetReference — 장부의 단일 간선 지점)다.
+    ObjectRef<Object> single;
     ObjectRefArray<Object> items;
 };
 
@@ -86,6 +89,8 @@ struct Entry {
     uint32 owner = NoIndex;
     uint32 edges[MaxEdges];
     uint32 degree = 0;
+    // 단일 참조 필드의 대상이다(없으면 NoIndex).
+    uint32 single = NoIndex;
     bool clusterRoot = false;
     bool destroyed = false;
     bool discarded = false;
@@ -270,6 +275,66 @@ private:
             --entry.degree;
             ++report_.edgeWrites;
             return;
+        }
+    }
+
+    // 단일 참조 필드를 target(NoIndex면 null)으로 바꾼다(SetReference).
+    void SetSingle(uint32 owner, uint32 target) noexcept {
+        auto borrowed = objects_->Resolve<ClusterSoakNode>(Access(), entries_[owner].handle);
+        if (!borrowed) {
+            ++report_.rejectedWrites;
+            return;
+        }
+
+        auto pointer = borrowed.Value().Get();
+        const ObjectHandle handle = target == NoIndex ? ObjectHandle{} : entries_[target].handle;
+        if (!pointer || !objects_->SetReference(Access(), entries_[owner].handle,
+                                                pointer.Value()->single, handle)) {
+            // cutoff white 대상(Sweeping)만 거부될 수 있다.
+            ++report_.rejectedWrites;
+            return;
+        }
+
+        entries_[owner].single = target;
+        ++report_.edgeWrites;
+    }
+
+    // items의 at번 원소를 target으로 바꾼다(SetReferenceAt — 모델 간선 순서는 배열과 같다).
+    void ReplaceEdge(uint32 owner, uint32 at, uint32 target) noexcept {
+        auto replaced = EditItems(owner, [&](ObjectRefArray<Object>& items) noexcept {
+            return objects_->SetReferenceAt(Access(), entries_[owner].handle, items, at,
+                                            entries_[target].handle);
+        });
+        if (!replaced) {
+            ++report_.rejectedWrites;
+            return;
+        }
+
+        entries_[owner].edges[at] = target;
+        ++report_.edgeWrites;
+    }
+
+    // 단일 필드 쓰기 또는 배열 원소 교체다(소유 간선 — Actor의 Component — 은 건드리지 않는다).
+    void MutateSingle(Role role) noexcept {
+        const uint32 owner = PickRole(role);
+        const uint32 target = Pick();
+        if (owner == NoIndex || target == NoIndex || !Usable(target)) {
+            return;
+        }
+
+        if (rng_.Below(2) == 0) {
+            SetSingle(owner, rng_.Below(4) == 0 ? NoIndex : target);
+            return;
+        }
+
+        Entry& entry = entries_[owner];
+        if (entry.degree == 0) {
+            return;
+        }
+
+        const uint32 at = rng_.Below(entry.degree);
+        if (entries_[entry.edges[at]].role != Role::Component) {
+            ReplaceEdge(owner, at, target);
         }
     }
 
@@ -733,8 +798,11 @@ private:
     }
 
     void Mutate() noexcept {
-        const uint32 roll = rng_.Below(18);
-        if (options_.packages) {
+        const uint32 roll = rng_.Below(20);
+        if (roll >= 18) {
+            MutateSingle(options_.packages ? Role::Inner
+                                           : (rng_.Below(2) == 0 ? Role::Actor : Role::Normal));
+        } else if (options_.packages) {
             MutatePackages(roll);
         } else {
             MutateWorld(roll);
@@ -768,6 +836,7 @@ private:
             (void)stack_.TryPopBack();
             const Entry& entry = entries_[index];
             visit(entry.outer);
+            visit(entry.single);
             for (uint32 edge = 0; edge < entry.degree; ++edge) {
                 visit(entry.edges[edge]);
             }
@@ -807,6 +876,7 @@ private:
 
             entry.dead = true;
             entry.degree = 0;
+            entry.single = NoIndex;
             entry.held.Reset();
             ++report_.reclaimed;
             if (entry.clusterRoot) {
