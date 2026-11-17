@@ -456,6 +456,13 @@ void ObjectRegistry::ValidateStagedEdge(void* pointer, ObjectHandle handle) noex
             return;
         }
 
+        // 영구 창의 staged 간선(outer 포함)은 같은 트랜잭션 객체나 영구 객체만 가리킨다(13.7절).
+        if (state.permanent && slot->state != SlotState::Reserved &&
+            !state.registry->IsPermanentLocked(slot->index)) {
+            state.error = ErrorCode::Unsupported;
+            return;
+        }
+
         if (state.observe) {
             package = state.registry->HandleOf(*slot->outermost);
         }
@@ -493,11 +500,14 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
 
     uint32 newClusters = 0;
     const bool packageClusters = clustersEnabled_ && options_.policy.packageNativeType != nullptr;
+    bool permanent = false;
     {
         platform::LockGuard lock(gate_);
         if (auto open = OpenState(closed_, processing_); !open) {
             return open;
         }
+
+        permanent = permanentOpen_;
 
         for (usize index = 0; index < staged.Size(); ++index) {
             Slot* slot = FindSlot(staged[index]);
@@ -523,7 +533,18 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
 
         // 클러스터 가입 지정(DesignateCluster)을 다시 본다: 기존 루트가 그 사이 해체·파괴됐으면
         // StaleHandle이다. 새 루트 수만큼 레코드를 잠금 밖에서 확보한다.
-        if (clustersEnabled_) {
+        // 영구 창: 모든 객체가 완전한 필드 배치여야 하고 영구 클러스터에 들어간다(13.7절).
+        if (permanent) {
+            for (usize index = 0; index < staged.Size(); ++index) {
+                if (!FindSlot(staged[index])->type.Ops().completeFieldLayout) {
+                    return Result<void>::Failure(ErrorCode::Unsupported);
+                }
+            }
+
+            newClusters = permanentCluster_ == NoSlot ? 1u : 0u;
+        }
+
+        if (clustersEnabled_ && !permanent) {
             for (usize index = 0; index < staged.Size(); ++index) {
                 ClusterCell& cell = CellOf(staged[index].slot);
                 // 패키지 정책: 패키지 객체는 새 클러스터 루트이고 나머지는 outermost 패키지의
@@ -557,6 +578,7 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
     MarkState state{this, nullptr, transaction};
     state.tally = &tally;
     state.delta = 1;
+    state.permanent = permanent;
     // 가입할 소유자의 Trace 간선(소유자, 대상) 쌍이다(outer는 공개 잠금 안에서 hot 레코드로 센다).
     Array<uint32> ledger(allocator_);
     if (newClusters != 0) {
@@ -575,7 +597,7 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
         }
 
         // 처리 표시 아래라 가입 지정 칸이 바뀌지 않는다.
-        if (clustersEnabled_ && CellOf(slot->index).state == ClusterPending) {
+        if (permanent || (clustersEnabled_ && CellOf(slot->index).state == ClusterPending)) {
             state.ledger = &ledger;
             state.ledgerOwner = slot->index;
         }
@@ -620,6 +642,17 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
         // 클러스터 가입(13.4절): 새 루트의 클러스터를 먼저 만들고 가입 객체를 넣은 뒤, 소속을 모두
         // 정한 상태에서 staged 간선과 outer를 센다. 공개 전 객체는 같은 트랜잭션의 staged 간선만
         // 받으므로 가입 때문에 분류가 바뀌는 기존 간선이 없다.
+        if (permanent) {
+            if (permanentCluster_ == NoSlot) {
+                permanentCluster_ = CreateClusterLocked(NoSlot, false);
+                clusters_[permanentCluster_].permanent = true;
+            }
+
+            for (usize index = 0; index < staged.Size(); ++index) {
+                JoinClusterLocked(permanentCluster_, staged[index].slot);
+            }
+        }
+
         if (clustersEnabled_) {
             for (usize index = 0; index < staged.Size(); ++index) {
                 const uint32 slot = staged[index].slot;

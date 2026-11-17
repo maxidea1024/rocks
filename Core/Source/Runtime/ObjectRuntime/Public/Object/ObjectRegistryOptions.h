@@ -76,6 +76,14 @@ struct RegistryOptions {
     // 루트이고 outermost가 그 패키지인 객체가 생성 Commit 때 가입하며, 부분 트리 Discard가 이탈,
     // 패키지 Discard가 해체다. clusters와 관계없이 켜진다. 끄는 것은 측정 비교용이다.
     bool packageClusters = true;
+    // 영구 창을 연 채 Registry를 만든다(Docs/Design/GarbageCollectionScale.ko.md 13.7절). 켜면
+    // ObjectRegistry::ClosePermanentRegion 전까지 Commit되는 객체가 모두 영구 영역(언제나 표식된
+    // 특수 클러스터)에 들어가 표식·sweep 비용이 없다. 영구 객체는 완전한 필드 배치 타입이어야 하고
+    // (아니면 Commit이 Unsupported), 강한 간선 대상(outer 포함)은 영구 객체뿐이며(어기는 쓰기·
+    // Commit은 Unsupported), RequestDestroy·Discard도 Unsupported다. Shutdown 때만 해체한다.
+    // 패키지 정책과 함께 켜면 Registry 생성이 Fatal이다(자식 고리가 간선이라 창을 닫은 뒤 만든
+    // 자식이 영구 → 일반 간선이 된다). Engine Registry가 서브시스템 초기화 동안만 연다.
+    bool permanentRegion = false;
     // Debug에서 Begin·Collect마다 클러스터 장부(소속·inCount·outCount·경계·detached 목록)를
     // 처음부터 다시 계산해 비교하고, 어긋나면 Fatal로 멈춘다(비용이 커서 soak·시험만 켠다).
     // Release·Development에서는 무시한다.

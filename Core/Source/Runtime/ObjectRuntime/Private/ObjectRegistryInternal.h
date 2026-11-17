@@ -157,6 +157,8 @@ struct ObjectRegistry::MarkState {
     // 간선을 (소유자, 대상) 슬롯 쌍으로 모은다(Commit). 이탈 trace는 ledgerOwner의 몫을 뺀다.
     Array<uint32>* ledger = nullptr;
     uint32 ledgerOwner = registry_detail::NoSlot;
+    // 영구 창의 Commit 검증이다(staged 간선 대상은 같은 트랜잭션 객체나 영구 객체만).
+    bool permanent = false;
     // 관찰자 쌍 집계(Commit 검증·Discard·다중 간선 지점): tally가 있고 observe면 지금 trace하는
     // 소유자의 패키지 ownerPackage에서 다른 패키지로 가는 간선을 delta로 합친다.
     EdgeTally* tally = nullptr;

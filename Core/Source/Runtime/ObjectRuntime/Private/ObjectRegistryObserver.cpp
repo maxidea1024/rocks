@@ -257,6 +257,11 @@ Result<void> ObjectRegistry::Discard(const ObjectAccessContext& access,
                 return Result<void>::Failure(ErrorCode::Busy);
             }
 
+            // 영구 객체는 Shutdown 때만 해체한다(13.7절).
+            if (IsPermanentLocked(node->index)) {
+                return Result<void>::Failure(ErrorCode::Unsupported);
+            }
+
             ++count;
         }
 

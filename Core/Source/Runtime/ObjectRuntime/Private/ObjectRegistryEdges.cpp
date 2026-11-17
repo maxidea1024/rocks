@@ -150,6 +150,13 @@ Result<void> ObjectRegistry::SetEdge(const ObjectAccessContext& access, ObjectHa
                 if (!targetChecked) {
                     return targetChecked;
                 }
+
+                if (transaction == 0) {
+                    targetChecked = CheckPermanentEdgeLocked(*FindSlot(owner), target);
+                    if (!targetChecked) {
+                        return targetChecked;
+                    }
+                }
             }
 
             // staged 쓰기는 기록하지 않는다(Commit이 한꺼번에 보고한다).

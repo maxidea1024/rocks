@@ -558,6 +558,13 @@ public:
     Result<void> CancelCollection(const ObjectAccessContext&) noexcept;
     GcPhase CollectionPhase() const noexcept;
     Result<uint32> DrainRetired(const ObjectAccessContext&) noexcept;
+    // 영구 창(RegistryOptions::permanentRegion)을 닫는다. 이 뒤에 Commit하는 객체는 일반 객체이고
+    // 다시 열 수 없다(이미 닫았거나 창 없이 만든 Registry는 성공 — 무동작). GC·callback 처리 중에는
+    // Busy(Commit 검증과 공개 사이에 창 상태가 바뀌지 않게), 종료 시작 뒤에는 ShuttingDown이다.
+    //
+    // 사용 예(Engine이 서브시스템 초기화 뒤):
+    //   if (auto closed = objects.ClosePermanentRegion(access); !closed) { return closed; }
+    Result<void> ClosePermanentRegion(const ObjectAccessContext&) noexcept;
     // 신규 객체/루트/접근권을 닫은 후 회수를 시도한다. Busy면 보유권을 반환하고 재시도한다.
     // 접근 검증/재진입 거부는 닫기 전에 반환한다. 닫은 뒤의 회수 실패는 닫힌 상태를 유지한다.
     // 보유권이 남은 동안 Registry를 먼저 파괴해서는 안 된다.
@@ -700,6 +707,10 @@ private:
     void DissolveClusterLocked(uint32 id) noexcept;
     // 잠금 보유: 표식되지 않은 클러스터를 모두 해체한다(cutoff·Collect sweep 직전).
     void DissolveUnmarkedClustersLocked() noexcept;
+    // 잠금 보유: slot이 영구 영역 소속인지다.
+    bool IsPermanentLocked(uint32 slot) const noexcept;
+    // 잠금 보유: 영구 소속 owner의 새 간선 target이 영구 객체가 아니면 Unsupported다(13.7절).
+    Result<void> CheckPermanentEdgeLocked(const Slot& owner, ObjectHandle target) const noexcept;
     // 잠금 보유: 표식 epoch를 하나 올린다(Begin·Collect — 한 바퀴 돌면 레코드 epoch를 비운다).
     void AdvanceGcEpochLocked() noexcept;
     // 잠금 보유: 모든 클러스터를 해체한다(Shutdown).
@@ -1051,6 +1062,9 @@ private:
     uint32 clusterFreeCount_ = 0;
     uint32 clusterDissolved_ = NumericLimits<uint32>::Max();
     uint32 gcEpoch_ = 0;
+    // 영구 영역(13.7절): 창이 열렸는지와 영구 클러스터 번호(첫 영구 Commit에서 만든다)다.
+    bool permanentOpen_ = false;
+    uint32 permanentCluster_ = NumericLimits<uint32>::Max();
     usize gcCursor_ = 0;
     GcPhase gcPhase_ = GcPhase::Idle;
     GcReport cycleGc_;

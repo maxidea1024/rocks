@@ -802,7 +802,98 @@ void RunPackageClusters(uint32 mode) noexcept {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
+// ---- 영구 영역(P4d) ----
+
+// 영구 창의 객체는 루트 없이 살고, 창을 닫은 뒤의 영구 → 일반 간선·파괴 요청·Discard는
+// Unsupported다. mode는 CollectBy와 같다.
+void RunPermanentRegion(uint32 mode) noexcept {
+    SystemAllocator allocator;
+    {
+        WorkerScheduler scheduler(allocator);
+        REQUIRE(scheduler.Start({2, 256, 16}));
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterClusterTypes(types));
+        {
+            RegistryOptions options;
+            options.permanentRegion = true;
+            options.verifyClusterLedger = true;
+            ObjectRegistry objects(allocator, types, Guid{0x4746, mode}, options);
+            const auto access = objects.OwnerAccess();
+            // 창 안: 완전한 필드 배치가 아닌 타입은 Commit이 거부한다.
+            {
+                ConstructionContext transaction(objects, access);
+                REQUIRE(transaction.Create<ClusterNode>(PlainNodeType));
+                CHECK(transaction.Commit().Error() == ErrorCode::Unsupported);
+            }
+
+            ObjectHandle permanent[3];
+            for (ObjectHandle& handle : permanent) {
+                auto made = objects.NewObject<ClusterNode>(access, ClusterNodeType);
+                REQUIRE(made);
+                handle = made.Value().Handle();
+            }
+
+            {
+                auto inner =
+                    objects.NewObject<ClusterNode>(access, ClusterNodeType, permanent[0], "Inner");
+                REQUIRE(inner);
+            }
+
+            // 영구 → 영구 간선은 된다. 가입 지정은 창 안에서 받지 않는다.
+            REQUIRE(Link(objects, permanent[0], permanent[1]));
+            {
+                ConstructionContext transaction(objects, access);
+                auto node = transaction.Create<ClusterNode>(ClusterNodeType);
+                REQUIRE(node);
+                CHECK(transaction.SetClusterRoot(node.Value()).Error() == ErrorCode::Unsupported);
+            }
+
+            CHECK(objects.Stats().clusters == 1);
+            CHECK(objects.Stats().clusterMembers == 4);
+            REQUIRE(objects.ClosePermanentRegion(access));
+            REQUIRE(objects.ClosePermanentRegion(access));
+            auto normal = objects.NewObject<ClusterNode>(access, ClusterNodeType);
+            REQUIRE(normal);
+            const ObjectHandle normalHandle = normal.Value().Handle();
+            CHECK(objects.Stats().clusterMembers == 4);
+            // 영구 → 일반은 거부, 일반 → 영구는 된다.
+            CHECK(!Link(objects, permanent[2], normalHandle));
+            REQUIRE(Link(objects, normalHandle, permanent[2]));
+            CHECK(objects.RequestDestroy(access, permanent[1]).Error() == ErrorCode::Unsupported);
+            CHECK(objects.Discard(access, permanent[0]).Error() == ErrorCode::Unsupported);
+            normal.Value().Reset();
+            CollectBy(objects, mode, scheduler);
+            CHECK(!Exists(objects, normalHandle));
+            for (ObjectHandle handle : permanent) {
+                CHECK(Exists(objects, handle));
+            }
+
+            CollectBy(objects, mode, scheduler);
+            CHECK(objects.Stats().liveObjects == 4);
+            // 종료가 영구 영역을 해체하고 회수한다.
+            REQUIRE(objects.Shutdown(access));
+        }
+
+        REQUIRE(scheduler.Shutdown());
+        REQUIRE(types.Shutdown());
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
 } // namespace
+
+TEST(ObjectGcCluster_PermanentRegionCollect) {
+    RunPermanentRegion(0);
+}
+
+TEST(ObjectGcCluster_PermanentRegionIncremental) {
+    RunPermanentRegion(1);
+}
+
+TEST(ObjectGcCluster_PermanentRegionParallel) {
+    RunPermanentRegion(2);
+}
 
 TEST(ObjectGcCluster_PackageClustersCollect) {
     RunPackageClusters(0);

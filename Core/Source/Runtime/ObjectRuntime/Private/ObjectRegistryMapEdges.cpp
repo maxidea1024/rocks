@@ -54,6 +54,10 @@ Result<void> ObjectRegistry::SetMapEdge(const ObjectAccessContext& access, Objec
             revision = edit.Revision();
             if (!target.IsNull()) {
                 auto targetChecked = CheckTargetLocked(target, 0, nativeType);
+                if (targetChecked) {
+                    targetChecked = CheckPermanentEdgeLocked(*FindSlot(owner), target);
+                }
+
                 if (!targetChecked) {
                     return targetChecked;
                 }

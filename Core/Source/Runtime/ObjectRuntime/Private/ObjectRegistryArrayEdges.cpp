@@ -40,7 +40,16 @@ Result<void> ObjectRegistry::InsertArrayEdge(const ObjectAccessContext& access, 
         return CheckContainerOwnerLocked(owner, &storage, sizeof(storage), 0, false);
     };
     auto targetLocked = [&]() noexcept -> Result<void> {
-        return target.IsNull() ? Result<void>::Success() : CheckTargetLocked(target, 0, nativeType);
+        if (target.IsNull()) {
+            return Result<void>::Success();
+        }
+
+        auto checked = CheckTargetLocked(target, 0, nativeType);
+        if (!checked) {
+            return checked;
+        }
+
+        return CheckPermanentEdgeLocked(*FindSlot(owner), target);
     };
     // position에 target을 넣어 게시한다(잠금 보유, 검증 뒤). buffer는 size + 1을 담는 버퍼(기존
     // 또는 새 것)이고, 새 버퍼로 바꾸면 잠금 밖에서 반환할 옛 버퍼를 돌려준다. shade 실패면
@@ -229,6 +238,10 @@ Result<void> ObjectRegistry::ReplaceArrayEdge(const ObjectAccessContext& access,
 
             if (!target.IsNull()) {
                 auto targetChecked = CheckTargetLocked(target, 0, nativeType);
+                if (targetChecked) {
+                    targetChecked = CheckPermanentEdgeLocked(*FindSlot(owner), target);
+                }
+
                 if (!targetChecked) {
                     return targetChecked;
                 }

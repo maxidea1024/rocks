@@ -22,8 +22,13 @@ ObjectRegistry::ObjectRegistry(Allocator& allocator, TypeRegistry& types, Contex
     : allocator_(allocator), types_(types), context_(context), options_(options),
       domain_(detail::NextRegistryDomain()), ownerThread_(platform::CurrentThreadId()),
       gcWork_(allocator), gcShade_(allocator),
-      clustersEnabled_(options.clusters ||
-                       (options.policy.packageNativeType != nullptr && options.packageClusters)) {
+      clustersEnabled_(options.clusters || options.permanentRegion ||
+                       (options.policy.packageNativeType != nullptr && options.packageClusters)),
+      permanentOpen_(options.permanentRegion) {
+    if (options_.permanentRegion && options_.policy.packageNativeType != nullptr) {
+        platform::Fatal("A package-policy ObjectRegistry cannot open a permanent region");
+    }
+
     // 클러스터 장부 칸·작업 큐 항목이 클러스터 번호와 표지 비트를 같은 32비트에 담는다.
     if (clustersEnabled_ && options_.maxSlots > RegistryOptions::ClusterSlotLimit) {
         platform::Fatal("A cluster-enabled ObjectRegistry allows at most ClusterSlotLimit slots");
@@ -456,6 +461,11 @@ Result<void> ObjectRegistry::RequestDestroyLocked(ObjectHandle handle, const Obj
     auto live = CheckLive(slot, nullptr);
     if (!live) {
         return live;
+    }
+
+    // 영구 객체는 Shutdown 때만 해체한다(13.7절).
+    if (IsPermanentLocked(slot->index)) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
     slot->SetState(tally_, SlotState::DestroyRequested);

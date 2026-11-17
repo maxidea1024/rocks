@@ -16,6 +16,14 @@ constexpr uint32 StepClient = 5;
 // World 실행 문맥 ID의 상위 값이다. 엔진 Registry 문맥(EngineConfig::context)과 겹치지 않는다.
 constexpr uint64 WorldContextHigh = 0x524f434b53574f52ull;
 
+// 엔진 Registry는 서브시스템 초기화 동안 영구 창을 연다(Docs/Design/GarbageCollectionScale.ko.md
+// 13.7절).
+RegistryOptions EngineRegistryOptions() noexcept {
+    RegistryOptions options;
+    options.permanentRegion = true;
+    return options;
+}
+
 } // namespace
 
 const char* EngineStateName(EngineState state) noexcept {
@@ -101,8 +109,10 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
 
     initializedSteps_ = StepTypesRegistered;
 
-    auto objects =
-        UniquePtr<ObjectRegistry>::TryMake(allocator_, allocator_, *types_, config_.context);
+    // 서브시스템 초기화 동안 만든 객체는 영구 영역에 둔다(GC 표식·sweep 비용 없음 — Docs/Design/
+    // GarbageCollectionScale.ko.md 13.7절). 초기화 뒤 닫는다.
+    auto objects = UniquePtr<ObjectRegistry>::TryMake(allocator_, allocator_, *types_,
+                                                      config_.context, EngineRegistryOptions());
     if (!objects) {
         return fail(objects.Error());
     }
@@ -116,6 +126,8 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
         if (!subsystems) {
             return fail(subsystems.Error());
         }
+
+        (void)objects_->ClosePermanentRegion(objects_->OwnerAccess());
     }
 
     initializedSteps_ = StepSubsystems;

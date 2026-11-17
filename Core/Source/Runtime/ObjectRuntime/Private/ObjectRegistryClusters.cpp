@@ -287,6 +287,36 @@ void ObjectRegistry::DissolveClusterLocked(uint32 id) noexcept {
     }
 }
 
+bool ObjectRegistry::IsPermanentLocked(uint32 slot) const noexcept {
+    return permanentCluster_ != NoSlot && CellOf(slot).state == (ClusterMember | permanentCluster_);
+}
+
+Result<void> ObjectRegistry::CheckPermanentEdgeLocked(const Slot& owner,
+                                                      ObjectHandle target) const noexcept {
+    // 비교 하나다(Release에서도 거부한다 — 영구 객체는 trace하지 않으므로 일반 대상을 살리지
+    // 못한다).
+    if (target.IsNull() || !IsPermanentLocked(owner.index) || IsPermanentLocked(target.slot)) {
+        return Result<void>::Success();
+    }
+
+    return Result<void>::Failure(ErrorCode::Unsupported);
+}
+
+Result<void> ObjectRegistry::ClosePermanentRegion(const ObjectAccessContext& access) noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return valid;
+    }
+
+    platform::LockGuard lock(gate_);
+    if (auto open = OpenState(closed_, processing_); !open) {
+        return open;
+    }
+
+    permanentOpen_ = false;
+    return Result<void>::Success();
+}
+
 void ObjectRegistry::AdvanceGcEpochLocked() noexcept {
     if (++gcEpoch_ != 0) {
         return;
@@ -504,8 +534,9 @@ Result<void> ObjectRegistry::DesignateCluster(const ObjectAccessContext& access,
         return open;
     }
 
-    // 패키지 정책 Registry는 패키지 클러스터를 스스로 만든다(13.3절).
-    if (!clustersEnabled_ || options_.policy.packageNativeType != nullptr) {
+    // 패키지 정책 Registry는 패키지 클러스터를 스스로 만들고, 영구 창 안의 객체는 모두 영구다
+    // (13.3절).
+    if (!clustersEnabled_ || options_.policy.packageNativeType != nullptr || permanentOpen_) {
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
