@@ -492,6 +492,7 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
     }
 
     uint32 newClusters = 0;
+    const bool packageClusters = clustersEnabled_ && options_.policy.packageNativeType != nullptr;
     {
         platform::LockGuard lock(gate_);
         if (auto open = OpenState(closed_, processing_); !open) {
@@ -524,7 +525,15 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
         // StaleHandle이다. 새 루트 수만큼 레코드를 잠금 밖에서 확보한다.
         if (clustersEnabled_) {
             for (usize index = 0; index < staged.Size(); ++index) {
-                const ClusterCell& cell = CellOf(staged[index].slot);
+                ClusterCell& cell = CellOf(staged[index].slot);
+                // 패키지 정책: 패키지 객체는 새 클러스터 루트이고 나머지는 outermost 패키지의
+                // 클러스터에 가입한다(13.3절 — 모든 객체가 완전한 필드 배치다).
+                if (packageClusters && cell.state == 0) {
+                    const Slot* slot = FindSlot(staged[index]);
+                    cell.state = ClusterPending;
+                    cell.inCount = slot->outer.IsNull() ? NoSlot : slot->outermost->index;
+                }
+
                 if (cell.state != ClusterPending) {
                     continue;
                 }
@@ -616,7 +625,8 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
                 const uint32 slot = staged[index].slot;
                 const ClusterCell& cell = CellOf(slot);
                 if (cell.state == ClusterPending && cell.inCount == NoSlot) {
-                    (void)CreateClusterLocked(slot, true);
+                    // 패키지 클러스터는 고리가 소유라 소속 불변식 검증 대상이 아니다(13.8절).
+                    (void)CreateClusterLocked(slot, !packageClusters);
                 }
             }
 

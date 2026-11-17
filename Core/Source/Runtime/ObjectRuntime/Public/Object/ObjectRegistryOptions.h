@@ -72,6 +72,10 @@ struct RegistryOptions {
     // 객체가 모두 살고(루트 → 소속 암묵 강한 간선), 표식은 소속 사이 간선을 따라가지 않는다. 켜면
     // maxSlots는 ClusterSlotLimit 이하여야 한다(아니면 Registry 생성이 Fatal).
     bool clusters = false;
+    // 패키지 정책 Registry에서 패키지마다 클러스터를 자동으로 만든다(기본 — 13.3절). 패키지 객체가
+    // 루트이고 outermost가 그 패키지인 객체가 생성 Commit 때 가입하며, 부분 트리 Discard가 이탈,
+    // 패키지 Discard가 해체다. clusters와 관계없이 켜진다. 끄는 것은 측정 비교용이다.
+    bool packageClusters = true;
     // Debug에서 Begin·Collect마다 클러스터 장부(소속·inCount·outCount·경계·detached 목록)를
     // 처음부터 다시 계산해 비교하고, 어긋나면 Fatal로 멈춘다(비용이 커서 soak·시험만 켠다).
     // Release·Development에서는 무시한다.

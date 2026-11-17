@@ -967,10 +967,10 @@ private:
     void ApplyTallyLocked(const EdgeTally&, ReferenceChangeCause, uint64) noexcept;
     // 잠금 밖·처리 표시 아래: tally의 새 키 공간을 관찰자에 예약한다(모자랄 때만).
     Result<void> ReserveTally(const EdgeTally&, ReferenceChangeCause, uint64) noexcept;
-    // 잠금 밖·처리 표시 아래: StructRefArray 원소 블록들을 등록 struct trace로 훑어 (ownerPackage,
-    // 대상 패키지, -1)을 tally에 합친다. 원소 struct 조회 실패는 Unsupported다.
-    Result<void> TallyStructBlocks(const detail::StructElementOps&, void* const* blocks,
-                                   uint32 count, ObjectHandle ownerPackage, EdgeTally&) noexcept;
+    // 잠금 밖·처리 표시 아래: 떼어 낼 간선 handles의 (ownerPackage, 대상 패키지, -1)을 tally에
+    // 합친다.
+    Result<void> TallyHandles(const ObjectHandle* handles, usize count, ObjectHandle ownerPackage,
+                              EdgeTally&) noexcept;
     // 잠금 밖·처리 표시 아래: StructRefArray 원소 블록들을 등록 struct trace로 훑어 null이 아닌
     // 간선을 out에 모은다(클러스터 장부). 원소 struct 조회 실패는 Unsupported다.
     Result<void> CollectStructEdges(const detail::StructElementOps&, void* const* blocks,

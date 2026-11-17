@@ -201,19 +201,18 @@ Result<void> ObjectRegistry::RemoveStructElement(const ObjectAccessContext& acce
         EdgeTally tally(allocator_);
         Array<ObjectHandle> removed(allocator_);
         void* const target = storage.blocks[index];
+        if (auto collected = CollectStructEdges(ops, &target, 1, removed); !collected) {
+            return EndProcessing(Move(collected));
+        }
+
         if (observe) {
-            if (auto tallied = TallyStructBlocks(ops, &target, 1, package, tally); !tallied) {
+            if (auto tallied = TallyHandles(removed.Data(), removed.Size(), package, tally);
+                !tallied) {
                 return EndProcessing(Move(tallied));
             }
 
             if (auto reserved = ReserveTally(tally, ReferenceChangeCause::Edit, 0); !reserved) {
                 return EndProcessing(Move(reserved));
-            }
-        }
-
-        if (member) {
-            if (auto collected = CollectStructEdges(ops, &target, 1, removed); !collected) {
-                return EndProcessing(Move(collected));
             }
         }
 
@@ -286,21 +285,19 @@ Result<void> ObjectRegistry::ClearStructElements(const ObjectAccessContext& acce
     if (observe || member) {
         EdgeTally tally(allocator_);
         Array<ObjectHandle> removed(allocator_);
+        if (auto collected = CollectStructEdges(ops, storage.blocks, storage.size, removed);
+            !collected) {
+            return EndProcessing(Move(collected));
+        }
+
         if (observe) {
-            if (auto tallied = TallyStructBlocks(ops, storage.blocks, storage.size, package, tally);
+            if (auto tallied = TallyHandles(removed.Data(), removed.Size(), package, tally);
                 !tallied) {
                 return EndProcessing(Move(tallied));
             }
 
             if (auto reserved = ReserveTally(tally, ReferenceChangeCause::Edit, 0); !reserved) {
                 return EndProcessing(Move(reserved));
-            }
-        }
-
-        if (member) {
-            if (auto collected = CollectStructEdges(ops, storage.blocks, storage.size, removed);
-                !collected) {
-                return EndProcessing(Move(collected));
             }
         }
 

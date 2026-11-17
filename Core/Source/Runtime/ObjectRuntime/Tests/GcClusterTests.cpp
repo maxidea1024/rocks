@@ -685,7 +685,136 @@ void RunClusterModel(uint64 seed, uint32 workers) noexcept {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
+// ---- 패키지 클러스터(P4c) ----
+
+constexpr TypeId PackageNodeType{0x47436c7573745034ULL, 1};
+
+class PackageNode final : public Object {
+public:
+    explicit PackageNode(Allocator& allocator) noexcept : items(allocator) {
+    }
+
+    void Trace(TraceVisitor& visitor) const noexcept {
+        items.Trace(visitor);
+    }
+
+    ObjectRefArray<Object> items;
+};
+
+bool RegisterPackageTypes(TypeRegistry& types) noexcept {
+    RuntimeTypeOps package = MakeRuntimeTypeOps<PackageNode>();
+    package.parallelTraceSafe = true;
+    package.completeFieldLayout = true;
+    return RegisterClusterTypes(types) &&
+           types.Register(TypeSchema{PackageNodeType, 1, {}, {}}, Move(package));
+}
+
+RegistryOptions PackageClusterOptions() noexcept {
+    RegistryOptions options;
+    options.policy.packageNativeType = NativeTypeKey<PackageNode>();
+    options.verifyClusterLedger = true;
+    options.assertRetiredWithoutDiscard = false;
+    return options;
+}
+
+// mode 0: Collect, 1: 증분 직렬(객체 3개씩), 2: 증분 병렬.
+void CollectBy(ObjectRegistry& objects, uint32 mode, WorkerScheduler& scheduler) noexcept {
+    if (mode == 0) {
+        REQUIRE(objects.Collect(objects.OwnerAccess()));
+        return;
+    }
+
+    REQUIRE(objects.BeginCollection(objects.OwnerAccess()));
+    while (objects.CollectionPhase() != GcPhase::Idle) {
+        REQUIRE(objects.StepCollection(objects.OwnerAccess(), GcBudget{3, 0},
+                                       mode == 2 ? &scheduler : nullptr));
+    }
+}
+
+void RunPackageClusters(uint32 mode) noexcept {
+    SystemAllocator allocator;
+    {
+        WorkerScheduler scheduler(allocator);
+        REQUIRE(scheduler.Start({2, 256, 16}));
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterPackageTypes(types));
+        {
+            ObjectRegistry objects(allocator, types, Guid{0x4745, mode}, PackageClusterOptions());
+            const auto access = objects.OwnerAccess();
+            auto first = objects.NewObject<PackageNode>(access, PackageNodeType);
+            auto second = objects.NewObject<PackageNode>(access, PackageNodeType);
+            REQUIRE(first && second);
+            const ObjectHandle p = first.Value().Handle();
+            const ObjectHandle q = second.Value().Handle();
+            auto a = objects.NewObject<ClusterNode>(access, ClusterNodeType, p, "A");
+            REQUIRE(a);
+            auto b =
+                objects.NewObject<ClusterNode>(access, ClusterNodeType, a.Value().Handle(), "B");
+            auto c = objects.NewObject<ClusterNode>(access, ClusterNodeType, p, "C");
+            auto x = objects.NewObject<ClusterNode>(access, ClusterNodeType, q, "X");
+            REQUIRE(b && c && x);
+            const ObjectHandle ah = a.Value().Handle();
+            const ObjectHandle bh = b.Value().Handle();
+            const ObjectHandle ch = c.Value().Handle();
+            const ObjectHandle xh = x.Value().Handle();
+            a.Value().Reset();
+            b.Value().Reset();
+            c.Value().Reset();
+            x.Value().Reset();
+            CHECK(objects.Stats().clusters == 2);
+            CHECK(objects.Stats().clusterMembers == 6);
+            // 패키지 사이 간선(경계)과 같은 패키지 안 간선.
+            REQUIRE(Link(objects, ah, xh));
+            REQUIRE(Link(objects, ch, ah));
+            CollectBy(objects, mode, scheduler);
+            CHECK(Exists(objects, bh));
+            CHECK(Exists(objects, xh));
+            // 부분 트리 Discard(A·B): 이탈한다. C가 A를 가리키므로 A는 detached로 산다.
+            REQUIRE(objects.Discard(access, ah));
+            CHECK(objects.Stats().clusterMembers == 4);
+            CollectBy(objects, mode, scheduler);
+            CHECK(Exists(objects, ah));
+            CHECK(!Exists(objects, bh));
+            REQUIRE(Unlink(objects, ch, ah));
+            CollectBy(objects, mode, scheduler);
+            CHECK(!Exists(objects, ah));
+            // 패키지 Discard는 해체다. 루트를 놓으면 회수된다.
+            REQUIRE(objects.Discard(access, p));
+            CHECK(objects.Stats().clusters == 1);
+            first.Value().Reset();
+            CollectBy(objects, mode, scheduler);
+            CHECK(!Exists(objects, ch));
+            CHECK(!Exists(objects, p));
+            CHECK(objects.Stats().retiredWithoutDiscard == 0);
+            // Discard 없이 루트를 놓은 버그 경로: 표식되지 않은 클러스터를 해체하고 센다.
+            second.Value().Reset();
+            CollectBy(objects, mode, scheduler);
+            CHECK(!Exists(objects, xh));
+            CHECK(objects.Stats().retiredWithoutDiscard == 2);
+            CHECK(objects.Stats().clusters == 0);
+            REQUIRE(objects.Shutdown(access));
+        }
+
+        REQUIRE(scheduler.Shutdown());
+        REQUIRE(types.Shutdown());
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
 } // namespace
+
+TEST(ObjectGcCluster_PackageClustersCollect) {
+    RunPackageClusters(0);
+}
+
+TEST(ObjectGcCluster_PackageClustersIncremental) {
+    RunPackageClusters(1);
+}
+
+TEST(ObjectGcCluster_PackageClustersParallel) {
+    RunPackageClusters(2);
+}
 
 TEST(ObjectGcCluster_ModelMatchesOracleSerial) {
     RunClusterModel(0x9e3779b97f4a7c15ULL, 0);

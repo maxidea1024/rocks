@@ -1092,9 +1092,11 @@ TEST(ReferenceObserver_UnregisteredElementStructIsUnsupported) {
               ErrorCode::Unsupported);
         CHECK(node->loose.Size() == 2);
 
-        // 정책은 같고 관찰자 없는 Registry는 조회하지 않는다.
+        // 정책은 같고 관찰자 없는 Registry는 조회하지 않는다. 패키지 클러스터(GC-S7)를 켜면 소속
+        // 소유자의 원소 제거도 원소 Trace가 필요하므로(13.4절) 이 비교는 클러스터를 끈다.
         RegistryOptions options;
         options.policy.packageNativeType = NativeTypeKey<ObservedPackage>();
+        options.packageClusters = false;
         ObjectRegistry plain(allocator, fixture.types, {0x4f623d, 2}, options);
         const auto plainAccess = plain.OwnerAccess();
         auto package = plain.NewObject<ObservedPackage>(plainAccess, PackageType);

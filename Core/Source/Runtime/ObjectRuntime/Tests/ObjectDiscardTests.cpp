@@ -507,6 +507,10 @@ TEST(ObjectDiscard_DuringMarkingAndSweeping) {
         auto born = NewNode(registry, asset.Value(), "Born");
         REQUIRE(born);
         REQUIRE(Finish(registry));
+        // 패키지 클러스터(GC-S7)는 첫 slice에서 표식됐으므로 Marking 중 이탈한 객체를 보수적으로
+        // shade한다(Docs/Design/GarbageCollectionScale.ko.md 13.6절). 다음 cycle에 회수된다.
+        CHECK(Requested(registry, children[0]));
+        REQUIRE(registry.Collect(access));
         CHECK(Reclaimed(registry, children[0]));
         CHECK(Alive(registry, born.Value()));
         CHECK(Alive(registry, children[1]));

@@ -21,7 +21,9 @@ ObjectRegistry::ObjectRegistry(Allocator& allocator, TypeRegistry& types, Contex
                                RegistryOptions options) noexcept
     : allocator_(allocator), types_(types), context_(context), options_(options),
       domain_(detail::NextRegistryDomain()), ownerThread_(platform::CurrentThreadId()),
-      gcWork_(allocator), gcShade_(allocator), clustersEnabled_(options.clusters) {
+      gcWork_(allocator), gcShade_(allocator),
+      clustersEnabled_(options.clusters ||
+                       (options.policy.packageNativeType != nullptr && options.packageClusters)) {
     // 클러스터 장부 칸·작업 큐 항목이 클러스터 번호와 표지 비트를 같은 32비트에 담는다.
     if (clustersEnabled_ && options_.maxSlots > RegistryOptions::ClusterSlotLimit) {
         platform::Fatal("A cluster-enabled ObjectRegistry allows at most ClusterSlotLimit slots");

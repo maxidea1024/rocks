@@ -149,26 +149,14 @@ void ObjectRegistry::TallyEdge(void* pointer, ObjectHandle handle) noexcept {
     }
 }
 
-Result<void> ObjectRegistry::TallyStructBlocks(const detail::StructElementOps& element,
-                                               void* const* blocks, uint32 count,
-                                               ObjectHandle ownerPackage,
-                                               EdgeTally& tally) noexcept {
-    // 떼어 낼 원소만 trace한다(소유자 Trace는 부르지 않는다). trace 칸은 원소 표에 없으므로 등록
-    // struct의 실행 정보로 얻는다(StructRefArray.h — 생성 헤더 없는 곳의 인스턴스화 문제).
-    auto lease = types_.AcquireStructByNative(element.nativeType);
-    if (!lease) {
-        return Result<void>::Failure(ErrorCode::Unsupported);
-    }
-
-    const auto trace = lease.Value().StructOps().trace;
+Result<void> ObjectRegistry::TallyHandles(const ObjectHandle* handles, usize count,
+                                          ObjectHandle ownerPackage, EdgeTally& tally) noexcept {
     MarkState state{this, nullptr};
     state.tally = &tally;
     state.ownerPackage = ownerPackage;
     state.delta = -1;
-    TraceVisitor visitor(&state, &ObjectRegistry::TallyEdge);
-    for (uint32 index = 0; trace != nullptr && index < count && state.error == ErrorCode::None;
-         ++index) {
-        trace(blocks[index], visitor);
+    for (usize index = 0; index < count && state.error == ErrorCode::None; ++index) {
+        TallyEdge(&state, handles[index]);
     }
 
     return state.error == ErrorCode::None ? Result<void>::Success()
@@ -178,7 +166,10 @@ Result<void> ObjectRegistry::TallyStructBlocks(const detail::StructElementOps& e
 Result<void> ObjectRegistry::CollectStructEdges(const detail::StructElementOps& element,
                                                 void* const* blocks, uint32 count,
                                                 Array<ObjectHandle>& out) noexcept {
-    // 클러스터 소속 소유자의 원소를 지울 때는 원소 Trace가 반드시 있어야 한다(13.4절).
+    // 떼어 낼 원소만 trace한다(소유자 Trace는 부르지 않는다). trace 칸은 원소 표에 없으므로 등록
+    // struct의 실행 정보로 얻는다(StructRefArray.h — 생성 헤더 없는 곳의 인스턴스화 문제). 관찰자
+    // 집계와 클러스터 장부가 이 결과를 같이 쓴다(원소마다 trace 한 번 — 13.4절: 소속 소유자의
+    // 원소를 지울 때도 원소 Trace가 반드시 있어야 한다).
     auto lease = types_.AcquireStructByNative(element.nativeType);
     if (!lease) {
         return Result<void>::Failure(ErrorCode::Unsupported);
