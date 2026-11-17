@@ -124,4 +124,29 @@ public:
     virtual void Poll(input::InputQueue& queue) noexcept = 0;
 };
 
+// 이 프로세스가 도는 데스크톱 세션이 표시 장치에 연결되어 있는지다(QueryDesktopSessionState).
+enum class DesktopSessionState : uint8 {
+    // 사용자가 세션을 보고 있다(콘솔 또는 원격 연결이 붙어 있다).
+    Connected,
+    // 세션은 살아 있으나 표시 장치가 떨어졌다(원격 연결을 끊었거나 사용자를 전환했다).
+    Disconnected,
+    // 판정할 수 없다(조회 실패, 세션 개념이 없는 플랫폼).
+    Unknown
+};
+
+// 이 프로세스의 데스크톱 세션 연결 상태다. Windows는 WTSQuerySessionInformation(WTSConnectState)로
+// 묻는다: WTSActive는 Connected, WTSDisconnected는 Disconnected, 그 밖과 조회 실패는 Unknown이다.
+// 다른 플랫폼은 Unknown이다. 어느 스레드에서나 부를 수 있고, 상태는 언제든 바뀔 수 있으므로 쓰는
+// 지점에서 다시 묻는다.
+//
+// 끊긴 세션에서는 숨긴 창 DC로의 GDI 그리기(StretchBlt)가 실패한다. GDI로 창에 내보내는 소프트웨어
+// 경로(lavapipe의 Windows WSI)는 이 상태에서 창 출력을 할 수 없다. DXGI·WGL과 하드웨어 Vulkan
+// 드라이버의 present는 영향을 받지 않는다(Docs/Design/VulkanGraphics.ko.md 17절).
+//
+// 사용 예:
+//   if (platform::QueryDesktopSessionState() == platform::DesktopSessionState::Disconnected) {
+//       // GDI 기반 창 출력 검사는 근거를 남기고 건너뛴다
+//   }
+DesktopSessionState QueryDesktopSessionState() noexcept;
+
 } // namespace rocks::platform

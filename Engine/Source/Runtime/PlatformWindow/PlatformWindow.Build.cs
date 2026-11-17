@@ -21,7 +21,8 @@ public sealed class PlatformWindow : EngineModuleRules
             PublicIncludeDirectories = [context.PathInRoot($"{ModuleDirectory}/Public")],
             Dependencies = RequiredModules,
             // XInput is loaded dynamically at run time (the SDK's xinput.lib makes lld-link warn about a DllMain import).
-            SystemLibraries = windows ? ["user32"] : []
+            // wtsapi32 answers the desktop session connect state (QueryDesktopSessionState).
+            SystemLibraries = windows ? ["user32", "wtsapi32"] : []
         };
     }
 }
