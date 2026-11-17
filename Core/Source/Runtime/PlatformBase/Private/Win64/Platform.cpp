@@ -64,7 +64,7 @@ uint64 MonotonicTickFrequency() noexcept {
     return static_cast<uint64>(frequency.QuadPart);
 }
 
-int64 UtcTicks() noexcept {
+bool TryUtcTicks(int64& ticks) noexcept {
     FILETIME time{};
     GetSystemTimePreciseAsFileTime(&time);
     // FILETIME은 1601-01-01부터의 100ns다. 0001-01-01부터 1601-01-01까지는 584388일이다.
@@ -72,13 +72,44 @@ int64 UtcTicks() noexcept {
     constexpr uint64 MaxTicks = 3155378975999999999ull;
     const uint64 value = (static_cast<uint64>(time.dwHighDateTime) << 32) | time.dwLowDateTime;
     if (value > MaxTicks - static_cast<uint64>(Offset)) {
+        return false;
+    }
+
+    ticks = static_cast<int64>(value) + Offset;
+    return true;
+}
+
+int64 UtcTicks() noexcept {
+    int64 ticks = 0;
+    if (!TryUtcTicks(ticks)) {
         Fatal("UTC clock is outside the DateTime range");
     }
-    return static_cast<int64>(value) + Offset;
+
+    return ticks;
 }
 
 uint64 CurrentThreadId() noexcept {
     return static_cast<uint64>(GetCurrentThreadId());
+}
+
+void WriteDiagnostic(const char* bytes, usize count) noexcept {
+    const HANDLE errorStream = GetStdHandle(STD_ERROR_HANDLE);
+    if (bytes == nullptr || errorStream == nullptr || errorStream == INVALID_HANDLE_VALUE) {
+        return;
+    }
+
+    // WriteFile은 DWORD 길이를 받으므로 나눠 쓴다. 진행이 없으면(실패·0 byte) 멈춘다.
+    constexpr usize MaxChunk = 1u << 30;
+    while (count != 0) {
+        const DWORD chunk = static_cast<DWORD>(count < MaxChunk ? count : MaxChunk);
+        DWORD written = 0;
+        if (!WriteFile(errorStream, bytes, chunk, &written, nullptr) || written == 0) {
+            return;
+        }
+
+        bytes += written;
+        count -= written;
+    }
 }
 
 [[noreturn]] void Fatal(const char* message) noexcept {

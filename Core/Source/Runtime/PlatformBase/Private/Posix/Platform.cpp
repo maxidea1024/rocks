@@ -5,6 +5,7 @@
 #include <Base/Checked.h>
 #include "PosixPlatform.h"
 #include <pthread.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
@@ -66,23 +67,56 @@ uint64 MonotonicTickFrequency() noexcept {
     return detail::PosixMonotonicTickFrequency();
 }
 
-int64 UtcTicks() noexcept {
+bool TryUtcTicks(int64& ticks) noexcept {
     timespec time{};
     if (clock_gettime(CLOCK_REALTIME, &time) != 0) {
-        Fatal("clock_gettime(CLOCK_REALTIME) failed");
+        return false;
     }
+
     // 0001-01-01부터 1970-01-01까지는 719162일이다.
     constexpr int64 Offset = 719162ll * 864000000000ll;
     constexpr int64 MaxTicks = 3155378975999999999ll;
     const int64 seconds = static_cast<int64>(time.tv_sec);
     if (seconds < -Offset / 10000000ll || seconds > (MaxTicks - Offset) / 10000000ll) {
-        Fatal("UTC clock is outside the DateTime range");
+        return false;
     }
-    return seconds * 10000000ll + static_cast<int64>(time.tv_nsec) / 100 + Offset;
+
+    ticks = seconds * 10000000ll + static_cast<int64>(time.tv_nsec) / 100 + Offset;
+    return true;
+}
+
+int64 UtcTicks() noexcept {
+    int64 ticks = 0;
+    if (!TryUtcTicks(ticks)) {
+        Fatal("UTC clock query failed or is outside the DateTime range");
+    }
+
+    return ticks;
 }
 
 uint64 CurrentThreadId() noexcept {
     return detail::PosixThreadId();
+}
+
+void WriteDiagnostic(const char* bytes, usize count) noexcept {
+    if (bytes == nullptr) {
+        return;
+    }
+
+    // 부분 쓰기는 이어 쓰고, 오류·진행 없음이면 멈춘다(EINTR만 다시 시도한다).
+    while (count != 0) {
+        const auto written = write(STDERR_FILENO, bytes, count);
+        if (written < 0 && errno == EINTR) {
+            continue;
+        }
+
+        if (written <= 0) {
+            return;
+        }
+
+        bytes += written;
+        count -= static_cast<usize>(written);
+    }
 }
 
 [[noreturn]] void Fatal(const char* message) noexcept {
