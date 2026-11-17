@@ -1003,9 +1003,8 @@ Result<void> ConfigContext::Sync() noexcept {
         }
     }
 
-    // 3. 새 입력이 더 강한 출처에 가려진 경로를 알린다(약한 쓰기 — 값은 바뀌지 않았다).
-    // TODO(log): 로깅 시스템(Docs/Design/LoggingSystem.ko.md)이 들어오면 Note 진단을 설정 로그
-    // 범주로도 남긴다.
+    // 3. 새 입력이 더 강한 출처에 가려진 경로를 알린다(약한 쓰기 — 값은 바뀌지 않았다). 진단 목록에
+    // 남기고, 실패가 아니므로 로그는 Debug다.
     for (usize index = 0; index < results.Size(); ++index) {
         for (const UniquePtr<SourceStack>& stack : results[index]->sources) {
             for (usize position = 0; position < stack->entries.Size(); ++position) {
@@ -1031,6 +1030,12 @@ Result<void> ConfigContext::Sync() noexcept {
                     "a stronger source ({} {}) already sets this value; the write is kept in the "
                     "source stack",
                     ConfigLayerName(top->layer), top->sourceName.View()));
+                Log::Debug(detail::LogConfig,
+                           "Config write to {Path} from {Layer} {Source} is shadowed by {TopLayer} "
+                           "{TopSource}; the value is unchanged",
+                           stack->path.View(), ConfigLayerName(weak->layer),
+                           weak->sourceName.View(), ConfigLayerName(top->layer),
+                           top->sourceName.View());
                 if (auto reported = detail::Report(
                         *state, ConfigDiagnosticCode::WeakWrite, ConfigSeverity::Note, weak->layer,
                         weak->sourceName.View(), nullptr, stack->path.View(), message.View());
