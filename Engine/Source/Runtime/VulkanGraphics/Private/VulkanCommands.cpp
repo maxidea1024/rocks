@@ -207,8 +207,9 @@ Result<CommandContext*> VulkanDevice::BeginFrame(SwapChainHandle handle,
     }
 
     // 패스는 swapchain마다 하나인 중간 이미지(SRGB view)에 그린다.
-    target_ = {record->target, record->framebuffer, VK_FORMAT_R8G8B8A8_SRGB, record->targetLayout,
-               record->width,  record->height,      Format::RGBA8UnormSrgb,  {}};
+    target_ = {
+        record->target, record->framebuffer, VK_FORMAT_R8G8B8A8_SRGB,     record->targetLayout,
+        record->width,  record->height,      PixelFormat::RGBA8UnormSrgb, {}};
     presentTarget_ = handle;
     StartPass(clear);
     return Result<CommandContext*>::Success(this);
@@ -240,7 +241,7 @@ Result<CommandContext*> VulkanDevice::BeginOffscreen(TextureHandle handle,
     const VkFramebuffer framebuffer = record->framebuffer;
     const uint32 width = record->width;
     const uint32 height = record->height;
-    const Format format = record->format;
+    const PixelFormat format = record->format;
     auto begun = BeginRecording();
     if (!begun) {
         return Result<CommandContext*>::Failure(begun.Error());
@@ -248,8 +249,8 @@ Result<CommandContext*> VulkanDevice::BeginOffscreen(TextureHandle handle,
 
     target_ = {image,
                framebuffer,
-               format == Format::RGBA8UnormSrgb ? VK_FORMAT_R8G8B8A8_SRGB
-                                                : VK_FORMAT_R8G8B8A8_UNORM,
+               format == PixelFormat::RGBA8UnormSrgb ? VK_FORMAT_R8G8B8A8_SRGB
+                                                     : VK_FORMAT_R8G8B8A8_UNORM,
                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                width,
                height,

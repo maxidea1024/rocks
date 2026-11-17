@@ -72,7 +72,7 @@ struct TextureRecord {
     uint32 width = 0;
     uint32 height = 0;
     uint32 mipLevels = 1;
-    Format format = Format::Unknown;
+    PixelFormat format = PixelFormat::Unknown;
     bool renderTarget = false;
 };
 
@@ -303,7 +303,7 @@ private:
         VkImageLayout restLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         uint32 width = 0;
         uint32 height = 0;
-        Format format = Format::Unknown;
+        PixelFormat format = PixelFormat::Unknown;
         // offscreen 패스의 대상 텍스처다(창 패스는 null).
         TextureHandle texture;
     };
@@ -356,6 +356,16 @@ private:
     template <class T>
     Result<T> FailWith(const char* stage, VkResult result) noexcept {
         auto failed = Fail(stage, result);
+        return Result<T>::Failure(failed.Error());
+    }
+
+    // 이 backend가 대응하지 않는 픽셀 형식이다. 다른 형식으로 바꾸지 않고 Unsupported로 실패하고
+    // LastError에 형식 이름을 남긴다(PixelFormat.ko.md 8.3절). 호출자는 gate_를 잡고 있어야 한다.
+    template <class T>
+    Result<T> UnsupportedFormat(PixelFormat format) noexcept {
+        auto failed = FailCode("pixel format", ErrorCode::Unsupported, PixelFormatName(format));
+        auto appended = lastError_.TryAppend(StringView(" is not supported by the Vulkan backend"));
+        (void)appended;
         return Result<T>::Failure(failed.Error());
     }
 

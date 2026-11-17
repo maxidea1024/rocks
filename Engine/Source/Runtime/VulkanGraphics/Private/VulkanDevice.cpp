@@ -628,7 +628,7 @@ Result<void> VulkanDevice::CreateSharedObjects(const DeviceDesc& desc) noexcept 
     TextureDesc whiteDesc;
     whiteDesc.width = 1;
     whiteDesc.height = 1;
-    whiteDesc.format = Format::RGBA8Unorm;
+    whiteDesc.format = PixelFormat::RGBA8Unorm;
     auto whiteTexture = CreateTexture(whiteDesc, Span<const uint8>(white, 4));
     if (!whiteTexture) {
         return Result<void>::Failure(whiteTexture.Error());

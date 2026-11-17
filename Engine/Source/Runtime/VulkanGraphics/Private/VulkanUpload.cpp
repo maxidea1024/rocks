@@ -282,12 +282,11 @@ Result<void> VulkanDevice::RecordTextureUpload(const TextureRecord& record, uint
 
     const VkBuffer source = space.Value().buffer;
     uint64 offset = space.Value().offset;
-    const uint32 bytesPerPixel = BytesPerPixel(record.format);
     for (uint32 index = 0; index < count; ++index) {
         const uint32 level = firstMip + index;
         RecordTextureCopy(record, level, source, offset, initial);
-        offset += static_cast<uint64>(MipExtent(record.width, level)) *
-                  MipExtent(record.height, level) * bytesPerPixel;
+        offset += PixelFormatImageBytes(record.format, MipExtent(record.width, level),
+                                        MipExtent(record.height, level));
     }
 
     return Result<void>::Success();
@@ -352,8 +351,8 @@ Result<void> VulkanDevice::UpdateTexture(TextureHandle handle, uint32 mipLevel,
     }
 
     if (mipLevel >= record->mipLevels ||
-        pixels.Size() != static_cast<usize>(MipExtent(record->width, mipLevel)) *
-                             MipExtent(record->height, mipLevel) * BytesPerPixel(record->format)) {
+        pixels.Size() != PixelFormatImageBytes(record->format, MipExtent(record->width, mipLevel),
+                                               MipExtent(record->height, mipLevel))) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -404,8 +403,8 @@ Result<void> VulkanDevice::UploadTextureFromStaging(TextureHandle handle, uint32
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    const uint64 bytes = static_cast<uint64>(MipExtent(record->width, mipLevel)) *
-                         MipExtent(record->height, mipLevel) * BytesPerPixel(record->format);
+    const uint64 bytes = PixelFormatImageBytes(record->format, MipExtent(record->width, mipLevel),
+                                               MipExtent(record->height, mipLevel));
     if (mipLevel >= record->mipLevels || offset > memory.Value().size ||
         bytes > memory.Value().size - offset) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -413,7 +412,7 @@ Result<void> VulkanDevice::UploadTextureFromStaging(TextureHandle handle, uint32
 
     const TextureRecord copy = *record;
     // 원본 offset이 texel 크기 배수가 아니면 ring으로 옮겨 올린다(vkCmdCopyBufferToImage 규칙).
-    if (offset % BytesPerPixel(copy.format) != 0) {
+    if (offset % GetPixelFormatInfo(copy.format).blockBytes != 0) {
         return RecordTextureUpload(
             copy, mipLevel, 1,
             Span<const uint8>(memory.Value().data + offset, static_cast<usize>(bytes)), false);
@@ -493,7 +492,7 @@ Result<ReadbackRequest> VulkanDevice::RequestReadbackLocked(TextureHandle target
     ReadbackRecord readback;
     readback.width = texture.width;
     readback.height = texture.height;
-    readback.bytesPerPixel = BytesPerPixel(texture.format);
+    readback.bytesPerPixel = GetPixelFormatInfo(texture.format).blockBytes;
     const uint64 bytes =
         static_cast<uint64>(readback.width) * readback.height * readback.bytesPerPixel;
     auto created = CreateBufferWithMemory(bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -648,7 +647,7 @@ Result<void> VulkanDevice::ReadPixels(TextureHandle handle, Span<uint8> out) noe
     }
 
     const usize size =
-        static_cast<usize>(record->width) * record->height * BytesPerPixel(record->format);
+        static_cast<usize>(PixelFormatImageBytes(record->format, record->width, record->height));
     if (!record->renderTarget || out.Size() != size || recording_) {
         return Result<void>::Failure(recording_ ? ErrorCode::Busy : ErrorCode::InvalidArgument);
     }

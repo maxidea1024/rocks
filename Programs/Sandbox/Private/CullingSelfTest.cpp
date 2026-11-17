@@ -275,7 +275,7 @@ void RunFacingChecks(Bench& bench, bool window, Array<uint8>& pixels) noexcept {
     desc.vertex = {hlsl, StringView(FacingVertexGlsl, sizeof(FacingVertexGlsl) - 1)};
     desc.pixel = {hlsl, StringView(FacingPixelGlsl, sizeof(FacingPixelGlsl) - 1)};
     desc.layout = {attributes, streams};
-    desc.colorFormat = Format::RGBA8UnormSrgb;
+    desc.colorFormat = PixelFormat::RGBA8UnormSrgb;
     auto pipeline = bench.device->CreatePipeline(desc);
     Check(pipeline.IsOk(), "facing pipeline creation");
     if (!pipeline) {

@@ -340,8 +340,14 @@ Result<BufferHandle> VulkanDevice::CreateBuffer(const BufferDesc& desc,
 // 다른 스레드에서도 부를 수 있다(concurrentResourceCreation). 초기 픽셀은 업로드 기록으로 간다.
 Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
                                                   Span<const uint8> pixels) noexcept {
+    const TextureFormatInfo format = TextureFormat(desc.format);
+    if (IsValidPixelFormat(desc.format) && format.format == VK_FORMAT_UNDEFINED) {
+        platform::LockGuard lock(gate_);
+        return UnsupportedFormat<TextureHandle>(desc.format);
+    }
+
     const bool renderTarget = desc.usage == TextureUsage::RenderTarget;
-    const uint64 size = MipChainBytes(desc.width, desc.height, desc.mipLevels, desc.format);
+    const uint64 size = MipChainBytes(desc.format, desc.width, desc.height, 1, desc.mipLevels);
     const uint32 limit = properties_.limits.maxImageDimension2D < MaxTextureExtent
                              ? properties_.limits.maxImageDimension2D
                              : MaxTextureExtent;
@@ -351,7 +357,6 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
         return Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
-    const TextureFormatInfo format = TextureFormat(desc.format);
     VkFormatProperties support = {};
     functions_.vkGetPhysicalDeviceFormatProperties(physical_, format.format, &support);
     const VkFormatFeatureFlags required =

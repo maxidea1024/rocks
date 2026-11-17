@@ -16,13 +16,16 @@ constexpr VkFormatFeatureFlags FilteredSampledFeatures =
 
 } // namespace
 
-TextureFormatInfo TextureFormat(Format format) noexcept {
+// 지금은 RGBA8 두 형식만 대응한다. 나머지 유효 형식은 VK_FORMAT_UNDEFINED이고 장치가 Unsupported로
+// 공개한다(PixelFormat.ko.md 8.3절, 대체하지 않는다). Vulkan 대응 주의점(BC1은 RGBA 블록, V8U8은
+// SNORM, A8은 R8 + swizzle)은 PixelFormat.ko.md 15·17절이다.
+TextureFormatInfo TextureFormat(PixelFormat format) noexcept {
     switch (format) {
-    case Format::RGBA8Unorm:
+    case PixelFormat::RGBA8Unorm:
         return {VK_FORMAT_R8G8B8A8_UNORM, ColorTargetFeatures, FilteredSampledFeatures};
-    case Format::RGBA8UnormSrgb:
+    case PixelFormat::RGBA8UnormSrgb:
         return {VK_FORMAT_R8G8B8A8_SRGB, ColorTargetFeatures, FilteredSampledFeatures};
-    case Format::Unknown:
+    default:
         break;
     }
 

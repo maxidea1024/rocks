@@ -260,8 +260,12 @@ Result<PipelineHandle> VulkanDevice::CreatePipeline(const PipelineDesc& desc) no
     platform::LockGuard lock(gate_);
     const TextureFormatInfo color = TextureFormat(desc.colorFormat);
     if (desc.vertex.hlsl.ByteCount() == 0 || desc.pixel.hlsl.ByteCount() == 0 ||
-        color.format == VK_FORMAT_UNDEFINED) {
+        !IsValidPixelFormat(desc.colorFormat)) {
         return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (color.format == VK_FORMAT_UNDEFINED) {
+        return UnsupportedFormat<PipelineHandle>(desc.colorFormat);
     }
 
     auto layoutChecked = ValidateVertexLayout(desc.layout);
