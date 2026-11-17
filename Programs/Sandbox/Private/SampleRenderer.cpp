@@ -1,5 +1,8 @@
 #include "SampleRenderer.h"
 
+#include <Core/Diagnostics/Log.h>
+#include <Graphics/GraphicsLog.h>
+
 #include <Base/Compiler.h>
 
 namespace sandbox::sample {
@@ -141,13 +144,24 @@ Result<void> Renderer::Initialize(graphics::Device& device,
     pipeline.colorFormat = colorFormat;
     pipeline.alphaBlend = true;
     pipeline.cullMode = graphics::CullMode::Back;
+    // 파이프라인(셰이더 컴파일 포함)의 실패를 결정하는 곳이 여기다. 장치는 원인을 LastError에만
+    // 남긴다(셰이더 컴파일 실패면 "Shader <entry> (<target>) failed to compile ...").
+    const auto logPipelineFailure = [&device](const char* variant, ErrorCode error) noexcept {
+        Log::Error(graphics::LogShader,
+                   "Sample renderer {Variant} pipeline could not be built on {Backend}: {Error}: "
+                   "{Diagnostics}",
+                   variant, graphics::BackendName(device.Info().backend), ErrorCodeName(error),
+                   device.LastError().LeftBytesAtCodePoint(graphics::MaxShaderDiagnosticLogBytes));
+    };
     auto createdPipeline = device.CreatePipeline(pipeline);
     if (!createdPipeline) {
+        logPipelineFailure("back-face culling", createdPipeline.Error());
         return Result<void>::Failure(createdPipeline.Error());
     }
     pipeline.cullMode = graphics::CullMode::Front;
     auto reversedPipeline = device.CreatePipeline(pipeline);
     if (!reversedPipeline) {
+        logPipelineFailure("front-face culling", reversedPipeline.Error());
         device.Retire(createdPipeline.Value());
         return Result<void>::Failure(reversedPipeline.Error());
     }

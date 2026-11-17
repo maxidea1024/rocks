@@ -227,6 +227,15 @@ struct StoredClassReference {
     bool nulled = false;
 };
 
+// 1단계가 기록한 InstancedStruct 판정 하나다(비어 있지 않은 저장 값의 방문 순서 — 리플렉션 B9j,
+// Docs/Design/ReflectionExtensions.ko.md 11절). type은 담긴 struct의 lease이고 비어 있으면 미등록
+// struct를 decode 정책 ReportAndClear로 비웠다는 뜻이다. 2단계가 같은 순서로 stored를 대조해
+// lease를 값으로 옮긴다(TypeRegistry 재조회 없음 — 2단계는 할당 말고 실패하지 않는다).
+struct StoredInstancedStruct {
+    TypeId stored{};
+    TypeLease type;
+};
+
 // 1단계가 보관한 struct 마이그레이션 결과 하나다(발생 순서). 2단계가 같은 순서로 (type, from)을
 // 대조해 쓴다. bytes의 heap 블록은 Array 이동에도 그대로라 view가 유효하다.
 struct StoredStructMigration {
@@ -243,7 +252,7 @@ struct StoredStructMigration {
 struct LoadNode {
     explicit LoadNode(Allocator& allocator) noexcept
         : migrated(allocator), fields(allocator), expectations(allocator), tokens(allocator),
-          structMigrations(allocator), names(allocator), classes(allocator) {
+          structMigrations(allocator), names(allocator), classes(allocator), instanced(allocator) {
     }
 
     TypeId type{};
@@ -260,6 +269,7 @@ struct LoadNode {
     Array<StoredStructMigration> structMigrations;
     Array<StoredName> names;
     Array<StoredClassReference> classes;
+    Array<StoredInstancedStruct> instanced;
     ObjectHandle handle{};
 };
 
@@ -419,9 +429,10 @@ Result<void> CheckImportTargets(const StageData& data, Span<const TypeLease> act
 
 // 2b 적용이다(GraphApply.cpp): 1단계가 보관한 필드를 staged 객체에 쓴다(그래프 예산에 접근하지
 // 않는다 — 노드 참조는 노드 handle로, 외부 참조 i는 imports[i − 1]로, ClassRef 값은 1단계 판정
-// 기록으로 바꾼다). 실패는 쓰기 codec·Registry의 오류이고 호출자가 트랜잭션을 버린다.
+// 기록으로, InstancedStruct 값은 1단계 판정 기록의 lease를 값으로 옮겨 바꾼다 — 그래서 한 번만
+// 부른다). 실패는 쓰기 codec·Registry의 오류이고 호출자가 트랜잭션을 버린다.
 Result<void> ApplyNodeFields(Allocator& allocator, ConstructionContext& transaction,
-                             const Array<LoadNode>& nodes, const ObjectGraphLoadOptions& options,
+                             Array<LoadNode>& nodes, const ObjectGraphLoadOptions& options,
                              Span<const ObjectHandle> imports) noexcept;
 
 // 적용을 마친 staged 노드들의 Required 실효 값을 진단한다(Docs/Design/ObjectFoundations.ko.md 4절

@@ -187,6 +187,12 @@ Result<void> ValidateFieldList(Span<const FieldSchema> fields, bool structMember
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
+        // InstancedStruct의 Base struct 제한(value.type ≠ 0 — InstancedStruct<Base>)은 리플렉션
+        // B9k가 연다. B9j는 제한 없는 InstancedStruct<>(0)만 받는다.
+        if (target.kind == ValueKind::InstancedStruct && target.type != TypeId{}) {
+            return Result<void>::Failure(ErrorCode::Unsupported);
+        }
+
         for (usize previous = 0; previous < index; ++previous) {
             if (field.id == fields[previous].id) {
                 return Result<void>::Failure(ErrorCode::AlreadyExists);

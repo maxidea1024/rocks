@@ -1,5 +1,8 @@
 #include "D3D11DeviceImpl.h"
 
+#include <Core/Diagnostics/Log.h>
+#include <Platform/Atomics.h>
+
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
 
@@ -374,7 +377,7 @@ Result<void> D3D11Device::CreateSharedStates() noexcept {
 void D3D11Device::FillReport(ErrorCode code, DeviceCreateReport& report) const noexcept {
     report = DeviceCreateReport{};
     report.code = code;
-    report.nativeCode = static_cast<int64>(failureResult_);
+    report.nativeCode = static_cast<int64>(static_cast<uint32>(failureResult_));
     const bool stageCut = CopyTruncated(report.stage, sizeof(report.stage), failureStage_);
     const bool detailCut = CopyTruncated(report.detail, sizeof(report.detail), lastError_.CStr());
     report.truncated = failureTruncated_ || stageCut || detailCut;
@@ -481,7 +484,8 @@ Result<void> D3D11Device::Fail(const char* stage, HRESULT result) noexcept {
     (void)assigned;
     failureTruncated_ = CopyTruncated(failureStage_, sizeof(failureStage_), stage);
     failureResult_ = result;
-    // TODO(log): Graphics.D3D11 Error "{Stage} failed (HRESULT {HResult:#x})" — LG7.
+    // 실패는 호출자가 결과·LastError로 받아 결정하는 쪽이 기록한다(LoggingSystem 13절). 장치는 손실
+    // 전이(DetectLost)만 직접 남긴다.
     return Result<void>::Failure(timeline_.IsLost() ? ErrorCode::Destroyed
                                                     : ErrorCode::DependencyFailed);
 }
@@ -506,9 +510,20 @@ void D3D11Device::DetectLost(HRESULT failure) noexcept {
         return;
     }
 
-    if (IsDeviceRemovedResult(failure) || device_->GetDeviceRemovedReason() != S_OK) {
-        // TODO(log): Graphics.D3D11 Error "Device removed: {Reason} (HRESULT {HResult:#x})" — LG7.
+    const HRESULT reason = device_->GetDeviceRemovedReason();
+    if (IsDeviceRemovedResult(failure) || reason != S_OK) {
         timeline_.MarkLost();
+        // 손실 전이 때 한 번 남긴다(여러 스레드가 같은 손실을 보아도 한 번).
+        if (platform::AtomicExchange<platform::MemoryOrder::AcquireRelease>(&lossLogged_, 1u) ==
+            0) {
+            Log::Error(
+                LogGraphicsD3D11,
+                "D3D11 device removed on {Adapter}: {Reason} (removed reason HRESULT "
+                "{ReasonCode:#x}, failing call HRESULT {HResult:#x}); the device is lost and "
+                "every later call fails",
+                adapterName_.View(), DeviceRemovedReasonName(reason), static_cast<uint32>(reason),
+                static_cast<uint32>(failure));
+        }
     }
 }
 
@@ -683,8 +698,18 @@ void D3D11Device::DrainValidationMessages() const noexcept {
                 message->Severity == D3D11_MESSAGE_SEVERITY_ERROR ||
                 message->Severity == D3D11_MESSAGE_SEVERITY_CORRUPTION) {
                 // 읽지 못한 메시지도 오류로 센다(필터가 오류만 저장한다).
-                // TODO(log): Graphics.D3D11.Validation Warning — 원문, 메시지 ID마다 1회(LG7).
                 ++validationErrors_;
+            }
+
+            // 원문을 메시지 ID마다 한 번 남긴다(세기는 위와 같다).
+            if (message != nullptr && message->pDescription != nullptr &&
+                validationFilter_.First(static_cast<uint32>(message->ID))) {
+                Log::Warning(
+                    LogGraphicsD3D11Validation, "D3D11 debug layer message {Id}: {Message}",
+                    static_cast<uint32>(message->ID),
+                    StringView(message->pDescription, message->DescriptionByteLength > 0
+                                                          ? message->DescriptionByteLength - 1
+                                                          : 0));
             }
         }
 
@@ -771,8 +796,10 @@ Result<UniquePtr<Device>> CreateD3D11Device(Allocator& allocator, const DeviceDe
         *report = DeviceCreateReport{};
     }
 
-    // TODO(log): Graphics.D3D11 Info "Created {Backend} device on {Adapter} (validation
-    // {Validation})" — LG7.
+    // 생성 실패 로그는 backend를 고르는 호출자가 report로 남긴다(LoggingSystem 13절).
+    const DeviceInfo info = created.Value()->Info();
+    Log::Info(LogGraphicsD3D11, "Created {Backend} device on {Adapter} (validation {Validation})",
+              BackendName(info.backend), info.adapterName, info.validationEnabled);
     return Result<UniquePtr<Device>>::Success(UniquePtr<Device>(Move(created.Value())));
 }
 

@@ -45,6 +45,7 @@ struct Comparer {
 
     Result<bool> SameField(const TextSlot& slot) noexcept;
     Result<bool> SameStruct(StructView view, uint32 flags) noexcept;
+    Result<bool> SameInstanced(uint32 flags) noexcept;
     Result<bool> SameArray(const TextSlot& slot) noexcept;
     Result<bool> SameKeyed(const TextSlot& slot) noexcept;
     Result<bool> SameRead() noexcept;
@@ -76,6 +77,8 @@ Result<bool> Comparer::SameField(const TextSlot& slot) noexcept {
 
         return left.Value() ? SameStruct(slot.structView, slot.flags) : Result<bool>::Success(true);
     }
+    case ValueKind::InstancedStruct:
+        return SameInstanced(slot.flags);
     case ValueKind::Array:
     case ValueKind::StaticArray:
         return SameArray(slot);
@@ -113,6 +116,34 @@ Result<bool> Comparer::SameStruct(StructView view, uint32 flags) noexcept {
     return Result<bool>::Success(true);
 }
 
+// InstancedStruct 값 자리(리플렉션 B9j)는 담긴 타입이 같고(둘 다 비어 있음 포함) 멤버가 같아야
+// 한다.
+Result<bool> Comparer::SameInstanced(uint32 flags) noexcept {
+    auto left = PathReadInstancedType(Registry(), Access(), live, LivePath());
+    if (!left) {
+        return ReadFailure(left.Error());
+    }
+
+    auto right = PathReadInstancedType(Registry(), Access(), box, BoxPath());
+    if (!right) {
+        return ReadFailure(right.Error());
+    }
+
+    if (left.Value().IsValid() != right.Value().IsValid()) {
+        return Result<bool>::Success(false);
+    }
+
+    if (!left.Value().IsValid()) {
+        return Result<bool>::Success(true);
+    }
+
+    if (!(left.Value().Id() == right.Value().Id())) {
+        return Result<bool>::Success(false);
+    }
+
+    return SameStruct(left.Value().Struct(), flags);
+}
+
 Result<bool> Comparer::SameArray(const TextSlot& slot) noexcept {
     const FieldSchema& field = *slot.field;
     usize count = field.maxElements;
@@ -137,7 +168,9 @@ Result<bool> Comparer::SameArray(const TextSlot& slot) noexcept {
     const bool structElement = field.element.kind == ValueKind::Struct;
     for (usize index = 0; index < count; ++index) {
         path.SetIndex(static_cast<uint32>(index));
-        auto same = structElement ? SameStruct(slot.structView, slot.flags) : SameRead();
+        auto same = structElement ? SameStruct(slot.structView, slot.flags)
+                    : field.element.kind == ValueKind::InstancedStruct ? SameInstanced(slot.flags)
+                                                                       : SameRead();
         if (!same || !same.Value()) {
             path.ClearSelector();
             return same;
@@ -182,7 +215,9 @@ Result<bool> Comparer::SameKeyed(const TextSlot& slot) noexcept {
             return Result<bool>::Failure(selected.Error());
         }
 
-        auto same = structValue ? SameStruct(slot.structView, slot.flags) : SameRead();
+        auto same = structValue ? SameStruct(slot.structView, slot.flags)
+                    : field.element.kind == ValueKind::InstancedStruct ? SameInstanced(slot.flags)
+                                                                       : SameRead();
         path.ClearSelector();
         if (!same || !same.Value()) {
             return same;

@@ -182,6 +182,10 @@ MetaCompiler(C#)와 런타임(C++)의 표 대조: MetaCompiler가 "모든 종류
 
 - 성질 표에 행 `StaticArray` = 27을 더했다(허용 표의 "Array 계열·Map·Set·StaticArray·Optional" 칸 — 단일·멤버와 컨테이너만 ○, 통째 FieldValue ×). `ValueKindCount`는 28이다. 늘 aggregate이고 `FieldTargetType`은 원소(`element`)를 준다. 이번 단계가 연 자리는 정적 배열 원소 열 전부다(ObjectReference 원소는 Registry 컨테이너 없이 `FieldKind::ObjectReference`).
 
+구현(B9j)에서 정한 점(성질 표 — InstancedStruct의 나머지는 11절 "구현(B9j)에서 정한 점"):
+
+- 성질 표에 행 `InstancedStruct` = 28을 더했다(허용 표의 InstancedStruct 칸 — 단일·멤버·Array 원소·StaticArray 원소·Map 값, 대상 타입 있음·대상 ID 선택, 통째 FieldValue ×). `ValueKindCount`는 29다. 이번 단계가 연 자리는 그 칸 전부이고, Struct 행의 InstancedStruct 내용 칸(값 struct ○)은 담기 조건 형질로 좁힌다. `ValueKindIsAggregate(InstancedStruct)`는 참이고 `FieldIsAggregate`도 같다.
+
 ### 1.4 플래그 비트
 
 | 플래그 | 값 | 대상 | 전파·상속 | 단계 |
@@ -1033,6 +1037,21 @@ public:
 - 차이 단위(A5): 통째. 같은 타입이면 기준 대비 멤버 차이로 쓰는 UE 방식(18.11절)은 writer 선택이라 형식을 바꾸지 않고 뒤에 더할 수 있다.
 - 소비자: Sparks 데이터 테이블 행 저장 `OrderedMap<Name, InstancedStruct<>>`(SL 1090행 `@tableRow`), CU6·데이터 에셋.
 
+구현(B9j)에서 정한 점:
+
+- 값 종류 `InstancedStruct` = 28(`ValueKindCount` 29). 성질 표 행은 단일·멤버·Array 원소·StaticArray 원소·Map 값·대상 타입 있음(대상 ID 선택 — Base, 0 = 제한 없음)이고 통째 FieldValue가 아니다(늘 aggregate). Required·키·Set 원소·Optional 내부·InstancedStruct 내용은 ×다. B9j는 value.type = 0만 받는다: TypeRegistry는 InstancedStruct 대상 type ≠ 0을 자리와 무관하게 Unsupported로 거부한다(B9k가 Base 해석으로 연다). MetaCompiler는 Clang 정규 철자 `rocks::InstancedStruct<>`·`rocks::InstancedStruct<void>`를 대상 없는 값 종류로 푼다(`SchemaValidator.Scalars` — 그래서 `SourceValueKinds` = 성질 표 Array 원소 열이 그대로 성립하고 Required RMC2202·Optional 내부 RMC2306·키·Set 원소 RMC2305는 표 판정으로 난다). `InstancedStruct<Base>` 철자는 B9k까지 RMC2000(지원하지 않는 형식)이다.
+- 값 타입 Object/InstancedStruct.h: TypeLease + 값 블록 + allocator, 이동 전용, `TryClone`·`Reset`·`IsEmpty`·`Type()`·`View()`·`Get<S>()`(native 키 대조). **스펙과 다른 점**: `Emplace<S>(Allocator&)`는 lease를 얻을 TypeRegistry가 필요해 `Emplace<S>(TypeRegistry&, Allocator&)`로 했다(`AcquireStructByNative`). lease 판 `Emplace(TypeLease, Allocator&)`는 lease를 소비한다. 둘 다 실패하면 값은 그대로다. `InstancedStruct<Base>`는 B9j에서 static_assert로 막는다.
+- 담기 조건의 판정 하나 `detail::CheckInstancedStructContent`(Emplace·경로 형 바꾸기·decode 1단계·encode): 스펙의 넷(강한 참조·Registry 컨테이너·InstancedStruct·Required)에 **WorldOnly 소유자 요구(`RequiresWorldOnlyOwner`)를 더했다** — 담긴 타입은 실행 중에 정해지므로 소유 객체 클래스로 그 NATIVE 형질을 판정할 수 없다. 새 등록 형질 `StructView::ContainsInstancedStruct`(멤버·원소 배열·정적 배열·Map 값·중첩 struct에서 전파, Transient 포함)와 생성 형질 `GeneratedType<S>::ContainsInstancedStruct`·`ContainsRequired`(MetaCompiler가 같은 규칙으로 계산 — `Emplace<S>`의 static_assert가 쓴다)를 더했다. Registry 컨테이너는 강한 참조를 담으므로 `ContainsStrongReference`가 이미 막는다(`ContainsReferenceArray`도 함께 본다).
+- 깊이 합 `detail::CheckInstancedStructDepth(position, view)`: codec의 위치 깊이는 `FieldCodecContext::PositionDepth()`(프레임 사슬 길이 − 1 — 배열 원소·Map 항목은 프레임을 더하지 않는다), 경로의 위치 깊이는 끝 단계 index(struct 값 시작 위치면 + 1)다. 상자(DetachedValue) 시작 위치는 원래 깊이를 모르므로 0으로 보고, 깊은 자리로 되돌린 위반은 저장(encode)이 InvalidArgument로 드러낸다.
+- codec 사슬 넷째 조각 Object/InstancedStructFieldCodec.h(StructFieldCodec 다음, ArrayFieldCodec 앞): `EncodeInstancedStructField`·`EncodeInstancedStructElement`(PrefixedRecordWriter)·`DecodeInstancedStructField`·`DecodeInstancedStructElement`. 담긴 struct의 Record는 struct 필드와 같은 `EncodeStructRecord`·`DecodeStructValue`(Record 내용 출처 — `OpenRecordBytes`)로 쓰고 읽는다. 마이그레이션·Atomic 판정이 프레임의 structure 칸을 읽으므로 새 RAII `InstancedContentScope`가 InstancedStruct 필드 프레임의 structure를 담긴 struct view로 채운다(프레임을 더하지 않는다 — 진단 경로는 `[f]`·`[f[i]]`·`[f, m]`). Array·정적 배열·Map codec에 InstancedStruct 원소·값 갈래를 더했다(원소마다 u64 길이 + 내용, 관찰 자리는 InvalidArgument).
+- decode 두 단계: 1단계는 문맥의 새 가상 `AcquireInstancedStructType`(그래프는 `TypeRegistry::AcquireValueType(id, Struct)` — 조회 몫 1 청구)으로 판정하고 `CollectInstancedStruct(stored, lease)`로 노드 기록(`LoadNode::instanced`)에 lease를 보관한다(미등록을 정책으로 비우면 빈 lease). 2단계는 `TakeInstancedStruct`로 그 lease를 값으로 **옮긴다**(TypeRegistry를 다시 조회하지 않고 lease 복제도 하지 않으므로 할당 말고는 실패하지 않는다 — 그래서 `ApplyNodeFields`는 노드 배열을 non-const로 받고 한 번만 부른다). 2단계는 자리가 같은 타입이면 그 값 위에(누락 멤버 = 지금 값), 다르면 그 타입 기본 값 위에 적용한다. 정책 `FieldDecodePolicy::unknownStructType`(`UnknownStructTypePolicy::Reject`·`ReportAndClear`)과 진단 `FieldDiagnosticKind::UnknownStructType`(valueType = 저장 struct ID)을 더했다. ReportAndClear는 진단 받을 곳이 없으면 InvalidArgument다(ClassRef ReportAndNull과 같다). struct가 아닌 레코드는 InvalidArgument다.
+- 관찰 struct 제한: InstancedStruct를 담은 struct는 `ObservedStructs`에 둘 수 없다(InvalidArgument — 1단계 임시 값에 담긴 타입의 lease를 둘 곳이 없다). 담긴 struct 자신은 관찰할 수 있다(임시 값).
+- GC: 생성 Trace는 InstancedStruct 필드를 방문하지 않는다(담긴 struct에 강한 참조가 없다). 값 연산 `ValueCopy<InstancedStruct<Base>>`는 TryClone이다(Detach·대입 묶음 상자).
+- 경로: 새 연산 `PathSetInstancedType(…, TypeId)`·`PathClearInstanced`·`PathReadInstancedType`(-> `TypeLease`, 비어 있으면 빈 lease)과 사유 `PropertyPathError::NotInstanced`·`InstancedEmpty`, 검증 `detail::ValidateInstancedEdit`(ReadOnly). 멤버 단계 해석: 경로 실행기는 InstancedStruct 단계 뒤에 단계가 있으면 같은 시작 위치에서 그 단계까지의 앞부분을 조회 연산(QueryInstanced)으로 먼저 돌려 지금 타입의 lease를 쥐고 그 struct로 다음 단계를 푼다(`PathCursor::DescendInstanced`가 실행 때 같은 타입인지 대조). 담긴 struct는 InstancedStruct를 담지 않으므로 경로에 그런 단계는 하나뿐이다. Array 원소 삽입은 빈 값을 넣고(값을 주면 AggregateValue), Map `PathInsertKey`는 빈 값을 넣는다. 통째 읽기·쓰기는 AggregateValue다.
+- 문자열 경로: `PathInstancedTypeResolver` hook을 `ParsePropertyPath`·`FormatPropertyPath`의 끝 인자로 더하고, 객체 문맥 판 `ParsePropertyPath(registry, access, target, text, …)`·`FormatPropertyPath(registry, access, target, path, …)`(게시·staged 객체·struct 값 — 상자는 Unsupported)가 경로 연산으로 구현한 resolver를 쓴다. lease 판에 resolver가 없으면 InstancedStruct 뒤 `.`은 NotStruct다.
+- 텍스트(ReflectionText): 새 값 모양 `TextValueShape::InstancedType`(`f=<타입 도구 이름>` — `TypeRegistry::AcquireByToolName`, 대소문자 무시, struct가 아니면 InvalidValue / `f=none` 비우기). 대입 묶음은 InstancedStruct를 값 단위(상자 — TryClone)로 다루고 형 바꾸기를 상자에 적용한다. Map 값 자리는 항목이 없으면 빈 값을 먼저 넣고, Array 원소 자리는 index가 길이면 끝에 더한다. 멤버 대입 `f.m=v`의 경로는 문맥의 resolver(`TextCodecContext::SetInstancedTypes` — 대입 묶음은 준비 상태를 보는 `PreparedInstancedType`)로 풀어서 같은 묶음의 앞 형 바꾸기 위에서 해석된다. override 경로는 InstancedStruct에서 자른다(통째 단위). ReadOnly 호출 끝 대조는 담긴 타입과 멤버를 깊게 본다. JSON: export는 비어 있으면 null, 아니면 `{"_structType": "<타입 도구 이름>", 멤버...}`(도구 이름 없는 수동 등록 struct는 Unsupported), import는 null·`{}` 비우기, `_structType` 객체는 형 바꾸기 뒤 멤버 병합(통째 교체 — Map MergeByKey여도 그 항목은 교체), `_structType` 없는 비지 않은 객체는 InvalidValue다.
+- 시험: ObjectRuntime `ValueKindProperties_*`의 새 행·Base ≠ 0 Unsupported·Required 거부, ObjectSerialization `InstancedStructGraph_RoundTripEmptyAndValues`·`InstancedStructGraph_FieldWireIsEmptyPayloadOrRecord`·`InstancedStructGraph_OldContentVersionIsMigrated`·`InstancedStructGraph_UnknownStructTypeFollowsDecodePolicy`·`InstancedStructGraph_UncontainableStructsAreRejected`·`InstancedStructGraph_DepthSumIsCheckedOnEncodeAndDecode`·`InstancedStructGraph_TypeLeaseKeepsRegistration`·`InstancedStructGraph_ObservedStructCannotHoldInstancedStruct`, `InstancedStructPath_SetTypeMembersAndClear`·`InstancedStructPath_ElementsMapValuesAndStructMembers`·`InstancedStructPath_SetTypeRejections`, ReflectionText `TextInstanced_CommandLineSetsTypesAndMembers`·`TextInstanced_RejectionsAreDiagnostics`·`TextInstanced_JsonRoundTripsStructType`, ToolTests `Meta.InstancedStructFieldsReachDescriptorAndGeneratedCode`(Emplace<S> static_assert 포함)·`Meta.InstancedStructRejectsRequired`·`Meta.InstancedStructOptionalInnerIsRejected`·`Meta.InstancedStructKeyPositionsAreRejected`, `Meta.ValueKindTable*`의 InstancedStruct 칸(대조 헤더 변이에 InstancedStruct MapKey 뒤집기 — "C# 표에만 있는 종류" 변이는 아직 런타임에 없는 Text로 바꿨다), fixture ReflectionTestFixtures/InstancedStructFixture.h.
+
 ## 12. struct 상속(B9k)
 
 - `ROCKS_STRUCT() struct Derived : public Base { … }`. 리플렉션 base는 하나, public 비가상이다. 여러 단 상속을 허용한다.
@@ -1125,7 +1144,7 @@ public:
 | B9i3c | 대입 묶음 API·준비 단위·resolver·Publish — c0 선행 기반(값 연산·PathTarget·Detach·Attach), c1 API와 값 단위, c2 단일 참조 위치 단위(간선 변경)·Hard 대상 고정, c3 Registry 컨테이너 단위·참조 struct `{}`, c4 StructRefArray 원소 지우기·비우기 | B9i3b | L |
 | B9i4 | JSON export·import(객체·staged·struct 값, mapMerge) | B9i3c | L |
 | B9i5 | StructRefArray 원소 추가(대입 묶음·JSON import)와 컨테이너 게시의 남는 원소 재확인 완화(B9i 리뷰 L1) | B9i4 | M |
-| B9j | InstancedStruct<>·담기 조건·깊이 합·객체 문맥 경로 해석 | B9i4 | L |
+| B9j | InstancedStruct<>·담기 조건·깊이 합·객체 문맥 경로 해석(구현 — 11절 "구현(B9j)에서 정한 점") | B9i4 | L |
 | B9k | struct 상속·비리플렉션 빈 base·struct 멤버 thunk 소유자 인자·`InstancedStruct<Base>` | B9j | L |
 | B9l | Text·Localization `TryGetPersistentForm`·`DeepClone` | B9i4 | M |
 | B9m | bitfield bool(접근자 판 일곱 갈래) | B9a1 | L |
@@ -1436,6 +1455,11 @@ U5의 Deprecated 저장 범위: UE의 저장 불가 판정은 패키지 저장 �
   - StructRefArray 원소 추가(대입 묶음의 `items[i]={}`·JSON import의 원소 배열) → B9i5에서 했다(10.2절 "구현(B9i5)에서 정한 점").
   - 컨테이너 단위 게시의 남는 원소 재확인 완화(B9i 리뷰 L1) → B9i5에서 했다(같은 곳 — 새로 들어오는 대상만 재확인).
   - 지운 StructRefArray 원소의 Undo 내용(PublishedAssignments가 지운 원소의 값·참조를 돌려주는 것 — 지금은 지운 원소 수와 index만 게시에 쓰고 내용을 남기지 않는다) → CU4(Undo).
+- B9j가 남긴 일(맡을 단계):
+  - `InstancedStruct<Base>`(Base 해석·파생 판정 `IsStructA`·RMC2308) → B9k. B9j의 TypeRegistry는 Base ≠ 0을 Unsupported로 막아 두었다.
+  - 차이 저장(같은 타입이면 기준 대비 멤버 차이 — UE 방식, 11절)과 InstancedStruct 안 멤버의 override 경로(지금은 InstancedStruct에서 자른 통째 단위) → A5.
+  - 상자(DetachedValue)에서 시작한 형 바꾸기의 깊이 합은 위치 깊이를 0으로 본다(원래 자리를 모른다 — 저장이 위반을 InvalidArgument로 드러낸다). 상자가 원래 깊이를 들고 다닐지는 CU4(Undo·붙여넣기)가 정한다.
+  - 객체 문맥 판 문자열 경로는 상자 시작 위치를 받지 않는다(Unsupported).
 - 경로 key 텍스트의 제어 문자: 따옴표 안 escape는 `\\`·`\"`·`\n`·`\r`·`\t`뿐이라(1.5절, 사용자 결정 2026-11-16) 그 밖의 제어 문자(0x00–0x1F 중 셋을 뺀 것, 0x7F)를 담은 String·Name 키는 문자열 경로로 쓸 수 없다(FormatPropertyPath Unsupported — PathKey로는 다룬다). UE에 없는 `\u` 표기를 둘지는 그런 키를 쓰는 소비자(asset-info 출력)가 생길 때 정한다.
 
 ## 21. 문서 반영 목록

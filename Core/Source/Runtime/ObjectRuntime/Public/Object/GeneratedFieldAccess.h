@@ -5,6 +5,7 @@
 #include <Object/AssetId.h>
 #include <Object/ClassRef.h>
 #include <Object/ConstructionContext.h>
+#include <Object/InstancedStruct.h>
 #include <Object/NameField.h>
 #include <Object/SoftObjectRef.h>
 #include <Core/Containers/OrderedMap.h>
@@ -262,9 +263,9 @@ constexpr ValueKind ScalarValueKind() noexcept {
 }
 
 // C++ 멤버 형식의 필드 값 종류다: 정적 배열 T[N]은 StaticArray, 리플렉션 배열 컨테이너는 Array,
-// Optional<T>는 Optional,
-// OrderedMap<K, V>·OrderedSet<T>는 Map·Set, 단일 값은 ScalarValueKind, 리플렉션 enum·struct는
-// Enum·Struct, 그 밖은 Opaque다(단일 값 형식 대응은 ScalarValueKind 한 곳에 있다).
+// Optional<T>는 Optional, OrderedMap<K, V>·OrderedSet<T>는 Map·Set, InstancedStruct<Base>는
+// InstancedStruct(리플렉션 B9j), 단일 값은 ScalarValueKind, 리플렉션 enum·struct는 Enum·Struct, 그
+// 밖은 Opaque다(단일 값 형식 대응은 ScalarValueKind 한 곳에 있다).
 template <class T>
 constexpr ValueKind FieldValueKind() noexcept {
     if constexpr (StaticArrayField<T>::Supported) {
@@ -275,6 +276,8 @@ constexpr ValueKind FieldValueKind() noexcept {
         return ValueKind::Optional;
     } else if constexpr (MapField<T>::Supported) {
         return MapField<T>::IsSet ? ValueKind::Set : ValueKind::Map;
+    } else if constexpr (InstancedStructField<T>::Supported) {
+        return ValueKind::InstancedStruct;
     } else if constexpr (ScalarValueKind<T>() != ValueKind::Opaque) {
         return ScalarValueKind<T>();
     } else if constexpr (ReflectedEnumField<T>::Supported) {
@@ -303,13 +306,16 @@ constexpr ValueKind FieldAccessKind() noexcept {
 // FieldValueKind<T>()).
 template <ValueKind Target, class T>
 struct TargetValueCheck {
-    static constexpr bool Valid = Target == ValueKind::Enum ? IsEnumV<T>
-                                  : Target == ValueKind::Struct
-                                      ? IsClassV<T> && ScalarValueKind<T>() == ValueKind::Opaque &&
-                                            !ArrayField<T>::Supported &&
-                                            !OptionalField<T>::Supported && !MapField<T>::Supported
-                                      : Target != ValueKind::Opaque && Target != ValueKind::Array &&
-                                            ScalarValueKind<T>() == Target;
+    static constexpr bool Valid =
+        Target == ValueKind::Enum ? IsEnumV<T>
+        : Target == ValueKind::Struct
+            ? IsClassV<T> && ScalarValueKind<T>() == ValueKind::Opaque &&
+                  !ArrayField<T>::Supported && !OptionalField<T>::Supported &&
+                  !MapField<T>::Supported && !InstancedStructField<T>::Supported
+        : Target == ValueKind::InstancedStruct
+            ? InstancedStructField<T>::Supported
+            : Target != ValueKind::Opaque && Target != ValueKind::Array &&
+                  ScalarValueKind<T>() == Target;
     static_assert(Valid, "path thunk target kind does not match the C++ member type");
 };
 

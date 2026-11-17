@@ -17,7 +17,8 @@
 //   intern, None 출력 `None`) / ObjectRef·WeakRef·Soft resolver(null `none`) / ClassRef 타입 도구
 //   이름·TypeId(null `none`) / Array·StaticArray·Set 쉼표 목록(빈 값 = 빈 컨테이너) / Map `k:v`
 //   쉼표 목록 / Optional 내부 표기(struct 내부는 `{}` — unset은 대입 종류 Unset) / struct
-//   `{}`(기본값).
+//   `{}`(기본값) / InstancedStruct 타입 도구 이름(그 struct 기본 값으로 형 바꾸기 — 멤버는 경로
+//   `<f>.<m>=v`), 비우기 `none`(리플렉션 B9j).
 //
 // 목록 escape 표(codec 전체에 하나 — TextListEscapeCharacters): 목록 원소 안의 `,`·`;`는 `\,`·`\;`,
 // Map 항목은 처음 나오는 escape되지 않은 `:`에서 나누고 키 안의 `:`만 `\:`로 쓴다(값 안의 `C:\x`는
@@ -83,7 +84,10 @@ enum class TextValueShape : uint8 {
     // 목록(elements) — Array·StaticArray·Set 필드.
     List,
     // Map 항목 목록(elements = 키, values = 값 — 같은 순서·같은 수).
-    Entries
+    Entries,
+    // InstancedStruct 자리의 형 바꾸기(리플렉션 B9j — 텍스트는 타입 도구 이름, single.guid = 그
+    // struct ID로 그 struct 기본 값을 만든다) 또는 비우기(텍스트 `none`, single.guid = 0).
+    InstancedType
 };
 
 // 값 텍스트 하나를 읽은 값, 또는 텍스트로 쓸 값이다. FieldValue는 allocator를 빌린다(값보다 오래
@@ -189,6 +193,18 @@ public:
     // ResolveTextPath가 key 오류를 보고할 때 쓴다.
     TextDiagnosticCode TakeKeyFailure() noexcept;
 
+    // InstancedStruct 뒤 멤버 단계(`row.damage` — 리플렉션 B9j)를 풀 때 그 자리의 지금 담긴
+    // struct를 주는 resolver다(없으면 nullptr — 그런 경로는 ResolveTextPath가 InvalidValue 진단).
+    // 대입 묶음은 준비 상태(같은 묶음의 앞 대입이 바꾼 상자)를 보는 resolver를 대입마다 건다.
+    // resolver는 이 문맥이 쓰는 동안 살아 있어야 한다.
+    PathInstancedTypeResolver* InstancedTypes() const noexcept {
+        return instancedTypes_;
+    }
+
+    void SetInstancedTypes(PathInstancedTypeResolver* resolver) noexcept {
+        instancedTypes_ = resolver;
+    }
+
 private:
     class KeyTextHook final : public PathKeyTextHook {
     public:
@@ -212,6 +228,7 @@ private:
     uint64 consumed_ = 0;
     bool started_ = false;
     KeyTextHook keyHook_;
+    PathInstancedTypeResolver* instancedTypes_ = nullptr;
 };
 
 // 해석한 경로와 그 자리다(약 7 KB — PropertyPathBuffer).
