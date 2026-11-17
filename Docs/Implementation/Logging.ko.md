@@ -233,6 +233,41 @@ logs.AddSink(sink, {LogLevel::Warning, LogGraphics});   // Graphics·Graphics.* 
 - Fatal이 재귀하면(로깅 내부의 assert 등) 바로 `platform::Fatal`로 간다.
 - 로깅 경로 자체의 실패(템플릿 오류, 공간 부족, 큐 포화, sink 실패, 출력 스레드 시작 실패)는 버리기·낮추기·집계로 끝난다. 엔진을 종료시키지 않는다.
 
+## 파일 기록과 암호화
+
+```cpp
+FileLogSinkConfig file;
+file.directory = logDirectory;
+file.hostName = "Game";
+file.format = LogFileFormat::Text;          // 또는 LogFileFormat::JsonLines
+crypto::LogFileSealer sealer(recipientPublicKey);   // 암호화할 때만(기본은 평문)
+file.cipher = &sealer;
+FileLogSink fileSink(allocator, file);
+(void)fileSink.Open();
+(void)logs.AddSink(fileSink);
+```
+
+- **파일 이름과 회전**
+  - 실행마다 새 파일 `<폴더>/<호스트>-YYYYMMDDTHHMMSSmmmZ.log`를 만듭니다. 회전한 파일과 같은 시각에 시작한 다른 실행은 `-2`, `-3` …이 붙습니다.
+  - `maxBytes`(기본 16 MiB)를 넘으면 회전하고, `retention`(기본 8, 최대 256)개까지만 남깁니다.
+- **쓰기:** flush 묶음 단위로 한 번에 씁니다. 렌더는 텍스트 레이아웃 또는 JSON lines sink와 같습니다. 쓰기나 열기가 실패하면 `DependencyFailed`를 돌려주고 다음 묶음에서 다시 엽니다.
+- **암호화는 선택이며 기본은 끔입니다.**
+  - Core는 Crypto보다 아래 계층이라, 암호화는 호스트가 `crypto::LogFileSealer`를 만들어 `cipher`로 넘깁니다.
+  - 봉인: 파일마다 개발자 공개키로 X-Wing KEM 캡슐화를 해서 SecretStream 키를 뽑고, flush 묶음마다 봉인합니다. 정상 종료와 회전 때는 끝 표시(Final)를 씁니다.
+  - 게임 바이너리에는 공개키만 들어갑니다. 목표는 사용자가 파일을 열어 읽지 못하게 하는 수준이고, 완벽한 보안이 아닙니다.
+  - **키 준비에 실패하면 평문으로 내려가지 않습니다.** 파일을 만들지 않고 sink를 끄며(`IsDisabled()`), 비상 출력으로 한 번 알립니다.
+- **파일 형식(버전 1)**
+  - 머리 1156 byte: `RKLOGENC`, 버전, KEM 종류, KEM 암호문 1120 byte, SecretStream header
+  - 그 뒤로 `length(4) | 봉인된 묶음`이 반복됩니다.
+  - 정상 종료면 Final 기록으로 끝납니다.
+- **명령(Commandlet)**
+  - `log keygen <out-public> <out-private>`: 키 쌍을 만듭니다. 기존 파일은 덮어쓰지 않습니다. **개인키는 저장소나 쿠킹 결과에 넣지 않습니다.**
+  - `log decode <file> --key <private> [--json]`: 평문을 표준 출력으로 냅니다. `--json`은 상태 요약을 표준 오류에 JSON 한 줄로 냅니다.
+    - 끝 표시가 없으면(비정상 종료) 마지막 완전한 묶음까지 내고 "no end marker (abnormal termination)"를 알립니다.
+    - 변조되었으면 "authentication failed"(종료 코드 1)입니다.
+  - `log seal <plain> <out> --public <public>`: 같은 형식으로 봉인합니다(진단·시험용).
+- **무할당 범위:** 파일을 연 뒤의 쓰기·봉인 경로는 엔진 allocator와 `operator new`를 쓰지 않습니다. 다만 회전 때 새 파일을 여는 OS 핸들과 새 KEM 캡슐화(Crypto 키 저장소)는 예외입니다.
+
 ## 시험에서 쓰기
 
 - `LogMode::Manual` LogSystem과 캡처 sink를 시험 안에서 `LogInstallScope`로 설치한다. 기록한 뒤 `Pump()`를 부르고 단언한다. sleep을 쓰지 않는다.
@@ -241,7 +276,6 @@ logs.AddSink(sink, {LogLevel::Warning, LogGraphics});   // Graphics·Graphics.* 
 
 ## 아직 구현되지 않은 것
 
-- 파일 sink와 선택적 암호화, `log keygen`·`log decode` 명령: LG10 진행 중
 - 설정 파일 연결(`log.mode`·`log.file.*`·레벨 재정의): LG9
 - Sandbox·명령줄 도구의 LogSystem 설치: LG8
 - TraceCapture `log` 채널 연결과 상관 id, 구조체 펼치기(`{@Obj}`), 사용자 Formatter spec의 컴파일 타임 검증: 후속
