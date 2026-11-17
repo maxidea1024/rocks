@@ -74,8 +74,22 @@ struct TextureRecord {
     uint32 width = 0;
     uint32 height = 0;
     uint32 mipLevels = 1;
+    // view(CreateTextureView)면 view가 읽는 형식, 아니면 텍스처 형식이다.
     PixelFormat format = PixelFormat::Unknown;
     bool renderTarget = false;
+    bool depthTarget = false;
+    // 이미지 전체의 aspect다(barrier, TextureFormatInfo::aspect).
+    VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+    // 묶을 때 쓰는 샘플러다(장치 수명 동안 산다). view도 원 텍스처의 샘플러를 쓴다.
+    VkSampler sampler = VK_NULL_HANDLE;
+    // 다른 텍스처의 이미지를 공유하는 view다. 이미지·메모리는 원 텍스처 기록이 쥐고 상태도 원
+    // 기록(source)이 추적한다. 업로드·readback·그리기 대상이 될 수 없다.
+    bool isView = false;
+    SlotHandle source;
+    // 이 텍스처를 가리키는 살아 있는 view 수다. 0이 아니면 Retire는 기록을 남겨 두고(retirePending)
+    // 마지막 view를 놓을 때 함께 놓는다(상태 추적의 주인을 하나로 유지한다).
+    uint32 viewCount = 0;
+    bool retirePending = false;
     // mip마다 장치가 추적한 접근 상태다(RenderBase GX5). committed는 제출한 프레임 기록 끝의 상태,
     // current는 기록 중인 프레임 안의 상태다(기록 중이 아니면 같다). 업로드 기록은 프레임 기록보다
     // 먼저 실행되므로 committed에서 바꿨다가 되돌린다(상태 중립). layout은 상태에서
@@ -237,6 +251,10 @@ public:
     Result<TextureHandle> CreateTexture(const TextureDesc& desc,
                                         Span<const uint8> pixels) noexcept override;
     PixelFormatCaps GetPixelFormatCaps(PixelFormat format) const noexcept override;
+    Result<TextureHandle> CreateTextureView(TextureHandle texture,
+                                            const TextureViewDesc& desc) noexcept override;
+    Result<void> ReadTexture(TextureHandle texture, uint32 mipLevel, uint32 plane,
+                             Span<uint8> out) noexcept override;
     Result<PipelineHandle> CreatePipeline(const PipelineDesc& desc) noexcept override;
     Result<CommandContext*> BeginFrame(SwapChainHandle swapChain,
                                        const ClearColor& clear) noexcept override;
@@ -387,6 +405,14 @@ private:
     // --- VulkanResources.cpp(형식 능력) ---
     // 형식 표에 있는 형식마다 optimal tiling 기능을 물어 능력을 정한다(장치 생성 때 한 번).
     void QueryFormatCaps() noexcept;
+    // format으로 만드는 이미지의 usage·flags다(QueryFormatCaps와 CreateTexture가 같은 값을 쓴다).
+    VkImageUsageFlags ImageUsageFor(PixelFormat format, bool renderTarget) const noexcept;
+    VkImageCreateFlags ImageFlagsFor(PixelFormat format) const noexcept;
+    // 그 usage·flags로 2D 이미지를 만들 수 있는지와 mip 사슬 지원을 묻는다.
+    bool ImageSupported(VkFormat format, VkImageUsageFlags usage, VkImageCreateFlags flags,
+                        bool& mipmaps) const noexcept;
+    // 텍스처 기록 하나를 회수 대기로 넘기고 표에서 뺀다(잠금 안).
+    void RetireTextureRecord(SlotHandle slot, TextureRecord& record) noexcept;
 
     // --- VulkanSubmission.cpp ---
     Result<void> CreateCommandPool() noexcept;
@@ -447,7 +473,8 @@ private:
     // image mip 구간의 접근 상태 from → to barrier를 buffer에 기록한다. 같은 상태의 읽기는
     // 건너뛰고, uavOrder면 같은 UAV 상태 사이에도 쓰기 순서 barrier를 낸다. 기록했는지를 돌려준다.
     bool AccessBarrier(VkCommandBuffer buffer, VkImage image, uint32 firstMip, uint32 mipCount,
-                       ResourceAccess from, ResourceAccess to, bool uavOrder) noexcept;
+                       ResourceAccess from, ResourceAccess to, bool uavOrder,
+                       VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) noexcept;
     // 기록 중 프레임에서 텍스처 mip [first, first + count)를 after로 바꾼다(잠금 안). barrier가
     // 필요하면 열린 render pass를 먼저 닫는다(호출자가 ResumeRenderPass로 다시 연다).
     void TrackTransition(TextureRecord& record, SlotHandle slot, uint32 first, uint32 count,
@@ -484,7 +511,7 @@ private:
     Result<void> RecordTextureUpload(const TextureRecord& record, uint32 firstMip, uint32 count,
                                      Span<const uint8> pixels, bool initial) noexcept;
     void RecordTextureCopy(const TextureRecord& record, uint32 mipLevel, VkBuffer source,
-                           uint64 offset, bool initial) noexcept;
+                           const uint64* offsets, bool initial) noexcept;
     Result<uint64> FlushUploadsLocked() noexcept;
     Result<ReadbackRequest> RequestReadbackLocked(TextureHandle target) noexcept;
     Result<bool> TryReadbackLocked(ReadbackHandle handle, Span<uint8> out) noexcept;
@@ -524,6 +551,12 @@ private:
     bool swapchainExtension_ = false;
     bool debugUtils_ = false;
     bool anisotropy_ = false;
+    // samplerYcbcrConversion 기능을 켰다(multi-planar 비디오 이미지 생성 조건, Vulkan 1.1 core).
+    bool ycbcr_ = false;
+    // VK_EXT_texture_compression_astc_hdr와 그 기능을 켰다(ASTC HDR 형식 사용 조건).
+    bool astcHdr_ = false;
+    // shaderImageGatherExtended를 지원한다(PixelFormatCaps::Gather 판정, UE와 같다).
+    bool gather_ = false;
     bool validation_ = false;
     bool software_ = false;
     ShaderSourceCompiler* shaderCompiler_ = nullptr;

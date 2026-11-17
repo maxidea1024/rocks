@@ -152,8 +152,17 @@ uint32 Slices(PixelFormat format, uint32 mips, Slice (&out)[8]) noexcept {
 }
 
 // 깊이 plane은 장치가 보존하는 값으로 바꾼다: D24는 상위 8비트를 0으로(정의되지 않는 비트), D32F는
-// [0, 1]의 유한값으로.
+// [0, 1]의 유한값으로. P010은 16비트 표본의 하위 6비트를 0으로 둔다(Vulkan G10X6 형식은 그 비트를
+// 정의하지 않는다).
 void SanitizeDepth(PixelFormat format, uint32 mips, Span<uint8> data) noexcept {
+    if (format == PixelFormat::P010) {
+        for (usize index = 0; index + 2 <= data.Size(); index += 2) {
+            data[index] = static_cast<uint8>(data[index] & 0xC0u);
+        }
+
+        return;
+    }
+
     Slice slices[8];
     const uint32 count = Slices(format, mips, slices);
     for (uint32 index = 0; index < count; ++index) {

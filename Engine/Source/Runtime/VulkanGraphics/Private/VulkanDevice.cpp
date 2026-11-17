@@ -171,8 +171,11 @@ VulkanDevice::~VulkanDevice() {
             }
 
             functions_.vkDestroyImageView(device_, record.view, nullptr);
-            functions_.vkDestroyImage(device_, record.image, nullptr);
-            FreeMemoryLocked(record.memory);
+            // view는 원 텍스처의 이미지를 공유하므로 원 기록만 이미지·메모리를 놓는다.
+            if (!record.isView) {
+                functions_.vkDestroyImage(device_, record.image, nullptr);
+                FreeMemoryLocked(record.memory);
+            }
         }
 
         textures_.Clear();
@@ -344,6 +347,9 @@ Result<void> VulkanDevice::Initialize(const DeviceDesc& desc, DeviceCreateReport
         return device;
     }
 
+    // 형식 능력은 켠 기능(Y′CbCr·ASTC HDR)에 따라 달라지므로 논리 장치를 만든 뒤 묻는다.
+    QueryFormatCaps();
+
     auto shared = CreateSharedObjects(desc);
     if (!shared) {
         return shared;
@@ -501,7 +507,6 @@ Result<void> VulkanDevice::PickPhysicalDevice(const DeviceDesc& desc) noexcept {
     software_ = bestRank == CpuRank;
     auto named = adapterName_.TryAssign(StringView(properties_.deviceName));
     (void)named;
-    QueryFormatCaps();
     return Result<void>::Success();
 }
 
@@ -532,11 +537,44 @@ Result<void> VulkanDevice::CreateLogicalDevice() noexcept {
         enabled[enabledCount++] = VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME;
     }
 
-    VkPhysicalDeviceFeatures supported = {};
-    functions_.vkGetPhysicalDeviceFeatures(physical_, &supported);
+    // ASTC HDR 형식(VK_FORMAT_ASTC_*_SFLOAT_BLOCK)은 확장 형식이다. 확장과 기능을 켜지 않으면 그
+    // 형식을 묻거나 쓸 수 없다(PixelFormat.ko.md 14.2절).
+    const bool astcHdrExtension = HasExtension(extensions, extensionCount,
+                                               VK_EXT_TEXTURE_COMPRESSION_ASTC_HDR_EXTENSION_NAME);
+    // multi-planar 이미지(NV12·P010)를 만들려면 samplerYcbcrConversion 기능을 켜야 한다(Vulkan 1.1
+    // core 기능, 지원하면 켠다). plane view만 쓰므로 Y′CbCr 변환 객체는 만들지 않는다.
+    VkPhysicalDeviceTextureCompressionASTCHDRFeatures astcHdrSupported = {};
+    astcHdrSupported.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TEXTURE_COMPRESSION_ASTC_HDR_FEATURES;
+    VkPhysicalDeviceSamplerYcbcrConversionFeatures ycbcrSupported = {};
+    ycbcrSupported.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES;
+    ycbcrSupported.pNext = astcHdrExtension ? &astcHdrSupported : nullptr;
+    VkPhysicalDeviceFeatures2 supported2 = {};
+    supported2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    supported2.pNext = &ycbcrSupported;
+    functions_.vkGetPhysicalDeviceFeatures2(physical_, &supported2);
+    const VkPhysicalDeviceFeatures& supported = supported2.features;
+    ycbcr_ = ycbcrSupported.samplerYcbcrConversion == VK_TRUE;
+    astcHdr_ = astcHdrExtension && astcHdrSupported.textureCompressionASTC_HDR == VK_TRUE;
+    if (astcHdr_) {
+        enabled[enabledCount++] = VK_EXT_TEXTURE_COMPRESSION_ASTC_HDR_EXTENSION_NAME;
+    }
+
+    VkPhysicalDeviceTextureCompressionASTCHDRFeatures astcHdrEnabled = {};
+    astcHdrEnabled.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TEXTURE_COMPRESSION_ASTC_HDR_FEATURES;
+    astcHdrEnabled.textureCompressionASTC_HDR = VK_TRUE;
+    VkPhysicalDeviceSamplerYcbcrConversionFeatures ycbcrEnabled = {};
+    ycbcrEnabled.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES;
+    ycbcrEnabled.samplerYcbcrConversion = ycbcr_ ? VK_TRUE : VK_FALSE;
+    ycbcrEnabled.pNext = astcHdr_ ? &astcHdrEnabled : nullptr;
     VkPhysicalDeviceFeatures features = {};
     anisotropy_ = supported.samplerAnisotropy == VK_TRUE;
+    gather_ = supported.shaderImageGatherExtended == VK_TRUE;
     features.samplerAnisotropy = anisotropy_ ? VK_TRUE : VK_FALSE;
+    // 블록 압축 묶음 기능은 지원하면 켠다. 형식마다의 지원은 형식 능력 질의가 판정한다.
+    features.textureCompressionBC = supported.textureCompressionBC;
+    features.textureCompressionETC2 = supported.textureCompressionETC2;
+    features.textureCompressionASTC_LDR = supported.textureCompressionASTC_LDR;
     const float priority = 1.0f;
     VkDeviceQueueCreateInfo queue = {};
     queue.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
@@ -550,6 +588,7 @@ Result<void> VulkanDevice::CreateLogicalDevice() noexcept {
     info.enabledExtensionCount = enabledCount;
     info.ppEnabledExtensionNames = enabled;
     info.pEnabledFeatures = &features;
+    info.pNext = &ycbcrEnabled;
     result = functions_.vkCreateDevice(physical_, &info, nullptr, &device_);
     if (result != VK_SUCCESS) {
         device_ = VK_NULL_HANDLE;

@@ -470,13 +470,23 @@ void VulkanDevice::SetTexture(TextureHandle handle) noexcept {
 
     TextureRecord* record = textures_.Find(handle.slot);
     SlotHandle slot = handle.slot;
-    if (record == nullptr) {
+    if (record == nullptr || record->set == VK_NULL_HANDLE) {
         record = textures_.Find(white_.slot);
         slot = white_.slot;
     }
 
     if (record == nullptr) {
         return;
+    }
+
+    // view는 descriptor만 자기 것이고 이미지 상태는 원 텍스처 기록이 추적한다.
+    const VkDescriptorSet set = record->set;
+    if (record->isView) {
+        slot = record->source;
+        record = textures_.Find(slot);
+        if (record == nullptr) {
+            return;
+        }
     }
 
     // 명시 전이 없이 그래픽 셰이더 읽기 상태가 아닌 텍스처를 읽으면 암묵 전이로 메운다(GX5. 렌더
@@ -495,7 +505,7 @@ void VulkanDevice::SetTexture(TextureHandle handle) noexcept {
     }
 
     functions_.vkCmdBindDescriptorSets(frame_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout_, 1,
-                                       1, &record->set, 0, nullptr);
+                                       1, &set, 0, nullptr);
 }
 
 void VulkanDevice::SetConstants(const DrawConstants& constants) noexcept {

@@ -159,7 +159,7 @@ bool BarrierNeeded(ResourceAccess from, ResourceAccess to, bool uavOrder) noexce
 
 bool VulkanDevice::AccessBarrier(VkCommandBuffer buffer, VkImage image, uint32 firstMip,
                                  uint32 mipCount, ResourceAccess from, ResourceAccess to,
-                                 bool uavOrder) noexcept {
+                                 bool uavOrder, VkImageAspectFlags aspect) noexcept {
     if (!BarrierNeeded(from, to, uavOrder)) {
         return false;
     }
@@ -175,7 +175,7 @@ bool VulkanDevice::AccessBarrier(VkCommandBuffer buffer, VkImage image, uint32 f
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.image = image;
-    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, firstMip, mipCount, 0, 1};
+    barrier.subresourceRange = {aspect, firstMip, mipCount, 0, 1};
     functions_.vkCmdPipelineBarrier(buffer, source.stage, destination.stage, 0, 0, nullptr, 0,
                                     nullptr, 1, &barrier);
     return true;
@@ -221,7 +221,8 @@ void VulkanDevice::TrackTransition(TextureRecord& record, SlotHandle slot, uint3
             SuspendRenderPass();
         }
 
-        (void)AccessBarrier(frame_, record.image, mip, end - mip, from, after, uavOrder);
+        (void)AccessBarrier(frame_, record.image, mip, end - mip, from, after, uavOrder,
+                            record.aspect);
         mip = end;
     }
 
@@ -319,7 +320,13 @@ void VulkanDevice::Transition(Span<const ResourceTransition> transitions) noexce
             continue;
         }
 
-        TextureRecord* record = textures_.Find(transition.texture.slot);
+        // view의 전이는 이미지 상태를 추적하는 원 텍스처 기록에 낸다.
+        SlotHandle slot = transition.texture.slot;
+        TextureRecord* record = textures_.Find(slot);
+        if (record != nullptr && record->isView) {
+            slot = record->source;
+            record = textures_.Find(slot);
+        }
         if (record == nullptr || transition.range.firstMip >= record->mipLevels) {
             ++ignoredDraws_;
             continue;
@@ -359,7 +366,7 @@ void VulkanDevice::Transition(Span<const ResourceTransition> transitions) noexce
         }
 
         const bool uav = HasAnyAccess(transition.after, UavAccessMask);
-        TrackTransition(*record, transition.texture.slot, first, count, transition.after, uav);
+        TrackTransition(*record, slot, first, count, transition.after, uav);
     }
 
     ResumeRenderPass();
