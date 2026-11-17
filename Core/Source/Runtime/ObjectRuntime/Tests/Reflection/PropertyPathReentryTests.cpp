@@ -104,7 +104,10 @@ FieldSchema ArrayOf(Guid id, const char* name, ValueKind element, TypeId type = 
 
 template <auto Member, ValueKind Target>
 RuntimeStructFieldOps MemberOps(Guid id) noexcept {
-    return detail::StructFieldOps<Member>(id, &detail::PathStructMember<Member, Target>);
+    return detail::StructFieldOps<typename detail::StructMemberPointer<decltype(Member)>::Owner,
+                                  Member>(
+        id, &detail::PathStructMember<typename detail::StructMemberPointer<decltype(Member)>::Owner,
+                                      Member, Target>);
 }
 
 // 단일 값 클래스 필드(read·write·writeStaged — 생성 코드와 달리 path는 없다).

@@ -66,9 +66,9 @@ internal static partial class MetaTests
             Verify.Contains("{ValueKind::Map,Guid{}}", generated, "generated map schema");
             Verify.Contains("{ValueKind::Set,Guid{}}", generated, "generated set schema");
             Verify.Contains("NativeTypeKey<::probe::Mode>()}", generated, "map enum key native key");
-            Verify.Contains("detail::StructFieldOps<&::probe::Leaf::tags>(", generated, "set struct member ops");
-            Verify.Contains("PathStructMember<&::probe::Leaf::tags,ValueKind::Name>", generated, "set member path thunk targets the element kind");
-            Verify.Contains("PathStructMember<&::probe::Leaf::named,ValueKind::Utf8String>", generated, "map member path thunk targets the value kind");
+            Verify.Contains("detail::StructFieldOps<::probe::Leaf,&::probe::Leaf::tags>(", generated, "set struct member ops");
+            Verify.Contains("PathStructMember<::probe::Leaf,&::probe::Leaf::tags,ValueKind::Name>", generated, "set member path thunk targets the element kind");
+            Verify.Contains("PathStructMember<::probe::Leaf,&::probe::Leaf::named,ValueKind::Utf8String>", generated, "map member path thunk targets the value kind");
             Verify.Contains("PathClassField<::probe::Value,::rocks::ValueKind::Struct>(cursor,&::probe::Value::leaves)", generated,
                 "map class field path thunk targets the value kind");
             Verify.Contains("PathClassField<::probe::Value,::rocks::ValueKind::SoftObjectReference>(cursor,&::probe::Value::assets)", generated,

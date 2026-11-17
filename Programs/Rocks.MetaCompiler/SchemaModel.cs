@@ -635,7 +635,13 @@ internal sealed class ClassModel
 
     // TypeFlags::Atomic(struct 전용 — ROCKS_STRUCT(Atomic), import struct는 descriptor flags의 Atomic). 값이 통째
     // 단위다(Docs/Design/ReflectionExtensions.ko.md 3.1절). 형질과 달리 선언 값이라 멤버에서 계산하거나 대조하지 않는다.
-    public bool Atomic { get; init; }
+    public bool Atomic { get; set; }
+
+    // struct의 C++ base 철자(Clang — 리플렉션 B9k)다. SchemaValidator가 리플렉션 struct 하나를 Base로, 나머지를 필드 없는 비리플렉션
+    // base(EmptyBases — 생성 static_assert가 비었고 다형적이지 않은지 확인한다)로 나눈다. import struct는 비어 있다.
+    public List<string> StructBaseSpellings { get; } = [];
+
+    public List<string> EmptyBases { get; } = [];
 
     // 설정 struct(ROCKS_STRUCT(Settings(Branch="…", Section="…")) — Docs/Design/ConfigSystem.ko.md 7절)의 branch·섹션 이름이다(설정 struct가
     // 아니면 둘 다 ""). 이 모듈 struct만 채운다(descriptor에 싣지 않는다 — import struct의 생성 SettingsSchema는 그 모듈의 생성 헤더에 있다).

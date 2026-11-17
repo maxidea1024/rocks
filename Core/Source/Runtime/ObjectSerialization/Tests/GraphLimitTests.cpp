@@ -67,8 +67,9 @@ struct GeneratedType<limit_fixture::Pair> {
 
     static RuntimeStructOps Ops() noexcept {
         using namespace limit_fixture;
-        static const RuntimeStructFieldOps fields[] = {detail::StructFieldOps<&Pair::x>(PairXId),
-                                                       detail::StructFieldOps<&Pair::y>(PairYId)};
+        static const RuntimeStructFieldOps fields[] = {
+            detail::StructFieldOps<Pair, &Pair::x>(PairXId),
+            detail::StructFieldOps<Pair, &Pair::y>(PairYId)};
         RuntimeStructOps ops = MakeRuntimeStructOps<Pair>();
         ops.fields = fields;
         return ops;

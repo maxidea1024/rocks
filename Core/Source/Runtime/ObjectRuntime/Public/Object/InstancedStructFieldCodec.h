@@ -32,6 +32,13 @@ Result<void> EncodeInstancedStructContent(const InstancedStruct<Base>& source, A
         return allowed;
     }
 
+    // InstancedStruct<Base>(리플렉션 B9k)의 담긴 struct는 스키마 Base의 파생이어야 한다(수동
+    // 함수표·lease 판 Emplace로 넣은 값도 저장 때 다시 본다).
+    const TypeId base = FieldTargetType(context.Field()).type;
+    if (base != TypeId{} && !source.Type().IsA(base)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
     if (auto fits = CheckInstancedStructDepth(context.PositionDepth(), view); !fits) {
         return fits;
     }
@@ -148,6 +155,13 @@ Result<void> DecodeInstancedStructContent(ConstructionContext* construction, Obj
         const StructView view = acquired.Value().Struct();
         if (auto allowed = CheckInstancedStructContent(view); !allowed) {
             return allowed;
+        }
+
+        // InstancedStruct<Base>(리플렉션 B9k)는 Base 자신이나 그 파생만 받는다(정책과 무관하게
+        // InvalidArgument).
+        const TypeId base = FieldTargetType(context.Field()).type;
+        if (base != TypeId{} && !acquired.Value().IsA(base)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
         if (auto fits = CheckInstancedStructDepth(context.PositionDepth(), view); !fits) {

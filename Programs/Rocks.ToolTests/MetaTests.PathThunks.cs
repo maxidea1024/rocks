@@ -33,14 +33,14 @@ internal static partial class MetaTests
                 ("NativeTypeKey<::probe::Holder>(), " + lambda + "::probe::Value, ::rocks::ValueKind::Struct>(cursor, &::probe::Value::holders)", "StructRefArray target kind"),
                 ("NativeTypeKey<::probe::Bundle>(), " + lambda + "::probe::Value, ::rocks::ValueKind::Struct>(cursor, &::probe::Value::bundle)", "struct field target kind"),
                 (lambda + "::probe::WorldValue, ::rocks::ValueKind::Struct>(cursor, &::probe::WorldValue::bundle)", "owner is the class that emits the table"),
-                ("detail::StructFieldOps<&::probe::Leaf::count>(", "member codec is unchanged"),
-                ("&detail::PathStructMember<&::probe::Leaf::count, ValueKind::UInt32>)", "scalar member path thunk"),
-                ("&detail::PathStructMember<&::probe::Leaf::codes, ValueKind::UInt16>)", "array member path thunk uses the element kind"),
-                ("&detail::PathStructMember<&::probe::Holder::target, ValueKind::ObjectReference>)", "reference member path thunk"),
-                ("&detail::PathStructMember<&::probe::Holder::weights, ValueKind::Float32>)", "float array member path thunk"),
-                ("&detail::PathStructMember<&::probe::Bundle::refs, ValueKind::ObjectReference>)", "ObjectRefArray member path thunk"),
-                ("&detail::PathStructMember<&::probe::Bundle::holders, ValueKind::Struct>)", "StructRefArray member path thunk"),
-                ("&detail::PathStructMember<&::probe::WorldBundle::inner, ValueKind::Struct>)", "struct member path thunk")
+                ("detail::StructFieldOps<::probe::Leaf,&::probe::Leaf::count>(", "member codec is unchanged"),
+                ("&detail::PathStructMember<::probe::Leaf, &::probe::Leaf::count, ValueKind::UInt32>)", "scalar member path thunk"),
+                ("&detail::PathStructMember<::probe::Leaf, &::probe::Leaf::codes, ValueKind::UInt16>)", "array member path thunk uses the element kind"),
+                ("&detail::PathStructMember<::probe::Holder, &::probe::Holder::target, ValueKind::ObjectReference>)", "reference member path thunk"),
+                ("&detail::PathStructMember<::probe::Holder, &::probe::Holder::weights, ValueKind::Float32>)", "float array member path thunk"),
+                ("&detail::PathStructMember<::probe::Bundle, &::probe::Bundle::refs, ValueKind::ObjectReference>)", "ObjectRefArray member path thunk"),
+                ("&detail::PathStructMember<::probe::Bundle, &::probe::Bundle::holders, ValueKind::Struct>)", "StructRefArray member path thunk"),
+                ("&detail::PathStructMember<::probe::WorldBundle, &::probe::WorldBundle::inner, ValueKind::Struct>)", "struct member path thunk")
             })
             {
                 Verify.That(generated.Contains(Compact(expected), StringComparison.Ordinal), "generated code missing " + reason + ": " + expected);
@@ -51,7 +51,7 @@ internal static partial class MetaTests
             Verify.Equal(1, Count(generated, "PathClassField<::probe::WorldValue,"), "WorldValue struct field has a path thunk");
             Verify.Equal(Count(generated, "detail::StructFieldOps<"), Count(generated, "&detail::PathStructMember<"), "every struct member has a path thunk");
             Verify.Equal(7, Count(generated, "&detail::PathStructMember<"), "struct member count");
-            Verify.That(!generated.Contains("PathStructMember<&::probe::WorldBundle::lease", StringComparison.Ordinal), "NATIVE members have no path thunk");
+            Verify.That(!generated.Contains("PathStructMember<::probe::WorldBundle,&::probe::WorldBundle::lease", StringComparison.Ordinal), "NATIVE members have no path thunk");
 
             // 단일 값 클래스 필드(plain)도 valueNativeType(nullptr) 뒤에 path thunk를 싣고(리플렉션 B9i3c0 — staged·Detach·Attach용)
             // private 멤버·enum·String·EditorOnly 멤버에도 thunk가 나온다.
@@ -64,19 +64,19 @@ internal static partial class MetaTests
                 (lambda + "::probe::Value, ::rocks::ValueKind::Struct>(cursor, &::probe::Value::holder)", "struct field path thunk"),
                 (lambda + "::probe::Value, ::rocks::ValueKind::Struct>(cursor, &::probe::Value::extra)", "EditorOnly struct field path thunk"),
                 (lambda + "::probe::WorldValue, ::rocks::ValueKind::Struct>(cursor, &::probe::WorldValue::bits)", "WorldOnly class struct field path thunk"),
-                ("&detail::PathStructMember<&::probe::Holder::flag, ValueKind::UInt8>)", "private member path thunk through GENERATED_BODY"),
-                ("&detail::PathStructMember<&::probe::Leaf::mode, ValueKind::Enum>)", "enum member path thunk"),
-                ("&detail::PathStructMember<&::probe::Leaf::label, ValueKind::Utf8String>)", "string member path thunk"),
-                ("&detail::PathStructMember<&::probe::Middle::offset, ValueKind::Int64>)", "EditorOnly member path thunk"),
-                ("&detail::PathStructMember<&::probe::Middle::leaf, ValueKind::Struct>)", "nested struct member path thunk"),
-                ("&detail::PathStructMember<&::probe::Holder::target, ValueKind::ObjectReference>)", "Required reference member path thunk")
+                ("&detail::PathStructMember<::probe::Holder, &::probe::Holder::flag, ValueKind::UInt8>)", "private member path thunk through GENERATED_BODY"),
+                ("&detail::PathStructMember<::probe::Leaf, &::probe::Leaf::mode, ValueKind::Enum>)", "enum member path thunk"),
+                ("&detail::PathStructMember<::probe::Leaf, &::probe::Leaf::label, ValueKind::Utf8String>)", "string member path thunk"),
+                ("&detail::PathStructMember<::probe::Middle, &::probe::Middle::offset, ValueKind::Int64>)", "EditorOnly member path thunk"),
+                ("&detail::PathStructMember<::probe::Middle, &::probe::Middle::leaf, ValueKind::Struct>)", "nested struct member path thunk"),
+                ("&detail::PathStructMember<::probe::Holder, &::probe::Holder::target, ValueKind::ObjectReference>)", "Required reference member path thunk")
             })
             {
                 Verify.That(structs.Contains(Compact(expected), StringComparison.Ordinal), "generated code missing " + reason + ": " + expected);
             }
 
             Verify.Equal(3, Count(structs, "PathClassField<::probe::Value,"), "every field of Value has a path thunk");
-            Verify.That(!structs.Contains("PathStructMember<&::probe::Middle::cache", StringComparison.Ordinal), "NATIVE struct member has no path thunk");
+            Verify.That(!structs.Contains("PathStructMember<::probe::Middle,&::probe::Middle::cache", StringComparison.Ordinal), "NATIVE struct member has no path thunk");
             Verify.Equal(Count(structs, "detail::StructFieldOps<"), Count(structs, "&detail::PathStructMember<"), "every struct member has a path thunk");
         });
         // Binds 미러 멤버의 path thunk는 미러가 아니라 실제 타입의 멤버 포인터를 쓴다(멤버가 다른 미러인 struct 멤버 포함).
@@ -93,10 +93,10 @@ internal static partial class MetaTests
             string generated = Compact(File.ReadAllText(probe.Output));
             foreach ((string expected, string reason) in new[]
             {
-                ("&detail::PathStructMember<&::rocks::Vector3<float>::x, ValueKind::Float32>)", "mirror member of the real type"),
-                ("&detail::PathStructMember<&::rocks::Vector3<double>::z, ValueKind::Float64>)", "template mirror member of the real type"),
-                ("&detail::PathStructMember<&::probe::Pair::a, ValueKind::Struct>)", "mirror member that is another mirror"),
-                ("&detail::PathStructMember<&::probe::Pair::b, ValueKind::Struct>)", "mirror member spelled as the real template"),
+                ("&detail::PathStructMember<::rocks::Vector3<float>, &::rocks::Vector3<float>::x, ValueKind::Float32>)", "mirror member of the real type"),
+                ("&detail::PathStructMember<::rocks::Vector3<double>, &::rocks::Vector3<double>::z, ValueKind::Float64>)", "template mirror member of the real type"),
+                ("&detail::PathStructMember<::probe::Pair, &::probe::Pair::a, ValueKind::Struct>)", "mirror member that is another mirror"),
+                ("&detail::PathStructMember<::probe::Pair, &::probe::Pair::b, ValueKind::Struct>)", "mirror member spelled as the real template"),
                 ("NativeTypeKey<::rocks::Vector3<float>>(), +[](const ::rocks::RuntimeFieldOps&, ::rocks::detail::PathCursor& cursor) noexcept -> ::rocks::Result<void> { " +
                     "return ::rocks::detail::PathClassField<::probe::Value, ::rocks::ValueKind::Struct>(cursor, &::probe::Value::position); }",
                     "class field of a Core value type"),
@@ -125,8 +125,8 @@ internal static partial class MetaTests
                 ("&::probe::Value::modes);", true, "ValueKind::Enum>", "ValueKind::UInt8>"),
                 ("&::probe::Value::bundle);", true, "ValueKind::Struct>", "ValueKind::Enum>"),
                 ("&::probe::Value::refs);", true, "ValueKind::ObjectReference>", "ValueKind::Struct>"),
-                ("PathStructMember<&::probe::Leaf::count,", false, "ValueKind::UInt32>", "ValueKind::Int32>"),
-                ("PathStructMember<&::probe::Holder::weights,", false, "ValueKind::Float32>", "ValueKind::Float64>")
+                ("PathStructMember<::probe::Leaf, &::probe::Leaf::count,", false, "ValueKind::UInt32>", "ValueKind::Int32>"),
+                ("PathStructMember<::probe::Holder, &::probe::Holder::weights,", false, "ValueKind::Float32>", "ValueKind::Float64>")
             })
             {
                 int site = original.IndexOf(anchor, StringComparison.Ordinal);

@@ -61,12 +61,16 @@ Result<uint32> EncodeMemberValue(const Member& source, ArchiveWriter& out,
     }
 }
 
-// 생성(또는 수동) struct 멤버 encode thunk다. 멤버를 복사하지 않고 직접 쓴다.
-template <auto MemberPointer>
+// 생성(또는 수동) struct 멤버 encode thunk다. 멤버를 복사하지 않고 직접 쓴다. Owner는 함수표를
+// 내는 struct(파생 — 리플렉션 B9k)이고 멤버 포인터는 선언 struct(base일 수 있다)의 것이다:
+// structValue를 Owner로 캐스트한 뒤 멤버 포인터를 쓰므로 base 하위 객체의 offset이 0이 아니어도
+// 바르다.
+template <class Owner, auto MemberPointer>
 Result<uint32> EncodeStructMember(const RuntimeStructFieldOps&, const void* structValue,
                                   ArchiveWriter& out, FieldEncodeContext& context) noexcept {
     using Traits = StructMemberPointer<decltype(MemberPointer)>;
-    using S = typename Traits::Owner;
+    using S = Owner;
+    static_assert(IsBaseOfV<typename Traits::Owner, Owner>);
     using Member = typename Traits::Member;
     static_assert(FieldValueKind<Member>() != ValueKind::Opaque);
     if (!MatchesSchema<Member>(context.Field())) {
@@ -79,12 +83,13 @@ Result<uint32> EncodeStructMember(const RuntimeStructFieldOps&, const void* stru
 // 생성(또는 수동) struct 멤버 decode thunk다. 검증 방식(structValue null)은 값에 손대지 않고, 관찰·
 // 적용 방식은 struct 값에 직접 쓴다(참조 멤버의 적용은 SetStructMemberReference, 배열 멤버는
 // DecodeArrayField, 정적 배열 멤버는 DecodeStaticArrayField).
-template <auto MemberPointer>
+template <class Owner, auto MemberPointer>
 Result<void> DecodeStructMember(const RuntimeStructFieldOps&, ConstructionContext* construction,
                                 ObjectHandle owner, void* structValue, const FieldView& field,
                                 FieldDecodeContext& context) noexcept {
     using Traits = StructMemberPointer<decltype(MemberPointer)>;
-    using S = typename Traits::Owner;
+    using S = Owner;
+    static_assert(IsBaseOfV<typename Traits::Owner, Owner>);
     using Member = typename Traits::Member;
     static_assert(FieldValueKind<Member>() != ValueKind::Opaque);
     if (!MatchesSchema<Member>(context.Field())) {
@@ -168,20 +173,21 @@ Result<void> DecodeStructMember(const RuntimeStructFieldOps&, ConstructionContex
 // struct 멤버 하나의 함수표다(생성 코드·수동 시험 공용). valueNativeType은 Enum·Struct 멤버와
 // Enum·Struct 원소 배열 멤버의 원소(Optional 내부, Map 값·Set 원소) native 키이고, keyNativeType은
 // 키가 Enum인 Map 멤버의 키 native 키다(리플렉션 B9f2). path는 경로 접근 thunk(B6 — 생성 코드는
-// &detail::PathStructMember<&S::m, ValueKind::Target>, Object/GeneratedPathAccess.h)이며 주지
+// &detail::PathStructMember<S, &S::m, ValueKind::Target>, Object/GeneratedPathAccess.h)이며 주지
 // 않으면 이 멤버로 들어가는 경로 연산은 Unsupported다.
 //
 // 사용 예:
-//   const RuntimeStructFieldOps fields[] = {detail::StructFieldOps<&BulkDataRef::bulkId>(
-//       BulkId, &detail::PathStructMember<&BulkDataRef::bulkId, ValueKind::UInt32>)};
-template <auto MemberPointer>
+//   const RuntimeStructFieldOps fields[] = {detail::StructFieldOps<BulkDataRef,
+//   &BulkDataRef::bulkId>(
+//       BulkId, &detail::PathStructMember<BulkDataRef, &BulkDataRef::bulkId, ValueKind::UInt32>)};
+template <class Owner, auto MemberPointer>
 RuntimeStructFieldOps StructFieldOps(Guid fieldId,
                                      StructFieldPathFunction path = nullptr) noexcept {
     using Member = typename StructMemberPointer<decltype(MemberPointer)>::Member;
     RuntimeStructFieldOps ops;
     ops.fieldId = fieldId;
-    ops.encode = &EncodeStructMember<MemberPointer>;
-    ops.decode = &DecodeStructMember<MemberPointer>;
+    ops.encode = &EncodeStructMember<Owner, MemberPointer>;
+    ops.decode = &DecodeStructMember<Owner, MemberPointer>;
     ops.path = path;
     if constexpr (StaticArrayField<Member>::Supported) {
         using Element = typename StaticArrayField<Member>::Element;

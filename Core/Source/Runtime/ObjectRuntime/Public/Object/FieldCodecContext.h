@@ -360,11 +360,12 @@ public:
             platform::Fatal("InstancedContentScope requires an InstancedStruct field frame");
         }
 
+        previous_ = frame_->structure;
         frame_->structure = content;
     }
 
     ~InstancedContentScope() {
-        frame_->structure = StructView{};
+        frame_->structure = previous_;
     }
 
     InstancedContentScope(const InstancedContentScope&) = delete;
@@ -372,6 +373,8 @@ public:
 
 private:
     FieldCodecFrame* frame_;
+    // 들어오기 전의 structure(InstancedStruct<Base>면 Base view — 리플렉션 B9k)다.
+    StructView previous_{};
 };
 
 } // namespace rocks

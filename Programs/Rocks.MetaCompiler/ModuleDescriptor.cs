@@ -14,11 +14,12 @@ internal static class ModuleDescriptor
     private static readonly string[] TypeKeys =
         ["kind", "name", "id", "version", "flags", "within", "base", "header", "visibility", "toolName", "fields"];
 
-    // struct 항목: base 대신 flags(선언 플래그 Atomic 다음 생성 형질 — 쓰기 순서 Atomic → ContainsStrongReference →
-    // RequiresWorldOnlyOwner → ContainsReferenceArray)와 binds(Binds 실제 타입의 Clang 정규 철자, 미러가 아니면 "")다
+    // struct 항목: base(리플렉션 base struct의 정규 이름, 없으면 "" — 리플렉션 B9k, ReflectionExtensions.ko.md 12절), flags(선언
+    // 플래그 Atomic(base에서 상속된 것 포함) 다음 생성 형질 — 쓰기 순서 Atomic → ContainsStrongReference → RequiresWorldOnlyOwner →
+    // ContainsReferenceArray)와 binds(Binds 실제 타입의 Clang 정규 철자, 미러가 아니면 "")다. fields는 상속 필드를 포함한 전체다
     // (Docs/Design/ReflectionFoundations.ko.md 1.4·4.6·5.6절, Atomic은 ReflectionExtensions.ko.md 1.8·3.1절).
     private static readonly string[] StructKeys =
-        ["kind", "name", "id", "version", "header", "visibility", "flags", "binds", "toolName", "fields"];
+        ["kind", "name", "id", "version", "base", "header", "visibility", "flags", "binds", "toolName", "fields"];
 
     // enum 항목: 필드·base 대신 underlying·열거자다(Docs/Design/ReflectionFoundations.ko.md 3.4절).
     private static readonly string[] EnumKeys =
@@ -116,6 +117,8 @@ internal static class ModuleDescriptor
         json.WriteString("name", type.Name);
         json.WriteString("id", type.Id);
         json.WriteNumber("version", type.Version);
+        // 리플렉션 base struct의 정규 이름이다(없으면 "" — 리플렉션 B9k, 비리플렉션 빈 base는 쓰지 않는다).
+        json.WriteString("base", type.Base);
         json.WriteString("header", type.Header);
         json.WriteString("visibility", type.Private ? "private" : "public");
         json.WriteStartArray("flags");
@@ -414,7 +417,7 @@ internal static class ModuleDescriptor
                 Id = id,
                 Site = new(descriptorPath, 1),
                 Version = version,
-                Base = isStruct ? "" : Name(type.GetProperty("base"), QualifiedName, "base of " + name),
+                Base = isStruct && type.GetProperty("base").GetString() is "" ? "" : Name(type.GetProperty("base"), QualifiedName, "base of " + name),
                 Abstract = flags.Contains("Abstract"),
                 WorldOnly = flags.Contains("WorldOnly"),
                 Transient = flags.Contains("Transient"),
@@ -653,8 +656,8 @@ internal static class ModuleDescriptor
                 // toolName은 실효 도구 이름이다(지정하지 않았으면 필드 이름).
                 string toolName = Name(field.GetProperty("toolName"), Identifier, "toolName of " + fieldName);
                 string owner = Name(field.GetProperty("owner"), QualifiedName, "field owner");
-                // struct는 상속이 없으므로 모든 필드의 owner가 그 struct다.
-                if (isStruct && owner != name)
+                // base 없는 struct는 모든 필드의 owner가 그 struct다(상속 struct의 owner는 base 사슬 — 리플렉션 B9k).
+                if (isStruct && owner != name && type.GetProperty("base").GetString() is "")
                 {
                     throw Invalid($"owner of struct field {name}::{fieldName}");
                 }

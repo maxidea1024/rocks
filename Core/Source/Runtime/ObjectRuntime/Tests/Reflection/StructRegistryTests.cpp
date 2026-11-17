@@ -126,10 +126,11 @@ TEST(StructRegistry_RegistrationRules) {
     // 스키마·실행 정보의 기본 규칙.
     CHECK(types.RegisterStruct({StructId(0), 0, value, {"Leaf", 4}}, StructOps(0, valueOps))
               .Error() == ErrorCode::InvalidArgument);
+    // base struct(리플렉션 B9k)는 먼저 등록되어 있어야 한다.
     CHECK(types
               .RegisterStruct({StructId(0), 1, value, {"Leaf", 4}, StructId(9)},
                               StructOps(0, valueOps))
-              .Error() == ErrorCode::InvalidArgument);
+              .Error() == ErrorCode::NotFound);
     CHECK(
         types
             .RegisterStruct(

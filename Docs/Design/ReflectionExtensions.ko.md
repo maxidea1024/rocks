@@ -1065,6 +1065,20 @@ public:
 - 도구 이름은 상속 포함 대소문자 무시 유일(RMC2203 — 클래스와 같다).
 - `InstancedStruct<Base>`: `value.type` = Base ID. 담긴 타입이 Base 또는 파생이어야 한다(쓰기·decode 1단계, TypeRegistry의 struct 파생 조회 `IsStructA`를 새로 둔다). C++ `Emplace<S>`는 `static_assert(IsBaseOfV<Base, S>)`로 막는다(공용 형질은 ObjectRuntime·생성 코드가 함께 쓴다 — RuntimeTypeOps.h:406·457). Base가 InstancedStruct를 담으면 RMC2308.
 
+구현(B9k)에서 정한 점:
+
+- TypeRegistry: `RegisterStruct`가 `schema.baseType`을 받는다. 펼침 대조는 클래스 `Register`와 같은 `detail::ContainsInheritedFields`(안정 ID·종류·값·원소·키 형식·maxElements·플래그·실효 도구 이름)를 함께 쓴다. base는 등록된 struct여야 하고(미등록 NotFound, struct가 아니면 TypeMismatch), 자기 자신을 base로 둔 스키마와 Atomic base 아래의 Atomic이 아닌 파생은 InvalidArgument, base 필드를 같은 표현으로 담지 않은 파생은 TypeMismatch다. base 레코드를 `record->base`와 의존으로 붙잡는다(base의 Unregister는 Busy). 형질·깊이는 펼친 필드로 계산되고, 필드로 드러나지 않는 NATIVE 멤버의 WorldOnly 소유자 형질만 base 레코드에서 더한다.
+- 파생 판정 `IsStructA`는 새로 두지 않았다: struct 레코드도 클래스처럼 `record->base` 사슬을 가지므로 기존 `TypeLease::IsA`(스키마 사슬)가 struct 파생 판정이다.
+- **스펙과 다른 점(1) — Base 레코드 의존**: 필드 대상 해석(`ResolveValueTypes`)이 value.type ≠ 0인 InstancedStruct(필드·원소·Map 값)의 Base 레코드를 찾고(미등록 NotFound, struct가 아니거나 담을 수 없는 struct는 InvalidArgument) 그 필드의 대상 레코드로 의존을 붙잡는다. 그래서 `InstancedStruct<Base>` 자리를 가진 타입이 등록된 동안 Base의 Unregister는 Busy다(실행 중 판정은 Base ID만 대조하므로 Base 등록이 사라진 뒤 같은 ID가 다른 struct로 다시 등록되는 일을 막는다). 그 결과 `FieldStruct`(StructView·TypeLease)는 InstancedStruct<Base> 필드에 Base view를 돌려준다(B9j까지는 빈 view). codec 프레임의 structure 칸이 Base view가 되므로 `InstancedContentScope`는 들어올 때의 값을 저장했다가 나갈 때 되돌린다.
+- 파생 판정 위치: lease 판 `Emplace(TypeLease, Allocator&)`(lease `IsA` — 위반 InvalidArgument), `Emplace<S>`(`static_assert(IsSameV<Base, void> || IsBaseOfV<Base, S>)`), 경로 형 바꾸기(InvalidArgument·`PropertyPathError::InvalidValue`), encode(수동 함수표·lease 판으로 넣은 값도 저장 때 다시 본다 — InvalidArgument), decode 1단계(미등록 정책과 무관하게 InvalidArgument). 텍스트 `f=<무관한 struct>`는 형 바꾸기 경로가 거부해 InvalidValue 진단이 된다(ReflectionText는 바꾸지 않았다). 스키마 대조(`MatchesSchema` — 필드·Array·StaticArray 원소·Map 값)는 `InstancedStructField<InstancedStruct<Base>>::BaseId()`(void면 0)를 쓴다.
+- 생성 struct 멤버 thunk는 소유 struct를 첫 인자로 받는다: `StructFieldOps<Owner, &Owner::m>`·`PathStructMember<Owner, &Owner::m, Kind>`(안의 `EncodeStructMember`·`DecodeStructMember`도 같다). `void*`를 Owner로 캐스트한 뒤 멤버 포인터를 적용하므로 base 하위 객체 offset이 0이 아니어도 맞고, 멤버 포인터의 소유 타입이 Owner 자신이나 base인지 static_assert로 본다. 손으로 쓴 시험 함수표도 같은 꼴로 바꿨다.
+- MetaCompiler: ClangAstParser가 struct base가 public 비가상인지, Binds 미러가 base를 갖지 않는지, `definitionData.isPolymorphic`(상속한 virtual 함수 포함)이 아닌지를 보고(모두 RMC2301) base 철자를 모은다. SchemaValidator가 철자를 이 모듈·import의 리플렉션 struct(둘러싼 이름공간 순으로 찾는다) 하나(`Base` — 둘 이상, Binds 미러, 리플렉션 클래스면 RMC2301)와 비리플렉션 base 목록(`EmptyBases`)으로 나누고, struct 필드를 base 먼저 만든다(base 필드 + 자기 필드 — import base는 descriptor의 상속 포함 전체 필드, Atomic은 base에서 `|=`). 형질은 펼친 필드로 계산하고 RequiresWorldOnlyOwner는 base에서도 상속한다. 등록 순위(Rank)에 base struct와 InstancedStruct Base를 넣었다. 상속 필드와의 도구 이름 충돌은 기존 RMC2203이 본다. 생성 스키마는 `baseType`에 base ID를 싣고, public 타입이 private base·private InstancedStruct Base를 쓰면 RMC2006이다.
+- **스펙과 다른 점(2) — 비리플렉션 base의 "필드 없음"**: AST에서 base의 필드를 재귀로 세지 않고 AST(public 비가상)와 생성 `static_assert(::rocks::IsEmptyV<B> && !::rocks::IsPolymorphicV<B>, "... (RMC2301)")`로 본다(메타 계약 검사 Clang 실행에서 RMC3000으로 실패하고 메시지에 RMC2301이 들어간다). 빈 클래스 판정은 비정적 데이터 멤버·virtual 함수·virtual base가 (재귀적으로) 없는 것이므로 스펙 조건과 같다. 리플렉션 base는 `static_assert(::rocks::IsBaseOfV<Base, S>)`를 더한다.
+- **스펙과 다른 점(3) — base 배치 변경과 버전**: base 배치를 바꾸면 파생도 버전을 올린다는 규칙은 MetaCompiler와 등록 모두 강제하지 않는다. 등록은 base 필드가 같은 ID·표현으로 펼쳐졌는지만 본다(옛 Record의 base 필드는 필드 ID로 이어지므로 추가·삭제는 버전 없이도 읽힌다 — 표현이 바뀐 필드만 마이그레이션이 필요하다).
+- InstancedStruct<Base>: MetaCompiler는 `rocks::InstancedStruct<X>`를 대상 X인 InstancedStruct로 푼다. X가 리플렉션 struct가 아니면 RMC2308, 형질 계산 뒤 X가 담을 수 없는 struct(강한 참조·Registry 컨테이너·InstancedStruct·Required·WorldOnly 소유자 요구 — B9j 담기 조건과 같다)면 RMC2308, struct 멤버 자리에서 1 + X 깊이가 16을 넘으면 RMC2303이다(더 깊은 자리는 런타임 깊이 합 규칙이 본다). descriptor는 값·원소 `type`에 Base ID를 쓰고, import 필드의 InstancedStruct 대상은 struct로 잇는다(`LinkTarget`).
+- descriptor: struct 항목에 `base`(리플렉션 base의 정규 이름, 없으면 "")를 더했다. 읽기는 base가 있는 struct 필드의 owner가 그 struct가 아니어도 받는다(상속 필드).
+- 시험: ObjectSerialization `StructInheritance_SchemaFlattensBaseFields`·`StructInheritance_RegistrationChainAndTraits`·`StructInheritance_RegisterStructChecksBase`·`StructInheritanceGraph_RoundTrip`·`StructInheritancePath_BaseMembersAndInstancedBase`·`StructInheritanceGraph_InstancedBaseDecode`, ReflectionText `TextInstanced_BaseRestrictsTypes`, ToolTests `Meta.StructInheritanceFlattensBaseFields`(파생이 아닌 `Emplace<S>` static_assert 포함)·`Meta.StructBaseMustBePublicNonvirtual`·`Meta.StructHasOneReflectedBase`·`Meta.StructNonReflectedBaseMustBeEmpty`·`Meta.StructCannotDeriveFromClass`·`Meta.StructCannotHaveVirtualFunctions`·`Meta.BindsMirrorAndInheritanceAreExclusive`·`Meta.StructInheritedToolNamesAreUnique`·`Meta.InstancedStructBaseMustBeHoldableStruct`(옛 `Meta.StructCannotInherit`는 지웠다), fixture ReflectionTestFixtures/StructInheritanceFixture.h(같은 타입의 빈 base 하위 객체 둘이 주소를 나눠 갖게 해 모든 ABI에서 base 하위 객체 offset이 0이 아니다).
+
 ## 13. Text(B9l)
 
 - C++ `rocks::Text`(Core/Source/Runtime/Localization/Public/Localization/Text.h:28-59 — 불변 DAG, 이동 전용). 기본 생성은 비어 있음. 클래스 필드·struct 멤버·Array·StaticArray 원소·Map 값.
@@ -1145,7 +1159,7 @@ public:
 | B9i4 | JSON export·import(객체·staged·struct 값, mapMerge) | B9i3c | L |
 | B9i5 | StructRefArray 원소 추가(대입 묶음·JSON import)와 컨테이너 게시의 남는 원소 재확인 완화(B9i 리뷰 L1) | B9i4 | M |
 | B9j | InstancedStruct<>·담기 조건·깊이 합·객체 문맥 경로 해석(구현 — 11절 "구현(B9j)에서 정한 점") | B9i4 | L |
-| B9k | struct 상속·비리플렉션 빈 base·struct 멤버 thunk 소유자 인자·`InstancedStruct<Base>` | B9j | L |
+| B9k | struct 상속·비리플렉션 빈 base·struct 멤버 thunk 소유자 인자·`InstancedStruct<Base>`(구현 — 12절 "구현(B9k)에서 정한 점") | B9j | L |
 | B9l | Text·Localization `TryGetPersistentForm`·`DeepClone` | B9i4 | M |
 | B9m | bitfield bool(접근자 판 일곱 갈래) | B9a1 | L |
 
@@ -1456,10 +1470,13 @@ U5의 Deprecated 저장 범위: UE의 저장 불가 판정은 패키지 저장 �
   - 컨테이너 단위 게시의 남는 원소 재확인 완화(B9i 리뷰 L1) → B9i5에서 했다(같은 곳 — 새로 들어오는 대상만 재확인).
   - 지운 StructRefArray 원소의 Undo 내용(PublishedAssignments가 지운 원소의 값·참조를 돌려주는 것 — 지금은 지운 원소 수와 index만 게시에 쓰고 내용을 남기지 않는다) → CU4(Undo).
 - B9j가 남긴 일(맡을 단계):
-  - `InstancedStruct<Base>`(Base 해석·파생 판정 `IsStructA`·RMC2308) → B9k. B9j의 TypeRegistry는 Base ≠ 0을 Unsupported로 막아 두었다.
+  - `InstancedStruct<Base>`(Base 해석·파생 판정·RMC2308) → B9k에서 했다(12절 "구현(B9k)에서 정한 점" — 파생 판정은 `IsStructA` 대신 `TypeLease::IsA`).
   - 차이 저장(같은 타입이면 기준 대비 멤버 차이 — UE 방식, 11절)과 InstancedStruct 안 멤버의 override 경로(지금은 InstancedStruct에서 자른 통째 단위) → A5.
   - 상자(DetachedValue)에서 시작한 형 바꾸기의 깊이 합은 위치 깊이를 0으로 본다(원래 자리를 모른다 — 저장이 위반을 InvalidArgument로 드러낸다). 상자가 원래 깊이를 들고 다닐지는 CU4(Undo·붙여넣기)가 정한다.
   - 객체 문맥 판 문자열 경로는 상자 시작 위치를 받지 않는다(Unsupported).
+- B9k가 남긴 일(맡을 단계):
+  - base 배치 변경 때 파생 버전 올림은 강제하지 않는다(12절 "구현(B9k)에서 정한 점"). 표현이 바뀐 base 필드의 마이그레이션 지원(파생마다 Migrate를 쓰지 않고 base 쪽 하나로)은 그런 소비자(Sparks 데이터 테이블 행 base)가 생길 때.
+  - import struct의 `base`가 import 범위에 있는지는 descriptor 읽기에서 따로 대조하지 않는다(그 struct를 base로 쓰는 쪽은 import struct의 상속 포함 전체 필드를 쓰고, 런타임 등록이 base 레코드를 요구한다). 필요하면 descriptor 무결성 검사와 함께.
 - 경로 key 텍스트의 제어 문자: 따옴표 안 escape는 `\\`·`\"`·`\n`·`\r`·`\t`뿐이라(1.5절, 사용자 결정 2026-11-16) 그 밖의 제어 문자(0x00–0x1F 중 셋을 뺀 것, 0x7F)를 담은 String·Name 키는 문자열 경로로 쓸 수 없다(FormatPropertyPath Unsupported — PathKey로는 다룬다). UE에 없는 `\u` 표기를 둘지는 그런 키를 쓰는 소비자(asset-info 출력)가 생길 때 정한다.
 
 ## 21. 문서 반영 목록

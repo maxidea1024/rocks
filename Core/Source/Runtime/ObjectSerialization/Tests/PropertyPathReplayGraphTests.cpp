@@ -88,7 +88,10 @@ FieldSchema ArrayOf(Guid id, const char* name, ValueKind element, TypeId type = 
 
 template <auto Member, ValueKind Target>
 RuntimeStructFieldOps MemberOps(Guid id) noexcept {
-    return detail::StructFieldOps<Member>(id, &detail::PathStructMember<Member, Target>);
+    return detail::StructFieldOps<typename detail::StructMemberPointer<decltype(Member)>::Owner,
+                                  Member>(
+        id, &detail::PathStructMember<typename detail::StructMemberPointer<decltype(Member)>::Owner,
+                                      Member, Target>);
 }
 
 template <auto Member, ValueKind Target>

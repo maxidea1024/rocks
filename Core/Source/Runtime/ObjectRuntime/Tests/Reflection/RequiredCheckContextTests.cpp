@@ -127,9 +127,9 @@ Result<TypeRegistrationToken> RegisterNote(TypeRegistry& types) noexcept {
     static const FieldSchema fields[] = {Scalar(AId, "a", ValueKind::UInt32),
                                          Scalar(BId, "b", ValueKind::UInt32),
                                          Scalar(HintId, "hint", ValueKind::UInt32, {}, EditorOnly)};
-    static const RuntimeStructFieldOps ops[] = {detail::StructFieldOps<&Note::a>(AId),
-                                                detail::StructFieldOps<&Note::b>(BId),
-                                                detail::StructFieldOps<&Note::hint>(HintId)};
+    static const RuntimeStructFieldOps ops[] = {detail::StructFieldOps<Note, &Note::a>(AId),
+                                                detail::StructFieldOps<Note, &Note::b>(BId),
+                                                detail::StructFieldOps<Note, &Note::hint>(HintId)};
     RuntimeStructOps structOps = MakeRuntimeStructOps<Note>();
     structOps.fields = ops;
     if (auto note = types.RegisterStruct({NoteId, 1, fields, {"Note", 4}}, Move(structOps));
@@ -140,7 +140,7 @@ Result<TypeRegistrationToken> RegisterNote(TypeRegistry& types) noexcept {
     static const FieldSchema slotFields[] = {
         Scalar(SlotTargetId, "target", ValueKind::ObjectReference, LinkedId)};
     static const RuntimeStructFieldOps slotOps[] = {
-        detail::StructFieldOps<&Slot::target>(SlotTargetId)};
+        detail::StructFieldOps<Slot, &Slot::target>(SlotTargetId)};
     RuntimeStructOps slot = MakeRuntimeStructOps<Slot>();
     slot.trace = [](const void* value, TraceVisitor& visitor) noexcept {
         GeneratedType<Slot>::Trace(*static_cast<const Slot*>(value), visitor);
