@@ -214,6 +214,20 @@ inline constexpr bool IsDebugBuild = ROCKS_BUILD_DEBUG != 0;
 inline constexpr bool IsDevelopmentBuild = ROCKS_BUILD_DEVELOPMENT != 0;
 inline constexpr bool IsReleaseBuild = ROCKS_BUILD_RELEASE != 0;
 
+// 대상 CPU의 캐시 라인 크기(byte)다(UE5.8 PLATFORM_CACHE_LINE_SIZE 대응). 여러 스레드가 따로 쓰는
+// 원자 변수·카운터를 alignas(CacheLineSize)로 떼어 false sharing을 막는 데 쓴다. 메모리 할당 정렬의
+// 의미는 없다(할당기는 자체 정렬 계약을 따른다).
+// - Windows x64: 64 (UE Engine/Source/Runtime/Core/Public/Windows/WindowsPlatform.h:206)
+// - macOS arm64: 128 (UE Engine/Source/Runtime/Core/Public/Mac/MacPlatform.h:63, Apple Silicon)
+// - Android arm64: 64 (UE는 Android 값을 따로 두지 않고 기본값을 쓴다,
+//   Engine/Source/Runtime/Core/Public/HAL/Platform.h:990)
+//
+// 사용 예:
+//   struct alignas(CacheLineSize) PaddedCounter {
+//       uint64 value = 0; // platform::AtomicLoad·AtomicStore로 접근
+//   };
+inline constexpr usize CacheLineSize = IsMac && IsArm64 ? 128 : 64;
+
 static_assert(IsX64 != IsArm64, "exactly one supported CPU architecture must be selected");
 static_assert(sizeof(void*) == 8, "Rocks requires a 64-bit target");
 

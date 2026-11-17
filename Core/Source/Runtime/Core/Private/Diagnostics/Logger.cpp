@@ -6,10 +6,6 @@ namespace rocks {
 namespace {
 thread_local bool inSinkCallback = false;
 
-bool IsValidLevel(LogLevel level) noexcept {
-    return static_cast<uint8>(level) <= static_cast<uint8>(LogLevel::Error);
-}
-
 class CallbackGuard {
 public:
     CallbackGuard() noexcept {
@@ -27,7 +23,7 @@ Result<void> Logger::Add(RuntimeLogSink& sink, LogFilter filter) noexcept {
     if (inSinkCallback) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
-    if (!IsValidLevel(filter.minimum)) {
+    if (!IsValidLogLevel(filter.minimum)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
     platform::LockGuard lock(mutex_);
@@ -64,7 +60,7 @@ Result<void> Logger::SetFilter(RuntimeLogSink& sink, LogFilter filter) noexcept 
     if (inSinkCallback) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
-    if (!IsValidLevel(filter.minimum)) {
+    if (!IsValidLogLevel(filter.minimum)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
     platform::LockGuard lock(mutex_);
@@ -77,45 +73,64 @@ Result<void> Logger::SetFilter(RuntimeLogSink& sink, LogFilter filter) noexcept 
     return Result<void>::Failure(ErrorCode::NotFound);
 }
 
-Result<void> Logger::Write(LogLevel level, uint32 category, StringView message) noexcept {
+Result<void> Logger::Write(LogLevel level, const LogCategory& category, StringView message,
+                           SourceLocation where) noexcept {
     if (inSinkCallback) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
-    if (!IsValidLevel(level) || !message.ValidateUtf8().IsOk()) {
+    if (!IsValidLogLevel(level) || !message.ValidateUtf8().IsOk()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
     platform::LockGuard lock(mutex_);
-    const LogMessage record{platform::MonotonicNanoseconds(), platform::CurrentThreadId(), category,
-                            level, message};
+    LogEvent event;
+    event.level = level;
+    event.category = category.Name();
+    event.message = message;
+    event.location = where;
+    event.threadId = platform::CurrentThreadId();
+    event.monotonicNanoseconds = platform::MonotonicNanoseconds();
     bool failed = false;
     for (usize index = 0; index < count_; ++index) {
         const Slot& slot = sinks_[index];
         if (static_cast<uint8>(level) < static_cast<uint8>(slot.filter.minimum) ||
-            (slot.filter.matchCategory && category != slot.filter.category)) {
+            !slot.filter.category.Matches(category)) {
             continue;
         }
         CallbackGuard guard;
-        if (!slot.sink->Write(record).IsOk()) {
+        if (!slot.sink->Write(event).IsOk()) {
             failed = true;
         }
     }
     return failed ? Result<void>::Failure(ErrorCode::DependencyFailed) : Result<void>::Success();
 }
 
-Result<void> TextLogSink::Write(const LogMessage& message) noexcept {
-    static const char* const names[] = {"Trace", "Info", "Warning", "Error"};
-    if (!IsValidLevel(message.level) || !message.message.ValidateUtf8().IsOk() ||
-        output_.write == nullptr || output_.flush == nullptr) {
+Result<void> TextLogSink::Write(const LogEvent& event) noexcept {
+    static constexpr StringView names[] = {"Trace", "Debug", "Info", "Warning", "Error", "Fatal"};
+    static constexpr usize LongestLevelNameBytes = sizeof("Warning") - 1;
+    static_assert(sizeof(names) / sizeof(names[0]) == LogLevelCount,
+                  "every LogLevel needs a text name");
+    if (!IsValidLogLevel(event.level) || event.category.ByteCount() > MaxLogCategoryNameBytes ||
+        !event.message.ValidateUtf8().IsOk() || output_.write == nullptr ||
+        output_.flush == nullptr) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
     platform::LockGuard lock(mutex_);
-    char prefix[64]{};
-    const int count =
-        snprintf(prefix, sizeof(prefix), "[%s][%u] ", names[static_cast<uint8>(message.level)],
-                 static_cast<unsigned>(message.category));
-    if (count < 0 || static_cast<usize>(count) >= sizeof(prefix) ||
-        !output_.write(output_.context, StringView(prefix, static_cast<usize>(count))).IsOk() ||
-        !output_.write(output_.context, message.message).IsOk() ||
+    // "[" 레벨 "][" 카테고리 "] "를 한 번의 write로 내기 위해 고정 버퍼에 모은다. 레벨 이름은
+    // LongestLevelNameBytes, 카테고리는 MaxLogCategoryNameBytes 이하라 넘치지 않는다.
+    char prefix[sizeof("[][] ") - 1 + LongestLevelNameBytes + MaxLogCategoryNameBytes]{};
+    usize count = 0;
+    const auto append = [&](StringView text) noexcept {
+        for (usize index = 0; index < text.ByteCount(); ++index) {
+            prefix[count++] = text.Data()[index];
+        }
+    };
+    append("[");
+    append(names[static_cast<uint8>(event.level)]);
+    append("][");
+    append(event.category);
+    append("] ");
+    if (!output_.write(output_.context, StringView(prefix, count)).IsOk() ||
+        !output_.write(output_.context, event.message).IsOk() ||
         !output_.write(output_.context, "\n").IsOk() || !output_.flush(output_.context).IsOk()) {
         return Result<void>::Failure(ErrorCode::DependencyFailed);
     }
@@ -142,7 +157,7 @@ Result<void> FlushStderr(void*) noexcept {
 StderrLogSink::StderrLogSink() noexcept : sink_({nullptr, WriteStderr, FlushStderr}) {
 }
 
-Result<void> StderrLogSink::Write(const LogMessage& message) noexcept {
-    return sink_.Write(message);
+Result<void> StderrLogSink::Write(const LogEvent& event) noexcept {
+    return sink_.Write(event);
 }
 } // namespace rocks

@@ -42,7 +42,13 @@ struct Equal {
     }
 };
 
-inline uint64 HashStringBytes(StringView value) noexcept {
+// byte 열의 64비트 FNV-1a 위에 MixHash를 씌운 값이다. 실행 중 분포용이며 영속 식별자가 아니다
+// (알고리즘을 바꾸면 값이 달라진다). constexpr이라 컴파일 타임 키에도 쓴다. LogCategory가 점 접두사
+// 해시를 consteval로 미리 계산할 때 이 함수를 쓰므로, 런타임에 같은 문자열을 해시하면 같은 값이다.
+//
+// 사용 예:
+//   constexpr uint64 key = HashStringBytes("Graphics");
+constexpr uint64 HashStringBytes(StringView value) noexcept {
     uint64 hash = 14695981039346656037ull;
     for (usize index = 0; index < value.ByteCount(); ++index) {
         hash ^= static_cast<uint8>(value.Data()[index]);

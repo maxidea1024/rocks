@@ -14,7 +14,8 @@ int RunLoggerFailureProbe() noexcept {
     if (!logger.Add(sink).IsOk()) {
         return 3;
     }
-    const auto result = logger.Write(LogLevel::Error, 0, "broken pipe");
+    constexpr LogCategory LogProbe{"Tests.LoggerProbe"};
+    const auto result = logger.Write(LogLevel::Error, LogProbe, "broken pipe");
     if (!logger.Remove(sink).IsOk()) {
         return 4;
     }

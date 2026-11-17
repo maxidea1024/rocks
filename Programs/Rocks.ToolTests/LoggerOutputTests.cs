@@ -39,7 +39,7 @@ internal static class LoggerOutputTests
                 Task copy = process.StandardError.BaseStream.CopyToAsync(bytes);
                 await Task.WhenAll(copy, process.WaitForExitAsync()).WaitAsync(TimeSpan.FromSeconds(20));
                 Verify.Equal(0, process.ExitCode, "stderr probe exit");
-                string expected = "[Warning][27] 한\0X" + (OperatingSystem.IsWindows() ? "\r\n" : "\n");
+                string expected = "[Warning][Tests.Logger] 한\0X" + (OperatingSystem.IsWindows() ? "\r\n" : "\n");
                 Verify.That(bytes.ToArray().SequenceEqual(Encoding.UTF8.GetBytes(expected)),
                     "stderr byte contents differ: " + Convert.ToHexString(bytes.ToArray()));
             }
