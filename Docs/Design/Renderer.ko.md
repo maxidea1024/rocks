@@ -1,6 +1,6 @@
 # 렌더러(Renderer) 설계
 
-기준일: 2026-11-18, 개정 2(초안). UE 5.8 Renderer 모듈이 맡는 일 가운데 **렌더 경로**(Forward+·Deferred)와 그 위에 올라가는 그림자·투명·하늘·안개·후처리의 구조, GI 두 축과 PathTracing 모드의 연결점을 Rocks에 세우는 설계 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-18, 개정 3(초안). UE 5.8 Renderer 모듈이 맡는 일 가운데 **렌더 경로**(Forward+·Deferred)와 그 위에 올라가는 그림자·투명·하늘·안개·후처리의 구조, GI 두 축과 PathTracing 모드의 연결점을 Rocks에 세우는 설계 스펙이다. 범위는 다음과 같다.
 - 장면 표현과 게임 → 렌더 전달, view와 가시성
 - 공통 frame graph, Forward+와 Deferred가 갈라지는 곳
 - GBuffer layout, light grid, 조명 평가, 그림자, 투명·하늘·안개, 후처리·업스케일 연결
@@ -33,7 +33,7 @@
 | 항목 | 결정 | 근거 |
 |---|---|---|
 | 렌더 경로 | `RenderPath::ForwardPlus`·`RenderPath::Deferred` 둘. 고전 Forward는 없다. view마다 고른다 | 사용자 결정 2026-11-16, 계획 11.1절. UE는 한 렌더러 안에서 forward 여부를 플랫폼 설정으로 가르고(`RU:1680–1685`) 모바일은 별도 렌더러다(`R/SceneRendering.h:2957`, `R/SceneRenderBuilder.cpp:499–522`). Rocks는 렌더러 하나에서 view별로 고른다(5절) |
-| 모듈 | `Renderer`(렌더 lane 위 장면·pass 조립), `RenderData`(장치 없는 장면 기술 값 타입), `RendererShaders`(장치 없는 pass 셰이더 타입 등록, 쿠커와 공유). 의존은 Renderer → RenderGraph → RenderBase → Graphics. World·ObjectRuntime 의존 없음 | 3절. 계획 3.1절 "RenderGraph / Renderer"·"RenderData" 행 |
+| 모듈 | `Renderer`(렌더 lane 위 장면·pass 조립), `RenderData`(장치 없는 장면 기술 값 타입, shading model·블렌드 모드·영역 번호표의 C++ 정의), `RendererShaders`(장치 없는 pass 셰이더 타입 등록, 쿠커와 공유). 번호표의 HLSL 상수는 `/Engine/Shared/` 공용 헤더다. 의존은 Renderer → RenderGraph → RenderBase → Graphics. World·ObjectRuntime 의존 없음 | 3절. 계획 3.1절 "RenderGraph / Renderer"·"RenderData" 행 |
 | 장면 전달 | WorldIntegration이 프레임 packet에 **장면 변경 목록**(추가·제거·변환·재질·광원)을 값으로 담고, 렌더 lane의 `RenderScene`이 프레임 시작에 일괄 적용한다. 게임 쪽 proxy 객체는 없다 | UE도 변경을 큐에 모아 프레임 시작에 일괄 적용한다(`R/RendererScene.cpp:1073, 5534–5596`, `R/SceneRendering.cpp:4378`). UE proxy는 게임 스레드가 만든 C++ 객체다(`R/RendererScene.cpp:1455`). Rocks는 RenderBase 1절 "프레임 packet과 handle만" |
 | 깊이 prepass | 두 경로 모두 불투명·masked 전체 depth prepass. HZB는 prepass 깊이로 base pass 전에 만든다 | UE forward는 전체 prepass를 강제하고(`RU:681–700`), 조기 깊이가 완전하면 HZB를 base pass 전에 만든다(`DSR:2781–2786`). 계획 11.4절 공통 전반부 |
 | 광원 목록 | 두 경로가 **같은 light grid**(compute 생성, 64 px 셀·로그 Z 32단)를 쓴다 | UE는 deferred에서도 매 프레임 light grid를 만들어 투명·안개가 쓴다(`DSR:2808`, `R/LightGridInjection.cpp:71–85, 627–634`) |
@@ -46,6 +46,7 @@
 | 후처리 | UE 순서: DOF → (TAA·TSR·외부 upscaler) → motion blur → 노출 → bloom → tone map → FXAA → spatial upscale. 계획 12절 `Upscaler`가 temporal 자리를 맡는다 | `R/PostProcess/PostProcessing.cpp:976–2205`. 11절 |
 | GI | 정적(None·Baked)·동적(None·VoxelConeTracing·DynamicGI·RayTraced) 두 축. 렌더러는 **간접광 입력 계약** 두 가지(world-space 표본 함수, screen-space 결과 텍스처)만 정하고 두 경로가 같은 결과를 소비한다 | 계획 14.3절. UE는 Lumen이 forward를 지원하지 않는다(`RU:2602–2623`). Rocks는 계획 14.3절대로 두 경로 공통 |
 | PathTracing | `RenderMode::PathTracing`은 래스터 pass를 건너뛰고 scene color를 누적 결과로 채운 뒤 같은 후처리로 보낸다 | UE도 base pass·조명·투명·안개를 건너뛰고 후처리로 넘긴다(`DSR:2284–2288, 3058, 3482, 4108–4119, 4241`). 12.3절 |
+| 단계당 텍스처(SRV) 상한 | 셰이더 원문은 모든 형식에 하나다. 상한은 **형식 정의**가 정한다: D3D12·Vulkan·Metal은 넓게, GLES·D3D11 SM5는 보장치 16. 렌더러 자원은 16 안에 둔다. 머티리얼 텍스처는 (pass, 퍼뮤테이션, 형식)마다 `형식 상한 − 렌더러 합계`이고, 넘는 머티리얼은 그 형식을 쿠킹할 때 명시 오류다(결정 RN13, 2026-11-18 사용자 결정으로 개정, 7.4절) | UE도 원문은 하나이고 플랫폼 상한을 컴파일 환경에 넣는다(`PLATFORM_MAX_SAMPLERS`, `EN/Private/ShaderCompiler/ShaderCompiler.cpp:3945–3946`). 샘플러 상한은 기본 16, `PCD3D_SM6` 32(`RHI/Private/DataDrivenShaderPlatformInfo.cpp:163`, `Engine/Config/Windows/DataDrivenPlatformInfo.ini:136`), OpenGL은 16 초과가 컴파일 오류다(`Engine/Source/Developer/ShaderFormatOpenGL/Private/OpenGLShaderCompiler.cpp:868–877`) |
 | 지원하지 않는 조합 | 몰래 낮추지 않는다. 지원표(13절)에 따른 공개 대체 또는 `Unsupported` | 계획 11.1절 "명시적인 fallback 또는 cook 오류", PixelFormat 1절 "대체 금지" |
 | 좌표·행렬 | UE 5.8과 같다: 왼손 +X 전방·+Y 오른쪽·+Z 위, cm, 행 벡터 `p·M`, 셰이더 `mul(v, M)`·행 우선, view +X 오른쪽·+Y 위·+Z 전방, reversed-Z 무한 원평면, 앞면 화면 반시계 | 사용자 결정, [셰이더 시스템](ShaderSystem.ko.md) 7.2절 6·8항, 계획 2.2절. 렌더러의 모든 깊이 비교·HZB·light grid Z·velocity가 이 규약 위에 있다(5.1절) |
 
@@ -101,29 +102,31 @@
 
 | 모듈 | 위치 | 직접 의존 | 책임 | 금지 |
 |---|---|---|---|---|
-| `RenderData` | `Engine/Source/Runtime/RenderData` | Core·MetaSchema | `RenderInstanceDesc`·`RenderLightDesc`·`ViewDesc`·`SceneChangeList` 값 타입, `RenderInstanceId`·`RenderLightId`·`ViewId`, 렌더 전달 가능 등록(RenderBase 5.2절) | 장치·Object·World |
-| `RendererShaders` | `Engine/Source/Runtime/RendererShaders` | ShaderCore·RenderData·MaterialSchema | pass 셰이더 타입·퍼뮤테이션 도메인·거르기 함수, `GBufferLayout` 정의, `ShadingModel` 번호(결정 RN5), 파라미터 구조체 선언 | 장치·Renderer |
+| `RenderData` | `Engine/Source/Runtime/RenderData` | Core·MetaSchema | `RenderInstanceDesc`·`RenderLightDesc`·`ViewDesc`·`SceneChangeList` 값 타입, `RenderInstanceId`·`RenderLightId`·`ViewId`, 렌더 전달 가능 등록(RenderBase 5.2절), `ShadingModel`·`BlendMode`·`MaterialDomain` 번호표의 C++ 정의(결정 RN5, 14.2절) | 장치·Object·World |
+| `RendererShaders` | `Engine/Source/Runtime/RendererShaders` | ShaderCore·RenderData·MaterialSchema | pass 셰이더 타입·퍼뮤테이션 도메인·거르기 함수(`MaterialShaderTraits`를 받는다, 14.3절), `GBufferLayout` 정의와 shading model의 GBuffer 의미, 파라미터 구조체 선언 | 장치·Renderer |
 | `Renderer` | `Engine/Source/Runtime/Renderer` | RendererShaders·RenderGraph·RenderBase·RenderData·MaterialRuntime·TextureStreaming·SpatialIndex·Task·Core | `RenderScene`·`RenderView`·가시성·`GpuScene`·light grid·그림자·두 경로의 pass 조립·`PostChain`·GI 연결점 | World·ObjectRuntime·AssetRuntime |
 | `WorldIntegration` | 계획 3.1 | World·RenderData·… | 컴포넌트를 `SceneChangeList`와 `ViewDesc`로 바꾼다. `RenderNotices`를 받아 게임 쪽 해제 | Renderer 내부 주소 |
 
 의존 방향(위가 아래를 쓴다):
 
 ```text
-WorldIntegration ──▶ RenderData ◀──────────────┐
-      │                                         │
-      ▼ (프레임 packet)                          │
-Renderer ──▶ RendererShaders ──▶ ShaderCore      │
-   │   │            └──────▶ MaterialSchema       │
-   │   ├──▶ MaterialRuntime ──▶ RenderBase ───────┤
-   │   ├──▶ TextureStreaming ──▶ RenderBase       │
-   │   └──▶ RenderGraph ──▶ RenderBase ──▶ Graphics
-   └──────────────────────────────────────────────┘
+WorldIntegration ──▶ RenderData ◀──────────────────────┐
+      │                  ▲                              │
+      ▼ (프레임 packet)   │ (번호표)                      │
+Renderer ──▶ RendererShaders ──▶ MaterialSchema ──┘      │
+   │   │            └──────▶ ShaderCore                  │
+   │   ├──▶ MaterialRuntime ──▶ RenderBase ──────────────┤
+   │   ├──▶ TextureStreaming ──▶ RenderBase              │
+   │   └──▶ RenderGraph ──▶ RenderBase ──▶ Graphics      │
+   └─────────────────────────────────────────────────────┘
 MaterialCook(Host) ──▶ RendererShaders(pass 셰이더 타입 목록)
 ```
 
+- **번호표 위치(결정 RN5, 머티리얼 시스템 10.4절 D2).** 번호표의 정의 권한은 이 문서(14.2절)에 있다. 코드는 두 곳에 둔다: C++ 열거는 `RenderData`, HLSL 상수는 `/Engine/Shared/`의 C++·HLSL 공용 `.h`(셰이더 시스템 3절)다. C++ 열거는 공용 헤더의 값과 `static_assert`로 맞춘다. MaterialSchema는 `RenderData`만 참조하므로 `RendererShaders` → MaterialSchema 의존과 순환이 생기지 않는다. GBuffer 인코딩 의미(GBufferB.a 4 bit 등)는 `RendererShaders`에 남는다. UE도 C++·셰이더 공용 정의를 `Engine/Shaders/Shared/`에 둔다(예 `Engine/Shaders/Shared/SubstrateDefinitions.h`).
+
 - `RendererShaders`를 따로 두는 이유: 머티리얼 쿠킹은 "이 머티리얼로 컴파일할 pass 셰이더 타입 전체"를 알아야 한다. UE는 그 목록이 Renderer 모듈의 정적 등록이고 에디터·쿠커가 Renderer를 링크한다(`R/BasePassRendering.cpp:180–192`). Rocks 쿠커(Host)는 장치 모듈을 링크하지 않으므로 장치 없는 등록부를 분리한다(결정 RN11).
 - RenderBase 14절이 "Renderer 설계"로 미룬 항목(`GBufferInfo`·`RendererInterface`·`SceneRenderingAllocator`·`ReadOnlyCVARCache`, MSAA resolve)은 이 배치를 따른다: GBuffer 메타는 `RendererShaders`, 장면 할당은 RenderBase CP3 프레임 arena, 설정은 ConfigSystem snapshot(RenderBase 12절), MSAA resolve는 RenderBase 그리기 유틸리티(18절 RQ16).
-- MaterialRuntime은 Renderer에 의존하지 않는다. Renderer가 MaterialRuntime의 셰이더 집합·파라미터 묶음을 소비한다(14절). 계획 14.6절 MaterialRuntime 의존(Core·RenderData·RHI 계약)과 같은 방향이다.
+- MaterialRuntime은 Renderer에 의존하지 않는다. Renderer가 MaterialRuntime의 셰이더 집합·파라미터 묶음을 소비한다(14절). 계획 14.6절 MaterialRuntime 의존(Core·RenderData·RHI 계약)과 같은 방향이고, 머티리얼 시스템 3.2절이 그 의존을 MaterialSchema·RenderBase·ShaderCore로 구체화했다.
 
 ## 4. 장면 표현과 게임 → 렌더 전달
 
@@ -318,7 +321,9 @@ DeferredLightingPass (전체 화면 PS, 렌더 타깃은 SceneColor 하나·가�
 
 ### 7.4 단계당 SRV 예산
 
-**제약.** GLES·Vulkan 형식의 단계당 SRV 텍스처(typed buffer 포함) 상한은 16이다(형식 정의 `sampledTextures`). 셰이더 시스템의 공통 상한은 그 셰이더 타입이 컴파일되는 형식들의 최소값이므로(셰이더 시스템 7.2절 4항 "공통 상한의 범위") GLES에서도 쓰는 pass 셰이더는 **D3D12에서도 16**에 묶인다. 텍스처·샘플러 1:1 짝 규칙(셰이더 시스템 7.2절 9항) 때문에 샘플러 16도 같이 쓴다.
+**제약(결정 RN13, 2026-11-18 사용자 결정으로 개정).** 셰이더 원문은 모든 형식에 하나다. 단계당 SRV 텍스처(typed buffer 포함) 상한은 **형식 정의**(`sampledTextures`, 셰이더 시스템 12.1절)가 정한다. D3D12·Vulkan·Metal 형식은 넓게, GLES·D3D11 SM5 형식은 보장치 16으로 둔다. 렌더러 pass 셰이더는 GLES에서도 쓰므로 **렌더러 자원은 16 안**에 둔다(아래 표). 머티리얼 텍스처 상한은 (pass, 퍼뮤테이션, 형식)마다 `형식 상한 − 렌더러 합계`다. 그래서 같은 머티리얼이 데스크톱 형식에서는 쿠킹되고 GLES·D3D11 형식에서는 상한을 넘을 수 있으며, 그때는 **그 형식을 쿠킹할 때 명시 오류**다(UE 모바일 머티리얼의 샘플러 제약과 같은 성격, `Engine/Source/Developer/ShaderFormatOpenGL/Private/OpenGLShaderCompiler.cpp:868–877`). 이 검사는 셰이더 시스템 7.2절 4항의 프로필 공통 상한(형식들의 최소값)이 아니라 job 형식의 상한으로 한다(RQ22).
+
+**샘플러.** 텍스처·샘플러 1:1 짝 규칙(셰이더 시스템 7.2절 9항)에서는 자기 샘플러를 쓰는 텍스처 수가 형식의 `samplers` 상한에 묶인다. 지금 형식 정의의 `samplers`는 모든 형식이 16이고, Metal은 장치 상한이 16이다(UE `ML_MaxSamplers = 16`, `Apple/MetalRHI/Private/MetalPipeline.h:47`). 그래서 넓은 형식이 실제로 16장을 넘으려면 짝 규칙의 예외인 **공유 샘플러**(UE `SSM_Wrap_WorldGroupSettings`·`SSM_Clamp_WorldGroupSettings`, `EN/Classes/Engine/EngineTypes.h:283–292`, 생성 `EN/Private/Materials/HLSLMaterialTranslator.cpp:7364–7388`)가 필요하다. 셰이더 시스템에서는 후속이므로 요구로 올린다(RQ23). 그 전에는 모든 형식에서 짝 규칙대로 `samplers − 렌더러 샘플러 수`가 실제 상한이다.
 
 **줄이는 규칙.** grid의 셀 개수와 광원 index를 한 `R32Uint` 버퍼(앞부분 셀 머리, 뒷부분 목록)로 합친다(8.1절). CSM 단과 local 광원 그림자를 **shadow atlas 하나**에 둔다(9.2절). 광원 함수·IES는 atlas 하나(RS9). 정적 조명은 정책 퍼뮤테이션으로 라이트맵 또는 프로브 하나만 묶는다.
 
@@ -338,10 +343,12 @@ DeferredLightingPass (전체 화면 PS, 렌더 타깃은 SceneColor 하나·가�
 | DBuffer(Forward+ decal, 퍼뮤테이션) | 0 | 0–3 |
 | height fog·aerial perspective LUT | 0 | 0–1(Translucent) |
 | **렌더러 합계** | 10–14 | 6–15 |
-| 머티리얼 텍스처에 남는 수 | — | 16 − 렌더러 합계 |
+| 머티리얼 텍스처에 남는 수 | — | 형식 상한 − 렌더러 합계 |
 
-- 머티리얼 텍스처 상한은 (pass, 퍼뮤테이션)마다 `16 − 렌더러 합계`다. 넘으면 셰이더 워커의 상한 검사(셰이더 시스템 7.2절 4항)가 쿠킹 오류를 낸다. 머티리얼 시스템이 이 값을 편집기·쿠커 진단에 보여 주도록 RQ18에 넣는다. 선택 자원을 모두 켠 조합(합계 15)에서는 머티리얼 텍스처가 1개만 남고, 정적 조명 2·GI·atlas·DBuffer만 켜도(합계 13) 3개다. 이런 조합을 허용할지와 어떻게 줄일지는 결정 RN13이다.
-- 데스크톱 형식만 상한을 넓히는 방법(공유 샘플러·bindless, 셰이더 시스템 7.2절 9·10항 후속, 또는 16-SRV 형식용 셰이더 타입을 따로 둠)은 결정 RN13의 대안이다.
+- `GBuffer` pass의 렌더러 합계는 정적 조명(라이트맵 또는 프로브) 0–2뿐이고, depth 계열 pass(`Depth`·`DepthVelocity`·`DepthAux`·`ShadowDepth`·`Velocity`)는 0이다.
+- 머티리얼 텍스처가 형식 상한을 넘으면 셰이더 워커의 형식별 상한 검사가 그 (머티리얼, pass, 퍼뮤테이션, 형식)의 쿠킹 오류를 낸다. 머티리얼 컴파일러는 번역 때 프로필 형식마다 이 값을 계산해 편집기·쿠커 진단에 보여 준다(머티리얼 시스템 5.4절 V9, RQ18).
+- GLES·D3D11 형식에서는 선택 자원을 모두 켠 조합(합계 15)에 머티리얼 텍스처가 1개만 남고, 정적 조명 2·GI·atlas·DBuffer만 켜도(합계 13) 3개다. 이런 조합의 실제 영향은 머티리얼 시스템 측정 MM5로 본다. 데스크톱 형식은 형식 상한이 넓어 같은 조합에서도 남는다(공유 샘플러 전에는 위 샘플러 문단의 상한).
+- bindless(셰이더 시스템 7.2절 10항)는 이 결정 밖의 후속이다.
 
 ## 8. Forward+
 
@@ -462,7 +469,7 @@ ForwardOpaquePS
 
 ### 10.2 Rocks 구조
 
-- **투명 pass 종류.** `TranslucentStandard`(DOF 전), `TranslucentAfterDof`, `TranslucentAfterMotionBlur` 셋이다. Modulate·Holdout은 해당 블렌드 모드 단계(RS5 뒤)에서 더한다. 머티리얼이 어느 pass에 들어갈지는 머티리얼 설정이다(14절).
+- **투명 pass 종류.** `TranslucentStandard`(DOF 전), `TranslucentAfterDof`, `TranslucentAfterMotionBlur` 셋이다. `Modulate` 블렌드 모드는 이 세 pass 안에서 그린다(RS5). UE의 Modulate 짝 pass(`…Modulate`, 분리 투명의 modulate를 따로 합성)는 후속이고, Holdout pass는 `AlphaHoldout` 블렌드 모드와 함께 후속이다(14.2절). 머티리얼이 어느 pass에 들어갈지는 머티리얼 설정(`MaterialShaderTraits`의 투명 pass 종류)이다(14.5절).
 - **조명.** 투명은 Forward+ base pass와 같은 조명 함수(8.3절)로 표면 조명을 평가한다. 반투명 조명 볼륨(UE `RenderTranslucencyLightingVolume`, `DSR:3479`)은 후속이다.
 - **정렬.** 인스턴스 bounds 중심의 view 깊이로 뒤 → 앞 정렬, 같은 깊이는 `RenderInstanceId` 순서로 결정적이다. 인스턴스 안 삼각형 정렬과 OIT는 후속(계획 14.4절 "OIT는 선택 후속").
 - **깊이.** 투명은 깊이 쓰기 없음·깊이 `GreaterEqual` 읽기다. velocity는 머티리얼 설정이 켠 경우에만 별도 pass로 쓴다(계획 14.4절 "velocity/DOF 정책").
@@ -560,10 +567,11 @@ ForwardOpaquePS
 | PS typed buffer 읽기(grid·GPU Scene) | ○ | ○ | ○ | ○ | ○(texture buffer, 형식 대조 미확인) | 셰이더 시스템 7.2절 3·4항, PixelFormat 8.6절 |
 | VS·PS storage buffer | ○ | ○ | ○(단계당 4) | ○(4) | ×(VS·PS 0) | 형식 정의 `storageBuffers`(GLES 형식의 값 4는 CS 기준), VS·PS 0은 셰이더 시스템 7.2절 4항 "구조화·raw 버퍼 SRV도 GLES 형식에서는 CS만" |
 | PS·VS UAV 쓰기 | ×(규약) | ×(규약) | ×(규약) | ×(규약) | × | 셰이더 시스템 7.2절 4항 "UAV는 CS만" |
-| 단계당 SRV 텍스처 | 128 | 128 | 16 | 128 | 16 | 형식 정의 `sampledTextures`. 엔진 셰이더의 공통 상한은 16(엔진 컴파일 프로필에 GLES 포함) |
-| MRT 수 | 8 | 8 | 4(결정 RN3) | 8 | 4 | 형식 정의 `renderTargets` |
+| 단계당 SRV 텍스처 | 넓음(128) | 16 | 넓음(장치 요구, RQ22) | 넓음(128) | 16 | 형식 정의 `sampledTextures`(결정 RN13 개정). 지금 정의 값은 D3D11 128·Vulkan 16이라 RQ22로 고친다. 렌더러 자원은 모든 형식에서 16 안(7.4절) |
+| 단계당 샘플러 | 16 | 16 | 16 | 16(장치 상한) | 16 | 형식 정의 `samplers`. 짝 규칙에서는 16장을 넘는 머티리얼 텍스처에 공유 샘플러가 필요하다(7.4절, RQ23) |
+| MRT 수 | 8 | 8 | 8(결정 RN3, 장치 요구 RQ11 뒤. 지금 정의 값 4) | 8 | 4 | 형식 정의 `renderTargets` |
 | Deferred 기본 layout(MRT 4) | ○ | ○ | ○ | ○ | ○ | 7.1절 |
-| Deferred D·E(MRT 5–6) | ○ | ○ | 결정 RN3 | ○ | ×(결정 RN4) | 7.1절 |
+| Deferred D·E(MRT 5–6) | ○ | ○ | ○(RQ11 뒤) | ○ | ×(결정 RN4) | 7.1절 |
 | `D32FloatS8Uint` 깊이 | ○ | ○ | △(장치 질의) | ○ | ○(core) | PixelFormat 8.4–8.7·10절. Vulkan은 GX1 형식 질의로 확인하고, 없으면 그 장치에서 Deferred·Forward+ 모두 `Unsupported`(대체 형식 선택 여부는 PixelFormat 10절 결정을 따른다) |
 | `RGBA16Float` SceneColor(렌더·블렌드·필터) | ○ | ○ | ○ | ○ | ○(core) | PixelFormat 8.6절 |
 | `RG16Float` velocity | ○ | ○ | ○ | ○ | ○(core) | PixelFormat 8.6절 |
@@ -587,8 +595,8 @@ ForwardOpaquePS
 | Forward+(직접광·그림자·투명) | ○ | ○ | ○ | ○ | ○ |
 | Forward+ MSAA | △ | △ | △ | △ | △ |
 | Deferred 기본 shading model | ○ | ○ | ○ | ○ | ○(다중 pass, GX13 전) |
-| Deferred 고급 shading model(GBufferD) | ○ | ○ | 결정 RN3 | ○ | `Unsupported` → 그 머티리얼은 쿠킹 오류 또는 Forward+ view에서만(결정 RN4) |
-| Deferred 정적 그림자 mask(GBufferE) | ○ | ○ | 결정 RN3 | ○ | `Unsupported`(Forward+는 지원) |
+| Deferred 고급 shading model(GBufferD) | ○ | ○ | ○(RQ11 뒤) | ○ | `Unsupported` → 그 머티리얼은 쿠킹 오류 또는 Forward+ view에서만(결정 RN4) |
+| Deferred 정적 그림자 mask(GBufferE) | ○ | ○ | ○(RQ11 뒤) | ○ | `Unsupported`(Forward+는 지원) |
 | decal(Deferred GBuffer decal, Forward+ DBuffer) | ○ | ○ | ○ | ○ | ○(SRV 예산 안, 7.4절) |
 | 정적 축 Baked | ○ | ○ | ○ | ○ | ○ |
 | 동적 축(VoxelConeTracing·DynamicGI) | 각 방식 스펙 | 각 방식 스펙 | 각 방식 스펙 | 각 방식 스펙 | 각 방식 스펙 |
@@ -601,11 +609,27 @@ ForwardOpaquePS
 
 ## 14. 렌더러가 머티리얼에 요구하는 계약
 
-이 절은 렌더러 쪽 요구만 정한다. 머티리얼 그래프·IR·컴파일러·인스턴스·에디터는 [머티리얼 시스템](MaterialSystem.ko.md)(작성 중, `feature/material-spec`)과 계획 14.5–14.9절이 맡는다. 겹치는 곳은 14.6절 경계표로 나눈다.
+이 절은 렌더러 쪽 요구만 정한다. 머티리얼 그래프·IR·컴파일러·인스턴스·에디터는 [머티리얼 시스템](MaterialSystem.ko.md)(개정 2)과 계획 14.5–14.9절이 맡는다. 겹치는 곳은 14.6절 경계표로 나눈다. 두 문서의 다른 점은 머티리얼 시스템 10.4절 "정합 결과"로 맞췄다(이 문서 개정 3).
 
-### 14.1 표면 속성(`SurfaceAttributes`)
+### 14.1 표면 속성(`SurfaceAttributes`)과 머티리얼 함수
 
-머티리얼은 pass 셰이더가 부르는 함수 `EvaluateMaterialSurface(MaterialInputs) → SurfaceAttributes`를 생성한다. 렌더러는 이 구조체만 읽는다.
+머티리얼은 pass 셰이더가 부르는 함수를 생성한다(머티리얼 시스템 7.3절 생성 파일 계약). 생성 파일은 아래 함수를 **항상 모두** 내고 쓰지 않는 함수는 기본값을 돌려주므로, pass 원문은 함수가 있는지 `#if`로 묻지 않는다.
+
+| 함수 | 단계 | 결과 | 부르는 pass(14.3절) |
+|---|---|---|---|
+| `EvaluateMaterialVertex(MaterialVertexInputs, inout MaterialVertexResult)` | VS | WPO(cm, world 공간 오프셋)·customized UV·보간 값 | 모든 메시 pass |
+| `EvaluateMaterialVertexPrevious(MaterialVertexInputs, inout MaterialVertexResult)` | VS | 이전 프레임 WPO(계획 14.7절 current/previous 계약) | `DepthVelocity`·`Velocity`, velocity를 쓰는 투명 |
+| `EvaluateMaterialSurface(MaterialInputs) → SurfaceAttributes` | PS | 표면 속성(아래 표) | `GBuffer`·`ForwardOpaque`·`Translucent`·`DepthAux` |
+| `EvaluateMaterialOpacityMask(MaterialInputs)` | PS | 마스크 값(clip 기준값 빼기 전) | masked 머티리얼의 `Depth`·`DepthVelocity`·`ShadowDepth` |
+| `EvaluateMaterialOpacity(MaterialInputs)` | PS | 반투명 coverage(`SurfaceAttributes.opacity`와 같은 값) | 투명 그림자·coverage만 필요한 pass(후속) |
+| `EvaluateMaterialPixelDepthOffset(MaterialInputs)` | PS | PDO(cm) | PDO를 쓰는 머티리얼의 depth 계열 pass와 base pass(`SV_Depth`) |
+| `EvaluateMaterialPreview(MaterialInputs)` | PS | 노드 미리보기 색 | `MaterialPreview`(에디터 전용) |
+
+- **WPO는 `SurfaceAttributes` 필드가 아니다.** 정점 단계 값이므로 정점 함수 결과다(머티리얼 시스템 10.4절 D1). UE도 WPO는 픽셀 입력 구조체(`SH/MaterialTemplate.ush:371` `FPixelMaterialInputs`)가 아니라 정점 파라미터를 받는 함수이고(`SH/MaterialTemplate.ush:4051, 4073`), depth·velocity·base pass 정점 셰이더가 부른다(`SH/DepthOnlyVertexShader.usf:55`, `SH/VelocityShader.usf:73, 81`, `SH/BasePassVertexShader.usf:59, 264`).
+- **마스크 전용 함수(머티리얼 시스템 10.4절 D8).** depth·그림자 pass는 표면 전체를 계산하지 않고 `EvaluateMaterialOpacityMask`만 부른다. UE는 depth PS가 픽셀 입력 전체를 계산한 뒤(`SH/DepthOnlyPixelShader.usf:42–44`) clip 함수만 쓰고(`:96`, `SH/MaterialTemplate.ush:4579`) 나머지는 하위 컴파일러의 불필요 코드 제거에 맡긴다. Rocks는 진입점마다 IR을 따로 내므로(머티리얼 시스템 6.2절) pass별 텍스처 수(7.4절)가 그 pass가 실제로 부르는 함수 기준으로 정확히 세어진다.
+- **PDO.** PDO를 쓰는 머티리얼은 depth prepass와 base pass가 같은 함수로 `SV_Depth`를 써서 base pass의 깊이 `Equal`이 성립한다. UE도 PDO가 있으면 depth pass에 PS를 둔다(`R/DepthRendering.cpp:171`).
+
+**`SurfaceAttributes` 필드.** 렌더러는 이 구조체만 읽는다.
 
 | 필드 | 타입 | 뜻 | 읽는 곳 |
 |---|---|---|---|
@@ -614,13 +638,12 @@ ForwardOpaquePS
 | `normal` | float3(world, 정규화) | 법선 맵 적용 뒤 | GBufferA, 조명 |
 | `emissive` | float3(선형, 노출 전) | 자체 발광 | SceneColor |
 | `ambientOcclusion` | float | 머티리얼 AO | GBufferC.a |
-| `opacity`·`opacityMask` | float | 투명도·마스크(clip 기준값은 머티리얼 상수) | 투명 블렌드·masked clip |
+| `opacity`·`opacityMask` | float | 투명도·마스크(clip 기준값은 머티리얼 정의 `MATERIAL_OPACITY_MASK_CLIP`, 기본 속성이라 static 변형을 가른다) | 투명 블렌드·masked clip |
 | `shadingModel` | uint(14.2절 번호) | BRDF 종류 | GBufferB.a, 조명 분기 |
 | `customData0`·`customData1` | float | shading model 전용(clear coat 강도·roughness 등) | GBufferD |
 | `tangent`·`anisotropy` | float3·float | 이방성(후속) | 후속 |
-| `worldPositionOffset` | float3(VS) | WPO(현재·이전 둘 다 평가, 계획 14.7절) | depth·velocity·그림자 |
 
-- 좌표·단위: world 공간은 1절 좌표계, 법선은 world 공간, 길이는 cm이다.
+- 좌표·단위: world 공간은 1절 좌표계, 법선은 world 공간, 길이는 cm이다. 머티리얼 그래프의 노멀 출력은 tangent 공간이 기본이고, 머티리얼 번역기가 내보낼 때 world 공간 정규화 값으로 바꾼다(머티리얼 시스템 10.3절).
 - 색 공간: 텍스처 sRGB 해석은 머티리얼·텍스처 쪽이고 `SurfaceAttributes` 값은 선형이다.
 
 ### 14.2 shading model·블렌드 모드·영역
@@ -630,44 +653,52 @@ ForwardOpaquePS
 | `ShadingModel` | `Unlit`(0)·`DefaultLit`(1) | RS1·RS2 | `EN/Classes/Engine/EngineTypes.h:707–728` |
 | 〃 | `ClearCoat`·`Subsurface`·`SubsurfaceProfile`(skin)·`TwoSidedFoliage`·`Cloth`·`Eye`·`ThinTranslucent`·`SingleLayerWater` | RS9(계획 14.4절 고급 재질) | 같다. UE의 `PreintegratedSkin`은 계획 14.4절 skin/profile을 `SubsurfaceProfile` 하나로 받는다는 제안에 따라 넣지 않는다(결정 RN5와 함께 확정) |
 | 〃 | `Hair` | P3(계획 11.1절) | 같다 |
-| `BlendMode` | `Opaque`·`Masked`·`Translucent`·`Additive`·`Modulate`·`AlphaComposite`(premultiplied) | RS0–RS5 | `EN/Classes/Engine/EngineTypes.h:245–255`(`AlphaHoldout`·Substrate 전용 값은 제외) |
+| `BlendMode` | `Opaque`·`Masked` | RS0 | `EN/Classes/Engine/EngineTypes.h:245–248` |
+| 〃 | `Translucent`·`Additive`·`Modulate`·`AlphaComposite`(premultiplied) | RS5 | 같다 |
+| 〃 | `AlphaHoldout` | 후속(Holdout pass와 함께), 그 전에는 `Unsupported` | `EN/Classes/Engine/EngineTypes.h:253`. UE는 Unlit 전용으로 검사하고(`EN/Private/Materials/MaterialShared.cpp:6378–6382`) source alpha 모양으로 뒤를 가리는 블렌드와 전용 Holdout pass를 쓴다(`R/TranslucentRendering.cpp:2361–2364, 2482–2490`, `R/BasePassRendering.cpp:2539`) |
 | `MaterialDomain` | `Surface` | RS0 | `EN/Public/MaterialDomain.h:12–30` |
 | 〃 | `DeferredDecal`·`LightFunction`·`PostProcess`·`Volume`·`UserInterface` | 각 기능 단계, 그 전에는 `Unsupported`(계획 14.7절) | 같다(`MD_RuntimeVirtualTexture`는 deprecated라 제외) |
 
-- shading model 번호는 GBuffer 4 bit이므로 렌더러(`RendererShaders`)가 번호표를 소유하고 머티리얼 스키마가 참조한다(결정 RN5). 이름·의미·UI는 머티리얼 쪽이다.
+- **번호표(결정 RN5).** shading model 번호는 GBuffer 4 bit이므로 이 문서가 번호표(`ShadingModel`·`BlendMode`·`MaterialDomain`)의 정의 권한을 갖고 머티리얼 스키마가 참조한다. 코드 위치는 C++ `RenderData`, HLSL `/Engine/Shared/` 공용 헤더다(3.2절). 이름 표시·UI·검증은 머티리얼 쪽이다.
+- **`AlphaHoldout`(머티리얼 시스템 10.4절 D4).** UE 5.8의 활성 값이라 목록에 남기되 후속이다. 들일 때 UE처럼 `Unlit` 전용 검사, Holdout 투명 pass(10.2절), 알파를 전하는 후처리를 함께 정한다. 그 전에는 머티리얼 쪽이 `Unsupported`로 진단하고 다른 블렌드 모드로 바꾸지 않는다. UE의 Substrate 전용 값(`TranslucentColoredTransmittance`, dual source blend 요구)과 숨은 별칭은 넣지 않는다(`EN/Classes/Engine/EngineTypes.h:254–258`).
 - 모든 shading model은 Forward 평가와 Deferred 인코딩을 둘 다 가져야 한다(계획 14.4절). 한쪽만 있으면 그 모델은 지원표에 "경로 제한"으로 표시하고 그 경로 쿠킹이 오류다.
 
 ### 14.3 pass별 셰이더 퍼뮤테이션 요구
 
-렌더러는 머티리얼 하나에 대해 다음 pass 셰이더를 요구한다. 거르기는 (블렌드 모드, 영역, shading model, 정점 입력 타입, 형식)로 한다.
+렌더러는 머티리얼 하나에 대해 다음 pass 셰이더를 요구한다. pass 셰이더 타입의 거르기 함수는 `ShouldCompile(const MaterialShaderTraits&, VertexInputTypeId, PermutationId, FormatId)`다(머티리얼 시스템 8.3절, 10.4절 D5). `MaterialShaderTraits`는 영역·블렌드 모드·양면·shading model 집합·투명 pass 종류·velocity 쓰기·그림자 caster·WPO·이전 WPO·PDO·마스크 사용·필요 기능(scene texture 읽기 등)·custom 출력을 담는다. UE도 pass 셰이더 거르기가 머티리얼 요약 구조체 전체를 받는다(`EN/Public/MaterialShared.h:1152–1271`, `EN/Private/Materials/MeshMaterialShader.cpp:178–186`).
 
-| `MeshPass` | 셰이더 | 머티리얼에서 쓰는 것 | 대상 머티리얼 |
-|---|---|---|---|
-| `Depth` | VS(+ masked면 PS) | WPO, opacityMask | Opaque·Masked |
-| `DepthVelocity` | VS·PS | WPO(현재·이전), opacityMask | 이동 물체 |
-| `DepthAux` | VS·PS | 위 + normal·roughness | Forward+ 보조 출력 view |
-| `GBuffer` | VS·PS | 전체 `SurfaceAttributes` | Opaque·Masked, Deferred |
-| `ForwardOpaque` | VS·PS | 전체 + 조명 | Opaque·Masked, Forward+ |
-| `ShadowDepth` | VS(+ masked PS) | WPO, opacityMask | 그림자 caster |
-| `Translucent` | VS·PS | 전체 + 조명 + opacity | 투명 블렌드 |
-| `Velocity` | VS·PS | WPO(현재·이전) | MSAA view 등 별도 velocity |
-| `Distortion` | VS·PS | 굴절 입력(후속) | 굴절 머티리얼 |
-| `Decal` 등 | — | — | 각 단계 |
+"경로" 열은 그 pass를 어느 렌더 경로가 쓰는지다. 경로 전용 pass는 머티리얼 Render Path Switch의 그 경로 입력을, 공통 pass는 Default 입력을 쓴다(머티리얼 시스템 6.3절 3단계, 10.4절 D7).
 
-- **퍼뮤테이션 차원(렌더러 쪽).** `GBuffer`: GBuffer profile {기본, +D, +E, +D+E}. `ForwardOpaque`·`Translucent`: 정적 조명 정책 {없음, 라이트맵, 프로브} × 동적 GI 표본 {없음, 있음} × 보조 출력 {없음, 있음}(ForwardOpaque만) × DBuffer {0, 1}(ForwardOpaque만) × 광원 함수·IES atlas {0, 1}(RS9). `Depth`·`ShadowDepth`: masked {0,1}. 광원 수·그림자 유무·광원 종류는 동적 분기이고 퍼뮤테이션이 아니다(계획 14.1절 "runtime parameter는 불필요한 variant를 생성하지 않는다").
+| `MeshPass` | 경로 | 셰이더 | 부르는 머티리얼 함수(14.1절) | 대상 머티리얼 |
+|---|---|---|---|---|
+| `Depth` | 공통 | VS(+ masked 또는 PDO면 PS) | 정점, 마스크, PDO | Opaque·Masked |
+| `DepthVelocity` | 공통 | VS·PS | 정점(현재·이전), 마스크, PDO | 이동 물체 |
+| `DepthAux` | Forward+ | VS·PS | 정점, 표면(normal·roughness), 마스크, PDO | Forward+ 보조 출력 view |
+| `GBuffer` | Deferred | VS·PS | 정점, 표면, PDO | Opaque·Masked |
+| `ForwardOpaque` | Forward+ | VS·PS | 정점, 표면, PDO + 조명 | Opaque·Masked |
+| `ShadowDepth` | 공통 | VS(+ masked 또는 PDO면 PS) | 정점, 마스크, PDO | 그림자 caster |
+| `Translucent` | 공통 | VS·PS | 정점(+ 이전, velocity 쓰기면), 표면 + 조명 | 투명 블렌드 |
+| `Velocity` | 공통 | VS·PS | 정점(현재·이전), 마스크 | MSAA view 등 별도 velocity |
+| `Distortion` | 공통 | VS·PS | 굴절 입력(후속) | 굴절 머티리얼 |
+| `MaterialPreview` | 공통(에디터 전용) | VS·PS | 미리보기 | 노드 미리보기 번역(머티리얼 시스템 11.4절) |
+| `Decal` 등 | 각 단계 | — | — | 각 단계 |
+
+- **경로 정의 이름.** 렌더러가 pass job에 `RENDER_PATH_DEFERRED`·`RENDER_PATH_FORWARD_PLUS`를 넣는다. 경로 전용 pass는 그 경로 하나가 1이고, 공통 pass는 둘 다 0이다. 생성 원문의 Render Path Switch는 이 둘로 `#if`를 고른다. 기능 등급 정의 이름은 형식 정의가 정한다(머티리얼 시스템 16절 MSR9).
+- **깊이 일치.** 공통 pass(Default 입력)와 경로 전용 base pass(경로 입력)가 다른 WPO·마스크·PDO를 쓰면 base pass의 깊이 `Equal`(7.2·8.2절)이 깨진다. 그래서 Render Path Switch가 이 셋에 닿는 그래프는 머티리얼 검증 오류다(머티리얼 시스템 5.4절 V15).
+- **퍼뮤테이션 차원(렌더러 쪽).** `GBuffer`: GBuffer profile {기본, +D, +E, +D+E}. `ForwardOpaque`·`Translucent`: 정적 조명 정책 {없음, 라이트맵, 프로브} × 동적 GI 표본 {없음, 있음} × 보조 출력 {없음, 있음}(ForwardOpaque만) × DBuffer {0, 1}(ForwardOpaque만) × 광원 함수·IES atlas {0, 1}(RS9). 마스크·PDO·WPO 사용은 `MaterialShaderTraits`가 정하므로(생성 원문의 `MATERIAL_USES_*` 정의) 퍼뮤테이션 차원이 아니다. 머티리얼이 정하는 값을 차원으로 두면 거르기로 반을 버리는 차원이 생기기 때문이다. 광원 수·그림자 유무·광원 종류는 동적 분기이고 퍼뮤테이션이 아니다(계획 14.1절 "runtime parameter는 불필요한 variant를 생성하지 않는다").
 - MSAA sample 수는 셰이더 퍼뮤테이션이 아니라 파이프라인 상태다(alpha-to-coverage 포함).
 - 퍼뮤테이션 수 보고(계획 14.1절 platform×path×sample count×material×skinning)는 쿠커가 이 표로 계산한다.
 
 ### 14.4 direct lighting 평가
 
 - BRDF(`EvaluateDirectLighting`)·광원 감쇠·그림자 표본은 렌더러 소유 HLSL(`RendererShaders` 셰이더 원문)이고 머티리얼이 바꾸지 않는다. Forward+ base pass·투명·Deferred 조명 pass가 같은 원문을 쓴다.
-- shading model별 BRDF 분기는 렌더러 원문 안 `switch(shadingModel)`이다. Forward 셰이더는 머티리얼 shading model이 정적으로 하나이면 그 분기만 컴파일한다(정의 상수로 고정).
+- shading model별 BRDF 분기는 렌더러 원문 안 `switch(shadingModel)`이다. 머티리얼 pass 셰이더(`ForwardOpaque`·`Translucent`·`GBuffer`)는 머티리얼 shading model이 정적으로 하나이면 생성 원문의 `MATERIAL_SINGLE_SHADING_MODEL`로 그 분기만 컴파일한다(머티리얼 시스템 7.3절). `DeferredLightingPass`는 머티리얼이 없는 전역 셰이더라 모든 분기를 가진다.
 
 ### 14.5 렌더러가 머티리얼에서 읽는 런타임 값
 
-- 셰이더 집합: (머티리얼 셰이더 집합, pass 셰이더 타입, 정점 입력 타입, 퍼뮤테이션 ID)로 조회(RenderBase 9.2절 키 + SX4).
+- 셰이더 집합: (pass 셰이더 타입, 정점 입력 타입, 머티리얼 셰이더 집합 id, 퍼뮤테이션 ID, 단계)로 조회(RenderBase 9.2절 키 + SX4 + SX5, 머티리얼 시스템 8.6절).
 - 파라미터 묶음: 머티리얼 인스턴스의 상수 블록과 텍스처 `RenderHandle` 목록. 텍스처는 스트리밍 바인딩 snapshot으로 그래프 구성 때 해석한다(TextureStreaming 5.3절).
-- 머티리얼 정적 속성: 블렌드 모드, 영역, shading model, two-sided, 투명 pass 종류, velocity 쓰기, 그림자 caster 여부, WPO 사용 여부. 그리기 항목 캐시 키에 들어간다.
+- 머티리얼 정적 속성: 쿠킹 데이터의 `MaterialShaderTraits`(머티리얼 시스템 8.3절)를 그대로 읽는다. 블렌드 모드·영역·shading model·양면·투명 pass 종류·velocity 쓰기·그림자 caster·WPO 사용이 그리기 항목 캐시 키에 들어간다.
 - 셰이더 집합 교체(hot reload, RenderBase 9.8절)는 프레임 경계에서 해당 그리기 항목 캐시를 무효화한다.
 
 ### 14.6 경계표
@@ -677,10 +708,32 @@ ForwardOpaquePS
 | `SurfaceAttributes` 필드와 의미 | 정한다 | 그래프 출력 pin을 이 필드로 낮춘다 |
 | shading model 번호·BRDF·GBuffer 인코딩 | 정한다 | 선택 UI·이름·검증 |
 | 블렌드 모드·영역 목록 | 렌더러가 지원하는 값과 단계 | 머티리얼 속성으로 노출, 미지원 값 진단 |
-| pass 셰이더 타입·퍼뮤테이션 차원(렌더러 쪽) | 정한다(`RendererShaders`) | 머티리얼 static switch 차원과 곱한다 |
+| pass 셰이더 타입·퍼뮤테이션 차원(렌더러 쪽) | 정한다(`RendererShaders`) | 머티리얼 static 변형(변형마다 셰이더 집합이 따로, 머티리얼 시스템 9.5절)과 곱한다. 거르기 입력 `MaterialShaderTraits`를 준다 |
+| 머티리얼이 내는 함수(정점·표면·마스크·PDO 등) | 어느 pass가 부르는지(14.1·14.3절) | 생성 파일 계약(머티리얼 시스템 7.3절) |
+| 렌더 경로·기능 등급 정의 이름 | 경로 정의 이름을 정한다(14.3절). 기능 등급은 형식 정의 | 생성 원문의 `#if`에 쓴다 |
+| (pass, 퍼뮤테이션, 형식)별 머티리얼 텍스처 상한 | `형식 상한 − 렌더러 합계` 표(7.4절) | 계산해 진단·쿠킹 검사에 쓴다 |
 | 머티리얼 셰이더 집합 키·쿠킹 단위 | 조회 키만 요구 | 정한다 |
 | 그래프·IR·HLSL 생성·인스턴스·파라미터 갱신 | — | 정한다 |
 | scene texture 읽기 노드 | 경로별 가능 여부(Deferred GBuffer, Forward+ 보조 출력) | 노드 검증(계획 14.7절 "Forward에서 없는 GBuffer를 읽는 node를 정상 지원으로 표시하지 않는다") |
+
+### 14.7 머티리얼 시스템 요구(MRD1–MRD12) 처리
+
+머티리얼 시스템 16절이 이 문서에 낸 요구다.
+
+| ID | 요구 | 처리 |
+|---|---|---|
+| MRD1 | WPO를 정점 함수 결과로 분리(D1) | 반영. 14.1절 함수 표, `SurfaceAttributes`에서 뺐다 |
+| MRD2 | 번호표 정의 위치(D2) | 반영. C++ `RenderData`, HLSL `/Engine/Shared/`(3.2·14.2절) |
+| MRD3 | RN13 재검토 조건(D3) | 반영. RN13을 사용자 결정으로 형식별 상한으로 개정(7.4절, 19.1절). 측정 MM5는 GLES·D3D11 형식의 오류 비율을 보는 데 쓴다 |
+| MRD4 | `AlphaHoldout` 처리(D4) | 반영. 목록에 두고 후속, 그 전에는 `Unsupported`(14.2절) |
+| MRD5 | 거르기 인자 `MaterialShaderTraits`(D5) | 반영(14.3·14.5·15.3절) |
+| MRD6 | view 상수의 translated world 기준과 절대 위치 표현 | 셰이더 기본 위치는 카메라 상대 world(translated world)다. 절대 위치는 상위(큰 격자 위치 float3)·하위(float3) 두 부분이고 view 상수에 카메라 이동 보정 상위·하위를 둔다(5.1절, `View` slot 15.2절). 머티리얼 `WorldPosition` 타입(`Float3` 둘)은 이 두 부분과 같은 표현이다. 격자 크기는 RS0 완료 기준 (e)에서 정한다 |
+| MRD7 | instance 데이터 계약 | GPU Scene 인스턴스 항목은 현재·이전 local-to-world(상위·하위), bounds, 인스턴스 표시다(4.2·5.1절). 머티리얼 `Instance` 빈도 입력(인스턴스별 custom data)의 슬롯 수와 읽기 함수는 RS0의 GPU Scene 배치와 함께 정한다 |
+| MRD8 | 기본 머티리얼 대체 표시 | 렌더러는 덧칠하지 않고 기본 머티리얼의 셰이더로 그린다. 대체 수를 계수(16.2절)로 남긴다. 화면 표시는 에디터 진단(머티리얼 시스템 11.3절)이 맡는다 |
+| MRD9 | 경로 전용·공통 구분과 정의 이름(D7) | 반영(14.3절 "경로" 열, `RENDER_PATH_*`) |
+| MRD10 | Deferred·Forward+ 기준 영상 허용 오차 | RS2 완료 기준 (a)에서 RS0 기준 영상과 같은 채널 ±8·2%로 시작한다. GBuffer 양자화(법선 10 bit, base color 8 bit sRGB)로 넘는 차이가 측정되면 그 항목만 RS2에서 정한다 |
+| MRD11 | 마스크 전용 함수(D8) | 반영(14.1·14.3절) |
+| MRD12 | DeferredDecal 속성, 반투명 scene color·depth 입력, PostProcess 위치 | DeferredDecal이 쓰는 속성은 decal 단계(RS7)에서 GBuffer 배치(7.1절) 기준으로 정한다. 반투명의 scene color·depth 읽기는 RS5에서 distortion과 같은 SceneColor 복사본·깊이 SRV로 주고, `MaterialShaderTraits`의 필요 기능으로 켠다(SRV 예산 7.4절). PostProcess 영역의 삽입 위치는 `PostChain` 자리(11.2절)에 맞춰 계획 26절 후처리 catalog 스펙이 정한다 |
 
 ## 15. 렌더 그래프·파라미터 구조체·셰이더 타입 사용 방식
 
@@ -718,7 +771,7 @@ ForwardOpaquePS
 | 종류 | 예 | 등록 | 거르기 |
 |---|---|---|---|
 | 전역 셰이더(머티리얼 없음) | light grid CS, HZB CS, `DeferredLightingPass` PS, 하늘·안개 PS, tone map·TAA·bloom | `RendererShaders` 정적 등록(셰이더 시스템 12.2절) | 형식·퍼뮤테이션 |
-| pass 셰이더(머티리얼 결합) | 14.3절 표 | `RendererShaders` 정적 등록, 머티리얼 쿠킹이 곱한다 | 형식 × 정점 입력 타입(SX4) × 머티리얼 정적 속성 |
+| pass 셰이더(머티리얼 결합) | 14.3절 표 | `RendererShaders` 정적 등록, 머티리얼 쿠킹이 곱한다 | 형식 × 정점 입력 타입(SX4) × `MaterialShaderTraits`(14.3절) |
 
 - 전역 셰이더 퍼뮤테이션 예: `DeferredLightingPass` {GBuffer profile 4} × {동적 GI 표본 0·1} × {contact shadow 0·1}, light grid CS {HZB 판정 0·1}.
 - GPU Scene 읽기: 정점 셰이더가 typed buffer에서 인스턴스 변환을 읽는다(GLES VS storage block 0 때문에 모든 backend 같은 방식, 결정 RN9). UE ES3.1은 primitive UBO 경로를 따로 둔다(`SH/SceneData.ush:40–46, 1293`).
@@ -752,7 +805,7 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 ### 16.2 계측
 
 - **`GpuScope`**(RenderBase 13절): 6.2절 F1–F16과 11.2절 PC1–PC11 이름 그대로의 구간. RG1 뒤에는 그래프 pass 자동 구간이다. 예산 항목 이름을 구간 묶음으로 둔다.
-- **계수**: view별 가시 인스턴스·제출 그리기·dispatch·삼각형, light grid 셀당 광원 수 histogram과 overflow, atlas 사용률과 그림자 해상도 강등·생략 수, 보류 집합 크기와 재검사 복구 수(V4), 정적·동적 GI 낮춤 결과, 지원표 거부 수.
+- **계수**: view별 가시 인스턴스·제출 그리기·dispatch·삼각형, light grid 셀당 광원 수 histogram과 overflow, atlas 사용률과 그림자 해상도 강등·생략 수, 보류 집합 크기와 재검사 복구 수(V4), 정적·동적 GI 낮춤 결과, 지원표 거부 수, 기본 머티리얼 대체 수(14.7절 MRD8).
 - **CPU**: 장면 변경 적용·가시성·그리기 항목 생성·그래프 구성 시간을 CP5 trace 구간으로(RenderBase 13.2절).
 - **측정**:
 
@@ -776,7 +829,7 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 | GX4 | RenderBase 4.4절 | MRT·깊이 attachment·dispatch·indirect(RQ3) |
 | RB2–RB6 | RenderBase 6·9–11절 | 자원 수명·셰이더 집합·상수 블록·공유 slot·정점 입력 타입·그리기 유틸리티 |
 | RG2 | RenderBase 8절 | 프레임 안 풀 재사용·그래프 안 업로드 |
-| 머티리얼 | 머티리얼 시스템 | 14절 계약, MAT0–MAT1(계획 14.9절) |
+| 머티리얼 | 머티리얼 시스템 15.2절 | RS0 전: MS1–MS3(스키마·번역·쿠킹, SF1 `Unlit`)과 MS4의 렌더 상태·상수 블록·기본 머티리얼 부분. MS4의 두 경로 기준 영상(MS-T6)은 RS2 완료 기준 (a)와 함께 본다. 고급 shading model은 MS8(SF3)이 RS9와 함께 간다 |
 | 메시 에셋 | AssetSystem(메시 단계) | 정적 메시(위치·패킹 법선·UV·section·bounds·LOD) |
 | WorldIntegration | 계획 3.1절 | 렌더 컴포넌트 → `SceneChangeList`·`ViewDesc` |
 
@@ -788,14 +841,14 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 |---|---|---|---|
 | RS0 | `RenderData`·`RendererShaders`·`Renderer` 모듈, `RenderScene`(변경 목록 적용), `RenderView`·`ViewHistory`, 가시성 V1, 그리기 항목 캐시·상태 묶음, `GpuScene`, depth prepass·velocity, HZB 생성, Unlit·emissive base pass, 최소 tone map | 17.1절 전체 | (a) 기록 backend: 같은 변경 목록 열 → 같은 장치 호출 열(결정적), 적용 순서(제거→추가→갱신) 단언 (b) 가시 집합 = CPU 참조(bounds 전수) (c) GPU Scene 영역 재사용이 slot GPU 완료 gate 전에는 없음 (d) D3D12·Vulkan·GLES 미리보기 Unlit 장면 기준 영상(채널 ±8, 2%, RenderBase 8절 기준) (e) reversed-Z·앞면·velocity 부호 시험(정지 카메라 0, 알려진 이동의 velocity 값) |
 | RS1 | Forward+ 직접광: 광원 장면, light grid CS, `ForwardOpaque`(DefaultLit), directional·point·spot, sky light 상수 | RS0, GX2 typed buffer UAV | (a) grid 셀 목록 ⊇ CPU 참조 판정(보수), overflow 계수 정확 (b) 광원 0개 view의 grid 생략 (c) 기준 영상 3 backend (d) GLES texel buffer 경로 픽셀 = D3D12 경로(허용 오차) |
-| RS2 | Deferred: GBuffer 기본 layout, `DeferredLightingPass`(7.3절) | RS1 | (a) **계획 API02**: 같은 머티리얼·메시·광원 장면의 Deferred·Forward+ 영상 대조(허용 오차 안), 깊이·법선·velocity 일치(Forward+는 보조 출력과 GBufferA 대조) (b) GBuffer 인코딩 왕복 CPU 시험(법선·shading model bit) (c) GLES 4 MRT 다중 pass 영상 |
+| RS2 | Deferred: GBuffer 기본 layout, `DeferredLightingPass`(7.3절) | RS1 | (a) **계획 API02**: 같은 머티리얼·메시·광원 장면의 Deferred·Forward+ 영상 대조(채널 ±8·2%로 시작, 14.7절 MRD10, 머티리얼 MS-T6과 같은 시험), 깊이·법선·velocity 일치(Forward+는 보조 출력과 GBufferA 대조) (b) GBuffer 인코딩 왕복 CPU 시험(법선·shading model bit) (c) GLES 4 MRT 다중 pass 영상 |
 | RS3 | 그림자: CSM·spot atlas·point 6면, PCF, caster 판정 V5 | RS1 | (a) 두 경로 그림자 영상 대조 (b) atlas overflow 시 강등·생략 계수와 표시 (c) caster 집합 ⊇ CPU 참조 (d) 직교 깊이 clamp 미지원 backend의 공개 대체 확인 |
 | RS4 | 2단계 occlusion(V2–V4), GPU 인스턴스 culling, 그리기 항목마다 간접 draw 하나(15.2절) | RS0, GX4 indirect | (a) 계획 13.1절 V_ref ⊆ V_submit(가시 누락 0), 느린 strafe·이동·삭제 occluder·cut·teleport 시퀀스 (b) 이전 HZB 없음·무효에서 전체 그리기 (c) 재검사 복구 계수 (d) GLES에서 base instance 0 간접 draw와 루트 상수 offset으로 같은 영상 |
-| RS5 | 투명 3종·정렬·블렌드 모드, distortion, sky atmosphere LUT·pass, height fog | RS1 | (a) 두 경로 투명 영상 대조 (b) 정렬 결정성(같은 입력 같은 순서) (c) fog·sky가 두 경로에서 같은 영상 |
+| RS5 | 투명 3종·정렬·블렌드 모드, distortion, sky atmosphere LUT·pass, height fog | RS1, 머티리얼 MS7(SF2 반투명 블렌드 모드) | (a) 두 경로 투명 영상 대조 (b) 정렬 결정성(같은 입력 같은 순서) (c) fog·sky가 두 경로에서 같은 영상 |
 | RS6 | `PostChain` 1차: 노출·bloom·tone map·LUT, FXAA, spatial upscale(U0), TAA·TAAU(U1), `Upscaler` interface | RS0, 계획 12절 | 계획 12.3절 시퀀스(정지·회전·고속·resize·cut), cut 잔상 0 프레임, history reset 조건 시험 |
 | RS7 | G0 기준 조명: 반사 capture·sky light, SSAO·GTAO, decal(Deferred GBuffer decal F10·Forward+ DBuffer F8a), `StaticLighting::Baked` 표본·GBufferE | RS2·RS3, bake 스펙(계획 14.10절) | 계획 LT02(direct·indirect·mixed shadow 항 분리, 두 경로·backend 비교), 이중 가산 0(정적·동적 배율 시험) |
 | RS8 | Forward+ MSAA 1·2·4, resolve(계획 11.1절) | RS1·RS6 | MSAA × temporal 조합의 resolve 대조(깊이·velocity 전경 선택), alpha-to-coverage |
-| RS9 | 고급 shading model(GBufferD), rect light·IES·광원 함수 atlas | RS2·RS3, 머티리얼 고급 재질 | 계획 14.2절 고급 직접 조명 검증, 모델별 Deferred 인코딩·Forward 평가 대조 |
+| RS9 | 고급 shading model(GBufferD), rect light·IES·광원 함수 atlas | RS2·RS3, 머티리얼 MS8(SF3) | 계획 14.2절 고급 직접 조명 검증, 모델별 Deferred 인코딩·Forward 평가 대조 |
 | RS10 | screen-space: SSR·contact shadow, Forward+ 보조 출력, 간접광 합성(F12) | RS2·RS6 | 순환 graph 거부(음성 대조), 두 경로 screen-space 영상 대조 |
 | RS11 | GI·RT 연결점: `IndirectLightingInputs`, `RayScene` 자리, `RenderMode::PathTracing` 골격(누적·리셋·후처리 연결) | RS10, 각 방식 스펙 | 방식 없음 view와 방식 있는 view의 직접광 동일, PathTracing 리셋 조건 시험, 미지원 장치 `Unsupported` |
 | RS12 | skinned 메시: 정점 입력 타입, 현재·이전 pose(velocity), 두 경로·그림자·투명 | RS3·RS6, 애니메이션 skinning(계획 15절) | 계획 15절 "Deferred·Forward·shadow·picking에서 동일 pose", CPU skinning 기준 결과 대조, 계획 12.1절 U1 skinned motion(velocity) 시험 |
@@ -823,16 +876,18 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 | RQ9 | PixelFormat 8.6절 | GLES texel buffer 형식(ES 3.2 Table 8.18)에서 `R32Uint`·`RGBA32Float` 대조(지금 "미대조") | RS1 |
 | RQ10 | 셰이더 시스템 7.2절 4항 | GLES에서 typed buffer SRV가 텍스처 유닛을 차지함을 상한 계산에 명시(이미 "SRV 텍스처(typed buffer 포함)"이나 GLES `samplerBuffer` 관계를 적는다), SPIRV-Cross가 HLSL `Buffer<T>`를 ESSL `samplerBuffer`·`texelFetch`로 내는지 SH0 측정에 추가 | RS1 |
 | RQ11 | 셰이더 시스템 12.1절(형식 정의) | `VULKAN_SM5` `renderTargets`를 8로 올리고 `deviceRequirements`에 `maxColorAttachments ≥ 8`(결정 RN3 (가)) 또는 별도 형식 id | RS7 전(RS2는 기본 layout으로 진행, 결정 RN3과 같다) |
-| RQ12 | 셰이더 시스템 7.2절 4항·12.1절 | 엔진 셰이더 단계당 SRV 16 상한 아래에서 `DeferredLightingPass`·`ForwardOpaque` 자원 예산표 유지(7.3절) | RS2 |
-| RQ13 | 셰이더 시스템 12.2절(P14) | pass 셰이더 타입이 정점 입력 타입·머티리얼 정적 속성으로 거르는 함수를 갖는 것(SX4와 함께), 쿠커의 퍼뮤테이션 수 보고 | RS0 |
+| RQ12 | 셰이더 시스템 7.2절 4항·12.1절 | 렌더러 자원(`DeferredLightingPass`·`ForwardOpaque`·`Translucent`)을 GLES 보장치 16 안에 두는 예산표 유지(7.4절) | RS2 |
+| RQ13 | 셰이더 시스템 12.2절(P14) | pass 셰이더 타입의 거르기 함수가 `MaterialShaderTraits`·정점 입력 타입·퍼뮤테이션·형식을 받는 것(SX4와 함께, 머티리얼 MSR5와 같은 요구), 쿠커의 퍼뮤테이션 수 보고 | RS0 |
 | RQ14 | 셰이더 시스템 7.2절 7항 | `SV_Target0–7`과 형식별 MRT 상한 검사(이미 있음) 확인, `SV_RenderTargetArrayIndex`(VS)를 능력 형식으로 열 때의 형식 id 규칙 | RS3(한 번 그리기는 후속) |
 | RQ15 | RenderGraph | `GraphSharedData`로 `SceneTextureSet` 전달, history export·import, mip view 그래프 자원, view 여럿의 한 그래프 구성 | RS0 |
 | RQ16 | RenderBase 11·14절 | MSAA 색·깊이 resolve 셰이더(깊이·velocity 전경 선택, 계획 11.1절)를 그리기 유틸리티로 | RS8 |
 | RQ17 | RenderBase 11.1절 내장 자원 팩 | 빈 light grid, 빈 그림자(깊이 1 = 원평면, 9.2절 보통 Z 규약에서 비교 결과 "그림자 없음"), 검은 cube, 기본 BRDF LUT(또는 시작 때 생성) | RS1·RS3·RS7 |
-| RQ18 | 머티리얼 시스템 | 14절 계약 전체, 특히 `SurfaceAttributes`·shading model 번호 참조(결정 RN5)·pass 셰이더 목록·WPO 현재·이전 평가, (pass, 퍼뮤테이션)별 머티리얼 텍스처 상한 표시(7.4절) | MAT0 |
+| RQ18 | 머티리얼 시스템 | 14절 계약 전체, 특히 `SurfaceAttributes`·생성 함수(14.1절)·번호표 참조(`RenderData`, 결정 RN5)·pass 셰이더 목록과 경로·`MaterialShaderTraits` 거르기, (pass, 퍼뮤테이션, 형식)별 머티리얼 텍스처 상한 표시(7.4절), Render Path Switch의 깊이 일치 검사(14.3절). 머티리얼 시스템 개정 2가 10.1·10.4절에 반영했다 | MS2(MAT0) |
 | RQ19 | AssetSystem 메시 단계 | 정적 메시: 위치·패킹 법선·tangent·UV, section·머티리얼 slot, bounds, LOD. 이동 물체 velocity를 위한 이전 위치는 렌더러가 변환으로 계산(skinned는 이전 pose를 렌더러에 넘김) | RS0 |
 | RQ20 | WorldIntegration | `SceneChangeList`·`ViewDesc` 생성, teleport·cut 표시, `RenderNotices` 처리 | RS0 |
 | RQ21 | TextureStreaming | 렌더러가 텍스처 사용 기록별 마지막 그린 프레임 번호(4.2절)와 view별 mip bias(11.2절)를 넘기는 형식. TextureStreaming 4.1절 요구를 렌더러 쪽에서 받은 것 | RS0(사용 기록)·RS6(mip bias) |
+| RQ22 | 셰이더 시스템 12.1절(형식 정의 `limits`)·7.2절 4항 | 결정 RN13 개정(2026-11-18 사용자 결정). (1) `sampledTextures`를 형식별로: `D3D12_SM6`·`METAL_SM5` 128 유지, `VULKAN_SM5`는 넓히고 `deviceRequirements`에 `maxPerStageDescriptorSampledImages`·`maxPerStageDescriptorSamplers` 하한을 넣는다(값은 GX1 장치 분포 확인 뒤, RQ11과 같은 방식), `D3D11_SM5`는 16, GLES는 16 유지. (2) 단계당 SRV 텍스처 상한 검사는 프로필 공통 상한(형식들의 최소값)이 아니라 job 형식의 상한으로 하고, 오류에 머티리얼·pass·퍼뮤테이션·형식을 담는다. 원문은 형식마다 바꾸지 않는다 | MS2·RS1 |
+| RQ23 | 셰이더 시스템 7.2절 9항 | 짝 규칙의 예외로 머티리얼 텍스처의 **공유 샘플러**(UE `SSM_Wrap_WorldGroupSettings`·`SSM_Clamp_WorldGroupSettings`와 같은 Wrap·Clamp 두 종, view 상수 쪽 샘플러, mip bias 포함)를 후속에서 앞당긴다. GLES는 공유 샘플러 객체를 각 텍스처 유닛에 묶어 combined sampler 규칙을 유지한다. 이것이 없으면 RQ22로 넓힌 형식도 샘플러 16에 묶인다(7.4절) | 머티리얼 텍스처가 16장을 넘는 콘텐츠 전(측정 MM5로 시점 판단) |
 
 ### 18.2 문서별 개정 위치
 
@@ -848,15 +903,16 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 | 〃 | 11.1절 내장 자원 팩 | 1차 내용 | RQ17 |
 | 〃 | 14절 표 "GBuffer 메타"·"MSAA resolve"·"렌더러 모듈 인터페이스" 행 | "Deferred 경로", "Forward+ MSAA", "Renderer 설계" | 이 문서 3.2절 배치(GBuffer 메타 `RendererShaders`, resolve RenderBase 유틸리티 RQ16) |
 | 〃 | 18.1절 "범위 밖" 첫 항목 | "Forward+·Deferred 조명 경로와 GI(계획 11·14절)" | 이 문서 17절 RS0–RS11 참조 |
-| ShaderSystem | 7.2절 4항 | GLES 모바일 상한 | RQ10·RQ12 |
-| 〃 | 12.1절 형식 정의 | `VULKAN_SM5` `renderTargets` 4 | RQ11(결정 RN3) |
+| ShaderSystem | 7.2절 4항 | GLES 모바일 상한, SRV 상한을 프로필 공통 상한으로 검사 | RQ10·RQ12, SRV 텍스처는 job 형식 상한으로 검사(RQ22) |
+| 〃 | 7.2절 9항 | 공유·정적 샘플러는 후속 | 머티리얼 공유 샘플러(RQ23) |
+| 〃 | 12.1절 형식 정의 | `VULKAN_SM5` `renderTargets` 4, `sampledTextures` D3D11 128·Vulkan 16 | RQ11(결정 RN3), RQ22(결정 RN13 개정) |
 | 〃 | 12.2절 P14 | 셰이더 타입·거르기 | RQ13 |
 | 〃 | 7.2절 7항 | 시스템 값 목록 | RQ14 |
 | PixelFormat | 8.6절 texel buffer 열 | "미대조" | RQ9 |
 | TextureStreaming | 4.1절 사용 기록·표본 해상도 입력 | 렌더러 쪽 형식 미정 | 렌더러가 넘기는 사용 기록·mip bias 형식(RQ21) |
 | RenderingGuide | 9절 | 계획 기반 개요 | 이 문서 6.2절 순서와 13절 지원표 참조 |
 | EngineRuntime | 10.3절 범위 밖 | "Deferred/Forward 경로" | 이 문서 참조 |
-| 머티리얼 시스템(작성 중) | 렌더러 계약 절 | — | 14절 계약 참조(RQ18) |
+| 머티리얼 시스템 | 10.1절 경계·10.4절 정합 결과 | 개정 2에서 반영 | 14절 계약(RQ18). 이 문서 쪽 처리는 14.7절 |
 
 ## 19. 결정 필요 사항과 미확인 목록
 
@@ -868,7 +924,7 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 | RN2 | GBuffer 법선 인코딩 | (가) 권장: UE desktop과 같은 `N·0.5+0.5` 10:10:10, 모든 backend. (나) octahedral(UE 모바일 방식) | RS2 전 |
 | RN3 | Vulkan Deferred MRT 8 | (가) 권장: `VULKAN_SM5` 장치 요구에 MRT 8을 넣고 상한을 8로(데스크톱 장치 분포는 **미확인**이므로 GX1 조회 결과를 먼저 본다). (나) MRT 8 형식 id를 따로 둔다. (다) Vulkan Deferred는 기본 layout만(D·E는 `Unsupported`) | RS7 전(RS2는 기본 layout으로 진행 가능) |
 | RN4 | GLES Deferred 범위 | (가) 권장: 기본 layout(MRT 4)만, 다중 pass, GBufferD·E가 필요한 기능은 GLES Deferred에서 `Unsupported`(Forward+는 지원). (나) GLES Deferred를 두지 않음(계획 11.5절 "모든 backend에서 두 경로 검증"과 충돌) | RS2 전 |
-| RN5 | shading model·블렌드 모드·영역 번호표 소유 | (가) 권장: `RendererShaders`가 번호·GBuffer 의미를 소유하고 머티리얼 스키마가 참조. (나) 머티리얼 스키마가 소유하고 렌더러가 참조. 머티리얼 스펙 세션과 합의 필요 | MAT0 전 |
+| RN5 | shading model·블렌드 모드·영역 번호표 소유 | (가) 권장: 렌더러가 번호·GBuffer 의미를 소유하고 머티리얼 스키마가 참조. 개정 3: 번호표 C++ 정의는 `RenderData`, HLSL 상수는 `/Engine/Shared/` 공용 헤더, GBuffer 의미는 `RendererShaders`(3.2절, 머티리얼 시스템 10.4절 D2의 순환 해소). (나) 머티리얼 스키마가 소유하고 렌더러가 참조 | MAT0 전 |
 | RN6 | velocity 형식 | (가) 권장: 모든 backend `RG16Float`. (나) UE처럼 `RG16Unorm` 인코딩(GLES는 확장 조건) | RS0 전 |
 | RN7 | 화면 마일스톤 다음 순서 | (가) 권장: RS0 → RS1 Forward+ → RS2 Deferred → RS3 그림자 → …(17.2절). (나) Deferred 먼저 | RS0 착수 전 |
 | RN8 | 하늘·안개 위치 | (가) 권장: 두 경로 모두 전체 화면 pass(F13), 투명은 자기 셰이더. (나) Forward+는 base pass 안에서 안개 적용 | RS5 전 |
@@ -876,9 +932,11 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 | RN10 | point 그림자 | (가) 권장: atlas 6면 개별 그리기(모든 backend). layer 출력 한 번 그리기는 능력 확장 후속. (나) cube 텍스처 + layer 출력 필수(GLES 불가) | RS3 전 |
 | RN11 | 모듈·이름 | 2절 이름과 3.2절 배치(`RenderData`·`RendererShaders`·`Renderer` 셋). 대안: `RendererShaders`를 두지 않고 쿠커가 `Renderer`를 링크(Host 쿠커에 장치 모듈 의존이 생긴다) | 문서 확정 |
 | RN12 | Forward+ 보조 출력 배치 | 8.4절 roughness 자리(두 번째 `R8Unorm` 타깃 또는 법선 octahedral + roughness 한 타깃). 권장안은 RS10 측정 뒤 | RS10 전 |
-| RN13 | 단계당 SRV 16 상한 대응(7.4절) | (가) 권장: 자원 합치기(grid 버퍼 하나·shadow atlas 하나·atlas 묶기)로 모든 형식에 한 원문을 유지하고, 머티리얼 텍스처 상한을 (pass, 퍼뮤테이션)별 `16 − 렌더러 합계`로 공개해 쿠킹에서 검사. 선택 자원을 많이 켠 조합은 머티리얼 텍스처가 1–3개만 남는다. (나) 16-SRV 형식(GLES·`VULKAN_SM5`)용 pass 셰이더 타입을 따로 두어 데스크톱 D3D·Metal은 128을 쓴다(셰이더 타입 수 증가). (다) 공유 샘플러·bindless(셰이더 시스템 7.2절 9·10항 후속)를 앞당긴다 | RS1 전 |
+| RN13 | 단계당 SRV 상한 대응(7.4절) | **개정 3(2026-11-18 사용자 결정): 형식별 상한.** 셰이더 원문은 모든 형식에 하나로 유지하고 자원 합치기(grid 버퍼 하나·shadow atlas 하나·atlas 묶기)로 렌더러 자원을 16 안에 둔다. 단계당 SRV 상한은 형식 정의가 정한다(D3D12·Vulkan·Metal 넓게, GLES·D3D11 SM5 16). 머티리얼 텍스처 상한은 (pass, 퍼뮤테이션, 형식)별 `형식 상한 − 렌더러 합계`이고, 모바일 형식에서 넘는 머티리얼은 그 형식 쿠킹의 명시 오류다(RQ22). 넓은 형식이 16장을 넘으려면 공유 샘플러가 필요하다(RQ23). 개정 2의 확정안은 (가) 모든 형식 `16 − 렌더러 합계`였다. 그 밖의 선택지: (나) 16-SRV 형식용 pass 셰이더 타입을 따로 둠(셰이더 타입 수 증가), (다) bindless를 앞당김 | RS1 전 |
 
-**결정(2026-11-18, 사용자 "결정사항들은 권장안대로 하면됨").** RN1–RN11·RN13은 각 행의 권장안으로 확정한다. RN12는 권장안이 정해지지 않은 항목이라 RS10에서 정한다. RN5(번호표 소유)는 머티리얼 스펙과의 교차 검증에서 경계를 맞춘다.
+**결정(2026-11-18, 사용자 "결정사항들은 권장안대로 하면됨").** RN1–RN11·RN13은 각 행의 권장안으로 확정한다. RN12는 권장안이 정해지지 않은 항목이라 RS10에서 정한다. RN5는 머티리얼 시스템과의 교차 검증에서 번호표 코드 위치를 정했다(개정 3).
+
+**개정(2026-11-18, 사용자 결정).** RN13을 권장안 (가)에서 형식별 상한으로 개정했다(위 행). 이유: (가)는 GLES 보장치 16이 데스크톱 형식까지 묶어 일반 PBR 머티리얼도 무거운 퍼뮤테이션에서 쿠킹 오류가 날 수 있었다(머티리얼 시스템 10.4절 D3). 데스크톱은 쿠킹되고 모바일 형식에서만 명시 오류가 나는 구조는 UE 모바일 머티리얼 제약과 같은 성격이다.
 
 ### 19.2 미확인 목록
 
@@ -895,6 +953,8 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 | GLES texel buffer 형식(`R32Uint`·`RGBA32Float`) | 8.1절, RQ9 | ES 3.2 사양 Table 8.18 대조 |
 | SPIRV-Cross의 HLSL `Buffer<T>` → ESSL `samplerBuffer` 변환 | RQ10 | SH0 측정 |
 | 데스크톱 Vulkan 장치의 `maxColorAttachments` 분포 | 결정 RN3 | GX1 조회·장치 표본 |
+| 데스크톱 Vulkan 장치의 `maxPerStageDescriptorSampledImages`·`maxPerStageDescriptorSamplers` 분포 | 결정 RN13, RQ22 | GX1 조회·장치 표본 |
+| D3D12 resource binding tier 1 장치가 `D3D12_SHADER_MODEL_6_6` 요구를 통과하는지(샘플러 상한 16 여부) | RQ23 | 장치 표본. 개발 기계 GTX 1060은 tier 3(셰이더 시스템 15절 결정 3 측정) |
 | Metal MRT·layer 출력·깊이 clamp·HDR 능력 | 13.1절 | SH5 착수 때 Apple 능력 표 |
 | GLES 깊이 clamp 확장 | 13.1절 | 확장 목록 조사(P13 기기) |
 | `r.Mobile.ShadingPath` 등록 위치 | 3.1절(모바일) | 렌더러 범위 밖이라 조사 생략. 설정 읽기만 확인(`RC/Private/ReadOnlyCVARCache.cpp:53–69`) |
@@ -903,3 +963,4 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 
 - 개정 1(2026-11-18): 초안. 사용자 지시 "스펙 지금 시작해"에 따라 작성했다. UE 5.8.4 Renderer 네 갈래 조사(프레임 흐름·desktop forward·light grid·모바일 선택 / GBuffer·Substrate·shading model·deferred 조명·그림자·정적 조명 / 장면 표현·그리기 명령·GPU Scene·view·가시성·투명·하늘·안개·후처리 / GI·RT·path tracing 진입점)를 종합하고, 핵심 근거 약 40곳을 원문 줄로 다시 대조했다. 사용자 결정(렌더 경로 Forward+·Deferred 둘, GI 두 축, PathTracing 별도 모드, UE 좌표·행렬, Rocks 이름, 레거시 제외, 5개 backend와 지원표)을 1절에 반영했다. 머티리얼 쪽 계약은 동시에 작성 중인 머티리얼 시스템 스펙과 겹치지 않게 14.6절 경계표로 나눴다. 독립 리뷰 1건(UE 인용 약 75곳 대조, 차단 2·중요 11·사소 다수)을 반영했다: GLES image 형식에 맞춰 grid를 `R32Uint` 하나로(8.1절), 큰 월드 위치를 GPU Scene 상위·하위 + view 이동 보정으로(5.1절), light grid 셀 상한 없음과 넘침 보수 대체(8.1절), 그림자 깊이를 UE와 같은 보통 Z·`D16Unorm`으로(9.2절), 단계당 SRV 16 예산표(7.4절, 결정 RN13), 공유 상수와 자원 묶음 분리(15.2절), 간접 draw의 인스턴스 offset(15.2절), 조명 pass의 깊이·스텐실 attachment 제거(GLES feedback loop, 7.3절), Forward+ DBuffer decal(6.2절), skinned 단계 RS12, 텍스처 스트리밍 요구 RQ21, 인용 경로·줄 번호 정정, PostChain ID를 PC로 변경.
 - 개정 2(2026-11-18): 사용자 지시 "결정사항들은 권장안대로 하면됨"으로 RN1–RN11·RN13을 권장안으로 확정했다(19.1절). RN12는 RS10에서 정하고, RN5는 머티리얼 스펙과의 교차 검증에서 경계를 맞춘다.
+- 개정 3(2026-11-18): 머티리얼 시스템 개정 1과 교차 검증해 두 문서를 맞췄다(머티리얼 시스템 10.4절 "정합 결과"). 사용자 결정 반영: RN13을 형식별 SRV 상한으로 개정(1·7.4·13.1·19.1절, RQ22), RN5 번호표의 C++ 정의를 `RenderData`·HLSL 상수를 `/Engine/Shared/`로(3.2·14.2절, 순환 해소). D1–D9 반영: WPO를 정점 함수로 분리하고 머티리얼 생성 함수 표를 둠(14.1절), `AlphaHoldout`을 후속 값으로 명시(14.2·10.2절), 거르기 인자를 `MaterialShaderTraits`로(14.3·14.5·15.3절), "static switch 차원"을 "static 변형"으로(14.6절), pass 표에 경로 열·`RENDER_PATH_*` 정의, depth·그림자 pass의 마스크 전용 함수(14.1·14.3절). 그 밖의 불일치 수정: Render Path Switch의 깊이 일치 규칙, 마스크를 퍼뮤테이션 차원에서 뺌, PDO 함수와 depth PS 조건, 노드 미리보기 pass `MaterialPreview`, 조회 키에 단계·SX5, mask clip 값이 static 정의임, 노멀 공간 변환 위치, `GBuffer`·depth 계열 pass의 렌더러 SRV 합계, 짝 규칙과 샘플러 상한(RQ23), 확정된 RN3을 지원표에 반영, 머티리얼 단계(MS)와 RS 선후(17절), 머티리얼 요구 MRD1–MRD12 처리(14.7절), 대체 계수(16.2절).

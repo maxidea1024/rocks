@@ -1,6 +1,6 @@
 # 머티리얼 시스템(MaterialSystem) 설계
 
-기준일: 2026-11-18, 개정 1(초안). [엔진 구현 계획](EngineImplementationPlan.ko.md) 14.1·14.4–14.9절의 머티리얼 요구를 구현 스펙으로 정한다. 범위는 다음과 같다.
+기준일: 2026-11-18, 개정 2(초안). [엔진 구현 계획](EngineImplementationPlan.ko.md) 14.1·14.4–14.9절의 머티리얼 요구를 구현 스펙으로 정한다. 범위는 다음과 같다.
 - 머티리얼 에셋 모델(머티리얼·인스턴스·함수·레이어·파라미터 컬렉션)과 쿠킹 데이터
 - 그래프 스키마, typed IR, IR에서 HLSL을 만드는 코드 생성
 - 퍼뮤테이션, 파라미터 layout과 상수 식, 인스턴스 override와 static 변형
@@ -22,11 +22,11 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 확인하지 못한 사실은 "미확인"으로 적는다. 근거 없이 채운 항목은 없다.
 
 **관계 문서.**
-- [셰이더 시스템](ShaderSystem.ko.md)(개정 11): 원문 규약·바인딩 규약 7.2절·job 키·셰이더 타입과 퍼뮤테이션(P14)·파라미터 구조체(P7)·라이브러리. 이 문서는 그 위에 머티리얼이 만드는 원문과 layout을 얹는다. 충돌은 그 문서의 결정을 따르고, 고칠 곳은 16절에 모은다.
+- [셰이더 시스템](ShaderSystem.ko.md)(개정 12): 원문 규약·바인딩 규약 7.2절·job 키·셰이더 타입과 퍼뮤테이션(P14)·파라미터 구조체(P7)·라이브러리. 이 문서는 그 위에 머티리얼이 만드는 원문과 layout을 얹는다. 충돌은 그 문서의 결정을 따르고, 고칠 곳은 16절에 모은다.
 - [렌더 기반](RenderBase.ko.md)(개정 9): 셰이더 집합·바인딩 지도·상수 블록·공유 상수 slot·파이프라인 캐시·정점 입력 타입.
 - [에셋 시스템](AssetSystem.ko.md)(개정 8): 에셋·참조 종류·에셋 너겟 키·Cooker.
 - [텍스처 스트리밍](TextureStreaming.ko.md)(개정 3) 결정 T4: 재질 sampling scale 공급.
-- [Renderer](Renderer.ko.md)(개정 2, `feature/renderer-spec` 2dc9068, 미병합): GBuffer 배치·조명 평가·pass 목록과 pass 셰이더, 그리고 14절 "렌더러가 머티리얼에 요구하는 계약"(`SurfaceAttributes`, shading model·블렌드 모드·영역 번호표, pass별 퍼뮤테이션, 경계표). 이 문서는 그 계약에 맞춘다(10.1절). 다른 점은 10.4절에 모았다. 이 문서에서 "Renderer 스펙"이라 부른다.
+- [Renderer](Renderer.ko.md)(개정 3): GBuffer 배치·조명 평가·pass 목록과 pass 셰이더, 그리고 14절 "렌더러가 머티리얼에 요구하는 계약"(`SurfaceAttributes`와 머티리얼 함수, shading model·블렌드 모드·영역 번호표, pass별 경로·퍼뮤테이션, 경계표, 이 문서 요구의 처리). 이 문서는 그 계약에 맞춘다(10.1절). 두 문서의 정합 결과는 10.4절이다. 이 문서에서 "Renderer 스펙"이라 부른다.
 
 **용어 방침.** UE 구조는 따르되 이름은 Rocks 이름을 쓴다. UE의 클래스·함수·CVar 이름은 대응표(2절)와 "UE 5.8 방식" 표·근거에만 적는다. shader·pass·BSDF·closure·GBuffer·uniform·sampler·permutation처럼 업계에서 함께 쓰는 말은 그대로 쓴다. 계획 문서에 이미 있는 Rocks 이름(MaterialSchema·MaterialCompiler·MaterialRuntime·MaterialCook·CompileCoordinator·PreviewSession)은 그대로 쓴다.
 
@@ -36,29 +36,29 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 
 ## 1. 결정 요약
 
-"결정 MDn"은 17절 항목이다. 2026-11-18 사용자 지시("결정사항들은 권장안대로 하면됨")로 MD1–MD9를 확정했다. MD4는 같은 날 확정된 Renderer 결정 RN13에 맞췄다(17절).
+"결정 MDn"은 17절 항목이다. 2026-11-18 사용자 지시("결정사항들은 권장안대로 하면됨")로 MD1–MD9를 확정했다. MD4는 같은 날 Renderer 결정 RN13과 함께 사용자 결정으로 형식별 상한으로 개정했다(17절).
 
 | 항목 | 결정(권장안 포함) | 근거 |
 |---|---|---|
 | 컴파일 구조 | 그래프 → **typed IR(SSA DAG)** → 분석·최적화 → HLSL. 노드가 HLSL 조각을 직접 내는 번역기는 두지 않는다(결정 MD2) | UE 5.8 기본은 노드가 코드를 직접 내는 번역기다(`RE/Private/Materials/MaterialShared.cpp:3683–3704`). IR 번역기는 실험이다(`r.Material.Translator.EnableNew` 기본 false, "prototype (WIP)", `:108–112`). Rocks는 HLSL 말고도 IR 소비자가 있다(계획 14.10절 CPU bake target `BakeMaterialProfile`, M8 `RayMaterialProfile`) |
 | IR 성질 | 값 해시 공유(hash-consing)·빈도 분석(상수·static·uniform·정점·픽셀)·결정적 번호 매김. 같은 그래프·같은 도구 빌드는 같은 바이트 | UE IR도 값 해시 공유를 쓴다(`RE/Public/Materials/MaterialIR.h:97–118`). 결정성은 AssetSystem 10절 규칙 |
 | 표면 출력 모델 | **Substrate형 BSDF 그래프**를 closure 하나로 접어 Renderer 스펙 `SurfaceAttributes`(고전 필드 + shading model 번호)로 내보낸다. shading model은 BSDF로 내려가는 preset 노드다. 여러 closure는 계획 14.4절 연구 gate(결정 MD1) | UE 5.8 새 프로젝트는 Substrate·Blendable GBuffer가 켜진다(`ED/GameProjectGeneration/Private/GameProjectUtils.cpp:199–211`). Blendable은 closure 1개를 강제한다(`RC/Private/RenderUtils.cpp:2328–2373`). Rocks 형식 가운데 Adaptive 대상(UE는 SM6 계열만)은 `D3D12_SM6`뿐이다(10.2절) |
-| 렌더러 경계 | 머티리얼은 `EvaluateMaterialSurface(MaterialInputs) → SurfaceAttributes`와 정점 함수(WPO 현재·이전)를 생성한다. `SurfaceAttributes` 필드, shading model·블렌드 모드·영역 번호표, GBuffer 인코딩, 직접광 평가, pass 원문은 Renderer 스펙이 소유한다(Renderer 결정 RN5) | Renderer 14.1·14.2·14.4·14.6절, 계획 11.1절 표 "공통 Material IR에서 GBuffer 출력 / 같은 IR에서 direct lighting·surface 평가" |
+| 렌더러 경계 | 머티리얼은 `EvaluateMaterialSurface(MaterialInputs) → SurfaceAttributes`, 정점 함수(WPO 현재·이전), 마스크·PDO 등 진입점 함수(7.3절)를 생성한다. `SurfaceAttributes` 필드, shading model·블렌드 모드·영역 번호표(C++ `RenderData`, HLSL `/Engine/Shared/`), GBuffer 인코딩, 직접광 평가, pass 원문은 Renderer 스펙이 소유한다(Renderer 결정 RN5) | Renderer 3.2·14.1·14.2·14.4·14.6절, 계획 11.1절 표 "공통 Material IR에서 GBuffer 출력 / 같은 IR에서 direct lighting·surface 평가" |
 | 생성 원문 연결 | 텍스트 템플릿 치환을 하지 않는다. 생성 파일 `/Engine/Generated/Material.rsh`(job마다 연결)를 정적 템플릿 `MaterialCommon.rsh`가 include한다 | UE는 `%{name}` 문자열 템플릿을 채운다(`RE/Private/Materials/StringTemplate.h:13–29`, `MaterialSourceTemplate.h:12–52`). Rocks는 정점 입력 타입의 고정 가상 경로 방식(RenderBase 10.2절)과 같게 한다 |
 | 파라미터 식별 | 파라미터는 이름이 아니라 (정의한 에셋, 안정 `ParameterId`(Guid), scope 경로(전역·함수 호출 위치·레이어 Guid))로 식별한다. 이름 바꾸기·레이어 순서 바꾸기에도 override가 남는다 | 계획 14.7절. UE는 이름+연관+레이어 index로 식별하고 index를 다시 매긴다(`RE/Public/Materials/MaterialParameters.h:33–46, 78, 134`) |
 | 상수 식 | uniform 빈도 식은 CPU **상수 식 프로그램**으로 내보내고 렌더 lane이 상수 블록을 채운다 | UE preshader(`RE/Public/Shader/Preshader.h:19–75`, 평가 `RE/Private/Materials/MaterialRenderProxy.cpp:458`) |
 | 인스턴스 해석 | override는 로드·편집 때 부모 사슬을 평탄화한 값 배열로 만든다. 그리기 경로에서 부모를 거슬러 찾지 않는다 | UE는 렌더 스레드에서 부모 proxy로 재귀한다(`RE/Private/Materials/MaterialInstance.cpp:371–395`) |
 | static 변형 | static 파라미터·기본 속성 override를 가진 인스턴스는 자기 static 변형을 쿠킹한다. 실행 중 만드는 인스턴스는 static 값을 바꿀 수 없다(`UnsupportedSetting`) | UE `bHasStaticPermutationResource`(`RE/Private/Materials/MaterialInstance.cpp:2415–2424`), 변형 갱신은 에디터 전용(`RE/Public/Materials/MaterialInstance.h:1042–1083`) |
 | 퍼뮤테이션 축 | (머티리얼 static 변형) × (pass 셰이더 타입·pass 퍼뮤테이션) × 정점 입력 타입 × 형식 × 품질 수준. 사용 대상 선언·쿠킹 유도·형식 거르기·품질 차이 검사로 줄이고 쿠커가 수를 보고한다 | UE `FMeshMaterialShaderType` 두 단계 거르기(`RE/Private/Materials/MeshMaterialShader.cpp:178–186`), 품질 사용 검사(`RE/Private/Materials/MaterialCachedData.cpp:625–637`), 계획 14.1절 증가량 보고 |
-| 파라미터 layout 형식 | MetaCompiler가 만드는 C++ 파라미터 구조체와 머티리얼 컴파일러가 만드는 **동적 layout**이 같은 `ShaderParameterLayout` 데이터를 낸다(셰이더 결정 4 권장안과 맞물림, 결정 MD3) | UE도 머티리얼 uniform buffer는 매크로가 아니라 실행 중 layout을 만든다(`RE/Private/Materials/MaterialUniformExpressions.cpp:524, 971–981`) |
-| 텍스처·샘플러 한도 | 머티리얼 텍스처 상한은 (pass, 퍼뮤테이션)마다 `16 − 렌더러 합계`다. 머티리얼 컴파일러가 pass별 예산을 계산해 진단·쿠킹 검사에 쓴다(결정 MD4 = Renderer RN13) | 셰이더 시스템 7.2절 4·9항(공통 상한 16, 텍스처마다 샘플러 하나), Renderer 7.4절. UE는 공유 샘플러로 샘플러 슬롯을 아낀다(`RE/Classes/Engine/EngineTypes.h:282–293`) |
-| 대체 머티리얼 | 도메인별 엔진 기본 머티리얼을 엔진 셰이더 라이브러리에 넣고 시작 때 완결성을 검사한다. 에디터는 마지막 성공 결과를 유지한다. 쿠킹 실행에서 빠진 셰이더는 기본 머티리얼 + 진단이다(검은 표면 금지) | UE `GetDefaultMaterial(Domain)`(`RE/Private/Materials/Material.cpp:1094–1109`), 기본 머티리얼은 동기 컴파일(`RE/Private/Materials/MaterialShared.cpp:2351–2354`). 계획 11.1절 "검은 표면으로 처리하지 않는다", 14.8절 "이전 검증 shader 유지" |
+| 파라미터 layout 형식 | MetaCompiler가 만드는 C++ 파라미터 구조체와 머티리얼 컴파일러가 만드는 **동적 layout**이 같은 `ShaderParameterLayout` 데이터를 낸다(셰이더 시스템 결정 4 = MetaCompiler 방식, 2026-11-18 확정. 결정 MD3, 셰이더 시스템 13절) | UE도 머티리얼 uniform buffer는 매크로가 아니라 실행 중 layout을 만든다(`RE/Private/Materials/MaterialUniformExpressions.cpp:524, 971–981`) |
+| 텍스처·샘플러 한도 | 생성 원문은 모든 형식에 하나다. 머티리얼 텍스처 상한은 (pass, 퍼뮤테이션, 형식)마다 `형식 상한 − 렌더러 합계`이고 형식 상한은 형식 정의가 정한다(D3D12·Vulkan·Metal 넓게, GLES·D3D11 SM5 16). 데스크톱에서 쿠킹되는 머티리얼도 모바일 형식에서 넘으면 그 형식 쿠킹의 명시 오류다(결정 MD4 = Renderer RN13, 2026-11-18 사용자 결정으로 개정). 16장을 넘으려면 공유 샘플러가 필요하다(16절 MSR13) | 셰이더 시스템 7.2절 4·9항(텍스처마다 샘플러 하나, 샘플러 16), Renderer 7.4절. UE는 공유 샘플러로 샘플러 슬롯을 아끼고(`RE/Classes/Engine/EngineTypes.h:283–292`), 플랫폼 샘플러 상한을 컴파일 환경에 넣으며(`RE/Private/ShaderCompiler/ShaderCompiler.cpp:3945–3946`), OpenGL은 16 초과가 컴파일 오류다(`Engine/Source/Developer/ShaderFormatOpenGL/Private/OpenGLShaderCompiler.cpp:868–877`) |
+| 대체 머티리얼 | 영역별 엔진 기본 머티리얼을 엔진 셰이더 라이브러리에 넣고 시작 때 완결성을 검사한다. 에디터는 마지막 성공 결과를 유지한다. 쿠킹 실행에서 빠진 셰이더는 기본 머티리얼 + 진단이다(검은 표면 금지) | UE `GetDefaultMaterial(Domain)`(`RE/Private/Materials/Material.cpp:1094–1109`), 기본 머티리얼은 동기 컴파일(`RE/Private/Materials/MaterialShared.cpp:2351–2354`). 계획 11.1절 "검은 표면으로 처리하지 않는다", 14.8절 "이전 검증 shader 유지" |
 | 쿠킹 단위 | 두 층 너겟: **번역 너겟**(그래프 → 원문·layout·상수 식)과 셰이더 시스템 **job 너겟**. 셰이더 코드는 셰이더 라이브러리에, 패키지에는 셰이더 집합 id(번역 결과 내용 hash, 호스트 무관)만 둔다 | 셰이더 시스템 10·12.3절, RenderBase SX5(라이브러리 묶음 id). UE는 번역 결과(`"MaterialTranslation"`)와 셰이더 맵(`"MaterialShaderMap"`)을 따로 캐시한다(`RE/Private/Materials/HLSLMaterialTranslator.cpp:209`, `RE/Private/Materials/MaterialShader.cpp:320–324`) |
 | 좌표·단위·행렬 | UE 5.8과 같다: 행 벡터 `mul(v, M)`·행 우선, cm, 좌표 공간 이름과 축. 머티리얼 노드의 변환도 이 규약으로 낸다 | 셰이더 시스템 7.2절 6항, 사용자 절대 규칙 |
 
 ## 2. 용어 대응
 
-결정 MD8(확정)대로다. 영역·블렌드 모드·shading model의 이름과 번호는 Renderer 스펙 14.2절(`RendererShaders` 소유, 결정 RN5)을 따른다.
+결정 MD8(확정)대로다. 영역·블렌드 모드·shading model의 이름과 번호는 Renderer 스펙 14.2절(Renderer 소유, 코드는 C++ `RenderData`·HLSL `/Engine/Shared/`, 결정 RN5)을 따른다.
 
 | Rocks | UE 5.8 대응 | 뜻 |
 |---|---|---|
@@ -73,7 +73,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 | 컬렉션 상태 `ParameterCollectionState` | `UMaterialParameterCollectionInstance` | World마다 가진 컬렉션 값 |
 | 머티리얼 그래프 `MaterialGraph` | `UMaterial::ExpressionCollection` | 노드·간선 데이터(EditorOnly) |
 | 노드 `MaterialNode`, 노드 타입 `NodeTypeId` | `UMaterialExpression`(클래스) | 그래프 노드 |
-| 출력 노드 `MaterialOutput` | 머티리얼 루트 노드(`UMaterial`의 입력 핀들) | 도메인별 typed 출력 |
+| 출력 노드 `MaterialOutput` | 머티리얼 루트 노드(`UMaterial`의 입력 핀들) | 영역별 typed 출력 |
 | 머티리얼 IR `MaterialIr` | `FMaterialIRModule`(실험) | typed SSA DAG |
 | 번역 결과 `MaterialTranslation` | `FMaterialCompilationOutput` + 생성 코드 | IR에서 만든 원문·layout·상수 식·특성 |
 | 상수 식 프로그램 `ConstantProgram` | preshader(`FUniformExpressionSet`) | uniform 빈도 식의 CPU 평가 프로그램 |
@@ -95,7 +95,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 | 표면 층 노드 `SurfaceSlab` | Substrate Slab | 기본 BSDF 노드 |
 | 표면 연산 노드 `SurfaceMix`·`SurfaceStack`·`SurfaceAdd`·`SurfaceCoverage`·`SurfaceSelect` | Horizontal Blend·Vertical Layer·Add·Coverage Weight·Select | BSDF 결합 |
 | shading preset 노드 | Substrate Shading Models(legacy 변환 노드)·`EMaterialShadingModel` | 고전 shading model 입력을 BSDF로 바꾸는 노드 |
-| 기본 머티리얼 `DefaultMaterial`(도메인별) | `UMaterial::GetDefaultMaterial` | 대체 머티리얼 |
+| 기본 머티리얼 `DefaultMaterial`(영역별) | `UMaterial::GetDefaultMaterial` | 대체 머티리얼 |
 | 컴파일 조정자 `CompileCoordinator`(계획 14.6) | 머티리얼 에디터 갱신 + 셰이더 맵 컴파일 | 편집 → 컴파일 요청 관리 |
 | 미리보기 세션 `PreviewSession`(계획 14.6) | 머티리얼 에디터 preview·`FMatExpressionPreview` | 미리보기 렌더 |
 
@@ -116,11 +116,11 @@ UE는 번역기·에셋·실행 상태를 한 모듈에 두어 쿠커와 게임�
 
 | 모듈 | 계층 | 책임 | 의존 | 금지 |
 |---|---|---|---|---|
-| **MaterialSchema** | Engine Runtime | 그래프 데이터 타입(`MaterialGraph`·노드·간선·핀 키), 노드 descriptor 표(데이터만), 파라미터 schema, 품질 수준·기본 속성 묶음, `MaterialShaderTraits`, semantic hash. 영역·블렌드 모드·shading model 번호표는 참조만 한다(Renderer 소유, 10.4절 D2) | Core·MetaSchema·Serialization·ShaderCore(셰이더 타입 id만)·RenderData(번호표, 10.4절 D2 제안) | RHI·Graphics·RenderBase·ObjectRuntime 객체 포인터·노드 lowering 코드 |
+| **MaterialSchema** | Engine Runtime | 그래프 데이터 타입(`MaterialGraph`·노드·간선·핀 키), 노드 descriptor 표(데이터만), 파라미터 schema, 품질 수준·기본 속성 묶음, `MaterialShaderTraits`, semantic hash. 영역·블렌드 모드·shading model 번호표는 참조만 한다(Renderer 소유, 10.4절 D2) | Core·MetaSchema·Serialization·ShaderCore(셰이더 타입 id만)·RenderData(번호표 C++ 정의, 10.4절 D2) | RHI·Graphics·RenderBase·ObjectRuntime 객체 포인터·노드 lowering 코드 |
 | **MaterialCompiler** | Engine Developer | 그래프 검증, 함수·레이어 펼치기, IR 생성·분석·최적화, HLSL 생성, 상수 식 생성, layout, 진단·원문 위치 지도 | MaterialSchema·ShaderCore·Core | 장치·프로세스 실행(셰이더 컴파일은 하지 않는다)·EditorFramework |
 | **MaterialRuntime** | Engine Runtime | `MaterialRenderState`, 상수 식 실행, 상수 블록 채움, 텍스처 handle 해석, 셰이더 집합 열기, 기본 머티리얼 대체 | MaterialSchema·RenderBase·ShaderCore·GraphicsTypes | ObjectRuntime·AssetRuntime(렌더 층 "Object 없음", 계획 3.1절)·그래프·컴파일러 |
 | **Material**(계획의 MaterialAssetBridge) | Engine Runtime | 에셋 클래스(`MaterialBase`·`Material`·`MaterialInstance`·`MaterialFunction`·`MaterialFunctionInstance`·`ParameterCollection`), `DynamicMaterialInstance`, 쿠킹 데이터 → `MaterialRenderState` 생성 | AssetRuntime·ObjectRuntime·MaterialSchema·MaterialRuntime | 컴파일러·셰이더 도구 |
-| **MaterialCook** | Engine Developer | 번역 너겟·셰이더 job 목록·쿠킹 처리기·퍼뮤테이션 보고 | Material·MaterialCompiler·AssetCooker·AssetNugget·ShaderCompiler | Release 링크 금지 |
+| **MaterialCook** | Engine Developer | 번역 너겟·셰이더 job 목록·쿠킹 처리기·퍼뮤테이션 보고 | Material·MaterialCompiler·RendererShaders(pass 셰이더 타입 목록)·AssetCooker·AssetNugget·ShaderCompiler | Release 링크 금지 |
 | **EditorMaterial** | Engine Editor | `CompileCoordinator`·`PreviewSession`·그래프 편집 명령(계획 14.6절) | 위 모듈·EditorBackend·Renderer | 화면 코드에서 shader 의미·검증 재구현 금지(계획 14.6절) |
 
 계획과 다른 점:
@@ -144,6 +144,8 @@ RendererShaders(Renderer 3.2절) → { ShaderCore, RenderData, MaterialSchema }
 ```
 
 **pass 셰이더 선언 모듈.** 쿠커는 "이 머티리얼에 어떤 pass 셰이더가 필요한가"를 알아야 한다. UE는 pass 셰이더 타입을 Renderer 모듈이 정적으로 등록하고(예 `RR/Private/BasePassRendering.cpp:180–192`), 셰이더 맵 layout을 만들 때 등록된 셰이더 타입 전체를 훑는다(`RE/Private/Materials/MaterialShader.cpp:3210–3310`). 그래서 Renderer 모듈이 로드되어야 표가 찬다. Rocks는 Renderer 스펙이 장치 없는 `RendererShaders` 모듈을 두었다(Renderer 3.2절, 결정 RN11). MaterialCook과 Renderer가 모두 이 모듈을 링크한다. 정점 입력 타입 선언도 같은 이유로 장치 없는 위치에 있어야 한다(16절 MRB8).
+
+**번호표와 순환.** `RendererShaders`는 거르기 함수 인자 `MaterialShaderTraits` 때문에 MaterialSchema에 의존한다. 번호표를 `RendererShaders`에 두면 MaterialSchema → `RendererShaders` → MaterialSchema 순환이 생긴다. 그래서 번호표의 정의 권한은 Renderer 스펙에 두고(결정 RN5), C++ 열거는 장치 없는 `RenderData`에, HLSL 상수는 `/Engine/Shared/`의 C++·HLSL 공용 `.h`(셰이더 시스템 3절)에 둔다(Renderer 3.2절, 10.4절 D2). 의존은 `RendererShaders` → MaterialSchema → `RenderData`로 한 방향이다.
 
 ## 4. 에셋 모델
 
@@ -170,7 +172,7 @@ UE는 파라미터 기본값을 `FMaterialCachedExpressionData`의 타입별 병
 | 클래스 | 필드(EditorOnly 표시) | 쿠킹 데이터 |
 |---|---|---|
 | `MaterialBase`(Abstract) | — | — |
-| `Material` | `graph : MaterialGraph`(EditorOnly), `traits : MaterialTraitsDesc`(도메인·혼합 방식·양면·마스크 기준값 등 기본 속성), `usage : VertexInputUsage`, `functionRefs`(EditorOnly, Build 의존)·`collectionRefs`(Hard + Build, 4.4절), 미리보기 설정(EditorOnly) | `MaterialArtifact` 목록(품질 수준별), 텍스처·컬렉션 Hard 참조 |
+| `Material` | `graph : MaterialGraph`(EditorOnly), `traits : MaterialTraitsDesc`(영역·블렌드 모드·양면·마스크 기준값 등 기본 속성), `usage : VertexInputUsage`, `functionRefs`(EditorOnly, Build 의존)·`collectionRefs`(Hard + Build, 4.4절), 미리보기 설정(EditorOnly) | `MaterialArtifact` 목록(품질 수준별), 텍스처·컬렉션 Hard 참조 |
 | `MaterialInstance` | `parent : ObjectRef<MaterialBase>`(Hard), 종류별 override 배열(4.3절), `staticOverrides`, `traitOverrides : Optional<MaterialTraitsDesc>`, `layerStackOverrides` | static 변형이 있으면 자기 `MaterialArtifact`, 없으면 평탄화한 override 값만 |
 | `MaterialFunction` | `graph`(EditorOnly), `usage : {General, Layer, LayerBlend}`, `exposeToLibrary`(EditorOnly), 입출력 선언 | 없다(쿠킹 런타임에 함수는 필요 없다. 함수를 쓰는 머티리얼에 펼쳐져 들어간다) |
 | `MaterialFunctionInstance` | `parent : ObjectRef<MaterialFunction>`, 파라미터 기본값 override | 없다 |
@@ -264,16 +266,17 @@ Build 의존 순환(함수가 자기 자신을 부름, 인스턴스 부모 사�
 | V2 | 데이터 흐름 순환 금지(재경유 포함) | 연결·번역 |
 | V3 | 함수 호출 순환·인스턴스 부모 사슬 순환 금지 | 번역(Build 의존 SCC) |
 | V4 | 단계 규칙. 픽셀 전용 노드(화면 좌표·미분·scene texture)를 정점 출력에 쓰면 오류다. 정점에서 암묵 mip 텍스처 샘플도 오류다(명시 mip 필요) | 번역(IR 분석, 6.4절) |
-| V5 | 도메인·혼합 방식이 허용하지 않는 출력 핀 연결(예: Opaque의 Opacity) | 번역. 연결은 경고로 남기고 IR에서 버린다 |
+| V5 | 영역·블렌드 모드가 허용하지 않는 출력 핀 연결(예: Opaque의 Opacity) | 번역. 연결은 경고로 남기고 IR에서 버린다 |
 | V6 | 렌더 경로·pass·형식이 제공하지 않는 입력·기능 사용(예: Forward+에서 GBuffer 읽기, 불투명에서 scene color 읽기, GLES Deferred에서 GBufferD가 필요한 shading model) | 번역(capability 검사, 계획 14.7절, Renderer 14.2·14.6절) |
 | V7 | static 입력에 비static 값 연결 | 번역 |
 | V8 | 파라미터 이름 충돌(같은 scope에서 같은 이름·다른 종류) | 번역 |
-| V9 | 텍스처·샘플러 수, 보간 벡터 수, 상수 블록 크기, 컬렉션 수의 형식·pass 예산 초과(7.4절 4항·13절, pass별 텍스처 예산은 Renderer 7.4절) | 번역((pass, 퍼뮤테이션)별 예산)·job(형식별 상한) |
+| V9 | 텍스처·샘플러 수, 보간 벡터 수, 상수 블록 크기, 컬렉션 수의 형식·pass 예산 초과(7.4절 4항·13절, (pass, 퍼뮤테이션, 형식)별 텍스처 예산은 Renderer 7.4절) | 번역(프로필 형식마다 진단)·job(형식별 상한, 넘는 형식만 쿠킹 오류) |
 | V10 | 텍스처 샘플 종류와 텍스처 설정 불일치(예: sRGB 텍스처를 `Normal`로 샘플) | 번역. 텍스처 메타데이터는 진단용으로만 읽고 키에 넣지 않는다 |
 | V11 | NaN·Inf 상수 금지 | 연결·번역 |
 | V12 | 등록되지 않은 노드 타입이 출력에 닿음 | 번역(에디터는 열 수 있고, 쿠킹은 실패) |
 | V13 | 임의 HLSL 노드 규칙(7.5절) | 번역·job |
 | V14 | 레이어 스택: 레이어 함수는 `MaterialAttributes` 출력 하나, 혼합 함수는 두 입력과 알파, 레이어 수 상한(MAT3 착수 때 정함) | 번역 |
+| V15 | Render Path Switch가 `WorldPositionOffset`·`OpacityMask`·`PixelDepthOffset`에 닿으면 오류다. 공통 depth pass(Default 입력)와 경로 전용 base pass(경로 입력)의 깊이가 달라져 base pass 깊이 `Equal`이 깨지기 때문이다(Renderer 14.3절 "깊이 일치") | 번역(IR 분석) |
 
 오류가 있는 그래프도 draft로 저장·재열기할 수 있다(계획 14.8절). 쿠킹은 오류가 하나라도 있으면 게시하지 않는다.
 
@@ -289,20 +292,20 @@ Build 의존 순환(함수가 자기 자신을 부름, 인스턴스 부모 사�
   - 화면 데이터(위치·크기·주석 문구·색·접힘·선택)는 넣지 않는다. 그래서 노드를 옮겨도 compile이 일어나지 않는다(계획 14.6·14.8절, MT04).
 - semantic hash는 에디터 상태 판정(현재 그래프와 마지막 성공 결과의 일치, 계획 14.8절)과 번역 너겟 키(12.2절)에 쓴다.
 
-### 5.6 출력 노드(도메인별 typed output)
+### 5.6 출력 노드(영역별 typed output)
 
-| 도메인 | 출력 핀 | 단계 | 비고 |
+| 영역 | 출력 핀 | 단계 | 비고 |
 |---|---|---|---|
-| Surface | `Surface`(BSDF), `Opacity`, `OpacityMask`, `AmbientOcclusion`, `PixelDepthOffset`, `WorldPositionOffset`, `CustomizedUv0`–`7`, 이름 있는 custom 출력 | 픽셀·정점 | 혼합 방식에 따라 `Opacity`·`OpacityMask`가 활성화된다(V5). `Refraction`·`Displacement`는 후속 |
+| Surface | `Surface`(BSDF), `Opacity`, `OpacityMask`, `AmbientOcclusion`, `PixelDepthOffset`, `WorldPositionOffset`, `CustomizedUv0`–`7`, 이름 있는 custom 출력 | 픽셀·정점 | 블렌드 모드에 따라 `Opacity`·`OpacityMask`가 활성화된다(V5). `Refraction`·`Displacement`는 후속 |
 | DeferredDecal | `Surface`(쓰는 속성 부분집합), `Opacity` | 픽셀 | 쓰는 속성(색·노멀·거칠기·발광)은 Renderer 스펙의 decal 계약이 정한다(16절 MRD12) |
 | LightFunction | `LightColor`(Float3) | 픽셀 | |
 | PostProcess | `Color`(Float4), scene texture 입력 노드 | 픽셀 | 삽입 위치는 계획 26절의 HDR·tone-map 위치 |
 | UserInterface | `Color`(Float3), `Opacity`, `OpacityMask` | 픽셀 | UI 정점 입력 타입(UiToolkit) |
 | Volume | `Albedo`·`Extinction`·`Emissive` | 픽셀 | 후속(Renderer volumetric fog 단계) |
 
-UE의 RuntimeVirtualTexture 도메인은 deprecated이며 로드 때 Surface + RVT 출력 노드로 바뀐다(`RE/Public/MaterialDomain.h:26–27`, `RE/Private/Materials/Material.cpp:3259–3333`). Rocks는 이것을 도메인으로 두지 않는다. 가상 텍스처 단계에서 Surface의 custom 출력으로 정한다(후속).
+UE의 RuntimeVirtualTexture 영역은 deprecated이며 로드 때 Surface + RVT 출력 노드로 바뀐다(`RE/Public/MaterialDomain.h:26–27`, `RE/Private/Materials/Material.cpp:3259–3333`). Rocks는 이것을 영역으로 두지 않는다. 가상 텍스처 단계에서 Surface의 custom 출력으로 정한다(후속).
 
-도메인은 Renderer가 준비될 때까지 `Unsupported`로 표시한다(계획 14.7절). M3 기준은 Surface(Opaque·Masked)와 `DefaultLit`·`Unlit` preset이다. 영역 이름은 Renderer 14.2절을 따른다.
+영역은 Renderer가 준비될 때까지 `Unsupported`로 표시한다(계획 14.7절). M3 기준은 Surface(Opaque·Masked)와 `DefaultLit`·`Unlit` preset이다. 영역 이름은 Renderer 14.2절을 따른다.
 
 ### 5.7 노드 묶음(1차 범위)
 
@@ -350,16 +353,16 @@ UE IR 구조(참고):
   - `Uniform`: 머티리얼 파라미터·컬렉션 값과 그것만으로 된 식. 상수 식 프로그램(9.4절)으로 간다.
   - `Instance`: 그리기 단위 데이터(primitive·instance custom data). Renderer 스펙의 instance 데이터 계약을 따른다.
   - 연산의 빈도는 피연산자 빈도의 최대다. 예외로 미분과 암묵 mip 텍스처 읽기는 `Pixel`이고, 명시 mip 텍스처 읽기는 최소 `Vertex`다(uniform으로 끌어올리지 않는다).
-- **조건 영역.** 번역 때 정해지지 않는 static 조건(렌더 경로·기능 등급)은 IR의 조건 값으로 남기고 생성 원문에서 `#if`로 낸다(6.3절). 품질 수준과 static 파라미터는 번역 때 정해진다.
+- **조건 값.** 번역 때 정해지지 않는 static 조건(렌더 경로·기능 등급)은 IR의 조건 값으로 남기고 생성 원문에서 `#if`로 낸다(6.3절). 품질 수준과 static 파라미터는 번역 때 정해진다.
 
 ### 6.3 생성(그래프 → IR)
 
 1. **입력 고정.** 그래프 snapshot(계획 14.6절 immutable)과 Build 의존 함수·컬렉션의 snapshot을 받는다. Object 주소는 들고 가지 않는다.
 2. **static 해석.** static 파라미터(인스턴스 override 반영), Quality Switch(번역 중인 품질 수준), Static Switch를 풀고, 선택되지 않은 입력은 IR로 만들지 않는다. UE도 Quality Switch는 유효 입력 하나만 컴파일한다(`RE/Private/Materials/MaterialExpressions.cpp:9082–9107`, 검증 때만 모든 입력 `:9088–9102`).
-3. **렌더 경로·기능 등급 분기.** Render Path Switch는 Deferred·ForwardPlus·Default 세 입력을 가진다. 경로 전용 pass(GBuffer·ForwardOpaque)는 그 경로 입력을, 두 경로가 함께 쓰는 pass(Depth·ShadowDepth·Translucent·Velocity 등, Renderer 14.3절)는 Default 입력을 쓴다. Render Path Switch와 Capability Tier Switch는 모든 입력을 IR로 만들고 조건 값으로 잇는다. UE는 shading path를 플랫폼당 하나로 정해 한쪽만 컴파일한다(`RE/Public/Materials/MaterialExpressionShadingPathSwitch.h:50`). Rocks는 한 실행 안에서 view마다 Deferred·Forward+를 고르므로(계획 11.1절) pass job이 정한다.
+3. **렌더 경로·기능 등급 분기.** Render Path Switch는 Deferred·ForwardPlus·Default 세 입력을 가진다. 경로 전용 pass(`GBuffer`·`ForwardOpaque`·`DepthAux`)는 그 경로 입력을, 두 경로가 함께 쓰는 pass(`Depth`·`ShadowDepth`·`Translucent`·`Velocity` 등)는 Default 입력을 쓴다(Renderer 14.3절 "경로" 열). 생성 원문은 Renderer가 pass job에 넣는 `RENDER_PATH_DEFERRED`·`RENDER_PATH_FORWARD_PLUS`로 `#if`를 고른다. WPO·마스크·PDO에 닿는 Render Path Switch는 V15 오류다. Render Path Switch와 Capability Tier Switch는 모든 입력을 IR로 만들고 조건 값으로 잇는다. UE는 shading path를 플랫폼당 하나로 정해 한쪽만 컴파일한다(`RE/Public/Materials/MaterialExpressionShadingPathSwitch.h:50`). Rocks는 한 실행 안에서 view마다 Deferred·Forward+를 고르므로(계획 11.1절) pass job이 정한다.
 4. **함수 펼치기.** 함수 호출은 scope를 쌓고 함수 그래프를 펼친다. 함수 입력은 호출한 쪽의 값이다. UE도 인라인이다(`RE/Private/Materials/MaterialExpressions.cpp:15774–15824`, 호출자 문맥 복귀 `:16564–16594`). 파라미터 scope 경로는 9.2절이다.
 5. **레이어 스택 펼치기.** 레이어 i를 펼치고 혼합 함수로 결합한다. 레이어·혼합 scope는 레이어 Guid다. UE는 레이어 index에 연관을 단다(`MaterialExpressions.cpp:7238–7239, 7273–7274`).
-6. **출력.** 도메인·혼합 방식이 쓰는 출력 핀만 진입점으로 만든다(V5).
+6. **출력.** 영역·블렌드 모드가 쓰는 출력 핀만 진입점으로 만든다(V5).
 
 ### 6.4 분석
 
@@ -437,7 +440,7 @@ pass 셰이더(.rsf, Renderer 스펙)                 MaterialCommon.rsh와 Vert
 
 | 정의·함수 | 뜻 |
 |---|---|
-| `MATERIAL_DOMAIN_SURFACE` 등 도메인 하나 = 1 | 도메인 |
+| `MATERIAL_DOMAIN_SURFACE` 등 영역 하나 = 1 | 영역 |
 | `MATERIAL_BLEND_OPAQUE`·`_MASKED`·`_TRANSLUCENT`·`_ADDITIVE`·`_MODULATE`·`_ALPHA_COMPOSITE` 하나 = 1 | 블렌드 모드(Renderer 14.2절) |
 | `MATERIAL_TWO_SIDED`, `MATERIAL_USES_WPO`, `MATERIAL_USES_PREVIOUS_WPO`, `MATERIAL_USES_PIXEL_DEPTH_OFFSET`, `MATERIAL_USES_OPACITY_MASK` | 기능 표지(0·1) |
 | `MATERIAL_SHADING_MODELS`, `MATERIAL_SINGLE_SHADING_MODEL` | 쓰는 shading model 집합 비트(번호는 Renderer 14.2절)와, 하나뿐이면 그 번호. Renderer가 그 분기만 컴파일한다(Renderer 14.4절) |
@@ -466,11 +469,11 @@ pass 셰이더(.rsf, Renderer 스펙)                 MaterialCommon.rsh와 Vert
 | 1항 선언 | register·`[[vk::*]]`를 쓰지 않는다. 이름 없는 전역 uniform 금지에 맞춰 상수는 이름 있는 `cbuffer MaterialConstants`로 낸다 |
 | 2항 루트 상수 | 머티리얼은 루트 상수를 쓰지 않는다. 그리기별 상수는 Renderer 몫이다 |
 | 3항 슬롯 정규화 | 생성 cbuffer의 정규화 layout 항목에 동적 layout 서명을 단다(RenderBase SX8의 "파라미터 구조체 identity" 자리, 16절 MRB2) |
-| 4항 상한 | 텍스처·샘플러는 번역 때 (pass, 퍼뮤테이션)별 `16 − 렌더러 합계`(Renderer 7.4절)로, 상수 버퍼·보간 수는 (프로필 공통 상한 − pass 예약 수)로 검사하고(V9), job에서 형식 상한으로 다시 검사한다 |
+| 4항 상한 | 텍스처는 (pass, 퍼뮤테이션, 형식)별 `형식 상한 − 렌더러 합계`(Renderer 7.4절, 결정 MD4)로 검사한다. 번역은 원문을 형식마다 바꾸지 않고 프로필 형식마다 진단만 내며, 넘는 형식의 job만 쿠킹 오류다. 자기 샘플러를 쓰는 텍스처는 형식의 샘플러 상한에도 묶인다(9항). 상수 버퍼·보간 수는 (프로필 공통 상한 − pass 예약 수)로 검사하고(V9), job에서 형식 상한으로 다시 검사한다 |
 | 5항 상수 버퍼 layout | `float4` 경계 정렬, 16 byte slot 안에 float·int·uint를 섞지 않음, 배열은 `float4` 배열, bool은 uint 비트. 머티리얼 컴파일러가 이 규칙으로 layout 표를 만들고, 워커가 리플렉션 오프셋과 대조한다 |
 | 6항 행렬 | 변환 노드는 `mul(v, M)`으로 내고 행렬은 행 우선 상수다 |
 | 7항 단계 사이 변수 | 머티리얼 보간 값은 pass가 준 기준 번호부터 `TEXCOORDn`을 이어 쓴다(n ≤ 15, GLES는 형식 상한). struct 멤버 순서는 n 오름차순이다 |
-| 9항 텍스처·샘플러 짝 | 텍스처 `MaterialTexture<k>`마다 `MaterialTexture<k>Sampler`를 낸다(짝 규칙 그대로, 결정 MD4) |
+| 9항 텍스처·샘플러 짝 | 텍스처 `MaterialTexture<k>`마다 `MaterialTexture<k>Sampler`를 낸다(짝 규칙 그대로, 결정 MD4). 공유 샘플러(16절 MSR13)가 생기면 텍스처 slot의 샘플러 출처(자기 샘플러·공유 Wrap·공유 Clamp, UE `ESamplerSourceMode`)로 고른다 |
 | 결정 7(경고) | 생성 원문도 경고 0이 기준이다. 생성기가 낸 경고는 생성기 버그로 본다 |
 
 **레이아웃 서명.** 머티리얼 상수 블록의 정규 layout 표(멤버 이름·타입·offset·크기, 텍스처·샘플러 순번)의 SHA-256이다. job 키 8항(셰이더 시스템 10절)에 들어가고, 쿠킹 셰이더 집합 항목에도 기록되어 실행 때 상수 블록 layout과 대조한다(RenderBase 9.3절·SX6 서명 검증과 같다).
@@ -502,7 +505,7 @@ pass 셰이더(.rsf, Renderer 스펙)                 MaterialCommon.rsh와 Vert
 
 | 항목 | UE 5.8 | 근거 |
 |---|---|---|
-| 머티리얼 요약 | `FMaterialShaderParametersBase`: 도메인·shading model 집합·혼합 방식·품질·feature level·customized UV 수와 64+10개 비트 플래그(`bIsMasked`, `bIsUsedWith{SkeletalMesh, MorphTargets, …}`, `bMaterialMayModifyMeshPosition` 등) | `RE/Public/MaterialShared.h:1152–1271` |
+| 머티리얼 요약 | `FMaterialShaderParametersBase`: 영역·shading model 집합·블렌드 모드·품질·feature level·customized UV 수와 64+10개 비트 플래그(`bIsMasked`, `bIsUsedWith{SkeletalMesh, MorphTargets, …}`, `bMaterialMayModifyMeshPosition` 등) | `RE/Public/MaterialShared.h:1152–1271` |
 | 거르기 | 머티리얼 셰이더는 셰이더 타입의 거르기만, 메시 머티리얼 셰이더는 vertex factory 거르기 AND 셰이더 거르기. pipeline은 모든 단계가 통과해야 한다 | `RE/Private/Materials/MaterialShader.cpp:1999–2002`, `RE/Private/Materials/MeshMaterialShader.cpp:178–186`(pipeline `:187–215`) |
 | 레이아웃 | 모든 머티리얼 셰이더 타입×퍼뮤테이션, pipeline, 정렬된 vertex factory마다 거른 결과로 셰이더 맵 layout을 만든다 | `RE/Private/Materials/MaterialShader.cpp:3210–3310` |
 | 사용 플래그 | `EMaterialUsage`. 에디터에서 처음 쓰일 때 플래그를 자동으로 켜고 패키지를 dirty로 한다(`bAutomaticallySetUsageInEditor` 기본 true). 게임에서는 "Default Material will be used in game" 경고 | `RE/Public/Materials/MaterialInterface.h:76–120`, `RE/Private/Materials/Material.cpp:1873–1983`, `RE/Public/Materials/Material.h:934` |
@@ -520,7 +523,7 @@ pass 셰이더(.rsf, Renderer 스펙)                 MaterialCommon.rsh와 Vert
 | 정점 입력 타입 | RenderBase 10.2절 | 사용 대상(8.4절) AND 정점 입력 타입 거르기 |
 | 형식 | TargetProfile `shaderFormats`(셰이더 시스템 12.3절) | 형식 기능 거르기(요구 기능·기능 등급) |
 | 품질 수준 | 프로필의 쿠킹 품질 목록 | 실제로 다른 수준만(8.5절) |
-| 렌더 경로 | 축이 아니다 | pass 셰이더 타입이 경로를 정한다(GBuffer는 Deferred, ForwardOpaque는 Forward+, Depth·ShadowDepth·Translucent 등은 공통, Renderer 14.3절). Render Path Switch는 pass job의 `#if`로 풀린다(6.3절) |
+| 렌더 경로 | 축이 아니다 | pass 셰이더 타입이 경로를 정한다(GBuffer는 Deferred, ForwardOpaque·DepthAux는 Forward+, Depth·ShadowDepth·Translucent 등은 공통, Renderer 14.3절). Render Path Switch는 pass job의 `#if`로 풀린다(6.3절) |
 
 머티리얼 하나의 job 수 = (static 변형, 품질 수준, pass 셰이더 타입, pass 퍼뮤테이션, 정점 입력 타입, 형식) 조합 가운데 거르기를 통과한 것마다 그 pass의 단계 수(VS·PS)를 더한 값이다.
 
@@ -629,7 +632,7 @@ UE는 에디터에서 사용 플래그를 자동으로 켜고 패키지를 dirty
 
 ### 9.5 static 파라미터와 변형
 
-- static 값(Static Bool·Component Mask·Enum·컬렉션 참조·레이어 구성)과 **기본 속성 override**(혼합 방식·양면·마스크 기준값·shading preset)를 인스턴스가 바꾸면 static 변형이 생긴다. UE도 기본 속성 override가 있으면 static 변형을 만든다(`RE/Private/Materials/MaterialInstance.cpp:2415–2424`, 키 `RE/Public/MaterialShared.h:1376` `BasePropertyOverridesHash`).
+- static 값(Static Bool·Component Mask·Enum·컬렉션 참조·레이어 구성)과 **기본 속성 override**(블렌드 모드·양면·마스크 기준값·shading preset)를 인스턴스가 바꾸면 static 변형이 생긴다. UE도 기본 속성 override가 있으면 static 변형을 만든다(`RE/Private/Materials/MaterialInstance.cpp:2415–2424`, 키 `RE/Public/MaterialShared.h:1376` `BasePropertyOverridesHash`).
 - 변형은 부모 머티리얼 그래프 + 인스턴스 사슬의 static 값으로 번역한다. 번역 너겟 키에 정규화한 static 값 목록이 들어간다(12.2절).
 - static 변형이 없는 인스턴스는 부모 산출물(셰이더 집합)을 그대로 쓰고 자기 값 배열만 가진다.
 - 에디터는 static 값을 바꿀 때 "새 변형 컴파일" 비용을 표시한다(계획 14.5절 "static variant"). dynamic 값만 바꾸면 compile job은 0이다(계획 MT04).
@@ -662,17 +665,18 @@ Renderer 스펙 14.6절 경계표와 같은 나눔이다. 아래는 그 표에 �
 | 항목 | 머티리얼 시스템(이 문서) | Renderer 스펙 |
 |---|---|---|
 | `SurfaceAttributes` 필드와 의미 | 그래프(BSDF 트리)를 이 필드로 낮춘다(10.3절) | 정한다(14.1절) |
-| shading model·블렌드 모드·영역 번호표 | 참조한다. 노드·이름 표시·검증·UI | 소유한다(`RendererShaders`, 결정 RN5) |
+| shading model·블렌드 모드·영역 번호표 | 참조한다(`RenderData`). 노드·이름 표시·검증·UI | 정의 권한을 가진다(결정 RN5). 코드는 C++ `RenderData`, HLSL `/Engine/Shared/`(3.2·14.2절) |
 | GBuffer 배치·인코딩, BRDF·직접광 평가 | — | 정한다(7.1·14.4절) |
-| pass 목록·pass 셰이더·pass 퍼뮤테이션 차원 | 거르기 입력(`MaterialShaderTraits`)을 준다 | 정한다(14.3절) |
+| pass 목록·경로·pass 셰이더·pass 퍼뮤테이션 차원 | 거르기 입력(`MaterialShaderTraits`)을 준다. static 변형이 pass 퍼뮤테이션과 곱해진다(9.5절) | 정한다(14.3절). 거르기 함수가 `MaterialShaderTraits`를 받는다 |
 | 머티리얼 셰이더 집합 키·쿠킹 단위·static 변형 | 정한다(8.6·12절) | 조회 키만 요구(14.5절) |
 | 그래프·IR·HLSL 생성·인스턴스·파라미터 갱신 | 정한다 | — |
+| 생성 함수(정점·이전 정점·표면·opacity·마스크·PDO·custom 출력·미리보기) | 생성 파일 계약으로 항상 낸다(7.3절) | 어느 pass가 어느 함수를 부르는지 정한다(14.1·14.3절) |
 | 문맥 구조체 `MaterialInputs`·`MaterialVertexInputs` | 정한다(7.3절) | pass 원문이 채운다(정점 입력 타입과 함께) |
-| (pass, 퍼뮤테이션)별 머티리얼 텍스처 상한 | 계산해 진단·쿠킹 검사에 쓴다(8.3·14절) | `16 − 렌더러 합계` 표를 정한다(7.4절, 결정 RN13) |
+| (pass, 퍼뮤테이션, 형식)별 머티리얼 텍스처 상한 | 계산해 진단·쿠킹 검사에 쓴다(7.4절 4항·14절 E9) | `형식 상한 − 렌더러 합계` 표를 정한다(7.4절, 결정 RN13) |
 | scene texture 읽기 노드 | 노드 검증(V6) | 경로별 가능 여부(14.6절) |
-| WPO 현재·이전 | 정점 함수로 낸다(7.3절) | depth·velocity·그림자 pass가 쓴다 |
-| 렌더 경로·기능 등급 정의 이름 | 생성 원문의 `#if`에 쓴다 | 정한다 |
-| 기본 머티리얼 대체 | 대체를 결정한다(11.3절) | 표시 방식을 정한다 |
+| WPO 현재·이전 | 정점 함수로 낸다(7.3절). `SurfaceAttributes` 필드가 아니다 | 모든 메시 pass의 정점 셰이더가 부르고, 이전 WPO는 velocity pass가 쓴다(14.1절) |
+| 렌더 경로·기능 등급 정의 이름 | 생성 원문의 `#if`에 쓴다(6.3절). Render Path Switch의 깊이 일치를 검사한다(V15) | 경로 이름 `RENDER_PATH_DEFERRED`·`RENDER_PATH_FORWARD_PLUS`를 정한다(14.3절). 기능 등급 이름은 형식 정의(MSR9) |
+| 기본 머티리얼 대체 | 대체를 결정하고 진단한다(11.3절) | 덧칠 없이 기본 머티리얼로 그리고 대체 수를 계수로 남긴다(14.7절 MRD8) |
 
 ### 10.2 UE 5.8 조사: Substrate와 고전 shading model
 
@@ -703,13 +707,13 @@ Renderer 스펙 14.6절 경계표와 같은 나눔이다. 아래는 그 표에 �
 - 예산 초과 시 연산을 깊이 순으로 parameter blending하고 slab을 단순화한다(`RE/Private/Materials/SubstrateTranslatorCommon.cpp:624–713, 1319–1433`).
 - 고전 shading model → Substrate 변환 노드(`MaterialExpressionSubstrate.h:72–271`)와 셰이더 쪽 변환(`SH/Private/Substrate/SubstrateLegacyConversion.ush:153`). 대응: Subsurface → SubsurfaceWrap, PreintegratedSkin → SubsurfaceMFP, TwoSidedFoliage → SubsurfaceThinTwoSided(`RE/Private/Materials/Material.cpp:3425–3439`).
 
-**도메인·혼합 방식(레거시 확인).**
+**영역·블렌드 모드(레거시 확인).**
 
 | 열거 | 값 | 상태 | 근거 |
 |---|---|---|---|
-| 도메인 | Surface·DeferredDecal·LightFunction·Volume·PostProcess·UI | 활성 | `RE/Public/MaterialDomain.h:11–30` |
+| 영역 | Surface·DeferredDecal·LightFunction·Volume·PostProcess·UI | 활성 | `RE/Public/MaterialDomain.h:11–30` |
 | 〃 | RuntimeVirtualTexture | **Deprecated**, Hidden | `MaterialDomain.h:26–27` |
-| 혼합 방식 | Opaque·Masked·Translucent·Additive·Modulate·AlphaComposite·AlphaHoldout | 활성 | `RE/Classes/Engine/EngineTypes.h:244–259` |
+| 블렌드 모드 | Opaque·Masked·Translucent·Additive·Modulate·AlphaComposite·AlphaHoldout | 활성 | `RE/Classes/Engine/EngineTypes.h:244–259` |
 | 〃 | TranslucentColoredTransmittance | Substrate 전용(dual source blending 요구) | `EngineTypes.h:254`, `RE/Private/Materials/HLSLMaterialTranslator.cpp:15000–15001` |
 | 〃 | TranslucentGreyTransmittance·ColoredTransmittanceOnly | Hidden 별칭 | `EngineTypes.h:256–258` |
 | shading model | Unlit·DefaultLit·Subsurface·PreintegratedSkin·ClearCoat·SubsurfaceProfile·TwoSidedFoliage·Hair·Cloth·Eye·SingleLayerWater·ThinTranslucent·FromMaterialExpression | 활성(열거 수준) | `EngineTypes.h:706–728` |
@@ -724,6 +728,8 @@ Renderer 스펙 14.6절 경계표와 같은 나눔이다. 아래는 그 표에 �
   - preset 노드의 고전 입력은 변환 없이 그대로 지나간다. UE도 고전 변환 머티리얼은 고전 GBuffer 데이터를 그대로 넘기는 표지를 둔다(`RE/Public/Rendering/SubstrateMaterialShared.h:180–237`의 컴파일 출력).
   - `SurfaceSlab`의 직접 입력(DiffuseAlbedo·F0·F90)을 고전 값으로 바꾸는 변환은 UE Blendable의 내보내기(`SH/Private/Substrate/SubstrateExport.ush:1058`, 호출 `SH/Private/BasePassPixelShader.usf:1927–1948`)에 대응한다. 변환식은 SF3에서 정한다. 그 전에는 preset 노드만 연다.
   - `customData0`·`customData1`의 shading model별 의미는 Renderer 스펙이 정한다(14.1절 "clear coat 강도·roughness 등").
+  - 노멀 핀은 tangent 공간이 기본이고(6.4절 공간 분석), 내보낼 때 문맥의 기저로 world 공간으로 바꿔 정규화한다. `SurfaceAttributes.normal`은 world 공간 정규화 값이다(Renderer 14.1절).
+  - WPO·PDO·마스크는 `SurfaceAttributes`로 내보내지 않고 각자의 진입점 함수로 낸다(7.3절, Renderer 14.1절).
 - **closure 하나로 접기.** 번역기는 BSDF 트리를 closure 하나로 접는다. 연산은 parameter blending(입력 값의 가중 혼합)으로 바꾼다. 결과 BSDF와 기능 조합에서 shading model 하나를 고른다(아래 표). 표로 나타낼 수 없는 조합(예: fuzz와 2차 반사를 함께 쓰는 slab, slab과 hair의 혼합)은 정해진 우선순위로 하나를 고르고 경고한다. UE Blendable이 closure 하나를 강제하고 예산을 넘으면 단순화하는 것과 같은 성격이다(10.2절).
 
 | 접은 BSDF·기능 | shading model(Renderer 14.2절) |
@@ -743,7 +749,7 @@ Renderer 스펙 14.6절 경계표와 같은 나눔이다. 아래는 그 표에 �
 - **shading model이 하나인 머티리얼.** 트리가 static으로 shading model 하나로 정해지면 생성 원문에 `MATERIAL_SINGLE_SHADING_MODEL`을 내고, Renderer는 그 분기만 컴파일한다(Renderer 14.4절). 실행 중 선택(`SurfaceSelect`의 dynamic 입력)이면 픽셀마다 `shadingModel` 값을 쓴다.
 - **여러 closure 저장은 계획 14.4절 연구 gate**다(Renderer 7.1절도 Blendable과 같은 고정 배치로 시작한다). IR의 `Surface` 타입은 처음부터 트리이므로, gate를 통과하면 접기·내보내기 단계만 기능 등급별로 바꾸면 된다. 그래프·에셋 migration은 필요 없다.
 
-**블렌드 모드.** Renderer 스펙 14.2절 목록(`Opaque`·`Masked`·`Translucent`·`Additive`·`Modulate`·`AlphaComposite`)을 쓴다. UE 5.8의 `AlphaHoldout`(활성)과 Substrate 전용 색 투과 반투명은 그 목록 밖이라 `Unsupported`로 표시한다(10.4절 D4).
+**블렌드 모드.** Renderer 스펙 14.2절 목록(`Opaque`·`Masked`·`Translucent`·`Additive`·`Modulate`·`AlphaComposite`)을 쓴다. UE 5.8의 `AlphaHoldout`(활성)은 Renderer 14.2절에 후속 값으로 있고, 그 단계 전에는 `Unsupported`로 진단한다. 들일 때 UE처럼 `Unlit` 전용 검사를 V5에 더한다(UE `RE/Private/Materials/MaterialShared.cpp:6378–6382`). Substrate 전용 색 투과 반투명은 목록에 없다(10.4절 D4).
 
 **GBufferD가 필요한 shading model.** `ClearCoat` 등은 GBufferD를 쓰므로 Deferred에서는 MRT 8 형식에서만 지원된다(Renderer 7.1절, 결정 RN3·RN4). GLES Deferred에서는 `Unsupported`이고 Forward+에서는 지원된다. 한 경로만 되는 조합은 그 경로의 쿠킹 오류다(Renderer 14.2절). 머티리얼 컴파일러는 이 조건을 V6 capability 검사로 진단한다.
 
@@ -751,29 +757,44 @@ Renderer 스펙 14.6절 경계표와 같은 나눔이다. 아래는 그 표에 �
 
 | 단계 | 표면 범위 | 계획·Renderer 대응 |
 |---|---|---|
-| SF1 | `DefaultLit`·`Unlit` preset, `Opaque`·`Masked` | MAT0–MAT1(M3), Renderer RS1·RS2 |
-| SF2 | `Translucent`·`Additive`·`Modulate`·`AlphaComposite` | MAT2–MAT3, Renderer 블렌드 모드 단계(RS0–RS5) |
+| SF1 | `DefaultLit`·`Unlit` preset, `Opaque`·`Masked` | MAT0–MAT1(M3), Renderer RS0(`Unlit`)·RS1(Forward+ `DefaultLit`)·RS2(Deferred) |
+| SF2 | `Translucent`·`Additive`·`Modulate`·`AlphaComposite` | MAT2–MAT3, Renderer RS5 |
 | SF3 | `ClearCoat`·`Subsurface`·`SubsurfaceProfile`·`TwoSidedFoliage`·`Cloth`·`Eye`·`ThinTranslucent`·`SingleLayerWater` preset, `SurfaceSlab` 직접 입력, 표면 연산(parameter blending) | MAT4, 계획 11.1절 "M6–M8 고급 공통 재질", Renderer RS9 |
 | Hair | `Hair` preset·`HairBsdf` | 계획 11.1절 P3 별도 gate, Renderer 14.2절 |
 | SF4 | 여러 closure 저장(기능 등급 SM6 형식만), glint·rough refraction | 계획 14.4절 연구 gate |
 
 **결정 전 대안 (가)(고전 enum).** 출력 노드가 baseColor·metallic·specular·roughness·normal·shadingModel 핀을 직접 가지는 방식이다. 지금 렌더러 계약(`SurfaceAttributes`)과는 바로 맞지만, 이후 Substrate형으로 옮기려면 UE처럼 에셋 변환이 필요하다(UE `RE/Private/Materials/Material.cpp:3522–3569`). 결정 MD1은 (나)이다.
 
-### 10.4 Renderer 문서와 다른 점(Renderer 개정 2, 2dc9068 기준)
+### 10.4 Renderer 문서와의 정합 결과(Renderer 개정 3)
 
-맞추는 작업은 두 문서의 리뷰 단계에서 함께 한다. Renderer 문서는 고치지 않았다.
+개정 1의 다른 점 D1–D9를 2026-11-18 교차 검증에서 판단하고 두 문서 본문에 반영했다. 판단 기준은 UE 5.8 근거, 사용자 원칙(UE 구조 + Rocks 이름, 하위 호환 없음, 대체 금지), 단순성이다.
 
-| ID | Renderer 스펙 | 이 문서 | 제안 |
+| 항목 | 결정 | 근거 | 반영 위치 |
 |---|---|---|---|
-| D1 | 14.1절 표가 `worldPositionOffset`(VS)을 `SurfaceAttributes` 필드로 둔다 | WPO는 정점 단계 값이라 별도 정점 함수(현재·이전)로 낸다(7.3절). `SurfaceAttributes`는 픽셀 함수 결과다 | Renderer 표에서 WPO를 "정점 함수 결과"로 분리 |
-| D2 | 번호표는 `RendererShaders`가 소유하고 머티리얼 스키마가 참조(결정 RN5). 의존은 `RendererShaders` → MaterialSchema(3.2절) | MaterialSchema가 번호표를 참조하려면 `RendererShaders`에 의존해야 해 **순환**이 생긴다 | 소유는 Renderer 그대로 두고, 번호표의 C++ 정의는 장치 없는 `RenderData`(MaterialSchema가 의존 가능)에, HLSL 상수는 `/Engine/Shared/`의 공용 `.h`에 둔다 |
-| D3 | 결정 RN13 (가): 모든 형식 16, 머티리얼 텍스처 = `16 − 렌더러 합계`. 선택 자원을 많이 켠 조합은 1–3개 | 초안 권장은 (다)(공유 샘플러 + 데스크톱 SRV 상한을 높인 형식)였다. 사용자 확정(RN13)에 맞춰 (가)로 적었다(결정 MD4) | **위험:** 일반 PBR 머티리얼(색·노멀·ORM에 디테일 1–2장)은 3–5장이다. 무거운 퍼뮤테이션에서 쿠킹 오류가 흔할 수 있다. 측정 MM5로 실제 분포를 본 뒤 RN13 (나)·(다)를 다시 볼 조건을 둔다. 공유 샘플러만으로는 SRV 상한이 풀리지 않는다(샘플러 수만 준다) |
-| D4 | 14.2절 블렌드 모드에서 `AlphaHoldout`과 Substrate 전용 값을 뺀다 | UE 5.8에서 `AlphaHoldout`은 활성 값이다(`RE/Classes/Engine/EngineTypes.h:244–259`). 이 문서는 Renderer를 따라 `Unsupported`로 둔다 | `AlphaHoldout`을 후속으로 둘지 Renderer가 명시 |
-| D5 | 14.3절 거르기 키는 (블렌드 모드, 영역, shading model, 정점 입력 타입, 형식) | `MaterialShaderTraits`는 WPO·마스크·capability·custom 출력·투명 pass 종류·velocity·그림자 caster를 더 가진다(8.3절) | Renderer 거르기 함수가 `MaterialShaderTraits`를 받는 것으로 통일(Renderer 15.3절 "머티리얼 정적 속성"과 같은 뜻) |
-| D6 | 14.6절 "머티리얼 static switch 차원과 곱한다" | static 값은 퍼뮤테이션 차원이 아니라 static 변형(따로 번역, 다른 셰이더 집합 id)이다(9.5절). 곱해지는 수는 같다 | 용어만 맞춘다 |
-| D7 | 14.3절 pass 표에 경로 전용과 공통 구분이 없다 | Render Path Switch는 경로 전용 pass(GBuffer·ForwardOpaque)에서 그 경로 입력을, 공통 pass(Depth·ShadowDepth·Translucent·Velocity 등)에서 Default 입력을 쓴다(6.3절) | pass 표에 "경로" 열과 정의 이름(16절 MRD9) |
-| D8 | 14.1절 함수 `EvaluateMaterialSurface(MaterialInputs) → SurfaceAttributes` | 그대로 쓴다. 더해 `EvaluateMaterialOpacityMask`(depth·shadow pass용)·정점 함수·custom 출력 함수를 낸다(7.3절) | Renderer 14.3절 Depth·ShadowDepth가 마스크 전용 함수를 부르도록 |
-| D9 | 14.2절 영역 이름 `DeferredDecal`·`UserInterface` | 이 문서 초안의 `Decal`·`UI`를 Renderer 이름으로 바꿨다 | 없음 |
+| D1 WPO | `SurfaceAttributes` 필드가 아니라 정점 함수 `EvaluateMaterialVertex`·`EvaluateMaterialVertexPrevious`의 결과다 | UE도 WPO는 픽셀 입력 구조체(`SH/Private/MaterialTemplate.ush:371`)가 아니라 정점 파라미터를 받는 함수이고(`:4051, 4073`) depth·velocity·base pass 정점 셰이더가 부른다(`SH/Private/DepthOnlyVertexShader.usf:55`, `SH/Private/VelocityShader.usf:73, 81`). 픽셀 함수 결과에 정점 값을 섞지 않는 것이 단순하다 | Renderer 14.1·14.3·14.6절, 이 문서 7.3·10.1·10.3절 |
+| D2 번호표 위치 | 정의 권한은 Renderer(결정 RN5) 그대로. C++ 열거는 `RenderData`, HLSL 상수는 `/Engine/Shared/` C++·HLSL 공용 `.h`. GBuffer 의미는 `RendererShaders` | MaterialSchema → `RendererShaders` → MaterialSchema 순환을 없앤다. 셰이더 시스템 3절이 공유 디렉터리의 `.h`를 허용하고, UE도 공용 정의를 `Engine/Shaders/Shared/`에 둔다(`SH/Shared/SubstrateDefinitions.h`) | Renderer 1·3.2·14.2·19.1절(RN5), 이 문서 2·3.2·10.1절 |
+| D3 텍스처 상한 | 사용자 결정(2026-11-18)으로 RN13·MD4를 **형식별 상한**으로 개정했다. 원문은 하나, 상한은 형식 정의(D3D12·Vulkan·Metal 넓게, GLES·D3D11 SM5 16), 머티리얼 텍스처 = (pass, 퍼뮤테이션, 형식)별 `형식 상한 − 렌더러 합계`, 모바일 형식에서 넘으면 그 형식 쿠킹 오류. 16장을 넘으려면 공유 샘플러(MSR13)가 필요하다 | 개정 1의 위험(일반 PBR 머티리얼도 무거운 퍼뮤테이션에서 쿠킹 오류)을 데스크톱에서 없앤다. UE도 원문은 하나이고 플랫폼 샘플러 상한을 컴파일 환경에 넣으며(`RE/Private/ShaderCompiler/ShaderCompiler.cpp:3945–3946`), OpenGL은 16 초과가 오류다(`Engine/Source/Developer/ShaderFormatOpenGL/Private/OpenGLShaderCompiler.cpp:868–877`). Metal 샘플러 상한은 16이다(`Engine/Source/Runtime/Apple/MetalRHI/Private/MetalPipeline.h:47`) | Renderer 1·7.4·13.1·19.1절, RQ22·RQ23, 이 문서 1·7.4·13·15·16·17절 |
+| D4 `AlphaHoldout` | Renderer 14.2절 목록에 **후속 값**으로 둔다. 들일 때 `Unlit` 전용 검사·Holdout 투명 pass·알파 전파 후처리를 함께 정한다. 그 전에는 `Unsupported` 진단이고 다른 블렌드 모드로 바꾸지 않는다 | UE 5.8 활성 값(`RE/Classes/Engine/EngineTypes.h:253`), `Unlit` 강제(`RE/Private/Materials/MaterialShared.cpp:6378–6382`), 전용 pass와 블렌드(`RR/Private/TranslucentRendering.cpp:2361–2364, 2482–2490`). UE 구조는 따르되 단계를 미룬다. 대체 금지 원칙 | Renderer 10.2·14.2절, 이 문서 10.3절 |
+| D5 거르기 키 | pass 셰이더 거르기 함수는 `ShouldCompile(const MaterialShaderTraits&, VertexInputTypeId, PermutationId, FormatId)` 하나로 통일한다. 마스크·WPO·PDO처럼 `MaterialShaderTraits`가 정하는 값은 pass 퍼뮤테이션 차원에서 뺐다 | UE도 머티리얼 요약 구조체 전체를 거르기에 넘긴다(`RE/Public/MaterialShared.h:1152–1271`, `RE/Private/Materials/MeshMaterialShader.cpp:178–186`). 머티리얼이 정하는 값을 차원으로 두면 반을 거르기로 버리는 차원이 생긴다 | Renderer 3.2·14.3·14.5·15.3절, RQ13, 이 문서 8.3절 |
+| D6 용어 | "static switch 차원"이 아니라 "static 변형"(변형마다 따로 번역하고 셰이더 집합 id가 다르다)이다. pass 퍼뮤테이션과 곱해지는 수는 같다 | 9.5·8.6절 | Renderer 14.6절, 이 문서 10.1절 |
+| D7 경로 구분 | Renderer pass 표에 "경로" 열을 둔다: `GBuffer` Deferred, `ForwardOpaque`·`DepthAux` Forward+, 나머지 공통. 정의 이름은 `RENDER_PATH_DEFERRED`·`RENDER_PATH_FORWARD_PLUS`(공통 pass는 둘 다 0). 기능 등급 이름은 형식 정의(MSR9) | Rocks는 view마다 경로를 고르므로(계획 11.1절) pass job이 경로를 정한다. UE는 플랫폼당 shading path 하나다(`RE/Public/Materials/MaterialExpressionShadingPathSwitch.h:50`) | Renderer 14.3·14.6절, 이 문서 6.3·8.2·10.1절 |
+| D8 마스크 전용 함수 | depth·그림자 pass는 `EvaluateMaterialOpacityMask`만 부른다. PDO를 쓰면 `EvaluateMaterialPixelDepthOffset`도 부르고 PS를 둔다 | UE depth PS는 픽셀 입력 전체를 계산하고 clip만 쓴다(`SH/Private/DepthOnlyPixelShader.usf:42–44, 96`). Rocks는 진입점마다 IR을 따로 내므로 pass별 텍스처 수가 그 pass가 부르는 함수 기준으로 정확하다(Renderer 7.4절). PDO는 UE도 depth PS 조건이다(`RR/Private/DepthRendering.cpp:171`) | Renderer 14.1·14.3절, 이 문서 7.3절 |
+| D9 영역 이름 | Renderer 이름(`DeferredDecal`·`UserInterface`)을 그대로 쓴다. 한국어 용어도 Renderer와 같게 "영역"·"블렌드 모드"로 통일했다(개정 1의 "도메인"·"혼합 방식") | 같은 개념은 같은 이름. UE 이름(`MD_UI` 등)은 대응표에만 | 이 문서 전체 |
+
+**D 밖에서 맞춘 것.**
+
+| 항목 | 결정 | 반영 위치 |
+|---|---|---|
+| Render Path Switch와 깊이 일치 | 공통 depth pass(Default 입력)와 경로 전용 base pass(경로 입력)가 다른 WPO·마스크·PDO를 쓰면 base pass 깊이 `Equal`이 깨진다. 이 셋에 닿는 Render Path Switch는 검증 오류(V15) | 이 문서 5.4·6.3절, Renderer 14.3절 |
+| 생성 함수와 pass 대응 | Renderer가 함수별로 부르는 pass를 표로 둔다. 노드 미리보기 pass `MaterialPreview`를 Renderer pass 표에 넣었다 | Renderer 14.1·14.3절, 이 문서 11.4절 |
+| 마스크 기준값 | `MATERIAL_OPACITY_MASK_CLIP` 정의(기본 속성, static 변형)다. Renderer의 "머티리얼 상수" 표현을 고쳤다 | Renderer 14.1절, 이 문서 7.3·9.5절 |
+| 노멀 공간 | 그래프 노멀은 tangent 공간 기본, 내보낼 때 world 정규화 | 이 문서 10.3절, Renderer 14.1절 |
+| 조회 키 | (pass 셰이더 타입, 정점 입력 타입, 셰이더 집합 id, 퍼뮤테이션, 단계), SX5 포함 | Renderer 14.5절, 이 문서 8.6절 |
+| pass별 렌더러 SRV 합계 | `GBuffer` pass 0–2, depth 계열 0을 더했다 | Renderer 7.4절 |
+| 단계 선후 | Renderer RS0 전에 MS1–MS3과 MS4 일부, MS-T6은 RS2와 함께, RS5는 MS7(SF2), RS9는 MS8(SF3) | Renderer 17절, 이 문서 10.3·15.1절 |
+| 모듈 의존 | MaterialCook 표 행에 `RendererShaders`를 더했다(의존 그림과 맞춤) | 이 문서 3.2절 |
+| 셰이더 결정 4 | MetaCompiler 방식으로 확정(셰이더 시스템 개정 12). `ShaderParameterLayout` 요구(MSR4)를 셰이더 시스템 13절에 연결 | 이 문서 1·15.1·16·17절(MD3) |
+| 기본 머티리얼 대체 표시 | Renderer는 덧칠하지 않고 대체 수를 계수로 남긴다 | Renderer 14.7·16.2절, 이 문서 10.1절 |
 
 ## 11. 비동기 컴파일·대체 머티리얼·미리보기·hot reload
 
@@ -787,7 +808,7 @@ Renderer 스펙 14.6절 경계표와 같은 나눔이다. 아래는 그 표에 �
 | 동기 컴파일 | 기본 머티리얼은 항상 동기 | `MaterialShared.cpp:2351–2354` |
 | 컴파일 모드 | None·Background·Synchronous, 기본 Background | `RE/Public/MaterialShaderPrecompileMode.h:6–13` |
 | 그리는 동안 대체 | 셰이더 맵이 없거나 미완성이면 대체 사슬을 따라 완성된 머티리얼을 쓴다. 에디터는 이때 미뤄 둔 job을 제출한다 | `RE/Private/Materials/MaterialRenderProxy.cpp:870–893` |
-| 대체 대상 | 도메인 기본 머티리얼(`UMaterial::GetDefaultMaterial(Domain)`). 기본 머티리얼은 대체가 없다 | `RE/Private/Materials/Material.cpp:441–450, 555–558, 1094–1109` |
+| 대체 대상 | 영역 기본 머티리얼(`UMaterial::GetDefaultMaterial(Domain)`). 기본 머티리얼은 대체가 없다 | `RE/Private/Materials/Material.cpp:441–450, 555–558, 1094–1109` |
 | 기본 머티리얼 에셋 | `WorldGridMaterial`(Surface), `DefaultLightFunctionMaterial`, `DefaultDeferredDecalMaterial`, `DefaultPostProcessMaterial` | `CFG/BaseEngine.ini:155–156, 219–220` |
 | 편집 반영 | `PostEditChange`가 렌더 명령을 비우고 진행 중 컴파일을 취소한 뒤 다시 캐시. 미리보기 머티리얼(`bIsPreviewMaterial`)은 전역 컴포넌트 재생성을 건너뛴다 | `RE/Private/Materials/Material.cpp:5356–5438`, `ED/MaterialEditor/Private/MaterialEditor.cpp:695` |
 | 갱신 문맥 | `FMaterialUpdateContext`(컴포넌트 재등록·렌더 스레드 동기·render state 재생성) | `RE/Public/MaterialShared.h:3480–3535` |
@@ -808,11 +829,11 @@ Renderer 스펙 14.6절 경계표와 같은 나눔이다. 아래는 그 표에 �
 
 | 상황 | 그리는 것 | 표시 |
 |---|---|---|
-| 에디터, 처음 컴파일 중 | 도메인 기본 머티리얼 | 컴파일 중 표시 |
+| 에디터, 처음 컴파일 중 | 영역 기본 머티리얼 | 컴파일 중 표시 |
 | 에디터, 성공한 적이 있고 다시 컴파일 중 | 마지막 성공 셰이더 집합(계획 14.8절) | "현재 그래프와 다른 마지막 성공 버전" |
 | 에디터, 컴파일 실패 | 마지막 성공 셰이더 집합, 없으면 기본 머티리얼 | 오류 위치(노드·핀) |
-| 쿠킹 실행, 필요한 셰이더가 라이브러리에 없음(사용 대상 누락 등) | 도메인 기본 머티리얼 | Development: 머티리얼·정점 입력 타입마다 한 번 오류 로그. Release: 오류 계수(진단 API)만 |
-| 쿠킹 실행, 머티리얼 셰이더 집합 서명 불일치 | 도메인 기본 머티리얼 | `IncompatibleCook` 진단 |
+| 쿠킹 실행, 필요한 셰이더가 라이브러리에 없음(사용 대상 누락 등) | 영역 기본 머티리얼 | Development: 머티리얼·정점 입력 타입마다 한 번 오류 로그. Release: 오류 계수(진단 API)만 |
+| 쿠킹 실행, 머티리얼 셰이더 집합 서명 불일치 | 영역 기본 머티리얼 | `IncompatibleCook` 진단 |
 | 엔진 기본 머티리얼이 없거나 불완전 | — | 렌더 lane 시작 실패(`IncompatibleCook`, RenderBase 9.2절 완결성 검사) |
 
 **검은 표면 금지.** 계획 11.1절대로 실패를 검은색이나 투명으로 처리하지 않는다. Surface 기본 머티리얼은 눈에 띄는 격자 무늬다(UE와 같은 성격, `CFG/BaseEngine.ini:155`).
@@ -827,7 +848,7 @@ Renderer 스펙 14.6절 경계표와 같은 나눔이다. 아래는 그 표에 �
 ### 11.4 미리보기
 
 - **미리보기 프로필.** 에디터 호스트의 현재 backend 형식 하나, 미리보기 메시의 정점 입력 타입, 미리보기 view의 렌더 경로 pass만 컴파일한다. Deferred·Forward+ 전환(계획 14.5절 "실시간 확인")은 다른 경로 pass를 추가로 요청한다.
-- **노드 미리보기.** 선택 노드의 출력을 `EvaluateMaterialPreview`로 내는 번역을 따로 한다. 정점 입력은 엔진 기본, pass는 미리보기 전용 unlit pass 하나다(UE도 BasePass 하나로 줄인다, `ED/MaterialEditor/Private/MaterialEditor.cpp:351–376`). 텍스처 객체·`Surface`·`MaterialAttributes`처럼 색으로 보일 수 없는 타입은 정해진 시각화(텍스처 샘플·BaseColor 등)를 쓴다. 동시에 컴파일하는 노드 미리보기 수에 상한을 둔다(계획 14.8절).
+- **노드 미리보기.** 선택 노드의 출력을 `EvaluateMaterialPreview`로 내는 번역을 따로 한다. 정점 입력은 엔진 기본, pass는 미리보기 전용 unlit pass `MaterialPreview` 하나다(Renderer 14.3절. UE도 BasePass 하나로 줄인다, `ED/MaterialEditor/Private/MaterialEditor.cpp:351–376`). 텍스처 객체·`Surface`·`MaterialAttributes`처럼 색으로 보일 수 없는 타입은 정해진 시각화(텍스처 샘플·BaseColor 등)를 쓴다. 동시에 컴파일하는 노드 미리보기 수에 상한을 둔다(계획 14.8절).
 - **실시간 갱신.** 시간 의존 노드가 있으면 미리보기 viewport가 매 프레임 그린다. 끄기 선택(계획 14.5절 "realtime on/off")은 viewport 갱신만 멈춘다.
 - **dynamic 파라미터 편집.** 인스턴스 에디터·머티리얼 에디터의 파라미터 값 변경은 상수 블록만 바꾼다(compile 0, 계획 MT04).
 
@@ -937,7 +958,8 @@ TextureStreaming 결정 T4는 "머티리얼 컴파일러가 생기면 셰이더 
 | 항목 | `D3D12_SM6` | `D3D11_SM5` | `VULKAN_SM5` | `METAL_SM5` | `GLES31_ANDROID`·`GLES31_PC` |
 |---|---|---|---|---|---|
 | 기능 등급 | SM6 | SM5 | SM5 | SM5 | Mobile |
-| 머티리얼 텍스처 수 | (pass, 퍼뮤테이션)별 `16 − 렌더러 합계`(Renderer 7.4절, 결정 RN13·MD4). 공통 상한이 GLES에 묶여 모든 형식이 같은 값 | 같음 | 같음 | 같음 | 같음 |
+| 머티리얼 텍스처 수 | (pass, 퍼뮤테이션)별 `128 − 렌더러 합계`(Renderer 7.4절, 결정 RN13·MD4) | `16 − 렌더러 합계` | `형식 상한 − 렌더러 합계`(형식 정의를 넓히는 MSR12 뒤, 그 전에는 16) | `128 − 렌더러 합계` | `16 − 렌더러 합계`. 넘으면 이 형식 쿠킹만 오류 |
+| 머티리얼 자기 샘플러 수 | 샘플러 16 − 렌더러 샘플러(짝 규칙). 넘는 텍스처는 공유 샘플러(MSR13) | 같음 | 같음 | 같음(Metal 장치 상한 16) | 같음 |
 | 상수 블록 | cbuffer | cbuffer | uniform buffer | buffer | uniform `vec4` 배열 에뮬레이션(타입별 배열, 7.2절 4항). uniform 벡터 수 상한 안 |
 | 머티리얼 보간 | `TEXCOORDn` n ≤ 15 − pass 예약 | 같음 | 같음 | 같음 | varying 상한 − pass 예약 |
 | VS·PS storage buffer 읽기 | 가능(공통 상한 4) | 가능 | 가능 | 가능 | **불가**(ES 3.2 최소 보장 0, 7.2절 4항). 이런 노드는 GLES에서 쿠킹 오류 |
@@ -972,7 +994,7 @@ UE 대조:
 | E6 | 미리보기 세션(메시·조명·환경·카메라·렌더 경로 전환) offscreen 렌더 | PreviewSession + Renderer | 14.5 "실시간 확인" |
 | E7 | 노드 미리보기 요청·해상도·동시 수 상한 | CompileCoordinator | 14.5, 14.8 |
 | E8 | 생성 원문 보기와 원문 위치 지도 | MaterialCompiler | 14.5 "generated HLSL" |
-| E9 | 통계: IR 기준(텍스처·샘플러·보간·상수 크기·값 수), (pass, 퍼뮤테이션)별 머티리얼 텍스처 상한과 사용 수(Renderer RQ18), 형식별 컴파일 결과(명령 수 등, 도구가 주는 값). 정적 지표와 GPU 측정을 구분 | MaterialCompiler·ShaderCompiler | 14.5 "진단·비용" |
+| E9 | 통계: IR 기준(텍스처·샘플러·보간·상수 크기·값 수), (pass, 퍼뮤테이션, 형식)별 머티리얼 텍스처 상한과 사용 수(Renderer 7.4절·RQ18), 형식별 컴파일 결과(명령 수 등, 도구가 주는 값). 정적 지표와 GPU 측정을 구분 | MaterialCompiler·ShaderCompiler | 14.5 "진단·비용" |
 | E10 | 퍼뮤테이션 수(프로필별)·static 변형 추가 비용 표시 | MaterialCook(조회 API) | 14.1, 14.5 |
 | E11 | 인스턴스 편집 데이터(파라미터 그룹·정렬·범위·override 여부·reset) | Material(에셋 모듈) | 14.5 "인스턴스 편집" |
 | E12 | 의존 추적(이 함수를 쓰는 머티리얼, 이 머티리얼의 인스턴스) | AssetIndex 역방향 의존 | 14.5 "재사용" |
@@ -990,14 +1012,15 @@ UE 대조:
 | SH1(워커·전처리기·두 층 키·너겟) | 셰이더 시스템 | MS2 | 생성 원문을 컴파일해 검증 |
 | SH2(리플렉션 정규화·워커 규칙 검사·P14 셰이더 타입) | 셰이더 시스템 | MS2·MS4 | 7.2절 규칙 검사, pass 셰이더 타입 |
 | SH3·P7(파라미터 구조체·`ShaderParameterLayout`) | 셰이더 시스템 | MS2 | 동적 layout 형식(결정 MD3) |
-| 셰이더 결정 4(파라미터 선언) | 셰이더 시스템 15절 | MS2 | MD3과 같은 형식이어야 한다 |
+| 셰이더 결정 4(파라미터 선언, 2026-11-18 MetaCompiler 방식으로 확정) | 셰이더 시스템 13·15절 | MS2 | MD3의 `ShaderParameterLayout` 데이터 형식(MSR4) |
 | P6b(TargetProfile·라이브러리 묶음 id) | 셰이더 시스템 | MS3 | 셰이더 집합 쿠킹 |
 | 셰이더 시스템 개정 MSR1–MSR11(16절) | 셰이더 시스템 | 각 단계 | |
 | A1–A4(AssetRuntime·ProjectLayout·에셋 너겟·Cooker) | 에셋 시스템 | MS3 | 에셋·너겟·쿠킹 |
 | A5(텍스처 에셋) | 에셋 시스템 | MS3 | 텍스처 파라미터 |
 | 리플렉션 B9(`InstancedStruct`·`OrderedMap`·`Optional`) | ReflectionExtensions | MS1 | 노드 속성 저장 |
 | RB3–RB5(셰이더 집합·바인딩·상수 블록·정점 입력 타입) | 렌더 기반 | MS4 | 실행 시 바인딩 |
-| Renderer 스펙 14절 계약(개정 2)과 16절 MRD1–MRD12 | Renderer | MS2(계약)·MS4(구현) | 생성 원문 계약 |
+| Renderer 스펙 14절 계약(개정 3)과 MRD1–MRD12 처리(Renderer 14.7절) | Renderer | MS2(계약)·MS4(구현) | 생성 원문 계약 |
+| Renderer RS0(Unlit base pass·depth prepass)·RS2(Deferred) | Renderer 17.2절 | MS4(RS0), MS-T6(RS2) | 렌더 연결과 두 경로 기준 영상. 반대로 Renderer RS0은 MS1–MS3과 MS4의 렌더 상태 부분을 선행으로 둔다(Renderer 17.1절) |
 | TextureStreaming 바인딩 snapshot | 텍스처 스트리밍 | MS4 | 텍스처 handle 해석 |
 | 정점 입력 타입 선언의 장치 없는 위치(16절 MRB8) | 렌더 기반 | MS3 | 쿠커의 거르기 |
 
@@ -1024,11 +1047,11 @@ UE 대조:
 | MS-T3 | 골든 원문 | fixture 그래프의 생성 원문이 저장된 기대 원문과 같음(생성 규칙 변경은 처리기 버전과 함께 기대 원문 갱신) |
 | MS-T4 | 퍼뮤테이션 수 | fixture 머티리얼 묶음 × 엔진 기본 프로필의 축별 수·job 수가 기대 표와 같음. 사용 대상 축소·품질 공유·static 변형 공유가 수를 줄이는지 확인 |
 | MS-T5 | 너겟 무효화 | 그래프·함수·컬렉션 layout·static 값·노드 lowering 버전·프로필을 하나씩 바꾸면 번역 너겟 미적중. 파라미터 기본값(scalar·vector·텍스처)·컬렉션 값·화면 데이터·사용 대상만 바꾸면 번역 너겟 적중(기본값은 cookKey만, 사용 대상은 job 목록과 cookKey만 바뀐다) |
-| MS-T6 | 기준 영상 | 같은 머티리얼 fixture를 Deferred·Forward+로 그린 결과가 Renderer가 정한 허용 오차 안. backend별 결과가 D3D12와 셰이더 시스템 self-test 허용 오차(채널 ±8·2%) 안 |
+| MS-T6 | 기준 영상 | 같은 머티리얼 fixture를 Deferred·Forward+로 그린 결과가 Renderer가 정한 허용 오차(채널 ±8·2%로 시작, Renderer RS2 (a)·14.7절 MRD10) 안. backend별 결과가 D3D12와 셰이더 시스템 self-test 허용 오차(채널 ±8·2%) 안 |
 | MS-T7 | 상수 식 | 상수 식으로 계산한 상수 블록 값과, 같은 식을 셰이더 안에서 계산한 값의 차이가 허용 오차 안(GPU readback) |
 | MS-T8 | 대체 | 사용 대상이 빠진 조합·서명 불일치·라이브러리 항목 누락에서 기본 머티리얼로 그리고 진단 1회 |
 | MS-T9 | override 보존 | 파라미터 이름 변경·레이어 순서 변경·함수 반복 호출에서 override가 키로 보존되고 서로 덮지 않음 |
-| MS-T10 | 텍스처 예산 | (pass, 퍼뮤테이션)별 예산(Renderer 7.4절)을 넘는 머티리얼이 그 조합에서만 쿠킹 오류이고, 진단에 상한·사용 수·pass·퍼뮤테이션이 나옴 |
+| MS-T10 | 텍스처 예산 | (pass, 퍼뮤테이션, 형식)별 예산(Renderer 7.4절)을 넘는 머티리얼이 그 조합에서만 쿠킹 오류이고, 진단에 상한·사용 수·pass·퍼뮤테이션·형식이 나옴. 같은 머티리얼이 데스크톱 형식에서는 쿠킹되고 GLES·D3D11 형식에서만 오류인 fixture를 포함 |
 | MS-T11 | 사용 대상 유도 | 메시를 추가한 뒤 부분 쿠킹하면 그 메시가 쓰는 머티리얼의 cookKey가 바뀌어 다시 쿠킹되고, 전체 쿠킹과 결과가 같음 |
 
 계획 14.9절 MT01–MT10은 위 단계의 완료 기준으로 그대로 쓴다(MT01 → MS1, MT02 → MS2, MT03 → MS4, MT04·MT05·MT07·MT09 → MS5, MT06 → MS6·MS7, MT08 → MS2·MS3, MT10 → MS1·MS5).
@@ -1041,7 +1064,7 @@ UE 대조:
 | MM2 | 상수 식 평가 비용(인스턴스 수·프레임당 변경 수) | 9.4절 병렬 평가 |
 | MM3 | GLES highp 전용의 성능 비용 | 13절 half 미지원 영향 |
 | MM4 | 머티리얼당 job 수·쿠킹 시간(대표 프로젝트) | 8.5절 상한 기본값 |
-| MM5 | 대표 콘텐츠의 머티리얼 텍스처 수 분포 대 (pass, 퍼뮤테이션)별 예산(Renderer 7.4절 합계 13–15 조합) | 결정 MD4·RN13 재검토 조건(10.4절 D3) |
+| MM5 | 대표 콘텐츠의 머티리얼 텍스처 수 분포 대 GLES·D3D11 형식의 (pass, 퍼뮤테이션)별 예산(Renderer 7.4절 합계 13–15 조합), 16장을 넘는 머티리얼 비율 | 모바일 형식 오류 비율, 공유 샘플러(MSR13) 시점(10.4절 D3) |
 
 ## 16. 다른 문서에 반영할 요구
 
@@ -1051,10 +1074,10 @@ UE 대조:
 
 | ID | 위치 | 요구 |
 |---|---|---|
-| MSR1 | 7.2절 4항(상한) | 머티리얼 pass 셰이더의 머티리얼 텍스처 예산 = (pass, 퍼뮤테이션)별 `16 − 렌더러 합계`(Renderer 7.4절·RQ12, 결정 MD4). 워커 상한 검사 오류에 머티리얼·pass·퍼뮤테이션을 담는다 |
+| MSR1 | 7.2절 4항(상한) | 머티리얼 pass 셰이더의 머티리얼 텍스처 예산 = (pass, 퍼뮤테이션, 형식)별 `형식 상한 − 렌더러 합계`(Renderer 7.4절, 결정 MD4). SRV 텍스처 상한은 프로필 공통 상한이 아니라 job 형식의 상한으로 검사하고, 워커 상한 검사 오류에 머티리얼·pass·퍼뮤테이션·형식을 담는다(Renderer RQ22 (2)) |
 | MSR2 | 3절(셰이더 맵 키)·12.2절(조회 키) | 머티리얼 셰이더 집합 id를 키 축으로(8.6절). RenderBase SX5 묶음 id와 같은 값 |
 | MSR3 | 3절(가상 경로)·결정 6(전처리기) | `/Engine/Generated/Material.rsh`를 job마다 메모리 텍스트로 잇는 규칙(7.2절) |
-| MSR4 | 13절(P7)·15절 결정 4 | `ShaderParameterLayout`을 C++ 타입 없이도 만들 수 있는 데이터 형식으로(동적 layout, 결정 MD3) |
+| MSR4 | 13절(P7)·15절 결정 4 | `ShaderParameterLayout`을 C++ 타입 없이도 만들 수 있는 데이터 형식으로(동적 layout, 결정 MD3). 셰이더 시스템 개정 12가 결정 4를 MetaCompiler 방식으로 확정하고 13절에 이 요구를 적었다 |
 | MSR5 | 12.2절(P14) | 셰이더 타입의 "머티리얼 셰이더" 표지와 거르기 인자 `MaterialShaderTraits`(8.3절), pass가 요구하는 custom 출력 선언 |
 | MSR6 | 3절 | 임의 HLSL 노드의 include 허용 목록(가상 경로 범위) |
 | MSR7 | 11절(워커) | job 우선순위(미리보기 > 노드 미리보기 > 화면 > 백그라운드)와 취소 |
@@ -1062,6 +1085,8 @@ UE 대조:
 | MSR9 | 12.1절(형식 정의) | 기능 등급(Mobile·SM5·SM6) 속성과 기능 등급별 지원 shading model·노드 기능 표(V6·Capability Tier Switch 입력) |
 | MSR10 | 12.2·12.3절("없으면 `IncompatibleCook`") | 머티리얼 셰이더는 예외로 (머티리얼, 정점 입력 타입, pass) 조합 단위 기본 머티리얼 대체 + 진단(11.3절). 엔진 셰이더와 엔진 기본 머티리얼은 지금 규칙 그대로 |
 | MSR11 | 12.3절(`shader-compile --engine`) | 엔진 기본 머티리얼 에셋을 번역해 엔진 내장 라이브러리에 넣는 경로(11.3절) |
+| MSR12 | 12.1절(형식 정의 `limits`) | 결정 MD4·RN13 개정. `sampledTextures`를 형식별로: `D3D12_SM6`·`METAL_SM5` 128 유지, `VULKAN_SM5`는 넓히고 장치 요구(`maxPerStageDescriptorSampledImages`·`maxPerStageDescriptorSamplers` 하한)를 더함, `D3D11_SM5`는 128에서 16으로, GLES는 16 유지(Renderer RQ22 (1)과 같은 요구) |
+| MSR13 | 7.2절 9항(텍스처·샘플러 짝) | 머티리얼 텍스처 slot의 샘플러 출처(자기 샘플러·공유 Wrap·공유 Clamp)와 공유 샘플러를 후속에서 앞당김. 공유 샘플러가 없으면 넓힌 형식도 샘플러 16에 묶인다(Metal 장치 상한 16). GLES는 공유 샘플러 객체를 텍스처 유닛마다 묶어 combined sampler 규칙을 유지한다(Renderer RQ23과 같은 요구) |
 
 **렌더 기반(RenderBase.ko.md)**
 
@@ -1076,22 +1101,22 @@ UE 대조:
 | MRB7 | 9.4절(상수 블록) | 머티리얼 렌더 상태의 `Persistent` 블록 교체·`Retire` 규칙 |
 | MRB8 | 10.2절(등록) | 정점 입력 타입 선언(이름·`.rsh` 경로·거르기·정적 배치)을 장치 없는 모듈(ShaderCore 또는 그와 같은 층)에 두어 쿠커가 RenderBase 없이 거르기를 실행할 수 있게 한다(8.3절) |
 
-**Renderer 스펙(Renderer.ko.md, 개정 2)**
+**Renderer 스펙(Renderer.ko.md)** — 개정 3이 모두 처리했다. 처리 내용은 Renderer 14.7절이다.
 
-| ID | 요구 |
-|---|---|
-| MRD1 | 10.4절 D1: `worldPositionOffset`을 정점 함수 결과로 분리 |
-| MRD2 | 10.4절 D2: 번호표의 C++·HLSL 정의 위치(순환 해소) |
-| MRD3 | 10.4절 D3: 결정 RN13의 재검토 조건(측정 MM5) |
-| MRD4 | 10.4절 D4: `AlphaHoldout` 처리 명시 |
-| MRD5 | 10.4절 D5: pass 거르기 인자를 `MaterialShaderTraits`로 |
-| MRD6 | view 상수의 translated world 기준과 절대 위치 표현(`WorldPosition` 타입, 5.3절) |
-| MRD7 | instance 데이터 계약(머티리얼 `Instance` 빈도 입력, 이전 프레임 변환) |
-| MRD8 | 기본 머티리얼 대체 표시 방식 |
-| MRD9 | 10.4절 D7: pass별 경로 전용·공통 구분과 렌더 경로·기능 등급 정의 이름 |
-| MRD10 | Deferred·Forward+ 기준 영상 허용 오차(MS-T6) |
-| MRD11 | 10.4절 D8: Depth·ShadowDepth pass가 마스크 전용 함수를 부름 |
-| MRD12 | DeferredDecal이 쓰는 속성, 반투명 scene color·depth 입력, PostProcess 위치(5.6절) |
+| ID | 요구 | 처리(Renderer 개정 3) |
+|---|---|---|
+| MRD1 | 10.4절 D1: `worldPositionOffset`을 정점 함수 결과로 분리 | 반영(Renderer 14.1절) |
+| MRD2 | 10.4절 D2: 번호표의 C++·HLSL 정의 위치(순환 해소) | 반영(Renderer 3.2·14.2절) |
+| MRD3 | 10.4절 D3: 결정 RN13의 재검토 조건(측정 MM5) | 사용자 결정으로 RN13 개정(Renderer 7.4·19.1절) |
+| MRD4 | 10.4절 D4: `AlphaHoldout` 처리 명시 | 반영(Renderer 14.2절, 후속 값) |
+| MRD5 | 10.4절 D5: pass 거르기 인자를 `MaterialShaderTraits`로 | 반영(Renderer 14.3·15.3절) |
+| MRD6 | view 상수의 translated world 기준과 절대 위치 표현(`WorldPosition` 타입, 5.3절) | 반영(Renderer 5.1·14.7절, 상위·하위 두 부분) |
+| MRD7 | instance 데이터 계약(머티리얼 `Instance` 빈도 입력, 이전 프레임 변환) | 이전 변환은 반영(Renderer 4.2·5.1절). custom data 슬롯은 Renderer RS0 GPU Scene 배치 때 |
+| MRD8 | 기본 머티리얼 대체 표시 방식 | 반영(Renderer 14.7·16.2절, 덧칠 없음·계수) |
+| MRD9 | 10.4절 D7: pass별 경로 전용·공통 구분과 렌더 경로·기능 등급 정의 이름 | 반영(Renderer 14.3절 `RENDER_PATH_*`). 기능 등급 이름은 MSR9 |
+| MRD10 | Deferred·Forward+ 기준 영상 허용 오차(MS-T6) | 반영(Renderer RS2 (a), 채널 ±8·2%로 시작) |
+| MRD11 | 10.4절 D8: Depth·ShadowDepth pass가 마스크 전용 함수를 부름 | 반영(Renderer 14.1·14.3절) |
+| MRD12 | DeferredDecal이 쓰는 속성, 반투명 scene color·depth 입력, PostProcess 위치(5.6절) | 자리 반영(Renderer 14.7절): decal 속성은 RS7, 반투명 입력은 RS5, PostProcess 위치는 계획 26절 스펙 |
 
 **에셋 시스템(AssetSystem.ko.md)**
 
@@ -1123,14 +1148,14 @@ UE 대조:
 
 ## 17. 결정 사항
 
-2026-11-18 사용자 지시("결정사항들은 권장안대로 하면됨")로 MD1–MD9를 확정했다. MD4는 같은 날 확정된 Renderer 결정 RN13과 이 문서 초안 권장이 달라 RN13에 맞췄다. 결정 대기로 남은 항목은 없다.
+2026-11-18 사용자 지시("결정사항들은 권장안대로 하면됨")로 MD1–MD9를 확정했다. MD4는 처음에 같은 날 확정된 Renderer 결정 RN13 (가)에 맞췄고, 같은 날 사용자 결정으로 RN13과 함께 형식별 상한으로 개정했다. 결정 대기로 남은 항목은 없다.
 
 | ID | 결정 | 선택지 | 결정 | 근거 |
 |---|---|---|---|---|
 | MD1 | **Substrate 채택 형태** | (가) 고전 shading model enum만. (나) Substrate형 BSDF 그래프 + closure 하나로 접어 `SurfaceAttributes`로 내보냄, 여러 closure는 연구 gate. (다) Substrate 전체(여러 closure·Adaptive형 저장) | **결정됨(2026-11-18, 권장안 (나))** | UE 5.8 새 프로젝트 기본(Substrate + Blendable)과 같은 조합이다(10.2절). UE는 고전 셰이더 함수를 5.7부터 "Deprecated by Substrate"로 표시했다. Renderer도 Blendable과 같은 고정 배치로 시작한다(Renderer 7.1절). Rocks 형식 가운데 Adaptive 대상은 `D3D12_SM6`뿐이라 (다)는 한 형식만 이득을 본다. (나)는 그래프·에셋을 처음부터 Substrate형으로 두어 나중에 여러 closure로 갈 때 에셋 변환이 없다 |
 | MD2 | **번역기 구조** | (가) typed IR → HLSL. (나) 노드가 HLSL 조각을 직접 내는 번역기(UE 5.8 기본) | **결정됨(2026-11-18, 권장안 (가))** | 계획이 typed IR을 요구하고(14.1·14.7절), CPU bake·ray profile이 같은 IR을 소비한다(6.7절). Rocks는 하위 호환할 노드 구현이 없다. 결정성(상수 접기·번호 매김)도 IR에서 한 번에 지킨다 |
-| MD3 | **셰이더 결정 4와의 관계** | 셰이더 결정 4는 (A) MetaCompiler 파라미터 종류 또는 (B) UE 매크로 방식이다. 머티리얼 layout은 어느 쪽이든 실행 중 데이터로 만든다 | **결정됨(2026-11-18, 권장안): (A)를 고르고 그 layout 표를 `ShaderParameterLayout` 데이터 형식으로 정해 머티리얼 컴파일러도 같은 형식을 낸다** | 바인딩 지도·서명 검증·GLES 복사 표가 C++ 구조체와 머티리얼에 같은 경로 하나로 동작한다(RenderBase 9.3절). (B)는 매크로 메타데이터와 머티리얼 동적 layout이 두 형식이 되어 변환층이 필요하다. UE도 머티리얼 uniform buffer는 매크로가 아니라 실행 중 layout으로 만든다(`RE/Private/Materials/MaterialUniformExpressions.cpp:524`). 셰이더 결정 4 자체도 같은 지시로 권장안 (A)가 되는지는 셰이더 시스템 문서에서 확인한다 |
-| MD4 | **텍스처·샘플러 한도** | (가) 짝 규칙 유지, 머티리얼 텍스처 = (pass, 퍼뮤테이션)별 `16 − 렌더러 합계`(= Renderer RN13 (가)). (나) 16-SRV 형식용 pass 셰이더 타입을 따로 두어 데스크톱은 높은 상한(RN13 (나)). (다) 공유 샘플러 + 데스크톱 SRV 상한을 높인 장치 요구 형식(이 문서 초안 권장) | **결정됨(2026-11-18): (가), Renderer RN13에 맞춤** | 사용자가 RN13 (가)를 확정했다. 초안 권장 (다)는 RN13과 충돌해 접었다. 재검토 조건: 측정 MM5에서 대표 콘텐츠의 머티리얼이 무거운 퍼뮤테이션 예산을 넘는 비율이 크면 RN13 (나)·(다)를 함께 다시 본다(10.4절 D3) |
+| MD3 | **셰이더 결정 4와의 관계** | 셰이더 결정 4는 (A) MetaCompiler 파라미터 종류 또는 (B) UE 매크로 방식이다. 머티리얼 layout은 어느 쪽이든 실행 중 데이터로 만든다 | **결정됨(2026-11-18, 권장안): (A)를 고르고 그 layout 표를 `ShaderParameterLayout` 데이터 형식으로 정해 머티리얼 컴파일러도 같은 형식을 낸다** | 바인딩 지도·서명 검증·GLES 복사 표가 C++ 구조체와 머티리얼에 같은 경로 하나로 동작한다(RenderBase 9.3절). (B)는 매크로 메타데이터와 머티리얼 동적 layout이 두 형식이 되어 변환층이 필요하다. UE도 머티리얼 uniform buffer는 매크로가 아니라 실행 중 layout으로 만든다(`RE/Private/Materials/MaterialUniformExpressions.cpp:524`). 셰이더 시스템 결정 4도 같은 날 (A)로 확정되었다(셰이더 시스템 개정 12, 15절). 이 요구는 셰이더 시스템 13절에 적혀 있다(MSR4) |
+| MD4 | **텍스처·샘플러 한도** | (가) 짝 규칙 유지, 머티리얼 텍스처 = (pass, 퍼뮤테이션)별 `16 − 렌더러 합계`(= Renderer RN13 (가)). (나) 16-SRV 형식용 pass 셰이더 타입을 따로 두어 데스크톱은 높은 상한(RN13 (나)). (다) 공유 샘플러 + 데스크톱 SRV 상한을 높인 장치 요구 형식(이 문서 초안 권장) | **결정됨(2026-11-18), 같은 날 사용자 결정으로 개정: 형식별 상한(Renderer RN13 개정과 같다)** | 생성 원문은 모든 형식에 하나이고 짝 규칙을 유지한다. 머티리얼 텍스처 상한은 (pass, 퍼뮤테이션, 형식)별 `형식 상한 − 렌더러 합계`이며 형식 상한은 형식 정의가 정한다(D3D12·Vulkan·Metal 넓게, GLES·D3D11 SM5 16, MSR12). 데스크톱에서 쿠킹되는 머티리얼도 모바일 형식에서 넘으면 그 형식을 쿠킹할 때 명시 오류다(UE 모바일 머티리얼 제약과 같은 성격). 16장을 넘으려면 공유 샘플러가 필요하다(MSR13). 초안 권장 (다)와 방향이 같다. 처음 확정한 (가)는 GLES 16이 데스크톱까지 묶어 일반 PBR 머티리얼도 무거운 퍼뮤테이션에서 쿠킹 오류가 날 수 있었다(10.4절 D3). 측정 MM5는 모바일 형식 오류 비율과 공유 샘플러 시점을 본다 |
 | MD5 | **함수 안 파라미터 범위** | (가) 계획 14.7절대로 호출 위치마다 독립 + 명시 "공유" 표시. (나) UE처럼 같은 이름이면 공유 | **결정됨(2026-11-18, 권장안 (가))** | 계획 결정을 따른다. UE 에셋을 들일 때 차이는 변환 도구가 다룬다 |
 | MD6 | **사용 대상 결정 방식** | (가) 선언 + 쿠킹 유도(8.4절). (나) UE처럼 에디터가 자동으로 켜고 저장 | **결정됨(2026-11-18, 권장안 (가))** | 에셋을 동의 없이 바꾸지 않고, 참조로 알 수 있는 조합은 쿠커가 빠뜨리지 않는다 |
 | MD7 | **품질 수준** | (가) Low·Medium·High·Epic 4단계(UE와 같음). (나) 프로젝트 정의 | **결정됨(2026-11-18, 권장안 (가))** | 프로필이 쿠킹 수준을 고른다 |
@@ -1142,3 +1167,4 @@ UE 대조:
 | 개정 | 날짜 | 내용 |
 |---|---|---|
 | 1(초안) | 2026-11-17 – 11-18 | 첫 작성. UE 5.8.4 조사(에셋 계층·파라미터·uniform expression·static 변형·컬렉션, 번역기 기본값과 IR 실험 상태, 템플릿 연결, 셰이더 맵 키·퍼뮤테이션·사용 플래그·품질, 비동기 컴파일·대체·미리보기, DDC·쿠킹, Substrate 기본 여부·Blendable/Adaptive·고전 경로 상태, 도메인·혼합·shading model 레거시 확인, 모바일·SM5 제약). 모듈 배치·에셋 모델·그래프 스키마·IR·코드 생성·퍼뮤테이션·파라미터·표면 모델·컴파일·쿠킹·backend 표·에디터 요구·단계·다른 문서 요구. 2026-11-18: 결정 MD1–MD9 확정(사용자 "권장안대로", MD4는 Renderer RN13에 맞춤), Renderer 개정 2(2dc9068) 14절 계약에 경계를 맞추고 다른 점을 10.4절에 정리, 교차 검증 리뷰 반영(셰이더 집합 id를 내용 hash로, 파라미터 기본값을 번역 키에서 제외, 사용 대상 유도를 cookKey 입력으로, 정점 입력 거르기의 장치 없는 위치, PinKey 정의, 의존 키 규칙, TextureStreaming 5.3 규칙, 요구 ID 접두어 `M`) |
+| 2(초안) | 2026-11-18 | Renderer 개정 2와 교차 검증해 두 문서를 맞췄다(10.4절을 "정합 결과" 표로). D1–D9 판단: WPO는 정점 함수, 번호표 C++ `RenderData`·HLSL `/Engine/Shared/`(순환 해소), `AlphaHoldout`은 Renderer 후속 값, 거르기 인자 `MaterialShaderTraits`, "static 변형" 용어, pass별 경로와 `RENDER_PATH_*`, depth·그림자 pass의 마스크 전용 함수, 영역 이름 유지. 사용자 결정 반영: MD4를 Renderer RN13과 함께 형식별 SRV 상한으로 개정(1·7.4·13·15·16·17절, MSR1·MSR12·MSR13), 셰이더 시스템 결정 4 확정(MetaCompiler 방식)을 MD3·15.1·MSR4에 반영. 그 밖의 수정: Render Path Switch의 깊이 일치 규칙 V15, 경로 전용 pass에 `DepthAux`, 노멀 공간 변환 위치, 노드 미리보기 pass 이름, MaterialCook 의존에 `RendererShaders`, 용어 통일("도메인" → "영역", "혼합 방식" → "블렌드 모드"), Renderer 단계(RS0·RS2·RS5)와의 선후(10.3·15.1절), MS-T6 허용 오차, MRD1–MRD12 처리 상태(16절) |
