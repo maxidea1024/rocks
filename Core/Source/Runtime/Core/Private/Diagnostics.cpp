@@ -1,3 +1,5 @@
+#include "Diagnostics/LogInternal.h"
+
 #include <Core/Assert.h>
 #include <Platform/Fatal.h>
 
@@ -31,6 +33,7 @@ namespace rocks {
     }
     append(")");
     buffer[used] = '\0';
-    platform::Fatal(buffer);
+    // 로그 시스템의 Fatal 경로(비상 출력 → 설치된 LogSystem에 전달 → 종료)로 보낸다(설계 11절).
+    detail::ReportAssertFailure(buffer);
 }
 } // namespace rocks

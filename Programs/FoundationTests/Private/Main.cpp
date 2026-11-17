@@ -9,6 +9,7 @@
 
 namespace rocks::test {
 int RunLoggerFailureProbe() noexcept;
+int RunLogFatalProbe(uint32 mode) noexcept;
 int RunProcessProbe(int argc, char** argv) noexcept;
 int RunHashTraversalNegativeControl(bool useSet, uint32 operation) noexcept;
 int RunHashOperationsNegativeControl(uint32 operation) noexcept;
@@ -362,6 +363,14 @@ int main(int argc, char** argv) {
                 return test::RunSecretSlotUseAfterFreeProbe();
             } else if (strcmp(control, "secret-slot-tail-overflow") == 0) {
                 return test::RunSecretSlotTailOverflowProbe();
+            } else if (strcmp(control, "log-fatal-sync") == 0) {
+                return test::RunLogFatalProbe(0);
+            } else if (strcmp(control, "log-fatal-async") == 0) {
+                return test::RunLogFatalProbe(1);
+            } else if (strcmp(control, "log-assert") == 0) {
+                return test::RunLogFatalProbe(2);
+            } else if (strcmp(control, "log-fatal-recursive") == 0) {
+                return test::RunLogFatalProbe(3);
             } else if (strcmp(control, "asan-uaf") == 0) {
                 return test::RunAsanNegativeControl();
             } else if (strcmp(control, "assert-stderr-lock") == 0) {

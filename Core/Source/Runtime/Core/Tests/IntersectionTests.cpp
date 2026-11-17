@@ -568,6 +568,29 @@ void CheckRayTriangle() {
                   TriangleSides::FrontOnly)
               .IsHit());
 
+    // UE 대조 golden(cm): 원점 근처에서 +X를 보는 카메라를 향한 렌더 메시 삼각형 A(100,0,0),
+    // B(100,10,0), C(100,0,10)는 UE 렌더 앞면 normal (C - A) x (B - A) = (-100, 0, 0)이
+    // 카메라 쪽이다(MeshDescription.cpp:1311-1313). 기하 앞면은 UE FPlane·Chaos FTriangle과 같은
+    // (B - A) x (C - A) = +X 쪽이므로 (A, B, C) 그대로는 FrontOnly에서 뒷면이고, 렌더 앞면으로
+    // 판정하려면 (A, C, B)로 넘긴다.
+    const Vector3<T> meshA = V<T>(100, 0, 0);
+    const Vector3<T> meshB = V<T>(100, 10, 0);
+    const Vector3<T> meshC = V<T>(100, 0, 10);
+    const Ray<T> cameraRay(V<T>(0, 2, 2), Vector3<T>::Forward());
+    CHECK(Raycast(cameraRay, Triangle<T>(meshA, meshB, meshC), Infinity<T>(),
+                  TriangleSides::FrontOnly)
+              .result == QueryResult::Miss);
+    const RayHit<T> renderFront = Raycast(cameraRay, Triangle<T>(meshA, meshC, meshB),
+                                          Infinity<T>(), TriangleSides::FrontOnly);
+    REQUIRE(renderFront.IsHit());
+    CHECK(renderFront.distance == 100);
+    CHECK(renderFront.point == V<T>(100, 2, 2));
+    CHECK(renderFront.normal == V<T>(-1, 0, 0));
+    const RayHit<T> twoSided = Raycast(cameraRay, Triangle<T>(meshA, meshB, meshC));
+    REQUIRE(twoSided.IsHit());
+    CHECK(twoSided.distance == 100);
+    CHECK(twoSided.normal == V<T>(-1, 0, 0));
+
     // 변·꼭짓점 위는 Hit, 변에서 최소 subnormal만큼 밖이면 Miss다.
     const RayHit<T> edge = Raycast(Ray<T>(V<T>(0.5, 0, 1), Vector3<T>::Down()), triangle);
     CHECK(edge.IsHit() && edge.point == V<T>(0.5, 0, 0));
