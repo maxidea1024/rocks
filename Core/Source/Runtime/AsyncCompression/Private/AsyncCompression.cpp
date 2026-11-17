@@ -1,6 +1,6 @@
 #include "CompressionInternal.h"
 
-#include <Compression/AsyncCompression.h>
+#include <AsyncCompression/AsyncCompression.h>
 #include <Core/Assert.h>
 #include <Core/Function.h>
 #include <Core/Move.h>

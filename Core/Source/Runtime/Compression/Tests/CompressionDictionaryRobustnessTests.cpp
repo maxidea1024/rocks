@@ -1,6 +1,7 @@
 #include "CompressionDictionaryTestSupport.h"
 
 #include <Base/Endian.h>
+#include <AsyncCompression/ParallelCompressedBlocks.h>
 #include <Compression/CompressedBlocks.h>
 #include <Compression/CompressionDictionary.h>
 #include <Core/Encoding/Crc32.h>
@@ -327,8 +328,9 @@ TEST(CompressionDictionary_ThreadsShareDictionaries) {
             Array<uint8> whole(system);
             REQUIRE(whole.TryResize(original.Size()));
             for (uint32 round = 0; round < 4; ++round) {
-                REQUIRE(reader.TryRead(scheduler, 0, Span<uint8>(whole.Data(), whole.Size()),
-                                       View(container), 0, system));
+                REQUIRE(TryReadCompressedBlocks(scheduler, reader, 0,
+                                                Span<uint8>(whole.Data(), whole.Size()),
+                                                View(container), 0, system));
                 CHECK(Same(whole, View(original)));
             }
 

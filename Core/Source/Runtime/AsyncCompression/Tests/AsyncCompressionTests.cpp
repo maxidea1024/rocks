@@ -1,6 +1,6 @@
-#include "CompressionTestSupport.h"
+#include <Compression/Tests/CompressionTestSupport.h>
 
-#include <Compression/AsyncCompression.h>
+#include <AsyncCompression/AsyncCompression.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Move.h>
 #include <Core/ScopeExit.h>

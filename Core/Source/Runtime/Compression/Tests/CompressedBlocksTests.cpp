@@ -1,6 +1,7 @@
 #include "CompressionTestSupport.h"
 
 #include <Base/Endian.h>
+#include <AsyncCompression/ParallelCompressedBlocks.h>
 #include <Compression/CompressedBlocks.h>
 #include <Core/Encoding/Crc32.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -511,9 +512,9 @@ TEST(CompressedBlocks_ParallelMatchesSequential) {
             for (const auto& range : ranges) {
                 Array<uint8> restored(allocator);
                 REQUIRE(restored.TryResize(range[1]));
-                CHECK(reader.Value().TryRead(scheduler, range[0],
-                                             Span<uint8>(restored.Data(), restored.Size()),
-                                             View(sequential), 0, allocator));
+                CHECK(TryReadCompressedBlocks(scheduler, reader.Value(), range[0],
+                                              Span<uint8>(restored.Data(), restored.Size()),
+                                              View(sequential), 0, allocator));
                 CHECK(Same(restored, Slice(View(original), range[0], range[1])));
             }
 
@@ -524,9 +525,9 @@ TEST(CompressedBlocks_ParallelMatchesSequential) {
             corrupt[reader.Value().IndexBytes() + 3] ^= 1;
             Array<uint8> restored(allocator);
             REQUIRE(restored.TryResize(original.Size()));
-            CHECK(reader.Value()
-                      .TryRead(scheduler, 0, Span<uint8>(restored.Data(), restored.Size()),
-                               View(corrupt), 0, allocator)
+            CHECK(TryReadCompressedBlocks(scheduler, reader.Value(), 0,
+                                          Span<uint8>(restored.Data(), restored.Size()),
+                                          View(corrupt), 0, allocator)
                       .Error() == ErrorCode::InvalidArgument);
         }
 
@@ -987,8 +988,9 @@ TEST(CompressedBlocks_ParallelReturnsWhileWorkersBusy) {
         CHECK(TryCompressBlocksAppend(scheduler, settings, View(original), parallel, allocator));
         Array<uint8> restored(allocator);
         REQUIRE(restored.TryResize(original.Size()));
-        CHECK(reader.Value().TryRead(scheduler, 0, Span<uint8>(restored.Data(), restored.Size()),
-                                     View(expected), 0, allocator));
+        CHECK(TryReadCompressedBlocks(scheduler, reader.Value(), 0,
+                                      Span<uint8>(restored.Data(), restored.Size()), View(expected),
+                                      0, allocator));
         const uint64 elapsed = platform::MonotonicNanoseconds() - start;
         release.Signal();
         CHECK(elapsed < uint64{5000000000});
@@ -1073,9 +1075,9 @@ TEST(CompressedBlocks_ParallelShapesLevelsAndBoundaries) {
             for (const auto& range : Ranges) {
                 Array<uint8> restored(allocator);
                 REQUIRE(restored.TryResize(range[1]));
-                CHECK(reader.Value().TryRead(scheduler, range[0],
-                                             Span<uint8>(restored.Data(), restored.Size()),
-                                             View(container), 0, allocator));
+                CHECK(TryReadCompressedBlocks(scheduler, reader.Value(), range[0],
+                                              Span<uint8>(restored.Data(), restored.Size()),
+                                              View(container), 0, allocator));
                 CHECK(Same(restored, Slice(View(original), range[0], range[1])));
             }
         }

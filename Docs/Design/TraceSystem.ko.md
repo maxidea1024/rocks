@@ -64,7 +64,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론)의 현재 기본 경로다. 경�
 - `TraceCapture`(Core Runtime): 세션·채널·블록·writer·출력·CPU 구간·카운터·표지·시간 띠·문맥.
   - 기반 모듈: Base·PlatformBase·Compression·Core(로그) 위에 선다.
   - Task 모듈은 TraceCapture를 쓰는 쪽이다(7절). TraceCapture는 Task에 의존하지 않고, writer 스레드도 Task가 아니라 플랫폼 스레드다. 일반 scheduler가 끝난 뒤에도 비워야 하기 때문이다(입력 계획 :427).
-  - **TR3 전 해결 과제**: TraceCapture가 쓰는 Compression 모듈이 비동기 압축(`AsyncCompression`·`CompressedBlocks`) 때문에 Task에 의존한다. 그래서 TraceCapture는 Compression을 거쳐 Task에 간접 의존하고, TR3에서 Task가 TraceCapture를 쓰면 모듈 순환이 된다. TR3 착수 전에 Compression의 Task 의존 부분을 별도 모듈로 떼는 등 방법을 정한다.
+  - **모듈 순환 해소**(2026-11-17): Compression의 Task 의존 부분(비동기 API·블록 컨테이너 병렬 API)을 모듈 `AsyncCompression`으로 떼었다([압축](Compression.ko.md) 4절). Compression은 Core와 codec에만 의존하므로 계층은 아래부터 Compression, TraceCapture, Task, AsyncCompression 순이고, TR3에서 Task가 TraceCapture를 써도 순환이 없다.
 - `TraceAnalysis`(Core Developer): 스트림 읽기·모델·report. 실행 파일에는 들어가지 않는다.
 - Rocks Lens(viewer): 후속. 계획 29.4절의 단계 R2·M3에 맞춘다.
 

@@ -1,7 +1,8 @@
 #include "CompressionDictionaryTestSupport.h"
 
 #include <Base/Endian.h>
-#include <Compression/AsyncCompression.h>
+#include <AsyncCompression/AsyncCompression.h>
+#include <AsyncCompression/ParallelCompressedBlocks.h>
 #include <Compression/CompressedBlocks.h>
 #include <Compression/CompressionDictionary.h>
 #include <Compression/CompressionStream.h>
@@ -605,8 +606,9 @@ TEST(CompressionDictionary_BlockContainers) {
             // 병렬 읽기.
             Array<uint8> whole(allocator);
             REQUIRE(whole.TryResize(original.Size()));
-            REQUIRE(reader.Value().TryRead(scheduler, 0, Span<uint8>(whole.Data(), whole.Size()),
-                                           View(container), 0, allocator));
+            REQUIRE(TryReadCompressedBlocks(scheduler, reader.Value(), 0,
+                                            Span<uint8>(whole.Data(), whole.Size()),
+                                            View(container), 0, allocator));
             CHECK(Same(whole, View(original)));
 
             // 지문 byte 손상은 CRC(InvalidArgument), CRC를 다시 맞추면 맞는 사전이

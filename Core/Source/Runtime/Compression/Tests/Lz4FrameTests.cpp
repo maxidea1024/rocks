@@ -1,6 +1,6 @@
 #include "CompressionTestSupport.h"
 
-#include <Compression/AsyncCompression.h>
+#include <AsyncCompression/AsyncCompression.h>
 #include <Compression/CompressedBlocks.h>
 #include <Compression/CompressionDictionary.h>
 #include <Compression/CompressionStream.h>

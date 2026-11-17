@@ -9,7 +9,7 @@ Rocks 저장소는 **Core(기반 라이브러리)**와 **Engine(게임 엔진 �
 rocks/
   Core/                       기반 라이브러리(엔진 아님)
     Source/
-      Runtime/                모듈: Base PlatformBase Core Task Compression Serialization MetaSchema
+      Runtime/                모듈: Base PlatformBase Core Compression TraceCapture Task AsyncCompression Serialization MetaSchema
                               Localization ObjectRuntime ObjectSerialization ReflectionText
       ThirdParty/             Core가 쓰는 고정 버전 외부 라이브러리(Lz4·Zstd·Zlib·Brotli·Sodium 원본, UnicodeData·
                               JsonTestSuite·Wycheproof 데이터). <Lib>/ThirdParty.json·<lib>-<version>/(릴리스 원본을
