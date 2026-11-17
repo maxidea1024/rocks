@@ -1,11 +1,11 @@
 #!/bin/sh
-# SPIRV-Tools C API 공유 라이브러리 오프라인 빌드다(macOS arm64). Windows 판은 같은 폴더의 Build.ps1이다.
-# libspirv.h C API(spvValidate 등과 최적화기 C API)를 libSPIRV-Tools-c.dylib 하나로 만든다(CMake 래퍼 SpirvToolsC.cmake, 이유는
-# Build.ps1). 업스트림 CMake가 Python 3(PATH)으로 문법 표를 생성한다.
-# 상태: 미검증(이 스크립트를 실행한 macOS 호스트 기록이 아직 없다, Docs/Design/ShaderSystem.ko.md 8절 진척).
+# Offline build of the SPIRV-Tools C API shared library (macOS arm64). The Windows version is Build.ps1 in the same folder.
+# Builds the libspirv.h C API (spvValidate and the like, plus the optimizer C API) as a single libSPIRV-Tools-c.dylib (CMake wrapper SpirvToolsC.cmake; see
+# Build.ps1 for why). The upstream CMake generates grammar tables with Python 3 (PATH).
+# Status: unverified (no macOS host has a record of running this script yet, Docs/Design/ShaderSystem.ko.md section 8 progress).
 #
-# 사용: sh Engine/Source/ThirdParty/SpirvTools/Build/Build.sh [작업 디렉터리] [archive 출력 디렉터리]
-# 필요: Xcode 명령행 도구, CMake, Ninja, Python 3, git(patch 적용).
+# Usage: sh Engine/Source/ThirdParty/SpirvTools/Build/Build.sh [work directory] [archive output directory]
+# Requires: Xcode command line tools, CMake, Ninja, Python 3, git (to apply patches).
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/../../../../../Build/ThirdPartyTools/tool-build.sh"

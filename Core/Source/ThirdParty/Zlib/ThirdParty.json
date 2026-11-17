@@ -6,7 +6,7 @@
   "source": {
     "url": "https://github.com/madler/zlib/releases/download/v1.4/zlib-1.4.tar.gz",
     "sha256": "02dd159783677a749c04adbdd02b55b8a2bcc7e054f51b76b549199a916ad584",
-    "verification": "zlib-1.4.tar.gz.asc GPG 서명 검증(Mark Adler, 지문 5ED4 6A67 21D3 6558 7791 E2AA 783F CD8E 58BC AFBA)과 GitHub 릴리스 자산 digest 일치."
+    "verification": "Verified the zlib-1.4.tar.gz.asc GPG signature (Mark Adler, fingerprint 5ED4 6A67 21D3 6558 7791 E2AA 783F CD8E 58BC AFBA) and matched the GitHub release asset digest."
   },
   "licenses": [
     {
@@ -177,9 +177,9 @@
     }
   ],
   "notes": [
-    "제외: gz*.c, compress.c, uncompr.c, infback.c(Z_SOLO에서 쓰지 않음).",
-    "Z_SOLO는 기본 할당기와 gzguts.h(_CRT_SECURE_NO_WARNINGS 정의 포함)를 빼서 할당기 주입을 강제한다. memcpy가 zmemcpy 루프로 바뀌지만 -O2에서 벡터화 복사로 컴파일됨을 확인했다.",
-    "Z_U4·Z_U8은 Z_SOLO가 끄는 braid CRC-32와 ARMv8 하드웨어 CRC를 되살린다.",
-    "Z_PREFIX는 Android·macOS 시스템 libz와의 심볼 충돌을 막는다."
+    "Excluded: gz*.c, compress.c, uncompr.c, infback.c (not used under Z_SOLO).",
+    "Z_SOLO removes the default allocator and gzguts.h (which defines _CRT_SECURE_NO_WARNINGS), forcing allocator injection. memcpy becomes a zmemcpy loop, but it was confirmed to compile to a vectorized copy at -O2.",
+    "Z_U4 and Z_U8 restore the braid CRC-32 and ARMv8 hardware CRC that Z_SOLO turns off.",
+    "Z_PREFIX prevents symbol collisions with the Android and macOS system libz."
   ]
 }
