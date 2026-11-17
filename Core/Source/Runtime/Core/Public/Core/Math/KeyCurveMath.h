@@ -16,8 +16,8 @@
 // 자리는 double)로 옮겼다. 빌드가 FMA 축약을 끄므로(-ffp-contract=off) Windows x64에서 UE
 // /fp:precise 빌드와 비트가 같다. 다른 곳은 설계 문서 15절의 수정뿐이다:
 // - Lerp는 math::Lerp라 비율 0·1에서 끝 값을 그대로 낸다(유한한 끝의 차가 넘칠 때만 UE와 다르다).
-// - 순환 시간 재배치는 길이 0·비유한 입력에서 재배치하지 않고, 주기 수가 int32를 넘으면 double로
-//   재배치한다(Fatal 없음, D16).
+// - 순환 시간 재배치는 길이 0·비유한 입력에서 재배치하지 않고, 주기 몫이 2^30 이상이면(UE SSE
+//   FloorToInt가 틀리는 범위) double로 재배치한다(Fatal 없음, D16).
 // - 가중 접선 3차 방정식은 근이 2개일 때 채워지지 않은 세 번째 칸을 읽지 않는다.
 // 가중 경로는 C 런타임의 atanf·acos·cos·pow·sqrt를 부른다. 이 함수들은 플랫폼마다 마지막 비트가
 // 다를 수 있으므로 플랫폼 사이의 비트 동일성은 보장하지 않는다(UE와 같은 수준 — D17). CurveSinCos는
@@ -93,7 +93,9 @@ constexpr bool IsCurveSegmentUnweighted(const Key& k1, const Key& k2) noexcept {
 
 // 3차 Bezier 값이다(UE UE::Curves::BezierInterp, CurveEvaluation.h 25–36 — De Casteljau). p0·p3은
 // 끝 값, p1·p2는 제어점, alpha ∈ [0, 1]이다. 각 단계는 math::Lerp라 alpha가 0이면 p0, 1이면 p3을
-// 그대로 낸다. (0, 1) 안은 UE A + α·(B − A)와 비트가 같다. NaN은 전파된다.
+// 그대로 낸다. alpha가 0·1이 아니면 UE A + α·(B − A)와 비트가 같다(유한한 끝의 차가 넘치는 경우
+// 제외). 가중 경로는 3차 방정식 근을 float로 바꾼 값을 alpha로 넣으므로, UE와 비트가 갈리는 조건도
+// 입력 비율이 아니라 이 alpha가 0·1인지다. NaN은 전파된다.
 //
 // 사용 예:
 //   const float value = math::BezierCurveValue(0.0f, 1.0f, 2.0f, 3.0f, 0.5f);   // 1.5
@@ -347,7 +349,9 @@ float WeightedCurveSegment(const Key& k1, const Key& k2, float time) noexcept {
 // - Linear: Lerp(k1.value, k2.value, α), α = (time − k1.time)/길이.
 // - Cubic 비가중: 제어점 p1 = v1 + (출발 접선·길이)·⅓, p2 = v2 − (도착 접선·길이)·⅓의 Bezier.
 // - Cubic 가중(IsCurveSegmentUnweighted가 거짓): WeightedCurveSegment.
-// α가 [0, 1] 밖이어도 계산한다(외삽 — 호출자가 구간을 골라 부른다). NaN은 전파된다.
+// α가 [0, 1] 밖이어도 계산한다(외삽 — 호출자가 구간을 골라 부른다). NaN 시간은 Linear·Cubic에서
+// NaN이지만 Constant 구간에서는 비교가 거짓이라 k2.value다(UE와 같다). 설계 5.6절의 NaN 규칙(키가
+// 있으면 NaN)은 CV5 Evaluate가 구간을 고르기 전에 확인한다.
 //
 // 사용 예:
 //   const float value = math::EvalCurveSegment(keys[index - 1], keys[index], time);
@@ -383,11 +387,13 @@ float EvalCurveSegment(const Key& k1, const Key& k2, float time) noexcept {
 // ---- 시간 재배치 ----
 
 // CycleCurveTime의 결과다.
-// - time: 키 범위 [첫 키 시간, 마지막 키 시간] 안으로 옮긴 시간(옮기지 않았으면 입력 그대로).
+// - time: 키 범위 [첫 키 시간, 마지막 키 시간] 쪽으로 옮긴 시간(옮기지 않았으면 입력 그대로). 대개
+//   범위 안이지만 int32 경로는 곱·합의 float 반올림으로 범위 끝을 time의 몇 ulp까지 벗어날 수 있다
+//   (|주기 몫|이 클수록 크고 약 2^22를 넘으면 한 주기 길이에 이를 수 있다 — UE와 같은 식·같은
+//   결과). CV5 Evaluate는 그런 시간을 앞·뒤 외삽 갈래(끝 키 값)로 받는다.
 // - cycleCount: 옮긴 주기 수(0 이상의 정수 값). int32 경로는 UE CycleCount의 절댓값과 같다.
-// - wide: 주기 수가 int32를 넘어 double로 재배치했는지. 이때 cycleCount는 double 정밀도의
-// 근삿값이다
-//   (2^53 이상이면 홀짝이 뜻을 잃는다).
+// - wide: 주기 몫이 2^30 이상이라 double로 재배치했는지. 이때 cycleCount는 double 정밀도의
+//   근삿값이다(2^53 이상이면 홀짝이 뜻을 잃는다).
 struct CurveCycle {
     float time = 0.0f;
     double cycleCount = 0.0;
@@ -396,17 +402,17 @@ struct CurveCycle {
 
 // 순환 외삽(Cycle·CycleWithOffset·Oscillate)의 시간 재배치다(UE FRealCurve::CycleTime,
 // RealCurve.cpp 7–34, D16). time > maximum이면 뒤쪽, time < minimum이면 앞쪽 주기를 세어 키 범위
-// 안으로 옮긴다.
-// - 주기 수는 UE 식의 float 몫((maximum − time)/길이 또는 (time − minimum)/길이)을 double로 넓혀
-//   TryFloorToInt32로 구한다. int32 안이면 UE와 같은 float 식으로 옮긴다(UE Windows x64의 SSE
-//   FloorToInt는 |몫| < 2^30에서만 올바르므로 UE와 비트가 같은 범위는 거기까지다).
-// - int32 밖이면 double 나머지(Fmod)로 옮긴다. 정확한 배수의 뒤쪽 시간은 maximum으로 가고 주기 수는
-//   하나 줄인다(UE int32 경로와 같은 규칙).
-// - 옮긴 시간이 반대쪽 끝에 닿으면 UE처럼 바로잡는다(앞쪽에서 온 maximum은 minimum, 뒤쪽에서 온
-//   minimum은 maximum).
+// 쪽으로 옮긴다.
+// - 주기 몫은 UE 식의 float 몫((maximum − time)/길이 또는 (time − minimum)/길이)이다. |몫| <
+// 2^30이면
+//   UE와 같은 float 식(int32 주기)으로 옮긴다 — UE Windows x64의 SSE FloorToInt가 올바른 범위이고
+//   그 안에서 UE와 비트가 같다. 옮긴 시간이 반대쪽 끝에 닿으면 UE처럼 바로잡는다(앞쪽에서 온
+//   maximum은 minimum, 뒤쪽에서 온 minimum은 maximum).
+// - |몫| ≥ 2^30이면 double 나머지(정확한 Fmod)로 옮긴다. 정확한 배수의 뒤쪽 시간은 maximum으로 가고
+//   주기 수는 하나 줄인다(int32 경로의 정확한 배수 규칙과 같다). 끝 바로잡기는 하지 않는다(float
+//   반올림으로 maximum이 된 앞쪽 시간은 maximum 그대로다 — 바꾸면 Cycle·Oscillate 결과가 뒤집힌다).
 // - 길이(maximum − minimum)가 0 이하·비유한이거나 time이 비유한(±Inf·NaN)이면 옮기지 않는다(주기
-// 0).
-//   UE는 0 나눗셈과 무효 정수 변환으로 의미 없는 값을 낸다(15절 1).
+//   0). UE는 0 나눗셈과 무효 정수 변환으로 의미 없는 주기 수를 낸다(15절 1).
 // minimum ≤ time ≤ maximum이면 그대로다. 호출자는 앞·뒤 외삽 방식을 보고 이 함수를 부른 뒤
 // CycleWithOffset이면 CurveCycleValueOffset, Oscillate면 IsOddCurveCycle을 쓴다.
 //
@@ -414,6 +420,8 @@ struct CurveCycle {
 //   const math::CurveCycle cycle = math::CycleCurveTime(0.0f, 2.0f, 5.0f);   // time 1, cycleCount
 //   2
 inline CurveCycle CycleCurveTime(float minimum, float maximum, float time) noexcept {
+    // SSE FloorToInt(F + F − 0.5f)가 올바른 몫의 상한이다(UE와 비트가 같은 int32 경로의 범위).
+    constexpr float SseFloorLimit = 1073741824.0f; // 2^30
     CurveCycle result;
     result.time = time;
     const float duration = maximum - minimum;
@@ -425,48 +433,44 @@ inline CurveCycle CycleCurveTime(float minimum, float maximum, float time) noexc
 
     const float ratio = after ? (maximum - time) / duration : (time - minimum) / duration;
     int32 cycles = 0;
-    float moved;
-    if (TryFloorToInt32(static_cast<double>(ratio), cycles)) {
-        moved = after ? time + duration * static_cast<float>(cycles)
-                      : time - duration * static_cast<float>(cycles);
-        result.cycleCount = Abs(static_cast<double>(cycles));
-    } else {
-        // 몫이 int32 밖이다(아주 큰 시간·작은 길이). 정확한 Fmod로 나머지를 구하고 주기 수는
-        // double로 둔다.
-        const double offset = static_cast<double>(time) - static_cast<double>(minimum);
-        const double length = static_cast<double>(duration);
-        double remainder = Fmod(offset, length);
-        double quotient = Floor((offset - remainder) / length + 0.5);
-        if (remainder < 0.0) {
-            remainder += length;
-            quotient -= 1.0;
+    if (Abs(ratio) < SseFloorLimit && TryFloorToInt32(static_cast<double>(ratio), cycles)) {
+        float moved = after ? time + duration * static_cast<float>(cycles)
+                            : time - duration * static_cast<float>(cycles);
+        if (moved == maximum && before) {
+            moved = minimum;
         }
 
-        if (remainder >= length) {
-            remainder = 0.0;
-            quotient += 1.0;
-        }
-
-        if (after && remainder == 0.0) {
+        if (moved == minimum && after) {
             moved = maximum;
-            result.cycleCount = quotient - 1.0;
-        } else {
-            moved = static_cast<float>(static_cast<double>(minimum) + remainder);
-            result.cycleCount = Abs(quotient);
         }
 
-        result.wide = true;
+        result.time = moved;
+        result.cycleCount = Abs(static_cast<double>(cycles));
+        return result;
     }
 
-    if (moved == maximum && before) {
-        moved = minimum;
+    // 몫이 2^30 이상이다(아주 큰 시간·작은 길이). 정확한 Fmod로 나머지를 구하고 주기 수는 double로
+    // 둔다. 나머지는 |r| < 길이이고, 0이 아니면 길이·2^-24보다 크다(시간 차 d ≥ 길이·2^30이라 d의
+    // double 간격이 길이의 float 간격 이상이고, 나머지는 그 간격의 배수다). 그래서 음수 나머지에
+    // 길이를 더해도 길이로 반올림되지 않는다.
+    const double offset = static_cast<double>(time) - static_cast<double>(minimum);
+    const double length = static_cast<double>(duration);
+    double remainder = Fmod(offset, length);
+    double quotient = Floor((offset - remainder) / length + 0.5);
+    if (remainder < 0.0) {
+        remainder += length;
+        quotient -= 1.0;
     }
 
-    if (moved == minimum && after) {
-        moved = maximum;
+    if (after && remainder == 0.0) {
+        result.time = maximum;
+        result.cycleCount = quotient - 1.0;
+    } else {
+        result.time = static_cast<float>(static_cast<double>(minimum) + remainder);
+        result.cycleCount = Abs(quotient);
     }
 
-    result.time = moved;
+    result.wide = true;
     return result;
 }
 

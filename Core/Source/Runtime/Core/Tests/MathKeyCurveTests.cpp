@@ -268,14 +268,78 @@ TEST(KeyCurveMath_CycleTimeInt32Path) {
     cycle = math::CycleCurveTime(0.0f, 1.0f, -1.0e-8f);
     CHECK(cycle.time == 0.0f && cycle.cycleCount == 1.0);
 
-    // 몫 경계: 2^31 − 128(float)은 int32 경로, 정수 배수라 max. 2^31은 몫 −2^31(int32 최솟값)이고
-    // 주기 2^31.
+    // 몫 경계 2^30: 그 바로 앞 −(2^30 − 64)(float)는 int32 경로이고 정수 배수라 min, 주기 2^30 −
+    // 64다.
+    cycle = math::CycleCurveTime(0.0f, 1.0f, -1073741760.0f);
+    CHECK(!cycle.wide && cycle.time == 0.0f && cycle.cycleCount == 1073741760.0);
+    // 뒤쪽 2^30 − 64는 몫 1 − (2^30 − 64)가 float −(2^30 − 64)로 반올림되어 int32 경로이고 시간
+    // 0(min)이 뒤쪽 바로잡기로 max가 된다(주기는 반올림된 몫 그대로 2^30 − 64 — UE와 같다).
+    cycle = math::CycleCurveTime(0.0f, 1.0f, 1073741760.0f);
+    CHECK(!cycle.wide && cycle.time == 1.0f && cycle.cycleCount == 1073741760.0);
+    // 몫 2^30 이상은 double 경로다(UE SSE FloorToInt가 틀리는 범위 — int32에 들어가도). 정확한
+    // 배수의 뒤쪽은 max이고 주기는 하나 줄인다: 2^31 − 128 → 2147483519, 2^31 → 2147483647. 앞쪽
+    // −2^31은 나머지 0이라 min, 주기 2^31.
     cycle = math::CycleCurveTime(0.0f, 1.0f, 2147483520.0f);
-    CHECK(cycle.time == 1.0f && cycle.cycleCount == 2147483520.0 && !cycle.wide);
+    CHECK(cycle.wide && cycle.time == 1.0f && cycle.cycleCount == 2147483519.0);
     cycle = math::CycleCurveTime(0.0f, 1.0f, 2147483648.0f);
-    CHECK(cycle.time == 1.0f && cycle.cycleCount == 2147483648.0 && !cycle.wide);
+    CHECK(cycle.wide && cycle.time == 1.0f && cycle.cycleCount == 2147483647.0);
     cycle = math::CycleCurveTime(0.0f, 1.0f, -2147483648.0f);
-    CHECK(cycle.time == 0.0f && cycle.cycleCount == 2147483648.0 && !cycle.wide);
+    CHECK(cycle.wide && cycle.time == 0.0f && cycle.cycleCount == 2147483648.0);
+    // 리뷰 반례: (0, 0.75, 805306432)는 몫이 2^30을 넘어 double 경로다(int32 경로였다면 시간 −64).
+    cycle = math::CycleCurveTime(0.0f, 0.75f, 805306432.0f);
+    CHECK(cycle.wide && cycle.time >= 0.0f && cycle.time <= 0.75f);
+    // double 경로는 끝 바로잡기를 하지 않는다: min = 2 − 2^-23, max = 2 + 2^-21, 앞쪽 −2052는
+    // 나머지를 더한 float가 max로 반올림되어도 max 그대로다(min으로 바꾸면 Cycle·Oscillate가
+    // 뒤집힌다).
+    const float low = 2.0f - 1.0f / 8388608.0f;
+    const float high = 2.0f + 1.0f / 2097152.0f;
+    cycle = math::CycleCurveTime(low, high, -2052.0f);
+    double rest = platform::PlatformMath::Fmod(-2052.0 - static_cast<double>(low),
+                                               static_cast<double>(high - low));
+    if (rest < 0.0) {
+        rest += static_cast<double>(high - low);
+    }
+
+    CHECK(cycle.wide && cycle.time == static_cast<float>(static_cast<double>(low) + rest));
+
+    // int32 경로는 UE와 같은 float 식이라 곱·합의 반올림으로 키 범위 끝을 시간 크기의 몇 ulp까지
+    // 벗어날 수 있다(|몫|이 클수록 크다). |몫| ≤ 2^22에서 그 벗어남이 |time|·2^-21 안인지
+    // 본다(무작위, 고정 seed). 길이·시간이 2^-6의 배수이고 |몫| ≤ 2^12면 곱이 정확해 언제나 범위
+    // 안이다.
+    MathRandom random(0x3801);
+    int32 outside = 0;
+    int32 exactOutside = 0;
+    for (int32 index = 0; index < 20000; ++index) {
+        const float minimum = static_cast<float>(random.Range(-100.0, 100.0));
+        const float maximum = minimum + static_cast<float>(random.Range(0.01, 10.0));
+        const float span = (maximum - minimum) * 4194304.0f;
+        const float time = index % 2 == 0 ? maximum + static_cast<float>(random.Unit()) * span
+                                          : minimum - static_cast<float>(random.Unit()) * span;
+        const math::CurveCycle moved = math::CycleCurveTime(minimum, maximum, time);
+        const float slack = platform::PlatformMath::Abs(time) / 2097152.0f;
+        if (!moved.wide && (moved.time < minimum - slack || moved.time > maximum + slack)) {
+            ++outside;
+        }
+
+        const float gridMinimum =
+            static_cast<float>(static_cast<int32>(random.Next() % 6400) - 3200) / 64.0f;
+        const float gridMaximum = gridMinimum + static_cast<float>(1 + random.Next() % 640) / 64.0f;
+        const float gridSpan = (gridMaximum - gridMinimum) * 4096.0f;
+        const float gridTime =
+            index % 2 == 0
+                ? gridMaximum +
+                      static_cast<float>(static_cast<int32>(random.Next() % 65536)) / 64.0f
+                : gridMinimum -
+                      static_cast<float>(static_cast<int32>(random.Next() % 65536)) / 64.0f;
+        const math::CurveCycle exact = math::CycleCurveTime(gridMinimum, gridMaximum, gridTime);
+        if (platform::PlatformMath::Abs(gridTime) <= gridSpan &&
+            (exact.wide || exact.time < gridMinimum || exact.time > gridMaximum)) {
+            ++exactOutside;
+        }
+    }
+
+    CHECK(exactOutside == 0);
+    CHECK(outside == 0);
 
     // 오프셋·홀짝: 값 차 2.5 × 주기 2 = 5.
     cycle = math::CycleCurveTime(0.0f, 2.0f, 5.0f);

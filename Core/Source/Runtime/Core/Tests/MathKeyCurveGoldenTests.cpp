@@ -14,18 +14,18 @@
 // 무작위 사례는 고정 seed라 매 실행이 같다.
 //
 // 참조 함수 ↔ UE 5.8.4 원본(리뷰어 줄 단위 대조용):
-//   ue58::FloorToInt32Sse        ↔ Runtime/Core/Public/Math/UnrealPlatformMathSSE.h 86–91
-//   ue58::TruncToInt64           ↔ x64 cvttss2si(64비트) — UnrealMathUtility.h 767·771의 (int64)
-//   변환 ue58::SinCos                 ↔ Runtime/Core/Public/Math/UnrealMathUtility.h 760–798
-//   ue58::Lerp                   ↔ Runtime/Core/Public/Math/UnrealMathUtility.h 1119–1126
-//   ue58::CycleTime              ↔ Runtime/Engine/Private/Curves/RealCurve.cpp 7–34
-//   ue58::SolveCubic             ↔ Runtime/Engine/Private/Curves/CurveEvaluation.cpp 10–79
-//   ue58::BezierToPower          ↔ CurveEvaluation.cpp 81–91
-//   ue58::WeightedEvalForTwoKeys ↔ CurveEvaluation.cpp 93–191
-//   ue58::IsItNotWeighted        ↔ CurveEvaluation.cpp 193–197
-//   ue58::EvalForTwoKeys         ↔ CurveEvaluation.cpp 205–250
-//   ue58::BezierInterp           ↔ Runtime/Engine/Public/Curves/CurveEvaluation.h 25–36
-//   ue58::ComputeCurveTangent    ↔ Runtime/Core/Public/Math/InterpCurvePoint.h
+//   ue58curve::FloorToInt32Sse        ↔ Runtime/Core/Public/Math/UnrealPlatformMathSSE.h 86–91
+//   ue58curve::TruncToInt64           ↔ x64 cvttss2si(64비트) — UnrealMathUtility.h 766·770의
+//   (int64) 변환 ue58curve::SinCos                 ↔ Runtime/Core/Public/Math/UnrealMathUtility.h
+//   760–798 ue58curve::Lerp                   ↔ Runtime/Core/Public/Math/UnrealMathUtility.h
+//   1119–1126 ue58curve::CycleTime              ↔ Runtime/Engine/Private/Curves/RealCurve.cpp 7–34
+//   ue58curve::SolveCubic             ↔ Runtime/Engine/Private/Curves/CurveEvaluation.cpp 10–79
+//   ue58curve::BezierToPower          ↔ CurveEvaluation.cpp 81–91
+//   ue58curve::WeightedEvalForTwoKeys ↔ CurveEvaluation.cpp 93–191
+//   ue58curve::IsItNotWeighted        ↔ CurveEvaluation.cpp 193–197
+//   ue58curve::EvalForTwoKeys         ↔ CurveEvaluation.cpp 205–250
+//   ue58curve::BezierInterp           ↔ Runtime/Engine/Public/Curves/CurveEvaluation.h 25–36
+//   ue58curve::ComputeCurveTangent    ↔ Runtime/Core/Public/Math/InterpCurvePoint.h
 //   198–204(AutoCalcTangent)·
 //                                  240–284(clamp 없는 갈래)·289–301
 namespace rocks::test {
@@ -60,7 +60,7 @@ static_assert(math::CurveSegmentKey<Key>);
 
 } // namespace key_curve_golden
 
-namespace ue58 {
+namespace ue58curve {
 
 using key_curve_golden::Interp;
 using key_curve_golden::Key;
@@ -71,8 +71,10 @@ struct Options {
     bool exactLerpEndpoints = true; // 15절 2: Lerp 끝점·끝의 차 넘침
     bool fixCycle = true;           // 15절 1: 길이 0·비유한 시간·int32 밖 주기
     bool fixUnfilledRoot = true;    // 15절 3: 근 2개일 때 세 번째 칸
-    double unfilledRoot =
-        0.0; // fixUnfilledRoot가 거짓일 때 세 번째 칸의 값(UE는 초기화되지 않은 stack)
+    // fixUnfilledRoot가 거짓일 때 세 번째 칸의 값(UE는 초기화되지 않은 stack)이다.
+    double unfilledRoot = 0.0;
+    // 있으면 마지막 Lerp의 비율을 남긴다(Bezier에 실제로 넣은 비율 — 가중 경로는 (float)근).
+    float* lastAlpha = nullptr;
 };
 
 constexpr float UE_PI = 3.1415926535897932f;
@@ -159,6 +161,10 @@ inline void SinCos(float* ScalarSin, float* ScalarCos, float Value) noexcept {
 
 // UnrealMathUtility.h 1123–1126: (T)(A + Alpha * (B-A)). exactLerpEndpoints면 Rocks math::Lerp다.
 inline float Lerp(float A, float B, float Alpha, const Options& options) noexcept {
+    if (options.lastAlpha) {
+        *options.lastAlpha = Alpha;
+    }
+
     if (options.exactLerpEndpoints) {
         return math::Lerp(A, B, Alpha);
     }
@@ -468,7 +474,7 @@ inline float ComputeCurveTangent(float PrevTime, float PrevPoint, float CurTime,
     return OutTangent;
 }
 
-} // namespace ue58
+} // namespace ue58curve
 
 namespace key_curve_golden {
 
@@ -551,7 +557,7 @@ Segment RandomSegment(MathRandom& random) noexcept {
 // 같은 입력에서 Rocks 결과와 참조 결과의 비트가 다른 사례 수다. include가 거짓인 사례는 세지
 // 않는다.
 template <typename Include>
-int32 CountSegmentMismatches(uint64 seed, int32 cases, const ue58::Options& options,
+int32 CountSegmentMismatches(uint64 seed, int32 cases, const ue58curve::Options& options,
                              Include include) noexcept {
     MathRandom random(seed);
     int32 mismatches = 0;
@@ -563,7 +569,7 @@ int32 CountSegmentMismatches(uint64 seed, int32 cases, const ue58::Options& opti
 
         const float rocks = math::EvalCurveSegment(segment.first, segment.second, segment.time);
         const float reference =
-            ue58::EvalForTwoKeys(segment.first, segment.second, segment.time, options);
+            ue58curve::EvalForTwoKeys(segment.first, segment.second, segment.time, options);
         if (!SameBits(rocks, reference)) {
             ++mismatches;
         }
@@ -576,20 +582,20 @@ bool AnySegment(const Segment&) noexcept {
     return true;
 }
 
-// UE 그대로와 비트가 같아야 하는 사례인가: 비율이 0·1이 아니고, 길이가 0이 아니며, 끝의 차가 넘치지
-// 않는다. 근 2개 가중 구간은 무작위로는 거의 나오지 않고 따로 시험한다.
+// UE 그대로와 비트가 같아야 하는 사례인가: 길이가 0이 아니고, Lerp·Bezier에 실제로 넣는 비율(가중
+// 경로는 3차 방정식 근을 float로 바꾼 값)이 0·1이 아니며, 끝의 차가 넘치지 않는다(값 범위가 작다).
+// 근 2개 가중 구간은 무작위로는 거의 나오지 않고 따로 시험한다.
 bool InsideUeBitRange(const Segment& segment) noexcept {
     const float difference = segment.second.time - segment.first.time;
     if (!(difference > 0.0f)) {
         return false;
     }
 
-    if (segment.first.interp == Interp::Constant) {
-        return true;
-    }
-
-    const float alpha = (segment.time - segment.first.time) / difference;
-    return alpha != 0.0f && alpha != 1.0f;
+    float used = 0.5f;
+    ue58curve::Options probe;
+    probe.lastAlpha = &used;
+    (void)ue58curve::EvalForTwoKeys(segment.first, segment.second, segment.time, probe);
+    return used != 0.0f && used != 1.0f;
 }
 
 } // namespace key_curve_golden
@@ -597,21 +603,24 @@ bool InsideUeBitRange(const Segment& segment) noexcept {
 using namespace key_curve_golden;
 
 TEST(KeyCurveGolden_SegmentMatchesUeFormulasBitExactly) {
-    const ue58::Options rocksOptions;
+    const ue58curve::Options rocksOptions;
     CHECK(CountSegmentMismatches(0x3001, 20000, rocksOptions, AnySegment) == 0);
 
     // 모든 구간을 가중 Cubic으로 만들어 가중 경로를 많이 지나게 한다.
     MathRandom random(0x3002);
     int32 mismatches = 0;
     int32 threeRootCases = 0;
+    int32 combinations[16] = {};
     for (int32 index = 0; index < 20000; ++index) {
         Segment segment = RandomSegment(random);
         segment.first.interp = Interp::Cubic;
-        segment.first.tangentWeight = (index & 1) ? Weight::Both : Weight::Leave;
-        segment.second.tangentWeight = (index & 2) ? Weight::Both : Weight::Arrive;
+        // 가중 방식 4 × 4 조합을 차례로 모두 지난다(비가중 조합 포함).
+        segment.first.tangentWeight = static_cast<Weight>(index % 4);
+        segment.second.tangentWeight = static_cast<Weight>((index / 4) % 4);
+        ++combinations[index % 16];
         const float rocks = math::EvalCurveSegment(segment.first, segment.second, segment.time);
         const float reference =
-            ue58::EvalForTwoKeys(segment.first, segment.second, segment.time, rocksOptions);
+            ue58curve::EvalForTwoKeys(segment.first, segment.second, segment.time, rocksOptions);
         if (!SameBits(rocks, reference)) {
             ++mismatches;
         }
@@ -625,10 +634,82 @@ TEST(KeyCurveGolden_SegmentMatchesUeFormulasBitExactly) {
 
     CHECK(mismatches == 0);
     CHECK(threeRootCases > 0);
+    for (const int32 count : combinations) {
+        CHECK(count > 0);
+    }
+}
+
+// 입력 비율이 0·1이 아니어도 가중 경로의 근이 float 1.0이 되면 Bezier 비율이 1이다(리뷰 고정 사례):
+// k1(t 0, v 0.3, 출발 접선 0.5, Both, 가중치 0.2), k2(t 1, v 0.0012345, 도착 접선 −2, Both, 가중치
+// 3.3333333), time 0.99999994 → 근 0.99999998667 → (float) 1.0. Rocks는 끝 값(k2.value)을 그대로
+// 낸다. 같은 계산을 한 수정 켬 참조와 비트가 같고 이 사례는 UE 비트 범위 밖으로 분류된다.
+TEST(KeyCurveGolden_WeightedRootRoundingToOneIsEndpoint) {
+    Segment segment;
+    segment.first.time = 0.0f;
+    segment.first.value = 0.3f;
+    segment.first.interp = Interp::Cubic;
+    segment.first.tangentWeight = Weight::Both;
+    segment.first.leaveTangent = 0.5f;
+    segment.first.leaveTangentWeight = 0.2f;
+    segment.second.time = 1.0f;
+    segment.second.value = 0.0012345f;
+    segment.second.interp = Interp::Cubic;
+    segment.second.tangentWeight = Weight::Both;
+    segment.second.arriveTangent = -2.0f;
+    segment.second.arriveTangentWeight = 3.3333333f;
+    segment.time = 0.99999994f;
+    float used = 0.5f;
+    ue58curve::Options fixed;
+    fixed.lastAlpha = &used;
+    const float reference =
+        ue58curve::EvalForTwoKeys(segment.first, segment.second, segment.time, fixed);
+    CHECK(used == 1.0f);
+    const float rocks = math::EvalCurveSegment(segment.first, segment.second, segment.time);
+    CHECK(SameBits(rocks, reference) && rocks == segment.second.value);
+    CHECK(!InsideUeBitRange(segment));
+}
+
+// 가중 경로의 비유한 입력: NaN·±Inf 시간과 접선·가중치에서 Rocks와 수정 켬 참조가 같다(NaN끼리는
+// NaN이면 같다고 본다).
+TEST(KeyCurveGolden_WeightedNonFiniteInputs) {
+    const float nan = platform::PlatformMath::QuietNaN<float>();
+    const float inf = platform::PlatformMath::Infinity<float>();
+    const float times[] = {nan, inf, -inf, 0.25f};
+    const float tangents[] = {nan, inf, -inf, 1.0e30f, 0.5f};
+    const float weights[] = {nan, inf, 0.5f};
+    const ue58curve::Options fixed;
+    int32 mismatches = 0;
+    for (const float time : times) {
+        for (const float tangent : tangents) {
+            for (const float weight : weights) {
+                Key first;
+                first.time = 0.0f;
+                first.value = 1.0f;
+                first.interp = Interp::Cubic;
+                first.tangentWeight = Weight::Both;
+                first.leaveTangent = tangent;
+                first.leaveTangentWeight = weight;
+                Key second = first;
+                second.time = 1.0f;
+                second.value = 2.0f;
+                second.arriveTangent = -tangent;
+                second.arriveTangentWeight = weight;
+                const float rocks = math::EvalCurveSegment(first, second, time);
+                const float reference = ue58curve::EvalForTwoKeys(first, second, time, fixed);
+                const bool bothNaN = platform::PlatformMath::IsNaN(rocks) &&
+                                     platform::PlatformMath::IsNaN(reference);
+                if (!bothNaN && !SameBits(rocks, reference)) {
+                    ++mismatches;
+                }
+            }
+        }
+    }
+
+    CHECK(mismatches == 0);
 }
 
 TEST(KeyCurveGolden_UeLiteralDiffersOnlyInDocumentedCases) {
-    ue58::Options literal;
+    ue58curve::Options literal;
     literal.exactLerpEndpoints = false;
     literal.fixUnfilledRoot = false;
     literal.unfilledRoot = 0.0;
@@ -643,7 +724,8 @@ TEST(KeyCurveGolden_UeLiteralDiffersOnlyInDocumentedCases) {
     overflow.first.value = -3.0e38f;
     overflow.second.time = 1.0f;
     overflow.second.value = 3.0e38f;
-    const float ueOverflow = ue58::EvalForTwoKeys(overflow.first, overflow.second, 0.5f, literal);
+    const float ueOverflow =
+        ue58curve::EvalForTwoKeys(overflow.first, overflow.second, 0.5f, literal);
     const float rocksOverflow = math::EvalCurveSegment(overflow.first, overflow.second, 0.5f);
     CHECK(!platform::PlatformMath::IsFinite(ueOverflow));
     CHECK(platform::PlatformMath::IsFinite(rocksOverflow) && rocksOverflow == 0.0f);
@@ -670,7 +752,7 @@ TEST(KeyCurveGolden_SinCosMatchesUePolynomial) {
         math::CurveSinCos(angle, sine, cosine);
         float ueSine;
         float ueCosine;
-        ue58::SinCos(&ueSine, &ueCosine, angle);
+        ue58curve::SinCos(&ueSine, &ueCosine, angle);
         if (!SameBits(sine, ueSine) || !SameBits(cosine, ueCosine)) {
             ++mismatches;
         }
@@ -692,7 +774,7 @@ TEST(KeyCurveGolden_SinCosMatchesUePolynomial) {
         math::CurveSinCos(angle, sine, cosine);
         float ueSine;
         float ueCosine;
-        ue58::SinCos(&ueSine, &ueCosine, angle);
+        ue58curve::SinCos(&ueSine, &ueCosine, angle);
         CHECK(SameBits(sine, ueSine) && SameBits(cosine, ueCosine));
     }
 }
@@ -726,7 +808,7 @@ TEST(KeyCurveGolden_SolveCubicMatchesUe) {
         double ueCoefficients[4] = {coefficients[0], coefficients[1], coefficients[2],
                                     coefficients[3]};
         double ueRoots[3] = {0.0, 0.0, 0.0};
-        const int32 ueCount = ue58::SolveCubic(ueCoefficients, ueRoots);
+        const int32 ueCount = ue58curve::SolveCubic(ueCoefficients, ueRoots);
         bool same = static_cast<int32>(rocks.count) == ueCount;
         for (int32 root = 0; same && root < ueCount; ++root) {
             same = SameBits(rocks.roots[root], ueRoots[root]);
@@ -752,8 +834,8 @@ TEST(KeyCurveGolden_SolveCubicMatchesUe) {
 }
 
 TEST(KeyCurveGolden_CycleTimeMatchesUeInsideSseRange) {
-    const ue58::Options fixed;
-    ue58::Options literal;
+    const ue58curve::Options fixed;
+    ue58curve::Options literal;
     literal.fixCycle = false;
     MathRandom random(0x3401);
     int32 fixedMismatches = 0;
@@ -777,7 +859,8 @@ TEST(KeyCurveGolden_CycleTimeMatchesUeInsideSseRange) {
         }
 
         const math::CurveCycle rocks = math::CycleCurveTime(minimum, maximum, time);
-        const ue58::CycleResult reference = ue58::CycleTime(minimum, maximum, time, fixed);
+        const ue58curve::CycleResult reference =
+            ue58curve::CycleTime(minimum, maximum, time, fixed);
         if (!SameBits(rocks.time, reference.time) || rocks.cycleCount != reference.cycleCount ||
             rocks.wide) {
             ++fixedMismatches;
@@ -785,7 +868,7 @@ TEST(KeyCurveGolden_CycleTimeMatchesUeInsideSseRange) {
 
         // 길이가 0보다 크고 |몫| < 2^30이면 UE SSE 식 그대로와도 같다.
         if (maximum > minimum) {
-            const ue58::CycleResult ue = ue58::CycleTime(minimum, maximum, time, literal);
+            const ue58curve::CycleResult ue = ue58curve::CycleTime(minimum, maximum, time, literal);
             if (!SameBits(rocks.time, ue.time) || rocks.cycleCount != ue.cycleCount) {
                 ++literalMismatches;
             }
@@ -797,27 +880,27 @@ TEST(KeyCurveGolden_CycleTimeMatchesUeInsideSseRange) {
 }
 
 TEST(KeyCurveGolden_CycleTimeUeDefectsAreFixed) {
-    ue58::Options literal;
+    ue58curve::Options literal;
     literal.fixCycle = false;
 
     // 몫 −(2^30 + 128): UE SSE FloorToInt는 2F가 int32를 넘어 −2^30을 내고 시간이 범위 밖(−128)에
     // 남는다.
     const float before = -(1073741824.0f + 128.0f);
-    const ue58::CycleResult ueBefore = ue58::CycleTime(0.0f, 1.0f, before, literal);
+    const ue58curve::CycleResult ueBefore = ue58curve::CycleTime(0.0f, 1.0f, before, literal);
     CHECK(ueBefore.time == -128.0f && ueBefore.cycleCount == 1073741824.0);
     const math::CurveCycle rocksBefore = math::CycleCurveTime(0.0f, 1.0f, before);
-    CHECK(rocksBefore.time == 0.0f && rocksBefore.cycleCount == 1073741952.0 && !rocksBefore.wide);
+    CHECK(rocksBefore.time == 0.0f && rocksBefore.cycleCount == 1073741952.0 && rocksBefore.wide);
 
     // 뒤쪽 정수 시간 2^30 + 128(주기 1의 정확한 배수): Rocks는 max, UE는 128.
     const float after = 1073741824.0f + 128.0f;
-    const ue58::CycleResult ueAfter = ue58::CycleTime(0.0f, 1.0f, after, literal);
+    const ue58curve::CycleResult ueAfter = ue58curve::CycleTime(0.0f, 1.0f, after, literal);
     CHECK(ueAfter.time == 128.0f);
     const math::CurveCycle rocksAfter = math::CycleCurveTime(0.0f, 1.0f, after);
-    CHECK(rocksAfter.time == 1.0f && rocksAfter.cycleCount == 1073741952.0);
+    CHECK(rocksAfter.time == 1.0f && rocksAfter.cycleCount == 1073741951.0 && rocksAfter.wide);
 
     // 길이 0: UE는 0 나눗셈(−Inf 몫 → 정수 무효값 → 주기 −2^30)이다. 시간은 5 + 0·(−2^30) = 5로
     // 남지만 주기 수 2^30이 CycleWithOffset 오프셋을 망가뜨린다. Rocks는 옮기지 않고 주기 0이다.
-    const ue58::CycleResult ueZero = ue58::CycleTime(2.0f, 2.0f, 5.0f, literal);
+    const ue58curve::CycleResult ueZero = ue58curve::CycleTime(2.0f, 2.0f, 5.0f, literal);
     CHECK(ueZero.time == 5.0f && ueZero.cycleCount == 1073741824.0);
     const math::CurveCycle rocksZero = math::CycleCurveTime(2.0f, 2.0f, 5.0f);
     CHECK(rocksZero.time == 5.0f && rocksZero.cycleCount == 0.0);
@@ -848,7 +931,7 @@ TEST(KeyCurveGolden_WeightedTwoRootsDoesNotReadUnfilledSlot) {
     for (int32 step = 0; step < 64 && !found; ++step) {
         double coefficients[4] = {-static_cast<double>(time), 4.5, -10.5, 7.0};
         double roots[3] = {0.0, 0.0, 0.0};
-        if (ue58::SolveCubic(coefficients, roots) == 2) {
+        if (ue58curve::SolveCubic(coefficients, roots) == 2) {
             found = true;
             break;
         }
@@ -857,15 +940,15 @@ TEST(KeyCurveGolden_WeightedTwoRootsDoesNotReadUnfilledSlot) {
     }
 
     REQUIRE(found);
-    const ue58::Options fixed;
+    const ue58curve::Options fixed;
     const float rocks = math::EvalCurveSegment(first, second, time);
-    CHECK(SameBits(rocks, ue58::EvalForTwoKeys(first, second, time, fixed)));
+    CHECK(SameBits(rocks, ue58curve::EvalForTwoKeys(first, second, time, fixed)));
 
     // UE는 채워지지 않은 세 번째 칸까지 본다. 그 칸이 [0, 1] 안의 더 큰 값이면 UE는 그것을 고른다.
-    ue58::Options literal;
+    ue58curve::Options literal;
     literal.fixUnfilledRoot = false;
     literal.unfilledRoot = 0.999;
-    const float ue = ue58::EvalForTwoKeys(first, second, time, literal);
+    const float ue = ue58curve::EvalForTwoKeys(first, second, time, literal);
     CHECK(!SameBits(rocks, ue));
 }
 
@@ -897,14 +980,14 @@ TEST(KeyCurveGolden_WeightedDoubleTimeEqualsFloatTime) {
         const double d = b - a;
         double coefficients[4] = {0.0 - static_cast<double>(alpha), 3.0 * a, 3.0 * d, cc - b - d};
         double roots[3] = {0.0, 0.0, 0.0};
-        const int32 count = ue58::SolveCubic(coefficients, roots);
+        const int32 count = ue58curve::SolveCubic(coefficients, roots);
         double parameter = roots[0];
         if (count != 1) {
             parameter = NumericLimits<double>::Lowest();
             for (int32 index = 0; index < count; ++index) {
                 const double root = roots[index];
-                if ((root > 0.0 || ue58::IsNearlyEqual(root, 0.0)) &&
-                    (root < 1.0 || ue58::IsNearlyEqual(root, 1.0)) &&
+                if ((root > 0.0 || ue58curve::IsNearlyEqual(root, 0.0)) &&
+                    (root < 1.0 || ue58curve::IsNearlyEqual(root, 1.0)) &&
                     (parameter < 0.0 || root > parameter)) {
                     parameter = root;
                 }
@@ -920,7 +1003,7 @@ TEST(KeyCurveGolden_WeightedDoubleTimeEqualsFloatTime) {
     };
 
     MathRandom random(0x3501);
-    const ue58::Options fixed;
+    const ue58curve::Options fixed;
     int32 differing = 0;
     int32 mismatches = 0;
     for (int32 index = 0; index < 50000; ++index) {
@@ -945,7 +1028,7 @@ TEST(KeyCurveGolden_WeightedDoubleTimeEqualsFloatTime) {
         const float time =
             first.time + static_cast<float>(random.Unit()) * (second.time - first.time);
         const float rocks = math::EvalCurveSegment(first, second, time);
-        if (!SameBits(rocks, ue58::EvalForTwoKeys(first, second, time, fixed))) {
+        if (!SameBits(rocks, ue58curve::EvalForTwoKeys(first, second, time, fixed))) {
             ++mismatches;
         }
 
@@ -973,8 +1056,8 @@ TEST(KeyCurveGolden_AutoTangentMatchesUe) {
         const float tension = static_cast<float>(random.Range(-1.0, 1.0));
         const float rocks = math::ComputeCurveTangent(previousTime, previousValue, currentValue,
                                                       nextTime, nextValue, tension);
-        const float ue = ue58::ComputeCurveTangent(previousTime, previousValue, currentTime,
-                                                   currentValue, nextTime, nextValue, tension);
+        const float ue = ue58curve::ComputeCurveTangent(previousTime, previousValue, currentTime,
+                                                        currentValue, nextTime, nextValue, tension);
         if (!SameBits(rocks, ue)) {
             ++mismatches;
         }
