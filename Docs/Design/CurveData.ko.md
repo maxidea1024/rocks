@@ -1,6 +1,6 @@
 # 커브 데이터 계층 설계
 
-개정 2(교차검증 1차 반영, 결정 D1–D21 확정), 기준일 2026-11-18. 이 문서는 Curve 단계(리플렉션 B9 직후, A0-G 앞 — 2026-11-15 사용자 결정)의 **값 타입 층** 설계다. 근거는 [에셋 시스템](AssetSystem.ko.md) 1절 Curve 행, [Core 상세 명세](CoreDetailedSpec.ko.md) G09, 이미 구현된 수학 층 [키 커브](../Implementation/InterpCurve.ko.md)(`InterpCurve<T>`)다. UE 대응 대상은 UE 5.8.4의 `Engine/Source/Runtime/Engine/Classes/Curves`(`FRealCurve`·`FRichCurve`·`FSimpleCurve`·`FIndexedCurve`·`FKeyHandle`·`FKeyHandleMap`·`FIntegralCurve`·`FNameCurve`·`FStringCurve`·`FCompressedRichCurve`)와 평가 함수 `Public/Curves/CurveEvaluation.h`(`UE::Curves::EvalForTwoKeys`·`BezierInterp`·`WeightedEvalForTwoKeys`), 그리고 G09가 이 단계로 미룬 `FInterpCurve<T>`의 리플렉션·직렬화·`CalcBounds`(12절)다. 아래에서 `RC` = `Engine/Source/Runtime/Engine/Private/Curves/RichCurve.cpp`, `CE` = 같은 폴더 `CurveEvaluation.cpp`, `SC` = `SimpleCurve.cpp`, `KH` = `Classes/Curves/KeyHandle.h`, `UMU` = `Core/Public/Math/UnrealMathUtility.h`, `UPM` = `Core/Public/Math/UnrealPlatformMathSSE.h`다. 레거시·deprecated 경로(옛 버전 키 직렬화 보정, `UE_DEPRECATED` 함수, `FInterpCurvePoint` → `FRichCurveKey` 변환 생성자)는 대응하지 않는다.
+개정 3(CV1·CV2 구현 반영 — 17.1절), 기준일 2026-11-18. 이 문서는 Curve 단계(리플렉션 B9 직후, A0-G 앞 — 2026-11-15 사용자 결정)의 **값 타입 층** 설계다. 근거는 [에셋 시스템](AssetSystem.ko.md) 1절 Curve 행, [Core 상세 명세](CoreDetailedSpec.ko.md) G09, 이미 구현된 수학 층 [키 커브](../Implementation/InterpCurve.ko.md)(`InterpCurve<T>`)다. UE 대응 대상은 UE 5.8.4의 `Engine/Source/Runtime/Engine/Classes/Curves`(`FRealCurve`·`FRichCurve`·`FSimpleCurve`·`FIndexedCurve`·`FKeyHandle`·`FKeyHandleMap`·`FIntegralCurve`·`FNameCurve`·`FStringCurve`·`FCompressedRichCurve`)와 평가 함수 `Public/Curves/CurveEvaluation.h`(`UE::Curves::EvalForTwoKeys`·`BezierInterp`·`WeightedEvalForTwoKeys`), 그리고 G09가 이 단계로 미룬 `FInterpCurve<T>`의 리플렉션·직렬화·`CalcBounds`(12절)다. 아래에서 `RC` = `Engine/Source/Runtime/Engine/Private/Curves/RichCurve.cpp`, `CE` = 같은 폴더 `CurveEvaluation.cpp`, `SC` = `SimpleCurve.cpp`, `KH` = `Classes/Curves/KeyHandle.h`, `UMU` = `Core/Public/Math/UnrealMathUtility.h`, `UPM` = `Core/Public/Math/UnrealPlatformMathSSE.h`다. 레거시·deprecated 경로(옛 버전 키 직렬화 보정, `UE_DEPRECATED` 함수, `FInterpCurvePoint` → `FRichCurveKey` 변환 생성자)는 대응하지 않는다.
 
 에셋 층(`UCurveFloat`·`UCurveVector`·`UCurveLinearColor`·`UCurveTable`·`FRuntimeFloatCurve`·`FCurveTableRowHandle`)은 A1 에셋 시스템 뒤 A 단계의 일이라 범위 밖이다. 이 문서는 그 층이 기댈 경계(14절)만 정한다.
 
@@ -137,7 +137,7 @@ private:
 
 ```
 min = keys[0].time; max = keys[N-1].time; duration = max - min          (float)
-duration == 0 또는 time 비유한(±Inf·NaN): 재배치하지 않는다(15절 1)
+duration <= 0·비유한 또는 time 비유한(±Inf·NaN): 재배치하지 않는다(15절 1, 17.1절 K3)
 time > max: ratio = (max - time) / duration      (float, UE와 같은 식)
 time < min: ratio = (time - min) / duration
 math::TryFloorToInt32((double)ratio) 성공 → cycles(int32) — UE와 같은 경로:
@@ -147,8 +147,8 @@ math::TryFloorToInt32((double)ratio) 성공 → cycles(int32) — UE와 같은 �
     if time == min && 원래 time > max: time = max
     cycles = |cycles|
 실패(ratio가 int32 범위 밖) → double 재배치(D16):
-    d = (double)원래 time - (double)min; q = Floor(d / (double)duration); r = d - q * (double)duration
-    r < 0이면 r += duration, r >= duration이면 r = 0(반올림 보정)
+    d = (double)원래 time - (double)min; r = Fmod(d, (double)duration)(정확); q = Floor((d - r) / (double)duration + 0.5)
+    r < 0이면 r += duration, q -= 1; r >= duration(반올림)이면 r = 0, q += 1   (17.1절 K3)
     time < min: time = (float)((double)min + r), cycles = |q|
     time > max: r == 0이면 time = max, cycles = q - 1(UE가 정확한 배수에서 max로 가는 것과 같게), 아니면 time = (float)((double)min + r), cycles = q
     cycles는 double로 둔다
@@ -197,7 +197,7 @@ k1.interp == Cubic, 가중:         WeightedCurveSegment(5.4)
 
 ### 5.4 가중 접선 — `math::WeightedCurveSegment`(UE `WeightedEvalForTwoKeys`, CE 93–191)
 
-뉴턴 반복이 아니라 Cardano 닫힌 해다. 가중치는 시간·값 평면에서 키에서 제어점까지의 유클리드 거리다. 형식 표기: `(f)`는 float 저장, `(d)`는 double 계산이다. 키 시간 둘은 double로 넓혀 쓰므로(CE 101–102) 시간 칸의 덧셈·뺄셈은 double로 계산한 뒤 float로 저장한다 — float끼리 계산하면 이중 반올림 때문에 드물게 비트가 달라진다.
+뉴턴 반복이 아니라 Cardano 닫힌 해다. 가중치는 시간·값 평면에서 키에서 제어점까지의 유클리드 거리다. 형식 표기: `(f)`는 float 저장, `(d)`는 double 계산이다. 키 시간 둘은 double로 넓혀 쓰므로(CE 101–102) 시간 칸의 덧셈·뺄셈은 double로 계산한 뒤 float로 저장한다. 이 식들은 모두 float 값 둘의 연산 한 번이라 double 결과를 float로 반올림한 값이 float 연산 결과와 늘 같다(double 53비트 ≥ 2·24 + 2 — 이중 반올림이 무해한 조건). Rocks는 UE와 줄 단위로 대조하기 쉽게 double 꼴을 그대로 둔다(17.1절 K5).
 
 ```
 diff(f) = t2 - t1;  alpha(f) = (time - t1) / diff;  third(f) = 1.0f / 3.0f
@@ -218,7 +218,7 @@ BezierToPower(0, n1, n2, 1)(d): a = n1 - 0, b = n2 - n1, c' = 1 - n2, d' = b - a
     coeff[3] = c' - b - d',  coeff[2] = 3.0 * d',  coeff[1] = 3.0 * a,  coeff[0] = 0
 coeff[0] = coeff[0] - alpha
 (근 개수, 근) = SolveCurveCubic(coeff)
-근이 1개면 그 근, 아니면 실제 근 중 [0, 1](허용오차 1e-8 포함 — IsNearlyEqual double 기본값) 안의 가장 큰 근, 없으면 0
+근이 1개면 그 근, 아니면 실제 근을 차례로 보며 [0, 1](허용오차 1e-8 포함 — IsNearlyEqual double 기본값) 안이고 "지금 고른 값이 음수이거나 이 근이 더 크면" 고른다(UE 순서 그대로 — 대개 가장 큰 근), 없으면 0
 결과 = BezierCurveValue(v1, tan1y, tan2y, v2, (float)근)
 ```
 
@@ -516,7 +516,7 @@ A1 에셋 시스템 뒤 A 단계에서 아래를 만든다. 이 문서는 그것
 - **독립 고정 벡터(손 계산)**: 참조와 구현이 같은 오독을 공유하는 것을 막으려고 참조 코드를 거치지 않은 기대값 표를 둔다. 각 갈래마다 몇 개씩 — 외삽 5종의 대표 시간, 2키 Linear·Constant·Cubic 비가중(손으로 Bezier 전개), 가중 구간의 단순한 경우(접선 0·가중치 1/3 거리 — 비가중과 같은 곡선이 되는 사례와 손으로 푼 3차식 근), `SinCos` 다항식의 몇 각도(계수 대입 손 계산), 자동 접선 3키, 양자화 경계, 압축 byte 배치(손으로 쓴 byte 열), `FrameRate::AsFrameTime`의 subframe 경계. 값은 문서·주석에 계산 과정과 함께 적는다.
 - **참조 코드 원본 대조 리뷰**: 시험의 UE 참조 코드는 구현자가 아닌 리뷰어 1명이 UE 원본(위 파일·줄)과 줄 단위로 대조한다(CV1·CV5·CV8·CV9 단계 리뷰에 포함). 대조표(참조 함수 ↔ UE 파일:줄)를 시험 파일 머리 주석에 둔다.
 - **경계**: 빈 커브(기본값 있음·없음), 키 하나(모든 외삽), 같은 시간 키(삽입 위치·평가 구간·FindKey, 첫 키·마지막 키 시간 중복), 키 시간 정확히·끝 키 시간·바로 앞뒤, 외삽 조합(앞·뒤 × 5종)과 순환 횟수 경계(정확히 n 주기 — int32 경로와 double 경로 모두에서 max로 가는 규칙), CycleWithOffset 누적, Oscillate 짝·홀수, Linear 외삽의 두 키 기울기·`|dt| <= 1e-8`, NaN·±Inf, **큰 시간·작은 간격의 cycle 몫 넘침**(몫 2^30 직전·직후, 2^31 직전·직후, 1e30 — Fatal 없음과 double 재배치 결과), `PlainCurve` 첫·끝 키 시간 갈래.
-- **보간·접선**: Constant 구간의 `time < t2` 비교, Linear, `Lerp` 끝의 차 넘침, Cubic 비가중 = 독립 double Bezier 참조와 상대 오차, 가중 4방식 × 좌우 조합과 뒤 키가 Linear인 도착 가중 구간, 가중 경로의 double 시간 혼용(float로만 계산하면 비트가 갈리는 입력을 찾아 고정), 자동 접선(tension 0·0.5·1, Constant 이웃의 User 키, 첫·끝 키), User·Break 보존.
+- **보간·접선**: Constant 구간의 `time < t2` 비교, Linear, `Lerp` 끝의 차 넘침, Cubic 비가중 = 독립 double Bezier 참조와 상대 오차, 가중 4방식 × 좌우 조합과 뒤 키가 Linear인 도착 가중 구간, 가중 경로의 double 시간 혼용(float로만 계산한 결과와 늘 같음을 확인 — 17.1절 K5), 자동 접선(tension 0·0.5·1, Constant 이웃의 User 키, 첫·끝 키), User·Break 보존.
 - **편집**: 삽입 위치, unwind ±180° 경계, UpdateOrAdd 허용오차, SetKeyTime 칸 유지, SetKeys 정렬·비유한 거부, Shift·Scale 순서 유지·factor 거부, 선택 키 이동의 결과 순서, Bake 시간 식과 `first == last`, RemoveRedundantKeys(표본 있음·없음·범위판, 뒤이은 `AutoSetTangents`와 UE 결과 비교), 값 범위(비가중·가중 단조·비단조 — 비단조는 촘촘한 Evaluate 표본의 최소·최대가 결과 범위 안이고 그 끝에 닿는지), 할당 실패 주입 뒤 커브 불변.
 - **FrameRate**: `AsFrameTime`·`AsSeconds` UE 식 대조(subframe 반올림·`MaxSubframe` 상한·int32 범위 clamp), 0 분모 거부.
 - **키 핸들 표**: 발급 단조·0 무효·Overflow, 삽입·삭제·이동 뒤 핸들 → index, 표를 거치지 않은 편집(C++ API·경로 쓰기·대입 묶음) 뒤 StaleHandle과 `TryRebuild`, 표 복사·대입이 같은 핸들.
@@ -542,6 +542,27 @@ A1 에셋 시스템 뒤 A 단계에서 아래를 만든다. 이 문서는 그것
 | CV9 | `InterpCurve<T>` 미러 다섯 형식(미러 private 멤버 접근 보강, `InterpCurveMode` enum 미러), `TryCalcBounds`(D19) | CV3 | M |
 | CV10 | 문서 반영(에셋 시스템 Curve 행·Core 상세 G09·InterpCurve 구현 문서·ReflectionExtensions 정리·이 문서의 구현 결과), 묶음 끝 스펙·문서 관점 리뷰 | CV1–CV9 | S |
 
+### 17.1 구현(CV1·CV2)에서 정한 점
+
+CV1(`Core/Math/KeyCurveMath.h`)·CV2(`Core/Time/FrameRate.h`)를 구현하며 정했거나 문서와 다르게 둔 점이다. 시험은 `Core/Tests/MathKeyCurveGoldenTests.cpp`(UE 참조 대조 — 머리 주석에 참조 함수 ↔ UE 파일:줄 대조표), `MathKeyCurveTests.cpp`(독립 고정 벡터·경계), `FrameRateTests.cpp`다.
+
+- **K1 키 형식** — 수학 층은 키 struct를 새로 만들지 않고 concept `math::CurveSegmentKey`로 받는다: float 칸 `time`·`value`·`arriveTangent`·`arriveTangentWeight`·`leaveTangent`·`leaveTangentWeight`와 enum 칸 `interp`·`tangentWeight`. enum 값은 번호로 비교한다(`math::CurveInterpLinear 0·Constant 1·Cubic 2`, `CurveWeightNone 0·Arrive 1·Leave 2·Both 3` — UE와 같은 번호, 2절). CV5의 `TangentCurveKey`(4절 칸 이름)와 압축 커브를 푼 키가 변환 없이 이 형식이다(CV5에서 enum 번호를 static_assert로 묶는다). Core에 `CurveInterp`와 같은 enum을 하나 더 두지 않으려는 선택이다.
+- **K2 순환 API** — `CycleCurveTime(min, max, time) -> CurveCycle{time, cycleCount(double), wide}`와 `CurveCycleValueOffset(cycle, valueDelta)`·`IsOddCurveCycle(cycle)`로 나눴다. 외삽 방식을 보고 앞·뒤를 고르는 `RemapTimeValue`(RC 1104–1161)는 외삽 enum이 있는 CV5 값 타입에 둔다. 오프셋은 int32 경로면 UE와 같은 `delta × (float)주기`, double 경로면 double 곱의 float 반올림이다. 주기 수는 늘 double이라 int32 최솟값 몫의 절댓값(2^31)도 넘치지 않는다(UE `FMath::Abs(int)`는 감싸 돈다).
+- **K3 double 재배치 식(5.1절 보강)** — 나머지는 `Fmod`(정확)로 구한다: `r = Fmod(d, 길이)`, `q = Floor((d − r)/길이 + 0.5)`, `r < 0`이면 `r += 길이, q −= 1`, 반올림으로 `r ≥ 길이`이면 `r = 0, q += 1`. 개정 2의 `r = d − q × 길이`는 큰 몫에서 정확하지 않아 5.1절을 이렇게 고쳤다. UE의 끝 바로잡기(앞쪽에서 온 max는 min, 뒤쪽에서 온 min은 max)는 두 경로 모두 마지막에 한다. 재배치하지 않는 입력에 **길이가 비유한인 경우**(키 시간이 ±3e38처럼 멀어 차가 넘침)를 더했다.
+- **K4 가중 근 고르기** — 5.4절의 "가장 큰 근"은 대략이고, 구현은 UE 조건 `(근 ∈ [0, 1] ± 1e-8) && (고른 값 < 0 || 근 > 고른 값)`을 그대로 쓴다(5.4절 문구를 고쳤다). 근이 2개면 두 칸만 본다(15절 3). 이 반례는 시간 제어점 (0, 1.5, −0.5, 1)·α = 극댓값 x(s₁) ≈ 0.5945로 근 2개를 만들어 시험한다(UE가 세 번째 칸 0.999를 고르는 경우).
+- **K5 double 시간 혼용** — 개정 2의 "float끼리 계산하면 드물게 비트가 달라진다"는 틀렸다. 해당 식(`c·w + t1`, `t2 − t1`, `tanX − t1`)은 모두 float 두 값의 연산 한 번이라 double로 계산해 float로 반올림한 값이 float 연산과 늘 같다(이중 반올림 무해 조건 53 ≥ 2·24 + 2). 구현은 UE와 대조하기 쉽게 double 꼴을 유지하고, 16절의 "갈리는 입력을 찾아 고정" 시험은 "같음을 확인"으로 바꿨다(무작위 5만 사례, 큰 시간·짧은 구간 포함).
+- **K6 `CurveSinCos`의 정수 변환** — UE의 `(int64)` 변환은 범위 밖·NaN에서 C++ 미정의 동작이다. Rocks는 x64 `cvttss2si`가 내는 정수 무효값(int64 최솟값)을 명시적으로 내서 UE Windows x64와 비트를 맞춘다. 그래서 NaN은 NaN이지만 ±Inf는 NaN이 아니라 의미 없는 값(+Inf 등)이다(UE와 같다). 가중 경로는 `atanf` 각도(|x| ≤ π/2)만 넣으므로 영향이 없다.
+- **K7 공개 함수 경계** — `WeightedCurveSegment`도 길이가 0 이하·NaN이면 앞 키 값을 낸다(UE 함수는 확인하지 않지만 `EvalCurveSegment`가 먼저 걸러 결과는 같다). `SolveCurveCubic`은 `CurveCubicRoots{roots[3], count}`를 돌려주고 쓰지 않은 칸은 0이다. `ComputeCurveTangent(previousTime, previousValue, currentValue, nextTime, nextValue, tension)`은 clamp 없는 경로에서 쓰지 않는 현재 키 시간을 받지 않는다. `IsCurveSegmentUnweighted`를 공개해 CV8 압축 형식 결정(11.1절)이 같은 판정을 쓴다.
+- **K8 UE 참조의 범위** — 시험 참조의 "수정 켬" 순환은 몫이 int32 안인 경우만 옮겼다. int32 밖 double 재배치는 참조 대신 손 계산 벡터(2^33 시간·길이 0.75 → 시간 0.5·주기 11453246122, 2^31 ± 256 경계, 1e30·길이 2^-20)로 확인한다. 반례: 몫 −(2^30 + 128)에서 UE는 시간 −128(범위 밖), 길이 0에서 UE는 시간은 그대로지만 주기 2^30이다.
+- **K9 FrameRate 최소 범위(D20)** — `FrameRate`(`TryCreate(분자, 분모)` — 둘 다 양수만, 기본 60000/1은 UE와 같다, `AsInterval`·`AsDecimal`·`AsSeconds`·`TryAsFrameTime`·`AsFrameTime`), `FrameNumber`(int32, `+`·`−`·`++`는 넘치면 Fatal, `TryAdd`·`TrySubtract`는 Overflow — TimeSpan과 같은 규약), `FrameTime`(프레임 + subframe, 생성자는 UE와 같은 `(s + 0.5) − 0.5` 뒤 [0, MaxSubframe] clamp — NaN은 UE Clamp처럼 MaxSubframe, `SetFrame`·`AsDecimal`·비교)만 두었다. UE의 `AsFrameNumber`·`TransformTime`·`Snap`·`FrameTime` 산술(`+`·`−`·`%`·배율)·`FromDecimal`·표시 문자열은 소비자가 생길 때 더한다.
+- **K10 `AsFrameTime`의 비정상 입력** — NaN은 `TryAsFrameTime`이 InvalidArgument(`AsFrameTime`은 Fatal — 검증된 키 시간용), ±Inf는 int32 끝 프레임 + subframe 0이다(UE는 NaN subframe을 정수로 바꿔 의미 없는 값). subframe 올림(float 반올림으로 비율 1)은 |프레임| < 2^28에서만 생기므로 int32 끝에서 넘치지 않는다. int32 밖 시간의 subframe은 UE처럼 원래 비율이다(3e9 + 0.25초 → 프레임 int32 최댓값, subframe 0.25).
+- **K11 FrameTime 비교** — UE와 같이 프레임 다음 subframe 순이다. subframe은 생성자에서 NaN이 될 수 없어 비교가 늘 정의된다.
+- **K12 19절 1번 확인 결과** — `atanf`·`acos`·`cos`·`pow`·`sqrt`·`sqrtf`를 무작위 비트 입력 각 200만 개로 MSVC 14.29(`/O2`·`/Od`, `/fp:precise`·`/fp:fast`, `/arch:AVX2` 유무)와 Rocks clang-cl(`/O2`·`/Od`·AVX2, `-ffp-contract=off`)에서 실행해 결과 비트를 비교했다. 릴리스 C 런타임(`/MD` — `ucrtbase.dll`)이면 모든 조합이 **비트까지 같다**(두 컴파일러 모두 같은 `ucrtbase.dll` 함수를 import한다). 그래서 D17의 Windows x64 비트 목표를 가중 경로에서도 유지한다. 조건:
+  - 디버그 C 런타임(`/MDd` — `ucrtbased.dll`)은 다른 구현이다: `acos` 824건·`pow` 3,761건(200만 중)이 1ulp 다르다(MSVC·clang 모두). Rocks Debug 구성은 `/MDd`라 Debug 실행 결과는 UE(릴리스 런타임)와 가중 경로에서 1ulp 다를 수 있다. golden 시험은 참조와 구현이 같은 런타임을 쓰므로 구성과 무관하게 비트가 같다.
+  - UE 게임 타깃의 기본 부동소수점 의미는 `/fp:fast`다(`VCToolChain.cs` 1313–1345 — Editor·Program 타깃만 `/fp:precise`). `/fp:fast`는 식의 재배열·축약을 허용하므로 UE 게임 빌드 자체가 소스 순서와 비트가 다를 수 있다. Rocks 비트 기준은 UE `/fp:precise` 빌드(편집기)다.
+  - `ucrtbase.dll`은 CPU에 따라 FMA3 경로를 고를 수 있어 기계 사이의 비트는 보장하지 않는다(같은 기계에서는 두 빌드가 같은 경로를 탄다 — UE와 같은 수준).
+  - UE 5.8은 VS2022 컴파일러지만 수학 함수 구현은 컴파일러가 아니라 OS의 `ucrtbase.dll`이 정하므로 VS2019 14.29로 한 확인이 유효하다고 본다(컴파일러 내장 대체가 없음을 import 표로 확인).
+
 ## 18. 결정 목록
 
 권장안으로 확정했다(2026-11-18, 교차검증 1차 반영).
@@ -562,7 +583,7 @@ A1 에셋 시스템 뒤 A 단계에서 아래를 만든다. 이 문서는 그것
 - **D14 압축 평가 식과 형식 결정** — 원본과 같은 핵심 식(`EvalCurveSegment`)을 쓴다. 형식 결정은 구간 단위 가중 판정으로 고치고, Constant는 비트 같은 값만이다. 그래서 Float32 압축이 원본과 비트가 같다(UE 압축 평가의 곱셈 순서·허용오차를 따르지 않는다).
 - **D15 모듈** — 수학 핵심은 Core(`KeyCurveMath.h`, 접선 시간 차는 `InterpCurveMath.h` 재사용), 프레임 시간은 Core `Time`, 값 타입은 새 Core 런타임 모듈 `Curves`, InterpCurve 미러는 `CoreTypeBindings`, Engine 층에는 두지 않는다.
 - **D16 순환 cycle 수 범위 밖** — float 몫을 double로 넓혀 `TryFloorToInt32`로 계산하고, 범위 밖이면 double floor·나머지(fmod 계열)로 재배치해 순환 의미(정확한 배수에서 max로 가는 규칙 포함)를 지킨다. Fatal로 가는 경로가 없다(5.1절).
-- **D17 비트 기준** — Windows x64에서 UE와 비트가 같은 것을 목표로 한다. UE `SinCos(float)` 다항식은 그대로 옮긴다(플랫폼과 무관하게 결정적). `atanf`와 double libm(`acos`·`cos`·`sqrt`·`pow`)은 UE와 같은 함수를 쓰고, 그 부분의 플랫폼 간 비트 결정성은 보장하지 않는다(UE와 같은 수준). DeterministicMath 함수로 바꾸지 않는다.
+- **D17 비트 기준** — Windows x64에서 UE와 비트가 같은 것을 목표로 한다. UE `SinCos(float)` 다항식은 그대로 옮긴다(플랫폼과 무관하게 결정적). `atanf`와 double libm(`acos`·`cos`·`sqrt`·`pow`)은 UE와 같은 함수를 쓰고, 그 부분의 플랫폼 간 비트 결정성은 보장하지 않는다(UE와 같은 수준). DeterministicMath 함수로 바꾸지 않는다. CV1에서 확인한 조건(17.1절 K12): 비교 대상은 UE `/fp:precise` 빌드(Editor·Program 타깃 — 게임 타깃 기본은 `/fp:fast`라 식 자체의 비트가 정해지지 않는다)이고, 두 쪽 모두 릴리스 C 런타임(`ucrtbase.dll`, `/MD`)일 때다.
 - **D18 바이트 덩어리 리플렉션 값** — 기반에 보강해 채택한다. `Array<uint8>` 필드·멤버·원소의 wire를 ValueArray(원소당 U32 4 byte)에서 Bytes 블록 하나(u64 길이 + byte)로 바꾼다(하위호환 없음 — 지금 쓰는 곳은 시험 fixture뿐). 경로 원소 접근과 JSON 표기 등 세부는 ReflectionExtensions 개정에서 정한다. `PackedTangentCurve::packed`가 쓴다. CV4.
 - **D19 InterpCurve 미러·값 범위** — 이 Curve 단계에 넣는다. 미러 대상은 UE USTRUCT가 있는 다섯 형식이다. private `points_`·`looped_`·`loopKeyOffset_`는 Core 타입의 `GeneratedType` friend 선언과 MetaCompiler의 Binds private 멤버 접근 보강으로 노출한다(접근자 미러가 아니다). 도구 이름은 `Name=`으로 둔다. 미러에 `Validate`를 둔다. `TryCalcBounds`는 UE `FindBounds` 식을 옮기고 루프 닫는 구간만 고친다. CV9.
 - **D20 FrameRate·FrameTime** — Core `Time`에 최소 타입 `FrameRate`(분자·분모 int32)·`FrameNumber`(int32)·`FrameTime`(프레임 + subframe float)을 두고 UE `AsFrameTime`·`AsSeconds` 식을 옮긴다. `RemoveRedundantKeys` 표본판이 `Optional<FrameRate>`로 쓴다. 제거 뒤 `AutoSetTangents`를 부르지 않는 D10의 결과 차이는 7.2절에 적었다. CV2.
@@ -572,7 +593,7 @@ A1 에셋 시스템 뒤 A 단계에서 아래를 만든다. 이 문서는 그것
 
 - UE `RCTM_SmartAuto`의 세부 식(시퀀서 CVar별 분기) — D5로 범위 밖이라 확인하지 않았다.
 - UE `FRichCurveKey`의 실제 메모리 크기(28바이트로 보이지만 static_assert로 확인하지 않았다) — Rocks 설계에 영향 없음.
-- 가중 경로의 `atanf`·double libm이 Rocks Windows x64 빌드(Clang + MSVC 런타임)와 UE 빌드(MSVC)에서 같은 C 런타임 구현으로 묶이는지 — CV1 시험에서 확인한다. 다르면 D17의 Windows x64 비트 목표가 가중 경로에서는 상대 오차 기준으로 내려간다.
+- ~~가중 경로의 `atanf`·double libm이 Rocks Windows x64 빌드(Clang + MSVC 런타임)와 UE 빌드(MSVC)에서 같은 C 런타임 구현으로 묶이는지~~ — CV1에서 확인했다(17.1절 K12): 같다. D17의 Windows x64 비트 목표를 유지한다(릴리스 C 런타임 조건).
 - 리플렉션 키 wire의 정확한 byte 수(기본값 필드 생략 여부) — CV5 실측(9.2절).
 - Core enum(`InterpCurveMode`)의 Binds 미러 지원 여부, Binds 생성 코드가 실제 타입의 private 멤버에 `GeneratedType` friend로 닿는 경로 — CV9 착수 때 확인한다.
 - UE 압축 Weighted 결함(11절)이 UE 쿡 데이터에서 실제로 드러나는지(애니메이션 코덱이 Weighted를 고르는 빈도) — Rocks 설계는 결함을 고치는 쪽이라 확인하지 않아도 된다.
@@ -581,6 +602,7 @@ A1 에셋 시스템 뒤 A 단계에서 아래를 만든다. 이 문서는 그것
 ## 20. 변경 이력
 
 - **개정 1 초안(2026-11-18, 36027f9)**: 값 타입·평가·편집·핸들·압축 설계, 결정 D1–D15, 단계 CV1–CV7.
+- **개정 3(2026-11-18, CV1·CV2 구현 반영)**: 17.1절 K1–K12. 5.4절 double 시간 혼용 설명 정정(float와 늘 같음)과 근 고르기 문구, 16절 해당 시험, D17 조건(UE `/fp:precise`·릴리스 C 런타임), 19절 1번 확인 결과.
 - **개정 2(2026-11-18, 교차검증 1차 반영, 결정 D1–D21 확정)**:
   - 사실 정정: UE `SinCos(float)`는 libm이 아니라 다항식(5.4절, D17). 가중 경로의 키 시간 double 혼용을 의사코드에 반영(5.4절). `SolveCubic` 연산 순서를 UE 식 그대로 적음. Windows x64 UE `FloorToInt`는 SSE 식(5.1절). `RCCE_None`은 숨김이 아님(2절, D4). UE `SetKeyTime`은 안의 `DeleteKey`로 접선을 재계산함(6절). `PlainCurve`·`TangentCurve`의 첫 키 시간 중복 차이(5.7절), 마지막 키 시간 중복 결과(5.2절). `Lerp` 끝의 차 넘침 예외(5.3절, 15절 2). 계단 커브 중복 제거의 Integer 조건(15절 9). UE `FNameCurve`에 기본값이 없음(4절, D9). wire 크기 약 13배(9.2절, D8). 압축 보간 byte는 형식 값(11.3절). 압축 "앞 경계 비교" 차이 주장은 결과 차이가 없어 지움(11.5절).
   - 치명 반영: cycle 몫 넘침이 Rocks `FloorToInt32` Fatal로 가는 경로를 D16으로 막음(5.1절). 압축 칸 정합 미검증의 메모리 밖 읽기를 D21(평가 진입 O(1) 대조)과 hook으로 막음(11.4절).
