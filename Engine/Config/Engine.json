@@ -1,0 +1,8 @@
+// Engine branch settings (Docs/Design/ConfigSystem.ko.md). Projects change these in their own Config/Engine.json, using array
+// operations ($append, $remove, $clear, $add) for lists.
+{
+  // Trace channel presets (Docs/Design/TraceSystem.ko.md section 5). --trace=default and trace.enable channels=default use them.
+  "TracePresets": {
+    "default": ["cpu", "task", "gpu", "frame", "log", "mark", "counter"]
+  }
+}

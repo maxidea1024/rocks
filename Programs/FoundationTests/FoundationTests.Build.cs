@@ -18,7 +18,7 @@ public abstract class TestsModule : ModuleRules
     private static readonly string[] DeveloperTestModules = ["CompressionTraining", "TraceAnalysis"];
 
     // Tests of Object family modules (included in FoundationTests and EngineTests).
-    private static readonly string[] ObjectTestModules = ["ObjectRuntime", "ObjectSerialization", "ReflectionText", "Config", "LogHost"];
+    private static readonly string[] ObjectTestModules = ["ObjectRuntime", "ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl"];
 
     // Tests of engine layer modules (EngineTests only). Paths are Group/Module under Engine/Source.
     private static readonly string[] EngineTestModules = ["Runtime/Input", "Runtime/PlatformWindow", "Runtime/World", "Runtime/Engine", "Runtime/GraphicsTypes", "Runtime/Graphics", "Runtime/RenderBase", "Runtime/RenderGraph", "Runtime/AssetRuntime", "Developer/AssetTools", "Developer/ShaderToolTable", "Developer/ShaderToolLoader", "Developer/ShaderCompiler", "Developer/ShaderFormatVulkan", "Runtime/VulkanGraphics"];
@@ -61,8 +61,8 @@ public abstract class TestsModule : ModuleRules
         string[] dependencies = Layer switch
         {
             TestLayer.Core => ["Task", "Localization", "Serialization", "Compression", "AsyncCompression", "Crypto", "TraceCapture", .. DeveloperTestModules],
-            TestLayer.Foundation => ["ObjectSerialization", "ReflectionText", "Config", "LogHost", "Localization", "Compression", "AsyncCompression", "Crypto", "TraceCapture", .. DeveloperTestModules],
-            _ => ["ObjectSerialization", "ReflectionText", "Config", "LogHost", "Localization", "Compression", "AsyncCompression", "Crypto", "TraceCapture", .. DeveloperTestModules,
+            TestLayer.Foundation => ["ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "Localization", "Compression", "AsyncCompression", "Crypto", "TraceCapture", .. DeveloperTestModules],
+            _ => ["ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "Localization", "Compression", "AsyncCompression", "Crypto", "TraceCapture", .. DeveloperTestModules,
                 .. EngineTestDependencies]
         };
 
