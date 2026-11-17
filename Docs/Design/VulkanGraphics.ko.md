@@ -247,7 +247,22 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 
 ## 17. 측정 결과
 
-구현 뒤 적는다.
+2026-11-17, Windows 11, Debug 구성. 도구: Vulkan SDK 1.4.363.0(LunarG, winget `KhronosGroup.VulkanSDK`, `C:\VulkanSDK\1.4.363.0`, `VK_LAYER_KHRONOS_validation` 포함), 시스템 로더 1.3.280, DXC 1.9.2609·SPIRV-Tools(사용자 도구 저장소).
+
+| 대상 | 결과 |
+|---|---|
+| GTX 1060 3GB(NVIDIA 560.94, Vulkan 1.3.280) | Sandbox `--self-test` 전체 통과: 픽셀·GX7 fence·GX10/11 소유권·swapchain·C7 컬링(창·offscreen, None·Back·Front, 음수 행렬식, 행 우선 행렬)·`SV_IsFrontFace` 대조·GX3a 정점 형식 20종·GX8 업로드·GX9 timestamp·calibration·marker·렌더 lane. D3D12와 픽셀 대조 차이 0 채널. 검증 오류 0, 의도한 render pass 형식 불일치는 `VUID-vkCmdDraw-renderPass-02684`로 집계된다 |
+| lavapipe(Mesa 26.2.7 `mesa-dist-win` release-msvc, llvmpipe LLVM 23.1.5, `VK_ADD_DRIVER_FILES`로 추가) | 같은 검사 전체 통과, D3D12와 차이 0 채널. calibrated timestamps가 PlatformBase 시계 domain(QPC)을 주지 않아 `clockCalibration` false이고 `CalibrateClocks`는 `Unsupported`(가짜 쌍 없음) |
+| 동기화 검증(`VK_LAYER_ENABLES`의 synchronization validation) | 두 장치 모두 `SYNC-HAZARD` 0건 |
+| Android 교차 빌드(arm64, NDK 29, `-p:RocksPlatform=android`, EngineTests) | VulkanGraphics Android 구현(`libvulkan.so`, `VK_KHR_android_surface`, CLOCK_MONOTONIC domain)과 ShaderFormatVulkan 미지원 구현이 경고 0으로 컴파일된다. 기기 실행은 SH6·P13이다 |
+| EngineTests | `GpuPageAllocator` 3건, `VulkanShaderCompiler` 2건(DXC·SPIRV-Tools 실제 호출), `VulkanDevice` 1건(로더 동적 로드·검증 층·빈 제출 fence) 통과, 전체 2135건 통과 |
+| best practices 검증 | 열거를 두 번 부르기로 고친 뒤 남는 경고는 RenderTarget 생성 때 UNDEFINED → SHADER_READ_ONLY 전이 하나다(D3D12도 생성 직후 내용이 정해지지 않는다. 오류로 세지 않는다) |
+
+**측정 S4(검증 층 공급·소프트웨어 ICD).**
+- 검증 층은 LunarG Vulkan SDK 설치로 공급한다(로컬). CI 공급(Khronos Vulkan-ValidationLayers 릴리스를 binary 항목으로 받는 것)은 SH2 때 정한다. 층이 없으면 장치는 검증 없이 만들어지고 `validationEnabled` false다.
+- 소프트웨어 ICD는 lavapipe로 정한다. Windows 바이너리는 `mesa-dist-win`(pal1000) 릴리스이며 `lvp_icd.x86_64.json`을 `VK_ADD_DRIVER_FILES`로 더하면 `preferSoftware` 장치로 잡힌다. 등록하지 않은 기계에서는 "Vulkan software"가 NOT RUN이다. SwiftShader는 Windows 공식 바이너리가 없어 쓰지 않았다.
+
+**앞면 매핑(측정 S5의 Vulkan 몫).** 11절 매핑에서 컬링 대조와 `SV_IsFrontFace` 대조가 모두 D3D12와 같다. 음성 대조로 UE 매핑(`VK_FRONT_FACE_CLOCKWISE`, `Back → FRONT_BIT`, `Front → BACK_BIT`)으로 바꿔 돌리면 컬링 대조(창·offscreen)와 D3D12 픽셀 대조는 그대로 통과하고 `SV_IsFrontFace` 대조만 실패한다(화면 반시계 삼각형이 뒷면으로 나온다). 그래서 컬링만 보는 시험으로는 이 차이를 잡지 못한다.
 
 ## 18. 남은 일
 

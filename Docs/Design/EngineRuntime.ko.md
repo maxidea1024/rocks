@@ -36,7 +36,8 @@ S4·S5는 S2·S3과 독립이다. 이번 범위에서 macOS는 창·Metal 구현
 | `Graphics` | GraphicsTypes | 장치·스왑체인·버퍼·텍스처(mip·텍스처별 샘플러)·파이프라인·명령 기록 계약, backend 열거 | World·Object·창 모듈 참조 |
 | `D3D12Graphics` | Graphics | D3D12 구현(Windows) | 다른 backend 참조 |
 | `OpenGLGraphics` | Graphics | OpenGL 4.5 core 구현(Windows WGL) | 〃 |
-| `VulkanGraphics`·`MetalGraphics` | Graphics | 자리만 둔다. 장치 생성은 `Unsupported`를 반환한다 | 동작하는 척하는 가짜 구현 |
+| `VulkanGraphics` | Graphics | Vulkan 1.1 구현(Windows·Android, 10.2절·[VulkanGraphics](VulkanGraphics.ko.md)) | 다른 backend 참조 |
+| `MetalGraphics` | Graphics | 자리만 둔다. 장치 생성은 `Unsupported`를 반환한다 | 동작하는 척하는 가짜 구현 |
 | `Engine` | ObjectRuntime, World | 엔진 상태 기계·메인 루프·WorldContext·EngineSubsystem | Gameplay·Graphics·창 참조 |
 | `World` | ObjectRuntime, CoreTypeBindings | World·Actor·Component·SceneComponent(WorldOnly 리플렉션 클래스 — 4.6절)·TickScheduler·WorldSubsystem | Engine·Graphics·Asset 참조 |
 | `WorldTestFixtures`(Developer) | World | World 타입을 상속한 리플렉션 시험 타입(SaveActor·SaveComponent)과 그 identity 명세. EngineTests만 의존 | 제품 링크 |
@@ -241,14 +242,24 @@ class Device {
 - 자원은 slot+generation 핸들이다. `Retire`는 마지막으로 사용한 제출의 fence(`GpuFencePoint`: device epoch·queue·value)가 끝난 뒤 자원과 descriptor를 해제한다. OpenGL도 `glFenceSync`로 같은 규칙을 따른다(즉시 삭제하지 않는다). fence 완료는 다른 스레드에서 기다리거나 통지·작업 이벤트(`Graphics/GpuFenceEvent.h`)로 받는다. 장치 손실은 기다리는 쪽을 `Destroyed`로 깨운다([렌더 기반](RenderBase.ko.md) GX7).
 - 장치 스레드 모델([렌더 기반](RenderBase.ko.md) 5.4절 GX11·GX10): 소유 스레드 하나가 제출·present·상태 변경·생성(지금은 생성도 — `DeviceInfo::concurrentResourceCreation` false)을 하고, 소유권은 `ReleaseOwnership`·`AcquireOwnership`으로 넘긴다. 소유 스레드 밖 호출은 Debug·Development에서 `WrongThread`다. 엔진 실행 때는 렌더 lane(RenderBase)이 장치를 소유한다.
 - 정점 배치([렌더 기반](RenderBase.ko.md) 10.4절 GX3a): 정점 원소 형식 20종(`GraphicsTypes/VertexFormat.h`), 속성(location·형식·stream·offset)·stream(stride·정점/인스턴스), index 버퍼(UInt16·UInt32), `Draw`·`DrawIndexed`(인스턴스 수), 정점 버퍼 없는 그리기. 셰이더 정점 입력 시맨틱은 `ATTRIBUTEn`이다.
-- 셰이더는 backend별 원문을 `PipelineDesc`에 담는다(D3D12: HLSL을 런타임 `D3DCompile` SM 5.1, OpenGL: GLSL 4.50). 오프라인 셰이더 쿠킹과 DXC는 후속이다.
+- 셰이더는 backend별 원문을 `PipelineDesc`에 담는다(D3D12: HLSL을 런타임 `D3DCompile` SM 5.1, OpenGL: GLSL 4.50, Vulkan: 같은 HLSL을 개발용 컴파일 훅 `DeviceDesc::shaderCompiler`가 SPIR-V로, 10.2절). 오프라인 셰이더 쿠킹은 후속이다.
 - 그리기 상수는 64바이트 행렬 + 16바이트 색으로 제한한다(D3D12 root constants, OpenGL uniform).
 - 좌표 규약: 2026-11-17 사용자 결정으로 좌표계·단위·행렬 규약을 UE 5.8과 같게 바꾼다(행 벡터 `p·M`·행 우선 저장, 셰이더 `mul(v, M)`·행 우선 packing, 앞면은 화면 반시계, [셰이더 시스템](ShaderSystem.ko.md) 7.2절 6·8항). 메모리 배치는 전과 같아 GPU로 가는 바이트는 바뀌지 않는다. 렌더 코드는 C7에서 반영했다(2026-11-17): `DrawConstants::transform`은 행 우선, 샘플 렌더러 셰이더는 `mul(float4(position, 1), transform)`(GLSL `vec4(position, 1) * uTransform`), D3D12는 `D3DCOMPILE_PACK_MATRIX_ROW_MAJOR`로 컴파일하고 OpenGL은 `glProgramUniformMatrix4fv(transpose = GL_TRUE)`로 올린다. `PipelineDesc::cullMode`(None·Back·Front, 기본 None)가 컬을 정하고 앞면은 화면 반시계다(D3D12 `FrontCounterClockwise = TRUE`, OpenGL은 clip 원점별 `glFrontFace`를 장치가 맞춘다). 샘플 렌더러는 뒤면을 컬하고, 물체 world·view 행렬식 가운데 하나만 음수면 앞면 컬 파이프라인으로 바꾼다. OpenGL은 `glClipControl`의 `GL_ZERO_TO_ONE`으로 D3D와 같은 [0,1] 깊이를 쓰고, 원점은 창에 그릴 때 `GL_LOWER_LEFT`, RenderTarget 텍스처에 그릴 때 `GL_UPPER_LEFT`로 바꿔 RenderTarget의 첫 행이 이미지 위쪽이 되게 한다(샘플링·readback 모두 D3D12와 같은 배치). 텍스처는 첫 행이 위인 배치로 올리고 UV (0,0)이 좌상단이다.
 - 동시에 진행하는 프레임 수는 렌더 lane 프레임 slot(2–3개)이 정하고, slot 재사용은 그 프레임의 모든 제출 fence 완료로 판정한다. D3D12는 끝난 제출의 기록 저장소를 다시 쓴다. 디버그 구성은 디버그 레이어를 켠다.
 
-### 10.2 범위 밖
+### 10.2 VulkanGraphics(P9)
 
-RenderGraph·Deferred/Forward 경로·깊이 버퍼·MSAA·멀티 큐·bindless·다른 backend 구현은 이번 범위가 아니다.
+Vulkan은 모바일 주력이자 필수 backend다. ShaderSystem P9의 산출물로 SH2 전에 구현했다(2026-11-17 사용자 지시 "Vulkan까지는 작업을 미리하자"). 설계와 UE 5.8 VulkanRHI 조사, 계약별 대응은 [VulkanGraphics](VulkanGraphics.ko.md)에 있고 여기에는 요지만 둔다.
+- 기준은 Vulkan 1.1(Android)이다. 로더는 시스템 `vulkan-1.dll`·`libvulkan.so`를 P10 `OpenSystem`으로 연다. 선택 확장은 swapchain·calibrated timestamps·debug utils뿐이고 없으면 `Unsupported`·false로 공개한다.
+- 완료 추적은 제출마다 `VkFence`이고, render pass는 `VkRenderPass`, 메모리는 자체 페이지 할당기(Graphics `GpuPageAllocator`)다.
+- 창 출력은 중간 RGBA8 이미지에 그리고 `EndFrame`에서 swapchain 이미지에 blit한다(UE 기본 경로와 같다).
+- 앞면은 음수 viewport 높이 + `VK_FRONT_FACE_COUNTER_CLOCKWISE`·`Back → BACK_BIT`다. UE 매핑(`CLOCKWISE`·`CM_CW → FRONT_BIT`)은 `SV_IsFrontFace`가 D3D12와 반대라 따르지 않는다.
+- 셰이더는 실행 중 컴파일러가 없으므로 개발 프로그램이 Developer `ShaderFormatVulkan`(DXC `VULKAN_SM5` 옵션과 SPIR-V 재작성)을 `DeviceDesc::shaderCompiler`로 넘긴다. Release 실행 파일에는 컴파일러가 없다(SH2 전에는 Vulkan 파이프라인이 `Unsupported`).
+- 확인: Sandbox self-test 전체가 GTX 1060과 lavapipe(소프트웨어 ICD, 측정 S4)에서 통과하고 D3D12와 픽셀 대조가 차이 0이다(VulkanGraphics 17절).
+
+### 10.3 범위 밖
+
+RenderGraph·Deferred/Forward 경로·깊이 버퍼·MSAA·멀티 큐·bindless·Metal backend 구현은 이번 범위가 아니다.
 
 ## 11. 에셋
 
@@ -279,4 +290,4 @@ RenderGraph·Deferred/Forward 경로·깊이 버퍼·MSAA·멀티 큐·bindless�
 - World 타입의 Level 그래프 저장은 구조 시험용이다: 부착 계층은 저장되지 않고(리플렉션 B9의 WeakRef PROPERTY와 World 단계의 결정 뒤), native 파생이 든 그래프는 저장할 수 없으며, 로드한 객체는 레벨 편입 단계 전까지 World 장부 밖이다(4.6절). World 필드는 ReadOnly라 CU5 setter hook 전에는 경로로 편집할 수 없다.
 - Tick마다 Borrow를 얻는 잠금 비용이 있다. 일괄 접근은 측정 후 도입한다.
 - 렌더 lane(RB1)과 프레임 slot은 구현했다. 렌더 설정 snapshot(CP4), 대체 자원(RB2), 장치 재생성은 후속이다. 지금 Sandbox의 엔진 루프 경로는 self-test(`--self-test`)의 헤드리스 장면이며, World 추출(WorldIntegration)과 창 실행 경로는 화면 마일스톤에서 잇는다.
-- macOS·Vulkan·Metal은 미구현이며 해당 경로는 `Unsupported`를 반환한다.
+- macOS·Metal은 미구현이며 해당 경로는 `Unsupported`를 반환한다. Vulkan은 SH2 전까지 개발용 컴파일 훅이 있어야 파이프라인을 만든다(10.2절).
