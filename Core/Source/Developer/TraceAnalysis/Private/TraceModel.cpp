@@ -21,6 +21,10 @@ struct TypeIds {
     uint16 counterFloat = TraceFormat::InvalidTypeId;
     uint16 mark = TraceFormat::InvalidTypeId;
     uint16 task = TraceFormat::InvalidTypeId;
+    uint16 gpuQueue = TraceFormat::InvalidTypeId;
+    uint16 gpuCalibration = TraceFormat::InvalidTypeId;
+    uint16 gpuScope = TraceFormat::InvalidTypeId;
+    uint16 gpuFrame = TraceFormat::InvalidTypeId;
 };
 
 uint16 FindType(const TraceStreamDecoder& decoder, const char* name) noexcept {
@@ -37,6 +41,10 @@ TypeIds ResolveTypes(const TraceStreamDecoder& decoder) noexcept {
     ids.counterFloat = FindType(decoder, Format::CounterFloatType);
     ids.mark = FindType(decoder, Format::MarkType);
     ids.task = FindType(decoder, Format::TaskType);
+    ids.gpuQueue = FindType(decoder, Format::GpuQueueType);
+    ids.gpuCalibration = FindType(decoder, Format::GpuCalibrationType);
+    ids.gpuScope = FindType(decoder, Format::GpuScopeType);
+    ids.gpuFrame = FindType(decoder, Format::GpuFrameType);
     return ids;
 }
 
@@ -75,7 +83,8 @@ uint64 TraceTicksToNanoseconds(uint64 ticks, uint64 frequency) noexcept {
 
 TraceModel::TraceModel(Allocator& allocator) noexcept
     : allocator_(&allocator), decoder_(allocator), threads_(allocator), tasks_(allocator),
-      edges_(allocator), counters_(allocator), channelLosses_(allocator), names_(allocator) {
+      edges_(allocator), counters_(allocator), channelLosses_(allocator), gpuQueues_(allocator),
+      gpuScopes_(allocator), gpuFrames_(allocator), names_(allocator) {
 }
 
 StringView TraceModel::ScopeName(uint32 id) const noexcept {
@@ -136,6 +145,22 @@ void TraceModel::AddChannelLoss(uint16 channel, uint64 count) noexcept {
     (void)added;
 }
 
+TraceModelGpuQueue* TraceModel::FindOrAddGpuQueue(uint16 id) noexcept {
+    for (TraceModelGpuQueue& queue : gpuQueues_) {
+        if (queue.id == id) {
+            return &queue;
+        }
+    }
+
+    TraceModelGpuQueue queue;
+    queue.id = id;
+    if (!gpuQueues_.TryPushBack(queue)) {
+        return nullptr;
+    }
+
+    return &gpuQueues_[gpuQueues_.Size() - 1];
+}
+
 Result<void> TraceModel::ReadDefinitions() noexcept {
     const TypeIds types = ResolveTypes(decoder_);
     Array<DecodedRecord> records(*allocator_);
@@ -194,6 +219,32 @@ Result<void> TraceModel::ReadDefinitions() noexcept {
                     entry.name = TextOf(record.variable[0]);
                 }
             }
+        } else if (record.typeId == types.gpuQueue && record.variableCount == 1 &&
+                   Covers(record, 0, Format::GpuQueueFixedBytes)) {
+            // 세션마다 다시 쓰인 정의는 나중 것이 이긴다.
+            TraceModelGpuQueue* queue =
+                FindOrAddGpuQueue(ReadFixed<uint16>(record, Format::GpuQueueIdOffset));
+            if (queue == nullptr) {
+                return Result<void>::Failure(ErrorCode::OutOfMemory);
+            }
+
+            queue->kind = ReadFixedByte(record, Format::GpuQueueKindOffset);
+            queue->timing = ReadFixedByte(record, Format::GpuQueueTimingOffset) != 0;
+            queue->name = TextOf(record.variable[0]);
+        } else if (record.typeId == types.gpuCalibration &&
+                   Covers(record, 0, Format::GpuCalibrationFixedBytes)) {
+            TraceModelGpuQueue* queue =
+                FindOrAddGpuQueue(ReadFixed<uint16>(record, Format::GpuCalibrationQueueOffset));
+            if (queue == nullptr) {
+                return Result<void>::Failure(ErrorCode::OutOfMemory);
+            }
+
+            const uint64 uncertainty =
+                ReadFixed<uint64>(record, Format::GpuCalibrationUncertaintyOffset);
+            ++queue->calibrations;
+            queue->maxUncertaintyNanoseconds = uncertainty > queue->maxUncertaintyNanoseconds
+                                                   ? uncertainty
+                                                   : queue->maxUncertaintyNanoseconds;
         } else if (record.typeId == types.definitionLoss &&
                    Covers(record, 0, TraceFormat::DefinitionLossFixedBytes)) {
             const uint64 dropped =
@@ -309,6 +360,28 @@ Result<void> TraceModel::ReadThread(uint16 stream, Array<OrderedEvent>& ordered)
             }
         } else if (record.typeId == types.mark) {
             ++summary_.marks;
+        } else if (record.typeId == types.gpuScope &&
+                   Covers(record, 0, Format::GpuScopeFixedBytes)) {
+            TraceModelGpuScope scope;
+            scope.queue = ReadFixed<uint16>(record, Format::GpuScopeQueueOffset);
+            scope.nameId = ReadFixed<uint32>(record, Format::GpuScopeNameOffset);
+            scope.depth = ReadFixed<uint32>(record, Format::GpuScopeDepthOffset);
+            scope.frame = ReadFixed<uint64>(record, Format::GpuScopeFrameOffset);
+            scope.beginTick = ReadFixed<uint64>(record, Format::GpuScopeBeginOffset);
+            scope.endTick = ReadFixed<uint64>(record, Format::GpuScopeEndOffset);
+            if (!gpuScopes_.TryPushBack(scope) || FindOrAddGpuQueue(scope.queue) == nullptr) {
+                return Result<void>::Failure(ErrorCode::OutOfMemory);
+            }
+        } else if (record.typeId == types.gpuFrame &&
+                   Covers(record, 0, Format::GpuFrameFixedBytes)) {
+            TraceModelGpuFrame frame;
+            frame.queue = ReadFixed<uint16>(record, Format::GpuFrameQueueOffset);
+            frame.frame = ReadFixed<uint64>(record, Format::GpuFrameNumberOffset);
+            frame.beginTick = ReadFixed<uint64>(record, Format::GpuFrameBeginOffset);
+            frame.endTick = ReadFixed<uint64>(record, Format::GpuFrameEndOffset);
+            if (!gpuFrames_.TryPushBack(frame) || FindOrAddGpuQueue(frame.queue) == nullptr) {
+                return Result<void>::Failure(ErrorCode::OutOfMemory);
+            }
         }
     }
 
@@ -448,7 +521,28 @@ Result<void> TraceModel::Build(Span<const uint8> bytes) noexcept {
         }
     }
 
+    for (const TraceModelGpuScope& scope : gpuScopes_) {
+        if (ScopeName(scope.nameId).IsEmpty() && !missing.Contains(scope.nameId) &&
+            !missing.TryPushBack(scope.nameId)) {
+            return Result<void>::Failure(ErrorCode::OutOfMemory);
+        }
+    }
+
     summary_.missingScopeNames = missing.Size();
+    gpuQueues_.Sort([](const TraceModelGpuQueue& left, const TraceModelGpuQueue& right) noexcept {
+        return left.id < right.id;
+    });
+    gpuScopes_.Sort([](const TraceModelGpuScope& left, const TraceModelGpuScope& right) noexcept {
+        if (left.queue != right.queue) {
+            return left.queue < right.queue;
+        }
+
+        return left.beginTick != right.beginTick ? left.beginTick < right.beginTick
+                                                 : left.depth < right.depth;
+    });
+    gpuFrames_.Sort([](const TraceModelGpuFrame& left, const TraceModelGpuFrame& right) noexcept {
+        return left.queue != right.queue ? left.queue < right.queue : left.frame < right.frame;
+    });
     threads_.Sort([](const TraceModelThread& left, const TraceModelThread& right) noexcept {
         return left.threadId < right.threadId;
     });

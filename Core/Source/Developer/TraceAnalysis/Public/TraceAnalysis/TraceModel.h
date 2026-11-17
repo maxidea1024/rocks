@@ -72,6 +72,37 @@ struct TraceModelCounter {
     uint64 lastBits = 0;
 };
 
+// GPU queue다(Trace.GpuQueue 정의, RB7). 정의 없이 구간만 있으면 이름이 빈 queue로 둔다.
+struct TraceModelGpuQueue {
+    uint16 id = 0;
+    StringView name;
+    uint8 kind = 0;
+    // GPU 시간을 쟀는지다. 거짓이면(timestamp·calibration 미지원) 그 queue의 구간은 기록되지
+    // 않는다(추정값 없음).
+    bool timing = false;
+    // calibration 쌍 수와 그 가운데 가장 큰 오차 반경(ns)이다.
+    uint64 calibrations = 0;
+    uint64 maxUncertaintyNanoseconds = 0;
+};
+
+// GPU 구간이다. tick은 기록 전에 calibration 쌍으로 trace 시간축으로 옮긴 값이다.
+struct TraceModelGpuScope {
+    uint16 queue = 0;
+    uint32 nameId = 0;
+    uint32 depth = 0;
+    uint64 frame = 0;
+    uint64 beginTick = 0;
+    uint64 endTick = 0;
+};
+
+// GPU 프레임 경계다(그 queue에서 프레임 시작·끝 timestamp).
+struct TraceModelGpuFrame {
+    uint16 queue = 0;
+    uint64 frame = 0;
+    uint64 beginTick = 0;
+    uint64 endTick = 0;
+};
+
 // 채널별 손실 합이다.
 struct TraceModelChannelLoss {
     uint16 channelId = 0;
@@ -146,6 +177,21 @@ public:
         return channelLosses_;
     }
 
+    // queue id 순이다.
+    const Array<TraceModelGpuQueue>& GpuQueues() const noexcept {
+        return gpuQueues_;
+    }
+
+    // queue·시작 tick 순이다(같으면 깊이 순).
+    const Array<TraceModelGpuScope>& GpuScopes() const noexcept {
+        return gpuScopes_;
+    }
+
+    // queue·프레임 번호 순이다.
+    const Array<TraceModelGpuFrame>& GpuFrames() const noexcept {
+        return gpuFrames_;
+    }
+
     const TraceModelSummary& Summary() const noexcept {
         return summary_;
     }
@@ -171,6 +217,7 @@ private:
     TraceModelThread* FindThread(uint32 threadId) noexcept;
     TraceModelTask* FindOrAddTask(uint64 id) noexcept;
     void AddChannelLoss(uint16 channel, uint64 count) noexcept;
+    TraceModelGpuQueue* FindOrAddGpuQueue(uint16 id) noexcept;
 
     Allocator* allocator_;
     TraceStreamDecoder decoder_;
@@ -179,6 +226,9 @@ private:
     Array<TraceModelEdge> edges_;
     Array<TraceModelCounter> counters_;
     Array<TraceModelChannelLoss> channelLosses_;
+    Array<TraceModelGpuQueue> gpuQueues_;
+    Array<TraceModelGpuScope> gpuScopes_;
+    Array<TraceModelGpuFrame> gpuFrames_;
     Array<NameEntry> names_;
     TraceModelSummary summary_;
 };
