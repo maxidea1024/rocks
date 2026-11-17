@@ -115,6 +115,14 @@ struct TraceFormat {
     // 머리 플래그: 출력이 붙기 전에 정의 저장소가 넘쳤거나 정의 기록이 버려져, 이 출력이 받은
     // 정의가 일부 빠져 있을 수 있다(4.3절).
     static constexpr uint32 HeaderFlagDefinitionsIncomplete = 1u << 0;
+    // 머리 플래그: 이 파일은 스냅샷이다(머리 → 스키마 → 정의 저장소 → 최근 기록 고리 → 동기 표지,
+    // 8절). 끝의 정의 스트림에 Trace.SnapshotSync 기록이 하나 있다.
+    static constexpr uint32 HeaderFlagSnapshot = 1u << 1;
+    // 머리 플래그: 스냅샷이 writer 잠금을 제한 시간 안에 얻지 못해 정의 저장소와 고리 없이 쓰였다.
+    static constexpr uint32 HeaderFlagSnapshotIncomplete = 1u << 2;
+    // 머리 플래그: 최근 기록 고리가 넘쳐 오래된 스레드 기록 덩어리를 버린 적이 있다(스냅샷의
+    // 앞부분이 없을 수 있다).
+    static constexpr uint32 HeaderFlagRecentDropped = 1u << 3;
 
     // ---- 덩어리 ----
     static constexpr usize ChunkHeaderBytes = 4;
@@ -143,6 +151,7 @@ struct TraceFormat {
     static constexpr uint16 ThreadInfoTypeId = 3;
     static constexpr uint16 LossTypeId = 4;
     static constexpr uint16 DefinitionLossTypeId = 5;
+    static constexpr uint16 SnapshotSyncTypeId = 6;
     static constexpr uint16 FirstUserTypeId = 16;
     // 형 id의 상한(포함)이다.
     static constexpr uint16 MaxTypeId = 4095;
@@ -193,6 +202,16 @@ struct TraceFormat {
     static constexpr usize DefinitionLossTickOffset = 0;
     static constexpr usize DefinitionLossCountOffset = 8;
     static constexpr usize DefinitionLossFixedBytes = 16;
+    // SnapshotSync(정의 스트림, 스냅샷 끝의 동기 표지): u64 tick | u64 다음 순서 번호 | u64 고리가
+    // 버린 덩어리 누계 | u64 고리가 버린 byte 누계 | u64 기록 경계를 잃어 이 스냅샷에서 뺀 덩어리
+    // 수 | u8 완전(1)·불완전(0)
+    static constexpr usize SnapshotSyncTickOffset = 0;
+    static constexpr usize SnapshotSyncOrderOffset = 8;
+    static constexpr usize SnapshotSyncDroppedChunksOffset = 16;
+    static constexpr usize SnapshotSyncDroppedBytesOffset = 24;
+    static constexpr usize SnapshotSyncSkippedChunksOffset = 32;
+    static constexpr usize SnapshotSyncCompleteOffset = 40;
+    static constexpr usize SnapshotSyncFixedBytes = 41;
 };
 
 // 세션이 Start 때 스스로 등록하는 표준 채널·형(TR2: CPU 구간·카운터·표지·시간 띠·프레임·문맥)의
@@ -307,6 +326,23 @@ struct TraceStandardFormat {
     static constexpr usize TaskRelatedOffset = 16;
     static constexpr usize TaskKindOffset = 24;
     static constexpr usize TaskFixedBytes = 25;
+
+    // ---- 수집 통계(TR5, 채널 "stats") ----
+    // Stats(스레드 스트림, writer가 statsIntervalPumps 펌프마다 냄): u64 tick | u64 풀 사용 byte |
+    // u64 풀 최대 사용 byte | u64 풀 상한 byte | u64 출력 byte 누계 | u64 정의 저장소 byte | u64
+    // 손실 기록 누계 | u64 버린 정의 기록 누계 | u64 고리 사용 byte | u64 고리가 버린 byte 누계
+    static constexpr const char* StatsType = "Trace.Stats";
+    static constexpr usize StatsTickOffset = 0;
+    static constexpr usize StatsPoolInUseOffset = 8;
+    static constexpr usize StatsPoolPeakOffset = 16;
+    static constexpr usize StatsPoolLimitOffset = 24;
+    static constexpr usize StatsOutputBytesOffset = 32;
+    static constexpr usize StatsDefinitionStoreOffset = 40;
+    static constexpr usize StatsLostRecordsOffset = 48;
+    static constexpr usize StatsDefinitionsDroppedOffset = 56;
+    static constexpr usize StatsRecentBytesOffset = 64;
+    static constexpr usize StatsRecentDroppedOffset = 72;
+    static constexpr usize StatsFixedBytes = 80;
     // 사건 종류 값이다(스트림에 기록되므로 바꾸지 않는다).
     static constexpr uint8 TaskCreated = 0;
     static constexpr uint8 TaskReady = 1;
