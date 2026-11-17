@@ -884,7 +884,7 @@ D3D12의 능력 없음 26개는 DXGI 형식이 없는 ETC2·EAC 6, ASTC 15, `R8U
 - `Multisample` 능력과 표본 수 질의(`GetPixelFormatSampleCounts`)는 MSAA desc가 생기는 GX2로 미뤘다. D3D12의 `Texture3D`·`TextureCube`·`Storage*`·`TexelBuffer*`는 질의해 공개하지만 그 차원·view API가 아직 없어 "능력 ⇔ 생성" 시험 범위 밖이다.
 - `D24Unorm`은 DXGI `R24G8_TYPELESS` 자원의 깊이 plane만 쓴다. 장치 자원의 plane이 Rocks plane보다 많으면 올리지 않은 plane도 생성 직후 쉬는 상태(PIXEL_SHADER_RESOURCE)로 옮긴다(`FormatPlaneCount`, `D3D12_FEATURE_FORMAT_INFO`).
 - 비디오 형식 plane은 SRV만 생성한다(plane RTV·UAV 없음). 비디오 형식의 Sampled 능력은 plane SRV 형식이 아니라 자원 형식 자체의 셰이더 지원으로 판정한다.
-- 자원 상태: 지금 D3D12 backend의 "쉬는 상태 PIXEL_SHADER_RESOURCE" 관례를 그대로 쓴다. 렌더 그래프 브랜치(GX5 `ResourceAccess.h`, mip별 상태 추적)가 들어오면 view·readback 경로를 그 상태 추적에 맞추고 readback은 상태 중립으로 기록한다.
+- 자원 상태(RG1 병합 뒤): D3D12 텍스처 상태는 mip별 committed·current로 추적한다(RenderBase GX5). 다중 plane 자원은 mip 하나의 상태를 그 mip의 모든 plane subresource가 함께 따르고, mip별 전이는 plane마다 barrier를 낸다(`TextureRecord::devicePlanes`). view는 상태를 따로 갖지 않고 원 텍스처 기록이 추적한다(`SetTexture`·`Transition`이 원 기록으로 향한다). 원 텍스처를 view보다 먼저 `Retire`하면 기록을 남겨 두었다가 마지막 view를 놓을 때 함께 놓는다. 업로드와 readback(`ReadTexture`)은 상태 중립이다: 그 mip의 committed 상태에서 복사 상태로 바꿨다가 되돌린다. 렌더 그래프의 텍스처 생성은 지금처럼 블록 압축을 거부하고 깊이 형식은 GX4에서 연다.
 
 ## 15. A0-G와의 분담
 
