@@ -179,7 +179,9 @@ void Renderer::Draw(graphics::CommandContext& context, const RenderView& view,
 
     context.SetPipeline(pipeline_);
     for (const RenderItem& item : items) {
-        const Mat4 clip = view.viewProjection * item.world;
+        // 행 벡터 규약(UE LocalToWorld * WorldToClip): 월드 변환 먼저, view·투영 나중. 메모리
+        // 배치가 이전 열 벡터 규약의 viewProjection * world와 같아 상수 버퍼 바이트는 그대로다.
+        const Mat4 clip = item.world * view.viewProjection;
         graphics::DrawConstants constants;
         for (uint32 index = 0; index < 16; ++index) {
             constants.transform[index] = clip.m[index];

@@ -626,7 +626,7 @@ TEST(WorldReflection_LevelGraphRoundTripsWithoutHierarchy) {
     REQUIRE(quiet);
     auto attached =
         world.With<SceneComponent>(scene.Value(), [&](SceneComponent& component) noexcept {
-            if (auto scaled = component.SetRelativeScale(Vec3(2.0f, 2.0f, 2.0f)); !scaled) {
+            if (auto scaled = component.SetRelativeScale(Vec3d(2.0, 2.0, 2.0)); !scaled) {
                 return scaled;
             }
 
@@ -725,7 +725,7 @@ TEST(WorldReflection_LevelGraphRoundTripsWithoutHierarchy) {
                 REQUIRE(borrowed);
                 SceneComponent* component = Get(borrowed.Value());
                 REQUIRE(component != nullptr);
-                CHECK(component->RelativeTransform().scale == Vec3(2.0f, 2.0f, 2.0f));
+                CHECK(component->RelativeTransform().scale == Vec3d(2.0, 2.0, 2.0));
                 CHECK(component->Parent().IsNull());
                 // 장부 밖 SceneComponent의 계층 API는 InvalidArgument, 값 설정·월드 행렬은 된다.
                 CHECK(ErrorOf(component->AttachTo(components[0])) == ErrorCode::InvalidArgument);

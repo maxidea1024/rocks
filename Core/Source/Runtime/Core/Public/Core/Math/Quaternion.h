@@ -14,8 +14,9 @@ namespace rocks {
 //   Q(+X, +90°): Right(+Y) → Up(+Z)
 //   Q(+Y, +90°): Up(+Z) → Forward(+X)
 // 이다. 성분 식은 표준 Hamilton 식 그대로이며 좌우수는 축 이름(+Y = 오른쪽)이 정한다.
-// 합성 a * b는 b를 먼저, a를 나중에 적용한다(UE FQuat와 같다, Quat.h:29-31). UE FTransform·
-// FMatrix 곱은 왼쪽 피연산자를 먼저 적용해 순서가 반대다.
+// 합성 a * b는 b를 먼저, a를 나중에 적용한다(UE FQuat와 같다, Quat.h:29-31). Matrix4 곱과
+// Transform::TryMultiply는 UE FMatrix·FTransform과 같이 왼쪽 피연산자를 먼저 적용해 순서가 반대다
+// (Q(a * b)의 행렬은 M(b) * M(a)).
 // 회전 함수는 단위 quaternion을 전제한다. 외부 입력은 TryNormalize로 검증한 뒤 사용한다.
 // q와 -q는 같은 회전이지만 operator==와 Equals는 성분 비교이므로 다르다. 회전 동일성은
 // AngularDistance로 판단한다. 기본값은 항등 회전이다.
@@ -64,9 +65,13 @@ struct Quaternion {
         return Quaternion(unitAxis.x * sine, unitAxis.y * sine, unitAxis.z * sine, math::Cos(half));
     }
 
-    // 회전 행렬(왼쪽 위 3x3)에서 quaternion을 만든다. 직교 정규·행렬식 +1 회전 행렬이 전제이며
-    // 이동·마지막 행은 무시한다. 대각합에 따라 가장 큰 성분을 먼저 구하는 방식으로 계산하여
-    // 180도 근처에서도 정밀도를 유지한다. 결과는 w >= 0으로 정규화한다.
+    // 회전 행렬(왼쪽 위 3x3, 행 벡터 규약 — 행이 축)에서 quaternion을 만든다. UE TQuat(const
+    // TMatrix&)(Quat.h:775-847)와 같은 색인 M[row][column]을 읽는다(x 성분은 M[1][2] - M[2][1]
+    // 쪽이다). 직교 정규·행렬식 +1 회전 행렬이 전제이며 이동·마지막 열은 무시한다. 대각합에 따라
+    // 가장 큰 성분을 먼저 구하는 방식으로 계산하여 180도 근처에서도 정밀도를 유지한다. 결과는
+    // w >= 0으로 정규화한다.
+    // UE와 다른 점: UE는 0 길이 축이면 항등 회전을 돌려주고 부호를 맞추지 않는다. Rocks는 결과를
+    // 정규화해 w >= 0으로 맞추고, 실패를 숨기지 않는다.
     // 실패(InvalidArgument): 유한하지 않은 원소 또는 정규화할 수 없는 결과.
     static Result<Quaternion> TryFromRotationMatrix(const Matrix4<T>& matrix) noexcept {
         const double m00 = matrix.At(0, 0);
@@ -86,24 +91,24 @@ struct Quaternion {
         if (trace > 0.0) {
             const double s = math::Sqrt(trace + 1.0) * 2.0;
             qw = 0.25 * s;
-            qx = (m21 - m12) / s;
-            qy = (m02 - m20) / s;
-            qz = (m10 - m01) / s;
+            qx = (m12 - m21) / s;
+            qy = (m20 - m02) / s;
+            qz = (m01 - m10) / s;
         } else if (m00 > m11 && m00 > m22) {
             const double s = math::Sqrt(1.0 + m00 - m11 - m22) * 2.0;
-            qw = (m21 - m12) / s;
+            qw = (m12 - m21) / s;
             qx = 0.25 * s;
             qy = (m01 + m10) / s;
             qz = (m02 + m20) / s;
         } else if (m11 > m22) {
             const double s = math::Sqrt(1.0 + m11 - m00 - m22) * 2.0;
-            qw = (m02 - m20) / s;
+            qw = (m20 - m02) / s;
             qx = (m01 + m10) / s;
             qy = 0.25 * s;
             qz = (m12 + m21) / s;
         } else {
             const double s = math::Sqrt(1.0 + m22 - m00 - m11) * 2.0;
-            qw = (m10 - m01) / s;
+            qw = (m01 - m10) / s;
             qx = (m02 + m20) / s;
             qy = (m12 + m21) / s;
             qz = 0.25 * s;
@@ -253,7 +258,10 @@ struct Quaternion {
         return GetAxisZ();
     }
 
-    // 회전 행렬(열 우선, 이동 없음)이다. 단위 quaternion 전제다.
+    // 회전 행렬(행 벡터 규약, 이동 없음)이다. UE FQuatRotationMatrix와 원소·색인이 같다
+    // (QuatRotationTranslationMatrix.h:76-91 — M[0][1] = 2(xy + wz), M[1][0] = 2(xy - wz)). 행
+    // 0·1·2는 회전된 X·Y·Z 축(GetAxisX/Y/Z)이다. 2를 곱하는 위치만 다르고 2배는 정확하므로 UE 식과
+    // 비트 단위로 같다. 단위 quaternion 전제다.
     Matrix4<T> ToMatrix() const noexcept {
         const T xx = x * x;
         const T yy = y * y;
@@ -268,13 +276,13 @@ struct Quaternion {
         const T two = static_cast<T>(2);
         Matrix4<T> result;
         result.At(0, 0) = one - two * (yy + zz);
-        result.At(0, 1) = two * (xy - wz);
-        result.At(0, 2) = two * (xz + wy);
-        result.At(1, 0) = two * (xy + wz);
+        result.At(0, 1) = two * (xy + wz);
+        result.At(0, 2) = two * (xz - wy);
+        result.At(1, 0) = two * (xy - wz);
         result.At(1, 1) = one - two * (xx + zz);
-        result.At(1, 2) = two * (yz - wx);
-        result.At(2, 0) = two * (xz - wy);
-        result.At(2, 1) = two * (yz + wx);
+        result.At(1, 2) = two * (yz + wx);
+        result.At(2, 0) = two * (xz + wy);
+        result.At(2, 1) = two * (yz - wx);
         result.At(2, 2) = one - two * (xx + yy);
         return result;
     }
@@ -360,7 +368,8 @@ Quaternion<T> Slerp(const Quaternion<T>& a, const Quaternion<T>& b, T t) noexcep
     return blended.IsFinite() ? a : blended;
 }
 
-// 회전 행렬과 이동으로 affine 행렬 T * R을 만든다.
+// 회전 행렬과 이동으로 affine 행렬을 만든다(UE FQuatRotationTranslationMatrix(Q, Origin)). 행 벡터
+// 규약 R * T로, 점에는 회전을 먼저, 이동을 나중에 적용한다. 이동은 마지막 행이다.
 template <typename T>
 Matrix4<T> MakeRotationTranslationMatrix(const Quaternion<T>& rotation,
                                          const Vector3<T>& translation) noexcept {
