@@ -7,18 +7,19 @@ namespace Rocks.Tooling.Checks;
 public static partial class PolicyChecks
 {
     // 도구 표 모듈(Developer/ShaderToolTable)을 참조해도 되는 곳이다: 표 모듈 자신, 메인 프로세스 컴파일 관리자, 워커와 그 안의
-    // 형식 모듈, 워커 자리 모듈(ShaderToolLoader), 시험 runner(EngineTests가 표·로더 시험을 링크한다).
+    // 형식 모듈, 워커 자리 모듈(ShaderToolLoader), 시험 runner(EngineTests가 표·로더 시험을 링크한다), SH0 도구 스파이크
+    // (Programs/ShaderToolSpike, 워커가 생기기 전에 도구를 직접 여는 측정 프로그램).
     private static readonly string[] ShaderToolTableUsers =
     [
         "Engine/Source/Developer/ShaderToolTable/", "Engine/Source/Developer/ShaderCompiler/", "Engine/Source/Developer/ShaderToolLoader/",
-        "Programs/ShaderCompileWorker/", "Programs/FoundationTests/"
+        "Programs/ShaderCompileWorker/", "Programs/FoundationTests/", "Programs/ShaderToolSpike/"
     ];
 
-    // 도구 binary를 열어도 되는 곳이다: 워커와 그 안의 형식 모듈, 워커 자리 모듈, 시험 runner. 메인 프로세스(ShaderCompiler)는
-    // 도구 표만 쓰고 binary를 열지 않는다.
+    // 도구 binary를 열어도 되는 곳이다: 워커와 그 안의 형식 모듈, 워커 자리 모듈, 시험 runner, SH0 도구 스파이크. 메인
+    // 프로세스(ShaderCompiler)는 도구 표만 쓰고 binary를 열지 않는다.
     private static readonly string[] ShaderToolLoadUsers =
     [
-        "Engine/Source/Developer/ShaderToolLoader/", "Programs/ShaderCompileWorker/", "Programs/FoundationTests/"
+        "Engine/Source/Developer/ShaderToolLoader/", "Programs/ShaderCompileWorker/", "Programs/FoundationTests/", "Programs/ShaderToolSpike/"
     ];
 
     // DynamicLibrary::Open(절대 경로 열기)을 불러도 되는 곳이다: 도구 로드 허용 위치와 API 구현·시험(PlatformBase·TestSupport).

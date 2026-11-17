@@ -44,6 +44,11 @@ internal static class ShaderToolPolicyTests
             "#include <Platform/DynamicLibrary.h>\nvoid G(platform::DynamicLibrary& l) { (void)l.OpenSystem(\"vulkan-1.dll\"); }\n" +
             "// #include <ShaderToolTable/ShaderToolTable.h> and l.Open(path) in a comment are not code\n");
         temporary.Write("Engine/Source/Runtime/Probe/Probe.Build.cs", "// depends on \"ShaderToolTable\" only in a comment\nRequiredModules => [\"Core\"];\n");
+        // SH0 도구 스파이크는 워커가 생기기 전에 도구를 직접 여는 측정 프로그램이다.
+        temporary.Write("Programs/ShaderToolSpike/ShaderToolSpike.Build.cs",
+            "Dependencies = [\"ShaderToolLoader\", \"ShaderToolTable\"]; Headers(\"DirectXShaderCompiler\");\n");
+        temporary.Write("Programs/ShaderToolSpike/Private/Win64/Dxc.cpp",
+            "#include <ShaderToolLoader/ShaderToolLoader.h>\n#include <dxc/dxcapi.h>\n");
         NoFailures(Run());
 
         (string File, string Content, string Rule)[] cases =
@@ -59,7 +64,9 @@ internal static class ShaderToolPolicyTests
             ("Engine/Source/Developer/ShaderCompiler/ShaderCompiler.Build.cs", "RequiredModules => [\"ShaderToolTable\", \"ShaderToolLoader\"];\n",
                 "shader-tool-binary-load"),
             // 이름이 비슷한 폴더는 형식 모듈이 아니다.
-            ("Engine/Source/Developer/ShaderFormat/Private/Load.cpp", "#include <ShaderToolLoader/ShaderToolLoader.h>\n", "shader-tool-binary-load")
+            ("Engine/Source/Developer/ShaderFormat/Private/Load.cpp", "#include <ShaderToolLoader/ShaderToolLoader.h>\n", "shader-tool-binary-load"),
+            // 스파이크와 이름만 비슷한 프로그램 폴더는 허용 위치가 아니다.
+            ("Programs/ShaderToolSpikeOld/Private/Dxc.cpp", "#include <dxc/dxcapi.h>\n", "shader-tool-binary-load")
         ];
         foreach ((string file, string content, string rule) in cases)
         {

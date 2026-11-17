@@ -116,7 +116,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 | A4 | Cooker·TargetProfile·쿠킹 매니페스트 | AssetSystem A4 | 미착수 | P6b | A3 | 5.2 K1–K3 |
 | P1 | 자식 프로세스·pipe | PlatformLayer | **구현** | SH1 | — | 5.3 |
 | P2 | 바인딩 규약(GLES 포함) | 이 문서 | 설계 | SH2 | — | 7절 |
-| P3 | ThirdParty Engine 루트·`binary`·`headers` 종류·저장소·오프라인 도구 빌드 | 이 문서 | **구현**(Windows. macOS 산출물·Release 게시 남음) | P4, P9, P12, SH0 | — | 8절 |
+| P3 | ThirdParty Engine 루트·`binary`·`headers` 종류·저장소·오프라인 도구 빌드 | 이 문서 | **구현**(Windows, Release 게시 완료. macOS 산출물 남음) | P4, P9, P12, SH0 | — | 8절 |
 | P4 | 도구 표 생성·binary 의존 정책·Release 배제 검사 | 이 문서 | **구현**(Windows. macOS 미검증, 알려진 Release 예외 2건은 SH2까지) | SH0, SH2 | P3, P10 | 9절 |
 | P5 | 셰이더 job 키 | 이 문서 | 설계 | SH1 | A2, A3, P6a | 10절 |
 | P6a | 형식 정의 스키마와 파일, 엔진 컴파일 프로필 | 이 문서 | 설계 | P5, P14, P6b, SH1 | A0-C(JSON), 결정 2·3·5 | 12.1절 |
@@ -130,6 +130,8 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 | P13 | Android 실행 기반(앱·창·EGL surface·수명·APK) | PlatformLayer | 미설계 | SH6 | P10, P11, AssetSystem APK 읽기(VFS) | 5.3 |
 | P14 | 셰이더 타입·퍼뮤테이션·라이브러리 형식 | 이 문서 | 설계 | SH2, P6b | P6a | 12절 |
 | P15 | D3D11Graphics·MetalGraphics 설계 | EngineRuntime | 미설계 | SH5 | P12(Metal) | 5.3 |
+
+선행 작업 뒤 첫 단계인 SH0(16절)은 **Windows 부분 구현**(2026-11-17, `feature/shader-tools`, `Programs/ShaderToolSpike`)이다. 형식별 산출·검증·리플렉션 덤프·`ROCKS_IMAGE_FORMAT` 확인과 Windows에서 할 수 있는 측정(S2·S3·S6·S8·S12 데스크톱)을 마쳤고, macOS 측정(S1 macOS DXC 서명, S3 호스트 사이, S9)이 남았다. 결과는 5.4절, 진척은 16절이다.
 
 ### 5.2 다른 문서가 맡는 선행 작업과 셰이더 요구
 
@@ -250,20 +252,20 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 
 결과에 따라 설계가 갈리는 값은 짐작하지 않고 SH0(또는 해당 단계)에서 잰다.
 
-| ID | 측정 | 결과가 정하는 것 |
-|---|---|---|
-| S1 | DXC 1.8.2505 내장 validator 서명(Windows·macOS) | 10절 서명 검사, `D3D12_SM6` 생산 호스트 |
-| S2 | 개발 기계 GPU와 WARP의 D3D12 최대 셰이더 모델, Windows 10 Agility SDK 요건 | 결정 3 |
-| S3 | 결정성: 같은 호스트 반복, Debug·Release 워커, 작업 디렉터리 변경, FMA3 유무, OS 버전, **Windows·macOS 사이**(DXIL·SPIR-V·ESSL·MSL 텍스트)에서 형식별 바이트 동일 | 10절 결정성 |
-| S4 | Vulkan 검증 레이어 공급, GPU 없는 CI의 소프트웨어 ICD | P9 |
-| S5 | D3D12·Vulkan·GLES 미리보기 픽셀 대조(행렬 옵션·앞면·Y 반전·루트 상수 대응) | 7.2절 6·8항 |
-| S6 | 도구 빌드 컴파일러(clang-cl·MSVC)·빌드 시간·바이너리 크기 | 8절 4항 |
-| S7 | 자체 전처리 결과로 컴파일한 출력 = DXC 직접 전처리 출력(`#line` 포함) | 결정 6 구현의 정합성(SH1 완료 기준) |
-| S8 | 워커 기동·DLL 로드 비용, SHA-256 처리량 | 11절 묶음 크기 |
-| S9 | Apple `metal` 재배포 조건, Windows용 Metal Developer Tools(UE 5.8 기대 버전 5.3, `Developer/Apple/MetalShaderFormat/Private/MetalShaderFormat.cpp:724–725`) | 결정 5 |
-| S10 | `d3dcompiler_47.dll` 재배포 조건과 고정 버전 | 8절 2항 FXC |
-| S11 | Android 에뮬레이터·CI의 OpenGL ES 3.2 context | SH6 검증 경로 |
-| S12 | (SH0) 데스크톱 GL 드라이버의 `#version 320 es` 수용(`GL_ARB_ES3_2_compatibility` 유무), (SH6) UE 수정 pass 없이 업스트림 SPIRV-Tools·SPIRV-Cross만으로 만든 ESSL이 Android 기기 드라이버에서 도는지 | P11, 7.2절 11항 |
+| ID | 측정 | 결과가 정하는 것 | 결과(SH0, 2026-11-17) |
+|---|---|---|---|
+| S1 | DXC 1.8.2505 내장 validator 서명(Windows·macOS) | 10절 서명 검사, `D3D12_SM6` 생산 호스트 | Windows: DXC 1.9.2609(내장 validator)가 Renderer VS·PS와 fixture DXIL 4개를 모두 서명했다(container digest가 0도 preview 우회 값도 아님). macOS: macOS 필요, 미측정 |
+| S2 | 개발 기계 GPU와 WARP의 D3D12 최대 셰이더 모델, Windows 10 Agility SDK 요건 | 결정 3 | GTX 1060 3GB(드라이버 32.0.15.6094)·WARP(10.0.26100.9818) 모두 최대 SM **6.8**, feature level 12.1, resource binding tier 3. Agility SDK 없이 OS 런타임(Windows 11 build 26200, `D3D12Core.dll` 10.0.26100.9818)에서 6.6 이상이 된다. Windows 10 요건은 Windows 10 기계가 없어 미측정 |
+| S3 | 결정성: 같은 호스트 반복, Debug·Release 워커, 작업 디렉터리 변경, FMA3 유무, OS 버전, **Windows·macOS 사이**(DXIL·SPIR-V·ESSL·MSL 텍스트)에서 형식별 바이트 동일 | 10절 결정성 | Windows 부분 byte 동일: 같은 입력 반복(Debug 2회·Release 3회), 작업 디렉터리 변경(Debug·Release 각 1회), Debug·Release 스파이크 빌드 사이에서 manifest의 산출물 44개(DXIL·SPIR-V·DXBC·ESSL·MSL·HLSL 5.0·리플렉션 덤프)가 모두 같다. 상수 초월 함수 fixture는 DXC가 DXIL·SPIR-V 모두 상수로 접었고(최적화 전 SPIR-V에도 `OpExtInst` 0), 접은 8개 값은 이 호스트 UCRT double 함수 결과를 float로 반올림한 값과 같다. FMA3 유무·OS 버전·Windows–macOS는 미측정(기계 하나) |
+| S4 | Vulkan 검증 레이어 공급, GPU 없는 CI의 소프트웨어 ICD | P9 | — |
+| S5 | D3D12·Vulkan·GLES 미리보기 픽셀 대조(행렬 옵션·앞면·Y 반전·루트 상수 대응) | 7.2절 6·8항 | — |
+| S6 | 도구 빌드 컴파일러(clang-cl·MSVC)·빌드 시간·바이너리 크기 | 8절 4항 | P3 인용: Windows x64 도구는 Visual Studio C++ 도구(vcvarsall x64, MSVC, DLL 링커 버전 14.29)와 CMake·Ninja Release, 업스트림 빌드 설정으로 만들었다. 크기: `dxcompiler.dll` 21,943,296 B, `spirv-cross-c-shared.dll` 2,305,536 B, `SPIRV-Tools-c.dll` 3,644,416 B(PDB 별도). 빌드 시간은 P3에서 기록하지 않았고 clang-cl 비교와 macOS는 미측정 |
+| S7 | 자체 전처리 결과로 컴파일한 출력 = DXC 직접 전처리 출력(`#line` 포함) | 결정 6 구현의 정합성(SH1 완료 기준) | — |
+| S8 | 워커 기동·DLL 로드 비용, SHA-256 처리량 | 11절 묶음 크기 | 측정값만(Release 스파이크 3회, i5-13600KF): `ShaderToolSet::Open` 82.5 ms 가운데 runtime 파일 31.3 MiB의 SHA-256 대조가 약 74 ms(Core SHA-256 423–426 MiB/s)이고 나머지 로드는 약 9 ms. 첫 DXIL 컴파일 5.6–6.4 ms(다음 3.6–3.7 ms), 첫 SPIR-V 3.6–4.3 ms(다음 2.9–3.1 ms), SPIRV-Cross ESSL 첫 0.34–0.36 ms(다음 0.07–0.10 ms), 첫 `spirv-val` 0.43–0.46 ms. Debug 빌드는 SHA-256 26–27 MiB/s, 열기 1.2 s. 워커 프로세스 기동은 워커가 없어 미측정 |
+| S9 | Apple `metal` 재배포 조건, Windows용 Metal Developer Tools(UE 5.8 기대 버전 5.3, `Developer/Apple/MetalShaderFormat/Private/MetalShaderFormat.cpp:724–725`) | 결정 5 | macOS 필요, 미측정 |
+| S10 | `d3dcompiler_47.dll` 재배포 조건과 고정 버전 | 8절 2항 FXC | — |
+| S11 | Android 에뮬레이터·CI의 OpenGL ES 3.2 context | SH6 검증 경로 | — |
+| S12 | (SH0) 데스크톱 GL 드라이버의 `#version 320 es` 수용(`GL_ARB_ES3_2_compatibility` 유무), (SH6) UE 수정 pass 없이 업스트림 SPIRV-Tools·SPIRV-Cross만으로 만든 ESSL이 Android 기기 드라이버에서 도는지 | P11, 7.2절 11항 | 데스크톱(GTX 1060 3GB, NVIDIA 560.94): GL 4.6 core context에 `GL_ARB_ES3_2_compatibility`·`GL_ARB_ES3_1_compatibility`·`GL_ARB_clip_control`이 있고 GLSL 목록에 `320 es`가 있다. `GLES31_PC` Renderer VS·PS 원문이 경고 없이 컴파일·링크된다. `WGL_EXT_create_context_es2_profile`로 만든 ES 3.2 context에서도 같다. AMD·Intel 드라이버는 미측정. 기기(SH6)는 미측정 |
 
 ## 6. 전체 순서
 
@@ -295,7 +297,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 
 ### 7.2 Rocks 규약
 
-1. **선언.** 셰이더 원문은 register·`[[vk::*]]`를 적지 않는다(UE의 일반 파라미터와 같다). 예외는 `Platform.rsh`가 형식별로 전개하는 매크로 둘이다: 루트 상수(2항)와 storage image 형식 `ROCKS_IMAGE_FORMAT(<형식>)`. DXC는 `RWTexture2D<float4>`의 SPIR-V 형식을 원소 타입으로 추론하므로(예: Rgba32f) 실제 형식이 다르면 Vulkan 검증 오류가 나고, ESSL image는 형식 한정자가 필요하다. 이 매크로는 SPIR-V 형식에서 DXC의 image format 지정으로, D3D 형식에서는 빈 것으로 전개한다. DXC가 지정을 지원하는지는 SH0에서 확인하고, 안 되면 워커가 SPIR-V `OpTypeImage`의 형식 operand를 고친다. Vulkan 형식 정의는 `shaderStorageImageWriteWithoutFormat`을 요구하지 않는다. 정적 샘플러 같은 다른 예약 space는 후속이다. 상수는 `cbuffer`·`ConstantBuffer<T>`·루트 상수로만 선언하고, 이름 없는 전역 uniform(`$Globals`가 되는 전역 변수)은 컴파일 오류다. UE는 느슨한 파라미터를 `$Globals`에 두지만, Rocks 파라미터는 언제나 이름 있는 버퍼다(13절).
+1. **선언.** 셰이더 원문은 register·`[[vk::*]]`를 적지 않는다(UE의 일반 파라미터와 같다). 예외는 `Platform.rsh`가 형식별로 전개하는 매크로 둘이다: 루트 상수(2항)와 storage image 형식 `ROCKS_IMAGE_FORMAT(<형식>)`. DXC는 `RWTexture2D<float4>`의 SPIR-V 형식을 원소 타입으로 추론하므로(예: Rgba32f) 실제 형식이 다르면 Vulkan 검증 오류가 나고, ESSL image는 형식 한정자가 필요하다. 이 매크로는 SPIR-V 형식에서 DXC의 image format 지정으로, D3D 형식에서는 빈 것으로 전개한다. DXC가 지정을 지원하는지는 SH0에서 확인하고, 안 되면 워커가 SPIR-V `OpTypeImage`의 형식 operand를 고친다. SH0 확인(2026-11-17): DXC 1.9.2609가 지원한다(`[[vk::image_format("rgba8")]]` 등 7종이 SPIR-V 형식으로 나오고, DXIL에서는 attribute를 무시하며 `-Wignored-attributes` 경고를 낸다, 16절). 그래서 D3D 형식의 빈 전개가 맞고, 셰이더 경고를 오류로 하는 정책(결정 7)에서는 D3D 형식에 attribute가 남지 않아야 한다. Vulkan 형식 정의는 `shaderStorageImageWriteWithoutFormat`을 요구하지 않는다. 정적 샘플러 같은 다른 예약 space는 후속이다. 상수는 `cbuffer`·`ConstantBuffer<T>`·루트 상수로만 선언하고, 이름 없는 전역 uniform(`$Globals`가 되는 전역 변수)은 컴파일 오류다. UE는 느슨한 파라미터를 `$Globals`에 두지만, Rocks 파라미터는 언제나 이름 있는 버퍼다(13절).
 2. **루트 상수(그리기별 상수).** `ROCKS_ROOT_CONSTANTS(Type, Name)` 하나로 선언한다. 크기는 최대 128 byte(32 DWORD, Vulkan push constant 최소 보장)이고 멤버는 5항 규칙을 따른다. 현재 `DrawConstants`(80 byte)가 첫 사용자다.
 
    | 형식 | 전개 | 실제 위치 |
@@ -469,7 +471,8 @@ Rocks도 같은 구조로 한다. 그래서 Rocks.Build에 공유 라이브러�
 - [x] bootstrap 명령(``Rocks.Build.Cli bootstrap``·``/t:ThirdPartyBootstrap``, ``ThirdPartyStore``): 임시 경로 → archive·파일 SHA-256·크기 검사 → 이동, 미러·``gh`` 인증 다운로드, 잠금(기다리지 않음), 빌드·워커 경로에서 받지 않음(정책 시험). 시험: 정상·SHA 불일치·중단 뒤 재시도·취소·오프라인·호스트 누락·손상 저장소·archive 경로 탈출과 링크(``ThirdPartyStore.*``). FXC 고정본(Windows SDK 10.0.22621.0의 ``d3dcompiler_47.dll`` 10.0.22621.2428)·Apple 도구 최소 버전(``MetalToolchain``, 32023) 등록. quarantine 제거는 macOS에서만 실제로 돌며 Windows 실행은 함수가 아무것도 하지 않음만 확인(macOS 미검증). CI 저장소 캐시(``foundation.yml``)는 CI가 bootstrap을 쓰는 단계(SH0)에서 더한다.
 - [x] 오프라인 도구 빌드: `Engine/Source/ThirdParty/<Lib>/Build/Build.ps1`·`Build.sh`(공용 함수 `Build/ThirdPartyTools/`), 수동 실행 workflow `.github/workflows/third-party-tools.yml`(정책 `PythonFreeMainPath`는 이 파일만 제외). 고정 태그는 DXC v1.9.2609(2026-09-29 최신 안정 릴리스), SPIRV-Cross·SPIRV-Tools·SPIRV-Headers는 그 submodule과 같은 Vulkan SDK 1.4.363.0. 공개 헤더(`dxcapi.h`·`WinAdapter.h`·`spirv_cross_c.h`·`spirv.h`·`libspirv.h`)는 커밋하고 스크립트가 빌드 원본과 byte 대조한다. SPIRV-Tools는 업스트림 공유 빌드가 Windows에서 링크되지 않아 C API(검증·최적화기)를 `SPIRV-Tools-c` 하나로 묶는다(CMake 래퍼 `Build/SpirvToolsC.cmake`).
 - [x] Windows x64 archive를 실제로 만들어 manifest `hosts.windows-x64`에 SHA-256을 기록하고 미러 bootstrap으로 검사했다. 빌드한 DXC가 서명된 DXIL(hash 0이 아님)과 SPIR-V를 만든다. `spirv_cross_c.h`·`libspirv.h`는 EngineTests가 경고 0으로 include한다.
-- [ ] Release 게시(사용자 확인 뒤), macOS arm64 산출물(`Build.sh` 미검증: install name·ad-hoc 서명·dSYM 포함), CI 저장소 캐시. (`dxcapi.h` 경고 0은 P4에서 확인했다, 9절 진척.)
+- [x] Release 게시(2026-11-17 확인): `third-party-DirectXShaderCompiler-1.9.2609-r1`·`third-party-SpirvCross-1.4.363.0-r1`·`third-party-SpirvTools-1.4.363.0-r1` Release 세 개가 있고, 각 Windows x64 archive의 SHA-256(GitHub asset digest)이 manifest `hosts.windows-x64.archive.sha256`과 같다.
+- [ ] macOS arm64 산출물(`Build.sh` 미검증: install name·ad-hoc 서명·dSYM 포함), CI 저장소 캐시. (`dxcapi.h` 경고 0은 P4에서 확인했다, 9절 진척.)
 
 ## 9. P4·P10 도구 로드와 Release 배제
 
@@ -506,6 +509,7 @@ Rocks는 P10 동적 라이브러리 API로 **모든 도구를 절대 경로에�
 - [x] 알려진 Release 예외 2건(SH2까지): Sandbox가 닿는 D3D12Graphics의 `d3dcompiler` 링크, Sandbox의 Windows OpenGLGraphics 링크. 실패가 아니라 `policy` 출력의 `note: known Release exception until SH2` 줄로 보고하고, 맞는 위반이 없어지면 `release-exception-stale` 실패로 예외를 지우게 한다.
 - [x] 음성 대조(ToolTests `Policy.ShaderToolReferenceControls`·`Policy.ReleaseExclusionControls`): Runtime 모듈의 도구 표 의존·include, Runtime 모듈의 binary 라이브러리 참조·`dxcapi.h` include·절대 경로 `Open`, 메인 프로세스(ShaderCompiler)의 로더 참조, 이름만 비슷한 `ShaderFormat` 폴더, Release Game 타깃의 Developer 모듈 도달·d3dcompiler·dxcompiler 링크, Windows Release 대상의 OpenGLGraphics(Android는 허용), 예외의 알림 전환과 낡은 예외.
 - [x] 시험(EngineTests): 생성 표 내용(manifest SHA 대조), 인자 오류, 빈 저장소의 bootstrap 안내, bootstrap한 저장소만으로 네 도구 열기와 함수 호출(DXC 버전, `spirv-val` 양성·음성, SPIRV-Cross ESSL 320 출력), SHA-256·크기 불일치와 없는 파일을 열지 않음, 현재 디렉터리·PATH의 같은 이름 라이브러리를 쓰지 않음(자식 probe, P10 음성 대조와 같은 시험 라이브러리). 저장소가 없거나 도구가 bootstrap되지 않았으면 도구를 여는 시험은 `[SKIP]`이며 실패가 아니다(P10과 같은 관례). 기본 빌드·Foundation CI는 저장소에 기대지 않는다(EngineTests는 CI에 없다).
+- [x] SH0 도구 스파이크(`Programs/ShaderToolSpike`)를 워커 자리 측정 프로그램으로 정책 허용 위치에 더했다(`shader-tool-table`·`shader-tool-binary-load`, 플랫폼 경계는 `Private/Win64`만 허용). 워커가 생기면 스파이크와 함께 지운다. SPIRV-Cross 함수 표에 `spvc_compiler_build_combined_image_samplers`를 더했다(ESSL에는 분리 texture·sampler가 없다).
 - [ ] 런타임 의존 파일 복사(Asan 런타임 복사를 일반 `RuntimeDependencies`로 넓히고 `redist` role을 실행 파일 옆에 두는 것)는 결정 3(D3D12 셰이더 모델) 뒤에 한다. 지금은 `redist` 파일이 없다.
 - [ ] macOS: Mac 저장소 루트 구현은 있으나 macOS 산출물(P3)이 없어 열기 시험은 SKIP이고 CI 미검증이다. `QueryDxcVersion`은 Windows만 구현했다.
 
@@ -662,7 +666,7 @@ Rocks 규칙:
 
 1. **확장자** — **결정됨(2026-11-13): `.rsf`(엔트리)·`.rsh`(include).** UE `.usf`/`.ush`의 역할 분리를 따르고 Rocks 명명(`.rasset`·`.rpkg`·`.rnug`)에 맞춘다. C++·HLSL 공용 헤더는 `.h`다(3절). 고려했던 대안은 `.hlsl`/`.hlsli`였다.
 2. **HLSL 2021 범위** — UE는 플랫폼 값 `EnablesHLSL2021ByDefault`(0 끔, 1 Global 셰이더 전부, 2 모든 셰이더, `Runtime/RHI/Public/DataDrivenShaderPlatformInfo.h:119`)에 레이 트레이싱 셰이더 강제(`Runtime/Engine/Private/ShaderCompiler/ShaderCompiler.cpp:3489–3498`)와 타입별 선택을 더한다. PCD3D_SM6·VULKAN_SM5·VULKAN_SM6·VULKAN_SM5_ANDROID·METAL_SM5·METAL_SM6·METAL_SM6_IOS는 1, PCD3D_SM5는 0(키 없음)이다(`Engine/Config/Windows/DataDrivenPlatformInfo.ini:130`, `Engine/Config/VulkanPC/DataDrivenPlatformInfo.ini:131·257`, `Engine/Config/Android/DataDrivenPlatformInfo.ini:128`, `Engine/Config/Mac/DataDrivenPlatformInfo.ini:53·94`, `Engine/Config/IOS/DataDrivenPlatformInfo.ini:106`). 권장: 형식 정의의 기본값 + 셰이더 타입 선택. `D3D11_SM5`에서 2021 셰이더는 SPIRV-Cross 경로를 탄다(`D3DShaderCompiler.cpp:807,873–890`).
-3. **D3D12 셰이더 모델** — 6.6(UE와 같음, `ShaderFormatD3D.cpp:107–110,139–142`) 또는 6.0~6.2 + bindless 프로필 6.6. 6.6은 Windows 10에서 Agility SDK가 Runtime 의존이 된다(9절). SH0에서 개발 기계 GPU·WARP 지원과 Windows 10 요건을 실측한 뒤 정한다(측정 S2).
+3. **D3D12 셰이더 모델** — 6.6(UE와 같음, `ShaderFormatD3D.cpp:107–110,139–142`) 또는 6.0~6.2 + bindless 프로필 6.6. 6.6은 Windows 10에서 Agility SDK가 Runtime 의존이 된다(9절). SH0에서 개발 기계 GPU·WARP 지원과 Windows 10 요건을 실측한 뒤 정한다(측정 S2). 측정 결과(S2, 2026-11-17, 결정은 아직 없음): 이 기계(Windows 11 build 26200)의 GTX 1060 3GB와 WARP가 Agility SDK 없이 최대 SM 6.8, resource binding tier 3이다. Windows 10의 OS 런타임 지원은 Windows 10 기계가 없어 미측정이다.
 4. **파라미터 선언** — MetaCompiler 셰이더 파라미터 종류(권장, 13절, 리플렉션 단일 출처·생성 HLSL을 디스크에 둠) 또는 UE 매크로 방식(`SHADER_PARAMETER_*`, `Runtime/RenderCore/Public/ShaderParameterMacros.h`).
 5. **형식별 생산 호스트** — 키가 호스트별이므로(10절) DXIL·SPIR-V·ESSL은 각 호스트가 직접 만든다. 한 호스트만 만들 수 있는 형식: DXBC는 Windows. metallib은 macOS(Xcode Metal 도구)를 기준으로 하고, Windows에도 Apple Metal Developer Tools(UE 5.8이 지원, 기대 버전 5.3, `MetalShaderFormat.cpp:724–725,1030–1137`)가 있으면 만들게 할지 정한다(권장: 허용, 형식 정의의 생산 호스트 규칙, 측정 S9). 만들 수 없는 호스트에서는 `UnsupportedCapability`이고, 원격 워커가 생기면 그쪽으로 보낸다.
 6. **전처리기** — Rocks 자체 구현을 `Developer/ShaderCompiler`에 둔다(권장, UE처럼 메인 프로세스에서 실행. UE 전처리기 stb_preprocess는 Epic 저작권 원본이라 가져올 수 없다, `Developer/ShaderPreprocessor/Private/stb_preprocess/preprocessor.h:1`) 또는 라이선스를 확인한 외부 C 전처리기를 P3 C 원본 규칙으로 들인다. DXC `-P`는 메인 프로세스가 DXC를 열게 되어(9절 규칙 위반) 쓰지 않는다. 자체 구현의 정합성은 측정 S7로 확인한다.
@@ -687,6 +691,21 @@ Rocks 규칙:
 | SH4 | 감시 재컴파일(`DirectoryWatch`)·오류 위치·디버그 심볼·PSO 교체 | SH2 | 저장 후 10초 안 반영(계획 I5) |
 | SH5 | D3D11Graphics → MetalGraphics | SH2·P12·P15 | 각 backend가 D3D12와 허용 오차 안 일치, 7.3절 (c)·(e)·(g)의 D3D11·Metal 부분 |
 | SH6 | Android: `GLES31_ANDROID` 기기 실행, `VULKAN_ANDROID` 형식과 VulkanGraphics Android | SH2·P13·P11 | Android(실기기 또는 S11 에뮬레이터)에서 D3D12 기준 이미지와 허용 오차 안 일치, 7.3절 (c)·(i)의 Android 부분, S12(기기) |
+
+SH0 진척(2026-11-17, `feature/shader-tools`, Windows 부분 구현):
+- [x] 스파이크 `Programs/ShaderToolSpike`(Program 타깃, `ShaderToolSpike --out <디렉터리> [--sm 6_0]`). 도구는 P4 `ShaderToolSet`으로 사용자 저장소에서 연다. 산출물은 `<out>` 아래에 두고 저장소에는 이 요약만 남긴다. `manifest.json`(산출물 이름·크기·SHA-256, 결정성 비교용)과 `report.json`(검사·측정값)을 쓴다.
+- [x] 형식별 산출(내장 Renderer VS·PS): DXIL `vs_6_0`·`ps_6_0`(`-Qstrip_reflect`), SPIR-V(`-spirv -fspv-target-env=vulkan1.1 -fvk-use-dx-position-w`), DXBC(FXC 고정본 `vs_5_0`·`ps_5_0`), MSL 2.1 macOS, ESSL `#version 320 es`의 `GLES31_ANDROID`(`fixup_clipspace`·`flip_vert_y` 켬)와 `GLES31_PC`(끔), HLSL 5.0. HLSL 5.0 출력은 FXC로 다시 컴파일된다(D3D11 대체 경로 확인).
+- [x] 검증: `spirv-val`(vulkan1.1) 통과, DXIL container digest 검사 통과(0·preview 우회 값이면 실패 처리), 리플렉션 덤프(DXIL `ID3D12ShaderReflection`, SPIR-V SPIRV-Reflect: 바인딩·상수 버퍼 오프셋·입출력 시맨틱과 location).
+- [x] `ROCKS_IMAGE_FORMAT`: DXC 1.9.2609가 `[[vk::image_format]]`을 지원한다. `rgba8`·`rgba8snorm`·`rgba16f`·`r11g11b10f`·`r32f`·`r32ui`·`unknown`이 SPIR-V 형식 그대로 나오고, 지정이 없으면 `float4`에서 `Rgba32f`로 추론한다. DXIL은 attribute를 무시하며 `-Wignored-attributes` 경고를 낸다. ESSL 320은 `r11g11b10f`를 받지 않고(SPIRV-Cross 오류 "image format not supported in ES profile"), `unknown`은 형식 한정자 없는 image를 낸다.
+- [x] SPIRV-Cross 실수 출력(10절): 극값 fixture 8개(최소·최대 비정규수, 최소 정규수, 최대 유한값, 0.1, 1/3, 1+ulp, 음의 비정규수)의 ESSL·MSL 철자가 C locale에서 독립 계산한 `%.32g`(정확한 반올림)와 같고 원래 bit로 다시 읽힌다. 쉼표 소수점 locale(`de-DE`)에서도 출력 byte가 같다(`fixup_radix_point`). Windows UCRT 기준이며 다른 CRT(macOS)는 미측정이다.
+- [x] 측정 S2·S3(Windows 부분)·S6·S8·S12(데스크톱): 5.4절 결과 열.
+- 규약 검토 자료(리플렉션 덤프에서 확인한 것, 결정 아님):
+  - SPIR-V에서 원문의 `register(t0)`·`register(s0)`가 같은 set 0·binding 0이 된다(texture와 sampler가 한 binding을 나눠 Vulkan descriptor layout으로 쓸 수 없다). 7.2절 4항 워커 재배치가 필요하다는 근거다. DXIL은 종류별 register 공간이라 겹치지 않는다.
+  - 상수 버퍼 `DrawConstants`는 DXIL·SPIR-V 모두 80 byte, `transform` 0·`color` 64다. SPIRV-Cross ESSL은 `layout(row_major) mat4`와 `vec * M`, HLSL 5.0은 `column_major`로 낸다(행렬 옵션은 S5, 7.2절 6항).
+  - SPIR-V 입출력은 location 0부터 선언 순서이고, DXC는 `-fspv-reflect` 없이는 시맨틱 decoration을 내지 않아 시맨틱은 변수 이름(`in.var.TEXCOORD0`)에만 남는다. SPIRV-Cross HLSL 5.0은 시맨틱을 location 기준 `TEXCOORDn`으로 다시 쓴다(`COLOR0` → `TEXCOORD1`).
+  - ESSL의 결합 sampler는 이름이 `_29`처럼 id이고 binding이 없다. 7.2절 GLES binding 재매김과 이름 규칙을 워커가 정해야 한다.
+- [ ] macOS: S1(macOS DXC 서명), S3 Windows–macOS 사이 byte 비교, S9, macOS CRT의 실수 출력. 스파이크 macOS 구현(`Private/Mac`, DXC는 `WinAdapter.h`)은 macOS 산출물(P3)과 함께 한다.
+- [ ] S3의 FMA3 유무·OS 버전 차이와 S12의 다른 GPU 공급자는 기계가 하나라 미측정이다.
 
 ## 17. 개정 이력
 

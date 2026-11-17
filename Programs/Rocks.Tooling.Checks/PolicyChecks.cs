@@ -204,6 +204,7 @@ public static partial class PolicyChecks
     /// <item>Core/Source/Runtime/PlatformBase/Private/{Win64,Mac,Posix,Apple,Android}/</item>
     /// <item>Core/Source/Developer/TestSupport/Private/{Win64,Mac,Posix,Apple,Android}/</item>
     /// <item>Programs/Commandlet/Private/Win64/</item>
+    /// <item>Programs/ShaderToolSpike/Private/Win64/: SH0 도구 스파이크의 DXC COM·D3D12·WGL 측정 코드.</item>
     /// <item>Engine/Source/{Runtime,Developer}/&lt;Module&gt;/Private/{Win64,Mac,Posix,Apple,Android}/: 창·그래픽
     /// backend처럼 OS SDK를 직접 쓰는 엔진 모듈 구현. 공개 헤더(Public/)와 공통 구현은 여전히 금지다.</item>
     /// </list>
@@ -211,7 +212,7 @@ public static partial class PolicyChecks
     public static bool IsNativeBackend(string relative)
     {
         string[] parts = relative.Replace('\\', '/').Split('/');
-        if (parts.Length >= 5 && parts[0] == "Programs" && parts[1] == "Commandlet" && parts[2] == "Private")
+        if (parts.Length >= 5 && parts[0] == "Programs" && parts[1] is "Commandlet" or "ShaderToolSpike" && parts[2] == "Private")
         {
             return parts[3] == "Win64";
         }

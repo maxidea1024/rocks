@@ -26,6 +26,7 @@ internal static class ProgramsPolicyReviewTests
         {
             using TemporaryDirectory temporary = new();
             temporary.Write("Programs/Commandlet/Private/Win64/Main.cpp", "#include <Windows.h>\n");
+            temporary.Write("Programs/ShaderToolSpike/Private/Win64/Probe.cpp", "#include <Windows.h>\n");
             temporary.Write("Engine/Source/Runtime/PlatformWindow/Private/Win64/Window.cpp", "#include <Windows.h>\n");
             temporary.Write("Engine/Source/Developer/Tool/Private/Mac/Tool.cpp", "#if __APPLE__\n#endif\n");
             Verify.Equal(0, PolicyChecks.PlatformBoundary(temporary.Root).Count, "native backend entry rejected");
@@ -38,6 +39,8 @@ internal static class ProgramsPolicyReviewTests
                 "Programs/Commandlet/Private/Win64Wrong/Main.cpp",
                 "Programs/Commandlet/Private/Mac/Main.mm",
                 "Programs/Commandlet/Private/Common/Main.cpp",
+                "Programs/ShaderToolSpike/Private/Common/Main.cpp",
+                "Programs/ShaderToolSpike/Private/Mac/Probe.cpp",
                 "Programs/CommandletWrong/Private/Win64/Main.cpp",
                 "Programs/Other/Private/Win64/Main.cpp",
                 // 테스트 소스는 STL 정책 밖이지만 플랫폼 경계는 그대로 적용된다.
