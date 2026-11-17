@@ -143,9 +143,10 @@ Result<usize> DecompressAppend(Span<const uint8> source, usize maxOutputBytes,
     }
 
     while (true) {
-        // 재시도 전 길이를 되돌린다(축소는 저장소 유지). 0으로 채우지 않는다.
+        // 재시도 전 길이를 되돌린다(축소는 저장소 유지). 0으로 채우지 않는다. 성장과 상한은 이
+        // 해제기가 정하므로 Array slack을 겹치지 않게 정확히 예약한다.
         RestoreLength(output, base);
-        auto grown = output.TryAppendUninitialized(capacity);
+        auto grown = AppendDecodeStorage(output, capacity);
         if (!grown) {
             RestoreLength(output, base);
             return Result<usize>::Failure(grown.Error());

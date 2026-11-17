@@ -363,7 +363,7 @@ struct Bench {
         desc.vertex = {hlsl, vertexGlsl};
         desc.pixel = {hlsl, Text(ColorPixelGlsl)};
         desc.layout = layout;
-        desc.colorFormat = Format::RGBA8Unorm;
+        desc.colorFormat = PixelFormat::RGBA8Unorm;
         return device->CreatePipeline(desc);
     }
 
@@ -716,7 +716,7 @@ uint32 RunVertexChecks(const char* name, Device& device, Allocator& allocator) n
     TextureDesc targetDesc;
     targetDesc.width = TargetSize;
     targetDesc.height = TargetSize;
-    targetDesc.format = Format::RGBA8Unorm;
+    targetDesc.format = PixelFormat::RGBA8Unorm;
     targetDesc.usage = TextureUsage::RenderTarget;
     auto target = device.CreateTexture(targetDesc, {});
     Check(target.IsOk(), "render target creation");

@@ -279,7 +279,7 @@ void FrameArena::PushDestructor(detail::FrameArenaDestructor* record) noexcept {
 void FrameArena::ReleaseBlock(Block* block) noexcept {
     // backing에 돌려주기 전에 poison을 푼다(backing이 그 메모리를 다시 쓸 수 있게).
     AsanUnpoisonMemory(Payload(block), block->bytes - BlockHeaderBytes);
-    DestroyAt(block);
+    static_assert(IsTriviallyDestructibleV<Block>);
     if (!backing_.Deallocate(block).IsOk()) {
         platform::Fatal("FrameArena backing rejected its own block");
     }

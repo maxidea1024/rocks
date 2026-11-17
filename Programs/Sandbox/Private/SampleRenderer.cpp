@@ -122,7 +122,8 @@ Renderer::~Renderer() {
     Shutdown();
 }
 
-Result<void> Renderer::Initialize(graphics::Device& device, graphics::Format colorFormat) noexcept {
+Result<void> Renderer::Initialize(graphics::Device& device,
+                                  graphics::PixelFormat colorFormat) noexcept {
     if (device_ != nullptr) {
         return Result<void>::Failure(ErrorCode::AlreadyExists);
     }

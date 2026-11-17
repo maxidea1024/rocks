@@ -40,6 +40,7 @@ internal static class ActionGraph
 
         string root = Path.GetFullPath(request.RootDirectory);
         string output = Path.GetFullPath(request.OutputDirectory, root);
+        string[] targetArguments = TargetCompileArguments(request, root).ToArray();
         var modules = new Dictionary<string, NativeModuleInput>(StringComparer.OrdinalIgnoreCase);
         foreach (var module in request.Modules)
         {
@@ -194,6 +195,8 @@ internal static class ActionGraph
                     arguments.Add("-flto=thin");
                 }
 
+                // 타깃 단위 인자: 로그 컴파일 하한과 소스 경로 접두 매핑은 모든 모듈·번역 단위에 같다(모듈 인자로 바꾸지 못한다).
+                arguments.AddRange(targetArguments);
                 arguments.AddRange(defines.Select(value => (windows ? "/D" : "-D") + value));
                 foreach (string include in includes)
                 {
@@ -366,6 +369,37 @@ internal static class ActionGraph
         CodeOptimization.Default => configuration is NativeConfiguration.Development or NativeConfiguration.Release,
         _ => throw new ArgumentException($"Invalid code optimization: {optimization}")
     };
+
+    /// <summary>
+    /// 타깃의 모든 compile action이 같은 값으로 받는 인자다(Docs/Design/LoggingSystem.ko.md 6.4절).
+    /// <list type="bullet">
+    /// <item><c>ROCKS_LOG_COMPILED_MINIMUM=n</c>: 로그 컴파일 하한(<see cref="LogCompiledMinimums"/>). 타깃 재정의가 없으면 구성 기본값.</item>
+    /// <item><c>-fmacro-prefix-map=&lt;루트&gt;&lt;구분자&gt;=</c>: <c>__FILE__</c>·<c>__builtin_FILE()</c>을 루트 기준 상대 경로로 남긴다
+    /// (로그 호출 위치·assert 위치가 빌드 장소를 담지 않는다). 루트는 소스 루트와, 설치 SDK 게임 빌드면 SDK 루트다. 디버그 정보 경로는
+    /// 바꾸지 않으므로 <c>-ffile-prefix-map</c>이 아니다. clang-cl은 이 옵션을 직접 받지 않아 <c>/clang:</c>로 넘긴다. clang은
+    /// Windows에서 접두를 구분자·대소문자 무관하게 맞춘다(clang-cl 21.1.6로 확인).</item>
+    /// </list>
+    /// </summary>
+    internal static IEnumerable<string> TargetCompileArguments(NativeBuildRequest request, string root)
+    {
+        bool windows = request.Toolchain.Platform == NativePlatform.Windows;
+        yield return (windows ? "/D" : "-D") + LogCompiledMinimums.Macro(request.Configuration, request.LogCompiledMinimum);
+        var prefixes = new List<string> { root };
+        if (request.SdkDirectory is not null)
+        {
+            prefixes.Add(Path.GetFullPath(request.SdkDirectory));
+        }
+
+        // 경로는 host 철자다(Windows host의 Android 교차 빌드도 '\'). 대상이 아니라 host 구분자를 붙인다.
+        char separator = Path.DirectorySeparatorChar;
+        foreach (string prefix in prefixes.Distinct(NativeToolchains.PathComparer))
+        {
+            string directory = Path.TrimEndingDirectorySeparator(prefix);
+            // 드라이브·파일 시스템 루트(C:\, /)는 이미 구분자로 끝난다.
+            string mapped = directory.EndsWith(separator) ? directory : directory + separator;
+            yield return (windows ? "/clang:" : "") + "-fmacro-prefix-map=" + mapped + "=";
+        }
+    }
 
     /// <summary>Release의 최적화된 모듈만 ThinLTO bitcode로 만든다. 최적화를 끈 모듈은 일반 object로 남는다.</summary>
     internal static bool UsesThinLto(NativeConfiguration configuration, CodeOptimization optimization) =>

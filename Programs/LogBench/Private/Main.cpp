@@ -18,6 +18,11 @@
 // 큐가 차서 버리는 경우가 섞이지 않도록 묶음마다 Flush한다(Flush 시간은 재지 않는다).
 //
 // 사용: LogBench [건수]. Release로 빌드해 같은 기기에서 비교한다.
+//
+// Release 문자열 제외 확인(LG5): Release 링크 결과 LogBench.exe에 Debug 템플릿 "compiled out
+// {Index} {Ratio}"는 없고 Info 템플릿 "enabled {Index} {Ratio}"는 있다(.obj는 ThinLTO
+// bitcode라 링크 결과를 본다). Windows clang-cl 21.1.6·lld-link 한 구성에서 확인한 사실이며
+// 일반 보장이 아니다(최적화가 참조 없는 리터럴을 버리는 데 기댄다).
 namespace {
 
 using namespace rocks;

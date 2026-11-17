@@ -89,7 +89,7 @@ public:
         }
 
         swapChain = createdSwapChain.Value();
-        auto initialized = renderer.Initialize(device, graphics::Format::RGBA8UnormSrgb);
+        auto initialized = renderer.Initialize(device, graphics::PixelFormat::RGBA8UnormSrgb);
         if (!initialized) {
             return initialized;
         }

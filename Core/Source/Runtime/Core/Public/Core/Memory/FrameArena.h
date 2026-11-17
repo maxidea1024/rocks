@@ -49,9 +49,11 @@ struct FrameArenaDestructor {
 template <typename T>
 void DestroyFrameArenaObjects(void* objects, usize count) noexcept {
     // 배열은 생성 역순으로 부순다.
-    T* typed = static_cast<T*>(objects);
-    for (usize index = count; index > 0; --index) {
-        DestroyAt(typed + index - 1);
+    if constexpr (!IsTriviallyDestructibleV<T>) {
+        T* typed = static_cast<T*>(objects);
+        for (usize index = count; index > 0; --index) {
+            DestroyAt(typed + index - 1);
+        }
     }
 }
 
@@ -72,7 +74,7 @@ public:
             return Result<T*>::Failure(placed.Error());
         }
 
-        T* object = ConstructAt<T>(placed.Value().objects, Forward<Args>(args)...);
+        T* object = InitializeAt<T>(placed.Value().objects, Forward<Args>(args)...);
         Register(placed.Value());
         return Result<T*>::Success(object);
     }
@@ -96,7 +98,7 @@ public:
 
         T* objects = static_cast<T*>(placed.Value().objects);
         for (usize index = 0; index < count; ++index) {
-            ConstructAt<T>(objects + index);
+            InitializeAt<T>(objects + index);
         }
 
         Register(placed.Value());

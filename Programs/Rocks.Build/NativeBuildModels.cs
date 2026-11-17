@@ -72,6 +72,47 @@ public static class NativeConfigurations
     };
 }
 
+/// <summary>
+/// 로그 레벨이다. 값은 C++ <c>rocks::LogLevel</c>(Core/Diagnostics/LogRecord.h)과 같은 순서·숫자다(Trace=0 … Fatal=5).
+/// 타깃 규칙의 <c>TargetRules.LogCompiledMinimum</c>으로 컴파일에 남길 최소 레벨을 고를 때 쓴다.
+/// </summary>
+public enum LogLevel { Trace, Debug, Info, Warning, Error, Fatal }
+
+/// <summary>
+/// 로그 컴파일 하한이다(Docs/Design/LoggingSystem.ko.md 6.4절, UE COMPILED_IN_MINIMUM_VERBOSITY 대응). Rocks.Build가 타깃의 모든
+/// 모듈·번역 단위에 같은 <c>ROCKS_LOG_COMPILED_MINIMUM</c>을 정의한다. 모듈마다 다르면 Log.h의 inline 함수 본문이 TU마다 달라져
+/// ODR 위반이므로 모듈은 이 매크로를 정의하지 못한다(InputValidation이 거부한다).
+/// </summary>
+public static class LogCompiledMinimums
+{
+    /// <summary>매크로 이름이다. 값은 <see cref="LogLevel"/>의 숫자다.</summary>
+    public const string MacroName = "ROCKS_LOG_COMPILED_MINIMUM";
+
+    /// <summary>구성 기본값이다: Debug·Asan은 Trace, Development는 Debug, Release는 Info.</summary>
+    public static LogLevel Default(NativeConfiguration configuration) => configuration switch
+    {
+        NativeConfiguration.Debug or NativeConfiguration.Asan => LogLevel.Trace,
+        NativeConfiguration.Development => LogLevel.Debug,
+        NativeConfiguration.Release => LogLevel.Info,
+        _ => throw new ArgumentException($"Invalid native configuration: {configuration}")
+    };
+
+    /// <summary>
+    /// 매크로 정의(<c>ROCKS_LOG_COMPILED_MINIMUM=n</c>)다. <paramref name="level"/>이 null이면 구성 기본값을 쓴다. 정의되지 않은
+    /// 레벨 값은 ArgumentException이다.
+    /// </summary>
+    public static string Macro(NativeConfiguration configuration, LogLevel? level)
+    {
+        LogLevel value = level ?? Default(configuration);
+        if (!Enum.IsDefined(value))
+        {
+            throw new ArgumentException($"Invalid log compiled minimum: {(int)value}");
+        }
+
+        return MacroName + "=" + ((int)value).ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
+}
+
 public enum NativeModuleKind { StaticLibrary, Executable }
 
 /// <summary>
@@ -247,6 +288,10 @@ public sealed record NativeBuildRequest
     public string RootDirectory { get; init; } = Directory.GetCurrentDirectory();
 
     public NativeConfiguration Configuration { get; init; } = NativeConfiguration.Debug;
+
+    // 로그 컴파일 하한의 타깃 재정의다(TargetRules.LogCompiledMinimum). null이면 구성 기본값이다. 모든 compile action이 같은 값을
+    // 받는다(LogCompiledMinimums).
+    public LogLevel? LogCompiledMinimum { get; init; }
 
     // 빈 목록은 모든 모듈을 뜻한다. 지정하면 도달하는 dependency만 빌드한다.
     public IReadOnlyList<string> Targets { get; init; } = [];

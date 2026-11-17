@@ -188,7 +188,7 @@ Result<void*> ExternalAllocator::Allocate(usize bytes, usize alignment, uint32 t
         platform::Fatal("ExternalAllocator backend overlaps allocation metadata");
     }
 
-    auto* record = ConstructAt<Record>(storage);
+    auto* record = InitializeAt<Record>(storage);
     record->address = address;
     record->bytes = bytes;
     bool overflow = false;
@@ -236,7 +236,7 @@ Result<void*> ExternalAllocator::Allocate(usize bytes, usize alignment, uint32 t
         if (!backend_.deallocate(backend_.context, address)) {
             platform::Fatal("ExternalAllocator backend rejected rollback");
         }
-        DestroyAt(record);
+        static_assert(IsTriviallyDestructibleV<RemovePointerT<decltype(record)>>);
         FreeRecord(storage);
         return Result<void*>::Failure(ErrorCode::Overflow);
     }
@@ -299,7 +299,7 @@ Result<void> ExternalAllocator::Deallocate(void* address) noexcept {
         stats_.liveBytes -= static_cast<uint64>(record->bytes);
         changed_.NotifyAll();
     }
-    DestroyAt(record);
+    static_assert(IsTriviallyDestructibleV<RemovePointerT<decltype(record)>>);
     FreeRecord(record);
     return Result<void>::Success();
 }

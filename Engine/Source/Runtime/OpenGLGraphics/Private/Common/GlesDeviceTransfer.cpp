@@ -82,7 +82,7 @@ Result<void> GlesDevice::UpdateTexture(TextureHandle handle, uint32 mipLevel,
     const uint32 width = MipExtent(record->width, mipLevel);
     const uint32 height = MipExtent(record->height, mipLevel);
     if (mipLevel >= record->mipLevels ||
-        pixels.Size() != static_cast<usize>(width) * height * BytesPerPixel(record->format)) {
+        pixels.Size() != PixelFormatImageBytes(record->format, width, height)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -123,8 +123,8 @@ Result<void> GlesDevice::UploadTextureFromStaging(TextureHandle handle, uint32 m
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    const uint64 bytes = static_cast<uint64>(MipExtent(record->width, mipLevel)) *
-                         MipExtent(record->height, mipLevel) * BytesPerPixel(record->format);
+    const uint64 bytes = PixelFormatImageBytes(record->format, MipExtent(record->width, mipLevel),
+                                               MipExtent(record->height, mipLevel));
     if (offset > memory.Value().size || bytes > memory.Value().size - offset) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -187,9 +187,8 @@ Result<ReadbackRequest> GlesDevice::RequestReadback(TextureHandle target) noexce
     ReadbackRecord readback;
     readback.width = record->width;
     readback.height = record->height;
-    readback.bytesPerPixel = BytesPerPixel(record->format);
-    const uint64 bytes =
-        static_cast<uint64>(record->width) * record->height * readback.bytesPerPixel;
+    const uint64 bytes = PixelFormatImageBytes(record->format, record->width, record->height);
+    readback.bytes = bytes;
     gl_.GenBuffers(1, &readback.buffer);
     gl_.BindBuffer(GL_PIXEL_PACK_BUFFER, readback.buffer);
     gl_.BufferData(GL_PIXEL_PACK_BUFFER, static_cast<GLsizeiptr>(bytes), nullptr, GL_STREAM_READ);
@@ -232,7 +231,7 @@ Result<bool> GlesDevice::TryReadback(ReadbackHandle handle, Span<uint8> out) noe
         return Result<bool>::Failure(ErrorCode::StaleHandle);
     }
 
-    const usize bytes = static_cast<usize>(record->width) * record->height * record->bytesPerPixel;
+    const usize bytes = static_cast<usize>(record->bytes);
     if (out.Size() != bytes) {
         return Result<bool>::Failure(ErrorCode::InvalidArgument);
     }

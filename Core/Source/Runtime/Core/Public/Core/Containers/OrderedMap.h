@@ -346,6 +346,17 @@ public:
         return table_.Compact();
     }
 
+    // 여유 용량이 UE 5.8 축소 임계값을 넘을 때만 Compact한다(항목 + 색인 2칸을 원소당 byte로 본다).
+    // 삽입 순서는 유지한다. Erase는 자동으로 용량을 줄이지 않는다. 오류: 순회 중이면 Busy, 재할당
+    // 실패는 allocator 오류이며 둘 다 내용·순서·주소·용량을 보존한다. 실제로 줄면 포인터가 무효다.
+    Result<void> ShrinkSlack() noexcept {
+        if (iterationDepth_ != 0) {
+            return Result<void>::Failure(ErrorCode::Busy);
+        }
+
+        return table_.ShrinkSlack();
+    }
+
     // 키가 있으면 지우고 true, 없으면 false다. 남은 원소의 순서는 그대로다. 죽은 항목이 산
     // 항목의 절반을 넘으면 제자리 압축이 일어나 모든 포인터가 무효다. 순회 중 호출은
     // Fatal이다.
@@ -747,8 +758,11 @@ private:
                     return Result<InsertOutcome>::Failure(ErrorCode::InvalidArgument);
                 }
 
-                DestroyAt(entry.Value());
-                ConstructAt<V>(entry.value, Forward<ValueArg>(value));
+                if constexpr (!IsTriviallyDestructibleV<V>) {
+                    DestroyAt(entry.Value());
+                }
+
+                InitializeAt<V>(entry.value, Forward<ValueArg>(value));
             }
 
             if (resultValue != nullptr) {

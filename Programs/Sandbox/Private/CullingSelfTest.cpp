@@ -156,7 +156,7 @@ struct Bench {
         desc.vertex = {sample::BuiltinShaderHlsl(), sample::BuiltinVertexGlsl()};
         desc.pixel = {sample::BuiltinShaderHlsl(), sample::BuiltinPixelGlsl()};
         desc.layout = {attributes, streams};
-        desc.colorFormat = Format::RGBA8UnormSrgb;
+        desc.colorFormat = PixelFormat::RGBA8UnormSrgb;
         desc.cullMode = cull;
         return device->CreatePipeline(desc);
     }
@@ -313,7 +313,7 @@ uint32 RunCullingChecks(const char* name, Device& device, sample::Renderer& rend
     TextureDesc targetDesc;
     targetDesc.width = Size;
     targetDesc.height = Size;
-    targetDesc.format = Format::RGBA8UnormSrgb;
+    targetDesc.format = PixelFormat::RGBA8UnormSrgb;
     targetDesc.usage = TextureUsage::RenderTarget;
     auto target = device.CreateTexture(targetDesc, {});
     auto capture = device.CreateTexture(targetDesc, {});

@@ -48,7 +48,7 @@ GlesFeatures DetectFeatures(const GlesFunctions& gl, bool desktopSrgbWriteContro
 
 // 텍스처 형식 대응 하나다. 새 픽셀 형식(PixelFormat 확장)은 GlesFormats.cpp의 표에 행을 더한다.
 struct GlesTextureFormat {
-    Format format = Format::Unknown;
+    PixelFormat format = PixelFormat::Unknown;
     // glTexStorage2D 내부 형식이다.
     GLenum internalFormat = 0;
     // glTexSubImage2D·glReadPixels의 외부 형식·타입이다.
@@ -64,7 +64,7 @@ struct GlesTextureFormat {
 };
 
 // format의 대응이다. 표에 없는 형식(Unknown 포함)은 nullptr이다.
-const GlesTextureFormat* FindTextureFormat(Format format) noexcept;
+const GlesTextureFormat* FindTextureFormat(PixelFormat format) noexcept;
 
 // format을 이 장치에서 샘플링(renderTarget이면 렌더 타깃으로도)할 수 있는지다.
 bool SupportsTextureFormat(const GlesTextureFormat& format, const GlesFeatures& features,

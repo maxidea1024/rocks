@@ -104,6 +104,11 @@ public:
         return map_.Compact();
     }
 
+    // 여유가 UE 5.8 축소 임계값을 넘을 때만 줄인다(OrderedMap::ShrinkSlack). 순서는 유지한다.
+    Result<void> ShrinkSlack() noexcept {
+        return map_.ShrinkSlack();
+    }
+
     usize Count() const noexcept {
         return map_.Count();
     }

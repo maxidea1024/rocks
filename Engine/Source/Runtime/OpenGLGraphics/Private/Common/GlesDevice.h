@@ -61,7 +61,7 @@ struct TextureRecord {
     uint32 width = 0;
     uint32 height = 0;
     uint32 mipLevels = 1;
-    Format format = Format::Unknown;
+    PixelFormat format = PixelFormat::Unknown;
 };
 
 struct PipelineRecord {
@@ -113,7 +113,8 @@ struct ReadbackRecord {
     uint64 fenceValue = 0;
     uint32 width = 0;
     uint32 height = 0;
-    uint32 bytesPerPixel = 0;
+    // 읽을 byte 수다(width × height 이미지 하나).
+    uint64 bytes = 0;
 };
 
 // OpenGL staging은 CPU 메모리다(TextureStreaming 5.4절). client 메모리 업로드(glTexSubImage2D·
@@ -314,7 +315,7 @@ private:
         GLuint framebuffer = 0;
         uint32 width = 0;
         uint32 height = 0;
-        Format format = Format::Unknown;
+        PixelFormat format = PixelFormat::Unknown;
         TextureHandle texture;
         SwapChainHandle swapChain;
     };

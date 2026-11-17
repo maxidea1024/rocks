@@ -295,7 +295,7 @@ CompressedBlocksWriter::TryBegin(const CompressedBlocksSettings& settings, uint6
     if (memory == nullptr) {
         return Result<CompressedBlocksWriter>::Failure(ErrorCode::OutOfMemory);
     }
-    State* state = ConstructAt<State>(memory);
+    State* state = InitializeAt<State>(memory);
     state->allocator = &allocator;
     state->format = settings.Compression().Format();
     state->level = settings.Compression().Level();

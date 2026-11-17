@@ -69,7 +69,7 @@ Result<void*> BinnedAllocator::CheckedBacking::Allocate(usize bytes, usize align
         }
     }
     auto* record =
-        ConstructAt<BackingRecord>(recordStorage, BackingRecord{address, bytes, records_});
+        InitializeAt<BackingRecord>(recordStorage, BackingRecord{address, bytes, records_});
     records_ = record;
     return result;
 }
@@ -88,7 +88,7 @@ Result<void> BinnedAllocator::CheckedBacking::Deallocate(void* address) noexcept
     }
     BackingRecord* record = *link;
     *link = record->next;
-    DestroyAt(record);
+    static_assert(IsTriviallyDestructibleV<RemovePointerT<decltype(record)>>);
     platform::AlignedFree(record);
     return Result<void>::Success();
 }
@@ -206,7 +206,7 @@ Result<void*> BinnedAllocator::Allocate(usize bytes, usize alignment, uint32 tag
         }
     }
 
-    auto* record = ConstructAt<Record>(storage, Record{result.Value(), bytes, bin, records_});
+    auto* record = InitializeAt<Record>(storage, Record{result.Value(), bytes, bin, records_});
     records_ = record;
     ++stats_.liveAllocations;
     stats_.liveBytes += bytes;
@@ -242,7 +242,7 @@ Result<void> BinnedAllocator::Deallocate(void* address) noexcept {
     *link = record->next;
     --stats_.liveAllocations;
     stats_.liveBytes -= record->bytes;
-    DestroyAt(record);
+    static_assert(IsTriviallyDestructibleV<RemovePointerT<decltype(record)>>);
     platform::AlignedFree(record);
     return Result<void>::Success();
 }

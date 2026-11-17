@@ -400,7 +400,7 @@ Result<usize> DecompressAppend(void* codec, uint32 requiredDictionaryId, Span<co
     }
 
     const usize base = output.Size();
-    auto grown = output.TryAppendUninitialized(capacity);
+    auto grown = AppendDecodeStorage(output, capacity);
     if (!grown) {
         return Result<usize>::Failure(grown.Error());
     }

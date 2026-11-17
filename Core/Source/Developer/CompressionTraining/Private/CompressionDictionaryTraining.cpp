@@ -92,7 +92,7 @@ ZDICT_params_t BuilderParameters(int32 level, uint32 id) noexcept {
 // 않는다(POSIX 소멸자는 잠긴 mutex에서 Fatal이다). 첫 호출에서 thread-safe하게 만든다.
 platform::Mutex& TrainingMutex() noexcept {
     alignas(platform::Mutex) static unsigned char storage[sizeof(platform::Mutex)];
-    static platform::Mutex* mutex = ConstructAt<platform::Mutex>(storage);
+    static platform::Mutex* mutex = InitializeAt<platform::Mutex>(storage);
     return *mutex;
 }
 

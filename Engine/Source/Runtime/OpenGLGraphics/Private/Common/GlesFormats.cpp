@@ -5,14 +5,15 @@ namespace rocks::graphics::gles {
 namespace {
 
 // 픽셀 형식 표다. ES 3.2 core는 RGBA8·SRGB8_ALPHA8을 샘플링·렌더 타깃 모두로 받는다(ES 3.2 사양
-// 표 8.10·8.13). PixelFormat 확장 때 이 표에 행을 더하고, core 밖 형식은 sampleFeature·
-// renderFeature로 확장을 요구한다(예: R16 UNORM → TextureNorm16, RGBA16F 렌더 타깃 →
+// 표 8.10·8.13). PF1 단계에서는 이 두 형식만 대응하고 표에 없는 형식은 Unsupported다(대체하지
+// 않는다, PixelFormat.ko.md 14절). 전체 대응은 다음 단계에서 이 표에 행을 더하고, core 밖 형식은
+// sampleFeature· renderFeature로 확장을 요구한다(예: R16 UNORM → TextureNorm16, RGBA16F 렌더 타깃 →
 // ColorBufferFloat).
 constexpr GlesTextureFormat TextureFormats[] = {
-    {Format::RGBA8Unorm, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, true, GlesFeature::None,
+    {PixelFormat::RGBA8Unorm, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, true, GlesFeature::None,
      GlesFeature::None},
-    {Format::RGBA8UnormSrgb, GL_SRGB8_ALPHA8, GL_RGBA, GL_UNSIGNED_BYTE, true, GlesFeature::None,
-     GlesFeature::None},
+    {PixelFormat::RGBA8UnormSrgb, GL_SRGB8_ALPHA8, GL_RGBA, GL_UNSIGNED_BYTE, true,
+     GlesFeature::None, GlesFeature::None},
 };
 
 } // namespace
@@ -54,7 +55,7 @@ GlesFeatures DetectFeatures(const GlesFunctions& gl, bool desktopSrgbWriteContro
     return features;
 }
 
-const GlesTextureFormat* FindTextureFormat(Format format) noexcept {
+const GlesTextureFormat* FindTextureFormat(PixelFormat format) noexcept {
     for (const GlesTextureFormat& entry : TextureFormats) {
         if (entry.format == format) {
             return &entry;

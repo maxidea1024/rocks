@@ -105,7 +105,7 @@ Engine/Source/Runtime/OpenGLGraphics/
 - 버퍼: `glGenBuffers` + `GL_COPY_WRITE_BUFFER`에 묶어 `glBufferData`·`glBufferSubData`. 정점 배열 상태(`GL_ELEMENT_ARRAY_BUFFER` binding)를 건드리지 않으려고 복사 대상 binding을 쓴다.
 - 텍스처: `glTexStorage2D` + `glTexSubImage2D`(첫 행 = 이미지 위쪽, UV (0,0) = 좌상단). 업로드는 그리기 유닛과 겹치지 않는 유닛 32에서 묶는다.
 - 샘플러: 텍스처마다 샘플러 객체 하나(`glSamplerParameter*`), 그릴 때 `glBindSampler`. border 색은 ES 3.2 core다.
-- 형식 표(`GlesFormats.cpp`): 행마다 내부·외부 형식, 렌더 타깃 가능 여부, 샘플링·렌더 타깃에 필요한 확장(`GlesFeature`)을 둔다. 지금은 `RGBA8Unorm`·`RGBA8UnormSrgb`(ES 3.2 core) 두 행이다. 픽셀 형식 확장(`Docs/Design/PixelFormat.ko.md`, 병합 예정) 때 행을 더하고, 확장이 없으면 다른 형식으로 대신하지 않고 `Unsupported`다.
+- 형식 표(`GlesFormats.cpp`): 행마다 내부·외부 형식, 렌더 타깃 가능 여부, 샘플링·렌더 타깃에 필요한 확장(`GlesFeature`)을 둔다. 지금은 `RGBA8Unorm`·`RGBA8UnormSrgb`(ES 3.2 core) 두 행이다. [픽셀 형식](PixelFormat.ko.md) PF1(`PixelFormat` 86개)이 들어온 뒤에도 이 두 형식만 대응하고, 표에 없는 올바른 형식은 텍스처·파이프라인 생성이 `Unsupported`다(다른 인자 검사보다 먼저, 대체하지 않는다). 전체 대응 단계에서 행을 더하고, 확장이 없으면 역시 `Unsupported`다.
 
   | 확장 | `GlesFeature` | 쓰는 곳 |
   |---|---|---|
@@ -201,7 +201,7 @@ Engine/Source/Runtime/OpenGLGraphics/
 - P13 Android 실행 기반: 앱 진입·`ANativeWindow` 수명·APK, 에뮬레이터·기기 실행(측정 S11), sRGB 스위치·sRGB 표면이 없는 기기의 셰이더 present.
 - SH2: 쿠킹된 ESSL과 바인딩 머리 받기, 상수 버퍼 에뮬레이션(`<단계>c<N>_<타입>`)·복사 표, `ShaderSource::glsl` 제거.
 - SH6: `GLES31_ANDROID` 픽셀 대조(앞면 `GL_CW`·y 반전), 기기 호환성(S12 기기 부분).
-- 픽셀 형식 병합 뒤 형식 표 확장과 `Format` → `PixelFormat` 이름 맞춤.
+- 픽셀 형식 전체 대응: GLES 형식 표에 PixelFormat 행을 더한다(PF1 뒤 다음 단계, 이름 맞춤은 끝났다).
 - LG7: 호출자 쪽 로그(생성 실패 선택자, 셰이더 컴파일 실패)와 관찰 스레드가 감지한 장치 손실의 로그.
 
 ## 11. UE 대응표

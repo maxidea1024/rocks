@@ -148,11 +148,13 @@ enum class TextureUsage : uint8 {
 // 텍스처 설정이다.
 //
 // 초기 픽셀 배치(Sampled): mip 0부터 mipLevels개를 빈틈 없이 잇는다. 각 mip은 MipExtent(width,
-// level) × MipExtent(height, level) 픽셀, 첫 행이 위, 행 사이 padding이 없다(MipChainBytes 크기).
+// level) × MipExtent(height, level) 픽셀(블록 형식은 블록 행 단위), 첫 행이 위, 행 사이 padding이
+// 없다(MipChainBytes 크기). 장치가 대응하지 않는 형식은 생성이 Unsupported다(PixelFormat.ko.md
+// 8.3절).
 struct TextureDesc {
     uint32 width = 0;
     uint32 height = 0;
-    Format format = Format::RGBA8UnormSrgb;
+    PixelFormat format = PixelFormat::RGBA8UnormSrgb;
     TextureUsage usage = TextureUsage::Sampled;
     // 1–FullMipCount(width, height)다. RenderTarget은 1이어야 한다.
     uint32 mipLevels = 1;
@@ -253,7 +255,7 @@ struct PipelineDesc {
     ShaderSource vertex;
     ShaderSource pixel;
     VertexLayout layout;
-    Format colorFormat = Format::RGBA8UnormSrgb;
+    PixelFormat colorFormat = PixelFormat::RGBA8UnormSrgb;
     // 소스 알파로 섞는다(premultiplied가 아닌 일반 알파).
     bool alphaBlend = false;
     // 버릴 면이다. 기본은 None이다(UE TStaticRasterizerState 기본 CM_None과 같고, 감김 순서를

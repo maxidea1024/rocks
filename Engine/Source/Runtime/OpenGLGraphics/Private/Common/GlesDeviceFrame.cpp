@@ -35,8 +35,12 @@ Result<CommandContext*> GlesDevice::BeginFrame(SwapChainHandle handle,
     // 스왑체인은 offscreen 색 텍스처(첫 행 = 이미지 위쪽)에 그리고 EndFrame의 present가 창에
     // 옮긴다(ShaderSystem 7.2절 8항). 그래서 창·RenderTarget 패스의 규약이 같다.
     presentTarget_ = handle;
-    pass_ = {
-        record->framebuffer, record->width, record->height, Format::RGBA8UnormSrgb, {}, handle};
+    pass_ = {record->framebuffer,
+             record->width,
+             record->height,
+             PixelFormat::RGBA8UnormSrgb,
+             {},
+             handle};
     StartPass(record->framebuffer, record->width, record->height, clear);
     return Result<CommandContext*>::Success(this);
 }
@@ -142,7 +146,7 @@ Result<void> GlesDevice::ReadPixels(TextureHandle handle, Span<uint8> out) noexc
     }
 
     const GlesTextureFormat* format = FindTextureFormat(record->format);
-    const usize rowBytes = static_cast<usize>(record->width) * BytesPerPixel(record->format);
+    const usize rowBytes = static_cast<usize>(PixelFormatRowBytes(record->format, record->width));
     if (record->framebuffer == 0 || out.Size() != rowBytes * record->height || recording_) {
         return Result<void>::Failure(recording_ ? ErrorCode::Busy : ErrorCode::InvalidArgument);
     }

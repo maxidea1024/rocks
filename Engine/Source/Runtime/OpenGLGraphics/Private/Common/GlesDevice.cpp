@@ -200,7 +200,7 @@ Result<void> GlesDevice::Initialize(const DeviceDesc& desc, const OpenGLDeviceOp
     TextureDesc whiteDesc;
     whiteDesc.width = 1;
     whiteDesc.height = 1;
-    whiteDesc.format = Format::RGBA8Unorm;
+    whiteDesc.format = PixelFormat::RGBA8Unorm;
     auto whiteTexture = CreateTexture(whiteDesc, Span<const uint8>(white, 4));
     if (!whiteTexture) {
         failure.Set(whiteTexture.Error(), "CreateTexture", 0, "default white texture failed");
@@ -354,22 +354,33 @@ Result<TextureHandle> GlesDevice::CreateTexture(const TextureDesc& desc,
         return Result<TextureHandle>::Failure(owner.Error());
     }
 
+    // 계약상 올바른 형식이지만 이 장치(ES 3.2 core + 확장, PF1에서는 RGBA8 두 형식)에서 쓸 수
+    // 없으면 다른 형식으로 대신하지 않고 Unsupported다(PixelFormat.ko.md 8.3절). 다른 인자 검사보다
+    // 먼저 한다.
     const bool renderTarget = desc.usage == TextureUsage::RenderTarget;
-    const uint64 size = MipChainBytes(desc.width, desc.height, desc.mipLevels, desc.format);
-    if (desc.width > MaxTextureExtent || desc.height > MaxTextureExtent || size == 0 ||
-        !IsValidSamplerDesc(desc.sampler) ||
+    const GlesTextureFormat* format = FindTextureFormat(desc.format);
+    if (IsValidPixelFormat(desc.format) &&
+        (format == nullptr || !SupportsTextureFormat(*format, features_, renderTarget))) {
+        Diagnostic message;
+        message.Text("pixel format ")
+            .Text(PixelFormatName(desc.format))
+            .Text(renderTarget ? " as a render target" : "")
+            .Text(" is not supported by this OpenGL ES device");
+        auto rejected = Reject(message, ErrorCode::Unsupported);
+        return Result<TextureHandle>::Failure(rejected.Error());
+    }
+
+    const uint64 size = MipChainBytes(desc.format, desc.width, desc.height, 1, desc.mipLevels);
+    if (format == nullptr || desc.width > MaxTextureExtent || desc.height > MaxTextureExtent ||
+        size == 0 || !IsValidSamplerDesc(desc.sampler) ||
         (renderTarget ? (pixels.Size() != 0 || desc.mipLevels != 1) : pixels.Size() != size)) {
         return Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
-    // 계약상 올바른 형식이지만 이 장치(ES 3.2 core + 확장)에서 쓸 수 없으면 다른 형식으로 대신하지
-    // 않고 Unsupported다.
-    const GlesTextureFormat* format = FindTextureFormat(desc.format);
-    if (format == nullptr || !SupportsTextureFormat(*format, features_, renderTarget) ||
-        desc.width > maxTextureExtent_ || desc.height > maxTextureExtent_) {
+    if (desc.width > maxTextureExtent_ || desc.height > maxTextureExtent_) {
         Diagnostic message;
         message.Text("texture format ")
-            .Text(FormatName(desc.format))
+            .Text(PixelFormatName(desc.format))
             .Text(renderTarget ? " as a render target" : "")
             .Text(" or extent ")
             .Number(desc.width)
@@ -400,8 +411,8 @@ Result<TextureHandle> GlesDevice::CreateTexture(const TextureDesc& desc,
         usize offset = 0;
         for (uint32 level = 0; level < desc.mipLevels; ++level) {
             UploadMip(record, level, pixels.Data() + offset);
-            offset += static_cast<usize>(MipExtent(desc.width, level)) *
-                      MipExtent(desc.height, level) * BytesPerPixel(desc.format);
+            offset += static_cast<usize>(PixelFormatImageBytes(
+                desc.format, MipExtent(desc.width, level), MipExtent(desc.height, level)));
         }
     } else {
         record.framebuffer = CreateColorFramebuffer(record.texture);
@@ -428,8 +439,18 @@ Result<PipelineHandle> GlesDevice::CreatePipeline(const PipelineDesc& desc) noex
 
     const GlesTextureFormat* colorFormat = FindTextureFormat(desc.colorFormat);
     if (desc.vertex.glsl.ByteCount() == 0 || desc.pixel.glsl.ByteCount() == 0 ||
-        colorFormat == nullptr) {
+        !IsValidPixelFormat(desc.colorFormat)) {
         return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 렌더 타깃으로 대응하지 않는 형식은 대신하지 않고 Unsupported다(PixelFormat.ko.md 8.3절).
+    if (colorFormat == nullptr || !SupportsTextureFormat(*colorFormat, features_, true)) {
+        Diagnostic message;
+        message.Text("pixel format ")
+            .Text(PixelFormatName(desc.colorFormat))
+            .Text(" is not supported as a render target by this OpenGL ES device");
+        auto rejected = Reject(message, ErrorCode::Unsupported);
+        return Result<PipelineHandle>::Failure(rejected.Error());
     }
 
     if (!ValidateVertexLayout(desc.layout)) {
@@ -840,7 +861,7 @@ void GlesDevice::ReleaseTexture(const TextureRecord& record) noexcept {
 }
 
 bool GlesDevice::CreateBackBuffer(SwapChainRecord& record, uint32 width, uint32 height) noexcept {
-    const GlesTextureFormat* format = FindTextureFormat(Format::RGBA8UnormSrgb);
+    const GlesTextureFormat* format = FindTextureFormat(PixelFormat::RGBA8UnormSrgb);
     GLuint texture = 0;
     gl_.GenTextures(1, &texture);
     gl_.ActiveTexture(GL_TEXTURE0 + UploadTextureUnit);
