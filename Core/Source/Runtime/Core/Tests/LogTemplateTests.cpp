@@ -267,8 +267,8 @@ struct Rendered {
 
     Result<void> From(Span<const uint8> capture,
                       const LogBlockProvider* blocks = nullptr) noexcept {
-        LogRenderTarget target{Span<char>(message), Span<char>(propertyText),
-                               Span<LogProperty>(properties)};
+        LogRenderTarget target{
+            Span<char>(message), Span<char>(propertyText), Span<LogProperty>(properties), {}};
         return RenderLogCapture(capture, blocks, target, event);
     }
 };
@@ -543,7 +543,7 @@ TEST(LogRenderTruncatesMessageAndRejectsCorruptCaptures) {
     LogEvent event;
     REQUIRE(RenderLogCapture(
                 Span<const uint8>(slot, captured.Value()), nullptr,
-                {Span<char>(message), Span<char>(texts), Span<LogProperty>(properties)}, event)
+                {Span<char>(message), Span<char>(texts), Span<LogProperty>(properties), {}}, event)
                 .IsOk());
     CHECK(event.message == "first val");
     CHECK(HasFlag(event, LogEventFlags::MessageTruncated));
@@ -551,13 +551,13 @@ TEST(LogRenderTruncatesMessageAndRejectsCorruptCaptures) {
 
     // 손상된 캡처(머리 표지)는 렌더하지 않는다.
     slot[0] = static_cast<uint8>(slot[0] ^ 0xffu);
-    CHECK(RenderLogCapture(Span<const uint8>(slot, captured.Value()), nullptr,
-                           {Span<char>(message), Span<char>(texts), Span<LogProperty>(properties)},
-                           event)
+    CHECK(RenderLogCapture(
+              Span<const uint8>(slot, captured.Value()), nullptr,
+              {Span<char>(message), Span<char>(texts), Span<LogProperty>(properties), {}}, event)
               .Error() == ErrorCode::InvalidArgument);
-    CHECK(RenderLogCapture(Span<const uint8>(slot, 4), nullptr,
-                           {Span<char>(message), Span<char>(texts), Span<LogProperty>(properties)},
-                           event)
+    CHECK(RenderLogCapture(
+              Span<const uint8>(slot, 4), nullptr,
+              {Span<char>(message), Span<char>(texts), Span<LogProperty>(properties), {}}, event)
               .Error() == ErrorCode::InvalidArgument);
 }
 
@@ -690,7 +690,7 @@ TEST(LogRenderTemplateErrorKeepsSuffixWhenMessageIsFull) {
     LogEvent event;
     REQUIRE(RenderLogCapture(
                 Span<const uint8>(slot, captured.Value()), nullptr,
-                {Span<char>(message), Span<char>(texts), Span<LogProperty>(properties)}, event)
+                {Span<char>(message), Span<char>(texts), Span<LogProperty>(properties), {}}, event)
                 .IsOk());
     CHECK(event.message.EndsWith(" [template error: ArgumentCountMismatch]",
                                  StringComparison::CaseSensitive));

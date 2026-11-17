@@ -17,6 +17,14 @@ constexpr uint32 CaptureMagic = 0x474F4C52u;
 // LogCaptureHeader::flags
 constexpr uint8 CaptureRuntimeTemplate = 1u << 0;
 constexpr uint8 CaptureValueTruncated = 1u << 1;
+constexpr uint8 CaptureContextTruncated = 1u << 2;
+
+using detail::LogCaptureContext;
+
+// 값 칸 count개와 문맥 칸 contexts개를 담은 캡처 앞부분의 크기다.
+constexpr usize FixedCaptureBytes(usize count, usize contexts) noexcept {
+    return LogCaptureMinimumBytes(count) + contexts * sizeof(LogCaptureContext);
+}
 
 // LogCaptureValue::flags
 constexpr uint8 ValueInBlock = 1u << 0;
@@ -223,8 +231,8 @@ public:
 
         platform::MemoryCopy(&header_, capture_.Data(), sizeof(header_));
         if (header_.magic != CaptureMagic || header_.totalBytes > capture_.Size() ||
-            header_.valueCount > MaxLogArguments ||
-            LogCaptureMinimumBytes(header_.valueCount) > header_.totalBytes ||
+            header_.valueCount > MaxLogArguments || header_.contextCount > MaxLogContextDepth ||
+            FixedCaptureBytes(header_.valueCount, header_.contextCount) > header_.totalBytes ||
             !IsValidLogLevel(static_cast<LogLevel>(header_.level)) ||
             header_.categoryBytes > MaxLogCategoryNameBytes ||
             (header_.categoryName == nullptr && header_.categoryBytes != 0)) {
@@ -235,6 +243,16 @@ public:
                              header_.valueCount * sizeof(LogCaptureValue));
         for (usize index = 0; index < header_.valueCount; ++index) {
             if (values_[index].kind > static_cast<uint8>(FormatArgKind::Custom)) {
+                return false;
+            }
+        }
+
+        platform::MemoryCopy(contexts_,
+                             capture_.Data() + LogCaptureMinimumBytes(header_.valueCount),
+                             header_.contextCount * sizeof(LogCaptureContext));
+        for (usize index = 0; index < header_.contextCount; ++index) {
+            if (contexts_[index].name == nullptr ||
+                contexts_[index].value.kind != static_cast<uint8>(FormatArgKind::Text)) {
                 return false;
             }
         }
@@ -252,7 +270,17 @@ public:
             }
         }
 
+        for (usize index = 0; index < header_.contextCount; ++index) {
+            if (!Text(contexts_[index].value, text)) {
+                return false;
+            }
+        }
+
         return TemplateText(text);
+    }
+
+    const LogCaptureContext& Context(usize index) const noexcept {
+        return contexts_[index];
     }
 
     const LogCaptureHeader& Header() const noexcept {
@@ -311,6 +339,7 @@ private:
     const LogBlockProvider* blocks_;
     LogCaptureHeader header_{};
     LogCaptureValue values_[MaxLogArguments]{};
+    LogCaptureContext contexts_[MaxLogContextDepth]{};
 };
 
 // 텍스트가 아닌 값 칸을 서식 인자로 되살린다. 텍스트 종류는 text를 쓴다.
@@ -503,11 +532,22 @@ Result<usize> WriteLogCapture(const LogCaptureTarget& target, LogLevel level,
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
 
-    const usize fixedBytes = LogCaptureMinimumBytes(count);
-    if (target.buffer.Size() < fixedBytes ||
+    if (target.buffer.Size() < LogCaptureMinimumBytes(count) ||
         target.buffer.Size() > static_cast<usize>(NumericLimits<uint32>::Max())) {
         return Result<usize>::Failure(ErrorCode::CapacityExceeded);
     }
+
+    // 이 스레드의 문맥(LogContextScope)을 담는다. 문맥 칸이 슬롯에 다 들어가지 않으면 안쪽부터
+    // 버린다.
+    bool contextTruncated = false;
+    const Span<const LogContextEntry> context = CurrentLogContext(contextTruncated);
+    usize contextCount = context.Size();
+    while (contextCount != 0 && target.buffer.Size() < FixedCaptureBytes(count, contextCount)) {
+        --contextCount;
+        contextTruncated = true;
+    }
+
+    const usize fixedBytes = FixedCaptureBytes(count, contextCount);
 
     const StringView categoryName = category.Name();
     LogCaptureHeader header;
@@ -522,6 +562,10 @@ Result<usize> WriteLogCapture(const LogCaptureTarget& target, LogLevel level,
     header.monotonicNanoseconds = target.monotonicNanoseconds;
     header.threadId = target.threadId;
     header.frame = target.frame;
+    header.contextCount = static_cast<uint8>(contextCount);
+    if (contextTruncated) {
+        header.flags |= CaptureContextTruncated;
+    }
 
     CaptureWriter writer(target, fixedBytes);
     if (text.runtime) {
@@ -566,6 +610,14 @@ Result<usize> WriteLogCapture(const LogCaptureTarget& target, LogLevel level,
         }
     }
 
+    LogCaptureContext contexts[MaxLogContextDepth];
+    for (usize index = 0; index < contextCount; ++index) {
+        contexts[index].name = context[index].name;
+        contexts[index].nameBytes = static_cast<uint32>(context[index].nameBytes);
+        contexts[index].value.kind = static_cast<uint8>(FormatArgKind::Text);
+        writer.StoreText(context[index].value, contexts[index].value);
+    }
+
     if (writer.Truncated()) {
         header.flags |= CaptureValueTruncated;
     }
@@ -575,6 +627,11 @@ Result<usize> WriteLogCapture(const LogCaptureTarget& target, LogLevel level,
     if (count != 0) {
         platform::MemoryCopy(target.buffer.Data() + sizeof(header), values,
                              count * sizeof(LogCaptureValue));
+    }
+
+    if (contextCount != 0) {
+        platform::MemoryCopy(target.buffer.Data() + LogCaptureMinimumBytes(count), contexts,
+                             contextCount * sizeof(LogCaptureContext));
     }
 
     return Result<usize>::Success(writer.Cursor());
@@ -654,12 +711,33 @@ Result<void> RenderLogCapture(Span<const uint8> capture, const LogBlockProvider*
         flags = flags | LogEventFlags::MessageTruncated;
     }
 
+    // 문맥: 이름=값. 값은 캡처 때 복사한 텍스트다.
+    const usize contextCount = header.contextCount;
+    const usize contextFilled =
+        contextCount < target.context.Size() ? contextCount : target.context.Size();
+    for (usize index = 0; index < contextFilled; ++index) {
+        const LogCaptureContext& entry = reader.Context(index);
+        LogProperty& property = target.context[index];
+        StringView value;
+        (void)reader.Text(entry.value, value); // ValidateTexts가 이미 확인했다
+        property.name = StringView(entry.name, entry.nameBytes);
+        property.text = value.IsValidUtf8() ? value : FormatErrorText;
+        property.kind = LogPropertyKind::String;
+        property.signedValue = 0;
+    }
+
+    if ((header.flags & CaptureContextTruncated) != 0 ||
+        (contextFilled < contextCount && target.context.Size() != 0)) {
+        flags = flags | LogEventFlags::ContextTruncated;
+    }
+
     event.level = static_cast<LogLevel>(header.level);
     event.category = StringView(header.categoryName, header.categoryBytes);
     event.messageTemplate = templateText;
     event.eventId = header.eventId;
     event.message = message.View();
     event.properties = Span<const LogProperty>(target.properties.Data(), filled);
+    event.context = Span<const LogProperty>(target.context.Data(), contextFilled);
     event.location = header.location;
     event.threadId = header.threadId;
     event.frame = header.frame;
@@ -685,6 +763,46 @@ void ReleaseLogCaptureBlocks(Span<const uint8> capture, LogBlockProvider& blocks
             blocks.Release(static_cast<uint32>(value.payload));
         }
     }
+
+    for (usize index = 0; index < header.contextCount; ++index) {
+        const LogCaptureValue& value = reader.Context(index).value;
+        if ((value.flags & ValueInBlock) != 0) {
+            blocks.Release(static_cast<uint32>(value.payload));
+        }
+    }
 }
+
+// ---- 문맥 스택(스레드별, 힙 없음) ----
+
+namespace detail {
+namespace {
+
+thread_local LogContextEntry contextStack[MaxLogContextDepth];
+thread_local usize contextDepth = 0;
+
+} // namespace
+
+Span<const LogContextEntry> CurrentLogContext(bool& truncated) noexcept {
+    truncated = contextDepth > MaxLogContextDepth;
+    const usize stored = contextDepth < MaxLogContextDepth ? contextDepth : MaxLogContextDepth;
+    return Span<const LogContextEntry>(contextStack, stored);
+}
+
+void PushLogContext(const char* name, usize nameBytes, StringView value) noexcept {
+    // 깊이를 넘는 범위는 담지 않고 깊이만 센다(그 범위가 열린 동안 ContextTruncated).
+    if (contextDepth < MaxLogContextDepth) {
+        contextStack[contextDepth] = LogContextEntry{name, nameBytes, value};
+    }
+
+    ++contextDepth;
+}
+
+void PopLogContext() noexcept {
+    if (contextDepth != 0) {
+        --contextDepth;
+    }
+}
+
+} // namespace detail
 
 } // namespace rocks

@@ -239,7 +239,9 @@ Result<DateTime> TryParseIso8601(StringView text) noexcept;
 // "{}"로 ISO 8601 UTC 형식 "YYYY-MM-DDThh:mm:ss[.소수부]Z"를 쓴다.
 //   2026-11-12 09:30:00 → "2026-11-12T09:30:00Z",  0.25초 → "…:00.25Z"(소수부는 0이 아닐 때만, 끝의
 //   0은 뺀다)
-// TryParseIso8601로 다시 읽으면 같은 값이다. spec("{:...}")은 받지 않는다(InvalidArgument).
+// TryParseIso8601로 다시 읽으면 같은 값이다.
+// spec "ms"("{:ms}")는 밀리초 3자리 고정 폭이다: "2026-11-12T09:30:00.250Z"(밀리초 아래는 버린다).
+// 로그처럼 줄마다 폭이 같아야 하는 출력에 쓴다. 그 밖의 spec은 InvalidArgument다.
 template <>
 struct Formatter<DateTime> {
     static Result<void> Format(StringBuilderBase& out, const DateTime& time,

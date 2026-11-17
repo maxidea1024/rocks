@@ -26,6 +26,43 @@ JsonWriter::JsonWriter(StringBuilderBase& out, JsonNumberMode mode, uint32 maxDe
       keys_(out.GetAllocator(), WrittenKeyHash{&out, {}}, WrittenKeyEqual{&out}) {
 }
 
+JsonWriter::JsonWriter(StringBuilderBase& out, const JsonWriterOptions& options) noexcept
+    : out_(&out), mode_(options.mode), maxDepth_(options.maxDepth), compact_(options.compact),
+      fixedFrames_(options.fixedFrames), detectDuplicateKeys_(options.detectDuplicateKeys),
+      frames_(out.GetAllocator()),
+      keys_(out.GetAllocator(), WrittenKeyHash{&out, {}}, WrittenKeyEqual{&out}) {
+    if (fixedFrames_ && maxDepth_ > FixedFrameCapacity) {
+        maxDepth_ = FixedFrameCapacity;
+    }
+}
+
+usize JsonWriter::FrameCount() const noexcept {
+    return fixedFrames_ ? fixedCount_ : frames_.Size();
+}
+
+JsonWriter::Frame& JsonWriter::TopFrame() noexcept {
+    return fixedFrames_ ? fixed_[fixedCount_ - 1] : frames_[frames_.Size() - 1];
+}
+
+bool JsonWriter::PushFrame(Frame frame) noexcept {
+    if (fixedFrames_) {
+        // maxDepth_는 생성에서 FixedFrameCapacity 이하로 맞췄고 BeginContainer가 먼저 검사한다.
+        fixed_[fixedCount_++] = frame;
+        return true;
+    }
+
+    return frames_.TryPushBack(frame).IsOk();
+}
+
+void JsonWriter::PopFrame() noexcept {
+    if (fixedFrames_) {
+        --fixedCount_;
+        return;
+    }
+
+    static_cast<void>(frames_.TryResize(frames_.Size() - 1)); // 줄이기는 할당하지 않는다
+}
+
 Result<void> JsonWriter::Fail(ErrorCode code) noexcept {
     failed_ = true;
     return Result<void>::Failure(code);
@@ -40,6 +77,10 @@ Result<void> JsonWriter::Check(Result<void> result) noexcept {
 }
 
 Result<void> JsonWriter::WriteIndent(usize depth) noexcept {
+    if (compact_) {
+        return Result<void>::Success();
+    }
+
     if (auto newline = Check(out_->TryAppendAscii('\n')); !newline) {
         return newline;
     }
@@ -53,11 +94,11 @@ Result<void> JsonWriter::BeforeValue() noexcept {
         return Fail(ErrorCode::InvalidArgument);
     }
 
-    if (frames_.IsEmpty()) {
+    if (FrameCount() == 0) {
         return rootWritten_ ? Fail(ErrorCode::InvalidArgument) : Result<void>::Success();
     }
 
-    Frame& top = frames_[frames_.Size() - 1];
+    Frame& top = TopFrame();
     if (top.object) {
         // 객체: Key 뒤에만 값이 온다(구분자는 Key가 썼다).
         if (!expectingValue_) {
@@ -76,11 +117,11 @@ Result<void> JsonWriter::BeforeValue() noexcept {
         }
     }
 
-    return WriteIndent(frames_.Size());
+    return WriteIndent(FrameCount());
 }
 
 Result<void> JsonWriter::AfterValue() noexcept {
-    if (frames_.IsEmpty()) {
+    if (FrameCount() == 0) {
         rootWritten_ = true;
     }
 
@@ -177,7 +218,7 @@ Result<void> JsonWriter::BeginContainer(bool object) noexcept {
         return before;
     }
 
-    if (frames_.Size() >= maxDepth_) {
+    if (FrameCount() >= maxDepth_) {
         return Fail(ErrorCode::CapacityExceeded);
     }
 
@@ -185,7 +226,7 @@ Result<void> JsonWriter::BeginContainer(bool object) noexcept {
         return open;
     }
 
-    if (!frames_.TryPushBack(Frame{object, false, object ? nextSerial_++ : 0})) {
+    if (!PushFrame(Frame{object, false, object ? nextSerial_++ : 0})) {
         return Fail(ErrorCode::OutOfMemory);
     }
 
@@ -193,15 +234,15 @@ Result<void> JsonWriter::BeginContainer(bool object) noexcept {
 }
 
 Result<void> JsonWriter::EndContainer(bool object) noexcept {
-    if (failed_ || finished_ || frames_.IsEmpty() || frames_[frames_.Size() - 1].object != object ||
+    if (failed_ || finished_ || FrameCount() == 0 || TopFrame().object != object ||
         expectingValue_) {
         return Fail(ErrorCode::InvalidArgument);
     }
 
-    const bool hasItems = frames_[frames_.Size() - 1].hasItems;
-    static_cast<void>(frames_.TryResize(frames_.Size() - 1)); // 줄이기는 할당하지 않는다
+    const bool hasItems = TopFrame().hasItems;
+    PopFrame();
     if (hasItems) {
-        if (auto indent = WriteIndent(frames_.Size()); !indent) {
+        if (auto indent = WriteIndent(FrameCount()); !indent) {
             return indent;
         }
     }
@@ -230,12 +271,11 @@ Result<void> JsonWriter::EndArray() noexcept {
 }
 
 Result<void> JsonWriter::Key(StringView key) noexcept {
-    if (failed_ || finished_ || frames_.IsEmpty() || !frames_[frames_.Size() - 1].object ||
-        expectingValue_) {
+    if (failed_ || finished_ || FrameCount() == 0 || !TopFrame().object || expectingValue_) {
         return Fail(ErrorCode::InvalidArgument);
     }
 
-    Frame& top = frames_[frames_.Size() - 1];
+    Frame& top = TopFrame();
     const bool first = !top.hasItems;
     const uint32 serial = top.serial;
     top.hasItems = true;
@@ -245,7 +285,7 @@ Result<void> JsonWriter::Key(StringView key) noexcept {
         }
     }
 
-    if (auto indent = WriteIndent(frames_.Size()); !indent) {
+    if (auto indent = WriteIndent(FrameCount()); !indent) {
         return indent;
     }
 
@@ -255,18 +295,20 @@ Result<void> JsonWriter::Key(StringView key) noexcept {
     }
 
     // 같은 객체의 같은 키는 자기 reader가 거부하므로 쓰지 않는다(이스케이프가 결정적이라
-    // 이스케이프된 byte로 비교한다).
-    auto inserted =
-        keys_.Insert(WrittenKey{serial, start, out_->ByteCount() - start}, static_cast<uint8>(0));
-    if (!inserted) {
-        return Fail(ErrorCode::OutOfMemory);
+    // 이스케이프된 byte로 비교한다). 옵션으로 끄면 확인하지 않는다(할당 없음).
+    if (detectDuplicateKeys_) {
+        auto inserted = keys_.Insert(WrittenKey{serial, start, out_->ByteCount() - start},
+                                     static_cast<uint8>(0));
+        if (!inserted) {
+            return Fail(ErrorCode::OutOfMemory);
+        }
+
+        if (inserted.Value() == InsertOutcome::AlreadyPresent) {
+            return Fail(ErrorCode::InvalidArgument);
+        }
     }
 
-    if (inserted.Value() == InsertOutcome::AlreadyPresent) {
-        return Fail(ErrorCode::InvalidArgument);
-    }
-
-    if (auto separator = Check(out_->TryAppend(StringView(": "))); !separator) {
+    if (auto separator = Check(out_->TryAppend(StringView(compact_ ? ":" : ": "))); !separator) {
         return separator;
     }
 
@@ -489,7 +531,7 @@ Result<void> JsonWriter::Value(JsonValue value) noexcept {
 }
 
 Result<void> JsonWriter::Finish() noexcept {
-    if (failed_ || finished_ || !frames_.IsEmpty() || !rootWritten_) {
+    if (failed_ || finished_ || FrameCount() != 0 || !rootWritten_) {
         return Fail(ErrorCode::InvalidArgument);
     }
 
