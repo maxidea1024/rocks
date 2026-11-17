@@ -17,6 +17,7 @@ Result<ObjectLifecycle> InspectBorrow(ObjectRegistry*, ObjectHandle) noexcept;
 void ReleaseBorrow(ObjectRegistry*, ObjectHandle) noexcept;
 void ReleaseBackend(ObjectRegistry*, ObjectHandle) noexcept;
 void ReleaseEncodePin(ObjectRegistry*, ObjectHandle) noexcept;
+class PathCursor;
 } // namespace detail
 
 // GC의 외부 루트. 포인터 접근권과 구분하며 실제 접근은 Borrow를 사용한다.
@@ -190,6 +191,9 @@ public:
 private:
     friend class ObjectRegistry;
     friend class ConstructionContext;
+    // 대입 묶음이 더한 게시 전 StructRefArray 원소 블록에 대상을 직접 쓴다(리플렉션 B9i5 —
+    // PathCursor::WriteAddedReference).
+    friend class detail::PathCursor;
     ObjectHandle handle_;
 };
 
