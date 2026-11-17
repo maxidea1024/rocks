@@ -159,6 +159,13 @@ Result<int32> KeyGen(Span<const StringView> args, CommandletOutput& output) noex
         return Result<int32>::Failure(pair.Error());
     }
 
+    // 비밀 seed는 파일을 만들기 전에 꺼낸다(실패하면 아무 파일도 남기지 않는다).
+    uint8 seed[crypto::LogFilePrivateKeyBytes];
+    if (auto exported = crypto::hazmat::TryExportSeed(pair.Value(), Span<uint8>(seed)); !exported) {
+        crypto::SecureZero(Span<uint8>(seed));
+        return Result<int32>::Failure(exported.Error());
+    }
+
     // 두 파일을 모두 새로 만든 뒤에 쓴다. 하나라도 이미 있으면 아무것도 쓰지 않는다(짝이 맞지 않는
     // 키 쌍을 남기지 않는다).
     const PathText publicPath(args[0]);
@@ -166,20 +173,17 @@ Result<int32> KeyGen(Span<const StringView> args, CommandletOutput& output) noex
     Result<int32> failure = Result<int32>::Success(1);
     platform::File publicFile;
     if (!CreateNewFile(output, publicPath, args[0], publicFile, failure)) {
+        crypto::SecureZero(Span<uint8>(seed));
         return failure;
     }
 
     platform::File privateFile;
     if (!CreateNewFile(output, privatePath, args[1], privateFile, failure)) {
+        crypto::SecureZero(Span<uint8>(seed));
         (void)publicFile.Close();
         (void)platform::PhysicalFileSystem().Delete(publicPath.text,
                                                     platform::CStringLength(publicPath.text));
         return failure;
-    }
-
-    uint8 seed[crypto::LogFilePrivateKeyBytes];
-    if (auto exported = crypto::hazmat::TryExportSeed(pair.Value(), Span<uint8>(seed)); !exported) {
-        return Result<int32>::Failure(exported.Error());
     }
 
     const bool secretWritten =

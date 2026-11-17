@@ -106,6 +106,9 @@ struct ConsoleSettingDefinition {
     double maximum = 0;
     // String·Name·Enum의 허용 값(콘솔 표기 — Enum은 대소문자 무시)이다. 비어 있으면 모두 허용한다.
     Span<const StringView> allowedValues{};
+    // String·Name의 허용 값도 ASCII 대소문자를 무시하고 맞춘다(값은 입력 표기 그대로 남는다 —
+    // 읽는 쪽도 대소문자를 무시해야 한다). 예: log.level의 "Warning".
+    bool allowedValuesIgnoreCase = false;
 };
 
 // 콘솔 설정 핸들이다(등록 순번). 문맥 수명 동안 유효하다.

@@ -468,7 +468,7 @@ Result<StringView> CheckConsoleValue(ConfigState& state, const ConsoleSettingSta
 
         bool allowed = false;
         for (const String& candidate : setting.allowed) {
-            allowed = allowed || (setting.kind == ValueKind::Enum
+            allowed = allowed || (setting.kind == ValueKind::Enum || setting.allowedIgnoreCase
                                       ? EqualsIgnoringAsciiCase(ToSpan(candidate.View()),
                                                                 ToSpan(canonical.View()))
                                       : candidate.View() == canonical.View());
@@ -947,6 +947,7 @@ ConfigContext::RegisterConsoleSetting(const ConsoleSettingDefinition& definition
     setting.hasRange = definition.hasRange;
     setting.minimum = definition.minimum;
     setting.maximum = definition.maximum;
+    setting.allowedIgnoreCase = definition.allowedValuesIgnoreCase;
     if (kind == ValueKind::Enum) {
         auto lease = objects_->Types().AcquireValueType(definition.enumType, TypeKind::Enum);
         if (!lease) {

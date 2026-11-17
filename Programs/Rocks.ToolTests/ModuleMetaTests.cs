@@ -96,6 +96,7 @@ internal static partial class ModuleMetaTests
         RegisterModuleDescriptors(suite, options, environment);
         RegisterStructs(suite, options, environment);
         RegisterArrays(suite, options, environment);
+        RegisterBitfields(suite, options, environment);
     }
 
     // 공백을 모두 지운 텍스트다(clang-format 줄바꿈과 무관하게 생성 코드 조각을 찾는다).

@@ -25,6 +25,8 @@ struct TypeIds {
     uint16 gpuCalibration = TraceFormat::InvalidTypeId;
     uint16 gpuScope = TraceFormat::InvalidTypeId;
     uint16 gpuFrame = TraceFormat::InvalidTypeId;
+    uint16 snapshotSync = TraceFormat::InvalidTypeId;
+    uint16 stats = TraceFormat::InvalidTypeId;
 };
 
 uint16 FindType(const TraceStreamDecoder& decoder, const char* name) noexcept {
@@ -45,6 +47,8 @@ TypeIds ResolveTypes(const TraceStreamDecoder& decoder) noexcept {
     ids.gpuCalibration = FindType(decoder, Format::GpuCalibrationType);
     ids.gpuScope = FindType(decoder, Format::GpuScopeType);
     ids.gpuFrame = FindType(decoder, Format::GpuFrameType);
+    ids.snapshotSync = FindType(decoder, "Trace.SnapshotSync");
+    ids.stats = FindType(decoder, Format::StatsType);
     return ids;
 }
 
@@ -161,6 +165,33 @@ TraceModelGpuQueue* TraceModel::FindOrAddGpuQueue(uint16 id) noexcept {
     return &gpuQueues_[gpuQueues_.Size() - 1];
 }
 
+void TraceModel::AddCaptureStats(const DecodedRecord& record) noexcept {
+    // 스레드 스트림을 차례로 읽으므로 표본은 tick 순이 아니다. 가장 이른·늦은 표본을 tick으로
+    // 고른다.
+    TraceModelCaptureStats& stats = captureStats_;
+    const uint64 tick = ReadFixed<uint64>(record, Format::StatsTickOffset);
+    const uint64 output = ReadFixed<uint64>(record, Format::StatsOutputBytesOffset);
+    const uint64 peak = ReadFixed<uint64>(record, Format::StatsPoolPeakOffset);
+    if (stats.samples == 0 || tick < stats.firstTick) {
+        stats.firstTick = tick;
+        stats.firstOutputBytes = output;
+    }
+
+    if (stats.samples == 0 || tick >= stats.lastTick) {
+        stats.lastTick = tick;
+        stats.lastOutputBytes = output;
+        stats.poolBytesLimit = ReadFixed<uint64>(record, Format::StatsPoolLimitOffset);
+        stats.definitionStoreBytes = ReadFixed<uint64>(record, Format::StatsDefinitionStoreOffset);
+        stats.lostRecords = ReadFixed<uint64>(record, Format::StatsLostRecordsOffset);
+        stats.definitionRecordsDropped =
+            ReadFixed<uint64>(record, Format::StatsDefinitionsDroppedOffset);
+        stats.recentDroppedBytes = ReadFixed<uint64>(record, Format::StatsRecentDroppedOffset);
+    }
+
+    stats.poolBytesPeak = peak > stats.poolBytesPeak ? peak : stats.poolBytesPeak;
+    ++stats.samples;
+}
+
 Result<void> TraceModel::ReadDefinitions() noexcept {
     const TypeIds types = ResolveTypes(decoder_);
     Array<DecodedRecord> records(*allocator_);
@@ -200,6 +231,14 @@ Result<void> TraceModel::ReadDefinitions() noexcept {
             if (!names_.TryPushBack(entry)) {
                 return Result<void>::Failure(ErrorCode::OutOfMemory);
             }
+        } else if (record.typeId == types.snapshotSync &&
+                   Covers(record, 0, TraceFormat::SnapshotSyncFixedBytes)) {
+            summary_.recentDroppedChunks =
+                ReadFixed<uint64>(record, TraceFormat::SnapshotSyncDroppedChunksOffset);
+            summary_.recentDroppedBytes =
+                ReadFixed<uint64>(record, TraceFormat::SnapshotSyncDroppedBytesOffset);
+            summary_.snapshotSkippedChunks =
+                ReadFixed<uint64>(record, TraceFormat::SnapshotSyncSkippedChunksOffset);
         } else if (record.typeId == types.counterDefinition && record.variableCount == 1 &&
                    Covers(record, 0, Format::CounterDefinitionFixedBytes)) {
             TraceModelCounter counter;
@@ -382,6 +421,8 @@ Result<void> TraceModel::ReadThread(uint16 stream, Array<OrderedEvent>& ordered)
             if (!gpuFrames_.TryPushBack(frame) || FindOrAddGpuQueue(frame.queue) == nullptr) {
                 return Result<void>::Failure(ErrorCode::OutOfMemory);
             }
+        } else if (record.typeId == types.stats && Covers(record, 0, Format::StatsFixedBytes)) {
+            AddCaptureStats(record);
         }
     }
 
@@ -490,6 +531,8 @@ Result<void> TraceModel::Build(Span<const uint8> bytes) noexcept {
         (header.flags & TraceFormat::HeaderFlagDefinitionsIncomplete) != 0;
     summary_.attachOrderNumber = header.attachOrderNumber;
     summary_.attachedMidSession = header.attachOrderNumber != 0;
+    summary_.snapshot = (header.flags & TraceFormat::HeaderFlagSnapshot) != 0;
+    summary_.snapshotIncomplete = (header.flags & TraceFormat::HeaderFlagSnapshotIncomplete) != 0;
 
     if (auto definitions = ReadDefinitions(); !definitions) {
         return definitions;

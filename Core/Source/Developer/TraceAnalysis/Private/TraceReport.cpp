@@ -463,6 +463,25 @@ void WriteGpu(JsonWriter& json, const TraceModel& model, Allocator& scratch, cha
     json.Close(']');
 }
 
+void WriteCapture(JsonWriter& json, const TraceModel& model) noexcept {
+    const TraceModelCaptureStats& stats = model.CaptureStats();
+    const uint64 frequency = model.Decoder().Header().tickFrequency;
+    json.Key("capture");
+    json.Open('{');
+    json.KeyUnsigned("samples", stats.samples);
+    json.KeyUnsigned("poolBytesPeak", stats.poolBytesPeak);
+    json.KeyUnsigned("poolBytesLimit", stats.poolBytesLimit);
+    json.KeyUnsigned("definitionStoreBytes", stats.definitionStoreBytes);
+    json.KeyUnsigned("lostRecords", stats.lostRecords);
+    json.KeyUnsigned("definitionRecordsDropped", stats.definitionRecordsDropped);
+    json.KeyUnsigned("recentDroppedBytes", stats.recentDroppedBytes);
+    json.KeyUnsigned("outputBytes", stats.lastOutputBytes >= stats.firstOutputBytes
+                                        ? stats.lastOutputBytes - stats.firstOutputBytes
+                                        : 0);
+    json.KeyUnsigned("spanNs", SpanNanoseconds(stats.firstTick, stats.lastTick, frequency));
+    json.Close('}');
+}
+
 } // namespace
 
 Result<void> WriteTraceReportJson(const TraceModel& model, Array<uint8>& out) noexcept {
@@ -502,6 +521,11 @@ Result<void> WriteTraceReportJson(const TraceModel& model, Array<uint8>& out) no
         json.KeyUnsigned("unendedScopes", summary.unendedScopes);
         json.KeyUnsigned("orderGaps", summary.orderGaps);
         json.KeyUnsigned("marks", summary.marks);
+        json.KeyBool("snapshot", summary.snapshot);
+        json.KeyBool("snapshotIncomplete", summary.snapshotIncomplete);
+        json.KeyUnsigned("recentDroppedChunks", summary.recentDroppedChunks);
+        json.KeyUnsigned("recentDroppedBytes", summary.recentDroppedBytes);
+        json.KeyUnsigned("snapshotSkippedChunks", summary.snapshotSkippedChunks);
         json.Key("channelLoss");
         json.Open('[');
         for (const TraceModelChannelLoss& loss : model.ChannelLosses()) {
@@ -541,6 +565,7 @@ Result<void> WriteTraceReportJson(const TraceModel& model, Array<uint8>& out) no
         WriteTasks(json, model, scratch);
         WriteCounters(json, model, scratch);
         WriteGpu(json, model, scratch, buffer, other);
+        WriteCapture(json, model);
         json.Close('}');
         json.Raw("\n");
     }

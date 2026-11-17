@@ -28,7 +28,7 @@ internal static class ModuleDescriptor
     private static readonly string[] EnumeratorKeys = ["name", "toolName", "displayName", "value", "flags"];
 
     private static readonly string[] FieldKeys =
-        ["owner", "name", "id", "fieldKind", "value", "element", "key", "flags", "toolName", "category", "displayName", "maxElements"];
+        ["owner", "name", "id", "fieldKind", "value", "element", "key", "flags", "toolName", "category", "displayName", "maxElements", "bitfield"];
 
     public static byte[] Write(string module, IEnumerable<ClassModel> types)
     {
@@ -243,6 +243,8 @@ internal static class ModuleDescriptor
             json.WriteString("category", field.Spec.Category);
             json.WriteString("displayName", field.Spec.DisplayName);
             json.WriteNumber("maxElements", field.IsCounted || field.IsStaticArray ? field.MaxElements : 0);
+            // 폭 1 bitfield bool(리플렉션 B9m)이면 참이다: 의존 모듈이 상속 필드 함수표에 base의 생성 접근자를 쓴다.
+            json.WriteBoolean("bitfield", field.Bitfield);
             json.WriteEndObject();
         }
 
@@ -669,6 +671,7 @@ internal static class ModuleDescriptor
                     Name = fieldName,
                     Owner = owner,
                     NativeSpelling = "",
+                    Bitfield = ReadBitfield(field, kind, Invalid),
                     Spec = new(fieldFlags.Contains("Transient"), fieldFlags.Contains("ReadOnly"),
                         field.GetProperty("category").GetString() ?? throw Invalid("category"),
                         field.GetProperty("displayName").GetString() ?? throw Invalid("displayName"))
@@ -697,6 +700,23 @@ internal static class ModuleDescriptor
         }
 
         return (module, types);
+    }
+
+    // 필드의 bitfield 표시다(리플렉션 B9m): bool이어야 하고, 참이면 값 종류가 Bool이어야 한다(아니면 InvalidDescriptor).
+    private static bool ReadBitfield(JsonElement field, string kind, Func<string, Exception> invalid)
+    {
+        JsonElement bitfield = field.GetProperty("bitfield");
+        if (bitfield.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+        {
+            throw invalid("bitfield");
+        }
+
+        if (bitfield.GetBoolean() && kind != "Bool")
+        {
+            throw invalid("bitfield of a non-Bool field");
+        }
+
+        return bitfield.GetBoolean();
     }
 
     // enum 항목 하나를 읽는다. 런타임 RegisterEnum과 같은 규칙(underlying 범위·별칭·Flags의 음수·도구 이름 문자 집합과

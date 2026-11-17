@@ -271,6 +271,44 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
         return resolved.Length != 0 ? resolved : Text(type, "qualType");
     }
 
+    // 폭 1 bitfield bool로 받는 부호 없는 정수 철자다(Clang 정규 철자 — uint8·16·32·64, 리플렉션 B9m).
+    private static readonly string[] UnsignedBitfieldSpellings =
+        ["unsigned char", "unsigned short", "unsigned int", "unsigned long", "unsigned long long"];
+
+    // NATIVE bitfield로 받는 정수·bool 철자다(리플렉션 B9m).
+    private static bool IsIntegerSpelling(string spelling) => spelling is "bool" or "char" or "signed char" or "unsigned char" or "short"
+        or "unsigned short" or "int" or "unsigned int" or "long" or "unsigned long" or "long long" or "unsigned long long";
+
+    // PROPERTY bitfield 규칙(RMC2207 — 리플렉션 B9m)이다: Binds 미러 안이 아니고, 폭(FieldDecl 안 상수 식)이 1이며, 형식이 부호 없는
+    // 정수 4종이다(`bool b : 1`은 UE와 같이 거부한다).
+    private static void CheckPropertyBitfield(JsonElement member, string symbol, string spelling, bool mirror)
+    {
+        if (mirror)
+        {
+            throw new MetadataException($"{symbol}: a Binds mirror cannot declare a bitfield", "RMC2207",
+                "Mirror the real type's members as plain members; Core value types have no bitfields.");
+        }
+
+        BigInteger? width = Children(member).Select(Constant).OfType<BigInteger>().Cast<BigInteger?>().FirstOrDefault();
+        if (width != 1)
+        {
+            throw new MetadataException($"{symbol}: a ROCKS_PROPERTY bitfield must have width 1", "RMC2207",
+                "Declare reflected bitfields as `uint8 name : 1` (reflected as bool); use a plain integer member for wider values.");
+        }
+
+        if (spelling == "bool")
+        {
+            throw new MetadataException($"{symbol}: `bool name : 1` cannot be a ROCKS_PROPERTY (as in UE)", "RMC2207",
+                "Declare the bitfield as `uint8 name : 1`; it is reflected as bool.");
+        }
+
+        if (!UnsignedBitfieldSpellings.Contains(spelling, StringComparer.Ordinal))
+        {
+            throw new MetadataException($"{symbol}: a ROCKS_PROPERTY bitfield must be an unsigned integer (uint8, uint16, uint32 or uint64)", "RMC2207",
+                "Declare the bitfield as `uint8 name : 1`; signed integers, enums and floating types cannot be reflected bitfields.");
+        }
+    }
+
     private static object? Constant(JsonElement node)
     {
         string kind = Text(node, "kind");
@@ -563,9 +601,18 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                         }
 
                         Specifiers.Native(nativeSpecifiers, symbol);
-                        if (memberName.Length == 0 || Flag(member, "isBitfield"))
+                        if (memberName.Length == 0)
                         {
-                            throw new MetadataException($"{symbol}: only named non-bitfield members are supported");
+                            throw new MetadataException($"{symbol}: only named members are supported");
+                        }
+
+                        // NATIVE bitfield(리플렉션 B9m — Docs/Design/ReflectionExtensions.ko.md 14절)는 정수·bool이면 받는다(강한 참조를
+                        // 담을 수 없으므로 탐침은 쓰지 않는다). 그 밖의 형식(enum 등) bitfield는 받지 않는다.
+                        bool nativeBitfield = Flag(member, "isBitfield");
+                        if (nativeBitfield && !IsIntegerSpelling(TypeSpelling(member)))
+                        {
+                            throw new MetadataException($"{symbol}: a ROCKS_NATIVE bitfield must be an integer or bool", "RMC2207",
+                                "Use an integer or bool bitfield, or a plain member.");
                         }
 
                         if (access != "public" && !generatedBody)
@@ -585,14 +632,25 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                             model.WorldOnlyNatives.Add((symbol, worldOnlyPath, currentSite));
                         }
 
-                        model.NativeMembers.Add(new NativeMemberModel { Name = memberName, Spelling = nativeType, Site = currentSite });
+                        model.NativeMembers.Add(new NativeMemberModel { Name = memberName, Spelling = nativeType, Site = currentSite, Bitfield = nativeBitfield });
                         continue;
                     }
 
                     string fieldSpecifiers = FieldArguments(member, symbol);
-                    if (memberName.Length == 0 || Flag(member, "isBitfield"))
+                    if (memberName.Length == 0)
                     {
-                        throw new MetadataException($"{symbol}: only named non-bitfield members are supported");
+                        throw new MetadataException($"{symbol}: only named members are supported");
+                    }
+
+                    // PROPERTY bitfield(리플렉션 B9m — Docs/Design/ReflectionExtensions.ko.md 14절)는 UE와 같이 폭 1의 부호 없는 정수
+                    // (uint8·uint16·uint32·uint64)만 Bool 값으로 받는다. `bool b : 1`·폭 ≠ 1·부호 있는 정수·enum·Binds 미러 안
+                    // bitfield는 RMC2207이다. 접근은 생성 접근자(GeneratedType<Owner>::Get_·Set_)가 한다.
+                    string spelling = TypeSpelling(member);
+                    bool bitfield = Flag(member, "isBitfield");
+                    if (bitfield)
+                    {
+                        CheckPropertyBitfield(member, symbol, spelling, structSpec is { Binds.Length: > 0 });
+                        spelling = "bool";
                     }
 
                     if (access != "public" && !generatedBody)
@@ -606,7 +664,8 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                         Site = currentSite,
                         Name = memberName,
                         Owner = qualified,
-                        NativeSpelling = TypeSpelling(member),
+                        NativeSpelling = spelling,
+                        Bitfield = bitfield,
                         Spec = Specifiers.Property(fieldSpecifiers, symbol, memberName)
                     });
                 }

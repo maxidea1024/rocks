@@ -16,6 +16,10 @@ namespace detail {
 struct TraceSessionState;
 } // namespace detail
 
+// 수집 통계 채널 "stats"다(Trace.Stats, TraceSessionSettings::statsIntervalPumps). 세션이 꺼진
+// 상태로 등록한다.
+extern TraceChannel TraceStatsChannel;
+
 // 스레드 블록과 블록 풀의 메모리 배치다(Docs/Design/TraceSystem.ko.md 4.1절). 블록 하나는 앞에서
 // 뒤로 자라는 기록 영역과 블록 끝의 머리 정보로 이뤄진다. 풀은 PageBlocks개 블록을 한 페이지로 한
 // 번에 확보한다. 시험·통계가 블록 수를 계산할 때 쓴다.
@@ -58,6 +62,37 @@ struct TraceSessionSettings {
     TraceWriterMode writerMode = TraceWriterMode::Thread;
     // writer 스레드의 비우기 주기(trace.writer.periodMs, ms). Thread 모드에서 0이 아니어야 한다.
     uint32 writerPeriodMs = 16;
+    // 최근 기록 고리의 byte 수(trace.recent.bytes)다. 스레드 기록 덩어리를 출력이 없어도 여기에
+    // 담고, 넘치면 가장 오래된 덩어리부터 버린다. 스냅샷(WriteSnapshot)이 고리를 쓴다. 0이면 고리가
+    // 없다. 0이 아니면 MinRecentBytes 이상이어야 한다.
+    usize recentBytes = 4 * 1024 * 1024;
+    // 블록 풀 사용량이 상한의 이 백분율 이상이면 경고 로그를 한 번 남긴다(trace.pool.warnPercent).
+    // 다시 아래로 내려간 뒤 넘으면 또 남긴다. 0이면 경고하지 않는다. 100 이하여야 한다.
+    uint32 poolWarningPercent = 80;
+    // 채널 "stats"가 켜져 있으면 이 펌프 수마다 수집 통계 기록(Trace.Stats)을 낸다
+    // (trace.stats.intervalPumps). 1 이상이어야 한다.
+    uint32 statsIntervalPumps = 60;
+
+    // 최근 기록 고리의 최소 크기다(가장 큰 덩어리 하나와 고리 칸 표시가 들어간다).
+    static constexpr usize MinRecentBytes = 32 * 1024;
+};
+
+// 스냅샷 writer 잠금의 기본 제한 시간(ms)이다(8절 "스냅샷").
+inline constexpr uint32 DefaultSnapshotLockTimeoutMs = 1000;
+
+// WriteSnapshot 결과다.
+struct TraceSnapshotInfo {
+    // writer 잠금을 제한 시간 안에 얻어 정의 저장소와 고리까지 썼는지다. 거짓이면 머리·스키마(얻을
+    // 수 있었으면)·동기 표지만 썼고 머리에 HeaderFlagSnapshotIncomplete가 켜져 있다.
+    bool complete = false;
+    // 쓴 byte 수다.
+    uint64 bytes = 0;
+    // 고리에서 옮긴 덩어리 수와, 앞 덩어리를 잃어 기록 경계를 찾을 때까지 뺀 덩어리 수다.
+    uint64 recentChunks = 0;
+    uint64 skippedChunks = 0;
+    // 세션 시작부터 고리가 넘쳐 버린 덩어리·byte 누계다.
+    uint64 droppedChunks = 0;
+    uint64 droppedBytes = 0;
 };
 
 // 한 시점의 세션 통계다. 여러 원자 칸을 따로 읽으므로 칸 사이의 일관성은 보장하지 않는다.
@@ -92,6 +127,16 @@ struct TraceSessionStats {
     // 이름 표에 든 이름 수와, 표가 차서 넣지 못한 이름 요청 수다.
     uint64 scopeNames = 0;
     uint64 scopeNamesRejected = 0;
+    // 최근 기록 고리의 크기·사용 byte·담긴 덩어리 수와, 넘쳐서 버린 덩어리·byte 누계다.
+    uint64 recentCapacity = 0;
+    uint64 recentBytes = 0;
+    uint64 recentChunks = 0;
+    uint64 recentDroppedChunks = 0;
+    uint64 recentDroppedBytes = 0;
+    // 풀 사용률 경고를 남긴 횟수다(poolWarningPercent).
+    uint64 poolWarnings = 0;
+    // 낸 수집 통계 기록 수다.
+    uint64 statsRecords = 0;
 };
 
 // 출력 콜백이다. 파일과 같은 byte 열(머리 + 덩어리)을 순서대로 받는다. bytes는 호출 동안만
@@ -206,6 +251,22 @@ public:
     // 출력을 뗀다. 떼기 전에 한 번 펌프해 이 호출 전에 공개된 기록까지 보낸 뒤 닫는다. 모르는 id는
     // NotFound다. 파일 닫기 실패는 DependencyFailed이며 출력은 떼어진다.
     Result<void> DetachOutput(TraceOutputId output) noexcept;
+
+    // 스냅샷을 쓴다(8절): 머리(HeaderFlagSnapshot) → 지금까지 낸 스키마 전체 → 정의 저장소 → 최근
+    // 기록 고리 → 동기 표지(Trace.SnapshotSync). 먼저 한 번 펌프해 지금까지 공개된 기록을 고리에
+    // 넣는다. writer 잠금은 lockTimeoutMs 안에서만 시도하고, 얻지 못하면 정의 저장소·고리를 빼고
+    // "불완전" (HeaderFlagSnapshotIncomplete)으로 쓴다(실패가 아니다). 고리 앞쪽을 잃어 기록
+    // 중간에서 시작하는 스레드 덩어리는 그 스레드의 다음 기록 경계 덩어리까지 뺀다. 붙은 출력과
+    // 고리는 바꾸지 않는다. 파일판은 path를 CreateAlways로 쓰고, 콜백판은 byte 전체를 write 한
+    // 번으로 넘긴다(write 안에서 같은 세션 API를 불러도 된다 — 잠금 밖에서 부른다). 실패: 실행 중
+    // 아님 WrongContext, 빈 path·null write InvalidArgument, 메모리 OutOfMemory, 파일
+    // 열기·쓰기·닫기 실패는 그 파일 상태의 오류 코드(FileErrorCode — 원본 상태는 통계
+    // lastOutputFileStatus), write가 돌려준 오류.
+    Result<TraceSnapshotInfo>
+    WriteSnapshot(const char* path, uint32 lockTimeoutMs = DefaultSnapshotLockTimeoutMs) noexcept;
+    Result<TraceSnapshotInfo>
+    WriteSnapshot(TraceOutputWrite write, void* context,
+                  uint32 lockTimeoutMs = DefaultSnapshotLockTimeoutMs) noexcept;
 
     // 실행 중이 아니면 모두 0이다.
     TraceSessionStats Stats() const noexcept;

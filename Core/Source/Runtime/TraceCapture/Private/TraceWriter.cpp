@@ -77,6 +77,19 @@ bool TraceSessionState::HasActiveOutput() const noexcept {
 // 원본 내용이 임계값을 넘으면 LZ4 raw block으로 압축해 본다. 줄지 않으면 원본 그대로 쓴다.
 void TraceSessionState::AppendChunk(Array<uint8>& out, uint16 stream,
                                     Span<const uint8> payload) noexcept {
+    // 스레드 스트림 덩어리는 최근 기록 고리에도 담는다(출력이 없어도).
+    const usize before = out.Size();
+    const bool toRecent =
+        &out == &outputBuffer && stream >= TraceFormat::FirstThreadStreamId && recent.IsActive();
+    AppendChunkBytes(out, stream, payload);
+    if (toRecent && out.Size() > before) {
+        recent.Push(out.View().Mid(before, out.Size() - before), recentBoundary);
+        recentBoundary = false;
+    }
+}
+
+void TraceSessionState::AppendChunkBytes(Array<uint8>& out, uint16 stream,
+                                         Span<const uint8> payload) noexcept {
     uint8 header[TraceFormat::ChunkHeaderBytes + TraceFormat::ChunkRawSizeBytes];
     if (payload.Size() > TraceFormat::CompressThresholdBytes) {
         auto packed = compressor.TryCompress(payload, compressed.View());
@@ -306,6 +319,9 @@ void TraceSessionState::DrainThread(TraceThreadState& thread, bool hasOutputs) n
     }
 
     const uint16 stream = ThreadStreamId(thread.threadId);
+    // 앞 펌프가 이 스트림을 기록 경계(published)에서 끝냈고 staging은 비어 있으므로, 이번 펌프의 첫
+    // 덩어리는 기록 경계로 시작한다.
+    recentBoundary = true;
     bool lossFlushed = false;
     for (;;) {
         TraceBlock* block = thread.readBlock;
@@ -370,7 +386,72 @@ void TraceSessionState::RecycleThread(TraceThreadState& thread) noexcept {
     freeThreads = &thread;
 }
 
+void TraceSessionState::CheckPoolUsage() noexcept {
+    if (settings.poolWarningPercent == 0) {
+        return;
+    }
+
+    const uint64 limit = static_cast<uint64>(pool.MaxPages()) * TraceBlockLayout::PageBytes;
+    const uint64 inUse = static_cast<uint64>(pool.BlocksInUse()) * TraceBlockLayout::BlockBytes;
+    // inUse / limit >= percent / 100을 나눗셈 없이 비교한다(limit은 64 MiB 단위라 넘치지 않는다).
+    const bool above = inUse * 100 >= limit * settings.poolWarningPercent;
+    if (!above) {
+        poolWarned = false;
+        return;
+    }
+
+    if (poolWarned) {
+        return;
+    }
+
+    poolWarned = true;
+    ++poolWarnings;
+    Log::Warning(LogTrace,
+                 "Trace block pool usage {UsedBytes} of {LimitBytes} bytes reached the "
+                 "{Percent}% warning level; records will be lost if the pool fills",
+                 inUse, limit, settings.poolWarningPercent);
+}
+
+void TraceSessionState::WriteStatsRecord() noexcept {
+    ++pumpCount;
+    if (pumpCount % settings.statsIntervalPumps != 0 || !TraceStatsChannel.IsEnabled()) {
+        return;
+    }
+
+    uint64 lost = AtomicLoad<MemoryOrder::Relaxed>(&unattributedLost);
+    for (const TraceThreadState* thread = AtomicLoad<MemoryOrder::Acquire>(&threads);
+         thread != nullptr; thread = thread->next) {
+        lost += AtomicLoad<MemoryOrder::Relaxed>(&thread->lostTotal);
+    }
+
+    using Format = TraceStandardFormat;
+    struct Fixed {
+        uint8 bytes[Format::StatsFixedBytes];
+    } fixed;
+    auto put = [&fixed](usize offset, uint64 value) noexcept {
+        StoreLittleEndian<uint64>(fixed.bytes + offset, value);
+    };
+    put(Format::StatsTickOffset, platform::MonotonicTicks());
+    put(Format::StatsPoolInUseOffset,
+        static_cast<uint64>(pool.BlocksInUse()) * TraceBlockLayout::BlockBytes);
+    put(Format::StatsPoolPeakOffset,
+        static_cast<uint64>(pool.PeakBlocksInUse()) * TraceBlockLayout::BlockBytes);
+    put(Format::StatsPoolLimitOffset,
+        static_cast<uint64>(pool.MaxPages()) * TraceBlockLayout::PageBytes);
+    put(Format::StatsOutputBytesOffset, outputBytes);
+    put(Format::StatsDefinitionStoreOffset, definitionStore.Size());
+    put(Format::StatsLostRecordsOffset, lost);
+    put(Format::StatsDefinitionsDroppedOffset, definitions.Dropped());
+    put(Format::StatsRecentBytesOffset, recent.UsedBytes());
+    put(Format::StatsRecentDroppedOffset, recent.DroppedBytes());
+    // 펌프하는 스레드의 스트림에 쓴다. 다음 펌프에 나간다.
+    if (TraceWrite(TraceStatsType, fixed) == TraceWriteResult::Recorded) {
+        ++statsRecords;
+    }
+}
+
 void TraceSessionState::Pump() noexcept {
+    CheckPoolUsage();
     // 1) 스레드마다 공개 위치를 먼저 읽는다. 그 앞의 기록이 쓰는 스키마·정의는 이 시점 전에
     // 준비됐으므로
     //    2)·3)에서 함께 나간다.
@@ -384,15 +465,17 @@ void TraceSessionState::Pump() noexcept {
     const bool hasOutputs = HasActiveOutput();
     EmitSchemas(hasOutputs);
     // 2) 정의를 끝까지 비우지 못했으면(다른 스레드가 쓰는 중) 그 정의보다 기록이 먼저 나가지 않도록
-    //    스레드 기록을 다음 펌프로 미룬다.
+    //    스레드 기록을 다음 펌프로 미룬다. 최근 기록 고리가 있으면 출력이 없어도 스레드 기록을
+    //    덩어리로 만든다.
     const bool definitionsComplete = DrainDefinitions(hasOutputs);
     if (definitionsComplete) {
         for (TraceThreadState* thread = head; thread != nullptr; thread = thread->next) {
-            DrainThread(*thread, hasOutputs);
+            DrainThread(*thread, hasOutputs || recent.IsActive());
         }
     }
 
     FlushOutputBuffer();
+    WriteStatsRecord();
 }
 
 void TraceSessionState::FinalFlush() noexcept {
@@ -429,6 +512,24 @@ void TraceSessionState::CloseOutputs() noexcept {
     }
 }
 
+void TraceSessionState::BuildFileHeader(uint8 (&header)[TraceFormat::FileHeaderBytes],
+                                        uint64 attachOrder, uint32 flags) const noexcept {
+    platform::MemoryZero(header, sizeof(header));
+    platform::MemoryCopy(header, TraceFormat::Magic, sizeof(TraceFormat::Magic));
+    StoreLittleEndian<uint16>(header + TraceFormat::HeaderVersionOffset, TraceFormat::Version);
+    StoreLittleEndian<uint16>(header + TraceFormat::HeaderBytesOffset,
+                              static_cast<uint16>(TraceFormat::FileHeaderBytes));
+    StoreLittleEndian<uint64>(header + TraceFormat::HeaderBaseTickOffset, baseTick);
+    StoreLittleEndian<uint64>(header + TraceFormat::HeaderTickFrequencyOffset, tickFrequency);
+    StoreLittleEndian<int64>(header + TraceFormat::HeaderStartUtcOffset, startUtcTicks);
+    StoreLittleEndian<uint64>(header + TraceFormat::HeaderSessionGuidHighOffset, guid.high);
+    StoreLittleEndian<uint64>(header + TraceFormat::HeaderSessionGuidLowOffset, guid.low);
+    platform::MemoryCopy(header + TraceFormat::HeaderBuildIdOffset, buildId.bytes,
+                         TraceFormat::HeaderBuildIdBytes);
+    StoreLittleEndian<uint64>(header + TraceFormat::HeaderAttachOrderOffset, attachOrder);
+    StoreLittleEndian<uint32>(header + TraceFormat::HeaderFlagsOffset, flags);
+}
+
 // 새 출력에 머리 → 지금까지 낸 스키마 전체 → 정의 저장소를 쓴다. 펌프 사이(writerMutex 아래)에서만
 // 붙으므로 각 스레드 스트림은 기록 경계에서 시작한다.
 Result<TraceOutputId> TraceSessionState::AttachOutput(TraceOutput output) noexcept {
@@ -446,24 +547,11 @@ Result<TraceOutputId> TraceSessionState::AttachOutput(TraceOutput output) noexce
         return Result<TraceOutputId>::Failure(ErrorCode::CapacityExceeded);
     }
 
-    uint8 header[TraceFormat::FileHeaderBytes] = {};
-    platform::MemoryCopy(header, TraceFormat::Magic, sizeof(TraceFormat::Magic));
-    StoreLittleEndian<uint16>(header + TraceFormat::HeaderVersionOffset, TraceFormat::Version);
-    StoreLittleEndian<uint16>(header + TraceFormat::HeaderBytesOffset,
-                              static_cast<uint16>(TraceFormat::FileHeaderBytes));
-    StoreLittleEndian<uint64>(header + TraceFormat::HeaderBaseTickOffset, baseTick);
-    StoreLittleEndian<uint64>(header + TraceFormat::HeaderTickFrequencyOffset, tickFrequency);
-    StoreLittleEndian<int64>(header + TraceFormat::HeaderStartUtcOffset, startUtcTicks);
-    StoreLittleEndian<uint64>(header + TraceFormat::HeaderSessionGuidHighOffset, guid.high);
-    StoreLittleEndian<uint64>(header + TraceFormat::HeaderSessionGuidLowOffset, guid.low);
-    platform::MemoryCopy(header + TraceFormat::HeaderBuildIdOffset, buildId.bytes,
-                         TraceFormat::HeaderBuildIdBytes);
+    uint8 header[TraceFormat::FileHeaderBytes];
     // 이 번호보다 작은 순서 번호의 기록은 이 출력에 없을 수 있다(분석기가 "앞부분 없음"으로 본다).
-    StoreLittleEndian<uint64>(header + TraceFormat::HeaderAttachOrderOffset,
-                              AtomicLoad<MemoryOrder::Relaxed>(&nextOrder));
     const bool incomplete = definitionStoreOverflowed || definitions.Dropped() != 0;
-    StoreLittleEndian<uint32>(header + TraceFormat::HeaderFlagsOffset,
-                              incomplete ? TraceFormat::HeaderFlagDefinitionsIncomplete : 0u);
+    BuildFileHeader(header, AtomicLoad<MemoryOrder::Relaxed>(&nextOrder),
+                    incomplete ? TraceFormat::HeaderFlagDefinitionsIncomplete : 0u);
 
     bool written = WriteOutput(output, Span<const uint8>(header, sizeof(header)));
     if (written) {

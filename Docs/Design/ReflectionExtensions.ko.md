@@ -1115,6 +1115,14 @@ public:
 - NATIVE bitfield: 지금은 NATIVE·PROPERTY 모두 bitfield를 거부한다(MC/ClangAstParser.cs `Visit`의 NATIVE·PROPERTY 멤버 `isBitfield` 검사). NATIVE bitfield는 정수·`bool` 모두 허용하고(강한 참조를 담을 수 없다), 탐침은 쓰지 않는다(정수·bool 형식인지만 AST로 본다). RMC2207은 PROPERTY와 Binds 미러에만 건다(UHT도 UPROPERTY만 본다).
 - Binds 미러 안 bitfield는 RMC2207이다(`VerifyBinds`가 `decltype(Real::m)`·`&Real::m`·구조적 바인딩을 쓴다 — CppEmitter.cs:434-461. Core 값 타입에는 bitfield가 없다).
 
+구현(B9m)에서 정한 점:
+
+- MetaCompiler: ClangAstParser가 PROPERTY bitfield를 규칙(Binds 미러 안이 아님 → 폭 = 1 → `bool` 아님 → Clang 정규 철자가 `unsigned char`·`unsigned short`·`unsigned int`·`unsigned long`·`unsigned long long`)으로 보고 통과하면 값 철자를 `bool`로 바꿔 `FieldModel.Bitfield`를 표시한다(위반은 모두 RMC2207, 폭은 FieldDecl 안 상수 식). 이름 없는 bitfield(패딩)는 지금처럼 거부한다. NATIVE bitfield는 정수·`bool`이면 받고(`NativeMemberModel.Bitfield` — enum 등 그 밖의 bitfield는 RMC2207) NativeMemberProbe에서 뺀다. descriptor 필드에 `"bitfield"`(bool, 늘 쓴다 — 읽기는 bool이 아니거나 Bool이 아닌 필드의 참이면 InvalidDescriptor)를 더했다.
+- 생성 코드: 자기 bitfield 필드마다 `GeneratedType<Owner>`에 `static bool Get_<name>(const Owner&) noexcept`·`static void Set_<name>(Owner&, bool) noexcept`(상수 0·1 대입 — 좁히기 경고가 없다)를 낸다. 클래스 필드 함수표는 `detail::BitfieldFieldOps<Owner, Get, Set, ReadOnly>(id)`, struct 멤버는 `detail::BitfieldStructFieldOps<Owner, Get, Set>(id)`(새 헤더 Object/GeneratedBitfieldAccess.h — read·write·writeStaged·encode·decode·경로 thunk를 접근자 판으로 한 벌)이고, 상속 필드는 선언 타입(base — 다른 모듈이면 descriptor `bitfield`로 안다)의 접근자를 쓰며 그 생성 헤더를 include한다. 생성 struct 값 복사(CopyValue)는 PROPERTY·NATIVE bitfield를 참조 대신 대입한다.
+- **스펙과 다른 점 — 함수표 이름**: 스펙의 `detail::BitfieldFieldOps<Get, Set>` 한 갈래 대신 클래스 필드(`BitfieldFieldOps<Owner, Get, Set, ReadOnly>` — Owner는 함수표를 내는 클래스, ReadOnly는 쓰기 Unsupported를 정적으로 고른다)와 struct 멤버(`BitfieldStructFieldOps<Owner, Get, Set>`) 둘로 나눴다(RuntimeFieldOps·RuntimeStructFieldOps가 다르다).
+- 경로: bitfield 단계는 bool 사본으로 단일 값 끝 지점(PathValue — 읽기·쓰기 검증과 옛 값 게시가 bool과 같다)을 거친 뒤 값이 바뀌었으면 Set으로 되쓴다. Detach는 bool 사본을 상자로 복사하고, Attach(대입 묶음 값 단위 게시)는 bitfield를 가진 Owner 값 주소를 자리로 기록하며 bitfield 전용 값 연산(`BitfieldValueOps` — bool의 연산에서 swap만 접근자 교환으로 바꿨다, 크기·native 키는 bool과 같아 bool 상자와 대조된다)으로 게시한다. 그래서 텍스트 대입·JSON import도 bool과 같다(클래스 필드는 값 단위로, struct 멤버는 struct 값 단위 안에서).
+- 시험: ObjectSerialization `BitfieldGraph_RoundTripEveryPosition`(형식 4종·클래스·private·상속·struct 멤버·Array<S> 원소, NATIVE bitfield는 저장하지 않음)·`BitfieldPath_WritesPreserveNeighbours`(이웃 비트 보존·ReadOnly·TypeMismatch)·`BitfieldSchema_IsBoolAndInherited`, ReflectionText `TextBitfield_CommandLineAssignsBits`·`TextBitfield_JsonRoundTrips`, ToolTests `Meta.BitfieldsReachDescriptorAndGeneratedCode`·`Meta.BitfieldPropertyRules`(`bool : 1`·폭 3·`int8 : 1`·enum)·`Meta.BitfieldInBindsMirror`·`Meta.NativeBitfieldMustBeInteger`·`Meta.ImportedBitfieldUsesBaseAccessors`(다른 모듈 base의 상속 bitfield — 옛 `Meta.Bitfields` 거부 시험은 지웠다), fixture ReflectionTestFixtures/BitfieldFixture.h.
+
 ## 15. 진단 코드
 
 | 코드 | 판정 | 뜻 |
@@ -1171,7 +1179,7 @@ public:
 | B9j | InstancedStruct<>·담기 조건·깊이 합·객체 문맥 경로 해석(구현 — 11절 "구현(B9j)에서 정한 점") | B9i4 | L |
 | B9k | struct 상속·비리플렉션 빈 base·struct 멤버 thunk 소유자 인자·`InstancedStruct<Base>`(구현 — 12절 "구현(B9k)에서 정한 점") | B9j | L |
 | B9l | Text·Localization `TryGetPersistentForm`·`DeepClone`(구현 — 13절 "구현(B9l)에서 정한 점") | B9i4 | M |
-| B9m | bitfield bool(접근자 판 일곱 갈래) | B9a1 | L |
+| B9m | bitfield bool(접근자 판 일곱 갈래 — 구현, 14절 "구현(B9m)에서 정한 점") | B9a1 | L |
 
 Core 커밋(B9b1·B9c1·B9f1·B9i1)은 다른 단계와 독립이라 먼저 해도 된다(메인 트리 구현은 순차). 종류 단계는 B9i3 뒤라면 그 종류의 텍스트 표기를 같은 커밋에서, 앞이라면 B9i3·B9i4에서 넣는다.
 
@@ -1490,6 +1498,8 @@ U5의 Deprecated 저장 범위: UE의 저장 불가 판정은 패키지 저장 �
 - B9l이 남긴 일(맡을 단계):
   - 명령행 출력의 Localized Text(지금 Unsupported — JSON으로만 나타낸다)와 `asset-info` 줄 출력의 Text 표기 → A2(에셋 명령).
   - Integer·Format 이력의 영속(문자열 표·Format 이력 영속은 위 항목) — 지금은 encode Unsupported.
+- B9m이 남긴 일(맡을 단계):
+  - bitfield bool의 Optional·배열·Map 자리는 C++에서 만들 수 없으므로 없다. 폭이 1보다 큰 정수 bitfield PROPERTY(UE도 받지 않는다)는 소비자가 생길 때.
 - 경로 key 텍스트의 제어 문자: 따옴표 안 escape는 `\\`·`\"`·`\n`·`\r`·`\t`뿐이라(1.5절, 사용자 결정 2026-11-16) 그 밖의 제어 문자(0x00–0x1F 중 셋을 뺀 것, 0x7F)를 담은 String·Name 키는 문자열 경로로 쓸 수 없다(FormatPropertyPath Unsupported — PathKey로는 다룬다). UE에 없는 `\u` 표기를 둘지는 그런 키를 쓰는 소비자(asset-info 출력)가 생길 때 정한다.
 
 ## 21. 문서 반영 목록

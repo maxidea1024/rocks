@@ -29,6 +29,10 @@ internal sealed class FieldModel
 
     public required string NativeSpelling { get; init; }
 
+    // 폭 1 부호 없는 정수 bitfield를 Bool로 받은 필드다(리플렉션 B9m — Docs/Design/ReflectionExtensions.ko.md 14절). 생성 코드는
+    // 멤버 포인터 대신 GeneratedType<Owner>::Get_·Set_ 접근자를 쓰고, descriptor는 `"bitfield": true`로 의존 모듈에 알린다.
+    public bool Bitfield { get; init; }
+
     // C 배열 PROPERTY의 정규 철자(`원소[N]` — 원소는 Clang 정규 형식)다. 첫 실행 철자는 원소를 쓰인 그대로(별칭·한정 없는 이름) 내므로
     // StaticArrayProbe가 두 번째 Clang 실행으로 채운다(리플렉션 B9g). 배열이 아니면 null이다.
     public string? CanonicalSpelling { get; set; }
@@ -549,6 +553,9 @@ internal sealed record EnumeratorModel(string Name, string ToolName, string Disp
 internal sealed class NativeMemberModel
 {
     public required string Name { get; init; }
+
+    // 정수·bool bitfield 멤버다(리플렉션 B9m — 생성 struct 값 복사가 참조 대신 대입을 쓴다).
+    public bool Bitfield { get; init; }
 
     public required string Spelling { get; init; }
 

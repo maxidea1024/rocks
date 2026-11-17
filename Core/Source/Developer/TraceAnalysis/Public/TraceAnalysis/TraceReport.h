@@ -6,8 +6,9 @@
 
 namespace rocks {
 
-// report 형식의 판이다. JSON 배치(키·순서)가 바뀌면 올린다(2: gpu 절을 더했다, RB7).
-inline constexpr uint32 TraceReportVersion = 2;
+// report 형식의 판이다. JSON 배치(키·순서)가 바뀌면 올린다(2: gpu 절, RB7. 3: summary의 스냅샷 칸과
+// capture 절, TR5).
+inline constexpr uint32 TraceReportVersion = 3;
 
 // 모델의 결정적 JSON report를 out 뒤에 붙인다(Docs/Design/TraceSystem.ko.md 10절 TR4,
 // `trace-report`). 같은 입력 byte에서 늘 같은 byte를 낸다. 키 순서는 고정이고, 배열은 스레드
@@ -16,12 +17,15 @@ inline constexpr uint32 TraceReportVersion = 2;
 // 담는 것:
 // - session: 세션 GUID, tick 주파수
 // - summary: 잘림·정의 일부 없음·중간에 붙음(앞부분 없음)·손실 수·손실 구간·버린 정의·
-//   이름 정의 누락·읽지 못한 스트림·시작 없는 끝·끝 없는 구간·순서 번호 구멍·표지 수, 채널별 손실
+//   이름 정의 누락·읽지 못한 스트림·시작 없는 끝·끝 없는 구간·순서 번호 구멍·표지 수, 스냅샷
+//   여부·불완전·고리 넘침(덩어리·byte)·기록 경계를 잃어 뺀 덩어리 수, 채널별 손실
 // - threads: 스레드별 구간 이름의 횟수·합계·p50/p95/p99(nearest-rank, 끝난 구간만)·끝 없음 수
 // - tasks: 수·실행·실패·취소, 임계 경로(앞 → 뒤 task id, 실행 시간 합, 첫 만듦부터 마지막 완료까지)
 // - counters: 이름 순, 표본 수, 마지막 값(정수 카운터) 또는 마지막 값 bit(실수 카운터, 16진)
 // - gpu: queue id 순, queue 이름·GPU 시간 여부·calibration 수·최대 오차(ns), 프레임 시간 통계, GPU
 //   구간 이름의 횟수·합계·p50/p95/p99(queue별). GPU 시간이 없는 queue는 통계가 비어 있다.
+// - capture: 수집 통계 표본 수, 풀 최대 사용·상한, 정의 저장소, 손실·버린 정의 누계, 고리가 버린
+//   byte, 첫·마지막 표본 사이의 출력 byte와 시간(ns — 대역폭은 둘의 비)
 // 이름 정의가 없는 구간은 "<unknown:id>"로 쓴다.
 // 실패: 메모리 부족 OutOfMemory.
 Result<void> WriteTraceReportJson(const TraceModel& model, Array<uint8>& out) noexcept;

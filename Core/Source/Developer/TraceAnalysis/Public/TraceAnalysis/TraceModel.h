@@ -133,6 +133,31 @@ struct TraceModelSummary {
     // attachOrderNumber 이상에서 빠진 순서 번호 수(손실로 버려진 순서 기록)다.
     uint64 orderGaps = 0;
     uint64 marks = 0;
+    // 스냅샷 파일인지(머리 HeaderFlagSnapshot)와, writer 잠금을 얻지 못해 정의·고리 없이 쓴 불완전
+    // 스냅샷인지다.
+    bool snapshot = false;
+    bool snapshotIncomplete = false;
+    // 동기 표지(Trace.SnapshotSync)의 고리 넘침 누계와 기록 경계를 잃어 뺀 덩어리 수다.
+    uint64 recentDroppedChunks = 0;
+    uint64 recentDroppedBytes = 0;
+    uint64 snapshotSkippedChunks = 0;
+};
+
+// 수집 통계 기록(Trace.Stats)의 요약이다. 표본이 없으면 모두 0이다.
+struct TraceModelCaptureStats {
+    uint64 samples = 0;
+    // 가장 이른·늦은 표본의 tick과 그때의 출력 byte 누계다(대역폭 = 출력 byte 차 / 시간 차).
+    uint64 firstTick = 0;
+    uint64 lastTick = 0;
+    uint64 firstOutputBytes = 0;
+    uint64 lastOutputBytes = 0;
+    // 표본 가운데 가장 큰 풀 최대 사용 byte와, 마지막 표본의 풀 상한·정의 저장소·손실 누계다.
+    uint64 poolBytesPeak = 0;
+    uint64 poolBytesLimit = 0;
+    uint64 definitionStoreBytes = 0;
+    uint64 lostRecords = 0;
+    uint64 definitionRecordsDropped = 0;
+    uint64 recentDroppedBytes = 0;
 };
 
 // 파일 하나의 분석 모델이다. 모델의 문자열 view는 모델이 가진 decoder byte를 가리키므로 모델보다
@@ -177,6 +202,10 @@ public:
         return channelLosses_;
     }
 
+    const TraceModelCaptureStats& CaptureStats() const noexcept {
+        return captureStats_;
+    }
+
     // queue id 순이다.
     const Array<TraceModelGpuQueue>& GpuQueues() const noexcept {
         return gpuQueues_;
@@ -218,6 +247,7 @@ private:
     TraceModelTask* FindOrAddTask(uint64 id) noexcept;
     void AddChannelLoss(uint16 channel, uint64 count) noexcept;
     TraceModelGpuQueue* FindOrAddGpuQueue(uint16 id) noexcept;
+    void AddCaptureStats(const DecodedRecord& record) noexcept;
 
     Allocator* allocator_;
     TraceStreamDecoder decoder_;
@@ -229,6 +259,7 @@ private:
     Array<TraceModelGpuQueue> gpuQueues_;
     Array<TraceModelGpuScope> gpuScopes_;
     Array<TraceModelGpuFrame> gpuFrames_;
+    TraceModelCaptureStats captureStats_;
     Array<NameEntry> names_;
     TraceModelSummary summary_;
 };
