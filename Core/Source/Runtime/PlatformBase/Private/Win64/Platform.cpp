@@ -40,6 +40,10 @@ void Mutex::Lock() noexcept {
     AcquireSRWLockExclusive(reinterpret_cast<SRWLOCK*>(storage_));
 }
 
+bool Mutex::TryLock() noexcept {
+    return TryAcquireSRWLockExclusive(reinterpret_cast<SRWLOCK*>(storage_)) != 0;
+}
+
 void Mutex::Unlock() noexcept {
     ReleaseSRWLockExclusive(reinterpret_cast<SRWLOCK*>(storage_));
 }

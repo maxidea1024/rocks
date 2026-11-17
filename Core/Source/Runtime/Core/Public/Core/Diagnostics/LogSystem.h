@@ -26,7 +26,8 @@
 //
 // 모드(LogMode):
 // - Async: 호출 스레드는 캡처·큐 복사만 하고, 출력 스레드("LogWriter")가 렌더·sink 출력을 한다.
-// - Sync: 호출 스레드가 렌더하고 sink까지 부른다(명령줄 도구). 큐·블록 풀·출력 스레드가 없다.
+// - Sync: 호출 스레드가 렌더하고 sink까지 부른다(명령줄 도구). 큐·출력 스레드가 없다. 큰 값은
+//   다른 모드와 같은 블록 풀을 써서 Manual과 같은 출력을 낸다(설계 5.1절).
 // - Manual: Async와 같은 큐를 쓰지만 출력 스레드 없이 Pump()를 부른 스레드가 비운다(시험).
 //
 // 메모리: Start에서 큐·블록 풀·렌더 버퍼를 모두 확보한다. 그 뒤 생산자·출력 스레드 모두 힙 할당이
@@ -88,7 +89,7 @@ struct LogSystemConfig {
     LogLevel globalMinimum = LogLevel::Info;
     // 큐 칸 수(2의 거듭제곱). Sync에서는 쓰지 않는다.
     usize queueSlots = DefaultQueueSlots;
-    // 큰 값 블록의 수와 크기. Sync에서는 쓰지 않는다.
+    // 큰 값 블록의 수와 크기(모든 모드).
     usize blockCount = DefaultBlockCount;
     usize blockBytes = DefaultBlockBytes;
     // 출력 렌더 버퍼(메시지·속성 텍스트)의 크기다.
@@ -133,12 +134,18 @@ struct LogSystemStats {
     uint64 droppedBeforeInstall = 0;
     // 출력 스레드를 만들지 못해 동기 비상 모드로 낮췄는지
     bool emergencyMode = false;
+    // Stop이 멈춘 sink 때문에 출력 스레드를 회수하지 못하고 남겨 두었는지(Stop 설명)
+    bool writerAbandoned = false;
 };
 
 class LogSystem;
 
 namespace detail {
 struct LogSystemAccess;
+
+// 설치·해제 때마다 하나씩 오르는 전역 세대 값이다(SRCU 세대 뒤집기). 해제가 뒤집기를 마쳤는지
+// 순서를 확인하는 시험·진단용이다.
+uint64 LogInstallGeneration() noexcept;
 } // namespace detail
 
 // 로그 기록 경로다. 호스트(main·시험)가 소유하고 LogInstallScope로 전역 대상에 설치한다.
@@ -146,8 +153,12 @@ struct LogSystemAccess;
 // 스레드 계약:
 // - Start·Stop·소멸은 소유 스레드 하나에서만, 서로 겹치지 않게 부른다.
 // - AddSink·RemoveSink·SetGlobalMinimum·SetLevel·ClearLevel·SetFrame·SetThreadName·Flush·Stats는
-//   어느 스레드에서나 부를 수 있다. sink 콜백 안에서 AddSink·RemoveSink·Flush를 부르면
-//   Busy·false다.
+//   어느 스레드에서나 부를 수 있다. sink 콜백 안에서 AddSink·RemoveSink·SetGlobalMinimum·SetLevel·
+//   ClearLevel을 부르면 Busy, Flush는 false다.
+// - lock 순서: 출력 쪽은 sink lock을 쥔 채 sink 콜백을 부른다. 그래서 sink 콜백이 잡는 lock을 쥔
+//   채로 AddSink·RemoveSink·(Sync 모드의) Flush를 부르지 않는다(교착). 로그 호출(Log::*)은 어떤
+//   lock 안에서도 된다(생산자는 sink lock을 잡지 않는다. Sync는 호출 스레드가 sink lock을 잡으므로
+//   sink 콜백이 잡는 lock 안에서 Sync 로그를 남기지 않는다).
 // - Pump는 Manual 모드에서 어느 스레드에서나 부를 수 있지만 한 번에 하나만 돈다(겹친 호출은 0).
 class LogSystem {
 public:
@@ -156,16 +167,24 @@ public:
     LogSystem(const LogSystem&) = delete;
     LogSystem& operator=(const LogSystem&) = delete;
 
-    // 큐·블록 풀·렌더 버퍼를 확보하고(Async는) 출력 스레드를 시작한다.
-    // - 실패: 이미 시작함·잘못된 설정은 InvalidArgument, 그 밖은 allocator 오류(아무것도 남기지
-    // 않는다).
+    // 큐·블록 풀·렌더 버퍼를 확보하고(Async는) 출력 스레드를 시작한다. Stop 뒤 다시 시작할 수 있다.
+    // - 실패: 이미 시작함·잘못된 설정은 InvalidArgument, 앞 Stop이 남겨 둔 출력 스레드가 아직 sink
+    //   안에 있으면 Busy, 그 밖은 allocator 오류(아무것도 남기지 않는다).
     // - 출력 스레드를 만들지 못하면 Start는 성공하고 동기 비상 모드로 낮춘다: Warning 이상만 호출
     //   스레드에서 비상 출력(stderr 직접 쓰기)으로 쓰고 나머지는 버린다. 한 번 알린다.
     Result<void> Start() noexcept;
 
-    // 새 기록을 받지 않고, 남은 기록을 비우고(drain, 제한 시간 안에서 best effort), sink를
+    // 새 기록을 받지 않고, 남은 기록을 비우고(Manual은 Stop한 스레드가 모두 비운다), sink를
     // flush하고, 출력 스레드를 회수한 뒤 메모리를 돌려준다. 설치된 상태면 먼저 해제해야 한다(설치
     // 범위가 이 객체보다 먼저 끝나야 한다). 두 번 불러도 된다.
+    //
+    // Async의 drain은 drainTimeoutMilliseconds 안의 best effort다. 넘기면 남은 기록을 버리기로
+    // 하고(출력 스레드는 다음 기록에서 멈춘다) 버린 수를 비상 경로로 알린 뒤 같은 시간만큼 한 번 더
+    // 기다린다. 그래도 출력 스레드가 sink 안에서 돌아오지 않으면(멈춘 sink) 기다리지 않고 반환한다:
+    // 출력 스레드를 남겨 두고 그 스레드가 쓰는 큐·블록·렌더 메모리를 돌려주지 않는다(살아 있는
+    // 스레드 아래에서 해제하지 않으려고 의도적으로 남긴다). 이때 Stats().writerAbandoned가 참이고,
+    // 소멸자는 그 스레드가 sink에서 돌아올 때까지 기다린 뒤 회수한다. 멈춘 sink가 끝내 돌아오지
+    // 않을 수 있으면 호스트는 LogSystem을 파괴하지 말고 프로세스를 끝낸다.
     void Stop() noexcept;
 
     // sink를 등록한다. 등록 뒤 시작하는 묶음부터 받는다. filter는 복사한다.
@@ -187,15 +206,16 @@ public:
     bool Flush(uint32 timeoutMilliseconds = platform::InfiniteTimeout) noexcept;
 
     // 전역 최소 레벨이다. 컴파일에서 뺀 레벨보다 낮게 주면 성공하되 Warning을 한 번 남긴다.
-    void SetGlobalMinimum(LogLevel level) noexcept;
+    // 실패: 잘못된 레벨 InvalidArgument, sink 콜백 안에서 부르면 Busy.
+    Result<void> SetGlobalMinimum(LogLevel level) noexcept;
 
     // 카테고리 이름 접두사(prefix)의 레벨을 재정의한다(점 접두사 최장 일치, ASCII 대소문자 무시).
     // 재정의는 전역보다 자세하게도 조용하게도 할 수 있다.
     // 실패: 이름 문법·레벨 오류 InvalidArgument, 표가 가득 차면 CapacityExceeded, 해시가 같은 다른
-    // 이름이 이미 있으면 AlreadyExists.
+    // 이름이 이미 있으면 AlreadyExists, sink 콜백 안에서 부르면 Busy.
     Result<void> SetLevel(StringView prefix, LogLevel level) noexcept;
 
-    // 재정의를 지운다. 없으면 NotFound다.
+    // 재정의를 지운다. 없으면 NotFound, sink 콜백 안에서 부르면 Busy다.
     Result<void> ClearLevel(StringView prefix) noexcept;
 
     // level·category의 기록이 지금 활성인지다(컴파일 타임 하한은 Log::IsEnabled가 본다). Fatal은 늘
@@ -226,6 +246,8 @@ private:
         uint32 consecutiveFailures = 0;
         uint32 batchesSinceBlocked = 0;
         bool blocked = false;
+        // 막혔다고 이미 알렸는지다(다시 시도해 실패해도 또 알리지 않는다. 성공하면 지운다).
+        bool blockAnnounced = false;
     };
 
     struct QueueSlot {
@@ -247,6 +269,11 @@ private:
     static void WriterEntry(void* context) noexcept;
     void WriterLoop() noexcept;
     usize DrainBatch(usize limit) noexcept;
+    // Pump의 본체다. started_를 보지 않으므로 Stop의 Manual drain도 쓴다(pumping_은 호출자가 쥔다).
+    usize DrainQueue(usize maxRecords) noexcept;
+    void ReleaseResources() noexcept;
+    // UTC 기준점을 다시 맞춘다(sinkMutex_ 안에서 부른다).
+    void RefreshUtcAnchor() noexcept;
     void Dispatch(Span<const uint8> capture, const LogBlockProvider* blocks) noexcept;
     void FlushSinks() noexcept;
     void ReportDrops() noexcept;
@@ -276,13 +303,16 @@ private:
     uint32 emergency_ = 0;
     uint32 sleeping_ = 0;
     uint32 pumping_ = 0;
+    // Stop이 drain을 포기했다(출력 스레드는 다음 기록에서 멈춘다).
+    uint32 abandoned_ = 0;
+    // Stop이 출력 스레드를 회수하지 못하고 메모리와 함께 남겨 두었다(소유 스레드만 읽고 쓴다).
+    bool writerLeaked_ = false;
     uint64 writerThread_ = 0;
 
     // sink 표(sinkMutex_가 보호). 출력 쪽은 묶음 동안 이 lock을 쥔다.
     platform::Mutex sinkMutex_;
     SinkSlot sinks_[MaxLogSinks];
     usize sinkCount_ = 0;
-    uint32 syncDispatching_ = 0;
 
     // Flush 대기(묶음 끝에 완료 위치를 알린다)
     platform::Mutex flushMutex_;
@@ -307,7 +337,9 @@ private:
     uint64 anchorMonotonic_ = 0;
     int64 anchorUtc_ = 0;
     bool anchorValid_ = false;
-    uint64 reportedDrops_ = 0;
+    // 마지막으로 알린 레벨별 버림 수다(알림은 그 뒤로 늘어난 만큼만 싣는다). dropped_는
+    // Stop·Start를 거쳐도 누적이므로 다시 시작해도 기준을 유지한다.
+    uint64 reportedDropped_[LogLevelCount]{};
 
     // 통계(원자 변수)
     uint64 dropped_[LogLevelCount]{};

@@ -110,7 +110,7 @@ struct Formatter<EchoSpec> {
 };
 
 namespace test {
-uint64 OperatorNewCallsOnThisThread() noexcept;
+uint64 OperatorNewCalls() noexcept;
 } // namespace test
 
 namespace test {
@@ -809,7 +809,7 @@ TEST(FixedStringBuilderTryReserveSucceedsWithoutAllocating) {
 // 캡처·렌더 API는 Allocator를 받지 않으므로 Rocks allocator 경로는 구조상 없다.
 TEST(LogCaptureAndRenderDoNotAllocate) {
     const uint64 attempts = detail::FixedStringBuilderAllocationAttempts();
-    const uint64 news = test::OperatorNewCallsOnThisThread();
+    const uint64 news = test::OperatorNewCalls();
     TestBlocks blocks;
     uint8 slot[LogCaptureMinimumBytes(5) + 16];
     char longText[300];
@@ -837,7 +837,7 @@ TEST(LogCaptureAndRenderDoNotAllocate) {
 
     CHECK(blocks.borrowed == blocks.released);
     CHECK(detail::FixedStringBuilderAllocationAttempts() == attempts);
-    CHECK(test::OperatorNewCallsOnThisThread() == news);
+    CHECK(test::OperatorNewCalls() == news);
 }
 
 // 리터럴 템플릿의 기본 인자 SourceLocation::Current()는 CaptureLog를 부른 줄을 담는다. 두 번역

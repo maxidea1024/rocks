@@ -3,6 +3,7 @@
 #include <Core/Diagnostics/LogSystem.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Platform/Atomics.h>
+#include <Platform/Clock.h>
 #include <Platform/Fatal.h>
 #include <Platform/Sync.h>
 #include <Platform/Thread.h>
@@ -10,7 +11,7 @@
 using namespace rocks;
 
 namespace rocks::test {
-uint64 OperatorNewCallsOnThisThread() noexcept;
+uint64 OperatorNewCalls() noexcept;
 } // namespace rocks::test
 
 namespace {
@@ -54,6 +55,7 @@ public:
             (void)line.TryAppendAscii('\n');
             bytes += line.ByteCount();
         }
+
         const uint32 target = platform::AtomicLoad<platform::MemoryOrder::Acquire>(&signalAt);
         if (target != 0 && records >= target) {
             reached.Signal();
@@ -282,10 +284,21 @@ TEST(LogSystemSaturationKeepsWarningReserveAndReportsDrops) {
     CHECK(before.dropped[static_cast<usize>(LogLevel::Warning)] == 1);
     CHECK(logs.Pump() == 16);
     CHECK(sink.records == 17);
-    CHECK(sink.Text().EndsWith(
-        "[Warning][Log] 7 log records dropped (0 Trace, 0 Debug, 6 Info, 1 Warning, 0 Error)\n",
-        StringComparison::CaseSensitive));
+    CHECK(sink.Text().EndsWith("[Warning][Log] 7 log records dropped since the last report (0 "
+                               "Trace, 0 Debug, 6 Info, 1 Warning, 0 Error)\n",
+                               StringComparison::CaseSensitive));
     CHECK(sink.Text().Contains("[Warning][Tests.System] warning 2\n",
+                               StringComparison::CaseSensitive));
+
+    // 두 번째 포화의 알림은 그 사이 늘어난 수만 싣는다(누계가 아니다).
+    sink.Clear();
+    for (uint32 index = 0; index < 16; ++index) {
+        Log::Info(LogSystemTests, "again {Index}", index);
+    }
+
+    CHECK(logs.Pump() == 14);
+    CHECK(sink.Text().EndsWith("[Warning][Log] 2 log records dropped since the last report (0 "
+                               "Trace, 0 Debug, 2 Info, 0 Warning, 0 Error)\n",
                                StringComparison::CaseSensitive));
 }
 
@@ -311,10 +324,18 @@ TEST(LogSystemBlocksFailingSinkAndRetries) {
     CHECK(logs.Stats().sinkFailures == LogSinkFailureLimit && logs.Stats().sinkBlocks == 1);
 
     failing.fail = false;
+    // 빈 Pump는 다시 시도까지의 묶음 수에 들지 않는다. 기록이 있는 묶음만 센다.
     for (uint32 batch = 0; batch < LogSinkRetryBatches; ++batch) {
-        (void)logs.Pump(); // 빈 묶음도 다시 시도까지의 묶음 수에 든다
+        CHECK(logs.Pump() == 0);
     }
 
+    bool stillBlocked = true;
+    for (uint32 batch = 0; batch + 1 < LogSinkRetryBatches; ++batch) {
+        Log::Info(LogSystemTests, "while blocked {Batch}", batch);
+        stillBlocked = stillBlocked && logs.Pump() == 1 && failing.records == LogSinkFailureLimit;
+    }
+
+    CHECK(stillBlocked);
     Log::Info(LogSystemTests, "after retry");
     CHECK(logs.Pump() == 1);
     CHECK(failing.records == LogSinkFailureLimit + 1);
@@ -336,6 +357,9 @@ public:
         added = logs.AddSink(other).Error();
         removed = logs.RemoveSink(*this).Error();
         flushed = logs.Flush(0);
+        globalSet = logs.SetGlobalMinimum(LogLevel::Info).Error();
+        levelSet = logs.SetLevel("Audio", LogLevel::Error).Error();
+        levelCleared = logs.ClearLevel("Audio").Error();
         return Result<void>::Success();
     }
 
@@ -344,13 +368,16 @@ public:
     uint32 records = 0;
     ErrorCode added = ErrorCode::None;
     ErrorCode removed = ErrorCode::None;
+    ErrorCode globalSet = ErrorCode::None;
+    ErrorCode levelSet = ErrorCode::None;
+    ErrorCode levelCleared = ErrorCode::None;
     bool flushed = true;
 };
 
 } // namespace
 
-// sink 콜백 안의 로그는 큐에 들어가지 않고 비상 경로로만 간다(재귀 없음). 콜백 안의 등록·해제는
-// Busy, Flush는 false다.
+// sink 콜백 안의 로그는 큐에 들어가지 않고 비상 경로로만 간다(재귀 없음). 콜백 안의 등록·해제·레벨
+// 변경은 Busy, Flush는 false다.
 TEST(LogSystemSinkReentryGoesToEmergencyPath) {
     ResetUninstalledDrops();
     SystemAllocator allocator;
@@ -364,6 +391,9 @@ TEST(LogSystemSinkReentryGoesToEmergencyPath) {
     CHECK(logs.Pump() == 0); // 콜백 안의 로그는 큐에 들어가지 않았다
     CHECK(sink.records == 1);
     CHECK(sink.added == ErrorCode::Busy && sink.removed == ErrorCode::Busy && !sink.flushed);
+    // 레벨 변경도 콜백 안에서는 Busy다(설치·해제와 lock 순서가 엇갈리지 않게).
+    CHECK(sink.globalSet == ErrorCode::Busy && sink.levelSet == ErrorCode::Busy &&
+          sink.levelCleared == ErrorCode::Busy);
     CHECK(logs.Stats().reentered == 1);
 }
 
@@ -411,7 +441,7 @@ TEST(LogSystemLevelOverridesUseLongestPrefix) {
     CHECK(logs.ClearLevel("Graphics").Error() == ErrorCode::NotFound);
     CHECK(logs.SetLevel("Bad..Name", LogLevel::Info).Error() == ErrorCode::InvalidArgument);
 
-    logs.SetGlobalMinimum(LogLevel::Info);
+    REQUIRE(logs.SetGlobalMinimum(LogLevel::Info).IsOk());
     CHECK(logs.IsEnabled(LogLevel::Info, LogAudio));
 
     // 표 용량을 넘기면 CapacityExceeded다.
@@ -506,70 +536,126 @@ TEST(LogInstallNestsAndReportsDropsBeforeInstall) {
 
 namespace {
 
-constexpr uint32 LoggingThreads = 4;
-
-struct ContinuousContext {
-    uint32 stop = 0;
-    platform::ManualResetEvent started[LoggingThreads];
-    uint64 written[LoggingThreads]{};
+// 게이트에서 멈추는 Formatter 값이다. 로그 호출을 읽기 범위(설치 세대 카운터) 안에 붙잡아 둔다.
+struct GateState {
+    platform::ManualResetEvent entered;
+    platform::ManualResetEvent release;
 };
 
-struct ContinuousArgument {
-    ContinuousContext* context = nullptr;
-    uint32 index = 0;
+struct GatedValue {
+    GateState* gate = nullptr;
 };
 
-void LogContinuously(void* raw) noexcept {
-    auto& argument = *static_cast<ContinuousArgument*>(raw);
-    ContinuousContext& context = *argument.context;
-    while (platform::AtomicLoad<platform::MemoryOrder::Acquire>(&context.stop) == 0) {
-        Log::Info(LogSystemTests, "busy {Thread}", argument.index);
-        if (++context.written[argument.index] == 1) {
-            context.started[argument.index].Signal();
+} // namespace
+
+namespace rocks {
+
+template <>
+struct Formatter<GatedValue> {
+    static Result<void> Format(StringBuilderBase& out, const GatedValue& value,
+                               StringView) noexcept {
+        value.gate->entered.Signal();
+        if (value.gate->release.Wait(SafetyTimeoutMilliseconds) != platform::WaitResult::Signaled) {
+            platform::Fatal("gated log value was never released");
         }
+
+        return out.TryAppend("gated");
+    }
+};
+
+} // namespace rocks
+
+namespace {
+
+struct UninstallContext {
+    LogSystem* logs = nullptr;
+    platform::ManualResetEvent installed;
+    platform::ManualResetEvent uninstall;
+    platform::ManualResetEvent uninstalled;
+};
+
+// 설치하고, 신호를 받으면 범위를 끝내 해제한다(해제가 이 스레드에서 기다린다).
+void InstallThenUninstall(void* raw) noexcept {
+    auto& context = *static_cast<UninstallContext*>(raw);
+    {
+        LogInstallScope installed(*context.logs);
+        context.installed.Signal();
+        if (context.uninstall.Wait(SafetyTimeoutMilliseconds) != platform::WaitResult::Signaled) {
+            platform::Fatal("uninstall was never requested");
+        }
+    }
+
+    context.uninstalled.Signal();
+}
+
+void LogOldGeneration(void* raw) noexcept {
+    Log::Info(LogSystemTests, "old {Value}", GatedValue{static_cast<GateState*>(raw)});
+}
+
+void LogNewGeneration(void* raw) noexcept {
+    Log::Warning(LogSystemTests, "new reader (expected in test log) {Value}",
+                 GatedValue{static_cast<GateState*>(raw)});
+}
+
+void Start(platform::Thread& thread, platform::Thread::Entry entry, void* context) noexcept {
+    if (thread.Start(entry, context) != platform::ThreadStatus::Success) {
+        platform::Fatal("log system test worker did not start");
+    }
+}
+
+void Await(platform::ManualResetEvent& event, const char* what) noexcept {
+    if (event.Wait(SafetyTimeoutMilliseconds) != platform::WaitResult::Signaled) {
+        platform::Fatal(what);
     }
 }
 
 } // namespace
 
-// 계속 로그가 들어와도 해제가 끝난다(두 세대 카운터: 새 호출은 새 세대로 가므로 옛 세대만
-// 기다린다).
-TEST(LogUninstallDoesNotStarveUnderContinuousLogging) {
+// 해제는 뒤집기 전 세대의 호출만 기다린다. 옛 세대 호출 하나를 게이트로 붙잡은 채 해제를 시작하고,
+// 뒤집기가 끝난 뒤 시작한 호출(새 세대)도 게이트로 붙잡는다. 옛 호출만 놓아도 해제가 끝나야 한다 —
+// 새 호출이 여전히 읽기 범위 안에 있는 동안. 순서는 모두 이벤트와 세대 값으로 정한다.
+TEST(LogUninstallWaitsOnlyForReadersFromBeforeTheFlip) {
+    ResetUninstalledDrops();
     SystemAllocator allocator;
-    LogSystemConfig config = Config(LogMode::Manual);
-    config.queueSlots = 64;
-    LogSystem logs(allocator, config);
+    LogSystem logs(allocator, Config(LogMode::Manual));
     REQUIRE(logs.Start().IsOk());
-    ContinuousContext context;
-    ContinuousArgument arguments[LoggingThreads];
-    platform::Thread threads[LoggingThreads];
-    {
-        LogInstallScope installed(logs);
-        for (uint32 index = 0; index < LoggingThreads; ++index) {
-            arguments[index] = {&context, index};
-            if (threads[index].Start(LogContinuously, &arguments[index]) !=
-                platform::ThreadStatus::Success) {
-                platform::Fatal("logging thread start failed");
-            }
+    UninstallContext context;
+    context.logs = &logs;
+    GateState oldGate;
+    GateState newGate;
+    platform::Thread installer;
+    platform::Thread oldReader;
+    platform::Thread newReader;
+    Start(installer, InstallThenUninstall, &context);
+    Await(context.installed, "install did not finish");
+    Start(oldReader, LogOldGeneration, &oldGate);
+    Await(oldGate.entered, "old-generation reader did not enter");
+
+    // 해제를 시작하고 세대가 뒤집히기를 기다린다(옛 호출이 붙잡혀 있어 해제는 끝나지 않는다).
+    const uint64 before = detail::LogInstallGeneration();
+    context.uninstall.Signal();
+    const uint64 start = platform::MonotonicNanoseconds();
+    while (detail::LogInstallGeneration() == before) {
+        if (platform::MonotonicNanoseconds() - start >
+            uint64{SafetyTimeoutMilliseconds} * 1000000u) {
+            platform::Fatal("uninstall did not flip the generation");
         }
 
-        for (platform::ManualResetEvent& started : context.started) {
-            if (started.Wait(SafetyTimeoutMilliseconds) != platform::WaitResult::Signaled) {
-                platform::Fatal("logging thread did not start");
-            }
-        }
-        // 범위가 끝나며 해제한다. 생산자들은 계속 로그를 남기는 중이다.
+        platform::YieldThread();
     }
 
-    platform::AtomicStore<platform::MemoryOrder::Release>(&context.stop, 1u);
-    for (platform::Thread& thread : threads) {
-        Join(thread);
-    }
+    CHECK(context.uninstalled.Wait(0) == platform::WaitResult::TimedOut);
+    Start(newReader, LogNewGeneration, &newGate);
+    Await(newGate.entered, "new-generation reader did not enter");
 
-    CHECK(logs.Stats().written == 0); // Manual이라 Pump 전에는 sink에 가지 않는다
-    for (uint64 written : context.written) {
-        CHECK(written != 0);
-    }
+    // 옛 호출만 놓는다. 새 호출이 읽기 범위 안에 있어도 해제는 끝난다.
+    oldGate.release.Signal();
+    CHECK(context.uninstalled.Wait(SafetyTimeoutMilliseconds) == platform::WaitResult::Signaled);
+    newGate.release.Signal();
+    Join(oldReader);
+    Join(newReader);
+    Join(installer);
+    CHECK(logs.Pump() == 1); // 옛 호출은 해제 전에 설치된 시스템의 큐에 들어갔다
 }
 
 namespace {
@@ -597,6 +683,7 @@ struct RemovalContext {
     GateSink* sink = nullptr;
     platform::ManualResetEvent started;
     uint32 finishedWhenRemoved = 0;
+    uint32 returned = 0;
     bool removed = false;
 };
 
@@ -606,12 +693,14 @@ void RemoveGateSink(void* raw) noexcept {
     context.removed = context.logs->RemoveSink(*context.sink).IsOk();
     context.finishedWhenRemoved =
         platform::AtomicLoad<platform::MemoryOrder::Acquire>(&context.sink->finished);
+    platform::AtomicStore<platform::MemoryOrder::Release>(&context.returned, 1u);
 }
 
 } // namespace
 
-// RemoveSink는 진행 중인 콜백이 끝난 뒤 반환한다. 시간 대신 순서로 확인한다: RemoveSink가 반환했을
-// 때 콜백의 마지막 쓰기(finished)가 이미 보여야 한다.
+// RemoveSink는 진행 중인 콜백이 끝난 뒤 반환한다. 콜백은 시작을 알리고(entered) 게이트에서 멈춘다.
+// 그동안 RemoveSink를 부른 스레드는 반환하지 않아야 하고(게이트를 열기 전 returned가 0), 반환했을
+// 때는 콜백의 마지막 쓰기(finished)가 이미 보여야 한다. 시간이 아니라 순서로 확인한다.
 TEST(LogSystemRemoveSinkWaitsForCallback) {
     ResetUninstalledDrops();
     SystemAllocator allocator;
@@ -634,6 +723,7 @@ TEST(LogSystemRemoveSinkWaitsForCallback) {
         platform::Fatal("remover did not start");
     }
 
+    CHECK(platform::AtomicLoad<platform::MemoryOrder::Acquire>(&context.returned) == 0);
     sink.release.Signal();
     Join(remover);
     CHECK(context.removed && context.finishedWhenRemoved == 1);
@@ -685,14 +775,14 @@ TEST(LogSystemDoesNotAllocateAfterStart) {
         REQUIRE(logs.AddSink(failing).IsOk());
         REQUIRE(logs.Start().IsOk());
         const uint64 afterStart = allocator.Allocations();
-        const uint64 news = test::OperatorNewCallsOnThisThread();
+        const uint64 news = test::OperatorNewCalls();
         {
             LogInstallScope installed(logs);
             ExerciseLogPaths(logs);
         }
 
         CHECK(allocator.Allocations() == afterStart);
-        CHECK(test::OperatorNewCallsOnThisThread() == news);
+        CHECK(test::OperatorNewCalls() == news);
         CHECK(sink.records != 0);
         logs.Stop();
     }
@@ -732,4 +822,159 @@ TEST(LogIsEnabledCombinesCompiledAndRuntimeLevels) {
     CHECK(Log::IsEnabled(LogLevel::Fatal, LogAudio));
     REQUIRE(logs.SetLevel("Audio", LogLevel::Trace).IsOk());
     CHECK(Log::IsEnabled(LogLevel::Trace, LogAudio) == (LogLevel::Trace >= LogCompiledMinimum));
+}
+
+namespace {
+
+// 문이 열릴 때까지 Write 안에서 기다리는 sink다. 처음에는 닫혀 있다.
+class HoldingSink final : public RuntimeLogSink {
+public:
+    Result<void> Write(const LogEvent&) noexcept override {
+        (void)platform::AtomicFetchAdd<platform::MemoryOrder::Relaxed>(&records, 1u);
+        entered.Signal();
+        if (release.Wait(SafetyTimeoutMilliseconds) != platform::WaitResult::Signaled) {
+            platform::Fatal("holding sink was never released");
+        }
+
+        return Result<void>::Success();
+    }
+
+    uint32 Records() const noexcept {
+        return platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&records);
+    }
+
+    platform::ManualResetEvent entered;
+    platform::ManualResetEvent release;
+    uint32 records = 0;
+};
+
+} // namespace
+
+// Manual의 Stop은 Pump하지 않은 기록도 sink에 넘긴다.
+TEST(LogSystemManualStopDeliversQueuedRecords) {
+    ResetUninstalledDrops();
+    SystemAllocator allocator;
+    LogSystem logs(allocator, Config(LogMode::Manual));
+    LineSink sink;
+    REQUIRE(logs.AddSink(sink).IsOk());
+    REQUIRE(logs.Start().IsOk());
+    {
+        LogInstallScope installed(logs);
+        Log::Info(LogSystemTests, "queued {Index}", 1);
+        Log::Info(LogSystemTests, "queued {Index}", 2);
+    }
+
+    CHECK(sink.records == 0);
+    logs.Stop();
+    CHECK(sink.Text() == "[Info][Tests.System] queued 1\n"
+                         "[Info][Tests.System] queued 2\n");
+}
+
+// Stop → Start 뒤에도 Flush는 그 전에 넣은 기록이 sink에 닿을 때까지 기다린다(앞 실행의 완료 위치가
+// 남아 바로 끝나지 않는다).
+TEST(LogSystemFlushWaitsAfterRestart) {
+    ResetUninstalledDrops();
+    SystemAllocator allocator;
+    LogSystem logs(allocator, Config(LogMode::Async));
+    HoldingSink sink;
+    sink.release.Signal();
+    REQUIRE(logs.AddSink(sink).IsOk());
+    REQUIRE(logs.Start().IsOk());
+    {
+        LogInstallScope installed(logs);
+        for (uint32 index = 0; index < 5; ++index) {
+            Log::Info(LogSystemTests, "first run {Index}", index);
+        }
+
+        CHECK(logs.Flush(SafetyTimeoutMilliseconds));
+    }
+
+    logs.Stop();
+    REQUIRE(logs.Start().IsOk());
+    sink.release.Reset();
+    sink.entered.Reset();
+    {
+        LogInstallScope installed(logs);
+        Log::Info(LogSystemTests, "second run");
+        if (sink.entered.Wait(SafetyTimeoutMilliseconds) != platform::WaitResult::Signaled) {
+            platform::Fatal("holding sink was not entered");
+        }
+
+        // 기록이 sink 안에 붙잡혀 있으므로 끝나지 않았다.
+        CHECK(!logs.Flush(0));
+        sink.release.Signal();
+        CHECK(logs.Flush(SafetyTimeoutMilliseconds));
+    }
+
+    CHECK(sink.Records() == 6);
+}
+
+// Async Stop은 sink가 멈춰도 끝없이 기다리지 않는다. drain을 포기하고(남은 기록은 버린다) 출력
+// 스레드와 메모리를 남긴 채 반환한다. 그 스레드가 남은 동안 Start는 Busy이고, 소멸자가 sink에서
+// 돌아온 스레드를 회수한다.
+TEST(LogSystemStopAbandonsWriterStuckInSink) {
+    ResetUninstalledDrops();
+    SystemAllocator allocator;
+    LogSystemConfig config = Config(LogMode::Async);
+    config.drainTimeoutMilliseconds = 10;
+    HoldingSink sink;
+    {
+        LogSystem logs(allocator, config);
+        REQUIRE(logs.AddSink(sink).IsOk());
+        REQUIRE(logs.Start().IsOk());
+        {
+            LogInstallScope installed(logs);
+            for (uint32 index = 0; index < 3; ++index) {
+                Log::Info(LogSystemTests, "stuck {Index}", index);
+            }
+
+            if (sink.entered.Wait(SafetyTimeoutMilliseconds) != platform::WaitResult::Signaled) {
+                platform::Fatal("holding sink was not entered");
+            }
+        }
+
+        // sink는 Stop이 반환한 뒤에야 열린다. 그러므로 Stop은 sink를 기다리지 않고 반환했다.
+        logs.Stop();
+        CHECK(logs.Stats().writerAbandoned);
+        CHECK(logs.Start().Error() == ErrorCode::Busy);
+        sink.release.Signal();
+    }
+
+    CHECK(sink.Records() == 1);
+}
+
+// Sync도 큰 값을 블록에 담아 Manual과 같은 출력을 낸다(준비 버퍼 크기에서 잘리지 않는다).
+TEST(LogSystemSyncKeepsLargeValuesLikeManual) {
+    ResetUninstalledDrops();
+    char large[2600];
+    for (usize index = 0; index < sizeof(large) - 1; ++index) {
+        large[index] = static_cast<char>('a' + index % 26);
+    }
+
+    large[sizeof(large) - 1] = '\0';
+    SystemAllocator allocator;
+    LineSink syncSink;
+    LineSink manualSink;
+    {
+        LogSystem logs(allocator, Config(LogMode::Sync));
+        REQUIRE(logs.AddSink(syncSink).IsOk());
+        REQUIRE(logs.Start().IsOk());
+        LogInstallScope installed(logs);
+        Log::Info(LogSystemTests, "large {Text}", StringView(large));
+        CHECK(logs.Stats().truncated == 0);
+    }
+
+    {
+        LogSystem logs(allocator, Config(LogMode::Manual));
+        REQUIRE(logs.AddSink(manualSink).IsOk());
+        REQUIRE(logs.Start().IsOk());
+        LogInstallScope installed(logs);
+        Log::Info(LogSystemTests, "large {Text}", StringView(large));
+        CHECK(logs.Pump() == 1);
+        CHECK(logs.Stats().truncated == 0);
+    }
+
+    CHECK(syncSink.Text() == manualSink.Text());
+    CHECK(syncSink.Text().ByteCount() ==
+          sizeof("[Info][Tests.System] large \n") - 1 + sizeof(large) - 1);
 }
