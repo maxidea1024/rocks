@@ -622,6 +622,104 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::BitfieldChild::extra",
+      "id": "11def73d2d2740d6838f3c41a0d2e58d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::BitfieldFlags::first",
+      "id": "b4821933d8884b39964b3d977be34c93",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::BitfieldFlags::plain",
+      "id": "db0c74a9f30c46ae8fdb982c9262261e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::BitfieldFlags::second",
+      "id": "a211696cb5f34b6693cfcb819a19c173",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::BitfieldFlags::wide",
+      "id": "886374e027264adb8e5ce36e2b73a3da",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::BitfieldFlags::wider",
+      "id": "b98ea0f578624b2086b321349e3d2f3b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::BitfieldFlags::widest",
+      "id": "85400cda1fcb4f00914af5a6e4a78294",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::BitfieldHolder::big",
+      "id": "425f29918163432894976eb612de7cc7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::BitfieldHolder::flags",
+      "id": "bc48b43af6ef4b7e92320214d27df01c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::BitfieldHolder::hidden",
+      "id": "4c9c4bad2be54c13bd7e3740c506471c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::BitfieldHolder::list",
+      "id": "7a6e4887083c4184bc44775ef645d673",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::BitfieldHolder::locked",
+      "id": "779750e6cca0457188c9b96a45604188",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::BitfieldHolder::off",
+      "id": "48930d7af75d4a52bc56b669ac032e0c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::BitfieldHolder::on",
+      "id": "90dba3e113194a93aebe1d0160aa5fae",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::ClassBase::value",
       "id": "44f1f56c3b2441c3beb1a13411abc0b0",
       "aliases": [],
@@ -3419,6 +3517,27 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::Bias",
       "id": "6ba8da01a9a74de9a2971b6caa9bc101",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::BitfieldChild",
+      "id": "9e67ba059ba140978830e4fb90f88740",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::BitfieldFlags",
+      "id": "e6e2665f8d6a4b9aa953b2c8806be576",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::BitfieldHolder",
+      "id": "b8b2f3ce679c4cdc8c9333796caca19e",
       "aliases": [],
       "retired": false
     },
