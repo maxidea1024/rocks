@@ -68,3 +68,77 @@ TEST(GcSoak_SchedulerCollectionKeepsModelInvariants) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+
+namespace {
+
+void PrintClusterFailure(const GcClusterSoakReport& report) noexcept {
+    if (report.failure != nullptr) {
+        fprintf(stderr, "GcClusterSoak failure at tick %llu (object %u, error %u): %s\n",
+                static_cast<unsigned long long>(report.failureTick), report.failureObject,
+                static_cast<unsigned>(report.failureError), report.failure);
+    }
+}
+
+} // namespace
+
+// 클러스터 smoke(GC-S7): World형과 패키지형, 직렬과 scheduler 경로다.
+TEST(GcSoak_ClusterWorldKeepsOracle) {
+    for (uint64 seed = 0; seed < 2; ++seed) {
+        SystemAllocator allocator;
+        GcClusterSoakOptions options;
+        options.seed = rocks::test::CurrentSeed() * 1000 + seed;
+        options.ticks = 60;
+        options.maxObjects = 700;
+        GcClusterSoakReport report;
+        const bool passed = RunGcClusterSoak(allocator, options, report);
+        PrintClusterFailure(report);
+        CHECK(passed);
+        CHECK(report.cyclesCompleted > 30);
+        CHECK(report.reclaimed > 20);
+        CHECK(report.destroys > 20);
+        CHECK(allocator.Stats().liveAllocations == 0);
+    }
+}
+
+TEST(GcSoak_ClusterPackagesKeepOracle) {
+    for (uint64 seed = 0; seed < 2; ++seed) {
+        SystemAllocator allocator;
+        GcClusterSoakOptions options;
+        options.seed = rocks::test::CurrentSeed() * 1000 + 40 + seed;
+        options.ticks = 60;
+        options.maxObjects = 700;
+        options.packages = true;
+        GcClusterSoakReport report;
+        const bool passed = RunGcClusterSoak(allocator, options, report);
+        PrintClusterFailure(report);
+        CHECK(passed);
+        CHECK(report.cyclesCompleted > 30);
+        CHECK(report.reclaimed > 20);
+        CHECK(report.discards > 10);
+        CHECK(allocator.Stats().liveAllocations == 0);
+    }
+}
+
+TEST(GcSoak_ClusterSchedulerKeepsOracle) {
+    SystemAllocator allocator;
+    {
+        WorkerScheduler scheduler(allocator);
+        REQUIRE(scheduler.Start({3, 256, 16}));
+        for (uint32 packages = 0; packages < 2; ++packages) {
+            GcClusterSoakOptions options;
+            options.seed = rocks::test::CurrentSeed() * 1000 + 90 + packages;
+            options.ticks = 40;
+            options.maxObjects = 600;
+            options.packages = packages != 0;
+            options.scheduler = &scheduler;
+            GcClusterSoakReport report;
+            const bool passed = RunGcClusterSoak(allocator, options, report);
+            PrintClusterFailure(report);
+            CHECK(passed);
+        }
+
+        REQUIRE(scheduler.Shutdown());
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}

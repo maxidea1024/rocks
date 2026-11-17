@@ -87,4 +87,50 @@ struct GcSoakReport {
 //   if (!RunGcSoak(allocator, options, report)) { /* report.failure, report.failureTick */ }
 bool RunGcSoak(Allocator& allocator, const GcSoakOptions& options, GcSoakReport& report) noexcept;
 
+// 클러스터 장기 smoke 설정이다(GC-S7, Docs/Design/GarbageCollectionScale.ko.md 13.8절).
+// - packages: true면 패키지 정책 Registry(패키지 클러스터 — 생성·부분/전체 Discard·Discard 없는
+//   루트 반환·패키지 사이 간선), false면 World형(Level 지정 클러스터 — Actor·Component 생성·파괴,
+//   World API 밖 Actor 파괴, Level 밖 일반 객체)이다.
+// - seed·ticks·maxObjects·scheduler는 GcSoakOptions와 같다. tick 하나는 증분 cycle 하나(slice마다
+//   무작위 객체 예산, slice 사이 변경)이고 7 tick마다 정지형 Collect로 정확성을 본다.
+struct GcClusterSoakOptions {
+    uint64 seed = 1;
+    uint64 ticks = 200;
+    uint32 maxObjects = 1500;
+    bool packages = false;
+    WorkerScheduler* scheduler = nullptr;
+};
+
+struct GcClusterSoakReport {
+    uint64 ticks = 0;
+    uint64 created = 0;
+    uint64 reclaimed = 0;
+    uint64 cyclesBegun = 0;
+    uint64 cyclesCompleted = 0;
+    uint64 collects = 0;
+    uint64 steps = 0;
+    uint64 verifications = 0;
+    uint64 edgeWrites = 0;
+    uint64 rejectedWrites = 0;
+    uint64 destroys = 0;
+    uint64 discards = 0;
+    const char* failure = nullptr;
+    uint64 failureTick = 0;
+    uint32 failureObject = 0;
+    ErrorCode failureError = ErrorCode::None;
+};
+
+// 클러스터 장기 smoke를 실행한다. 모델(간선·outer·소속·파괴·Discard·루트)을 들고 매 slice 뒤 회수된
+// 객체가 oracle(소속 간선과 패키지 고리 포함)에서 닿지 않는지, 정지형 Collect 뒤 생존 집합이
+// oracle과 같은지 본다. Debug에서는 Registry가 Begin·Collect마다 클러스터 장부(와 World형이면 소속
+// 불변식)를 다시 세어 어긋나면 Fatal로 멈춘다. 위반이 없으면 true다. 소유 스레드에서 부른다.
+//
+// 사용 예:
+//   GcClusterSoakOptions options;
+//   options.packages = true;
+//   GcClusterSoakReport report;
+//   if (!RunGcClusterSoak(allocator, options, report)) { /* report.failure */ }
+bool RunGcClusterSoak(Allocator& allocator, const GcClusterSoakOptions& options,
+                      GcClusterSoakReport& report) noexcept;
+
 } // namespace rocks
