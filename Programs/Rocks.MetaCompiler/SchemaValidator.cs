@@ -113,6 +113,7 @@ internal static partial class SchemaValidator
             (string? invalid, SourceSite site) = mirror.NativeMembers.Count != 0
                 ? ("a Binds mirror lists only persistent members (ROCKS_NATIVE is not allowed)", mirror.NativeMembers[0].Site)
                 : mirror.HasMigrate ? ("a Binds mirror cannot declare Migrate (the real type owns its layout)", mirror.MigrateSite ?? mirror.Site)
+                : mirror.HasValidate ? ("a Binds mirror cannot declare Validate yet (mirror validation hooks arrive with CurveData CV9)", mirror.ValidateSite ?? mirror.Site)
                 : mirror.OwnFields.Count == 0 ? ("a Binds mirror needs the real type's public data members as ROCKS_PROPERTY fields", mirror.Site)
                 : ((string?)null, mirror.Site);
             if (invalid is not null)
@@ -871,6 +872,14 @@ internal static partial class SchemaValidator
             {
                 throw new MetadataException($"{model.Name}: a Settings struct cannot hold strong object references or reference arrays", "RMC2210",
                     "Settings structs are plain values read from config files; refer to assets by SoftObjectRef or AssetId instead.").At(model.Site);
+            }
+
+            // 검증 hook(Docs/Design/CurveData.ko.md 9.1절)은 순수 함수라 Registry를 읽지 못하고, 리플렉션 쓰기는 hook struct를 통째로
+            // 복사해 검증한 뒤 게시한다. 그래서 hook struct는 참조 없는 값이어야 한다.
+            if (model.HasValidate && (model.ContainsStrongReference || model.ContainsReferenceArray))
+            {
+                throw new MetadataException($"{model.Name}: a struct with a Validate hook cannot hold strong object references or reference arrays", "RMC2309",
+                    "Keep validated structs plain values; validate reference-holding data where it is used instead.").At(model.ValidateSite ?? model.Site);
             }
 
             foreach (FieldModel field in model.OwnFields)

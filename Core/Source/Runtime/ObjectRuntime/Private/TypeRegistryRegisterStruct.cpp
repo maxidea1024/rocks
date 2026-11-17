@@ -354,6 +354,13 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
             return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
         }
 
+        // 검증 hook(Docs/Design/CurveData.ko.md 9.1절)은 통째로 복사·교환할 수 있는 참조 없는 값
+        // struct에만 둔다(MetaCompiler RMC2309가 먼저 막는다). 자기 hook이 있으면 트리 검증도 있다.
+        if (ops.validate &&
+            (strongReference || referenceArray || !ops.validateTree || !ops.copy || !ops.swap)) {
+            return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
+        }
+
         mutating_ = true;
     }
 
@@ -451,6 +458,8 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     record->structOps.migrate = ops.migrate;
     record->structOps.copy = ops.copy;
     record->structOps.swap = ops.swap;
+    record->structOps.validate = ops.validate;
+    record->structOps.validateTree = ops.validateTree;
     record->structOps.requiresWorldOnlyOwner = requiresWorldOnlyOwner;
     record->structOps.fields = {fieldOps, schema.fields.Size()};
 

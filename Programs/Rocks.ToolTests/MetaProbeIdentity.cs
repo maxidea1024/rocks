@@ -19,7 +19,7 @@ internal static class MetaProbeIdentity
                 "probe::Tiny", "probe::Signed", "probe::Short", "probe::Wide", "probe::Huge", "probe::Bits",
                 "probe::Point", "probe::Segment", "probe::Plain", "probe::Derived", "probe::Other", "probe::none",
                 "probe::Target", "probe::Slot", "probe::Host", "probe::Flags", "probe::Base", "probe::Mid", "probe::Tagged", "probe::AtomicBase",
-                "probe::AtomicLeaf", "probe::A", "probe::B", "probe::RefBase" }
+                "probe::AtomicLeaf", "probe::A", "probe::B", "probe::RefBase", "probe::Range", "probe::Hidden", "probe::Child" }
                 .Concat(Enumerable.Range(1, 17).Select(level => $"probe::Chain{level}")))
             {
                 manifest.Register("type", name);
@@ -70,7 +70,9 @@ internal static class MetaProbeIdentity
                 "probe::Host::shape", "probe::RealBinding::a", "probe::Value::title", "probe::Value::lines",
                 "probe::Value::byKey", "probe::Value::titles", "probe::Flags::on", "probe::Flags::wide",
                 "probe::Flags::wider", "probe::Flags::widest", "probe::Flags::plain", "probe::Value::visible", "probe::Value::locked",
-                "probe::Value::flags", "probe::Value::hidden", "probe::Value::flag" }
+                "probe::Value::flags", "probe::Value::hidden", "probe::Value::flag",
+                "probe::Range::low", "probe::Range::high", "probe::Range::owner", "probe::Hidden::range", "probe::Child::extra",
+                "probe::Holder::range", "probe::Holder::plain", "probe::Value::range", "probe::Value::child" }
                 .Concat(Enumerable.Range(2, 16).Select(level => $"probe::Chain{level}::inner")))
             {
                 manifest.Register("field", name);

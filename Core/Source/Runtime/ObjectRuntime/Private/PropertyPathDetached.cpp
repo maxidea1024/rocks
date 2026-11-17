@@ -2,6 +2,7 @@
 
 #include <Object/ConstructionContext.h>
 #include <Object/ObjectBatchPublish.h>
+#include <Object/ValueCopy.h>
 #include <Platform/Fatal.h>
 
 // 분리된 값과 경로 연산 Detach·Attach(리플렉션 B9i3c0 — Object/DetachedPath.h)의 구현이다: 상자의
@@ -35,6 +36,14 @@ void DetachedValue::Reset() noexcept {
     ops->destroy(storage);
     (void)allocator_->Deallocate(storage);
     lease_.Reset();
+}
+
+Result<void> DetachedValue::ValidateTree() const noexcept {
+    if (!storage_ || !ops_->validateTree) {
+        return Result<void>::Success();
+    }
+
+    return detail::StructValidationResult(ops_->validateTree(storage_));
 }
 
 void DetachedValue::ResetToDefault() noexcept {

@@ -100,6 +100,17 @@ public:
         acceptsReadOnly_ = true;
     }
 
+    // 담은 값 트리 안의 struct 검증 hook을 안쪽부터 부른다(Docs/Design/CurveData.ko.md 9.1절 —
+    // RuntimeValueOps::validateTree). 트리에 hook이 없거나 빈 상자면 성공이다. 거부는
+    // InvalidArgument다. 할당하지 않는다. PathPrepareAttach가 게시된 객체·staged 객체 자리에 놓기
+    // 전에 부르고, 대입 묶음은 진단을 남기려고 게시 전에 먼저 부른다.
+    //
+    // 사용 예:
+    //   if (auto checked = box.ValidateTree(); !checked) {
+    //       return checked;   // 상자 안 커브의 키 시간이 정렬되지 않았다 등
+    //   }
+    Result<void> ValidateTree() const noexcept;
+
 private:
     friend class detail::PathCursor;
     friend struct detail::PathRunner;

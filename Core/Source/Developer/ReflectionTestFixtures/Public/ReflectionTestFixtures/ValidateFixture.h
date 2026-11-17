@@ -1,0 +1,128 @@
+#pragma once
+
+#include <Core/Containers/Array.h>
+#include <Core/Containers/OrderedMap.h>
+#include <Core/Optional.h>
+#include <Core/Result.h>
+#include <Meta/Annotations.h>
+#include <Object/InstancedStruct.h>
+#include <Object/Object.h>
+#include <Object/ObjectRefs.h>
+#include <Object/StructRefArray.h>
+
+namespace rocks::reflection_fixture {
+
+// struct 검증 hook fixture다(Docs/Design/CurveData.ko.md 9.1절 — ValidateHookGraphTests·
+// ValidateHookPathTests·TextValidateHookTests). ValidRange(low ≤ high), ValidBox(ValidRange 멤버와
+// range.high ≤ limit — 중첩 순서), ValidDerived(base ValidRange의 hook을 물려받고 extra ≥ 0을
+// 더한다), ValidRefElement(강한 참조와 hook 멤버 — StructRefArray 원소)와 그것들을 모든 자리(struct
+// 필드·Array 원소·Optional 내부·Map 값·InstancedStruct 내용·정적 배열 원소·StructRefArray 원소
+// 멤버)에 담는 ValidHolder다.
+//
+// 시험이 호출 순서를 보도록 hook마다 스레드별 호출 기록(ValidateLog)에 글자 하나를 남긴다(r·b·d).
+// 실제 hook은 전역 상태를 쓰지 않는다 — 이 기록은 시험 관찰용이다.
+struct ValidateLog {
+    char calls[64] = {};
+    usize count = 0;
+
+    void Clear() noexcept {
+        count = 0;
+    }
+
+    void Note(char call) noexcept {
+        if (count < sizeof(calls)) {
+            calls[count] = call;
+        }
+
+        ++count;
+    }
+
+    // 기록이 text와 같은지다.
+    bool Is(const char* text) const noexcept {
+        usize length = 0;
+        while (text[length] != '\0') {
+            ++length;
+        }
+
+        if (length != count || count > sizeof(calls)) {
+            return false;
+        }
+
+        for (usize index = 0; index < length; ++index) {
+            if (calls[index] != text[index]) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+};
+
+inline ValidateLog& CurrentValidateLog() noexcept {
+    thread_local ValidateLog log;
+    return log;
+}
+
+ROCKS_STRUCT()
+struct ValidRange {
+    ROCKS_PROPERTY() int32 low = 0;
+    ROCKS_PROPERTY() int32 high = 0;
+
+    static Result<void> Validate(const ValidRange& value) noexcept {
+        CurrentValidateLog().Note('r');
+        return value.low <= value.high ? Result<void>::Success()
+                                       : Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+};
+
+ROCKS_STRUCT()
+struct ValidBox {
+    ROCKS_PROPERTY() ValidRange range;
+    ROCKS_PROPERTY() int32 limit = 100;
+
+    // 다른 오류 코드도 InvalidArgument로 다뤄진다(생성 thunk).
+    static Result<void> Validate(const ValidBox& value) noexcept {
+        CurrentValidateLog().Note('b');
+        return value.range.high <= value.limit ? Result<void>::Success()
+                                               : Result<void>::Failure(ErrorCode::Overflow);
+    }
+};
+
+ROCKS_STRUCT()
+struct ValidDerived : ValidRange {
+    ROCKS_PROPERTY() int32 extra = 0;
+
+    static Result<void> Validate(const ValidDerived& value) noexcept {
+        CurrentValidateLog().Note('d');
+        return value.extra >= 0 ? Result<void>::Success()
+                                : Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+};
+
+class ValidHolder;
+
+ROCKS_STRUCT()
+struct ValidRefElement {
+    ROCKS_PROPERTY() ObjectRef<ValidHolder> link;
+    ROCKS_PROPERTY() ValidRange range;
+};
+
+ROCKS_CLASS()
+class ValidHolder : public Object {
+public:
+    explicit ValidHolder(Allocator& allocator) noexcept
+        : ranges(allocator), byKey(allocator), elements(allocator) {
+    }
+
+    ROCKS_PROPERTY() ValidBox box;
+    ROCKS_PROPERTY() Array<ValidRange> ranges;
+    ROCKS_PROPERTY() Optional<ValidRange> maybe;
+    ROCKS_PROPERTY() OrderedMap<int32, ValidRange> byKey;
+    ROCKS_PROPERTY() InstancedStruct<> any;
+    ROCKS_PROPERTY() ValidRange fixed[2];
+    ROCKS_PROPERTY() ValidDerived derived;
+    ROCKS_PROPERTY() StructRefArray<ValidRefElement> elements;
+    ROCKS_PROPERTY() int32 plain = 0;
+};
+
+} // namespace rocks::reflection_fixture

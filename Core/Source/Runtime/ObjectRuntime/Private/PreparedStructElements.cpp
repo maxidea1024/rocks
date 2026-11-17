@@ -125,6 +125,31 @@ Result<PathTarget> PreparedStructElements::AddedTarget(uint32 id) noexcept {
         start.WithAddedElement(*this, kind_ == PathTarget::Kind::Staged ? transaction_ : nullptr));
 }
 
+Result<void> PreparedStructElements::ValidateAdded(usize& rejected) const noexcept {
+    if (!IsReady() || addedKept_ == 0) {
+        return Result<void>::Success();
+    }
+
+    const RuntimeStructOps& ops = elementType_.StructOps();
+    if (!ops.validateTree) {
+        return Result<void>::Success();
+    }
+
+    for (usize index = 0; index < kept_.Size(); ++index) {
+        const uint32 original = kept_[index];
+        if (!IsAdded(original)) {
+            continue;
+        }
+
+        if (!ops.validateTree(added_[original - original_])) {
+            rejected = index;
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
+    return Result<void>::Success();
+}
+
 Result<void> PreparedStructElements::PreparePublish() noexcept {
     if (!IsReady()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);

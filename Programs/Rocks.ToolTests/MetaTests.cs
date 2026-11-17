@@ -62,6 +62,7 @@ internal static partial class MetaTests
         RegisterFieldFlags(context);
         RegisterClassFlags(context);
         RegisterStructs(context);
+        RegisterValidateHooks(context);
         RegisterBinds(context);
         RegisterArrays(context);
         RegisterPathThunks(context);

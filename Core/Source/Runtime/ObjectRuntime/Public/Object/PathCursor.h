@@ -463,6 +463,12 @@ private:
     StructElementLocation element_{};
     bool inElement_ = false;
     bool failed_ = false;
+    // 객체(게시·staged) 시작 위치의 변경 연산이 struct 검증 hook 안을 바꾸면 연산하지 않고 그 가장
+    // 바깥 hook struct의 단계를 hookStep_에 남기고 돌아온다(redirectHooks_ — 공개 경로 연산
+    // 진입점만 켠다, Docs/Design/CurveData.ko.md 9.1절). 진입점이 그 자리를 상자로 분리해 상자
+    // 위에서 연산하고 검증한 뒤 게시한다.
+    bool redirectHooks_ = false;
+    usize hookStep_ = IndexNone;
 };
 
 } // namespace rocks::detail

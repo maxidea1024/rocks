@@ -74,6 +74,17 @@ struct PathRunner {
     static usize Length(const PathCursor& cursor) noexcept {
         return cursor.length_;
     }
+
+    // 객체 시작 위치의 변경이 검증 hook 있는 struct 안이면 연산 대신 그 단계를 남기게 한다
+    // (Docs/Design/CurveData.ko.md 9.1절 — 공개 경로 연산 진입점만 켠다).
+    static void RedirectHooks(PathCursor& cursor) noexcept {
+        cursor.redirectHooks_ = true;
+    }
+
+    // RedirectHooks를 건 Run이 남긴 가장 바깥 hook struct 단계다(없으면 IndexNone).
+    static usize HookStep(const PathCursor& cursor) noexcept {
+        return cursor.hookStep_;
+    }
 };
 
 } // namespace rocks::detail

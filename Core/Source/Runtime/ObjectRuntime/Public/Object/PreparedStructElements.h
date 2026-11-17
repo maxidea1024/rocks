@@ -112,6 +112,12 @@ public:
         return original >= original_ && original - original_ < added_.Size();
     }
 
+    // 남은 추가 원소마다 원소 struct 값 트리의 검증 hook을 안쪽부터
+    // 부른다(Docs/Design/CurveData.ko.md 9.1절 — 원소 struct는 참조를 담으므로 자기 hook은 없고
+    // 멤버 struct의 hook이다). 추가 원소 안 대입은 블록에 바로 적용되므로 대입 묶음이 게시 전에
+    // 부른다. 거부는 InvalidArgument이고 그 원소의 지금 index를 rejected에 둔다. 할당하지 않는다.
+    Result<void> ValidateAdded(usize& rejected) const noexcept;
+
     // 끝에 기본 원소 하나를 더한다(리플렉션 B9i5): 블록을 배열의 allocator로 할당해 기본 생성하고
     // 게시나 Reset까지 이 준비물이 소유한다. 새 원소의 지금 index는 Count() - 1이고 돌려주는 값은
     // 그 묶을 때 index(추가 원소 id)다. 묶지 않았으면 InvalidArgument, 원소 수가 uint32 상한에

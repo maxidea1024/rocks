@@ -675,6 +675,7 @@ internal static class CppEmitter
         }
 
         EmitValueCopy(type, native, type.Base.Length == 0 ? null : "::" + schema.Find(type.Base).NativeName, Line);
+        EmitValidateTree(type, native, type.Base.Length == 0 ? null : "::" + schema.Find(type.Base).NativeName, Line);
         Line("static RuntimeStructOps Ops(ModuleLease module = {}) noexcept {");
         Line($"auto ops = MakeRuntimeStructOps<{native}>(Move(module));");
         Line("if constexpr (ValueCopyable) {");
@@ -706,6 +707,14 @@ internal static class CppEmitter
             Line($"ops.migrate = &{native}::Migrate;");
         }
 
+        // 검증 hook(Docs/Design/CurveData.ko.md 9.1절): 트리에 hook이 있으면 validateTree, 자기 Validate가 있으면 validate.
+        Line("if constexpr (HasValidateTree) {");
+        Line($"ops.validateTree = +[](const void* value) noexcept -> Result<void> {{ return ValidateTree(*static_cast<const {native}*>(value)); }};");
+        Line("}");
+        Line("if constexpr (HasValidateSelf) {");
+        Line($"ops.validate = +[](const void* value) noexcept -> Result<void> {{ return ValidateSelf(*static_cast<const {native}*>(value)); }};");
+        Line("}");
+
         Line("ops.requiresWorldOnlyOwner = RequiresWorldOnlyOwner;");
         Line("return ops;");
         Line("}");
@@ -718,6 +727,68 @@ internal static class CppEmitter
         Line($"static constexpr bool Supported = GeneratedType<{native}>::ValueCopyable;");
         Line($"static Result<void> Copy({native}& destination, const {native}& source, Allocator& allocator) noexcept {{ return GeneratedType<{native}>::CopyValue(destination, source, allocator); }}");
         Line("};");
+        // 다른 값(Array<S>·Map 값·Optional<S>·멤버 S·InstancedStruct 내용)의 검증이 이 struct의 ValidateTree를 쓰게 잇는다(Object/ValueCopy.h).
+        Line($"template <> struct detail::ValueValidate<{native}> {{");
+        Line($"static constexpr bool HasHook = GeneratedType<{native}>::HasValidateTree;");
+        Line($"static Result<void> Run(const {native}& value) noexcept {{ return GeneratedType<{native}>::ValidateTree(value); }}");
+        Line("};");
+    }
+
+    // struct 값 트리의 검증이다(Docs/Design/CurveData.ko.md 9.1절 — RuntimeStructOps::validateTree). HasValidateTree는 자기 Validate·base·
+    // PROPERTY 멤버 형식(detail::ValueValidate<멤버>::HasHook) 중 하나라도 hook을 담을 수 있는지다. ValidateTree는 base 하위 객체, PROPERTY
+    // 멤버 순서(bitfield bool 제외 — hook이 없다), 마지막에 자기 Validate 순으로 안쪽부터 검증하고 첫 거부에서 멈춘다. NATIVE 멤버는
+    // 리플렉션 경로가 바꾸지 않으므로 보지 않는다. 자기 Validate는 시그니처를 static_assert로 대조하고, hook struct는 통째로 복사할 수
+    // 있어야 한다(리플렉션 쓰기가 사본에 적용해 검증한 뒤 게시한다 — ValueCopyable).
+    private static void EmitValidateTree(ClassModel type, string native, string? baseNative, Action<string> Line)
+    {
+        IEnumerable<FieldModel> ownFields = baseNative is null ? type.Fields : type.OwnFields;
+        string[] members = ownFields.Where(field => !field.Bitfield).Select(field => field.Name).ToArray();
+        string hasHook = (type.HasValidate ? "true" : "false") +
+            (baseNative is null ? "" : $" || GeneratedType<{baseNative}>::HasValidateTree") +
+            string.Concat(members.Select(member => $" || ::rocks::detail::ValueValidate<decltype({native}::{member})>::HasHook"));
+        Line($"static constexpr bool HasValidateTree = {hasHook};");
+        // 자기 수준의 hook(RuntimeStructOps::validate — decode가 값을 다 채운 뒤 부른다)은 base 사슬의 Validate 다음 자기 Validate다. base의
+        // hook을 물려받은 struct도 참조 없는 값이어야 한다(가져온 base는 C# 모델이 모르므로 static_assert로 본다).
+        string selfHook = (type.HasValidate ? "true" : "false") + (baseNative is null ? "" : $" || GeneratedType<{baseNative}>::HasValidateSelf");
+        Line($"static constexpr bool HasValidateSelf = {selfHook};");
+        Line($"static_assert(!HasValidateSelf || (!ContainsStrongReference && ValueCopyable), \"{type.Name} has a Validate hook (its own or a base's) and must be a deep-copyable value without strong references: reflected writes validate a copy before publishing it\");");
+        if (type.HasValidate)
+        {
+            Line($"static_assert(::rocks::IsSameV<decltype(&{native}::Validate), ::rocks::Result<void> (*)(const {native}&) noexcept>, \"{type.Name}::Validate must be declared as static rocks::Result<void> Validate(const {type.Name}&) noexcept\");");
+        }
+
+        Line($"static Result<void> ValidateSelf([[maybe_unused]] const {native}& value) noexcept {{");
+        if (baseNative is not null)
+        {
+            Line($"if constexpr (GeneratedType<{baseNative}>::HasValidateSelf) {{");
+            Line($"if (auto checked = GeneratedType<{baseNative}>::ValidateSelf(static_cast<const {baseNative}&>(value)); !checked) {{ return checked; }}");
+            Line("}");
+        }
+
+        Line(type.HasValidate
+            ? $"return ::rocks::detail::StructValidationResult({native}::Validate(value));"
+            : "return Result<void>::Success();");
+        Line("}");
+
+        Line($"static Result<void> ValidateTree([[maybe_unused]] const {native}& value) noexcept {{");
+        if (baseNative is not null)
+        {
+            Line($"if constexpr (GeneratedType<{baseNative}>::HasValidateTree) {{");
+            Line($"if (auto checked = GeneratedType<{baseNative}>::ValidateTree(static_cast<const {baseNative}&>(value)); !checked) {{ return checked; }}");
+            Line("}");
+        }
+
+        foreach (string member in members)
+        {
+            Line($"if constexpr (::rocks::detail::ValueValidate<decltype({native}::{member})>::HasHook) {{");
+            Line($"if (auto checked = ::rocks::detail::ValueValidate<decltype({native}::{member})>::Run(value.{member}); !checked) {{ return checked; }}");
+            Line("}");
+        }
+
+        Line(type.HasValidate
+            ? $"return ::rocks::detail::StructValidationResult({native}::Validate(value));"
+            : "return Result<void>::Success();");
+        Line("}");
     }
 
     // 설정 struct의 설정 메타데이터다(Docs/Design/ConfigSystem.ko.md 7절 — Meta/SettingsSchema.h): branch·섹션 이름과 설정 지정자가 있는 직접

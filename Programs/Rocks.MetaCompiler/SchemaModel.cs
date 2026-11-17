@@ -725,6 +725,14 @@ internal sealed class ClassModel
     // 첫 Migrate 선언 위치다(진단용).
     public SourceSite? MigrateSite { get; set; }
 
+    // struct가 검증 hook `static Result<void> Validate(const S&) noexcept`를 선언했다(Docs/Design/CurveData.ko.md 9.1절). 생성 Ops가
+    // RuntimeStructOps::validate·validateTree에 잇는다. 모양 규칙(정적·시그니처·단일 선언·접근)은 ClangAstParser가, 참조 struct·Binds
+    // 미러 금지는 SchemaValidator가 RMC2309로 본다.
+    public bool HasValidate { get; set; }
+
+    // 첫 Validate 선언 위치다(진단용).
+    public SourceSite? ValidateSite { get; set; }
+
     // Binds="…" 지정자의 원문 철자다(이 모듈 struct만, 없으면 ""). Clang 두 번째 실행이 정규 철자로 푼다.
     public string BindsSpelling { get; init; } = "";
 

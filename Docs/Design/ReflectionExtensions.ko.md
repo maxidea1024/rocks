@@ -1139,6 +1139,7 @@ public:
 | RMC2306(새) | MetaCompiler | Optional 내부 형식 오류(중첩 Optional 포함 — B9e에서 구현: 배열·참조·cv·지원하지 않는 형식·참조 struct 내부도) |
 | RMC2307(새) | MetaCompiler | 정적 배열 오류: 다차원, N 범위(1..65,535), 원소 형식 |
 | RMC2308(새) | MetaCompiler | InstancedStruct 오류: Base가 리플렉션 struct가 아님, Base가 담을 수 없는 struct(11절 조건) |
+| RMC2309(새 — CV3) | MetaCompiler | struct 검증 hook 오류(23절): `Validate`가 함수 템플릿·overload·비정적·시그니처(`Result<void> (const S&) noexcept`)가 다름·`ROCKS_GENERATED_BODY` 없는 private/protected, hook struct가 강한 참조·Registry 컨테이너를 담음, Binds 미러의 `Validate`(CurveData CV9까지) |
 | RMC2401(확장) | MetaCompiler | enum underlying 8종을 받는다. uint64 열거자 값이 int64 최댓값을 넘음 |
 | RMC2003(재사용) | MetaCompiler | WeakRef·ClassRef 대상이 리플렉션 클래스가 아님(지금 참조 대상 진단 — MC/SchemaValidator.cs:273) |
 
@@ -1700,3 +1701,11 @@ B9j–B9m 묶음 리뷰(2026-11-18 — 코드만 읽은 리뷰, 각 항목은 �
 | B9i5 우려 | 더한 StructRefArray 원소 안 참조 중첩 struct `{}`가 Unsupported | 재현됨. 더한 원소 블록 안의 참조 struct는 멤버마다 되돌린다(강한 참조는 null 쓰기, 참조 struct 멤버는 재귀 — `Apply::ResetReferenceMembers`). 시험 `TextAssign_AddedElementNestedReferenceStructReset` |
 | 시험 공백 | B9j 담기 거부(Registry 컨테이너·WorldOnly 소유자), B9k 상속 형질 Depth·ContainsInstancedStruct, B9m 다른 모듈 상속 bitfield 런타임 왕복 | 앞 둘은 시험을 더했다(`InstancedStructPath_RegistryContainerAndWorldOnlyContentRejected`, `StructInheritance_DeepCopyKeepsBaseMembers`와 static_assert). 셋째는 20절 B9m이 남긴 일에 적었다 |
 
+## 23. struct 검증 hook(CurveData CV3)
+
+[커브 데이터](CurveData.ko.md) 9.1절(D7)의 struct 검증 hook을 기반에 넣었다. 결정과 세부는 그 문서 17.2절 V1–V8이고 여기에는 기반 쪽 접점만 적는다.
+
+- 선언: `ROCKS_STRUCT`의 `static Result<void> Validate(const S&) noexcept`. 모양 오류와 참조 struct는 RMC2309(15절). 생성 특수화는 `HasValidateSelf`·`ValidateSelf`(base 사슬 다음 자기 hook)·`HasValidateTree`·`ValidateTree`(트리 전체)와 `detail::ValueValidate<S>` 특수화를 낸다.
+- 표: `RuntimeStructOps::validate`(자기 수준)·`validateTree`(트리), `RuntimeValueOps::validateTree`. TypeRegistry는 `validate`가 있으면 강한 참조·Registry 컨테이너가 없고 `validateTree`·`copy`·`swap`이 있어야 등록한다.
+- 부르는 곳: graph decode 2단계의 `DecodeStructValue` 끝(복원 전체 InvalidArgument), 대입 묶음·JSON import의 `Publish` 단계 0(추가 StructRefArray 원소)과 `PathPrepareAttach`(값 단위 상자 — 진단 `TextDiagnosticCode::InvalidStructValue`), 객체 시작 위치의 공개 경로 변경 연산(hook struct 자리를 상자로 분리·연산·검증·게시 — `PropertyPathError::StructValidation`), hook struct 안 자리에 상자를 놓는 `PathPrepareAttach`는 `PropertyPathError::InsideValidatedStruct`(Unsupported).
+- 성질 표(1.3절)와의 관계: hook은 값 종류의 성질이 아니라 struct 형질이다. hook struct는 표의 "값 struct(강한 참조 없음)" 행에만 오고 "참조 struct" 행(StructRefArray 원소 등)에는 올 수 없다(참조 struct는 hook struct를 멤버로 담을 수 있다 — 그 멤버는 원소 decode·추가 원소 검증·경로 쓰기가 본다).

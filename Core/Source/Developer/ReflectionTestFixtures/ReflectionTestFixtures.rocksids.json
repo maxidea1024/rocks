@@ -3345,6 +3345,118 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::ValidBox::limit",
+      "id": "2aee54a55b8c45cab7c0c24ca9d77912",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::ValidBox::range",
+      "id": "82471607413c4680a81e02c5e8fb48e9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::ValidDerived::extra",
+      "id": "14a04d0d46104ee3a7df4e9e0852db95",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::ValidHolder::any",
+      "id": "4fd419815702466882ceffcd91bd79ce",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::ValidHolder::box",
+      "id": "4191a7fd2fc24aa185eee9e492f163ab",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::ValidHolder::byKey",
+      "id": "965d28ae05804554ba26d39712272874",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::ValidHolder::derived",
+      "id": "1175405a90a745eb80db21f5cc5d76ce",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::ValidHolder::elements",
+      "id": "0c7113d3393e41e6a875e4d0abfc33c5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::ValidHolder::fixed",
+      "id": "f51aedab3a894219a3c944c3ccb87465",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::ValidHolder::maybe",
+      "id": "8b69b31f66494fb09f5eb33b8f14dd82",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::ValidHolder::plain",
+      "id": "b15b150db4ca44f0986a9907211c119d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::ValidHolder::ranges",
+      "id": "2cc7173ad0fc4bafa14a550c9b9b4820",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::ValidRange::high",
+      "id": "f18c2c7a48894c11a5d498b9ae3e7f2c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::ValidRange::low",
+      "id": "f2069f68aaff4b6c815874d41dcd1c26",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::ValidRefElement::link",
+      "id": "99beddb644434addb1a85d9a1212b1e3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::ValidRefElement::range",
+      "id": "5e2b90ac263542f3b4a2a3cd55f31abd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::WeakHolder::any",
       "id": "866510e2ea504c3aa4fb1e858bd309f7",
       "aliases": [],
@@ -4609,6 +4721,41 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::TransientThing",
       "id": "aa240d44280740298004f8f9bf56631d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::ValidBox",
+      "id": "a23ed18383a84f5d925d80e8a3996170",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::ValidDerived",
+      "id": "e2f32eb3a52b4d8b88780810d59f8d20",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::ValidHolder",
+      "id": "c11ad829832a43afa5bd2296b90c621d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::ValidRange",
+      "id": "038f8a31ade84d3da5e65104c58b749f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::ValidRefElement",
+      "id": "aa585e1ecdb6464285a54f99dcaaf047",
       "aliases": [],
       "retired": false
     },

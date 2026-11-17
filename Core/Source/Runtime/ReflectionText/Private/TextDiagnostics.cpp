@@ -44,6 +44,8 @@ StringView TextDiagnosticCodeName(TextDiagnosticCode code) noexcept {
         return "Unresolved";
     case TextDiagnosticCode::Unsupported:
         return "Unsupported";
+    case TextDiagnosticCode::InvalidStructValue:
+        return "InvalidStructValue";
     }
 
     return {};

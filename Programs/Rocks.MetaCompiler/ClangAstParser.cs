@@ -263,6 +263,50 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
     private static bool Flag(JsonElement node, string property) =>
         node.TryGetProperty(property, out JsonElement value) && value.ValueKind == JsonValueKind.True;
 
+    // struct 검증 hook 선언의 Clang 함수 형식 철자다: `Result<void> (const S &) noexcept`(이름공간 한정은 선택).
+    private static readonly System.Text.RegularExpressions.Regex ValidateSignature = new(
+        @"^(?:[A-Za-z_][\w]*::)*Result<void> \(const (?:struct |class )?(?:[A-Za-z_][\w]*::)*(?<type>[A-Za-z_][\w]*) &\) noexcept$",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+
+    // struct의 Validate 멤버 하나를 검증 hook으로 받는다(RMC2309): 함수 템플릿·두 번째 선언(overload)·비정적·시그니처가 다른 선언과
+    // GENERATED_BODY 없는 private·protected 선언을 거부한다.
+    private void CheckValidateHook(ClassModel model, JsonElement member, string memberKind, string qualified, string access, bool generatedBody)
+    {
+        const string hint = "Declare exactly one `static rocks::Result<void> Validate(const S& value) noexcept;` (public, or private with ROCKS_GENERATED_BODY).";
+        string unqualified = qualified[(qualified.LastIndexOf("::", StringComparison.Ordinal) + 2)..];
+        if (memberKind == "FunctionTemplateDecl")
+        {
+            throw new MetadataException($"{qualified}::Validate: the struct validation hook cannot be a function template", "RMC2309", hint);
+        }
+
+        if (model.HasValidate)
+        {
+            throw new MetadataException($"{qualified}::Validate: the struct validation hook cannot be overloaded", "RMC2309", hint);
+        }
+
+        if (Text(member, "storageClass") != "static")
+        {
+            throw new MetadataException($"{qualified}::Validate: the struct validation hook must be a static member function", "RMC2309", hint);
+        }
+
+        // Binds 미러의 Validate는 SchemaValidator가 미러 규칙으로 거부한다(인자가 실제 타입이라 모양을 여기서 보지 않는다).
+        string spelling = member.TryGetProperty("type", out JsonElement type) ? Text(type, "qualType") : "";
+        System.Text.RegularExpressions.Match match = ValidateSignature.Match(spelling);
+        if (model.BindsSpelling.Length == 0 && (!match.Success || match.Groups["type"].Value != unqualified))
+        {
+            throw new MetadataException($"{qualified}::Validate: the struct validation hook signature is `{spelling}`, not `Result<void> (const {unqualified} &) noexcept`",
+                "RMC2309", hint);
+        }
+
+        if (access != "public" && !generatedBody)
+        {
+            throw new MetadataException($"{qualified}::Validate: a private/protected struct validation hook requires ROCKS_GENERATED_BODY", "RMC2309", hint);
+        }
+
+        model.HasValidate = true;
+        model.ValidateSite ??= currentSite;
+    }
+
     // 노드 타입의 Clang 정규 철자다(별칭은 desugar한 철자). CompilerDriver가 Binds 별칭을 풀 때도 쓴다.
     internal static string TypeSpelling(JsonElement node)
     {
@@ -578,6 +622,13 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
 
                         model.HasMigrate = true;
                         model.MigrateSite ??= currentSite;
+                    }
+
+                    // struct의 검증 hook(Docs/Design/CurveData.ko.md 9.1절)은 `static Result<void> Validate(const S&) noexcept` 한 개다.
+                    // 모양이 다르면 조용히 hook 없이 등록되지 않게 RMC2309로 거부한다(정확한 형식은 생성 static_assert도 대조한다).
+                    if (isStruct && memberName == "Validate" && memberKind is ("CXXMethodDecl" or "FunctionTemplateDecl"))
+                    {
+                        CheckValidateHook(model, member, memberKind, qualified, access, generatedBody);
                     }
 
                     if (memberKind != "FieldDecl")

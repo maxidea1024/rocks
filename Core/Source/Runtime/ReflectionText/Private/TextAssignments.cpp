@@ -685,6 +685,31 @@ Result<PublishedAssignments> PreparedAssignments::Publish() noexcept {
         (void)state.elements.TryRemoveAt(kept, state.elements.Size() - kept);
     }
 
+    // 0. struct 검증 hook(Docs/Design/CurveData.ko.md 9.1절 — 게시 전 1회): 추가 StructRefArray
+    // 원소는 여기서, 값 단위 상자는 아래 PathPrepareAttach가 상자 값 트리를 검증한다. 거부는 진단
+    // InvalidStructValue(단위 경로)와 InvalidArgument이고 아무것도 게시하지 않는다.
+    const auto rejectStruct = [&state](PropertyPath path, StringView message) noexcept {
+        String text(state.allocator);
+        if (auto formatted = detail::FormatAssignmentPath(state, path, text); !formatted) {
+            return PublishResult::Failure(formatted.Error());
+        }
+
+        if (auto reported = detail::Diagnose(state, TextDiagnosticCode::InvalidStructValue,
+                                             TextSource{}, text.View(), message);
+            !reported) {
+            return PublishResult::Failure(reported.Error());
+        }
+
+        return PublishResult::Failure(ErrorCode::InvalidArgument);
+    };
+    for (usize index = 0; index < state.elements.Size(); ++index) {
+        detail::ElementsUnit& unit = *state.elements[index];
+        usize rejected = 0;
+        if (auto checked = unit.stage.ValidateAdded(rejected); !checked) {
+            return rejectStruct(unit.Path(), "an added element failed its struct validation hook");
+        }
+    }
+
     // 1. 게시 자리(읽기 Borrow — 변경 표지를 올리지 않는다). 죽은 owner(Discard·파괴 요청 — 경로
     // 연산은 Destroyed)는 BeginBatchPublish와 같이 StaleHandle로 알린다.
     const bool live = state.target.GetKind() == AssignmentTarget::Kind::Live;
@@ -694,9 +719,14 @@ Result<PublishedAssignments> PreparedAssignments::Publish() noexcept {
     const PathTarget root = state.Root();
     for (usize index = 0; index < state.units.Size(); ++index) {
         detail::AssignmentUnit& unit = *state.units[index];
-        if (auto located =
-                PathPrepareAttach(registry, access, root, unit.Path(), unit.box, unit.prepared);
+        PropertyPathFailure failure;
+        if (auto located = PathPrepareAttach(registry, access, root, unit.Path(), unit.box,
+                                             unit.prepared, &failure);
             !located) {
+            if (failure.reason == PropertyPathError::StructValidation) {
+                return rejectStruct(unit.Path(), "the value failed its struct validation hook");
+            }
+
             return PublishResult::Failure(ownerError(located.Error()));
         }
     }
