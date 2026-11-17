@@ -700,6 +700,7 @@ void Compare(const BackendResult& left, const BackendResult& right, const char* 
     printf("  [%s] %s (%u differing channels)\n", same ? "PASS" : "FAIL", name, different);
 }
 
+#if SANDBOX_SHADER_SOURCE_COMPILER
 // Vulkan 장치를 만들어 돌린다. 생성 실패는 report의 단계·원본 VkResult와 함께 NOT RUN으로 알린다.
 void RunVulkanDevice(const char* name, Allocator& allocator, const graphics::DeviceDesc& desc,
                      BackendResult& result) noexcept {
@@ -713,6 +714,7 @@ void RunVulkanDevice(const char* name, Allocator& allocator, const graphics::Dev
 
     RunBackend(name, Move(created), result);
 }
+#endif
 
 // Vulkan 하드웨어와 소프트웨어 ICD(lavapipe·SwiftShader, 측정 S4)를 돌린다. 실행 중 컴파일러가
 // 없으므로 개발용 컴파일 훅(ShaderFormatVulkan)이 있어야 한다(Release Sandbox는 NOT RUN).
@@ -738,8 +740,7 @@ void RunVulkan(Allocator& allocator, const graphics::DeviceDesc& base, BackendRe
     (void)hardware;
     (void)software;
     printf("  [NOT RUN] Vulkan: Release builds carry no shader compiler (cooked SPIR-V is "
-           "ShaderSystem SH2)
-");
+           "ShaderSystem SH2)\n");
 #endif
 }
 
