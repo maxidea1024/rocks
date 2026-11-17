@@ -1,6 +1,6 @@
 # 렌더 기반(RenderBase) 설계
 
-기준일: 2026-11-17, 개정 6(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-17, 개정 7(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
 - 렌더 lane과 프레임 전달, 장치 스레드 모델, 장치 자원 수명, 렌더 그래프
 - 셰이더 런타임 객체(셰이더 집합·파라미터 바인딩·상수 블록·파이프라인 캐시)
 - 정점 입력 타입, 공용 자원·그리기 유틸리티, GPU 계측
@@ -31,6 +31,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 | 파라미터 구조체 | 한 구조체가 셰이더 상수·자원 바인딩과 렌더 그래프 의존 선언을 함께 맡는다(결정 R4) | UE 파라미터 매크로(`RC/Public/ShaderParameterMacros.h:1697–1760, 1868–1900`)와 그래프 수집(`RC/Private/RenderGraphBuilder.cpp:2384–2532`) |
 | 셰이더 런타임 | 셰이더 라이브러리(셰이더 시스템 12절) 위에 **셰이더 집합**을 둔다. 장치 셰이더는 처음 쓸 때 만들고 게시는 한 번이다. frozen memory image는 들이지 않는다 | UE `RC/Public/Shader.h:405–417`, `RC/Private/ShaderResource.cpp:579–657`. memory image(`Core/Public/Serialization/MemoryLayout.h`)는 C++ 객체 배치를 굽는 장치이고 Rocks는 정규화 표를 Archive·Record로 읽는다 |
 | 설정 변수 | Core에 **콘솔 설정**과 Config 계층을 선행 작업으로 둔다. 렌더 lane에는 프레임 packet 안 snapshot으로 넘긴다 | RenderCore에 콘솔 변수 정의가 약 190줄 있다(`git grep -c` 줄 수). UE는 렌더 쪽 사본 주소에 쓰는 명령으로 전파한다(`RC/Private/RenderingThread.cpp:493–530`). Rocks에는 체계가 없다(UnrealCoreFeatureAudit UE-C21·C29 **후속**) |
+| 좌표·행렬 규약 | UE 5.8과 같다(2026-11-17 사용자 결정): 행 벡터(`p·M`)·행 우선 저장, 셰이더 `mul(v, M)`과 행 우선 packing, view space +X 오른쪽·+Y 위·+Z 전방, reversed-Z 무한 원평면 원근(수평 반각), 앞면은 화면 반시계·뒤면 컬, 음수 행렬식이면 컬 반전. 렌더 코드 반영은 Core Math 전환(C1·C2) 뒤 C7이며, 그 전에는 래스터 앞면·컬 기본값과 view·projection 상수 규약을 코드에 굳히지 않는다 | [셰이더 시스템](ShaderSystem.ko.md) 7.2절 6·8항, [엔진 구현 계획](EngineImplementationPlan.ko.md) 2.2절. UE `LocalPlayer.cpp:1241–1245`(view 축), `PerspectiveMatrix.h:135–153`(투영), `D3D12State.cpp:33–35, 353`(앞면) |
 
 ## 2. 용어 대응
 
@@ -734,7 +735,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 ## 12. 콘솔 설정(CP4·CP8)
 
 - RenderCore는 설정 변수로 기능 전환·디버그 모드·예산을 다룬다(그래프만 해도 31개, `RC/Private/RenderGraphPrivate.cpp:18–426`). Rocks에는 이 체계가 없고 Config 계층도 후속이다(UE-C21·C29).
-- 이 문서는 렌더 쪽 요구만 정한다. 체계 자체는 별도 Core 스펙(CP8 Config 계층, CP4 콘솔 설정)이 필요하다. 계획 24.2절 Config 우선순위(engine default → platform → project → device profile → user → session override), 런타임 변경 가능·재시작 필요 구분, 값 출처 표시가 그 스펙의 범위다.
+- 이 문서는 렌더 쪽 요구만 정한다. 체계 자체는 [설정 계층·콘솔 설정 설계](ConfigSystem.ko.md)(CP8·CP4, 단계 CF1–CF5)가 정한다. 계획 24.2절 Config 우선순위(engine default → platform → project → device profile → user → session override), 런타임 변경 가능·재시작 필요 구분, 값 출처 표시가 그 스펙의 범위다.
 - 렌더 요구:
   - 타입 있는 변수(bool·int·float·열거·문자열)와 명령, 이름 공간(렌더 그래프·셰이더·렌더 lane 등).
   - **렌더 snapshot.** 렌더 lane이 읽는 변수는 "렌더 읽기" 표시를 가지고, 게임 lane이 프레임 packet을 만들 때 그 값들의 snapshot을 담는다. 렌더 lane은 packet의 값만 읽는다. UE는 렌더 스레드 사본 주소에 쓰는 명령으로 전파한다(`RC/Private/RenderingThread.cpp:493–530`).
@@ -753,7 +754,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 
 ### 13.2 Rocks 규칙
 
-- **`GpuScope`.** 이름 구간 하나가 debug marker push·pop과 timestamp 한 쌍을 함께 기록한다. 렌더 그래프는 pass마다 자동으로 구간을 둔다(계획 11.3절 "pass 이름 기록"). Release에서는 marker를 끄고 timestamp는 설정으로 켠다. CPU 쪽 구간은 CP5와 같은 trace에 상관시킨다.
+- **`GpuScope`.** 이름 구간 하나가 debug marker push·pop과 timestamp 한 쌍을 함께 기록한다. 렌더 그래프는 pass마다 자동으로 구간을 둔다(계획 11.3절 "pass 이름 기록"). Release에서는 marker를 끄고 timestamp는 설정으로 켠다. CPU 쪽 구간은 CP5와 같은 trace에 상관시킨다. 기록 형과 GPU 시간 변환 경계는 [다중 스레드 trace 설계](TraceSystem.ko.md) 9절이다(RB7은 TR2 뒤).
 - **timestamp query**(GX9): 프레임 slot 링으로 회수하고 결과는 완료 통지 큐(5.2절)로 넘긴다. 결과가 아직 없으면 "미완료"다. disjoint 표시가 있으면 그 구간을 무효로 한다(계획 29.4절). GLES timestamp는 확장(`GL_EXT_disjoint_timer_query`)이 있을 때만이고, 없으면 GPU 시간을 "없음"으로 공개하며 추정값을 만들지 않는다(UE는 Android에서 같은 확장 함수를 쓴다, `OpenGLDrv/Private/Android/AndroidOpenGLFunctions.h:77`).
 - **CPU·GPU 시간 대응**(계획 29.1절 calibration pair): D3D12 queue clock calibration, Vulkan calibrated timestamps(13.1절과 같다). GLES는 `GL_TIMESTAMP` 조회(GLES는 `GL_EXT_disjoint_timer_query`의 `glGetInteger64vEXT`)와 CPU 시각을 잇달아 읽어 쌍을 만들고 조회 지연만큼 오차를 둔다(GX9 결정). 확장이 없으면 "없음"이다. Metal은 SH5 때 정한다.
 - **계수**: 그래프 pass 수·draw·dispatch 수·transient 최대 사용량·파이프라인 캐시 적중(계획 11.3절).
@@ -957,3 +958,4 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 - 개정 4(2026-11-16): 18.1절 화면 마일스톤 범위를 정의했다. 사용자 결정은 다음과 같다: "원래 목표는 미니멀하게 테스트하고자 했던건데 이제 의미없음. 렌더코어 제대로 구현하는게 나음", 쿠킹 셰이더 위에서(셰이더 시스템 결정 11 (나)), 렌더 기반 구조 포함, A5 텍스처 전부, 검증 backend는 셰이더 경로를 따름. 결정 R10을 이에 맞췄다.
 - 개정 5(2026-11-17): GX7·GX10·GX11·CP6·RB1·GX3a 구현을 반영했다. 4.2절 상태 열과 RB1 행, 4.3·4.4·5.7·10.4절 구현 메모를 더했다. 스펙과 다르게 정한 것: 작업 함수를 캡처 없는 함수 포인터로 제한, `Retire`는 handle만 받음(호출자 last-use 하한 없음), D3D12 스레드 안전 생성은 GX8로 미룸, 장치 손실·미지원 능력은 기존 오류 코드(`Destroyed`·`Unsupported`), 정리 drain·closure·실행기 hook은 실행 파일 hook에만. 같은 날 사용자 결정으로 최소 렌더러(내장 메시·원문 셰이더)를 엔진 모듈에서 Sandbox 시험 샘플로 옮겼다.
 - 개정 6(2026-11-17): GX8·GX9 구현을 반영했다(4.2절 상태 열, 4.4절 구현 메모, 13.2절 GLES 시간 대응 결정). GX11 상태에서 "D3D12 스레드 안전 생성은 GX8과 함께"를 지웠다(GX8에서 열었다). 스펙과 다르게 정한 것: 업로드 ring은 프레임 slot별 고정 구간 대신 fence로 닫는 묶음의 원형 할당, timestamp 끊김은 `ErrorCode::Cancelled`로 통지, `GpuScope`는 RB7로 남김.
+- 개정 7(2026-11-17): 1절에 좌표·행렬 규약 행을 더했다(사용자 결정: 좌표계·단위·행렬을 UE 5.8과 같게). 12절은 ConfigSystem, 13.2절은 TraceSystem을 참조하게 했다.

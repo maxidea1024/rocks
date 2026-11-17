@@ -242,7 +242,7 @@ class Device {
 - 정점 배치([렌더 기반](RenderBase.ko.md) 10.4절 GX3a): 정점 원소 형식 20종(`GraphicsTypes/VertexFormat.h`), 속성(location·형식·stream·offset)·stream(stride·정점/인스턴스), index 버퍼(UInt16·UInt32), `Draw`·`DrawIndexed`(인스턴스 수), 정점 버퍼 없는 그리기. 셰이더 정점 입력 시맨틱은 `ATTRIBUTEn`이다.
 - 셰이더는 backend별 원문을 `PipelineDesc`에 담는다(D3D12: HLSL을 런타임 `D3DCompile` SM 5.1, OpenGL: GLSL 4.50). 오프라인 셰이더 쿠킹과 DXC는 후속이다.
 - 그리기 상수는 64바이트 행렬 + 16바이트 색으로 제한한다(D3D12 root constants, OpenGL uniform).
-- 좌표 규약: 행렬은 열 우선 column vector이며 HLSL·GLSL 모두 열 우선으로 업로드한다. OpenGL은 `glClipControl`의 `GL_ZERO_TO_ONE`으로 D3D와 같은 [0,1] 깊이를 쓰고, 원점은 창에 그릴 때 `GL_LOWER_LEFT`, RenderTarget 텍스처에 그릴 때 `GL_UPPER_LEFT`로 바꿔 RenderTarget의 첫 행이 이미지 위쪽이 되게 한다(샘플링·readback 모두 D3D12와 같은 배치). 텍스처는 첫 행이 위인 배치로 올리고 UV (0,0)이 좌상단이다.
+- 좌표 규약: 2026-11-17 사용자 결정으로 좌표계·단위·행렬 규약을 UE 5.8과 같게 바꾼다(행 벡터 `p·M`·행 우선 저장, 셰이더 `mul(v, M)`·행 우선 packing, 앞면은 화면 반시계, [셰이더 시스템](ShaderSystem.ko.md) 7.2절 6·8항). 메모리 배치는 전과 같아 GPU로 가는 바이트는 바뀌지 않는다. 지금 코드(샘플 렌더러 `mul(transform, position)`, 열 우선 업로드)는 Core Math 전환 뒤 C7에서 바꾼다. OpenGL은 `glClipControl`의 `GL_ZERO_TO_ONE`으로 D3D와 같은 [0,1] 깊이를 쓰고, 원점은 창에 그릴 때 `GL_LOWER_LEFT`, RenderTarget 텍스처에 그릴 때 `GL_UPPER_LEFT`로 바꿔 RenderTarget의 첫 행이 이미지 위쪽이 되게 한다(샘플링·readback 모두 D3D12와 같은 배치). 텍스처는 첫 행이 위인 배치로 올리고 UV (0,0)이 좌상단이다.
 - 동시에 진행하는 프레임 수는 렌더 lane 프레임 slot(2–3개)이 정하고, slot 재사용은 그 프레임의 모든 제출 fence 완료로 판정한다. D3D12는 끝난 제출의 기록 저장소를 다시 쓴다. 디버그 구성은 디버그 레이어를 켠다.
 
 ### 10.2 범위 밖
