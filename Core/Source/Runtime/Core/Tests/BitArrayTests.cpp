@@ -131,6 +131,8 @@ TEST(BitArrayAllocationFailurePreservesContentsAndCapacity) {
     test::NFailAllocator failing(system);
     {
         BitArray bits(failing);
+        // 자동 성장 slack과 무관하게 다음 삽입이 실제 재할당을 필요로 하게 만든다.
+        REQUIRE(bits.TryReserve(64));
         REQUIRE(bits.TryAdd(false, 64));
         REQUIRE(bits.TrySetRange(31, 34, true).Error() == ErrorCode::InvalidArgument);
         REQUIRE(bits.TrySetRange(31, 33, true));
@@ -202,6 +204,7 @@ TEST(BitArrayBitwiseAndCloneFailuresKeepBothInputs) {
     {
         BitArray first(failing);
         BitArray second(system);
+        REQUIRE(first.TryReserve(64));
         REQUIRE(first.TryAdd(true, 64));
         REQUIRE(second.TryAdd(false, 129));
         REQUIRE(second.TrySet(128, true));

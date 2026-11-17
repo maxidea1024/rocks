@@ -1,9 +1,12 @@
 #pragma once
 
 #include <Base/Checked.h>
+#include <Core/Containers/ContainerDetail.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Move.h>
 #include <Platform/Fatal.h>
+#include <Platform/Memory.h>
+#include <Platform/PlatformMath.h>
 
 namespace rocks {
 
@@ -107,7 +110,7 @@ public:
     // capacity는 bit 단위다. 범위를 벗어난 index는 Fatal이며 오류 복구가 필요하면 TryGet을 쓴다.
     BitReference operator[](usize index) noexcept {
         CheckIndex(index);
-        return BitReference(words_[index / BitsPerWord], Mask(index));
+        return BitReference(words_[index >> WordShift], Mask(index));
     }
 
     bool operator[](usize index) const noexcept {
@@ -255,9 +258,7 @@ public:
         if (index > size_ || count > size_ - index) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
-        for (usize i = 0; i < count; ++i) {
-            Write(index + i, value);
-        }
+        SetRange(index, count, value);
         return Result<void>::Success();
     }
 
@@ -266,11 +267,11 @@ public:
         if (capacity <= Capacity()) {
             return Result<void>::Success();
         }
-        if (capacity > MaxSize - (BitsPerWord - 1)) {
+        if (capacity > MaxSize - WordMask) {
             return Result<void>::Failure(ErrorCode::Overflow);
         }
-        const usize words = (capacity + BitsPerWord - 1) / BitsPerWord;
-        if (words > MaxSize / BitsPerWord) {
+        const usize words = WordCount(capacity);
+        if (words > (MaxSize >> WordShift)) {
             return Result<void>::Failure(ErrorCode::Overflow);
         }
         usize bytes = 0;
@@ -285,9 +286,11 @@ public:
         if (!replacement || reinterpret_cast<uptr>(replacement) % alignof(uint64) != 0) {
             platform::Fatal("BitArray allocator returned invalid storage");
         }
-        for (usize i = 0; i < words; ++i) {
-            InitializeAt<uint64>(replacement + i, i < wordCapacity_ ? words_[i] : 0);
-        }
+        // 배열 수명을 한 번에 시작한다. 값 초기화와 기존 값 복사를 중복 수행하지 않는다.
+        ::new (replacement) uint64[words];
+        const usize used = WordCount(size_);
+        platform::MemoryCopy(replacement, words_, used * sizeof(uint64));
+        platform::MemoryZero(replacement + used, (words - used) * sizeof(uint64));
         FreeWords();
         words_ = replacement;
         wordCapacity_ = words;
@@ -301,13 +304,9 @@ public:
             if (!reserved) {
                 return reserved;
             }
-            for (usize i = size_; i < size; ++i) {
-                Write(i, value);
-            }
+            SetRange(size_, size - size_, value);
         } else {
-            for (usize i = size; i < size_; ++i) {
-                Write(i, false);
-            }
+            SetRange(size, size_ - size, false);
         }
         size_ = size;
         return Result<void>::Success();
@@ -340,12 +339,8 @@ public:
         if (!reserved) {
             return reserved;
         }
-        for (usize i = size_; i > index; --i) {
-            Write(i + count - 1, Read(i - 1));
-        }
-        for (usize i = 0; i < count; ++i) {
-            Write(index + i, value);
-        }
+        MoveBits(index + count, index, size_ - index);
+        SetRange(index, count, value);
         size_ = next;
         return Result<void>::Success();
     }
@@ -359,12 +354,8 @@ public:
             return Result<void>::Success();
         }
         const usize next = size_ - count;
-        for (usize i = index; i < next; ++i) {
-            Write(i, Read(i + count));
-        }
-        for (usize i = next; i < size_; ++i) {
-            Write(i, false);
-        }
+        MoveBits(index, index + count, next - index);
+        SetRange(next, count, false);
         size_ = next;
         return Result<void>::Success();
     }
@@ -381,22 +372,37 @@ public:
         const usize next = size_ - count;
         const usize tail = size_ - index - count;
         const usize moved = count < tail ? count : tail;
-        for (usize i = 0; i < moved; ++i) {
-            Write(index + i, Read(size_ - count + i));
-        }
-        for (usize i = next; i < size_; ++i) {
-            Write(i, false);
-        }
+        MoveBits(index, next, moved);
+        SetRange(next, count, false);
         size_ = next;
         return Result<void>::Success();
     }
 
     // 없거나 시작 위치가 범위를 벗어나면 NotFound다. FindAndSet은 발견한 bit만 변경한다.
     usize Find(bool value, usize start = 0) const noexcept {
-        for (usize i = start; i < size_; ++i) {
-            if (Read(i) == value) {
-                return i;
+        if (start >= size_) {
+            return NotFound;
+        }
+
+        const usize endWord = WordCount(size_);
+        usize index = start >> WordShift;
+        uint64 candidates =
+            (value ? words_[index] : ~words_[index]) & (AllBits << (start & WordMask));
+        for (;;) {
+            if (index + 1 == endWord && (size_ & WordMask) != 0) {
+                candidates &= LowMask(size_ & WordMask);
             }
+
+            if (candidates != 0) {
+                return (index << WordShift) +
+                       platform::PlatformMath::CountTrailingZeros64(candidates);
+            }
+
+            if (++index == endWord) {
+                break;
+            }
+
+            candidates = value ? words_[index] : ~words_[index];
         }
         return NotFound;
     }
@@ -414,11 +420,7 @@ public:
     }
 
     usize CountSetBits() const noexcept {
-        usize count = 0;
-        for (usize i = 0; i < size_; ++i) {
-            count += Read(i) ? 1 : 0;
-        }
-        return count;
+        return CountRange(0, size_);
     }
 
     // [begin, end)에서 설정된 비트 수를 센다. 잘못된 범위는 오류다.
@@ -426,23 +428,21 @@ public:
         if (begin > end || end > size_) {
             return Result<usize>::Failure(ErrorCode::InvalidArgument);
         }
-        usize count = 0;
-        for (usize i = begin; i < end; ++i) {
-            count += Read(i) ? 1 : 0;
-        }
-        return Result<usize>::Success(count);
+        return Result<usize>::Success(CountRange(begin, end));
     }
 
-    // 다른 allocator로 독립 복제한다. 실패해도 원본은 바뀌지 않는다.
+    // 다른 allocator로 독립 복제한다. 사본의 capacity는 Size()를 64-bit word로 올린 정확한
+    // 크기다(성장 slack 없음). 사용 word를 한 번에 복사하며 크기 밖 bit는 원본처럼 0이다.
+    // 실패해도 원본은 바뀌지 않는다.
     Result<BitArray> TryClone(Allocator& allocator) const noexcept {
         BitArray copy(allocator);
-        auto resized = copy.TryResize(size_);
-        if (!resized) {
-            return Result<BitArray>::Failure(resized.Error());
+        auto reserved = copy.TryReserve(size_);
+        if (!reserved) {
+            return Result<BitArray>::Failure(reserved.Error());
         }
-        for (usize i = 0; i < size_; ++i) {
-            copy.Write(i, Read(i));
-        }
+
+        platform::MemoryCopy(copy.words_, words_, WordCount(size_) * sizeof(uint64));
+        copy.size_ = size_;
         return Result<BitArray>::Success(Move(copy));
     }
 
@@ -470,32 +470,36 @@ public:
         if (!reserved) {
             return reserved;
         }
-        for (usize i = 0; i < newSize; ++i) {
-            const bool left = i < oldSize ? Read(i) : missingValue;
-            const bool right = i < otherSize ? other.Read(i) : missingValue;
-            const bool value = operation == BitOperation::And  ? left && right
-                               : operation == BitOperation::Or ? left || right
-                                                               : left != right;
-            Write(i, value);
+        switch (operation) {
+        case BitOperation::And:
+            CombineWords<BitOperation::And>(other, newSize, missingValue);
+            break;
+        case BitOperation::Or:
+            CombineWords<BitOperation::Or>(other, newSize, missingValue);
+            break;
+        case BitOperation::Xor:
+            CombineWords<BitOperation::Xor>(other, newSize, missingValue);
+            break;
         }
-        for (usize i = newSize; i < oldSize; ++i) {
-            Write(i, false);
+        if (newSize < oldSize) {
+            SetRange(newSize, oldSize - newSize, false);
         }
         size_ = newSize;
+        MaskLastWord();
         return Result<void>::Success();
     }
 
     void Invert() noexcept {
-        for (usize i = 0; i < size_; ++i) {
-            Write(i, !Read(i));
+        const usize words = WordCount(size_);
+        for (usize i = 0; i < words; ++i) {
+            words_[i] = ~words_[i];
         }
+        MaskLastWord();
     }
 
     // storage를 유지하며 모든 bit를 제거한다. 빌린 참조는 더 이상 사용하지 않는다.
     void Clear() noexcept {
-        for (usize i = 0; i < wordCapacity_; ++i) {
-            words_[i] = 0;
-        }
+        platform::MemoryZero(words_, WordCount(size_) * sizeof(uint64));
         size_ = 0;
     }
 
@@ -511,6 +515,128 @@ public:
 
 private:
     static constexpr usize BitsPerWord = 64;
+    static constexpr usize WordShift = 6;
+    static constexpr usize WordMask = BitsPerWord - 1;
+    static constexpr uint64 AllBits = NumericLimits<uint64>::Max();
+    static_assert((usize{1} << WordShift) == BitsPerWord);
+
+    static constexpr usize WordCount(usize bits) noexcept {
+        return (bits >> WordShift) + ((bits & WordMask) != 0 ? 1 : 0);
+    }
+
+    // count==64에서도 64-bit shift를 평가하지 않는다.
+    static constexpr uint64 LowMask(usize count) noexcept {
+        return count == BitsPerWord ? AllBits : (uint64{1} << count) - 1;
+    }
+
+    void MaskLastWord() noexcept {
+        if ((size_ & WordMask) != 0) {
+            words_[size_ >> WordShift] &= LowMask(size_ & WordMask);
+        }
+    }
+
+    // 목적지는 한 word 안의 범위다. 범위 밖 비트는 그대로 둔다.
+    void WriteBits(usize index, usize count, uint64 value) noexcept {
+        const usize offset = index & WordMask;
+        const uint64 mask = LowMask(count) << offset;
+        uint64& word = words_[index >> WordShift];
+        word = (word & ~mask) | ((value << offset) & mask);
+    }
+
+    // 최대 64bit를 읽는다. 필요한 경우에만 다음 word를 읽어 capacity 밖 접근을 막는다.
+    uint64 ReadBits(usize index, usize count) const noexcept {
+        const usize offset = index & WordMask;
+        const usize word = index >> WordShift;
+        uint64 value = words_[word] >> offset;
+        if (count > BitsPerWord - offset) {
+            value |= words_[word + 1] << (BitsPerWord - offset);
+        }
+
+        return value & LowMask(count);
+    }
+
+    void SetRange(usize index, usize count, bool value) noexcept {
+        if (count == 0) {
+            return;
+        }
+
+        const usize offset = index & WordMask;
+        if (offset != 0) {
+            const usize first = count < BitsPerWord - offset ? count : BitsPerWord - offset;
+            WriteBits(index, first, value ? AllBits : 0);
+            index += first;
+            count -= first;
+        }
+
+        const usize whole = count >> WordShift;
+        platform::MemorySet(words_ + (index >> WordShift), value ? 0xff : 0,
+                            whole * sizeof(uint64));
+        index += whole << WordShift;
+        count &= WordMask;
+        if (count != 0) {
+            WriteBits(index, count, value ? AllBits : 0);
+        }
+    }
+
+    // memmove와 같이 중첩 방향에 맞춰 읽기부터 수행한다. 단위는 목적지의 word 경계다.
+    void MoveBits(usize destination, usize source, usize count) noexcept {
+        if (destination == source) {
+            return;
+        }
+        while (count != 0) {
+            const bool backward = destination > source;
+            const usize available = backward ? ((destination + count - 1) & WordMask) + 1
+                                             : BitsPerWord - (destination & WordMask);
+            const usize chunk = count < available ? count : available;
+            const usize offset = backward ? count - chunk : 0;
+            const uint64 value = ReadBits(source + offset, chunk);
+            WriteBits(destination + offset, chunk, value);
+            count -= chunk;
+            if (!backward) {
+                source += chunk;
+                destination += chunk;
+            }
+        }
+    }
+
+    usize CountRange(usize begin, usize end) const noexcept {
+        usize count = 0;
+        while (begin < end) {
+            const usize available = BitsPerWord - (begin & WordMask);
+            const usize chunk = end - begin < available ? end - begin : available;
+            count += platform::PlatformMath::PopCount64(ReadBits(begin, chunk));
+            begin += chunk;
+        }
+
+        return count;
+    }
+
+    uint64 ExtendedWord(usize index, bool missing) const noexcept {
+        const usize first = index << WordShift;
+        if (first >= size_) {
+            return missing ? AllBits : 0;
+        }
+
+        const usize remaining = size_ - first;
+        const uint64 mask = LowMask(remaining < BitsPerWord ? remaining : BitsPerWord);
+        return (words_[index] & mask) | (missing ? ~mask : 0);
+    }
+
+    template <BitOperation Operation>
+    void CombineWords(const BitArray& other, usize size, bool missing) noexcept {
+        const usize words = WordCount(size);
+        for (usize i = 0; i < words; ++i) {
+            const uint64 left = ExtendedWord(i, missing);
+            const uint64 right = other.ExtendedWord(i, missing);
+            if constexpr (Operation == BitOperation::And) {
+                words_[i] = left & right;
+            } else if constexpr (Operation == BitOperation::Or) {
+                words_[i] = left | right;
+            } else {
+                words_[i] = left ^ right;
+            }
+        }
+    }
 
     // 자동 추가는 여유 공간을 기하급수적으로 늘려 반복 추가에서 매 word마다 전체 복사를
     // 피한다. 명시적 TryReserve는 요청 크기만 64-bit word로 올리는 별도 계약을 유지한다.
@@ -524,19 +650,9 @@ private:
             return Result<void>::Failure(ErrorCode::Overflow);
         }
 
-        const usize current = Capacity();
-        const usize growth = current / 2;
-        usize target = 0;
-        if (!rocks::TryAdd(current, growth, target) || target > maximum) {
-            target = maximum;
-        }
-        if (target < BitsPerWord) {
-            target = BitsPerWord;
-        }
-        if (target < required) {
-            target = required;
-        }
-        return TryReserve(target);
+        const usize words =
+            detail::GrowthCapacityWithin(wordCapacity_, WordCount(required), MaxSize >> WordShift);
+        return TryReserve(words << WordShift);
     }
 
     static bool TryAddSize(usize a, usize b, usize& out) noexcept {
@@ -544,15 +660,15 @@ private:
     }
 
     static uint64 Mask(usize index) noexcept {
-        return static_cast<uint64>(1) << (index % BitsPerWord);
+        return uint64{1} << (index & WordMask);
     }
 
     bool Read(usize index) const noexcept {
-        return (words_[index / BitsPerWord] & Mask(index)) != 0;
+        return (words_[index >> WordShift] & Mask(index)) != 0;
     }
 
     void Write(usize index, bool value) noexcept {
-        uint64& word = words_[index / BitsPerWord];
+        uint64& word = words_[index >> WordShift];
         if (value) {
             word |= Mask(index);
         } else {
