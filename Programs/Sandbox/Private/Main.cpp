@@ -9,9 +9,12 @@
 
 // Sandbox 진입점이다.
 //   Sandbox [--self-test]          창 없이 그래픽 backend·엔진 호스트 검사(종료 코드 0 = 통과)
-//   Sandbox --engine [--frames N] [--config <Engine.json>]
-//                                  헤드리스 엔진을 N 프레임(기본 60) 돌린다. 설정 파일의
-//                                  "Settings" 섹션으로 log.* 설정(모드·레벨·파일 기록)을 바꾼다
+//   Sandbox --engine [--frames N] [--config <Engine.json>] [--set=<target>=<value>]...
+//                  [--trace=<목록>]...
+//                                  헤드리스 엔진을 N 프레임(기본 60) 돌린다. 엔진 층 설정
+//                                  파일(Engine/Config) 다음 설정 파일(Project 층 — "Settings"
+//                                  섹션의 log.* 등), 그다음 --set(Session 층) 순으로 합친다.
+//                                  --trace는 trace 채널·묶음을 켠다(TraceControl)
 //
 // 로그(Docs/Design/LoggingSystem.ko.md 5.1절): 자체 검사는 명령줄 도구처럼 Sync, 엔진 실행은
 // LogHost가 설정으로 만든 LogSystem(기본 Async)을 stderr sink와 함께 설치한다. 자체 검사의
@@ -19,7 +22,8 @@
 namespace {
 
 int Usage() noexcept {
-    fprintf(stderr, "usage: Sandbox [--self-test] | --engine [--frames N] [--config <file>]\n");
+    fprintf(stderr, "usage: Sandbox [--self-test] | --engine [--frames N] [--config <file>] "
+                    "[--set=<target>=<value>]... [--trace=<channels>]...\n");
     return 2;
 }
 
@@ -68,6 +72,10 @@ int main(int argc, char** argv) {
     rocks::SystemAllocator allocator;
     bool engine = false;
     sandbox::EngineHostOptions options;
+    // --set·--trace 인자다(나온 순서). argv를 빌린다.
+    constexpr int MaxSettingArguments = 64;
+    rocks::StringView settingArguments[MaxSettingArguments];
+    int settingCount = 0;
     for (int index = 1; index < argc; ++index) {
         if (rocks::platform::CStringEquals(argv[index], "--self-test")) {
             continue;
@@ -80,10 +88,18 @@ int main(int argc, char** argv) {
             ++index;
         } else if (rocks::platform::CStringEquals(argv[index], "--config") && index + 1 < argc) {
             options.configPath = argv[++index];
+        } else if ((rocks::StringView(argv[index])
+                        .StartsWith("--set=", rocks::StringComparison::CaseSensitive) ||
+                    rocks::StringView(argv[index])
+                        .StartsWith("--trace=", rocks::StringComparison::CaseSensitive)) &&
+                   settingCount < MaxSettingArguments) {
+            settingArguments[settingCount++] = rocks::StringView(argv[index]);
         } else {
             return Usage();
         }
     }
 
+    options.arguments = rocks::Span<const rocks::StringView>(
+        settingArguments, static_cast<rocks::usize>(settingCount));
     return engine ? sandbox::RunEngineHost(allocator, options) : RunSelfTest(allocator);
 }

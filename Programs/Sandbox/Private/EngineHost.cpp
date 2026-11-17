@@ -2,14 +2,15 @@
 
 #include <Core/Containers/Array.h>
 #include <Core/Diagnostics/Log.h>
-#include <Core/Text/NamePool.h>
 #include <Core/Text/StringBuilder.h>
 #include <Engine/Engine.h>
+#include <HostConfig/HostSettings.h>
 #include <LogHost/LogHost.h>
-#include <Object/ObjectRegistry.h>
-#include <Object/TypeRegistry.h>
 #include <Platform/File.h>
 #include <Platform/Process.h>
+#include <TraceCapture/TraceSession.h>
+#include <TraceControl/TraceController.h>
+#include <TraceControl/TraceSettings.generated.h>
 #include <stdio.h>
 
 namespace sandbox {
@@ -17,6 +18,9 @@ namespace sandbox {
 namespace {
 
 using namespace rocks;
+
+// Sandbox 엔진 호스트의 로그 카테고리다.
+inline constexpr LogCategory LogSandboxHost{"Sandbox"};
 
 // 헤드리스 실행의 고정 프레임 시간이다(결정적 시간 진행).
 constexpr double HeadlessFrameSeconds = 1.0 / 60.0;
@@ -28,87 +32,12 @@ constexpr uint32 SelfTestTimeoutMilliseconds = 60000;
 // 자식 stderr를 모으는 버퍼 크기다.
 constexpr usize SelfTestOutputBytes = 64 * 1024;
 
-// 로그 설정용 설정 문맥이다(엔진 시작 전 — 로그는 엔진보다 먼저 준비한다). 소멸 순서: 문맥 →
-// Registry → pool → 타입.
-class HostSettings {
-public:
-    explicit HostSettings(Allocator& allocator) noexcept
-        : allocator_(allocator), types_(allocator), names_(allocator),
-          objects_(allocator, types_, {0x53414e44, 1}, MakeOptions(names_)) {
-    }
-
-    ~HostSettings() noexcept {
-        context_ = nullptr;
-        (void)objects_.Shutdown(objects_.OwnerAccess());
-        (void)names_.Shutdown();
-        (void)types_.Shutdown();
-    }
-
-    HostSettings(const HostSettings&) = delete;
-    HostSettings& operator=(const HostSettings&) = delete;
-
-    bool Initialize() noexcept {
-        if (!names_.Initialize()) {
-            return false;
-        }
-
-        auto made = UniquePtr<config::ConfigContext>::TryMake(allocator_, allocator_, objects_,
-                                                              config::ConfigContextOptions{});
-        if (!made) {
-            return false;
-        }
-
-        context_ = Move(made.Value());
-        return context_->Initialize() && RegisterLogSettings(*context_) && context_->Sync();
-    }
-
-    // Engine branch 파일 하나를 Project 층으로 읽는다(log.* 설정은 "Settings" 섹션).
-    bool Load(const char* path) noexcept {
-        platform::File file;
-        uint64 size = 0;
-        Array<char> text(allocator_);
-        if (!file.Open(path, platform::FileOpenMode::ReadExisting) || !file.Size(size) ||
-            !text.TryResize(static_cast<usize>(size)) ||
-            !file.ReadExact(text.Data(), text.Size()).status) {
-            fprintf(stderr, "Sandbox: cannot read config file '%s'\n", path);
-            return false;
-        }
-
-        const StringView source(path);
-        if (!context_->AddLayerText(config::ConfigLayer::Project, "SandboxConfig", "Engine", source,
-                                    StringView(text.Data(), text.Size())) ||
-            !context_->Sync()) {
-            fprintf(stderr, "Sandbox: config file '%s' was rejected (%llu diagnostics)\n", path,
-                    static_cast<unsigned long long>(context_->Diagnostics().Count()));
-            return false;
-        }
-
-        return true;
-    }
-
-    config::ConfigContext& Context() noexcept {
-        return *context_;
-    }
-
-private:
-    static RegistryOptions MakeOptions(NamePool& names) noexcept {
-        RegistryOptions options;
-        options.names = &names;
-        return options;
-    }
-
-    Allocator& allocator_;
-    TypeRegistry types_;
-    NamePool names_;
-    ObjectRegistry objects_;
-    UniquePtr<config::ConfigContext> context_;
-};
-
 // 엔진을 World 하나로 frames만큼 돌린다. 실패 원인은 엔진이 한 번 기록한다(호스트는 다시 기록하지
 // 않는다).
-int RunEngine(Allocator& allocator, uint64 frames) noexcept {
+int RunEngine(Allocator& allocator, uint64 frames, config::ConfigContext& settings) noexcept {
     EngineConfig config;
     config.maxFrames = frames;
+    config.settings = &settings;
     config.fixedFrameDeltaSeconds = HeadlessFrameSeconds;
     Engine engine(allocator);
     if (!engine.Initialize(config)) {
@@ -249,19 +178,35 @@ bool CheckConfiguredFileLogging() noexcept {
 } // namespace
 
 int RunEngineHost(Allocator& allocator, const EngineHostOptions& options) noexcept {
+    char engineDir[4096] = {};
+    HostSettingsOptions boot;
+    if (auto found = FindEngineDirectory(Span<char>(engineDir)); found) {
+        boot.engineDir = StringView(engineDir, found.Value());
+    } else {
+        // 엔진 층 파일 없이 코드 기본값으로 돈다(설치 전이므로 비상 경로로 나간다).
+        Log::Warning(LogSandboxHost,
+                     "Engine/Config was not found above the executable ({Error}); engine config "
+                     "files are not read",
+                     ErrorCodeName(found.Error()));
+    }
+
+    // 1)–5) 설정 문맥과 시작 설정. 실패는 HostSettings가 진단과 함께 기록했다.
     HostSettings settings(allocator);
-    if (!settings.Initialize()) {
-        fprintf(stderr, "Sandbox: the config context could not start\n");
+    if (!settings.Initialize(boot)) {
         return 1;
     }
 
-    if (options.configPath != nullptr && !settings.Load(options.configPath)) {
+    if (!settings.LoadFiles() ||
+        (options.configPath != nullptr &&
+         !settings.AddFile(config::ConfigLayer::Project, "Engine", options.configPath)) ||
+        !settings.ApplyCommandLine(options.arguments) || !settings.CompleteStartup()) {
         return 2;
     }
 
+    // 6) 로그. log.mode·log.file.* 는 5)에서 고정됐다.
     LogHost host(allocator);
     if (!host.Start(LogSystemConfig::ForEngineHost(), &settings.Context(), "Sandbox")) {
-        fprintf(stderr, "Sandbox: the log system could not start\n");
+        Log::Error(LogSandboxHost, "The log system could not start");
         return 1;
     }
 
@@ -270,9 +215,27 @@ int RunEngineHost(Allocator& allocator, const EngineHostOptions& options) noexce
         LogInstallScope installed(host.System());
         (void)host.System().SetThreadName("GameThread");
         (void)host.Watch(settings.Context());
-        // log.mode·log.file.* 는 여기서 고정된다(실행 중 변경 거부).
-        (void)settings.Context().CompleteStartup();
-        exitCode = RunEngine(allocator, options.frames);
+        // 7) trace 세션(설정 섹션 Trace)·콘솔 명령·--trace. 세션을 열지 못해도 엔진은 돈다.
+        TraceSession trace;
+        TraceSessionSettings traceSettings = trace_control::MakeTraceSessionSettings(
+            settings.Context().Get<trace_control::TraceCaptureSettings>(), allocator);
+        if (auto started = trace.Start(traceSettings); !started) {
+            Log::Warning(LogSandboxHost, "Trace capture could not start: {Error}",
+                         ErrorCodeName(started.Error()));
+        }
+
+        {
+            trace_control::TraceController control(allocator, trace, settings.Context());
+            if (trace.IsRunning()) {
+                (void)control.RegisterConsoleCommands();
+                (void)control.ApplyCommandLine(options.arguments);
+            }
+
+            // 8) 엔진 루프(프레임마다 sync 지점).
+            exitCode = RunEngine(allocator, options.frames, settings.Context());
+        }
+
+        trace.Stop();
     }
 
     host.Stop();
