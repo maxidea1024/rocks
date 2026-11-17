@@ -387,7 +387,11 @@ public:
 - **카테고리별 재정의**는 문자열 하나(`log.levels`, `접두사=레벨` 목록)다. Map 설정은 리플렉션 생성 struct가 필요해 쓰지 않았다. 잘못된 항목은 Warning을 남기고 건너뛴다.
 - **실행 중 변경:** `LogHost::Watch`가 `log.level`·`log.levels`를 구독하고 Config sync 지점에서 다시 적용한다. 다시 적용할 때 앞의 재정의를 지운다. 시작 뒤 고정 항목은 Config `StartupOnly` 플래그와 호스트의 `CompleteStartup`으로 거부된다.
 - **실패:** 암호화를 켰는데 키가 없거나 틀리면 파일 sink를 만들지 않고 Error를 한 번 남긴다(평문으로 기록하지 않음, L12). 파일 폴더를 열지 못하면 Error를 남기고 파일 없이 계속한다. `LogHost::Start`는 설치 전에 돌기 때문에 이 Error는 설치 전 비상 경로(stderr)로 나간다.
-- **호스트 순서(Sandbox `--engine --config <Engine.json>`):** 설정 문맥(TypeRegistry·NamePool·ObjectRegistry·ConfigContext) → `LogHost::Start(preset, &context, hostName)` → 설치 → `Watch` → `CompleteStartup` → 엔진 실행 → 엔진 종료 → `LogHost::Stop`.
+- **호스트 순서(Sandbox `--engine --config <Engine.json>`, ConfigSystem 5.3·5.4절):** `HostSettings`(HostConfig 모듈)가 문맥을 만든다.
+  - 설정 단계: 등록(`RegisterLogSettings` → `trace.*` → 호스트) → 층 파일 → `--config` → `--set` → Sync → `CompleteStartup`(`log.mode`·`log.file.*` 고정).
+  - 실행 단계: `LogHost::Start(preset, &context, hostName)` → 설치 → `Watch` → trace 세션 → 엔진 루프(프레임마다 Config Sync가 `log.level`·`log.levels` 변경을 적용).
+  - 종료 단계: 엔진 정리 → trace 정지 → 설치 해제 → `LogHost::Stop`(`WriterAbandoned()`면 정리 없이 종료).
+  - 설치 전 설정 오류는 비상 경로(stderr)로 한 번 남는다. `HostSettings`는 LogHost보다 오래 산다.
 
 ## 10. 장애 격리
 
