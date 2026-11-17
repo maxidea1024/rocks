@@ -1,6 +1,6 @@
 # 셰이더 시스템 설계
 
-기준일: 2026-11-14, 개정 8(초안). 셰이더 원문을 HLSL 하나로 쓰고 오프라인에서 D3D12·D3D11·Vulkan·Metal·OpenGL ES용 코드로 바꾸는 구조와, 그 구현에 앞서 갖춰야 할 **선행 작업**을 정한다. 개정 7은 현재 코드베이스(HEAD `0be1e64`, 2026-11-14)와 다른 설계 문서의 상태를 다시 조사해 선행 작업과 순서를 새로 세웠다(4–6절).
+기준일: 2026-11-17, 개정 9(초안). 셰이더 원문을 HLSL 하나로 쓰고 오프라인에서 D3D12·D3D11·Vulkan·Metal·OpenGL ES용 코드로 바꾸는 구조와, 그 구현에 앞서 갖춰야 할 **선행 작업**을 정한다. 개정 7은 현재 코드베이스(HEAD `0be1e64`, 2026-11-14)와 다른 설계 문서의 상태를 다시 조사해 선행 작업과 순서를 새로 세웠다(4–6절).
 
 UE 근거는 UE 5.8.4(EpicGames/UnrealEngine `release` 브랜치 commit `f45729c0b6f097038e72b52d366a62baeca3275b`)의 원본이다. 2026-11-14 사용자 지시로 기준을 5.6에서 5.8로 올렸고, 개정 6까지의 5.6 근거를 모두 5.8.4로 다시 확인했다(17절). 경로는 `Engine/Source/` 기준이며 `Engine/Shaders`·`Engine/Config`·`Engine/Build`는 그대로 적는다. UE 밖 도구(DXC·SPIRV-Cross·SPIRV-Tools·Vulkan)에 관한 사실은 그 출처를 따로 적는다. 개정 6까지의 조사 문서(UE 5.6 기준)는 [Rocks 셰이더 시스템](https://claude.ai/artifact/U5uNh2EWGvXKQiNYXnuc1Q)이다.
 
@@ -174,7 +174,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 
 **P2 바인딩 규약 — 설계(7절).**
 - 산출물: 7.2절 규칙, `ShaderBindingLayout` 형식, GLES 상수 버퍼 에뮬레이션 규약.
-- 완료 기준: 측정에 기대지 않는 규칙이 확정되고 7.3절 시험이 SH2·SH3·SH5·SH6 완료 기준에 들어 있다. 행렬 옵션(7.2절 6항)과 backend별 앞면 매핑(8항)은 측정 S5로 정하는 SH2 산출물이다.
+- 완료 기준: 측정에 기대지 않는 규칙이 확정되고 7.3절 시험이 SH2·SH3·SH5·SH6 완료 기준에 들어 있다. 행렬 규약(7.2절 6항)의 형식별 확인과 backend별 앞면 매핑(8항)은 측정 S5로 확인하는 SH2 산출물이다.
 
 **P3 ThirdParty 확장과 오프라인 도구 빌드 — 설계(8절).**
 - 산출물: Engine 루트, `kind: binary`·`kind: headers`, 저장소에 커밋하는 도구 공개 헤더, 사용자 단위 내용 주소 저장소와 bootstrap 명령, 라이브러리별 오프라인 빌드 스크립트와 수동 CI workflow, FXC 고정본, Apple 도구 최소 버전, SPIRV-Reflect(C 원본)·Vulkan-Headers(headers).
@@ -355,7 +355,14 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
    - 반례(이 규칙이 막는 것): `float a[2]; float b;`는 D3D에서 b가 20(마지막 원소의 남는 자리에 채움), std140에서 32이고, 명시 padding으로도 두 규칙을 함께 맞출 수 없다. `float3x3 m; float s;`는 D3D 44, std140 48이다. push constant의 스칼라 배열은 std430 stride 4, D3D root constant는 16이다. `struct S { float4 v; }; struct R { float a; S s; }`의 s는 D3D·std140 16, push constant(std430, 구조체 정렬 4) 4다. 명시 padding이 없으면 워커 검사가 거부한다.
    - C++ 타입: Core `Matrix4`·`Vector3`는 정렬 지정이 없다(`Matrix4.h:56–61`, `Vector3.h:19–24`). 그래서 ShaderCore에 셰이더 전용 정렬 타입(`alignas(8)` 2성분, `alignas(16)` 3·4성분·`float4x4`)을 두고, 셰이더 파라미터 구조체는 이 타입만 쓴다(13절에서 MetaCompiler가 강제). `DrawConstants`의 C++ `float transform[16]`(`DeviceTypes.h:161–164`)은 이 행렬 타입으로 바꾼다.
    - Rocks는 수정되지 않은 DXC를 쓰므로 scalar block layout을 쓰지 않는다(Android Vulkan 1.1·GLES와 호환).
-6. **행렬.** Rocks는 열 벡터·열 우선 저장(EngineRuntime 10.1)이므로 UE의 `-Zpr`(`D3DShaderCompilerDXC.cpp:190`, `D3DShaderCompiler.cpp:1339`)를 쓰지 않는다. 형식별 DXC 행렬 옵션은 비대칭 행렬을 쓴 픽셀 대조 시험(SH2, 측정 S5)으로 확정하고 이 문서에 기록한다. 시험 전에는 옵션을 단정하지 않는다.
+6. **행렬.** 2026-11-17 사용자 결정으로 Rocks 수학 규약을 UE와 같게 바꾼다. 행렬은 행 벡터(`p' = p·M`, `A*B`는 A 먼저)와 행 우선 저장이다. 그래서 셰이더 규약도 UE와 같다.
+   - 셰이더는 `mul(v, M)`으로 쓰고, 모든 형식에서 행렬을 행 우선으로 담는다.
+     - DXC는 `-Zpr`이다(UE `Developer/Windows/ShaderFormatD3D/Private/D3DShaderCompilerDXC.cpp:189–190` "Unpack uniform matrices as row-major to match the CPU layout").
+     - FXC는 `/Zpr`이다(UE `D3DShaderCompiler.cpp:1337–1339`의 `D3DCOMPILE_PACK_MATRIX_ROW_MAJOR`, 명령줄 `:223–227`).
+     - SPIR-V에서 나오는 Vulkan·Metal·GLES 경로도 행 우선이다. UE ShaderConductor 기본값은 `bPackMatricesInRowMajor = true`다(`Developer/ShaderCompilerCommon/Public/ShaderConductorContext.h:78`).
+   - CPU 행렬의 메모리 배치는 전환 전후에 바이트 단위로 같다(이동이 평면 index 12–14). 그래서 상수를 올릴 때 전치하지 않는다.
+   - 비대칭 행렬 픽셀 대조 시험(SH2, 측정 S5)은 옵션을 고르는 시험이 아니다. 형식마다 위 규약이 지켜지는지 확인하는 시험이다.
+   - 렌더 코드 반영(`DrawConstants`·샘플 렌더러 셰이더·Sandbox)은 Core Math 행 벡터 전환(C2) 뒤의 C7 작업이다.
 7. **정점 입력과 단계 사이 변수.** DXC `-spirv`는 입출력 location을 시맨틱 번호가 아니라 선언 순서로 준다(기본 `-fvk-stage-io-order=decl`). D3D11·D3D12는 VS 출력과 PS 입력을 register 위치로 맞추고 register는 선언 순서로 정해진다. 그래서 두 단계를 따로 컴파일해도 맞도록 다음을 지킨다.
    - 정점 입력 시맨틱은 `ATTRIBUTEn`이다(현재 `TEXCOORDn`, `DeviceTypes.h:130–136`). n은 `VertexAttribute::location`이다.
    - 단계 사이 변수는 하나의 struct로 선언하고 VS 출력과 PS 입력이 같은 struct를 쓴다(공용 `.rsh`). struct 멤버 순서는 `SV_Position` 다음 `TEXCOORDn`을 n 오름차순으로 둔다. 그러면 선언 순서 = location 순서라 FXC 경로(선언 순서)와 SPIRV-Cross 경로(location 순서)의 signature가 같다. PS 입력에 다른 struct를 쓰려면 VS 출력의 앞부분(같은 순서)이어야 한다.
@@ -369,7 +376,15 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
    - Vulkan은 음수 viewport 높이(Vulkan 1.1 core)로 뒤집고, HLSL을 뺀 모든 대상(SPIR-V·MSL·ESSL)에 `-fvk-use-dx-position-w`를 넘긴다(UE와 같다).
    - `GLES31_ANDROID`는 SPIRV-Cross 업스트림 옵션 `fixup_clipspace`·`flip_vert_y`로 VS 끝에서 z를 [-1,1]로 바꾸고 y를 뒤집으며, backend는 컬 방향을 뒤집고 표시 때 Y를 뒤집는다(UE와 같다).
    - `GLES31_PC`는 두 옵션을 끄고 창·RenderTarget 모두 `glClipControl(GL_UPPER_LEFT, GL_ZERO_TO_ONE)`으로 그린다(UE도 결과가 같다: UE가 SPIRV-Cross Options에 더한 `force_glsl_clipspace` 필드를 보고 ShaderConductor가 두 옵션을 끈다. Rocks는 업스트림 옵션을 직접 지정한다). 그래서 창에는 offscreen color target에 그린 뒤 Y를 뒤집는 blit으로 표시한다(UE 데스크톱도 표시 blit에서 Y를 뒤집는다, `Runtime/OpenGLDrv/Private/Windows/WindowsOpenGLPlatform.cpp:511–513`). 지금 OpenGLGraphics가 창에는 `GL_LOWER_LEFT`, RenderTarget에는 `GL_UPPER_LEFT`를 쓰는 규칙(EngineRuntime 10.1)은 SH2에서 이것으로 바뀐다.
-   - Graphics API의 앞면 감기 방향은 framebuffer(y 아래) 기준 하나로 정한다. backend별 `frontFace` 매핑은 컬링 픽셀 대조(SH2 Vulkan·GLES 미리보기, SH5 Metal·D3D11, SH6 Android)로 확정한다.
+   - **앞면 규약.** UE와 같게, 표시된 화면에서 반시계로 감긴 삼각형이 앞면이다.
+     - 기본 컬링은 뒤면이다. UE D3D12는 `FrontCounterClockwise = true`이고 기본 컬 `CM_CW`가 `D3D12_CULL_MODE_BACK`이다(`Runtime/D3D12RHI/Private/D3D12State.cpp:33–35, 353`, `Runtime/Renderer/Private/MeshPassProcessor.cpp:1860–1868`).
+     - 렌더 메시의 앞면 법선은 `(C−A)×(B−A)`다(UE `MeshDescription.cpp:1311–1313`). 기하 `Plane`·`Triangle`의 법선 식과 이 렌더 앞면의 관계는 Core Math 쪽 결정(좌표 전환 C3)을 따른다.
+   - **음수 행렬식.** 물체 local-to-world 행렬식이 음수이면 컬 방향을 뒤집는다(UE `StaticMeshSceneProxy.cpp:1318–1327`, `DynamicMeshBuilder.cpp:920`). view 행렬식이 음수여도 뒤집는다(`SceneView.cpp:1000`, `MeshPassProcessor.cpp:1697`). 둘 다 해당하면 원래 방향으로 돌아온다. 뒤집기는 파이프라인 래스터 상태 선택에서 하고, 셰이더는 관여하지 않는다.
+   - **backend 매핑.** 앞면 규약은 Graphics API 하나로 정하고, backend별 `frontFace`·컬 매핑은 backend 안에 숨긴다.
+     - UE Vulkan은 `VK_FRONT_FACE_CLOCKWISE`와 `CM_CW → VK_CULL_MODE_FRONT_BIT`에 음수 viewport를 함께 쓴다(`Runtime/VulkanRHI/Private/VulkanPipeline.cpp:936`, `VulkanState.cpp:186–188`).
+     - GLES Android는 `flip_vert_y` 때문에 컬 방향을 뒤집는다(위 항).
+     - 매핑이 맞는지는 컬링 픽셀 대조로 확정한다(SH2 Vulkan·GLES 미리보기, SH5 Metal·D3D11, SH6 Android).
+   - 좌표 전환 전에는 래스터 상태의 앞면·컬 기본값을 코드에 굳히지 않는다. 지금 D3D12는 컬 없음 고정이다(`D3D12Device.cpp:1034`).
 9. **텍스처와 샘플러.** 텍스처마다 샘플러를 정하는 현재 규칙(`DeviceTypes.h:126–127`, `Sampler.h:42`)을 유지한다. HLSL은 둘을 따로 선언하므로 짝 규칙을 둔다: 텍스처 `X`는 같은 단계의 `SamplerState XSampler`와 짝이다. 짝이 없는 텍스처·샘플러와, 한 샘플러를 여러 텍스처가 쓰는 경우는 컴파일 오류다. 이 규칙으로 GLES combined sampler가 짝마다 하나로 정해진다(UE는 텍스처마다 샘플러 하나로 합치려고 SPIRV-Cross를 고쳤다, `ShaderConductor.cpp:1745–1758`). 공유·정적 샘플러(UE space1000)는 후속이다.
 10. **bindless.** 기본 프로필에 넣지 않는다. 후속 bindless 프로필은 D3D12 `ResourceDescriptorHeap`(SM 6.6), Vulkan bindless(UE 5.8은 mutable descriptor 기반 set 3개와 descriptor buffer, 7.1절), Metal Shader Converter로 UE 구조를 따른다.
 11. **GLES 출력과 UE 수정 도구.** UE GLES 경로는 UE가 고친 SPIRV-Tools pass 셋(`--reduce-const-array-to-struct`, `--convert-composite-to-op-access-chain-pass`, `--adv-interface-variable-scalar-replacement=skip-matrices`, `ThirdParty/ShaderConductor/ShaderConductor/External/SPIRV-Tools/source/opt/optimizer.cpp:554–562, 674–688`, 사용 `OpenGLShaderCompiler.cpp:2835–2853`)과 SPIRV-Cross 수정(UBO padding `pad_ubo_blocks`, PC 형식의 `force_glsl_clipspace` 표시, 텍스처당 샘플러 결합, ES binding 버전 조건, ESSL `offset` 생략, `ThirdParty/ShaderConductor/ShaderConductor/External/SPIRV-Cross/spirv_glsl.hpp:195–201`, `ShaderConductor.cpp:1745–1748`, `spirv_glsl.cpp:2220–2225, 2242–2245`)에 기댄다. 상수 버퍼를 `vec4` 배열로 묶는 일은 UE ShaderFormatOpenGL의 텍스트 재작성이 한다(`OpenGLShaderCompiler.cpp:1137–1240, 1797–1890`). UE 수정은 가져올 수 없으므로 Rocks는 업스트림 옵션과 워커 재작성으로 같은 결과를 낸다.
@@ -395,7 +410,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 | (h) | 텍스처·샘플러 짝 규칙의 음성 대조, GLES combined sampler 이름·유닛 | SH2 |
 | (i) | GLES 모바일 상한(샘플러 16, 에뮬레이션 `vec4` 합계, VS·PS storage block, varying 수, MRT 수) 초과와 한 슬롯에 타입을 섞은 상수 버퍼의 컴파일 오류, 바뀐 버퍼만 올리는지(호출 수 계측) | SH2(미리보기), SH6(기기) |
 
-P2 완료 기준: 이 절의 규칙과 `ShaderBindingLayout` 형식이 확정되고, 위 시험이 SH2·SH3·SH5·SH6 완료 기준에 들어 있다. 6항 행렬 옵션과 8항 backend별 앞면 매핑은 측정 S5로 정하는 SH2 산출물이며 P2 완료를 막지 않는다.
+P2 완료 기준: 이 절의 규칙과 `ShaderBindingLayout` 형식이 확정되고, 위 시험이 SH2·SH3·SH5·SH6 완료 기준에 들어 있다. 6항 행렬 규약의 형식별 확인과 8항 backend별 앞면 매핑은 측정 S5로 확인하는 SH2 산출물이며 P2 완료를 막지 않는다.
 
 ## 8. P3 ThirdParty 확장과 도구 빌드
 
@@ -716,7 +731,7 @@ SH0 진척(2026-11-17, `feature/shader-tools`, Windows 부분 구현):
 - [x] 측정 S2·S3(Windows 부분)·S6·S8·S12(데스크톱): 5.4절 결과 열.
 - 규약 검토 자료(리플렉션 덤프에서 확인한 것, 결정 아님):
   - SPIR-V에서 원문의 `register(t0)`·`register(s0)`가 같은 set 0·binding 0이 된다(texture와 sampler가 한 binding을 나눠 Vulkan descriptor layout으로 쓸 수 없다). 7.2절 4항 워커 재배치가 필요하다는 근거다. DXIL은 종류별 register 공간이라 겹치지 않는다.
-  - 상수 버퍼 `DrawConstants`는 DXIL·SPIR-V 모두 80 byte, `transform` 0·`color` 64다. SPIRV-Cross ESSL은 `layout(row_major) mat4`와 `vec * M`, HLSL 5.0은 `column_major`로 낸다(행렬 옵션은 S5, 7.2절 6항).
+  - 상수 버퍼 `DrawConstants`는 DXIL·SPIR-V 모두 80 byte, `transform` 0·`color` 64다. SPIRV-Cross ESSL은 `layout(row_major) mat4`와 `vec * M`, HLSL 5.0은 `column_major`로 낸다(행렬 옵션은 S5, 7.2절 6항). 이 측정은 2026-11-17 행 벡터 전환 전의 열 우선 원문으로 했다.
   - SPIR-V 입출력은 location 0부터 선언 순서이고, DXC는 `-fspv-reflect` 없이는 시맨틱 decoration을 내지 않아 시맨틱은 변수 이름(`in.var.TEXCOORD0`)에만 남는다. SPIRV-Cross HLSL 5.0은 시맨틱을 location 기준 `TEXCOORDn`으로 다시 쓴다(`COLOR0` → `TEXCOORD1`).
   - ESSL의 결합 sampler는 이름이 `_29`처럼 id이고 binding이 없다. 7.2절 GLES binding 재매김과 이름 규칙을 워커가 정해야 한다.
 - [ ] macOS: S1(macOS DXC 서명), S3 Windows–macOS 사이 byte 비교, S9, macOS CRT의 실수 출력. 스파이크 macOS 구현(`Private/Mac`, DXC는 `WinAdapter.h`)은 macOS 산출물(P3)과 함께 한다.
@@ -759,3 +774,7 @@ SH0 진척(2026-11-17, `feature/shader-tools`, Windows 부분 구현):
     - 경고 정책(결정 7)을 CompilerDiagnostics와의 충돌 때문에 확인 항목으로 되돌렸다.
   - 2차 점검(내부 정합성과 이번에 더한 UE 근거) 반영: 한 16 byte 슬롯에 기본 타입을 섞지 않는 규칙(GLES 배열 크기 계산), GLES binding을 종류별 공간으로 다시 매김, VS·PS storage block 0(ES 3.2 최소), 공통 상한을 셰이더 타입이 컴파일되는 형식으로 한정하고 그 형식 정의 SHA를 키에 넣음, 결정 2·3·5 기한을 P6a 전으로, 결정 6을 측정 없이 정하고 S7을 SH1 완료 기준으로, 엔진 컴파일 프로필을 P6a로 옮기고 TargetProfile과 스키마를 나눔, backend 이름 고정 어휘, `redist` role, Apple 도구 로드 예외, `GL_ARB_ES3_2_compatibility`, S12를 데스크톱(SH0)·기기(SH6)로 나눔, 막는 단계 열과 인용 정정.
 - 개정 8(2026-11-14): GLES 기기 요구(ES 3.2 필수)의 근거를 2절에 기록했다(사용자 요청). Android 배포 대시보드의 OpenGL ES·Vulkan 분포(2025-11-24까지), Android의 Vulkan 요구 조건, ES 3.0·3.1 기기 세대(GPU별은 미확인), Google의 OpenGL ES·ANGLE 방향, ES 3.0·3.1을 넣지 않는 이유.
+- 개정 9(2026-11-17): 사용자 결정(좌표계·단위·행렬 규약을 UE 5.8과 같게)에 맞춰 7.2절을 고쳤다.
+  - 6항: 행 벡터·행 우선 규약으로 바꾸고 형식별 행 우선 옵션의 UE 근거를 확인했다. S5는 옵션을 고르는 시험에서 규약을 확인하는 시험으로 바꿨다.
+  - 8항: 앞면 규약(화면 반시계·뒤면 컬), 음수 행렬식 반전, backend 매핑 근거를 더했다.
+  - 근거: 좌표 전환 세션의 차이표(UE 5.8.4 소스·probe)와 이 문서의 UE 소스 재확인.
