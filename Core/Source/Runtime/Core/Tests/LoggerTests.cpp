@@ -214,17 +214,19 @@ TEST(TextLogSinkOutputAndFailures) {
         CHECK(output.bytes[index] == expected[index]);
     }
 
-    CHECK(output.writes == 3 && output.flushes == 1);
+    // 한 기록은 버퍼에 모아 write 한 번이다. flush는 Flush()에서만 한다(묶음 flush).
+    CHECK(output.writes == 1 && output.flushes == 0);
+    CHECK(sink.Flush().IsOk() && output.flushes == 1);
     output = {};
-    output.failWrite = 2;
+    output.failWrite = 1;
     CHECK(sink.Write(MakeEvent(LogLevel::Info, "Tests", "x")).Error() ==
           ErrorCode::DependencyFailed);
-    CHECK(output.writes == 2 && output.flushes == 0);
+    CHECK(output.writes == 1 && output.flushes == 0);
     output = {};
     output.failFlush = true;
-    CHECK(sink.Write(MakeEvent(LogLevel::Info, "Tests", "x")).Error() ==
-          ErrorCode::DependencyFailed);
-    CHECK(output.writes == 3 && output.flushes == 1);
+    CHECK(sink.Write(MakeEvent(LogLevel::Info, "Tests", "x")).IsOk());
+    CHECK(sink.Flush().Error() == ErrorCode::DependencyFailed);
+    CHECK(output.writes == 1 && output.flushes == 1);
     const char invalid[] = {static_cast<char>(0xff)};
     CHECK(sink.Write(MakeEvent(LogLevel::Info, "Tests", StringView(invalid, 1))).Error() ==
           ErrorCode::InvalidArgument);
@@ -235,7 +237,11 @@ TEST(TextLogSinkOutputAndFailures) {
 // 외부 프로세스가 stderr 원시 byte를 캡처하여 한글과 NUL까지 확인할 수 있는 전용 probe다.
 TEST(RuntimeLoggerStderrOutputProbe) {
     SyncLogs setup;
-    StderrLogSink stderrSink;
+    // 시각·위치가 섞이지 않도록 레벨·카테고리·메시지만 쓰는 레이아웃이다(C# 시험이 byte를
+    // 비교한다).
+    const auto layout = LogLayout::Parse("[{Level}][{Category}] {Message}{NewLine}");
+    REQUIRE(layout.IsOk());
+    StderrLogSink stderrSink(layout.Value());
     REQUIRE(setup.logs.AddSink(stderrSink).IsOk());
     LogInstallScope installed(setup.logs);
     const char message[] = {static_cast<char>(0xed), static_cast<char>(0x95),

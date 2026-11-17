@@ -132,7 +132,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 | P12 | macOS 실행 기반(Objective-C++ 빌드·Cocoa 창·Metal layer) | PlatformLayer·Rocks.Build | 미설계 | P15, SH5 | P3 | 5.3 |
 | P13 | Android 실행 기반(앱·창·EGL surface·수명·APK) | PlatformLayer | 미설계 | SH6 | P10, P11, AssetSystem APK 읽기(VFS) | 5.3 |
 | P14 | 셰이더 타입·퍼뮤테이션·라이브러리 형식 | 이 문서 | 설계 | SH2, P6b | P6a | 12절 |
-| P15 | D3D11Graphics·MetalGraphics 설계 | EngineRuntime | 미설계 | SH5 | P12(Metal) | 5.3 |
+| P15 | D3D11Graphics·MetalGraphics 설계 | EngineRuntime | D3D11 **구현**(10.2절), Metal 미설계 | SH5 | P12(Metal) | 5.3 |
 
 선행 작업 뒤 첫 단계인 SH0(16절)은 **Windows 부분 구현**(2026-11-17, `feature/shader-tools`, `Programs/ShaderToolSpike`)이다. 형식별 산출·검증·리플렉션 덤프·`ROCKS_IMAGE_FORMAT` 확인과 Windows에서 할 수 있는 측정(S2·S3·S6·S8·S12 데스크톱)을 마쳤고, macOS 측정(S1 macOS DXC 서명, S3 호스트 사이, S9)이 남았다. 결과는 5.4절, 진척은 16절이다.
 
@@ -247,8 +247,9 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 - 완료 기준: 등록·퍼뮤테이션 ID의 결정성 시험(등록 순서와 무관), 같은 코드의 중복 제거, 라이브러리 왕복·손상 검출, 빠진 항목 조회의 `IncompatibleCook`.
 - 의존: P6a. 막는 것: P6b, SH2.
 
-**P15 D3D11Graphics·MetalGraphics 설계 — 미설계(EngineRuntime).**
+**P15 D3D11Graphics·MetalGraphics 설계 — D3D11 구현, Metal 미설계(EngineRuntime).**
 - 산출물: VulkanGraphics 절(P9)과 같은 수준의 backend 설계 절(장치·스왑체인·자원·파이프라인 layout(7.2절 4항)·검증 레이어·self-test 대상)이다. D3D11은 Windows, Metal은 P12 위에 선다.
+- D3D11(2026-11-17): 설계는 EngineRuntime 10.2절이다. 사용자 결정으로 SH5의 D3D11 부분 가운데 backend 자체를 앞당겨 구현했다(`D3D11Graphics`, 실행 중 `D3DCompile` SM 5.0). SH5에 남은 D3D11 일은 쿠킹된 `D3D11_SM5` 코드를 받는 경로(SH2 API 위), 그리기 상수 b13 배치(7.2절 4항), 7.3절 (c)·(g)의 D3D11 대조다.
 - 막는 것: SH5.
 
 ### 5.4 측정
