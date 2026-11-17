@@ -13,7 +13,7 @@ public abstract class TestsModule : ModuleRules
     protected enum TestLayer { Core, Foundation, Engine }
 
     // Object 계열이 아닌 런타임 모듈의 테스트다.
-    private static readonly string[] RuntimeTestModules = ["Base", "Core", "PlatformBase", "Task", "Localization", "Serialization", "Compression", "Crypto", "DeterministicMath"];
+    private static readonly string[] RuntimeTestModules = ["Base", "Core", "PlatformBase", "Task", "Localization", "Serialization", "Compression", "Crypto", "DeterministicMath", "TraceCapture"];
 
     // Core 계층 개발 도구 모듈(Core/Source/Developer)의 테스트다(모든 테스트 실행 파일에 들어간다).
     private static readonly string[] DeveloperTestModules = ["CompressionTraining"];
@@ -61,9 +61,9 @@ public abstract class TestsModule : ModuleRules
             ? $"{support}/Private/Asan/Enabled.cpp" : $"{support}/Private/Asan/Disabled.cpp"));
         string[] dependencies = Layer switch
         {
-            TestLayer.Core => ["Task", "Localization", "Serialization", "Compression", "Crypto", .. DeveloperTestModules],
-            TestLayer.Foundation => ["ObjectSerialization", "ReflectionText", "Localization", "Compression", "Crypto", .. DeveloperTestModules],
-            _ => ["ObjectSerialization", "ReflectionText", "Localization", "Compression", "Crypto", .. DeveloperTestModules,
+            TestLayer.Core => ["Task", "Localization", "Serialization", "Compression", "Crypto", "TraceCapture", .. DeveloperTestModules],
+            TestLayer.Foundation => ["ObjectSerialization", "ReflectionText", "Localization", "Compression", "Crypto", "TraceCapture", .. DeveloperTestModules],
+            _ => ["ObjectSerialization", "ReflectionText", "Localization", "Compression", "Crypto", "TraceCapture", .. DeveloperTestModules,
                 .. EngineTestDependencies]
         };
 
