@@ -26,13 +26,13 @@ Result<void> SceneComponent::SetRelativeLocation(const Vec3d& location) noexcept
     return SetRelativeTransform(transform);
 }
 
-Result<void> SceneComponent::SetRelativeRotation(const Quat& rotation) noexcept {
+Result<void> SceneComponent::SetRelativeRotation(const Quatd& rotation) noexcept {
     Transform transform = relative_;
     transform.rotation = rotation;
     return SetRelativeTransform(transform);
 }
 
-Result<void> SceneComponent::SetRelativeScale(const Vec3& scale) noexcept {
+Result<void> SceneComponent::SetRelativeScale(const Vec3d& scale) noexcept {
     Transform transform = relative_;
     transform.scale = scale;
     return SetRelativeTransform(transform);
@@ -74,7 +74,9 @@ Mat4d SceneComponent::WorldMatrix() const noexcept {
         }
     }
 
-    worldMatrix_ = parentMatrix * relative_.ToMatrix();
+    // 행 벡터 규약: 상대 변환을 먼저, 부모 월드 변환을 나중에 적용한다(UE NewRelativeTransform *
+    // ParentToWorld).
+    worldMatrix_ = relative_.ToMatrix() * parentMatrix;
     worldDirty_ = false;
     return worldMatrix_;
 }

@@ -4,13 +4,13 @@
 // 초기화되는 정적 객체이고, 채널은 꺼진 상태로 등록한다(묶음·명령줄로 켜는 것은 TR5).
 namespace rocks {
 
-TraceChannel TraceCpuChannel{"cpu", "CPU 구간(CpuScope)"};
-TraceChannel TraceCounterChannel{"counter", "카운터 값"};
-TraceChannel TraceMarkChannel{"mark", "표지"};
-TraceChannel TraceSpanChannel{"span", "스레드와 무관한 시간 띠"};
-TraceChannel TraceFrameChannel{"frame", "게임·렌더 프레임 경계"};
-TraceChannel TraceContextChannel{"context", "상관 id 문맥의 쌓기·복원"};
-TraceChannel TraceTaskChannel{"task", "task 수명·의존·기다림"};
+TraceChannel TraceCpuChannel{"cpu", "CPU scopes (CpuScope)"};
+TraceChannel TraceCounterChannel{"counter", "Counter values"};
+TraceChannel TraceMarkChannel{"mark", "Marks"};
+TraceChannel TraceSpanChannel{"span", "Thread-independent time spans"};
+TraceChannel TraceFrameChannel{"frame", "Game and render frame boundaries"};
+TraceChannel TraceContextChannel{"context", "Correlation id context push and restore"};
+TraceChannel TraceTaskChannel{"task", "Task lifetime, dependencies and waits"};
 
 namespace detail {
 

@@ -60,8 +60,10 @@ TEST(Quaternion_CompositionAppliesRightOperandFirst) {
     CHECK((yaw * roll).RotateVector(Vec3d::Right()).Equals(Vec3d::Up(), 1.0e-15));
     // (roll * yaw): yaw 먼저. Right --yaw--> Backward --roll--> Backward
     CHECK((roll * yaw).RotateVector(Vec3d::Right()).Equals(Vec3d::Backward(), 1.0e-15));
-    // 행렬 합성과 같은 순서다.
-    CHECK((yaw * roll).ToMatrix().Equals(yaw.ToMatrix() * roll.ToMatrix(), 1.0e-15));
+    // 행렬 곱은 UE FMatrix와 같이 왼쪽을 먼저 적용하므로(Matrix.h:28-32) 같은 회전의 행렬은 순서가
+    // 반대다: Q(yaw * roll) = M(roll) * M(yaw).
+    CHECK((yaw * roll).ToMatrix().Equals(roll.ToMatrix() * yaw.ToMatrix(), 1.0e-15));
+    CHECK(!(yaw * roll).ToMatrix().Equals(yaw.ToMatrix() * roll.ToMatrix(), 1.0e-3));
 }
 
 TEST(Quaternion_RandomizedConsistency) {
@@ -150,14 +152,14 @@ TEST(Quaternion_SlerpEndpointsAndShortestPath) {
 }
 
 TEST(Transform_PointOrderIsScaleRotateTranslate) {
-    const Transform transform(Vec3d(10.0, 0.0, 0.0),
-                              Quat::FromUnitAxisAngle(Vec3::Up(), math::HalfPi<float>),
-                              Vec3(2.0f, 1.0f, 1.0f));
+    // UE FTransform(InRotation, InTranslation, InScale3D) 인자 순서, 점은 scale → 회전 → 이동.
+    const Transform transform(Quatd::FromUnitAxisAngle(Vec3d::Up(), math::HalfPi<double>),
+                              Vec3d(10.0, 0.0, 0.0), Vec3d(2.0, 1.0, 1.0));
     CHECK(transform.IsValid());
-    CHECK(transform.TransformPoint(Vec3d(1.0, 0.0, 0.0)).Equals(Vec3d(10.0, 2.0, 0.0), 1.0e-6));
-    CHECK(transform.TransformVector(Vec3d(1.0, 0.0, 0.0)).Equals(Vec3d(0.0, 2.0, 0.0), 1.0e-6));
-    CHECK(transform.TransformDirection(Vec3d(1.0, 0.0, 0.0)).Equals(Vec3d(0.0, 1.0, 0.0), 1.0e-6));
-    // 행렬 경로와 같은 결과다.
+    CHECK(transform.TransformPoint(Vec3d(1.0, 0.0, 0.0)).Equals(Vec3d(10.0, 2.0, 0.0), 1.0e-14));
+    CHECK(transform.TransformVector(Vec3d(1.0, 0.0, 0.0)).Equals(Vec3d(0.0, 2.0, 0.0), 1.0e-14));
+    CHECK(transform.TransformDirection(Vec3d(1.0, 0.0, 0.0)).Equals(Vec3d(0.0, 1.0, 0.0), 1.0e-15));
+    // 행렬 경로와 같은 결과다(행 벡터 p · S · R · T).
     const Vec3d p(0.3, -2.0, 7.0);
     CHECK(transform.TransformPoint(p).Equals(transform.ToMatrix().TransformPoint(p), 1.0e-12));
     auto back = transform.TryInverseTransformPoint(transform.TransformPoint(p));
@@ -167,8 +169,9 @@ TEST(Transform_PointOrderIsScaleRotateTranslate) {
 }
 
 TEST(Transform_LargeWorldTranslationKeepsDoublePrecision) {
-    // 10^9 m 떨어진 위치에서도 1mm 변위를 잃지 않는다(float라면 64m 단위로 양자화된다).
-    const Transform far(Vec3d(1.0e9, -1.0e9, 5.0), Quat::Identity(), Vec3::One());
+    // 10^9 cm(1만 km) 떨어진 위치에서도 0.001 cm 변위를 잃지 않는다(float라면 64 cm 단위로
+    // 양자화된다).
+    const Transform far(Quatd::Identity(), Vec3d(1.0e9, -1.0e9, 5.0), Vec3d::One());
     const Vec3d moved = far.TransformPoint(Vec3d(0.001, 0.0, 0.0));
     CHECK(Near(moved.x - 1.0e9, 0.001, 1.0e-6));
     auto local = far.TryInverseTransformPoint(Vec3d(1.0e9 + 0.25, -1.0e9, 5.0));
@@ -177,67 +180,79 @@ TEST(Transform_LargeWorldTranslationKeepsDoublePrecision) {
 }
 
 TEST(Transform_InverseFailsOnZeroScale) {
-    const Transform flat(Vec3d::Zero(), Quat::Identity(), Vec3(1.0f, 0.0f, 1.0f));
+    // UE InverseTransformPosition은 0 scale 축의 역수를 0으로 두지만 Rocks는 InvalidArgument다.
+    const Transform flat(Quatd::Identity(), Vec3d::Zero(), Vec3d(1.0, 0.0, 1.0));
     CHECK(flat.TryInverseTransformPoint(Vec3d::One()).Error() == ErrorCode::InvalidArgument);
     CHECK(!flat.TryInverseTransformVector(Vec3d::One()));
     CHECK(flat.TryInverse().Error() == ErrorCode::InvalidArgument);
-    const Transform invalid(Vec3d(platform::PlatformMath::QuietNaN<double>(), 0.0, 0.0),
-                            Quat::Identity(), Vec3::One());
+    const Transform invalid(Quatd::Identity(),
+                            Vec3d(platform::PlatformMath::QuietNaN<double>(), 0.0, 0.0),
+                            Vec3d::One());
     CHECK(!invalid.IsValid());
-    CHECK(!Transform(Vec3d::Zero(), Quat(0.0f, 0.0f, 0.0f, 2.0f), Vec3::One()).IsValid());
+    CHECK(!Transform(Quatd(0.0, 0.0, 0.0, 2.0), Vec3d::Zero(), Vec3d::One()).IsValid());
 }
 
-TEST(Transform_ComposeMatchesAffineProductWhenRepresentable) {
+TEST(Transform_MultiplyAppliesFirstOperandFirst) {
     MathRandom random(0x13579bdf2468ace0ull ^ CurrentSeed());
     for (int iteration = 0; iteration < 2000; ++iteration) {
-        const float parentScale = static_cast<float>(random.Range(0.25, 4.0));
-        const Transform parent(RandomVector(random, 100.0), Quat(RandomRotation(random)),
-                               Vec3(parentScale, parentScale, parentScale));
-        const Transform local{RandomVector(random, 10.0), Quat(RandomRotation(random)),
-                              Vec3{static_cast<float>(random.Range(0.5, 2.0)),
-                                   static_cast<float>(random.Range(0.5, 2.0)),
-                                   static_cast<float>(random.Range(0.5, 2.0))}};
-        auto composed = Transform::TryCompose(parent, local);
+        const double parentScale = random.Range(0.25, 4.0);
+        const Transform parent(RandomRotation(random), RandomVector(random, 100.0),
+                               Vec3d::Splat(parentScale));
+        const Transform local{
+            RandomRotation(random), RandomVector(random, 10.0),
+            Vec3d{random.Range(0.5, 2.0), random.Range(0.5, 2.0), random.Range(0.5, 2.0)}};
+        // UE LocalToWorld = Local * ParentToWorld: local을 먼저, parent를 나중에 적용한다.
+        auto composed = Transform::TryMultiply(local, parent);
         REQUIRE(composed);
         const Vec3d p = RandomVector(random, 5.0);
         const Vec3d expected = parent.TransformPoint(local.TransformPoint(p));
-        CHECK(composed.Value().TransformPoint(p).Equals(expected, 1.0e-4));
+        CHECK(composed.Value().TransformPoint(p).Equals(expected, 1.0e-9));
+        // 같은 값의 Transform3d와 비트 단위로 같다.
+        auto wide = Transform3d::TryMultiply(local.ToTransform3d(), parent.ToTransform3d());
+        REQUIRE(wide);
+        CHECK(composed.Value().rotation == wide.Value().rotation &&
+              composed.Value().translation == wide.Value().translation &&
+              composed.Value().scale == wide.Value().scale);
         // 균일 scale·회전 변환은 TRS 역변환이 존재한다.
         auto inverse = parent.TryInverse();
         REQUIRE(inverse);
-        CHECK(inverse.Value().TransformPoint(parent.TransformPoint(p)).Equals(p, 1.0e-4));
+        CHECK(inverse.Value().TransformPoint(parent.TransformPoint(p)).Equals(p, 1.0e-9));
     }
 }
 
 TEST(Transform_ShearIsRejectedInsteadOfApproximated) {
-    // 비균일 parent scale + 45도 child 회전 = shear. TRS로 근사하지 않고 Unsupported다.
-    const Transform parent(Vec3d::Zero(), Quat::Identity(), Vec3(1.0f, 3.0f, 1.0f));
-    const Transform child(Vec3d::Zero(), Quat::FromUnitAxisAngle(Vec3::Up(), 0.785398163f),
-                          Vec3::One());
-    auto composed = Transform::TryCompose(parent, child);
+    // 자식 45도 회전 · 비균일 부모 scale = shear. UE Multiply는 shear를 버리지만 Rocks는 TRS로
+    // 근사하지 않고 Unsupported다.
+    const Transform parent(Quatd::Identity(), Vec3d::Zero(), Vec3d(1.0, 3.0, 1.0));
+    const Transform child(Quatd::FromUnitAxisAngle(Vec3d::Up(), math::Pi<double> / 4.0),
+                          Vec3d::Zero(), Vec3d::One());
+    auto composed = Transform::TryMultiply(child, parent);
     CHECK(!composed && composed.Error() == ErrorCode::Unsupported);
-    // 정확한 affine 결과는 행렬로 얻을 수 있다.
-    const Mat4d affine = parent.ToMatrix() * child.ToMatrix();
+    // 정확한 affine 결과는 행렬로 얻을 수 있다(행 벡터 child * parent).
+    const Mat4d affine = child.ToMatrix() * parent.ToMatrix();
     const Vec3d p(1.0, 0.0, 0.0);
     CHECK(affine.TransformPoint(p).Equals(parent.TransformPoint(child.TransformPoint(p)), 1.0e-12));
     // 비균일 scale + 회전의 역변환도 TRS가 아니다.
-    const Transform skewed(Vec3d::Zero(), Quat::FromUnitAxisAngle(Vec3::Up(), 0.5f),
-                           Vec3(1.0f, 2.0f, 1.0f));
+    const Transform skewed(Quatd::FromUnitAxisAngle(Vec3d::Up(), 0.5), Vec3d::Zero(),
+                           Vec3d(1.0, 2.0, 1.0));
     CHECK(skewed.TryInverse().Error() == ErrorCode::Unsupported);
 }
 
 TEST(Transform_FromMatrixHandlesMirrorAndRejectsProjective) {
-    const Transform mirrored(Vec3d(1.0, 2.0, 3.0), Quat::FromUnitAxisAngle(Vec3::Up(), 0.4f),
-                             Vec3(-2.0f, 1.0f, 3.0f));
+    const Transform mirrored(Quatd::FromUnitAxisAngle(Vec3d::Up(), 0.4), Vec3d(1.0, 2.0, 3.0),
+                             Vec3d(-2.0, 1.0, 3.0));
     auto decomposed = Transform::TryFromMatrix(mirrored.ToMatrix());
     REQUIRE(decomposed);
     const Vec3d p(0.5, -1.5, 2.5);
-    CHECK(decomposed.Value().TransformPoint(p).Equals(mirrored.TransformPoint(p), 1.0e-5));
-    CHECK(decomposed.Value().scale.x < 0.0f); // 반사는 x scale 부호로 표현한다.
+    CHECK(decomposed.Value().TransformPoint(p).Equals(mirrored.TransformPoint(p), 1.0e-12));
+    CHECK(decomposed.Value().scale.x < 0.0); // 반사는 x scale 부호로 표현한다.
+    // 행 벡터 규약에서 사영 성분은 마지막 열(M[0..2][3])이다.
     Mat4d projective = Mat4d::Identity();
-    projective.At(3, 0) = 0.1;
+    projective.At(0, 3) = 0.1;
     CHECK(Transform::TryFromMatrix(projective).Error() == ErrorCode::InvalidArgument);
     CHECK(!Transform::TryFromMatrix(Mat4d::Scale(Vec3d(1.0, 0.0, 1.0))));
+    // 이동이 들어 있는 마지막 행은 사영이 아니다.
+    CHECK(Transform::TryFromMatrix(Mat4d::Translation(Vec3d(1.0, 2.0, 3.0))));
 }
 
 TEST(Quaternion_AngularDistanceResolvesSmallAngles) {

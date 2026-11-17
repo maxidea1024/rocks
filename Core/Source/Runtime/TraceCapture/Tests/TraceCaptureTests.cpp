@@ -10,8 +10,8 @@ using namespace rocks::tracetest;
 
 namespace {
 
-TraceChannel RecordChannel{"test.record", "TR1 시험 기록"};
-TraceChannel ReadOnlyChannel{"test.readonly", "읽기 전용 시험 채널", true};
+TraceChannel RecordChannel{"test.record", "TR1 test records"};
+TraceChannel ReadOnlyChannel{"test.readonly", "Read-only test channel", true};
 
 struct SampleEvent {
     uint32 thread;
@@ -363,7 +363,7 @@ TEST(TraceRegistrationRejectsInvalidDeclarations) {
 
     REQUIRE(session.RegisterChannel(RecordChannel, true));
     CHECK(session.RegisterChannel(RecordChannel).Error() == ErrorCode::AlreadyExists);
-    TraceChannel sameName{"test.record", "같은 이름"};
+    TraceChannel sameName{"test.record", "Same name"};
     CHECK(session.RegisterChannel(sameName).Error() == ErrorCode::AlreadyExists);
 
     // 등록하지 않은 채널의 형은 등록할 수 없고, 등록 전에는 기록해도 아무것도 하지 않는다.

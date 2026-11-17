@@ -28,22 +28,43 @@ static_assert(IsSameV<decltype(Transform3dBinding::rotation), decltype(Transform
               "Transform3dBinding::rotation must have the type of Transform3d::rotation");
 static_assert(IsSameV<decltype(Transform3dBinding::scale), decltype(Transform3d::scale)>,
               "Transform3dBinding::scale must have the type of Transform3d::scale");
-static_assert(ROCKS_OFFSET_OF(Transform3f, translation) < ROCKS_OFFSET_OF(Transform3f, rotation) &&
-                  ROCKS_OFFSET_OF(Transform3f, rotation) < ROCKS_OFFSET_OF(Transform3f, scale),
-              "Transform3f members must be declared translation, rotation, scale");
-static_assert(ROCKS_OFFSET_OF(Transform3d, translation) < ROCKS_OFFSET_OF(Transform3d, rotation) &&
-                  ROCKS_OFFSET_OF(Transform3d, rotation) < ROCKS_OFFSET_OF(Transform3d, scale),
-              "Transform3d members must be declared translation, rotation, scale");
-static_assert(ROCKS_OFFSET_OF(Transform3fBinding, translation) <
-                      ROCKS_OFFSET_OF(Transform3fBinding, rotation) &&
-                  ROCKS_OFFSET_OF(Transform3fBinding, rotation) <
+// Transform 세 타입과 미러는 UE TTransform과 같은 rotation·translation·scale 순서다
+// (Core/Math/Transform.h — UE TransformVectorized.h:75-79).
+static_assert(ROCKS_OFFSET_OF(Transform3f, rotation) < ROCKS_OFFSET_OF(Transform3f, translation) &&
+                  ROCKS_OFFSET_OF(Transform3f, translation) < ROCKS_OFFSET_OF(Transform3f, scale),
+              "Transform3f members must be declared rotation, translation, scale like UE");
+static_assert(ROCKS_OFFSET_OF(Transform3d, rotation) < ROCKS_OFFSET_OF(Transform3d, translation) &&
+                  ROCKS_OFFSET_OF(Transform3d, translation) < ROCKS_OFFSET_OF(Transform3d, scale),
+              "Transform3d members must be declared rotation, translation, scale like UE");
+static_assert(ROCKS_OFFSET_OF(Transform, rotation) < ROCKS_OFFSET_OF(Transform, translation) &&
+                  ROCKS_OFFSET_OF(Transform, translation) < ROCKS_OFFSET_OF(Transform, scale),
+              "Transform members must be declared rotation, translation, scale like UE FTransform");
+static_assert(ROCKS_OFFSET_OF(Transform3fBinding, rotation) <
+                      ROCKS_OFFSET_OF(Transform3fBinding, translation) &&
+                  ROCKS_OFFSET_OF(Transform3fBinding, translation) <
                       ROCKS_OFFSET_OF(Transform3fBinding, scale),
               "Transform3fBinding members must follow the Transform3f declaration order");
-static_assert(ROCKS_OFFSET_OF(Transform3dBinding, translation) <
-                      ROCKS_OFFSET_OF(Transform3dBinding, rotation) &&
-                  ROCKS_OFFSET_OF(Transform3dBinding, rotation) <
+static_assert(ROCKS_OFFSET_OF(Transform3dBinding, rotation) <
+                      ROCKS_OFFSET_OF(Transform3dBinding, translation) &&
+                  ROCKS_OFFSET_OF(Transform3dBinding, translation) <
                       ROCKS_OFFSET_OF(Transform3dBinding, scale),
               "Transform3dBinding members must follow the Transform3d declaration order");
+static_assert(ROCKS_OFFSET_OF(core_type_bindings::TransformBinding, rotation) <
+                      ROCKS_OFFSET_OF(core_type_bindings::TransformBinding, translation) &&
+                  ROCKS_OFFSET_OF(core_type_bindings::TransformBinding, translation) <
+                      ROCKS_OFFSET_OF(core_type_bindings::TransformBinding, scale),
+              "TransformBinding members must follow the Transform declaration order");
+// Transform 미러는 UE FTransform과 같이 모든 성분이 double이다.
+static_assert(
+    IsSameV<decltype(core_type_bindings::TransformBinding::rotation),
+            decltype(Transform::rotation)> &&
+        IsSameV<decltype(core_type_bindings::TransformBinding::translation),
+                decltype(Transform::translation)> &&
+        IsSameV<decltype(core_type_bindings::TransformBinding::scale), decltype(Transform::scale)>,
+    "TransformBinding members must have the types of Transform members");
+static_assert(IsSameV<decltype(Transform::rotation), Quatd> &&
+                  IsSameV<decltype(Transform::scale), Vec3d>,
+              "Transform rotation and scale must be double like UE FTransform");
 // Rotator 미러는 UE FRotator와 같은 pitch·yaw·roll(도) 순서다(Core/Math/Rotator.h).
 static_assert(ROCKS_OFFSET_OF(Rotator<float>, pitch) < ROCKS_OFFSET_OF(Rotator<float>, yaw) &&
                   ROCKS_OFFSET_OF(Rotator<float>, yaw) < ROCKS_OFFSET_OF(Rotator<float>, roll),

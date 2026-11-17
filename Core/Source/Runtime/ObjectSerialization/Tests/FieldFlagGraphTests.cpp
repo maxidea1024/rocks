@@ -61,7 +61,7 @@ void Fill(ObjectRegistry& objects, ObjectHandle handle) noexcept {
         value.atom.a = 10;
         value.atom.b = 11;
         value.pose.translation = Vec3d{1.0, 2.0, 3.0};
-        value.pose.scale = Vec3{2.0f, 2.0f, 2.0f};
+        value.pose.scale = Vec3d{2.0, 2.0, 2.0};
     });
 }
 

@@ -127,6 +127,7 @@ inline Register4f QuaternionMultiply(Register4f a, Register4f b) noexcept {
     return _mm_add_ps(_mm_add_ps(_mm_add_ps(termW, termX), termY), termZ);
 }
 
+// 행 우선 행렬 M과 행 벡터 v의 곱 v · M이다(scalar::TransformVector4와 같은 계약·누적 순서).
 inline Register4f TransformVector4(const float* matrix, Register4f vector) noexcept {
     const __m128 c0 = _mm_mul_ps(_mm_loadu_ps(matrix + 0),
                                  _mm_shuffle_ps(vector, vector, _MM_SHUFFLE(0, 0, 0, 0)));
@@ -139,6 +140,8 @@ inline Register4f TransformVector4(const float* matrix, Register4f vector) noexc
     return _mm_add_ps(_mm_add_ps(_mm_add_ps(c0, c1), c2), c3);
 }
 
+// 행 우선 output = b * a다(b를 먼저 적용, scalar::MatrixMultiply와 같은 계약). 출력 행 r = b[r] ·
+// a.
 inline void MatrixMultiply(const float* a, const float* b, float* output) noexcept {
     const __m128 c0 = TransformVector4(a, _mm_loadu_ps(b + 0));
     const __m128 c1 = TransformVector4(a, _mm_loadu_ps(b + 4));

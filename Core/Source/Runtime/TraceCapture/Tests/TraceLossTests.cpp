@@ -7,9 +7,9 @@ using namespace rocks::tracetest;
 
 namespace {
 
-TraceChannel FillChannel{"test.fill", "풀 고갈 시험"};
-TraceChannel FillOtherChannel{"test.fill.other", "풀 고갈 시험(두 번째 채널)"};
-TraceChannel NameChannel{"test.names", "정의 기록 시험"};
+TraceChannel FillChannel{"test.fill", "Pool exhaustion test"};
+TraceChannel FillOtherChannel{"test.fill.other", "Pool exhaustion test (second channel)"};
+TraceChannel NameChannel{"test.names", "Name table test"};
 
 // 기록 하나가 2 + 64 = 66 byte인 형이다. 블록 하나에 PayloadBytes / 66개가 들어간다.
 struct FillEvent {
