@@ -31,6 +31,9 @@ constexpr usize SealBatchBytes = 4096;
 // 명령이 만드는 진단 한 줄의 버퍼 byte 수다.
 constexpr usize MessageBytes = 512;
 
+// base64 공개키 문자열(1216 byte → 1624자)과 NUL의 버퍼 byte 수다.
+constexpr usize KeyTextBytes = 2048;
+
 Result<int32> Write(CommandletOutput& output, CommandletStream stream, StringView text,
                     int32 code) noexcept {
     auto written = output.write(output.context, stream, text);
@@ -196,11 +199,17 @@ Result<int32> KeyGen(Span<const StringView> args, CommandletOutput& output) noex
         return failure;
     }
 
-    char storage[MessageBytes];
+    // 설정 log.file.recipient_key에 넣을 base64 공개키도 함께 알린다(비밀이 아니다).
+    char base64[KeyTextBytes];
+    auto encoded = crypto::TryToBase64(pair.Value().PublicKey().View(),
+                                       crypto::Base64Variant::Standard, Span<char>(base64));
+    char storage[MessageBytes + KeyTextBytes];
     FixedStringBuilder text{Span<char>(storage)};
     (void)text.TryAppendFormat("log keygen: wrote public key '{}' and private key '{}'. Keep the "
-                               "private key out of the repository and cooked output.\n",
-                               args[0], args[1]);
+                               "private key out of the repository and cooked output.\n"
+                               "log.file.recipient_key = {}\n",
+                               args[0], args[1],
+                               encoded ? StringView(base64, encoded.Value()) : StringView());
     return Write(output, CommandletStream::Output, text.View(), 0);
 }
 

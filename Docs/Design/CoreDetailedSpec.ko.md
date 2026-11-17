@@ -124,7 +124,7 @@ Base → PlatformBase → Core → Task / Localization / Serialization / MetaSch
 
 | ID/우선 | 기능·상태 | 완료 조건과 검증 |
 |---|---|---|
-| D01 P0 | logger → sink·level/category, assert/check/ensure, fatal, 재진입/OOM fallback **부분**(LogSystem·sink·레벨·Fatal·재진입 비상 경로 완료, 설정 연결·crash 수집 남음) | 여러 sink, 동기화·필터·순서·failure propagation, stdout/stderr 잠김·종료·경로 실패; Fatal 음성 대조가 실패 상황을 가짜 PASS로 만들지 않음. |
+| D01 P0 | logger → sink·level/category, assert/check/ensure, fatal, 재진입/OOM fallback **부분**(LogSystem·sink·레벨·Fatal·재진입 비상 경로·설정 연결 완료, crash 수집 남음) | 여러 sink, 동기화·필터·순서·failure propagation, stdout/stderr 잠김·종료·경로 실패; Fatal 음성 대조가 실패 상황을 가짜 PASS로 만들지 않음. |
 | D02 P1 | structured log, file rotation/async sink, trace·CPU/GPU profiler, counters, dropped event, memory/task/I/O/GC 측정 **부분/후속** | 비활성 비용·overflow/drop·종료/동시 capture·시간 상관·headless viewer 연계. GPU는 Renderer 계층. |
 | D03 P1 | config 계층·platform/target override, 환경·commandline, reload/change listeners, runtime console variables **후속** | 우선순위·잘못된 구문/진단·원자 snapshot·동시 갱신·민감값 처리·headless. 기존 Commandlet은 console variable 관리 구현을 뜻하지 않는다. |
 | D04 P1 | CRC/checksum·비암호 hash·Base64·compression 인터페이스·streaming — `Core/Encoding/Crc32.h`(zlib 호환 CRC-32, 분할 계산)와 `Base64.h`(RFC 4648 엄격 디코딩, 실패 시 출력 불변) **부분**. compression은 Core 계층 모듈 `Compression`(`Compression/Compression.h`, 비동기는 모듈 `AsyncCompression`의 `AsyncCompression/AsyncCompression.h`: LZ4 1.11.1·zstd 1.5.7·zlib 1.4 고정 원본, Lz4·Zstd·Deflate·Zlib·Gzip 동기·비동기, [설계](Compression.ko.md)) **부분**(Windows 실행 증거만). 블록 컨테이너·streaming 객체·URL-safe 변형 **후속** | 공식 golden, 빈 입력·overflow·partial chunk·악성/절단 데이터·출력 제한·OOM rollback, 안전하지 않은 형식의 오용 방지. 암호/보안은 검증된 라이브러리와 키·무결성 정책을 별도로 선택한다. |

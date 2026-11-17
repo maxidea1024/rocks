@@ -112,7 +112,7 @@ Core 위 엔진 계층의 렌더 기반 첫 묶음([렌더 기반](../Design/Ren
 
 SystemAllocator와 Arena·Stack·Pool·Binned·Budget·Debug·External allocator는 사용 범위별 live allocation·byte 계수 또는 통계를 제공한다. 상세 사용법과 확인되지 않은 외부 공급자 지원은 [할당기 설계와 사용 규약](Allocators.ko.md)에 정리한다. ObjectRegistry의 Stats는 상태와 보유 계수를, CaptureDiagnostics는 호출자가 준 버퍼에 객체별 스냅샷을 제공한다. 캡처는 할당하지 않으며 용량 부족 시 부분 기록하지 않는다. LastGcReport는 마지막 성공 GC의 검사·표식·retire·회수 개수와 ns 시간을 보존한다.
 
-로깅은 [로깅 설계](../Design/LoggingSystem.ko.md) LG1–LG8·LG10까지 구현했다(사용법은 [로깅 사용 안내](Logging.ko.md)). 카테고리·컴파일 타임 하한·호출 위치·메시지 템플릿을 갖춘 `Log::*`, Async·Sync·Manual 모드의 `LogSystem`(무할당 lock-free 큐·블록 풀·출력 스레드·장애 격리·`Log::Fatal`), 레이아웃·stderr·JSON lines·파일 sink(회전·보관)와 선택적 봉인(`crypto::LogFileSealer`, Commandlet `log keygen`·`log decode`)이 있다. Engine·World·그래픽 backend가 기록하고, Sandbox(자체 검사 Sync, `--engine` Async)·Commandlet·셰이더 도구 스파이크가 LogSystem을 설치한다. 남은 것: 설정 파일 연결(LG9), crash 수집, 전문 viewer. LogBuffer는 단일 스레드 초기 진단으로 남는다.
+로깅은 [로깅 설계](../Design/LoggingSystem.ko.md) LG1–LG10을 구현했다(사용법은 [로깅 사용 안내](Logging.ko.md)). 카테고리·컴파일 타임 하한·호출 위치·메시지 템플릿을 갖춘 `Log::*`, Async·Sync·Manual 모드의 `LogSystem`(무할당 lock-free 큐·블록 풀·출력 스레드·장애 격리·`Log::Fatal`), 레이아웃·stderr·JSON lines·파일 sink(회전·보관)와 선택적 봉인(`crypto::LogFileSealer`, Commandlet `log keygen`·`log decode`)이 있다. Engine·World·그래픽 backend가 기록하고, Sandbox(자체 검사 Sync, `--engine` Async)·Commandlet·셰이더 도구 스파이크가 LogSystem을 설치한다. 설정 파일의 `log.*` 콘솔 설정으로 모드·레벨·파일 기록을 고른다(`LogHost`). 남은 것: crash 수집, 전문 viewer. LogBuffer는 단일 스레드 초기 진단으로 남는다.
 
 Commandlet은 CPU-only 독립 실행 진입점과 명령 등록·목록·도움말을 제공한다. 현재 core-check 외의 에셋·cook·패키징·엔진 부트 명령은 구현되지 않았다. 상세 실행법과 인수·수명 계약은 Programs/Commandlet/README.ko.md를 따른다.
 

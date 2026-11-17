@@ -84,7 +84,7 @@ try
     string text = string.Concat(Enumerable.Range(0, 300).Select(index => $"[Info][Game] line {index}\n"));
     File.WriteAllText(plain, text);
     await Check("log usage", ["log"], 2, "", "log keygen");
-    await Check("log keygen", ["log", "keygen", publicKey, privateKey], 0, "out of the repository", "");
+    await Check("log keygen", ["log", "keygen", publicKey, privateKey], 0, "log.file.recipient_key = ", "");
     await Check("log keygen refuses to overwrite", ["log", "keygen", publicKey, privateKey], 1, "", "cannot create");
     // 한쪽 경로만 이미 있으면 아무 키도 남기지 않는다(짝이 맞지 않는 키 쌍 금지).
     string lonePublic = Path.Combine(logDirectory, "lone.pub");

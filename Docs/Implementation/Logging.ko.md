@@ -268,6 +268,37 @@ FileLogSink fileSink(allocator, file);
   - `log seal <plain> <out> --public <public>`: 같은 형식으로 봉인합니다(진단·시험용).
 - **무할당 범위:** 파일을 연 뒤의 쓰기·봉인 경로는 엔진 allocator와 `operator new`를 쓰지 않습니다. 다만 회전 때 새 파일을 여는 OS 핸들과 새 KEM 캡슐화(Crypto 키 저장소)는 예외입니다.
 
+## 설정 파일로 고르기(LogHost)
+
+엔진 호스트는 `LogHost` 모듈로 설정 시스템의 `log.*` 콘솔 설정을 읽어 LogSystem과 sink를 만든다(Core는 Config·Crypto 아래라 이 모듈이 그 위에서 묶는다).
+
+```cpp
+REQUIRE(RegisterLogSettings(context));                 // log.* 등록(모듈 등록 함수, 전역 생성자 없음)
+// ... 설정 파일 층을 넣고 context.Sync()
+LogHost host(allocator);
+(void)host.Start(LogSystemConfig::ForEngineHost(), &context, "Sandbox");
+LogInstallScope installed(host.System());
+(void)host.Watch(context);                             // log.level·log.levels 변경을 sync 지점에서 적용
+(void)context.CompleteStartup();                       // 이후 log.mode·log.file.* 변경은 거부
+```
+
+| 설정 | 종류 | 기본값 | 변경 |
+|---|---|---|---|
+| `log.mode` | string | `default`(호스트 프리셋) · `async` · `sync` | 시작 뒤 고정 |
+| `log.level` | string | `info` (`trace`…`fatal`) | 실행 중, sync 지점 |
+| `log.levels` | string | `""` — `Graphics=warning,Engine.World=debug` | 실행 중, sync 지점 |
+| `log.file.enabled` | bool | `false` | 시작 뒤 고정 |
+| `log.file.directory` | string | `Saved/Logs` | 시작 뒤 고정 |
+| `log.file.format` | string | `text` · `jsonlines` | 시작 뒤 고정 |
+| `log.file.max_bytes` | int64 | `16777216` (64 KiB–1 TiB) | 시작 뒤 고정 |
+| `log.file.retention` | int32 | `8` (1–256) | 시작 뒤 고정 |
+| `log.file.encrypt` | bool | `false` | 시작 뒤 고정 |
+| `log.file.recipient_key` | string | `""` — X-Wing 공개키 base64(`log keygen`이 출력) | 시작 뒤 고정 |
+
+- 레벨 이름과 `log.levels`의 접두사는 대소문자를 가리지 않는다. 잘못된 항목은 Warning을 남기고 건너뛴다.
+- 암호화를 켰는데 공개키가 없거나 틀리면 파일을 쓰지 않고 Error를 한 번 남긴다(평문으로 내려가지 않는다).
+- Sandbox: `Sandbox --engine --config <Engine.json>`의 `"Settings"` 섹션이 이 값들이다. 예: `{"Settings": {"log.mode": "sync", "log.file.enabled": true}}`.
+
 ## 시험에서 쓰기
 
 - `LogMode::Manual` LogSystem과 캡처 sink를 시험 안에서 `LogInstallScope`로 설치한다. 기록한 뒤 `Pump()`를 부르고 단언한다. sleep을 쓰지 않는다.
@@ -276,6 +307,4 @@ FileLogSink fileSink(allocator, file);
 
 ## 아직 구현되지 않은 것
 
-- 설정 파일 연결(`log.mode`·`log.file.*`·레벨 재정의): LG9
-- Sandbox·명령줄 도구의 LogSystem 설치: LG8
 - TraceCapture `log` 채널 연결과 상관 id, 구조체 펼치기(`{@Obj}`), 사용자 Formatter spec의 컴파일 타임 검증: 후속
