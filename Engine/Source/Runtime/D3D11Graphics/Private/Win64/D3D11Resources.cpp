@@ -164,18 +164,29 @@ Result<BufferHandle> D3D11Device::CreateBuffer(const BufferDesc& desc,
 // 다른 스레드에서도 부를 수 있다(concurrentResourceCreation). 초기 픽셀은 생성 호출이 올린다.
 Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
                                                  Span<const uint8> pixels) noexcept {
-    // 올바른 형식이지만 대응 표에 없으면 미지원이다(다른 형식으로 대신하지 않는다). 크기 검사보다
-    // 먼저 본다(깊이 형식처럼 업로드 크기가 없는 형식도 Unsupported로 알린다).
-    if ((IsValidPixelFormat(desc.format) && ResourceFormat(desc.format) == DXGI_FORMAT_UNKNOWN) ||
-        desc.usage == TextureUsage::DepthStencil) {
-        return Result<TextureHandle>::Failure(ErrorCode::Unsupported);
+    // 형식·용도 지원은 장치 능력으로 판정한다(다른 형식으로 대신하지 않는다,
+    // PixelFormat.ko.md 8.3절). 크기 검사보다 먼저 본다.
+    if (IsValidPixelFormat(desc.format) &&
+        !HasPixelFormatCaps(FormatCaps(desc.format),
+                            RequiredPixelFormatCaps(desc.usage, desc.mipLevels))) {
+        platform::LockGuard lock(gate_);
+        return UnsupportedFormat<TextureHandle>(desc.format);
     }
 
     const bool renderTarget = desc.usage == TextureUsage::RenderTarget;
+    const bool depthTarget = desc.usage == TextureUsage::DepthStencil;
+    const bool attachment = renderTarget || depthTarget;
+    const PixelFormatInfo& info = GetPixelFormatInfo(desc.format);
+    const bool depth =
+        info.kind == PixelFormatKind::Depth || info.kind == PixelFormatKind::DepthStencil;
     const uint64 size = MipChainBytes(desc.format, desc.width, desc.height, 1, desc.mipLevels);
-    if (desc.width > MaxTextureExtent || desc.height > MaxTextureExtent || size == 0 ||
+    // BC는 최상위 크기가 블록 배수여야 한다(PixelFormatInfo::topLevelBlockAligned).
+    const bool aligned = !info.topLevelBlockAligned ||
+                         (desc.width % info.blockWidth == 0 && desc.height % info.blockHeight == 0);
+    if (desc.width > MaxTextureExtent || desc.height > MaxTextureExtent || size == 0 || !aligned ||
         desc.mipLevels > MaxMipLevels || !IsValidSamplerDesc(desc.sampler) ||
-        (renderTarget ? (pixels.Size() != 0 || desc.mipLevels != 1) : pixels.Size() != size)) {
+        (attachment ? (pixels.Size() != 0 || desc.mipLevels != 1) : pixels.Size() != size) ||
+        (depthTarget && !depth)) {
         return Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -185,28 +196,35 @@ Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
         return Result<TextureHandle>::Failure(sampler.Error());
     }
 
+    const FormatMapping mapping = MappingOf(desc.format);
+    const bool sampled = HasPixelFormatCaps(FormatCaps(desc.format), PixelFormatCaps::Sampled);
     TextureRecord record;
     record.width = desc.width;
     record.height = desc.height;
     record.mipLevels = desc.mipLevels;
     record.format = desc.format;
     record.renderTarget = renderTarget;
+    record.depthTarget = depthTarget;
     record.sampler = sampler.Value();
     D3D11_TEXTURE2D_DESC textureDesc = {};
     textureDesc.Width = desc.width;
     textureDesc.Height = desc.height;
     textureDesc.MipLevels = desc.mipLevels;
     textureDesc.ArraySize = 1;
-    textureDesc.Format = ResourceFormat(desc.format);
+    textureDesc.Format = mapping.resource;
     textureDesc.SampleDesc.Count = 1;
     textureDesc.Usage = D3D11_USAGE_DEFAULT;
-    textureDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE |
-                            (renderTarget ? static_cast<UINT>(D3D11_BIND_RENDER_TARGET) : 0u);
-    // 초기 픽셀(빈틈 없는 행, mip 0부터 이어 붙임)을 mip별 원본으로 나눈다.
+    // 깊이 형식은 늘 DEPTH_STENCIL bind로 만든다(typeless 깊이 자원의 DSV 조건).
+    textureDesc.BindFlags = (sampled ? static_cast<UINT>(D3D11_BIND_SHADER_RESOURCE) : 0u) |
+                            (renderTarget ? static_cast<UINT>(D3D11_BIND_RENDER_TARGET) : 0u) |
+                            (depth ? static_cast<UINT>(D3D11_BIND_DEPTH_STENCIL) : 0u);
+    // 색·블록 압축 형식은 초기 데이터로 바로 만든다(빈틈 없는 행, mip 0부터, 블록 형식은 블록 행).
+    // 깊이·스텐실·비디오는 D3D11 배치가 달라 만든 뒤 staging 복사로 올린다.
+    const bool direct =
+        info.kind == PixelFormatKind::Color || info.kind == PixelFormatKind::Compressed;
     D3D11_SUBRESOURCE_DATA mips[MaxMipLevels] = {};
-    // 블록 압축 형식의 행은 블록 행이다.
     usize offset = 0;
-    for (uint32 level = 0; !renderTarget && level < desc.mipLevels; ++level) {
+    for (uint32 level = 0; !attachment && direct && level < desc.mipLevels; ++level) {
         const usize rowBytes =
             static_cast<usize>(PixelFormatRowBytes(desc.format, MipExtent(desc.width, level)));
         mips[level].pSysMem = pixels.Data() + offset;
@@ -214,27 +232,151 @@ Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
         offset += rowBytes * PixelFormatBlockRows(desc.format, MipExtent(desc.height, level));
     }
 
-    HRESULT result =
-        device_->CreateTexture2D(&textureDesc, renderTarget ? nullptr : mips, record.texture.Out());
+    HRESULT result = device_->CreateTexture2D(&textureDesc, !attachment && direct ? mips : nullptr,
+                                              record.texture.Out());
     if (FAILED(result)) {
         return FailWith<TextureHandle>("ID3D11Device::CreateTexture2D", result);
     }
 
-    result = device_->CreateShaderResourceView(record.texture.Get(), nullptr, record.srv.Out());
-    if (FAILED(result)) {
-        return FailWith<TextureHandle>("CreateShaderResourceView", result);
+    if (sampled) {
+        result = CreatePlaneView(record.texture.Get(), mapping.srv, 0, desc.mipLevels,
+                                 info.kind == PixelFormatKind::Planar, record.srv);
+        if (FAILED(result)) {
+            return FailWith<TextureHandle>("CreateShaderResourceView", result);
+        }
     }
 
     if (renderTarget) {
-        result = device_->CreateRenderTargetView(record.texture.Get(), nullptr, record.rtv.Out());
+        D3D11_RENDER_TARGET_VIEW_DESC view = {};
+        view.Format = mapping.rtv;
+        view.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+        result = device_->CreateRenderTargetView(record.texture.Get(), &view, record.rtv.Out());
         if (FAILED(result)) {
             return FailWith<TextureHandle>("CreateRenderTargetView", result);
+        }
+    }
+
+    if (depthTarget) {
+        D3D11_DEPTH_STENCIL_VIEW_DESC view = {};
+        view.Format = mapping.dsv;
+        view.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+        result = device_->CreateDepthStencilView(record.texture.Get(), &view, record.dsv.Out());
+        if (FAILED(result)) {
+            return FailWith<TextureHandle>("CreateDepthStencilView", result);
         }
     }
 
     auto reserved = ReserveRetireCapacity(1);
     if (!reserved) {
         return Result<TextureHandle>::Failure(reserved.Error());
+    }
+
+    if (!attachment && !direct) {
+        offset = 0;
+        for (uint32 level = 0; level < desc.mipLevels; ++level) {
+            auto uploaded = RecordStagedUpload(record, level, pixels.Data() + offset);
+            if (!uploaded) {
+                return Result<TextureHandle>::Failure(uploaded.Error());
+            }
+
+            offset += static_cast<usize>(PixelFormatImageBytes(
+                desc.format, MipExtent(desc.width, level), MipExtent(desc.height, level)));
+        }
+    }
+
+    auto added = textures_.TryAdd(Move(record));
+    if (!added) {
+        return Result<TextureHandle>::Failure(added.Error());
+    }
+
+    return Result<TextureHandle>::Success(TextureHandle{added.Value()});
+}
+
+HRESULT D3D11Device::CreatePlaneView(ID3D11Texture2D* texture, DXGI_FORMAT format, uint32 plane,
+                                     uint32 mipLevels, bool planar,
+                                     ComRef<ID3D11ShaderResourceView>& out) noexcept {
+    if (planar) {
+        D3D11_SHADER_RESOURCE_VIEW_DESC1 view = {};
+        view.Format = format;
+        view.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+        view.Texture2D.MostDetailedMip = 0;
+        view.Texture2D.MipLevels = mipLevels;
+        view.Texture2D.PlaneSlice = plane;
+        ID3D11ShaderResourceView1* created = nullptr;
+        const HRESULT result = device_->CreateShaderResourceView1(texture, &view, &created);
+        if (SUCCEEDED(result)) {
+            out.Attach(created);
+        }
+
+        return result;
+    }
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC view = {};
+    view.Format = format;
+    view.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    view.Texture2D.MostDetailedMip = 0;
+    view.Texture2D.MipLevels = mipLevels;
+    return device_->CreateShaderResourceView(texture, &view, out.Out());
+}
+
+PixelFormatCaps D3D11Device::FormatCaps(PixelFormat format) const noexcept {
+    const uint32 number = PixelFormatNumber(format);
+    return number <= MaxPixelFormatNumber ? formatCaps_[number] : PixelFormatCaps::None;
+}
+
+// 스레드 안전(장치 생성 뒤 바뀌지 않는다).
+PixelFormatCaps D3D11Device::GetPixelFormatCaps(PixelFormat format) const noexcept {
+    return FormatCaps(format);
+}
+
+// 원 텍스처의 자원을 공유하는 SRV view다(PixelFormat.ko.md 9–11절). 다른 스레드에서도 부를 수 있다.
+Result<TextureHandle> D3D11Device::CreateTextureView(TextureHandle texture,
+                                                     const TextureViewDesc& desc) noexcept {
+    platform::LockGuard lock(gate_);
+    const TextureRecord* source = textures_.Find(texture.slot);
+    if (source == nullptr) {
+        return Result<TextureHandle>::Failure(ErrorCode::StaleHandle);
+    }
+
+    if (source->view) {
+        return Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto resolved = ResolveTextureViewFormat(source->format, desc);
+    if (!resolved) {
+        return Result<TextureHandle>::Failure(resolved.Error());
+    }
+
+    // sRGB 짝 view는 짝 형식이, plane view는 원 형식이 샘플 가능해야 한다.
+    const bool planes = PixelFormatPlaneCount(source->format) == 2;
+    const PixelFormat sampledFormat = planes ? source->format : resolved.Value();
+    const DXGI_FORMAT srvFormat = ViewSrvFormat(source->format, desc.plane, resolved.Value());
+    if (!HasPixelFormatCaps(FormatCaps(sampledFormat), PixelFormatCaps::Sampled) ||
+        srvFormat == DXGI_FORMAT_UNKNOWN) {
+        return UnsupportedFormat<TextureHandle>(resolved.Value());
+    }
+
+    auto reserved = ReserveRetireCapacity(1);
+    if (!reserved) {
+        return Result<TextureHandle>::Failure(reserved.Error());
+    }
+
+    const PixelFormatPlane& layout = GetPixelFormatInfo(source->format).planes[desc.plane];
+    TextureRecord record;
+    // view는 원 텍스처에 참조를 하나 더 잡는다(원 텍스처를 먼저 Retire해도 자원이 산다).
+    source->texture->AddRef();
+    record.texture.Attach(source->texture.Get());
+    record.width = MipExtent(source->width, layout.widthShift);
+    record.height = MipExtent(source->height, layout.heightShift);
+    record.mipLevels = source->mipLevels;
+    record.format = resolved.Value();
+    record.view = true;
+    record.sampler = source->sampler;
+    const HRESULT result = CreatePlaneView(
+        record.texture.Get(), srvFormat, desc.plane, record.mipLevels,
+        GetPixelFormatInfo(source->format).kind == PixelFormatKind::Planar, record.srv);
+    if (FAILED(result)) {
+        return FailWith<TextureHandle>("CreateShaderResourceView (texture view)", result);
     }
 
     auto added = textures_.TryAdd(Move(record));
@@ -246,17 +388,6 @@ Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
 }
 
 // 다른 스레드에서도 부를 수 있다(concurrentResourceCreation, 내부 잠금으로 직렬화한다).
-PixelFormatCaps D3D11Device::GetPixelFormatCaps(PixelFormat format) const noexcept {
-    if (ResourceFormat(format) == DXGI_FORMAT_UNKNOWN) {
-        return PixelFormatCaps::None;
-    }
-
-    // 표에 있는 형식(RGBA8 두 형식)은 2D 샘플·필터·mip·렌더 타깃·블렌드를 기능 수준 11에서
-    // 보장한다.
-    return PixelFormatCaps::Sampled | PixelFormatCaps::Filterable | PixelFormatCaps::Mipmaps |
-           PixelFormatCaps::RenderTarget | PixelFormatCaps::Blendable;
-}
-
 Result<PipelineHandle> D3D11Device::CreatePipeline(const PipelineDesc& desc) noexcept {
     platform::LockGuard lock(gate_);
     if (desc.vertex.hlsl.ByteCount() == 0 || desc.pixel.hlsl.ByteCount() == 0 ||
@@ -264,8 +395,11 @@ Result<PipelineHandle> D3D11Device::CreatePipeline(const PipelineDesc& desc) noe
         return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
-    if (ResourceFormat(desc.colorFormat) == DXGI_FORMAT_UNKNOWN) {
-        return Result<PipelineHandle>::Failure(ErrorCode::Unsupported);
+    const PixelFormatCaps required =
+        desc.alphaBlend ? PixelFormatCaps::RenderTarget | PixelFormatCaps::Blendable
+                        : PixelFormatCaps::RenderTarget;
+    if (!HasPixelFormatCaps(FormatCaps(desc.colorFormat), required)) {
+        return UnsupportedFormat<PipelineHandle>(desc.colorFormat);
     }
 
     auto layoutChecked = ValidateVertexLayout(desc.layout);
@@ -554,7 +688,11 @@ void D3D11Device::Retire(TextureHandle handle) noexcept {
         return;
     }
 
-    Defer(Move(record->texture), Move(record->srv), Move(record->rtv));
+    if (record->depthTarget) {
+        Defer(Move(record->texture), Move(record->srv), Move(record->dsv));
+    } else {
+        Defer(Move(record->texture), Move(record->srv), Move(record->rtv));
+    }
     auto removed = textures_.TryRemove(handle.slot);
     (void)removed;
 }
