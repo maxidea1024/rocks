@@ -18,6 +18,19 @@ uint64 EdgeTerm(ObjectHandle handle) noexcept {
     return handle.IsNull() ? 0 : Hash<ObjectHandle>{}(handle);
 }
 
+// ObjectRefArray 옛 원소에 value가 있는지다(PublishBatchTarget의 retained — 재확인에 실패한
+// 원소만 찾는다).
+bool ArrayHolds(const void* storage, ObjectHandle value) noexcept {
+    const auto& old = *static_cast<const detail::ObjectRefArrayStorage*>(storage);
+    for (uint32 index = 0; index < old.size; ++index) {
+        if (old.data[index] == value) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 } // namespace
 
 Result<uint64> ObjectRegistry::MutationStamp(const ObjectAccessContext& access,
@@ -192,7 +205,9 @@ void ObjectRegistry::NoteBatchRemoved(ObjectHandle removed) noexcept {
     batchApplied_ -= EdgeTerm(removed);
 }
 
-void ObjectRegistry::PublishBatchTarget(ObjectHandle& value, const void* nativeType) noexcept {
+void ObjectRegistry::PublishBatchTarget(ObjectHandle& value, const void* nativeType,
+                                        bool (*retained)(const void*, ObjectHandle) noexcept,
+                                        const void* state) noexcept {
     if (value.IsNull()) {
         // 비교·Required 검사·encode가 정규 null만 보게 한다.
         value = ObjectHandle{};
@@ -200,8 +215,21 @@ void ObjectRegistry::PublishBatchTarget(ObjectHandle& value, const void* nativeT
     }
 
     platform::LockGuard lock(gate_);
-    if (!batchActive_ || !CheckTargetLocked(value, 0, nativeType)) {
+    if (!batchActive_) {
         platform::Fatal("Batch publish target was not revalidated by BeginBatchPublish");
+    }
+
+    if (!CheckTargetLocked(value, 0, nativeType)) {
+        // 컨테이너 교체에서 옛 내용에 있던 대상은 이미 게시된 간선이라 다시 확인하지 않는다
+        // (리플렉션 B9i5 — Discard된 대상이 남아도 다른 원소의 변경을 막지 않는다). 새로 들어오는
+        // 대상만 BeginBatchPublish가 재확인했어야 한다. 장벽도 필요 없다(이미 owner의 간선이다).
+        if (retained == nullptr || !retained(state, value)) {
+            platform::Fatal("Batch publish target was not revalidated by BeginBatchPublish");
+        }
+
+        batchApplied_ += EdgeTerm(value);
+        batchPublished_ = true;
+        return;
     }
 
     // 삽입 장벽: Marking 중이면 미리 잡은 GC 작업 용량으로 shade한다(모자라면 불변식 위반).
@@ -277,8 +305,9 @@ void ObjectRegistry::PublishBatchArray(detail::ObjectRefArrayStorage& storage,
         NoteBatchRemoved(storage.data[index]);
     }
 
+    // 옛 원소는 맞바꾸기 전까지 storage에 그대로 있다.
     for (uint32 index = 0; index < prepared.size; ++index) {
-        PublishBatchTarget(prepared.data[index], nativeType);
+        PublishBatchTarget(prepared.data[index], nativeType, &ArrayHolds, &storage);
     }
 
     batchPublished_ = true;

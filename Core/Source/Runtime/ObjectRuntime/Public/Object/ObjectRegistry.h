@@ -910,8 +910,11 @@ private:
     void CheckBatchContainer(const void* storage, usize bytes) const noexcept;
     // 게시로 빠지는 옛 대상을 검사합에 넣는다.
     void NoteBatchRemoved(ObjectHandle removed) noexcept;
-    // 새 값 하나를 정규화(null)·재확인·shade하고 검사합에 넣는다.
-    void PublishBatchTarget(ObjectHandle& value, const void* nativeType) noexcept;
+    // 새 값 하나를 정규화(null)·재확인·shade하고 검사합에 넣는다. 재확인에 실패해도 retained(state,
+    // 값)가 참이면(컨테이너 옛 내용의 대상 — 이미 게시된 간선, 리플렉션 B9i5) 검사합에만 넣는다.
+    void PublishBatchTarget(ObjectHandle& value, const void* nativeType,
+                            bool (*retained)(const void*, ObjectHandle) noexcept = nullptr,
+                            const void* state = nullptr) noexcept;
     // 관찰자 기록·표지 증가 뒤 구간을 닫는다(ObjectBatchPublish::End).
     void EndBatchPublish(ObjectHandle owner) noexcept;
 

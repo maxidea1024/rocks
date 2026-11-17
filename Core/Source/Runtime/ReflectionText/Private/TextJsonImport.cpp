@@ -324,15 +324,7 @@ Result<void> Importer::Elements(const TextSlot& slot, JsonValue value) noexcept 
     if (field.element.kind == ValueKind::Struct) {
         const TextSlot element = PartSlot(slot, TextSlotPart::Element);
         if (field.value.kind == ValueKind::Array) {
-            // 원소를 담은 StructRefArray는 원소 추가가 아직 없다(대입 묶음은 지우기·비우기만 —
-            // 리플렉션 B9i3c4).
-            if (slot.structView.ContainsStrongReference() && value.Size() != 0) {
-                result = Report(TextDiagnosticCode::Unsupported, value,
-                                "elements of a reference struct array cannot be added yet");
-                --depth;
-                return result;
-            }
-
+            // StructRefArray도 같다: 비운 뒤 `a[i]={}`가 끝에 원소를 더한다(리플렉션 B9i5).
             TextValue cleared(state.allocator);
             cleared.shape = TextValueShape::List;
             result = Assign(AssignmentKind::Set, slot, value, &cleared);

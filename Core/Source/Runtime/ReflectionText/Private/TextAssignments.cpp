@@ -662,10 +662,10 @@ Result<PublishedAssignments> PreparedAssignments::Publish() noexcept {
         (void)state.containers.TryRemoveAt(kept, state.containers.Size() - kept);
     }
 
-    // 원소 지우기 단위도 지운 원소가 없으면 게시하지 않는다.
+    // 원소 지우기·추가 단위도 바뀐 것이 없으면 게시하지 않는다.
     kept = 0;
     for (usize index = 0; index < state.elements.Size(); ++index) {
-        if (state.elements[index]->stage.HasRemovals()) {
+        if (state.elements[index]->stage.HasChanges()) {
             if (kept != index) {
                 state.elements[kept] = Move(state.elements[index]);
             }
@@ -743,74 +743,11 @@ Result<PublishedAssignments> PreparedAssignments::Publish() noexcept {
 
     if (live) {
         // 2. owner Borrow와 묶음 게시 구간(표지·새 대상 재확인·관찰자 예약) → 무할당 게시.
-        // 컨테이너는 옛 원소마다 {원소, null}, 새 원소마다 {null, 원소}를 선언한다(그대로 남는
-        // 원소는 검사합에서 상쇄된다).
-        usize targetCount = state.pins.Size() + state.references.Size();
-        usize edgeCount = state.references.Size();
-        for (usize index = 0; index < state.containers.Size(); ++index) {
-            const PreparedReferences& stage = state.containers[index]->stage;
-            targetCount += stage.Current().Size();
-            edgeCount += stage.Previous().Size() + stage.Current().Size();
-        }
-
-        for (usize index = 0; index < state.elements.Size(); ++index) {
-            edgeCount += state.elements[index]->stage.RemovedReferences().Size();
-        }
-
+        // 재확인·간선 목록은 PlanBatchPublish다(컨테이너는 옛 내용과의 차이만 — 리플렉션 B9i5).
         Array<BatchTargetCheck> targets(state.allocator);
         Array<BatchEdgeChange> edges(state.allocator);
-        if (auto reserved = targets.TryReserve(targetCount); !reserved) {
-            return PublishResult::Failure(reserved.Error());
-        }
-
-        if (auto reserved = edges.TryReserve(edgeCount); !reserved) {
-            return PublishResult::Failure(reserved.Error());
-        }
-
-        for (usize index = 0; index < state.containers.Size(); ++index) {
-            const PreparedReferences& stage = state.containers[index]->stage;
-            for (const ObjectHandle previous : stage.Previous()) {
-                if (!previous.IsNull()) {
-                    (void)edges.TryPushBack(BatchEdgeChange{previous, ObjectHandle{}});
-                }
-            }
-
-            for (const ObjectHandle current : stage.Current()) {
-                if (!current.IsNull()) {
-                    (void)targets.TryPushBack(BatchTargetCheck{current, stage.TargetType()});
-                    (void)edges.TryPushBack(BatchEdgeChange{ObjectHandle{}, current});
-                }
-            }
-        }
-
-        for (usize index = 0; index < state.elements.Size(); ++index) {
-            for (const ObjectHandle removed : state.elements[index]->stage.RemovedReferences()) {
-                (void)edges.TryPushBack(BatchEdgeChange{removed, ObjectHandle{}});
-            }
-        }
-
-        // Weak 고정은 생존만, 참조 단위의 새 대상은 자리의 C++ 대상 타입까지 본다. 컨테이너 단위의
-        // 고정은 GC만 막는다 — 새 내용의 원소는 위에서 모두 검사하고, 사본에서 다시 빠진 대상(
-        // `group=/a` 뒤 `group=`)은 검사하지 않는다(리플렉션 B9i 리뷰 반영).
-        for (usize index = 0; index < state.pins.Size(); ++index) {
-            bool container = false;
-            for (usize unit = 0; unit < state.containers.Size() && !container; ++unit) {
-                container = state.pinOwners[index] == state.containers[unit].Get();
-            }
-
-            if (!container) {
-                (void)targets.TryPushBack(BatchTargetCheck{state.pins[index].Handle(), nullptr});
-            }
-        }
-
-        for (usize index = 0; index < state.references.Size(); ++index) {
-            const detail::ReferenceUnit& unit = *state.references[index];
-            if (!unit.target.IsNull()) {
-                (void)targets.TryPushBack(
-                    BatchTargetCheck{unit.target, unit.prepared.TargetType()});
-            }
-
-            (void)edges.TryPushBack(BatchEdgeChange{unit.previous, unit.target});
+        if (auto planned = detail::PlanBatchPublish(state, targets, edges); !planned) {
+            return PublishResult::Failure(planned.Error());
         }
 
         auto owner = registry.Resolve(access, state.target.Handle());

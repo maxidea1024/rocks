@@ -35,10 +35,15 @@ namespace rocks::detail {
 // 함수만 friend다), 아니면 소유 객체 저장소 안 주소의 SetReference다.
 // 비정규 null은 Registry가 ObjectHandle{}로 정규화한다. staged 객체는 트랜잭션의 staged 간선
 // 쓰기이고, 분리된 값에는 강한 참조 위치가 없다(Unsupported(NoPathAccess) — 리플렉션 B9i3c0).
+// 예외는 원소 추가 준비물이 소유한 게시 전 원소 블록이다(대상을 블록에 직접 쓴다 — 리플렉션 B9i5).
 template <class T>
 Result<void> SetPathMemberReference(PathCursor& cursor, ObjectRef<T>& field,
                                     ObjectHandle target) noexcept {
     if (cursor.IsDetached()) {
+        if (cursor.WritesAddedElement()) {
+            return cursor.WriteAddedReference(field);
+        }
+
         return cursor.Fail(ErrorCode::Unsupported, PropertyPathError::NoPathAccess);
     }
 
