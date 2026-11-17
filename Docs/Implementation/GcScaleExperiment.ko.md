@@ -1,8 +1,8 @@
-# GC 대규모 처리 실험 결과 (GC-S0–GC-S4·M2)
+# GC 대규모 처리 실험 결과 (GC-S0–GC-S4·GC-S7·M2·M3)
 
-기준일: 2026-11-16. 브랜치 `experiment/gc-scale`(기준 `795761a`). 설계는 [GC 대규모 처리 보강](../Design/GarbageCollectionScale.ko.md)이다.
+기준일: 2026-11-16(Phase 4: 2026-11-17). 브랜치 `experiment/gc-scale`(기준 `795761a`). 설계는 [GC 대규모 처리 보강](../Design/GarbageCollectionScale.ko.md)이다.
 
-이 문서는 설계 6절의 단계 중 **GC-S0(측정 기준과 장기 smoke, Phase 0)**, **GC-S1(잠금 없는 직렬 marker·배치 visitor·prefetch)과 GC-S2(시간 기준 예산)(Phase 1)**, **GC-S3(GC 밀집 자료·루트 목록·비트 sweep·상한)과 M2(잎 타입)(Phase 2)**, **GC-S4(병렬 표식·장벽 큐·World scheduler)(Phase 3)** 의 실행 결과다. GC-S5–S7과 M1·M3–M7은 범위 밖이다.
+이 문서는 설계 6절의 단계 중 **GC-S0(측정 기준과 장기 smoke, Phase 0)**, **GC-S1(잠금 없는 직렬 marker·배치 visitor·prefetch)과 GC-S2(시간 기준 예산)(Phase 1)**, **GC-S3(GC 밀집 자료·루트 목록·비트 sweep·상한)과 M2(잎 타입)(Phase 2)**, **GC-S4(병렬 표식·장벽 큐·World scheduler)(Phase 3)** 의 실행 결과다. Phase 4(13절)는 **병렬 slice 보정(P4a)**, **GC-S7 클러스터·영구 영역(P4b–P4e)**, **M3 참조 위치 표(P4f)** 를 더한다. GC-S5·S6과 M1·M4–M7은 범위 밖이다.
 
 ## 1. 측정 환경
 
@@ -416,3 +416,173 @@ GC-S4 완료 기준 "STW 병렬 전체 표식이 4절 목표를 만족한다"는
 **음성 대조 추가.** 이탈 때 `inCount` 이동 생략, Marking 중 이탈 shade 생략, `outCount` 갱신 하나 생략, M3 표에서 참조 하나 생략. 각각 시험이나 soak가 잡아야 한다.
 
 **검증.** 커밋마다 Debug Foundation·EngineTests의 바뀐 범위, format, policy. Asan은 돌리지 않는다(2026-11-17 사용자 결정).
+
+## 13. Phase 4 구현 (P4a–P4f)
+
+### 13.1 바꾼 것
+
+| 단계 | 커밋 | 내용 |
+|---|---|---|
+| P4a | `a7711a4`·`534431f` | 병렬 증분 slice 시간 내역(`GcSliceTimes`)과 GcBench 출력. 예산이 다해 남은 회색 블록을 펴지 않고 다음 slice로 넘김(`gcGrayBlocks_`), 앞 slice의 꼬리 시간(worker 회수·회색 넘기기)만큼 표식을 일찍 멈춤(예산의 1/4까지) |
+| P4b | `edd0bec` | 클러스터 장부(슬롯마다 28 B 칸 — GC 페이지와 함께 할당, `clustered` 비트), 레코드 표, `ConstructionContext::SetClusterRoot`·`JoinCluster`, Commit의 가입과 staged 간선·outer 계수, 모든 live 간선 지점(비우기 경로 포함)의 장부 갱신, 클러스터 표식(epoch 비교 교환)·처리(경계 소속 항목·detached 표식·처리 epoch, 직렬·병렬), sweep 후보 `live & ~mark & ~clustered`, cutoff·Collect 직전 표식되지 않은 클러스터 해체, RequestDestroy·Discard의 이탈(잠금 밖 Trace)·루트 해체, 처리 전 해체의 경계 항목, Marking 중 가입의 outer shade, Debug 장부 재계산(`verifyClusterLedger`)·소속 불변식(`verifyClusterOwnership`) |
+| P4c | `25e6f41` | 패키지 정책 Registry의 자동 패키지 클러스터(`packageClusters`, 기본 켬). struct 원소 제거·비우기는 원소 trace 한 번으로 관찰자 집계와 장부를 같이 셈 |
+| P4d | `224a4dc` | 영구 영역(`permanentRegion`·`ClosePermanentRegion`), 창 안 완전한 필드 배치 강제, 영구 → 일반 간선(staged·live, outer 포함) Unsupported, 영구 객체 RequestDestroy·Discard Unsupported, 패키지 정책과 함께 켜면 Fatal, Shutdown 해체. Engine Registry가 서브시스템 초기화 동안 창을 열고 뒤에 닫음(실패는 별도 초기화 실패 지점) |
+| P4e | `3c72bab` | World Level 클러스터(`WorldDesc::levelClusters`), SpawnActor·AddComponent의 가입, Actor 레코드의 Component handle 목록(우회 파괴 Actor의 Component도 정리), GC cycle 시작 전 우회 파괴 Actor 정리, RequestDestroy 결과 확인 |
+| — | `435950f`·`b68dd3d` | 클러스터 장기 smoke(`RunGcClusterSoak`, World형·패키지형), GcBench 클러스터 시나리오(`--clusters`)·`--cluster-soak` |
+| — | `9cb44e9`·`7981d11` | smoke·시험에 단일 필드 쓰기·배열 원소 교체·map 편집을 더함(음성 대조 3·10이 드러낸 구멍). smoke 도구 결함(모델 상한·O(객체²) oracle) 고침과 진행 표시(13.11절) |
+| merge | `0551d92` | `origin/feature/engine-runtime`(영어 결과물 policy, 로깅 API). GcBench를 Program 타깃으로 표시(새 Release 배제 policy) |
+| P4f | `0bdb66e` | 참조 위치 표(M3): `RuntimeTypeOps::referenceLayout`(MetaCompiler 생성), 타입별 표(`referenceTables`, 기본 켬), 직렬·병렬 marker의 표 표식과 4칸 앞 배열 버퍼 미리 읽기, Debug 표·Trace 대조. GC 사이클 끝 통계를 `Log::Debug`(Object.GC)로 남김 |
+
+### 13.2 측정 환경
+
+- Phase 3과 같은 기계·Development(-O2) 구성이다. 측정 내내 같은 기계의 에뮬레이터(qemu)가 CPU를 계속 써서 부하가 100%로 보고됐다. 그래서 비교는 같은 실행 안에서 번갈아(P3 실행 파일 ↔ P4f, 표 켬 ↔ 끔, 클러스터 켬 ↔ 끔) 쟀다. 병렬 수치와 증분 p99는 선점에 크게 흔들리고(같은 설정의 두 round가 1.5–3배 다르다), 직렬 정지형 표식은 round 사이 차이가 2–30%다.
+- 원시 출력: scratchpad `p4/p4a-cmp.txt`(P4a), `p4/p4f-m3.txt`(M3·P3 비교), `p4/p4g-clusters.txt`(클러스터·영구 영역·간선 쓰기), `p4/p4g-negctl.txt`(음성 대조), `p4/p4g-soak.txt`(장기 soak).
+
+### 13.3 P4a: 병렬 증분 slice (1M · 간선 4, worker 8개)
+
+| 예산 | 지표 | P3 | P4a |
+|---|---|---|---|
+| 2ms | p50 | 2342–2375us | 2007–2022us |
+| 2ms | p95 | 9.9–11.8ms | 2.12–2.18ms |
+| 2ms | p99 | — | 6.1–13.7ms |
+| 기본 1ms | p99 | 9.4ms | 1.24–2.64ms |
+
+slice마다 회색 객체 약 26만 개를 펴고 다시 블록으로 묶던 비용(준비 약 195us·넘기기 약 226us)이 준비 약 40us·넘기기 25–60us로 줄었다. 2ms 예산의 p99는 표식 구간의 선점이 차지한다(slice 내역의 mark p99가 Step p99와 같다). 완료 기준(병렬 Step p99 ≤ 2ms)은 p95까지 맞고 p99는 이 기계의 부하에서 판정할 수 없다.
+
+### 13.4 P4f: 참조 위치 표(M3) (1M · 간선 4, 정지형 중앙값 ms, 두 round)
+
+| 항목 | P3 | P4f 표 켬 | P4f 표 끔 |
+|---|---|---|---|
+| 직렬 Collect 표식 | 244.4 · 170.1 | **102.3 · 104.1** | 168.1 · 226.0 |
+| 병렬 ×8 표식 | 63.0 · 74.8 | 96.9 · 135.1 | 123.4 · 93.2 |
+| 병렬 ×16 표식 | 41.4 · 77.7 | 67.5 · 179.6 | 75.0 · 123.1 |
+| 증분 기본(직렬) cycle·Step 수 | 211.5ms·172 · 163.5ms·162 | **84.9ms·86 · 118.9ms·103** | 182.7ms·180 · 310.2ms·193 |
+| 증분 2ms(직렬) Step 수 | 89 · 82 | **49 · 51** | 94 · 100 |
+| 증분 기본 ×8 Step 수 | 78 · 61 | 42 · 41 | 46 · 47 |
+| churn 98K Collect 전체 | 234.2 · 212.8 | **141.9 · 134.2** | 197.1 · 223.4 |
+
+- 직렬 표식은 표로 약 **1.6–2.2배** 빨라졌다(11절의 예상 55–65ms에는 못 미친다 — 이 부하에서 102ms). 표가 없을 때보다 trace 함수 간접 호출·`ObjectRefArray::Trace` 순회가 빠지고, 4칸 앞 객체의 배열 버퍼를 미리 읽는다.
+- 병렬 정지형은 이 측정에서 개선을 보이지 않는다. round 사이 차이(×16 67.5 ↔ 179.6ms)가 설정 차이보다 커서 판정할 수 없다. 병렬 marker의 지역 큐가 LIFO라 "4칸 앞"이 실제로 곧 꺼낼 객체가 아니어서 미리 읽기 효과가 작을 수 있다(부하 없는 기계에서 다시 잴 항목).
+- 증분 직렬 cycle은 Step 수가 절반 가까이 줄었다(2ms 예산 89 → 49–51 Step, 60프레임 gate 충족).
+
+### 13.5 클러스터 시나리오 (`GcBench --clusters`, 클러스터 켬 ↔ 끔 같은 실행)
+
+정지형 표식 중앙값(ms), 증분 기본 예산 cycle(직렬 Step 수, ×8 Step 수), 간선 쓰기(`AddReference`·`RemoveReferenceAt` 각 200K번, Borrow 비용 포함, ns/op).
+
+| 시나리오 | 클러스터 | 직렬 표식 | 병렬 ×8 표식 | 증분 직렬 | 증분 ×8 | 간선 추가 | 간선 제거 |
+|---|---|---:|---:|---|---|---:|---:|
+| 패키지 1M, 패키지 사이 1% | 켬 | **18.7** | **3.2** | 34.6ms · 20 | 5 | 1,041 | 986 |
+| | 끔 | 90.2 | 67.2 | 175.4ms · 136 | 43 | 1,127 | 566 |
+| 패키지 1M, 사이 10% | 켬 | 99.8 | **34.3** | 142.3ms · 130 | 21 | 1,581 | 819 |
+| | 끔 | 110.6 | 68.6 | 106.6ms · 100 | 65 | 998 | 710 |
+| 패키지 1M, 사이 30% | 켬 | 230.3 | **34.0** | 184.9ms · 176 | 33 | 1,402 | 912 |
+| | 끔 | 123.9 | 53.3 | 129.3ms · 123 | 63 | 870 | 594 |
+| World 10 Level × 30K Actor × 3 + 밖 200K | 켬 | **20.4** | **6.5** | 20.1ms · 21 | 8 | 774 | 609 |
+| | 끔 | 51.7 | 21.3 | 64.9ms · 64 | 24 | 605 | 447 |
+| 영구 100K + 일반 1M | 켬 | **98.2** | 41.4 | 107.0ms · 105 | 45 | — | — |
+| | 끔 | 113.1 | 46.3 | 125.7ms · 126 | 55 | — | — |
+
+- World형 일반 객체 churn(20K, 병렬 ×8 Collect 전체): 켬 12.6ms(표식 6.4) ↔ 끔 28.2ms(표식 21.0).
+- 메모리: 클러스터를 켠 Registry의 GC 밀집 자료가 슬롯당 20.8 → 48.9 B(패키지형), 24.2 → 52.2 B(World형)다(장부 칸 28 B와 clustered 비트).
+- **효과는 경계 비율에 달려 있다.** 패키지 사이 간선 1%(소속 약 4%가 경계)에서 직렬 4.8배·병렬 21배 빨라지고, World형(같은 Level 안 참조만)도 직렬 2.5배·병렬 3.3배 빨라진다. 사이 30%(경계 소속 약 76%)에서는 직렬이 **1.9배 느려진다**. 경계 소속을 거의 다 trace하면서 간선마다 대상이 소속인지 장부 칸(28 B, 대상 슬롯마다 다른 캐시 줄)과 레코드를 한 번 더 읽기 때문이다. 병렬은 클러스터 항목이 경계 소속 수백 개를 한 번에 지역 큐에 넣어 나눔이 쉬워 여전히 1.6배 빠르다.
+- 간선 쓰기는 장부 갱신으로 추가가 0–60%, 제거가 30–75% 느려졌다(Borrow 조회가 포함된 수치 — 장부 갱신 자체는 잠금 안 칸 몇 개의 갱신이다). 패키지 1% 끔 ↔ 켬의 추가가 거꾸로인 것은 측정 흔들림이다.
+- 영구 영역은 영구 객체 수(전체의 9%)만큼 표식이 준다(직렬 13%, 병렬 11%).
+
+### 13.6 장기 soak
+
+기존 GcSoak(Development, P4 실행 파일 — 표·클러스터 기능이 들어간 Registry의 일반 경로):
+
+| 실행 | 설정 | tick | 생성 | 회수 | cycle(시작/완료) | 결과 |
+|---|---|---:|---:|---:|---:|---|
+| seed 11 | 직렬, 객체 3000 | 300,000 | 178,662 | 174,654 | 4,319 / 3,662 | PASS(20.3s) |
+| seed 12 | 직렬, 객체 3000 | 300,000 | 181,539 | 177,639 | 4,349 / 3,688 | PASS(16.1s) |
+| seed 24 | 병렬 worker 4개 | 300,000 | 184,662 | 181,391 | 5,735 / 5,140 | PASS(22.6s) |
+| seed 14 | 시간 예산 100us | 200,000 | 125,297 | 122,131 | 20,258 / 20,169 | PASS(20.7s) |
+
+클러스터 smoke(`GcBench --cluster-soak`, 13.8절 시나리오 — 소속 객체의 단일 필드 쓰기·배열 원소 교체 포함, 각 실행은 진행 표시와 상한 시간을 두었다). Debug 실행은 Begin·Collect마다 장부 재계산과(World형) 소속 불변식 검증을 한다.
+
+| 실행 | 구성 | 형 | tick | 생성 | 회수 | cycle | 정지형 대조 | 결과 |
+|---|---|---|---:|---:|---:|---:|---:|---|
+| seed 31 | Development 직렬 | World | 5,000 | 1,500 | 1,407 | 4,286 | 715 | PASS(0.4s) |
+| seed 35 | Development 직렬 | World | 5,000 | 1,500 | 1,404 | 4,286 | 715 | PASS(0.3s) |
+| seed 33 | Development worker 4 | World | 3,000 | 1,500 | 1,369 | 2,572 | 429 | PASS(0.5s) |
+| seed 32 | Development 직렬 | 패키지 | 1,000 | 1,497 | 1,479 | 858 | 143 | PASS(0.1s) |
+| seed 36 | Development 직렬 | 패키지 | 1,000 | 1,497 | 1,472 | 858 | 143 | PASS(0.1s) |
+| seed 34 | Development worker 4 | 패키지 | 600 | 1,497 | 1,443 | 515 | 86 | PASS(0.1s) |
+| seed 41 | **Debug**(장부·소속 검증) 직렬 | World | 1,500 | 1,200 | 1,106 | 1,286 | 215 | PASS(0.4s) |
+| seed 42 | **Debug**(장부 검증) 직렬 | 패키지 | 300 | 1,199 | 1,056 | 258 | 43 | PASS(0.2s) |
+
+한계: 클러스터 smoke의 모델은 항목을 재사용하지 않아 모델 상한(1,200–1,500)에 닿은 뒤(World형 약 1,000 tick, 패키지형 약 200 tick)는 남은 객체의 편집·파괴만 한다. 그래서 tick 수보다 cycle 수(위 표)가 실제 덮은 양이다. 첫 실행 묶음에서 World형 5,000 tick이 끝나지 않은 일은 도구 결함이었다(13.11절).
+
+### 13.7 음성 대조
+
+코드 한 곳을 임시로 바꿔 Debug Foundation을 빌드하고 클러스터 시험(`ObjectGcCluster`)·smoke 시험(`GcSoak`, 클러스터 smoke 포함)·병렬 oracle(`ObjectGcParallel`)·증분 시험(`ObjectIncrementalGc`)을 돌린 뒤 되돌렸다(커밋하지 않음 — 원시 출력 `p4/p4g-negctl-1-2.txt`·`p4/p4g-negctl-3.txt`).
+
+| 대조 | 바꾼 것 | 잡은 시험 | 증상 |
+|---|---|---|---|
+| 1 | 이탈 때 `inCount` 이동 생략 | 클러스터 시험·smoke | Debug 장부 재계산 "Cluster ledger diverged from a recount" |
+| 2 | Marking 중 이탈 shade 생략 | 클러스터 smoke | "Reachable object was reclaimed"(tick 45). 결정적 시험은 잡지 못했다 |
+| 3 | `outCount` 갱신 하나 생략(`ReplaceArrayEdge`) | 클러스터 smoke | 장부 재계산. 처음 실행에서는 smoke·시험 모두 배열 원소 교체를 하지 않아 **잡지 못했고**, smoke에 단일 필드 쓰기·원소 교체를 더한 뒤(`9cb44e9`) 잡았다 |
+| 9 | `outCount` 갱신 하나 생략(`RemoveArrayEdge`) | 클러스터 시험·smoke | 장부 재계산 |
+| 4 | 처리 전 해체에서 경계 항목 넣기 생략 | 13.8절 결정적 시험 | 경계 소속의 밖 대상이 회수됨(`Exists(outside)` 실패). smoke는 이 tick 수에서 잡지 못했다 |
+| 5 | 배열 비우기 경로의 장부 갱신 생략 | 클러스터 시험·smoke | 장부 재계산 |
+| 10 | map 비우기 경로의 장부 갱신 생략 | map 편집 시험(`9cb44e9`에서 추가) | 장부 재계산 |
+| 6 | M3 표에서 마지막 칸 생략 | 병렬 oracle | 생존 집합·표식 수가 oracle과 다름(Debug 표·Trace 대조 Fatal) |
+| 7 | 삽입 장벽 끔 | 클러스터 smoke·병렬·증분 시험 | "Reachable object was reclaimed"(tick 3) 외. 클러스터 결정적 시험(13.8절 장벽 경우)은 **잡지 못했다** — keeper가 연결 시점에 아직 trace 전이라 장벽 없이도 산다(시험이 의도보다 약하다) |
+| 8 | 지연 목록의 회수 가능 전이 끔 | GcSoak·증분 시험 | 회수 수가 모델과 다름 |
+
+검사가 비어 있던 경로 두 곳(배열 원소 교체, map 비우기)은 대조로 드러나 시험·smoke를 보강했다. 대조 2·4·7은 한 가지 시험만 잡는다.
+
+### 13.8 설계(13절)와 다르게 구현한 점
+
+| 항목 | 설계 | 구현 | 이유 |
+|---|---|---|---|
+| 소속 trace 항목 | 일반 표식 항목과 구분되는 큐 항목, 같은 클러스터 대상은 `clusterState` 비교로 건너뜀 | 경계 소속을 mark 비트를 켜고 **일반 항목**으로 넣는다. 같은 클러스터 대상은 일반 표식 경로에서 clustered 비트 → 클러스터 epoch 비교 한 번으로 끝난다 | 꺼낼 때 소속이 아니어도 그대로 일반 trace라 별도 표지가 필요 없다. mark 비트로 넣어 슬롯마다 큐 항목이 한 번이 되어 작업 큐 상한이 `슬롯 수 + 클러스터 레코드 수`로 닫힌다 |
+| 클러스터 id | 루트 slot에서 얻음 | 레코드 표 번호(빈 레코드 재사용). 루트 칸의 `clusterState`가 번호를 가리키고 레코드가 루트 slot을 가진다 | 레코드 표를 slot 수만큼 두지 않으려고. Marking 중 해체한 레코드는 큐가 빌 때(cutoff·취소·오류)까지 재사용하지 않아 "해체됨" 판정이 같은 cycle 안에서 유지된다 |
+| Marking 중 Create의 outer shade | 모든 새 객체 | 가입한 새 소속만 | 소속이 아닌 새 객체는 shade 뒤 trace되어 outer를 방문한다(기존 규칙). 차이가 생기는 것은 처리된 클러스터에 가입한 소속뿐이다 |
+| 소속 불변식 검증 | Debug 장부 검증과 같이 | `verifyClusterOwnership`를 따로 켠다(World 시험·soak·World형 smoke) | 엔진 계층 API를 다른 용도(시험 모델)로 쓰면 소유가 클러스터 밖일 수 있다 |
+| World API 밖 Actor 파괴 | World 레코드의 Component 목록으로 정리 | 목록에 더해 World가 GC cycle을 시작하기 전에 레코드를 훑어 우회 파괴된 Actor를 정리한다(`RepairBypassedActors`) | 틱 없는 Actor는 Tick이 발견하지 못해, 그 사이 Begin의 소속 불변식 검증이 고아 소속을 만난다. 훑기는 cycle마다 O(Actor 수)다 |
+| World 클러스터 끄기 | 항상 | `WorldDesc::levelClusters`(기본 켬) | 측정 비교와 객체 단위 표식 순서를 보는 기존 장벽 시험 2개 |
+| 패키지 클러스터 끄기 | 항상 | `RegistryOptions::packageClusters`(기본 켬) | 측정 비교 |
+| struct 원소 제거·비우기 | 장부가 원소 Trace로 셈 | 관찰자 집계와 장부가 원소 trace 한 번의 결과를 같이 쓴다 | 원소마다 trace를 두 번 부르지 않는다(관찰자 시험이 trace 횟수를 센다) |
+| Engine.cpp | 한 줄 | 영구 창을 연 Registry 생성(옵션 도우미)과 초기화 뒤 닫기(실패하면 초기화 실패, 서브시스템 단계와 다른 실패 지점) | 창을 열려면 생성 옵션이 필요하다 |
+| M3 측정 타입 | GcBench·GcSoak 타입을 리플렉션 타입(Metadata·rocksids)으로 | GcBench 노드는 생성 함수와 같은 모양의 **수동** 참조 위치 함수를 쓴다(`ReportLayout`). 생성 경로는 World·리플렉션 시험 타입(EngineTests·Foundation 리플렉션 시험)이 Debug 대조와 함께 지난다 | 벤치·smoke 모듈에 MetaCompiler 단계를 넣지 않아도 표식 경로는 같다(표가 만들어진 뒤에는 생성·수동이 구별되지 않는다) |
+| M3 표 범위 | 참조 위치 상수(컨테이너 버퍼 offset) | ObjectRef·ObjectRefArray 칸만 표로 나타내고, StructRefArray·ObjectRefMap·참조 struct 필드가 있는 타입은 trace로 남긴다. 표는 타입마다 첫 객체에서 멤버 주소 차이로 잰다(offsetof는 표준 배치가 아닌 클래스에서 오류) | 컨테이너 내부 배치를 marker가 알아야 하는 종류만 넣었다 |
+
+### 13.9 4절 성능 gate (Phase 4 시점, 1M)
+
+| gate | 목표 | Phase 3 | Phase 4 | 상태 |
+|---|---|---|---|---|
+| STW 병렬 전체 표식 | ≤ 15ms | ×16 23.9ms(부하 없는 재측정) | 일반 그래프는 부하 아래 41–180ms로 판정 불가. 클러스터가 맞는 그래프는 패키지 1% ×8 3.2ms, World형 ×8 6.5ms | 클러스터 그래프 **충족**, 일반 그래프 미정(부하 없는 재측정 필요) |
+| 단일 스레드 전체 표식 | ≤ 60ms | 112–117ms | 표 켬 102–104ms(부하 100%). 패키지 1% 18.7ms, World형 20.4ms | 일반 그래프 미달, 클러스터 그래프 **충족** |
+| Begin | ≤ 1ms | 0.04–0.12ms | 0.04–0.40ms(클러스터 레코드 epoch·루트 클러스터 항목) | **충족** |
+| sweep 후보 판정 | ≤ 1ms | 0.012–0.03ms | 0.02–0.19ms | **충족** |
+| 증분 Step p99 | ≤ 2ms | 직렬 2.0–2.1ms, 병렬 2.3–2.7ms | 직렬 표 켬 1.1–5.9ms·병렬 p95 1.04–2.1ms, p99는 선점(25–110ms) | 부하 아래 판정 불가(p95는 충족) |
+| 증분 cycle | 2ms 예산에서 60프레임 이내 | 직렬 89·병렬 21–27 Step | 직렬 49–51, 병렬 21–22, 패키지 1% ×8 3, World ×8 5 | **충족** |
+| Slot 정보 | ≤ 64B | 192 + 20.6B | 200 + 20.8B(클러스터 Registry는 + 28B) | 미달 |
+| 기본 `maxSlots` | ≥ 2,097,152 | 2,097,152 | 같음(클러스터 Registry 상한 2^29) | **충족** |
+
+### 13.10 검증
+
+| 항목 | 결과 |
+|---|---|
+| Debug Foundation 전체 시험 | P4c 1758개, merge 뒤 P4f 2057개 전부 통과(P4b·P4d·P4e는 `--filter Object`·`GcSoak`·`Reference` 범위 통과) |
+| Debug EngineTests | P4d 1827개, P4e 1832개, merge 뒤 2183개(P4f 포함) 전부 통과. World 시험 전부가 Debug 장부·소속 불변식 검증을 켠 채 돈다 |
+| Debug Foundation `-t:Test`(P4f — MetaCompiler 변경) | 네이티브 2057개, 도구 self 134개, native 117개, meta 208개 통과 |
+| 클러스터 시험(`ObjectGcCluster` 13개) | 기본 규칙·13.8절 장벽 경우·map 편집·패키지(정지형·증분·병렬)·영구 영역(정지형·증분·병렬)·무작위 모델(직렬·병렬, oracle에 소속 간선 포함, slice마다 안전성·정지형 뒤 정확성) — `--repeat 10` 통과(P4b 시점) |
+| 병렬 oracle(`ObjectGcParallel`) | 표 타입(노드·poison)과 trace 타입(수동 노드)을 섞은 그래프, Debug 표·Trace 대조 통과 |
+| clang-format 21.1.6·policy | 커밋마다 통과(merge 뒤 새 영어 결과물 policy 포함) |
+| Asan | 돌리지 않았다(2026-11-17 사용자 결정) |
+| 기존 시험의 기대 변경 | `ObjectDiscard_DuringMarkingAndSweeping`(패키지 클러스터가 표식된 뒤 Marking 중 Discard는 보수적으로 한 cycle 남는다 — 13.6절), `ReferenceObserver_UnregisteredElementStructIsUnsupported`(관찰자 없는 비교 Registry는 패키지 클러스터를 끈다 — 소속 소유자의 원소 제거는 원소 Trace가 필요하다), World 장벽 시험 2개(Level 클러스터를 끈다 — 객체 단위 스캔 순서를 지나야 한다), `ObjectIncrementalGcMatchesIndependentGraphOracleWithParallelMarking`(worker가 실제로 trace했는지의 경쟁 운 단언 삭제 — Phase 3에서 들어온 시간 의존 단언) |
+
+### 13.11 발견과 남은 것
+
+- **경계가 큰 클러스터의 간선당 비용.** 클러스터 그래프의 표식은 간선마다 대상의 `clustered` 비트를 보고, 소속이면 장부 칸(28 B — 대상마다 다른 캐시 줄)에서 클러스터 번호를 읽고 레코드 epoch를 비교한다. 경계 소속 비율이 높으면(패키지 사이 간선 30%) 이 두 번의 추가 읽기로 직렬 표식이 클러스터 없는 경우보다 1.9배 느려졌다. 클러스터 번호를 hot 레코드 쪽(16 B의 남는 2 B로는 모자란다 — 페이지별 소속 번호 배열이나 hot 확장)에 두거나, 경계 비율이 높은 패키지는 클러스터에서 빼는 정책이 필요하다.
+- **병렬 표식과 M3.** 직렬은 표로 1.6–2.2배 빨라졌지만 병렬 정지형은 이 부하에서 개선을 확인하지 못했다. 병렬 marker의 지역 큐는 LIFO라 "4칸 앞" 미리 읽기가 곧 꺼낼 객체를 겨누지 않는다. 부하 없는 기계에서 다시 재고, 블록 단위 미리 읽기를 검토한다.
+- **부하 없는 재측정.** 이 Phase의 모든 측정은 부하 100%(같은 기계의 에뮬레이터와 다른 세션의 빌드) 아래였다. 병렬 STW gate(15ms)·증분 p99 gate(2ms)는 판정하지 못했다.
+- **장부 메모리.** 클러스터 Registry는 슬롯당 28 B를 더 쓴다. 고리 칸(16 B)은 페이지 안 16비트 번호로 줄일 수 있다.
+- **영구 영역의 실제 효과.** 지금 Engine 서브시스템은 초기화 동안 Registry 객체를 만들지 않아 엔진에서의 효과는 0이다(벤치의 100K 영구 객체는 시작 콘텐츠를 가정한 것).
+- **World 우회 파괴 발견.** 틱 없는 Actor의 우회 파괴는 다음 GC cycle 시작 때 O(Actor 수) 훑기로 정리한다. Actor가 많은 World에서 cycle마다의 비용을 잰 적이 없다.
+- **클러스터 smoke가 멈춘 것처럼 보인 일(2026-11-18, 도구 결함).** `GcBench --cluster-soak 5000 --seed 31`(World형)이 13분 넘게 단일 스레드 100%로 출력 없이 돌았다. cdb로 세 번 표본을 뜬 스택이 모두 smoke 쪽 oracle(`ClusterSoak::Reach` ← `CheckSafety`)이었고, 같은 seed의 tick 수를 늘리면 1,000 tick 1.8초 → 2,000 tick 15.4초로 초선형이었다(무한 루프가 아니라 비용 폭증). 원인 둘: (1) Level 생성이 모델 상한(`maxObjects`)을 보지 않아 Level을 파괴·재생성할 때마다 모델 항목이 끝없이 늘었고(2,000 tick에서 2,350개 — 상한 1,500), (2) oracle이 도달한 클러스터 루트·패키지 객체마다 모델 전체를 훑어 slice마다 O(루트 × 객체)였다. Registry·GC 결함은 아니다. Level 생성에 상한을 걸고, oracle을 slice마다 인접 목록을 만드는 O(객체) 방식으로 바꾸고, smoke에 진행 표시를 더했다. 시험 `GcSoak_ClusterWorldStaysWithinModelLimit`(상한 120, 600 tick, `created ≤ maxObjects`)가 상한 검사를 빼면 실패함을 확인했다.
+- **시험 구멍.** 소속 소유자의 `StructRefArray` 원소 제거·비우기 장부 경로는 등록 struct가 필요해 클러스터 시험·smoke가 지나지 않는다(관찰자 시험이 같은 trace 경로의 집계만 본다). 클러스터 smoke의 패키지형은 oracle이 O(객체²)라 객체 1,500개 안팎에서만 돈다.
+- **cutoff의 클러스터 순회.** cutoff와 정지형 sweep 직전에 레코드 표 전체를 훑어 표식되지 않은 클러스터를 해체한다(잠금 안, O(클러스터 수)). 패키지 10K개에서 Begin·sweep 시간에 드러나지 않았다(0.3ms 이하).
