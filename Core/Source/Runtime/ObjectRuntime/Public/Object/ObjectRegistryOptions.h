@@ -158,6 +158,9 @@ struct GcReport {
     uint64 markNanoseconds = 0;
     uint64 sweepNanoseconds = 0;
     uint64 reclaimNanoseconds = 0;
+    // 경계 비율 안전장치로 이 cycle 끝에 해체한 패키지 클러스터 수다(그 패키지의 객체는 이후 일반
+    // 객체로 표식된다 — Docs/Implementation/GcScaleExperiment.ko.md 14절).
+    uint32 flattenedClusters = 0;
     GcWorkCounters work;
 };
 

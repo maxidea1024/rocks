@@ -554,6 +554,11 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
                 // 클러스터에 가입한다(13.3절 — 모든 객체가 완전한 필드 배치다).
                 if (packageClusters && state == 0) {
                     const Slot* slot = FindSlot(staged[index]);
+                    // 경계 비율 안전장치가 클러스터를 해체한 패키지의 새 객체는 일반 객체다.
+                    if (!slot->outer.IsNull() && IsFlattenedPackageLocked(*slot->outermost)) {
+                        continue;
+                    }
+
                     state = ClusterPending;
                     pendingRoot = slot->outer.IsNull() ? NoSlot : slot->outermost->index;
                 }

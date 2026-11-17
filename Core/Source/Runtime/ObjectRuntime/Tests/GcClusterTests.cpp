@@ -970,7 +970,115 @@ void RunPermanentRegion(uint32 mode) noexcept {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
+// ---- 경계 비율 안전장치 ----
+
+// 경계 소속 비율이 ClusterFlattenBoundaryPercent(80%)를 넘는 패키지 클러스터는 cycle 끝에 해체되고,
+// 그 패키지의 객체는 일반 객체로 계속 산다. 문턱 아래 패키지는 남는다. 해체된 패키지의 새 객체는
+// 가입하지 않고, 패키지 Discard 뒤에는 모두 회수된다. mode는 CollectBy와 같다.
+void RunPackageBoundaryValve(uint32 mode) noexcept {
+    SystemAllocator allocator;
+    {
+        WorkerScheduler scheduler(allocator);
+        REQUIRE(scheduler.Start({2, 256, 16}));
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterPackageTypes(types));
+        {
+            ObjectRegistry objects(allocator, types, Guid{0x4747, mode}, PackageClusterOptions());
+            const auto access = objects.OwnerAccess();
+            auto wide = objects.NewObject<PackageNode>(access, PackageNodeType);
+            auto narrow = objects.NewObject<PackageNode>(access, PackageNodeType);
+            auto target = objects.NewObject<PackageNode>(access, PackageNodeType);
+            REQUIRE(wide && narrow && target);
+            const ObjectHandle w = wide.Value().Handle();
+            const ObjectHandle n = narrow.Value().Handle();
+            const ObjectHandle t = target.Value().Handle();
+            auto outside = objects.NewObject<ClusterNode>(access, ClusterNodeType, t, "Y");
+            REQUIRE(outside);
+            const ObjectHandle y = outside.Value().Handle();
+            outside.Value().Reset();
+            // 패키지마다 소속 10개(패키지 객체 + 9): wide는 9개(90%), narrow는 1개(10%)가 경계다.
+            constexpr uint32 Inner = 9;
+            ObjectHandle wideNodes[Inner];
+            ObjectHandle narrowNodes[Inner];
+            for (uint32 index = 0; index < Inner; ++index) {
+                const char name[] = {'n', static_cast<char>('0' + index)};
+                auto first =
+                    objects.NewObject<ClusterNode>(access, ClusterNodeType, w, StringView(name, 2));
+                auto second =
+                    objects.NewObject<ClusterNode>(access, ClusterNodeType, n, StringView(name, 2));
+                REQUIRE(first && second);
+                wideNodes[index] = first.Value().Handle();
+                narrowNodes[index] = second.Value().Handle();
+            }
+
+            for (uint32 index = 0; index < Inner; ++index) {
+                REQUIRE(Link(objects, wideNodes[index], y));
+            }
+
+            REQUIRE(Link(objects, narrowNodes[0], y));
+            CHECK(objects.Stats().clusters == 3);
+            CHECK(objects.Stats().clusterMembers == 22);
+            CollectBy(objects, mode, scheduler);
+            CHECK(objects.Stats().clusters == 2);
+            CHECK(objects.Stats().clusterMembers == 12);
+            CHECK(Exists(objects, w));
+            CHECK(Exists(objects, y));
+            for (uint32 index = 0; index < Inner; ++index) {
+                CHECK(Exists(objects, wideNodes[index]));
+                CHECK(Exists(objects, narrowNodes[index]));
+            }
+
+            // 해체된 패키지의 새 객체는 일반 객체다(가입하지 않고 Commit은 성공한다).
+            auto late = objects.NewObject<ClusterNode>(access, ClusterNodeType, w, "Late");
+            REQUIRE(late);
+            const ObjectHandle lateHandle = late.Value().Handle();
+            late.Value().Reset();
+            REQUIRE(Link(objects, lateHandle, wideNodes[0]));
+            CHECK(objects.Stats().clusterMembers == 12);
+            CollectBy(objects, mode, scheduler);
+            CHECK(Exists(objects, lateHandle));
+            CHECK(objects.Stats().clusters == 2);
+            // 해체된 패키지를 Discard하고 루트를 놓으면 모두 회수된다. 밖 대상은 다른 패키지라
+            // 산다.
+            REQUIRE(objects.Discard(access, w));
+            wide.Value().Reset();
+            CollectBy(objects, mode, scheduler);
+            CHECK(!Exists(objects, w));
+            CHECK(!Exists(objects, lateHandle));
+            for (uint32 index = 0; index < Inner; ++index) {
+                CHECK(!Exists(objects, wideNodes[index]));
+                CHECK(Exists(objects, narrowNodes[index]));
+            }
+
+            CHECK(Exists(objects, y));
+            CHECK(objects.Stats().retiredWithoutDiscard == 0);
+            REQUIRE(objects.Discard(access, n));
+            REQUIRE(objects.Discard(access, t));
+            narrow.Value().Reset();
+            target.Value().Reset();
+            REQUIRE(objects.Shutdown(access));
+        }
+
+        REQUIRE(scheduler.Shutdown());
+        REQUIRE(types.Shutdown());
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
 } // namespace
+
+TEST(ObjectGcCluster_PackageBoundaryValveCollect) {
+    RunPackageBoundaryValve(0);
+}
+
+TEST(ObjectGcCluster_PackageBoundaryValveIncremental) {
+    RunPackageBoundaryValve(1);
+}
+
+TEST(ObjectGcCluster_PackageBoundaryValveParallel) {
+    RunPackageBoundaryValve(2);
+}
 
 TEST(ObjectGcCluster_PermanentRegionCollect) {
     RunPermanentRegion(0);

@@ -1526,6 +1526,8 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
             // RootRef를 Discard 없이 놓은 버그 경로). 큐가 비었으므로 해체한 레코드를 바로 재사용할
             // 수 있다.
             DissolveUnmarkedClustersLocked();
+            // 경계 비율 안전장치: 남은 클러스터는 모두 표식됐으므로 해체가 소속에 mark를 켠다.
+            cycleGc_.flattenedClusters += FlattenBoundaryClustersLocked();
             ReleaseDissolvedClustersLocked();
             gcPhase_ = GcPhase::Sweeping;
             sweepChunk_ = chunkCount_;
@@ -1699,6 +1701,10 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access,
         for (uint32 chunk = chunkCount_; chunk-- != 0;) {
             report.retired += RetireWhiteLocked(chunk);
         }
+
+        // 경계 비율 안전장치: 분류가 끝난 뒤라 남은 소속은 모두 살아 있다(해체가 mark를 켜지 않아도
+        // 된다).
+        report.flattenedClusters = FlattenBoundaryClustersLocked();
     }
 
     const uint64 reclaimStarted = platform::MonotonicNanoseconds();

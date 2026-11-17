@@ -31,6 +31,13 @@ inline constexpr uint32 ClusterIdMask = ClusterPending - 1;
 // chunk 클러스터 표(GcBits::firstCluster)가 이 값이면 chunk에 클러스터가 셋 이상 섞였다(소속의
 // 번호는 장부 상태에서 읽는다).
 inline constexpr uint32 ChunkClusterMixed = NumericLimits<uint32>::Max();
+// 경계 비율 안전장치(Docs/Implementation/GcScaleExperiment.ko.md 14절)의 문턱이다. 패키지
+// 클러스터의 경계 소속(밖으로 가는 간선이 있는 소속)이 소속의 이 백분율을 넘으면 cycle 끝에 해체해
+// 일반 trace로 둔다. 경계 소속은 어차피 trace되고 나머지 소속도 처음 만날 때 클러스터 조회를
+// 치르므로 경계가 거의 전부인 클러스터는 일반 표식보다 느리다. 값은 GcBench --package-profile로
+// 정했다: 80%는 패키지 사이 간선 100%(경계 약 88%)에서 표식을 클러스터 끔 수준으로 되돌리고 70%
+// 이하 그래프에는 차이가 없다. 70%로 낮추면 경계 70–80% 패키지 일부만 해체되어 오히려 느려졌다.
+inline constexpr uint32 ClusterFlattenBoundaryPercent = 80;
 // 작업 큐 항목의 클러스터 표지다(낮은 비트가 클러스터 번호, 표지가 없으면 슬롯 번호).
 inline constexpr uint32 ClusterItem = 1u << 31;
 enum class SlotState : uint8 {
@@ -349,6 +356,8 @@ struct ObjectRegistry::ClusterRecord {
     uint32 members = 0;
     uint32 memberHead = registry_detail::NoSlot;
     uint32 boundaryHead = registry_detail::NoSlot;
+    // 경계 고리의 소속 수다(경계 비율 안전장치가 읽는다).
+    uint32 boundaryMembers = 0;
     uint32 detachedHead = registry_detail::NoSlot;
     uint32 processedEpoch = 0;
     // 빈 레코드 목록·해체 대기 목록의 다음 번호다.

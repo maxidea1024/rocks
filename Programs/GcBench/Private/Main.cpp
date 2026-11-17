@@ -999,6 +999,10 @@ int RunPackageScenario(uint32 crossPercent, bool clusters, const Options& option
                 }
 
                 printf("  mark min %.3f ms\n", Milliseconds(fastest));
+                // 경계 비율 안전장치가 첫 Collect 끝에 해체한 패키지 클러스터 수(이후 반복은 그
+                // 상태다).
+                printf("  flattened clusters %u (first Collect), clusters left %u\n",
+                       reports[0].flattenedClusters, registry.Stats().clusters);
                 const GcWorkCounters& work = reports[0].work;
                 if (options.countWork) {
                     printf("  work: traced %llu, edges %llu, clustered edges %llu "

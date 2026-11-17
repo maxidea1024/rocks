@@ -121,6 +121,7 @@ void ObjectRegistry::LedgerEdgeLocked(uint32 owner, uint32 target, bool add) noe
     if (add) {
         if (from.outCount++ == 0) {
             LinkCellLocked(clusters_[id].boundaryHead, owner, true);
+            ++clusters_[id].boundaryMembers;
         }
 
         return;
@@ -132,6 +133,7 @@ void ObjectRegistry::LedgerEdgeLocked(uint32 owner, uint32 target, bool add) noe
 
     if (--from.outCount == 0) {
         UnlinkCellLocked(clusters_[id].boundaryHead, owner, true);
+        --clusters_[id].boundaryMembers;
     }
 }
 
@@ -281,6 +283,7 @@ void ObjectRegistry::DissolveClusterLocked(uint32 id) noexcept {
     record.members = 0;
     record.memberHead = NoSlot;
     record.boundaryHead = NoSlot;
+    record.boundaryMembers = 0;
     record.detachedHead = NoSlot;
     record.live = false;
     record.dissolved = true;
@@ -355,6 +358,30 @@ void ObjectRegistry::DissolveUnmarkedClustersLocked() noexcept {
             DissolveClusterLocked(id);
         }
     }
+}
+
+uint32 ObjectRegistry::FlattenBoundaryClustersLocked() noexcept {
+    // 패키지 클러스터만 대상이다. 엔진이 지정한 클러스터(World Level)는 가입을 엔진이 정하므로
+    // 남기고, 영구 영역은 표식·sweep을 하지 않는 것이 목적이다.
+    uint32 flattened = 0;
+    for (uint32 id = 0; id < clusterUsed_; ++id) {
+        const ClusterRecord& record = clusters_[id];
+        if (record.live && !record.designated && !record.permanent &&
+            uint64(record.boundaryMembers) * 100 >
+                uint64(record.members) * ClusterFlattenBoundaryPercent) {
+            DissolveClusterLocked(id);
+            ++flattened;
+        }
+    }
+
+    return flattened;
+}
+
+bool ObjectRegistry::IsFlattenedPackageLocked(const Slot& package) const noexcept {
+    // 패키지 정책에서 살아 있는 패키지 객체는 언제나 자기 클러스터의 루트다. 소속이 아니면
+    // 안전장치가 해체했다(파괴 요청·cutoff로 해체된 패키지는 Alive가 아니거나 cutoff다).
+    return package.state == SlotState::Alive && !IsCutoff(&package) &&
+           (ClusterStateOf(package.index) & ClusterMember) == 0;
 }
 
 void ObjectRegistry::DissolveAllClustersLocked() noexcept {
@@ -718,10 +745,16 @@ Result<void> ObjectRegistry::VerifyClusterLedger() noexcept {
             }
 
             members += counted;
+            uint32 boundary = 0;
             for (uint32 at = record.boundaryHead; at != NoSlot; at = CellOf(at).boundaryNext) {
-                if (ClusterStateOf(at) != (ClusterMember | id) || CellOf(at).outCount == 0) {
+                if (ClusterStateOf(at) != (ClusterMember | id) || CellOf(at).outCount == 0 ||
+                    ++boundary > record.members) {
                     platform::Fatal("Cluster boundary list holds a non-boundary object");
                 }
+            }
+
+            if (boundary != record.boundaryMembers) {
+                platform::Fatal("Cluster boundary count diverged from its boundary list");
             }
 
             for (uint32 at = record.detachedHead; at != NoSlot; at = CellOf(at).listNext) {

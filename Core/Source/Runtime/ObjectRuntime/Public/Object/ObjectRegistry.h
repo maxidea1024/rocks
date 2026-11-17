@@ -778,6 +778,13 @@ private:
     void DissolveClusterLocked(uint32 id) noexcept;
     // 잠금 보유: 표식되지 않은 클러스터를 모두 해체한다(cutoff·Collect sweep 직전).
     void DissolveUnmarkedClustersLocked() noexcept;
+    // 잠금 보유: 경계 비율이 registry_detail::ClusterFlattenBoundaryPercent를 넘는 패키지
+    // 클러스터를 해체하고 그 수를 돌려준다(경계 비율 안전장치 — cutoff, Collect sweep 뒤). 남은
+    // 클러스터는 모두 표식된 상태여야 한다.
+    uint32 FlattenBoundaryClustersLocked() noexcept;
+    // 잠금 보유: 안전장치로 클러스터를 해체한 패키지(살아 있는 루트가 소속이 아니다)인지 본다. 그
+    // 패키지의 새 객체는 클러스터에 가입하지 않는다.
+    bool IsFlattenedPackageLocked(const Slot& package) const noexcept;
     // 잠금 보유: slot이 영구 영역 소속인지다.
     bool IsPermanentLocked(uint32 slot) const noexcept;
     // 잠금 보유: 영구 소속 owner의 새 간선 target이 영구 객체가 아니면 Unsupported다(13.7절).
