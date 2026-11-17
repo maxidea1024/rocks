@@ -270,16 +270,23 @@ FileLogSink fileSink(allocator, file);
 
 ## 설정 파일로 고르기(LogHost)
 
-엔진 호스트는 `LogHost` 모듈로 설정 시스템의 `log.*` 콘솔 설정을 읽어 LogSystem과 sink를 만든다(Core는 Config·Crypto 아래라 이 모듈이 그 위에서 묶는다).
+엔진 호스트는 `LogHost` 모듈로 설정 시스템의 `log.*` 콘솔 설정을 읽어 LogSystem과 sink를 만든다(Core는 Config·Crypto 아래라 이 모듈이 그 위에서 묶는다). 설정 문맥은 `HostConfig` 모듈의 `HostSettings`가 만들고, `log.*` 등록(`RegisterLogSettings`)도 그 `Initialize`가 파일보다 먼저 한다(Docs/Design/ConfigSystem.ko.md 5.3·5.4절). 시작 뒤 고정 값(`log.mode`·`log.file.*`)은 `CompleteStartup`에서 확정되고, LogHost는 그 뒤에 읽기만 한다. 실제 호스트 코드는 `Programs/Sandbox/Private/EngineHost.cpp`다.
 
 ```cpp
-REQUIRE(RegisterLogSettings(context));                 // log.* 등록(모듈 등록 함수, 전역 생성자 없음)
-// ... 설정 파일 층을 넣고 context.Sync()
+HostSettings settings(allocator);                      // LogHost보다 먼저 선언(더 오래 산다)
+if (!settings.Initialize(boot) || !settings.LoadFiles() ||        // 1) 등록(log.*·trace.*) 2) 층 파일
+    !settings.AddFile(config::ConfigLayer::Project, "Engine", path) ||  // 3) --config
+    !settings.ApplyCommandLine(arguments) || !settings.CompleteStartup()) {  // 4) --set 5) 고정
+    return 2;                                          // 진단은 HostSettings가 비상 경로로 이미 남겼다
+}
 LogHost host(allocator);
-(void)host.Start(LogSystemConfig::ForEngineHost(), &context, "Sandbox");
-LogInstallScope installed(host.System());
-(void)host.Watch(context);                             // log.level·log.levels 변경을 sync 지점에서 적용
-(void)context.CompleteStartup();                       // 이후 log.mode·log.file.* 변경은 거부
+(void)host.Start(LogSystemConfig::ForEngineHost(), &settings.Context(), "Sandbox");
+{
+    LogInstallScope installed(host.System());
+    (void)host.Watch(settings.Context());              // log.level·log.levels 변경을 프레임 Sync에서 적용
+    // ... trace 세션 → 엔진 루프(프레임마다 Config Sync) → 엔진 정리 → trace 정지
+}
+host.Stop();                                           // WriterAbandoned()면 정리 없이 _Exit
 ```
 
 | 설정 | 종류 | 기본값 | 변경 |

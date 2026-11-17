@@ -127,6 +127,10 @@ struct Apply {
     Result<void> ResetAt(PropertyPath at) noexcept;
     // 정적 배열 struct 원소의 멤버마다 기본값으로 되돌린다(리플렉션 B9i3c3).
     Result<void> ResetMembers() noexcept;
+    // 더한 원소 블록 안의 참조 struct(at — 그 struct 값 경로, view — 그 스키마)를 멤버마다
+    // 기본값으로 되돌린다: 강한 참조는 null을 쓰고(복사할 수 없어 떼어 낼 수 없다), 강한 참조를
+    // 담은 struct 멤버는 재귀, 그 밖은 ResetAt이다(B9j–B9m 묶음 리뷰의 B9i5 우려).
+    Result<void> ResetReferenceMembers(StructView view, PropertyPath at) noexcept;
     Result<void> ReplaceContents(const TextValue& value) noexcept;
 };
 

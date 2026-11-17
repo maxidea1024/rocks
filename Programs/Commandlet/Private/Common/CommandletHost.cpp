@@ -1,8 +1,10 @@
 #include "CommandletHost.h"
 #include "LogCommandlet.h"
+#include <Config/ConfigDump.h>
 #include <Core/Diagnostics/LogSystem.h>
 #include <Core/Diagnostics/RuntimeLogSink.h>
 #include <Core/Memory/SystemAllocator.h>
+#include <HostConfig/HostSettings.h>
 #include <Platform/File.h>
 #include <TraceAnalysis/TraceModel.h>
 #include <TraceAnalysis/TraceReport.h>
@@ -158,7 +160,24 @@ int Run(Span<const StringView> args, CommandletOutput output) noexcept {
 
 namespace {
 
+// config-dump가 보는 설정 문맥이다. 엔진 호스트와 같은 부트(HostSettings — log.*·trace.*·
+// TracePresets 등록 → 엔진 층 파일 → CompleteStartup)를 거친다. 실행 파일 위에 Engine/Config가
+// 없으면 엔진 층 파일 없이 코드 기본값이다. 실패는 HostSettings가 기록했다(config-dump만 빠진다).
+bool BootSettings(HostSettings& settings) noexcept {
+    char engineDir[4096] = {};
+    HostSettingsOptions options;
+    if (auto found = FindEngineDirectory(Span<char>(engineDir)); found) {
+        options.engineDir = StringView(engineDir, found.Value());
+    }
+
+    return settings.Initialize(options).IsOk() && settings.LoadFiles().IsOk() &&
+           settings.CompleteStartup().IsOk();
+}
+
 int RunCommands(Span<const StringView> args, CommandletOutput output) noexcept {
+    SystemAllocator settingsAllocator;
+    HostSettings settings(settingsAllocator);
+    const bool settingsReady = BootSettings(settings);
     CommandletRegistry registry;
     auto registered = registry.Register(
         {"core-check", "Check the Core allocator lifecycle.", &CoreCheck, nullptr});
@@ -176,6 +195,12 @@ int RunCommands(Span<const StringView> args, CommandletOutput output) noexcept {
          &RunLogCommand, nullptr});
     if (!registered) {
         return 1;
+    }
+    if (settingsReady) {
+        registered = config::RegisterConfigDumpCommandlet(registry, settings.Context());
+        if (!registered) {
+            return 1;
+        }
     }
     auto result = registry.Run(args, output);
     if (!result) {

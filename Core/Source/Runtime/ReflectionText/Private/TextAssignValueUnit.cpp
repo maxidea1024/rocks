@@ -293,7 +293,76 @@ Result<void> Apply::ResetStruct() noexcept {
         return Result<void>::Success();
     }
 
+    // 더한 원소 블록 안의 참조 struct는 떼어 낼 수 없으므로(강한 참조는 복사할 수 없다) 멤버마다
+    // 되돌린다.
+    if (!box && added && !slot.structView.IsEmpty() && slot.structView.ContainsStrongReference()) {
+        return ResetReferenceMembers(slot.structView, relative);
+    }
+
     return ResetAt(relative);
+}
+
+Result<void> Apply::ResetReferenceMembers(StructView view, PropertyPath at) noexcept {
+    const usize count = at.steps.Size();
+    if (count >= MaxPropertyPathSteps) {
+        return Diagnostic(TextDiagnosticCode::Unsupported, "this element cannot be reset");
+    }
+
+    PathStep steps[MaxPropertyPathSteps];
+    for (usize index = 0; index < count; ++index) {
+        steps[index] = at.steps[index];
+    }
+
+    FieldValue none(state.allocator);
+    none.kind = ValueKind::ObjectReference;
+    FreshFailure fresh(state);
+    const auto& members = view.Schema().fields;
+    for (usize index = 0; index < members.Size(); ++index) {
+        const FieldSchema& member = members[index];
+        steps[count] = PathStep{};
+        steps[count].fieldId = member.id;
+        const PropertyPath memberPath{Span<const PathStep>(steps, count + 1), at.keys};
+        if (member.value.kind == ValueKind::ObjectReference) {
+            if (auto written =
+                    PathWrite(Registry(), Access(), Start(), memberPath, none, nullptr, &failure);
+                !written) {
+                return Failed(written.Error());
+            }
+
+            continue;
+        }
+
+        if (member.value.kind == ValueKind::StaticArray &&
+            member.element.kind == ValueKind::ObjectReference) {
+            steps[count].selector = PathSelector::Index;
+            for (uint32 element = 0; element < member.maxElements; ++element) {
+                steps[count].index = element;
+                if (auto written = PathWrite(Registry(), Access(), Start(), memberPath, none,
+                                             nullptr, &failure);
+                    !written) {
+                    return Failed(written.Error());
+                }
+            }
+
+            continue;
+        }
+
+        const StructView nested = view.FieldStruct(index);
+        if (member.value.kind == ValueKind::Struct && !nested.IsEmpty() &&
+            nested.ContainsStrongReference()) {
+            if (auto reset = ResetReferenceMembers(nested, memberPath); !reset || state.failed) {
+                return reset;
+            }
+
+            continue;
+        }
+
+        if (auto reset = ResetAt(memberPath); !reset || state.failed) {
+            return reset;
+        }
+    }
+
+    return Result<void>::Success();
 }
 
 Result<void> Apply::ResetAt(PropertyPath at) noexcept {

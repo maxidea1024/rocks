@@ -90,21 +90,8 @@ struct Importer {
 
 // 지금 경로의 텍스트다(진단 경로). 쓸 수 없는 key(resolver가 쓰지 못한 Soft 등)면 빈 텍스트다.
 Result<void> Importer::PathText(String& out) noexcept {
-    out.Clear();
-    if (path.Depth() == 0) {
-        return Result<void>::Success();
-    }
-
-    auto formatted = FormatPropertyPath(state.lease, path.View(), out, &Context().KeyHook());
-    if (!formatted) {
-        if (formatted.Error() == ErrorCode::OutOfMemory) {
-            return formatted;
-        }
-
-        out.Clear();
-    }
-
-    return Result<void>::Success();
+    // InstancedStruct 내용 멤버도 쓰도록 묶음의 준비 상태 resolver로 쓴다(리플렉션 B9j).
+    return detail::FormatAssignmentPath(state, path.View(), out);
 }
 
 Result<void> Importer::Report(TextDiagnosticCode code, JsonValue at, StringView message) noexcept {

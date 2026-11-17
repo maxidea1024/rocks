@@ -294,6 +294,17 @@ Result<bool> PreparedContains(AssignmentState& state, PropertyPath path) noexcep
 Result<void> PreparedInstancedType(AssignmentState& state, PropertyPath path,
                                    TypeLease& out) noexcept;
 
+// 대입 묶음의 경로 path(대상 기준)가 가리키는 자리를 out에 쓴다(DescribeTextPath + 준비 상태
+// resolver — InstancedStruct 뒤 멤버 단계를 그 자리의 준비된 담긴 struct로 푼다, 리플렉션 B9j).
+// 오류: DescribeTextPath와 같다.
+Result<void> DescribeAssignmentPath(AssignmentState& state, PropertyPath path,
+                                    TextSlot& out) noexcept;
+
+// 대입 묶음의 경로 path(대상 기준)의 정규 텍스트를 out에 쓴다(진단 경로 — FormatPropertyPath +
+// 문맥 KeyHook + 준비 상태 resolver라 InstancedStruct 내용 멤버도 쓴다). 쓸 수 없는 경로(resolver가
+// 풀지 못한 단계·쓰지 못한 key)는 빈 텍스트다. 오류: 할당 실패.
+Result<void> FormatAssignmentPath(AssignmentState& state, PropertyPath path, String& out) noexcept;
+
 // 값 단위의 ReadOnly 자리마다 상자의 값이 대상의 지금 값과 같은지 깊게 대조하고, 다르면 진단
 // ReadOnly를 남긴다(리플렉션 B9i 리뷰 반영 — PrepareAssignments·Append·ImportJson이 호출 끝에
 // 부른다). 대조한 자리 목록은 비운다. 오류: 호출 오류(할당·대상 문맥).

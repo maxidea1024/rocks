@@ -381,6 +381,56 @@ Result<void> PathCursor::CaptureText(const String& text, const AssetId* asset, F
     return CheckOwner();
 }
 
+Result<void> PathCursor::ReadTextValue(const Text& text) noexcept {
+    FieldValue candidate(output_->GetAllocator());
+    candidate.kind = ValueKind::Text;
+    // Read는 처음부터 고정을 쥐므로 이 할당의 콜백이 text를 바꾸면 Busy다.
+    auto copied = text.DeepClone(candidate.GetAllocator());
+    if (!copied) {
+        return Fail(copied.Error());
+    }
+
+    candidate.text = Move(copied.Value());
+    return PublishRead(candidate);
+}
+
+Result<void> PathCursor::WriteTextValue(Text& text) noexcept {
+    if (auto pinned = Pin(); !pinned) {
+        return pinned;
+    }
+
+    auto replacement = input_->text.DeepClone(ValueAllocator());
+    if (!replacement) {
+        return Fail(replacement.Error());
+    }
+
+    FieldValue captured(output_ ? output_->GetAllocator() : ValueAllocator());
+    if (output_) {
+        captured.kind = ValueKind::Text;
+        auto previous = text.DeepClone(captured.GetAllocator());
+        if (!previous) {
+            return Fail(previous.Error());
+        }
+
+        captured.text = Move(previous.Value());
+    }
+
+    if (auto alive = CheckOwner(); !alive) {
+        return alive;
+    }
+
+    // 게시: 노드 포인터 교환(할당·반환 없음)이다. 옛 노드는 고정을 푼 뒤 반환한다.
+    Text old = Move(text);
+    text = Move(replacement.Value());
+    pin_.Reset();
+    old.Reset();
+    if (output_) {
+        *output_ = Move(captured);
+    }
+
+    return Result<void>::Success();
+}
+
 Result<void> PathCursor::WriteText(String& text, AssetId* asset) noexcept {
     const FieldValue& value = *input_;
     if (asset) {

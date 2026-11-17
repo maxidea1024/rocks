@@ -9,6 +9,7 @@ using namespace rocks;
 using namespace rocks::reflection_text;
 using namespace rocks::test::assign;
 using reflection_fixture::AssignHolder;
+using reflection_fixture::AssignNestHolder;
 using reflection_fixture::AssignTarget;
 
 namespace {
@@ -317,4 +318,34 @@ TEST(TextAssign_ContainerPublishSkipsRetainedTargets) {
     Array<ReferenceEdgeDelta> changes = fixture.Take();
     REQUIRE(changes.Size() == 1);
     CHECK(changes[0].targetPackage == second.Handle() && changes[0].delta == -1);
+}
+
+// 추가된 StructRefArray 원소 안의 참조 struct 멤버(AssignNest::mixed)도 `{}`로 기본값을 쓰고 그
+// 멤버를 대입할 수 있다(B9j–B9m 묶음 리뷰의 B9i5 우려 확인).
+TEST(TextAssign_AddedElementNestedReferenceStructReset) {
+    SystemAllocator system;
+    Fixture fixture(system);
+    auto created = fixture.objects.NewObject<AssignNestHolder>(
+        fixture.Access(), GeneratedType<AssignNestHolder>::Schema().id);
+    REQUIRE(created);
+    RootRef<AssignNestHolder> root = Move(created.Value());
+    const TextAssignment inputs[] = {Set("nests[0]", "{}"), Set("nests[0].n", "4", 1),
+                                     Set("nests[0].mixed", "{}", 2),
+                                     Set("nests[0].mixed.weight", "9", 3)};
+    auto prepared =
+        PrepareAssignments(AssignmentTarget::Live(fixture.objects, fixture.Access(), root.Handle()),
+                           inputs, fixture.options, fixture.diagnostics);
+    for (usize index = 0; index < fixture.diagnostics.Count(); ++index) {
+        CHECK(fixture.diagnostics.Get(index).code != TextDiagnosticCode::Unsupported);
+    }
+
+    REQUIRE(prepared);
+    REQUIRE(prepared.Value().Publish());
+    auto borrowed = fixture.objects.Resolve<AssignNestHolder>(fixture.Access(), root.Handle());
+    REQUIRE(borrowed);
+    auto value = borrowed.Value().Get();
+    REQUIRE(value);
+    REQUIRE(value.Value()->nests.Size() == 1);
+    CHECK(value.Value()->nests[0].n == 4);
+    CHECK(value.Value()->nests[0].mixed.weight == 9);
 }

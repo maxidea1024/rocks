@@ -398,7 +398,7 @@ Result<void> AddOverride(AssignmentState& state, PropertyPath path) noexcept {
     for (usize index = 0; index < path.steps.Size(); ++index) {
         TextSlot slot;
         const PropertyPath prefix{Span<const PathStep>(path.steps.Data(), index + 1), path.keys};
-        if (auto described = DescribeTextPath(state.lease, prefix, slot); !described) {
+        if (auto described = DescribeAssignmentPath(state, prefix, slot); !described) {
             return described;
         }
 

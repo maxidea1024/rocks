@@ -496,6 +496,27 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::AssignNest::mixed",
+      "id": "39195a9e481e4c0782f40cc841e58cb2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::AssignNest::n",
+      "id": "51837c964e254a9a81d28ac62d58421c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::AssignNestHolder::nests",
+      "id": "0691915e170b4794b0d228f235d1f95e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::AssignPoint::x",
       "id": "04d63c64e9df4c0c8848490471163bd6",
       "aliases": [],
@@ -1469,6 +1490,20 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::InheritNestedBase::inner",
+      "id": "426166cda1224ef48c60d6ff811b808a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::InheritNestedLeaf::z",
+      "id": "0b8cbe91fab14e0395a09329df739447",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::InheritOffset::d",
       "id": "cf3342f1efc845398d8d3dfd8784d4ae",
       "aliases": [],
@@ -1478,6 +1513,20 @@
       "kind": "field",
       "name": "rocks::reflection_fixture::InheritOther::q",
       "id": "4b8196ca718c4904bf3cdd5532db2bfa",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::InheritPrivateBase::secret",
+      "id": "7835f7efb7bb4fac845192a524f84293",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::InheritPrivateLeaf::open",
+      "id": "f271771c1d7e44aba551f082e0d2717e",
       "aliases": [],
       "retired": false
     },
@@ -1506,6 +1555,13 @@
       "kind": "field",
       "name": "rocks::reflection_fixture::InheritRequiredLeaf::m",
       "id": "4870fc331d08408d8b02a7dc14f934f2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::InheritShapeChild::extra",
+      "id": "57a92636862c449da24ec20bd7c95d2d",
       "aliases": [],
       "retired": false
     },
@@ -1651,6 +1707,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::InstancedHolder::hosts",
+      "id": "02712723509b4a1189a58eec937fa871",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::InstancedHolder::list",
       "id": "43413e43d8f44877a8c4d1ce258ab3fe",
       "aliases": [],
@@ -1660,6 +1723,13 @@
       "kind": "field",
       "name": "rocks::reflection_fixture::InstancedHolder::locked",
       "id": "ed92630d9e8b405f90fd61631fb012cc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::InstancedHolder::slots",
+      "id": "892b25aa1ec74d6fb8766a466a54a63a",
       "aliases": [],
       "retired": false
     },
@@ -1700,6 +1770,20 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::InstancedLocked::fixed",
+      "id": "fd960655c8824968915140358ff0ad91",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::InstancedLocked::free",
+      "id": "4c71fab94b864a57b87e83d81eed631a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::InstancedNested::inner",
       "id": "b4cd1b730e694e138ad66d7f45fc1705",
       "aliases": [],
@@ -1723,6 +1807,13 @@
       "kind": "field",
       "name": "rocks::reflection_fixture::InstancedPoint::y",
       "id": "7db73d6ca6d0439f8115170327105670",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::InstancedRefArrayHolder::refs",
+      "id": "2898b33c725640379a6dbf163fc0fa4c",
       "aliases": [],
       "retired": false
     },
@@ -1765,6 +1856,13 @@
       "kind": "field",
       "name": "rocks::reflection_fixture::InstancedVersioned::value",
       "id": "834a1098004d49629ffa2de0d157a653",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::InstancedWorldBound::v",
+      "id": "67ec8166326247028912f4d6dfdc7e3f",
       "aliases": [],
       "retired": false
     },
@@ -3480,6 +3578,20 @@
     },
     {
       "kind": "type",
+      "name": "rocks::reflection_fixture::AssignNest",
+      "id": "cadf8459475b4eefbf91f6dcccf02aac",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::AssignNestHolder",
+      "id": "949ff40232ca4249a3015efe5e92edbb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::reflection_fixture::AssignPoint",
       "id": "dbae8f09d9a4495a8a665beb9110e24e",
       "aliases": [],
@@ -3802,6 +3914,20 @@
     },
     {
       "kind": "type",
+      "name": "rocks::reflection_fixture::InheritNestedBase",
+      "id": "cba134a0c0fa47698d348958ee5f36ff",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::InheritNestedLeaf",
+      "id": "b616cbfca453409c998d3402f71a5efc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::reflection_fixture::InheritOffset",
       "id": "299d97b8171c4d5993300562cd69fe2b",
       "aliases": [],
@@ -3811,6 +3937,20 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::InheritOther",
       "id": "0640bdf53ede40b1ba06f53e6e9e15a0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::InheritPrivateBase",
+      "id": "b5641ec29c1e4775ba32a2dba6581f25",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::InheritPrivateLeaf",
+      "id": "c45624f21dea431db52840f8a31ab899",
       "aliases": [],
       "retired": false
     },
@@ -3839,6 +3979,13 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::InheritRequiredLeaf",
       "id": "467dca36a3134a20bc573386e14daa2a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::InheritShapeChild",
+      "id": "57dd9cfff6d543eba33888b4969eda09",
       "aliases": [],
       "retired": false
     },
@@ -3977,6 +4124,13 @@
     },
     {
       "kind": "type",
+      "name": "rocks::reflection_fixture::InstancedLocked",
+      "id": "5b893d27a14e437c806c21b4e8561fef",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::reflection_fixture::InstancedNested",
       "id": "9c4e0aa48e41452cb5a576c6941d86dc",
       "aliases": [],
@@ -3986,6 +4140,13 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::InstancedPoint",
       "id": "bafb7e553b724b18a61cffc8a939aa8e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::InstancedRefArrayHolder",
+      "id": "b44ac859aacb476993447b755e1b6678",
       "aliases": [],
       "retired": false
     },
@@ -4014,6 +4175,13 @@
       "kind": "type",
       "name": "rocks::reflection_fixture::InstancedVersioned",
       "id": "2adf8b878f534cb2a8c30ebb0e59f854",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::reflection_fixture::InstancedWorldBound",
+      "id": "14d55a96a96041479d2e96183bd0b23e",
       "aliases": [],
       "retired": false
     },

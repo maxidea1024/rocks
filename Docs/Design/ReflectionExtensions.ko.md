@@ -136,7 +136,7 @@ MetaCompiler(C#)와 런타임(C++)의 표 대조: MetaCompiler가 "모든 종류
 - "통째 FieldValue"가 ×인 종류는 aggregate다(read·write·writeStaged가 null, 경로 연산으로만 쓴다 — RF 3.6절 규칙을 넓힌다). Optional은 내부가 ○면 비aggregate, 값 struct면 aggregate다.
 - 직접 중첩만 막는다. 값 struct가 Array·Map 멤버를 담고 그 struct가 원소가 되는 간접 중첩은 지금처럼 허용한다(UE도 직접 중첩만 막는다 — 18.7절).
 - Optional 내부에서 참조를 막는 이유: 참조는 이미 null이 "없음"이다(SL 24행 "없음은 하나다", SL 1198행 SD19).
-- InstancedStruct 내용으로 받는 struct는 11절 조건(강한 참조·Registry 컨테이너·InstancedStruct·Required 없음)을 지켜야 한다.
+- InstancedStruct 내용으로 받는 struct는 11절 조건(강한 참조·Registry 컨테이너·InstancedStruct·Required 없음, WorldOnly 소유자 요구 없음 — B9j 구현에서 더한 조건)을 지켜야 한다.
 
 구현(B9a1, 동작 불변)에서 정한 점:
 
@@ -1042,7 +1042,7 @@ public:
 - 값 종류 `InstancedStruct` = 28(`ValueKindCount` 29). 성질 표 행은 단일·멤버·Array 원소·StaticArray 원소·Map 값·대상 타입 있음(대상 ID 선택 — Base, 0 = 제한 없음)이고 통째 FieldValue가 아니다(늘 aggregate). Required·키·Set 원소·Optional 내부·InstancedStruct 내용은 ×다. B9j는 value.type = 0만 받는다: TypeRegistry는 InstancedStruct 대상 type ≠ 0을 자리와 무관하게 Unsupported로 거부한다(B9k가 Base 해석으로 연다). MetaCompiler는 Clang 정규 철자 `rocks::InstancedStruct<>`·`rocks::InstancedStruct<void>`를 대상 없는 값 종류로 푼다(`SchemaValidator.Scalars` — 그래서 `SourceValueKinds` = 성질 표 Array 원소 열이 그대로 성립하고 Required RMC2202·Optional 내부 RMC2306·키·Set 원소 RMC2305는 표 판정으로 난다). `InstancedStruct<Base>` 철자는 B9k까지 RMC2000(지원하지 않는 형식)이다.
 - 값 타입 Object/InstancedStruct.h: TypeLease + 값 블록 + allocator, 이동 전용, `TryClone`·`Reset`·`IsEmpty`·`Type()`·`View()`·`Get<S>()`(native 키 대조). **스펙과 다른 점**: `Emplace<S>(Allocator&)`는 lease를 얻을 TypeRegistry가 필요해 `Emplace<S>(TypeRegistry&, Allocator&)`로 했다(`AcquireStructByNative`). lease 판 `Emplace(TypeLease, Allocator&)`는 lease를 소비한다. 둘 다 실패하면 값은 그대로다. `InstancedStruct<Base>`는 B9j에서 static_assert로 막는다.
 - 담기 조건의 판정 하나 `detail::CheckInstancedStructContent`(Emplace·경로 형 바꾸기·decode 1단계·encode): 스펙의 넷(강한 참조·Registry 컨테이너·InstancedStruct·Required)에 **WorldOnly 소유자 요구(`RequiresWorldOnlyOwner`)를 더했다** — 담긴 타입은 실행 중에 정해지므로 소유 객체 클래스로 그 NATIVE 형질을 판정할 수 없다. 새 등록 형질 `StructView::ContainsInstancedStruct`(멤버·원소 배열·정적 배열·Map 값·중첩 struct에서 전파, Transient 포함)와 생성 형질 `GeneratedType<S>::ContainsInstancedStruct`·`ContainsRequired`(MetaCompiler가 같은 규칙으로 계산 — `Emplace<S>`의 static_assert가 쓴다)를 더했다. Registry 컨테이너는 강한 참조를 담으므로 `ContainsStrongReference`가 이미 막는다(`ContainsReferenceArray`도 함께 본다).
-- 깊이 합 `detail::CheckInstancedStructDepth(position, view)`: codec의 위치 깊이는 `FieldCodecContext::PositionDepth()`(프레임 사슬 길이 − 1 — 배열 원소·Map 항목은 프레임을 더하지 않는다), 경로의 위치 깊이는 끝 단계 index(struct 값 시작 위치면 + 1)다. 상자(DetachedValue) 시작 위치는 원래 깊이를 모르므로 0으로 보고, 깊은 자리로 되돌린 위반은 저장(encode)이 InvalidArgument로 드러낸다.
+- 깊이 합 `detail::CheckInstancedStructDepth(position, view)`: codec의 위치 깊이는 `FieldCodecContext::PositionDepth()`(프레임 사슬 길이 − 1 — 배열 원소·Map 항목은 프레임을 더하지 않는다), 경로의 위치 깊이는 끝 단계 index(struct 값 시작 위치면 + 1)다. 상자(DetachedValue) 시작 위치는 분리할 때 기록한 원래 자리의 위치 깊이(`DetachedValue::position_` — 상자에서 다시 분리하면 이어 받는다)에서 센다(B9j–B9m 묶음 리뷰 S1 반영 — 처음 구현은 0으로 봐서 대입 묶음이 깊은 자리의 위반을 받은 뒤 저장이 실패했다).
 - codec 사슬 넷째 조각 Object/InstancedStructFieldCodec.h(StructFieldCodec 다음, ArrayFieldCodec 앞): `EncodeInstancedStructField`·`EncodeInstancedStructElement`(PrefixedRecordWriter)·`DecodeInstancedStructField`·`DecodeInstancedStructElement`. 담긴 struct의 Record는 struct 필드와 같은 `EncodeStructRecord`·`DecodeStructValue`(Record 내용 출처 — `OpenRecordBytes`)로 쓰고 읽는다. 마이그레이션·Atomic 판정이 프레임의 structure 칸을 읽으므로 새 RAII `InstancedContentScope`가 InstancedStruct 필드 프레임의 structure를 담긴 struct view로 채운다(프레임을 더하지 않는다 — 진단 경로는 `[f]`·`[f[i]]`·`[f, m]`). Array·정적 배열·Map codec에 InstancedStruct 원소·값 갈래를 더했다(원소마다 u64 길이 + 내용, 관찰 자리는 InvalidArgument).
 - decode 두 단계: 1단계는 문맥의 새 가상 `AcquireInstancedStructType`(그래프는 `TypeRegistry::AcquireValueType(id, Struct)` — 조회 몫 1 청구)으로 판정하고 `CollectInstancedStruct(stored, lease)`로 노드 기록(`LoadNode::instanced`)에 lease를 보관한다(미등록을 정책으로 비우면 빈 lease). 2단계는 `TakeInstancedStruct`로 그 lease를 값으로 **옮긴다**(TypeRegistry를 다시 조회하지 않고 lease 복제도 하지 않으므로 할당 말고는 실패하지 않는다 — 그래서 `ApplyNodeFields`는 노드 배열을 non-const로 받고 한 번만 부른다). 2단계는 자리가 같은 타입이면 그 값 위에(누락 멤버 = 지금 값), 다르면 그 타입 기본 값 위에 적용한다. 정책 `FieldDecodePolicy::unknownStructType`(`UnknownStructTypePolicy::Reject`·`ReportAndClear`)과 진단 `FieldDiagnosticKind::UnknownStructType`(valueType = 저장 struct ID)을 더했다. ReportAndClear는 진단 받을 곳이 없으면 InvalidArgument다(ClassRef ReportAndNull과 같다). struct가 아닌 레코드는 InvalidArgument다.
 - 관찰 struct 제한: InstancedStruct를 담은 struct는 `ObservedStructs`에 둘 수 없다(InvalidArgument — 1단계 임시 값에 담긴 타입의 lease를 둘 곳이 없다). 담긴 struct 자신은 관찰할 수 있다(임시 값).
@@ -1112,7 +1112,7 @@ public:
 - ByteOffset·ByteMask는 두지 않는다(RF 원칙 "raw offset 공개 없음"). 비트 배치는 컴파일러가 처리한다. UE는 0으로 채운 버퍼에 SetBit을 불러 바이트를 찾는다(PropertyBool.cpp:98-117).
 - descriptor 필드 `"bitfield": true`: 의존 모듈이 상속 필드 thunk를 만들 때 base의 접근자를 부르기 위해서다. 런타임 `FieldSchema`는 바뀌지 않는다.
 - wire Bool, 경로·텍스트·차이 저장은 bool과 같다.
-- NATIVE bitfield: 지금은 NATIVE·PROPERTY 모두 bitfield를 거부한다(MC/ClangAstParser.cs `Visit`의 NATIVE·PROPERTY 멤버 `isBitfield` 검사). NATIVE bitfield는 정수·`bool` 모두 허용하고(강한 참조를 담을 수 없다), 탐침은 쓰지 않는다(정수·bool 형식인지만 AST로 본다). RMC2207은 PROPERTY와 Binds 미러에만 건다(UHT도 UPROPERTY만 본다).
+- NATIVE bitfield: B9m 전에는 NATIVE·PROPERTY 모두 bitfield를 거부했다. NATIVE bitfield는 정수·`bool` 모두 허용하고(강한 참조를 담을 수 없다), 탐침은 쓰지 않는다(정수·bool 형식인지만 AST로 본다). 정수·bool이 아닌 NATIVE bitfield(enum 등)는 RMC2207이다(B9m 구현에서 정한 범위 — 그 밖의 RMC2207은 PROPERTY와 Binds 미러에만 건다. UHT도 UPROPERTY만 본다).
 - Binds 미러 안 bitfield는 RMC2207이다(`VerifyBinds`가 `decltype(Real::m)`·`&Real::m`·구조적 바인딩을 쓴다 — CppEmitter.cs:434-461. Core 값 타입에는 bitfield가 없다).
 
 구현(B9m)에서 정한 점:
@@ -1129,7 +1129,7 @@ public:
 |---|---|---|
 | RMC2202(확장) | MetaCompiler | 지정자-종류 불일치에 새 경우를 더한다: Required는 ClassRef와 그 컨테이너·참조 StaticArray·ObjectRefMap 값·Soft·ClassRef 원소 Set까지(WeakRef·Name·Optional·InstancedStruct·Text는 거부), MaxElements는 Map·Set까지(StaticArray는 거부), Required + DuplicateTransient·NonPIEDuplicateTransient 조합 거부. 타입 지정자를 다른 매크로에 쓰면 매크로별 지정자 표에 없으므로 지금의 "모르는 지정자" 오류다 |
 | RMC2203(확장) | MetaCompiler | 타입 도구 이름의 형식·대소문자 무시 중복(모듈과 import 범위), `none` 예약 |
-| RMC2207(새) | MetaCompiler | PROPERTY·Binds 미러의 bitfield 규칙 위반(NATIVE bitfield는 정수·bool 모두 허용): 폭 ≠ 1, `bool : 1`, 부호 있는 정수·enum·실수 bitfield, Binds 미러 안 bitfield |
+| RMC2207(새) | MetaCompiler | PROPERTY·Binds 미러의 bitfield 규칙 위반과 정수·bool이 아닌 NATIVE bitfield(NATIVE bitfield는 정수·bool 모두 허용 — B9m 구현): 폭 ≠ 1, `bool : 1`, 부호 있는 정수·enum·실수 bitfield, Binds 미러 안 bitfield |
 | RMC2208(새) | MetaCompiler | `Within` 오류: 대상이 리플렉션 클래스가 아님, 부모 Within의 파생이 아님, 철자를 풀 수 없음 |
 | RMC2209(새) | MetaCompiler | Deprecated가 아닌 타입의 필드가 Deprecated 클래스를 가리킴 |
 | RMC2301(뜻 변경) | MetaCompiler | struct 상속 규칙 위반: 리플렉션 base 둘 이상, 필드 있는 비리플렉션 base, virtual·non-public base, virtual 함수, Binds 미러가 base이거나 base를 가짐 |
@@ -1454,7 +1454,7 @@ U5의 Deprecated 저장 범위: UE의 저장 불가 판정은 패키지 저장 �
 17. ReflectionText는 새 모듈, 용도별 출력·입력 제외 플래그(UE `ShouldPort` 대응, Edit 입력은 Transient만 제외), 대입 묶음은 Prepare → 들여다보기·덧붙이기 → Publish. Prepare·Append가 새 대상을 고정하고, Publish는 변경 표지 확인 → 묶음 구간에서 대상 재확인·관찰자 묶음 예약 → 무할당 게시다. 그래서 게시 단계는 실패하지 않는다(10절, 조정자 결정 2026-11-15).
 18. 명령행 대입 종류 Set·Unset·Erase, `none`은 참조·ClassRef·InstancedStruct null 전용, Flags는 `+`, escape 표는 하나(10.4절).
 19. JSON import는 struct 병합·그 밖 통째 교체, Map은 선택 `MergeByKey`(10.4절).
-20. InstancedStruct 내용은 참조·Registry 컨테이너·InstancedStruct·Required가 없는 struct, 위치 깊이 + 내용 깊이 ≤ 16(11절).
+20. InstancedStruct 내용은 참조·Registry 컨테이너·InstancedStruct·Required·WorldOnly 소유자 요구(`RequiresWorldOnlyOwner`)가 없는 struct, 위치 깊이 + 내용 깊이 ≤ 16(11절).
 21. struct 상속은 펼침, 리플렉션 base 하나 + 필드 없는 비리플렉션 base, struct 멤버 thunk는 소유자 명시(12절).
 22. Text는 잎 셋 + 형태 byte, Registry 경계·FieldValue 반출은 DeepClone(13절).
 23. bitfield는 생성 접근자, offset 없음, NATIVE bitfield 허용(14절).
@@ -1490,7 +1490,7 @@ U5의 Deprecated 저장 범위: UE의 저장 불가 판정은 패키지 저장 �
 - B9j가 남긴 일(맡을 단계):
   - `InstancedStruct<Base>`(Base 해석·파생 판정·RMC2308) → B9k에서 했다(12절 "구현(B9k)에서 정한 점" — 파생 판정은 `IsStructA` 대신 `TypeLease::IsA`).
   - 차이 저장(같은 타입이면 기준 대비 멤버 차이 — UE 방식, 11절)과 InstancedStruct 안 멤버의 override 경로(지금은 InstancedStruct에서 자른 통째 단위) → A5.
-  - 상자(DetachedValue)에서 시작한 형 바꾸기의 깊이 합은 위치 깊이를 0으로 본다(원래 자리를 모른다 — 저장이 위반을 InvalidArgument로 드러낸다). 상자가 원래 깊이를 들고 다닐지는 CU4(Undo·붙여넣기)가 정한다.
+  - 상자(DetachedValue)에서 시작한 형 바꾸기의 깊이 합: 상자가 원래 자리의 위치 깊이를 기록하도록 고쳤다(B9j–B9m 묶음 리뷰 S1).
   - 객체 문맥 판 문자열 경로는 상자 시작 위치를 받지 않는다(Unsupported).
 - B9k가 남긴 일(맡을 단계):
   - base 배치 변경 때 파생 버전 올림은 강제하지 않는다(12절 "구현(B9k)에서 정한 점"). 표현이 바뀐 base 필드의 마이그레이션 지원(파생마다 Migrate를 쓰지 않고 base 쪽 하나로)은 그런 소비자(Sparks 데이터 테이블 행 base)가 생길 때.
@@ -1500,6 +1500,7 @@ U5의 Deprecated 저장 범위: UE의 저장 불가 판정은 패키지 저장 �
   - Integer·Format 이력의 영속(문자열 표·Format 이력 영속은 위 항목) — 지금은 encode Unsupported.
 - B9m이 남긴 일(맡을 단계):
   - bitfield bool의 Optional·배열·Map 자리는 C++에서 만들 수 없으므로 없다. 폭이 1보다 큰 정수 bitfield PROPERTY(UE도 받지 않는다)는 소비자가 생길 때.
+  - 다른 모듈 파생의 상속 bitfield는 MetaCompiler 시험(`Meta.ImportedBitfieldUsesBaseAccessors` — 생성 헤더가 검증 컴파일을 통과)까지만 본다. 런타임 그래프 왕복은 두 리플렉션 모듈을 묶는 시험 fixture 구성이 필요해 그런 시험 모듈 구성이 생길 때 더한다.
 - 경로 key 텍스트의 제어 문자: 따옴표 안 escape는 `\\`·`\"`·`\n`·`\r`·`\t`뿐이라(1.5절, 사용자 결정 2026-11-16) 그 밖의 제어 문자(0x00–0x1F 중 셋을 뺀 것, 0x7F)를 담은 String·Name 키는 문자열 경로로 쓸 수 없다(FormatPropertyPath Unsupported — PathKey로는 다룬다). UE에 없는 `\u` 표기를 둘지는 그런 키를 쓰는 소비자(asset-info 출력)가 생길 때 정한다.
 
 ## 21. 문서 반영 목록
@@ -1683,3 +1684,19 @@ U5의 Deprecated 저장 범위: UE의 저장 불가 판정은 패키지 저장 �
 | L14 | 낡은 용어·위치·행 | 반영: PathWriteBatch → 대입 묶음 게시, FieldCodecHooks.h, LinkerLoad 6122-6131·6146-6154, `CollectInners`는 그대로이고 A1이 `IsUnsaveableObject`로 거름(1.6·4.1·9.2·18.9·21절) |
 | 참고 1 | MutationStamp와 C++ 직접 쓰기 | 반영: 계약 한 줄(10.2절) |
 | 참고 2 | Sparks SaveGame 표시 주체 | 반영: 20절 열린 문제 |
+
+B9j–B9m 묶음 리뷰(2026-11-18 — 코드만 읽은 리뷰, 각 항목은 시험으로 먼저 재현한 뒤 고쳤다):
+
+| 지적 | 요지 | 처리 |
+|---|---|---|
+| I1 | 파생 struct 깊은 복사가 base의 NATIVE 멤버를 기본값으로 되돌린다(생성 CopyValue가 파생 모델의 필드·자기 NATIVE만 복사) | 재현됨. 생성 CopyValue가 base 하위 객체를 `GeneratedType<Base>::CopyValue`로 먼저 복사하고 자기 멤버만 복사한다(import base도 base 생성 헤더의 CopyValue를 쓴다). 시험 `StructInheritance_DeepCopyKeepsBaseMembers`·`TextInstanced_DerivedUnitKeepsBaseNativeMembers` |
+| I2 | Text 경로 쓰기(struct 멤버·원소·Map 값)가 고정 없이 DeepClone해 할당 콜백 재진입이 live 값을 바꿀 수 있다 | 재현됨(재진입 쓰기·원소 삭제가 Busy가 아니었다). `PathCursor::ReadTextValue`·`WriteTextValue`(String WriteText와 같은 순서 — 고정 → 새 값·옛 값 DeepClone → owner 재확인 → 노드 교환 → 고정 해제 → 옛 노드 반환). 시험 `TextGraph_PathWritesPinWhileAllocating` |
+| I3 | InstancedStruct 내용 안 ReadOnly 멤버 대입이 진단 없이 InvalidArgument | 재현됨. 대입 묶음의 경로 해석·진단 경로를 묶음 resolver로 한다(`DescribeAssignmentPath`·`FormatAssignmentPath`, `DescribeTextPath`의 resolver 인자). 시험 `TextInstanced_ReadOnlyContentMembers` |
+| S1 | 상자 위 형 바꾸기의 깊이 합이 상자 시작 위치 깊이를 0으로 본다 | 시험(`hosts[0].value`·`slots[1].value`에 깊이 16)으로는 재현되지 않았다 — 수정 없이도 InvalidValue로 거부되었다. 상자의 위치 깊이 계산은 코드상 리뷰 지적대로 0이었으므로 `DetachedValue`가 원래 자리의 위치 깊이를 기록하고 경로 실행기가 더하도록 고쳤고(11절 문장 수정), 같은 시험 `TextInstanced_BoxDepthSumUsesOriginalPosition`을 회귀 방지로 둔다 |
+| S2 | JSON import 진단 경로가 InstancedStruct 내용 멤버에서 빈 문자열 | I3과 같은 `FormatAssignmentPath`로 고쳤다(같은 시험이 경로 `value.fixed`를 확인) |
+| S3 | import base 범위 검사 | 고치지 않는다(조정자 결정 — 20절 B9k가 남긴 일) |
+| S4 | base private 리플렉션 멤버를 파생 생성 코드가 접근 | 재현되지 않았다: `ROCKS_GENERATED_BODY`가 모든 `GeneratedType` 특수화를 friend로 두므로 base를 거친 이름 접근이 허용된다(fixture `InheritPrivateBase`·`InheritPrivateLeaf`가 컴파일되고 복사가 보존된다) |
+| S5 | 14·15절 NATIVE bitfield 범위, 1.3절 표 아래·20절 결정 20의 WorldOnly 소유자 요구 | 반영 |
+| B9i5 우려 | 더한 StructRefArray 원소 안 참조 중첩 struct `{}`가 Unsupported | 재현됨. 더한 원소 블록 안의 참조 struct는 멤버마다 되돌린다(강한 참조는 null 쓰기, 참조 struct 멤버는 재귀 — `Apply::ResetReferenceMembers`). 시험 `TextAssign_AddedElementNestedReferenceStructReset` |
+| 시험 공백 | B9j 담기 거부(Registry 컨테이너·WorldOnly 소유자), B9k 상속 형질 Depth·ContainsInstancedStruct, B9m 다른 모듈 상속 bitfield 런타임 왕복 | 앞 둘은 시험을 더했다(`InstancedStructPath_RegistryContainerAndWorldOnlyContentRejected`, `StructInheritance_DeepCopyKeepsBaseMembers`와 static_assert). 셋째는 20절 B9m이 남긴 일에 적었다 |
+

@@ -168,7 +168,107 @@ FieldValue TextValue(Allocator& allocator, Text text) noexcept {
     return value;
 }
 
+// 지정한 할당 직전에 콜백을 한 번 부르는 allocator다(경로 쓰기 재진입 시험 — B9j–B9m 묶음 리뷰 I2).
+class ReentryAllocator final : public Allocator {
+public:
+    explicit ReentryAllocator(Allocator& backing) noexcept : backing_(backing) {
+    }
+
+    Result<void*> Allocate(usize bytes, usize alignment, uint32 tag) noexcept override {
+        if (hook) {
+            auto run = hook;
+            hook = nullptr;
+            run(context);
+        }
+
+        return backing_.Allocate(bytes, alignment, tag);
+    }
+
+    Result<void> Deallocate(void* address) noexcept override {
+        return backing_.Deallocate(address);
+    }
+
+    void (*hook)(void*) noexcept = nullptr;
+    void* context = nullptr;
+
+private:
+    Allocator& backing_;
+};
+
+// 재진입 콜백이 같은 자리를 지우거나 쓰려 한 결과다.
+struct Reentry {
+    ObjectRegistry* objects = nullptr;
+    ObjectHandle owner{};
+    PropertyPath target{};
+    PropertyPath container{};
+    Allocator* scratch = nullptr;
+    ErrorCode written = ErrorCode::None;
+    ErrorCode removed = ErrorCode::None;
+};
+
+void Reenter(void* context) noexcept {
+    Reentry& probe = *static_cast<Reentry*>(context);
+    FieldValue other = TextValue(*probe.scratch, MakeInvariant(*probe.scratch, "intruder"));
+    auto written =
+        PathWrite(*probe.objects, probe.objects->OwnerAccess(), probe.owner, probe.target, other);
+    probe.written = written ? ErrorCode::None : written.Error();
+    if (probe.container.steps.Size() != 0) {
+        auto removed = PathRemoveElement(*probe.objects, probe.objects->OwnerAccess(), probe.owner,
+                                         probe.container);
+        probe.removed = removed ? ErrorCode::None : removed.Error();
+    }
+}
+
 } // namespace
+
+// Text 경로 쓰기(Array 원소·struct 멤버·정적 배열 원소)는 고정 아래 새 노드를 만든다: 할당 콜백의
+// 재진입 쓰기·원소 삭제는 Busy이고 바깥 쓰기가 그대로 게시된다(B9j–B9m 묶음 리뷰 I2).
+TEST(TextGraph_PathWritesPinWhileAllocating) {
+    SystemAllocator backing;
+    ReentryAllocator hooked(backing);
+    TypeRegistry types(backing);
+    REQUIRE(RegisterFixture(types));
+    {
+        ObjectRegistry objects(hooked, types, {0x5447, 9});
+        RootRef<TextFieldHolder> holder = New(objects);
+        const ObjectHandle handle = holder.Handle();
+        PathStep line[] = {{FieldOf("lines"), 0, PathSelector::Index}};
+        const FieldValue first = TextValue(backing, MakeInvariant(backing, "first"));
+        REQUIRE(
+            PathInsertElement(objects, objects.OwnerAccess(), handle, PropertyPath{line}, &first));
+        const Guid captionLabel =
+            SchemaField(GeneratedType<TextFieldCaption>::Schema(), "label").id;
+        const PathStep label[] = {{FieldOf("caption")}, {captionLabel}};
+        const PathStep fixed[] = {{FieldOf("fixed"), 1, PathSelector::Index}};
+        const PropertyPath targets[] = {PropertyPath{line}, PropertyPath{label},
+                                        PropertyPath{fixed}};
+        for (const PropertyPath& target : targets) {
+            Reentry probe;
+            probe.objects = &objects;
+            probe.owner = handle;
+            probe.target = target;
+            probe.container = target.steps.Data() == line ? PropertyPath{line} : PropertyPath{};
+            probe.scratch = &backing;
+            hooked.context = &probe;
+            hooked.hook = &Reenter;
+            const FieldValue replacement =
+                TextValue(backing, MakeLocalized(backing, TitleId, 4, "outer"));
+            REQUIRE(PathWrite(objects, objects.OwnerAccess(), handle, target, replacement));
+            CHECK(probe.written == ErrorCode::Busy);
+            CHECK(probe.container.steps.Size() == 0 || probe.removed == ErrorCode::Busy);
+            FieldValue read(backing);
+            REQUIRE(PathRead(objects, objects.OwnerAccess(), handle, target, read));
+            CHECK(HasForm(read.text, TextPersistentForm::Localized, "outer", TitleId, 4));
+        }
+
+        With(objects, handle,
+             [](TextFieldHolder& value) noexcept { CHECK(value.lines.Size() == 1); });
+        holder.Reset();
+        REQUIRE(objects.Shutdown(objects.OwnerAccess()));
+    }
+
+    CHECK(types.Shutdown());
+}
 
 // 세 형태가 모든 자리에서 왕복하고 다시 저장한 byte가 같다.
 TEST(TextGraph_FormsRoundTripInEveryPosition) {

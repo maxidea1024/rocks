@@ -1,3 +1,4 @@
+#include <Config/ConfigContext.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/Diagnostics/LogContext.h>
 #include <Engine/Engine.h>
@@ -461,6 +462,19 @@ Result<void> Engine::RunFrame() noexcept {
                                     ? time_.deltaSeconds
                                     : time_.averageFrameSeconds * 0.9 + time_.deltaSeconds * 0.1;
 
+    // 2-1) 설정 sync 지점(ConfigSystem 5.3절): 큐에 쌓인 설정 변경·콘솔 명령을 프레임 시작 전에
+    //      적용한다. 실패하면 값은 Sync 전 그대로이고 프레임은 계속한다(첫 오류를 돌려준다).
+    Result<void> synced = Result<void>::Success();
+    if (config_.settings != nullptr) {
+        synced = config_.settings->Sync();
+        if (!synced && !settingsSyncFailing_) {
+            Log::Error(LogEngine, "Config sync failed at frame {Frame}: {Error}", time_.frameIndex,
+                       ErrorCodeName(synced.Error()));
+        }
+
+        settingsSyncFailing_ = !synced;
+    }
+
     // 3) 프레임 시작.
     if (config_.hooks != nullptr) {
         config_.hooks->BeginFrame(*this);
@@ -478,7 +492,7 @@ Result<void> Engine::RunFrame() noexcept {
     }
 
     // 4) World Tick. hook이 World를 추가·파괴 요청해도 index로 다시 읽는다.
-    Result<void> outcome = Result<void>::Success();
+    Result<void> outcome = Move(synced);
     const uint64 worldStart = platform::MonotonicNanoseconds();
     for (usize index = 0; index < worlds_.Size(); ++index) {
         if (worlds_[index].pendingDestroy) {

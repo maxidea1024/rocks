@@ -674,7 +674,7 @@ internal static class CppEmitter
             Line("}");
         }
 
-        EmitValueCopy(type, native, Line);
+        EmitValueCopy(type, native, type.Base.Length == 0 ? null : "::" + schema.Find(type.Base).NativeName, Line);
         Line("static RuntimeStructOps Ops(ModuleLease module = {}) noexcept {");
         Line($"auto ops = MakeRuntimeStructOps<{native}>(Move(module));");
         Line("if constexpr (ValueCopyable) {");
@@ -748,10 +748,14 @@ internal static class CppEmitter
     // detail::TryCopyValue로 새 값을 다 만든 뒤 이동 대입 한 번으로 넣는다(실패하면 destination 그대로). 한 멤버라도 복사할 수
     // 없으면(ObjectRef·Registry 컨테이너·복사 의미가 없는 NATIVE 타입) ValueCopyable이 거짓이고 CopyValue는 Unsupported다 — 멤버를
     // 조용히 빠뜨리지 않는다. trivially copyable struct는 대입 한 번이다. 복사할 수 없는 분기가 컴파일되지 않게 템플릿이다.
-    private static void EmitValueCopy(ClassModel type, string native, Action<string> Line)
+    // 리플렉션 base가 있는 struct(리플렉션 B9k)는 base 하위 객체를 base의 CopyValue로 먼저 복사하고 자기 멤버만 복사한다 — base의
+    // NATIVE 멤버(파생 모델·import descriptor에 없다)와 상속 필드를 base가 책임진다.
+    private static void EmitValueCopy(ClassModel type, string native, string? baseNative, Action<string> Line)
     {
-        string[] members = type.Fields.Select(field => field.Name).Concat(type.NativeMembers.Select(member => member.Name)).ToArray();
-        string supported = string.Concat(members.Select(member => $" && ::rocks::detail::ValueCopy<decltype({native}::{member})>::Supported"));
+        IEnumerable<FieldModel> ownFields = baseNative is null ? type.Fields : type.OwnFields;
+        string[] members = ownFields.Select(field => field.Name).Concat(type.NativeMembers.Select(member => member.Name)).ToArray();
+        string supported = (baseNative is null ? "" : $" && GeneratedType<{baseNative}>::ValueCopyable") +
+            string.Concat(members.Select(member => $" && ::rocks::detail::ValueCopy<decltype({native}::{member})>::Supported"));
         Line($"static constexpr bool ValueCopyable = ::rocks::detail::IsPlainCopyV<{native}> || (::rocks::IsNothrowMoveAssignableV<{native}>{supported});");
         Line($"template <class Self = {native}>");
         Line("static Result<void> CopyValue(Self& destination, const Self& source, Allocator& allocator) noexcept {");
@@ -761,6 +765,11 @@ internal static class CppEmitter
         Line("return Result<void>::Success();");
         Line("} else if constexpr (ValueCopyable) {");
         Line("Self copy = ::rocks::detail::MakeAllocatedValue<Self>(allocator);");
+        if (baseNative is not null)
+        {
+            Line($"if (auto copied = GeneratedType<{baseNative}>::CopyValue(static_cast<{baseNative}&>(copy), static_cast<const {baseNative}&>(source), allocator); !copied) {{ return copied; }}");
+        }
+
         // bitfield(PROPERTY bitfield bool·NATIVE 정수 bitfield — 리플렉션 B9m)는 참조를 만들 수 없으므로 대입한다(정수라 깊은 복사다).
         HashSet<string> bitfields = type.Fields.Where(field => field.Bitfield).Select(field => field.Name)
             .Concat(type.NativeMembers.Where(member => member.Bitfield).Select(member => member.Name)).ToHashSet(StringComparer.Ordinal);

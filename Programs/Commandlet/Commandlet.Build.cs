@@ -15,6 +15,7 @@ public sealed class CommandletHost : ModuleRules
         PrivateIncludeDirectories = [context.PathInRoot("Programs/Commandlet/Private/Common")],
         // TraceAnalysis (Developer): the trace-report command. Commandlet is a tool (Program) target, so it may link Developer modules.
         // Crypto: the log keygen/decode/seal commands (encrypted log files).
-        Dependencies = ["Core", "TraceAnalysis", "Crypto"]
+        // HostConfig: the config-dump command boots the same config context as the engine hosts (engine files, log.*, trace.*).
+        Dependencies = ["Core", "TraceAnalysis", "Crypto", "HostConfig"]
     };
 }

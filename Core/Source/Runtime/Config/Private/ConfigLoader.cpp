@@ -219,4 +219,38 @@ Result<void> LoadConfigFiles(ConfigContext& context, platform::FileSystem& files
     return rejected ? Result<void>::Failure(ErrorCode::InvalidArgument) : Result<void>::Success();
 }
 
+Result<uint32> AddCommandLineAssignments(ConfigContext& context,
+                                         Span<const StringView> arguments) noexcept {
+    uint32 added = 0;
+    ErrorCode first = ErrorCode::None;
+    for (const StringView argument : arguments) {
+        if (!argument.StartsWith(SetArgumentPrefix, StringComparison::CaseSensitive)) {
+            continue;
+        }
+
+        const StringView assignment =
+            argument.TryRightBytes(argument.ByteCount() - SetArgumentPrefix.ByteCount()).Value();
+        StringView target;
+        StringView value;
+        ErrorCode error = ErrorCode::None;
+        if (!assignment.Split("=", target, value, StringComparison::CaseSensitive) ||
+            target.IsEmpty()) {
+            error = ErrorCode::InvalidArgument;
+        } else if (auto queued =
+                       context.AddAssignment(ConfigLayer::Session, "--set", target, value);
+                   !queued) {
+            error = queued.Error();
+        } else {
+            ++added;
+        }
+
+        if (error != ErrorCode::None && first == ErrorCode::None) {
+            first = error;
+        }
+    }
+
+    return first == ErrorCode::None ? Result<uint32>::Success(added)
+                                    : Result<uint32>::Failure(first);
+}
+
 } // namespace rocks::config

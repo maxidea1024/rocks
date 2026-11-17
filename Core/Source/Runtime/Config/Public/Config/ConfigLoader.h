@@ -28,4 +28,21 @@ namespace rocks::config {
 //   context.Sync();
 Result<void> LoadConfigFiles(ConfigContext& context, platform::FileSystem& files) noexcept;
 
+// 명령줄 대입 인자의 접두사다(`--set=<target>=<value>`).
+inline constexpr StringView SetArgumentPrefix = "--set=";
+
+// 명령줄 인자 가운데 `--set=<target>=<value>`를 나온 순서대로 세션 층 대입(AddAssignment —
+// ConfigLayer::Session, 태그·출처 `--set`)으로 넣는다. target은 첫 `=` 앞까지이고 value는 그 뒤
+// 전부다(`--set=Render.RenderGraph.passes=a,b`·`--set=log.level=debug`). 다른 인자는 무시한다. 값은
+// 다음 Sync에 바뀐다. 거부한 인자가 있어도 나머지를 끝까지 넣어 진단을 모은다. 반환: 넣은 대입 수.
+// 오류: 첫 실패 — target이 비었거나 `=`가 없음 InvalidArgument, AddAssignment의 오류(진단 참조).
+//
+// 사용 예(엔진 부트):
+//   LoadConfigFiles(context, files);                       // 엔진·프로젝트 층
+//   AddCommandLineAssignments(context, arguments);         // 세션 층
+//   context.Sync();
+//   context.CompleteStartup();
+Result<uint32> AddCommandLineAssignments(ConfigContext& context,
+                                         Span<const StringView> arguments) noexcept;
+
 } // namespace rocks::config

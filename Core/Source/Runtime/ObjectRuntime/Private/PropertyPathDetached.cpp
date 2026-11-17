@@ -29,6 +29,7 @@ void DetachedValue::Reset() noexcept {
     enumeration_ = nullptr;
     keyEnumeration_ = nullptr;
     target_ = StructView{};
+    position_ = 0;
     // 값(옛 값일 수 있다)을 먼저 비운 상자 밖에서 소멸·반환하고 lease를 마지막에 놓는다(소멸 함수의
     // 코드 수명을 lease가 지킨다).
     ops->destroy(storage);
@@ -154,6 +155,9 @@ Result<void> PathCursor::DetachValue(const RuntimeValueOps& ops, const void* val
     box.enumeration_ = frame.enumeration;
     box.keyEnumeration_ = frame.keyEnumeration;
     box.target_ = frame.target;
+    // 원래 자리의 위치 깊이다(시작 위치가 struct 값이면 + 1, 상자면 그 상자의 깊이를 이어 받는다).
+    box.position_ = static_cast<uint32>(current_) + (root_ == PathTarget::Kind::Struct ? 1u : 0u) +
+                    (root_ == PathTarget::Kind::Detached ? rootBox_->position_ : 0u);
     return Result<void>::Success();
 }
 

@@ -116,6 +116,9 @@ private:
     const EnumSchema* enumeration_ = nullptr;
     const EnumSchema* keyEnumeration_ = nullptr;
     StructView target_{};
+    // 상자 값이 원래 놓였던 자리의 위치 깊이(그 값을 감싼 struct 단계 수 — InstancedStruct 깊이 합
+    // 판정용, 리플렉션 B9j)다. 상자 위 경로의 위치 깊이는 이 값 + 상자 안 단계 수다.
+    uint32 position_ = 0;
 };
 
 // PathPrepareAttach가 찾아 둔 게시 자리 하나다: 대상 값의 주소, 그 형식의 무할당 교환, 상자. 게시는

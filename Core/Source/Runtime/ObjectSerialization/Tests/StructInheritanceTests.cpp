@@ -15,18 +15,30 @@ using reflection_fixture::InheritBase;
 using reflection_fixture::InheritHolder;
 using reflection_fixture::InheritLeaf;
 using reflection_fixture::InheritMiddle;
+using reflection_fixture::InheritNestedBase;
+using reflection_fixture::InheritNestedLeaf;
 using reflection_fixture::InheritOffset;
 using reflection_fixture::InheritOther;
+using reflection_fixture::InheritPrivateBase;
+using reflection_fixture::InheritPrivateLeaf;
 using reflection_fixture::InheritRefBase;
 using reflection_fixture::InheritRefLeaf;
 using reflection_fixture::InheritRequiredBase;
 using reflection_fixture::InheritRequiredLeaf;
+using reflection_fixture::InheritShapeChild;
 using reflection_fixture::InheritShapeHost;
 
 static_assert(GeneratedType<InheritRefLeaf>::ContainsStrongReference,
               "strong reference trait is inherited from the base");
 static_assert(GeneratedType<InheritRequiredLeaf>::ContainsRequired,
               "Required trait is inherited from the base");
+// 상속된 형질(B9j–B9m 묶음 리뷰의 시험 공백): InstancedStruct 담기와 깊이는 base에서 온다.
+static_assert(GeneratedType<InheritShapeChild>::ContainsInstancedStruct,
+              "InstancedStruct trait is inherited from the base");
+static_assert(GeneratedType<InheritNestedLeaf>::Depth == 2 &&
+                  GeneratedType<InheritNestedLeaf>::Depth ==
+                      GeneratedType<InheritNestedBase>::Depth,
+              "nesting depth is inherited from the base");
 static_assert(!GeneratedType<InheritLeaf>::ContainsStrongReference &&
                   !GeneratedType<InheritLeaf>::ContainsRequired,
               "plain base chain has no reference or Required traits");
@@ -47,6 +59,11 @@ bool RegisterDerived(TypeRegistry& types) noexcept {
            GeneratedType<InheritRequiredLeaf>::Register(types).IsOk() &&
            GeneratedType<InheritOther>::Register(types).IsOk() &&
            GeneratedType<InheritShapeHost>::Register(types).IsOk() &&
+           GeneratedType<InheritShapeChild>::Register(types).IsOk() &&
+           GeneratedType<InheritNestedBase>::Register(types).IsOk() &&
+           GeneratedType<InheritNestedLeaf>::Register(types).IsOk() &&
+           GeneratedType<InheritPrivateBase>::Register(types).IsOk() &&
+           GeneratedType<InheritPrivateLeaf>::Register(types).IsOk() &&
            GeneratedType<InheritHolder>::Register(types).IsOk();
 }
 
@@ -374,6 +391,54 @@ TEST(StructInheritanceGraph_InstancedBaseDecode) {
             LoadObjectGraph(allocator, objects, types, objects.OwnerAccess(), rejected.View());
         CHECK(!failed && failed.Error() == ErrorCode::InvalidArgument);
         REQUIRE(objects.Shutdown(objects.OwnerAccess()));
+    }
+
+    CHECK(types.Shutdown());
+}
+
+// 파생 struct의 깊은 복사(TryCopyValue·InstancedStruct TryClone)는 base의 NATIVE 멤버와 상속 필드를
+// 보존한다(B9j–B9m 묶음 리뷰 I1). base의 private 리플렉션 멤버도 생성 코드가 다룬다(리뷰 S4). 등록
+// 형질은 상속 InstancedStruct 담기와 깊이를 반영한다.
+TEST(StructInheritance_DeepCopyKeepsBaseMembers) {
+    SystemAllocator allocator;
+    TypeRegistry types(allocator);
+    REQUIRE(RegisterAll(types));
+    {
+        InheritLeaf source(allocator);
+        source.a = 3;
+        REQUIRE(source.name.TryAssign("name"));
+        source.nativeCount = 7;
+        REQUIRE(source.note.TryAssign("note"));
+        source.b = 4;
+        source.c = 1.5f;
+        InheritLeaf copy(allocator);
+        REQUIRE(detail::TryCopyValue(copy, source, allocator));
+        CHECK(copy.a == 3 && copy.name.View() == "name" && copy.b == 4u && copy.c == 1.5f);
+        CHECK(copy.nativeCount == 7u && copy.note.View() == "note");
+
+        InstancedStruct<InheritBase> held;
+        REQUIRE(held.Emplace<InheritLeaf>(types, allocator));
+        held.Get<InheritLeaf>()->nativeCount = 9;
+        REQUIRE(held.Get<InheritLeaf>()->note.TryAssign("held"));
+        auto cloned = held.TryClone(allocator);
+        REQUIRE(cloned);
+        REQUIRE(cloned.Value().Get<InheritLeaf>());
+        CHECK(cloned.Value().Get<InheritLeaf>()->nativeCount == 9u);
+        CHECK(cloned.Value().Get<InheritLeaf>()->note.View() == "held");
+
+        InheritPrivateLeaf hidden;
+        hidden.SetSecret(5);
+        hidden.open = 6;
+        InheritPrivateLeaf hiddenCopy;
+        REQUIRE(detail::TryCopyValue(hiddenCopy, hidden, allocator));
+        CHECK(hiddenCopy.Secret() == 5 && hiddenCopy.open == 6);
+
+        auto shape = types.AcquireValueType(TypeIdOf<InheritShapeChild>(), TypeKind::Struct);
+        REQUIRE(shape);
+        CHECK(shape.Value().Struct().ContainsInstancedStruct());
+        auto nested = types.AcquireValueType(TypeIdOf<InheritNestedLeaf>(), TypeKind::Struct);
+        REQUIRE(nested);
+        CHECK(nested.Value().Struct().Depth() == 2u);
     }
 
     CHECK(types.Shutdown());

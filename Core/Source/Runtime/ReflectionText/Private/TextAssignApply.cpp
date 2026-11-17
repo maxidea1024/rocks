@@ -199,7 +199,7 @@ Result<UnitEnd> FindUnitEnd(AssignmentState& state, PropertyPath path) noexcept 
     for (usize index = 0; index < path.steps.Size(); ++index) {
         TextSlot slot;
         const PropertyPath prefix{Span<const PathStep>(path.steps.Data(), index + 1), path.keys};
-        if (auto described = DescribeTextPath(state.lease, prefix, slot); !described) {
+        if (auto described = DescribeAssignmentPath(state, prefix, slot); !described) {
             return Result<UnitEnd>::Failure(described.Error());
         }
 
@@ -270,6 +270,36 @@ public:
 private:
     AssignmentState& state_;
 };
+
+} // namespace
+
+Result<void> DescribeAssignmentPath(AssignmentState& state, PropertyPath path,
+                                    TextSlot& out) noexcept {
+    PreparedInstancedTypes resolver(state);
+    return DescribeTextPath(state.lease, path, out, &resolver);
+}
+
+Result<void> FormatAssignmentPath(AssignmentState& state, PropertyPath path, String& out) noexcept {
+    out.Clear();
+    if (path.steps.Size() == 0) {
+        return Result<void>::Success();
+    }
+
+    PreparedInstancedTypes resolver(state);
+    auto formatted =
+        FormatPropertyPath(state.lease, path, out, &state.context.KeyHook(), &resolver);
+    if (!formatted) {
+        if (formatted.Error() == ErrorCode::OutOfMemory) {
+            return formatted;
+        }
+
+        out.Clear();
+    }
+
+    return Result<void>::Success();
+}
+
+namespace {
 
 // 문맥에 resolver를 거는 동안이다(대입 하나 — 문맥은 묶음 상태보다 오래 살 수 있다).
 class InstancedTypesScope {

@@ -239,8 +239,11 @@ struct TextPath {
 
 // path(type 스키마로 해석한 경로 — 정규형)가 가리키는 자리를 out에 쓴다. 할당하지 않는다.
 // 오류: 빈 path·정규형이 아닌 단계·없는 필드·모양 불일치(ParsePropertyPath가 만들지 않는 경로)는
+// InvalidArgument다. instanced가 있으면 InstancedStruct 뒤 멤버 단계를 그 자리의 지금 담긴 struct로
+// 푼다(리플렉션 B9j — 대입 묶음은 준비 상태를 보는 resolver를 넘긴다). 없으면 그런 단계는
 // InvalidArgument다.
-Result<void> DescribeTextPath(const TypeLease& type, PropertyPath path, TextSlot& out) noexcept;
+Result<void> DescribeTextPath(const TypeLease& type, PropertyPath path, TextSlot& out,
+                              PathInstancedTypeResolver* instanced = nullptr) noexcept;
 
 // 경로 텍스트를 type(클래스·struct lease)의 스키마로 풀어 out에 쓴다(ParsePropertyPath + KeyHook +
 // DescribeTextPath). 텍스트 byte를 입력 누계에 더하고, 입력 용도의 판정을 경로 전체에 한다.
