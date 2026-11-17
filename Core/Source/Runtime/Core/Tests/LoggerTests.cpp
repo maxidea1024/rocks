@@ -9,7 +9,37 @@
 
 using namespace rocks;
 
+// Rocks.Build가 타깃 전체에 정의한 로그 컴파일 하한이 이 모듈에도 왔는지 확인한다. 타깃 재정의가
+// 없으므로 구성 기본값이어야 한다.
+#ifndef ROCKS_LOG_COMPILED_MINIMUM
+#error "Rocks.Build must define ROCKS_LOG_COMPILED_MINIMUM for every module of the target"
+#endif
+
+static_assert(LogCompiledMinimum == (IsDebugBuild         ? LogLevel::Trace
+                                     : IsDevelopmentBuild ? LogLevel::Debug
+                                                          : LogLevel::Info),
+              "the Foundation target must use the configuration default log compiled minimum");
+
 namespace {
+// Rocks.Build가 -fmacro-prefix-map으로 저장소 루트를 떼므로 소스 경로는 저장소 기준 상대 경로다
+// (예: Core\Source\Runtime\Core\Tests\LoggerTests.cpp). 구분자는 host 철자라 '/'와 '\'를 같게
+// 본다.
+bool IsRepositoryPath(const char* file, StringView expected) noexcept {
+    const StringView path(file);
+    if (path.ByteCount() != expected.ByteCount()) {
+        return false;
+    }
+
+    for (usize index = 0; index < path.ByteCount(); ++index) {
+        const char actual = path.Data()[index] == '\\' ? '/' : path.Data()[index];
+        if (actual != expected.Data()[index]) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 constexpr LogCategory LogTests{"Tests"};
 constexpr LogCategory LogTestsAlpha{"Tests.Alpha"};
 constexpr LogCategory LogTestsBeta{"Tests.Beta"};
@@ -214,17 +244,19 @@ TEST(TextLogSinkOutputAndFailures) {
         CHECK(output.bytes[index] == expected[index]);
     }
 
-    CHECK(output.writes == 3 && output.flushes == 1);
+    // 한 기록은 버퍼에 모아 write 한 번이다. flush는 Flush()에서만 한다(묶음 flush).
+    CHECK(output.writes == 1 && output.flushes == 0);
+    CHECK(sink.Flush().IsOk() && output.flushes == 1);
     output = {};
-    output.failWrite = 2;
+    output.failWrite = 1;
     CHECK(sink.Write(MakeEvent(LogLevel::Info, "Tests", "x")).Error() ==
           ErrorCode::DependencyFailed);
-    CHECK(output.writes == 2 && output.flushes == 0);
+    CHECK(output.writes == 1 && output.flushes == 0);
     output = {};
     output.failFlush = true;
-    CHECK(sink.Write(MakeEvent(LogLevel::Info, "Tests", "x")).Error() ==
-          ErrorCode::DependencyFailed);
-    CHECK(output.writes == 3 && output.flushes == 1);
+    CHECK(sink.Write(MakeEvent(LogLevel::Info, "Tests", "x")).IsOk());
+    CHECK(sink.Flush().Error() == ErrorCode::DependencyFailed);
+    CHECK(output.writes == 1 && output.flushes == 1);
     const char invalid[] = {static_cast<char>(0xff)};
     CHECK(sink.Write(MakeEvent(LogLevel::Info, "Tests", StringView(invalid, 1))).Error() ==
           ErrorCode::InvalidArgument);
@@ -235,7 +267,11 @@ TEST(TextLogSinkOutputAndFailures) {
 // 외부 프로세스가 stderr 원시 byte를 캡처하여 한글과 NUL까지 확인할 수 있는 전용 probe다.
 TEST(RuntimeLoggerStderrOutputProbe) {
     SyncLogs setup;
-    StderrLogSink stderrSink;
+    // 시각·위치가 섞이지 않도록 레벨·카테고리·메시지만 쓰는 레이아웃이다(C# 시험이 byte를
+    // 비교한다).
+    const auto layout = LogLayout::Parse("[{Level}][{Category}] {Message}{NewLine}");
+    REQUIRE(layout.IsOk());
+    StderrLogSink stderrSink(layout.Value());
     REQUIRE(setup.logs.AddSink(stderrSink).IsOk());
     LogInstallScope installed(setup.logs);
     const char message[] = {static_cast<char>(0xed), static_cast<char>(0x95),
@@ -489,7 +525,7 @@ TEST(SourceLocationCapturesCaller) {
     CHECK(first.where.line != second.where.line);
     CHECK(StringView(first.where.function) == "CallFromFirstFunction");
     CHECK(StringView(second.where.function) == "CallFromSecondFunction");
-    CHECK(StringView(first.where.file).EndsWith("LoggerTests.cpp"));
+    CHECK(IsRepositoryPath(first.where.file, "Core/Source/Runtime/Core/Tests/LoggerTests.cpp"));
     CHECK(StringView(second.where.file) == StringView(first.where.file));
 
     // 본문에서 직접 부르면 그 줄이다.
@@ -511,7 +547,8 @@ TEST(LogSystemPassesCallerLocation) {
     Log::Info(LogTests, "where");
     const uint32 writeLine = __LINE__ - 1;
     CHECK(capture.lastLocation.line == writeLine);
-    CHECK(StringView(capture.lastLocation.file).EndsWith("LoggerTests.cpp"));
+    CHECK(IsRepositoryPath(capture.lastLocation.file,
+                           "Core/Source/Runtime/Core/Tests/LoggerTests.cpp"));
     CHECK(StringView(capture.lastLocation.function) == "RocksTest_LogSystemPassesCallerLocation");
 }
 

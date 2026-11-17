@@ -30,6 +30,11 @@ internal static class InputValidation
         {
             throw new ArgumentException($"Configuration: unsupported value {request.Configuration}.");
         }
+
+        if (request.LogCompiledMinimum is LogLevel logMinimum && !Enum.IsDefined(logMinimum))
+        {
+            throw new ArgumentException($"LogCompiledMinimum: unsupported value {(int)logMinimum}.");
+        }
         // enum 멤버가 추가돼도 실제 타깃 지원을 검토하기 전에는 통과시키지 않는다.
         bool hostMatches = request.Toolchain.Platform switch
         {
@@ -159,6 +164,12 @@ internal static class InputValidation
                     name.StartsWith("ROCKS_ARCH_", StringComparison.Ordinal) || name.StartsWith("ROCKS_TARGET_", StringComparison.Ordinal))
                 {
                     throw new ArgumentException($"Module {module.Name}: define '{define}' is reserved for the build configuration and target.");
+                }
+                // 로그 컴파일 하한은 타깃 전체에 하나다(LogCompiledMinimums). 모듈이 바꾸면 Log.h inline 본문이 TU마다 달라져 ODR 위반이다.
+                if (name == LogCompiledMinimums.MacroName)
+                {
+                    throw new ArgumentException($"Module {module.Name}: define '{define}' is reserved for the target " +
+                        "(set TargetRules.LogCompiledMinimum instead; a per-module value violates the ODR).");
                 }
                 // 경로를 담은 define 값은 호스트마다 달라 도구 빌드 ID와 바이너리 신원을 호스트에 묶는다. 외부 파일은 선언 입력으로 둔다.
                 int equals = define.IndexOf('=');

@@ -12,10 +12,12 @@
 // 않는다. 픽셀 형식·샘플러는 GraphicsTypes 모듈에 있다.
 namespace rocks::graphics {
 
-// 그래픽 backend다. D3D12·OpenGL·Vulkan은 구현 모듈(D3D12Graphics·OpenGLGraphics·VulkanGraphics)이
-// 있고, Metal은 자리만 둔다(구현 모듈이 아직 없어 선택하면 Unsupported).
+// 그래픽 backend다. D3D12·D3D11·OpenGL·Vulkan은 구현 모듈(D3D12Graphics·D3D11Graphics·
+// OpenGLGraphics·VulkanGraphics)이 있고, Metal은 자리만 둔다(구현 모듈이 아직 없어 선택하면
+// Unsupported).
 enum class Backend : uint8 {
     D3D12,
+    D3D11,
     OpenGL,
     Vulkan,
     Metal
@@ -69,12 +71,12 @@ class ShaderSourceCompiler;
 
 // 장치 생성 설정이다.
 struct DeviceDesc {
-    // API 검증 계층(D3D12 debug layer, Vulkan VK_LAYER_KHRONOS_validation, GL debug context)을
-    // 켠다. 없으면 켜지 않고 계속한다.
+    // API 검증 계층(D3D12·D3D11 debug layer, Vulkan VK_LAYER_KHRONOS_validation, GL debug
+    // context)을 켠다. 없으면 켜지 않고 계속한다.
     bool enableValidation = false;
-    // 하드웨어 대신 소프트웨어 장치를 쓴다(D3D12 WARP, Vulkan CPU 장치 — lavapipe·SwiftShader 같은
-    // 소프트웨어 ICD). 헤드리스 CI 검증용이다. Vulkan은 CPU 장치가 없으면 Unsupported다. OpenGL은
-    // 무시한다.
+    // 하드웨어 대신 소프트웨어 장치를 쓴다(D3D12·D3D11 WARP, Vulkan CPU 장치 — lavapipe·SwiftShader
+    // 같은 소프트웨어 ICD). 헤드리스 CI 검증용이다. Vulkan은 CPU 장치가 없으면 Unsupported다.
+    // OpenGL은 무시한다.
     bool preferSoftware = false;
     // 업로드 ring 크기다(0이면 DefaultUploadRingBytes). 생성 초기 데이터·내용 갱신이 이 ring을
     // 거친다.
@@ -84,7 +86,7 @@ struct DeviceDesc {
     // 실행 중 컴파일러가 없는 backend(Vulkan)가 PipelineDesc의 HLSL 원문을 backend 코드로 바꿀 때
     // 부르는 개발용 컴파일 훅이다(Graphics/ShaderSourceCompiler.h). 쿠킹된 셰이더(ShaderSystem SH2)
     // 전까지만 쓰며 Release 실행 파일에는 넣지 않는다. null이면 그런 backend의 파이프라인 생성은
-    // Unsupported다. D3D12·OpenGL은 무시한다. 장치보다 오래 살아야 한다.
+    // Unsupported다. D3D12·D3D11·OpenGL은 무시한다. 장치보다 오래 살아야 한다.
     ShaderSourceCompiler* shaderCompiler = nullptr;
 };
 
@@ -447,8 +449,9 @@ struct ClockCalibration {
     // 때 쓴다. ns를 다시 tick으로 바꾸는 반올림을 피한다).
     uint64 cpuTicks = 0;
     // 두 시각이 같은 순간이라는 추정의 오차 반경(ns)이다. D3D12는 queue clock calibration이 한 번에
-    // 읽은 쌍이라 CPU tick 하나의 길이, OpenGL은 GL_TIMESTAMP 조회 앞뒤 CPU 시각 차의 절반,
-    // Vulkan은 vkGetCalibratedTimestamps가 준 최대 편차(maxDeviation)다.
+    // 읽은 쌍이라 CPU tick 하나의 길이, OpenGL은 GL_TIMESTAMP 조회 앞뒤 CPU 시각 차의 절반, D3D11은
+    // GPU가 쉴 때 넣은 timestamp의 제출 전 CPU 시각과 완료를 본 CPU 시각 차의 절반, Vulkan은
+    // vkGetCalibratedTimestamps가 준 최대 편차(maxDeviation)다.
     uint64 uncertaintyNanoseconds = 0;
 };
 
@@ -484,8 +487,9 @@ struct DeviceInfo {
     // 자원·파이프라인 생성(Create*)을 소유 스레드가 아닌 스레드에서도 부를 수 있는지다(RenderBase
     // 5.4절 GX11). false면 소유 스레드 전용이고 다른 스레드의 생성 요청은 렌더 lane 작업으로
     // 넘긴다. D3D12는 true다: 생성·갱신·staging 업로드는 내부 잠금 아래 업로드 기록에 쌓이고 소유
-    // 스레드의 다음 제출이 실행한다(GX8). Vulkan도 true다(같은 업로드 기록 구조). OpenGL은
-    // context가 소유 스레드에 묶여 false다.
+    // 스레드의 다음 제출이 실행한다(GX8). D3D11도 true다(free-threaded 장치, 갱신은 업로드 기록).
+    // Vulkan도 true다(D3D12와 같은 업로드 기록 구조). OpenGL은 context가 소유 스레드에 묶여
+    // false다.
     bool concurrentResourceCreation = false;
     // GPU timestamp를 기록할 수 있는지와 초당 tick 수다(GX9). false면 WriteTimestamp가
     // Unsupported이며 GPU 시간은 "없음"이다(추정값을 만들지 않는다). D3D12는 graphics queue
@@ -496,16 +500,18 @@ struct DeviceInfo {
     uint64 timestampFrequency = 0;
     // timestamp 구간 끊김(disjoint)을 알아챌 수 있는지다. false면 TimestampSample::disjoint는 제출
     // 실패 때만 true다. D3D12·Vulkan은 queue timestamp가 끊기지 않아 해당 없음(false), OpenGL은
-    // GL_EXT_disjoint_timer_query가 있을 때만 true다.
+    // GL_EXT_disjoint_timer_query가 있을 때만 true, D3D11은 프레임마다 TIMESTAMP_DISJOINT로 감싸
+    // true다(주파수가 공개값과 달라져도 disjoint로 낸다).
     bool timestampDisjointDetection = false;
     // GPU·CPU 시각 쌍(CalibrateClocks)을 얻을 수 있는지다. D3D12는 queue clock calibration,
-    // OpenGL은 GL_TIMESTAMP 조회와 CPU 시각을 잇달아 읽는다(조회 지연만큼 오차). Vulkan은
+    // OpenGL은 GL_TIMESTAMP 조회와 CPU 시각을 잇달아 읽는다(조회 지연만큼 오차). D3D11은 제출한 GPU
+    // 작업이 끝나기를 기다린 뒤 timestamp 하나를 CPU 시각 둘로 감싼다(호출이 비싸다). Vulkan은
     // calibrated timestamps 확장이 장치 domain과 PlatformBase 시계 domain(QPC·CLOCK_MONOTONIC)을 줄
     // 때만 참이다.
     bool clockCalibration = false;
     // debug marker(PushMarker·PopMarker)가 캡처 도구에 기록되는지다. false면 두 호출은 아무것도
-    // 하지 않는다. D3D12는 command list 이벤트(PIX), Vulkan은 VK_EXT_debug_utils label, OpenGL은
-    // debug group이다.
+    // 하지 않는다. D3D12는 command list 이벤트(PIX), D3D11은 ID3DUserDefinedAnnotation, Vulkan은
+    // VK_EXT_debug_utils label, OpenGL은 debug group이다.
     bool debugMarkers = false;
 };
 

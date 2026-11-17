@@ -139,7 +139,7 @@ TEST(TextAssign_CollectsErrorsAndKeepsSameValues) {
                                      Set("numbers", "1,x", 3),
                                      Set("locked", "3", 4),
                                      Set("mixed", "{}", 5),
-                                     Set("items[0]", "{}", 6),
+                                     Set("items[1]", "{}", 6),
                                      Set("pair[0]", "{}", 7),
                                      Other(AssignmentKind::Unset, "label", 8),
                                      Other(AssignmentKind::Erase, "atom", 9),
@@ -148,8 +148,9 @@ TEST(TextAssign_CollectsErrorsAndKeepsSameValues) {
     auto prepared = fixture.Prepare(object, inputs);
     CHECK(ErrorOf(prepared) == ErrorCode::InvalidArgument);
     // 참조 struct·정적 배열 원소의 `{}`는 멤버마다 나뉘어 받는다(리플렉션 B9i3c3) — 빈
-    // StructRefArray의 원소는 범위 밖이다. 값 단위의 ReadOnly 자리는 호출 끝에 대조하므로 그
-    // 진단은 맨 뒤에 단위 순서로 온다(리플렉션 B9i 리뷰 반영).
+    // StructRefArray의 원소 수보다 큰 index는 범위 밖이다(같으면 추가 — 리플렉션 B9i5). 값 단위의
+    // ReadOnly 자리는 호출 끝에 대조하므로 그 진단은 맨 뒤에 단위 순서로 온다(리플렉션 B9i 리뷰
+    // 반영).
     const TextDiagnosticCode codes[] = {TextDiagnosticCode::DuplicateAssignment,
                                         TextDiagnosticCode::UnknownProperty,
                                         TextDiagnosticCode::InvalidValue,

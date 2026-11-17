@@ -265,6 +265,7 @@ private:
     LogBlockPool blocks_;
     char* render_ = nullptr;
     LogProperty properties_[MaxLogArguments];
+    LogProperty context_[MaxLogContextDepth];
     platform::Thread writer_;
     platform::ManualResetEvent wake_;
 

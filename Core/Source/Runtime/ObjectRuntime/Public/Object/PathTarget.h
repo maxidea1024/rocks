@@ -13,6 +13,7 @@ namespace rocks {
 class ConstructionContext;
 class DetachedValue;
 class PreparedReferences;
+class PreparedStructElements;
 
 // 경로 연산의 시작 위치다. ObjectHandle에서 암묵 변환되므로 기존 호출(PathRead(registry, access,
 // handle, ...))은 그대로 게시된 객체에서 시작한다. 값 타입이며 가리키는 트랜잭션·struct 값·상자를
@@ -136,6 +137,22 @@ public:
         return references_;
     }
 
+    // 원소 추가 준비물 stage가 소유한 게시 전 원소 블록(struct 값 시작 위치)이라는 표시다(리플렉션
+    // B9i5 — PreparedStructElements::AddedTarget이 만든다). 그 원소의 강한 참조 멤버 쓰기는 블록에
+    // 대상을 직접 쓰고(간선은 게시 때 선언한다), 강한 대상의 생존 검증은 transaction이 있으면 그
+    // 트랜잭션 규칙(같은 트랜잭션의 공개 전 객체 포함)이다.
+    PathTarget WithAddedElement(PreparedStructElements& stage,
+                                ConstructionContext* transaction) const noexcept {
+        PathTarget target = *this;
+        target.added_ = &stage;
+        target.transaction_ = transaction;
+        return target;
+    }
+
+    PreparedStructElements* AddedElements() const noexcept {
+        return added_;
+    }
+
 private:
     Kind kind_;
     ObjectHandle object_{};
@@ -146,6 +163,7 @@ private:
     Allocator* allocator_ = nullptr;
     DetachedValue* box_ = nullptr;
     PreparedReferences* references_ = nullptr;
+    PreparedStructElements* added_ = nullptr;
 };
 
 } // namespace rocks

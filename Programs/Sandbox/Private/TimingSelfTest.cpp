@@ -14,8 +14,9 @@ using namespace rocks::graphics;
 // offscreen 대상 크기와 slot 재사용 시험의 프레임 수(TimestampFrameSlots보다 많게)다.
 constexpr uint32 TargetSize = 16;
 constexpr uint32 RepeatFrames = TimestampFrameSlots + 2;
-// calibration으로 옮긴 GPU 시각이 앞뒤 CPU 시각 밖으로 벗어나도 되는 폭(ns)이다. 시계 변환의
-// 반올림과 GL 조회 지연을 덮는다.
+// calibration으로 옮긴 GPU 시각이 앞뒤 CPU 시각 밖으로 벗어나도 되는 기본 폭(ns)이다. 시계 변환의
+// 반올림을 덮는다. 장치가 공개한 두 calibration의 오차 반경(uncertaintyNanoseconds)을 여기에
+// 더한다(D3D11·OpenGL은 CPU 부하에 따라 반경이 커진다).
 constexpr uint64 CalibrationSlackNanoseconds = 1000000;
 
 uint32 failures = 0;
@@ -139,8 +140,10 @@ void RunPair(Device& device, sample::Renderer& renderer, TextureHandle target,
     // 프레임은 앞 calibration 뒤에 제출되고 뒤 calibration 전에 끝났다.
     const uint64 cpuBegin = GpuTicksToCpuNanoseconds(before.Value(), begin->ticks);
     const uint64 cpuEnd = GpuTicksToCpuNanoseconds(before.Value(), end->ticks);
-    const bool inside = cpuBegin + CalibrationSlackNanoseconds >= before.Value().cpuNanoseconds &&
-                        cpuEnd <= after.Value().cpuNanoseconds + CalibrationSlackNanoseconds;
+    const uint64 slack = CalibrationSlackNanoseconds + before.Value().uncertaintyNanoseconds +
+                         after.Value().uncertaintyNanoseconds;
+    const bool inside = cpuBegin + slack >= before.Value().cpuNanoseconds &&
+                        cpuEnd <= after.Value().cpuNanoseconds + slack;
     Check(inside, "GPU interval maps between the surrounding CPU times");
     Check(after.Value().cpuNanoseconds <= platform::MonotonicNanoseconds() &&
               after.Value().gpuTicks >= before.Value().gpuTicks,
@@ -151,10 +154,12 @@ void RunPair(Device& device, sample::Renderer& renderer, TextureHandle target,
            static_cast<unsigned long long>(gpuNanoseconds),
            static_cast<unsigned long long>(device.Info().timestampFrequency));
     if (!inside) {
-        printf("    cpu %llu..%llu, gpu mapped %llu..%llu\n",
+        printf("    cpu %llu..%llu, gpu mapped %llu..%llu, uncertainty %llu/%llu ns\n",
                static_cast<unsigned long long>(before.Value().cpuNanoseconds),
                static_cast<unsigned long long>(after.Value().cpuNanoseconds),
-               static_cast<unsigned long long>(cpuBegin), static_cast<unsigned long long>(cpuEnd));
+               static_cast<unsigned long long>(cpuBegin), static_cast<unsigned long long>(cpuEnd),
+               static_cast<unsigned long long>(before.Value().uncertaintyNanoseconds),
+               static_cast<unsigned long long>(after.Value().uncertaintyNanoseconds));
     }
 }
 

@@ -1,6 +1,6 @@
 # 로깅 시스템 설계
 
-기준일: 2026-11-17, 개정 4. 엔진 전반에서 쓰는 **로그**(사람이 읽는 사건 기록)의 호출 API, 카테고리·레벨 필터, 비동기 기록 경로, 출력 형식, 장애 격리, 엔진 적용 범위를 정한다.
+기준일: 2026-11-17, 개정 5. 엔진 전반에서 쓰는 **로그**(사람이 읽는 사건 기록)의 호출 API, 카테고리·레벨 필터, 비동기 기록 경로, 출력 형식, 장애 격리, 엔진 적용 범위를 정한다.
 
 요구는 다음 문서에서 온다.
 - [엔진 구현 계획](EngineImplementationPlan.ko.md) 29.4절(필수 로깅·프로파일러: level/category, UTC+monotonic, rate limit·중복 집계, compile/runtime level, error/fatal 비상 경로, 임계 구간에서 file IO·heap·lock wait 금지)
@@ -186,7 +186,9 @@ static void Info(const LogCategory&, LogTemplate<TypeIdentityT<Args>...> text, c
 - 교차 검증에서 clang-cl 21.1.6으로 동작을 확인했다. 실제 호출 위치가 남고, `TypeIdentityT` 추론 차단과 Lazy의 뒤쪽 기본 인자도 동작한다. LG2는 이를 TU 두 개·함수 두 개의 시험으로 고정한다. 람다 안에서 호출하면 함수 이름은 `operator()`다.
 - 문자열은 정적 저장소라 프로그램 수명 동안 유효하다(모듈은 정적 링크·언로드 없음). 동적 모듈을 도입하면 다시 검토한다.
 - 경로: Rocks.Build가 저장소 기준 상대 경로로 남긴다(LG5).
-  - clang-cl은 `-ffile-prefix-map`을 "unknown argument ignored"로 무시하므로 `/clang:-ffile-prefix-map=<저장소 루트>=`로 넘긴다(`ActionGraph.cs:408`의 `/clang:-std=c++23`과 같은 방식).
+  - `-fmacro-prefix-map=<저장소 루트>/=`를 쓴다(clang-cl은 `/clang:-fmacro-prefix-map=<루트>\=`). `-ffile-prefix-map`은 디버그 정보 경로까지 바꿔 디버거의 소스 찾기를 깨므로 쓰지 않는다. clang-cl은 `/clang:` 없이 넘기면 "unknown argument ignored"로 무시한다(`ActionGraph.cs:408`의 `/clang:-std=c++23`과 같은 방식).
+  - 매핑은 `__FILE__`, `__builtin_FILE()`, 헤더 본문 모두에 적용된다(clang-cl 21.1.6 확인). Windows 결과의 구분자는 `\`다. 설치 SDK 게임 빌드는 SDK 디렉터리에도 같은 매핑을 건다. 빌드 ID는 이 인자의 루트를 `src:`로 정규화해 호스트에 무관하다(LG5, `4c94a2d`).
+  - Release exe에 남는 절대 경로는 링커가 쓰는 PDB 경로뿐이다(범위 밖).
   - 모듈 인자 검사가 절대 경로 값을 거부하므로(`InputValidation.cs:195`) 모듈이 아니라 toolchain 단에서 넣는다.
 
 ### 6.5 문맥(육하원칙의 "누가·어디서")
@@ -460,7 +462,7 @@ Result<UniquePtr<Device>> CreateD3D12Device(Allocator&, const DeviceDesc&, Devic
 | LG2 | 공용 `constexpr` 서식 파서·이름 자리, `FixedStringBuilder`(잘림 모드), `LogTemplate` 검증, 위치 수집 시험, EventId, 값 캡처 인코딩과 렌더(왕복), 컴파일 실패 시험 체계(Rocks.ToolTests가 clang-cl `-fsyntax-only`) | LG1 | 템플릿·위치(TU 2개)·캡처 왕복·잘림·컴파일 실패 시험 |
 | LG3 | `Log::*` 진입 함수와 Lazy, `BoundedMpscQueue`, 블록 풀, 준비 버퍼, `LogSystem`(Async·Sync·Manual 모드, 프리셋, 출력 스레드·깨우기·Pump·Flush·포화·sink 명령·통계), fan-out 재작성, 세대 카운터 `LogInstallScope`, `platform::WriteDiagnostic`·`TryUtcTicks`, 설치 전후 경로, 장애 격리, `Log::Fatal`·`AssertFailed` | LG2 | 큐 스트레스·포화·wrap·멈춘 생산자 결정적 시험, **무할당 시험**(호출 수 세는 할당기로 Start 뒤 0회), Lazy 0회/1회, 깨우기 유실 없음, 해제 기아 없음, Sync와 Manual의 출력 동일·Sync 무할당, 장애 주입, TSan·Asan, 호출 비용 측정 보고 |
 | LG4 | 레이아웃 해석기, Text·Stderr sink 개편(묶음 flush), `JsonWriter` 옵션(한 줄·고정 frame·중복 색인 끔)·`JsonLinesLogSink`, `DateTime` 고정 폭 밀리초, `LogContextScope` | LG3 | 토큰별 결정적 출력, 잘못된 패턴 실패, JSON 왕복, 무할당 |
-| LG5 | `ROCKS_LOG_COMPILED_MINIMUM`, toolchain 단 `/clang:-ffile-prefix-map=`, Release 문자열 제외 검사, 템플릿 비ASCII 정책 검사 | LG2 | 구성별 빌드, 최종 링크 결과 검사 |
+| LG5 | `ROCKS_LOG_COMPILED_MINIMUM`(타깃 `LogCompiledMinimum` 재정의, 모듈 재정의 거부), toolchain 단 `-fmacro-prefix-map`, Release 문자열 제외 검사. 한글 템플릿은 `source-literal-english` 정책이 막으므로 음성 대조만 추가 | LG2 | 구성별 빌드, 최종 링크 결과 검사 |
 | LG6 | Engine·World 적용(13절) | LG4, **15절 조건** | 단계별 실패 주입 → Stage, 파괴 지연 1000프레임 → Warning 정확히 1회·해소 Info 1회 |
 | LG7 | Graphics·창·셰이더 도구(report, HRESULT, 장치 제거 사유, 검증 메시지, 셰이더 진단) | LG4, **15절 조건** | 실패 주입 시험, Sandbox 자체 시험 |
 | LG8 | 호스트: Sandbox 헤드리스 `--engine`(Async, L1), Commandlet 등 명령줄 도구(Sync). 사용 가이드 `Docs/Implementation/Logging.ko.md`, FoundationStatus·UE-C22·D01 갱신 | LG6, LG7 | Sandbox 실행으로 시작·종료·실패 원인 추적 확인 |
@@ -548,3 +550,4 @@ Result<UniquePtr<Device>> CreateD3D12Device(Allocator&, const DeviceDesc&, Devic
 - 개정 2(2026-11-17): 기록 모드(5.1절, L11)를 추가했다. 명령줄 도구는 Sync, 엔진 호스트는 Async가 기본이며, 설정 `log.mode`로 고른다. 이를 위해 LG9(ConfigSystem CF2 연결)를 추가했다. trace 세션 답신에 따라 LG1에서 `LogBuffer`·`ProfileScope` 카테고리 교체를 뺐다(TR2가 `ProfileScope`를 지움). `Clock.h`가 TR1과 겹치는 것도 15절에 적었다.
 - 개정 3(2026-11-17): P7과 파일 sink·암호화(9.1절, L12·L13, LG10)를 추가했다. 기본은 암호화 끔이고, 켜면 KEM 봉인 파일 키와 SecretStream 묶음 봉인을 쓴다.
 - 개정 4(2026-11-17): 15절에 render-lane·Config·TraceCapture 병합 현황을 적었다(LG3 착수 조건 충족). 셰이더 컴파일 실패 로그 위치를 Sandbox `SampleRenderer`로 옮겼다. 캡처가 카테고리 객체 포인터 대신 이름을 담도록 바꿨다(8.3).
+- 개정 5(2026-11-17): LG5 구현 반영 — 소스 경로는 `-fmacro-prefix-map`(디버그 정보 경로 보존), 컴파일 타임 하한은 타깃 단위 재정의·모듈 재정의 거부, 한글 템플릿은 `source-literal-english` 정책이 막으므로 별도 검사 없음.

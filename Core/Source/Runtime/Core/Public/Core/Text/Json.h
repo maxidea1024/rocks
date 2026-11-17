@@ -296,9 +296,34 @@ enum class JsonNumberMode : uint8 {
     Preserve
 };
 
-// StringBuilder에 JSON을 쓴다. byte 단위 고정 규칙: 들여쓰기 2칸, 줄바꿈 LF, Finish가 끝에 줄바꿈
-// 1개, 키 구분자 ": ", 빈 컨테이너 {}·[], 키 순서는 호출 순서. 문자열은 '"'·'\\'·제어 문자만
-// 이스케이프한다(U+0008·0C·0A·0D·09는 \b\f\n\r\t, 그 밖 제어 문자는 소문자 \u00xx). 그 밖의
+// JsonWriter의 쓰기 옵션이다.
+// - mode·maxDepth: 숫자 쓰기 방식과 최대 중첩 깊이(JsonReadOptions::maxDepth와 같은 기본값)
+// - compact: 한 줄로 쓴다. 들여쓰기·줄바꿈이 없고 키 구분자는 ":"이다(JSON lines 출력).
+//   Finish의 끝 줄바꿈은 그대로 쓴다.
+// - fixedFrames: 컨테이너 중첩 상태를 writer 안의 고정 배열(JsonWriter::FixedFrameCapacity칸)에
+//   둔다. 할당하지 않는 대신 깊이가 그 수로 제한된다(maxDepth와 둘 중 작은 값).
+// - detectDuplicateKeys: 같은 객체의 중복 키를 거부한다(색인 HashMap을 할당한다). 끄면 확인하지
+//   않으므로 호출자가 키가 겹치지 않음을 보장한다(로그 속성 이름은 템플릿 검증이 막는다).
+// fixedFrames·detectDuplicateKeys 끔이고 출력 builder가 할당하지 않으면(FixedStringBuilder)
+// String·Key·숫자·컨테이너 쓰기는 할당하지 않는다. Value(문서 값 복사)는 여전히 할당할 수 있다.
+//
+// 사용 예:
+//   JsonWriterOptions options;
+//   options.compact = true;
+//   options.fixedFrames = true;
+//   options.detectDuplicateKeys = false;
+//   JsonWriter writer(line, options);
+struct JsonWriterOptions {
+    JsonNumberMode mode = JsonNumberMode::Canonical;
+    uint32 maxDepth = 128;
+    bool compact = false;
+    bool fixedFrames = false;
+    bool detectDuplicateKeys = true;
+};
+
+// StringBuilder에 JSON을 쓴다. byte 단위 고정 규칙(기본 옵션): 들여쓰기 2칸, 줄바꿈 LF, Finish가
+// 끝에 줄바꿈 1개, 키 구분자 ": ", 빈 컨테이너 {}·[], 키 순서는 호출 순서. 문자열은 '"'·'\\'·제어
+// 문자만 이스케이프한다(U+0008·0C·0A·0D·09는 \b\f\n\r\t, 그 밖 제어 문자는 소문자 \u00xx). 그 밖의
 // 문자('/'·U+007F·U+2028 포함)는 UTF-8 그대로이며 입력 문자열의 UTF-8을 검증한다. BOM은 쓰지
 // 않는다. 입력 문자열이 out의 View()여도 된다. 들여쓰기 때문에 출력 크기는 중첩 깊이의 제곱에
 // 비례한다(깊이 D인 사슬은 약 2·D² byte) — 아주 깊은 문서는 maxDepth를 올려도 출력이 커진다.
@@ -313,6 +338,11 @@ public:
     // 있다).
     explicit JsonWriter(StringBuilderBase& out, JsonNumberMode mode = JsonNumberMode::Canonical,
                         uint32 maxDepth = 128) noexcept;
+    // 옵션을 함께 받는다(JsonWriterOptions 참고).
+    JsonWriter(StringBuilderBase& out, const JsonWriterOptions& options) noexcept;
+
+    // fixedFrames 옵션의 고정 중첩 칸 수다.
+    static constexpr uint32 FixedFrameCapacity = 32;
     JsonWriter(const JsonWriter&) = delete;
     JsonWriter& operator=(const JsonWriter&) = delete;
 
@@ -380,9 +410,20 @@ private:
     Result<void> Fail(ErrorCode code) noexcept;
     Result<void> Check(Result<void> result) noexcept;
 
+    // 중첩 상태 접근(고정 배열 또는 Array)이다.
+    usize FrameCount() const noexcept;
+    Frame& TopFrame() noexcept;
+    bool PushFrame(Frame frame) noexcept;
+    void PopFrame() noexcept;
+
     StringBuilderBase* out_;
     JsonNumberMode mode_;
     uint32 maxDepth_;
+    bool compact_ = false;
+    bool fixedFrames_ = false;
+    bool detectDuplicateKeys_ = true;
+    uint32 fixedCount_ = 0;
+    Frame fixed_[FixedFrameCapacity]{};
     Array<Frame> frames_;
     HashMap<WrittenKey, uint8, WrittenKeyHash, WrittenKeyEqual> keys_;
     uint32 nextSerial_ = 0;

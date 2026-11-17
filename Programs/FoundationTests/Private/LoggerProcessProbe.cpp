@@ -53,7 +53,8 @@ int RunLoggerFailureProbe() noexcept {
         Log::Error(LogProbe, "broken pipe");
     }
 
-    return logs.Stats().sinkFailures == 1 ? 0 : 5;
+    // 기록 write와 묶음 flush가 모두 실패한다(둘 다 sink 실패로 센다).
+    return logs.Stats().sinkFailures != 0 ? 0 : 5;
 }
 
 // Log::Fatal·AssertFailed 경로를 별도 child에서 실행한다(설계 11절). 대화상자 없이 끝나도록 시험
