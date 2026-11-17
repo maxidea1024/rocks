@@ -5,6 +5,7 @@
 #include <Graphics/DeviceOwnership.h>
 #include <Graphics/FenceTimeline.h>
 #include <Graphics/StagingPool.h>
+#include <Graphics/TimestampRing.h>
 
 namespace rocks::render::testing {
 
@@ -41,7 +42,10 @@ public:
         UpdateBuffer,
         UpdateTexture,
         UploadFromStaging,
-        RequestReadback
+        RequestReadback,
+        WriteTimestamp,
+        PushMarker,
+        PopMarker
     };
 
     struct Call {
@@ -93,6 +97,17 @@ public:
         return failedResizes_;
     }
 
+    // false면 timestamp·clock calibration을 지원하지 않는 장치로 공개한다(GLES 확장 없음과 같은
+    // "없음" 공개 시험). 기본은 true다. 장치를 쓰기 전에 부른다.
+    void SetTimestampsSupported(bool supported) noexcept {
+        timestampsSupported_ = supported;
+    }
+
+    // 기록 backend의 timestamp 주파수(초당 tick)다. WriteTimestamp마다 TimestampTickStep씩 증가한
+    // tick을 낸다.
+    static constexpr uint64 TimestampFrequency = 1000000000;
+    static constexpr uint64 TimestampTickStep = 100;
+
     // --- Device ---
     graphics::DeviceInfo Info() const noexcept override;
     Result<graphics::SwapChainHandle>
@@ -138,6 +153,8 @@ public:
     RequestReadback(graphics::TextureHandle target) noexcept override;
     Result<bool> TryReadback(graphics::ReadbackHandle readback, Span<uint8> out) noexcept override;
     void ReleaseReadback(graphics::ReadbackHandle readback) noexcept override;
+    usize CollectTimestamps(Span<graphics::TimestampSample> out) noexcept override;
+    Result<graphics::ClockCalibration> CalibrateClocks() noexcept override;
 
     // readback이 돌려줄 byte 값이다(시험이 결과를 알아본다).
     void SetReadbackFill(uint8 value) noexcept {
@@ -179,6 +196,15 @@ private:
         Allocator* allocator = nullptr;
     };
 
+    // 기록한 tick을 pool 칸에서 읽는다(GPU 완료 뒤에만 Harvest가 부른다).
+    class TickSource final : public graphics::TimestampSource {
+    public:
+        graphics::TimestampReadState ReadTimestamps(uint32 first, uint32 count,
+                                                    uint64* ticks) noexcept override;
+
+        Array<uint64>* pool = nullptr;
+    };
+
     uint64 SubmitInternal() noexcept;
 
     // --- CommandContext ---
@@ -191,6 +217,9 @@ private:
     void SetConstants(const graphics::DrawConstants& constants) noexcept override;
     void Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept override;
     void DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept override;
+    Result<uint64> WriteTimestamp() noexcept override;
+    void PushMarker(StringView name) noexcept override;
+    void PopMarker() noexcept override;
 
     void Record(Op op, uint64 value = 0) noexcept;
     void Defer() noexcept;
@@ -206,6 +235,12 @@ private:
     CpuStaging stagingSource_;
     graphics::StagingPool staging_;
     uint8 readbackFill_ = 0;
+    graphics::TimestampRing timestamps_;
+    Array<uint64> timestampPool_;
+    TickSource tickSource_;
+    uint64 tickClock_ = 0;
+    uint32 markerDepth_ = 0;
+    bool timestampsSupported_ = true;
     Call calls_[MaxCalls];
     usize callCount_ = 0;
     platform::Mutex gate_;

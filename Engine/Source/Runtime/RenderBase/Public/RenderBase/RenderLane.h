@@ -467,6 +467,8 @@ private:
     void RunRetire(RenderHandle handle) noexcept;
     void RunReadback(uint64 id, RenderHandle texture) noexcept;
     void FinishReadback(uint64 id, ErrorCode error) noexcept;
+    // GPU가 끝낸 프레임의 timestamp 결과를 장치에서 꺼내 GpuTimestamp 통지로 넣는다(lane 작업).
+    void PublishTimestamps() noexcept;
     static void OnReadbackFence(ErrorCode result, void* context) noexcept;
     static void OnSlotFence(ErrorCode result, void* context) noexcept;
     static void OnRetireFence(ErrorCode result, void* context) noexcept;

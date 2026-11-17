@@ -10,8 +10,19 @@ RecordingDevice::RecordingDevice(Allocator& allocator) noexcept
     : timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics), buffers_(allocator),
       textures_(allocator), pipelines_(allocator), swapChains_(allocator), retired_(allocator),
       readbacks_(allocator),
-      staging_(allocator, stagingSource_, graphics::DefaultStagingBudgetBytes) {
+      staging_(allocator, stagingSource_, graphics::DefaultStagingBudgetBytes),
+      timestamps_(allocator), timestampPool_(allocator) {
     stagingSource_.allocator = &allocator;
+    tickSource_.pool = &timestampPool_;
+}
+
+TimestampReadState RecordingDevice::TickSource::ReadTimestamps(uint32 first, uint32 count,
+                                                               uint64* ticks) noexcept {
+    for (uint32 index = 0; index < count; ++index) {
+        ticks[index] = (*pool)[first + index];
+    }
+
+    return TimestampReadState::Ready;
 }
 
 Result<StagingMemory> RecordingDevice::CpuStaging::CreateStaging(uint64 bytes) noexcept {
@@ -231,6 +242,10 @@ DeviceInfo RecordingDevice::Info() const noexcept {
     DeviceInfo info;
     info.backend = Backend::D3D12;
     info.deviceEpoch = timeline_.DeviceEpoch();
+    info.timestamps = timestampsSupported_;
+    info.timestampFrequency = timestampsSupported_ ? TimestampFrequency : 0;
+    info.clockCalibration = timestampsSupported_;
+    info.debugMarkers = true;
     return info;
 }
 
@@ -382,6 +397,11 @@ Result<GpuFencePoint> RecordingDevice::EndFrame() noexcept {
         }
     }
 
+    while (markerDepth_ != 0) {
+        PopMarker();
+    }
+
+    timestamps_.Close(value, true);
     timeline_.Submitted(value, nullptr);
     Record(Op::EndFrame, value);
     bool hold = false;
@@ -594,6 +614,71 @@ void RecordingDevice::DrawIndexed(uint32 indexCount, uint32 instanceCount,
                                   uint32 firstIndex) noexcept {
     Record(Op::DrawIndexed, (static_cast<uint64>(indexCount) << 40) |
                                 (static_cast<uint64>(instanceCount) << 20) | firstIndex);
+}
+
+Result<uint64> RecordingDevice::WriteTimestamp() noexcept {
+    if (!timestampsSupported_) {
+        return Result<uint64>::Failure(ErrorCode::Unsupported);
+    }
+
+    if (timestampPool_.IsEmpty()) {
+        auto reset = timestamps_.Reset(TimestampFrameSlots, MaxTimestampsPerFrame);
+        if (!reset) {
+            return Result<uint64>::Failure(reset.Error());
+        }
+
+        auto sized = timestampPool_.TryResize(static_cast<usize>(TimestampFrameSlots) *
+                                              MaxTimestampsPerFrame);
+        if (!sized) {
+            return Result<uint64>::Failure(sized.Error());
+        }
+    }
+
+    timestamps_.Harvest(timeline_.Completed(), tickSource_);
+    auto write = timestamps_.Allocate();
+    if (!write) {
+        return Result<uint64>::Failure(write.Error());
+    }
+
+    tickClock_ += TimestampTickStep;
+    timestampPool_[write.Value().index] = tickClock_;
+    Record(Op::WriteTimestamp, write.Value().query);
+    return Result<uint64>::Success(write.Value().query);
+}
+
+void RecordingDevice::PushMarker(StringView name) noexcept {
+    ++markerDepth_;
+    Record(Op::PushMarker, name.ByteCount());
+}
+
+void RecordingDevice::PopMarker() noexcept {
+    if (markerDepth_ == 0) {
+        return;
+    }
+
+    --markerDepth_;
+    Record(Op::PopMarker, markerDepth_);
+}
+
+usize RecordingDevice::CollectTimestamps(Span<TimestampSample> out) noexcept {
+    if (!timestampsSupported_ || !ownership_.IsOwner() || timestampPool_.IsEmpty()) {
+        return 0;
+    }
+
+    timestamps_.Harvest(timeline_.Completed(), tickSource_);
+    return timestamps_.Collect(out);
+}
+
+Result<ClockCalibration> RecordingDevice::CalibrateClocks() noexcept {
+    if (!timestampsSupported_) {
+        return Result<ClockCalibration>::Failure(ErrorCode::Unsupported);
+    }
+
+    ClockCalibration calibration;
+    calibration.gpuTicks = tickClock_;
+    calibration.cpuNanoseconds = tickClock_;
+    calibration.gpuFrequency = TimestampFrequency;
+    return Result<ClockCalibration>::Success(calibration);
 }
 
 } // namespace rocks::render::testing

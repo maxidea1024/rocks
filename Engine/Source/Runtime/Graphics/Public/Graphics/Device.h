@@ -45,6 +45,31 @@ public:
     virtual void DrawIndexed(uint32 indexCount, uint32 instanceCount = 1,
                              uint32 firstIndex = 0) noexcept = 0;
 
+    // --- GPU 계측(RenderBase 13.2절, GX9) ---
+
+    // 이 지점(앞 명령이 끝난 GPU 시각)의 timestamp를 기록하고 결과를 맞춰 볼 번호를 돌려준다. 값은
+    // 이 프레임의 GPU 완료 뒤 Device::CollectTimestamps로 나온다. 기다리지 않는다.
+    //
+    // 사용 예:
+    //   auto begin = commands.WriteTimestamp();
+    //   ... 그리기 ...
+    //   auto end = commands.WriteTimestamp();
+    //   // 완료 뒤: CollectTimestamps에서 query == begin.Value()·end.Value()인 결과의 tick 차이
+    //
+    // 실패: 장치가 timestamp를 지원하지 않으면 Unsupported(DeviceInfo::timestamps), 앞
+    // TimestampFrameSlots개 프레임의 결과가 아직 회수 전이면 Busy, 프레임당 MaxTimestampsPerFrame을
+    // 넘으면 CapacityExceeded.
+    virtual Result<uint64> WriteTimestamp() noexcept = 0;
+
+    // 이름 구간을 연다(캡처 도구의 debug marker). name(UTF-8)은 호출 동안만 쓰며
+    // MaxDebugMarkerNameBytes를 넘으면 글자 경계에서 자른다.
+    // DeviceInfo::debugMarkers가 false면 아무것도 하지 않는다. 프레임 끝에 열린 구간은 장치가
+    // 닫는다.
+    virtual void PushMarker(StringView name) noexcept = 0;
+
+    // 가장 최근 구간을 닫는다. 열린 구간이 없으면 무시하고 IgnoredDraws를 올린다.
+    virtual void PopMarker() noexcept = 0;
+
 protected:
     ~CommandContext() = default;
 };
@@ -229,6 +254,18 @@ public:
 
     // readback을 놓는다(소유 스레드). 버퍼는 fence 뒤에 회수된다.
     virtual void ReleaseReadback(ReadbackHandle readback) noexcept = 0;
+
+    // --- GPU 계측(GX9) ---
+
+    // GPU가 끝낸 프레임의 timestamp 결과를 쓴 순서대로 out에 옮기고 옮긴 수를 돌려준다(소유
+    // 스레드, 비차단). 아직 GPU가 끝내지 않은 프레임의 결과는 나오지 않는다(미완료). out이 작으면
+    // 남은 결과는 다음 호출로 간다. 지원하지 않거나 소유 스레드가 아니면 0이다.
+    virtual usize CollectTimestamps(Span<TimestampSample> out) noexcept = 0;
+
+    // GPU tick과 CPU 시각(platform::MonotonicNanoseconds 시간축) 한 쌍을 얻는다(소유 스레드).
+    // GpuTicksToCpuNanoseconds로 timestamp를 CPU trace와 같은 시간축에 놓는다. 실패: 지원하지
+    // 않으면 Unsupported(DeviceInfo::clockCalibration), 장치 손실 Destroyed.
+    virtual Result<ClockCalibration> CalibrateClocks() noexcept = 0;
 
     // --- 스레드 안전 fence API(어느 스레드에서나 부를 수 있다) ---
 

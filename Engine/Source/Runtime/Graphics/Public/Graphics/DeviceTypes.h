@@ -340,6 +340,76 @@ struct UploadStats {
 inline constexpr uint64 DefaultUploadRingBytes = uint64{4} << 20;
 inline constexpr uint64 DefaultStagingBudgetBytes = uint64{256} << 20;
 
+// --- GPU 계측(RenderBase 13.2절, GX9) ---
+
+// timestamp를 담는 프레임 slot 수와 slot(제출 하나)당 timestamp 한도다. slot이 모두 회수 전이면
+// CommandContext::WriteTimestamp가 기다리지 않고 Busy다.
+inline constexpr uint32 TimestampFrameSlots = 4;
+inline constexpr uint32 MaxTimestampsPerFrame = 256;
+
+// timestamp 하나를 기록할 자리다(TimestampRing::Allocate). query는 결과를 맞춰 볼 번호(1부터
+// 증가), index는 backend query pool 칸이다.
+struct TimestampWrite {
+    uint64 query = 0;
+    uint32 index = 0;
+};
+
+// backend query pool의 연속 구간이다(제출 전 resolve용).
+struct TimestampRange {
+    uint32 first = 0;
+    uint32 count = 0;
+};
+
+// backend가 resolve한 결과를 읽은 상태다.
+enum class TimestampReadState : uint8 {
+    // 값이 준비되었다.
+    Ready,
+    // GPU는 끝났지만 결과가 아직 보이지 않는다(다음 회수에서 다시 묻는다).
+    NotReady,
+    // 측정 구간이 끊겼다(전력 상태 변화·GPU 재설정 등). 값은 무효다.
+    Disjoint
+};
+
+// GPU 완료 뒤 회수한 timestamp 결과 하나다(Device::CollectTimestamps).
+struct TimestampSample {
+    // CommandContext::WriteTimestamp가 돌려준 번호다.
+    uint64 query = 0;
+    // GPU tick이다. 초당 tick 수는 DeviceInfo::timestampFrequency다. disjoint면 0이다.
+    uint64 ticks = 0;
+    // true면 값이 무효다(구간 끊김 또는 제출 실패). 이 값으로 구간을 재지 않는다.
+    bool disjoint = false;
+};
+
+// 같은 순간의 GPU tick과 CPU 시각 한 쌍이다(Device::CalibrateClocks). CPU 시각은
+// platform::MonotonicNanoseconds와 같은 시간축의 ns다.
+struct ClockCalibration {
+    uint64 gpuTicks = 0;
+    uint64 cpuNanoseconds = 0;
+    // GPU tick의 초당 수다(DeviceInfo::timestampFrequency와 같다).
+    uint64 gpuFrequency = 0;
+};
+
+// frequency(초당 tick) 기준 ticks를 ns로 바꾼다. 중간 곱이 넘치지 않으며 1초 미만 부분만 double로
+// 계산한다. frequency가 0이면 0이다. backend가 OS 시계 tick(예: QPC)을 CPU 시간축으로 옮길 때도
+// 쓴다.
+uint64 TicksToNanoseconds(uint64 ticks, uint64 frequency) noexcept;
+
+// GPU tick을 calibration 기준으로 CPU 시간축 ns로 옮긴다. ticks가 기준보다 앞이면 그만큼 앞선
+// 시각이다(0 아래는 0). gpuFrequency가 0이면 cpuNanoseconds를 그대로 돌려준다. 두 시계의 drift는
+// 보정하지 않으므로 오래된 calibration일수록 오차가 커진다(프레임마다 새로 얻기를 권한다).
+//
+// 사용 예:
+//   auto pair = device.CalibrateClocks();
+//   uint64 cpuTime = GpuTicksToCpuNanoseconds(pair.Value(), sample.ticks);
+uint64 GpuTicksToCpuNanoseconds(const ClockCalibration& calibration, uint64 ticks) noexcept;
+
+// debug marker 이름의 최대 byte 수다. 넘으면 UTF-8 글자 경계에서 자른다.
+inline constexpr usize MaxDebugMarkerNameBytes = 255;
+
+// name을 MaxDebugMarkerNameBytes 안으로 자른다(UTF-8 글자 중간에서 자르지 않는다). backend가
+// marker를 기록하기 전에 쓴다. 잘못된 UTF-8은 검사하지 않는다.
+StringView ClipDebugMarkerName(StringView name) noexcept;
+
 // 장치 정보다. 문자열은 장치가 소유하며 장치 수명 동안 유효하다.
 struct DeviceInfo {
     Backend backend = Backend::D3D12;
@@ -353,6 +423,21 @@ struct DeviceInfo {
     // 넘긴다. D3D12는 true다: 생성·갱신·staging 업로드는 내부 잠금 아래 업로드 기록에 쌓이고 소유
     // 스레드의 다음 제출이 실행한다(GX8). OpenGL은 context가 소유 스레드에 묶여 false다.
     bool concurrentResourceCreation = false;
+    // GPU timestamp를 기록할 수 있는지와 초당 tick 수다(GX9). false면 WriteTimestamp가
+    // Unsupported이며 GPU 시간은 "없음"이다(추정값을 만들지 않는다). D3D12는 graphics queue
+    // timestamp, OpenGL은 GL_TIMESTAMP query(counter bit가 0이면 false)다.
+    bool timestamps = false;
+    uint64 timestampFrequency = 0;
+    // timestamp 구간 끊김(disjoint)을 알아챌 수 있는지다. false면 TimestampSample::disjoint는 제출
+    // 실패 때만 true다. D3D12는 queue timestamp가 끊기지 않아 해당 없음(false), OpenGL은
+    // GL_EXT_disjoint_timer_query가 있을 때만 true다.
+    bool timestampDisjointDetection = false;
+    // GPU·CPU 시각 쌍(CalibrateClocks)을 얻을 수 있는지다. D3D12는 queue clock calibration,
+    // OpenGL은 GL_TIMESTAMP 조회와 CPU 시각을 잇달아 읽는다(조회 지연만큼 오차).
+    bool clockCalibration = false;
+    // debug marker(PushMarker·PopMarker)가 캡처 도구에 기록되는지다. false면 두 호출은 아무것도
+    // 하지 않는다. D3D12는 command list 이벤트(PIX), OpenGL은 debug group이다.
+    bool debugMarkers = false;
 };
 
 } // namespace rocks::graphics

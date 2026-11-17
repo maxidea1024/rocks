@@ -4,6 +4,7 @@
 #include <Graphics/DeviceOwnership.h>
 #include <Graphics/FenceTimeline.h>
 #include <Graphics/StagingPool.h>
+#include <Graphics/TimestampRing.h>
 #include <Graphics/UploadRing.h>
 #include <Platform/Fatal.h>
 
@@ -442,6 +443,28 @@ public:
     ID3D12Device* device = nullptr;
 };
 
+// timestamp query heap을 resolve한 readback 버퍼에서 결과를 읽는다(GX9). Harvest가 fence 완료
+// 뒤에만 부르므로 값은 이미 버퍼에 있다.
+class D3D12TimestampSource final : public TimestampSource {
+public:
+    TimestampReadState ReadTimestamps(uint32 first, uint32 count, uint64* ticks) noexcept override {
+        const D3D12_RANGE range = {static_cast<SIZE_T>(first) * sizeof(uint64),
+                                   static_cast<SIZE_T>(first + count) * sizeof(uint64)};
+        void* mapped = nullptr;
+        if (buffer == nullptr || FAILED(buffer->Map(0, &range, &mapped))) {
+            return TimestampReadState::Disjoint;
+        }
+
+        platform::MemoryCopy(ticks, static_cast<const uint8*>(mapped) + range.Begin,
+                             static_cast<usize>(count) * sizeof(uint64));
+        const D3D12_RANGE noWrite = {0, 0};
+        buffer->Unmap(0, &noWrite);
+        return TimestampReadState::Ready;
+    }
+
+    ID3D12Resource* buffer = nullptr;
+};
+
 // 비동기 readback 하나다. fence가 끝나면 footprint 배치로 버퍼에 있다.
 struct ReadbackRecord {
     ComRef<ID3D12Resource> resource;
@@ -491,7 +514,7 @@ public:
           pipelines_(allocator), swapChains_(allocator), retired_(allocator), rtvs_(allocator),
           srvs_(allocator), samplers_(allocator), allocators_(allocator),
           messageScratch_(allocator), timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics),
-          allocator_(allocator), readbacks_(allocator), ring_(allocator) {
+          allocator_(allocator), readbacks_(allocator), ring_(allocator), timestamps_(allocator) {
     }
 
     ~D3D12Device() override {
@@ -673,6 +696,7 @@ public:
             return Result<void>::Failure(pool.Error());
         }
         staging_ = Move(pool.Value());
+        InitializeTimestamps();
 
         // 텍스처를 묶지 않은 그리기가 쓸 1x1 흰색 텍스처다.
         const uint8 white[4] = {255, 255, 255, 255};
@@ -697,6 +721,12 @@ public:
         info.concurrentResourceCreation = true;
         info.validationEnabled = validation_;
         info.software = software_;
+        // graphics queue timestamp와 clock calibration이다. queue timestamp는 끊기지 않으므로
+        // disjoint 감지는 해당 없다.
+        info.timestamps = timestampHeap_.Get() != nullptr;
+        info.timestampFrequency = timestampFrequency_;
+        info.clockCalibration = info.timestamps;
+        info.debugMarkers = true;
         return info;
     }
 
@@ -1111,6 +1141,13 @@ public:
         const D3D12_RESOURCE_BARRIER back =
             Transition(target_.resource, D3D12_RESOURCE_STATE_RENDER_TARGET, target_.restState);
         list_->ResourceBarrier(1, &back);
+        CloseMarkers();
+        const TimestampRange stamps = timestamps_.OpenRange();
+        if (stamps.count != 0) {
+            list_->ResolveQueryData(timestampHeap_.Get(), D3D12_QUERY_TYPE_TIMESTAMP, stamps.first,
+                                    stamps.count, timestampReadback_.Get(),
+                                    uint64{stamps.first} * sizeof(uint64));
+        }
         recording_ = false;
         allocators_[recordingAllocator_].inUse = false;
         // 이 프레임 전에 쌓인 업로드(생성 초기 데이터·내용 갱신)를 먼저 실행한다.
@@ -1118,6 +1155,7 @@ public:
         if (!uploads) {
             allocators_[recordingAllocator_].fenceValue = fenceValue_;
             AssignPendingRetires(fenceValue_);
+            timestamps_.Close(fenceValue_, false);
             (void)list_->Close();
             return Result<GpuFencePoint>::Failure(uploads.Error());
         }
@@ -1125,6 +1163,7 @@ public:
             // 아무것도 제출하지 않았다. 이 기록만 참조하던 자원은 지금까지의 제출 뒤에 놓아도 된다.
             allocators_[recordingAllocator_].fenceValue = fenceValue_;
             AssignPendingRetires(fenceValue_);
+            timestamps_.Close(fenceValue_, false);
             return FailWith<GpuFencePoint>("command list close failed");
         }
         ID3D12CommandList* lists[] = {list_.Get()};
@@ -1150,12 +1189,14 @@ public:
             // 놓지 않는다.
             allocators_[recordingAllocator_].fenceValue = RetainUntilDestructionFence;
             AssignPendingRetires(RetainUntilDestructionFence);
+            timestamps_.Close(RetainUntilDestructionFence, false);
             DrainValidationMessages();
             return Result<GpuFencePoint>::Failure(signaled.Error());
         }
         const uint64 value = signaled.Value();
         allocators_[recordingAllocator_].fenceValue = value;
         AssignPendingRetires(value);
+        timestamps_.Close(value, true);
         ProcessRetired();
         DrainValidationMessages();
         if (!outcome) {
@@ -1533,6 +1574,48 @@ public:
         return ignoredDraws_;
     }
 
+    usize CollectTimestamps(Span<TimestampSample> out) noexcept override {
+        if (!ownership_.IsOwner()) {
+            return 0;
+        }
+        platform::LockGuard lock(gate_);
+        if (timestampHeap_.Get() == nullptr) {
+            return 0;
+        }
+        HarvestTimestamps();
+        return timestamps_.Collect(out);
+    }
+
+    Result<ClockCalibration> CalibrateClocks() noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<ClockCalibration>::Failure(owner.Error());
+        }
+        if (timestampHeap_.Get() == nullptr) {
+            return Result<ClockCalibration>::Failure(ErrorCode::Unsupported);
+        }
+        if (timeline_.IsLost()) {
+            return Result<ClockCalibration>::Failure(ErrorCode::Destroyed);
+        }
+        // CPU 쪽 값은 QueryPerformanceCounter tick이다. platform::MonotonicNanoseconds와 같은
+        // 시계이므로 같은 주파수로 ns로 옮긴다.
+        UINT64 gpu = 0;
+        UINT64 cpu = 0;
+        LARGE_INTEGER frequency{};
+        const HRESULT calibrated = queue_->GetClockCalibration(&gpu, &cpu);
+        if (FAILED(calibrated) || !QueryPerformanceFrequency(&frequency) ||
+            frequency.QuadPart <= 0) {
+            DetectLost(calibrated);
+            return FailWith<ClockCalibration>("GetClockCalibration failed");
+        }
+        ClockCalibration calibration;
+        calibration.gpuTicks = gpu;
+        calibration.cpuNanoseconds =
+            TicksToNanoseconds(cpu, static_cast<uint64>(frequency.QuadPart));
+        calibration.gpuFrequency = timestampFrequency_;
+        return Result<ClockCalibration>::Success(calibration);
+    }
+
     uint64 ValidationErrorCount() const noexcept override {
         DrainValidationMessages();
         return validationErrors_;
@@ -1895,6 +1978,51 @@ private:
         return Result<void>::Success();
     }
 
+    // timestamp query heap과 resolve 대상 readback 버퍼를 만든다(GX9). queue가 timestamp 주파수를
+    // 주지 않거나 만들 수 없으면 timestamp를 "없음"으로 공개한다(장치 생성은 실패하지 않는다).
+    void InitializeTimestamps() noexcept {
+        UINT64 frequency = 0;
+        if (FAILED(queue_->GetTimestampFrequency(&frequency)) || frequency == 0) {
+            return;
+        }
+        constexpr uint32 Count = TimestampFrameSlots * MaxTimestampsPerFrame;
+        D3D12_QUERY_HEAP_DESC heapDesc = {};
+        heapDesc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+        heapDesc.Count = Count;
+        const D3D12_HEAP_PROPERTIES heap = HeapProperties(D3D12_HEAP_TYPE_READBACK);
+        const D3D12_RESOURCE_DESC buffer = BufferResource(uint64{Count} * sizeof(uint64));
+        ComRef<ID3D12QueryHeap> queries;
+        ComRef<ID3D12Resource> readback;
+        if (FAILED(device_->CreateQueryHeap(&heapDesc, IID_PPV_ARGS(queries.Out()))) ||
+            FAILED(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &buffer,
+                                                    D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+                                                    IID_PPV_ARGS(readback.Out()))) ||
+            !timestamps_.Reset(TimestampFrameSlots, MaxTimestampsPerFrame)) {
+            return;
+        }
+        timestampHeap_ = Move(queries);
+        timestampReadback_ = Move(readback);
+        timestampSource_.buffer = timestampReadback_.Get();
+        timestampFrequency_ = frequency;
+    }
+
+    // GPU가 끝낸 프레임의 timestamp를 회수한다(잠금 안). 장치가 제거되었으면 값이 없으므로 읽지
+    // 않는다.
+    void HarvestTimestamps() noexcept {
+        const uint64 completed = fence_->GetCompletedValue();
+        if (completed == D3D12FenceSource::RemovedFenceValue) {
+            return;
+        }
+        timestamps_.Harvest(completed, timestampSource_);
+    }
+
+    // 프레임 끝에 열린 marker 구간을 닫는다(잠금 안).
+    void CloseMarkers() noexcept {
+        for (; markerDepth_ != 0; --markerDepth_) {
+            list_->EndEvent();
+        }
+    }
+
     Result<void> BeginRecording() noexcept {
         // 이전 제출이 끝난 저장소만 다시 쓸 수 있다.
         auto picked = PickCommandAllocator();
@@ -1909,6 +2037,7 @@ private:
         recordingAllocator_ = picked.Value();
         record.inUse = true;
         recording_ = true;
+        markerDepth_ = 0;
         boundPipeline_ = {};
         for (BoundVertexBuffer& bound : boundVertex_) {
             bound = {};
@@ -2495,6 +2624,54 @@ private:
         list_->DrawIndexedInstanced(indexCount, instanceCount, firstIndex, 0, 0);
     }
 
+    Result<uint64> WriteTimestamp() noexcept override {
+        platform::LockGuard lock(gate_);
+        if (timestampHeap_.Get() == nullptr) {
+            return Result<uint64>::Failure(ErrorCode::Unsupported);
+        }
+        if (!recording_) {
+            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+        }
+        HarvestTimestamps();
+        auto write = timestamps_.Allocate();
+        if (!write) {
+            return Result<uint64>::Failure(write.Error());
+        }
+        list_->EndQuery(timestampHeap_.Get(), D3D12_QUERY_TYPE_TIMESTAMP, write.Value().index);
+        return Result<uint64>::Success(write.Value().query);
+    }
+
+    // PIX가 읽는 이벤트 형식(metadata 0 = UTF-16 문자열)으로 command list에 구간을 기록한다.
+    void PushMarker(StringView name) noexcept override {
+        platform::LockGuard lock(gate_);
+        if (!recording_) {
+            return;
+        }
+        const StringView clipped = ClipDebugMarkerName(name);
+        wchar_t text[MaxDebugMarkerNameBytes + 1];
+        int length = 0;
+        if (clipped.ByteCount() != 0) {
+            length = MultiByteToWideChar(CP_UTF8, 0, clipped.Data(),
+                                         static_cast<int>(clipped.ByteCount()), text,
+                                         static_cast<int>(MaxDebugMarkerNameBytes));
+        }
+        text[length > 0 ? length : 0] = L'\0';
+        constexpr UINT UnicodeEventMetadata = 0;
+        list_->BeginEvent(UnicodeEventMetadata, text,
+                          static_cast<UINT>((length > 0 ? length + 1 : 1) * sizeof(wchar_t)));
+        ++markerDepth_;
+    }
+
+    void PopMarker() noexcept override {
+        platform::LockGuard lock(gate_);
+        if (!recording_ || markerDepth_ == 0) {
+            ++ignoredDraws_;
+            return;
+        }
+        list_->EndEvent();
+        --markerDepth_;
+    }
+
     String adapterName_;
     String lastError_;
     SlotArray<BufferRecord> buffers_;
@@ -2551,6 +2728,15 @@ private:
     uint64 dedicatedUploads_ = 0;
     D3D12StagingSource stagingSource_;
     UniquePtr<StagingPool> staging_;
+    // GPU 계측(GX9): timestamp query heap, resolve 대상 readback 버퍼와 프레임 slot 장부다.
+    // 지원하지 않으면 heap이 없다.
+    ComRef<ID3D12QueryHeap> timestampHeap_;
+    ComRef<ID3D12Resource> timestampReadback_;
+    D3D12TimestampSource timestampSource_;
+    TimestampRing timestamps_;
+    uint64 timestampFrequency_ = 0;
+    // 지금 프레임에서 열린 marker 구간 수다.
+    uint32 markerDepth_ = 0;
     bool recording_ = false;
     bool validation_ = false;
     bool software_ = false;

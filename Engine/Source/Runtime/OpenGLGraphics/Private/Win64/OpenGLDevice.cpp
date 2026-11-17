@@ -3,7 +3,9 @@
 #include <Graphics/DeviceOwnership.h>
 #include <Graphics/FenceTimeline.h>
 #include <Graphics/StagingPool.h>
+#include <Graphics/TimestampRing.h>
 #include <OpenGLGraphics/OpenGLDevice.h>
+#include <Platform/Clock.h>
 #include <Platform/Fatal.h>
 
 #include <Windows.h>
@@ -20,6 +22,7 @@ using GLchar = char;
 using GLsizeiptr = signed long long;
 using GLintptr = signed long long;
 using GLuint64 = unsigned long long;
+using GLint64 = long long;
 using GLsync = struct __GLsync*;
 using GLDEBUGPROC = void(APIENTRY*)(GLenum source, GLenum type, GLuint id, GLenum severity,
                                     GLsizei length, const GLchar* message, const void* user);
@@ -49,6 +52,13 @@ constexpr GLenum GL_MIRRORED_REPEAT_VALUE = 0x8370;
 constexpr GLenum GL_SYNC_GPU_COMMANDS_COMPLETE_VALUE = 0x9117;
 constexpr GLenum GL_HALF_FLOAT_VALUE = 0x140B;
 constexpr GLenum GL_PIXEL_PACK_BUFFER_VALUE = 0x88EB;
+// timestamp query(GL 3.3 ARB_timer_query)와 debug group(GL 4.3)이다.
+constexpr GLenum GL_TIMESTAMP_VALUE = 0x8E28;
+constexpr GLenum GL_QUERY_COUNTER_BITS_VALUE = 0x8864;
+constexpr GLenum GL_QUERY_RESULT_VALUE = 0x8866;
+constexpr GLenum GL_QUERY_RESULT_AVAILABLE_VALUE = 0x8867;
+constexpr GLenum GL_GPU_DISJOINT_EXT_VALUE = 0x8FBB;
+constexpr GLenum GL_DEBUG_SOURCE_APPLICATION_VALUE = 0x824A;
 // glNamedBufferStorage: glNamedBufferSubData로 내용을 바꿀 수 있다.
 constexpr GLbitfield GL_DYNAMIC_STORAGE_BIT_VALUE = 0x0100;
 constexpr GLenum GL_UNSIGNED_INT_2_10_10_10_REV_VALUE = 0x8368;
@@ -178,6 +188,15 @@ struct GlFunctions {
     void(APIENTRY* BindBuffer)(GLenum, GLuint) = nullptr;
     GLenum(APIENTRY* ClientWaitSync)(GLsync, GLbitfield, GLuint64) = nullptr;
     void(APIENTRY* DeleteSync)(GLsync) = nullptr;
+    void(APIENTRY* CreateQueries)(GLenum, GLsizei, GLuint*) = nullptr;
+    void(APIENTRY* DeleteQueries)(GLsizei, const GLuint*) = nullptr;
+    void(APIENTRY* QueryCounter)(GLuint, GLenum) = nullptr;
+    void(APIENTRY* GetQueryiv)(GLenum, GLenum, GLint*) = nullptr;
+    void(APIENTRY* GetQueryObjectiv)(GLuint, GLenum, GLint*) = nullptr;
+    void(APIENTRY* GetQueryObjectui64v)(GLuint, GLenum, GLuint64*) = nullptr;
+    void(APIENTRY* GetInteger64v)(GLenum, GLint64*) = nullptr;
+    void(APIENTRY* PushDebugGroup)(GLenum, GLuint, GLsizei, const GLchar*) = nullptr;
+    void(APIENTRY* PopDebugGroup)() = nullptr;
 };
 
 // wglGetProcAddress는 실패를 nullptr뿐 아니라 1·2·3·-1로도 알린다.
@@ -244,7 +263,12 @@ bool LoadFunctions(GlFunctions& gl) noexcept {
            Bind(gl.NamedBufferSubData, "glNamedBufferSubData") &&
            Bind(gl.GetNamedBufferSubData, "glGetNamedBufferSubData") &&
            Bind(gl.BindBuffer, "glBindBuffer") && Bind(gl.ClientWaitSync, "glClientWaitSync") &&
-           Bind(gl.DeleteSync, "glDeleteSync");
+           Bind(gl.DeleteSync, "glDeleteSync") && Bind(gl.CreateQueries, "glCreateQueries") &&
+           Bind(gl.DeleteQueries, "glDeleteQueries") && Bind(gl.QueryCounter, "glQueryCounter") &&
+           Bind(gl.GetQueryiv, "glGetQueryiv") && Bind(gl.GetQueryObjectiv, "glGetQueryObjectiv") &&
+           Bind(gl.GetQueryObjectui64v, "glGetQueryObjectui64v") &&
+           Bind(gl.GetInteger64v, "glGetInteger64v") &&
+           Bind(gl.PushDebugGroup, "glPushDebugGroup") && Bind(gl.PopDebugGroup, "glPopDebugGroup");
 }
 
 // 정점 원소 형식의 GL 속성 설정이다(RenderBase 10.4절 표, UE OpenGLVertexDeclaration.cpp:49–77).
@@ -498,6 +522,43 @@ public:
     Allocator* allocator = nullptr;
 };
 
+// timestamp query 결과를 읽는다(GX9). Harvest가 fence 완료 뒤에만 부르지만 query 결과가 아직
+// 보이지 않을 수 있으므로 가용 여부를 먼저 본다. GL_EXT_disjoint_timer_query가 있으면 끊김 표시를
+// 읽어 그 묶음을 무효로 한다.
+class OpenGLTimestampSource final : public TimestampSource {
+public:
+    TimestampReadState ReadTimestamps(uint32 first, uint32 count, uint64* ticks) noexcept override {
+        for (uint32 index = 0; index < count; ++index) {
+            GLint available = GL_FALSE;
+            gl->GetQueryObjectiv(queries[first + index], GL_QUERY_RESULT_AVAILABLE_VALUE,
+                                 &available);
+            if (available == GL_FALSE) {
+                return TimestampReadState::NotReady;
+            }
+        }
+
+        for (uint32 index = 0; index < count; ++index) {
+            GLuint64 value = 0;
+            gl->GetQueryObjectui64v(queries[first + index], GL_QUERY_RESULT_VALUE, &value);
+            ticks[index] = value;
+        }
+
+        if (disjointDetection) {
+            GLint disjoint = GL_FALSE;
+            glGetIntegerv(GL_GPU_DISJOINT_EXT_VALUE, &disjoint);
+            if (disjoint != GL_FALSE) {
+                return TimestampReadState::Disjoint;
+            }
+        }
+
+        return TimestampReadState::Ready;
+    }
+
+    const GlFunctions* gl = nullptr;
+    const GLuint* queries = nullptr;
+    bool disjointDetection = false;
+};
+
 // 비동기 readback 하나다(pixel pack buffer). fenceValue 제출이 끝나면 읽을 수 있다.
 struct ReadbackRecord {
     GLuint buffer = 0;
@@ -564,7 +625,7 @@ public:
     explicit OpenGLDevice(Allocator& allocator) noexcept
         : adapterName_(allocator), lastError_(allocator), buffers_(allocator), textures_(allocator),
           pipelines_(allocator), swapChains_(allocator), retired_(allocator), readbacks_(allocator),
-          timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics) {
+          timestamps_(allocator), timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics) {
         stagingSource_.allocator = &allocator;
     }
 
@@ -592,6 +653,9 @@ public:
             staging_->Clear();
         }
         if (current) {
+            if (timestampsReady_) {
+                gl_.DeleteQueries(static_cast<GLsizei>(TimestampQueryCount), timestampQueries_);
+            }
             for (const ReadbackRecord& record : readbacks_) {
                 gl_.DeleteBuffers(1, &record.buffer);
             }
@@ -725,13 +789,19 @@ public:
         bool anisotropic = major > 4 || (major == 4 && minor >= 6);
         GLint extensionCount = 0;
         glGetIntegerv(GL_NUM_EXTENSIONS_VALUE, &extensionCount);
-        for (GLint index = 0; index < extensionCount && !anisotropic; ++index) {
+        bool disjointTimer = false;
+        for (GLint index = 0; index < extensionCount; ++index) {
             const auto* name = reinterpret_cast<const char*>(
                 gl_.GetStringi(GL_EXTENSIONS, static_cast<GLuint>(index)));
+            if (name == nullptr) {
+                continue;
+            }
             anisotropic =
-                name != nullptr &&
-                (platform::CStringCompare(name, "GL_ARB_texture_filter_anisotropic") == 0 ||
-                 platform::CStringCompare(name, "GL_EXT_texture_filter_anisotropic") == 0);
+                anisotropic ||
+                platform::CStringCompare(name, "GL_ARB_texture_filter_anisotropic") == 0 ||
+                platform::CStringCompare(name, "GL_EXT_texture_filter_anisotropic") == 0;
+            disjointTimer =
+                disjointTimer || platform::CStringCompare(name, "GL_EXT_disjoint_timer_query") == 0;
         }
         if (anisotropic) {
             glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_VALUE, &maxAnisotropy_);
@@ -779,6 +849,7 @@ public:
             gl_.DebugMessageCallback(&OpenGLDevice::DebugMessage, this);
             validation_ = true;
         }
+        InitializeTimestamps(disjointTimer);
         SetClipOrigin(GL_LOWER_LEFT_VALUE);
         glDisable(GL_DEPTH_TEST);
         glDisable(GL_CULL_FACE);
@@ -805,6 +876,12 @@ public:
         info.deviceEpoch = timeline_.DeviceEpoch();
         info.concurrentResourceCreation = false;
         info.validationEnabled = validation_;
+        // GL_TIMESTAMP 값은 ns다. counter bit가 0이면 timestamp가 없다(추정값을 만들지 않는다).
+        info.timestamps = timestampsReady_;
+        info.timestampFrequency = timestampsReady_ ? TimestampNanosecondFrequency : 0;
+        info.timestampDisjointDetection = timestampsReady_ && timestampSource_.disjointDetection;
+        info.clockCalibration = timestampsReady_;
+        info.debugMarkers = true;
         return info;
     }
 
@@ -1160,7 +1237,11 @@ public:
             }
         }
         gl_.BindFramebuffer(GL_FRAMEBUFFER_VALUE, 0);
+        for (; markerDepth_ != 0; --markerDepth_) {
+            gl_.PopDebugGroup();
+        }
         const uint64 value = Submit();
+        timestamps_.Close(value, true);
         AssignPendingRetires(value);
         DeleteRetired(timeline_.Completed());
         if (!outcome) {
@@ -1567,6 +1648,41 @@ public:
         return ignoredDraws_;
     }
 
+    usize CollectTimestamps(Span<TimestampSample> out) noexcept override {
+        if (!ownership_.IsOwner() || !timestampsReady_ || !MakeCurrentForResources()) {
+            return 0;
+        }
+        timestamps_.Harvest(timeline_.Completed(), timestampSource_);
+        return timestamps_.Collect(out);
+    }
+
+    // GL_TIMESTAMP 조회(앞 명령이 서버에 닿은 시각)와 CPU 시각을 잇달아 읽는다. CPU 시각은 조회
+    // 앞뒤 값의 가운데로 잡아 조회 지연의 절반만 오차로 남긴다.
+    Result<ClockCalibration> CalibrateClocks() noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return Result<ClockCalibration>::Failure(owner.Error());
+        }
+        if (!timestampsReady_) {
+            return Result<ClockCalibration>::Failure(ErrorCode::Unsupported);
+        }
+        if (timeline_.IsLost()) {
+            return Result<ClockCalibration>::Failure(ErrorCode::Destroyed);
+        }
+        if (!MakeCurrentForResources()) {
+            return FailWith<ClockCalibration>("OpenGL context is not current");
+        }
+        const uint64 before = platform::MonotonicNanoseconds();
+        GLint64 gpu = 0;
+        gl_.GetInteger64v(GL_TIMESTAMP_VALUE, &gpu);
+        const uint64 after = platform::MonotonicNanoseconds();
+        ClockCalibration calibration;
+        calibration.gpuTicks = static_cast<uint64>(gpu);
+        calibration.cpuNanoseconds = before + (after - before) / 2;
+        calibration.gpuFrequency = TimestampNanosecondFrequency;
+        return Result<ClockCalibration>::Success(calibration);
+    }
+
     uint64 ValidationErrorCount() const noexcept override {
         return validationErrors_;
     }
@@ -1842,8 +1958,25 @@ private:
         return Result<GLuint>::Success(shader);
     }
 
+    // timestamp query 묶음을 만든다(GX9). GL_TIMESTAMP counter bit가 0이면 timestamp를 "없음"으로
+    // 공개한다(장치 생성은 실패하지 않는다).
+    void InitializeTimestamps(bool disjointExtension) noexcept {
+        GLint bits = 0;
+        gl_.GetQueryiv(GL_TIMESTAMP_VALUE, GL_QUERY_COUNTER_BITS_VALUE, &bits);
+        if (bits <= 0 || !timestamps_.Reset(TimestampFrameSlots, MaxTimestampsPerFrame)) {
+            return;
+        }
+        gl_.CreateQueries(GL_TIMESTAMP_VALUE, static_cast<GLsizei>(TimestampQueryCount),
+                          timestampQueries_);
+        timestampSource_.gl = &gl_;
+        timestampSource_.queries = timestampQueries_;
+        timestampSource_.disjointDetection = disjointExtension;
+        timestampsReady_ = true;
+    }
+
     void StartPass(uint32 width, uint32 height, const ClearColor& clear) noexcept {
         recording_ = true;
+        markerDepth_ = 0;
         boundPipeline_ = {};
         for (BoundVertexBuffer& bound : boundVertex_) {
             bound = {};
@@ -1932,6 +2065,41 @@ private:
         }
     }
 
+    Result<uint64> WriteTimestamp() noexcept override {
+        if (!timestampsReady_) {
+            return Result<uint64>::Failure(ErrorCode::Unsupported);
+        }
+        if (!recording_) {
+            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+        }
+        timestamps_.Harvest(timeline_.Completed(), timestampSource_);
+        auto write = timestamps_.Allocate();
+        if (!write) {
+            return Result<uint64>::Failure(write.Error());
+        }
+        gl_.QueryCounter(timestampQueries_[write.Value().index], GL_TIMESTAMP_VALUE);
+        return Result<uint64>::Success(write.Value().query);
+    }
+
+    void PushMarker(StringView name) noexcept override {
+        if (!recording_) {
+            return;
+        }
+        const StringView clipped = ClipDebugMarkerName(name);
+        gl_.PushDebugGroup(GL_DEBUG_SOURCE_APPLICATION_VALUE, 0,
+                           static_cast<GLsizei>(clipped.ByteCount()), clipped.Data());
+        ++markerDepth_;
+    }
+
+    void PopMarker() noexcept override {
+        if (!recording_ || markerDepth_ == 0) {
+            ++ignoredDraws_;
+            return;
+        }
+        gl_.PopDebugGroup();
+        --markerDepth_;
+    }
+
     void Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept override {
         const PipelineRecord* pipeline = DrawablePipeline();
         if (pipeline == nullptr) {
@@ -1973,6 +2141,16 @@ private:
     SlotArray<ReadbackRecord> readbacks_;
     OpenGLStagingSource stagingSource_;
     UniquePtr<StagingPool> staging_;
+    // GPU 계측(GX9): timestamp query 묶음(slot × 프레임당 한도)과 프레임 slot 장부다. GL_TIMESTAMP
+    // 값의 단위는 ns다.
+    static constexpr uint32 TimestampQueryCount = TimestampFrameSlots * MaxTimestampsPerFrame;
+    static constexpr uint64 TimestampNanosecondFrequency = 1000000000;
+    GLuint timestampQueries_[TimestampQueryCount] = {};
+    OpenGLTimestampSource timestampSource_;
+    TimestampRing timestamps_;
+    bool timestampsReady_ = false;
+    // 지금 프레임에서 열린 debug group 수다.
+    uint32 markerDepth_ = 0;
     GlFunctions gl_;
     WglSwapInterval swapInterval_ = nullptr;
     HWND deviceWindow_ = nullptr;

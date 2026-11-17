@@ -1,5 +1,6 @@
 #include "GraphicsSelfTest.h"
 #include "RenderLaneSelfTest.h"
+#include "TimingSelfTest.h"
 #include "UploadSelfTest.h"
 #include "VertexSelfTest.h"
 
@@ -583,6 +584,8 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     failures += RunVertexChecks(name, device, result.triangle.GetAllocator());
     // 업로드·readback(GX8): 내용 갱신·ring wrap·staging 회수·비동기 readback·다른 스레드 생성.
     failures += RunUploadChecks(name, device, renderer, result.triangle.GetAllocator());
+    // GPU 계측(GX9): timestamp 쌍·slot 재사용·calibration·debug marker.
+    failures += RunTimingChecks(name, device, renderer, result.triangle.GetAllocator());
     Check(device.ValidationErrorCount() == 0, name, "no validation errors");
 
     // 검증 오류 집계가 실제로 동작하는지 확인한다: D3D12는 파이프라인 RTV 형식과 다른 대상에

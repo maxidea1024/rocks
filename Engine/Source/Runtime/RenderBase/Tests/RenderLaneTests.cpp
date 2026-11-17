@@ -43,6 +43,11 @@ struct OrderMark {
     uint32 id = 0;
 };
 
+// timestamp 프레임 packet이다. 그리기를 marker 구간과 timestamp 한 쌍으로 감싼다.
+struct TimedPacket {
+    uint32 draws = 1;
+};
+
 // 등록하지 않은 값이다(전달 거부 시험).
 struct Unregistered {
     uint32 value = 0;
@@ -54,6 +59,7 @@ ROCKS_RENDER_TRANSFERABLE(ScenePacket);
 ROCKS_RENDER_TRANSFERABLE(TextureUpload);
 ROCKS_RENDER_TRANSFERABLE(SurfaceResize);
 ROCKS_RENDER_TRANSFERABLE(OrderMark);
+ROCKS_RENDER_TRANSFERABLE(TimedPacket);
 // 리플렉션 struct: ArrayTag는 참조가 없고, WeakLink는 WeakRef 필드를, ArraySlot은 ObjectRef 필드를
 // 가진다.
 ROCKS_RENDER_TRANSFERABLE(rocks::reflection_fixture::ArrayTag);
@@ -137,6 +143,8 @@ public:
     graphics::BufferHandle buffer;
     graphics::TextureHandle target;
     graphics::SwapChainHandle swapChain;
+    // DrawTimed의 timestamp 쓰기 결과다(lane에서 쓰고 Drain 뒤 시험이 읽는다).
+    ErrorCode timestampError = ErrorCode::None;
 };
 
 void DrawScene(RenderFrameContext& context, ScenePacket& packet) noexcept {
@@ -163,6 +171,33 @@ void DrawScene(RenderFrameContext& context, ScenePacket& packet) noexcept {
 
     auto submitted = device.EndFrame();
     (void)submitted;
+}
+
+// timestamp 쓰기 오류는 processor에 남긴다(프레임은 그대로 제출한다).
+void DrawTimed(RenderFrameContext& context, TimedPacket& packet) noexcept {
+    auto* processor = static_cast<TestProcessor*>(context.Processor());
+    graphics::Device& device = context.Device();
+    auto frame = device.BeginOffscreen(processor->target, {});
+    if (!frame) {
+        context.ReportFailure(frame.Error());
+        return;
+    }
+
+    graphics::CommandContext& commands = *frame.Value();
+    commands.PushMarker(StringView("scene"));
+    auto begin = commands.WriteTimestamp();
+    commands.SetPipeline(processor->pipeline);
+    const graphics::VertexBufferBinding binding{processor->buffer, 0};
+    commands.SetVertexBuffers(0, Span<const graphics::VertexBufferBinding>(&binding, 1));
+    for (uint32 index = 0; index < packet.draws; ++index) {
+        commands.Draw(3);
+    }
+
+    auto end = commands.WriteTimestamp();
+    commands.PopMarker();
+    auto submitted = device.EndFrame();
+    (void)submitted;
+    processor->timestampError = begin ? (end ? ErrorCode::None : end.Error()) : begin.Error();
 }
 
 void CreateTextureOnLane(RenderLaneContext& context, TextureUpload& upload) noexcept {
@@ -742,5 +777,101 @@ TEST(RenderLane_ReadbackNoticeArrivesOnlyAfterGpuCompletion) {
 
     CHECK(updated);
     REQUIRE(lane.Retire(texture.Value()));
+    CHECK(lane.Shutdown());
+}
+
+namespace {
+
+// notices에서 kind 통지를 모은다.
+void Gather(const Array<RenderNotice>& notices, RenderNoticeKind kind,
+            Array<RenderNotice>& out) noexcept {
+    for (const RenderNotice& notice : notices) {
+        if (notice.kind == kind) {
+            REQUIRE(out.TryPushBack(notice));
+        }
+    }
+}
+
+} // namespace
+
+TEST(RenderLane_TimestampsArriveOnlyAfterGpuCompletion) {
+    SystemAllocator allocator;
+    RecordingDevice device(allocator);
+    device.HoldCompletions(true);
+    TestProcessor processor;
+    RenderLane lane(allocator, device);
+    REQUIRE(lane.Start(MakeConfig(RenderLaneMode::Thread, processor)));
+    auto ticket = lane.BeginFrame();
+    REQUIRE(ticket);
+    REQUIRE(lane.SubmitFrame(Move(ticket.Value()), TimedPacket{2}, &DrawTimed));
+    REQUIRE(lane.Drain(RenderDrainReason::Test));
+
+    // GPU 완료(fence gate) 전에는 timestamp 통지가 없다(미완료).
+    Array<RenderNotice> notices(allocator);
+    Array<RenderNotice> stamps(allocator);
+    REQUIRE(lane.Notices().TakeAll(notices));
+    Gather(notices, RenderNoticeKind::GpuTimestamp, stamps);
+    CHECK(stamps.IsEmpty());
+
+    device.CompleteAll();
+    REQUIRE(lane.Drain(RenderDrainReason::Test));
+    notices.Clear();
+    REQUIRE(lane.Notices().TakeAll(notices));
+    Gather(notices, RenderNoticeKind::GpuTimestamp, stamps);
+    REQUIRE(stamps.Size() == 2);
+    CHECK(stamps[0].frame == 1 && stamps[0].value == RecordingDevice::TimestampTickStep);
+    CHECK(stamps[1].frame == 2 && stamps[1].value == 2 * RecordingDevice::TimestampTickStep);
+    CHECK(stamps[0].error == ErrorCode::None && stamps[1].error == ErrorCode::None);
+    CHECK(processor.timestampError == ErrorCode::None);
+    Array<RenderNotice> frames(allocator);
+    Gather(notices, RenderNoticeKind::FrameCompleted, frames);
+    REQUIRE(frames.Size() == 1);
+    CHECK(frames[0].error == ErrorCode::None);
+    // timestamp 통지는 같은 프레임의 FrameCompleted보다 먼저다.
+    usize stampAt = 0;
+    usize frameAt = 0;
+    for (usize index = 0; index < notices.Size(); ++index) {
+        stampAt = notices[index].kind == RenderNoticeKind::GpuTimestamp ? index : stampAt;
+        frameAt = notices[index].kind == RenderNoticeKind::FrameCompleted ? index : frameAt;
+    }
+
+    CHECK(stampAt < frameAt);
+    // marker는 timestamp 쌍을 감싸고, 열고 닫은 수가 같다.
+    uint32 pushes = 0;
+    uint32 pops = 0;
+    for (const RecordingDevice::Call& call : device.Calls()) {
+        pushes += call.op == RecordingDevice::Op::PushMarker ? 1u : 0u;
+        pops += call.op == RecordingDevice::Op::PopMarker ? 1u : 0u;
+    }
+
+    CHECK(pushes == 1 && pops == 1);
+    CHECK(lane.Shutdown());
+}
+
+TEST(RenderLane_UnsupportedTimestampsArePublishedAsNone) {
+    SystemAllocator allocator;
+    RecordingDevice device(allocator);
+    device.SetTimestampsSupported(false);
+    CHECK(!device.Info().timestamps && device.Info().timestampFrequency == 0);
+    CHECK(!device.Info().clockCalibration);
+    CHECK(device.CalibrateClocks().Error() == ErrorCode::Unsupported);
+    TestProcessor processor;
+    RenderLane lane(allocator, device);
+    REQUIRE(lane.Start(MakeConfig(RenderLaneMode::Thread, processor)));
+    auto ticket = lane.BeginFrame();
+    REQUIRE(ticket);
+    REQUIRE(lane.SubmitFrame(Move(ticket.Value()), TimedPacket{1}, &DrawTimed));
+    REQUIRE(lane.Drain(RenderDrainReason::Test));
+    Array<RenderNotice> notices(allocator);
+    REQUIRE(lane.Notices().TakeAll(notices));
+    Array<RenderNotice> stamps(allocator);
+    Gather(notices, RenderNoticeKind::GpuTimestamp, stamps);
+    Array<RenderNotice> frames(allocator);
+    Gather(notices, RenderNoticeKind::FrameCompleted, frames);
+    // 추정값을 만들지 않는다: 통지가 없고 쓰기는 Unsupported로 실패하며 프레임은 그대로 끝난다.
+    CHECK(stamps.IsEmpty());
+    CHECK(processor.timestampError == ErrorCode::Unsupported);
+    REQUIRE(frames.Size() == 1);
+    CHECK(frames[0].error == ErrorCode::None);
     CHECK(lane.Shutdown());
 }

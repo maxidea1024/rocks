@@ -13,6 +13,8 @@ constexpr char DefaultThreadName[] = "RenderLane";
 
 // fence 완료 통지를 한 번에 꺼내 처리하는 수다(할당 없이 묶어 처리한다).
 constexpr usize InboxBatch = 16;
+// 장치에서 timestamp 결과를 한 번에 꺼내는 수다.
+constexpr usize TimestampBatch = 32;
 
 // 시작할 때 미리 잡는 통지 칸 수다(프레임 slot·Retire 통지가 보통 이 안에 든다).
 constexpr usize InboxReserve = 64;
@@ -595,6 +597,7 @@ void RenderLane::ProcessInbox() noexcept {
             }
 
             if (item.kind == InboxKind::FrameCompleted) {
+                PublishTimestamps();
                 notice.kind = RenderNoticeKind::FrameCompleted;
                 notice.frame = item.frame;
                 notices_.Push(notice);
@@ -610,6 +613,25 @@ void RenderLane::ProcessInbox() noexcept {
             --stats_.retiresPending;
             ++stats_.retiresCompleted;
             changed_.NotifyAll();
+        }
+    }
+}
+
+void RenderLane::PublishTimestamps() noexcept {
+    graphics::TimestampSample samples[TimestampBatch];
+    for (;;) {
+        const usize count = device_.CollectTimestamps(Span<graphics::TimestampSample>(samples));
+        for (usize index = 0; index < count; ++index) {
+            RenderNotice notice;
+            notice.kind = RenderNoticeKind::GpuTimestamp;
+            notice.frame = samples[index].query;
+            notice.value = samples[index].ticks;
+            notice.error = samples[index].disjoint ? ErrorCode::Cancelled : ErrorCode::None;
+            notices_.Push(notice);
+        }
+
+        if (count < TimestampBatch) {
+            return;
         }
     }
 }
