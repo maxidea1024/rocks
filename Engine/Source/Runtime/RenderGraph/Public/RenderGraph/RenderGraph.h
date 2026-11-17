@@ -95,6 +95,7 @@ struct RenderGraphDesc {
     GraphResourcePool* pool = nullptr;
     // 그래프 수명 할당(pass·접근 목록·내부 표)이다. 그래프가 끝난 뒤에 Reset되어야 한다(렌더 lane의
     // 프레임 slot arena는 그 프레임의 GPU 완료 뒤 Reset된다).
+    // 필수다(null이면 Fatal). device·handles·pool이 null이면 그래프의 모든 호출이 OutOfMemory다.
     FrameArena* arena = nullptr;
     // 있으면 pass마다 GpuScope(pass 이름) 구간을 두고, 그래프의 장치 기록 전체를 GPU 프레임 하나로
     // 묶는다(GpuTrace::BeginFrame·EndFrame을 그래프가 부른다, 13절).

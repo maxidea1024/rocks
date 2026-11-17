@@ -998,9 +998,11 @@ public:
         const D3D12_HEAP_PROPERTIES heap = HeapProperties(D3D12_HEAP_TYPE_DEFAULT);
         // 최적화 clear 값은 두지 않는다. 패스마다 clear 색이 다르므로 값을 두면 매번 불일치 경고가
         // 쌓인다.
-        const D3D12_RESOURCE_STATES initialState = renderTarget
-                                                       ? D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE
-                                                       : D3D12_RESOURCE_STATE_COPY_DEST;
+        // 렌더 타깃은 셰이더 읽기 상태(ResourceAccess::SrvGraphics와 같은 PSR|NPSR)로 만든다.
+        // 업로드로 채우는 텍스처가 업로드 뒤 놓이는 상태와 같아 import 선언이 생성 경로와 무관하게
+        // 맞는다.
+        const D3D12_RESOURCE_STATES initialState =
+            renderTarget ? ShaderReadStates : D3D12_RESOURCE_STATE_COPY_DEST;
         if (FAILED(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &resource,
                                                     initialState, nullptr,
                                                     IID_PPV_ARGS(record.resource.Out())))) {
@@ -2437,10 +2439,14 @@ private:
             return Result<ReadbackRequest>::Failure(opened.Error());
         }
         // 업로드 기록은 상태 중립이다: 제출한 상태에서 복사 원본으로 바꿨다가 되돌린다.
+        // 이미 복사 원본 상태면(그래프가 CopySource로 끝냈다) barrier를 내지 않는다.
         const D3D12_RESOURCE_STATES resting = record->committed[0];
-        const D3D12_RESOURCE_BARRIER toCopy = TransitionSubresource(
-            record->resource.Get(), 0, resting, D3D12_RESOURCE_STATE_COPY_SOURCE);
-        uploadList_->ResourceBarrier(1, &toCopy);
+        const bool move = resting != D3D12_RESOURCE_STATE_COPY_SOURCE;
+        if (move) {
+            const D3D12_RESOURCE_BARRIER toCopy = TransitionSubresource(
+                record->resource.Get(), 0, resting, D3D12_RESOURCE_STATE_COPY_SOURCE);
+            uploadList_->ResourceBarrier(1, &toCopy);
+        }
         D3D12_TEXTURE_COPY_LOCATION destination = {};
         destination.pResource = readback.resource.Get();
         destination.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
@@ -2450,9 +2456,11 @@ private:
         source.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
         source.SubresourceIndex = 0;
         uploadList_->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
-        const D3D12_RESOURCE_BARRIER back = TransitionSubresource(
-            record->resource.Get(), 0, D3D12_RESOURCE_STATE_COPY_SOURCE, resting);
-        uploadList_->ResourceBarrier(1, &back);
+        if (move) {
+            const D3D12_RESOURCE_BARRIER back = TransitionSubresource(
+                record->resource.Get(), 0, D3D12_RESOURCE_STATE_COPY_SOURCE, resting);
+            uploadList_->ResourceBarrier(1, &back);
+        }
         auto flushed = FlushUploadsLocked();
         if (!flushed) {
             KeepUntilDestruction(Move(readback.resource));
@@ -2778,22 +2786,36 @@ private:
         }
 
         // 백버퍼(R8G8B8A8_UNORM)와 RenderTarget(R8G8B8A8_UNORM_SRGB)은 같은 typeless 묶음이라
-        // CopyResource가 byte를 그대로 옮긴다.
-        // 복사 대상은 지금(기록 중) 상태에서 바꿨다가 되돌린다(상태 중립).
+        // CopyResource가 byte를 그대로 옮긴다. 원본(패스 대상)과 복사 대상은 지금(기록 중) 추적
+        // 상태에서 바꿨다가 되돌린다(상태 중립). 이미 복사 상태면 barrier를 내지 않는다.
+        const TextureRecord* source = textures_.Find(target_.texture.slot);
+        const D3D12_RESOURCE_STATES sourceState =
+            source != nullptr ? source->current[0] : D3D12_RESOURCE_STATE_RENDER_TARGET;
         const D3D12_RESOURCE_STATES resting = record->current[0];
-        const D3D12_RESOURCE_BARRIER toCopy[] = {
-            TransitionBarrier(target_.resource, D3D12_RESOURCE_STATE_RENDER_TARGET,
-                              D3D12_RESOURCE_STATE_COPY_SOURCE),
-            TransitionSubresource(record->resource.Get(), 0, resting,
-                                  D3D12_RESOURCE_STATE_COPY_DEST)};
-        list_->ResourceBarrier(resting == D3D12_RESOURCE_STATE_COPY_DEST ? 1u : 2u, toCopy);
+        D3D12_RESOURCE_BARRIER toCopy[2] = {};
+        D3D12_RESOURCE_BARRIER back[2] = {};
+        uint32 count = 0;
+        if (sourceState != D3D12_RESOURCE_STATE_COPY_SOURCE) {
+            toCopy[count] = TransitionSubresource(target_.resource, 0, sourceState,
+                                                  D3D12_RESOURCE_STATE_COPY_SOURCE);
+            back[count] = TransitionSubresource(target_.resource, 0,
+                                                D3D12_RESOURCE_STATE_COPY_SOURCE, sourceState);
+            ++count;
+        }
+        if (resting != D3D12_RESOURCE_STATE_COPY_DEST) {
+            toCopy[count] = TransitionSubresource(record->resource.Get(), 0, resting,
+                                                  D3D12_RESOURCE_STATE_COPY_DEST);
+            back[count] = TransitionSubresource(record->resource.Get(), 0,
+                                                D3D12_RESOURCE_STATE_COPY_DEST, resting);
+            ++count;
+        }
+        if (count != 0) {
+            list_->ResourceBarrier(count, toCopy);
+        }
         list_->CopyResource(record->resource.Get(), target_.resource);
-        const D3D12_RESOURCE_BARRIER back[] = {
-            TransitionBarrier(target_.resource, D3D12_RESOURCE_STATE_COPY_SOURCE,
-                              D3D12_RESOURCE_STATE_RENDER_TARGET),
-            TransitionSubresource(record->resource.Get(), 0, D3D12_RESOURCE_STATE_COPY_DEST,
-                                  resting)};
-        list_->ResourceBarrier(resting == D3D12_RESOURCE_STATE_COPY_DEST ? 1u : 2u, back);
+        if (count != 0) {
+            list_->ResourceBarrier(count, back);
+        }
         return Result<void>::Success();
     }
 

@@ -1,6 +1,7 @@
 #include "RenderGraphInternal.h"
 
 #include <Platform/Atomics.h>
+#include <Platform/Fatal.h>
 #include <RenderBase/RenderLane.h>
 
 namespace rocks::render {
@@ -19,6 +20,15 @@ uint32 NextGraphSerial() noexcept {
     }
 
     return serial;
+}
+
+// 그래프 수명 arena는 필수다(없으면 그래프를 만들 수 없는 호출자 오류다).
+FrameArena& RequireArena(const RenderGraphDesc& desc) noexcept {
+    if (desc.arena == nullptr) {
+        platform::Fatal("RenderGraphDesc::arena is null");
+    }
+
+    return *desc.arena;
 }
 
 // 최대 mip 수다(장치 텍스처 한계와 같다, 2^15 크기까지).
@@ -214,7 +224,7 @@ RenderGraphDesc MakeRenderGraphDesc(RenderFrameContext& frame, GraphResourcePool
     return desc;
 }
 
-RenderGraph::RenderGraph(const RenderGraphDesc& desc) noexcept : arena_(*desc.arena) {
+RenderGraph::RenderGraph(const RenderGraphDesc& desc) noexcept : arena_(RequireArena(desc)) {
     if (desc.device == nullptr || desc.handles == nullptr || desc.pool == nullptr) {
         return;
     }
@@ -442,6 +452,7 @@ Result<RenderHandle> ExportResource(GraphState& state, GraphResourceKind kind, u
     }
 
     record.exported = true;
+    record.released = false;
     record.finalAccess = finalAccess;
     return Result<RenderHandle>::Success(record.handle);
 }
@@ -730,28 +741,40 @@ Result<GraphPass> RenderGraph::AddPassWithAccesses(TraceScopeName& name, GraphPa
     pass.root = HasGraphPassFlag(flags, GraphPassFlags::HasSideEffects) ||
                 target.kind == GraphTargetKind::SwapChain;
     pass.culled = state.mode == GraphMode::Deferred;
+    // 생산자 간선을 먼저 모은다(상태를 바꾸지 않는다). 간선은 pass를 넣어야 닿으므로 실패해도 남지
+    // 않는다.
     for (usize index = firstUse; index < state.uses.Size(); ++index) {
         const SubresourceUse use = state.uses[index];
-        ResourceRecord& resource = state.resources[use.resource];
-        SubresourceTrack& track = state.tracks[resource.firstTrack + use.subresource];
+        const ResourceRecord& resource = state.resources[use.resource];
+        const SubresourceTrack& track = state.tracks[resource.firstTrack + use.subresource];
         if (track.lastProducer != GraphIndexNone) {
             auto linked = AddProducer(arena_, state, pass, track.lastProducer);
             if (!linked) {
-                return rollback(linked.Error());
+                return rollback(RecordGraphError(state, linked.Error(), false,
+                                                 "pass '{}' could not be recorded ({})", passName,
+                                                 ErrorCodeName(linked.Error())));
             }
         }
 
-        if (graphics::IsWritableAccess(use.access)) {
-            track.lastProducer = passIndex;
-            resource.produced = true;
-            // 그래프 밖 자원에 쓰는 pass는 외부 출력이다.
-            pass.root = pass.root || resource.imported;
-        }
+        // 그래프 밖 자원에 쓰는 pass는 외부 출력이다.
+        pass.root = pass.root || (resource.imported && graphics::IsWritableAccess(use.access));
     }
 
     auto pushed = state.passes.TryPushBack(arena_, pass);
     if (!pushed) {
-        return rollback(pushed.Error());
+        return rollback(RecordGraphError(state, pushed.Error(), false,
+                                         "pass '{}' could not be recorded ({})", passName,
+                                         ErrorCodeName(pushed.Error())));
+    }
+
+    // pass를 넣은 뒤에만 마지막 생산자를 바꾼다(실패한 pass가 생산자로 남지 않는다).
+    for (usize index = firstUse; index < state.uses.Size(); ++index) {
+        const SubresourceUse use = state.uses[index];
+        if (graphics::IsWritableAccess(use.access)) {
+            ResourceRecord& resource = state.resources[use.resource];
+            state.tracks[resource.firstTrack + use.subresource].lastProducer = passIndex;
+            resource.produced = true;
+        }
     }
 
     ++state.stats.passes;

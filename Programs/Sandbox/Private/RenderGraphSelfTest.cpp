@@ -114,11 +114,11 @@ auto FullScreen(sample::Renderer* renderer, TextureHandle texture, GraphTexture 
 
 // 장면(빨강) → 쓰이지 않는 파랑 pass → 합성 pass로 output을 채운다. exportScene이면 장면을
 // history로 내보낸다. history가 있으면 장면 대신 그것을 합성한다.
-bool RunGraph(GraphBench& bench, RenderHandle output, RenderHandle history,
-              RenderHandle* exported) noexcept {
+bool RunGraph(GraphBench& bench, RenderHandle output, RenderHandle history, RenderHandle* exported,
+              ResourceAccess outputFinal = ResourceAccess::SrvGraphics) noexcept {
     RenderGraph graph(bench.Desc());
     rocks::render::GraphImportOptions outputOptions;
-    outputOptions.finalAccess = ResourceAccess::SrvGraphics;
+    outputOptions.finalAccess = outputFinal;
     auto target = graph.ImportTexture(output, "Output", outputOptions);
     auto scene = graph.CreateTexture(TargetDesc(), "Scene");
     auto unused = graph.CreateTexture(TargetDesc(), "Unused");
@@ -242,7 +242,9 @@ uint32 RunRenderGraphChecks(const char* name, Device& device, sample::Renderer& 
     for (uint32 run = 0; ok && run < 2; ++run) {
         auto cleared = arena.Reset();
         (void)cleared;
-        ok = RunGraph(bench, output.Value(), {}, nullptr);
+        // 두 번째는 출력을 복사 원본 상태로 끝낸다(readback이 같은 상태 barrier를 내지 않는지).
+        ok = RunGraph(bench, output.Value(), {}, nullptr,
+                      run == 0 ? ResourceAccess::SrvGraphics : ResourceAccess::CopySource);
         Check(ok && device.ReadPixels(outputTexture.Value(), pixels.View()).IsOk() &&
                   CenterIs(pixels, 255, 0, 0),
               "graph with a pooled scene texture composites red");
