@@ -53,8 +53,10 @@ enum class PlaneSide : uint8 {
     InvalidInput
 };
 
-// 삼각형 ray·segment 질의의 면 선택이다. TwoSided(기본)는 양면 모두 Hit, FrontOnly는 앞면
-// (Cross(b - a, c - a) 쪽)에서 들어오는 경우만 Hit다.
+// 삼각형 ray·segment 질의의 면 선택이다. TwoSided(기본)는 양면 모두 Hit, FrontOnly는 기하
+// 앞면(Cross(b - a, c - a) 쪽 — UE FPlane·Chaos FTriangle과 같은 식)에서 들어오는 경우만 Hit다.
+// UE 렌더 메시의 앞면(Cross(c - a, b - a), 화면 반시계)과 반대이므로 렌더 메시 삼각형은 b와 c를
+// 바꿔 넘긴다(Triangle 설명 참고).
 enum class TriangleSides : uint8 {
     TwoSided,
     FrontOnly

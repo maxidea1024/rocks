@@ -47,9 +47,11 @@ void CheckDefaults() {
     CHECK(plane.normal == Vector3<T>::Up());
     CHECK(plane.distance == 0);
 
+    // UE TRay 기본 생성자·Init과 같이 원점에서 +Z(0, 0, 1)를 향한다(UE Ray.h:30-34, :66-72).
     const Ray<T> ray;
     CHECK(ray.IsValid());
-    CHECK(ray.direction == Vector3<T>::Forward());
+    CHECK(ray.origin == Vector3<T>::Zero());
+    CHECK(ray.direction == V<T>(0, 0, 1));
 
     const Segment<T> segment;
     CHECK(segment.IsValid());
@@ -127,15 +129,35 @@ void CheckPlaneFromPointNormal() {
 
 template <typename T>
 void CheckPlaneFromPointsWinding() {
-    // 오른손 법칙: X축 점 → Y축 점 순서(위에서 볼 때 반시계)는 +Z normal이다.
-    auto counterClockwise = Plane<T>::TryFromPoints(V<T>(0, 0, 0), V<T>(1, 0, 0), V<T>(0, 1, 0));
-    REQUIRE(counterClockwise);
-    CHECK(counterClockwise.Value().normal == Vector3<T>::Up());
-    CHECK(IsPositiveZero(counterClockwise.Value().distance));
+    // UE FPlane(A, B, C) = ((B - A) ^ (C - A)).GetSafeNormal(), W = A | N(UE Plane.h:441-446).
+    // 원점 → X축 점 → Y축 점은 왼손 좌표계에서 위(+Z)에서 볼 때 전방 → 오른쪽의 시계 방향이며
+    // normal은 +Z다.
+    auto clockwiseFromAbove = Plane<T>::TryFromPoints(V<T>(0, 0, 0), V<T>(1, 0, 0), V<T>(0, 1, 0));
+    REQUIRE(clockwiseFromAbove);
+    CHECK(clockwiseFromAbove.Value().normal == Vector3<T>::Up());
+    CHECK(IsPositiveZero(clockwiseFromAbove.Value().distance));
 
-    auto clockwise = Plane<T>::TryFromPoints(V<T>(0, 0, 0), V<T>(0, 1, 0), V<T>(1, 0, 0));
-    REQUIRE(clockwise);
-    CHECK(clockwise.Value().normal == Vector3<T>::Down());
+    auto reversed = Plane<T>::TryFromPoints(V<T>(0, 0, 0), V<T>(0, 1, 0), V<T>(1, 0, 0));
+    REQUIRE(reversed);
+    CHECK(reversed.Value().normal == Vector3<T>::Down());
+
+    // UE 대조 golden(cm): 원점에서 +X를 보는 카메라를 향한 렌더 메시 삼각형 A(100,0,0),
+    // B(100,10,0), C(100,0,10). UE 렌더 앞면 normal (C - A) x (B - A) = (-100, 0, 0)은 카메라
+    // 쪽이고
+    // (MeshDescription.cpp:1311-1313) 화면에서 반시계다. FPlane(A, B, C)는 그 반대인 normal
+    // (1, 0, 0), W = 100이다. 렌더 앞면 쪽 평면은 (A, C, B) 순서로 만든다.
+    const Vector3<T> meshA = V<T>(100, 0, 0);
+    const Vector3<T> meshB = V<T>(100, 10, 0);
+    const Vector3<T> meshC = V<T>(100, 0, 10);
+    auto uePlane = Plane<T>::TryFromPoints(meshA, meshB, meshC);
+    REQUIRE(uePlane);
+    CHECK(uePlane.Value().normal == V<T>(1, 0, 0));
+    CHECK(uePlane.Value().distance == 100);
+    auto renderFrontPlane = Plane<T>::TryFromPoints(meshA, meshC, meshB);
+    REQUIRE(renderFrontPlane);
+    CHECK(renderFrontPlane.Value().normal == V<T>(-1, 0, 0));
+    CHECK(renderFrontPlane.Value().distance == -100);
+    CHECK(renderFrontPlane.Value().SignedDistance(Vector3<T>::Zero()) == 100);
 
     auto raised = Plane<T>::TryFromPoints(V<T>(0, 0, 3), V<T>(1, 0, 3), V<T>(0, 1, 3));
     REQUIRE(raised);
@@ -364,7 +386,7 @@ TEST(ShapePlaneFromPointNormal) {
     CheckPlaneFromPointNormal<double>();
 }
 
-TEST(ShapePlaneFromPointsUsesCounterClockwiseWinding) {
+TEST(ShapePlaneFromPointsMatchesUePlaneNotRenderFront) {
     CheckPlaneFromPointsWinding<float>();
     CheckPlaneFromPointsWinding<double>();
 }
