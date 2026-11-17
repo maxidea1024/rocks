@@ -1,5 +1,6 @@
 #include <Core/Guid.h>
 #include <Core/Optional.h>
+#include <Object/ConstructionContext.h>
 #include <Object/PropertyPath.h>
 #include <Object/ValueText.h>
 
@@ -88,6 +89,24 @@ bool IsStructStep(const FieldSchema& field, PathSelector selector) noexcept {
     case PathSelector::None:
         return field.value.kind == ValueKind::Struct ||
                (field.value.kind == ValueKind::Optional && field.element.kind == ValueKind::Struct);
+    }
+
+    return false;
+}
+
+// 단계가 InstancedStruct 값으로 끝나 다음 단계(`.`)가 지금 담긴 struct의 멤버인지다(리플렉션 B9j —
+// InstancedStruct 필드·멤버, InstancedStruct 원소 배열·정적 배열의 index 단계, InstancedStruct 값
+// Map의 key 단계).
+bool IsInstancedStep(const FieldSchema& field, PathSelector selector) noexcept {
+    switch (selector) {
+    case PathSelector::Index:
+        return ValueKindTakesIndex(field.value.kind) &&
+               field.element.kind == ValueKind::InstancedStruct;
+    case PathSelector::Key:
+        return field.value.kind == ValueKind::Map &&
+               field.element.kind == ValueKind::InstancedStruct;
+    case PathSelector::None:
+        return field.value.kind == ValueKind::InstancedStruct;
     }
 
     return false;
@@ -343,7 +362,8 @@ namespace detail {
 // ParsePropertyPath의 본체다(PropertyPathBuffer의 key 칸을 채우는 유일한 곳 — friend).
 struct PropertyPathParser {
     static Result<void> Parse(const TypeLease& type, StringView text, PropertyPathBuffer& out,
-                              PropertyPathFailure* failure, PathKeyTextHook* hook) noexcept;
+                              PropertyPathFailure* failure, PathKeyTextHook* hook,
+                              PathInstancedTypeResolver* instanced) noexcept;
 
     // [position — `[` 다음]부터 key 텍스트를 parsed의 여백 뒤 byte에 풀고 키 값으로 읽어 정규형
     // wire로 담는다. 성공하면 position은 `]` 다음이다.
@@ -463,7 +483,8 @@ Result<void> PropertyPathParser::ParseKey(const FieldSchema& field, const EnumSc
 
 Result<void> PropertyPathParser::Parse(const TypeLease& type, StringView text,
                                        PropertyPathBuffer& out, PropertyPathFailure* failure,
-                                       PathKeyTextHook* hook) noexcept {
+                                       PathKeyTextHook* hook,
+                                       PathInstancedTypeResolver* instanced) noexcept {
     const auto fail = [failure](ErrorCode code, PropertyPathError reason, usize step,
                                 usize offset) noexcept {
         if (failure) {
@@ -485,6 +506,9 @@ Result<void> PropertyPathParser::Parse(const TypeLease& type, StringView text,
     const usize size = text.ByteCount();
     PropertyPathBuffer parsed;
     StructView scope;
+    // InstancedStruct 뒤 멤버 단계를 해석한 담긴 struct의 lease다(경로에 하나 — 해석 동안 scope를
+    // 지킨다).
+    TypeLease content;
     usize position = 0;
     while (true) {
         // 이름(ASCII 식별자)을 읽어 지금 범위(클래스·struct lease 스키마 또는 struct view)에서
@@ -598,6 +622,25 @@ Result<void> PropertyPathParser::Parse(const TypeLease& type, StringView text,
                         position);
         }
 
+        // InstancedStruct 뒤 멤버는 resolver가 주는 지금 담긴 struct로 해석한다(리플렉션 B9j —
+        // resolver가 없으면 struct가 아닌 값 뒤의 단계와 같다).
+        if (instanced && IsInstancedStep(field, step.selector)) {
+            TypeLease resolved;
+            if (auto queried = instanced->InstancedType(parsed.View(), resolved); !queried) {
+                return fail(queried.Error(), PropertyPathError::None, stepIndex, position);
+            }
+
+            if (!resolved.IsValid()) {
+                return fail(ErrorCode::NotFound, PropertyPathError::InstancedEmpty, stepIndex,
+                            position);
+            }
+
+            content = Move(resolved);
+            ++position;
+            scope = content.Struct();
+            continue;
+        }
+
         if (!IsStructStep(field, step.selector) || target.IsEmpty()) {
             return fail(ErrorCode::TypeMismatch, PropertyPathError::NotStruct, stepIndex, position);
         }
@@ -613,12 +656,98 @@ Result<void> PropertyPathParser::Parse(const TypeLease& type, StringView text,
 } // namespace detail
 
 Result<void> ParsePropertyPath(const TypeLease& type, StringView text, PropertyPathBuffer& out,
+                               PropertyPathFailure* failure, PathKeyTextHook* hook,
+                               PathInstancedTypeResolver* instanced) noexcept {
+    return detail::PropertyPathParser::Parse(type, text, out, failure, hook, instanced);
+}
+
+namespace {
+
+// 경로 시작 위치(게시된 객체·staged 객체·struct 값)의 InstancedStruct 담긴 타입을 경로 연산
+// (PathReadInstancedType)으로 읽는 resolver다(객체 문맥 판 ParsePropertyPath·FormatPropertyPath).
+class TargetInstancedTypes final : public PathInstancedTypeResolver {
+public:
+    TargetInstancedTypes(ObjectRegistry& registry, const ObjectAccessContext& access,
+                         const PathTarget& target) noexcept
+        : registry_(registry), access_(access), target_(target) {
+    }
+
+    Result<void> InstancedType(PropertyPath prefix, TypeLease& out) noexcept override {
+        auto type = PathReadInstancedType(registry_, access_, target_, prefix);
+        if (!type) {
+            return Result<void>::Failure(type.Error());
+        }
+
+        out = Move(type.Value());
+        return Result<void>::Success();
+    }
+
+private:
+    ObjectRegistry& registry_;
+    const ObjectAccessContext& access_;
+    const PathTarget& target_;
+};
+
+// 시작 위치의 스키마 lease다: 게시된 객체는 AcquireType, staged 객체는 그 트랜잭션의 AcquireType,
+// struct 값은 그 lease의 복제다. 상자(DetachedValue)는 첫 단계가 상자 필드 자신이라 lease로 해석할
+// 수 없다(Unsupported).
+Result<TypeLease> TargetSchema(ObjectRegistry& registry, const ObjectAccessContext& access,
+                               const PathTarget& target) noexcept {
+    switch (target.GetKind()) {
+    case PathTarget::Kind::Object:
+        return registry.AcquireType(access, target.Object());
+    case PathTarget::Kind::Staged:
+        if (!target.Transaction() || &target.Transaction()->Registry() != &registry) {
+            return Result<TypeLease>::Failure(ErrorCode::WrongContext);
+        }
+
+        return target.Transaction()->AcquireType(target.Object());
+    case PathTarget::Kind::Struct:
+        if (!target.Lease()) {
+            return Result<TypeLease>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        return target.Lease()->Clone();
+    case PathTarget::Kind::Detached:
+        break;
+    }
+
+    return Result<TypeLease>::Failure(ErrorCode::Unsupported);
+}
+
+} // namespace
+
+Result<void> ParsePropertyPath(ObjectRegistry& registry, const ObjectAccessContext& access,
+                               const PathTarget& target, StringView text, PropertyPathBuffer& out,
                                PropertyPathFailure* failure, PathKeyTextHook* hook) noexcept {
-    return detail::PropertyPathParser::Parse(type, text, out, failure, hook);
+    auto type = TargetSchema(registry, access, target);
+    if (!type) {
+        if (failure) {
+            *failure = {};
+        }
+
+        return Result<void>::Failure(type.Error());
+    }
+
+    TargetInstancedTypes instanced(registry, access, target);
+    return detail::PropertyPathParser::Parse(type.Value(), text, out, failure, hook, &instanced);
+}
+
+Result<void> FormatPropertyPath(ObjectRegistry& registry, const ObjectAccessContext& access,
+                                const PathTarget& target, PropertyPath path, String& out,
+                                PathKeyTextHook* hook) noexcept {
+    auto type = TargetSchema(registry, access, target);
+    if (!type) {
+        return Result<void>::Failure(type.Error());
+    }
+
+    TargetInstancedTypes instanced(registry, access, target);
+    return FormatPropertyPath(type.Value(), path, out, hook, &instanced);
 }
 
 Result<void> FormatPropertyPath(const TypeLease& type, PropertyPath path, String& out,
-                                PathKeyTextHook* hook) noexcept {
+                                PathKeyTextHook* hook,
+                                PathInstancedTypeResolver* instanced) noexcept {
     const Span<const PathStep> steps = path.steps;
     if (!type.IsValid() || type.Kind() == TypeKind::Enum || steps.Size() == 0 ||
         steps.Size() > MaxPropertyPathSteps) {
@@ -631,6 +760,8 @@ Result<void> FormatPropertyPath(const TypeLease& type, PropertyPath path, String
     char keyBuffers[MaxPropertyPathSteps][KeyTextBytes];
     usize bytes = 0;
     StructView scope;
+    // InstancedStruct 뒤 멤버 단계의 담긴 struct lease다(리플렉션 B9j — Parse와 같다).
+    TypeLease content;
     for (usize index = 0; index < steps.Size(); ++index) {
         const PathStep& step = steps[index];
         if (!IsCanonicalPathStep(step, path.keys.Size())) {
@@ -654,9 +785,24 @@ Result<void> FormatPropertyPath(const TypeLease& type, PropertyPath path, String
             return Result<void>::Failure(ErrorCode::TypeMismatch);
         }
 
-        const StructView target =
-            index == 0 ? type.FieldStruct(position) : scope.FieldStruct(position);
-        if (index + 1 < steps.Size() && (!IsStructStep(field, step.selector) || target.IsEmpty())) {
+        StructView target = index == 0 ? type.FieldStruct(position) : scope.FieldStruct(position);
+        if (index + 1 < steps.Size() && instanced && IsInstancedStep(field, step.selector)) {
+            TypeLease resolved;
+            if (auto queried = instanced->InstancedType(
+                    PropertyPath{Span<const PathStep>(steps.Data(), index + 1), path.keys},
+                    resolved);
+                !queried) {
+                return queried;
+            }
+
+            if (!resolved.IsValid()) {
+                return Result<void>::Failure(ErrorCode::NotFound);
+            }
+
+            content = Move(resolved);
+            target = content.Struct();
+        } else if (index + 1 < steps.Size() &&
+                   (!IsStructStep(field, step.selector) || target.IsEmpty())) {
             return Result<void>::Failure(ErrorCode::TypeMismatch);
         }
 

@@ -8,6 +8,7 @@
 #include <D3D11Graphics/D3D11Device.h>
 #include <Graphics/DeviceOwnership.h>
 #include <Graphics/FenceTimeline.h>
+#include <Graphics/GraphicsLog.h>
 #include <Graphics/StagingPool.h>
 #include <Graphics/TimestampRing.h>
 #include <Graphics/UploadRing.h>
@@ -424,6 +425,10 @@ private:
     uint64 ignoredDraws_ = 0;
     // 검증 메시지는 읽을 때마다 비우고 여기에 누적한다(저장 한도로 오래된 오류가 밀려나지 않게).
     mutable uint64 validationErrors_ = 0;
+    // 검증 메시지 원문을 ID마다 한 번만 남긴다(DrainValidationMessages가 쓴다).
+    mutable ValidationMessageFilter validationFilter_;
+    // 장치 제거를 이미 남겼는지다(손실 전이 때 한 번, 원자 변수).
+    uint32 lossLogged_ = 0;
     mutable Array<uint8> messageScratch_;
     FenceEventSource fenceSource_;
     FenceTimeline timeline_;

@@ -521,6 +521,18 @@ internal static class CppEmitter
     // Migrate가 있으면 migrate), Register. 형질과 깊이는 모델 값을 내되 직접 멤버의 생성 값을 포함하는지
     // static_assert로 대조한다(import descriptor의 flags를 믿지 않는다). Binds 미러는 실제 타입(NativeName)의
     // 특수화를 내고 멤버 thunk·Trace·생성·소멸이 모두 실제 타입을 쓰며, 스키마 이름만 미러 이름이다.
+    // struct가 InstancedStruct 값(단일·원소 배열·정적 배열·Map 값)을 (중첩 struct·원소·Optional·Map 값 struct까지) 담는지다(리플렉션
+    // B9j — 런타임 등록 형질 StructView::ContainsInstancedStruct와 같은 규칙, Transient 멤버도 센다).
+    private static bool ContainsInstancedStruct(SchemaModel schema, ClassModel type) =>
+        type.Fields.Any(field => field.TargetKind == "InstancedStruct" ||
+            (field.StructTarget && ContainsInstancedStruct(schema, schema.Find(field.Reference!))));
+
+    // struct가 Required 멤버를 (중첩 struct·원소 struct까지, Transient 멤버 아래는 빼고) 담는지다(리플렉션 B9j — 런타임 등록 형질
+    // StructView::ContainsRequired와 같은 규칙).
+    private static bool ContainsRequired(SchemaModel schema, ClassModel type) =>
+        type.Fields.Any(field => !field.Spec.Transient &&
+            (field.Spec.Required || (field.StructTarget && ContainsRequired(schema, schema.Find(field.Reference!)))));
+
     private static void EmitStruct(SchemaModel schema, ClassModel type, Action<string> Line)
     {
         string native = "::" + type.NativeName;
@@ -529,6 +541,9 @@ internal static class CppEmitter
         Line($"static constexpr bool ContainsStrongReference = {True(type.ContainsStrongReference)};");
         Line($"static constexpr bool RequiresWorldOnlyOwner = {True(type.RequiresWorldOnlyOwner)};");
         Line($"static constexpr bool ContainsReferenceArray = {True(type.ContainsReferenceArray)};");
+        // InstancedStruct 담기 조건의 생성 형질이다(리플렉션 B9j — InstancedStruct::Emplace<S>의 static_assert가 쓴다).
+        Line($"static constexpr bool ContainsInstancedStruct = {True(ContainsInstancedStruct(schema, type))};");
+        Line($"static constexpr bool ContainsRequired = {True(ContainsRequired(schema, type))};");
         Line($"static constexpr uint32 Depth = {type.Depth}u;");
         Line($"static_assert(Depth <= ::rocks::MaxStructDepth, \"ROCKS_STRUCT {type.Name} nesting depth exceeds MaxStructDepth (RMC2303)\");");
         if (type.Binds.Length != 0)

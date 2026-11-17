@@ -42,7 +42,13 @@ enum class PathOperation : uint8 {
     Detach,
     Attach,
     // Map·Set 필드의 키를 삽입 순서대로 모두 읽기다(PathReadKeys — 리플렉션 B9i4).
-    ReadKeys
+    ReadKeys,
+    // InstancedStruct 값의 형 바꾸기(그 struct 기본 값)·비우기·담긴 타입 조회다(리플렉션 B9j —
+    // PathSetInstancedType·PathClearInstanced·PathReadInstancedType). 조회는 경로 실행기가
+    // InstancedStruct 뒤 멤버 단계를 해석할 때도 앞 경로로 먼저 돌린다.
+    SetInstancedType,
+    ClearInstanced,
+    QueryInstanced
 };
 
 // 해석한 경로 단계 하나다: 필드(스키마 안 위치), 바깥 필드에서 누적한 유효 플래그, 대상
@@ -148,12 +154,30 @@ public:
     // Unsupported(NoPathAccess)를 기록한다.
     Result<void> RequireLive() noexcept;
 
-    // 지금 연산이 대상을 바꾸지 않는 읽기(Read·Length·QueryOptional·Contains·ReadKeys)인지다.
+    // 지금 연산이 대상을 바꾸지 않는 읽기(Read·Length·QueryOptional·Contains·ReadKeys·
+    // QueryInstanced)인지다.
     bool IsReading() const noexcept {
         return operation_ == PathOperation::Read || operation_ == PathOperation::Length ||
                operation_ == PathOperation::QueryOptional ||
-               operation_ == PathOperation::Contains || operation_ == PathOperation::ReadKeys;
+               operation_ == PathOperation::Contains || operation_ == PathOperation::ReadKeys ||
+               operation_ == PathOperation::QueryInstanced;
     }
+
+    // 지금 단계(InstancedStruct 값 — 리플렉션 B9j)의 담긴 값 value(type struct)로 내려간다. 경로
+    // 실행기는 이 단계 뒤 멤버를 같은 연산 안에서 먼저 조회한 담긴 타입으로 해석했으므로 type이 그
+    // 해석과 같아야 한다(아니면 TypeMismatch(StaticTypeMismatch)). 비어 있으면(type이 빈 lease)
+    // NotFound(InstancedEmpty)다. 그 밖은 Descend와 같다.
+    Result<void> DescendInstanced(const TypeLease& type, void* value) noexcept;
+
+    // PathSetInstancedType의 새 타입 lease를 넘겨받는다(경로 실행기가 등록·담기 조건·깊이 합을
+    // 검사해 쥐었다 — 한 번만 부른다, 두 번째는 빈 lease).
+    TypeLease TakeInstancedInput() noexcept {
+        return Move(instancedInput_);
+    }
+
+    // QueryInstanced의 결과로 type(빈 lease면 비어 있음)을 복제해 출력에 둔다(lease 복제의 오류 —
+    // ShuttingDown·Overflow는 그대로 실패로 기록한다).
+    Result<void> PublishInstancedType(const TypeLease& type) noexcept;
 
     // Detach 끝 지점이다: value(ops 형식의 지금 값)를 출력 상자에 깊게 복사하고 상자를
     // 채운다(enter는 상자에서 경로를 시작하는 생성 함수). 게시된 객체면 고정 아래 복사하고 owner를
@@ -404,11 +428,22 @@ private:
     const FieldValue* input_;
     FieldValue* output_;
     Array<FieldValue>* keys_ = nullptr;
+    // QueryInstanced의 출력 lease다(리플렉션 B9j).
+    TypeLease* instancedOut_ = nullptr;
     PropertyPathFailure* failure_;
     TypeLease ownerType_;
     TypeLease expectedType_;
     TypeLease referencedType_;
     TypeLease keyClass_;
+    // InstancedStruct 뒤 멤버 단계를 해석한 담긴 struct lease(경로에 하나 — 담긴 struct는
+    // InstancedStruct를 담지 않는다)와 그 단계 index, PathSetInstancedType의 새 타입
+    // lease다(리플렉션 B9j).
+    TypeLease instancedType_;
+    usize instancedStep_ = IndexNone;
+    TypeLease instancedInput_;
+    TypeId instancedRequest_{};
+    // 시작 위치다(InstancedStruct 단계의 담긴 타입 조회가 같은 시작 위치로 하위 연산을 돌린다).
+    const PathTarget* target_;
     Borrow<Object> borrow_;
     EncodePin pin_;
     Object* object_ = nullptr;

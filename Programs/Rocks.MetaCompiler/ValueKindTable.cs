@@ -113,7 +113,10 @@ internal static class ValueKindTable
         new("Map", 25, ValueKindProperty.Field | ValueKindProperty.StructMember | ValueKindProperty.Container),
         new("Set", 26, ValueKindProperty.Field | ValueKindProperty.StructMember | ValueKindProperty.Container),
         // 정적 배열 T x[N](원소 형식 element, 원소 수 maxElements = N)도 필드·멤버 자리의 aggregate 컨테이너다(리플렉션 B9g).
-        new("StaticArray", 27, ValueKindProperty.Field | ValueKindProperty.StructMember | ValueKindProperty.Container)
+        new("StaticArray", 27, ValueKindProperty.Field | ValueKindProperty.StructMember | ValueKindProperty.Container),
+        // InstancedStruct<>(실행 중 정해지는 struct 값 하나 — 리플렉션 B9j)는 필드·멤버·Array·정적 배열 원소·Map 값 자리의 aggregate다.
+        // 대상 type은 Base struct ID(0 = 제한 없음)이고 Required·키·Set 원소·Optional 내부가 아니다.
+        new("InstancedStruct", 28, Placed | ValueKindProperty.MapValue | ValueKindProperty.HasTargetType)
     ];
 
     // 성질과 같은 뜻의 런타임 질의 함수(rocks:: 이름공간)다. 대조 헤더가 칸마다 이 함수를 부른다.

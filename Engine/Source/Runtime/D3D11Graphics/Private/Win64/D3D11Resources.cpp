@@ -1,5 +1,6 @@
 #include "D3D11DeviceImpl.h"
 
+#include <Core/Text/StringBuilder.h>
 #include <Platform/Memory.h>
 
 #include <d3d11shader.h>
@@ -407,15 +408,23 @@ Result<void> D3D11Device::Compile(StringView source, const char* entry, const ch
     const HRESULT compiled = D3DCompile(source.Data(), source.ByteCount(), "RocksShader", nullptr,
                                         nullptr, entry, target, flags, 0, code.Out(), errors.Out());
     if (FAILED(compiled)) {
+        // 파이프라인을 만드는 호출자가 LastError로 기록한다(LoggingSystem 13절). 진단은 앞쪽
+        // MaxShaderDiagnosticLogBytes까지 싣는다.
+        auto failed = Fail("D3DCompile", compiled);
+        (void)failed;
+        StringView diagnostics("no compiler output");
         if (errors) {
-            auto assigned = lastError_.TryAssign(StringView(
-                static_cast<const char*>(errors->GetBufferPointer()), errors->GetBufferSize()));
-            (void)assigned;
-        } else {
-            auto failed = Fail("D3DCompile", compiled);
-            (void)failed;
+            diagnostics = StringView(static_cast<const char*>(errors->GetBufferPointer()),
+                                     errors->GetBufferSize())
+                              .LeftBytesAtCodePoint(MaxShaderDiagnosticLogBytes);
         }
 
+        char storage[MaxShaderDiagnosticLogBytes + 128];
+        FixedStringBuilder text{Span<char>(storage)};
+        (void)text.TryAppendFormat("Shader {} ({}) failed to compile (HRESULT {:#x}): {}", entry,
+                                   target, static_cast<uint32>(compiled), diagnostics);
+        auto assigned = lastError_.TryAssign(text.View());
+        (void)assigned;
         return Result<void>::Failure(ErrorCode::DependencyFailed);
     }
 

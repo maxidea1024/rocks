@@ -74,6 +74,22 @@ internal static class ValueKindTableTests
                     $"B9f2/B9g {container} is a field-only aggregate container that does not nest");
             }
 
+            Verify.That(ValueKindTable.Has("InstancedStruct", ValueKindProperty.Field) &&
+                ValueKindTable.Has("InstancedStruct", ValueKindProperty.StructMember) &&
+                ValueKindTable.Has("InstancedStruct", ValueKindProperty.ArrayElement) &&
+                ValueKindTable.Has("InstancedStruct", ValueKindProperty.StaticArrayElement) &&
+                ValueKindTable.Has("InstancedStruct", ValueKindProperty.MapValue) &&
+                ValueKindTable.Has("InstancedStruct", ValueKindProperty.HasTargetType) &&
+                !ValueKindTable.Has("InstancedStruct", ValueKindProperty.MapKey) &&
+                !ValueKindTable.Has("InstancedStruct", ValueKindProperty.SetElement) &&
+                !ValueKindTable.Has("InstancedStruct", ValueKindProperty.OptionalInner) &&
+                !ValueKindTable.Has("InstancedStruct", ValueKindProperty.InstancedStructContent) &&
+                !ValueKindTable.Has("InstancedStruct", ValueKindProperty.AcceptsRequired) &&
+                !ValueKindTable.Has("InstancedStruct", ValueKindProperty.RequiresTargetId) &&
+                !ValueKindTable.Has("InstancedStruct", ValueKindProperty.Container) &&
+                !ValueKindTable.Has("InstancedStruct", ValueKindProperty.WholeFieldValue),
+                "B9j InstancedStruct is a placed aggregate with an optional base and no Required");
+
             Verify.That(ValueKindTable.Has("SoftObjectReference", ValueKindProperty.MapKey), "single property query");
             Verify.Throws<ArgumentException>(() => ValueKindTable.Has("SoftObjectReference", ValueKindProperty.MapKey | ValueKindProperty.AcceptsRequired));
             Verify.Throws<ArgumentException>(() => ValueKindTable.Has("Bool", ValueKindProperty.None));
@@ -108,11 +124,12 @@ internal static class ValueKindTableTests
                 ("map cell", Flip("Map", ValueKindProperty.MapValue), "Map MapValue = true"),
                 ("set cell", Flip("Set", ValueKindProperty.Container), "Set Container = false"),
                 ("static array cell", Flip("StaticArray", ValueKindProperty.StaticArrayElement), "StaticArray StaticArrayElement = true"),
+                ("instanced struct cell", Flip("InstancedStruct", ValueKindProperty.MapKey), "InstancedStruct MapKey = true"),
                 ("container property", Flip("Array", ValueKindProperty.Container), "Array Container = false"),
                 ("whole FieldValue property", Flip("Struct", ValueKindProperty.WholeFieldValue), "Struct WholeFieldValue = true"),
-                // 런타임에 아직 없는 종류(리플렉션 B9j의 InstancedStruct)를 C# 표에만 더한 경우다.
+                // 런타임에 아직 없는 종류(리플렉션 B9l의 Text)를 C# 표에만 더한 경우다.
                 ("extra C# kind", ValueKindTable.ParityHeader([.. ValueKindTable.Rows,
-                    new("InstancedStruct", (uint)count, ValueKindProperty.Field)]),
+                    new("Text", (uint)count, ValueKindProperty.Field)]),
                     $"C# table has {count + 1} value kinds"),
                 ("missing C# kind", ValueKindTable.ParityHeader([.. ValueKindTable.Rows.Take(count - 1)]),
                     $"C# table has {count - 1} value kinds"),

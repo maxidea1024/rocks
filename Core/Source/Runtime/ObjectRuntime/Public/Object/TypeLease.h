@@ -92,6 +92,18 @@ public:
     //   }
     bool ContainsWeakReference() const noexcept;
 
+    // InstancedStruct 값(ValueKind::InstancedStruct — 단일 멤버·원소 배열·정적 배열·Map 값 멤버)을
+    // 담는지다(리플렉션 B9j). 등록이 계산한 형질이며 중첩 struct 멤버와 struct 원소 배열·Optional·
+    // Map 멤버의 대상 struct에서 전파되고 Transient 멤버도 센다. 이것이 참인 struct는
+    // InstancedStruct의 내용이 될 수 없고(중첩 금지 — detail::CheckInstancedStructContent,
+    // Docs/Design/ReflectionExtensions.ko.md 11절) 그래프 복원 1단계의 관찰 대상도 될 수 없다(담긴
+    // 타입의 lease를 1단계 임시 값에 둘 곳이 없다 — 직렬화기가 InvalidArgument로 거부한다). 빈
+    // view는 Fatal이다.
+    //
+    // 사용 예:
+    //   if (lease.Struct().ContainsInstancedStruct()) { /* InstancedStruct에 담을 수 없다 */ }
+    bool ContainsInstancedStruct() const noexcept;
+
     // 선언된 struct 플래그 TypeFlags::Atomic(ROCKS_STRUCT(Atomic))이 있는지다 — 값이 통째
     // 단위다(Docs/Design/ReflectionExtensions.ko.md 3.1절: 차이 저장은 멤버 하나라도 기준과
     // 다르면 모든 멤버를 쓰고, override 집합·되돌리기 단위가 그 struct 필드 경로다). 차이 쓰기·

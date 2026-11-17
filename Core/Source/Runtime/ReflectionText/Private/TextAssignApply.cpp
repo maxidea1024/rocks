@@ -246,9 +246,49 @@ Result<bool> ReadAssignmentValue(AssignmentState& state, const TextSlot& slot,
     return ParseTextValue(state.context, slot, assignment.value, source, assignment.path, out);
 }
 
+namespace {
+
+// 대입 묶음의 InstancedStruct 담긴 타입 resolver다(리플렉션 B9j — PreparedInstancedType).
+class PreparedInstancedTypes final : public PathInstancedTypeResolver {
+public:
+    explicit PreparedInstancedTypes(AssignmentState& state) noexcept : state_(state) {
+    }
+
+    Result<void> InstancedType(PropertyPath prefix, TypeLease& out) noexcept override {
+        return PreparedInstancedType(state_, prefix, out);
+    }
+
+private:
+    AssignmentState& state_;
+};
+
+// 문맥에 resolver를 거는 동안이다(대입 하나 — 문맥은 묶음 상태보다 오래 살 수 있다).
+class InstancedTypesScope {
+public:
+    InstancedTypesScope(TextCodecContext& context, PathInstancedTypeResolver& resolver) noexcept
+        : context_(context), previous_(context.InstancedTypes()) {
+        context.SetInstancedTypes(&resolver);
+    }
+
+    ~InstancedTypesScope() {
+        context_.SetInstancedTypes(previous_);
+    }
+
+    InstancedTypesScope(const InstancedTypesScope&) = delete;
+    InstancedTypesScope& operator=(const InstancedTypesScope&) = delete;
+
+private:
+    TextCodecContext& context_;
+    PathInstancedTypeResolver* previous_;
+};
+
+} // namespace
+
 Result<void> ProcessAssignment(AssignmentState& state, const TextAssignment& assignment) noexcept {
     const TextSource source = TextSource::Assignment(assignment.sourceIndex);
     TextPath resolved;
+    PreparedInstancedTypes instanced(state);
+    InstancedTypesScope scope(state.context, instanced);
     auto made = ResolveTextPath(state.context, state.lease, assignment.path, source, resolved);
     if (!made) {
         return Result<void>::Failure(made.Error());
@@ -451,6 +491,73 @@ Result<bool> PreparedContains(AssignmentState& state, PropertyPath targetPath) n
     }
 
     return present;
+}
+
+Result<void> PreparedInstancedType(AssignmentState& state, PropertyPath targetPath,
+                                   TypeLease& out) noexcept {
+    out.Reset();
+    PathStep mappedSteps[MaxPropertyPathSteps];
+    auto translated = MapElementIndices(state, targetPath, mappedSteps, TextSource{}, {}, false);
+    if (!translated) {
+        return Result<void>::Failure(translated.Error());
+    }
+
+    // 지운 원소 안 등 준비 상태에서 닿을 수 없는 자리는 비어 있는 것이다.
+    if (!translated.Value()) {
+        return Result<void>::Success();
+    }
+
+    const PropertyPath path{Span<const PathStep>(mappedSteps, targetPath.steps.Size()),
+                            targetPath.keys};
+    ObjectRegistry& registry = state.target.Registry();
+    const ObjectAccessContext& access = state.target.Access();
+    PathTarget start = state.Root();
+    PropertyPath relative = path;
+    const AddedElement added = FindAddedElement(state, path);
+    if (added.unit && added.step + 1 < path.steps.Size()) {
+        auto addedStart = added.unit->stage.AddedTarget(added.id);
+        if (!addedStart) {
+            return Result<void>::Success();
+        }
+
+        start = addedStart.Value();
+        relative = PropertyPath{path.steps.Mid(added.step + 1), path.keys};
+    } else {
+        auto unitEnd = FindUnitEnd(state, path);
+        if (!unitEnd) {
+            return Result<void>::Failure(unitEnd.Error());
+        }
+
+        // 그 자리의 값 단위가 이미 있으면 상자(같은 묶음의 앞 대입이 바꾼 상태)를 본다.
+        if (unitEnd.Value().kind == UnitKind::Value) {
+            const usize end = unitEnd.Value().index;
+            PathStep unitSteps[MaxPropertyPathSteps];
+            for (usize index = 0; index <= end; ++index) {
+                unitSteps[index] = path.steps[index];
+            }
+
+            unitSteps[end].selector = PathSelector::None;
+            unitSteps[end].index = 0;
+            const PropertyPath unitPath{Span<const PathStep>(unitSteps, end + 1), {}};
+            for (usize index = 0; index < state.units.Size(); ++index) {
+                if (SamePropertyPath(state.units[index]->Path(), unitPath)) {
+                    start = PathTarget::Value(state.units[index]->box);
+                    relative = PropertyPath{path.steps.Mid(end), path.keys};
+                    break;
+                }
+            }
+        }
+    }
+
+    auto type = PathReadInstancedType(registry, access, start, relative);
+    if (!type) {
+        // 닿을 수 없는 자리는 비어 있는 것이다(멤버 단계의 InstancedEmpty 진단이 된다).
+        return IsCallError(type.Error()) ? Result<void>::Failure(type.Error())
+                                         : Result<void>::Success();
+    }
+
+    out = Move(type.Value());
+    return Result<void>::Success();
 }
 
 } // namespace rocks::reflection_text::detail

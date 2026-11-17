@@ -16,6 +16,7 @@
 //   - trivially copyable(단일 값·Guid·AssetId·Digest·Name 토큰·WeakRef·ClassRef·enum)은 대입이다.
 //   - String·SoftObjectRef는 TryClone이다.
 //   - Array·OrderedMap·OrderedSet·Optional·정적 배열(E[N])은 원소·키·값마다 복사한다.
+//   - InstancedStruct는 TryClone이다(리플렉션 B9j).
 //   - 생성 struct는 MetaCompiler가 내는 특수화가 GeneratedType<S>::CopyValue(PROPERTY·NATIVE 멤버
 //     모두)로 잇는다.
 //   - 그 밖의 C++ 타입은 noexcept 복사 생성·대입이 있으면 C++ 복사, 없으면 지원하지 않는다
@@ -227,6 +228,24 @@ struct ValueCopy<Optional<T>> {
         }
 
         destination.Emplace(Move(copy));
+        return Result<void>::Success();
+    }
+};
+
+// InstancedStruct<Base>(리플렉션 B9j)는 TryClone(새 lease·새 값 블록·담긴 struct의 깊은 복사 —
+// RuntimeStructOps::copy가 없는 struct는 Unsupported)이다.
+template <class Base>
+struct ValueCopy<InstancedStruct<Base>> {
+    static constexpr bool Supported = true;
+
+    static Result<void> Copy(InstancedStruct<Base>& destination,
+                             const InstancedStruct<Base>& source, Allocator& allocator) noexcept {
+        auto cloned = source.TryClone(allocator);
+        if (!cloned) {
+            return Result<void>::Failure(cloned.Error());
+        }
+
+        destination = Move(cloned.Value());
         return Result<void>::Success();
     }
 };

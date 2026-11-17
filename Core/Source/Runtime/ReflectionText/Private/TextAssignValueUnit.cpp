@@ -215,6 +215,52 @@ Result<void> Apply::RunSet(TextValue& value) noexcept {
         }
 
         return Changed();
+    case TextValueShape::InstancedType: {
+        // InstancedStruct 형 바꾸기·비우기(리플렉션 B9j). Map 값 자리는 항목이 없으면 빈 값을 먼저
+        // 넣고, Array 원소 자리는 index가 길이면 끝에 빈 원소를 더한다.
+        if (slot.part == TextSlotPart::MapValue) {
+            auto present = PathContains(Registry(), Access(), Start(), relative, &failure);
+            if (!present) {
+                return Failed(present.Error());
+            }
+
+            if (!present.Value()) {
+                auto inserted = PathInsertKey(Registry(), Access(), Start(), relative, &failure);
+                if (!inserted) {
+                    return Failed(inserted.Error());
+                }
+            }
+        } else if (slot.part == TextSlotPart::Element && fieldKind == ValueKind::Array) {
+            PathStep arraySteps[MaxPropertyPathSteps];
+            const usize last = relative.steps.Size() - 1;
+            for (usize index = 0; index <= last; ++index) {
+                arraySteps[index] = relative.steps[index];
+            }
+
+            arraySteps[last].selector = PathSelector::None;
+            arraySteps[last].index = 0;
+            auto count = PathCount(
+                Registry(), Access(), Start(),
+                PropertyPath{Span<const PathStep>(arraySteps, last + 1), relative.keys}, &failure);
+            if (!count) {
+                return Failed(count.Error());
+            }
+
+            if (relative.steps[last].index == count.Value()) {
+                if (auto inserted = PathInsertElement(Registry(), Access(), Start(), relative,
+                                                      nullptr, &failure);
+                    !inserted) {
+                    return Failed(inserted.Error());
+                }
+            }
+        }
+
+        auto done = value.single.guid == Guid{}
+                        ? PathClearInstanced(Registry(), Access(), Start(), relative, &failure)
+                        : PathSetInstancedType(Registry(), Access(), Start(), relative,
+                                               value.single.guid, &failure);
+        return done ? Changed() : Failed(done.Error());
+    }
     case TextValueShape::List:
     case TextValueShape::Entries:
     case TextValueShape::Empty:

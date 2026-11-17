@@ -22,14 +22,18 @@ internal static partial class SchemaValidator
         ["rocks::String"] = "Utf8String",
         ["rocks::Name"] = "Name",
         ["rocks::AssetId"] = "AssetId",
-        ["rocks::Sha256Digest"] = "Digest256"
+        ["rocks::Sha256Digest"] = "Digest256",
+        // InstancedStruct<>(리플렉션 B9j — Docs/Design/ReflectionExtensions.ko.md 11절)는 대상 없는 값 종류로 푼다(Clang은 기본 인자를
+        // 생략한 `<>`로 내고, 명시한 void는 `<void>`로 낸다). InstancedStruct<Base>는 리플렉션 B9k가 연다.
+        ["rocks::InstancedStruct<>"] = "InstancedStruct",
+        ["rocks::InstancedStruct<void>"] = "InstancedStruct"
     };
 
     private static readonly string[] TargetKinds = ["Enum", "Struct", "ObjectReference", "WeakObjectReference", "SoftObjectReference", "ClassReference"];
 
     // 원본 선언의 철자 해석(ResolveValue·ResolveArray)이 만들 수 있는 단일 값 종류다: 스칼라 철자(Name 포함), 리플렉션 enum·struct,
     // 강한·weak·소프트 참조, 클래스 참조(ClassRef). ToolTests가 이 집합과 성질 표(ValueKindTable)의 Array 원소 열이 같은지 본다(새 종류는 철자 해석과 표에 함께 더한다).
-    internal static IReadOnlyList<string> SourceValueKinds { get; } = [.. Scalars.Values, .. TargetKinds];
+    internal static IReadOnlyList<string> SourceValueKinds { get; } = [.. Scalars.Values.Distinct(StringComparer.Ordinal), .. TargetKinds];
 
     // "prefix<T>" 철자의 T를 돌려준다(아니면 null).
     private static string? TemplateTarget(string spelling, string prefix) =>
@@ -225,7 +229,7 @@ internal static partial class SchemaValidator
                 return $"Core value types are reflected by the {StructRules.BindingModule} module: depend on {StructRules.BindingModule} (add it to the module's RequiredModules) so its descriptor is imported.";
             }
 
-            return "Use a supported scalar, Guid, String, Name, AssetId, Sha256Digest, ROCKS_ENUM enum, ROCKS_STRUCT struct, ObjectRef, WeakRef, SoftObjectRef, ClassRef, rocks::Optional, rocks::OrderedMap/OrderedSet or rocks::Array/ObjectRefArray/StructRefArray field; raw pointers/other containers/cv-qualified fields need an explicit codec extension.";
+            return "Use a supported scalar, Guid, String, Name, AssetId, Sha256Digest, ROCKS_ENUM enum, ROCKS_STRUCT struct, ObjectRef, WeakRef, SoftObjectRef, ClassRef, rocks::InstancedStruct<>, rocks::Optional, rocks::OrderedMap/OrderedSet or rocks::Array/ObjectRefArray/StructRefArray field; raw pointers/other containers/cv-qualified fields need an explicit codec extension.";
         }
 
         // 단일 값 형식 철자 하나를 (값 종류, 대상 정규 이름, 대상 ID)로 푼다(필드와 Array<T> 원소가 같은 해석을 쓴다).

@@ -1,8 +1,11 @@
 #include <Core/Containers/Array.h>
+#include <Core/Diagnostics/Log.h>
 #include <Core/Text/String.h>
+#include <Core/Text/StringBuilder.h>
 #include <D3D12Graphics/D3D12Device.h>
 #include <Graphics/DeviceOwnership.h>
 #include <Graphics/FenceTimeline.h>
+#include <Graphics/GraphicsLog.h>
 #include <Graphics/StagingPool.h>
 #include <Graphics/TimestampRing.h>
 #include <Graphics/UploadRing.h>
@@ -14,6 +17,7 @@
 #include <d3dcompiler.h>
 #include <dxgi1_6.h>
 #include <dxgidebug.h>
+#include <Platform/Atomics.h>
 
 #include "D3D12PixelFormats.h"
 #include <Platform/Memory.h>
@@ -21,6 +25,26 @@
 namespace rocks::graphics {
 
 namespace {
+
+// GetDeviceRemovedReason 값의 이름이다(진단용, 정적 수명).
+const char* RemovedReasonName(HRESULT reason) noexcept {
+    switch (reason) {
+    case S_OK:
+        return "not removed";
+    case DXGI_ERROR_DEVICE_HUNG:
+        return "DXGI_ERROR_DEVICE_HUNG";
+    case DXGI_ERROR_DEVICE_REMOVED:
+        return "DXGI_ERROR_DEVICE_REMOVED";
+    case DXGI_ERROR_DEVICE_RESET:
+        return "DXGI_ERROR_DEVICE_RESET";
+    case DXGI_ERROR_DRIVER_INTERNAL_ERROR:
+        return "DXGI_ERROR_DRIVER_INTERNAL_ERROR";
+    case DXGI_ERROR_INVALID_CALL:
+        return "DXGI_ERROR_INVALID_CALL";
+    default:
+        return "unknown reason";
+    }
+}
 
 // 기록 저장소(command allocator) 수의 상한이다. 끝난 제출의 저장소를 다시 쓰고, 모두 GPU가 쓰는
 // 중이면 이 수까지 새로 만든다. 프레임 수 제한(프레임 slot, RenderBase 5.3절)은 장치 밖에서 하므로
@@ -608,7 +632,9 @@ public:
         if (!ownership_.IsOwner() && !ownership_.Acquire()) {
             platform::Fatal("graphics device destroyed while another thread owns it");
         }
-        if (queue_ && fence_ && fenceEvent_ != nullptr) {
+        // 초기화가 staging pool 전에 실패했으면 아무것도 제출하지 않았다(WaitIdle의 회수가 pool을
+        // 쓰므로 부르지 않는다).
+        if (queue_ && fence_ && fenceEvent_ != nullptr && staging_) {
             auto idle = WaitIdle();
             (void)idle;
         }
@@ -643,8 +669,10 @@ public:
             }
         }
 
-        if (FAILED(CreateDXGIFactory2(factoryFlags, IID_PPV_ARGS(factory_.Out())))) {
-            return Fail("CreateDXGIFactory2 failed");
+        const HRESULT factoryCreated =
+            CreateDXGIFactory2(factoryFlags, IID_PPV_ARGS(factory_.Out()));
+        if (FAILED(factoryCreated)) {
+            return Fail("CreateDXGIFactory2", factoryCreated);
         }
 
         ComRef<IDXGIAdapter1> adapter;
@@ -673,10 +701,16 @@ public:
         }
 
         if (!device_) {
-            if (FAILED(factory_->EnumWarpAdapter(IID_PPV_ARGS(adapter.Out()))) ||
-                FAILED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0,
-                                         IID_PPV_ARGS(device_.Out())))) {
-                return Fail("D3D12CreateDevice failed for hardware and WARP adapters");
+            // 하드웨어 후보가 없거나 모두 실패했다. 마지막 수단인 WARP의 실패 원인을 남긴다.
+            const HRESULT warp = factory_->EnumWarpAdapter(IID_PPV_ARGS(adapter.Out()));
+            if (FAILED(warp)) {
+                return Fail("EnumWarpAdapter", warp);
+            }
+
+            const HRESULT created = D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0,
+                                                      IID_PPV_ARGS(device_.Out()));
+            if (FAILED(created)) {
+                return Fail("D3D12CreateDevice (WARP)", created);
             }
             software_ = true;
         }
@@ -699,8 +733,10 @@ public:
 
         D3D12_COMMAND_QUEUE_DESC queueDesc = {};
         queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-        if (FAILED(device_->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(queue_.Out())))) {
-            return Fail("CreateCommandQueue failed");
+        const HRESULT queueCreated =
+            device_->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(queue_.Out()));
+        if (FAILED(queueCreated)) {
+            return Fail("CreateCommandQueue", queueCreated);
         }
 
         auto reservedAllocators = allocators_.TryReserve(MaxCommandAllocators);
@@ -725,13 +761,15 @@ public:
         }
         uploadList_->Close();
 
-        if (FAILED(device_->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(fence_.Out())))) {
-            return Fail("CreateFence failed");
+        const HRESULT fenceCreated =
+            device_->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(fence_.Out()));
+        if (FAILED(fenceCreated)) {
+            return Fail("CreateFence", fenceCreated);
         }
         fenceEvent_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
         watcherEvent_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
         if (fenceEvent_ == nullptr || watcherEvent_ == nullptr) {
-            return Fail("CreateEvent failed");
+            return Fail("CreateEventW", HRESULT_FROM_WIN32(GetLastError()));
         }
         fenceSource_.fence = fence_.Get();
         fenceSource_.event = watcherEvent_;
@@ -774,11 +812,16 @@ public:
         const D3D12_RESOURCE_DESC ringDesc = BufferResource(ringBytes);
         void* ringMapped = nullptr;
         const D3D12_RANGE noRead = {0, 0};
-        if (FAILED(device_->CreateCommittedResource(&uploadHeap, D3D12_HEAP_FLAG_NONE, &ringDesc,
-                                                    D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-                                                    IID_PPV_ARGS(ringBuffer_.Out()))) ||
-            FAILED(ringBuffer_->Map(0, &noRead, &ringMapped))) {
-            return Fail("upload ring creation failed");
+        const HRESULT ringCreated = device_->CreateCommittedResource(
+            &uploadHeap, D3D12_HEAP_FLAG_NONE, &ringDesc, D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr, IID_PPV_ARGS(ringBuffer_.Out()));
+        if (FAILED(ringCreated)) {
+            return Fail("CreateCommittedResource (upload ring)", ringCreated);
+        }
+
+        const HRESULT ringMappedResult = ringBuffer_->Map(0, &noRead, &ringMapped);
+        if (FAILED(ringMappedResult)) {
+            return Fail("ID3D12Resource::Map (upload ring)", ringMappedResult);
         }
         ringData_ = static_cast<uint8*>(ringMapped);
         stagingSource_.device = device_.Get();
@@ -846,9 +889,10 @@ public:
         swapDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
         const HWND window = static_cast<HWND>(desc.surface.window);
         ComRef<IDXGISwapChain1> swapChain1;
-        if (FAILED(factory_->CreateSwapChainForHwnd(queue_.Get(), window, &swapDesc, nullptr,
-                                                    nullptr, swapChain1.Out()))) {
-            return FailWith<SwapChainHandle>("CreateSwapChainForHwnd failed");
+        const HRESULT swapCreated = factory_->CreateSwapChainForHwnd(
+            queue_.Get(), window, &swapDesc, nullptr, nullptr, swapChain1.Out());
+        if (FAILED(swapCreated)) {
+            return FailWith<SwapChainHandle>("CreateSwapChainForHwnd", swapCreated);
         }
         factory_->MakeWindowAssociation(window, DXGI_MWA_NO_ALT_ENTER);
 
@@ -924,9 +968,10 @@ public:
         }
         // 이 시점부터 버퍼가 없으므로 성공할 때까지 그리기를 막는다.
         record->broken = true;
-        if (FAILED(record->swapChain->ResizeBuffers(SwapChainBufferCount, width, height,
-                                                    DXGI_FORMAT_R8G8B8A8_UNORM, 0))) {
-            return Fail("ResizeBuffers failed");
+        const HRESULT resized = record->swapChain->ResizeBuffers(
+            SwapChainBufferCount, width, height, DXGI_FORMAT_R8G8B8A8_UNORM, 0);
+        if (FAILED(resized)) {
+            return Fail("IDXGISwapChain::ResizeBuffers", resized);
         }
         auto views = CreateSwapChainViews(*record);
         if (!views) {
@@ -1511,10 +1556,8 @@ public:
             if (record != nullptr) {
                 const HRESULT presented = record->swapChain->Present(record->vsync ? 1 : 0, 0);
                 if (FAILED(presented)) {
-                    DetectLost(presented);
-                    outcome = Fail(presented == DXGI_ERROR_DEVICE_REMOVED
-                                       ? "Present failed: device removed"
-                                       : "Present failed");
+                    // Fail이 장치 제거를 판정해 손실 전이 때 한 번 Error로 남긴다.
+                    outcome = Fail("IDXGISwapChain::Present", presented);
                 }
             }
         }
@@ -2027,22 +2070,79 @@ private:
         uint32 slot = 0;
     };
 
-    // 진단 문자열을 남기고 실패를 돌려준다. 장치가 손실되었으면 Destroyed다.
+    // 진단 문자열을 남기고 실패를 돌려준다. 장치가 손실되었으면 Destroyed다. 실패는 호출자가 결과로
+    // 받아 결정하는 쪽이 기록한다(LoggingSystem 13절). 장치는 손실 전이만 직접 남긴다.
     Result<void> Fail(const char* message) noexcept {
         auto assigned = lastError_.TryAssign(StringView(message, platform::CStringLength(message)));
         (void)assigned;
+        failureTruncated_ = CopyStage(message);
+        failureResult_ = S_OK;
         return Result<void>::Failure(timeline_.IsLost() ? ErrorCode::Destroyed
                                                         : ErrorCode::DependencyFailed);
     }
 
-    // API 실패가 장치 제거 때문이면 손실을 게시한다(기다리는 쪽을 Destroyed로 깨운다).
+    // API 호출 stage가 HRESULT로 실패했다. 원본 코드를 보존하고(DeviceCreateReport::nativeCode)
+    // LastError에 "stage failed (HRESULT 0x...)"로 덧붙인다. 장치 제거면 손실을 게시한다.
+    Result<void> Fail(const char* stage, HRESULT result) noexcept {
+        DetectLost(result);
+        char storage[160];
+        FixedStringBuilder text{Span<char>(storage)};
+        (void)text.TryAppendFormat("{} failed (HRESULT {:#x})", stage, static_cast<uint32>(result));
+        auto assigned = lastError_.TryAssign(text.View());
+        (void)assigned;
+        failureTruncated_ = CopyStage(stage) || text.Truncated();
+        failureResult_ = result;
+        return Result<void>::Failure(timeline_.IsLost() ? ErrorCode::Destroyed
+                                                        : ErrorCode::DependencyFailed);
+    }
+
+    // 실패한 stage 이름을 report용 칸에 복사한다. 잘렸으면 참이다.
+    bool CopyStage(const char* stage) noexcept {
+        FixedStringBuilder text{Span<char>(failureStage_)};
+        (void)text.TryAppend(StringView(stage));
+        return text.Truncated();
+    }
+
+    // API 실패가 장치 제거 때문이면 손실을 게시한다(기다리는 쪽을 Destroyed로 깨운다). 손실 전이 때
+    // GetDeviceRemovedReason과 함께 Error를 한 번 남긴다.
     void DetectLost(HRESULT failure) noexcept {
+        // 장치를 만들기 전(팩터리·어댑터 단계)의 실패에는 잃을 장치가 없다.
+        if (!device_) {
+            return;
+        }
+
+        const HRESULT reason = device_->GetDeviceRemovedReason();
         if (failure == DXGI_ERROR_DEVICE_REMOVED || failure == DXGI_ERROR_DEVICE_RESET ||
-            device_->GetDeviceRemovedReason() != S_OK) {
+            reason != S_OK) {
             timeline_.MarkLost();
+            if (platform::AtomicExchange<platform::MemoryOrder::AcquireRelease>(&lossLogged_, 1u) ==
+                0) {
+                Log::Error(LogGraphicsD3D12,
+                           "D3D12 device removed on {Adapter}: {Reason} (removed reason HRESULT "
+                           "{ReasonCode:#x}, failing call HRESULT {HResult:#x}); the device "
+                           "is lost and every later call fails",
+                           adapterName_.View(), RemovedReasonName(reason),
+                           static_cast<uint32>(reason), static_cast<uint32>(failure));
+            }
         }
     }
 
+public:
+    // DeviceCreateReport를 채운다(생성 실패, CreateD3D12Device가 부른다).
+    void FillReport(ErrorCode code, DeviceCreateReport& report) const noexcept {
+        report = DeviceCreateReport{};
+        report.code = code;
+        report.nativeCode = static_cast<int64>(static_cast<uint32>(failureResult_));
+        FixedStringBuilder stage{Span<char>(report.stage)};
+        (void)stage.TryAppend(failureStage_[0] != '\0' ? StringView(failureStage_)
+                                                       : StringView("Initialize"));
+        FixedStringBuilder detail{Span<char>(report.detail)};
+        (void)detail.TryAppend(lastError_.ByteCount() != 0 ? lastError_.View()
+                                                           : StringView(ErrorCodeName(code)));
+        report.truncated = failureTruncated_ || stage.Truncated() || detail.Truncated();
+    }
+
+private:
     // graphics queue에 다음 fence 값을 신호하고 타임라인에 알린다. 실패하면 값을 쓰지 않는다.
     Result<uint64> SignalQueue() noexcept {
         if (timeline_.IsLost()) {
@@ -2122,6 +2222,12 @@ private:
         auto failed = Fail(message);
         (void)failed;
         return Result<T>::Failure(ErrorCode::DependencyFailed);
+    }
+
+    template <class T>
+    Result<T> FailWith(const char* stage, HRESULT result) noexcept {
+        auto failed = Fail(stage, result);
+        return Result<T>::Failure(failed.Error());
     }
 
     // 이 backend가 대응하지 않는 픽셀 형식이다. 다른 형식으로 바꾸지 않고 Unsupported로
@@ -2325,14 +2431,23 @@ private:
             D3DCompile(source.Data(), source.ByteCount(), "RocksShader", nullptr, nullptr, entry,
                        target, flags, 0, code.Out(), errors.Out());
         if (FAILED(compiled)) {
+            // 파이프라인을 만드는 호출자가 LastError로 기록한다(LoggingSystem 13절). 진단은 앞쪽
+            // MaxShaderDiagnosticLogBytes까지 싣는다.
+            StringView diagnostics("no compiler output");
             if (errors) {
-                auto assigned = lastError_.TryAssign(StringView(
-                    static_cast<const char*>(errors->GetBufferPointer()), errors->GetBufferSize()));
-                (void)assigned;
-            } else {
-                auto failed = Fail("shader compilation failed");
-                (void)failed;
+                diagnostics = StringView(static_cast<const char*>(errors->GetBufferPointer()),
+                                         errors->GetBufferSize())
+                                  .LeftBytesAtCodePoint(MaxShaderDiagnosticLogBytes);
             }
+
+            char storage[MaxShaderDiagnosticLogBytes + 128];
+            FixedStringBuilder text{Span<char>(storage)};
+            (void)text.TryAppendFormat("Shader {} ({}) failed to compile (HRESULT {:#x}): {}",
+                                       entry, target, static_cast<uint32>(compiled), diagnostics);
+            auto assigned = lastError_.TryAssign(text.View());
+            (void)assigned;
+            failureTruncated_ = CopyStage("D3DCompile");
+            failureResult_ = compiled;
             return Result<void>::Failure(ErrorCode::DependencyFailed);
         }
         return Result<void>::Success();
@@ -2882,6 +2997,17 @@ private:
                     // 읽지 못한 메시지도 오류로 센다(필터가 오류만 저장한다).
                     ++validationErrors_;
                 }
+
+                // 원문을 메시지 ID마다 한 번 남긴다(세기는 위와 같다).
+                if (message != nullptr && message->pDescription != nullptr &&
+                    validationFilter_.First(static_cast<uint32>(message->ID))) {
+                    Log::Warning(
+                        LogGraphicsD3D12Validation, "D3D12 debug layer message {Id}: {Message}",
+                        static_cast<uint32>(message->ID),
+                        StringView(message->pDescription, message->DescriptionByteLength > 0
+                                                              ? message->DescriptionByteLength - 1
+                                                              : 0));
+                }
             }
             infoQueue_->ClearStoredMessages();
         }
@@ -3371,6 +3497,14 @@ private:
     ComRef<IDXGIInfoQueue> dxgiInfoQueue_;
     // 검증 메시지는 읽을 때마다 비우고 여기에 누적한다(저장 한도로 오래된 오류가 밀려나지 않게).
     mutable uint64 validationErrors_ = 0;
+    // 검증 메시지 원문을 ID마다 한 번만 남긴다(DrainValidationMessages가 쓴다).
+    mutable ValidationMessageFilter validationFilter_;
+    // 마지막 실패의 API 호출 이름·원본 HRESULT다(DeviceCreateReport).
+    char failureStage_[48]{};
+    HRESULT failureResult_ = S_OK;
+    bool failureTruncated_ = false;
+    // 장치 제거를 이미 남겼는지다(손실 전이 때 한 번, 원자 변수).
+    uint32 lossLogged_ = 0;
     mutable Array<uint8> messageScratch_;
     D3D12FenceSource fenceSource_;
     FenceTimeline timeline_;
@@ -3410,17 +3544,35 @@ private:
 
 } // namespace
 
-Result<UniquePtr<Device>> CreateD3D12Device(Allocator& allocator, const DeviceDesc& desc) noexcept {
+Result<UniquePtr<Device>> CreateD3D12Device(Allocator& allocator, const DeviceDesc& desc,
+                                            DeviceCreateReport* report) noexcept {
     auto created = UniquePtr<D3D12Device>::TryMake(allocator, allocator);
     if (!created) {
+        if (report != nullptr) {
+            *report = DeviceCreateReport{};
+            report->code = created.Error();
+        }
+
         return Result<UniquePtr<Device>>::Failure(created.Error());
     }
 
     auto initialized = created.Value()->Initialize(desc);
     if (!initialized) {
+        // 생성 실패 로그는 backend를 고르는 호출자가 report로 남긴다(LoggingSystem 13절).
+        if (report != nullptr) {
+            created.Value()->FillReport(initialized.Error(), *report);
+        }
+
         return Result<UniquePtr<Device>>::Failure(initialized.Error());
     }
 
+    if (report != nullptr) {
+        *report = DeviceCreateReport{};
+    }
+
+    const DeviceInfo info = created.Value()->Info();
+    Log::Info(LogGraphicsD3D12, "Created {Backend} device on {Adapter} (validation {Validation})",
+              BackendName(info.backend), info.adapterName, info.validationEnabled);
     return Result<UniquePtr<Device>>::Success(UniquePtr<Device>(Move(created.Value())));
 }
 

@@ -49,7 +49,13 @@ enum class FieldDiagnosticKind : uint8 {
     // 복원 1단계가 클래스 Deprecated인 노드(path 빈 것 — objectType = 노드 타입) 또는 Deprecated
     // 클래스를 가리키는 ClassRef 값(valueType = 그 클래스, path = 값 위치)을 읽었다(리플렉션 B9h2 —
     // 값·노드는 정상으로 읽는다).
-    DeprecatedType
+    DeprecatedType,
+    // 복원 1단계가 읽은 InstancedStruct 값(ValueKind::InstancedStruct — 리플렉션 B9j)의 담긴
+    // struct가 대상 TypeRegistry에 등록되어 있지 않아 decode 정책
+    // UnknownStructTypePolicy::ReportAndClear대로 비웠다(valueType = 저장된 struct ID, path = 그
+    // 값의 위치 — 배열·Map 값이면 [f[i]], Docs/Design/ReflectionExtensions.ko.md 11절). Reject
+    // 정책(기본)은 진단 없이 NotFound다.
+    UnknownStructType
 };
 
 // 진단 하나다. objectIndex는 그래프 안 노드 위치(0부터 — local ID − 1 = export index − 1), path는
@@ -148,8 +154,9 @@ public:
 
     // 복원 1단계에서 관찰할 struct ID다(로드 시작 때 한 번 읽는다 — 미등록 ID는 NotFound, 참조
     // (강한·weak)나 Name을 담는 struct는 InvalidArgument — 1단계 임시 값에는 참조 대상도 Name
-    // 토큰도 만들 수 없다, StructView::ContainsStrongReference·ContainsWeakReference·ContainsName).
-    // 반환 span은 그 로드 동안 유효해야 한다.
+    // 토큰도 만들 수 없다, StructView::ContainsStrongReference·ContainsWeakReference·ContainsName —
+    // 리플렉션 B9j부터 InstancedStruct를 담은 struct도 거부한다, ContainsInstancedStruct). 반환
+    // span은 그 로드 동안 유효해야 한다.
     virtual Span<const TypeId> ObservedStructs() noexcept {
         return {};
     }

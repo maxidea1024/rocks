@@ -61,9 +61,27 @@ Result<bool> CheckKey(TextCodecContext& context, const EnumSchema* keyEnum, cons
     return Result<bool>::Success(true);
 }
 
-// DescribeTextPath의 본체다. checkKeys가 있으면 key 단계마다 CheckKey를 부른다.
+// 단계가 InstancedStruct 값으로 끝나 다음 단계가 지금 담긴 struct의 멤버인지다(리플렉션 B9j).
+bool IsInstancedStep(const FieldSchema& field, PathSelector selector) noexcept {
+    switch (selector) {
+    case PathSelector::Index:
+        return ValueKindTakesIndex(field.value.kind) &&
+               field.element.kind == ValueKind::InstancedStruct;
+    case PathSelector::Key:
+        return field.value.kind == ValueKind::Map &&
+               field.element.kind == ValueKind::InstancedStruct;
+    case PathSelector::None:
+        return field.value.kind == ValueKind::InstancedStruct;
+    }
+
+    return false;
+}
+
+// DescribeTextPath의 본체다. checkKeys가 있으면 key 단계마다 CheckKey를 부른다. instanced가 있으면
+// InstancedStruct 뒤 멤버 단계를 그 자리의 지금 담긴 struct로 푼다(리플렉션 B9j).
 Result<bool> Describe(const TypeLease& type, PropertyPath path, TextSlot& out,
-                      TextCodecContext* checkKeys, KeyCheck* failure) noexcept {
+                      TextCodecContext* checkKeys, KeyCheck* failure,
+                      PathInstancedTypeResolver* instanced = nullptr) noexcept {
     if (!type.IsValid() || type.Kind() == TypeKind::Enum || path.steps.Size() == 0) {
         return Result<bool>::Failure(ErrorCode::InvalidArgument);
     }
@@ -76,6 +94,9 @@ Result<bool> Describe(const TypeLease& type, PropertyPath path, TextSlot& out,
     }
 
     TextSlot slot;
+    // InstancedStruct 뒤 멤버 단계의 담긴 struct lease다(값이 같은 레코드를 붙잡으므로 slot의
+    // view는 그 값이 사는 동안 유효하다).
+    TypeLease content;
     for (usize index = 0; index < path.steps.Size(); ++index) {
         const PathStep& step = path.steps[index];
         const usize fieldIndex = scope.FieldIndex(step.fieldId);
@@ -126,6 +147,25 @@ Result<bool> Describe(const TypeLease& type, PropertyPath path, TextSlot& out,
             return Result<bool>::Failure(ErrorCode::InvalidArgument);
         }
 
+        if (index + 1 < path.steps.Size() && instanced && IsInstancedStep(field, step.selector)) {
+            TypeLease resolved;
+            if (auto queried = instanced->InstancedType(
+                    PropertyPath{Span<const PathStep>(path.steps.Data(), index + 1), path.keys},
+                    resolved);
+                !queried) {
+                return Result<bool>::Failure(queried.Error());
+            }
+
+            if (!resolved.IsValid()) {
+                return Result<bool>::Failure(ErrorCode::NotFound);
+            }
+
+            content = Move(resolved);
+            scope.lease = nullptr;
+            scope.view = content.Struct();
+            continue;
+        }
+
         if (index + 1 < path.steps.Size()) {
             if (!IsStructStep(field, step.selector) || slot.structView.IsEmpty()) {
                 return Result<bool>::Failure(ErrorCode::InvalidArgument);
@@ -154,6 +194,8 @@ StringView PathFailureMessage(PropertyPathError reason) noexcept {
         return "index or key on a field that has none";
     case PropertyPathError::NotStruct:
         return "member of a value that is not a struct";
+    case PropertyPathError::InstancedEmpty:
+        return "member of an empty instanced struct";
     default:
         return "invalid path";
     }
@@ -191,7 +233,8 @@ Result<bool> ResolveTextPath(TextCodecContext& context, const TypeLease& type, S
 
     PropertyPathFailure failure;
     context.TakeKeyFailure();
-    auto parsed = ParsePropertyPath(type, text, out.path, &failure, &context.KeyHook());
+    auto parsed = ParsePropertyPath(type, text, out.path, &failure, &context.KeyHook(),
+                                    context.InstancedTypes());
     const TextDiagnosticCode keyFailure = context.TakeKeyFailure();
     if (!parsed) {
         if (parsed.Error() == ErrorCode::OutOfMemory) {
@@ -210,7 +253,8 @@ Result<bool> ResolveTextPath(TextCodecContext& context, const TypeLease& type, S
     }
 
     KeyCheck keyCheck;
-    auto described = Describe(type, out.path.View(), out.slot, &context, &keyCheck);
+    auto described =
+        Describe(type, out.path.View(), out.slot, &context, &keyCheck, context.InstancedTypes());
     if (!described) {
         return described;
     }

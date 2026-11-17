@@ -13,25 +13,28 @@ namespace {
 class GraphApplyContext final : public FieldDecodeContext {
 public:
     GraphApplyContext(Allocator& allocator, const ObjectGraphLoadOptions& options,
-                      const Array<LoadNode>& nodes, Span<const ObjectHandle> imports) noexcept
+                      Array<LoadNode>& nodes, Span<const ObjectHandle> imports) noexcept
         : FieldDecodeContext(options.policy, options.hooks, ReferenceWire), allocator_(allocator),
           limits_(options.limits), nodes_(nodes), imports_(imports) {
         SetRecording(false);
     }
 
-    void BeginNode(const LoadNode& node, uint32 index) noexcept {
+    void BeginNode(LoadNode& node, uint32 index) noexcept {
         SetObject(node.type, index);
         node_ = &node;
         migration_ = 0;
         name_ = 0;
         class_ = 0;
+        instanced_ = 0;
     }
 
     // 노드의 모든 필드를 적용한 뒤 부른다. 1단계가 보관한 struct 마이그레이션·Name 기록·ClassRef
-    // 판정은 모두 소비되어야 한다(남으면 두 단계의 방문 순서가 어긋난 계약 위반).
+    // 판정·InstancedStruct 판정은 모두 소비되어야 한다(남으면 두 단계의 방문 순서가 어긋난 계약
+    // 위반).
     Result<void> EndNode() noexcept {
-        if (node_ && (migration_ != node_->structMigrations.Size() ||
-                      name_ != node_->names.Size() || class_ != node_->classes.Size())) {
+        if (node_ &&
+            (migration_ != node_->structMigrations.Size() || name_ != node_->names.Size() ||
+             class_ != node_->classes.Size() || instanced_ != node_->instanced.Size())) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
@@ -58,6 +61,18 @@ public:
 
         const bool nulled = node_->classes[class_++].nulled;
         return Result<TypeId>::Success(nulled ? TypeId{} : stored);
+    }
+
+    // 1단계가 같은 순서로 기록한 InstancedStruct 판정이다(리플렉션 B9j — 기록의 lease를 넘겨받는다,
+    // TypeRegistry를 다시 조회하지 않는다). 다시 읽은 저장 struct ID가 기록과 다르면(방문 순서
+    // 어긋남) InvalidArgument다.
+    Result<TypeLease> TakeInstancedStruct(TypeId stored) noexcept override {
+        if (!node_ || instanced_ >= node_->instanced.Size() ||
+            !(node_->instanced[instanced_].stored == stored)) {
+            return Result<TypeLease>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        return Result<TypeLease>::Success(Move(node_->instanced[instanced_++].type));
     }
 
     Result<RecordScope> OpenRecord(const FieldView& field, TypeId expected, uint32 minVersion,
@@ -264,11 +279,13 @@ private:
     ObjectGraphLimits limits_;
     const Array<LoadNode>& nodes_;
     Span<const ObjectHandle> imports_;
-    const LoadNode* node_ = nullptr;
+    LoadNode* node_ = nullptr;
     usize migration_ = 0;
     usize name_ = 0;
     // 다음에 소비할 ClassRef 판정 기록의 위치다(리플렉션 B9d2).
     usize class_ = 0;
+    // 다음에 소비할 InstancedStruct 판정 기록의 위치다(리플렉션 B9j).
+    usize instanced_ = 0;
 };
 
 } // namespace
@@ -362,11 +379,11 @@ Result<void> InternNodeNames(Allocator& allocator, NamePool* pool,
 }
 
 Result<void> ApplyNodeFields(Allocator& allocator, ConstructionContext& transaction,
-                             const Array<LoadNode>& nodes, const ObjectGraphLoadOptions& options,
+                             Array<LoadNode>& nodes, const ObjectGraphLoadOptions& options,
                              Span<const ObjectHandle> imports) noexcept {
     GraphApplyContext context(allocator, options, nodes, imports);
     for (usize index = 0; index < nodes.Size(); ++index) {
-        const auto& node = nodes[index];
+        auto& node = nodes[index];
         const auto& schema = node.lease.Schema();
         context.BeginNode(node, static_cast<uint32>(index));
         for (usize fieldIndex = 0; fieldIndex < node.fields.Size(); ++fieldIndex) {
