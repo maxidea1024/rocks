@@ -141,7 +141,8 @@ inline float Dot4(Register4f a, Register4f b) noexcept {
     return low + high;
 }
 
-// xyz의 오른손 외적이다. w는 입력과 무관하게 +0이다.
+// xyz의 표준 외적 (a.y·b.z − a.z·b.y, a.z·b.x − a.x·b.z, a.x·b.y − a.y·b.x)이다(UE 외적과
+// 같은 식 — 왼손 좌표계에서 Forward × Right = Up). w는 입력과 무관하게 +0이다.
 inline Register4f Cross3(Register4f a, Register4f b) noexcept {
     const float yz = a.lane[1] * b.lane[2];
     const float zy = a.lane[2] * b.lane[1];
@@ -152,7 +153,8 @@ inline Register4f Cross3(Register4f a, Register4f b) noexcept {
     return Register4f{{yz - zy, zx - xz, xy - yx, 0.0f}};
 }
 
-// (x, y, z, w) 순서 quaternion의 Hamilton 곱 a*b다. 열 벡터 회전에서 b를 먼저, a를 나중에 적용한다.
+// (x, y, z, w) 순서 quaternion의 Hamilton 곱 a*b다. 회전으로는 b를 먼저, a를 나중에
+// 적용한다(UE FQuat 곱과 같은 식·순서).
 // 누적 순서: ((aw*b + ax*[bw,-bz,by,-bx]) + ay*[bz,bw,-bx,-by]) + az*[-by,bx,bw,-bz]
 inline Register4f QuaternionMultiply(Register4f a, Register4f b) noexcept {
     const float bx = b.lane[0];

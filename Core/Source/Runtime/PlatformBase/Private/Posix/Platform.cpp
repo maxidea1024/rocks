@@ -56,19 +56,14 @@ void Mutex::Unlock() noexcept {
     }
 }
 
-uint64 MonotonicNanoseconds() noexcept {
-    timespec time{};
-    if (clock_gettime(CLOCK_MONOTONIC, &time) != 0 || time.tv_sec < 0) {
-        Fatal("clock_gettime failed");
-    }
+// 원천은 OS hook이 고른다(Apple mach_absolute_time, Android CLOCK_MONOTONIC). ns 변환
+// (MonotonicNanoseconds)은 플랫폼 공통 Private/Common/Clock.cpp가 이 두 값으로 한다.
+uint64 MonotonicTicks() noexcept {
+    return detail::PosixMonotonicTicks();
+}
 
-    // 초를 ns로 바꾸기 전에 상한을 검사한다. 실패 시 wrap된 deadline을 반환하지 않는다.
-    const uint64 seconds = static_cast<uint64>(time.tv_sec);
-    if (seconds > (NumericLimits<uint64>::Max() - 999999999) / 1000000000) {
-        Fatal("Monotonic clock overflow");
-    }
-
-    return seconds * 1000000000 + static_cast<uint64>(time.tv_nsec);
+uint64 MonotonicTickFrequency() noexcept {
+    return detail::PosixMonotonicTickFrequency();
 }
 
 int64 UtcTicks() noexcept {

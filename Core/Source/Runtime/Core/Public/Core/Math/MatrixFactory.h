@@ -266,7 +266,8 @@ Result<Matrix4<T>> TryMakeLookAt(const Vector3<T>& eye, const Vector3<T>& target
 
 // ---- 기본 affine ----
 
-// 축 회전 행렬이다. 오른손 법칙: 축을 향해 내려다볼 때 양의 각은 반시계 방향.
+// 축 회전 행렬이다. 양의 각(라디안)은 같은 축의 Quaternion 축-각과 같은 회전이다(UE와 같은 왼손
+// 양의 각: 축의 + 끝에서 내려다볼 때 시계 방향 — MakeRotationZ(+90°)는 Forward를 Right로 보낸다).
 template <typename T>
 Matrix4<T> MakeRotationX(T radians) noexcept {
     const T sine = math::Sin(radians);

@@ -191,9 +191,14 @@ clang-cl `/W4 /WX`(`/Od`·`/O2`)와 GNU식 `-Wall -Wextra -Wpedantic -Werror`(`-
 
 ## 4. 동기 API — `Compression/Compression.h`
 
-모듈 `Compression`(Core 계층, `Core/Source/Runtime/Compression`)이다. RequiredModules는 `Core`·`Task`와 ThirdParty `Lz4`·
-`Zstd`·`Zlib`·`Brotli`다. Core 모듈에 외부 의존이 생기지 않고, 비동기 API가 Task를 쓸 수 있다. 정적 링크이므로 동기 API만 쓰는
-모듈(예: AssetTools PNG)은 Task의 object를 링크하지 않는다.
+모듈 `Compression`(Core 계층, `Core/Source/Runtime/Compression`)이다. RequiredModules는 `Core`와 ThirdParty `Lz4`·
+`Zstd`·`Zlib`·`Brotli`다. Core 모듈에 외부 의존이 생기지 않는다.
+
+WorkerScheduler(Task) 위의 비동기 API(5절)와 블록 컨테이너의 병렬 API(9절)는 모듈 `AsyncCompression`
+(`Core/Source/Runtime/AsyncCompression`, RequiredModules `Core`·`Task`·`Compression`)이다(2026-11-17 분리). Task 모듈이 trace 수집
+(TraceCapture)을 쓰고 TraceCapture가 Compression을 쓰므로, Compression은 Task보다 아래 계층이어야 한다([trace](TraceSystem.ko.md) 3절).
+AsyncCompression은 동기 경로와 같은 코덱·블록 인코딩을 쓰려고 Compression의 내부 헤더(`Compression/Private`의
+`CompressionInternal.h`·`CompressedBlocksInternal.h`)를 Private 구현에서만 include한다.
 
 ```cpp
 namespace rocks {
@@ -350,7 +355,7 @@ public:
   (window 이하) + Huffman 표(최악 약 2.6MiB)이고, ring buffer를 늘리는 순간 최고 약 1.5 × window + 표다(13.3절). 정확한 값은
   테스트의 계수 allocator로 기록한다.
 
-## 5. 비동기 API — `Compression/AsyncCompression.h`
+## 5. 비동기 API — `AsyncCompression/AsyncCompression.h`
 
 ```cpp
 namespace rocks {
@@ -570,7 +575,9 @@ frame 하나로 압축·해제한다. 사전은 학습하지 않은 raw 내용(�
 큰 데이터를 고정 크기 블록으로 나눠 각각 압축하고, 임의 위치를 필요한 블록만 해제해 읽는다(Godot
 `FileAccessCompressed`, UE `FCompressedBuffer`·`FCompressedBufferReader` 대응). 블록이 독립이라 병렬 압축·해제가 되고,
 블록마다 저장 byte의 CRC로 무결성을 확인한다(LZ4·Deflate raw처럼 체크섬이 없는 코덱도 보호). 헤더는
-`Compression/CompressedBlocks.h`다.
+`Compression/CompressedBlocks.h`이고, 병렬 압축·읽기(WorkerScheduler)는 AsyncCompression 모듈의
+`AsyncCompression/ParallelCompressedBlocks.h`다(4절). 병렬 읽기는 reader 멤버가 아니라 자유 함수
+`TryReadCompressedBlocks(scheduler, reader, …)`다.
 
 ### 9.1 영속 형식 RCBK v2
 
@@ -654,7 +661,7 @@ frame 하나로 압축·해제한다. 사전은 학습하지 않은 raw 내용(�
   - `TryRead(rawOffset, destination, stored, storedBase, context, verify = true)`: stored는 컨테이너의 [storedBase, +크기)
     byte다. 필요한 범위를 내부에서 다시 계산해 stored 안에 있는지 확인한다(호출자가 준 범위를 믿지 않는다). 메모리 전체
     컨테이너 편의 overload는 storedBase 0이다. rawSize를 넘는 읽기는 InvalidArgument, 0byte 읽기는 빈 성공이다.
-  - `TryRead(scheduler, …)`: 큰 범위 병렬 해제(블록 범위 job, 블록은 destination에 바로 해제). 걸치는 끝 블록만 job별
+  - `TryReadCompressedBlocks(scheduler, reader, …)`: 큰 범위 병렬 해제(블록 범위 job, 블록은 destination에 바로 해제). 걸치는 끝 블록만 job별
     임시 버퍼를 쓴다.
   - `TryVerify(stored, storedBase)`: 해제 없이 모든 블록 저장 byte의 CRC를 확인한다.
 - `CompressedBlocksReadContext`: 스레드마다 하나. 같은 형식의 Decompressor, 블록 크기 버퍼 하나, 마지막으로 해제한

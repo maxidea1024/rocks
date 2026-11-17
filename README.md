@@ -19,7 +19,7 @@ C++23 기반 멀티플랫폼 3D 게임 엔진 프로젝트.
 
 ```text
 Core/        기반 라이브러리(엔진 아님): Base·PlatformBase·Core·Task·Compression·Crypto·Serialization·MetaSchema·
-             Localization·ObjectRuntime·ObjectSerialization·ReflectionText (Source/Runtime/<모듈>),
+             Localization·ObjectRuntime·ObjectSerialization·ReflectionText·Config (Source/Runtime/<모듈>),
              고정 버전 외부 라이브러리 원본(Source/ThirdParty/<Lib>: LZ4·zstd·zlib·Brotli·libsodium)
 Engine/      게임 엔진 계층(World·Renderer·Gameplay·Editor, 단계적으로 채움)과 엔진 플러그인
 Programs/    실행 프로그램: 테스트 실행 파일·Commandlet(C++), 빌드·메타·검사 도구(C#)
@@ -48,6 +48,7 @@ dotnet msbuild Rocks.proj /t:Test /p:Configuration=Debug /p:RocksTarget=Foundati
 - [Clang 생성 Reflection](Docs/Implementation/ReflectionMetadata.ko.md)
 - [Archive·Record·객체 그래프 직렬화](Docs/Implementation/Serialization.ko.md)
 - [WorkerScheduler 수명·종료 계약](Docs/Implementation/WorkerScheduler.ko.md)
+- [렌더 기반 구현 범위와 계약](Docs/Implementation/RenderBase.ko.md)
 - [저장소 구성](Docs/Design/RepositoryLayout.ko.md)
 - [전체 구현 계획](Docs/Design/EngineImplementationPlan.ko.md)
 - [Core·Object·Input 상세 구현 계획](Docs/Design/CoreObjectInputDetailedPlan.ko.md)

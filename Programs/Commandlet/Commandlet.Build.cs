@@ -13,6 +13,7 @@ public sealed class CommandletHost : ModuleRules
             ? context.Sources("Programs/Commandlet/Private/Common")
             : context.Sources("Programs/Commandlet/Private/Common", $"Programs/Commandlet/Private/{context.PlatformDirectory}"),
         PrivateIncludeDirectories = [context.PathInRoot("Programs/Commandlet/Private/Common")],
-        Dependencies = ["Core"]
+        // TraceAnalysis(Developer): trace-report 명령. Commandlet은 도구(Program) 타깃이라 Developer 모듈을 링크해도 된다.
+        Dependencies = ["Core", "TraceAnalysis"]
     };
 }

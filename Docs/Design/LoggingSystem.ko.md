@@ -20,7 +20,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론)의 현재 기본 경로다. 경�
 
 UE의 매크로 중심 API(`UE_LOG`, `DECLARE_LOG_CATEGORY_*`)는 따르지 않는다. 일반 로그는 함수 호출로 쓴다. 메시지 템플릿과 출력 레이아웃은 Serilog·log4j의 개념을 Rocks 이름으로 가져온다. UE 이름은 대응표(4절)에만 둔다.
 
-상태: **설계 확정**(결정 L1–L12 확정, L13 사용자 확인 대기, 17절). 단계는 14절이다. 다른 세션과의 순서는 15절이다.
+상태: **설계 확정**(결정 L1–L13, 17절). 단계는 14절이다. 다른 세션과의 순서는 15절이다.
 
 ## 1. 결정 요약
 
@@ -347,10 +347,11 @@ public:
 };
 ```
 
+- **보안 목표:** 완벽한 보안이 아니다. 사용자가 파일을 열어 읽을 수 없으면 된다. 풀려도 된다(사용자 확인). 그래서 그 이상의 강화는 하지 않는다: 키 회전, 보낸 쪽 서명, 안전 삭제, 메타데이터(파일 크기·시각) 은닉.
 - 구현 `crypto::LogFileSealer`는 Crypto 모듈에 둔다(Crypto는 Core 위). 자체 암호 구현은 없다.
   - **파일 키:** 파일마다 Crypto KEM(X-Wing, `Kem.h`)으로 개발자 **공개키**에 캡슐화한 공유 비밀에서 KDF 타입 파생으로 `SecretStreamKey`를 뽑는다. 파일 머리에는 KEM 암호문과 secretstream header를 둔다.
   - 게임 바이너리에는 공개키만 들어간다. 그래서 바이너리를 분석해도 기존 파일을 열 수 없다. 여는 쪽은 개인키를 가진 개발자 도구뿐이다.
-  - "사용자가 알아볼 수 없는 수준"이라는 요구보다 강하다. 그래도 고른 이유는 비용이 같기 때문이다. 파일당 KEM 한 번이고, 기록당 비용은 대칭 봉인뿐이다. 고정 키를 바이너리에 숨기는 방식(L13 대안)보다 키 관리가 단순하다.
+  - "사용자가 알아볼 수 없는 수준"이라는 요구보다 강하다. 그래도 고른 이유는 비용이 같기 때문이다. 파일당 KEM 한 번이고, 기록당 비용은 대칭 봉인뿐이다. 고정 키를 바이너리에 숨기는 방식(L13 대안)보다 키 관리가 단순하다(L13 결정).
   - **봉인 단위:** flush 묶음 하나가 secretstream 메시지 하나다(tag `Message`, 정상 종료 때 `Final`). 묶음당 17 byte가 늘어난다. 비정상 종료로 `Final`이 없는 파일도 마지막으로 쓴 묶음까지 복호된다. 복호 도구는 "끝 표시 없음(비정상 종료)"을 알린다.
   - 봉인은 출력 스레드에서 한다(Async). 메인 틱 비용은 0이다. Sync 모드(도구)에서는 호출 스레드가 낸다. 출력 버퍼는 Start에서 확보한다. 키 상태는 Crypto 키 저장소 슬롯에 있고 파일을 열 때 한 번 만든다.
   - 암호화를 켰는데 키 준비(KEM·키 저장소)에 실패하면 **평문으로 내려가지 않는다.** 파일 sink를 끄고 비상 경로로 한 번 알린다(P3: 엔진은 계속 실행, 민감 로그는 평문으로 남지 않음).
@@ -455,8 +456,8 @@ Result<UniquePtr<Device>> CreateD3D12Device(Allocator&, const DeviceDesc&, Devic
 |---|---|---|---|
 | LG0 | 이 문서 | — | 교차 검증 반영 |
 | LG1 | `LogLevel`(Debug·Fatal), `LogCategory`(접두사 해시), `SourceLocation`, 기록 모델(속성·문맥·프레임·스레드 이름), Logger·sink의 `uint32` 카테고리 교체(`AesModes.cpp` 포함), Base 캐시 라인 상수. **`LogBuffer`·`ProfileScope`의 카테고리 타입은 그대로 둔다**(15절) | LG0 | 기존 Logger·LogBuffer·ProfileScope·LoggerOutputTests 통과 |
-| LG2 | 공용 `constexpr` 서식 파서·이름 자리, `FixedStringBuilder`(잘림 모드), `LogTemplate` 검증, 위치 수집 시험, EventId, 값 캡처 인코딩, Lazy, 컴파일 실패 시험 체계(Rocks.ToolTests가 clang-cl `-fsyntax-only`) | LG1 | 템플릿·위치(TU 2개)·Lazy 0회/1회·잘림·컴파일 실패 시험 |
-| LG3 | `BoundedMpscQueue`, 블록 풀, 준비 버퍼, `LogSystem`(Async·Sync·Manual 모드, 프리셋, 출력 스레드·깨우기·Pump·Flush·포화·sink 명령·통계), fan-out 재작성, 세대 카운터 `LogInstallScope`, `platform::WriteDiagnostic`·`TryUtcTicks`, 설치 전후 경로, 장애 격리, `Log::Fatal`·`AssertFailed` | LG2 | 큐 스트레스·포화·wrap·멈춘 생산자 결정적 시험, **무할당 시험**(호출 수 세는 할당기로 Start 뒤 0회), 깨우기 유실 없음, 해제 기아 없음, Sync와 Manual의 출력 동일·Sync 무할당, 장애 주입, TSan·Asan, 호출 비용 측정 보고 |
+| LG2 | 공용 `constexpr` 서식 파서·이름 자리, `FixedStringBuilder`(잘림 모드), `LogTemplate` 검증, 위치 수집 시험, EventId, 값 캡처 인코딩과 렌더(왕복), 컴파일 실패 시험 체계(Rocks.ToolTests가 clang-cl `-fsyntax-only`) | LG1 | 템플릿·위치(TU 2개)·캡처 왕복·잘림·컴파일 실패 시험 |
+| LG3 | `Log::*` 진입 함수와 Lazy, `BoundedMpscQueue`, 블록 풀, 준비 버퍼, `LogSystem`(Async·Sync·Manual 모드, 프리셋, 출력 스레드·깨우기·Pump·Flush·포화·sink 명령·통계), fan-out 재작성, 세대 카운터 `LogInstallScope`, `platform::WriteDiagnostic`·`TryUtcTicks`, 설치 전후 경로, 장애 격리, `Log::Fatal`·`AssertFailed` | LG2 | 큐 스트레스·포화·wrap·멈춘 생산자 결정적 시험, **무할당 시험**(호출 수 세는 할당기로 Start 뒤 0회), Lazy 0회/1회, 깨우기 유실 없음, 해제 기아 없음, Sync와 Manual의 출력 동일·Sync 무할당, 장애 주입, TSan·Asan, 호출 비용 측정 보고 |
 | LG4 | 레이아웃 해석기, Text·Stderr sink 개편(묶음 flush), `JsonWriter` 옵션(한 줄·고정 frame·중복 색인 끔)·`JsonLinesLogSink`, `DateTime` 고정 폭 밀리초, `LogContextScope` | LG3 | 토큰별 결정적 출력, 잘못된 패턴 실패, JSON 왕복, 무할당 |
 | LG5 | `ROCKS_LOG_COMPILED_MINIMUM`, toolchain 단 `/clang:-ffile-prefix-map=`, Release 문자열 제외 검사, 템플릿 비ASCII 정책 검사 | LG2 | 구성별 빌드, 최종 링크 결과 검사 |
 | LG6 | Engine·World 적용(13절) | LG4, **15절 조건** | 단계별 실패 주입 → Stage, 파괴 지연 1000프레임 → Warning 정확히 1회·해소 Info 1회 |
@@ -519,7 +520,7 @@ Result<UniquePtr<Device>> CreateD3D12Device(Allocator&, const DeviceDesc&, Devic
 | L10 | 하위 호환 없음: `uint32` 카테고리·`LogFilter`·기존 출력 형식을 바로 교체 | 결정됨(2026-11-17, 초기 단계 원칙) |
 | L11 | 비동기는 선택 사항이다. 명령줄 도구는 기본 Sync, tick이 있는 엔진 호스트(게임·에디터)는 기본 Async이며, 설정 파일 `log.mode`로 동기·비동기를 고른다(시작 뒤 고정) | 결정됨(2026-11-17, 사용자 지시) |
 | L12 | 파일 기록 암호화는 선택이고 **기본은 끔**이다(`log.file.encrypt`). 켜면 Crypto `SecretStream`으로 flush 묶음 단위로 봉인한다. 키 준비에 실패하면 평문으로 내려가지 않고 파일 sink를 끈다 | 결정됨(2026-11-17, 사용자 지시) |
-| L13 | 파일 키는 파일마다 개발자 공개키로 KEM(X-Wing) 캡슐화한다. 바이너리에는 공개키만 들어간다. 대안은 바이너리에 고정 대칭키를 숨기는 것이다(요구 수준은 충족하지만 바이너리 분석으로 풀린다) | 권장안 — 사용자 확인 대기(LG10 착수 전) |
+| L13 | 파일 키는 파일마다 개발자 공개키로 KEM(X-Wing) 캡슐화한다. 바이너리에는 공개키만 들어간다. 대안은 바이너리에 고정 대칭키를 숨기는 것이다(요구 수준은 충족하지만 바이너리 분석으로 풀린다) | 결정됨(2026-11-17, 사용자 확인 — 권장안) |
 
 ## 18. 개정 이력
 

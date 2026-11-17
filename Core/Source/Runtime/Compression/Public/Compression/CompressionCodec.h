@@ -20,7 +20,7 @@
 //
 // 지원 범위:
 // - 일회성 압축·해제(TryCompress·TryCompressAppend·TryDecompress·TryDecompressAppend),
-//   Compressor·Decompressor, 비동기 제출(AsyncCompression.h), 수준 범위·
+//   Compressor·Decompressor, 비동기 제출(AsyncCompression/AsyncCompression.h), 수준 범위·
 //   CompressionSettings·TryGetCompressBound.
 // - 스트림(CompressStream·DecompressStream)과 사전(CompressionDictionary.h)은 Unsupported,
 //   블록 컨테이너(CompressedBlocks.h, codec ID가 파일에 남는 영속 값)는 InvalidArgument다.

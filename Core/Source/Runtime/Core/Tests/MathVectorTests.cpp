@@ -61,6 +61,56 @@ TEST(MathUtility_UnwindRadiansRange) {
     CHECK(math::IsNaN(math::UnwindRadians(static_cast<double>(InfinityF))));
 }
 
+TEST(MathUtility_UnwindDegreesMatchesNormalizeAxis) {
+    // UE UnwindDegrees(UnrealMathUtility.h:949-964) 값과 같고, UE가 -180으로 두는 두 입력
+    // (-180, -540)만 반열린 구간 (-180, 180]의 180이다(UE 식 probe).
+    CHECK(math::UnwindDegrees(0.0) == 0.0);
+    CHECK(math::UnwindDegrees(180.0) == 180.0);
+    CHECK(math::UnwindDegrees(-180.0) == 180.0);
+    CHECK(math::UnwindDegrees(190.0) == -170.0);
+    CHECK(math::UnwindDegrees(-190.0) == 170.0);
+    CHECK(math::UnwindDegrees(540.0) == 180.0);
+    CHECK(math::UnwindDegrees(-540.0) == 180.0);
+    CHECK(math::UnwindDegrees(725.0) == 5.0);
+    CHECK(math::UnwindDegrees(359.5) == -0.5);
+    CHECK(math::UnwindDegrees(-1.0e-20) == -1.0e-20);
+    CHECK(math::UnwindDegrees(370.0f) == 10.0f);
+    CHECK(math::IsNaN(math::UnwindDegrees(static_cast<double>(InfinityF))));
+    CHECK(math::IsNaN(math::UnwindDegrees(NaNF)));
+    // 최소 각 차이(UE FindDeltaAngleDegrees 대응).
+    CHECK(math::FindDeltaAngleDegrees(170.0, -170.0) == 20.0);
+    CHECK(math::FindDeltaAngleDegrees(-170.0, 170.0) == -20.0);
+    CHECK(math::FindDeltaAngleDegrees(10.0, 190.0) == 180.0);
+}
+
+TEST(MathUtility_FastAsinMatchesUnrealBits) {
+    // UE FMath::FastAsin(float)(UnrealMathUtility.h:819-847)을 옮긴 probe의 bit 값과 정확히
+    // 같다. 사칙·sqrt만 쓰므로 IEEE 플랫폼에서 결정적이다.
+    struct Case {
+        float input;
+        uint32 bits;
+    };
+
+    const Case cases[] = {{0.5f, 0x3f060a92u},  {-0.5f, 0xbf060a92u}, {0.25f, 0x3e815f50u},
+                          {0.9f, 0x3f8f549bu},  {-0.9f, 0xbf8f549bu}, {1.0f, 0x3fc90fdau},
+                          {-1.0f, 0xbfc90fdau}, {1.5f, 0x3fc90fdau},  {0.999f, 0x3fc3564fu}};
+    for (const Case& item : cases) {
+        CHECK(platform::BitCast<uint32>(math::FastAsin(item.input)) == item.bits);
+    }
+
+    CHECK(math::FastAsin(0.0f) == 0.0f);
+    CHECK(math::IsNaN(math::FastAsin(NaNF)));
+    // 근사 오차: [-1, 1] 전 구간에서 2.3e-7 rad 이하(1e-6 간격 전수 최대 2.22e-7).
+    for (int step = -10000; step <= 10000; ++step) {
+        const float value = static_cast<float>(step) / 10000.0f;
+        CHECK(Near(static_cast<double>(math::FastAsin(value)),
+                   math::Asin(static_cast<double>(value)), 2.3e-7));
+    }
+
+    // double은 UE와 같이 근사 없는 Asin이다.
+    CHECK(math::FastAsin(0.3) == math::Asin(0.3));
+}
+
 TEST(MathUtility_ConversionsForwardToPlatform) {
     CHECK(math::FloorToInt32(-1.5f) == -2);
     CHECK(math::CeilToInt32(-1.5) == -1);
@@ -71,12 +121,24 @@ TEST(MathUtility_ConversionsForwardToPlatform) {
     CHECK(math::TryRoundToInt32(1.5, output) && output == 2);
 }
 
-TEST(Vector3_AxisConventionIsRightHandedZUpXForward) {
-    CHECK(Cross(Vec3::Forward(), Vec3::Left()) == Vec3::Up());
-    CHECK(Cross(Vec3::Left(), Vec3::Up()) == Vec3::Forward());
-    CHECK(Cross(Vec3::Up(), Vec3::Forward()) == Vec3::Left());
-    CHECK(Vec3::Right() == Vec3(0.0f, -1.0f, 0.0f));
+TEST(Vector3_AxisConventionMatchesUnreal) {
+    // UE 5.8 방향 상수(Vector.h:84-100, UnrealMath.cpp:35-51)와 정확히 같다.
+    CHECK(Vec3::Forward() == Vec3(1.0f, 0.0f, 0.0f));
+    CHECK(Vec3::Backward() == Vec3(-1.0f, 0.0f, 0.0f));
+    CHECK(Vec3::Right() == Vec3(0.0f, 1.0f, 0.0f));
+    CHECK(Vec3::Left() == Vec3(0.0f, -1.0f, 0.0f));
+    CHECK(Vec3::Up() == Vec3(0.0f, 0.0f, 1.0f));
     CHECK(Vec3d::Down() == Vec3d(0.0, 0.0, -1.0));
+    // UE operator^(Vector.h:1521-1530) golden(UE 식 probe): X^Y = Z, Y^Z = X, Z^X = Y,
+    // Forward^Right = Up, Right^Forward = Down. 축 단위 벡터라 반올림 없이 정확하다.
+    CHECK(Cross(Vec3::UnitX(), Vec3::UnitY()) == Vec3::UnitZ());
+    CHECK(Cross(Vec3::UnitY(), Vec3::UnitZ()) == Vec3::UnitX());
+    CHECK(Cross(Vec3::UnitZ(), Vec3::UnitX()) == Vec3::UnitY());
+    CHECK(Cross(Vec3::Forward(), Vec3::Right()) == Vec3::Up());
+    CHECK(Cross(Vec3::Right(), Vec3::Forward()) == Vec3::Down());
+    CHECK(Cross(Vec3d::Right(), Vec3d::Up()) == Vec3d::Forward());
+    CHECK(Cross(Vec3d::Up(), Vec3d::Forward()) == Vec3d::Right());
+    CHECK(Cross(Vec3d::Forward(), Vec3d::Left()) == Vec3d::Down());
     // 외적은 반대칭이다.
     const Vec3d a(1.25, -2.0, 3.5);
     const Vec3d b(-0.5, 4.0, 0.75);
@@ -155,8 +217,8 @@ TEST(Vector3_ProjectionReflectionAndAngle) {
     REQUIRE(projected);
     CHECK(projected.Value() == Vec3d(0.0, 4.0, 0.0));
     CHECK(!TryProjectOnto(v, Vec3d::Zero()));
-    CHECK(Reflect(Vec3d(1.0, -1.0, 0.0), Vec3d::Left()) == Vec3d(1.0, 1.0, 0.0));
-    auto right = TryAngleBetween(Vec3d::Forward(), Vec3d::Left());
+    CHECK(Reflect(Vec3d(1.0, -1.0, 0.0), Vec3d::Right()) == Vec3d(1.0, 1.0, 0.0));
+    auto right = TryAngleBetween(Vec3d::Forward(), Vec3d::Right());
     REQUIRE(right);
     CHECK(Near(right.Value(), math::HalfPi<double>, 1.0e-15));
     auto opposite = TryAngleBetween(Vec3d::Up(), Vec3d::Down());

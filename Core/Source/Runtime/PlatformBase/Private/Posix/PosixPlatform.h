@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Base/Types.h>
+#include <Platform/Thread.h>
 
 #include <pthread.h>
 #include <sys/stat.h>
@@ -22,11 +23,24 @@ int PosixFullSync(int descriptor) noexcept;
 // 현재 스레드의 OS 식별 값이다(Apple pthread_threadid_np, Android gettid).
 uint64 PosixThreadId() noexcept;
 
+// 단조 시계의 원시 tick이다(Apple mach_absolute_time, Android CLOCK_MONOTONIC의 ns). 실패는 Fatal.
+uint64 PosixMonotonicTicks() noexcept;
+
+// PosixMonotonicTicks의 초당 tick 수다(Apple timebase에서 구한 값, Android 10^9). 실패는 Fatal.
+uint64 PosixMonotonicTickFrequency() noexcept;
+
 // 조건 변수를 시스템 시각 변경에 영향받지 않는 시한 대기가 가능하도록 초기화한다. 실패는 Fatal.
 void PosixInitializeCondition(pthread_cond_t* condition) noexcept;
 
 // timeoutMs 동안 기다린다. pthread 오류 코드(0, ETIMEDOUT 등)를 그대로 반환한다.
 int PosixTimedWait(pthread_cond_t* condition, pthread_mutex_t* mutex, uint32 timeoutMs) noexcept;
+
+// 현재 스레드에 이름을 붙인다(Apple은 자기 스레드만 가능, Linux 계열은 15 byte로 자른다). name은
+// Thread::Start가 검사한 비어 있지 않은 UTF-8이다. 실패는 무시한다(이름은 힌트).
+void PosixSetCurrentThreadName(const char* name) noexcept;
+
+// 현재 스레드의 우선순위를 바꾼다(Apple SCHED_OTHER 우선순위, Android nice). 실패는 무시한다.
+void PosixSetCurrentThreadPriority(ThreadPriority priority) noexcept;
 
 // decommit한 페이지를 OS에 돌려주는 madvise 값이다(Apple MADV_FREE, Linux 계열 MADV_DONTNEED).
 int PosixDecommitAdvice() noexcept;

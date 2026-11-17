@@ -1,5 +1,4 @@
 #include <TestSupport/Test.h>
-#include <Core/Diagnostics/ProfileScope.h>
 #include <Core/Function.h>
 #include <Core/Lifetime/ModuleLease.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -107,19 +106,4 @@ TEST(ModuleLease_ReentrantOldReleaseDoesNotLoseReplacement) {
     CHECK(!prepared);
     target.Reset();
     CHECK(preparedState.references == 0);
-}
-
-TEST(Diagnostics_ProfilePreservesNameTruncationFlag) {
-    LogBuffer buffer;
-    char name[200];
-    for (usize i = 0; i + 1 < sizeof(name); ++i) {
-        name[i] = 'x';
-    }
-    name[sizeof(name) - 1] = '\0';
-    {
-        ProfileScope profile(buffer, name);
-    }
-    REQUIRE(buffer.Size() == 2);
-    CHECK(buffer.At(0)->truncated);
-    CHECK(buffer.At(1)->truncated);
 }

@@ -851,7 +851,7 @@ while (!pending.IsEmpty()) {
 
 - `AsyncCrypto.h`: `TrySubmitSegmentEncrypt`·`TrySubmitSegmentDecrypt`는 큰 버퍼를 세그먼트 단위로 쪼개 WorkerScheduler에서 병렬로 처리한다. 봉인은 `SegmentStreamParallelWriter`, 복호는 `SegmentStreamRandomAccess`의 const 함수를 쓴다. 세그먼트들은 헤더를 공유할 뿐 서로 독립이므로, salt를 고정한 시험에서 결과 byte는 동기 API와 같다.
 - `AsyncFile` 읽기 완료 → 세그먼트 복호를 의존 작업으로 잇는다(Compression 5절과 같은 형태). 취소는 세그먼트 경계에서 확인한다. 실패·취소된 작업은 2절 규칙대로 출력 전체를 지운다.
-- 출력 버퍼의 할당기·수명·취소·용량 계약은 `AsyncCompression.h`의 규약을 따른다. 키 의존 상태는 9.1절대로 SecretArena에 있다.
+- 출력 버퍼의 할당기·수명·취소·용량 계약은 `AsyncCompression/AsyncCompression.h`의 규약을 따른다. 키 의존 상태는 9.1절대로 SecretArena에 있다.
 
 구현(C4, 2026-11-15):
 

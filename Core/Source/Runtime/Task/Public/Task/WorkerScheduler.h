@@ -3,6 +3,7 @@
 #include <Core/Containers/Span.h>
 #include <Core/Function.h>
 #include <Platform/Thread.h>
+#include <Task/TaskLane.h>
 
 namespace rocks {
 namespace detail {
@@ -68,7 +69,9 @@ public:
     // 아직 worker가 꺼내지 않은(Pending) 작업을 호출 스레드에서 바로 회수해 Cancelled로 끝낸다.
     // body는 실행하지 않고 capture·dependency 보존분은 이 스레드가 정리한다(gate 밖). worker가 비지
     // 않아도 끝나므로, 호출 스레드가 모든 일을 마친 뒤 남은 helper 작업을 기다리지 않을 때 쓴다.
-    // 회수했으면 true, 이미 실행 중이거나 끝났으면 false(아무것도 바꾸지 않는다)다. 이 작업에
+    // 회수했으면 true, 이미 실행 중이거나 끝났거나 순서 전용 선행(WorkerSubmitOptions)이 아직
+    // 끝나지 않았으면 false(아무것도 바꾸지 않는다)다. 순서 대기 중인 작업을 멈추려면
+    // RequestCancel을 쓴다 (선행이 끝난 뒤 body 없이 Cancelled로 끝난다). 이 작업에 일반 선행으로
     // 의존한 작업은 RequestCancel과 같이 DependencyFailed가 된다. invalid handle은 StaleHandle이다.
     //
     // 사용 예:
@@ -161,6 +164,26 @@ struct WorkerSchedulerConfig {
     WorkerThreadLauncher launch = nullptr;
     void* launchContext = nullptr;
 };
+// Submit의 추가 옵션이다.
+//
+// 사용 예(앞 작업의 성공 여부와 무관하게 그 뒤에 실행):
+//   WorkerSubmitOptions options;
+//   options.orderDependencies = Span<const WorkerTaskHandle>(&previous, 1);
+//   options.lane = TaskLane::Render;
+//   auto next = scheduler.Submit(Move(body), {}, options);
+struct WorkerSubmitOptions {
+    // 순서 전용 선행이다. 모두 끝난 뒤(terminal)에만 실행하되 결과(실패·취소·회수)는 보지 않는다
+    // (UE FPipe처럼 "앞 작업이 끝난 뒤"만 보장, SerialTaskChain이 쓴다). 취소 요청·일반 선행 실패로
+    // body 없이 끝나는 경우도 순서 전용 선행이 모두 끝난 뒤에야 정리·terminal이 된다. 그 전에는
+    // TryRevoke도 false다. 일반 선행과 같은 검사(같은
+    // scheduler·같은 세대·중복 없음)를 받고, 일반 선행과 같은 handle을 넣으면 InvalidArgument다. 두
+    // 목록의 합이 maxDependencies를 넘으면 CapacityExceeded다. Submit 호출 동안만 읽는다.
+    Span<const WorkerTaskHandle> orderDependencies;
+    // body와 capture 정리 동안 CurrentTaskLane()이 돌려줄 lane 표지다. TaskLane 범위 밖 값은
+    // InvalidArgument다. TryRevoke로 호출 스레드가 capture를 정리할 때는 표지를 바꾸지 않는다.
+    TaskLane lane = TaskLane::Worker;
+};
+
 enum class WorkerShutdownMode {
     Drain,
     Cancel
@@ -190,9 +213,10 @@ public:
     // 소비한다. 같은 Start 세대의 기존 handle만 허용하므로 새 node에서 기존 node로의 DAG만
     // 생성된다. 중복/invalid dependency는 InvalidArgument, 다른 scheduler/이전 세대는
     // WrongContext다. dependency 실패·취소는 body 없이 DependencyFailed다. 모든 거부/OOM은 caller
-    // body를 보존한다.
+    // body를 보존한다. options의 순서 전용 선행·lane 표지는 WorkerSubmitOptions를 따른다.
     Result<WorkerTaskHandle> Submit(Function<void(WorkerTaskContext&)>&& body,
-                                    Span<const WorkerTaskHandle> dependencies = {}) noexcept;
+                                    Span<const WorkerTaskHandle> dependencies = {},
+                                    const WorkerSubmitOptions& options = {}) noexcept;
     // 외부 완료 이벤트를 만든다(WorkerTaskEvent). 실패: 시작 전·종료 중 ShuttingDown, maxInFlight
     // 초과 CapacityExceeded, 할당 실패는 그 오류다.
     Result<WorkerTaskEvent> TryCreateEvent() noexcept;

@@ -93,18 +93,19 @@ struct QuatdBinding {
     ROCKS_PROPERTY() double w = 1;
 };
 
-// 회전은 yaw·pitch·roll 라디안이다(UE FRotator는 pitch·yaw·roll 도 — UE 데이터 반입 때 변환한다).
+// 회전은 pitch·yaw·roll 도(degree)다. UE FRotator와 필드 순서·단위·의미가 같다
+// (Core/Math/Rotator.h).
 ROCKS_STRUCT(Binds = "rocks::Rotator<float>", Atomic, Version = 1)
 struct RotatorBinding {
-    ROCKS_PROPERTY() float yaw = 0;
     ROCKS_PROPERTY() float pitch = 0;
+    ROCKS_PROPERTY() float yaw = 0;
     ROCKS_PROPERTY() float roll = 0;
 };
 
 ROCKS_STRUCT(Binds = "rocks::Rotator<double>", Atomic, Version = 1)
 struct RotatordBinding {
-    ROCKS_PROPERTY() double yaw = 0;
     ROCKS_PROPERTY() double pitch = 0;
+    ROCKS_PROPERTY() double yaw = 0;
     ROCKS_PROPERTY() double roll = 0;
 };
 

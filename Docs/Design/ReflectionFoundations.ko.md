@@ -122,6 +122,8 @@
 
 리플렉션 B9가 STRUCT `Atomic`(통째 단위, struct base에서 상속), CLASS `Transient`·`Deprecated`(상속, 저장 불가 객체)·`Within="…"`, CLASS·STRUCT `Name="…"`(B9d2에서 구현 — 타입 도구 이름, 기본은 한정하지 않은 C++ 이름, 모듈과 import 범위에서 대소문자 무시로 유일 RMC2203)를 더한다(RX 3.1·5.2·9.2절).
 
+설정 계층(CF1)이 STRUCT `Settings(Branch="…", Section="…")`(설정 struct — branch 파일의 섹션 하나, 생성 `GeneratedType<S>::Settings()`가 `SettingsSchema`를 낸다)를 더한다. 괄호 안 지정자 목록(묶음 값)은 이 지정자만 받는다([설정 계층](ConfigSystem.ko.md) 7절, RMC2210).
+
 버전 규칙: 버전은 그 타입 Record의 해석 규칙이다. 영속 필드의 의미·형식이 바뀌면 올리고 마이그레이션을 등록한다. base의 버전은 파생 Record에 기록되지 않으므로 base의 영속 배치를 바꾸면 파생 타입들도 버전을 올린다(MetaCompiler는 강제하지 않는다 — 배치 지문 비교는 후속 후보). 필드 추가만 한 경우의 누락은 정책이 아니라 A0-O의 형식 규칙으로 허용된다(Oc가 graph v1 envelope 위에서 먼저 넣었고 graph v2가 그대로 갖는다 — [ObjectFoundations](ObjectFoundations.ko.md) 4절) — 빠진 필드·멤버는 기준(클래스 기본값) 값을 뜻한다. 기본값만 바꾸는 것은 버전을 올리지 않고, 기존 인스턴스에 전파하지 않으려 하거나 필드의 의미를 바꾸면 올린다([RuntimeClassMetadata](RuntimeClassMetadata.ko.md) '클래스 기본값 결정').
 
 ### 2.3 필드 지정자
@@ -133,6 +135,8 @@
 | `Required` | 8 | ObjectRef·SoftObjectRef 필드와 그 배열(`ObjectRefArray`·`Array<SoftObjectRef>` — 원소마다 non-null, 5.6절)에만 쓸 수 있다(그 밖은 RMC2202). **패키지 저장·쿠킹에서** null이면 거부한다 — graph 저장 옵션 `rejectMissingRequired`(패키지 저장·쿠킹이 켠다, 스냅샷·복제 같은 다른 저장은 끈다)이 켜져 있으면 InvalidArgument, Soft 대상의 존재 확인은 패키지 저장·쿠킹(A1). **로드는 거부하지 않고** 진단(`RequiredMissing`)만 낸다 — 기존 필드에 `Required`를 붙여도 null을 가진 에셋을 열어 고칠 수 있어야 한다 |
 | `Name="…"` | — | 도구·명령행 이름(`toolName`). ASCII 식별자(`[A-Za-z_][A-Za-z0-9_]*`), 없으면 C++ 필드 이름. 상속 포함 대소문자 무시로 유일해야 한다(RMC2203). 직렬화는 필드 ID라 이름과 무관하다 |
 | `MaxElements=N` | — | 배열 길이 상한(5.5절 — 쓰기·저장에서 건다). 1..1,048,576(밖은 RMC2000), 없으면 65,536. 배열이 아닌 필드는 RMC2202 |
+
+설정 계층(CF1)이 설정 struct 직접 멤버의 설정 지정자 `UserConfig`·`ConsoleName="…"`·`RestartRequired`·`StartupOnly`·`RenderRead`·`DevelopmentOnly`를 더한다(`FieldFlags`가 아니라 `SettingsFieldSchema`에 실린다 — [설정 계층](ConfigSystem.ko.md) 7절, RMC2210·RMC2202). 출시 제외 `ShippingExcluded`는 쿠킹(CF5) 때 더한다.
 
 리플렉션 B9가 `DuplicateTransient`·`NonPIEDuplicateTransient`·`SaveGame`·`TextExportTransient`(전파 없음)를 더하고, Required 허용 범위를 ClassRef와 그 컨테이너(B9d2에서 ClassRef 필드·`Array<ClassRef>` 구현)·참조 정적 배열·ObjectRefMap 값으로 넓히며, Required와 DuplicateTransient 계열의 조합을 거부한다. `MaxElements`는 Map·Set에도 쓴다(RX 9.1·15절).
 

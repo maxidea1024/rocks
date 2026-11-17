@@ -1,7 +1,8 @@
 #include "CompressionDictionaryTestSupport.h"
 
 #include <Base/Endian.h>
-#include <Compression/AsyncCompression.h>
+#include <AsyncCompression/AsyncCompression.h>
+#include <AsyncCompression/ParallelCompressedBlocks.h>
 #include <Compression/CompressedBlocks.h>
 #include <Compression/CompressionDictionary.h>
 #include <Compression/CompressionStream.h>
@@ -435,9 +436,9 @@ TEST(CompressionDictionary_BlockWriterPathsAgree) {
                 REQUIRE(reader);
                 Array<uint8> restored(allocator);
                 REQUIRE(restored.TryResize(original.Size()));
-                REQUIRE(reader.Value().TryRead(scheduler, 0,
-                                               Span<uint8>(restored.Data(), restored.Size()),
-                                               View(oneShot), 0, allocator));
+                REQUIRE(TryReadCompressedBlocks(scheduler, reader.Value(), 0,
+                                                Span<uint8>(restored.Data(), restored.Size()),
+                                                View(oneShot), 0, allocator));
                 CHECK(Same(restored, View(original)));
             }
         }
@@ -483,8 +484,9 @@ TEST(CompressionDictionary_BlockPartialReadsAndIndexBytes) {
             const uint64 from = 5000;
             Array<uint8> out(allocator);
             REQUIRE(out.TryResize((usize{1} << 20) + 777));
-            REQUIRE(reader.Value().TryRead(scheduler, from, Span<uint8>(out.Data(), out.Size()),
-                                           View(container), 0, allocator));
+            REQUIRE(TryReadCompressedBlocks(scheduler, reader.Value(), from,
+                                            Span<uint8>(out.Data(), out.Size()), View(container), 0,
+                                            allocator));
             CHECK(Same(out, Slice(View(original), from, out.Size())));
 
             // 순차 읽기: 블록 세 개에 걸친 부분 읽기.

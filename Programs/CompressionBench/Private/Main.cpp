@@ -1,3 +1,4 @@
+#include <AsyncCompression/ParallelCompressedBlocks.h>
 #include <Compression/CompressedBlocks.h>
 #include <Compression/Compression.h>
 #include <Compression/CompressionDictionary.h>
@@ -438,7 +439,9 @@ int RunBlocks(Span<const uint8> input, uint32 rounds, uint32 workers, Allocator&
                    matches();
         });
         const double parallelReadSeconds = Best(rounds + 2, [&]() {
-            return reader.Value().TryRead(scheduler, 0, destination, stored, 0, allocator).IsOk() &&
+            return TryReadCompressedBlocks(scheduler, reader.Value(), 0, destination, stored, 0,
+                                           allocator)
+                       .IsOk() &&
                    matches();
         });
         if (sequentialSeconds < 0 || parallelSeconds < 0 || readSeconds < 0 ||

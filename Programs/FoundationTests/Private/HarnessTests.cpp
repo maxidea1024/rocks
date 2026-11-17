@@ -1,5 +1,5 @@
 #include <TestSupport/Test.h>
-#include <Core/Diagnostics/ProfileScope.h>
+#include <Core/Diagnostics/LogSink.h>
 #include <Core/Lifetime/ModuleLease.h>
 #include <Core/Memory/SystemAllocator.h>
 
@@ -26,23 +26,17 @@ TEST(Diagnostics_BoundedCaptureReportsLoss) {
     CHECK(buffer.Dropped() == 0);
 }
 
-TEST(Diagnostics_ProfileAndTruncation) {
+// CPU 구간 계측은 TraceCapture CpuScope로 옮겼다(ProfileScope 삭제, TraceSystem 결정 T8).
+TEST(Diagnostics_TruncationIsReported) {
     LogBuffer buffer;
-    {
-        ProfileScope scope(buffer, "work", 2);
-    }
-    REQUIRE(buffer.Size() == 2);
-    CHECK(buffer.At(0)->kind == DiagnosticKind::ScopeBegin);
-    CHECK(buffer.At(1)->kind == DiagnosticKind::ScopeEnd);
-    CHECK(buffer.At(1)->timestamp >= buffer.At(0)->timestamp);
     char longName[200];
     for (usize i = 0; i < sizeof(longName) - 1; ++i) {
         longName[i] = 'x';
     }
     longName[sizeof(longName) - 1] = '\0';
     REQUIRE(buffer.Write(LogLevel::Warning, 0, longName).IsOk());
-    CHECK(buffer.At(2)->truncated);
-    CHECK(buffer.At(2)->text[119] == '\0');
+    CHECK(buffer.At(0)->truncated);
+    CHECK(buffer.At(0)->text[119] == '\0');
 }
 
 TEST(ModuleLease_CopyMoveReleaseExactlyOnce) {

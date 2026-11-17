@@ -38,7 +38,17 @@ const AsyncRequestState& RequestOf(const unsigned char* storage) noexcept {
 }
 
 bool IsInFlight(const AsyncRequestState& request) noexcept {
-    return request.phase == AsyncPhase::Queued || request.phase == AsyncPhase::Running;
+    return request.phase == AsyncPhase::Queued || request.phase == AsyncPhase::Running ||
+           request.phase == AsyncPhase::Held;
+}
+
+// mutex 안에서 결과를 게시한다. 이 뒤로 요청과 파일은 대기자가 파괴할 수 있다.
+void PublishLocked(AsyncContextState& context, AsyncRequestState& request,
+                   const AsyncIoResult& result) noexcept {
+    request.result = result;
+    request.phase = AsyncPhase::Completed;
+    --request.file->pending;
+    --context.pending;
 }
 
 // worker는 큐에서 요청을 꺼내 위치 지정 동기 읽기·쓰기를 수행한다. 취소 표시된 대기 요청은 읽지
@@ -114,17 +124,34 @@ void CompleteAsyncRequest(AsyncRequestState& request, const AsyncIoResult& resul
                 Fatal("AsyncIoContext completion wait failed");
             }
         }
-        if (request.phase == AsyncPhase::Completed || request.phase == AsyncPhase::Idle) {
+        if (request.phase == AsyncPhase::Completed || request.phase == AsyncPhase::Idle ||
+            request.phase == AsyncPhase::Held) {
             Fatal("AsyncIoRequest completed more than once");
         }
+
+        // 보류 중이거나 아직 게시되지 않은 보류 결과가 있으면 목록 뒤에 쌓는다(완료 순서 유지).
+        // 진행 중으로 남으므로 대기자가 요청을 파괴하지 않고, 게시는 ResumeCompletions가 한다.
+        if (context.holds != 0 || context.heldHead != nullptr) {
+            request.result = result;
+            request.phase = AsyncPhase::Held;
+            request.nextQueued = nullptr;
+            if (context.heldTail != nullptr) {
+                context.heldTail->nextQueued = &request;
+            } else {
+                context.heldHead = &request;
+            }
+
+            context.heldTail = &request;
+            ++context.heldCount;
+            return;
+        }
+
         callback = request.callback;
         callbackContext = request.callbackContext;
-        request.result = result;
-        request.phase = AsyncPhase::Completed;
-        --request.file->pending;
-        --context.pending;
+        PublishLocked(context, request, result);
         // 이 지점 이후 요청과 파일은 대기자가 파괴할 수 있으므로 다시 접근하지 않는다.
     }
+
     context.changed.NotifyAll();
     if (callback != nullptr) {
         callback(result, callbackContext);
@@ -236,6 +263,68 @@ FileStatus AsyncIoContext::Shutdown() noexcept {
     return {};
 }
 
+void AsyncIoContext::HoldCompletions() noexcept {
+    AsyncContextState& context = detail::ContextOf(storage_);
+    LockGuard lock(context.mutex);
+    if (context.holds == NumericLimits<uint32>::Max()) {
+        Fatal("AsyncIoContext completion hold count overflow");
+    }
+
+    ++context.holds;
+}
+
+FileStatus AsyncIoContext::ResumeCompletions() noexcept {
+    AsyncContextState& context = detail::ContextOf(storage_);
+    context.mutex.Lock();
+    if (context.holds == 0) {
+        context.mutex.Unlock();
+        return {FileCode::InvalidArgument, 0};
+    }
+
+    --context.holds;
+    if (context.holds != 0 || context.releasing) {
+        // 아직 보류 중이거나 다른 스레드가 게시 중이다(그 스레드가 목록 끝까지 게시한다).
+        context.mutex.Unlock();
+        return {};
+    }
+
+    // 보류가 풀린 동안 목록을 하나씩 게시한다. callback은 잠금 밖에서 이 스레드가 부른다. 그 사이
+    // 다시 보류되면 남은 것은 다음 재개가 게시한다.
+    context.releasing = true;
+    while (context.holds == 0 && context.heldHead != nullptr) {
+        AsyncRequestState& request = *context.heldHead;
+        context.heldHead = request.nextQueued;
+        if (context.heldHead == nullptr) {
+            context.heldTail = nullptr;
+        }
+
+        request.nextQueued = nullptr;
+        --context.heldCount;
+        const AsyncIoResult result = request.result;
+        const AsyncIoCallback callback = request.callback;
+        void* callbackContext = request.callbackContext;
+        detail::PublishLocked(context, request, result);
+        // 게시 뒤에는 요청을 만지지 않는다. 알림은 잠금 안에서 해 context 수명 규칙과 맞춘다.
+        context.changed.NotifyAll();
+        context.mutex.Unlock();
+        if (callback != nullptr) {
+            callback(result, callbackContext);
+        }
+
+        context.mutex.Lock();
+    }
+
+    context.releasing = false;
+    context.mutex.Unlock();
+    return {};
+}
+
+uint64 AsyncIoContext::HeldCompletionCount() const noexcept {
+    const AsyncContextState& context = detail::ContextOf(storage_);
+    LockGuard lock(context.mutex);
+    return context.heldCount;
+}
+
 bool AsyncIoContext::IsRunning() const noexcept {
     return detail::ContextOf(storage_).running;
 }
@@ -332,6 +421,11 @@ void DestroyFileState(AsyncFileState& file, const char* closeFailure) noexcept {
         AsyncContextState& context = *file.context;
         {
             LockGuard lock(context.mutex);
+            if (file.pending != 0 && context.holds != 0) {
+                // 보류 중이면 완료가 게시되지 않아 아래 대기가 끝나지 않는다.
+                Fatal("Async file destroyed with in-flight requests while completions are held");
+            }
+
             if (file.pending != 0) {
                 if (context.backend == AsyncIoBackend::Native) {
                     AsyncNativeCancelFile(file);
@@ -560,6 +654,10 @@ AsyncIoRequest::~AsyncIoRequest() noexcept {
         {
             LockGuard lock(request.context->mutex);
             inFlight = detail::IsInFlight(request);
+            if (inFlight && request.context->holds != 0) {
+                // 보류 중이면 완료가 게시되지 않아 소멸자의 대기가 끝나지 않는다.
+                Fatal("AsyncIoRequest destroyed in flight while completions are held");
+            }
         }
         if (inFlight) {
             Cancel();
@@ -607,9 +705,11 @@ void AsyncIoRequest::Cancel() noexcept {
     }
     AsyncContextState& context = *request.context;
     LockGuard lock(context.mutex);
-    if (!detail::IsInFlight(request)) {
+    if (!detail::IsInFlight(request) || request.phase == AsyncPhase::Held) {
+        // 이미 끝나 게시만 보류된 요청은 결과가 정해졌으므로 취소가 바꾸지 않는다.
         return;
     }
+
     request.cancelRequested = true;
     if (context.backend == AsyncIoBackend::Native && !request.submitting) {
         detail::AsyncNativeCancel(request);

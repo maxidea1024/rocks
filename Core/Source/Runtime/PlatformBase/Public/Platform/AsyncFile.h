@@ -81,6 +81,44 @@ public:
     bool IsRunning() const noexcept;
     AsyncIoBackend Backend() const noexcept;
 
+    // ---- 완료 게시 보류(Rocks 고유, UE 5.8 IAsyncReadFileHandle·IoDispatcher에는 대응 없음) ----
+    // IO 완료 시점을 호출자가 정하게 해 "IO가 끝나기 전/끝난 뒤"를 경쟁 없이 만든다. 스트리밍처럼
+    // 완료 순서에 따라 동작이 갈리는 상위 계층의 결정적 시험(완료를 gate로 막고 단언)과, 프레임
+    // 경계에서만 완료를 받고 싶은 호출자가 쓴다.
+    //
+    // 사용 예:
+    //   io.HoldCompletions();
+    //   pack.SubmitRead(request, offset, buffer, bytes, OnLoaded, &state);
+    //   // OS가 읽기를 끝냈어도 request는 진행 중이다: IsComplete() false, 재제출·Close·Shutdown은
+    //   // Busy, callback은 아직 불리지 않았다.
+    //   io.ResumeCompletions();   // 쌓인 결과를 게시하고 이 스레드에서 callback을 부른다
+    //
+    // 계약:
+    // - 보류 중에는 OS·worker에서 끝난 요청도 결과를 게시하지 않고 내부 목록에 완료 순서대로
+    //   쌓는다. 그 요청은 진행 중으로 보인다: IsComplete false, Wait는 계속 기다린다(시간
+    //   제한이면 TimedOut), callback은 부르지 않는다. OS 작업 자체는 막지 않으므로 버퍼에는 이미
+    //   데이터가 있을 수 있으나 게시 전에는 읽지 않는다.
+    // - 중첩할 수 있다(계수). 마지막 ResumeCompletions가 계수를 0으로 만들 때 쌓인 결과를 쌓인
+    //   순서대로 하나씩 게시하고, 게시한 요청의 callback을 그 ResumeCompletions를 부른 스레드에서
+    //   차례로 부른다. 그 사이 새로 끝난 요청도 목록 뒤에 붙어 같은 스레드가 게시한다(완료 순서
+    //   유지). 보류 밖에서 끝난 요청의 callback은 평소처럼 backend 완료 스레드에서 부른다.
+    // - 보류 중 취소: 아직 OS·worker가 끝내지 않은 요청은 평소대로 취소가 적용될 수 있고, 이미
+    //   끝나 쌓인 요청의 취소는 아무것도 바꾸지 않는다. 어느 쪽이든 재개 때 결과는 요청마다 정확히
+    //   하나다.
+    // - 쌓인 요청은 진행 중으로 센다. 그래서 그 파일의 Close·같은 요청 재제출·Shutdown은 Busy다.
+    //   보류 중에 진행 중 요청이 있는 파일·요청을 파괴하면(소멸자는 완료를 기다리므로 영원히
+    //   막힌다) Fatal로 수명 오류를 드러낸다. 진행 중 요청이 없으면 보류 중 Shutdown도 성공하며
+    //   계수는 그대로다.
+    // - context 소멸은 보류 계수를 버린다(쌓인 결과가 있으면 열린 파일·진행 중 요청 때문에 이미
+    //   Fatal이다).
+    // - 어느 스레드에서나 부를 수 있고 완료 callback 안에서도 부를 수 있다. 보류한 스레드가 같은
+    //   context의 요청을 무기한 Wait하면 스스로 막히므로 재개를 먼저 한다.
+    void HoldCompletions() noexcept;
+    // 보류 계수 하나를 푼다. 보류 중이 아니면 InvalidArgument이고 아무것도 바꾸지 않는다.
+    FileStatus ResumeCompletions() noexcept;
+    // OS·worker에서 끝나 게시를 기다리는 결과 수다(진단·시험용, 읽는 순간의 값).
+    uint64 HeldCompletionCount() const noexcept;
+
 private:
     friend class AsyncReadFile;
     friend class AsyncWriteFile;

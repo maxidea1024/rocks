@@ -44,22 +44,24 @@ void Mutex::Unlock() noexcept {
     ReleaseSRWLockExclusive(reinterpret_cast<SRWLOCK*>(storage_));
 }
 
-uint64 MonotonicNanoseconds() noexcept {
+// ns 변환(MonotonicNanoseconds)은 플랫폼 공통 Private/Common/Clock.cpp가 이 두 값으로 한다.
+uint64 MonotonicTicks() noexcept {
     LARGE_INTEGER counter{};
-    LARGE_INTEGER frequency{};
-    if (!QueryPerformanceCounter(&counter) || !QueryPerformanceFrequency(&frequency) ||
-        counter.QuadPart < 0 || frequency.QuadPart <= 0) {
+    if (!QueryPerformanceCounter(&counter) || counter.QuadPart < 0) {
         Fatal("QueryPerformanceCounter failed");
     }
 
-    // 정수 tick×10^9 중간 곱의 overflow를 피한다. 단위 변환은 해상도 향상을 뜻하지 않는다.
-    const long double nanoseconds = static_cast<long double>(counter.QuadPart) * 1000000000.0L /
-                                    static_cast<long double>(frequency.QuadPart);
-    if (nanoseconds >= static_cast<long double>(NumericLimits<uint64>::Max())) {
-        Fatal("Monotonic clock overflow");
+    return static_cast<uint64>(counter.QuadPart);
+}
+
+// 주파수는 부팅 때 정해져 바뀌지 않는다. 호출마다 읽어도 비용이 작아 따로 캐시하지 않는다.
+uint64 MonotonicTickFrequency() noexcept {
+    LARGE_INTEGER frequency{};
+    if (!QueryPerformanceFrequency(&frequency) || frequency.QuadPart <= 0) {
+        Fatal("QueryPerformanceFrequency failed");
     }
 
-    return static_cast<uint64>(nanoseconds);
+    return static_cast<uint64>(frequency.QuadPart);
 }
 
 int64 UtcTicks() noexcept {

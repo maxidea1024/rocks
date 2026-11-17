@@ -634,6 +634,14 @@ internal sealed class ClassModel
     // 단위다(Docs/Design/ReflectionExtensions.ko.md 3.1절). 형질과 달리 선언 값이라 멤버에서 계산하거나 대조하지 않는다.
     public bool Atomic { get; init; }
 
+    // 설정 struct(ROCKS_STRUCT(Settings(Branch="…", Section="…")) — Docs/Design/ConfigSystem.ko.md 7절)의 branch·섹션 이름이다(설정 struct가
+    // 아니면 둘 다 ""). 이 모듈 struct만 채운다(descriptor에 싣지 않는다 — import struct의 생성 SettingsSchema는 그 모듈의 생성 헤더에 있다).
+    public string SettingsBranch { get; init; } = "";
+
+    public string SettingsSection { get; init; } = "";
+
+    public bool IsSettings => SettingsSection.Length != 0;
+
     // TypeFlags::Transient·Deprecated(클래스 — 리플렉션 B9h2). 선언이 직접 쓰거나 base에서 상속된다(SchemaValidator가 채운다).
     public bool Transient { get; set; }
 

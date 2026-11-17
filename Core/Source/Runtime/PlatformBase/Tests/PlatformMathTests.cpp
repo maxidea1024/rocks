@@ -467,7 +467,7 @@ TEST(VectorRegister_ReductionsMatchScalarOrder) {
 TEST(VectorRegister_CrossProductOrientationAndZeroW) {
     namespace simd = platform::simd;
     float result[4];
-    // 오른손: X × Y = Z. w는 입력과 무관하게 +0이다.
+    // 표준 외적: X × Y = Z(UE 축 이름으로 Forward × Right = Up). w는 입력과 무관하게 +0이다.
     simd::Store(result, simd::Cross3(simd::Set(1.0f, 0.0f, 0.0f, QuietNaN),
                                      simd::Set(0.0f, 1.0f, 0.0f, Infinity)));
     CHECK(result[0] == 0.0f && result[1] == 0.0f && result[2] == 1.0f);
