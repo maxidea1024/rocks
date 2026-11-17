@@ -1,6 +1,6 @@
 # 로깅 시스템 설계
 
-기준일: 2026-11-17, 개정 6. 엔진 전반에서 쓰는 **로그**(사람이 읽는 사건 기록)의 호출 API, 카테고리·레벨 필터, 비동기 기록 경로, 출력 형식, 장애 격리, 엔진 적용 범위를 정한다.
+기준일: 2026-11-18, 개정 7. 엔진 전반에서 쓰는 **로그**(사람이 읽는 사건 기록)의 호출 API, 카테고리·레벨 필터, 비동기 기록 경로, 출력 형식, 장애 격리, 엔진 적용 범위를 정한다.
 
 요구는 다음 문서에서 온다.
 - [엔진 구현 계획](EngineImplementationPlan.ko.md) 29.4절(필수 로깅·프로파일러: level/category, UTC+monotonic, rate limit·중복 집계, compile/runtime level, error/fatal 비상 경로, 임계 구간에서 file IO·heap·lock wait 금지)
@@ -434,7 +434,7 @@ public:
 | 장치 생성 성공 | Info | `Created {Backend} device on {Adapter} (validation {Validation})` | 생성 함수 |
 | 장치 생성 실패 | Warning / Error | fallback이면 Warning, 모든 후보 실패면 Error. HRESULT·단계 포함 | 호출자(선택자), `DeviceCreateReport` |
 | Present 실패·장치 제거 | Error | `Device removed during present: {Reason} (HRESULT {HResult:#x})`, lost 전이 때 1회 | 장치 내부 |
-| 셰이더 컴파일 실패 | Error | `Shader {Entry} ({Target}) failed to compile: {Diagnostics}` | 파이프라인 생성을 결정하는 쪽(지금은 Sandbox `SampleRenderer`) |
+| 셰이더 컴파일 실패 | Error | 장치가 LastError에 `Shader {entry} ({target}) failed to compile (HRESULT ..): {진단 최대 1 KiB}`를 남기고, 파이프라인 생성을 결정하는 쪽(지금은 Sandbox `SampleRenderer`)이 `... pipeline could not be built on {Backend}: {Error}: {Diagnostics}`로 기록한다. entry·target을 구조화해 내보내려면 Device API 변경이 필요해 보류 | 결정하는 호출자 |
 | 검증 계층 메시지 | Warning | 원문, 메시지 ID마다 1회, `Graphics.D3D12.Validation` | 장치 내부 |
 | 창 생성 실패 | Error | `Window creation failed at {Call}: {OsError}` | 호스트, `WindowCreateReport` |
 | ShaderToolLoader | Error / Debug | 필수 도구 실패 Error, 선택 도구 없음 Debug | 호출자 |
@@ -552,3 +552,4 @@ Result<UniquePtr<Device>> CreateD3D12Device(Allocator&, const DeviceDesc&, Devic
 - 개정 4(2026-11-17): 15절에 render-lane·Config·TraceCapture 병합 현황을 적었다(LG3 착수 조건 충족). 셰이더 컴파일 실패 로그 위치를 Sandbox `SampleRenderer`로 옮겼다. 캡처가 카테고리 객체 포인터 대신 이름을 담도록 바꿨다(8.3).
 - 개정 5(2026-11-17): LG5 구현 반영 — 소스 경로는 `-fmacro-prefix-map`(디버그 정보 경로 보존), 컴파일 타임 하한은 타깃 단위 재정의·모듈 재정의 거부, 한글 템플릿은 `source-literal-english` 정책이 막으므로 별도 검사 없음.
 - 개정 6(2026-11-17): LG6 구현과 LG3–LG5 리뷰 반영 — `ErrorCode::CycleDetected`, `World::AddActorTickPrerequisite`, Tick 실패 첫 1회+요약, `Log::SetFrame`, `SetGlobalMinimum`의 `Result<void>` 반환과 sink 안 레벨 변경 Busy, Sync Fatal은 `Mutex::TryLock`, Stop 시간 초과 포기 처리.
+- 개정 7(2026-11-18): LG7 구현 반영 — `CreateD3D12Device`·`Window::Create`에 report 인자(기본 nullptr), `Graphics/GraphicsLog.h` 카테고리와 `ValidationMessageFilter`, 셰이더 실패는 장치 LastError + 호출자 기록, Sandbox는 backend별 실행이라 "건너뛴 backend Warning·모두 실패 Error", OpenGL 기존 로그는 규칙 충족으로 유지.

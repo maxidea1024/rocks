@@ -1,4 +1,5 @@
 #include "CommandletHost.h"
+#include "LogCommandlet.h"
 #include <Core/Memory/SystemAllocator.h>
 #include <Platform/File.h>
 #include <TraceAnalysis/TraceModel.h>
@@ -144,6 +145,12 @@ int Run(Span<const StringView> args, CommandletOutput output) noexcept {
     registered =
         registry.Register({"trace-report", "Write a deterministic JSON report of a .rtrace file.",
                            &TraceReport, nullptr});
+    if (!registered) {
+        return 1;
+    }
+    registered = registry.Register(
+        {"log", "Log file tools: keygen, decode, seal. Never commit or cook the private key.",
+         &RunLogCommand, nullptr});
     if (!registered) {
         return 1;
     }

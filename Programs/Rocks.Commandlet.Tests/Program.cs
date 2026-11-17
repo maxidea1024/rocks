@@ -70,6 +70,49 @@ finally
     Directory.Delete(traceDirectory, true);
 }
 
+// log keygen·seal·decode: 왕복, 끝 표시 없음(비정상 종료), 변조, 잘못된 키, 덮어쓰기 거부.
+string logDirectory = Path.Combine(Path.GetTempPath(), $"rocks-log-commandlet-{Environment.ProcessId}");
+Directory.CreateDirectory(logDirectory);
+try
+{
+    string publicKey = Path.Combine(logDirectory, "log.pub");
+    string privateKey = Path.Combine(logDirectory, "log.key");
+    string plain = Path.Combine(logDirectory, "plain.log");
+    string sealedLog = Path.Combine(logDirectory, "sealed.log");
+    string truncated = Path.Combine(logDirectory, "truncated.log");
+    string tampered = Path.Combine(logDirectory, "tampered.log");
+    string text = string.Concat(Enumerable.Range(0, 300).Select(index => $"[Info][Game] line {index}\n"));
+    File.WriteAllText(plain, text);
+    await Check("log usage", ["log"], 2, "", "log keygen");
+    await Check("log keygen", ["log", "keygen", publicKey, privateKey], 0, "out of the repository", "");
+    await Check("log keygen refuses to overwrite", ["log", "keygen", publicKey, privateKey], 1, "", "cannot create");
+    await Check("log seal", ["log", "seal", plain, sealedLog, "--public", publicKey], 0, "", "");
+    await Check("log decode", ["log", "decode", sealedLog, "--key", privateKey], 0, "line 299\n", "");
+    await Check("log decode json status", ["log", "decode", sealedLog, "--key", privateKey, "--json"], 0, "line 0\n",
+        "\"endMarker\": true");
+    byte[] sealedBytes = File.ReadAllBytes(sealedLog);
+    // 마지막 기록(길이 4 + 빈 평문의 봉인 17)이 끝 표시다. 떼면 비정상 종료한 파일이다.
+    File.WriteAllBytes(truncated, sealedBytes[..^21]);
+    await Check("log decode without end marker", ["log", "decode", truncated, "--key", privateKey], 0, "line 299\n",
+        "no end marker (abnormal termination)");
+    byte[] changed = (byte[])sealedBytes.Clone();
+    changed[1200] ^= 0x01;
+    File.WriteAllBytes(tampered, changed);
+    await Check("log decode tampered", ["log", "decode", tampered, "--key", privateKey], 1, "", "authentication failed");
+    await Check("log decode wrong key file", ["log", "decode", sealedLog, "--key", publicKey], 1, "", "not a log private key");
+    await Check("log decode not a log", ["log", "decode", plain, "--key", privateKey], 1, "", "not an encrypted Rocks log file");
+    bool noPlaintext = !System.Text.Encoding.UTF8.GetString(sealedBytes).Contains("line 1", StringComparison.Ordinal);
+    Console.WriteLine($"log seal hides plaintext: {(noPlaintext ? "PASS" : "FAIL")}");
+    if (!noPlaintext)
+    {
+        ++failures;
+    }
+}
+finally
+{
+    Directory.Delete(logDirectory, true);
+}
+
 if (OperatingSystem.IsWindows())
 {
     // 무효 stderr 핸들을 child의 표준 오류로 직접 설정해 출력 실패를 재현한다.

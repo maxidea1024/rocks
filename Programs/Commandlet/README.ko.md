@@ -2,6 +2,8 @@
 
 `Commandlet` 타깃은 창, 렌더러, GPU, 오디오 장치 없이 실행되는 Core 기반 콘솔 프로그램이다. 현재 엔진 부트와 에셋 시스템은 연결되지 않았으며 cook 등의 명령은 제공하지 않는다. `core-check`는 Core 할당과 해제만 검사한다. `trace-report <입력.rtrace> [<출력.json>]`은 trace 파일의 결정적 JSON report(스레드별 구간 이름의 횟수·합계·p50/p95/p99, task 임계 경로, 손실·잘림·정의 누락 요약, [trace 설계](../../Docs/Design/TraceSystem.ko.md) 10절 TR4)를 쓴다. 출력 경로가 없으면 표준 출력이다. 파일·분석 오류는 원본 파일 오류 코드와 함께 알리고 1을 반환한다.
 
+`log`는 암호화한 로그 파일 도구다([로깅 설계](../../Docs/Design/LoggingSystem.ko.md) 9.1절, LG10). `log keygen <공개키 파일> <개인키 파일>`은 X-Wing 키 쌍을 만들고(기존 파일을 덮어쓰지 않는다), `log decode <파일> --key <개인키 파일> [--json]`은 평문을 표준 출력으로 낸다. 끝 표시가 없으면 마지막 완전한 묶음까지 낸 뒤 "no end marker (abnormal termination)"를 알리고, 변조는 오류 1이다. `--json`은 상태를 표준 오류에 JSON 객체 한 줄로 쓴다. `log seal <평문> <출력> --public <공개키 파일>`은 같은 형식으로 봉인한다(진단·시험용). **개인키는 저장소와 쿠킹 결과에 넣지 않는다.**
+
 ```text
 dotnet msbuild Rocks.proj /t:Build /p:RocksTarget=Commandlet
 RocksCommandlet --help
