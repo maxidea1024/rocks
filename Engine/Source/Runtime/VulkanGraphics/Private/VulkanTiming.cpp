@@ -232,8 +232,10 @@ Result<ClockCalibration> VulkanDevice::CalibrateClocks() noexcept {
     infos[0].timeDomain = VK_TIME_DOMAIN_DEVICE_KHR;
     infos[1].sType = VK_STRUCTURE_TYPE_CALIBRATED_TIMESTAMP_INFO_KHR;
     infos[1].timeDomain = HostTimeDomain();
-    uint64 values[2] = {};
-    uint64 deviation = 0;
+    // Vulkan 함수는 uint64_t를 받는다(LP64 Android에서는 unsigned long이라 Rocks uint64와 다른
+    // 타입이다).
+    uint64_t values[2] = {};
+    uint64_t deviation = 0;
     const VkResult result = getCalibratedTimestamps_(device_, 2, infos, values, &deviation);
     if (result != VK_SUCCESS) {
         platform::LockGuard lock(gate_);
