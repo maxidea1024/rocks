@@ -18,6 +18,8 @@
 #include <dxgi1_6.h>
 #include <dxgidebug.h>
 #include <Platform/Atomics.h>
+
+#include "D3D12PixelFormats.h"
 #include <Platform/Memory.h>
 
 namespace rocks::graphics {
@@ -50,6 +52,7 @@ const char* RemovedReasonName(HRESULT reason) noexcept {
 constexpr uint32 MaxCommandAllocators = 8;
 constexpr uint32 SwapChainBufferCount = 2;
 constexpr uint32 RtvCapacity = 128;
+constexpr uint32 DsvCapacity = 64;
 constexpr uint32 SrvCapacity = 1024;
 // 서로 다른 SamplerDesc 조합 수의 상한이다(필터 4 × 주소 9 × 이방성 16을 넘지 않는다).
 constexpr uint32 SamplerCapacity = 256;
@@ -136,21 +139,6 @@ public:
 private:
     T* pointer_ = nullptr;
 };
-
-// 픽셀 형식의 DXGI 형식이다. PF1에서는 RGBA8 두 형식만 대응하고 나머지는 UNKNOWN이다(생성이
-// Unsupported, PixelFormat.ko.md 14절). 전체 대응 표는 PF2에서 D3D12PixelFormats.cpp로 옮긴다.
-DXGI_FORMAT ResourceFormat(PixelFormat format) noexcept {
-    switch (format) {
-    case PixelFormat::RGBA8Unorm:
-        return DXGI_FORMAT_R8G8B8A8_UNORM;
-    case PixelFormat::RGBA8UnormSrgb:
-        return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
-    default:
-        break;
-    }
-
-    return DXGI_FORMAT_UNKNOWN;
-}
 
 // 컬 모드의 D3D12 값이다. 앞면 규약(FrontCounterClockwise = TRUE)과 함께 쓴다.
 D3D12_CULL_MODE RasterCullMode(CullMode mode) noexcept {
@@ -397,10 +385,27 @@ struct TextureRecord {
     uint32 width = 0;
     uint32 height = 0;
     uint32 mipLevels = 1;
+    // view(CreateTextureView)면 view가 읽는 형식, 아니면 텍스처 형식이다.
     PixelFormat format = PixelFormat::Unknown;
     bool renderTarget = false;
+    // 깊이·스텐실 타깃(TextureUsage::DepthStencil)이다.
+    bool depthTarget = false;
+    // 다른 텍스처의 자원을 공유하는 view다. 업로드·readback·그리기 대상이 될 수 없다. 자원 상태는
+    // 원 텍스처 기록(source)이 추적한다.
+    bool view = false;
+    SlotHandle source;
+    // 이 텍스처를 가리키는 살아 있는 view 수다. 0이 아니면 Retire는 기록을 남겨 두고(retirePending)
+    // 마지막 view가 놓일 때 함께 놓는다(상태 추적의 주인을 하나로 유지한다).
+    uint32 viewCount = 0;
+    bool retirePending = false;
+    // 장치 자원의 plane 수다(D3D12_FEATURE_FORMAT_INFO, 깊이·스텐실 typeless와 비디오는 2). mip별
+    // 상태 전이는 모든 plane의 subresource에 낸다.
+    uint32 devicePlanes = 1;
+    // SRV가 있다(형식이 Sampled일 때만 만든다). 없으면 SetTexture는 흰 텍스처로 대신한다.
+    bool hasSrv = false;
     uint32 srv = 0;
     uint32 rtv = 0;
+    uint32 dsv = 0;
     // 샘플러 힙의 칸이다(SamplerFor가 같은 설정끼리 공유한다).
     uint32 sampler = 0;
     // mip마다 장치가 추적한 상태다(RenderBase GX5). committed는 제출한 프레임 기록 끝의 상태이고,
@@ -442,6 +447,7 @@ struct Retired {
     bool pending = false;
     int64 srv = -1;
     int64 rtv = -1;
+    int64 dsv = -1;
 };
 
 // 고정 용량 descriptor 힙의 빈 칸 관리다.
@@ -574,9 +580,9 @@ struct ReadbackRecord {
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
     uint64 total = 0;
     uint64 fenceValue = 0;
-    uint32 width = 0;
-    uint32 height = 0;
-    uint32 bytesPerPixel = 0;
+    // 빈틈 없는 행 하나의 바이트와 행 수다(블록 형식은 블록 행).
+    uint64 rowBytes = 0;
+    uint32 rows = 0;
 };
 
 // fence 관찰 스레드가 제출 하나의 완료를 기다리는 경계다. 장치가 제거되면 fence 완료 값이
@@ -615,7 +621,7 @@ public:
     explicit D3D12Device(Allocator& allocator) noexcept
         : adapterName_(allocator), lastError_(allocator), buffers_(allocator), textures_(allocator),
           pipelines_(allocator), swapChains_(allocator), retired_(allocator), rtvs_(allocator),
-          srvs_(allocator), samplers_(allocator), allocators_(allocator),
+          dsvs_(allocator), srvs_(allocator), samplers_(allocator), allocators_(allocator),
           messageScratch_(allocator), timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics),
           allocator_(allocator), readbacks_(allocator), ring_(allocator), timestamps_(allocator),
           touchedTextures_(allocator) {
@@ -774,12 +780,20 @@ public:
 
         auto rtvs =
             rtvs_.Initialize(device_.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, RtvCapacity, false);
+        auto dsvs =
+            dsvs_.Initialize(device_.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_DSV, DsvCapacity, false);
         auto srvs = srvs_.Initialize(device_.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
                                      SrvCapacity, true);
         auto samplers = samplers_.Initialize(device_.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER,
                                              SamplerCapacity, true);
-        if (!rtvs || !srvs || !samplers) {
+        if (!rtvs || !dsvs || !srvs || !samplers) {
             return Fail("descriptor heap creation failed");
+        }
+
+        // 형식 능력은 장치 수명 동안 바뀌지 않으므로 한 번 질의해 둔다(PixelFormat.ko.md PF3).
+        for (uint32 number = 0; number <= MaxPixelFormatNumber; ++number) {
+            formatCaps_[number] =
+                d3d12::QueryFormatCaps(device_.Get(), static_cast<PixelFormat>(number));
         }
 
         auto signature = CreateRootSignature();
@@ -1011,17 +1025,29 @@ public:
     }
 
     // 다른 스레드에서도 부를 수 있다(concurrentResourceCreation). 초기 픽셀은 업로드 기록으로 간다.
+    // 형식·용도 지원은 장치 능력(GetPixelFormatCaps)으로 판정한다(PixelFormat.ko.md 8.3절).
     Result<TextureHandle> CreateTexture(const TextureDesc& desc,
                                         Span<const uint8> pixels) noexcept override {
-        if (IsValidPixelFormat(desc.format) && ResourceFormat(desc.format) == DXGI_FORMAT_UNKNOWN) {
+        const bool renderTarget = desc.usage == TextureUsage::RenderTarget;
+        const bool depthTarget = desc.usage == TextureUsage::DepthStencil;
+        const PixelFormatInfo& info = GetPixelFormatInfo(desc.format);
+        if (IsValidPixelFormat(desc.format) &&
+            !HasPixelFormatCaps(FormatCaps(desc.format),
+                                RequiredPixelFormatCaps(desc.usage, desc.mipLevels))) {
             platform::LockGuard lock(gate_);
             return UnsupportedFormat<TextureHandle>(desc.format);
         }
-        const bool renderTarget = desc.usage == TextureUsage::RenderTarget;
+        const bool depth =
+            info.kind == PixelFormatKind::Depth || info.kind == PixelFormatKind::DepthStencil;
         const uint64 size = MipChainBytes(desc.format, desc.width, desc.height, 1, desc.mipLevels);
-        if (desc.width > 16384 || desc.height > 16384 || size == 0 ||
+        const bool attachment = renderTarget || depthTarget;
+        // BC는 최상위 크기가 블록 배수여야 한다(D3D12 요구, PixelFormatInfo::topLevelBlockAligned).
+        const bool aligned = !info.topLevelBlockAligned || (desc.width % info.blockWidth == 0 &&
+                                                            desc.height % info.blockHeight == 0);
+        if (desc.width > 16384 || desc.height > 16384 || size == 0 || !aligned ||
             desc.mipLevels > MaxMipLevels || !IsValidSamplerDesc(desc.sampler) ||
-            (renderTarget ? (pixels.Size() != 0 || desc.mipLevels != 1) : pixels.Size() != size)) {
+            (attachment ? (pixels.Size() != 0 || desc.mipLevels != 1) : pixels.Size() != size) ||
+            (depthTarget && !depth)) {
             return Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
         }
         platform::LockGuard lock(gate_);
@@ -1030,12 +1056,15 @@ public:
             return FailWith<TextureHandle>("sampler descriptor heap is full");
         }
 
+        const d3d12::FormatMapping mapping = d3d12::MappingOf(desc.format);
+        const bool sampled = HasPixelFormatCaps(FormatCaps(desc.format), PixelFormatCaps::Sampled);
         TextureRecord record;
         record.width = desc.width;
         record.height = desc.height;
         record.mipLevels = desc.mipLevels;
         record.format = desc.format;
         record.renderTarget = renderTarget;
+        record.depthTarget = depthTarget;
         record.sampler = sampler.Value();
         D3D12_RESOURCE_DESC resource = {};
         resource.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
@@ -1043,18 +1072,20 @@ public:
         resource.Height = desc.height;
         resource.DepthOrArraySize = 1;
         resource.MipLevels = static_cast<UINT16>(desc.mipLevels);
-        resource.Format = ResourceFormat(desc.format);
+        resource.Format = mapping.resource;
         resource.SampleDesc.Count = 1;
-        resource.Flags =
-            renderTarget ? D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET : D3D12_RESOURCE_FLAG_NONE;
+        // 깊이 형식은 늘 DEPTH_STENCIL 플래그로 만든다(typeless 깊이 자원의 DSV·복사 조건).
+        resource.Flags = renderTarget ? D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET
+                                      : (depth ? D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL
+                                               : D3D12_RESOURCE_FLAG_NONE);
         const D3D12_HEAP_PROPERTIES heap = HeapProperties(D3D12_HEAP_TYPE_DEFAULT);
         // 최적화 clear 값은 두지 않는다. 패스마다 clear 색이 다르므로 값을 두면 매번 불일치 경고가
         // 쌓인다.
-        // 렌더 타깃은 셰이더 읽기 상태(ResourceAccess::SrvGraphics와 같은 PSR|NPSR)로 만든다.
-        // 업로드로 채우는 텍스처가 업로드 뒤 놓이는 상태와 같아 import 선언이 생성 경로와 무관하게
-        // 맞는다.
+        // 렌더 타깃·깊이 타깃은 셰이더 읽기 상태(ResourceAccess::SrvGraphics와 같은 PSR|NPSR)로
+        // 만든다. 업로드로 채우는 텍스처가 업로드 뒤 놓이는 상태와 같아 import 선언이 생성 경로와
+        // 무관하게 맞는다.
         const D3D12_RESOURCE_STATES initialState =
-            renderTarget ? ShaderReadStates : D3D12_RESOURCE_STATE_COPY_DEST;
+            attachment ? ShaderReadStates : D3D12_RESOURCE_STATE_COPY_DEST;
         if (FAILED(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &resource,
                                                     initialState, nullptr,
                                                     IID_PPV_ARGS(record.resource.Out())))) {
@@ -1064,46 +1095,236 @@ public:
             record.committed[mip] = initialState;
             record.current[mip] = initialState;
         }
+        record.devicePlanes = d3d12::FormatPlaneCount(device_.Get(), mapping.resource);
 
         auto reserved = ReserveRetireCapacity(1);
         if (!reserved) {
             return Result<TextureHandle>::Failure(reserved.Error());
         }
-        if (!renderTarget) {
+        if (!attachment) {
             auto uploaded = RecordTextureUpload(record, 0, record.mipLevels, pixels, false);
             if (!uploaded) {
                 return Result<TextureHandle>::Failure(uploaded.Error());
             }
+            // 장치 자원이 Rocks보다 plane이 많으면(D24Unorm은 D24S8 자원의 깊이 plane만 쓴다)
+            // 올리지 않은 plane도 쉬는 상태로 옮긴다.
+            for (uint32 plane = PixelFormatPlaneCount(desc.format); plane < record.devicePlanes;
+                 ++plane) {
+                for (uint32 mip = 0; mip < record.mipLevels; ++mip) {
+                    const D3D12_RESOURCE_BARRIER toShader =
+                        TransitionSubresource(record.resource.Get(),
+                                              d3d12::SubresourceIndex(mip, plane, record.mipLevels),
+                                              D3D12_RESOURCE_STATE_COPY_DEST, ShaderReadStates);
+                    uploadList_->ResourceBarrier(1, &toShader);
+                }
+            }
         }
 
+        auto views = CreateTextureViews(record, mapping, sampled);
+        if (!views) {
+            return Result<TextureHandle>::Failure(views.Error());
+        }
+        return AddTextureRecord(Move(record));
+    }
+
+    // 기본 SRV(형식이 Sampled일 때, plane 0)·RTV·DSV를 만든다(잠금 안). 실패하면 이미 잡은 칸을
+    // 놓는다.
+    Result<void> CreateTextureViews(TextureRecord& record, const d3d12::FormatMapping& mapping,
+                                    bool sampled) noexcept {
+        if (sampled) {
+            auto srv = srvs_.Allocate();
+            if (!srv) {
+                return Fail("shader resource descriptor heap is full");
+            }
+            record.srv = srv.Value();
+            record.hasSrv = true;
+            WriteShaderResourceView(record.resource.Get(), mapping.srv, 0, record.mipLevels,
+                                    record.srv);
+        }
+        if (record.renderTarget) {
+            auto rtv = rtvs_.Allocate();
+            if (!rtv) {
+                if (record.hasSrv) {
+                    srvs_.Free(record.srv);
+                    record.hasSrv = false;
+                }
+                return Fail("render target descriptor heap is full");
+            }
+            record.rtv = rtv.Value();
+            D3D12_RENDER_TARGET_VIEW_DESC view = {};
+            view.Format = mapping.rtv;
+            view.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+            device_->CreateRenderTargetView(record.resource.Get(), &view, rtvs_.Cpu(record.rtv));
+        }
+        if (record.depthTarget) {
+            auto dsv = dsvs_.Allocate();
+            if (!dsv) {
+                if (record.hasSrv) {
+                    srvs_.Free(record.srv);
+                    record.hasSrv = false;
+                }
+                return Fail("depth stencil descriptor heap is full");
+            }
+            record.dsv = dsv.Value();
+            D3D12_DEPTH_STENCIL_VIEW_DESC view = {};
+            view.Format = mapping.dsv;
+            view.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+            device_->CreateDepthStencilView(record.resource.Get(), &view, dsvs_.Cpu(record.dsv));
+        }
+
+        return Result<void>::Success();
+    }
+
+    // 다 만든 텍스처 기록의 descriptor 칸을 바로 놓는다(잠금 안, 아직 어떤 명령도 참조하지 않을
+    // 때).
+    void ReleaseTextureViews(const TextureRecord& record) noexcept {
+        if (record.hasSrv) {
+            srvs_.Free(record.srv);
+        }
+        if (record.renderTarget) {
+            rtvs_.Free(record.rtv);
+        }
+        if (record.depthTarget) {
+            dsvs_.Free(record.dsv);
+        }
+    }
+
+    // 2D texture SRV를 쓴다. plane은 깊이·스텐실·비디오 plane 선택이다.
+    void WriteShaderResourceView(ID3D12Resource* resource, DXGI_FORMAT format, uint32 plane,
+                                 uint32 mipLevels, uint32 slot) noexcept {
+        D3D12_SHADER_RESOURCE_VIEW_DESC view = {};
+        view.Format = format;
+        view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        view.Texture2D.MostDetailedMip = 0;
+        view.Texture2D.MipLevels = mipLevels;
+        view.Texture2D.PlaneSlice = plane;
+        device_->CreateShaderResourceView(resource, &view, srvs_.Cpu(slot));
+    }
+
+    // 기록을 표에 넣고 handle을 돌려준다(잠금 안). 실패하면 descriptor 칸을 놓는다.
+    Result<TextureHandle> AddTextureRecord(TextureRecord&& record) noexcept {
+        TextureRecord kept;
+        kept.hasSrv = record.hasSrv;
+        kept.srv = record.srv;
+        kept.renderTarget = record.renderTarget;
+        kept.rtv = record.rtv;
+        kept.depthTarget = record.depthTarget;
+        kept.dsv = record.dsv;
+        auto added = textures_.TryAdd(Move(record));
+        if (!added) {
+            // 아직 어떤 명령도 이 텍스처를 참조하지 않으므로 바로 놓는다.
+            ReleaseTextureViews(kept);
+            return Result<TextureHandle>::Failure(added.Error());
+        }
+        return Result<TextureHandle>::Success(TextureHandle{added.Value()});
+    }
+
+    PixelFormatCaps FormatCaps(PixelFormat format) const noexcept {
+        const uint32 number = PixelFormatNumber(format);
+        return number <= MaxPixelFormatNumber ? formatCaps_[number] : PixelFormatCaps::None;
+    }
+
+    PixelFormatCaps GetPixelFormatCaps(PixelFormat format) const noexcept override {
+        return FormatCaps(format);
+    }
+
+    // 원 텍스처의 자원을 공유하는 SRV view다(PixelFormat.ko.md 9–11절). 다른 스레드에서도 부를 수
+    // 있다.
+    Result<TextureHandle> CreateTextureView(TextureHandle texture,
+                                            const TextureViewDesc& desc) noexcept override {
+        platform::LockGuard lock(gate_);
+        TextureRecord* source = textures_.Find(texture.slot);
+        if (source == nullptr || source->retirePending) {
+            return Result<TextureHandle>::Failure(ErrorCode::StaleHandle);
+        }
+        if (source->view) {
+            return Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
+        }
+        auto resolved = ResolveTextureViewFormat(source->format, desc);
+        if (!resolved) {
+            return Result<TextureHandle>::Failure(resolved.Error());
+        }
+        // sRGB 짝 view는 짝 형식이, plane view는 원 형식이 샘플 가능해야 한다.
+        const PixelFormat sampledFormat =
+            PixelFormatPlaneCount(source->format) == 2 ? source->format : resolved.Value();
+        const DXGI_FORMAT srvFormat =
+            d3d12::ViewSrvFormat(source->format, desc.plane, resolved.Value());
+        if (!HasPixelFormatCaps(FormatCaps(sampledFormat), PixelFormatCaps::Sampled) ||
+            srvFormat == DXGI_FORMAT_UNKNOWN) {
+            return UnsupportedFormat<TextureHandle>(resolved.Value());
+        }
+        auto reserved = ReserveRetireCapacity(1);
+        if (!reserved) {
+            return Result<TextureHandle>::Failure(reserved.Error());
+        }
         auto srv = srvs_.Allocate();
         if (!srv) {
             return FailWith<TextureHandle>("shader resource descriptor heap is full");
         }
+        const PixelFormatPlane& layout = GetPixelFormatInfo(source->format).planes[desc.plane];
+        TextureRecord record;
+        // view는 원 자원에 참조를 하나 더 잡는다(원 텍스처를 먼저 Retire해도 자원이 산다).
+        source->resource->AddRef();
+        record.resource.Attach(source->resource.Get());
+        record.width = MipExtent(source->width, layout.widthShift);
+        record.height = MipExtent(source->height, layout.heightShift);
+        record.mipLevels = source->mipLevels;
+        record.format = resolved.Value();
+        record.view = true;
+        record.source = texture.slot;
+        record.devicePlanes = source->devicePlanes;
+        record.sampler = source->sampler;
         record.srv = srv.Value();
-        device_->CreateShaderResourceView(record.resource.Get(), nullptr, srvs_.Cpu(record.srv));
-        if (renderTarget) {
-            auto rtv = rtvs_.Allocate();
-            if (!rtv) {
-                srvs_.Free(record.srv);
-                return FailWith<TextureHandle>("render target descriptor heap is full");
-            }
-            record.rtv = rtv.Value();
-            device_->CreateRenderTargetView(record.resource.Get(), nullptr, rtvs_.Cpu(record.rtv));
+        record.hasSrv = true;
+        WriteShaderResourceView(record.resource.Get(), srvFormat, desc.plane, record.mipLevels,
+                                record.srv);
+        auto added = AddTextureRecord(Move(record));
+        if (added) {
+            ++source->viewCount;
         }
+        return added;
+    }
 
-        const uint32 srvIndex = record.srv;
-        const int64 rtvIndex = renderTarget ? static_cast<int64>(record.rtv) : -1;
-        auto added = textures_.TryAdd(Move(record));
-        if (!added) {
-            // 아직 어떤 명령도 이 텍스처를 참조하지 않으므로 바로 놓는다.
-            srvs_.Free(srvIndex);
-            if (rtvIndex >= 0) {
-                rtvs_.Free(static_cast<uint32>(rtvIndex));
-            }
-            return Result<TextureHandle>::Failure(added.Error());
+    // 텍스처 mip·plane 하나를 동기로 읽는다(시험·캡처용). ReadPixels와 같은 경로다.
+    Result<void> ReadTexture(TextureHandle handle, uint32 mipLevel, uint32 plane,
+                             Span<uint8> out) noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return owner;
         }
-        return Result<TextureHandle>::Success(TextureHandle{added.Value()});
+        platform::LockGuard lock(gate_);
+        const TextureRecord* record = textures_.Find(handle.slot);
+        if (record == nullptr) {
+            return Result<void>::Failure(ErrorCode::StaleHandle);
+        }
+        if (recording_) {
+            return Result<void>::Failure(ErrorCode::Busy);
+        }
+        if (record->view || mipLevel >= record->mipLevels ||
+            out.Size() != PixelFormatPlaneImageBytes(record->format, plane,
+                                                     MipExtent(record->width, mipLevel),
+                                                     MipExtent(record->height, mipLevel))) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+        // 초기 데이터·갱신 업로드가 먼저 실행되도록 같은 업로드 기록 뒤에 복사를 붙인다.
+        auto requested = RequestReadbackLocked(handle, mipLevel, plane, false);
+        if (!requested) {
+            return Result<void>::Failure(requested.Error());
+        }
+        const ReadbackHandle readback = requested.Value().handle;
+        auto waited = WaitFenceOwner(requested.Value().completion.value);
+        Result<void> outcome = Result<void>::Success();
+        if (!waited) {
+            outcome = Move(waited);
+        } else {
+            auto copied = TryReadbackLocked(readback, out);
+            if (!copied || !copied.Value()) {
+                outcome = Fail("readback did not complete");
+            }
+        }
+        ReleaseReadbackLocked(readback);
+        return outcome;
     }
 
     // 다른 스레드에서도 부를 수 있다(concurrentResourceCreation, 내부 잠금으로 직렬화한다).
@@ -1113,7 +1334,10 @@ public:
             !IsValidPixelFormat(desc.colorFormat)) {
             return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
         }
-        if (ResourceFormat(desc.colorFormat) == DXGI_FORMAT_UNKNOWN) {
+        const PixelFormatCaps required =
+            desc.alphaBlend ? PixelFormatCaps::RenderTarget | PixelFormatCaps::Blendable
+                            : PixelFormatCaps::RenderTarget;
+        if (!HasPixelFormatCaps(FormatCaps(desc.colorFormat), required)) {
             return UnsupportedFormat<PipelineHandle>(desc.colorFormat);
         }
         auto layoutChecked = ValidateVertexLayout(desc.layout);
@@ -1179,7 +1403,7 @@ public:
                              static_cast<UINT>(desc.layout.attributes.Size())};
         state.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
         state.NumRenderTargets = 1;
-        state.RTVFormats[0] = ResourceFormat(desc.colorFormat);
+        state.RTVFormats[0] = d3d12::MappingOf(desc.colorFormat).rtv;
         state.SampleDesc.Count = 1;
 
         PipelineRecord record;
@@ -1418,7 +1642,8 @@ public:
         if (record == nullptr) {
             return Result<void>::Failure(ErrorCode::StaleHandle);
         }
-        if (mipLevel >= record->mipLevels ||
+        if (record->view || record->renderTarget || record->depthTarget ||
+            mipLevel >= record->mipLevels ||
             pixels.Size() != PixelFormatImageBytes(record->format,
                                                    MipExtent(record->width, mipLevel),
                                                    MipExtent(record->height, mipLevel))) {
@@ -1470,9 +1695,16 @@ public:
         const uint32 height = MipExtent(record->height, mipLevel);
         const uint64 rowBytes = PixelFormatRowBytes(record->format, width);
         const uint64 bytes = PixelFormatImageBytes(record->format, width, height);
-        if (mipLevel >= record->mipLevels || offset > memory.Value().size ||
+        if (record->view || record->renderTarget || record->depthTarget ||
+            mipLevel >= record->mipLevels || bytes == 0 || offset > memory.Value().size ||
             bytes > memory.Value().size - offset) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+        // 다중 plane은 plane마다 footprint가 달라 ring에 옮겨 올린다.
+        if (PixelFormatPlaneCount(record->format) != 1) {
+            return RecordTextureUpload(
+                *record, mipLevel, 1,
+                Span<const uint8>(memory.Value().data + offset, static_cast<usize>(bytes)), true);
         }
         D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
         UINT64 total = 0;
@@ -1495,8 +1727,8 @@ public:
             return marked;
         }
         footprint.Offset = offset;
-        CopyTextureFrom(*record, mipLevel, static_cast<ID3D12Resource*>(memory.Value().resource),
-                        footprint, true);
+        CopyTextureFrom(*record, mipLevel, mipLevel,
+                        static_cast<ID3D12Resource*>(memory.Value().resource), footprint, true);
         return Result<void>::Success();
     }
 
@@ -1587,12 +1819,31 @@ public:
         platform::LockGuard lock(gate_);
 
         TextureRecord* record = textures_.Find(handle.slot);
-        if (record == nullptr || handle == white_) {
+        if (record == nullptr || handle == white_ || record->retirePending) {
             return;
         }
-        Defer(Move(record->resource), record->srv,
-              record->renderTarget ? static_cast<int64>(record->rtv) : int64{-1});
-        auto removed = textures_.TryRemove(handle.slot);
+        if (record->viewCount != 0) {
+            record->retirePending = true;
+            return;
+        }
+        const bool view = record->view;
+        const SlotHandle source = record->source;
+        RetireTextureRecord(handle.slot, *record);
+        if (view) {
+            TextureRecord* owner = textures_.Find(source);
+            if (owner != nullptr && owner->viewCount != 0 && --owner->viewCount == 0 &&
+                owner->retirePending) {
+                RetireTextureRecord(source, *owner);
+            }
+        }
+    }
+
+    // 텍스처 기록 하나를 회수 대기로 넘기고 표에서 뺀다(잠금 안).
+    void RetireTextureRecord(SlotHandle slot, TextureRecord& record) noexcept {
+        Defer(Move(record.resource), record.hasSrv ? static_cast<int64>(record.srv) : int64{-1},
+              record.renderTarget ? static_cast<int64>(record.rtv) : int64{-1},
+              record.depthTarget ? static_cast<int64>(record.dsv) : int64{-1});
+        auto removed = textures_.TryRemove(slot);
         (void)removed;
     }
 
@@ -1984,7 +2235,7 @@ private:
     template <class T>
     Result<T> UnsupportedFormat(PixelFormat format) noexcept {
         constexpr const char* Prefix = "pixel format ";
-        constexpr const char* Suffix = " is not supported by the D3D12 backend";
+        constexpr const char* Suffix = " is not supported for this use by the D3D12 device";
         const char* name = PixelFormatName(format);
         auto assigned = lastError_.TryAssign(StringView(Prefix, platform::CStringLength(Prefix)));
         auto named = lastError_.TryAppend(StringView(name, platform::CStringLength(name)));
@@ -2434,23 +2685,25 @@ private:
         return Result<void>::Success();
     }
 
-    // footprint 배치의 원본에서 mip 하나로 복사를 기록한다. restore면 제출한 상태(committed)에서
-    // 복사 대상으로 바꿨다가 되돌린다(업로드 기록은 프레임 기록보다 먼저 실행되므로 상태 중립이어야
-    // 한다). 처음 생성(COPY_DEST)이면 복사 뒤 셰이더 읽기 상태로 바꾸고 그것을 추적 상태로 삼는다.
-    void CopyTextureFrom(TextureRecord& record, uint32 mipLevel, ID3D12Resource* source,
+    // footprint 배치의 원본에서 mip 하나의 plane 하나(subresource)로 복사를 기록한다. restore면
+    // 제출한 상태(committed)에서 복사 대상으로 바꿨다가 되돌린다(업로드 기록은 프레임 기록보다 먼저
+    // 실행되므로 상태 중립이어야 한다). 처음 생성(COPY_DEST)이면 복사 뒤 셰이더 읽기 상태로 바꾸고
+    // 그것을 추적 상태로 삼는다. 상태는 mip 단위로 추적하고 그 mip의 plane들이 함께 따른다.
+    void CopyTextureFrom(TextureRecord& record, uint32 mipLevel, uint32 subresource,
+                         ID3D12Resource* source,
                          const D3D12_PLACED_SUBRESOURCE_FOOTPRINT& footprint,
                          bool restore) noexcept {
         const D3D12_RESOURCE_STATES resting =
             restore ? record.committed[mipLevel] : ShaderReadStates;
         if (restore && resting != D3D12_RESOURCE_STATE_COPY_DEST) {
             const D3D12_RESOURCE_BARRIER toCopy = TransitionSubresource(
-                record.resource.Get(), mipLevel, resting, D3D12_RESOURCE_STATE_COPY_DEST);
+                record.resource.Get(), subresource, resting, D3D12_RESOURCE_STATE_COPY_DEST);
             uploadList_->ResourceBarrier(1, &toCopy);
         }
         D3D12_TEXTURE_COPY_LOCATION destination = {};
         destination.pResource = record.resource.Get();
         destination.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-        destination.SubresourceIndex = mipLevel;
+        destination.SubresourceIndex = subresource;
         D3D12_TEXTURE_COPY_LOCATION from = {};
         from.pResource = source;
         from.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
@@ -2458,7 +2711,7 @@ private:
         uploadList_->CopyTextureRegion(&destination, 0, 0, 0, &from, nullptr);
         if (resting != D3D12_RESOURCE_STATE_COPY_DEST) {
             const D3D12_RESOURCE_BARRIER back = TransitionSubresource(
-                record.resource.Get(), mipLevel, D3D12_RESOURCE_STATE_COPY_DEST, resting);
+                record.resource.Get(), subresource, D3D12_RESOURCE_STATE_COPY_DEST, resting);
             uploadList_->ResourceBarrier(1, &back);
         }
         if (!restore) {
@@ -2467,43 +2720,67 @@ private:
         }
     }
 
-    // 빈틈 없는 행의 픽셀(mip firstMip부터 count개)을 장치 행 정렬로 ring에 옮기고 복사를 기록한다.
+    // 빈틈 없는 행의 픽셀(mip firstMip부터 count개, mip 안은 plane 순서)을 장치 행 정렬로 ring에
+    // 옮기고 복사를 기록한다. 블록 압축 형식의 행은 블록 행이다.
     Result<void> RecordTextureUpload(TextureRecord& record, uint32 firstMip, uint32 count,
                                      Span<const uint8> pixels, bool restore) noexcept {
-        D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprints[MaxMipLevels] = {};
-        UINT64 total = 0;
+        constexpr uint32 MaxPlanes = 2;
+        const uint32 planes = PixelFormatPlaneCount(record.format);
+        D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprints[MaxMipLevels * MaxPlanes] = {};
+        uint32 subresources[MaxMipLevels * MaxPlanes] = {};
+        uint32 levels[MaxMipLevels * MaxPlanes] = {};
+        uint64 offsets[MaxMipLevels * MaxPlanes] = {};
         const D3D12_RESOURCE_DESC resourceDesc = record.resource->GetDesc();
-        device_->GetCopyableFootprints(&resourceDesc, firstMip, count, 0, footprints, nullptr,
-                                       nullptr, &total);
+        // subresource마다 배치 정렬된 위치에 이어 놓는다.
+        uint64 total = 0;
+        uint32 copies = 0;
+        for (uint32 index = 0; index < count; ++index) {
+            for (uint32 plane = 0; plane < planes; ++plane) {
+                const uint32 subresource =
+                    d3d12::SubresourceIndex(firstMip + index, plane, record.mipLevels);
+                UINT64 bytes = 0;
+                device_->GetCopyableFootprints(&resourceDesc, subresource, 1, 0,
+                                               &footprints[copies], nullptr, nullptr, &bytes);
+                total = (total + TexturePlacementAlignment - 1) / TexturePlacementAlignment *
+                        TexturePlacementAlignment;
+                offsets[copies] = total;
+                subresources[copies] = subresource;
+                levels[copies] = firstMip + index;
+                total += bytes;
+                ++copies;
+            }
+        }
         auto space = StageUpload(total, TexturePlacementAlignment);
         if (!space) {
             return Result<void>::Failure(space.Error());
         }
-        // 원본은 빈틈 없는 행이고 GPU 복사는 256바이트 정렬 행 간격을 요구하므로 mip·행마다 옮긴다.
-        // 블록 압축 형식의 행은 블록 행이다.
         usize sourceOffset = 0;
+        uint32 copy = 0;
         for (uint32 index = 0; index < count; ++index) {
             const uint32 level = firstMip + index;
             const uint32 width = MipExtent(record.width, level);
-            const uint32 height =
-                PixelFormatBlockRows(record.format, MipExtent(record.height, level));
-            const usize rowBytes = static_cast<usize>(PixelFormatRowBytes(record.format, width));
-            uint8* rows = space.Value().data + footprints[index].Offset;
-            for (uint32 row = 0; row < height; ++row) {
-                platform::MemoryCopy(rows + static_cast<usize>(row) *
-                                                footprints[index].Footprint.RowPitch,
-                                     pixels.Data() + sourceOffset + row * rowBytes, rowBytes);
+            const uint32 height = MipExtent(record.height, level);
+            for (uint32 plane = 0; plane < planes; ++plane, ++copy) {
+                const usize rowBytes =
+                    static_cast<usize>(PixelFormatPlaneRowBytes(record.format, plane, width));
+                const uint32 rows = PixelFormatPlaneRows(record.format, plane, height);
+                uint8* destination = space.Value().data + offsets[copy];
+                for (uint32 row = 0; row < rows; ++row) {
+                    platform::MemoryCopy(destination + static_cast<usize>(row) *
+                                                           footprints[copy].Footprint.RowPitch,
+                                         pixels.Data() + sourceOffset + row * rowBytes, rowBytes);
+                }
+                sourceOffset += rowBytes * rows;
+                footprints[copy].Offset = space.Value().offset + offsets[copy];
             }
-            sourceOffset += rowBytes * height;
-            footprints[index].Offset += space.Value().offset;
         }
         auto opened = OpenUploadList();
         if (!opened) {
             return opened;
         }
-        for (uint32 index = 0; index < count; ++index) {
-            CopyTextureFrom(record, firstMip + index, space.Value().resource, footprints[index],
-                            restore);
+        for (uint32 index = 0; index < copies; ++index) {
+            CopyTextureFrom(record, levels[index], subresources[index], space.Value().resource,
+                            footprints[index], restore);
         }
         return Result<void>::Success();
     }
@@ -2547,23 +2824,29 @@ private:
         }
     }
 
-    // RenderTarget 텍스처를 readback 버퍼로 복사하는 기록을 쌓고 바로 제출한다(잠금 안).
-    Result<ReadbackRequest> RequestReadbackLocked(TextureHandle target) noexcept {
+    // 텍스처 mip 하나의 plane 하나를 readback 버퍼로 복사하는 기록을 쌓고 바로 제출한다(잠금 안).
+    // requireRenderTarget이면 RenderTarget 텍스처만 받는다(ReadPixels·RequestReadback 계약).
+    Result<ReadbackRequest> RequestReadbackLocked(TextureHandle target, uint32 mipLevel = 0,
+                                                  uint32 plane = 0,
+                                                  bool requireRenderTarget = true) noexcept {
         const TextureRecord* record = textures_.Find(target.slot);
         if (record == nullptr) {
             return Result<ReadbackRequest>::Failure(ErrorCode::StaleHandle);
         }
-        if (!record->renderTarget) {
+        if ((requireRenderTarget && !record->renderTarget) || record->view ||
+            mipLevel >= record->mipLevels || plane >= PixelFormatPlaneCount(record->format)) {
             return Result<ReadbackRequest>::Failure(ErrorCode::InvalidArgument);
         }
         ReadbackRecord readback;
-        readback.width = record->width;
-        readback.height = record->height;
-        readback.bytesPerPixel = GetPixelFormatInfo(record->format).blockBytes;
+        const uint32 width = MipExtent(record->width, mipLevel);
+        const uint32 height = MipExtent(record->height, mipLevel);
+        readback.rowBytes = PixelFormatPlaneRowBytes(record->format, plane, width);
+        readback.rows = PixelFormatPlaneRows(record->format, plane, height);
+        const uint32 subresource = d3d12::SubresourceIndex(mipLevel, plane, record->mipLevels);
         const D3D12_RESOURCE_DESC resourceDesc = record->resource->GetDesc();
         UINT64 total = 0;
-        device_->GetCopyableFootprints(&resourceDesc, 0, 1, 0, &readback.footprint, nullptr,
-                                       nullptr, &total);
+        device_->GetCopyableFootprints(&resourceDesc, subresource, 1, 0, &readback.footprint,
+                                       nullptr, nullptr, &total);
         readback.total = total;
         const D3D12_HEAP_PROPERTIES heap = HeapProperties(D3D12_HEAP_TYPE_READBACK);
         const D3D12_RESOURCE_DESC buffer = BufferResource(total);
@@ -2582,11 +2865,11 @@ private:
         }
         // 업로드 기록은 상태 중립이다: 제출한 상태에서 복사 원본으로 바꿨다가 되돌린다.
         // 이미 복사 원본 상태면(그래프가 CopySource로 끝냈다) barrier를 내지 않는다.
-        const D3D12_RESOURCE_STATES resting = record->committed[0];
+        const D3D12_RESOURCE_STATES resting = record->committed[mipLevel];
         const bool move = resting != D3D12_RESOURCE_STATE_COPY_SOURCE;
         if (move) {
             const D3D12_RESOURCE_BARRIER toCopy = TransitionSubresource(
-                record->resource.Get(), 0, resting, D3D12_RESOURCE_STATE_COPY_SOURCE);
+                record->resource.Get(), subresource, resting, D3D12_RESOURCE_STATE_COPY_SOURCE);
             uploadList_->ResourceBarrier(1, &toCopy);
         }
         D3D12_TEXTURE_COPY_LOCATION destination = {};
@@ -2596,11 +2879,11 @@ private:
         D3D12_TEXTURE_COPY_LOCATION source = {};
         source.pResource = record->resource.Get();
         source.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-        source.SubresourceIndex = 0;
+        source.SubresourceIndex = subresource;
         uploadList_->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
         if (move) {
             const D3D12_RESOURCE_BARRIER back = TransitionSubresource(
-                record->resource.Get(), 0, D3D12_RESOURCE_STATE_COPY_SOURCE, resting);
+                record->resource.Get(), subresource, D3D12_RESOURCE_STATE_COPY_SOURCE, resting);
             uploadList_->ResourceBarrier(1, &back);
         }
         auto flushed = FlushUploadsLocked();
@@ -2609,8 +2892,7 @@ private:
             return Result<ReadbackRequest>::Failure(flushed.Error());
         }
         readback.fenceValue = flushed.Value();
-        const uint64 bytes =
-            static_cast<uint64>(readback.width) * readback.height * readback.bytesPerPixel;
+        const uint64 bytes = readback.rowBytes * readback.rows;
         auto added = readbacks_.TryAdd(Move(readback));
         if (!added) {
             return Result<ReadbackRequest>::Failure(added.Error());
@@ -2627,8 +2909,8 @@ private:
         if (record == nullptr) {
             return Result<bool>::Failure(ErrorCode::StaleHandle);
         }
-        const usize rowBytes = static_cast<usize>(record->width) * record->bytesPerPixel;
-        if (out.Size() != rowBytes * record->height) {
+        const usize rowBytes = static_cast<usize>(record->rowBytes);
+        if (out.Size() != rowBytes * record->rows) {
             return Result<bool>::Failure(ErrorCode::InvalidArgument);
         }
         const uint64 completed = fence_->GetCompletedValue();
@@ -2645,7 +2927,7 @@ private:
             return FailWith<bool>("readback map failed");
         }
         const uint8* rows = static_cast<const uint8*>(mapped) + record->footprint.Offset;
-        for (uint32 row = 0; row < record->height; ++row) {
+        for (uint32 row = 0; row < record->rows; ++row) {
             platform::MemoryCopy(
                 out.Data() + row * rowBytes,
                 rows + static_cast<usize>(row) * record->footprint.Footprint.RowPitch, rowBytes);
@@ -2765,13 +3047,13 @@ private:
 
     // 모든 D3D 인터페이스는 IUnknown을 단일 상속하므로 포인터 변환이 안전하다.
     template <class T>
-    void Defer(ComRef<T>&& object, int64 srv, int64 rtv) noexcept {
+    void Defer(ComRef<T>&& object, int64 srv, int64 rtv, int64 dsv = -1) noexcept {
         ComRef<IUnknown> unknown;
         unknown.Attach(object.Detach());
-        RetireObject(Move(unknown), srv, rtv);
+        RetireObject(Move(unknown), srv, rtv, dsv);
     }
 
-    void RetireObject(ComRef<IUnknown>&& object, int64 srv, int64 rtv) noexcept {
+    void RetireObject(ComRef<IUnknown>&& object, int64 srv, int64 rtv, int64 dsv = -1) noexcept {
         Retired entry;
         entry.object = Move(object);
         // 제출된 작업은 모두 signal 뒤에 있으므로 마지막 signal 값이 끝나면 더 쓰지 않는다. 기록
@@ -2784,6 +3066,7 @@ private:
         entry.uploadPending = uploadOpen_;
         entry.srv = srv;
         entry.rtv = rtv;
+        entry.dsv = dsv;
         // 용량은 자원을 만들 때 미리 확보했으므로(ReserveRetireCapacity) 실패하지 않는다.
         auto pushed = retired_.TryPushBack(Move(entry));
         if (!pushed) {
@@ -2822,6 +3105,9 @@ private:
             }
             if (entry.rtv >= 0) {
                 rtvs_.Free(static_cast<uint32>(entry.rtv));
+            }
+            if (entry.dsv >= 0) {
+                dsvs_.Free(static_cast<uint32>(entry.dsv));
             }
             auto removed = retired_.TryRemoveAtSwap(index - 1);
             (void)removed;
@@ -2878,20 +3164,28 @@ private:
         platform::LockGuard lock(gate_);
         TextureRecord* record = textures_.Find(handle.slot);
         SlotHandle slot = handle.slot;
-        if (record == nullptr) {
+        if (record == nullptr || !record->hasSrv) {
             record = textures_.Find(white_.slot);
             slot = white_.slot;
         }
         if (record != nullptr) {
+            // view는 자원 상태를 원 텍스처 기록이 추적한다(원 텍스처는 view가 남아 있는 동안 표에
+            // 남는다, Retire 참고).
+            TextureRecord* owner = record;
+            SlotHandle ownerSlot = slot;
+            if (record->view) {
+                ownerSlot = record->source;
+                owner = textures_.Find(ownerSlot);
+            }
             // 명시 전이 없이 셰이더 읽기 상태가 아닌 텍스처를 읽으면 암묵 전이로 메운다(GX5. 렌더
             // 그래프를 거치지 않는 그리기용이다).
             bool readable = true;
-            for (uint32 mip = 0; mip < record->mipLevels; ++mip) {
+            for (uint32 mip = 0; owner != nullptr && mip < owner->mipLevels; ++mip) {
                 readable = readable &&
-                           (record->current[mip] & D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE) != 0;
+                           (owner->current[mip] & D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE) != 0;
             }
-            if (!readable && recording_) {
-                TrackTransition(*record, slot, 0, record->mipLevels, ShaderReadStates);
+            if (owner != nullptr && !readable && recording_) {
+                TrackTransition(*owner, ownerSlot, 0, owner->mipLevels, ShaderReadStates);
             }
             list_->SetGraphicsRootDescriptorTable(1, srvs_.Gpu(record->srv));
             list_->SetGraphicsRootDescriptorTable(2, samplers_.Gpu(record->sampler));
@@ -2987,7 +3281,13 @@ private:
                 LowerBufferTransition(transition);
                 continue;
             }
-            TextureRecord* record = textures_.Find(transition.texture.slot);
+            // view의 전이는 자원 상태를 추적하는 원 텍스처 기록에 낸다.
+            SlotHandle slot = transition.texture.slot;
+            TextureRecord* record = textures_.Find(slot);
+            if (record != nullptr && record->view) {
+                slot = record->source;
+                record = textures_.Find(slot);
+            }
             if (record == nullptr || transition.range.firstMip >= record->mipLevels) {
                 ++ignoredDraws_;
                 continue;
@@ -3015,7 +3315,7 @@ private:
             }
             const D3D12_RESOURCE_STATES after = StatesFor(transition.after);
             const bool uav = HasAnyAccess(transition.after, UavAccessMask);
-            TrackTransition(*record, transition.texture.slot, first, count, after, uav);
+            TrackTransition(*record, slot, first, count, after, uav);
         }
     }
 
@@ -3043,16 +3343,21 @@ private:
         for (uint32 mip = first; mip < first + count && uniform; ++mip) {
             uniform = record.current[mip] == record.current[first];
         }
-        D3D12_RESOURCE_BARRIER barriers[MaxMipLevels] = {};
+        constexpr uint32 MaxPlanes = 2;
+        D3D12_RESOURCE_BARRIER barriers[MaxMipLevels * MaxPlanes] = {};
         uint32 used = 0;
         if (uniform && record.current[first] != after) {
             barriers[used++] =
                 TransitionBarrier(record.resource.Get(), record.current[first], after);
         } else {
             for (uint32 mip = first; mip < first + count; ++mip) {
-                if (record.current[mip] != after) {
-                    barriers[used++] = TransitionSubresource(record.resource.Get(), mip,
-                                                             record.current[mip], after);
+                for (uint32 plane = 0; plane < record.devicePlanes && plane < MaxPlanes; ++plane) {
+                    if (record.current[mip] != after) {
+                        barriers[used++] = TransitionSubresource(
+                            record.resource.Get(),
+                            d3d12::SubresourceIndex(mip, plane, record.mipLevels),
+                            record.current[mip], after);
+                    }
                 }
             }
         }
@@ -3160,9 +3465,12 @@ private:
     SlotArray<SwapChainRecord> swapChains_;
     Array<Retired> retired_;
     DescriptorPool rtvs_;
+    DescriptorPool dsvs_;
     DescriptorPool srvs_;
     DescriptorPool samplers_;
     SamplerEntry samplerDescs_[SamplerCapacity];
+    // 형식 번호별 능력이다(장치 생성 때 채우고 바꾸지 않는다).
+    PixelFormatCaps formatCaps_[MaxPixelFormatNumber + 1] = {};
     uint32 samplerCount_ = 0;
     ComRef<IDXGIFactory4> factory_;
     ComRef<ID3D12Device> device_;

@@ -159,6 +159,7 @@ public:
     Result<TextureHandle> CreateTexture(const TextureDesc& desc,
                                         Span<const uint8> pixels) noexcept override;
     Result<PipelineHandle> CreatePipeline(const PipelineDesc& desc) noexcept override;
+    PixelFormatCaps GetPixelFormatCaps(PixelFormat format) const noexcept override;
     Result<CommandContext*> BeginFrame(SwapChainHandle handle,
                                        const ClearColor& clear) noexcept override;
     Result<CommandContext*> BeginOffscreen(TextureHandle handle,

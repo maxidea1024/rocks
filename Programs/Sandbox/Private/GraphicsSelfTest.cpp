@@ -4,6 +4,7 @@
 #include "RenderLaneSelfTest.h"
 #include "TimingSelfTest.h"
 #include "UploadSelfTest.h"
+#include "FormatSelfTest.h"
 #include "VertexSelfTest.h"
 
 #include <Core/Containers/Array.h>
@@ -669,6 +670,8 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     failures += RunVertexChecks(name, device, result.triangle.GetAllocator());
     // 업로드·readback(GX8): 내용 갱신·ring wrap·staging 회수·비동기 readback·다른 스레드 생성.
     failures += RunUploadChecks(name, device, renderer, result.triangle.GetAllocator());
+    // 픽셀 형식(PF2·PF3·PF6): 능력 ⇔ 생성, 업로드·readback 왕복, sRGB·깊이·스텐실·비디오 view.
+    failures += RunFormatChecks(name, device, result.triangle.GetAllocator());
     // 렌더 그래프(RG1): 그래프 텍스처·명시 전이·culling·history export/import.
     failures += RunRenderGraphChecks(name, device, renderer, result.triangle.GetAllocator());
     // GPU 계측(GX9): timestamp 쌍·slot 재사용·calibration·debug marker.

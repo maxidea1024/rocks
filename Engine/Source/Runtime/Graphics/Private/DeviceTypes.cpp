@@ -72,4 +72,42 @@ Result<void> ValidateVertexLayout(const VertexLayout& layout) noexcept {
     return Result<void>::Success();
 }
 
+Result<PixelFormat> ResolveTextureViewFormat(PixelFormat texture,
+                                             const TextureViewDesc& desc) noexcept {
+    const PixelFormatInfo& info = GetPixelFormatInfo(texture);
+    if (!IsValidPixelFormat(texture) || desc.plane >= info.planeCount) {
+        return Result<PixelFormat>::Failure(ErrorCode::InvalidArgument);
+    }
+    if (info.planeCount == 2) {
+        const PixelFormat planeFormat = info.planes[desc.plane].format;
+        if (desc.format != PixelFormat::Unknown && desc.format != planeFormat) {
+            return Result<PixelFormat>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        return Result<PixelFormat>::Success(planeFormat);
+    }
+    if (desc.format == PixelFormat::Unknown || desc.format == texture) {
+        return Result<PixelFormat>::Success(texture);
+    }
+    if (info.srgbPair != PixelFormat::Unknown && desc.format == info.srgbPair) {
+        return Result<PixelFormat>::Success(info.srgbPair);
+    }
+
+    return Result<PixelFormat>::Failure(ErrorCode::InvalidArgument);
+}
+
+PixelFormatCaps RequiredPixelFormatCaps(TextureUsage usage, uint32 mipLevels) noexcept {
+    switch (usage) {
+    case TextureUsage::Sampled:
+        return mipLevels > 1 ? PixelFormatCaps::Sampled | PixelFormatCaps::Mipmaps
+                             : PixelFormatCaps::Sampled;
+    case TextureUsage::RenderTarget:
+        return PixelFormatCaps::RenderTarget | PixelFormatCaps::Sampled;
+    case TextureUsage::DepthStencil:
+        return PixelFormatCaps::DepthStencil;
+    }
+
+    return PixelFormatCaps::None;
+}
+
 } // namespace rocks::graphics

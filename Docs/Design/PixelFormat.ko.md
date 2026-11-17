@@ -1,6 +1,6 @@
 # 픽셀 형식(PixelFormat) 설계
 
-기준일: 2026-11-17, 개정 2(초안). UE 5.8이 정의하는 픽셀 형식 전체를 Rocks에 들이기 위한 조사와 구현 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-17, 개정 3(초안). UE 5.8이 정의하는 픽셀 형식 전체를 Rocks에 들이기 위한 조사와 구현 스펙이다. 범위는 다음과 같다.
 - 형식 목록과 고정 번호표, UE 대응표, 제외 형식과 사유
 - 형식 정보 표(`PixelFormatInfo`)와 형식 능력 플래그(`PixelFormatCaps`)
 - backend 대응 표(D3D12·D3D11·Vulkan·OpenGL ES·Metal)와 장치 능력 질의(GX1)의 연결
@@ -531,7 +531,7 @@ uint64 MipChainBytes(PixelFormat format, uint32 width, uint32 height, uint32 dep
                      uint32 mipLevels) noexcept;
 ```
 
-`MipExtent`·`FullMipCount`는 그대로 둔다. 깊이·스텐실 형식은 CPU 업로드 크기를 정의하지 않는다(`PixelFormatImageBytes`가 0). readback은 plane별이다(10절).
+`MipExtent`·`FullMipCount`는 그대로 둔다. 깊이·스텐실과 비디오 형식의 이미지 크기는 plane 크기의 합이고(개정 3, 14.1절) readback은 plane별이다(10절).
 
 ## 7. 형식 능력 플래그(`PixelFormatCaps`)
 
@@ -854,6 +854,38 @@ ID는 이 문서가 부여한다(PF). 형식 부분을 A0-G에서 떼어 렌더 
 
 시험 규칙: 형식 순회 시험은 장치가 지원하지 않는 형식을 "건너뜀"으로 기록하되, 그 판정은 PF3 이후 능력 질의 결과로만 한다(PF2에서는 backend 표의 "장치 형식 없음"만 건너뜀). 시간·경쟁에 기대지 않는다.
 
+### 14.1 구현 상태(개정 3)
+
+| ID | 상태 | 위치 |
+|---|---|---|
+| PF1 | **구현** | `GraphicsTypes/PixelFormat.h`·`PixelFormat.cpp`, 시험 `GraphicsTypes/Tests/PixelFormatTests.cpp` |
+| PF2 | D3D12 **구현**. GLES·D3D11은 각 backend 대응 단계 | `D3D12Graphics/Private/Win64/D3D12PixelFormats.{h,cpp}`, 생성·업로드·readback·view는 `D3D12Device.cpp` |
+| PF3 | 틀 **구현**. D3D12는 질의, D3D11·OpenGL은 대응 중인 RGBA8 두 형식만 정적 공개 | `Device::GetPixelFormatCaps`, `RequiredPixelFormatCaps`(`Graphics/DeviceTypes.h`) |
+| PF6 | D3D12 **구현** | NV12·P010 생성·plane 업로드·plane readback·Y/UV view |
+
+검증(2026-11-17, Sandbox `--self-test`, 검증 계층 켬): 형식 86개 × 용도에서 "능력 있음 ⇔ 생성 성공" 실패 0, 업로드·readback·`UpdateTexture` 왕복 실패 0, view 샘플 실패 0, 검증 계층 오류 0.
+
+| 장치 | Sampled | RenderTarget | DepthStencil | 능력 없음 |
+|---|---|---|---|---|
+| D3D12 GTX 1060 | 60 | 38 | 5 | 26 |
+| D3D12 WARP | 60 | 42 | 5 | 26 |
+| D3D11·D3D11 WARP·OpenGL | 2 | 2 | 0 | 84 |
+
+D3D12의 능력 없음 26개는 DXGI 형식이 없는 ETC2·EAC 6, ASTC 15, `R8UnormSrgb`·`RG8UnormSrgb`·`RGB8Unorm`·`RGB8UnormSrgb`·`R64Uint`다(8.4절).
+
+**스펙과 다르게 정한 것(개정 3).**
+- 깊이·스텐실 형식의 이미지 크기를 plane 합으로 정의하였다(PF1에서는 0). D3D12는 깊이 자원에도 CPU 데이터를 복사할 수 있고, plane별 크기를 합하면 비디오 형식과 같은 규칙이 된다. 초기 데이터 배치는 mip 0부터, mip 안은 plane 0 다음 plane 1이다. `PixelFormatPlaneCount`·`PixelFormatPlaneRowBytes`·`PixelFormatPlaneRows`를 더하였고, `PixelFormatRowBytes`는 단일 plane 형식만 값을 준다. 깊이 전용 형식의 `blockBytes`는 깊이 texel 바이트(D16 2·D24 4·D32F 4)다.
+- Graphics 계약을 GX2 전에 일부 열었다.
+  - `TextureUsage::DepthStencil`: 생성·DSV까지만 한다. 깊이 그리기 경로(attachment·깊이 상태)는 GX2·GX3이다. 깊이 형식은 용도와 상관없이 `ALLOW_DEPTH_STENCIL`로 만들어 Sampled 깊이 텍스처에도 CPU 데이터를 복사한다. 그래서 D3D12의 깊이 형식 Sampled 능력은 DSV 지원을 함께 요구한다.
+  - view는 별도 handle 타입 대신 원 자원을 공유하는 **`TextureHandle`이다**(`CreateTextureView`, `TextureViewDesc{format, plane}`). 기존 `SetTexture`로 묶고 `Retire`로 놓으며, 원 텍스처를 먼저 놓아도 view가 자원 참조를 쥔다. view에는 업로드·readback·그리기 대상 지정을 하지 않는다. 형식·plane 규칙은 장치 무관 함수 `ResolveTextureViewFormat`이다.
+  - `ReadTexture(handle, mip, plane, out)`: 렌더 타깃이 아닌 텍스처·블록 압축·깊이 plane·비디오 plane을 읽는 동기 시험 경로다(`ReadPixels`와 같은 readback 경로).
+  - 새 virtual(`GetPixelFormatCaps`·`CreateTextureView`·`ReadTexture`)은 기본 구현이 각각 `None`·`Unsupported`·`Unsupported`다. 다른 backend 브랜치가 구현 없이도 빌드된다.
+- 텍스처·파이프라인 생성은 형식 능력으로 판정한다. 파이프라인 색 형식은 `RenderTarget`(알파 블렌드면 `Blendable`도)이 필요하다. 능력이 없으면 `Unsupported`이고 `LastError`에 형식 이름을 기록한다(D3D12·OpenGL).
+- `Multisample` 능력과 표본 수 질의(`GetPixelFormatSampleCounts`)는 MSAA desc가 생기는 GX2로 미뤘다. D3D12의 `Texture3D`·`TextureCube`·`Storage*`·`TexelBuffer*`는 질의해 공개하지만 그 차원·view API가 아직 없어 "능력 ⇔ 생성" 시험 범위 밖이다.
+- `D24Unorm`은 DXGI `R24G8_TYPELESS` 자원의 깊이 plane만 쓴다. 장치 자원의 plane이 Rocks plane보다 많으면 올리지 않은 plane도 생성 직후 쉬는 상태(PIXEL_SHADER_RESOURCE)로 옮긴다(`FormatPlaneCount`, `D3D12_FEATURE_FORMAT_INFO`).
+- 비디오 형식 plane은 SRV만 생성한다(plane RTV·UAV 없음). 비디오 형식의 Sampled 능력은 plane SRV 형식이 아니라 자원 형식 자체의 셰이더 지원으로 판정한다.
+- 자원 상태(RG1 병합 뒤): D3D12 텍스처 상태는 mip별 committed·current로 추적한다(RenderBase GX5). 다중 plane 자원은 mip 하나의 상태를 그 mip의 모든 plane subresource가 함께 따르고, mip별 전이는 plane마다 barrier를 낸다(`TextureRecord::devicePlanes`). view는 상태를 따로 갖지 않고 원 텍스처 기록이 추적한다(`SetTexture`·`Transition`이 원 기록으로 향한다). 원 텍스처를 view보다 먼저 `Retire`하면 기록을 남겨 두었다가 마지막 view를 놓을 때 함께 놓는다. 업로드와 readback(`ReadTexture`)은 상태 중립이다: 그 mip의 committed 상태에서 복사 상태로 바꿨다가 되돌린다. 렌더 그래프의 텍스처 생성은 지금처럼 블록 압축을 거부하고 깊이 형식은 GX4에서 연다.
+
 ## 15. A0-G와의 분담
 
 형식 부분(번호표·정보 표·backend 형식 대응·형식 능력 질의)은 렌더 쪽이 PF1–PF3으로 지금 한다. A0-G에는 차원·view swizzle·샘플러가 남는다. A0-G의 backend 형식 표는 PF2·PF3이 만든 표를 쓴다.
@@ -902,3 +934,4 @@ ID는 이 문서가 부여한다(PF). 형식 부분을 A0-G에서 떼어 렌더 
 
 - 개정 1(2026-11-17): 초안. UE 5.8.4 `EPixelFormat` 94개 값 전체, 정보 표·능력 플래그·판정 위치, D3D12·D3D11·Vulkan·OpenGL·Metal 형식 표, sRGB·깊이·스텐실·비디오 처리, 쿠킹 대상 위치를 조사하였다. OpenGL ES 3.2 사양서 Table 8.10·8.11·8.17·8.19·8.26과 NDK 헤더로 GLES 대응을 확인하였다. 사용자 지시 "PixelFormat으로", "언리얼에서 지원하는거 full로 지원", "시간이 걸리더라도 제대로해"에 따라 형식마다 근거를 달고 확인하지 못한 것은 미확인으로 남겼다.
 - 개정 2(2026-11-17): 사용자 결정 반영. PX1 (가) sRGB 별도 형식, PX2 계열별 번호 구간, PX3 비디오 형식은 D3D12 생성까지 지금 구현(권장안이던 "생성은 미디어 단계까지 계약"이 아님). 1·11·16절과 PF6 행을 고쳤다.
+- 개정 3(2026-11-17): PF2(D3D12)·PF3 틀·PF6(D3D12) 구현과 스펙 차이를 14.1절에 기록하였다. 깊이·스텐실 이미지 크기를 plane 합으로 바꾸었고, `TextureUsage::DepthStencil`·`CreateTextureView`·`ReadTexture`·`GetPixelFormatCaps`를 Graphics 계약에 더하였다.
