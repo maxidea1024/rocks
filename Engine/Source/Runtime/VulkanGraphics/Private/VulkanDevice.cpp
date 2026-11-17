@@ -108,8 +108,8 @@ VulkanDevice::VulkanDevice(Allocator& allocator) noexcept
       buffers_(allocator), textures_(allocator), pipelines_(allocator), swapChains_(allocator),
       readbacks_(allocator), retired_(allocator), descriptorPools_(allocator),
       renderPasses_(allocator), timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics),
-      acquireSemaphores_(allocator), orphanSemaphores_(allocator), ring_(allocator),
-      stagingBlocks_(allocator), timestamps_(allocator) {
+      touchedTextures_(allocator), acquireSemaphores_(allocator), orphanSemaphores_(allocator),
+      ring_(allocator), stagingBlocks_(allocator), timestamps_(allocator) {
     stagingSource_.owner = this;
     timestampSource_.owner = this;
 }

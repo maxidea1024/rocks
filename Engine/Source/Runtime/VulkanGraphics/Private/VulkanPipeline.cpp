@@ -128,7 +128,7 @@ Result<VkRenderPass> VulkanDevice::RenderPassFor(VkFormat format, bool load) noe
     }
 
     // layout은 시작·끝 모두 COLOR_ATTACHMENT_OPTIMAL이고 전이는 바깥 barrier가 한다. load op만 다른
-    // render pass끼리는 호환이다(사양 "Render Pass Compatibility").
+    // render pass끼리는 호환이다(사양 "Render Pass Compatibility". 의존은 호환성에 들지 않는다).
     VkAttachmentDescription attachment = {};
     attachment.format = format;
     attachment.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -143,12 +143,26 @@ Result<VkRenderPass> VulkanDevice::RenderPassFor(VkFormat format, bool load) noe
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments = &color;
+    // 바깥 의존: 앞 명령(앞 render pass·앞 제출 포함)의 color attachment 쓰기 뒤에 이 pass의
+    // attachment 읽기·쓰기가 온다. 같은 대상이 렌더 타깃 상태로 남은 채 이어지는 pass(풀에서 다시
+    // 쓴 대상, 전이로 닫았다 다시 연 LOAD pass)의 WAW·RAW를 이 의존이 막는다. 암묵 바깥 의존은
+    // TOP_OF_PIPE·access 0이라 이 일을 하지 않는다(사양 "Render Pass Creation").
+    VkSubpassDependency dependency = {};
+    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependency.dstSubpass = 0;
+    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    dependency.dstAccessMask =
+        VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
     VkRenderPassCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     info.attachmentCount = 1;
     info.pAttachments = &attachment;
     info.subpassCount = 1;
     info.pSubpasses = &subpass;
+    info.dependencyCount = 1;
+    info.pDependencies = &dependency;
     RenderPassEntry entry;
     entry.format = format;
     entry.load = load;

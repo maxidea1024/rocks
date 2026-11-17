@@ -386,9 +386,11 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
     info.arrayLayers = 1;
     info.samples = VK_SAMPLE_COUNT_1_BIT;
     info.tiling = VK_IMAGE_TILING_OPTIMAL;
-    info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    // 모든 텍스처가 복사 원본이 될 수 있다(readback·그래프 CopySource, D3D12도 허용한다).
+    info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                 VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     if (renderTarget) {
-        info.usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        info.usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     }
 
     info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -399,6 +401,13 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
     record.mipLevels = desc.mipLevels;
     record.format = desc.format;
     record.renderTarget = renderTarget;
+    // 업로드로 채운 텍스처와 렌더 타깃 모두 셰이더 읽기 상태로 시작한다(D3D12와 같다, GX5). 아래
+    // 업로드 기록이 UNDEFINED에서 그 상태로 바꾼다.
+    for (uint32 mip = 0; mip < desc.mipLevels; ++mip) {
+        record.committed[mip] = CanonicalAccess(ResourceAccess::SrvGraphics);
+        record.current[mip] = CanonicalAccess(ResourceAccess::SrvGraphics);
+    }
+
     auto image = CreateImageWithMemory(info, record.image, record.memory);
     if (!image) {
         return Result<TextureHandle>::Failure(image.Error());
@@ -464,7 +473,7 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
     const TextureRecord& stored = *textures_.Find(added.Value());
     Result<void> uploaded = Result<void>::Success();
     if (renderTarget) {
-        // 쉬는 layout(SHADER_READ_ONLY)으로 바꿔 둔다. 다음 제출보다 먼저 실행된다.
+        // 셰이더 읽기 상태(SHADER_READ_ONLY)로 바꿔 둔다. 다음 제출보다 먼저 실행된다.
         uploaded = OpenUploadList();
         if (uploaded) {
             Barrier(upload_, stored.image, VK_IMAGE_LAYOUT_UNDEFINED,

@@ -1,6 +1,6 @@
 # Vulkan 그래픽 backend(VulkanGraphics) 설계
 
-기준일: 2026-11-17, 개정 1(초안). Vulkan backend `VulkanGraphics`가 Graphics 장치 계약(`Graphics/Device.h`)을 Vulkan 1.1 위에서 어떻게 지키는지 정한다. [셰이더 시스템](ShaderSystem.ko.md) P9 "Vulkan 선행"의 산출물이다. 그 문서가 P9 산출물로 "EngineRuntime에 절을 더한다"고 적었지만, 내용이 커서 이 문서로 따로 두고 [엔진 런타임](EngineRuntime.ko.md) 10절에는 요약과 링크만 둔다.
+기준일: 2026-11-17, 개정 2(초안). Vulkan backend `VulkanGraphics`가 Graphics 장치 계약(`Graphics/Device.h`)을 Vulkan 1.1 위에서 어떻게 지키는지 정한다. [셰이더 시스템](ShaderSystem.ko.md) P9 "Vulkan 선행"의 산출물이다. 그 문서가 P9 산출물로 "EngineRuntime에 절을 더한다"고 적었지만, 내용이 커서 이 문서로 따로 두고 [엔진 런타임](EngineRuntime.ko.md) 10절에는 요약과 링크만 둔다.
 
 UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275b`, 로컬 클론) 원본이다. 경로는 `Engine/Source/Runtime/VulkanRHI/` 기준이며 `Private/`는 `P/`, `Public/`은 `Pub/`로 줄인다. Vulkan 사양 근거는 Vulkan 1.4 사양(Vulkan-Docs)의 절 이름으로 적는다.
 
@@ -145,11 +145,20 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 
 ## 8. 이미지 layout과 동기화
 
-- 추적기 없이 자원마다 쉬는 layout 하나를 두고, 쓰는 명령 앞뒤에 그 layout에서 나가고 돌아오는 barrier를 둔다(D3D12 경로와 같은 모양, UE도 추적기가 없다).
-  - 패스: 쉬는 layout → `COLOR_ATTACHMENT_OPTIMAL` → (render pass) → 쉬는 layout.
-  - 업로드: `SHADER_READ_ONLY_OPTIMAL` → `TRANSFER_DST_OPTIMAL` → 복사 → `SHADER_READ_ONLY_OPTIMAL`(처음 생성은 UNDEFINED에서).
-  - readback·`CopyPassTarget`: 원본은 `TRANSFER_SRC_OPTIMAL`, 대상은 `TRANSFER_DST_OPTIMAL`을 거쳐 돌아온다.
-- `CopyPassTarget`은 render pass 안에서 복사할 수 없으므로 render pass를 끝내고 복사한 뒤 LOAD render pass로 이어 연다. 묶인 파이프라인·descriptor·동적 상태는 명령 버퍼 상태라 그대로 남는다.
+- 명시 접근 상태와 전이(RenderBase GX5, `CommandContext::Transition`)를 따른다. 텍스처 mip마다 접근 상태를 추적한다(`committed`는 제출한 프레임 기록 끝, `current`는 기록 중 프레임 안). 제출하면 `current`를 `committed`로 삼고, 제출하지 못하면 되돌린다. D3D12와 같은 규칙이다.
+- 접근 상태 → layout·단계·access(`Private/VulkanAccess.cpp`, UE `VulkanBarriers.cpp`의 `GetVkStageAndAccessFlags` 대응):
+  - layout: 셰이더 읽기만 `SHADER_READ_ONLY_OPTIMAL`, `RenderTarget` `COLOR_ATTACHMENT_OPTIMAL`, `CopySource`·`CopyDestination` `TRANSFER_SRC·DST_OPTIMAL`, UAV와 서로 다른 읽기가 섞인 상태 `GENERAL`, 깊이 읽기·쓰기 `DEPTH_STENCIL_*`, `Unknown` `UNDEFINED`.
+  - 추적 상태는 대표형이다(`CanonicalAccess`): D3D12 상태 대응에서 같은 상태가 되는 접근을 하나로 모은다. `SrvGraphics`는 compute 읽기를 포함하고(D3D12 `PIXEL | NON_PIXEL_SHADER_RESOURCE`), `VertexOrIndex`는 `Constant`를, UAV 비트 하나는 두 UAV 비트를 포함한다. 검증 장치의 `before` 비교도 대표형끼리 하므로 D3D12와 같은 기준이다.
+  - 앞 상태는 쓰기 access만 원본 mask에 남긴다(읽기는 실행 의존으로 충분하다, WAR). barrier를 생략하는 것은 같은 layout에서 단계가 줄어드는 읽기 → 읽기뿐이다. 단계가 새로 생기는 읽기 → 읽기(예: 업로드 뒤 셰이더 읽기 상태 → 다른 단계 읽기)는 앞 쓰기가 새 단계에 보이도록 실행 의존을 잇는다(srcAccess 0, dstAccess는 새 읽기, barrier 사슬). 같은 상태 사이는 UAV면 생략 표시가 없을 때 쓰기 순서 barrier, 복사 대상처럼 attachment가 아닌 쓰기 상태면 WAW barrier다.
+  - 렌더 타깃끼리의 순서(같은 대상이 렌더 타깃 상태로 남은 채 이어지는 pass, 풀에서 다시 쓴 대상, 전이로 닫았다 다시 연 LOAD pass)는 render pass의 바깥 의존(`VK_SUBPASS_EXTERNAL` → 0, color attachment 쓰기 → color attachment 읽기·쓰기)이 맡는다. 암묵 바깥 의존은 `TOP_OF_PIPE`·access 0이라 이 일을 하지 않는다.
+  - 모든 텍스처는 `TRANSFER_SRC` usage를 가진다(readback·그래프 `CopySource`, D3D12도 허용한다). 렌더 타깃이 아닌 텍스처를 `RenderTarget`으로, 또는 아무 텍스처를 깊이 상태로 바꾸는 전이는 usage에 없는 layout이므로 무시하고 `IgnoredDraws`에 센다(깊이 텍스처는 GX4).
+  - 버퍼에는 layout이 없다. 쓰기가 끼거나 단계가 새로 생기는 전이만 메모리 barrier로 낮추고(앞 상태가 `Unknown`·`Discard`면 모든 쓰기를 기다린다. UE도 `Discard`를 `Unknown`처럼 다룬다), 단계가 줄어드는 읽기 → 읽기는 아무것도 하지 않는다. D3D12가 버퍼 전이를 COMMON 암묵 승격에 맡기는 것과 달리 Vulkan에는 암묵 동기화가 없기 때문이다.
+- render pass 안에서는 layout 전이를 할 수 없다(사양 "Render Pass" 의 barrier 제한). 그래서 `Transition`·`SetTexture` 암묵 전이·`CopyPassTarget`이 barrier를 내야 하면 열린 render pass를 닫고 barrier를 낸 뒤 LOAD render pass로 다시 연다. 묶인 파이프라인·descriptor·push constant·동적 상태는 명령 버퍼 상태라 그대로 남는다. 패스 대상 자신이 렌더 타깃 상태를 떠났으면 다시 열지 않고(그 사이 그리기는 무시된다), 대상이 렌더 타깃으로 돌아오는 전이에서 다시 연다.
+  - `BeginOffscreen`은 대상 mip 0을 추적 상태에서 `RenderTarget`으로 바꾸고(attachment 전이), `EndFrame`은 offscreen 대상을 그대로 둔다. swapchain 중간 이미지는 추적 텍스처가 아니며 attachment ↔ blit 원본 layout을 오간다.
+  - 생성: 업로드로 채운 텍스처와 RenderTarget 모두 셰이더 읽기 상태(`SrvGraphics`)로 시작한다(D3D12와 같다).
+  - 업로드·readback 기록은 프레임 기록보다 먼저 실행되므로 상태 중립이다: `committed`에서 복사 상태로 바꿨다가 되돌린다(이미 그 상태면 barrier가 없다). `CopyPassTarget`은 원본·대상을 `current`에서 바꿨다가 되돌린다.
+  - `SetTexture`가 그래픽 셰이더 읽기 상태가 아닌 텍스처(그래픽 읽기 비트가 없거나 layout이 `SHADER_READ_ONLY_OPTIMAL`이 아님)를 받으면 암묵 전이로 메운다(렌더 그래프를 거치지 않는 그리기). descriptor의 image layout을 `SHADER_READ_ONLY_OPTIMAL`로 썼기 때문이다. D3D12는 `PIXEL_SHADER_RESOURCE` 비트만 본다.
+  - 검증 층을 켠 장치에서 `before`가 추적 상태와 다르면 `ValidationErrorCount`를 올리고 `LastError`에 남긴다(GPU에는 추적 상태를 쓴다).
 - barrier API는 1.1 core `vkCmdPipelineBarrier`다(sync2는 1.3).
 - 업로드 묶음 명령 버퍼는 시작에 "앞 제출의 읽기 → 전송 쓰기"(WAR) 실행 의존, 끝에 "전송 쓰기 → 정점·index·셰이더 읽기" 메모리 의존을 둔다. 같은 queue의 제출 순서가 뒤 프레임까지 의존을 잇는다(사양 "Execution and Memory Dependencies"의 submission order 범위).
 - 한 묶음 안에서 같은 버퍼 구간을 두 번 쓰면(초기 데이터 + 갱신, 갱신 두 번) 두 복사는 순서가 없다. 그래서 묶음 안 버퍼 쓰기 구간을 기록하고 겹치는 복사 앞에 TRANSFER_WRITE → TRANSFER_WRITE barrier를 둔다. 이미지는 복사마다 layout 전이 barrier가 있어 해당 없다.
@@ -253,7 +262,8 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 |---|---|
 | GTX 1060 3GB(NVIDIA 560.94, Vulkan 1.3.280) | Sandbox `--self-test` 전체 통과: 픽셀·GX7 fence·GX10/11 소유권·swapchain·C7 컬링(창·offscreen, None·Back·Front, 음수 행렬식, 행 우선 행렬)·`SV_IsFrontFace` 대조·GX3a 정점 형식 20종·GX8 업로드·GX9 timestamp·calibration·marker·렌더 lane. D3D12와 픽셀 대조 차이 0 채널. 검증 오류 0, 의도한 render pass 형식 불일치는 `VUID-vkCmdDraw-renderPass-02684`로 집계된다 |
 | lavapipe(Mesa 26.2.7 `mesa-dist-win` release-msvc, llvmpipe LLVM 23.1.5, `VK_ADD_DRIVER_FILES`로 추가) | 같은 검사 전체 통과, D3D12와 차이 0 채널. calibrated timestamps가 PlatformBase 시계 domain(QPC)을 주지 않아 `clockCalibration` false이고 `CalibrateClocks`는 `Unsupported`(가짜 쌍 없음) |
-| 동기화 검증(`VK_LAYER_ENABLES`의 synchronization validation) | 두 장치 모두 `SYNC-HAZARD` 0건 |
+| GX5 전이·렌더 그래프 RG1(8절, origin 병합 뒤) | 두 장치에서 Sandbox 렌더 그래프 self-test(그래프 텍스처 → SRV 합성, culling, history export → import, 명시 전이)가 검증 오류 0(before 불일치 포함)으로 통과하고 풀 생성 2·재사용 1이다. 전체 self-test 대상 D3D12·WARP·D3D11·D3D11 WARP·OpenGL ES 두 context·Vulkan 두 장치가 모두 통과하고 D3D12 vs Vulkan·Vulkan software 픽셀 차이 0이다 |
+| 동기화 검증(`VK_LAYER_ENABLES`의 synchronization validation) | 두 장치 모두 `SYNC-HAZARD` 0건(GX5 전이 뒤에도 0건) |
 | Android 교차 빌드(arm64, NDK 29, `-p:RocksPlatform=android`, EngineTests) | VulkanGraphics Android 구현(`libvulkan.so`, `VK_KHR_android_surface`, CLOCK_MONOTONIC domain)과 ShaderFormatVulkan 미지원 구현이 경고 0으로 컴파일된다. 기기 실행은 SH6·P13이다 |
 | EngineTests | `GpuPageAllocator` 3건, `VulkanShaderCompiler` 2건(DXC·SPIRV-Tools 실제 호출), `VulkanDevice` 1건(로더 동적 로드·검증 층·빈 제출 fence) 통과, 전체 2135건 통과 |
 | best practices 검증 | 열거를 두 번 부르기로 고친 뒤 남는 경고는 RenderTarget 생성 때 UNDEFINED → SHADER_READ_ONLY 전이 하나다(D3D12도 생성 직후 내용이 정해지지 않는다. 오류로 세지 않는다) |
@@ -271,9 +281,11 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - 멀티 큐(async compute·copy)와 timeline semaphore 경로, 동적 렌더링·sync2 선택 경로(장치가 주면).
 - 파이프라인 캐시 파일 저장(RenderBase 9.7절), 메모리 예산 확장, 객체 debug 이름.
 - 픽셀 형식 개편(`PixelFormat`)의 형식 표 확장.
+- 분리 전이(begin·end, RG2)와 pipe 구분(RG4): 지금 `Transition`은 한 지점 barrier다. 버퍼 전이는 쓰기가 끼는 경우의 전역 메모리 barrier라 범위를 좁히지 않는다.
 - `VK_KHR_image_format_list`(1.2 core)로 중간 이미지의 `MUTABLE_FORMAT` 대상 형식을 UNORM·SRGB 둘로 알려 압축(DCC 등)을 살리는 것.
 - `Draw(firstVertex)`가 0이 아닐 때 `SV_VertexID`에 firstVertex가 들어간다(Vulkan `VertexIndex`). base vertex를 도입할 때 ShaderSystem 7.2절 7항 규칙(루트 상수로 넘김)을 따른다.
 
 ## 19. 개정 이력
 
 - 개정 1(2026-11-17): 초안. P9 설계, UE 5.8 VulkanRHI 조사, Graphics 계약(GX3a·GX7–GX11·C7)의 Vulkan 대응. 교차 검토 반영: 앞면은 UE 매핑 대신 D3D12와 같은 매핑(`SV_IsFrontFace` 일치), present 수명(`vkQueueWaitIdle`), swapchain 크기와 중간 이미지 크기 분리, 업로드 묶음 안 WAW barrier, query reset을 기록 밖 회수와 프레임 앞 reset으로, 손실 뒤 값 소비 금지, 정점·index offset 정렬.
+- 개정 2(2026-11-17): GX5 명시 접근 상태와 전이(RenderBase 개정 9–11, RG1)를 8절에 반영했다: mip별 `committed`·`current` 추적과 대표형 상태, 접근 → layout·stage·access, 단계가 새로 생기는 읽기 전이와 같은 쓰기 상태의 WAW, render pass 바깥 의존, render pass 안 barrier는 pass를 닫고 다시 연다, 버퍼는 쓰기가 끼거나 단계가 생기는 전이만 메모리 barrier, 업로드·readback 상태 중립, `SetTexture` 암묵 전이. 교차 검토(중요 3·사소 3)를 반영했다. 픽셀 형식 PF1(`PixelFormat`, RGBA8 두 형식만 대응, 나머지 `Unsupported`)과 OpenGL ES 전환 병합 뒤 측정(17절).

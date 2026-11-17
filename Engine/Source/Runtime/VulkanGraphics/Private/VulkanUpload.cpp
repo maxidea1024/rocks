@@ -250,10 +250,14 @@ Result<void> VulkanDevice::RecordBufferUpload(VkBuffer target, uint64 offset,
 
 void VulkanDevice::RecordTextureCopy(const TextureRecord& record, uint32 mipLevel, VkBuffer source,
                                      uint64 offset, bool initial) noexcept {
-    // 처음 생성이면 내용이 없으므로 UNDEFINED에서, 아니면 쉬는 layout에서 복사 대상으로 바꾼다.
-    Barrier(upload_, record.image,
-            initial ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, mipLevel, 1);
+    // 업로드 기록은 프레임 기록보다 먼저 실행되므로 상태 중립이다(GX5): 처음 생성이면 내용이
+    // 없으므로 UNDEFINED에서 복사 대상으로 바꿨다가 셰이더 읽기 상태로, 아니면 제출한 상태
+    // (committed)에서 바꿨다가 되돌린다.
+    const ResourceAccess resting =
+        initial ? CanonicalAccess(ResourceAccess::SrvGraphics) : record.committed[mipLevel];
+    (void)AccessBarrier(upload_, record.image, mipLevel, 1,
+                        initial ? ResourceAccess::Unknown : resting,
+                        ResourceAccess::CopyDestination, false);
     // 빽빽한 행이다(bufferRowLength = 0). Vulkan은 원본 offset이 texel 크기 배수이기만 하면 된다.
     VkBufferImageCopy region = {};
     region.bufferOffset = offset;
@@ -261,8 +265,8 @@ void VulkanDevice::RecordTextureCopy(const TextureRecord& record, uint32 mipLeve
     region.imageExtent = {MipExtent(record.width, mipLevel), MipExtent(record.height, mipLevel), 1};
     functions_.vkCmdCopyBufferToImage(upload_, source, record.image,
                                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-    Barrier(upload_, record.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, mipLevel, 1);
+    (void)AccessBarrier(upload_, record.image, mipLevel, 1, ResourceAccess::CopyDestination,
+                        resting, false);
 }
 
 Result<void> VulkanDevice::RecordTextureUpload(const TextureRecord& record, uint32 firstMip,
@@ -508,15 +512,16 @@ Result<ReadbackRequest> VulkanDevice::RequestReadbackLocked(TextureHandle target
         return Result<ReadbackRequest>::Failure(opened.Error());
     }
 
-    Barrier(upload_, texture.image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    // 업로드 기록은 상태 중립이다: 제출한 상태에서 복사 원본으로 바꿨다가 되돌린다. 이미 복사 원본
+    // 상태면(그래프가 CopySource로 끝냈다) barrier를 내지 않는다.
+    const ResourceAccess resting = texture.committed[0];
+    (void)AccessBarrier(upload_, texture.image, 0, 1, resting, ResourceAccess::CopySource, false);
     VkBufferImageCopy region = {};
     region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
     region.imageExtent = {texture.width, texture.height, 1};
     functions_.vkCmdCopyImageToBuffer(upload_, texture.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                                       readback.buffer, 1, &region);
-    Barrier(upload_, texture.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    (void)AccessBarrier(upload_, texture.image, 0, 1, ResourceAccess::CopySource, resting, false);
     // fence 뒤 CPU가 읽도록 전송 쓰기를 host 읽기에 보인다.
     VkBufferMemoryBarrier host = {};
     host.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;

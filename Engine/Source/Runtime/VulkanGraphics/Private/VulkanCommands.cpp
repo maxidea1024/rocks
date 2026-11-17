@@ -146,9 +146,13 @@ void VulkanDevice::BeginRenderPass(bool load, const ClearColor* clear) noexcept 
 }
 
 void VulkanDevice::StartPass(const ClearColor& clear) noexcept {
+    // attachment 전이다(GX5). offscreen 대상은 BeginOffscreen이 추적 상태에서 바꿨다. swapchain
     // 중간 이미지는 앞 프레임 blit(TRANSFER 읽기) 뒤일 수 있다(WAR).
-    Barrier(frame_, target_.image, target_.restLayout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 0,
-            VK_REMAINING_MIP_LEVELS, VK_PIPELINE_STAGE_TRANSFER_BIT);
+    if (target_.texture.IsNull()) {
+        Barrier(frame_, target_.image, target_.restLayout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                0, VK_REMAINING_MIP_LEVELS, VK_PIPELINE_STAGE_TRANSFER_BIT);
+    }
+
     BeginRenderPass(false, &clear);
     // NDC y 위를 화면 위로 둔다(음수 viewport 높이, Vulkan 1.1 core, ShaderSystem 7.2절 8항).
     VkViewport viewport = {};
@@ -251,12 +255,16 @@ Result<CommandContext*> VulkanDevice::BeginOffscreen(TextureHandle handle,
                framebuffer,
                format == PixelFormat::RGBA8UnormSrgb ? VK_FORMAT_R8G8B8A8_SRGB
                                                      : VK_FORMAT_R8G8B8A8_UNORM,
-               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                width,
                height,
                format,
                handle};
     presentTarget_ = {};
+    // attachment 전이: 대상 mip 0을 추적한 상태에서 렌더 타깃으로 바꾼다(GX5).
+    TextureRecord* targetRecord = textures_.Find(handle.slot);
+    TrackTransition(*targetRecord, handle.slot, 0, 1, ResourceAccess::RenderTarget, false);
+    renderPassSuspended_ = false;
     StartPass(clear);
     return Result<CommandContext*>::Success(this);
 }
@@ -286,10 +294,9 @@ Result<GpuFencePoint> VulkanDevice::EndFrame() noexcept {
     if (present != nullptr) {
         outcome = RecordPresentBlit(*present, imageIndex, acquired);
         present->targetLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    } else if (presentTarget_.IsNull()) {
-        Barrier(frame_, target_.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
+
+    // offscreen 대상은 렌더 타깃 상태 그대로 둔다(GX5: 다음 사용이 명시 전이나 암묵 전이로 바꾼다).
 
     // 기록 중 Retire한 swapchain은 present를 생략한다(중간 이미지는 회수 항목이 쥔다).
     recording_ = false;
@@ -308,6 +315,7 @@ Result<GpuFencePoint> VulkanDevice::EndFrame() noexcept {
         AssignPendingRetires(fenceValue_);
         timestamps_.Close(fenceValue_, false);
         dirtySlots_ |= usedThisFrame_;
+        SettleTracking(false);
         return FailWith<GpuFencePoint>("vkEndCommandBuffer", result);
     }
 
@@ -338,6 +346,7 @@ Result<GpuFencePoint> VulkanDevice::EndFrame() noexcept {
         AssignPendingRetires(RetainUntilDestructionFence);
         timestamps_.Close(RetainUntilDestructionFence, false);
         dirtySlots_ |= usedThisFrame_;
+        SettleTracking(false);
         return Result<GpuFencePoint>::Failure(uploads ? signaled.Error() : uploads.Error());
     }
 
@@ -346,6 +355,7 @@ Result<GpuFencePoint> VulkanDevice::EndFrame() noexcept {
     AssignPendingRetires(value);
     timestamps_.Close(value, true);
     dirtySlots_ = (dirtySlots_ & ~resetThisFrame_) | usedThisFrame_;
+    SettleTracking(true);
     if (acquired != VK_NULL_HANDLE) {
         ReturnAcquireSemaphore(acquired, value);
         VkPresentInfoKHR info = {};
@@ -458,15 +468,34 @@ void VulkanDevice::SetTexture(TextureHandle handle) noexcept {
         return;
     }
 
-    const TextureRecord* record = textures_.Find(handle.slot);
+    TextureRecord* record = textures_.Find(handle.slot);
+    SlotHandle slot = handle.slot;
     if (record == nullptr) {
         record = textures_.Find(white_.slot);
+        slot = white_.slot;
     }
 
-    if (record != nullptr) {
-        functions_.vkCmdBindDescriptorSets(frame_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout_,
-                                           1, 1, &record->set, 0, nullptr);
+    if (record == nullptr) {
+        return;
     }
+
+    // 명시 전이 없이 그래픽 셰이더 읽기 상태가 아닌 텍스처를 읽으면 암묵 전이로 메운다(GX5. 렌더
+    // 그래프를 거치지 않는 그리기용). 그래픽 읽기 비트가 있고 layout이 SHADER_READ_ONLY여야 한다
+    // (descriptor를 그 layout으로 썼다. D3D12는 PIXEL_SHADER_RESOURCE 비트만 본다). 패스 대상
+    // 자신은 attachment라 바꾸지 않는다(샘플링할 수 없다).
+    bool readable = true;
+    for (uint32 mip = 0; mip < record->mipLevels; ++mip) {
+        readable = readable && HasAnyAccess(record->current[mip], ResourceAccess::SrvGraphics) &&
+                   (record->current[mip] & ~SrvAccessMask) == ResourceAccess::Unknown;
+    }
+
+    if (!readable && !(target_.texture == TextureHandle{slot})) {
+        TrackTransition(*record, slot, 0, record->mipLevels, ResourceAccess::SrvGraphics, false);
+        ResumeRenderPass();
+    }
+
+    functions_.vkCmdBindDescriptorSets(frame_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout_, 1,
+                                       1, &record->set, 0, nullptr);
 }
 
 void VulkanDevice::SetConstants(const DrawConstants& constants) noexcept {
@@ -534,10 +563,16 @@ Result<void> VulkanDevice::CopyPassTarget(TextureHandle destination) noexcept {
         insideRenderPass_ = false;
     }
 
-    Barrier(frame_, target_.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-    Barrier(frame_, record->image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    // 원본(패스 대상)과 복사 대상은 지금(기록 중) 추적 상태에서 바꿨다가 되돌린다(상태 중립, GX5).
+    // swapchain 중간 이미지는 추적 텍스처가 아니므로 attachment layout에서 바꾼다.
+    const TextureRecord* source = textures_.Find(target_.texture.slot);
+    const ResourceAccess sourceState =
+        source != nullptr ? source->current[0] : ResourceAccess::RenderTarget;
+    const ResourceAccess resting = record->current[0];
+    (void)AccessBarrier(frame_, target_.image, 0, 1, sourceState, ResourceAccess::CopySource,
+                        false);
+    (void)AccessBarrier(frame_, record->image, 0, 1, resting, ResourceAccess::CopyDestination,
+                        false);
     // 중간 이미지(UNORM)와 RenderTarget(SRGB)은 같은 크기 부류라 byte를 그대로 옮긴다.
     VkImageCopy region = {};
     region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
@@ -545,11 +580,13 @@ Result<void> VulkanDevice::CopyPassTarget(TextureHandle destination) noexcept {
     region.extent = {target_.width, target_.height, 1};
     functions_.vkCmdCopyImage(frame_, target_.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                               record->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-    Barrier(frame_, target_.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-    Barrier(frame_, record->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    BeginRenderPass(true, nullptr);
+    (void)AccessBarrier(frame_, target_.image, 0, 1, ResourceAccess::CopySource, sourceState,
+                        false);
+    (void)AccessBarrier(frame_, record->image, 0, 1, ResourceAccess::CopyDestination, resting,
+                        false);
+    if (sourceState == ResourceAccess::RenderTarget) {
+        BeginRenderPass(true, nullptr);
+    }
     return Result<void>::Success();
 }
 

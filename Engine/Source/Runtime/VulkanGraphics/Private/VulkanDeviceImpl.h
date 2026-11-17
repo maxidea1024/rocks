@@ -10,6 +10,7 @@
 #include <Graphics/Device.h>
 #include <Graphics/DeviceOwnership.h>
 #include <Graphics/FenceTimeline.h>
+#include <Graphics/ResourceAccess.h>
 #include <Graphics/ShaderSourceCompiler.h>
 #include <Graphics/StagingPool.h>
 #include <Graphics/TimestampRing.h>
@@ -54,6 +55,12 @@ inline constexpr uint32 MaxTrackedBufferWrites = 64;
 // 검증 메시지 ID 중복 제거 표 크기다(넘친 ID는 매번 로그를 남긴다).
 inline constexpr uint32 MaxLoggedValidationIds = 128;
 
+// 접근 상태의 대표형이다. D3D12 상태 대응에서 같은 상태가 되는 접근을 하나로 모은다:
+// SrvGraphics는 compute 읽기도 포함하고(D3D12 PIXEL | NON_PIXEL_SHADER_RESOURCE), VertexOrIndex는
+// Constant를, UAV 비트 하나는 두 UAV 비트를 포함한다. 추적 상태는 늘 대표형이고, before 검증도
+// 대표형끼리 비교한다(D3D12가 대응한 상태끼리 비교하는 것과 같은 기준).
+ResourceAccess CanonicalAccess(ResourceAccess access) noexcept;
+
 struct BufferRecord {
     VkBuffer buffer = VK_NULL_HANDLE;
     MemoryAllocation memory;
@@ -74,6 +81,14 @@ struct TextureRecord {
     uint32 mipLevels = 1;
     PixelFormat format = PixelFormat::Unknown;
     bool renderTarget = false;
+    // mip마다 장치가 추적한 접근 상태다(RenderBase GX5). committed는 제출한 프레임 기록 끝의 상태,
+    // current는 기록 중인 프레임 안의 상태다(기록 중이 아니면 같다). 업로드 기록은 프레임 기록보다
+    // 먼저 실행되므로 committed에서 바꿨다가 되돌린다(상태 중립). layout은 상태에서
+    // 정한다(LayoutFor).
+    ResourceAccess committed[MaxMipLevels] = {};
+    ResourceAccess current[MaxMipLevels] = {};
+    // 기록 중인 프레임이 current를 바꿨다(touchedTextures_에 있다).
+    bool touched = false;
 };
 
 struct PipelineRecord {
@@ -285,6 +300,7 @@ private:
                           Span<const VertexBufferBinding> buffers) noexcept override;
     void SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64 offset) noexcept override;
     void SetTexture(TextureHandle texture) noexcept override;
+    void Transition(Span<const ResourceTransition> transitions) noexcept override;
     void SetConstants(const DrawConstants& constants) noexcept override;
     void Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept override;
     void DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept override;
@@ -427,6 +443,23 @@ private:
                  VkPipelineStageFlags extraSourceStages = 0) const noexcept;
     void ResetTimestampSlots() noexcept;
 
+    // --- VulkanAccess.cpp(GX5 명시 접근 상태) ---
+    // image mip 구간의 접근 상태 from → to barrier를 buffer에 기록한다. 같은 상태의 읽기는
+    // 건너뛰고, uavOrder면 같은 UAV 상태 사이에도 쓰기 순서 barrier를 낸다. 기록했는지를 돌려준다.
+    bool AccessBarrier(VkCommandBuffer buffer, VkImage image, uint32 firstMip, uint32 mipCount,
+                       ResourceAccess from, ResourceAccess to, bool uavOrder) noexcept;
+    // 기록 중 프레임에서 텍스처 mip [first, first + count)를 after로 바꾼다(잠금 안). barrier가
+    // 필요하면 열린 render pass를 먼저 닫는다(호출자가 ResumeRenderPass로 다시 연다).
+    void TrackTransition(TextureRecord& record, SlotHandle slot, uint32 first, uint32 count,
+                         ResourceAccess after, bool uavOrder) noexcept;
+    // 프레임 기록을 끝낸다. 제출했으면 current를 committed로, 아니면 committed로 되돌린다.
+    void SettleTracking(bool executed) noexcept;
+    void SuspendRenderPass() noexcept;
+    // 닫은 render pass를 LOAD로 다시 연다. 패스 대상이 더는 렌더 타깃 상태가 아니면 열지 않고 닫힌
+    // 표시를 남긴다(대상이 렌더 타깃으로 돌아오는 다음 전이에서 다시 연다).
+    void ResumeRenderPass() noexcept;
+    void LowerBufferTransition(const ResourceTransition& transition) noexcept;
+
     // --- VulkanSwapChain.cpp ---
     Result<void> BuildSwapChain(SwapChainRecord& record) noexcept;
     Result<void> CreateSwapChainTarget(SwapChainRecord& record) noexcept;
@@ -542,6 +575,10 @@ private:
     BoundIndexBuffer boundIndex_;
     uint64 ignoredDraws_ = 0;
     uint32 markerDepth_ = 0;
+    // GX5: 기록 중 프레임이 상태를 바꾼 텍스처와, 전이를 위해 닫은 render pass다.
+    Array<SlotHandle> touchedTextures_;
+    bool touchedOverflow_ = false;
+    bool renderPassSuspended_ = false;
     Array<AcquireSemaphore> acquireSemaphores_;
     // 신호됐지만 대기자가 없는 acquire semaphore다(제출 실패). queue idle 뒤 파괴한다.
     Array<VkSemaphore> orphanSemaphores_;
