@@ -50,7 +50,8 @@ internal static partial class SelfTests
         // 시험이 아닌 런타임·개발 도구·프로그램 소스의 한글 문자열은 어디서든 위반이다(Build/ 아래는 파일 전체 규칙이 맡는다. 모듈 Private/Tests/는 모듈에
         // 컴파일되어 출하되므로 시험 소스가 아니다).
         string[] nativeSources = [
-            "const char* text = \"한국어 메시지\";", "ROCKS_LOG(Warning, \"설정을 읽지 못했다: %s\", path);", "char16_t c = u'한';",
+            "const char* text = \"한국어 메시지\";", "ROCKS_LOG(Warning, \"설정을 읽지 못했다: %s\", path);",
+            "Log::Warning(LogConfig, \"설정을 읽지 못했다: {Path}\", path);", "char16_t c = u'한';",
             "const char* raw = R\"(한국어)\";", "const char* text = \"a//b\" \"한국어\"; // comment"];
         string[] csharpSources = [
             "Console.WriteLine(\"한국어 메시지\");", "string path = @\"C:\\디렉터리\\\";", "string raw = \"\"\"한국어\"\"\";",

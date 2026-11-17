@@ -70,7 +70,11 @@ internal static class CLanguageTests
         {
             NativeAction action = ActionGraph.Create(request with { Configuration = configuration }).Actions
                 .Single(candidate => candidate.Kind == "Compile" && candidate.Module == "Engine");
-            string[] expected = [.. toolchain.CompileArguments, .. profile, .. tail];
+            // 타깃 단위 인자(로그 컴파일 하한·소스 경로 접두 매핑)는 프로필 뒤, 모듈 정의 앞이다.
+            string prefixMap = (windows ? "/clang:" : "") + "-fmacro-prefix-map=" +
+                Path.TrimEndingDirectorySeparator(Path.GetFullPath(request.RootDirectory)) + Path.DirectorySeparatorChar + "=";
+            string logMinimum = (windows ? "/D" : "-D") + "ROCKS_LOG_COMPILED_MINIMUM=" + (configuration == NativeConfiguration.Release ? "2" : "0");
+            string[] expected = [.. toolchain.CompileArguments, .. profile, logMinimum, prefixMap, .. tail];
             Check(action.Arguments.SequenceEqual(expected),
                 $"{configuration} C++ compile action changed:\n{string.Join(' ', action.Arguments)}\nexpected:\n{string.Join(' ', expected)}");
         }
