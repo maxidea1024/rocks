@@ -289,6 +289,12 @@ Result<void> ProcessResolvedAssignment(AssignmentState& state, const TextAssignm
                                        TextSource source, PropertyPath resolvedPath,
                                        const TextSlot& slot, TextValue* value) noexcept {
     PreparsedScope preparsed(state, value);
+    // StructRefArray `items[i]={}`의 i가 지금 원소 수면 끝에 원소를 더한다(리플렉션 B9i5).
+    auto appended = AppendElement(state, assignment, slot, resolvedPath, source);
+    if (!appended || appended.Value()) {
+        return appended ? Result<void>::Success() : Result<void>::Failure(appended.Error());
+    }
+
     // StructRefArray 원소 index는 앞 대입이 지운 원소를 뺀 지금 index다 — 묶을 때 index로
     // 옮긴다(리플렉션 B9i3c4).
     PathStep mapped[MaxPropertyPathSteps];
@@ -308,6 +314,13 @@ Result<void> ProcessResolvedAssignment(AssignmentState& state, const TextAssignm
     if (!added.Value()) {
         return Diagnose(state, TextDiagnosticCode::DuplicateAssignment, source, assignment.path,
                         "the same path is assigned twice");
+    }
+
+    // 더한 원소 안의 대입은 원소 블록에 바로 적용한다(원소 자체의 지우기는 아래 원소 지우기 단위 —
+    // 리플렉션 B9i5).
+    const AddedElement element = FindAddedElement(state, path);
+    if (element.unit && element.step + 1 < path.steps.Size()) {
+        return ApplyAddedElement(state, assignment, slot, path, source, element);
     }
 
     auto unitEnd = FindUnitEnd(state, path);
@@ -371,11 +384,40 @@ Result<void> ProcessResolvedAssignment(AssignmentState& state, const TextAssignm
     return apply.Run();
 }
 
-Result<bool> PreparedContains(AssignmentState& state, PropertyPath path) noexcept {
+Result<bool> PreparedContains(AssignmentState& state, PropertyPath targetPath) noexcept {
+    // StructRefArray 원소 index는 지금 index다 — 묶을 때 index(추가 원소 id 포함)로 옮긴다. 지금
+    // 원소 수 밖이면 키가 없는 것이다(리플렉션 B9i5).
+    PathStep mappedSteps[MaxPropertyPathSteps];
+    auto translated = MapElementIndices(state, targetPath, mappedSteps, TextSource{}, {}, false);
+    if (!translated || !translated.Value()) {
+        return translated ? Result<bool>::Success(false)
+                          : Result<bool>::Failure(translated.Error());
+    }
+
+    const PropertyPath path{Span<const PathStep>(mappedSteps, targetPath.steps.Size()),
+                            targetPath.keys};
     ObjectRegistry& registry = state.target.Registry();
     const ObjectAccessContext& access = state.target.Access();
     PathTarget start = state.Root();
     PropertyPath relative = path;
+    // 더한 StructRefArray 원소 안이면 그 블록을 본다(리플렉션 B9i5).
+    const AddedElement added = FindAddedElement(state, path);
+    if (added.unit && added.step + 1 < path.steps.Size()) {
+        auto addedStart = added.unit->stage.AddedTarget(added.id);
+        if (!addedStart) {
+            return Result<bool>::Success(false);
+        }
+
+        auto present = PathContains(registry, access, addedStart.Value(),
+                                    PropertyPath{path.steps.Mid(added.step + 1), path.keys});
+        if (!present) {
+            return IsCallError(present.Error()) ? Result<bool>::Failure(present.Error())
+                                                : Result<bool>::Success(false);
+        }
+
+        return present;
+    }
+
     auto unitEnd = FindUnitEnd(state, path);
     if (!unitEnd) {
         return Result<bool>::Failure(unitEnd.Error());

@@ -235,12 +235,14 @@ Result<void> Apply::RunSet(TextValue& value) noexcept {
 
 Result<void> Apply::ResetStruct() noexcept {
     // 단위 자신이면 상자를 기본값으로, 안쪽 struct면 그 자리를 따로 떼어 기본값으로 바꿔 되돌린다.
-    // 값 단위만 struct 자리를 가진다(컨테이너 단위의 값은 참조다).
-    if (!box) {
+    // 값 단위와 더한 StructRefArray 원소(블록이 시작 위치 — 리플렉션 B9i5)만 struct 자리를 가진다
+    // (컨테이너 단위의 값은 참조다).
+    const bool added = start.AddedElements() != nullptr;
+    if (!box && !added) {
         return Diagnostic(TextDiagnosticCode::InvalidValue, "value does not fit the property");
     }
 
-    if (relative.steps.Size() == 1) {
+    if (box && relative.steps.Size() == 1) {
         box->ResetToDefault();
         return Result<void>::Success();
     }
@@ -249,7 +251,7 @@ Result<void> Apply::ResetStruct() noexcept {
 }
 
 Result<void> Apply::ResetAt(PropertyPath at) noexcept {
-    DetachedValue inner(box->GetAllocator());
+    DetachedValue inner(box ? box->GetAllocator() : *start.ValueAllocator());
     if (auto detached = PathDetach(Registry(), Access(), Start(), at, inner, &failure); !detached) {
         return Failed(detached.Error());
     }
@@ -270,7 +272,7 @@ Result<void> Apply::ResetMembers() noexcept {
     // 정적 배열의 struct 원소는 떼어 낼 수 없으므로(선택자가 있는 끝) 멤버마다 기본값으로 되돌린다.
     const StructView view = slot.structView;
     const usize count = relative.steps.Size();
-    if (!box || view.IsEmpty() || count >= MaxPropertyPathSteps) {
+    if ((!box && !start.AddedElements()) || view.IsEmpty() || count >= MaxPropertyPathSteps) {
         return Diagnostic(TextDiagnosticCode::Unsupported, "this element cannot be reset");
     }
 

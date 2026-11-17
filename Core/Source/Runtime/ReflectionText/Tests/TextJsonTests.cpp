@@ -399,8 +399,8 @@ TEST(TextJson_LimitsTargetsAndReadKeys) {
         transaction.Rollback();
     }
 
-    // 참조는 resolver로 읽는다. 원소를 담은 StructRefArray는 아직 원소를 더하지 못한다(빈 배열은
-    // 비우기).
+    // 참조는 resolver로 읽는다. 원소를 담은 StructRefArray는 비운 뒤 원소마다 더하고 멤버를
+    // 병합한다(리플렉션 B9i5 — 빈 배열은 비우기).
     auto target = fixture.MakeTarget();
     TargetResolver resolver;
     resolver.target = target.Handle();
@@ -408,9 +408,23 @@ TEST(TextJson_LimitsTargetsAndReadKeys) {
     REQUIRE(Publishes(Import(system, R"({"next": "/t", "peer": "/t", "items": []})", live,
                              fixture.options, fixture.diagnostics)));
     CHECK(Peek(fixture, object)->next.Handle() == target.Handle());
-    auto items = Import(system, R"({"items": [{}]})", live, fixture.options, fixture.diagnostics);
-    REQUIRE(!items && fixture.diagnostics.Count() == 1);
-    CHECK(fixture.diagnostics.Get(0).code == TextDiagnosticCode::Unsupported);
+    REQUIRE(Publishes(Import(system, R"({"items": [{}, {"weight": 3, "link": "/t"}]})", live,
+                             fixture.options, fixture.diagnostics)));
+    {
+        Peek holder(fixture, object);
+        REQUIRE(holder->items.Size() == 2);
+        CHECK(holder->items[0].weight == 0 && holder->items[0].link.Handle().IsNull());
+        CHECK(holder->items[1].weight == 3 && holder->items[1].link.Handle() == target.Handle());
+    }
+
+    REQUIRE(Publishes(Import(system, R"({"items": [{"weight": 4}]})", live, fixture.options,
+                             fixture.diagnostics)));
+    {
+        Peek holder(fixture, object);
+        REQUIRE(holder->items.Size() == 1);
+        CHECK(holder->items[0].weight == 4 && holder->items[0].link.Handle().IsNull());
+    }
+
     // resolver가 쓰지 못하는 non-null 참조는 export 오류다.
     CHECK(ErrorOf(Export(live, fixture.options, text)) == ErrorCode::Unsupported);
     fixture.options.resolver = nullptr;

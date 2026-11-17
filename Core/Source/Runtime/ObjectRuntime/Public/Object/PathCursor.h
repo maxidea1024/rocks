@@ -125,6 +125,21 @@ public:
         return construction_;
     }
 
+    // 시작 위치가 원소 추가 준비물이 소유한 게시 전 StructRefArray 원소 블록인지다(리플렉션 B9i5 —
+    // PathTarget::WithAddedElement).
+    bool WritesAddedElement() const noexcept {
+        return added_ != nullptr;
+    }
+
+    // 게시 전 원소 블록 안의 강한 참조 멤버 field에 쓰기 입력(Input()의 reference)을 직접
+    // 쓴다(리플렉션 B9i5). 대상의 생존·스키마 기대 타입은 검증 지점이 이미 봤고 여기서는 C++ 대상
+    // 타입을 대조한다 (CheckWeakTarget). field가 시작 위치 블록 밖이면 InvalidArgument다. 간선은
+    // 게시 때 선언한다(PreparedStructElements::AddedReferences).
+    template <class T>
+    Result<void> WriteAddedReference(ObjectRef<T>& field) noexcept {
+        return WriteAddedReferenceAt(field.handle_, NativeTypeKey<T>());
+    }
+
     // 빈 자리(unset Optional 등)에 새로 만드는 값의 allocator다: 객체(게시·staged)면
     // ObjectRegistry::ObjectAllocator, 분리된 값이면 그 값의 allocator다.
     Allocator& ValueAllocator() const noexcept;
@@ -360,6 +375,8 @@ private:
     Result<void> LocateReferenceAt(void* field, PreparedReference::PublishFunction publish,
                                    const void* nativeType, ObjectHandle previous) noexcept;
 
+    Result<void> WriteAddedReferenceAt(ObjectHandle& field, const void* nativeType) noexcept;
+
     ObjectRegistry& registry_;
     const ObjectAccessContext& access_;
     ObjectHandle owner_;
@@ -379,6 +396,8 @@ private:
     PreparedReference* reference_ = nullptr;
     // 시작 위치에 건 Registry 컨테이너 준비 사본이다(리플렉션 B9i3c3).
     PreparedReferences* stage_;
+    // 시작 위치가 원소 추가 준비물의 게시 전 원소 블록이면 그 준비물이다(리플렉션 B9i5).
+    PreparedStructElements* added_;
     // PathPrepareStructElements의 출력 준비물이다(리플렉션 B9i3c4).
     PreparedStructElements* elements_ = nullptr;
     PathOperation operation_;
