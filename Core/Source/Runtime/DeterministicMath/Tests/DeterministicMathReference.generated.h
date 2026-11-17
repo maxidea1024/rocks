@@ -1,5 +1,6 @@
 // Generated file. Do not edit by hand: Rocks.ToolTests math-tables --root . --write
-// Accuracy reference cases as double bits: {input, second input (Pow exponent), correctly rounded exact value}.
+// Accuracy reference cases as double bits:
+// {input, second input (Pow exponent), correctly rounded exact value}.
 // Exact values: 400-bit fixed point (Rocks.Tooling.Checks/MathReference.cs).
 #pragma once
 

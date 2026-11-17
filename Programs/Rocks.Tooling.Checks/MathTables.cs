@@ -61,7 +61,8 @@ public static class MathTables
 
         var text = new StringBuilder();
         text.Append("// Generated file. Do not edit by hand: Rocks.ToolTests math-tables --root . --write\n");
-        text.Append($"// Generator version {GeneratorVersion}. Values are float bit patterns (rounded by exact rational and integer comparison).\n");
+        text.Append($"// Generator version {GeneratorVersion}. Values are float bit patterns\n");
+        text.Append("// (rounded by exact rational and integer comparison).\n");
         text.Append("#pragma once\n\n#include <Base/Types.h>\n\nnamespace rocks::deterministic::detail {\n\n");
         text.Append("// clang-format off\n");
         text.Append("// decode(k/255) rounded to the nearest float.\n");

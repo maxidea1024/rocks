@@ -1,5 +1,6 @@
 // Generated file. Do not edit by hand: Rocks.ToolTests math-tables --root . --write
-// Generator version 1. Values are float bit patterns (rounded by exact rational and integer comparison).
+// Generator version 1. Values are float bit patterns
+// (rounded by exact rational and integer comparison).
 #pragma once
 
 #include <Base/Types.h>

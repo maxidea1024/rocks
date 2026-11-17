@@ -14,8 +14,8 @@ namespace rocks::detail::unicode {
 inline constexpr char UnicodeVersion[] = "18.0.0";
 inline constexpr uint32 MaxDecompositionLength = 4;
 
-// Code point property records: bits 0-7 combining class, 8-12 GeneralCategory, 13-14 NFC_QC (0 Yes, 1 No, 2 Maybe),
-// 15 NFD_QC (0 Yes, 1 No), 16 Default_Ignorable.
+// Code point property records: bits 0-7 combining class, 8-12 GeneralCategory,
+// 13-14 NFC_QC (0 Yes, 1 No, 2 Maybe), 15 NFD_QC (0 Yes, 1 No), 16 Default_Ignorable.
 // clang-format off
 inline constexpr uint32 PropertyRecords[] = {
     6400, 5632, 4352, 4864, 3328, 3584, 4608, 3072,
@@ -314,7 +314,8 @@ inline constexpr uint16 PropertyStage1[] = {
 };
 inline constexpr usize PropertyStage1Count = 4352;
 
-// Property record number per block (256 entries each). Entry o of block b = PropertyBlocks[b * 256 + o].
+// Property record number per block (256 entries each).
+// Entry o of block b = PropertyBlocks[b * 256 + o].
 inline constexpr uint16 PropertyBlocks[] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -3055,7 +3056,8 @@ inline constexpr uint16 PropertyBlocks[] = {
 };
 inline constexpr usize PropertyBlocksCount = 43776;
 
-// Canonical decomposition index (by code point): { code point, DecompositionData offset, length }. Hangul syllables are algorithmic.
+// Canonical decomposition index (by code point): { code point, DecompositionData offset, length }.
+// Hangul syllables are algorithmic.
 struct DecompositionEntry {
     uint32 codePoint;
     uint32 offset;

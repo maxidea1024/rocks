@@ -20,7 +20,8 @@ public static class MathReference
     {
         var text = new StringBuilder();
         text.Append("// Generated file. Do not edit by hand: Rocks.ToolTests math-tables --root . --write\n");
-        text.Append("// Accuracy reference cases as double bits: {input, second input (Pow exponent), correctly rounded exact value}.\n");
+        text.Append("// Accuracy reference cases as double bits:\n");
+        text.Append("// {input, second input (Pow exponent), correctly rounded exact value}.\n");
         text.Append("// Exact values: 400-bit fixed point (Rocks.Tooling.Checks/MathReference.cs).\n");
         text.Append("#pragma once\n\n#include <Base/Types.h>\n\nnamespace rocks::deterministic::reference {\n\n");
         text.Append("struct ReferenceCase {\n    uint64 input;\n    uint64 second;\n    uint64 expected;\n};\n\n");
