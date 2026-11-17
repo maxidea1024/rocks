@@ -456,8 +456,8 @@ Result<UniquePtr<Device>> CreateD3D12Device(Allocator&, const DeviceDesc&, Devic
 |---|---|---|---|
 | LG0 | 이 문서 | — | 교차 검증 반영 |
 | LG1 | `LogLevel`(Debug·Fatal), `LogCategory`(접두사 해시), `SourceLocation`, 기록 모델(속성·문맥·프레임·스레드 이름), Logger·sink의 `uint32` 카테고리 교체(`AesModes.cpp` 포함), Base 캐시 라인 상수. **`LogBuffer`·`ProfileScope`의 카테고리 타입은 그대로 둔다**(15절) | LG0 | 기존 Logger·LogBuffer·ProfileScope·LoggerOutputTests 통과 |
-| LG2 | 공용 `constexpr` 서식 파서·이름 자리, `FixedStringBuilder`(잘림 모드), `LogTemplate` 검증, 위치 수집 시험, EventId, 값 캡처 인코딩, Lazy, 컴파일 실패 시험 체계(Rocks.ToolTests가 clang-cl `-fsyntax-only`) | LG1 | 템플릿·위치(TU 2개)·Lazy 0회/1회·잘림·컴파일 실패 시험 |
-| LG3 | `BoundedMpscQueue`, 블록 풀, 준비 버퍼, `LogSystem`(Async·Sync·Manual 모드, 프리셋, 출력 스레드·깨우기·Pump·Flush·포화·sink 명령·통계), fan-out 재작성, 세대 카운터 `LogInstallScope`, `platform::WriteDiagnostic`·`TryUtcTicks`, 설치 전후 경로, 장애 격리, `Log::Fatal`·`AssertFailed` | LG2 | 큐 스트레스·포화·wrap·멈춘 생산자 결정적 시험, **무할당 시험**(호출 수 세는 할당기로 Start 뒤 0회), 깨우기 유실 없음, 해제 기아 없음, Sync와 Manual의 출력 동일·Sync 무할당, 장애 주입, TSan·Asan, 호출 비용 측정 보고 |
+| LG2 | 공용 `constexpr` 서식 파서·이름 자리, `FixedStringBuilder`(잘림 모드), `LogTemplate` 검증, 위치 수집 시험, EventId, 값 캡처 인코딩과 렌더(왕복), 컴파일 실패 시험 체계(Rocks.ToolTests가 clang-cl `-fsyntax-only`) | LG1 | 템플릿·위치(TU 2개)·캡처 왕복·잘림·컴파일 실패 시험 |
+| LG3 | `Log::*` 진입 함수와 Lazy, `BoundedMpscQueue`, 블록 풀, 준비 버퍼, `LogSystem`(Async·Sync·Manual 모드, 프리셋, 출력 스레드·깨우기·Pump·Flush·포화·sink 명령·통계), fan-out 재작성, 세대 카운터 `LogInstallScope`, `platform::WriteDiagnostic`·`TryUtcTicks`, 설치 전후 경로, 장애 격리, `Log::Fatal`·`AssertFailed` | LG2 | 큐 스트레스·포화·wrap·멈춘 생산자 결정적 시험, **무할당 시험**(호출 수 세는 할당기로 Start 뒤 0회), Lazy 0회/1회, 깨우기 유실 없음, 해제 기아 없음, Sync와 Manual의 출력 동일·Sync 무할당, 장애 주입, TSan·Asan, 호출 비용 측정 보고 |
 | LG4 | 레이아웃 해석기, Text·Stderr sink 개편(묶음 flush), `JsonWriter` 옵션(한 줄·고정 frame·중복 색인 끔)·`JsonLinesLogSink`, `DateTime` 고정 폭 밀리초, `LogContextScope` | LG3 | 토큰별 결정적 출력, 잘못된 패턴 실패, JSON 왕복, 무할당 |
 | LG5 | `ROCKS_LOG_COMPILED_MINIMUM`, toolchain 단 `/clang:-ffile-prefix-map=`, Release 문자열 제외 검사, 템플릿 비ASCII 정책 검사 | LG2 | 구성별 빌드, 최종 링크 결과 검사 |
 | LG6 | Engine·World 적용(13절) | LG4, **15절 조건** | 단계별 실패 주입 → Stage, 파괴 지연 1000프레임 → Warning 정확히 1회·해소 Info 1회 |
