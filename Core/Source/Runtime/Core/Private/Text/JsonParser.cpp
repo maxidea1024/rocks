@@ -53,16 +53,10 @@ private:
         return result ? true : Fail(JsonErrorCode::OutOfMemory, position_);
     }
 
-    void SkipWhitespace() noexcept {
-        while (position_ < size_) {
-            const uint8 byte = data_[position_];
-            if (byte != ' ' && byte != '\t' && byte != '\n' && byte != '\r') {
-                return;
-            }
-
-            ++position_;
-        }
-    }
+    // 공백(과 allowLineComments면 줄 주석)을 건너뛴다. 주석 안의 잘못된 UTF-8은 그 byte에서 첫
+    // 오류(InvalidUtf8)로 기록하고 멈춘다 — 위치가 그 byte에 남으므로 다음 토큰 해석도 실패하고,
+    // Run은 기록된 첫 오류를 돌려준다.
+    void SkipWhitespace() noexcept;
 
     // 노드를 추가한다. at은 값의 시작 위치(한도 초과 보고용)다. 스칼라는 서브트리 끝이 자기
     // 다음이다.
@@ -233,6 +227,40 @@ usize Utf8Length(const uint8* data, usize size, usize position) noexcept {
 }
 
 } // namespace
+
+void JsonParser::SkipWhitespace() noexcept {
+    while (position_ < size_) {
+        const uint8 byte = data_[position_];
+        if (byte == ' ' || byte == '\t' || byte == '\n' || byte == '\r') {
+            ++position_;
+            continue;
+        }
+
+        const bool comment = options_.allowLineComments && byte == '/' && position_ + 1 < size_ &&
+                             data_[position_ + 1] == '/';
+        if (!comment) {
+            return;
+        }
+
+        // 줄 끝(LF·CR) 앞까지 건너뛴다. 줄바꿈은 다음 반복이 공백으로 소비한다(위치 계산이 줄을
+        // 센다).
+        position_ += 2;
+        while (position_ < size_ && data_[position_] != '\n' && data_[position_] != '\r') {
+            if (data_[position_] < 0x80) {
+                ++position_;
+                continue;
+            }
+
+            const usize count = Utf8Length(data_, size_, position_);
+            if (count == 0) {
+                static_cast<void>(Fail(JsonErrorCode::InvalidUtf8, position_));
+                return;
+            }
+
+            position_ += count;
+        }
+    }
+}
 
 // \u 뒤 16진수 4자리(position_은 첫 자리). 잘못된 자리가 있으면 그 이스케이프(escape) 위치에서
 // InvalidEscape, 모두 16진수인데 입력이 먼저 끝났으면 UnexpectedEnd다.
@@ -770,6 +798,12 @@ JsonError JsonParser::Run() noexcept {
         if (position_ != size_) {
             ok = Fail(JsonErrorCode::TrailingContent, position_);
         }
+    }
+
+    // 주석 안의 잘못된 UTF-8(SkipWhitespace)은 그 자리에서 해석을 멈추지 않고 기록만 하므로, 기록된
+    // 오류가 있으면 실패다.
+    if (ok && errorCode_ != JsonErrorCode::None) {
+        ok = false;
     }
 
     if (ok) {

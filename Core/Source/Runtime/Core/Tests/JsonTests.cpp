@@ -354,6 +354,57 @@ TEST(Json_ErrorPositionsAndCodes) {
           JsonErrorCode::UnexpectedCharacter);
 }
 
+// config 읽기 옵션(allowLineComments, Docs/Design/ConfigSystem.ko.md 4.1절): 값·키 사이의 `//` 줄
+// 주석을 건너뛰고 문자열 안의 `//`는 그대로 둔다. 기본(엄격)은 같은 입력을 거부한다. 블록 주석·짝
+// 없는 `/`·끝 쉼표·중복 키는 옵션과 무관하게 오류이고, 위치는 주석을 포함한 원문 기준이다.
+TEST(Json_LineCommentsAreAnOptIn) {
+    SystemAllocator allocator;
+    JsonDocument document(allocator);
+    JsonReadOptions comments;
+    comments.allowLineComments = true;
+    const char* text = "// 머리 주석\r\n{\n  \"url\": \"http://x//y\", // 끝 주석 \xEA\xB0\x80\n"
+                       "  // 줄 전체 주석\n  \"n\": [1, // 원소 사이\n 2]\n} // 마지막";
+    REQUIRE(ParseText(document, text, comments).Succeeded());
+    CHECK(document.Root().Find("url").GetString() == "http://x//y");
+    CHECK(document.Root().Find("n").Size() == 2);
+    // 위치는 주석을 센 원문 기준이다(4행 첫 값 [ 는 n 줄의 열 8).
+    const JsonPosition at = document.Root().Find("n").Position();
+    CHECK(at.line == 5 && at.column == 8);
+    // 기본 옵션은 주석을 거부한다.
+    const JsonError strict = ParseText(document, text);
+    CHECK(strict.code == JsonErrorCode::UnexpectedCharacter && strict.position.line == 1 &&
+          strict.position.column == 1);
+
+    struct Case {
+        const char* text;
+        JsonErrorCode code;
+        uint32 line;
+        uint32 column;
+    };
+    const Case cases[] = {
+        {"{} /* 블록 */", JsonErrorCode::TrailingContent, 1, 4},
+        {"[1 / 2]", JsonErrorCode::UnexpectedCharacter, 1, 4},
+        {"[1, // c\n]", JsonErrorCode::UnexpectedCharacter, 2, 1},
+        {"{\"a\": 1, // c\n \"a\": 2}", JsonErrorCode::DuplicateKey, 2, 2},
+        {"[1] // \xC0\xAF", JsonErrorCode::InvalidUtf8, 1, 8},
+        {"// only", JsonErrorCode::UnexpectedEnd, 1, 8},
+    };
+    for (const Case& item : cases) {
+        const JsonError error = ParseText(document, item.text, comments);
+        if (error.code != item.code || error.position.line != item.line ||
+            error.position.column != item.column) {
+            printf("json comment case: %s at %u:%u\n", JsonErrorMessage(error.code),
+                   error.position.line, error.position.column);
+        }
+
+        CHECK(error.code == item.code && error.position.line == item.line &&
+              error.position.column == item.column);
+    }
+
+    // 주석이 입력 끝까지 이어져도(줄바꿈 없음) 값 뒤라면 성공이다.
+    CHECK(ParseText(document, "{\"a\": 1}//", comments).Succeeded());
+}
+
 TEST(Json_ReadLimits) {
     SystemAllocator allocator;
     JsonDocument document(allocator);
