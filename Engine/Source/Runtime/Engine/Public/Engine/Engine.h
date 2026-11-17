@@ -9,6 +9,10 @@
 
 namespace rocks {
 
+namespace config {
+class ConfigContext;
+} // namespace config
+
 class Engine;
 
 // 종료 때 최종 GC와 정리 drain을 반복하는 최대 횟수다. 넘으면 닫히지 않은 것으로 보고 Busy를
@@ -184,6 +188,11 @@ struct EngineConfig {
     // 등록 토큰은 버려도 된다 — Engine은 종료할 때 타입을 Unregister하지 않고
     // TypeRegistry::Shutdown이 모두 반납한다.
     Result<void> (*registerTypes)(TypeRegistry&) noexcept = nullptr;
+    // 호스트가 만든 설정 문맥이다(선택, Docs/Design/ConfigSystem.ko.md 5.3절). 엔진은 빌려 쓰기만
+    // 하고 만들거나 파괴하지 않는다. 있으면 프레임마다 시작 단계(3) 전에 Sync를 부른다(sync 지점 —
+    // 콘솔 입력·설정 변경은 여기서만 값이 된다). 엔진과 같은 스레드(게임 스레드)가 소유해야 하고
+    // 엔진보다 오래 살아야 한다. 층 읽기·`--set`·CompleteStartup은 엔진 초기화 전에 호스트가 한다.
+    config::ConfigContext* settings = nullptr;
 };
 
 // 새 World 설정이다(WorldDesc에서 엔진이 정하는 실행 문맥을 뺀 것).
@@ -227,9 +236,9 @@ struct EngineStats {
 //   engine.Run();                                    // RequestExit 또는 maxFrames까지
 //   engine.Shutdown();                               // 여러 번 호출해도 안전
 //
-// 프레임 순서(RunFrame): 1) hooks.PumpEvents -> 2) 시간 갱신 -> 3) hooks.BeginFrame·
-// Subsystem.OnFrameBegin·client.OnEngineTick -> 4) World마다 Tick -> 5) 지연 작업(World 파괴)
-// -> 6) Subsystem.OnFrameEnd·hooks.EndFrame.
+// 프레임 순서(RunFrame): 1) hooks.PumpEvents -> 2) 시간 갱신·설정 sync 지점(EngineConfig.settings가
+// 있으면 ConfigContext::Sync) -> 3) hooks.BeginFrame·Subsystem.OnFrameBegin·client.OnEngineTick ->
+// 4) World마다 Tick -> 5) 지연 작업(World 파괴) -> 6) Subsystem.OnFrameEnd·hooks.EndFrame.
 //
 // 수명 규약:
 // - 초기화 순서: TypeRegistry·ModuleRegistration -> 타입 등록(World 리플렉션 타입 ->
@@ -391,6 +400,8 @@ private:
     bool exitRequested_ = false;
     // maxFrames에 닿아 스스로 종료를 요청했는지다(Run 종료 사유).
     bool maxFramesReached_ = false;
+    // 설정 Sync가 실패하고 있는지다(연속 실패는 첫 번째만 Error로 남긴다).
+    bool settingsSyncFailing_ = false;
 };
 
 } // namespace rocks
