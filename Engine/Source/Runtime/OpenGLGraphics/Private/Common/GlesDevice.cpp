@@ -101,6 +101,11 @@ GlesDevice::~GlesDevice() {
             gl_.DeleteVertexArrays(1, &record.vertexArray);
         }
 
+        gl_.DeleteProgram(depthReadProgram_);
+        gl_.DeleteProgram(stencilReadProgram_);
+        gl_.DeleteVertexArrays(1, &readVertexArray_);
+        gl_.DeleteSamplers(1, &readSampler_);
+
         for (const SwapChainRecord& record : swapChains_) {
             gl_.DeleteFramebuffers(1, &record.framebuffer);
             gl_.DeleteTextures(1, &record.texture);
@@ -161,6 +166,13 @@ Result<void> GlesDevice::Initialize(const DeviceDesc& desc, const OpenGLDeviceOp
                             : MaxTextureExtent;
     features_ = DetectFeatures(gl_, context.desktopContext);
     rawSrgbBlit_ = context.rawSrgbBlit && features_.srgbWriteControl;
+    for (uint32 number = 1; number <= MaxPixelFormatNumber; ++number) {
+        const auto pixelFormat = static_cast<PixelFormat>(number);
+        const GlesTextureFormat* entry =
+            IsValidPixelFormat(pixelFormat) ? FindTextureFormat(pixelFormat) : nullptr;
+        formatCaps_[number] =
+            entry != nullptr ? TextureFormatCaps(*entry, features_) : PixelFormatCaps::None;
+    }
 
     const uint64 stagingBudget =
         desc.stagingBudgetBytes != 0 ? desc.stagingBudgetBytes : DefaultStagingBudgetBytes;
@@ -348,19 +360,13 @@ Result<BufferHandle> GlesDevice::CreateBuffer(const BufferDesc& desc,
 }
 
 PixelFormatCaps GlesDevice::GetPixelFormatCaps(PixelFormat format) const noexcept {
-    // 대응 표(GlesFormats.cpp)에 있고 이 장치에서 샘플할 수 있는 형식만 능력을
-    // 공개한다(PixelFormat.ko.md 14절 PF3, ES 3.2 조건표 전체는 PF4).
-    const GlesTextureFormat* entry = FindTextureFormat(format);
-    if (entry == nullptr || !SupportsTextureFormat(*entry, features_, false)) {
+    // 장치 생성 때 대응 표(GlesFormats.cpp)와 확장으로 채운 표다(PixelFormat.ko.md 7·8.6절).
+    const auto number = static_cast<uint32>(format);
+    if (!IsValidPixelFormat(format) || number > MaxPixelFormatNumber) {
         return PixelFormatCaps::None;
     }
-    PixelFormatCaps caps =
-        PixelFormatCaps::Sampled | PixelFormatCaps::Filterable | PixelFormatCaps::Mipmaps;
-    if (SupportsTextureFormat(*entry, features_, true)) {
-        caps = caps | PixelFormatCaps::RenderTarget | PixelFormatCaps::Blendable;
-    }
 
-    return caps;
+    return formatCaps_[number];
 }
 
 Result<TextureHandle> GlesDevice::CreateTexture(const TextureDesc& desc,
@@ -370,28 +376,35 @@ Result<TextureHandle> GlesDevice::CreateTexture(const TextureDesc& desc,
         return Result<TextureHandle>::Failure(owner.Error());
     }
 
-    // 계약상 올바른 형식이지만 이 장치(ES 3.2 core + 확장, PF1에서는 RGBA8 두 형식)에서 쓸 수
-    // 없으면 다른 형식으로 대신하지 않고 Unsupported다(PixelFormat.ko.md 8.3절). 다른 인자 검사보다
-    // 먼저 한다.
+    // 계약상 올바른 형식이지만 이 장치(ES 3.2 core + 확장)에서 그 용도로 쓸 수 없으면 다른 형식으로
+    // 대신하지 않고 Unsupported다(PixelFormat.ko.md 8.3절). 다른 인자 검사보다 먼저 한다.
     const bool renderTarget = desc.usage == TextureUsage::RenderTarget;
+    const bool depthTarget = desc.usage == TextureUsage::DepthStencil;
+    const bool attachment = renderTarget || depthTarget;
     const GlesTextureFormat* format = FindTextureFormat(desc.format);
-    // 깊이·스텐실 타깃(TextureUsage::DepthStencil)은 깊이 형식 대응(PF4) 전까지 대응하지 않는다.
     if (IsValidPixelFormat(desc.format) &&
-        (format == nullptr || desc.usage == TextureUsage::DepthStencil ||
-         !SupportsTextureFormat(*format, features_, renderTarget))) {
+        !HasPixelFormatCaps(GetPixelFormatCaps(desc.format),
+                            RequiredPixelFormatCaps(desc.usage, desc.mipLevels))) {
         Diagnostic message;
         message.Text("pixel format ")
             .Text(PixelFormatName(desc.format))
             .Text(renderTarget ? " as a render target" : "")
+            .Text(depthTarget ? " as a depth stencil target" : "")
             .Text(" is not supported by this OpenGL ES device");
         auto rejected = Reject(message, ErrorCode::Unsupported);
         return Result<TextureHandle>::Failure(rejected.Error());
     }
 
+    const PixelFormatInfo& info = GetPixelFormatInfo(desc.format);
     const uint64 size = MipChainBytes(desc.format, desc.width, desc.height, 1, desc.mipLevels);
+    // BC는 최상위 크기가 블록 배수여야 한다(PixelFormatInfo::topLevelBlockAligned, D3D와 같은
+    // 계약).
+    const bool aligned = !info.topLevelBlockAligned ||
+                         (desc.width % info.blockWidth == 0 && desc.height % info.blockHeight == 0);
     if (format == nullptr || desc.width > MaxTextureExtent || desc.height > MaxTextureExtent ||
-        size == 0 || !IsValidSamplerDesc(desc.sampler) ||
-        (renderTarget ? (pixels.Size() != 0 || desc.mipLevels != 1) : pixels.Size() != size)) {
+        size == 0 || !aligned || desc.mipLevels > MaxMipLevels ||
+        !IsValidSamplerDesc(desc.sampler) ||
+        (attachment ? (pixels.Size() != 0 || desc.mipLevels != 1) : pixels.Size() != size)) {
         return Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -418,21 +431,38 @@ Result<TextureHandle> GlesDevice::CreateTexture(const TextureDesc& desc,
     record.height = desc.height;
     record.mipLevels = desc.mipLevels;
     record.format = desc.format;
+    record.depthTarget = depthTarget;
+    record.depthStencilTexture = info.kind == PixelFormatKind::DepthStencil;
+    record.samplerDesc = desc.sampler;
     gl_.GenTextures(1, &record.texture);
     gl_.ActiveTexture(GL_TEXTURE0 + UploadTextureUnit);
     gl_.BindTexture(GL_TEXTURE_2D, record.texture);
     gl_.TexStorage2D(GL_TEXTURE_2D, static_cast<GLsizei>(desc.mipLevels), format->internalFormat,
                      static_cast<GLsizei>(desc.width), static_cast<GLsizei>(desc.height));
-    record.sampler = CreateSampler(desc.sampler);
-    if (!renderTarget) {
+    if (format->Is(GlesAlphaSwizzle)) {
+        // A8: R8 저장소를 (0, 0, 0, R)로 읽는다(텍스처 객체 상태, ES 3.0 core).
+        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R, static_cast<GLint>(GL_ZERO));
+        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_G, static_cast<GLint>(GL_ZERO));
+        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_B, static_cast<GLint>(GL_ZERO));
+        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, static_cast<GLint>(GL_RED));
+    }
+
+    record.sampler = CreateSampler(desc.sampler, HasPixelFormatCaps(GetPixelFormatCaps(desc.format),
+                                                                    PixelFormatCaps::Filterable));
+    if (!attachment) {
         // 첫 행을 v = 0에 둔다. UV (0,0)이 이미지 좌상단이 되어 D3D12와 결과가 같다.
         usize offset = 0;
         for (uint32 level = 0; level < desc.mipLevels; ++level) {
-            UploadMip(record, level, pixels.Data() + offset);
+            auto uploaded = UploadMip(record, level, pixels.Data() + offset);
+            if (!uploaded) {
+                ReleaseTexture(record);
+                return Result<TextureHandle>::Failure(uploaded.Error());
+            }
+
             offset += static_cast<usize>(PixelFormatImageBytes(
                 desc.format, MipExtent(desc.width, level), MipExtent(desc.height, level)));
         }
-    } else {
+    } else if (renderTarget) {
         record.framebuffer = CreateColorFramebuffer(record.texture);
         if (record.framebuffer == 0) {
             ReleaseTexture(record);
@@ -449,6 +479,72 @@ Result<TextureHandle> GlesDevice::CreateTexture(const TextureDesc& desc,
     return Result<TextureHandle>::Success(TextureHandle{added.Value()});
 }
 
+// ES core에는 texture view(형식 재해석)가 없다. 같은 텍스처 객체를 공유해 plane만 고르는 view(깊이·
+// 스텐실 plane, 같은 형식)를 만들고, 형식을 바꾸는 view(sRGB 짝)는 Unsupported다(PixelFormat.ko.md
+// 14.2절).
+Result<TextureHandle> GlesDevice::CreateTextureView(TextureHandle texture,
+                                                    const TextureViewDesc& desc) noexcept {
+    auto owner = ownership_.Check();
+    if (!owner) {
+        return Result<TextureHandle>::Failure(owner.Error());
+    }
+
+    TextureRecord* source = textures_.Find(texture.slot);
+    if (source == nullptr || source->retirePending) {
+        return Result<TextureHandle>::Failure(ErrorCode::StaleHandle);
+    }
+
+    if (source->isView) {
+        return Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto resolved = ResolveTextureViewFormat(source->format, desc);
+    if (!resolved) {
+        return Result<TextureHandle>::Failure(resolved.Error());
+    }
+
+    const PixelFormatKind kind = GetPixelFormatInfo(source->format).kind;
+    const bool depth = kind == PixelFormatKind::Depth || kind == PixelFormatKind::DepthStencil;
+    if (!HasPixelFormatCaps(GetPixelFormatCaps(source->format), PixelFormatCaps::Sampled) ||
+        (!depth && resolved.Value() != source->format)) {
+        Diagnostic message;
+        message.Text("texture view of ")
+            .Text(PixelFormatName(source->format))
+            .Text(" as ")
+            .Text(PixelFormatName(resolved.Value()))
+            .Text(" is not supported by OpenGL ES (no texture views in ES core)");
+        auto rejected = Reject(message, ErrorCode::Unsupported);
+        return Result<TextureHandle>::Failure(rejected.Error());
+    }
+
+    if (!MakeCurrentForResources()) {
+        return FailWith<TextureHandle>("cannot make the OpenGL context current");
+    }
+
+    TextureRecord record;
+    record.texture = source->texture;
+    record.width = source->width;
+    record.height = source->height;
+    record.mipLevels = source->mipLevels;
+    record.format = resolved.Value();
+    record.plane = desc.plane;
+    record.depthStencilTexture = source->depthStencilTexture;
+    record.samplerDesc = source->samplerDesc;
+    record.isView = true;
+    record.source = texture.slot;
+    record.sampler =
+        CreateSampler(record.samplerDesc, HasPixelFormatCaps(GetPixelFormatCaps(source->format),
+                                                             PixelFormatCaps::Filterable));
+    auto added = textures_.TryAdd(record);
+    if (!added) {
+        gl_.DeleteSamplers(1, &record.sampler);
+        return Result<TextureHandle>::Failure(added.Error());
+    }
+
+    ++textures_.Find(texture.slot)->viewCount;
+    return Result<TextureHandle>::Success(TextureHandle{added.Value()});
+}
+
 Result<PipelineHandle> GlesDevice::CreatePipeline(const PipelineDesc& desc) noexcept {
     auto owner = ownership_.Check();
     if (!owner) {
@@ -462,7 +558,12 @@ Result<PipelineHandle> GlesDevice::CreatePipeline(const PipelineDesc& desc) noex
     }
 
     // 렌더 타깃으로 대응하지 않는 형식은 대신하지 않고 Unsupported다(PixelFormat.ko.md 8.3절).
-    if (colorFormat == nullptr || !SupportsTextureFormat(*colorFormat, features_, true)) {
+    // 블렌드를 켜면 그 형식이 블렌드를 받아야 한다(32-bit float는 GL_EXT_float_blend).
+    if (colorFormat == nullptr ||
+        !HasPixelFormatCaps(GetPixelFormatCaps(desc.colorFormat),
+                            desc.alphaBlend
+                                ? PixelFormatCaps::RenderTarget | PixelFormatCaps::Blendable
+                                : PixelFormatCaps::RenderTarget)) {
         Diagnostic message;
         message.Text("pixel format ")
             .Text(PixelFormatName(desc.colorFormat))
@@ -596,18 +697,37 @@ void GlesDevice::Retire(TextureHandle handle) noexcept {
         return;
     }
 
-    const TextureRecord* record = textures_.Find(handle.slot);
-    if (record == nullptr || handle == white_) {
+    TextureRecord* record = textures_.Find(handle.slot);
+    if (record == nullptr || handle == white_ || record->retirePending) {
         return;
     }
 
+    if (record->viewCount != 0) {
+        record->retirePending = true;
+        return;
+    }
+
+    const bool view = record->isView;
+    const SlotHandle source = record->source;
+    RetireTextureRecord(handle.slot, *record);
+    if (view) {
+        TextureRecord* owner = textures_.Find(source);
+        if (owner != nullptr && owner->viewCount != 0 && --owner->viewCount == 0 &&
+            owner->retirePending) {
+            RetireTextureRecord(source, *owner);
+        }
+    }
+}
+
+void GlesDevice::RetireTextureRecord(SlotHandle slot, const TextureRecord& record) noexcept {
     RetiredObject entry;
     entry.kind = RetiredKind::Texture;
-    entry.objects[0] = record->texture;
-    entry.objects[1] = record->sampler;
-    entry.objects[2] = record->framebuffer;
+    // view는 텍스처 객체를 원 기록과 공유하므로 자기 샘플러만 놓는다(이름 0은 지우지 않는다).
+    entry.objects[0] = record.isView ? 0u : record.texture;
+    entry.objects[1] = record.sampler;
+    entry.objects[2] = record.framebuffer;
     Defer(entry);
-    auto removed = textures_.TryRemove(handle.slot);
+    auto removed = textures_.TryRemove(slot);
     (void)removed;
 }
 
@@ -853,7 +973,10 @@ void GlesDevice::DeleteObject(const RetiredObject& entry) noexcept {
             gl_.DeleteSamplers(1, &entry.objects[1]);
         }
 
-        gl_.DeleteTextures(1, &entry.objects[0]);
+        if (entry.objects[0] != 0) {
+            gl_.DeleteTextures(1, &entry.objects[0]);
+        }
+
         if (entry.kind == RetiredKind::SwapChain) {
             platform_->DestroySurface(entry.surface);
         }
@@ -875,7 +998,9 @@ void GlesDevice::ReleaseTexture(const TextureRecord& record) noexcept {
         gl_.DeleteSamplers(1, &record.sampler);
     }
 
-    gl_.DeleteTextures(1, &record.texture);
+    if (!record.isView) {
+        gl_.DeleteTextures(1, &record.texture);
+    }
 }
 
 bool GlesDevice::CreateBackBuffer(SwapChainRecord& record, uint32 width, uint32 height) noexcept {
@@ -919,18 +1044,22 @@ GLuint GlesDevice::CreateColorFramebuffer(GLuint texture) noexcept {
     return framebuffer;
 }
 
-GLuint GlesDevice::CreateSampler(const SamplerDesc& desc) noexcept {
+GLuint GlesDevice::CreateSampler(const SamplerDesc& desc, bool filterable) noexcept {
     GLuint sampler = 0;
     gl_.GenSamplers(1, &sampler);
-    gl_.SamplerParameteri(sampler, GL_TEXTURE_MIN_FILTER, MinFilter(desc.filter));
-    gl_.SamplerParameteri(sampler, GL_TEXTURE_MAG_FILTER, MagFilter(desc.filter));
+    // 선형 필터를 받지 않는 형식(정수·깊이·필터 확장 없는 32-bit float)에 선형 필터를 걸면 ES에서
+    // 불완전 텍스처가 되어 texelFetch도 0을 읽는다. 그 형식은 최근접 필터로 둔다(Filterable 능력이
+    // 없음을 공개한 형식이다).
+    const Filter filter = filterable ? desc.filter : Filter::Nearest;
+    gl_.SamplerParameteri(sampler, GL_TEXTURE_MIN_FILTER, MinFilter(filter));
+    gl_.SamplerParameteri(sampler, GL_TEXTURE_MAG_FILTER, MagFilter(filter));
     gl_.SamplerParameteri(sampler, GL_TEXTURE_WRAP_S, WrapMode(desc.addressU));
     gl_.SamplerParameteri(sampler, GL_TEXTURE_WRAP_T, WrapMode(desc.addressV));
     // border 색은 ES 3.2 core(GL_OES_texture_border_clamp 흡수)다.
     float border[4];
     BorderColorValue(desc.borderColor, border);
     gl_.SamplerParameterfv(sampler, GL_TEXTURE_BORDER_COLOR, border);
-    if (desc.filter == Filter::Anisotropic && features_.anisotropic) {
+    if (filter == Filter::Anisotropic && features_.anisotropic) {
         const float requested = static_cast<float>(desc.maxAnisotropy);
         gl_.SamplerParameterf(sampler, GL_TEXTURE_MAX_ANISOTROPY,
                               requested < features_.maxAnisotropy ? requested
@@ -940,16 +1069,64 @@ GLuint GlesDevice::CreateSampler(const SamplerDesc& desc) noexcept {
     return sampler;
 }
 
-void GlesDevice::UploadMip(const TextureRecord& record, uint32 level,
-                           const uint8* pixels) noexcept {
+Result<void> GlesDevice::UploadMip(const TextureRecord& record, uint32 level,
+                                   const uint8* pixels) noexcept {
     const GlesTextureFormat* format = FindTextureFormat(record.format);
+    const uint32 width = MipExtent(record.width, level);
+    const uint32 height = MipExtent(record.height, level);
+    const auto glWidth = static_cast<GLsizei>(width);
+    const auto glHeight = static_cast<GLsizei>(height);
     gl_.ActiveTexture(GL_TEXTURE0 + UploadTextureUnit);
     gl_.BindTexture(GL_TEXTURE_2D, record.texture);
     gl_.PixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    gl_.TexSubImage2D(GL_TEXTURE_2D, static_cast<GLint>(level), 0, 0,
-                      static_cast<GLsizei>(MipExtent(record.width, level)),
-                      static_cast<GLsizei>(MipExtent(record.height, level)), format->externalFormat,
-                      format->externalType, pixels);
+    if (format->Is(GlesCompressed)) {
+        const uint64 bytes = PixelFormatImageBytes(record.format, width, height);
+        gl_.CompressedTexSubImage2D(GL_TEXTURE_2D, static_cast<GLint>(level), 0, 0, glWidth,
+                                    glHeight, format->internalFormat, static_cast<GLsizei>(bytes),
+                                    pixels);
+        return Result<void>::Success();
+    }
+
+    // D16·D32F와 색 형식은 Rocks 배치가 GL 외부 배치와 같다. D24는 하위 24비트 값을 32-bit 정규화
+    // 정수로 넓히고, 깊이·스텐실은 두 plane을 texel 하나로 엮는다(UNSIGNED_INT_24_8: 깊이 상위
+    // 24비트 + 스텐실, FLOAT_32_UNSIGNED_INT_24_8_REV: float 깊이 + 스텐실 하위 8비트 32-bit 칸).
+    const PixelFormat depthLayout = record.format;
+    if (depthLayout != PixelFormat::D24Unorm && depthLayout != PixelFormat::D24UnormS8Uint &&
+        depthLayout != PixelFormat::D32FloatS8Uint) {
+        gl_.TexSubImage2D(GL_TEXTURE_2D, static_cast<GLint>(level), 0, 0, glWidth, glHeight,
+                          format->externalFormat, format->externalType, pixels);
+        return Result<void>::Success();
+    }
+
+    const usize texels = static_cast<usize>(width) * height;
+    const usize texelBytes = depthLayout == PixelFormat::D32FloatS8Uint ? 8 : 4;
+    Array<uint8> packed(*stagingSource_.allocator);
+    if (!packed.TryResize(texels * texelBytes)) {
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    const uint8* stencil = pixels + texels * 4;
+    for (usize texel = 0; texel < texels; ++texel) {
+        uint32 depth = 0;
+        platform::MemoryCopy(&depth, pixels + texel * 4, 4);
+        uint8* out = packed.Data() + texel * texelBytes;
+        if (depthLayout == PixelFormat::D24Unorm) {
+            const uint32 value = depth & 0xFFFFFFu;
+            const uint32 wide = (value << 8) | (value >> 16);
+            platform::MemoryCopy(out, &wide, 4);
+        } else if (depthLayout == PixelFormat::D24UnormS8Uint) {
+            const uint32 word = ((depth & 0xFFFFFFu) << 8) | stencil[texel];
+            platform::MemoryCopy(out, &word, 4);
+        } else {
+            const uint32 word = stencil[texel];
+            platform::MemoryCopy(out, &depth, 4);
+            platform::MemoryCopy(out + 4, &word, 4);
+        }
+    }
+
+    gl_.TexSubImage2D(GL_TEXTURE_2D, static_cast<GLint>(level), 0, 0, glWidth, glHeight,
+                      format->externalFormat, format->externalType, packed.Data());
+    return Result<void>::Success();
 }
 
 Result<void> GlesDevice::MatchVertexInputs(GLuint program, const VertexLayout& layout) noexcept {

@@ -705,27 +705,27 @@ Vulkan 기능 수준에서 지원이 보장되는 형식 집합(필수 형식 �
 | 13 | `RGBA8UnormSrgb` | `SRGB8_ALPHA8` / `RGBA` / `UNSIGNED_BYTE` | core | CR·TF |
 | 14 | `RGBA8Snorm` | `RGBA8_SNORM` / `RGBA` / `BYTE` | core | TF, image, CR은 `GL_EXT_render_snorm` |
 | 15 | `RGBA8Uint` | `RGBA8UI` / `RGBA_INTEGER` / `UNSIGNED_BYTE` | core | CR, image |
-| 16 | `BGRA8Unorm` | `BGRA8_EXT` / `BGRA_EXT` / `UNSIGNED_BYTE` | `GL_EXT_texture_format_BGRA8888`(불변 저장 조합 미확인) | 미대조 |
+| 16 | `BGRA8Unorm` | `BGRA8_EXT` / `BGRA_EXT` / `UNSIGNED_BYTE` | `GL_EXT_texture_format_BGRA8888`(개정 1.4가 `BGRA8_EXT` 크기 내부 형식을 더함. 사양은 `TexStorage2D`를 언급하지 않으나 NVIDIA ES context에서 생성·왕복 확인, 개정 4) | CR·TF(확장 사양 ES 3.0 절) |
 | 17 | `BGRA8UnormSrgb` | 없음 | — | UE는 `SRGB8_ALPHA8` + R·B swizzle(GL:1073)이나 렌더 타깃 쓰기 순서가 달라 따르지 않음 |
-| 18 | `R16Unorm` | `R16_EXT` / `RED` / `UNSIGNED_SHORT` | `GL_EXT_texture_norm16` | TF, CR(미대조) |
+| 18 | `R16Unorm` | `R16_EXT` / `RED` / `UNSIGNED_SHORT` | `GL_EXT_texture_norm16` | CR·TF(확장 사양 Table 8.13, readback은 `RGBA`/`UNSIGNED_SHORT`) |
 | 19·20 | `R16Uint`·`R16Sint` | `R16UI`·`R16I` / `RED_INTEGER` / `UNSIGNED_SHORT`·`SHORT` | core | CR |
 | 21 | `R16Float` | `R16F` / `RED` / `HALF_FLOAT` | core | CR·TF |
-| 22 | `RG16Unorm` | `RG16_EXT` / `RG` / `UNSIGNED_SHORT` | `GL_EXT_texture_norm16` | TF, CR(미대조) |
-| 23 | `RG16Snorm` | `RG16_SNORM_EXT` / `RG` / `SHORT` | `GL_EXT_texture_norm16` | TF(미대조) |
+| 22 | `RG16Unorm` | `RG16_EXT` / `RG` / `UNSIGNED_SHORT` | `GL_EXT_texture_norm16` | CR·TF |
+| 23 | `RG16Snorm` | `RG16_SNORM_EXT` / `RG` / `SHORT` | `GL_EXT_texture_norm16` | TF, CR은 `GL_EXT_render_snorm`(readback `RGBA`/`SHORT`) |
 | 24·25 | `RG16Uint`·`RG16Sint` | `RG16UI`·`RG16I` / `RG_INTEGER` | core | CR |
 | 26 | `RG16Float` | `RG16F` / `RG` / `HALF_FLOAT` | core | CR·TF |
-| 27 | `RGBA16Unorm` | `RGBA16_EXT` / `RGBA` / `UNSIGNED_SHORT` | `GL_EXT_texture_norm16` | TF, CR(미대조) |
-| 28 | `RGBA16Snorm` | `RGBA16_SNORM_EXT` / `RGBA` / `SHORT` | `GL_EXT_texture_norm16` | TF(미대조) |
+| 27 | `RGBA16Unorm` | `RGBA16_EXT` / `RGBA` / `UNSIGNED_SHORT` | `GL_EXT_texture_norm16` | CR·TF |
+| 28 | `RGBA16Snorm` | `RGBA16_SNORM_EXT` / `RGBA` / `SHORT` | `GL_EXT_texture_norm16` | TF, CR은 `GL_EXT_render_snorm` |
 | 29·30 | `RGBA16Uint`·`RGBA16Sint` | `RGBA16UI`·`RGBA16I` / `RGBA_INTEGER` | core | CR, image |
 | 31 | `RGBA16Float` | `RGBA16F` / `RGBA` / `HALF_FLOAT` | core | CR·TF, image |
 | 32·33 | `R32Uint`·`R32Sint` | `R32UI`·`R32I` / `RED_INTEGER` | core | CR, image·atomic |
-| 34 | `R32Float` | `R32F` / `RED` / `FLOAT` | core | CR, image, TF는 `GL_OES_texture_float_linear` |
+| 34 | `R32Float` | `R32F` / `RED` / `FLOAT` | core | CR, image, TF는 `GL_OES_texture_float_linear`, 블렌드는 `GL_EXT_float_blend` |
 | 35 | `RG32Uint` | `RG32UI` / `RG_INTEGER` / `UNSIGNED_INT` | core | CR |
-| 36 | `RG32Float` | `RG32F` / `RG` / `FLOAT` | core | CR, TF는 `GL_OES_texture_float_linear` |
+| 36 | `RG32Float` | `RG32F` / `RG` / `FLOAT` | core | CR, TF는 `GL_OES_texture_float_linear`, 블렌드는 `GL_EXT_float_blend` |
 | 37·38 | `RGB32Uint`·`RGB32Sint` | `RGB32UI`·`RGB32I` / `RGB_INTEGER` | core | 샘플만 |
 | 39 | `RGB32Float` | `RGB32F` / `RGB` / `FLOAT` | core | 샘플만, TF는 `GL_OES_texture_float_linear`(대상 형식 미대조) |
 | 40 | `RGBA32Uint` | `RGBA32UI` / `RGBA_INTEGER` / `UNSIGNED_INT` | core | CR, image |
-| 41 | `RGBA32Float` | `RGBA32F` / `RGBA` / `FLOAT` | core | CR, image, TF는 `GL_OES_texture_float_linear` |
+| 41 | `RGBA32Float` | `RGBA32F` / `RGBA` / `FLOAT` | core | CR, image, TF는 `GL_OES_texture_float_linear`, 블렌드는 `GL_EXT_float_blend` |
 | 42 | `R64Uint` | 없음 | — | — |
 | 43 | `R5G6B5Unorm` | `RGB565` / `RGB` / `UNSIGNED_SHORT_5_6_5` | core | CR·TF |
 | 44 | `B5G5R5A1Unorm` | 없음. ES에 `UNSIGNED_SHORT_1_5_5_5_REV`가 없어 비트 배치가 맞는 업로드 type이 없다 | — | UE 대응(GL:1033–1037)의 정확성 미확인 |
@@ -891,6 +891,7 @@ D3D12의 능력 없음 26개는 DXGI 형식이 없는 ETC2·EAC 6, ASTC 15, `R8U
 | backend | 상태 | 위치 |
 |---|---|---|
 | D3D11 | **구현** | `D3D11Graphics/Private/Win64/D3D11PixelFormats.{h,cpp}`(대응 표·능력 질의·D3D11 메모리 배치 변환), 생성·view·readback은 `D3D11Resources.cpp`·`D3D11Upload.cpp` |
+| OpenGL ES | **구현** | `OpenGLGraphics/Private/Common/GlesFormats.{h,cpp}`(대응 표·확장 조건·능력·readback 변환), 생성·view는 `GlesDevice.cpp`, 업로드·`ReadTexture`는 `GlesDeviceTransfer.cpp`, 묶기는 `GlesDeviceFrame.cpp` |
 | Vulkan | **구현** | `VulkanGraphics/Private/VulkanFormats.{h,cpp}`(대응 표·plane aspect·view 형식), 능력 질의·생성·view는 `VulkanResources.cpp`, 업로드·readback은 `VulkanUpload.cpp`, 기능 활성은 `VulkanDevice.cpp` |
 
 **D3D11(2026-11-18).**
@@ -916,6 +917,41 @@ D3D12의 능력 없음 26개는 DXGI 형식이 없는 ETC2·EAC 6, ASTC 15, `R8U
 - `CreateTextureView`: sRGB 짝(같은 이미지, MUTABLE), 깊이·스텐실 plane, 비디오 plane view를 만든다. view 기록은 이미지·메모리를 쥐지 않고 상태 추적은 원 기록이 한다(전이·바인딩이 원 기록으로 간다). 원 텍스처를 먼저 Retire하면 원 기록은 남아 있다가 마지막 view를 놓을 때 함께 놓인다(D3D12와 같은 보류 Retire).
 - 렌더 파이프라인: `alphaBlend`이면 색 형식에 `Blendable`도 요구한다(D3D와 같다).
 - 검증: Sandbox `--self-test`에서 NVIDIA GTX 1060은 Sampled 58·RenderTarget 37·DepthStencil 5·능력 없음 24, lavapipe(llvmpipe)는 Sampled 60·RenderTarget 40·DepthStencil 5·능력 없음 23, 둘 다 "능력 ⇔ 생성"·바이트 왕복·view 샘플 실패 0, 검증 계층 오류 0(의도한 형식 불일치 탐지 시험 제외). D3D12와 수가 다른 것은 장치 차이다(예: GTX 1060은 `RGB32*`를 optimal tiling으로 샘플하지 못하고 `R8UnormSrgb`는 샘플한다). "능력 없음"은 능력 bit가 하나도 없는 형식 수다(샘플할 수 없어도 storage·texel buffer bit가 있는 형식은 들지 않는다).
+
+**OpenGL ES(2026-11-18).**
+- 대응 표는 8.6절이다. 조건은 ES 확장 이름으로 판정한다. Windows 미리보기의 데스크톱 core context(GLES31_PC)도 같은 이름을 공개할 때만 켠다. 그래서 데스크톱에서 core 기능인 norm16·BPTC·float 필터·float 블렌드도 그 context에서는 꺼진다. ASTC LDR은 ES context에서는 core로 보고, 데스크톱 core context에서는 `GL_KHR_texture_compression_astc_ldr`를 요구한다.
+- 대응하지 않는 형식(Unsupported): `BGRA8UnormSrgb`(ES에 BGRA sRGB 내부 형식 없음), `R64Uint`, `B5G5R5A1Unorm`(비트 배치가 맞는 업로드 타입 `UNSIGNED_SHORT_1_5_5_5_REV`가 ES에 없음), `NV12`·`P010`(ES core에 다중 plane 텍스처 없음). 확장이 없는 형식도 능력 없음이다.
+- 능력(7절 OpenGL ES 열):
+  - 모든 대응 형식에 Sampled·Mipmaps·TextureCube·Gather를 준다.
+  - Texture3D는 비압축 색 형식만 준다. 압축 형식의 3D 조건은 확장 사양을 대조하지 않았다.
+  - Filterable은 Table 8.10 TF(32F는 `GL_OES_texture_float_linear`)를 따른다.
+  - RenderTarget은 CR(SNORM은 `GL_EXT_render_snorm`, norm16 UNORM은 `GL_EXT_texture_norm16`)을 따른다. Blendable은 렌더 타깃이면서 정수가 아닐 때 준다. 32F는 `GL_EXT_float_blend`가 있어야 한다(없이 블렌드하면 `INVALID_OPERATION`, 확장 사양).
+  - Storage는 Table 8.26, atomic은 R32UI·R32I다.
+  - texel buffer(Table 8.18)는 대조하지 않아 공개하지 않는다.
+  - 깊이는 Filterable이 아니다. 비교 모드 없이 선형 필터를 걸면 불완전 텍스처가 된다.
+- 선형 필터를 받지 않는 형식(정수·깊이·필터 확장 없는 32F)의 샘플러는 최근접 필터로 만든다. ES에서는 그 조합이 불완전 텍스처가 되어 `texelFetch`도 0을 읽는다. 이는 Filterable 능력이 없다고 공개한 형식의 규칙이다.
+- `A8Unorm`은 R8에 텍스처 swizzle (0,0,0,R)을 건다. 렌더 타깃·storage 능력은 주지 않고, readback은 저장소 R8을 읽는다.
+- 업로드: 블록 압축은 `glCompressedTexSubImage2D`로 올린다. D24는 하위 24비트를 32-bit 정규화 정수로 넓혀 `DEPTH_COMPONENT`/`UNSIGNED_INT`로 올린다. 깊이·스텐실은 두 plane을 엮어 올린다(`UNSIGNED_INT_24_8`, `FLOAT_32_UNSIGNED_INT_24_8_REV`).
+- `ReadTexture`(pixel pack buffer):
+  - 색 렌더 타깃 형식은 mip을 임시 framebuffer에 붙여 읽는다. 구현 선택 조합(`IMPLEMENTATION_COLOR_READ_FORMAT/TYPE`)이 업로드 배치와 같으면 그대로 읽는다.
+  - 다르면 계열 표준 조합으로 읽고 CPU에서 정확히 되돌린다(ES 3.2 16.1.2절과 `EXT_texture_norm16`·`EXT_render_snorm`의 추가 조합). 표준 조합은 `RGBA`/`UNSIGNED_BYTE`·`BYTE`·`UNSIGNED_SHORT`·`SHORT`·`FLOAT`, `RGBA_INTEGER`/`UNSIGNED_INT`·`INT`, `RGB10_A2`다. 되돌리는 변환은 채널 고르기, half·11/10-bit float 묶기, BGRA 순서, 5_6_5 묶기다.
+  - 깊이·스텐실 plane은 ES가 `glReadPixels`로 읽지 못한다. 그래서 셰이더가 `texelFetch`로 R32F(깊이)·R32UI(스텐실, `DEPTH_STENCIL_TEXTURE_MODE` = `STENCIL_INDEX`) 대상에 옮겨 읽는다. D16·D24는 정규화 값을 저장 정수로 반올림해 되돌린다.
+  - 블록 압축과 색 렌더 타깃이 아닌 형식은 Unsupported다. 블록 압축은 ES에 `glGetCompressedTexImage`가 없고, 색 렌더 타깃이 아닌 형식(`SRGB8`·`RGB9_E5`·`RGB32*`·확장 sRGB R8/RG8, SNORM은 `EXT_render_snorm`이 없을 때)은 framebuffer에 붙일 수 없다.
+  - `ReadPixels`·`RequestReadback`도 같은 읽기 조합을 쓴다. 비동기 readback은 `TryReadback`에서 변환한다.
+- `CreateTextureView`: ES core에는 형식을 재해석하는 view가 없다.
+  - 같은 텍스처 객체를 공유하는 view만 만든다: 같은 형식 view와 깊이·스텐실 plane view다.
+  - 읽을 plane(`DEPTH_STENCIL_TEXTURE_MODE`)과 스텐실 G 채널 대응(swizzle (R,R,0,1))은 텍스처 객체 상태다. 그래서 `SetTexture`로 묶을 때마다 정한다. 한 그리기에 텍스처 하나만 묶으므로 서로 덮지 않는다.
+  - sRGB 짝 view는 Unsupported다. `GL_EXT_texture_sRGB_decode`로 sRGB 원본을 선형으로 읽는 한 방향은 가능하지만 후속으로 둔다.
+  - view는 자기 샘플러만 놓는다. 원 텍스처의 Retire는 마지막 view까지 보류한다(D3D12·Vulkan과 같다).
+- 렌더 파이프라인: `alphaBlend`이면 색 형식에 `Blendable`도 요구한다.
+- self-test 보강:
+  - 정수 형식 파이프라인에 GLSL `ivec4`·`uvec4` 출력을 쓰고, view 시험에도 GLSL판을 쓴다. 그래서 OpenGL ES 예외 없이 "능력 ⇔ 파이프라인 생성"을 본다.
+  - OpenGL ES에서만 `ReadTexture` Unsupported를 허용하고, 읽지 못한 형식 수를 요약에 적는다. sRGB 짝 view의 Unsupported도 OpenGL ES에서만 허용한다.
+  - 왕복 데이터는 모든 backend에서 float의 NaN·무한대·비정규 수와 SNORM 최솟값(-128·-32768)을 피한다. 이 값들은 framebuffer 읽기 조합을 거치면 보존되지 않는다.
+- 검증(Sandbox `--self-test`, NVIDIA GTX 1060):
+  - ES 3.2 context: Sampled 77·RenderTarget 36·DepthStencil 5·능력 없음 9, 읽지 못한 형식 35(블록 압축 29, `R8UnormSrgb`·`RGB8UnormSrgb`·`RGB32*` 3종·`RGB9E5Ufloat`).
+  - 데스크톱 core context: Sampled 53·RenderTarget 28·DepthStencil 5·능력 없음 33, 읽지 못한 형식 19(블록 압축 11, `EXT_render_snorm` 없는 SNORM 2종, `R8UnormSrgb`·`RGB8UnormSrgb`·`RGB32*` 3종·`RGB9E5Ufloat`).
+  - 둘 다 "능력 ⇔ 생성"·바이트 왕복(깊이·스텐실 포함)·깊이/스텐실 view 샘플 실패 0, GL debug 오류 0이다.
 
 ## 15. A0-G와의 분담
 
@@ -966,4 +1002,4 @@ D3D12의 능력 없음 26개는 DXGI 형식이 없는 ETC2·EAC 6, ASTC 15, `R8U
 - 개정 1(2026-11-17): 초안. UE 5.8.4 `EPixelFormat` 94개 값 전체, 정보 표·능력 플래그·판정 위치, D3D12·D3D11·Vulkan·OpenGL·Metal 형식 표, sRGB·깊이·스텐실·비디오 처리, 쿠킹 대상 위치를 조사하였다. OpenGL ES 3.2 사양서 Table 8.10·8.11·8.17·8.19·8.26과 NDK 헤더로 GLES 대응을 확인하였다. 사용자 지시 "PixelFormat으로", "언리얼에서 지원하는거 full로 지원", "시간이 걸리더라도 제대로해"에 따라 형식마다 근거를 달고 확인하지 못한 것은 미확인으로 남겼다.
 - 개정 2(2026-11-17): 사용자 결정 반영. PX1 (가) sRGB 별도 형식, PX2 계열별 번호 구간, PX3 비디오 형식은 D3D12 생성까지 지금 구현(권장안이던 "생성은 미디어 단계까지 계약"이 아님). 1·11·16절과 PF6 행을 고쳤다.
 - 개정 3(2026-11-17): PF2(D3D12)·PF3 틀·PF6(D3D12) 구현과 스펙 차이를 14.1절에 기록하였다. 깊이·스텐실 이미지 크기를 plane 합으로 바꾸었고, `TextureUsage::DepthStencil`·`CreateTextureView`·`ReadTexture`·`GetPixelFormatCaps`를 Graphics 계약에 더하였다.
-- 개정 4(2026-11-18): PF4 진행. D3D11·Vulkan 대응 표·능력 질의·깊이·스텐실·비디오·view·readback(14.2절).
+- 개정 4(2026-11-18): PF4. D3D11·Vulkan·OpenGL ES 대응 표·능력 질의·깊이·스텐실·비디오·view·readback(14.2절). 8.6절 표의 norm16·SNORM 렌더 타깃·BGRA8 조건을 확장 사양으로 대조해 고치고 32F 블렌드 조건(`GL_EXT_float_blend`)을 더하였다.

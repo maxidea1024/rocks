@@ -93,9 +93,110 @@ inline constexpr GLenum GL_UNSIGNED_INT = 0x1405;
 inline constexpr GLenum GL_FLOAT = 0x1406;
 inline constexpr GLenum GL_HALF_FLOAT = 0x140B;
 inline constexpr GLenum GL_UNSIGNED_INT_2_10_10_10_REV = 0x8368;
+inline constexpr GLenum GL_UNSIGNED_SHORT_5_6_5 = 0x8363;
+inline constexpr GLenum GL_UNSIGNED_INT_10F_11F_11F_REV = 0x8C3B;
+inline constexpr GLenum GL_UNSIGNED_INT_5_9_9_9_REV = 0x8C3E;
+inline constexpr GLenum GL_UNSIGNED_INT_24_8 = 0x84FA;
+inline constexpr GLenum GL_FLOAT_32_UNSIGNED_INT_24_8_REV = 0x8DAD;
+
+// 외부(업로드·readback) 형식이다.
+inline constexpr GLenum GL_STENCIL_INDEX = 0x1901;
+inline constexpr GLenum GL_DEPTH_COMPONENT = 0x1902;
+inline constexpr GLenum GL_RED = 0x1903;
+inline constexpr GLenum GL_GREEN = 0x1904;
+inline constexpr GLenum GL_BLUE = 0x1905;
+inline constexpr GLenum GL_ALPHA = 0x1906;
+inline constexpr GLenum GL_RGB = 0x1907;
 inline constexpr GLenum GL_RGBA = 0x1908;
+inline constexpr GLenum GL_RG = 0x8227;
+inline constexpr GLenum GL_RG_INTEGER = 0x8228;
+inline constexpr GLenum GL_RED_INTEGER = 0x8D94;
+inline constexpr GLenum GL_RGB_INTEGER = 0x8D98;
+inline constexpr GLenum GL_RGBA_INTEGER = 0x8D99;
+inline constexpr GLenum GL_DEPTH_STENCIL = 0x84F9;
+// GL_EXT_texture_format_BGRA8888이다.
+inline constexpr GLenum GL_BGRA_EXT = 0x80E1;
+
+// 내부 형식(ES 3.2 Table 8.10·8.11·8.17과 확장)이다.
+inline constexpr GLenum GL_R8 = 0x8229;
+inline constexpr GLenum GL_R8I = 0x8231;
+inline constexpr GLenum GL_R8UI = 0x8232;
+inline constexpr GLenum GL_RG8 = 0x822B;
+inline constexpr GLenum GL_RG8_SNORM = 0x8F95;
+inline constexpr GLenum GL_RG8UI = 0x8238;
+inline constexpr GLenum GL_RGB8 = 0x8051;
+inline constexpr GLenum GL_SRGB8 = 0x8C41;
 inline constexpr GLenum GL_RGBA8 = 0x8058;
 inline constexpr GLenum GL_SRGB8_ALPHA8 = 0x8C43;
+inline constexpr GLenum GL_RGBA8_SNORM = 0x8F97;
+inline constexpr GLenum GL_RGBA8UI = 0x8D7C;
+inline constexpr GLenum GL_R16I = 0x8233;
+inline constexpr GLenum GL_R16UI = 0x8234;
+inline constexpr GLenum GL_R16F = 0x822D;
+inline constexpr GLenum GL_RG16I = 0x8239;
+inline constexpr GLenum GL_RG16UI = 0x823A;
+inline constexpr GLenum GL_RG16F = 0x822F;
+inline constexpr GLenum GL_RGBA16I = 0x8D88;
+inline constexpr GLenum GL_RGBA16UI = 0x8D76;
+inline constexpr GLenum GL_RGBA16F = 0x881A;
+inline constexpr GLenum GL_R32I = 0x8235;
+inline constexpr GLenum GL_R32UI = 0x8236;
+inline constexpr GLenum GL_R32F = 0x822E;
+inline constexpr GLenum GL_RG32UI = 0x823C;
+inline constexpr GLenum GL_RG32F = 0x8230;
+inline constexpr GLenum GL_RGB32I = 0x8D83;
+inline constexpr GLenum GL_RGB32UI = 0x8D71;
+inline constexpr GLenum GL_RGB32F = 0x8815;
+inline constexpr GLenum GL_RGBA32UI = 0x8D70;
+inline constexpr GLenum GL_RGBA32F = 0x8814;
+inline constexpr GLenum GL_RGB565 = 0x8D62;
+inline constexpr GLenum GL_RGB10_A2 = 0x8059;
+inline constexpr GLenum GL_R11F_G11F_B10F = 0x8C3A;
+inline constexpr GLenum GL_RGB9_E5 = 0x8C3D;
+inline constexpr GLenum GL_DEPTH_COMPONENT16 = 0x81A5;
+inline constexpr GLenum GL_DEPTH_COMPONENT24 = 0x81A6;
+inline constexpr GLenum GL_DEPTH_COMPONENT32F = 0x8CAC;
+inline constexpr GLenum GL_DEPTH24_STENCIL8 = 0x88F0;
+inline constexpr GLenum GL_DEPTH32F_STENCIL8 = 0x8CAD;
+// GL_EXT_texture_sRGB_R8·GL_EXT_texture_sRGB_RG8이다.
+inline constexpr GLenum GL_SR8_EXT = 0x8FBD;
+inline constexpr GLenum GL_SRG8_EXT = 0x8FBE;
+// GL_EXT_texture_format_BGRA8888(개정 1.4)이다.
+inline constexpr GLenum GL_BGRA8_EXT = 0x93A1;
+// GL_EXT_texture_norm16이다.
+inline constexpr GLenum GL_R16_EXT = 0x822A;
+inline constexpr GLenum GL_RG16_EXT = 0x822C;
+inline constexpr GLenum GL_RGBA16_EXT = 0x805B;
+inline constexpr GLenum GL_RG16_SNORM_EXT = 0x8F99;
+inline constexpr GLenum GL_RGBA16_SNORM_EXT = 0x8F9B;
+// 블록 압축 내부 형식이다(S3TC·RGTC·BPTC는 확장, ETC2·EAC·ASTC LDR은 ES 3.2 core).
+inline constexpr GLenum GL_COMPRESSED_RGBA_S3TC_DXT1_EXT = 0x83F1;
+inline constexpr GLenum GL_COMPRESSED_RGBA_S3TC_DXT3_EXT = 0x83F2;
+inline constexpr GLenum GL_COMPRESSED_RGBA_S3TC_DXT5_EXT = 0x83F3;
+inline constexpr GLenum GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT = 0x8C4D;
+inline constexpr GLenum GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT = 0x8C4E;
+inline constexpr GLenum GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT = 0x8C4F;
+inline constexpr GLenum GL_COMPRESSED_RED_RGTC1_EXT = 0x8DBB;
+inline constexpr GLenum GL_COMPRESSED_RED_GREEN_RGTC2_EXT = 0x8DBD;
+inline constexpr GLenum GL_COMPRESSED_RGBA_BPTC_UNORM_EXT = 0x8E8C;
+inline constexpr GLenum GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_EXT = 0x8E8D;
+inline constexpr GLenum GL_COMPRESSED_RGB_BPTC_UNSIGNED_FLOAT_EXT = 0x8E8F;
+inline constexpr GLenum GL_COMPRESSED_R11_EAC = 0x9270;
+inline constexpr GLenum GL_COMPRESSED_RG11_EAC = 0x9272;
+inline constexpr GLenum GL_COMPRESSED_RGB8_ETC2 = 0x9274;
+inline constexpr GLenum GL_COMPRESSED_SRGB8_ETC2 = 0x9275;
+inline constexpr GLenum GL_COMPRESSED_RGBA8_ETC2_EAC = 0x9278;
+inline constexpr GLenum GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC = 0x9279;
+inline constexpr GLenum GL_COMPRESSED_RGBA_ASTC_4x4 = 0x93B0;
+inline constexpr GLenum GL_COMPRESSED_RGBA_ASTC_6x6 = 0x93B4;
+inline constexpr GLenum GL_COMPRESSED_RGBA_ASTC_8x8 = 0x93B7;
+inline constexpr GLenum GL_COMPRESSED_RGBA_ASTC_10x10 = 0x93BB;
+inline constexpr GLenum GL_COMPRESSED_RGBA_ASTC_12x12 = 0x93BD;
+inline constexpr GLenum GL_COMPRESSED_SRGB8_ALPHA8_ASTC_4x4 = 0x93D0;
+inline constexpr GLenum GL_COMPRESSED_SRGB8_ALPHA8_ASTC_6x6 = 0x93D4;
+inline constexpr GLenum GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x8 = 0x93D7;
+inline constexpr GLenum GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x10 = 0x93DB;
+inline constexpr GLenum GL_COMPRESSED_SRGB8_ALPHA8_ASTC_12x12 = 0x93DD;
 
 // --- 버퍼 ---
 inline constexpr GLenum GL_ARRAY_BUFFER = 0x8892;
@@ -128,6 +229,12 @@ inline constexpr GLenum GL_TEXTURE_BORDER_COLOR = 0x1004;
 // GL_EXT_texture_filter_anisotropic이다.
 inline constexpr GLenum GL_TEXTURE_MAX_ANISOTROPY = 0x84FE;
 inline constexpr GLenum GL_MAX_TEXTURE_MAX_ANISOTROPY = 0x84FF;
+// 텍스처 성분 대응(ES 3.0 core)과 깊이·스텐실 텍스처의 읽기 대상(ES 3.1 core)이다.
+inline constexpr GLenum GL_TEXTURE_SWIZZLE_R = 0x8E42;
+inline constexpr GLenum GL_TEXTURE_SWIZZLE_G = 0x8E43;
+inline constexpr GLenum GL_TEXTURE_SWIZZLE_B = 0x8E44;
+inline constexpr GLenum GL_TEXTURE_SWIZZLE_A = 0x8E45;
+inline constexpr GLenum GL_DEPTH_STENCIL_TEXTURE_MODE = 0x90EA;
 inline constexpr GLenum GL_UNPACK_ALIGNMENT = 0x0CF5;
 inline constexpr GLenum GL_PACK_ALIGNMENT = 0x0D05;
 
@@ -137,6 +244,9 @@ inline constexpr GLenum GL_READ_FRAMEBUFFER = 0x8CA8;
 inline constexpr GLenum GL_DRAW_FRAMEBUFFER = 0x8CA9;
 inline constexpr GLenum GL_COLOR_ATTACHMENT0 = 0x8CE0;
 inline constexpr GLenum GL_FRAMEBUFFER_COMPLETE = 0x8CD5;
+// 읽기 framebuffer의 구현 선택 ReadPixels 형식·타입이다(ES 3.2 16.1.2절).
+inline constexpr GLenum GL_IMPLEMENTATION_COLOR_READ_TYPE = 0x8B9A;
+inline constexpr GLenum GL_IMPLEMENTATION_COLOR_READ_FORMAT = 0x8B9B;
 
 // --- 셰이더·프로그램 ---
 inline constexpr GLenum GL_FRAGMENT_SHADER = 0x8B30;
@@ -229,6 +339,7 @@ inline constexpr GLenum GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR = 0x824E;
     X(void, UseProgram, (GLuint))                                                                  \
     X(GLint, GetUniformLocation, (GLuint, const GLchar*))                                          \
     X(void, Uniform4fv, (GLint, GLsizei, const GLfloat*))                                          \
+    X(void, Uniform1i, (GLint, GLint))                                                             \
     X(void, GenTextures, (GLsizei, GLuint*))                                                       \
     X(void, DeleteTextures, (GLsizei, const GLuint*))                                              \
     X(void, ActiveTexture, (GLenum))                                                               \
@@ -236,6 +347,9 @@ inline constexpr GLenum GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR = 0x824E;
     X(void, TexStorage2D, (GLenum, GLsizei, GLenum, GLsizei, GLsizei))                             \
     X(void, TexSubImage2D,                                                                         \
       (GLenum, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, const void*))                \
+    X(void, CompressedTexSubImage2D,                                                               \
+      (GLenum, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLsizei, const void*))               \
+    X(void, TexParameteri, (GLenum, GLenum, GLint))                                                \
     X(void, GenSamplers, (GLsizei, GLuint*))                                                       \
     X(void, DeleteSamplers, (GLsizei, const GLuint*))                                              \
     X(void, BindSampler, (GLuint, GLuint))                                                         \

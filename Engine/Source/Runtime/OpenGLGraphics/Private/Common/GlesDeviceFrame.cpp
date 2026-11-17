@@ -145,7 +145,6 @@ Result<void> GlesDevice::ReadPixels(TextureHandle handle, Span<uint8> out) noexc
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    const GlesTextureFormat* format = FindTextureFormat(record->format);
     const usize rowBytes = static_cast<usize>(PixelFormatRowBytes(record->format, record->width));
     if (record->framebuffer == 0 || out.Size() != rowBytes * record->height || recording_) {
         return Result<void>::Failure(recording_ ? ErrorCode::Busy : ErrorCode::InvalidArgument);
@@ -157,13 +156,8 @@ Result<void> GlesDevice::ReadPixels(TextureHandle handle, Span<uint8> out) noexc
 
     // RenderTarget 저장소의 첫 행이 이미지 위쪽이므로 뒤집지 않고 읽는다. sRGB 형식도 저장된
     // 값(인코딩된 byte)을 그대로 읽는다.
-    gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, record->framebuffer);
-    gl_.ReadBuffer(GL_COLOR_ATTACHMENT0);
-    gl_.PixelStorei(GL_PACK_ALIGNMENT, 1);
-    gl_.ReadPixels(0, 0, static_cast<GLsizei>(record->width), static_cast<GLsizei>(record->height),
-                   format->externalFormat, format->externalType, out.Data());
-    gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    return Result<void>::Success();
+    const TextureRecord copy = *record;
+    return ReadColorLevel(copy, 0, out);
 }
 
 void GlesDevice::StartPass(GLuint framebuffer, uint32 width, uint32 height,
@@ -194,6 +188,21 @@ void GlesDevice::BindPassTexture(const TextureRecord& record) noexcept {
     gl_.ActiveTexture(GL_TEXTURE0 + PixelTextureUnit);
     gl_.BindTexture(GL_TEXTURE_2D, record.texture);
     gl_.BindSampler(PixelTextureUnit, record.sampler);
+    // 깊이·스텐실 텍스처는 읽을 plane이 텍스처 객체 상태(ES 3.1 core)이므로 묶을 때 정한다. 한
+    // 그리기에 텍스처 하나만 묶으므로 깊이 view와 스텐실 view가 서로 덮지 않는다.
+    // 스텐실 plane은 다른 backend와 같이 값을 G 채널에서 읽는다(성분 대응 (R, R, 0, 1),
+    // PixelFormat.ko.md 10절). 깊이 plane은 항등 대응으로 되돌린다.
+    if (record.depthStencilTexture) {
+        const bool stencil = record.plane == 1;
+        gl_.TexParameteri(GL_TEXTURE_2D, GL_DEPTH_STENCIL_TEXTURE_MODE,
+                          static_cast<GLint>(stencil ? GL_STENCIL_INDEX : GL_DEPTH_COMPONENT));
+        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_G,
+                          static_cast<GLint>(stencil ? GL_RED : GL_GREEN));
+        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_B,
+                          static_cast<GLint>(stencil ? GL_ZERO : GL_BLUE));
+        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A,
+                          static_cast<GLint>(stencil ? GL_ONE : GL_ALPHA));
+    }
 }
 
 bool GlesDevice::PresentBlit(const SwapChainRecord& record) noexcept {

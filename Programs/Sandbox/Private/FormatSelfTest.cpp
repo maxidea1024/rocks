@@ -20,6 +20,10 @@ constexpr int ColorTolerance = 2;
 
 uint32 failures = 0;
 const char* backendName = "";
+// OpenGL ES는 색 렌더 타깃이 아닌 형식·블록 압축을 읽지 못한다(ReadTexture가 Unsupported,
+// PixelFormat.ko.md 14.2절). 그 backend에서만 Unsupported를 허용하고 수를 센다.
+bool readLimited = false;
+uint32 unreadable = 0;
 
 void Check(bool condition, PixelFormat format, const char* what) noexcept {
     if (!condition) {
@@ -77,6 +81,47 @@ precision highp int;
 layout(location = 0) out vec4 out_var_SV_Target0;
 void main() {
     out_var_SV_Target0 = vec4(0.25, 0.5, 0.75, 1.0);
+}
+)";
+
+constexpr char IntColorPixelGlsl[] = R"(#version 320 es
+precision highp float;
+precision highp int;
+layout(location = 0) out ivec4 out_var_SV_Target0;
+void main() {
+    out_var_SV_Target0 = ivec4(1, 2, 3, 4);
+}
+)";
+
+constexpr char UintColorPixelGlsl[] = R"(#version 320 es
+precision highp float;
+precision highp int;
+layout(location = 0) out uvec4 out_var_SV_Target0;
+void main() {
+    out_var_SV_Target0 = uvec4(1u, 2u, 3u, 4u);
+}
+)";
+
+// LoadFloatHlsl·LoadStencilHlsl의 GLSL ES판이다(OpenGL ES backend).
+constexpr char LoadFloatGlsl[] = R"(#version 320 es
+precision highp float;
+precision highp int;
+layout(binding = 0) uniform highp sampler2D ps0;
+layout(location = 0) out vec4 out_var_SV_Target0;
+void main() {
+    vec4 value = texelFetch(ps0, ivec2(gl_FragCoord.xy) % 4, 0);
+    out_var_SV_Target0 = vec4(value.rgb, 1.0);
+}
+)";
+
+constexpr char LoadStencilGlsl[] = R"(#version 320 es
+precision highp float;
+precision highp int;
+layout(binding = 0) uniform highp usampler2D ps0;
+layout(location = 0) out vec4 out_var_SV_Target0;
+void main() {
+    uvec4 value = texelFetch(ps0, ivec2(gl_FragCoord.xy) % 4, 0);
+    out_var_SV_Target0 = vec4(0.0, float(value.g) / 255.0, 0.0, 1.0);
 }
 )";
 
@@ -151,10 +196,68 @@ uint32 Slices(PixelFormat format, uint32 mips, Slice (&out)[8]) noexcept {
     return count;
 }
 
+// 작은 float 하나(exponentBits·mantissaBits, 비트 offset)를 유한한 정규 수 또는 0으로 바꾼다.
+uint32 FiniteSmallFloat(uint32 word, uint32 offset, uint32 exponentBits,
+                        uint32 mantissaBits) noexcept {
+    const uint32 exponentMask = ((1u << exponentBits) - 1u) << (offset + mantissaBits);
+    const uint32 mantissaMask = ((1u << mantissaBits) - 1u) << offset;
+    const uint32 exponent = (word & exponentMask) >> (offset + mantissaBits);
+    if (exponent == (1u << exponentBits) - 1u) {
+        word &= ~(1u << (offset + mantissaBits));
+    } else if (exponent == 0) {
+        word &= ~mantissaMask;
+    }
+
+    return word;
+}
+
+// float·snorm 표본을 모든 backend가 비트 그대로 왕복하는 값으로 바꾼다. OpenGL ES readback은
+// framebuffer 읽기 조합(RGBA/FLOAT·RGBA/BYTE)을 거치므로 NaN·무한대·비정규 수와 SNORM 최솟값(-1을
+// 두 번 나타내는 -128·-32768)은 보존되지 않는다.
+void SanitizeValues(PixelFormat format, Span<uint8> data) noexcept {
+    const PixelFormatInfo& info = GetPixelFormatInfo(format);
+    if (info.kind != PixelFormatKind::Color) {
+        return;
+    }
+    if (format == PixelFormat::RG11B10Ufloat) {
+        for (usize at = 0; at + 4 <= data.Size(); at += 4) {
+            uint32 word = 0;
+            platform::MemoryCopy(&word, data.Data() + at, 4);
+            word = FiniteSmallFloat(word, 0, 5, 6);
+            word = FiniteSmallFloat(word, 11, 5, 6);
+            word = FiniteSmallFloat(word, 22, 5, 5);
+            platform::MemoryCopy(data.Data() + at, &word, 4);
+        }
+        return;
+    }
+    uint32 channels = 0;
+    for (uint32 bit = 0; bit < 4; ++bit) {
+        channels += (info.channels >> bit) & 1u;
+    }
+    const uint32 width = channels == 0 ? 0 : info.blockBytes / channels;
+    if (info.componentType == PixelComponentType::Float && (width == 2 || width == 4)) {
+        for (usize at = 0; at + width <= data.Size(); at += width) {
+            uint32 word = 0;
+            platform::MemoryCopy(&word, data.Data() + at, width);
+            word = width == 2 ? FiniteSmallFloat(word, 0, 5, 10) : FiniteSmallFloat(word, 0, 8, 23);
+            platform::MemoryCopy(data.Data() + at, &word, width);
+        }
+    } else if (info.componentType == PixelComponentType::Snorm && (width == 1 || width == 2)) {
+        for (usize at = 0; at + width <= data.Size(); at += width) {
+            // 최솟값은 최상위 byte 0x80, 나머지 0이다(little-endian).
+            const bool minimum = data[at + width - 1] == 0x80u && (width == 1 || data[at] == 0);
+            if (minimum) {
+                data[at] = static_cast<uint8>(data[at] | 1u);
+            }
+        }
+    }
+}
+
 // 깊이 plane은 장치가 보존하는 값으로 바꾼다: D24는 상위 8비트를 0으로(정의되지 않는 비트), D32F는
 // [0, 1]의 유한값으로. P010은 16비트 표본의 하위 6비트를 0으로 둔다(Vulkan G10X6 형식은 그 비트를
-// 정의하지 않는다).
+// 정의하지 않는다). 색 형식은 SanitizeValues를 따른다.
 void SanitizeDepth(PixelFormat format, uint32 mips, Span<uint8> data) noexcept {
+    SanitizeValues(format, data);
     if (format == PixelFormat::P010) {
         for (usize index = 0; index + 2 <= data.Size(); index += 2) {
             data[index] = static_cast<uint8>(data[index] & 0xC0u);
@@ -197,8 +300,9 @@ bool SameBytes(PixelFormat format, uint32 plane, const uint8* expected, const ui
     return true;
 }
 
-// 모든 mip·plane을 읽어 data와 비교한다.
-void CompareAll(Device& device, TextureHandle texture, PixelFormat format, uint32 mips,
+// 모든 mip·plane을 읽어 data와 비교한다. ReadTexture가 그 형식을 읽지 못하면(OpenGL ES만 허용)
+// false다.
+bool CompareAll(Device& device, TextureHandle texture, PixelFormat format, uint32 mips,
                 Span<const uint8> data, Allocator& allocator, const char* what) noexcept {
     Slice slices[8];
     const uint32 count = Slices(format, mips, slices);
@@ -207,9 +311,12 @@ void CompareAll(Device& device, TextureHandle texture, PixelFormat format, uint3
         const Slice& slice = slices[index];
         if (!read.TryResize(slice.bytes)) {
             Check(false, format, "readback buffer allocation");
-            return;
+            return true;
         }
         auto readback = device.ReadTexture(texture, slice.mip, slice.plane, read.View());
+        if (!readback && readLimited && readback.Error() == ErrorCode::Unsupported) {
+            return false;
+        }
         Check(readback.IsOk(), format, "ReadTexture succeeds");
         if (readback) {
             Check(SameBytes(format, slice.plane, data.Data() + slice.offset, read.Data(),
@@ -217,6 +324,8 @@ void CompareAll(Device& device, TextureHandle texture, PixelFormat format, uint3
                   format, what);
         }
     }
+
+    return true;
 }
 
 // 업로드·readback 왕복과 UpdateTexture 왕복이다(PF2·PF6).
@@ -249,8 +358,9 @@ void RunRoundTrip(Device& device, PixelFormat format, Allocator& allocator) noex
         return;
     }
 
-    CompareAll(device, texture.Value(), format, mips, data.View(), allocator,
-               "initial data reads back unchanged");
+    const bool readable = CompareAll(device, texture.Value(), format, mips, data.View(), allocator,
+                                     "initial data reads back unchanged");
+    unreadable += readable ? 0u : 1u;
     // mip 0 갱신(UpdateTexture)도 같은 배치로 올라간다.
     Array<uint8> update(allocator);
     if (update.TryResize(static_cast<usize>(PixelFormatImageBytes(format, Extent, Extent)))) {
@@ -259,7 +369,7 @@ void RunRoundTrip(Device& device, PixelFormat format, Allocator& allocator) noex
         auto updated = device.UpdateTexture(texture.Value(), 0,
                                             Span<const uint8>(update.Data(), update.Size()));
         Check(updated.IsOk(), format, "UpdateTexture succeeds");
-        if (updated) {
+        if (updated && readable) {
             CompareAll(device, texture.Value(), format, 1, update.View(), allocator,
                        "updated mip 0 reads back unchanged");
         }
@@ -277,8 +387,7 @@ void ExpectCreation(bool created, ErrorCode error, bool expected, PixelFormat fo
 }
 
 // 형식 × 용도의 "능력 있음 ⇔ 생성 성공"이다(PF3).
-void RunCapsMatchCreation(Device& device, PixelFormat format, Allocator& allocator,
-                          bool openGl) noexcept {
+void RunCapsMatchCreation(Device& device, PixelFormat format, Allocator& allocator) noexcept {
     const PixelFormatCaps caps = device.GetPixelFormatCaps(format);
     TextureDesc desc;
     desc.width = Extent;
@@ -321,18 +430,20 @@ void RunCapsMatchCreation(Device& device, PixelFormat format, Allocator& allocat
     // 파이프라인 색 형식: 셰이더 출력 계열을 형식에 맞춘다(타입이 다르면 검증 계층 경고).
     const PixelShaderType shader = GetPixelFormatInfo(format).shaderType;
     StringView hlsl = Text(FloatColorHlsl);
+    StringView glsl = Text(ColorPixelGlsl);
     if (shader == PixelShaderType::Int) {
         hlsl = Text(IntColorHlsl);
+        glsl = Text(IntColorPixelGlsl);
     } else if (shader == PixelShaderType::Uint || shader == PixelShaderType::Uint64) {
         hlsl = Text(UintColorHlsl);
+        glsl = Text(UintColorPixelGlsl);
     }
     PipelineDesc pipelineDesc;
     pipelineDesc.vertex = {hlsl, Text(ColorVertexGlsl)};
-    pipelineDesc.pixel = {hlsl, Text(ColorPixelGlsl)};
+    pipelineDesc.pixel = {hlsl, glsl};
     pipelineDesc.colorFormat = format;
     auto pipeline = device.CreatePipeline(pipelineDesc);
-    const bool expected = HasPixelFormatCaps(caps, PixelFormatCaps::RenderTarget) &&
-                          (!openGl || shader == PixelShaderType::Float);
+    const bool expected = HasPixelFormatCaps(caps, PixelFormatCaps::RenderTarget);
     ExpectCreation(pipeline.IsOk(), pipeline.IsOk() ? ErrorCode::None : pipeline.Error(), expected,
                    format, "pipeline color format matches the RenderTarget capability");
     if (pipeline) {
@@ -414,7 +525,10 @@ void RunSrgbView(ViewBench& bench, Allocator& allocator) noexcept {
     auto view = device.CreateTextureView(texture.Value(), {PixelFormat::RGBA8UnormSrgb, 0});
     const bool expected = HasPixelFormatCaps(device.GetPixelFormatCaps(PixelFormat::RGBA8UnormSrgb),
                                              PixelFormatCaps::Sampled);
-    Check(view.IsOk() == expected, format, "sRGB pair view creation matches the capability");
+    // OpenGL ES core에는 형식을 바꾸는 texture view가 없어 sRGB 짝 view는 Unsupported다.
+    const bool reinterpretLimited = readLimited && !view && view.Error() == ErrorCode::Unsupported;
+    Check(view.IsOk() == expected || reinterpretLimited, format,
+          "sRGB pair view creation matches the capability");
     uint8 color[4] = {};
     Check(bench.Render(texture.Value(), bench.floatLoad, color) && Near(color[0], 128), format,
           "linear view reads the stored value");
@@ -519,11 +633,11 @@ void RunViewChecks(Device& device, Allocator& allocator) noexcept {
     auto target = device.CreateTexture(targetDesc, {});
     PipelineDesc pipelineDesc;
     pipelineDesc.vertex = {Text(LoadFloatHlsl), Text(ColorVertexGlsl)};
-    pipelineDesc.pixel = {Text(LoadFloatHlsl), Text(ColorPixelGlsl)};
+    pipelineDesc.pixel = {Text(LoadFloatHlsl), Text(LoadFloatGlsl)};
     pipelineDesc.colorFormat = PixelFormat::RGBA8Unorm;
     auto floatLoad = device.CreatePipeline(pipelineDesc);
     pipelineDesc.vertex.hlsl = Text(LoadStencilHlsl);
-    pipelineDesc.pixel.hlsl = Text(LoadStencilHlsl);
+    pipelineDesc.pixel = {Text(LoadStencilHlsl), Text(LoadStencilGlsl)};
     auto stencilLoad = device.CreatePipeline(pipelineDesc);
     Check(target.IsOk() && floatLoad.IsOk() && stencilLoad.IsOk(), PixelFormat::RGBA8Unorm,
           "view bench resources are created");
@@ -577,8 +691,9 @@ void Probe(Device& device, Allocator& allocator, bool& readable, bool& views) no
 
 uint32 RunFormatChecks(const char* name, Device& device, Allocator& allocator) noexcept {
     failures = 0;
+    unreadable = 0;
     backendName = name;
-    const bool openGl = device.Info().backend == Backend::OpenGL;
+    readLimited = device.Info().backend == Backend::OpenGL;
     // ReadTexture·CreateTextureView를 지원하는 backend에서만 왕복·view 시험을 한다. 지원하지 않으면
     // Unsupported여야 한다(새 virtual의 기본 구현).
     bool readable = false;
@@ -598,7 +713,7 @@ uint32 RunFormatChecks(const char* name, Device& device, Allocator& allocator) n
         renderTargets += HasPixelFormatCaps(caps, PixelFormatCaps::RenderTarget) ? 1u : 0u;
         depthTargets += HasPixelFormatCaps(caps, PixelFormatCaps::DepthStencil) ? 1u : 0u;
         unsupported += caps == PixelFormatCaps::None ? 1u : 0u;
-        RunCapsMatchCreation(device, format, allocator, openGl);
+        RunCapsMatchCreation(device, format, allocator);
         if (readable) {
             RunRoundTrip(device, format, allocator);
         }
@@ -609,9 +724,9 @@ uint32 RunFormatChecks(const char* name, Device& device, Allocator& allocator) n
     auto flushed = device.WaitIdle();
     Check(flushed.IsOk(), PixelFormat::Unknown, "WaitIdle after format checks");
     printf("  %s pixel formats: %u sampled, %u render target, %u depth stencil, %u unsupported, "
-           "readback %s, views %s, %u failure%s\n",
+           "readback %s (%u formats unreadable), views %s, %u failure%s\n",
            name, sampled, renderTargets, depthTargets, unsupported, readable ? "yes" : "no",
-           views ? "yes" : "no", failures, failures == 1 ? "" : "s");
+           unreadable, views ? "yes" : "no", failures, failures == 1 ? "" : "s");
     return failures;
 }
 

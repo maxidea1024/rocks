@@ -47,6 +47,9 @@ inline constexpr GLsizei InfoLogBytes = 2048;
 // 줄인다. D3D12와 같은 상한 16384를 넘지 않는다).
 inline constexpr uint32 MaxTextureExtent = 16384;
 
+// mip 사슬 길이의 상한이다(16384 한 변의 전체 사슬 15단 + 여유, D3D·Vulkan backend와 같다).
+inline constexpr uint32 MaxMipLevels = 16;
+
 struct BufferRecord {
     GLuint buffer = 0;
     uint64 size = 0;
@@ -54,7 +57,8 @@ struct BufferRecord {
 
 struct TextureRecord {
     GLuint texture = 0;
-    // 텍스처마다의 샘플러 객체다(TextureDesc::sampler).
+    // 텍스처마다의 샘플러 객체다(TextureDesc::sampler). 선형 필터를 받지 않는 형식(정수·깊이)은
+    // 최근접 필터로 만든다(ES에서 그 조합은 불완전 텍스처다).
     GLuint sampler = 0;
     // RenderTarget이면 색 attachment 하나의 framebuffer다.
     GLuint framebuffer = 0;
@@ -62,6 +66,25 @@ struct TextureRecord {
     uint32 height = 0;
     uint32 mipLevels = 1;
     PixelFormat format = PixelFormat::Unknown;
+    // TextureUsage::DepthStencil로 만들었다(초기 데이터 없음).
+    bool depthTarget = false;
+    // 깊이·스텐실 텍스처를 묶을 때 읽는 plane이다(GL_DEPTH_STENCIL_TEXTURE_MODE, 1이면 스텐실).
+    // 이 값은 텍스처 객체 상태라 묶을 때마다 다시 정한다.
+    uint32 plane = 0;
+    // GL 텍스처 객체가 깊이·스텐실 형식이다(묶을 때 plane으로 읽기 대상을 정한다). view도 원
+    // 텍스처의 값을 갖는다.
+    bool depthStencilTexture = false;
+    // 텍스처 생성 때의 샘플러 설명이다(view가 같은 설명으로 자기 샘플러를 만든다).
+    SamplerDesc samplerDesc;
+    // 다른 텍스처의 GL 텍스처 객체를 공유하는 view다(CreateTextureView). 텍스처 객체는 원 기록이
+    // 놓는다. 업로드·readback·그리기 대상이 될 수 없다.
+    bool isView = false;
+    SlotHandle source;
+    // 이 텍스처를 가리키는 살아 있는 view 수다. 0이 아니면 Retire는 기록을 남겨 두고
+    // (retirePending) 마지막 view를 놓을 때 함께 놓는다(텍스처 객체 이름을 view보다 먼저 지우지
+    // 않는다).
+    uint32 viewCount = 0;
+    bool retirePending = false;
 };
 
 struct PipelineRecord {
@@ -113,8 +136,12 @@ struct ReadbackRecord {
     uint64 fenceValue = 0;
     uint32 width = 0;
     uint32 height = 0;
-    // 읽을 byte 수다(width × height 이미지 하나).
+    // 호출자에게 줄 byte 수다(width × height 이미지 하나, Rocks 배치).
     uint64 bytes = 0;
+    // pack buffer의 byte 수다. 표준 읽기 조합으로 읽었으면(convert) Rocks 배치로 옮겨 준다.
+    uint64 readBytes = 0;
+    PixelFormat format = PixelFormat::Unknown;
+    bool convert = false;
 };
 
 // OpenGL staging은 CPU 메모리다(TextureStreaming 5.4절). client 메모리 업로드(glTexSubImage2D·
@@ -160,6 +187,10 @@ public:
                                         Span<const uint8> pixels) noexcept override;
     Result<PipelineHandle> CreatePipeline(const PipelineDesc& desc) noexcept override;
     PixelFormatCaps GetPixelFormatCaps(PixelFormat format) const noexcept override;
+    Result<TextureHandle> CreateTextureView(TextureHandle texture,
+                                            const TextureViewDesc& desc) noexcept override;
+    Result<void> ReadTexture(TextureHandle texture, uint32 mipLevel, uint32 plane,
+                             Span<uint8> out) noexcept override;
     Result<CommandContext*> BeginFrame(SwapChainHandle handle,
                                        const ClearColor& clear) noexcept override;
     Result<CommandContext*> BeginOffscreen(TextureHandle handle,
@@ -255,6 +286,8 @@ private:
     void DeleteRetired(uint64 completed) noexcept;
     void DeleteObject(const RetiredObject& entry) noexcept;
     void ReleaseTexture(const TextureRecord& record) noexcept;
+    // 텍스처 기록 하나를 회수 대기로 넘기고 표에서 뺀다(view면 샘플러만 놓는다).
+    void RetireTextureRecord(SlotHandle slot, const TextureRecord& record) noexcept;
 
     // 스왑체인의 offscreen 색 텍스처를 width × height로 (다시) 만든다.
     bool CreateBackBuffer(SwapChainRecord& record, uint32 width, uint32 height) noexcept;
@@ -262,11 +295,28 @@ private:
     // 색 attachment 하나의 framebuffer를 만든다. 완전하지 않으면 0이다.
     GLuint CreateColorFramebuffer(GLuint texture) noexcept;
 
-    // 텍스처 하나의 샘플러 객체를 만든다.
-    GLuint CreateSampler(const SamplerDesc& desc) noexcept;
+    // 텍스처 하나의 샘플러 객체를 만든다. filterable이 false면(정수·깊이 형식) 최근접 필터다.
+    GLuint CreateSampler(const SamplerDesc& desc, bool filterable) noexcept;
 
-    // texture mip 하나를 올린다(업로드 유닛에서 묶는다).
-    void UploadMip(const TextureRecord& record, uint32 level, const uint8* pixels) noexcept;
+    // texture mip 하나를 올린다(업로드 유닛에서 묶는다). 원본은 Rocks 배치(mip 안 plane 순서)다.
+    // 깊이·스텐실은 plane을 GL 외부 배치로 엮는 임시 버퍼가 필요하다(할당 실패면 OutOfMemory).
+    Result<void> UploadMip(const TextureRecord& record, uint32 level, const uint8* pixels) noexcept;
+
+    // mip 하나를 색 attachment로 읽어 Rocks 배치로 out에 둔다(ReadTexture·ReadPixels·readback의
+    // 공통 경로). 읽기 조합은 구현 선택 조합이 업로드 배치와 같으면 그것, 아니면 표준 조합이다.
+    Result<void> ReadColorLevel(const TextureRecord& record, uint32 mipLevel,
+                                Span<uint8> out) noexcept;
+    // 깊이·스텐실 plane 하나를 셰이더로 R32F·R32UI 대상에 옮겨 읽는다(ES는 깊이·스텐실을
+    // glReadPixels로 읽지 못한다).
+    Result<void> ReadDepthPlane(const TextureRecord& record, uint32 mipLevel, uint32 plane,
+                                Span<uint8> out) noexcept;
+    // 지금 읽기 framebuffer에서 읽을 조합을 고른다. direct면 업로드 배치 그대로다.
+    GlesReadPair ChooseReadPair(const GlesTextureFormat& format, bool& direct) noexcept;
+    // framebuffer의 색 attachment 0을 pixel pack buffer로 읽고 map해 out에 옮긴다.
+    Result<void> ReadFramebuffer(GLuint framebuffer, uint32 width, uint32 height,
+                                 const GlesReadPair& pair, uint8* out, uint64 bytes) noexcept;
+    // 깊이·스텐실 읽기용 프로그램·정점 배열·최근접 샘플러를 처음 쓸 때 만든다.
+    Result<void> PrepareDepthReads() noexcept;
 
     Result<void> MatchVertexInputs(GLuint program, const VertexLayout& layout) noexcept;
     Result<GLuint> CompileShader(GLenum stage, StringView source) noexcept;
@@ -300,6 +350,15 @@ private:
     // platform_->Gl()의 사본이다(호출마다 간접 참조를 줄인다).
     GlesFunctions gl_;
     GlesFeatures features_;
+    // 형식 번호마다의 능력이다(장치 생성 때 features_로 한 번 채운다).
+    PixelFormatCaps formatCaps_[MaxPixelFormatNumber + 1] = {};
+    // 깊이·스텐실 plane 읽기 자원이다(PrepareDepthReads).
+    GLuint depthReadProgram_ = 0;
+    GLuint stencilReadProgram_ = 0;
+    GLint depthReadLevel_ = -1;
+    GLint stencilReadLevel_ = -1;
+    GLuint readVertexArray_ = 0;
+    GLuint readSampler_ = 0;
     GlesTimerQueryFunctions timer_;
     // GPU 계측(GX9): timestamp query 묶음(slot × 프레임당 한도)과 프레임 slot 장부다. GL_TIMESTAMP
     // 값의 단위는 ns다.
