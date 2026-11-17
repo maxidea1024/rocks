@@ -264,6 +264,8 @@ struct Options {
     uint32 packageProfile = 0;
     bool packageProfileSet = false;
     bool packageClustersOff = false;
+    // 작업 계수를 센다(--count-work — 간선마다 읽기가 늘어 시간 비교에는 끈다).
+    bool countWork = false;
     uint64 clusterSoakTicks = 0;
     uint64 soakTicks = 0;
     uint64 seed = 7;
@@ -902,7 +904,7 @@ int RunPackageScenario(uint32 crossPercent, bool clusters, const Options& option
             registryOptions.referenceTables = !options.noTables;
             registryOptions.policy.packageNativeType = NativeTypeKey<BenchPackage>();
             registryOptions.packageClusters = clusters;
-            registryOptions.countGcWork = options.packageProfileSet;
+            registryOptions.countGcWork = options.countWork;
             ObjectRegistry registry(memory, types, Guid{0x6764, crossPercent}, registryOptions);
             const auto access = registry.OwnerAccess();
             Rng rng{0x51ed270b9a3c4d21ULL ^ crossPercent};
@@ -978,18 +980,29 @@ int RunPackageScenario(uint32 crossPercent, bool clusters, const Options& option
                 }
 
                 PrintPhases("Collect (median)", MedianOf(reports, memory));
+                // 부하가 있는 기계에서는 최솟값이 고유 비용에 더 가깝다(선점은 늘리기만 한다).
+                uint64 fastest = NumericLimits<uint64>::Max();
+                for (usize at = 0; at < reports.Size(); ++at) {
+                    fastest = reports[at].markNanoseconds < fastest ? reports[at].markNanoseconds
+                                                                    : fastest;
+                }
+
+                printf("  mark min %.3f ms\n", Milliseconds(fastest));
                 const GcWorkCounters& work = reports[0].work;
-                printf("  work: traced %llu, edges %llu, clustered edges %llu (same cluster %llu), "
-                       "cluster items %llu, boundary pushes %llu, detached marks %llu, cluster "
-                       "processing %.3f ms\n",
-                       static_cast<unsigned long long>(work.tracedObjects),
-                       static_cast<unsigned long long>(work.edges),
-                       static_cast<unsigned long long>(work.clusteredEdges),
-                       static_cast<unsigned long long>(work.sameClusterEdges),
-                       static_cast<unsigned long long>(work.clusterItems),
-                       static_cast<unsigned long long>(work.boundaryPushes),
-                       static_cast<unsigned long long>(work.detachedMarks),
-                       Milliseconds(work.clusterProcessNanoseconds));
+                if (options.countWork) {
+                    printf("  work: traced %llu, edges %llu, clustered edges %llu "
+                           "(same cluster %llu), cluster items %llu, boundary pushes %llu, "
+                           "detached marks %llu, cluster processing %.3f ms\n",
+                           static_cast<unsigned long long>(work.tracedObjects),
+                           static_cast<unsigned long long>(work.edges),
+                           static_cast<unsigned long long>(work.clusteredEdges),
+                           static_cast<unsigned long long>(work.sameClusterEdges),
+                           static_cast<unsigned long long>(work.clusterItems),
+                           static_cast<unsigned long long>(work.boundaryPushes),
+                           static_cast<unsigned long long>(work.detachedMarks),
+                           Milliseconds(work.clusterProcessNanoseconds));
+                }
+
                 fflush(stdout);
             }
 
@@ -1601,6 +1614,8 @@ bool Parse(int argc, char** argv, Options& options) noexcept {
             options.noTables = true;
         } else if (platform::CStringEquals(argv[index], "--clusters-off")) {
             options.packageClustersOff = true;
+        } else if (platform::CStringEquals(argv[index], "--count-work")) {
+            options.countWork = true;
         } else if (platform::CStringEquals(argv[index], "--soak-workers")) {
             options.soakWorkers = true;
         } else if (platform::CStringEquals(argv[index], "--soak-time-budget")) {
@@ -1617,7 +1632,7 @@ bool Parse(int argc, char** argv, Options& options) noexcept {
             options.leafPercent = static_cast<uint32>(value > 100 ? 0 : value);
             ++index;
         } else if (platform::CStringEquals(argv[index], "--reps")) {
-            options.reps = static_cast<uint32>(value > 100 ? 0 : value);
+            options.reps = static_cast<uint32>(value > 100000 ? 0 : value);
             ++index;
         } else if (platform::CStringEquals(argv[index], "--workers")) {
             options.workers = static_cast<uint32>(value > 64 ? 0 : value);
