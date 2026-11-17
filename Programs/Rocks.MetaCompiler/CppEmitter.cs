@@ -172,6 +172,8 @@ internal static class CppEmitter
                 .Select(field => field.KeyReference!))
             .Concat(own.SelectMany(type => type.NativeMembers).Where(native => native.Struct is not null).Select(native => native.Struct!))
             .Concat(own.Where(type => type.IsStruct && type.Base.Length != 0).Select(type => type.Base))
+            // 상속 bitfield bool 필드(리플렉션 B9m)는 선언 타입의 생성 접근자를 쓴다.
+            .Concat(own.SelectMany(type => type.Fields).Where(field => field.Bitfield).Select(field => field.Owner))
             .Select(name => schema.Find(name).Header)
             .Where(header => header != include)
             .Distinct(StringComparer.Ordinal)
@@ -179,6 +181,12 @@ internal static class CppEmitter
         foreach (string header in valueHeaders)
         {
             Line($"#include <{CompilerOptions.GeneratedSpelling(header)}>");
+        }
+
+        // bitfield bool 필드(리플렉션 B9m)의 접근자 판 함수표 템플릿이다.
+        if (own.Any(type => type.Fields.Any(field => field.Bitfield)))
+        {
+            Line("#include <Object/GeneratedBitfieldAccess.h>");
         }
 
         // 설정 struct의 GeneratedType<S>::Settings()가 쓴다(Docs/Design/ConfigSystem.ko.md 7절).
@@ -213,6 +221,7 @@ internal static class CppEmitter
             string native = "::" + type.NativeName;
             string? baseId = type.Base == "rocks::Object" ? null : schema.Find(type.Base).Id;
             Line($"template <> struct GeneratedType<{native}> {{");
+            EmitBitfieldAccessors(type, native, Line);
             // ROCKS_NATIVE 멤버는 스키마에 넣지 않는다. 생성 static_assert는 직접 타입의 강한 참조 래퍼(ObjectRef·RootRef·
             // ObjectRefArray·StructRefArray와 그것을 가리키는 포인터·참조 — RMC2205)와 WorldOnly 소유자 형질(RMC2206)만 컴파일러가
             // 한 번 더 확인한다. Object 파생 타입을 가리키는 raw 포인터·참조는 대상의 완전성이 TU마다 달라 형질로 보지 않고
@@ -279,6 +288,13 @@ internal static class CppEmitter
                 Line("static const RuntimeFieldOps fields[] = {");
                 foreach (FieldModel field in type.Fields)
                 {
+                    if (field.Bitfield)
+                    {
+                        // bitfield bool(리플렉션 B9m)은 멤버 포인터 대신 생성 접근자로 read·write·writeStaged·codec·경로를 낸다.
+                        Line($"detail::BitfieldFieldOps<{native}, {BitfieldAccessors(schema, field)}, {(field.Spec.ReadOnly ? "true" : "false")}>({GuidValue(field.Id)}),");
+                        continue;
+                    }
+
                     string member = $"&::{field.Owner}::{field.Name}";
                     Line($"{{{GuidValue(field.Id)},");
                     if (field.IsMap || field.IsSet)
@@ -357,6 +373,25 @@ internal static class CppEmitter
 
         Line("} // namespace rocks");
         return output.ToString();
+    }
+
+    // 자기 bitfield bool 필드(리플렉션 B9m — Docs/Design/ReflectionExtensions.ko.md 14절)의 생성 접근자다. bitfield는 멤버
+    // 포인터·참조를 만들 수 없으므로 함수표 템플릿(detail::BitfieldFieldOps·BitfieldStructFieldOps)이 이 정적 함수를 받는다.
+    // GeneratedType은 ROCKS_GENERATED_BODY의 friend라 private 멤버도 읽고 쓴다. 파생 타입은 base의 접근자를 그대로 쓴다.
+    private static void EmitBitfieldAccessors(ClassModel type, string native, Action<string> Line)
+    {
+        foreach (FieldModel field in type.OwnFields.Where(field => field.Bitfield))
+        {
+            Line($"static bool Get_{field.Name}(const {native}& value) noexcept {{ return value.{field.Name} != 0; }}");
+            Line($"static void Set_{field.Name}({native}& value, bool bit) noexcept {{ if (bit) {{ value.{field.Name} = 1; }} else {{ value.{field.Name} = 0; }} }}");
+        }
+    }
+
+    // bitfield bool 필드의 접근자 인자 둘이다(선언 타입 — 상속 필드면 base — 의 GeneratedType 정적 함수).
+    private static string BitfieldAccessors(SchemaModel schema, FieldModel field)
+    {
+        string owner = $"GeneratedType<::{schema.Find(field.Owner).NativeName}>";
+        return $"&{owner}::Get_{field.Name}, &{owner}::Set_{field.Name}";
     }
 
     // struct 필드·배열 필드 함수표의 valueNativeType 인자다: struct 필드는 그 struct, 배열은 원소가 Enum·Struct면 그
@@ -540,6 +575,7 @@ internal static class CppEmitter
         string native = "::" + type.NativeName;
         string True(bool value) => value ? "true" : "false";
         Line($"template <> struct GeneratedType<{native}> {{");
+        EmitBitfieldAccessors(type, native, Line);
         Line($"static constexpr bool ContainsStrongReference = {True(type.ContainsStrongReference)};");
         Line($"static constexpr bool RequiresWorldOnlyOwner = {True(type.RequiresWorldOnlyOwner)};");
         Line($"static constexpr bool ContainsReferenceArray = {True(type.ContainsReferenceArray)};");
@@ -649,7 +685,9 @@ internal static class CppEmitter
             Line("static const RuntimeStructFieldOps fields[] = {");
             foreach (FieldModel field in type.Fields)
             {
-                Line(StructMemberOps(native, field));
+                Line(field.Bitfield
+                    ? $"detail::BitfieldStructFieldOps<{native}, {BitfieldAccessors(schema, field)}>({GuidValue(field.Id)}),"
+                    : StructMemberOps(native, field));
             }
 
             Line("};");
@@ -723,9 +761,14 @@ internal static class CppEmitter
         Line("return Result<void>::Success();");
         Line("} else if constexpr (ValueCopyable) {");
         Line("Self copy = ::rocks::detail::MakeAllocatedValue<Self>(allocator);");
+        // bitfield(PROPERTY bitfield bool·NATIVE 정수 bitfield — 리플렉션 B9m)는 참조를 만들 수 없으므로 대입한다(정수라 깊은 복사다).
+        HashSet<string> bitfields = type.Fields.Where(field => field.Bitfield).Select(field => field.Name)
+            .Concat(type.NativeMembers.Where(member => member.Bitfield).Select(member => member.Name)).ToHashSet(StringComparer.Ordinal);
         foreach (string member in members)
         {
-            Line($"if (auto copied = ::rocks::detail::TryCopyValue(copy.{member}, source.{member}, allocator); !copied) {{ return copied; }}");
+            Line(bitfields.Contains(member)
+                ? $"copy.{member} = source.{member};"
+                : $"if (auto copied = ::rocks::detail::TryCopyValue(copy.{member}, source.{member}, allocator); !copied) {{ return copied; }}");
         }
 
         Line("destination = Move(copy);");
