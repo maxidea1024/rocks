@@ -1,6 +1,6 @@
 # 로깅 시스템 설계
 
-기준일: 2026-11-17, 개정 5. 엔진 전반에서 쓰는 **로그**(사람이 읽는 사건 기록)의 호출 API, 카테고리·레벨 필터, 비동기 기록 경로, 출력 형식, 장애 격리, 엔진 적용 범위를 정한다.
+기준일: 2026-11-17, 개정 6. 엔진 전반에서 쓰는 **로그**(사람이 읽는 사건 기록)의 호출 API, 카테고리·레벨 필터, 비동기 기록 경로, 출력 형식, 장애 격리, 엔진 적용 범위를 정한다.
 
 요구는 다음 문서에서 온다.
 - [엔진 구현 계획](EngineImplementationPlan.ko.md) 29.4절(필수 로깅·프로파일러: level/category, UTC+monotonic, rate limit·중복 집계, compile/runtime level, error/fatal 비상 경로, 임계 구간에서 file IO·heap·lock wait 금지)
@@ -381,7 +381,7 @@ public:
 | 출력 스레드 안(sink 콜백 등)에서 로그 호출 | 큐에 넣지 않고 비상 경로로만. 재귀 없음, 집계 |
 | 준비 버퍼 안(Formatter·Lazy)에서 로그 호출 | 깊이 1까지 두 번째 준비 버퍼, 그보다 깊으면 비상 경로(8.1) |
 | 출력 스레드 시작 실패 | Start는 성공하고 **동기 비상 모드**로 낮춤(Warning 이상만 호출 스레드에서 stderr). 한 번 알림 |
-| 종료 drain 시간 초과 | 남은 수를 비상 경로로 알리고 진행 |
+| 종료 drain 시간 초과 | 포기 표시로 출력 스레드를 다음 기록에서 멈추게 하고, 남은 수를 비상 경로로 알린 뒤 진행한다. 그래도 sink에서 돌아오지 않으면 스레드와 메모리를 남겨 둔 채 Stop이 반환한다(`Stats().writerAbandoned`, 이후 Start는 Busy). 소멸자는 그 스레드를 Join하므로, 이 경우 호스트는 LogSystem을 파괴하지 않고 프로세스를 끝낸다(PlatformBase Thread에 detach가 없음) |
 | 설치 전·해제 후 | 5절 |
 | 비상 경로 자체 실패 | 무시(더 내려갈 단계가 없다) |
 
@@ -426,11 +426,11 @@ public:
 | 초기화 실패 | Error | `Engine initialization failed at {Stage}: {Error}` — Stage = TypeRegistry·ModuleRegistration·RegisterTypes·ObjectRegistry·Subsystems·PermanentRegion(GC 세션 영구 창 닫기, 병합 뒤)·ClientStart | Engine(호스트는 재기록하지 않음) |
 | Teardown 정리 실패 | Fatal | `Engine {Registry} could not shut down after initialization failure at {Stage}: {Error}` | 기존 `platform::Fatal` 대체 |
 | Run 종료 | Info | `Engine run finished after {Frames} frames: {Reason}` | `Engine::Run` |
-| World Tick 실패 | Error | `World {World} tick failed: {Error}` (EventId 반복 요약) | `Engine::RunFrame` |
+| World Tick 실패 | Error | World별 첫 실패만 `World {World} tick failed: {Error}`, 회복·파괴 때 "N more times (last: X)" 요약 1회 | `Engine::RunFrame` |
 | World 파괴 지연 | Debug → Warning → Info | 첫 지연 Debug, `WorldDestroyWarnFrames`(300) 넘으면 Warning 1회, 해소되면 `World {World} destroyed after {Frames} deferred frames` | `ProcessDeferred`, WorldContext에 프레임 수·경고 여부 |
 | 종료 | Info / Error | 실패 시 `{Worlds}`, `{PendingDestroys}`, `{LiveObjects}`, `{Error}` | `Engine::Shutdown` |
 | CreateWorld 내부 실패 | Error | `World {World} failed during {Stage}: {Error}` | Engine |
-| Tick 순환 거부 | Warning | `Rejected tick prerequisite {Before} -> {After}: would create a cycle` | 이름을 가진 World·Actor 경계. TickScheduler 오류 코드 분리 |
+| Tick 순환 거부 | Warning | `Rejected tick prerequisite {Before} -> {After}: would create a cycle`. TickScheduler는 `ErrorCode::CycleDetected`로 구별하고, 새 `World::AddActorTickPrerequisite`가 기록한다. Actor에 이름이 없어 `타입#slot`으로 표기 | 이름을 가진 World·Actor 경계. TickScheduler 오류 코드 분리 |
 | 장치 생성 성공 | Info | `Created {Backend} device on {Adapter} (validation {Validation})` | 생성 함수 |
 | 장치 생성 실패 | Warning / Error | fallback이면 Warning, 모든 후보 실패면 Error. HRESULT·단계 포함 | 호출자(선택자), `DeviceCreateReport` |
 | Present 실패·장치 제거 | Error | `Device removed during present: {Reason} (HRESULT {HResult:#x})`, lost 전이 때 1회 | 장치 내부 |
@@ -551,3 +551,4 @@ Result<UniquePtr<Device>> CreateD3D12Device(Allocator&, const DeviceDesc&, Devic
 - 개정 3(2026-11-17): P7과 파일 sink·암호화(9.1절, L12·L13, LG10)를 추가했다. 기본은 암호화 끔이고, 켜면 KEM 봉인 파일 키와 SecretStream 묶음 봉인을 쓴다.
 - 개정 4(2026-11-17): 15절에 render-lane·Config·TraceCapture 병합 현황을 적었다(LG3 착수 조건 충족). 셰이더 컴파일 실패 로그 위치를 Sandbox `SampleRenderer`로 옮겼다. 캡처가 카테고리 객체 포인터 대신 이름을 담도록 바꿨다(8.3).
 - 개정 5(2026-11-17): LG5 구현 반영 — 소스 경로는 `-fmacro-prefix-map`(디버그 정보 경로 보존), 컴파일 타임 하한은 타깃 단위 재정의·모듈 재정의 거부, 한글 템플릿은 `source-literal-english` 정책이 막으므로 별도 검사 없음.
+- 개정 6(2026-11-17): LG6 구현과 LG3–LG5 리뷰 반영 — `ErrorCode::CycleDetected`, `World::AddActorTickPrerequisite`, Tick 실패 첫 1회+요약, `Log::SetFrame`, `SetGlobalMinimum`의 `Result<void>` 반환과 sink 안 레벨 변경 Busy, Sync Fatal은 `Mutex::TryLock`, Stop 시간 초과 포기 처리.
