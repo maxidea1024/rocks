@@ -50,14 +50,19 @@ public:
         if (!memory.IsOk()) {
             return Result<Function>::Failure(memory.Error());
         }
-        Stored* stored = ConstructAt<Stored>(memory.Value(), Forward<Callable>(callable));
+        Stored* stored = InitializeAt<Stored>(memory.Value(), Forward<Callable>(callable));
         Function result;
         result.object_ = stored;
         result.allocator_ = &allocator;
         result.invoke_ = [](void* object, Args&&... args) -> Return {
             return (*static_cast<Stored*>(object))(Forward<Args>(args)...);
         };
-        result.destroy_ = [](void* object) noexcept { DestroyAt(static_cast<Stored*>(object)); };
+        if constexpr (!IsTriviallyDestructibleV<Stored>) {
+            result.destroy_ = [](void* object) noexcept {
+                DestroyAt(static_cast<Stored*>(object));
+            };
+        }
+
         return Result<Function>::Success(Move(result));
     }
 
@@ -82,7 +87,10 @@ public:
         invoke_ = nullptr;
         destroy_ = nullptr;
         if (object != nullptr) {
-            destroy(object);
+            if (destroy != nullptr) {
+                destroy(object);
+            }
+
             ROCKS_ASSERT(allocator->Deallocate(object).IsOk());
         }
     }

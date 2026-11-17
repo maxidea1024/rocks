@@ -30,7 +30,7 @@ public:
     // 이동 후에도 원본의 성공/실패 태그는 유지된다. 성공값은 T가 정의한 이동 후 상태가 된다.
     Result(Result&& other) noexcept : error_(other.error_) {
         if (other.IsOk()) {
-            ConstructAt<T>(storage_, Move(other.Value()));
+            InitializeAt<T>(storage_, Move(other.Value()));
         }
     }
 
@@ -39,14 +39,20 @@ public:
             ResetValue();
             error_ = other.error_;
             if (other.IsOk()) {
-                ConstructAt<T>(storage_, Move(other.Value()));
+                InitializeAt<T>(storage_, Move(other.Value()));
             }
         }
 
         return *this;
     }
 
-    ~Result() noexcept {
+    ~Result() noexcept
+        requires(IsTriviallyDestructibleV<T>)
+    = default;
+
+    ~Result() noexcept
+        requires(!IsTriviallyDestructibleV<T>)
+    {
         ResetValue();
     }
 
@@ -76,7 +82,7 @@ public:
 
 private:
     explicit Result(T&& value) noexcept : error_(ErrorCode::None) {
-        ConstructAt<T>(storage_, Move(value));
+        InitializeAt<T>(storage_, Move(value));
     }
 
     // T 자체가 ErrorCode인 경우에도 값 생성과 실패 생성을 구분한다.
@@ -92,8 +98,10 @@ private:
     }
 
     void ResetValue() noexcept {
-        if (IsOk()) {
-            DestroyAt(reinterpret_cast<T*>(storage_));
+        if constexpr (!IsTriviallyDestructibleV<T>) {
+            if (IsOk()) {
+                DestroyAt(reinterpret_cast<T*>(storage_));
+            }
         }
     }
 

@@ -217,13 +217,13 @@ Result<FrameCompressor*> CreateState(int32 level, Allocator& allocator) noexcept
         return Result<FrameCompressor*>::Failure(ErrorCode::OutOfMemory);
     }
 
-    FrameCompressor* state = ConstructAt<FrameCompressor>(memory);
+    FrameCompressor* state = InitializeAt<FrameCompressor>(memory);
     state->allocator = &allocator;
     state->level = level;
     // 생성 함수의 실패는 문맥 할당 실패뿐이다. 블록 버퍼·LZ4 상태는 첫 frame을 시작할 때 할당한다.
     state->context = LZ4F_createCompressionContext_advanced(Memory(allocator), LZ4F_VERSION);
     if (state->context == nullptr) {
-        DestroyAt(state);
+        static_assert(IsTriviallyDestructibleV<RemovePointerT<decltype(state)>>);
         CodecFree(allocator, state);
         return Result<FrameCompressor*>::Failure(ErrorCode::OutOfMemory);
     }
@@ -418,7 +418,7 @@ void DestroyCompressor(void* codec) noexcept {
     Allocator& allocator = *state->allocator;
     (void)LZ4F_freeCompressionContext(state->context);
     CodecFree(allocator, state->stage);
-    DestroyAt(state);
+    static_assert(IsTriviallyDestructibleV<RemovePointerT<decltype(state)>>);
     CodecFree(allocator, state);
 }
 

@@ -292,6 +292,21 @@ public:
         return Rehash(target);
     }
 
+    // 여유 용량이 UE 5.8 축소 임계값(Array::TryShrinkSlack과 같은 식, 원소당 byte는 슬롯 2개)을
+    // 넘을 때만 Compact한다. open addressing의 power-of-two 슬롯 수와 최대 부하율 1/2는 유지하므로
+    // 줄어든 크기는 Count()를 담는 최소 power-of-two다. Erase·EraseIf는 자동으로 줄이지 않는다.
+    // 오류: 순회 중이면 Busy, 재할당 실패는 allocator 오류이며 둘 다 내용·주소·용량을 보존한다.
+    // 실제로 줄면 모든 원소 포인터가 무효다.
+    Result<void> ShrinkSlack() noexcept {
+        if (iterationDepth_ != 0) {
+            return Result<void>::Failure(ErrorCode::Busy);
+        }
+
+        return detail::ShrinkCapacity(Capacity(), size_, sizeof(Slot) * 2) < Capacity()
+                   ? Compact()
+                   : Result<void>::Success();
+    }
+
     // 키가 존재하면 삭제 후 true, 없으면 false다. 삭제한 원소의 빌린 포인터는 무효다.
     // 동일 컨테이너 순회 중 구조 변경은 Fatal이다. 다른 스레드 접근도 외부 동기화가 필요하다.
     template <typename Q>
@@ -302,8 +317,14 @@ public:
             return false;
         }
         Slot& slot = slots_[index];
-        DestroyAt(slot.Value());
-        DestroyAt(slot.Key());
+        if constexpr (!IsTriviallyDestructibleV<V>) {
+            DestroyAt(slot.Value());
+        }
+
+        if constexpr (!IsTriviallyDestructibleV<K>) {
+            DestroyAt(slot.Key());
+        }
+
         slot.state = State::Deleted;
         --size_;
         ++revision_;
@@ -343,8 +364,13 @@ public:
             ++revision_;
             ++deleted_;
             ++removed;
-            DestroyAt(slot.Value());
-            DestroyAt(slot.Key());
+            if constexpr (!IsTriviallyDestructibleV<V>) {
+                DestroyAt(slot.Value());
+            }
+
+            if constexpr (!IsTriviallyDestructibleV<K>) {
+                DestroyAt(slot.Key());
+            }
         }
         --iterationDepth_;
         if (removed != 0 && size_ == 0) {
@@ -362,10 +388,27 @@ public:
     // 모든 원소와 할당된 저장소를 반환한다. 같은 allocator로 다시 사용할 수 있다.
     void Reset() noexcept {
         CheckNotIterating();
-        ClearSlots();
-        FreeSlots(slots_, slotCount_);
+        if constexpr (!IsTriviallyDestructibleV<K> || !IsTriviallyDestructibleV<V>) {
+            for (usize i = 0; i < slotCount_; ++i) {
+                Slot& slot = slots_[i];
+                if (slot.state == State::Occupied) {
+                    if constexpr (!IsTriviallyDestructibleV<V>) {
+                        DestroyAt(slot.Value());
+                    }
+
+                    if constexpr (!IsTriviallyDestructibleV<K>) {
+                        DestroyAt(slot.Key());
+                    }
+                }
+            }
+        }
+
+        FreeSlots(slots_);
         slots_ = nullptr;
         slotCount_ = 0;
+        size_ = 0;
+        deleted_ = 0;
+        ++revision_;
     }
 
     // 순서와 순회 간 순서 안정성은 보장하지 않는다. 순회 중 중첩 읽기·순회 및 값 수정은
@@ -623,8 +666,11 @@ private:
                     (!safeSharedInput && ArgumentsOverlap(key, value))) {
                     return Result<InsertOutcome>::Failure(ErrorCode::InvalidArgument);
                 }
-                DestroyAt(slots_[existing].Value());
-                ConstructAt<V>(slots_[existing].value, Forward<ValueArg>(value));
+                if constexpr (!IsTriviallyDestructibleV<V>) {
+                    DestroyAt(slots_[existing].Value());
+                }
+
+                InitializeAt<V>(slots_[existing].value, Forward<ValueArg>(value));
             }
             if (resultValue != nullptr) {
                 *resultValue = slots_[existing].Value();
@@ -686,8 +732,8 @@ private:
         if (target.state == State::Deleted) {
             --deleted_;
         }
-        ConstructAt<K>(target.key, Forward<KeyArg>(key));
-        ConstructAt<V>(target.value, Forward<ValueArg>(value));
+        InitializeAt<K>(target.key, Forward<KeyArg>(key));
+        InitializeAt<V>(target.value, Forward<ValueArg>(value));
         target.hash = hash;
         target.state = State::Occupied;
         ++size_;
@@ -749,7 +795,7 @@ private:
 
         // 할당에 성공한 뒤에만 이전 객체를 noexcept 이동하고 수명을 끝낸다.
         for (usize i = 0; i < count; ++i) {
-            ConstructAt<Slot>(replacement + i);
+            InitializeAt<Slot>(replacement + i);
         }
         for (usize i = 0; i < slotCount_; ++i) {
             Slot& old = slots_[i];
@@ -761,15 +807,19 @@ private:
                 index = (index + 1) & (count - 1);
             }
             Slot& dest = replacement[index];
-            ConstructAt<K>(dest.key, Move(*old.Key()));
-            ConstructAt<V>(dest.value, Move(*old.Value()));
+            InitializeAt<K>(dest.key, Move(*old.Key()));
+            InitializeAt<V>(dest.value, Move(*old.Value()));
             dest.hash = old.hash;
             dest.state = State::Occupied;
-            DestroyAt(old.Value());
-            DestroyAt(old.Key());
-            old.state = State::Empty;
+            if constexpr (!IsTriviallyDestructibleV<V>) {
+                DestroyAt(old.Value());
+            }
+
+            if constexpr (!IsTriviallyDestructibleV<K>) {
+                DestroyAt(old.Key());
+            }
         }
-        FreeSlots(slots_, slotCount_);
+        FreeSlots(slots_);
         slots_ = replacement;
         slotCount_ = count;
         deleted_ = 0;
@@ -781,8 +831,13 @@ private:
         for (usize i = 0; i < slotCount_; ++i) {
             Slot& slot = slots_[i];
             if (slot.state == State::Occupied) {
-                DestroyAt(slot.Value());
-                DestroyAt(slot.Key());
+                if constexpr (!IsTriviallyDestructibleV<V>) {
+                    DestroyAt(slot.Value());
+                }
+
+                if constexpr (!IsTriviallyDestructibleV<K>) {
+                    DestroyAt(slot.Key());
+                }
             }
             slot.state = State::Empty;
         }
@@ -791,13 +846,12 @@ private:
         ++revision_;
     }
 
-    void FreeSlots(Slot* slots, usize count) noexcept {
+    void FreeSlots(Slot* slots) noexcept {
         if (!slots) {
             return;
         }
-        for (usize i = 0; i < count; ++i) {
-            DestroyAt(slots + i);
-        }
+        // Slot은 raw K/V 저장소와 메타데이터다. 실제 K/V의 소멸은 caller가 담당한다.
+        static_assert(IsTriviallyDestructibleV<Slot>);
         if (!allocator_->Deallocate(slots)) {
             platform::Fatal("HashMap storage was not owned by its allocator");
         }

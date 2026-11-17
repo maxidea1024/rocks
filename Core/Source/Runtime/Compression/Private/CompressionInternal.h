@@ -306,6 +306,24 @@ struct StreamDecodeState {
     uint8 header[32] = {};
 };
 
+// 일회성 해제기(LZ4 raw·LZ4 frame·Brotli·zlib·zstd·사용자 등록 형식)가 출력 Array 뒤를 bytes만큼
+// 초기화 없이 늘린다. 이 해제기들은 다음 크기(2배 등)와 출력 상한을 스스로 정하므로 Array의 성장
+// slack(required × 3/8 + 16)을 겹쳐 얹으면 피크 메모리가 해제 예산을 넘는다. 그래서 정확히
+// Size() + bytes를 예약한 뒤 늘린다. 크기 overflow는 Overflow, 할당 실패는 allocator 오류이며 둘 다
+// output의 길이·내용·용량을 보존한다. 반환 Span은 늘어난 구간이다.
+inline Result<Span<uint8>> AppendDecodeStorage(Array<uint8>& output, usize bytes) noexcept {
+    if (bytes > MaxSize - output.Size()) {
+        return Result<Span<uint8>>::Failure(ErrorCode::Overflow);
+    }
+
+    auto reserved = output.TryReserve(output.Size() + bytes);
+    if (!reserved) {
+        return Result<Span<uint8>>::Failure(reserved.Error());
+    }
+
+    return output.TryAppendUninitialized(bytes);
+}
+
 // 일회성 해제의 출력 대상이다(LZ4 frame·Brotli 공통). fixed면 Span, 아니면 Array 뒤를
 // 상한(limit)까지 늘린다. 쓸 공간이 없으면 코덱에 1byte 예비 창을 주고, 거기에 byte가 나올 때만
 // 늘리므로(AcceptSpare) 출력이 base + limit보다 길어지지 않고 정확히 상한 크기인 결과는 성공한다.
@@ -329,7 +347,7 @@ struct DecodeOutput {
     // 쓸 공간을 bytes만큼 늘린다(Array만, 호출자가 상한 안으로 정한다). 늘린 구간은 해제가 채우므로
     // 0으로 채우지 않는다.
     Result<void> Grow(usize bytes) noexcept {
-        auto grown = array->TryAppendUninitialized(bytes);
+        auto grown = AppendDecodeStorage(*array, bytes);
         if (!grown) {
             return Result<void>::Failure(grown.Error());
         }

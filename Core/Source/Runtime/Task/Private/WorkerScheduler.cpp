@@ -512,7 +512,7 @@ Result<void> WorkerScheduler::Start(WorkerSchedulerConfig config) noexcept {
         if (!memory) {
             return finish(memory.Error());
         }
-        state = ConstructAt<WorkerState>(memory.Value(), allocator_);
+        state = InitializeAt<WorkerState>(memory.Value(), allocator_);
         {
             platform::LockGuard lock(lifecycleGate_);
             state_ = state;
@@ -542,7 +542,7 @@ Result<void> WorkerScheduler::Start(WorkerSchedulerConfig config) noexcept {
     }
     auto* workers = static_cast<WorkerSlot*>(workerMemory.Value());
     for (uint32 index = 0; index < config.workerCount; ++index) {
-        ConstructAt<WorkerSlot>(&workers[index]);
+        InitializeAt<WorkerSlot>(&workers[index]);
         workers[index].state = state;
     }
     auto queueMemory = allocator_.Allocate(queueBytes, alignof(WorkerRecord*));
@@ -679,7 +679,7 @@ Result<WorkerTaskHandle> WorkerScheduler::Submit(Function<void(WorkerTaskContext
         ReleaseState(state);
         return Result<WorkerTaskHandle>::Failure(memory.Error());
     }
-    WorkerRecord* record = ConstructAt<WorkerRecord>(memory.Value(), *state);
+    WorkerRecord* record = InitializeAt<WorkerRecord>(memory.Value(), *state);
     record->dependencyCount = count;
     record->lane = options.lane;
     for (uint32 index = 0; index < count; ++index) {
@@ -761,7 +761,7 @@ Result<WorkerTaskEvent> WorkerScheduler::TryCreateEvent() noexcept {
         ReleaseState(state);
         return Result<WorkerTaskEvent>::Failure(memory.Error());
     }
-    WorkerRecord* record = ConstructAt<WorkerRecord>(memory.Value(), *state);
+    WorkerRecord* record = InitializeAt<WorkerRecord>(memory.Value(), *state);
     record->external = true;
     record->trace = TraceCreateTask();
     bool accepted = false;

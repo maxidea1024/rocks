@@ -171,9 +171,9 @@ Result<void*> StackAllocator::Allocate(usize bytes, usize alignment, uint32 tag)
             platform::Fatal("StackAllocator backing allocator returned invalid storage");
         }
 
-        chunk = ConstructAt<Chunk>(storage, Chunk{chunks_, capacity, sizeof(Chunk)});
+        chunk = InitializeAt<Chunk>(storage, Chunk{chunks_, capacity, sizeof(Chunk)});
         if (!TryLayout(*chunk, bytes, alignment, recordOffset, dataOffset, endOffset)) {
-            DestroyAt(chunk);
+            static_assert(IsTriviallyDestructibleV<RemovePointerT<decltype(chunk)>>);
             if (!backing_->Deallocate(storage)) {
                 platform::Fatal("StackAllocator backing storage ownership mismatch");
             }
@@ -188,8 +188,8 @@ Result<void*> StackAllocator::Allocate(usize bytes, usize alignment, uint32 tag)
     auto* storage = reinterpret_cast<unsigned char*>(chunk);
     void* address = storage + dataOffset;
     const uint64 id = stats_.allocations.totalAllocations + 1;
-    auto* record = ConstructAt<Record>(storage + recordOffset,
-                                       Record{top_, chunk, address, bytes, chunk->used, id});
+    auto* record = InitializeAt<Record>(storage + recordOffset,
+                                        Record{top_, chunk, address, bytes, chunk->used, id});
     top_ = record;
     chunk->used = endOffset;
     ++stats_.allocations.liveAllocations;
@@ -227,7 +227,7 @@ Result<void> StackAllocator::Deallocate(void* address) noexcept {
     record->chunk->used = record->previousUsed;
     --stats_.allocations.liveAllocations;
     stats_.allocations.liveBytes -= record->bytes;
-    DestroyAt(record);
+    static_assert(IsTriviallyDestructibleV<RemovePointerT<decltype(record)>>);
     return Result<void>::Success();
 }
 
@@ -341,7 +341,7 @@ void StackAllocator::ReleaseChunks() noexcept {
     Chunk* chunk = chunks_;
     while (chunk) {
         Chunk* next = chunk->next;
-        DestroyAt(chunk);
+        static_assert(IsTriviallyDestructibleV<RemovePointerT<decltype(chunk)>>);
         if (!backing_->Deallocate(chunk)) {
             platform::Fatal("StackAllocator backing storage ownership mismatch");
         }
