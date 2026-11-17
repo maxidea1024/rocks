@@ -3,6 +3,8 @@
 #include <Base/NumericLimits.h>
 #include <Graphics/DeviceTypes.h>
 
+#include "D3D11PixelFormats.h"
+
 #include <Windows.h>
 #include <d3d11_4.h>
 #include <dxgi1_6.h>
@@ -170,9 +172,6 @@ private:
     usize length_ = 0;
     bool truncated_ = false;
 };
-
-// 텍스처 형식의 DXGI 형식이다(대응 표, D3D11Common.cpp). 지원하지 않는 형식은 UNKNOWN이다.
-DXGI_FORMAT ResourceFormat(PixelFormat format) noexcept;
 
 // 정점 원소 형식의 DXGI 형식이다(RenderBase 10.4절 표, UE D3D11VertexDeclaration.cpp).
 DXGI_FORMAT AttributeFormat(VertexFormat format) noexcept;

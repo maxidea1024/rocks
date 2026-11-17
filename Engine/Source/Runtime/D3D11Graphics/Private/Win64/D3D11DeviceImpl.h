@@ -32,14 +32,22 @@ struct BufferRecord {
 
 struct TextureRecord {
     ComRef<ID3D11Texture2D> texture;
+    // 형식이 Sampled일 때만 있다. 없으면 SetTexture는 흰 텍스처로 대신한다.
     ComRef<ID3D11ShaderResourceView> srv;
     // RenderTarget만 있다.
     ComRef<ID3D11RenderTargetView> rtv;
+    // DepthStencil만 있다.
+    ComRef<ID3D11DepthStencilView> dsv;
     uint32 width = 0;
     uint32 height = 0;
     uint32 mipLevels = 1;
+    // view(CreateTextureView)면 view가 읽는 형식, 아니면 텍스처 형식이다.
     PixelFormat format = PixelFormat::Unknown;
     bool renderTarget = false;
+    bool depthTarget = false;
+    // 다른 텍스처의 자원을 공유하는 view다(SRV와 texture 참조가 자원을 붙든다). 업로드·readback·
+    // 그리기 대상이 될 수 없다.
+    bool view = false;
     // 샘플러 캐시의 객체다(장치 수명 동안 산다).
     ID3D11SamplerState* sampler = nullptr;
 };
@@ -103,7 +111,10 @@ struct UploadOp {
         // UpdateSubresource(destination, subresource, box, source, rowPitch, depthPitch)
         Update,
         // CopyResource(destination, copySource) — readback
-        Copy
+        Copy,
+        // CopySubresourceRegion(destination, subresource, copySource, sourceSubresource) — 깊이·
+        // 비디오 staging 업로드와 mip·plane readback
+        CopyRegion
     };
 
     Kind kind = Kind::Update;
@@ -111,6 +122,7 @@ struct UploadOp {
     ID3D11Resource* destination = nullptr;
     ID3D11Resource* copySource = nullptr;
     uint32 subresource = 0;
+    uint32 sourceSubresource = 0;
     bool hasBox = false;
     D3D11_BOX box = {};
     const uint8* source = nullptr;
@@ -174,9 +186,12 @@ public:
     Result<TextureHandle> CreateTexture(const TextureDesc& desc,
                                         Span<const uint8> pixels) noexcept override;
     Result<PipelineHandle> CreatePipeline(const PipelineDesc& desc) noexcept override;
-    // 대응 표(D3D11Common.cpp)에 있는 형식만 능력을 공개한다(PixelFormat.ko.md 14절 PF3, D3D11
-    // 질의는 PF4).
+    // 장치 생성 때 CheckFormatSupport로 채운 능력이다(PixelFormat.ko.md PF4).
     PixelFormatCaps GetPixelFormatCaps(PixelFormat format) const noexcept override;
+    Result<TextureHandle> CreateTextureView(TextureHandle texture,
+                                            const TextureViewDesc& desc) noexcept override;
+    Result<void> ReadTexture(TextureHandle texture, uint32 mipLevel, uint32 plane,
+                             Span<uint8> out) noexcept override;
     Result<CommandContext*> BeginFrame(SwapChainHandle swapChain,
                                        const ClearColor& clear) noexcept override;
     Result<CommandContext*> BeginOffscreen(TextureHandle target,
@@ -307,6 +322,20 @@ private:
     // 정점 셰이더 입력 대조 실패를 남기고 InvalidArgument를 돌려준다.
     Result<void> Reject(const Diagnostic& message) noexcept;
 
+    // 이 장치가 형식·용도를 지원하지 않는다는 진단을 남기고 Unsupported를 돌려준다(잠금 안).
+    template <class T>
+    Result<T> UnsupportedFormat(PixelFormat format) noexcept {
+        Diagnostic message;
+        message.Text("pixel format ")
+            .Text(PixelFormatName(format))
+            .Text(" is not supported for this use by the D3D11 device");
+        auto assigned = lastError_.TryAssign(StringView(message.CStr(), message.Length()));
+        (void)assigned;
+        return Result<T>::Failure(ErrorCode::Unsupported);
+    }
+
+    PixelFormatCaps FormatCaps(PixelFormat format) const noexcept;
+
     // API 실패가 장치 제거 때문이면 손실을 게시한다(기다리는 쪽을 Destroyed로 깨운다).
     void DetectLost(HRESULT failure) noexcept;
 
@@ -351,6 +380,10 @@ private:
     Result<void> MatchVertexInputs(ID3DBlob* code, const VertexLayout& layout) noexcept;
     Result<void> CheckVertexFormats(const VertexLayout& layout) noexcept;
     Result<void> CreateSwapChainView(SwapChainRecord& record) noexcept;
+    // 2D SRV를 만든다. 비디오 형식은 PlaneSlice로, 깊이·스텐실은 view 형식으로 plane을 고른다.
+    HRESULT CreatePlaneView(ID3D11Texture2D* texture, DXGI_FORMAT format, uint32 plane,
+                            uint32 mipLevels, bool planar,
+                            ComRef<ID3D11ShaderResourceView>& out) noexcept;
 
     // --- 기록(D3D11Frame.cpp) ---
 
@@ -367,6 +400,13 @@ private:
                                     Span<const uint8> data) noexcept;
     Result<void> RecordTextureUpload(const TextureRecord& record, uint32 mipLevel,
                                      const uint8* pixels) noexcept;
+    // 깊이·스텐실·비디오 형식의 mip 하나를 D3D11 배치로 바꾼 staging 텍스처에서 복사한다(잠금 안).
+    // UpdateSubresource는 깊이·스텐실 자원에 쓸 수 없다.
+    Result<void> RecordStagedUpload(const TextureRecord& record, uint32 mipLevel,
+                                    const uint8* pixels) noexcept;
+    // 형식 종류에 맞는 업로드 경로를 고른다(잠금 안).
+    Result<void> RecordAnyUpload(const TextureRecord& record, uint32 mipLevel,
+                                 const uint8* pixels) noexcept;
     Result<uint64> FlushUploadsLocked() noexcept;
     Result<void> WaitIdleLocked() noexcept;
     Result<ReadbackRequest> RequestReadbackLocked(TextureHandle target) noexcept;
@@ -393,6 +433,8 @@ private:
     Array<DedicatedUpload> dedicated_;
     Array<UploadOp> uploadOps_;
     SamplerEntry samplers_[SamplerCapacity];
+    // 형식 번호별 능력이다(장치 생성 때 채우고 바꾸지 않는다).
+    PixelFormatCaps formatCaps_[MaxPixelFormatNumber + 1] = {};
     uint32 samplerCount_ = 0;
     ComRef<IDXGIFactory4> factory_;
     ComRef<ID3D11Device5> device_;
