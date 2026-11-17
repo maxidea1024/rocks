@@ -6,6 +6,7 @@
 #include "VertexSelfTest.h"
 
 #include <Core/Containers/Array.h>
+#include <D3D11Graphics/D3D11Device.h>
 #include <D3D12Graphics/D3D12Device.h>
 #include <Graphics/GpuFenceEvent.h>
 #include <OpenGLGraphics/OpenGLDevice.h>
@@ -305,8 +306,8 @@ struct OwnerThreadRun {
 // 확인한다.
 void RunOwnershipChecks(const char* name, graphics::Device& device, sample::Renderer& renderer,
                         graphics::TextureHandle target, Allocator& allocator) noexcept {
-    // D3D12는 생성이 스레드 안전이고(GX8 업로드 경로), OpenGL은 소유 스레드 전용이다.
-    const bool concurrent = device.Info().backend == graphics::Backend::D3D12;
+    // D3D12·D3D11은 생성이 스레드 안전이고(GX8 업로드 경로), OpenGL은 소유 스레드 전용이다.
+    const bool concurrent = device.Info().backend != graphics::Backend::OpenGL;
     Check(device.Info().concurrentResourceCreation == concurrent && device.IsOwnerThread(), name,
           "device starts owned by its creating thread");
     Check(device.ReleaseOwnership().IsOk() && !device.IsOwnerThread(), name,
@@ -360,8 +361,8 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     if (!created) {
         printf("  [NOT RUN] %s: device unavailable (error %u)\n", name,
                static_cast<unsigned>(created.Error()));
-        if (report != nullptr && report->stage[0] != 0) {
-            printf("    %s (native 0x%llX): %s\n", report->stage,
+        if (report != nullptr && report->stage[0] != '\0') {
+            printf("    %s (native 0x%08llX): %s\n", report->stage,
                    static_cast<unsigned long long>(report->nativeCode), report->detail);
         }
 
@@ -623,10 +624,47 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     renderer.Shutdown();
     auto idle = device.WaitIdle();
     Check(idle.IsOk(), name, "wait idle");
+    if (!idle) {
+        printf("    %.*s\n", static_cast<int>(device.LastError().ByteCount()),
+               device.LastError().Data());
+    }
     // 렌더 lane(RB1): 장치를 lane으로 넘겨 엔진 루프 프레임을 그리고 되돌려 받는다.
     failures += RunRenderLaneChecks(name, device, result.triangle.GetAllocator());
     result.passed = failures == before;
     printf("  [%s] %s\n", result.passed ? "PASS" : "FAIL", name);
+}
+
+// D3D11 검증 계층 집계가 실제로 동작하는지 확인한다. D3D11은 파이프라인에 RTV 형식이 없으므로 정점
+// 용도 버퍼를 index 버퍼로 묶는다(D3D11 버퍼는 용도별 bind flag로 만든다). 이 오류는 WARP 장치를
+// 제거하므로 검사 장치와 따로 만든 단기 장치에서 한다.
+void RunD3D11ValidationProbe(const char* name,
+                             Result<UniquePtr<graphics::Device>> created) noexcept {
+    if (!created || !created.Value()->Info().validationEnabled) {
+        return;
+    }
+
+    graphics::Device& device = *created.Value();
+    graphics::TextureDesc targetDesc;
+    targetDesc.width = Size;
+    targetDesc.height = Size;
+    targetDesc.usage = graphics::TextureUsage::RenderTarget;
+    auto target = device.CreateTexture(targetDesc, {});
+    const uint8 bytes[16] = {};
+    graphics::BufferDesc vertexDesc;
+    vertexDesc.size = sizeof(bytes);
+    auto vertexOnly = device.CreateBuffer(vertexDesc, Span<const uint8>(bytes, sizeof(bytes)));
+    const uint64 before = device.ValidationErrorCount();
+    if (target && vertexOnly) {
+        auto frame = device.BeginOffscreen(target.Value(), {});
+        if (frame) {
+            frame.Value()->SetIndexBuffer(vertexOnly.Value(), graphics::IndexFormat::UInt16);
+            auto ended = device.EndFrame();
+            (void)ended;
+        }
+    }
+
+    Check(device.ValidationErrorCount() > before, name,
+          "validation layer error is counted (intentional index buffer bind flag mismatch)");
 }
 
 // 두 backend의 결과가 픽셀 단위로 거의 같은지 본다(래스터화·필터링 차이 허용 범위 안).
@@ -666,29 +704,39 @@ int RunGraphicsSelfTest(Allocator& allocator) noexcept {
     desc.enableValidation = true;
     BackendResult d3d12(allocator);
     BackendResult warp(allocator);
+    BackendResult d3d11(allocator);
+    BackendResult d3d11Warp(allocator);
     BackendResult glesProfile(allocator);
     BackendResult glesDesktop(allocator);
     RunBackend("D3D12", graphics::CreateD3D12Device(allocator, desc), d3d12);
     graphics::DeviceDesc software = desc;
     software.preferSoftware = true;
     RunBackend("D3D12 WARP", graphics::CreateD3D12Device(allocator, software), warp);
+    graphics::DeviceCreateReport report;
+    RunBackend("D3D11", graphics::CreateD3D11Device(allocator, desc, &report), d3d11, &report);
+    RunBackend("D3D11 WARP", graphics::CreateD3D11Device(allocator, software, &report), d3d11Warp,
+               &report);
+    RunD3D11ValidationProbe("D3D11", graphics::CreateD3D11Device(allocator, desc));
+    RunD3D11ValidationProbe("D3D11 WARP", graphics::CreateD3D11Device(allocator, software));
     // OpenGL ES 3.2 미리보기(GLES31_PC)를 두 context에서 돌린다: 진짜 ES 3.2 context(드라이버가 ES
     // 밖 호출을 거부)와 UE 방식의 데스크톱 GL 4.3 core context.
     graphics::OpenGLDeviceOptions esProfile;
     esProfile.contextProfile = graphics::OpenGLContextProfile::EsProfile;
-    graphics::DeviceCreateReport esReport;
-    RunBackend("OpenGL ES", graphics::CreateOpenGLDevice(allocator, desc, esProfile, &esReport),
-               glesProfile, &esReport);
+    RunBackend("OpenGL ES", graphics::CreateOpenGLDevice(allocator, desc, esProfile, &report),
+               glesProfile, &report);
     graphics::OpenGLDeviceOptions desktopCore;
     desktopCore.contextProfile = graphics::OpenGLContextProfile::DesktopCore;
-    graphics::DeviceCreateReport desktopReport;
     RunBackend("OpenGL ES on GL core",
-               graphics::CreateOpenGLDevice(allocator, desc, desktopCore, &desktopReport),
-               glesDesktop, &desktopReport);
+               graphics::CreateOpenGLDevice(allocator, desc, desktopCore, &report), glesDesktop,
+               &report);
     Compare(d3d12, glesProfile, "D3D12 vs OpenGL ES");
     Compare(d3d12, glesDesktop, "D3D12 vs OpenGL ES on GL core");
     Compare(d3d12, warp, "D3D12 vs WARP");
-    const bool anyRan = d3d12.ran || warp.ran || glesProfile.ran || glesDesktop.ran;
+    Compare(d3d12, d3d11, "D3D12 vs D3D11");
+    Compare(d3d12, d3d11Warp, "D3D12 vs D3D11 WARP");
+    Compare(warp, d3d11Warp, "D3D12 WARP vs D3D11 WARP");
+    const bool anyRan =
+        d3d12.ran || warp.ran || d3d11.ran || d3d11Warp.ran || glesProfile.ran || glesDesktop.ran;
     printf("Graphics self-test: %s (%u failure%s)\n",
            failures == 0 && anyRan ? "PASS" : (anyRan ? "FAIL" : "NOT RUN"), failures,
            failures == 1 ? "" : "s");
