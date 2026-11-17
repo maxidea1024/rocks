@@ -1,4 +1,5 @@
 #include <Core/Memory/SystemAllocator.h>
+#include <Core/Math/Rotator.h>
 #include <Core/Memory/UniquePtr.h>
 #include <ObjectSerialization/ObjectGraph.h>
 #include <TestSupport/Test.h>
@@ -651,6 +652,46 @@ TEST(World_TransformHierarchyComposesAndRejectsCycles) {
     auto parent = world.With<SceneComponent>(
         grandchild.Value(), [](SceneComponent& scene) noexcept { return scene.Parent(); });
     CHECK(parent && parent.Value().IsNull());
+    REQUIRE(world.Shutdown());
+}
+
+// UE 5.8 대조 golden(cm): 부모 상대 Transform = yaw +90°(FRotator(0, 90, 0)), 이동 (0, 0, 50) cm,
+// scale 2, 자식 상대 위치 (100, 0, 0) cm. UE 컴포넌트 월드 = NewRelativeTransform * ParentToWorld
+// (SceneComponent.cpp:732)이므로 자식 원점은 scale 2 → yaw +90(+X → +Y) → 이동 순으로
+// (0, 200, 50) cm다(UE 식 probe — ue-coords 차이표 1.5절). 허용 오차는 quaternion 반올림이 200 cm에
+// 곱해지는 크기(C2 Transform 합성 점 오차 1e-12와 같다).
+TEST(World_SceneComponentMatchesUeChildTimesParentInCentimeters) {
+    Fixture fixture;
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    auto actor = world.SpawnActorDeferred<Actor>();
+    REQUIRE(actor);
+    auto parent = world.AddComponent<SceneComponent>(actor.Value());
+    auto child = world.AddComponent<SceneComponent>(actor.Value());
+    REQUIRE(parent && child);
+    auto parentSet = world.With<SceneComponent>(parent.Value(), [](SceneComponent& scene) noexcept {
+        const Transform transform(Rotator<double>(0.0, 90.0, 0.0).ToQuaternion(),
+                                  Vec3d(0.0, 0.0, 50.0), Vec3d(2.0, 2.0, 2.0));
+        return scene.SetRelativeTransform(transform);
+    });
+    REQUIRE(parentSet);
+    auto childSet = world.With<SceneComponent>(child.Value(), [&](SceneComponent& scene) noexcept {
+        if (auto attached = scene.AttachTo(parent.Value()); !attached) {
+            return attached;
+        }
+        return scene.SetRelativeLocation(Vec3d(100.0, 0.0, 0.0));
+    });
+    REQUIRE(childSet);
+    auto location = world.With<SceneComponent>(
+        child.Value(), [](SceneComponent& scene) noexcept { return scene.WorldLocation(); });
+    REQUIRE(location);
+    CHECK(location.Value().Equals(Vec3d(0.0, 200.0, 50.0), 1.0e-12));
+    auto worldTransform = world.With<SceneComponent>(
+        child.Value(), [](SceneComponent& scene) noexcept { return scene.TryWorldTransform(); });
+    REQUIRE(worldTransform);
+    // 자식의 전방(+X)은 부모 yaw +90에 따라 월드 오른쪽(+Y)을 향하고 scale은 부모의 2다.
+    CHECK(worldTransform.Value().rotation.GetForwardVector().Equals(Vec3d::Right(), 1.0e-15));
+    CHECK(worldTransform.Value().scale.Equals(Vec3d(2.0, 2.0, 2.0), 1.0e-14));
     REQUIRE(world.Shutdown());
 }
 

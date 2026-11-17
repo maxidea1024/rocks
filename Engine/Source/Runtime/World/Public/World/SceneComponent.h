@@ -13,7 +13,9 @@ namespace rocks {
 // 사용 예:
 //   world.With<SceneComponent>(child, [&](SceneComponent& scene) {
 //       scene.AttachTo(parent);                          // 순환이면 InvalidArgument
-//       scene.SetRelativeLocation(Vec3d(0.0, 0.0, 100.0));
+//       scene.SetRelativeLocation(Vec3d(0.0, 0.0, 100.0)); // 부모 기준 위(+Z)로 100 cm(1 m)
+//       // UE SetRelativeRotation(FRotator(P, Y, R))에 해당: 도 단위 Rotator를 바꿔 넘긴다.
+//       scene.SetRelativeRotation(Rotator<double>(0.0, 90.0, 0.0).ToQuaternion()); // yaw +90
 //   });
 //   auto matrix = world.With<SceneComponent>(
 //       child, [](SceneComponent& s) { return s.WorldMatrix(); });
@@ -27,6 +29,11 @@ namespace rocks {
 // parent에서 유도되는 값이다).
 //
 // 규약:
+// - 좌표·단위는 UE 5.8과 같다(Docs/Implementation/Math.ko.md 2절): 왼손 +X 전방·+Y 오른쪽·+Z 위,
+//   위치·이동은 cm(UE WorldSettings.h:593-595 WorldToMeters 100), 회전은 단위 quaternion(UE
+//   FQuat 의미 — 양의 각은 왼손 회전, 도 단위 각은 Rotator<double>::ToQuaternion으로 바꾼다),
+//   scale은 무차원 배율이다. 물리 엔진 등 m 단위 계층과는 Core/Math/UnitConversion.h의 함수로
+//   경계에서 바꾼다.
 // - 월드 변환은 affine 행렬(Mat4d) = 상대 TRS 행렬 × 부모 월드 행렬이다(행 벡터 규약, UE
 //   NewRelativeTransform * ParentToWorld — Engine/Private/Components/SceneComponent.cpp:732).
 //   비균일 scale 부모 아래 회전한 자식도 정확히 표현한다(TRS로 분해할 수 없는 shear 포함 — UE
@@ -51,10 +58,13 @@ public:
     }
 
     // 상대 Transform을 바꾼다. 유한하지 않거나 회전이 단위 quaternion이 아니면 InvalidArgument이며
-    // 바꾸지 않는다.
+    // 바꾸지 않는다. 아래 세 함수는 해당 성분만 바꾸며 실패 조건이 같다.
     Result<void> SetRelativeTransform(const Transform& transform) noexcept;
+    // 부모 기준 위치(cm)다. UE SetRelativeLocation과 같은 단위다.
     Result<void> SetRelativeLocation(const Vec3d& location) noexcept;
+    // 부모 기준 회전(단위 quaternion, 왼손 양의 각)이다. 도 단위 Rotator는 ToQuaternion으로 바꾼다.
     Result<void> SetRelativeRotation(const Quatd& rotation) noexcept;
+    // 부모 기준 scale(무차원 배율, 1 = 원래 크기)이다.
     Result<void> SetRelativeScale(const Vec3d& scale) noexcept;
 
     // 월드 행렬이다. dirty면 부모 사슬을 따라 다시 계산한다. 부모에 접근할 수 없으면(파괴 중 등)
@@ -64,7 +74,7 @@ public:
     // 월드 변환을 TRS로 분해한다. shear가 있으면 Unsupported, 0 scale이면 InvalidArgument다.
     Result<Transform> TryWorldTransform() const noexcept;
 
-    // 월드 위치(월드 행렬의 이동 성분)다.
+    // 월드 위치(cm, 월드 행렬의 이동 성분 — 마지막 행)다.
     Vec3d WorldLocation() const noexcept;
 
     ObjectHandle Parent() const noexcept {
