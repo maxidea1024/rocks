@@ -11,8 +11,9 @@
 // 5.6·6.4절). 값 종류·필드의 wire tag(FieldWireType), 정수 폭 한도(UnsignedLimit·SignedLimit·
 // FitsSignedLimit), enum 선언 값 집합(EnumValueSet), 값 쓰기(WriteValueWire)와 단일 값 필드
 // 쓰기(EncodeFieldWire — Optional<단일 값> 포함)가 있다. 사슬(FieldValueWire → FieldValueParse →
-// StructFieldCodec → ArrayFieldCodec → OptionalFieldCodec → MapFieldCodec → GeneratedFieldCodec)은
-// 각 조각이 앞 조각을 include하므로 직접 include하지 말고 Object/GeneratedFieldCodec.h로 받는다.
+// StructFieldCodec → InstancedStructFieldCodec → ArrayFieldCodec → OptionalFieldCodec →
+// MapFieldCodec → StaticArrayFieldCodec → GeneratedFieldCodec)은 각 조각이 앞 조각을 include하므로
+// 직접 include하지 말고 Object/GeneratedFieldCodec.h로 받는다.
 namespace rocks::detail {
 
 // 값 종류의 wire tag다. 참조(강한·weak)는 문맥의 referenceWire다. Array·Opaque는 Unsupported다(배열
@@ -75,6 +76,10 @@ inline Result<uint32> FieldWireType(ValueKind kind, uint32 referenceWire) noexce
     case ValueKind::Set:
         // 원소 wire + count + 원소(같은 문서 1.2·7.2절).
         return Result<uint32>::Success(static_cast<uint32>(WireType::Set));
+    case ValueKind::InstancedStruct:
+        // 필드 값은 빈 payload 또는 담긴 struct Record, 원소·Map 값 자리는 u64 길이 + 같은
+        // 내용(같은 문서 1.2·11절 — 리플렉션 B9j).
+        return Result<uint32>::Success(static_cast<uint32>(WireType::InstancedStruct));
     case ValueKind::Array:
     case ValueKind::StaticArray:
     case ValueKind::Opaque:
@@ -477,6 +482,7 @@ inline Result<void> WriteValueWire(ArchiveWriter& out, FieldEncodeContext& conte
     case ValueKind::Map:
     case ValueKind::Set:
     case ValueKind::StaticArray:
+    case ValueKind::InstancedStruct:
     case ValueKind::Opaque:
         break;
     }

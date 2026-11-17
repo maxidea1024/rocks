@@ -36,6 +36,7 @@ struct TypeRegistry::Record {
     bool containsReferenceArray = false;
     bool containsName = false;
     bool containsWeakReference = false;
+    bool containsInstancedStruct = false;
     Record** fieldTypes = nullptr;
     Record** fieldKeyTypes = nullptr;
     uint32 generation = 0;

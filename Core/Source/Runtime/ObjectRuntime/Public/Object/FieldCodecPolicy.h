@@ -46,6 +46,16 @@ enum class UnknownClassPolicy : uint8 {
     ReportAndNull
 };
 
+// 등록되지 않은 struct를 담은 InstancedStruct 값(ValueKind::InstancedStruct — 리플렉션 B9j)을
+// 읽었을 때: 거부(기본, NotFound) 또는 진단(UnknownStructType) 후 비움(Docs/Design/
+// ReflectionExtensions.ko.md 11절 — struct를 지운 데이터를 열어 고칠 때 쓴다, UE는 경고 뒤 비운다).
+// 등록은 됐지만 struct가 아니거나(클래스·enum) 담을 수 없는 struct·깊이 합 위반은 정책과 무관하게
+// InvalidArgument다.
+enum class UnknownStructTypePolicy : uint8 {
+    Reject,
+    ReportAndClear
+};
+
 // 스키마에 없는 필드: 진단 후 건너뛰기(기본) 또는 거부(쿠킹 데이터는 정확히 일치해야 한다).
 enum class UnknownFieldPolicy : uint8 {
     SkipAndReport,
@@ -88,6 +98,8 @@ struct FieldDecodePolicy {
     // 비트가 없는 필드·struct 멤버(Atomic struct 안의 멤버 제외)가 파일에 있으면
     // InvalidArgument이고, Required 실효 값 검사에서도 뺀다.
     uint32 includeFlags = 0;
+    // InstancedStruct 값의 미등록 struct 정책이다(리플렉션 B9j).
+    UnknownStructTypePolicy unknownStructType = UnknownStructTypePolicy::Reject;
 };
 
 class RecordScope;

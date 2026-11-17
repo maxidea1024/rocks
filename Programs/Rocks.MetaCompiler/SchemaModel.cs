@@ -108,7 +108,10 @@ internal sealed class FieldModel
 
     // FieldValue로 통째 읽고 쓰지 않는 필드다(런타임 FieldIsAggregate와 같은 규칙): struct 값, 배열, 값 struct 내부의 Optional,
     // Map·Set. 생성 함수표는 read·write·writeStaged 없이 codec과(Map·Set 말고) 경로 thunk를 싣는다.
-    public bool IsAggregate => IsStruct || IsArray || IsStaticArray || (IsOptional && ElementKind == "Struct") || IsMap || IsSet;
+    public bool IsAggregate => IsStruct || IsArray || IsStaticArray || (IsOptional && ElementKind == "Struct") || IsMap || IsSet || IsInstancedStruct;
+
+    // InstancedStruct<> 필드다(리플렉션 B9j — Docs/Design/ReflectionExtensions.ko.md 11절). 원소·Map 값 자리는 TargetKind로 본다.
+    public bool IsInstancedStruct => Kind == "InstancedStruct";
 
     // 필드 값의 대상 종류다: 배열이면 원소 종류, Optional이면 내부 종류, Map이면 값 종류, Set이면 원소 종류, 아니면 값 종류(런타임
     // FieldTargetType과 같은 규칙). Map 키는 KeyKind다.

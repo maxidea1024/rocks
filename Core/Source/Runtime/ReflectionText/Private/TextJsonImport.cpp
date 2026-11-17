@@ -68,7 +68,9 @@ struct Importer {
     Result<void> PathText(String& out) noexcept;
     Result<void> Report(TextDiagnosticCode code, JsonValue at, StringView message) noexcept;
     Result<void> Enter() noexcept;
-    Result<void> Members(const SchemaScope& scope, uint32 flags, JsonValue object) noexcept;
+    Result<void> Members(const SchemaScope& scope, uint32 flags, JsonValue object,
+                         bool instanced = false) noexcept;
+    Result<void> InstancedAt(const TextSlot& slot, JsonValue value) noexcept;
     Result<void> Field(const SchemaScope& scope, usize index, uint32 flags,
                        JsonValue value) noexcept;
     Result<void> Whole(const TextSlot& slot, JsonValue value) noexcept;
@@ -123,7 +125,8 @@ Result<void> Importer::Enter() noexcept {
     return Result<void>::Success();
 }
 
-Result<void> Importer::Members(const SchemaScope& scope, uint32 flags, JsonValue object) noexcept {
+Result<void> Importer::Members(const SchemaScope& scope, uint32 flags, JsonValue object,
+                               bool instanced) noexcept {
     if (!object.IsObject()) {
         return Report(TextDiagnosticCode::InvalidValue, object, "expected an object");
     }
@@ -148,6 +151,11 @@ Result<void> Importer::Members(const SchemaScope& scope, uint32 flags, JsonValue
         if (auto charged = Context().ChargeInput(key.ByteCount()); !charged) {
             result = Move(charged);
             break;
+        }
+
+        // InstancedStruct 객체의 타입 키는 InstancedAt이 읽었다(리플렉션 B9j).
+        if (instanced && key == detail::InstancedTypeKey) {
+            continue;
         }
 
         // 객체 키는 필드 도구 이름이고 대소문자를 무시한다(경로 규칙과 같다).
@@ -226,6 +234,8 @@ Result<void> Importer::Whole(const TextSlot& slot, JsonValue value) noexcept {
     switch (field.value.kind) {
     case ValueKind::Struct:
         return Members(SchemaScope{nullptr, slot.structView}, slot.flags, value);
+    case ValueKind::InstancedStruct:
+        return InstancedAt(slot, value);
     case ValueKind::Optional:
         if (value.IsNull()) {
             return Assign(AssignmentKind::Unset, slot, value, nullptr);
@@ -263,6 +273,70 @@ Result<void> Importer::StructAt(const TextSlot& slot, JsonValue value) noexcept 
     }
 
     return Members(SchemaScope{nullptr, slot.structView}, slot.flags, value);
+}
+
+// InstancedStruct 자리(필드·원소·Map 값 — 리플렉션 B9j, Docs/Design/ReflectionExtensions.ko.md
+// 10.4절)다: null과 `{}`는 비우기, `{"_structType": "<타입 도구 이름>", 멤버...}`는 그 struct 기본
+// 값으로 형을 바꾼 뒤(통째 교체) 멤버를 병합한다. `_structType`가 없는 비지 않은 객체·문자열이 아닌
+// 타입은 InvalidValue, 형 바꾸기가 진단을 남기면 멤버는 보지 않는다.
+Result<void> Importer::InstancedAt(const TextSlot& slot, JsonValue value) noexcept {
+    TextValue type(state.allocator);
+    if (value.IsNull() || (value.IsObject() && value.Size() == 0)) {
+        type.shape = TextValueShape::InstancedType;
+        type.single.kind = ValueKind::InstancedStruct;
+        return Assign(AssignmentKind::Set, slot, value, &type);
+    }
+
+    if (!value.IsObject()) {
+        return Report(TextDiagnosticCode::InvalidValue, value, "expected an object or null");
+    }
+
+    usize at = IndexNone;
+    for (usize index = 0; index < value.Size(); ++index) {
+        if (value.KeyAt(index) == detail::InstancedTypeKey) {
+            at = index;
+            break;
+        }
+    }
+
+    if (at == IndexNone || !value.ValueAt(at).IsString()) {
+        return Report(TextDiagnosticCode::InvalidValue, value,
+                      "an instanced struct object needs a \"_structType\" string");
+    }
+
+    String text(state.allocator);
+    if (auto made = PathText(text); !made) {
+        return made;
+    }
+
+    const JsonValue name = value.ValueAt(at);
+    auto parsed = ParseTextValue(Context(), slot, name.GetString(),
+                                 TextSource::Json(name.Position()), text.View(), type);
+    if (!parsed || !parsed.Value()) {
+        state.failed = state.failed || (parsed && !parsed.Value());
+        return parsed ? Result<void>::Success() : Result<void>::Failure(parsed.Error());
+    }
+
+    if (type.single.guid == Guid{}) {
+        return Report(TextDiagnosticCode::InvalidValue, name,
+                      "\"_structType\" must name a struct type");
+    }
+
+    auto content = Context().Types().AcquireValueType(type.single.guid, TypeKind::Struct);
+    if (!content) {
+        return Result<void>::Failure(content.Error());
+    }
+
+    const uint64 before = DiagnosticCount();
+    if (auto assigned = Assign(AssignmentKind::Set, slot, value, &type); !assigned) {
+        return assigned;
+    }
+
+    if (DiagnosticCount() != before) {
+        return Result<void>::Success();
+    }
+
+    return Members(SchemaScope{nullptr, content.Value().Struct()}, slot.flags, value, true);
 }
 
 Result<void> Importer::ScalarAt(const TextSlot& slot, JsonValue value) noexcept {
@@ -314,6 +388,26 @@ Result<void> Importer::Elements(const TextSlot& slot, JsonValue value) noexcept 
         for (usize index = 0; result && index < value.Size() && !Stopped(); ++index) {
             path.SetIndex(static_cast<uint32>(index));
             result = ScalarAt(element, value.At(index));
+            path.ClearSelector();
+        }
+
+        --depth;
+        return result;
+    }
+
+    if (field.element.kind == ValueKind::InstancedStruct) {
+        // InstancedStruct 원소(리플렉션 B9j): Array는 비운 뒤 `a[i]=<타입>`이 끝에 원소를 더하고,
+        // 정적 배열은 원소마다 바꾼다.
+        const TextSlot element = PartSlot(slot, TextSlotPart::Element);
+        if (field.value.kind == ValueKind::Array) {
+            TextValue cleared(state.allocator);
+            cleared.shape = TextValueShape::List;
+            result = Assign(AssignmentKind::Set, slot, value, &cleared);
+        }
+
+        for (usize index = 0; result && index < value.Size() && !Stopped(); ++index) {
+            path.SetIndex(static_cast<uint32>(index));
+            result = InstancedAt(element, value.At(index));
             path.ClearSelector();
         }
 
@@ -421,10 +515,12 @@ Result<void> Importer::Entries(const TextSlot& slot, JsonValue value) noexcept {
     const TextScalarType valueType = SlotValueType(slot);
     const TextSlot entrySlot = PartSlot(slot, TextSlotPart::MapValue);
     const bool structValue = field.element.kind == ValueKind::Struct;
+    // InstancedStruct 값(리플렉션 B9j)은 항목마다 통째 교체다(MergeByKey여도 그 항목은 교체).
+    const bool instancedValue = field.element.kind == ValueKind::InstancedStruct;
     const bool merge = Context().Options().mapMerge == MapMergeMode::MergeByKey;
     // 통째 교체: struct 값 Map은 비운 뒤 항목마다 펼치고, 단일 값 Map은 항목 목록 대입 하나다.
     TextValue entries(state.allocator);
-    if (structValue && !merge) {
+    if ((structValue || instancedValue) && !merge) {
         entries.shape = TextValueShape::Entries;
         result = Assign(AssignmentKind::Set, slot, value, &entries);
     }
@@ -460,13 +556,15 @@ Result<void> Importer::Entries(const TextSlot& slot, JsonValue value) noexcept {
             continue;
         }
 
-        if (structValue || merge) {
+        if (structValue || instancedValue || merge) {
             result = path.SetKey(state.options.names, state.allocator, key);
             if (!result) {
                 break;
             }
 
-            if (!structValue) {
+            if (instancedValue) {
+                result = InstancedAt(entrySlot, item);
+            } else if (!structValue) {
                 result = ScalarAt(entrySlot, item);
             } else if (merge) {
                 // 있던 항목은 멤버 병합, 없던 항목은 기본값 뒤 멤버 병합이다. 있는지는 준비
@@ -515,7 +613,7 @@ Result<void> Importer::Entries(const TextSlot& slot, JsonValue value) noexcept {
         return Result<void>::Success();
     }
 
-    if (structValue || merge || Stopped()) {
+    if (structValue || instancedValue || merge || Stopped()) {
         return Result<void>::Success();
     }
 

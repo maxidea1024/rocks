@@ -318,6 +318,7 @@ inline Result<void> ReadValueWire(ArchiveReader& reader, FieldDecodeContext& con
     case ValueKind::Map:
     case ValueKind::Set:
     case ValueKind::StaticArray:
+    case ValueKind::InstancedStruct:
     case ValueKind::Opaque:
         break;
     }
@@ -652,6 +653,9 @@ bool MatchesSchema(const FieldSchema& field) noexcept {
     } else if constexpr (ReflectedEnumField<Member>::Supported ||
                          ReflectedStructField<Member>::Supported) {
         return field.value.type == GeneratedType<Member>::Id();
+    } else if constexpr (InstancedStructField<Member>::Supported) {
+        // InstancedStruct<>(리플렉션 B9j)는 Base 제한이 없다(value.type 0 — Base는 B9k).
+        return field.value.type == TypeId{};
     } else {
         return true;
     }
