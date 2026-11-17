@@ -22,7 +22,8 @@ public:
 };
 
 // sink 하나의 기록 필터다. level이 minimum 이상이고 카테고리가 category 접두사 아래면 통과한다.
-// category 기본값(빈 접두사)은 모든 카테고리를 통과시킨다. category를 LogCategory에서 만들면 이름이
+// Fatal은 카테고리 조건과 무관하게 늘 통과한다(어떤 필터도 Fatal을 막지 않는다). category
+// 기본값(빈 접두사)은 모든 카테고리를 통과시킨다. category를 LogCategory에서 만들면 이름이
 // 정적 저장소라 등록 수명 제약이 없다. 직접 채운 접두사는 등록된 동안 이름 저장소가 살아 있어야
 // 한다.
 //
@@ -56,8 +57,8 @@ public:
     // 기록 한 건을 필터를 통과한 sink에 등록 순서대로 넘긴다. sink가 받는 LogEvent에는 level·
     // category 이름·message·where·호출 스레드 id·단조 시각(ns)이 들어간다.
     // - message: 유효한 UTF-8이어야 한다(embedded NUL 허용). 아니면 InvalidArgument.
-    // - level: 정의된 LogLevel이어야 한다. 아니면 InvalidArgument. Fatal도 일반 기록처럼 넘기고
-    //   종료하지 않는다.
+    // - level: 정의된 LogLevel이어야 한다. 아니면 InvalidArgument. Fatal은 sink 필터의 카테고리
+    //   조건을 무시하고 모든 sink에 넘기며, 기록만 하고 종료하지 않는다.
     // - where: 기본 인자가 호출 지점의 파일·함수·줄을 담는다. 보통 넘기지 않는다.
     // 필터를 통과한 sink가 하나도 없어도 성공이다. 한 sink가 실패해도 나머지는 호출하며 하나라도
     // 실패하면 DependencyFailed를 반환한다. sink callback에서 Logger에 재진입하면 잠그기 전에
@@ -91,7 +92,8 @@ struct LogTextOutput {
 // 출력 정책을 주입하는 동기식 텍스트 sink다. 호출마다 prefix `[레벨][카테고리 이름] `, 원본 byte,
 // 줄바꿈을 순서대로 출력하고 flush한다(예: `[Warning][Graphics.D3D12] Device lost`). 부분 출력 뒤
 // 실패하면 되돌리지 않는다. 같은 인스턴스의 호출은 직렬화한다.
-// 잘못된 레벨, UTF-8이 아닌 message, MaxLogCategoryNameBytes를 넘는 category는 InvalidArgument다.
+// 잘못된 레벨, UTF-8이 아닌 message, 카테고리 이름 문법(ValidateLogCategoryName)을 어긴 category는
+// InvalidArgument다.
 class TextLogSink final : public RuntimeLogSink {
 public:
     explicit TextLogSink(LogTextOutput output) noexcept : output_(output) {

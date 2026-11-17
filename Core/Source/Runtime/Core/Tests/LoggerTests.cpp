@@ -42,6 +42,7 @@ struct CaptureSink final : RuntimeLogSink {
         for (usize index = 0; index < lastCategoryBytes && index < sizeof(lastCategory); ++index) {
             lastCategory[index] = event.category.Data()[index];
         }
+
         lastLevel = event.level;
         lastThread = event.threadId;
         lastTime = event.monotonicNanoseconds;
@@ -355,8 +356,8 @@ CapturedCall CallFromSecondFunction() noexcept {
 
 constexpr bool PrefixHashesAreConsteval() noexcept {
     return LogGraphicsD3D12.PrefixCount() == 2 &&
-           LogGraphicsD3D12.PrefixHash(0) == HashStringBytes("Graphics") &&
-           LogGraphicsD3D12.PrefixHash(1) == HashStringBytes("Graphics.D3D12") &&
+           LogGraphicsD3D12.PrefixHash(0) == HashLogCategoryName("Graphics") &&
+           LogGraphicsD3D12.PrefixHash(1) == HashLogCategoryName("Graphics.D3D12") &&
            LogGraphicsD3D12.NameHash() == LogGraphicsD3D12.PrefixHash(1) &&
            LogGraphics.NameHash() == LogGraphicsD3D12.PrefixHash(0);
 }
@@ -373,23 +374,32 @@ TEST(LogCategoryPrefixHashesAndNames) {
     CHECK(LogGraphicsD3D12.Name() == "Graphics.D3D12");
     CHECK(LogGraphicsD3D12.PrefixName(0) == "Graphics");
     CHECK(LogGraphicsD3D12.PrefixName(1) == "Graphics.D3D12");
-    CHECK(LogGraphicsD3D12.PrefixName(2).IsEmpty() && LogGraphicsD3D12.PrefixHash(2) == 0);
+    CHECK(LogGraphicsD3D12.PrefixName(2).IsEmpty() &&
+          LogGraphicsD3D12.PrefixHash(2) == InvalidLogCategoryHash);
     CHECK(LogGraphics.PrefixCount() == 1 && LogGraphics.Name() == "Graphics");
 
     // consteval로 미리 계산한 해시가 런타임 문자열 해시와 같아야 후속 재정의 표(런타임 이름)와
     // 맞물린다. 상수 접기를 피하려고 런타임 버퍼에서 해시한다.
     char runtimeName[] = "Graphics.D3D12";
-    CHECK(HashStringBytes(StringView(runtimeName, sizeof("Graphics") - 1)) ==
+    CHECK(HashLogCategoryName(StringView(runtimeName, sizeof("Graphics") - 1)) ==
           LogGraphicsD3D12.PrefixHash(0));
-    CHECK(HashStringBytes(StringView(runtimeName, sizeof(runtimeName) - 1)) ==
+    CHECK(HashLogCategoryName(StringView(runtimeName, sizeof(runtimeName) - 1)) ==
           LogGraphicsD3D12.NameHash());
+    // 설정 값은 대소문자를 무시하고 맞춘다(설계 6.2절). 표기만 다른 런타임 이름도 같은 해시다.
+    char upperName[] = "GRAPHICS";
+    char lowerName[] = "graphics.d3d12";
+    CHECK(HashLogCategoryName(StringView(upperName, sizeof(upperName) - 1)) ==
+          LogGraphicsD3D12.PrefixHash(0));
+    CHECK(HashLogCategoryName(StringView(lowerName, sizeof(lowerName) - 1)) ==
+          LogGraphicsD3D12.NameHash());
+    CHECK(HashLogCategoryName("Audio") != LogGraphics.NameHash());
 
     const char* const deepestPrefixes[] = {
         "A",         "A.B",         "A.B.C",         "A.B.C.D",
         "A.B.C.D.E", "A.B.C.D.E.F", "A.B.C.D.E.F.G", "A.B.C.D.E.F.G.H"};
     for (usize index = 0; index < MaxLogCategoryDepth; ++index) {
         CHECK(LogDeepest.PrefixName(index) == deepestPrefixes[index]);
-        CHECK(LogDeepest.PrefixHash(index) == HashStringBytes(deepestPrefixes[index]));
+        CHECK(LogDeepest.PrefixHash(index) == HashLogCategoryName(deepestPrefixes[index]));
     }
 
     CHECK(LogLongest.PrefixCount() == 1 &&
@@ -431,6 +441,32 @@ TEST(LogCategoryPrefixMatching) {
     CHECK(!wrongHash.Matches(LogGraphics));
     // 접두사가 카테고리보다 깊으면 일치하지 않는다.
     CHECK(!LogCategoryPrefix(LogDeepest).Matches(LogGraphics));
+
+    // 설정에서 온 소문자 접두사도 일치한다(해시·이름 비교 모두 ASCII 대소문자 무시).
+    LogCategoryPrefix configured;
+    configured.name = "graphics";
+    configured.hash = HashLogCategoryName("graphics");
+    configured.depth = 1;
+    CHECK(configured.Matches(LogGraphics) && configured.Matches(LogGraphicsD3D12));
+    CHECK(!configured.Matches(LogGraphicsX) && !configured.Matches(LogAudio));
+}
+
+TEST(LogCategoryNameValidation) {
+    CHECK(ValidateLogCategoryName("Graphics.D3D12") == LogCategoryNameError::None);
+    CHECK(ValidateLogCategoryName("") == LogCategoryNameError::EmptyName);
+    CHECK(ValidateLogCategoryName(".A") == LogCategoryNameError::EmptySegment);
+    CHECK(ValidateLogCategoryName("A.") == LogCategoryNameError::EmptySegment);
+    CHECK(ValidateLogCategoryName("A..B") == LogCategoryNameError::EmptySegment);
+    CHECK(ValidateLogCategoryName("A-B") == LogCategoryNameError::InvalidCharacter);
+    CHECK(ValidateLogCategoryName("A\nB") == LogCategoryNameError::InvalidCharacter);
+    CHECK(ValidateLogCategoryName("A.B.C.D.E.F.G.H.I") == LogCategoryNameError::TooManySegments);
+    char tooLong[MaxLogCategoryNameBytes + 2]{};
+    for (usize index = 0; index + 1 < sizeof(tooLong); ++index) {
+        tooLong[index] = 'L';
+    }
+
+    CHECK(ValidateLogCategoryName(tooLong) == LogCategoryNameError::NameTooLong);
+    CHECK(ValidateLogCategoryName(LogLongest.Name()) == LogCategoryNameError::None);
 }
 
 TEST(RuntimeLoggerFiltersByCategoryPrefix) {
@@ -459,6 +495,49 @@ TEST(RuntimeLoggerFiltersByCategoryPrefix) {
     CHECK(logger.Remove(graphics).IsOk());
     CHECK(logger.Remove(d3d12).IsOk());
     CHECK(logger.Remove(forged).IsOk());
+}
+
+// 어떤 필터도 Fatal을 막지 않는다(설계 7절). 카테고리 접두사가 다른 sink도 Fatal은 받는다.
+TEST(RuntimeLoggerFatalBypassesCategoryFilter) {
+    Logger logger;
+    CaptureSink audioOnly;
+    REQUIRE(logger.Add(audioOnly, {LogLevel::Trace, LogAudio}).IsOk());
+    CHECK(logger.Write(LogLevel::Error, LogGraphics, "blocked").IsOk());
+    CHECK(audioOnly.count == 0);
+    CHECK(logger.Write(LogLevel::Fatal, LogGraphics, "fatal").IsOk());
+    CHECK(audioOnly.count == 1 && audioOnly.lastLevel == LogLevel::Fatal &&
+          audioOnly.LastCategory() == "Graphics");
+    CHECK(logger.Remove(audioOnly).IsOk());
+}
+
+// TextLogSink는 손으로 만든 LogEvent의 카테고리도 문법으로 검사한다. 줄바꿈을 넣어 가짜 기록 줄을
+// 만들거나 접두사 버퍼를 넘기는 이름은 출력 전에 거부한다.
+TEST(TextLogSinkRejectsInvalidCategoryNames) {
+    TextCapture output;
+    TextLogSink sink({&output, TextCapture::Write, TextCapture::Flush});
+    LogEvent event;
+    event.level = LogLevel::Info;
+    event.message = "m";
+
+    char tooLong[MaxLogCategoryNameBytes + 1]{};
+    for (usize index = 0; index < sizeof(tooLong); ++index) {
+        tooLong[index] = 'L';
+    }
+
+    event.category = StringView(tooLong, sizeof(tooLong));
+    CHECK(sink.Write(event).Error() == ErrorCode::InvalidArgument);
+    event.category = "Tests\n[Error][Forged] injected";
+    CHECK(sink.Write(event).Error() == ErrorCode::InvalidArgument);
+    const char invalidUtf8[] = {'T', static_cast<char>(0xff)};
+    event.category = StringView(invalidUtf8, sizeof(invalidUtf8));
+    CHECK(sink.Write(event).Error() == ErrorCode::InvalidArgument);
+    event.category = StringView();
+    CHECK(sink.Write(event).Error() == ErrorCode::InvalidArgument);
+    CHECK(output.count == 0 && output.writes == 0);
+
+    event.category = StringView(tooLong, MaxLogCategoryNameBytes);
+    CHECK(sink.Write(event).IsOk());
+    CHECK(output.count == sizeof("[Info][] m\n") - 1 + MaxLogCategoryNameBytes);
 }
 
 TEST(SourceLocationCapturesCaller) {

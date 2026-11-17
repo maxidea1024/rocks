@@ -92,10 +92,13 @@ Result<void> Logger::Write(LogLevel level, const LogCategory& category, StringVi
     bool failed = false;
     for (usize index = 0; index < count_; ++index) {
         const Slot& slot = sinks_[index];
+        // Fatal은 어떤 필터로도 막지 않는다(설계 7절). 레벨 하한은 Fatal이 가장 크므로 늘 통과하고,
+        // 카테고리 조건만 건너뛰면 된다.
         if (static_cast<uint8>(level) < static_cast<uint8>(slot.filter.minimum) ||
-            !slot.filter.category.Matches(category)) {
+            (level != LogLevel::Fatal && !slot.filter.category.Matches(category))) {
             continue;
         }
+
         CallbackGuard guard;
         if (!slot.sink->Write(event).IsOk()) {
             failed = true;
@@ -109,11 +112,15 @@ Result<void> TextLogSink::Write(const LogEvent& event) noexcept {
     static constexpr usize LongestLevelNameBytes = sizeof("Warning") - 1;
     static_assert(sizeof(names) / sizeof(names[0]) == LogLevelCount,
                   "every LogLevel needs a text name");
-    if (!IsValidLogLevel(event.level) || event.category.ByteCount() > MaxLogCategoryNameBytes ||
+    // 카테고리도 문법(ASCII 영숫자·점, 길이 상한)을 검사한다. 손으로 만든 LogEvent가 줄바꿈 등을
+    // 넣어 다른 기록처럼 보이는 줄을 만들지 못하게 한다.
+    if (!IsValidLogLevel(event.level) ||
+        ValidateLogCategoryName(event.category) != LogCategoryNameError::None ||
         !event.message.ValidateUtf8().IsOk() || output_.write == nullptr ||
         output_.flush == nullptr) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     platform::LockGuard lock(mutex_);
     // "[" 레벨 "][" 카테고리 "] "를 한 번의 write로 내기 위해 고정 버퍼에 모은다. 레벨 이름은
     // LongestLevelNameBytes, 카테고리는 MaxLogCategoryNameBytes 이하라 넘치지 않는다.
@@ -124,6 +131,7 @@ Result<void> TextLogSink::Write(const LogEvent& event) noexcept {
             prefix[count++] = text.Data()[index];
         }
     };
+
     append("[");
     append(names[static_cast<uint8>(event.level)]);
     append("][");
@@ -134,6 +142,7 @@ Result<void> TextLogSink::Write(const LogEvent& event) noexcept {
         !output_.write(output_.context, "\n").IsOk() || !output_.flush(output_.context).IsOk()) {
         return Result<void>::Failure(ErrorCode::DependencyFailed);
     }
+
     return Result<void>::Success();
 }
 

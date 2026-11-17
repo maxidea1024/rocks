@@ -169,6 +169,30 @@ private:
     usize bytes_ = 0;
 };
 
+// ASCII 대소문자만 무시한 byte 같음이다(A–Z와 a–z만 접는다. 그 밖의 byte는 정확히 비교한다).
+// HashStringBytesIgnoringAsciiCase(Core/Hash.h)와 짝이 맞는 같음이며, constexpr이라 컴파일 타임
+// 비교에도 쓴다.
+//
+// 사용 예:
+//   static_assert(EqualsIgnoringAsciiCase("Graphics", "GRAPHICS"));
+constexpr bool EqualsIgnoringAsciiCase(StringView left, StringView right) noexcept {
+    if (left.ByteCount() != right.ByteCount()) {
+        return false;
+    }
+
+    for (usize index = 0; index < left.ByteCount(); ++index) {
+        char a = left.Data()[index];
+        char b = right.Data()[index];
+        a = a >= 'A' && a <= 'Z' ? static_cast<char>(a + ('a' - 'A')) : a;
+        b = b >= 'A' && b <= 'Z' ? static_cast<char>(b + ('a' - 'A')) : b;
+        if (a != b) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 // 검증된 UTF-8 view의 code point를 char32_t로 순회하는 range다. StringView::TryCodePoints로 만든다.
 //   auto points = view.TryCodePoints();
 //   if (points) { for (char32_t point : points.Value()) { ... } }
