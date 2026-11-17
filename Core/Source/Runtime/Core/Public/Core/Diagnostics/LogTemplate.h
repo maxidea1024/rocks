@@ -51,7 +51,9 @@ enum class LogTemplateError : uint8 {
     // 템플릿이 유효한 UTF-8이 아니다
     InvalidUtf8,
     // 인자가 MaxLogArguments보다 많다
-    TooManyArguments
+    TooManyArguments,
+    // 사용자 Formatter 인자 하나를 서로 다른 spec으로 썼다(Formatter는 캡처 때 한 번만 렌더한다)
+    ConflictingFormatterSpec
 };
 
 // 오류 종류의 영어 이름이다(None은 "None").
@@ -81,6 +83,8 @@ constexpr StringView LogTemplateErrorName(LogTemplateError error) noexcept {
         return "InvalidUtf8";
     case LogTemplateError::TooManyArguments:
         return "TooManyArguments";
+    case LogTemplateError::ConflictingFormatterSpec:
+        return "ConflictingFormatterSpec";
     }
 
     return "Unknown";
@@ -126,6 +130,16 @@ inline void LogTemplateError_TooManyArguments() noexcept {
 inline void LogTemplateError_NotNullTerminated() noexcept {
 }
 
+inline void LogTemplateError_ConflictingFormatterSpec() noexcept {
+}
+
+// 인자 하나의 spec이 템플릿 원문 어디에 있는지다(사용자 Formatter 인자의 캡처용). LogTemplate의
+// consteval 생성자가 미리 계산하므로 생산자는 템플릿을 다시 해석하지 않는다.
+struct LogArgumentSpec {
+    uint32 offset = 0;
+    uint32 bytes = 0;
+};
+
 // 로그 인자 타입의 서식 종류다. 서식과 같되, Formatter가 없는 enum은 바탕 정수로 본다(캡처는 원시
 // 값을 담는다).
 template <typename T>
@@ -140,8 +154,8 @@ consteval FormatArgKind LogArgKindOf() noexcept {
 
 // 템플릿을 해석한 결과다. 렌더(속성 이름)와 캡처(사용자 Formatter의 spec)가 쓴다.
 // - named: 이름 자리 템플릿인지. names[i]는 i번째 인자의 이름(이름 자리일 때만)
-// - specs[i]·hasSpec[i]: i번째 인자를 처음 쓴 자리의 spec(사용자 Formatter는 이 spec으로 한 번만
-//   렌더한다)
+// - specs[i]·hasSpec[i]: i번째 인자를 처음 쓴 자리의 spec
+//   사용자 Formatter 인자는 모든 자리의 spec이 같아야 한다(ConflictingFormatterSpec).
 // view는 모두 템플릿 원문을 빌린다.
 struct LogTemplateLayout {
     bool named = false;
@@ -225,6 +239,11 @@ constexpr LogTemplateError AnalyzeLogTemplate(StringView text, const FormatArgKi
             layout.referenced[argument] = true;
             layout.specs[argument] = token.spec;
             layout.hasSpec[argument] = token.hasSpec;
+        } else if (kinds[argument] == FormatArgKind::Custom &&
+                   (layout.hasSpec[argument] != token.hasSpec ||
+                    !(layout.specs[argument] == token.spec))) {
+            // Formatter는 캡처 때 한 번만 렌더하므로 자리마다 다른 spec을 적용할 수 없다.
+            return LogTemplateError::ConflictingFormatterSpec;
         }
     }
 
@@ -285,6 +304,9 @@ constexpr void ReportLogTemplateError(LogTemplateError error) noexcept {
     case LogTemplateError::TooManyArguments:
         LogTemplateError_TooManyArguments();
         break;
+    case LogTemplateError::ConflictingFormatterSpec:
+        LogTemplateError_ConflictingFormatterSpec();
+        break;
     }
 }
 
@@ -297,7 +319,8 @@ constexpr void ReportLogTemplateError(LogTemplateError error) noexcept {
 // 실제 인자에서만 추론된다. 생성자의 기본 인자 SourceLocation::Current()는 호출 지점에서 평가되므로
 // 로그 함수를 부른 곳의 위치가 남는다.
 //
-// 값: 템플릿 원문(정적 저장소), EventId(원문의 HashStringBytes, 컴파일 타임 계산), 호출 위치.
+// 값: 템플릿 원문(정적 저장소), EventId(원문의 HashStringBytes, 컴파일 타임 계산), 호출 위치,
+// 인자마다 처음 쓴 자리의 spec 위치(사용자 Formatter 인자의 캡처가 쓴다).
 // 수명: 원문과 위치 문자열은 정적 저장소라 프로그램 수명 동안 유효하다.
 //
 // 사용 예:
@@ -326,6 +349,10 @@ public:
         detail::LogTemplateLayout layout{};
         detail::ReportLogTemplateError(detail::AnalyzeLogTemplate(StringView(text, Count - 1),
                                                                   kinds, sizeof...(Args), layout));
+        for (usize index = 0; index < sizeof...(Args); ++index) {
+            specs_[index].offset = static_cast<uint32>(layout.specs[index].Data() - text);
+            specs_[index].bytes = static_cast<uint32>(layout.specs[index].ByteCount());
+        }
     }
 
     // 템플릿 원문이다(끝 NUL 제외).
@@ -344,11 +371,18 @@ public:
         return location_;
     }
 
+    // 인자마다 처음 쓴 자리의 spec 위치다(원문 기준 offset·길이). sizeof...(Args)개다.
+    constexpr const detail::LogArgumentSpec* ArgumentSpecs() const noexcept {
+        return specs_;
+    }
+
 private:
     const char* text_;
     usize bytes_;
     uint64 eventId_;
     SourceLocation location_;
+    // 인자가 없을 때 길이 0 배열을 피하려고 최소 하나를 둔다.
+    detail::LogArgumentSpec specs_[sizeof...(Args) == 0 ? 1 : sizeof...(Args)]{};
 };
 
 // 실행 중에 정한 메시지 템플릿이다(설정 파일·스크립트에서 온 문자열 등). 명시적으로 만든다.

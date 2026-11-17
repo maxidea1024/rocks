@@ -29,6 +29,19 @@ enum class Offset : int16 {
     Back = -3
 };
 
+// Formatter가 불린 횟수를 센다(캡처가 Formatter를 한 번만 부르는지 확인).
+struct Counted {
+    usize count = 0;
+};
+
+thread_local uint32 countedCalls = 0;
+
+// Formatter 안에서 TryReserve를 부른다(잘림 모드 builder에서 실패하지 않아야 한다).
+struct Reserving {};
+
+// spec을 그대로 "[spec]"으로 낸다(미리 계산한 spec 위치 확인).
+struct EchoSpec {};
+
 } // namespace
 
 namespace rocks {
@@ -59,6 +72,46 @@ struct Formatter<Wide> {
         return out.TryAppendRepeated('x', value.count);
     }
 };
+
+template <>
+struct Formatter<Counted> {
+    static Result<void> Format(StringBuilderBase& out, const Counted& value, StringView) noexcept {
+        ++countedCalls;
+        return out.TryAppendRepeated('c', value.count);
+    }
+};
+
+template <>
+struct Formatter<Reserving> {
+    static Result<void> Format(StringBuilderBase& out, const Reserving&, StringView) noexcept {
+        auto reserved = out.TryReserve(4096);
+        if (!reserved) {
+            return reserved;
+        }
+
+        return out.TryAppend("reserved");
+    }
+};
+
+template <>
+struct Formatter<EchoSpec> {
+    static Result<void> Format(StringBuilderBase& out, const EchoSpec&, StringView spec) noexcept {
+        auto result = out.TryAppendAscii('[');
+        if (result) {
+            result = out.TryAppend(spec);
+        }
+
+        if (result) {
+            result = out.TryAppendAscii(']');
+        }
+
+        return result;
+    }
+};
+
+namespace test {
+uint64 OperatorNewCallsOnThisThread() noexcept;
+} // namespace test
 
 namespace test {
 uint32 CaptureLogFromProbeUnit(Span<uint8> buffer) noexcept;
@@ -113,6 +166,11 @@ static_assert(Analyze("{A:>8.3}", Texts, 1) == LogTemplateError::None);
 static_assert(Analyze("{A:+}", Texts, 1) == LogTemplateError::InvalidSpec);
 // 사용자 Formatter의 spec은 컴파일 타임에 보지 않는다(부분 검증).
 static_assert(Analyze("{A:anything}", Customs, 1) == LogTemplateError::None);
+// 사용자 Formatter 인자는 캡처 때 한 번만 렌더하므로 자리마다 spec이 같아야 한다.
+static_assert(Analyze("{0:x} {0:x}", Customs, 1) == LogTemplateError::None);
+static_assert(Analyze("{0} {0:x}", Customs, 1) == LogTemplateError::ConflictingFormatterSpec);
+static_assert(Analyze("{0:x} {0:y}", Customs, 1) == LogTemplateError::ConflictingFormatterSpec);
+static_assert(Analyze("{0:.1f} {0:.2f}", Doubles, 1) == LogTemplateError::None);
 static_assert(Analyze("{A}", Ints, MaxLogArguments + 1) == LogTemplateError::TooManyArguments);
 static_assert(Analyze(StringView("\xff{A}", 4), Ints, 1) == LogTemplateError::InvalidUtf8);
 
@@ -146,6 +204,10 @@ public:
         return false;
     }
 
+    usize BlockBytes() const noexcept override {
+        return Bytes;
+    }
+
     Span<const uint8> Resolve(uint32 index) const noexcept override {
         if (index >= Count || !used[index]) {
             return Span<const uint8>();
@@ -164,6 +226,34 @@ public:
     uint8 storage[Count][Bytes]{};
     bool used[Count]{};
     uint32 limit = Count;
+    uint32 borrowed = 0;
+    uint32 released = 0;
+};
+
+// 계약을 어기고 BlockBytes보다 훨씬 작은(1 byte) 블록을 주는 provider다. 캡처는 그 블록을 돌려주고
+// 블록 없이 진행해야 한다(Fatal로 가면 안 된다).
+class TinyBlocks final : public LogBlockProvider {
+public:
+    usize BlockBytes() const noexcept override {
+        return 256;
+    }
+
+    bool TryBorrow(LogBlock& block) noexcept override {
+        ++borrowed;
+        block.index = 0;
+        block.bytes = Span<uint8>(storage, 1);
+        return true;
+    }
+
+    Span<const uint8> Resolve(uint32) const noexcept override {
+        return Span<const uint8>(storage, 1);
+    }
+
+    void Release(uint32) noexcept override {
+        ++released;
+    }
+
+    uint8 storage[1]{};
     uint32 borrowed = 0;
     uint32 released = 0;
 };
@@ -471,12 +561,257 @@ TEST(LogRenderTruncatesMessageAndRejectsCorruptCaptures) {
               .Error() == ErrorCode::InvalidArgument);
 }
 
-// 캡처·렌더는 힙을 쓰지 않는다. FixedStringBuilder의 allocator는 모든 요청을 거절하고 센다. 큰 값·
-// 잘림·Formatter·런타임 템플릿 경로를 모두 지나도 요청이 0회여야 한다.
+namespace {
+
+// 캡처 머리·값 칸을 고쳐 손상을 만든다(화이트 박스). 값 칸의 flags 1은 "블록에 있음"이다.
+constexpr uint8 ValueInBlockFlag = 1;
+
+struct CorruptCapture {
+    uint8 bytes[512]{};
+    usize size = 0;
+
+    detail::LogCaptureHeader Header() const noexcept {
+        detail::LogCaptureHeader header;
+        platform::MemoryCopy(&header, bytes, sizeof(header));
+        return header;
+    }
+
+    void SetHeader(const detail::LogCaptureHeader& header) noexcept {
+        platform::MemoryCopy(bytes, &header, sizeof(header));
+    }
+
+    detail::LogCaptureValue Value(usize index) const noexcept {
+        detail::LogCaptureValue value;
+        platform::MemoryCopy(&value,
+                             bytes + sizeof(detail::LogCaptureHeader) +
+                                 index * sizeof(detail::LogCaptureValue),
+                             sizeof(value));
+        return value;
+    }
+
+    void SetValue(usize index, const detail::LogCaptureValue& value) noexcept {
+        platform::MemoryCopy(bytes + sizeof(detail::LogCaptureHeader) +
+                                 index * sizeof(detail::LogCaptureValue),
+                             &value, sizeof(value));
+    }
+
+    ErrorCode Render(const LogBlockProvider* blocks = nullptr) const noexcept {
+        Rendered rendered;
+        return rendered.From(Span<const uint8>(bytes, size), blocks).Error();
+    }
+};
+
+CorruptCapture MakeValidCapture() noexcept {
+    CorruptCapture capture;
+    const auto captured = CaptureLog({Span<uint8>(capture.bytes)}, LogLevel::Info, LogTests,
+                                     "{Text} {Number}", "text", 7);
+    capture.size = captured.IsOk() ? captured.Value() : 0;
+    return capture;
+}
+
+} // namespace
+
+TEST(LogRenderRejectsCorruptHeaderAndValueCells) {
+    REQUIRE(MakeValidCapture().Render() == ErrorCode::None);
+
+    CorruptCapture capture = MakeValidCapture();
+    detail::LogCaptureValue text = capture.Value(0);
+    text.payload = capture.size; // 텍스트 시작이 캡처 끝
+    text.bytes = 1;
+    capture.SetValue(0, text);
+    CHECK(capture.Render() == ErrorCode::InvalidArgument);
+
+    capture = MakeValidCapture();
+    text = capture.Value(0);
+    text.bytes = 1000; // 길이가 캡처를 넘는다
+    capture.SetValue(0, text);
+    CHECK(capture.Render() == ErrorCode::InvalidArgument);
+
+    capture = MakeValidCapture();
+    detail::LogCaptureHeader header = capture.Header();
+    header.valueCount = static_cast<uint16>(MaxLogArguments + 1);
+    capture.SetHeader(header);
+    CHECK(capture.Render() == ErrorCode::InvalidArgument);
+
+    capture = MakeValidCapture();
+    detail::LogCaptureValue number = capture.Value(1);
+    number.kind = static_cast<uint8>(detail::FormatArgKind::Custom) + 1;
+    capture.SetValue(1, number);
+    CHECK(capture.Render() == ErrorCode::InvalidArgument);
+
+    capture = MakeValidCapture();
+    header = capture.Header();
+    header.level = static_cast<uint8>(LogLevelCount);
+    capture.SetHeader(header);
+    CHECK(capture.Render() == ErrorCode::InvalidArgument);
+
+    capture = MakeValidCapture();
+    header = capture.Header();
+    header.categoryBytes = static_cast<uint8>(MaxLogCategoryNameBytes + 1);
+    capture.SetHeader(header);
+    CHECK(capture.Render() == ErrorCode::InvalidArgument);
+
+    // 블록에 있다고 표시한 값의 블록을 provider가 모른다(빌려 준 적 없는 index).
+    capture = MakeValidCapture();
+    text = capture.Value(0);
+    text.flags = ValueInBlockFlag;
+    text.payload = 1;
+    capture.SetValue(0, text);
+    TestBlocks blocks;
+    CHECK(capture.Render(&blocks) == ErrorCode::InvalidArgument);
+    CHECK(capture.Render() == ErrorCode::InvalidArgument);
+}
+
+// 런타임 템플릿이 캡처 때 잘렸으면 해석하지 않는다(잘린 "{A"를 짝 없는 중괄호로 오판하지 않는다).
+TEST(LogRenderTruncatedRuntimeTemplateIsNotATemplateError) {
+    uint8 slot[LogCaptureMinimumBytes(1) + 8];
+    const auto captured = CaptureLog({Span<uint8>(slot)}, LogLevel::Info, LogTests,
+                                     RuntimeTemplate{StringView("value {A} and more")}, 1);
+    REQUIRE(captured.IsOk());
+    Rendered rendered;
+    REQUIRE(rendered.From(Span<const uint8>(slot, captured.Value())).IsOk());
+    CHECK(rendered.event.message == "value {A");
+    CHECK(HasFlag(rendered.event, LogEventFlags::MessageTruncated));
+    CHECK(HasFlag(rendered.event, LogEventFlags::ValueTruncated));
+    CHECK(!HasFlag(rendered.event, LogEventFlags::TemplateError));
+    CHECK(rendered.event.properties.Size() == 1 &&
+          rendered.event.properties.Data()[0].name == "Arg0");
+}
+
+// 메시지 영역이 모자라도 오류 표기는 남고 원본이 잘린다.
+TEST(LogRenderTemplateErrorKeepsSuffixWhenMessageIsFull) {
+    uint8 slot[512];
+    const auto captured = CaptureLog({Span<uint8>(slot)}, LogLevel::Info, LogTests,
+                                     RuntimeTemplate{StringView("a long template {A} {B}")}, 1);
+    REQUIRE(captured.IsOk());
+    char message[48];
+    char texts[16];
+    LogProperty properties[1];
+    LogEvent event;
+    REQUIRE(RenderLogCapture(
+                Span<const uint8>(slot, captured.Value()), nullptr,
+                {Span<char>(message), Span<char>(texts), Span<LogProperty>(properties)}, event)
+                .IsOk());
+    CHECK(event.message.EndsWith(" [template error: ArgumentCountMismatch]",
+                                 StringComparison::CaseSensitive));
+    CHECK(event.message.StartsWith("a long", StringComparison::CaseSensitive));
+    CHECK(HasFlag(event, LogEventFlags::TemplateError));
+    CHECK(HasFlag(event, LogEventFlags::MessageTruncated));
+}
+
+// 캡처는 카테고리 객체가 아니라 이름(정적 문자열)을 담는다. 함수 지역 constexpr 카테고리도 렌더 때
+// 유효하다(설계 8.3절).
+usize CaptureWithLocalCategory(Span<uint8> buffer) noexcept {
+    constexpr LogCategory LogLocal{"Tests.Local"};
+    const auto captured = CaptureLog({buffer}, LogLevel::Info, LogLocal, "local {Value}", 3);
+    return captured.IsOk() ? captured.Value() : 0;
+}
+
+TEST(LogCaptureKeepsCategoryNameNotObject) {
+    uint8 slot[256];
+    const usize used = CaptureWithLocalCategory(Span<uint8>(slot));
+    REQUIRE(used != 0);
+    Rendered rendered;
+    REQUIRE(rendered.From(Span<const uint8>(slot, used)).IsOk());
+    CHECK(rendered.event.category == "Tests.Local" && rendered.event.message == "local 3");
+}
+
+// Formatter는 한 번만 부른다. 남은 영역이 블록보다 작으면 블록에 먼저 렌더하고, 결과가 남은 영역에
+// 들어가면 옮긴 뒤 블록을 돌려준다.
+TEST(LogCaptureCallsFormatterOnce) {
+    TestBlocks blocks;
+    uint8 slot[LogCaptureMinimumBytes(1) + 64];
+    countedCalls = 0;
+    const auto fits =
+        CaptureLog({Span<uint8>(slot), &blocks}, LogLevel::Info, LogTests, "{C}", Counted{40});
+    REQUIRE(fits.IsOk());
+    CHECK(countedCalls == 1);
+    CHECK(blocks.borrowed == 1 && blocks.released == 1);
+    Rendered small;
+    REQUIRE(small.From(Span<const uint8>(slot, fits.Value()), &blocks).IsOk());
+    CHECK(small.event.message.ByteCount() == 40);
+
+    countedCalls = 0;
+    const auto large =
+        CaptureLog({Span<uint8>(slot), &blocks}, LogLevel::Info, LogTests, "{C}", Counted{200});
+    REQUIRE(large.IsOk());
+    CHECK(countedCalls == 1);
+    Rendered big;
+    REQUIRE(big.From(Span<const uint8>(slot, large.Value()), &blocks).IsOk());
+    CHECK(big.event.message.ByteCount() == 200 &&
+          !HasFlag(big.event, LogEventFlags::ValueTruncated));
+    ReleaseLogCaptureBlocks(Span<const uint8>(slot, large.Value()), blocks);
+    CHECK(blocks.borrowed == blocks.released);
+
+    // 블록이 계약보다 작으면 돌려주고 남은 영역에 렌더한다(Fatal로 가지 않는다).
+    TinyBlocks tiny;
+    countedCalls = 0;
+    const auto tinyResult =
+        CaptureLog({Span<uint8>(slot), &tiny}, LogLevel::Info, LogTests, "{C}", Counted{100});
+    REQUIRE(tinyResult.IsOk());
+    CHECK(countedCalls == 1 && tiny.borrowed == 1 && tiny.released == 1);
+    Rendered fallback;
+    REQUIRE(fallback.From(Span<const uint8>(slot, tinyResult.Value())).IsOk());
+    CHECK(fallback.event.message.ByteCount() == 63);
+    CHECK(HasFlag(fallback.event, LogEventFlags::ValueTruncated));
+}
+
+// 리터럴 템플릿은 consteval로 계산한 spec 위치를, 런타임 템플릿은 캡처 때 찾은 spec을 Formatter에
+// 준다.
+TEST(LogCaptureGivesFormatterItsSpec) {
+    uint8 slot[256];
+    const auto literal = CaptureLog({Span<uint8>(slot)}, LogLevel::Info, LogTests,
+                                    "{0:abc} and {0:abc}", EchoSpec{});
+    REQUIRE(literal.IsOk());
+    Rendered first;
+    REQUIRE(first.From(Span<const uint8>(slot, literal.Value())).IsOk());
+    CHECK(first.event.message == "[abc] and [abc]");
+
+    const auto runtime = CaptureLog({Span<uint8>(slot)}, LogLevel::Info, LogTests,
+                                    RuntimeTemplate{StringView("{Value:xy}")}, EchoSpec{});
+    REQUIRE(runtime.IsOk());
+    Rendered second;
+    REQUIRE(second.From(Span<const uint8>(slot, runtime.Value())).IsOk());
+    CHECK(second.event.message == "[xy]");
+
+    // 런타임 템플릿에서 같은 Formatter 인자에 다른 spec을 쓰면 템플릿 오류다.
+    const auto conflict = CaptureLog({Span<uint8>(slot)}, LogLevel::Info, LogTests,
+                                     RuntimeTemplate{StringView("{0:a} {0:b}")}, EchoSpec{});
+    REQUIRE(conflict.IsOk());
+    Rendered third;
+    REQUIRE(third.From(Span<const uint8>(slot, conflict.Value())).IsOk());
+    CHECK(third.event.message == "{0:a} {0:b} [template error: ConflictingFormatterSpec]");
+}
+
+// 잘림 모드 builder의 TryReserve는 할당하지 않고 성공한다. Formatter가 불러도 실패하지 않는다.
+TEST(FixedStringBuilderTryReserveSucceedsWithoutAllocating) {
+    const uint64 attempts = detail::FixedStringBuilderAllocationAttempts();
+    char storage[6];
+    FixedStringBuilder text{Span<char>(storage)};
+    CHECK(text.TryReserve(100000).IsOk());
+    REQUIRE(text.TryAppendFormat("{}", Reserving{}).IsOk());
+    CHECK(text.View() == "reser" && text.Truncated());
+
+    uint8 slot[256];
+    const auto captured =
+        CaptureLog({Span<uint8>(slot)}, LogLevel::Info, LogTests, "{R}", Reserving{});
+    REQUIRE(captured.IsOk());
+    Rendered rendered;
+    REQUIRE(rendered.From(Span<const uint8>(slot, captured.Value())).IsOk());
+    CHECK(rendered.event.message == "reserved");
+    CHECK(detail::FixedStringBuilderAllocationAttempts() == attempts);
+}
+
+// 캡처·렌더는 힙을 쓰지 않는다. 두 가지 갈고리로 이 스레드의 할당 시도를 센다.
+// - FixedStringBuilder의 거절 allocator(스레드별 카운터): builder가 저장소를 늘리려 하면 센다.
+// - 이 시험 바이너리의 전역 operator new 대체(스레드별 카운터, OperatorNewCounter.cpp).
+// 큰 값·잘림·Formatter(TryReserve 포함)·런타임 템플릿 경로를 모두 지나도 둘 다 0회여야 한다.
+// 캡처·렌더 API는 Allocator를 받지 않으므로 Rocks allocator 경로는 구조상 없다.
 TEST(LogCaptureAndRenderDoNotAllocate) {
     const uint64 attempts = detail::FixedStringBuilderAllocationAttempts();
+    const uint64 news = test::OperatorNewCallsOnThisThread();
     TestBlocks blocks;
-    uint8 slot[LogCaptureMinimumBytes(4) + 16];
+    uint8 slot[LogCaptureMinimumBytes(5) + 16];
     char longText[300];
     for (usize index = 0; index < sizeof(longText) - 1; ++index) {
         longText[index] = 'q';
@@ -485,9 +820,9 @@ TEST(LogCaptureAndRenderDoNotAllocate) {
     longText[sizeof(longText) - 1] = '\0';
     for (uint32 round = 0; round < 3; ++round) {
         blocks.limit = round;
-        const auto captured =
-            CaptureLog({Span<uint8>(slot), &blocks}, LogLevel::Debug, LogTests,
-                       "{A} {B} {C} {D:.3e}", longText, Vector2i{3, 4}, Wide{400}, 2.5);
+        const auto captured = CaptureLog({Span<uint8>(slot), &blocks}, LogLevel::Debug, LogTests,
+                                         "{A} {B} {C} {D:.3e} {E}", longText, Vector2i{3, 4},
+                                         Wide{400}, 2.5, Reserving{});
         REQUIRE(captured.IsOk());
         Rendered rendered;
         REQUIRE(rendered.From(Span<const uint8>(slot, captured.Value()), &blocks).IsOk());
@@ -502,6 +837,7 @@ TEST(LogCaptureAndRenderDoNotAllocate) {
 
     CHECK(blocks.borrowed == blocks.released);
     CHECK(detail::FixedStringBuilderAllocationAttempts() == attempts);
+    CHECK(test::OperatorNewCallsOnThisThread() == news);
 }
 
 // 리터럴 템플릿의 기본 인자 SourceLocation::Current()는 CaptureLog를 부른 줄을 담는다. 두 번역

@@ -24,6 +24,8 @@ constexpr uint8 ValueTruncated = 1u << 1;
 constexpr uint8 ValueFormatError = 1u << 2;
 
 constexpr StringView FormatErrorText = "<format error>";
+constexpr StringView TemplateErrorPrefix = " [template error: ";
+constexpr StringView TemplateErrorSuffix = "]";
 
 static_assert(MaxLogArguments <= NumericLimits<uint16>::Max(), "value count is stored as uint16");
 
@@ -35,6 +37,10 @@ constexpr StringView PositionalPropertyNames[] = {
 static_assert(sizeof(PositionalPropertyNames) / sizeof(PositionalPropertyNames[0]) ==
                   MaxLogArguments,
               "every argument position needs a property name");
+
+Span<char> BlockChars(const LogBlock& block) noexcept {
+    return Span<char>(reinterpret_cast<char*>(block.bytes.Data()), block.bytes.Size());
+}
 
 // 캡처 한 건을 쓰는 동안의 상태다. 머리·값 칸 뒤의 남은 영역에 가변 데이터를 앞에서부터 쌓는다.
 class CaptureWriter {
@@ -74,56 +80,67 @@ public:
         MarkTruncated(value, true);
     }
 
-    // 사용자 Formatter 결과를 남은 영역에 렌더한다. 넘치면 블록을 빌려 다시 렌더한다.
+    // 사용자 Formatter 결과를 렌더한다. Formatter는 한 번만 부른다.
+    // - 남은 영역이 블록보다 작으면 블록에 먼저 렌더하고, 결과가 남은 영역에 들어가면 옮긴 뒤
+    // 블록을
+    //   돌려준다.
+    // - 블록이 없거나(provider 없음·고갈) 너무 작으면 남은 영역에 렌더한다(넘치면 잘림).
     void StoreCustom(const FormatArg& arg, StringView spec, LogCaptureValue& value) noexcept {
         value.kind = static_cast<uint8>(FormatArgKind::Custom);
-        bool inlineTruncated = true;
-        if (Remaining() >= 2) {
-            FixedStringBuilder text(Span<char>(InlineData(), Remaining()));
-            if (!arg.custom.format(text, arg.custom.object, spec)) {
-                value.flags |= ValueFormatError;
+        LogBlock block;
+        if (target_.blocks != nullptr && Remaining() < target_.blocks->BlockBytes() &&
+            target_.blocks->TryBorrow(block)) {
+            if (block.bytes.Size() >= MinimumLogRenderBytes) {
+                RenderIntoBlock(arg, spec, block, value);
                 return;
             }
 
-            value.payload = cursor_;
-            value.bytes = static_cast<uint32>(text.ByteCount());
-            inlineTruncated = text.Truncated();
-            if (!inlineTruncated) {
-                cursor_ += text.ByteCount();
-                return;
-            }
+            // 계약보다 작은 블록은 쓰지 않는다(장애 격리: 생성자의 Fatal로 가지 않는다).
+            target_.blocks->Release(block.index);
         }
 
-        // 남은 영역에 다 들어가지 않았다. 블록이 있으면 그곳에 다시 렌더한다.
-        LogBlock block;
-        if (target_.blocks != nullptr && target_.blocks->TryBorrow(block)) {
-            FixedStringBuilder text(
-                Span<char>(reinterpret_cast<char*>(block.bytes.Data()), block.bytes.Size()));
-            if (!arg.custom.format(text, arg.custom.object, spec)) {
-                target_.blocks->Release(block.index);
-                value.bytes = 0;
-                value.flags |= ValueFormatError;
-                return;
-            }
-
-            value.flags |= ValueInBlock;
-            value.payload = block.index;
-            value.bytes = static_cast<uint32>(text.ByteCount());
-            MarkTruncated(value, text.Truncated());
+        if (Remaining() < MinimumLogRenderBytes) {
+            value.payload = cursor_;
+            value.bytes = 0;
+            MarkTruncated(value, true);
             return;
         }
 
-        // 블록이 없으면 남은 영역에 잘린 결과를 둔다(남은 영역이 없었으면 빈 값).
-        if (Remaining() < 2) {
-            value.payload = cursor_;
-            value.bytes = 0;
+        FixedStringBuilder text(Span<char>(InlineData(), Remaining()));
+        if (!arg.custom.format(text, arg.custom.object, spec)) {
+            value.flags |= ValueFormatError;
+            return;
         }
 
-        cursor_ += value.bytes;
-        MarkTruncated(value, true);
+        value.payload = cursor_;
+        value.bytes = static_cast<uint32>(text.ByteCount());
+        cursor_ += text.ByteCount();
+        MarkTruncated(value, text.Truncated());
     }
 
 private:
+    void RenderIntoBlock(const FormatArg& arg, StringView spec, const LogBlock& block,
+                         LogCaptureValue& value) noexcept {
+        FixedStringBuilder text(BlockChars(block));
+        if (!arg.custom.format(text, arg.custom.object, spec)) {
+            target_.blocks->Release(block.index);
+            value.flags |= ValueFormatError;
+            return;
+        }
+
+        // 남은 영역에 들어가면 옮기고 블록을 바로 돌려준다(블록은 큰 값에만 남긴다).
+        if (!text.Truncated() && text.ByteCount() <= Remaining()) {
+            StoreInline(text.View(), value);
+            target_.blocks->Release(block.index);
+            return;
+        }
+
+        value.flags |= ValueInBlock;
+        value.payload = block.index;
+        value.bytes = static_cast<uint32>(text.ByteCount());
+        MarkTruncated(value, text.Truncated());
+    }
+
     usize Remaining() const noexcept {
         return target_.buffer.Size() - cursor_;
     }
@@ -185,6 +202,12 @@ LogCaptureValue EncodeScalar(const FormatArg& arg) noexcept {
     return value;
 }
 
+bool IsTextValue(const LogCaptureValue& value) noexcept {
+    const auto kind = static_cast<FormatArgKind>(value.kind);
+    return kind == FormatArgKind::Text ||
+           (kind == FormatArgKind::Custom && (value.flags & ValueFormatError) == 0);
+}
+
 // 읽기: 캡처 머리와 값 칸을 꺼내고 텍스트 위치를 확인한다.
 class CaptureReader {
 public:
@@ -192,6 +215,7 @@ public:
         : capture_(capture), blocks_(blocks) {
     }
 
+    // 머리와 값 칸의 형식(표지·길이·값 수·종류·레벨·카테고리 길이)을 검사한다.
     bool Open() noexcept {
         if (capture_.Size() < sizeof(LogCaptureHeader)) {
             return false;
@@ -201,7 +225,9 @@ public:
         if (header_.magic != CaptureMagic || header_.totalBytes > capture_.Size() ||
             header_.valueCount > MaxLogArguments ||
             LogCaptureMinimumBytes(header_.valueCount) > header_.totalBytes ||
-            header_.category == nullptr) {
+            !IsValidLogLevel(static_cast<LogLevel>(header_.level)) ||
+            header_.categoryBytes > MaxLogCategoryNameBytes ||
+            (header_.categoryName == nullptr && header_.categoryBytes != 0)) {
             return false;
         }
 
@@ -216,6 +242,19 @@ public:
         return true;
     }
 
+    // 모든 텍스트 값(런타임 템플릿 포함)의 위치가 캡처·블록 안인지 검사한다. 렌더 전에 한 번
+    // 부른다.
+    bool ValidateTexts() const noexcept {
+        StringView text;
+        for (usize index = 0; index < header_.valueCount; ++index) {
+            if (IsTextValue(values_[index]) && !Text(values_[index], text)) {
+                return false;
+            }
+        }
+
+        return TemplateText(text);
+    }
+
     const LogCaptureHeader& Header() const noexcept {
         return header_;
     }
@@ -227,12 +266,12 @@ public:
     // 텍스트 값의 byte다. 범위를 벗어나거나 블록을 찾을 수 없으면 false다.
     bool Text(const LogCaptureValue& value, StringView& text) const noexcept {
         if ((value.flags & ValueInBlock) != 0) {
-            if (blocks_ == nullptr) {
+            if (blocks_ == nullptr || value.payload > NumericLimits<uint32>::Max()) {
                 return false;
             }
 
             const Span<const uint8> block = blocks_->Resolve(static_cast<uint32>(value.payload));
-            if (value.bytes > block.Size()) {
+            if (block.Size() == 0 || value.bytes > block.Size()) {
                 return false;
             }
 
@@ -250,8 +289,12 @@ public:
         return true;
     }
 
+    bool IsRuntimeTemplate() const noexcept {
+        return (header_.flags & CaptureRuntimeTemplate) != 0;
+    }
+
     bool TemplateText(StringView& text) const noexcept {
-        if ((header_.flags & CaptureRuntimeTemplate) != 0) {
+        if (IsRuntimeTemplate()) {
             return Text(header_.runtimeTemplate, text);
         }
 
@@ -422,8 +465,31 @@ bool FillProperty(const CaptureReader& reader, const LogCaptureValue& value,
         return true;
     }
 
-    property.text = StringView(texts.View().Data() + start, texts.ByteCount() - start);
+    const usize bytes = texts.ByteCount() - start;
+    property.text = bytes == 0 ? StringView() : StringView(texts.View().Data() + start, bytes);
     return false;
+}
+
+// 템플릿 오류: 원본을 남기고 오류 이름을 붙인다. 메시지가 모자라면 원본을 잘라 오류 표기를 남긴다.
+void RenderTemplateError(FixedStringBuilder& message, StringView templateText,
+                         LogTemplateError error, LogEventFlags& flags) noexcept {
+    const StringView name = LogTemplateErrorName(error);
+    const usize suffixBytes =
+        TemplateErrorPrefix.ByteCount() + name.ByteCount() + TemplateErrorSuffix.ByteCount();
+    const usize room = message.Capacity() > suffixBytes ? message.Capacity() - suffixBytes : 0;
+    // 원본이 UTF-8이 아니면 원본은 뺀다(InvalidUtf8 오류).
+    if (templateText.IsValidUtf8()) {
+        const StringView kept = templateText.LeftBytesAtCodePoint(room);
+        (void)message.TryAppend(kept);
+        if (kept.ByteCount() < templateText.ByteCount()) {
+            flags = flags | LogEventFlags::MessageTruncated;
+        }
+    }
+
+    (void)message.TryAppend(TemplateErrorPrefix);
+    (void)message.TryAppend(name);
+    (void)message.TryAppend(TemplateErrorSuffix);
+    flags = flags | LogEventFlags::TemplateError;
 }
 
 } // namespace
@@ -443,11 +509,14 @@ Result<usize> WriteLogCapture(const LogCaptureTarget& target, LogLevel level,
         return Result<usize>::Failure(ErrorCode::CapacityExceeded);
     }
 
+    const StringView categoryName = category.Name();
     LogCaptureHeader header;
     header.magic = CaptureMagic;
     header.valueCount = static_cast<uint16>(count);
     header.level = static_cast<uint8>(level);
-    header.category = &category;
+    header.categoryBytes = static_cast<uint8>(categoryName.ByteCount());
+    header.categoryName = categoryName.Data();
+    header.categoryHash = category.NameHash();
     header.eventId = text.eventId;
     header.location = text.location;
     header.monotonicNanoseconds = target.monotonicNanoseconds;
@@ -464,9 +533,8 @@ Result<usize> WriteLogCapture(const LogCaptureTarget& target, LogLevel level,
         header.templateBytes = static_cast<uint32>(text.text.ByteCount());
     }
 
-    // 사용자 Formatter 인자가 있으면 그 인자를 처음 쓴 자리의 spec을 찾는다(템플릿이 잘못됐으면
-    // 오류 앞까지만 찾고 나머지는 빈 spec).
-    LogTemplateLayout layout;
+    // 사용자 Formatter 인자의 spec: 리터럴 템플릿은 컴파일 타임에 계산한 위치를 쓰고, 런타임
+    // 템플릿만 여기서 해석한다(템플릿이 잘못됐으면 오류 앞까지만 찾고 나머지는 빈 spec).
     bool hasCustom = false;
     FormatArgKind kinds[MaxLogArguments]{};
     for (usize index = 0; index < count; ++index) {
@@ -474,7 +542,8 @@ Result<usize> WriteLogCapture(const LogCaptureTarget& target, LogLevel level,
         hasCustom = hasCustom || args[index].kind == FormatArgKind::Custom;
     }
 
-    if (hasCustom) {
+    LogTemplateLayout layout;
+    if (hasCustom && text.specs == nullptr) {
         (void)AnalyzeLogTemplate(text.text, kinds, count, layout);
     }
 
@@ -485,7 +554,13 @@ Result<usize> WriteLogCapture(const LogCaptureTarget& target, LogLevel level,
             values[index].kind = static_cast<uint8>(FormatArgKind::Text);
             writer.StoreText(StringView(arg.text.data, arg.text.bytes), values[index]);
         } else if (arg.kind == FormatArgKind::Custom) {
-            writer.StoreCustom(arg, layout.specs[index], values[index]);
+            StringView spec = layout.specs[index];
+            if (text.specs != nullptr) {
+                spec = StringView(text.text.Data() + text.specs[index].offset,
+                                  text.specs[index].bytes);
+            }
+
+            writer.StoreCustom(arg, spec, values[index]);
         } else {
             values[index] = EncodeScalar(arg);
         }
@@ -511,7 +586,8 @@ Result<void> RenderLogCapture(Span<const uint8> capture, const LogBlockProvider*
                               const LogRenderTarget& target, LogEvent& event) noexcept {
     CaptureReader reader(capture, blocks);
     StringView templateText;
-    if (target.message.Size() == 0 || !reader.Open() || !reader.TemplateText(templateText)) {
+    if (target.message.Size() == 0 || !reader.Open() || !reader.ValidateTexts() ||
+        !reader.TemplateText(templateText)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -522,51 +598,53 @@ Result<void> RenderLogCapture(Span<const uint8> capture, const LogBlockProvider*
         flags = flags | LogEventFlags::ValueTruncated;
     }
 
-    // 리터럴 템플릿도 같은 검증을 거친다(컴파일 타임에 통과했으므로 늘 성공한다).
-    FormatArgKind kinds[MaxLogArguments]{};
-    for (usize index = 0; index < count; ++index) {
-        kinds[index] = static_cast<FormatArgKind>(reader.Value(index).kind);
-    }
-
-    detail::LogTemplateLayout layout;
-    const LogTemplateError error = detail::AnalyzeLogTemplate(templateText, kinds, count, layout);
-
     FixedStringBuilder message(target.message);
-    if (error != LogTemplateError::None) {
-        // 원본 템플릿을 그대로 두고 오류 이름을 덧붙인다. 원본이 UTF-8이 아니면 원본은 뺀다.
-        if (message.TryAppend(templateText).IsOk() && !templateText.IsEmpty()) {
-            (void)message.TryAppendAscii(' ');
+    detail::LogTemplateLayout layout;
+    LogTemplateError error = LogTemplateError::None;
+    const bool templateTruncated =
+        reader.IsRuntimeTemplate() && (header.runtimeTemplate.flags & ValueTruncated) != 0;
+    if (templateTruncated) {
+        // 캡처 때 잘린 런타임 템플릿은 해석하면 거짓 오류가 난다. 원본(잘린 것)을 그대로 쓴다.
+        if (templateText.IsValidUtf8()) {
+            (void)message.TryAppend(templateText);
         }
 
-        (void)message.TryAppend("[template error: ");
-        (void)message.TryAppend(LogTemplateErrorName(error));
-        (void)message.TryAppendAscii(']');
-        flags = flags | LogEventFlags::TemplateError;
+        flags = flags | LogEventFlags::MessageTruncated;
     } else {
-        detail::FormatParser parser(templateText, true);
-        detail::FormatToken token;
-        while (parser.Next(token)) {
-            if (token.kind == detail::FormatTokenKind::Literal) {
-                (void)message.TryAppend(token.text);
-                continue;
-            }
+        // 리터럴 템플릿도 같은 검증을 거친다(컴파일 타임에 통과했으므로 늘 성공한다).
+        detail::FormatArgKind kinds[MaxLogArguments]{};
+        for (usize index = 0; index < count; ++index) {
+            kinds[index] = static_cast<detail::FormatArgKind>(reader.Value(index).kind);
+        }
 
-            if (!RenderHole(message, reader, reader.Value(token.argument), token)) {
-                flags = flags | LogEventFlags::FormatError;
+        error = detail::AnalyzeLogTemplate(templateText, kinds, count, layout);
+        if (error != LogTemplateError::None) {
+            RenderTemplateError(message, templateText, error, flags);
+        } else {
+            detail::FormatParser parser(templateText, true);
+            detail::FormatToken token;
+            while (parser.Next(token)) {
+                if (token.kind == detail::FormatTokenKind::Literal) {
+                    (void)message.TryAppend(token.text);
+                    continue;
+                }
+
+                if (!RenderHole(message, reader, reader.Value(token.argument), token)) {
+                    flags = flags | LogEventFlags::FormatError;
+                }
             }
         }
     }
 
     // 속성: 인자마다 하나. 이름 자리면 그 이름, 아니면 Arg0…
+    const bool named = !templateTruncated && error == LogTemplateError::None && layout.named;
     const usize filled = count < target.properties.Size() ? count : target.properties.Size();
     char emptyTexts[1];
     FixedStringBuilder texts(target.propertyText.Size() != 0 ? target.propertyText
                                                              : Span<char>(emptyTexts));
     for (usize index = 0; index < filled; ++index) {
         LogProperty& property = target.properties[index];
-        property.name = error == LogTemplateError::None && layout.named
-                            ? layout.names[index]
-                            : PositionalPropertyNames[index];
+        property.name = named ? layout.names[index] : PositionalPropertyNames[index];
         if (FillProperty(reader, reader.Value(index), texts, property)) {
             flags = flags | LogEventFlags::FormatError;
         }
@@ -577,7 +655,7 @@ Result<void> RenderLogCapture(Span<const uint8> capture, const LogBlockProvider*
     }
 
     event.level = static_cast<LogLevel>(header.level);
-    event.category = header.category->Name();
+    event.category = StringView(header.categoryName, header.categoryBytes);
     event.messageTemplate = templateText;
     event.eventId = header.eventId;
     event.message = message.View();
@@ -597,8 +675,7 @@ void ReleaseLogCaptureBlocks(Span<const uint8> capture, LogBlockProvider& blocks
     }
 
     const LogCaptureHeader& header = reader.Header();
-    if ((header.flags & CaptureRuntimeTemplate) != 0 &&
-        (header.runtimeTemplate.flags & ValueInBlock) != 0) {
+    if (reader.IsRuntimeTemplate() && (header.runtimeTemplate.flags & ValueInBlock) != 0) {
         blocks.Release(static_cast<uint32>(header.runtimeTemplate.payload));
     }
 

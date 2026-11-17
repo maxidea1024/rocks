@@ -2,7 +2,6 @@
 #include "NumberTextInternal.h"
 
 #include <Core/Text/StringBuilder.h>
-#include <Platform/Atomics.h>
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
 
@@ -31,7 +30,9 @@ void StringBuilderBase::Clear() noexcept {
 }
 
 Result<void> StringBuilderBase::TryReserve(usize byteCapacity) noexcept {
-    if (byteCapacity <= capacity_) {
+    // 잘림 모드는 할당하지 않는다. 확보는 늘 성공하고 넘치는 내용은 다음 붙이기가
+    // 자른다(Formatter가 TryReserve를 불러도 실패하지 않게).
+    if (byteCapacity <= capacity_ || truncating_) {
         return Result<void>::Success();
     }
 
@@ -692,13 +693,13 @@ Result<void> AppendFormatArgument(StringBuilderBase& out, const FormatArg& arg, 
 
 namespace {
 
-// 거절한 할당 요청 수다. 시험이 무할당을 확인하는 용도라 relaxed로 센다.
-uint64 refusedAllocations = 0;
+// 거절한 할당 요청 수다(스레드별). 시험이 무할당을 확인하는 용도다.
+thread_local uint64 refusedAllocations = 0;
 
 } // namespace
 
 Result<void*> RefusingAllocator::Allocate(usize, usize, uint32) noexcept {
-    (void)platform::AtomicFetchAdd<platform::MemoryOrder::Relaxed>(&refusedAllocations, 1u);
+    ++refusedAllocations;
     return Result<void*>::Failure(ErrorCode::OutOfMemory);
 }
 
@@ -709,7 +710,7 @@ Result<void> RefusingAllocator::Deallocate(void* address) noexcept {
 }
 
 uint64 FixedStringBuilderAllocationAttempts() noexcept {
-    return platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&refusedAllocations);
+    return refusedAllocations;
 }
 
 RefusingAllocator& FixedStringBuilderAllocator() noexcept {

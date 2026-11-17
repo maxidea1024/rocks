@@ -228,18 +228,21 @@ Result<void> FormatTo(StringBuilderBase& out, StringView format,
 Result<void> AppendFormatArgument(StringBuilderBase& out, const FormatArg& arg, StringView spec,
                                   bool hasSpec) noexcept;
 
-// FixedStringBuilder가 쓰는, 모든 요청을 거절하는 allocator다. 거절한 호출 수를 센다(무할당 시험이
-// 0인지 확인한다). 여러 스레드에서 불러도 된다.
+// FixedStringBuilder가 쓰는, 모든 요청을 거절하는 allocator다. 거절한 호출 수를 호출 스레드별로
+// 센다(무할당 시험이 0인지 확인한다). 여러 스레드에서 불러도 된다.
 class RefusingAllocator final : public Allocator {
 public:
     Result<void*> Allocate(usize bytes, usize alignment, uint32 tag = 0) noexcept override;
     Result<void> Deallocate(void* address) noexcept override;
 };
 
-// 프로세스 전체에서 FixedStringBuilder의 allocator가 거절한 호출 수다. 시험이 할당 시도가 없었음을
-// 확인하는 데 쓴다.
+// 호출 스레드에서 FixedStringBuilder의 allocator가 거절한 호출 수다(스레드별이라 다른 시험의 할당이
+// 섞이지 않는다). 시험이 할당 시도가 없었음을 확인하는 데 쓴다.
 uint64 FixedStringBuilderAllocationAttempts() noexcept;
 
+// 모든 FixedStringBuilder가 함께 쓰는 거절 allocator다(상태 없는 정적 객체, 프로그램 수명 동안
+// 유효). FixedStringBuilder의 생성자만 쓴다. 할당을 시도하는 경로가 생기면 그 시도는 실패하고 위
+// 카운터에 남는다.
 RefusingAllocator& FixedStringBuilderAllocator() noexcept;
 
 } // namespace detail
@@ -456,11 +459,10 @@ public:
 //
 // StringBuilder와 다른 점:
 // - 용량(buffer 크기 - 1, 끝 NUL 자리)을 넘으면 넘친 부분을 UTF-8 문자 경계에서 잘라 버리고
-// **성공**한다.
-//   Truncated()가 참이 되고, 그 뒤의 붙이기는 모두 버린다(Clear 전까지).
+//   성공한다. Truncated()가 참이 되고, 그 뒤의 붙이기는 모두 버린다(Clear 전까지).
 // - 서식 오류·잘못된 UTF-8·사용자 Formatter 오류는 StringBuilder와 같이 실패하고 호출 전으로
-// 돌아간다.
-// - TryReserve로 용량보다 크게 확보할 수 없다(allocator 오류).
+//   돌아간다.
+// - TryReserve는 할당하지 않고 늘 성공한다(넘치는 내용은 다음 붙이기가 자른다).
 // - 서식 인자가 이 builder의 내용을 가리켜도 된다(저장소가 움직이지 않는다).
 //
 // 수명: buffer는 builder보다 오래 살아야 한다. View()·CString()은 buffer를 가리킨다.

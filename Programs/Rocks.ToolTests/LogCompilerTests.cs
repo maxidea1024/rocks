@@ -9,6 +9,7 @@ internal static class LogCompilerTests
     private const string Prelude = """
         #include <Core/Diagnostics/LogCapture.h>
         struct Point { int x; };
+        enum class Mode : unsigned char { Fast = 1 };
         template <> struct rocks::Formatter<Point> {
             static rocks::Result<void> Format(rocks::StringBuilderBase& out, const Point& point,
                                               rocks::StringView) noexcept {
@@ -71,7 +72,7 @@ internal static class LogCompilerTests
             }
 
             // 위치 자리·이름 자리·사용자 Formatter spec(런타임 검사)·런타임 템플릿은 컴파일된다.
-            string valid = Call("\"{Count} {Ratio:.2f} {P:anything}\", 1, 2.0, Point{3}") + "\n" +
+            string valid = Call("\"{Count} {Ratio:.2f} {P:anything} {M}\", 1, 2.0, Point{3}, Mode::Fast") + "\n" +
                 "void Other(rocks::Span<rocks::uint8> buffer) noexcept {\n" +
                 "    (void)rocks::CaptureLog({buffer}, rocks::LogLevel::Info, LogValid, \"{} {{x}} {}\", 1, \"x\");\n" +
                 "    (void)rocks::CaptureLog({buffer}, rocks::LogLevel::Info, LogValid, rocks::RuntimeTemplate{rocks::StringView(\"{A\")}, 1);\n" +
@@ -89,6 +90,16 @@ internal static class LogCompilerTests
                 ("bad_spec", Call("\"{A:.2f}\", 1"), "LogTemplateError_InvalidSpec"),
                 ("duplicate_name", Call("\"{A} {A}\", 1, 2"), "LogTemplateError_DuplicateHoleName"),
                 ("index_range", Call("\"{0} {2}\", 1, 2"), "LogTemplateError_ArgumentIndexOutOfRange"),
+                ("hole_name", Call("\"{A-B}\", 1"), "LogTemplateError_InvalidHoleName"),
+                ("index_leading_zero", Call("\"{01} {1}\", 1, 2"), "LogTemplateError_InvalidArgumentIndex"),
+                ("invalid_utf8", Call("\"\\xff{A}\", 1"), "LogTemplateError_InvalidUtf8"),
+                ("formatter_spec_conflict", Call("\"{0} {0:x}\", Point{1}"), "LogTemplateError_ConflictingFormatterSpec"),
+                ("not_null_terminated",
+                    "void Test(rocks::Span<rocks::uint8> buffer) noexcept {\n" +
+                    "    static constexpr char text[3] = {'a', 'b', 'c'};\n" +
+                    "    (void)rocks::CaptureLog({buffer}, rocks::LogLevel::Info, LogValid, text);\n" +
+                    "}",
+                    "LogTemplateError_NotNullTerminated"),
                 ("generic_parameter", "void Test(rocks::Span<rocks::uint8> buffer) noexcept { Capture(buffer, \"{A} {B}\", 1); }",
                     "LogTemplateError_ArgumentCountMismatch"),
                 ("too_many", Call("\"{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\", 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17"),
