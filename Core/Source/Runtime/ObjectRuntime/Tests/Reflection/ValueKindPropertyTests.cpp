@@ -86,10 +86,11 @@ constexpr ExpectedRow Expected[] = {{ValueKind::Opaque, "00000000000000"},
                                     {ValueKind::Map, "11000000000010"},
                                     {ValueKind::Set, "11000000000010"},
                                     {ValueKind::StaticArray, "11000000000010"},
-                                    {ValueKind::InstancedStruct, "11110100001000"}};
+                                    {ValueKind::InstancedStruct, "11110100001000"},
+                                    {ValueKind::Text, "11110100000001"}};
 
 static_assert(sizeof(Expected) / sizeof(Expected[0]) == ValueKindCount);
-static_assert(ValueKindCount == 29);
+static_assert(ValueKindCount == 30);
 static_assert(ValueKindCanBeMapKey(ValueKind::Bool) && !ValueKindCanBeMapKey(ValueKind::Float32));
 
 usize CellCount(const char* cells) noexcept {
@@ -389,8 +390,8 @@ TEST(ValueKindProperties_TypeRegistryFollowsTable) {
               (count >= 1 && count <= MaxStaticArrayElements));
     }
 
-    // InstancedStruct의 Base 제한(value.type ≠ 0 — InstancedStruct<Base>)은 리플렉션 B9k가 연다:
-    // B9j는 0만 받고(제한 없음) 그 밖은 자리와 무관하게 Unsupported로 거부한다.
+    // InstancedStruct의 Base(value.type ≠ 0 — InstancedStruct<Base>, 리플렉션 B9k)는 등록된 담을 수
+    // 있는 struct여야 한다: 미등록 Base는 자리와 무관하게 거부한다(NotFound).
     FieldSchema instanced;
     instanced.id = Guid{0x564b46, 9};
     instanced.name = Span<const char>("row", 3);

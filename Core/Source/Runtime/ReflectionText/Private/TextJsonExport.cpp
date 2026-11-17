@@ -105,7 +105,62 @@ struct Exporter {
     Result<void> WriteKeyed(const TextSlot& slot) noexcept;
     Result<void> WriteRead(const TextScalarType& type) noexcept;
     Result<void> WriteScalar(const TextScalarType& type, const FieldValue& value) noexcept;
+    Result<void> WriteText(const Text& value) noexcept;
 };
+
+// Text 값(리플렉션 B9l — 10.4절 JSON 열)은 비어 있으면 null, Invariant면 원문 문자열, Localized면
+// `{"id": "<TextId>", "revision": <sourceRevision>, "source": "<fallback>"}`이다. Format·Integer
+// 이력은 Unsupported다(저장 형태가 없다).
+Result<void> Exporter::WriteText(const Text& value) noexcept {
+    TextPersistentView view;
+    if (auto got = value.TryGetPersistentForm(view); !got) {
+        return got;
+    }
+
+    if (view.form == TextPersistentForm::Empty) {
+        return writer.Null();
+    }
+
+    if (view.form == TextPersistentForm::Invariant) {
+        return writer.String(view.source);
+    }
+
+    StringBuilder<64> id(allocator);
+    if (auto formatted = id.TryAppendFormat("{}", view.id); !formatted) {
+        return formatted;
+    }
+
+    Result<void> written = writer.BeginObject();
+    if (written) {
+        written = writer.Key(detail::TextIdKey);
+    }
+
+    if (written) {
+        written = writer.String(id.View());
+    }
+
+    if (written) {
+        written = writer.Key(detail::TextRevisionKey);
+    }
+
+    if (written) {
+        written = writer.UInt64(view.sourceRevision);
+    }
+
+    if (written) {
+        written = writer.Key(detail::TextSourceKey);
+    }
+
+    if (written) {
+        written = writer.String(view.source);
+    }
+
+    if (!written) {
+        return written;
+    }
+
+    return writer.EndObject();
+}
 
 Result<void> Exporter::WriteStruct(const SchemaScope& scope, uint32 flags) noexcept {
     if (auto begun = writer.BeginObject(); !begun) {
@@ -366,6 +421,8 @@ Result<void> Exporter::WriteScalar(const TextScalarType& type, const FieldValue&
         }
 
         break;
+    case ValueKind::Text:
+        return WriteText(value.text);
     default:
         break;
     }

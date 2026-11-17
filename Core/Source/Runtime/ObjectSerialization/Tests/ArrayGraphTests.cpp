@@ -146,7 +146,7 @@ constexpr Guid ItemsId{0x414c4b, 4};
 
 constexpr uint32 Required = static_cast<uint32>(FieldFlags::Required);
 
-Span<const char> Text(const char* text) noexcept {
+Span<const char> Chars(const char* text) noexcept {
     usize bytes = 0;
     while (text[bytes] != '\0') {
         ++bytes;
@@ -161,7 +161,7 @@ FieldSchema Scalar(Guid id, const char* name, ValueKind kind, TypeId type = {},
     field.id = id;
     field.kind = kind == ValueKind::ObjectReference ? FieldKind::ObjectReference : FieldKind::Value;
     field.flags = flags;
-    field.name = Text(name);
+    field.name = Chars(name);
     field.value = ValueType{kind, type};
     return field;
 }
@@ -173,7 +173,7 @@ FieldSchema ArrayOf(Guid id, const char* name, ValueKind element, TypeId type = 
     field.kind =
         element == ValueKind::ObjectReference ? FieldKind::ObjectReference : FieldKind::Value;
     field.flags = flags;
-    field.name = Text(name);
+    field.name = Chars(name);
     field.value = ValueType{ValueKind::Array, {}};
     field.element = ValueType{element, type};
     field.maxElements = maxElements;
@@ -1498,7 +1498,7 @@ Result<TypeRegistrationToken> RegisterClass(TypeRegistry& types, TypeId id, cons
     auto runtime = MakeRuntimeTypeOps<C>();
     runtime.fields = ops;
     runtime.completeFieldLayout = true;
-    return types.Register({id, 1, fields, Text(name)}, Move(runtime));
+    return types.Register({id, 1, fields, Chars(name)}, Move(runtime));
 }
 
 // Deep<0>…Deep<N>을 등록하고(멤버 struct 먼저), 원소를 하나씩 더해 맨 아래 문자열까지 채운다.

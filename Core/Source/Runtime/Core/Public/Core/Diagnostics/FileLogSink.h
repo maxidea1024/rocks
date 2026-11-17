@@ -14,6 +14,9 @@ inline constexpr usize MaxLogFilePathBytes = 1024;
 // 파일 이름 앞부분(호스트 이름)의 최대 byte 수다.
 inline constexpr usize MaxLogFileHostBytes = 32;
 
+// 파일 이름의 UTC 시작 시각("YYYYMMDDTHHMMSSmmmZ")의 byte 수다.
+inline constexpr usize LogFileStampBytes = 19;
+
 // 보관 개수 상한의 최대값이다.
 inline constexpr uint32 MaxLogFileRetention = 256;
 
@@ -128,8 +131,8 @@ private:
     usize directoryBytes_ = 0;
     char host_[MaxLogFileHostBytes + 1]{};
     usize hostBytes_ = 0;
-    // UTC 시작 시각 "YYYYMMDDTHHMMSSmmmZ"(19 byte)다.
-    char stamp_[24]{};
+    // UTC 시작 시각 "YYYYMMDDTHHMMSSmmmZ"다.
+    char stamp_[LogFileStampBytes + 1]{};
     char path_[MaxLogFilePathBytes]{};
     usize pathBytes_ = 0;
     platform::File file_;

@@ -91,13 +91,14 @@ struct LogFileDecodeSummary {
     // 끝 표시(Final)를 받았는지다. 거짓이면 비정상 종료한 파일이다(마지막 완전한 묶음까지
     // 복호했다).
     bool endMarker = false;
-    // 끝 표시 없이 끝난 파일의 꼬리에 완성되지 않은 기록이 있어 버렸는지다(쓰는 중 종료).
+    // 끝 표시 없이 끝난 파일의 꼬리에 완성되지 않은 기록이 있어 버렸는지다(쓰는 중 종료). 길이
+    // 머리가 손상돼 파일 끝을 넘는 길이를 가리켜도 같은 모양이다(인증으로 구별할 수 없다).
     bool partialTail = false;
 };
 
 // file(봉인한 로그 파일 전체)을 recipient 개인키로 열어 묶음마다 output에 평문을 넘긴다. 평문
 // 버퍼는 allocator로 잡는다.
-// - 머리가 짧거나 magic이 다르면 InvalidArgument, 모르는 버전·KEM은 Unsupported다.
+// - 머리가 짧거나 magic이 다르면 InvalidArgument, 모르는 버전·KEM·0이 아닌 예약 칸은 Unsupported다.
 // - 완전한 기록의 인증이 실패하면(변조·다른 키·순서 위반·끝 표시 뒤의 byte) AuthenticationFailed다.
 //   그 전까지의 묶음은 이미 output에 넘어갔다.
 // - 끝 표시 없이 끝나면 성공이고 endMarker가 거짓이다(호출자가 "비정상 종료"를 알린다).

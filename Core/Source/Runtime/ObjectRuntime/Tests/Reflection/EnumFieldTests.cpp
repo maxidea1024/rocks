@@ -22,7 +22,7 @@ enum class UnrelatedEnum : uint8 {
     Only
 };
 
-Span<const char> Text(const char* text) noexcept {
+Span<const char> Chars(const char* text) noexcept {
     usize size = 0;
     while (text[size] != '\0') {
         ++size;
@@ -118,16 +118,16 @@ TEST(Enums_GeneratedSchemaAndValidatorsMatch) {
 
 TEST(Enums_ToolNameLookupIgnoresCaseAndOptionalPrefix) {
     const EnumSchema& group = GeneratedType<TextureGroup>::Schema();
-    CHECK(FindEnumerator(group, Text("8BitData")) == &group.values[1]);
-    CHECK(FindEnumerator(group, Text("texturegroup_8bitdata")) == &group.values[1]);
-    CHECK(FindEnumerator(group, Text("TEXTUREGROUP_World")) == &group.values[0]);
-    CHECK(FindEnumerator(group, Text("world")) == &group.values[0]);
+    CHECK(FindEnumerator(group, Chars("8BitData")) == &group.values[1]);
+    CHECK(FindEnumerator(group, Chars("texturegroup_8bitdata")) == &group.values[1]);
+    CHECK(FindEnumerator(group, Chars("TEXTUREGROUP_World")) == &group.values[0]);
+    CHECK(FindEnumerator(group, Chars("world")) == &group.values[0]);
     // C++ 이름은 도구 이름이 따로 있으면 받지 않는다. 숨김 열거자도 찾는다(설정 계층이 거부한다).
-    CHECK(FindEnumerator(group, Text("EightBitData")) == nullptr);
-    CHECK(FindEnumerator(group, Text("Reserved13")) == &group.values[2]);
-    CHECK(FindEnumerator(group, Text("TEXTUREGROUP_")) == nullptr);
-    CHECK(FindEnumerator(group, Text("")) == nullptr);
-    CHECK(FindEnumerator(GeneratedType<Bias>::Schema(), Text("TEXTUREGROUP_Low")) == nullptr);
+    CHECK(FindEnumerator(group, Chars("EightBitData")) == nullptr);
+    CHECK(FindEnumerator(group, Chars("Reserved13")) == &group.values[2]);
+    CHECK(FindEnumerator(group, Chars("TEXTUREGROUP_")) == nullptr);
+    CHECK(FindEnumerator(group, Chars("")) == nullptr);
+    CHECK(FindEnumerator(GeneratedType<Bias>::Schema(), Chars("TEXTUREGROUP_Low")) == nullptr);
 }
 
 TEST(Enums_RegistryKindsDependenciesAndNativeKeys) {
@@ -260,7 +260,7 @@ TEST(Enums_ManualRegisterEnumValidatesAndDeepCopies) {
     char name[] = "manual::Mode";
     char first[] = "First";
     char display[] = "첫째";
-    EnumeratorSchema values[] = {{Text("First"), {}, {}, 0, 0}, {Text("Second"), {}, {}, 1, 0}};
+    EnumeratorSchema values[] = {{Chars("First"), {}, {}, 0, 0}, {Chars("Second"), {}, {}, 1, 0}};
     values[0].name = Span<const char>(first, sizeof(first) - 1);
     values[0].displayName = Span<const char>(display, sizeof(display) - 1);
     EnumSchema schema{Guid{0x454e554d, 1},
@@ -286,7 +286,7 @@ TEST(Enums_ManualRegisterEnumValidatesAndDeepCopies) {
          ErrorCode::InvalidArgument},
         {[](EnumSchema& s, EnumeratorSchema*) noexcept { s.values = {}; },
          ErrorCode::InvalidArgument},
-        {[](EnumSchema& s, EnumeratorSchema*) noexcept { s.toolPrefix = Text("BAD-"); },
+        {[](EnumSchema& s, EnumeratorSchema*) noexcept { s.toolPrefix = Chars("BAD-"); },
          ErrorCode::InvalidArgument},
         {[](EnumSchema&, EnumeratorSchema* v) noexcept { v[1].value = 256; },
          ErrorCode::InvalidArgument},
@@ -296,20 +296,20 @@ TEST(Enums_ManualRegisterEnumValidatesAndDeepCopies) {
              v[1].value = -1;
          },
          ErrorCode::InvalidArgument},
-        {[](EnumSchema&, EnumeratorSchema* v) noexcept { v[1].name = Text("1st"); },
+        {[](EnumSchema&, EnumeratorSchema* v) noexcept { v[1].name = Chars("1st"); },
          ErrorCode::InvalidArgument},
-        {[](EnumSchema&, EnumeratorSchema* v) noexcept { v[1].toolName = Text("has space"); },
+        {[](EnumSchema&, EnumeratorSchema* v) noexcept { v[1].toolName = Chars("has space"); },
          ErrorCode::InvalidArgument},
         {[](EnumSchema&, EnumeratorSchema* v) noexcept { v[1].flags = 2; },
          ErrorCode::InvalidArgument},
         // 값 별칭과 (접두 유무를 합친) 도구 이름 중복
         {[](EnumSchema&, EnumeratorSchema* v) noexcept { v[1].value = 0; },
          ErrorCode::AlreadyExists},
-        {[](EnumSchema&, EnumeratorSchema* v) noexcept { v[1].toolName = Text("FIRST"); },
+        {[](EnumSchema&, EnumeratorSchema* v) noexcept { v[1].toolName = Chars("FIRST"); },
          ErrorCode::AlreadyExists},
         {[](EnumSchema& s, EnumeratorSchema* v) noexcept {
-             s.toolPrefix = Text("MODE_");
-             v[1].toolName = Text("mode_first");
+             s.toolPrefix = Chars("MODE_");
+             v[1].toolName = Chars("mode_first");
          },
          ErrorCode::AlreadyExists}};
     for (const Case& example : cases) {

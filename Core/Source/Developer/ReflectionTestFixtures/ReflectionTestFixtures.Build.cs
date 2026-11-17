@@ -9,7 +9,8 @@ public sealed class ReflectionTestFixtures : CoreModuleRules
     protected override string ModuleName => "ReflectionTestFixtures";
 
     // CoreTypeBindings: the Core value type field fixture (CoreValueFixture.h) imports that module's Binds mirrors.
-    protected override string[] RequiredModules => ["ObjectRuntime", "CoreTypeBindings"];
+    // Localization: rocks::Text fields (TextFieldFixture.h).
+    protected override string[] RequiredModules => ["ObjectRuntime", "CoreTypeBindings", "Localization"];
 
     protected override bool HasSources => false;
 
@@ -23,5 +24,5 @@ public sealed class ReflectionTestFixtures : CoreModuleRules
             "ReflectionTestFixtures/FieldFlagFixture.h",
             "ReflectionTestFixtures/ClassFlagFixture.h", "ReflectionTestFixtures/TextFixture.h",
             "ReflectionTestFixtures/AssignFixture.h", "ReflectionTestFixtures/InstancedStructFixture.h",
-            "ReflectionTestFixtures/StructInheritanceFixture.h"];
+            "ReflectionTestFixtures/StructInheritanceFixture.h", "ReflectionTestFixtures/TextFieldFixture.h"];
 }

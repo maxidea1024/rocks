@@ -108,8 +108,8 @@ Result<LogFileDecodeSummary> TryDecodeLogFile(const KemKeyPair& recipient, Span<
     }
 
     if (file[VersionOffset] != LogFileFormatVersion ||
-        file[KemOffset] != static_cast<uint8>(KemAlgorithm::XWing) ||
-        recipient.Algorithm() != KemAlgorithm::XWing) {
+        file[KemOffset] != static_cast<uint8>(KemAlgorithm::XWing) || file[KemOffset + 1] != 0 ||
+        file[KemOffset + 2] != 0 || recipient.Algorithm() != KemAlgorithm::XWing) {
         return Summary::Failure(ErrorCode::Unsupported);
     }
 

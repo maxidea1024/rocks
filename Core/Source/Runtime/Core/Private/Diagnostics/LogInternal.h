@@ -4,6 +4,16 @@
 #include <Core/Diagnostics/LogCapture.h>
 #include <Core/Diagnostics/LogSystem.h>
 
+namespace rocks {
+
+// 로그 모듈이 스스로 남기는 진단(버림 알림·sink 차단·파일 sink 등)의 카테고리다.
+inline constexpr LogCategory LogLogging{"Log"};
+
+// 로그 모듈이 스스로 만드는 알림 한 줄의 버퍼 byte 수다.
+inline constexpr usize LogNoticeBytes = 256;
+
+} // namespace rocks
+
 // 로그 모듈 내부 공용 함수다(Log.cpp·LogSystem.cpp·Diagnostics.cpp). 공개 API가 아니다.
 namespace rocks::detail {
 

@@ -6,6 +6,7 @@
 #include <Serialization/MapWire.h>
 #include <Serialization/OptionalWire.h>
 #include <Serialization/SetWire.h>
+#include <Serialization/TextWire.h>
 
 // 필드 codec 사슬의 첫 조각으로 단일 값의 wire 쓰기 쪽이다(Docs/Design/ReflectionFoundations.ko.md
 // 5.6·6.4절). 값 종류·필드의 wire tag(FieldWireType), 정수 폭 한도(UnsignedLimit·SignedLimit·
@@ -80,6 +81,9 @@ inline Result<uint32> FieldWireType(ValueKind kind, uint32 referenceWire) noexce
         // 필드 값은 빈 payload 또는 담긴 struct Record, 원소·Map 값 자리는 u64 길이 + 같은
         // 내용(같은 문서 1.2·11절 — 리플렉션 B9j).
         return Result<uint32>::Success(static_cast<uint32>(WireType::InstancedStruct));
+    case ValueKind::Text:
+        // 형태 byte + 형태별 내용(같은 문서 1.2·13절 — 리플렉션 B9l).
+        return Result<uint32>::Success(static_cast<uint32>(WireType::Text));
     case ValueKind::Array:
     case ValueKind::StaticArray:
     case ValueKind::Opaque:
@@ -315,6 +319,39 @@ private:
     bool zeroDeclared_ = false;
 };
 
+// Localization의 영속 형태와 wire 형태 byte는 같은 값이다(리플렉션 B9l — 형식 지식은
+// TryGetPersistentForm·Text 생성 함수와 이 codec 한 곳에만 있다).
+static_assert(static_cast<uint8>(TextPersistentForm::Empty) ==
+                      static_cast<uint8>(TextWireForm::Empty) &&
+                  static_cast<uint8>(TextPersistentForm::Invariant) ==
+                      static_cast<uint8>(TextWireForm::Invariant) &&
+                  static_cast<uint8>(TextPersistentForm::Localized) ==
+                      static_cast<uint8>(TextWireForm::Localized),
+              "TextPersistentForm must match TextWireForm");
+
+// Text 값 하나를 wire Text로 쓴다(리플렉션 B9l — Docs/Design/ReflectionExtensions.ko.md 13절,
+// 단일 값 필드·배열·정적 배열 원소·Map 값 공용). 저장할 수 있는 형태는 비어 있음·Invariant·
+// Localized이고 Format·Integer 이력은 Unsupported(런타임에 만든 조합 문구는 저장 대상이 아니다),
+// 원문이 TextCreateLimits 기본 maxSourceBytes(1 MiB)를 넘으면 CapacityExceeded다(그 밖의 형식
+// 오류와 maxValueBytes 한도는 WriteTextWire). 노드를 복사하지 않는다(원문은 view).
+inline Result<void> WriteTextValue(ArchiveWriter& out, const Text& text) noexcept {
+    TextPersistentView view;
+    if (auto got = text.TryGetPersistentForm(view); !got) {
+        return got;
+    }
+
+    if (view.source.ByteCount() > TextCreateLimits{}.maxSourceBytes) {
+        return Result<void>::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    TextWireValue wire;
+    wire.form = static_cast<TextWireForm>(view.form);
+    wire.source = view.source;
+    wire.textId = view.id;
+    wire.sourceRevision = view.sourceRevision;
+    return WriteTextWire(out, wire);
+}
+
 // 값 하나(type 종류)를 out에 쓴다(단일 값 필드와 배열 원소 공용, 5.6절). value.kind는 type.kind와
 // 같아야 한다(TypeMismatch). text는 Utf8String의 값·SoftObjectReference의 경로이고(value.string
 // 대신 쓴다 — 생성 thunk가 멤버를 복사하지 않게), staticNative는 강한 참조의 정적 대상 타입이다.
@@ -417,6 +454,8 @@ inline Result<void> WriteValueWire(ArchiveWriter& out, FieldEncodeContext& conte
     }
     case ValueKind::Digest256:
         return out.WriteBytes(Span<const uint8>(value.digest.bytes, Sha256Digest::Bytes));
+    case ValueKind::Text:
+        return WriteTextValue(out, value.text);
     case ValueKind::SoftObjectReference: {
         // C++에서 직접 쓴 값은 쓰기 검증을 거치지 않았으므로 저장 때 다시 검사한다.
         const AssetId asset{value.guid};

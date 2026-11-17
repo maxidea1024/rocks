@@ -57,6 +57,7 @@ internal static partial class MetaTests
         RegisterStaticArrays(context);
         RegisterInstancedStructs(context);
         RegisterStructInheritance(context);
+        RegisterTextFields(context);
         RegisterFieldFlags(context);
         RegisterClassFlags(context);
         RegisterStructs(context);

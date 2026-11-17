@@ -183,7 +183,8 @@ Result<uint32> EncodeArrayElements(const Elements& array, usize count, ArchiveWr
     } else {
         constexpr bool variable = IsSameV<Element, String> || IsSameV<Element, Name> ||
                                   SoftReferenceField<Element>::Supported ||
-                                  InstancedStructField<Element>::Supported;
+                                  InstancedStructField<Element>::Supported ||
+                                  IsSameV<Element, Text>;
         auto elementWire = FieldWireType(field.element.kind, context.ReferenceWireType());
         if (!elementWire) {
             return elementWire;
@@ -216,6 +217,11 @@ Result<uint32> EncodeArrayElements(const Elements& array, usize count, ArchiveWr
                 // InstancedStruct 원소(리플렉션 B9j)는 u64 길이 + 내용이다.
                 if (auto written = EncodeInstancedStructElement(array[index], out, context);
                     !written) {
+                    return Result<uint32>::Failure(written.Error());
+                }
+            } else if constexpr (IsSameV<Element, Text>) {
+                // Text 원소(리플렉션 B9l)는 노드를 복사하지 않고 영속 형태를 쓴다.
+                if (auto written = WriteTextValue(out, array[index]); !written) {
                     return Result<uint32>::Failure(written.Error());
                 }
             } else {
@@ -255,7 +261,8 @@ Result<uint32> EncodeArrayElements(const Elements& array, usize count, ArchiveWr
 // TypeId(ReportAndNull로 바꾼 미등록 클래스는 null)다.
 template <class Element>
 Element ParsedScalarValue(const ParsedValue& parsed) noexcept {
-    static_assert(!IsSameV<Element, String> && !SoftReferenceField<Element>::Supported,
+    static_assert(!IsSameV<Element, String> && !SoftReferenceField<Element>::Supported &&
+                      !IsSameV<Element, Text>,
                   "allocating values are built by the caller");
     if constexpr (ReflectedEnumField<Element>::Supported) {
         return static_cast<Element>(parsed.signedInteger);
@@ -306,6 +313,14 @@ Result<void> AppendParsedElement(Array<Element>& target, const ParsedValue& pars
         }
 
         return added.Value()->TryAssign(AssetId{parsed.guid}, parsed.text);
+    } else if constexpr (IsSameV<Element, Text>) {
+        // Text 원소(리플렉션 B9l)는 배열의 allocator(객체 allocator)로 노드를 만든다.
+        auto made = MakeParsedText(target.GetAllocator(), parsed);
+        if (!made) {
+            return Result<void>::Failure(made.Error());
+        }
+
+        return target.TryPushBack(Move(made.Value()));
     } else {
         return target.TryPushBack(ParsedScalarValue<Element>(parsed));
     }

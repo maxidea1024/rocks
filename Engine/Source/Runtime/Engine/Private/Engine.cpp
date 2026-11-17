@@ -619,6 +619,11 @@ Result<void> Engine::Shutdown() noexcept {
     const char* closeStage = failedStage;
     auto closedAfter = CloseAfterSubsystems(closeStage);
     KeepFirst(outcome, failedStage, Move(closedAfter), closeStage);
+    // 남은 수는 Registry를 닫기 전에 센다(닫은 뒤에는 0이다).
+    if (!outcome) {
+        LogShutdownFailure(failedStage, outcome.Error());
+    }
+
     if (objects_) {
         auto closed = objects_->Shutdown(objects_->OwnerAccess());
         if (!closed) {
@@ -647,9 +652,6 @@ Result<void> Engine::Shutdown() noexcept {
     initializedSteps_ = 0;
     shutdownProgress_ = ShutdownNotStarted;
     state_ = EngineState::Stopped;
-    if (!outcome) {
-        LogShutdownFailure(failedStage, outcome.Error());
-    }
 
     Log::Info(LogEngine, "Engine shut down");
     return outcome;

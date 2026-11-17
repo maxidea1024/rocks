@@ -15,6 +15,65 @@ namespace {
 // 같은 시각의 다른 실행과 이름이 겹칠 때 시도하는 번호 상한이다.
 constexpr uint32 MaxLogFileParts = 100000;
 
+// 이름 뒤 번호 조각("-" + MaxLogFileParts 미만의 10진수)의 최대 byte 수다.
+constexpr usize MaxLogFilePartBytes = 6;
+
+constexpr StringView LogFileExtension = ".log";
+
+bool IsDigit(char value) noexcept {
+    return value >= '0' && value <= '9';
+}
+
+// "YYYYMMDDTHHMMSSmmmZ"(LogFileStampBytes)인지다.
+bool IsLogFileStamp(StringView text) noexcept {
+    if (text.ByteCount() != LogFileStampBytes || text.Data()[8] != 'T' ||
+        text.Data()[LogFileStampBytes - 1] != 'Z') {
+        return false;
+    }
+
+    for (usize index = 0; index + 1 < LogFileStampBytes; ++index) {
+        if (index != 8 && !IsDigit(text.Data()[index])) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// name이 정확히 `<prefix><시각>[-<숫자>].log`인지다. 호스트 이름에 '-'가 있을 수 있으므로
+// 접두만으로 고르지 않는다(Sandbox와 Sandbox-Server의 파일을 섞지 않는다).
+bool IsHostLogFileName(StringView name, StringView prefix) noexcept {
+    if (!name.StartsWith(prefix, StringComparison::CaseSensitive) ||
+        !name.EndsWith(LogFileExtension, StringComparison::CaseSensitive) ||
+        name.ByteCount() < prefix.ByteCount() + LogFileStampBytes + LogFileExtension.ByteCount()) {
+        return false;
+    }
+
+    const StringView body(name.Data() + prefix.ByteCount(),
+                          name.ByteCount() - prefix.ByteCount() - LogFileExtension.ByteCount());
+    if (!IsLogFileStamp(StringView(body.Data(), LogFileStampBytes))) {
+        return false;
+    }
+
+    const usize rest = body.ByteCount() - LogFileStampBytes;
+    if (rest == 0) {
+        return true;
+    }
+
+    const char* part = body.Data() + LogFileStampBytes;
+    if (rest < 2 || rest > MaxLogFilePartBytes || part[0] != '-') {
+        return false;
+    }
+
+    for (usize index = 1; index < rest; ++index) {
+        if (!IsDigit(part[index])) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 bool IsHostByte(char value) noexcept {
     return (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') ||
            (value >= '0' && value <= '9') || value == '_' || value == '-';
@@ -37,13 +96,12 @@ struct ExistingLogFiles {
     bool failed = false;
 };
 
-// "<호스트>-"로 시작하고 ".log"로 끝나는 일반 파일을 모은다.
+// 이 호스트가 만든 이름(`<호스트>-<시각>[-<숫자>].log`)의 일반 파일을 모은다.
 bool CollectLogFile(const platform::DirectoryEntry& entry, void* raw) noexcept {
     auto& context = *static_cast<ExistingLogFiles*>(raw);
     const StringView name(entry.name, entry.nameBytes);
     if (entry.info.type != platform::FileType::File || name.ByteCount() >= MaxLogFilePathBytes ||
-        !name.StartsWith(context.prefix, StringComparison::CaseSensitive) ||
-        !name.EndsWith(".log", StringComparison::CaseSensitive)) {
+        !IsHostLogFileName(name, context.prefix)) {
         return true;
     }
 
@@ -97,7 +155,8 @@ Result<void> FileLogSink::Open() noexcept {
 
     // 파일 이름: 호스트 + "-" + 시각(19) + "-N"(최대 7) + ".log". 폴더와 구분자를 더해도 남아야
     // 한다.
-    const usize nameLimit = hostBytes_ + 1 + 19 + 7 + 4;
+    const usize nameLimit =
+        hostBytes_ + 1 + LogFileStampBytes + MaxLogFilePartBytes + LogFileExtension.ByteCount();
     if (!hostValid || directoryBytes_ == 0 || directoryBytes_ >= sizeof(directory_) ||
         directoryBytes_ + 1 + nameLimit >= MaxLogFilePathBytes || config_.maxBytes == 0 ||
         config_.batchBytes == 0 || config_.retention == 0 ||
@@ -390,7 +449,7 @@ Result<void> FileLogSink::OpenNextFile() noexcept {
             (void)built.TryAppendFormat("-{}", nextPart_);
         }
 
-        (void)built.TryAppend(".log");
+        (void)built.TryAppend(LogFileExtension);
         pathBytes_ = built.ByteCount();
         const platform::FileStatus opened =
             file_.Open(*fileSystem_, path_, pathBytes_, platform::FileOpenMode::CreateNew);
@@ -447,12 +506,12 @@ void FileLogSink::Disable(ErrorCode error) noexcept {
     }
 
     disabled_ = true;
-    char storage[200];
+    char storage[LogNoticeBytes];
     FixedStringBuilder text{Span<char>(storage)};
     (void)text.TryAppendFormat("Log file encryption setup failed ({}); the file log sink is "
                                "disabled and writes nothing (no plaintext fallback)",
                                ErrorCodeName(error));
-    detail::WriteLogEmergencyText(LogLevel::Error, "Log", text.View());
+    detail::WriteLogEmergencyText(LogLevel::Error, LogLogging.Name(), text.View());
 }
 
 void FileLogSink::ReleaseBuffers() noexcept {

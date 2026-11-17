@@ -67,7 +67,7 @@ private:
     Allocator& inner_;
 };
 
-FieldValue Text(Allocator& allocator, const char* text) noexcept {
+FieldValue StringValue(Allocator& allocator, const char* text) noexcept {
     FieldValue value(allocator);
     value.kind = ValueKind::Utf8String;
     CHECK(value.string.TryAssign(StringView(text)));
@@ -155,7 +155,7 @@ TEST(DetachedPath_ReadWriteOnStructValueAndBox) {
         const ParsedPath leafLabel(lease.Value(), "holder.middle.leaf.label");
         const ParsedPath middle(lease.Value(), "holder.middle");
         const ParsedPath target(lease.Value(), "holder.target");
-        FieldValue original = Text(allocator, "원본");
+        FieldValue original = StringValue(allocator, "원본");
         REQUIRE(PathWrite(objects, access, handle, extraLabel.View(), original));
         REQUIRE(PathWrite(objects, access, handle, leafLabel.View(), original));
 
@@ -164,7 +164,7 @@ TEST(DetachedPath_ReadWriteOnStructValueAndBox) {
         StructLeaf leaf(allocator);
         const PathTarget leafValue = PathTarget::Value(
             lease.Value(), lease.Value().FieldStruct(extraIndex), &leaf, allocator);
-        FieldValue written = Text(allocator, "값");
+        FieldValue written = StringValue(allocator, "값");
         REQUIRE(PathWrite(objects, access, leafValue, extraLabel.View(1), written));
         CHECK(leaf.label.View() == StringView("값"));
         FieldValue read(allocator);
@@ -188,7 +188,7 @@ TEST(DetachedPath_ReadWriteOnStructValueAndBox) {
         CHECK(!box.IsEmpty() && box.FieldId() == extra.View().steps[0].fieldId);
         CHECK(ReadText(objects, PathTarget::Value(box), extraLabel.View(), read) ==
               StringView("원본"));
-        FieldValue edited = Text(allocator, "상자");
+        FieldValue edited = StringValue(allocator, "상자");
         REQUIRE(PathWrite(objects, access, PathTarget::Value(box), extraLabel.View(), edited));
         CHECK(ReadText(objects, PathTarget::Value(box), extraLabel.View(), read) ==
               StringView("상자"));
@@ -236,7 +236,7 @@ TEST(DetachedPath_DetachEditAttachRoundTrip) {
         const ParsedPath extraLabel(lease.Value(), "extra.label");
         const ParsedPath extraCount(lease.Value(), "extra.count");
         const ParsedPath plain(lease.Value(), "plain");
-        FieldValue original = Text(system, "원본");
+        FieldValue original = StringValue(system, "원본");
         REQUIRE(PathWrite(objects, access, handle, extraLabel.View(), original));
         FieldValue seven = Unsigned(system, ValueKind::UInt32, 7);
         REQUIRE(PathWrite(objects, access, handle, plain.View(), seven));
@@ -247,7 +247,7 @@ TEST(DetachedPath_DetachEditAttachRoundTrip) {
         DetachedValue plainBox(objects.ObjectAllocator());
         REQUIRE(PathDetach(objects, access, handle, extra.View(), box));
         REQUIRE(PathDetach(objects, access, handle, plain.View(), plainBox));
-        FieldValue edited = Text(system, "편집한 긴 이름 — 버퍼가 바뀐다");
+        FieldValue edited = StringValue(system, "편집한 긴 이름 — 버퍼가 바뀐다");
         REQUIRE(PathWrite(objects, access, PathTarget::Value(box), extraLabel.View(), edited));
         FieldValue nine = Unsigned(system, ValueKind::UInt32, 9);
         REQUIRE(PathWrite(objects, access, PathTarget::Value(box), extraCount.View(), nine));
@@ -363,7 +363,7 @@ TEST(DetachedPath_DetachFailureLeavesSourceUnchanged) {
         const ObjectHandle handle = owner.Value().Handle();
         const ParsedPath extra(lease.Value(), "extra");
         const ParsedPath extraLabel(lease.Value(), "extra.label");
-        FieldValue original = Text(system, "실패해도 그대로인 원본");
+        FieldValue original = StringValue(system, "실패해도 그대로인 원본");
         REQUIRE(PathWrite(objects, access, handle, extraLabel.View(), original));
         for (uint64 attempt = 1; attempt <= 2; ++attempt) {
             HookAllocator failing(system);
@@ -411,7 +411,7 @@ TEST(DetachedPath_StagedNestedPaths) {
             REQUIRE(made);
             created = made.Value();
             const PathTarget staged = PathTarget::Staged(transaction, created);
-            FieldValue label = Text(system, "staged 잎");
+            FieldValue label = StringValue(system, "staged 잎");
             REQUIRE(PathWrite(objects, access, staged, leafLabel.View(), label));
             FieldValue five = Unsigned(system, ValueKind::UInt32, 5);
             REQUIRE(PathWrite(objects, access, staged, plain.View(), five));
@@ -479,7 +479,7 @@ struct Reentry {
 void WriteDuringDetach(void* context) noexcept {
     Reentry& reentry = *static_cast<Reentry*>(context);
     SystemAllocator local;
-    FieldValue value = Text(local, "재진입");
+    FieldValue value = StringValue(local, "재진입");
     reentry.duringDetach = ErrorOf(PathWrite(*reentry.objects, reentry.objects->OwnerAccess(),
                                              reentry.owner, reentry.label, value));
 }
@@ -519,7 +519,7 @@ TEST(DetachedPath_ReentryDuringDetachAndAfterAttach) {
         const ParsedPath extra(lease.Value(), "extra");
         const ParsedPath extraLabel(lease.Value(), "extra.label");
         const ParsedPath plain(lease.Value(), "plain");
-        FieldValue original = Text(system, "옛 값 — 해제 콜백을 부를 만큼 긴 문자열");
+        FieldValue original = StringValue(system, "옛 값 — 해제 콜백을 부를 만큼 긴 문자열");
         REQUIRE(PathWrite(objects, access, handle, extraLabel.View(), original));
         Reentry reentry;
         reentry.objects = &objects;
@@ -537,7 +537,7 @@ TEST(DetachedPath_ReentryDuringDetachAndAfterAttach) {
               original.string.View());
         CHECK(ReadText(objects, handle, extraLabel.View(), read) == original.string.View());
 
-        FieldValue fresh = Text(system, "새 값");
+        FieldValue fresh = StringValue(system, "새 값");
         REQUIRE(PathWrite(objects, access, PathTarget::Value(box), extraLabel.View(), fresh));
         auto stamp = objects.MutationStamp(access, handle);
         PreparedAttach prepared;

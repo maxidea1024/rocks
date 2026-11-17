@@ -1,5 +1,6 @@
 #include "TextAssignApplyInternal.h"
 #include "TextJsonInternal.h"
+#include <Object/ValueText.h>
 
 // JSON import다(리플렉션 B9i4 — ReflectionText/TextJson.h의 ImportJson). JSON 객체를 스키마와 함께
 // 따라가며 struct는 멤버마다 내려가고(병합), 그 밖의 자리는 대입 하나(미리 읽은 값 — 통째 교체,
@@ -82,6 +83,7 @@ struct Importer {
                         FieldValue& out) noexcept;
     Result<bool> FlagNames(const TextScalarType& type, JsonValue value, StringView pathText,
                            FieldValue& out) noexcept;
+    Result<bool> TextAt(JsonValue value, StringView pathText, FieldValue& out) noexcept;
     Result<void> Assign(AssignmentKind kind, const TextSlot& slot, JsonValue at,
                         TextValue* value) noexcept;
 };
@@ -627,6 +629,10 @@ Result<bool> Importer::Scalar(const TextScalarType& type, JsonValue value, Strin
     const TextSource source = TextSource::Json(value.Position());
     const ValueKind kind = type.type.kind;
     StringView message;
+    if (kind == ValueKind::Text) {
+        return TextAt(value, pathText, out);
+    }
+
     if (kind == ValueKind::Bool) {
         if (value.IsBool()) {
             out.kind = ValueKind::Bool;
@@ -673,6 +679,69 @@ Result<bool> Importer::Scalar(const TextScalarType& type, JsonValue value, Strin
     }
 
     return detail::Report(Context(), TextDiagnosticCode::InvalidValue, source, pathText, message);
+}
+
+// Text 값(리플렉션 B9l — 10.4절 JSON 열)을 읽는다: null은 비어 있음, 문자열은 Invariant
+// 원문(명령행과 같은 해석 — 빈 문자열은 비어 있음), 객체는 정확히 키 셋 `{"id": "<TextId>",
+// "revision": <u64>, "source": "<fallback>"}`의 Localized다. 그 밖의 모양·모르는 키·빠진 키·id
+// 0·revision 0·잘못된 원문은 InvalidValue 진단이다. 노드는 out의 allocator로 만든다.
+Result<bool> Importer::TextAt(JsonValue value, StringView pathText, FieldValue& out) noexcept {
+    const TextSource source = TextSource::Json(value.Position());
+    const TextScalarType type{ValueType{ValueKind::Text, {}}, nullptr};
+    if (value.IsString()) {
+        return ParseTextScalar(Context(), type, value.GetString(), source, pathText, out);
+    }
+
+    if (value.IsNull()) {
+        return ParseTextScalar(Context(), type, StringView(), source, pathText, out);
+    }
+
+    if (!value.IsObject()) {
+        return detail::Report(Context(), TextDiagnosticCode::InvalidValue, source, pathText,
+                              "expected a string, null or a localized text object");
+    }
+
+    const JsonValue id = value.Find(detail::TextIdKey);
+    const JsonValue revision = value.Find(detail::TextRevisionKey);
+    const JsonValue text = value.Find(detail::TextSourceKey);
+    if (value.Size() != 3 || !id.IsValid() || !id.IsString() || !revision.IsValid() ||
+        !revision.IsNumber() || !text.IsValid() || !text.IsString()) {
+        return detail::Report(Context(), TextDiagnosticCode::InvalidValue, source, pathText,
+                              "expected exactly \"id\", \"revision\" and \"source\"");
+    }
+
+    if (auto started = Context().Start(); !started) {
+        return Result<bool>::Failure(started.Error());
+    }
+
+    if (auto charged =
+            Context().ChargeInput(id.GetString().ByteCount() + text.GetString().ByteCount());
+        !charged) {
+        return Result<bool>::Failure(charged.Error());
+    }
+
+    auto parsedId = ParseScalarText(ValueType{ValueKind::Guid, {}}, nullptr, id.GetString());
+    auto parsedRevision = revision.TryGetUInt64();
+    if (!parsedId || !parsedRevision) {
+        return detail::Report(Context(), TextDiagnosticCode::InvalidValue, source, pathText,
+                              "invalid localized text id or revision");
+    }
+
+    auto made = Text::Localized(out.GetAllocator(), parsedId.Value().guid, parsedRevision.Value(),
+                                text.GetString());
+    if (!made) {
+        if (made.Error() == ErrorCode::OutOfMemory) {
+            return Result<bool>::Failure(made.Error());
+        }
+
+        return detail::Report(Context(), TextDiagnosticCode::InvalidValue, source, pathText,
+                              "invalid localized text (zero id or revision, bad or long source)");
+    }
+
+    out.kind = ValueKind::Text;
+    out.present = true;
+    out.text = Move(made.Value());
+    return Result<bool>::Success(true);
 }
 
 // Flags enum의 이름 배열을 읽는다(명령행 표기 `A+B`로 이어 같은 해석을 쓴다 — 빈 배열은 0).

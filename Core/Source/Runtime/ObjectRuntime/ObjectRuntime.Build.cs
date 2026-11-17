@@ -7,5 +7,6 @@ public sealed class ObjectRuntime : CoreModuleRules
 
     // Serialization: field codecs (FieldCodec.h and GeneratedFieldCodec.h) use the Archive and Record formats
     // (Docs/Design/ReflectionFoundations.ko.md section 6.4).
-    protected override string[] RequiredModules => ["MetaSchema", "Task", "Serialization"];
+    // Localization: rocks::Text field values (Docs/Design/ReflectionExtensions.ko.md section 13).
+    protected override string[] RequiredModules => ["MetaSchema", "Task", "Serialization", "Localization"];
 }

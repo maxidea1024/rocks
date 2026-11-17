@@ -302,11 +302,11 @@ TEST(MapPathReentry_OwnerDestroyedDuringReserveLeavesContainerUntouched) {
     FillRatios(world);
     const char* names[] = {LONG_KEY("a"), LONG_KEY("b"), LONG_KEY("c"), LONG_KEY("d")};
     for (const char* name : names) {
-        String word = Text(world.objects.ObjectAllocator(), name);
+        String word = MakeString(world.objects.ObjectAllocator(), name);
         With(world.objects, world.owner, [&](MapHolder& value) noexcept {
             REQUIRE(value.words.Add(Move(word)));
             MapPoint point(world.objects.ObjectAllocator());
-            Put(value.points, Text(world.objects.ObjectAllocator(), name), Move(point));
+            Put(value.points, MakeString(world.objects.ObjectAllocator(), name), Move(point));
         });
     }
 

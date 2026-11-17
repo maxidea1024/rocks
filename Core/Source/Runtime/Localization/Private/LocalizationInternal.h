@@ -8,7 +8,10 @@ namespace rocks::detail {
 enum class TextKind : uint8 {
     Invariant,
     Localized,
-    Format
+    Format,
+    // Text::Integer의 10진 표기다(해석은 Invariant와 같고, 저장할 수 있는 형태가 아닌 것만 다르다 —
+    // 리플렉션 B9l TryGetPersistentForm).
+    Integer
 };
 
 struct TextArgumentData {

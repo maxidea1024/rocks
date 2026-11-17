@@ -342,6 +342,31 @@ Result<bool> ParseScalarCore(TextCodecContext& context, const TextScalarType& ty
     }
     case ValueKind::Name:
         return ParseName(context, text, out, failure);
+    case ValueKind::Text: {
+        // 명령행 Text는 Invariant 원문만이다(리플렉션 B9l — 사용자 결정 U7). 빈 텍스트는 비어 있음
+        // (Text 기본값)이다. 노드는 out의 allocator로 만든다(게시 쓰기가 대상 객체 allocator로 다시
+        // 복사한다).
+        if (text.IsEmpty()) {
+            out.text.Reset();
+            return Result<bool>::Success(true);
+        }
+
+        auto made = Text::Invariant(out.GetAllocator(), text);
+        if (!made) {
+            if (made.Error() == ErrorCode::InvalidArgument) {
+                return Fail(failure, TextDiagnosticCode::InvalidValue, "not valid UTF-8");
+            }
+
+            if (made.Error() == ErrorCode::CapacityExceeded) {
+                return Fail(failure, TextDiagnosticCode::InvalidValue, "text source is too long");
+            }
+
+            return Result<bool>::Failure(made.Error());
+        }
+
+        out.text = Move(made.Value());
+        return Result<bool>::Success(true);
+    }
     case ValueKind::ObjectReference:
     case ValueKind::WeakObjectReference:
     case ValueKind::SoftObjectReference:
@@ -448,6 +473,20 @@ Result<void> FormatTextScalar(TextCodecContext& context, const TextScalarType& t
                                               : out.TryAppendFormat("{}", value.float64);
     case ValueKind::Utf8String:
         return out.TryAppend(value.string.View());
+    case ValueKind::Text: {
+        // 명령행 Text는 Invariant 원문이다(비어 있음은 빈 텍스트). Localized·Format·Integer는
+        // 명령행 표기가 없다(Unsupported — Localized는 JSON 객체로 쓴다, 리플렉션 B9l).
+        TextPersistentView view;
+        if (auto got = value.text.TryGetPersistentForm(view); !got) {
+            return got;
+        }
+
+        if (view.form == TextPersistentForm::Localized) {
+            return Result<void>::Failure(ErrorCode::Unsupported);
+        }
+
+        return out.TryAppend(view.source);
+    }
     case ValueKind::Name: {
         auto display =
             AcquireNameFieldText(context.Options().names, value.name, context.GetAllocator());

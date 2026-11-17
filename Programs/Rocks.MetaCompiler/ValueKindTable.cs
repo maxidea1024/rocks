@@ -116,7 +116,10 @@ internal static class ValueKindTable
         new("StaticArray", 27, ValueKindProperty.Field | ValueKindProperty.StructMember | ValueKindProperty.Container),
         // InstancedStruct<>(실행 중 정해지는 struct 값 하나 — 리플렉션 B9j)는 필드·멤버·Array·정적 배열 원소·Map 값 자리의 aggregate다.
         // 대상 type은 Base struct ID(0 = 제한 없음)이고 Required·키·Set 원소·Optional 내부가 아니다.
-        new("InstancedStruct", 28, Placed | ValueKindProperty.MapValue | ValueKindProperty.HasTargetType)
+        new("InstancedStruct", 28, Placed | ValueKindProperty.MapValue | ValueKindProperty.HasTargetType),
+        // rocks::Text(지역화 문구 — 리플렉션 B9l)는 필드·멤버·Array·정적 배열 원소·Map 값 자리의 통째 FieldValue다. 키·Set 원소·
+        // Optional 내부가 아니고 Required를 받지 않는다.
+        new("Text", 29, Placed | ValueKindProperty.MapValue | ValueKindProperty.WholeFieldValue)
     ];
 
     // 성질과 같은 뜻의 런타임 질의 함수(rocks:: 이름공간)다. 대조 헤더가 칸마다 이 함수를 부른다.

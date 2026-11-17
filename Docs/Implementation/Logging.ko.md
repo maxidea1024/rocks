@@ -158,7 +158,7 @@ int main() {
 - **큐가 가득 찼을 때:** 생산자는 기다리지 않는다. 큐가 90%를 넘으면 Info 이하를 거부하고, 남은 10%는 Warning 이상 전용이다. 그래도 차면 버리고 레벨별로 센다. 공간이 생기면 "dropped since the last report"를 한 줄 남긴다. 도구 호스트는 `overflow = LogOverflow::WaitForSpace`로 손실 대신 대기를 고를 수 있다(게임 스레드에서는 쓰지 않는다).
 - `Flush(timeout)`은 이 호출 전에 넣은 기록이 모두 sink에 도달할 때까지 기다린다.
 - `Stats()`는 손실·잘림·템플릿 오류·sink 실패·차단 수와 비상 모드 여부를 보여 준다.
-- **Stop의 제한 시간:** drain이 `drainTimeoutMilliseconds`를 넘기면 남은 수를 알리고 진행한다. 출력 스레드가 sink에서 끝내 돌아오지 않으면 스레드와 메모리를 남겨 둔 채 반환한다(`Stats().writerAbandoned`). 이 경우 호스트는 LogSystem을 파괴하지 말고 프로세스를 끝낸다.
+- **Stop의 제한 시간:** drain이 `drainTimeoutMilliseconds`를 넘기면 남은 수를 알리고 진행한다. 출력 스레드가 sink에서 끝내 돌아오지 않으면 스레드와 메모리를 남겨 둔 채 반환한다(`Stats().writerAbandoned`). 이 경우 호스트는 LogSystem을 파괴하지 말고 프로세스를 끝낸다. 등록한 sink도 그때까지 살아 있어야 하고, 그동안 `AddSink`·`RemoveSink`는 `Busy`다. sink 콜백 안의 `Stop`은 아무것도 하지 않는다.
 
 ## sink와 출력 형식
 
@@ -249,7 +249,7 @@ FileLogSink fileSink(allocator, file);
 
 - **파일 이름과 회전**
   - 실행마다 새 파일 `<폴더>/<호스트>-YYYYMMDDTHHMMSSmmmZ.log`를 만듭니다. 회전한 파일과 같은 시각에 시작한 다른 실행은 `-2`, `-3` …이 붙습니다.
-  - `maxBytes`(기본 16 MiB)를 넘으면 회전하고, `retention`(기본 8, 최대 256)개까지만 남깁니다.
+  - `maxBytes`(기본 16 MiB)를 넘으면 회전하고, `retention`(기본 8, 최대 256)개까지만 남깁니다. 보관 정리는 이 호스트의 이름 모양(`<호스트>-<시각>[-<번호>].log`)만 세므로 `Sandbox`와 `Sandbox-Server`의 파일은 섞이지 않습니다.
 - **쓰기:** flush 묶음 단위로 한 번에 씁니다. 렌더는 텍스트 레이아웃 또는 JSON lines sink와 같습니다. 쓰기나 열기가 실패하면 `DependencyFailed`를 돌려주고 다음 묶음에서 다시 엽니다.
 - **암호화는 선택이며 기본은 끔입니다.**
   - Core는 Crypto보다 아래 계층이라, 암호화는 호스트가 `crypto::LogFileSealer`를 만들어 `cipher`로 넘깁니다.
@@ -261,12 +261,43 @@ FileLogSink fileSink(allocator, file);
   - 그 뒤로 `length(4) | 봉인된 묶음`이 반복됩니다.
   - 정상 종료면 Final 기록으로 끝납니다.
 - **명령(Commandlet)**
-  - `log keygen <out-public> <out-private>`: 키 쌍을 만듭니다. 기존 파일은 덮어쓰지 않습니다. **개인키는 저장소나 쿠킹 결과에 넣지 않습니다.**
-  - `log decode <file> --key <private> [--json]`: 평문을 표준 출력으로 냅니다. `--json`은 상태 요약을 표준 오류에 JSON 한 줄로 냅니다.
+  - `log keygen <out-public> <out-private>`: 키 쌍을 만듭니다. 두 경로 중 하나라도 이미 있으면 아무 파일도 남기지 않고 실패합니다(짝이 맞지 않는 키 쌍 방지). **개인키는 저장소나 쿠킹 결과에 넣지 않습니다.**
+  - `log decode <file> --key <private> [--json]`: 평문을 표준 출력으로 냅니다. `--json`은 상태 요약(`batches`·`endMarker`·`partialTail`·`error`, 성공·실패 같은 모양)을 표준 오류에 JSON 한 줄로 냅니다.
     - 끝 표시가 없으면(비정상 종료) 마지막 완전한 묶음까지 내고 "no end marker (abnormal termination)"를 알립니다.
     - 변조되었으면 "authentication failed"(종료 코드 1)입니다.
   - `log seal <plain> <out> --public <public>`: 같은 형식으로 봉인합니다(진단·시험용).
 - **무할당 범위:** 파일을 연 뒤의 쓰기·봉인 경로는 엔진 allocator와 `operator new`를 쓰지 않습니다. 다만 회전 때 새 파일을 여는 OS 핸들과 새 KEM 캡슐화(Crypto 키 저장소)는 예외입니다.
+
+## 설정 파일로 고르기(LogHost)
+
+엔진 호스트는 `LogHost` 모듈로 설정 시스템의 `log.*` 콘솔 설정을 읽어 LogSystem과 sink를 만든다(Core는 Config·Crypto 아래라 이 모듈이 그 위에서 묶는다).
+
+```cpp
+REQUIRE(RegisterLogSettings(context));                 // log.* 등록(모듈 등록 함수, 전역 생성자 없음)
+// ... 설정 파일 층을 넣고 context.Sync()
+LogHost host(allocator);
+(void)host.Start(LogSystemConfig::ForEngineHost(), &context, "Sandbox");
+LogInstallScope installed(host.System());
+(void)host.Watch(context);                             // log.level·log.levels 변경을 sync 지점에서 적용
+(void)context.CompleteStartup();                       // 이후 log.mode·log.file.* 변경은 거부
+```
+
+| 설정 | 종류 | 기본값 | 변경 |
+|---|---|---|---|
+| `log.mode` | string | `default`(호스트 프리셋) · `async` · `sync` | 시작 뒤 고정 |
+| `log.level` | string | `info` (`trace`…`fatal`) | 실행 중, sync 지점 |
+| `log.levels` | string | `""` — `Graphics=warning,Engine.World=debug` | 실행 중, sync 지점 |
+| `log.file.enabled` | bool | `false` | 시작 뒤 고정 |
+| `log.file.directory` | string | `Saved/Logs` | 시작 뒤 고정 |
+| `log.file.format` | string | `text` · `jsonlines` | 시작 뒤 고정 |
+| `log.file.max_bytes` | int64 | `16777216` (64 KiB–1 TiB) | 시작 뒤 고정 |
+| `log.file.retention` | int32 | `8` (1–256) | 시작 뒤 고정 |
+| `log.file.encrypt` | bool | `false` | 시작 뒤 고정 |
+| `log.file.recipient_key` | string | `""` — X-Wing 공개키 base64(`log keygen`이 출력) | 시작 뒤 고정 |
+
+- 레벨 이름과 `log.levels`의 접두사는 대소문자를 가리지 않는다. 잘못된 항목은 Warning을 남기고 건너뛴다.
+- 암호화를 켰는데 공개키가 없거나 틀리면 파일을 쓰지 않고 Error를 한 번 남긴다(평문으로 내려가지 않는다).
+- Sandbox: `Sandbox --engine --config <Engine.json>`의 `"Settings"` 섹션이 이 값들이다. 예: `{"Settings": {"log.mode": "sync", "log.file.enabled": true}}`.
 
 ## 시험에서 쓰기
 
@@ -276,6 +307,4 @@ FileLogSink fileSink(allocator, file);
 
 ## 아직 구현되지 않은 것
 
-- 설정 파일 연결(`log.mode`·`log.file.*`·레벨 재정의): LG9
-- Sandbox·명령줄 도구의 LogSystem 설치: LG8
 - TraceCapture `log` 채널 연결과 상관 id, 구조체 펼치기(`{@Obj}`), 사용자 Formatter spec의 컴파일 타임 검증: 후속
