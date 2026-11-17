@@ -1,5 +1,5 @@
-// 생성 파일이다. 직접 고치지 않는다: Rocks.ToolTests number-tables --root . --write
-// 생성기 버전 1. 128비트 값은 {하위 64비트, 상위 64비트} 순서다.
+// Generated file. Do not edit by hand: Rocks.ToolTests number-tables --root . --write
+// Generator version 1. 128-bit values are ordered {low 64 bits, high 64 bits}.
 #pragma once
 
 #include <Base/Types.h>
@@ -11,7 +11,7 @@ inline constexpr int32 LargestPowerOfTen = 308;
 inline constexpr int32 RyuBitCount = 125;
 
 // clang-format off
-// 5^q ≈ Pow5Significand[q + 342] · 2^Pow5Exponent[q + 342](내림, 상위 비트 2^127이 켜져 있다).
+// 5^q ≈ Pow5Significand[q + 342] · 2^Pow5Exponent[q + 342] (rounded down, top bit 2^127 is set).
 inline constexpr uint64 Pow5Significand[][2] = {
     {0x113FAA2906A13B3Fu, 0xEEF453D6923BD65Au},
     {0x4AC7CA59A424C507u, 0x9558B4661B6565F8u},
@@ -724,7 +724,7 @@ inline constexpr int16 Pow5Exponent[] = {
     583, 585, 588,
 };
 
-// Ryu: ⌊2^(B(q) − 1 + 125) / 5^q⌋ + 1(B(q) = 5^q의 비트 길이).
+// Ryu: ⌊2^(B(q) − 1 + 125) / 5^q⌋ + 1 (B(q) = bit length of 5^q).
 inline constexpr uint64 Pow5InvSplit[][2] = {
     {0x0000000000000001u, 0x2000000000000000u},
     {0x999999999999999Au, 0x1999999999999999u},
@@ -1070,7 +1070,7 @@ inline constexpr uint64 Pow5InvSplit[][2] = {
     {0x0958F94B348498A1u, 0x12AB168CC36CACBFu},
 };
 
-// Ryu: 5^i를 125비트로 맞춘 값(넘치는 비트는 버린다).
+// Ryu: 5^i normalized to 125 bits (excess bits are truncated).
 inline constexpr uint64 Pow5Split[][2] = {
     {0x0000000000000000u, 0x1000000000000000u},
     {0x0000000000000000u, 0x1400000000000000u},

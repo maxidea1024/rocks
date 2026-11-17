@@ -1,6 +1,6 @@
 using Rocks.Build.Rules;
 
-// 원시 타입·Guid POD·ABI 정의만 담는 최하위 헤더 모듈이다(할당 없음).
+// Lowest-level header module holding only primitive types, the Guid POD and ABI definitions (no allocation).
 public sealed class Base : CoreModuleRules
 {
     protected override string ModuleName => "Base";

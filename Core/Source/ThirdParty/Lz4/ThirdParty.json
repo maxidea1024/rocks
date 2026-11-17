@@ -6,12 +6,12 @@
   "source": {
     "url": "https://github.com/lz4/lz4/releases/download/v1.11.1/lz4-1.11.1.tar.gz",
     "sha256": "683fed08a844ad012196381e40badf80c0bbe4962959761416d41c9e67d77ec7",
-    "verification": "GitHub 릴리스 자산 digest(sha256)와 일치. upstream 서명 파일은 없다."
+    "verification": "Matches the GitHub release asset digest (sha256). There is no upstream signature file."
   },
   "licenses": [
     {
       "spdx": "BSD-2-Clause",
-      "upstreamExpression": "BSD-2-Clause (lib/), GPL-2.0-or-later (programs/ 등 lib 밖, 들이지 않음)",
+      "upstreamExpression": "BSD-2-Clause (lib/), GPL-2.0-or-later (programs/ and others outside lib, not imported)",
       "file": "lz4-1.11.1/lib/LICENSE",
       "binaryNoticeRequired": true
     }
@@ -128,13 +128,13 @@
     }
   ],
   "notes": [
-    "Lz4Unity.c 한 번역 단위로 lz4.c와 lz4hc.c를 함께 빌드한다(upstream이 지원하는 LZ4_SRC_INCLUDED 방식). lz4hc.c의 -Wunused-function 억제 분기는 이 방식에서 비활성이다.",
-    "lz4frame.c와 xxhash.c는 따로 컴파일한다. upstream 합본(lz4.c·lz4hc.c·lz4frame.c 순서)은 lz4.c의 ALLOC 매크로를 lz4frame.c가 이어 쓰는데, LZ4_STATIC_LINKING_ONLY_DISABLE_MEMORY_ALLOCATION이 그 매크로를 컴파일 오류 표지로 바꾸므로 합칠 수 없다. 따로 컴파일한 lz4frame.c는 lz4.c의 할당 API(LZ4_createStream 등)를 쓰지 않는다. xxhash.c는 upstream 합본에서도 별도 번역 단위다.",
-    "XXH_NAMESPACE=LZ4_: LZ4의 xxHash 0.6.5 심볼을 LZ4_XXH32 등으로 바꾼다. zstd는 자기 xxhash.h에서 XXH_NAMESPACE를 ZSTD_로 정하므로 두 라이브러리를 함께 링크해도 심볼이 겹치지 않는다. lz4frame.c와 xxhash.c가 같은 정의를 받는다.",
-    "LZ4F 할당: adapter는 LZ4F_createCompressionContext_advanced·LZ4F_createDecompressionContext_advanced(LZ4F_STATIC_LINKING_ONLY, v1.9.4+ 실험 API)에 할당·해제 함수를 모두 넘기므로 LZ4F의 모든 할당이 Rocks Allocator를 거친다. lz4frame.c에는 사용자 할당기가 없을 때 쓰는 기본 할당 경로(LZ4F_compressFrame·LZ4F_createCompressionContext·LZ4F_createDecompressionContext·LZ4F_createCDict)가 남는다. LZ4_USER_MEMORY_FUNCTIONS(upstream 설정 지점)로 그 경로를 Lz4Unity.c의 LZ4_malloc·LZ4_calloc·LZ4_free에 연결하고, 이 함수들은 NULL을 돌려주므로 실수로 기본 경로를 타면 CRT 대신 할당 실패가 된다. lz4.c는 DISABLE_MEMORY_ALLOCATION 분기가 먼저라 영향이 없다. xxhash.c의 XXH32_createState·XXH64_createState는 CRT malloc을 직접 부르지만 lz4frame.c는 상태를 문맥 안에 두고 이 함수를 쓰지 않는다(Docs/Design/Compression.ko.md 12.2절).",
-    "LZ4F_MULTITHREAD는 정의하지 않는다(기본 0: 스레드 코드가 컴파일되지 않고 nbWorkers 0만 쓴다).",
-    "LZ4_compress_fast_extState_fastReset(LZ4_STATIC_LINKING_ONLY, lz4hc.h가 LZ4_HC_STATIC_LINKING_ONLY일 때 정의)과 LZ4_STREAMHC_EXTSIZE·LZ4_compress_HC_extStateHC_fastReset(LZ4_HC_STATIC_LINKING_ONLY, v1.11 실험 API)을 쓴다. 확장 상태를 쓰면 수준 10–12도 압축 중 할당이 없다. LZ4F의 HC 상태도 같은 확장 크기다. 정적 링크·고정 버전이라 실험 API를 쓸 수 있다.",
-    "LZ4_STATIC_LINKING_ONLY_DISABLE_MEMORY_ALLOCATION은 lz4.c·lz4hc.c의 할당 API를 컴파일 단계에서 제거한다.",
-    "LZ4FLIB_VISIBILITY=: lz4frame.h가 GNU 계열에서 붙이는 visibility(\"default\")를 해제한다(LZ4LIB_VISIBILITY=와 같은 이유). lz4frame_static.h(LZ4F_STATIC_LINKING_ONLY를 정의하고 lz4frame.h를 포함하는 호환 헤더)는 consumerDefines의 LZ4F_STATIC_LINKING_ONLY로 대신하므로 들이지 않는다."
+    "lz4.c and lz4hc.c are built together as one translation unit through Lz4Unity.c (the LZ4_SRC_INCLUDED approach upstream supports). The -Wunused-function suppression branch of lz4hc.c is inactive in this approach.",
+    "lz4frame.c and xxhash.c are compiled separately. The upstream amalgamation (lz4.c, lz4hc.c, lz4frame.c in that order) has lz4frame.c reuse lz4.c's ALLOC macro, but LZ4_STATIC_LINKING_ONLY_DISABLE_MEMORY_ALLOCATION turns that macro into a compile error marker, so they cannot be combined. The separately compiled lz4frame.c does not use lz4.c's allocation API (LZ4_createStream and the like). xxhash.c is a separate translation unit in the upstream amalgamation as well.",
+    "XXH_NAMESPACE=LZ4_: renames LZ4's xxHash 0.6.5 symbols to LZ4_XXH32 and the like. zstd sets XXH_NAMESPACE to ZSTD_ in its own xxhash.h, so the symbols do not collide when both libraries are linked together. lz4frame.c and xxhash.c receive the same definitions.",
+    "LZ4F allocation: the adapter passes both allocation and free functions to LZ4F_createCompressionContext_advanced and LZ4F_createDecompressionContext_advanced (LZ4F_STATIC_LINKING_ONLY, experimental API since v1.9.4), so every LZ4F allocation goes through the Rocks Allocator. lz4frame.c keeps default allocation paths used when there is no user allocator (LZ4F_compressFrame, LZ4F_createCompressionContext, LZ4F_createDecompressionContext, LZ4F_createCDict). LZ4_USER_MEMORY_FUNCTIONS (an upstream configuration point) connects those paths to LZ4_malloc, LZ4_calloc and LZ4_free in Lz4Unity.c, and these functions return NULL, so accidentally taking a default path becomes an allocation failure instead of the CRT. lz4.c is unaffected because its DISABLE_MEMORY_ALLOCATION branch comes first. XXH32_createState and XXH64_createState in xxhash.c call the CRT malloc directly, but lz4frame.c keeps its state inside the context and does not use these functions (Docs/Design/Compression.ko.md section 12.2).",
+    "LZ4F_MULTITHREAD is not defined (default 0: thread code is not compiled and only nbWorkers 0 is used).",
+    "Uses LZ4_compress_fast_extState_fastReset (LZ4_STATIC_LINKING_ONLY, defined by lz4hc.h under LZ4_HC_STATIC_LINKING_ONLY) and LZ4_STREAMHC_EXTSIZE and LZ4_compress_HC_extStateHC_fastReset (LZ4_HC_STATIC_LINKING_ONLY, experimental API in v1.11). With external state, levels 10-12 also allocate nothing during compression. The LZ4F HC state uses the same external size. Static linking and a pinned version allow the experimental APIs.",
+    "LZ4_STATIC_LINKING_ONLY_DISABLE_MEMORY_ALLOCATION removes the allocation APIs of lz4.c and lz4hc.c at compile time.",
+    "LZ4FLIB_VISIBILITY=: removes the visibility(\"default\") lz4frame.h adds on the GNU family (same reason as LZ4LIB_VISIBILITY=). lz4frame_static.h (a compatibility header that defines LZ4F_STATIC_LINKING_ONLY and includes lz4frame.h) is not imported because LZ4F_STATIC_LINKING_ONLY in consumerDefines replaces it."
   ]
 }

@@ -1,12 +1,12 @@
 using Rocks.Build.Rules;
 
-// 압축 처리량 측정 타깃이다. 수치는 Release로 측정한다:
+// Compression throughput benchmark target. Measure with Release:
 //   dotnet msbuild Rocks.proj /t:Build /p:RocksTarget=CompressionBench /p:Configuration=Release
 public sealed class CompressionBenchTarget : TargetRules
 {
     public override string Name => "CompressionBench";
 
-    // 개발 도구·시험 실행 파일이다(Release 배제 정책 대상이 아니다).
+    // Development tool and test executable (not subject to the Release exclusion policy).
     public override TargetType Type => TargetType.Program;
 
     public override IReadOnlyList<string> Modules => ["CompressionBench"];

@@ -1,8 +1,8 @@
 using Rocks.Build;
 using Rocks.Build.Rules;
 
-// zstd 사전 학습(도구 전용, Docs/Design/Compression.ko.md 11.6절). zstd dictBuilder는 CRT malloc을 직접 쓰므로(승인된
-// 좁은 예외: 학습 시점만) 게임 런타임이 아니라 쿠커·도구가 링크한다. zdict.h를 include하는 유일한 모듈이다.
+// zstd dictionary training (tool only, Docs/Design/Compression.ko.md section 11.6). zstd dictBuilder calls the CRT malloc directly (an
+// approved narrow exception: training time only), so cookers and tools link it, not the game runtime. This is the only module that includes zdict.h.
 public sealed class CompressionTraining : CoreModuleRules
 {
     private static readonly string[] Codecs = ["Zstd"];

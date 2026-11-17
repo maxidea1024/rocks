@@ -157,8 +157,8 @@ internal static class ValueKindTable
     public static string ParityHeader(IReadOnlyList<ValueKindRow> rows)
     {
         StringBuilder text = new();
-        text.Append("// 생성 파일: Rocks.MetaCompiler ValueKindTable이 C# 값 종류 성질 표로 만든 런타임 표 대조 헤더다\n");
-        text.Append("// (Docs/Design/ReflectionExtensions.ko.md 1.3절). 고치지 말고 C#·런타임 표를 함께 고친다.\n");
+        text.Append("// Generated file: runtime table parity header built by Rocks.MetaCompiler ValueKindTable from the C# value kind property table\n");
+        text.Append("// (Docs/Design/ReflectionExtensions.ko.md section 1.3). Do not edit; change the C# and runtime tables together.\n");
         text.Append("#pragma once\n\n#include <Meta/TypeSchema.h>\n\n");
         foreach ((ValueKindProperty property, _) in Queries)
         {

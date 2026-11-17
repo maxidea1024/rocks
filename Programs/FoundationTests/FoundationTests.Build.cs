@@ -2,33 +2,32 @@ using Rocks.Build;
 using Rocks.Build.Rules;
 
 /// <summary>
-/// 엔진 모듈 테스트를 한 실행 파일로 묶는 규칙이다. 각 모듈의 Tests/ 폴더와 테스트 runner(이 폴더의
-/// Private/), 테스트 지원 코드(Core/Source/Developer/TestSupport)를 함께 빌드한다.
-/// 새 모듈의 테스트를 추가하려면 해당 계층 목록(RuntimeTestModules·ObjectTestModules·EngineTestModules)에
-/// 모듈 이름을 넣는다.
+/// Rule that bundles engine module tests into one executable. Builds each module's Tests/ folder, the test runner (this folder's
+/// Private/) and the test support code (Core/Source/Developer/TestSupport) together.
+/// To add tests of a new module, put the module name in the list of its layer (RuntimeTestModules, ObjectTestModules or EngineTestModules).
 /// </summary>
 public abstract class TestsModule : ModuleRules
 {
-    /// <summary>테스트 실행 파일이 포함하는 계층이다. 위 계층은 아래 계층의 테스트를 모두 포함한다.</summary>
+    /// <summary>Layer included by a test executable. A higher layer includes all tests of the lower layers.</summary>
     protected enum TestLayer { Core, Foundation, Engine }
 
-    // Object 계열이 아닌 런타임 모듈의 테스트다.
+    // Tests of runtime modules outside the Object family.
     private static readonly string[] RuntimeTestModules = ["Base", "Core", "PlatformBase", "Task", "Localization", "Serialization", "Compression", "AsyncCompression", "Crypto", "DeterministicMath", "TraceCapture"];
 
-    // Core 계층 개발 도구 모듈(Core/Source/Developer)의 테스트다(모든 테스트 실행 파일에 들어간다).
+    // Tests of Core layer development tool modules (Core/Source/Developer) (included in every test executable).
     private static readonly string[] DeveloperTestModules = ["CompressionTraining", "TraceAnalysis"];
 
-    // Object 계열 모듈의 테스트다(FoundationTests·EngineTests에 들어간다).
+    // Tests of Object family modules (included in FoundationTests and EngineTests).
     private static readonly string[] ObjectTestModules = ["ObjectRuntime", "ObjectSerialization", "ReflectionText", "Config"];
 
-    // 엔진 계층 모듈의 테스트다(EngineTests에만 들어간다). 경로는 Engine/Source 아래 Group/Module이다.
+    // Tests of engine layer modules (EngineTests only). Paths are Group/Module under Engine/Source.
     private static readonly string[] EngineTestModules = ["Runtime/Input", "Runtime/PlatformWindow", "Runtime/World", "Runtime/Engine", "Runtime/GraphicsTypes", "Runtime/Graphics", "Runtime/RenderBase", "Runtime/AssetRuntime", "Developer/AssetTools", "Developer/ShaderToolTable", "Developer/ShaderToolLoader", "Developer/ShaderCompiler"];
 
-    // EngineTests가 링크하는 엔진 모듈이다(테스트가 쓰는 최상위 모듈만 둔다. 하위 의존은 전파된다).
+    // Engine modules EngineTests links (only the top modules tests use; lower dependencies propagate).
     private static readonly string[] EngineTestDependencies = ["PlatformWindow", "Engine", "Graphics", "RenderBase", "SpirvReflect", "ShaderToolLoader", "ShaderCompiler"];
 
-    // EngineTests의 셰이더 도구 외부 라이브러리 시험(Programs/FoundationTests/Engine)이 include하는 라이브러리다. 헤더는 이 실행 파일의
-    // Private include로만 들어가고(adapter 방식) 엔진 경고 규칙으로 경고 0이어야 한다(Docs/Design/ShaderSystem.ko.md 8절).
+    // Libraries included by the EngineTests shader tool external library tests (Programs/FoundationTests/Engine). Headers enter only through this executable's
+    // Private includes (adapter approach) and must produce zero warnings under the engine warning rules (Docs/Design/ShaderSystem.ko.md section 8).
     private static readonly string[] EngineThirdPartyHeaders = ["VulkanHeaders", "SpirvReflect", "SpirvCross", "SpirvTools"];
 
     protected abstract TestLayer Layer { get; }
@@ -54,7 +53,7 @@ public abstract class TestsModule : ModuleRules
             directories.Add("Programs/FoundationTests/Engine");
         }
 
-        // POSIX 플랫폼은 공통 테스트 지원 구현을 쓴다.
+        // POSIX platforms use the shared test support implementation.
         directories.Add(context.Platform == NativePlatform.Windows ? $"{support}/Private/Win64" : $"{support}/Private/Posix");
         var sources = context.Sources(directories.ToArray()).ToList();
         sources.Add(context.PathInRoot(context.Configuration == NativeConfiguration.Asan
@@ -67,9 +66,9 @@ public abstract class TestsModule : ModuleRules
                 .. EngineTestDependencies]
         };
 
-        // Object 계열 시험은 리플렉션 fixture 모듈(설정 계층 시험은 ConfigTestFixtures)에 의존한다. 생성 헤더(<ReflectionTestFixtures/*.generated.h>)는
-        // 그 모듈의 public include로 전파된다. 엔진 계층 시험은 World 리플렉션 fixture(WorldTestFixtures — World 타입을
-        // 상속한 저장·경로 시험 타입)에도 의존한다.
+        // Object family tests depend on the reflection fixture module (config layer tests on ConfigTestFixtures). Generated headers (<ReflectionTestFixtures/*.generated.h>)
+        // propagate through that module's public includes. Engine layer tests also depend on the World reflection fixture (WorldTestFixtures: save and path
+        // test types that derive from World types).
         string[] fixtures = Layer switch
         {
             TestLayer.Core => [],
@@ -81,8 +80,8 @@ public abstract class TestsModule : ModuleRules
             Name = ExecutableName,
             Kind = NativeModuleKind.Executable,
             Sources = sources,
-            // Core/Source/Runtime: 시험이 모듈의 Private 헤더를 <Module/Private/...> 철자로 include한다. 저장소 루트는 include하지 않는다
-            // (gitignore된 출력·사용자 디렉터리·중첩 작업 사본의 헤더가 include inventory에 들어가지 않게).
+            // Core/Source/Runtime: tests include module Private headers with the <Module/Private/...> spelling. The repository root is not included
+            // (so headers of gitignored outputs, user directories and nested working copies do not enter the include inventory).
             PrivateIncludeDirectories = [context.PathInRoot("Core/Source/Runtime"), context.PathInRoot($"{support}/Public"),
                 .. (Layer == TestLayer.Engine ? ThirdPartyModuleRules.ConsumerIncludeDirectories(context, EngineThirdPartyHeaders) : [])],
             PrivateDefines = ["ROCKS_TESTING=1",
