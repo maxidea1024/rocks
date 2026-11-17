@@ -115,7 +115,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - 크기 상한은 min(16384, `maxImageDimension2D`)이다.
 - 장치를 만들 때 1×1 흰색 Sampled 텍스처와 그 descriptor set을 만든다. 패스 시작과 `SetTexture(null)`·stale handle이 그것을 묶는다(D3D12와 같다).
 - `ReadPixels`는 기록 중이면 `Busy`, RenderTarget이 아니거나 크기가 다르면 `InvalidArgument`다(D3D12와 같다). 비동기 readback과 같은 경로로 제출하고 그 fence를 기다린다.
-- 형식 표(`Private/VulkanFormats.cpp`)는 `switch` 하나로 둔다. 픽셀 형식 전면 개편(`PixelFormat`) 때 행만 늘리면 되도록 형식 → (`VkFormat`, 필요한 형식 기능 bit) 한 곳에서 정한다.
+- 형식 표(`Private/VulkanFormats.cpp`)는 `switch` 하나로 둔다. 대응 형식을 늘릴 때 행만 더하면 되도록 `PixelFormat` → (`VkFormat`, 필요한 형식 기능 bit)를 한 곳에서 정한다. 지금(PF1)은 아래 두 형식뿐이고, 표에 없는 유효 형식은 텍스처·파이프라인 생성이 `Unsupported`이며 `LastError`에 형식 이름을 남긴다(다른 형식으로 대체하지 않는다, PixelFormat.ko.md 8.3절). 업로드·readback 크기는 `PixelFormatImageBytes`·블록 크기로 계산한다. 형식을 넓힐 때의 Vulkan 주의점(BC1은 RGBA 블록, V8U8은 SNORM, A8은 R8 + swizzle)은 PixelFormat.ko.md 15·17절이다.
 
   | Rocks | Vulkan |
   |---|---|
