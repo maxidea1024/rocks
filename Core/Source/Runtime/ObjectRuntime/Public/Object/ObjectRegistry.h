@@ -638,8 +638,10 @@ private:
     // 병렬 표식이다(GC-S4). work[cursor..)를 씨앗으로 쓰고 work를 비운 뒤, 예산이 다해 남은 회색
     // 객체를 work에 다시 담는다(cursor는 0). 반환은 trace한 객체 수이고 오류는 state.error다.
     // 끝까지 표식했으면 completed가 참이다.
+    // times가 있으면 준비·표식·회수·넘기기 시간과 넘긴 회색 객체 수를 적는다.
     uint32 MarkParallel(Array<uint32>& work, usize& cursor, MarkState& state, uint32 maxObjects,
-                        uint64 deadline, WorkerScheduler& scheduler, bool& completed) noexcept;
+                        uint64 deadline, WorkerScheduler& scheduler, bool& completed,
+                        GcSliceTimes* times = nullptr) noexcept;
     // 장벽 큐(gcShade_)를 표식 큐(gcWork_) 뒤로 옮긴다(slice 시작).
     void DrainShadeQueue() noexcept;
     static void ValidateStagedEdge(void*, ObjectHandle) noexcept;

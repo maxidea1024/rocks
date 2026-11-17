@@ -404,6 +404,13 @@ bool RunIncremental(ObjectRegistry& registry, const char* label, GcBudget budget
                     WorkerScheduler* scheduler, Allocator& allocator) noexcept {
     const auto access = registry.OwnerAccess();
     Array<uint64> steps(allocator);
+    // Step마다의 내역(GcSliceTimes): 준비·표식·worker 회수·회색 넘기기·Step 밖 비용(잠금·진입).
+    Array<uint64> setups(allocator);
+    Array<uint64> markings(allocator);
+    Array<uint64> drains(allocator);
+    Array<uint64> requeues(allocator);
+    Array<uint64> outside(allocator);
+    uint64 carried = 0;
     const uint64 started = platform::MonotonicNanoseconds();
     if (!registry.BeginCollection(access)) {
         printf("  %s: BeginCollection failed\n", label);
@@ -421,7 +428,14 @@ bool RunIncremental(ObjectRegistry& registry, const char* label, GcBudget budget
             return false;
         }
 
-        if (!steps.TryPushBack(after - before)) {
+        const GcSliceTimes& slice = progress.Value().slice;
+        const uint64 inside =
+            slice.setup + slice.marking + slice.drain + slice.requeue + slice.sweep + slice.reclaim;
+        carried += slice.grayCarried;
+        if (!steps.TryPushBack(after - before) || !setups.TryPushBack(slice.setup) ||
+            !markings.TryPushBack(slice.marking) || !drains.TryPushBack(slice.drain) ||
+            !requeues.TryPushBack(slice.requeue) ||
+            !outside.TryPushBack(after - before > inside ? after - before - inside : 0)) {
             return false;
         }
 
@@ -442,6 +456,20 @@ bool RunIncremental(ObjectRegistry& registry, const char* label, GcBudget budget
            Milliseconds(begun - started), Milliseconds(report.markNanoseconds),
            Milliseconds(report.sweepNanoseconds), Milliseconds(report.reclaimNanoseconds),
            Milliseconds(report.durationNanoseconds), Milliseconds(finished - started));
+    Array<uint64>* parts[] = {&setups, &markings, &drains, &requeues, &outside};
+    for (Array<uint64>* part : parts) {
+        part->Sort();
+    }
+
+    printf("  %-28s p50/p99 us: setup %.1f/%.1f  mark %.1f/%.1f  drain %.1f/%.1f  requeue "
+           "%.1f/%.1f  other %.1f/%.1f | gray carried avg %.0f\n",
+           "", Microseconds(Percentile(setups, 50)), Microseconds(Percentile(setups, 99)),
+           Microseconds(Percentile(markings, 50)), Microseconds(Percentile(markings, 99)),
+           Microseconds(Percentile(drains, 50)), Microseconds(Percentile(drains, 99)),
+           Microseconds(Percentile(requeues, 50)), Microseconds(Percentile(requeues, 99)),
+           Microseconds(Percentile(outside, 50)), Microseconds(Percentile(outside, 99)),
+           steps.IsEmpty() ? 0.0
+                           : static_cast<double>(carried) / static_cast<double>(steps.Size()));
     return true;
 }
 

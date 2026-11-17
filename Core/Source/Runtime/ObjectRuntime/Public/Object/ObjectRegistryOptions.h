@@ -106,10 +106,29 @@ struct GcReport {
     uint64 reclaimNanoseconds = 0;
 };
 
+// StepCollection slice 하나의 시간 내역(ns)이다. 증분 수집의 Step 시간이 예산을 넘는 원인을 나눠 볼
+// 때 쓴다(Programs/GcBench). 값은 이 slice 하나의 것이고 누적하지 않는다.
+// - setup: 표식 전 준비(장벽 큐 옮기기, 병렬이면 씨앗 블록 묶기와 task 제출)
+// - marking: 표식(병렬이면 소유 스레드가 참여 루프에서 나올 때까지)
+// - drain: 병렬 표식에서 소유 스레드가 나온 뒤 worker task를 모두 회수할 때까지
+// - requeue: 병렬 표식에서 남은 회색 객체를 다음 slice로 넘기기
+// - sweep·reclaim: 분류와 회수
+// grayCarried는 다음 slice로 넘긴 회색 객체 수다.
+struct GcSliceTimes {
+    uint64 setup = 0;
+    uint64 marking = 0;
+    uint64 drain = 0;
+    uint64 requeue = 0;
+    uint64 sweep = 0;
+    uint64 reclaim = 0;
+    uint32 grayCarried = 0;
+};
+
 struct GcProgress {
     GcPhase phase = GcPhase::Idle;
     uint32 processed = 0;
     GcReport report;
+    GcSliceTimes slice;
 
     bool IsComplete() const noexcept {
         return phase == GcPhase::Idle;

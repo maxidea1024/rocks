@@ -924,8 +924,9 @@ struct ObjectRegistry::ParallelMark {
 
 uint32 ObjectRegistry::MarkParallel(Array<uint32>& work, usize& cursor, MarkState& state,
                                     uint32 maxObjects, uint64 deadline, WorkerScheduler& scheduler,
-                                    bool& completed) noexcept {
+                                    bool& completed, GcSliceTimes* times) noexcept {
     completed = false;
+    const uint64 setupStarted = platform::MonotonicNanoseconds();
     constexpr uint32 MaxWorkers = 64;
     const uint32 workers =
         scheduler.Stats().workerCount < MaxWorkers ? scheduler.Stats().workerCount : MaxWorkers;
@@ -991,7 +992,9 @@ uint32 ObjectRegistry::MarkParallel(Array<uint32>& work, usize& cursor, MarkStat
         }
     }
 
+    const uint64 markStarted = platform::MonotonicNanoseconds();
     shared.Run(participants[0]);
+    const uint64 drainStarted = platform::MonotonicNanoseconds();
     for (uint32 index = 0; index < submitted; ++index) {
         auto waited = tasks[index].Wait();
         if (!waited || waited.Value() != platform::WaitResult::Signaled) {
@@ -1008,6 +1011,7 @@ uint32 ObjectRegistry::MarkParallel(Array<uint32>& work, usize& cursor, MarkStat
         }
     }
 
+    const uint64 requeueStarted = platform::MonotonicNanoseconds();
     // 모든 참여자가 끝났다. 남은 회색 객체(멈춤)를 큐에 다시 담고 블록을 재사용 목록으로 돌린다.
     uint32 traced = 0;
     for (uint32 index = 0; index <= workers; ++index) {
@@ -1037,6 +1041,14 @@ uint32 ObjectRegistry::MarkParallel(Array<uint32>& work, usize& cursor, MarkStat
     }
 
     gcFreeBlocks_ = shared.freeBlocks;
+    if (times != nullptr) {
+        times->setup += markStarted - setupStarted;
+        times->marking += drainStarted - markStarted;
+        times->drain += requeueStarted - drainStarted;
+        times->requeue += platform::MonotonicNanoseconds() - requeueStarted;
+        times->grayCarried = static_cast<uint32>(work.Size());
+    }
+
     const auto error = static_cast<ErrorCode>(shared.error);
     if (error != ErrorCode::None) {
         state.error = error;
@@ -1106,21 +1118,25 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
     uint32 processed = 0;
     const uint64 markStarted = platform::MonotonicNanoseconds();
     MarkState state{this, &gcWork_};
+    GcSliceTimes slice;
     bool cutoffPublished = false;
     if (gcPhase_ == GcPhase::Marking) {
         // slice 사이에 장벽이 모은 회색 객체를 표식 큐로 옮긴다(slice 동안은 장벽이 없다 — 처리
         // 표시).
         DrainShadeQueue();
+        slice.setup += platform::MonotonicNanoseconds() - markStarted;
         bool completed = false;
         if (scheduler == nullptr) {
+            const uint64 serialStarted = platform::MonotonicNanoseconds();
             processed = MarkSerial(gcWork_, gcCursor_, state, budget.maxObjects, deadline);
+            slice.marking += platform::MonotonicNanoseconds() - serialStarted;
             // 큐가 빈 것을 이 slice의 예산 안에서 보았을 때만 끝난 것으로 본다(예산을 다 쓴 slice는
             // Marking으로 끝나 다음 slice 전에 mutator가 장벽을 거칠 수 있다).
             completed = gcCursor_ == gcWork_.Size() && processed < budget.maxObjects &&
                         (deadline == 0 || platform::MonotonicNanoseconds() < deadline);
         } else {
             processed = MarkParallel(gcWork_, gcCursor_, state, budget.maxObjects, deadline,
-                                     *scheduler, completed);
+                                     *scheduler, completed, &slice);
         }
 
         cycleGc_.marked += state.marked;
@@ -1180,6 +1196,7 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
 
     const uint64 reclaimStarted = platform::MonotonicNanoseconds();
     cycleGc_.sweepNanoseconds += reclaimStarted - sweepStarted;
+    slice.sweep = reclaimStarted - sweepStarted;
     if (gcPhase_ == GcPhase::Reclaiming && processed < budget.maxObjects &&
         (deadline == 0 || platform::MonotonicNanoseconds() < deadline)) {
         const uint32 reclaimed = ReclaimEligible(budget.maxObjects - processed, deadline);
@@ -1190,6 +1207,7 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
     const uint64 finished = platform::MonotonicNanoseconds();
     platform::LockGuard lock(gate_);
     cycleGc_.reclaimNanoseconds += finished - reclaimStarted;
+    slice.reclaim = finished - reclaimStarted;
     cycleGc_.durationNanoseconds += finished - started;
     if (gcPhase_ == GcPhase::Reclaiming && !HasReclaimableLocked()) {
         gcPhase_ = GcPhase::Idle;
@@ -1200,7 +1218,7 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
     }
 
     processing_ = false;
-    return Result<GcProgress>::Success({gcPhase_, processed, cycleGc_});
+    return Result<GcProgress>::Success({gcPhase_, processed, cycleGc_, slice});
 }
 
 Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access,
