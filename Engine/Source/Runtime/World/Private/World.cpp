@@ -284,6 +284,7 @@ Result<void> World::AddActorTickPrerequisite(ObjectHandle dependent,
                 (void)out.TryAppendFormat("Actor#{}", actor.slot);
             }
         };
+
         char beforeStorage[MaxTickActorLabelBytes];
         char afterStorage[MaxTickActorLabelBytes];
         FixedStringBuilder beforeLabel{Span<char>(beforeStorage)};

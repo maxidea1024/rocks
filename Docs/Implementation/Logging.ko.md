@@ -158,7 +158,7 @@ int main() {
 - **큐가 가득 찼을 때:** 생산자는 기다리지 않는다. 큐가 90%를 넘으면 Info 이하를 거부하고, 남은 10%는 Warning 이상 전용이다. 그래도 차면 버리고 레벨별로 센다. 공간이 생기면 "dropped since the last report"를 한 줄 남긴다. 도구 호스트는 `overflow = LogOverflow::WaitForSpace`로 손실 대신 대기를 고를 수 있다(게임 스레드에서는 쓰지 않는다).
 - `Flush(timeout)`은 이 호출 전에 넣은 기록이 모두 sink에 도달할 때까지 기다린다.
 - `Stats()`는 손실·잘림·템플릿 오류·sink 실패·차단 수와 비상 모드 여부를 보여 준다.
-- **Stop의 제한 시간:** drain이 `drainTimeoutMilliseconds`를 넘기면 남은 수를 알리고 진행한다. 출력 스레드가 sink에서 끝내 돌아오지 않으면 스레드와 메모리를 남겨 둔 채 반환한다(`Stats().writerAbandoned`). 이 경우 호스트는 LogSystem을 파괴하지 말고 프로세스를 끝낸다.
+- **Stop의 제한 시간:** drain이 `drainTimeoutMilliseconds`를 넘기면 남은 수를 알리고 진행한다. 출력 스레드가 sink에서 끝내 돌아오지 않으면 스레드와 메모리를 남겨 둔 채 반환한다(`Stats().writerAbandoned`). 이 경우 호스트는 LogSystem을 파괴하지 말고 프로세스를 끝낸다. 등록한 sink도 그때까지 살아 있어야 하고, 그동안 `AddSink`·`RemoveSink`는 `Busy`다. sink 콜백 안의 `Stop`은 아무것도 하지 않는다.
 
 ## sink와 출력 형식
 
@@ -249,7 +249,7 @@ FileLogSink fileSink(allocator, file);
 
 - **파일 이름과 회전**
   - 실행마다 새 파일 `<폴더>/<호스트>-YYYYMMDDTHHMMSSmmmZ.log`를 만듭니다. 회전한 파일과 같은 시각에 시작한 다른 실행은 `-2`, `-3` …이 붙습니다.
-  - `maxBytes`(기본 16 MiB)를 넘으면 회전하고, `retention`(기본 8, 최대 256)개까지만 남깁니다.
+  - `maxBytes`(기본 16 MiB)를 넘으면 회전하고, `retention`(기본 8, 최대 256)개까지만 남깁니다. 보관 정리는 이 호스트의 이름 모양(`<호스트>-<시각>[-<번호>].log`)만 세므로 `Sandbox`와 `Sandbox-Server`의 파일은 섞이지 않습니다.
 - **쓰기:** flush 묶음 단위로 한 번에 씁니다. 렌더는 텍스트 레이아웃 또는 JSON lines sink와 같습니다. 쓰기나 열기가 실패하면 `DependencyFailed`를 돌려주고 다음 묶음에서 다시 엽니다.
 - **암호화는 선택이며 기본은 끔입니다.**
   - Core는 Crypto보다 아래 계층이라, 암호화는 호스트가 `crypto::LogFileSealer`를 만들어 `cipher`로 넘깁니다.
@@ -261,8 +261,8 @@ FileLogSink fileSink(allocator, file);
   - 그 뒤로 `length(4) | 봉인된 묶음`이 반복됩니다.
   - 정상 종료면 Final 기록으로 끝납니다.
 - **명령(Commandlet)**
-  - `log keygen <out-public> <out-private>`: 키 쌍을 만듭니다. 기존 파일은 덮어쓰지 않습니다. **개인키는 저장소나 쿠킹 결과에 넣지 않습니다.**
-  - `log decode <file> --key <private> [--json]`: 평문을 표준 출력으로 냅니다. `--json`은 상태 요약을 표준 오류에 JSON 한 줄로 냅니다.
+  - `log keygen <out-public> <out-private>`: 키 쌍을 만듭니다. 두 경로 중 하나라도 이미 있으면 아무 파일도 남기지 않고 실패합니다(짝이 맞지 않는 키 쌍 방지). **개인키는 저장소나 쿠킹 결과에 넣지 않습니다.**
+  - `log decode <file> --key <private> [--json]`: 평문을 표준 출력으로 냅니다. `--json`은 상태 요약(`batches`·`endMarker`·`partialTail`·`error`, 성공·실패 같은 모양)을 표준 오류에 JSON 한 줄로 냅니다.
     - 끝 표시가 없으면(비정상 종료) 마지막 완전한 묶음까지 내고 "no end marker (abnormal termination)"를 알립니다.
     - 변조되었으면 "authentication failed"(종료 코드 1)입니다.
   - `log seal <plain> <out> --public <public>`: 같은 형식으로 봉인합니다(진단·시험용).

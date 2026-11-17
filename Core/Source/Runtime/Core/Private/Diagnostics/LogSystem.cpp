@@ -14,9 +14,6 @@ using platform::MemoryOrder;
 
 namespace {
 
-// 이 파일이 남기는 진단의 카테고리다.
-constexpr LogCategory LogLogging{"Log"};
-
 // 한 묶음에서 꺼내는 최대 기록 수다(그 뒤 sink flush·Flush 대기자 알림).
 constexpr usize WriterBatchLimit = 256;
 
@@ -281,6 +278,12 @@ Result<void> LogSystem::Start() noexcept {
 }
 
 void LogSystem::Stop() noexcept {
+    // sink 콜백 안(출력 쪽이 sink lock·pumping_을 쥔 상태)에서는 멈출 수 없다. 기다리면 자기 자신을
+    // 기다린다.
+    if (inSink) {
+        return;
+    }
+
     if (platform::AtomicExchange<MemoryOrder::AcquireRelease>(&started_, 0u) == 0) {
         return;
     }
@@ -297,7 +300,7 @@ void LogSystem::Stop() noexcept {
             platform::WaitResult::Signaled) {
             platform::AtomicStore<MemoryOrder::SequentiallyConsistent>(&abandoned_, 1u);
             Wake();
-            char storage[160];
+            char storage[LogNoticeBytes];
             FixedStringBuilder text{Span<char>(storage)};
             (void)text.TryAppendFormat("Log writer did not drain within the stop timeout; "
                                        "abandoning {} queued records",
@@ -352,7 +355,8 @@ void LogSystem::RefreshUtcAnchor() noexcept {
 }
 
 Result<void> LogSystem::AddSink(RuntimeLogSink& sink, LogFilter filter) noexcept {
-    if (inSink) {
+    // Stop이 남겨 둔 출력 스레드가 sink lock을 쥐고 있을 수 있다(기다리면 끝나지 않는다).
+    if (inSink || platform::AtomicLoad<MemoryOrder::Acquire>(&abandoned_) != 0) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
 
@@ -379,7 +383,7 @@ Result<void> LogSystem::AddSink(RuntimeLogSink& sink, LogFilter filter) noexcept
 }
 
 Result<void> LogSystem::RemoveSink(RuntimeLogSink& sink) noexcept {
-    if (inSink) {
+    if (inSink || platform::AtomicLoad<MemoryOrder::Acquire>(&abandoned_) != 0) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
 
@@ -454,6 +458,12 @@ usize LogSystem::Pump(usize maxRecords) noexcept {
         return 0;
     }
 
+    // pumping_을 얻기 전에 Stop이 끝났을 수 있다(큐·블록이 이미 해제됐다). 얻은 뒤 다시 본다.
+    if (platform::AtomicLoad<MemoryOrder::Acquire>(&started_) == 0) {
+        platform::AtomicStore<MemoryOrder::Release>(&pumping_, 0u);
+        return 0;
+    }
+
     const usize total = DrainQueue(maxRecords);
     platform::AtomicStore<MemoryOrder::Release>(&pumping_, 0u);
     return total;
@@ -504,7 +514,9 @@ usize LogSystem::DrainBatch(usize limit) noexcept {
             ++count;
         }
 
-        if (count != 0) {
+        // Stop이 포기한 출력 스레드는 더 이상 sink를 부르지 않는다(호스트가 sink를 파괴했을 수
+        // 있다).
+        if (count != 0 && platform::AtomicLoad<MemoryOrder::Acquire>(&abandoned_) == 0) {
             ReportDrops();
             FlushSinks();
         }
@@ -552,6 +564,11 @@ void LogSystem::Dispatch(Span<const uint8> capture, const LogBlockProvider* bloc
 
     Increment(written_);
     for (usize index = 0; index < sinkCount_; ++index) {
+        // Stop이 포기한 뒤에는 남은 sink를 부르지 않는다(멈췄던 sink에서 돌아온 경우).
+        if (platform::AtomicLoad<MemoryOrder::Acquire>(&abandoned_) != 0) {
+            break;
+        }
+
         SinkSlot& slot = sinks_[index];
         if (slot.blocked || !slot.filter.Accepts(event)) {
             continue;
@@ -929,7 +946,7 @@ Result<void> LogSystem::SetLevel(StringView prefix, LogLevel level) noexcept {
         platform::MemoryCopy(overrideNames_[empty], prefix.Data(), prefix.ByteCount());
         overrideNames_[empty][prefix.ByteCount()] = '\0';
         // 레벨을 먼저 쓰고 해시를 release로 공개한다(해시를 본 생산자는 레벨도 본다).
-        platform::AtomicStore<MemoryOrder::Relaxed>(&overrides_[empty].level,
+        platform::AtomicStore<MemoryOrder::Release>(&overrides_[empty].level,
                                                     static_cast<uint8>(level));
         platform::AtomicStore<MemoryOrder::SequentiallyConsistent>(&overrides_[empty].hash, hash);
         if (empty + 1 > platform::AtomicLoad<MemoryOrder::Relaxed>(&overrideHighWater_)) {

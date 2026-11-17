@@ -86,6 +86,18 @@ try
     await Check("log usage", ["log"], 2, "", "log keygen");
     await Check("log keygen", ["log", "keygen", publicKey, privateKey], 0, "out of the repository", "");
     await Check("log keygen refuses to overwrite", ["log", "keygen", publicKey, privateKey], 1, "", "cannot create");
+    // 한쪽 경로만 이미 있으면 아무 키도 남기지 않는다(짝이 맞지 않는 키 쌍 금지).
+    string lonePublic = Path.Combine(logDirectory, "lone.pub");
+    string lonePrivate = Path.Combine(logDirectory, "lone.key");
+    File.WriteAllBytes(lonePrivate, [1, 2, 3]);
+    await Check("log keygen with an existing private path", ["log", "keygen", lonePublic, lonePrivate], 1, "", "cannot create");
+    bool loneClean = !File.Exists(lonePublic) && File.ReadAllBytes(lonePrivate).Length == 3;
+    Console.WriteLine($"log keygen leaves no half pair: {(loneClean ? "PASS" : "FAIL")}");
+    if (!loneClean)
+    {
+        ++failures;
+    }
+
     await Check("log seal", ["log", "seal", plain, sealedLog, "--public", publicKey], 0, "", "");
     await Check("log decode", ["log", "decode", sealedLog, "--key", privateKey], 0, "line 299\n", "");
     await Check("log decode json status", ["log", "decode", sealedLog, "--key", privateKey, "--json"], 0, "line 0\n",

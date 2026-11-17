@@ -28,6 +28,9 @@ constexpr StringView Usage =
 // 봉인 도구가 묶음 하나에 담는 평문 byte 수다.
 constexpr usize SealBatchBytes = 4096;
 
+// 명령이 만드는 진단 한 줄의 버퍼 byte 수다.
+constexpr usize MessageBytes = 512;
+
 Result<int32> Write(CommandletOutput& output, CommandletStream stream, StringView text,
                     int32 code) noexcept {
     auto written = output.write(output.context, stream, text);
@@ -52,7 +55,7 @@ struct PathText {
 
 Result<int32> FileFailure(CommandletOutput& output, const char* action, StringView path,
                           platform::FileStatus status) noexcept {
-    char storage[512];
+    char storage[MessageBytes];
     FixedStringBuilder text{Span<char>(storage)};
     (void)text.TryAppendFormat("log: cannot {} '{}' (file code {}, native error {})\n", action,
                                path, static_cast<int32>(status.code), status.nativeError);
@@ -114,6 +117,35 @@ Result<int32> WriteNewFile(CommandletOutput& output, StringView path,
     return Result<int32>::Success(0);
 }
 
+// 새 파일을 만든다(있으면 덮어쓰지 않는다). 실패하면 오류를 출력하고 그 종료 코드를 failure에 둔다.
+bool CreateNewFile(CommandletOutput& output, const PathText& path, StringView shown,
+                   platform::File& file, Result<int32>& failure) noexcept {
+    if (const platform::FileStatus opened = file.Open(path.text, platform::FileOpenMode::CreateNew);
+        !opened) {
+        failure = FileFailure(output, "create", shown, opened);
+        return false;
+    }
+
+    return true;
+}
+
+// 열어 둔 새 파일에 bytes를 다 쓰고 닫는다.
+bool WriteAndClose(CommandletOutput& output, StringView shown, platform::File& file,
+                   Span<const uint8> bytes, Result<int32>& failure) noexcept {
+    if (const platform::FileTransfer written = file.WriteAll(bytes.Data(), bytes.Size());
+        !written.status) {
+        failure = FileFailure(output, "write", shown, written.status);
+        return false;
+    }
+
+    if (const platform::FileStatus closed = file.Close(); !closed) {
+        failure = FileFailure(output, "close", shown, closed);
+        return false;
+    }
+
+    return true;
+}
+
 Result<int32> KeyGen(Span<const StringView> args, CommandletOutput& output) noexcept {
     if (args.Size() != 2) {
         return UsageError(output);
@@ -124,24 +156,47 @@ Result<int32> KeyGen(Span<const StringView> args, CommandletOutput& output) noex
         return Result<int32>::Failure(pair.Error());
     }
 
+    // 두 파일을 모두 새로 만든 뒤에 쓴다. 하나라도 이미 있으면 아무것도 쓰지 않는다(짝이 맞지 않는
+    // 키 쌍을 남기지 않는다).
+    const PathText publicPath(args[0]);
+    const PathText privatePath(args[1]);
+    Result<int32> failure = Result<int32>::Success(1);
+    platform::File publicFile;
+    if (!CreateNewFile(output, publicPath, args[0], publicFile, failure)) {
+        return failure;
+    }
+
+    platform::File privateFile;
+    if (!CreateNewFile(output, privatePath, args[1], privateFile, failure)) {
+        (void)publicFile.Close();
+        (void)platform::PhysicalFileSystem().Delete(publicPath.text,
+                                                    platform::CStringLength(publicPath.text));
+        return failure;
+    }
+
     uint8 seed[crypto::LogFilePrivateKeyBytes];
     if (auto exported = crypto::hazmat::TryExportSeed(pair.Value(), Span<uint8>(seed)); !exported) {
         return Result<int32>::Failure(exported.Error());
     }
 
-    // 개인키를 먼저 쓴다(공개키만 남고 개인키가 없는 상태를 피한다).
-    auto secret = WriteNewFile(output, args[1], Span<const uint8>(seed));
+    const bool secretWritten =
+        WriteAndClose(output, args[1], privateFile, Span<const uint8>(seed), failure);
     crypto::SecureZero(Span<uint8>(seed));
-    if (!secret || secret.Value() != 0) {
-        return secret;
+    const bool publicWritten =
+        secretWritten &&
+        WriteAndClose(output, args[0], publicFile, pair.Value().PublicKey().View(), failure);
+    if (!publicWritten) {
+        // 한쪽만 남기지 않는다. 만든 두 파일을 지운다.
+        (void)publicFile.Close();
+        (void)privateFile.Close();
+        (void)platform::PhysicalFileSystem().Delete(privatePath.text,
+                                                    platform::CStringLength(privatePath.text));
+        (void)platform::PhysicalFileSystem().Delete(publicPath.text,
+                                                    platform::CStringLength(publicPath.text));
+        return failure;
     }
 
-    auto published = WriteNewFile(output, args[0], pair.Value().PublicKey().View());
-    if (!published || published.Value() != 0) {
-        return published;
-    }
-
-    char storage[512];
+    char storage[MessageBytes];
     FixedStringBuilder text{Span<char>(storage)};
     (void)text.TryAppendFormat("log keygen: wrote public key '{}' and private key '{}'. Keep the "
                                "private key out of the repository and cooked output.\n",
@@ -199,7 +254,7 @@ Result<int32> Decode(Span<const StringView> args, CommandletOutput& output) noex
     DecodeContext context{&output, 0};
     auto decoded =
         crypto::TryDecodeLogFile(pair.Value(), file.View(), allocator, &PrintPlaintext, &context);
-    char storage[512];
+    char storage[MessageBytes];
     FixedStringBuilder text{Span<char>(storage)};
     int32 code = 0;
     if (!decoded) {
@@ -212,9 +267,9 @@ Result<int32> Decode(Span<const StringView> args, CommandletOutput& output) noex
             : error == ErrorCode::Unsupported     ? "unsupported log file version"
                                                   : ErrorCodeName(error);
         if (json) {
-            (void)text.TryAppendFormat(
-                "{{\"batches\": {}, \"endMarker\": false, \"error\": \"{}\"}}\n", context.batches,
-                ErrorCodeName(error));
+            (void)text.TryAppendFormat("{{\"batches\": {}, \"endMarker\": false, "
+                                       "\"partialTail\": false, \"error\": \"{}\"}}\n",
+                                       context.batches, ErrorCodeName(error));
         } else {
             (void)text.TryAppendFormat("log decode: '{}': {} (after {} decoded batches)\n", args[0],
                                        reason, context.batches);

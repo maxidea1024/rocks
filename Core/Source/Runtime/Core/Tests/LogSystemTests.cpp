@@ -918,9 +918,12 @@ TEST(LogSystemStopAbandonsWriterStuckInSink) {
     LogSystemConfig config = Config(LogMode::Async);
     config.drainTimeoutMilliseconds = 10;
     HoldingSink sink;
+    LineSink other;
+    LineSink late;
     {
         LogSystem logs(allocator, config);
         REQUIRE(logs.AddSink(sink).IsOk());
+        REQUIRE(logs.AddSink(other).IsOk());
         REQUIRE(logs.Start().IsOk());
         {
             LogInstallScope installed(logs);
@@ -937,10 +940,59 @@ TEST(LogSystemStopAbandonsWriterStuckInSink) {
         logs.Stop();
         CHECK(logs.Stats().writerAbandoned);
         CHECK(logs.Start().Error() == ErrorCode::Busy);
+        // 남은 스레드가 sink lock을 쥐고 있으므로 등록·해제는 기다리지 않고 Busy다.
+        CHECK(logs.AddSink(late).Error() == ErrorCode::Busy);
+        CHECK(logs.RemoveSink(other).Error() == ErrorCode::Busy);
         sink.release.Signal();
     }
 
+    // 멈췄던 sink에서 돌아온 출력 스레드는 다음 sink(other)를 부르지 않았다.
     CHECK(sink.Records() == 1);
+    CHECK(other.records == 0 && late.records == 0);
+}
+
+namespace {
+
+// 콜백 안에서 Stop을 부른다(아무것도 하지 않고 돌아와야 한다).
+class StoppingSink final : public RuntimeLogSink {
+public:
+    explicit StoppingSink(LogSystem& owner) noexcept : logs(owner) {
+    }
+
+    Result<void> Write(const LogEvent&) noexcept override {
+        logs.Stop();
+        ++records;
+        return Result<void>::Success();
+    }
+
+    LogSystem& logs;
+    uint32 records = 0;
+};
+
+} // namespace
+
+// sink 콜백 안의 Stop은 자기 자신(Pump 중인 pumping_)을 기다리지 않고 돌아온다. Stop 뒤의 Pump는
+// 0이다.
+TEST(LogSystemStopInsideSinkReturnsAndPumpAfterStopIsEmpty) {
+    ResetUninstalledDrops();
+    SystemAllocator allocator;
+    LogSystem logs(allocator, Config(LogMode::Manual));
+    StoppingSink sink(logs);
+    REQUIRE(logs.AddSink(sink).IsOk());
+    REQUIRE(logs.Start().IsOk());
+    {
+        LogInstallScope installed(logs);
+        Log::Info(LogSystemTests, "first");
+        CHECK(logs.Pump() == 1);
+        // 콜백 안의 Stop은 무시됐으므로 계속 받는다.
+        Log::Info(LogSystemTests, "second");
+        CHECK(logs.Pump() == 1);
+        Log::Info(LogSystemTests, "third");
+    }
+
+    logs.Stop();
+    CHECK(sink.records == 3);
+    CHECK(logs.Pump() == 0);
 }
 
 // Sync도 큰 값을 블록에 담아 Manual과 같은 출력을 낸다(준비 버퍼 크기에서 잘리지 않는다).

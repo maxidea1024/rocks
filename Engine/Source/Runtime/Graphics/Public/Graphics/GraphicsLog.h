@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/Diagnostics/Log.h>
 #include <Core/Diagnostics/LogCategory.h>
 
 namespace rocks::graphics {
@@ -43,6 +44,16 @@ public:
         }
 
         if (count_ == MaxLoggedValidationIds) {
+            // 표가 찬 첫 순간에 한 번 알린다(그 뒤의 새 ID는 세기만 한다).
+            if (!overflowReported_) {
+                overflowReported_ = true;
+                Log::Warning(
+                    LogGraphics,
+                    "Validation message ID table is full ({Count} IDs); further validation "
+                    "message IDs are counted but not logged",
+                    MaxLoggedValidationIds);
+            }
+
             return false;
         }
 
@@ -53,6 +64,7 @@ public:
 private:
     uint32 ids_[MaxLoggedValidationIds]{};
     uint32 count_ = 0;
+    bool overflowReported_ = false;
 };
 
 } // namespace rocks::graphics

@@ -26,6 +26,9 @@ namespace rocks::graphics {
 
 namespace {
 
+// "stage failed (HRESULT 0x...)" 진단 한 줄의 버퍼 byte 수다.
+constexpr usize FailureMessageBytes = 160;
+
 // GetDeviceRemovedReason 값의 이름이다(진단용, 정적 수명).
 const char* RemovedReasonName(HRESULT reason) noexcept {
     switch (reason) {
@@ -766,10 +769,14 @@ public:
         if (FAILED(fenceCreated)) {
             return Fail("CreateFence", fenceCreated);
         }
+        // 오류 코드는 실패한 호출 바로 뒤에 읽는다(다음 호출이 덮어쓴다).
         fenceEvent_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (fenceEvent_ == nullptr) {
+            return Fail("CreateEventW (fence)", HRESULT_FROM_WIN32(GetLastError()));
+        }
         watcherEvent_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-        if (fenceEvent_ == nullptr || watcherEvent_ == nullptr) {
-            return Fail("CreateEventW", HRESULT_FROM_WIN32(GetLastError()));
+        if (watcherEvent_ == nullptr) {
+            return Fail("CreateEventW (watcher)", HRESULT_FROM_WIN32(GetLastError()));
         }
         fenceSource_.fence = fence_.Get();
         fenceSource_.event = watcherEvent_;
@@ -2085,7 +2092,7 @@ private:
     // LastError에 "stage failed (HRESULT 0x...)"로 덧붙인다. 장치 제거면 손실을 게시한다.
     Result<void> Fail(const char* stage, HRESULT result) noexcept {
         DetectLost(result);
-        char storage[160];
+        char storage[FailureMessageBytes];
         FixedStringBuilder text{Span<char>(storage)};
         (void)text.TryAppendFormat("{} failed (HRESULT {:#x})", stage, static_cast<uint32>(result));
         auto assigned = lastError_.TryAssign(text.View());
@@ -3500,7 +3507,7 @@ private:
     // 검증 메시지 원문을 ID마다 한 번만 남긴다(DrainValidationMessages가 쓴다).
     mutable ValidationMessageFilter validationFilter_;
     // 마지막 실패의 API 호출 이름·원본 HRESULT다(DeviceCreateReport).
-    char failureStage_[48]{};
+    char failureStage_[sizeof(DeviceCreateReport{}.stage)]{};
     HRESULT failureResult_ = S_OK;
     bool failureTruncated_ = false;
     // 장치 제거를 이미 남겼는지다(손실 전이 때 한 번, 원자 변수).

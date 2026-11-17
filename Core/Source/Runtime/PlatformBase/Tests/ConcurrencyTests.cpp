@@ -140,6 +140,7 @@ void Consume(void* raw) noexcept {
         CHECK(context.free.Release());
     }
 }
+
 struct TryLockContext {
     Mutex* mutex = nullptr;
     bool acquired = false;
