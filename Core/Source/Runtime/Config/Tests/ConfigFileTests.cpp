@@ -321,3 +321,28 @@ TEST(Config_DumpIsDeterministicGolden) {
     REQUIRE(usage);
     CHECK(usage.Value() == 2 && !captured.error.IsEmpty());
 }
+
+// 명령줄 `--set=<target>=<value>`는 나온 순서대로 세션 층 대입이 된다(값은 첫 `=` 뒤 전부). `=`가
+// 없는 인자는 거부하되 나머지는 끝까지 넣는다.
+TEST(Config_CommandLineAssignments) {
+    ConfigFixture fixture;
+    ConfigContext& context = fixture.Context();
+    const StringView arguments[] = {"--frames=3", "--set=render.graph.immediate=true",
+                                    "--set=Render.RenderGraph.passes=a,b", "--set=missing",
+                                    "--set=Render.RenderGraph.maxPasses=7"};
+    auto added = AddCommandLineAssignments(context, Span<const StringView>(arguments, 5));
+    CHECK(!added && added.Error() == ErrorCode::InvalidArgument);
+    REQUIRE(context.Sync());
+    CHECK(fixture.Graph().immediate);
+    CHECK(fixture.Graph().maxPasses == 7);
+    CHECK(JoinedEquals(fixture.Graph().passes, "a,b"));
+    const ConfigLayer session[] = {ConfigLayer::Session};
+    CHECK(fixture.SourcesAre("Render", "RenderGraph", "maxPasses", session));
+
+    const StringView valid[] = {"--set=Render.RenderGraph.maxPasses=9"};
+    auto again = AddCommandLineAssignments(context, Span<const StringView>(valid, 1));
+    REQUIRE(again);
+    CHECK(again.Value() == 1);
+    REQUIRE(context.Sync());
+    CHECK(fixture.Graph().maxPasses == 9);
+}
