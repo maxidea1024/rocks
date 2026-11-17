@@ -254,7 +254,8 @@ struct PixelFormatInfo {
     // 블록 크기다. 비압축·깊이·다중 plane은 1×1이다. 깊이 방향 블록은 없다.
     uint8 blockWidth = 0;
     uint8 blockHeight = 0;
-    // 블록 하나의 바이트다. 깊이·스텐실과 다중 plane 형식은 0이고 plane별 크기를 쓴다.
+    // 블록 하나의 바이트다. 깊이 전용 형식은 깊이 texel 바이트, 깊이·스텐실과 다중 plane 형식은
+    // 0이고 plane별 크기(PixelFormatPlaneRowBytes)를 쓴다.
     uint8 blockBytes = 0;
     // PixelChannel 비트의 OR다.
     uint8 channels = 0;
@@ -297,21 +298,27 @@ Result<PixelFormat> ParsePixelFormatName(StringView name) noexcept;
 uint32 PixelFormatBlockColumns(PixelFormat format, uint32 width) noexcept;
 uint32 PixelFormatBlockRows(PixelFormat format, uint32 height) noexcept;
 
-// 블록 행 하나의 바이트다(색·압축 형식만, 그 밖 0).
-uint64 PixelFormatRowBytes(PixelFormat format, uint32 width) noexcept;
+// plane 수다(단일 plane 1, 깊이·스텐실과 비디오 2, 무효 0).
+uint32 PixelFormatPlaneCount(PixelFormat format) noexcept;
 
-// 2D 이미지 하나의 바이트다(행 사이 padding 없음, RenderBase 6.5절 배치).
-// - 색·압축: 블록 열 수 × 블록 행 수 × blockBytes
-// - 다중 plane(비디오): plane 크기의 합. 폭·높이가 plane 축소 배수가 아니면 0
-// - 깊이·스텐실: 0(CPU 업로드 크기를 정의하지 않는다. plane별 크기는 PixelFormatPlaneImageBytes)
-// 크기가 0이거나 형식이 무효면 0이다.
-uint64 PixelFormatImageBytes(PixelFormat format, uint32 width, uint32 height) noexcept;
+// plane 하나의 행 바이트와 행 수다. 블록 압축 형식의 행은 블록 행이다. 다중 plane 형식은 plane
+// 크기(width >> widthShift)로 계산하며 폭·높이가 축소 배수가 아니면 0이다. 깊이·스텐실은 plane 0이
+// 깊이(D16 2·D24 4·D32F 4바이트 texel), plane 1이 스텐실(1바이트)이다. 범위 밖 plane은 0이다.
+uint64 PixelFormatPlaneRowBytes(PixelFormat format, uint32 plane, uint32 width) noexcept;
+uint32 PixelFormatPlaneRows(PixelFormat format, uint32 plane, uint32 height) noexcept;
 
-// plane 하나의 2D 이미지 바이트다(readback·plane 업로드). 단일 plane 형식은 plane 0만 있다.
-// 깊이·스텐실은 plane 0이 깊이(D16 2·D24 4·D32F 4바이트), plane 1이 스텐실(1바이트)이다. 범위 밖
-// plane이나 무효 크기는 0이다.
+// plane 하나의 2D 이미지 바이트다(행 바이트 × 행 수, readback·plane 업로드 크기).
 uint64 PixelFormatPlaneImageBytes(PixelFormat format, uint32 plane, uint32 width,
                                   uint32 height) noexcept;
+
+// 단일 plane 형식의 행 하나 바이트다(블록 압축은 블록 행 하나). 다중 plane 형식은 0이다.
+uint64 PixelFormatRowBytes(PixelFormat format, uint32 width) noexcept;
+
+// 2D 이미지 하나의 바이트다(행 사이 padding 없음, RenderBase 6.5절 배치). plane 크기의 합이며
+// plane 순서대로 잇는다(plane 0 전체 다음 plane 1). 깊이·스텐실(D24S8 4×4 = 64 + 16)과
+// 비디오(NV12 4×2 = 8 + 4)도 같다. 어느 plane이든 크기가 0이면(무효 형식·0 크기·축소 배수 아님)
+// 0이다.
+uint64 PixelFormatImageBytes(PixelFormat format, uint32 width, uint32 height) noexcept;
 
 // mip level의 크기다(max(1, size >> level)).
 constexpr uint32 MipExtent(uint32 size, uint32 level) noexcept {
@@ -332,8 +339,9 @@ constexpr uint32 FullMipCount(uint32 width, uint32 height) noexcept {
 }
 
 // 앞 mipLevels개 mip을 빈틈 없이 이은 바이트다(텍스처 초기 데이터 배치). 각 mip은 depth개의 2D
-// 이미지(PixelFormatImageBytes)이고 depth도 mip마다 max(1, depth >> level)로 줄어든다(2D는 1).
-// 크기·mip 수(1–전체 mip 수)·형식이 잘못됐거나 이미지 크기가 0이면 0이다.
+// 이미지(PixelFormatImageBytes, 다중 plane은 plane 0 다음 plane 1)이고 depth도 mip마다 max(1, depth
+// >> level)로 줄어든다(2D는 1). 크기·mip 수(1–전체 mip 수)·형식이 잘못됐거나 이미지 크기가 0이면
+// 0이다.
 //
 // 사용 예:
 //   MipChainBytes(PixelFormat::RGBA8Unorm, 4, 4, 1, 3);  // 64 + 16 + 4 = 84

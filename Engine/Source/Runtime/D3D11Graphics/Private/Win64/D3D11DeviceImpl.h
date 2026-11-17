@@ -173,6 +173,9 @@ public:
     Result<TextureHandle> CreateTexture(const TextureDesc& desc,
                                         Span<const uint8> pixels) noexcept override;
     Result<PipelineHandle> CreatePipeline(const PipelineDesc& desc) noexcept override;
+    // 대응 표(D3D11Common.cpp)에 있는 형식만 능력을 공개한다(PixelFormat.ko.md 14절 PF3, D3D11
+    // 질의는 PF4).
+    PixelFormatCaps GetPixelFormatCaps(PixelFormat format) const noexcept override;
     Result<CommandContext*> BeginFrame(SwapChainHandle swapChain,
                                        const ClearColor& clear) noexcept override;
     Result<CommandContext*> BeginOffscreen(TextureHandle target,

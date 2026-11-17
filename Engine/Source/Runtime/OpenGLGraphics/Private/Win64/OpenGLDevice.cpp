@@ -1002,6 +1002,9 @@ public:
         if (IsValidPixelFormat(desc.format) && InternalFormat(desc.format) == 0) {
             return UnsupportedFormat<TextureHandle>(desc.format);
         }
+        if (desc.usage == TextureUsage::DepthStencil) {
+            return Result<TextureHandle>::Failure(ErrorCode::Unsupported);
+        }
         const bool renderTarget = desc.usage == TextureUsage::RenderTarget;
         const uint64 size = MipChainBytes(desc.format, desc.width, desc.height, 1, desc.mipLevels);
         if (desc.width > 16384 || desc.height > 16384 || size == 0 ||
@@ -1066,6 +1069,16 @@ public:
             return Result<TextureHandle>::Failure(added.Error());
         }
         return Result<TextureHandle>::Success(TextureHandle{added.Value()});
+    }
+
+    // 대응하는 RGBA8 두 형식만 능력을 공개한다(PixelFormat.ko.md 14절 PF3, ES 3.2 조건표는 PF4).
+    PixelFormatCaps GetPixelFormatCaps(PixelFormat format) const noexcept override {
+        if (InternalFormat(format) == 0) {
+            return PixelFormatCaps::None;
+        }
+
+        return PixelFormatCaps::Sampled | PixelFormatCaps::Filterable | PixelFormatCaps::Mipmaps |
+               PixelFormatCaps::RenderTarget | PixelFormatCaps::Blendable;
     }
 
     Result<PipelineHandle> CreatePipeline(const PipelineDesc& desc) noexcept override {

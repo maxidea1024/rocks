@@ -160,10 +160,48 @@ public:
     virtual Result<BufferHandle> CreateBuffer(const BufferDesc& desc,
                                               Span<const uint8> initial) noexcept = 0;
 
-    // 텍스처를 만든다. Sampled는 pixels(행 위→아래, 빈틈 없는 width*4바이트 행)가 필요하고,
-    // RenderTarget은 pixels가 비어 있어야 한다. 잘못된 크기·형식은 InvalidArgument다.
+    // 텍스처를 만든다. Sampled는 pixels(mip 0부터, mip 안은 plane 순서, 행 위→아래 빈틈 없는 행 —
+    // MipChainBytes 크기)가 필요하고, RenderTarget·DepthStencil은 pixels가 비어 있어야 한다. 잘못된
+    // 크기·형식은 InvalidArgument, 이 장치가 형식·용도를 지원하지 않으면(GetPixelFormatCaps)
+    // Unsupported다.
     virtual Result<TextureHandle> CreateTexture(const TextureDesc& desc,
                                                 Span<const uint8> pixels) noexcept = 0;
+
+    // 이 장치에서 format이 가진 능력이다(PixelFormat.ko.md 7·8절, 장치 생성 때 정해지고 바뀌지
+    // 않는다). backend가 대응하지 않는 형식은 None이다. 스레드 안전.
+    //
+    // 사용 예:
+    //   if (HasPixelFormatCaps(device.GetPixelFormatCaps(PixelFormat::BC7Unorm),
+    //                          PixelFormatCaps::Sampled)) { ... }
+    virtual PixelFormatCaps GetPixelFormatCaps(PixelFormat format) const noexcept {
+        (void)format;
+        return PixelFormatCaps::None;
+    }
+
+    // texture의 자원을 공유하고 형식·plane만 다르게 읽는 view를 만든다(TextureViewDesc). 돌려준
+    // handle은 SetTexture로 묶고 Retire로 놓는다. 원 텍스처를 먼저 Retire해도 view가 자원을 붙든다.
+    // view에는 업로드·readback·그리기 대상 지정을 할 수 없다(InvalidArgument). 형식·plane 조합이
+    // 틀리면 InvalidArgument, 형식이 Sampled가 아니거나 backend가 view를 지원하지 않으면
+    // Unsupported다.
+    virtual Result<TextureHandle> CreateTextureView(TextureHandle texture,
+                                                    const TextureViewDesc& desc) noexcept {
+        (void)texture;
+        (void)desc;
+        return Result<TextureHandle>::Failure(ErrorCode::Unsupported);
+    }
+
+    // 텍스처 mip 하나의 plane 하나를 out(PixelFormatPlaneImageBytes 크기, 행 위→아래, 블록 형식은
+    // 블록 행)으로 읽는다. 렌더 타깃이 아닌 텍스처·블록 압축·깊이·비디오 plane도 읽는다. GPU 완료를
+    // 기다린다(시험·캡처용, 프레임 경로에서 쓰지 않는다). 크기·mip·plane이 틀리면 InvalidArgument,
+    // backend가 지원하지 않으면 Unsupported다.
+    virtual Result<void> ReadTexture(TextureHandle texture, uint32 mipLevel, uint32 plane,
+                                     Span<uint8> out) noexcept {
+        (void)texture;
+        (void)mipLevel;
+        (void)plane;
+        (void)out;
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
 
     // 셰이더를 컴파일하고 파이프라인을 만든다. 셰이더 컴파일 실패는 DependencyFailed다(진단 로그는
     // LastError로 읽는다). 정점 배치 위반(ValidateVertexLayout)과 셰이더 입력 대조 실패는
