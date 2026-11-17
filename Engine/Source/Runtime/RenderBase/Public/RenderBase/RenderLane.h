@@ -95,6 +95,13 @@ public:
         return slot_;
     }
 
+    // 이 프레임 slot의 프레임 arena다(CP3). 게임 lane이 packet 목록을 담은 같은 arena이며, 렌더
+    // lane은 그 프레임 작업 안에서 그래프 수명 객체(렌더 그래프 pass·접근 목록)를 더 할당할 수
+    // 있다. 내용은 이 slot을 다시 확보할 때(그 프레임의 GPU 완료 뒤) 게임 lane이 Reset하므로,
+    // 소멸자가 렌더 lane에서 돌아야 하는 객체는 프레임 작업 안에서 스스로 부순다(RenderGraph가
+    // 그렇게 한다).
+    FrameArena& Arena() const noexcept;
+
     // 게임 lane이 이 프레임에 담은 렌더 설정 snapshot이다(RenderLane::AttachSettings, 12절). 담지
     // 않았으면 빈 참조다. 렌더 lane은 설정을 이것으로만 읽는다.
     const RenderSettingsRef& Settings() const noexcept {
@@ -421,6 +428,7 @@ private:
         bool ready = false;
     };
     friend class RenderLaneContext;
+    friend class RenderFrameContext;
 
     enum class SlotPhase : uint8 {
         // 비어 있다(GPU 완료 표지까지 끝났다).
@@ -480,6 +488,11 @@ private:
     void CancelSubmit(uint32 slot) noexcept;
     void FinishFrame(uint32 slot, uint64 frame, graphics::GpuFencePoint before) noexcept;
     void RunRetire(RenderHandle handle) noexcept;
+    // 장치 Retire와 GPU 완료 통지 등록이다(RunRetire와 미룬 Retire가 함께 쓴다).
+    void RetireOnDevice(RenderHandle handle,
+                        const RenderHandleTable::RetiredResource& retired) noexcept;
+    // lease가 남아 미뤘던 Retire 가운데 마지막 lease가 풀린 것을 장치로 넘긴다(lane 작업 끝).
+    void FinishDeferredRetires() noexcept;
     void RunReadback(uint64 id, RenderHandle texture) noexcept;
     void FinishReadback(uint64 id, ErrorCode error) noexcept;
     // GPU가 끝낸 프레임의 timestamp 결과를 장치에서 꺼내 GpuTimestamp 통지로 넣는다(lane 작업).
@@ -575,6 +588,7 @@ Result<void> RenderLane::SubmitFrame(FrameTicket&& ticket, T&& packet,
             const graphics::GpuFencePoint before = device_.LastSubmittedFence();
             RenderFrameContext context(*this, slot, frame, settings_[slot]);
             render(context, value);
+            FinishDeferredRetires();
             FinishFrame(slot, frame, before);
         });
     if (!posted) {
@@ -597,6 +611,7 @@ Result<void> RenderLane::PostResource(T&& value, RenderLaneFunction<T> run) noex
         ProcessInbox();
         RenderLaneContext context(*this);
         run(context, held);
+        FinishDeferredRetires();
     });
 }
 
