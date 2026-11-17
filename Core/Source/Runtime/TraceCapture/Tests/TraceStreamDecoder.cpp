@@ -240,4 +240,88 @@ bool TraceStreamDecoder::DecodeRecords(uint16 streamId, Array<DecodedRecord>& ou
     return true;
 }
 
+bool DecodeScopeBatch(Span<const uint8> events, Array<DecodedScopeEvent>& out) noexcept {
+    constexpr uint8 ContinueBit = 0x80;
+    constexpr uint32 MaxShift = 63;
+    usize position = 0;
+    auto readVarint = [&](uint64& value) {
+        value = 0;
+        for (uint32 shift = 0; position < events.Size(); shift += 7) {
+            if (shift > MaxShift) {
+                return false;
+            }
+
+            const uint8 byte = events[position++];
+            value |= static_cast<uint64>(byte & ~ContinueBit) << shift;
+            if ((byte & ContinueBit) == 0) {
+                return true;
+            }
+        }
+
+        return false;
+    };
+
+    uint64 tick = 0;
+    while (position < events.Size()) {
+        uint64 head = 0;
+        if (!readVarint(head)) {
+            return false;
+        }
+
+        DecodedScopeEvent event;
+        tick += head >> TraceStandardFormat::ScopeTagBits;
+        event.tick = tick;
+        event.begin =
+            (head & TraceStandardFormat::ScopeTagMask) == TraceStandardFormat::ScopeBeginTag;
+        if (event.begin) {
+            uint64 name = 0;
+            if (!readVarint(name)) {
+                return false;
+            }
+
+            event.nameId = static_cast<uint32>(name);
+        } else if ((head & TraceStandardFormat::ScopeTagMask) != 0) {
+            return false;
+        }
+
+        if (!out.TryPushBack(event)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool BuildScopes(Span<const DecodedScopeEvent> events, Array<DecodedScope>& out,
+                 usize& orphanEnds) noexcept {
+    constexpr usize MaxDepth = 256;
+    usize stack[MaxDepth];
+    usize depth = 0;
+    orphanEnds = 0;
+    for (const DecodedScopeEvent& event : events) {
+        if (event.begin) {
+            if (depth == MaxDepth) {
+                return false;
+            }
+
+            DecodedScope scope;
+            scope.nameId = event.nameId;
+            scope.beginTick = event.tick;
+            scope.depth = static_cast<uint32>(depth);
+            stack[depth++] = out.Size();
+            if (!out.TryPushBack(scope)) {
+                return false;
+            }
+        } else if (depth == 0) {
+            ++orphanEnds;
+        } else {
+            DecodedScope& scope = out[stack[--depth]];
+            scope.endTick = event.tick;
+            scope.ended = true;
+        }
+    }
+
+    return true;
+}
+
 } // namespace rocks::tracetest

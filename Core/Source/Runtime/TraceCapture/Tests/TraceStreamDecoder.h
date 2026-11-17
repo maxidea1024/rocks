@@ -111,6 +111,32 @@ private:
     Array<DecodedSchema> schemas_;
 };
 
+// CPU 구간 배치(Trace.CpuScopeBatch)의 사건 하나다.
+struct DecodedScopeEvent {
+    uint64 tick = 0;
+    uint32 nameId = 0;
+    bool begin = false;
+};
+
+// 배치 내용 하나를 사건 열로 풀어 out 뒤에 붙인다(TraceStandardFormat의 varint 형식). 형식이 틀리면
+// false다.
+bool DecodeScopeBatch(Span<const uint8> events, Array<DecodedScopeEvent>& out) noexcept;
+
+// 짝지은 CPU 구간이다. 끝을 잃은 구간(손실·세션 종료)은 ended가 false이고 길이를 지어내지 않는다
+// (endTick 0).
+struct DecodedScope {
+    uint32 nameId = 0;
+    uint64 beginTick = 0;
+    uint64 endTick = 0;
+    uint32 depth = 0;
+    bool ended = false;
+};
+
+// 한 스레드의 사건 열을 스택으로 짝짓는다. 시작 순서대로 out에 붙인다. 시작을 잃은 끝(손실로 시작
+// 배치가 버려짐)은 orphanEnds로 센다.
+bool BuildScopes(Span<const DecodedScopeEvent> events, Array<DecodedScope>& out,
+                 usize& orphanEnds) noexcept;
+
 // 고정부 offset의 little-endian 정수를 읽는다(uint16·uint32·uint64).
 template <typename T>
 T ReadFixed(const DecodedRecord& record, usize offset) noexcept {

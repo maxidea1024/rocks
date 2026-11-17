@@ -351,8 +351,10 @@ TEST(TraceDefinitionStoreOverflowIsMarked) {
         REQUIRE(lateDecoder.DecodeRecords(TraceFormat::DefinitionStreamId, lateRecords));
         CHECK(CountType(earlyRecords, nameId) == Names);
         CHECK(CountType(lateRecords, nameId) == 0);
-        // 저장된 채널 정보는 늦게 붙은 출력도 받는다.
-        CHECK(CountType(lateRecords, TraceFormat::ChannelInfoTypeId) == 1);
+        // 저장된 채널 정보(표준 채널 포함)는 늦게 붙은 출력도 똑같이 받는다.
+        const usize channelInfos = CountType(earlyRecords, TraceFormat::ChannelInfoTypeId);
+        CHECK(channelInfos > 0);
+        CHECK(CountType(lateRecords, TraceFormat::ChannelInfoTypeId) == channelInfos);
     }
 }
 

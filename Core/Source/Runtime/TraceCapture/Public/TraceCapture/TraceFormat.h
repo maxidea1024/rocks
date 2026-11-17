@@ -16,12 +16,10 @@
 // 스트림은 스키마(형 정의)·정의 기록·스레드별 기록으로 나뉘고, 같은 스트림의 덩어리 내용을 순서대로
 // 이으면 그 스트림의 기록 열이 된다. 덩어리 경계는 기록 경계와 무관하다.
 //
-// 기록(정의·스레드 스트림) = u16 형 id | [u64 순서 번호: Ordered 형] | 고정부 | 가변 필드마다 u32
-// 길이
-//                          | 가변 필드 내용(필드 표 순서대로 이어 붙임)
-// 스키마 기록(스키마 스트림) = u16 기록 byte 수 | u16 형 id | u16 채널 id | u8 형 플래그 | u8 필드
-// 수
-//                          | u16 고정부 byte 수 | u16 이름 길이 | 이름
+// 기록(정의·스레드 스트림) = u16 형 id | [u64 순서 번호: Ordered 형] | 고정부
+//                          | 가변 필드마다 u32 길이 | 가변 필드 내용(필드 표 순서대로 이어 붙임)
+// 스키마 기록(스키마 스트림) = u16 기록 byte 수 | u16 형 id | u16 채널 id | u8 형 플래그
+//                          | u8 필드 수 | u16 고정부 byte 수 | u16 이름 길이 | 이름
 //                          | 필드마다 (u8 필드 타입 | u16 고정부 offset | u16 이름 길이 | 이름)
 namespace rocks {
 
@@ -180,10 +178,12 @@ struct TraceFormat {
     static constexpr usize ChannelStateIdOffset = 8;
     static constexpr usize ChannelStateEnabledOffset = 10;
     static constexpr usize ChannelStateFixedBytes = 11;
-    // ThreadInfo(정의): u32 trace 스레드 id | u64 OS 스레드 id
+    // ThreadInfo(정의): u32 trace 스레드 id | u64 OS 스레드 id | i32 정렬 순위,
+    // 가변: 이름(String) | 묶음(String). 같은 스레드의 기록이 다시 나오면 나중 것이 이긴다.
     static constexpr usize ThreadInfoIdOffset = 0;
     static constexpr usize ThreadInfoOsIdOffset = 4;
-    static constexpr usize ThreadInfoFixedBytes = 12;
+    static constexpr usize ThreadInfoSortOrderOffset = 12;
+    static constexpr usize ThreadInfoFixedBytes = 16;
     // Loss(스레드 스트림): u64 손실 시작 tick | u64 손실 끝 tick,
     // 가변: 채널 id(UInt16Array) | 채널별 손실 수(UInt64Array). 두 배열의 원소 수는 같다.
     static constexpr usize LossStartTickOffset = 0;
@@ -193,6 +193,112 @@ struct TraceFormat {
     static constexpr usize DefinitionLossTickOffset = 0;
     static constexpr usize DefinitionLossCountOffset = 8;
     static constexpr usize DefinitionLossFixedBytes = 16;
+};
+
+// 세션이 Start 때 스스로 등록하는 표준 채널·형(TR2: CPU 구간·카운터·표지·시간 띠·프레임·문맥)의
+// 형식이다. 형 id는 등록 순서로 정해지므로 reader는 아래 이름으로 스키마를 찾는다. 이름 id·카운터
+// id·표지 호출 지점 id·문맥 id는 세션마다 1부터 매기는 u32이고, 0은 "없음"이다.
+struct TraceStandardFormat {
+    // ---- 이름 ----
+    static constexpr const char* ScopeNameType = "Trace.ScopeName";
+    static constexpr const char* CpuScopeBatchType = "Trace.CpuScopeBatch";
+    static constexpr const char* CounterDefinitionType = "Trace.CounterDefinition";
+    static constexpr const char* CounterIntegerType = "Trace.CounterInteger";
+    static constexpr const char* CounterFloatType = "Trace.CounterFloat";
+    static constexpr const char* MarkSiteType = "Trace.MarkSite";
+    static constexpr const char* MarkType = "Trace.Mark";
+    static constexpr const char* SpanBeginType = "Trace.SpanBegin";
+    static constexpr const char* SpanEndType = "Trace.SpanEnd";
+    static constexpr const char* FrameBeginType = "Trace.FrameBegin";
+    static constexpr const char* FrameEndType = "Trace.FrameEnd";
+    static constexpr const char* ContextDefinitionType = "Trace.ContextDefinition";
+    static constexpr const char* ContextPushType = "Trace.ContextPush";
+    static constexpr const char* ContextPopType = "Trace.ContextPop";
+
+    // ---- 이름 표 ----
+    // ScopeName(정의): u32 이름 id | u8 잘림, 가변: 이름(String). 이름이 MaxScopeNameBytes를 넘으면
+    // 앞부분만 두고 잘림을 켠다. 같은 이름은 세션 안에서 id 하나다(결정 T4).
+    static constexpr usize ScopeNameIdOffset = 0;
+    static constexpr usize ScopeNameTruncatedOffset = 4;
+    static constexpr usize ScopeNameFixedBytes = 5;
+    static constexpr usize MaxScopeNameBytes = 1024;
+
+    // ---- CPU 구간 배치 ----
+    // CpuScopeBatch(스레드 스트림): 가변 UInt8Array 하나. 사건 열이며 각 사건은
+    //   시작: varint((Δtick << 2) | ScopeBeginTag) varint(이름 id)
+    //   끝:   varint(Δtick << 2)
+    // 이다. Δtick은 같은 배치의 앞 사건 tick과의 차이이고, 배치 첫 사건은 절대 tick이다. varint는
+    // 7비트씩 낮은 쪽부터 쓰고 최상위 비트가 "이어짐"이다(LEB128 부호 없음).
+    static constexpr usize ScopeBatchBytes = 256;
+    static constexpr uint64 ScopeBeginTag = 1;
+    static constexpr uint64 ScopeTagMask = 3;
+    static constexpr uint32 ScopeTagBits = 2;
+
+    // ---- 카운터 ----
+    // CounterDefinition(정의): u32 id | u8 종류(0 정수, 1 실수) | u8 단위(0 개수, 1 byte, 2 백분율)
+    // | u8 방식(0 바뀔 때만, 1 매번), 가변: 이름(String)
+    static constexpr usize CounterDefinitionIdOffset = 0;
+    static constexpr usize CounterDefinitionKindOffset = 4;
+    static constexpr usize CounterDefinitionUnitOffset = 5;
+    static constexpr usize CounterDefinitionModeOffset = 6;
+    static constexpr usize CounterDefinitionFixedBytes = 7;
+    // CounterInteger·CounterFloat(스레드 스트림, 순서 번호): u64 tick | u32 id | i64 또는 f64 값
+    static constexpr usize CounterValueTickOffset = 0;
+    static constexpr usize CounterValueIdOffset = 8;
+    static constexpr usize CounterValueOffset = 12;
+    static constexpr usize CounterValueFixedBytes = 20;
+
+    // ---- 표지 ----
+    // MarkSite(정의): u32 호출 지점 id | u32 줄, 가변: 형식 문자열(String) | 파일(String)
+    static constexpr usize MarkSiteIdOffset = 0;
+    static constexpr usize MarkSiteLineOffset = 4;
+    static constexpr usize MarkSiteFixedBytes = 8;
+    // Mark(스레드 스트림): u64 tick | u32 호출 지점 id, 가변: 형식 인자(UInt8Array). 인자마다 u8
+    // tag와 값이다. Int64·UInt64·Float64는 8 byte, Bool은 1 byte, String은 u32 길이 + byte다.
+    static constexpr usize MarkTickOffset = 0;
+    static constexpr usize MarkSiteOffset = 8;
+    static constexpr usize MarkFixedBytes = 12;
+    static constexpr usize MaxMarkArgumentBytes = 512;
+    static constexpr uint8 MarkArgumentInt64 = 1;
+    static constexpr uint8 MarkArgumentUInt64 = 2;
+    static constexpr uint8 MarkArgumentFloat64 = 3;
+    static constexpr uint8 MarkArgumentBool = 4;
+    static constexpr uint8 MarkArgumentString = 5;
+
+    // ---- 시간 띠 ----
+    // SpanBegin(스레드 스트림): u64 tick | u64 띠 id | u32 이름 id. SpanEnd: u64 tick | u64 띠 id.
+    // 띠 id는 세션 안에서 1부터 매긴다. 시작과 끝은 id로만 짝짓는다(같은 이름의 띠가 겹쳐도 된다).
+    static constexpr usize SpanTickOffset = 0;
+    static constexpr usize SpanIdOffset = 8;
+    static constexpr usize SpanNameOffset = 16;
+    static constexpr usize SpanBeginFixedBytes = 20;
+    static constexpr usize SpanEndFixedBytes = 16;
+
+    // ---- 프레임 ----
+    // FrameBegin·FrameEnd(스레드 스트림): u64 tick | u64 프레임 번호 | u8 종류(0 게임, 1 렌더)
+    static constexpr usize FrameTickOffset = 0;
+    static constexpr usize FrameNumberOffset = 8;
+    static constexpr usize FrameKindOffset = 16;
+    static constexpr usize FrameFixedBytes = 17;
+
+    // ---- 문맥 ----
+    // ContextDefinition(정의): u32 문맥 id | u64 세션 | u64 task | u64 에셋 | u64 entity | u64 요청
+    static constexpr usize ContextDefinitionIdOffset = 0;
+    static constexpr usize ContextDefinitionValuesOffset = 4;
+    static constexpr usize ContextValueCount = 5;
+    static constexpr usize ContextDefinitionFixedBytes = 4 + ContextValueCount * 8;
+    // ContextPush(스레드 스트림): u64 tick | u32 문맥 id. 새 문맥을 쌓을 때와 저장한 문맥을 복원할
+    // 때 같다(복원은 id만 기록한다). ContextPop: u64 tick.
+    static constexpr usize ContextPushTickOffset = 0;
+    static constexpr usize ContextPushIdOffset = 8;
+    static constexpr usize ContextPushFixedBytes = 12;
+    static constexpr usize ContextPopFixedBytes = 8;
+    // 스레드 문맥 스택의 깊이 상한이다. 넘친 쌓기는 스택에 들어가지 않고 기록도 하지 않는다.
+    static constexpr usize MaxContextDepth = 16;
+
+    // ---- 스레드 정보 ----
+    // 스레드 이름·묶음의 byte 상한이다. 넘으면 앞부분만 쓴다.
+    static constexpr usize MaxThreadNameBytes = 63;
 };
 
 } // namespace rocks

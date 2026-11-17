@@ -137,8 +137,20 @@ bool TraceSessionState::WriteOutput(TraceOutput& output, Span<const uint8> bytes
     if (output.file != nullptr) {
         const platform::FileTransfer transfer = output.file->WriteAll(bytes.Data(), bytes.Size());
         written = transfer.status && transfer.bytes == bytes.Size();
+        if (!written) {
+            // 원본 파일 오류(OS 오류 포함)를 통계에 남긴다. 짧은 쓰기는 NoProgress로 본다.
+            lastOutputFileStatus = transfer.status
+                                       ? platform::FileStatus{platform::FileCode::NoProgress, 0}
+                                       : transfer.status;
+            // TODO(log): 출력 쓰기 실패를 로그로 알린다(LoggingSystem).
+        }
     } else {
-        written = static_cast<bool>(output.write(output.context, bytes));
+        const Result<void> result = output.write(output.context, bytes);
+        written = result.IsOk();
+        if (!written) {
+            lastOutputCallbackError = result.Error();
+            // TODO(log): 출력 콜백 실패를 로그로 알린다(LoggingSystem).
+        }
     }
 
     if (!written) {
@@ -244,16 +256,35 @@ bool TraceSessionState::DrainDefinitions(bool hasOutputs) noexcept {
 // 스레드 하나의 공개된 기록을 target(이번 펌프 시작 때 읽은 published)까지 보낸다. 다 읽은 은퇴
 // 블록은 풀로 돌려준다.
 void TraceSessionState::DrainThread(TraceThreadState& thread, bool hasOutputs) noexcept {
-    if (thread.done) {
+    // 칸을 다른 스레드가 다시 쓰기 시작했으면 writer 칸을 처음으로 되돌린다. 이번 펌프의 target이
+    // 그 전 세대에서 읽은 값이면 믿을 수 없으므로 다음 펌프로 미룬다.
+    const uint32 generation = AtomicLoad<MemoryOrder::Acquire>(&thread.generation);
+    if (generation != thread.writerGeneration) {
+        thread.writerGeneration = generation;
+        thread.readBlock = nullptr;
+        thread.consumed = 0;
+        thread.done = false;
+    }
+
+    if (thread.done || generation != thread.targetGeneration) {
         return;
     }
 
     if (thread.readBlock == nullptr) {
         thread.readBlock = AtomicLoad<MemoryOrder::Acquire>(&thread.firstBlock);
         if (thread.readBlock == nullptr) {
-            // 블록을 한 번도 받지 못하고(모두 손실) 끝난 스레드다. 손실 기록이 첫 블록이 된다.
-            if (AtomicLoad<MemoryOrder::Acquire>(&thread.exited) == 0 || !thread.lossActive ||
-                !WriteThreadLoss(pool, thread)) {
+            if (AtomicLoad<MemoryOrder::Acquire>(&thread.exited) == 0) {
+                return;
+            }
+
+            // 블록 없이 끝난 스레드다. 스레드 기록이 하나도 없었으면(정의만 썼거나 스레드 정보만
+            // 정했다) 비울 것이 없다. 모두 손실이었으면 손실 기록이 첫 블록이 된다.
+            if (!thread.lossActive) {
+                RecycleThread(thread);
+                return;
+            }
+
+            if (!WriteThreadLoss(pool, thread)) {
                 return;
             }
 
@@ -314,8 +345,17 @@ void TraceSessionState::DrainThread(TraceThreadState& thread, bool hasOutputs) n
         AtomicLoad<MemoryOrder::Acquire>(&thread.readBlock->header.next) == nullptr) {
         pool.Free(thread.readBlock);
         thread.readBlock = nullptr;
-        thread.done = true;
+        RecycleThread(thread);
     }
+}
+
+// 끝났고 다 비운 스레드의 칸을 재사용 목록에 넣는다. 새 스레드가 다시 쓰므로 스레드를 자주 만들고
+// 없애도 스레드 목록이 자라지 않는다(trace 스레드 id는 새로 받는다).
+void TraceSessionState::RecycleThread(TraceThreadState& thread) noexcept {
+    thread.done = true;
+    platform::LockGuard lock(registryMutex);
+    thread.freeNext = freeThreads;
+    freeThreads = &thread;
 }
 
 void TraceSessionState::Pump() noexcept {
@@ -324,6 +364,8 @@ void TraceSessionState::Pump() noexcept {
     //    2)·3)에서 함께 나간다.
     TraceThreadState* head = AtomicLoad<MemoryOrder::Acquire>(&threads);
     for (TraceThreadState* thread = head; thread != nullptr; thread = thread->next) {
+        // 세대를 먼저 읽는다. 세대가 그대로면 이어 읽은 published는 그 세대의 값이다.
+        thread->targetGeneration = AtomicLoad<MemoryOrder::Acquire>(&thread->generation);
         thread->target = AtomicLoad<MemoryOrder::Acquire>(&thread->published);
     }
 
@@ -349,8 +391,9 @@ void TraceSessionState::FinalFlush() noexcept {
 
 void TraceSessionState::CloseOutput(TraceOutput& output, bool& closeFailed) noexcept {
     if (output.file != nullptr) {
-        if (!output.file->Close()) {
+        if (const platform::FileStatus closed = output.file->Close(); !closed) {
             closeFailed = true;
+            lastOutputFileStatus = closed;
         }
 
         output.file->~File();

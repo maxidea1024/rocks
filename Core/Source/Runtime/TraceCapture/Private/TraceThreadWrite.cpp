@@ -19,17 +19,16 @@ using platform::AtomicLoad;
 using platform::AtomicStore;
 
 constinit TraceSessionState* currentSession = nullptr;
+constinit uint64 currentSessionSerial = 0;
 constinit uint64 sessionSerialCounter = 0;
 
 namespace {
-
-struct ThreadSlot;
 
 // 한 번이라도 기록한 모든 스레드의 TLS 칸 목록이다. Stop이 이 목록으로 진행 중인 기록을 기다린다.
 // 목록 변경(스레드의 첫 기록·종료)은 드물어 spin 잠금으로 직렬화한다. 상수 초기화되는 전역이다.
 struct SlotRegistry {
     uint32 lock = 0;
-    ThreadSlot* head = nullptr;
+    TraceThreadSlot* head = nullptr;
 };
 
 constinit SlotRegistry slotRegistry;
@@ -46,87 +45,7 @@ void UnlockSlotRegistry() noexcept {
 
 void RetireThread(TraceSessionState& session, TraceThreadState& state) noexcept;
 
-// 스레드의 TLS 칸이다. 세션 메모리가 아니라 스레드 수명에 묶여 있어, Stop이 아직 세션에 등록하지
-// 않은 스레드의 진행 중 기록도 기다릴 수 있다.
-//
-// 기록 호출은 busy를 올린 뒤(seq_cst) 현재 세션을 읽고, 끝나면 내린다. Stop은 현재 세션을 null로 쓴
-// 뒤(seq_cst) 모든 칸의 busy가 0이 되기를 기다린다. 기록 호출이 세션을 읽었다면 그 전에 올린 busy를
-// Stop이 반드시 보므로, Stop이 세션 메모리를 해제할 때 그 세션을 쓰는 기록 호출은 없다.
-struct ThreadSlot {
-    // 진행 중인 기록 호출의 깊이다. 이 스레드만 쓰고 Stop이 읽는다.
-    uint32 busy = 0;
-    bool linked = false;
-    // state가 속한 세션의 serial이다. 다르면 state는 이미 해제된 세션의 것이므로 보지 않는다.
-    uint64 serial = 0;
-    TraceThreadState* state = nullptr;
-    ThreadSlot* previous = nullptr;
-    ThreadSlot* next = nullptr;
-
-    constexpr ThreadSlot() noexcept = default;
-    ThreadSlot(const ThreadSlot&) = delete;
-    ThreadSlot& operator=(const ThreadSlot&) = delete;
-
-    // 스레드 종료(TLS 정리) 때 현재 세션의 스레드 상태를 은퇴로 표시한다(UE TlsBuffer와 같다).
-    // writer가 남은 내용을 보낸 뒤 블록을 풀로 돌려준다.
-    ~ThreadSlot() noexcept;
-
-    uint32 Enter() noexcept {
-        const uint32 depth = AtomicLoad<MemoryOrder::Relaxed>(&busy);
-        AtomicStore<MemoryOrder::SequentiallyConsistent>(&busy, depth + 1);
-        return depth;
-    }
-
-    void Leave(uint32 depth) noexcept {
-        AtomicStore<MemoryOrder::Release>(&busy, depth);
-    }
-
-    void Link() noexcept {
-        LockSlotRegistry();
-        next = slotRegistry.head;
-        if (next != nullptr) {
-            next->previous = this;
-        }
-
-        slotRegistry.head = this;
-        linked = true;
-        UnlockSlotRegistry();
-    }
-
-    void Unlink() noexcept {
-        LockSlotRegistry();
-        if (previous != nullptr) {
-            previous->next = next;
-        } else {
-            slotRegistry.head = next;
-        }
-
-        if (next != nullptr) {
-            next->previous = previous;
-        }
-
-        previous = nullptr;
-        next = nullptr;
-        linked = false;
-        UnlockSlotRegistry();
-    }
-};
-
-ThreadSlot::~ThreadSlot() noexcept {
-    if (!linked) {
-        return;
-    }
-
-    const uint32 depth = Enter();
-    TraceSessionState* session = AtomicLoad<MemoryOrder::SequentiallyConsistent>(&currentSession);
-    if (session != nullptr && state != nullptr && serial == session->serial) {
-        RetireThread(*session, *state);
-    }
-
-    Leave(depth);
-    Unlink();
-}
-
-thread_local ThreadSlot currentSlot;
+thread_local TraceThreadSlot currentSlot;
 
 // ---- 블록 쓰기 ----
 
@@ -327,8 +246,152 @@ void RetireThread(TraceSessionState& session, TraceThreadState& state) noexcept 
     AtomicStore<MemoryOrder::Release>(&state.exited, 1u);
 }
 
-// 이 스레드를 세션에 등록한다(스레드의 세션 첫 기록). 스레드 정보는 정의 기록으로 남긴다.
-TraceThreadState* AcquireThreadState(TraceSessionState& session, ThreadSlot& slot) noexcept {
+// 끝난 스레드의 칸을 새 스레드에 줄 때 생산자·공유 칸을 처음으로 되돌린다. writer 칸은 writer가
+// generation을 보고 되돌린다. 칸은 writer가 다 비운 뒤에만 재사용 목록에 들어오므로 이때 이 칸을
+// 쓰는 생산자도 writer도 없다.
+void ResetThreadState(TraceThreadState& state) noexcept {
+    state.block = nullptr;
+    state.offset = 0;
+    state.total = 0;
+    state.writing = false;
+    state.lossActive = false;
+    state.lossStartTick = 0;
+    for (uint64& count : state.lostCounts) {
+        count = 0;
+    }
+
+    for (uint64& mask : state.lostChannelMask) {
+        mask = 0;
+    }
+
+    for (TraceNameCacheEntry& entry : state.nameCache) {
+        entry = TraceNameCacheEntry{};
+    }
+
+    AtomicStore<MemoryOrder::Relaxed>(&state.published, uint64{0});
+    AtomicStore<MemoryOrder::Relaxed>(&state.firstBlock, static_cast<TraceBlock*>(nullptr));
+    AtomicStore<MemoryOrder::Relaxed>(&state.exited, 0u);
+}
+
+// 가변부 인자가 형의 가변 필드와 맞는지 확인한다. 등록 때 세어 둔 배치를 쓰므로 필드 표를 훑지
+// 않는다. 어긋남은 호출 지점의 프로그래밍 오류다.
+void CheckVariableParts(const TraceEventType& type,
+                        Span<const TraceVariablePart> variable) noexcept {
+    if (variable.Size() != type.VariableCount()) {
+        platform::Fatal("TraceWrite variable part count does not match the event type");
+    }
+
+    for (usize index = 0; index < variable.Size(); ++index) {
+        const TraceVariablePart& value = variable[index];
+        const usize elementBytes = TraceEventTypeAccess::VariableElementBytes(type, index);
+        if ((value.data == nullptr && value.bytes != 0) || value.bytes % elementBytes != 0) {
+            platform::Fatal("TraceWrite variable part does not match its field type");
+        }
+    }
+}
+
+} // namespace
+
+// ---- TLS 칸 ----
+
+void TraceThreadSlot::Link() noexcept {
+    LockSlotRegistry();
+    next = slotRegistry.head;
+    if (next != nullptr) {
+        next->previous = this;
+    }
+
+    slotRegistry.head = this;
+    linked = true;
+    UnlockSlotRegistry();
+}
+
+void TraceThreadSlot::Unlink() noexcept {
+    LockSlotRegistry();
+    if (previous != nullptr) {
+        previous->next = next;
+    } else {
+        slotRegistry.head = next;
+    }
+
+    if (next != nullptr) {
+        next->previous = previous;
+    }
+
+    previous = nullptr;
+    next = nullptr;
+    linked = false;
+    UnlockSlotRegistry();
+}
+
+TraceThreadSlot::~TraceThreadSlot() noexcept {
+    if (!linked) {
+        return;
+    }
+
+    FlushCpuScopeBatch(*this);
+    {
+        TraceSessionGuard guard(*this);
+        TraceSessionState* session = guard.Session(serial);
+        if (session != nullptr && state != nullptr) {
+            RetireThread(*session, *state);
+        }
+    }
+
+    Unlink();
+}
+
+TraceThreadSlot& CurrentTraceThreadSlot() noexcept {
+    return currentSlot;
+}
+
+TraceSessionGuard::TraceSessionGuard() noexcept : TraceSessionGuard(currentSlot) {
+}
+
+TraceSessionGuard::TraceSessionGuard(TraceThreadSlot& slot) noexcept : slot_(slot) {
+    if (!slot_.linked) {
+        slot_.Link();
+    }
+
+    depth_ = slot_.Enter();
+    session_ = AtomicLoad<MemoryOrder::SequentiallyConsistent>(&currentSession);
+}
+
+TraceSessionGuard::~TraceSessionGuard() noexcept {
+    slot_.Leave(depth_);
+}
+
+TraceSessionState* TraceSessionGuard::Session(uint64 serial) const noexcept {
+    if (session_ == nullptr || (serial != 0 && session_->serial != serial)) {
+        return nullptr;
+    }
+
+    return session_;
+}
+
+// ---- 스레드 등록 ----
+
+void WriteThreadInfo(TraceSessionState& session, const TraceThreadState& state,
+                     const TraceThreadSlot& slot) noexcept {
+    uint8 fixed[TraceFormat::ThreadInfoFixedBytes];
+    StoreLittleEndian<uint32>(fixed + TraceFormat::ThreadInfoIdOffset, state.threadId);
+    StoreLittleEndian<uint64>(fixed + TraceFormat::ThreadInfoOsIdOffset, state.osThreadId);
+    StoreLittleEndian<int32>(fixed + TraceFormat::ThreadInfoSortOrderOffset, slot.threadSortOrder);
+    const TraceVariablePart parts[] = {{slot.threadName, slot.threadNameBytes},
+                                       {slot.threadGroup, slot.threadGroupBytes}};
+    TraceRecordShape info;
+    info.typeId = TraceFormat::ThreadInfoTypeId;
+    info.fixed = fixed;
+    info.fixedBytes = sizeof(fixed);
+    info.variable = parts;
+    if (!session.WriteDefinition(info)) {
+        session.definitions.NoteDropped();
+    }
+}
+
+// 이 스레드를 세션에 등록한다(스레드의 세션 첫 기록). 끝난 스레드의 칸이 있으면 다시 쓰고(trace
+// 스레드 id는 새로 받는다), 스레드 정보는 정의 기록으로 남긴다.
+TraceThreadState* AcquireThreadState(TraceSessionState& session, TraceThreadSlot& slot) noexcept {
     if (slot.state != nullptr && slot.serial == session.serial) {
         return slot.state;
     }
@@ -338,68 +401,47 @@ TraceThreadState* AcquireThreadState(TraceSessionState& session, ThreadSlot& slo
         return nullptr;
     }
 
-    auto memory = session.allocator->Allocate(sizeof(TraceThreadState), alignof(TraceThreadState));
-    if (!memory) {
-        return nullptr;
+    TraceThreadState* state = session.freeThreads;
+    const bool reused = state != nullptr;
+    if (reused) {
+        session.freeThreads = state->freeNext;
+        state->freeNext = nullptr;
+        ResetThreadState(*state);
+    } else {
+        auto memory =
+            session.allocator->Allocate(sizeof(TraceThreadState), alignof(TraceThreadState));
+        if (!memory) {
+            return nullptr;
+        }
+
+        state = ::new (memory.Value()) TraceThreadState{};
+        ++session.threadSlots;
     }
 
-    auto* state = ::new (memory.Value()) TraceThreadState{};
     state->threadId = session.nextThreadId++;
     state->osThreadId = platform::CurrentThreadId();
-    state->next = session.threads;
-
-    uint8 fixed[TraceFormat::ThreadInfoFixedBytes];
-    StoreLittleEndian<uint32>(fixed + TraceFormat::ThreadInfoIdOffset, state->threadId);
-    StoreLittleEndian<uint64>(fixed + TraceFormat::ThreadInfoOsIdOffset, state->osThreadId);
-    TraceRecordShape info;
-    info.typeId = TraceFormat::ThreadInfoTypeId;
-    info.fixed = fixed;
-    info.fixedBytes = sizeof(fixed);
-    if (!session.WriteDefinition(info)) {
-        session.definitions.NoteDropped();
+    if (reused) {
+        // 위의 초기화와 새 스레드 id를 writer에 공개한다.
+        AtomicStore<MemoryOrder::Release>(&state->generation, state->generation + 1);
     }
 
-    AtomicStore<MemoryOrder::Release>(&session.threads, state);
+    WriteThreadInfo(session, *state, slot);
+    if (!reused) {
+        state->next = session.threads;
+        AtomicStore<MemoryOrder::Release>(&session.threads, state);
+    }
+
     slot.state = state;
     slot.serial = session.serial;
     return state;
 }
 
-// 가변부 인자가 형의 가변 필드와 맞는지 확인한다. 어긋남은 호출 지점의 프로그래밍 오류다.
-void CheckVariableParts(const TraceEventType& type,
-                        Span<const TraceVariablePart> variable) noexcept {
-    usize part = 0;
-    for (usize index = 0; index < type.FieldCount(); ++index) {
-        const TraceField& field = type.Fields()[index];
-        if (!IsVariableTraceField(field.type)) {
-            continue;
-        }
+// ---- 기록 ----
 
-        if (part == variable.Size()) {
-            platform::Fatal(
-                "TraceWrite received fewer variable parts than the event type declares");
-        }
-
-        const TraceVariablePart& value = variable[part++];
-        if ((value.data == nullptr && value.bytes != 0) ||
-            value.bytes % TraceFieldElementBytes(field.type) != 0) {
-            platform::Fatal("TraceWrite variable part does not match its field type");
-        }
-    }
-
-    if (part != variable.Size()) {
-        platform::Fatal("TraceWrite received more variable parts than the event type declares");
-    }
-}
-
-TraceWriteResult WriteWithSession(TraceSessionState& session, ThreadSlot& slot,
-                                  const TraceEventType& type, const void* fixed, usize fixedBytes,
-                                  Span<const TraceVariablePart> variable) noexcept {
-    const uint16 typeId = type.Id();
-    if (typeId == TraceEventType::NoId) {
-        return TraceWriteResult::Disabled;
-    }
-
+TraceWriteResult WriteSessionRecord(TraceSessionState& session, TraceThreadSlot& slot,
+                                    const TraceEventType& type, uint16 typeId, const void* fixed,
+                                    usize fixedBytes,
+                                    Span<const TraceVariablePart> variable) noexcept {
     TraceRecordShape shape;
     shape.typeId = typeId;
     shape.ordered = HasTraceEventFlag(type.Flags(), TraceEventFlags::Ordered);
@@ -445,34 +487,44 @@ TraceWriteResult WriteWithSession(TraceSessionState& session, ThreadSlot& slot,
     return written ? TraceWriteResult::Recorded : TraceWriteResult::Lost;
 }
 
-} // namespace
+bool WriteStandardDefinition(TraceSessionState& session, const TraceEventType& type,
+                             const void* fixed, usize fixedBytes,
+                             Span<const TraceVariablePart> variable) noexcept {
+    TraceRecordShape shape;
+    shape.typeId = type.Id();
+    shape.fixed = fixed;
+    shape.fixedBytes = fixedBytes;
+    shape.variable = variable;
+    if (shape.typeId == TraceEventType::NoId || !session.WriteDefinition(shape)) {
+        session.definitions.NoteDropped();
+        return false;
+    }
+
+    return true;
+}
 
 TraceWriteResult TraceWriteRecord(const TraceEventType& type, const void* fixed, usize fixedBytes,
                                   Span<const TraceVariablePart> variable) noexcept {
+    TraceSessionGuard guard;
+    TraceSessionState* session = guard.Session();
+    // 형 id는 세션을 빌린 뒤에 읽는다. 그래야 id가 그 세션의 것이다(Stop은 기록이 끝나기를 기다린
+    // 뒤에 id를 지운다).
+    const uint16 typeId = TraceEventTypeAccess::AcquireId(type);
+    if (session == nullptr || typeId == TraceEventType::NoId) {
+        return TraceWriteResult::Disabled;
+    }
+
     if (fixedBytes != type.FixedBytes()) {
         platform::Fatal("TraceWrite fixed part size does not match the event type");
     }
 
     CheckVariableParts(type, variable);
-    ThreadSlot& slot = currentSlot;
-    if (!slot.linked) {
-        slot.Link();
-    }
-
-    const uint32 depth = slot.Enter();
-    TraceWriteResult result = TraceWriteResult::Disabled;
-    TraceSessionState* session = AtomicLoad<MemoryOrder::SequentiallyConsistent>(&currentSession);
-    if (session != nullptr) {
-        result = WriteWithSession(*session, slot, type, fixed, fixedBytes, variable);
-    }
-
-    slot.Leave(depth);
-    return result;
+    return WriteSessionRecord(*session, guard.Slot(), type, typeId, fixed, fixedBytes, variable);
 }
 
 void WaitForTraceProducers() noexcept {
     LockSlotRegistry();
-    for (ThreadSlot* slot = slotRegistry.head; slot != nullptr; slot = slot->next) {
+    for (TraceThreadSlot* slot = slotRegistry.head; slot != nullptr; slot = slot->next) {
         while (AtomicLoad<MemoryOrder::SequentiallyConsistent>(&slot->busy) != 0) {
             platform::YieldThread();
         }

@@ -6,6 +6,7 @@
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
 #include <Core/Text/StringView.h>
+#include <Platform/File.h>
 #include <TraceCapture/TraceChannel.h>
 #include <TraceCapture/TraceEventType.h>
 
@@ -51,6 +52,9 @@ struct TraceSessionSettings {
     // TraceFormat::MaxDefinitionRecordBytes 의 네 배 이상이어야 한다. 차면 새 정의 기록은 버려지고
     // 세어진다.
     usize definitionBufferBytes = 256 * 1024;
+    // 세션 이름 표(CPU 구간·시간 띠 이름)의 칸 수다. 2의 거듭제곱이고 1024 이상이어야 한다. 칸의
+    // 3/4이 차면 새 이름은 넣지 못하고 그 이름의 구간은 기록하지 않는다(통계 scopeNamesRejected).
+    usize nameTableCapacity = 16 * 1024;
     TraceWriterMode writerMode = TraceWriterMode::Thread;
     // writer 스레드의 비우기 주기(trace.writer.periodMs, ms). Thread 모드에서 0이 아니어야 한다.
     uint32 writerPeriodMs = 16;
@@ -74,10 +78,20 @@ struct TraceSessionStats {
     // 출력에 보낸 byte 수(모든 출력 합)와 쓰기에 실패한 출력 수다.
     uint64 outputBytes = 0;
     uint64 outputFailures = 0;
+    // 마지막 출력 실패의 원본 오류다. 파일 출력(열기·쓰기·닫기)은 파일 상태(OS 오류 포함), 콜백
+    // 출력은 콜백이 돌려준 오류다. 실패가 없었으면 Success·None이다.
+    platform::FileStatus lastOutputFileStatus;
+    ErrorCode lastOutputCallbackError = ErrorCode::None;
     // writer 버퍼를 늘리지 못해 버린 덩어리 수다(정상 경로에서는 0이다).
     uint64 writerDroppedChunks = 0;
-    // 세션에 등록된 스레드 수(종료한 스레드 포함)다.
+    // 세션에 등록된 trace 스레드 수(종료한 스레드 포함, trace 스레드 id는 재사용하지 않는다)다.
     uint32 threadCount = 0;
+    // 스레드 상태 저장 칸 수다. 끝난 스레드의 칸은 writer가 다 비운 뒤 재사용하므로 동시에 살아
+    // 있던 스레드 수의 최대값 근처에 머문다.
+    uint32 threadSlots = 0;
+    // 이름 표에 든 이름 수와, 표가 차서 넣지 못한 이름 요청 수다.
+    uint64 scopeNames = 0;
+    uint64 scopeNamesRejected = 0;
 };
 
 // 출력 콜백이다. 파일과 같은 byte 열(머리 + 덩어리)을 순서대로 받는다. bytes는 호출 동안만

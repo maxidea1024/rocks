@@ -47,6 +47,9 @@ constexpr TraceField ChannelStateFields[] = {
 constexpr TraceField ThreadInfoFields[] = {
     {"thread", TraceFieldType::UInt32, TraceFormat::ThreadInfoIdOffset},
     {"osThread", TraceFieldType::UInt64, TraceFormat::ThreadInfoOsIdOffset},
+    {"sortOrder", TraceFieldType::Int32, TraceFormat::ThreadInfoSortOrderOffset},
+    {"name", TraceFieldType::String, TraceField::Variable},
+    {"group", TraceFieldType::String, TraceField::Variable},
 };
 
 constexpr TraceField LossFields[] = {
@@ -294,6 +297,7 @@ void DestroyState(TraceSessionState* state) noexcept {
 
     state->pool.Release();
     state->definitions.Release();
+    state->names.Release();
     state->~TraceSessionState();
     auto freed = allocator.Deallocate(state);
     (void)freed;
@@ -319,6 +323,11 @@ Result<void> InitializeState(TraceSessionState& state) noexcept {
             state.definitions.Initialize(*state.allocator, state.settings.definitionBufferBytes);
         !buffer) {
         return buffer;
+    }
+
+    if (auto names = state.names.Initialize(*state.allocator, state.settings.nameTableCapacity);
+        !names) {
+        return names;
     }
 
     if (auto writer = state.InitializeWriter(); !writer) {
@@ -358,7 +367,10 @@ Result<void> TraceSession::Start(const TraceSessionSettings& settings) noexcept 
         return Result<void>::Failure(ErrorCode::AlreadyExists);
     }
 
+    constexpr usize MinimumNameTableCapacity = 1024;
     if (settings.allocator == nullptr || settings.poolMaxBytes < TraceBlockLayout::PageBytes ||
+        settings.nameTableCapacity < MinimumNameTableCapacity ||
+        (settings.nameTableCapacity & (settings.nameTableCapacity - 1)) != 0 ||
         (settings.writerMode == TraceWriterMode::Thread && settings.writerPeriodMs == 0)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -383,9 +395,12 @@ Result<void> TraceSession::Start(const TraceSessionSettings& settings) noexcept 
         return Result<void>::Failure(ErrorCode::Busy);
     }
 
+    AtomicStore(&detail::currentSessionSerial, state->serial);
+
     if (settings.writerMode == TraceWriterMode::Thread) {
         if (state->writerThread.Start(&detail::RunTraceWriter, state) !=
             platform::ThreadStatus::Success) {
+            AtomicStore(&detail::currentSessionSerial, uint64{0});
             AtomicStore(&detail::currentSession, static_cast<TraceSessionState*>(nullptr));
             detail::WaitForTraceProducers();
             DestroyState(state);
@@ -396,6 +411,12 @@ Result<void> TraceSession::Start(const TraceSessionSettings& settings) noexcept 
     }
 
     state_ = state;
+    // 표준 채널(cpu·counter·mark·span·frame·context, 꺼진 상태)과 표준 형을 등록한다.
+    if (auto standard = detail::RegisterStandardTraceTypes(*this); !standard) {
+        Stop();
+        return standard;
+    }
+
     return Result<void>::Success();
 }
 
@@ -406,6 +427,7 @@ void TraceSession::Stop() noexcept {
 
     TraceSessionState& state = *state_;
     // 1) 새 기록 입장 차단: 공개를 거두고 채널을 끈다.
+    AtomicStore(&detail::currentSessionSerial, uint64{0});
     AtomicStore(&detail::currentSession, static_cast<TraceSessionState*>(nullptr));
     {
         platform::LockGuard lock(state.registryMutex);
@@ -677,6 +699,8 @@ Result<void> TraceSession::RegisterEventType(TraceEventType& type) noexcept {
         return Result<void>::Failure(ErrorCode::OutOfMemory);
     }
 
+    // 가변 필드 배치를 먼저 채우고 id를 release로 공개한다(기록 경로는 id를 acquire로 읽는다).
+    TraceEventTypeAccess::SetLayout(type);
     TraceEventTypeAccess::SetId(type, id);
     return Result<void>::Success();
 }
@@ -713,7 +737,14 @@ Result<TraceOutputId> TraceSession::AttachFileOutput(const char* path) noexcept 
     }
 
     auto* file = ::new (memory.Value()) platform::File();
-    if (!file->Open(path, platform::FileOpenMode::CreateAlways)) {
+    if (const platform::FileStatus opened = file->Open(path, platform::FileOpenMode::CreateAlways);
+        !opened) {
+        {
+            platform::LockGuard lock(state_->writerMutex);
+            state_->lastOutputFileStatus = opened;
+            ++state_->outputFailures;
+        }
+
         file->~File();
         auto freed = state_->allocator->Deallocate(file);
         (void)freed;
@@ -767,16 +798,25 @@ TraceSessionStats TraceSession::Stats() const noexcept {
     for (const detail::TraceThreadState* thread = AtomicLoad<MemoryOrder::Acquire>(&state.threads);
          thread != nullptr; thread = thread->next) {
         stats.lostRecords += AtomicLoad<MemoryOrder::Relaxed>(&thread->lostTotal);
-        ++stats.threadCount;
     }
 
     stats.definitionRecordsDropped = state.definitions.Dropped();
+    stats.scopeNames = state.names.Count();
+    stats.scopeNamesRejected = state.names.Rejected();
+    {
+        platform::LockGuard registry(state.registryMutex);
+        stats.threadCount = state.nextThreadId - 1;
+        stats.threadSlots = state.threadSlots;
+    }
+
     platform::LockGuard lock(state.writerMutex);
     stats.definitionStoreBytes = state.definitionStore.Size();
     stats.definitionRecordsNotStored = state.definitionRecordsNotStored;
     stats.outputBytes = state.outputBytes;
     stats.outputFailures = state.outputFailures;
     stats.writerDroppedChunks = state.writerDroppedChunks;
+    stats.lastOutputFileStatus = state.lastOutputFileStatus;
+    stats.lastOutputCallbackError = state.lastOutputCallbackError;
     return stats;
 }
 

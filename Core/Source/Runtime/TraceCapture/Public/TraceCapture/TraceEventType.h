@@ -90,9 +90,16 @@ public:
     TraceEventType(const TraceEventType&) = delete;
     TraceEventType& operator=(const TraceEventType&) = delete;
 
-    // 세션이 발급한 형 id다. 등록 전이면 NoId다.
+    // 세션이 발급한 형 id다. 등록 전이면 NoId다. 등록 때 정한 가변 필드 배치(VariableCount)를 함께
+    // 보려면 acquire로 읽는다(기록 경로가 그렇게 한다).
     uint16 Id() const noexcept {
         return platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&id_);
+    }
+
+    // 가변 필드 수다. 등록 때 필드 표에서 세어 둔다(기록마다 필드 표를 훑지 않는다). 등록 전에는
+    // 0이다.
+    usize VariableCount() const noexcept {
+        return variableCount_;
     }
 
     const char* Name() const noexcept {
@@ -129,6 +136,9 @@ private:
     usize fixedBytes_;
     TraceEventFlags flags_;
     uint16 id_ = NoId;
+    // 등록 때 세션이 채운다(id_를 release로 공개하기 전에). 가변 필드마다의 원소 byte 수다.
+    uint8 variableCount_ = 0;
+    uint8 variableElementBytes_[TraceFormat::MaxFields] = {};
 };
 
 } // namespace rocks

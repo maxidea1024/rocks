@@ -1,6 +1,7 @@
 #include "TraceCaptureTestSupport.h"
 
 #include <TestSupport/Test.h>
+#include <TraceCapture/TraceCpuScope.h>
 
 #include <stdio.h>
 
@@ -453,5 +454,34 @@ TEST(TraceDisabledChannelCostIsMeasured) {
                                static_cast<double>(platform::MonotonicTickFrequency()) /
                                static_cast<double>(Iterations);
     printf("trace disabled channel: %.3f ns per TraceWrite (%u calls)\n", nanoseconds, Iterations);
+
+    // 켜진 채널의 기록 1회(고정부 8 byte, 순서 번호)와 정적 이름 CPU 구간 1쌍(깊이 0이라 쌍마다
+    // 배치 이벤트 하나)의 비용도 같은 방식으로 기록만 한다.
+    constexpr uint32 EnabledIterations = 100000;
+    REQUIRE(session.SetChannelEnabled(RecordChannel, true));
+    uint32 recorded = 0;
+    const uint64 writeStart = platform::MonotonicTicks();
+    for (uint32 index = 0; index < EnabledIterations; ++index) {
+        if (TraceWrite(OrderedType, OrderedEvent{0, index}) == TraceWriteResult::Recorded) {
+            ++recorded;
+        }
+    }
+
+    const uint64 writeElapsed = platform::MonotonicTicks() - writeStart;
+    CHECK(recorded == EnabledIterations);
+    REQUIRE(session.Pump());
+    REQUIRE(session.SetChannelEnabled(TraceCpuChannel, true));
+    const uint64 scopeStart = platform::MonotonicTicks();
+    for (uint32 index = 0; index < EnabledIterations; ++index) {
+        ROCKS_TRACE_CPU_SCOPE("Test.Cost");
+    }
+
+    const uint64 scopeElapsed = platform::MonotonicTicks() - scopeStart;
+    CHECK(session.Stats().lostRecords == 0);
+    const double frequency = static_cast<double>(platform::MonotonicTickFrequency());
+    printf("trace enabled: %.3f ns per TraceWrite, %.3f ns per CpuScope pair (%u each)\n",
+           static_cast<double>(writeElapsed) * 1e9 / frequency / EnabledIterations,
+           static_cast<double>(scopeElapsed) * 1e9 / frequency / EnabledIterations,
+           EnabledIterations);
     session.Stop();
 }

@@ -9,6 +9,10 @@
 #include <Platform/Memory.h>
 #include <Platform/Sync.h>
 #include <Platform/Thread.h>
+#include <TraceCapture/TraceContext.h>
+#include <TraceCapture/TraceCounter.h>
+#include <TraceCapture/TraceCpuScope.h>
+#include <TraceCapture/TraceMark.h>
 #include <TraceCapture/TraceSession.h>
 #include <TraceCapture/TraceWrite.h>
 
@@ -31,6 +35,72 @@ struct TraceChannelAccess {
 struct TraceEventTypeAccess {
     static void SetId(TraceEventType& type, uint16 id) noexcept {
         platform::AtomicStore<MemoryOrder::Release>(&type.id_, id);
+    }
+
+    // id를 acquire로 읽는다. 등록 때 id보다 먼저 쓴 가변 필드 배치가 함께 보인다.
+    static uint16 AcquireId(const TraceEventType& type) noexcept {
+        return platform::AtomicLoad<MemoryOrder::Acquire>(&type.id_);
+    }
+
+    // 가변 필드 배치를 채운다. id를 공개하기 전(NoId인 동안)에만 부른다.
+    static void SetLayout(TraceEventType& type) noexcept {
+        uint8 count = 0;
+        for (usize index = 0; index < type.FieldCount(); ++index) {
+            const TraceField& field = type.Fields()[index];
+            if (IsVariableTraceField(field.type)) {
+                type.variableElementBytes_[count++] =
+                    static_cast<uint8>(TraceFieldElementBytes(field.type));
+            }
+        }
+
+        type.variableCount_ = count;
+    }
+
+    static uint8 VariableElementBytes(const TraceEventType& type, usize index) noexcept {
+        return type.variableElementBytes_[index];
+    }
+};
+
+// 정적 이름·카운터·표지 지점이 세션별 id를 캐시하는 칸의 형식이다: (serial 하위 32비트 << 32) | id.
+constexpr uint64 PackSessionId(uint64 serial, uint32 id) noexcept {
+    return (serial << 32) | id;
+}
+
+// cache가 serial 세션의 값이면 id를, 아니면 0을 돌려준다.
+inline uint32 CachedSessionId(const uint64* cache, uint64 serial) noexcept {
+    const uint64 value = platform::AtomicLoad<MemoryOrder::Relaxed>(cache);
+    return static_cast<uint32>(value >> 32) == static_cast<uint32>(serial)
+               ? static_cast<uint32>(value)
+               : 0;
+}
+
+struct TraceScopeNameAccess {
+    static uint64* Cache(TraceScopeName& name) noexcept {
+        return &name.cache_;
+    }
+};
+
+struct TraceCounterAccess {
+    static uint64* Cache(TraceCounter& counter) noexcept {
+        return &counter.cache_;
+    }
+
+    static uint64* Value(TraceCounter& counter) noexcept {
+        return &counter.value_;
+    }
+
+    static uint64* LastBits(TraceCounter& counter) noexcept {
+        return &counter.lastBits_;
+    }
+
+    static uint64* LastSerial(TraceCounter& counter) noexcept {
+        return &counter.lastSerial_;
+    }
+};
+
+struct TraceMarkSiteAccess {
+    static uint64* Cache(TraceMarkSite& site) noexcept {
+        return &site.cache_;
     }
 };
 
@@ -192,8 +262,19 @@ bool TraceDefinitionBuffer::Drain(Visit&& visit) noexcept {
 
 // ---- 스레드 상태 ----
 
-// 한 스레드가 한 세션에서 쓰는 상태다. 첫 기록 때 세션 할당기로 만들고 세션 Stop 때 해제한다.
+// 스레드의 동적 이름 앞단 캐시 한 칸이다(결정 T4). text는 세션 이름 표의 저장소를 가리킨다.
+struct TraceNameCacheEntry {
+    uint64 hash = 0;
+    const char* text = nullptr;
+    uint32 length = 0;
+    uint32 id = 0;
+};
+
+// 한 스레드가 한 세션에서 쓰는 상태다. 첫 기록 때 세션 할당기로 만들거나 끝난 스레드의 칸을 다시
+// 쓰고, 세션 Stop 때 해제한다. 칸을 다시 쓸 때마다 generation이 늘고 trace 스레드 id는 새로 받는다.
 struct TraceThreadState {
+    static constexpr usize NameCacheEntries = 64;
+
     // ---- 생산자(그 스레드) 전용 ----
     TraceBlock* block = nullptr;
     usize offset = 0;
@@ -205,6 +286,7 @@ struct TraceThreadState {
     uint64 lostCounts[TraceFormat::MaxChannels] = {};
     // 손실이 있는 채널 bit(MaxChannels bit)다.
     uint64 lostChannelMask[TraceFormat::MaxChannels / 64] = {};
+    TraceNameCacheEntry nameCache[NameCacheEntries];
 
     // ---- 공유 ----
     // 공개한 byte 누계. 생산자가 기록을 다 쓴 뒤 release로 늘린다. writer는 acquire로 읽어 그
@@ -214,20 +296,181 @@ struct TraceThreadState {
     TraceBlock* firstBlock = nullptr;
     // 스레드가 끝났다(TLS 정리). 마지막 공개 뒤 release로 1을 쓴다.
     uint32 exited = 0;
-    // 통계용 손실 누계(relaxed).
+    // 통계용 손실 누계(relaxed). 칸을 다시 써도 이어 센다.
     uint64 lostTotal = 0;
+    // 칸의 세대다. 생산자가 칸을 다시 쓸 때 다른 칸을 모두 초기화한 뒤 release로 늘린다. writer는
+    // 세대가 바뀌면 자기 칸을 처음으로 되돌린다.
+    uint32 generation = 0;
 
-    // ---- 불변(등록 때 정함) ----
+    // ---- 세대마다 등록 때 정함 ----
     uint32 threadId = 0;
     uint64 osThreadId = 0;
-    // 세션 스레드 목록의 다음 칸이다. 목록 머리에 넣기 전에 정하고 바꾸지 않는다.
+
+    // ---- 목록(registryMutex) ----
+    // 세션 스레드 목록의 다음 칸이다. 목록 머리에 넣기 전에 정하고 바꾸지 않는다(칸을 다시 써도
+    // 목록 자리는 그대로다).
     TraceThreadState* next = nullptr;
+    // 재사용 목록의 다음 칸이다.
+    TraceThreadState* freeNext = nullptr;
 
     // ---- writer 전용 ----
     TraceBlock* readBlock = nullptr;
     uint64 consumed = 0;
     uint64 target = 0;
+    // target을 읽을 때의 세대와 writer가 따르는 세대다.
+    uint32 targetGeneration = 0;
+    uint32 writerGeneration = 0;
     bool done = false;
+};
+
+// ---- 스레드 TLS 칸 ----
+
+// 문맥 스택 한 칸이다. cache는 정의를 쓴 세션의 (serial, 문맥 id)이고, recorded는 쌓기를 기록한
+// 세션 serial이다(0이면 기록하지 않았다).
+struct TraceContextEntry {
+    TraceContextValues values;
+    uint64 cache = 0;
+    uint64 recorded = 0;
+};
+
+// 스레드의 TLS 칸이다. 세션 메모리가 아니라 스레드 수명에 묶여 있어, Stop이 아직 세션에 등록하지
+// 않은 스레드의 진행 중 기록도 기다릴 수 있다.
+//
+// 기록 호출은 busy를 올린 뒤(seq_cst) 현재 세션을 읽고, 끝나면 내린다. Stop은 현재 세션을 null로 쓴
+// 뒤(seq_cst) 모든 칸의 busy가 0이 되기를 기다린다. 기록 호출이 세션을 읽었다면 그 전에 올린 busy를
+// Stop이 반드시 보므로, Stop이 세션 메모리를 해제할 때 그 세션을 쓰는 기록 호출은 없다.
+//
+// CPU 구간 배치·스레드 정보·문맥 스택은 이 스레드만 쓰는 칸이라 세션 접근 없이 바꾼다.
+struct TraceThreadSlot {
+    // 진행 중인 기록 호출의 깊이다. 이 스레드만 쓰고 Stop이 읽는다.
+    uint32 busy = 0;
+    bool linked = false;
+    // state가 속한 세션의 serial이다. 다르면 state는 이미 해제된 세션의 것이므로 보지 않는다.
+    uint64 serial = 0;
+    TraceThreadState* state = nullptr;
+    TraceThreadSlot* previous = nullptr;
+    TraceThreadSlot* next = nullptr;
+
+    // ---- CPU 구간 배치 ----
+    // 배치가 속한 세션 serial, 배치 안 마지막 tick, 열린 구간 깊이, 배치 byte 수다.
+    uint64 scopeSerial = 0;
+    uint64 scopeLastTick = 0;
+    uint32 scopeDepth = 0;
+    uint32 scopeBytes = 0;
+    uint8 scopeBatch[TraceStandardFormat::ScopeBatchBytes] = {};
+
+    // ---- 스레드 정보 ----
+    char threadName[TraceStandardFormat::MaxThreadNameBytes] = {};
+    char threadGroup[TraceStandardFormat::MaxThreadNameBytes] = {};
+    uint8 threadNameBytes = 0;
+    uint8 threadGroupBytes = 0;
+    int32 threadSortOrder = 0;
+
+    // ---- 문맥 스택 ----
+    TraceContextEntry contexts[TraceStandardFormat::MaxContextDepth];
+    uint32 contextDepth = 0;
+    // 깊이 상한을 넘어 세기만 한 쌓기 수다.
+    uint32 contextOverflow = 0;
+
+    constexpr TraceThreadSlot() noexcept = default;
+    TraceThreadSlot(const TraceThreadSlot&) = delete;
+    TraceThreadSlot& operator=(const TraceThreadSlot&) = delete;
+
+    // 스레드 종료(TLS 정리) 때 남은 구간 배치를 내고 현재 세션의 스레드 상태를 은퇴로 표시한다.
+    ~TraceThreadSlot() noexcept;
+
+    uint32 Enter() noexcept {
+        const uint32 depth = platform::AtomicLoad<MemoryOrder::Relaxed>(&busy);
+        platform::AtomicStore<MemoryOrder::SequentiallyConsistent>(&busy, depth + 1);
+        return depth;
+    }
+
+    void Leave(uint32 depth) noexcept {
+        platform::AtomicStore<MemoryOrder::Release>(&busy, depth);
+    }
+
+    void Link() noexcept;
+    void Unlink() noexcept;
+};
+
+// 이 스레드의 TLS 칸이다(처음 부를 때 Stop이 기다릴 수 있도록 전역 목록에 넣는다).
+TraceThreadSlot& CurrentTraceThreadSlot() noexcept;
+
+// 현재 세션을 진행 중 표시 아래에서 빌린다. 객체가 살아 있는 동안 Session()은 해제되지 않는다.
+class TraceSessionGuard {
+public:
+    // 이 스레드의 TLS 칸으로 빌린다.
+    TraceSessionGuard() noexcept;
+    // 주어진 칸(이 스레드의 칸이어야 한다)으로 빌린다. TLS 칸의 소멸자가 자기 자신을 넘긴다.
+    explicit TraceSessionGuard(TraceThreadSlot& slot) noexcept;
+    ~TraceSessionGuard() noexcept;
+
+    TraceSessionGuard(const TraceSessionGuard&) = delete;
+    TraceSessionGuard& operator=(const TraceSessionGuard&) = delete;
+
+    // 현재 세션이다. 없거나, serial이 주어졌는데 다르면 null이다.
+    TraceSessionState* Session(uint64 serial = 0) const noexcept;
+
+    TraceThreadSlot& Slot() const noexcept {
+        return slot_;
+    }
+
+private:
+    TraceThreadSlot& slot_;
+    TraceSessionState* session_;
+    uint32 depth_;
+};
+
+// ---- 이름 표 ----
+
+// 세션 전역 이름 표다(결정 T4). 읽기는 잠금 없이 열린 주소법으로 찾고, 삽입만 잠금 하나로
+// 직렬화한다. 칸은 해시를 마지막에 release로 써서 공개하고, 이름 byte는 세션 저장소에 복사해 세션
+// 끝까지 옮기지 않는다. 칸의 3/4이 차면 더 넣지 않는다.
+class TraceNameTable {
+public:
+    Result<void> Initialize(Allocator& allocator, usize capacity) noexcept;
+    void Release() noexcept;
+
+    // 이름의 id를 찾거나 새로 넣는다. 새로 넣으면 이름 정의(Trace.ScopeName)를 먼저 정의 버퍼에
+    // 쓰고 칸을 공개한다. 표가 가득 차거나 정의를 쓰지 못하면 0이다. stored에는 표가 가진 이름
+    // byte를 돌려준다(스레드 캐시가 비교에 쓴다). truncated는 name이 원래 이름의 앞부분이라는
+    // 표시다(이름 정의에 남는다).
+    uint32 FindOrInsert(TraceSessionState& session, StringView name, uint64 hash, bool truncated,
+                        const char*& stored, uint32& storedLength) noexcept;
+
+    usize Count() const noexcept {
+        return platform::AtomicLoad<MemoryOrder::Relaxed>(&count_);
+    }
+
+    uint64 Rejected() const noexcept {
+        return platform::AtomicLoad<MemoryOrder::Relaxed>(&rejected_);
+    }
+
+    // 이름 byte의 해시다(0은 빈 칸 표지라 쓰지 않는다).
+    static uint64 HashName(StringView name) noexcept;
+
+private:
+    struct Slot {
+        uint64 hash;
+        const char* text;
+        uint32 length;
+        uint32 id;
+    };
+
+    uint32 Find(StringView name, uint64 hash, const char*& stored,
+                uint32& storedLength) const noexcept;
+    char* CopyText(StringView name) noexcept;
+
+    Allocator* allocator_ = nullptr;
+    Slot* slots_ = nullptr;
+    usize mask_ = 0;
+    usize count_ = 0;
+    uint64 rejected_ = 0;
+    // 이름 byte 저장소(덩어리 목록, 덩어리 첫 8 byte가 다음 덩어리)다.
+    uint8* chunk_ = nullptr;
+    usize chunkUsed_ = 0;
+    usize chunkBytes_ = 0;
+    platform::Mutex insertMutex_;
 };
 
 // ---- 출력 ----
@@ -312,6 +555,12 @@ struct TraceSessionState {
 
     TraceBlockPool pool;
     TraceDefinitionBuffer definitions;
+    TraceNameTable names;
+    // 세션 안 카운터·표지 호출 지점 id(registryMutex)와 문맥·시간 띠 id(원자 fetch-add) 발급기다.
+    uint32 nextCounterId = 0;
+    uint32 nextMarkSiteId = 0;
+    uint32 nextContextId = 0;
+    uint64 nextSpanId = 0;
     // 순서 번호 발급기(relaxed fetch-add).
     uint64 nextOrder = 0;
     // 스레드 상태가 없어(등록 실패) 세지 못한 손실과 같은 스레드 재진입 손실이다.
@@ -327,6 +576,9 @@ struct TraceSessionState {
     uint32 nextThreadId = 1;
     // 스레드 목록 머리. registryMutex 아래에서 release로 바꾸고, writer·통계는 acquire로 읽는다.
     TraceThreadState* threads = nullptr;
+    // 끝나서 writer가 다 비운 칸의 재사용 목록과 지금까지 만든 칸 수다.
+    TraceThreadState* freeThreads = nullptr;
+    uint32 threadSlots = 0;
 
     // ---- writer(writerMutex) ----
     platform::Mutex writerMutex;
@@ -348,6 +600,8 @@ struct TraceSessionState {
     Compressor compressor;
     uint64 outputBytes = 0;
     uint64 outputFailures = 0;
+    platform::FileStatus lastOutputFileStatus;
+    ErrorCode lastOutputCallbackError = ErrorCode::None;
     // writer 버퍼를 늘리지 못해 버린 덩어리 수다.
     uint64 writerDroppedChunks = 0;
 
@@ -371,6 +625,7 @@ struct TraceSessionState {
     void EmitSchemas(bool hasOutputs) noexcept;
     bool DrainDefinitions(bool hasOutputs) noexcept;
     void DrainThread(TraceThreadState& thread, bool hasOutputs) noexcept;
+    void RecycleThread(TraceThreadState& thread) noexcept;
     void AppendStream(Array<uint8>& out, uint16 stream, Span<const uint8> bytes) noexcept;
     void FinishStream(Array<uint8>& out, uint16 stream) noexcept;
     void AppendChunk(Array<uint8>& out, uint16 stream, Span<const uint8> payload) noexcept;
@@ -385,9 +640,60 @@ struct TraceSessionState {
     bool WriteDefinition(const TraceRecordShape& shape) noexcept;
 };
 
-// 현재 세션(TraceWrite가 쓰는 곳)과 세션 serial 발급기다. 상수 초기화되는 전역이다.
+// 현재 세션(TraceWrite가 쓰는 곳), 그 serial(없으면 0), 세션 serial 발급기다. 상수 초기화되는
+// 전역이다. currentSessionSerial은 세션 메모리를 보지 않고 "어느 세션이 현재인가"만 알 때 쓴다(CPU
+// 구간·정적 이름 캐시).
 extern TraceSessionState* currentSession;
+extern uint64 currentSessionSerial;
 extern uint64 sessionSerialCounter;
+
+// 이 스레드를 세션에 등록하거나 이미 등록한 상태를 돌려준다. 실패(스레드 id 상한·할당 실패)는 null.
+// TraceSessionGuard 아래에서 부른다.
+TraceThreadState* AcquireThreadState(TraceSessionState& session, TraceThreadSlot& slot) noexcept;
+
+// 기록 하나를 세션에 쓴다(채널 검사 없음, 형은 등록돼 있어야 한다). TraceSessionGuard 아래에서
+// 부른다.
+TraceWriteResult WriteSessionRecord(TraceSessionState& session, TraceThreadSlot& slot,
+                                    const TraceEventType& type, uint16 typeId, const void* fixed,
+                                    usize fixedBytes,
+                                    Span<const TraceVariablePart> variable) noexcept;
+
+// 등록된 정의 형(Definition)의 기록을 채널 검사 없이 정의 버퍼에 쓴다. 버퍼가 차 있으면 버린 정의로
+// 세고 false다.
+bool WriteStandardDefinition(TraceSessionState& session, const TraceEventType& type,
+                             const void* fixed, usize fixedBytes,
+                             Span<const TraceVariablePart> variable) noexcept;
+
+// 이 스레드의 스레드 정보(Trace.ThreadInfo)를 정의 기록으로 쓴다.
+void WriteThreadInfo(TraceSessionState& session, const TraceThreadState& state,
+                     const TraceThreadSlot& slot) noexcept;
+
+// 이름(CPU 구간·시간 띠)의 세션 id를 찾거나 넣는다. MaxScopeNameBytes를 넘는 이름은 앞부분만 쓴다.
+// useThreadCache면 이 스레드의 앞단 캐시를 먼저 본다(동적 이름). serial 세션이 현재가 아니거나 표가
+// 가득 차면 0이다.
+uint32 ResolveTraceName(uint64 serial, StringView name, bool useThreadCache) noexcept;
+
+// 이 스레드의 CPU 구간 배치를 이벤트 하나로 낸다(배치 세션과 현재 세션이 같을 때만). 배치를 비운다.
+void FlushCpuScopeBatch(TraceThreadSlot& slot) noexcept;
+
+// 세션 Start가 등록하는 표준 채널·형이다(TraceStandardTypes.cpp).
+extern TraceEventType TraceScopeNameType;
+extern TraceEventType TraceCpuScopeBatchType;
+extern TraceEventType TraceCounterDefinitionType;
+extern TraceEventType TraceCounterIntegerType;
+extern TraceEventType TraceCounterFloatType;
+extern TraceEventType TraceMarkSiteType;
+extern TraceEventType TraceMarkEventType;
+extern TraceEventType TraceSpanBeginType;
+extern TraceEventType TraceSpanEndType;
+extern TraceEventType TraceFrameBeginType;
+extern TraceEventType TraceFrameEndType;
+extern TraceEventType TraceContextDefinitionType;
+extern TraceEventType TraceContextPushType;
+extern TraceEventType TraceContextPopType;
+
+// 표준 채널(꺼진 상태로)과 표준 형을 등록한다.
+Result<void> RegisterStandardTraceTypes(TraceSession& session) noexcept;
 
 // 현재 세션 공개를 거둔 뒤 부른다. 진행 중인 기록 호출(모든 스레드)이 끝날 때까지 기다린다.
 void WaitForTraceProducers() noexcept;
