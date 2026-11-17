@@ -362,3 +362,13 @@ libsodium 1.0.22-stable 기반 범용 암호 모듈 `Crypto`를 추가했다(설
 - 시험 probe: FoundationTests runner에 상위 계층 시험이 `--process-probe` 모드를 이름으로 등록하는 `RegisterProcessProbe`를 더했다(도구 열기의 현재 디렉터리·PATH 음성 대조가 쓴다).
 - 남은 것: 런타임 의존 파일 복사(`RuntimeDependencies`·`redist`)는 결정 3 뒤, macOS 도구 열기(산출물 없음)·`QueryDxcVersion` macOS 구현, CI의 저장소 캐시(SH0).
 - 검증(Windows x64 clang-cl, Debug): Foundation native 1836·self 130, EngineTests native 1914(도구 표 3건·도구 열기 5건 포함, bootstrap한 저장소로 네 도구를 열어 SKIP 없음), Sandbox·Commandlet 빌드, Rocks.Build 회귀 41그룹(생성 번역 단위 포함), SDK·외부 게임 통합 22건, policy(알려진 Release 예외 2건 알림)·format. Asan은 실행하지 않았다(엔진 브랜치 병합 전 묶음 검증에서 돈다). macOS는 빌드하지 않았다.
+
+## 2026-11-17 셰이더 형식 정의·엔진 컴파일 프로필(셰이더 P6a)
+
+셰이더 형식 정의와 엔진 컴파일 프로필을 추가했다(요구·진척: [셰이더 시스템](../Design/ShaderSystem.ko.md) 5.1절 P6a·12.1절). 같은 날 사용자가 결정 2(HLSL 2021: D3D12·Vulkan·Metal 켬, D3D11 끔)·3(D3D12 SM 6.6, Windows 10은 Agility SDK 재배포)·5(metallib은 Apple Metal Developer Tools가 있는 Windows에서도)·6(자체 전처리기)을 정했고 형식 정의 값에 반영했다. 브랜치 `feature/shader-tools`.
+
+- 형식 정의 `Engine/Config/ShaderFormats/<id>.json`: `D3D12_SM6`·`D3D11_SM5`·`VULKAN_SM5`·`METAL_SM5`·`GLES31_ANDROID`·`GLES31_PC`, 자리만 둔 `VULKAN_ANDROID`·`METAL_IOS`. 도구 목록·HLSL 2021 기본값·컴파일 경로와 셰이더 모델·target env·ESSL·MSL 버전·바인딩 규약 버전·처리기 버전·상한·기능·장치 요구·생산 호스트를 담는다. SH0 측정(S2·S12·`ROCKS_IMAGE_FORMAT`)을 값으로 옮겼다.
+- 엔진 컴파일 프로필 `Engine-Windows.json`·`Engine-MacOS.json`(`{schema, id, host, formats}`).
+- 읽기 코드 `Developer/ShaderCompiler`(`ShaderCompiler/ShaderFormatDefinition.h`, Core JSON): 모르는 속성·어휘 밖 값 거부, 도구 이름을 도구 표(P4)와 대조, backend–처리기–경로 짝, 프로필 형식의 해석(없음·자리만 둔 형식·생산 호스트 아님), 프로필 공통 상한 `CommonLimits`, 형식 정의 SHA-256(파일 byte, job 키 3항). 오류는 JSON 경로와 줄을 돌려준다.
+- 남은 것: job 키 계산(P5), 공통 상한의 워커 검사, 런타임 의존 파일 복사(Agility SDK `redist`, P6b 또는 SH2), macOS 실행 시험.
+- 검증(Windows x64 clang-cl, Debug): EngineTests `ShaderFormat_*` 8건(저장소 정의 8·프로필 2 전체 읽기, 결정·측정 값, Windows 프로필 공통 상한, 음성 대조 40건), format·policy.

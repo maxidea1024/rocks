@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "id": "GLES31_PC",
+  "status": "supported",
+  "backend": "OpenGL",
+  "processor": { "module": "ShaderFormatOpenGL", "version": 1 },
+  "bindingConvention": 1,
+  "tools": ["DirectXShaderCompiler", "SpirvTools", "SpirvCross"],
+  "language": { "hlsl2021": false },
+  "compiler": {
+    "path": "DxcSpirvEssl",
+    "shaderModel": "6_0",
+    "imageFormat": "VkImageFormat",
+    "unsupportedImageFormats": ["r11g11b10f"],
+    "spirvTargetEnv": "vulkan1.1",
+    "dxPositionW": true,
+    "esslVersion": 320,
+    "fixupClipSpace": false,
+    "flipVertexY": false
+  },
+  "stages": ["vertex", "pixel", "compute"],
+  "limits": {
+    "constantBuffers": 12,
+    "sampledTextures": 16,
+    "storageBuffers": 4,
+    "storageImages": 4,
+    "samplers": 16,
+    "uavStages": ["compute"],
+    "renderTargets": 4,
+    "interStageVectors": 15,
+    "rootConstantBytes": 128,
+    "uniformVectors": { "vertex": 256, "pixel": 224, "compute": 128 }
+  },
+  "features": ["compute"],
+  "deviceRequirements": ["OPENGL_4_3", "GL_ARB_ES3_2_compatibility", "GL_ARB_clip_control"],
+  "producers": [{ "host": "windows-x64" }, { "host": "macos-arm64" }]
+}
