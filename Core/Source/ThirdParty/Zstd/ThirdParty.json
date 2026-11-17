@@ -6,12 +6,12 @@
   "source": {
     "url": "https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz",
     "sha256": "eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3",
-    "verification": "공식 zstd-1.5.7.tar.gz.sha256 파일과 일치."
+    "verification": "Matches the official zstd-1.5.7.tar.gz.sha256 file."
   },
   "licenses": [
     {
       "spdx": "BSD-3-Clause",
-      "upstreamExpression": "BSD-3-Clause OR GPL-2.0-only (BSD-3-Clause 선택)",
+      "upstreamExpression": "BSD-3-Clause OR GPL-2.0-only (BSD-3-Clause chosen)",
       "file": "zstd-1.5.7/LICENSE",
       "binaryNoticeRequired": true
     },
@@ -316,15 +316,15 @@
     }
   ],
   "notes": [
-    "제외: legacy/, deprecated/, zstdmt_compress.c, threading.c(ZSTD_MULTITHREAD 없이는 쓰지 않는 기호 하나만 정의), debug.c(DEBUGLEVEL 0에서 쓰지 않는 g_debuglevel만 정의), huf_decompress_amd64.S(ZSTD_DISABLE_ASM).",
-    "사전 학습: dictBuilder/(cover.c·fastcover.c·zdict.c·divsufsort.c)와 common/pool.c·pool.h·threading.h를 넣는다. 서로 참조해 떼어낼 수 없다(fastCover만 써도 divsufsort가 필요하다). ZSTD_MULTITHREAD가 없어 pool.c는 단일 스레드 대체 구현이다. 정적 라이브러리라 학습을 부르지 않는 바이너리에는 링크되지 않는다(Docs/Design/Compression.ko.md 11.6절).",
-    "divsufsort.c·divsufsort.h는 MIT(libdivsufsort-lite, Yuta Mori)이고 zstd LICENSE에 포함되지 않는다. 원문 전체가 divsufsort.h 머리 주석에 있어 licenses의 두 번째 항목으로 고지한다.",
-    "할당 예외: dictBuilder는 CRT malloc·calloc을 직접 부르고 Rocks Allocator를 거치지 않는다(customMem을 받지 않으며 내부 CCtx·CDict도 기본 메모리를 쓴다). 도구 시점 학습에 한한 승인된 좁은 예외이고, 학습 wrapper 모듈은 Core/Source/Developer/CompressionTraining이다.",
-    "스레드: cover.c·fastcover.c는 프로세스 전역(g_displayLevel·g_time, COVER의 g_coverCtx)을 동기화 없이 쓴다. 호출자가 학습을 직렬화해야 한다.",
-    "fastCover만 쓴다: Android에서 COVER의 qsort 대체 경로는 전역 문맥(g_coverCtx)을 써 재진입할 수 없고, COVER 출력은 플랫폼마다 다르다(fastCover·finalize 출력은 Windows x64와 Android x86_64에서 같음을 실측).",
-    "ZDICTLIB_VISIBLE=: zstd.h의 ZSTDLIB_VISIBLE=와 같은 이유로 GNU 계열의 기본 visibility 속성을 비운다. ZDICTLIB_STATIC_API는 DLL 정의가 없으면 ZDICTLIB_VISIBLE로 정해지므로 따로 정의하지 않는다. ZDICT_STATIC_LINKING_ONLY(소비 측)는 fastCover 학습 API를 연다.",
-    "MEM_STATIC: clang-cl은 __GNUC__가 없어 zstd가 GNU 계열에서 붙이는 unused 속성을 빼고, assert 전용 HUF_isSorted·ZSTD_isAligned가 -Wunused-function 오류가 된다. compiler.h의 #ifndef MEM_STATIC 가드(커널 빌드용, README 설정 항목은 아님)로 GNU 계열 정의를 그대로 재현한다. 경고 정책(CompilerDiagnostics.ko.md) \"외부 원본 내부 진단 지시문\" 4항으로 승인(2026-11-12).",
-    "DYNAMIC_BMI2=0(Windows): clang-cl에서는 TARGET_ATTRIBUTE가 비어 BMI2 사본이 이득 없이 중복된다.",
-    "ZSTD_customMem·ZSTD_decompressBound·ZSTD_c_stableInBuffer·ZSTD_d_stableOutBuffer는 ZSTD_STATIC_LINKING_ONLY API다. 정적 링크·고정 버전이라 쓸 수 있다."
+    "Excluded: legacy/, deprecated/, zstdmt_compress.c, threading.c (defines only one symbol that is unused without ZSTD_MULTITHREAD), debug.c (defines only g_debuglevel, unused at DEBUGLEVEL 0), huf_decompress_amd64.S (ZSTD_DISABLE_ASM).",
+    "Dictionary training: includes dictBuilder/ (cover.c, fastcover.c, zdict.c, divsufsort.c) and common/pool.c, pool.h and threading.h. They reference each other and cannot be separated (even fastCover alone needs divsufsort). Without ZSTD_MULTITHREAD, pool.c is the single-threaded fallback implementation. As a static library it is not linked into binaries that do not call training (Docs/Design/Compression.ko.md section 11.6).",
+    "divsufsort.c and divsufsort.h are MIT (libdivsufsort-lite, Yuta Mori) and are not covered by the zstd LICENSE. The full text is in the header comment of divsufsort.h, so it is noticed as the second entry of licenses.",
+    "Allocation exception: dictBuilder calls the CRT malloc and calloc directly and does not go through the Rocks Allocator (it takes no customMem, and its internal CCtx and CDict also use default memory). This is an approved narrow exception limited to tool-time training, and the training wrapper module is Core/Source/Developer/CompressionTraining.",
+    "Threads: cover.c and fastcover.c use process globals (g_displayLevel, g_time, and COVER's g_coverCtx) without synchronization. Callers must serialize training.",
+    "Only fastCover is used: on Android, COVER's qsort fallback path uses the global context (g_coverCtx) and is not reentrant, and COVER output differs per platform (fastCover and finalize output measured identical on Windows x64 and Android x86_64).",
+    "ZDICTLIB_VISIBLE=: clears the default visibility attribute on the GNU family for the same reason as ZSTDLIB_VISIBLE= in zstd.h. ZDICTLIB_STATIC_API resolves to ZDICTLIB_VISIBLE when there is no DLL definition, so it is not defined separately. ZDICT_STATIC_LINKING_ONLY (consumer side) opens the fastCover training API.",
+    "MEM_STATIC: clang-cl has no __GNUC__, so zstd drops the unused attribute it adds on the GNU family, and the assert-only HUF_isSorted and ZSTD_isAligned become -Wunused-function errors. The #ifndef MEM_STATIC guard in compiler.h (meant for kernel builds, not a README configuration item) reproduces the GNU family definition as is. Approved under item 4, \"diagnostic directives inside external sources\", of the warning policy (CompilerDiagnostics.ko.md) (2026-11-12).",
+    "DYNAMIC_BMI2=0 (Windows): under clang-cl TARGET_ATTRIBUTE is empty, so the BMI2 copies are duplicated with no benefit.",
+    "ZSTD_customMem, ZSTD_decompressBound, ZSTD_c_stableInBuffer and ZSTD_d_stableOutBuffer are ZSTD_STATIC_LINKING_ONLY APIs. Static linking and a pinned version allow them."
   ]
 }

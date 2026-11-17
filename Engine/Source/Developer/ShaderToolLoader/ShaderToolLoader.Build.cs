@@ -2,11 +2,11 @@ using Rocks.Build;
 using Rocks.Build.Rules;
 
 /// <summary>
-/// 셰이더 도구 열기 모듈이다(Docs/Design/ShaderSystem.ko.md 9절). 사용자 저장소의 도구 파일을 도구 표(ShaderToolTable)와 SHA-256으로
-/// 대조한 뒤 P10 DynamicLibrary::Open으로 열고 함수 표를 얻는다. 도구를 여는 것은 워커와 ShaderFormat 모듈뿐이며, 워커
-/// (Programs/ShaderCompileWorker)가 생기기 전까지 이 모듈이 그 자리를 맡는다(정책 검사 shader-tool-binary-load).
-/// 플랫폼 구현은 Private/Win64(저장소 루트, dxcapi.h를 Windows 헤더와 함께 쓰는 DXC 버전 조회)·Private/Mac·Private/Unsupported
-/// (Android)다.
+/// Shader tool opening module (Docs/Design/ShaderSystem.ko.md section 9). Matches tool files in the user store against the tool table (ShaderToolTable)
+/// and SHA-256, then opens them with P10 DynamicLibrary::Open and obtains the function table. Only workers and ShaderFormat modules open tools; until
+/// the worker (Programs/ShaderCompileWorker) exists, this module stands in for it (policy check shader-tool-binary-load).
+/// Platform implementations are Private/Win64 (repository root; DXC version query that uses dxcapi.h together with Windows headers), Private/Mac and Private/Unsupported
+/// (Android).
 /// </summary>
 public sealed class ShaderToolLoader : EngineModuleRules
 {
@@ -29,7 +29,7 @@ public sealed class ShaderToolLoader : EngineModuleRules
         {
             Sources = [.. Directory.GetFiles(context.PathInRoot(backend), "*.cpp").Order(StringComparer.Ordinal),
                 .. context.Sources($"{backend}/{platform}")],
-            // DXC 공개 헤더(dxcapi.h)는 Windows 구현만 include한다. 외부 헤더는 이 모듈 소스에만 보인다(adapter 방식).
+            // Only the Windows implementation includes the DXC public header (dxcapi.h). External headers are visible only to this module's sources (adapter approach).
             PrivateIncludeDirectories = ThirdPartyModuleRules.ConsumerIncludeDirectories(context, "DirectXShaderCompiler"),
             PrivateDefines = ThirdPartyModuleRules.ConsumerDefines(context, "DirectXShaderCompiler")
         };

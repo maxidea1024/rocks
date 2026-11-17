@@ -1,7 +1,7 @@
 using Rocks.Build.Rules;
 
-// 작업 DAG·worker scheduler(UE TaskGraph 대응). task 수명 사건을 TraceCapture에 기록한다(채널 task,
-// Docs/Design/TraceSystem.ko.md 7절). TraceCapture는 Task에 의존하지 않는다.
+// Task DAG and worker scheduler (UE TaskGraph counterpart). Records task lifetime events to TraceCapture (channel task,
+// Docs/Design/TraceSystem.ko.md section 7). TraceCapture does not depend on Task.
 public sealed class TaskRuntime : CoreModuleRules
 {
     protected override string ModuleName => "Task";

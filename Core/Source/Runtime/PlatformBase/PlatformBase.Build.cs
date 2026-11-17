@@ -1,8 +1,8 @@
 using Rocks.Build;
 using Rocks.Build.Rules;
 
-// 메모리·파일·스레드·시계 등 OS 경계 모듈이다. 공개 인터페이스는 플랫폼 독립이고 구현은
-// Private/<플랫폼>/에 둔다. POSIX 플랫폼은 공통 Posix 구현과 OS hook(Apple·Android)을 함께 빌드한다.
+// OS boundary module for memory, files, threads, clocks and the like. The public interface is platform independent and implementations
+// live in Private/<Platform>/. POSIX platforms build the shared Posix implementation together with OS hooks (Apple and Android).
 public sealed class PlatformBase : CoreModuleRules
 {
     protected override string ModuleName => "PlatformBase";
@@ -23,12 +23,12 @@ public sealed class PlatformBase : CoreModuleRules
                 _ => context.Sources($"{backend}/{context.PlatformDirectory}", $"{backend}/Common")
             },
             PublicIncludeDirectories = [context.PathInRoot($"{ModuleDirectory}/Public")],
-            // Mac 소스가 sibling Apple 공통 헤더를 쓰므로 증분 빌드의 입력에도 포함한다.
+            // Mac sources use the sibling Apple shared headers, so they are also inputs of incremental builds.
             PrivateIncludeDirectories = context.Platform == NativePlatform.MacOS
                 ? [context.PathInRoot($"{backend}/Apple")]
                 : [],
             Dependencies = RequiredModules,
-            // macOS 디렉터리 감시(FSEvents)는 CoreServices framework를 쓴다.
+            // macOS directory watching (FSEvents) uses the CoreServices framework.
             Frameworks = context.Platform == NativePlatform.MacOS ? ["CoreServices"] : []
         };
     }

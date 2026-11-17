@@ -3,8 +3,8 @@ using Rocks.Build.Rules;
 
 public sealed class SampleGameModule : ModuleRules
 {
-    // 리플렉션 헤더 Source/GameObject.h를 include 철자 "GameObject.h"로 연다. 생성 헤더는 <GameObject.generated.h>다.
-    // identity 명세는 ModuleDirectory(프로젝트 루트)의 SampleGame.rocksids.json이다.
+    // Opens the reflection header Source/GameObject.h with the include spelling "GameObject.h". The generated header is <GameObject.generated.h>.
+    // The identity spec is SampleGame.rocksids.json in ModuleDirectory (the project root).
     public override NativeModuleInput Configure(BuildContext context) => new()
     {
         Name = "SampleGame",

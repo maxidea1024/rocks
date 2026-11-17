@@ -1,8 +1,8 @@
 using Rocks.Build.Rules;
 
-// World 리플렉션 시험 fixture 모듈이다(Docs/Design/ReflectionFoundations.ko.md 9.1절 B8b). World 모듈의 WorldOnly
-// 리플렉션 클래스를 상속한 타입(SaveActor·SaveComponent)의 헤더와 identity 명세(WorldTestFixtures.rocksids.json)를
-// 소유한다. EngineTests 실행 파일만 의존하며 헤더만 있다.
+// World reflection test fixture module (Docs/Design/ReflectionFoundations.ko.md section 9.1, B8b). Owns the headers of types that derive from the World module's
+// WorldOnly reflection classes (SaveActor and SaveComponent) and the identity spec (WorldTestFixtures.rocksids.json).
+// Only the EngineTests executable depends on it. Header only.
 public sealed class WorldTestFixtures : EngineModuleRules
 {
     protected override string Group => "Developer";

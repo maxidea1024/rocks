@@ -1,14 +1,14 @@
-# DirectXShaderCompiler(DXC) 오프라인 빌드다(Windows x64). Docs/Design/ShaderSystem.ko.md 8절 4항, UE 5.8
-# ThirdParty/ShaderConductor/Build_ShaderConductor_Win64.bat와 같은 역할(엔진 빌드 밖 CMake 빌드, 결과 공유 라이브러리만 배포)이다.
-# 고정 태그의 원본과 submodule(SPIRV-Headers·SPIRV-Tools·DirectX-Headers) 원본을 manifest build에서 받아 SHA-256을 검사하고,
-# 업스트림 cache(cmake/caches/PredefinedParams.cmake)에 시험만 끈 설정으로 dxcompiler.dll과 dxc.exe를 만든다. 업스트림 빌드는
-# 예외·RTTI를 쓰며(LLVM 기반), Python 3(PATH)으로 표를 생성한다. 저장소에 커밋된 생성 원본을 다시 만들지 않는다(HLSL_DISABLE_SOURCE_GENERATION,
-# git checkout이 아닌 archive라 줄끝 비교 HLSL_AUTOCRLF는 끈다). MSVC는 업스트림이 /Zi로 PDB를 만든다. dxil.dll은 만들지 않는다(1.8.2505부터 내장 validator가 서명한다).
-# 게시는 하지 않는다.
+# Offline build of DirectXShaderCompiler (DXC) (Windows x64). Docs/Design/ShaderSystem.ko.md section 8, item 4. Same role as UE 5.8
+# ThirdParty/ShaderConductor/Build_ShaderConductor_Win64.bat (CMake build outside the engine build, shipping only the resulting shared libraries).
+# Downloads the pinned tag sources and submodule (SPIRV-Headers, SPIRV-Tools, DirectX-Headers) sources from the manifest build, verifies SHA-256,
+# and builds dxcompiler.dll and dxc.exe with the upstream cache (cmake/caches/PredefinedParams.cmake) with only tests turned off. The upstream build
+# uses exceptions and RTTI (LLVM based) and generates tables with Python 3 (PATH). Generated sources committed upstream are not regenerated (HLSL_DISABLE_SOURCE_GENERATION;
+# it is an archive, not a git checkout, so the line ending comparison HLSL_AUTOCRLF is off). For MSVC, upstream produces PDBs with /Zi. dxil.dll is not built (since 1.8.2505 the built-in validator signs).
+# Does not publish.
 #
-# 사용: pwsh Engine/Source/ThirdParty/DirectXShaderCompiler/Build/Build.ps1 [-WorkDirectory C:\rtb\Dxc] [-OutputDirectory <dir>]
-# 필요: CMake, Ninja, Visual Studio C++ 도구와 Windows SDK, Python 3, git(patch 적용). 경로가 긴 LLVM 목적 파일 때문에 작업
-# 디렉터리는 짧은 경로(기본 <드라이브>\rtb\Dxc)에 둔다.
+# Usage: pwsh Engine/Source/ThirdParty/DirectXShaderCompiler/Build/Build.ps1 [-WorkDirectory C:\rtb\Dxc] [-OutputDirectory <dir>]
+# Requires: CMake, Ninja, Visual Studio C++ tools and the Windows SDK, Python 3, git (to apply patches). Because of long LLVM object file paths, keep the work
+# directory on a short path (default <drive>\rtb\Dxc).
 param(
     [string] $WorkDirectory = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'rtb\Dxc'),
     [string] $OutputDirectory = '',

@@ -351,7 +351,7 @@ String은 UTF-8 소유, StringView는 길이 포함 view다. byte count와 code 
 
 Guid의 128-bit POD 표현은 C01의 Base/Guid.h에 둔다. C13의 Core/Guid.h는 생성·parse·format helper만 추가한다. Guid 생성은 OS random backend를 사용하고 TypeId/FieldId/ActionId는 source control의 manifest로 유지한다. 타입 rename으로 ID가 바뀌지 않는다. hash는 runtime lookup용과 콘텐츠 digest용을 구분한다. Path는 플랫폼 정규화·case 정책을 노출하며 문자열의 locale 변환으로 파일 identity를 결정하지 않는다.
 
-LocalTransform은 double translation·quaternion·diagonal scale, WorldAffine은 affine matrix다. 비균일 scale과 rotation이 만드는 shear를 계산 결과에 보존한다. KeepWorld reparent가 local TRS로 표현되지 않으면 명시 오류를 반환한다. normal inverse-transpose·음수 determinant·singular inverse·bounds를 CF04/CT06에 포함한다. 산술 알고리즘은 검증된 backend를 adapter로 호출하며 자체 scalar/SIMD 수학 라이브러리를 새로 구현하지 않는다. 파일/ABI layout은 backend SIMD layout과 분리한다.
+LocalTransform은 quaternion·translation·diagonal scale(모든 성분 double — UE FTransform), WorldAffine은 affine matrix다. 비균일 scale과 rotation이 만드는 shear를 계산 결과에 보존한다. KeepWorld reparent가 local TRS로 표현되지 않으면 명시 오류를 반환한다. normal inverse-transpose·음수 determinant·singular inverse·bounds를 CF04/CT06에 포함한다. 산술 알고리즘은 검증된 backend를 adapter로 호출하며 자체 scalar/SIMD 수학 라이브러리를 새로 구현하지 않는다. 파일/ABI layout은 backend SIMD layout과 분리한다.
 
 ### 7.4 수학 backend 선정·adapter Gate
 
@@ -361,7 +361,7 @@ C15는 수학 알고리즘 개발 과제가 아니다. GLM·Realtime Math·Direc
 
 후보 manifest·ADR·MathBackendAdapter/TransformAdapter·conformance 시험이 C15 산출물이다. 라이브러리를 선정하기 전 상태는 미결정이며 candidate 이름만으로 지원 PASS를 선언하지 않는다. 선정 실패는 C15 미완료이고 Object R1을 임시 수학 구현 때문에 지연하지 않는다.
 
-Vec3/Quat/Mat4는 f32 local/render 저장형이며 f64 Vec3d/Mat4d/WorldPosition을 별도 제공한다. vendor register·padding·CPU별 ABI를 serialization·VM·C ABI로 전달하지 않는다. DirectXMath의 f32 범위와 f64 World 요구를 분리하여 검증한다. column vector `p′=M×p`, `world=parent×local` 규약을 유지하고 row-vector backend의 순서·전치 변환을 adapter에서 처리한다. 전역 원점 차감은 f64에서 수행한 뒤 범위를 확인하여 f32로 변환한다.
+Vec3/Quat/Mat4는 f32 local/render 저장형이며 f64 Vec3d/Mat4d/WorldPosition을 별도 제공한다. vendor register·padding·CPU별 ABI를 serialization·VM·C ABI로 전달하지 않는다. DirectXMath의 f32 범위와 f64 World 요구를 분리하여 검증한다. 행렬 규약은 UE 5.8과 같은 row vector `p′=p·M`, `world=local×parent`다(2026-11-17 column vector `p′=M×p`·`world=parent×local`에서 전환, [전체 구현 계획](EngineImplementationPlan.ko.md) 2.2절). column-vector backend를 쓰면 순서·전치 변환을 adapter에서 처리한다. 좌표계·단위도 UE와 같은 왼손 +X 전방·+Y 오른쪽·+Z 위, cm다. 전역 원점 차감은 f64에서 수행한 뒤 범위를 확인하여 f32로 변환한다.
 
 공개 signature와 storage ABI에 vendor 타입을 노출하지 않되, vendor header 완전 비공개와 모든 작은 연산의 inline·무비용 wrapper를 동시에 보장하지 않는다. 내부 detail inline header의 제한된 compile dependency와 private translation unit+LTO/batch 방식을 비교한다. 전자는 macro 격리·재컴파일 범위, 후자는 호출·load/store·shuffle 비용을 측정한다. 단일 벡터 연산마다 virtual dispatch/CPU 검사를 수행하지 않으며 batch kernel 진입에서만 runtime ISA를 선택한다. baseline x64/SSE2와 ARM64/NEON을 검증하고 선택 AVX2/FMA는 CPU·OS state 조건 및 baseline/확장 코드 분리를 확인한다.
 

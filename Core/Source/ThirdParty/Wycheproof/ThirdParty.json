@@ -7,7 +7,7 @@
   "source": {
     "url": "https://github.com/C2SP/wycheproof/archive/65ca494727a52944c204441c860b039e6786b99b.zip",
     "sha256": "5a0cdcbf5550d7a67602bee4690edbd79e6ef7a12b6d3250fbc339d5735e06f2",
-    "verification": "GitHub HTTPS commit archive(2026-11-15, main = 65ca494727a52944c204441c860b039e6786b99b). 릴리스가 없어 commit으로 고정한다. 서명은 없다. 암호 모듈 시험에 쓰는 testvectors_v1 파일만 들인다(AEGIS는 Wycheproof가 128 bit tag라 libsodium의 256 bit tag로 tag·invalid 사례를 검증할 수 없어 뺀다)."
+    "verification": "GitHub HTTPS commit archive (2026-11-15, main = 65ca494727a52944c204441c860b039e6786b99b). There are no releases, so it is pinned to a commit. There is no signature. Only the testvectors_v1 files used by the crypto module tests are imported (AEGIS is left out because Wycheproof uses a 128-bit tag, so tag and invalid cases cannot be verified with libsodium's 256-bit tag)."
   },
   "licenses": [
     {
@@ -40,8 +40,8 @@
   },
   "pragmaDirectives": [],
   "notes": [
-    "commit archive에서 testvectors_v1/의 C1 암호 시험 파일 10개, C2의 aes_cmac_test.json, C3의 xchacha20_poly1305_secretstream_test.json(2026-11-15, 같은 archive SHA-256 확인 뒤 추가)과 LICENSE만 byte 그대로 꺼냈다(Java·Go 도구와 다른 벡터는 두지 않는다). Crypto 시험(Crypto/Tests/WycheproofTests.cpp)이 Core Json으로 읽는다. 설계는 Docs/Design/Crypto.ko.md 5.4·12절.",
-    "시험 데이터일 뿐 어떤 모듈 바이너리에도 들어가지 않으므로 embeddedIn이 없다(SDK가 라이선스를 배포할 필요 없다).",
-    "AEGIS 벡터는 128 bit tag라 libsodium(256 bit tag)으로 tag·invalid 사례를 검증할 수 없어 들이지 않았다. secretstream 파일(상태 벡터 7건)은 C3에서 시험 접근점으로 상태를 넣어 돌린다."
+    "Only 10 C1 crypto test files of testvectors_v1/, aes_cmac_test.json for C2, xchacha20_poly1305_secretstream_test.json for C3 (added 2026-11-15 after confirming the same archive SHA-256) and LICENSE were extracted byte for byte from the commit archive (Java and Go tools and other vectors are not kept). The Crypto tests (Crypto/Tests/WycheproofTests.cpp) read them with Core Json. Design: Docs/Design/Crypto.ko.md sections 5.4 and 12.",
+    "It is test data only and goes into no module binary, so it has no embeddedIn (the SDK need not distribute the license).",
+    "AEGIS vectors use a 128-bit tag, so tag and invalid cases cannot be verified with libsodium (256-bit tag), and they were not imported. The secretstream file (7 state vectors) runs in C3 by injecting state through a test access point."
   ]
 }
