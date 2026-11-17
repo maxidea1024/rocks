@@ -322,6 +322,25 @@ Result<void> ValidateOptionalEdit(const FieldWriteTarget& target) noexcept {
     return Result<void>::Success();
 }
 
+Result<void> ValidateInstancedEdit(const FieldWriteTarget& target) noexcept {
+    if (!target.actual) {
+        return Result<void>::Failure(ErrorCode::TypeMismatch);
+    }
+
+    // 원소 모드면 원소·Map 값, 아니면 필드 값이 InstancedStruct여야 한다.
+    const ValueType& value = target.element ? target.actual->element : target.actual->value;
+    if (value.kind != ValueKind::InstancedStruct) {
+        return Result<void>::Failure(ErrorCode::TypeMismatch);
+    }
+
+    // 바깥 struct·배열 필드의 ReadOnly가 전파되어 형 바꾸기·비우기를 막는다.
+    if (HasFlag(target.effectiveFlags, FieldFlags::ReadOnly)) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    return Result<void>::Success();
+}
+
 Result<void> ValidateWeakTarget(ObjectRegistry& registry, const ObjectAccessContext& access,
                                 ObjectHandle target, const void* staticNative) noexcept {
     if (target.IsNull()) {

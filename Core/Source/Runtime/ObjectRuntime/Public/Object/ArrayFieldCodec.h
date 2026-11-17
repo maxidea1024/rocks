@@ -1,9 +1,9 @@
 #pragma once
 
 #include <Base/TypeTraits.h>
-#include <Object/StructFieldCodec.h>
+#include <Object/InstancedStructFieldCodec.h>
 
-// 필드 codec 사슬의 넷째 조각으로 배열 필드 codec이다(Docs/Design/ReflectionFoundations.ko.md
+// 필드 codec 사슬의 다섯째 조각으로 배열 필드 codec이다(Docs/Design/ReflectionFoundations.ko.md
 // 5.6절). 원소 wire 준비(ElementWireValue·ElementArrayShape·PrepareEnumElements), RecordList
 // 한도(ArrayRecordListLimits), 쓰기(EncodeArrayField), 원소 종류별 읽기(DecodeValueArray·
 // DecodeReferenceArray·DecodeStructArray)와 그 분기(DecodeArrayField), 생성 Trace 도우미
@@ -182,7 +182,8 @@ Result<uint32> EncodeArrayElements(const Elements& array, usize count, ArchiveWr
         return Result<uint32>::Success(static_cast<uint32>(WireType::RecordList));
     } else {
         constexpr bool variable = IsSameV<Element, String> || IsSameV<Element, Name> ||
-                                  SoftReferenceField<Element>::Supported;
+                                  SoftReferenceField<Element>::Supported ||
+                                  InstancedStructField<Element>::Supported;
         auto elementWire = FieldWireType(field.element.kind, context.ReferenceWireType());
         if (!elementWire) {
             return elementWire;
@@ -211,18 +212,26 @@ Result<uint32> EncodeArrayElements(const Elements& array, usize count, ArchiveWr
         for (usize index = 0; index < count; ++index) {
             element.Set(static_cast<uint32>(index));
             StringView text;
-            if constexpr (ObjectReferenceField<Element>::Supported) {
-                value.kind = ValueKind::ObjectReference;
-                value.reference = ElementReferenceHandle(array[index]);
-            } else if (auto copied = ElementWireValue(array[index], value, text); !copied) {
-                return Result<uint32>::Failure(copied.Error());
-            }
+            if constexpr (InstancedStructField<Element>::Supported) {
+                // InstancedStruct 원소(리플렉션 B9j)는 u64 길이 + 내용이다.
+                if (auto written = EncodeInstancedStructElement(array[index], out, context);
+                    !written) {
+                    return Result<uint32>::Failure(written.Error());
+                }
+            } else {
+                if constexpr (ObjectReferenceField<Element>::Supported) {
+                    value.kind = ValueKind::ObjectReference;
+                    value.reference = ElementReferenceHandle(array[index]);
+                } else if (auto copied = ElementWireValue(array[index], value, text); !copied) {
+                    return Result<uint32>::Failure(copied.Error());
+                }
 
-            if (auto written =
-                    WriteValueWire(out, context, field.element, context.FieldEnum(), value, text,
-                                   StaticReferenceNative<Element>(), lookup);
-                !written) {
-                return Result<uint32>::Failure(written.Error());
+                if (auto written =
+                        WriteValueWire(out, context, field.element, context.FieldEnum(), value,
+                                       text, StaticReferenceNative<Element>(), lookup);
+                    !written) {
+                    return Result<uint32>::Failure(written.Error());
+                }
             }
 
             if constexpr (variable) {
@@ -431,6 +440,66 @@ Result<void> DecodeValueArray(Array<Element>* target, const FieldView& field,
     return ReserveArrayApply(context, count, sizeof(Element), textWork);
 }
 
+// InstancedStruct 원소 배열(Array<InstancedStruct<>> — 리플렉션 B9j)의 decode다(DecodeArrayField의
+// 가지 — 원소 tag InstancedStruct, u64 길이 + 내용). target이 없으면 검증만(관찰 자리는 오지 않는다
+// — 관찰 struct는 InstancedStruct를 담지 않는다, InvalidArgument), 있으면(2단계) Clear →
+// TryReserve(count) → 원소마다 빈 값을 넣고 그 자리에 DecodeInstancedStructElement다. 2단계 몫은
+// 원소 메모리 count × sizeof(원소) + 원소 수 + 1이다(담긴 값 블록·멤버는 멤버 codec과 원소의 1이
+// 덮는다).
+template <class Element>
+Result<void> DecodeInstancedArray(ConstructionContext* construction, ObjectHandle owner,
+                                  Array<Element>* target, const FieldView& field,
+                                  FieldDecodeContext& context) noexcept {
+    if (target && !construction) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto opened = context.OpenValueArray(field, static_cast<uint32>(WireType::InstancedStruct),
+                                         MaxArrayElements);
+    if (!opened) {
+        return Result<void>::Failure(opened.Error());
+    }
+
+    ValueArrayReader& reader = opened.Value();
+    const usize count = reader.Count();
+    if (auto counted = context.AddElements(count); !counted) {
+        return counted;
+    }
+
+    if (target) {
+        target->Clear();
+        if (auto reserved = target->TryReserve(count); !reserved) {
+            return reserved;
+        }
+    }
+
+    ElementIndexScope element(context);
+    for (usize index = 0; index < count; ++index) {
+        element.Set(static_cast<uint32>(index));
+        Element* slot = nullptr;
+        if (target) {
+            auto added = target->TryEmplaceBack();
+            if (!added) {
+                return Result<void>::Failure(added.Error());
+            }
+
+            slot = added.Value();
+        }
+
+        if (auto decoded =
+                DecodeInstancedStructElement(construction, owner, slot, reader.Elements(), context);
+            !decoded) {
+            return decoded;
+        }
+    }
+
+    if (auto finished = reader.Finish(); !finished) {
+        return finished;
+    }
+
+    return ReserveArrayApply(context, count, sizeof(Element), 0);
+}
+
 // ObjectRefArray decode다(원소 tag = ReferenceWireType(), null 원소 허용). 1단계는 원소마다
 // ReadReference — null은 token을 남기지 않고(Required null 진단은 적용 뒤 실효 값 검사가 [f[i]]로
 // 낸다), non-null은 (token, 필드 기대 형식 {element.type, NativeTypeKey<T>()})을 남긴다. 2단계는
@@ -637,6 +706,8 @@ Result<void> DecodeArrayField(ConstructionContext* construction, ObjectHandle ow
         return DecodeStructArray(construction, owner, target, field, context);
     } else if constexpr (ObjectReferenceField<Element>::Supported) {
         return DecodeReferenceArray(construction, owner, target, field, context);
+    } else if constexpr (InstancedStructField<Element>::Supported) {
+        return DecodeInstancedArray(construction, owner, target, field, context);
     } else {
         return DecodeValueArray(target, field, context);
     }

@@ -13,7 +13,7 @@ PathCursor::PathCursor(ObjectRegistry& registry, const ObjectAccessContext& acce
       construction_(target.Transaction()), rootLease_(target.Lease()), rootView_(target.View()),
       rootValue_(target.Storage()), rootAllocator_(target.ValueAllocator()), rootBox_(target.Box()),
       stage_(target.References()), added_(target.AddedElements()), operation_(operation),
-      input_(input), output_(output), failure_(failure) {
+      input_(input), output_(output), failure_(failure), target_(&target) {
     if (failure_) {
         *failure_ = {};
     }
@@ -215,6 +215,38 @@ Result<void> PathCursor::Descend(void* structValue) noexcept {
 
     --current_;
     return result;
+}
+
+Result<void> PathCursor::DescendInstanced(const TypeLease& type, void* value) noexcept {
+    if (!type.IsValid() || !value) {
+        return Fail(ErrorCode::NotFound, PropertyPathError::InstancedEmpty);
+    }
+
+    const StructView target = frames_[current_].target;
+    if (instancedStep_ != current_ || target.IsEmpty() || !(type.Id() == target.Schema().id)) {
+        return Fail(ErrorCode::TypeMismatch, PropertyPathError::StaticTypeMismatch);
+    }
+
+    return Descend(value);
+}
+
+Result<void> PathCursor::PublishInstancedType(const TypeLease& type) noexcept {
+    if (!instancedOut_) {
+        return Fail(ErrorCode::InvalidArgument);
+    }
+
+    if (!type.IsValid()) {
+        instancedOut_->Reset();
+        return Result<void>::Success();
+    }
+
+    auto cloned = type.Clone();
+    if (!cloned) {
+        return Fail(cloned.Error());
+    }
+
+    *instancedOut_ = Move(cloned.Value());
+    return Result<void>::Success();
 }
 
 Result<void> PathCursor::CheckIndex(usize size) noexcept {

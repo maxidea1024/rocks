@@ -242,6 +242,37 @@ public:
         return budget_.AddElements(count);
     }
 
+    // InstancedStruct 값의 담긴 struct다(리플렉션 B9j). 1단계는 TypeRegistry만 조회한다(잠금으로
+    // 보호 — ObjectRegistry에 닿지 않는다). 조회 몫 1을 청구한다(2단계는 조회하지 않으므로 한 번).
+    Result<TypeLease> AcquireInstancedStructType(TypeId type) noexcept override {
+        if (auto spent = Charge(1); !spent) {
+            return Result<TypeLease>::Failure(spent.Error());
+        }
+
+        return types_.AcquireValueType(type, TypeKind::Struct);
+    }
+
+    // InstancedStruct 판정 하나를 노드의 기록에 더한다(리플렉션 B9j — 2단계가 같은 순서로 lease를
+    // 값으로 옮긴다). 기록 메모리 몫(항목 byte)을 한 번 청구한다.
+    Result<void> CollectInstancedStruct(TypeId stored, TypeLease type) noexcept override {
+        if (!node_) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (auto spent = Charge(sizeof(StoredInstancedStruct)); !spent) {
+            return spent;
+        }
+
+        StoredInstancedStruct record;
+        record.stored = stored;
+        record.type = Move(type);
+        if (!node_->instanced.TryPushBack(Move(record))) {
+            return Result<void>::Failure(ErrorCode::OutOfMemory);
+        }
+
+        return Result<void>::Success();
+    }
+
     Result<DecodedReference>
     ReadReference(ArchiveReader& reader,
                   const ReferenceExpectation& expectation) noexcept override {
@@ -846,9 +877,12 @@ Result<UniquePtr<StageData>> ValidateGraph(Allocator& allocator, TypeRegistry& t
                 return Output::Failure(lease.Error());
             }
 
+            // InstancedStruct를 담은 struct도 관찰하지 않는다(리플렉션 B9j — 1단계 임시 값에 담긴
+            // 타입의 lease를 둘 곳이 없다).
             if (lease.Value().Struct().ContainsStrongReference() ||
                 lease.Value().Struct().ContainsWeakReference() ||
-                lease.Value().Struct().ContainsName()) {
+                lease.Value().Struct().ContainsName() ||
+                lease.Value().Struct().ContainsInstancedStruct()) {
                 return Output::Failure(ErrorCode::InvalidArgument);
             }
 

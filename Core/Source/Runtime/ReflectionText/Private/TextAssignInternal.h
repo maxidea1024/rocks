@@ -287,6 +287,13 @@ void ReleasePins(AssignmentState& state, const void* owner) noexcept;
 // 오류(할당·대상 문맥).
 Result<bool> PreparedContains(AssignmentState& state, PropertyPath path) noexcept;
 
+// 경로 path(대상 기준 — InstancedStruct 값으로 끝난다)의 준비 상태에서 지금 담긴 struct lease를
+// out에 둔다(리플렉션 B9j — 비어 있거나 닿을 수 없으면 빈 lease). 보는 곳은 PreparedContains와
+// 같다(그 자리의 값 단위 상자, 더한 StructRefArray 원소 블록, 없으면 대상). 대입 텍스트의
+// InstancedStruct 뒤 멤버 경로 해석이 쓴다. 오류: 호출 오류(할당·대상 문맥).
+Result<void> PreparedInstancedType(AssignmentState& state, PropertyPath path,
+                                   TypeLease& out) noexcept;
+
 // 값 단위의 ReadOnly 자리마다 상자의 값이 대상의 지금 값과 같은지 깊게 대조하고, 다르면 진단
 // ReadOnly를 남긴다(리플렉션 B9i 리뷰 반영 — PrepareAssignments·Append·ImportJson이 호출 끝에
 // 부른다). 대조한 자리 목록은 비운다. 오류: 호출 오류(할당·대상 문맥).

@@ -11,6 +11,7 @@ namespace rocks {
 
 class FieldScope;
 class ElementIndexScope;
+class InstancedContentScope;
 
 // 두 문맥의 공통 기반이다: 위치(프레임) 스택, 진단·Soft 보고, 예산, 참조 wire. 직렬화기가
 // 파생해 구현한다. 같은 문맥을 여러 스레드에서 쓰지 않는다.
@@ -64,6 +65,20 @@ public:
     // 지금 위치가 키가 Enum인 Map 필드면 그 키 enum 스키마다(리플렉션 B9f2 — 그 밖은 nullptr).
     const EnumSchema* FieldKeyEnum() const noexcept {
         return current_ ? current_->keyEnumeration : nullptr;
+    }
+
+    // 지금 위치가 감싼 struct 단계 수다(최상위 필드 0 — 프레임 사슬 길이 − 1, 위치 밖이면 0).
+    // InstancedStruct의 깊이 합 규칙(위치 깊이 + 담긴 struct 깊이 ≤ MaxStructDepth — 리플렉션 B9j,
+    // Docs/Design/ReflectionExtensions.ko.md 11절)이 쓴다. 배열 원소·Map 항목은 프레임을 더하지
+    // 않으므로 그 컨테이너 필드의 위치 깊이와 같다.
+    uint32 PositionDepth() const noexcept {
+        uint32 depth = 0;
+        for (const FieldCodecFrame* frame = current_ ? current_->parent : nullptr; frame;
+             frame = frame->parent) {
+            ++depth;
+        }
+
+        return depth;
     }
 
     TypeId ObjectType() const noexcept {
@@ -215,6 +230,7 @@ protected:
 private:
     friend class FieldScope;
     friend class ElementIndexScope;
+    friend class InstancedContentScope;
 
     FieldCodecHooks* hooks_;
     NamePool* names_ = nullptr;
@@ -322,6 +338,39 @@ public:
 
 private:
     FieldCodecContext& context_;
+    FieldCodecFrame* frame_;
+};
+
+// InstancedStruct 필드 프레임(대상 형식이 InstancedStruct인 필드·원소 배열·Map — 리플렉션 B9j)의
+// structure 칸을 담긴 struct의 view로 채운다(RAII). 담긴 struct의 Record를 해석·쓰는 동안 그
+// 프레임이 struct 필드처럼 보이게 한다: 마이그레이션(FieldDecodeContext::MigrateStruct — 프레임
+// structure의 migrate)과 Atomic 포함 판정(IsOutsideInclude)이 이 칸을 읽는다. 지금 프레임의 대상
+// 형식이 InstancedStruct가 아니면 Fatal이다(codec 계약 위반). 소멸 때 빈 view로 되돌린다. 그
+// 프레임을 연 FieldScope보다 먼저 끝나야 하고, 그 안에서 연 멤버 scope는 이것보다 먼저 끝나야 한다.
+//
+// 사용 예(InstancedStruct codec):
+//   InstancedContentScope content(context, value.View());
+//   auto decoded = detail::DecodeStructValue(value.View(), construction, owner, block, source,
+//                                            context);
+class InstancedContentScope {
+public:
+    [[nodiscard]] InstancedContentScope(FieldCodecContext& context, StructView content) noexcept
+        : frame_(context.current_) {
+        if (!frame_ || FieldTargetType(*frame_->field).kind != ValueKind::InstancedStruct) {
+            platform::Fatal("InstancedContentScope requires an InstancedStruct field frame");
+        }
+
+        frame_->structure = content;
+    }
+
+    ~InstancedContentScope() {
+        frame_->structure = StructView{};
+    }
+
+    InstancedContentScope(const InstancedContentScope&) = delete;
+    InstancedContentScope& operator=(const InstancedContentScope&) = delete;
+
+private:
     FieldCodecFrame* frame_;
 };
 

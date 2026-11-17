@@ -170,6 +170,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     bool referenceArray = false;
     bool nameMember = false;
     bool weakMember = false;
+    bool instancedMember = false;
     for (const FieldSchema& field : schema.fields) {
         // 강한 참조 멤버: 단일 참조·ObjectRefArray·ObjectRef 원소 정적 배열·ObjectRefMap(대상
         // 형식이 ObjectReference).
@@ -180,6 +181,9 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
                      FieldKeyType(field).kind == ValueKind::Name;
         // weak 참조 멤버: 단일 WeakRef와 Array<WeakRef>(Transient 포함 — 관찰 struct 제한이 쓴다).
         weakMember = weakMember || FieldTargetType(field).kind == ValueKind::WeakObjectReference;
+        // InstancedStruct 멤버: 단일·원소 배열·정적 배열·Map 값(리플렉션 B9j — Transient 포함).
+        instancedMember =
+            instancedMember || FieldTargetType(field).kind == ValueKind::InstancedStruct;
         strongReference = strongReference || referenceTarget;
         // Registry 컨테이너 멤버: ObjectRefArray와 ObjectRefMap(리플렉션 B9f4 — 원소 블록이 owner
         // 저장소 밖인 StructRefArray 원소 struct에는 둘 수 없다, RF 결정 15).
@@ -278,6 +282,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
                                                           : record->containsReferenceArray);
                 nameMember = nameMember || record->containsName;
                 weakMember = weakMember || record->containsWeakReference;
+                instancedMember = instancedMember || record->containsInstancedStruct;
             }
         }
 
@@ -367,6 +372,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     record->containsReferenceArray = referenceArray;
     record->containsName = nameMember;
     record->containsWeakReference = weakMember;
+    record->containsInstancedStruct = instancedMember;
     record->ops.size = ops.size;
     record->ops.alignment = ops.alignment;
     record->ops.nativeType = ops.nativeType;

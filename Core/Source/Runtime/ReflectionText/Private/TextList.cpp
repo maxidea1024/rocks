@@ -323,6 +323,46 @@ bool IsStructSlot(const TextSlot& slot) noexcept {
     return SlotValueType(slot).type.kind == ValueKind::Struct;
 }
 
+// InstancedStruct 값 자리(필드·원소·Map 값 — 리플렉션 B9j)인지다.
+bool IsInstancedSlot(const TextSlot& slot) noexcept {
+    return SlotValueType(slot).type.kind == ValueKind::InstancedStruct;
+}
+
+// InstancedStruct 자리의 값 텍스트다(리플렉션 B9j — Docs/Design/ReflectionExtensions.ko.md 10.4절):
+// `none`(ASCII 대소문자 무시)은 비우기, 그 밖은 타입 도구 이름(TypeRegistry::AcquireByToolName —
+// 대소문자 무시)이어야 하고 struct여야 한다(아니면 InvalidValue 진단). 담기 조건·깊이 합은 형
+// 바꾸기 경로 연산이 본다.
+Result<bool> ParseInstancedType(TextCodecContext& context, StringView text, TextSource source,
+                                StringView pathText, TextValue& out) noexcept {
+    out.shape = TextValueShape::InstancedType;
+    out.single.kind = ValueKind::InstancedStruct;
+    out.single.guid = Guid{};
+    if (EqualsIgnoringAsciiCase(Span<const char>(text.Data(), text.ByteCount()),
+                                Span<const char>("none", 4))) {
+        return Result<bool>::Success(true);
+    }
+
+    auto lease = context.Types().AcquireByToolName(Span<const char>(text.Data(), text.ByteCount()));
+    if (!lease) {
+        if (lease.Error() != ErrorCode::NotFound && lease.Error() != ErrorCode::InvalidArgument) {
+            return Result<bool>::Failure(lease.Error());
+        }
+
+        out.Reset();
+        return detail::Report(context, TextDiagnosticCode::InvalidValue, source, pathText,
+                              "unknown struct type tool name");
+    }
+
+    if (lease.Value().Kind() != TypeKind::Struct) {
+        out.Reset();
+        return detail::Report(context, TextDiagnosticCode::InvalidValue, source, pathText,
+                              "type is not a reflected struct");
+    }
+
+    out.single.guid = lease.Value().Id();
+    return Result<bool>::Success(true);
+}
+
 } // namespace
 
 namespace detail {
@@ -420,6 +460,10 @@ Result<bool> ParseTextValue(TextCodecContext& context, const TextSlot& slot, Str
             return ParseStructDefault(context, text, source, pathText, out);
         }
 
+        if (IsInstancedSlot(slot)) {
+            return ParseInstancedType(context, text, source, pathText, out);
+        }
+
         return ParseSingle(context, SlotValueType(slot), text, source, pathText, out);
     case TextSlotPart::Field:
         break;
@@ -428,6 +472,8 @@ Result<bool> ParseTextValue(TextCodecContext& context, const TextSlot& slot, Str
     switch (field.value.kind) {
     case ValueKind::Struct:
         return ParseStructDefault(context, text, source, pathText, out);
+    case ValueKind::InstancedStruct:
+        return ParseInstancedType(context, text, source, pathText, out);
     case ValueKind::Optional:
         if (field.element.kind == ValueKind::Struct) {
             return ParseStructDefault(context, text, source, pathText, out);
@@ -437,7 +483,8 @@ Result<bool> ParseTextValue(TextCodecContext& context, const TextSlot& slot, Str
     case ValueKind::Array:
     case ValueKind::StaticArray:
     case ValueKind::Set:
-        if (field.element.kind == ValueKind::Struct) {
+        if (field.element.kind == ValueKind::Struct ||
+            field.element.kind == ValueKind::InstancedStruct) {
             if (field.value.kind == ValueKind::Array && text.IsEmpty()) {
                 out.shape = TextValueShape::List;
                 return Result<bool>::Success(true);
@@ -450,7 +497,8 @@ Result<bool> ParseTextValue(TextCodecContext& context, const TextSlot& slot, Str
 
         return ParseList(context, slot, text, source, pathText, out);
     case ValueKind::Map:
-        if (field.element.kind == ValueKind::Struct) {
+        if (field.element.kind == ValueKind::Struct ||
+            field.element.kind == ValueKind::InstancedStruct) {
             if (text.IsEmpty()) {
                 out.shape = TextValueShape::Entries;
                 return Result<bool>::Success(true);
@@ -478,7 +526,29 @@ Result<void> FormatTextValue(TextCodecContext& context, const TextSlot& slot,
                                 kind == ValueKind::Set);
     const bool entries = whole && kind == ValueKind::Map;
     const bool structured = IsStructSlot(slot) && !list && !entries;
+    const bool instanced = IsInstancedSlot(slot) && !list && !entries;
     switch (value.shape) {
+    case TextValueShape::InstancedType: {
+        if (!instanced) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (value.single.guid == Guid{}) {
+            return out.TryAppend("none");
+        }
+
+        auto lease = context.Types().AcquireValueType(value.single.guid, TypeKind::Struct);
+        if (!lease) {
+            return Result<void>::Failure(lease.Error());
+        }
+
+        const Span<const char> name = lease.Value().Schema().toolName;
+        if (name.Size() == 0) {
+            return Result<void>::Failure(ErrorCode::Unsupported);
+        }
+
+        return out.TryAppend(StringView(name.Data(), name.Size()));
+    }
     case TextValueShape::Single: {
         if (list || entries || structured || slot.part == TextSlotPart::SetElement) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
