@@ -46,28 +46,38 @@ float4 PSMain(VSOutput input) : SV_Target {
 }
 )";
 
-constexpr char VertexGlsl[] = R"(#version 450 core
-layout(location = 0) in vec3 aPosition;
-layout(location = 1) in vec2 aUv;
-layout(location = 2) in vec4 aColor;
-uniform mat4 uTransform;
-uniform vec4 uColor;
-layout(location = 0) out vec2 vUv;
-layout(location = 1) out vec4 vColor;
+// OpenGL ES 3.2 원문(GLSL ES 3.20)이다. SH2 전 런타임 경로이지만 쿠킹된 GLES31_PC 출력과 같은
+// 모양으로 쓴다(ShaderSystem 7.2절 4항): 정점 입력은 ATTRIBUTEn location, 단계 사이 변수는
+// TEXCOORDn location, 그리기 상수는 루트 상수 에뮬레이션 배열 vu_h(DrawConstants의 vec4 5개),
+// 텍스처는 combined sampler ps0(유닛 0). 행렬은 행 우선 byte를 그대로 받아 mat4(열 우선)로 읽으므로
+// Mᵀ * v = v·M이다(HLSL mul(v, transform)과 같다, 7.2절 6항).
+constexpr char VertexGlsl[] = R"(#version 320 es
+precision highp float;
+precision highp int;
+uniform highp vec4 vu_h[5];
+#define transform mat4(vu_h[0], vu_h[1], vu_h[2], vu_h[3])
+#define color vu_h[4]
+layout(location = 0) in vec3 in_var_ATTRIBUTE0;
+layout(location = 1) in vec2 in_var_ATTRIBUTE1;
+layout(location = 2) in vec4 in_var_ATTRIBUTE2;
+layout(location = 0) out vec2 out_var_TEXCOORD0;
+layout(location = 1) out vec4 out_var_TEXCOORD1;
 void main() {
-    gl_Position = vec4(aPosition, 1.0) * uTransform;
-    vUv = aUv;
-    vColor = aColor * uColor;
+    gl_Position = transform * vec4(in_var_ATTRIBUTE0, 1.0);
+    out_var_TEXCOORD0 = in_var_ATTRIBUTE1;
+    out_var_TEXCOORD1 = in_var_ATTRIBUTE2 * color;
 }
 )";
 
-constexpr char PixelGlsl[] = R"(#version 450 core
-layout(location = 0) in vec2 vUv;
-layout(location = 1) in vec4 vColor;
-layout(binding = 0) uniform sampler2D uTexture;
-layout(location = 0) out vec4 oColor;
+constexpr char PixelGlsl[] = R"(#version 320 es
+precision highp float;
+precision highp int;
+layout(binding = 0) uniform highp sampler2D ps0;
+layout(location = 0) in vec2 in_var_TEXCOORD0;
+layout(location = 1) in vec4 in_var_TEXCOORD1;
+layout(location = 0) out vec4 out_var_SV_Target0;
 void main() {
-    oColor = texture(uTexture, vUv) * vColor;
+    out_var_SV_Target0 = texture(ps0, in_var_TEXCOORD0) * in_var_TEXCOORD1;
 }
 )";
 
@@ -112,7 +122,8 @@ Renderer::~Renderer() {
     Shutdown();
 }
 
-Result<void> Renderer::Initialize(graphics::Device& device, graphics::Format colorFormat) noexcept {
+Result<void> Renderer::Initialize(graphics::Device& device,
+                                  graphics::PixelFormat colorFormat) noexcept {
     if (device_ != nullptr) {
         return Result<void>::Failure(ErrorCode::AlreadyExists);
     }

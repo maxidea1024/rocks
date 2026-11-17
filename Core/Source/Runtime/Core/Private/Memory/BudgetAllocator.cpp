@@ -113,7 +113,7 @@ Result<void*> BudgetAllocator::Allocate(usize bytes, usize alignment, uint32 tag
         platform::Fatal("BudgetAllocator backing returned invalid allocation");
     }
 
-    auto* record = ConstructAt<Record>(recordMemory.Value());
+    auto* record = InitializeAt<Record>(recordMemory.Value());
     record->address = allocation.Value();
     record->bytes = bytes;
     {
@@ -170,7 +170,7 @@ Result<void> BudgetAllocator::Deallocate(void* address) noexcept {
         --stats_.liveAllocations;
         stats_.liveBytes -= static_cast<uint64>(record->bytes);
     }
-    DestroyAt(record);
+    static_assert(IsTriviallyDestructibleV<RemovePointerT<decltype(record)>>);
     if (!backing_.Deallocate(record)) {
         platform::Fatal("BudgetAllocator could not release its allocation record");
     }

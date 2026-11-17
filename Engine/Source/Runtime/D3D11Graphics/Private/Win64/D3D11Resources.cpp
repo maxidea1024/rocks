@@ -163,17 +163,18 @@ Result<BufferHandle> D3D11Device::CreateBuffer(const BufferDesc& desc,
 // 다른 스레드에서도 부를 수 있다(concurrentResourceCreation). 초기 픽셀은 생성 호출이 올린다.
 Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
                                                  Span<const uint8> pixels) noexcept {
+    // 올바른 형식이지만 대응 표에 없으면 미지원이다(다른 형식으로 대신하지 않는다). 크기 검사보다
+    // 먼저 본다(깊이 형식처럼 업로드 크기가 없는 형식도 Unsupported로 알린다).
+    if (IsValidPixelFormat(desc.format) && ResourceFormat(desc.format) == DXGI_FORMAT_UNKNOWN) {
+        return Result<TextureHandle>::Failure(ErrorCode::Unsupported);
+    }
+
     const bool renderTarget = desc.usage == TextureUsage::RenderTarget;
-    const uint64 size = MipChainBytes(desc.width, desc.height, desc.mipLevels, desc.format);
+    const uint64 size = MipChainBytes(desc.format, desc.width, desc.height, 1, desc.mipLevels);
     if (desc.width > MaxTextureExtent || desc.height > MaxTextureExtent || size == 0 ||
         desc.mipLevels > MaxMipLevels || !IsValidSamplerDesc(desc.sampler) ||
         (renderTarget ? (pixels.Size() != 0 || desc.mipLevels != 1) : pixels.Size() != size)) {
         return Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
-    }
-
-    // 올바른 형식이지만 대응 표에 없으면 미지원이다(다른 형식으로 대신하지 않는다).
-    if (ResourceFormat(desc.format) == DXGI_FORMAT_UNKNOWN) {
-        return Result<TextureHandle>::Failure(ErrorCode::Unsupported);
     }
 
     platform::LockGuard lock(gate_);
@@ -201,13 +202,14 @@ Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
                             (renderTarget ? static_cast<UINT>(D3D11_BIND_RENDER_TARGET) : 0u);
     // 초기 픽셀(빈틈 없는 행, mip 0부터 이어 붙임)을 mip별 원본으로 나눈다.
     D3D11_SUBRESOURCE_DATA mips[MaxMipLevels] = {};
-    const uint32 bytesPerPixel = BytesPerPixel(desc.format);
+    // 블록 압축 형식의 행은 블록 행이다.
     usize offset = 0;
     for (uint32 level = 0; !renderTarget && level < desc.mipLevels; ++level) {
-        const usize rowBytes = static_cast<usize>(MipExtent(desc.width, level)) * bytesPerPixel;
+        const usize rowBytes =
+            static_cast<usize>(PixelFormatRowBytes(desc.format, MipExtent(desc.width, level)));
         mips[level].pSysMem = pixels.Data() + offset;
         mips[level].SysMemPitch = static_cast<UINT>(rowBytes);
-        offset += rowBytes * MipExtent(desc.height, level);
+        offset += rowBytes * PixelFormatBlockRows(desc.format, MipExtent(desc.height, level));
     }
 
     HRESULT result =
@@ -245,7 +247,7 @@ Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
 Result<PipelineHandle> D3D11Device::CreatePipeline(const PipelineDesc& desc) noexcept {
     platform::LockGuard lock(gate_);
     if (desc.vertex.hlsl.ByteCount() == 0 || desc.pixel.hlsl.ByteCount() == 0 ||
-        desc.colorFormat == Format::Unknown) {
+        !IsValidPixelFormat(desc.colorFormat)) {
         return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
     }
 

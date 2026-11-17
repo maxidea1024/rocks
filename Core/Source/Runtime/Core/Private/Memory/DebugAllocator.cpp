@@ -175,7 +175,7 @@ Result<void*> DebugAllocator::Allocate(usize bytes, usize alignment, uint32 tag)
         platform::Fatal("DebugAllocator backing returned invalid payload storage");
     }
 
-    auto* record = ConstructAt<Record>(metadata.Value());
+    auto* record = InitializeAt<Record>(metadata.Value());
     record->storage = storage.Value();
     record->address = static_cast<unsigned char*>(storage.Value()) + prefix;
     record->bytes = bytes;
@@ -325,7 +325,7 @@ Result<void> DebugAllocator::EvictOne() noexcept {
 }
 
 void DebugAllocator::ReleaseRecord(Record* record) noexcept {
-    DestroyAt(record);
+    static_assert(IsTriviallyDestructibleV<RemovePointerT<decltype(record)>>);
     if (!backing_.Deallocate(record)) {
         platform::Fatal("DebugAllocator backing rejected owned record");
     }

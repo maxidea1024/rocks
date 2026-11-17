@@ -377,7 +377,7 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
            info.software ? ", software" : "");
 
     sample::Renderer renderer;
-    auto initialized = renderer.Initialize(device, graphics::Format::RGBA8UnormSrgb);
+    auto initialized = renderer.Initialize(device, graphics::PixelFormat::RGBA8UnormSrgb);
     if (!initialized) {
         printf("    %.*s\n", static_cast<int>(device.LastError().ByteCount()),
                device.LastError().Data());
@@ -388,7 +388,7 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     graphics::TextureDesc targetDesc;
     targetDesc.width = Size;
     targetDesc.height = Size;
-    targetDesc.format = graphics::Format::RGBA8UnormSrgb;
+    targetDesc.format = graphics::PixelFormat::RGBA8UnormSrgb;
     targetDesc.usage = graphics::TextureUsage::RenderTarget;
     auto target = device.CreateTexture(targetDesc, {});
     // 2x2 텍스처: 좌상 빨강, 우상 초록, 좌하 파랑, 우하 흰색(행 위→아래).
@@ -523,7 +523,7 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
         Array<uint8> chain(result.triangle.GetAllocator());
         bool built = chain
                          .TryResize(static_cast<usize>(graphics::MipChainBytes(
-                             MipSize, MipSize, levels, graphics::Format::RGBA8UnormSrgb)))
+                             graphics::PixelFormat::RGBA8UnormSrgb, MipSize, MipSize, 1, levels)))
                          .IsOk();
         usize offset = 0;
         for (uint32 level = 0; built && level < levels; ++level) {
@@ -604,7 +604,7 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     if (info.backend == graphics::Backend::D3D12 && info.validationEnabled) {
         const uint64 before = device.ValidationErrorCount();
         sample::Renderer mismatched;
-        if (mismatched.Initialize(device, graphics::Format::RGBA8Unorm)) {
+        if (mismatched.Initialize(device, graphics::PixelFormat::RGBA8Unorm)) {
             sample::RenderItem item;
             item.mesh = sample::MeshKind::Triangle;
             auto frame = device.BeginOffscreen(target.Value(), view.clear);
@@ -706,7 +706,8 @@ int RunGraphicsSelfTest(Allocator& allocator) noexcept {
     BackendResult warp(allocator);
     BackendResult d3d11(allocator);
     BackendResult d3d11Warp(allocator);
-    BackendResult opengl(allocator);
+    BackendResult glesProfile(allocator);
+    BackendResult glesDesktop(allocator);
     RunBackend("D3D12", graphics::CreateD3D12Device(allocator, desc), d3d12);
     graphics::DeviceDesc software = desc;
     software.preferSoftware = true;
@@ -717,13 +718,25 @@ int RunGraphicsSelfTest(Allocator& allocator) noexcept {
                &report);
     RunD3D11ValidationProbe("D3D11", graphics::CreateD3D11Device(allocator, desc));
     RunD3D11ValidationProbe("D3D11 WARP", graphics::CreateD3D11Device(allocator, software));
-    RunBackend("OpenGL", graphics::CreateOpenGLDevice(allocator, desc), opengl);
-    Compare(d3d12, opengl, "D3D12 vs OpenGL");
+    // OpenGL ES 3.2 미리보기(GLES31_PC)를 두 context에서 돌린다: 진짜 ES 3.2 context(드라이버가 ES
+    // 밖 호출을 거부)와 UE 방식의 데스크톱 GL 4.3 core context.
+    graphics::OpenGLDeviceOptions esProfile;
+    esProfile.contextProfile = graphics::OpenGLContextProfile::EsProfile;
+    RunBackend("OpenGL ES", graphics::CreateOpenGLDevice(allocator, desc, esProfile, &report),
+               glesProfile, &report);
+    graphics::OpenGLDeviceOptions desktopCore;
+    desktopCore.contextProfile = graphics::OpenGLContextProfile::DesktopCore;
+    RunBackend("OpenGL ES on GL core",
+               graphics::CreateOpenGLDevice(allocator, desc, desktopCore, &report), glesDesktop,
+               &report);
+    Compare(d3d12, glesProfile, "D3D12 vs OpenGL ES");
+    Compare(d3d12, glesDesktop, "D3D12 vs OpenGL ES on GL core");
     Compare(d3d12, warp, "D3D12 vs WARP");
     Compare(d3d12, d3d11, "D3D12 vs D3D11");
     Compare(d3d12, d3d11Warp, "D3D12 vs D3D11 WARP");
     Compare(warp, d3d11Warp, "D3D12 WARP vs D3D11 WARP");
-    const bool anyRan = d3d12.ran || warp.ran || d3d11.ran || d3d11Warp.ran || opengl.ran;
+    const bool anyRan =
+        d3d12.ran || warp.ran || d3d11.ran || d3d11Warp.ran || glesProfile.ran || glesDesktop.ran;
     printf("Graphics self-test: %s (%u failure%s)\n",
            failures == 0 && anyRan ? "PASS" : (anyRan ? "FAIL" : "NOT RUN"), failures,
            failures == 1 ? "" : "s");

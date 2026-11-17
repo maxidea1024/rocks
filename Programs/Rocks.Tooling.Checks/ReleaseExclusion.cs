@@ -45,7 +45,7 @@ public static class ReleaseExclusion
         new("release-shader-compiler", NativePlatform.Windows, "D3D11Graphics", "d3dcompiler", "SH5",
             "D3D11Graphics compiles its shaders at run time with D3DCompile until cooked D3D11_SM5 code arrives (ShaderSystem P15/SH5)"),
         new("release-windows-opengl", NativePlatform.Windows, "OpenGLGraphics", "OpenGLGraphics", "SH2",
-            "Sandbox links the desktop OpenGL backend for its D3D12/OpenGL self-test (ShaderSystem 9: OpenGLGraphics becomes the GLES preview backend, kept out of Release Windows executables, in SH2)")
+            "Sandbox links the OpenGL ES (GLES31_PC preview) backend for its D3D12/OpenGL ES self-test (ShaderSystem 9: the preview backend is kept out of Release Windows executables in SH2)")
     ];
 
     // 검사하는 대상 플랫폼과 아키텍처다(개발 호스트 두 곳과 모바일).

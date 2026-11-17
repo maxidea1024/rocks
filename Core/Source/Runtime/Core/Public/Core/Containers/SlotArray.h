@@ -2,6 +2,7 @@
 
 #include <Base/TypeTraits.h>
 #include <Base/Checked.h>
+#include <Core/Containers/ContainerDetail.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Move.h>
 #include <Platform/Fatal.h>
@@ -181,7 +182,7 @@ public:
             const uint32 index = firstFree_;
             Slot& slot = slots_[index];
             const uint32 next = slot.next;
-            ConstructAt<T>(&slot.value, Forward<Args>(args)...);
+            InitializeAt<T>(&slot.value, Forward<Args>(args)...);
             slot.next = Occupied;
             firstFree_ = next;
             ++size_;
@@ -205,7 +206,7 @@ public:
         // 기존 저장소가 아직 유효할 때 먼저 생성하므로 인자가 기존 원소를 가리켜도 된다.
         const uint32 index = static_cast<uint32>(slotCount_);
         Slot& slot = target[index];
-        ConstructAt<T>(&slot.value, Forward<Args>(args)...);
+        InitializeAt<T>(&slot.value, Forward<Args>(args)...);
         slot.generation = 1;
         slot.next = Occupied;
         if (replacement != nullptr) {
@@ -225,7 +226,10 @@ public:
         if (!checked) {
             return checked;
         }
-        DestroyAt(&slots_[handle.index].value);
+        if constexpr (!IsTriviallyDestructibleV<T>) {
+            DestroyAt(&slots_[handle.index].value);
+        }
+
         FreeSlot(handle.index);
         return Result<void>::Success();
     }
@@ -238,7 +242,10 @@ public:
         }
         Slot& slot = slots_[handle.index];
         auto taken = Result<T>::Success(Move(slot.value));
-        DestroyAt(&slot.value);
+        if constexpr (!IsTriviallyDestructibleV<T>) {
+            DestroyAt(&slot.value);
+        }
+
         FreeSlot(handle.index);
         return taken;
     }
@@ -266,7 +273,10 @@ public:
     void Clear() noexcept {
         for (usize index = slotCount_; index != 0; --index) {
             if (slots_[index - 1].next == Occupied) {
-                DestroyAt(&slots_[index - 1].value);
+                if constexpr (!IsTriviallyDestructibleV<T>) {
+                    DestroyAt(&slots_[index - 1].value);
+                }
+
                 FreeSlot(static_cast<uint32>(index - 1));
             }
         }
@@ -405,7 +415,7 @@ private:
         // value는 생성하지 않는다.
         auto* slots = static_cast<Slot*>(allocation.Value());
         for (usize index = 0; index < capacity; ++index) {
-            ConstructAt<Slot>(slots + index);
+            InitializeAt<Slot>(slots + index);
         }
         return Result<Slot*>::Success(slots);
     }
@@ -422,8 +432,10 @@ private:
             Slot& source = slots_[index];
             Slot& target = replacement[index];
             if (source.next == Occupied) {
-                ConstructAt<T>(&target.value, Move(source.value));
-                DestroyAt(&source.value);
+                InitializeAt<T>(&target.value, Move(source.value));
+                if constexpr (!IsTriviallyDestructibleV<T>) {
+                    DestroyAt(&source.value);
+                }
             }
             target.generation = source.generation;
             target.next = source.next;
@@ -445,13 +457,7 @@ private:
     }
 
     usize GrowthCapacity(usize required) const noexcept {
-        const usize maximum = Limit();
-        if (capacity_ == 0) {
-            return maximum < 4 || required > 4 ? required : 4;
-        }
-        const usize growth = capacity_ / 2 + 1;
-        const usize candidate = growth > maximum - capacity_ ? maximum : capacity_ + growth;
-        return candidate < required ? required : candidate;
+        return detail::GrowthCapacityWithin(capacity_, required, Limit());
     }
 
     void CheckHandle(SlotHandle handle) const noexcept {
@@ -461,9 +467,11 @@ private:
     }
 
     void Release() noexcept {
-        for (usize index = slotCount_; index != 0; --index) {
-            if (slots_[index - 1].next == Occupied) {
-                DestroyAt(&slots_[index - 1].value);
+        if constexpr (!IsTriviallyDestructibleV<T>) {
+            for (usize index = slotCount_; index != 0; --index) {
+                if (slots_[index - 1].next == Occupied) {
+                    DestroyAt(&slots_[index - 1].value);
+                }
             }
         }
         FreeStorage(slots_);

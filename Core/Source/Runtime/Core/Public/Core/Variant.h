@@ -112,7 +112,7 @@ public:
     Variant() noexcept
         requires(IsNothrowConstructibleV<TypePackElement<0, Types...>>)
     {
-        ConstructAt<TypePackElement<0, Types...>>(storage_);
+        InitializeAt<TypePackElement<0, Types...>>(storage_);
         index_ = 0;
     }
 
@@ -121,14 +121,14 @@ public:
                  IsNothrowConstructibleV<detail::VariantDecayT<T>, T &&>)
     Variant(T&& value) noexcept {
         using Alternative = detail::VariantDecayT<T>;
-        ConstructAt<Alternative>(storage_, Forward<T>(value));
+        InitializeAt<Alternative>(storage_, Forward<T>(value));
         index_ = static_cast<uint8>(IndexOf<Alternative>);
     }
 
     template <typename T, typename... Args>
         requires(IndexOf<T> < Count && IsNothrowConstructibleV<T, Args && ...>)
     explicit Variant(InPlaceType<T>, Args&&... args) noexcept {
-        ConstructAt<T>(storage_, Forward<Args>(args)...);
+        InitializeAt<T>(storage_, Forward<Args>(args)...);
         index_ = static_cast<uint8>(IndexOf<T>);
     }
 
@@ -142,7 +142,13 @@ public:
         MoveConstructFrom(other, MakeIndexSequence<Count>{});
     }
 
-    ~Variant() noexcept {
+    ~Variant() noexcept
+        requires((IsTriviallyDestructibleV<Types> && ...))
+    = default;
+
+    ~Variant() noexcept
+        requires(!(IsTriviallyDestructibleV<Types> && ...))
+    {
         DestroyCurrent(MakeIndexSequence<Count>{});
     }
 
@@ -221,7 +227,7 @@ public:
                       "Variant::Emplace requires a noexcept constructor");
         T replacement(Forward<Args>(args)...);
         DestroyCurrent(MakeIndexSequence<Count>{});
-        ConstructAt<T>(storage_, Move(replacement));
+        InitializeAt<T>(storage_, Move(replacement));
         index_ = static_cast<uint8>(IndexOf<T>);
         return Ref<T>();
     }
@@ -259,15 +265,25 @@ private:
 
     template <usize... Indices>
     void DestroyCurrent(IndexSequence<Indices...>) noexcept {
-        (void)((index_ == Indices ? (DestroyAt(&Ref<TypePackElement<Indices, Types...>>()), true)
-                                  : false) ||
-               ...);
+        if constexpr (!(IsTriviallyDestructibleV<Types> && ...)) {
+            // trivial alternative는 주소 조회와 소멸 함수 호출도 인스턴스화하지 않는다.
+            (
+                [&] {
+                    using T = TypePackElement<Indices, Types...>;
+                    if constexpr (!IsTriviallyDestructibleV<T>) {
+                        if (index_ == Indices) {
+                            DestroyAt(&Ref<T>());
+                        }
+                    }
+                }(),
+                ...);
+        }
     }
 
     template <usize... Indices>
     void CopyConstructFrom(const Variant& other, IndexSequence<Indices...>) noexcept {
         (void)((other.index_ == Indices
-                    ? (ConstructAt<TypePackElement<Indices, Types...>>(
+                    ? (InitializeAt<TypePackElement<Indices, Types...>>(
                            storage_, other.template Ref<TypePackElement<Indices, Types...>>()),
                        true)
                     : false) ||
@@ -278,7 +294,7 @@ private:
     template <usize... Indices>
     void MoveConstructFrom(Variant& other, IndexSequence<Indices...>) noexcept {
         (void)((other.index_ == Indices
-                    ? (ConstructAt<TypePackElement<Indices, Types...>>(
+                    ? (InitializeAt<TypePackElement<Indices, Types...>>(
                            storage_,
                            Move(other.template Ref<TypePackElement<Indices, Types...>>())),
                        true)

@@ -59,7 +59,7 @@ void TaskHandle::Reset() noexcept {
     ROCKS_ASSERT(record->references > 0);
     if (--record->references == 0) {
         Allocator* allocator = record->allocator;
-        DestroyAt(record);
+        static_assert(IsTriviallyDestructibleV<RemovePointerT<decltype(record)>>);
         ROCKS_ASSERT(allocator->Deallocate(record).IsOk());
     }
 }
@@ -108,8 +108,8 @@ Result<TaskHandle> InlineExecutor::Submit(TaskDesc&& description) noexcept {
     if (!memory.IsOk()) {
         return Result<TaskHandle>::Failure(memory.Error());
     }
-    auto* record = ConstructAt<TaskHandle::Record>(memory.Value(), &allocator_, owner_, 1,
-                                                   TaskState::Succeeded, ErrorCode::None);
+    auto* record = InitializeAt<TaskHandle::Record>(memory.Value(), &allocator_, owner_, 1,
+                                                    TaskState::Succeeded, ErrorCode::None);
     Function<void(TaskContext&)> body(Move(description.body));
     TaskContext context;
     // task 채널이 꺼져 있으면 분기 하나다. 켜져 있으면 만듦·실행 가능·시작·끝·완료를 남긴다(동기

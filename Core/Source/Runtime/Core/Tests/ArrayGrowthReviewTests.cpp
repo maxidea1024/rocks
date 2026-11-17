@@ -139,8 +139,8 @@ TEST(ArrayFindOnConstArrayUsesConstComparisonOverload) {
 TEST(ArrayGrowthCapacityMatchesArrayGrowth) {
     static_assert(ArrayGrowthCapacity(0, 1, 4) == 4);
     static_assert(ArrayGrowthCapacity(0, 9, 4) == 9);
-    static_assert(ArrayGrowthCapacity(4, 5, 4) == 7);
-    static_assert(ArrayGrowthCapacity(4, 20, 4) == 20);
+    static_assert(ArrayGrowthCapacity(4, 5, 4) == 22);
+    static_assert(ArrayGrowthCapacity(4, 20, 4) == 43);
     static_assert(ArrayGrowthCapacity(MaxSize / 8 - 1, MaxSize / 8, 8) == MaxSize / 8);
     SystemAllocator allocator;
     Array<int32> values(allocator);
@@ -171,20 +171,25 @@ TEST(ArrayEnsureCapacityGrowsGeometricallyUnlikeExactReserve) {
 
     CHECK(linearAllocator.Stats().totalAllocations == static_cast<uint64>(Count));
 
+    // 기대 용량은 성장 함수로 다시 계산하지 않고 UE 기본 slack에서 손으로 구한 독립값이다: 첫 할당
+    // max(4, 1) = 4, 이후 required + floor(required * 3/8) + 16 — 5 -> 22, 23 -> 47, 48 -> 82,
+    // 83 -> 130. 100개를 넣는 동안 할당은 5번이다.
+    constexpr usize ExpectedCapacities[] = {4, 22, 47, 82, 130};
+    constexpr usize ExpectedAllocations =
+        sizeof(ExpectedCapacities) / sizeof(ExpectedCapacities[0]);
     SystemAllocator geometricAllocator;
-    uint64 expectedAllocations = 0;
+    usize observed[ExpectedAllocations + 1]{};
+    usize observedCount = 0;
     {
         Array<int32> values(geometricAllocator);
-        usize expectedCapacity = 0;
         for (int32 index = 0; index < Count; ++index) {
-            if (values.Size() + 1 > expectedCapacity) {
-                expectedCapacity =
-                    ArrayGrowthCapacity(expectedCapacity, values.Size() + 1, sizeof(int32));
-                ++expectedAllocations;
+            const usize before = values.Capacity();
+            REQUIRE(values.TryEnsureCapacity(values.Size() + 1));
+            if (values.Capacity() != before) {
+                REQUIRE(observedCount <= ExpectedAllocations);
+                observed[observedCount++] = values.Capacity();
             }
 
-            REQUIRE(values.TryEnsureCapacity(values.Size() + 1));
-            CHECK(values.Capacity() == expectedCapacity);
             REQUIRE(values.TryPushBack(index));
         }
 
@@ -193,14 +198,17 @@ TEST(ArrayEnsureCapacityGrowsGeometricallyUnlikeExactReserve) {
         }
     }
 
-    // 4 -> 7 -> 11 -> 17 -> 26 -> 40 -> 61 -> 92 -> 139로 9번이다.
-    CHECK(expectedAllocations == 9);
-    CHECK(geometricAllocator.Stats().totalAllocations == expectedAllocations);
+    CHECK(observedCount == ExpectedAllocations);
+    for (usize step = 0; step < observedCount && step < ExpectedAllocations; ++step) {
+        CHECK(observed[step] == ExpectedCapacities[step]);
+    }
+
+    CHECK(geometricAllocator.Stats().totalAllocations == ExpectedAllocations);
     CHECK(geometricAllocator.Stats().liveAllocations == 0);
 }
 
 // 기준은 절대 원소 수다. 이미 충분하면 할당·이동하지 않고, 모자라면 성장 규칙의 용량(요청이 더
-// 크면 요청 그대로)을 잡는다. 할당 실패와 overflow는 데이터·size·capacity·주소를 보존한다.
+// 크기에 slack을 더해)을 잡는다. 할당 실패와 overflow는 데이터·size·capacity·주소를 보존한다.
 TEST(ArrayEnsureCapacityIsAbsoluteAndPreservesStateOnFailure) {
     SystemAllocator backing;
     test::NFailAllocator allocator(backing);
@@ -236,11 +244,11 @@ TEST(ArrayEnsureCapacityIsAbsoluteAndPreservesStateOnFailure) {
         CHECK(allocator.Attempts() == 0);
         CHECK(values.Data() == data && values.Capacity() == 10 && values.Size() == 3);
 
-        // 10의 1.5배 + 1 = 16, 요청이 더 크면 요청 그대로다.
+        // UE 기본 slack: required + floor(required * 3/8) + 16.
         REQUIRE(values.TryEnsureCapacity(11));
-        CHECK(values.Capacity() == 16);
+        CHECK(values.Capacity() == 31);
         REQUIRE(values.TryEnsureCapacity(40));
-        CHECK(values.Capacity() == 40);
+        CHECK(values.Capacity() == 71);
         CHECK(values.Size() == 3);
         CHECK(values[0] == 1 && values[1] == 2 && values[2] == 3);
     }

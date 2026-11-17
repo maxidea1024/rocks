@@ -28,8 +28,8 @@ Result<void> D3D11Device::UpdateTexture(TextureHandle handle, uint32 mipLevel,
     }
 
     if (mipLevel >= record->mipLevels ||
-        pixels.Size() != static_cast<usize>(MipExtent(record->width, mipLevel)) *
-                             MipExtent(record->height, mipLevel) * BytesPerPixel(record->format)) {
+        pixels.Size() != PixelFormatImageBytes(record->format, MipExtent(record->width, mipLevel),
+                                               MipExtent(record->height, mipLevel))) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -87,8 +87,8 @@ Result<void> D3D11Device::UploadTextureFromStaging(TextureHandle handle, uint32 
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    const uint64 bytes = static_cast<uint64>(MipExtent(record->width, mipLevel)) *
-                         MipExtent(record->height, mipLevel) * BytesPerPixel(record->format);
+    const uint64 bytes = PixelFormatImageBytes(record->format, MipExtent(record->width, mipLevel),
+                                               MipExtent(record->height, mipLevel));
     if (mipLevel >= record->mipLevels || offset > memory.Value().size ||
         bytes > memory.Value().size - offset) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -222,13 +222,15 @@ Result<void> D3D11Device::RecordBufferUpload(ID3D11Buffer* target, uint64 offset
 // ring·staging 메모리다.
 Result<void> D3D11Device::RecordTextureUpload(const TextureRecord& record, uint32 mipLevel,
                                               const uint8* pixels) noexcept {
-    const uint32 rowBytes = MipExtent(record.width, mipLevel) * BytesPerPixel(record.format);
+    const uint32 rowBytes =
+        static_cast<uint32>(PixelFormatRowBytes(record.format, MipExtent(record.width, mipLevel)));
     UploadOp op;
     op.destination = record.texture.Get();
     op.subresource = mipLevel;
     op.source = pixels;
     op.rowPitch = rowBytes;
-    op.depthPitch = rowBytes * MipExtent(record.height, mipLevel);
+    op.depthPitch =
+        rowBytes * PixelFormatBlockRows(record.format, MipExtent(record.height, mipLevel));
     return PushUpload(op);
 }
 
@@ -310,7 +312,7 @@ Result<void> D3D11Device::ReadPixels(TextureHandle handle, Span<uint8> out) noex
     }
 
     const usize size =
-        static_cast<usize>(record->width) * record->height * BytesPerPixel(record->format);
+        static_cast<usize>(PixelFormatImageBytes(record->format, record->width, record->height));
     if (!record->renderTarget || out.Size() != size || recording_) {
         return Result<void>::Failure(recording_ ? ErrorCode::Busy : ErrorCode::InvalidArgument);
     }
@@ -386,7 +388,7 @@ Result<ReadbackRequest> D3D11Device::RequestReadbackLocked(TextureHandle target)
     ReadbackRecord readback;
     readback.width = record->width;
     readback.height = record->height;
-    readback.bytesPerPixel = BytesPerPixel(record->format);
+    readback.bytesPerPixel = GetPixelFormatInfo(record->format).blockBytes;
     D3D11_TEXTURE2D_DESC stagingDesc = {};
     stagingDesc.Width = record->width;
     stagingDesc.Height = record->height;

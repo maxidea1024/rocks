@@ -58,7 +58,7 @@ struct RenderStats {
 //
 // 사용 예:
 //   sample::Renderer renderer;
-//   if (!renderer.Initialize(device, graphics::Format::RGBA8UnormSrgb)) { ... }
+//   if (!renderer.Initialize(device, graphics::PixelFormat::RGBA8UnormSrgb)) { ... }
 //   auto frame = device.BeginFrame(swapChain, view.clear);
 //   if (frame) {
 //       renderer.Draw(*frame.Value(), view, items);
@@ -79,7 +79,7 @@ public:
 
     // 내장 메시와 파이프라인을 만든다. 이미 초기화됐으면 AlreadyExists, 셰이더·자원 생성 실패는 그
     // 오류다 (장치 LastError에 진단 문자열).
-    Result<void> Initialize(graphics::Device& device, graphics::Format colorFormat) noexcept;
+    Result<void> Initialize(graphics::Device& device, graphics::PixelFormat colorFormat) noexcept;
 
     // 장치 자원을 해제한다. 여러 번 호출해도 안전하다.
     void Shutdown() noexcept;

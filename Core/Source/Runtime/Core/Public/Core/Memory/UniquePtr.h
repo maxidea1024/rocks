@@ -15,7 +15,10 @@ struct AllocatorDeleter {
 
     template <typename T>
     void operator()(T* object) noexcept {
-        DestroyAt(object);
+        if constexpr (!IsTriviallyDestructibleV<T>) {
+            DestroyAt(object);
+        }
+
         if (!allocator->Deallocate(allocation)) {
             platform::Fatal("UniquePtr storage deallocation failed");
         }
@@ -87,7 +90,7 @@ public:
         if (!storage) {
             return Result<UniquePtr>::Failure(storage.Error());
         }
-        T* object = ConstructAt<T>(storage.Value(), Forward<Args>(args)...);
+        T* object = InitializeAt<T>(storage.Value(), Forward<Args>(args)...);
         return Result<UniquePtr>::Success(
             UniquePtr(object, AllocatorDeleter{storage.Value(), &allocator}, AdoptTag{}));
     }
@@ -112,8 +115,11 @@ public:
             // 기존 객체 소멸이 other에 접근해도 안전하도록 소유권을 먼저 옮겨 둔다.
             UniquePtr previous(Move(*this));
             object_ = other.object_;
-            DestroyAt(&deleter_);
-            ConstructAt<Deleter>(&deleter_, Move(other.deleter_));
+            if constexpr (!IsTriviallyDestructibleV<Deleter>) {
+                DestroyAt(&deleter_);
+            }
+
+            InitializeAt<Deleter>(&deleter_, Move(other.deleter_));
             other.object_ = nullptr;
         }
         return *this;

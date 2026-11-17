@@ -94,7 +94,7 @@ Result<void*> TryStartGcm(const AeadKey& key, Span<const uint8> nonce) noexcept 
         return slot;
     }
 
-    auto* stream = ConstructAt<detail::AesGcmStream>(slot.Value());
+    auto* stream = InitializeAt<detail::AesGcmStream>(slot.Value());
     detail::AesGcmStreamStart(detail::GetAesKernels(),
                               *static_cast<const detail::AesSchedule*>(schedule), nonce, *stream);
     return slot;
@@ -253,7 +253,7 @@ Result<hazmat::AesCtr> hazmat::AesCtr::TryCreate(const AesKey& key,
 
     detail::AesBlock counter;
     platform::MemoryCopy(counter.bytes, initialCounterBlock.Data(), AesBlockBytes);
-    auto* stream = ConstructAt<detail::AesCtrStream>(slot.Value());
+    auto* stream = InitializeAt<detail::AesCtrStream>(slot.Value());
     detail::AesCtrStreamStart(detail::GetAesKernels(), ScheduleOf(key), counter, mapped, *stream);
     AesCtr ctr;
     ctr.state_ = slot.Value();
