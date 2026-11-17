@@ -1,6 +1,6 @@
 # Rocks GC 대규모 처리 보강 설계
 
-기준일: 2026-11-16, 개정 1(초안).
+기준일: 2026-11-16, 개정 1(초안). 개정 2(2026-11-17): 클러스터·영구 영역 상세 설계(13절), 열린 결정 4 확정, 열린 결정 6 해소, UE 클러스터 사실 정정.
 
 **이 문서의 작업은 반드시 해야 하는 작업이다.** 현재 `ObjectRegistry` GC는 AAA급 규모(살아 있는 객체 100만 개 이상)의 게임에서 쓸 수 없는 상태다(2026-11-16 사용자 판단). 이 문서의 GC-S 단계는 선택 최적화가 아니며 성능 미달을 "측정 결과로 관리"하는 대상도 아니다. 단계를 모두 마치고 4절의 성능 gate를 통과해야 GC를 대규모 콘텐츠에 쓸 수 있다고 본다.
 
@@ -33,6 +33,8 @@ UE 소스는 설계 사실의 대조에만 쓰고 코드를 옮기지 않는다.
 | 수집 일정 | STW 병렬 전체 수집을 정식 경로로 둔다. 증분은 선택지로 유지한다. 파괴·회수는 시간 예산으로 여러 프레임에 나눈다 | UE 기본값, 5절 |
 | 할당자 | O(1) 소유권 판정, 스레드별 캐시, 크기별 slab을 갖춘 할당자를 Core Memory 공용으로 둔다. ObjectRuntime 전용 구현은 두지 않는다 | 3.2절 8번 |
 | MetaCompiler 활용 | 생성 코드로 marker 전용 정적 특수화, 잎 타입 표시, 참조 위치 상수, 정적 schema를 낸다(M1–M7, 제안) | 6절 끝 "메타 컴파일러로 얻는 추가 여지" |
+| 클러스터 | 패키지 정책 Registry의 패키지, World의 Level을 엔진이 자동으로 클러스터로 둔다. 모든 강한 간선 쓰기에서 장부를 정확히 갱신하므로 UE와 달리 런타임 변경으로 깨지지 않고 해체가 필요 없다 | 13절 |
+| 영구 영역 | 특수 클러스터로 둔다. 영구 객체는 영구 객체만 가리킬 수 있다(결정 4 확정, 2026-11-17) | 13.7절 |
 | 세대별 GC | 이 문서 범위 밖이다. 측정 전에는 보류한다. 클러스터·영구 영역과는 다른 기법이다 | UE도 쓰지 않는다 |
 
 ## 2. 원칙: 규모는 엔진의 책임
@@ -130,13 +132,14 @@ UE 소스는 설계 사실의 대조에만 쓰고 코드를 옮기지 않는다.
 | 배치·prefetch | `TReferenceBatcher` 3단 큐(GC 1478–1481, 1758–1837), 객체 반복자 2·6·16칸 앞 prefetch(FRC 85–119) | GC-S1 |
 | 병렬 | 최대 16 worker(**`Private/UObject/ReachabilityAnalysisState.h` 27**), 512칸 `FWorkBlock`(**FRC 127–136**), CAS work-stealing(GC 2264–2435) | GC-S4 |
 | 루트 | `GRoots`와 dirty 큐로 증분 관리(GC 630–697, 4382–4419) | GC-S3 루트 목록 |
-| 영구 객체 | DisregardForGC(UOA 1215–1217), 클러스터는 노드 하나(GC 4295–4354, 3121–3163) | GC-S7 |
+| 영구 객체 | DisregardForGC(UOA 1215–1217). cooked 빌드 전용, 시작 때 열린 창에서 만든 객체(`Launch/Private/LaunchEngineLoop.cpp` 3909–3917) | GC-S7, 13.7절 |
+| 클러스터 | 루트 하나 + 멤버, 멤버 내부 간선은 따라가지 않음(GC 4295–4380, 3130–3158). 생성 때의 스냅샷이고 런타임 쓰기 추적은 없다(검증 경고 `GarbageCollectionVerification.cpp` 267, 오류 누적 시 386에서 Fatal). **에셋·액터 클러스터는 기본 꺼짐**(`gc.AssetClustreringEnabled=False`·`gc.ActorClusteringEnabled=False`, `Engine/Config/BaseEngine.ini` 1752–1755) | GC-S7, 13절 |
 | 증분 표식 | `gc.AllowIncrementalReachability=0`, 실험 기능, 켜면 5ms(**GC 302–316**). 증분 반복은 work-stealing을 쓰지 않음(FRC 1175) | GC-S5에서 STW 병렬을 정식 경로로 |
 | 미도달 수집 | item 배열 전체를 `ParallelFor`로 선형 스캔(GC 5378–5410) | GC-S3 bitmap |
 | 파괴 | BeginDestroy·FinishDestroy를 프레임에 나눔, `gc.IncrementalGCTimePerFrame` 2ms(**`Runtime/Engine/Private/UnrealEngine.cpp` 1826**) | GC-S5 |
 | 실행 주기 | `gc.TimeBetweenPurgingPendingKillObjects=61.1`(**`Engine/Config/BaseEngine.ini` 1749**), 레벨 전환 시점 | GC-S5 일정 정책 |
 
-UE가 1M을 감당하는 이유는 세 가지가 함께 작동하기 때문이다. 표식 비용을 낮추는 기법, 표식 대상 수를 줄이는 기법, 자주 돌리지 않는 운영 정책이다. 세대별 GC는 쓰지 않는다.
+UE가 1M을 감당하는 이유는 세 가지가 함께 작동하기 때문이다. 표식 비용을 낮추는 기법, 표식 대상 수를 줄이는 기법, 자주 돌리지 않는 운영 정책이다. 세대별 GC는 쓰지 않는다. 대상 수 줄이기 가운데 기본으로 켜진 것은 DisregardForGC이고, 에셋·액터 클러스터는 기본 설정에서 꺼져 있다(개정 2 정정). 따라서 UE 기본 경로의 1M 처리는 주로 표식 비용·병렬·운영 정책에서 나온다.
 
 ## 6. 단계
 
@@ -207,8 +210,8 @@ UE가 1M을 감당하는 이유는 세 가지가 함께 작동하기 때문이�
 
 ### GC-S7 · 표식 대상 줄이기와 큰 Trace 분할
 
-- **영구 영역.** 시작 때 만들어 끝까지 사는 객체를 표식 대상에서 뺀다(UE DisregardForGC에 해당). 영구 객체가 일반 객체를 가리킬 때의 규칙(영구 객체의 간선을 루트로 취급할지)을 정한다.
-- **클러스터.** 함께 로드되고 함께 죽는 객체 묶음을 노드 하나로 표식한다. 패키지 정책 Registry(Discard로만 죽는 묶음, [ObjectFoundations](ObjectFoundations.ko.md) 1.7절)가 출발점이다. 클러스터는 엔진이 로드 때 자동으로 만든다. 사용자가 묶는 장치로 두지 않는다.
+- **영구 영역.** 시작 때 만들어 끝까지 사는 객체를 표식 대상에서 뺀다(UE DisregardForGC에 해당). 영구 객체는 영구 객체만 가리킬 수 있다(결정 4 확정). 상세는 13.7절이다.
+- **클러스터.** 함께 살고 함께 죽는 객체 묶음을 노드 하나로 표식한다. 패키지 정책 Registry의 패키지([ObjectFoundations](ObjectFoundations.ko.md) 1.7절)와 World의 Level이 클러스터다. 엔진이 생성 Commit 때 자동으로 가입시킨다. 사용자가 묶는 장치로 두지 않는다. 상세는 13절이다.
 - **schema 기반 Trace.** MetaCompiler가 참조 멤버의 offset·종류 표를 생성하고 marker가 그 표를 해석한다. 큰 `ObjectRefArray`·`ObjectRefMap`은 블록 단위 작업으로 쪼갠다(계획 §6.2 2번의 "큰 참조 배열 bounded batch 분할"). 수동 Trace는 기존 함수 경로로 남긴다.
 - 완료 기준: 큰 배열 하나(예: 1M 참조)가 Step 예산을 넘기지 않는다. 영구·클러스터 객체가 표식 비용에서 빠진다.
 
@@ -223,7 +226,7 @@ UE는 리플렉션으로 만든 schema를 실행 중에 `switch`로 해석한다
 | M3 (GC-S1·S3) | **참조 위치 상수.** 생성기가 강한 참조 필드가 놓인 byte 범위와 컨테이너 버퍼 포인터의 offset을 상수로 낸다. prefetch가 객체 전체가 아니라 필요한 cache line과 컨테이너 버퍼를 정확히 가져온다 | 미스 사슬 단축. 큰 객체일수록 크다 |
 | M4 (GC-S7) | **정적 schema.** offset·종류 표를 constexpr로 생성한다. M1의 특수화 코드와 같은 원천에서 만든다. 큰 `ObjectRefArray`·`ObjectRefMap`의 블록 분할 지점과 Step 예산 안에서 Trace를 끊었다 이어 가는 데 쓴다 | 거대 Trace 분할의 기반 |
 | M5 (GC-S4) | **병렬 안전의 정적 판정.** 생성 타입은 이미 `parallelTraceSafe`를 opt-in한다(338행). 수동 Trace만 소유 스레드 큐로 보낸다 | 이미 있는 정보의 활용 |
-| M6 (GC-S7) | **소유 관계에서 자동 클러스터.** "배타적으로 소유한 하위 객체"를 리플렉션 메타데이터로 표시하면 클러스터 경계를 빌드·로드 때 정할 수 있다. 지금 리플렉션에는 이 표시가 없으므로 새 메타데이터가 필요하다 | 클러스터를 사용자가 아닌 엔진이 만든다. **결정 필요**(표시 방식) |
+| M6 (GC-S7) | **소유 관계에서 자동 클러스터.** "배타적으로 소유한 하위 객체"를 리플렉션 메타데이터로 표시하면 클러스터 경계를 빌드·로드 때 정할 수 있다. 지금 리플렉션에는 이 표시가 없으므로 새 메타데이터가 필요하다 | **개정 2에서 불필요.** 클러스터 경계를 패키지 소속과 World 소유 사슬이 이미 정하므로 새 메타데이터가 없어도 엔진이 클러스터를 만든다(13.3절) |
 | M7 (GC-S7) | **정적 대상 타입에 따른 장벽·표식 생략.** 필드의 대상 타입이 영구 영역 전용 타입으로 정적으로 정해지면 장벽 shade와 표식 enqueue를 생략하는 경로를 생성한다 | Registry 단위 분리가 이미 있으므로 효과가 제한적일 수 있다. 측정 뒤 결정 |
 
 한계는 다음과 같다.
@@ -301,9 +304,9 @@ GC slice는 `processing_` 아래에서 실행되며, 그동안 생성·간선 �
 | 1 | 완료 시한 | 화면 마일스톤 뒤 대규모 콘텐츠 작업 전 / 특정 gate 전 / 사용자가 따로 정함. **결정 필요** |
 | 2 | 표식 단위 | epoch 바이트(1M → 1 MiB, 단순) 또는 bit(128 KiB, `fetch_or`). GC-S0 측정으로 정한다 |
 | 3 | STW 전체 수집 주기 | 시간 간격·메모리 임계·레벨 전환 조합. 기본값은 GC-S5에서 정한다 |
-| 4 | 영구 객체가 일반 객체를 가리킬 때의 규칙 | 영구 객체 간선을 루트로 방문 / 금지(검증 오류). GC-S7 착수 때 **결정 필요** |
+| 4 | 영구 객체가 일반 객체를 가리킬 때의 규칙 | **확정(2026-11-17): 금지.** 위반 쓰기·Commit은 `Unsupported`다. 일반 객체를 붙잡아야 하면 RootRef를 쓴다(13.7절) |
 | 5 | Slot 정보 64B 목표의 달성 방법 | cold 필드 분리·이름 정보 외부화 등. GC-S3에서 정한다 |
-| 6 | 배타 소유 하위 객체의 표시 방식(M6) | 리플렉션 필드 지정자 / 클래스 수준 선언 / 표시 없이 패키지 단위만. GC-S7 착수 때 **결정 필요** |
+| 6 | 배타 소유 하위 객체의 표시 방식(M6) | **해소(개정 2).** 패키지·Level 소속으로 경계를 정하므로 표시가 필요 없다(13.3절) |
 | 7 | slice 중 루트 해제의 루트 목록 반영 시점 | 즉시 반영 / 다음 Begin까지 지연. GC-S3에서 정한다 |
 
 ## 12. 다른 문서 정정
@@ -312,3 +315,116 @@ GC slice는 `processing_` 아래에서 실행되며, 그동안 생성·간선 �
 - [Core·Object 입력 상세 계획](CoreObjectInputDetailedPlan.ko.md)의 C28은 "선택 R3"으로 남아 있다. 이 표는 `CoreObjectInputTasks.ko.csv`·`CoreObjectInputData.json`과 짝이므로 이번에는 고치지 않는다. GC-S6 착수 때 세 곳을 함께 필수로 바꾼다.
 - [GC 안내](../Implementation/GarbageCollectionGuide.ko.md) 7절과 8절은 GC-S 단계를 마칠 때마다 현재 동작과 수치로 고친다. 7.2절의 객체 수 줄이기 권고는 GC-S 완료 뒤 사용자 선택 최적화로 낮춘다.
 - [증분 GC 구현 계약](../Implementation/IncrementalGarbageCollection.ko.md)은 GC-S1(잠금), GC-S2(예산), GC-S4(장벽 큐) 때 계약을 고친다.
+
+## 13. 클러스터와 영구 영역 (GC-S7 상세, 개정 2)
+
+상태: **설계**. 실험 브랜치(experiment/gc-scale) Phase 4에서 구현·측정한다([실험 결과](../Implementation/GcScaleExperiment.ko.md) 12절).
+
+### 13.1 출발점과 사실 정정
+
+- Rocks의 타입 정보는 Registry 객체가 아니다. `TypeRegistry`가 따로 소유하고 GC 대상이 아니다. 그래서 UE의 DisregardForGC에 들어가는 네이티브 클래스·CDO에 해당하는 몫이 Rocks에는 원래 없다. 지금 영구 영역에 들어갈 객체는 Engine Registry를 초기화할 때 만드는 객체(서브시스템)와 앞으로 생길 시작 콘텐츠다. 효과는 그 수에 비례하며 측정으로 기록한다.
+- UE 5.8의 에셋·액터 클러스터는 기본 설정에서 꺼져 있고 cooked 빌드에서만 만들어진다(5절 표). UE 클러스터는 생성 때의 스냅샷이다. 실행 중 멤버가 클러스터 밖의 새 객체를 가리키게 되어도 장부를 고치지 않고, 검증 모드에서만 경고한다. 멤버나 참조 대상이 Garbage가 되면 클러스터를 해체한다.
+- Rocks는 UE와 조건이 다르다. 세 가지를 쓸 수 있다.
+  - 모든 강한 간선 쓰기가 Registry API(`SetEdge`·컨테이너 편집·Commit)를 지난다. 관찰자([ObjectFoundations](ObjectFoundations.ko.md) 3절)가 이미 이 지점에서 패키지 사이 간선을 센다.
+  - 패키지 정책 Registry에서는 소속 객체가 Discard로만 죽고, 패키지가 살아 있으면 소속 객체가 모두 산다(1.7절).
+  - World에서는 Level → Actor → Component 소유 사슬이 World API로만 바뀐다(`World.h` 소유·수명 규약).
+- 그래서 Rocks 클러스터는 UE를 옮기지 않는다. 간선 쓰기마다 장부를 정확히 고쳐 런타임 변경에도 깨지지 않고, 해체 없이 개별 이탈을 처리하는 형태로 설계한다.
+
+### 13.2 의미
+
+- 클러스터는 루트 객체 하나와 소속 객체 집합이다. 루트도 소속이다.
+- 소속은 **루트 → 소속 객체의 암묵 강한 간선**으로 정의한다. 패키지 고리 간선(1.7절)과 같은 뜻이다. 정지형 oracle `Collect`도 이 간선을 따라간다. 그러므로 클러스터 표식의 결과 집합은 oracle과 정확히 같아야 한다(보수적 잔존을 허용하지 않는다).
+- 표식은 소속 객체 사이의 간선을 따라가지 않는다. 루트가 살면 소속 전체가 살기 때문이다. 클러스터 하나의 표식 비용은 O(1 + 경계 소속 객체의 간선 수 + 이탈 대상 수)다.
+- 가입은 생성 Commit 때만 한다. 이탈은 되돌릴 수 없다(재가입 없음). 해체는 루트의 RequestDestroy·Discard와 Registry 종료에서만 일어난다.
+
+### 13.3 누가 클러스터를 만드나
+
+엔진이 자동으로 만든다. 사용자가 객체를 묶는 공개 장치는 두지 않는다.
+
+| Registry | 클러스터 | 루트 | 소속 | 가입 | 이탈 |
+|---|---|---|---|---|---|
+| 패키지 정책(에셋) | 패키지 하나 | 패키지 객체 | outermost가 그 패키지인 객체 | 생성 Commit(자동) | Discard(부분 트리) |
+| World | Level 하나 | Level | World API(`SpawnActor`·`AddComponent`)로 만든 Actor·Component | 그 생성 Commit(World가 지정) | `DestroyActor`·`DestroyComponent`의 RequestDestroy |
+| 영구 영역을 연 Registry | 영구 영역(특수 클러스터) | 없음(언제나 생존) | 영구 창이 열린 동안 Commit한 객체 | Commit | 없음(Shutdown만) |
+
+- 소속 조건은 `RuntimeTypeOps::completeFieldLayout`인 타입이다. 모든 강한 간선이 metadata에 있고 Registry API로 쓰인다는 선언이다. 이 조건을 못 맞추는 객체(수동 Trace, 리플렉션 base를 둔 native 파생)는 클러스터 밖 일반 객체로 남는다. 정확성은 그대로이고 최적화만 받지 못한다. 패키지 정책 Registry는 이미 이 조건을 강제한다.
+- World는 Level을 만드는 트랜잭션에서 그 Level을 클러스터 루트로 지정하고, Spawn·AddComponent 트랜잭션에서 가입할 클러스터를 지정한다. 이 API는 World·AssetManager 같은 엔진 계층용이다(Discard와 같은 위치).
+- M6(배타 소유 표시 메타데이터)과 열린 결정 6은 필요 없어졌다.
+
+### 13.4 장부
+
+클러스터 기능을 켠 Registry만 객체별 칸을 slot index 밀집 배열로 둔다. chunk와 함께 할당하므로 잠금 안에서 할당하지 않는다.
+
+| 칸 | 크기 | 뜻 |
+|---|---|---|
+| `clusterState` | u32 | 소속 클러스터, 또는 "클러스터 C에서 이탈한 대상(detached)", 또는 없음 |
+| `inCount` | u32 | 소속이면 같은 클러스터 소속 객체에서 오는 간선 수. detached면 C 소속 객체에서 오는 간선 수 |
+| `outCount` | u32 | 소속 객체의 간선 가운데 대상이 같은 클러스터의 소속도 detached도 아닌 간선 수 |
+| 목록 고리 | u32 ×2 | 소속 목록 또는 detached 목록 |
+| 경계 고리 | u32 ×2 | `outCount > 0`인 소속 객체 목록 |
+
+객체당 28B다. 4절의 Slot 64B 목표와는 따로 계산하고 측정 뒤 줄일 방안을 정한다. 클러스터 레코드는 루트 slot, 소속 수, 경계 목록 머리, detached 목록 머리, 표식 epoch를 갖는다.
+
+**간선 분류.** 소유자 X가 클러스터 C의 소속이고 대상이 t일 때 다음과 같이 센다. 소유자가 클러스터 밖이면 장부가 없다.
+
+- t가 C의 소속이면 `inCount[t]`
+- t가 C에서 이탈한 detached면 `inCount[t]`
+- 그 밖이면 `outCount[X]`. 0 → 1이면 X를 경계 목록에 넣고, 1 → 0이면 뺀다.
+
+outer 간선(생성 때 고정)도 같은 규칙으로 센다. 패키지 고리 간선과 소속 간선 자체는 세지 않는다.
+
+**갱신 지점.** 관찰자의 기록 지점과 같다. Commit(가입과 staged 간선 일괄), `SetEdge`·`ObjectRefArray`·`ObjectRefMap`·`StructRefArray` 편집(제거와 추가 각각), Discard·RequestDestroy(이탈), 루트의 Discard·RequestDestroy(해체), Shutdown이다.
+
+- **이탈**(객체 B, 클러스터 C): 먼저 B의 Trace와 outer로 B가 C 장부에 남긴 몫을 뺀다(대상이 C 소속이거나 C의 detached면 `inCount[t]` 감소, 0이 된 detached는 목록에서 뺌, 그 밖이면 `outCount[B]`를 비우고 경계에서 뺌). 그다음 `inCount[B] > 0`이면 B를 C의 detached로 옮기고, 아니면 클러스터 없음으로 둔다. 비용은 O(B의 간선)이다. 부분 트리 Discard는 객체마다 차례로 이탈한다.
+- **가입**: 새 객체만 가입한다. 공개 전 객체는 같은 트랜잭션의 staged 간선만 받으므로(Alive 소유자의 편집은 Reserved 대상을 거부한다 — `CheckTargetLocked`), 가입 때문에 분류가 바뀌는 기존 간선이 없다. 트랜잭션의 새 객체 소속을 모두 정한 뒤 staged 간선을 센다.
+- **해체**(C): 소속과 detached의 `clusterState`를 모두 비운다. 비용은 O(소속 + detached)다.
+- **분류가 어긋나지 않는 근거**: 대상의 상태 전이는 네 가지뿐이다. 생성 → 소속, 소속 → detached(계수를 그대로 옮김), detached → 없음(계수가 0일 때만), 소속 → 없음(해체, 그 클러스터 장부는 버림). 어느 전이도 다른 클러스터 장부의 분류를 바꾸지 않는다. 다른 클러스터 D의 장부에서 C의 소속은 언제나 "그 밖"이기 때문이다.
+
+### 13.5 표식과 sweep
+
+- 객체 x에 닿으면: x가 클러스터 C의 소속이면 C를 atomic으로 표식하고 이긴 쪽이 C를 큐에 넣는다. detached이거나 클러스터 밖이면 지금처럼 개별 표식한다.
+- 클러스터 C 처리: 경계 목록의 소속 객체마다 Trace와 outer를 돌리되 C 소속 대상은 `clusterState` 비교로 건너뛴다. detached 목록의 객체는 개별 표식한다.
+- 루트 목록에 소속 객체가 있으면 그 클러스터를 표식한다. 영구 영역은 Begin에서 표식된 상태로 시작하고 큐에 넣지 않는다(경계·detached가 없다).
+- sweep 후보는 `live & ~mark & ~clustered`다(`clustered`는 소속 bitmap). 표식되지 않은 클러스터는 sweep 시작 전에 해체해 소속을 white 후보로 내보낸다. 패키지 RootRef를 Discard 없이 놓은 버그 경로이며 `retiredWithoutDiscard`는 지금처럼 센다.
+- cutoff 판정(`IsCutoff`·`CheckLive`·`ValidateStagedEdge`)은 소속 객체를 클러스터 표식으로 판정한다.
+- 병렬: 클러스터 하나는 worker 하나가 처리한다. 경계가 매우 큰 클러스터의 블록 분할은 측정 뒤 정한다.
+
+### 13.6 증분 장벽
+
+- 삽입 장벽(`ShadeLocked`)은 대상이 소속이면 그 클러스터를 shade한다.
+- Marking 중 C가 이미 표식된 뒤 경계가 늘거나 detached 계수가 늘면, 새 간선의 대상은 삽입 장벽이 이미 shade했으므로 추가 조치가 없다.
+- Marking 중 이탈: C가 표식됐으면 B를 shade한다(보수적, 다음 cycle에 회수).
+- Marking 중 해체: C가 표식됐으면 소속을 모두 black으로 찍고 큐에는 넣지 않는다. 밖으로 나가는 간선은 C를 처리할 때 이미 따라갔고, 안쪽 간선의 대상은 모두 같이 black이 된다.
+- Sweeping 중 이탈·해체: 소속의 mark를 그 클러스터의 표식 상태로 맞춘다.
+
+### 13.7 영구 영역
+
+- 영구 영역은 특수 클러스터다. 언제나 표식된 상태이고 해체는 Shutdown 때만 한다.
+- 들어가는 법: `RegistryOptions`의 영구 창 칸을 켠 Registry는 `ClosePermanentRegion(access)` 전까지 Commit되는 객체가 모두 영구다. 닫은 뒤에는 다시 열 수 없다. Engine은 Engine Registry 초기화(서브시스템 생성) 뒤 닫는다. World·에셋 Registry는 열지 않는다.
+- 규칙(결정 4 확정, 2026-11-17): 영구 객체의 강한 간선 대상(outer 포함)은 영구 객체뿐이다. 위반하는 쓰기·Commit은 Release에서도 `Unsupported`로 거부한다(비교 하나). 일반 객체를 붙잡아야 하면 RootRef를 쥔다. 영구 객체의 RequestDestroy·Discard도 `Unsupported`다.
+- 표식과 sweep에서 비용이 0이다. 영구 객체를 가리키는 간선은 언제나 표식된 클러스터에 닿아 끝난다.
+
+### 13.8 검증
+
+- Debug 장부 검증(옵션, 비용 큼): Begin마다 모든 클러스터 장부를 처음부터 다시 계산해 비교한다. soak에서 켠다.
+- oracle(`Collect`, 소속 간선 포함)과 결과 집합이 같아야 한다. 무작위 그래프와 soak 모두에서 확인한다.
+- 음성 대조: 이탈 때 `inCount` 이동을 빼거나, 이탈 shade를 빼거나, `outCount` 갱신 하나를 빼면 검출되어야 한다.
+- soak 시나리오: 패키지 생성·부분 Discard·전체 Discard, 패키지 사이 간선 편집, Level·Actor·Component 생성·파괴, 같은 Level 안 Actor 사이 참조, 증분 cycle 도중의 모든 변경.
+
+### 13.9 비용과 한계
+
+- 간선 쓰기마다 `gate_` 아래에서 밀집 배열 갱신 몇 개가 늘어난다(무할당). 벤치로 잰다.
+- 클러스터 기능을 켠 Registry에서 객체당 28B가 늘어난다.
+- 경계 소속 비율이 높으면 효과가 줄어든다. 경계 비율별 벤치로 잰다.
+- 소속 조건을 못 맞추는 타입은 혜택이 없다. World의 게임 Actor가 native 파생이면 클러스터 밖이다.
+- 큰 클러스터 하나의 경계 처리가 병렬 작업 하나에 묶인다.
+
+### 13.10 UE 5.8과의 차이
+
+| 항목 | UE 5.8 | Rocks |
+|---|---|---|
+| 기본 사용 | 에셋·액터 클러스터 꺼짐, cooked 전용 | 패키지 정책 Registry와 World에서 항상 |
+| 경계 | 생성 때의 스냅샷과 MutableObjects. 런타임 변경은 검증 경고뿐 | 모든 강한 간선 쓰기에서 정확히 갱신 |
+| 멤버 이탈 | 루트나 참조 대상이 Garbage가 되면 해체 | 개별 이탈 O(그 객체의 간선), 해체 불필요 |
+| 생성 시점 | 로딩 PostLoad 뒤, Level Finalize | 생성 Commit |
+| 영구 객체 → 일반 객체 | 따라가지 않고 검증 경고 | 쓰기 때 거부 |

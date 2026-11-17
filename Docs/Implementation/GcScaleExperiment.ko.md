@@ -388,3 +388,31 @@ GC-S4 완료 기준 "STW 병렬 전체 표식이 4절 목표를 만족한다"는
 - **GC-S7.** 영구 영역·클러스터로 표식 대상 수를 줄이고 schema Trace(M4)로 큰 배열을 나눈다. 시작 때부터 끝까지 사는 객체가 많은 게임에서는 표식 시간이 대상 수에 비례해 준다.
 - **M1.** 배치 visitor가 이미 간선당 간접 호출을 없앴으므로 추가 이득은 작을 것으로 본다(객체당 간접 호출 1회만 남는다).
 - **Slot 64B.** 6.4절의 cold 분리다. 표식 시간에는 영향이 작고 메모리(1M에서 약 130MB)를 줄인다.
+
+## 12. Phase 4 계획 (2026-11-17)
+
+설계 [13절](../Design/GarbageCollectionScale.ko.md)의 클러스터·영구 영역과, 10절에서 남은 gate를 함께 다룬다. 순서는 아래와 같고 단계마다 따로 커밋한다.
+
+| 단계 | 내용 | 완료 기준 |
+|---|---|---|
+| P4a | 병렬 증분 slice의 남은 회색 블록을 펴지 않고 넘김(`gcGrayBlocks_`), slice 시간 내역 계측 | 병렬 Step p99 ≤ 2ms(1M·간선 4, ×8). 못 미치면 원인과 남은 몫을 기록 |
+| P4b | 클러스터 장부·표식·sweep·cutoff·장벽, oracle의 소속 간선, Debug 장부 검증 | 기존 GC 시험 전부와 oracle 대조 통과 |
+| P4c | 패키지 정책 Registry의 자동 패키지 클러스터 | 패키지 생성·부분 Discard·전체 Discard 시험, `retiredWithoutDiscard` 경로 |
+| P4d | 영구 영역(창 열기·닫기, 영구 → 일반 간선 거부, 파괴 거부), Engine Registry 초기화 뒤 닫기 | 거부 경로 시험, Engine 시험 통과 |
+| P4e | World의 Level 클러스터(Level 생성 때 루트 지정, Spawn·AddComponent 가입, 파괴 때 이탈) | EngineTests World 시험 통과 |
+| P4f | M3 참조 위치 표 | 단일·병렬 표식 시간, 표와 Trace의 Debug 대조 |
+| P4g | 측정·soak·음성 대조, 이 문서의 결과 절 | 아래 측정 항목 |
+
+**벤치 시나리오 추가.**
+
+- 패키지형: 패키지 정책 Registry, 1M 객체 = 패키지 10K × 100. 패키지 안 간선 평균 4. 패키지 사이 간선 비율 1%·10%·30%. 클러스터를 끈 같은 그래프와 비교한다.
+- World형: Level 10개 × Actor 30K × (Actor 1 + Component 2), 같은 Level 안 참조, Level 밖 일반 객체 200K 참조 5%, 일반 객체 churn.
+- 영구 영역: 영구 객체 100K + 일반 1M에서 영구 영역 있음·없음 비교.
+- 간선 쓰기 비용: 클러스터 장부 갱신이 있는 `SetEdge`·배열 편집 처리량을 장부 없는 Registry와 비교한다.
+- 기존 1M 시나리오는 P3와 P4를 같은 실행 안에서 번갈아 잰다.
+
+**soak 추가.** 패키지 생성·부분 Discard·전체 Discard, 패키지 사이 간선 편집, Level·Actor·Component 생성·파괴, 같은 Level 안 Actor 사이 참조를 증분 cycle 도중에 섞는다. Begin마다 Debug 장부 검증을 켜고, oracle 대조를 주기적으로 한다.
+
+**음성 대조 추가.** 이탈 때 `inCount` 이동 생략, Marking 중 이탈 shade 생략, `outCount` 갱신 하나 생략, M3 표에서 참조 하나 생략. 각각 시험이나 soak가 잡아야 한다.
+
+**검증.** 커밋마다 Debug Foundation·EngineTests의 바뀐 범위, format, policy. Asan은 돌리지 않는다(2026-11-17 사용자 결정).
