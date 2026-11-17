@@ -1,6 +1,6 @@
 # 픽셀 형식(PixelFormat) 설계
 
-기준일: 2026-11-17, 개정 1(초안). UE 5.8이 정의하는 픽셀 형식 전체를 Rocks에 들이기 위한 조사와 구현 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-17, 개정 2(초안). UE 5.8이 정의하는 픽셀 형식 전체를 Rocks에 들이기 위한 조사와 구현 스펙이다. 범위는 다음과 같다.
 - 형식 목록과 고정 번호표, UE 대응표, 제외 형식과 사유
 - 형식 정보 표(`PixelFormatInfo`)와 형식 능력 플래그(`PixelFormatCaps`)
 - backend 대응 표(D3D12·D3D11·Vulkan·OpenGL ES·Metal)와 장치 능력 질의(GX1)의 연결
@@ -44,9 +44,9 @@
 | 정보 표 | GraphicsTypes에 장치 없는 정보 표를 둔다. 블록 크기·블록 바이트·채널·성분 타입·압축 계열·깊이/스텐실 비트·plane·sRGB 짝 | 6절. UE `PF.cpp:31–150` |
 | 능력 | 장치마다 형식별 능력 플래그를 시작 때 한 번 채운다(GX1). D3D12·Vulkan은 API 질의, OpenGL ES는 사양 표 + 확장 조건 정적 표, Metal은 GPU family 정적 표 | 7·8절 |
 | 대체 금지 | 장치가 형식을 지원하지 않을 때 다른 형식으로 몰래 바꾸지 않는다. 생성은 `UnsupportedCapability`로 실패한다. 대체 형식 선택은 쿠킹 프로필이나 호출자가 능력 질의 결과로 한다 | 8.3절. UE의 대체 사슬(`VK:768`·`VK:781`·`GL:1039–1044`)은 쿠킹 바이트 계약(RenderBase 6.5절)과 맞지 않는다 |
-| sRGB 표현 | **결정 필요(PX1)**. 권장은 (가) sRGB 변형을 별도 형식으로 두기 | 9절 |
+| sRGB 표현 | sRGB 변형을 별도 형식으로 둔다(결정 PX1 (가), 2026-11-17) | 9절 |
 | 깊이·스텐실 | UE의 "플랫폼이 고르는 깊이 형식" 대신 명시 형식 5개(`D16Unorm`·`D24Unorm`·`D32Float`·`D24UnormS8Uint`·`D32FloatS8Uint`)를 둔다. 스텐실 읽기는 형식이 아니라 view의 plane 선택이다 | 10절 |
-| 비디오 형식 | `NV12`·`P010`을 번호표와 정보 표에 넣고(plane 2개) backend 생성은 미디어 단계까지 **계약**(`UnsupportedCapability`)으로 둔다 | 11절 |
+| 비디오 형식 | `NV12`·`P010`을 번호표와 정보 표에 넣고(plane 2개) D3D12 생성까지 지금 구현한다(결정 PX3, 2026-11-17). 다른 backend는 그 backend 대응 때 한다 | 11절 |
 | 저장 값 | 번호를 이번에 다시 매긴다. 기존 값 0–2가 저장된 쿠킹 데이터·fixture는 없다 | 12절 |
 | 문서 위치 | RenderBase(974줄)에 넣지 않고 별도 문서로 둔다. RenderBase GX1·GX2·6.5절과 AssetSystem A0-G가 이 문서를 가리킨다 | 2절 |
 
@@ -761,7 +761,7 @@ Rocks MetalGraphics는 SH5에서 구현한다. 그때 UE 표(MTL:798–1046)를 
 
 ## 9. sRGB 표현(결정 PX1)
 
-사용자에게 올리는 결정이다.
+**결정됨(2026-11-17): (가).** 아래는 결정 때 비교한 내용이다.
 
 **(가) sRGB 변형을 별도 형식으로 둔다(지금 방식).** 형식 하나가 texel 해석을 모두 정한다. `RGBA8Unorm`과 `RGBA8UnormSrgb`는 저장 바이트가 같고 정보 표의 `srgbPair`로 서로를 가리킨다.
 
@@ -807,9 +807,9 @@ Rocks MetalGraphics는 SH5에서 구현한다. 그때 UE 표(MTL:798–1046)를 
 
 - `NV12`(8비트)·`P010`(10비트, 16비트 저장 상위 10비트)은 4:2:0 2-plane 형식이다. plane 0은 휘도(`R8Unorm`·`R16Unorm`, 원래 크기), plane 1은 색차 CbCr(`RG8Unorm`·`RG16Unorm`, 폭·높이 ½)이다(UE `PF.cpp:110–111, 137–138`, `DXGI:238–251`). 폭·높이는 2의 배수여야 한다(`DXGI:277–278, 315–316`).
 - 정보 표의 `planes[2]`가 plane별 형식·크기 축소·texel 바이트를 준다. `PixelFormatImageBytes`는 두 plane의 합이다.
-- 상태는 **계약**이다. 번호표·정보 표·크기 함수는 PF1에서 구현하고 텍스처 생성은 미디어 단계(RenderBase 14절 "미디어" 후속)까지 `UnsupportedCapability`다.
-- 미디어 단계의 backend 방향: D3D12는 DXGI `NV12`·`P010` + plane별 SRV(UE와 달리 SRV 생성), Vulkan은 multi-planar 형식 + plane aspect(`VK_IMAGE_ASPECT_PLANE_0/1_BIT`, sampler Y′CbCr 변환은 쓰지 않고 plane별 view), OpenGL ES·Metal은 그때 정한다(UE는 미지원).
-- 포함 시기는 결정 PX3이다.
+- 상태: 번호표·정보 표·크기 함수는 PF1, D3D12 생성·plane 업로드·plane view는 PF6에서 구현한다(결정 PX3, 2026-11-17 "생성까지 지금 구현"). GLES·D3D11·Vulkan·Metal은 그 backend의 대응 단계(PF4·PF5)에서 정하며 그 전에는 `UnsupportedCapability`다.
+- backend 방향: D3D12는 DXGI `NV12`·`P010` + plane별 SRV(UE와 달리 SRV 생성), Vulkan은 multi-planar 형식 + plane aspect(`VK_IMAGE_ASPECT_PLANE_0/1_BIT`, sampler Y′CbCr 변환은 쓰지 않고 plane별 view), OpenGL ES·Metal은 그때 정한다(UE는 미지원).
+- 포함 시기는 결정 PX3으로 정하였다(16절).
 
 ## 12. 저장 값과 번호 재배정
 
@@ -850,7 +850,7 @@ ID는 이 문서가 부여한다(PF). 형식 부분을 A0-G에서 떼어 렌더 
 | PF3 | 능력 질의(GX1 형식 부분): `DeviceCaps` 형식 능력 배열, D3D12 `CheckFeatureSupport`, GL 조건 평가 + `glGetInternalformativ`, 생성 검증과 `UnsupportedCapability` | PF2, GX1 설계 | 능력 표가 실제 생성 결과와 일치 | 형식 × 용도(샘플·3D·cube·렌더 타깃·블렌드·MSAA 표본 수·깊이·storage) 전 조합에서 "능력 있음 ⇔ 생성 성공"을 단언. 능력 없음은 `Unsupported`(이후 `UnsupportedCapability`)와 `LastError` 문구, 크래시·검증 오류 없음. 결정적이며 시간 의존 없음 |
 | PF4 | Vulkan(SH2의 VulkanGraphics, P9)·D3D11(SH5) 대응 표와 능력 질의 | PF3, 해당 backend | PF2·PF3 시험이 그 backend에서 통과 | 같은 self-test. Vulkan은 CI에서 NOT RUN일 수 있으며 그때는 로컬 결과를 기록 |
 | PF5 | Metal(SH5) 대응 표·능력 | SH5 | PF2·PF3 시험 | 같은 self-test(macOS) |
-| PF6 | 비디오 형식 생성(plane view) | 미디어 단계 | NV12·P010 생성·plane 업로드·plane view 샘플 | plane별 패턴 왕복 |
+| PF6 | 비디오 형식 생성: D3D12 `NV12`·`P010` 텍스처 생성, plane별 업로드, plane view(SRV) 샘플. 다른 backend는 PF4·PF5에서 | PF1, PF2 D3D12 부분 | D3D12에서 NV12·P010 생성·plane 업로드·plane view 샘플 통과, 다른 backend는 `UnsupportedCapability` | plane별 결정적 패턴 왕복(plane 0 휘도, plane 1 색차), 홀수 크기 거부 |
 
 시험 규칙: 형식 순회 시험은 장치가 지원하지 않는 형식을 "건너뜀"으로 기록하되, 그 판정은 PF3 이후 능력 질의 결과로만 한다(PF2에서는 backend 표의 "장치 형식 없음"만 건너뜀). 시간·경쟁에 기대지 않는다.
 
@@ -882,9 +882,9 @@ ID는 이 문서가 부여한다(PF). 형식 부분을 A0-G에서 떼어 렌더 
 
 | ID | 결정 | 선택지와 권장 | 기한 |
 |---|---|---|---|
-| PX1 | sRGB 표현 | (가) 별도 형식(권장), (나) 생성 플래그. 9절 | PF1 착수 전 |
-| PX2 | 번호 체계 | 권장: 계열별 구간(5.2절, `uint8`). 대안: 1부터 빈틈 없는 연속 번호(정점 형식과 같음, 추가는 끝에만) | PF1 착수 전 |
-| PX3 | 비디오 형식 포함 시기 | 권장: 번호·정보·크기 함수는 PF1에 넣고 생성은 PF6(미디어 단계)까지 계약. 대안: 미디어 단계에서 번호 추가 | PF1 착수 전 |
+| PX1 | sRGB 표현 | **결정됨(2026-11-17)**: (가) 별도 형식. 9절 | — |
+| PX2 | 번호 체계 | **결정됨(2026-11-17)**: 계열별 구간(5.2절, `uint8`) | — |
+| PX3 | 비디오 형식 포함 시기 | **결정됨(2026-11-17)**: 번호·정보·크기 함수는 PF1, D3D12 생성은 PF6에서 지금 구현(권장안이던 "생성은 미디어 단계까지 계약"이 아님) | — |
 
 ## 17. 미확인 목록
 
@@ -901,3 +901,4 @@ ID는 이 문서가 부여한다(PF). 형식 부분을 A0-G에서 떼어 렌더 
 ## 18. 개정 이력
 
 - 개정 1(2026-11-17): 초안. UE 5.8.4 `EPixelFormat` 94개 값 전체, 정보 표·능력 플래그·판정 위치, D3D12·D3D11·Vulkan·OpenGL·Metal 형식 표, sRGB·깊이·스텐실·비디오 처리, 쿠킹 대상 위치를 조사하였다. OpenGL ES 3.2 사양서 Table 8.10·8.11·8.17·8.19·8.26과 NDK 헤더로 GLES 대응을 확인하였다. 사용자 지시 "PixelFormat으로", "언리얼에서 지원하는거 full로 지원", "시간이 걸리더라도 제대로해"에 따라 형식마다 근거를 달고 확인하지 못한 것은 미확인으로 남겼다.
+- 개정 2(2026-11-17): 사용자 결정 반영. PX1 (가) sRGB 별도 형식, PX2 계열별 번호 구간, PX3 비디오 형식은 D3D12 생성까지 지금 구현(권장안이던 "생성은 미디어 단계까지 계약"이 아님). 1·11·16절과 PF6 행을 고쳤다.
