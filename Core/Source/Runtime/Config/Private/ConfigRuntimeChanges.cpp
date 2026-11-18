@@ -141,9 +141,104 @@ Result<void> AddPending(ConfigState& state, StringView name, StringView pending,
                   ConfigLayer::CodeDefault, {}, nullptr, name, message.View());
 }
 
+// 다음 실행에도 같은 입력이 다시 오는 층인지다(파일 층과 코드 기본값 — 지운 파일이면 코드 기본값이
+// 드러난다). 기기 프로필·품질·기능 묶음은 시작 뒤 다시 계산되는 파생 층이고 세션 이후 층은 휘발
+// 층이다.
+bool PersistsAcrossRuns(ConfigLayer layer) noexcept {
+    switch (layer) {
+    case ConfigLayer::CodeDefault:
+    case ConfigLayer::Engine:
+    case ConfigLayer::EnginePlatform:
+    case ConfigLayer::Project:
+    case ConfigLayer::ProjectPlatform:
+    case ConfigLayer::User:
+        return true;
+    default:
+        return false;
+    }
+}
+
+const ConfigEntry* EntryIn(Span<ConfigEntry* const> order, uint64 sequence) noexcept {
+    for (const ConfigEntry* entry : order) {
+        if (entry->sequence == sequence) {
+            return entry;
+        }
+    }
+
+    return nullptr;
+}
+
+// stack 끝(가장 강한 출처)이 best보다 강하면 best로 둔다.
+void TakeStronger(Span<ConfigEntry* const> order, Span<const uint64> stack,
+                  const ConfigEntry*& best) noexcept {
+    if (stack.IsEmpty()) {
+        return;
+    }
+
+    const ConfigEntry* top = EntryIn(order, stack[stack.Size() - 1]);
+    if (top != nullptr && (best == nullptr || top->layer > best->layer ||
+                           (top->layer == best->layer && top->sequence > best->sequence))) {
+        best = top;
+    }
+}
+
+// 파일 층이 아닌 출처의 시작 뒤 쓰기를 무시했다고 같은 이름·층·출처에 한 번만 알린다.
+Result<void> ReportIgnored(ConfigState& state, StringView name, const ConfigEntry& source,
+                           StringView ignored, StringView current) noexcept {
+    StringBuilder<192> key(state.allocator);
+    static_cast<void>(key.TryAppendFormat("{}\n{}\n{}", name, ConfigLayerName(source.layer),
+                                          source.sourceName.View()));
+    if (auto status = key.Status(); !status) {
+        return status;
+    }
+
+    for (const String& seen : state.ignoredBootWrites) {
+        if (seen.View() == key.View()) {
+            return Result<void>::Success();
+        }
+    }
+
+    String stored(state.allocator);
+    if (auto assigned = stored.TryAssign(key.View()); !assigned) {
+        return assigned;
+    }
+
+    if (auto pushed = state.ignoredBootWrites.TryPushBack(Move(stored)); !pushed) {
+        return pushed;
+    }
+
+    Log::Warning(LogConfig,
+                 "Boot value ignored after startup: {Layer} {Source} sets {Name} to {Value}; the "
+                 "current value {Current} stays",
+                 ConfigLayerName(source.layer), source.sourceName.View(), name, ignored, current);
+    StringBuilder<256> message(state.allocator);
+    static_cast<void>(message.TryAppendFormat(
+        "boot value ignored after startup: {} {} sets {}; the current value {} stays (only config "
+        "files change a RestartRequired value for the next start)",
+        ConfigLayerName(source.layer), source.sourceName.View(), ignored, current));
+    if (auto status = message.Status(); !status) {
+        return status;
+    }
+
+    return Report(state, ConfigDiagnosticCode::BootValueIgnored, ConfigSeverity::Warning,
+                  source.layer, source.sourceName.View(), nullptr, name, message.View());
+}
+
+// 바뀐 값 하나를 다룬다: 출처가 파일 층(또는 기본값으로 돌아감)이면 대기, 아니면 무시 진단.
+Result<void> HoldOne(ConfigState& state, StringView name, const ConfigEntry* source,
+                     StringView next, StringView current,
+                     Array<UniquePtr<PendingRestart>>& pending) noexcept {
+    if (source == nullptr || PersistsAcrossRuns(source->layer)) {
+        return AddPending(state, name, next, current, pending);
+    }
+
+    return ReportIgnored(state, name, *source, next, current);
+}
+
 } // namespace
 
-Result<void> HoldRestartSections(ConfigState& state, Span<void* const> values,
+Result<void> HoldRestartSections(ConfigState& state, Span<ConfigEntry* const> order,
+                                 Span<void* const> values,
                                  Span<Array<UniquePtr<SourceStack>>* const> sources,
                                  Array<UniquePtr<PendingRestart>>& pending) noexcept {
     if (!state.startupComplete) {
@@ -215,9 +310,17 @@ Result<void> HoldRestartSections(ConfigState& state, Span<void* const> values,
                 described = CompactText(state.allocator, before, currentText);
             }
 
+            // 새 값의 가장 강한 출처(그 필드 아래 출처 스택들의 끝)다. 기본값으로 돌아갔으면 없다.
+            const ConfigEntry* source = nullptr;
+            for (const UniquePtr<SourceStack>& stack : *sources[index]) {
+                if (IsUnderField(stack->path.View(), tool)) {
+                    TakeStronger(order, stack->entries.View(), source);
+                }
+            }
+
             if (described) {
-                described =
-                    AddPending(state, name.View(), pendingText.View(), currentText.View(), pending);
+                described = HoldOne(state, name.View(), source, pendingText.View(),
+                                    currentText.View(), pending);
             }
 
             if (described) {
@@ -266,7 +369,8 @@ Result<void> HoldRestartSections(ConfigState& state, Span<void* const> values,
     return Result<void>::Success();
 }
 
-Result<void> HoldRestartSettings(ConfigState& state, Span<const UniquePtr<SettingResult>> settings,
+Result<void> HoldRestartSettings(ConfigState& state, Span<ConfigEntry* const> order,
+                                 Span<const UniquePtr<SettingResult>> settings,
                                  Array<UniquePtr<PendingRestart>>& pending) noexcept {
     if (!state.startupComplete) {
         return Result<void>::Success();
@@ -281,8 +385,10 @@ Result<void> HoldRestartSettings(ConfigState& state, Span<const UniquePtr<Settin
             continue;
         }
 
-        if (auto added = AddPending(state, setting.name.View(), result.text.View(),
-                                    setting.text.View(), pending);
+        const ConfigEntry* source = nullptr;
+        TakeStronger(order, result.sources.View(), source);
+        if (auto added = HoldOne(state, setting.name.View(), source, result.text.View(),
+                                 setting.text.View(), pending);
             !added) {
             return added;
         }

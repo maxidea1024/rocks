@@ -198,6 +198,9 @@ struct ConfigState {
     bool syncing = false;
     // 재시작 대기 값(마지막 Sync 기준 — CF3).
     Array<UniquePtr<PendingRestart>> pendingRestarts;
+    // 진단을 이미 낸 무시된 시작 뒤 쓰기(이름·층·출처를 줄바꿈으로 이은 키) — 같은 것에 한 번만
+    // 낸다.
+    Array<String> ignoredBootWrites;
     // sync 지점 앞 hook(등록 순서).
     Array<SyncHook> syncHooks;
 
@@ -243,14 +246,20 @@ Result<void> SortedEntries(ConfigState& state, bool (*keep)(const ConfigEntry& e
 Result<void> ExportSection(ConfigState& state, const SectionState& section, void* storage,
                            String& out) noexcept;
 
-// 시작 뒤 RestartRequired 값이 바뀌었으면 지금 값(sections[i]->value·settings[i]->value)을 유지하고
-// 새 값은 재시작 대기로 기록한다(Sync가 값 계산 뒤, 맞바꾸기 전에 부른다). values·sources는 섹션
-// 순서의 새 값과 출처 스택, settings는 콘솔 설정 순서의 새 값이다(필드 설정은 values를 고친 뒤 다시
-// 읽어야 하므로 호출자가 ComputeSettingResults 전에 HoldRestartSections를, 뒤에
-// HoldRestartSettings를 부른다). pending에 새 대기 목록을 쓴다.
-Result<void> HoldRestartSections(ConfigState& state, Span<void* const> values,
+// 시작 뒤 RestartRequired 값이 바뀌었으면 지금 값(sections[i]->value·settings[i]->value)을
+// 유지한다(Sync가 값 계산 뒤, 맞바꾸기 전에 부른다). 새 값의 가장 강한 출처가 파일 층(코드
+// 기본값·엔진·엔진 플랫폼·프로젝트·프로젝트 플랫폼·사용자 — 다음 실행에도 같은 입력이 다시
+// 온다)이면 재시작 대기로 기록하고, 그 밖의 층(기기 프로필·품질·기능 묶음 같은 파생 층, 세션·콘솔
+// 같은 휘발 층)이면 대기 없이 Warning BootValueIgnored를 같은 이름·출처에 한 번 낸다. order는 이번
+// Sync의 적용 입력이다(출처 층 조회). values·sources는 섹션 순서의 새 값과 출처 스택, settings는
+// 콘솔 설정 순서의 새 값이다(필드 설정은 values를 고친 뒤 다시 읽어야 하므로 호출자가
+// ComputeSettingResults 전에 HoldRestartSections를, 뒤에 HoldRestartSettings를 부른다). pending에
+// 새 대기 목록을 쓴다.
+Result<void> HoldRestartSections(ConfigState& state, Span<ConfigEntry* const> order,
+                                 Span<void* const> values,
                                  Span<Array<UniquePtr<SourceStack>>* const> sources,
                                  Array<UniquePtr<PendingRestart>>& pending) noexcept;
+
 // path 파일을 out에 통째로 읽는다(files의 파일 시스템). 반환: 없으면 false(out은 비운다). 오류:
 // 파일 상태의 대응 ErrorCode, 할당 실패.
 Result<bool> ReadWholeFile(platform::FileSystem& files, StringView path, Array<char>& out) noexcept;
@@ -354,7 +363,8 @@ Result<void> ComputeSettingResults(ConfigState& state, Span<ConfigEntry* const> 
 
 // HoldRestartSections의 콘솔 설정 짝이다(독립 콘솔 설정만 — 필드 설정은 섹션 값을 따른다). 대기로
 // 돌린 결과는 지금 값·표기·출처로 되돌리고 changed를 끈다.
-Result<void> HoldRestartSettings(ConfigState& state, Span<const UniquePtr<SettingResult>> settings,
+Result<void> HoldRestartSettings(ConfigState& state, Span<ConfigEntry* const> order,
+                                 Span<const UniquePtr<SettingResult>> settings,
                                  Array<UniquePtr<PendingRestart>>& pending) noexcept;
 
 // 새 값으로 설정 snapshot을 만든다. RenderRead 값의 서명(signature에 쓴다)이 이전과 같고 snapshot이

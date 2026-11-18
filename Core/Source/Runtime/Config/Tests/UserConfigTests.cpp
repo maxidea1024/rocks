@@ -83,6 +83,17 @@ bool HasEntry(ConfigFixture& fixture, ConfigSeverity severity, ConfigDiagnosticC
     return false;
 }
 
+// 진단 모음에서 code인 진단 수다.
+usize CountEntries(ConfigFixture& fixture, ConfigDiagnosticCode code) noexcept {
+    const ConfigDiagnostics& all = fixture.Context().Diagnostics();
+    usize count = 0;
+    for (usize index = 0; index < all.Count(); ++index) {
+        count += all.Get(index).code == code ? 1 : 0;
+    }
+
+    return count;
+}
+
 } // namespace
 
 // 저장은 사용자 층까지 합친 값과 그 아래 층 값이 다른 UserConfig 값만 쓴다(프로젝트 값과 같게 고친
@@ -243,9 +254,10 @@ TEST(Config_OldUserFileDropsUnknownKeysWithWarnings) {
     CHECK(fixture.Rejects(ConfigLayer::Project, "Game", R"({"Display": {"removedField": 3}})"));
 }
 
-// 시작 뒤 RestartRequired 값의 변경은 지금 값을 두고 재시작 대기로 기록한다(구독 콜백·snapshot은
-// 바뀌지 않는다). 사용자 층 값이면 저장되어 다음 시작 때 적용된다. 되돌리면 대기가 없어진다. 시작
-// 전 변경은 바로 적용된다.
+// 시작 뒤 RestartRequired 값의 변경은 지금 값을 둔다(구독 콜백·snapshot은 바뀌지 않는다). 출처가
+// 파일 층(사용자·프로젝트)이면 재시작 대기로 기록하고 사용자 값은 저장되어 다음 시작 때 적용된다.
+// 콘솔 층 같은 휘발 층이면 대기 없이 Warning BootValueIgnored를 한 번만 낸다. 되돌리면 대기가
+// 없어진다. 시작 전 변경은 바로 적용된다.
 TEST(Config_RestartRequiredChangeWaitsForNextStart) {
     UserTree paths;
     REQUIRE(paths.Make());
@@ -280,13 +292,15 @@ TEST(Config_RestartRequiredChangeWaitsForNextStart) {
         CHECK(context.ConsoleValue(portId.Value()).signedInteger == 7777);
         Array<ConfigPendingRestart> pending(paths.allocator);
         REQUIRE(context.GetPendingRestarts(pending));
-        REQUIRE(pending.Size() == 2);
+        REQUIRE(pending.Size() == 1);
         CHECK(pending[0].name == "Game.Display.textureBudget" && pending[0].pending == "2048" &&
               pending[0].current == "768");
-        CHECK(pending[1].name == "net.listen.port" && pending[1].pending == "9000" &&
-              pending[1].current == "7777");
         CHECK(HasEntry(fixture, ConfigSeverity::Note, ConfigDiagnosticCode::RestartRequired,
                        "Game.Display.textureBudget"));
+        // 콘솔 값은 다음 실행에 다시 오지 않으므로 대기가 아니다(진단만).
+        CHECK(HasEntry(fixture, ConfigSeverity::Warning, ConfigDiagnosticCode::BootValueIgnored,
+                       "net.listen.port"));
+        CHECK(CountEntries(fixture, ConfigDiagnosticCode::BootValueIgnored) == 1);
         // 출처는 지금 값의 출처(Project)다.
         const ConfigLayer projectTop[] = {ConfigLayer::Project};
         CHECK(fixture.SourcesAre("Game", "Display", "textureBudget", projectTop));
@@ -297,13 +311,26 @@ TEST(Config_RestartRequiredChangeWaitsForNextStart) {
         CHECK(context.Get<DisplaySettings>().gamma == 2.0f && calls == 1);
         CHECK(context.Get<DisplaySettings>().textureBudget == 768);
         REQUIRE(context.GetPendingRestarts(pending));
-        CHECK(pending.Size() == 2);
+        CHECK(pending.Size() == 1);
+        // 같은 이름·출처의 무시 진단은 다시 내지 않는다.
+        CHECK(CountEntries(fixture, ConfigDiagnosticCode::BootValueIgnored) == 1);
 
         // 사용자 값은 저장된다(다음 시작 때 적용).
         REQUIRE(SaveUserConfig(context, platform::PhysicalFileSystem()));
 
-        // 콘솔 값을 되돌리면 그 대기는 없어진다.
+        // 콘솔 값을 빼고 프로젝트 파일이 바꾸면(hot reload와 같은 파일 층) 그것은 대기가 된다.
         REQUIRE(context.Unset(ConfigLayer::Console, "console"));
+        REQUIRE(context.AddLayerText(ConfigLayer::Project, "Game.json", "Game", "project/Game.json",
+                                     R"({"Settings": {"net.listen.port": 9100}})"));
+        REQUIRE(context.Sync());
+        REQUIRE(context.GetPendingRestarts(pending));
+        REQUIRE(pending.Size() == 2);
+        CHECK(pending[0].name == "Game.Display.textureBudget");
+        CHECK(pending[1].name == "net.listen.port" && pending[1].pending == "9100" &&
+              pending[1].current == "7777");
+
+        // 되돌리면 그 대기는 없어진다.
+        REQUIRE(context.Unset(ConfigLayer::Project, "Game.json"));
         REQUIRE(context.Sync());
         REQUIRE(context.GetPendingRestarts(pending));
         CHECK(pending.Size() == 1 && pending[0].name == "Game.Display.textureBudget");

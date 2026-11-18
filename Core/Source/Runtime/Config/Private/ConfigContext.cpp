@@ -39,7 +39,8 @@ ConfigState::ConfigState(Allocator& allocator, ObjectRegistry& objects) noexcept
       projectName(allocator), branches(allocator), sections(allocator), entries(allocator),
       queue(allocator), diagnostics(allocator), regions(allocator), settings(allocator),
       commands(allocator), pendingCommands(allocator), subscriptions(allocator),
-      renderSignature(allocator), pendingRestarts(allocator), syncHooks(allocator) {
+      renderSignature(allocator), pendingRestarts(allocator), ignoredBootWrites(allocator),
+      syncHooks(allocator) {
 }
 
 reflection_text::TextCodecOptions ConfigState::CodecOptions() const noexcept {
@@ -1090,8 +1091,8 @@ Result<void> ConfigContext::Sync() noexcept {
     }
 
     Array<UniquePtr<detail::PendingRestart>> pendingRestarts(*allocator_);
-    if (auto held =
-            detail::HoldRestartSections(*state, values.View(), sourceLists.View(), pendingRestarts);
+    if (auto held = detail::HoldRestartSections(*state, order.View(), values.View(),
+                                                sourceLists.View(), pendingRestarts);
         !held) {
         return held;
     }
@@ -1103,7 +1104,8 @@ Result<void> ConfigContext::Sync() noexcept {
         return computed;
     }
 
-    if (auto held = detail::HoldRestartSettings(*state, settingResults.View(), pendingRestarts);
+    if (auto held = detail::HoldRestartSettings(*state, order.View(), settingResults.View(),
+                                                pendingRestarts);
         !held) {
         return held;
     }

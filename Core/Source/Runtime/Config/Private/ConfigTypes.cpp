@@ -74,6 +74,8 @@ StringView ConfigDiagnosticCodeName(ConfigDiagnosticCode code) noexcept {
         return "UnknownSetting";
     case ConfigDiagnosticCode::RestartRequired:
         return "RestartRequired";
+    case ConfigDiagnosticCode::BootValueIgnored:
+        return "BootValueIgnored";
     case ConfigDiagnosticCode::InvalidDeviceProfile:
         return "InvalidDeviceProfile";
     }
