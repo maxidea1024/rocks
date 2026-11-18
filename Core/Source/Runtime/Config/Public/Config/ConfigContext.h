@@ -4,6 +4,7 @@
 #include <Config/CVarDefinition.h>
 #include <Config/ConfigTypes.h>
 #include <Config/ConsoleSettings.h>
+#include <Core/Delegate.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Meta/GeneratedType.h>
 #include <Meta/SettingsSchema.h>
@@ -27,8 +28,12 @@
 //   때 펼친다(4.3절).
 // - 사용자 층은 UserConfig 필드만 쓸 수 있다.
 //
-// 스레드: 소유 스레드(만든 스레드 — 게임 lane)에서만 쓴다. 다른 스레드의 호출은 WrongThread다(Get은
-// Fatal). 값은 Sync에서만 바뀌므로 그 사이 Get이 돌려준 참조의 내용은 바뀌지 않는다.
+// 스레드: 소유 스레드(만든 스레드 — 게임 lane)에서 쓴다. 다른 스레드의 호출은 WrongThread다(Get은
+// Fatal). 예외는 Acquire·ClearLayer와 CVar 핸들의 `Set`·`Clear`(쓰기 큐 —
+// Docs/Design/CVarSystem.ko.md 6.2·10.1절)다. 다른 스레드에서 쓰려면 allocator가 여러 스레드의 동시
+// 호출을 받아야 한다 (SystemAllocator 등). 값은 Sync에서만 바뀌므로 그 사이 Get이 돌려준 참조의
+// 내용은 바뀌지 않는다. 소유 스레드는 문맥이 스스로 최신 snapshot에
+// 묶는다(Initialize·Register·Sync가 게시할 때).
 //
 // 수명: allocator·objects는 문맥보다 오래 살아야 한다. 설정 struct 타입의 모듈(생성 코드)과 그
 // TypeRegistry 등록도 문맥보다 오래 살아야 한다(문맥이 TypeLease를 쥔다).
@@ -164,6 +169,14 @@ struct ConfigPendingRestart {
 // 지점에 넣는 데 쓴다.
 using ConfigSyncHook = void (*)(void* context, ConfigContext& config) noexcept;
 
+// Sync 한 번의 변경 목록이다(ConfigContext::OnSynced 인자 — CVarSystem.ko.md 7.3절, VD9).
+// variables는 유효값이 바뀐 CVar 핸들 번호(이름 순서), settings는 값이 바뀐 설정 struct(등록
+// 순서)다. 바뀐 것이 없는 Sync도 빈 목록으로 한 번 부른다. view는 콜백 동안만 유효하다.
+struct SyncChanges {
+    Span<const cvar::Index> variables;
+    Span<const TypeId> settings;
+};
+
 class ConfigContext {
 public:
     ConfigContext(Allocator& allocator, ObjectRegistry& objects,
@@ -252,14 +265,17 @@ public:
     // 없는 태그는 무동작이다. 오류: layer 범위 InvalidArgument, 다른 스레드 WrongThread, 할당 실패.
     Result<void> Unset(ConfigLayer layer, StringView tag) noexcept;
 
-    // sync 지점이다(5.3절): 큐를 순서대로 적용하고 모든 섹션 값·콘솔 설정 값과 출처 스택을 다시
-    // 합친다. 그 뒤 큐에 든 콘솔 명령을 실행하고, 값이 바뀐 대상의 구독 콜백을 구독 순서대로
-    // 부르고, RenderRead 값이 바뀌었으면 새 설정 snapshot(세대 +1)을 만든다. 콜백 안에서 Sync를
-    // 부르면 Busy다. 새 입력이 더 강한 출처에 가려졌으면 진단 Note WeakWrite를 남긴다. 적용에
-    // 실패한 입력(이전 층에 따라 달라진 배열 연산 결과가 원소 수 한도를 넘는 등)은 그 섹션에서
-    // 건너뛰고 Error 진단을 남긴다(값은 나머지 입력으로 합친다). 큐가 비었으면 아무것도 하지
-    // 않는다. 오류: 다른 스레드 WrongThread, 할당 실패(OutOfMemory — 그때 값은 Sync 전 그대로이고
-    // 큐도 그대로다).
+    // sync 지점이다(Docs/Design/CVarSystem.ko.md 10절 순서): 0) sync hook을 등록 순서대로 부른다
+    // 1) 쓰기 큐를 넣은 순서대로 적용한다(다른 스레드에서 넣은 쓰기는 여기서 다시 검사하고,
+    // 거부되면 진단을 남기고 버린다) 2) 모든 섹션 값·콘솔 설정 값과 출처 스택을 다시 합친다(묶음
+    // 펼침 반복은 CVR5 — 지금은 한 번) 3) 유효값이 바뀐 CVar 칸의 세대를 올린다 4) 바뀐 조각만 새로
+    // 만든 snapshot을 게시하고 게임 lane을 다시 묶는다(바뀐 것이 없으면 같은 snapshot) 5) 큐에 든
+    // 콘솔 명령을 실행하고 값이 바뀐 대상의 구독 콜백(CF2 — CVR7까지)을 부른다 6) OnSynced를
+    // 부른다. 콜백 안에서 Sync를 부르면 Busy다. 새 입력이 더 강한 출처에 가려졌으면 진단 Note
+    // WeakWrite를 남긴다. 적용에 실패한 입력(이전 층에 따라 달라진 배열 연산 결과가 원소 수 한도를
+    // 넘는 등)은 그 섹션에서 건너뛰고 Error 진단을 남긴다(값은 나머지 입력으로 합친다). 오류: 다른
+    // 스레드 WrongThread, 할당 실패(OutOfMemory — 그때 값은 Sync 전 그대로이고 꺼낸 쓰기는 다음
+    // Sync가 이어서 적용한다).
     Result<void> Sync() noexcept;
 
     // 다음 Sync가 적용할 입력이 큐에 있는지다.
@@ -314,9 +330,10 @@ public:
     // 누락을 잡는다). 핸들 번호(Index)는 처음 등록될 때 프로세스 전체에서 한 번 정해진다(문맥이
     // 여럿이어도 같은 핸들은 같은 번호). 이미 들어온 층 입력(대기 값)을 바로 검사·적용한다(거부한
     // 값은 진단을 남기고 건너뛴다 — 등록은 성공한다). 등록한 변수는 독립 콘솔 설정과 같은 이름
-    // 공간·값 저장소에 들고(FindConsoleSetting·ConsoleValue로 바로 보인다), 설정 snapshot에는 다음
-    // Sync 뒤에 든다(VD6 — 등록 즉시 게시(VD17)는 CVR2). 출시 빌드의 `Cheat()` 변수는
-    // 건너뛴다(13.1절 — 번호도 받지 않는다).
+    // 공간·값 저장소에 들고(FindConsoleSetting·ConsoleValue로 보인다), 등록은 바로 보인다: 기존
+    // 칸은 그대로 두고 새 칸만 더한 snapshot을 그 자리에서 게시하고 게임 lane을 다시 묶는다(VD17 —
+    // 등록 직후 같은 프레임에 `Get()`해도 된다. 등록 전에 만든 snapshot에는 칸이 없다). 출시 빌드의
+    // `Cheat()` 변수는 건너뛴다(13.1절 — 번호도 받지 않는다).
     //
     // 넘긴 핸들을 모두 검사한 뒤에 등록한다(하나라도 거부하면 아무것도 등록하지 않고 진단도 남기지
     // 않는다). 같은 핸들을 다시 넘기면(같은 호출 안 포함) 성공이다(멱등).
@@ -410,10 +427,31 @@ public:
     // 자체는 거부하지 않는다. 오류: 다른 스레드 WrongThread.
     Result<void> CompleteStartup() noexcept;
 
-    // 마지막 Sync의 설정 snapshot이다(5.3절 — RenderRead 값의 불변 블록과 세대 번호). 첫 Sync
-    // 전에는 null이다. RenderRead 값이 바뀌지 않은 Sync는 같은 snapshot(같은 세대)을 돌려준다. 렌더
-    // lane은 이 snapshot만 읽는다(문맥은 읽지 않는다). 소유 스레드가 아니면 Fatal.
-    SharedPtr<ConfigSnapshot> Snapshot() const noexcept;
+    // 마지막으로 게시한 설정 snapshot이다(Docs/Design/CVarSystem.ko.md 7.2절 — CVar 칸과 RenderRead
+    // 이름 블록, Config 5.3절). 어느 스레드에서나 부를 수 있다(게시와 함께 짧은 잠금을 잡는다 —
+    // 읽기 경로가 아니다). Initialize가 빈 snapshot을 게시하므로 초기화 뒤에는 null이 아니다(초기화
+    // 전이면 null). 바뀐 것이 없는 Sync는 같은 snapshot(같은 세대)을 남긴다. 렌더 lane·worker는 이
+    // snapshot을 cvar::SnapshotBinding으로 묶어 `CVar::Get()`으로 읽는다.
+    //
+    // 사용 예(다른 스레드):
+    //   cvar::SnapshotBinding bind{config.Acquire()};
+    //   const float distance = ShadowDistance.Get();
+    SharedPtr<const ConfigSnapshot> Acquire() const noexcept;
+
+    // 층 하나의 모든 입력(모든 태그)을 다음 Sync에서 뺀다(6.1절 —
+    // `ClearLayer(ConfigLayer::Hotfix)`로 핫픽스 전체를 되돌린다). 어느 스레드에서나 부를 수
+    // 있다(쓰기 큐에 넣는다). 오류: 초기화 전· CodeDefault·정의되지 않은 층 InvalidArgument, 큐가
+    // 가득 차면 Busy, 할당 실패.
+    Result<void> ClearLayer(ConfigLayer layer) noexcept;
+
+    // Sync마다 한 번(값 적용·snapshot 게시·명령 실행 뒤) 부르는 변경 알림이다(7.3절, VD9 — 변수
+    // 하나마다의 콜백은 없다). 게임 lane에서 문맥 잠금 없이 부른다. 콜백 안의 `Set`·층 입력은 다음
+    // Sync에 적용되고, 콜백 안에서 Sync를 부르면 Busy다. 소유 스레드에서만 더하고 뺀다.
+    //
+    // 사용 예:
+    //   auto handle = config.OnSynced().TryAddLambda([](const SyncChanges& changes) noexcept { ...
+    //   });
+    MulticastDelegate<void(const SyncChanges&)>& OnSynced() noexcept;
 
     // 내부 상태다(config-dump·파일 로더 등 모듈 안 구현이 쓴다). 초기화 전이면 null이다.
     detail::ConfigState* State() const noexcept {

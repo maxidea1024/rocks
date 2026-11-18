@@ -33,14 +33,24 @@ enum class ConfigLayer : uint8 {
     DeviceProfile,
     // <UserData>/<Project>/Config/<Branch>.json — 사용자 설정 가능(UserConfig) 필드만
     User,
+    // 라이브 운영 핫픽스(태그 = 핫픽스 묶음 — Docs/Design/CVarSystem.ko.md 6.1절, UE
+    // ECVF_SetByHotfix)
+    Hotfix,
     // 명령줄 `--set=`·시험 픽스처
     Session,
-    // 실행 중 콘솔 입력·코드의 범위 임시 변경
-    Console
+    // 코드의 `CVar::Set`(출처 = 호출 위치 — UE ECVF_SetByCode)
+    Code,
+    // 범위 임시 변경(`cvar::ScopedOverride`·시험 — 태그마다 하나, 콘솔보다 약하다 — UE
+    // ECVF_SetByTemp)
+    Scoped,
+    // 실행 중 콘솔 입력
+    Console,
+    // 서버가 복제한 값(가장 강하다 — 클라이언트의 콘솔·코드·임시 변경이 이기지 못한다, CVar 13.2절)
+    Server
 };
 
-// 층 수다(ConfigLayer::Console + 1).
-inline constexpr uint32 ConfigLayerCount = static_cast<uint32>(ConfigLayer::Console) + 1;
+// 층 수다(ConfigLayer::Server + 1).
+inline constexpr uint32 ConfigLayerCount = static_cast<uint32>(ConfigLayer::Server) + 1;
 
 // 정의된 층 값인지다.
 constexpr bool IsConfigLayer(ConfigLayer layer) noexcept {

@@ -40,7 +40,7 @@ ConfigState::ConfigState(Allocator& allocator, ObjectRegistry& objects) noexcept
       queue(allocator), diagnostics(allocator), regions(allocator), settings(allocator),
       commands(allocator), pendingCommands(allocator), subscriptions(allocator),
       renderSignature(allocator), pendingRestarts(allocator), ignoredBootWrites(allocator),
-      syncHooks(allocator) {
+      syncHooks(allocator), onSynced(allocator) {
 }
 
 reflection_text::TextCodecOptions ConfigState::CodecOptions() const noexcept {
@@ -462,6 +462,31 @@ StringView ToView(Span<const char> text) noexcept {
     return StringView(text.Data(), text.Size());
 }
 
+// byte 순서 비교(사전식)다.
+bool NameLess(StringView left, StringView right) noexcept {
+    const usize count = left.ByteCount() < right.ByteCount() ? left.ByteCount() : right.ByteCount();
+    for (usize index = 0; index < count; ++index) {
+        const auto a = static_cast<uint8>(left.Data()[index]);
+        const auto b = static_cast<uint8>(right.Data()[index]);
+        if (a != b) {
+            return a < b;
+        }
+    }
+
+    return left.ByteCount() < right.ByteCount();
+}
+
+// OnSynced를 부른다(Sync마다 한 번 — 7.3절). 콜백 안의 Sync는 Busy다.
+void NotifySynced(ConfigState& state, Span<const cvar::Index> variables,
+                  Span<const TypeId> settings) noexcept {
+    SyncChanges changes;
+    changes.variables = variables;
+    changes.settings = settings;
+    state.syncing = true;
+    state.onSynced.Broadcast(changes);
+    state.syncing = false;
+}
+
 } // namespace
 
 ConfigContext::ConfigContext(Allocator& allocator, ObjectRegistry& objects,
@@ -473,6 +498,26 @@ ConfigContext::~ConfigContext() {
     ConfigState* state = state_.Get();
     if (state == nullptr) {
         return;
+    }
+
+    // 묶음이 남은 채 문맥을 없애면 그 묶음의 Set이 닫힌 통로에 가고 종료 순서가 틀린 것이다(10.1절
+    // — 조용히 넘기지 않는다). 게임 lane의 자동 묶음은 여기서 푼다.
+    detail::WriteChannel& channel = *state->channel;
+    if (platform::AtomicLoad<platform::MemoryOrder::Acquire>(&channel.bindings) != 0) {
+        platform::Fatal(
+            "ConfigContext destroyed while cvar::SnapshotBinding objects still bind its "
+            "snapshots");
+    }
+
+    if (detail::CurrentBinding.gameLane == &channel) {
+        detail::CurrentBinding = detail::ThreadBinding{};
+    }
+
+    {
+        platform::LockGuard lock(channel.mutex);
+        channel.open = false;
+        channel.queue.Clear();
+        channel.current = SharedPtr<const ConfigSnapshot>();
     }
 
     for (UniquePtr<SectionState>& section : state->sections) {
@@ -541,6 +586,18 @@ Result<void> ConfigContext::Initialize() noexcept {
 
     if (!copied) {
         return copied;
+    }
+
+    auto channel = SharedPtr<detail::WriteChannel>::TryMake(*allocator_, *allocator_);
+    if (!channel) {
+        return Result<void>::Failure(channel.Error());
+    }
+
+    channel.Value()->releaseRules = state.releaseRules;
+    state.channel = Move(channel.Value());
+    // 빈 snapshot을 게시하고 소유 스레드(게임 lane)를 묶는다(CVar 칸·이름 블록 없음, 세대 1).
+    if (auto published = detail::PublishSnapshot(state, nullptr, {}); !published) {
+        return published;
     }
 
     // 옵션의 view는 여기까지만 빌린다.
@@ -677,16 +734,13 @@ const void* ConfigContext::FindSettings(TypeId type) const noexcept {
     return nullptr;
 }
 
-Result<void> ConfigContext::AddLayerText(ConfigLayer layer, StringView tag, StringView branch,
-                                         StringView sourceName, StringView text) noexcept {
-    ConfigState* state = state_.Get();
-    if (state == nullptr || !IsConfigLayer(layer) || layer == ConfigLayer::CodeDefault) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
-    }
+namespace detail {
 
-    if (platform::CurrentThreadId() != state->owner) {
-        return Result<void>::Failure(ErrorCode::WrongThread);
-    }
+Result<void> QueueLayerText(ConfigState& owner, ConfigLayer layer, StringView tag,
+                            StringView branch, StringView sourceName, StringView text,
+                            bool replace) noexcept {
+    ConfigState* state = &owner;
+    Allocator* allocator_ = &owner.allocator;
 
     const usize branchIndex = state->FindBranch(branch);
     if (branchIndex == IndexNone) {
@@ -760,9 +814,42 @@ Result<void> ConfigContext::AddLayerText(ConfigLayer layer, StringView tag, Stri
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    added.sequence = state->nextSequence++;
     queued.Value()->entry = Move(entry.Value());
-    return state->queue.TryPushBack(Move(queued.Value()));
+    // 바꾸기(hot reload — 8절)면 새 입력 앞에 (층, 태그) 빼기를 함께 넣는다. 한꺼번에 넣으므로 다른
+    // 스레드의 쓰기가 그 사이에 끼지 않는다.
+    if (replace) {
+        auto removal = UniquePtr<QueuedChange>::TryMake(*allocator_, *allocator_);
+        if (!removal) {
+            return Result<void>::Failure(removal.Error());
+        }
+
+        removal.Value()->layer = layer;
+        if (auto assigned = removal.Value()->tag.TryAssign(tag); !assigned) {
+            return assigned;
+        }
+
+        UniquePtr<QueuedChange> pair[] = {Move(removal.Value()), Move(queued.Value())};
+        return Enqueue(*state->channel, Span<UniquePtr<QueuedChange>>(pair));
+    }
+
+    UniquePtr<QueuedChange> one[] = {Move(queued.Value())};
+    return Enqueue(*state->channel, Span<UniquePtr<QueuedChange>>(one));
+}
+
+} // namespace detail
+
+Result<void> ConfigContext::AddLayerText(ConfigLayer layer, StringView tag, StringView branch,
+                                         StringView sourceName, StringView text) noexcept {
+    ConfigState* state = state_.Get();
+    if (state == nullptr || !IsConfigLayer(layer) || layer == ConfigLayer::CodeDefault) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (platform::CurrentThreadId() != state->owner) {
+        return Result<void>::Failure(ErrorCode::WrongThread);
+    }
+
+    return detail::QueueLayerText(*state, layer, tag, branch, sourceName, text, false);
 }
 
 Result<void> ConfigContext::AddAssignment(ConfigLayer layer, StringView tag, StringView target,
@@ -821,9 +908,9 @@ Result<void> ConfigContext::AddAssignment(ConfigLayer layer, StringView tag, Str
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
-        added.sequence = state->nextSequence++;
         queued.Value()->entry = Move(entry.Value());
-        return state->queue.TryPushBack(Move(queued.Value()));
+        UniquePtr<QueuedChange> one[] = {Move(queued.Value())};
+        return detail::Enqueue(*state->channel, Span<UniquePtr<QueuedChange>>(one));
     }
 
     StringView branchName;
@@ -887,9 +974,9 @@ Result<void> ConfigContext::AddAssignment(ConfigLayer layer, StringView tag, Str
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    added.sequence = state->nextSequence++;
     queued.Value()->entry = Move(entry.Value());
-    return state->queue.TryPushBack(Move(queued.Value()));
+    UniquePtr<QueuedChange> one[] = {Move(queued.Value())};
+    return detail::Enqueue(*state->channel, Span<UniquePtr<QueuedChange>>(one));
 }
 
 Result<void> ConfigContext::Unset(ConfigLayer layer, StringView tag) noexcept {
@@ -912,13 +999,15 @@ Result<void> ConfigContext::Unset(ConfigLayer layer, StringView tag) noexcept {
         return assigned;
     }
 
-    return state->queue.TryPushBack(Move(queued.Value()));
+    UniquePtr<QueuedChange> one[] = {Move(queued.Value())};
+    return detail::Enqueue(*state->channel, Span<UniquePtr<QueuedChange>>(one));
 }
 
 bool ConfigContext::HasPendingChanges() const noexcept {
     const ConfigState* state = state_.Get();
     return state != nullptr &&
-           (!state->queue.IsEmpty() || state->dirty || !state->pendingCommands.IsEmpty());
+           (!state->queue.IsEmpty() || state->dirty || !state->pendingCommands.IsEmpty() ||
+            detail::HasQueuedChanges(*state->channel));
 }
 
 Result<void> ConfigContext::Sync() noexcept {
@@ -948,6 +1037,12 @@ Result<void> ConfigContext::Sync() noexcept {
         state->syncing = false;
     }
 
+    // 1. 쓰기 큐(다른 스레드의 쓰기·hook이 넣은 입력 포함)를 넣은 순서대로 꺼낸다. 다른 스레드의
+    // 쓰기는 여기서 다시 검사한다(6.2절 — 적용 때 판정).
+    if (auto drained = detail::DrainQueue(*state); !drained) {
+        return drained;
+    }
+
     if (state->queue.IsEmpty() && !state->dirty && !state->pendingCommands.IsEmpty()) {
         // 값은 그대로이고 큐에 든 명령만 실행한다.
         Array<bool> none(*allocator_);
@@ -963,10 +1058,12 @@ Result<void> ConfigContext::Sync() noexcept {
         }
 
         detail::RunCommandsAndCallbacks(*state, none.View(), none.View());
+        NotifySynced(*state, {}, {});
         return Result<void>::Success();
     }
 
     if (state->queue.IsEmpty() && !state->dirty) {
+        NotifySynced(*state, {}, {});
         return Result<void>::Success();
     }
 
@@ -980,25 +1077,30 @@ Result<void> ConfigContext::Sync() noexcept {
 
     uint64 firstNew = state->nextSequence;
     for (UniquePtr<QueuedChange>& change : state->queue) {
+        // 빼기(Unset·Clear·ClearLayer)와 바꾸기(Set — 같은 자리의 이전 쓰기를 뺀다)다.
+        if (change->entry.Get() == nullptr || change->replace) {
+            usize kept = 0;
+            for (usize index = 0; index < plan.Size(); ++index) {
+                const ConfigEntry& entry = *plan[index];
+                const bool removed =
+                    entry.layer == change->layer &&
+                    (change->allTags || entry.tag.View() == change->tag.View()) &&
+                    (change->path.IsEmpty() || (entry.kind == EntryKind::Console &&
+                                                entry.path.View() == change->path.View()));
+                if (!removed) {
+                    plan[kept++] = plan[index];
+                }
+            }
+
+            static_cast<void>(plan.TryResize(kept)); // 줄이기는 할당하지 않는다
+        }
+
         if (change->entry.Get() != nullptr) {
             firstNew = firstNew < change->entry->sequence ? firstNew : change->entry->sequence;
             if (auto pushed = plan.TryPushBack(change->entry.Get()); !pushed) {
                 return pushed;
             }
-
-            continue;
         }
-
-        usize kept = 0;
-        for (usize index = 0; index < plan.Size(); ++index) {
-            const bool removed = plan[index]->layer == change->layer &&
-                                 plan[index]->tag.View() == change->tag.View();
-            if (!removed) {
-                plan[kept++] = plan[index];
-            }
-        }
-
-        static_cast<void>(plan.TryResize(kept)); // 줄이기는 할당하지 않는다
     }
 
     // 2. 적용 순서(층, 넣은 순서)로 정렬하고 섹션마다 다시 합친다. 실패하면 만든 값을 버린다.
@@ -1143,18 +1245,76 @@ Result<void> ConfigContext::Sync() noexcept {
         }
     }
 
-    SharedPtr<ConfigSnapshot> snapshot;
+    SharedPtr<const detail::NamedBlock> named;
     String signature(*allocator_);
-    if (auto prepared = detail::PrepareSnapshot(*state, settingResults.View(), values.View(),
-                                                snapshot, signature);
+    if (auto prepared = detail::PrepareNamedBlock(*state, settingResults.View(), values.View(),
+                                                  named, signature);
         !prepared) {
         return prepared;
     }
 
-    // 5. 입력 소유권을 새 목록으로 옮길 자리를 먼저 잡는다(이 뒤로는 실패하지 않는다).
+    // 유효값이 바뀐 CVar 칸(세대 +1)과 OnSynced의 번호 목록(이름 순서)이다.
+    Array<detail::SlotWrite> writes(*allocator_);
+    Array<const ConsoleSettingState*> changedVariables(*allocator_);
+    for (usize index = 0; index < settingResults.Size(); ++index) {
+        const ConsoleSettingState& setting = *state->settings[index];
+        if (setting.definition == nullptr || !settingResults[index]->changed) {
+            continue;
+        }
+
+        detail::SlotWrite write;
+        write.index =
+            platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&setting.definition->index);
+        write.value = &settingResults[index]->value;
+        if (auto pushed = writes.TryPushBack(write); !pushed) {
+            return pushed;
+        }
+
+        if (auto pushed = changedVariables.TryPushBack(&setting); !pushed) {
+            return pushed;
+        }
+    }
+
+    changedVariables.Sort(
+        [](const ConsoleSettingState* left, const ConsoleSettingState* right) noexcept {
+            return NameLess(left->name.View(), right->name.View());
+        });
+    Array<cvar::Index> variableIndexes(*allocator_);
+    Array<TypeId> changedSettings(*allocator_);
+    for (const ConsoleSettingState* setting : changedVariables) {
+        const cvar::Index index{
+            platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&setting->definition->index)};
+        if (auto pushed = variableIndexes.TryPushBack(index); !pushed) {
+            return pushed;
+        }
+    }
+
+    for (usize index = 0; index < sectionChanged.Size(); ++index) {
+        if (sectionChanged[index]) {
+            if (auto pushed = changedSettings.TryPushBack(state->sections[index]->ops.id);
+                !pushed) {
+                return pushed;
+            }
+        }
+    }
+
+    // 5. 입력 소유권을 새 목록으로 옮길 자리를 먼저 잡고, 바뀐 조각만 새로 만든 snapshot을 게시한다
+    // (게시가 실패하면 값은 Sync 전 그대로다). 이 뒤로는 실패하지 않는다.
     Array<UniquePtr<ConfigEntry>> next(*allocator_);
     if (auto reserved = next.TryReserve(plan.Size()); !reserved) {
         return reserved;
+    }
+
+    if (named.Get() != nullptr || !writes.IsEmpty()) {
+        if (auto published = detail::PublishSnapshot(
+                *state, named.Get() != nullptr ? &named : nullptr, writes.View());
+            !published) {
+            return published;
+        }
+
+        if (named.Get() != nullptr) {
+            state->renderSignature = Move(signature);
+        }
     }
 
     // 6. 맞바꾼다: 섹션 값·출처 스택·정규 JSON, 콘솔 설정 값, snapshot, 입력 목록.
@@ -1170,12 +1330,6 @@ Result<void> ConfigContext::Sync() noexcept {
         setting.value = Move(settingResults[index]->value);
         setting.text = Move(settingResults[index]->text);
         setting.sources = Move(settingResults[index]->sources);
-    }
-
-    if (snapshot.Get() != nullptr) {
-        state->snapshot = Move(snapshot);
-        state->snapshotGeneration = state->snapshot->Generation();
-        state->renderSignature = Move(signature);
     }
 
     state->pendingRestarts = Move(pendingRestarts);
@@ -1199,8 +1353,10 @@ Result<void> ConfigContext::Sync() noexcept {
     state->entries = Move(next);
     state->queue.Clear();
     state->dirty = false;
-    // 7. 값이 다 바뀐 뒤 명령을 실행하고 변경 콜백을 부른다(콜백은 새 값을 본다).
+    // 7. 값이 다 바뀐 뒤 명령을 실행하고 변경 콜백을 부른 다음 OnSynced를 부른다(콜백은 새 값을
+    // 본다).
     detail::RunCommandsAndCallbacks(*state, sectionChanged.View(), settingChanged.View());
+    NotifySynced(*state, variableIndexes.View(), changedSettings.View());
     return Result<void>::Success();
 }
 

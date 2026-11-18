@@ -169,6 +169,8 @@ internal static class CVarCompilerTests
                     "CVarError_InvalidUtf8"),
                 ("name_default_not_ascii", ("CVar<Name> X = cvar::Var<Name>(\"game.x\", \"caf\\xc3\\xa9\").Help(\"x\");"),
                     "CVarError_NameDefaultNotAscii"),
+                ("scoped_override_boot", "void F() noexcept { cvar::ScopedOverride scoped{GraphicsBackend, \"metal\"}; }",
+                    "BootCVar is fixed at boot; set it in a config file or with --set and restart"),
                 ("register_non_handle", "Result<void> F(config::ConfigContext& config) noexcept { int32 value = 1; return config.Register(value); }",
                     "ConfigContext::Register takes CVar or BootCVar handles (Config/CVar.h)"),
             ];

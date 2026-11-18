@@ -1,6 +1,6 @@
 # CVar·치트 명령 설계
 
-기준일: 2026-11-18, 개정 5(결정 확정, CVR1 구현·리뷰 반영). 실행 중 이름으로 읽고 바꾸는 타입 있는 설정 변수 **CVar**와, 개발 빌드에서 게임 상태를 직접 바꾸는 **치트 명령**을 정한다.
+기준일: 2026-11-19, 개정 6(결정 확정, CVR1·CVR2 구현). 실행 중 이름으로 읽고 바꾸는 타입 있는 설정 변수 **CVar**와, 개발 빌드에서 게임 상태를 직접 바꾸는 **치트 명령**을 정한다.
 
 이 문서는 [설정 계층과 콘솔 설정](ConfigSystem.ko.md)(이하 Config)의 5절 "콘솔 설정과 명령"을 대체하는 상세 스펙이다. 값 저장소·층·출처 스택·sync 지점·JSON 파일·`--set`·설정 struct는 Config를 그대로 쓰고, 이 문서는 그 위에 다음을 더한다.
 - 한 문장으로 정의하고 `.Get()`으로 읽는 타입 있는 핸들(`CVar<T>`·`BootCVar<T>`·`CVarGroup`·`ConsoleCommand`)
@@ -648,9 +648,21 @@ public:
 - 진단 코드 `Clamped`(Note)·`ValidationFailed`를 더했다(12절). 기본 영역 표에 `cvar`·`cheat`·`obj`를 더했다(15절 — Config 5.1 표와 같다).
 - 스펙과 다른 점: `Clamp()`를 수가 아닌 타입에 부르면 메시지가 `Clamp() is only available for numeric CVars (...)`다(4.3절 표는 `Range()` 문구 하나). `BootVarBuilder`에 `ConsoleReadOnly`도 없다(4.2절 목록 그대로). enum `Count` 검사는 ADL 표에만 건다(리플렉션 enum의 이름은 생성 메타데이터가 정한다). 수 입력과 `3 (High)` 표시는 ReflectionText 단일 값 표기가 enum 이름만 받으므로 CVR6 콘솔 도구에서 정한다.
 - 19절 컴파일 실패 목록 중 프리셋 항목(타입 불일치·`BootCVar` 항목·같은 등급 두 번)은 CVR5, `ScopedOverride`에 `BootCVar`는 CVR2에서 그 타입과 함께 더한다.
-- `Register`는 VD17의 즉시 게시 대신 문맥을 dirty로 표시하고 다음 `Sync`가 snapshot에 반영한다(이름 조회 `FindConsoleSetting`·`ConsoleValue`에는 바로 보인다). CVR2에서 조각 snapshot과 함께 VD17대로 즉시 게시한다.
+- (CVR1 당시) `Register`는 즉시 게시 대신 dirty 표시 뒤 다음 `Sync`가 반영했다. CVR2에서 VD17대로 즉시 게시로 바꿨다(아래).
 - `Register`의 소유 스레드 위반은 Debug assert가 아니라 모든 구성에서 `WrongThread`다(Config 관례 — 10절 문장을 이에 맞췄다).
 - 리뷰 반영(2026-11-18): 핸들 힙 생성 금지(`operator new` 삭제), Policy가 직접·중괄호 초기화·쉼표 뒤 선언자·비정적 멤버·`thread_local`·`const`·`constexpr`·핸들 타입 별칭을 잡고 `Templates`도 본다. `Register`는 모든 검사·기본값 해석(Name intern 포함)을 끝낸 뒤 대기 값을 넘기고, 넘기다 실패하면 이번 호출의 진단을 되돌린다(`ConfigDiagnostics::Mark`·`Rewind` — 실패한 등록은 진단을 남기지 않는다). Release `Cheat()` 정의는 enum 스키마도 버린다.
+
+**CVR2 구현(2026-11-19, `feature/cvar`)**
+- snapshot(7.2절): `Config/ConfigSnapshot.h`. CVar 칸은 `ChunkSlotCount`(256) 칸 조각의 표이고, 칸은 8 byte 값(실수는 double 비트)과 세대다. String·Name 값은 불변 텍스트 블록(`CVarText`)을 조각이 참조 계수로 쥔다. 이름 블록(CF2 독립 설정과 설정 struct 필드 중 RenderRead — 설정 struct의 렌더 읽기 블록)은 따로 공유되는 불변 블록이다. CVar 핸들은 이름 블록에 들지 않는다(VD6 — 모두 CVar 칸에 든다. CVR1의 `RenderRead` 플래그는 뺐다). Sync는 바뀐 칸이 든 조각만 복사하고, 이름 블록도 바뀐 경우에만 새로 만든다. 둘 다 그대로면 snapshot을 새로 만들지 않는다.
+- `Initialize`가 빈 snapshot(세대 1)을 게시하고 소유 스레드를 묶는다. 그래서 초기화 뒤 `Acquire()`는 null이 아니다(CF2의 "첫 Sync 전 null"을 바꿨다).
+- 스레드 묶음(7.1절): `thread_local` 묶음은 {snapshot, 게임 lane 통로}다. 게임 lane은 게시(Initialize·Register·Sync) 때 스스로 다시 묶는다(그 스레드가 명시 묶음·다른 문맥에 묶여 있으면 그대로 둔다). `cvar::SnapshotBinding`은 LIFO로 되돌리고, 앞 묶음이 게임 lane이면 그 문맥의 최신 snapshot으로 되돌린다. 묶음 수는 문맥의 통로(`WriteChannel` — 문맥과 snapshot들이 공유)가 원자 계수로 세고, 문맥 파괴 때 0이 아니면 Fatal이다.
+- `Get()`(7.1절): 묶음 → 조각 표 → 조각 → 칸. 묶음 없음 Fatal, 번호 없는 핸들은 게임 lane에서 Fatal·다른 스레드에서 기본값, 칸 없는 snapshot은 기본값이다. Name 변수의 기본값은 None이다(Name은 문맥 pool의 토큰이라 핸들이 상수로 담을 수 없다 — 칸이 있으면 등록 때 intern한 기본값이다). `BootCVar::Get()`도 같은 칸을 읽는다(봉인 블록은 CVR4).
+- 쓰기 큐(6.2절, VD8): 통로의 잠금 큐 하나에 다른 스레드의 `Set`·`Clear`·`ClearLayer`와 소유 스레드의 층 입력(`AddLayerText`·`AddAssignment`·`Unset`·`ReplaceLayerText`)이 모두 넣은 순서대로 든다(한도 `MaxQueuedChanges`, 넘으면 `Busy`). `Set`은 바로 범위·`Validate`·층 권한을 검사하고(값 표기를 만들어 콘솔 이름 입력으로 넣는다), Sync가 꺼낼 때 소유 스레드에서 다시 검사해 진단(`Clamped` 등)을 남기고 거부되면 버린다. 같은 (층, 태그)의 `Set`은 앞 `Set`을 바꾼다. 다른 스레드에서 쓰려면 문맥 allocator가 동시 호출을 받아야 한다.
+- 층(6.1절): `Hotfix`·`Code`·`Scoped`·`Server`를 더했다. `ScopedOverride`는 `scoped.<번호>` 고유 태그로 Scoped 층에 쓰고 소멸 때 그 태그를 지운다.
+- Sync 순서(10절): hook → 큐 꺼내기·재검사 → 적용·유효값 계산(묶음 펼침 반복은 CVR5) → 바뀐 칸 세대 → 게시·다시 묶기 → 명령·CF2 구독 콜백 → `OnSynced`. `OnSynced`는 바뀐 것이 없는 Sync에도 빈 목록으로 부른다. hot reload hook은 `ReplaceLayerText`로 새 큐에 (빼기, 새 입력)을 한꺼번에 넣는다.
+- `Set`의 오류는 `Result`의 `ErrorCode`다(묶음 없음 `NotFound`, 범위·`Validate`·층 권한 위반 `InvalidArgument`, 큐 가득 `Busy`, 문맥 없음 `ShuttingDown`). 6.2절의 `ValueOutOfRange`·`ValidationFailed` 등은 적용 때 진단 코드로 남는다.
+- CF2 이관(21절): `Snapshot()`은 `Acquire()`로 바꿨다(snapshot 구조가 바뀌어 같은 API를 둘 수 없다 — RenderBase와 시험을 함께 바꿨다). 변수별 `Subscribe`는 남겼다: 21절대로 쓰는 곳(LogHost)을 CVR7에서 핸들·`OnSynced`·`Watcher`로 한꺼번에 옮긴다(LogHost의 `log.*`는 아직 핸들이 없는 CF2 독립 설정이라 지금 옮기면 CVR7에서 한 번 더 바꾼다).
+- 넘긴 것: `Get(scope)`·`SetOptions::scope`(CVR3), 봉인 뒤 `BootSealed`·불변 부팅 블록(CVR4), 묶음 펼침 반복(CVR5), 권한(치트 허용·복제) 적용 때 재판정(CVR6 — 지금 적용 때 다시 보는 권한은 층 권한뿐이다), 렌더 lane이 프레임 packet snapshot을 묶는 연결(RenderBase RB1 — RenderBase는 Config를 모른다, 16절 엔진 연결)·Task 작업 문맥 슬롯으로 worker에 묶음 넘기기(16절), 묶음 없는 `Set`의 프로세스 기본 문맥(6.2절 — `HostSettings`가 정하는 것으로 CVR7 호스트 설정 이관 때 넣는다. 지금은 `NotFound`), macOS TSan(CI).
 
 **CVR1 이후 결정·후속 항목**
 - `Register`는 타입을 지운 `const cvar::detail::VarDefinition*`만 받는다. CVR5 `CVarGroup`·CVR6 `ConsoleCommand`가 같은 경로로 오려면 종류(`HandleKind`)를 가진 공통 정의 머리가 필요하다(지금 `VarDefinition`을 머리로 쓰고 종류별 꼬리를 덧붙이는 모양).
@@ -690,6 +702,7 @@ public:
 
 ## 23. 개정 이력
 
+- 개정 6(2026-11-19): CVR2 구현 결과를 20절에 적었다(조각 snapshot·이름 블록, Initialize 빈 snapshot, 스레드 묶음·묶음 계수, `Get()`·Name 기본값, 하나의 쓰기 큐와 적용 때 재검사, 새 층 넷, Sync 순서, `Set` 오류 코드, CF2 이관 — `Snapshot()`→`Acquire()`, `Subscribe`는 CVR7, 넘긴 것). CVR1 메모의 dirty 반영을 즉시 게시로 고쳤다.
 - 개정 5(2026-11-18): CVR1 리뷰 반영. 4.2절에 힙 생성 금지·Policy 거부 형태·정의 텍스트 규칙(Name 기본값 ASCII 한정으로 NFC 판정 대신)을, 10절에 `Register` 등 게임 lane API의 소유 스레드 위반은 모든 구성에서 `WrongThread`임을, 20절에 `Register`의 dirty 반영(즉시 게시는 CVR2)·리뷰 반영 내용·후속 항목(공통 정의 머리, 모듈 언로드, `rocks::Name`)을 적었다.
 - 개정 4(2026-11-18): CVR1 구현 결과를 20절에 적었다(헤더 구성, CVR2 전 저장소, `Get()`을 CVR2로 둔 까닭, 스택 범위 platform API, 진단 코드 둘, 스펙과 다른 점, 다음 단계로 넘긴 컴파일 실패 사례).
 - 개정 3(2026-11-18): Config CF3·CF4 병합(78d69a5d, Config 개정 5–8)에 맞췄다. 10절 Sync 순서에 sync hook(`AddSyncHook`, 큐 적용 전 0단계)을 넣고 hot reload 경로(`ConfigFileReloader` → hook → `ReplaceLayerText`·`Unset`)를 적었다. 10.1절 표에 sync hook 목록을 더했다. 9절 봉인 뒤 처리를 Config의 부팅 값 규칙과 같게 바꿨다: 직접 쓰기는 `BootSealed` 거부, 파일 층 변경은 재시작 대기(`GetPendingRestarts`, `RestartRequired`), 파생·휘발 층 변경은 지금 값 유지와 `BootValueIgnored`. 앞의 "봉인 뒤 모든 쓰기 거부"는 시작 뒤 기기 프로필 재적용마다 오류를 내고 hot reload한 파일의 다음 실행 효력을 보이지 못했다. 1·12·19절을 함께 고쳤다. 로깅 세션의 검사 함수 병합(c5fe9289)에 맞춰 CVR7 행에 `log.*` 대응(실행 중 셋, 나머지 `BootCVar`, 검사 함수 셋, enum 둘)을 적었다.

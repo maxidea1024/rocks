@@ -5,6 +5,7 @@
 #include <Core/Text/Json.h>
 #include <Object/TypeLease.h>
 #include <Platform/File.h>
+#include <Platform/Sync.h>
 #include <ReflectionText/TextCodecOptions.h>
 
 // 설정 문맥의 내부 상태다(ConfigContext의 pimpl — 모듈 안 구현만 쓴다).
@@ -69,14 +70,65 @@ struct ConfigEntry {
     String value;
 };
 
-// 큐 항목이다: 입력 추가 또는 (층, 태그) 빼기.
+// 큐 항목이다: 입력 추가 또는 빼기.
+// - entry가 있으면 입력을 더한다. replace면 그 앞에 같은 (층, 태그, 콘솔 이름)의 콘솔 이름 입력을
+// 뺀다
+//   (`CVar::Set` — 같은 자리의 이전 쓰기를 바꾼다). validateAtApply면 Sync가 적용 전에 소유
+//   스레드에서 다시 검사하고(진단을 남긴다) 거부되면 항목 전체를 버린다(다른 스레드에서 넣은 쓰기
+//   — 6.2절).
+// - entry가 없으면 빼기다: allTags면 층 전체, 아니면 (층, 태그)이고 path가 있으면 그 콘솔 이름
+// 입력만
+//   뺀다(`CVar::Clear`·`ClearLayer`·Unset).
 struct QueuedChange {
-    explicit QueuedChange(Allocator& allocator) noexcept : tag(allocator) {
+    explicit QueuedChange(Allocator& allocator) noexcept : tag(allocator), path(allocator) {
     }
 
     UniquePtr<ConfigEntry> entry;
     ConfigLayer layer = ConfigLayer::Engine;
     String tag;
+    String path;
+    bool replace = false;
+    bool allTags = false;
+    bool validateAtApply = false;
+};
+
+// 쓰기 큐 길이 한도다(넘으면 Busy — 버리지 않는다, 10.1절 표).
+inline constexpr usize MaxQueuedChanges = 65536;
+
+// 문맥의 쓰기 통로다(10.1절 — 다른 스레드가 문맥에 들어오는 길은 이것 하나다). 문맥과 그 문맥이
+// 만든 snapshot들이 참조 계수로 공유하므로 문맥보다 오래 살 수 있다(open이 거짓이면 쓰기를 받지
+// 않는다). mutex가 queue·current·open을 지킨다. 읽기 경로(`Get`)는 이 잠금을 잡지 않는다.
+struct WriteChannel {
+    explicit WriteChannel(Allocator& allocator) noexcept : allocator(allocator), queue(allocator) {
+    }
+
+    Allocator& allocator;
+    platform::Mutex mutex;
+    // 넣은 순서의 쓰기(소유 스레드의 층 입력 포함 — 하나의 순서다).
+    Array<UniquePtr<QueuedChange>> queue;
+    // 마지막으로 게시한 snapshot(Acquire가 돌려준다).
+    SharedPtr<const ConfigSnapshot> current;
+    bool open = true;
+    // 문맥 옵션의 사본(다른 스레드의 쓰기 검사가 읽는다 — 만든 뒤 바뀌지 않는다).
+    bool releaseRules = false;
+    // 살아 있는 cvar::SnapshotBinding 수(원자 — 문맥 파괴 때 0이어야 한다).
+    uint64 bindings = 0;
+};
+
+// 이름 블록이다(snapshot의 RenderRead 이름 값 — 만든 뒤 바뀌지 않는다).
+struct NamedBlock {
+    explicit NamedBlock(Allocator& allocator) noexcept : entries(allocator) {
+    }
+
+    struct Entry {
+        explicit Entry(Allocator& allocator) noexcept : name(allocator), value(allocator) {
+        }
+
+        String name;
+        FieldValue value;
+    };
+
+    Array<UniquePtr<Entry>> entries;
 };
 
 // 콘솔 설정 하나다(독립 설정 또는 설정 struct 필드). 필드 설정이면 section·field가 그 필드를
@@ -181,6 +233,8 @@ struct ConfigState {
     Array<UniquePtr<SectionState>> sections;
     // 적용 중인 입력(넣은 순서).
     Array<UniquePtr<ConfigEntry>> entries;
+    // 통로에서 꺼냈지만 아직 적용하지 않은 쓰기(넣은 순서 — Sync가 실패하면 다음 Sync가 이어서
+    // 적용한다).
     Array<UniquePtr<QueuedChange>> queue;
     uint64 nextSequence = 1;
     // 섹션 등록처럼 큐 밖의 변경이 있어 다음 Sync가 다시 합쳐야 한다.
@@ -193,7 +247,9 @@ struct ConfigState {
     Array<PendingCommand> pendingCommands;
     Array<Subscription> subscriptions;
     uint64 nextSubscription = 1;
-    SharedPtr<ConfigSnapshot> snapshot;
+    // 쓰기 통로(문맥과 snapshot들이 공유)와 마지막으로 게시한 snapshot이다.
+    SharedPtr<WriteChannel> channel;
+    SharedPtr<const ConfigSnapshot> snapshot;
     uint64 snapshotGeneration = 0;
     // 마지막 snapshot 값의 서명(이름 순서 `이름=표기` 줄)이다. 같으면 snapshot을 재사용한다.
     String renderSignature;
@@ -206,6 +262,8 @@ struct ConfigState {
     Array<String> ignoredBootWrites;
     // sync 지점 앞 hook(등록 순서).
     Array<SyncHook> syncHooks;
+    // Sync마다 한 번 부르는 변경 알림(7.3절).
+    MulticastDelegate<void(const SyncChanges&)> onSynced;
 
     // 텍스트 codec 옵션(Edit 용도, Map 키별 병합, 대상 Registry의 Name pool).
     reflection_text::TextCodecOptions CodecOptions() const noexcept;
@@ -280,8 +338,13 @@ StringView CheckLayerAllowed(const ConfigState& state, ConfigLayer layer,
 
 // 콘솔 이름으로 쓰는 값의 층 허용 판정이다(콘솔 플래그 — 읽기 전용·품질 구성원·개발 전용·사용자
 // 설정). code에 거부 진단 종류를 쓴다. 쓸 수 있으면 빈 view다. 시작 뒤 고정 값은 Sync가 지킨다.
-StringView CheckConsoleLayer(const ConfigState& state, ConfigLayer layer, uint32 consoleFlags,
+StringView CheckConsoleLayer(bool releaseRules, ConfigLayer layer, uint32 consoleFlags,
                              ConfigDiagnosticCode& code) noexcept;
+
+// CVar 핸들 정의의 성질을 콘솔 설정 플래그로 옮긴다. 부팅 변수는 StartupOnly(CompleteStartup 뒤
+// 고정 — 9절), Cheat는 DevelopmentOnly(VD5 — 출시 규칙 시험에서 숨김·고정)다. 모든 CVar는
+// snapshot의 CVar 칸에 든다(VD6 — 이름 블록의 RenderRead가 아니다).
+uint32 ConsoleFlagsOfDefinition(const cvar::detail::VarDefinition& definition) noexcept;
 
 // 설정 필드 플래그(SettingsFieldFlags)를 콘솔 플래그(ConsoleSettingFlags)로 옮긴다.
 uint32 ConsoleFlagsOfField(uint32 settingsFlags) noexcept;
@@ -374,11 +437,74 @@ Result<void> HoldBootSettings(ConfigState& state, Span<ConfigEntry* const> order
                               Span<const UniquePtr<SettingResult>> settings,
                               Array<UniquePtr<PendingRestart>>& pending) noexcept;
 
-// 새 값으로 설정 snapshot을 만든다. RenderRead 값의 서명(signature에 쓴다)이 이전과 같고 snapshot이
-// 이미 있으면 out은 null(재사용)이다. 아니면 세대 +1의 새 snapshot이다.
-Result<void> PrepareSnapshot(ConfigState& state, Span<const UniquePtr<SettingResult>> settings,
-                             Span<void* const> sectionValues, SharedPtr<ConfigSnapshot>& out,
-                             String& signature) noexcept;
+// 새 값으로 이름 블록(RenderRead 콘솔 설정·설정 struct 필드 — CVar 핸들 제외)을 만든다. 값의
+// 서명(signature에 쓴다)이 이전과 같고 snapshot이 이미 있으면 out은 null(재사용)이다.
+Result<void> PrepareNamedBlock(ConfigState& state, Span<const UniquePtr<SettingResult>> settings,
+                               Span<void* const> sectionValues, SharedPtr<const NamedBlock>& out,
+                               String& signature) noexcept;
+
+// CVar 칸 하나의 새 값이다(value는 그 설정 종류의 값).
+struct SlotWrite {
+    uint32 index = 0;
+    const FieldValue* value = nullptr;
+};
+
+// 지금 snapshot을 바탕으로 새 snapshot을 만들어 게시한다(소유 스레드 — 10절 4단계·5절 등록 즉시
+// 게시). named가 null이 아니면 이름 블록을 바꾸고, writes의 칸만 새 값으로 바꾼다(바뀐 칸이 든
+// 조각만 새로 만들고 나머지는 공유한다 — 칸의 세대는 이전 세대 + 1, 처음이면 1). 세대 번호는 이전 +
+// 1이다. 게시하면 통로의 current를 바꾸고 소유 스레드를 다시 묶는다(그 스레드가 다른 문맥·명시
+// 묶음에 묶여 있으면 그대로 둔다). 오류: 할당 실패(그때 게시하지 않는다).
+Result<void> PublishSnapshot(ConfigState& state, const SharedPtr<const NamedBlock>* named,
+                             Span<const SlotWrite> writes) noexcept;
+
+// 설정 snapshot의 내부 접근이다(ConfigSnapshot의 friend — Config 모듈 안만 쓴다).
+struct SnapshotAccess {
+    static const SharedPtr<WriteChannel>& Channel(const ConfigSnapshot& snapshot) noexcept {
+        return snapshot.channel_;
+    }
+
+    static Result<SharedPtr<ConfigSnapshot>> Make(Allocator& allocator) noexcept;
+
+    static void Assign(ConfigSnapshot& snapshot, uint64 generation,
+                       SharedPtr<const NamedBlock> named,
+                       SharedPtr<WriteChannel> channel) noexcept {
+        snapshot.generation_ = generation;
+        snapshot.named_ = Move(named);
+        snapshot.channel_ = Move(channel);
+    }
+
+    static Array<SharedPtr<const CVarChunk>>& Chunks(ConfigSnapshot& snapshot) noexcept {
+        return snapshot.chunks_;
+    }
+
+    static const Array<SharedPtr<const CVarChunk>>&
+    Chunks(const ConfigSnapshot& snapshot) noexcept {
+        return snapshot.chunks_;
+    }
+
+    static const SharedPtr<const NamedBlock>& Named(const ConfigSnapshot& snapshot) noexcept {
+        return snapshot.named_;
+    }
+};
+
+// 쓰기 큐에 changes를 이 순서대로 한꺼번에 넣는다(어느 스레드에서나). 오류: 통로가 닫혔으면
+// ShuttingDown, 넣으면 MaxQueuedChanges를 넘으면 Busy, 할당 실패. 실패하면 아무것도 넣지 않는다.
+Result<void> Enqueue(WriteChannel& channel, Span<UniquePtr<QueuedChange>> changes) noexcept;
+
+// 층 입력 하나(branch 파일 내용)를 검사하고 쓰기 큐에 넣는다(ConfigContext::AddLayerText의 본체 —
+// 소유 스레드). replace면 그 앞에 (층, 태그) 빼기를 함께 넣는다(ReplaceLayerText). 오류는
+// AddLayerText와 같다.
+Result<void> QueueLayerText(ConfigState& state, ConfigLayer layer, StringView tag,
+                            StringView branch, StringView sourceName, StringView text,
+                            bool replace) noexcept;
+
+// 쓰기 큐에 든 것이 있는지다.
+bool HasQueuedChanges(WriteChannel& channel) noexcept;
+
+// 통로의 쓰기를 넣은 순서대로 꺼내 state.queue 뒤에 붙인다(Sync 1단계 앞 — 소유 스레드). 다른
+// 스레드에서 넣은 쓰기(validateAtApply)는 여기서 다시 검사해 진단을 남기고, 거부되면 버린다. 입력
+// 순번(sequence)을 여기서 매긴다. 오류: 할당 실패(꺼낸 것은 state.queue에 남는다).
+Result<void> DrainQueue(ConfigState& state) noexcept;
 
 // 맞바꾼 뒤의 일이다: 큐에 든 콘솔 명령을 실행하고, 값이 바뀐 대상의 구독 콜백을 구독 순서대로
 // 부른다.

@@ -25,10 +25,18 @@ StringView ConfigLayerName(ConfigLayer layer) noexcept {
         return "DeviceProfile";
     case ConfigLayer::User:
         return "User";
+    case ConfigLayer::Hotfix:
+        return "Hotfix";
     case ConfigLayer::Session:
         return "Session";
+    case ConfigLayer::Code:
+        return "Code";
+    case ConfigLayer::Scoped:
+        return "Scoped";
     case ConfigLayer::Console:
         return "Console";
+    case ConfigLayer::Server:
+        return "Server";
     }
 
     return {};

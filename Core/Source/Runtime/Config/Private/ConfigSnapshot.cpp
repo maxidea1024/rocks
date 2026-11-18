@@ -1,0 +1,216 @@
+#include "ConfigState.h"
+
+#include <Platform/Clock.h>
+#include <Platform/Memory.h>
+
+// 설정 snapshot의 조회·만들기·게시다(Docs/Design/CVarSystem.ko.md 7.2·10절 — CVR2).
+namespace rocks::config {
+
+namespace {
+
+// byte 순서 비교(사전식)다(이름 블록의 정렬 순서와 같다).
+bool NameLess(StringView left, StringView right) noexcept {
+    const usize count = left.ByteCount() < right.ByteCount() ? left.ByteCount() : right.ByteCount();
+    for (usize index = 0; index < count; ++index) {
+        const auto a = static_cast<uint8>(left.Data()[index]);
+        const auto b = static_cast<uint8>(right.Data()[index]);
+        if (a != b) {
+            return a < b;
+        }
+    }
+
+    return left.ByteCount() < right.ByteCount();
+}
+
+using detail::NamedBlock;
+
+} // namespace
+
+ConfigSnapshot::ConfigSnapshot(Allocator& allocator) noexcept : chunks_(allocator) {
+}
+
+ConfigSnapshot::~ConfigSnapshot() = default;
+
+usize ConfigSnapshot::Count() const noexcept {
+    return named_.Get() != nullptr ? named_->entries.Size() : 0;
+}
+
+StringView ConfigSnapshot::NameAt(usize index) const noexcept {
+    if (index >= Count()) {
+        platform::Fatal("ConfigSnapshot::NameAt index out of range");
+    }
+
+    return named_->entries[index]->name.View();
+}
+
+const FieldValue& ConfigSnapshot::ValueAt(usize index) const noexcept {
+    if (index >= Count()) {
+        platform::Fatal("ConfigSnapshot::ValueAt index out of range");
+    }
+
+    return named_->entries[index]->value;
+}
+
+const FieldValue* ConfigSnapshot::Find(StringView name) const noexcept {
+    usize low = 0;
+    usize high = Count();
+    while (low < high) {
+        const usize middle = low + (high - low) / 2;
+        if (NameLess(named_->entries[middle]->name.View(), name)) {
+            low = middle + 1;
+        } else {
+            high = middle;
+        }
+    }
+
+    return low < Count() && named_->entries[low]->name.View() == name ? &named_->entries[low]->value
+                                                                      : nullptr;
+}
+
+namespace detail {
+
+Result<SharedPtr<ConfigSnapshot>> SnapshotAccess::Make(Allocator& allocator) noexcept {
+    return SharedPtr<ConfigSnapshot>::TryMake(allocator, allocator);
+}
+
+namespace {
+
+// 설정 값(value — 콘솔 설정 종류)을 칸에 쓴다. String·Name은 새 텍스트 블록을 만든다.
+Result<void> WriteSlot(Allocator& allocator, const FieldValue& value, CVarSlot& slot,
+                       SharedPtr<const CVarText>& text) noexcept {
+    switch (value.kind) {
+    case ValueKind::Bool:
+        slot.bits = value.boolean ? 1 : 0;
+        text = SharedPtr<const CVarText>();
+        return Result<void>::Success();
+    case ValueKind::Float32:
+        slot.bits = platform::BitCast<uint64>(static_cast<double>(value.float32));
+        text = SharedPtr<const CVarText>();
+        return Result<void>::Success();
+    case ValueKind::Float64:
+        slot.bits = platform::BitCast<uint64>(value.float64);
+        text = SharedPtr<const CVarText>();
+        return Result<void>::Success();
+    case ValueKind::Utf8String:
+    case ValueKind::Name: {
+        auto made = SharedPtr<CVarText>::TryMake(allocator, allocator);
+        if (!made) {
+            return Result<void>::Failure(made.Error());
+        }
+
+        if (value.kind == ValueKind::Utf8String) {
+            if (auto assigned = made.Value()->text.TryAssign(value.string.View()); !assigned) {
+                return assigned;
+            }
+        } else {
+            made.Value()->name = value.name;
+        }
+
+        slot.bits = 0;
+        text = Move(made.Value());
+        return Result<void>::Success();
+    }
+    default:
+        slot.bits = static_cast<uint64>(value.signedInteger);
+        text = SharedPtr<const CVarText>();
+        return Result<void>::Success();
+    }
+}
+
+} // namespace
+
+Result<void> PublishSnapshot(ConfigState& state, const SharedPtr<const NamedBlock>* named,
+                             Span<const SlotWrite> writes) noexcept {
+    const ConfigSnapshot* previous = state.snapshot.Get();
+    auto made = SnapshotAccess::Make(state.allocator);
+    if (!made) {
+        return Result<void>::Failure(made.Error());
+    }
+
+    ConfigSnapshot& snapshot = *made.Value();
+    // 조각 표는 이전 snapshot의 것을 공유하고, 쓰는 칸이 든 조각만 복사본으로 바꾼다.
+    Array<SharedPtr<const CVarChunk>>& chunks = SnapshotAccess::Chunks(snapshot);
+    if (previous != nullptr) {
+        if (auto copied = chunks.TryAppend(SnapshotAccess::Chunks(*previous).View()); !copied) {
+            return copied;
+        }
+    }
+
+    Array<SharedPtr<CVarChunk>> copies(state.allocator);
+    for (const SlotWrite& write : writes) {
+        const usize chunk = write.index / ChunkSlotCount;
+        if (chunk >= chunks.Size()) {
+            if (auto grown = chunks.TryResize(chunk + 1); !grown) {
+                return grown;
+            }
+        }
+
+        if (chunk >= copies.Size()) {
+            if (auto grown = copies.TryResize(chunk + 1); !grown) {
+                return grown;
+            }
+        }
+
+        if (copies[chunk].Get() == nullptr) {
+            auto copy = SharedPtr<CVarChunk>::TryMake(state.allocator);
+            if (!copy) {
+                return Result<void>::Failure(copy.Error());
+            }
+
+            if (chunks[chunk].Get() != nullptr) {
+                *copy.Value() = *chunks[chunk];
+            }
+
+            copies[chunk] = Move(copy.Value());
+        }
+
+        const usize slotIndex = write.index % ChunkSlotCount;
+        CVarSlot& slot = copies[chunk]->slots[slotIndex];
+        const uint32 generation = slot.generation + 1;
+        if (auto written =
+                WriteSlot(state.allocator, *write.value, slot, copies[chunk]->texts[slotIndex]);
+            !written) {
+            return written;
+        }
+
+        slot.generation = generation;
+    }
+
+    // 여기부터는 실패하지 않는다.
+    for (usize chunk = 0; chunk < copies.Size(); ++chunk) {
+        if (copies[chunk].Get() != nullptr) {
+            chunks[chunk] = SharedPtr<const CVarChunk>(Move(copies[chunk]));
+        }
+    }
+
+    SharedPtr<const NamedBlock> block;
+    if (named != nullptr) {
+        block = *named;
+    } else if (previous != nullptr) {
+        block = SnapshotAccess::Named(*previous);
+    }
+
+    const uint64 generation = previous != nullptr ? previous->Generation() + 1 : 1;
+    SnapshotAccess::Assign(snapshot, generation, Move(block), state.channel);
+    SharedPtr<const ConfigSnapshot> published(Move(made.Value()));
+    {
+        platform::LockGuard lock(state.channel->mutex);
+        state.channel->current = published;
+    }
+
+    // 소유 스레드(게임 lane)를 다시 묶는다. 이 스레드가 이 문맥의 자동 묶음이거나 아무 묶음도 없을
+    // 때만이다(명시 묶음·다른 문맥의 자동 묶음은 그대로 둔다).
+    ThreadBinding& binding = CurrentBinding;
+    if (binding.snapshot == nullptr || binding.gameLane == state.channel.Get()) {
+        binding.snapshot = published.Get();
+        binding.gameLane = state.channel.Get();
+    }
+
+    state.snapshot = Move(published);
+    state.snapshotGeneration = generation;
+    return Result<void>::Success();
+}
+
+} // namespace detail
+
+} // namespace rocks::config
