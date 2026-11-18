@@ -193,7 +193,10 @@ public:
     // - 없으면 세 키(직전에 남긴 키·이 키·다음 키)가 모두 User·Break가 아닐 때만 이 키 시간에서
     //   비교한다.
     // 지운 뒤 AutoSetTangents를 부르지 않는다(D10 — UE와 결과를 맞추려면 호출자가 이어서 부른다).
-    // 키가 3개 미만이면 아무것도 하지 않는다. 차가 NaN인 키(NaN 값·접선)는 남긴다(UE는 지운다).
+    // 키가 3개 미만이면 아무것도 하지 않는다. 비교한 차가 NaN이면 그 키를 남긴다(UE `>` 비교는
+    // 지운다). 비표본판은 이 키 시간에서 비교하므로 NaN 값 키는 늘 남는다. 표본판은 표본 시간의
+    // 평가에 NaN이 나올 때만 남는다(그 키가 영향을 주는 구간에 표본이 없거나 NaN이 평가에 쓰이지
+    // 않는 구간 — Constant 보간의 뒤 키 등 — 이면 NaN 값·접선 키도 지울 수 있다).
     // 표본판의 표본 수는 키 간격 × 프레임 속도에 비례하고, 호출 하나에 2^24개를 넘으면
     // CapacityExceeded다(UE는 상한이 없다).
     // 실패: tolerance가 NaN·음수면 InvalidArgument, 표본 상한을 넘으면 CapacityExceeded, 할당
@@ -207,6 +210,15 @@ public:
     // InvalidArgument, 할당 실패면 OutOfMemory.
     Result<void> TryRemoveRedundantKeys(float tolerance, float first, float last,
                                         Optional<FrameRate> sampleRate = {}) noexcept;
+
+    // 위와 같고, 남긴 키의 원래 index(오름차순 — 순서를 보존하는 부분열)를 keptIndices에 담는다(키
+    // 핸들 표 CurveKeyHandleTable::TryRemoveRedundantKeys가 남은 키의 핸들을 맞추는 데 쓴다). 지운
+    // 키가 없으면 0..N−1이다. keptIndices는 그 allocator로 다시 채운다. 실패하면 커브와
+    // keptIndices가 그대로다.
+    Result<void> TryRemoveRedundantKeys(Array<usize>& keptIndices, float tolerance,
+                                        Optional<FrameRate> sampleRate = {}) noexcept;
+    Result<void> TryRemoveRedundantKeys(Array<usize>& keptIndices, float tolerance, float first,
+                                        float last, Optional<FrameRate> sampleRate = {}) noexcept;
 
     // 리플렉션 경로의 검증 hook이다(설계 9.1절): 키 시간이 모두 유한하고 오름차순이면 Success,
     // 아니면 InvalidArgument. 할당하지 않고 어느 스레드에서나 불린다.

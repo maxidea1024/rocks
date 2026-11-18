@@ -6,7 +6,7 @@ public sealed class D3D12Graphics : EngineModuleRules
 {
     protected override string ModuleName => "D3D12Graphics";
 
-    protected override string[] RequiredModules => ["Graphics"];
+    protected override string[] RequiredModules => ["Graphics", "DxgiGraphics"];
 
     public override NativeModuleInput Configure(BuildContext context)
     {

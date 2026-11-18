@@ -477,17 +477,45 @@ usize StepKeyIndex(Span<Key> keys, float time, bool defaultBeforeFirst) noexcept
 // 계단 커브의 중복 키 제거다(UE FIntegralCurve·FStringCurve::RemoveRedundantKeys — 원래 배열에서
 // 앞·뒤 키와 값이 같은 안쪽 키를 지운다). UE와 달리 남은 키 하나를 기본값으로 바꾸지 않는다(설계
 // 15절 9). same(a, b)가 값 같음이다.
+// 키를 지우지 않은 중복 제거의 남은 index(0..count − 1)를 keptIndices에 채운다(nullptr면 할 일이
+// 없다). 할당 실패면 OutOfMemory이고 keptIndices는 그대로다.
+inline Result<void> FillIdentityIndices(Array<usize>* keptIndices, usize count) noexcept {
+    if (keptIndices == nullptr) {
+        return Result<void>::Success();
+    }
+
+    Array<usize> indices(keptIndices->GetAllocator());
+    if (auto reserved = indices.TryReserve(count); !reserved) {
+        return reserved;
+    }
+
+    for (usize index = 0; index < count; ++index) {
+        static_cast<void>(indices.TryPushBack(index)); // 예약했으므로 실패하지 않는다
+    }
+
+    *keptIndices = Move(indices);
+    return Result<void>::Success();
+}
+
 template <class Key, class Same>
-Result<void> RemoveStepRedundantKeys(Array<Key>& keys, Same&& same) noexcept {
+Result<void> RemoveStepRedundantKeys(Array<Key>& keys, Same&& same,
+                                     Array<usize>* keptIndices = nullptr) noexcept {
     const usize count = keys.Size();
     if (count < 3) {
-        return Result<void>::Success();
+        return FillIdentityIndices(keptIndices, count);
     }
 
     Allocator& allocator = keys.GetAllocator();
     Array<uint8> removed(allocator);
     if (auto sized = removed.TryResize(count); !sized) {
         return sized;
+    }
+
+    Array<usize> indices(keptIndices != nullptr ? keptIndices->GetAllocator() : allocator);
+    if (keptIndices != nullptr) {
+        if (auto reserved = indices.TryReserve(count); !reserved) {
+            return reserved;
+        }
     }
 
     usize kept = count;
@@ -500,6 +528,14 @@ Result<void> RemoveStepRedundantKeys(Array<Key>& keys, Same&& same) noexcept {
     }
 
     if (kept == count) {
+        if (keptIndices != nullptr) {
+            for (usize index = 0; index < count; ++index) {
+                static_cast<void>(indices.TryPushBack(index)); // 예약했으므로 실패하지 않는다
+            }
+
+            *keptIndices = Move(indices);
+        }
+
         return Result<void>::Success();
     }
 
@@ -511,10 +547,17 @@ Result<void> RemoveStepRedundantKeys(Array<Key>& keys, Same&& same) noexcept {
     for (usize index = 0; index < count; ++index) {
         if (removed[index] == 0) {
             static_cast<void>(next.TryPushBack(Move(keys[index]))); // 예약했으므로 실패하지 않는다
+            if (keptIndices != nullptr) {
+                static_cast<void>(indices.TryPushBack(index));
+            }
         }
     }
 
     keys = Move(next);
+    if (keptIndices != nullptr) {
+        *keptIndices = Move(indices);
+    }
+
     return Result<void>::Success();
 }
 
@@ -542,14 +585,16 @@ inline Result<Interval<float>> FiniteRange(float minimum, float maximum) noexcep
     return Interval<float>::TryMake(minimum, maximum);
 }
 
-// 두 커브의 공통 평가 틀이다(UE FRichCurve::Eval·FSimpleCurve::Eval, RemapTimeValue — 설계 5절).
-// plainBounds면 PlainCurve 경계(첫 키 이하는 앞 갈래, 마지막 키 이상은 뒤 갈래), 아니면
-// TangentCurve 경계다. segment(k1, k2, time)가 구간 값이다.
-template <class Key, class Segment>
-float EvaluateCurve(const ScalarCurveBase& curve, Span<Key> keys, float time, float fallback,
-                    bool plainBounds, Segment&& segment) noexcept {
+// 스칼라 커브의 공통 평가 틀이다(UE FRichCurve::Eval·FSimpleCurve::Eval, RemapTimeValue — 설계
+// 5절). keys는 Size()와 operator[](키 — 참조나 값)를 가진 시간 오름차순 키 목록이다(Span, 또는
+// PackedTangentCurve가 풀어 내는 키 보기). plainBounds면 PlainCurve 경계(첫 키 이하는 앞 갈래,
+// 마지막 키 이상은 뒤 갈래), 아니면 TangentCurve 경계다. segment(k1, k2, time)가 구간 값이다.
+template <class Keys, class Segment>
+float EvaluateCurve(const Optional<float>& defaultValue, CurveExtrapolation preExtrapolation,
+                    CurveExtrapolation postExtrapolation, const Keys& keys, float time,
+                    float fallback, bool plainBounds, Segment&& segment) noexcept {
     const usize count = keys.Size();
-    float value = curve.defaultValue.HasValue() ? curve.defaultValue.Value() : fallback;
+    float value = defaultValue.HasValue() ? defaultValue.Value() : fallback;
     float offset = 0.0f;
     if (count == 0) {
         return value + offset; // UE와 같이 0을 더한다(−0은 +0이 된다)
@@ -559,8 +604,8 @@ float EvaluateCurve(const ScalarCurveBase& curve, Span<Key> keys, float time, fl
         return platform::PlatformMath::QuietNaN<float>();
     }
 
-    const Key& firstKey = keys[0];
-    const Key& lastKey = keys[count - 1];
+    const auto& firstKey = keys[0];
+    const auto& lastKey = keys[count - 1];
     auto cyclic = [](CurveExtrapolation mode) noexcept {
         return mode != CurveExtrapolation::Linear && mode != CurveExtrapolation::Constant;
     };
@@ -569,7 +614,7 @@ float EvaluateCurve(const ScalarCurveBase& curve, Span<Key> keys, float time, fl
     if (count >= 2) {
         const bool before = time <= firstKey.time;
         const bool after = !before && time >= lastKey.time;
-        const CurveExtrapolation mode = before ? curve.preExtrapolation : curve.postExtrapolation;
+        const CurveExtrapolation mode = before ? preExtrapolation : postExtrapolation;
         if ((before || after) && cyclic(mode)) {
             const float minimum = firstKey.time;
             const float maximum = lastKey.time;
@@ -589,7 +634,7 @@ float EvaluateCurve(const ScalarCurveBase& curve, Span<Key> keys, float time, fl
     const bool front = plainBounds ? time <= firstKey.time : time < firstKey.time;
     const bool inside = plainBounds ? time < lastKey.time : time <= lastKey.time;
     if (count < 2 || front) {
-        if (curve.preExtrapolation == CurveExtrapolation::Linear && count > 1) {
+        if (preExtrapolation == CurveExtrapolation::Linear && count > 1) {
             const float timeDifference = keys[1].time - firstKey.time;
             if (math::IsNearlyZero(timeDifference, SlopeTimeTolerance)) {
                 value = firstKey.value;
@@ -618,8 +663,8 @@ float EvaluateCurve(const ScalarCurveBase& curve, Span<Key> keys, float time, fl
 
         value = segment(keys[first - 1], keys[first], time);
     } else {
-        if (curve.postExtrapolation == CurveExtrapolation::Linear) {
-            const Key& previousKey = keys[count - 2];
+        if (postExtrapolation == CurveExtrapolation::Linear) {
+            const auto& previousKey = keys[count - 2];
             const float timeDifference = previousKey.time - lastKey.time;
             if (math::IsNearlyZero(timeDifference, SlopeTimeTolerance)) {
                 value = lastKey.value;

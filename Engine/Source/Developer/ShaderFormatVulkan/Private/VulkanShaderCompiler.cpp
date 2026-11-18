@@ -247,6 +247,12 @@ Result<void> Reflect(graphics::ShaderStage stage, Span<const uint32> raw,
         binding.sourceSpace = original->set;
         binding.shape = BindingShape(reflected.descriptor_type, original->user_type);
         binding.sampledType = SampledType(reflected);
+        // StructuredBuffer<T>는 { T _m0[]; } block이라 첫 member 배열의 stride가 원소 byte다.
+        if (binding.shape == graphics::ShaderResourceShape::StructuredBuffer &&
+            reflected.block.member_count != 0 && reflected.block.members != nullptr) {
+            binding.structureStride = reflected.block.members[0].array.stride;
+        }
+
         binding.writable =
             reflected.descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_IMAGE ||
             reflected.descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER ||

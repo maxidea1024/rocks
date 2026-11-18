@@ -330,7 +330,7 @@ void VulkanDevice::AssignPendingUploads(uint64 value) noexcept {
 Result<void> VulkanDevice::ReserveRetireCapacity(usize extra) noexcept {
     const usize live = buffers_.Size() + bufferViews_.Size() + orphanBuffers_.Size() +
                        textures_.Size() + pipelines_.Size() + readbacks_.Size() +
-                       swapChains_.Size();
+                       swapChains_.Size() + framebuffers_.Size();
     return retired_.TryEnsureCapacity(retired_.Size() + live + extra);
 }
 
@@ -368,6 +368,10 @@ void VulkanDevice::DestroyRetired(Retired& entry) noexcept {
 
     if (entry.view != VK_NULL_HANDLE) {
         functions_.vkDestroyImageView(device_, entry.view, nullptr);
+    }
+
+    if (entry.attachmentView != VK_NULL_HANDLE) {
+        functions_.vkDestroyImageView(device_, entry.attachmentView, nullptr);
     }
 
     if (entry.image != VK_NULL_HANDLE) {

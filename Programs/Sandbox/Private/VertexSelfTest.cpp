@@ -363,7 +363,7 @@ struct Bench {
         desc.vertex = {hlsl, vertexGlsl};
         desc.pixel = {hlsl, Text(ColorPixelGlsl)};
         desc.layout = layout;
-        desc.colorFormat = PixelFormat::RGBA8Unorm;
+        desc.colorFormats[0] = PixelFormat::RGBA8Unorm;
         return device->CreatePipeline(desc);
     }
 

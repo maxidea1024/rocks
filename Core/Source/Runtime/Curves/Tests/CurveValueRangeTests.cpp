@@ -231,7 +231,8 @@ TangentCurveKey WeightedKey(float time, float value, float arrive, float arriveW
 
 // 얕은 접힘(CV5 리뷰 1): Evaluate의 3차 방정식 풀이는 판별식 |D| ≤ 1e-8에서 근을 겹근으로 근사해
 // 수학적 매개변수 집합 밖의 매개변수를 고른다. 범위는 그 풀이가 고르는 매개변수까지 넣으므로 리뷰
-// 반례 Evaluate(0.24326344) ≈ −13.353도 범위 안이다(고치기 전 최솟값 ≈ −13.178).
+// 반례의 실제 최솟값 Evaluate(0.243263736) ≈ −13.3529도 범위 안이다(고치기 전 최솟값 ≈ −13.178).
+// 여유는 float 반올림만큼(1e-6·(1 + 폭) — 독립 확인의 최대 상대 초과는 2.25e-7)이다.
 TEST(CurveValueRange_ShallowFoldCounterexample) {
     SystemAllocator allocator;
     TangentCurve curve(allocator);
@@ -241,9 +242,9 @@ TEST(CurveValueRange_ShallowFoldCounterexample) {
     auto range = curve.TryGetValueRange();
     REQUIRE(range);
     const float span = range.Value().max - range.Value().min;
-    const float slack = 1.0e-4f * (1.0f + span);
-    const float value = curve.Evaluate(0.24326344f);
-    CHECK(value < -13.3f);
+    const float slack = 1.0e-6f * (1.0f + span);
+    const float value = curve.Evaluate(0.243263736f);
+    CHECK(value < -13.35f);
     CHECK(value >= range.Value().min - slack && value <= range.Value().max + slack);
     Sampled sampled = SampleRange(curve, 200000);
     SampleNearFolds(curve, sampled);

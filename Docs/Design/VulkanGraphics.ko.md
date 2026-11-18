@@ -22,7 +22,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 | 창 출력 | 중간 color 이미지에 그리고 `EndFrame`에서 swapchain 이미지를 얻어 blit 후 present | UE 기본(`r.Vulkan.DelayAcquireBackBuffer=1`, `P/VulkanDevice.cpp:86–93`, `P/VulkanViewport.cpp:745–756`). swapchain 형식(BGRA·RGBA)과 상관없이 파이프라인이 `RGBA8UnormSrgb` 하나로 호환된다 |
 | 좌표·앞면 | 음수 viewport 높이와 `VK_FRONT_FACE_COUNTER_CLOCKWISE`·`Back → BACK_BIT`(D3D12와 같은 매핑). UE 매핑(`CLOCKWISE`·`CM_CW → FRONT_BIT`)은 컬링은 같지만 `SV_IsFrontFace`가 D3D12와 반대라 따르지 않는다(11절) | ShaderSystem 7.2절 8항, UE `P/VulkanPendingState.cpp:500–506`, `P/VulkanPipeline.cpp:936`, `P/VulkanState.cpp:186–188`, `Engine/Shaders/Private/MaterialTemplate.ush:4641–4648` |
 | 셰이더 | SH2 전에는 개발용 컴파일 훅(`ShaderSourceCompiler`)이 HLSL 원문을 SPIR-V로 바꾼다. 구현은 Developer `ShaderFormatVulkan`(DXC). Release에는 넣지 않는다 | ShaderSystem P4(Release 배제), 9절 |
-| 검증 | `enableValidation`이면 `VK_LAYER_KHRONOS_validation`과 `VK_EXT_debug_utils` messenger. ERROR 심각도를 `ValidationErrorCount`가 센다 | UE `P/VulkanLayers.cpp:48,410`, `P/VulkanDebug.cpp:195–198`. UE는 세지 않고 로그만 남긴다 |
+| 검증 | `enableValidation`이면 `VK_LAYER_KHRONOS_validation`과 `VK_EXT_debug_utils` messenger. ERROR 심각도의 validation 메시지를 `ValidationErrorCount`가 센다(로더 GENERAL 메시지는 로그만) | UE `P/VulkanLayers.cpp:48,410`, `P/VulkanDebug.cpp:195–198`. UE는 세지 않고 로그만 남긴다 |
 
 ## 2. UE 5.8 VulkanRHI 조사
 
@@ -131,7 +131,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - 파이프라인 layout은 파이프라인마다 만든다(개정 6). 개발 컴파일 훅의 리플렉션(set·binding·종류에 더해 원문 register·space, 자원 모양(이미지·texel buffer·구조화·raw·상수·샘플러), 원소 타입, 쓰기 여부)을 PipelineDesc 고정 배치와 대조해 set 0(VS)·set 1(PS) layout을 만든다(ShaderSystem 7.2절 4항: set = 단계, binding = 종류 순서). binding이 없는 단계는 장치 공용 빈 layout이다.
   - PS t0 이미지 → `SAMPLED_IMAGE`(SetTexture), PS s0 → `SAMPLER`(그 텍스처의 샘플러), 단계 모두의 t1–t4 → typed는 `UNIFORM_TEXEL_BUFFER`, 구조화·raw는 `STORAGE_BUFFER`(SetBufferView slot 0–3). 그 밖(다른 register·space, 상수 버퍼, 쓰기 자원)은 생성이 `InvalidArgument`다.
   - push constant 80 byte(`DrawConstants`, VS·PS, 7.2절 2항)는 모든 파이프라인 layout과 공용 layout(두 set이 빈 layout)이 같은 범위라 공용 layout으로 올린다(사양 "Pipeline Layout Compatibility").
-- 그리기 descriptor set은 그리기 직전(바뀐 것이 있을 때만) 지금 명령 버퍼 기록의 pool에서 받아 쓰고 파이프라인 layout으로 묶는다. pool은 기록마다 최대 8개(set 1024개씩)이고, 그 기록을 다시 쓸 때(앞 제출의 fence가 끝났다) `vkResetDescriptorPool`로 통째로 비운다. UE 비-bindless의 프레임 단위 pool과 같은 방식이다(`P/VulkanPendingState.cpp:30–319`). 텍스처마다 고정 set을 두던 개정 5 방식은 파이프라인마다 layout이 달라지면서 없앴다. 한 프레임에 descriptor를 바꾸는 그리기가 8192번을 넘으면 그 뒤 그리기는 무시된다(`IgnoredDraws`, LastError).
+- 그리기 descriptor set은 그리기 직전(바뀐 것이 있을 때만) 지금 명령 버퍼 기록의 pool에서 받아 쓰고 파이프라인 layout으로 묶는다. pool은 기록마다 최대 8개이고 첫 pool이 set 1024개, 다음 pool은 앞 pool의 두 배다. 그 기록을 다시 쓸 때(앞 제출의 fence가 끝났다) `vkResetDescriptorPool`로 통째로 비운다. UE 비-bindless의 프레임 단위 pool과 같은 방식이다(`P/VulkanPendingState.cpp:30–319`). 텍스처마다 고정 set을 두던 개정 5 방식은 파이프라인마다 layout이 달라지면서 없앴다. 한 프레임에 descriptor를 바꾸는 그리기가 1024 × (2^8 − 1) = 261120번을 넘으면 그 뒤 그리기는 무시되고(`IgnoredDraws`, LastError) 처음 한 번 Warning 로그를 남긴다(GX1·GX2 리뷰 반영).
 
 ## 7. 파이프라인·render pass
 
@@ -162,7 +162,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
   - 검증 층을 켠 장치에서 `before`가 추적 상태와 다르면 `ValidationErrorCount`를 올리고 `LastError`에 남긴다(GPU에는 추적 상태를 쓴다).
 - barrier API는 1.1 core `vkCmdPipelineBarrier`다(sync2는 1.3).
 - 업로드 묶음 명령 버퍼는 시작에 "앞 제출의 읽기 → 전송 쓰기"(WAR) 실행 의존, 끝에 "전송 쓰기 → 정점·index·셰이더 읽기" 메모리 의존을 둔다. 같은 queue의 제출 순서가 뒤 프레임까지 의존을 잇는다(사양 "Execution and Memory Dependencies"의 submission order 범위).
-- 한 묶음 안에서 같은 버퍼 구간을 두 번 쓰면(초기 데이터 + 갱신, 갱신 두 번) 두 복사는 순서가 없다. 그래서 묶음 안 버퍼 쓰기 구간을 기록하고 겹치는 복사 앞에 TRANSFER_WRITE → TRANSFER_WRITE barrier를 둔다. 이미지는 복사마다 layout 전이 barrier가 있어 해당 없다.
+- 한 묶음 안에서 같은 버퍼 구간을 두 번 쓰거나(초기 데이터 + 갱신, 갱신 두 번) 앞 복사가 쓴 구간을 원본으로 읽으면(초기 데이터 직후의 `ReadBuffer`) 두 복사는 순서가 없다. 그래서 묶음 안 버퍼 쓰기 구간을 기록하고 대상이나 원본이 겹치는 복사 앞에 TRANSFER_WRITE → TRANSFER_READ·WRITE barrier를 둔다(WAW·RAW, synchronization validation으로 RAW 경고가 사라지는 것을 확인했다). 이미지는 복사마다 layout 전이 barrier가 있어 해당 없다.
 
 ## 9. 창 출력(swapchain)
 
@@ -183,6 +183,16 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - staging pool: `StagingPool`에 `HOST_VISIBLE | HOST_COHERENT` 버퍼(`TRANSFER_SRC`)를 대 준다. IO가 바로 쓸 수 있는 고정 주소다.
 - readback: `HOST_CACHED` 우선 버퍼에 `vkCmdCopyImageToBuffer`(빽빽한 행), 버퍼에 `TRANSFER_WRITE → HOST_READ` barrier, 곧바로 제출한다. `TryReadback`은 fence가 끝났을 때만 (필요하면 invalidate 뒤) 복사한다.
 
+### 10.1 파이프라인·패스·명령 기록 확장(GX3·GX4)
+
+- render pass는 열쇠(색 형식·load·store 0–8, 깊이 형식·깊이/스텐실 load·store, 읽기 전용 깊이)마다 캐시한다. layout은 시작·끝 모두 attachment layout(색 `COLOR_ATTACHMENT_OPTIMAL`, 깊이 `DEPTH_STENCIL_ATTACHMENT_OPTIMAL`·읽기 전용 `DEPTH_STENCIL_READ_ONLY_OPTIMAL`)이고 전이는 바깥 barrier(GX5)가 한다. 바깥 의존은 색·깊이 attachment 쓰기 → 읽기·쓰기다. 파이프라인은 같은 형식의 호환 render pass로 만든다(load·store·layout은 호환성에 들지 않는다).
+- framebuffer는 attachment view 묶음(크기 포함)으로 캐시하고, attachment 텍스처를 놓을 때 그 view를 쓰는 framebuffer를 회수 목록으로 넘긴다(텍스처마다 framebuffer를 두던 방식을 없앴다). 스텐실이 있는 깊이 타깃은 깊이·스텐실 aspect 둘의 attachment view를 따로 만든다(기본 view는 깊이 aspect만 읽는다).
+- 전이·dispatch·복사로 render pass를 닫으면 모든 attachment를 LOAD로 다시 연다. attachment가 attachment 상태를 떠났으면 열지 않는다.
+- 파이프라인 상태: 타깃별 블렌드(`independentBlend`가 없으면 같아야 한다), alpha-to-coverage, 깊이 bias(`depthBiasClamp` 기능), `depthClampEnable`, 깊이·스텐실 상태, 기본도형, 동적 viewport·scissor·스텐실 기준. `SetViewport`는 음수 높이로 뒤집는다.
+- compute: 개발 훅이 `CSMain`을 `cs_6_0`으로 컴파일하고 set 0에 읽기(t1–t4)·쓰기(u0–u3, storage buffer·storage texel buffer) binding을 둔다. 모든 파이프라인 layout의 push constant 범위는 VS·PS·CS다. dispatch는 render pass 밖에서 기록하고 descriptor set은 compute bind point에 묶는다. 프레임 descriptor pool에 storage texel buffer 크기를 더했다.
+- 버퍼 쓰기 명령(dispatch·`vkCmdCopyBuffer`·UAV clear의 `vkCmdFillBuffer`) 앞에는 앞선 읽기와의 실행 의존(WAR), 뒤에는 모든 버퍼 읽기·쓰기 단계(간접 인자·정점·index·셰이더·전송)로 가는 메모리 barrier를 둔다. 렌더 그래프 밖 기록의 보수적 순서이고 렌더 그래프가 버퍼 전이를 내면 좁힐 수 있다.
+- `CopyTexture`는 두 mip 0을 복사 원본·대상 상태로 바꿔 `vkCmdCopyImage`(이미지 aspect 그대로)다.
+
 ## 11. 좌표·앞면·컬(C7, ShaderSystem 7.2절 8항)
 
 - viewport는 `y = 높이`, `height = -높이`다(D3D와 같은 NDC y 위를 화면 위로). 깊이 범위 [0, 1]은 Vulkan 기본이다.
@@ -200,7 +210,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - 주파수: `1e9 / timestampPeriod`를 가장 가까운 정수 Hz로 공개한다(`DeviceInfo::timestampFrequency`는 정수다). period가 정수 ns가 아닌 장치는 반올림만큼 변환 오차가 생긴다. disjoint 감지는 Vulkan에 없으므로 `timestampDisjointDetection` false다.
 - calibration: `VK_KHR_calibrated_timestamps`(없으면 EXT)의 `[DEVICE, 호스트]`. 호스트 domain은 Windows `QUERY_PERFORMANCE_COUNTER`(PlatformBase `MonotonicTicks`와 같은 QPC), Android `CLOCK_MONOTONIC`(같은 원천, ns)이다. 두 domain을 장치가 주지 않으면 `clockCalibration` false다. `uncertaintyNanoseconds`는 드라이버가 준 `maxDeviation`(ns)이다(UE는 버린다. Rocks는 오차를 공개한다).
 - debug marker: label 함수는 instance 확장 명령이라 `vkGetInstanceProcAddr`로 얻는다. `VK_EXT_debug_utils`가 켜져 있으면 `vkCmdBegin/EndDebugUtilsLabelEXT`(UTF-8 그대로, `MaxDebugMarkerNameBytes`로 자름)이고 `debugMarkers` 참이다. 없으면 거짓이고 두 호출은 아무것도 하지 않는다.
-- 검증 messenger: ERROR 심각도의 검증·일반 메시지를 원자 계수로 센다(`ValidationErrorCount`). 메시지는 `Graphics.Vulkan.Validation` 범주(`LogGraphicsVulkanValidation`, 장치 생성·손실은 `LogGraphicsVulkan`, 둘 다 `Graphics/GraphicsLog.h`)에 Warning으로 메시지 ID마다 한 번 남긴다(LoggingSystem 13절). 콜백은 드라이버 스레드에서도 불리므로 직렬화를 전제하는 `ValidationMessageFilter` 대신 같은 규칙(표 `MaxLoggedValidationIds`가 차면 새 ID는 남기지 않고 개수만 센다)을 잠금 없이 원자 연산과 고정 크기 ID 표로 지킨다.
+- 검증 messenger: ERROR 심각도의 validation 종류(`VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT`) 메시지만 원자 계수로 센다(`ValidationErrorCount`). 로더·드라이버의 GENERAL 메시지(예: 레지스트리에 남은 implicit layer JSON을 열지 못함)는 API 사용 오류가 아니므로 로그로만 남긴다(2026-11-18, Epic overlay layer 항목이 남은 기계에서 확인). 메시지는 `Graphics.Vulkan.Validation` 범주(`LogGraphicsVulkanValidation`, 장치 생성·손실은 `LogGraphicsVulkan`, 둘 다 `Graphics/GraphicsLog.h`)에 Warning으로 메시지 ID마다 한 번 남긴다(LoggingSystem 13절). 콜백은 드라이버 스레드에서도 불리므로 직렬화를 전제하는 `ValidationMessageFilter` 대신 같은 규칙(표 `MaxLoggedValidationIds`가 차면 새 ID는 남기지 않고 개수만 센다)을 잠금 없이 원자 연산과 고정 크기 ID 표로 지킨다.
 - 실패 보존: 장치 안 실패는 `LastError`에 "단계: VkResult 이름(값)"을 적는다. 생성 실패는 `DeviceCreateReport`(code·nativeCode = `VkResult`·stage·detail)로 돌려준다.
 
 ## 13. 스레드 모델(GX10·GX11)·셰이더 경로
@@ -296,3 +306,4 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - 개정 4(2026-11-18): 로깅 LG7(`Graphics/GraphicsLog.h` 범주, 검증 메시지 ID 표 규칙, 12절)과 픽셀 형식 PF3(`GetPixelFormatCaps`, 능력으로 생성 판정, 6절)을 반영했다.
 - 개정 5(2026-11-18): lavapipe 창 경로가 끊긴 데스크톱 세션에서 실패하는 원인을 mesa WSI 소스·GDI 프로브·이전 코드 대조로 확정하고, 세션 연결 판정(`QueryDesktopSessionState`)으로 그 경우만 근거를 단 NOT RUN으로 바꿨다(17절).
 - 개정 6(2026-11-18): RenderBase GX1(장치 능력·MSAA 표본 수)·GX2 버퍼 1단계. 버퍼 용도·버퍼 view·`ReadBuffer`(6절), 파이프라인별 layout과 기록 단위 descriptor pool(6절 descriptor, 개정 5의 텍스처별 고정 set 대체), 켜는 장치 기능·확장, 업로드 끝 barrier에 간접 인자·상수·compute 단계를 더했다.
+- 개정 7(2026-11-18): GX1·GX2 리뷰 반영(업로드 묶음 RAW barrier, descriptor pool 두 배 증가·경고, `atomic64`의 `shaderInt64`, `apiVersion` 실효 판, ray tracing 확장 공개, VS layer·viewport 출력과 `multiViewport`·viewport 수)과 RenderBase GX3·GX4(10.1절): render pass 열쇠·framebuffer 캐시·깊이 attachment view, 파이프라인 고정 기능 상태, compute 파이프라인과 쓰기 view, 간접 그리기·dispatch, 버퍼 쓰기 명령 barrier, 복사·UAV clear.

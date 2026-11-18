@@ -160,6 +160,8 @@ public:
     graphics::DeviceInfo Info() const noexcept override;
     const graphics::DeviceCaps& Caps() const noexcept override;
     uint32 GetPixelFormatSampleCounts(graphics::PixelFormat format) const noexcept override;
+    Result<graphics::PipelineHandle>
+    CreateComputePipeline(const graphics::ComputePipelineDesc& desc) noexcept override;
     Result<graphics::BufferViewHandle>
     CreateBufferView(graphics::BufferHandle buffer,
                      const graphics::BufferViewDesc& desc) noexcept override;
@@ -178,9 +180,7 @@ public:
     Result<graphics::CommandContext*>
     BeginFrame(graphics::SwapChainHandle swapChain,
                const graphics::ClearColor& clear) noexcept override;
-    Result<graphics::CommandContext*>
-    BeginOffscreen(graphics::TextureHandle target,
-                   const graphics::ClearColor& clear) noexcept override;
+    Result<graphics::CommandContext*> BeginPass(const graphics::PassDesc& pass) noexcept override;
     Result<graphics::GpuFencePoint> EndFrame() noexcept override;
     Result<void> ReadPixels(graphics::TextureHandle target, Span<uint8> out) noexcept override;
     void Retire(graphics::BufferHandle buffer) noexcept override;
@@ -276,6 +276,21 @@ private:
                         uint64 offset) noexcept override;
     void SetTexture(graphics::TextureHandle texture) noexcept override;
     void SetBufferView(uint32 slot, graphics::BufferViewHandle view) noexcept override;
+    void SetWritableBufferView(uint32 slot, graphics::BufferViewHandle view) noexcept override;
+    void DrawIndirect(graphics::BufferHandle arguments, uint64 offset) noexcept override;
+    void DrawIndexedIndirect(graphics::BufferHandle arguments, uint64 offset) noexcept override;
+    void Dispatch(uint32 groupCountX, uint32 groupCountY, uint32 groupCountZ) noexcept override;
+    void DispatchIndirect(graphics::BufferHandle arguments, uint64 offset) noexcept override;
+    void SetViewport(const graphics::Viewport& viewport) noexcept override;
+    void SetScissor(const graphics::ScissorRect& scissor) noexcept override;
+    void SetStencilReference(uint32 reference) noexcept override;
+    Result<void> CopyBuffer(graphics::BufferHandle destination, uint64 destinationOffset,
+                            graphics::BufferHandle source, uint64 sourceOffset,
+                            uint64 size) noexcept override;
+    Result<void> CopyTexture(graphics::TextureHandle destination,
+                             graphics::TextureHandle source) noexcept override;
+    Result<void> ClearWritableBufferView(graphics::BufferViewHandle view,
+                                         uint32 value) noexcept override;
     void SetConstants(const graphics::DrawConstants& constants) noexcept override;
     void Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept override;
     void DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept override;

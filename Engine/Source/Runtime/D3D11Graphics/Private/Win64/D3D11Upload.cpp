@@ -605,6 +605,10 @@ Result<ReadbackRequest> D3D11Device::RequestReadbackLocked(TextureHandle target)
         static_cast<uint64>(readback.width) * readback.height * readback.bytesPerPixel;
     auto added = readbacks_.TryAdd(Move(readback));
     if (!added) {
+        // 제출한 복사가 아직 쓰는 staging이다. 완료를 기다리지 않고 놓지 않도록 소멸 때까지 둔다.
+        ComRef<IUnknown> object;
+        object.Attach(readback.staging.Detach());
+        KeepUntilDestruction(Move(object));
         return Result<ReadbackRequest>::Failure(added.Error());
     }
 

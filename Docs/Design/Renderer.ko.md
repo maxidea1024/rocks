@@ -1,6 +1,6 @@
 # 렌더러(Renderer) 설계
 
-기준일: 2026-11-18, 개정 8(초안). UE 5.8 Renderer 모듈이 맡는 일 가운데 **렌더 경로**(Forward+·Deferred)와 그 위에 올라가는 그림자·투명·하늘·안개·후처리의 구조, GI 두 축과 PathTracing 모드의 연결점을 Rocks에 세우는 설계 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-18, 개정 9(초안). UE 5.8 Renderer 모듈이 맡는 일 가운데 **렌더 경로**(Forward+·Deferred)와 그 위에 올라가는 그림자·투명·하늘·안개·후처리의 구조, GI 두 축과 PathTracing 모드의 연결점을 Rocks에 세우는 설계 스펙이다. 범위는 다음과 같다.
 - 장면 표현과 게임 → 렌더 전달, view와 가시성
 - 공통 frame graph, Forward+와 Deferred가 갈라지는 곳
 - GBuffer layout, light grid, 조명 평가, 그림자, 투명·하늘·안개, 후처리·업스케일 연결
@@ -868,11 +868,11 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 
 | ID | 대상 | 요구 | 기한 |
 |---|---|---|---|
-| RQ1 | GX2 버퍼 | 용도: structured(SRV·UAV), typed buffer(SRV·UAV, `PixelFormat` 지정), 간접 인자. typed buffer 형식 `R32Uint`·`RGBA32Float`(GLES image 가능 형식, 8.1절) | RS0 |
+| RQ1 | GX2 버퍼 | 용도: structured(SRV·UAV), typed buffer(SRV·UAV, `PixelFormat` 지정), 간접 인자. typed buffer 형식 `R32Uint`·`RGBA32Float`(GLES image 가능 형식, 8.1절) **구현(2026-11-18, GX2 버퍼, RenderBase 4.4절)**: 버퍼 용도 비트·structured·raw·typed·간접 인자, 버퍼 view, `ReadBuffer`. GLES typed 형식은 ES 3.2 표 대조(`R32Uint`·`RGBA32Float` 읽기·쓰기 가능) | RS0 |
 | RQ2 | GX2 텍스처 | `D32FloatS8Uint`·`D32Float` 깊이, 깊이 읽기 전용 view와 스텐실 plane view(PixelFormat 10절), MSAA, cube array(반사 capture), 3D(LUT·후속 GI), UAV 텍스처, mip별 view(HZB) | RS0·RS3 |
-| RQ3 | GX4 | MRT 최대 8(타깃별 load·store·clear), 깊이 attachment 읽기 전용 표시, 스텐실 ref, dispatch·간접 dispatch, indexed instanced 간접 draw, 텍스처 복사(history·distortion), UAV clear, viewport·scissor | RS0 |
-| RQ4 | GX1 | `maxColorAttachments`, 형식별 MSAA 표본 수, typed UAV load 형식(HZB `R32Float`·`RG16Float`), texel buffer 형식 능력, 깊이 clamp, VS layer·viewport 출력과 viewport 수, 64 bit atomic, RT tier, HDR 출력 능력 | RS0·RS3·RS11 |
-| RQ5 | GX3 | 깊이 `GreaterEqual`·`Equal`, slope-scaled 깊이 bias, 깊이 clamp, 타깃별 블렌드(decal), 스텐실 연산, 색 쓰기 mask, alpha-to-coverage | RS0·RS3·RS8 |
+| RQ3 | GX4 | MRT 최대 8(타깃별 load·store·clear), 깊이 attachment 읽기 전용 표시, 스텐실 ref, dispatch·간접 dispatch, indexed instanced 간접 draw, 텍스처 복사(history·distortion), UAV clear, viewport·scissor **구현(2026-11-18, GX4 5beb4540)**: `BeginPass`(색 8·깊이·load·store·clear·읽기 전용 깊이), `Dispatch`·`DispatchIndirect`·`DrawIndirect`·`DrawIndexedIndirect`, `CopyBuffer`·`CopyTexture`(mip 0), `ClearWritableBufferView`, viewport·scissor, 스텐실 ref. 남은 것: mip·slice attachment(GX2 텍스처), 구조화 view UAV clear는 `Unsupported`(D3D12 debug layer 거부), GLES indexed 간접은 index offset 0만 | RS0 |
+| RQ4 | GX1 | `maxColorAttachments`, 형식별 MSAA 표본 수, typed UAV load 형식(HZB `R32Float`·`RG16Float`), texel buffer 형식 능력, 깊이 clamp, VS layer·viewport 출력과 viewport 수, 64 bit atomic, RT tier, HDR 출력 능력 **구현(2026-11-18, GX1)**: `DeviceCaps`(MRT·형식별 MSAA·typed UAV load·texel buffer 형식·깊이 clamp·layer·viewport 출력·atomic64·RT tier·HDR 출력·viewport 수). 측정값은 RenderBase 4.4절 | RS0·RS3·RS11 |
+| RQ5 | GX3 | 깊이 `GreaterEqual`·`Equal`, slope-scaled 깊이 bias, 깊이 clamp, 타깃별 블렌드(decal), 스텐실 연산, 색 쓰기 mask, alpha-to-coverage **구현(2026-11-18, GX3 5beb4540)**: `Graphics/PipelineState.h`의 비교 함수 전부(깊이 기본 reverse-Z `GreaterEqual`), 깊이 bias·기울기·상한, 깊이 clamp, 타깃별 블렌드·색 쓰기 mask, alpha-to-coverage, 스텐실 연산, 기본도형 5종, compute 파이프라인. 능력 밖은 `CheckPipelineFeatures`가 `Unsupported` | RS0·RS3·RS8 |
 | RQ6 | GX5 | 깊이 읽기 전용 상태(DSV 읽기 + SRV 동시, D3D·Vulkan·Metal. GLES는 feedback loop이므로 깊이 복사 경로, 8.2절), compute 사슬의 UAV→SRV, MSAA resolve 상태 | RS0 |
 | RQ7 | RenderBase 9.5·9.6절 | 15.2절 상수 slot 6개 등록, 자원 부분을 펼쳐 넣기 구조체로 공유하는 방식(같은 자원 묶음을 여러 pass가 포함)을 9.6절 규칙에 적는다. **반영(RenderBase 개정 15, 9.5·9.6절)**: slot 여섯의 선언 위치(`RendererShaders`)·묶는 단위·상수 버퍼 예산, 자원 묶음 규칙(이름 `<묶음>_<멤버>`, 쓰는 멤버만 의존). 개정 8: `PrecomputedLighting`을 그리기별 바인딩으로 옮겨 공유 slot은 다섯, `Scene`은 `ViewSet` 단위, 상수 버퍼 예산 최대 10(RenderBase 개정 16) | RS0 |
 | RQ8 | RenderBase 10절 | 정점 입력 타입이 GPU Scene typed buffer로 인스턴스 변환을 읽는 규약, 인스턴스 offset 루트 상수. **반영(RenderBase 개정 15, 10.5절)**: `InstanceIndices[instanceListOffset + SV_InstanceID]`로 인스턴스 번호를 얻고 GPU Scene typed buffer를 읽는다. 늘 목록을 거친다(RenderBase 결정 R13). 루트 상수 앞 16 byte `MeshDrawConstants`. 개정 8: typed buffer 원소 상한과 넘침(RenderBase 결정 R16) | RS0 |
@@ -976,3 +976,4 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 - 개정 6(2026-11-18): 셰이더 시스템 개정 14 반영(RQ11·RQ22 Vulkan 값, 19.1절 MRT 행).
 - 개정 7(2026-11-18): 18절 요구 RQ7·RQ8·RQ15·RQ16·RQ17(RenderBase 개정 15)과 RQ13·RQ14(셰이더 시스템 개정 16) 반영 상태를 18.1·18.2절에 적었다. RQ14를 반영하면서 MRT 상한을 프로필 공통 상한으로 검사하던 빈틈을 셰이더 시스템에서 고쳤다.
 - 개정 8(2026-11-18): RenderBase 개정 16·셰이더 시스템 개정 17(교차 검증 반영)에 맞췄다. 8.1절 원소 상한과 셀 좌표 clamp, 8.2절 MSAA resolve 범위(결정 R17), 8.3절 반사 capture 알파, 9.2절과 결정 RN10의 point 한 번 그리기를 layer가 아니라 viewport 출력으로 바로잡음, 13.1절 지원표 행, 15.2절 `PrecomputedLighting` 그리기별 바인딩·`ForwardLight` local 광원 수·`Scene`의 `ViewSet` 단위·상수 버퍼 예산, 결정 RN9 재검토 조건, 19.2절 측정 두 건, 18.1절 RQ4·7·8·14–17 행.
+- 개정 9(2026-11-18): Graphics GX1–GX4 구현(98b6e524)을 18절 RQ1·RQ3·RQ4·RQ5에 적었다.
