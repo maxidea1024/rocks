@@ -74,8 +74,20 @@ enum class JsonErrorCode : uint8 {
     OutOfMemory
 };
 
-// 오류 코드의 짧은 영어 설명(정적 문자열)이다.
+// 읽기 문법이다(JsonReadOptions::syntax).
+enum class JsonSyntax : uint8 {
+    Strict, // RFC 8259(기본). 줄 주석만 JsonReadOptions::allowLineComments로 받는다.
+    Json5   // JSON5 1.0.0 — 사람이 손으로 고치는 설정 파일용(JsonReadOptions::syntax 참고)
+};
+
+// 오류 코드의 짧은 영어 설명(정적 문자열)이다. syntax를 주면 그 문법에 맞는 문구다(Json5의
+// InvalidLiteral은 Infinity·NaN도 든다 — C# Json5Reader.Message와 같은 문구).
+//
+// 사용 예:
+//   const JsonError error = document.Parse(text, options);
+//   Report(JsonErrorMessage(error.code, options.syntax));
 const char* JsonErrorMessage(JsonErrorCode code) noexcept;
+const char* JsonErrorMessage(JsonErrorCode code, JsonSyntax syntax) noexcept;
 
 // 입력 위치. line·column은 1부터다. CRLF는 줄바꿈 1개, CR 단독도 줄바꿈이고, column은 code point
 // 단위(tab은 1칸, 건너뛴 BOM은 세지 않는다)다. U+2028·U+2029는 Json5에서도 줄바꿈으로 세지 않는다
@@ -102,12 +114,6 @@ enum class JsonWarningCode : uint8 {
 struct JsonWarning {
     JsonWarningCode code;
     JsonPosition position;
-};
-
-// 읽기 문법이다(JsonReadOptions::syntax).
-enum class JsonSyntax : uint8 {
-    Strict, // RFC 8259(기본). 줄 주석만 JsonReadOptions::allowLineComments로 받는다.
-    Json5   // JSON5 1.0.0 — 사람이 손으로 고치는 설정 파일용(JsonReadOptions::syntax 참고)
 };
 
 // 읽기 한도와 읽기 규칙 옵션. 한도를 넘으면 해당 오류다. 깊이 한도는 JsonWriter의 기본 깊이 한도와
@@ -146,14 +152,14 @@ struct JsonReadOptions {
     //   예약어(`null`, `true`)도 키가 된다. 범주는 Core의 Unicode 표(GetGeneralCategory, Unicode
     //   18.0.0)로 판정한다 — ES5.1이 가리키는 Unicode 3.0보다 넓다.
     // - 문자열: 작은따옴표(`'it\'s'`), 이스케이프 `\'` `\v` `\0`(뒤에 10진 숫자가 오면
-    // InvalidEscape)
-    //   `\xHH`, 그 밖 글자 이스케이프는 그 글자 자체(`\a` → a, 10진 숫자 `\1`–`\9`는
-    //   InvalidEscape), 줄 이음(백슬래시 + LF·CR·CRLF·U+2028·U+2029는 없는 것으로), 이스케이프하지
-    //   않은 U+2028· U+2029와 LF·CR 밖의 제어 문자. 이스케이프하지 않은 LF·CR은 ControlCharacter다.
-    // - 숫자: 앞 `+`, 16진 정수(`0x1F`, 부호 가능), 앞·뒤 소수점(`.5`, `5.`),
-    // `Infinity`·`-Infinity`·
-    //   `NaN`(부호 가능). 숫자 바로 뒤에 식별자 글자가 붙으면 InvalidNumber, 앞자리 0(`01`)도
-    //   오류다.
+    //   InvalidEscape) `\xHH`, 그 밖 글자 이스케이프는 그 글자 자체(`\a` → a, 10진 숫자
+    //   `\1`–`\9`는 InvalidEscape), 줄 이음(백슬래시 + LF·CR·CRLF·U+2028·U+2029는 없는 것으로),
+    //   이스케이프하지 않은 U+2028·U+2029와 LF·CR 밖의 제어 문자. 이스케이프하지 않은 LF·CR은
+    //   ControlCharacter다. 길이 한도(maxStringBytes)는 이스케이프를 푼 값의 UTF-8 byte 수다.
+    // - 숫자: 앞 `+`, 16진 정수(`0x1F`, 부호 가능), 앞·뒤 소수점(`.5`, `5.`), `Infinity`·
+    //   `-Infinity`·`NaN`(부호 가능). 숫자 바로 뒤에 식별자 글자가 붙으면 InvalidNumber다(`1x`,
+    //   `0x1g`). 단 `Infinity1`·`-Infinityx`·`+NaN1`처럼 단어 뒤에 붙으면 InvalidLiteral이다.
+    //   앞자리 0(`01`)도 InvalidNumber다.
     //
     // 숫자 값과 원문 토큰(RawNumber): 유한한 수의 토큰은 Strict 문법이 같은 종류·값으로 읽는 RFC
     // 8259 꼴로 바꿔 보관한다 — 앞 `+`를 버리고 `.5` → `0.5`, `5.` → `5.0`, `5.e3` → `5.0e3`,
@@ -163,7 +169,7 @@ struct JsonReadOptions {
     // NumberOutOfRange다(JSON5는 double로 반올림한다 — Rocks 정책). `Infinity`·`-Infinity`·`NaN`은
     // Double(±무한대, NaN은 부호와 무관하게 양의 quiet NaN 비트 하나)이고 토큰은
     // "Infinity"·"-Infinity"·"NaN"이다. JSON에 없는 값이라 JsonWriter는 Canonical·Preserve 모두
-    // InvalidArgument로 거부하고, JsonEquals는 비트로 비교한다 (NaN끼리 같다). TryGetDouble은
+    // InvalidArgument로 거부하고, JsonEquals는 비트로 비교한다(NaN끼리 같다). TryGetDouble은
     // 그대로 돌려주므로 유한한 값이 필요한 호출자가 검사한다.
     //
     // JSON5와 다른 Rocks 정책: 중복 키는 DuplicateKey(JSON5는 뒤 값이 이긴다), 잘못된 UTF-8은
@@ -390,9 +396,9 @@ struct JsonWriterOptions {
 //
 // 오류: 구조 오류(키 없이 값, 같은 객체의 중복 키 — 자기 reader가 거부한다, 닫지 않은 컨테이너,
 // Finish 뒤 호출 등)·NaN·Inf(Json5로 읽은 문서 값 포함, Preserve도)·잘못된 UTF-8·무효 JsonValue는
-// InvalidArgument, maxDepth 초과는
-// CapacityExceeded, builder·색인 할당 실패는 OutOfMemory. 한 번 실패하면 이후 호출은 모두 실패하고
-// builder에는 실패 전까지 쓴 내용이 남는다(그 결과는 버린다). 복사하지 않는다.
+// InvalidArgument, maxDepth 초과는 CapacityExceeded, builder·색인 할당 실패는 OutOfMemory. 한 번
+// 실패하면 이후 호출은 모두 실패하고 builder에는 실패 전까지 쓴 내용이 남는다(그 결과는 버린다).
+// 복사하지 않는다.
 class JsonWriter final {
 public:
     // maxDepth는 JsonReadOptions::maxDepth와 같은 기본값이다(쓴 결과를 기본 옵션으로 다시 읽을 수

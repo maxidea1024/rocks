@@ -2,18 +2,18 @@
 
 // JSON5 읽기(JsonSyntax::Json5)의 C++·C# 공용 대조 사례다. C++ Json5Tests.cpp가 이 헤더를 그대로
 // 쓰고, C# Json5ReaderTests(Programs/Rocks.ToolTests)가 이 파일을 텍스트로 읽어 같은 표를 C 문자열
-// 규칙
-// (\\ \" \n \r \t \v \f \xHH, 이웃 문자열 이어 붙이기)으로 풀어 같은 기대값을 확인한다 — 두 구현이
-// 같은 입력 집합을 받고 같은 값·오류 코드·위치를 내는지 본다. 그래서 이 파일의 표 안에서는 위
-// 이스케이프 밖의 C 문법(매크로·\u·8진 이스케이프·원시 문자열)을 쓰지 않는다. \xHH 뒤에 16진수
-// 글자가 오면 C는 이어서 읽으므로 그때는 문자열을 나눈다("\xA0" "1").
+// 규칙(\\ \" \n \r \t \v \f \xHH, 이웃 문자열 이어 붙이기)으로 풀어 같은 기대값을 확인한다 —
+// 두 구현이 같은 입력 집합을 받고 같은 값·오류 코드·위치를 내는지 본다. 그래서 이 파일의 표
+// 안에서는 위 이스케이프 밖의 C 문법(매크로·\u·8진 이스케이프·원시 문자열)을 쓰지 않는다. \xHH 뒤에
+// 16진수 글자가 오면 C는 이어서 읽으므로 그때는 문자열을 나눈다("\xA0" "1").
 //
 // 기대값 표기(두 쪽 시험의 Dump와 같다):
 // - null·true·false, 정수 i<10진>, 부호 없는 정수 u<10진>, 실수 d<double 비트 16진 16자리>
 // - 문자열 "..."(", \ 는 \", \\, U+0020–U+007E 밖은 \u{대문자 16진})
 // - 배열 [a,b], 객체 {"k":v,...}(원문 순서)
 // - 오류 !<JsonErrorCode 이름>@<줄>:<열>
-// 입력은 기본 한도(JsonReadOptions 기본값)로 읽는다. 입력에 NUL은 넣지 않는다(C 문자열).
+// Json5ParityCases는 기본 한도(JsonReadOptions 기본값)로 읽는다. 입력에 NUL은 넣지 않는다(C
+// 문자열).
 namespace rocks::test {
 
 struct Json5ParityCase {
@@ -191,6 +191,30 @@ inline constexpr Json5ParityCase Json5ParityCases[] = {
     {"{\n  a: 1,\n  b: x\n}", "!InvalidLiteral@3:6"},
     {"[\r\n1,\r2,\n3,\xE2\x80\xA8 x]", "!InvalidLiteral@4:5"},
     {"['\xEA\xB0\x80', x]", "!InvalidLiteral@1:7"},
+};
+
+// 문자열·키 길이 한도의 경계 사례다. maxStringBytes = Json5StringLimit로 읽고, 한도는 이스케이프를
+// 푼 값의 UTF-8 byte 수로 판정한다(\u·\x도 푼 글자의 실제 길이). 큰따옴표 문자열 하나뿐인 입력은
+// C++ 시험이 Strict 문법으로도 읽어 같은 결과인지 본다.
+inline constexpr unsigned Json5StringLimit = 3;
+
+inline constexpr Json5ParityCase Json5StringLimitCases[] = {
+    {"'ab\\u0041'", "\"abA\""},
+    {"\"ab\\u0041\"", "\"abA\""},
+    {"'a\xC3\xA9'", "\"a\\u{E9}\""},
+    {"'a\\u00E9'", "\"a\\u{E9}\""},
+    {"\"a\\u00e9\"", "\"a\\u{E9}\""},
+    {"'ab\\u00E9'", "!StringTooLong@1:1"},
+    {"\"ab\\u00e9\"", "!StringTooLong@1:1"},
+    {"\"\\uAC00\"", "\"\\u{AC00}\""},
+    {"\"a\\uAC00\"", "!StringTooLong@1:1"},
+    {"\"\\uD83D\\uDE00\"", "!StringTooLong@1:1"},
+    {"'\\x41\\x42\\x43'", "\"ABC\""},
+    {"'a\\xe9'", "\"a\\u{E9}\""},
+    {"'ab\\xe9'", "!StringTooLong@1:1"},
+    {"{abc: 1}", "{\"abc\":i1}"},
+    {"{ab\\u0063: 1}", "{\"abc\":i1}"},
+    {"{abcd: 1}", "!StringTooLong@1:2"},
 };
 
 } // namespace rocks::test

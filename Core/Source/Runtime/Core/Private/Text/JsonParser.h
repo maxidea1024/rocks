@@ -25,6 +25,19 @@ inline int HexDigitValue(uint8 byte) noexcept {
     return -1;
 }
 
+// codePoint의 UTF-8 byte 수다.
+inline usize Utf8EncodedLength(uint32 codePoint) noexcept {
+    if (codePoint < 0x80) {
+        return 1;
+    }
+
+    if (codePoint < 0x800) {
+        return 2;
+    }
+
+    return codePoint < 0x10000 ? 3 : 4;
+}
+
 // data[position]에서 시작하는 UTF-8 한 글자를 읽어 길이(잘못되면 0)를 돌려준다. overlong·surrogate
 // 부호화·U+10FFFF 초과·잘림을 거부한다. 성공하면 codePoint에 값을 쓴다.
 usize DecodeUtf8(const uint8* data, usize size, usize position, uint32& codePoint) noexcept;

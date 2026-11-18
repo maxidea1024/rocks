@@ -74,19 +74,6 @@ bool IsIdentifierPart(uint32 codePoint) noexcept {
     }
 }
 
-// codePoint의 UTF-8 byte 수다.
-usize Utf8EncodedLength(uint32 codePoint) noexcept {
-    if (codePoint < 0x80) {
-        return 1;
-    }
-
-    if (codePoint < 0x800) {
-        return 2;
-    }
-
-    return codePoint < 0x10000 ? 3 : 4;
-}
-
 } // namespace
 
 void JsonParser::SkipJson5Whitespace() noexcept {
@@ -372,20 +359,21 @@ bool JsonParser::ParseJson5Escape(usize stringStart, usize textStart) noexcept {
         }
 
         position_ += 2;
-        if (!WithinStringLimit(textStart, Utf8EncodedLength(value))) {
+        if (!WithinStringLimit(textStart, detail::Utf8EncodedLength(value))) {
             return Fail(JsonErrorCode::StringTooLong, stringStart);
         }
 
         return AppendCodePoint(value);
     }
     case 'u': {
-        // 엄격 문법과 같다(짝 없는 surrogate는 UnpairedSurrogate, 한도는 4 byte로 미리 본다).
+        // 엄격 문법과 같다(짝 없는 surrogate는 UnpairedSurrogate, 한도는 푼 글자의 UTF-8 길이로
+        // 본다).
         uint32 codePoint = 0;
         if (!ReadUnicodeEscape(escape, codePoint)) {
             return false;
         }
 
-        if (!WithinStringLimit(textStart, 4)) {
+        if (!WithinStringLimit(textStart, detail::Utf8EncodedLength(codePoint))) {
             return Fail(JsonErrorCode::StringTooLong, stringStart);
         }
 
@@ -481,7 +469,7 @@ bool JsonParser::ParseJson5Identifier(uint32& offset, uint32& length) noexcept {
             position_ = at + count;
         }
 
-        if (!WithinStringLimit(textStart, Utf8EncodedLength(codePoint))) {
+        if (!WithinStringLimit(textStart, detail::Utf8EncodedLength(codePoint))) {
             return Fail(JsonErrorCode::StringTooLong, start);
         }
 

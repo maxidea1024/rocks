@@ -320,6 +320,39 @@ TEST(Json5_ParityCases) {
     CHECK(failures == 0);
 }
 
+TEST(Json5_StringLimitCases) {
+    SystemAllocator allocator;
+    JsonDocument document(allocator);
+    StringBuilder<> actual(allocator);
+    JsonReadOptions options;
+    options.maxStringBytes = test::Json5StringLimit;
+    usize failures = 0;
+    for (const test::Json5ParityCase& item : test::Json5StringLimitCases) {
+        const StringView input(item.input, strlen(item.input));
+        const StringView expected(item.expected, strlen(item.expected));
+        options.syntax = JsonSyntax::Json5;
+        DumpResult(document, document.Parse(input, options), actual);
+        bool same = actual.View() == expected;
+        // 큰따옴표 문자열 하나뿐인 입력은 엄격 문법도 같은 한도 판정이다.
+        if (input.StartsWith(StringView("\"")) && input.EndsWith(StringView("\""))) {
+            options.syntax = JsonSyntax::Strict;
+            DumpResult(document, document.Parse(input, options), actual);
+            same = same && actual.View() == expected;
+        }
+
+        if (!same) {
+            ++failures;
+            printf("Json5 string limit case ");
+            PrintCString(input);
+            printf(": got ");
+            PrintCString(actual.View());
+            printf("\n");
+        }
+    }
+
+    CHECK(failures == 0);
+}
+
 TEST(Json5_TestSuiteCases) {
     SystemAllocator allocator;
     // 사례 목록은 데이터 라이브러리 manifest의 files에서 읽는다.

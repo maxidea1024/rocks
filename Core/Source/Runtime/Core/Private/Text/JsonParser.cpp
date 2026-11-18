@@ -358,7 +358,7 @@ bool JsonParser::ParseString(uint32& offset, uint32& length) noexcept {
             return false;
         }
 
-        if (!withinLimit(4)) {
+        if (!withinLimit(detail::Utf8EncodedLength(unit))) {
             return Fail(JsonErrorCode::StringTooLong, start);
         }
 

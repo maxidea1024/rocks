@@ -46,6 +46,14 @@ const char* JsonErrorMessage(JsonErrorCode code) noexcept {
     return "unknown error";
 }
 
+const char* JsonErrorMessage(JsonErrorCode code, JsonSyntax syntax) noexcept {
+    if (syntax == JsonSyntax::Json5 && code == JsonErrorCode::InvalidLiteral) {
+        return "invalid literal (expected true, false, null, Infinity or NaN)";
+    }
+
+    return JsonErrorMessage(code);
+}
+
 // ---- 문서 ----
 
 using detail::HashKeyBytes;
