@@ -319,7 +319,7 @@ Result<void> ApplyDeviceProfile(ConfigContext& context, StringView commandLinePr
         ++out.values;
     }
 
-    Log::Info(
+    Log::Debug(
         detail::LogConfig,
         "Device profile {Profile} selected by {Source} (memory bucket '{Bucket}', {Values} values)",
         out.profile.View(), DeviceProfileSourceName(out.source), out.memoryBucket.View(),
