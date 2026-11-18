@@ -152,14 +152,15 @@ public:
     //                                   .after = ResourceAccess::SrvGraphics};
     //   commands.Transition(Span<const ResourceTransition>(&toRead, 1));
     //
-    // 장치는 텍스처 subresource마다 현재 상태를 추적한다. BeginFrame·BeginPass는 색 attachment를
-    // RenderTarget, 깊이를 DepthWrite(읽기 전용이면 DepthRead)로 바꾸고(attachment 전이),
-    // EndFrame은 offscreen 대상을 RenderTarget 그대로 두며 스왑체인 백버퍼만 Present로 돌린다. 명시
-    // 전이 없이 다른 상태의 텍스처를 읽는 호출(SetTexture 등)은 장치가 필요하면 암묵 전이로 메운다.
-    // 렌더 그래프는 모든 전이를 명시한다.
+    // 장치는 텍스처 subresource(mip × slice, SubresourceRange)마다 현재 상태를 추적한다.
+    // BeginFrame·BeginPass는 색 attachment를 RenderTarget, 깊이를 DepthWrite(읽기 전용이면
+    // DepthRead)로 바꾸고(attachment 전이), EndFrame은 offscreen 대상을 RenderTarget 그대로 두며
+    // 스왑체인 백버퍼만 Present로 돌린다. 명시 전이 없이 다른 상태의 텍스처를 읽는 호출(SetTexture
+    // 등)은 장치가 필요하면 암묵 전이로 메운다. 렌더 그래프는 모든 전이를 명시한다.
     //
     // backend 낮추기:
-    // - D3D12: 추적한 상태 → after의 resource barrier(mip 단위). UAV → UAV는 UAV barrier. 버퍼는
+    // - D3D12: 추적한 상태 → after의 resource barrier(subresource = mip × slice 단위). UAV → UAV는
+    // UAV barrier. 버퍼는
     //   COMMON 암묵 승격·제출 끝 복귀에 맡기므로 UAV barrier 외에는 아무것도 하지 않는다(버퍼 쓰기
     //   명령이 생기는 GX4에서 다시 본다).
     // - Vulkan: pipeline barrier(image layout과 access·stage mask).
@@ -189,7 +190,8 @@ public:
     // 규칙:
     // - begin과 end는 같은 기록(Begin… EndFrame) 안에서 짝을 맞춘다. end에는 begin과 같은 목록(같은
     //   순서·같은 값)을 넘긴다.
-    // - begin과 end 사이에 그 subresource를 쓰는 명령·전이·다른 분리 전이를 기록하지 않는다(그래서
+    // - begin과 end 사이에 그 subresource(mip·slice 범위가 겹치는 것, SubresourceRangesOverlap)를
+    //   쓰는 명령·전이·다른 분리 전이를 기록하지 않는다(그래서
     //   before가 장치 추적 상태와 같은지는 begin과 end 어느 쪽에서 보아도 같다). 검증 장치는 begin
     //   때(Vulkan) 또는 end 때(D3D12) 대조해 ValidationErrorCount를 올린다.
     // - 장치 추적 상태는 짝이 끝나면 after다(이후 Transition의 before 대조 기준).
@@ -344,10 +346,14 @@ public:
     virtual Result<void> ReadBuffer(BufferHandle buffer, uint64 offset,
                                     Span<uint8> out) noexcept = 0;
 
-    // 텍스처를 만든다. Sampled는 pixels(mip 0부터, mip 안은 plane 순서, 행 위→아래 빈틈 없는 행 —
-    // MipChainBytes 크기)가 필요하고, RenderTarget·DepthStencil은 pixels가 비어 있어야 한다. 잘못된
-    // 크기·형식은 InvalidArgument, 이 장치가 형식·용도를 지원하지 않으면(GetPixelFormatCaps)
-    // Unsupported다.
+    // 텍스처를 만든다. Sampled는 pixels(TextureDesc 주석의 배치: mip 0부터, mip 안은 slice·깊이 면
+    // 순서, 이미지 안은 plane 순서, 행 위→아래 빈틈 없는 행 — TextureDataBytes 크기)가 필요하고,
+    // RenderTarget·DepthStencil은 pixels가 비어 있어야 한다. 실패: 규칙 위반(ValidateTextureDesc)·
+    // 크기 불일치 InvalidArgument, 이 장치가 형식·용도·차원을 지원하지 않거나(GetPixelFormatCaps,
+    // RequiredPixelFormatCaps) 장치 한도를 넘거나(CheckTextureLimits) swizzle·샘플러를 낮출 수
+    // 없으면(D3D11 view swizzle 등 backend 지원 표 — RenderBase GX2)
+    // Unsupported다. 다른 값으로 바꿔 만들지 않는다(예외: 하드웨어 대응이 없는 AnisotropicPoint는
+    // UE처럼 AnisotropicLinear로 만든다, DeviceFeatures::anisotropicPointFilter).
     virtual Result<TextureHandle> CreateTexture(const TextureDesc& desc,
                                                 Span<const uint8> pixels) noexcept = 0;
 
@@ -373,10 +379,10 @@ public:
     //   if ((device.GetPixelFormatSampleCounts(PixelFormat::RGBA16Float) & SampleCountBit(4)) != 0)
     virtual uint32 GetPixelFormatSampleCounts(PixelFormat format) const noexcept = 0;
 
-    // texture의 자원을 공유하고 형식·plane만 다르게 읽는 view를 만든다(TextureViewDesc). 돌려준
-    // handle은 SetTexture로 묶고 Retire로 놓는다. 원 텍스처를 먼저 Retire해도 view가 자원을 붙든다.
-    // view에는 업로드·readback·그리기 대상 지정을 할 수 없다(InvalidArgument). 형식·plane 조합이
-    // 틀리면 InvalidArgument, 형식이 Sampled가 아니거나 backend가 view를 지원하지 않으면
+    // texture의 자원을 공유하고 형식·plane·swizzle만 다르게 읽는 view를 만든다(TextureViewDesc).
+    // 돌려준 handle은 SetTexture로 묶고 Retire로 놓는다. 원 텍스처를 먼저 Retire해도 view가 자원을
+    // 붙든다. view에는 업로드·readback·그리기 대상 지정을 할 수 없다(InvalidArgument). 형식·plane
+    // 조합이 틀리면 InvalidArgument, 형식이 Sampled가 아니거나 backend가 view를 지원하지 않으면
     // Unsupported다.
     virtual Result<TextureHandle> CreateTextureView(TextureHandle texture,
                                                     const TextureViewDesc& desc) noexcept {
@@ -385,10 +391,25 @@ public:
         return Result<TextureHandle>::Failure(ErrorCode::Unsupported);
     }
 
-    // 텍스처 mip 하나의 plane 하나를 out(PixelFormatPlaneImageBytes 크기, 행 위→아래, 블록 형식은
-    // 블록 행)으로 읽는다. 렌더 타깃이 아닌 텍스처·블록 압축·깊이·비디오 plane도 읽는다. GPU 완료를
-    // 기다린다(시험·캡처용, 프레임 경로에서 쓰지 않는다). 크기·mip·plane이 틀리면 InvalidArgument,
-    // backend가 지원하지 않으면 Unsupported다.
+    // 텍스처의 mip 수와 slice 수다(subresource 구성, 상태 추적 단위). view면 원 텍스처의 값이다.
+    // 렌더 그래프 import가 선언한 구성(GraphImportOptions)과 대조한다. 실패: 모르는 handle
+    // StaleHandle, 지원하지 않는 장치 Unsupported. 소유 스레드가 부른다(장치 잠금 안에서 기록을
+    // 읽는다).
+    //
+    // 사용 예:
+    //   auto shape = device.GetTextureSubresources(texture);
+    //   if (shape && shape.Value().slices != declared) { ... }
+    virtual Result<TextureSubresources>
+    GetTextureSubresources(TextureHandle texture) const noexcept {
+        (void)texture;
+        return Result<TextureSubresources>::Failure(ErrorCode::Unsupported);
+    }
+
+    // 텍스처 mip 하나의 plane 하나를 out(TextureMipPlaneBytes 크기: 그 mip의 모든 slice·깊이 면을
+    // 초기 픽셀과 같은 순서로, 행 위→아래, 블록 형식은 블록 행)으로 읽는다. swizzle은 적용하지
+    // 않는다(저장된 값 그대로). 렌더 타깃이 아닌 텍스처·블록 압축·깊이·비디오 plane도 읽는다. GPU
+    // 완료를 기다린다(시험·캡처용, 프레임 경로에서 쓰지 않는다). 크기·mip·plane이 틀리면
+    // InvalidArgument, backend가 지원하지 않으면 Unsupported다.
     virtual Result<void> ReadTexture(TextureHandle texture, uint32 mipLevel, uint32 plane,
                                      Span<uint8> out) noexcept {
         (void)texture;
@@ -477,8 +498,8 @@ public:
     virtual Result<void> UpdateBuffer(BufferHandle buffer, uint64 offset,
                                       Span<const uint8> data) noexcept = 0;
 
-    // 텍스처 mip 하나를 바꾼다(pixels는 빈틈 없는 행, 첫 행이 위). 실패: 모르는 handle StaleHandle,
-    // mip 범위 밖·크기 불일치 InvalidArgument.
+    // 텍스처 mip 하나를 바꾼다(모든 slice·깊이 면, pixels는 TextureMipBytes 크기의 초기 픽셀과 같은
+    // 배치). 실패: 모르는 handle StaleHandle, mip 범위 밖·크기 불일치 InvalidArgument.
     virtual Result<void> UpdateTexture(TextureHandle texture, uint32 mipLevel,
                                        Span<const uint8> pixels) noexcept = 0;
 
@@ -494,8 +515,9 @@ public:
     // 예산이 찼으면 CapacityExceeded.
     virtual Result<StagingBuffer> AcquireStaging(uint64 bytes) noexcept = 0;
 
-    // staging의 offset부터 빈틈 없는 행 픽셀로 텍스처 mip 하나를 올린다. 실패: stale handle
-    // StaleHandle, 범위 밖 InvalidArgument. staging은 이 업로드의 fence 뒤까지 재사용되지 않는다.
+    // staging의 offset부터 텍스처 mip 하나(모든 slice·깊이 면, UpdateTexture와 같은 배치)를 올린다.
+    // 실패: stale handle StaleHandle, 범위 밖 InvalidArgument. staging은 이 업로드의 fence 뒤까지
+    // 재사용되지 않는다.
     virtual Result<void> UploadTextureFromStaging(TextureHandle texture, uint32 mipLevel,
                                                   StagingHandle staging,
                                                   uint64 offset) noexcept = 0;

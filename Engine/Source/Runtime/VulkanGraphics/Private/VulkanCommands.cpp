@@ -421,13 +421,15 @@ void VulkanDevice::SetTexture(TextureHandle handle) noexcept {
     // (descriptor를 그 layout으로 썼다. D3D12는 PIXEL_SHADER_RESOURCE 비트만 본다). 패스 대상
     // 자신은 attachment라 바꾸지 않는다(샘플링할 수 없다).
     bool readable = true;
-    for (uint32 mip = 0; mip < record->mipLevels; ++mip) {
-        readable = readable && HasAnyAccess(record->current[mip], ResourceAccess::SrvGraphics) &&
-                   (record->current[mip] & ~SrvAccessMask) == ResourceAccess::Unknown;
+    for (uint32 index = 0; index < record->current.Count(); ++index) {
+        readable = readable && HasAnyAccess(record->current[index], ResourceAccess::SrvGraphics) &&
+                   (record->current[index] & ~SrvAccessMask) == ResourceAccess::Unknown;
     }
 
     if (!readable && !IsPassAttachment(slot)) {
-        TrackTransition(*record, slot, 0, record->mipLevels, ResourceAccess::SrvGraphics, false);
+        TrackTransition(*record, slot,
+                        ResolveSubresourceRange({}, record->mipLevels, record->slices),
+                        ResourceAccess::SrvGraphics, false);
         ResumeRenderPass();
     }
 }

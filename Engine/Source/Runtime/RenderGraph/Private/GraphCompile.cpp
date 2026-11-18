@@ -273,6 +273,35 @@ uint32 SplitBeginPass(const GraphState& state, const ChainEntry& entry) noexcept
     return between ? entry.previousUser : GraphIndexNone;
 }
 
+// record와 entry가 slice·mip 범위 말고는 같은 전이인지다.
+bool SameTransitionGroup(const GraphTransitionRecord& record, const ChainEntry& entry,
+                         GraphResourceKind kind, uint32 beginPass) noexcept {
+    return record.pass == entry.pass && record.kind == kind && record.resource == entry.resource &&
+           record.before == entry.before && record.after == entry.after &&
+           record.attachment == entry.attachment && record.beginPass == beginPass;
+}
+
+// 마지막 두 record가 같은 mip 범위의 이웃 slice 범위이고 나머지가 같으면 하나로 합친다. 새
+// record를 넣기 전과 수집 끝에 불러 slice마다 모은 mip 범위를 slice 범위로 묶는다.
+void MergeSliceRuns(GraphState& state) noexcept {
+    const usize size = state.transitions.Size();
+    if (size < 2 || size - 2 < state.nextTransition) {
+        return;
+    }
+
+    GraphTransitionRecord& previous = state.transitions[size - 2];
+    const GraphTransitionRecord& last = state.transitions[size - 1];
+    if (previous.pass == last.pass && previous.kind == last.kind &&
+        previous.resource == last.resource && previous.before == last.before &&
+        previous.after == last.after && previous.attachment == last.attachment &&
+        previous.beginPass == last.beginPass && previous.firstMip == last.firstMip &&
+        previous.mipCount == last.mipCount &&
+        previous.firstSlice + previous.sliceCount == last.firstSlice) {
+        previous.sliceCount += last.sliceCount;
+        state.transitions.PopBack();
+    }
+}
+
 } // namespace
 
 Result<void> CollectTransitions(FrameArena& arena, GraphState& state, usize first) noexcept {
@@ -284,35 +313,42 @@ Result<void> CollectTransitions(FrameArena& arena, GraphState& state, usize firs
 
         const GraphResourceKind kind = state.resources[entry.resource].kind;
         const uint32 beginPass = SplitBeginPass(state, entry);
-        // 같은 pass·자원·전후 상태·begin 자리의 바로 다음 mip이면 앞 범위를 늘린다.
+        const ResourceRecord& resource = state.resources[entry.resource];
+        const uint32 mip = entry.subresource % resource.mipLevels;
+        const uint32 slice = entry.subresource / resource.mipLevels;
+        // 같은 pass·자원·전후 상태·begin 자리의 같은 slice 바로 다음 mip이면 앞 범위를 늘린다.
         if (!state.transitions.IsEmpty()) {
             GraphTransitionRecord& last = state.transitions.Back();
             const usize lastIndex = state.transitions.Size() - 1;
-            if (lastIndex >= state.nextTransition && last.pass == entry.pass && last.kind == kind &&
-                last.resource == entry.resource && last.before == entry.before &&
-                last.after == entry.after && last.attachment == entry.attachment &&
-                last.beginPass == beginPass && last.firstMip + last.mipCount == entry.subresource) {
+            if (lastIndex >= state.nextTransition &&
+                SameTransitionGroup(last, entry, kind, beginPass) && last.sliceCount == 1 &&
+                last.firstSlice == slice && last.firstMip + last.mipCount == mip) {
                 ++last.mipCount;
                 continue;
             }
         }
 
+        // 새 record를 넣기 전에 앞에서 다 모은 slice의 mip 범위를 그 앞 slice 범위와 합친다.
         GraphTransitionRecord record;
         record.pass = entry.pass;
         record.kind = kind;
         record.resource = entry.resource;
-        record.firstMip = entry.subresource;
+        record.firstMip = mip;
         record.mipCount = 1;
+        record.firstSlice = slice;
+        record.sliceCount = 1;
         record.before = entry.before;
         record.after = entry.after;
         record.attachment = entry.attachment;
         record.beginPass = beginPass;
+        MergeSliceRuns(state);
         auto pushed = state.transitions.TryPushBack(arena, record);
         if (!pushed) {
             return pushed;
         }
     }
 
+    MergeSliceRuns(state);
     return Result<void>::Success();
 }
 

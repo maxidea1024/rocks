@@ -160,12 +160,21 @@ struct SubresourceUse {
 };
 
 // 그래프 자원 하나다(텍스처·버퍼).
+struct ResourceRecord;
+
+// 텍스처 subresource(mip, slice)의 번호다(slice × mipLevels + mip, 장치 subresource 순서).
+uint32 SubresourceIndex(const ResourceRecord& resource, uint32 mip, uint32 slice) noexcept;
+
 struct ResourceRecord {
     GraphResourceKind kind = GraphResourceKind::Texture;
     const char* name = "";
     graphics::TextureDesc textureDesc;
     graphics::BufferDesc bufferDesc;
+    // subresource 수(mipLevels × slices)다. 텍스처 subresource 번호는 slice × mipLevels + mip이다
+    // (SubresourceIndex). 버퍼는 1이다.
     uint32 subresources = 1;
+    uint32 mipLevels = 1;
+    uint32 slices = 1;
     bool imported = false;
     bool exported = false;
     // 생산된 적이 있다(import는 처음부터 생산된 것으로 본다).
@@ -197,7 +206,7 @@ struct ResourceRecord {
     bool uploadTarget = false;
     // 어느 Raster pass의 렌더 타깃(attachment)이다.
     bool renderTarget = false;
-    // Sampled 텍스처 업로드의 mip 사슬(MipChainBytes, 프레임 arena)이다.
+    // Sampled 텍스처 업로드의 초기 데이터(TextureDataBytes, 프레임 arena)다.
     uint8* uploadPixels = nullptr;
 };
 

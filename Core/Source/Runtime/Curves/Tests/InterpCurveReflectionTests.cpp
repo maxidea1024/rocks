@@ -465,7 +465,10 @@ TEST(InterpCurveReflection_PathWritesValidate) {
     mode.kind = ValueKind::Enum;
     mode.type = TypeIdOf<InterpCurveMode>();
     mode.signedInteger = 6;
-    CHECK(!PathWrite(fixture.objects, fixture.access, handle, modePath.View(), mode));
+    PropertyPathFailure modeFailure;
+    CHECK(!PathWrite(fixture.objects, fixture.access, handle, modePath.View(), mode, nullptr,
+                     &modeFailure));
+    CHECK(modeFailure.reason == PropertyPathError::InvalidValue);
     mode.signedInteger = static_cast<int64>(InterpCurveMode::CurveUser);
     CHECK(PathWrite(fixture.objects, fixture.access, handle, modePath.View(), mode));
 
@@ -509,4 +512,70 @@ TEST(InterpCurveReflection_CopyAllocationFailureIsAtomic) {
     }
 
     CHECK(injected);
+}
+
+// 묶음 리뷰 1: 키를 모두 지운 루프 커브(InterpCurve::Reset·TryRemovePoint는 루프를 남긴다 — UE와
+// 같다)도 그래프와 JSON으로 왕복한다(hook은 루프면 offset이 유한한 양수인지만 본다).
+TEST(InterpCurveReflection_EmptyLoopedCurveRoundTrips) {
+    Objects fixture;
+    auto holder = fixture.Make();
+    fixture.Fill(holder.Handle());
+    fixture.With(holder.Handle(), [](InterpCurveHolder& value) noexcept {
+        value.floats.Reset();
+        CHECK(value.floats.IsLooped() && value.floats.PointCount() == 0);
+    });
+    auto saved = SaveObjectGraph(fixture.system, fixture.objects, fixture.access, holder.Handle());
+    REQUIRE(saved);
+    ObjectRegistry target(fixture.system, fixture.types, {0x4943, 5});
+    {
+        auto loaded = LoadObjectGraph(fixture.system, target, fixture.types, target.OwnerAccess(),
+                                      saved.Value().View());
+        REQUIRE(loaded);
+        auto borrowed =
+            target.Resolve<InterpCurveHolder>(target.OwnerAccess(), loaded.Value().Handle());
+        REQUIRE(borrowed);
+        auto value = borrowed.Value().Get();
+        REQUIRE(value);
+        CHECK(value.Value()->floats.IsLooped() && value.Value()->floats.PointCount() == 0);
+        CHECK(value.Value()->floats.LoopKeyOffset() == 2.0625f);
+    }
+
+    REQUIRE(target.Shutdown(target.OwnerAccess()));
+    StringBuilder<16384> text(fixture.system);
+    REQUIRE(fixture.Export(holder.Handle(), text));
+    auto copy = fixture.Make();
+    REQUIRE(fixture.Import(copy.Handle(), text.View()));
+    fixture.With(copy.Handle(), [](InterpCurveHolder& value) noexcept {
+        CHECK(value.floats.IsLooped() && value.floats.PointCount() == 0);
+    });
+}
+
+// 묶음 리뷰 5: 미선언 모드(Core API로 넣은 9)를 담은 값은 graph decode가 거부하고(저장이 먼저
+// 거부해도 된다), JSON의 미선언 모드 이름은 import가 거부한다(값 그대로).
+TEST(InterpCurveReflection_UndeclaredModeIsRejected) {
+    Objects fixture;
+    auto holder = fixture.Make();
+    fixture.Fill(holder.Handle());
+    StringBuilder<16384> text(fixture.system);
+    REQUIRE(fixture.Export(holder.Handle(), text));
+    StringBuilder<16384> broken(fixture.system);
+    ReplaceOnce(text.View(), StringView("\"CurveUser\""), StringView("\"Cubic\""), broken);
+    REQUIRE(broken.View().ByteCount() != 0);
+    auto copy = fixture.Make();
+    CHECK(!fixture.Import(copy.Handle(), broken.View()));
+    fixture.With(copy.Handle(),
+                 [](InterpCurveHolder& value) noexcept { CHECK(value.floats.PointCount() == 0); });
+
+    fixture.With(holder.Handle(), [](InterpCurveHolder& value) noexcept {
+        value.floats.SetMode(0, static_cast<InterpCurveMode>(9));
+    });
+    auto saved = SaveObjectGraph(fixture.system, fixture.objects, fixture.access, holder.Handle());
+    if (saved) {
+        ObjectRegistry target(fixture.system, fixture.types, {0x4943, 6});
+        auto loaded = LoadObjectGraph(fixture.system, target, fixture.types, target.OwnerAccess(),
+                                      saved.Value().View());
+        CHECK(!loaded && loaded.Error() == ErrorCode::InvalidArgument);
+        CHECK(target.Stats().liveObjects == 0);
+        REQUIRE(target.Shutdown(target.OwnerAccess()));
+    }
 }

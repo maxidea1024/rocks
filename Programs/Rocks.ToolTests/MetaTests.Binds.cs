@@ -99,15 +99,22 @@ internal static partial class MetaTests
 
             Verify.That(!generated.Contains("GeneratedType<::probe::ModeBinding>", StringComparison.Ordinal), "no specialization of the enum mirror type");
         });
-        // 열거자 값·이름이 실제 enum과 다르거나 underlying이 다르면 생성 코드 검증 컴파일이 거부한다. enum 미러의 대상이 enum이
-        // 아니면 RMC3000, CoreTypeBindings 밖은 RMC2004다. friend가 없는 private 멤버는 여전히 컴파일 실패다(아래 Hidden 사례).
+        // underlying이 다르면 생성 코드 검증 컴파일이 거부한다(열거자 이름·값 차이는 아래 RMC2401이 먼저 거부한다). enum 미러의
+        // 대상이 enum이 아니면 RMC3000, CoreTypeBindings 밖은 RMC2004다. friend가 없는 private 멤버는 여전히 컴파일 실패다(아래
+        // Hidden 사례).
         AddRejectGroup(context, "Meta.BindsEnumMismatchFailsToCompile", new[]
             {
-                "ROCKS_ENUM(Binds = \"probe::Mode\")\nenum class ModeBinding : rocks::uint8 {\nA = 0,\nB = 3,\n};\n",
-                "ROCKS_ENUM(Binds = \"probe::Mode\")\nenum class ModeBinding : rocks::uint8 {\nA = 0,\nC = 2,\n};\n",
                 "ROCKS_ENUM(Binds = \"probe::Mode\")\nenum class ModeBinding : rocks::uint16 {\nA = 0,\nB = 2,\n};\n"
             }.Select(declaration => BindsPreamble + "enum class Mode : rocks::uint8 {\nA = 0,\nB = 2,\n};\n" + declaration + "}\n"),
             "RMC3000", "generated metadata contract rejected", BindsModule);
+        // 실제 enum에만 있는 열거자(미러가 빠뜨린 것)·값이 다른 열거자·실제 enum에 없는 열거자는 MetaCompiler가 실제 enum의 AST
+        // 열거자 목록과 1:1로 대조해 RMC2401로 거부한다(묶음 리뷰 2 — 생성 static_assert는 미러 쪽 열거자만 본다).
+        AddRejectGroup(context, "Meta.BindsEnumMustListEveryRealEnumerator", [
+            BindsPreamble + "enum class Mode : rocks::uint8 {\nA = 0,\nB = 2,\nC = 3,\n};\nROCKS_ENUM(Binds = \"probe::Mode\")\nenum class ModeBinding : rocks::uint8 {\nA = 0,\nB = 2,\n};\n}\n",
+            BindsPreamble + "enum class Mode : rocks::uint8 {\nA,\nB,\nC,\n};\nROCKS_ENUM(Binds = \"probe::Mode\")\nenum class ModeBinding : rocks::uint8 {\nA = 0,\nB = 1,\n};\n}\n",
+            BindsPreamble + "enum class Mode : rocks::uint8 {\nA = 0,\nB = 2,\n};\nROCKS_ENUM(Binds = \"probe::Mode\")\nenum class ModeBinding : rocks::uint8 {\nA = 0,\nB = 3,\n};\n}\n",
+            BindsPreamble + "enum class Mode : rocks::uint8 {\nA = 0,\nB = 2,\n};\nROCKS_ENUM(Binds = \"probe::Mode\")\nenum class ModeBinding : rocks::uint8 {\nA = 0,\nC = 2,\n};\n}\n"],
+            "RMC2401", "every enumerator", BindsModule);
         AddRejectGroup(context, "Meta.BindsEnumTargetMustBeAnEnum", [
             BindsPreamble + "struct NotEnum {\nrocks::int32 a = 0;\n};\nROCKS_ENUM(Binds = \"probe::NotEnum\")\nenum class ModeBinding : rocks::uint8 {\nA = 0,\n};\n}\n"],
             "RMC3000", "does not name an enum type", BindsModule);

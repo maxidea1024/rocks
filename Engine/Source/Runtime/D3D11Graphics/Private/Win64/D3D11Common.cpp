@@ -79,16 +79,20 @@ D3D11_CULL_MODE RasterCullMode(CullMode mode) noexcept {
     return D3D11_CULL_NONE;
 }
 
-D3D11_FILTER SamplerFilter(Filter filter) noexcept {
+D3D11_FILTER SamplerFilter(Filter filter, bool comparison) noexcept {
     switch (filter) {
-    case Filter::Nearest:
-        return D3D11_FILTER_MIN_MAG_MIP_POINT;
+    case Filter::Point:
+        return comparison ? D3D11_FILTER_COMPARISON_MIN_MAG_MIP_POINT
+                          : D3D11_FILTER_MIN_MAG_MIP_POINT;
     case Filter::Bilinear:
-        return D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT;
+        return comparison ? D3D11_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT
+                          : D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT;
     case Filter::Trilinear:
-        return D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-    case Filter::Anisotropic:
-        return D3D11_FILTER_ANISOTROPIC;
+        return comparison ? D3D11_FILTER_COMPARISON_MIN_MAG_MIP_LINEAR
+                          : D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    case Filter::AnisotropicPoint:
+    case Filter::AnisotropicLinear:
+        return comparison ? D3D11_FILTER_COMPARISON_ANISOTROPIC : D3D11_FILTER_ANISOTROPIC;
     }
 
     return D3D11_FILTER_MIN_MAG_MIP_LINEAR;

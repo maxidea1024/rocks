@@ -103,7 +103,7 @@ TextureDesc TargetDesc() noexcept {
     desc.width = TargetSize;
     desc.height = TargetSize;
     desc.usage = TextureUsage::RenderTarget;
-    desc.sampler.filter = Filter::Nearest;
+    desc.sampler.filter = Filter::Point;
     return desc;
 }
 
@@ -423,7 +423,7 @@ bool RunSampledUploadGraph(GraphBench& bench, RenderHandle output, const uint8* 
     desc.width = 1;
     desc.height = 1;
     desc.usage = TextureUsage::Sampled;
-    desc.sampler.filter = Filter::Nearest;
+    desc.sampler.filter = Filter::Point;
     auto lut = graph.CreateTexture(desc, "Uploaded");
     auto target = graph.ImportTexture(output, "Output");
     if (!lut || !target || !graph.UploadTexture(lut.Value(), 0, Span<const uint8>(color, 4))) {
@@ -465,7 +465,7 @@ uint32 RunRenderGraphChecks(const char* name, Device& device, sample::Renderer& 
     TextureDesc redDesc;
     redDesc.width = 1;
     redDesc.height = 1;
-    redDesc.sampler.filter = Filter::Nearest;
+    redDesc.sampler.filter = Filter::Point;
     auto redTexture = device.CreateTexture(redDesc, Span<const uint8>(red, sizeof(red)));
     auto outputTexture = device.CreateTexture(TargetDesc(), {});
     auto output = handles.Reserve(RenderResourceKind::Texture);

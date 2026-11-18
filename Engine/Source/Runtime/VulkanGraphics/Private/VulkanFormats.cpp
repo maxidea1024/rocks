@@ -332,4 +332,48 @@ VkFormat VertexAttributeFormat(VertexFormat format) noexcept {
     return VK_FORMAT_UNDEFINED;
 }
 
+VkComponentMapping ComposeComponents(const ChannelSwizzle& outer,
+                                     const VkComponentMapping& inner) noexcept {
+    const VkComponentSwizzle channels[4] = {inner.r, inner.g, inner.b, inner.a};
+    auto pick = [&channels](SwizzleSource source) noexcept {
+        switch (source) {
+        case SwizzleSource::Zero:
+            return VK_COMPONENT_SWIZZLE_ZERO;
+        case SwizzleSource::One:
+            return VK_COMPONENT_SWIZZLE_ONE;
+        case SwizzleSource::Red:
+        case SwizzleSource::Green:
+        case SwizzleSource::Blue:
+        case SwizzleSource::Alpha:
+            break;
+        }
+
+        const uint32 index = static_cast<uint32>(source);
+        const VkComponentSwizzle selected = channels[index];
+        // IDENTITY는 그 성분 자신이다(R = 3부터 R·G·B·A 순서).
+        return selected == VK_COMPONENT_SWIZZLE_IDENTITY
+                   ? static_cast<VkComponentSwizzle>(VK_COMPONENT_SWIZZLE_R + index)
+                   : selected;
+    };
+    return VkComponentMapping{pick(outer.red), pick(outer.green), pick(outer.blue),
+                              pick(outer.alpha)};
+}
+
+VkImageViewType ViewTypeOf(TextureDimension dimension) noexcept {
+    switch (dimension) {
+    case TextureDimension::Texture2D:
+        return VK_IMAGE_VIEW_TYPE_2D;
+    case TextureDimension::Texture2DArray:
+        return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+    case TextureDimension::Texture3D:
+        return VK_IMAGE_VIEW_TYPE_3D;
+    case TextureDimension::TextureCube:
+        return VK_IMAGE_VIEW_TYPE_CUBE;
+    case TextureDimension::TextureCubeArray:
+        return VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
+    }
+
+    return VK_IMAGE_VIEW_TYPE_2D;
+}
+
 } // namespace rocks::graphics::vulkan

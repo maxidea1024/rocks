@@ -94,16 +94,27 @@ bool IsAttributeSemantic(const char* name) noexcept {
     return name[index] == 0;
 }
 
-D3D12_FILTER SamplerFilter(Filter filter) noexcept {
+D3D12_FILTER SamplerFilter(Filter filter, bool comparison) noexcept {
+    // D3D12_FILTER_MIN_MAG_ANISOTROPIC_MIP_POINT(0x54)·COMPARISON(0xD4)는 Agility SDK 1.7 이후
+    // d3d12.h에만 있다(Windows SDK 10.0.22621 헤더에 없다). D3D12_ENCODE_ANISOTROPIC_FILTER처럼
+    // 이방성 비트(0x40)에 min·mag 선형(0x10·0x04)을 두고 mip은 point(0)로 둔 값이다. 장치가
+    // OPTIONS19 AnisoFilterWithPointMipSupported를 낼 때만 쓴다(CreateTexture가 거른다).
+    constexpr D3D12_FILTER AnisotropicPointMip = static_cast<D3D12_FILTER>(0x54);
+    constexpr D3D12_FILTER ComparisonAnisotropicPointMip = static_cast<D3D12_FILTER>(0xD4);
     switch (filter) {
-    case Filter::Nearest:
-        return D3D12_FILTER_MIN_MAG_MIP_POINT;
+    case Filter::Point:
+        return comparison ? D3D12_FILTER_COMPARISON_MIN_MAG_MIP_POINT
+                          : D3D12_FILTER_MIN_MAG_MIP_POINT;
     case Filter::Bilinear:
-        return D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT;
+        return comparison ? D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT
+                          : D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT;
     case Filter::Trilinear:
-        return D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-    case Filter::Anisotropic:
-        return D3D12_FILTER_ANISOTROPIC;
+        return comparison ? D3D12_FILTER_COMPARISON_MIN_MAG_MIP_LINEAR
+                          : D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    case Filter::AnisotropicPoint:
+        return comparison ? ComparisonAnisotropicPointMip : AnisotropicPointMip;
+    case Filter::AnisotropicLinear:
+        return comparison ? D3D12_FILTER_COMPARISON_ANISOTROPIC : D3D12_FILTER_ANISOTROPIC;
     }
     return D3D12_FILTER_MIN_MAG_MIP_LINEAR;
 }

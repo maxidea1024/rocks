@@ -79,6 +79,10 @@ DeviceCaps QueryDeviceCaps(ID3D12Device* device, IDXGIAdapter1* adapter,
     D3D12_FEATURE_DATA_D3D12_OPTIONS9 options9 = {};
     const bool options9Known = SUCCEEDED(
         device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS9, &options9, sizeof(options9)));
+    // OPTIONS19는 D3D12 runtime이 오래되면(Agility SDK 1.7 이전) E_INVALIDARG다(기능 없음).
+    D3D12_FEATURE_DATA_D3D12_OPTIONS19 options19 = {};
+    const bool options19Known = SUCCEEDED(
+        device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS19, &options19, sizeof(options19)));
 
     // UAV 합 한도: Tier 1은 FL 11.0이면 8, 그 위는 64. Tier 2는 64, Tier 3은 heap 전체다.
     uint32 uavs = D3D12_UAV_SLOT_COUNT;
@@ -158,6 +162,8 @@ DeviceCaps QueryDeviceCaps(ID3D12Device* device, IDXGIAdapter1* adapter,
     features.indirectFirstInstance = true;
     features.multiDrawIndirect = true;
     features.textureCubeArray = true;
+    features.anisotropicPointFilter = options19Known && options19.AnisoFilterWithPointMipSupported;
+    features.textureViewSwizzle = true;
     features.srgbPairView = true;
     // VS UAV는 FL 11.1 이상이다(FL 11.0은 PS·CS만).
     features.vertexStores = featureLevel >= D3D_FEATURE_LEVEL_11_1;

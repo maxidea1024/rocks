@@ -639,10 +639,12 @@ Result<void> GlesDevice::CopyTexture(TextureHandle destination, TextureHandle so
     const PixelFormatInfo& info = GetPixelFormatInfo(from->format);
     if (destination == source || to->isView || from->isView || to->width != from->width ||
         to->height != from->height || to->format != from->format || info.planeCount > 1 ||
-        attached(destination) || attached(source)) {
+        to->dimension != TextureDimension::Texture2D ||
+        from->dimension != TextureDimension::Texture2D || attached(destination) ||
+        attached(source)) {
         Diagnostic message;
-        message.Text("texture copy needs two distinct non-view single-plane textures of the same "
-                     "size and format outside the current pass");
+        message.Text("texture copy needs two distinct non-view single-plane 2D textures of the "
+                     "same size and format outside the current pass");
         return Reject(message, ErrorCode::InvalidArgument);
     }
 

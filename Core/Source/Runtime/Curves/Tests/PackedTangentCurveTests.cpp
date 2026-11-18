@@ -852,9 +852,10 @@ TEST(PackedTangentCurve_CapacityExceeded) {
 
 namespace rocks::test::packed_curve {
 
-// CV8 리뷰 1: UE FindKeyFormat은 복원한 마지막 키 시간이 max보다 작으면(1 ulp) 손실 키를 마지막
-// 키까지 전진한 뒤 Keys[NumKeys]를 읽는다(UE 배열 밖 읽기 — 참조는 고쳐 옮겼다, 15절 32). 반례 세
-// 개에서 전제(복원 시간 < max)가 성립하고, 고친 참조와 Rocks가 끝까지 돌며 byte가 같다.
+// 범위 밖 읽기 회귀 시험(CV8 리뷰 1): UE FindKeyFormat은 복원한 마지막 키 시간이 max보다 작으면
+// (1 ulp) 손실 키를 마지막 키까지 전진한 뒤 Keys[NumKeys]를 읽는다(UE 배열 밖 읽기 — 참조는 고쳐
+// 옮겼다, 15절 32). 반례 세 개에서 전제(복원 시간 < max)가 성립하고, 고친 참조와 Rocks가 끝까지
+// 돌며 byte가 같다. 고친 갈래가 판정을 바꾸는 반례는 찾지 못했다(15절 32).
 TEST(PackedTangentCurve_UeLossyKeyOverrunCounterexamples) {
     SystemAllocator system;
     const float ranges[][2] = {{-3.0f, 6.4f}, {-4.0f, 7.2666669f}, {-5.0f, 6.2666669f}};

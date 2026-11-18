@@ -523,14 +523,53 @@ bool ShaderTypeOf(GLenum type, VertexShaderType& out) noexcept {
     }
 }
 
+GLenum TextureTarget(TextureDimension dimension) noexcept {
+    switch (dimension) {
+    case TextureDimension::Texture2D:
+        return GL_TEXTURE_2D;
+    case TextureDimension::Texture2DArray:
+        return GL_TEXTURE_2D_ARRAY;
+    case TextureDimension::Texture3D:
+        return GL_TEXTURE_3D;
+    case TextureDimension::TextureCube:
+        return GL_TEXTURE_CUBE_MAP;
+    case TextureDimension::TextureCubeArray:
+        return GL_TEXTURE_CUBE_MAP_ARRAY;
+    }
+
+    return GL_TEXTURE_2D;
+}
+
+GLint SwizzleParameter(SwizzleSource source) noexcept {
+    switch (source) {
+    case SwizzleSource::Red:
+        return static_cast<GLint>(GL_RED);
+    case SwizzleSource::Green:
+        return static_cast<GLint>(GL_GREEN);
+    case SwizzleSource::Blue:
+        return static_cast<GLint>(GL_BLUE);
+    case SwizzleSource::Alpha:
+        return static_cast<GLint>(GL_ALPHA);
+    case SwizzleSource::Zero:
+        return static_cast<GLint>(GL_ZERO);
+    case SwizzleSource::One:
+        return static_cast<GLint>(GL_ONE);
+    }
+
+    return static_cast<GLint>(GL_ZERO);
+}
+
+// UE OpenGLState.cpp의 대응과 같다. AnisotropicPoint는 UE가 AnisotropicLinear로 넘기지만 Rocks는
+// 최근접 mip(LINEAR_MIPMAP_NEAREST)에 이방성을 더한다(필터를 바꾸지 않는다).
 GLint MinFilter(Filter filter) noexcept {
     switch (filter) {
-    case Filter::Nearest:
+    case Filter::Point:
         return static_cast<GLint>(GL_NEAREST_MIPMAP_NEAREST);
     case Filter::Bilinear:
+    case Filter::AnisotropicPoint:
         return static_cast<GLint>(GL_LINEAR_MIPMAP_NEAREST);
     case Filter::Trilinear:
-    case Filter::Anisotropic:
+    case Filter::AnisotropicLinear:
         return static_cast<GLint>(GL_LINEAR_MIPMAP_LINEAR);
     }
 
@@ -538,7 +577,7 @@ GLint MinFilter(Filter filter) noexcept {
 }
 
 GLint MagFilter(Filter filter) noexcept {
-    return static_cast<GLint>(filter == Filter::Nearest ? GL_NEAREST : GL_LINEAR);
+    return static_cast<GLint>(filter == Filter::Point ? GL_NEAREST : GL_LINEAR);
 }
 
 GLint WrapMode(AddressMode mode) noexcept {

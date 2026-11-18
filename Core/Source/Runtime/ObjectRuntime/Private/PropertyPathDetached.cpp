@@ -212,10 +212,11 @@ Result<void> PathDetach(ObjectRegistry& registry, const ObjectAccessContext& acc
 
 Result<void> PathPrepareAttach(ObjectRegistry& registry, const ObjectAccessContext& access,
                                const PathTarget& target, PropertyPath path, DetachedValue& box,
-                               PreparedAttach& out, PropertyPathFailure* failure) noexcept {
+                               PreparedAttach& out, PropertyPathFailure* failure,
+                               bool validateHooks) noexcept {
     detail::PathCursor cursor = detail::PathRunner::Make(
         registry, access, target, detail::PathOperation::Attach, nullptr, nullptr, failure);
-    detail::PathRunner::BindBox(cursor, box, &out);
+    detail::PathRunner::BindBox(cursor, box, &out, validateHooks);
     return detail::PathRunner::Run(cursor, path);
 }
 

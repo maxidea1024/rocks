@@ -703,7 +703,8 @@ Result<PublishedAssignments> PreparedAssignments::Publish() noexcept {
 
         return PublishResult::Failure(ErrorCode::InvalidArgument);
     };
-    for (usize index = 0; index < state.elements.Size(); ++index) {
+    const bool validateHooks = state.options.validateStructHooks;
+    for (usize index = 0; validateHooks && index < state.elements.Size(); ++index) {
         detail::ElementsUnit& unit = *state.elements[index];
         usize rejected = 0;
         if (auto checked = unit.stage.ValidateAdded(rejected); !checked) {
@@ -746,7 +747,8 @@ Result<PublishedAssignments> PreparedAssignments::Publish() noexcept {
     } rootCopy;
     const bool valueTarget = state.target.GetKind() == AssignmentTarget::Kind::Value;
     const TypeLease* rootType = valueTarget ? state.target.StructType() : nullptr;
-    const bool rootHook = rootType && rootType->StructOps().validate && state.units.Size() != 0;
+    const bool rootHook =
+        validateHooks && rootType && rootType->StructOps().validate && state.units.Size() != 0;
     if (rootHook) {
         const RuntimeStructOps& ops = rootType->StructOps();
         Allocator& valueAllocator = state.target.ValueAllocator();
@@ -773,7 +775,7 @@ Result<PublishedAssignments> PreparedAssignments::Publish() noexcept {
         detail::AssignmentUnit& unit = *state.units[index];
         PropertyPathFailure failure;
         if (auto located = PathPrepareAttach(registry, access, root, unit.Path(), unit.box,
-                                             unit.prepared, &failure);
+                                             unit.prepared, &failure, validateHooks);
             !located) {
             if (failure.reason == PropertyPathError::StructValidation) {
                 return rejectStruct(unit.Path(), "the value failed its struct validation hook");

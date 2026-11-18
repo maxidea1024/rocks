@@ -271,7 +271,9 @@ Result<void> PathDetach(ObjectRegistry& registry, const ObjectAccessContext& acc
 // box의 필드가 끝 필드와 다르면(다른 스키마 레코드·다른 C++ 형식) TypeMismatch(StaticTypeMismatch),
 // 유효 플래그가 ReadOnly면 Unsupported(ReadOnly — staged 객체는 막지 않는다), 교환할 수 없는 값은
 // Unsupported(NotCopyable), box가 target 자신이면 InvalidArgument. 그 밖의 순서는 PathWrite와
-// 같다(값 검증은 없다 — 상자 안의 값은 경로 연산이 검증하며 넣었다).
+// 같다(값 검증은 없다 — 상자 안의 값은 경로 연산이 검증하며 넣었다). 객체·struct 값 자리에 놓는
+// 상자의 struct 검증 hook은 validateHooks가 참일 때 부른다(거짓은 게시하지 않을 중간 값 —
+// TextCodecOptions::validateStructHooks).
 //
 // 사용 예(게시된 객체):
 //   PreparedAttach prepared;
@@ -280,8 +282,8 @@ Result<void> PathDetach(ObjectRegistry& registry, const ObjectAccessContext& acc
 //   prepared.Publish(batch.Value());
 Result<void> PathPrepareAttach(ObjectRegistry& registry, const ObjectAccessContext& access,
                                const PathTarget& target, PropertyPath path, DetachedValue& box,
-                               PreparedAttach& out,
-                               PropertyPathFailure* failure = nullptr) noexcept;
+                               PreparedAttach& out, PropertyPathFailure* failure = nullptr,
+                               bool validateHooks = true) noexcept;
 
 // path의 끝(단일 강한 참조 위치 — ObjectRef 필드, 인라인 struct·StructRefArray 원소의 ObjectRef
 // 멤버, 정적 배열의 ObjectRef 원소)을 value(ObjectReference)로 바꿀 자리를 찾아 out에 둔다(리플렉션
