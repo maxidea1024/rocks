@@ -429,18 +429,7 @@ Result<TextureHandle> GlesDevice::CreateTexture(const TextureDesc& desc,
         return Result<TextureHandle>::Failure(valid.Error());
     }
 
-    const PixelFormatInfo& info = GetPixelFormatInfo(desc.format);
-    const uint64 size = TextureDataBytes(desc);
-    // BC는 최상위 크기가 블록 배수여야 한다(PixelFormatInfo::topLevelBlockAligned, D3D와 같은
-    // 계약).
-    const bool aligned = !info.topLevelBlockAligned ||
-                         (desc.width % info.blockWidth == 0 && desc.height % info.blockHeight == 0);
-    if (format == nullptr || desc.width > MaxTextureExtent || desc.height > MaxTextureExtent ||
-        size == 0 || !aligned || desc.mipLevels > MaxMipLevels ||
-        (attachment ? pixels.Size() != 0 : pixels.Size() != size)) {
-        return Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
-    }
-
+    // 장치 한도를 크기 계산보다 먼저 본다(한도 안의 desc는 데이터 byte가 넘치지 않는다).
     if (desc.width > maxTextureExtent_ || desc.height > maxTextureExtent_ ||
         !CheckTextureLimits(caps_, desc)) {
         Diagnostic message;
@@ -454,6 +443,18 @@ Result<TextureHandle> GlesDevice::CreateTexture(const TextureDesc& desc,
             .Text(" is not supported by this OpenGL ES device");
         auto rejected = Reject(message, ErrorCode::Unsupported);
         return Result<TextureHandle>::Failure(rejected.Error());
+    }
+
+    const PixelFormatInfo& info = GetPixelFormatInfo(desc.format);
+    const uint64 size = TextureDataBytes(desc);
+    // BC는 최상위 크기가 블록 배수여야 한다(PixelFormatInfo::topLevelBlockAligned, D3D와 같은
+    // 계약).
+    const bool aligned = !info.topLevelBlockAligned ||
+                         (desc.width % info.blockWidth == 0 && desc.height % info.blockHeight == 0);
+    if (format == nullptr || desc.width > MaxTextureExtent || desc.height > MaxTextureExtent ||
+        size == 0 || !aligned || desc.mipLevels > MaxMipLevels ||
+        (attachment ? pixels.Size() != 0 : pixels.Size() != size)) {
+        return Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
     if (!MakeCurrentForResources()) {
@@ -554,7 +555,7 @@ Result<TextureHandle> GlesDevice::CreateTextureView(TextureHandle texture,
         return Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
-    auto resolved = ResolveTextureViewFormat(source->format, desc);
+    auto resolved = ResolveTextureViewFormat(source->format, desc, source->samplerDesc.comparison);
     if (!resolved) {
         return Result<TextureHandle>::Failure(resolved.Error());
     }
@@ -1398,6 +1399,17 @@ void GlesDevice::StoreLog(GLuint object, bool shader) noexcept {
     // 13절).
     auto assigned = lastError_.TryAssign(StringView(log, static_cast<usize>(written)));
     (void)assigned;
+}
+
+Result<TextureSubresources>
+GlesDevice::GetTextureSubresources(TextureHandle texture) const noexcept {
+    const TextureRecord* record = textures_.Find(texture.slot);
+    if (record == nullptr) {
+        return Result<TextureSubresources>::Failure(ErrorCode::StaleHandle);
+    }
+
+    return Result<TextureSubresources>::Success(
+        TextureSubresources{record->mipLevels, record->slices});
 }
 
 } // namespace rocks::graphics::gles

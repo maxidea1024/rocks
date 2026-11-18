@@ -251,3 +251,37 @@ TEST(SubresourceStates_InlineAndHeapStorage) {
     CHECK(copy.At(4, 11) == 9u);
     CHECK(copy.Reset(allocator, 0, 1, 0u).Error() == ErrorCode::InvalidArgument);
 }
+
+TEST(TextureDesc_SizesThatOverflowAreZero) {
+    TextureDesc desc;
+    desc.dimension = TextureDimension::Texture2DArray;
+    desc.format = PixelFormat::RGBA32Float;
+    desc.width = 65536;
+    desc.height = 65536;
+    desc.arraySize = NumericLimits<uint32>::Max();
+    // 이미지 하나(2^36 byte)와 층 수(2^32 − 1)의 곱은 uint64를 넘친다.
+    CHECK(TextureMipBytes(desc, 0) == 0);
+    CHECK(TextureMipPlaneBytes(desc, 0, 0) == 0);
+    CHECK(TextureDataBytes(desc) == 0);
+}
+
+TEST(TextureDesc_ComparisonSamplerNeedsDepth) {
+    TextureDesc desc;
+    desc.width = 4;
+    desc.height = 4;
+    desc.format = PixelFormat::RGBA8Unorm;
+    desc.sampler.comparison = true;
+    CHECK(ValidateTextureDesc(desc).Error() == ErrorCode::InvalidArgument);
+    desc.format = PixelFormat::D32Float;
+    CHECK(ValidateTextureDesc(desc).IsOk());
+    desc.format = PixelFormat::D24UnormS8Uint;
+    CHECK(ValidateTextureDesc(desc).IsOk());
+    // 비교 샘플러 텍스처의 view는 깊이 plane만 읽는다.
+    CHECK(ResolveTextureViewFormat(PixelFormat::D24UnormS8Uint, {}, true).Value() ==
+          PixelFormat::D24Unorm);
+    CHECK(ResolveTextureViewFormat(PixelFormat::D24UnormS8Uint, {PixelFormat::Unknown, 1, {}}, true)
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(
+        ResolveTextureViewFormat(PixelFormat::D24UnormS8Uint, {PixelFormat::Unknown, 1, {}}, false)
+            .Value() == PixelFormat::R8Uint);
+}

@@ -125,7 +125,8 @@ private:
 };
 
 // 샘플러 필터다(비교 샘플러면 COMPARISON 계열). AnisotropicPoint는
-// D3D12_FILTER_MIN_MAG_ANISOTROPIC_MIP_POINT(장치 기능 AnisoFilterWithPointMipSupported)다.
+// D3D12_FILTER_MIN_MAG_ANISOTROPIC_MIP_POINT다(장치 기능 AnisoFilterWithPointMipSupported가 있을
+// 때만 부른다. 없으면 SamplerFor가 AnisotropicLinear로 바꿔 부른다).
 D3D12_FILTER SamplerFilter(Filter filter, bool comparison) noexcept;
 
 D3D12_TEXTURE_ADDRESS_MODE SamplerAddress(AddressMode mode) noexcept;
@@ -209,6 +210,8 @@ struct TextureRecord {
     uint32 dsv = 0;
     // 샘플러 힙의 칸이다(SamplerFor가 같은 설정끼리 공유한다).
     uint32 sampler = 0;
+    // 샘플러가 깊이 비교 샘플러다(view는 깊이 plane만 읽을 수 있다).
+    bool comparison = false;
     // subresource(mip × slice)마다 장치가 추적한 상태다(RenderBase GX5). committed는 제출한 프레임
     // 기록 끝의 상태이고, current는 기록 중인 프레임 안의 상태다(기록 중이 아니면 둘이 같다).
     // 업로드 기록은 프레임 기록보다 먼저 실행되므로 committed에서 바꿨다가 committed로 되돌려
@@ -502,6 +505,8 @@ public:
                                             const TextureViewDesc& desc) noexcept override;
 
     // 텍스처 mip·plane 하나를 동기로 읽는다(시험·캡처용). ReadPixels와 같은 경로다.
+    Result<TextureSubresources>
+    GetTextureSubresources(TextureHandle texture) const noexcept override;
     Result<void> ReadTexture(TextureHandle handle, uint32 mipLevel, uint32 plane,
                              Span<uint8> out) noexcept override;
 
@@ -966,6 +971,8 @@ private:
     DeviceCaps caps_;
     uint32 featureLevel_ = 0;
     uint32 samplerCount_ = 0;
+    // AnisotropicPoint를 AnisotropicLinear로 만든 일을 로그에 남겼다(한 번만).
+    bool anisotropicPointReported_ = false;
     ComRef<IDXGIFactory4> factory_;
     ComRef<ID3D12Device> device_;
     ComRef<ID3D12InfoQueue> infoQueue_;

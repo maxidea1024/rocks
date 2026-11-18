@@ -14,7 +14,8 @@ namespace sandbox {
 //   view를 번갈아 그려도 각자의 대응이다(OpenGL ES는 텍스처 객체 상태를 공유한다). A8 형식 흉내와의
 //   합성. D3D11은 항등이 아니면 Unsupported다.
 // - 샘플러: 3D W축 주소 모드(Wrap·Clamp), 깊이 비교 샘플러(LessEqual·GreaterEqual), 필터 5종의 생성
-//   (AnisotropicPoint는 DeviceFeatures::anisotropicPointFilter가 거짓이면 Unsupported).
+//   (AnisotropicPoint는 하드웨어 대응이 없으면 AnisotropicLinear로 만들어진다). 그 밖에 staging
+//   업로드·BC1 왕복, swizzle이 attachment·ReadTexture에 새지 않음, 비교 샘플러 선형 필터.
 // device는 호출 스레드가 소유한다. 실패 수를 돌려준다. 읽기를 지원하지 않는 조합(OpenGL ES의 2D가
 // 아닌 깊이 텍스처 ReadTexture 등)은 Unsupported인지 단언한다.
 rocks::uint32 RunTextureChecks(const char* name, rocks::graphics::Device& device,

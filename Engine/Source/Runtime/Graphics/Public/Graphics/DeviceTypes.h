@@ -400,13 +400,15 @@ uint32 TextureFullMipCount(const TextureDesc& desc) noexcept;
 // mip level의 2D 이미지 수다(slice 수 × 3D면 그 mip의 깊이).
 uint32 TextureMipImageCount(const TextureDesc& desc, uint32 level) noexcept;
 
-// mip level 하나의 데이터 byte다(모든 이미지, 다중 plane은 plane 합). 형식·크기가 잘못되면 0이다.
+// mip level 하나의 데이터 byte다(모든 이미지, 다중 plane은 plane 합). 형식·크기가 잘못되거나
+// uint64를 넘치면 0이다.
 uint64 TextureMipBytes(const TextureDesc& desc, uint32 level) noexcept;
 
 // mip level 하나의 plane 하나 데이터 byte다(ReadTexture 출력 크기).
 uint64 TextureMipPlaneBytes(const TextureDesc& desc, uint32 level, uint32 plane) noexcept;
 
-// 초기 픽셀 전체 byte다(mip 0부터 mipLevels개의 TextureMipBytes 합). 잘못된 desc는 0이다.
+// 초기 픽셀 전체 byte다(mip 0부터 mipLevels개의 TextureMipBytes 합). 잘못된 desc와 uint64 넘침은
+// 0이다.
 uint64 TextureDataBytes(const TextureDesc& desc) noexcept;
 
 // 장치와 무관한 텍스처 설정 규칙이다(backend가 생성 전에 부른다).
@@ -416,10 +418,19 @@ uint64 TextureDataBytes(const TextureDesc& desc) noexcept;
 // - Cube·CubeArray인데 width ≠ height
 // - mipLevels가 0이거나 TextureFullMipCount 초과, RenderTarget·DepthStencil인데 mipLevels ≠ 1
 // - DepthStencil인데 깊이 형식이 아님
+// - 비교 샘플러(SamplerDesc::comparison)인데 깊이 형식(Depth·DepthStencil)이 아님
 // Unsupported(이 단계의 계약 밖):
 // - RenderTarget·DepthStencil인데 Texture2D가 아님(slice attachment는 렌더 세션 GX2 몫)
 // - 다중 plane 형식(깊이·스텐실 D24S8·D32S8, 비디오)인데 Texture2D가 아님
 Result<void> ValidateTextureDesc(const TextureDesc& desc) noexcept;
+
+// 텍스처의 subresource 구성이다(Device::GetTextureSubresources). slices는 TextureSliceCount다.
+struct TextureSubresources {
+    uint32 mipLevels = 0;
+    uint32 slices = 0;
+
+    bool operator==(const TextureSubresources&) const noexcept = default;
+};
 
 // 장치 한도로 텍스처를 검사한다(ValidateTextureDesc 다음). 넘으면 Unsupported다: 한 변이
 // textureSize2D(Cube·CubeArray는 textureSizeCube, 3D는 세 축 모두 textureSize3D)를 넘음, slice
@@ -450,6 +461,11 @@ struct TextureViewDesc {
 // 않는 형식·무효 swizzle InvalidArgument.
 Result<PixelFormat> ResolveTextureViewFormat(PixelFormat texture,
                                              const TextureViewDesc& desc) noexcept;
+
+// 위와 같고, 원 텍스처의 샘플러가 비교 샘플러면(comparisonSampler) view가 깊이 plane을 읽어야
+// 한다(스텐실 plane·비디오 plane view는 InvalidArgument). backend의 CreateTextureView가 부른다.
+Result<PixelFormat> ResolveTextureViewFormat(PixelFormat texture, const TextureViewDesc& desc,
+                                             bool comparisonSampler) noexcept;
 
 // desc의 텍스처를 만들 때 형식에 필요한 능력이다(TextureUsage 주석, 3D는 Texture3D, Cube·
 // CubeArray는 TextureCube를 더한다).

@@ -141,6 +141,11 @@ Result<void> RenderGraph::UploadTexture(GraphTexture texture, uint32 mipLevel,
     // 초기 데이터 자리를 처음 업로드 때 잡는다(장치 생성 초기 데이터 배치: mip 0부터 빈틈 없이).
     if (resource.uploadPixels == nullptr) {
         const uint64 chain = graphics::TextureDataBytes(desc);
+        // CreateTexture가 넘침을 이미 거르지만 arena 할당 전에 다시 본다.
+        if (chain == 0 || chain > NumericLimits<usize>::Max()) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
         auto memory = arena_.TryAllocate(static_cast<usize>(chain), alignof(uint64));
         if (!memory) {
             return Result<void>::Failure(memory.Error());

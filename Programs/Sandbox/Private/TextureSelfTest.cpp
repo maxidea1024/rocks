@@ -227,6 +227,27 @@ void main() {
 }
 )";
 
+// 깊이 비교 선형 필터(PCF): (0.5, 0.5)를 비교 값 0.5로 표본한다.
+constexpr char CompareLinearHlsl[] =
+    "Texture2D<float> source : register(t0);\n"
+    "SamplerComparisonState sourceSampler : register(s0);\n" ROCKS_FULL_SCREEN_HLSL
+    "float4 PSMain(float4 position : SV_Position) : SV_Target {\n"
+    "    float result = source.SampleCmpLevelZero(sourceSampler, "
+    "float2(0.5, 0.5), 0.5);\n"
+    "    return float4(result, result, result, 1.0);\n"
+    "}\n";
+
+constexpr char CompareLinearGlsl[] = R"(#version 320 es
+precision highp float;
+precision highp int;
+layout(binding = 0) uniform highp sampler2DShadow ps0;
+layout(location = 0) out vec4 out_var_SV_Target0;
+void main() {
+    float result = textureLod(ps0, vec3(0.5, 0.5, 0.5), 0.0);
+    out_var_SV_Target0 = vec4(result, result, result, 1.0);
+}
+)";
+
 #undef ROCKS_FULL_SCREEN_HLSL
 #undef ROCKS_CUBE_DIRECTIONS
 
@@ -750,7 +771,8 @@ void RunCompare(Device& device) noexcept {
     bench.Release();
 }
 
-// 필터 5종: 생성 성공, AnisotropicPoint는 장치 기능을 따른다.
+// 필터 5종: 모두 만들어진다. AnisotropicPoint는 하드웨어 대응이 없는 backend(D3D11, OPTIONS19가
+// 없는 D3D12)에서 AnisotropicLinear로 만든다(UE와 같다, DeviceFeatures::anisotropicPointFilter).
 void RunFilters(Device& device) noexcept {
     const uint8 texel[4] = {1, 2, 3, 4};
     for (uint32 value = 0; value <= static_cast<uint32>(MaxFilter); ++value) {
@@ -767,17 +789,235 @@ void RunFilters(Device& device) noexcept {
             platform::MemoryCopy(data + index * 4, texel, 4);
         }
         auto texture = device.CreateTexture(desc, Span<const uint8>(data, sizeof(data)));
-        const bool expected =
-            filter != Filter::AnisotropicPoint || device.Caps().features.anisotropicPointFilter;
         char what[96];
-        snprintf(what, sizeof(what), "filter %s creation matches the device features",
-                 FilterName(filter));
-        Check(expected ? texture.IsOk() : (!texture && texture.Error() == ErrorCode::Unsupported),
-              what);
+        snprintf(what, sizeof(what), "filter %s texture is created", FilterName(filter));
+        Check(texture.IsOk(), what);
         if (texture) {
             device.Retire(texture.Value());
         }
     }
+}
+
+// staging 업로드: 배열·cube·3D의 mip 하나를 staging(offset 0과 512)에서 올리고 ReadTexture로
+// 대조한다. 3D 64×4×4 RGBA8은 행이 256 byte라 D3D12가 staging에서 바로 복사하는 footprint 경로를,
+// 배열·cube는 ring 경로(D3D12)와 layerCount 복사(Vulkan)를 탄다.
+void RunStagingUploads(Device& device, Allocator& allocator) noexcept {
+    TextureDesc descs[3] = {ColorDesc(TextureDimension::Texture2DArray, 3, 1, 2),
+                            ColorDesc(TextureDimension::TextureCube, 1, 1, 2),
+                            ColorDesc(TextureDimension::Texture3D, 1, 4, 1)};
+    descs[2].width = 64;
+    const char* labels[3] = {"2D array", "cube", "3D"};
+    for (uint32 kind = 0; kind < 3; ++kind) {
+        const TextureDesc& desc = descs[kind];
+        if (desc.dimension == TextureDimension::Texture3D &&
+            !HasPixelFormatCaps(device.GetPixelFormatCaps(desc.format),
+                                PixelFormatCaps::Texture3D)) {
+            continue;
+        }
+        Array<uint8> data(allocator);
+        if (!data.TryResize(static_cast<usize>(TextureDataBytes(desc)))) {
+            Check(false, "staging data allocation");
+            return;
+        }
+        FillBytes(data.View(), 21 + kind);
+        auto texture = device.CreateTexture(desc, data.View());
+        Check(texture.IsOk(), "staging target texture is created");
+        if (!texture) {
+            continue;
+        }
+        const uint32 mip = desc.mipLevels - 1;
+        const usize bytes = static_cast<usize>(TextureMipBytes(desc, mip));
+        const uint64 offsets[2] = {0, 512};
+        for (const uint64 offset : offsets) {
+            auto staging = device.AcquireStaging(offset + bytes);
+            Check(staging.IsOk(), "staging is acquired");
+            if (!staging) {
+                continue;
+            }
+            Array<uint8> fresh(allocator);
+            Array<uint8> read(allocator);
+            if (!fresh.TryResize(bytes) || !read.TryResize(bytes)) {
+                Check(false, "staging compare allocation");
+                device.ReleaseStaging(staging.Value().handle);
+                continue;
+            }
+            FillBytes(fresh.View(), 40 + kind * 2 + static_cast<uint32>(offset));
+            platform::MemoryCopy(staging.Value().data + offset, fresh.Data(), bytes);
+            auto uploaded = device.UploadTextureFromStaging(texture.Value(), mip,
+                                                            staging.Value().handle, offset);
+            device.ReleaseStaging(staging.Value().handle);
+            auto readback = device.ReadTexture(texture.Value(), mip, 0, read.View());
+            char what[128];
+            snprintf(what, sizeof(what), "%s staging upload at offset %u reads back", labels[kind],
+                     static_cast<uint32>(offset));
+            Check(uploaded.IsOk() && readback.IsOk() &&
+                      platform::MemoryCompare(read.Data(), fresh.Data(), bytes) == 0,
+                  what);
+            if (!uploaded || !readback) {
+                PrintLastError(device);
+            }
+        }
+        device.Retire(texture.Value());
+    }
+}
+
+// 블록 압축(BC1) 배열·cube·3D 왕복이다. OpenGL ES는 블록 압축 텍스처를 읽지 못한다(ReadTexture
+// Unsupported, PixelFormat.ko.md 14.2절).
+void RunCompressed(Device& device, Allocator& allocator) noexcept {
+    const PixelFormat format = PixelFormat::BC1Unorm;
+    const PixelFormatCaps caps = device.GetPixelFormatCaps(format);
+    if (!HasPixelFormatCaps(caps, PixelFormatCaps::Sampled | PixelFormatCaps::Mipmaps)) {
+        return;
+    }
+    TextureDesc descs[3] = {ColorDesc(TextureDimension::Texture2DArray, 2, 1, 2),
+                            ColorDesc(TextureDimension::TextureCube, 1, 1, 2),
+                            ColorDesc(TextureDimension::Texture3D, 1, 2, 1)};
+    const char* labels[3] = {"BC1 2D array", "BC1 cube", "BC1 3D"};
+    for (uint32 kind = 0; kind < 3; ++kind) {
+        TextureDesc desc = descs[kind];
+        desc.format = format;
+        desc.width = 8;
+        desc.height = 8;
+        if ((desc.dimension == TextureDimension::Texture3D &&
+             !HasPixelFormatCaps(caps, PixelFormatCaps::Texture3D)) ||
+            (desc.dimension == TextureDimension::TextureCube &&
+             !HasPixelFormatCaps(caps, PixelFormatCaps::TextureCube))) {
+            continue;
+        }
+        Array<uint8> data(allocator);
+        if (!data.TryResize(static_cast<usize>(TextureDataBytes(desc)))) {
+            Check(false, "compressed data allocation");
+            return;
+        }
+        FillBytes(data.View(), 60 + kind);
+        auto texture = device.CreateTexture(desc, data.View());
+        char what[96];
+        snprintf(what, sizeof(what), "%s texture is created", labels[kind]);
+        Check(texture.IsOk(), what);
+        if (!texture) {
+            PrintLastError(device);
+            continue;
+        }
+        if (device.Info().backend == Backend::OpenGL) {
+            Array<uint8> read(allocator);
+            if (read.TryResize(static_cast<usize>(TextureMipBytes(desc, 0)))) {
+                auto readback = device.ReadTexture(texture.Value(), 0, 0, read.View());
+                Check(!readback && readback.Error() == ErrorCode::Unsupported,
+                      "OpenGL ES compressed ReadTexture is Unsupported");
+            }
+        } else {
+            RunRoundTrip(device, texture.Value(), desc, data.View(), labels[kind], allocator);
+        }
+        device.Retire(texture.Value());
+    }
+}
+
+// swizzle은 셰이더 읽기에만 적용한다: (B, G, R, A) 렌더 타깃을 빨강으로 clear하면 저장·ReadPixels는
+// 빨강이고 셰이더로 읽으면 파랑이다(Vulkan은 attachment에 항등 view를 따로 쓴다). 깊이 텍스처를
+// (0, 0, 0, 1)로 그린 뒤의 ReadTexture는 저장된 깊이다(OpenGL ES는 성분 대응이 텍스처 객체 상태다).
+void RunSwizzleIsolation(Device& device) noexcept {
+    if (!device.Caps().features.textureViewSwizzle) {
+        return;
+    }
+    Bench bench;
+    if (!bench.Initialize(device, 1, Text(LoadHlsl), Text(LoadGlsl))) {
+        Check(false, "swizzle isolation bench resources are created");
+        return;
+    }
+    TextureDesc targetDesc;
+    targetDesc.width = Extent;
+    targetDesc.height = Extent;
+    targetDesc.format = PixelFormat::RGBA8Unorm;
+    targetDesc.usage = TextureUsage::RenderTarget;
+    targetDesc.swizzle = {SwizzleSource::Blue, SwizzleSource::Green, SwizzleSource::Red,
+                          SwizzleSource::Alpha};
+    auto target = device.CreateTexture(targetDesc, {});
+    Check(target.IsOk(), "swizzled render target is created");
+    if (target) {
+        auto frame = device.BeginOffscreen(target.Value(), {1.0f, 0.0f, 0.0f, 1.0f});
+        const bool ended = frame.IsOk() && device.EndFrame().IsOk();
+        uint8 stored[Extent * Extent * 4] = {};
+        const bool read =
+            ended && device.ReadPixels(target.Value(), Span<uint8>(stored, sizeof(stored))).IsOk();
+        Check(read && NearColor(stored + (Extent + 1) * 4, 255, 0, 0, 255),
+              "swizzled render target stores the cleared color unswizzled");
+        Check(bench.Render(target.Value()) && NearColor(bench.Pixel(0), 0, 0, 255, 255),
+              "swizzled render target reads swizzled in a shader");
+        device.Retire(target.Value());
+    }
+
+    const PixelFormat depthFormat = PixelFormat::D32Float;
+    if (HasPixelFormatCaps(device.GetPixelFormatCaps(depthFormat), PixelFormatCaps::Sampled)) {
+        TextureDesc depthDesc;
+        depthDesc.width = Extent;
+        depthDesc.height = Extent;
+        depthDesc.format = depthFormat;
+        depthDesc.sampler.filter = Filter::Point;
+        depthDesc.swizzle = {SwizzleSource::Zero, SwizzleSource::Zero, SwizzleSource::Zero,
+                             SwizzleSource::One};
+        const float value = 0.625f;
+        float depths[Extent * Extent] = {};
+        for (float& depth : depths) {
+            depth = value;
+        }
+        auto depth = device.CreateTexture(
+            depthDesc, Span<const uint8>(reinterpret_cast<const uint8*>(depths), sizeof(depths)));
+        Check(depth.IsOk(), "swizzled depth texture is created");
+        if (depth) {
+            Check(bench.Render(depth.Value()) && NearColor(bench.Pixel(0), 0, 0, 0, 255),
+                  "swizzled depth texture reads (0, 0, 0, 1) in a shader");
+            float read[Extent * Extent] = {};
+            auto readback = device.ReadTexture(
+                depth.Value(), 0, 0, Span<uint8>(reinterpret_cast<uint8*>(read), sizeof(read)));
+            Check(readback.IsOk() && read[5] == value,
+                  "ReadTexture after a swizzled draw reads the stored depth");
+            device.Retire(depth.Value());
+        }
+    }
+    bench.Release();
+}
+
+// 비교 샘플러 선형 필터(PCF): 2×2 깊이(왼쪽 열 0.25, 오른쪽 열 0.75)를 두 열 사이 u = 0.5에서 비교
+// 값 0.5, LessEqual로 표본하면 왼쪽 결과 0과 오른쪽 결과 1의 평균 0.5다.
+void RunCompareLinear(Device& device) noexcept {
+    const PixelFormat format = PixelFormat::D32Float;
+    if (!HasPixelFormatCaps(device.GetPixelFormatCaps(format), PixelFormatCaps::Sampled)) {
+        return;
+    }
+    Bench bench;
+    if (!bench.Initialize(device, 1, Text(CompareLinearHlsl), Text(CompareLinearGlsl))) {
+        Check(false, "PCF bench resources are created");
+        return;
+    }
+    TextureDesc desc;
+    desc.width = 2;
+    desc.height = 2;
+    desc.format = format;
+    desc.sampler.filter = Filter::Bilinear;
+    desc.sampler.addressU = AddressMode::Clamp;
+    desc.sampler.addressV = AddressMode::Clamp;
+    desc.sampler.comparison = true;
+    desc.sampler.compare = CompareFunction::LessEqual;
+    const float depths[4] = {0.25f, 0.75f, 0.25f, 0.75f};
+    auto texture = device.CreateTexture(
+        desc, Span<const uint8>(reinterpret_cast<const uint8*>(depths), sizeof(depths)));
+    Check(texture.IsOk(), "PCF depth texture is created");
+    if (texture) {
+        // 선형 비교 결과는 구현마다 가중 오차가 있어 0.5 ± 0.05로 본다.
+        const bool drawn = bench.Render(texture.Value());
+        const int red = bench.Pixel(0)[0];
+        Check(drawn && red >= 115 && red <= 140,
+              "bilinear comparison between a failing and a passing texel is about 0.5");
+        device.Retire(texture.Value());
+    }
+    // 비교 샘플러는 깊이 형식에만 붙는다.
+    TextureDesc color = desc;
+    color.format = PixelFormat::RGBA8Unorm;
+    const uint8 texels[16] = {};
+    auto rejected = device.CreateTexture(color, Span<const uint8>(texels, sizeof(texels)));
+    Check(!rejected && rejected.Error() == ErrorCode::InvalidArgument,
+          "comparison sampler on a color format is InvalidArgument");
+    bench.Release();
 }
 
 } // namespace
@@ -789,8 +1029,12 @@ uint32 RunTextureChecks(const char* name, Device& device, Allocator& allocator) 
     RunVolume(device, allocator);
     RunCube(device, allocator);
     RunCubeArray(device, allocator);
+    RunStagingUploads(device, allocator);
+    RunCompressed(device, allocator);
     RunSwizzle(device);
+    RunSwizzleIsolation(device);
     RunCompare(device);
+    RunCompareLinear(device);
     RunFilters(device);
     auto flushed = device.WaitIdle();
     Check(flushed.IsOk(), "WaitIdle after texture checks");

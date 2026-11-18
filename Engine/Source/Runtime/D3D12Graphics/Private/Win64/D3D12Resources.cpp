@@ -306,12 +306,6 @@ Result<TextureHandle> D3D12Device::CreateTexture(const TextureDesc& desc,
                                        "texture size, slice count or dimension exceeds the D3D12 "
                                        "device limits");
     }
-    if (desc.sampler.filter == Filter::AnisotropicPoint && !caps_.features.anisotropicPointFilter) {
-        platform::LockGuard lock(gate_);
-        return FailCode<TextureHandle>(ErrorCode::Unsupported,
-                                       "the D3D12 device has no anisotropic filter with point mip "
-                                       "selection (AnisoFilterWithPointMipSupported)");
-    }
     const bool depth =
         info.kind == PixelFormatKind::Depth || info.kind == PixelFormatKind::DepthStencil;
     const uint64 size = TextureDataBytes(desc);
@@ -342,6 +336,7 @@ Result<TextureHandle> D3D12Device::CreateTexture(const TextureDesc& desc,
     record.renderTarget = renderTarget;
     record.depthTarget = depthTarget;
     record.sampler = sampler.Value();
+    record.comparison = desc.sampler.comparison;
     const bool volume = desc.dimension == TextureDimension::Texture3D;
     D3D12_RESOURCE_DESC resource = {};
     // cube·배열은 2D 배열 자원이다(cube 면은 UE·D3D 순서대로 slice 0–5).
@@ -553,7 +548,7 @@ Result<TextureHandle> D3D12Device::CreateTextureView(TextureHandle texture,
     if (source->view) {
         return Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
     }
-    auto resolved = ResolveTextureViewFormat(source->format, desc);
+    auto resolved = ResolveTextureViewFormat(source->format, desc, source->comparison);
     if (!resolved) {
         return Result<TextureHandle>::Failure(resolved.Error());
     }
@@ -589,6 +584,7 @@ Result<TextureHandle> D3D12Device::CreateTextureView(TextureHandle texture,
     record.source = texture.slot;
     record.devicePlanes = source->devicePlanes;
     record.sampler = source->sampler;
+    record.comparison = source->comparison;
     record.srv = srv.Value();
     record.hasSrv = true;
     WriteShaderResourceView(record, srvFormat, desc.plane, desc.swizzle, record.srv);
@@ -720,8 +716,20 @@ Result<uint32> D3D12Device::SamplerFor(const SamplerDesc& desc) noexcept {
     if (!slot) {
         return Result<uint32>::Failure(slot.Error());
     }
+    // AnisotropicPoint 하드웨어 필터가 없으면 UE처럼 AnisotropicLinear로 만든다(사용자 결정,
+    // DeviceFeatures::anisotropicPointFilter가 거짓, 처음 한 번 Debug 로그).
+    Filter filter = desc.filter;
+    if (filter == Filter::AnisotropicPoint && !caps_.features.anisotropicPointFilter) {
+        filter = Filter::AnisotropicLinear;
+        if (!anisotropicPointReported_) {
+            anisotropicPointReported_ = true;
+            Log::Debug(LogGraphicsD3D12,
+                       "AnisotropicPoint samplers are created as AnisotropicLinear because the "
+                       "device has no AnisoFilterWithPointMipSupported");
+        }
+    }
     D3D12_SAMPLER_DESC sampler = {};
-    sampler.Filter = SamplerFilter(desc.filter, desc.comparison);
+    sampler.Filter = SamplerFilter(filter, desc.comparison);
     sampler.AddressU = SamplerAddress(desc.addressU);
     sampler.AddressV = SamplerAddress(desc.addressV);
     sampler.AddressW = SamplerAddress(desc.addressW);
@@ -749,6 +757,18 @@ Result<void> D3D12Device::CreateSwapChainViews(SwapChainRecord& record) noexcept
                                         rtvs_.Cpu(record.rtv[index]));
     }
     return Result<void>::Success();
+}
+
+Result<TextureSubresources>
+D3D12Device::GetTextureSubresources(TextureHandle texture) const noexcept {
+    platform::LockGuard lock(gate_);
+    const TextureRecord* record = textures_.Find(texture.slot);
+    if (record == nullptr) {
+        return Result<TextureSubresources>::Failure(ErrorCode::StaleHandle);
+    }
+
+    return Result<TextureSubresources>::Success(
+        TextureSubresources{record->mipLevels, record->slices});
 }
 
 } // namespace rocks::graphics::d3d12

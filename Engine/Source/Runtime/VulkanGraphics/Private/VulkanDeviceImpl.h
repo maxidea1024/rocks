@@ -115,8 +115,9 @@ struct BufferViewRecord {
 struct TextureRecord {
     VkImage image = VK_NULL_HANDLE;
     VkImageView view = VK_NULL_HANDLE;
-    // 깊이·스텐실 attachment용 view(깊이와 스텐실 aspect 모두)다. 기본 view는 깊이 aspect만
-    // 읽으므로 스텐실 plane이 있는 깊이 타깃에만 따로 만든다. 없으면 view를 attachment로 쓴다.
+    // attachment용 view(이미지 전체 aspect, 항등 성분 대응)다. 기본 view는 깊이 aspect만 읽거나
+    // swizzle이 걸려 있을 수 있으므로 스텐실 plane이 있는 깊이 타깃과 성분 대응이 항등이 아닌
+    // 렌더 타깃에만 따로 만든다. 없으면 view를 attachment로 쓴다.
     VkImageView attachmentView = VK_NULL_HANDLE;
     MemoryAllocation memory;
     TextureDimension dimension = TextureDimension::Texture2D;
@@ -135,6 +136,8 @@ struct TextureRecord {
     VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
     // 묶을 때 쓰는 샘플러다(장치 수명 동안 산다). view도 원 텍스처의 샘플러를 쓴다.
     VkSampler sampler = VK_NULL_HANDLE;
+    // 샘플러가 깊이 비교 샘플러다(view는 깊이 plane만 읽을 수 있다).
+    bool comparison = false;
     // 다른 텍스처의 이미지를 공유하는 view다. 이미지·메모리는 원 텍스처 기록이 쥐고 상태도 원
     // 기록(source)이 추적한다. 업로드·readback·그리기 대상이 될 수 없다.
     bool isView = false;
@@ -409,6 +412,8 @@ public:
     PixelFormatCaps GetPixelFormatCaps(PixelFormat format) const noexcept override;
     Result<TextureHandle> CreateTextureView(TextureHandle texture,
                                             const TextureViewDesc& desc) noexcept override;
+    Result<TextureSubresources>
+    GetTextureSubresources(TextureHandle texture) const noexcept override;
     Result<void> ReadTexture(TextureHandle texture, uint32 mipLevel, uint32 plane,
                              Span<uint8> out) noexcept override;
     Result<PipelineHandle> CreatePipeline(const PipelineDesc& desc) noexcept override;
@@ -703,6 +708,11 @@ private:
     void TrackTransition(TextureRecord& record, SlotHandle slot,
                          const ResolvedSubresourceRange& range, ResourceAccess after,
                          bool uavOrder) noexcept;
+    // 범위를 (같은 상태 열의 layer 구간) × (같은 상태의 mip 구간) 직사각형으로 나눠 emit(firstMip,
+    // mipCount, firstLayer, layerCount, from)을 부른다(barrier 수를 줄인다).
+    template <class Emit>
+    void ForEachStateRun(const TextureRecord& record, const ResolvedSubresourceRange& range,
+                         Emit&& emit) noexcept;
     // 프레임 기록을 끝낸다. 제출했으면 current를 committed로, 아니면 committed로 되돌린다.
     void SettleTracking(bool executed) noexcept;
     void SuspendRenderPass() noexcept;

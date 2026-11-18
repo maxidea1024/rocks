@@ -192,6 +192,8 @@ public:
                                  uint32 height) noexcept override;
     Result<graphics::BufferHandle> CreateBuffer(const graphics::BufferDesc& desc,
                                                 Span<const uint8> initial) noexcept override;
+    Result<graphics::TextureSubresources>
+    GetTextureSubresources(graphics::TextureHandle texture) const noexcept override;
     Result<graphics::TextureHandle> CreateTexture(const graphics::TextureDesc& desc,
                                                   Span<const uint8> pixels) noexcept override;
     Result<graphics::PipelineHandle>

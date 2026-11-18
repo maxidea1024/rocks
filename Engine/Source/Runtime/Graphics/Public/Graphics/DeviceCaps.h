@@ -165,8 +165,8 @@ struct DeviceFeatures {
     // AnisoFilterWithPointMipSupported(D3D12_FILTER_MIN_MAG_ANISOTROPIC_MIP_POINT)일 때다. Vulkan·
     // OpenGL ES는 늘 참이다(mipmapMode NEAREST·LINEAR_MIPMAP_NEAREST에 이방성 배율을 더하며, 배율은
     // 다른 이방성 필터처럼 장치 한도 samplerAnisotropy로 줄인다). D3D11은 대응 필터가 없어
-    // 거짓이다. 거짓이면 그 필터의 텍스처 생성이 Unsupported다(UE는 이방성 선형으로 바꾸지만
-    // Rocks는 다른 필터로 바꾸지 않는다).
+    // 거짓이다. 거짓이면 그 필터는 UE와 같이 AnisotropicLinear로 만든다(사용자 결정 2026-11-18,
+    // backend가 처음 한 번 Debug 로그를 남긴다). 쿠킹 프로필은 UE 기본값을 그대로 쓴다.
     bool anisotropicPointFilter = false;
     // sRGB 짝 형식 view(PixelFormat.ko.md 9절). OpenGL ES는 형식을 재해석하는 view가 없어 거짓이다.
     bool srgbPairView = false;

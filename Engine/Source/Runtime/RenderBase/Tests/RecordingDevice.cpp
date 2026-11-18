@@ -694,6 +694,17 @@ uint64 RecordingDevice::ValidationErrorCount() const noexcept {
     return validationErrors_;
 }
 
+Result<graphics::TextureSubresources>
+RecordingDevice::GetTextureSubresources(TextureHandle texture) const noexcept {
+    const TextureState* state = textures_.Find(texture.slot);
+    if (state == nullptr) {
+        return Result<graphics::TextureSubresources>::Failure(ErrorCode::StaleHandle);
+    }
+
+    return Result<graphics::TextureSubresources>::Success(
+        graphics::TextureSubresources{state->states.MipLevels(), state->states.Slices()});
+}
+
 ResourceAccess RecordingDevice::TextureAccess(TextureHandle texture, uint32 mip,
                                               uint32 slice) const noexcept {
     const TextureState* state = textures_.Find(texture.slot);

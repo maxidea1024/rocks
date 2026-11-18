@@ -588,3 +588,30 @@ TEST(RenderGraph_TracksSubresourcesPerSlice) {
                                   GraphPassFlags::HasSideEffects, outside, Logged(2));
     CHECK(!added && added.Error() == ErrorCode::InvalidArgument);
 }
+
+// import 선언(mip·slice 수)이 장치 텍스처 구성과 다르면 InvalidArgument다
+// (Device::GetTextureSubresources 대조).
+TEST(RenderGraph_ImportRejectsSubresourceMismatch) {
+    GraphBench bench;
+    graphics::TextureDesc arrayDesc;
+    arrayDesc.dimension = graphics::TextureDimension::Texture2DArray;
+    arrayDesc.width = 4;
+    arrayDesc.height = 4;
+    arrayDesc.arraySize = 3;
+    arrayDesc.format = graphics::PixelFormat::RGBA8Unorm;
+    auto created = bench.device.CreateTexture(arrayDesc, {});
+    auto reserved = bench.handles.Reserve(RenderResourceKind::Texture);
+    REQUIRE(created && reserved && bench.handles.BindTexture(reserved.Value(), created.Value()));
+    auto shape = bench.device.GetTextureSubresources(created.Value());
+    REQUIRE(shape);
+    CHECK(shape.Value().mipLevels == 1 && shape.Value().slices == 3);
+
+    RenderGraph graph(bench.Next());
+    GraphImportOptions options;
+    options.slices = 2;
+    auto wrong = graph.ImportTexture(reserved.Value(), "Layers", options);
+    CHECK(!wrong && wrong.Error() == ErrorCode::InvalidArgument);
+    options.slices = 3;
+    auto right = graph.ImportTexture(reserved.Value(), "Layers", options);
+    CHECK(right.IsOk());
+}
