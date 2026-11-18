@@ -118,8 +118,8 @@ void ObjectRegistry::LedgerEdgeLocked(uint32 owner, uint32 target, bool add) noe
         return;
     }
 
-    ClusterCell& from = CellOf(owner);
     if (add) {
+        ClusterCell& from = CellOf(owner);
         if (from.outCount++ == 0) {
             LinkCellLocked(clusters_[id].boundaryHead, owner, true);
             ++clusters_[id].boundaryMembers;
@@ -128,6 +128,12 @@ void ObjectRegistry::LedgerEdgeLocked(uint32 owner, uint32 target, bool add) noe
         return;
     }
 
+    LedgerOutsideRemoveLocked(owner);
+}
+
+void ObjectRegistry::LedgerOutsideRemoveLocked(uint32 owner) noexcept {
+    const uint32 id = MemberClusterOf(owner);
+    ClusterCell& from = CellOf(owner);
     if (from.outCount == 0) {
         platform::Fatal("Cluster ledger out-count underflow");
     }
@@ -150,11 +156,49 @@ void ObjectRegistry::LedgerEditLocked(const Slot& owner, ObjectHandle removed,
     }
 
     if (!removed.IsNull()) {
-        LedgerEdgeLocked(owner.index, removed.slot, false);
+        DeferLedgerRemovalLocked(owner.index, removed);
     }
 
     if (!added.IsNull()) {
         LedgerEdgeLocked(owner.index, added.slot, true);
+    }
+}
+
+void ObjectRegistry::DeferLedgerRemovalLocked(uint32 owner, ObjectHandle target) noexcept {
+    if (ledgerRemovalCount_ == LedgerRemovalCapacity) {
+        ApplyLedgerRemovalsLocked();
+    }
+
+    ledgerRemovals_[ledgerRemovalCount_++] = {owner, target.slot, target.generation};
+}
+
+void ObjectRegistry::ApplyLedgerRemovalsLocked() noexcept {
+    // 기록 때와 같은 분류로 줄인다 — 기록과 적용 사이에 대상·소유자의 클러스터 관계를 바꾸는 이탈·
+    // 해체는 먼저 이 함수를 부른다. 대상은 적용 전에 회수될 수 없다: Marking 중의 기록은
+    // cutoff(경계 비율 판정 전)에 적용되고, Sweeping 중의 기록이 가리키는 대상은 이 cycle에
+    // 표식됐다. 세대가 다르면 그 불변식이 깨진 것이다(Debug Fatal). Release는 회수된 대상을
+    // 클러스터 밖으로 보고 소유자 outCount만 줄인다(안쪽 대상은 이탈·해체 없이 회수되지 않는다).
+    const uint32 count = ledgerRemovalCount_;
+    ledgerRemovalCount_ = 0;
+    for (uint32 at = 0; at < count; ++at) {
+        if (at + LedgerApplyPrefetchDistance < count) {
+            const LedgerRemoval& ahead = ledgerRemovals_[at + LedgerApplyPrefetchDistance];
+            platform::PrefetchRead(SlotAt(ahead.target));
+            platform::PrefetchRead(&CellOf(ahead.target));
+            platform::PrefetchRead(&BitsOf(ahead.target));
+            platform::PrefetchRead(&CellOf(ahead.owner));
+        }
+
+        const LedgerRemoval& entry = ledgerRemovals_[at];
+        if (SlotAt(entry.target)->generation == entry.targetGeneration) {
+            LedgerEdgeLocked(entry.owner, entry.target, false);
+        } else {
+            if constexpr (IsDebugBuild) {
+                platform::Fatal("Deferred cluster ledger removal outlived its target");
+            }
+
+            LedgerOutsideRemoveLocked(entry.owner);
+        }
     }
 }
 
@@ -166,7 +210,7 @@ void ObjectRegistry::LedgerClearLocked(const Slot& owner, const ObjectHandle* va
 
     for (usize index = 0; index < count; ++index) {
         if (!values[index].IsNull()) {
-            LedgerEdgeLocked(owner.index, values[index].slot, false);
+            DeferLedgerRemovalLocked(owner.index, values[index]);
         }
     }
 }
@@ -201,6 +245,7 @@ void ObjectRegistry::LeaveTrace(Slot& slot) noexcept {
 }
 
 void ObjectRegistry::FinishLeaveLocked(Slot& slot) noexcept {
+    ApplyLedgerRemovalsLocked();
     const uint32 index = slot.index;
     ClusterCell& cell = CellOf(index);
     const uint32 id = ClusterStateOf(index) & ClusterIdMask;
@@ -235,6 +280,7 @@ void ObjectRegistry::FinishLeaveLocked(Slot& slot) noexcept {
 }
 
 void ObjectRegistry::DissolveClusterLocked(uint32 id) noexcept {
+    ApplyLedgerRemovalsLocked();
     ClusterRecord& record = clusters_[id];
     const bool cycle = gcPhase_ == GcPhase::Marking || gcPhase_ == GcPhase::Sweeping;
     const bool marked = cycle && IsClusterMarkedLocked(id);
@@ -332,6 +378,7 @@ Result<void> ObjectRegistry::ClosePermanentRegion(const ObjectAccessContext& acc
 }
 
 void ObjectRegistry::AdvanceGcEpochLocked() noexcept {
+    ApplyLedgerRemovalsLocked();
     ++gcEpoch_;
     if (gcEpoch_ == 0) {
         // epoch가 한 바퀴 돌았다: 옛 cycle의 epoch가 새 cycle과 같아 보이지 않게 비운다.
@@ -362,6 +409,7 @@ void ObjectRegistry::DissolveUnmarkedClustersLocked() noexcept {
 }
 
 uint32 ObjectRegistry::FlattenBoundaryClustersLocked() noexcept {
+    ApplyLedgerRemovalsLocked();
     // 패키지 클러스터만 대상이다. 엔진이 지정한 클러스터(World Level)는 가입을 엔진이 정하므로
     // 남기고, 영구 영역은 표식·sweep을 하지 않는 것이 목적이다.
     uint32 flattened = 0;
@@ -600,6 +648,19 @@ Result<void> ObjectRegistry::ReserveClusters(uint32 count) noexcept {
         return Result<void>::Failure(epochs.Error());
     }
 
+    LedgerRemoval* removals = nullptr;
+    if (ledgerRemovals_ == nullptr) {
+        auto log = allocator_.Allocate(sizeof(LedgerRemoval) * LedgerRemovalCapacity,
+                                       alignof(LedgerRemoval), ClusterTableTag);
+        if (!log) {
+            ReleaseRegistryMemory(allocator_, grown);
+            ReleaseRegistryMemory(allocator_, epochs.Value());
+            return Result<void>::Failure(log.Error());
+        }
+
+        removals = static_cast<LedgerRemoval*>(log.Value());
+    }
+
     auto* grownEpochs = static_cast<uint32*>(epochs.Value());
     for (uint32 index = 0; index < capacity; ++index) {
         grownEpochs[index] = 0;
@@ -619,6 +680,9 @@ Result<void> ObjectRegistry::ReserveClusters(uint32 count) noexcept {
         previousEpochs = clusterEpochs_;
         clusters_ = grown;
         clusterEpochs_ = grownEpochs;
+        if (removals != nullptr) {
+            ledgerRemovals_ = removals;
+        }
         clusterFreeCount_ += static_cast<uint32>(capacity) - clusterCapacity_;
         clusterCapacity_ = static_cast<uint32>(capacity);
     }
@@ -777,6 +841,12 @@ Result<void> ObjectRegistry::VerifyClusterLedger() noexcept {
     } else {
         if (!clustersEnabled_ || !options_.verifyClusterLedger) {
             return Result<void>::Success();
+        }
+
+        // 미룬 장부 감소를 먼저 적용한다(계수를 다시 세어 대조한다).
+        {
+            platform::LockGuard lock(gate_);
+            ApplyLedgerRemovalsLocked();
         }
 
         // 처리 표시 아래라 장부·간선이 바뀌지 않는다(다른 스레드는 루트·Borrow 계수만 바꾼다).

@@ -108,6 +108,7 @@ ObjectRegistry::~ObjectRegistry() {
     ReleaseRegistryMemory(allocator_, rootList_);
     ReleaseRegistryMemory(allocator_, clusters_);
     ReleaseRegistryMemory(allocator_, clusterEpochs_);
+    ReleaseRegistryMemory(allocator_, ledgerRemovals_);
     clusterEpochs_ = nullptr;
     clusters_ = nullptr;
     gcPages_ = nullptr;

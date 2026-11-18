@@ -800,6 +800,14 @@ private:
     void LedgerEdgeLocked(uint32 owner, uint32 target, bool add) noexcept;
     // 잠금 보유: 단일 간선 지점의 장부 갱신이다(owner가 소속이 아니면 아무것도 하지 않는다).
     void LedgerEditLocked(const Slot& owner, ObjectHandle removed, ObjectHandle added) noexcept;
+    // 간선 제거의 장부 감소를 미뤄 기록한다(GC 설계 13.4절 — 대상 줄을 건드리지 않는다). 기록이
+    // 차면 먼저 적용한다.
+    void DeferLedgerRemovalLocked(uint32 owner, ObjectHandle target) noexcept;
+    // 미룬 장부 감소를 모두 적용한다. 장부 계수를 읽거나 클러스터 상태를 바꾸기 전(이탈·해체·
+    // Begin·Collect·검증)에 부른다.
+    void ApplyLedgerRemovalsLocked() noexcept;
+    // 클러스터 밖 대상으로 가던 간선 하나를 소유자 outCount에서 뺀다(경계 고리 출입 포함).
+    void LedgerOutsideRemoveLocked(uint32 owner) noexcept;
     // 잠금 보유: 비우기 지점에서 떼어 낼 값 count개를 장부에서 뺀다(owner가 소속이 아니면 무동작).
     void LedgerClearLocked(const Slot& owner, const ObjectHandle* values, usize count) noexcept;
     // owner가 클러스터 소속인지다(잠금 보유, 클러스터를 끈 Registry는 거짓).
@@ -1225,6 +1233,14 @@ private:
     // 목록과 수, Marking 중 해체해 큐가 빌 때까지 재사용하지 않는 레코드 목록, 표식 epoch다(Begin·
     // Collect마다 하나씩 오른다).
     bool clustersEnabled_ = false;
+    // 미룬 장부 감소 기록(DeferLedgerRemovalLocked)이다. 첫 클러스터 예약 때 받는다.
+    struct LedgerRemoval {
+        uint32 owner;
+        uint32 target;
+        uint32 targetGeneration;
+    };
+    LedgerRemoval* ledgerRemovals_ = nullptr;
+    uint32 ledgerRemovalCount_ = 0;
     ClusterRecord* clusters_ = nullptr;
     // 클러스터 표식 epoch다(레코드 번호로 색인, 레코드와 같은 용량 — marker가 간선마다 읽으므로
     // 레코드에서 떼어 작고 연속되게 둔다. 영구 영역은 언제나 지금 epoch다).

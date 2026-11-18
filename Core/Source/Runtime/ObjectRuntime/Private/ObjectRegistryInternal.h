@@ -502,6 +502,10 @@ inline uint32& ObjectRegistry::ClusterStateOf(uint32 index) const noexcept {
     return CellOf(index).state;
 }
 
+// 미룬 장부 감소 기록의 칸 수와 적용 때 미리 읽는 거리다(GC 설계 13.4절).
+inline constexpr uint32 LedgerRemovalCapacity = 4096;
+inline constexpr uint32 LedgerApplyPrefetchDistance = 8;
+
 inline uint32& ObjectRegistry::ClusterInCountOf(uint32 index) const noexcept {
     return SlotAt(index)->clusterInCount;
 }
