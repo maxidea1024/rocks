@@ -140,6 +140,10 @@ struct GraphImportOptions {
 // 계산한 전이 하나다(진단·시험). pass는 이 전이를 prologue에서 내는 pass 번호이며
 // GraphIndexNone이면 그래프 끝(export·import 마지막 상태)이다. attachment면 그 pass의 렌더 타깃
 // 전이라 장치의 BeginOffscreen이 낸다(CommandContext::Transition으로 내지 않는다).
+//
+// 만든 자원의 첫 전이 before는 Unknown(내용 불필요, 장치가 추적한 상태에서 바꾼다)이고, 같은 그래프
+// 안에서 앞 자원이 놓은 장치 객체를 이어 쓰는 자원(GraphLifetime::reusedWithinGraph)은 Discard다
+// (이전 내용 무효, backend는 Unknown처럼 추적 상태에서 바꾼다).
 struct GraphTransitionRecord {
     uint32 pass = GraphIndexNone;
     GraphResourceKind kind = GraphResourceKind::Texture;
@@ -155,14 +159,18 @@ struct GraphTransitionRecord {
 };
 
 // 그래프 자원의 수명이다(참조 수 기준, 7.1절 수명·할당). firstPass에서 할당하고 lastPass 뒤에
-// 해제한다(RG1은 해제한 자원을 그래프 끝에 풀로 돌려준다. 프레임 안 재사용은 RG2). 쓰는 pass가 모두
-// 제거됐으면 둘 다 GraphIndexNone이다. import·export 자원은 해제하지 않는다(released가 false).
+// 해제한다. 해제한 장치 객체는 같은 그래프의 뒤 pass에서 처음 쓰는 같은 desc 자원이 이어 쓰고(RG2
+// 프레임 안 재사용, Deferred 모드), 그래프 끝에 풀로 돌아간다. 쓰는 pass가 모두 제거됐으면 둘 다
+// GraphIndexNone이다. import·export 자원은 해제하지 않는다(released가 false). 업로드를 받는 자원은
+// 그래프 시작에 할당한다(그래서 앞 자원의 객체를 이어 쓰지 않는다).
 struct GraphLifetime {
     uint32 firstPass = GraphIndexNone;
     uint32 lastPass = GraphIndexNone;
     // 남은(제거되지 않은) pass의 참조 수다.
     uint32 references = 0;
     bool released = false;
+    // 같은 그래프 안에서 앞 자원이 놓은 장치 객체를 이어 쓴다(첫 전이 before가 Discard).
+    bool reusedWithinGraph = false;
 };
 
 // 그래프 진단 계수다.
@@ -175,9 +183,13 @@ struct GraphStats {
     uint32 attachmentTransitions = 0;
     // 연 장치 기록(BeginOffscreen·BeginFrame) 수다.
     uint32 recordings = 0;
-    // 풀에서 새로 만든·재사용한 자원 수다.
+    // 풀에서 새로 만든·재사용한 자원 수다(풀에서 받은 장치 객체 기준).
     uint32 createdResources = 0;
     uint32 reusedResources = 0;
+    // 같은 그래프 안에서 앞 자원이 놓은 장치 객체를 이어 쓴 자원 수다(풀에 가지 않는다, RG2).
+    uint32 reusedWithinGraph = 0;
+    // 장치에 낸 업로드 수다(버퍼 업로드 하나, 텍스처 mip 하나가 1).
+    uint32 uploads = 0;
     uint32 validationErrors = 0;
 };
 

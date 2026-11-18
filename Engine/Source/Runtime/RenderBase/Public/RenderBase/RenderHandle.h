@@ -6,6 +6,10 @@
 #include <Platform/Sync.h>
 #include <RenderBase/RenderTransfer.h>
 
+namespace rocks::graphics {
+class Device;
+} // namespace rocks::graphics
+
 namespace rocks::render {
 
 // 게임 lane이 예약받는 렌더 자원 handle이다(Docs/Design/RenderBase.ko.md 5.4절 handle 예약, 6.2절).
@@ -38,6 +42,31 @@ enum class RenderResourceState : uint8 {
     Failed,
     // Retire 요청을 받았다. 새 사용은 막히고 GPU 완료 뒤 표에서 빠진다.
     Retired
+};
+
+// 렌더 handle의 Retire를 장치 해제 대신 받는 쪽이다(Docs/Design/RenderBase.ko.md 7.4절 결정 R15).
+// 장치 자원을 다른 소유자(렌더 그래프 자원 풀)가 계속 가지면서 handle로 빌려줄 때 BindBuffer·
+// BindTexture에 넘긴다. 그 handle의 Retire는 ReleaseRetiredResource가 장치 Retire 대신 이 sink로
+// 넘긴다.
+//
+// 사용 예(GraphResourcePool이 export한 history 텍스처):
+//   handles.BindTexture(history, texture, &pool);   // pool : RenderRetireSink
+//   ... 다음 프레임들이 import로 읽는다 ...
+//   lane.Retire(history);   // lease가 풀린 뒤 pool.OnRenderRetire(...) — 장치 해제가 아니라 풀
+//   반납
+//
+// 스레드·수명: 렌더 lane(장치 소유 스레드)에서 불린다. sink는 이어 준 handle이 모두 Retire되거나
+// DetachRetireSink로 떼어질 때까지 살아야 한다.
+class RenderRetireSink {
+public:
+    // handle의 Retire가 왔다. device는 handle에 이어져 있던 장치 handle slot(kind 종류), lastUse는
+    // 그 자원을 마지막으로 쓸 수 있는 제출의 완료 지점이다(기록 중이 아닐 때 부르므로 그때까지의
+    // 마지막 제출). 받은 쪽이 그 장치 자원의 수명을 정한다.
+    virtual void OnRenderRetire(RenderHandle handle, RenderResourceKind kind, SlotHandle device,
+                                graphics::GpuFencePoint lastUse) noexcept = 0;
+
+protected:
+    ~RenderRetireSink() = default;
 };
 
 // 렌더 handle의 사용 lease다(계획 11.2절 RenderResourceLease,
@@ -83,11 +112,14 @@ public:
     // 새 handle을 Pending으로 예약한다. 실패: 할당 실패는 그 오류다.
     Result<RenderHandle> Reserve(RenderResourceKind kind) noexcept;
 
-    // Pending handle에 장치 자원을 잇고 Ready로 바꾼다. 실패: 모르는 handle StaleHandle, 종류가
-    // 다르면 TypeMismatch, Pending이 아니면 InvalidArgument(Retired면 ShuttingDown — 호출자가 만든
-    // 장치 자원을 바로 Retire한다).
-    Result<void> BindBuffer(RenderHandle handle, graphics::BufferHandle buffer) noexcept;
-    Result<void> BindTexture(RenderHandle handle, graphics::TextureHandle texture) noexcept;
+    // Pending handle에 장치 자원을 잇고 Ready로 바꾼다. sink가 있으면 그 handle의 Retire는 장치
+    // Retire 대신 sink로 간다(RenderRetireSink, ReleaseRetiredResource). 실패: 모르는 handle
+    // StaleHandle, 종류가 다르면 TypeMismatch, Pending이 아니면 InvalidArgument(Retired면
+    // ShuttingDown — 호출자가 만든 장치 자원을 바로 Retire한다).
+    Result<void> BindBuffer(RenderHandle handle, graphics::BufferHandle buffer,
+                            RenderRetireSink* sink = nullptr) noexcept;
+    Result<void> BindTexture(RenderHandle handle, graphics::TextureHandle texture,
+                             RenderRetireSink* sink = nullptr) noexcept;
     Result<void> BindPipeline(RenderHandle handle, graphics::PipelineHandle pipeline) noexcept;
 
     // Pending handle을 Failed로 바꾼다(error는 진단용으로 남는다).
@@ -129,6 +161,8 @@ public:
         SlotHandle device;
         // lease가 남아 장치 Retire를 미뤘다.
         bool deferred = false;
+        // Bind 때 넘긴 Retire 대행자다(없으면 장치 Retire).
+        RenderRetireSink* sink = nullptr;
     };
 
     Result<RetiredResource> BeginRetire(RenderHandle handle) noexcept;
@@ -136,6 +170,10 @@ public:
     // 미룬 Retire 가운데 마지막 lease가 풀린 것 하나를 꺼낸다. 있으면 true이고 handle·retired(장치
     // handle 포함)를 채운다. 렌더 lane이 lane 작업 끝에 불러 장치 Retire를 이어 간다.
     bool TakeReleasedRetire(RenderHandle& handle, RetiredResource& retired) noexcept;
+
+    // handle의 Retire 대행자가 sink면 떼어 낸다(그 뒤 Retire는 장치 Retire다). sink가 먼저 사라질
+    // 때(예: 풀 파괴) 장치 자원의 소유를 handle에 넘긴다. 모르는 handle·다른 sink는 무시한다.
+    void DetachRetireSink(RenderHandle handle, const RenderRetireSink* sink) noexcept;
 
     // Retired handle을 표에서 뺀다(GPU 완료 뒤). 그 뒤 handle은 stale이다.
     Result<void> Remove(RenderHandle handle) noexcept;
@@ -152,9 +190,11 @@ private:
         uint32 leases = 0;
         // Retire 때 lease가 남아 장치 Retire를 미뤘다(device는 아직 이어져 있다).
         bool retireDeferred = false;
+        RenderRetireSink* sink = nullptr;
     };
 
-    Result<void> Bind(RenderHandle handle, RenderResourceKind kind, SlotHandle device) noexcept;
+    Result<void> Bind(RenderHandle handle, RenderResourceKind kind, SlotHandle device,
+                      RenderRetireSink* sink) noexcept;
     Result<SlotHandle> Lookup(RenderHandle handle, RenderResourceKind kind) const noexcept;
 
     mutable platform::Mutex gate_;
@@ -162,6 +202,19 @@ private:
     // 마지막 lease가 풀려 장치 Retire를 이어 갈 handle이다.
     Array<RenderHandle> releasedRetires_;
 };
+
+// Retire된 자원(BeginRetire·TakeReleasedRetire 결과)을 넘긴다: sink가 있으면 sink에, 없으면 장치
+// Retire로 넘긴다(device가 null이면 아무것도 하지 않는다). lastUse는 device.LastSubmittedFence()다.
+// 장치 소유 스레드에서 기록 중이 아닐 때 부른다. 렌더 lane이 쓰고, lane 없이 표를 쓰는 시험·도구도
+// 같은 경로를 쓴다.
+//
+// 사용 예:
+//   auto retired = handles.BeginRetire(handle);
+//   if (retired && !retired.Value().deferred) {
+//       ReleaseRetiredResource(device, handle, retired.Value());
+//   }
+void ReleaseRetiredResource(graphics::Device& device, RenderHandle handle,
+                            const RenderHandleTable::RetiredResource& retired) noexcept;
 
 } // namespace rocks::render
 

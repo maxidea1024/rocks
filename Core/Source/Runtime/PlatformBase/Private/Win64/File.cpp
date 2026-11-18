@@ -366,19 +366,17 @@ public:
             const bool dot =
                 name[0] == L'.' && (name[1] == L'\0' || (name[1] == L'.' && name[2] == L'\0'));
             if (!dot) {
-                int nameUnits = 0;
-                while (name[nameUnits] != L'\0') {
-                    ++nameUnits;
-                }
                 char utf8[MAX_PATH * 3 + 1];
                 DirectoryEntry entry;
-                usize nameBytes = 0;
-                if (!detail::WideToUtf8(name, nameUnits, utf8, sizeof(utf8), nameBytes)) {
+                const windows::TextConversion converted =
+                    windows::ConvertWideToUtf8(name, windows::WideLength(data.cFileName), utf8,
+                                               sizeof(utf8), windows::TextFit::Exact);
+                if (!converted) {
                     result = {FileCode::SystemError, ERROR_NO_UNICODE_TRANSLATION};
                     break;
                 }
                 entry.name = utf8;
-                entry.nameBytes = nameBytes;
+                entry.nameBytes = converted.length;
                 const bool directory = (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
                 entry.info.type = directory ? FileType::Directory : FileType::File;
                 entry.info.isLink = detail::IsLinkReparse(data.dwFileAttributes, data.dwReserved0);

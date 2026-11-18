@@ -19,7 +19,7 @@
 
 이 기능은 여러 문서가 "prefab 단계"로 미뤄 둔 일을 한곳에서 정한다.
 
-- default subobject와 SubobjectGuid, 인스턴스별 clone·remap(EIP 5.3절, RCM 43·73행, OF 0절, SL 527·529행).
+- default subobject와 SubobjectGuid, 인스턴스별 clone·remap(EIP 5.3절, RCM 43·73행, OF 0절, SL 4.5절).
 - 차이 저장 기준의 일반화 — "prefab이 생기면 기준이 archetype 사슬이 된다"(RCM 72행, EIP 5.3절).
 - Map·Set의 key 단위 차이(RX 20절 열린 문제), 배열 원소 안정 ID(RF 1044행).
 - Instanced 하위 객체(RX 0절, OF 0절).
@@ -173,7 +173,7 @@ Unity는 소스가 공개되지 않아 직렬화 YAML의 공개 필드 이름 �
 **설계: subobject를 선언으로 옮긴다**(UE SCS가 선언 트리인 것과 같은 꼴 — 2.4절, 4절 D13).
 
 - **선언**: C++는 소유 필드 지정자로 선언한다 — `ROCKS_PROPERTY(Subobject, Parent = "root") ObjectRef<StaticMeshComponent> mesh;`(지정자 이름은 PF1에서 확정). Sparks는 `let` component 필드가 같은 선언으로 컴파일된다(SL 4.5절).
-- **subobject 표**: MetaCompiler가 클래스마다 생성한다. 항목은 `{SubobjectGuid, 타입(TypeId), 이름, 부착 부모(SubobjectGuid 또는 소유 Actor의 root), 소유 필드(FieldId)}`이고 상속 클래스의 표는 base 표 + 자기 항목이다. SubobjectGuid는 `.rocksids.json`에 발급한다(TypeId·FieldId와 같다 — SL 990행). 이름은 표 안에서 유일하다(MetaCompiler 오류).
+- **subobject 표**: MetaCompiler가 클래스마다 생성한다. 항목은 `{SubobjectGuid, 타입(TypeId), 이름, 부착 부모(SubobjectGuid 또는 소유 Actor의 root), 소유 필드(FieldId)}`이고 상속 클래스의 표는 base 표 + 자기 항목이다. SubobjectGuid는 `.rocksids.json`에 발급한다(TypeId·FieldId와 같다 — SL 12.2절). 이름은 표 안에서 유일하다(MetaCompiler 오류).
 - **생성**: 생성자가 아니라 World instancing이 만든다. `ConstructionContext`에서 소유 객체를 만든 직후 표 순서대로 subobject를 staged로 만들고(Outer = 소유 객체, 이름 = 표 이름), 소유 필드에 staged 쓰기로 넣고, 부착 부모를 정한다. `SpawnActor`·`AddComponent`·그래프 복원·prefab spawn이 모두 이 한 경로를 쓴다.
 - **subobject 기본값 레코드**: (소유 클래스 TypeId, SubobjectGuid)마다 하나다. 내용 = subobject 타입의 클래스 레코드 + 소유 클래스가 그 subobject에 준 기본값 덮기. C++는 소유 클래스의 정적 함수가 Registry 밖 임시 subobject 값에 쓰는 방식으로 덮기를 준다(RCM 58·59행의 레코드 생성과 같은 결정성 계약 — 두 번 실행해 인코딩 비교). Sparks는 `let` 초기값의 필드 지정이 덮기다.
 - **subobject 지역 번호 참조**: 클래스 레코드·subobject 기본값 레코드 안에서 "이 소유 객체의 k번째 subobject"를 가리키는 참조 wire를 둔다(예: `Actor.rootComponent` 기본값 = subobject 1, 부착 부모 = subobject 2). 값은 소유 객체 기준 지역 번호이고 instancing이 실제 handle로 바꾼다. 이 참조만 레코드의 non-null 객체 참조로 허용한다 — **RCM 59·60·68행 개정이 필요하다**(7절, D1 (a)의 선행 조건).
@@ -202,7 +202,7 @@ Unity는 소스가 공개되지 않아 직렬화 YAML의 공개 필드 이름 �
 9. **소유 목록**(4절 D15): prefab에서 펼친 Actor는 Level의 영속 목록 `actors`가 아니라 Transient 소유 목록 `spawnedActors`(`ROCKS_PROPERTY(Transient) ObjectRefArray<Actor>`)에 넣는다. `actors`는 Required 영속 필드라(ER 4.6절) 펼친 Actor가 들어 있으면 레벨 저장에서 그 Actor를 빼는 순간 집합 밖 강한 참조가 되어 graph v2 Reject로 실패한다(OF 5.3절). Transient 목록은 저장되지 않고 GC 소유 간선 역할만 한다(생성 Trace가 Transient 참조 필드를 방문해야 한다 — 5.1절에서 확인). 레벨에 직접 배치한 Actor만 `actors`에 남는다.
 10. **생성 출처 표시**: 객체마다 NATIVE 생성 출처를 둔다 — `ClassSubobject`·`PrefabNode`·`InstanceAdded`(인스턴스 override로 추가한 노드)·`Runtime`(hook·게임 코드의 `SpawnActor`·`AddComponent`). UE `CreationMethod`와 같은 목적이다(2.1절). 원형 본문과 레벨 저장은 Runtime 출처를 넣지 않는다. 편집 World에서는 게임 hook을 실행하지 않으므로(3.13절, 4절 D18) Runtime 출처가 생기지 않는 것이 정상이고, 이 표시는 그 계약의 방어선이다.
 11. **pre-commit Initialize → Commit**: 최상위 Actor들을 root로 다중 root Commit 한 번(OF 1.6절). Commit 전 실패는 staged 그래프 전체를 rollback한다.
-12. **Register → hook**: World가 Actor마다 `ActorRecord`를 만들고 클러스터에 가입시킨다(3.9절). hook은 spawn 묶음 단위다 — 묶음의 모든 Actor·Component `OnAwake`가 성공하면 노드 순서로 `OnEnable`, `OnStart`는 기존 규칙(ER 7.2절)을 따른다(SL 539행). Commit 뒤 `OnAwake` 실패는 묶음 전체를 RequestDestroy 경로로 정리한다(EIP 5.3절 — 공개된 객체를 rollback 경로로 지우지 않는다).
+12. **Register → hook**: World가 Actor마다 `ActorRecord`를 만들고 클러스터에 가입시킨다(3.9절). hook은 spawn 묶음 단위다 — 묶음의 모든 Actor·Component `OnAwake`가 성공하면 노드 순서로 `OnEnable`, `OnStart`는 기존 규칙(ER 7.2절)을 따른다(SL 5.1절). Commit 뒤 `OnAwake` 실패는 묶음 전체를 RequestDestroy 경로로 정리한다(EIP 5.3절 — 공개된 객체를 rollback 경로로 지우지 않는다).
 
 API(이름은 PF3에서 확정 — EIP 20.3절의 `InstantiatePrefab`·`PrefabInstanceDesc`와 맞출 점은 7절):
 
@@ -261,7 +261,7 @@ Result<PrefabSpawnResult> World::SpawnPrefab(const AssetLease& prefab, const Spa
   - 클래스 subobject 노드는 삭제할 수 없다(클래스 선언이 만든다). 비활성화는 `enabled` 값 override로 한다.
   - 루트가 하나뿐인 원형의 루트는 삭제할 수 없다.
   - 추가 노드의 부모는 원형 노드나 다른 추가 노드다. 추가 노드의 Record는 기준이 클래스 레코드인 전부 저장 형식(RCM 66행 누락 = 기준)이다. 추가 노드의 이름은 부모 Actor 안에서 유일해야 한다(추가 때 검사).
-- **reparent**: 부착 계층이 리플렉션 필드(WeakRef 부모 — ER 4.6절, RF 결정 21)로 영속된 뒤에는 reparent가 부모 필드의 값 override다. Outer(소유 Actor)를 바꾸는 이동은 없다 — Outer는 불변이다(OF 1.1절).
+- **reparent**: 부착 계층이 리플렉션 필드(WeakObjectRef 부모 — ER 4.6절, RF 결정 21)로 영속된 뒤에는 reparent가 부모 필드의 값 override다. Outer(소유 Actor)를 바꾸는 이동은 없다 — Outer는 불변이다(OF 1.1절).
 - **타입 버전 기록**: override 집합은 대상 노드 타입마다 저장 당시 스키마 버전을 기록한다(마이그레이션 판정용 — 3.7절).
 
 ### 3.6 저장 형식
@@ -283,7 +283,7 @@ Result<PrefabSpawnResult> World::SpawnPrefab(const AssetLease& prefab, const Spa
   - `contentRevision` = SHA-256(이 패키지의 `base`·`body`·`nodeInfo`·`crossReferences`·`overrides`의 인코딩). 저장 때 계산한다. 편집기 dirty 판정과 쿡 입력 지문에 쓴다.
   - `resolvedRevision` = SHA-256(도메인 문자열, 자기 `contentRevision`, 기준의 `resolvedRevision`, 중첩 노드마다 대상의 `resolvedRevision`(노드 순서), 해석 결과가 쓰는 타입들의 (TypeId, 스키마 버전, 클래스 레코드·subobject 기본값 레코드 지문) TypeId 정렬 목록). 저장하지 않고 해석 때 계산한다(cooked는 쿠커가 계산해 저장한다).
   - 쓰임: 원형 캐시 키 = (AssetId, `resolvedRevision`). 레벨 배치 기록의 `baseRevision` = 저장 당시 `resolvedRevision`이라서 기준 사슬·중첩·코드 기본값이 바뀌어도 전파가 일어난다(3.7절). cooked 검증 = cooked `PrefabAsset`에 저장한 `resolvedRevision`과 cooked 레벨 배치 기록의 `baseRevision` 대조(다르면 `UnsupportedVersion` — 다시 쿠킹). 쿠커 재계산 = prefab의 cookKey 입력에 기준·중첩 prefab의 cookKey와 타입 지문 목록을 넣어 기준이 바뀌면 그것을 쓰는 prefab과 배치 레벨이 다시 쿠킹된다.
-- **의존**: 원형 본문의 에셋 참조(World 객체의 Soft 참조)는 이 패키지의 Dependencies(Hard)로 기록한다 — "하드 의미는 그 World 데이터를 담는 레벨·prefab 패키지의 Dependencies(Hard)로 표현한다"(AS 6.3절). 기준 prefab과 중첩 prefab도 Hard다. override하지 않은 값의 클래스 레코드 참조도 포함한다(RCM 68행). prefab별 하드 의존 크기 예산은 쿡이 검사한다(SL 727행). Hard 의존 덕분에 prefab A가 상주하는 동안 그 기준·중첩 prefab도 상주한다.
+- **의존**: 원형 본문의 에셋 참조(World 객체의 Soft 참조)는 이 패키지의 Dependencies(Hard)로 기록한다 — "하드 의미는 그 World 데이터를 담는 레벨·prefab 패키지의 Dependencies(Hard)로 표현한다"(AS 6.3절). 기준 prefab과 중첩 prefab도 Hard다. override하지 않은 값의 클래스 레코드 참조도 포함한다(RCM 68행). prefab별 하드 의존 크기 예산은 쿡이 검사한다(SL 7.2절). Hard 의존 덕분에 prefab A가 상주하는 동안 그 기준·중첩 prefab도 상주한다.
 - **레벨 배치 인스턴스.** 레벨에 놓인 인스턴스는 펼친 객체가 아니라 **배치 기록** `PrefabPlacement{instanceGuid, prefab(SoftObjectRef), baseRevision, transform, overrides}`로 저장한다(UE Level Instance가 World 에셋 + 배치 Actor인 구조 — 2.5절, 4절 D3). 배치 기록은 Level의 영속 struct 배열 필드다. 펼친 Actor·Component는 Transient 소유 목록에 있으므로(3.3절 9항) 레벨 저장에 들어가지 않는다. `baseRevision`이 다르면 로드 때 전파(3.7절)를 거친다.
 - **실행 중 spawn한 인스턴스**는 저장하지 않는다. 세이브게임은 원형 ID·인스턴스 Guid·spawn/despawn 기록과 SaveGame 필드를 저장한다(EIP 951행 — 세이브게임 계층).
 - **쿠킹**(4절 D8): 쿠커는 variant 사슬과 중첩을 펼친 **평탄화 원형**을 cooked `PrefabAsset`에 저장한다. 펼친 노드가 `MaxPrefabNodes`(graph v2 `maxObjects`)를 넘을 수 있으므로 평탄화 본문은 **부분 그래프 여러 개**(각각 4096 이하 — 원래의 원형 경계를 따라 나누고, 한 원형이 4096을 넘을 수는 없다) + 노드 주소 표 + 그래프 사이 참조 표다. 그래프 사이 참조는 3.3절 6항 규칙(강한 = 같은 트랜잭션 import, weak = 참조 표)을 그대로 쓴다. `base`·`overrides`는 비운다(UE cooked 빠른 경로가 차이 블록을 미리 만드는 것과 같은 목적 — 2.4절). 편집기 해석 결과와 cooked 평탄화 결과는 같은 입력에서 같은 byte여야 한다(PF8 시험). EditorOnly 필드·노드는 뺀다. 레벨 배치 인스턴스의 cooked 형태는 4절 D9.
@@ -439,7 +439,7 @@ Result<PrefabSpawnResult> World::SpawnPrefab(const AssetLease& prefab, const Spa
 
 | ID | 질문 | 선택지 | 추천 |
 |---|---|---|---|
-| D1 | 1차로 무엇을 하나 | (a) 클래스 원형(선언형 default subobject — UE SCS 대응)만 (b) prefab 에셋(데이터 원형, Actor 여러 개 가능 — Unity prefab·UE BP spawn·Level Instance 배치 대응) (c) Level Instance식 별도 Level 로드 (d) 전부 | **(a)+(b)를 1차로 함께**. (a)는 (b)의 선행이고 Sparks `let` component가 기다린다(SL 527행). (a)는 RCM 59·60·68행 개정(3.2절)이 선행이다. (c)는 레벨 패키지·스트리밍 단계(EIP 2064행 P2·M7)와 함께, Packed 대응은 렌더 instancing 뒤 |
+| D1 | 1차로 무엇을 하나 | (a) 클래스 원형(선언형 default subobject — UE SCS 대응)만 (b) prefab 에셋(데이터 원형, Actor 여러 개 가능 — Unity prefab·UE BP spawn·Level Instance 배치 대응) (c) Level Instance식 별도 Level 로드 (d) 전부 | **(a)+(b)를 1차로 함께**. (a)는 (b)의 선행이고 Sparks `let` component가 기다린다(SL 4.5절). (a)는 RCM 59·60·68행 개정(3.2절)이 선행이다. (c)는 레벨 패키지·스트리밍 단계(EIP 2064행 P2·M7)와 함께, Packed 대응은 렌더 instancing 뒤 |
 | D2 | 원형을 무엇으로 두나 | (a) 불변 데이터(노드 표 + Record) (b) 별도 템플릿 Registry의 살아 있는 객체(UE archetype 방식) | **(a)**. WorldOnly 제약·RCM의 CDO 거부 이유가 그대로 적용되고 GC 비용이 0이다(3.1절). 편집은 편집 World로 한다 |
 | D3 | 레벨 배치 인스턴스를 어디에 기록하나 | (a) Level의 배치 기록 struct 배열 `PrefabPlacement` (b) UE `ALevelInstance`처럼 인스턴스마다 전용 Actor | **(a)**. 인스턴스마다 Actor 하나를 더 만들지 않는다. (b)의 장점(Actor 검색·선택·기즈모)은 편집기 Outliner가 배치 기록을 묶음 항목으로 보여 주고 앵커(3.10절)를 기즈모로 움직이는 것으로 대신한다 |
 | D4 | 배열 원소 override | (a) 배열은 통째, 원소 단위는 key 컨테이너로 (b) 배열 원소에 ElementGuid 도입 | **(a)**. index override는 금지한다(Unity 약점 — 2.10절). ElementGuid는 리플렉션 값 형식·텍스트·경로를 모두 바꾸므로 실제 요구가 생기면 따로 설계한다 |
@@ -467,14 +467,14 @@ Result<PrefabSpawnResult> World::SpawnPrefab(const AssetLease& prefab, const Spa
 
 | 선행 | 내용 | 상태(2026-11-17) |
 |---|---|---|
-| 리플렉션 B9 | WeakRef PROPERTY(B9d1), Map·Set·PathKey(B9f), 필드 플래그 DuplicateTransient 계열(B9h1), 저장 불가 객체(B9h2), 대입 묶음·`OverridePaths`(B9i), InstancedStruct(B9j), struct 상속(B9k) | B9a–B9i 구현, B9j–B9m 진행 중 |
+| 리플렉션 B9 | WeakObjectRef PROPERTY(B9d1), Map·Set·PathKey(B9f), 필드 플래그 DuplicateTransient 계열(B9h1), 저장 불가 객체(B9h2), 대입 묶음·`OverridePaths`(B9i), InstancedStruct(B9j), struct 상속(B9k) | B9a–B9i 구현, B9j–B9m 진행 중 |
 | A1 | 패키지 포맷 v1·`Package`·AssetManager·AssetLease·Dependencies(Hard)·패키지 Discard 통지 | 계획 |
 | A2 | 저장·복제(`asset-duplicate` 제외 정책)·인덱스 | 계획 |
 | A5 | 클래스 기본값 레코드·차이 쓰기·override 집합·지문, 차이 형식의 "기준(base)" 명시 API(RCM 72행) | 계획 |
 | RCM 개정 | 59·60·68행: subobject 지역 번호 참조를 레코드의 허용 참조로, subobject 기본값 레코드(3.2절) | 이 문서가 제안(7절) |
 | ObjectRuntime·Serialization | graph v2 "기존 default subobject" 노드 종류(OF 5.1절), 경로 위치 부분 Record staged 디코드 `ApplyPathWire`(3.5절), decode 정책의 제외 필드 건너뛰기(3.3절 7항), Transient 참조 필드의 GC Trace 방문 확인(3.3절 9항) | 이 문서가 제안 |
 | MetaCompiler | subobject 지정자·subobject 표·SubobjectGuid 발급 | 이 문서가 제안 |
-| World 단계 | 부착 계층 영속(WeakRef 부모 — RF 결정 21), 레벨 편입 계약(ER 4.6절), `worldOnlyCreationKey`, Component Outer = Actor, `spawnedActors`, 객체 생성 출처, 앵커 부모 행렬, 편집 World 모드(게임 hook 없음), Actor 영속 Entity Guid(Unpack), 영속 Entity 참조(셀 사이·D12) | 자리만 |
+| World 단계 | 부착 계층 영속(WeakObjectRef 부모 — RF 결정 21), 레벨 편입 계약(ER 4.6절), `worldOnlyCreationKey`, Component Outer = Actor, `spawnedActors`, 객체 생성 출처, 앵커 부모 행렬, 편집 World 모드(게임 hook 없음), Actor 영속 Entity Guid(Unpack), 영속 Entity 참조(셀 사이·D12) | 자리만 |
 | 레벨 패키지 | WorldOnly 그래프의 패키지 저장·export 집합 규칙(OF 5.6절 "레벨 패키지(WorldOnly, 후속)"), 배치 기록 필드 | 후속 |
 | CU4·CU5 | 소유형 경로 `OwnedPropertyPath`와 Record 형식(RX 20절), Undo transaction, setter·통지 hook(World 필드 ReadOnly — ER 4.6절) | 후속 |
 | Sparks L2 | component `let` 필드 초기값(SL 4.5절) — PF1과 함께 열린다 | 후속 |
@@ -578,7 +578,7 @@ PF1은 A5와 RCM 개정 뒤 언제든 할 수 있고, PF2 이후는 World 단계
 | EIP 20.3절(1771-1781행) | `PrefabInstanceDesc{AssetId prefab; Transform root; PrefabOverrideSet}`, `InstantiatePrefab(World&, …)` | `World::SpawnPrefab(AssetLease, SpawnPrefabParams)` | World API로 두는 이유(WorldOnly 생성 키)·lease 인자·`tracked`를 EIP에 반영, 이름 하나로 통일 |
 | EIP 20.3절(1771행) | "외부 world object는 SoftEntityId로 유지" | 1차는 저장 거부, 영속 Entity 참조가 생기면 SoftEntityId(D12) | 시점 차이 기록(최종 방향 같음) |
 | EIP 20.3절(1784행) | "editor 노출 collection에는 stable ElementGuid를 부여하거나 keyed collection을 요구" | 배열은 통째, 원소 단위는 key 컨테이너(D4) | ElementGuid 선택지를 "필요 시 별도 설계"로 낮춤 |
-| SL 1119행 | "`@edit` 배열 원소에는 ElementGuid를 자동 부여한다" | ElementGuid 없음(D4) | Sparks 데이터 에셋 단계에서 key 컨테이너로 바꿀지 결정 |
+| SL 15절 | (초안 1.2) "`@edit` 배열 원소에는 ElementGuid를 자동 부여한다" | ElementGuid 없음(D4) | SL 초안 1.3에서 정정 — 원소 식별은 key 컨테이너(Map·Set) 또는 struct 안 ID 필드 |
 | EIP 20.5절(1804행)·2111행 | 주소 = PrefabInstanceGuid + 중첩 경로 + NodeGuid + FieldId + **ElementGuid** | 마지막 칸은 PathKey(key 컨테이너) | 주소 마지막 칸을 "PropertyPath(필드 ID + key)"로 |
 | EIP 20.3절(1786행) | "reference cycle을 cooker가 거부" | 편집기 저장·로드·쿡 모두 거부 | 검사 시점을 넓힘(강화) |
 | EIP 20.5절(1804행) | "instance EntityGuid는 저장 시 보존하고 새 복제 시 재발급" | 인스턴스 Guid만 보존, 노드 ID는 결정적 파생 | 노드 ID 파생 규칙(3.4절) 추가 |

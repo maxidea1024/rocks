@@ -9,7 +9,8 @@
 #include <Windows.h>
 
 // Windows 동기·비동기 파일 backend가 함께 쓰는 비공개 도구다. 공개 헤더에 Windows 타입을 노출하지
-// 않는다. 오류 변환은 WindowsError.h, UTF-8·UTF-16 변환은 WindowsString.h에 있다.
+// 않는다. 오류 변환은 WindowsError.h, UTF-8·UTF-16 변환은 공개 헤더 Platform/Win64/WideString.h에
+// 있다.
 namespace rocks::platform::detail {
 
 // UTF-8 경로를 검증하고 NUL로 끝나는 UTF-16으로 바꾼다. 장치 namespace·레거시 DOS 장치 이름은
@@ -115,7 +116,7 @@ private:
         return {};
     }
 
-    WideString value_;
+    windows::WideString value_;
 };
 
 // FILETIME(1601-01-01 UTC부터의 100ns)을 FileInfo tick(0001-01-01 UTC부터의 100ns)으로 바꾼다.

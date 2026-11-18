@@ -203,6 +203,8 @@ public static partial class PolicyChecks
     /// <list type="bullet">
     /// <item>Core/Source/Runtime/PlatformBase/Private/{Win64,Mac,Posix,Apple,Android}/</item>
     /// <item>Core/Source/Developer/TestSupport/Private/{Win64,Mac,Posix,Apple,Android}/</item>
+    /// <item>Core/Source/Runtime/PlatformBase/Public/Platform/Win64/: Windows 전용 공개 헤더(ComRef·WideString). 다른 플랫폼에서는
+    /// 내용이 ROCKS_PLATFORM_WINDOWS로 비고(공개 헤더 단독 컴파일 검사), 위 native backend 디렉터리의 소스만 포함한다.</item>
     /// <item>Programs/Commandlet/Private/Win64/</item>
     /// <item>Programs/ShaderToolSpike/Private/Win64/: SH0 도구 스파이크의 DXC COM·D3D12·WGL 측정 코드.</item>
     /// <item>Engine/Source/{Runtime,Developer}/&lt;Module&gt;/Private/{Win64,Mac,Posix,Apple,Android}/: 창·그래픽
@@ -221,6 +223,13 @@ public static partial class PolicyChecks
             parts[2] is "Runtime" or "Developer" && parts[4] == "Private")
         {
             return parts[5] is "Win64" or "Mac" or "Posix" or "Apple" or "Android";
+        }
+
+        // Windows 전용 공개 헤더(COM 참조·UTF-16 변환)다. 다른 모듈의 Private/Win64 구현만 포함한다.
+        if (parts.Length >= 8 && parts[0] == "Core" && parts[1] == "Source" && parts[2] == "Runtime" &&
+            parts[3] == "PlatformBase" && parts[4] == "Public" && parts[5] == "Platform")
+        {
+            return parts[6] == "Win64";
         }
 
         if (parts.Length < 7 || parts[0] != "Core" || parts[1] != "Source" || parts[4] != "Private")
