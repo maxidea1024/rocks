@@ -501,3 +501,27 @@ TEST(CurveReflection_PathWriteMakesHandleTableStale) {
         CHECK(table.TryGetHandle(value.tangent, 1));
     });
 }
+
+// 대입 묶음(명령행)으로 커브를 바꾸면 표 사본과 달라져 다음 표 호출이 StaleHandle이다. 거부된
+// 묶음은 커브를 바꾸지 않으므로 표가 그대로 맞는다.
+TEST(CurveReflection_AssignmentsMakeHandleTableStale) {
+    Objects fixture;
+    auto holder = fixture.Make();
+    const ObjectHandle handle = holder.Handle();
+    fixture.Fill(handle);
+    CurveKeyHandleTable<TangentCurve> table(fixture.system);
+    fixture.With(handle,
+                 [&](CurveHolder& value) noexcept { REQUIRE(table.TryRebuild(value.tangent)); });
+    const TextAssignment rejected[] = {Set("tangent.keys[1].value", "7"),
+                                       Set("tangent.keys[0].time", "100")};
+    CHECK(!fixture.Apply(handle, rejected));
+    fixture.With(handle,
+                 [&](CurveHolder& value) noexcept { CHECK(table.TryGetHandle(value.tangent, 1)); });
+    const TextAssignment applied[] = {Set("tangent.keys[1].tangentMode", "User")};
+    REQUIRE(fixture.Apply(handle, applied));
+    fixture.With(handle, [&](CurveHolder& value) noexcept {
+        auto stale = table.TryGetHandle(value.tangent, 1);
+        CHECK(!stale && stale.Error() == ErrorCode::StaleHandle);
+        CHECK(table.IsStale());
+    });
+}
