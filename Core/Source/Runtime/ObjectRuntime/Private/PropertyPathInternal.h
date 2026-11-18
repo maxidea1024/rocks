@@ -81,6 +81,11 @@ struct PathRunner {
         cursor.redirectHooks_ = true;
     }
 
+    // Run의 끝 단계가 Set 원소(키 단계)였는지다.
+    static bool EndsAtSetElement(const PathCursor& cursor) noexcept {
+        return cursor.setElement_;
+    }
+
     // RedirectHooks를 건 Run이 남긴 가장 바깥 hook struct 단계다(없으면 IndexNone).
     static usize HookStep(const PathCursor& cursor) noexcept {
         return cursor.hookStep_;

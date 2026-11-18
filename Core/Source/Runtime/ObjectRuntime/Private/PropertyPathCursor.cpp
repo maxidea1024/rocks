@@ -1,4 +1,5 @@
 #include <Object/PathCursor.h>
+#include <Object/PreparedStructElements.h>
 #include <Object/SoftObjectRef.h>
 
 // 경로 접근 cursor(detail::PathCursor — Object/PathCursor.h)의 멤버 구현이다. 실패 기록, 정적 대조,
@@ -16,6 +17,12 @@ PathCursor::PathCursor(ObjectRegistry& registry, const ObjectAccessContext& acce
       input_(input), output_(output), failure_(failure), target_(&target) {
     if (failure_) {
         *failure_ = {};
+    }
+}
+
+void PathCursor::MarkAddedElementWritten() noexcept {
+    if (added_ != nullptr) {
+        added_->addedValidated_ = false;
     }
 }
 

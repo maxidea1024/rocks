@@ -31,6 +31,8 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
 
     private SourceSite currentSite = new(inputs[0].Path, 1);
     private readonly Dictionary<string, byte[]> sourceBytes = new(StringComparer.Ordinal);
+    // 주석을 공백으로 바꾼 원문이다(DeclarationPrefixHas — 다른 원문 검사는 원래 byte를 쓰는 sourceBytes다).
+    private readonly Dictionary<string, byte[]> uncommentedSourceBytes = new(StringComparer.Ordinal);
     private readonly Dictionary<string, (string? File, int Offset)> locations = new(StringComparer.Ordinal);
     private string? serializedFile;
     private string? serializedParent;
@@ -342,7 +344,8 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
     private readonly List<(string Alias, string Target)> currentAliases = [];
 
     // 선언 node의 이름 앞(같은 선언의 시작 — 앞의 ';'·'{'·'}' 뒤부터)에 word가 낱말로 쓰여 있는지다(consteval처럼 Clang JSON이
-    // 구별하지 않는 지정자). 원문 위치를 모르면 거짓이다.
+    // 구별하지 않는 지정자). 주석은 걷어낸 원문(WithoutComments)에서 보므로 앞 주석의 낱말·기호는 판정에 들지 않는다. 원문 위치를 모르면
+    // 거짓이다.
     private bool DeclarationPrefixHas(JsonElement node, string word)
     {
         if (!locations.TryGetValue(Text(node, "id"), out var location) || location.File is null || location.Offset < 0 ||
@@ -351,10 +354,10 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
             return false;
         }
 
-        if (!sourceBytes.TryGetValue(location.File, out byte[]? bytes))
+        if (!uncommentedSourceBytes.TryGetValue(location.File, out byte[]? bytes))
         {
-            bytes = File.ReadAllBytes(location.File);
-            sourceBytes.Add(location.File, bytes);
+            bytes = WithoutComments(File.ReadAllBytes(location.File));
+            uncommentedSourceBytes.Add(location.File, bytes);
         }
 
         int end = Math.Min(location.Offset, bytes.Length);
@@ -367,6 +370,70 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
         string prefix = System.Text.Encoding.UTF8.GetString(bytes, start, end - start);
         return System.Text.RegularExpressions.Regex.IsMatch(prefix, $@"\b{word}\b", System.Text.RegularExpressions.RegexOptions.CultureInvariant,
             TimeSpan.FromSeconds(1));
+    }
+
+    // C++ 원문에서 주석(`//`·`/* */`)을 공백으로 바꾼 사본이다(줄바꿈과 byte 위치는 그대로). 문자열·문자 상수 안의 `//`는 주석이 아니다
+    // (raw 문자열은 일반 문자열처럼 본다 — 선언 앞 지정자 판정에는 충분하다).
+    private static byte[] WithoutComments(byte[] source)
+    {
+        byte[] result = (byte[])source.Clone();
+        int index = 0;
+        while (index < result.Length)
+        {
+            byte current = result[index];
+            byte next = index + 1 < result.Length ? result[index + 1] : (byte)0;
+            if (current == (byte)'/' && next == (byte)'/')
+            {
+                while (index < result.Length && result[index] != (byte)'\n')
+                {
+                    result[index] = (byte)' ';
+                    ++index;
+                }
+
+                continue;
+            }
+
+            if (current == (byte)'/' && next == (byte)'*')
+            {
+                result[index] = (byte)' ';
+                result[index + 1] = (byte)' ';
+                index += 2;
+                while (index < result.Length && !(result[index] == (byte)'*' && index + 1 < result.Length && result[index + 1] == (byte)'/'))
+                {
+                    if (result[index] != (byte)'\n')
+                    {
+                        result[index] = (byte)' ';
+                    }
+
+                    ++index;
+                }
+
+                if (index < result.Length)
+                {
+                    result[index] = (byte)' ';
+                    result[index + 1] = (byte)' ';
+                    index += 2;
+                }
+
+                continue;
+            }
+
+            if (current == (byte)'"' || current == (byte)'\'')
+            {
+                ++index;
+                while (index < result.Length && result[index] != current && result[index] != (byte)'\n')
+                {
+                    index += result[index] == (byte)'\\' ? 2 : 1;
+                }
+
+                ++index;
+                continue;
+            }
+
+            ++index;
+        }
+
+        return result;
     }
 
     // 노드 타입의 Clang 정규 철자다(별칭은 desugar한 철자). CompilerDriver가 Binds 별칭을 풀 때도 쓴다.

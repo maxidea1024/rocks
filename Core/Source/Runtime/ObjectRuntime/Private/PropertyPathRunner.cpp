@@ -587,6 +587,7 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
     const ValueKind kind = endType.kind;
     const bool setElement =
         end.selector == PathSelector::Key && end.field->value.kind == ValueKind::Set;
+    cursor.setElement_ = setElement;
     // InstancedStruct 형 바꾸기·비우기·타입 조회(리플렉션 B9j)의 끝은 InstancedStruct 값(필드·멤버·
     // 원소·Map 값)이다.
     const bool instancedEdit =
@@ -932,6 +933,11 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         }
     }
 
+    // 게시 전 원소 블록을 바꾸면 준비물의 추가 원소 검증 표시를 내린다(게시 전에 다시 검증).
+    if (IsMutation(operation)) {
+        cursor.MarkAddedElementWritten();
+    }
+
     // 7. Borrow(쓰기는 ResolveForWrite — encode 고정 중이면 Busy)와 읽기 고정. Detach·Attach는
     // 대상을 바꾸지 않으므로 읽기 Borrow다(변경 표지를 올리지 않는다 — 대입 묶음이 표지를 읽은 뒤
     // 준비한다). staged 객체는 트랜잭션의 Get(쓰기는 GetForWrite), 분리된 값은 Borrow가 없다.
@@ -1001,11 +1007,11 @@ using detail::PathRunner;
 // 만드는 경로다(Docs/Design/CurveData.ko.md 9.1절·17.2절): 그 자리(그 단계 — 원소·Map 값이면
 // 선택자를 뗀 컨테이너 필드)를 상자로 분리하고, 상자 위에서 같은 연산을 한 뒤 원래 자리와 맞바꾼다.
 // 상자 값 트리의 검증은 PathPrepareAttach가 한다(거부는 InvalidArgument(StructValidation)). 게시된
-// 객체는 묶음 게시 구간이다(변경 표지·관찰자 규칙은 대입 묶음과 같다). staged 객체는 분리와 게시
-// 사이에 그 트랜잭션의 staged 쓰기가 있었으면(재진입 변경) Busy로 게시하지 않는다. 바뀐 것이 없는
-// 연산(이미 있는 키의 InsertKey)은 게시하지 않는다. 실패하면 객체와 출력 인자(output·length)는
-// 그대로다 — 출력은 지역 값에 받아 두고 게시가 끝난 뒤 옮긴다. 상자 위 연산의 실패 위치는 원래
-// 경로의 단계로 옮겨 알린다.
+// 객체는 묶음 게시 구간이다(변경 표지·관찰자 규칙은 대입 묶음과 같다). staged 객체는 분리 전부터
+// 게시 직전 사이에 그 트랜잭션의 staged 쓰기가 있었으면(분리 중을 포함한 재진입 변경) Busy로
+// 게시하지 않는다. 바뀐 것이 없는 연산(이미 있는 Set 원소의 InsertKey)은 게시하지 않는다. 실패하면
+// 객체와 출력 인자(output·length)는 그대로다 — 출력은 지역 값에 받아 두고 게시가 끝난 뒤 옮긴다.
+// 상자 위 연산의 실패 위치는 원래 경로의 단계로 옮겨 알린다.
 Result<void> RunThroughHookBox(ObjectRegistry& registry, const ObjectAccessContext& access,
                                const PathTarget& target, PropertyPath path, usize hook,
                                PathOperation operation, const FieldValue* input, FieldValue* output,
@@ -1030,13 +1036,16 @@ Result<void> RunThroughHookBox(ObjectRegistry& registry, const ObjectAccessConte
         stamp = read.Value();
     }
 
+    // staged 쓰기 누계는 분리 전에 잰다: staged는 Pin이 무동작이라 분리(깊은 복사)의 할당 콜백이
+    // 같은 트랜잭션에 쓴 변경도 게시 전 대조에 잡혀야 한다(그렇지 않으면 상자 맞바꿈이 그 쓰기를
+    // 덮는다).
+    ConstructionContext* transaction = target.Transaction();
+    const uint64 writes = !live && transaction ? transaction->WriteCount() : 0;
     DetachedValue box(registry.ObjectAllocator());
     if (auto detached = PathDetach(registry, access, target, unit, box, failure); !detached) {
         return detached;
     }
 
-    ConstructionContext* transaction = target.Transaction();
-    const uint64 writes = !live && transaction ? transaction->WriteCount() : 0;
     const PropertyPath inner{
         Span<const PathStep>(path.steps.Data() + hook, path.steps.Size() - hook), path.keys};
     Optional<FieldValue> result;
@@ -1045,6 +1054,7 @@ Result<void> RunThroughHookBox(ObjectRegistry& registry, const ObjectAccessConte
     }
 
     usize produced = 0;
+    bool setElement = false;
     {
         detail::PathCursor cursor =
             PathRunner::Make(registry, access, PathTarget::Value(box), operation, input,
@@ -1062,10 +1072,12 @@ Result<void> RunThroughHookBox(ObjectRegistry& registry, const ObjectAccessConte
         }
 
         produced = PathRunner::Length(cursor);
+        setElement = PathRunner::EndsAtSetElement(cursor);
     }
 
-    // 이미 있는 키의 InsertKey는 바뀐 것이 없다(게시·변경 표지·관찰자 알림 없음).
-    const bool changed = !(operation == PathOperation::InsertKey && produced == 0);
+    // 이미 있는 Set 원소의 InsertKey만 바뀐 것이 없다(게시·변경 표지·관찰자 알림 없음). Map의 이미
+    // 있는 키는 값을 기본 값으로 바꾸므로(길이 0이어도) 게시하고 검증한다.
+    const bool changed = !(operation == PathOperation::InsertKey && produced == 0 && setElement);
     if (changed) {
         if (!live && transaction && transaction->WriteCount() != writes) {
             return Result<void>::Failure(ErrorCode::Busy);

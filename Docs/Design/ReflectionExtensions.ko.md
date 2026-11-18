@@ -1721,3 +1721,4 @@ B9j–B9m 묶음 리뷰(2026-11-18 — 코드만 읽은 리뷰, 각 항목은 �
 - 성질 표(1.3절): 새 값 종류를 두지 않았다(스키마는 `{Array, UInt8}` 그대로 — wire만 필드 단위로 다르다). 그래서 성질 표·C# `ValueKindTable`·descriptor는 바뀌지 않는다.
 - 경로: 원소 경로(`bytes[3]`)와 원소 수·넣기·지우기는 그대로다.
 - 텍스트(10.4절 표의 Array 행 예외): 통째 값은 명령행·JSON 모두 RFC 4648 Base64 문자열 하나(Core `Encoding/Base64.h`, 빈 문자열 = 빈 배열)이고 JSON 숫자 배열은 InvalidValue다. 원소 대입은 `bytes[i]=v` 그대로다.
+- 단계 리뷰 반영(CurveData 17.3절 B8): 설정 층 배열 연산 객체는 byte 배열에서 InvalidArrayOperation이다. 텍스트 Base64 풀기는 길이·패딩으로 원소 수 한도를 먼저 본다. 상자 경로의 InsertKey "바뀐 것 없음"은 Set 원소만이고(Map 기존 키 초기화는 게시·검증), staged 재진입 누계는 분리 전에 잰다. `AddedTarget` 시작 위치의 변경 연산은 추가 원소 검증 표시를 내린다. MetaCompiler consteval 판정은 주석을 걷어낸 원문으로 한다.

@@ -3,6 +3,7 @@
 #include <Core/Algorithms.h>
 #include <Core/ScopeExit.h>
 #include <Core/Text/StringBuilder.h>
+#include <Object/FieldValueWire.h>
 #include <Object/PropertyPath.h>
 #include <ReflectionText/TextJson.h>
 
@@ -291,6 +292,19 @@ Result<void> SectionApplier::WriteField(WriteSession& session, JsonValue value, 
     case ValueKind::Array:
     case ValueKind::Set:
         if (value.IsObject()) {
+            // byte 배열(`Array<uint8>`)의 값은 Base64 문자열 하나라 원소 단위 배열 연산이 없다
+            // (Docs/Design/CurveData.ko.md 17.3절 B5).
+            if (::rocks::detail::IsByteArrayField(field)) {
+                if (auto reported =
+                        Diagnose(ConfigDiagnosticCode::InvalidArrayOperation, &at,
+                                 "byte arrays take a Base64 string; array operations do not apply");
+                    !reported) {
+                    return reported;
+                }
+
+                return WriteCopy(session, value);
+            }
+
             if (nested) {
                 if (auto reported =
                         Diagnose(ConfigDiagnosticCode::UnsupportedOperation, &at,

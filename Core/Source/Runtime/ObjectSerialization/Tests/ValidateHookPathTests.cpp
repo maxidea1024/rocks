@@ -519,6 +519,105 @@ TEST(ValidateHookPath_ReentrantStagedWriteIsBusy) {
     }
 }
 
+// 이미 있는 Map 키의 InsertKey는 값을 기본 값으로 바꾸는 변경이다(CV4 리뷰 1): 상자 경로가 길이 0을
+// "바뀐 것 없음"으로 보던 것은 Set 원소에만 맞다. Map<K, hook struct>의 기존 키 초기화는
+// 게시되고(변경 표지가 오른다), 기본 값이 hook을 어기면 InvalidArgument(StructValidation)이고 값이
+// 그대로다. Set의 이미 있는 원소는 지금처럼 게시하지 않는다(EveryOperationInsideHook).
+TEST(ValidateHookPath_InsertKeyResetsExistingMapValue) {
+    Objects fixture;
+    auto holder = fixture.Make();
+    const ObjectHandle handle = holder.Handle();
+    fixture.With(handle, [](ValidHolder& value) noexcept {
+        REQUIRE(value.byKey.Insert(int32{4}, ValidRange{-5, 3}));
+        REQUIRE(value.byKeyEmpty.Insert(int32{2}, reflection_fixture::ValidNonEmpty{7}));
+    });
+
+    PropertyPathBuffer four = PathOf(fixture, handle, "byKey[4]");
+    auto stamp = fixture.objects.MutationStamp(fixture.access, handle);
+    REQUIRE(stamp);
+    auto reset = PathInsertKey(fixture.objects, fixture.access, handle, four.View());
+    REQUIRE(reset);
+    CHECK(!reset.Value());
+    auto after = fixture.objects.MutationStamp(fixture.access, handle);
+    REQUIRE(after);
+    CHECK(after.Value() != stamp.Value());
+
+    PropertyPathBuffer two = PathOf(fixture, handle, "byKeyEmpty[2]");
+    PropertyPathFailure failure;
+    auto rejected = PathInsertKey(fixture.objects, fixture.access, handle, two.View(), &failure);
+    CHECK(!rejected && rejected.Error() == ErrorCode::InvalidArgument);
+    CHECK(failure.reason == PropertyPathError::StructValidation);
+    fixture.With(handle, [](ValidHolder& value) noexcept {
+        REQUIRE(value.byKey.Find(4) != nullptr && value.byKeyEmpty.Find(2) != nullptr);
+        CHECK(value.byKey.Find(4)->low == 0 && value.byKey.Find(4)->high == 0);
+        CHECK(value.byKeyEmpty.Find(2)->count == 7);
+    });
+}
+
+// staged 재진입 감지는 분리(PathDetach) 전부터 잰다(CV4 리뷰 3): 분리의 할당 콜백이 같은 트랜잭션에
+// 쓰고 상자 연산이 할당하지 않는 쓰기(box.range.low)이면, 분리 뒤에 잰 누계로는 놓쳐 상자 맞바꿈이
+// 그 쓰기를 덮을 수 있었다. 지금은 Busy이고 값은 그대로다.
+TEST(ValidateHookPath_ReentryDuringDetachIsBusy) {
+    SystemAllocator system;
+    CallbackAllocator allocator(system);
+    TypeRegistry types(system);
+    REQUIRE(GeneratedType<ValidRange>::Register(types));
+    REQUIRE(GeneratedType<reflection_fixture::ValidBox>::Register(types));
+    REQUIRE(GeneratedType<reflection_fixture::ValidDerived>::Register(types));
+    REQUIRE(GeneratedType<reflection_fixture::ValidRefElement>::Register(types));
+    REQUIRE(GeneratedType<reflection_fixture::ValidNonEmpty>::Register(types));
+    REQUIRE(GeneratedType<reflection_fixture::ValidWrapper>::Register(types));
+    REQUIRE(GeneratedType<reflection_fixture::ValidList>::Register(types));
+    REQUIRE(GeneratedType<reflection_fixture::ValidOuter>::Register(types));
+    REQUIRE(GeneratedType<ValidHolder>::Register(types));
+    {
+        ObjectRegistry objects(allocator, types, {0x5653, 1});
+        const ObjectAccessContext access = objects.OwnerAccess();
+        {
+            ConstructionContext transaction(objects, access);
+            auto made = transaction.Create<ValidHolder>(TypeIdOf<ValidHolder>());
+            REQUIRE(made);
+            struct State {
+                ConstructionContext* transaction;
+                ObjectHandle object;
+                bool fired;
+            } state{&transaction, made.Value(), false};
+            auto lease = types.Acquire(TypeIdOf<ValidHolder>());
+            REQUIRE(lease);
+            PropertyPathBuffer at;
+            REQUIRE(ParsePropertyPath(lease.Value(), "box.range.low", at));
+            FieldValue minusOne(system);
+            minusOne.kind = ValueKind::Int32;
+            minusOne.signedInteger = -1;
+            allocator.state = &state;
+            // 첫 할당(상자 분리)에서 한 번만 같은 트랜잭션에 쓴다.
+            allocator.callback = [](void* raw) noexcept {
+                auto* reentry = static_cast<State*>(raw);
+                if (reentry->fired) {
+                    return;
+                }
+
+                reentry->fired = true;
+                auto written = reentry->transaction->GetForWrite<ValidHolder>(reentry->object);
+                if (written) {
+                    written.Value()->plain = 77;
+                }
+            };
+            allocator.armed = true;
+            auto result = PathWrite(objects, access, PathTarget::Staged(transaction, made.Value()),
+                                    at.View(), minusOne);
+            allocator.armed = false;
+            CHECK(state.fired);
+            CHECK(ErrorOf(result) == ErrorCode::Busy);
+            auto value = transaction.Get<ValidHolder>(made.Value());
+            REQUIRE(value);
+            CHECK(value.Value()->box.range.low == 0 && value.Value()->plain == 77);
+        }
+
+        REQUIRE(objects.Shutdown(objects.OwnerAccess()));
+    }
+}
+
 // PreparedStructElements를 대입 묶음 없이 직접 써도 추가 원소는 게시 전에 검증된다(CV3 리뷰 3):
 // PreparePublish가 hook 거부로 InvalidArgument이고, 묶지 않은 준비물의 ValidateAdded도
 // InvalidArgument다.
@@ -538,6 +637,32 @@ TEST(ValidateHookPath_PreparedElementsValidateAddedDirectly) {
     REQUIRE(id);
     auto start = stage.AddedTarget(id.Value());
     REQUIRE(start);
+    auto lease = fixture.types.AcquireValueType(TypeIdOf<reflection_fixture::ValidRefElement>(),
+                                                TypeKind::Struct);
+    REQUIRE(lease);
+    PropertyPathBuffer low;
+    REQUIRE(ParsePropertyPath(lease.Value(), "range.low", low));
+    FieldValue nine = Int32Value(fixture.system, 9);
+    REQUIRE(PathWrite(fixture.objects, fixture.access, start.Value(), low.View(), nine));
+    CHECK(ErrorOf(stage.PreparePublish()) == ErrorCode::InvalidArgument);
+}
+
+// ValidateAdded 뒤에 AddedTarget 시작 위치로 쓴 변경도 게시 전에 다시 검증된다(CV4 리뷰 4): 블록을
+// 바꾸는 경로 연산이 검증 표시를 내린다. 읽기는 내리지 않는다(다시 부르지 않아도 게시된다).
+TEST(ValidateHookPath_PreparedElementsWriteAfterValidateIsRevalidated) {
+    Objects fixture;
+    auto holder = fixture.Make();
+    const ObjectHandle handle = holder.Handle();
+    PropertyPathBuffer elements = PathOf(fixture, handle, "elements");
+    PreparedStructElements stage(fixture.system);
+    REQUIRE(
+        PathPrepareStructElements(fixture.objects, fixture.access, handle, elements.View(), stage));
+    auto id = stage.Append();
+    REQUIRE(id);
+    auto start = stage.AddedTarget(id.Value());
+    REQUIRE(start);
+    usize rejected = 0;
+    REQUIRE(stage.ValidateAdded(rejected));
     auto lease = fixture.types.AcquireValueType(TypeIdOf<reflection_fixture::ValidRefElement>(),
                                                 TypeKind::Struct);
     REQUIRE(lease);

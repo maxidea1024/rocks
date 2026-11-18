@@ -3,6 +3,8 @@
 #include <Object/PropertyPath.h>
 #include <ObjectSerialization/ObjectGraph.h>
 #include <Platform/Fatal.h>
+#include <Serialization/Archive.h>
+#include <Serialization/Record.h>
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 #include "GraphTestSupport.h"
@@ -359,5 +361,171 @@ TEST(BytesGraph_EveryLoadAllocationFailureRollsBack) {
         }
 
         REQUIRE(objects.Shutdown(objects.OwnerAccess()));
+    }
+}
+
+namespace {
+
+// value를 count개 채운 BytesBlob이다.
+BytesBlob BlobOf(Allocator& allocator, usize count, uint8 value) noexcept {
+    BytesBlob blob(allocator);
+    if (!blob.data.TryReserve(count)) {
+        platform::Fatal("test blob reserve failed");
+    }
+
+    for (usize index = 0; index < count; ++index) {
+        static_cast<void>(blob.data.TryPushBack(value));
+    }
+
+    return blob;
+}
+
+// u64 길이 count + value × count 블록의 위치다(없으면 IndexNone).
+usize FindBlock(Span<const uint8> bytes, usize count, uint8 value, Allocator& allocator) noexcept {
+    Array<uint8> block(allocator);
+    if (!block.TryResize(8 + count)) {
+        return IndexNone;
+    }
+
+    for (usize index = 0; index < 8; ++index) {
+        block[index] = static_cast<uint8>((uint64{count} >> (8 * index)) & 0xFF);
+    }
+
+    for (usize index = 0; index < count; ++index) {
+        block[8 + index] = value;
+    }
+
+    return Find(bytes, block.View());
+}
+
+} // namespace
+
+// Optional·Map 값·InstancedStruct 내용 안 struct 멤버의 Array<uint8>도 Bytes 블록으로 왕복하고(다시
+// 저장 byte 같음), 그 블록 길이를 바꾼 입력은 로드가 InvalidArgument이며 아무것도 남기지 않는다(CV4
+// 리뷰 7).
+TEST(BytesGraph_NestedPositionsRoundTripAndRejectTampering) {
+    SystemAllocator allocator;
+    TypeRegistry types(allocator);
+    REQUIRE(RegisterFixture(types));
+    {
+        ObjectRegistry source(allocator, types, {0x425D, 1});
+        ObjectRegistry target(allocator, types, {0x425D, 2});
+        {
+            RootRef<BytesHolder> holder = New(source);
+            With(source, holder.Handle(), [&](BytesHolder& value) noexcept {
+                value.maybe.Emplace(BlobOf(allocator, 11, 0xC1));
+                REQUIRE(value.byKey.Insert(int32{3}, BlobOf(allocator, 13, 0xC2)));
+                REQUIRE(value.any.Emplace<BytesBlob>(types, allocator));
+                BytesBlob* inner = value.any.Get<BytesBlob>();
+                REQUIRE(inner != nullptr);
+                *inner = BlobOf(allocator, 17, 0xC3);
+            });
+            auto saved = SaveObjectGraph(allocator, source, source.OwnerAccess(), holder.Handle());
+            REQUIRE(saved);
+            auto loaded = LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
+                                          saved.Value().View());
+            REQUIRE(loaded);
+            With(target, loaded.Value().Handle(), [](BytesHolder& value) noexcept {
+                REQUIRE(value.maybe.HasValue() && value.byKey.Find(3) != nullptr &&
+                        value.any.Get<BytesBlob>() != nullptr);
+                CHECK(value.maybe.Value().data.Size() == 11 &&
+                      value.maybe.Value().data[10] == 0xC1);
+                CHECK(value.byKey.Find(3)->data.Size() == 13 &&
+                      value.byKey.Find(3)->data[0] == 0xC2);
+                CHECK(value.any.Get<BytesBlob>()->data.Size() == 17 &&
+                      value.any.Get<BytesBlob>()->data[16] == 0xC3);
+            });
+            auto again =
+                SaveObjectGraph(allocator, target, target.OwnerAccess(), loaded.Value().Handle());
+            REQUIRE(again);
+            CHECK(test::graph::SameBytes(saved.Value().View(), again.Value().View()));
+            loaded.Value().Reset();
+            REQUIRE(target.Collect(target.OwnerAccess()));
+
+            struct Block {
+                usize count;
+                uint8 value;
+            };
+            const Block blocks[] = {{11, 0xC1}, {13, 0xC2}, {17, 0xC3}};
+            const uint32 before = target.Stats().liveObjects;
+            for (const Block& block : blocks) {
+                const usize at =
+                    FindBlock(saved.Value().View(), block.count, block.value, allocator);
+                REQUIRE(at != IndexNone);
+                const uint8 lengths[] = {static_cast<uint8>(block.count + 1),
+                                         static_cast<uint8>(block.count - 1)};
+                for (const uint8 length : lengths) {
+                    Array<uint8> tampered(allocator);
+                    REQUIRE(tampered.TryAppend(saved.Value().View()));
+                    tampered[at] = length;
+                    auto rejected = LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
+                                                    tampered.View());
+                    CHECK(!rejected && rejected.Error() == ErrorCode::InvalidArgument);
+                    CHECK(target.Stats().liveObjects == before);
+                }
+            }
+        }
+
+        REQUIRE(source.Shutdown(source.OwnerAccess()));
+        REQUIRE(target.Shutdown(target.OwnerAccess()));
+    }
+}
+
+// 로드 쪽 한도(CV4 리뷰 7): 블록 크기가 값 byte 한도(maxValueBytes)를 넘으면 CapacityExceeded이고,
+// MaxArrayElements + 1 byte 블록(손으로 만든 Record — 저장은 이런 값을 만들지 않는다)도
+// CapacityExceeded다. 둘 다 객체를 남기지 않는다.
+TEST(BytesGraph_LoadLimits) {
+    SystemAllocator allocator;
+    TypeRegistry types(allocator);
+    REQUIRE(RegisterFixture(types));
+    {
+        ObjectRegistry source(allocator, types, {0x425E, 1});
+        ObjectRegistry target(allocator, types, {0x425E, 2});
+        {
+            RootRef<BytesHolder> holder = New(source);
+            With(source, holder.Handle(),
+                 [](BytesHolder& value) noexcept { REQUIRE(Fill(value.payload, 2000, 1)); });
+            auto saved = SaveObjectGraph(allocator, source, source.OwnerAccess(), holder.Handle());
+            REQUIRE(saved);
+            ObjectGraphLoadOptions small;
+            small.limits.maxValueBytes = 1024;
+            auto over = LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
+                                        saved.Value().View(), small);
+            CHECK(!over && over.Error() == ErrorCode::CapacityExceeded);
+            CHECK(target.Stats().liveObjects == 0);
+
+            Array<uint8> block(allocator);
+            REQUIRE(block.TryResize(MaxArrayElements + 1));
+            for (usize index = 0; index < block.Size(); ++index) {
+                block[index] = 0x5A;
+            }
+
+            ArchiveWriter writer(allocator);
+            REQUIRE(writer.WriteBytes(block.View()));
+            Array<uint8> payload = writer.TakeBytes();
+            Guid payloadId;
+            for (const FieldSchema& field : GeneratedType<BytesHolder>::Schema().fields) {
+                if (StringView(field.name.Data(), field.name.Size()) == StringView("payload")) {
+                    payloadId = field.id;
+                }
+            }
+
+            RecordBuilder record(allocator, TypeIdOf<BytesHolder>(),
+                                 GeneratedType<BytesHolder>::Schema().version);
+            REQUIRE(
+                record.AddField(payloadId, static_cast<uint32>(WireType::Bytes), payload.View()));
+            auto built = record.Build();
+            REQUIRE(built);
+            auto graph =
+                test::graph::Single(allocator, TypeIdOf<BytesHolder>(), built.Value().View());
+            REQUIRE(graph);
+            auto tooMany = LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
+                                           graph.Value().View());
+            CHECK(!tooMany && tooMany.Error() == ErrorCode::CapacityExceeded);
+            CHECK(target.Stats().liveObjects == 0);
+        }
+
+        REQUIRE(source.Shutdown(source.OwnerAccess()));
+        REQUIRE(target.Shutdown(target.OwnerAccess()));
     }
 }
