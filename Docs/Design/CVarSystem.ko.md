@@ -610,7 +610,7 @@ public:
 | CVR4 | `BootCVar`·봉인·대기 값 늦은 적용·`ReportUnresolved`(Core 편집 거리)·진단 코드 | CVR2 | 부팅·미해결 시험 |
 | CVR5 | `CVarGroup`·Quality 층 펼침·되풀이 한도 | CVR2 | 프리셋 시험. Config CF4는 이 묶음을 쓴다 |
 | CVR6 | 콘솔 도구(Explain·find·dump·reset·enum 표시)·`cvar::Command`·치트 허용 상태·네트워크 역할·Export/Import | CVR4 | 권한·dump 왕복 시험 |
-| CVR7 | 이관: `log.*`(LogHost)·`trace.*`(TraceControl)·호스트 설정을 핸들로, `RegisterConsoleSetting` 공개 경로를 `RegisterDynamic`으로 | CVR6 | 기존 Config·LogHost·Trace 시험 통과 |
+| CVR7 | 이관: `log.*`(LogHost)·`trace.*`(TraceControl)·호스트 설정을 핸들로, `RegisterConsoleSetting` 공개 경로를 `RegisterDynamic`으로. `log.*`는 로깅 문서 L18과 맞춘다: `log.level`은 enum 핸들(대소문자 무시 입력), `log.levels`·`log.rate_limits`·레이아웃 문자열은 `Validate`로 문법만 검사(순수 함수라 런타임 카테고리 목록은 못 본다 — 모르는 카테고리는 LogHost가 적용 때 진단), `log.mode`·`log.file.*`는 `BootCVar` | CVR6 | 기존 Config·LogHost·Trace 시험 통과 |
 | CVR8 | `CheatSet`·`ROCKS_FUNCTION(Cheat)`·객체 콘솔(14.3·14.4) | CVR6, CU2 | 치트 집합 등록·실행·출시 규칙 시험 |
 
 - CVR1–CVR7은 Core 단독(Config 모듈)이고 World 연결만 Engine이다. CVR8은 함수 리플렉션 뒤다.
