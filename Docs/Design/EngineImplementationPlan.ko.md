@@ -233,7 +233,7 @@ Apple은 Windows용 Metal 제작 도구와 macOS/Windows용 Metal Shader Convert
 | PlatformBase / PlatformWindow | EngineBase·OS kernel / Core·PlatformBase·window SDK | Base는 메모리·파일·스레드·clock, Window는 창·입력. CPU-only는 Window 제외 |
 | Core | EngineBase·PlatformBase | 컨테이너·할당기·문자열·수학·진단·Atomic. Window 의존 금지 |
 | Task / IO / Trace | Core | 작업 DAG, 비동기 IO, 계측. 서로의 높은 계층에 의존하지 않음 |
-| SpatialIndex | Core, Task | 계층 공간 해시·평면 SoA 판정·Loose Octree의 공통 코드(10.4절, [공간 인덱스 설계](SpatialIndex.ko.md)). World·RHI·Object 의존 금지 |
+| SpatialIndex | Core, Task | 계층 공간 해시·평면 SoA 판정·Loose Octree의 공통 코드(10.4절, [공간 인덱스 설계](SpatialIndex.ko.md)). 엔진 계층 모듈이며(Core는 기반 계층으로 가볍게 둔다, 2026-11-18) 수학 타입·판정은 Core에 둔다. World·RHI·Object 의존 금지 |
 | MetaSchema / Serialization | Core | TypeId·FieldId·Archive 계약, 버전 규칙. Object 없음 |
 | ObjectRuntime | Core, Task, MetaSchema | Object, Registry, GC, Reflection 실행. Asset 의존 금지 |
 | ObjectSerialization | ObjectRuntime, Serialization | R2 객체 Archive bridge. ObjectRuntime의 역참조 금지 |
@@ -260,9 +260,9 @@ RenderData, PhysicsData, AudioData는 안정적인 ID와 평범한 데이터 구
 
 ~~~text
 Core/Source/Runtime/      Base  PlatformBase  Core  Task  IO  Trace  MetaSchema  Serialization  Localization
-                          ObjectRuntime/{Registry,Reflection,GC}  ObjectSerialization  SpatialIndex
+                          ObjectRuntime/{Registry,Reflection,GC}  ObjectSerialization
 Core/Source/Developer/    TestSupport
-Engine/Source/Runtime/    AssetRuntime  World  WorldIntegration  Gameplay
+Engine/Source/Runtime/    AssetRuntime  World  WorldIntegration  Gameplay  SpatialIndex
                           RHI/{Null,D3D11,D3D12,Vulkan,Metal,OpenGL}  RenderGraph  Renderer
                           MaterialSchema  MaterialRuntime  MaterialAssetBridge
                           Physics  Animation  Audio  Navigation  Network  AI  VFX  UiCore  UiFramework  TextLayout  UiRender  UiWidget  UiScreens  ScriptRuntime

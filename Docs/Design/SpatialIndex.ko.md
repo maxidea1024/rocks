@@ -231,7 +231,7 @@ UE의 다른 구조에서 가져오는 것은 다음과 같다.
 
 ### 6.1 책임과 공개 API
 
-배치는 Core 계층 `SpatialIndex` 모듈이다(EngineImplementationPlan 3.1절: Core·Task에만 의존, World·RHI·Object 의존 금지). 네임스페이스는 `rocks::spatial`이다. 인스턴스는 소비자(World, RenderScene, 도구)가 소유하며 전역 singleton을 두지 않는다. 수학 타입은 `rocks`의 `Box<T>`, `Sphere<T>`, `Ray<T>`, `Vec3d`를 쓴다.
+배치는 엔진 계층 `SpatialIndex` 모듈(`Engine/Source/Runtime/SpatialIndex`)이다. Core는 기반 계층으로 가볍게 두므로 엔진 기능인 공간 질의 구조는 엔진에 두고, 수학 타입·판정(`ConvexVolume` 등)과 범용 컨테이너(`InlineArray`·`IndexPool`)는 Core에 둔다(2026-11-18 사용자 결정). 의존은 Core뿐이다(EngineImplementationPlan 3.1절: World·RHI·Object 의존 금지). 네임스페이스는 `rocks::spatial`이다. 인스턴스는 소비자(World, RenderScene, 도구)가 소유하며 전역 singleton을 두지 않는다. 수학 타입은 `rocks`의 `Box<T>`, `Sphere<T>`, `Ray<T>`, `Vec3d`를 쓴다.
 
 ```cpp
 namespace rocks::spatial {
@@ -734,7 +734,7 @@ HEAD `1c0ef8a` 기준이다.
 | SIP7 | 범용 색인 풀 `IndexPool<T>`(평탄 저장소 + uint32 LIFO 재사용 목록, 할당 없는 사전 확보 경로) | CoreDetailedSpec C03 | 구현 | OT1 |
 | SIP8 | 벤치마크 실행 파일 `Programs/SpatialIndexBench`. 공용 하니스가 없으므로 통계(백분위)·JSON 출력을 새로 만든다 | 이 문서 | 설계 | OT5 |
 | SIP9 | 읽기·변경 단계 검증 도구(`SpatialReadScope`의 일반화) | 이 문서, EngineImplementationPlan 8.4 | 설계 | OT4 |
-| SIP10 | `SpatialIndex` 모듈(폴더, Build.cs, FoundationTests 등록) | EngineImplementationPlan 3.1 | 구현 | OT1 |
+| SIP10 | `SpatialIndex` 모듈(`Engine/Source/Runtime/SpatialIndex`, Build.cs, EngineTests 등록) | EngineImplementationPlan 3.1·3.2 | 구현 | OT1 |
 
 기반이 부족한 곳은 옥트리 안에서 우회하지 않고 해당 기반을 보강한다. SIP1–SIP7은 Core 쪽 작업이며 옥트리 전용 사본을 만들지 않는다.
 
