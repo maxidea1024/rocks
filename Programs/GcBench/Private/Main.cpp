@@ -272,6 +272,9 @@ struct Options {
     bool packageClustersOff = false;
     // 작업 계수를 센다(--count-work — 간선마다 읽기가 늘어 시간 비교에는 끈다).
     bool countWork = false;
+    // 일반 그래프 시나리오에서 정지형 표식만 잰다(--mark-only — 직렬과 병렬 x8·x16 Collect를 reps번
+    // 되풀이해 표식 시간의 최소·중앙·최대를 낸다. 표본 프로파일러를 붙일 때도 쓴다).
+    bool markOnly = false;
     // 패키지 시나리오 하나에서 Collect 반복 전에 간선 쓰기를 이만큼 되풀이해 잰다(--write-rounds —
     // 부하가 있는 기계에서 최솟값을 보려고).
     uint32 writeRounds = 0;
@@ -445,6 +448,29 @@ PhaseTimes MedianOf(Array<GcReport>& reports, Allocator& allocator) noexcept {
     }
 
     return times;
+}
+
+// 표식 시간의 최소·중앙·최대다(--mark-only).
+void PrintMarkSpread(const char* label, const Array<GcReport>& reports) noexcept {
+    uint64 values[256];
+    const usize count = reports.Size() < 256 ? reports.Size() : 256;
+    for (usize index = 0; index < count; ++index) {
+        values[index] = reports[index].markNanoseconds;
+    }
+
+    for (usize outer = 1; outer < count; ++outer) {
+        for (usize inner = outer; inner > 0 && values[inner - 1] > values[inner]; --inner) {
+            const uint64 swapped = values[inner];
+            values[inner] = values[inner - 1];
+            values[inner - 1] = swapped;
+        }
+    }
+
+    if (count != 0) {
+        printf("  %-28s mark min %8.3f  median %8.3f  max %8.3f ms (%llu reps)\n", label,
+               Milliseconds(values[0]), Milliseconds(values[count / 2]),
+               Milliseconds(values[count - 1]), static_cast<unsigned long long>(count));
+    }
 }
 
 void PrintPhases(const char* label, const PhaseTimes& times) noexcept {
@@ -678,88 +704,123 @@ int RunScenario(const Scenario& scenario, const Options& options) noexcept {
             }
 
             PrintPhases("Collect (median)", MedianOf(reports, memory));
-            if (!RunIncremental(registry, "incremental default budget", GcBudget{}, nullptr,
-                                memory) ||
-                !RunIncremental(registry, "incremental time 2ms",
-                                GcBudget{NumericLimits<uint32>::Max(), 2000000}, nullptr, memory) ||
-                !RunIncremental(registry, "incremental time 0.5ms",
-                                GcBudget{NumericLimits<uint32>::Max(), 500000}, nullptr, memory)) {
-                return 5;
+            if (options.markOnly) {
+                PrintMarkSpread("serial Collect", reports);
+                const uint32 markWorkers[] = {8, 16};
+                for (uint32 workers : markWorkers) {
+                    WorkerScheduler parallel(memory);
+                    if (!parallel.Start({workers, 256, 16})) {
+                        printf("scheduler start failed\n");
+                        return 5;
+                    }
+
+                    reports.Clear();
+                    for (uint32 rep = 0; rep < scenario.reps; ++rep) {
+                        auto collected = registry.Collect(access, &parallel);
+                        if (!collected || !reports.TryPushBack(collected.Value())) {
+                            printf("parallel Collect failed\n");
+                            return 5;
+                        }
+                    }
+
+                    char label[64];
+                    snprintf(label, sizeof(label), "parallel Collect x%u", workers);
+                    PrintMarkSpread(label, reports);
+                    if (!parallel.Shutdown()) {
+                        return 5;
+                    }
+                }
             }
 
-            // 병렬 표식(GC-S4): worker 수마다 정지형 Collect(STW 병렬 전체 수집)를 잰다. 소유
-            // 스레드도 참여하므로 참여자는 worker + 1이다.
-            const uint32 workerCounts[] = {2, 4, 8, 16};
-            for (uint32 workers : workerCounts) {
-                WorkerScheduler parallel(memory);
-                if (!parallel.Start({workers, 256, 16})) {
-                    printf("scheduler start failed\n");
+            if (!options.markOnly) {
+                if (!RunIncremental(registry, "incremental default budget", GcBudget{}, nullptr,
+                                    memory) ||
+                    !RunIncremental(registry, "incremental time 2ms",
+                                    GcBudget{NumericLimits<uint32>::Max(), 2000000}, nullptr,
+                                    memory) ||
+                    !RunIncremental(registry, "incremental time 0.5ms",
+                                    GcBudget{NumericLimits<uint32>::Max(), 500000}, nullptr,
+                                    memory)) {
                     return 5;
                 }
 
-                reports.Clear();
-                for (uint32 rep = 0; rep < scenario.reps; ++rep) {
-                    auto collected = registry.Collect(access, &parallel);
-                    if (!collected || !reports.TryPushBack(collected.Value())) {
-                        printf("parallel Collect failed\n");
+                // 병렬 표식(GC-S4): worker 수마다 정지형 Collect(STW 병렬 전체 수집)를 잰다. 소유
+                // 스레드도 참여하므로 참여자는 worker + 1이다.
+                const uint32 workerCounts[] = {2, 4, 8, 16};
+                for (uint32 workers : workerCounts) {
+                    WorkerScheduler parallel(memory);
+                    if (!parallel.Start({workers, 256, 16})) {
+                        printf("scheduler start failed\n");
+                        return 5;
+                    }
+
+                    reports.Clear();
+                    for (uint32 rep = 0; rep < scenario.reps; ++rep) {
+                        auto collected = registry.Collect(access, &parallel);
+                        if (!collected || !reports.TryPushBack(collected.Value())) {
+                            printf("parallel Collect failed\n");
+                            return 5;
+                        }
+                    }
+
+                    char label[64];
+                    snprintf(label, sizeof(label), "parallel Collect x%u", workers);
+                    PrintPhases(label, MedianOf(reports, memory));
+                    if (!parallel.Shutdown()) {
                         return 5;
                     }
                 }
 
                 char label[64];
-                snprintf(label, sizeof(label), "parallel Collect x%u", workers);
-                PrintPhases(label, MedianOf(reports, memory));
-                if (!parallel.Shutdown()) {
+                snprintf(label, sizeof(label), "incremental default x%u", options.workers);
+                if (!RunIncremental(registry, label, GcBudget{}, &scheduler, memory)) {
                     return 5;
                 }
-            }
 
-            char label[64];
-            snprintf(label, sizeof(label), "incremental default x%u", options.workers);
-            if (!RunIncremental(registry, label, GcBudget{}, &scheduler, memory)) {
-                return 5;
-            }
-
-            snprintf(label, sizeof(label), "incremental time 2ms x%u", options.workers);
-            if (!RunIncremental(registry, label, GcBudget{NumericLimits<uint32>::Max(), 2000000},
-                                &scheduler, memory)) {
-                return 5;
-            }
-
-            // churn: 살아 있는 객체의 10%만큼 쓰레기 묶음을 만들고(간선은 산 그래프로) 회수한다.
-            reports.Clear();
-            Array<uint64> createTimes(memory);
-            const uint32 churn = static_cast<uint32>(survivors.Size() / 10);
-            for (uint32 rep = 0; rep < scenario.reps; ++rep) {
-                Array<ObjectHandle> garbage(memory);
-                Array<ObjectHandle> garbageNodes(memory);
-                Array<RootRef<Object>> garbagePins(memory);
-                const uint64 before = platform::MonotonicNanoseconds();
-                if (!builder.CreateGroups(churn, garbage, garbageNodes, garbagePins) ||
-                    !builder.Link(garbageNodes, survivors, scenario.refs)) {
-                    printf("churn creation failed\n");
-                    return 6;
+                snprintf(label, sizeof(label), "incremental time 2ms x%u", options.workers);
+                if (!RunIncremental(registry, label,
+                                    GcBudget{NumericLimits<uint32>::Max(), 2000000}, &scheduler,
+                                    memory)) {
+                    return 5;
                 }
 
-                garbagePins.Clear();
-                const uint64 after = platform::MonotonicNanoseconds();
-                auto collected = registry.Collect(access);
-                if (!collected || collected.Value().reclaimed != churn ||
-                    !reports.TryPushBack(collected.Value()) ||
-                    !createTimes.TryPushBack(after - before)) {
-                    printf("churn Collect failed\n");
-                    return 6;
+                // churn: 살아 있는 객체의 10%만큼 쓰레기 묶음을 만들고(간선은 산 그래프로)
+                // 회수한다.
+                reports.Clear();
+                Array<uint64> createTimes(memory);
+                const uint32 churn = static_cast<uint32>(survivors.Size() / 10);
+                for (uint32 rep = 0; rep < scenario.reps; ++rep) {
+                    Array<ObjectHandle> garbage(memory);
+                    Array<ObjectHandle> garbageNodes(memory);
+                    Array<RootRef<Object>> garbagePins(memory);
+                    const uint64 before = platform::MonotonicNanoseconds();
+                    if (!builder.CreateGroups(churn, garbage, garbageNodes, garbagePins) ||
+                        !builder.Link(garbageNodes, survivors, scenario.refs)) {
+                        printf("churn creation failed\n");
+                        return 6;
+                    }
+
+                    garbagePins.Clear();
+                    const uint64 after = platform::MonotonicNanoseconds();
+                    auto collected = registry.Collect(access);
+                    if (!collected || collected.Value().reclaimed != churn ||
+                        !reports.TryPushBack(collected.Value()) ||
+                        !createTimes.TryPushBack(after - before)) {
+                        printf("churn Collect failed\n");
+                        return 6;
+                    }
                 }
+
+                char churnLabel[64];
+                snprintf(churnLabel, sizeof(churnLabel), "churn %u Collect (median)", churn);
+                PrintPhases(churnLabel, MedianOf(reports, memory));
+                printf("  churn create+link median %.3f ms, reclaim %.1f ns/object\n",
+                       Milliseconds(Median(createTimes)),
+                       static_cast<double>(MedianOf(reports, memory).reclaim) /
+                           static_cast<double>(churn == 0 ? 1 : churn));
+                PrintMemory(memory, survivors.Size(), registry.Stats());
             }
 
-            char churnLabel[64];
-            snprintf(churnLabel, sizeof(churnLabel), "churn %u Collect (median)", churn);
-            PrintPhases(churnLabel, MedianOf(reports, memory));
-            printf("  churn create+link median %.3f ms, reclaim %.1f ns/object\n",
-                   Milliseconds(Median(createTimes)),
-                   static_cast<double>(MedianOf(reports, memory).reclaim) /
-                       static_cast<double>(churn == 0 ? 1 : churn));
-            PrintMemory(memory, survivors.Size(), registry.Stats());
             roots.Clear();
             fflush(stdout);
             const uint64 teardown = platform::MonotonicNanoseconds();
@@ -1673,6 +1734,8 @@ bool Parse(int argc, char** argv, Options& options) noexcept {
             options.packageClustersOff = true;
         } else if (platform::CStringEquals(argv[index], "--count-work")) {
             options.countWork = true;
+        } else if (platform::CStringEquals(argv[index], "--mark-only")) {
+            options.markOnly = true;
         } else if (platform::CStringEquals(argv[index], "--soak-workers")) {
             options.soakWorkers = true;
         } else if (platform::CStringEquals(argv[index], "--soak-time-budget")) {

@@ -20,6 +20,13 @@ constexpr usize HotPrefetchDistance = 16;
 constexpr usize ObjectPrefetchDistance = 8;
 // 참조 위치 표(M3)의 배열 칸 버퍼를 몇 칸 앞에서 미리 읽는지다(본체는 8칸 앞에서 이미 당겼다).
 constexpr usize ArrayPrefetchDistance = 4;
+// 병렬 marker의 FIFO 미리 읽기 고리 칸 수다(2의 거듭제곱 — 들어올 때 hot을 미리 읽으므로 hot 미리
+// 읽기 거리와 같다. GC 설계 16.1절: 8칸은 덜 줄고 24칸은 16칸과 같다).
+constexpr uint32 MarkRingSlots = 16;
+static_assert((MarkRingSlots & (MarkRingSlots - 1)) == 0, "Mark ring size must be a power of two");
+static_assert(MarkRingSlots > ObjectPrefetchDistance &&
+                  ObjectPrefetchDistance > ArrayPrefetchDistance,
+              "Mark ring stages must run hot -> object -> array");
 // 병렬 slice의 꼬리 시간 보정이 시간 예산에서 가져갈 수 있는 최대 몫(예산 / 이 값)이다. 선점 같은
 // 일회성 지연이 다음 slice의 표식 시간을 지나치게 줄이지 않게 한다.
 constexpr uint64 ParallelTailBudgetDivisor = 4;

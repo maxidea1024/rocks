@@ -26,6 +26,12 @@ struct ObjectRegistry::MarkParticipant {
     // 공유 trace 수에 아직 더하지 않은 수다(예산 검사 간격).
     uint32 pending = 0;
     bool isOwner = false;
+    // 지역 큐에서 꺼낸 항목을 처리 전에 두는 FIFO 미리 읽기 고리다(GC 설계 16.1절). 지역 큐는
+    // LIFO라 몇 칸 아래 항목이 곧 꺼낼 항목이 아니다 — 고리가 미리 읽기 거리를 큐 순서와 무관하게
+    // 고정한다. 고리의 항목은 이 참여자의 회색 객체이고 다른 참여자는 훔치지 않는다.
+    uint32 ring[MarkRingSlots] = {};
+    uint32 ringHead = 0;
+    uint32 ringCount = 0;
 };
 
 // 한 slice(또는 Collect)의 병렬 표식이다(GC-S4, Docs/Design/GarbageCollectionScale.ko.md).
@@ -121,9 +127,18 @@ struct ObjectRegistry::ParallelMark {
     // 지역 큐에 넣는다. 맨 위 블록이 가득 차면 풀이 모자랄 때(참여자 수보다 적을 때) 그 블록을
     // 풀에 내놓고 새 블록을 받는다.
     void Push(MarkParticipant& self, uint32 index) noexcept {
+        PushBlock(self, index, true);
+    }
+
+    // 고리를 되돌릴 때 쓴다(멈춘 뒤라 풀에 내놓지 않는다).
+    void PushStack(MarkParticipant& self, uint32 index) noexcept {
+        PushBlock(self, index, false);
+    }
+
+    void PushBlock(MarkParticipant& self, uint32 index, bool share) noexcept {
         GcBlock* top = self.stack;
         if (top == nullptr || top->count == GcBlock::Capacity) {
-            if (top != nullptr &&
+            if (share && top != nullptr &&
                 platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&poolBlocks) < participants) {
                 self.stack = top->next;
                 Publish(top);
@@ -157,29 +172,11 @@ struct ObjectRegistry::ParallelMark {
         self.owner->items[self.owner->count++] = index;
     }
 
-    bool Pop(MarkParticipant& self, uint32& index) noexcept {
+    // 지역 큐의 맨 위 항목을 꺼낸다(빈 블록은 반환한다).
+    bool PopStack(MarkParticipant& self, uint32& index) noexcept {
         while (GcBlock* top = self.stack) {
             if (top->count != 0) {
                 index = top->items[--top->count];
-                // 미스 사슬(hot 레코드 → 본체)을 지역 큐 앞쪽(LIFO라 아래 칸)에서 미리 당긴다.
-                // 클러스터 항목(ClusterItem)은 슬롯이 아니라 미리 읽지 않는다.
-                if (top->count > HotPrefetchDistance &&
-                    (top->items[top->count - HotPrefetchDistance] & ClusterItem) == 0) {
-                    platform::PrefetchRead(
-                        &registry->HotOf(top->items[top->count - HotPrefetchDistance]));
-                }
-
-                if (top->count > ObjectPrefetchDistance &&
-                    (top->items[top->count - ObjectPrefetchDistance] & ClusterItem) == 0) {
-                    platform::PrefetchRead(
-                        registry->HotOf(top->items[top->count - ObjectPrefetchDistance]).object);
-                }
-
-                if (top->count > ArrayPrefetchDistance &&
-                    (top->items[top->count - ArrayPrefetchDistance] & ClusterItem) == 0) {
-                    registry->PrefetchArrays(top->items[top->count - ArrayPrefetchDistance]);
-                }
-
                 return true;
             }
 
@@ -188,6 +185,56 @@ struct ObjectRegistry::ParallelMark {
         }
 
         return false;
+    }
+
+    // 처리할 항목을 고리 앞에서 꺼낸다. 고리를 지역 큐에서 채우며 들어오는 항목의 hot 레코드를,
+    // 꺼낼 때 ObjectPrefetchDistance칸 뒤 항목의 본체와 ArrayPrefetchDistance칸 뒤 항목의 참조 배열
+    // 버퍼를 미리 읽는다(직렬 marker의 큐 앞쪽 미리 읽기와 같은 단계). 클러스터 항목(ClusterItem)은
+    // 슬롯이 아니라 미리 읽지 않는다. 고리와 지역 큐가 모두 비면 거짓이다.
+    bool Pop(MarkParticipant& self, uint32& index) noexcept {
+        constexpr uint32 Mask = MarkRingSlots - 1;
+        uint32 item = 0;
+        while (self.ringCount < MarkRingSlots && PopStack(self, item)) {
+            self.ring[(self.ringHead + self.ringCount) & Mask] = item;
+            ++self.ringCount;
+            if ((item & ClusterItem) == 0) {
+                platform::PrefetchRead(&registry->HotOf(item));
+            }
+        }
+
+        if (self.ringCount == 0) {
+            return false;
+        }
+
+        index = self.ring[self.ringHead];
+        self.ringHead = (self.ringHead + 1) & Mask;
+        --self.ringCount;
+        if (ObjectPrefetchDistance < self.ringCount) {
+            const uint32 ahead = self.ring[(self.ringHead + ObjectPrefetchDistance) & Mask];
+            if ((ahead & ClusterItem) == 0) {
+                platform::PrefetchRead(registry->HotOf(ahead).object);
+            }
+        }
+
+        if (ArrayPrefetchDistance < self.ringCount) {
+            const uint32 ahead = self.ring[(self.ringHead + ArrayPrefetchDistance) & Mask];
+            if ((ahead & ClusterItem) == 0) {
+                registry->PrefetchArrays(ahead);
+            }
+        }
+
+        return true;
+    }
+
+    // 멈출 때 고리의 항목을 지역 큐로 되돌린다(남은 블록과 함께 다음 slice 몫이 된다 — 회색 객체를
+    // 잃지 않는다). 블록을 얻지 못하면 SetError가 멈춤 원인을 남긴다.
+    void ReturnRing(MarkParticipant& self) noexcept {
+        while (self.ringCount != 0) {
+            const uint32 item = self.ring[self.ringHead];
+            self.ringHead = (self.ringHead + 1) & (MarkRingSlots - 1);
+            --self.ringCount;
+            PushStack(self, item);
+        }
     }
 
     // 클러스터를 표식한다(atomic 비교 교환 — 이긴 참여자만 클러스터 항목을 넣는다).
@@ -427,7 +474,8 @@ struct ObjectRegistry::ParallelMark {
             ChargeBudget(self);
         }
 
-        // 멈췄으면 남은 지역 블록을 다음 slice 몫으로 모은다.
+        // 멈췄으면 고리의 항목을 지역 큐로 되돌리고 남은 지역 블록을 다음 slice 몫으로 모은다.
+        ReturnRing(self);
         platform::LockGuard lock(gate);
         while (GcBlock* block = self.stack) {
             self.stack = block->next;
