@@ -1,6 +1,6 @@
 # 렌더러(Renderer) 설계
 
-기준일: 2026-11-18, 개정 5(초안). UE 5.8 Renderer 모듈이 맡는 일 가운데 **렌더 경로**(Forward+·Deferred)와 그 위에 올라가는 그림자·투명·하늘·안개·후처리의 구조, GI 두 축과 PathTracing 모드의 연결점을 Rocks에 세우는 설계 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-18, 개정 6(초안). UE 5.8 Renderer 모듈이 맡는 일 가운데 **렌더 경로**(Forward+·Deferred)와 그 위에 올라가는 그림자·투명·하늘·안개·후처리의 구조, GI 두 축과 PathTracing 모드의 연결점을 Rocks에 세우는 설계 스펙이다. 범위는 다음과 같다.
 - 장면 표현과 게임 → 렌더 전달, view와 가시성
 - 공통 frame graph, Forward+와 Deferred가 갈라지는 곳
 - GBuffer layout, light grid, 조명 평가, 그림자, 투명·하늘·안개, 후처리·업스케일 연결
@@ -567,9 +567,9 @@ ForwardOpaquePS
 | PS typed buffer 읽기(grid·GPU Scene) | ○ | ○ | ○ | ○ | ○(texture buffer, 형식 대조 미확인) | 셰이더 시스템 7.2절 3·4항, PixelFormat 8.6절 |
 | VS·PS storage buffer | ○ | ○ | ○(단계당 4) | ○(4) | ×(VS·PS 0) | 형식 정의 `storageBuffers`(GLES 형식의 값 4는 CS 기준), VS·PS 0은 셰이더 시스템 7.2절 4항 "구조화·raw 버퍼 SRV도 GLES 형식에서는 CS만" |
 | PS·VS UAV 쓰기 | ×(규약) | ×(규약) | ×(규약) | ×(규약) | × | 셰이더 시스템 7.2절 4항 "UAV는 CS만" |
-| 단계당 SRV 텍스처 | 넓음(128) | 16 | 넓음(장치 요구, RQ22) | 넓음(128) | 16 | 형식 정의 `sampledTextures`(결정 RN13 개정). D3D11은 셰이더 시스템 개정 13에서 16으로 고쳤고, Vulkan은 GX1 측정 뒤 넓힌다(RQ22). 렌더러 자원은 모든 형식에서 16 안(7.4절) |
+| 단계당 SRV 텍스처 | 넓음(128) | 16 | 넓음(장치 요구, RQ22) | 넓음(128) | 16 | 형식 정의 `sampledTextures`(결정 RN13 개정). D3D11은 셰이더 시스템 개정 13에서 16으로, Vulkan은 개정 14에서 128로 고쳤다(RQ22). 렌더러 자원은 모든 형식에서 16 안(7.4절) |
 | 단계당 샘플러 | 16 | 16 | 16 | 16(장치 상한) | 16 | 형식 정의 `samplers`. 짝 규칙에서는 16장을 넘는 머티리얼 텍스처에 공유 샘플러가 필요하다(7.4절, RQ23) |
-| MRT 수 | 8 | 8 | 8(결정 RN3, 장치 요구 RQ11 뒤. 지금 정의 값 4) | 8 | 4 | 형식 정의 `renderTargets` |
+| MRT 수 | 8 | 8 | 8(결정 RN3, RQ11 반영: 셰이더 시스템 개정 14) | 8 | 4 | 형식 정의 `renderTargets` |
 | Deferred 기본 layout(MRT 4) | ○ | ○ | ○ | ○ | ○ | 7.1절 |
 | Deferred D·E(MRT 5–6) | ○ | ○ | ○(RQ11 뒤) | ○ | ×(결정 RN4) | 7.1절 |
 | `D32FloatS8Uint` 깊이 | ○ | ○ | △(장치 질의) | ○ | ○(core) | PixelFormat 8.4–8.7·10절. Vulkan은 GX1 형식 질의로 확인하고, 없으면 그 장치에서 Deferred·Forward+ 모두 `Unsupported`(대체 형식 선택 여부는 PixelFormat 10절 결정을 따른다) |
@@ -875,7 +875,7 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 | RQ8 | RenderBase 10절 | 정점 입력 타입이 GPU Scene typed buffer로 인스턴스 변환을 읽는 규약, 인스턴스 offset 루트 상수 | RS0 |
 | RQ9 | PixelFormat 8.6절 | GLES texel buffer 형식(ES 3.2 Table 8.18)에서 `R32Uint`·`RGBA32Float` 대조(지금 "미대조") | RS1 |
 | RQ10 | 셰이더 시스템 7.2절 4항 | GLES에서 typed buffer SRV가 텍스처 유닛을 차지함을 상한 계산에 명시(이미 "SRV 텍스처(typed buffer 포함)"이나 GLES `samplerBuffer` 관계를 적는다), SPIRV-Cross가 HLSL `Buffer<T>`를 ESSL `samplerBuffer`·`texelFetch`로 내는지 SH0 측정에 추가 | RS1 |
-| RQ11 | 셰이더 시스템 12.1절(형식 정의) | `VULKAN_SM5` `renderTargets`를 8로 올리고 `deviceRequirements`에 `maxColorAttachments ≥ 8`(결정 RN3 (가)) 또는 별도 형식 id | RS7 전(RS2는 기본 layout으로 진행, 결정 RN3과 같다) |
+| RQ11 | 셰이더 시스템 12.1절(형식 정의) | `VULKAN_SM5` `renderTargets`를 8로 올리고 `deviceRequirements`에 `maxColorAttachments ≥ 8`(결정 RN3 (가)) 또는 별도 형식 id. **반영(셰이더 시스템 개정 14)**: (가)로 `renderTargets` 8. 장치 요구는 형식 `limits`를 런타임 형식 선택이 `DeviceCaps`와 대조하는 규칙으로 둔다(별도 어휘 없음) | RS7 전(RS2는 기본 layout으로 진행, 결정 RN3과 같다) |
 | RQ12 | 셰이더 시스템 7.2절 4항·12.1절 | 렌더러 자원(`DeferredLightingPass`·`ForwardOpaque`·`Translucent`)을 GLES 보장치 16 안에 두는 예산표 유지(7.4절) | RS2 |
 | RQ13 | 셰이더 시스템 12.2절(P14) | pass 셰이더 타입의 거르기 함수가 `MaterialShaderTraits`·정점 입력 타입·퍼뮤테이션·형식을 받는 것(SX4와 함께, 머티리얼 MSR5와 같은 요구), 쿠커의 퍼뮤테이션 수 보고 | RS0 |
 | RQ14 | 셰이더 시스템 7.2절 7항 | `SV_Target0–7`과 형식별 MRT 상한 검사(이미 있음) 확인, `SV_RenderTargetArrayIndex`(VS)를 능력 형식으로 열 때의 형식 id 규칙 | RS3(한 번 그리기는 후속) |
@@ -886,7 +886,7 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 | RQ19 | AssetSystem 메시 단계 | 정적 메시: 위치·패킹 법선·tangent·UV, section·머티리얼 slot, bounds, LOD. 이동 물체 velocity를 위한 이전 위치는 렌더러가 변환으로 계산(skinned는 이전 pose를 렌더러에 넘김) | RS0 |
 | RQ20 | WorldIntegration | `SceneChangeList`·`ViewDesc` 생성, teleport·cut 표시, `RenderNotices` 처리 | RS0 |
 | RQ21 | TextureStreaming | 렌더러가 텍스처 사용 기록별 마지막 그린 프레임 번호(4.2절)와 view별 mip bias(11.2절)를 넘기는 형식. TextureStreaming 4.1절 요구를 렌더러 쪽에서 받은 것 | RS0(사용 기록)·RS6(mip bias) |
-| RQ22 | 셰이더 시스템 12.1절(형식 정의 `limits`)·7.2절 4항 | 결정 RN13 개정(2026-11-18 사용자 결정). (1) `sampledTextures`를 형식별로: `D3D12_SM6`·`METAL_SM5` 128 유지, `VULKAN_SM5`는 넓히고 `deviceRequirements`에 `maxPerStageDescriptorSampledImages`·`maxPerStageDescriptorSamplers` 하한을 넣는다(값은 GX1 장치 분포 확인 뒤, RQ11과 같은 방식), `D3D11_SM5`는 16, GLES는 16 유지. (2) 단계당 SRV 텍스처 상한 검사는 프로필 공통 상한(형식들의 최소값)이 아니라 job 형식의 상한으로 하고, 오류에 머티리얼·pass·퍼뮤테이션·형식을 담는다. 원문은 형식마다 바꾸지 않는다. **반영(셰이더 시스템 개정 13)**: (2)와 (1)의 D3D11 16은 7.2절 4항·12.1절에 들어갔다. Vulkan 값과 장치 요구(`maxDescriptorSetSampledImages`·`maxPerStageResources` 하한도 함께 필요)는 GX1 뒤 | MS2·RS1 |
+| RQ22 | 셰이더 시스템 12.1절(형식 정의 `limits`)·7.2절 4항 | 결정 RN13 개정(2026-11-18 사용자 결정). (1) `sampledTextures`를 형식별로: `D3D12_SM6`·`METAL_SM5` 128 유지, `VULKAN_SM5`는 넓히고 `deviceRequirements`에 `maxPerStageDescriptorSampledImages`·`maxPerStageDescriptorSamplers` 하한을 넣는다(값은 GX1 장치 분포 확인 뒤, RQ11과 같은 방식), `D3D11_SM5`는 16, GLES는 16 유지. (2) 단계당 SRV 텍스처 상한 검사는 프로필 공통 상한(형식들의 최소값)이 아니라 job 형식의 상한으로 하고, 오류에 머티리얼·pass·퍼뮤테이션·형식을 담는다. 원문은 형식마다 바꾸지 않는다. **반영(셰이더 시스템 개정 13)**: (2)와 (1)의 D3D11 16은 7.2절 4항·12.1절에 들어갔다. Vulkan은 개정 14에서 128(장치 요구는 `limits`와 `DeviceCaps` 대조, `maxDescriptorSetSampledImages`·`maxPerStageResources` 합산 포함) | MS2·RS1 |
 | RQ23 | 셰이더 시스템 7.2절 9항 | 짝 규칙의 예외로 머티리얼 텍스처의 **공유 샘플러**(UE `SSM_Wrap_WorldGroupSettings`·`SSM_Clamp_WorldGroupSettings`와 같은 Wrap·Clamp 두 종, view 상수 쪽 샘플러, mip bias 포함)를 후속에서 앞당긴다. GLES는 공유 샘플러 객체를 각 텍스처 유닛에 묶어 combined sampler 규칙을 유지한다. 이것이 없으면 RQ22로 넓힌 형식도 샘플러 16에 묶인다(7.4절). **반영(셰이더 시스템 개정 13, 7.2절 9항)**: SH2와 함께 구현한다. 공유 샘플러 상태(필터·이방성·mip bias)는 렌더러가 view마다 정해 파이프라인 layout의 공유 slot에 준다 | 머티리얼 텍스처가 16장을 넘는 콘텐츠 전(측정 MM5로 시점 판단) |
 
 ### 18.2 문서별 개정 위치
@@ -922,7 +922,7 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 |---|---|---|---|
 | RN1 | Deferred 조명 구조 | (가) 권장: 전체 화면 조명 pass 하나가 directional 목록 + light grid local 광원을 Forward+와 같은 함수로 평가, 그림자 직접 표본(7.3절). 측정 MR1로 확정. (나) UE 5.8 기본: 광원별 pass(구·원뿔 기하) + 그림자 광원별 screen mask. (다) tiled compute deferred(UE에서 제거됨, GLES image 형식 제약) | RS2 전(MR1 결과로) |
 | RN2 | GBuffer 법선 인코딩 | (가) 권장: UE desktop과 같은 `N·0.5+0.5` 10:10:10, 모든 backend. (나) octahedral(UE 모바일 방식) | RS2 전 |
-| RN3 | Vulkan Deferred MRT 8 | (가) 권장: `VULKAN_SM5` 장치 요구에 MRT 8을 넣고 상한을 8로(데스크톱 장치 분포는 **미확인**이므로 GX1 조회 결과를 먼저 본다). (나) MRT 8 형식 id를 따로 둔다. (다) Vulkan Deferred는 기본 layout만(D·E는 `Unsupported`) | RS7 전(RS2는 기본 layout으로 진행 가능) |
+| RN3 | Vulkan Deferred MRT 8 | (가) 권장: `VULKAN_SM5` 장치 요구에 MRT 8을 넣고 상한을 8로(데스크톱 장치 분포는 **미확인**이므로 GX1 조회 결과를 먼저 본다). (나) MRT 8 형식 id를 따로 둔다. (다) Vulkan Deferred는 기본 layout만(D·E는 `Unsupported`). **결정됨(2026-11-18, 권장안 (가))**: GX1 측정(GTX 1060·lavapipe 모두 8)으로 `VULKAN_SM5` `renderTargets` 8(셰이더 시스템 개정 14) | RS7 전(RS2는 기본 layout으로 진행 가능) |
 | RN4 | GLES Deferred 범위 | (가) 권장: 기본 layout(MRT 4)만, 다중 pass, GBufferD·E가 필요한 기능은 GLES Deferred에서 `Unsupported`(Forward+는 지원). (나) GLES Deferred를 두지 않음(계획 11.5절 "모든 backend에서 두 경로 검증"과 충돌) | RS2 전 |
 | RN5 | shading model·블렌드 모드·영역 번호표 소유 | (가) 권장: 렌더러가 번호·GBuffer 의미를 소유하고 머티리얼 스키마가 참조. 개정 3: 번호표 C++ 정의는 `RenderData`, HLSL 상수는 `/Engine/Shared/` 공용 헤더, GBuffer 의미는 `RendererShaders`(3.2절, 머티리얼 시스템 10.4절 D2의 순환 해소). (나) 머티리얼 스키마가 소유하고 렌더러가 참조 | MAT0 전 |
 | RN6 | velocity 형식 | (가) 권장: 모든 backend `RG16Float`. (나) UE처럼 `RG16Unorm` 인코딩(GLES는 확장 조건) | RS0 전 |
@@ -966,3 +966,4 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 - 개정 3(2026-11-18): 머티리얼 시스템 개정 1과 교차 검증해 두 문서를 맞췄다(머티리얼 시스템 10.4절 "정합 결과"). 사용자 결정 반영: RN13을 형식별 SRV 상한으로 개정(1·7.4·13.1·19.1절, RQ22), RN5 번호표의 C++ 정의를 `RenderData`·HLSL 상수를 `/Engine/Shared/`로(3.2·14.2절, 순환 해소). D1–D9 반영: WPO를 정점 함수로 분리하고 머티리얼 생성 함수 표를 둠(14.1절), `AlphaHoldout`을 후속 값으로 명시(14.2·10.2절), 거르기 인자를 `MaterialShaderTraits`로(14.3·14.5·15.3절), "static switch 차원"을 "static 변형"으로(14.6절), pass 표에 경로 열·`RENDER_PATH_*` 정의, depth·그림자 pass의 마스크 전용 함수(14.1·14.3절). 그 밖의 불일치 수정: Render Path Switch의 깊이 일치 규칙, 마스크를 퍼뮤테이션 차원에서 뺌, PDO 함수와 depth PS 조건, 노드 미리보기 pass `MaterialPreview`, 조회 키에 단계·SX5, mask clip 값이 static 정의임, 노멀 공간 변환 위치, `GBuffer`·depth 계열 pass의 렌더러 SRV 합계, 짝 규칙과 샘플러 상한(RQ23), 확정된 RN3을 지원표에 반영, 머티리얼 단계(MS)와 RS 선후(17절), 머티리얼 요구 MRD1–MRD12 처리(14.7절), 대체 계수(16.2절).
 - 개정 4(2026-11-18): 셰이더 시스템 개정 13의 RQ22·RQ23 반영 상태를 적었다(7.4절, 19.1절 표, 18절 RQ22·RQ23).
 - 개정 5(2026-11-18): 19.2절 미확인 3건(GLES texel buffer 형식 RQ9 확인, Vulkan `maxColorAttachments`·단계당 SRV·샘플러 분포)에 RenderBase GX1 측정을 적었다. RQ11·RQ22 값 결정은 하지 않았다.
+- 개정 6(2026-11-18): 셰이더 시스템 개정 14 반영(RQ11·RQ22 Vulkan 값, 19.1절 MRT 행).
