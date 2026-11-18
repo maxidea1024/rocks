@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/NumericLimits.h>
 #include <Core/Assert.h>
 #include <Core/Traits.h>
 #include <Platform/PlatformMath.h>
@@ -239,6 +240,77 @@ constexpr bool IsNearlyEqualByUlps(T a, T b, uint64 maxUlps) noexcept {
         const uint64 right = ordered(b);
         return (left > right ? left - right : right - left) <= maxUlps;
     }
+}
+
+// value보다 큰 표현 가능한 값 중 가장 작은 값이다(IEEE 754 nextUp, 양의 방향 한 ULP). NaN은 그대로,
+// +Inf는 +Inf, -Inf는 Lowest(), ±0은 가장 작은 양의 비정규 값이다. 반올림 오차를 바깥쪽으로 덮는
+// 보수적 경계(예: 공간 인덱스의 float 상대 경계)를 만들 때 쓴다. 비트 연산만 쓰므로 부동소수 환경
+// (반올림 방식·FTZ)의 영향을 받지 않는다.
+//
+// 사용 예:
+//   const float lower = math::NextDown(math::ToFloatRoundedDown(minimum - center));
+template <typename T>
+    requires IsFloatingPointV<T>
+constexpr T NextUp(T value) noexcept {
+    if (IsNaN(value)) {
+        return value;
+    }
+    if constexpr (IsSameV<T, float>) {
+        const uint32 raw = platform::BitCast<uint32>(value);
+        if (raw == 0x7f800000u) {
+            return value;
+        }
+        if ((raw & 0x7fffffffu) == 0) {
+            return platform::BitCast<float>(uint32{1});
+        }
+        return platform::BitCast<float>((raw & 0x80000000u) != 0 ? raw - 1 : raw + 1);
+    } else {
+        const uint64 raw = platform::BitCast<uint64>(value);
+        if (raw == 0x7ff0000000000000ull) {
+            return value;
+        }
+        if ((raw & 0x7fffffffffffffffull) == 0) {
+            return platform::BitCast<double>(uint64{1});
+        }
+        return platform::BitCast<double>((raw & 0x8000000000000000ull) != 0 ? raw - 1 : raw + 1);
+    }
+}
+
+// value보다 작은 표현 가능한 값 중 가장 큰 값이다(IEEE 754 nextDown, 음의 방향 한 ULP). NextUp의
+// 대칭이며 -Inf는 -Inf, +Inf는 Max(), ±0은 가장 작은 음의 비정규 값이다.
+template <typename T>
+    requires IsFloatingPointV<T>
+constexpr T NextDown(T value) noexcept {
+    return -NextUp(-value);
+}
+
+// value 이하인 float 중 가장 큰 값이다(방향 반올림, 아래쪽). 결과는 항상 value 이하이므로 하한을
+// float로 좁혀도 원래 구간을 잃지 않는다. float 범위를 넘는 큰 양수는 NumericLimits<float>::Max(),
+// 그보다 작은 음수는 -Inf, NaN은 NaN이다.
+//
+// 사용 예(double 구간 [minimum, maximum]을 덮는 float 구간):
+//   const float lower = math::ToFloatRoundedDown(minimum);
+//   const float upper = math::ToFloatRoundedUp(maximum);
+constexpr float ToFloatRoundedDown(double value) noexcept {
+    if (IsNaN(value)) {
+        return static_cast<float>(value);
+    }
+    const double largest = static_cast<double>(NumericLimits<float>::Max());
+    if (value > largest) {
+        return NumericLimits<float>::Max();
+    }
+    if (value < -largest) {
+        return -platform::PlatformMath::Infinity<float>();
+    }
+    // 범위 안의 변환은 최근접 반올림이므로 결과가 value보다 크면 한 ULP 내린다.
+    const float nearest = static_cast<float>(value);
+    return static_cast<double>(nearest) > value ? NextDown(nearest) : nearest;
+}
+
+// value 이상인 float 중 가장 작은 값이다(방향 반올림, 위쪽). ToFloatRoundedDown의 대칭이며 float
+// 범위를 넘는 큰 양수는 +Inf, 그보다 작은 음수는 NumericLimits<float>::Lowest(), NaN은 NaN이다.
+constexpr float ToFloatRoundedUp(double value) noexcept {
+    return -ToFloatRoundedDown(-value);
 }
 
 // ---- CPU별 구현으로 위임하는 함수. 특수값 규약은 GenericPlatformMath.h를 따른다. ----
