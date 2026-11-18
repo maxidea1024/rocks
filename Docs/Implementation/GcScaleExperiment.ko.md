@@ -1057,4 +1057,39 @@ a1916228(Slot hot·cold 분리)·a43ca91e(1차 리뷰 반영)의 2차 리뷰 지
 - **잠금 전 미리 읽기**(지울 값을 먼저 읽어 대상 Slot·대상 장부 칸·소유자 장부 칸을 미리 읽음): 부하가 큰 시간대의 세 round에서 켬 제거가 전 361–414 ↔ 후 344–391로 흔들림 안이었다(`step4/writes.txt`). 제거 호출 안에서 미스와 겹칠 독립 작업이 접근 검사·잠금 정도뿐이다.
 - **`inCount` 밀집 배열**(hot Slot → GC 페이지의 슬롯당 4 B 배열): 제거 중앙값 약 10–20ns(3–5%) 감소, 차이의 대부분이 남는다. 클러스터 Registry 메모리가 슬롯당 4 B 늘고 hot Slot은 정렬 때문에 줄지 않는다 — 버림.
 - 표본 프로파일(밀집 배열 빌드, 10%, 쓰기 묶음 400개, 표본 약 18,000개): 클러스터 때문에 생긴 줄은 대상 `inCount` 읽기 8.7%, 소유자 소속 비트 3.7%, 대상 비트 2.6%, 경계 간선의 소유자 `outCount` 칸 1.3%다. 나머지는 켬·끔 공통(소유자 Borrow의 Slot 미스 23.7%, 소유자 본체 읽기 8.9%, 배열 원소 읽기 10.2% 등)이다. 비트 묶음(1 MB)과 밀집 배열(4 MB)도 무작위 대상에서는 캐시 밖이다.
-- 결론: 남는 비용은 간선마다 무작위 대상 하나의 계수를 고치는 일이고, 계수를 대상마다 두는 한(이탈 때 detached 판정에 필요) 없앨 수 없다. 같은 클러스터 안 간선이 많은 그래프의 표식 이득(14.4절 — 10% 22%, 1% 7배)과 맞바꾼 값으로 둔다.
+- 결론(아래 22.1절 전): 남는 비용은 간선마다 무작위 대상 하나의 계수를 고치는 일이고, 계수를 대상마다 두는 한(이탈 때 detached 판정에 필요) 없앨 수 없다. 같은 클러스터 안 간선이 많은 그래프의 표식 이득(14.4절 — 10% 22%, 1% 7배)과 맞바꾼 값으로 둔다.
+
+### 22.1 채택: 간선 제거의 장부 감소를 미루는 기록
+
+위 결론의 "없앨 수 없다"는 감소를 그 자리에서 할 때의 말이다. 감소를 미뤄 몰아서 적용하면 대상 줄을 읽는 일을 제거 호출 밖으로 옮겨 미리 읽기로 겹칠 수 있다. 설계는 13.4절(9e475aa1 — 적용 시점·분류 불변 근거·늦는 쪽이 안전한 근거, 5d3c7358 — 기록한 대상이 적용 전에 회수되지 않는 근거와 세대 대조를 Debug Fatal로)이고 구현은 8279ee93이다.
+
+- 구조: 제거(`LedgerEditLocked`의 지운 값, `LedgerClearLocked`)는 (소유자 슬롯, 대상 슬롯, 대상 세대) 12 B를 Registry 기록(4096칸, 첫 클러스터 예약 때 48 KB)에 덧붙인다. 추가는 그대로 바로 센다 — 계수는 실제 이상이라 판단이 모두 보수 쪽이다. 적용(`ApplyLedgerRemovalsLocked`, 8칸 앞 미리 읽기)은 이탈 판정 전, 해체 전, 경계 비율 판정 전, cycle 시작(Begin·Collect), Debug 장부 검증 전, 기록이 찼을 때 한다.
+- 세대가 다른 기록은 정상 API로 닿지 않는다(Marking 중 기록은 cutoff에 적용되고, Sweeping 중 기록의 대상은 그 cycle에 표식됐다). Debug는 Fatal, Release는 소유자 `outCount`만 줄인다.
+
+측정: 22절과 같은 `--package-profile CROSS --write-rounds 15 --reps 1`, 높은 우선순위로 전(HEAD 341d5eef)·후를 같은 시점 번갈아, 묶음 최소/중앙 ns/op. 첫 측정(`step4/writes-deferred.txt`, 네 round, 부하 비교적 낮음)은 시제품, 둘째(`step4/run4b.txt`, 세 round, 부하 큼)는 커밋한 코드다(Release 경로는 같다).
+
+| 측정 | 사이 간선 | 전 켬 제거 | 후 켬 제거 | 전 끔 제거 | 후 끔 제거 | 켬 추가 전 → 후 |
+|---|---|---|---|---|---|---|
+| 첫째(4 round) | 10% | 334–351 / 352–375 | 264–284 / 275–313 | 225–234 / 246–260 | 230–247 / 248–264 | 중앙 444–483 → 460–503 |
+| 첫째(4 round) | 30% | 359–369 / 376–389 | 264–275 / 280–292 | 228–236 / 241–253 | 226–246 / 250–265 | 중앙 463–493 → 465–501 |
+| 둘째(3 round) | 10% | 364–403 / 412–535 | 294–307 / 317–358 | 277–340 / 307–553 | 260–274 / 275–389 | 중앙 508–663 → 519–557 |
+| 둘째(3 round) | 30% | 371–430 / 421–514 | 283–290 / 299–335 | 241–252 / 266–312 | 256–356 / 278–446 | 중앙 502–631 → 484–532 |
+
+- 켬 제거 중앙이 같은 round에서 39–109ns(대개 70–110ns, 약 20–28%) 줄었다(첫째 352–389 → 275–313). 같은 round 켬·끔 중앙 차이는 약 110–140ns에서 18–62ns(대개 20–30ns)로, 최솟값 차이는 18–49ns로 줄었다. 둘째 측정은 부하로 흔들림이 크지만(끔 중앙 553·446 같은 튀는 값) 켬의 전·후 순서는 모든 round에서 같다.
+- 추가는 흔들림 안에서 바뀌지 않았다(추가는 기록을 쓰지 않는다).
+- 남은 차이(대개 20–30ns)는 기록 쓰기·적용 때 대상 줄 미스 가운데 미리 읽기로 다 겹치지 못한 몫과 소유자 소속 비트 읽기다.
+
+음성 대조(`negctl9.py`, `step4/negctl9b.txt` — 대조마다 Debug Foundation 클러스터 시험과 Debug·Development cluster smoke 6종):
+
+| 대조 | 빼거나 바꾼 것 | 잡은 곳 |
+|---|---|---|
+| V1 | 이탈 전 적용(`FinishLeaveLocked`) | 클러스터 시험 실행이 결과 줄 없이 멈춤(Fatal), 패키지 soak 4종도 멈춤 |
+| V2 | 적용 때 세대 대조 | 정상 API로 닿지 않는 경로라 대조를 돌리지 않고 Debug Fatal 검사로 막음(설계 13.4절) |
+| V3 | cycle 시작 적용(`AdvanceGcEpochLocked`) | Development world smoke seed 41 tick 77 "Unreachable object survived a stop-the-world collection"(Debug는 통과 — Debug Collect의 장부 검증이 먼저 적용하기 때문으로 본다) |
+| V4 | 경계 비율 판정 전 적용(`FlattenBoundaryClustersLocked`) | 새 시험 `BoundaryValveSeesDeferredRemovals`(미적용 감소로 경계 비율을 잘못 보고 해체 — `flattenedClusters == 0`·`clusters == 2` 실패), Debug 패키지 worker soak 멈춤 |
+| V5 | 해체 전 적용(`DissolveClusterLocked`) | 패키지 soak 4종이 결과 줄 없이 멈춤(Fatal). 이때 클러스터 시험은 통과해 시험 빈틈이었으므로 `DeferredRemovalAppliesBeforeDissolve`를 더함 — "Cluster ledger out-count underflow" Fatal로 잡음 |
+
+새 시험 다섯: `DeferredRemovalAppliesBeforeLeave`(경계·안쪽 간선을 지우고 바로 이탈), `DeferredRemovalAppliesBeforeDissolve`(같은 간선을 지우고 바로 루트 파괴 요청으로 해체), `DeferredRemovalDuringMarkingAppliesAtCutoff`(증분 Marking 중 경계 간선 제거 → cycle 끝 → 밖 대상 회수 → 같은 슬롯을 같은 클러스터 새 소속이 다시 씀 → Collect·장부 검증), `DeferredRemovalsOverflowTheLog`(비우기 하나로 5,000개 — 기록이 참), `BoundaryValveSeesDeferredRemovals`(경계 90% 패키지에서 Marking 중 경계 간선 다섯을 지운 뒤 cutoff 판정).
+
+검증: Debug Foundation 전체 2,072개·`--filter Object --repeat 3` 202개×3·`--filter ObjectGcCluster --repeat 5` 23개×5(해체 시험 포함), Debug EngineTests 전체 2,210개·World `--repeat 3`, 클러스터 smoke Debug 6종, Development soak 10종(일반 300K tick 3종·시간 예산 1종·클러스터 world 3종·packages 3종)과 추가 soak 3종(packages seed 52·53(worker), world 5000 tick seed 54(worker)), format·policy 통과. 해체 시험은 Foundation 전체 실행 뒤에 더해 클러스터 묶음 반복으로 확인했다.
+
