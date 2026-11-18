@@ -1,6 +1,6 @@
 # 커브 데이터 계층 설계
 
-개정 8(CV6 구현 반영 — 17.5절, CV5 단계 리뷰 반영 — 7.3절·15절 23–29·17.4절 C4·C6·C9·C10·C13), 기준일 2026-11-18. 이 문서는 Curve 단계(리플렉션 B9 직후, A0-G 앞 — 2026-11-15 사용자 결정)의 **값 타입 층** 설계다. 근거는 [에셋 시스템](AssetSystem.ko.md) 1절 Curve 행, [Core 상세 명세](CoreDetailedSpec.ko.md) G09, 이미 구현된 수학 층 [키 커브](../Implementation/InterpCurve.ko.md)(`InterpCurve<T>`)다. UE 대응 대상은 UE 5.8.4의 `Engine/Source/Runtime/Engine/Classes/Curves`(`FRealCurve`·`FRichCurve`·`FSimpleCurve`·`FIndexedCurve`·`FKeyHandle`·`FKeyHandleMap`·`FIntegralCurve`·`FNameCurve`·`FStringCurve`·`FCompressedRichCurve`)와 평가 함수 `Public/Curves/CurveEvaluation.h`(`UE::Curves::EvalForTwoKeys`·`BezierInterp`·`WeightedEvalForTwoKeys`), 그리고 G09가 이 단계로 미룬 `FInterpCurve<T>`의 리플렉션·직렬화·`CalcBounds`(12절)다. 아래에서 `RC` = `Engine/Source/Runtime/Engine/Private/Curves/RichCurve.cpp`, `CE` = 같은 폴더 `CurveEvaluation.cpp`, `SC` = `SimpleCurve.cpp`, `KH` = `Classes/Curves/KeyHandle.h`, `UMU` = `Core/Public/Math/UnrealMathUtility.h`, `UPM` = `Core/Public/Math/UnrealPlatformMathSSE.h`다. 레거시·deprecated 경로(옛 버전 키 직렬화 보정, `UE_DEPRECATED` 함수, `FInterpCurvePoint` → `FRichCurveKey` 변환 생성자)는 대응하지 않는다.
+개정 9(CV7 구현 반영 — 17.6절), 기준일 2026-11-18. 이 문서는 Curve 단계(리플렉션 B9 직후, A0-G 앞 — 2026-11-15 사용자 결정)의 **값 타입 층** 설계다. 근거는 [에셋 시스템](AssetSystem.ko.md) 1절 Curve 행, [Core 상세 명세](CoreDetailedSpec.ko.md) G09, 이미 구현된 수학 층 [키 커브](../Implementation/InterpCurve.ko.md)(`InterpCurve<T>`)다. UE 대응 대상은 UE 5.8.4의 `Engine/Source/Runtime/Engine/Classes/Curves`(`FRealCurve`·`FRichCurve`·`FSimpleCurve`·`FIndexedCurve`·`FKeyHandle`·`FKeyHandleMap`·`FIntegralCurve`·`FNameCurve`·`FStringCurve`·`FCompressedRichCurve`)와 평가 함수 `Public/Curves/CurveEvaluation.h`(`UE::Curves::EvalForTwoKeys`·`BezierInterp`·`WeightedEvalForTwoKeys`), 그리고 G09가 이 단계로 미룬 `FInterpCurve<T>`의 리플렉션·직렬화·`CalcBounds`(12절)다. 아래에서 `RC` = `Engine/Source/Runtime/Engine/Private/Curves/RichCurve.cpp`, `CE` = 같은 폴더 `CurveEvaluation.cpp`, `SC` = `SimpleCurve.cpp`, `KH` = `Classes/Curves/KeyHandle.h`, `UMU` = `Core/Public/Math/UnrealMathUtility.h`, `UPM` = `Core/Public/Math/UnrealPlatformMathSSE.h`다. 레거시·deprecated 경로(옛 버전 키 직렬화 보정, `UE_DEPRECATED` 함수, `FInterpCurvePoint` → `FRichCurveKey` 변환 생성자)는 대응하지 않는다.
 
 에셋 층(`UCurveFloat`·`UCurveVector`·`UCurveLinearColor`·`UCurveTable`·`FRuntimeFloatCurve`·`FCurveTableRowHandle`)은 A1 에셋 시스템 뒤 A 단계의 일이라 범위 밖이다. 이 문서는 그 층이 기댈 경계(14절)만 정한다.
 
@@ -661,6 +661,19 @@ D18(`Array<uint8>` Bytes 블록 wire)을 넣었다. 기반 쪽 요약은 [리플
 - **S6 리플렉션** — 검증 hook은 CV5와 같은 `ValidateKeys`(키 시간 유한·비내림차순)다. Name 값 키 커브를 담은 객체의 decode·JSON은 기존 Name 필드 규칙(Registry·텍스트 옵션의 NamePool)을 따른다. 키 struct는 Atomic이고 키 배열의 도구 이름은 `keys`다.
 - **S7 golden 범위** — 무작위 Integer 3,000개 × 시간 30개(키 시간 정확히·범위 안팎·NaN, `useDefaultBeforeFirstKey`·기본값 조합)가 수정을 켠 참조와 같고 UE 그대로와는 NaN에서만 다르다. `FindKeyAtOrBefore`도 UE `FindKeyBeforeOrAt`과 같다. String·Name 3,000개가 `FStringCurve::Eval` 참조(Name은 D9의 String 규칙)와 같다. 편집 순서 400 × 30단계, 중복 제거 2,000개(UE 그대로는 남은 키 기본값 변환으로 첫 키 이전 평가가, FString 같음으로 남는 키 수가 달라지는 사례 존재).
 
+### 17.6 구현(CV7)에서 정한 점
+
+키 핸들 표(8절, D3)를 넣었다. 시험은 `Curves/Tests/CurveKeyHandleTableTests.cpp`와 `CurveReflectionTests.cpp`의 `CurveReflection_PathWriteMakesHandleTableStale`이다.
+
+- **H1 배치** — 헤더 전용 템플릿 `Curves/CurveKeyHandleTable.h`(`CurveKeyHandle`·`CurveKeyHandleTable<Curve>`)이고 다섯 커브 형식(`TangentCurve`·`PlainCurve`·계단 커브 셋)에 같이 쓴다. 리플렉션 타입이 아니다(저장하지 않는다 — UE와 같다). 발급 카운터를 uint32 끝 근처로 옮기는 시험 접근점은 모듈 Private의 `CurveKeyHandleTableTestAccess.h`다(공개 API에는 카운터를 정하는 길이 없다).
+- **H2 수정 감지** — 사본은 키 struct 칸마다 비트 비교한다(padding은 보지 않는다): float는 비트(−0과 +0도 다르다), enum, Name은 토큰의 모든 칸(Name 같음 규칙이 아니다 — 표시 철자만 바꾼 쓰기도 수정이다), String은 byte다. 새로 만든 표는 빈 사본이라 빈 커브에만 맞고, 키가 있는 커브는 먼저 `TryRebuild`를 부른다.
+- **H3 TryRebuild** — 모든 키에 새 핸들을 발급하고(발급 카운터는 이어진다 — 옛 핸들 값이 새 키를 가리키는 일이 없다) 무효 표시를 지운다. 발급할 수가 uint32 끝을 넘으면 Overflow이고 표는 그대로다.
+- **H4 표 판 편집 함수(UE 대응)** — `TryGetHandle`(UE `GetKeyHandle`), `TryFindIndex`(UE `GetIndex`), `TryAddKey`(UE `AddKey` — 새 핸들), `TryUpdateOrAddKey`(값만 바꾸면 그 키의 핸들, 더하면 새 핸들 — 값만 바꿀 때는 카운터 끝에서도 Overflow가 아니다), `TryRemoveKey`(UE `DeleteKey`), `TrySetKeyTime`(UE `SetKeyTime` — 핸들이 키를 따라간다), `TrySetKeyValue`(UE `SetKeyValue`), `TryShiftKeyTimes`(UE `ShiftCurve(Delta, KeyHandles)` — 커브 `TryShiftKeyTimes`와 같은 재삽입 규칙으로 핸들 순서를 맞춘다), `TryEditKeys`(키 시간·수·순서를 바꾸지 않는 필드 편집 — 보간·접선 방식·접선·가중치·`AutoSetTangents` — 를 표를 거쳐 하고 사본을 다시 맞춘다. 비트 복사 가능한 키의 커브만이고, 편집이 시간·키 수를 바꿨으면 표가 무효가 된다). 인자는 커브 자신의 같은 이름 연산 인자를 그대로 넘긴다(`TryAddKey(curve, time, value, unwind)` 등). UE `GetNextKey`·`GetPreviousKey`·핸들 판 `ScaleCurve`·Bake는 두지 않는다(index 연산과 `TryGetHandle`로 한다).
+- **H5 원자성** — 모든 함수는 실패하면 커브와 표가 그대로다. 커브를 바꾸기 전에 핸들 목록·사본의 용량을 잡고 String 사본 키를 복제하며, 선택 이동은 새 순서·새 배열을 먼저 마련한 뒤 커브 연산을 부른다(커브 연산 뒤에는 할당하지 않는다). 무효 판정(StaleHandle)도 커브를 바꾸지 않는다.
+- **H6 비용** — 핸들 → index 조회는 핸들 목록의 선형 탐색이다. 함수마다 사본 비교가 이미 O(N)이라 맵을 두지 않았다(편집기 빈도).
+- **H7 복사·이동** — `TryCopyFrom`은 핸들·사본·발급 카운터·무효 표시를 그대로 복사한다(실패하면 그대로). 이동은 noexcept다. 복사 생성·대입은 지웠다(String 사본 복제가 실패할 수 있어 Rocks 규약대로 `TryCopyFrom`이다).
+- **H8 시험** — 다섯 커브 형식 × 60커브 × 40단계 무작위 편집(더하기·같은 시간 더하기·UpdateOrAdd·지우기·시간 옮기기·값 바꾸기·선택 이동, TangentCurve는 `TryEditKeys`로 보간 바꾸기 + `AutoSetTangents`)마다 모든 핸들이 같은 키(값에 둔 고유 번호)를 가리키고 핸들이 단조 증가, 표 밖 수정 다섯 가지(값·시간·키 수·접선 부호·보간)와 리플렉션 경로 쓰기의 StaleHandle 감지와 `TryRebuild`, Overflow 경계, 할당 실패 원자성(주입 단언 — 더하기·UpdateOrAdd·값 바꾸기·선택 이동·TryRebuild·TryCopyFrom), 복사·이동과 무효 표의 복사.
+
 ## 18. 결정 목록
 
 권장안으로 확정했다(2026-11-18, 교차검증 1차 반영).
@@ -700,6 +713,7 @@ D18(`Array<uint8>` Bytes 블록 wire)을 넣었다. 기반 쪽 요약은 [리플
 ## 20. 변경 이력
 
 - **개정 1 초안(2026-11-18, 36027f9)**: 값 타입·평가·편집·핸들·압축 설계, 결정 D1–D15, 단계 CV1–CV7.
+- **개정 9(2026-11-18, CV7 구현 반영)**: 17.6절 H1–H8(키 핸들 표 — 칸별 비트 비교 감지, 표 판 편집 함수, 원자성, `TryEditKeys`).
 - **개정 8(2026-11-18, CV6 구현·CV5 단계 리뷰 반영)**: 17.5절 S1–S7(계단 커브 셋 — NaN 시간은 기본값, String 빈 기본값, 중복 제거의 같음 규칙, `FindKeyAtOrBefore`). CV5 리뷰: 값 범위가 풀이 판별식 띠의 매개변수까지 담음(7.3절·C10·D11·19절), 회전 풀기 UE 비트 일치(C6), 표본판 상한·NaN 키 보존(C9), 순환 int32 경로 벗어남 표현(5.1절·C4), golden 참조 표현(C13), 15절 23–29, D8 확정, 7.1표.
 - **개정 7(2026-11-18, CV5 구현·CV4 단계 리뷰 반영)**: 17.3절 B8·B5, 17.4절 C1–C14(`Curves` 모듈, 값 범위의 일반 매개변수 집합, API 이름, 허용오차·회전 풀기·Bake·중복 제거 경계), 9.2절 키 wire 실측과 저작 wire 유지 판단, D8·19절 갱신.
 - **개정 6(2026-11-18, CV3 단계 리뷰 반영)**: 17.2절 V9–V12.
