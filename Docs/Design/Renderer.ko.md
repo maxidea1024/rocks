@@ -1,6 +1,6 @@
 # 렌더러(Renderer) 설계
 
-기준일: 2026-11-18, 개정 3(초안). UE 5.8 Renderer 모듈이 맡는 일 가운데 **렌더 경로**(Forward+·Deferred)와 그 위에 올라가는 그림자·투명·하늘·안개·후처리의 구조, GI 두 축과 PathTracing 모드의 연결점을 Rocks에 세우는 설계 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-18, 개정 4(초안). UE 5.8 Renderer 모듈이 맡는 일 가운데 **렌더 경로**(Forward+·Deferred)와 그 위에 올라가는 그림자·투명·하늘·안개·후처리의 구조, GI 두 축과 PathTracing 모드의 연결점을 Rocks에 세우는 설계 스펙이다. 범위는 다음과 같다.
 - 장면 표현과 게임 → 렌더 전달, view와 가시성
 - 공통 frame graph, Forward+와 Deferred가 갈라지는 곳
 - GBuffer layout, light grid, 조명 평가, 그림자, 투명·하늘·안개, 후처리·업스케일 연결
@@ -323,7 +323,7 @@ DeferredLightingPass (전체 화면 PS, 렌더 타깃은 SceneColor 하나·가�
 
 **제약(결정 RN13, 2026-11-18 사용자 결정으로 개정).** 셰이더 원문은 모든 형식에 하나다. 단계당 SRV 텍스처(typed buffer 포함) 상한은 **형식 정의**(`sampledTextures`, 셰이더 시스템 12.1절)가 정한다. D3D12·Vulkan·Metal 형식은 넓게, GLES·D3D11 SM5 형식은 보장치 16으로 둔다. 렌더러 pass 셰이더는 GLES에서도 쓰므로 **렌더러 자원은 16 안**에 둔다(아래 표). 머티리얼 텍스처 상한은 (pass, 퍼뮤테이션, 형식)마다 `형식 상한 − 렌더러 합계`다. 그래서 같은 머티리얼이 데스크톱 형식에서는 쿠킹되고 GLES·D3D11 형식에서는 상한을 넘을 수 있으며, 그때는 **그 형식을 쿠킹할 때 명시 오류**다(UE 모바일 머티리얼의 샘플러 제약과 같은 성격, `Engine/Source/Developer/ShaderFormatOpenGL/Private/OpenGLShaderCompiler.cpp:868–877`). 이 검사는 셰이더 시스템 7.2절 4항의 프로필 공통 상한(형식들의 최소값)이 아니라 job 형식의 상한으로 한다(RQ22).
 
-**샘플러.** 텍스처·샘플러 1:1 짝 규칙(셰이더 시스템 7.2절 9항)에서는 자기 샘플러를 쓰는 텍스처 수가 형식의 `samplers` 상한에 묶인다. 지금 형식 정의의 `samplers`는 모든 형식이 16이고, Metal은 장치 상한이 16이다(UE `ML_MaxSamplers = 16`, `Apple/MetalRHI/Private/MetalPipeline.h:47`). 그래서 넓은 형식이 실제로 16장을 넘으려면 짝 규칙의 예외인 **공유 샘플러**(UE `SSM_Wrap_WorldGroupSettings`·`SSM_Clamp_WorldGroupSettings`, `EN/Classes/Engine/EngineTypes.h:283–292`, 생성 `EN/Private/Materials/HLSLMaterialTranslator.cpp:7364–7388`)가 필요하다. 셰이더 시스템에서는 후속이므로 요구로 올린다(RQ23). 그 전에는 모든 형식에서 짝 규칙대로 `samplers − 렌더러 샘플러 수`가 실제 상한이다.
+**샘플러.** 텍스처·샘플러 1:1 짝 규칙(셰이더 시스템 7.2절 9항)에서는 자기 샘플러를 쓰는 텍스처 수가 형식의 `samplers` 상한에 묶인다. 지금 형식 정의의 `samplers`는 모든 형식이 16이고, Metal은 장치 상한이 16이다(UE `ML_MaxSamplers = 16`, `Apple/MetalRHI/Private/MetalPipeline.h:47`). 그래서 넓은 형식이 실제로 16장을 넘으려면 짝 규칙의 예외인 **공유 샘플러**(UE `SSM_Wrap_WorldGroupSettings`·`SSM_Clamp_WorldGroupSettings`, `EN/Classes/Engine/EngineTypes.h:283–292`, 생성 `EN/Private/Materials/HLSLMaterialTranslator.cpp:7364–7388`)가 필요하다. 셰이더 시스템에서 후속이던 것을 요구로 올렸고(RQ23), 셰이더 시스템 개정 13이 SH2로 앞당겨 규칙을 정했다(셰이더 시스템 7.2절 9항: `SharedWrapSampler`·`SharedClampSampler`, 텍스처마다 출처 하나). 그 전에는 모든 형식에서 짝 규칙대로 `samplers − 렌더러 샘플러 수`가 실제 상한이다.
 
 **줄이는 규칙.** grid의 셀 개수와 광원 index를 한 `R32Uint` 버퍼(앞부분 셀 머리, 뒷부분 목록)로 합친다(8.1절). CSM 단과 local 광원 그림자를 **shadow atlas 하나**에 둔다(9.2절). 광원 함수·IES는 atlas 하나(RS9). 정적 조명은 정책 퍼뮤테이션으로 라이트맵 또는 프로브 하나만 묶는다.
 
@@ -567,7 +567,7 @@ ForwardOpaquePS
 | PS typed buffer 읽기(grid·GPU Scene) | ○ | ○ | ○ | ○ | ○(texture buffer, 형식 대조 미확인) | 셰이더 시스템 7.2절 3·4항, PixelFormat 8.6절 |
 | VS·PS storage buffer | ○ | ○ | ○(단계당 4) | ○(4) | ×(VS·PS 0) | 형식 정의 `storageBuffers`(GLES 형식의 값 4는 CS 기준), VS·PS 0은 셰이더 시스템 7.2절 4항 "구조화·raw 버퍼 SRV도 GLES 형식에서는 CS만" |
 | PS·VS UAV 쓰기 | ×(규약) | ×(규약) | ×(규약) | ×(규약) | × | 셰이더 시스템 7.2절 4항 "UAV는 CS만" |
-| 단계당 SRV 텍스처 | 넓음(128) | 16 | 넓음(장치 요구, RQ22) | 넓음(128) | 16 | 형식 정의 `sampledTextures`(결정 RN13 개정). 지금 정의 값은 D3D11 128·Vulkan 16이라 RQ22로 고친다. 렌더러 자원은 모든 형식에서 16 안(7.4절) |
+| 단계당 SRV 텍스처 | 넓음(128) | 16 | 넓음(장치 요구, RQ22) | 넓음(128) | 16 | 형식 정의 `sampledTextures`(결정 RN13 개정). D3D11은 셰이더 시스템 개정 13에서 16으로 고쳤고, Vulkan은 GX1 측정 뒤 넓힌다(RQ22). 렌더러 자원은 모든 형식에서 16 안(7.4절) |
 | 단계당 샘플러 | 16 | 16 | 16 | 16(장치 상한) | 16 | 형식 정의 `samplers`. 짝 규칙에서는 16장을 넘는 머티리얼 텍스처에 공유 샘플러가 필요하다(7.4절, RQ23) |
 | MRT 수 | 8 | 8 | 8(결정 RN3, 장치 요구 RQ11 뒤. 지금 정의 값 4) | 8 | 4 | 형식 정의 `renderTargets` |
 | Deferred 기본 layout(MRT 4) | ○ | ○ | ○ | ○ | ○ | 7.1절 |
@@ -886,8 +886,8 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 | RQ19 | AssetSystem 메시 단계 | 정적 메시: 위치·패킹 법선·tangent·UV, section·머티리얼 slot, bounds, LOD. 이동 물체 velocity를 위한 이전 위치는 렌더러가 변환으로 계산(skinned는 이전 pose를 렌더러에 넘김) | RS0 |
 | RQ20 | WorldIntegration | `SceneChangeList`·`ViewDesc` 생성, teleport·cut 표시, `RenderNotices` 처리 | RS0 |
 | RQ21 | TextureStreaming | 렌더러가 텍스처 사용 기록별 마지막 그린 프레임 번호(4.2절)와 view별 mip bias(11.2절)를 넘기는 형식. TextureStreaming 4.1절 요구를 렌더러 쪽에서 받은 것 | RS0(사용 기록)·RS6(mip bias) |
-| RQ22 | 셰이더 시스템 12.1절(형식 정의 `limits`)·7.2절 4항 | 결정 RN13 개정(2026-11-18 사용자 결정). (1) `sampledTextures`를 형식별로: `D3D12_SM6`·`METAL_SM5` 128 유지, `VULKAN_SM5`는 넓히고 `deviceRequirements`에 `maxPerStageDescriptorSampledImages`·`maxPerStageDescriptorSamplers` 하한을 넣는다(값은 GX1 장치 분포 확인 뒤, RQ11과 같은 방식), `D3D11_SM5`는 16, GLES는 16 유지. (2) 단계당 SRV 텍스처 상한 검사는 프로필 공통 상한(형식들의 최소값)이 아니라 job 형식의 상한으로 하고, 오류에 머티리얼·pass·퍼뮤테이션·형식을 담는다. 원문은 형식마다 바꾸지 않는다 | MS2·RS1 |
-| RQ23 | 셰이더 시스템 7.2절 9항 | 짝 규칙의 예외로 머티리얼 텍스처의 **공유 샘플러**(UE `SSM_Wrap_WorldGroupSettings`·`SSM_Clamp_WorldGroupSettings`와 같은 Wrap·Clamp 두 종, view 상수 쪽 샘플러, mip bias 포함)를 후속에서 앞당긴다. GLES는 공유 샘플러 객체를 각 텍스처 유닛에 묶어 combined sampler 규칙을 유지한다. 이것이 없으면 RQ22로 넓힌 형식도 샘플러 16에 묶인다(7.4절) | 머티리얼 텍스처가 16장을 넘는 콘텐츠 전(측정 MM5로 시점 판단) |
+| RQ22 | 셰이더 시스템 12.1절(형식 정의 `limits`)·7.2절 4항 | 결정 RN13 개정(2026-11-18 사용자 결정). (1) `sampledTextures`를 형식별로: `D3D12_SM6`·`METAL_SM5` 128 유지, `VULKAN_SM5`는 넓히고 `deviceRequirements`에 `maxPerStageDescriptorSampledImages`·`maxPerStageDescriptorSamplers` 하한을 넣는다(값은 GX1 장치 분포 확인 뒤, RQ11과 같은 방식), `D3D11_SM5`는 16, GLES는 16 유지. (2) 단계당 SRV 텍스처 상한 검사는 프로필 공통 상한(형식들의 최소값)이 아니라 job 형식의 상한으로 하고, 오류에 머티리얼·pass·퍼뮤테이션·형식을 담는다. 원문은 형식마다 바꾸지 않는다. **반영(셰이더 시스템 개정 13)**: (2)와 (1)의 D3D11 16은 7.2절 4항·12.1절에 들어갔다. Vulkan 값과 장치 요구(`maxDescriptorSetSampledImages`·`maxPerStageResources` 하한도 함께 필요)는 GX1 뒤 | MS2·RS1 |
+| RQ23 | 셰이더 시스템 7.2절 9항 | 짝 규칙의 예외로 머티리얼 텍스처의 **공유 샘플러**(UE `SSM_Wrap_WorldGroupSettings`·`SSM_Clamp_WorldGroupSettings`와 같은 Wrap·Clamp 두 종, view 상수 쪽 샘플러, mip bias 포함)를 후속에서 앞당긴다. GLES는 공유 샘플러 객체를 각 텍스처 유닛에 묶어 combined sampler 규칙을 유지한다. 이것이 없으면 RQ22로 넓힌 형식도 샘플러 16에 묶인다(7.4절). **반영(셰이더 시스템 개정 13, 7.2절 9항)**: SH2와 함께 구현한다. 공유 샘플러 상태(필터·이방성·mip bias)는 렌더러가 view마다 정해 파이프라인 layout의 공유 slot에 준다 | 머티리얼 텍스처가 16장을 넘는 콘텐츠 전(측정 MM5로 시점 판단) |
 
 ### 18.2 문서별 개정 위치
 
@@ -964,3 +964,4 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 - 개정 1(2026-11-18): 초안. 사용자 지시 "스펙 지금 시작해"에 따라 작성했다. UE 5.8.4 Renderer 네 갈래 조사(프레임 흐름·desktop forward·light grid·모바일 선택 / GBuffer·Substrate·shading model·deferred 조명·그림자·정적 조명 / 장면 표현·그리기 명령·GPU Scene·view·가시성·투명·하늘·안개·후처리 / GI·RT·path tracing 진입점)를 종합하고, 핵심 근거 약 40곳을 원문 줄로 다시 대조했다. 사용자 결정(렌더 경로 Forward+·Deferred 둘, GI 두 축, PathTracing 별도 모드, UE 좌표·행렬, Rocks 이름, 레거시 제외, 5개 backend와 지원표)을 1절에 반영했다. 머티리얼 쪽 계약은 동시에 작성 중인 머티리얼 시스템 스펙과 겹치지 않게 14.6절 경계표로 나눴다. 독립 리뷰 1건(UE 인용 약 75곳 대조, 차단 2·중요 11·사소 다수)을 반영했다: GLES image 형식에 맞춰 grid를 `R32Uint` 하나로(8.1절), 큰 월드 위치를 GPU Scene 상위·하위 + view 이동 보정으로(5.1절), light grid 셀 상한 없음과 넘침 보수 대체(8.1절), 그림자 깊이를 UE와 같은 보통 Z·`D16Unorm`으로(9.2절), 단계당 SRV 16 예산표(7.4절, 결정 RN13), 공유 상수와 자원 묶음 분리(15.2절), 간접 draw의 인스턴스 offset(15.2절), 조명 pass의 깊이·스텐실 attachment 제거(GLES feedback loop, 7.3절), Forward+ DBuffer decal(6.2절), skinned 단계 RS12, 텍스처 스트리밍 요구 RQ21, 인용 경로·줄 번호 정정, PostChain ID를 PC로 변경.
 - 개정 2(2026-11-18): 사용자 지시 "결정사항들은 권장안대로 하면됨"으로 RN1–RN11·RN13을 권장안으로 확정했다(19.1절). RN12는 RS10에서 정하고, RN5는 머티리얼 스펙과의 교차 검증에서 경계를 맞춘다.
 - 개정 3(2026-11-18): 머티리얼 시스템 개정 1과 교차 검증해 두 문서를 맞췄다(머티리얼 시스템 10.4절 "정합 결과"). 사용자 결정 반영: RN13을 형식별 SRV 상한으로 개정(1·7.4·13.1·19.1절, RQ22), RN5 번호표의 C++ 정의를 `RenderData`·HLSL 상수를 `/Engine/Shared/`로(3.2·14.2절, 순환 해소). D1–D9 반영: WPO를 정점 함수로 분리하고 머티리얼 생성 함수 표를 둠(14.1절), `AlphaHoldout`을 후속 값으로 명시(14.2·10.2절), 거르기 인자를 `MaterialShaderTraits`로(14.3·14.5·15.3절), "static switch 차원"을 "static 변형"으로(14.6절), pass 표에 경로 열·`RENDER_PATH_*` 정의, depth·그림자 pass의 마스크 전용 함수(14.1·14.3절). 그 밖의 불일치 수정: Render Path Switch의 깊이 일치 규칙, 마스크를 퍼뮤테이션 차원에서 뺌, PDO 함수와 depth PS 조건, 노드 미리보기 pass `MaterialPreview`, 조회 키에 단계·SX5, mask clip 값이 static 정의임, 노멀 공간 변환 위치, `GBuffer`·depth 계열 pass의 렌더러 SRV 합계, 짝 규칙과 샘플러 상한(RQ23), 확정된 RN3을 지원표에 반영, 머티리얼 단계(MS)와 RS 선후(17절), 머티리얼 요구 MRD1–MRD12 처리(14.7절), 대체 계수(16.2절).
+- 개정 4(2026-11-18): 셰이더 시스템 개정 13의 RQ22·RQ23 반영 상태를 적었다(7.4절, 19.1절 표, 18절 RQ22·RQ23).
