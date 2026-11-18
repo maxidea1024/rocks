@@ -1,6 +1,6 @@
 # 셰이더 시스템 설계
 
-기준일: 2026-11-18, 개정 14(초안). 셰이더 원문을 HLSL 하나로 쓰고 오프라인에서 D3D12·D3D11·Vulkan·Metal·OpenGL ES용 코드로 바꾸는 구조와, 그 구현에 앞서 갖춰야 할 **선행 작업**을 정한다. 개정 7은 현재 코드베이스(HEAD `0be1e64`, 2026-11-14)와 다른 설계 문서의 상태를 다시 조사해 선행 작업과 순서를 새로 세웠다(4–6절).
+기준일: 2026-11-18, 개정 15(초안). 셰이더 원문을 HLSL 하나로 쓰고 오프라인에서 D3D12·D3D11·Vulkan·Metal·OpenGL ES용 코드로 바꾸는 구조와, 그 구현에 앞서 갖춰야 할 **선행 작업**을 정한다. 개정 7은 현재 코드베이스(HEAD `0be1e64`, 2026-11-14)와 다른 설계 문서의 상태를 다시 조사해 선행 작업과 순서를 새로 세웠다(4–6절).
 
 UE 근거는 UE 5.8.4(EpicGames/UnrealEngine `release` 브랜치 commit `f45729c0b6f097038e72b52d366a62baeca3275b`)의 원본이다. 2026-11-14 사용자 지시로 기준을 5.6에서 5.8로 올렸고, 개정 6까지의 5.6 근거를 모두 5.8.4로 다시 확인했다(17절). 경로는 `Engine/Source/` 기준이며 `Engine/Shaders`·`Engine/Config`·`Engine/Build`는 그대로 적는다. UE 밖 도구(DXC·SPIRV-Cross·SPIRV-Tools·Vulkan)에 관한 사실은 그 출처를 따로 적는다. 개정 6까지의 조사 문서(UE 5.6 기준)는 [Rocks 셰이더 시스템](https://claude.ai/artifact/U5uNh2EWGvXKQiNYXnuc1Q)이다.
 
@@ -272,6 +272,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 | S10 | `d3dcompiler_47.dll` 재배포 조건과 고정 버전 | 8절 2항 FXC | — |
 | S11 | Android 에뮬레이터·CI의 OpenGL ES 3.2 context | SH6 검증 경로 | — |
 | S12 | (SH0) 데스크톱 GL 드라이버의 `#version 320 es` 수용(`GL_ARB_ES3_2_compatibility` 유무), (SH6) UE 수정 pass 없이 업스트림 SPIRV-Tools·SPIRV-Cross만으로 만든 ESSL이 Android 기기 드라이버에서 도는지 | P11, 7.2절 11항 | 데스크톱(GTX 1060 3GB, NVIDIA 560.94): GL 4.6 core context에 `GL_ARB_ES3_2_compatibility`·`GL_ARB_ES3_1_compatibility`·`GL_ARB_clip_control`이 있고 GLSL 목록에 `320 es`가 있다. `GLES31_PC` Renderer VS·PS 원문이 경고 없이 컴파일·링크된다. `WGL_EXT_create_context_es2_profile`로 만든 ES 3.2 context에서도 같다. AMD·Intel 드라이버는 미측정. 기기(SH6)는 미측정 P11(2026-11-17) 추가: ES 3.2 profile context는 `GL_EXT_clip_control`·`GL_EXT_disjoint_timer_query`·`GL_KHR_debug`·`GL_EXT_sRGB_write_control`과 ES 형식 확장을 공개하고, 4.3 core 요청은 4.3.0을 준다([OpenGL ES backend](OpenGLESGraphics.ko.md) 2.2절) |
+| S13 | SPIRV-Cross가 HLSL `Buffer<T>`·`RWBuffer<T>`(typed buffer)를 ESSL `samplerBuffer`·`isamplerBuffer`·`usamplerBuffer`와 `texelFetch`, `imageBuffer`와 `imageLoad`·`imageStore`로 내는지, 결합 sampler 목록에 typed buffer SRV가 들어가는지 | 7.2절 4항 GLES typed buffer 규칙(Renderer RQ10) | — |
 
 ## 6. 전체 순서
 
@@ -348,6 +349,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
      - mediump 배열은 없다. 5항이 half(`min16*`)를 막으므로 실수는 모두 highp다(UE는 RelaxedPrecision을 `m` 배열로 나눈다, `OpenGLShaderCompiler.cpp:1117–1124`).
      - 진짜 UBO(std140, `glBindBufferRange`)는 후속이다(UE `NoEmulatedUniformBuffer` 표시에 해당).
      - 텍스처는 9항의 짝마다 combined sampler 하나(SPIRV-Cross `build_combined_image_samplers`)이고 이름은 `<단계>s<순번>`(UE `ps<n>`)이다. Vulkan 재배치(set = 단계, binding 0부터, 종류를 이어서 번호)를 그대로 ESSL에 내면 VS와 PS 샘플러가 같은 binding이 되고 GLES의 종류별 binding 공간(텍스처 유닛·image 유닛·storage block binding)과도 맞지 않으므로, 워커가 GLES용 binding을 종류마다 다시 매긴다. 텍스처 유닛은 PS·CS 0부터, VS 16부터다(셰이더당 샘플러 16개 이하이고 ES 3.2의 `GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS` 최소 96 안이다). image 유닛과 storage block binding은 0부터다. UE는 binding을 낸 뒤 런타임이 `glUniform1i`로 VS 유닛을 `MaxTextureImageUnits`부터 정한다(7.1절). Rocks는 컴파일 때 고정해 런타임 조회를 없앤다. 샘플러 상태는 샘플러 객체(`glBindSampler`)다.
+     - typed buffer SRV(`Buffer<T>`)는 ESSL `samplerBuffer`(정수는 `isamplerBuffer`·`usamplerBuffer`)이고 **텍스처 유닛 하나를 차지한다**. 그래서 단계의 SRV 텍스처 수(typed buffer SRV 포함, 3항 종류 구분)와 GLES 텍스처 유닛 수에 함께 세며, 모바일 상한의 샘플러 16 안에 든다. 샘플러 상태가 없으므로 짝 샘플러를 두지 않고 `Load`(`texelFetch`)만 쓴다(9항의 `Load`만 쓰는 텍스처와 같다). 유닛 번호는 텍스처와 같은 공간에서 매긴다(PS·CS 0부터, VS 16부터). typed buffer UAV(`RWBuffer<T>`)는 `imageBuffer`이고 image 유닛을 차지하며 CS만이다. 형식은 ES 3.2 texel buffer 표의 형식만이다([PixelFormat](PixelFormat.ko.md) 8.6절, Renderer RQ9). SPIRV-Cross 출력이 이 모양인지는 측정 S13으로 확인한다(Renderer RQ10). SH2 전 런타임 경로(GX2, 2026-11-18)는 typed view를 텍스처 유닛 PS 1–4·VS 17–20에 묶는다([렌더 기반](RenderBase.ko.md) 4.4절 GX2).
      - storage image는 CS만이다(4항 공통 상한). 구조화·raw 버퍼 SRV도 GLES 형식에서는 CS만이다: ES 3.2의 VS·PS storage block 최소 보장이 0이기 때문이며, 모바일 상한(VS·PS storage block 0)으로 워커가 검사한다.
      - 정점 입력은 `layout(location = n) in`(`ATTRIBUTEn`), PS 출력은 SPIRV-Cross 이름(`out_var_SV_TargetN`)에 `layout(location = n)`이다.
      - 바인딩 머리(attribute 마스크, 배열 이름과 크기, 샘플러 이름과 유닛, 복사 표)는 쿠킹 결과의 별도 부분이다. 런타임은 링크 때 `glGetUniformLocation`으로 배열 위치를 한 번 찾는다.
@@ -813,3 +815,4 @@ SH0 진척(2026-11-17, `feature/shader-tools`, Windows 부분 구현):
   - 7.3절 (b)·(h): job 형식 상한과 공유 샘플러 시험을 더했다.
   - 12.1절: `D3D11_SM5` `sampledTextures` 128 → 16(형식 정의 파일도 함께 고쳤다). `VULKAN_SM5` 확장은 GX1 측정 뒤 할 일로 남겼다.
 - 개정 14(2026-11-18): GX1 측정으로 `VULKAN_SM5` `sampledTextures` 128·`renderTargets` 8을 정했다(Renderer RQ11·RQ22, 결정 RN3 (가), 권장안 기본 지시). 7.2절 4항에 "상한은 장치 요구다" 규칙(형식 `limits`를 런타임 형식 선택이 `DeviceCaps`와 대조, Vulkan set·`maxPerStageResources` 합산 포함)을 두고 장치 요구 어휘 추가 계획을 없앴다. 12.1절 진척을 고쳤다.
+- 개정 15(2026-11-18): Renderer RQ10 반영. 7.2절 4항 GLES에 typed buffer SRV가 `samplerBuffer`로 텍스처 유닛을 차지하고 SRV 텍스처 수·샘플러 16 안에 든다는 규칙, typed buffer UAV는 `imageBuffer`·CS만이라는 규칙을 더했다. 5.4절에 SPIRV-Cross 출력 확인 측정 S13을 더했다.
