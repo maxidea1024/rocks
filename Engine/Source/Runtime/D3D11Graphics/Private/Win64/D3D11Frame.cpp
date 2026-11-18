@@ -29,48 +29,24 @@ Result<CommandContext*> D3D11Device::BeginFrame(SwapChainHandle handle,
         return FailWith<CommandContext*>("swap chain has no buffers after a failed resize");
     }
 
-    BeginRecording({record->rtv.Get(),
-                    record->buffer.Get(),
-                    record->width,
-                    record->height,
-                    PixelFormat::RGBA8UnormSrgb,
-                    {}},
-                   clear);
+    Target target;
+    target.rtv = record->rtv.Get();
+    target.resource = record->buffer.Get();
+    target.width = record->width;
+    target.height = record->height;
+    target.format = PixelFormat::RGBA8UnormSrgb;
+    target.colorCount = 1;
+    target.rtvs[0] = target.rtv;
+    PassDesc pass;
+    pass.colorCount = 1;
+    pass.colors[0].clear = clear;
+    BeginRecording(target, pass);
     presentTarget_ = handle;
     return Result<CommandContext*>::Success(this);
 }
 
-Result<CommandContext*> D3D11Device::BeginOffscreen(TextureHandle handle,
-                                                    const ClearColor& clear) noexcept {
-    auto owner = ownership_.Check();
-    if (!owner) {
-        return Result<CommandContext*>::Failure(owner.Error());
-    }
-
-    platform::LockGuard lock(gate_);
-    TextureRecord* record = textures_.Find(handle.slot);
-    if (record == nullptr || !record->renderTarget) {
-        return Result<CommandContext*>::Failure(record == nullptr ? ErrorCode::StaleHandle
-                                                                  : ErrorCode::InvalidArgument);
-    }
-
-    if (recording_) {
-        return Result<CommandContext*>::Failure(ErrorCode::Busy);
-    }
-
-    if (timeline_.IsLost()) {
-        return Result<CommandContext*>::Failure(ErrorCode::Destroyed);
-    }
-
-    BeginRecording({record->rtv.Get(), record->texture.Get(), record->width, record->height,
-                    record->format, handle},
-                   clear);
-    presentTarget_ = {};
-    return Result<CommandContext*>::Success(this);
-}
-
 // deferred context는 FinishCommandList(FALSE) 뒤 기본 상태다. 패스 상태를 처음부터 묶는다.
-void D3D11Device::BeginRecording(const Target& target, const ClearColor& clear) noexcept {
+void D3D11Device::BeginRecording(const Target& target, const PassDesc& pass) noexcept {
     target_ = target;
     recording_ = true;
     markerDepth_ = 0;
@@ -84,22 +60,58 @@ void D3D11Device::BeginRecording(const Target& target, const ClearColor& clear) 
         view = {};
     }
 
+    for (BufferViewHandle& view : boundWriteViews_) {
+        view = {};
+    }
+
+    stencilReference_ = 0;
+    inputsDirty_ = false;
     ID3D11DeviceContext* context = deferred_.Get();
-    context->OMSetRenderTargets(1, &target_.rtv, nullptr);
-    const float color[4] = {clear.r, clear.g, clear.b, clear.a};
-    context->ClearRenderTargetView(target_.rtv, color);
-    D3D11_VIEWPORT viewport = {};
-    viewport.Width = static_cast<float>(target_.width);
-    viewport.Height = static_cast<float>(target_.height);
-    viewport.MaxDepth = 1.0f;
-    context->RSSetViewports(1, &viewport);
-    context->RSSetState(rasterizers_[static_cast<usize>(CullMode::None)].Get());
-    context->OMSetDepthStencilState(depthDisabled_.Get(), 0);
-    context->OMSetBlendState(opaqueBlend_.Get(), nullptr, D3D11_DEFAULT_SAMPLE_MASK);
+    context->OMSetRenderTargets(target_.colorCount, target_.rtvs, target_.dsv);
+    for (uint32 index = 0; index < target_.colorCount; ++index) {
+        if (pass.colors[index].load == LoadAction::Clear) {
+            const ClearColor& clear = pass.colors[index].clear;
+            const float color[4] = {clear.r, clear.g, clear.b, clear.a};
+            context->ClearRenderTargetView(target_.rtvs[index], color);
+        }
+    }
+
+    const TextureRecord* depth = textures_.Find(target_.depth.slot);
+    if (depth != nullptr && !target_.depthReadOnly) {
+        UINT flags = 0;
+        if (pass.depth.depthLoad == LoadAction::Clear) {
+            flags |= D3D11_CLEAR_DEPTH;
+        }
+
+        if (pass.depth.stencilLoad == LoadAction::Clear &&
+            GetPixelFormatInfo(depth->format).stencilBits != 0) {
+            flags |= D3D11_CLEAR_STENCIL;
+        }
+
+        if (flags != 0) {
+            context->ClearDepthStencilView(target_.dsv, flags, pass.depth.clearDepth,
+                                           pass.depth.clearStencil);
+        }
+    }
+
+    // viewport·scissor는 대상 전체다(래스터 상태는 늘 scissor를 켠다). attachment 없는 패스는
+    // 그리지 않으므로 두지 않는다.
+    if (target_.width != 0) {
+        D3D11_VIEWPORT viewport = {};
+        viewport.Width = static_cast<float>(target_.width);
+        viewport.Height = static_cast<float>(target_.height);
+        viewport.MaxDepth = 1.0f;
+        context->RSSetViewports(1, &viewport);
+        const D3D11_RECT scissor = {0, 0, static_cast<LONG>(target_.width),
+                                    static_cast<LONG>(target_.height)};
+        context->RSSetScissorRects(1, &scissor);
+    }
+
     context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     ID3D11Buffer* constants = constants_.Get();
     context->VSSetConstantBuffers(0, 1, &constants);
     context->PSSetConstantBuffers(0, 1, &constants);
+    context->CSSetConstantBuffers(0, 1, &constants);
     const TextureRecord* white = textures_.Find(white_.slot);
     if (white != nullptr) {
         ID3D11ShaderResourceView* view = white->srv.Get();
@@ -201,13 +213,20 @@ void D3D11Device::SetPipeline(PipelineHandle handle) noexcept {
     }
 
     ID3D11DeviceContext* context = deferred_.Get();
+    boundPipeline_ = handle.slot;
+    if (record->compute) {
+        // 그래픽 상태는 건드리지 않는다(같은 패스의 다음 그리기가 그대로 쓴다).
+        context->CSSetShader(record->computeShader.Get(), nullptr, 0);
+        return;
+    }
+
     context->VSSetShader(record->vertexShader.Get(), nullptr, 0);
     context->PSSetShader(record->pixelShader.Get(), nullptr, 0);
     context->IASetInputLayout(record->inputLayout.Get());
-    context->RSSetState(rasterizers_[static_cast<usize>(record->cullMode)].Get());
-    context->OMSetBlendState(record->alphaBlend ? alphaBlend_.Get() : opaqueBlend_.Get(), nullptr,
-                             D3D11_DEFAULT_SAMPLE_MASK);
-    boundPipeline_ = handle.slot;
+    context->IASetPrimitiveTopology(record->topology);
+    context->RSSetState(record->raster.Get());
+    context->OMSetBlendState(record->blend.Get(), nullptr, D3D11_DEFAULT_SAMPLE_MASK);
+    context->OMSetDepthStencilState(record->depthStencil.Get(), stencilReference_);
     // 이미 묶인 정점 버퍼를 새 파이프라인의 stride로 다시 묶는다.
     for (uint32 stream = 0; stream < MaxVertexStreams; ++stream) {
         if (!boundVertex_[stream].buffer.IsNull()) {
@@ -279,7 +298,7 @@ void D3D11Device::WriteConstants(const DrawConstants& constants) noexcept {
 
 void D3D11Device::Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept {
     platform::LockGuard lock(gate_);
-    if (!StreamsBound() || !BufferViewsBound()) {
+    if (!PrepareDraw(false)) {
         ++ignoredDraws_;
         return;
     }
@@ -290,9 +309,7 @@ void D3D11Device::Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVer
 
 void D3D11Device::DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept {
     platform::LockGuard lock(gate_);
-    const BufferRecord* index = buffers_.Find(boundIndex_.buffer.slot);
-    if (!StreamsBound() || !BufferViewsBound() || index == nullptr ||
-        boundIndex_.offset >= index->size) {
+    if (!PrepareDraw(true)) {
         ++ignoredDraws_;
         return;
     }
@@ -318,8 +335,9 @@ Result<void> D3D11Device::CopyPassTarget(TextureHandle destination) noexcept {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (!record->renderTarget || destination == target_.texture || record->width != target_.width ||
-        record->height != target_.height || record->format != target_.format) {
+    if (target_.resource == nullptr || !record->renderTarget || destination == target_.texture ||
+        record->width != target_.width || record->height != target_.height ||
+        record->format != target_.format) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

@@ -14,10 +14,11 @@
 // 않는다(ShaderSystem P4).
 namespace rocks::graphics {
 
-// 셰이더 단계다. 진입점 이름은 HLSL에서 VSMain·PSMain이다.
+// 셰이더 단계다. 진입점 이름은 HLSL에서 VSMain·PSMain·CSMain이다.
 enum class ShaderStage : uint8 {
     Vertex,
-    Pixel
+    Pixel,
+    Compute
 };
 
 // 셰이더가 쓰는 descriptor 종류다. 값 순서가 binding 번호를 매기는 종류 순서다(ShaderSystem 7.2절
@@ -59,6 +60,8 @@ struct ShaderBinding {
     PixelShaderType sampledType = PixelShaderType::None;
     // 셰이더가 쓰기도 한다(UAV·storage). 읽기 전용 storage buffer·이미지는 거짓이다.
     bool writable = false;
+    // 구조화 버퍼의 원소 byte(런타임 배열의 ArrayStride)다. 그 밖이나 알 수 없으면 0이다.
+    uint32 structureStride = 0;
 };
 
 // 정점 셰이더가 읽는 입력 하나다. location은 시맨틱 ATTRIBUTEn의 n이다.

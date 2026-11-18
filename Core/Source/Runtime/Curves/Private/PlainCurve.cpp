@@ -29,15 +29,16 @@ float PlainSegment(PlainCurveInterp interp, const PlainCurveKey& first, const Pl
 
 // UE FSimpleCurve::RemoveRedundantKeysInternal(SC 511–643): [start, end] 보존 키 사이에서, 남긴
 // 키를 되짚어 다시 지우며 고른다(두 번 불러도 더 지우지 않는다 — UE 쿡 결정성 주석).
+// keptIndices가 있으면 남긴 키의 원래 index를 담는다(실패하면 그대로).
 Result<void> RemoveRedundant(Array<PlainCurveKey>& keys, PlainCurveInterp interp, float tolerance,
-                             usize start, usize end) noexcept {
+                             usize start, usize end, Array<usize>* keptIndices) noexcept {
     const usize count = keys.Size();
     if (count < 3 || end - start < 2) {
-        return Result<void>::Success();
+        return curves_detail::FillIdentityIndices(keptIndices, count);
     }
 
     Allocator& allocator = keys.GetAllocator();
-    Array<usize> keep(allocator);
+    Array<usize> keep(keptIndices != nullptr ? keptIndices->GetAllocator() : allocator);
     if (auto reserved = keep.TryReserve(count); !reserved) {
         return reserved;
     }
@@ -104,7 +105,40 @@ Result<void> RemoveRedundant(Array<PlainCurveKey>& keys, PlainCurveInterp interp
     }
 
     keys = Move(kept);
+    if (keptIndices != nullptr) {
+        *keptIndices = Move(keep);
+    }
+
     return Result<void>::Success();
+}
+
+Result<void> RemoveRedundantAll(Array<PlainCurveKey>& keys, PlainCurveInterp interp,
+                                float tolerance, Array<usize>* keptIndices) noexcept {
+    if (!curves_detail::IsUsableTolerance(tolerance)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (keys.Size() < 3) {
+        return curves_detail::FillIdentityIndices(keptIndices, keys.Size());
+    }
+
+    return RemoveRedundant(keys, interp, tolerance, 0, keys.Size() - 1, keptIndices);
+}
+
+Result<void> RemoveRedundantRange(Array<PlainCurveKey>& keys, PlainCurveInterp interp,
+                                  float tolerance, float first, float last,
+                                  Array<usize>* keptIndices) noexcept {
+    if (!curves_detail::IsUsableTolerance(tolerance) || math::IsNaN(first) || math::IsNaN(last)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    usize start = 0;
+    usize end = 0;
+    if (!curves_detail::FindRedundantRange(keys.View(), first, last, start, end)) {
+        return curves_detail::FillIdentityIndices(keptIndices, keys.Size());
+    }
+
+    return RemoveRedundant(keys, interp, tolerance, start, end, keptIndices);
 }
 
 } // namespace
@@ -131,7 +165,7 @@ Result<void> PlainCurve::TryCopyFrom(const PlainCurve& other) noexcept {
 float PlainCurve::Evaluate(float time, float fallback) const noexcept {
     const PlainCurveInterp mode = interp;
     return curves_detail::EvaluateCurve(
-        *this, keys_.View(), time, fallback, true,
+        defaultValue, preExtrapolation, postExtrapolation, keys_.View(), time, fallback, true,
         [mode](const PlainCurveKey& first, const PlainCurveKey& second, float at) noexcept {
             return PlainSegment(mode, first, second, at);
         });
@@ -242,29 +276,21 @@ Result<void> PlainCurve::TryBake(float interval) noexcept {
 }
 
 Result<void> PlainCurve::TryRemoveRedundantKeys(float tolerance) noexcept {
-    if (!curves_detail::IsUsableTolerance(tolerance)) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
-    }
-
-    if (keys_.Size() < 3) {
-        return Result<void>::Success();
-    }
-
-    return RemoveRedundant(keys_, interp, tolerance, 0, keys_.Size() - 1);
+    return RemoveRedundantAll(keys_, interp, tolerance, nullptr);
 }
 
 Result<void> PlainCurve::TryRemoveRedundantKeys(float tolerance, float first, float last) noexcept {
-    if (!curves_detail::IsUsableTolerance(tolerance) || math::IsNaN(first) || math::IsNaN(last)) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
-    }
+    return RemoveRedundantRange(keys_, interp, tolerance, first, last, nullptr);
+}
 
-    usize start = 0;
-    usize end = 0;
-    if (!curves_detail::FindRedundantRange(keys_.View(), first, last, start, end)) {
-        return Result<void>::Success();
-    }
+Result<void> PlainCurve::TryRemoveRedundantKeys(Array<usize>& keptIndices,
+                                                float tolerance) noexcept {
+    return RemoveRedundantAll(keys_, interp, tolerance, &keptIndices);
+}
 
-    return RemoveRedundant(keys_, interp, tolerance, start, end);
+Result<void> PlainCurve::TryRemoveRedundantKeys(Array<usize>& keptIndices, float tolerance,
+                                                float first, float last) noexcept {
+    return RemoveRedundantRange(keys_, interp, tolerance, first, last, &keptIndices);
 }
 
 Result<void> PlainCurve::Validate(const PlainCurve& curve) noexcept {

@@ -53,8 +53,9 @@ void FromDeviceLayout(PixelFormat format, uint32 plane, uint32 width, uint32 hei
                       const uint8* source, uint64 rowPitch, uint8* destination) noexcept;
 
 // device에서 format의 능력을 CheckFormatSupport·CheckFeatureSupport(FORMAT_SUPPORT2)로
-// 질의한다(D3D12 질의와 같은 규칙, UE D3D11Device.cpp:457–524).
-PixelFormatCaps QueryFormatCaps(ID3D11Device* device, PixelFormat format) noexcept;
+// 질의한다(D3D12 질의와 같은 규칙, UE D3D11Device.cpp:457–524). software는 WARP 어댑터다(드라이버
+// 결함을 피할 형식을 뺀다).
+PixelFormatCaps QueryFormatCaps(ID3D11Device* device, PixelFormat format, bool software) noexcept;
 
 // format의 MSAA 표본 수 집합이다(비트 n = 2^n). caps에 RenderTarget이 있으면 RTV 형식,
 // DepthStencil이면 DSV 형식이 MULTISAMPLE_RENDERTARGET을 지원할 때 2–32표본을

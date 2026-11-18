@@ -67,12 +67,13 @@ Result<void> CompileHlslToSpirv(const DxcFunctions& dxc, graphics::ShaderStage s
     }
 
     const bool vertex = stage == graphics::ShaderStage::Vertex;
+    const bool compute = stage == graphics::ShaderStage::Compute;
     const wchar_t* arguments[MaxArguments] = {};
     usize count = 0;
     arguments[count++] = L"-E";
-    arguments[count++] = vertex ? L"VSMain" : L"PSMain";
+    arguments[count++] = vertex ? L"VSMain" : (compute ? L"CSMain" : L"PSMain");
     arguments[count++] = L"-T";
-    arguments[count++] = vertex ? L"vs_6_0" : L"ps_6_0";
+    arguments[count++] = vertex ? L"vs_6_0" : (compute ? L"cs_6_0" : L"ps_6_0");
     // 행렬 행 우선(ShaderSystem 7.2절 6항), Vulkan 1.1 SPIR-V와 D3D 규약 위치 w(8항).
     arguments[count++] = L"-Zpr";
     arguments[count++] = L"-spirv";

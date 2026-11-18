@@ -5,24 +5,6 @@
 // 장치 능력 조회와 버퍼 view(RenderBase 4.4절 GX1·GX2)다.
 namespace rocks::graphics::d3d11 {
 
-namespace {
-
-// slot을 배치에 더한다. 이미 다른 종류·값 계열로 쓰는 slot이면 거짓이다.
-bool AddBufferSlot(DrawBufferSlots& slots, uint32 slot, BufferViewKind kind,
-                   PixelShaderType type) noexcept {
-    const uint32 bit = 1u << slot;
-    if ((slots.usedMask & bit) != 0) {
-        return slots.kinds[slot] == kind && slots.typedShaderTypes[slot] == type;
-    }
-
-    slots.usedMask |= bit;
-    slots.kinds[slot] = kind;
-    slots.typedShaderTypes[slot] = type;
-    return true;
-}
-
-} // namespace
-
 const DeviceCaps& D3D11Device::Caps() const noexcept {
     return caps_;
 }
@@ -68,8 +50,10 @@ Result<BufferViewHandle> D3D11Device::CreateBufferView(BufferHandle handle,
     const UINT first = static_cast<UINT>(range.offset / range.elementBytes);
     const UINT count = static_cast<UINT>(range.elementCount);
     BufferViewRecord record;
+    record.format = desc.format;
     record.kind = desc.kind;
     record.access = desc.access;
+    record.stride = desc.kind == BufferViewKind::Structured ? range.elementBytes : 0u;
     record.shaderType = desc.kind == BufferViewKind::Typed
                             ? GetPixelFormatInfo(desc.format).shaderType
                             : PixelShaderType::None;
@@ -210,8 +194,8 @@ void D3D11Device::Retire(BufferViewHandle handle) noexcept {
 
 // b0 상수, PS t0 텍스처·s0 샘플러, t1–t4 버퍼 SRV만 받는다(PipelineDesc 고정 배치). 두 단계가 같은
 // slot을 다른 종류로 읽거나 배치 밖 자원(UAV 포함)이면 InvalidArgument다.
-Result<void> D3D11Device::ReflectBindings(ID3DBlob* code, bool pixel,
-                                          DrawBufferSlots& slots) noexcept {
+Result<void> D3D11Device::ReflectBindings(ID3DBlob* code, ShaderStage stage, DrawBufferSlots& slots,
+                                          DrawBufferSlots* writeSlots) noexcept {
     ComRef<ID3D11ShaderReflection> reflection;
     HRESULT result =
         D3DReflect(code->GetBufferPointer(), code->GetBufferSize(), IID_PPV_ARGS(reflection.Out()));
@@ -232,9 +216,15 @@ Result<void> D3D11Device::ReflectBindings(ID3DBlob* code, bool pixel,
             return Fail("ID3D11ShaderReflection::GetResourceBindingDesc", result);
         }
 
+        const bool pixel = stage == ShaderStage::Pixel;
         const bool single = resource.BindCount == 1;
         const uint32 slot = resource.BindPoint - 1;
         const bool viewSlot = resource.BindPoint >= 1 && slot < MaxDrawBufferViews;
+        const bool writeSlot = writeSlots != nullptr && resource.BindPoint < MaxDrawBufferViews;
+        const PixelShaderType type =
+            resource.ReturnType == D3D_RETURN_TYPE_SINT   ? PixelShaderType::Int
+            : resource.ReturnType == D3D_RETURN_TYPE_UINT ? PixelShaderType::Uint
+                                                          : PixelShaderType::Float;
         bool fits = false;
         switch (resource.Type) {
         case D3D_SIT_CBUFFER:
@@ -247,22 +237,35 @@ Result<void> D3D11Device::ReflectBindings(ID3DBlob* code, bool pixel,
             if (resource.Dimension != D3D_SRV_DIMENSION_BUFFER) {
                 fits = single && pixel && resource.BindPoint == 0;
             } else {
-                const PixelShaderType type =
-                    resource.ReturnType == D3D_RETURN_TYPE_SINT   ? PixelShaderType::Int
-                    : resource.ReturnType == D3D_RETURN_TYPE_UINT ? PixelShaderType::Uint
-                                                                  : PixelShaderType::Float;
-                fits =
-                    single && viewSlot && AddBufferSlot(slots, slot, BufferViewKind::Typed, type);
+                fits = single && viewSlot &&
+                       AddDrawBufferSlot(slots, slot, BufferViewKind::Typed, type);
             }
 
             break;
         case D3D_SIT_STRUCTURED:
         case D3D_SIT_BYTEADDRESS:
-            fits = single && viewSlot &&
-                   AddBufferSlot(slots, slot,
-                                 resource.Type == D3D_SIT_STRUCTURED ? BufferViewKind::Structured
-                                                                     : BufferViewKind::Raw,
-                                 PixelShaderType::None);
+            // 구조화 버퍼의 NumSamples는 원소 stride다(D3D11_SHADER_INPUT_BIND_DESC).
+            fits =
+                single && viewSlot &&
+                AddDrawBufferSlot(slots, slot,
+                                  resource.Type == D3D_SIT_STRUCTURED ? BufferViewKind::Structured
+                                                                      : BufferViewKind::Raw,
+                                  PixelShaderType::None,
+                                  resource.Type == D3D_SIT_STRUCTURED ? resource.NumSamples : 0u);
+            break;
+        case D3D_SIT_UAV_RWTYPED:
+            fits = single && writeSlot && resource.Dimension == D3D_SRV_DIMENSION_BUFFER &&
+                   AddDrawBufferSlot(*writeSlots, resource.BindPoint, BufferViewKind::Typed, type);
+            break;
+        case D3D_SIT_UAV_RWSTRUCTURED:
+        case D3D_SIT_UAV_RWBYTEADDRESS:
+            fits = single && writeSlot &&
+                   AddDrawBufferSlot(
+                       *writeSlots, resource.BindPoint,
+                       resource.Type == D3D_SIT_UAV_RWSTRUCTURED ? BufferViewKind::Structured
+                                                                 : BufferViewKind::Raw,
+                       PixelShaderType::None,
+                       resource.Type == D3D_SIT_UAV_RWSTRUCTURED ? resource.NumSamples : 0u);
             break;
         default:
             break;
@@ -270,11 +273,11 @@ Result<void> D3D11Device::ReflectBindings(ID3DBlob* code, bool pixel,
 
         if (!fits) {
             Diagnostic message;
-            message.Text(pixel ? "pixel" : "vertex")
+            message.Text(pixel ? "pixel" : (stage == ShaderStage::Vertex ? "vertex" : "compute"))
                 .Text(" shader resource ")
                 .Text(resource.Name != nullptr ? resource.Name : "?")
-                .Text(" is outside the fixed layout (b0, pixel t0 and s0, buffer views t1-t4; no "
-                      "UAVs in graphics stages)");
+                .Text(" is outside the fixed layout (b0, pixel t0 and s0, buffer views t1-t4, "
+                      "compute buffer UAVs u0-u3; no UAVs in graphics stages)");
             return Reject(message);
         }
     }
@@ -292,7 +295,7 @@ bool D3D11Device::BufferViewsBound() const noexcept {
     for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
         const BufferViewRecord* view = bufferViews_.Find(boundViews_[slot].slot);
         if (view != nullptr) {
-            bound[slot] = {true, view->kind, view->shaderType};
+            bound[slot] = {true, view->kind, view->shaderType, view->stride};
         }
     }
 
@@ -305,13 +308,11 @@ void D3D11Device::SetBufferView(uint32 slot, BufferViewHandle handle) noexcept {
         return;
     }
 
-    // 그래픽 단계에는 UAV가 없으므로 ReadWrite view와 stale handle은 slot을 비운다.
+    // 그래픽 단계에는 UAV가 없으므로 ReadWrite view와 stale handle은 slot을 비운다. 실제 묶기는
+    // 그리기·dispatch 직전에 한다(PrepareDraw·PrepareDispatch, dispatch의 UAV와 겹치지 않게).
     const BufferViewRecord* view = bufferViews_.Find(handle.slot);
     const bool readable = view != nullptr && view->access == ViewAccess::Read;
     boundViews_[slot] = readable ? handle : BufferViewHandle{};
-    ID3D11ShaderResourceView* srv = readable ? view->srv.Get() : nullptr;
-    deferred_->VSSetShaderResources(slot + 1, 1, &srv);
-    deferred_->PSSetShaderResources(slot + 1, 1, &srv);
 }
 
 } // namespace rocks::graphics::d3d11

@@ -19,7 +19,8 @@ inline constexpr char DrawConstantsBlockName[] = "DrawConstants";
 //   입력에 ATTRIBUTEn 시맨틱이 없거나, n이 15를 넘거나 겹치면 InvalidArgument다.
 // - rootConstantsName 이름의 상수 버퍼(Uniform Block 변수)를 push constant로 바꾼다(변수·포인터
 //   타입·access chain의 storage class, binding 장식 제거).
-// - 나머지 descriptor 자원을 set = 단계(정점 0, 픽셀 1), binding = 종류 순서(상수 버퍼 → 구조화·raw
+// - 나머지 descriptor 자원을 set = 단계(정점 0, 픽셀 1, compute 0), binding = 종류 순서(상수 버퍼 →
+// 구조화·raw
 //   버퍼 → storage image → SRV 텍스처 → 샘플러, 같은 종류는 원래 set·binding 순)로 다시 매긴다.
 // - SPV_GOOGLE_hlsl_functionality1·SPV_GOOGLE_user_type 확장 선언과 그 장식을 지운다.
 // 진입점의 실행 모델이 stage와 다르거나 SPIR-V가 망가졌으면 InvalidArgument다. 실패하면

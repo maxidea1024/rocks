@@ -1,34 +1,10 @@
 #include "D3D12Caps.h"
 
+#include <DxgiGraphics/DxgiAdapter.h>
+
 namespace rocks::graphics::d3d12 {
 
 namespace {
-
-// COM 참조 하나를 범위 끝에서 놓는다(이 파일 안에서만 쓴다).
-template <class T>
-class ScopedCom {
-public:
-    ScopedCom() noexcept = default;
-    ScopedCom(const ScopedCom&) = delete;
-    ScopedCom& operator=(const ScopedCom&) = delete;
-
-    ~ScopedCom() {
-        if (pointer_ != nullptr) {
-            pointer_->Release();
-        }
-    }
-
-    T** Out() noexcept {
-        return &pointer_;
-    }
-
-    T* operator->() const noexcept {
-        return pointer_;
-    }
-
-private:
-    T* pointer_ = nullptr;
-};
 
 // resource binding tier의 단계별 한도다(D3D12 "Hardware tiers" 표, d3d12.h 상수).
 StageResourceLimits TierStageLimits(D3D12_RESOURCE_BINDING_TIER tier, uint32 uavs) noexcept {
@@ -56,53 +32,25 @@ uint32 Capped(uint64 value, uint32 cap) noexcept {
 
 } // namespace
 
-uint64 GuaranteedResourceBytes(uint64 dedicatedVideoMemory) noexcept {
-    const uint64 videoMiB = dedicatedVideoMemory >> 20;
-    uint64 mib = static_cast<uint64>(static_cast<double>(videoMiB) *
-                                     D3D12_REQ_RESOURCE_SIZE_IN_MEGABYTES_EXPRESSION_B_TERM);
-    mib = mib < D3D12_REQ_RESOURCE_SIZE_IN_MEGABYTES_EXPRESSION_A_TERM
-              ? D3D12_REQ_RESOURCE_SIZE_IN_MEGABYTES_EXPRESSION_A_TERM
-              : mib;
-    mib = mib > D3D12_REQ_RESOURCE_SIZE_IN_MEGABYTES_EXPRESSION_C_TERM
-              ? D3D12_REQ_RESOURCE_SIZE_IN_MEGABYTES_EXPRESSION_C_TERM
-              : mib;
-    return mib << 20;
-}
-
-bool AdapterHasHdrOutput(IDXGIAdapter* adapter) noexcept {
-    if (adapter == nullptr) {
-        return false;
-    }
-
-    for (UINT index = 0;; ++index) {
-        ScopedCom<IDXGIOutput> output;
-        if (adapter->EnumOutputs(index, output.Out()) != S_OK) {
-            return false;
-        }
-
-        ScopedCom<IDXGIOutput6> output6;
-        DXGI_OUTPUT_DESC1 desc = {};
-        if (SUCCEEDED(output->QueryInterface(IID_PPV_ARGS(output6.Out()))) &&
-            SUCCEEDED(output6->GetDesc1(&desc)) &&
-            desc.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020) {
-            return true;
-        }
-    }
-}
-
 DeviceCaps QueryDeviceCaps(ID3D12Device* device, IDXGIAdapter1* adapter,
                            uint32& featureLevel) noexcept {
     DeviceCaps caps;
     const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1,
                                         D3D_FEATURE_LEVEL_12_0, D3D_FEATURE_LEVEL_12_1,
                                         D3D_FEATURE_LEVEL_12_2};
-    D3D12_FEATURE_DATA_FEATURE_LEVELS featureLevels = {};
-    featureLevels.NumFeatureLevels = static_cast<UINT>(sizeof(levels) / sizeof(levels[0]));
-    featureLevels.pFeatureLevelsRequested = levels;
+    // 12_2를 모르는 구 런타임은 목록 전체를 E_INVALIDARG로 거부하므로 그때는 12_2를 빼고 다시
+    // 묻는다.
     featureLevel = D3D_FEATURE_LEVEL_11_0;
-    if (SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_FEATURE_LEVELS, &featureLevels,
-                                              sizeof(featureLevels)))) {
-        featureLevel = featureLevels.MaxSupportedFeatureLevel;
+    const UINT levelCount = static_cast<UINT>(sizeof(levels) / sizeof(levels[0]));
+    for (UINT count = levelCount; count + 1 >= levelCount; --count) {
+        D3D12_FEATURE_DATA_FEATURE_LEVELS featureLevels = {};
+        featureLevels.NumFeatureLevels = count;
+        featureLevels.pFeatureLevelsRequested = levels;
+        if (SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_FEATURE_LEVELS, &featureLevels,
+                                                  sizeof(featureLevels)))) {
+            featureLevel = featureLevels.MaxSupportedFeatureLevel;
+            break;
+        }
     }
 
     // 지원하지 않는 최고값을 물으면 E_INVALIDARG이므로 높은 것부터 내려가며 묻는다.
@@ -125,6 +73,9 @@ DeviceCaps QueryDeviceCaps(ID3D12Device* device, IDXGIAdapter1* adapter,
         device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(options)));
     const D3D12_RESOURCE_BINDING_TIER tier =
         optionsKnown ? options.ResourceBindingTier : D3D12_RESOURCE_BINDING_TIER_1;
+    D3D12_FEATURE_DATA_D3D12_OPTIONS5 options5 = {};
+    const bool options5Known = SUCCEEDED(
+        device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5)));
     D3D12_FEATURE_DATA_D3D12_OPTIONS9 options9 = {};
     const bool options9Known = SUCCEEDED(
         device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS9, &options9, sizeof(options9)));
@@ -141,6 +92,10 @@ DeviceCaps QueryDeviceCaps(ID3D12Device* device, IDXGIAdapter1* adapter,
     limits.vertex = TierStageLimits(tier, uavs);
     limits.pixel = limits.vertex;
     limits.compute = limits.vertex;
+    // FL 11.0의 VS에는 UAV가 없다(vertexStores와 같은 조건).
+    if (featureLevel < D3D_FEATURE_LEVEL_11_1) {
+        limits.vertex.storageImages = 0;
+    }
     // 그래픽 파이프라인은 VS·PS가 각자 slot을 가지므로 단계 값의 두 배이고, heap 크기를 넘지
     // 않는다.
     limits.pipelineSampledTextures = Capped(uint64{limits.pixel.sampledTextures} * 2,
@@ -153,9 +108,10 @@ DeviceCaps QueryDeviceCaps(ID3D12Device* device, IDXGIAdapter1* adapter,
     limits.pipelineUavs = uavs;
     limits.boundDescriptorSets = NotApplicableLimit;
     limits.colorAttachments = D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT;
+    limits.viewports = D3D12_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;
     limits.constantBufferBytes = D3D12_REQ_CONSTANT_BUFFER_ELEMENT_COUNT * 16;
     // Rocks 루트 상수 계약(ShaderSystem 7.2절 2항, 32 DWORD)이다.
-    limits.rootConstantBytes = 128;
+    limits.rootConstantBytes = RootConstantContractBytes;
     limits.constantBufferOffsetAlignment = D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT;
     // buffer view의 FirstElement는 원소 단위라 원소 정렬 외 제약이 없다.
     limits.storageBufferOffsetAlignment = 1;
@@ -164,9 +120,9 @@ DeviceCaps QueryDeviceCaps(ID3D12Device* device, IDXGIAdapter1* adapter,
     limits.storageBufferBytes = uint64{limits.texelBufferElements} * 4;
     DXGI_ADAPTER_DESC1 adapterDesc = {};
     if (adapter != nullptr && SUCCEEDED(adapter->GetDesc1(&adapterDesc))) {
-        limits.bufferBytes = GuaranteedResourceBytes(adapterDesc.DedicatedVideoMemory);
+        limits.bufferBytes = dxgi::GuaranteedResourceBytes(adapterDesc.DedicatedVideoMemory);
     } else {
-        limits.bufferBytes = GuaranteedResourceBytes(0);
+        limits.bufferBytes = dxgi::GuaranteedResourceBytes(0);
     }
 
     limits.vertexAttributes = D3D12_IA_VERTEX_INPUT_STRUCTURE_ELEMENT_COUNT;
@@ -190,9 +146,14 @@ DeviceCaps QueryDeviceCaps(ID3D12Device* device, IDXGIAdapter1* adapter,
     DeviceFeatures& features = caps.features;
     features.computeShaders = true;
     features.depthClamp = true;
-    features.vertexShaderLayerOutput =
-        optionsKnown &&
-        options.VPAndRTArrayIndexFromAnyShaderFeedingRasterizerSupportedWithoutGSEmulation;
+    features.depthBiasClamp = true;
+    features.alphaToCoverage = true;
+    features.independentBlend = true;
+    // D3D12는 VS의 layer·viewport 출력을 늘 받는다. OPTIONS의
+    // VPAndRTArrayIndexFromAnyShaderFeedingRasterizerSupportedWithoutGSEmulation은 드라이버가 GS
+    // 에뮬레이션 없이 하는지일 뿐이다(UE 5.8도 D3D12에서 무조건 참: D3D12Device.cpp:272,
+    // D3D12RHI.cpp:135).
+    features.vertexViewportLayerOutput = true;
     features.atomic64 = options9Known && options9.AtomicInt64OnTypedResourceSupported;
     features.indirectFirstInstance = true;
     features.multiDrawIndirect = true;
@@ -201,8 +162,14 @@ DeviceCaps QueryDeviceCaps(ID3D12Device* device, IDXGIAdapter1* adapter,
     // VS UAV는 FL 11.1 이상이다(FL 11.0은 PS·CS만).
     features.vertexStores = featureLevel >= D3D_FEATURE_LEVEL_11_1;
     features.pixelStores = true;
-    features.hdrOutput = AdapterHasHdrOutput(adapter);
+    features.hdrOutput = dxgi::AdapterHasHdrOutput(adapter);
     features.resourceBindingTier = static_cast<uint8>(tier);
+    // D3D12_RAYTRACING_TIER는 1.0 = 10, 1.1 = 11이다(major × 10 + minor와 같다).
+    const D3D12_RAYTRACING_TIER rayTracing =
+        options5Known ? options5.RaytracingTier : D3D12_RAYTRACING_TIER_NOT_SUPPORTED;
+    features.rayTracingTier = static_cast<uint8>(rayTracing);
+    features.rayTracingPipeline = rayTracing >= D3D12_RAYTRACING_TIER_1_0;
+    features.rayQuery = rayTracing >= D3D12_RAYTRACING_TIER_1_1;
     return caps;
 }
 

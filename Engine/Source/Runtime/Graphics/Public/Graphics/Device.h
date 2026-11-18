@@ -9,7 +9,7 @@
 
 namespace rocks::graphics {
 
-// 한 프레임(또는 offscreen 패스)의 그리기 명령 기록기다. Device::BeginFrame·BeginOffscreen이
+// 한 프레임(또는 offscreen 패스)의 그리기 명령 기록기다. Device::BeginFrame·BeginPass가
 // 돌려주며 EndFrame까지만 유효하다. 기록 순서대로 실행된다.
 class CommandContext {
 public:
@@ -52,7 +52,8 @@ public:
     virtual void SetBufferView(uint32 slot, BufferViewHandle view) noexcept = 0;
     virtual void SetConstants(const DrawConstants& constants) noexcept = 0;
 
-    // 삼각형 목록을 그린다(정점 vertexCount개 × 인스턴스 instanceCount개, firstVertex부터). base
+    // 기본도형을 그린다(파이프라인 topology, 정점 vertexCount개 × 인스턴스 instanceCount개,
+    // firstVertex부터). base
     // instance는 0으로 고정한다(SV_InstanceID의 base 포함 여부가 backend마다 달라서다). 정점 입력이
     // 없는 배치는 정점 버퍼 없이 그린다. 파이프라인이 없거나 배치가 선언한 stream에 정점 버퍼가
     // 묶이지 않았으면 무시하고 IgnoredDraws를 올린다(Development 진단).
@@ -65,7 +66,65 @@ public:
     virtual void DrawIndexed(uint32 indexCount, uint32 instanceCount = 1,
                              uint32 firstIndex = 0) noexcept = 0;
 
-    // 지금까지 그린 패스 대상(스왑체인 백버퍼 또는 BeginOffscreen의 RenderTarget)을 destination
+    // --- 명령 기록 확장(RenderBase 4.4절 GX4, Renderer RQ3) ---
+    //
+    // 간접 그리기·dispatch 인자는 Indirect 용도 버퍼의 offset(4 byte 배수)에 놓인
+    // DrawIndirectArguments·DrawIndexedIndirectArguments·DispatchIndirectArguments 하나다. 인자를
+    // GPU가 썼다면 앞에 그 버퍼의 IndirectArgs 전이가 필요하다(렌더 그래프 밖 기록은 장치가
+    // 메운다). 아래 그리기·dispatch는 조건(파이프라인 종류·묶은 자원·인자 범위)이 맞지 않으면
+    // 무시하고 IgnoredDraws를 올린다.
+
+    // Draw와 같은 조건에서 buffer[offset]의 DrawIndirectArguments로 그린다.
+    virtual void DrawIndirect(BufferHandle arguments, uint64 offset) noexcept = 0;
+
+    // DrawIndexed와 같은 조건에서 buffer[offset]의 DrawIndexedIndirectArguments로 그린다.
+    // OpenGL ES는 간접 인자의 firstIndex에 index 버퍼 offset을 더할 곳이 없어 SetIndexBuffer
+    // offset이 0일 때만 그린다(아니면 무시하고 IgnoredDraws).
+    virtual void DrawIndexedIndirect(BufferHandle arguments, uint64 offset) noexcept = 0;
+
+    // 묶인 compute 파이프라인(CreateComputePipeline)으로 그룹 groupCountX × Y × Z개를 실행한다.
+    // 그룹 수는 DeviceLimits::computeGroupCount 안이어야 한다. 읽는 slot·쓰는 slot에 맞는 view가
+    // 묶여야 한다(SetBufferView·SetWritableBufferView). 색·깊이 attachment가 있는 패스 안에서도
+    // 부를 수 있다(Vulkan은 render pass를 닫고 다시 연다).
+    virtual void Dispatch(uint32 groupCountX, uint32 groupCountY = 1,
+                          uint32 groupCountZ = 1) noexcept = 0;
+
+    // Dispatch와 같은 조건에서 buffer[offset]의 DispatchIndirectArguments로 실행한다.
+    virtual void DispatchIndirect(BufferHandle arguments, uint64 offset) noexcept = 0;
+
+    // compute 쓰기 버퍼 view slot(0 – MaxDrawBufferViews-1, HLSL u0–u3)에 ReadWrite view를 묶는다.
+    // null handle·Read view·stale handle은 slot을 비운다. 그래픽 단계에는 UAV가 없으므로 그리기는
+    // 이 slot을 쓰지 않는다.
+    virtual void SetWritableBufferView(uint32 slot, BufferViewHandle view) noexcept = 0;
+
+    // viewport·scissor를 바꾼다. 패스 시작 때 둘 다 대상 전체로 돌아간다. 크기 0 viewport는
+    // 무시한다.
+    virtual void SetViewport(const Viewport& viewport) noexcept = 0;
+    virtual void SetScissor(const ScissorRect& scissor) noexcept = 0;
+
+    // 스텐실 기준 값이다(패스 시작 때 0).
+    virtual void SetStencilReference(uint32 reference) noexcept = 0;
+
+    // 버퍼 구간 복사다(GPU, 기록 순서). 실패: stale StaleHandle, 0 크기·범위 밖·같은 버퍼끼리(한
+    // 자원이 복사 원본·대상 상태를 함께 가질 수 없다)·offset·크기가 4 byte 배수 아님
+    // InvalidArgument.
+    virtual Result<void> CopyBuffer(BufferHandle destination, uint64 destinationOffset,
+                                    BufferHandle source, uint64 sourceOffset,
+                                    uint64 size) noexcept = 0;
+
+    // 텍스처 mip 0 전체 복사다(history·distortion용). 두 텍스처는 크기·형식이 같고 view가 아니어야
+    // 하며 지금 패스의 attachment가 아니어야 한다. 실패: stale StaleHandle, 조건 위반
+    // InvalidArgument.
+    virtual Result<void> CopyTexture(TextureHandle destination, TextureHandle source) noexcept = 0;
+
+    // 쓰기 view 범위의 모든 32-bit word를 value로 채운다(UAV clear, D3D
+    // ClearUnorderedAccessViewUint· Vulkan vkCmdFillBuffer와 같은 bit 그대로). raw view와
+    // R32Uint·R32Sint typed view만 받는다(다른 typed 형식은 형식 변환이 backend마다 다르고, 구조화
+    // view는 D3D12가 clear를 받지 않는다). 실패: stale StaleHandle, 기록 중 아님·Read view
+    // InvalidArgument, 구조화 view·그 밖의 typed 형식 Unsupported.
+    virtual Result<void> ClearWritableBufferView(BufferViewHandle view, uint32 value) noexcept = 0;
+
+    // 지금까지 그린 패스 대상(스왑체인 백버퍼 또는 BeginPass의 색 attachment 0)을 destination
     // RenderTarget에 그대로 복사한다. 복사 결과는 이미지 위쪽이 첫 행인 배치라 ReadPixels로 읽으면
     // offscreen 패스와 같은 배치다. 창 출력 확인(시험)·화면 캡처용이며, 복사 뒤에도 같은 패스에
     // 계속 그릴 수 있다.
@@ -93,10 +152,11 @@ public:
     //                                   .after = ResourceAccess::SrvGraphics};
     //   commands.Transition(Span<const ResourceTransition>(&toRead, 1));
     //
-    // 장치는 텍스처 subresource마다 현재 상태를 추적한다. BeginFrame·BeginOffscreen은 대상을
-    // RenderTarget으로 바꾸고(attachment 전이), EndFrame은 offscreen 대상을 RenderTarget 그대로
-    // 두며 스왑체인 백버퍼만 Present로 돌린다. 명시 전이 없이 다른 상태의 텍스처를 읽는
-    // 호출(SetTexture 등)은 장치가 필요하면 암묵 전이로 메운다. 렌더 그래프는 모든 전이를 명시한다.
+    // 장치는 텍스처 subresource마다 현재 상태를 추적한다. BeginFrame·BeginPass는 색 attachment를
+    // RenderTarget, 깊이를 DepthWrite(읽기 전용이면 DepthRead)로 바꾸고(attachment 전이),
+    // EndFrame은 offscreen 대상을 RenderTarget 그대로 두며 스왑체인 백버퍼만 Present로 돌린다. 명시
+    // 전이 없이 다른 상태의 텍스처를 읽는 호출(SetTexture 등)은 장치가 필요하면 암묵 전이로 메운다.
+    // 렌더 그래프는 모든 전이를 명시한다.
     //
     // backend 낮추기:
     // - D3D12: 추적한 상태 → after의 resource barrier(mip 단위). UAV → UAV는 UAV barrier. 버퍼는
@@ -164,7 +224,7 @@ protected:
 // 신호·장치
 //   상태 변경(EndFrame·WaitIdle·Retire·ReclaimCompleted·스왑체인)은 소유 스레드 전용이다.
 // - 기록 객체(CommandContext)는 기록하는 스레드마다 하나이며 소유 스레드가 제출한다. 지금은 소유
-//   스레드의 BeginFrame·BeginOffscreen이 돌려주는 하나뿐이다(병렬 기록은 GX4·RG3).
+//   스레드의 BeginFrame·BeginPass가 돌려주는 하나뿐이다(병렬 기록은 GX4·RG3).
 // - 자원·파이프라인 생성의 스레드 안전 여부는 DeviceInfo::concurrentResourceCreation이 공개한다.
 //   false면 생성도 소유 스레드 전용이다.
 // - "스레드 안전" 표시가 붙은 함수(Info·fence API·소유권 조회)는 어느 스레드에서나 부를 수 있다.
@@ -174,7 +234,7 @@ protected:
 //   검사를 생략한다. 기록 객체의 그리기 호출은 검사하지 않는다(소유 스레드의 Begin만 돌려준다).
 //
 // 계약:
-// - 프레임은 한 번에 하나만 기록한다. BeginFrame/BeginOffscreen 뒤 EndFrame 전의 다른 Begin은
+// - 프레임은 한 번에 하나만 기록한다. BeginFrame·BeginPass 뒤 EndFrame 전의 다른 Begin은
 //   Busy다.
 // - 제출·완료·회수(계획 11.2절, RenderBase 4.4절 GX7): EndFrame·업로드·WaitIdle의 queue 제출은
 //   모두 GpuFencePoint를 남긴다. Retire는 자원과 그 descriptor(D3D12 heap 칸)·API 객체를 마지막으로
@@ -230,6 +290,12 @@ public:
     //
     // 실패: stale handle StaleHandle, 규칙 위반(ResolveBufferView)·장치 정렬 위반 InvalidArgument,
     // 형식 능력·범위 한도 밖(CheckBufferViewLimits) Unsupported. 다른 형식·종류로 대체하지 않는다.
+    //
+    // Vulkan은 typed view 형식이 view 접근만이 아니라 버퍼의 모든 texel 용도를 받아야 한다
+    // (VUID-VkBufferViewCreateInfo-format-08778): ShaderRead | ShaderWrite 버퍼의 Read view도
+    // 형식에 TexelBufferWrite가 있어야 하고 없으면 Unsupported다. 읽기만 하는 형식은 ShaderRead만
+    // 준 버퍼에 만든다(VK_KHR_maintenance5의 view별 usage로 풀 수 있으나 기준 1.1에는 없어 쓰지
+    // 않는다).
     virtual Result<BufferViewHandle> CreateBufferView(BufferHandle buffer,
                                                       const BufferViewDesc& desc) noexcept = 0;
 
@@ -298,13 +364,32 @@ public:
     // InvalidArgument, backend가 지원하지 않는 정점 형식(OpenGL의 Bgra8Unorm)은 Unsupported다.
     virtual Result<PipelineHandle> CreatePipeline(const PipelineDesc& desc) noexcept = 0;
 
+    // compute 파이프라인을 만든다(ComputePipelineDesc, GX3). 돌려준 handle은 SetPipeline으로 묶고
+    // Dispatch로 실행하며 Retire로 놓는다. 실패: 원문 없음·배치 밖 자원 InvalidArgument, 컴파일
+    // 실패 DependencyFailed(LastError), compute가 없는 장치 Unsupported.
+    virtual Result<PipelineHandle>
+    CreateComputePipeline(const ComputePipelineDesc& desc) noexcept = 0;
+
     // 스왑체인의 다음 백버퍼에 그리기를 시작한다(clear 포함). 장치 손실 뒤에는 Destroyed다.
     virtual Result<CommandContext*> BeginFrame(SwapChainHandle swapChain,
                                                const ClearColor& clear) noexcept = 0;
 
-    // RenderTarget 텍스처에 그리기를 시작한다(clear 포함). 장치 손실 뒤에는 Destroyed다.
-    virtual Result<CommandContext*> BeginOffscreen(TextureHandle target,
-                                                   const ClearColor& clear) noexcept = 0;
+    // attachment들(PassDesc)에 기록을 시작한다(GX4). 색 attachment는 RenderTarget, 깊이는
+    // DepthStencil 텍스처이고 크기가 모두 같아야 한다. 시작 때 attachment를 RenderTarget·DepthWrite
+    // (readOnly면 DepthRead)로 전이하고 load 동작을 한다. viewport·scissor는 대상 전체, 스텐실
+    // 기준은 0이다. 실패: stale handle StaleHandle, 용도·크기 불일치·colorCount >
+    // MaxColorTargets·같은 텍스처 중복 InvalidArgument, colorCount > DeviceLimits::colorAttachments
+    // Unsupported, 기록 중 Busy, 장치 손실 Destroyed.
+    virtual Result<CommandContext*> BeginPass(const PassDesc& pass) noexcept = 0;
+
+    // RenderTarget 텍스처 하나에 clear로 기록을 시작한다(BeginPass의 간단한 형태).
+    Result<CommandContext*> BeginOffscreen(TextureHandle target, const ClearColor& clear) noexcept {
+        PassDesc pass;
+        pass.colorCount = 1;
+        pass.colors[0].texture = target;
+        pass.colors[0].clear = clear;
+        return BeginPass(pass);
+    }
 
     // 기록을 graphics queue에 제출하고 그 완료 지점을 돌려준다. BeginFrame이었으면 present한다.
     // 진행 중인 프레임이 없으면 InvalidArgument다. 제출은 했지만 present가 실패하면 실패를

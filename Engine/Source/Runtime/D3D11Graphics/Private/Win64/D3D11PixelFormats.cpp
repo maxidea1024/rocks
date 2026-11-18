@@ -366,7 +366,7 @@ void FromDeviceLayout(PixelFormat format, uint32 plane, uint32 width, uint32 hei
     }
 }
 
-PixelFormatCaps QueryFormatCaps(ID3D11Device* device, PixelFormat format) noexcept {
+PixelFormatCaps QueryFormatCaps(ID3D11Device* device, PixelFormat format, bool software) noexcept {
     const FormatMapping mapping = MappingOf(format);
     if (device == nullptr || mapping.resource == DXGI_FORMAT_UNKNOWN) {
         return PixelFormatCaps::None;
@@ -416,9 +416,9 @@ PixelFormatCaps QueryFormatCaps(ID3D11Device* device, PixelFormat format) noexce
         PixelFormatCaps::StorageAtomic);
     // 공유 지수 형식(RGB9E5)의 버퍼 view는 WARP D3D11이 SUPPORT_BUFFER를 알리고도
     // CreateShaderResourceView 안에서 멈춘다(2026-11-18 Sandbox self-test, d3d10warp 접근 위반).
-    // 렌더러가 버퍼에 쓰지 않는 형식이라 D3D11에서는 공개하지 않는다(보수적 값).
+    // 그래서 software 어댑터에서만 공개하지 않는다(하드웨어는 질의 결과 그대로).
     const bool buffer = Has(srv, D3D11_FORMAT_SUPPORT_BUFFER) && info.planeCount == 1 && !depth &&
-                        format != PixelFormat::RGB9E5Ufloat;
+                        !(software && format == PixelFormat::RGB9E5Ufloat);
     Add(caps, buffer, PixelFormatCaps::TexelBufferRead);
     Add(caps, buffer && typedUav && Has2(uav, D3D11_FORMAT_SUPPORT2_UAV_TYPED_STORE),
         PixelFormatCaps::TexelBufferWrite);

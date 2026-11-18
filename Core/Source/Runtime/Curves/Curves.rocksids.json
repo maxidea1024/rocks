@@ -66,6 +66,62 @@
     },
     {
       "kind": "field",
+      "name": "rocks::PackedTangentCurve::constantValue_",
+      "id": "eb3065e363624abeb9e9b130995dcacb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PackedTangentCurve::emptyDefault_",
+      "id": "a3a9d3ca170f4e8682521ee58926ce92",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PackedTangentCurve::format_",
+      "id": "2ec14c5e49524719a7e6cf0f40918f57",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PackedTangentCurve::keyCount_",
+      "id": "a3aacdbee8b64f0aa891b3382f2b3e6f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PackedTangentCurve::keyTimeFormat_",
+      "id": "1f25aed803c141f6b40f2f65e7b7f08b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PackedTangentCurve::packed_",
+      "id": "a5f809782ec54d57920cddd8dd21d840",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PackedTangentCurve::postExtrapolation_",
+      "id": "1003024568fa4eacb16cac85a85dba48",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PackedTangentCurve::preExtrapolation_",
+      "id": "e0e43f6244854de3ac1f34c695539119",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::PlainCurve::interp",
       "id": "da0b3005f8284c9c893b360e106b960d",
       "aliases": [],
@@ -264,6 +320,27 @@
       "kind": "type",
       "name": "rocks::NameStepKey",
       "id": "fec5dbb4af374209acba3f589e3a5e56",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PackedCurveFormat",
+      "id": "22dd16b5e9dd451ebd28d4a59d252c72",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PackedKeyTimeFormat",
+      "id": "35de780725674d85895e8a63a207a188",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PackedTangentCurve",
+      "id": "1452ceac79714adf92c6ee7ede028f9e",
       "aliases": [],
       "retired": false
     },
