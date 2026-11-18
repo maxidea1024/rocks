@@ -1,4 +1,5 @@
 #include "ConfigState.h"
+#include "ConfigText.h"
 
 #include <Config/DeviceProfiles.h>
 #include <Config/DeviceProfileSettings.generated.h>
@@ -10,19 +11,6 @@ namespace rocks::config {
 using detail::ConfigState;
 
 namespace {
-
-bool LessBytes(StringView left, StringView right) noexcept {
-    const usize count = left.ByteCount() < right.ByteCount() ? left.ByteCount() : right.ByteCount();
-    for (usize index = 0; index < count; ++index) {
-        const auto a = static_cast<uint8>(left.Data()[index]);
-        const auto b = static_cast<uint8>(right.Data()[index]);
-        if (a != b) {
-            return a < b;
-        }
-    }
-
-    return left.ByteCount() < right.ByteCount();
-}
 
 // 프로필 오류 진단을 남긴다.
 Result<void> ReportProfile(ConfigState& state, StringView path, StringView message) noexcept {
@@ -111,7 +99,7 @@ Result<void> Select(ConfigState& state, const DeviceProfileSettings& settings,
 
             const bool better = best == nullptr || profile.matchPriority > bestPriority ||
                                 (profile.matchPriority == bestPriority &&
-                                 LessBytes(entry.key.View(), best->View()));
+                                 detail::LessBytes(entry.key.View(), best->View()));
             if (better) {
                 best = &entry.key;
                 bestPriority = profile.matchPriority;
@@ -297,14 +285,26 @@ Result<void> ApplyDeviceProfile(ConfigContext& context, StringView commandLinePr
         current = profile->parent.View();
     }
 
-    // 층을 다시 쓴다. 뿌리 쪽 값부터 넣는다(같은 필드를 다른 철자로 가리키면 자식이 이긴다).
-    if (auto unset = context.Unset(ConfigLayer::DeviceProfile, DeviceProfileTag); !unset) {
-        return unset;
+    // 층을 다시 쓴다. 뿌리 쪽 값부터 넣는다(같은 필드를 다른 철자로 가리키면 자식이 이긴다). 빼기와
+    // 새 값을 한꺼번에 큐에 넣으므로 반쯤 적용되는 일이 없다(거부된 값만 빠진다).
+    Array<SharedPtr<detail::QueuedChange>> changes(state->allocator);
+    if (auto reserved = changes.TryReserve(targets.Size() + 1); !reserved) {
+        return reserved;
     }
 
+    SharedPtr<detail::QueuedChange> removal;
+    if (auto prepared =
+            detail::PrepareUnset(*state, ConfigLayer::DeviceProfile, DeviceProfileTag, removal);
+        !prepared) {
+        return prepared;
+    }
+
+    static_cast<void>(changes.TryPushBack(Move(removal))); // 예약했다
+    usize accepted = 0;
     for (usize index = targets.Size(); index-- > 0;) {
-        auto added = context.AddAssignment(ConfigLayer::DeviceProfile, DeviceProfileTag,
-                                           targets[index].View(), values[index].View());
+        SharedPtr<detail::QueuedChange> change;
+        auto added = detail::PrepareAssignment(*state, ConfigLayer::DeviceProfile, DeviceProfileTag,
+                                               targets[index].View(), values[index].View(), change);
         if (!added) {
             if (added.Error() != ErrorCode::InvalidArgument) {
                 return added;
@@ -316,8 +316,15 @@ Result<void> ApplyDeviceProfile(ConfigContext& context, StringView commandLinePr
             continue;
         }
 
-        ++out.values;
+        static_cast<void>(changes.TryPushBack(Move(change))); // 예약했다
+        ++accepted;
     }
+
+    if (auto queued = detail::Enqueue(*state->channel, changes.View(), false); !queued) {
+        return queued;
+    }
+
+    out.values += static_cast<uint32>(accepted);
 
     Log::Debug(
         detail::LogConfig,

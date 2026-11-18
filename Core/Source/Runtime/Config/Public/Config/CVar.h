@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Config/CVarAccess.h>
 #include <Config/CVarBuilder.h>
 #include <Config/ConfigContext.h>
 

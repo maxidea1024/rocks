@@ -1,3 +1,5 @@
+#include "ConfigText.h"
+
 #include <Config/QualityValidation.h>
 
 #include <Core/Text/StringBuilder.h>
@@ -5,19 +7,6 @@
 namespace rocks::config {
 
 namespace {
-
-bool LessBytes(StringView left, StringView right) noexcept {
-    const usize count = left.ByteCount() < right.ByteCount() ? left.ByteCount() : right.ByteCount();
-    for (usize index = 0; index < count; ++index) {
-        const auto a = static_cast<uint8>(left.Data()[index]);
-        const auto b = static_cast<uint8>(right.Data()[index]);
-        if (a != b) {
-            return a < b;
-        }
-    }
-
-    return left.ByteCount() < right.ByteCount();
-}
 
 // 요청 하나의 계산 상태다. rule이 null이면 규칙 없는 묶음이다. position은 rule->levels 안의 펼칠
 // 등급 위치다.
@@ -132,7 +121,7 @@ Result<void> ResolveQualityLevels(Span<const QualityGroupRule> groups,
     plans.Sort([](const Plan& left, const Plan& right) noexcept {
         return left.rule->priority != right.rule->priority
                    ? left.rule->priority < right.rule->priority
-                   : LessBytes(left.rule->group, right.rule->group);
+                   : detail::LessBytes(left.rule->group, right.rule->group);
     });
 
     String why(allocator);

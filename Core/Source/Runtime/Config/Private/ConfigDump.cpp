@@ -1,4 +1,5 @@
 #include "ConfigState.h"
+#include "ConfigText.h"
 
 #include <Config/ConfigDump.h>
 #include <Core/Text/StringBuilder.h>
@@ -13,20 +14,6 @@ using detail::SectionState;
 using detail::SourceStack;
 
 namespace {
-
-// byte 순서 비교(사전식)다.
-bool LessBytes(StringView left, StringView right) noexcept {
-    const usize count = left.ByteCount() < right.ByteCount() ? left.ByteCount() : right.ByteCount();
-    for (usize index = 0; index < count; ++index) {
-        const auto a = static_cast<uint8>(left.Data()[index]);
-        const auto b = static_cast<uint8>(right.Data()[index]);
-        if (a != b) {
-            return a < b;
-        }
-    }
-
-    return left.ByteCount() < right.ByteCount();
-}
 
 // 출처 목록(약한 것부터)을 배열 하나로 쓴다. writer 오류는 이후 호출이 모두 실패하는 것으로 전한다.
 void WriteSourceList(const ConfigState& state, Span<const uint64> entries,
@@ -77,7 +64,7 @@ Result<void> WriteSettings(ConfigState& state, JsonWriter& writer) noexcept {
 
     settings.Sort([](const detail::ConsoleSettingState* left,
                      const detail::ConsoleSettingState* right) noexcept {
-        return LessBytes(left->name.View(), right->name.View());
+        return detail::LessBytes(left->name.View(), right->name.View());
     });
     static_cast<void>(writer.BeginArray());
     for (const detail::ConsoleSettingState* setting : settings) {
@@ -154,10 +141,10 @@ Result<void> WriteConfigDump(ConfigContext& context, JsonWriter& writer) noexcep
         const StringView leftBranch = state->branches[left->branch].View();
         const StringView rightBranch = state->branches[right->branch].View();
         if (leftBranch != rightBranch) {
-            return LessBytes(leftBranch, rightBranch);
+            return detail::LessBytes(leftBranch, rightBranch);
         }
 
-        return LessBytes(left->section.View(), right->section.View());
+        return detail::LessBytes(left->section.View(), right->section.View());
     });
     const reflection_text::TextCodecOptions options = state->CodecOptions();
     Result<void> result = writer.BeginObject();
@@ -184,7 +171,7 @@ Result<void> WriteConfigDump(ConfigContext& context, JsonWriter& writer) noexcep
         }
 
         stacks.Sort([](const SourceStack* left, const SourceStack* right) noexcept {
-            return LessBytes(left->path.View(), right->path.View());
+            return detail::LessBytes(left->path.View(), right->path.View());
         });
         static_cast<void>(writer.Key("sources"));
         static_cast<void>(writer.BeginArray());

@@ -1,4 +1,5 @@
 #include "ConfigState.h"
+#include "ConfigText.h"
 
 #include <Config/UserConfig.h>
 #include <Core/FileError.h>
@@ -27,19 +28,6 @@ Span<const char> ToSpan(StringView text) noexcept {
 
 StringView ToView(Span<const char> text) noexcept {
     return StringView(text.Data(), text.Size());
-}
-
-bool LessBytes(StringView left, StringView right) noexcept {
-    const usize count = left.ByteCount() < right.ByteCount() ? left.ByteCount() : right.ByteCount();
-    for (usize index = 0; index < count; ++index) {
-        const auto a = static_cast<uint8>(left.Data()[index]);
-        const auto b = static_cast<uint8>(right.Data()[index]);
-        if (a != b) {
-            return a < b;
-        }
-    }
-
-    return left.ByteCount() < right.ByteCount();
 }
 
 Result<void> CheckOwner(const ConfigState* state) noexcept {
@@ -415,7 +403,7 @@ Result<uint32> WriteSettingsDifference(ConfigState& state, Span<ConfigEntry* con
     }
 
     settings.Sort([](const ConsoleSettingState* left, const ConsoleSettingState* right) noexcept {
-        return LessBytes(left->name.View(), right->name.View());
+        return detail::LessBytes(left->name.View(), right->name.View());
     });
     uint32 written = 0;
     for (const ConsoleSettingState* setting : settings) {
@@ -605,8 +593,8 @@ Result<uint32> WriteUserConfig(ConfigContext& context, StringView branch,
     }
 
     sections.Sort([state](usize left, usize right) noexcept {
-        return LessBytes(state->sections[left]->section.View(),
-                         state->sections[right]->section.View());
+        return detail::LessBytes(state->sections[left]->section.View(),
+                                 state->sections[right]->section.View());
     });
     static_cast<void>(writer.BeginObject());
     static_cast<void>(writer.Key(UserConfigVersionKey));
