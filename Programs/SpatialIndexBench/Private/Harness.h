@@ -47,6 +47,8 @@ struct Sections {
     bool frames = true;
     bool lightVariants = true;
     bool removeAll = true;
+    // 참이면 프레임 부하는 이동 10%·광원 64개 한 설정만 잰다(조합 측정의 시간 예산).
+    bool framesTenPercentOnly = false;
 };
 
 // 한 사례(분포 × 규모)의 입력이다.

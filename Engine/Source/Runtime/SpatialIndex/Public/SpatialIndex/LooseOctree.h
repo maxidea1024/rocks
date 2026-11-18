@@ -30,6 +30,13 @@ inline constexpr uint32 NoBlock = NumericLimits<uint32>::Max();
 inline constexpr uint32 NoNode = LooseOctreeNoNode;
 // 범위 밖 목록에 있는 프록시 레코드의 노드 칸 값이다.
 inline constexpr uint32 OutOfRangeNode = NoNode - 1;
+// 큰 객체 목록에 있는 프록시 레코드의 노드 칸 값이다(결정 8).
+inline constexpr uint32 LargeProxyNode = NoNode - 2;
+
+// 레코드의 노드 칸이 트리 밖 선형 목록(범위 밖 또는 큰 객체)을 가리키는지다.
+constexpr bool IsListNode(uint32 node) noexcept {
+    return node == OutOfRangeNode || node == LargeProxyNode;
+}
 // 루트는 객체 안에 따로 두고 번호 0을 쓴다. 자식 블록 b의 자식 i는 1 + 8b + i다.
 inline constexpr uint32 RootNode = 0;
 
@@ -114,7 +121,8 @@ struct ElementChunk {
 };
 
 // 프록시의 관리용 레코드다(SlotArray 원소). 정확한 double AABB와 저장 위치를 가진다. 범위 밖 목록에
-// 있으면 node는 OutOfRangeNode이고 chunk는 목록 색인이다.
+// 있으면 node는 OutOfRangeNode, 큰 객체 목록에 있으면 LargeProxyNode이고 chunk는 그 목록의
+// 색인이다.
 struct ProxyRecord {
     Box<double> bounds;
     uint32 node = NoNode;
@@ -124,7 +132,7 @@ struct ProxyRecord {
     uint64 userValue = 0;
 };
 
-// 범위 밖 목록 원소다. 기준 노드 중심이 없으므로 double 경계를 그대로 둔다.
+// 범위 밖 목록과 큰 객체 목록의 원소다. 기준 노드 중심이 없으므로 double 경계를 그대로 둔다.
 struct OutOfRangeEntry {
     Box<double> bounds;
     uint32 filter = 0;
@@ -180,7 +188,7 @@ struct BoxQueryShape {
         return box.Contains(loose) ? NodeClass::Inside : NodeClass::Intersecting;
     }
 
-    // 범위 밖 목록(정확한 double 경계)에만 쓴다.
+    // 범위 밖 목록·큰 객체 목록(정확한 double 경계)에만 쓴다.
     bool Test(const Box<double>& bounds, double& entry) const noexcept {
         entry = 0.0;
         return Overlap(box, bounds) == QueryResult::Hit;
@@ -243,8 +251,8 @@ struct RayQueryShape {
 } // namespace detail
 
 // 범용 영역 질의용 loose octree다(Docs/Design/SpatialIndex.ko.md 6절). 프록시(AABB·필터 mask·사용자
-// 값)를 정확히 한 곳(노드 하나 또는 범위 밖 목록)에 저장하고, 박스 질의로 AABB 교차 후보를
-// 돌려준다. 정밀 형상 교차는 호출자가 한다.
+// 값)를 정확히 한 곳(노드 하나, 범위 밖 목록 또는 큰 객체 목록)에 저장하고, 박스 질의로 AABB 교차
+// 후보를 돌려준다. 정밀 형상 교차는 호출자가 한다.
 //
 // 소유와 수명
 // - 소비자(World·RenderScene·도구)가 인스턴스를 소유한다. 전역 singleton이 아니다.
@@ -273,7 +281,7 @@ struct RayQueryShape {
 // 순서가 나온다. 시간 예산 유지보수는 순서를 보장하지 않는다.
 //
 // 사용 예:
-//   LooseOctreeConfig config;   // 기본값: 128 cm 최소 셀, 초기 루트 level 10
+//   LooseOctreeConfig config;   // 기본값: 128 cm 최소 셀, 초기 루트 level 8, looseness 3/2
 //   Result<LooseOctree> created = LooseOctree::TryCreate(config, allocator);
 //   if (!created) {
 //       return Result<void>::Failure(created.Error());
@@ -316,7 +324,8 @@ public:
 
     // 프록시를 등록하고 handle을 돌려준다. 저장 위치는 호출 안에서 정해지며 다음 읽기 단계에서 바로
     // 검색된다. 잎의 직접 저장 수가 splitThreshold를 넘으면 분할을 평가한다(할당 실패는 보류로
-    // 처리하고 성공한다). 루트 확장 한도 밖이면 범위 밖 목록에 넣고 성공한다. 오류: desc.bounds가
+    // 처리하고 성공한다). 루트 확장 한도 밖이면 범위 밖 목록, 최대 반 변이 largeProxyHalfExtent를
+    // 넘으면 큰 객체 목록에 넣고 성공한다. 오류: desc.bounds가
     // 유효하지 않으면 InvalidArgument, 프록시 수가 maxProxies에 닿았거나 handle slot이 모두
     // 폐기되었으면 CapacityExceeded, 색인 폭 초과는 Overflow, 할당 실패는 OutOfMemory. 실패하면
     // 논리 상태는 그대로다.
@@ -426,8 +435,14 @@ private:
     void NoteHeldChange(uint32 node) noexcept;
     void InsertIntoTree(uint32 start, uint32 stopExclusive, uint32 slot,
                         bool evaluateSplit) noexcept;
-    void MoveToOutOfRange(uint32 slot) noexcept;
-    void RemoveFromOutOfRange(uint32 index) noexcept;
+    // 트리 밖 목록(범위 밖 또는 큰 객체, 레코드 노드 칸 값으로 고름)이다.
+    Array<detail::OutOfRangeEntry>& ListOf(uint32 listNode) noexcept;
+    // slot을 목록 끝에 넣는다. 용량은 호출자가 확보했다.
+    void MoveToList(uint32 slot, uint32 listNode) noexcept;
+    void RemoveFromList(uint32 listNode, uint32 index) noexcept;
+    // 큰 객체 목록에 넣을 크기인지(기준 초과), 목록에 남을 크기인지(이력 비율 초과)다.
+    bool IsLargeProxy(const Box<double>& bounds) const noexcept;
+    bool StaysLargeProxy(const Box<double>& bounds) const noexcept;
     void NoteOutOfRangeGrowth() noexcept;
     Result<void> CheckHandle(SpatialProxyHandle handle) const noexcept;
 
@@ -469,8 +484,8 @@ private:
                               bool contained, const Shape& shape, uint32 filterMask,
                               QueryStats* stats, Emit& emit) const noexcept;
     template <typename Shape, typename Emit>
-    bool ForEachOutOfRangeCandidate(const Shape& shape, uint32 filterMask, QueryStats* stats,
-                                    Emit& emit) const noexcept;
+    bool ForEachListCandidate(const Array<detail::OutOfRangeEntry>& list, const Shape& shape,
+                              uint32 filterMask, QueryStats* stats, Emit& emit) const noexcept;
     template <typename Shape, typename Sink>
     QueryOutcome RunQuery(const Shape& shape, uint32 filterMask, Sink& sink,
                           QueryStats* stats) const noexcept;
@@ -510,6 +525,7 @@ private:
         uint64 parentWarnEvents = 0;
         uint64 outOfRangeWarnEvents = 0;
         uint64 outOfRangeInsertions = 0;
+        uint64 largeProxyInsertions = 0;
     };
 
     // 배열별 예약 용량의 피크(byte)다. 변경 함수가 끝날 때마다 갱신한다.
@@ -518,6 +534,7 @@ private:
         usize chunkBytes = 0;
         usize nodeBytes = 0;
         usize outOfRangeBytes = 0;
+        usize largeProxyBytes = 0;
     };
 
     LooseOctreeConfig config_;
@@ -540,6 +557,8 @@ private:
     IndexPool<detail::ManageBlock> manageBlocks_;
     IndexPool<detail::ElementChunk> chunks_;
     Array<detail::OutOfRangeEntry> outOfRange_;
+    // 큰 객체 목록이다(config_.largeProxyHalfExtent가 0이면 늘 빈다).
+    Array<detail::OutOfRangeEntry> large_;
     detail::SearchNode rootSearch_;
     detail::ManageNode rootManage_;
 
@@ -703,7 +722,8 @@ public:
 
     // 형상과 교차하는 노드를 직접 저장 프록시 단위 묶음으로 모은다(6.1절, 그림자 caster 수집처럼
     // 결과가 많은 질의를 worker에 나눌 때). out에 들어가는 만큼 쓰고 끝까지 세어 total을 돌려준다.
-    // 범위 밖 목록이 비어 있지 않으면 마지막 묶음이다. 묶음 순서는 단일 질의의 방문 순서와 같으므로
+    // 범위 밖 목록, 큰 객체 목록이 비어 있지 않으면 그 순서로 마지막 묶음들이다. 묶음 순서는 단일
+    // 질의의 방문 순서와 같으므로
     // 묶음별 QueryBatch 결과를 순서대로 이으면 같은 형상의 단일 질의 결과와 같다(필터는
     // QueryBatch가 적용). 묶음은 모은 트리의 이번 읽기 단계 안에서만 유효하다. 오류: 형상이
     // 유효하지 않으면 InvalidArgument.
@@ -763,7 +783,7 @@ public:
     // 프록시의 지금 내용이다. 오류: 빈 handle은 InvalidArgument, 낡은 handle은 StaleHandle.
     [[nodiscard]] Result<SpatialProxyDesc> TryGet(SpatialProxyHandle handle) const noexcept;
 
-    // 살아 있는 프록시 수(범위 밖 목록 포함)다.
+    // 살아 있는 프록시 수(범위 밖·큰 객체 목록 포함)다.
     [[nodiscard]] uint32 Count() const noexcept;
 
     // 구조·메모리·누적 계수다(6.10절). O(노드 수)다.
@@ -1047,12 +1067,14 @@ bool LooseOctree::ForEachNodeCandidate(uint32 nodeIndex, uint32 level, const int
     return true;
 }
 
-// 범위 밖 목록의 후보다. 기준 노드가 없으므로 모든 형상을 정확한 double 경계로 판정한다.
+// 트리 밖 목록(범위 밖·큰 객체)의 후보다. 기준 노드가 없으므로 모든 형상을 정확한 double 경계로
+// 판정한다.
 template <typename Shape, typename Emit>
-bool LooseOctree::ForEachOutOfRangeCandidate(const Shape& shape, uint32 filterMask,
-                                             QueryStats* stats, Emit& emit) const noexcept {
-    for (usize index = 0; index < outOfRange_.Size(); ++index) {
-        const detail::OutOfRangeEntry& entry = outOfRange_[index];
+bool LooseOctree::ForEachListCandidate(const Array<detail::OutOfRangeEntry>& list,
+                                       const Shape& shape, uint32 filterMask, QueryStats* stats,
+                                       Emit& emit) const noexcept {
+    for (usize index = 0; index < list.Size(); ++index) {
+        const detail::OutOfRangeEntry& entry = list[index];
         if ((entry.filter & filterMask) == 0) {
             continue;
         }
@@ -1111,8 +1133,8 @@ QueryOutcome LooseOctree::RunQuery(const Shape& shape, uint32 filterMask, Sink& 
     };
     Policy policy{this, &shape, filterMask, stats, &emit};
     Walk(shape, policy, stats);
-    if (!outcome.stopped) {
-        (void)ForEachOutOfRangeCandidate(shape, filterMask, stats, emit);
+    if (!outcome.stopped && ForEachListCandidate(outOfRange_, shape, filterMask, stats, emit)) {
+        (void)ForEachListCandidate(large_, shape, filterMask, stats, emit);
     }
     return outcome;
 }
@@ -1173,7 +1195,8 @@ NearestHit LooseOctree::RunNearest(const detail::RayQueryShape& shape, uint32 fi
     };
     Policy policy{this, &shape, filterMask, stats, &emit, &best};
     Walk(shape, policy, stats);
-    (void)ForEachOutOfRangeCandidate(shape, filterMask, stats, emit);
+    (void)ForEachListCandidate(outOfRange_, shape, filterMask, stats, emit);
+    (void)ForEachListCandidate(large_, shape, filterMask, stats, emit);
     return nearest;
 }
 
@@ -1212,6 +1235,9 @@ BufferQueryOutcome LooseOctree::CollectBatches(const Shape& shape,
     if (outOfRange_.Size() != 0) {
         record(LooseOctreeOutOfRangeBatch, static_cast<uint32>(outOfRange_.Size()), false);
     }
+    if (large_.Size() != 0) {
+        record(LooseOctreeLargeProxyBatch, static_cast<uint32>(large_.Size()), false);
+    }
     outcome.truncated = outcome.total > out.Size();
     return outcome;
 }
@@ -1228,7 +1254,8 @@ Result<QueryOutcome> LooseOctree::RunBatch(const SpatialNodeBatch& batch, const 
         return Result<QueryOutcome>::Failure(ErrorCode::StaleHandle);
     }
     const bool outOfRange = batch.node == LooseOctreeOutOfRangeBatch;
-    if (!outOfRange && batch.node != detail::RootNode &&
+    const bool large = batch.node == LooseOctreeLargeProxyBatch;
+    if (!outOfRange && !large && batch.node != detail::RootNode &&
         !searchBlocks_.IsLive(BlockOf(batch.node))) {
         return Result<QueryOutcome>::Failure(ErrorCode::InvalidArgument);
     }
@@ -1252,7 +1279,9 @@ Result<QueryOutcome> LooseOctree::RunBatch(const SpatialNodeBatch& batch, const 
         return true;
     };
     if (outOfRange) {
-        (void)ForEachOutOfRangeCandidate(shape, filterMask, stats, emit);
+        (void)ForEachListCandidate(outOfRange_, shape, filterMask, stats, emit);
+    } else if (large) {
+        (void)ForEachListCandidate(large_, shape, filterMask, stats, emit);
     } else {
         const detail::ManageNode& manage = Manage(batch.node);
         (void)ForEachNodeCandidate(batch.node, manage.level, manage.origin, batch.contained, shape,
