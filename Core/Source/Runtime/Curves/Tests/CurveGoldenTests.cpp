@@ -8,8 +8,10 @@
 
 // TangentCurve·PlainCurve를 UE 5.8 FRichCurve·FSimpleCurve 식을 그대로 옮긴 참조(CurveUeReference.h
 // — 머리 주석에 참조 함수 ↔ UE 파일·줄 대조표)와 비트 단위로 대조한다(Docs/Design/CurveData.ko.md
-// 16절). 수정을 모두 켠 참조 = Rocks 의미이고 모든 사례에서 비트가 같아야 한다. 수정을 끈 참조는
-// 문서화한 경우(NaN 시간, 범위판 중복 제거의 비교 기준)에서만 다르다. 접선을 다시 계산하는 UE 편집
+// 16절). 수정을 모두 켠 참조 = Rocks 의미이고 모든 사례에서 비트가 같아야 한다. 커브 층 수정 하나만
+// 끈 참조(curveLayerUe — 수학 층 수정(15절 1–3: Lerp 끝점·순환·근 2개)은 켠 채라 "UE 그대로"가
+// 아니다)는 그 수정의 경우(NaN 시간 15절 4, 범위판 중복 제거의 비교 기준 15절 8)에서만 다르다. UE
+// 그대로의 수학 층 차이는 CV1 golden(MathKeyCurveGoldenTests)이 본다. 접선을 다시 계산하는 UE 편집
 // 연산(DeleteKey·SetKeyTime·RemoveRedundantKeys)은 Rocks 연산 뒤 같은 지점에서 AutoSetTangents를
 // 부르면 같다(D10). 순환 사례는 |주기 몫| < 2^29로 둔다(double 재배치는 CV1 손 계산 벡터가 본다).
 // 무작위 사례는 고정 seed다.
@@ -165,19 +167,19 @@ float RandomEvaluationTime(MathRandom& random, Span<const float> times) noexcept
 } // namespace
 
 // 무작위 TangentCurve(키 0–8개, 앞·뒤 외삽 5종, 기본값 있음·없음)의 Evaluate가 수정을 켠 UE
-// FRichCurve::Eval 참조와 모든 시간에서 비트가 같다. 수정을 끈 참조와는 NaN 시간(키 있음)에서만
-// 다르다.
+// FRichCurve::Eval 참조와 모든 시간에서 비트가 같다. NaN 수정(15절 4)만 끈 참조와는 NaN 시간(키
+// 있음)에서만 다르다.
 TEST(CurveGolden_TangentEvaluateMatchesUe) {
     SystemAllocator allocator;
     MathRandom random(0xC5A11);
     Array<TangentCurveKey> keys(allocator);
     Array<RichKey> reference(allocator);
     Array<float> times(allocator);
-    CurveOptions literal;
-    literal.nanTimeIsNaN = false;
+    CurveOptions curveLayerUe;
+    curveLayerUe.nanTimeIsNaN = false;
     int32 mismatches = 0;
-    int32 literalOutsideNaN = 0;
-    int32 literalNaN = 0;
+    int32 curveLayerUeOutsideNaN = 0;
+    int32 curveLayerUeNaN = 0;
     for (int32 curveIndex = 0; curveIndex < 3000; ++curveIndex) {
         TangentCurve curve(allocator);
         RandomBase(random, curve);
@@ -196,20 +198,21 @@ TEST(CurveGolden_TangentEvaluateMatchesUe) {
             const float actual = curve.Evaluate(time, fallback);
             const float expected = ue58richcurve::RichEval(state, reference, time, fallback, {});
             mismatches += SameFloat(actual, expected) ? 0 : 1;
-            const float ue = ue58richcurve::RichEval(state, reference, time, fallback, literal);
+            const float ue =
+                ue58richcurve::RichEval(state, reference, time, fallback, curveLayerUe);
             if (!SameFloat(actual, ue)) {
                 if (platform::PlatformMath::IsNaN(time) && curve.KeyCount() > 0) {
-                    ++literalNaN;
+                    ++curveLayerUeNaN;
                 } else {
-                    ++literalOutsideNaN;
+                    ++curveLayerUeOutsideNaN;
                 }
             }
         }
     }
 
     CHECK(mismatches == 0);
-    CHECK(literalOutsideNaN == 0);
-    CHECK(literalNaN > 0);
+    CHECK(curveLayerUeOutsideNaN == 0);
+    CHECK(curveLayerUeNaN > 0);
 }
 
 // 무작위 PlainCurve(Linear·Constant)의 Evaluate가 UE FSimpleCurve::Eval 참조와 비트가 같다.
@@ -360,21 +363,21 @@ TEST(CurveGolden_EditSequenceMatchesUe) {
 
 // 중복 키 제거(표본 없음·있음, 전체·범위판)에 이어 AutoSetTangents를 부른 결과가 UE
 // RemoveRedundantKeysInternal(마지막 AutoSetTangents 포함)과 비트가 같다. 범위판은 비교 기준을 시작
-// 보존 키로 고친 참조와 같고(15절 8), UE 그대로(index 0)와 다른 사례가 있다.
+// 보존 키로 고친 참조와 같고(15절 8), 그 수정만 끈 참조(UE의 index 0 기준)와 다른 사례가 있다.
 TEST(CurveGolden_RemoveRedundantKeysMatchesUe) {
     SystemAllocator allocator;
     MathRandom random(0x8ED0);
     Array<TangentCurveKey> keys(allocator);
     Array<RichKey> reference(allocator);
-    Array<RichKey> literal(allocator);
+    Array<RichKey> curveLayerUe(allocator);
     const FrameRate rates[] = {FrameRate::TryCreate(30, 1).Value(),
                                FrameRate::TryCreate(24000, 1001).Value(),
                                FrameRate::TryCreate(60, 1).Value()};
-    CurveOptions literalOptions;
-    literalOptions.redundantStartFromKeep = false;
+    CurveOptions curveLayerUeOptions;
+    curveLayerUeOptions.redundantStartFromKeep = false;
     int32 mismatches = 0;
     int32 removedTotal = 0;
-    int32 literalDiffers = 0;
+    int32 curveLayerUeDiffers = 0;
     for (int32 curveIndex = 0; curveIndex < 1500; ++curveIndex) {
         TangentCurve curve(allocator);
         // 지울 키가 생기게 값을 자주 직선 위에 둔다.
@@ -388,7 +391,7 @@ TEST(CurveGolden_RemoveRedundantKeysMatchesUe) {
 
         REQUIRE(curve.TrySetKeys(keys.View()));
         ToReference(curve, reference);
-        ToReference(curve, literal);
+        ToReference(curve, curveLayerUe);
         const float tolerance = random.Next() % 3 == 0 ? 0.0f : RandomFloat(random, 0.0, 0.5);
         Optional<FrameRate> rate;
         if (random.Next() % 2 == 0) {
@@ -411,9 +414,9 @@ TEST(CurveGolden_RemoveRedundantKeysMatchesUe) {
             if (ue58richcurve::RemoveRedundantRange(reference, first, last, start, end)) {
                 ue58richcurve::RemoveRedundantKeysInternal(reference, tolerance, start, end, rate,
                                                            true, {});
-                ue58richcurve::RemoveRedundantKeysInternal(literal, tolerance, start, end, rate,
-                                                           true, literalOptions);
-                literalDiffers += reference.Size() != literal.Size() ? 1 : 0;
+                ue58richcurve::RemoveRedundantKeysInternal(curveLayerUe, tolerance, start, end,
+                                                           rate, true, curveLayerUeOptions);
+                curveLayerUeDiffers += reference.Size() != curveLayerUe.Size() ? 1 : 0;
                 ran = end - start >= 2;
             } else {
                 ran = false;
@@ -430,7 +433,7 @@ TEST(CurveGolden_RemoveRedundantKeysMatchesUe) {
 
     CHECK(mismatches == 0);
     CHECK(removedTotal > 0);
-    CHECK(literalDiffers > 0);
+    CHECK(curveLayerUeDiffers > 0);
 }
 
 // PlainCurve 중복 키 제거(전체·범위판)가 UE FSimpleCurve::RemoveRedundantKeysInternal과 같다. 두 번
@@ -524,6 +527,104 @@ TEST(CurveGolden_BakeAndIsConstantMatchUe) {
             },
             allocator);
         mismatches += SameKeys(curve, reference) ? 0 : 1;
+    }
+
+    CHECK(mismatches == 0);
+}
+
+} // namespace rocks::test::curve_golden
+
+namespace rocks::test::curve_golden {
+
+// Bake 시간식의 UE와 다른 점(15절 7): 키 (0, 0)·(1, 10)을 간격 0.1로 구우면 Rocks 시간은
+// 0.1·i(float 곱)이고 UE는 0.1을 float로 누적해 일부 시간이 다르다(값은 각 시간의 Evaluate). 키
+// 수는 같다.
+TEST(CurveGolden_BakeTimesDifferFromUeAccumulation) {
+    SystemAllocator allocator;
+    TangentCurve curve(allocator);
+    REQUIRE(curve.TryAddKey(0.0f, 0.0f));
+    REQUIRE(curve.TryAddKey(1.0f, 10.0f));
+    Array<RichKey> reference(allocator);
+    ToReference(curve, reference);
+    Array<RichKey> original(allocator);
+    ToReference(curve, original);
+    const ue58richcurve::CurveState state = ue58richcurve::StateOf(curve);
+    REQUIRE(curve.TryBake(0.1f));
+    ue58richcurve::BakeCurve(
+        reference, 0.1f, 0.0f, 1.0f,
+        [&](float time) noexcept {
+            return ue58richcurve::RichEval(state, original, time, 0.0f, {});
+        },
+        allocator);
+    REQUIRE(curve.KeyCount() == 11);
+    REQUIRE(reference.Size() == 11);
+    int32 differentTimes = 0;
+    for (usize index = 1; index + 1 < curve.KeyCount(); ++index) {
+        CHECK(curve.Keys()[index].time == static_cast<float>(index) * 0.1f);
+        differentTimes += curve.Keys()[index].time != reference[index].time ? 1 : 0;
+    }
+
+    CHECK(differentTimes > 0);
+}
+
+// PlainCurve 편집(더하기·같은 시간 더하기·UpdateOrAdd·시간 옮기기·지우기)이 UE FSimpleCurve와 같은
+// 키 배열을 낸다(SimpleCurve.cpp 86–116·140–165·167–177 — SetKeyTime은 DeleteKey + AddKey(새 시간,
+// 값)이고 접선이 없어 Rocks TrySetKeyTime과 같다).
+TEST(CurveGolden_PlainEditSequenceMatchesUe) {
+    SystemAllocator allocator;
+    MathRandom random(0x5EDC);
+    Array<SimpleKey> reference(allocator);
+    int32 mismatches = 0;
+    for (int32 curveIndex = 0; curveIndex < 400; ++curveIndex) {
+        PlainCurve curve(allocator);
+        reference.Clear();
+        for (int32 step = 0; step < 30; ++step) {
+            const usize count = curve.KeyCount();
+            const uint64 operation = count == 0 ? 0 : random.Next() % 4;
+            const float value = RandomFloat(random, -720.0, 720.0);
+            if (operation == 0) {
+                const float time = count > 0 && random.Next() % 3 == 0
+                                       ? curve.Keys()[random.Next() % count].time
+                                       : RandomFloat(random, -10.0, 10.0);
+                const bool unwind = random.Next() % 2 == 0;
+                auto added = curve.TryAddKey(time, value, unwind);
+                REQUIRE(added);
+                const int32 index = ue58richcurve::AddKey(reference, time, value, unwind);
+                mismatches += added.Value() == static_cast<usize>(index) ? 0 : 1;
+            } else if (operation == 1) {
+                const float time = random.Next() % 2 == 0
+                                       ? curve.Keys()[random.Next() % count].time + 5.0e-5f
+                                       : RandomFloat(random, -10.0, 10.0);
+                auto updated = curve.TryUpdateOrAddKey(time, value);
+                REQUIRE(updated);
+                const int32 index =
+                    ue58richcurve::UpdateOrAddKey(reference, time, value, false, 1.0e-4f);
+                mismatches += updated.Value() == static_cast<usize>(index) ? 0 : 1;
+            } else if (operation == 2) {
+                const usize index = random.Next() % count;
+                const float time = RandomFloat(random, -10.0, 10.0);
+                const SimpleKey old = reference[index];
+                static_cast<void>(reference.TryRemoveAt(index));
+                const int32 expected = ue58richcurve::AddKey(reference, time, old.value, false);
+                auto moved = curve.TrySetKeyTime(index, time);
+                REQUIRE(moved);
+                mismatches += moved.Value() == static_cast<usize>(expected) ? 0 : 1;
+            } else {
+                const usize index = random.Next() % count;
+                REQUIRE(curve.TryRemoveKey(index));
+                static_cast<void>(reference.TryRemoveAt(index));
+            }
+
+            Array<SimpleKey> actual(allocator);
+            ToReference(curve, actual);
+            bool same = actual.Size() == reference.Size();
+            for (usize index = 0; same && index < actual.Size(); ++index) {
+                same = SameFloat(actual[index].time, reference[index].time) &&
+                       SameFloat(actual[index].value, reference[index].value);
+            }
+
+            mismatches += same ? 0 : 1;
+        }
     }
 
     CHECK(mismatches == 0);

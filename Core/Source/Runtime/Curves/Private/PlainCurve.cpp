@@ -45,7 +45,7 @@ Result<void> RemoveRedundant(Array<PlainCurveKey>& keys, PlainCurveInterp interp
     const Span<const PlainCurveKey> view = keys.View();
     auto keepMiddle = [&](usize first, usize middle, usize last) noexcept {
         const float without = PlainSegment(interp, view[first], view[last], view[middle].time);
-        return math::Abs(without - view[middle].value) > tolerance;
+        return !(math::Abs(without - view[middle].value) <= tolerance); // NaN 차는 남긴다
     };
 
     usize next = 0;

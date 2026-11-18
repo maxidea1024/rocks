@@ -155,3 +155,148 @@ TEST(CurveValueRange_RandomCurvesContainSamples) {
     CHECK(outside == 0);
     CHECK(loose == 0);
 }
+
+namespace {
+
+// 가중 구간 (0, v1)→(1, v2)의 시간 제어점 x(s) = Bezier(0, x1, x2, 1)의 접힘 점(x′의 (0, 1) 안
+// 근)에서의 x 값들이다(없으면 0개).
+uint32 FoldAlphas(const TangentCurveKey& k1, const TangentCurveKey& k2,
+                  double (&alphas)[2]) noexcept {
+    const math::CurveWeightedControls controls = math::WeightedCurveControls(k1, k2);
+    const double x1 = controls.normalizedX1;
+    const double x2 = controls.normalizedX2;
+    const double d0 = x1;
+    const double d1 = x2 - x1;
+    const double d2 = 1.0 - x2;
+    const double a = d0 - 2.0 * d1 + d2;
+    const double b = 2.0 * (d1 - d0);
+    const double c = d0;
+    uint32 count = 0;
+    const double discriminant = b * b - 4.0 * a * c;
+    if (a == 0.0 || discriminant < 0.0) {
+        return 0;
+    }
+
+    const double root = platform::PlatformMath::Sqrt(discriminant);
+    const double candidates[2] = {(-b - root) / (2.0 * a), (-b + root) / (2.0 * a)};
+    for (const double s : candidates) {
+        if (s > 0.0 && s < 1.0) {
+            const double inverse = 1.0 - s;
+            alphas[count++] =
+                3.0 * inverse * inverse * s * x1 + 3.0 * inverse * s * s * x2 + s * s * s;
+        }
+    }
+
+    return count;
+}
+
+// 접힘 점 α 근처(10^-12 … 10^-1 떨어진 시간)의 Evaluate 최소·최대를 sampled에 더한다.
+void SampleNearFolds(const TangentCurve& curve, Sampled& sampled) noexcept {
+    const Span<const TangentCurveKey> keys = curve.Keys();
+    for (usize index = 0; index + 1 < keys.Size(); ++index) {
+        double alphas[2];
+        const uint32 count = FoldAlphas(keys[index], keys[index + 1], alphas);
+        const double start = keys[index].time;
+        const double length = static_cast<double>(keys[index + 1].time) - start;
+        for (uint32 fold = 0; fold < count; ++fold) {
+            for (int32 step = 0; step <= 400; ++step) {
+                const double offset =
+                    platform::PlatformMath::Pow(10.0, -12.0 + 11.0 * step / 400.0);
+                const double sides[2] = {alphas[fold] - offset, alphas[fold] + offset};
+                for (const double alpha : sides) {
+                    if (alpha >= 0.0 && alpha < 1.0) {
+                        const float value =
+                            curve.Evaluate(static_cast<float>(start + alpha * length));
+                        sampled.minimum = math::Min(sampled.minimum, value);
+                        sampled.maximum = math::Max(sampled.maximum, value);
+                    }
+                }
+            }
+        }
+    }
+}
+
+TangentCurveKey WeightedKey(float time, float value, float arrive, float arriveWeight, float leave,
+                            float leaveWeight) noexcept {
+    TangentCurveKey key = Key(time, value, CurveInterp::Cubic);
+    key.tangentWeight = CurveTangentWeight::Both;
+    key.arriveTangent = arrive;
+    key.arriveTangentWeight = arriveWeight;
+    key.leaveTangent = leave;
+    key.leaveTangentWeight = leaveWeight;
+    return key;
+}
+
+} // namespace
+
+// 얕은 접힘(CV5 리뷰 1): Evaluate의 3차 방정식 풀이는 판별식 |D| ≤ 1e-8에서 근을 겹근으로 근사해
+// 수학적 매개변수 집합 밖의 매개변수를 고른다. 범위는 그 풀이가 고르는 매개변수까지 넣으므로 리뷰
+// 반례 Evaluate(0.24326344) ≈ −13.353도 범위 안이다(고치기 전 최솟값 ≈ −13.178).
+TEST(CurveValueRange_ShallowFoldCounterexample) {
+    SystemAllocator allocator;
+    TangentCurve curve(allocator);
+    const TangentCurveKey keys[] = {WeightedKey(0.0f, -0.33362928f, 0.0f, 0.0f, -39.46f, 24.106f),
+                                    WeightedKey(1.0f, 0.56734283f, 7.873f, 10.2616f, 0.0f, 0.0f)};
+    REQUIRE(curve.TrySetKeys(keys));
+    auto range = curve.TryGetValueRange();
+    REQUIRE(range);
+    const float span = range.Value().max - range.Value().min;
+    const float slack = 1.0e-4f * (1.0f + span);
+    const float value = curve.Evaluate(0.24326344f);
+    CHECK(value < -13.3f);
+    CHECK(value >= range.Value().min - slack && value <= range.Value().max + slack);
+    Sampled sampled = SampleRange(curve, 200000);
+    SampleNearFolds(curve, sampled);
+    CHECK(sampled.minimum >= range.Value().min - slack);
+    CHECK(sampled.maximum <= range.Value().max + slack);
+}
+
+// 무작위 얕은 접힘(시간 제어점 x1 ∈ [0.4, 0.8], x2 ∈ [−0.45, −0.1] — 판별식 띠를 겨냥한다)과 끝이
+// 되돌아가는 구간(x2 > 1 — 음수 가중치): 접힘 점 근처와 촘촘한 Evaluate 표본이 범위 안이고(반올림
+// 여유 1e-4·(1 + 폭)) 범위 끝에 닿는다(2e-2·(1 + 폭)).
+TEST(CurveValueRange_RandomShallowFoldsContainSamples) {
+    SystemAllocator allocator;
+    test::MathRandom random(0xF01D);
+    int32 outside = 0;
+    int32 loose = 0;
+    for (int32 curveIndex = 0; curveIndex < 300; ++curveIndex) {
+        const bool reversedEnd = curveIndex % 4 == 3;
+        const double x1 = reversedEnd ? random.Range(0.1, 0.6) : random.Range(0.4, 0.8);
+        const double x2 = reversedEnd ? random.Range(1.05, 1.6) : random.Range(-0.45, -0.1);
+        // 접선 각도의 cos로 가중치를 맞춘다: x1 = cos(atan(출발))·w1, x2 = 1 −
+        // cos(atan(도착))·w2(길이 1).
+        const float leave = static_cast<float>(random.Range(-40.0, 40.0));
+        const float arrive = static_cast<float>(random.Range(-40.0, 40.0));
+        const double leaveCos =
+            1.0 / platform::PlatformMath::Sqrt(1.0 + static_cast<double>(leave) * leave);
+        const double arriveCos =
+            1.0 / platform::PlatformMath::Sqrt(1.0 + static_cast<double>(arrive) * arrive);
+        const float leaveWeight = static_cast<float>(x1 / leaveCos);
+        const float arriveWeight = static_cast<float>((1.0 - x2) / arriveCos);
+        const float v1 = static_cast<float>(random.Range(-1.0, 1.0));
+        const float v2 = static_cast<float>(random.Range(-1.0, 1.0));
+        TangentCurve curve(allocator);
+        const TangentCurveKey keys[] = {WeightedKey(0.0f, v1, 0.0f, 0.0f, leave, leaveWeight),
+                                        WeightedKey(1.0f, v2, arrive, arriveWeight, 0.0f, 0.0f),
+                                        Key(2.0f, v2)};
+        REQUIRE(curve.TrySetKeys(keys));
+        auto range = curve.TryGetValueRange();
+        REQUIRE(range);
+        Sampled sampled = SampleRange(curve, 20000);
+        SampleNearFolds(curve, sampled);
+        const float span = range.Value().max - range.Value().min;
+        const float slack = 1.0e-4f * (1.0f + span);
+        outside += sampled.minimum >= range.Value().min - slack &&
+                           sampled.maximum <= range.Value().max + slack
+                       ? 0
+                       : 1;
+        const float reach = 2.0e-2f * (1.0f + span);
+        loose += sampled.maximum >= range.Value().max - reach &&
+                         sampled.minimum <= range.Value().min + reach
+                     ? 0
+                     : 1;
+    }
+
+    CHECK(outside == 0);
+    CHECK(loose == 0);
+}

@@ -3,6 +3,69 @@
   "entries": [
     {
       "kind": "field",
+      "name": "rocks::IntegerStepCurve::defaultValue",
+      "id": "bca3b969e3824c10a92768e869168815",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::IntegerStepCurve::keys_",
+      "id": "82a566f0737e495d9d7cba1a87a6ee57",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::IntegerStepCurve::useDefaultBeforeFirstKey",
+      "id": "6b6d89f69f164359af7d11d881ad4852",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::IntegerStepKey::time",
+      "id": "56d2c0fe659a4415a0d772b8d3d47232",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::IntegerStepKey::value",
+      "id": "85e8678fcb5a4e9da7785af4148a86d5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::NameStepCurve::defaultValue",
+      "id": "cfc08f25a0fc4380961b0fb5ac7a64ea",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::NameStepCurve::keys_",
+      "id": "40301e65d58447f2a0c37c41ce2ab8ff",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::NameStepKey::time",
+      "id": "050b9372faf5489fb694a91b7dea0c1b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::NameStepKey::value",
+      "id": "fba55189461d4a55b079cfbfd32237e0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::PlainCurve::interp",
       "id": "da0b3005f8284c9c893b360e106b960d",
       "aliases": [],
@@ -47,6 +110,34 @@
       "kind": "field",
       "name": "rocks::ScalarCurveBase::preExtrapolation",
       "id": "c99b2de187334c118fd35921862b3abd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StringStepCurve::defaultValue",
+      "id": "dc740e4f620047c4b72a2c80f03c6ac0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StringStepCurve::keys_",
+      "id": "f89936b5cd8f481ea0b41c5beafe65a6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StringStepKey::time",
+      "id": "0fe3bad6f7c8488db5e1edb69370c5d3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StringStepKey::value",
+      "id": "65ff2e0a7ad34fa4a5c0643b6ba358b0",
       "aliases": [],
       "retired": false
     },
@@ -150,6 +241,34 @@
     },
     {
       "kind": "type",
+      "name": "rocks::IntegerStepCurve",
+      "id": "f6344a331bfa48898dd418ecdbd979d0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::IntegerStepKey",
+      "id": "9c7dab7f84da40aba26e5e419877caf3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::NameStepCurve",
+      "id": "b61b3d49180f4e188dd10dc854583b50",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::NameStepKey",
+      "id": "fec5dbb4af374209acba3f589e3a5e56",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::PlainCurve",
       "id": "8acc5aa887f345dc8aa35d98d68d74cb",
       "aliases": [],
@@ -173,6 +292,20 @@
       "kind": "type",
       "name": "rocks::ScalarCurveBase",
       "id": "8545ad31a7dc469883c629dd541b34d7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::StringStepCurve",
+      "id": "4392568d911e416caeb7166ba14a7a12",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::StringStepKey",
+      "id": "28e352badf4442e88e9eb84279bf9561",
       "aliases": [],
       "retired": false
     },
