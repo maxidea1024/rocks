@@ -335,11 +335,11 @@ void ReleaseBorrow(ObjectRegistry* registry, ObjectHandle handle) noexcept {
 void ReleaseBackend(ObjectRegistry* registry, ObjectHandle handle) noexcept {
     platform::LockGuard lock(registry->gate_);
     auto* slot = registry->FindSlot(handle);
-    if (!slot || slot->backendHolds == 0) {
+    if (!slot || registry->ColdOf(*slot).backendHolds == 0) {
         platform::Fatal("Backend lease release after lifetime closure");
     }
 
-    --slot->backendHolds;
+    --registry->ColdOf(*slot).backendHolds;
     --registry->tally_.backendHolds;
     registry->WakeDeferredLocked(*slot);
 }
@@ -579,11 +579,11 @@ Result<BackendLease> ObjectRegistry::AcquireBackendLease(const ObjectAccessConte
         return Result<BackendLease>::Failure(live.Error());
     }
 
-    if (slot->backendHolds == NumericLimits<uint32>::Max()) {
+    if (ColdOf(*slot).backendHolds == NumericLimits<uint32>::Max()) {
         return Result<BackendLease>::Failure(ErrorCode::Overflow);
     }
 
-    ++slot->backendHolds;
+    ++ColdOf(*slot).backendHolds;
     ++tally_.backendHolds;
     return Result<BackendLease>::Success(BackendLease(this, handle));
 }
@@ -738,7 +738,7 @@ ObjectStats ObjectRegistry::Stats() const noexcept {
                 retiredCount += slot.state == SlotState::Retired ? 1u : 0u;
                 counted.roots += slot.roots;
                 counted.borrows += slot.borrows;
-                counted.backendHolds += slot.backendHolds;
+                counted.backendHolds += ColdOf(slot).backendHolds;
                 counted.encodePins += slot.encodePins;
             }
         }
@@ -754,7 +754,7 @@ ObjectStats ObjectRegistry::Stats() const noexcept {
 
         const uint64 limit = uint64(chunkCount_) * SlotsPerChunk;
         uint64 listed = 0;
-        for (const Slot* slot = freeSlots_; slot != nullptr; slot = slot->nextInList) {
+        for (const Slot* slot = freeSlots_; slot != nullptr; slot = ColdOf(*slot).nextInList) {
             if (slot->state != SlotState::Free || slot->queue != RetiredQueue::None ||
                 ++listed > limit) {
                 platform::Fatal("Object registry free list is corrupt");
@@ -771,9 +771,10 @@ ObjectStats ObjectRegistry::Stats() const noexcept {
                                        RetiredQueue::Ready};
         for (uint32 at = 0; at < 3; ++at) {
             const Slot* previous = nullptr;
-            for (const Slot* slot = lists[at]->head; slot != nullptr; slot = slot->nextInList) {
+            for (const Slot* slot = lists[at]->head; slot != nullptr;
+                 slot = ColdOf(*slot).nextInList) {
                 if (slot->state != SlotState::Retired || slot->queue != queues[at] ||
-                    slot->prevInList != previous || ++listed > limit ||
+                    ColdOf(*slot).prevInList != previous || ++listed > limit ||
                     (queues[at] == RetiredQueue::Deferred && IsReclaimable(*slot))) {
                     platform::Fatal("Object registry retired queue is corrupt");
                 }
@@ -830,11 +831,11 @@ ObjectRegistry::CaptureDiagnostics(Span<ObjectDiagnosticRecord> output) const no
 
             output[written++] = {{domain_, slot.index, slot.generation},
                                  context_,
-                                 slot.stableType,
+                                 ColdOf(slot).stableType,
                                  phase,
                                  slot.roots,
                                  slot.borrows,
-                                 slot.backendHolds,
+                                 ColdOf(slot).backendHolds,
                                  slot.encodePins};
         }
     }

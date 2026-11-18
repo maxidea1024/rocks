@@ -25,12 +25,13 @@ namespace rocks {
 using namespace registry_detail;
 
 void ObjectRegistry::VisitIdentityEdges(const Slot& slot, TraceVisitor& visitor) const noexcept {
-    visitor.Visit(slot.outer);
+    visitor.Visit(ColdOf(slot).outer);
     // 패키지 정책: 자식 고리가 export 표다. 처리 표시 아래라 고리가 바뀌지 않고 열린 생성
     // 트랜잭션이 있으면 GC가 진행하지 않으므로 Reserved 자식은 Commit 검증(같은 트랜잭션)에서만
     // 만난다.
     if (options_.policy.packageNativeType != nullptr) {
-        for (const Slot* child = slot.firstChild; child != nullptr; child = child->nextSibling) {
+        for (const Slot* child = ColdOf(slot).firstChild; child != nullptr;
+             child = ColdOf(*child).nextSibling) {
             visitor.Visit(HandleOf(*child));
         }
     }
@@ -351,8 +352,8 @@ void ObjectRegistry::TraceIndex(uint32 index, MarkState& state, TraceVisitor& vi
     // 패키지 정책: outer → inner(자식 고리)도 강한 간선이다. 고리는 cold Slot에 둔다(GC-S3 결정 —
     // 패키지 정책 Registry만 읽는다). 처리 표시 아래라 고리가 바뀌지 않는다.
     if (options_.policy.packageNativeType != nullptr) {
-        for (const Slot* child = SlotAt(index)->firstChild; child != nullptr;
-             child = child->nextSibling) {
+        for (const Slot* child = ColdOf(*SlotAt(index)).firstChild; child != nullptr;
+             child = ColdOf(*child).nextSibling) {
             const ErrorCode marked = MarkIndex(child->index, *state.work, state.marked);
             if (marked != ErrorCode::None) {
                 state.error = marked;
@@ -781,7 +782,8 @@ bool ObjectRegistry::IsReclaimable(const Slot& slot) const noexcept {
     // Retire되면 자식들이 같은 sweep에서 스스로 떨어질 때까지 기다린다(그 사이 DrainRetired 회수
     // 포함 — rollback은 저널의 슬롯만 회수하고, 그 자식은 같은 저널의 뒤쪽이라 먼저 떨어진다).
     return slot.state == SlotState::Retired && slot.roots == 0 && slot.borrows == 0 &&
-           slot.backendHolds == 0 && slot.encodePins == 0 && slot.firstChild == nullptr;
+           ColdOf(slot).backendHolds == 0 && slot.encodePins == 0 &&
+           ColdOf(slot).firstChild == nullptr;
 }
 
 ObjectRegistry::Slot* ObjectRegistry::NextReclaimableLocked() noexcept {
@@ -814,10 +816,10 @@ void ObjectRegistry::LinkRetiredLocked(Slot& slot, RetiredQueue queue) noexcept 
                         : queue == RetiredQueue::Deferred ? retiredDeferred_
                                                           : retiredReady_;
     slot.queue = queue;
-    slot.nextInList = nullptr;
-    slot.prevInList = list.tail;
+    ColdOf(slot).nextInList = nullptr;
+    ColdOf(slot).prevInList = list.tail;
     if (list.tail != nullptr) {
-        list.tail->nextInList = &slot;
+        ColdOf(*list.tail).nextInList = &slot;
     } else {
         list.head = &slot;
     }
@@ -829,21 +831,21 @@ void ObjectRegistry::UnlinkRetiredLocked(Slot& slot) noexcept {
     RetiredList& list = slot.queue == RetiredQueue::Pending    ? retiredPending_
                         : slot.queue == RetiredQueue::Deferred ? retiredDeferred_
                                                                : retiredReady_;
-    if (slot.prevInList != nullptr) {
-        slot.prevInList->nextInList = slot.nextInList;
+    if (ColdOf(slot).prevInList != nullptr) {
+        ColdOf(*ColdOf(slot).prevInList).nextInList = ColdOf(slot).nextInList;
     } else {
-        list.head = slot.nextInList;
+        list.head = ColdOf(slot).nextInList;
     }
 
-    if (slot.nextInList != nullptr) {
-        slot.nextInList->prevInList = slot.prevInList;
+    if (ColdOf(slot).nextInList != nullptr) {
+        ColdOf(*ColdOf(slot).nextInList).prevInList = ColdOf(slot).prevInList;
     } else {
-        list.tail = slot.prevInList;
+        list.tail = ColdOf(slot).prevInList;
     }
 
     slot.queue = RetiredQueue::None;
-    slot.nextInList = nullptr;
-    slot.prevInList = nullptr;
+    ColdOf(slot).nextInList = nullptr;
+    ColdOf(slot).prevInList = nullptr;
 }
 
 void ObjectRegistry::RetireLocked(Slot& slot) noexcept {
@@ -870,7 +872,7 @@ void ObjectRegistry::RetireLocked(Slot& slot) noexcept {
         }
     }
 
-    if (slot.destroyListed) {
+    if (ColdOf(slot).destroyListed) {
         UnlinkDestroyRequestLocked(slot);
     }
 
@@ -881,30 +883,30 @@ void ObjectRegistry::RetireLocked(Slot& slot) noexcept {
 }
 
 void ObjectRegistry::LinkDestroyRequestLocked(Slot& slot) noexcept {
-    slot.prevInList = nullptr;
-    slot.nextInList = destroyRequests_;
+    ColdOf(slot).prevInList = nullptr;
+    ColdOf(slot).nextInList = destroyRequests_;
     if (destroyRequests_ != nullptr) {
-        destroyRequests_->prevInList = &slot;
+        ColdOf(*destroyRequests_).prevInList = &slot;
     }
 
     destroyRequests_ = &slot;
-    slot.destroyListed = true;
+    ColdOf(slot).destroyListed = true;
 }
 
 void ObjectRegistry::UnlinkDestroyRequestLocked(Slot& slot) noexcept {
-    if (slot.prevInList != nullptr) {
-        slot.prevInList->nextInList = slot.nextInList;
+    if (ColdOf(slot).prevInList != nullptr) {
+        ColdOf(*ColdOf(slot).prevInList).nextInList = ColdOf(slot).nextInList;
     } else {
-        destroyRequests_ = slot.nextInList;
+        destroyRequests_ = ColdOf(slot).nextInList;
     }
 
-    if (slot.nextInList != nullptr) {
-        slot.nextInList->prevInList = slot.prevInList;
+    if (ColdOf(slot).nextInList != nullptr) {
+        ColdOf(*ColdOf(slot).nextInList).prevInList = ColdOf(slot).prevInList;
     }
 
-    slot.nextInList = nullptr;
-    slot.prevInList = nullptr;
-    slot.destroyListed = false;
+    ColdOf(slot).nextInList = nullptr;
+    ColdOf(slot).prevInList = nullptr;
+    ColdOf(slot).destroyListed = false;
 }
 
 Result<usize> ObjectRegistry::TakeDestroyRequests(const ObjectAccessContext& access,
@@ -1239,8 +1241,8 @@ struct ObjectRegistry::ParallelMark {
 
         // 패키지 정책의 자식 고리는 slice 동안 바뀌지 않아 여러 참여자가 읽어도 경합이 없다.
         if (registry->options_.policy.packageNativeType != nullptr) {
-            for (const Slot* child = registry->SlotAt(index)->firstChild; child != nullptr;
-                 child = child->nextSibling) {
+            for (const Slot* child = registry->ColdOf(*registry->SlotAt(index)).firstChild;
+                 child != nullptr; child = registry->ColdOf(*child).nextSibling) {
                 const ErrorCode marked = Mark(self, child->index);
                 if (marked != ErrorCode::None) {
                     SetError(marked);
@@ -1856,9 +1858,9 @@ ObjectRegistry::ReclaimWork ObjectRegistry::TakeForReclaimLocked(Slot& slot) noe
     work.slot = &slot;
     work.type = Move(slot.type);
     work.object = slot.object;
-    work.storage = slot.storage;
-    work.record = slot.name;
-    slot.name = nullptr;
+    work.storage = ColdOf(slot).storage;
+    work.record = ColdOf(slot).name;
+    ColdOf(slot).name = nullptr;
     return work;
 }
 
@@ -1875,10 +1877,10 @@ void ObjectRegistry::FinishReclaim(ReclaimWork& work) noexcept {
         platform::LockGuard lock(gate_);
         Slot& slot = *work.slot;
         slot.object = nullptr;
-        slot.storage = nullptr;
-        slot.transaction = 0;
-        slot.stableType = {};
-        slot.outer = {};
+        ColdOf(slot).storage = nullptr;
+        ColdOf(slot).transaction = 0;
+        ColdOf(slot).stableType = {};
+        ColdOf(slot).outer = {};
         // GC 밀집 자료를 비운다(live는 Retire 때 이미 꺼졌다).
         HotOf(slot.index) = GcHot{};
         GcBits& bits = BitsOf(slot.index);
@@ -1889,11 +1891,11 @@ void ObjectRegistry::FinishReclaim(ReclaimWork& work) noexcept {
             ClearClusterSlotLocked(slot.index);
         }
 
-        slot.outermost = nullptr;
-        slot.parent = nullptr;
-        slot.lastChild = nullptr;
-        slot.pathBytes = 0;
-        slot.discarded = false;
+        ColdOf(slot).outermost = nullptr;
+        ColdOf(slot).parent = nullptr;
+        ColdOf(slot).lastChild = nullptr;
+        ColdOf(slot).pathBytes = 0;
+        ColdOf(slot).discarded = false;
         // 세대를 0/과거 값으로 순환시키면 오래된 WeakRef가 새 객체를 가리킬 수 있다.
         // 한도에 도달한 슬롯은 재사용하지 않고 Exhausted로 남긴다.
         if (slot.generation >= options_.maxGeneration) {
@@ -1901,7 +1903,7 @@ void ObjectRegistry::FinishReclaim(ReclaimWork& work) noexcept {
         } else {
             ++slot.generation;
             slot.SetState(tally_, SlotState::Free);
-            slot.nextInList = freeSlots_;
+            ColdOf(slot).nextInList = freeSlots_;
             freeSlots_ = &slot;
         }
     }

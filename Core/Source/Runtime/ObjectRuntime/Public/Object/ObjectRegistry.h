@@ -667,6 +667,7 @@ private:
     friend class PreparedStructElements;
 
     struct Slot;
+    struct SlotCold;
     struct Chunk;
     struct MarkState;
     struct NameRecord;
@@ -753,6 +754,8 @@ private:
     // 정의는 ObjectRuntime/Private/ObjectRegistryInternal.h(inline — 구현 파일만 부른다).
     inline Slot* FindSlot(ObjectHandle) const noexcept;
     inline Slot* SlotAt(uint32) const noexcept;
+    // 슬롯의 cold 레코드(이름·고리·회수 목록·생성 트랜잭션·Outer)다.
+    inline SlotCold& ColdOf(const Slot&) const noexcept;
     // GC 밀집 자료(GC-S3, 정의는 ObjectRegistryInternal.h). 슬롯 index의 페이지·hot 레코드·비트
     // 묶음과 그 묶음 안의 비트다. index는 chunk가 있는 슬롯이어야 한다.
     inline GcPage& PageOf(uint32) const noexcept;

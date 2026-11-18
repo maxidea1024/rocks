@@ -127,8 +127,8 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
         parent = FindSlot(outer);
         outerValid = parent != nullptr && !IsCutoff(parent) &&
                      (parent->state == SlotState::Alive ||
-                      (parent->state == SlotState::Reserved && parent->transaction == transaction &&
-                       parent->object != nullptr));
+                      (parent->state == SlotState::Reserved &&
+                       ColdOf(*parent).transaction == transaction && parent->object != nullptr));
         if (outerValid) {
             // hasNamedInners는 대표 자식(빈 이름) 생성에만 쓰인다. 이름 있는 생성은 고리를 훑지
             // 않는다 (Sweeping 중 cutoff white 형제가 많아도 잠금 시간이 늘지 않게).
@@ -311,7 +311,7 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
             for (uint32 index = SlotsPerChunk; index-- != 0;) {
                 Slot& slot = chunk->slots[index];
                 if (slot.state == SlotState::Free) {
-                    slot.nextInList = freeSlots_;
+                    ColdOf(slot).nextInList = freeSlots_;
                     freeSlots_ = &slot;
                 }
             }
@@ -329,16 +329,31 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
         // 상태·이름 색인·부모 고리를 한 잠금 안에서 게시한다(공개 전 객체도 이름을 점유한다).
         platform::LockGuard lock(gate_);
         freeSlot = freeSlots_;
-        freeSlots_ = freeSlot->nextInList;
-        freeSlot->nextInList = nullptr;
+        freeSlots_ = ColdOf(*freeSlot).nextInList;
+        ColdOf(*freeSlot).nextInList = nullptr;
+        if constexpr (IsDebugBuild) {
+            // 회수(FinishReclaim)는 cold 레코드를 빈 상태로 되돌린다. 재사용 생성이 칸 몇 개를
+            // 덮어써 결과가 같아 보여도 계약이 깨졌으면 여기서 멈춘다(GC 설계 6절 Slot hot·cold
+            // 분리).
+            const SlotCold& cold = ColdOf(*freeSlot);
+            if (cold.prevInList != nullptr || cold.storage != nullptr ||
+                !(cold.stableType == TypeId{}) || cold.transaction != 0 || !cold.outer.IsNull() ||
+                cold.outermost != nullptr || cold.parent != nullptr || cold.firstChild != nullptr ||
+                cold.lastChild != nullptr || cold.nextSibling != nullptr ||
+                cold.prevSibling != nullptr || cold.name != nullptr || cold.backendHolds != 0 ||
+                cold.pathBytes != 0 || cold.discarded || cold.destroyListed) {
+                platform::Fatal("Reused slot kept cold state from its previous object");
+            }
+        }
+
         ++freeSlotProbes_;
         handle = HandleOf(*freeSlot);
         freeSlot->SetState(tally_, SlotState::Reserved);
-        freeSlot->storage = memory.Value();
-        freeSlot->transaction = transaction;
-        freeSlot->stableType = type;
+        ColdOf(*freeSlot).storage = memory.Value();
+        ColdOf(*freeSlot).transaction = transaction;
+        ColdOf(*freeSlot).stableType = type;
         freeSlot->type = Move(typeLease.Value());
-        freeSlot->outer = outerKey;
+        ColdOf(*freeSlot).outer = outerKey;
         // hot 레코드와 잎 비트(GC-S3·M2). object는 생성자 실행 뒤 채운다.
         GcHot& hot = HotOf(freeSlot->index);
         hot.object = nullptr;
@@ -347,10 +362,10 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
         if (gcTypes_[hot.type].leaf) {
             BitsOf(freeSlot->index).leaf |= uint64(1) << (freeSlot->index % SlotsPerChunk);
         }
-        freeSlot->parent = parent;
-        freeSlot->outermost = parent != nullptr ? parent->outermost : freeSlot;
-        freeSlot->pathBytes = static_cast<uint16>(pathBytes);
-        freeSlot->name = record;
+        ColdOf(*freeSlot).parent = parent;
+        ColdOf(*freeSlot).outermost = parent != nullptr ? ColdOf(*parent).outermost : freeSlot;
+        ColdOf(*freeSlot).pathBytes = static_cast<uint16>(pathBytes);
+        ColdOf(*freeSlot).name = record;
         if (named) {
             if (grown != nullptr) {
                 previousTable = RehashNamesLocked(grown, grownCapacity);
@@ -397,7 +412,7 @@ Result<void*> ObjectRegistry::GetPending(const ObjectAccessContext& access, Obje
     platform::LockGuard lock(gate_);
     Slot* slot = FindSlot(handle);
     if (processing_ || !slot || slot->state != SlotState::Reserved ||
-        slot->transaction != transaction || !slot->object) {
+        ColdOf(*slot).transaction != transaction || !slot->object) {
         return Result<void*>::Failure(ErrorCode::StaleHandle);
     }
 
@@ -426,7 +441,7 @@ Result<TypeLease> ObjectRegistry::AcquireTypeChecked(const ObjectAccessContext& 
     if (!slot || IsCutoff(slot) ||
         !(slot->state == SlotState::Alive ||
           (transaction != 0 && slot->state == SlotState::Reserved &&
-           slot->transaction == transaction && slot->object != nullptr))) {
+           ColdOf(*slot).transaction == transaction && slot->object != nullptr))) {
         return Result<TypeLease>::Failure(ErrorCode::StaleHandle);
     }
 
@@ -453,7 +468,8 @@ void ObjectRegistry::ValidateStagedEdge(void* pointer, ObjectHandle handle) noex
         Slot* slot = state.registry->FindSlot(handle);
         if (!slot || state.registry->IsCutoff(slot) ||
             !(slot->state == SlotState::Alive ||
-              (slot->state == SlotState::Reserved && slot->transaction == state.transaction))) {
+              (slot->state == SlotState::Reserved &&
+               state.registry->ColdOf(*slot).transaction == state.transaction))) {
             state.error = ErrorCode::StaleHandle;
             return;
         }
@@ -466,7 +482,7 @@ void ObjectRegistry::ValidateStagedEdge(void* pointer, ObjectHandle handle) noex
         }
 
         if (state.observe) {
-            package = state.registry->HandleOf(*slot->outermost);
+            package = state.registry->HandleOf(*state.registry->ColdOf(*slot).outermost);
         }
     }
 
@@ -513,8 +529,8 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
 
         for (usize index = 0; index < staged.Size(); ++index) {
             Slot* slot = FindSlot(staged[index]);
-            if (!slot || slot->state != SlotState::Reserved || slot->transaction != transaction ||
-                !slot->object) {
+            if (!slot || slot->state != SlotState::Reserved ||
+                ColdOf(*slot).transaction != transaction || !slot->object) {
                 return Result<void>::Failure(ErrorCode::StaleHandle);
             }
         }
@@ -523,8 +539,8 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
         // 수 없다) 중복 root도 roots 크기가 uint32 안이면 넘치지 않는다.
         for (usize index = 0; index < roots.Size(); ++index) {
             Slot* slot = FindSlot(roots[index]);
-            if (!slot || slot->state != SlotState::Reserved || slot->transaction != transaction ||
-                !slot->object) {
+            if (!slot || slot->state != SlotState::Reserved ||
+                ColdOf(*slot).transaction != transaction || !slot->object) {
                 return Result<void>::Failure(ErrorCode::StaleHandle);
             }
         }
@@ -555,12 +571,14 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
                 if (packageClusters && state == 0) {
                     const Slot* slot = FindSlot(staged[index]);
                     // 경계 비율 안전장치가 클러스터를 해체한 패키지의 새 객체는 일반 객체다.
-                    if (!slot->outer.IsNull() && IsFlattenedPackageLocked(*slot->outermost)) {
+                    if (!ColdOf(*slot).outer.IsNull() &&
+                        IsFlattenedPackageLocked(*ColdOf(*slot).outermost)) {
                         continue;
                     }
 
                     state = ClusterPending;
-                    pendingRoot = slot->outer.IsNull() ? NoSlot : slot->outermost->index;
+                    pendingRoot =
+                        ColdOf(*slot).outer.IsNull() ? NoSlot : ColdOf(*slot).outermost->index;
                 }
 
                 if (state != ClusterPending) {
@@ -598,10 +616,10 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
     TraceVisitor visitor(&state, &ObjectRegistry::ValidateStagedEdge);
     for (usize index = 0; index < staged.Size() && state.error == ErrorCode::None; ++index) {
         Slot* slot = FindSlot(staged[index]);
-        state.observe = options_.referenceObserver != nullptr && !slot->outer.IsNull();
+        state.observe = options_.referenceObserver != nullptr && !ColdOf(*slot).outer.IsNull();
         state.leafOwner = !slot->type.Ops().hasStrongReferences;
         if (state.observe) {
-            state.ownerPackage = HandleOf(*slot->outermost);
+            state.ownerPackage = HandleOf(*ColdOf(*slot).outermost);
         }
 
         // 처리 표시 아래라 가입 지정 칸이 바뀌지 않는다.
@@ -643,7 +661,7 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
         for (usize index = 0; index < staged.Size(); ++index) {
             Slot* slot = FindSlot(staged[index]);
             slot->SetState(tally_, SlotState::Alive);
-            slot->transaction = 0;
+            ColdOf(*slot).transaction = 0;
             BitsOf(slot->index).live |= uint64(1) << (slot->index % SlotsPerChunk);
         }
 
@@ -706,8 +724,8 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
                 // 13.6절: 이미 처리된 클러스터에 가입한 소속은 shade가 클러스터에 닿아 끝나므로
                 // trace되지 않는다. staged 간선의 생존 대상은 쓸 때 shade됐고, 생존 outer는 여기서
                 // shade한다(같은 트랜잭션의 outer도 이 루프가 shade한다).
-                if (member && !slot->outer.IsNull() &&
-                    ShadeLocked(slot->outer) != ErrorCode::None) {
+                if (member && !ColdOf(*slot).outer.IsNull() &&
+                    ShadeLocked(ColdOf(*slot).outer) != ErrorCode::None) {
                     platform::Fatal("Preallocated newborn mark queue exhausted");
                 }
 
@@ -766,7 +784,8 @@ void ObjectRegistry::Rollback(uint64 transaction, Span<const ObjectHandle> stage
         {
             platform::LockGuard lock(gate_);
             Slot* slot = FindSlot(staged[remaining - 1]);
-            if (!slot || slot->state != SlotState::Reserved || slot->transaction != transaction) {
+            if (!slot || slot->state != SlotState::Reserved ||
+                ColdOf(*slot).transaction != transaction) {
                 platform::Fatal("Corrupt construction journal");
             }
 

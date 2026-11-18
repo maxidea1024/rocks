@@ -192,7 +192,7 @@ Result<void> ObjectRegistry::RemoveStructElement(const ObjectAccessContext& acce
         } else {
             // 다중 간선 지점: 떼어 낼 원소만 처리 표시 아래 잠금 밖에서 trace해 합친다(관찰자 쌍과
             // 클러스터 장부 — 13.4절).
-            package = observe ? HandleOf(*source.outermost) : ObjectHandle{};
+            package = observe ? HandleOf(*ColdOf(source).outermost) : ObjectHandle{};
             processing_ = true;
         }
     }
@@ -277,7 +277,7 @@ Result<void> ObjectRegistry::ClearStructElements(const ObjectAccessContext& acce
         } else {
             // 다중 간선 지점: 떼어 낼 원소를 처리 표시 아래 잠금 밖에서 trace해 합친다(관찰자 쌍과
             // 클러스터 장부 — 13.4절).
-            package = observe ? HandleOf(*source.outermost) : ObjectHandle{};
+            package = observe ? HandleOf(*ColdOf(source).outermost) : ObjectHandle{};
             processing_ = true;
         }
     }

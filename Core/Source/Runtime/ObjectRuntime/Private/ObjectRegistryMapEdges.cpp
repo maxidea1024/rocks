@@ -245,7 +245,7 @@ Result<void> ObjectRegistry::ClearMapEdges(const ObjectAccessContext& access, Ob
         // 다중 간선 지점(Docs/Design/ObjectFoundations.ko.md 3절): 처리 표시 아래 잠금 밖에서 떼어
         // 낼 값의 쌍을 합친 뒤 예약하고, 한 잠금 안에서 비우고 기록한다. 처리 표시 동안 다른 변경은
         // Busy라 컨테이너·owner를 다시 검증할 필요가 없다.
-        package = HandleOf(*source.outermost);
+        package = HandleOf(*ColdOf(source).outermost);
         processing_ = true;
     }
 

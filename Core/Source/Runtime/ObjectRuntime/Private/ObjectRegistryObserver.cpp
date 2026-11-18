@@ -25,18 +25,18 @@ ObjectHandle ObjectRegistry::PackageOfLocked(ObjectHandle target) const noexcept
     if (slot == nullptr ||
         !(slot->state == SlotState::Reserved || slot->state == SlotState::Alive ||
           slot->state == SlotState::DestroyRequested) ||
-        slot->outermost == nullptr) {
+        ColdOf(*slot).outermost == nullptr) {
         platform::Fatal("Observed reference target lost its package");
     }
 
-    return HandleOf(*slot->outermost);
+    return HandleOf(*ColdOf(*slot).outermost);
 }
 
 bool ObjectRegistry::ObservesOwnerLocked(const Slot& owner) const noexcept {
     // 패키지 객체(Outer 없음)가 소유한 간선과 DestroyRequested 소유자의 제거·비우기(Discard가 이미
     // 반납했다)는 기록하지 않는다.
     return options_.referenceObserver != nullptr && owner.state == SlotState::Alive &&
-           !owner.outer.IsNull();
+           !ColdOf(owner).outer.IsNull();
 }
 
 ObjectRegistry::EdgePlan ObjectRegistry::PlanEditLocked(const Slot& owner, ObjectHandle removed,
@@ -46,7 +46,7 @@ ObjectRegistry::EdgePlan ObjectRegistry::PlanEditLocked(const Slot& owner, Objec
         return plan;
     }
 
-    const ObjectHandle package = HandleOf(*owner.outermost);
+    const ObjectHandle package = HandleOf(*ColdOf(owner).outermost);
     const bool hasRemoved = !removed.IsNull();
     const bool hasAdded = !added.IsNull();
     const ObjectHandle removedPackage = hasRemoved ? PackageOfLocked(removed) : ObjectHandle{};
@@ -215,16 +215,16 @@ Result<void> ObjectRegistry::Discard(const ObjectAccessContext& access,
 
     // 부분 트리 전위 순회의 다음 노드다(스택 없이 부모 포인터로 되돌아 오른다). 고리로 닿는 객체만
     // 부분 트리다 — 이미 Discard·Retire된 객체는 고리에서 빠져 있다.
-    auto next = [](const Slot* node, const Slot* root) noexcept -> Slot* {
-        if (node->firstChild != nullptr) {
-            return node->firstChild;
+    auto next = [this](const Slot* node, const Slot* root) noexcept -> Slot* {
+        if (ColdOf(*node).firstChild != nullptr) {
+            return ColdOf(*node).firstChild;
         }
 
-        while (node != root && node->nextSibling == nullptr) {
-            node = node->parent;
+        while (node != root && ColdOf(*node).nextSibling == nullptr) {
+            node = ColdOf(*node).parent;
         }
 
-        return node == root ? nullptr : node->nextSibling;
+        return node == root ? nullptr : ColdOf(*node).nextSibling;
     };
     Slot* root = nullptr;
     usize count = 0;
@@ -241,7 +241,7 @@ Result<void> ObjectRegistry::Discard(const ObjectAccessContext& access,
         }
 
         // 이미 Discard된 객체는 무동작이다(cutoff·Retire 뒤에도 — RequestDestroy 재요청과 같다).
-        if (root->discarded) {
+        if (ColdOf(*root).discarded) {
             return Result<void>::Success();
         }
 
@@ -300,7 +300,7 @@ Result<void> ObjectRegistry::Discard(const ObjectAccessContext& access,
                 platform::LockGuard lock(gate_);
                 observe = ObservesOwnerLocked(node);
                 if (observe) {
-                    state.ownerPackage = HandleOf(*node.outermost);
+                    state.ownerPackage = HandleOf(*ColdOf(node).outermost);
                 }
             }
 
@@ -334,7 +334,7 @@ Result<void> ObjectRegistry::Discard(const ObjectAccessContext& access,
                 LinkDestroyRequestLocked(*node);
             }
 
-            node->discarded = true;
+            ColdOf(*node).discarded = true;
             DetachIdentityLocked(*node);
         }
 

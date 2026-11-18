@@ -77,59 +77,34 @@ namespace rocks {
 
 // 슬롯과 객체 저장소를 이동하지 않는다. 슬롯 재사용 시 세대를 올리고 wrap 대신 영구 격리한다.
 // TypeLease를 소멸 호출용 지역 변수로 옮긴 뒤에도 진단에는 stableType을 사용한다.
-struct ObjectRegistry::Slot {
+// 슬롯의 hot 레코드다(캐시 줄 하나 — GcScaleExperiment.ko.md 17절). handle 조회(세대·상태), Borrow,
+// 루트, 참조 쓰기(변경 표지·encode 고정·클러스터 계수)가 읽는 칸만 둔다. 이름·고리·회수 목록·생성
+// 트랜잭션·Outer 같은 나머지는 같은 chunk의 SlotCold(ObjectRegistry::ColdOf)에 있다.
+struct alignas(64) ObjectRegistry::Slot {
     uint32 generation = 1;
     uint32 index = 0;
     // 상태는 SetState로만 바꾼다(Registry의 상태별 통계를 같이 맞춘다).
     registry_detail::SlotState state = registry_detail::SlotState::Free;
     // Retired 슬롯이 든 회수 대상 목록이다(그 밖의 상태는 None).
     RetiredQueue queue = RetiredQueue::None;
+    bool indexed = false; // 이름 색인에 있다
+    bool linked = false;  // 부모 고리에 있다
     // 클러스터 장부의 inCount다(ClusterCell 주석 — 클러스터를 켠 Registry만 쓴다). 같은 클러스터 안
     // 간선(가장 흔한 쓰기)은 이 계수만 바꾸고, 참조 추가는 대상 슬롯을 검증으로 이미 읽었으므로
     // 장부 칸을 따로 읽지 않는다(GcScaleExperiment.ko.md 14절). 공개 전 가입
-    // 지정(ClusterPending)이면 루트 슬롯 번호(루트 지정이면 NoSlot)다. 앞 칸의 채움 바이트 자리라
-    // 슬롯 크기는 그대로다.
+    // 지정(ClusterPending)이면 루트 슬롯 번호(루트 지정이면 NoSlot)다.
     uint32 clusterInCount = 0;
-    // Free면 빈 슬롯 목록(단일 연결 — prevInList는 null), Retired면 queue 목록(이중 연결),
-    // DestroyRequested면 파괴 요청 목록(이중 연결 — destroyListed, TakeDestroyRequests)의 이웃
-    // 슬롯이다. 세 목록은 상태로 배타적이다.
-    Slot* nextInList = nullptr;
-    Slot* prevInList = nullptr;
     Object* object = nullptr;
-    void* storage = nullptr;
     TypeLease type;
-    TypeId stableType;
     uint32 roots = 0;
     uint32 borrows = 0;
-    uint32 backendHolds = 0;
     // encode 고정 계수(PinForEncode). 0이 아니면 컨테이너·참조 변경이 Busy이고 회수하지 않는다.
     uint32 encodePins = 0;
+    // 루트 목록(ObjectRegistry::rootList_)에서의 위치다(roots가 0이면 NoSlot).
+    uint32 rootPosition = registry_detail::NoSlot;
     // 변경 표지(ObjectRegistry::MutationStamp — 쓰기 Borrow·live 참조·컨테이너 변경·묶음 게시마다
     // 오른다). 슬롯을 다시 써도 되돌리지 않는다.
     uint64 mutations = 0;
-    uint64 transaction = 0;
-    // 루트 목록(ObjectRegistry::rootList_)에서의 위치다(roots가 0이면 NoSlot).
-    uint32 rootPosition = registry_detail::NoSlot;
-    // Outer·이름(생성 때 고정 — Docs/Design/ObjectFoundations.ko.md 1.4절). 고리는 슬롯 번호가
-    // 아니라 Slot*다: chunk는 Registry 소멸 전까지 이동·반환되지 않으므로 포인터가 안정하고, 순회가
-    // 슬롯 번호 → chunk 표 조회를 거치지 않고 바로 따라간다. Reclaiming·Free 슬롯의 이 칸은 읽지
-    // 않는다. Retired 슬롯은 자기를 부모 고리에서 이미 뗐지만, Retired 부모의 firstChild는 그
-    // 자식들이 스스로 뗄 때까지 유효하다(그동안 회수하지 않는다 — IsReclaimable).
-    ObjectHandle outer;
-    Slot* outermost = nullptr;
-    Slot* parent = nullptr;
-    Slot* firstChild = nullptr;
-    Slot* lastChild = nullptr;
-    Slot* nextSibling = nullptr;
-    Slot* prevSibling = nullptr;
-    // 이름이 있거나 대표 자식이면 있다(Outer 없는 이름 없는 객체는 null). 회수 때 잠금 밖에서
-    // 반환한다.
-    NameRecord* name = nullptr;
-    uint16 pathBytes = 0;
-    bool indexed = false;   // 이름 색인에 있다
-    bool linked = false;    // 부모 고리에 있다
-    bool discarded = false; // Discard됐다(DestroyRequested이고 색인·고리에 없다 — 회수 때 내린다)
-    bool destroyListed = false; // 파괴 요청 목록에 있다(아직 TakeDestroyRequests가 꺼내지 않았다)
 
     // 잠금 보유 상태에서 부른다. tally는 그 Registry의 상태별 통계다.
     void SetState(ObjectStats& tally, registry_detail::SlotState next) noexcept {
@@ -145,8 +120,43 @@ struct ObjectRegistry::Slot {
     }
 };
 
+// 슬롯의 cold 레코드다(같은 chunk에 슬롯과 나란히 — ObjectRegistry::ColdOf). 생성·회수·이름·Outer
+// 고리·Discard 경로만 읽는다.
+struct ObjectRegistry::SlotCold {
+    // Free면 빈 슬롯 목록(단일 연결 — prevInList는 null), Retired면 queue 목록(이중 연결),
+    // DestroyRequested면 파괴 요청 목록(이중 연결 — destroyListed, TakeDestroyRequests)의 이웃
+    // 슬롯이다. 세 목록은 상태로 배타적이다.
+    Slot* nextInList = nullptr;
+    Slot* prevInList = nullptr;
+    void* storage = nullptr;
+    TypeId stableType;
+    uint64 transaction = 0;
+    // Outer·이름(생성 때 고정 — Docs/Design/ObjectFoundations.ko.md 1.4절). 고리는 슬롯 번호가
+    // 아니라 Slot*다: chunk는 Registry 소멸 전까지 이동·반환되지 않으므로 포인터가 안정하고, 순회가
+    // 슬롯 번호 → chunk 표 조회를 거치지 않고 바로 따라간다. Reclaiming·Free 슬롯의 이 칸은 읽지
+    // 않는다. Retired 슬롯은 자기를 부모 고리에서 이미 뗐지만, Retired 부모의 firstChild는 그
+    // 자식들이 스스로 뗄 때까지 유효하다(그동안 회수하지 않는다 — IsReclaimable).
+    ObjectHandle outer;
+    Slot* outermost = nullptr;
+    Slot* parent = nullptr;
+    Slot* firstChild = nullptr;
+    Slot* lastChild = nullptr;
+    Slot* nextSibling = nullptr;
+    Slot* prevSibling = nullptr;
+    // 이름이 있거나 대표 자식이면 있다(Outer 없는 이름 없는 객체는 null). 회수 때 잠금 밖에서
+    // 반환한다.
+    NameRecord* name = nullptr;
+    uint32 backendHolds = 0;
+    uint16 pathBytes = 0;
+    bool discarded = false; // Discard됐다(DestroyRequested이고 색인·고리에 없다 — 회수 때 내린다)
+    bool destroyListed = false; // 파괴 요청 목록에 있다(아직 TakeDestroyRequests가 꺼내지 않았다)
+};
+
 struct ObjectRegistry::Chunk {
+    static_assert(sizeof(Slot) == 64, "Slot hot record must fill one cache line");
+
     Slot slots[registry_detail::SlotsPerChunk];
+    SlotCold colds[registry_detail::SlotsPerChunk];
 };
 
 // chunk 포인터 표 하나의 머리다. Chunk* 칸이 바로 뒤에 이어진다(할당 하나). 표를 키우면 옛 표를
@@ -531,6 +541,11 @@ inline ObjectRegistry::Slot* ObjectRegistry::SlotAt(uint32 index) const noexcept
     const uint32 chunk = index / registry_detail::SlotsPerChunk;
     return chunk < chunkCount_ ? &chunks_[chunk]->slots[index % registry_detail::SlotsPerChunk]
                                : nullptr;
+}
+
+inline ObjectRegistry::SlotCold& ObjectRegistry::ColdOf(const Slot& slot) const noexcept {
+    return chunks_[slot.index / registry_detail::SlotsPerChunk]
+        ->colds[slot.index % registry_detail::SlotsPerChunk];
 }
 
 inline ObjectRegistry::Slot* ObjectRegistry::FindSlot(ObjectHandle handle) const noexcept {

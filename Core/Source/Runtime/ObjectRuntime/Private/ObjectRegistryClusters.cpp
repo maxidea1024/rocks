@@ -715,7 +715,7 @@ Result<void> ObjectRegistry::DesignateCluster(const ObjectAccessContext& access,
     }
 
     Slot* slot = FindSlot(object);
-    if (!slot || slot->state != SlotState::Reserved || slot->transaction != transaction ||
+    if (!slot || slot->state != SlotState::Reserved || ColdOf(*slot).transaction != transaction ||
         slot->object == nullptr) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
@@ -759,7 +759,7 @@ bool ObjectRegistry::IsJoinableRootLocked(uint32 root, uint64 transaction) const
     const uint32 state = ClusterStateOf(root);
     if (slot->state == SlotState::Reserved) {
         // 같은 트랜잭션에서 루트로 지정한 객체다.
-        return slot->transaction == transaction && state == ClusterPending &&
+        return ColdOf(*slot).transaction == transaction && state == ClusterPending &&
                ClusterInCountOf(root) == NoSlot;
     }
 

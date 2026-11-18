@@ -21,7 +21,7 @@ Result<void> ObjectRegistry::CheckContainerOwnerLocked(ObjectHandle owner, const
 
     if (transaction != 0) {
         // staged: 같은 생성 트랜잭션의 Reserved 객체다(Reserved는 Borrow를 얻을 수 없다).
-        if (source->state != SlotState::Reserved || source->transaction != transaction) {
+        if (source->state != SlotState::Reserved || ColdOf(*source).transaction != transaction) {
             return Result<void>::Failure(ErrorCode::StaleHandle);
         }
     } else {
@@ -39,7 +39,7 @@ Result<void> ObjectRegistry::CheckContainerOwnerLocked(ObjectHandle owner, const
     }
 
     // 컨테이너 객체는 owner 저장소 안에 직접 포함되어야 한다(SetEdge의 필드 위치 검사와 같다).
-    const uptr start = reinterpret_cast<uptr>(source->storage);
+    const uptr start = reinterpret_cast<uptr>(ColdOf(*source).storage);
     const uptr location = reinterpret_cast<uptr>(storage);
     const usize size = source->type.Ops().size;
     if (size < storageBytes || location < start || location - start > size - storageBytes) {
@@ -66,7 +66,7 @@ Result<void> ObjectRegistry::CheckTargetLocked(ObjectHandle target, uint64 trans
     if (!destination || IsCutoff(destination) ||
         !(destination->state == SlotState::Alive ||
           (transaction && destination->state == SlotState::Reserved &&
-           destination->transaction == transaction))) {
+           ColdOf(*destination).transaction == transaction))) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
@@ -133,12 +133,12 @@ Result<void> ObjectRegistry::SetEdge(const ObjectAccessContext& access, ObjectHa
                 Slot* source = FindSlot(owner);
                 if (!source || !source->object || IsCutoff(source) ||
                     (transaction ? source->state != SlotState::Reserved ||
-                                       source->transaction != transaction
+                                       ColdOf(*source).transaction != transaction
                                  : source->state != SlotState::Alive)) {
                     return Result<void>::Failure(ErrorCode::StaleHandle);
                 }
 
-                const uptr start = reinterpret_cast<uptr>(source->storage);
+                const uptr start = reinterpret_cast<uptr>(ColdOf(*source).storage);
                 const usize size = source->type.Ops().size;
                 if (location < start || location - start > size - sizeof(ObjectHandle)) {
                     return Result<void>::Failure(ErrorCode::InvalidArgument);

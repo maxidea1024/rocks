@@ -193,7 +193,7 @@ void ObjectRegistry::CheckBatchContainer(const void* storage, usize bytes) const
         platform::Fatal("Batch publish used outside an open batch");
     }
 
-    const uptr start = reinterpret_cast<uptr>(source->storage);
+    const uptr start = reinterpret_cast<uptr>(ColdOf(*source).storage);
     const uptr location = reinterpret_cast<uptr>(storage);
     const usize size = source->type.Ops().size;
     if (size < bytes || location < start || location - start > size - bytes) {
