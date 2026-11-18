@@ -2,7 +2,9 @@
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
 #include <Platform/Sync.h>
+#include <Platform/Thread.h>
 #include <Base/Checked.h>
+#include "../Common/TerminationInternal.h"
 #include "PosixPlatform.h"
 #include <pthread.h>
 #include <errno.h>
@@ -145,6 +147,8 @@ void WriteDiagnostic(const char* bytes, usize count) noexcept {
     const auto ignoredNewline = write(STDERR_FILENO, "\n", 1);
     (void)ignoredText;
     (void)ignoredNewline;
+    detail::RecordTerminatingThread(CurrentThreadId());
+    detail::RunTerminationHook(text, length);
     abort();
 }
 

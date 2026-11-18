@@ -1,11 +1,18 @@
 #include "TraceTestWriter.h"
+#include <Base/Endian.h>
 
 #include <TestSupport/Test.h>
+#include <Core/Diagnostics/Correlation.h>
+#include <Core/Diagnostics/Log.h>
+#include <Core/Diagnostics/LogSystem.h>
 #include <TraceAnalysis/TraceModel.h>
 #include <TraceAnalysis/TraceReport.h>
 #include <TraceCapture/Tests/TraceCaptureTestSupport.h>
 #include <TraceCapture/TraceCounter.h>
+#include <TraceCapture/TraceContext.h>
 #include <TraceCapture/TraceCpuScope.h>
+#include <TraceCapture/TraceLogSink.h>
+#include <TraceCapture/TraceTask.h>
 
 // TR4 분석 시험이다(Docs/Design/TraceSystem.ko.md 10절). 입력은 tick·순서·형 id를 정한 writer로
 // 만들어 golden report와 byte 단위로 비교하고, 실제 세션 capture로 결정성과 손상 입력(OB03)을
@@ -369,7 +376,7 @@ StringView View(const Array<uint8>& bytes) noexcept {
 
 constexpr const char* GoldenReport = R"({
   "format": "rocks-trace-report",
-  "version": 3,
+  "version": 4,
   "session": {
     "guidHigh": "0x0000000000001234",
     "guidLow": "0x0000000000005678",
@@ -687,4 +694,371 @@ TEST(TraceAnalysisHandlesMidSessionAttachDeterministically) {
 
         CHECK(sawAfter);
     }
+}
+
+namespace {
+
+constexpr LogCategory LogAnalysisTests{"Tests.Analysis"};
+constexpr LogCategory LogTraceWriterTests{"Trace.Writer"};
+
+} // namespace
+
+// TraceLogSink가 채널 "log"가 켜진 동안의 기록을 남기고, 분석이 순서·스레드·상관 id·spec을
+// 되살린다. 채널이 꺼진 동안의 기록과 trace 자신의 카테고리("Trace.*")는 남지 않는다. spec은
+// EventId당 한 번이다.
+TEST(TraceAnalysisReadsLogRecords) {
+    SystemAllocator allocator;
+    MemoryOutput output(allocator);
+    TraceSession session;
+    TraceSessionSettings settings;
+    settings.allocator = &allocator;
+    settings.writerMode = TraceWriterMode::Manual;
+    REQUIRE(session.Start(settings));
+    REQUIRE(session.AttachCallbackOutput(&MemoryOutput::Write, &output));
+    LogSystemConfig config;
+    config.mode = LogMode::Manual;
+    config.globalMinimum = LogLevel::Trace;
+    LogSystem logs(allocator, config);
+    TraceLogSink sink;
+    REQUIRE(logs.AddSink(sink));
+    REQUIRE(logs.Start());
+    {
+        LogInstallScope installed(logs);
+        Log::Info(LogAnalysisTests, "before channel {Value}", 0);
+        CHECK(logs.Pump() == 1);
+        REQUIRE(session.SetChannelEnabled(TraceLogChannel, true));
+        {
+            CorrelationScope request(CorrelationIds{0, 0, 0, 0, 55});
+            for (uint32 index = 0; index < 3; ++index) {
+                Log::Info(LogAnalysisTests, "value {Value}", index);
+            }
+        }
+
+        Log::Warning(LogAnalysisTests, "warned {Value}", 7);
+        Log::Warning(LogTraceWriterTests, "skipped {Value}", 1);
+        CHECK(logs.Pump() == 5);
+    }
+
+    logs.Stop();
+    session.Stop();
+    CHECK(sink.Lost() == 0);
+
+    TraceModel model(allocator);
+    REQUIRE(model.Build(output.bytes.View()));
+    REQUIRE(model.Logs().Size() == 4);
+    CHECK(model.LogSpecs().Size() == 2);
+    const uint64 thread = platform::CurrentThreadId();
+    for (usize index = 0; index < 3; ++index) {
+        const TraceModelLog& log = model.Logs()[index];
+        CHECK(log.thread == thread);
+        CHECK(log.level == static_cast<uint8>(LogLevel::Info));
+        CHECK(log.correlation[4] == 55);
+        CHECK(index == 0 || log.tick >= model.Logs()[index - 1].tick);
+    }
+
+    CHECK(model.Logs()[0].message == StringView("value 0"));
+    CHECK(model.Logs()[2].message == StringView("value 2"));
+    const TraceModelLog& warning = model.Logs()[3];
+    CHECK(warning.message == StringView("warned 7") && warning.correlation[4] == 0);
+    const TraceModelLogSpec* spec = model.FindLogSpec(warning.specId);
+    REQUIRE(spec != nullptr);
+    CHECK(spec->category == StringView("Tests.Analysis"));
+    CHECK(spec->templateText == StringView("warned {Value}"));
+
+    Array<uint8> report(allocator);
+    REQUIRE(Report(allocator, output.bytes.View(), report));
+    CHECK(View(report).Contains("\"Warning\": 1", StringComparison::CaseSensitive) ||
+          View(report).Contains("\"Warning\":1", StringComparison::CaseSensitive));
+    CHECK(View(report).Contains("warned 7", StringComparison::CaseSensitive));
+}
+
+namespace rocks::test {
+uint64 OperatorNewCalls() noexcept;
+} // namespace rocks::test
+
+namespace {
+
+constexpr usize TruncationProbeBytes = MaxTraceLogMessageBytes + 64;
+constexpr uint32 SpecFloodCount = TraceLogSpecTableLimit + 64;
+constexpr uint64 SpecFloodBaseId = 0x1000;
+// 넘침 시험이 펌프하는 간격(기록 수)이다(블록이 쌓여 기록을 잃지 않게).
+constexpr uint32 SpecFloodPumpInterval = 256;
+// 정의 기록 상한을 넘는 템플릿 크기다.
+constexpr usize OversizedTemplateBytes = TraceFormat::MaxDefinitionRecordBytes + 64;
+char oversizedTemplate[OversizedTemplateBytes];
+
+// sink에 바로 넣는 기록이다(LogSystem 없이 EventId·위치를 정해 넣는다).
+LogEvent DirectEvent(StringView message, uint64 eventId, uint32 line) noexcept {
+    LogEvent event;
+    event.level = LogLevel::Info;
+    event.category = "Tests.Analysis";
+    event.messageTemplate = "direct {Value}";
+    event.message = message;
+    event.eventId = eventId;
+    event.location.file = "Direct.cpp";
+    event.location.line = line;
+    event.threadId = platform::CurrentThreadId();
+    return event;
+}
+
+struct LiveSession {
+    explicit LiveSession(Allocator& allocator, usize poolMaxBytes = 0) noexcept
+        : output(allocator) {
+        TraceSessionSettings settings;
+        settings.allocator = &allocator;
+        settings.writerMode = TraceWriterMode::Manual;
+        if (poolMaxBytes != 0) {
+            settings.poolMaxBytes = poolMaxBytes;
+        }
+
+        REQUIRE(session.Start(settings));
+        REQUIRE(session.AttachCallbackOutput(&MemoryOutput::Write, &output));
+        REQUIRE(session.SetChannelEnabled(TraceLogChannel, true));
+    }
+
+    MemoryOutput output;
+    TraceSession session;
+};
+
+} // namespace
+
+// 같은 템플릿이라도 호출 지점(카테고리·위치)이 다르면 spec이 따로이고, 기록은 자기 spec으로 찾는다.
+// 중복 표가 차면 정의를 더 쓰지 않고 기록에 카테고리·템플릿을 싣는다(분석은 둘 다 읽는다). 세션이
+// 바뀌면 spec을 다시 쓴다. 긴 메시지는 UTF-8 경계에서 1024 byte로 자른다. 초기화 뒤 sink는 할당하지
+// 않는다.
+TEST(TraceLogSinkSpecsTruncationAndSessions) {
+    SystemAllocator allocator;
+    TraceLogSink sink;
+    {
+        LiveSession live(allocator);
+        // 같은 EventId, 다른 위치 → spec 둘.
+        REQUIRE(sink.Write(DirectEvent("first site", 7, 10)));
+        REQUIRE(sink.Write(DirectEvent("second site", 7, 20)));
+        REQUIRE(sink.Write(DirectEvent("first site again", 7, 10)));
+        // 마지막에 다중 byte 문자가 1024 byte 경계를 넘는 메시지.
+        char text[TruncationProbeBytes];
+        for (usize index = 0; index < sizeof(text); ++index) {
+            text[index] = 'a';
+        }
+
+        const char han[] = "\xED\x95\x9C"; // "한"
+        for (usize index = 0; index < 3; ++index) {
+            text[MaxTraceLogMessageBytes - 1 + index] = han[index];
+        }
+
+        const uint64 news = test::OperatorNewCalls();
+        REQUIRE(sink.Write(DirectEvent(StringView(text, sizeof(text)), 8, 30)));
+        CHECK(test::OperatorNewCalls() == news);
+        // 중복 표 넘침: 서로 다른 호출 지점을 상한보다 많이 넣는다.
+        for (uint32 index = 0; index < SpecFloodCount; ++index) {
+            REQUIRE(sink.Write(DirectEvent("flood", SpecFloodBaseId + index, index)));
+            if ((index + 1) % SpecFloodPumpInterval == 0) {
+                CHECK(live.session.Pump());
+            }
+        }
+
+        CHECK(sink.SpecTableOverflows() + sink.SpecWriteFailures() != 0);
+        live.session.Stop();
+
+        TraceModel model(allocator);
+        REQUIRE(model.Build(live.output.bytes.View()));
+        REQUIRE(model.Logs().Size() == 4 + SpecFloodCount);
+        CHECK(model.Logs()[0].specId == model.Logs()[2].specId);
+        CHECK(model.Logs()[0].specId != model.Logs()[1].specId);
+        const TraceModelLogSpec* second = model.FindLogSpec(model.Logs()[1].specId);
+        REQUIRE(second != nullptr);
+        CHECK(second->line == 20);
+        const TraceModelLog& cut = model.Logs()[3];
+        CHECK(cut.truncated);
+        CHECK(cut.message.ByteCount() == MaxTraceLogMessageBytes - 1);
+        CHECK(cut.message.IsValidUtf8());
+        // 넘친 뒤의 기록도 카테고리를 잃지 않는다(정의 또는 기록에 실린 값).
+        bool categories = true;
+        for (const TraceModelLog& log : model.Logs()) {
+            categories = categories && model.LogCategoryOf(log) == StringView("Tests.Analysis");
+        }
+
+        CHECK(categories);
+    }
+
+    // 세션이 바뀌면 같은 호출 지점의 spec을 새 출력에 다시 쓴다.
+    {
+        LiveSession live(allocator);
+        REQUIRE(sink.Write(DirectEvent("next session", 7, 10)));
+        live.session.Stop();
+        TraceModel model(allocator);
+        REQUIRE(model.Build(live.output.bytes.View()));
+        REQUIRE(model.Logs().Size() == 1);
+        CHECK(model.FindLogSpec(model.Logs()[0].specId) != nullptr);
+    }
+}
+
+// 기록 버퍼가 없으면 기다리지 않고 버리고 Lost()로 센다(작은 풀, 펌프 없음).
+TEST(TraceLogSinkCountsLostRecords) {
+    SystemAllocator allocator;
+    TraceLogSink sink;
+    constexpr uint32 FloodRecords = 20000;
+    // 풀 상한의 최소 단위(한 페이지)다.
+    LiveSession live(allocator, TraceBlockLayout::PageBytes);
+    for (uint32 index = 0; index < FloodRecords && sink.Lost() == 0; ++index) {
+        REQUIRE(sink.Write(DirectEvent("lost probe message with some padding text", 9, 40)));
+    }
+
+    CHECK(sink.Lost() != 0);
+    live.session.Stop();
+}
+
+// 재진입 표시가 켜진 스레드(Write 안)에서 sink를 직접 불러도 기록하지 않는다. trace 자신의
+// 카테고리도 남기지 않는다. 표시를 벗어난 뒤의 직접 호출은 기록한다.
+TEST(TraceLogSinkBlocksReentrantDirectWrite) {
+    SystemAllocator allocator;
+    TraceLogSink sink;
+    LiveSession live(allocator);
+    {
+        detail::TraceLogWriteScope inside;
+        REQUIRE(sink.Write(DirectEvent("reentrant", 11, 50)));
+        {
+            detail::TraceLogWriteScope nested;
+        }
+
+        CHECK(detail::inTraceLogWrite);
+    }
+
+    CHECK(!detail::inTraceLogWrite);
+    LogEvent own = DirectEvent("trace own", 12, 51);
+    own.category = "Trace.Writer";
+    REQUIRE(sink.Write(own));
+    REQUIRE(sink.Write(DirectEvent("outside", 11, 52)));
+    live.session.Stop();
+    TraceModel model(allocator);
+    REQUIRE(model.Build(live.output.bytes.View()));
+    REQUIRE(model.Logs().Size() == 1);
+    CHECK(model.Logs()[0].message == StringView("outside"));
+}
+
+// spec id는 위치 문자열의 내용으로 정한다. 같은 내용의 파일·함수 문자열이 다른 주소에 있어도(여러
+// TU의 inline 인스턴스) 같은 spec이다.
+TEST(TraceLogSinkSpecIdUsesLocationText) {
+    SystemAllocator allocator;
+    TraceLogSink sink;
+    LiveSession live(allocator);
+    char fileA[] = "Shared.h";
+    char fileB[] = "Shared.h";
+    char functionA[] = "SharedInline";
+    char functionB[] = "SharedInline";
+    LogEvent first = DirectEvent("copy a", 13, 60);
+    first.location.file = fileA;
+    first.location.function = functionA;
+    LogEvent second = DirectEvent("copy b", 13, 60);
+    second.location.file = fileB;
+    second.location.function = functionB;
+    REQUIRE(sink.Write(first));
+    REQUIRE(sink.Write(second));
+    live.session.Stop();
+    TraceModel model(allocator);
+    REQUIRE(model.Build(live.output.bytes.View()));
+    REQUIRE(model.Logs().Size() == 2);
+    CHECK(model.Logs()[0].specId == model.Logs()[1].specId);
+    CHECK(model.LogSpecs().Size() == 1);
+}
+
+// 정의 기록 상한을 넘는 spec은 정의를 시도하지 않고 기록에 동봉한다. 동봉한 템플릿은
+// MaxTraceLogMessageBytes에서 잘리고 잘림 비트가 켜진다. 세션의 "버린 정의" 수는 늘지 않고 sink만
+// 센다. 동봉한 기록에는 위치가 없다(spec 정의 없음).
+TEST(TraceLogSinkInlinesOversizedSpec) {
+    SystemAllocator allocator;
+    TraceLogSink sink;
+    LiveSession live(allocator);
+    for (usize index = 0; index < OversizedTemplateBytes; ++index) {
+        oversizedTemplate[index] = 't';
+    }
+
+    LogEvent event = DirectEvent("oversized", 14, 70);
+    event.messageTemplate = StringView(oversizedTemplate, OversizedTemplateBytes);
+    constexpr uint32 Writes = 3;
+    for (uint32 index = 0; index < Writes; ++index) {
+        REQUIRE(sink.Write(event));
+    }
+
+    CHECK(sink.SpecWriteFailures() == Writes);
+    CHECK(live.session.Stats().definitionRecordsDropped == 0);
+    live.session.Stop();
+    TraceModel model(allocator);
+    REQUIRE(model.Build(live.output.bytes.View()));
+    REQUIRE(model.Logs().Size() == Writes);
+    for (const TraceModelLog& log : model.Logs()) {
+        CHECK(log.templateTruncated && !log.truncated);
+        CHECK(log.inlineTemplate.ByteCount() == MaxTraceLogMessageBytes);
+        CHECK(model.FindLogSpec(log.specId) == nullptr);
+        CHECK(model.LogCategoryOf(log) == StringView("Tests.Analysis"));
+    }
+}
+
+// task 실행 구간은 trace 없이도 저장한 상관 id를 복원하고 내린다. 빈 정보는 아무것도 쌓지 않는다.
+TEST(TraceTaskScopeRestoresCorrelationWithoutTrace) {
+    {
+        const TraceTaskInfo empty;
+        TraceTaskScope scope(empty);
+        CHECK(CorrelationDepth() == 0);
+    }
+
+    TraceTaskInfo info;
+    {
+        CorrelationScope request(CorrelationIds{0, 0, 0, 0, 77});
+        info = TraceCreateTask();
+    }
+
+    REQUIRE(info.context.valid);
+    CHECK(!info.id.IsTraced());
+    CHECK(CorrelationDepth() == 0);
+    {
+        TraceTaskScope scope(info);
+        CorrelationIds ids;
+        CHECK(CurrentCorrelation(ids) && ids.request == 77);
+        CHECK(CorrelationDepth() == 1);
+    }
+
+    CHECK(CorrelationDepth() == 0);
+}
+
+// 공개 CorrelationScope로 쌓은 값이 trace 문맥 정의 기록에 같게 나간다(관찰자 경로).
+TEST(TraceContextRecordsMatchPublicCorrelationScope) {
+    SystemAllocator allocator;
+    MemoryOutput output(allocator);
+    TraceSession session;
+    TraceSessionSettings settings;
+    settings.allocator = &allocator;
+    settings.writerMode = TraceWriterMode::Manual;
+    REQUIRE(session.Start(settings));
+    REQUIRE(session.AttachCallbackOutput(&MemoryOutput::Write, &output));
+    REQUIRE(session.SetChannelEnabled(TraceContextChannel, true));
+    {
+        CorrelationScope request(CorrelationIds{3, 0, 0, 0, 99});
+        const CorrelationEntry* top = detail::TopCorrelationEntry();
+        REQUIRE(top != nullptr);
+        CHECK(top->ext[CorrelationPushExtension] != 0);
+    }
+
+    session.Stop();
+    TraceStreamDecoder decoder(allocator);
+    REQUIRE(decoder.Decode(output.bytes.View()));
+    const DecodedSchema* schema = decoder.FindSchema(StringView("Trace.ContextDefinition"));
+    REQUIRE(schema != nullptr);
+    Array<DecodedRecord> records(allocator);
+    (void)decoder.DecodeRecordsPartial(TraceFormat::DefinitionStreamId, records);
+    bool found = false;
+    for (const DecodedRecord& record : records) {
+        if (record.typeId != schema->typeId ||
+            record.fixed.Size() < TraceStandardFormat::ContextDefinitionFixedBytes) {
+            continue;
+        }
+
+        const uint8* values =
+            record.fixed.Data() + TraceStandardFormat::ContextDefinitionValuesOffset;
+        constexpr usize RequestIndex = 4;
+        found = found || (LoadLittleEndian<uint64>(values) == 3 &&
+                          LoadLittleEndian<uint64>(values + RequestIndex * sizeof(uint64)) == 99);
+    }
+
+    CHECK(found);
 }

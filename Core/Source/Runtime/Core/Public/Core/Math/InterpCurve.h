@@ -453,9 +453,10 @@ public:
     // 끝 값과 곡선 키 구간의 극값(Hermite 도함수의 근이 구간 안일 때)을 넣는다. 구간 모양은 시작
     // 키의 모드로 정한다(곡선 모드가 아니면 끝 값만 — Constant 구간도 그렇다).
     // - UE와 다른 점(설계 15절 22): 루프 커브의 닫는 구간(마지막 키 → 첫 키)의 끝 시간을
-    //   마지막 키 + 루프 offset으로 둔다 — UE는 첫 키의 입력값을 넘겨 구간 길이가 음수가 되고
-    //   접선 크기와 근 판정이 뒤집힌다. 키 하나의 루프 커브도 자기 자신으로 가는 닫는 구간을
-    //   본다 — UE는 키 하나면 구간을 보지 않지만 Eval은 그 구간을 Hermite로 평가한다.
+    //   마지막 키 + 루프 offset, 길이를 루프 offset 그대로(Eval과 같다) 둔다 — UE는 첫 키의
+    //   입력값을 넘겨 구간 길이가 음수가 되고 접선 크기와 근 판정이 뒤집힌다. 키 하나의 루프 커브도
+    //   자기 자신으로 가는 닫는 구간을 본다 — UE는 키 하나면 구간을 보지 않지만 Eval은 그 구간을
+    //   Hermite로 평가한다.
     // - 지원 형식은 Traits::HasBounds(float·double·Vector2/3·LinearColor)다 — quaternion·Vector4는
     //   컴파일되지 않는다.
     // 실패: 키가 없으면 NotFound다(UE는 인자로 받은 기본값). 할당하지 않는다.
@@ -482,7 +483,9 @@ public:
             const bool closing = index == count - 1;
             const Point& start = points_[index];
             const Point& end = closing ? points_[0] : points_[index + 1];
+            // 닫는 구간의 길이는 Eval(MakeSegment)과 같은 루프 offset 그대로다.
             const float endTime = closing ? start.inValue + loopKeyOffset_ : end.inValue;
+            const float duration = closing ? loopKeyOffset_ : end.inValue - start.inValue;
             Scalar startValue[Components];
             Scalar startLeave[Components];
             Scalar endValue[Components];
@@ -496,7 +499,7 @@ public:
                 Scalar high;
                 math::CurveSegmentBounds(low, high, startValue[component], startLeave[component],
                                          start.inValue, endValue[component], endArrive[component],
-                                         endTime, start.IsCurveKey());
+                                         endTime, duration, start.IsCurveKey());
                 // UE FMath::Min·Max(`A < B ? A : B`, `B < A ? A : B`)와 같은 선택이다.
                 minimum[component] = minimum[component] < low ? minimum[component] : low;
                 maximum[component] = high < maximum[component] ? maximum[component] : high;

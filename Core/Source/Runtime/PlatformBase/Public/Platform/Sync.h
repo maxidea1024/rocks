@@ -90,6 +90,9 @@ public:
     ManualResetEvent& operator=(const ManualResetEvent&) = delete;
 
     void Signal() noexcept;
+    // 막히지 않는 Signal이다. 내부 lock을 TryLock으로 attempts번까지 시도하고, 잡으면 Signal과 같고
+    // true다. 못 잡으면 false다(종료 경로처럼 막히면 안 되는 곳에서 쓴다).
+    bool TrySignal(uint32 attempts = 1) noexcept;
     void Reset() noexcept;
     WaitResult Wait(uint32 timeoutMs = InfiniteTimeout) noexcept;
 

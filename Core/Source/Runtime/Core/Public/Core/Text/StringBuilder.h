@@ -62,6 +62,9 @@ class StringBuilderBase;
 // - 실패를 반환하면 그 서식 호출 전체가 실패하고 builder 내용은 호출 전으로 돌아간다(로그 렌더는
 //   예외로 그 자리만 "<format error>"로 바꾼다).
 // - out은 FixedStringBuilder(잘림 모드)일 수 있다. 그때 넘치는 출력은 잘리고 성공한다.
+// - 선택: `static constexpr bool IsValidSpec(StringView spec) noexcept`를 두면 로그 템플릿이 spec을
+//   검사한다. 리터럴 템플릿은 컴파일 타임에(잘못되면 LogTemplateError_InvalidFormatterSpec 컴파일
+//   오류), RuntimeTemplate은 캡처 때 검사한다. 없으면 Format이 실행 중에 판단한다.
 template <typename T>
 struct Formatter;
 
@@ -102,6 +105,13 @@ struct FormatArg {
 template <typename T>
 concept HasFormatter = requires(StringBuilderBase& out, const T& value, StringView spec) {
     { Formatter<T>::Format(out, value, spec) } noexcept;
+};
+
+// Formatter<T>가 spec 검사 함수 IsValidSpec을 가졌는지다(Formatter 설명).
+template <typename T>
+concept HasFormatterSpecCheck = HasFormatter<T> && requires(StringView spec) {
+    { Formatter<T>::IsValidSpec(spec) } noexcept;
+    requires IsSameV<decltype(Formatter<T>::IsValidSpec(spec)), bool>;
 };
 
 // const·volatile·참조를 벗긴 인자 타입이다.

@@ -7,12 +7,6 @@
 namespace rocks {
 namespace {
 
-// 레이아웃 토큰 이름과 허용하는 형식이다.
-struct TokenName {
-    StringView name;
-    uint8 token;
-};
-
 // 형식 표지(Part::variant)다. 0은 형식 없음이다.
 constexpr uint8 VariantMilliseconds = 1;
 constexpr uint8 VariantUpper3 = 2;
@@ -56,6 +50,26 @@ void AppendFormatted(Writer& writer, StringView format, const Args&... args) noe
     FixedStringBuilder text{Span<char>(storage)};
     if (text.TryAppendFormat(format, args...)) {
         writer.Append(text.View());
+    }
+}
+
+bool HasCorrelationIds(const LogEvent& event) noexcept {
+    return event.hasCorrelation && !IsEmptyCorrelation(event.correlation);
+}
+
+// "session=3 task=1842"(0인 칸은 뺀다)
+void AppendCorrelation(Writer& writer, const LogEvent& event) noexcept {
+    uint64 values[CorrelationFieldCount];
+    CorrelationFieldValues(event.correlation, values);
+    bool first = true;
+    for (usize index = 0; index < CorrelationFieldCount; ++index) {
+        if (values[index] == 0) {
+            continue;
+        }
+
+        AppendFormatted(writer, first ? "{}={}" : " {}={}", CorrelationFieldNames[index],
+                        values[index]);
+        first = false;
     }
 }
 
@@ -113,25 +127,22 @@ void AppendPairs(Writer& writer, Span<const LogProperty> pairs, StringView templ
 
 } // namespace
 
-Result<LogLayout> LogLayout::Parse(StringView pattern, const LogLayoutOptions& options) noexcept {
-    static constexpr TokenName Names[] = {
-        {"Timestamp", static_cast<uint8>(Token::Timestamp)},
-        {"Elapsed", static_cast<uint8>(Token::Elapsed)},
-        {"Level", static_cast<uint8>(Token::Level)},
-        {"Category", static_cast<uint8>(Token::Category)},
-        {"EventId", static_cast<uint8>(Token::EventId)},
-        {"Thread", static_cast<uint8>(Token::Thread)},
-        {"Frame", static_cast<uint8>(Token::Frame)},
-        {"Message", static_cast<uint8>(Token::Message)},
-        {"Template", static_cast<uint8>(Token::Template)},
-        {"Properties", static_cast<uint8>(Token::Properties)},
-        {"Context", static_cast<uint8>(Token::Context)},
-        {"Location", static_cast<uint8>(Token::Location)},
-        {"NewLine", static_cast<uint8>(Token::NewLine)},
-    };
+Result<LogLayout> LogLayout::Parse(StringView pattern, const LogLayoutOptions& options,
+                                   LogLayoutParseError* error) noexcept {
+    static_assert(static_cast<usize>(Token::Correlation) + 1 == detail::LogLayoutTokenCount,
+                  "every layout token needs a name");
+    static_assert(static_cast<usize>(Token::Timestamp) == detail::LogLayoutTimestampToken &&
+                      static_cast<usize>(Token::Level) == detail::LogLayoutLevelToken,
+                  "layout token numbers must match the name table");
 
-    if (!pattern.IsValidUtf8()) {
-        return Result<LogLayout>::Failure(ErrorCode::InvalidArgument);
+    // 문법은 상수 평가용 검사와 같은 함수로 먼저 본다. 아래 해석은 통과한 패턴만 받는다.
+    LogLayoutParseError scanned;
+    if (!detail::ScanLogLayout(pattern, scanned)) {
+        if (error != nullptr) {
+            *error = scanned;
+        }
+
+        return Result<LogLayout>::Failure(scanned.code);
     }
 
     LogLayout layout;
@@ -168,9 +179,9 @@ Result<LogLayout> LogLayout::Parse(StringView pattern, const LogLayoutOptions& o
 
         bool known = false;
         Part part;
-        for (const TokenName& name : Names) {
-            if (name.name == token.name) {
-                part.token = static_cast<Token>(name.token);
+        for (usize index = 0; index < detail::LogLayoutTokenCount; ++index) {
+            if (detail::LogLayoutTokenNames[index] == token.name) {
+                part.token = static_cast<Token>(index);
                 known = true;
                 break;
             }
@@ -234,6 +245,8 @@ bool LogLayout::IsEmpty(const Part& part, const LogEvent& event) const noexcept 
         return !HasUnusedProperties(event);
     case Token::Context:
         return event.context.Size() == 0;
+    case Token::Correlation:
+        return !HasCorrelationIds(event);
     case Token::Location:
         return event.level < options_.locationMinimum || event.location.file == nullptr ||
                event.location.file[0] == '\0';
@@ -314,6 +327,9 @@ void LogLayout::EmitToken(const Part& part, const LogEvent& event, void* raw) co
         return;
     case Token::NewLine:
         writer.Append("\n");
+        return;
+    case Token::Correlation:
+        AppendCorrelation(writer, event);
         return;
     }
 }

@@ -880,13 +880,11 @@ void WorkerScheduler::RunWorker(void* raw) noexcept {
             TaskLaneScope laneScope(selected->lane);
             if (run) {
                 WorkerTaskContext context(selected);
-                if (!selected->trace.id.IsTraced()) {
-                    body(context);
-                } else {
-                    // 시작·끝 사건, 저장한 문맥 복원, CPU 구간 "Task.Run"(TraceTaskScope).
-                    TraceTaskScope traced(selected->trace);
-                    body(context);
-                }
+                // 저장한 상관 id는 늘 복원하고(trace 채널·세션과 무관, 로깅 L15), 기록한 task면
+                // 시작·끝 사건과 CPU 구간 "Task.Run"도 남긴다. 기록하지 않고 문맥도 없는 task는
+                // 생성·소멸이 분기 하나씩이다(TraceTaskScope).
+                TraceTaskScope traced(selected->trace);
+                body(context);
                 error = context.Error();
                 {
                     platform::LockGuard lock(state.gate);

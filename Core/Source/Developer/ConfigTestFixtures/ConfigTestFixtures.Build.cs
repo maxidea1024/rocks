@@ -9,7 +9,7 @@ public sealed class ConfigTestFixtures : CoreModuleRules
 
     protected override string ModuleName => "ConfigTestFixtures";
 
-    protected override string[] RequiredModules => ["ObjectRuntime"];
+    protected override string[] RequiredModules => ["ObjectRuntime", "CoreTypeBindings"];
 
     protected override bool HasSources => false;
 

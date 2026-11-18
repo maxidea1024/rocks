@@ -122,6 +122,8 @@ internal static class CompilerDriver
             bindsArguments.Add("-");
             await ResolveBindsAsync(declared, options.Module, options.Inputs.Count,
                 extra => ProcessRunner.RunAsync(new(compiler, bindsArguments, root, environment, ValidateGeneratedCode(unit + extra), TimeSpan.FromMinutes(2))));
+            // Binds enum 미러는 실제 enum의 열거자 목록(첫 실행의 AST)과 1:1이어야 한다(RMC2401).
+            parser.VerifyEnumMirrors(declared.Values);
             // 정적 배열 PROPERTY의 원소 형식도 같은 번역 단위에 탐침 변수를 붙인 Clang 실행으로 정규 철자를 얻는다(리플렉션 B9g —
             // StaticArrayProbe). 정적 배열이 없으면 실행하지 않는다.
             List<string> staticArguments = [.. arguments.Take(arguments.Count - 1)];

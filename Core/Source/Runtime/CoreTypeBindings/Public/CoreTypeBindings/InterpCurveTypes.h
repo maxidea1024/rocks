@@ -24,8 +24,8 @@
 //   Name= "points"·"looped"·"loopKeyOffset"이다.
 // - 커브 미러의 Validate(검증 hook — Docs/Design/CurveData.ko.md 9.1절)가 InterpCurve
 //   불변식을 지킨다: 키 입력값이 유한하고 비내림차순, 루프 offset이 유한, 루프가 켜져 있으면
-//   키가 있고 offset이 양수다. graph decode·JSON import·대입 묶음·경로 쓰기가 어기는 값을
-//   게시하지 않는다(InvalidArgument).
+//   offset이 양수다(키 없는 루프 커브도 받는다 — Reset이 남기는 값). graph decode·JSON import·대입
+//   묶음·경로 쓰기가 어기는 값을 게시하지 않는다(InvalidArgument).
 //
 // 사용 예(이 모듈에 의존하는 모듈의 리플렉션 클래스):
 //   ROCKS_CLASS()
@@ -60,8 +60,10 @@ Result<void> ValidateInterpCurve(const InterpCurve<T>& curve) noexcept {
         }
     }
 
+    // 루프면 offset이 유한한 양수다. 키를 모두 지운 루프 커브(Reset·TryRemovePoint는 루프를
+    // 남긴다 — UE와 같다)도 받는다.
     const float offset = curve.LoopKeyOffset();
-    if (!math::IsFinite(offset) || (curve.IsLooped() && (points.Size() == 0 || !(offset > 0.0f)))) {
+    if (!math::IsFinite(offset) || (curve.IsLooped() && !(offset > 0.0f))) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

@@ -283,3 +283,34 @@ TEST(Config_ByteArrayRejectsArrayOperations) {
         CHECK(settings.blob.Size() == 3);
     }
 }
+
+// InterpCurve 설정(CoreTypeBindings 미러 — 묶음 리뷰 5): 정렬된 키는 받고 정렬을 깨는 층 값은 hook
+// 거부(InvalidStructValue)이며 값이 그대로다. 묶음 리뷰 4: 배열 연산 `$remove`를 입력값
+// 내림차순으로 적어도 결과가 정렬돼 있으면 받는다 — 연산 목록의 정규화(중간 import)는 hook을 보지
+// 않고 최종 값만 hook이 본다.
+TEST(Config_InterpCurveSettingsValidateFinalValue) {
+    ConfigFixture fixture;
+    REQUIRE(fixture.Context().RegisterSettings<config_fixture::CurveSettings>());
+    REQUIRE(fixture.Context().Sync());
+    const auto& settings = fixture.Context().Get<config_fixture::CurveSettings>();
+    CHECK(fixture.Rejects(
+        ConfigLayer::Engine, "Render",
+        R"({"CurveCheck": {"curve": {"points": [{"inValue": 2}, {"inValue": 1}]}}})"));
+    CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::FieldValue, 0, 0,
+                                reflection_text::TextDiagnosticCode::InvalidStructValue));
+    CHECK(settings.curve.PointCount() == 0);
+    REQUIRE(fixture.Context().AddLayerText(
+        ConfigLayer::Engine, "x", "Render", "<test>",
+        R"({"CurveCheck": {"curve": {"points": [{"inValue": 0, "outValue": 1},
+            {"inValue": 1, "outValue": 2}, {"inValue": 2, "outValue": 3}]}}})"));
+    REQUIRE(fixture.Context().Sync());
+    REQUIRE(settings.curve.PointCount() == 3);
+    REQUIRE(fixture.Context().AddLayerText(
+        ConfigLayer::Project, "y", "Render", "<test>",
+        R"({"CurveCheck": {"curve": {"points": {"$remove": [{"inValue": 2, "outValue": 3},
+            {"inValue": 0, "outValue": 1}]}}}})"));
+    REQUIRE(fixture.Context().Sync());
+    REQUIRE(settings.curve.PointCount() == 1);
+    CHECK(settings.curve.GetPoint(0).inValue == 1.0f &&
+          settings.curve.GetPoint(0).outValue == 2.0f);
+}

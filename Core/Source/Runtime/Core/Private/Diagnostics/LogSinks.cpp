@@ -252,6 +252,31 @@ Result<void> WriteRecord(JsonWriter& json, const LogEvent& event) noexcept {
         result = json.EndObject();
     }
 
+    // 상관 id: 0이 아닌 칸만, 모두 0이거나 없으면 키를 쓰지 않는다.
+    if (result && event.hasCorrelation && !IsEmptyCorrelation(event.correlation)) {
+        uint64 values[CorrelationFieldCount];
+        CorrelationFieldValues(event.correlation, values);
+        result = json.Key("corr");
+        if (result) {
+            result = json.BeginObject();
+        }
+
+        for (usize index = 0; result && index < CorrelationFieldCount; ++index) {
+            if (values[index] == 0) {
+                continue;
+            }
+
+            result = json.Key(CorrelationFieldNames[index]);
+            if (result) {
+                result = json.UInt64(values[index]);
+            }
+        }
+
+        if (result) {
+            result = json.EndObject();
+        }
+    }
+
     if (result) {
         result = json.Key("src");
     }

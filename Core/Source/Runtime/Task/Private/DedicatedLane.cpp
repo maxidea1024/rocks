@@ -1,14 +1,17 @@
 #include <Task/DedicatedLane.h>
+#include <Core/Diagnostics/Correlation.h>
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
 
 namespace rocks {
 
 struct DedicatedLane::Node {
-    explicit Node(Function<void()>&& body) noexcept : task(Move(body)) {
+    Node(Function<void()>&& body, const CorrelationToken& captured) noexcept
+        : task(Move(body)), correlation(captured) {
     }
 
     Function<void()> task;
+    CorrelationToken correlation;
     Node* next = nullptr;
 };
 
@@ -142,13 +145,17 @@ Result<void> DedicatedLane::Post(Function<void()>&& task) noexcept {
         return Result<void>::Failure(memory.Error());
     }
 
+    // 올린 스레드의 상관 id를 lane 작업에 넘긴다(로깅 L15). 사본은 잠금 밖에서 만든다. 스택이 비면
+    // 분기 하나다.
+    const CorrelationToken correlation =
+        CorrelationDepth() != 0 ? CaptureCorrelation() : CorrelationToken{};
     bool accepted = false;
     bool drain = false;
     {
         platform::LockGuard lock(gate_);
         const bool laneContinuation = running_ && stopping_ && IsInsideLane();
         if (accepting_ || laneContinuation) {
-            Node* node = ConstructAt<Node>(memory.Value(), Move(task));
+            Node* node = ConstructAt<Node>(memory.Value(), Move(task), correlation);
             if (tail_ != nullptr) {
                 tail_->next = node;
             } else {
@@ -274,6 +281,9 @@ void DedicatedLane::RunNode(Node* node) noexcept {
         // 수 있고, 그 안에서 자기 lane을 기다리면 교착이기 때문이다.
         LaneFrame frame(this);
         TaskLaneScope scope(lane_);
+        // 작업 동안만 올린 쪽 상관 id를 쌓는다. 범위가 끝나면 lane 스레드의 깊이는 원래대로다(작업
+        // 사이로 새지 않는다).
+        CorrelationScope correlation(node->correlation);
         node->task();
         node->task.Reset();
     }

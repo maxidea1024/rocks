@@ -53,12 +53,12 @@ T CubicInterp(const T& P0, const T& T0, const T& P1, const T& T1, const U& A) no
 // UnrealMath.cpp 1512–1573
 template <typename T>
 void FindBounds(T& OutMin, T& OutMax, T Start, T StartLeaveTan, float StartT, T End, T EndArriveTan,
-                float EndT, bool bCurve) noexcept {
+                float EndT, float Length, bool bCurve) noexcept {
     OutMin = Min(Start, End);
     OutMax = Max(Start, End);
 
     if (bCurve) {
-        T Diff = EndT - StartT;
+        T Diff = Length; // UE: EndT - StartT(호출자가 넘긴다)
         StartLeaveTan *= Diff;
         EndArriveTan *= Diff;
 
@@ -69,7 +69,7 @@ void FindBounds(T& OutMin, T& OutMax, T Start, T StartLeaveTan, float StartT, T 
         if (IsNearlyZero(a)) {
             if (!IsNearlyZero(b)) {
                 const T x = -c / b;
-                const T t = StartT + x * (EndT - StartT);
+                const T t = StartT + x * Length;
                 if (t > StartT && t < EndT) {
                     const T Val = CubicInterp(Start, StartLeaveTan, End, EndArriveTan, x);
                     OutMin = Min(OutMin, Val);
@@ -82,7 +82,7 @@ void FindBounds(T& OutMin, T& OutMax, T Start, T StartLeaveTan, float StartT, T 
                 const T SqrtDisc = platform::PlatformMath::Sqrt(Discriminant);
 
                 const T x0 = (-b + SqrtDisc) / (2.f * a);
-                const T t0 = StartT + x0 * (EndT - StartT);
+                const T t0 = StartT + x0 * Length;
                 if (t0 > StartT && t0 < EndT) {
                     const T Val = CubicInterp(Start, StartLeaveTan, End, EndArriveTan, x0);
 
@@ -91,7 +91,7 @@ void FindBounds(T& OutMin, T& OutMax, T Start, T StartLeaveTan, float StartT, T 
                 }
 
                 const T x1 = (-b - SqrtDisc) / (2.f * a);
-                const T t1 = StartT + x1 * (EndT - StartT);
+                const T t1 = StartT + x1 * Length;
                 if (t1 > StartT && t1 < EndT) {
                     const T Val = CubicInterp(Start, StartLeaveTan, End, EndArriveTan, x1);
 
@@ -115,21 +115,21 @@ struct Point {
 // UnrealMath.cpp 1575–1662: 성분마다 FindBounds 뒤 CurrentMin = Min(CurrentMin, OutMin),
 // CurrentMax = Max(CurrentMax, OutMax). endInVal은 End.InVal(fixClosing이면 닫는 구간에서 바뀐다).
 template <typename S, usize N>
-void IntervalBounds(const Point<S, N>& Start, const Point<S, N>& End, float endInVal,
+void IntervalBounds(const Point<S, N>& Start, const Point<S, N>& End, float endInVal, float length,
                     S (&CurrentMin)[N], S (&CurrentMax)[N]) noexcept {
     for (usize component = 0; component < N; ++component) {
         S OutMin;
         S OutMax;
         FindBounds(OutMin, OutMax, Start.OutVal[component], Start.LeaveTangent[component],
                    Start.InVal, End.OutVal[component], End.ArriveTangent[component], endInVal,
-                   Start.bCurve);
+                   length, Start.bCurve);
         CurrentMin[component] = Min(CurrentMin[component], OutMin);
         CurrentMax[component] = Max(CurrentMax[component], OutMax);
     }
 }
 
-// InterpCurve.h 746–772(키 1개 이상). fixClosing이면 닫는 구간 끝 시간이 마지막 키 + offset이고 키
-// 하나의 루프 커브도 닫는 구간을 본다.
+// InterpCurve.h 746–772(키 1개 이상). fixClosing이면 닫는 구간 끝 시간이 마지막 키 + offset, 길이가
+// offset 그대로이고 키 하나의 루프 커브도 닫는 구간을 본다.
 template <typename S, usize N>
 void CalcBounds(const Point<S, N>* Points, int32 NumPoints, bool bIsLooped, float LoopKeyOffset,
                 bool fixClosing, S (&OutMin)[N], S (&OutMax)[N]) noexcept {
@@ -149,7 +149,10 @@ void CalcBounds(const Point<S, N>* Points, int32 NumPoints, bool bIsLooped, floa
         const int32 NextIndex = (Index == NumPoints - 1) ? 0 : (Index + 1);
         const float endInVal = fixClosing && NextIndex == 0 ? Points[Index].InVal + LoopKeyOffset
                                                             : Points[NextIndex].InVal;
-        IntervalBounds(Points[Index], Points[NextIndex], endInVal, OutMin, OutMax);
+        // fixClosing이면 닫는 구간 길이도 Rocks처럼 offset 그대로다(UE는 EndT - StartT).
+        const float length =
+            fixClosing && NextIndex == 0 ? LoopKeyOffset : endInVal - Points[Index].InVal;
+        IntervalBounds(Points[Index], Points[NextIndex], endInVal, length, OutMin, OutMax);
     }
 }
 
@@ -390,5 +393,50 @@ TEST(InterpCurveBounds_HandVectors) {
     CHECK(SameBits(withNaN.Value().minimum, nanMin[0]) &&
           SameBits(withNaN.Value().maximum, nanMax[0]));
 }
+
+} // namespace rocks::test
+
+namespace rocks::test {
+
+// 묶음 리뷰 3: 닫는 구간의 길이는 Eval처럼 루프 offset 그대로다(마지막 키 1000 + offset 0.1은 float
+// 반올림으로 길이 0.09997559가 된다). 키 하나의 곡선 루프에서 범위 최대가 offset 그대로의 Hermite
+// 극값(손 계산)과 상대 1e-5 안이고, 촘촘한 Eval 표본이 그것을 넘지 않는다.
+TEST(InterpCurveBounds_ClosingSegmentUsesLoopOffset) {
+    SystemAllocator allocator;
+    InterpCurve<float> curve(allocator);
+    // offset 0.1을 키 0에서 정한 뒤 키를 1000으로 옮긴다(offset은 마지막 키 기준으로 남는다).
+    REQUIRE(curve.TryAddPoint(0.0f, 0.0f));
+    REQUIRE(curve.TrySetLoopKey(0.1f));
+    REQUIRE(curve.TryRemovePoint(0));
+    REQUIRE(curve.TryAddPoint(
+        InterpCurvePoint<float>(1000.0f, 0.0f, 0.0f, 30.0f, InterpCurveMode::CurveUser)));
+    REQUIRE(curve.IsLooped());
+    const float offset = curve.LoopKeyOffset();
+    CHECK(offset == 0.1f);
+    CHECK(offset != (1000.0f + offset) - 1000.0f); // 반올림으로 길이가 다르다
+    auto bounds = curve.TryCalcBounds();
+    REQUIRE(bounds);
+    // P0 = P1 = 0, T0 = 30·offset, T1 = 0 — 극값 α = 1/3에서 T0·4/27(길이를 (1000 + offset) −
+    // 1000으로 쓰면 상대 2.4e-4만큼 작다).
+    const double expected = 30.0 * static_cast<double>(offset) * 4.0 / 27.0;
+    CHECK(platform::PlatformMath::Abs(static_cast<double>(bounds.Value().maximum) - expected) <=
+          1.0e-5 * expected);
+    CHECK(bounds.Value().minimum == 0.0f);
+    float sampled = 0.0f;
+    for (int32 sample = 0; sample <= 1000; ++sample) {
+        const float value = curve.Eval(1000.0f + offset * (static_cast<float>(sample) / 1000.0f));
+        sampled = value > sampled ? value : sampled;
+    }
+
+    CHECK(sampled <= bounds.Value().maximum * (1.0f + 1.0e-6f));
+    CHECK(sampled >= bounds.Value().maximum * (1.0f - 1.0e-3f));
+}
+
+// 묶음 리뷰 5: quaternion·Vector4 커브에는 TryCalcBounds가 없다(HasBounds 거짓 — 컴파일 거부).
+template <typename T>
+concept CurveHasBounds = requires(const InterpCurve<T>& curve) { curve.TryCalcBounds(); };
+
+static_assert(!CurveHasBounds<Quat> && !CurveHasBounds<Quatd> && !CurveHasBounds<Vec4>);
+static_assert(CurveHasBounds<Vec3d> && CurveHasBounds<LinearColor> && CurveHasBounds<double>);
 
 } // namespace rocks::test

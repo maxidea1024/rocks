@@ -48,8 +48,9 @@ constexpr bool IsCurveMode(InterpCurveMode mode) noexcept {
 //   ClampsAutoTangents   true면 CurveAutoClamped 키의 자동 접선을 성분별로 clamp한다. false면
 //                   CurveAuto와 같게 계산한다(UE 일반 ComputeCurveTangent — FLinearColor·FVector4).
 //   HasBounds       true면 InterpCurve::TryCalcBounds(성분별 최소·최대 — UE CalcBounds)를 제공한다.
-//                   UE가 구간 범위 함수를 둔 형식(float·FVector2D·FVector·FLinearColor)과 그 정밀도
-//                   짝이다. quaternion·Vector4는 false다(UE 일반 형식은 아무것도 하지 않는다).
+//                   UE 범위 함수가 있는 형식은 float·FVector2D·FVector·FLinearColor 넷이고,
+//                   Vec2f·Vec3f·double은 같은 식을 넓혀 적용했다. quaternion·Vector4는 false다(UE
+//                   일반 형식은 아무것도 하지 않는다).
 //   DefaultValue()  빈 커브 평가의 기본 fallback(0, quaternion은 항등)이다.
 //   DefaultTangent  새 키의 접선 기본값(0). quaternion은 키 자신(제어점 = 키, 정지)이다.
 //   NaNValue()      모든 성분이 quiet NaN인 값(NaN 입력 평가 결과)이다.

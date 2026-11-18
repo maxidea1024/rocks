@@ -3,6 +3,7 @@
 #include <Core/Containers/Array.h>
 #include <Core/Containers/OrderedMap.h>
 #include <Core/Containers/OrderedSet.h>
+#include <Core/Math/InterpCurve.h>
 #include <Core/Text/Name.h>
 #include <Core/Result.h>
 #include <Core/Text/String.h>
@@ -45,6 +46,16 @@ struct FixtureSpan {
 ROCKS_STRUCT(Settings(Branch = "Render", Section = "SpanCheck"))
 struct SpanSettings {
     ROCKS_PROPERTY() FixtureSpan span;
+};
+
+// InterpCurve 설정 섹션이다(CoreTypeBindings 미러 — 검증 hook이 키 정렬을 본다. 기본 fixture에
+// 등록하지 않는다 — 그 시험이 따로 등록한다. Docs/Design/CurveData.ko.md 17.8절).
+ROCKS_STRUCT(Settings(Branch = "Render", Section = "CurveCheck"))
+struct CurveSettings {
+    explicit CurveSettings(Allocator& allocator) noexcept : curve(allocator) {
+    }
+
+    ROCKS_PROPERTY() InterpCurve<float> curve;
 };
 
 // byte 배열 설정 섹션이다(기본 fixture에 등록하지 않는다 — 그 시험이 따로 등록한다). 값은 Base64

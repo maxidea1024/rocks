@@ -13,6 +13,8 @@ struct EngineHostOptions {
     // Engine branch 설정 파일(JSON)이다. 엔진 층 파일 다음 Project 층으로 읽는다(log.*는 "Settings"
     // 섹션). null이면 읽지 않는다.
     const char* configPath = nullptr;
+    // trace 파일 경로다(`--trace-file <path>`, trace.file 명령과 같다). null이면 열지 않는다.
+    const char* traceFile = nullptr;
     // 명령줄 `--set=<target>=<value>`·`--trace=<목록>` 인자다(나온 순서). 실행 동안 빌린다.
     rocks::Span<const rocks::StringView> arguments{};
 };

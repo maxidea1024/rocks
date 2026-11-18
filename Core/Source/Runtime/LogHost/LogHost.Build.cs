@@ -7,5 +7,5 @@ public sealed class LogHost : CoreModuleRules
 {
     protected override string ModuleName => "LogHost";
 
-    protected override string[] RequiredModules => ["Config", "Crypto", "Core"];
+    protected override string[] RequiredModules => ["Config", "Crypto", "Compression", "Core"];
 }

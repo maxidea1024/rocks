@@ -18,7 +18,8 @@
 //     magic        8   "RKLOGENC"
 //     version      1   1
 //     kem          1   KemAlgorithm(X-Wing = 1)
-//     reserved     2   0
+//     flags        1   LogFileFlag* 비트(0 또는 LogFileFlagCompressedBatches)
+//     reserved     1   0
 //     kemCiphertext 1120  개발자 공개키로 캡슐화한 암호문(X-Wing)
 //     streamHeader 24   SecretStreamWriter header
 //   기록(flush 묶음마다 하나, 끝까지 반복)
@@ -42,6 +43,8 @@ namespace rocks::crypto {
 
 inline constexpr uint8 LogFileMagic[8] = {'R', 'K', 'L', 'O', 'G', 'E', 'N', 'C'};
 inline constexpr uint8 LogFileFormatVersion = 1;
+// 머리 flags: 묶음 평문이 독립 zstd frame이다(압축 뒤 봉인, 로깅 L23). 읽는 쪽이 묶음마다 푼다.
+inline constexpr uint8 LogFileFlagCompressedBatches = 1;
 // X-Wing 암호문 길이다(KemInfo::ciphertextBytes).
 inline constexpr usize LogFileKemCiphertextBytes = 1120;
 inline constexpr usize LogFileHeaderBytes =
@@ -58,7 +61,8 @@ public:
     // recipientPublicKey는 X-Wing 공개키(LogFilePublicKeyBytes)다. 복사한다. 길이가 틀리면 생성은
     // 되지만 TryWriteHeader가 InvalidArgument로 실패한다(호스트가 실수로 평문 sink를 쓰지 않게,
     // 키 문제는 sink를 끄는 쪽으로 드러난다).
-    explicit LogFileSealer(Span<const uint8> recipientPublicKey) noexcept;
+    // flags는 머리에 남길 LogFileFlag* 비트다(압축한 묶음을 봉인하면 LogFileFlagCompressedBatches).
+    explicit LogFileSealer(Span<const uint8> recipientPublicKey, uint8 flags = 0) noexcept;
 
     usize HeaderBytes() const noexcept override {
         return LogFileHeaderBytes;
@@ -76,6 +80,7 @@ public:
 
 private:
     KemPublicKey recipient_;
+    uint8 flags_ = 0;
     ErrorCode setupError_ = ErrorCode::None;
     SecretStreamWriter writer_;
 };
@@ -94,7 +99,13 @@ struct LogFileDecodeSummary {
     // 끝 표시 없이 끝난 파일의 꼬리에 완성되지 않은 기록이 있어 버렸는지다(쓰는 중 종료). 길이
     // 머리가 손상돼 파일 끝을 넘는 길이를 가리켜도 같은 모양이다(인증으로 구별할 수 없다).
     bool partialTail = false;
+    // 머리 flags에 LogFileFlagCompressedBatches가 있었는지다(묶음 평문이 zstd frame이다).
+    bool compressedBatches = false;
 };
+
+// 봉인한 로그 파일의 머리에 LogFileFlagCompressedBatches가 있는지다(복호 전에 묶음 평문을 풀지
+// 정할 때). 머리가 짧거나 magic이 다르면 false다.
+bool LogFileHasCompressedBatches(Span<const uint8> file) noexcept;
 
 // file(봉인한 로그 파일 전체)을 recipient 개인키로 열어 묶음마다 output에 평문을 넘긴다. 평문
 // 버퍼는 allocator로 잡는다.

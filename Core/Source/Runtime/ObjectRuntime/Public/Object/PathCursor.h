@@ -429,6 +429,8 @@ private:
     // Detach의 출력 상자·Attach의 입력 상자와 Attach의 출력 자리다.
     DetachedValue* box_ = nullptr;
     PreparedAttach* attach_ = nullptr;
+    // Attach가 상자 값 트리의 검증 hook을 부르는지다(PathPrepareAttach의 validateHooks).
+    bool validateHooks_ = true;
     // PathPrepareReference의 출력 자리다(리플렉션 B9i3c2).
     PreparedReference* reference_ = nullptr;
     // 시작 위치에 건 Registry 컨테이너 준비 사본이다(리플렉션 B9i3c3).

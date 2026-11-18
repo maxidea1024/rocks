@@ -103,6 +103,40 @@ struct TraceModelGpuFrame {
     uint64 endTick = 0;
 };
 
+// 로그 호출 지점의 정의(Trace.LogMessageSpec)다. 같은 spec id가 다시 나오면 처음 것을 쓴다.
+struct TraceModelLogSpec {
+    uint64 specId = 0;
+    uint64 eventId = 0;
+    uint32 line = 0;
+    uint8 level = 0;
+    StringView category;
+    StringView templateText;
+    StringView file;
+    StringView function;
+};
+
+// 로그 기록 하나(Trace.LogMessage)다. 순서 번호 순으로 모은다. thread는 생산자 OS 스레드 id다
+// (Trace.ThreadInfo의 osThreadId로 대응한다). 상관 id는 0이면 없음이다.
+struct TraceModelLog {
+    uint64 order = 0;
+    uint64 tick = 0;
+    uint64 thread = 0;
+    uint64 frame = 0;
+    uint64 specId = 0;
+    uint64 eventId = 0;
+    uint64 correlation[TraceStandardFormat::ContextValueCount]{};
+    uint32 flags = 0;
+    uint8 level = 0;
+    // trace 쪽에서 메시지를 잘랐다 / 동봉한 템플릿을 잘랐다.
+    bool truncated = false;
+    bool templateTruncated = false;
+    StringView message;
+    // spec 정의 대신 기록에 실린 카테고리·템플릿이다(중복 표가 참·정의 상한 초과·정의 버퍼
+    // 부족일 때만, 평소에는 빈 값). 이때 위치(파일·줄·함수)는 없다.
+    StringView inlineCategory;
+    StringView inlineTemplate;
+};
+
 // 채널별 손실 합이다.
 struct TraceModelChannelLoss {
     uint16 channelId = 0;
@@ -197,6 +231,22 @@ public:
         return counters_;
     }
 
+    // 로그 기록이다(순서 번호 순).
+    const Array<TraceModelLog>& Logs() const noexcept {
+        return logs_;
+    }
+
+    // 로그 호출 지점 정의다(spec id 순).
+    const Array<TraceModelLogSpec>& LogSpecs() const noexcept {
+        return logSpecs_;
+    }
+
+    // spec id의 정의다(이진 탐색). 없으면 nullptr다.
+    const TraceModelLogSpec* FindLogSpec(uint64 specId) const noexcept;
+
+    // 기록의 카테고리다: spec 정의가 있으면 그것, 없으면 기록에 실린 값이다.
+    StringView LogCategoryOf(const TraceModelLog& log) const noexcept;
+
     // 채널 id 순이다.
     const Array<TraceModelChannelLoss>& ChannelLosses() const noexcept {
         return channelLosses_;
@@ -259,6 +309,8 @@ private:
     Array<TraceModelGpuQueue> gpuQueues_;
     Array<TraceModelGpuScope> gpuScopes_;
     Array<TraceModelGpuFrame> gpuFrames_;
+    Array<TraceModelLogSpec> logSpecs_;
+    Array<TraceModelLog> logs_;
     TraceModelCaptureStats captureStats_;
     Array<NameEntry> names_;
     TraceModelSummary summary_;

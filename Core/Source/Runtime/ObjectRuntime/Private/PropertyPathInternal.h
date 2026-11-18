@@ -35,9 +35,12 @@ struct PathRunner {
     }
 
     // Detach의 출력 상자·Attach의 입력 상자와 Attach의 출력 자리를 건다(리플렉션 B9i3c0).
-    static void BindBox(PathCursor& cursor, DetachedValue& box, PreparedAttach* attach) noexcept {
+    // validateHooks는 Attach가 상자 값 트리의 검증 hook을 부르는지다(PathPrepareAttach).
+    static void BindBox(PathCursor& cursor, DetachedValue& box, PreparedAttach* attach,
+                        bool validateHooks = true) noexcept {
         cursor.box_ = &box;
         cursor.attach_ = attach;
+        cursor.validateHooks_ = validateHooks;
     }
 
     // PathPrepareReference의 출력 자리를 건다(리플렉션 B9i3c2).
