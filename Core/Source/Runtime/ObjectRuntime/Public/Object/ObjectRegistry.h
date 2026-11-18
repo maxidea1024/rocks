@@ -715,9 +715,9 @@ private:
         Slot* tail = nullptr;
     };
 
-    // 표식(Private/ObjectRegistryGc.cpp). MarkBatch는 직렬 marker의 배치 visitor 콜백이다(잠금 없음
-    // — 처리 표시 아래 단일 marker, Docs/Design/GarbageCollectionScale.ko.md 7.1절). MarkHandles가
-    // 본문이다. 병렬 marker는 ParallelMark(ObjectRegistryGc.cpp)다.
+    // 표식(Private/ObjectRegistryGcMark.cpp). MarkBatch는 직렬 marker의 배치 visitor 콜백이다(잠금
+    // 없음 — 처리 표시 아래 단일 marker, Docs/Design/GarbageCollectionScale.ko.md 7.1절).
+    // MarkHandles가 본문이다. 병렬 marker는 ParallelMark(ObjectRegistryGcParallel.cpp)다.
     static void MarkBatch(void*, const ObjectHandle*, uint32) noexcept;
     void MarkHandles(MarkState&, const ObjectHandle*, uint32) noexcept;
     // 간선 handle이 이 Registry의 슬롯 범위 안인지 본다(Release 검사). Debug는 세대·상태까지 보아

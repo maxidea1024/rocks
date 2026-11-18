@@ -5,7 +5,7 @@
 // ObjectRegistry 참조 간선 쓰기다. 단일 참조(SetEdge)와 컨테이너 편집이 함께 쓰는 owner·대상
 // 검증(CheckContainerOwnerLocked·CheckTargetLocked)을 둔다. ObjectRefArray 편집은
 // ObjectRegistryArrayEdges.cpp, StructRefArray 원소 편집은 ObjectRegistryStructElements.cpp다.
-// 쓰기는 삽입 장벽(ShadeLocked — ObjectRegistryGc.cpp)과 관찰자 기록 계획·예약
+// 쓰기는 삽입 장벽(ShadeLocked — ObjectRegistryGcMark.cpp)과 관찰자 기록 계획·예약
 // (ObjectRegistryObserver.cpp)을 거친다.
 namespace rocks {
 

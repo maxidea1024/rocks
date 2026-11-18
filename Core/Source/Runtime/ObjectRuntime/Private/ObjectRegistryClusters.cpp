@@ -10,7 +10,7 @@
 // ObjectRegistry 클러스터다(GC-S7, Docs/Design/GarbageCollectionScale.ko.md 13절). 클러스터 장부
 // (소속·inCount·outCount·소속/detached/경계 목록), 가입 지정·생성·가입·이탈·해체, 직렬 marker의
 // 클러스터 표식·처리, 레코드 표와 작업 큐 용량, Debug 장부 검증을 둔다. 병렬 marker의 클러스터
-// 처리와 sweep·cutoff 규칙은 ObjectRegistryGc.cpp에 있다.
+// 처리와 sweep·cutoff 규칙은 ObjectRegistryGc.cpp·ObjectRegistryGcMark.cpp에 있다.
 //
 // 장부 기준(13.4절): 소유자 X가 클러스터 C의 소속이면 X의 강한 간선(Trace 간선과 outer)을 센다 —
 // 대상이 C의 소속이거나 C의 detached면 inCount[대상], 그 밖이면 outCount[X]. 소유자가 소속이 아니면

@@ -11,8 +11,8 @@
 // 통계·진단을 둔다. 생성 트랜잭션은 ObjectRegistryCreate.cpp, Outer·이름은
 // ObjectRegistryNames.cpp, 참조 간선 쓰기는 ObjectRegistryEdges.cpp(단일 참조·검증)·
 // ObjectRegistryArrayEdges.cpp(ObjectRefArray)·ObjectRegistryStructElements.cpp(StructRefArray),
-// GC는 ObjectRegistryGc.cpp, 관찰자 기록과 Discard는 ObjectRegistryObserver.cpp, 공용 내부 정의는
-// ObjectRegistryInternal.h다.
+// GC는 ObjectRegistryGc*.cpp(GC 설계 15절), 관찰자 기록과 Discard는 ObjectRegistryObserver.cpp,
+// 공용 내부 정의는 ObjectRegistryInternal.h다.
 namespace rocks {
 
 using namespace registry_detail;
