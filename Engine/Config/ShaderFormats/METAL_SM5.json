@@ -28,7 +28,7 @@
     "interStageVectors": 16,
     "rootConstantBytes": 128
   },
-  "features": ["compute"],
+  "features": ["compute", "vertexViewportLayerOutput"],
   "deviceRequirements": [],
   "producers": [
     { "host": "macos-arm64", "systemTools": ["MetalToolchain"] },

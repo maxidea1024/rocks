@@ -141,6 +141,12 @@ public:
     // OutOfMemory.
     Result<void> TryRemoveRedundantKeys() noexcept;
 
+    // 위와 같고, 남긴 키의 원래 index(오름차순 — 순서를 보존하는 부분열)를 keptIndices에 담는다(키
+    // 핸들 표 CurveKeyHandleTable::TryRemoveRedundantKeys가 남은 키의 핸들을 맞추는 데 쓴다). 지운
+    // 키가 없으면 0..N−1이다. keptIndices는 그 allocator로 다시 채운다. 실패하면 커브와
+    // keptIndices가 그대로다.
+    Result<void> TryRemoveRedundantKeys(Array<usize>& keptIndices) noexcept;
+
     // 리플렉션 경로의 검증 hook이다: 키 시간이 모두 유한하고 오름차순이면 Success, 아니면
     // InvalidArgument.
     static Result<void> Validate(const IntegerStepCurve& curve) noexcept;
@@ -201,6 +207,12 @@ public:
     // 앞·뒤 키와 값(Name 규칙)이 같은 안쪽 키를 지운다. UE FNameCurve에는 없는 연산이다(String과
     // 같은 규칙으로 더한다 — 남은 키를 기본값으로 바꾸지 않는다).
     Result<void> TryRemoveRedundantKeys() noexcept;
+
+    // 위와 같고, 남긴 키의 원래 index(오름차순 — 순서를 보존하는 부분열)를 keptIndices에 담는다(키
+    // 핸들 표 CurveKeyHandleTable::TryRemoveRedundantKeys가 남은 키의 핸들을 맞추는 데 쓴다). 지운
+    // 키가 없으면 0..N−1이다. keptIndices는 그 allocator로 다시 채운다. 실패하면 커브와
+    // keptIndices가 그대로다.
+    Result<void> TryRemoveRedundantKeys(Array<usize>& keptIndices) noexcept;
 
     static Result<void> Validate(const NameStepCurve& curve) noexcept;
 
@@ -265,6 +277,12 @@ public:
     // 앞·뒤 키와 값(byte 비교)이 같은 안쪽 키를 지운다. 남은 키를 기본값으로 바꾸지 않는다(설계
     // 15절 9 — UE는 바꿔 첫 키 이전 평가가 늘 달라진다).
     Result<void> TryRemoveRedundantKeys() noexcept;
+
+    // 위와 같고, 남긴 키의 원래 index(오름차순 — 순서를 보존하는 부분열)를 keptIndices에 담는다(키
+    // 핸들 표 CurveKeyHandleTable::TryRemoveRedundantKeys가 남은 키의 핸들을 맞추는 데 쓴다). 지운
+    // 키가 없으면 0..N−1이다. keptIndices는 그 allocator로 다시 채운다. 실패하면 커브와
+    // keptIndices가 그대로다.
+    Result<void> TryRemoveRedundantKeys(Array<usize>& keptIndices) noexcept;
 
     static Result<void> Validate(const StringStepCurve& curve) noexcept;
 

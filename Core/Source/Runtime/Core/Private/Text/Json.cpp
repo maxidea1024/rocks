@@ -20,7 +20,7 @@ const char* JsonErrorMessage(JsonErrorCode code) noexcept {
     case JsonErrorCode::InvalidNumber:
         return "invalid number";
     case JsonErrorCode::NumberOutOfRange:
-        return "number is out of double range";
+        return "number is out of range";
     case JsonErrorCode::InvalidEscape:
         return "invalid escape sequence";
     case JsonErrorCode::InvalidUtf8:
@@ -44,6 +44,14 @@ const char* JsonErrorMessage(JsonErrorCode code) noexcept {
     }
 
     return "unknown error";
+}
+
+const char* JsonErrorMessage(JsonErrorCode code, JsonSyntax syntax) noexcept {
+    if (syntax == JsonSyntax::Json5 && code == JsonErrorCode::InvalidLiteral) {
+        return "invalid literal (expected true, false, null, Infinity or NaN)";
+    }
+
+    return JsonErrorMessage(code);
 }
 
 // ---- 문서 ----

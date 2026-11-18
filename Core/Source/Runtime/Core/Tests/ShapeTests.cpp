@@ -1,5 +1,6 @@
 #include <Core/Math/Shapes.h>
 #include <TestSupport/Test.h>
+#include <Platform/FloatingPointEnvironment.h>
 #include <Platform/PlatformMath.h>
 
 using namespace rocks;
@@ -464,4 +465,188 @@ TEST(ShapePrecisionConversionIsExplicitAndStaysValid) {
 
     const Segment<double> wideSegment(Segment<float>(Vec3(0, 0, 0), Vec3(0, 0, 1)));
     CHECK(wideSegment.end == Vec3d(0, 0, 1));
+}
+
+namespace {
+
+template <typename T>
+void CheckBoxContainmentUnionAndExpansion() {
+    const Box<T> outer(V<T>(-2, -2, -2), V<T>(2, 2, 2));
+
+    // 닫힌 집합: 면에 닿는 box와 크기 0 box도 포함이다.
+    CHECK(outer.Contains(Box<T>(V<T>(-2, -1, 0), V<T>(2, 1, 2))));
+    CHECK(outer.Contains(Box<T>(V<T>(2, 2, 2), V<T>(2, 2, 2))));
+    CHECK(outer.Contains(outer));
+    CHECK(!outer.Contains(Box<T>(V<T>(-2, -1, 0), V<T>(2.5, 1, 2))));
+    CHECK(!outer.Contains(Box<T>(V<T>(-3, -3, -3), V<T>(-2.5, -2.5, -2.5))));
+    // 역전·NaN·무한대 box는 어떤 box에도 들어 있지 않다.
+    CHECK(!outer.Contains(Box<T>(V<T>(1, 0, 0), V<T>(0, 0, 0))));
+    CHECK(!outer.Contains(Box<T>(V<T>(QuietNaN<T>(), 0, 0), V<T>(0, 0, 0))));
+    const Box<T> everything(Vector3<T>::Splat(-Infinity<T>()), Vector3<T>::Splat(Infinity<T>()));
+    CHECK(!everything.Contains(Box<T>(V<T>(0, 0, 0), V<T>(Infinity<T>(), 0, 0))));
+
+    CHECK(outer.Contains(V<T>(2, -2, 0)));
+    CHECK(!outer.Contains(V<T>(2.5, 0, 0)));
+    CHECK(!outer.Contains(V<T>(QuietNaN<T>(), 0, 0)));
+
+    const Box<T> left(V<T>(-5, 0, 1), V<T>(-4, 1, 2));
+    const Box<T> right(V<T>(3, -1, 0), V<T>(4, 0.5, 6));
+    const Box<T> both = left.Union(right);
+    CHECK(both.min == V<T>(-5, -1, 0));
+    CHECK(both.max == V<T>(4, 1, 6));
+    CHECK(both.Contains(left) && both.Contains(right));
+    CHECK(Box<T>::Empty().Union(left).min == left.min);
+    CHECK(Box<T>::Empty().Union(left).max == left.max);
+    // NaN은 합집합에서 사라지지 않는다.
+    CHECK(!left.Union(Box<T>(V<T>(QuietNaN<T>(), 0, 0), V<T>(0, 0, 0))).IsValid());
+
+    const Box<T> grown = left.ExpandedBy(V<T>(1, 2, 0.5));
+    CHECK(grown.min == V<T>(-6, -2, 0.5));
+    CHECK(grown.max == V<T>(-3, 3, 2.5));
+    CHECK(!left.ExpandedBy(V<T>(-0.5, 0, 0)).IsEmpty());
+    CHECK(left.ExpandedBy(V<T>(-0.75, 0, 0)).IsEmpty());
+}
+
+// 방향 반올림: 아래로 내린 값은 원래 값 이하, 올린 값은 이상이며 둘 다 가장 가까운 float다.
+void CheckDirectedFloatRounding(double value) {
+    const float down = math::ToFloatRoundedDown(value);
+    const float up = math::ToFloatRoundedUp(value);
+    CHECK(static_cast<double>(down) <= value);
+    CHECK(static_cast<double>(up) >= value);
+    CHECK(static_cast<double>(math::NextUp(down)) > value || static_cast<double>(down) == value);
+    CHECK(static_cast<double>(math::NextDown(up)) < value || static_cast<double>(up) == value);
+    if (static_cast<double>(static_cast<float>(value)) == value) {
+        CHECK(down == up);
+    } else {
+        CHECK(math::NextUp(down) == up);
+    }
+}
+
+} // namespace
+
+TEST(ShapeBoxContainmentUnionAndExpansion) {
+    CheckBoxContainmentUnionAndExpansion<float>();
+    CheckBoxContainmentUnionAndExpansion<double>();
+}
+
+TEST(MathNextUpDownStepsOneUlpAndHandlesSpecialValues) {
+    CHECK(math::NextUp(1.0f) == 1.0f + math::MachineEpsilon<float>);
+    CHECK(math::NextDown(1.0f) == 1.0f - math::MachineEpsilon<float> / 2);
+    CHECK(math::NextUp(-1.0) == -1.0 + math::MachineEpsilon<double> / 2);
+    CHECK(math::NextDown(-1.0) == -1.0 - math::MachineEpsilon<double>);
+    // 0의 이웃은 가장 작은 비정규 값이며 +0·-0 모두 같다.
+    CHECK(math::NextUp(0.0f) > 0.0f && math::NextUp(0.0f) < NumericLimits<float>::Min());
+    CHECK(math::NextUp(-0.0f) == math::NextUp(0.0f));
+    CHECK(math::NextDown(0.0) == -math::NextUp(0.0));
+    CHECK(math::NextUp(NumericLimits<float>::Max()) == Infinity<float>());
+    CHECK(math::NextUp(Infinity<float>()) == Infinity<float>());
+    CHECK(math::NextUp(-Infinity<double>()) == NumericLimits<double>::Lowest());
+    CHECK(math::NextDown(-Infinity<float>()) == -Infinity<float>());
+    CHECK(math::IsNaN(math::NextUp(QuietNaN<float>())));
+    CHECK(math::IsNaN(math::NextDown(QuietNaN<double>())));
+    static_assert(math::NextUp(1.0f) > 1.0f, "NextUp must be usable in constant evaluation");
+}
+
+TEST(MathDirectedFloatRoundingBracketsDoubleValues) {
+    // 최근접 반올림이 위로 가는 값(1 + 2^-24 + 2^-40 → 1 + 2^-23)과 아래로 가는 값, 정확한 값,
+    // 음수.
+    const double values[] = {1.0 + 0x1.0p-24 + 0x1.0p-40,
+                             1.0 + 0x1.0p-25,
+                             1.0,
+                             -1.0 - 0x1.0p-30,
+                             0.1,
+                             -0.1,
+                             1.0e-42,
+                             -1.0e-42,
+                             123456789.123,
+                             -987654321.5};
+    for (const double value : values) {
+        CheckDirectedFloatRounding(value);
+    }
+
+    // float 범위를 넘는 값은 포함 관계를 지키는 쪽으로 끝값·무한대가 된다.
+    CHECK(math::ToFloatRoundedDown(1.0e300) == NumericLimits<float>::Max());
+    CHECK(math::ToFloatRoundedUp(1.0e300) == Infinity<float>());
+    CHECK(math::ToFloatRoundedDown(-1.0e300) == -Infinity<float>());
+    CHECK(math::ToFloatRoundedUp(-1.0e300) == NumericLimits<float>::Lowest());
+    // 무한대는 float에서도 표현되므로 그대로다(가장 가까운 아래·위 값이 자기 자신).
+    CHECK(math::ToFloatRoundedDown(Infinity<double>()) == Infinity<float>());
+    CHECK(math::ToFloatRoundedUp(-Infinity<double>()) == -Infinity<float>());
+    CHECK(math::IsNaN(math::ToFloatRoundedDown(QuietNaN<double>())));
+
+    const Box<double> wide(Vec3d(0.1, -0.1, 1.0e10 + 0.5), Vec3d(0.3, 1.0 / 3.0, 1.0e10 + 1.5));
+    const Box<float> narrow = wide.ToFloatOutward();
+    CHECK(static_cast<double>(narrow.min.x) <= wide.min.x);
+    CHECK(static_cast<double>(narrow.min.y) <= wide.min.y);
+    CHECK(static_cast<double>(narrow.min.z) <= wide.min.z);
+    CHECK(static_cast<double>(narrow.max.x) >= wide.max.x);
+    CHECK(static_cast<double>(narrow.max.y) >= wide.max.y);
+    CHECK(static_cast<double>(narrow.max.z) >= wide.max.z);
+    CHECK(Box<double>(narrow).Contains(wide));
+}
+
+namespace {
+
+uint32 Bits(float value) noexcept {
+    return platform::BitCast<uint32>(value);
+}
+
+// 방향 반올림의 비정규·정규 경계 입력과 기대 비트다(아래, 위). 기대값은 IEEE 754 정의에서 손으로
+// 구한 것이다: 2^-149는 가장 작은 비정규 float(비트 1), 2^-126은 가장 작은 정규 float(비트
+// 0x00800000)다.
+struct DirectedCase {
+    double value;
+    uint32 down;
+    uint32 up;
+};
+
+const DirectedCase DirectedCases[] = {
+    {0x1.0p-149, 0x00000001u, 0x00000001u},
+    {0x1.0p-150, 0x00000000u, 0x00000001u},
+    {-0x1.0p-150, 0x80000001u, 0x80000000u},
+    {0x1.8p-149, 0x00000001u, 0x00000002u},
+    {0x1.0p-1074, 0x00000000u, 0x00000001u},
+    {-0x1.0p-1074, 0x80000001u, 0x80000000u},
+    {0x0.fffffep-126, 0x007fffffu, 0x007fffffu},
+    {0x0.ffffffp-126, 0x007fffffu, 0x00800000u},
+    {0x1.0p-126, 0x00800000u, 0x00800000u},
+    {-0x0.ffffffp-126, 0x80800000u, 0x807fffffu},
+    {0.0, 0x00000000u, 0x00000000u},
+    {-0.0, 0x80000000u, 0x80000000u},
+    {0x1.fffffep127, 0x7f7fffffu, 0x7f7fffffu},
+    {0x1.ffffffp127, 0x7f7fffffu, 0x7f800000u},
+    {-0x1.ffffffp127, 0xff800000u, 0xff7fffffu},
+};
+
+bool DirectedCasesMatch() noexcept {
+    bool same = true;
+    for (const DirectedCase& entry : DirectedCases) {
+        same = same && Bits(math::ToFloatRoundedDown(entry.value)) == entry.down &&
+               Bits(math::ToFloatRoundedUp(entry.value)) == entry.up;
+    }
+    // 비정규 값의 이웃(NextUp·NextDown)도 비트 연산이다.
+    same = same && Bits(math::NextDown(platform::BitCast<float>(0x00000001u))) == 0 &&
+           Bits(math::NextUp(platform::BitCast<float>(0x807fffffu))) == 0x807ffffeu &&
+           Bits(math::NextUp(platform::BitCast<float>(0x007fffffu))) == 0x00800000u;
+    return same;
+}
+
+} // namespace
+
+// 비정규 경계: 방향 반올림은 비정규 값까지 정확하다(정수 비트 연산).
+TEST(MathDirectedFloatRoundingSubnormalBoundaries) {
+    CHECK(DirectedCasesMatch());
+    static_assert(math::ToFloatRoundedUp(0x1.0p-150) > 0.0f,
+                  "Directed rounding must be usable in constant evaluation");
+}
+
+// FTZ·DAZ를 켜도 같은 비트를 낸다. 부동소수 비교가 비정규 입력을 0으로 보는 환경에서도 계약("항상
+// value 이하/이상")이 깨지지 않아야 공간 인덱스의 외향 보정이 성립한다.
+TEST(MathDirectedFloatRoundingIgnoresFlushToZero) {
+    const uint64 original = platform::detail::ReadFloatingPointControl();
+    platform::detail::WriteFloatingPointControl(original | platform::detail::FlushToZeroBit() |
+                                                platform::detail::DenormalsAreZeroBit());
+    const bool same = DirectedCasesMatch();
+    platform::detail::WriteFloatingPointControl(original);
+    CHECK(same);
 }

@@ -23,6 +23,7 @@ internal static partial class SelfTests
         FormatCheckTests.Register(suite, options);
         ProcessReviewTests.Register(suite, options);
         ProcessHardTimeoutReviewTests.Register(suite, options);
+        Json5ReaderTests.Register(suite, options);
         // rocks::Array 인스턴스화 실패의 RMC2304 변환 위치: Core Array.h 오류에 딸린 note 중 이 모듈 입력의 첫 위치를 clang
         // (file:line:col)과 clang-cl(file(line,col)) 두 형식 모두에서 찾고, 상대 경로는 Clang 작업 디렉터리 기준이다. 입력이
         // 아닌 note는 건너뛰고, 첫 error가 Array.h가 아니거나 note 앞에 다른 진단(warning 포함)이 끼면 바꾸지 않는다(Docs/Design/

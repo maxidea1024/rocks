@@ -813,10 +813,11 @@ void RunTopologyAndViewport(Bench& bench) noexcept {
         };
         constexpr Rgba White = {255, 255, 255, 255};
         constexpr Rgba Black = {0, 0, 0, 255};
-        // 띠는 정점 5개(삼각형 3개, 마지막은 퇴화)로 그린다. 화면에 딱 맞는 정점 4개 사각형은
-        // lavapipe (mesa 26.2.7 llvmpipe)에서 PS가 push constant 0번 vec4를 읽는 것처럼 색이
-        // 틀린다(2026-11-18 측정, 정점 3·5개와 다른 기본도형은 맞다. llvmpipe 사각형 빠른 경로
-        // 의심, 원인 미확정).
+        // 띠는 정점 5개로 그린다. 다섯째 정점은 퇴화가 아니라 오른쪽 아래 반을 한 번 더 덮는
+        // 삼각형이며, llvmpipe(mesa 26.2.7) linear 경로를 피하려고 둔다. 화면 정렬 사각형만 있는
+        // bin에서 llvmpipe가 셰이더를 AoS u8로 컴파일하면 load_ubo의 정수 offset이 상수
+        // 변환(float_to_ubyte)으로 0이 되어 PS가 push constant 첫 vec4를 읽는다
+        // (LP_PERF=no_rast_linear로 사라짐, 2026-11-18 확인, mesa 버그).
         Check(draw(stripPipeline.Value(), StripQuad, 5) && bench.PixelIs(0, 0, White) &&
                   bench.PixelIs(7, 7, White),
               "triangle strip covers the target");

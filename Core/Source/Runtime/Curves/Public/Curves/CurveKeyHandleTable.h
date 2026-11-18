@@ -108,7 +108,8 @@ Result<Key> CloneTableKey(const Key& key, Allocator& allocator) noexcept {
 // 핸들
 //   발급이 Overflow다(UE는 전역 atomic이고 쿡 중에는 0을 건너뛰며 순환한다).
 // - 편집 함수는 커브와 표를 함께 바꾸고 키 순서가 바뀌면 핸들이 키를 따라간다. 실패하면 커브와 표가
-//   모두 그대로다(String 값은 커브를 바꾸기 전에 사본 키를 먼저 만든다).
+//   모두 그대로다(String 값은 커브를 바꾸기 전에 사본 키를 먼저 만든다). 예외는
+//   TryEditKeys다(실패한 편집 함수가 앞서 바꾼 칸은 남고 표는 그 상태에 맞춘다).
 // - 저장하지 않는다(UE와 같다 — undo 기록은 CU4 단계가 정한다). 복사는 TryCopyFrom(핸들·사본·발급
 //   카운터 그대로), 이동은 noexcept다. 동기화는 없다.
 // - 핸들 → index 조회는 핸들 목록의 선형 탐색이다(사본 비교와 같은 O(N) — 편집기 빈도).
@@ -271,7 +272,8 @@ public:
 
     // curve.TryUpdateOrAddKey(time, arguments...)다(UE UpdateOrAddKey). 허용오차 안의 키 값을
     // 바꿨으면 그 키의 핸들, 키를 더했으면 새 핸들을 돌려준다. 실패는 TryAddKey와 같다(값만 바꾸는
-    // 경우에는 Overflow가 아니다).
+    // 경우에는 Overflow가 아니다). 더할지는 커브 연산이 정한다 — 발급 카운터가 끝인데 키가
+    // 더해졌으면 그 키를 지워 되돌리고 Overflow다(허용오차 인자의 형식과 무관하다).
     template <class Value, class... Rest>
     Result<CurveKeyHandle> TryUpdateOrAddKey(Curve& curve, float time, Value&& value,
                                              Rest&&... rest) noexcept {
@@ -280,10 +282,6 @@ public:
         }
 
         const usize before = curve.KeyCount();
-        if (lastIssued_ == NumericLimits<uint32>::Max() && !WouldUpdate(curve, time, rest...)) {
-            return Result<CurveKeyHandle>::Failure(ErrorCode::Overflow);
-        }
-
         auto pending = PrepareInsert(time, value);
         if (!pending) {
             return Result<CurveKeyHandle>::Failure(pending.Error());
@@ -298,6 +296,11 @@ public:
         if (curve.KeyCount() == before) {
             Refresh(curve, Move(pending.Value()), index);
             return Result<CurveKeyHandle>::Success(handles_[index]);
+        }
+
+        if (lastIssued_ == NumericLimits<uint32>::Max()) {
+            static_cast<void>(curve.TryRemoveKey(index)); // 더한 키를 지우면 커브가 그대로다
+            return Result<CurveKeyHandle>::Failure(ErrorCode::Overflow);
         }
 
         const CurveKeyHandle handle{++lastIssued_};
@@ -452,31 +455,171 @@ public:
         return Result<void>::Success();
     }
 
-    // 키 시간·수·순서를 바꾸지 않는 편집(보간·접선 방식·접선·가중치, AutoSetTangents 등)을 표를
-    // 거쳐 한다: edit(curve)를 부른 뒤 사본을 다시 맞춘다. edit가 키 시간·수를 바꿨으면 표는 무효가
-    // 되고 StaleHandle이다(편집은 이미 적용됐다 — 그런 편집은 표의 다른 함수로 한다). 비트 복사
-    // 가능한 키의 커브만이다(String 키는 TrySetKeyValue로 바꾼다). edit는 Result<void>를 돌려주며
-    // 실패하면 그 오류를 돌려주고 사본을 커브에 다시 맞춘다(edit가 일부를 바꾼 뒤 실패했을 수
-    // 있다).
+    // 모든 키 시간을 delta만큼 옮긴다(UE FIndexedCurve::ShiftCurve(DeltaTime) — IndexedCurve.cpp
+    // 89–117, 핸들 유지). 키 순서가 그대로라 모든 핸들이 같은 키를 가리킨다(UE는 키마다
+    // SetKeyTime이라 같은 시간이 된 키의 순서가 바뀔 수 있다 — 설계 15절 29). 할당하지 않는다.
+    // 실패: StaleHandle, 커브 TryShiftTime의 오류(비유한 delta·결과 시간 InvalidArgument) —
+    // 실패하면 커브와 표가 그대로다.
+    Result<void> TryShiftTime(Curve& curve, float delta) noexcept {
+        if (auto checked = Check(curve); !checked) {
+            return checked;
+        }
+
+        if (auto shifted = curve.TryShiftTime(delta); !shifted) {
+            return shifted;
+        }
+
+        SyncTimes(curve);
+        return Result<void>::Success();
+    }
+
+    // origin을 중심으로 키 시간을 factor배 한다(UE ScaleCurve(ScaleOrigin, ScaleFactor) —
+    // IndexedCurve.cpp 119–146). 핸들은
+    // TryShiftTime과 같이 그대로다. 실패: StaleHandle, 커브 TryScaleTime의 오류(0 이하·비유한
+    // factor, 비유한 origin·결과 시간 InvalidArgument) — 실패하면 커브와 표가 그대로다.
+    Result<void> TryScaleTime(Curve& curve, float origin, float factor) noexcept {
+        if (auto checked = Check(curve); !checked) {
+            return checked;
+        }
+
+        if (auto scaled = curve.TryScaleTime(origin, factor); !scaled) {
+            return scaled;
+        }
+
+        SyncTimes(curve);
+        return Result<void>::Success();
+    }
+
+    // 커브의 중복 키 제거를 하고 남은 키의 핸들을 그대로 둔다(UE RemoveRedundantKeys의 핸들 유지 —
+    // RichCurve.cpp 984–1100, IntegralCurve.cpp 228–257, StringCurve.cpp 209–238). arguments는 커브
+    // TryRemoveRedundantKeys의 인자다(TangentCurve는 허용오차·표본 속도, 범위판은 first·last도,
+    // PlainCurve는 허용오차, 계단 커브는 없음). 커브가 남긴 키의 원래 index 목록(순서를 보존하는
+    // 부분열)으로 핸들·사본을 앞으로 당긴다. 지운 키의 핸들은 NotFound가 된다. 실패: StaleHandle,
+    // 커브의 오류(허용오차 InvalidArgument, 표본 상한 CapacityExceeded, 할당 실패 OutOfMemory) —
+    // 실패하면 커브와 표가 그대로다.
+    template <class... Arguments>
+    Result<void> TryRemoveRedundantKeys(Curve& curve, Arguments&&... arguments) noexcept {
+        if (auto checked = Check(curve); !checked) {
+            return checked;
+        }
+
+        Array<usize> kept(handles_.GetAllocator());
+        if (auto removed = curve.TryRemoveRedundantKeys(kept, Forward<Arguments>(arguments)...);
+            !removed) {
+            return removed;
+        }
+
+        for (usize position = 0; position < kept.Size(); ++position) {
+            const usize from = kept[position]; // 오름차순이라 from ≥ position
+            if (from != position) {
+                handles_[position] = handles_[from];
+                snapshot_[position] = Move(snapshot_[from]);
+            }
+        }
+
+        if (kept.Size() < handles_.Size()) {
+            const usize dropped = handles_.Size() - kept.Size();
+            static_cast<void>(
+                handles_.TryRemoveAt(kept.Size(), dropped)); // 줄이기라 실패하지 않는다
+            static_cast<void>(snapshot_.TryRemoveAt(kept.Size(), dropped));
+        }
+
+        return Result<void>::Success();
+    }
+
+    // TryEditKeys가 편집 함수에 넘기는 키별 칸 편집자다(TangentCurve 표 전용). 핸들로 키를 골라
+    // 보간·접선 방식·가중 방식·접선·가중치만 바꾼다(커브의 같은 이름 함수 — 접선 재계산 없음). 키
+    // 시간·값·수·순서를 바꾸는 길은 없다(그런 편집은 표의 다른 함수로 한다). 각 함수는 할당하지
+    // 않고, 핸들이 이 표에 없으면 NotFound다(그 키는 그대로). 복사할 수 없고 TryEditKeys 안에서만
+    // 쓴다.
+    class KeyFieldEditor {
+    public:
+        KeyFieldEditor(const KeyFieldEditor&) = delete;
+        KeyFieldEditor& operator=(const KeyFieldEditor&) = delete;
+
+        // 지금 키들이다(읽기 전용 — 앞선 편집이 바로 보인다).
+        Span<const Key> Keys() const noexcept {
+            return curve_.Keys();
+        }
+
+        // 핸들 키의 지금 index다. 실패: NotFound.
+        Result<usize> TryFindIndex(CurveKeyHandle handle) const noexcept {
+            return table_.Find(handle);
+        }
+
+        Result<void> TrySetInterp(CurveKeyHandle handle, CurveInterp interp) noexcept {
+            auto index = table_.Find(handle);
+            return index ? curve_.TrySetKeyInterp(index.Value(), interp)
+                         : Result<void>::Failure(index.Error());
+        }
+
+        Result<void> TrySetTangentMode(CurveKeyHandle handle, CurveTangentMode mode) noexcept {
+            auto index = table_.Find(handle);
+            return index ? curve_.TrySetKeyTangentMode(index.Value(), mode)
+                         : Result<void>::Failure(index.Error());
+        }
+
+        Result<void> TrySetTangentWeight(CurveKeyHandle handle,
+                                         CurveTangentWeight weight) noexcept {
+            auto index = table_.Find(handle);
+            return index ? curve_.TrySetKeyTangentWeight(index.Value(), weight)
+                         : Result<void>::Failure(index.Error());
+        }
+
+        Result<void> TrySetTangents(CurveKeyHandle handle, float arriveTangent,
+                                    float leaveTangent) noexcept {
+            auto index = table_.Find(handle);
+            return index ? curve_.TrySetKeyTangents(index.Value(), arriveTangent, leaveTangent)
+                         : Result<void>::Failure(index.Error());
+        }
+
+        Result<void> TrySetTangentWeights(CurveKeyHandle handle, float arriveWeight,
+                                          float leaveWeight) noexcept {
+            auto index = table_.Find(handle);
+            return index ? curve_.TrySetKeyTangentWeights(index.Value(), arriveWeight, leaveWeight)
+                         : Result<void>::Failure(index.Error());
+        }
+
+    private:
+        friend class CurveKeyHandleTable;
+
+        KeyFieldEditor(const CurveKeyHandleTable& table, Curve& curve) noexcept
+            : table_(table), curve_(curve) {
+        }
+
+        const CurveKeyHandleTable& table_;
+        Curve& curve_;
+    };
+
+    // 키 시간·값·수·순서를 바꾸지 않는 키별 칸 편집을 표를 거쳐 한다(TangentCurve 전용):
+    // edit(KeyFieldEditor&)를 부른 뒤 사본을 다시 맞추고 edit의 결과(Result<void>)를 돌려준다.
+    // - edit가 실패를 돌려주면 그 전에 편집자로 바꾼 칸은 남는다(표는 그 상태에 맞춰 다시 맞추므로
+    //   핸들은 계속 쓸 수 있다 — 실패하면 그대로인 다른 함수와 다른 점이다).
+    // - 안전장치: edit가 편집자 밖에서 커브를 바꿔 키 수·시간·값이 사본과 비트까지 다르면(같은 시간
+    //   키의 순서 바뀜 포함) 표를 무효로 하고 StaleHandle이다.
+    // 사용 예:
+    //   auto edited = table.TryEditKeys(curve, [&](auto& keys) noexcept {
+    //       return keys.TrySetInterp(handle, CurveInterp::Cubic);
+    //   });
     template <class Edit>
-        requires IsTriviallyCopyableV<Key>
+        requires IsSameV<Curve, TangentCurve>
     Result<void> TryEditKeys(Curve& curve, Edit&& edit) noexcept {
         if (auto checked = Check(curve); !checked) {
             return checked;
         }
 
-        Result<void> edited = edit(curve);
+        KeyFieldEditor editor(*this, curve);
+        Result<void> edited = edit(editor);
         const Span<const Key> keys = curve.Keys();
-        if (keys.Size() != snapshot_.Size()) {
-            stale_ = true;
-            return Result<void>::Failure(ErrorCode::StaleHandle);
+        bool same = keys.Size() == snapshot_.Size();
+        for (usize index = 0; same && index < keys.Size(); ++index) {
+            same = curves_detail::SameFloatBits(keys[index].time, snapshot_[index].time) &&
+                   curves_detail::SameFloatBits(keys[index].value, snapshot_[index].value);
         }
 
-        for (usize index = 0; index < keys.Size(); ++index) {
-            if (!curves_detail::SameFloatBits(keys[index].time, snapshot_[index].time)) {
-                stale_ = true;
-                return Result<void>::Failure(ErrorCode::StaleHandle);
-            }
+        if (!same) {
+            stale_ = true;
+            return Result<void>::Failure(ErrorCode::StaleHandle);
         }
 
         for (usize index = 0; index < keys.Size(); ++index) {
@@ -484,6 +627,24 @@ public:
         }
 
         return edited;
+    }
+
+    // Auto 키의 접선을 다시 계산한다(TangentCurve::AutoSetTangents — 키 시간·값·순서가 그대로라
+    // 핸들도 그대로다). 할당하지 않는다. 실패: StaleHandle.
+    Result<void> TryAutoSetTangents(Curve& curve, float tension = 0.0f) noexcept
+        requires IsSameV<Curve, TangentCurve>
+    {
+        if (auto checked = Check(curve); !checked) {
+            return checked;
+        }
+
+        curve.AutoSetTangents(tension);
+        const Span<const Key> keys = curve.Keys();
+        for (usize index = 0; index < keys.Size(); ++index) {
+            snapshot_[index] = keys[index];
+        }
+
+        return Result<void>::Success();
     }
 
 private:
@@ -601,19 +762,16 @@ private:
         snapshot_[to] = Move(key);
     }
 
-    float TimeAfterShift(usize index, const Array<uint8>& selected, float delta) const noexcept {
-        return selected[index] != 0 ? snapshot_[index].time + delta : snapshot_[index].time;
+    // 순서를 그대로 두는 시간 연산(Shift·Scale) 뒤 사본 시간을 커브에 맞춘다.
+    void SyncTimes(const Curve& curve) noexcept {
+        const Span<const Key> keys = curve.Keys();
+        for (usize index = 0; index < keys.Size(); ++index) {
+            snapshot_[index].time = keys[index].time;
+        }
     }
 
-    // UpdateOrAdd가 기존 키 값만 바꿀지다(커브 FindKey와 같은 허용오차 규칙). 나머지 인자의
-    // 마지막이 float면 그것이 허용오차다(TangentCurve·PlainCurve는 unwindRotation(bool) 다음, 계단
-    // 커브는 값 다음). 없으면 커브 기본값 1e-4다.
-    template <class... Rest>
-    bool WouldUpdate(const Curve& curve, float time, const Rest&... rest) const noexcept {
-        float tolerance = 1.0e-4f;
-        ((tolerance = IsSameV<RemoveCvRefT<Rest>, float> ? static_cast<float>(rest) : tolerance),
-         ...);
-        return curve.FindKey(time, tolerance) != IndexNone;
+    float TimeAfterShift(usize index, const Array<uint8>& selected, float delta) const noexcept {
+        return selected[index] != 0 ? snapshot_[index].time + delta : snapshot_[index].time;
     }
 
     Array<CurveKeyHandle> handles_;

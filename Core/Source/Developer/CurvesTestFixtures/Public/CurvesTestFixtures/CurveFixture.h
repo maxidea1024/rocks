@@ -3,6 +3,7 @@
 #include <Core/Containers/Array.h>
 #include <Core/Containers/OrderedMap.h>
 #include <Core/Optional.h>
+#include <Curves/PackedTangentCurve.h>
 #include <Curves/PlainCurve.h>
 #include <Curves/StepCurves.h>
 #include <Curves/TangentCurve.h>
@@ -30,8 +31,8 @@ public:
     ROCKS_PROPERTY() InstancedStruct<ScalarCurveBase> any;
 };
 
-// 계단 커브 셋(CV6)을 필드·Array 원소·Optional 내부·Map 값에 담는다(Name 값이 있어 Registry에
-// NamePool이 필요하다 — CurveHolder와 나눈 까닭이다).
+// 계단 커브 셋(CV6)을 필드·Array 원소·Optional 내부·Map 값·InstancedStruct 내용에 담는다(Name 값이
+// 있어 Registry에 NamePool이 필요하다 — CurveHolder와 나눈 까닭이다).
 ROCKS_CLASS()
 class StepCurveHolder : public Object {
 public:
@@ -46,6 +47,19 @@ public:
     ROCKS_PROPERTY() Array<StringStepCurve> stringList;
     ROCKS_PROPERTY() Optional<NameStepCurve> maybeNames;
     ROCKS_PROPERTY() OrderedMap<int32, IntegerStepCurve> byKey;
+    ROCKS_PROPERTY() InstancedStruct<NameStepCurve> anyNames;
+};
+
+// 압축 커브(CV8)를 필드·Array 원소·Optional 내부에 담는다(검증 hook·Bytes wire 시험).
+ROCKS_CLASS()
+class PackedCurveHolder : public Object {
+public:
+    explicit PackedCurveHolder(Allocator& allocator) noexcept : packed(allocator), list(allocator) {
+    }
+
+    ROCKS_PROPERTY() PackedTangentCurve packed;
+    ROCKS_PROPERTY() Array<PackedTangentCurve> list;
+    ROCKS_PROPERTY() Optional<PackedTangentCurve> maybe;
 };
 
 } // namespace rocks::curves_fixture
