@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::Asset::assetId_",
+      "id": "9586ddb14f344740aac087fafd3f8be4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BulkDataRef::bulkId",
+      "id": "9ef94eff892d41af80056de26499e0c2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BulkDataRef::rawBytes",
+      "id": "4b1b11986eb6461cb8bc26865e447ffc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BulkDataRef::sha256",
+      "id": "78a0a9528b6a446d9b4a751c87116704",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Package::id_",
+      "id": "aba87fe5d1e34dd296cc9bd86d546130",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::Asset",
+      "id": "56b77eb53b784bc28e54f8edc79dc075",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::BulkDataRef",
+      "id": "782153c42d40427fb006fb29c4a5c3d2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::Package",
+      "id": "cecd2aaca3c146f6a2d1321087c7cdeb",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

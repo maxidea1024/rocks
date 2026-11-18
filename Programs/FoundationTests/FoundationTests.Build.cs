@@ -68,12 +68,12 @@ public abstract class TestsModule : ModuleRules
 
         // Object family tests depend on the reflection fixture module (config layer tests on ConfigTestFixtures, curve tests on CurvesTestFixtures). Generated headers (<ReflectionTestFixtures/*.generated.h>)
         // propagate through that module's public includes. Engine layer tests also depend on the World reflection fixture (WorldTestFixtures: save and path
-        // test types that derive from World types).
+        // test types that derive from World types) and the asset fixture (AssetTestFixtures: test asset classes that derive from AssetRuntime's Asset).
         string[] fixtures = Layer switch
         {
             TestLayer.Core => [],
             TestLayer.Foundation => ["ReflectionTestFixtures", "ConfigTestFixtures", "CurvesTestFixtures"],
-            _ => ["ReflectionTestFixtures", "ConfigTestFixtures", "CurvesTestFixtures", "WorldTestFixtures"]
+            _ => ["ReflectionTestFixtures", "ConfigTestFixtures", "CurvesTestFixtures", "WorldTestFixtures", "AssetTestFixtures"]
         };
         return new()
         {
