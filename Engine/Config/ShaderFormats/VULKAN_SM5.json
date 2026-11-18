@@ -26,7 +26,7 @@
     "interStageVectors": 16,
     "rootConstantBytes": 128
   },
-  "features": ["compute"],
+  "features": ["compute", "vertexViewportLayerOutput"],
   "deviceRequirements": ["VULKAN_1_1"],
   "producers": [{ "host": "windows-x64" }, { "host": "macos-arm64" }]
 }

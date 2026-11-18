@@ -31,7 +31,9 @@
 //       !loaded) {
 //       printf("%s: %s (line %u)\n", ShaderFormatErrorName(loaded.code), loaded.path, loaded.line);
 //   }
-//   const ShaderFormatLimits common = CommonLimits(profile.Formats());
+//   for (const ShaderFormatDefinition& format : profile.Formats()) {
+//       // 상한은 job 형식마다 따로 검사한다(7.2절 4항): format.limits.
+//   }
 //
 // 스레드: 모든 함수는 재진입 가능하며 전역 상태를 쓰지 않는다. 결과 객체는 값 형식이고 도구 표
 // 항목(정적 수명)만 가리킨다.
@@ -126,12 +128,32 @@ enum ShaderStageBits : uint32 {
     ShaderStageCompute = 1u << 2
 };
 
-// 지원 기능 비트("features"). 셰이더 타입이 요구한 기능이 없으면 그 형식에서 쿠킹하지 않는다(2절).
+// 지원 기능 비트("features"). "이 형식이 그 기능을 쓰는 셰이더를 컴파일한다"는 뜻이다. 셰이더
+// 타입이 요구한 기능이 없으면 그 형식에서 쿠킹하지 않는다(2절, 12.2절 거르기).
+//
+// 기능은 두 범주다(15절 결정 12).
+// - 장치 보장 기능: 형식의 deviceRequirements가 보장하므로 그 형식을 고른 장치는 늘 쓸 수 있다.
+// - 런타임 확인 기능(RuntimeCheckedShaderFeatures): 같은 형식 안에서도 장치마다 다르다. 런타임
+//   형식 선택은 이 기능으로 장치를 거르지 않고, 셰이더 집합이 장치 능력(Graphics DeviceCaps)과
+//   대조해 없는 장치에서 그 셰이더 생성을 Unsupported로 막는다. 호출자(렌더러)가 대체 경로를
+//   고른다.
 enum ShaderFeatureBits : uint32 {
     ShaderFeatureCompute = 1u << 0,
     // SM 6 웨이브 연산(2절, UE EShaderOptionalDataKey::ShaderModel6에 해당).
-    ShaderFeatureWaveOperations = 1u << 1
+    ShaderFeatureWaveOperations = 1u << 1,
+    // VS 출력 SV_RenderTargetArrayIndex·SV_ViewportArrayIndex(7.2절 7항). 런타임 확인 기능이다.
+    // 장치 쪽 값은 DeviceCaps의 vertexViewportLayerOutput이다.
+    ShaderFeatureVertexViewportLayerOutput = 1u << 2
 };
+
+// 런타임 확인 기능 비트 묶음이다. 나머지 기능은 장치 보장 기능이다. 셰이더 라이브러리 항목은
+// 요구 기능 가운데 이 비트만 담는다(12.2절).
+inline constexpr uint32 RuntimeCheckedShaderFeatures = ShaderFeatureVertexViewportLayerOutput;
+
+// feature 비트 하나가 런타임 확인 기능인가.
+constexpr bool IsRuntimeCheckedShaderFeature(uint32 feature) noexcept {
+    return (feature & RuntimeCheckedShaderFeatures) != 0;
+}
 
 // 장치 요구 비트("deviceRequirements"). 런타임 backend가 장치를 고를 때 대조한다.
 enum ShaderDeviceRequirementBits : uint32 {
@@ -175,7 +197,8 @@ struct ShaderFormatCompiler {
     MslPlatform mslPlatform = MslPlatform::None;
 };
 
-// 단계별 상한(7.2절 4항)이다. 프로필 공통 상한은 CommonLimits로 구한다.
+// 단계별 상한(7.2절 4항)이다. 모든 상한은 job 형식의 이 값으로 검사한다(프로필 공통 상한은 없다).
+// 핵심 최소 보장을 넘는 값은 장치 요구이며, 런타임 형식 선택이 장치 능력과 대조한다.
 struct ShaderFormatLimits {
     uint32 constantBuffers = 0;
     uint32 sampledTextures = 0;
@@ -331,10 +354,6 @@ ShaderFormatStatus ResolveEngineCompileProfile(const EngineCompileProfileDesc& d
 // 파일이 없으면 UnknownFormat(path에 형식 id)이다.
 ShaderFormatStatus LoadEngineCompileProfile(const char* directory, StringView profileId,
                                             EngineCompileProfile& out) noexcept;
-
-// 형식들의 공통 상한(필드별 최소값, uavStages는 교집합)이다(7.2절 4항 "공통 상한의 범위"). 빈
-// 목록이면 기본값(모두 0, 에뮬레이션 상한은 NoShaderLimit)이다.
-ShaderFormatLimits CommonLimits(Span<const ShaderFormatDefinition> formats) noexcept;
 
 // 어휘 이름 조회다(진단·시험용, 정적 수명). 범위 밖이면 "unknown".
 const char* ShaderBackendName(ShaderBackend backend) noexcept;
