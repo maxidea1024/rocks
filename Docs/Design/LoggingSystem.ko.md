@@ -673,13 +673,14 @@ LG11–LG19의 검증도 같다: Debug 빌드, format, policy, 바뀐 부분 시
 - 수집기를 설치하지 않은 프로세스에서는 콜백이 불리지 않는다. Rocks 실행 파일은 Launch를 거쳐 설치하므로, 남는 것은 C# 도구와 외부 호스트뿐이다.
 
 **콜백 본문(`detail::FlushInstalledLogForTermination(const TerminationContext&)`).**
-- **출력 스레드 판정:** `failingThreadId`나 `stoppedThreadIds`(개수는 원자로 읽음)에 출력 스레드가 있으면 큐를 비울 주체가 없다. 기다리지 않고 비상 출력만 하고 `Skipped`다. 판정은 helper 하나가 두 칸을 함께 본다.
+- **출력 스레드 판정:** `failingThreadId`나 `stoppedThreadIds`(개수는 원자로 읽음)에 출력 스레드가 있으면 큐를 비울 주체가 없다. 기다리지 않고 비상 출력만 하고 `Skipped`다. 판정은 private helper `WriterThreadFailed` 하나가 두 칸을 함께 본다(`FlushForTermination`이 멈춘 스레드 목록을 `Span<const uint64>`로 받는다).
 - **대기 시간:**
   - 기본은 `fatalFlushTimeoutMilliseconds`와 공용 마감까지 남은 시간 중 짧은 쪽이다.
-  - `Log::Fatal`·assert가 flush를 시도했으면(아래 Fatal 표시) 실패 스레드의 대기가 제한 시간에 끊겼을 수 있다. 그 뒤에 들어온 다른 스레드의 기록도 있을 수 있다. 그래서 바로 건너뛰지 않고 남은 큐를 한 번 더 기다린다. 상한은 "공용 마감 - 여유"다.
+  - `Log::Fatal`·assert가 flush를 시도했으면(아래 Fatal 표시) 실패 스레드의 대기가 제한 시간에 끊겼을 수 있다. 그 뒤에 들어온 다른 스레드의 기록도 있을 수 있다. 그래서 바로 건너뛰지 않고 남은 큐를 한 번 더 기다린다. 상한은 "공용 마감 - `TerminationCallbackReserveMilliseconds`(250 ms)"다. 기본 대기도 이 상한을 넘지 않는다.
   - 콜백은 등록 역순으로 불리고 마감을 함께 쓴다. 여유는 로그 뒤에 불리는 콜백(수집기가 설치 때 먼저 등록한 것 등)의 몫이다.
-  - 마감이 이미 지났으면 `Skipped`다. 밀리초 변환은 `NumericLimits<uint32>::Max()`에서 자른다.
-- **결과 값:** `LogSystem::FlushForTermination(timeout, failingThreadId)`이 `TerminationCallbackResult`를 바로 돌려준다. 결과는 크래시 기록에 남으므로 "기다렸지만 못 비움"과 "할 수 없었음"을 가른다.
+  - 콜백이 불렸을 때 상한이 이미 지났으면 건너뛰지 않고 timeout 0으로 한 번 시도한다. Sync는 sink lock을 잡으면 비우고, Async는 이미 비어 있으면 `Completed`, 아니면 `TimedOut`이다. 기다리지 않는 시도라 다른 콜백의 몫을 쓰지 않고, 남은 기록을 건질 기회는 남는다. 마감이 지난 뒤의 콜백을 아예 부르지 않는 것은 수집기의 몫이다(수집기 계약 3).
+  - 밀리초 변환은 `NumericLimits<uint32>::Max()`에서 자른다.
+- **결과 값:** `LogSystem::FlushForTermination(timeout, failingThreadId, stoppedThreadIds)`이 `TerminationCallbackResult`를 바로 돌려준다. 결과는 크래시 기록에 남으므로 "기다렸지만 못 비움"과 "할 수 없었음"을 가른다.
   - `Completed`: 다 비웠다.
   - `TimedOut`: Async에서 마감까지 기다렸지만 큐가 남았다.
   - `Skipped`: 시작 전, Manual, 비상 모드, sink 콜백 안, 출력 스레드 자신, 출력 스레드가 실패하거나 멈춘 스레드, Sync에서 sink lock을 TryLock으로 못 잡음(쥔 스레드가 멈췄다).
@@ -707,7 +708,8 @@ LG11–LG19의 검증도 같다: Debug 빌드, format, policy, 바뀐 부분 시
 - 완료 기준(자식 프로세스 시험 `LoggerOutputTests`, 모든 모드가 수집기를 설치):
   - `platform::Fatal`·접근 위반·stack overflow(Windows)·SIGSEGV(POSIX) 직전의 Async 기록이 파일·stderr에 남는다. Windows는 정확한 종료 코드를 단언한다.
   - 출력 스레드가 멈춘 sink 안에서 Fatal이 나도 프로세스가 끝난다. 단언은 종료 코드와 내용이다.
-  - 단위 시험: 설치된 시스템이 없거나 마감이 지났으면 `Skipped`, 설치돼 있으면 `Completed`이고 기록이 sink에 남는다. 출력 스레드가 멈춘 목록에 있으면 `Skipped`, Manual이면 `Skipped`다.
+  - 출력 스레드 안에서 접근 위반이 나면(`Native.Crash.writer-fault`) 기다리지 않고 "The log writer thread itself crashed; queued records are lost"를 남긴다.
+  - 단위 시험: 설치된 시스템이 없으면 `Skipped`, 설치돼 있으면 `Completed`이고 기록이 sink에 남는다. Manual이면 `Skipped`(`FlushForTerminationSkipsManualMode`), 출력 스레드가 실패하거나 멈춘 스레드면 `Skipped`(`FlushForTerminationSkipsWhenTheWriterThreadFailed`, 멈춘 목록·실패 스레드·콜백 경로)다.
   - abort·WER 대화상자를 억제한다.
 
 #### 14.1.9 LG19 `log view`
@@ -730,7 +732,7 @@ LG11–LG19의 검증도 같다: Debug 빌드, format, policy, 바뀐 부분 시
 - **LG18(개정 11 당시, 개정 12에서 수집기로 옮김):** 종료 hook 이름은 `platform::SetTerminationHook`, 처리기 API는 `platform::InstallCrashHandler`·`RemoveCrashHandler`·`PrepareThreadForCrashHandling`(`Platform/CrashHandler.h`)이다. `SetThreadStackGuarantee`·`sigaltstack`은 엔진 스레드만이 아니라 `platform::Thread`로 만든 모든 스레드가 시작 때 확보한다. POSIX 처리기는 이 환경에서 컴파일을 확인하지 못했다(Windows만 빌드·시험).
 - **LG19:** `--json` 출력 선택은 두지 않았다(입력 JSON lines 줄을 그대로 낸다). 폴더는 `*.log`·`*.log.zst`를 읽는다. 봉인 여부는 magic(`RKLOGENC`)으로 정하고 키 없는 봉인 파일은 경고 뒤 건너뛴다. 압축 파일은 스트림으로 풀어(파일당 1 GiB 상한) 잘린 frame 앞까지 보여 준다. `--event`는 16진 숫자로 비교한다. 기본 레이아웃 기록의 이어진 줄은 앞 기록의 판정을 따른다. 시험용으로 `log pack`(묶음별 zstd frame)과 `log seal --compress`를 더했다.
 - **LG18(리뷰):** POSIX 대체 stack은 정적 TLS가 아니라 스레드를 준비할 때 잡고 끝날 때 돌려주며(`ReleaseThreadCrashHandling`), 이미 있으면 덮어쓰지 않는다. 이 함수들은 개정 12에서 `Platform/CrashReporting.h`로 옮겨졌다(동작 같음).
-- **LG18(개정 12, 크래시 수집 LC1a):** `Platform/CrashHandler.h`·`SetTerminationHook`·`TerminatingThreadId`·`LogTerminationHook`·`SetChainedTerminationHook`·`LogInstallScope`의 hook 교체를 지웠다. 코드 변경은 크래시 수집 세션(rocks-36)이 LC1a에서 함께 했고, 로깅이 리뷰했다. 리뷰 반영: `FlushForTermination`이 `TerminationCallbackResult`를 돌려줌(할 수 없었음은 `Skipped`, 기다렸지만 남음만 `TimedOut`), 출력 스레드 판정 helper 하나, 재대기 상한 "마감 - 여유", 밀리초 변환 상한, 멈춘 출력 스레드·Manual 시험.
+- **LG18(개정 12, 크래시 수집 LC1a):** `Platform/CrashHandler.h`·`SetTerminationHook`·`TerminatingThreadId`·`LogTerminationHook`·`SetChainedTerminationHook`·`LogInstallScope`의 hook 교체를 지웠다. 코드 변경은 크래시 수집 세션(rocks-36)이 LC1a에서 함께 했고, 로깅이 리뷰했다. 리뷰 반영: `FlushForTermination`이 `TerminationCallbackResult`를 돌려줌(할 수 없었음은 `Skipped`, 기다렸지만 남음만 `TimedOut`), 출력 스레드 판정 helper 하나(`WriterThreadFailed`), 재대기 상한 "마감 - 250 ms", 밀리초 변환 상한, 멈춘 출력 스레드·Manual 시험과 출력 스레드 크래시 자식 시험. 상한이 지난 뒤 불린 콜백은 timeout 0으로 한 번 시도한다(rocks-36 제안 채택).
 
 ## 15. 다른 세션과의 조율
 
