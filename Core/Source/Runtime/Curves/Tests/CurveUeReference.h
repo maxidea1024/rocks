@@ -21,12 +21,12 @@
 //   ue58richcurve::AutoSetTangents     ↔ RichCurve.cpp 680–755
 //   ue58richcurve::AddKey              ↔ RichCurve.cpp 303–339(SimpleCurve.cpp 86–116은 같은 위치)
 //   ue58richcurve::UpdateOrAddKey      ↔ RichCurve.cpp 376–400
-//   ue58richcurve::DeleteKey           ↔ RichCurve.cpp 366–374
+//   ue58richcurve::DeleteKey           ↔ RichCurve.cpp 365–373
 //   ue58richcurve::SetKeyTime          ↔ RichCurve.cpp 403–417
 //   ue58richcurve::IsConstant          ↔ RichCurve.cpp 485–502
-//   ue58richcurve::BakeCurve           ↔ RichCurve.cpp 890–913
+//   ue58richcurve::BakeCurve           ↔ RichCurve.cpp 890–914
 //   ue58richcurve::RemoveRedundantKeysInternal ↔ RichCurve.cpp 966–1102
-//   ue58richcurve::RemoveRedundantRange ↔ RichCurve.cpp 935–963
+//   ue58richcurve::RemoveRedundantRange ↔ RichCurve.cpp 936–963
 //   ue58richcurve::SimpleRemoveRedundantKeysInternal ↔ SimpleCurve.cpp 511–643
 namespace rocks::test::ue58richcurve {
 
@@ -395,7 +395,7 @@ int32 UpdateOrAddKey(Array<K>& Keys, float InTime, float InValue, const bool bUn
     return AddKey(Keys, InTime, InValue, bUnwindRotation);
 }
 
-// RichCurve.cpp 366–374.
+// RichCurve.cpp 365–373.
 inline void DeleteKey(Array<RichKey>& Keys, int32 Index) noexcept {
     static_cast<void>(Keys.TryRemoveAt(static_cast<usize>(Index)));
     AutoSetTangents(Keys, 0.0f);
@@ -430,7 +430,7 @@ inline bool IsConstant(const Array<RichKey>& Keys, float Tolerance) noexcept {
     return true;
 }
 
-// RichCurve.cpp 890–913(Eval 대신 eval 함수 — 표본 시간은 UE float 누적).
+// RichCurve.cpp 890–914(Eval 대신 eval 함수 — 표본 시간은 UE float 누적).
 template <class K, class Eval>
 void BakeCurve(Array<K>& Keys, float SampleRate, float FirstKeyTime, float LastKeyTime, Eval&& eval,
                Allocator& allocator) noexcept {
@@ -554,7 +554,7 @@ inline void RemoveRedundantKeysInternal(Array<RichKey>& Keys, float Tolerance, i
     }
 }
 
-// RichCurve.cpp 935–963의 시작·끝 키 찾기. 찾으면 참이다.
+// RichCurve.cpp 936–963의 시작·끝 키 찾기. 찾으면 참이다.
 template <class K>
 bool RemoveRedundantRange(const Array<K>& Keys, float FirstKeyTime, float LastKeyTime,
                           int32& StartKey, int32& EndKey) noexcept {

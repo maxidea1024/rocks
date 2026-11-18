@@ -1,6 +1,6 @@
 # 렌더 기반(RenderBase) 설계
 
-기준일: 2026-11-18, 개정 12(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-18, 개정 14(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
 - 렌더 lane과 프레임 전달, 장치 스레드 모델, 장치 자원 수명, 렌더 그래프
 - 셰이더 런타임 객체(셰이더 집합·파라미터 바인딩·상수 블록·파이프라인 캐시)
 - 정점 입력 타입, 공용 자원·그리기 유틸리티, GPU 계측
@@ -129,10 +129,10 @@ ID는 이 문서가 붙인다. CP는 Core 선행, GX는 Graphics 확장, RB는 R
 | CP1 | 전용 lane 실행기, 스레드 이름·우선순위·스택 크기 | 구현 | Thread·Sync(구현) | RB1 | M | 4.3절 |
 | CP2 | 직렬 작업 체인·ParallelFor·작업 문맥 표지 | 구현 | WorkerScheduler(구현) | RG3, RB3 일괄 생성 선택 | M | 4.3절 |
 | CP3 | 프레임 arena | 구현 | Allocator(구현) | RG1, RB4(GLES `PerDraw`) | M | 4.3절 |
-| CP4 | 콘솔 설정(타입 있는 변수·명령·출처·렌더 snapshot) | 구현(ConfigSystem CF2, 프레임 packet 연결은 RB1) | CP8 | RB1 설정 snapshot, RG1 디버그 설정 | M | 12절 |
+| CP4 | 콘솔 설정(타입 있는 변수·명령·출처·렌더 snapshot) | 구현(ConfigSystem CF2, 프레임 packet 연결은 RB1). 상세 스펙은 [CVar](CVarSystem.ko.md)(CVR1–CVR8, 구현 전 — 12절) | CP8 | RB1 설정 snapshot, RG1 디버그 설정 | M | 12절 |
 | CP5 | 다중 스레드 CPU 구간 계측·카운터·GPU 상관 | 구현(TR1–TR4, GPU 기록 형은 RB7에서 구현) | TraceCapture·TraceAnalysis | RB7 | M | 13절, [TraceSystem](TraceSystem.ko.md) |
 | CP6 | 엔진 종료 단계 hook(기존 `EngineSubsystem`·`EngineLoopHooks` 확장) | 구현 | Engine(구현) | RB1 종료 순서 | S | 4.3절 |
-| CP7 | 엔진 전역 `Name` pool 결정 | 미결정 | Name(구현) | RB3 | S | 4.3절 |
+| CP7 | 엔진 전역 `Name` pool 결정 | 결정(2026-11-18): 전역 pool 없음, 렌더 이름은 정적 문자열 + 64 bit 해시 | Name(구현) | RB3 | S | 4.3절 |
 | CP8 | Config 계층(UE-C21) | 구현(ConfigSystem CF1) | — | CP4 | M | 12절 |
 | GX1 | 장치 능력 `DeviceCaps` | 구현(1단계: 전역 한도·기능·MSAA 표본 수. 셰이더 형식 목록·형식 정의 상한 대조는 SH2) | A0-G G1, 셰이더 시스템 P6a, PixelFormat PF2 | RB3, RG1, RG4 | M | 4.4절 |
 | GX2 | 자원 desc·view 확장, 샘플러 위치(R12)·비교 샘플러 | 구현(1단계: 버퍼 용도·버퍼 view·ReadBuffer. 텍스처 차원·MSAA 텍스처·텍스처 view 범위·샘플러는 다음 단계) | A0-G | RB2, RG1 | L | 4.4절 |
@@ -168,7 +168,12 @@ ID는 이 문서가 붙인다. CP는 Core 선행, GX는 Graphics 확장, RB는 R
 
 **CP6 엔진 종료 단계 hook.** 렌더 lane 종료(5.5절)는 계획 3.2절 Shutdown 순서의 "GPU fence 완료"부터 "owner/retire/queue closure 확인"까지에 걸친다. 새 이벤트 체계를 만들지 않고 기존 `EngineSubsystem`·`EngineLoopHooks`(`Engine.h:27–69`)에 그 단계를 드러내는 hook을 더한다. **구현(2026-11-17).** `EngineLoopHooks`에 `BeginShutdown`·`CompleteInFlightWork`·`DrainShutdownCleanup`·`VerifyShutdownClosure`·`StopExecutors`, `EngineSubsystem`에 `BeginShutdown`·`CompleteInFlightWork`를 더했다. `Engine::Shutdown` 순서는 차단 → client 종료·World 파괴 → 진행 중 작업 완료 → Subsystem 정리 → [최종 GC → 정리 drain]을 둘 다 0이 될 때까지(`MaxShutdownCollectPasses` = 8, 넘으면 `Busy`) → closure 확인 → 실행기 종료 → Registry·타입 정리다. 정리 drain·closure·실행기 hook은 실행 파일 hook에만 둔다. Subsystem은 정리(`Deinitialize`) 뒤에는 불리지 않기 때문이다. 실패한 단계도 뒤 단계를 건너뛰지 않고 첫 오류를 돌려준다. 계약은 [렌더 기반 구현](../Implementation/RenderBase.ko.md) 3절.
 
-**CP7 Name pool.** 셰이더 타입·형식·pass 이름을 `Name`으로 다룰지, 정적 문자열과 SHA-256으로 다룰지 정한다. 셰이더 시스템은 키에 이름 정렬·SHA-256을 쓰므로(12.2절) 런타임 조회만 정하면 된다.
+**CP7 Name pool.** 셰이더 타입·형식·pass 이름을 `Name`으로 다룰지, 정적 문자열과 SHA-256으로 다룰지 정한다. 셰이더 시스템은 키에 이름 정렬·SHA-256을 쓰므로(12.2절) 런타임 조회만 정하면 된다. **결정(2026-11-18, 권장안).** 엔진 전역 `Name` pool을 두지 않는다.
+- 렌더 런타임의 셰이더 타입·셰이더 형식·pass·정점 입력 타입·파라미터 구조체 이름은 정적 등록 항목의 문자열 리터럴(프로그램 수명)과 그 이름의 64 bit 해시로 다룬다. 해시는 Core `HashStringBytesIgnoringAsciiCase`(`Core/Hash.h`, constexpr)이고, 런타임 조회 표의 키다.
+- 등록 때 같은 해시에 다른 이름이 있으면 등록이 실패한다(충돌을 조용히 넘기지 않는다, 오류 문구는 영어). 같은 이름을 두 번 등록해도 실패다.
+- 해시는 실행 중 조회용일 뿐이다. 저장·쿠킹 형식(셰이더 라이브러리 항목, job 키)은 셰이더 시스템 12.2절대로 이름 문자열 정렬과 SHA-256을 쓴다. 그래서 해시 함수를 바꿔도 쿠킹 결과는 바뀌지 않는다.
+- 이유: `Name`은 pool 세션 domain과 lease를 가진 실행 중 토큰이다(`Core/Text/Name.h`, `NamePool.h`). 정적 등록과 여러 스레드 조회에 pool 수명 관리가 끼어든다. 렌더 이름은 코드가 정하는 닫힌 집합이라 pool이 필요 없다. UE도 셰이더 타입 표를 `FName`이 아니라 64 bit 해시 `FHashedName`으로 찾는다(`Runtime/RenderCore/Public/Shader.h:1277` `GetNameToTypeMap`, 해시는 대문자 이름의 CityHash64 `Runtime/Core/Private/Serialization/MemoryImage.cpp:1210–1252`).
+- 머티리얼 파라미터 이름처럼 콘텐츠가 정하는 이름은 이 결정의 범위가 아니다([머티리얼 시스템](MaterialSystem.ko.md)이 정한다).
 
 ### 4.4 Graphics 확장(GX)
 
@@ -795,6 +800,13 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 - **구현(2026-11-17, RB1 설정 snapshot).** 게임 lane은 sync 지점(`ConfigContext::Sync`) 뒤 `ConfigContext::Snapshot()`을 `RenderSettingsRef::Share`로 감싸 `RenderLane::AttachSettings(ticket, ...)`로 그 프레임 slot에 담는다. 렌더 lane은 프레임 작업 안에서 `RenderFrameContext::Settings().Get<config::ConfigSnapshot>()`만 읽는다(registry·문맥은 읽지 않는다). slot의 참조는 그 slot을 다음에 다시 확보할 때(`BeginFrame`, GPU 완료 뒤) 또는 lane 정지 때 게임 lane에서 놓는다. 그래서 snapshot 수명은 그 프레임 slot이 끝날 때까지이고 파괴는 게임 lane에서 일어난다. 시험(`RenderBase/Tests/RenderSettingsTests.cpp`): sync 지점에서 바꾼 값은 다음 packet부터 보이고 이전 packet은 옛 값을 읽는다. GPU 완료 gate가 닫힌 동안 옛 snapshot이 살아 있고, slot을 다시 확보하면 놓인다.
   - 스펙과 다른 점: RenderBase는 ObjectRuntime에 의존하지 않으므로(9.3절) Config 타입을 직접 이름 짓지 않는다. `RenderSettingsRef`는 snapshot의 공유 소유권(`SharedPtr` aliasing)과 타입 표지만 들고, 꺼낼 때 같은 타입으로만 돌려준다(다른 타입이면 null). 타입은 Config를 아는 쪽(실행 파일·렌더러 모듈)이 정한다. 담지 않은 프레임은 빈 참조를 읽는다(직전 프레임 값을 물려받지 않는다).
 
+- **CVar 이관(설계, 구현 전).** [CVar·치트 명령 설계](CVarSystem.ko.md)(개정 2)가 콘솔 설정을 타입 있는 핸들 `CVar<T>`로 바꾼다. 착수 시점은 사용자가 정한다. 그때 RB1 연결은 다음처럼 바뀐다.
+  - 렌더 snapshot은 "렌더 읽기" 표시가 있는 값만이 아니라 **모든 CVar**를 담는다(CVar VD6). 설정 struct 필드의 `RenderRead` 블록은 같은 snapshot 안에 남는다.
+  - 게임 lane은 `ConfigContext::Snapshot()` 대신 `Acquire()`로 얻은 참조를 지금처럼 `RenderSettingsRef`로 프레임 slot에 담는다(CVar 7.2절).
+  - 렌더 lane은 프레임 작업을 시작할 때 packet의 snapshot을 `cvar::SnapshotBinding`으로 그 스레드에 묶고, 작업이 끝날 때 놓는다. 그 사이 렌더 코드는 이름 탐색 없이 `ShadowDistance.Get()`처럼 읽는다(CVar 7.1·16절).
+  - 이관 뒤에는 게임 lane이 **모든 프레임**에 snapshot을 담는다. 바뀐 것이 없으면 같은 snapshot 참조다. 그래서 렌더 lane은 늘 묶을 snapshot이 있고, 묶음 없는 `Get()`은 Fatal이라는 CVar 규칙(VD7)과 어긋나지 않는다. 지금의 "담지 않은 프레임은 빈 참조" 규칙은 이관 때 없앤다.
+  - 렌더 lane이 만든 worker 작업은 묶인 snapshot의 참조를 작업 문맥으로 넘겨받는다(CVar 10.1절).
+
 ## 13. GPU 계측(RB7)
 
 ### 13.1 UE 5.8 방식
@@ -1026,3 +1038,5 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 - 개정 10(2026-11-17): GX5(최소)·RG1 구현을 반영했다(2절 용어, 4.2절 GX5·RG1 행, 4.4절 GX5 구현 메모, 8절 구현 메모). 사용자 지시 "렌더 그래프도 미리 하자"에 따라 선행(RB4·GX1·GX2·GX4)이 없는 부분은 범위를 줄였다. 스펙과 다르게 정한 것: 의존 선언을 명시 접근 목록으로(파라미터 구조체 수집기가 같은 목록을 만든다), GX5 분리 전이·pipe 없음과 attachment 전이는 장치 Begin, 즉시·지연 동치의 정의, 풀 키에 샘플러 포함, 풀 반환은 그래프 끝, lease를 `RenderHandleTable`에, 검증 항상 켬, 그래프 기록 전체를 GPU 프레임 하나로. 픽셀 형식 PF1 병합 뒤 그래프 텍스처 desc는 `PixelFormat`이고, 풀 byte 추정은 `MipChainBytes(format, w, h, 1, mips)`(PixelFormatInfo), `CreateTexture`는 번호표 밖·블록 압축 형식을 거부한다.
 - 개정 11(2026-11-17): Vulkan GX5 전이 구현을 반영했다(4.4절 GX5 구현 메모, RG1 완료 기준 (g)에 Vulkan 하드웨어·lavapipe). 처리는 [렌더 기반 구현](../Implementation/RenderBase.ko.md) 8절과 [VulkanGraphics](VulkanGraphics.ko.md) 8절.
 - 개정 12(2026-11-18): GX1(장치 능력·MSAA 표본 수)·GX2 버퍼 부분(버퍼 용도·버퍼 view·`ReadBuffer`·그리기 slot) 1단계 구현을 반영했다(4.2절 GX1·GX2 상태, 4.4절 구현 메모와 장치 측정 표). 스펙과 다르게 정한 것: 버퍼 view 묶기는 GX6 전 개발 경로 고정 배치(slot 0–3 = `t1–t4`)이고, Vulkan 그리기 descriptor는 파이프라인별 layout과 기록 단위 pool로 바꿨다.
+- 개정 13(2026-11-18): [CVar·치트 명령 설계](CVarSystem.ko.md) 개정 2를 반영했다(4.2절 CP4 행, 12절 CVar 이관 메모). RB1의 설정 snapshot 연결은 CVar 구현 때 `Acquire()`·모든 CVar 포함·렌더 lane `SnapshotBinding`으로 바뀐다.
+- 개정 14(2026-11-18): CP7(엔진 전역 `Name` pool)을 권장안으로 정했다: 전역 pool 없음, 렌더 이름은 정적 문자열 리터럴 + 64 bit 해시 조회, 등록 때 충돌·중복은 실패, 쿠킹 형식은 이름 정렬·SHA-256 그대로(4.3절, CP 표).

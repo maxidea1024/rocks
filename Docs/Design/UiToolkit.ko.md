@@ -476,7 +476,7 @@ UE `UWidgetComponent`는 화면 공간(매 프레임 투영한 game layer)과 �
 | ID | 항목 | UE 5.8 대응 | 계약 내용 · 사용처 |
 |---|---|---|---|
 | CU1 | 편집 메타데이터 어휘 | `UPROPERTY(meta=…)`(`CoreUObject/Public/UObject/ObjectMacros.h:1242-1655`: ClampMin·Delta·EditCondition·EditConditionHides·InlineEditConditionToggle·MetaClass·MultiLine·UIMin·Units·GetOptions 등)와 편집용 속성 지정자(Category·AdvancedDisplay 등, 1086–1218행) · 에디터 전용 저장(`WITH_METADATA`) | 범위(편집 범위와 강제 범위 구분)·단계·단위·enum 표시·비트 플래그·여러 줄·허용 클래스·편집 조건(UD8)·조건 불만족 시 숨김·인라인 토글·후보 목록 함수·고급·숨김·재생성 표지. 버전 있는 manifest로 등록하고 메타 컴파일러가 검증한다. 에디터 전용 값은 Shipping 스키마에서 제외한다. 접근자 지정·결합 표는 실행 스키마이므로 CU1에 속하지 않는다(5.3·5.4절). 사용처: Inspector·Designer·프로젝트 설정 |
-| CU2 | 함수 리플렉션 | `UFUNCTION` | `ROCKS_FUNCTION`. 인자·반환 스키마, 순수·const 표지, 호출 thunk. 사용처: 이벤트 대상·바인딩 변환 함수·Sparks 바인딩·Inspector 버튼·에디터 명령 |
+| CU2 | 함수 리플렉션 | `UFUNCTION` | `ROCKS_FUNCTION`. 인자·반환 스키마, 순수·const 표지, 호출 thunk. 사용처: 이벤트 대상·바인딩 변환 함수·Sparks 바인딩·Inspector 버튼·에디터 명령·치트 함수(`CheatSet`의 `Cheat`·`Authority` 지정자 — [CVar·치트 명령 설계](CVarSystem.ko.md) 14.3절) |
 | CU3 | 리플렉션된 이벤트 | dynamic multicast delegate | Core `MulticastDelegate` 필드 + `ROCKS_PROPERTY(Params = ...)`, `FieldKind::Event`. 약한 Object 바인딩, 대상 파괴 시 자동 해제, 연결을 WidgetAsset에 저장, 에디터 이벤트 목록 |
 | CU4 | 속성 경로 | `FPropertyPath` · `FEditPropertyChain` · `FCachedPropertyPath` | (객체 stable ID, FieldId 체인, 배열 index·map key) 한 형식을 Transaction·Inspector·UI 애니메이션 트랙·바인딩에서 공용. map key 단계는 리플렉션 B9 B9f3 |
 | CU5 | 변경 통지 | `PreEditChange`·`PostEditChangeChainProperty`·`EPropertyChangeType` + `INotifyFieldValueChanged`·`FFieldId`(`Runtime/FieldNotification`) | (a) 편집 통지: 변경 전·후와 종류(대화형·값 설정·배열 연산·기본값 복원 등), Transaction 병합의 기반. (b) 실행 중 필드 변경 통지: 클래스별 필드 번호, 구독 비트 검사 후 통지(5.3절). 생성 setter에 포함(UD7). Sparks 필드 `Changed` 이벤트로 노출 |

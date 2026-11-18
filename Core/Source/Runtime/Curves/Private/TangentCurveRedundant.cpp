@@ -5,7 +5,8 @@
 // TangentCurve 중복 키 제거다(UE FRichCurve::RemoveRedundantKeysInternal, RC 966–1102 —
 // 설계 7.2절). UE와 다른 점: 범위판의 비교 기준이 시작 보존 키에서 시작하고(15절 8), 제거 뒤
 // AutoSetTangents를 부르지 않는다(D10), 표본 프레임 번호가 int32 끝에 닿으면 표본을 멈춘다(UE는
-// 감싸 돌아 끝나지 않는다).
+// 감싸 돌아 끝나지 않는다), 호출 하나의 표본 수가 2^24를 넘으면 CapacityExceeded다(Bake와 같은
+// 상한 — UE는 상한이 없다), 차가 NaN인 키(NaN 값)는 남긴다(UE `>` 비교는 NaN을 지운다).
 namespace rocks {
 
 namespace {
@@ -14,9 +15,14 @@ bool IsUserTangentKey(const TangentCurveKey& key) noexcept {
     return key.tangentMode == CurveTangentMode::User || key.tangentMode == CurveTangentMode::Break;
 }
 
-// mostRecent(남긴 직전 키)·test·test + 1 세 키로 test 키를 남겨야 하는지다(RC 1022–1069).
-bool KeepKey(Span<const TangentCurveKey> keys, usize mostRecent, usize test, float tolerance,
-             const Optional<FrameRate>& sampleRate) noexcept {
+// 호출 하나의 표본 수 상한이다(Bake와 같다).
+inline constexpr usize MaxRedundantSamples = curves_detail::MaxBakeSamples;
+
+// mostRecent(남긴 직전 키)·test·test + 1 세 키로 test 키를 남겨야 하는지다(RC 1022–1069). 표본판은
+// samples에 표본 수를 더하고, 상한을 넘으면 CapacityExceeded다.
+Result<bool> KeepKey(Span<const TangentCurveKey> keys, usize mostRecent, usize test,
+                     float tolerance, const Optional<FrameRate>& sampleRate,
+                     usize& samples) noexcept {
     const TangentCurveKey& previous = keys[mostRecent];
     const TangentCurveKey& candidate = keys[test];
     const TangentCurveKey& next = keys[test + 1];
@@ -27,13 +33,17 @@ bool KeepKey(Span<const TangentCurveKey> keys, usize mostRecent, usize test, flo
         FrameTime sample = rate.AsFrameTime(previous.time);
         const float removedTime = candidate.time;
         while (sample <= last) {
+            if (++samples > MaxRedundantSamples) {
+                return Result<bool>::Failure(ErrorCode::CapacityExceeded);
+            }
+
             const float seconds = static_cast<float>(rate.AsSeconds(sample));
             const float without = math::EvalCurveSegment(previous, next, seconds);
             const TangentCurveKey& first = seconds <= removedTime ? previous : candidate;
             const TangentCurveKey& second = seconds <= removedTime ? candidate : next;
             const float with = math::EvalCurveSegment(first, second, seconds);
-            if (math::Abs(without - with) > tolerance) {
-                return true;
+            if (!(math::Abs(without - with) <= tolerance)) { // NaN 차는 남긴다
+                return Result<bool>::Success(true);
             }
 
             const Result<FrameNumber> advanced = sample.Frame().TryAdd(FrameNumber(1));
@@ -44,15 +54,16 @@ bool KeepKey(Span<const TangentCurveKey> keys, usize mostRecent, usize test, flo
             sample.SetFrame(advanced.Value());
         }
 
-        return false;
+        return Result<bool>::Success(false);
     }
 
     if (IsUserTangentKey(previous) || IsUserTangentKey(next) || IsUserTangentKey(candidate)) {
-        return true;
+        return Result<bool>::Success(true);
     }
 
     const float without = math::EvalCurveSegment(previous, next, candidate.time);
-    return math::Abs(without - candidate.value) > tolerance;
+    // NaN 차는 남긴다.
+    return Result<bool>::Success(!(math::Abs(without - candidate.value) <= tolerance));
 }
 
 // [start, end] 보존 키 사이의 키를 고른다(RC 966–1102). start < end다.
@@ -74,8 +85,14 @@ Result<void> RemoveRedundant(Array<TangentCurveKey>& keys, float tolerance, usiz
     }
 
     usize mostRecent = start; // UE는 0(15절 8)
+    usize samples = 0;
     for (usize test = start + 1; test < end; ++test) {
-        if (KeepKey(view, mostRecent, test, tolerance, sampleRate)) {
+        auto keep = KeepKey(view, mostRecent, test, tolerance, sampleRate, samples);
+        if (!keep) {
+            return Result<void>::Failure(keep.Error());
+        }
+
+        if (keep.Value()) {
             mostRecent = test;
             static_cast<void>(kept.TryPushBack(view[test]));
         }
