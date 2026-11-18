@@ -82,6 +82,12 @@ public:
     // 값을 놓고 빈 상태로 만든다.
     void Reset() noexcept;
 
+    // 담긴 경로의 확장 경로 접두사를 제자리에서 뗀다. "\\?\C:\..."는 "C:\...", "\\?\UNC\server"는
+    // "\\server"가 된다. 그 밖의 확장 경로("\\?\Volume{GUID}\..." 등)는 접두사를 떼면 상대 경로가
+    // 되므로 그대로 둔다. 비어 있으면 아무것도 하지 않는다. AssignModuleFileName이 부르며 Adopt한
+    // OS 경로에도 쓸 수 있다.
+    void RemoveExtendedPrefix() noexcept;
+
     // NUL로 끝나는 UTF-16이다. 비어 있으면 null이다. Win32 API가 쓰기 가능한 버퍼를 요구하는
     // 경우(CreateProcessW 명령줄)가 있어 non-const를 준다. 다음 Assign·Reset·소멸까지 유효하다.
     wchar_t* Value() const noexcept {
@@ -94,8 +100,6 @@ public:
     }
 
 private:
-    void RemoveExtendedPrefix() noexcept;
-
     wchar_t* value_ = nullptr;
     usize units_ = 0;
 };
@@ -137,8 +141,8 @@ public:
     // UTF-16 text(units개, NUL 종료 불필요)를 바꿔 담는다. 빈 문자열도 된다(Value는 ""). 기존 값은
     // 먼저 놓는다.
     // 실패: 짝 없는 surrogate는 InvalidArgument(ERROR_NO_UNICODE_TRANSLATION), text가 null인데
-    // units가 0이 아니면 InvalidArgument(0), 2^31 단위 이상은 Overflow, 메모리 부족은
-    // OutOfMemory다.
+    // units가 0이 아니면 InvalidArgument(0), UTF-8 결과가 2^31 byte 이상이면 Overflow, 메모리
+    // 부족은 OutOfMemory다.
     FileStatus AssignWide(const wchar_t* text, usize units) noexcept;
 
     // 값을 놓고 빈 상태로 만든다.
@@ -171,10 +175,12 @@ enum class TextFit : uint8 {
 
 // 고정 버퍼 변환 결과다.
 // - status: 성공, 잘못된 입력(InvalidArgument, ERROR_NO_UNICODE_TRANSLATION), text가 null인데
-// 길이가
-//   0이 아님(InvalidArgument, 0), 칸 부족(Overflow: Exact에서 모자람, capacity 0, 입력 2^31 이상).
+//   길이가 0이 아님(InvalidArgument, 0), 칸 부족(Overflow). Overflow는 Exact에서 모자랄 때,
+//   capacity가 0일 때, 결과가 2^31 단위·byte 이상일 때(Exact, 또는 UTF-8 입력이 2^31 byte 이상)다.
+//   Truncate는 UTF-16→UTF-8 결과가 2^31 byte를 넘어도 그 안에서 자른다.
 // - length: buffer에 쓴 길이(NUL 제외, UTF-16 단위 또는 UTF-8 byte). 실패하면 0이다.
-// - required: Exact의 Overflow에서 필요한 길이(NUL 제외)다. 그 밖에는 0이다.
+// - required: Overflow에서 필요한 길이(NUL 제외)다. 입력이 너무 커 세지 못했으면 0이다. 그 밖에는
+//   0이다.
 // - truncated: Truncate에서 잘렸는지다.
 // 실패해도 capacity가 1 이상이면 buffer는 빈 문자열(NUL 하나)이다.
 struct [[nodiscard]] TextConversion {

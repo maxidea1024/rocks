@@ -637,8 +637,10 @@ internal static partial class SelfTests
             Verify.Equal(1, PolicyChecks.PlatformBoundary(temporary.Root).Count, "prefix lookalike must not be allowlisted");
             // Windows 전용 공개 헤더 디렉터리는 허용하고, 다른 공개 디렉터리·유사 이름은 여전히 거부한다.
             temporary.Write("Core/Source/Runtime/PlatformBase/Private/Win64Wrong/Probe.cpp", "#pragma once\n");
-            temporary.Write("Core/Source/Runtime/PlatformBase/Public/Platform/Win64/Probe.h",
-                "#include <Base/Compiler.h>\n#if !ROCKS_PLATFORM_WINDOWS\n#error \"Windows only\"\n#endif\n#include <Windows.h>\n");
+            const string windowsHeader = "Core/Source/Runtime/PlatformBase/Public/Platform/Win64/Probe.h";
+            const string guarded = "#pragma once\n\n#include <Base/Compiler.h>\n\n// Windows only.\n#if ROCKS_PLATFORM_WINDOWS\n\n" +
+                "#include <Windows.h>\n\n#endif\n";
+            temporary.Write(windowsHeader, guarded);
             NoFailures(PolicyChecks.PlatformBoundary(temporary.Root));
             foreach (string lookalike in new[] { "Core/Source/Runtime/PlatformBase/Public/Platform/Win64Wrong/Probe.h",
                 "Core/Source/Runtime/PlatformBase/Public/Platform/Probe.h", "Core/Source/Runtime/Core/Public/Platform/Win64/Probe.h" })
@@ -646,6 +648,47 @@ internal static partial class SelfTests
                 temporary.Write(lookalike, "#include <Windows.h>\n");
                 Verify.Equal(1, PolicyChecks.PlatformBoundary(temporary.Root).Count, "public Windows header allowance too wide: " + lookalike);
                 temporary.Write(lookalike, "#pragma once\n");
+            }
+        });
+        suite.Add("Policy.WindowsPublicHeadersStayNarrow", () =>
+        {
+            using TemporaryDirectory temporary = new();
+            const string directory = "Core/Source/Runtime/PlatformBase/Public/Platform/Win64/";
+            const string guarded = "#pragma once\n#include <Base/Compiler.h>\n#if ROCKS_PLATFORM_WINDOWS\n#include <Windows.h>\n#endif\n";
+            temporary.Write(directory + "Probe.h", guarded);
+            // Windows native backend 소스는 Windows 전용 공개 헤더를 포함할 수 있다. 주석 속 언급은 포함이 아니다.
+            temporary.Write("Engine/Source/Runtime/Probe/Private/Win64/Use.cpp", "#include <Platform/Win64/Probe.h>\n");
+            temporary.Write("Core/Source/Developer/TestSupport/Private/Win64/Use.cpp", "#include \"Platform/Win64/Probe.h\"\n");
+            temporary.Write("Engine/Source/Runtime/Probe/Private/Common.cpp", "// #include <Platform/Win64/Probe.h> is Windows only\n");
+            NoFailures(PolicyChecks.PlatformBoundary(temporary.Root));
+
+            // 1. Windows 전용 소스 밖의 포함은 거부한다(공통 구현·공개 헤더·시험·다른 플랫폼 backend).
+            foreach (string user in new[] { "Engine/Source/Runtime/Probe/Private/Common.cpp", "Engine/Source/Runtime/Probe/Public/Probe/Probe.h",
+                "Core/Source/Runtime/Core/Tests/ProbeTests.cpp", "Core/Source/Runtime/PlatformBase/Private/Mac/Use.cpp" })
+            {
+                temporary.Write(user, "#include <Platform/Win64/Probe.h>\n");
+                Verify.Equal(1, PolicyChecks.PlatformBoundary(temporary.Root).Count, "Platform/Win64 include accepted outside Windows backend: " + user);
+                temporary.Write(user, "#pragma once\n");
+            }
+
+            // 2. 디렉터리 바로 아래 .h만 허용한다(하위 디렉터리 헤더·소스 파일은 거부).
+            foreach (string misplaced in new[] { directory + "Nested/Probe.h", directory + "Probe.cpp" })
+            {
+                temporary.Write(misplaced, guarded);
+                Verify.That(PolicyChecks.PlatformBoundary(temporary.Root).Count != 0, "misplaced Platform/Win64 file accepted: " + misplaced);
+                File.Delete(Path.Combine(temporary.Root, misplaced));
+            }
+
+            NoFailures(PolicyChecks.PlatformBoundary(temporary.Root));
+
+            // 3. 내용 전체를 #if ROCKS_PLATFORM_WINDOWS로 감싸야 한다.
+            foreach (string unguarded in new[] { "#pragma once\n#include <Base/Compiler.h>\n#include <Windows.h>\n",
+                "#pragma once\n#include <Base/Compiler.h>\n#if !ROCKS_PLATFORM_WINDOWS\n#error \"Windows only\"\n#endif\n#include <Windows.h>\n",
+                "#pragma once\n#include <Base/Compiler.h>\n#if ROCKS_PLATFORM_WINDOWS\n#endif\nvoid Exposed();\n",
+                "#pragma once\n#if ROCKS_PLATFORM_WINDOWS\n#include <Base/Compiler.h>\n#endif\n" })
+            {
+                temporary.Write(directory + "Probe.h", unguarded);
+                Verify.Equal(1, PolicyChecks.PlatformBoundary(temporary.Root).Count, "unguarded Platform/Win64 header accepted: " + unguarded);
             }
         });
         suite.Add("Policy.TargetMacroControls", () =>

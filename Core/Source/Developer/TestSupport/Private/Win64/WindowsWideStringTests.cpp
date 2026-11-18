@@ -1,4 +1,6 @@
 #include <Core/Move.h>
+#include <Platform/Memory.h>
+#include <PlatformBase/Private/Win64/WindowsString.h>
 #include <Platform/Win64/WideString.h>
 #include <TestSupport/Test.h>
 
@@ -90,8 +92,9 @@ TEST(PlatformWindowsWideStringRejectsInvalidUtf8) {
         CHECK(IsRejected(wide.AssignUtf8(text, strlen(text))));
         CHECK(wide.Value() == nullptr);
 
-        wchar_t buffer[8] = {L'x'};
         for (const TextFit fit : Fits) {
+            // 반복마다 칸을 다시 채워 실패가 매번 빈 문자열을 쓰는지 본다.
+            wchar_t buffer[8] = {L'x', L'x'};
             const TextConversion converted = ConvertUtf8ToWide(text, strlen(text), buffer, 8, fit);
             CHECK(IsRejected(converted.status) && converted.length == 0 && buffer[0] == L'\0');
         }
@@ -119,8 +122,9 @@ TEST(PlatformWindowsWideStringRejectsLoneSurrogates) {
         CHECK(IsRejected(narrow.AssignWide(text, units)));
         CHECK(narrow.Value() == nullptr);
 
-        char buffer[16] = {'x'};
         for (const TextFit fit : Fits) {
+            // 반복마다 칸을 다시 채워 실패가 매번 빈 문자열을 쓰는지 본다.
+            char buffer[16] = {'x', 'x'};
             const TextConversion converted = ConvertWideToUtf8(text, units, buffer, 16, fit);
             CHECK(IsRejected(converted.status) && converted.length == 0 && buffer[0] == '\0');
         }
@@ -222,4 +226,109 @@ TEST(PlatformWindowsWideStringWideLengthStopsAtNulOrLimit) {
     CHECK(WideLength(full) == 3);
     CHECK(WideLength(full, 2) == 2);
     CHECK(WideLength(EmojiWide) == 2);
+}
+
+namespace {
+
+// AlignedAllocate로 text를 복사해 wide에 넘긴다(Adopt의 소유 규칙).
+bool AdoptCopy(WideString& wide, const wchar_t* text) noexcept {
+    const usize units = WideLength(text, 1024);
+    auto* value =
+        static_cast<wchar_t*>(AlignedAllocate((units + 1u) * sizeof(wchar_t), alignof(wchar_t)));
+    if (value == nullptr) {
+        return false;
+    }
+
+    MemoryCopy(value, text, (units + 1u) * sizeof(wchar_t));
+    wide.Adopt(value, units);
+    return true;
+}
+
+} // namespace
+
+TEST(PlatformWindowsWideStringRemoveExtendedPrefixKeepsWin32Paths) {
+    struct Case {
+        const wchar_t* input;
+        const wchar_t* expected;
+    };
+
+    const Case cases[] = {
+        {L"\\\\?\\C:\\dir\\app.exe", L"C:\\dir\\app.exe"},
+        {L"\\\\?\\d:/dir/app.exe", L"d:/dir/app.exe"},
+        {L"\\\\?\\UNC\\server\\share\\app.exe", L"\\\\server\\share\\app.exe"},
+        // 접두사를 떼면 상대 경로가 되는 확장 경로와 접두사 없는 경로는 그대로 둔다.
+        {L"\\\\?\\Volume{01234567-89ab-cdef-0123-456789abcdef}\\app.exe",
+         L"\\\\?\\Volume{01234567-89ab-cdef-0123-456789abcdef}\\app.exe"},
+        {L"\\\\?\\GLOBALROOT\\Device\\app.exe", L"\\\\?\\GLOBALROOT\\Device\\app.exe"},
+        {L"\\\\?\\C:", L"\\\\?\\C:"},
+        {L"C:\\dir\\app.exe", L"C:\\dir\\app.exe"},
+        {L"\\\\server\\share\\app.exe", L"\\\\server\\share\\app.exe"},
+        {L"", L""},
+    };
+    for (const Case& item : cases) {
+        WideString wide;
+        REQUIRE(AdoptCopy(wide, item.input));
+        wide.RemoveExtendedPrefix();
+        CHECK(SameWide(wide.Value(), item.expected) &&
+              wide.Units() == WideLength(item.expected, 1024));
+    }
+
+    // 빈 WideString에는 아무것도 하지 않는다.
+    WideString empty;
+    empty.RemoveExtendedPrefix();
+    CHECK(empty.Value() == nullptr && empty.Units() == 0);
+}
+
+TEST(PlatformWindowsWideStringModuleFileNameIsThisExecutable) {
+    WideString path;
+    REQUIRE(path.AssignModuleFileName());
+    REQUIRE(path.Value() != nullptr && path.Units() > 4);
+    CHECK(path.Value()[path.Units()] == L'\0');
+    // 확장 접두사가 없는 일반 Win32 절대 경로이고 .exe로 끝난다.
+    CHECK(!(path.Value()[0] == L'\\' && path.Value()[1] == L'\\' && path.Value()[2] == L'?'));
+    const wchar_t* tail = path.Value() + path.Units() - 4;
+    CHECK((tail[0] == L'.') && (tail[1] == L'e' || tail[1] == L'E') &&
+          (tail[2] == L'x' || tail[2] == L'X') && (tail[3] == L'e' || tail[3] == L'E'));
+
+    // 같은 파일을 가리킨다(GetModuleFileNameW 결과에서 접두사를 뗀 것과 같다).
+    wchar_t raw[MAX_PATH];
+    const DWORD rawUnits = GetModuleFileNameW(nullptr, raw, MAX_PATH);
+    if (rawUnits != 0 && rawUnits < MAX_PATH) {
+        WideString expected;
+        REQUIRE(AdoptCopy(expected, raw));
+        expected.RemoveExtendedPrefix();
+        CHECK(SameWide(path.Value(), expected.Value()));
+    }
+}
+
+TEST(PlatformWindowsWideStringWriteUtf8MapsErrorsForPublicApis) {
+    // "a가" = UTF-8 4 byte.
+    const wchar_t source[] = {L'a', 0xAC00, 0};
+    char buffer[8] = {'x'};
+    usize bytes = 99;
+    FileStatus status =
+        rocks::platform::detail::WriteUtf8(source, 2, buffer, sizeof(buffer), bytes);
+    CHECK(status && bytes == 4 && memcmp(buffer, "a\xEA\xB0\x80", 5) == 0);
+
+    // 칸 부족은 Overflow이고 bytes에 필요한 길이(NUL 제외)를 둔다. capacity 0도 같다.
+    char small[4] = {'x'};
+    bytes = 99;
+    status = rocks::platform::detail::WriteUtf8(source, 2, small, sizeof(small), bytes);
+    CHECK(status.code == FileCode::Overflow && status.nativeError == 0 && bytes == 4 &&
+          small[0] == '\0');
+    bytes = 99;
+    status = rocks::platform::detail::WriteUtf8(source, 2, nullptr, 0, bytes);
+    CHECK(status.code == FileCode::Overflow && bytes == 4);
+
+    // OS가 준 UTF-16이 잘못됐으면 호출자 인자 오류가 아니라 SystemError다.
+    const wchar_t lone[] = {L'a', 0xD800, 0};
+    bytes = 99;
+    status = rocks::platform::detail::WriteUtf8(lone, 2, buffer, sizeof(buffer), bytes);
+    CHECK(status.code == FileCode::SystemError &&
+          status.nativeError == ERROR_NO_UNICODE_TRANSLATION && buffer[0] == '\0');
+
+    // 빈 문자열은 성공이며 길이 0이다.
+    bytes = 99;
+    status = rocks::platform::detail::WriteUtf8(L"", 0, buffer, sizeof(buffer), bytes);
+    CHECK(status && bytes == 0 && buffer[0] == '\0');
 }
