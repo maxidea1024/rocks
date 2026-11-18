@@ -846,3 +846,43 @@ Debug 장부 재계산은 새 배치를 본다: 칸의 `clusterState`·`outCount
 | T2 | 새 틱 등록을 priority와 관계없이 끝에 붙임 | `Tick_PriorityThenRegistrationOrderWithinPhase` | 순서가 priority를 따르지 않는다 |
 | T3 | 지금 순서가 어기는 선행 추가에도 재구성하지 않음 | `Tick_PrerequisitesOverridePriorityAndCyclesAreRejected` | 선행보다 먼저 실행된다 |
 | T4 | 의존받는 틱의 해제를 재구성 없이 처리(의존 계수 없음) | 같은 시험 | 해제 뒤 풀린 의존의 순서가 옛 순서로 남는다 — 처음 구현에서 이 시험이 실제로 실패해 의존 계수를 더했다 |
+
+## 17. Slot hot·cold 분리 (6.4절, 2026-11-18)
+
+`Slot`을 캐시 줄 하나(64 B, `alignas(64)`)의 hot 레코드와 같은 chunk 안에 나란히 둔 cold 레코드(`SlotCold`, `ObjectRegistry::ColdOf`)로 나눴다. 동작은 바꾸지 않았다.
+
+| 레코드 | 칸 | 읽는 경로 |
+|---|---|---|
+| hot `Slot` (64 B) | 세대·번호·상태·회수 목록 종류·색인/고리 플래그, 클러스터 inCount, object, TypeLease, roots·borrows·encodePins·루트 목록 위치, 변경 표지 | handle 조회, Borrow, 루트, 참조 쓰기(검증·변경 표지·encode 고정·클러스터 계수) |
+| cold `SlotCold` (128 B) | 회수·빈 슬롯·파괴 요청 목록 고리, storage, stableType, 생성 트랜잭션, Outer handle, 이름·자식 고리(Slot*), 이름 기록, backend 보유, 경로 길이, Discard·파괴 요청 목록 플래그 | 생성·회수·이름·Outer 고리·Discard, 패키지 정책의 자식 고리 표식 |
+
+옮긴 지점 약 180곳은 컴파일러 오류 위치를 기계적으로 고쳐 바꿨다(`base->field` → `ColdOf(*base).field`, 중첩 접근은 오른쪽부터). 4.3절 이후의 Slot 접근 의미는 그대로다.
+
+측정(1M · 간선 4, 높은 우선순위, 같은 실행 번갈아 세 round — `p4/slot-bench.txt`):
+
+| 항목 | 전 | 후 |
+|---|---|---|
+| Slot 메모리 | 200.3 B/slot(191.0 MiB) | **192.3 B/slot**(183.4 MiB) — hot 64 + cold 128 |
+| 생성 1M | 610–711ms | 544–747ms |
+| 연결(간선 4M) | 1,160–1,423ms | 1,150–1,473ms |
+| 직렬 Collect 표식(중앙값) | 74–89ms | 63–81ms |
+| 병렬 ×8 표식 | 35.1–37.3ms | 37.2–37.4ms |
+| churn 98K 회수 | 230–254 ns/object | 256–262 ns/object |
+| 종료(전부 회수) | 265–447ms | 308–360ms |
+
+- 시간은 측정 흔들림 안에서 같다. 회수만 5–10% 느려 보인다(회수가 hot과 cold 두 줄을 고친다).
+- 4절 gate "Slot 정보 ≤ 64B"는 hot 레코드로 충족한다. 슬롯 전체는 192 B로 남는다. 더 줄이려면 cold의 Slot* 고리 8개를 슬롯 번호(4 B)로, Outer handle을 hot 레코드의 Outer 번호와 대상 세대로, 이름·자식 고리를 이름 있는/Outer 있는 객체만의 identity 레코드로 옮겨야 한다(6.4절 — 약 40–60 B, 남은 일).
+
+검증: Debug Foundation 전체 2,063개·`--filter Object --repeat 3` 194개×3, Debug EngineTests 전체 2,189개·World `--repeat 3`, 클러스터 smoke Debug 6종(World형 seed 41·47·43(worker 4), 패키지형 seed 42·48·44(worker 4)), Development soak 10종(일반 300K tick seed 11·12·24(worker 4)·14(시간 예산), 클러스터 World형 5,000 tick seed 31·35·33(worker 4), 패키지형 1,000 tick seed 32·36·34(worker 4)) 모두 통과. format·policy 통과.
+
+음성 대조(`p4/negctl5*.txt` — Debug Foundation을 고쳐 빌드하고 Object·GcSoak·Registry 시험을 돌린 뒤 되돌림):
+
+| 대조 | 바꾼 것 | 처음 결과 | 보강 뒤 |
+|---|---|---|---|
+| H1 | 모든 cold 조회를 같은 chunk의 이웃 슬롯 cold로 | 실패 없음 | 결함 아님 — 일관된 순열이면 동작이 같다(cold 대응은 `ColdOf` 하나로만 정한다) |
+| H2 | 회수가 cold Outer를 비우지 않음 | 실패 없음(재사용 생성이 덮어쓴다) | Debug 재사용 검사 Fatal — Object·GcSoak·Registry 모두 중단 |
+| H3 | 회수가 cold 생성 트랜잭션을 비우지 않음 | 실패 없음 | 같은 검사로 Object·Registry 중단 |
+| H4 | 모든 cold 조회를 첫 chunk로 | Object·Registry 중단, GcSoak 시간 초과 | — |
+| H5 | 회수 준비가 cold 이름 기록 포인터를 남김 | 실패 없음 | 같은 검사로 Object·GcSoak·Registry 중단 |
+
+보강(설계 개정 4): Debug에서 빈 슬롯을 재사용할 때 cold 칸이 모두 빈 값인지 검사한다("Reused slot kept cold state from its previous object"). 보강 뒤 Debug Foundation 2,063개·EngineTests 2,189개, smoke 3종이 다시 통과했다.
