@@ -68,11 +68,11 @@ constexpr bool HasFlag(uint32 flags, ConsoleSettingFlags flag) noexcept {
 // 콘솔 설정 종류의 리플렉션 값 종류다(Bool·Int32·Int64·Float32·Float64·Utf8String·Name·Enum).
 ValueKind ConsoleValueKind(ConsoleValueType type) noexcept;
 
-// 기본 영역 이름 공간 표다(5.1절 — 이름의 첫 마디). ConfigContext::RegisterConsoleRegion으로
-// 더한다.
-inline constexpr StringView DefaultConsoleRegions[] = {"render",  "graph", "stream",  "shader",
-                                                       "quality", "net",   "physics", "log",
-                                                       "game",    "input", "audio",   "ui"};
+// 기본 영역 이름 공간 표다(5.1절 — 이름의 첫 마디). `cvar`·`cheat`·`obj`는 CVar 도구·치트·객체
+// 콘솔 자리다(Docs/Design/CVarSystem.ko.md 15절). ConfigContext::RegisterConsoleRegion으로 더한다.
+inline constexpr StringView DefaultConsoleRegions[] = {
+    "render", "graph", "stream", "shader", "quality", "net",   "physics", "log",
+    "game",   "input", "audio",  "ui",     "cvar",    "cheat", "obj"};
 
 // 독립 콘솔 설정 하나의 정의다(설정 struct 필드가 아닌 것 — 필드는 ConsoleName 지정자로 등록된다).
 // view는 등록 호출 동안만 빌린다(문맥이 복사한다).

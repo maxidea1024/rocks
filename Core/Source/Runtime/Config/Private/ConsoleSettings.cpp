@@ -378,6 +378,52 @@ Result<void> ReadField(ConfigState& state, const SectionState& section, void* st
         out);
 }
 
+// 읽은 값(value — 콘솔 설정 종류)의 CVar 검사용 값이다. String·Name의 텍스트는 입력 텍스트다(값
+// 표기가 원문 그대로다).
+cvar::detail::ScalarValue ScalarOfField(const FieldValue& value, StringView text) noexcept {
+    cvar::detail::ScalarValue scalar;
+    switch (value.kind) {
+    case ValueKind::Bool:
+        scalar.boolean = value.boolean;
+        break;
+    case ValueKind::Float32:
+        scalar.real = static_cast<double>(value.float32);
+        break;
+    case ValueKind::Float64:
+        scalar.real = value.float64;
+        break;
+    case ValueKind::Utf8String:
+        scalar.text = value.string.View();
+        break;
+    case ValueKind::Name:
+        scalar.text = text;
+        break;
+    default:
+        scalar.integer = value.signedInteger;
+        break;
+    }
+
+    return scalar;
+}
+
+// CVar 검사가 보정한 수 값을 value에 되쓴다(정수·실수만 보정된다).
+void StoreScalar(const cvar::detail::ScalarValue& scalar, FieldValue& value) noexcept {
+    switch (value.kind) {
+    case ValueKind::Float32:
+        value.float32 = static_cast<float>(scalar.real);
+        break;
+    case ValueKind::Float64:
+        value.float64 = scalar.real;
+        break;
+    case ValueKind::Int32:
+    case ValueKind::Int64:
+        value.signedInteger = scalar.integer;
+        break;
+    default:
+        break;
+    }
+}
+
 // 출처 스택의 층 이름 목록을 output에 쓴다.
 Result<void> WriteStack(ConfigState& state, Span<const uint64> stack,
                         ConsoleOutput& output) noexcept {
@@ -475,7 +521,44 @@ Result<StringView> CheckConsoleValue(ConfigState& state, const ConsoleSettingSta
         }
     }
 
+    if (setting.definition != nullptr && setting.definition->check != nullptr) {
+        // CVar 핸들 설정: 정의의 범위·보정·Validate를 타입대로 적용한다(컴파일 때 기본값 검사와
+        // 같은 함수 — CVar 4.2절). String·Name의 검사 인자는 값 텍스트다.
+        cvar::detail::ScalarValue scalar = ScalarOfField(out, text);
+        StringView reason;
+        switch (setting.definition->check(*setting.definition, scalar, reason)) {
+        case cvar::detail::ValueCheck::Accepted:
+            break;
+        case cvar::detail::ValueCheck::Clamped:
+            StoreScalar(scalar, out);
+            code = ConfigDiagnosticCode::Clamped;
+            break;
+        case cvar::detail::ValueCheck::OutOfRange:
+            code = ConfigDiagnosticCode::ValueOutOfRange;
+            return Result<StringView>::Success(reason);
+        case cvar::detail::ValueCheck::ValidationFailed:
+            code = ConfigDiagnosticCode::ValidationFailed;
+            return Result<StringView>::Success(reason);
+        }
+    }
+
     return Result<StringView>::Success(StringView{});
+}
+
+Result<void> AdoptPendingValues(ConfigState& state, ConsoleSettingState& setting) noexcept {
+    Array<ConfigEntry*> order(state.allocator);
+    for (UniquePtr<ConfigEntry>& entry : state.entries) {
+        if (auto pushed = order.TryPushBack(entry.Get()); !pushed) {
+            return pushed;
+        }
+    }
+
+    order.Sort([](const ConfigEntry* left, const ConfigEntry* right) noexcept {
+        return left->layer != right->layer ? left->layer < right->layer
+                                           : left->sequence < right->sequence;
+    });
+    return RecomputeConsoleSetting(state, setting, order.View(), true, setting.value, setting.text,
+                                   setting.sources);
 }
 
 Result<void> RecomputeConsoleSetting(ConfigState& state, const ConsoleSettingState& setting,
@@ -546,6 +629,15 @@ Result<void> RecomputeConsoleSetting(ConfigState& state, const ConsoleSettingSta
             }
 
             continue;
+        }
+
+        if (report && code == ConfigDiagnosticCode::Clamped) {
+            if (auto reported = Report(state, code, ConfigSeverity::Note, entry->layer,
+                                       entry->sourceName.View(), position, setting.name.View(),
+                                       "the value was clamped to the setting range");
+                !reported) {
+                return reported;
+            }
         }
 
         if (auto copied = CopyFieldValue(candidate, value); !copied) {
@@ -996,20 +1088,7 @@ ConfigContext::RegisterConsoleSetting(const ConsoleSettingDefinition& definition
     }
 
     // 이미 들어온 층 입력(대기 값)을 바로 넘긴다. 거부한 값은 진단을 남긴다.
-    Array<ConfigEntry*> order(*allocator_);
-    for (UniquePtr<ConfigEntry>& entry : state->entries) {
-        if (auto pushed = order.TryPushBack(entry.Get()); !pushed) {
-            return Result<ConsoleSettingId>::Failure(pushed.Error());
-        }
-    }
-
-    order.Sort([](const ConfigEntry* left, const ConfigEntry* right) noexcept {
-        return left->layer != right->layer ? left->layer < right->layer
-                                           : left->sequence < right->sequence;
-    });
-    if (auto computed = detail::RecomputeConsoleSetting(
-            *state, setting, order.View(), true, setting.value, setting.text, setting.sources);
-        !computed) {
+    if (auto computed = detail::AdoptPendingValues(*state, setting); !computed) {
         return Result<ConsoleSettingId>::Failure(computed.Error());
     }
 

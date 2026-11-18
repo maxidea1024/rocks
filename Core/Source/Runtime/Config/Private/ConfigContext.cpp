@@ -211,6 +211,16 @@ Result<bool> ValidateConsoleValue(ConfigState& state, const ConfigEntry& entry, 
     }
 
     if (checked.Value().IsEmpty()) {
+        // `Clamp()` CVar는 범위 밖 값을 보정해 받는다(CVar 6.2절 — 입력은 받고 Note를 남긴다).
+        if (code == ConfigDiagnosticCode::Clamped) {
+            if (auto reported =
+                    Report(state, code, ConfigSeverity::Note, entry.layer, entry.sourceName.View(),
+                           position, name, "the value was clamped to the setting range");
+                !reported) {
+                return Result<bool>::Failure(reported.Error());
+            }
+        }
+
         return Result<bool>::Success(true);
     }
 

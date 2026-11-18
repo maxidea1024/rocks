@@ -99,4 +99,27 @@ void SleepFor(uint32 milliseconds) noexcept;
 usize CopyCurrentThreadName(char* buffer, usize capacity) noexcept;
 void YieldThread() noexcept;
 
+// 스레드 스택이 차지하는 주소 범위 [low, high)다(guard page 포함 여부는 OS가 정한다 — 경계 근처의
+// 판정에 쓰지 말고 "이 주소가 스택 위 지역 변수인가"를 묻는 데 쓴다).
+struct ThreadStackRange {
+    uptr low = 0;
+    uptr high = 0;
+
+    // address가 범위 안인지다.
+    bool Contains(const void* address) const noexcept {
+        const auto value = reinterpret_cast<uptr>(address);
+        return value >= low && value < high;
+    }
+};
+
+// 현재 스레드의 스택 주소 범위다(Windows GetCurrentThreadStackLimits, macOS
+// pthread_get_stackaddr_np·pthread_get_stacksize_np, Android pthread_getattr_np). 정적 저장
+// 기간이어야 하는 객체가 함수 안 지역 변수로 만들어졌는지 확인하는 데 쓴다(CVar 핸들 — Docs/Design/
+// CVarSystem.ko.md 4.2절). OS 조회 실패는 Fatal이다. 스레드: 아무 스레드에서나 부를 수 있고 그
+// 스레드의 범위를 돌려준다.
+//
+// 사용 예:
+//   if (platform::CurrentThreadStackRange().Contains(&handle)) { return InvalidArgument; }
+ThreadStackRange CurrentThreadStackRange() noexcept;
+
 } // namespace rocks::platform
