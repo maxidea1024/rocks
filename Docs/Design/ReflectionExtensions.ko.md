@@ -1708,7 +1708,7 @@ B9j–B9m 묶음 리뷰(2026-11-18 — 코드만 읽은 리뷰, 각 항목은 �
 
 [커브 데이터](CurveData.ko.md) 9.1절(D7)의 struct 검증 hook을 기반에 넣었다. 결정과 세부는 그 문서 17.2절 V1–V8이고 여기에는 기반 쪽 접점만 적는다.
 
-- 선언: `ROCKS_STRUCT`의 `static Result<void> Validate(const S&) noexcept`. 모양 오류와 참조 struct는 RMC2309(15절). 생성 특수화는 `HasValidateSelf`·`ValidateSelf`(base 사슬 다음 자기 hook)·`HasValidateTree`·`ValidateTree`(트리 전체)와 `detail::ValueValidate<S>` 특수화를 낸다.
+- 선언: `ROCKS_STRUCT`의 `static Result<void> Validate(const S&) noexcept`. 모양 오류와 참조 struct는 RMC2309(15절). Binds 미러는 CV3에서 막아 두었다가 CV9에서 열었다 — 미러의 `static Validate(const 실제 타입&)`가 실제 타입의 hook이다(25절). 생성 특수화는 `HasValidateSelf`·`ValidateSelf`(base 사슬 다음 자기 hook)·`HasValidateTree`·`ValidateTree`(트리 전체)와 `detail::ValueValidate<S>` 특수화를 낸다.
 - 표: `RuntimeStructOps::validate`(자기 수준)·`validateTree`(트리), `RuntimeValueOps::validateTree`. TypeRegistry는 `validate`가 있으면 강한 참조·Registry 컨테이너가 없고 `validateTree`·`copy`·`swap`이 있어야 등록한다.
 - 부르는 곳: graph decode 2단계의 `DecodeStructValue` 끝(복원 전체 InvalidArgument), 대입 묶음·JSON import의 `Publish` 단계 0(추가 StructRefArray 원소)과 `PathPrepareAttach`(값 단위 상자 — 진단 `TextDiagnosticCode::InvalidStructValue`), 객체 시작 위치의 공개 경로 변경 연산(hook struct 자리를 상자로 분리·연산·검증·게시 — `PropertyPathError::StructValidation`), hook struct 안 자리에 상자를 놓는 `PathPrepareAttach`는 `PropertyPathError::InsideValidatedStruct`(Unsupported).
 - 단계 리뷰 반영(CurveData 17.2절 V9–V12): struct 값 시작 위치(대입 묶음 Value 대상 — 설정·콘솔)도 `PathPrepareAttach`가 검증하고, 루트 struct의 hook은 Publish가 루트 사본으로 검증한다. hook 단계 탐색은 InstancedStruct 내용까지 본다. `PreparedStructElements::PreparePublish`·staged `Publish()`가 추가 원소를 한 번 검증한다. 상자 경로는 분류·검증 뒤 Borrow 직전에 고르고(staged는 쓰기 접근 판정을 먼저 — `PathSetInstancedType`도 같은 진입점), 값을 만드는 연산(넣기·키 넣기·Optional 만들기·형 바꾸기)도 hook 트리가 있으면 상자로 보낸다. 실패하면 출력 인자는 그대로, 바뀐 것이 없으면(이미 있는 키의 InsertKey) 게시하지 않고, staged는 `ConstructionContext::WriteCount()` 대조와 `CheckStagedWrite`로 재진입 변경·Required 검사 중 쓰기를 Busy로 막는다. MetaCompiler는 friend·using-declaration·consteval `Validate`를 RMC2309로 거부하고 `::`·별칭 철자를 받는다.
@@ -1723,4 +1723,14 @@ B9j–B9m 묶음 리뷰(2026-11-18 — 코드만 읽은 리뷰, 각 항목은 �
 - 성질 표(1.3절): 새 값 종류를 두지 않았다(스키마는 `{Array, UInt8}` 그대로 — wire만 필드 단위로 다르다). 그래서 성질 표·C# `ValueKindTable`·descriptor는 바뀌지 않는다.
 - 경로: 원소 경로(`bytes[3]`)와 원소 수·넣기·지우기는 그대로다.
 - 텍스트(10.4절 표의 Array 행 예외): 통째 값은 명령행·JSON 모두 RFC 4648 Base64 문자열 하나(Core `Encoding/Base64.h`, 빈 문자열 = 빈 배열)이고 JSON 숫자 배열은 InvalidValue다. 원소 대입은 `bytes[i]=v` 그대로다.
+- 소비자: `PackedTangentCurve::packed`(CurveData CV8 — `MaxElements = 1048576`, 정합 hook과 함께 쓴다).
 - 단계 리뷰 반영(CurveData 17.3절 B8): 설정 층 배열 연산 객체는 byte 배열에서 InvalidArrayOperation이다. 텍스트 Base64 풀기는 길이·패딩으로 원소 수 한도를 먼저 본다. 상자 경로의 InsertKey "바뀐 것 없음"은 Set 원소만이고(Map 기존 키 초기화는 게시·검증), staged 재진입 누계는 분리 전에 잰다. `AddedTarget` 시작 위치의 변경 연산은 추가 원소 검증 표시를 내린다. MetaCompiler consteval 판정은 주석을 걷어낸 원문으로 한다.
+
+## 25. Binds 확장 — enum 미러·private 멤버·미러 검증 hook(CurveData CV9)
+
+[커브 데이터](CurveData.ko.md) 12.1절(D19)의 `InterpCurve` 미러를 위해 Binds(RF 4.5·4.6절)를 넓혔다. 결정과 세부는 그 문서 17.8절 I2–I4이고 여기에는 기반 쪽 접점만 적는다.
+
+- **enum Binds**: `ROCKS_ENUM(Binds = "<실제 enum 철자>")`(CoreTypeBindings만 — 밖은 RMC2004). 철자는 struct와 같은 별칭 Clang 실행으로 정규화하고 대상이 enum이 아니면 RMC3000이다. 생성 코드는 실제 enum의 `GeneratedType`(스키마 이름은 미러 이름)을 내고 underlying과 미러 열거자마다 `static_cast<int64>(실제::이름) == 값`을 static_assert로 대조한다. 미러가 나열한 열거자만 선언 값이다. 실제 enum 형식의 필드(클래스 필드·미러 멤버·Map 키)는 미러로 풀리고 native 키는 실제 enum이다. descriptor enum 항목에 `binds` 칸이 생겼다(미러가 아니면 "").
+- **private 멤버**: 실제 타입이 `template <class> friend struct ::rocks::GeneratedType;`을 선언하면(Core는 앞 선언만 한다) 미러가 private 멤버를 C++ 이름으로 나열할 수 있다. 대조 static_assert·구조적 바인딩(C++20 접근 가능 멤버 규칙)·멤버 포인터 thunk·깊은 복사·검증 트리가 모두 `GeneratedType` 특수화 안이라 생성 코드는 바뀌지 않았다. friend가 없는 private 멤버는 여전히 생성 코드 컴파일 실패다. 도구 이름은 `Name=`으로 준다.
+- **미러 검증 hook**: 미러 struct의 `static Result<void> Validate(const 실제 타입&) noexcept`를 받는다(모양은 생성 static_assert가 대조한다 — 파서는 미러의 인자 철자를 보지 않는다). 생성 `ValidateSelf`·`ValidateTree`가 미러 함수를 부르고, 나머지 hook 규칙(23절)은 같다.
+- 시험: ToolTests `Meta.BindsEnumMirrorPrivateMembersAndValidate`·`Meta.BindsEnumMismatchFailsToCompile`·`Meta.BindsEnumTargetMustBeAnEnum`·`Meta.BindsEnumIsAllowedOnlyInCoreTypeBindings`, Curves `InterpCurveReflection_*`, ObjectRuntime `AtomicStruct_CoreValueMirrorsAreAtomicExceptTransform`(CoreTypeBindings 등록 수 17 + 11).
