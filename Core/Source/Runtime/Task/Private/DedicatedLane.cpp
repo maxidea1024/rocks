@@ -1,4 +1,5 @@
 #include <Task/DedicatedLane.h>
+#include <Core/Diagnostics/Correlation.h>
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
 
@@ -6,9 +7,14 @@ namespace rocks {
 
 struct DedicatedLane::Node {
     explicit Node(Function<void()>&& body) noexcept : task(Move(body)) {
+        // 올린 스레드의 상관 id를 lane 작업에 넘긴다(로깅 L15). 스택이 비면 분기 하나다.
+        if (CorrelationDepth() != 0) {
+            correlation = CaptureCorrelation();
+        }
     }
 
     Function<void()> task;
+    CorrelationToken correlation;
     Node* next = nullptr;
 };
 
@@ -274,6 +280,9 @@ void DedicatedLane::RunNode(Node* node) noexcept {
         // 수 있고, 그 안에서 자기 lane을 기다리면 교착이기 때문이다.
         LaneFrame frame(this);
         TaskLaneScope scope(lane_);
+        // 작업 동안만 올린 쪽 상관 id를 쌓는다. 범위가 끝나면 lane 스레드의 깊이는 원래대로다(작업
+        // 사이로 새지 않는다).
+        CorrelationScope correlation(node->correlation);
         node->task();
         node->task.Reset();
     }

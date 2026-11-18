@@ -46,7 +46,18 @@ TraceScopeName& TraceTaskRunName() noexcept;
 //   record->trace = TraceCreateTask();
 //   for (each dependency) TraceTaskDependency(record->trace.id, dependency->trace.id);
 inline TraceTaskInfo TraceCreateTask() noexcept {
-    return TraceTaskChannel.IsEnabled() ? detail::CreateTraceTask() : TraceTaskInfo{};
+    if (TraceTaskChannel.IsEnabled()) {
+        return detail::CreateTraceTask();
+    }
+
+    // 상관 id 전파는 채널과 무관하게 한다(로그가 같은 값을 쓴다, 로깅 L15). 스택이 비면 분기
+    // 하나다.
+    TraceTaskInfo info;
+    if (CorrelationDepth() != 0) {
+        info.context = CaptureCorrelation();
+    }
+
+    return info;
 }
 
 // 의존 추가(앞 prerequisite → 뒤 task)다. 둘 중 하나라도 기록하지 않은 task면 아무것도 하지 않는다.
@@ -102,7 +113,7 @@ inline void TraceTaskWaitEnd(const TraceTaskId& waited) noexcept {
 class TraceTaskScope {
 public:
     explicit TraceTaskScope(const TraceTaskInfo& info) noexcept
-        : id_(info.id), context_(info.id.IsTraced() ? info.context : TraceContextToken{}) {
+        : id_(info.id), context_(info.context) {
         if (id_.IsTraced()) {
             detail::BeginTraceTaskExecution(id_, previousTask_);
             if (TraceCpuChannel.IsEnabled()) {

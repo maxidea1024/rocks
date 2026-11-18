@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/Diagnostics/Correlation.h>
 #include <Base/Types.h>
 #include <Core/Containers/Span.h>
 #include <Core/Diagnostics/LogRecord.h>
@@ -118,6 +119,9 @@ struct LogEvent {
     uint64 monotonicNanoseconds = 0;
     // 기록 시각, 캡처한 단조 tick(platform::MonotonicTicks 원천). trace 기록이 변환 없이 쓴다.
     uint64 monotonicTicks = 0;
+    // 기록한 스레드의 상관 id(CorrelationScope 맨 위)다. hasCorrelation이 false면 비었다.
+    CorrelationIds correlation;
+    bool hasCorrelation = false;
     // 기록 시각, UTC tick(platform::UtcTicks 단위). LG3 출력 스레드가 환산해 채운다. 그 전에는
     // 0이다.
     int64 utcTicks = 0;

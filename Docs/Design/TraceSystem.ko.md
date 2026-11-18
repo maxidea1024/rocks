@@ -1,6 +1,6 @@
 # 다중 스레드 trace 설계
 
-기준일: 2026-11-18, 개정 6. 여러 스레드의 CPU 구간·카운터·표지·task 수명·GPU 구간을 하나의 시간축에 기록하는 **trace 수집**(TraceCapture)과, 이를 읽는 **trace 분석**(TraceAnalysis)을 정한다.
+기준일: 2026-11-18, 개정 7. 여러 스레드의 CPU 구간·카운터·표지·task 수명·GPU 구간을 하나의 시간축에 기록하는 **trace 수집**(TraceCapture)과, 이를 읽는 **trace 분석**(TraceAnalysis)을 정한다.
 
 [렌더 기반](RenderBase.ko.md)의 선행 작업 CP5(다중 스레드 CPU 구간 계측·카운터·GPU 상관)이고 RB7(`GpuScope`, RenderBase 13절)의 기반이다. 요구는 다음 문서에서 온다.
 - [엔진 구현 계획](EngineImplementationPlan.ko.md) 29.1절(계측 체계), 29.4절(필수 로깅·프로파일러), 29.5절(OB01–OB06)
@@ -236,6 +236,12 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론)의 현재 기본 경로다. 경�
   - 저장한 사본(`TraceContextToken`)은 id만이 아니라 값도 함께 가진다. 다른 스레드의 스택에 값을 다시 놓아야 로그가 같은 상관 id를 쓸 수 있고, 세션이 바뀌어도 복원할 수 있기 때문이다. 같은 세션이면 복원은 정의를 다시 쓰지 않고 id만 기록한다(`Trace.ContextPush`). 문맥 id는 세션마다 1부터 매기는 u32다.
   - 기록 채널은 새 채널 `context`다.
 
+- **로깅 LG14(개정 7):** 스택은 Core `CorrelationScope`(`Core/Diagnostics/Correlation.h`, 깊이 `MaxCorrelationDepth` = 16) 하나로 옮겼다. 로그 기록도 같은 스택의 맨 위 값을 캡처한다(LoggingSystem.ko.md 14.1.4, L14).
+  - `TraceContextValues`는 `CorrelationIds`, `TraceContextToken`은 `CorrelationToken`(값 + 확장 칸 2개 + valid)의 별칭이다. `TraceContextScope`·`TraceCaptureContext`·`TraceCurrentContext`는 같은 이름·의미의 얇은 래퍼다.
+  - Core는 trace를 모른다. 스택 칸의 확장 칸 `ext[2]`는 Core에게 뜻 없는 u64 두 칸이고, trace가 `ext[0]` = 정의 캐시(세션 serial 하위 32비트 << 32 | 문맥 id), `ext[1]` = 쌓기를 기록한 세션 serial로 쓴다.
+  - 쌓기·내리기 관찰자(원자 포인터 하나)를 세션 Start가 건다(같은 관찰자 재설정은 무동작, 프로세스 수명 동안 유지, 해제는 다른 스레드가 쌓지 않는 종료 단계에서만). 관찰자는 지금까지의 `TraceContextScope`가 하던 기록(정의·`Trace.ContextPush`·`Trace.ContextPop`)을 같은 조건(채널 `context`·세션)으로 낸다. 그래서 공개 `CorrelationScope`로 쌓아도 trace 기록이 같다.
+  - 기록 형식과 깊이 상한·넘침 규칙은 바뀌지 않았다. TR2·TR3 시험은 고치지 않고 통과한다.
+
 ### 6.5 스레드 정보
 
 - 스레드 등록 기록은 trace 스레드 id·OS 스레드 id·이름·묶음·정렬 순위다.
@@ -262,7 +268,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론)의 현재 기본 경로다. 경�
   - task 신원은 `TraceTaskId`(세션 64비트 id + 세션 serial)다. 만들 때 채널이 꺼져 있으면 id가 0이라, 그 task의 모든 사건 지점(제출·실행·끝 상태·기다림)이 분기 하나로 끝난다. 신원과 문맥 사본은 scheduler가 작업을 records에 공개하기 전에 정해 worker와 경쟁하지 않는다.
   - 실행 가능: 제출 때 의존이 모두 성공했으면 바로, 아니면 마지막 의존이 성공으로 끝날 때 scheduler gate 안에서 낸다(worker의 시작보다 앞선다).
   - 실행 구간 `TraceTaskScope`: 저장한 문맥 복원 → 시작 → CPU 구간 `Task.Run`(채널 cpu가 켜져 있을 때) → 끝 순이다.
-  - 문맥은 task 채널이 켜졌을 때만 저장·복원한다(채널 꺼짐 비용 분기 하나 요구). 로그 상관 id를 trace와 무관하게 늘 전파할지는 로깅 시스템 연동 때 정한다.
+  - 문맥(상관 id)은 task 채널과 무관하게 늘 저장·복원한다(로깅 L15, 개정 7). 채널이 꺼져 있고 스택이 비어 있으면 분기 하나다(`TraceCreateTask`). 채널이 꺼져 있으면 사본만 받고 task 기록은 하지 않는다. `DedicatedLane::Post`도 같은 규칙으로 전파하고, lane 작업이 끝나면 lane 스레드의 스택은 원래 깊이로 돌아온다.
   - InlineExecutor는 만듦부터 완료까지 한 스레드에서 차례로 남긴다.
 
 ## 7.1 기록 경로 비용(TR2 검토)
@@ -389,6 +395,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론)의 현재 기본 경로다. 경�
 
 ## 13. 개정 이력
 
+- 개정 7(2026-11-18, 로깅 세션 작성·rocks-95 합의): 상관 id 스택을 Core `CorrelationScope`로 옮기고 trace는 확장 칸·관찰자로 기록을 유지한다(6.4절). 문맥 전파는 task 채널과 무관하게 늘 하고 `DedicatedLane::Post`도 전파한다(7절). 표준 채널 `log`와 `Log.MessageSpec`·`Log.Message`는 LG15에서 더한다.
 - 개정 6(2026-11-18): TR5 구현 반영(5절 구현, 8절 구현). 스펙과 다르게 정한 것: 고리의 덩어리에 기록 경계 표시를 두고 경계를 잃은 덩어리는 스냅샷에서 뺀다, 동기 표지를 세션 내부 형 기록(`Trace.SnapshotSync`)으로 둔다, 수집 통계를 표준 채널 `stats`의 기록으로 펌프 수 간격에 낸다(기본 묶음에 넣지 않음), 설정 계층 연결을 새 모듈 `TraceControl`에 둔다, 묶음은 Map이 아니라 설정 struct의 필드다, 콘솔 설정 이름은 밑줄 표기다, `trace.stop`은 세션이 아니라 `trace.file`의 출력만 끝낸다.
 - 개정 5(2026-11-17): RB7 GPU 기록 형 구현 반영(9절). 형 4개와 배치, 변환 식, 기록 스트림, 세션별 정의 재기록, 분석 모델과 report 판 2의 `gpu` 절을 적었다. 스펙과 다르게 정한 것: 구간 하나를 두 tick 기록 하나로, "GPU 시간 없음"을 queue 정의 칸으로, 작업·fence 사건은 뒤로. 채널 설명 문자열은 영어로 바꿨다(로그·추적 메시지 영어 규칙).
 - 개정 4(2026-11-17): TR3·TR4 구현 반영. task 사건을 종류 칸이 있는 형 하나로 둔 것, 실행 가능 시점, 실행 구간 순서, task 채널이 켜졌을 때만 문맥을 전파하는 것(7절), TraceAnalysis 모듈·이름으로 찾는 스키마·스트림 해석 상태·순서 번호 병합·손실을 사이에 둔 보수적 짝짓기·report 형식·임계 경로 정의(7.2절)를 적었다.

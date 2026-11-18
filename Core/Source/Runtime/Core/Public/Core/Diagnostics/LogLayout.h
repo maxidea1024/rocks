@@ -27,6 +27,7 @@
 //   {Location}           "파일:줄 함수". 기록 레벨이 options.locationMinimum(기본 Warning) 이상일
 //                        때만, 아니면 빈 값
 //   {NewLine}            줄바꿈("\n")
+//   {Correlation}        상관 id "session=3 task=1842"(0인 칸은 빼고, 모두 비면 빈 값)
 //
 // 빈 값 생략 규칙(정확한 정의):
 //   1. 토큰이 빈 값이고 바로 앞 리터럴이 '['로 끝나며 바로 뒤 리터럴이 ']'로 시작하면, 그 '['와
@@ -69,8 +70,8 @@ namespace detail {
 
 // 레이아웃 토큰 이름이다. 순서가 LogLayout의 토큰 번호다.
 inline constexpr StringView LogLayoutTokenNames[] = {
-    "Timestamp", "Elapsed",  "Level",      "Category", "EventId",  "Thread", "Frame",
-    "Message",   "Template", "Properties", "Context",  "Location", "NewLine"};
+    "Timestamp", "Elapsed",  "Level",      "Category", "EventId",  "Thread",  "Frame",
+    "Message",   "Template", "Properties", "Context",  "Location", "NewLine", "Correlation"};
 
 inline constexpr usize LogLayoutTokenCount =
     sizeof(LogLayoutTokenNames) / sizeof(LogLayoutTokenNames[0]);
@@ -211,7 +212,8 @@ private:
         Properties,
         Context,
         Location,
-        NewLine
+        NewLine,
+        Correlation
     };
 
     // 토큰 하나와 그 앞 리터럴(text_ 안의 위치)이다. variant는 형식(ms·u3)이다.

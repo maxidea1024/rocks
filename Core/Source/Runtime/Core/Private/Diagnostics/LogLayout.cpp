@@ -53,6 +53,44 @@ void AppendFormatted(Writer& writer, StringView format, const Args&... args) noe
     }
 }
 
+// 상관 id 칸 수와 칸 이름·값이다(출력 순서).
+constexpr usize CorrelationFieldCount = 5;
+
+struct CorrelationField {
+    StringView name;
+    uint64 value;
+};
+
+void CorrelationFields(const CorrelationIds& ids,
+                       CorrelationField (&fields)[CorrelationFieldCount]) noexcept {
+    fields[0] = {"session", ids.session};
+    fields[1] = {"task", ids.task};
+    fields[2] = {"asset", ids.asset};
+    fields[3] = {"entity", ids.entity};
+    fields[4] = {"request", ids.request};
+}
+
+bool HasCorrelationIds(const LogEvent& event) noexcept {
+    const CorrelationIds& ids = event.correlation;
+    return event.hasCorrelation &&
+           (ids.session | ids.task | ids.asset | ids.entity | ids.request) != 0;
+}
+
+// "session=3 task=1842"(0인 칸은 뺀다)
+void AppendCorrelation(Writer& writer, const LogEvent& event) noexcept {
+    CorrelationField fields[CorrelationFieldCount];
+    CorrelationFields(event.correlation, fields);
+    bool first = true;
+    for (const CorrelationField& field : fields) {
+        if (field.value == 0) {
+            continue;
+        }
+
+        AppendFormatted(writer, first ? "{}={}" : " {}={}", field.name, field.value);
+        first = false;
+    }
+}
+
 // 템플릿 자리에 쓰인 속성인지다. 이름 자리는 "{이름}"·"{이름:"이 템플릿에 있으면, 위치
 // 자리(Arg0…)는 검증된 템플릿이 모든 인자를 쓰므로 늘 쓰인 것이다.
 bool IsPropertyUsed(StringView templateText, StringView name) noexcept {
@@ -109,7 +147,7 @@ void AppendPairs(Writer& writer, Span<const LogProperty> pairs, StringView templ
 
 Result<LogLayout> LogLayout::Parse(StringView pattern, const LogLayoutOptions& options,
                                    LogLayoutParseError* error) noexcept {
-    static_assert(static_cast<usize>(Token::NewLine) + 1 == detail::LogLayoutTokenCount,
+    static_assert(static_cast<usize>(Token::Correlation) + 1 == detail::LogLayoutTokenCount,
                   "every layout token needs a name");
     static_assert(static_cast<usize>(Token::Timestamp) == detail::LogLayoutTimestampToken &&
                       static_cast<usize>(Token::Level) == detail::LogLayoutLevelToken,
@@ -225,6 +263,8 @@ bool LogLayout::IsEmpty(const Part& part, const LogEvent& event) const noexcept 
         return !HasUnusedProperties(event);
     case Token::Context:
         return event.context.Size() == 0;
+    case Token::Correlation:
+        return !HasCorrelationIds(event);
     case Token::Location:
         return event.level < options_.locationMinimum || event.location.file == nullptr ||
                event.location.file[0] == '\0';
@@ -305,6 +345,9 @@ void LogLayout::EmitToken(const Part& part, const LogEvent& event, void* raw) co
         return;
     case Token::NewLine:
         writer.Append("\n");
+        return;
+    case Token::Correlation:
+        AppendCorrelation(writer, event);
         return;
     }
 }

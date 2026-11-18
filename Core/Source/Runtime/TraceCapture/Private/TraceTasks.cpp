@@ -41,18 +41,18 @@ TraceScopeName& TraceTaskRunName() noexcept {
 }
 
 TraceTaskInfo CreateTraceTask() noexcept {
+    TraceTaskInfo info;
+    // 문맥 사본은 세션과 무관하게 받는다(상관 id 전파, 로깅 L15). 세션이 있으면 정의도 미리 쓴다.
+    info.context = TraceCaptureContext();
     const uint64 serial = AtomicLoad<MemoryOrder::Acquire>(&currentSessionSerial);
     if (serial == 0) {
-        return {};
+        return info;
     }
 
-    TraceTaskInfo info;
-    // 문맥 사본은 세션 접근 전에 받는다(사본 자체가 필요하면 세션을 빌린다).
-    info.context = TraceCaptureContext();
     TraceSessionGuard guard;
     TraceSessionState* session = guard.Session(serial);
     if (session == nullptr) {
-        return {};
+        return info;
     }
 
     info.id.value = platform::AtomicFetchAdd<MemoryOrder::Relaxed>(&session->nextTaskId, 1) + 1;

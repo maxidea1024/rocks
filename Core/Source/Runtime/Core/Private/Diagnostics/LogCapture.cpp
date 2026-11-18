@@ -21,12 +21,15 @@ constexpr uint8 CaptureValueTruncated = 1u << 1;
 constexpr uint8 CaptureContextTruncated = 1u << 2;
 // 런타임 템플릿의 사용자 Formatter spec을 IsValidSpec이 거부했다(렌더가 템플릿 오류로 낸다).
 constexpr uint8 CaptureFormatterSpecRejected = 1u << 3;
+// 문맥 칸 뒤에 상관 id(CorrelationIds)가 있다(스택이 비면 0 byte).
+constexpr uint8 CaptureHasCorrelation = 1u << 4;
 
 using detail::LogCaptureContext;
 
-// 값 칸 count개와 문맥 칸 contexts개를 담은 캡처 앞부분의 크기다.
-constexpr usize FixedCaptureBytes(usize count, usize contexts) noexcept {
-    return LogCaptureMinimumBytes(count) + contexts * sizeof(LogCaptureContext);
+// 값 칸 count개와 문맥 칸 contexts개(와 상관 id)를 담은 캡처 앞부분의 크기다.
+constexpr usize FixedCaptureBytes(usize count, usize contexts, bool correlation = false) noexcept {
+    return LogCaptureMinimumBytes(count) + contexts * sizeof(LogCaptureContext) +
+           (correlation ? sizeof(CorrelationIds) : 0);
 }
 
 // LogCaptureValue::flags
@@ -234,7 +237,8 @@ public:
         platform::MemoryCopy(&header_, capture_.Data(), sizeof(header_));
         if (header_.magic != CaptureMagic || header_.totalBytes > capture_.Size() ||
             header_.valueCount > MaxLogArguments || header_.contextCount > MaxLogContextDepth ||
-            FixedCaptureBytes(header_.valueCount, header_.contextCount) > header_.totalBytes ||
+            FixedCaptureBytes(header_.valueCount, header_.contextCount,
+                              (header_.flags & CaptureHasCorrelation) != 0) > header_.totalBytes ||
             !IsValidLogLevel(static_cast<LogLevel>(header_.level)) ||
             header_.categoryBytes > MaxLogCategoryNameBytes ||
             (header_.categoryName == nullptr && header_.categoryBytes != 0)) {
@@ -259,7 +263,18 @@ public:
             }
         }
 
+        if ((header_.flags & CaptureHasCorrelation) != 0) {
+            platform::MemoryCopy(&correlation_,
+                                 capture_.Data() +
+                                     FixedCaptureBytes(header_.valueCount, header_.contextCount),
+                                 sizeof(correlation_));
+        }
+
         return true;
+    }
+
+    const CorrelationIds& Correlation() const noexcept {
+        return correlation_;
     }
 
     // 모든 텍스트 값(런타임 템플릿 포함)의 위치가 캡처·블록 안인지 검사한다. 렌더 전에 한 번
@@ -342,6 +357,7 @@ private:
     LogCaptureHeader header_{};
     LogCaptureValue values_[MaxLogArguments]{};
     LogCaptureContext contexts_[MaxLogContextDepth]{};
+    CorrelationIds correlation_{};
 };
 
 // 텍스트가 아닌 값 칸을 서식 인자로 되살린다. 텍스트 종류는 text를 쓴다.
@@ -549,7 +565,15 @@ Result<usize> WriteLogCapture(const LogCaptureTarget& target, LogLevel level,
         contextTruncated = true;
     }
 
-    const usize fixedBytes = FixedCaptureBytes(count, contextCount);
+    // 이 스레드의 상관 id(맨 위 칸)를 담는다. 비어 있으면 0 byte다. 들어갈 자리가 없으면 뺀다.
+    CorrelationIds correlation;
+    bool hasCorrelation = CurrentCorrelation(correlation);
+    if (hasCorrelation &&
+        target.buffer.Size() < FixedCaptureBytes(count, contextCount, hasCorrelation)) {
+        hasCorrelation = false;
+    }
+
+    const usize fixedBytes = FixedCaptureBytes(count, contextCount, hasCorrelation);
 
     const StringView categoryName = category.Name();
     LogCaptureHeader header;
@@ -565,6 +589,10 @@ Result<usize> WriteLogCapture(const LogCaptureTarget& target, LogLevel level,
     header.threadId = target.threadId;
     header.frame = target.frame;
     header.contextCount = static_cast<uint8>(contextCount);
+    if (hasCorrelation) {
+        header.flags |= CaptureHasCorrelation;
+    }
+
     if (contextTruncated) {
         header.flags |= CaptureContextTruncated;
     }
@@ -638,6 +666,11 @@ Result<usize> WriteLogCapture(const LogCaptureTarget& target, LogLevel level,
     if (contextCount != 0) {
         platform::MemoryCopy(target.buffer.Data() + LogCaptureMinimumBytes(count), contexts,
                              contextCount * sizeof(LogCaptureContext));
+    }
+
+    if (hasCorrelation) {
+        platform::MemoryCopy(target.buffer.Data() + FixedCaptureBytes(count, contextCount),
+                             &correlation, sizeof(correlation));
     }
 
     return Result<usize>::Success(writer.Cursor());
@@ -752,6 +785,8 @@ Result<void> RenderLogCapture(Span<const uint8> capture, const LogBlockProvider*
     event.threadId = header.threadId;
     event.frame = header.frame;
     event.monotonicTicks = header.monotonicTicks;
+    event.hasCorrelation = (header.flags & CaptureHasCorrelation) != 0;
+    event.correlation = event.hasCorrelation ? reader.Correlation() : CorrelationIds{};
     event.monotonicNanoseconds = detail::LogTicksToNanoseconds(
         header.monotonicTicks,
         target.tickFrequency != 0 ? target.tickFrequency : platform::MonotonicTickFrequency());
