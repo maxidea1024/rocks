@@ -697,7 +697,11 @@ LG11–LG19의 검증도 같다: Debug 빌드, format, policy, 바뀐 부분 시
 **한계.**
 - Async 큐에서 칸을 예약한 생산자가 게시 전에 멈추면(그 짧은 구간에서 크래시), 출력 스레드는 그 칸을 넘지 못한다. 콜백은 상한까지 기다린 뒤 `TimedOut`이고, 그 칸 뒤의 기록은 잃는다. 이 구간은 복사 한 번이라 드물다. 고치려면 큐가 멈춘 칸을 건너뛰어야 하는데, 생산자가 살아 있는지 가릴 수 없어 하지 않는다.
 - 봉인 파일의 끝 표시: 비정상 종료에서는 `Final`을 쓰지 않는다. "끝 표시 없음 = 비정상 종료" 판정이 맞기 때문이다(9.1절).
-- 크래시 기록에서 로그 파일을 찾을 수 있게, `FileLogSink`가 파일을 열 때와 회전할 때 출력 스레드에서 `SetCrashAnnotation(CrashAnnotation::LogFile, 경로)`로 현재 경로를 알린다. 칸 API는 크래시 수집 LC1b에서 생기며, 로깅은 그 뒤에 붙인다(15.1절).
+- **크래시 기록의 로그 파일 칸.** 크래시 기록(CrashInfo.json `associatedFiles.logFile`)에서 로그 파일을 찾을 수 있게, `FileLogSink`가 파일을 열 때와 회전할 때 `platform::SetCrashAnnotation(CrashAnnotation::LogFile, data, bytes)`(`Platform/CrashReporting.h`)로 현재 파일의 절대 경로를 알린다. 칸 API는 크래시 수집 LC1b에서 생기며, 로깅은 크래시 수집이 engine-runtime에 병합된 뒤 붙인다(15.1절).
+  - 칸은 쓰는 쪽이 하나여야 한다(seqlock). Async는 출력 스레드만, Sync는 sink mutex 안에서만 쓴다. 프로세스에 `FileLogSink`가 여럿이면 설치된 LogSystem의 sink만 알린다.
+  - 칸은 512 B(`MaxCrashAnnotationBytes`)다. 넘으면 API가 false를 돌려주고 칸을 바꾸지 않는다(자르지 않는다). 그러면 칸을 비우고(`bytes` 0) Warning을 한 번 남긴다. 이전 회전 파일 경로가 남아 엉뚱한 파일을 가리키지 않게 하려는 것이다.
+  - 버린 대안: 넘을 때 파일 이름만 넘기기. 같은 이름이 여러 폴더에 있을 수 있어 헷갈린다. 폴더를 따로 담는 칸이 없다.
+  - 정상 Stop 때 칸을 비우지 않는다. 정상 종료 뒤의 크래시에서도 마지막 로그 파일은 여전히 유효하다.
 - UE: 크래시 보고 전에 `GLog->Panic()`을 부른다(`Private/Windows/WindowsPlatformCrashContext.cpp:1833–1837`). Panic은 출력 장치 lock을 최대 1초 기다린 뒤 그대로 flush로 넘어간다(`OR:981–1016`).
 
 **버린 대안(개정 9–11의 설계).**
