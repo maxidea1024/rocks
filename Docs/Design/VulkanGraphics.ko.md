@@ -22,7 +22,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 | 창 출력 | 중간 color 이미지에 그리고 `EndFrame`에서 swapchain 이미지를 얻어 blit 후 present | UE 기본(`r.Vulkan.DelayAcquireBackBuffer=1`, `P/VulkanDevice.cpp:86–93`, `P/VulkanViewport.cpp:745–756`). swapchain 형식(BGRA·RGBA)과 상관없이 파이프라인이 `RGBA8UnormSrgb` 하나로 호환된다 |
 | 좌표·앞면 | 음수 viewport 높이와 `VK_FRONT_FACE_COUNTER_CLOCKWISE`·`Back → BACK_BIT`(D3D12와 같은 매핑). UE 매핑(`CLOCKWISE`·`CM_CW → FRONT_BIT`)은 컬링은 같지만 `SV_IsFrontFace`가 D3D12와 반대라 따르지 않는다(11절) | ShaderSystem 7.2절 8항, UE `P/VulkanPendingState.cpp:500–506`, `P/VulkanPipeline.cpp:936`, `P/VulkanState.cpp:186–188`, `Engine/Shaders/Private/MaterialTemplate.ush:4641–4648` |
 | 셰이더 | SH2 전에는 개발용 컴파일 훅(`ShaderSourceCompiler`)이 HLSL 원문을 SPIR-V로 바꾼다. 구현은 Developer `ShaderFormatVulkan`(DXC). Release에는 넣지 않는다 | ShaderSystem P4(Release 배제), 9절 |
-| 검증 | `enableValidation`이면 `VK_LAYER_KHRONOS_validation`과 `VK_EXT_debug_utils` messenger. ERROR 심각도를 `ValidationErrorCount`가 센다 | UE `P/VulkanLayers.cpp:48,410`, `P/VulkanDebug.cpp:195–198`. UE는 세지 않고 로그만 남긴다 |
+| 검증 | `enableValidation`이면 `VK_LAYER_KHRONOS_validation`과 `VK_EXT_debug_utils` messenger. ERROR 심각도의 validation 메시지를 `ValidationErrorCount`가 센다(로더 GENERAL 메시지는 로그만) | UE `P/VulkanLayers.cpp:48,410`, `P/VulkanDebug.cpp:195–198`. UE는 세지 않고 로그만 남긴다 |
 
 ## 2. UE 5.8 VulkanRHI 조사
 
@@ -200,7 +200,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - 주파수: `1e9 / timestampPeriod`를 가장 가까운 정수 Hz로 공개한다(`DeviceInfo::timestampFrequency`는 정수다). period가 정수 ns가 아닌 장치는 반올림만큼 변환 오차가 생긴다. disjoint 감지는 Vulkan에 없으므로 `timestampDisjointDetection` false다.
 - calibration: `VK_KHR_calibrated_timestamps`(없으면 EXT)의 `[DEVICE, 호스트]`. 호스트 domain은 Windows `QUERY_PERFORMANCE_COUNTER`(PlatformBase `MonotonicTicks`와 같은 QPC), Android `CLOCK_MONOTONIC`(같은 원천, ns)이다. 두 domain을 장치가 주지 않으면 `clockCalibration` false다. `uncertaintyNanoseconds`는 드라이버가 준 `maxDeviation`(ns)이다(UE는 버린다. Rocks는 오차를 공개한다).
 - debug marker: label 함수는 instance 확장 명령이라 `vkGetInstanceProcAddr`로 얻는다. `VK_EXT_debug_utils`가 켜져 있으면 `vkCmdBegin/EndDebugUtilsLabelEXT`(UTF-8 그대로, `MaxDebugMarkerNameBytes`로 자름)이고 `debugMarkers` 참이다. 없으면 거짓이고 두 호출은 아무것도 하지 않는다.
-- 검증 messenger: ERROR 심각도의 검증·일반 메시지를 원자 계수로 센다(`ValidationErrorCount`). 메시지는 `Graphics.Vulkan.Validation` 범주(`LogGraphicsVulkanValidation`, 장치 생성·손실은 `LogGraphicsVulkan`, 둘 다 `Graphics/GraphicsLog.h`)에 Warning으로 메시지 ID마다 한 번 남긴다(LoggingSystem 13절). 콜백은 드라이버 스레드에서도 불리므로 직렬화를 전제하는 `ValidationMessageFilter` 대신 같은 규칙(표 `MaxLoggedValidationIds`가 차면 새 ID는 남기지 않고 개수만 센다)을 잠금 없이 원자 연산과 고정 크기 ID 표로 지킨다.
+- 검증 messenger: ERROR 심각도의 validation 종류(`VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT`) 메시지만 원자 계수로 센다(`ValidationErrorCount`). 로더·드라이버의 GENERAL 메시지(예: 레지스트리에 남은 implicit layer JSON을 열지 못함)는 API 사용 오류가 아니므로 로그로만 남긴다(2026-11-18, Epic overlay layer 항목이 남은 기계에서 확인). 메시지는 `Graphics.Vulkan.Validation` 범주(`LogGraphicsVulkanValidation`, 장치 생성·손실은 `LogGraphicsVulkan`, 둘 다 `Graphics/GraphicsLog.h`)에 Warning으로 메시지 ID마다 한 번 남긴다(LoggingSystem 13절). 콜백은 드라이버 스레드에서도 불리므로 직렬화를 전제하는 `ValidationMessageFilter` 대신 같은 규칙(표 `MaxLoggedValidationIds`가 차면 새 ID는 남기지 않고 개수만 센다)을 잠금 없이 원자 연산과 고정 크기 ID 표로 지킨다.
 - 실패 보존: 장치 안 실패는 `LastError`에 "단계: VkResult 이름(값)"을 적는다. 생성 실패는 `DeviceCreateReport`(code·nativeCode = `VkResult`·stage·detail)로 돌려준다.
 
 ## 13. 스레드 모델(GX10·GX11)·셰이더 경로

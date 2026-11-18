@@ -151,13 +151,15 @@ Result<void> VulkanDevice::CreateMessenger() noexcept {
 VKAPI_ATTR VkBool32 VKAPI_CALL VulkanDevice::OnValidationMessage(
     VkDebugUtilsMessageSeverityFlagBitsEXT severity, VkDebugUtilsMessageTypeFlagsEXT types,
     const VkDebugUtilsMessengerCallbackDataEXT* data, void* user) {
-    (void)types;
     auto* state = static_cast<ValidationState*>(user);
     if (state == nullptr || data == nullptr) {
         return VK_FALSE;
     }
 
-    if ((severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0) {
+    // 검증 오류 계수는 validation 메시지 종류만 센다. 로더·드라이버의 GENERAL 메시지(예: 레지스트리에
+    // 남은 implicit layer JSON을 열지 못함)는 API 사용 오류가 아니므로 로그로만 남긴다.
+    if ((severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0 &&
+        (types & VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT) != 0) {
         platform::AtomicFetchAdd<platform::MemoryOrder::AcquireRelease>(&state->errors, uint64{1});
     }
 
