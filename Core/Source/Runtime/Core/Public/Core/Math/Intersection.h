@@ -34,8 +34,10 @@ namespace rocks {
 //   수준으로 달라질 수 있다(예: start=-5, end=-1-ulp이면 차이가 정확히 4로 반올림되어 표면 -1에
 //   닿는다). Plane은 끝점별 거리로 계산해 끝점이 평면 위면 t를 정확히 0/1로 낸다. 0 길이 segment는
 //   점 판정이다. Plane, Sphere, Box, Triangle만 지원한다.
-// - 지원하지 않는 범위: frustum, swept shape(sweep), 접촉 깊이·다중 접촉점, mesh 가속 구조. 물리
-//   응답은 별도 계층에서 다룬다.
+// - 볼록 영역(프러스텀 포함, ConvexVolume)은 Box·Sphere와의 3분류(ClassifyContainment)와 보수적
+//   겹침(Overlap)만 지원한다. ray·segment와 볼록 영역의 교차는 없다.
+// - 지원하지 않는 범위: swept shape(sweep), 접촉 깊이·다중 접촉점, mesh 가속 구조. 물리 응답은 별도
+//   계층에서 다룬다.
 
 // 겹침·포함 판정 결과다. 입력 오류(InvalidInput)는 접촉 여부(Miss/Hit)와 구분한다.
 enum class QueryResult : uint8 {
@@ -1378,6 +1380,168 @@ Result<SegmentClosestPoints<T>> TryClosestPoints(const Segment<T>& first,
     }
     return Result<SegmentClosestPoints<T>>::Success(
         detail::SymmetricClosestSegmentSegment(first, second));
+}
+
+// ---- 볼록 영역·포함 3분류(ConvexVolume, sphere의 box 포함) ----
+//
+// ClassifyContainment는 shape이 영역 밖(Outside)·안(Inside)·걸침(Intersecting) 중 어디인지
+// 돌려준다.
+// - Outside는 엄격하다: 어느 평면(또는 sphere 표면)에 대해 shape 전체가 엄격히 바깥일 때만이다.
+//   경계에 닿기만 해도 Outside가 아니다(닫힌 집합, 접촉 = 교차).
+// - Inside는 닫힌 포함이다: shape 전체가 영역 안(경계 포함)이다.
+// - 그 밖은 Intersecting이다. 볼록 영역의 Box 판정은 평면별 판정이라 모서리 근처에서 실제로는
+//   영역과 겹치지 않는 box도 Intersecting일 수 있다(UE FConvexVolume::IntersectBox와 같은 보수적
+//   술어).
+// - 단조성: 평면별 거리(가장 앞·뒤 꼭짓점의 SignedDistance)와 sphere–box 거리는 box 좌표에 대해
+//   단조인 고정 순서의 식으로 계산한다. 그래서 box A ⊆ B이면 반올림을 거쳐도 B가 Outside가 아닌 한
+//   A의 판정이 B보다 바깥쪽으로 가지 않고, B가 Inside면 A도 Outside가 아니다. 공간 인덱스가 노드
+//   경계로 가지를 칠 때 이 성질에 기대어 프록시를 놓치지 않는다(Docs/Design/SpatialIndex.ko.md
+//   6.8절).
+// - 입력이 유효하지 않으면(평면 없는·잘못된 ConvexVolume, 역전·비유한 box, 음수 반지름)
+// InvalidInput이다.
+enum class Containment : uint8 {
+    Outside,
+    Inside,
+    Intersecting,
+    InvalidInput
+};
+
+namespace detail {
+
+// 평면 기준으로 box의 가장 뒤 꼭짓점과 가장 앞 꼭짓점의 SignedDistance다(ClassifyBoxUnchecked와
+// 같은 꼭짓점 선택).
+template <typename T>
+struct PlaneBoxDistances {
+    T lowest;
+    T highest;
+};
+
+template <typename T>
+constexpr PlaneBoxDistances<T> PlaneBoxRange(const Plane<T>& plane, const Box<T>& box) noexcept {
+    const T zero = static_cast<T>(0);
+    const Vector3<T> lowest(plane.normal.x >= zero ? box.min.x : box.max.x,
+                            plane.normal.y >= zero ? box.min.y : box.max.y,
+                            plane.normal.z >= zero ? box.min.z : box.max.z);
+    const Vector3<T> highest(plane.normal.x >= zero ? box.max.x : box.min.x,
+                             plane.normal.y >= zero ? box.max.y : box.min.y,
+                             plane.normal.z >= zero ? box.max.z : box.min.z);
+    return PlaneBoxDistances<T>{plane.SignedDistance(lowest), plane.SignedDistance(highest)};
+}
+
+// box에서 point까지 가장 먼 꼭짓점의 제곱 거리다. 축마다 먼 쪽 면까지의 거리를 고른다.
+template <typename T>
+constexpr T BoxFarthestDistanceSquared(const Vector3<T>& minimum, const Vector3<T>& maximum,
+                                       const Vector3<T>& point) noexcept {
+    const Vector3<T> toMinimum = point - minimum;
+    const Vector3<T> toMaximum = maximum - point;
+    const Vector3<T> farthest(math::Max(math::Abs(toMinimum.x), math::Abs(toMaximum.x)),
+                              math::Max(math::Abs(toMinimum.y), math::Abs(toMaximum.y)),
+                              math::Max(math::Abs(toMinimum.z), math::Abs(toMaximum.z)));
+    return farthest.LengthSquared();
+}
+
+template <typename T>
+constexpr Containment ClassifyVolumeBoxUnchecked(const ConvexVolume<T>& volume,
+                                                 const Box<T>& box) noexcept {
+    const T zero = static_cast<T>(0);
+    bool inside = true;
+    for (uint32 index = 0; index < volume.planeCount; ++index) {
+        const PlaneBoxDistances<T> range = PlaneBoxRange(volume.planes[index], box);
+        if (range.highest < zero) {
+            return Containment::Outside;
+        }
+        inside = inside && range.lowest >= zero;
+    }
+    return inside ? Containment::Inside : Containment::Intersecting;
+}
+
+template <typename T>
+constexpr Containment ClassifyVolumeSphereUnchecked(const ConvexVolume<T>& volume,
+                                                    const Sphere<T>& sphere) noexcept {
+    bool inside = true;
+    for (uint32 index = 0; index < volume.planeCount; ++index) {
+        const T signedDistance = volume.planes[index].SignedDistance(sphere.center);
+        if (signedDistance < -sphere.radius) {
+            return Containment::Outside;
+        }
+        inside = inside && signedDistance >= sphere.radius;
+    }
+    return inside ? Containment::Inside : Containment::Intersecting;
+}
+
+template <typename T>
+constexpr Containment ClassifySphereBoxUnchecked(const Sphere<T>& sphere,
+                                                 const Box<T>& box) noexcept {
+    const T radiusSquared = sphere.radius * sphere.radius;
+    if (BoxDistanceSquared(box.min, box.max, sphere.center) > radiusSquared) {
+        return Containment::Outside;
+    }
+    return BoxFarthestDistanceSquared(box.min, box.max, sphere.center) <= radiusSquared
+               ? Containment::Inside
+               : Containment::Intersecting;
+}
+
+} // namespace detail
+
+// box가 볼록 영역 밖·안·걸침인지다. 어느 평면에서든 가장 앞 꼭짓점이 엄격히 뒤(SignedDistance <
+// 0)면 Outside, 모든 평면에서 가장 뒤 꼭짓점이 앞이거나 평면 위(>= 0)면 Inside다.
+template <typename T>
+Containment ClassifyContainment(const ConvexVolume<T>& volume, const Box<T>& box) noexcept {
+    if (!volume.IsValid() || !box.IsValid()) {
+        return Containment::InvalidInput;
+    }
+    return detail::ClassifyVolumeBoxUnchecked(volume, box);
+}
+
+// sphere가 볼록 영역 밖·안·걸침인지다. 어느 평면에서든 중심의 SignedDistance < −radius면 Outside,
+// 모든 평면에서 SignedDistance >= radius면 Inside다.
+template <typename T>
+Containment ClassifyContainment(const ConvexVolume<T>& volume, const Sphere<T>& sphere) noexcept {
+    if (!volume.IsValid() || !sphere.IsValid()) {
+        return Containment::InvalidInput;
+    }
+    return detail::ClassifyVolumeSphereUnchecked(volume, sphere);
+}
+
+// box가 sphere 밖·안·걸침인지다. 중심에서 box까지 제곱 거리 > r²면 Outside(Overlap(sphere, box)의
+// 부정과 같은 식), 가장 먼 꼭짓점까지 제곱 거리 <= r²면 Inside다.
+template <typename T>
+Containment ClassifyContainment(const Sphere<T>& sphere, const Box<T>& box) noexcept {
+    if (!sphere.IsValid() || !box.IsValid()) {
+        return Containment::InvalidInput;
+    }
+    return detail::ClassifySphereBoxUnchecked(sphere, box);
+}
+
+// 볼록 영역과 box의 보수적 겹침이다(어느 평면에서도 엄격히 바깥이 아님). 모서리 근처의 초과 Hit는
+// ClassifyContainment 설명을 따른다.
+template <typename T>
+QueryResult Overlap(const ConvexVolume<T>& volume, const Box<T>& box) noexcept {
+    const Containment containment = ClassifyContainment(volume, box);
+    if (containment == Containment::InvalidInput) {
+        return QueryResult::InvalidInput;
+    }
+    return detail::ToQueryResult(containment != Containment::Outside);
+}
+
+template <typename T>
+QueryResult Overlap(const Box<T>& box, const ConvexVolume<T>& volume) noexcept {
+    return Overlap(volume, box);
+}
+
+// 볼록 영역과 sphere의 보수적 겹침이다(어느 평면에서도 중심이 반지름보다 더 뒤가 아님).
+template <typename T>
+QueryResult Overlap(const ConvexVolume<T>& volume, const Sphere<T>& sphere) noexcept {
+    const Containment containment = ClassifyContainment(volume, sphere);
+    if (containment == Containment::InvalidInput) {
+        return QueryResult::InvalidInput;
+    }
+    return detail::ToQueryResult(containment != Containment::Outside);
+}
+
+template <typename T>
+QueryResult Overlap(const Sphere<T>& sphere, const ConvexVolume<T>& volume) noexcept {
+    return Overlap(volume, sphere);
 }
 
 } // namespace rocks
