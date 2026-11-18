@@ -1,6 +1,6 @@
 # 엔진 런타임·월드·그래픽 최소 경로 설계
 
-기준일: 2026-11-12. 2026-11-18 갱신: 4.5절 위치 교체 제거, 7.2·7.4절 Level 배열·우회 파괴 복구(매 프레임, Level 포함)·시작 큐, 8절 증분 틱 순서(GC 실험 [16절](../Implementation/GcScaleExperiment.ko.md) 선형 검색 점검). 이 문서는 Core·Object 위에 처음 올리는 엔진 계층의 구조와 계약을 정한다. 범위는 **엔진 틱 → 월드 → Actor/Component → 텍스처 에셋 → D3D12·OpenGL로 화면에 그리기**까지의 수직 경로와, 그 위에 올릴 게임플레이 프레임워크(GameInstance·GameDirector·GameState·Controller·Pawn)의 골격이다. 전체 계획은 [엔진 구현 계획](EngineImplementationPlan.ko.md)을 따르며, 이 문서와 충돌하는 부분은 개정 1.8에서 이 문서 기준으로 바꾼다.
+기준일: 2026-11-12. 2026-11-18 갱신: 4.5절 위치 교체 제거, 7.2·7.4절 Level 배열·우회 파괴 복구(매 프레임, Level 포함)·시작 큐, 7.5절 World 소스 파일 구성, 8절 증분 틱 순서(GC 실험 [16절](../Implementation/GcScaleExperiment.ko.md) 선형 검색 점검). 이 문서는 Core·Object 위에 처음 올리는 엔진 계층의 구조와 계약을 정한다. 범위는 **엔진 틱 → 월드 → Actor/Component → 텍스처 에셋 → D3D12·OpenGL로 화면에 그리기**까지의 수직 경로와, 그 위에 올릴 게임플레이 프레임워크(GameInstance·GameDirector·GameState·Controller·Pawn)의 골격이다. 전체 계획은 [엔진 구현 계획](EngineImplementationPlan.ko.md)을 따르며, 이 문서와 충돌하는 부분은 개정 1.8에서 이 문서 기준으로 바꾼다.
 
 ## 1. 범위와 단계
 
@@ -205,6 +205,25 @@ Uninitialized → Initializing → Running → Stopping → Stopped
   - 매 프레임인 이유: 우회 파괴는 Tick 밖(GC step 사이)에서만 일어나므로 매 step 전에 보면 sweep이 그 객체를 회수하기 전에 반드시 정리한다. cycle 시작 전에만 보던 처음 방식은 (1) cycle 도중의 우회 파괴를 정리 없이 회수할 수 있고(Level이 사라지면 그 클러스터의 Actor도 도달하지 못해 레코드만 남는다), (2) World 쪽 파괴가 없으면 GC가 돌지 않아 우회 파괴된 Actor·Level이 영영 남았다(2026-11-18 리뷰 반영 시험 `World_BypassedLevelDestroyIsRepaired`가 드러냄 — Level 우회 파괴는 아예 복구하지 않았다).
   - 처음 구현은 cycle마다 모든 Actor를 `InspectLifecycle`로 조회했다(cycle 시작 프레임 Actor 10K → 100K: 207 → 2,390us, 파괴 요청 목록으로 2–13us).
   - Level 배열에서 뗄 때(`DetachFromLevel`)는 `RemoveReferenceAtSwap`(4.5절)을 쓴다. 옮겨 오는 끝 Actor도 우회 파괴로 DestroyRequested일 수 있는데, 위치 교체 `SetReferenceAt`은 그 원소를 새로 쓰는 것이라 재검증에서 실패하고 그 실패를 버리면 지운 Actor가 배열에 좀비로 남았다(리뷰 지적). 이 경로의 실패와 Actor 레코드 위치·배열 불일치는 일어날 수 없으므로 Fatal이다. 예외는 Level 객체 자체가 우회 파괴돼(DestroyRequested — Registry가 빌려 주지 않는다) 복구 전인 경우다. 그 배열은 Level과 함께 사라지므로 뗄 것이 없고, 복구의 `DestroyLevel`은 Level 배열 대신 World의 Actor 레코드에서 소속 Actor를 찾는다(이 계약 위반의 복구에서만 Actor 수에 비례).
+
+### 7.5 소스 파일 구성
+
+`World` 클래스 하나의 정의를 기능별 파일로 나눈다(`Engine/Source/Runtime/World/Private/`, 2026-11-18 — 한 파일 약 2,000줄을 동작 불변 이동으로 나눔). 공개 선언은 `World/World.h` 하나이고, 파일 사이 공용 helper가 필요하면 `Private/` 내부 헤더에 둔다(지금은 없다).
+
+| 파일 | 담당 | 새 기능을 넣는 곳 |
+|---|---|---|
+| `World.cpp` | 생성·소멸, `Initialize`·`BeginPlay`·`Shutdown`(Subsystem 초기화·종료 포함), 상태 이름·Tick 설정 검사·타입 등록, 레코드 조회(`FindActorRecord`·`Get*`·`HasActor`), `Stats` | World 수명 단계, 조회 API, 통계 |
+| `WorldLevels.cpp` | Level 생성·파괴·회수(`CreateLevel`·`DestroyLevel`·`ReleaseLevel`·`FinishLevelDestroys`), Level 배열에서 떼기(`DetachFromLevel` — 바꿔 떼기) | Level 스트리밍·Level 단위 기능 |
+| `WorldActors.cpp` | Actor Spawn(`SpawnActorDeferred`·`FinishSpawning`), `DestroyActor` 요청, 클러스터 가입 조건(`JoinsCluster`) | Actor 생성 방식·Spawn 인자 |
+| `WorldComponents.cpp` | Component 추가·진행(`AddComponent`·`AdvanceComponent`)·`DestroyComponent` 요청 | Component 종류별 등록 |
+| `WorldActivation.cpp` | 활성·Tick 활성 전환(`SetActorEnabled`·`EnableActor` 등, 시작 큐 재등록) | 활성 정책 |
+| `WorldStarts.cpp` | 시작 큐와 `OnStart` 처리(`ProcessStarts`·`StartComponent`) | 시작 순서·준비 조건 |
+| `WorldTicks.cpp` | Tick 등록·해제(`RegisterTicks` 등)와 프레임 실행(`ExecuteTick`·`Tick`) | 프레임 단계·Tick 연동 |
+| `WorldDestroys.cpp` | 안전 지점의 파괴 정리(`FlushDestroys`·`DestroyActorNow`·`DestroyComponentNow`·root 비우기) | 파괴 hook·정리 순서 |
+| `WorldGarbageCollection.cpp` | GC step(`StepGarbageCollection`), 소유 객체 파괴 요청, 우회 파괴 복구(`RepairBypassedActors`) | GC 일정·Registry 연동 |
+
+- 파일은 수백 줄 안쪽을 유지한다. 한 파일이 천 줄 가까이 커지면 기능 경계로 다시 나눈다(나눔은 동작 불변 이동 커밋).
+- `TickScheduler.cpp`(약 590줄)는 한 클래스의 한 기능이라 나누지 않는다.
 
 ## 8. Tick Scheduler
 
