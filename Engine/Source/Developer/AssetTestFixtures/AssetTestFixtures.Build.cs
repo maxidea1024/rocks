@@ -15,5 +15,5 @@ public sealed class AssetTestFixtures : EngineModuleRules
 
     protected override bool HasSources => false;
 
-    protected override IReadOnlyList<string> Metadata => ["AssetTestFixtures/TestAssets.h", "AssetTestFixtures/ValueAssets.h"];
+    protected override IReadOnlyList<string> Metadata => ["AssetTestFixtures/TestAssets.h", "AssetTestFixtures/ValueAssets.h", "AssetTestFixtures/CombinationAssets.h"];
 }

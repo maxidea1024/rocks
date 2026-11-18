@@ -22,13 +22,13 @@
 #include <Object/StructRefArray.h>
 
 // 리플렉션 성질 표의 "지원하는 모든 조합" fixture다(Docs/Design/AssetSystem.ko.md 14.1절,
-// ReflectionExtensions.ko.md 1.3절). 값 종류마다 struct 하나(ComboXxx)가 그 종류를 표가 허용하는 모든
-// 자리에 둔다: value(struct 멤버), array(Array 원소), fixed(정적 배열 원소), keyed(Map 키),
+// ReflectionExtensions.ko.md 1.3절). 값 종류마다 struct 하나(ComboXxx)가 그 종류를 표가 허용하는
+// 모든 자리에 둔다: value(struct 멤버), array(Array 원소), fixed(정적 배열 원소), keyed(Map 키),
 // mapped(Map 값), set(Set 원소), maybe(Optional 내부). 표가 막는 자리의 멤버는 두지 않는다. 클래스
-// 필드 자리는 ComboAsset의 f* 필드가, EditorOnly 실효 플래그는 같은 모양의 ComboEditorAsset이 덮는다.
-// 멤버 이름이 종류마다 같아서 시험의 생성기·비교기(Tests/AssetCombination.h)가 템플릿 하나로 모든
-// 종류를 채우고 비교한다. 빠진 칸은 FixtureAsset_CombinationsCoverPropertyTable이 성질 표를 순회해
-// 잡는다.
+// 필드 자리는 ComboAsset의 f* 필드가, EditorOnly 실효 플래그는 같은 모양의 ComboEditorAsset이
+// 덮는다. 멤버 이름이 종류마다 같아서 시험의 생성기·비교기(Tests/AssetCombination.h)가 템플릿
+// 하나로 모든 종류를 채우고 비교한다. 빠진 칸은 FixtureAsset_CombinationsCoverPropertyTable이 성질
+// 표를 순회해 잡는다.
 //
 // 표 밖 축:
 //   - 참조 종류: ObjectRef·WeakObjectRef 값은 null·같은 패키지(대표·하위·깊은 하위)·다른 패키지
@@ -343,7 +343,7 @@ struct ComboEnum {
 
     ROCKS_PROPERTY() ComboTone value = ComboTone::None;
     ROCKS_PROPERTY() Array<ComboTone> array;
-    ROCKS_PROPERTY() ComboTone fixed[2] = {ComboTone::None, ComboTone::None};
+    ROCKS_PROPERTY() ComboTone fixed[2] = { ComboTone::None, ComboTone::None };
     ROCKS_PROPERTY() OrderedMap<ComboTone, int32> keyed;
     ROCKS_PROPERTY() OrderedMap<int32, ComboTone> mapped;
     ROCKS_PROPERTY() OrderedSet<ComboTone> set;
@@ -739,7 +739,8 @@ struct ComboPart : Object {
 // 상속한 하위 객체다(기반 필드 + 파생 필드).
 ROCKS_CLASS()
 struct ComboPartDerived final : ComboPart {
-    explicit ComboPartDerived(Allocator& allocator) noexcept : ComboPart(allocator), note(allocator) {
+    explicit ComboPartDerived(Allocator& allocator) noexcept
+        : ComboPart(allocator), note(allocator) {
     }
 
     ROCKS_PROPERTY() String note;
