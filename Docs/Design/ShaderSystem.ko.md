@@ -1,6 +1,6 @@
 # 셰이더 시스템 설계
 
-기준일: 2026-11-18, 개정 15(초안). 셰이더 원문을 HLSL 하나로 쓰고 오프라인에서 D3D12·D3D11·Vulkan·Metal·OpenGL ES용 코드로 바꾸는 구조와, 그 구현에 앞서 갖춰야 할 **선행 작업**을 정한다. 개정 7은 현재 코드베이스(HEAD `0be1e64`, 2026-11-14)와 다른 설계 문서의 상태를 다시 조사해 선행 작업과 순서를 새로 세웠다(4–6절).
+기준일: 2026-11-18, 개정 16(초안). 셰이더 원문을 HLSL 하나로 쓰고 오프라인에서 D3D12·D3D11·Vulkan·Metal·OpenGL ES용 코드로 바꾸는 구조와, 그 구현에 앞서 갖춰야 할 **선행 작업**을 정한다. 개정 7은 현재 코드베이스(HEAD `0be1e64`, 2026-11-14)와 다른 설계 문서의 상태를 다시 조사해 선행 작업과 순서를 새로 세웠다(4–6절).
 
 UE 근거는 UE 5.8.4(EpicGames/UnrealEngine `release` 브랜치 commit `f45729c0b6f097038e72b52d366a62baeca3275b`)의 원본이다. 2026-11-14 사용자 지시로 기준을 5.6에서 5.8로 올렸고, 개정 6까지의 5.6 근거를 모두 5.8.4로 다시 확인했다(17절). 경로는 `Engine/Source/` 기준이며 `Engine/Shaders`·`Engine/Config`·`Engine/Build`는 그대로 적는다. UE 밖 도구(DXC·SPIRV-Cross·SPIRV-Tools·Vulkan)에 관한 사실은 그 출처를 따로 적는다. 개정 6까지의 조사 문서(UE 5.6 기준)는 [Rocks 셰이더 시스템](https://claude.ai/artifact/U5uNh2EWGvXKQiNYXnuc1Q)이다.
 
@@ -57,7 +57,7 @@ GLES 기기 요구는 UE와 같다: OpenGL ES 3.2 기기만 실행하고 ES 3.0�
 
 GLES 형식의 셰이더 단계는 VS·PS·CS다. UE GL 컴파일러는 VS·PS·GS·CS를 받지만 ES3.1 feature level은 GS를 빼고 테셀레이션은 받지 않는다(`OpenGLShaderCompiler.cpp:2998–3004`, `Runtime/RHI/Public/DataDrivenShaderPlatformInfo.h:1087–1089`).
 
-장치 요구 수준이 다르면(예: Vulkan 최소 보장보다 큰 descriptor 한도) 다른 형식 id로 둔다. 상한과 기능 요구는 형식 정의가 가진다(12절). 위 표의 형식 정의 파일은 `Engine/Config/ShaderFormats/<id>.json`이다(P6a, 12.1절). HLSL 2021 기본값은 `D3D12_SM6`·`VULKAN_SM5`·`METAL_SM5`가 켬, `D3D11_SM5`·`GLES31_*`가 끔이다(결정 2, GLES는 UE `OPENGL_ES3_1_ANDROID`처럼 끔). MSL 버전 2.4는 UE 5.8 Mac 기본(`Engine/Config/BaseEngine.ini:3434` `MetalLanguageVersion=7`, `Developer/Mac/MacTargetPlatformSettings/Classes/MacTargetSettings.h:23`)과 같다.
+장치 요구 수준이 다르면(예: Vulkan 최소 보장보다 큰 descriptor 한도) 다른 형식 id로 둔다. 다만 대체 경로가 있는 선택 기능(VS 층 출력 등)은 형식 id를 나누지 않고 실행 장치의 능력으로 확인한다(7.2절 7항, 15절 결정 12). 상한과 기능 요구는 형식 정의가 가진다(12절). 위 표의 형식 정의 파일은 `Engine/Config/ShaderFormats/<id>.json`이다(P6a, 12.1절). HLSL 2021 기본값은 `D3D12_SM6`·`VULKAN_SM5`·`METAL_SM5`가 켬, `D3D11_SM5`·`GLES31_*`가 끔이다(결정 2, GLES는 UE `OPENGL_ES3_1_ANDROID`처럼 끔). MSL 버전 2.4는 UE 5.8 Mac 기본(`Engine/Config/BaseEngine.ini:3434` `MetalLanguageVersion=7`, `Developer/Mac/MacTargetPlatformSettings/Classes/MacTargetSettings.h:23`)과 같다.
 
 SM 6 기능(웨이브 연산 등)이 필요한 셰이더: UE는 이런 셰이더(`ShaderFormatD3D.cpp:113–122`)를 DXIL로 컴파일하고 `EShaderOptionalDataKey::ShaderModel6`을 붙이며(`D3DShaderCompilerDXC.cpp:1195–1199`), D3D11 RHI는 이 표시가 있는 셰이더를 만들지 않는다(`Runtime/Windows/D3D11RHI/Private/D3D11Shaders.cpp:54–66`). Rocks는 셰이더 타입이 요구 기능을 선언하고, 형식 정의의 지원 기능 목록에 없으면 그 형식에서 쿠킹하지 않는다(12절). 런타임에 없는 셰이더를 찾으면 `IncompatibleCook`이다.
 
@@ -245,7 +245,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 **P14 셰이더 타입·퍼뮤테이션·라이브러리 형식 — 설계(12절).**
 - 현재: 셰이더 타입 등록, 퍼뮤테이션, 셰이더 라이브러리 파일 형식, 런타임 조회 규칙이 없다(Renderer 내장 셰이더는 문자열 하나다).
 - UE 5.8: 셰이더 타입은 `IMPLEMENT_GLOBAL_SHADER`로 정적 등록하고(`Runtime/RenderCore/Public/GlobalShader.h:433`), 퍼뮤테이션은 차원 타입(`SHADER_PERMUTATION_BOOL` 등, `Runtime/RenderCore/Public/ShaderPermutation.h:629`)을 묶은 `TShaderPermutationDomain`(`:272`)이 정하며, 타입마다 `ShouldCompilePermutation`으로 형식·퍼뮤테이션을 거른다(`GlobalShader.h:100–102`). 라이브러리는 셰이더 맵 hash·셰이더 hash 표와 항목 표를 가진다(`FSerializedShaderArchive`, `Runtime/RenderCore/Public/ShaderCodeArchive.h:206–230`, 항목 `:48`·`:70`).
-- 산출물: 셰이더 타입 등록(이름·`.rsf` 경로·엔트리·단계·요구 기능, 2절), 퍼뮤테이션 차원 선언과 ID 계산, 형식·퍼뮤테이션 거르기 규칙, 라이브러리 항목 키(셰이더 타입·퍼뮤테이션 ID·단계 → 코드 SHA-256)와 파일 형식·버전, 런타임 조회와 빠졌을 때의 `IncompatibleCook`.
+- 산출물: 셰이더 타입 등록(이름·`.rsf` 경로·엔트리·단계·요구 기능, 2절), 퍼뮤테이션 차원 선언과 ID 계산, 형식·퍼뮤테이션 거르기 규칙, 라이브러리 항목 키(셰이더 타입·퍼뮤테이션 ID·단계 → 코드 SHA-256)와 파일 형식·버전, 런타임 조회와 빠졌을 때의 `IncompatibleCook`. 개정 16에서 정점 입력 타입 축, 머티리얼 셰이더 표지, 거르기 서명과 형식 사실 조회, 퍼뮤테이션 수 보고를 더했다(12.2절).
 - 완료 기준: 등록·퍼뮤테이션 ID의 결정성 시험(등록 순서와 무관), 같은 코드의 중복 제거, 라이브러리 왕복·손상 검출, 빠진 항목 조회의 `IncompatibleCook`.
 - 의존: P6a. 막는 것: P6b, SH2.
 
@@ -273,6 +273,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 | S11 | Android 에뮬레이터·CI의 OpenGL ES 3.2 context | SH6 검증 경로 | — |
 | S12 | (SH0) 데스크톱 GL 드라이버의 `#version 320 es` 수용(`GL_ARB_ES3_2_compatibility` 유무), (SH6) UE 수정 pass 없이 업스트림 SPIRV-Tools·SPIRV-Cross만으로 만든 ESSL이 Android 기기 드라이버에서 도는지 | P11, 7.2절 11항 | 데스크톱(GTX 1060 3GB, NVIDIA 560.94): GL 4.6 core context에 `GL_ARB_ES3_2_compatibility`·`GL_ARB_ES3_1_compatibility`·`GL_ARB_clip_control`이 있고 GLSL 목록에 `320 es`가 있다. `GLES31_PC` Renderer VS·PS 원문이 경고 없이 컴파일·링크된다. `WGL_EXT_create_context_es2_profile`로 만든 ES 3.2 context에서도 같다. AMD·Intel 드라이버는 미측정. 기기(SH6)는 미측정 P11(2026-11-17) 추가: ES 3.2 profile context는 `GL_EXT_clip_control`·`GL_EXT_disjoint_timer_query`·`GL_KHR_debug`·`GL_EXT_sRGB_write_control`과 ES 형식 확장을 공개하고, 4.3 core 요청은 4.3.0을 준다([OpenGL ES backend](OpenGLESGraphics.ko.md) 2.2절) |
 | S13 | SPIRV-Cross가 HLSL `Buffer<T>`·`RWBuffer<T>`(typed buffer)를 ESSL `samplerBuffer`·`isamplerBuffer`·`usamplerBuffer`와 `texelFetch`, `imageBuffer`와 `imageLoad`·`imageStore`로 내는지, 결합 sampler 목록에 typed buffer SRV가 들어가는지 | 7.2절 4항 GLES typed buffer 규칙(Renderer RQ10) | — |
+| S14 | VS 출력 `SV_RenderTargetArrayIndex`의 변환: DXC DXIL(SM 6.6), DXC SPIR-V(target env 1.1에서 `ShaderViewportIndexLayerEXT` capability·`SPV_EXT_shader_viewport_index_layer` 확장으로 나오는지), SPIRV-Cross MSL(`[[render_target_array_index]]`), FXC `vs_5_0`이 받는지 | 7.2절 7항 VS 층 출력 규칙의 형식별 `vertexLayerOutput`(Renderer RQ14), `D3D11_SM5` 포함 여부 | — |
 
 ## 6. 전체 순서
 
@@ -319,7 +320,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
    UE는 비-bindless Vulkan layout에서 push constant를 쓰지 않는다(7.1절). Rocks는 그리기별 상수를 위해 쓰며 7.3절 시험 (a)·(d)로 확인한다.
 3. **슬롯 정규화.** 컴파일 후 형식별 리플렉션(DXIL `ID3D12ShaderReflection`, SPIR-V SPIRV-Reflect)을 Rocks 공통 `ShaderBindingLayout`으로 바꾼다. 단위는 (단계, 종류, 단계 안 순번)이며 이름 hash·CB 크기·멤버 오프셋·텍스처와 샘플러의 짝(9항)을 함께 둔다(UE `FShaderParameterMap`·`FVulkanShaderHeader` 대응). 종류는 Vulkan descriptor 종류를 기준으로 나눈다: 상수 버퍼, SRV 텍스처(typed buffer SRV 포함), 구조화·raw 버퍼(SRV·UAV), storage image(UAV 텍스처·typed buffer UAV), 샘플러.
 4. **상한과 backend별 실제 위치.**
-   - **상한 검사 위치.** 형식 정의의 상한(장치 요구 수준별)과 프로필 공통 상한(프로필에 든 형식들의 최소값)은 job 안에서 검사한다. 다만 SRV 텍스처(typed buffer SRV 포함)와 샘플러 수는 프로필 공통 상한이 아니라 **job 형식의 상한**으로만 검사한다(개정 13, [렌더러](Renderer.ko.md) 결정 RN13·RQ22, [머티리얼 시스템](MaterialSystem.ko.md) MSR1). 원문은 형식마다 바꾸지 않으므로, 같은 셰이더가 넓은 형식에서는 컴파일되고 16장 형식(GLES·`D3D11_SM5`)에서는 그 형식 job만 오류가 될 수 있다. 오류에는 셰이더 타입·퍼뮤테이션·형식과, 머티리얼 job이면 머티리얼 경로·pass를 담는다. UE도 원문은 하나이고 플랫폼 샘플러 상한을 컴파일 환경에 넣어 그 플랫폼 컴파일에서만 실패시킨다(`Runtime/Engine/Private/ShaderCompiler/ShaderCompiler.cpp:3945–3946`, OpenGL `Developer/ShaderFormatOpenGL/Private/OpenGLShaderCompiler.cpp:868–877`). 형식 정의와 프로파일 출력 설정이 모두 키에 있으므로(10절) 프로필에 형식을 더해 상한이 내려가면 키가 바뀌어 다시 검사된다. 파이프라인 합계 한도(D3D12 Tier 1 UAV, Vulkan `maxDescriptorSet*`)는 파이프라인 layout을 만들 때(쿠킹 때 알려진 쌍, 런타임 생성) 검사한다.
+   - **상한 검사 위치.** 형식 정의의 상한(장치 요구 수준별)과 프로필 공통 상한(프로필에 든 형식들의 최소값)은 job 안에서 검사한다. 다만 SRV 텍스처(typed buffer SRV 포함)와 샘플러 수는 프로필 공통 상한이 아니라 **job 형식의 상한**으로만 검사한다(개정 13, [렌더러](Renderer.ko.md) 결정 RN13·RQ22, [머티리얼 시스템](MaterialSystem.ko.md) MSR1). render target 수(PS가 쓰는 `SV_Target`의 가장 큰 번호 + 1)도 job 형식의 `renderTargets`로만 검사한다(개정 16, Renderer RQ14). 공통 상한(GLES가 든 프로필은 4)으로 검사하면 MRT 8 형식에서만 쓰는 GBuffer +D·+E profile(Renderer 7.1절, 결정 RN3·RN4)이 모든 형식에서 오류가 되기 때문이다. 그런 퍼뮤테이션은 pass 셰이더 거르기(12.2절)가 형식 `renderTargets`를 보고 빼며, job 형식 상한 검사는 거르기 누락을 잡는 안전장치다. 원문은 형식마다 바꾸지 않으므로, 같은 셰이더가 넓은 형식에서는 컴파일되고 16장 형식(GLES·`D3D11_SM5`)에서는 그 형식 job만 오류가 될 수 있다. 오류에는 셰이더 타입·퍼뮤테이션·형식과, 머티리얼 job이면 머티리얼 경로·pass를 담는다. UE도 원문은 하나이고 플랫폼 샘플러 상한을 컴파일 환경에 넣어 그 플랫폼 컴파일에서만 실패시킨다(`Runtime/Engine/Private/ShaderCompiler/ShaderCompiler.cpp:3945–3946`, OpenGL `Developer/ShaderFormatOpenGL/Private/OpenGLShaderCompiler.cpp:868–877`). 형식 정의와 프로파일 출력 설정이 모두 키에 있으므로(10절) 프로필에 형식을 더해 상한이 내려가면 키가 바뀌어 다시 검사된다. 파이프라인 합계 한도(D3D12 Tier 1 UAV, Vulkan `maxDescriptorSet*`)는 파이프라인 layout을 만들 때(쿠킹 때 알려진 쌍, 런타임 생성) 검사한다.
    - **데스크톱 공통 상한(초기값).** Vulkan 값은 핵심 최소 보장이다. 더 큰 장치 요구는 다른 형식 id로 둔다(2절).
 
      | 종류(단계당) | D3D12(Tier 1) | D3D11(FL 11.0) | Vulkan 최소 | Metal(macOS) | 데스크톱 공통 |
@@ -375,8 +376,15 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 7. **정점 입력과 단계 사이 변수.** DXC `-spirv`는 입출력 location을 시맨틱 번호가 아니라 선언 순서로 준다(기본 `-fvk-stage-io-order=decl`). D3D11·D3D12는 VS 출력과 PS 입력을 register 위치로 맞추고 register는 선언 순서로 정해진다. 그래서 두 단계를 따로 컴파일해도 맞도록 다음을 지킨다.
    - 정점 입력 시맨틱은 `ATTRIBUTEn`이다(현재 `TEXCOORDn`, `DeviceTypes.h:130–136`). n은 `VertexAttribute::location`이다.
    - 단계 사이 변수는 하나의 struct로 선언하고 VS 출력과 PS 입력이 같은 struct를 쓴다(공용 `.rsh`). struct 멤버 순서는 `SV_Position` 다음 `TEXCOORDn`을 n 오름차순으로 둔다. 그러면 선언 순서 = location 순서라 FXC 경로(선언 순서)와 SPIRV-Cross 경로(location 순서)의 signature가 같다. PS 입력에 다른 struct를 쓰려면 VS 출력의 앞부분(같은 순서)이어야 한다.
-   - 허용 시맨틱: 단계 사이는 `TEXCOORDn`(n ≤ 15, GLES 형식은 4항 모바일 상한의 varying 수 안). 시스템 값은 `SV_Position`·`SV_Target0–7`(GLES 형식은 MRT 상한 안)·`SV_Depth`·`SV_VertexID`·`SV_InstanceID`·`SV_IsFrontFace`와 CS의 `SV_DispatchThreadID`·`SV_GroupID`·`SV_GroupThreadID`·`SV_GroupIndex`다. 형식별 기능이 필요한 시스템 값(PS의 `SV_PrimitiveID`는 Vulkan Geometry capability, VS의 `SV_RenderTargetArrayIndex`·`SV_ViewportArrayIndex`는 선택 기능)은 형식 정의의 기능 요구로 후속이다. 그 밖은 컴파일 오류다.
+   - 허용 시맨틱: 단계 사이는 `TEXCOORDn`(n ≤ 15, GLES 형식은 4항 모바일 상한의 varying 수 안). 시스템 값은 `SV_Position`·`SV_Target0–7`(n < job 형식 `renderTargets`, 4항. 개정 14 기준 GLES 형식 4, 그 밖 8)·`SV_Depth`·`SV_VertexID`·`SV_InstanceID`·`SV_IsFrontFace`와 CS의 `SV_DispatchThreadID`·`SV_GroupID`·`SV_GroupThreadID`·`SV_GroupIndex`다. VS 출력 `SV_RenderTargetArrayIndex`는 아래 "VS 층 출력" 규칙으로 연다(개정 16). 형식별 기능이 필요한 나머지 시스템 값(PS의 `SV_PrimitiveID`는 Vulkan Geometry capability, VS의 `SV_ViewportArrayIndex`는 선택 기능)은 같은 규칙으로 열 수 있으나 후속이다. 그 밖은 컴파일 오류다.
    - `SV_VertexID`·`SV_InstanceID`에 base vertex·base instance가 들어가는지는 backend마다 다르다(D3D는 빼고 Vulkan·Metal은 넣으며, Vulkan 1.1의 draw parameters는 선택 기능이다). Graphics API가 base vertex·base instance를 0으로만 그리므로 지금은 차이가 없다. base 값을 도입하면 루트 상수로 넘기고 시스템 값에 기대지 않는다.
+   - **VS 층 출력(개정 16, Renderer RQ14·결정 RN10).** VS가 `SV_RenderTargetArrayIndex`를 내면 그리기 한 번으로 texture array·cube의 여러 층에 그린다(point 그림자 6면의 한 번 그리기, Renderer 9.2절).
+     - **형식 기능.** 형식 정의 `features` 어휘에 `vertexLayerOutput`을 더한다. 넣는 형식은 `D3D12_SM6`·`VULKAN_SM5`·`METAL_SM5`다. `D3D11_SM5`는 FXC `vs_5_0`이 이 출력을 받는지 측정 S14로 본 뒤 SH5에서 정한다. GLES 형식에는 넣지 않는다. GLES backend의 `DeviceCaps`가 이 기능을 늘 거짓으로 공개한다(ES용 확장이 없다, RenderBase 4.4절 GX1, `Graphics/DeviceCaps.h` `vertexShaderLayerOutput`).
+     - **셰이더 타입 선언.** 이 출력을 쓰는 셰이더 타입(또는 퍼뮤테이션)은 요구 기능에 `vertexLayerOutput`을 적는다. 형식에 그 기능이 없으면 거르기에서 빠지고 그 형식에서 쿠킹하지 않는다(2절 요구 기능 규칙, 12.2절). 요구 기능을 적지 않은 셰이더가 VS 출력에 이 시맨틱을 쓰면 컴파일 오류다. PS 입력·CS에서 이 시맨틱은 계속 오류다.
+     - **장치 요구가 아니다.** `vertexLayerOutput`은 **런타임 확인 기능**이다. 4항의 `limits`와 달리 런타임 형식 선택이 이 기능으로 장치를 거르지 않는다. API마다 선택 기능이어서(D3D12 `VPAndRTArrayIndexFromAnyShaderFeedingRasterizerSupportedWithoutGSEmulation`, D3D11 OPTIONS3, Vulkan `VK_EXT_shader_viewport_index_layer`) 형식 요구로 묶으면 같은 형식을 못 쓰는 장치가 생기기 때문이다. 대신 셰이더 집합(RenderBase 9.2절)이 `DeviceCaps.features.vertexShaderLayerOutput`이 거짓인 장치에서 그 셰이더의 장치 셰이더·파이프라인 생성을 `Unsupported`로 거부한다. 호출자(렌더러)는 능력을 먼저 확인해 대체 경로(point 그림자 면마다 그리기, Renderer 결정 RN10)를 고른다. 몰래 바꾸지 않는다.
+     - **형식 id 규칙.** 대체 경로가 있는 런타임 확인 기능 때문에 형식 id를 나누지 않는다. 형식 id를 따로 두는 것은 기능을 장치에 **보장**받아야 하고 대체 경로가 없을 때뿐이다. 그때 그 기능은 새 형식 id의 `deviceRequirements`(버전·확장 이름)에 넣는다(2절, 4항 "상한은 장치 요구다"와 같은 방식). 기능 어휘마다 장치 보장 기능(`compute`·`waveOperations`: 형식의 `deviceRequirements`가 보장한다)인지 런타임 확인 기능인지가 정해져 있고 형식 정의 읽기 코드가 이 구분을 안다(15절 결정 12).
+     - **UE 대응.** UE는 플랫폼 정적 표시(`bSupportsVertexShaderLayer`, `Runtime/RHI/Public/DataDrivenShaderPlatformInfo.h:111, 1161–1164`)나 "실행 때 감지" 설정(`r.Shadow.DetectVertexShaderLayerAtRuntime`, Windows 기본 1, `Engine/Config/Windows/BaseWindowsEngine.ini:35`)이 있으면 vslayer 퍼뮤테이션을 컴파일하고(`Runtime/Renderer/Private/ShadowDepthRendering.cpp:356–361, 408`), 실행 때 장치 값 `GRHISupportsArrayIndexFromAnyShader`를 함께 확인해 쓴다(`Runtime/RenderCore/Private/RenderUtils.cpp:1672–1678`, `Runtime/Renderer/Private/ShadowSetup.cpp:3868`). Rocks의 "형식 기능 + 런타임 확인"은 이 두 단계와 같다.
+     - **변환.** DXC·SPIRV-Cross가 형식마다 이 출력을 어떻게 내는지(SPIR-V capability·확장, MSL 속성)는 측정 S14로 확인한다(**미확인**). 확장이 필요하면 워커가 그 형식에 허용하는 SPIR-V 확장 목록에 넣는다.
    - 워커가 SPIR-V 입력·출력 location을 시맨틱 번호 n으로 다시 쓴다. UE는 VS 입력(`ATTRIBUTEn`)만 시맨틱 번호로 다시 배정하고(7.1절) 단계 사이 변수는 다시 쓰지 않는다. 단계 사이 변수 재작성은 Rocks가 더하는 규칙이다. Metal의 `[[attribute(n)]]`·`[[user(locnN)]]`과 GLES의 `layout(location = n)`(SPIRV-Cross는 ESSL 310 이상에서 단계 사이 변수에도 location을 쓴다)도 이 location에서 나온다. GLES는 단계 사이 struct를 SPIRV-Cross `force_flattened_io_blocks`로 펼친다(UE와 같다).
    - 다시 쓴 SPIR-V는 `spirv-val`로 검증한다. 그래서 SPIRV-Tools는 필수다.
    - VS·PS 쌍의 연결은 DXIL·DXBC signature와 SPIR-V location을 대조해 검사한다(쿠킹 때 알려진 쌍, 파이프라인 생성 때 Development 검사).
@@ -427,6 +435,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 | (g) | location 재작성 뒤 `spirv-val` 통과, 선언 순서를 바꾼 VS·PS 쌍의 연결 거부·일치(SPIR-V·DXIL·ESSL) | SH2. D3D11 두 경로 혼합은 SH5 |
 | (h) | 텍스처·샘플러 짝 규칙의 음성 대조, GLES combined sampler 이름·유닛. 공유 샘플러: 17장 이상 텍스처를 공유 샘플러로 쓰는 PS가 넓은 형식에서 컴파일되고 16장 형식에서는 그 형식 job만 오류, 한 텍스처를 두 출처로 쓰기·예약 이름을 짝 샘플러로 쓰기의 음성 대조, 공유 Wrap·Clamp의 픽셀 대조(GLES 유닛별 `glBindSampler` 포함) | SH2 |
 | (i) | GLES 모바일 상한(샘플러 16, 에뮬레이션 `vec4` 합계, VS·PS storage block, varying 수, MRT 수) 초과와 한 슬롯에 타입을 섞은 상수 버퍼의 컴파일 오류, 바뀐 버퍼만 올리는지(호출 수 계측) | SH2(미리보기), SH6(기기) |
+| (j) | MRT: `SV_Target4`–`7`을 쓰는 PS가 render target 8 형식에서 컴파일되고 GLES 형식 job만 오류(4항 job 형식 검사). VS 층 출력: 요구 기능을 적지 않은 타입의 `SV_RenderTargetArrayIndex` 컴파일 오류, `vertexLayerOutput`이 없는 형식에서 그 타입이 거르기로 빠짐, `DeviceCaps` 거짓 장치(GLES 미리보기)에서 장치 셰이더·파이프라인 생성 `Unsupported`, 참 장치에서 cube 6면 한 번 그리기 픽셀 대조(7항) | SH2(D3D12·Vulkan·GLES 미리보기), SH5(D3D11·Metal) |
 
 P2 완료 기준: 이 절의 규칙과 `ShaderBindingLayout` 형식이 확정되고, 위 시험이 SH2·SH3·SH5·SH6 완료 기준에 들어 있다. 6항 행렬 규약의 형식별 확인과 8항 backend별 앞면 매핑은 측정 S5로 확인하는 SH2 산출물이며 P2 완료를 막지 않는다.
 
@@ -634,15 +643,27 @@ Rocks 규칙:
 - [x] 시험(EngineTests `ShaderFormat_*` 8건): 저장소 디렉터리 전체 읽기(정의 8·프로필 2), 결정·측정 값, Windows 프로필 공통 상한(상수 버퍼 12·텍스처 16·storage 4·4·샘플러 16·UAV 합 8·render target 4·단계 사이 15·에뮬레이션 256/224/128), 음성 대조(모르는 속성 6·도구 6·값 불일치 21·프로필 해석 3·프로필 스키마 4).
 - [x] 개정 13(2026-11-18, Renderer RQ22 (1)·머티리얼 MSR12): `D3D11_SM5`의 `sampledTextures`를 16으로 내렸다. `D3D12_SM6`·`METAL_SM5` 128과 GLES 16은 그대로다.
 - [x] 개정 14(2026-11-18, Renderer RQ11·RQ22 (1)·결정 RN3 (가)): `VULKAN_SM5`의 `sampledTextures` 16 → 128, `renderTargets` 4 → 8. 근거는 GX1 측정(RenderBase 4.4절: GTX 1060 `maxColorAttachments` 8·단계당 sampled image 1048576·set 1048576·`maxPerStageResources` 4294967295, lavapipe 8·1015808·1015808·1015808)이다. 장치 요구는 별도 어휘 없이 `limits` 자체를 장치 능력과 대조한다(7.2절 4항 "상한은 장치 요구다"). 이 형식의 PS 합산 요구는 12 + 128 + 4 + 4 + 8 = 156으로 Vulkan 핵심 최소 보장 128을 넘으므로, 그런 장치는 `VULKAN_SM5`를 쓸 수 없다. 장치 표본이 둘뿐이라 다른 공급자(AMD·Intel)의 값은 미측정이다. 프로필 공통 상한은 GLES가 들어 있어 그대로다(텍스처 16·render target 4).
-- [ ] job 키 계산(P5)과 상한 검사(워커: 프로필 공통 상한, SRV 텍스처·샘플러는 job 형식 상한)는 이 값을 쓰는 다음 단계에서 한다.
+- [ ] 개정 16(Renderer RQ14): `features` 어휘에 런타임 확인 기능 `vertexLayerOutput`을 더해 `D3D12_SM6`·`VULKAN_SM5`·`METAL_SM5` 형식 정의에 넣고, 어휘마다 장치 보장·런타임 확인 구분을 읽기 코드(`ShaderFormatDefinition`)에 둔다(7.2절 7항, 15절 결정 12). 형식 정의 파일과 읽기 코드 변경은 SH2에서 한다.
+- [ ] job 키 계산(P5)과 상한 검사(워커: 프로필 공통 상한, SRV 텍스처·샘플러·render target 수는 job 형식 상한)는 이 값을 쓰는 다음 단계에서 한다.
 
 ### 12.2 P14 셰이더 타입·퍼뮤테이션·라이브러리 형식
 
-- **셰이더 타입.** 이름, `.rsf` 가상 경로, 엔트리, 단계, 요구 기능(2절), 퍼뮤테이션 도메인, 형식·퍼뮤테이션 거르기 함수를 가진다. 정적 등록 표로 모은다(UE `IMPLEMENT_GLOBAL_SHADER`, `Runtime/RenderCore/Public/GlobalShader.h:433`). 등록 표의 순서는 결과에 영향을 주지 않는다(이름으로 정렬해 쓴다).
-- **퍼뮤테이션.** 차원(bool·정수 범위·열거)을 선언하고 차원 값의 조합에서 퍼뮤테이션 ID를 계산한다. 각 차원은 전처리 정의 하나로 원문에 들어간다(UE `SHADER_PERMUTATION_BOOL`·`TShaderPermutationDomain`, `ShaderPermutation.h:272,629`). 형식과 퍼뮤테이션마다 컴파일 여부를 거른다(UE `ShouldCompilePermutation`, `GlobalShader.h:100–102`).
-- **라이브러리 형식.** 머리(형식 버전, 형식 id, 항목 수), 항목 표(셰이더 타입 이름 hash·퍼뮤테이션 ID·단계 → 코드 SHA-256), 코드 표(코드 SHA-256 → 오프셋·크기, 같은 코드는 한 번만), 코드 부분(바이트코드·바인딩 layout·GLES 바인딩 머리). UE `FSerializedShaderArchive`(셰이더 맵 hash 표·셰이더 hash 표·항목 표, `Runtime/RenderCore/Public/ShaderCodeArchive.h:206–230`)에 해당한다.
-- **런타임 조회.** (셰이더 타입, 퍼뮤테이션 ID, 단계)로 찾는다. 등록된 타입이 요구하는 퍼뮤테이션이 라이브러리에 없으면 `IncompatibleCook`이다.
-- 완료 기준: 퍼뮤테이션 ID의 결정성(등록 순서와 무관), 같은 코드의 중복 제거, 라이브러리 왕복·손상 검출(`CorruptEntry`), 빠진 항목 조회의 `IncompatibleCook`.
+- **셰이더 타입.** 이름, `.rsf` 가상 경로, 엔트리, 단계, 요구 기능(2절), 퍼뮤테이션 도메인, 거르기 함수를 가진다. 정적 등록 표로 모은다(UE `IMPLEMENT_GLOBAL_SHADER`, `Runtime/RenderCore/Public/GlobalShader.h:433`). 등록 표의 순서는 결과에 영향을 주지 않는다(이름으로 정렬해 쓴다). 개정 16(Renderer RQ13, RenderBase SX4, 머티리얼 시스템 MSR5)에서 다음 두 표지를 더했다.
+  - **머티리얼 셰이더 표지.** 표지가 있는 타입은 머티리얼 쿠킹이 머티리얼 셰이더 집합마다 곱한다(Renderer 14.3절 pass 셰이더). 없는 타입은 엔진 셰이더다. 머티리얼 셰이더 타입은 pass가 요구하는 custom 출력 이름 목록을 선언하고, 그 출력이 없는 머티리얼은 거르기에서 빠진다(머티리얼 시스템 8.3절).
+  - **정점 입력 축 표지.** 표지가 있는 타입은 정점 입력 타입(RenderBase 10절)마다 따로 컴파일한다. 메시 pass 셰이더와 엔진 기본 정점 입력 타입의 fallback 셰이더(RenderBase 11.1절)가 쓴다. 전체 화면·compute 셰이더는 표지가 없고 정점 입력 타입 자리가 "없음"이다.
+  - UE는 이 조합을 Global·Material·MeshMaterial 타입 종류로 나눈다(`Runtime/RenderCore/Public/Shader.h:1219–1226`). Rocks는 표지 둘로 같은 구분을 한다.
+- **거르기 함수.** 타입마다 하나다. 서명은 머티리얼 시스템 8.3절·10.4절 D5와 Renderer 14.3절이 정한 것으로 통일한다.
+  - 머티리얼 셰이더: `bool ShouldCompile(const MaterialShaderTraits&, VertexInputTypeId, PermutationId, FormatId)`. 정점 입력 축이 없는 타입은 `VertexInputTypeId`에 "없음"을 받는다.
+  - 엔진 셰이더: `bool ShouldCompile(VertexInputTypeId, PermutationId, FormatId)`. 정점 입력 축이 없으면 역시 "없음"이다.
+  - 정점 입력 타입의 거르기: `bool ShouldCompile(const MaterialShaderTraits&, FormatId)`(머티리얼 시스템 8.3절). 엔진 셰이더에는 기본값 특성(머티리얼 없음)을 넘긴다.
+  - **결합.** 컴파일 여부 = 요구 기능 ⊆ 형식 `features`(2절) AND 셰이더 타입 거르기 AND 정점 입력 타입 거르기(정점 입력 축이 있을 때). UE도 정점 입력 타입 거르기와 셰이더 타입 거르기를 AND로 쓴다(`Runtime/Engine/Private/Materials/MaterialShader.cpp:3274, 3287`, `Runtime/Engine/Private/Materials/MeshMaterialShader.cpp:178–186`).
+  - **결정성.** 거르기는 순수 함수다. 인자와 아래 형식 사실만 읽고 설정·장치·등록 순서·실행 순서를 읽지 않는다. 쿠커(Developer)와 런타임 완결성 검사(RenderBase 9.2절)가 같은 결과를 내야 하기 때문이다.
+  - **형식 사실.** 거르기는 `FormatId`로 형식 정의의 `limits`·`features`를 읽는다. 예: GBuffer +D·+E profile은 `renderTargets` ≥ 8 형식에서만(Renderer 7.1절, 결정 RN3·RN4), VS 층 출력 퍼뮤테이션은 `features`에 `vertexLayerOutput`이 있는 형식에서만(7.2절 7항). ShaderCore가 `FormatId` → 형식 사실 조회를 제공한다. 쿠커는 형식 정의 파일에서, 런타임은 라이브러리 머리에 담긴 같은 값에서 채운다. 장치 능력(`DeviceCaps`)은 거르기 입력이 아니다(런타임 확인 기능은 셰이더 집합이 확인한다, 7.2절 7항).
+- **퍼뮤테이션.** 차원(bool·정수 범위·열거)을 선언하고 차원 값의 조합에서 퍼뮤테이션 ID를 계산한다. 각 차원은 전처리 정의 하나로 원문에 들어간다(UE `SHADER_PERMUTATION_BOOL`·`TShaderPermutationDomain`, `ShaderPermutation.h:272,629`). 형식과 퍼뮤테이션마다 위 거르기로 컴파일 여부를 정한다(UE `ShouldCompilePermutation`, `GlobalShader.h:100–102`). 머티리얼이 정하는 값(마스크·WPO·PDO)은 차원이 아니라 `MaterialShaderTraits`로 거른다(Renderer 14.3절).
+- **퍼뮤테이션 수 보고(Renderer RQ13).** 거르기 결과를 열거하는 결정적 함수를 둔다: 셰이더 타입마다 (정점 입력 타입, 퍼뮤테이션, 형식) 조합 가운데 통과한 수와 그 단계 수. 엔진 셰이더는 `shader-compile --engine`(12.3절)이, 머티리얼 셰이더는 쿠커가 머티리얼마다 이 값으로 축별 수·job 수·이전 쿠킹 대비 증감을 보고한다(머티리얼 시스템 8.5절, 계획 14.1절 "증가량을 cooker가 보고"). 입력 표는 Renderer 14.3절 pass 셰이더·퍼뮤테이션 차원이다.
+- **라이브러리 형식.** 머리(형식 버전, 형식 id, 형식 정의 SHA-256, 거르기가 읽는 형식 사실(`limits`·`features`), 항목 수), 항목 표(셰이더 타입 이름 hash·정점 입력 타입 이름 hash(없음은 0)·퍼뮤테이션 ID·단계 → 코드 SHA-256), 코드 표(코드 SHA-256 → 오프셋·크기, 같은 코드는 한 번만), 코드 부분(바이트코드·바인딩 layout·GLES 바인딩 머리). UE `FSerializedShaderArchive`(셰이더 맵 hash 표·셰이더 hash 표·항목 표, `Runtime/RenderCore/Public/ShaderCodeArchive.h:206–230`)에 해당한다. 머티리얼 셰이더 집합의 묶음 id 열(RenderBase SX5, 머티리얼 시스템 MSR2)과 항목별 레이아웃 서명(SX6)은 이 개정에서 넣지 않았고 라이브러리 형식 버전 1 확정 전에 따로 넣는다.
+- **런타임 조회.** (셰이더 타입, 정점 입력 타입, 퍼뮤테이션 ID, 단계)로 찾는다(RenderBase SX4. UE 셰이더 키도 vertex factory를 별도 축으로 둔다, `Runtime/RenderCore/Public/Shader.h:644–671`). 등록된 타입이 요구하는 조합(위 결합 거르기를 통과한 것)이 라이브러리에 없으면 `IncompatibleCook`이다. 머티리얼 셰이더의 예외(기본 머티리얼 대체)는 머티리얼 시스템 MSR10이다.
+- 완료 기준: 퍼뮤테이션 ID의 결정성(등록 순서와 무관), 같은 코드의 중복 제거, 라이브러리 왕복·손상 검출(`CorruptEntry`), 빠진 항목 조회의 `IncompatibleCook`. 개정 16에서 더한 것: 정점 입력 타입 축 왕복(같은 셰이더 타입·퍼뮤테이션의 정점 입력 타입별 항목), 결합 거르기 음성 대조(정점 입력 타입이 거른 조합·요구 기능이 없는 형식의 조합이 라이브러리에 없고 조회도 요구하지 않음), 쿠커와 런타임의 거르기 결과 일치(같은 형식 사실), 형식 사실(`renderTargets`)을 바꾼 형식의 열거 변화, 수 보고 값 = 열거 결과.
 
 ### 12.3 P6b TargetProfile·쿠킹 매니페스트·엔진 내장 라이브러리
 
@@ -713,7 +734,7 @@ Rocks 규칙:
 
 ## 15. 결정 필요 사항
 
-2026-11-18 결정 4 확정으로 이 절의 결정은 모두 정해졌다. 아래는 각 결정의 기한(이 결정이 없으면 시작할 수 없는 작업 직전) 기록이다: 결정 7·11은 셰이더 구현 착수(A6 완료) 전, 결정 6은 SH1 전(측정 없이 정하고, 자체 구현의 정합성은 SH1 완료 기준인 S7로 확인한다), 결정 2·3·5는 형식 정의에 들어가므로 SH0 측정 S2·S9 뒤 P6a 전, 결정 4는 P14 전이었다. 이 문서의 "확정"은 측정에 기대지 않는 내용의 승인이며, 측정 뒤에 정하는 결정과 그에 걸린 14절 개정은 해당 기한에 한다.
+2026-11-18 결정 4 확정으로 이 절의 결정은 모두 정해졌다. 같은 날 개정 16에서 더한 결정 12도 권장안으로 정했다. 아래는 각 결정의 기한(이 결정이 없으면 시작할 수 없는 작업 직전) 기록이다: 결정 7·11은 셰이더 구현 착수(A6 완료) 전, 결정 6은 SH1 전(측정 없이 정하고, 자체 구현의 정합성은 SH1 완료 기준인 S7로 확인한다), 결정 2·3·5는 형식 정의에 들어가므로 SH0 측정 S2·S9 뒤 P6a 전, 결정 4는 P14 전이었다. 이 문서의 "확정"은 측정에 기대지 않는 내용의 승인이며, 측정 뒤에 정하는 결정과 그에 걸린 14절 개정은 해당 기한에 한다.
 
 1. **확장자** — **결정됨(2026-11-13): `.rsf`(엔트리)·`.rsh`(include).** UE `.usf`/`.ush`의 역할 분리를 따르고 Rocks 명명(`.rasset`·`.rpkg`·`.rnug`)에 맞춘다. C++·HLSL 공용 헤더는 `.h`다(3절). 고려했던 대안은 `.hlsl`/`.hlsli`였다.
 2. **HLSL 2021 범위** — **결정됨(2026-11-17): 형식 정의 기본값 + 셰이더 타입 선택.** `D3D12_SM6`·`VULKAN_SM5`·`METAL_SM5`는 켜고 `D3D11_SM5`는 끈다. `D3D11_SM5`에서 2021 셰이더는 SPIRV-Cross 경로로 간다. GLES 형식은 UE `OPENGL_ES3_1_ANDROID`(키 없음)처럼 끈다(형식 정의 `language.hlsl2021`). 결정 전 기록: UE는 플랫폼 값 `EnablesHLSL2021ByDefault`(0 끔, 1 Global 셰이더 전부, 2 모든 셰이더, `Runtime/RHI/Public/DataDrivenShaderPlatformInfo.h:119`)에 레이 트레이싱 셰이더 강제(`Runtime/Engine/Private/ShaderCompiler/ShaderCompiler.cpp:3489–3498`)와 타입별 선택을 더한다. PCD3D_SM6·VULKAN_SM5·VULKAN_SM6·VULKAN_SM5_ANDROID·METAL_SM5·METAL_SM6·METAL_SM6_IOS는 1, PCD3D_SM5는 0(키 없음)이다(`Engine/Config/Windows/DataDrivenPlatformInfo.ini:130`, `Engine/Config/VulkanPC/DataDrivenPlatformInfo.ini:131·257`, `Engine/Config/Android/DataDrivenPlatformInfo.ini:128`, `Engine/Config/Mac/DataDrivenPlatformInfo.ini:53·94`, `Engine/Config/IOS/DataDrivenPlatformInfo.ini:106`). 권장: 형식 정의의 기본값 + 셰이더 타입 선택. `D3D11_SM5`에서 2021 셰이더는 SPIRV-Cross 경로를 탄다(`D3DShaderCompiler.cpp:807,873–890`).
@@ -730,6 +751,7 @@ Rocks 규칙:
 11. **셰이더 구현 착수 위치** — **결정됨(2026-11-16): (나).** 사용자 결정 "쿠킹 셰이더 위에서(정공법)", "원래 목표는 미니멀하게 테스트하고자 했던건데 이제 의미없음. 렌더코어 제대로 구현하는게 나음". 화면 마일스톤은 셰이더 구현(SH0–SH3)과 렌더 기반을 함께 세우는 단계이며, 범위는 [렌더 기반](RenderBase.ko.md) 18.1절이다. 아래는 결정 전 선택지 기록이다. 고정 순서(A0-B → A0-O → A0-G → A1–A6 → 화면 마일스톤) 안에서 셰이더 구현(6절 4항)을 어디에 둘지다. 셰이더는 A1–A4가 필요하고 고정 순서가 A1–A6을 한 묶음으로 두므로 A6 뒤다.
     - (가) 화면 마일스톤 뒤(권장): 고정 순서를 그대로 둔다. 화면 마일스톤은 지금의 backend별 원문 경로로 그리고, SH2가 Renderer 내장 셰이더와 Graphics 파이프라인 생성을 바꾼다. 화면 마일스톤의 범위는 아직 정의되어 있지 않으므로(4절) 이 권장은 화면 마일스톤이 내장 셰이더 몇 개로 그리고 material(셰이더 그래프)을 들이지 않는다는 조건에서다. (가)를 고르면 5.2절 G2(ES 공통 API) 규칙을 화면 마일스톤의 OpenGL 작업까지 넓히고, 화면 마일스톤의 새 셰이더도 7.2절 규칙(짝 규칙·허용 타입·`ATTRIBUTEn`)대로 쓴다.
     - (나) 화면 마일스톤 본체 앞: 화면 마일스톤을 처음부터 쿠킹된 셰이더와 최종 바인딩 규약 위에 쌓는다. 화면 마일스톤이 P2·P3·P4·P5·P6a·P6b·P9–P11·P14·SH0–SH2만큼 늦어진다. 화면 마일스톤이 material이나 많은 셰이더를 들인다면 이쪽이 낫다.
+12. **선택 기능의 형식 id 규칙** — **결정됨(2026-11-18, 권장안).** Renderer RQ14(VS `SV_RenderTargetArrayIndex`)에서 나온 결정이다. (가) 권장: 형식 정의 `features`는 "이 형식이 그 기능을 쓰는 셰이더를 컴파일한다"는 뜻이고, 기능 어휘마다 장치 보장 기능(형식의 `deviceRequirements`가 보장, `compute`·`waveOperations`)과 런타임 확인 기능(`vertexLayerOutput`)을 나눈다. 런타임 확인 기능은 형식 선택에서 장치를 거르지 않고, 셰이더 집합이 `DeviceCaps`로 장치 셰이더 생성을 막으며 호출자가 대체 경로를 고른다. 형식 id는 나누지 않는다(7.2절 7항). UE의 정적 표시 + 실행 때 확인 두 단계와 같다. (나) 기능마다 형식 id를 따로 둔다(예: 층 출력 형식). 장치를 확실히 가르지만 형식·쿠킹 산출물이 기능 조합만큼 늘고, 대체 경로가 있는 기능에는 이득이 없다. (다) 기능을 형식의 장치 요구로 넣는다. 그 기능이 없는 장치가 형식 전체를 못 쓴다. 기한: SH2(형식 정의 읽기 코드에 어휘 구분을 넣을 때).
 
 ## 16. 이후 단계(선행 작업 뒤)
 
@@ -816,3 +838,6 @@ SH0 진척(2026-11-17, `feature/shader-tools`, Windows 부분 구현):
   - 12.1절: `D3D11_SM5` `sampledTextures` 128 → 16(형식 정의 파일도 함께 고쳤다). `VULKAN_SM5` 확장은 GX1 측정 뒤 할 일로 남겼다.
 - 개정 14(2026-11-18): GX1 측정으로 `VULKAN_SM5` `sampledTextures` 128·`renderTargets` 8을 정했다(Renderer RQ11·RQ22, 결정 RN3 (가), 권장안 기본 지시). 7.2절 4항에 "상한은 장치 요구다" 규칙(형식 `limits`를 런타임 형식 선택이 `DeviceCaps`와 대조, Vulkan set·`maxPerStageResources` 합산 포함)을 두고 장치 요구 어휘 추가 계획을 없앴다. 12.1절 진척을 고쳤다.
 - 개정 15(2026-11-18): Renderer RQ10 반영. 7.2절 4항 GLES에 typed buffer SRV가 `samplerBuffer`로 텍스처 유닛을 차지하고 SRV 텍스처 수·샘플러 16 안에 든다는 규칙, typed buffer UAV는 `imageBuffer`·CS만이라는 규칙을 더했다. 5.4절에 SPIRV-Cross 출력 확인 측정 S13을 더했다.
+- 개정 16(2026-11-18): Renderer RQ13·RQ14 반영.
+  - RQ14(7.2절 4·7항): `SV_Target0–7`의 상한을 job 형식 `renderTargets`로 검사한다(프로필 공통 상한 4로 검사하면 MRT 8 형식 전용 GBuffer +D·+E가 모든 형식에서 오류가 되는 빈틈을 고쳤다). VS `SV_RenderTargetArrayIndex`를 런타임 확인 기능 `vertexLayerOutput`으로 연다: 형식 `features`에 넣되 장치 요구가 아니고, 셰이더 집합이 `DeviceCaps`로 확인하며, 형식 id를 나누지 않는다(15절 결정 12, 권장안). UE 근거(정적 표시·실행 때 감지·장치 값)를 달았다. 측정 S14와 시험 (j)를 더했다.
+  - RQ13(12.2절, RenderBase SX4, 머티리얼 시스템 MSR5와 함께): 머티리얼 셰이더 표지·정점 입력 축 표지, 거르기 서명(`MaterialShaderTraits`·정점 입력 타입·퍼뮤테이션·형식, 머티리얼 시스템 8.3절과 같음)과 AND 결합, 거르기가 읽는 형식 사실 조회(라이브러리 머리에 담아 쿠커·런타임 결과를 같게), 퍼뮤테이션 수 보고, 정점 입력 타입을 넣은 라이브러리 항목 키·런타임 조회 키. 묶음 id 열(SX5·MSR2)과 레이아웃 서명(SX6)은 남겼다.

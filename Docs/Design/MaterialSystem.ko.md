@@ -1,6 +1,6 @@
 # 머티리얼 시스템(MaterialSystem) 설계
 
-기준일: 2026-11-18, 개정 3(초안). [엔진 구현 계획](EngineImplementationPlan.ko.md) 14.1·14.4–14.9절의 머티리얼 요구를 구현 스펙으로 정한다. 범위는 다음과 같다.
+기준일: 2026-11-18, 개정 4(초안). [엔진 구현 계획](EngineImplementationPlan.ko.md) 14.1·14.4–14.9절의 머티리얼 요구를 구현 스펙으로 정한다. 범위는 다음과 같다.
 - 머티리얼 에셋 모델(머티리얼·인스턴스·함수·레이어·파라미터 컬렉션)과 쿠킹 데이터
 - 그래프 스키마, typed IR, IR에서 HLSL을 만드는 코드 생성
 - 퍼뮤테이션, 파라미터 layout과 상수 식, 인스턴스 override와 static 변형
@@ -1078,7 +1078,7 @@ UE 대조:
 | MSR2 | 3절(셰이더 맵 키)·12.2절(조회 키) | 머티리얼 셰이더 집합 id를 키 축으로(8.6절). RenderBase SX5 묶음 id와 같은 값 |
 | MSR3 | 3절(가상 경로)·결정 6(전처리기) | `/Engine/Generated/Material.rsh`를 job마다 메모리 텍스트로 잇는 규칙(7.2절) |
 | MSR4 | 13절(P7)·15절 결정 4 | `ShaderParameterLayout`을 C++ 타입 없이도 만들 수 있는 데이터 형식으로(동적 layout, 결정 MD3). 셰이더 시스템 개정 12가 결정 4를 MetaCompiler 방식으로 확정하고 13절에 이 요구를 적었다 |
-| MSR5 | 12.2절(P14) | 셰이더 타입의 "머티리얼 셰이더" 표지와 거르기 인자 `MaterialShaderTraits`(8.3절), pass가 요구하는 custom 출력 선언 |
+| MSR5 | 12.2절(P14) | 셰이더 타입의 "머티리얼 셰이더" 표지와 거르기 인자 `MaterialShaderTraits`(8.3절), pass가 요구하는 custom 출력 선언. **반영(셰이더 시스템 개정 16, 12.2절)**: 머티리얼 셰이더 표지·custom 출력 선언, 이 문서 8.3절과 같은 두 거르기 서명과 AND 결합. 거르기는 `FormatId`로 형식 사실(`limits`·`features`)을 읽고 쿠커·런타임이 같은 값을 쓴다 |
 | MSR6 | 3절 | 임의 HLSL 노드의 include 허용 목록(가상 경로 범위) |
 | MSR7 | 11절(워커) | job 우선순위(미리보기 > 노드 미리보기 > 화면 > 백그라운드)와 취소 |
 | MSR8 | 12.3절 | 프로젝트 셰이더 라이브러리에 머티리얼 셰이더 집합이 들어가는 규칙과 쿠킹 매니페스트 v2 항목 |
@@ -1169,3 +1169,4 @@ UE 대조:
 | 1(초안) | 2026-11-17 – 11-18 | 첫 작성. UE 5.8.4 조사(에셋 계층·파라미터·uniform expression·static 변형·컬렉션, 번역기 기본값과 IR 실험 상태, 템플릿 연결, 셰이더 맵 키·퍼뮤테이션·사용 플래그·품질, 비동기 컴파일·대체·미리보기, DDC·쿠킹, Substrate 기본 여부·Blendable/Adaptive·고전 경로 상태, 도메인·혼합·shading model 레거시 확인, 모바일·SM5 제약). 모듈 배치·에셋 모델·그래프 스키마·IR·코드 생성·퍼뮤테이션·파라미터·표면 모델·컴파일·쿠킹·backend 표·에디터 요구·단계·다른 문서 요구. 2026-11-18: 결정 MD1–MD9 확정(사용자 "권장안대로", MD4는 Renderer RN13에 맞춤), Renderer 개정 2(2dc9068) 14절 계약에 경계를 맞추고 다른 점을 10.4절에 정리, 교차 검증 리뷰 반영(셰이더 집합 id를 내용 hash로, 파라미터 기본값을 번역 키에서 제외, 사용 대상 유도를 cookKey 입력으로, 정점 입력 거르기의 장치 없는 위치, PinKey 정의, 의존 키 규칙, TextureStreaming 5.3 규칙, 요구 ID 접두어 `M`) |
 | 2(초안) | 2026-11-18 | Renderer 개정 2와 교차 검증해 두 문서를 맞췄다(10.4절을 "정합 결과" 표로). D1–D9 판단: WPO는 정점 함수, 번호표 C++ `RenderData`·HLSL `/Engine/Shared/`(순환 해소), `AlphaHoldout`은 Renderer 후속 값, 거르기 인자 `MaterialShaderTraits`, "static 변형" 용어, pass별 경로와 `RENDER_PATH_*`, depth·그림자 pass의 마스크 전용 함수, 영역 이름 유지. 사용자 결정 반영: MD4를 Renderer RN13과 함께 형식별 SRV 상한으로 개정(1·7.4·13·15·16·17절, MSR1·MSR12·MSR13), 셰이더 시스템 결정 4 확정(MetaCompiler 방식)을 MD3·15.1·MSR4에 반영. 그 밖의 수정: Render Path Switch의 깊이 일치 규칙 V15, 경로 전용 pass에 `DepthAux`, 노멀 공간 변환 위치, 노드 미리보기 pass 이름, MaterialCook 의존에 `RendererShaders`, 용어 통일("도메인" → "영역", "혼합 방식" → "블렌드 모드"), Renderer 단계(RS0·RS2·RS5)와의 선후(10.3·15.1절), MS-T6 허용 오차, MRD1–MRD12 처리 상태(16절) |
 | 3(초안) | 2026-11-18 | 셰이더 시스템 개정 13의 MSR1·MSR12·MSR13 반영 상태와 공유 출처일 때의 생성 규칙(13절 9항 대응)을 적었다 |
+| 4(초안) | 2026-11-18 | 셰이더 시스템 개정 16의 MSR5 반영 상태를 적었다(Renderer RQ13과 같은 개정) |
