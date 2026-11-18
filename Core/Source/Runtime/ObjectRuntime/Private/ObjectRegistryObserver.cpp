@@ -331,6 +331,7 @@ Result<void> ObjectRegistry::Discard(const ObjectAccessContext& access,
         for (Slot* node : nodes) {
             if (node->state == SlotState::Alive) {
                 node->SetState(tally_, SlotState::DestroyRequested);
+                LinkDestroyRequestLocked(*node);
             }
 
             node->discarded = true;

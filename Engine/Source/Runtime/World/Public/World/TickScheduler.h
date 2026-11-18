@@ -170,13 +170,24 @@ private:
         // interval 판정용 누적(이월 포함)과 마지막 실행 이후 흐른 시간이다.
         double accumulated = 0.0;
         double sinceLastRun = 0.0;
+        // 단계 순서 배열(order_)에서의 위치다(재구성·끝에 붙이기가 정한다 — 없으면 NoOrder).
+        uint32 orderPosition = NoOrder;
+        // 이 항목을 선행으로 둔 항목 수다. 0이 아닌 항목을 해제하면 의존이 풀려 순서가 바뀌므로
+        // 재구성한다.
+        uint32 dependents = 0;
         bool removed = false;
     };
+
+    static constexpr uint32 NoOrder = NumericLimits<uint32>::Max();
 
     Result<void> RebuildOrder(uint32 phase) noexcept;
     // from에서 선행 간선을 따라 to에 닿는지 본다(방문 표시로 선형 시간). 할당 실패는 OutOfMemory다.
     Result<bool> Reaches(TickHandle from, TickHandle to) noexcept;
     void ApplyPendingRemovals() noexcept;
+    // 순서 배열에 있던 항목(ordered)이 해제됐음을 단계 상태에 적는다.
+    void NoteRemovedLocked(uint32 phase, bool ordered) noexcept;
+    // 해제할 항목의 의존 계수를 정리하고 순서 배열을 다시 만들어야 하는지 돌려준다.
+    bool ReleaseDependencies(const Entry& entry) noexcept;
     bool Before(uint32 left, uint32 right) const noexcept;
     void HeapPush(uint32 local) noexcept;
     uint32 HeapPop() noexcept;
@@ -185,6 +196,15 @@ private:
     SlotArray<Entry> entries_;
     Array<TickHandle> order_[TickPhaseCount];
     bool dirty_[TickPhaseCount] = {};
+    // 순서 배열을 처음부터 다시 만들지 않고 고치려고 둔 단계별 상태다(RebuildOrder 주석).
+    // - maxPriority_: 순서 배열 항목의 priority 최댓값(새 항목이 이 이상이면 끝에 붙여도 순서가
+    // 같다)
+    // - staleInOrder_: 순서 배열에 남은 해제 항목 수(실행이 건너뛴다 — 배열의 절반을 넘으면 재구성)
+    int32 maxPriority_[TickPhaseCount] = {};
+    uint32 staleInOrder_[TickPhaseCount] = {};
+    // 실행 중 해제를 미룬 항목이다(단계 경계에서 지운다 — 등록마다 용량을 미리 확보해 해제는
+    // 할당하지 않는다).
+    Array<TickHandle> pendingRemoved_;
     // 정렬·탐색 작업 공간이다. 순서가 바뀐 단계와 의존 추가 때만 쓰며 크기를 재사용한다.
     Array<TickHandle> scratch_;
     Array<uint32> localIndex_;
@@ -192,7 +212,10 @@ private:
     Array<uint32> dependentOffsets_;
     Array<uint32> dependents_;
     Array<uint32> heap_;
-    Array<uint8> marks_;
+    // Reaches의 방문 표시다(항목 칸마다 마지막으로 방문한 호출의 번호 — 호출마다 배열을 비우지
+    // 않아 비용이 방문한 항목 수에 비례한다).
+    Array<uint32> marks_;
+    uint32 markEpoch_ = 0;
     Array<TickHandle> stack_;
     uint64 nextSequence_ = 1;
     uint32 pendingRemovals_ = 0;

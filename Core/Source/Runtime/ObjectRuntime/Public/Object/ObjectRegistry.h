@@ -561,6 +561,21 @@ public:
     Result<ObjectLifecycle> InspectLifecycle(const ObjectAccessContext&,
                                              ObjectHandle) const noexcept;
 
+    // 지난 호출 뒤 DestroyRequested가 된 객체(RequestDestroy·Object::Destroy·Discard)를 out에 꺼내
+    // 그 수를 돌려준다(out이 차면 남은 것은 다음 호출이 꺼낸다 — 0이 나올 때까지 부른다). 그 사이
+    // 회수된 객체는 빠진다. 소유 계층(World)이 자기 API 밖의 파괴를 객체 수에 비례하는 훑기 없이
+    // 찾으려고 쓴다. 순서는 정하지 않는다. 할당하지 않는다. 접근 규칙과 오류는 InspectLifecycle과
+    // 같다.
+    //
+    // 사용 예:
+    //   ObjectHandle batch[64];
+    //   for (;;) {
+    //       auto taken = registry.TakeDestroyRequests(access, batch);
+    //       if (!taken || taken.Value() == 0) break;
+    //       for (usize at = 0; at < taken.Value(); ++at) { /* batch[at] 처리 */ }
+    //   }
+    Result<usize> TakeDestroyRequests(const ObjectAccessContext&, Span<ObjectHandle> out) noexcept;
+
     // 객체가 지금 클러스터 소속인지다(진단·시험용 — 장기 smoke가 경계 비율 안전장치의 해체를 모델에
     // 맞춘다). 클러스터를 켜지 않은 Registry는 언제나 false다. handle·접근 규칙과 오류는
     // InspectLifecycle과 같다(cutoff white는 false). 결과는 반환 후에도 바뀔 수 있다.
@@ -1010,6 +1025,9 @@ private:
     uint32 RetireWhiteLocked(uint32 chunk) noexcept;
     // 잠금 보유: 어느 목록에도 없는 Retired 슬롯을 queue 목록 끝에 붙인다.
     void LinkRetiredLocked(Slot&, RetiredQueue) noexcept;
+    // 잠금 보유: DestroyRequested가 된 slot을 파괴 요청 목록에 넣는다 / 뺀다.
+    void LinkDestroyRequestLocked(Slot&) noexcept;
+    void UnlinkDestroyRequestLocked(Slot&) noexcept;
     // 잠금 보유: 슬롯을 지금 든 회수 대상 목록에서 뗀다.
     void UnlinkRetiredLocked(Slot&) noexcept;
     // 잠금 보유: 지연 목록의 슬롯이 회수 가능해졌으면(보유 계수 반환·마지막 자식이 떨어짐) 풀린
@@ -1142,11 +1160,17 @@ private:
     GcType* gcTypes_ = nullptr;
     uint32 gcTypeCount_ = 0;
     uint32 gcTypeCapacity_ = 0;
+    // 타입 키(RuntimeTypeOps 주소) → gcTypes_ 번호의 개방 주소 색인이다(0이면 빈 칸, 용량은 2의
+    // 거듭제곱이고 gcTypeCapacity_의 두 배). 생성마다 타입 표를 처음부터 훑지 않게 한다.
+    uint16* gcTypeIndex_ = nullptr;
+    uint32 gcTypeIndexCapacity_ = 0;
     // 루트(roots > 0) 슬롯 번호 목록이다. Begin·Collect가 O(루트 수)로 루트를 표식한다. 용량은
     // 언제나 슬롯 수 이상이라 gate_ 아래 추가가 할당하지 않는다(다른 스레드의 ReleaseRoot도 gate_
     // 아래에서 즉시 뺀다 — 목록은 Begin·Collect의 잠금 구간만 읽는다).
     uint32* rootList_ = nullptr;
     uint32 rootCount_ = 0;
+    // 파괴 요청 목록 머리다(Slot::destroyListed — TakeDestroyRequests).
+    Slot* destroyRequests_ = nullptr;
     uint32 rootCapacity_ = 0;
     // 빈(Free) 슬롯 목록이다. 가장 최근에 회수한 슬롯부터 재사용한다(새 chunk는 낮은 번호부터).
     Slot* freeSlots_ = nullptr;

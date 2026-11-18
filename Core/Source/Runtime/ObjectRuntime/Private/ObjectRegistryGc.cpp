@@ -467,6 +467,16 @@ void ObjectRegistry::RemoveRootListLocked(Slot& slot) noexcept {
     slot.rootPosition = NoSlot;
 }
 
+namespace {
+
+// 타입 키 주소의 색인 위치다(주소의 낮은 비트는 정렬로 늘 같으므로 섞는다).
+uint32 GcTypeBucket(const void* key, uint32 capacity) noexcept {
+    const uint64 bits = static_cast<uint64>(reinterpret_cast<uptr>(key));
+    return static_cast<uint32>(((bits >> 4) * 0x9e3779b97f4a7c15ULL) >> 32) & (capacity - 1);
+}
+
+} // namespace
+
 void ObjectRegistry::ClearMarksLocked() noexcept {
     for (uint32 chunk = 0; chunk < chunkCount_; ++chunk) {
         GcBits& bits = BitsOf(chunk * SlotsPerChunk);
@@ -478,25 +488,34 @@ void ObjectRegistry::ClearMarksLocked() noexcept {
 Result<uint16> ObjectRegistry::AcquireGcType(const RuntimeTypeOps& ops) noexcept {
     const void* key = &ops;
     const bool leaf = !ops.hasStrongReferences && options_.policy.packageNativeType == nullptr;
-    for (uint32 index = 1; index < gcTypeCount_; ++index) {
-        GcType& type = gcTypes_[index];
-        if (type.key == key) {
-            // 같은 주소를 새 레코드가 쓰는 경우(옛 레코드 해제 뒤)를 위해 값을 다시 채운다. 참조
-            // 위치 표는 함수가 바뀌었으면 다시 정한다(그때는 옛 타입의 객체가 남아 있지 않다).
-            type.trace = ops.trace;
-            type.parallelTraceSafe = ops.parallelTraceSafe;
-            type.leaf = leaf;
-            if (type.referenceLayout != ops.referenceLayout) {
-                ReleaseRegistryMemory(allocator_, type.slots);
-                type.slots = nullptr;
-                type.slotCount = 0;
-                type.hasArray = false;
-                type.layout = GcType::Layout::Unknown;
-                type.referenceLayout = ops.referenceLayout;
-            }
-
-            return Result<uint16>::Success(static_cast<uint16>(index));
+    uint32 bucket = gcTypeIndexCapacity_ == 0 ? 0 : GcTypeBucket(key, gcTypeIndexCapacity_);
+    for (uint32 probe = 0; probe < gcTypeIndexCapacity_; ++probe) {
+        const uint16 index = gcTypeIndex_[bucket];
+        if (index == 0) {
+            break;
         }
+
+        GcType& type = gcTypes_[index];
+        if (type.key != key) {
+            bucket = (bucket + 1) & (gcTypeIndexCapacity_ - 1);
+            continue;
+        }
+
+        // 같은 주소를 새 레코드가 쓰는 경우(옛 레코드 해제 뒤)를 위해 값을 다시 채운다. 참조
+        // 위치 표는 함수가 바뀌었으면 다시 정한다(그때는 옛 타입의 객체가 남아 있지 않다).
+        type.trace = ops.trace;
+        type.parallelTraceSafe = ops.parallelTraceSafe;
+        type.leaf = leaf;
+        if (type.referenceLayout != ops.referenceLayout) {
+            ReleaseRegistryMemory(allocator_, type.slots);
+            type.slots = nullptr;
+            type.slotCount = 0;
+            type.hasArray = false;
+            type.layout = GcType::Layout::Unknown;
+            type.referenceLayout = ops.referenceLayout;
+        }
+
+        return Result<uint16>::Success(static_cast<uint16>(index));
     }
 
     if (gcTypeCount_ > NumericLimits<uint16>::Max()) {
@@ -510,14 +529,40 @@ Result<uint16> ObjectRegistry::AcquireGcType(const RuntimeTypeOps& ops) noexcept
             return Result<uint16>::Failure(memory.Error());
         }
 
+        // 색인은 표 용량의 두 배다(적재율 1/2 이하 — 탐색이 짧다).
+        const uint32 indexCapacity = capacity * 2;
+        auto index =
+            allocator_.Allocate(sizeof(uint16) * indexCapacity, alignof(uint16), GcTypeTag);
+        if (!index) {
+            ReleaseRegistryMemory(allocator_, memory.Value());
+            return Result<uint16>::Failure(index.Error());
+        }
+
         auto* grown = static_cast<GcType*>(memory.Value());
-        for (uint32 index = 0; index < capacity; ++index) {
-            ::new (&grown[index]) GcType(index < gcTypeCount_ ? gcTypes_[index] : GcType{});
+        for (uint32 at = 0; at < capacity; ++at) {
+            ::new (&grown[at]) GcType(at < gcTypeCount_ ? gcTypes_[at] : GcType{});
+        }
+
+        auto* table = static_cast<uint16*>(index.Value());
+        for (uint32 at = 0; at < indexCapacity; ++at) {
+            table[at] = 0;
+        }
+
+        for (uint32 at = 1; at < gcTypeCount_; ++at) {
+            uint32 slot = GcTypeBucket(grown[at].key, indexCapacity);
+            while (table[slot] != 0) {
+                slot = (slot + 1) & (indexCapacity - 1);
+            }
+
+            table[slot] = static_cast<uint16>(at);
         }
 
         ReleaseRegistryMemory(allocator_, gcTypes_);
+        ReleaseRegistryMemory(allocator_, gcTypeIndex_);
         gcTypes_ = grown;
         gcTypeCapacity_ = capacity;
+        gcTypeIndex_ = table;
+        gcTypeIndexCapacity_ = indexCapacity;
         // 0번은 비어 있는 항목이다(hot 레코드의 타입 없음).
         gcTypeCount_ = gcTypeCount_ == 0 ? 1 : gcTypeCount_;
     }
@@ -528,6 +573,12 @@ Result<uint16> ObjectRegistry::AcquireGcType(const RuntimeTypeOps& ops) noexcept
     type.referenceLayout = ops.referenceLayout;
     type.parallelTraceSafe = ops.parallelTraceSafe;
     type.leaf = leaf;
+    uint32 slot = GcTypeBucket(key, gcTypeIndexCapacity_);
+    while (gcTypeIndex_[slot] != 0) {
+        slot = (slot + 1) & (gcTypeIndexCapacity_ - 1);
+    }
+
+    gcTypeIndex_[slot] = static_cast<uint16>(gcTypeCount_);
     return Result<uint16>::Success(static_cast<uint16>(gcTypeCount_++));
 }
 
@@ -819,10 +870,63 @@ void ObjectRegistry::RetireLocked(Slot& slot) noexcept {
         }
     }
 
+    if (slot.destroyListed) {
+        UnlinkDestroyRequestLocked(slot);
+    }
+
     slot.SetState(tally_, SlotState::Retired);
     BitsOf(slot.index).live &= ~BitOf(slot.index);
     DetachIdentityLocked(slot);
     LinkRetiredLocked(slot, RetiredQueue::Pending);
+}
+
+void ObjectRegistry::LinkDestroyRequestLocked(Slot& slot) noexcept {
+    slot.prevInList = nullptr;
+    slot.nextInList = destroyRequests_;
+    if (destroyRequests_ != nullptr) {
+        destroyRequests_->prevInList = &slot;
+    }
+
+    destroyRequests_ = &slot;
+    slot.destroyListed = true;
+}
+
+void ObjectRegistry::UnlinkDestroyRequestLocked(Slot& slot) noexcept {
+    if (slot.prevInList != nullptr) {
+        slot.prevInList->nextInList = slot.nextInList;
+    } else {
+        destroyRequests_ = slot.nextInList;
+    }
+
+    if (slot.nextInList != nullptr) {
+        slot.nextInList->prevInList = slot.prevInList;
+    }
+
+    slot.nextInList = nullptr;
+    slot.prevInList = nullptr;
+    slot.destroyListed = false;
+}
+
+Result<usize> ObjectRegistry::TakeDestroyRequests(const ObjectAccessContext& access,
+                                                  Span<ObjectHandle> out) noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return Result<usize>::Failure(valid.Error());
+    }
+
+    platform::LockGuard lock(gate_);
+    if (closed_ || processing_) {
+        return Result<usize>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
+    }
+
+    usize taken = 0;
+    while (taken < out.Size() && destroyRequests_ != nullptr) {
+        Slot& slot = *destroyRequests_;
+        UnlinkDestroyRequestLocked(slot);
+        out[taken++] = HandleOf(slot);
+    }
+
+    return Result<usize>::Success(taken);
 }
 
 void ObjectRegistry::WakeDeferredLocked(Slot& slot) noexcept {

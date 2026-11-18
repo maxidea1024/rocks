@@ -383,13 +383,18 @@ Result<void> World::DestroyLevel(ObjectHandle level) noexcept {
     auto marked = With<Level>(level, [](Level& value) noexcept { value.pendingDestroy_ = true; });
     (void)marked;
     // 소속 Actor를 모두 파괴 대기로 만든다(hook 없음). 정리 단계가 Actor를 정리한 뒤 Level을
-    // 회수한다.
-    for (const ActorRecord& actor : actors_) {
-        if (actor.level == level && actor.state != ActorState::PendingDestroy) {
-            auto destroyed = DestroyActor(actor.handle);
-            (void)destroyed;
+    // 회수한다. Level 배열만 훑는다(World 전체 Actor가 아니라 — Level이 정리 중이면 Actor 파괴는
+    // 배열을 고치지 않는다).
+    auto listed = With<Level>(level, [&](Level& owner) noexcept {
+        for (usize at = 0; at < owner.actors_.Size(); ++at) {
+            const ActorRecord* actor = FindActorRecord(owner.actors_[at]);
+            if (actor != nullptr && actor->state != ActorState::PendingDestroy) {
+                auto destroyed = DestroyActor(actor->handle);
+                (void)destroyed;
+            }
         }
-    }
+    });
+    (void)listed;
 
     // Tick·hook 밖에서 요청했고 소속 Actor가 이미 없으면 바로 회수한다.
     if (!inTick_ && hookDepth_ == 0) {
@@ -504,7 +509,9 @@ Result<ObjectHandle> World::SpawnActorDeferred(TypeId type, const SpawnParams& p
     }
 
     // Level의 강한 간선으로 소유를 넘긴다. 이후 임시 루트를 놓아도 Level이 살아 있는 동안 보존된다.
+    uint32 levelPosition = 0;
     auto owned = With<Level>(level, [&](Level& owner) noexcept {
+        levelPosition = static_cast<uint32>(owner.actors_.Size());
         return objects_.AddReference(Access(), level, owner.actors_, handle);
     });
     if (!owned) {
@@ -518,6 +525,7 @@ Result<ObjectHandle> World::SpawnActorDeferred(TypeId type, const SpawnParams& p
     record.handle = handle;
     record.level = level;
     record.clustered = clustered;
+    record.levelPosition = levelPosition;
     created.Value().Reset();
     FindLevelRecord(level)->actorCount += 1;
     ++spawnedTotal_;
@@ -945,6 +953,14 @@ void World::EnableActor(ObjectHandle actor, bool enabled) noexcept {
     record->transitioning = true;
     if (enabled) {
         record->enabledApplied = true;
+        // 꺼진 채 시작을 기다리던 Actor는 다시 시작 큐에 넣는다(ProcessStarts가 뺐다 — 용량은
+        // Spawn에서 Actor마다 확보했다).
+        if (record->startDeferred && record->state == ActorState::Initialized) {
+            record->startDeferred = false;
+            auto queued = pendingStart_.TryPushBack(actor);
+            (void)queued;
+        }
+
         auto tickEnabled =
             With<Actor>(actor, [](Actor& value) noexcept { return value.tickEnabled_; });
         SetTicksEnabled(record->ticks, tickEnabled && tickEnabled.Value());
@@ -1256,9 +1272,10 @@ void World::ProcessStarts() noexcept {
             continue;
         }
 
-        // 비활성 Actor는 활성화될 때까지 시작을 미룬다(Unity와 같은 의미).
+        // 비활성 Actor는 활성화될 때까지 시작을 미룬다(Unity와 같은 의미). 큐에 남기지 않고
+        // 활성화(EnableActor)가 다시 넣는다 — 오래 꺼진 Actor를 프레임마다 다시 훑지 않는다.
         if (!record->enabledApplied) {
-            pendingStart_[kept++] = actor;
+            FindActorRecord(actor)->startDeferred = true;
             continue;
         }
 
@@ -1655,10 +1672,7 @@ void World::DestroyActorNow(ObjectHandle actor) noexcept {
     LevelRecord* levelRecord = FindLevelRecord(level);
     if (levelRecord != nullptr) {
         if (!levelRecord->pendingDestroy && state_ != WorldState::TearingDown) {
-            auto detached = With<Level>(level, [&](Level& owner) noexcept {
-                return objects_.RemoveReference(Access(), level, owner.actors_, actor);
-            });
-            (void)detached;
+            DetachFromLevel(level, *record);
         }
 
         if (levelRecord->actorCount != 0) {
@@ -1774,23 +1788,61 @@ void World::RequestDestroyOwned(ObjectHandle object) noexcept {
 }
 
 bool World::RepairBypassedActors() noexcept {
-    // DestroyActor는 레코드 상태를 바꾸고 파괴 큐에 넣을 뿐 레코드 배열을 바꾸지 않는다.
+    // Registry의 파괴 요청 목록(지난 호출 뒤 DestroyRequested가 된 객체)만 본다 — Actor 수에
+    // 비례하는 훑기가 아니다. World가 스스로 요청한 파괴(PendingDestroy 레코드, Component)는
+    // 건너뛴다. DestroyActor는 레코드 상태를 바꾸고 파괴 큐에 넣을 뿐 목록을 바꾸지 않는다.
     bool repaired = false;
-    for (const ActorRecord& record : actors_) {
-        if (record.state == ActorState::PendingDestroy) {
-            continue;
+    ObjectHandle batch[RepairBatch];
+    for (;;) {
+        auto taken = objects_.TakeDestroyRequests(Access(), Span<ObjectHandle>(batch, RepairBatch));
+        if (!taken || taken.Value() == 0) {
+            break;
         }
 
-        auto lifecycle = objects_.InspectLifecycle(Access(), record.handle);
-        if (lifecycle && lifecycle.Value() == ObjectLifecycle::DestroyRequested) {
+        for (usize at = 0; at < taken.Value(); ++at) {
+            const ActorRecord* record = FindActorRecord(batch[at]);
+            if (record == nullptr || record->state == ActorState::PendingDestroy) {
+                continue;
+            }
+
             ++repairedTicks_;
             repaired = true;
-            auto destroyed = DestroyActor(record.handle);
+            auto destroyed = DestroyActor(batch[at]);
             (void)destroyed;
         }
     }
 
     return repaired;
+}
+
+void World::DetachFromLevel(ObjectHandle level, const ActorRecord& record) noexcept {
+    // 끝 원소를 이 Actor 자리로 옮기고 끝을 지운다(두 쓰기 모두 O(1) — 앞에서 찾지도, 뒤를 당기지도
+    // 않는다). 옮긴 Actor의 위치를 고친다.
+    auto detached = With<Level>(level, [&](Level& owner) noexcept -> Result<void> {
+        const usize last = owner.actors_.Size() - 1;
+        const uint32 at = record.levelPosition;
+        if (owner.actors_.IsEmpty() || at > last || owner.actors_[at] != record.handle) {
+            platform::Fatal("Actor record position diverged from its Level array");
+        }
+
+        if (at != last) {
+            const ObjectHandle moved = owner.actors_[last];
+            if (auto set = objects_.SetReferenceAt(Access(), level, owner.actors_, at, moved);
+                !set) {
+                return set;
+            }
+
+            ActorRecord* movedRecord = FindActorRecord(moved);
+            if (movedRecord == nullptr) {
+                platform::Fatal("Level array holds an actor without a record");
+            }
+
+            movedRecord->levelPosition = at;
+        }
+
+        return objects_.RemoveReferenceAt(Access(), level, owner.actors_, last);
+    });
+    (void)detached;
 }
 
 bool World::JoinsCluster(ConstructionContext& transaction, ObjectHandle object) noexcept {

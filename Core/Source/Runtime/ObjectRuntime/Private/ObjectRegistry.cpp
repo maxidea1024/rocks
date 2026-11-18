@@ -103,6 +103,8 @@ ObjectRegistry::~ObjectRegistry() {
     }
 
     ReleaseRegistryMemory(allocator_, gcTypes_);
+    ReleaseRegistryMemory(allocator_, gcTypeIndex_);
+    gcTypeIndex_ = nullptr;
     ReleaseRegistryMemory(allocator_, rootList_);
     ReleaseRegistryMemory(allocator_, clusters_);
     ReleaseRegistryMemory(allocator_, clusterEpochs_);
@@ -481,6 +483,7 @@ Result<void> ObjectRegistry::RequestDestroyLocked(ObjectHandle handle, const Obj
     }
 
     slot->SetState(tally_, SlotState::DestroyRequested);
+    LinkDestroyRequestLocked(*slot);
     if (IsClusterMemberLocked(*slot)) {
         const uint32 id = ClusterStateOf(slot->index) & ClusterIdMask;
         if (clusters_[id].root == slot->index) {

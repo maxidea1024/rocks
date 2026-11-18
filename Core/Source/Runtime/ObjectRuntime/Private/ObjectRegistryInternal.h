@@ -90,8 +90,9 @@ struct ObjectRegistry::Slot {
     // 지정(ClusterPending)이면 루트 슬롯 번호(루트 지정이면 NoSlot)다. 앞 칸의 채움 바이트 자리라
     // 슬롯 크기는 그대로다.
     uint32 clusterInCount = 0;
-    // Free면 빈 슬롯 목록(단일 연결 — prevInList는 null), Retired면 queue 목록(이중 연결)의 이웃
-    // 슬롯이다. 두 목록은 상태로 배타적이다.
+    // Free면 빈 슬롯 목록(단일 연결 — prevInList는 null), Retired면 queue 목록(이중 연결),
+    // DestroyRequested면 파괴 요청 목록(이중 연결 — destroyListed, TakeDestroyRequests)의 이웃
+    // 슬롯이다. 세 목록은 상태로 배타적이다.
     Slot* nextInList = nullptr;
     Slot* prevInList = nullptr;
     Object* object = nullptr;
@@ -128,6 +129,7 @@ struct ObjectRegistry::Slot {
     bool indexed = false;   // 이름 색인에 있다
     bool linked = false;    // 부모 고리에 있다
     bool discarded = false; // Discard됐다(DestroyRequested이고 색인·고리에 없다 — 회수 때 내린다)
+    bool destroyListed = false; // 파괴 요청 목록에 있다(아직 TakeDestroyRequests가 꺼내지 않았다)
 
     // 잠금 보유 상태에서 부른다. tally는 그 Registry의 상태별 통계다.
     void SetState(ObjectStats& tally, registry_detail::SlotState next) noexcept {

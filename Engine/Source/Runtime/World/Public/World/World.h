@@ -453,6 +453,11 @@ private:
         // 방지)이다.
         bool finishing = false;
         bool transitioning = false;
+        // 꺼진 채 시작 큐에서 빠졌다(활성화가 다시 넣는다).
+        bool startDeferred = false;
+        // Level의 actors_ 배열에서의 위치다(파괴가 끝 원소와 바꿔 O(1)로 뗀다 — Level 배열 순서는
+        // 정하지 않는다).
+        uint32 levelPosition = 0;
         TickHandle ticks[detail::TickHookCount];
     };
 
@@ -547,6 +552,10 @@ private:
     void RequestDestroyOwned(ObjectHandle object) noexcept;
     // World API 밖에서 파괴(Object::Destroy)된 Actor를 찾아 정리 대기로 돌린다. 하나라도 있으면 참.
     bool RepairBypassedActors() noexcept;
+    // Actor를 Level의 actors_에서 O(1)로 뗀다(끝 원소와 바꾼다).
+    void DetachFromLevel(ObjectHandle level, const ActorRecord& record) noexcept;
+    // RepairBypassedActors가 파괴 요청 목록을 한 번에 꺼내는 수다.
+    static constexpr usize RepairBatch = 64;
     // 새 객체의 타입이 클러스터 소속 조건(완전한 필드 배치)을 맞추는지다.
     static bool JoinsCluster(ConstructionContext& transaction, ObjectHandle object) noexcept;
     bool CanMutate() const noexcept;
