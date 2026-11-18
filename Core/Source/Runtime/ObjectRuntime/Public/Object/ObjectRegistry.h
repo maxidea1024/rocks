@@ -561,6 +561,11 @@ public:
     Result<ObjectLifecycle> InspectLifecycle(const ObjectAccessContext&,
                                              ObjectHandle) const noexcept;
 
+    // 객체가 지금 클러스터 소속인지다(진단·시험용 — 장기 smoke가 경계 비율 안전장치의 해체를 모델에
+    // 맞춘다). 클러스터를 켜지 않은 Registry는 언제나 false다. handle·접근 규칙과 오류는
+    // InspectLifecycle과 같다(cutoff white는 false). 결과는 반환 후에도 바뀔 수 있다.
+    Result<bool> InspectClusterMembership(const ObjectAccessContext&, ObjectHandle) const noexcept;
+
     // handle이 이 Registry가 발급한 것인지다(domain 비교만 — 생존·세대·접근 문맥은 보지 않는다).
     // 조회 API는 다른 Registry의 handle을 회수된 handle과 같은 StaleHandle로 알리므로, 둘을
     // 구별해야 하는 쪽이 먼저 부른다 — weak 참조(WeakRef PROPERTY)는 죽은 대상이면 null로 쓰지만
@@ -664,6 +669,7 @@ private:
     struct ParallelMark;
     struct MarkParticipant;
     struct ClusterCell;
+    struct ClusterChunk;
     struct ClusterRecord;
 
     // Retired 슬롯이 든 회수 대상 목록이다. 슬롯은 셋 중 하나에만 있다(Retired가 아니면 어디에도
@@ -743,7 +749,8 @@ private:
     inline uint32& ClusterStateOf(uint32) const noexcept;
     // 장부 inCount(Slot 안 — 공개 전 가입 지정이면 루트 슬롯)다.
     inline uint32& ClusterInCountOf(uint32) const noexcept;
-    // 소속 슬롯의 클러스터 번호다(GcBits의 chunk 클러스터 표에 있으면 표, 아니면 장부 상태).
+    // chunk 클러스터 표와, 소속 슬롯의 클러스터 번호다(표에 있으면 표, 섞인 chunk면 장부 상태).
+    inline ClusterChunk& ClusterChunkOf(uint32) const noexcept;
     inline uint32 MemberClusterOf(uint32) const noexcept;
     // 잠금 보유: slot의 장부(상태·계수·고리)를 비운다.
     void ClearClusterSlotLocked(uint32 slot) noexcept;
@@ -782,6 +789,8 @@ private:
     // 클러스터를 해체하고 그 수를 돌려준다(경계 비율 안전장치 — cutoff, Collect sweep 뒤). 남은
     // 클러스터는 모두 표식된 상태여야 한다.
     uint32 FlattenBoundaryClustersLocked() noexcept;
+    // 경계 비율 안전장치의 문턱을 넘는 레코드인지다(패키지 클러스터만).
+    bool ExceedsFlattenThreshold(const ClusterRecord& record) const noexcept;
     // 잠금 보유: 안전장치로 클러스터를 해체한 패키지(살아 있는 루트가 소속이 아니다)인지 본다. 그
     // 패키지의 새 객체는 클러스터에 가입하지 않는다.
     bool IsFlattenedPackageLocked(const Slot& package) const noexcept;
@@ -802,6 +811,10 @@ private:
     uint32 CreateClusterLocked(uint32 root, bool designated) noexcept;
     // 잠금 보유: slot을 id 클러스터 소속으로 넣는다(장부 칸은 비어 있어야 한다).
     void JoinClusterLocked(uint32 id, uint32 slot) noexcept;
+    // 잠금 보유: slot의 chunk 클러스터 표 칸을 id로 맞춘다(others는 같은 chunk의 다른 소속 비트).
+    void SetChunkClusterLocked(uint32 slot, uint32 id, uint64 others) noexcept;
+    // 잠금 보유: 표식 비트와 클러스터 표식을 본 소속 비트를 모두 지운다(Begin·Collect).
+    void ClearMarksLocked() noexcept;
     // 잠금 밖·처리 표시 아래: 빈 클러스터 레코드가 count개 이상이 되게 표를 키운다(Marking이면 작업
     // 큐도).
     Result<void> ReserveClusters(uint32 count) noexcept;

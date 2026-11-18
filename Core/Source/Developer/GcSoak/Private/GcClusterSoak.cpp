@@ -3,6 +3,7 @@
 #include <Core/Containers/Array.h>
 #include <Object/ConstructionContext.h>
 #include <Object/ObjectRegistry.h>
+#include <Object/StructRefArray.h>
 #include <Object/TypeRegistry.h>
 #include <Platform/Fatal.h>
 
@@ -19,6 +20,9 @@
 // - 패키지형(packages = true): 패키지 정책 Registry에서 패키지 생성(outer 사슬 포함), 패키지 사이
 //   간선 편집, 부분 트리 Discard, 패키지 Discard와 루트 반환, Discard 없이 루트 반환(버그 경로)을
 //   섞는다.
+// 두 형 모두 소속 소유자의 단일 필드 쓰기·배열 원소 교체·StructRefArray 원소 추가·제거·비우기(등록
+// struct — 장부가 원소 trace로 센다)를 섞는다. 패키지형은 패키지 객체의 간선과 기존 패키지 아래
+// 새 객체도 만들어, 경계 비율 안전장치가 해체한 패키지를 모델이 Registry 조회로 따라간다.
 // 모든 변경은 증분 cycle의 slice 사이에도 일어난다(장벽으로만 shade된 클러스터의 해체, slice
 // 예산 중간에 끊긴 클러스터, 처리된 클러스터에 밖 outer를 가진 새 소속 가입이 무작위로 생긴다).
 namespace rocks {
@@ -29,22 +33,61 @@ constexpr uint32 NoIndex = NumericLimits<uint32>::Max();
 // 모델 간선 칸 수다(Level이 Actor를 소유하는 칸). 그 밖의 소유자는 OtherEdges개까지 쓴다.
 constexpr uint32 MaxEdges = 48;
 constexpr uint32 OtherEdges = 6;
+// 모델 StructRefArray 원소 칸 수다.
+constexpr uint32 MaxSlots = 4;
 constexpr TypeId ClusterSoakNodeType{0x4743534b4e4f4431ULL, 1};
 constexpr TypeId ClusterSoakPackageType{0x4743534b504b4731ULL, 1};
+constexpr TypeId ClusterSoakSlotType{0x4743534b534c5431ULL, 1};
+constexpr Guid ClusterSoakSlotTargetId{0x4743534bULL, 1};
+
+} // namespace
+
+} // namespace rocks
+
+namespace rocks_cluster_soak {
+
+// StructRefArray 원소다(등록 struct).
+struct ClusterSoakSlot {
+    explicit ClusterSoakSlot(rocks::Allocator&) noexcept {
+    }
+
+    rocks::ObjectRef<rocks::Object> target;
+};
+
+} // namespace rocks_cluster_soak
+
+namespace rocks {
+
+template <>
+struct GeneratedType<rocks_cluster_soak::ClusterSoakSlot> {
+    static constexpr bool ContainsStrongReference = true;
+
+    static void Trace(const rocks_cluster_soak::ClusterSoakSlot& value,
+                      TraceVisitor& visitor) noexcept {
+        visitor.Visit(value.target);
+    }
+};
+
+namespace {
+
+using rocks_cluster_soak::ClusterSoakSlot;
 
 class ClusterSoakNode final : public Object {
 public:
-    explicit ClusterSoakNode(Allocator& allocator) noexcept : items(allocator) {
+    explicit ClusterSoakNode(Allocator& allocator) noexcept : items(allocator), slots(allocator) {
     }
 
     void Trace(TraceVisitor& visitor) const noexcept {
         visitor.Visit(single);
         items.Trace(visitor);
+        slots.Trace(visitor);
     }
 
     // 단일 참조 필드(SetReference — 장부의 단일 간선 지점)다.
     ObjectRef<Object> single;
     ObjectRefArray<Object> items;
+    // 원소 제거·비우기는 등록 struct의 원소 trace로 장부를 고친다.
+    StructRefArray<ClusterSoakSlot> slots;
 };
 
 class ClusterSoakPackage final : public Object {
@@ -91,6 +134,9 @@ struct Entry {
     uint32 degree = 0;
     // 단일 참조 필드의 대상이다(없으면 NoIndex).
     uint32 single = NoIndex;
+    // StructRefArray 원소의 대상이다(원소 순서, null이면 NoIndex).
+    uint32 slots[MaxSlots];
+    uint32 slotCount = 0;
     bool clusterRoot = false;
     bool destroyed = false;
     bool discarded = false;
@@ -358,6 +404,113 @@ private:
 
         entries_[owner].degree = 0;
         ++report_.edgeWrites;
+    }
+
+    // StructRefArray 편집이다(Borrow를 쥐고 한다). 패키지 객체는 원소가 없다.
+    template <class Edit>
+    Result<void> EditSlots(uint32 index, Edit&& edit) noexcept {
+        auto borrowed = objects_->Resolve<ClusterSoakNode>(Access(), entries_[index].handle);
+        if (!borrowed) {
+            return Result<void>::Failure(borrowed.Error());
+        }
+
+        auto pointer = borrowed.Value().Get();
+        return pointer ? edit(pointer.Value()->slots) : Result<void>::Failure(pointer.Error());
+    }
+
+    // 원소를 더하고 그 참조를 target으로 둔다. 참조 쓰기가 거부되면(cutoff white 대상) 원소는
+    // null로 남는다.
+    void AddSlot(uint32 owner, uint32 target) noexcept {
+        Entry& entry = entries_[owner];
+        if (entry.slotCount == MaxSlots) {
+            return;
+        }
+
+        bool added = false;
+        bool linked = false;
+        auto edited = EditSlots(owner, [&](StructRefArray<ClusterSoakSlot>& slots) noexcept {
+            auto index = objects_->AddElement(Access(), entry.handle, slots);
+            if (!index) {
+                return Result<void>::Failure(index.Error());
+            }
+
+            added = true;
+            linked = static_cast<bool>(objects_->SetElementReference(
+                Access(), entry.handle, slots, index.Value(), slots[index.Value()].target,
+                entries_[target].handle));
+            return Result<void>::Success();
+        });
+        if (!edited || !added) {
+            // cutoff white 소유자(Sweeping 중 도달하지 않은 객체)는 편집할 수 없다.
+            ++report_.rejectedWrites;
+            return;
+        }
+
+        entry.slots[entry.slotCount++] = linked ? target : NoIndex;
+        report_.edgeWrites += linked ? 2u : 1u;
+        report_.rejectedWrites += linked ? 0u : 1u;
+    }
+
+    void RemoveSlot(uint32 owner, uint32 at) noexcept {
+        Entry& entry = entries_[owner];
+        auto removed = EditSlots(owner, [&](StructRefArray<ClusterSoakSlot>& slots) noexcept {
+            return objects_->RemoveElementAt(Access(), entry.handle, slots, at);
+        });
+        if (!removed) {
+            if (removed.Error() != ErrorCode::Destroyed) {
+                Fail("RemoveElementAt failed", owner, removed.Error());
+            }
+
+            return;
+        }
+
+        for (uint32 next = at + 1; next < entry.slotCount; ++next) {
+            entry.slots[next - 1] = entry.slots[next];
+        }
+
+        --entry.slotCount;
+        ++report_.edgeWrites;
+    }
+
+    void ClearSlots(uint32 owner) noexcept {
+        auto cleared = EditSlots(owner, [&](StructRefArray<ClusterSoakSlot>& slots) noexcept {
+            return objects_->ClearElements(Access(), entries_[owner].handle, slots);
+        });
+        if (!cleared) {
+            if (cleared.Error() != ErrorCode::Destroyed) {
+                Fail("ClearElements failed", owner, cleared.Error());
+            }
+
+            return;
+        }
+
+        entries_[owner].slotCount = 0;
+        ++report_.edgeWrites;
+    }
+
+    // 원소 추가·제거·비우기다(소유자 규칙은 간선 추가와 같다 — World형 Actor는 같은 Level Actor만
+    // 가리킨다).
+    void MutateSlots(Role role) noexcept {
+        const uint32 owner = PickRole(role);
+        if (owner == NoIndex) {
+            return;
+        }
+
+        const uint32 roll = rng_.Below(6);
+        if (roll < 3) {
+            const uint32 target = Pick();
+            if (target != NoIndex && Usable(target) &&
+                (role != Role::Actor || (entries_[target].role == Role::Actor &&
+                                         entries_[target].owner == entries_[owner].owner))) {
+                AddSlot(owner, target);
+            }
+        } else if (roll < 5) {
+            if (entries_[owner].slotCount != 0) {
+                RemoveSlot(owner, rng_.Below(entries_[owner].slotCount));
+            }
+        } else {
+            ClearSlots(owner);
+        }
     }
 
     uint32 Append(ObjectHandle handle, Role role, uint32 outer, uint32 cluster,
@@ -670,6 +823,53 @@ private:
         }
     }
 
+    // 기존 패키지 아래 새 객체를 만든다. 패키지가 클러스터면 가입하고, 안전장치가 해체한
+    // 패키지면 일반 객체다(Registry의 결과를 모델 소속과 대조한다).
+    void CreateLateInner() noexcept {
+        const uint32 package = PickRole(Role::Package);
+        if (package == NoIndex || entries_.Size() >= options_.maxObjects) {
+            return;
+        }
+
+        ConstructionContext transaction(*objects_, Access());
+        const ObjectHandle inner =
+            Create(transaction, ClusterSoakNodeType, entries_[package].handle);
+        if (inner.IsNull() ||
+            !transaction.Commit(Span<const ObjectHandle>{}, Span<RootRef<Object>>{})) {
+            // cutoff white 패키지(Sweeping 중 도달하지 않은 패키지) 아래에는 만들 수 없다.
+            ++report_.rejectedWrites;
+            return;
+        }
+
+        const uint32 cluster = entries_[package].clusterRoot ? package : NoIndex;
+        const uint32 index = Append(inner, Role::Inner, package, cluster, NoIndex);
+        auto member = objects_->InspectClusterMembership(Access(), inner);
+        if (!member || member.Value() != (cluster != NoIndex)) {
+            Fail("Late package object membership diverged from the model", index,
+                 member ? ErrorCode::None : member.Error());
+        }
+    }
+
+    // 안전장치가 해체한 패키지 클러스터를 모델에 옮긴다(cycle 끝 — cutoff·정지형 sweep 뒤).
+    void SyncFlattened() noexcept {
+        if (!options_.packages) {
+            return;
+        }
+
+        for (uint32 index = 0; index < entries_.Size(); ++index) {
+            const Entry& entry = entries_[index];
+            if (!entry.clusterRoot || !Usable(index)) {
+                continue;
+            }
+
+            auto member = objects_->InspectClusterMembership(Access(), entry.handle);
+            if (member && !member.Value()) {
+                Dissolve(index);
+                ++report_.flattened;
+            }
+        }
+    }
+
     // index의 부분 트리(outer 사슬이 index를 지나는 Discard되지 않은 객체)를 Discard로 표시한다.
     void MarkDiscarded(uint32 index) noexcept {
         entries_[index].discarded = true;
@@ -692,7 +892,8 @@ private:
         if (roll < 3) {
             CreatePackage();
         } else if (roll < 8) {
-            const uint32 owner = PickRole(Role::Inner);
+            // 패키지 객체의 간선도 둔다(경계가 거의 전부인 패키지 — 안전장치 경로).
+            const uint32 owner = PickRole(rng_.Below(3) == 0 ? Role::Package : Role::Inner);
             const uint32 target = Pick();
             if (owner != NoIndex && target != NoIndex && Usable(target)) {
                 AddEdge(owner, target);
@@ -740,6 +941,8 @@ private:
                 MarkDiscarded(package);
                 entries_[package].held.Reset();
             }
+        } else if (roll < 15 && rng_.Below(2) == 0) {
+            CreateLateInner();
         } else if (roll < 15) {
             // 버그 경로: Discard 없이 루트를 놓는다(표식되지 않은 클러스터를 cutoff에 해체한다).
             const uint32 package = PickRole(Role::Package);
@@ -809,8 +1012,11 @@ private:
     }
 
     void Mutate() noexcept {
-        const uint32 roll = rng_.Below(20);
-        if (roll >= 18) {
+        const uint32 roll = rng_.Below(22);
+        if (roll >= 20) {
+            MutateSlots(options_.packages ? Role::Inner
+                                          : (rng_.Below(2) == 0 ? Role::Actor : Role::Normal));
+        } else if (roll >= 18) {
             MutateSingle(options_.packages ? Role::Inner
                                            : (rng_.Below(2) == 0 ? Role::Actor : Role::Normal));
         } else if (options_.packages) {
@@ -879,6 +1085,10 @@ private:
                 visit(entry.edges[edge]);
             }
 
+            for (uint32 slot = 0; slot < entry.slotCount; ++slot) {
+                visit(entry.slots[slot]);
+            }
+
             if (entry.clusterRoot) {
                 for (uint32 at = memberHead_[index]; at != NoIndex; at = memberNext_[at]) {
                     visit(at);
@@ -893,6 +1103,7 @@ private:
 
     // 회수된 객체를 dead로 옮기고 oracle에서 닿지 않았는지 본다.
     void CheckSafety() noexcept {
+        SyncFlattened();
         Reach();
         for (uint32 index = 0; index < entries_.Size(); ++index) {
             Entry& entry = entries_[index];
@@ -908,6 +1119,7 @@ private:
             entry.dead = true;
             entry.degree = 0;
             entry.single = NoIndex;
+            entry.slotCount = 0;
             entry.held.Reset();
             ++report_.reclaimed;
             if (entry.clusterRoot) {
@@ -982,7 +1194,25 @@ bool RunGcClusterSoak(Allocator& allocator, const GcClusterSoakOptions& options,
         RuntimeTypeOps package = MakeRuntimeTypeOps<ClusterSoakPackage>();
         package.parallelTraceSafe = true;
         package.completeFieldLayout = true;
-        if (!types.Register(TypeSchema{ClusterSoakNodeType, 1, {}, {}}, Move(node)) ||
+        static FieldSchema fields[1];
+        fields[0].id = ClusterSoakSlotTargetId;
+        fields[0].kind = FieldKind::ObjectReference;
+        fields[0].flags = static_cast<uint32>(FieldFlags::Transient);
+        fields[0].name = Span<const char>("target", 6);
+        fields[0].value = ValueType{ValueKind::ObjectReference, {}};
+        static const RuntimeStructFieldOps fieldOps[] = {{ClusterSoakSlotTargetId}};
+        RuntimeStructOps slot = MakeRuntimeStructOps<ClusterSoakSlot>();
+        slot.trace = [](const void* value, TraceVisitor& visitor) noexcept {
+            GeneratedType<ClusterSoakSlot>::Trace(*static_cast<const ClusterSoakSlot*>(value),
+                                                  visitor);
+        };
+        slot.fields = Span<const RuntimeStructFieldOps>(fieldOps, 1);
+        if (!types.RegisterStruct({ClusterSoakSlotType,
+                                   1,
+                                   Span<const FieldSchema>(fields, 1),
+                                   {"ClusterSoakSlot", 15}},
+                                  Move(slot)) ||
+            !types.Register(TypeSchema{ClusterSoakNodeType, 1, {}, {}}, Move(node)) ||
             !types.Register(TypeSchema{ClusterSoakPackageType, 1, {}, {}}, Move(package))) {
             report.failure = "type registration failed";
             return false;

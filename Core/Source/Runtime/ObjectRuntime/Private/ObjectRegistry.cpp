@@ -85,6 +85,7 @@ ObjectRegistry::~ObjectRegistry() {
     chunks_ = nullptr;
     for (uint32 index = 0; index < gcPageCount_; ++index) {
         ReleaseRegistryMemory(allocator_, gcPages_[index]->cells);
+        ReleaseRegistryMemory(allocator_, gcPages_[index]->clusterChunks);
         gcPages_[index]->~GcPage();
         ReleaseRegistryMemory(allocator_, gcPages_[index]);
     }

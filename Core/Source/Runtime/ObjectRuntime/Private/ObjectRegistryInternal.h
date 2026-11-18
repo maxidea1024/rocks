@@ -28,9 +28,13 @@ inline constexpr uint32 ClusterMember = 1u << 31;
 inline constexpr uint32 ClusterDetached = 1u << 30;
 inline constexpr uint32 ClusterPending = 1u << 29;
 inline constexpr uint32 ClusterIdMask = ClusterPending - 1;
-// chunk 클러스터 표(GcBits::firstCluster)가 이 값이면 chunk에 클러스터가 셋 이상 섞였다(소속의
-// 번호는 장부 상태에서 읽는다).
-inline constexpr uint32 ChunkClusterMixed = NumericLimits<uint32>::Max();
+// chunk 클러스터 표의 넘침 표지다. GcBits::firstCluster가 이 값이면 chunk에 클러스터가 셋 이상이라
+// 넓은 표(ObjectRegistry::ClusterChunk)를 읽고, 넓은 표의 clusters[0]이 이 값이면 그보다 많이
+// 섞여 장부 상태를 읽는다.
+inline constexpr uint32 ChunkClusterOverflow = NumericLimits<uint32>::Max();
+// 넓은 chunk 클러스터 표가 담는 클러스터 수와 소속마다의 고름 비트 수다.
+inline constexpr uint32 ChunkClusterEntries = 8;
+inline constexpr uint32 ChunkSelectorBits = 3;
 // 경계 비율 안전장치(Docs/Implementation/GcScaleExperiment.ko.md 14절)의 문턱이다. 패키지
 // 클러스터의 경계 소속(밖으로 가는 간선이 있는 소속)이 소속의 이 백분율을 넘으면 cycle 끝에 해체해
 // 일반 trace로 둔다. 경계 소속은 어차피 trace되고 나머지 소속도 처음 만날 때 클러스터 조회를
@@ -309,15 +313,16 @@ struct ObjectRegistry::GcHot {
 // - clustered: 클러스터 소속이다(GC-S7). sweep 후보에서 빠지고(live & ~mark & ~clustered) 표식은
 //   그 클러스터를 표식한다. 가입이 켜고 이탈·해체가 끈다(잠금 안).
 // 나머지는 chunk 클러스터 표다. marker와 참조 쓰기가 소속의 클러스터 번호를 비트 묶음과 같은 캐시
-// 줄에서 얻는다(슬롯마다 둔 장부 칸을 무작위로 읽으면 캐시 미스다 — GcScaleExperiment.ko.md 14절).
+// 줄에서 얻는다(슬롯마다 둔 장부 칸을 무작위로 읽으면 캐시 미스다 — GcScaleExperiment.ko.md
+// 14·15절).
 // - clusterSeen: 이번 cycle에 클러스터 표식을 본 소속이다. mark처럼 Begin·Collect가 지우고 marker가
 //   켠다(병렬 marker는 atomic OR). 같은 소속으로 가는 다음 간선은 이 비트 하나로 끝난다.
 // - firstCluster·secondCluster: 소속의 (클러스터 번호 + 1), 0이면 비었다. chunk 하나에 클러스터
 //   둘까지 담는다(이웃 슬롯에 만든 클러스터의 경계가 chunk를 가르는 흔한 경우). clusterSecond
 //   비트가 켜진 소속은 secondCluster, 꺼진 소속은 firstCluster다. 셋 이상이면 firstCluster가
-//   registry_detail::ChunkClusterMixed다(장부 상태를 읽는다). 가입이 맞추고(chunk의 소속이 모두
-//   떠난 뒤 가입하면 다시 비운다), 이탈·해체는 clustered 비트만 끄므로 남은 소속에 대해 표는 여전히
-//   맞다.
+//   registry_detail::ChunkClusterOverflow이고 넓은 표(ClusterChunk)를 읽는다.
+// 가입이 맞추고(chunk의 소속이 모두 떠난 뒤 가입하면 다시 비운다), 이탈·해체는 clustered 비트만
+// 끄므로 남은 소속에 대해 표는 여전히 맞다.
 struct alignas(64) ObjectRegistry::GcBits {
     uint64 live = 0;
     uint64 mark = 0;
@@ -327,6 +332,46 @@ struct alignas(64) ObjectRegistry::GcBits {
     uint64 clusterSecond = 0;
     uint32 firstCluster = 0;
     uint32 secondCluster = 0;
+};
+
+// chunk(소속 64개)의 넓은 클러스터 표다(클러스터를 켠 Registry만, 캐시 줄 하나 — GcBits 표가 넘칠
+// 때만 읽는다). 작은 패키지(64칸 chunk에 패키지 10개 안팎)의 소속도 장부 칸 대신 이 표에서 번호를
+// 얻는다(표 배열은 1M 슬롯에 1MB라 캐시에 남는다).
+// - clusters: chunk에 든 클러스터의 (번호 + 1), 0이면 빈 칸. 소속마다 selectors의 3비트가 칸을
+//   고른다. 8개까지 담고, 더 많으면 clusters[0]이 registry_detail::ChunkClusterOverflow다(장부
+//   상태를 읽는다).
+struct alignas(64) ObjectRegistry::ClusterChunk {
+    uint8 selectors[registry_detail::SlotsPerChunk * registry_detail::ChunkSelectorBits / 8] = {};
+    uint32 clusters[registry_detail::ChunkClusterEntries] = {};
+
+    // slot(chunk 안 번호)의 칸 번호다.
+    uint32 Selector(uint32 slot) const noexcept {
+        const uint32 at = slot * registry_detail::ChunkSelectorBits;
+        const uint32 byte = at / 8;
+        uint32 word = selectors[byte];
+        if (byte + 1 < sizeof(selectors)) {
+            word |= uint32(selectors[byte + 1]) << 8;
+        }
+
+        return (word >> (at % 8)) & ((1u << registry_detail::ChunkSelectorBits) - 1);
+    }
+
+    void SetSelector(uint32 slot, uint32 entry) noexcept {
+        const uint32 at = slot * registry_detail::ChunkSelectorBits;
+        const uint32 byte = at / 8;
+        const uint32 shift = at % 8;
+        const uint32 mask = ((1u << registry_detail::ChunkSelectorBits) - 1) << shift;
+        uint32 word = selectors[byte];
+        if (byte + 1 < sizeof(selectors)) {
+            word |= uint32(selectors[byte + 1]) << 8;
+        }
+
+        word = (word & ~mask) | (entry << shift);
+        selectors[byte] = static_cast<uint8>(word);
+        if (byte + 1 < sizeof(selectors)) {
+            selectors[byte + 1] = static_cast<uint8>(word >> 8);
+        }
+    }
 };
 
 // 클러스터 장부 칸이다(슬롯마다, 클러스터를 켠 Registry만 —
@@ -375,12 +420,14 @@ struct ObjectRegistry::ClusterRecord {
 struct ObjectRegistry::GcPage {
     static_assert(sizeof(GcHot) == 16, "GC hot record must stay 16 bytes");
     static_assert(sizeof(GcBits) == 64, "GC bit group must fill one cache line");
+    static_assert(sizeof(ClusterChunk) == 64, "Wide chunk cluster table must fill one cache line");
 
     GcBits bits[registry_detail::ChunksPerGcPage];
     GcHot hot[registry_detail::GcPageSlots];
-    // 클러스터 장부 칸(GcPageSlots개, 클러스터를 켠 Registry만 — 아니면 null)이다. 페이지와 함께
-    // 잠금 밖에서 할당한다.
+    // 클러스터 장부 칸(GcPageSlots개)과 chunk 클러스터 표(ChunksPerGcPage개)다(클러스터를 켠
+    // Registry만 — 아니면 null). 페이지와 함께 잠금 밖에서 할당한다.
     ClusterCell* cells = nullptr;
+    ClusterChunk* clusterChunks = nullptr;
 };
 
 // GC 타입 표의 항목이다. key는 타입 레코드의 RuntimeTypeOps 주소다(레코드가 살아 있는 동안
@@ -447,13 +494,26 @@ inline uint32& ObjectRegistry::ClusterInCountOf(uint32 index) const noexcept {
     return SlotAt(index)->clusterInCount;
 }
 
+inline ObjectRegistry::ClusterChunk& ObjectRegistry::ClusterChunkOf(uint32 index) const noexcept {
+    return PageOf(index)
+        .clusterChunks[(index % registry_detail::GcPageSlots) / registry_detail::SlotsPerChunk];
+}
+
 inline uint32 ObjectRegistry::MemberClusterOf(uint32 index) const noexcept {
     const GcBits& bits = BitsOf(index);
-    const uint64 bit = uint64(1) << (index % registry_detail::SlotsPerChunk);
-    const uint32 key = (bits.clusterSecond & bit) != 0 ? bits.secondCluster : bits.firstCluster;
-    return key != registry_detail::ChunkClusterMixed
-               ? key - 1
-               : ClusterStateOf(index) & registry_detail::ClusterIdMask;
+    const uint32 local = index % registry_detail::SlotsPerChunk;
+    const uint32 key =
+        (bits.clusterSecond >> local & 1) != 0 ? bits.secondCluster : bits.firstCluster;
+    if (key != registry_detail::ChunkClusterOverflow) {
+        return key - 1;
+    }
+
+    const ClusterChunk& chunk = ClusterChunkOf(index);
+    if (chunk.clusters[0] == registry_detail::ChunkClusterOverflow) {
+        return ClusterStateOf(index) & registry_detail::ClusterIdMask;
+    }
+
+    return chunk.clusters[chunk.Selector(local)] - 1;
 }
 
 inline ObjectRegistry::GcBits& ObjectRegistry::BitsOf(uint32 index) const noexcept {

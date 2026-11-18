@@ -467,6 +467,14 @@ void ObjectRegistry::RemoveRootListLocked(Slot& slot) noexcept {
     slot.rootPosition = NoSlot;
 }
 
+void ObjectRegistry::ClearMarksLocked() noexcept {
+    for (uint32 chunk = 0; chunk < chunkCount_; ++chunk) {
+        GcBits& bits = BitsOf(chunk * SlotsPerChunk);
+        StoreMark(bits.mark, 0);
+        StoreMark(bits.clusterSeen, 0);
+    }
+}
+
 Result<uint16> ObjectRegistry::AcquireGcType(const RuntimeTypeOps& ops) noexcept {
     const void* key = &ops;
     const bool leaf = !ops.hasStrongReferences && options_.policy.packageNativeType == nullptr;
@@ -547,6 +555,18 @@ Result<void> ObjectRegistry::PrepareGcGrowth(uint64 slots, GcGrowth& growth) noe
             }
 
             growth.page->cells = table;
+            auto chunks = allocator_.Allocate(sizeof(ClusterChunk) * ChunksPerGcPage,
+                                              alignof(ClusterChunk), GcPageTag);
+            if (!chunks) {
+                return Result<void>::Failure(chunks.Error());
+            }
+
+            auto* chunkTable = static_cast<ClusterChunk*>(chunks.Value());
+            for (uint32 index = 0; index < ChunksPerGcPage; ++index) {
+                ::new (&chunkTable[index]) ClusterChunk();
+            }
+
+            growth.page->clusterChunks = chunkTable;
         }
 
         if (gcPageCount_ == gcPageCapacity_) {
@@ -613,6 +633,7 @@ void ObjectRegistry::GrowGcLocked(GcGrowth& growth) noexcept {
 void ObjectRegistry::ReleaseGcGrowth(GcGrowth& growth) noexcept {
     if (growth.page != nullptr) {
         ReleaseRegistryMemory(allocator_, growth.page->cells);
+        ReleaseRegistryMemory(allocator_, growth.page->clusterChunks);
         growth.page->~GcPage();
         ReleaseRegistryMemory(allocator_, growth.page);
     }
@@ -664,11 +685,7 @@ Result<void> ObjectRegistry::BeginCollection(const ObjectAccessContext& access) 
     }
 
     // 표식 비트와 클러스터 표식을 본 소속 비트를 지운다(chunk마다 word 하나씩 — O(슬롯 수 / 64)).
-    for (uint32 chunk = 0; chunk < chunkCount_; ++chunk) {
-        GcBits& bits = BitsOf(chunk * SlotsPerChunk);
-        StoreMark(bits.mark, 0);
-        StoreMark(bits.clusterSeen, 0);
-    }
+    ClearMarksLocked();
 
     gcPhase_ = GcPhase::Marking;
     gcCursor_ = 0;
@@ -1654,12 +1671,7 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access,
     MarkState state{this, &work};
     {
         platform::LockGuard lock(gate_);
-        for (uint32 chunk = 0; chunk < chunkCount_; ++chunk) {
-            GcBits& bits = BitsOf(chunk * SlotsPerChunk);
-            StoreMark(bits.mark, 0);
-            StoreMark(bits.clusterSeen, 0);
-        }
-
+        ClearMarksLocked();
         AdvanceGcEpochLocked();
         for (uint32 position = 0; position < rootCount_; ++position) {
             if (MarkIndex(rootList_[position], work, state.marked) != ErrorCode::None) {

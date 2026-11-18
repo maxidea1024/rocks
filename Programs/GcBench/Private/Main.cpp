@@ -248,6 +248,12 @@ StringView NameOf(char (&buffer)[16], uint32 number) noexcept {
     return StringView(buffer, count + 1);
 }
 
+// 패키지형 그래프의 객체 수와 기본 패키지 크기다(--package-size로 바꾼다 — 64보다 작으면 chunk
+// 하나에 클러스터가 셋 이상 섞인다).
+constexpr uint32 PackageObjects = 1000000;
+constexpr uint32 DefaultPackageSize = 100;
+constexpr uint32 MinPackageSize = 2;
+
 struct Options {
     uint32 objects = 0;
     uint32 refs = 4;
@@ -269,6 +275,11 @@ struct Options {
     // 패키지 시나리오 하나에서 Collect 반복 전에 간선 쓰기를 이만큼 되풀이해 잰다(--write-rounds —
     // 부하가 있는 기계에서 최솟값을 보려고).
     uint32 writeRounds = 0;
+    // 패키지 시나리오 하나에서 Collect 반복 뒤 기본 예산 증분 cycle을 이만큼 돌려 가장 긴 slice를
+    // 잰다(--incremental-reps — cutoff·정리 slice가 클러스터 수에 비례하는지 본다).
+    uint32 incrementalReps = 0;
+    // 패키지형 그래프의 패키지 크기다(--package-size).
+    uint32 packageSize = DefaultPackageSize;
     uint64 clusterSoakTicks = 0;
     uint64 soakTicks = 0;
     uint64 seed = 7;
@@ -879,14 +890,14 @@ bool MeasureEdgeWrites(ObjectRegistry& registry, uint32 count, Pick&& pick,
     return true;
 }
 
-constexpr uint32 Packages = 10000;
-constexpr uint32 PackageSize = 100;
 // --write-rounds 한 번의 간선 쓰기 수다.
 constexpr uint32 ProfileWrites = 50000;
 
 // 패키지형: 10K 패키지 × 100 객체(1M), 노드마다 평균 4개 간선, 그중 cross%는 다른 패키지로 간다.
 // clusters가 거짓이면 패키지 클러스터를 끈다(RegistryOptions::packageClusters).
 int RunPackageScenario(uint32 crossPercent, bool clusters, const Options& options) noexcept {
+    const uint32 PackageSize = options.packageSize;
+    const uint32 Packages = PackageObjects / PackageSize;
     printf("\n== package graph: %u packages x %u, refs avg 4, cross %u%%, clusters %s ==\n",
            Packages, PackageSize, crossPercent, clusters ? "on" : "off");
     fflush(stdout);
@@ -913,7 +924,7 @@ int RunPackageScenario(uint32 crossPercent, bool clusters, const Options& option
             ObjectRegistry registry(memory, types, Guid{0x6764, crossPercent}, registryOptions);
             const auto access = registry.OwnerAccess();
             Rng rng{0x51ed270b9a3c4d21ULL ^ crossPercent};
-            constexpr uint32 Total = Packages * PackageSize;
+            const uint32 Total = Packages * PackageSize;
             Array<ObjectHandle> all(memory);
             Array<RootRef<Object>> roots(memory);
             if (!all.TryReserve(Total) || !roots.TryReserve(Packages)) {
@@ -991,6 +1002,36 @@ int RunPackageScenario(uint32 crossPercent, bool clusters, const Options& option
                 }
 
                 PrintPhases("Collect (median)", MedianOf(reports, memory));
+                // 기본 예산 증분 cycle의 가장 긴 slice(벽시계)다. cycle마다의 최댓값 가운데
+                // 최솟값을 쓴다(선점은 늘리기만 한다).
+                uint64 slowestSlice = NumericLimits<uint64>::Max();
+                uint32 slices = 0;
+                for (uint32 cycle = 0; cycle < options.incrementalReps; ++cycle) {
+                    if (!registry.BeginCollection(access)) {
+                        return 4;
+                    }
+
+                    uint64 longest = 0;
+                    slices = 0;
+                    while (registry.CollectionPhase() != GcPhase::Idle) {
+                        const uint64 stepStarted = platform::MonotonicNanoseconds();
+                        if (!registry.StepCollection(access, GcBudget{})) {
+                            return 4;
+                        }
+
+                        const uint64 took = platform::MonotonicNanoseconds() - stepStarted;
+                        longest = took > longest ? took : longest;
+                        ++slices;
+                    }
+
+                    slowestSlice = longest < slowestSlice ? longest : slowestSlice;
+                }
+
+                if (options.incrementalReps != 0) {
+                    printf("  incremental default budget: longest slice %.1f us, slices %u\n",
+                           static_cast<double>(slowestSlice) * 1e-3, slices);
+                }
+
                 // 부하가 있는 기계에서는 최솟값이 고유 비용에 더 가깝다(선점은 늘리기만 한다).
                 uint64 fastest = NumericLimits<uint64>::Max();
                 for (usize at = 0; at < reports.Size(); ++at) {
@@ -1531,7 +1572,7 @@ int RunClusterSoak(const Options& options) noexcept {
                static_cast<double>(platform::MonotonicNanoseconds() - started) * 1e-9);
         printf("  created %llu, reclaimed %llu, cycles begun %llu / completed %llu, Collect %llu, "
                "steps %llu, verifications %llu, edge writes %llu (rejected %llu), destroys %llu, "
-               "Discard %llu\n",
+               "Discard %llu, flattened %llu\n",
                static_cast<unsigned long long>(report.created),
                static_cast<unsigned long long>(report.reclaimed),
                static_cast<unsigned long long>(report.cyclesBegun),
@@ -1542,7 +1583,8 @@ int RunClusterSoak(const Options& options) noexcept {
                static_cast<unsigned long long>(report.edgeWrites),
                static_cast<unsigned long long>(report.rejectedWrites),
                static_cast<unsigned long long>(report.destroys),
-               static_cast<unsigned long long>(report.discards));
+               static_cast<unsigned long long>(report.discards),
+               static_cast<unsigned long long>(report.flattened));
         if (report.failure != nullptr) {
             printf("  FAILURE at tick %llu (object %u, error %u): %s\n",
                    static_cast<unsigned long long>(report.failureTick), report.failureObject,
@@ -1654,6 +1696,13 @@ bool Parse(int argc, char** argv, Options& options) noexcept {
             ++index;
         } else if (platform::CStringEquals(argv[index], "--soak")) {
             options.soakTicks = value;
+            ++index;
+        } else if (platform::CStringEquals(argv[index], "--package-size")) {
+            options.packageSize = static_cast<uint32>(
+                value < MinPackageSize || value > PackageObjects ? DefaultPackageSize : value);
+            ++index;
+        } else if (platform::CStringEquals(argv[index], "--incremental-reps")) {
+            options.incrementalReps = static_cast<uint32>(value > 1000 ? 0 : value);
             ++index;
         } else if (platform::CStringEquals(argv[index], "--write-rounds")) {
             options.writeRounds = static_cast<uint32>(value > 1000 ? 0 : value);

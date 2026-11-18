@@ -5,6 +5,7 @@
 #include <Platform/Atomics.h>
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
+#include <Platform/PlatformMath.h>
 
 // ObjectRegistry 클러스터다(GC-S7, Docs/Design/GarbageCollectionScale.ko.md 13절). 클러스터 장부
 // (소속·inCount·outCount·소속/detached/경계 목록), 가입 지정·생성·가입·이탈·해체, 직렬 marker의
@@ -365,16 +366,22 @@ uint32 ObjectRegistry::FlattenBoundaryClustersLocked() noexcept {
     // 남기고, 영구 영역은 표식·sweep을 하지 않는 것이 목적이다.
     uint32 flattened = 0;
     for (uint32 id = 0; id < clusterUsed_; ++id) {
-        const ClusterRecord& record = clusters_[id];
-        if (record.live && !record.designated && !record.permanent &&
-            uint64(record.boundaryMembers) * 100 >
-                uint64(record.members) * ClusterFlattenBoundaryPercent) {
+        if (clusters_[id].live && ExceedsFlattenThreshold(clusters_[id])) {
             DissolveClusterLocked(id);
             ++flattened;
         }
     }
 
     return flattened;
+}
+
+bool ObjectRegistry::ExceedsFlattenThreshold(const ClusterRecord& record) const noexcept {
+    if (record.designated || record.permanent) {
+        return false;
+    }
+
+    return uint64(record.boundaryMembers) * 100 >
+           uint64(record.members) * ClusterFlattenBoundaryPercent;
 }
 
 bool ObjectRegistry::IsFlattenedPackageLocked(const Slot& package) const noexcept {
@@ -440,34 +447,92 @@ void ObjectRegistry::JoinClusterLocked(uint32 id, uint32 slot) noexcept {
     LinkCellLocked(record.memberHead, slot, false);
     ++record.members;
     ++tally_.clusterMembers;
-    // chunk 클러스터 표를 맞춘다(GcBits 주석): 이미 있는 칸이면 그 칸, 남은 소속이 없는 칸은
-    // 이 클러스터가 차지하고, 둘 다 차 있으면 섞임이다.
     GcBits& bits = BitsOf(slot);
     const uint64 bit = BitOf(slot);
-    const uint64 others = bits.clustered & ~bit;
+    SetChunkClusterLocked(slot, id, bits.clustered & ~bit);
+    bits.clustered |= bit;
+}
+
+void ObjectRegistry::SetChunkClusterLocked(uint32 slot, uint32 id, uint64 others) noexcept {
+    // chunk 클러스터 표를 맞춘다(GcBits·ClusterChunk 주석): 이미 있는 칸이면 그 칸, 비었거나 남은
+    // 소속이 고르지 않는 칸은 이 클러스터가 차지한다. 두 칸이 차면 넓은 표로 옮기고, 넓은 표도 차면
+    // 섞임이다.
+    GcBits& bits = BitsOf(slot);
+    const uint32 local = slot % SlotsPerChunk;
+    const uint64 bit = uint64(1) << local;
     const uint32 key = id + 1;
     if (others == 0) {
         bits.firstCluster = key;
         bits.secondCluster = 0;
         bits.clusterSecond = 0;
-    } else if (bits.firstCluster == ChunkClusterMixed) {
-        // 섞인 chunk의 소속은 장부 상태로 찾는다(표를 바꾸지 않는다).
-    } else if (bits.firstCluster == key) {
-        bits.clusterSecond &= ~bit;
-    } else if (bits.secondCluster == key) {
-        bits.clusterSecond |= bit;
-    } else if ((others & ~bits.clusterSecond) == 0) {
-        bits.firstCluster = key;
-        bits.clusterSecond &= ~bit;
-    } else if ((others & bits.clusterSecond) == 0) {
-        bits.secondCluster = key;
-        bits.clusterSecond |= bit;
-    } else {
-        bits.firstCluster = ChunkClusterMixed;
-        bits.clusterSecond = 0;
+        return;
     }
 
-    bits.clustered |= bit;
+    if (bits.firstCluster != ChunkClusterOverflow) {
+        if (bits.firstCluster == key) {
+            bits.clusterSecond &= ~bit;
+            return;
+        }
+
+        if (bits.secondCluster == key) {
+            bits.clusterSecond |= bit;
+            return;
+        }
+
+        if ((others & ~bits.clusterSecond) == 0) {
+            bits.firstCluster = key;
+            bits.clusterSecond &= ~bit;
+            return;
+        }
+
+        if ((others & bits.clusterSecond) == 0) {
+            bits.secondCluster = key;
+            bits.clusterSecond |= bit;
+            return;
+        }
+
+        // 셋째 클러스터: 남은 소속을 넓은 표로 옮긴다(두 칸 → 넓은 표의 0·1번 칸).
+        ClusterChunk& wide = ClusterChunkOf(slot);
+        wide = ClusterChunk{};
+        wide.clusters[0] = bits.firstCluster;
+        wide.clusters[1] = bits.secondCluster;
+        for (uint64 rest = others; rest != 0; rest &= rest - 1) {
+            const uint32 member = platform::PlatformMath::CountTrailingZeros64(rest);
+            wide.SetSelector(member, (bits.clusterSecond >> member & 1) != 0 ? 1u : 0u);
+        }
+
+        bits.firstCluster = ChunkClusterOverflow;
+        bits.clusterSecond = 0;
+        bits.secondCluster = 0;
+    }
+
+    ClusterChunk& chunk = ClusterChunkOf(slot);
+    if (chunk.clusters[0] == ChunkClusterOverflow) {
+        // 섞인 chunk의 소속은 장부 상태로 찾는다(표를 바꾸지 않는다).
+        return;
+    }
+
+    for (uint32 entry = 0; entry < ChunkClusterEntries; ++entry) {
+        if (chunk.clusters[entry] == key) {
+            chunk.SetSelector(local, entry);
+            return;
+        }
+    }
+
+    uint32 used = 0;
+    for (uint64 rest = others; rest != 0; rest &= rest - 1) {
+        used |= 1u << chunk.Selector(platform::PlatformMath::CountTrailingZeros64(rest));
+    }
+
+    for (uint32 entry = 0; entry < ChunkClusterEntries; ++entry) {
+        if ((used & (1u << entry)) == 0) {
+            chunk.clusters[entry] = key;
+            chunk.SetSelector(local, entry);
+            return;
+        }
+    }
+
+    chunk.clusters[0] = ChunkClusterOverflow;
 }
 
 uint64 ObjectRegistry::GcQueueBound(uint64 slots) const noexcept {
@@ -615,6 +680,20 @@ void ObjectRegistry::ProcessCluster(uint32 id, MarkState& state) noexcept {
         state.counters->boundaryPushes += state.work->Size() - queued;
         state.counters->clusterProcessNanoseconds += platform::MonotonicNanoseconds() - started;
     }
+}
+
+Result<bool> ObjectRegistry::InspectClusterMembership(const ObjectAccessContext& access,
+                                                      ObjectHandle object) const noexcept {
+    auto lifecycle = InspectLifecycle(access, object);
+    if (!lifecycle) {
+        return Result<bool>::Failure(lifecycle.Error());
+    }
+
+    // 조회와 같은 잠금 구간이 아니어도 된다(결과는 어차피 반환 뒤 바뀔 수 있다 — 소유 스레드만
+    // 바꾼다).
+    platform::LockGuard lock(gate_);
+    const Slot* slot = FindSlot(object);
+    return Result<bool>::Success(slot != nullptr && IsClusterMemberLocked(*slot));
 }
 
 Result<void> ObjectRegistry::DesignateCluster(const ObjectAccessContext& access, uint64 transaction,

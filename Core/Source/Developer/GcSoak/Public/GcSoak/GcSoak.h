@@ -121,6 +121,8 @@ struct GcClusterSoakReport {
     uint64 rejectedWrites = 0;
     uint64 destroys = 0;
     uint64 discards = 0;
+    // 경계 비율 안전장치가 해체한 패키지 클러스터 수다(패키지형).
+    uint64 flattened = 0;
     const char* failure = nullptr;
     uint64 failureTick = 0;
     uint32 failureObject = 0;

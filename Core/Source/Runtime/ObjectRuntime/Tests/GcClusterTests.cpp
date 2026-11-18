@@ -4,6 +4,7 @@
 #include <Object/ConstructionContext.h>
 #include <Object/ObjectRefMap.h>
 #include <Object/ObjectRegistry.h>
+#include <Object/StructRefArray.h>
 #include <Object/TypeRegistry.h>
 #include <Task/WorkerScheduler.h>
 
@@ -266,6 +267,23 @@ TEST(ObjectGcCluster_IncrementalBarrierCasesKeepReachableObjects) {
         auto keeper = objects.NewObject<ClusterNode>(access, PlainNodeType);
         auto outside = objects.NewObject<ClusterNode>(access, PlainNodeType);
         REQUIRE(keeper && outside);
+        // 다른 루트 넷과, 첫 루트 아래 루트 없는 사슬이다. 첫 slice(루트 수만큼의 예산)가 루트를
+        // 모두 trace하고(keeper 포함 — 루트 목록 순서와 무관) 사슬이 남아 표식이 끝나지 않게 한다.
+        RootRef<ClusterNode> fillers[4];
+        for (RootRef<ClusterNode>& filler : fillers) {
+            auto made = objects.NewObject<ClusterNode>(access, PlainNodeType);
+            REQUIRE(made);
+            filler = Move(made.Value());
+        }
+
+        ObjectHandle chain = fillers[0].Handle();
+        for (uint32 index = 0; index < 8; ++index) {
+            auto link = objects.NewObject<ClusterNode>(access, PlainNodeType);
+            REQUIRE(link);
+            REQUIRE(Link(objects, chain, link.Value().Handle()));
+            chain = link.Value().Handle();
+        }
+
         const ObjectHandle outsideHandle = outside.Value().Handle();
         const ObjectHandle member = cluster.members[0];
         REQUIRE(Link(objects, member, outsideHandle));
@@ -274,7 +292,11 @@ TEST(ObjectGcCluster_IncrementalBarrierCasesKeepReachableObjects) {
         const ObjectHandle rootHandle = cluster.root.Handle();
         cluster.root.Reset();
         REQUIRE(objects.BeginCollection(access));
-        // keeper(이미 표식된 루트)가 소속 m0를 가리키게 한다: 장벽이 클러스터를 shade만 한다.
+        // 루트(keeper와 filler 넷)를 먼저 모두 trace한다. 그 뒤 keeper(이미 trace된 객체)가 소속
+        // m0를 가리키게 한다: 이 간선은 삽입 장벽만 지킨다 — 장벽이 클러스터를 shade만 하고(처리
+        // 전), 장벽이 없으면 m0·밖 대상이 keeper에서 닿는데도 회수된다.
+        REQUIRE(objects.StepCollection(access, GcBudget{5, 0}));
+        REQUIRE(objects.CollectionPhase() == GcPhase::Marking);
         REQUIRE(Link(objects, keeper.Value().Handle(), member));
         // 처리 전에 루트를 파괴해 해체한다. 경계 소속 m0의 밖 대상이 살아야 한다.
         REQUIRE(objects.RequestDestroy(access, rootHandle));
@@ -325,6 +347,10 @@ TEST(ObjectGcCluster_IncrementalBarrierCasesKeepReachableObjects) {
         CHECK(Exists(objects, hostHandle));
         second.root.Reset();
         keeper.Value().Reset();
+        for (RootRef<ClusterNode>& filler : fillers) {
+            filler.Reset();
+        }
+
         REQUIRE(objects.Shutdown(access));
     }
 
@@ -1112,4 +1138,175 @@ TEST(ObjectGcCluster_ModelMatchesOracleSerial) {
 TEST(ObjectGcCluster_ModelMatchesOracleParallel) {
     RunClusterModel(0x2545f4914f6cdd1dULL, 2);
     RunClusterModel(0x6a09e667f3bcc909ULL, 4);
+}
+
+// ---- 소속 소유자의 StructRefArray 원소 제거·비우기 ----
+
+namespace cluster_struct_fixture {
+
+using namespace rocks;
+
+// 등록 struct 원소다(소속 소유자의 원소 제거·비우기가 원소 trace로 장부를 고친다).
+struct ClusterSlot {
+    explicit ClusterSlot(Allocator&) noexcept {
+    }
+
+    ObjectRef<Object> target;
+};
+
+class SlotNode final : public Object {
+public:
+    explicit SlotNode(Allocator& allocator) noexcept : slots(allocator) {
+    }
+
+    void Trace(TraceVisitor& visitor) const noexcept;
+
+    StructRefArray<ClusterSlot> slots;
+};
+
+} // namespace cluster_struct_fixture
+
+namespace rocks {
+
+template <>
+struct GeneratedType<cluster_struct_fixture::ClusterSlot> {
+    static constexpr bool ContainsStrongReference = true;
+
+    static void Trace(const cluster_struct_fixture::ClusterSlot& value,
+                      TraceVisitor& visitor) noexcept {
+        visitor.Visit(value.target);
+    }
+};
+
+} // namespace rocks
+
+void cluster_struct_fixture::SlotNode::Trace(TraceVisitor& visitor) const noexcept {
+    slots.Trace(visitor);
+}
+
+namespace {
+
+using namespace cluster_struct_fixture;
+
+constexpr TypeId SlotNodeType{0x47436c7573745335ULL, 1};
+constexpr TypeId ClusterSlotType{0x47436c7573745336ULL, 1};
+constexpr Guid SlotTargetId{0x47435354ULL, 1};
+
+bool RegisterSlotTypes(TypeRegistry& types) noexcept {
+    static FieldSchema fields[1];
+    fields[0].id = SlotTargetId;
+    fields[0].kind = FieldKind::ObjectReference;
+    fields[0].flags = static_cast<uint32>(FieldFlags::Transient);
+    fields[0].name = Span<const char>("target", 6);
+    fields[0].value = ValueType{ValueKind::ObjectReference, {}};
+    static const RuntimeStructFieldOps fieldOps[] = {{SlotTargetId}};
+    RuntimeStructOps slot = MakeRuntimeStructOps<ClusterSlot>();
+    slot.trace = [](const void* value, TraceVisitor& visitor) noexcept {
+        GeneratedType<ClusterSlot>::Trace(*static_cast<const ClusterSlot*>(value), visitor);
+    };
+    slot.fields = Span<const RuntimeStructFieldOps>(fieldOps, 1);
+    RuntimeTypeOps node = MakeRuntimeTypeOps<SlotNode>();
+    node.completeFieldLayout = true;
+    return RegisterClusterTypes(types) &&
+           types
+               .RegisterStruct(
+                   {ClusterSlotType, 1, Span<const FieldSchema>(fields, 1), {"ClusterSlot", 11}},
+                   Move(slot))
+               .IsOk() &&
+           types.Register(TypeSchema{SlotNodeType, 1, {}, {}}, Move(node));
+}
+
+// owner의 원소 하나를 더하고 그 참조를 target으로 둔다.
+bool AddSlot(ObjectRegistry& objects, ObjectHandle owner, ObjectHandle target) noexcept {
+    auto borrowed = objects.Resolve<SlotNode>(objects.OwnerAccess(), owner);
+    if (!borrowed) {
+        return false;
+    }
+
+    auto pointer = borrowed.Value().Get();
+    if (!pointer) {
+        return false;
+    }
+
+    StructRefArray<ClusterSlot>& slots = pointer.Value()->slots;
+    auto index = objects.AddElement(objects.OwnerAccess(), owner, slots);
+    return index && objects.SetElementReference(objects.OwnerAccess(), owner, slots, index.Value(),
+                                                slots[index.Value()].target, target);
+}
+
+template <class Edit>
+bool EditSlots(ObjectRegistry& objects, ObjectHandle owner, Edit&& edit) noexcept {
+    auto borrowed = objects.Resolve<SlotNode>(objects.OwnerAccess(), owner);
+    if (!borrowed) {
+        return false;
+    }
+
+    auto pointer = borrowed.Value().Get();
+    return pointer && static_cast<bool>(edit(pointer.Value()->slots));
+}
+
+} // namespace
+
+// 소속 소유자 M의 원소가 같은 클러스터 소속 N(두 번)과 밖 객체 O를 가리킨다. 원소 제거는 O의
+// 밖 간선(outCount)을, 비우기는 N의 inCount를 장부에서 뺀다. Debug는 Collect마다 장부를 다시 센다
+// (빠뜨리면 "Cluster ledger diverged from a recount"). 이탈한 N은 M의 원소가 가리키는 동안
+// detached로 살고, 비운 뒤 회수된다.
+TEST(ObjectGcCluster_MemberStructElementRemovalKeepsLedger) {
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterSlotTypes(types));
+        ObjectRegistry objects(allocator, types, Guid{0x4743, 9}, ClusterOptions());
+        const auto access = objects.OwnerAccess();
+        ObjectHandle root;
+        ObjectHandle m;
+        ObjectHandle n;
+        RootRef<Object> held[1];
+        {
+            ConstructionContext transaction(objects, access);
+            auto made = transaction.Create<SlotNode>(SlotNodeType);
+            REQUIRE(made && transaction.SetClusterRoot(made.Value()));
+            root = made.Value();
+            auto owner = transaction.Create<SlotNode>(SlotNodeType, root, "M");
+            auto inner = transaction.Create<ClusterNode>(ClusterNodeType, root, "N");
+            REQUIRE(owner && inner);
+            REQUIRE(transaction.JoinCluster(owner.Value(), root));
+            REQUIRE(transaction.JoinCluster(inner.Value(), root));
+            m = owner.Value();
+            n = inner.Value();
+            const ObjectHandle roots[] = {root};
+            REQUIRE(transaction.Commit(roots, held));
+        }
+
+        auto outside = objects.NewObject<ClusterNode>(access, PlainNodeType);
+        REQUIRE(outside);
+        const ObjectHandle o = outside.Value().Handle();
+        outside.Value().Reset();
+        REQUIRE(AddSlot(objects, m, n));
+        REQUIRE(AddSlot(objects, m, o));
+        REQUIRE(AddSlot(objects, m, n));
+        REQUIRE(objects.Collect(access));
+        CHECK(Exists(objects, o));
+        // 원소 제거: 밖 간선이 빠지고 O는 닿지 않는다.
+        REQUIRE(EditSlots(objects, m, [&](StructRefArray<ClusterSlot>& slots) noexcept {
+            return objects.RemoveElementAt(access, m, slots, 1);
+        }));
+        REQUIRE(objects.Collect(access));
+        CHECK(!Exists(objects, o));
+        // N 이탈: M의 원소 둘이 가리키므로 detached로 산다.
+        REQUIRE(objects.RequestDestroy(access, n));
+        REQUIRE(objects.Collect(access));
+        CHECK(Exists(objects, n));
+        // 비우기: N의 inCount가 0이 되어 클러스터 없음 — 회수된다.
+        REQUIRE(EditSlots(objects, m, [&](StructRefArray<ClusterSlot>& slots) noexcept {
+            return objects.ClearElements(access, m, slots);
+        }));
+        REQUIRE(objects.Collect(access));
+        CHECK(!Exists(objects, n));
+        CHECK(Exists(objects, m));
+        held[0].Reset();
+        REQUIRE(objects.Shutdown(access));
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
 }
