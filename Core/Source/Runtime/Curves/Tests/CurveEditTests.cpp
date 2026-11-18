@@ -100,6 +100,13 @@ TEST(CurveEdit_UnwindRotation) {
     CHECK(huge - 370.0f >= -180.0f && huge - 370.0f <= 180.0f);
     REQUIRE(curve.TryAddKey(5.0f, platform::PlatformMath::Infinity<float>(), true));
     CHECK(curve.Keys()[5].value == platform::PlatformMath::Infinity<float>());
+
+    // UE 반복이 끝나는 큰 차(약 112만 번)는 UE와 비트가 같다: 앞 키 0, 4e8 → 104(float 반복 뺄셈의
+    // 결과 — 2^20번 상한이던 때는 double 나머지 40이었다, CV5 리뷰 2).
+    TangentCurve large(allocator);
+    REQUIRE(large.TryAddKey(0.0f, 0.0f));
+    REQUIRE(large.TryAddKey(1.0f, 4.0e8f, true));
+    CHECK(large.Keys()[1].value == 104.0f);
 }
 
 // UpdateOrAdd는 허용오차 안의 가장 앞 키 값만 바꾸고(다른 칸 유지), 없으면 더한다. 허용오차가
@@ -370,25 +377,132 @@ TEST(CurveEdit_AllocationFailureLeavesCurveUnchanged) {
             return curve.TryRemoveRedundantKeys(1.0e-4f);
         },
         [](TangentCurve& curve, TangentCurve& other) noexcept { return curve.TryCopyFrom(other); },
+        [](TangentCurve& curve, TangentCurve&) noexcept {
+            auto updated = curve.TryUpdateOrAddKey(1.5f, 9.0f);
+            return updated ? Result<void>::Success() : Result<void>::Failure(updated.Error());
+        },
+        [](TangentCurve& curve, TangentCurve&) noexcept {
+            return curve.TryRemoveRedundantKeys(1.0e-4f, 0.5f, 2.5f);
+        },
+        [](TangentCurve& curve, TangentCurve&) noexcept {
+            return curve.TryRemoveRedundantKeys(1.0e-4f, FrameRate::TryCreate(30, 1).Value());
+        },
     };
     for (const Operation operation : operations) {
+        bool injected = false;
         for (uint64 attempt = 1; attempt <= 8; ++attempt) {
             test::NFailAllocator failing(system);
             TangentCurve curve(failing);
             REQUIRE(curve.TrySetKeys(keys));
             TangentCurve other(system);
             REQUIRE(other.TryAddKey(7.0f, 7.0f));
-            failing.FailOnAttempt(failing.Attempts() + attempt);
+            failing.FailOnAttempt(attempt); // 시도 수는 여기서 0부터 센다
             const Result<void> result = operation(curve, other);
             failing.DisableFailure();
             if (!result) {
+                injected = true;
                 CHECK(result.Error() == ErrorCode::OutOfMemory);
                 const float times[] = {0.0f, 1.0f, 2.0f, 3.0f};
                 const float values[] = {0.0f, 1.0f, 2.0f, 5.0f};
                 CHECK(Times(curve, times) && Values(curve, values));
             }
         }
+
+        CHECK(injected); // 실패가 실제로 주입됐다(할당하는 연산이다)
     }
+}
+
+// PlainCurve의 할당하는 연산도 시도마다 실패를 주입하면 OutOfMemory이고 커브가 그대로다(중복 키
+// 제거는 남길 index 목록과 새 키 배열 두 번 할당한다 — 둘 다 본다).
+TEST(CurveEdit_PlainAllocationFailureLeavesCurveUnchanged) {
+    SystemAllocator system;
+    const PlainCurveKey keys[] = {{0.0f, 0.0f}, {1.0f, 1.0f}, {2.0f, 2.0f}, {3.0f, 5.0f}};
+    using Operation = Result<void> (*)(PlainCurve&, PlainCurve&);
+    const Operation operations[] = {
+        [](PlainCurve& curve, PlainCurve&) noexcept {
+            auto added = curve.TryAddKey(1.5f, 9.0f);
+            return added ? Result<void>::Success() : Result<void>::Failure(added.Error());
+        },
+        [](PlainCurve& curve, PlainCurve&) noexcept {
+            auto updated = curve.TryUpdateOrAddKey(1.5f, 9.0f);
+            return updated ? Result<void>::Success() : Result<void>::Failure(updated.Error());
+        },
+        [](PlainCurve& curve, PlainCurve&) noexcept {
+            const PlainCurveKey more[] = {{0.0f, 0.0f}, {1.0f, 1.0f}, {4.0f, 6.0f}};
+            return curve.TrySetKeys(more);
+        },
+        [](PlainCurve& curve, PlainCurve&) noexcept {
+            const usize picked[] = {0, 2};
+            return curve.TryShiftKeyTimes(picked, 0.25f);
+        },
+        [](PlainCurve& curve, PlainCurve&) noexcept { return curve.TryBake(0.25f); },
+        [](PlainCurve& curve, PlainCurve&) noexcept {
+            return curve.TryRemoveRedundantKeys(1.0e-4f);
+        },
+        [](PlainCurve& curve, PlainCurve&) noexcept {
+            return curve.TryRemoveRedundantKeys(1.0e-4f, 0.5f, 2.5f);
+        },
+        [](PlainCurve& curve, PlainCurve& other) noexcept { return curve.TryCopyFrom(other); },
+    };
+    for (const Operation operation : operations) {
+        uint32 injected = 0;
+        for (uint64 attempt = 1; attempt <= 8; ++attempt) {
+            test::NFailAllocator failing(system);
+            PlainCurve curve(failing);
+            REQUIRE(curve.TrySetKeys(keys));
+            PlainCurve other(system);
+            REQUIRE(other.TryAddKey(7.0f, 7.0f));
+            failing.FailOnAttempt(attempt); // 시도 수는 여기서 0부터 센다
+            const Result<void> result = operation(curve, other);
+            failing.DisableFailure();
+            if (!result) {
+                ++injected;
+                CHECK(result.Error() == ErrorCode::OutOfMemory);
+                REQUIRE(curve.KeyCount() == 4);
+                for (usize index = 0; index < 4; ++index) {
+                    CHECK(curve.Keys()[index].time == keys[index].time &&
+                          curve.Keys()[index].value == keys[index].value);
+                }
+            }
+        }
+
+        CHECK(injected >= 1);
+    }
+}
+
+// 중복 키 제거는 차가 NaN인 키(NaN 값)를 남긴다(UE `>` 비교는 지운다 — CV5 리뷰 4). 표본판은
+// 프레임 번호가 int32 끝에 닿으면 표본을 멈추고(UE는 감싸 돌아 끝나지 않는다), 호출 하나의 표본이
+// 2^24개를 넘으면 CapacityExceeded이고 그대로다.
+TEST(CurveEdit_RedundantKeyEdgeCases) {
+    SystemAllocator allocator;
+    const float nan = platform::PlatformMath::QuietNaN<float>();
+    TangentCurve curve(allocator);
+    const TangentCurveKey keys[] = {Key(0.0f, 0.0f), Key(1.0f, nan), Key(2.0f, 2.0f)};
+    REQUIRE(curve.TrySetKeys(keys));
+    REQUIRE(curve.TryRemoveRedundantKeys(1.0e-4f));
+    CHECK(curve.KeyCount() == 3);
+    REQUIRE(curve.TryRemoveRedundantKeys(1.0e-4f, FrameRate::TryCreate(30, 1).Value()));
+    CHECK(curve.KeyCount() == 3);
+    PlainCurve plain(allocator);
+    const PlainCurveKey plainKeys[] = {{0.0f, 0.0f}, {1.0f, nan}, {2.0f, 2.0f}};
+    REQUIRE(plain.TrySetKeys(plainKeys));
+    REQUIRE(plain.TryRemoveRedundantKeys(1.0e-4f));
+    CHECK(plain.KeyCount() == 3);
+
+    // 30fps에서 7.158e7초는 프레임 2,147,400,000, 그 뒤 키는 int32 끝으로 잘린다.
+    TangentCurve far(allocator);
+    const TangentCurveKey farKeys[] = {Key(7.158e7f, 0.0f), Key(8.0e7f, 0.0f), Key(1.0e8f, 0.0f)};
+    REQUIRE(far.TrySetKeys(farKeys));
+    REQUIRE(far.TryRemoveRedundantKeys(1.0e-4f, FrameRate::TryCreate(30, 1).Value()));
+    CHECK(far.KeyCount() == 2);
+
+    // 1000fps × 2만 초 = 2천만 표본(> 2^24).
+    TangentCurve wide(allocator);
+    const TangentCurveKey wideKeys[] = {Key(0.0f, 0.0f), Key(1.0e4f, 1.0f), Key(2.0e4f, 2.0f)};
+    REQUIRE(wide.TrySetKeys(wideKeys));
+    CHECK(ErrorOf(wide.TryRemoveRedundantKeys(1.0f, FrameRate::TryCreate(1000, 1).Value())) ==
+          ErrorCode::CapacityExceeded);
+    CHECK(wide.KeyCount() == 3);
 }
 
 // PlainCurve 편집은 TangentCurve와 같은 규칙이다(대표 연산). 중복 키 제거는 UE FSimpleCurve

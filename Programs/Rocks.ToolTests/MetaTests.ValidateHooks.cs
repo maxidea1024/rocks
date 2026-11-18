@@ -95,7 +95,7 @@ internal static partial class MetaTests
             string generated = Compact(File.ReadAllText(probe.Output));
             Verify.That(generated.Contains("staticconstexprboolHasValidateSelf=true;", StringComparison.Ordinal), "alias spelling hook detected");
         });
-        // consteval 판정은 주석을 걷어낸 원문으로 한다(CV4 리뷰 6): 바로 앞 줄·블록 주석의 낱말 `consteval`은 정상 hook을 거부하지 않는다.
+        // consteval 판정은 주석을 걷어낸 원문으로 한다(CV4 리뷰 6): 바로 앞 줄·블록 주석의 낱말 `consteval`은 정상 hook을 거부하지 않는다(숫자 구분자 `1'000` 뒤의 주석도 — CV5 리뷰 10).
         // 중첩 struct의 별칭은 바깥 struct의 별칭 철자 풀이를 지우지 않는다(중첩 선언은 바깥 멤버 순회가 끝난 뒤 처리된다).
         suite.Add("Meta.ValidateHookIgnoresCommentsAndNestedAliases", async () =>
         {
@@ -103,6 +103,7 @@ internal static partial class MetaTests
             await probe.GenerateAsync(ValidateSource("using Self = Range;\n" +
                 "ROCKS_STRUCT()\nstruct Inner {\nusing Self = Inner;\nROCKS_PROPERTY() rocks::int32 n = 0;\n" +
                 "static rocks::Result<void> Validate(const Self&) noexcept { return rocks::Result<void>::Success(); }\n};\n" +
+                "static constexpr rocks::int32 Big = 1'000; // the separator must not open a character literal (consteval)\n" +
                 "// must not be consteval\n" +
                 "/* nor consteval */ static rocks::Result<void> Validate(const Self& value) noexcept { return value.low <= value.high ? " +
                 "rocks::Result<void>::Success() : rocks::Result<void>::Failure(rocks::ErrorCode::InvalidArgument); }\n"));

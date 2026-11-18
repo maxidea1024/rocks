@@ -373,7 +373,7 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
     }
 
     // C++ 원문에서 주석(`//`·`/* */`)을 공백으로 바꾼 사본이다(줄바꿈과 byte 위치는 그대로). 문자열·문자 상수 안의 `//`는 주석이 아니다
-    // (raw 문자열은 일반 문자열처럼 본다 — 선언 앞 지정자 판정에는 충분하다).
+    // (raw 문자열은 일반 문자열처럼 본다 — 선언 앞 지정자 판정에는 충분하다). 숫자 구분자 `1'000`의 `'`는 문자 상수가 아니다(IsDigitSeparator).
     private static byte[] WithoutComments(byte[] source)
     {
         byte[] result = (byte[])source.Clone();
@@ -418,6 +418,12 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                 continue;
             }
 
+            if (current == (byte)'\'' && IsDigitSeparator(result, index))
+            {
+                ++index;
+                continue;
+            }
+
             if (current == (byte)'"' || current == (byte)'\'')
             {
                 ++index;
@@ -434,6 +440,26 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
         }
 
         return result;
+    }
+
+    // index의 `'`가 숫자 구분자(1'000·0xFF'FF)인지다: 앞이 수 토큰(숫자로 시작해 영숫자·`_`·`'`·`.`로 이어지는 토큰)의 영숫자이고 뒤도
+    // 영숫자다. u8'a'처럼 문자로 시작하는 토큰 뒤의 `'`는 문자 상수다.
+    private static bool IsDigitSeparator(byte[] source, int index)
+    {
+        static bool IsWord(byte value) => value is >= (byte)'0' and <= (byte)'9' or >= (byte)'a' and <= (byte)'z' or >= (byte)'A' and <= (byte)'Z' or (byte)'_';
+
+        if (index == 0 || index + 1 >= source.Length || !IsWord(source[index - 1]) || !IsWord(source[index + 1]))
+        {
+            return false;
+        }
+
+        int start = index - 1;
+        while (start > 0 && (IsWord(source[start - 1]) || source[start - 1] == (byte)'\'' || source[start - 1] == (byte)'.'))
+        {
+            --start;
+        }
+
+        return source[start] is >= (byte)'0' and <= (byte)'9';
     }
 
     // 노드 타입의 Clang 정규 철자다(별칭은 desugar한 철자). CompilerDriver가 Binds 별칭을 풀 때도 쓴다.
