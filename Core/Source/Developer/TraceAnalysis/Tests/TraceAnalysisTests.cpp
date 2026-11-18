@@ -1,11 +1,15 @@
 #include "TraceTestWriter.h"
 
 #include <TestSupport/Test.h>
+#include <Core/Diagnostics/Correlation.h>
+#include <Core/Diagnostics/Log.h>
+#include <Core/Diagnostics/LogSystem.h>
 #include <TraceAnalysis/TraceModel.h>
 #include <TraceAnalysis/TraceReport.h>
 #include <TraceCapture/Tests/TraceCaptureTestSupport.h>
 #include <TraceCapture/TraceCounter.h>
 #include <TraceCapture/TraceCpuScope.h>
+#include <TraceCapture/TraceLogSink.h>
 
 // TR4 분석 시험이다(Docs/Design/TraceSystem.ko.md 10절). 입력은 tick·순서·형 id를 정한 writer로
 // 만들어 golden report와 byte 단위로 비교하고, 실제 세션 capture로 결정성과 손상 입력(OB03)을
@@ -687,4 +691,80 @@ TEST(TraceAnalysisHandlesMidSessionAttachDeterministically) {
 
         CHECK(sawAfter);
     }
+}
+
+namespace {
+
+constexpr LogCategory LogAnalysisTests{"Tests.Analysis"};
+constexpr LogCategory LogTraceWriterTests{"Trace.Writer"};
+
+} // namespace
+
+// TraceLogSink가 채널 "log"가 켜진 동안의 기록을 남기고, 분석이 순서·스레드·상관 id·spec을
+// 되살린다. 채널이 꺼진 동안의 기록과 trace 자신의 카테고리("Trace.*")는 남지 않는다. spec은
+// EventId당 한 번이다.
+TEST(TraceAnalysisReadsLogRecords) {
+    SystemAllocator allocator;
+    MemoryOutput output(allocator);
+    TraceSession session;
+    TraceSessionSettings settings;
+    settings.allocator = &allocator;
+    settings.writerMode = TraceWriterMode::Manual;
+    REQUIRE(session.Start(settings));
+    REQUIRE(session.AttachCallbackOutput(&MemoryOutput::Write, &output));
+    LogSystemConfig config;
+    config.mode = LogMode::Manual;
+    config.globalMinimum = LogLevel::Trace;
+    LogSystem logs(allocator, config);
+    TraceLogSink sink;
+    REQUIRE(logs.AddSink(sink));
+    REQUIRE(logs.Start());
+    {
+        LogInstallScope installed(logs);
+        Log::Info(LogAnalysisTests, "before channel {Value}", 0);
+        CHECK(logs.Pump() == 1);
+        REQUIRE(session.SetChannelEnabled(TraceLogChannel, true));
+        {
+            CorrelationScope request(CorrelationIds{0, 0, 0, 0, 55});
+            for (uint32 index = 0; index < 3; ++index) {
+                Log::Info(LogAnalysisTests, "value {Value}", index);
+            }
+        }
+
+        Log::Warning(LogAnalysisTests, "warned {Value}", 7);
+        Log::Warning(LogTraceWriterTests, "skipped {Value}", 1);
+        CHECK(logs.Pump() == 5);
+    }
+
+    logs.Stop();
+    session.Stop();
+    CHECK(sink.Lost() == 0);
+
+    TraceModel model(allocator);
+    REQUIRE(model.Build(output.bytes.View()));
+    REQUIRE(model.Logs().Size() == 4);
+    CHECK(model.LogSpecs().Size() == 2);
+    const uint64 thread = platform::CurrentThreadId();
+    for (usize index = 0; index < 3; ++index) {
+        const TraceModelLog& log = model.Logs()[index];
+        CHECK(log.thread == thread);
+        CHECK(log.level == static_cast<uint8>(LogLevel::Info));
+        CHECK(log.correlation[4] == 55);
+        CHECK(index == 0 || log.tick >= model.Logs()[index - 1].tick);
+    }
+
+    CHECK(model.Logs()[0].message == StringView("value 0"));
+    CHECK(model.Logs()[2].message == StringView("value 2"));
+    const TraceModelLog& warning = model.Logs()[3];
+    CHECK(warning.message == StringView("warned 7") && warning.correlation[4] == 0);
+    const TraceModelLogSpec* spec = model.FindLogSpec(warning.eventId);
+    REQUIRE(spec != nullptr);
+    CHECK(spec->category == StringView("Tests.Analysis"));
+    CHECK(spec->templateText == StringView("warned {Value}"));
+
+    Array<uint8> report(allocator);
+    REQUIRE(Report(allocator, output.bytes.View(), report));
+    CHECK(View(report).Contains("\"Warning\": 1", StringComparison::CaseSensitive) ||
+          View(report).Contains("\"Warning\":1", StringComparison::CaseSensitive));
+    CHECK(View(report).Contains("warned 7", StringComparison::CaseSensitive));
 }

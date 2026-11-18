@@ -325,6 +325,12 @@ Log::Info(LogNet, "Request accepted");
 - 출력: 레이아웃 토큰 `{Correlation}`(`session=3 task=1842`, 0인 칸은 뺌), JSON lines `corr` 객체. 기본 콘솔 레이아웃에는 넣지 않았다.
 - trace와 같은 스택이다(`TraceContextScope`는 별칭 래퍼). task(`WorkerScheduler`)와 `DedicatedLane::Post`는 trace 채널과 무관하게 상관 id를 넘긴다. lane 작업이 끝나면 lane 스레드의 스택은 원래 깊이로 돌아온다.
 
+## trace로 보내기
+
+- `TraceLogSink`(TraceCapture)를 trace 세션 시작 뒤 `LogSystem::AddSink`로 더하고, `TraceSession::Stop` 전에 `RemoveSink`로 뺀다. 채널 `log`(기본 묶음 `default`에 있다)가 켜져 있을 때만 `Trace.LogMessageSpec`·`Trace.LogMessage`를 쓴다.
+- 카테고리 `Trace`·`Trace.*` 기록과 세션이 없을 때의 기록은 보내지 않는다. 메시지는 1024 byte까지다.
+- `trace-report`에 `logs`(레벨별 수, Warning 이상 목록)가 나온다.
+
 ## 시험에서 쓰기
 
 - `LogMode::Manual` LogSystem과 캡처 sink를 시험 안에서 `LogInstallScope`로 설치한다. 기록한 뒤 `Pump()`를 부르고 단언한다. sleep을 쓰지 않는다.
@@ -333,4 +339,4 @@ Log::Info(LogNet, "Request accepted");
 
 ## 아직 구현되지 않은 것
 
-- TraceCapture `log` 채널 연결, 구조체 펼치기(`{@Obj}`): 후속
+- 구조체 펼치기(`{@Obj}`): 후속(GC 세션 병합 뒤)

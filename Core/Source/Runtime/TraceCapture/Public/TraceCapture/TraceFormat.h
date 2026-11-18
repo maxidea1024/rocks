@@ -315,6 +315,31 @@ struct TraceStandardFormat {
     // 스레드 문맥 스택의 깊이 상한이다. 넘친 쌓기는 스택에 들어가지 않고 기록도 하지 않는다.
     static constexpr usize MaxContextDepth = 16;
 
+    // ---- 로그(로깅 LG15, 채널 "log") ----
+    // LogMessageSpec(정의): u64 EventId | u32 줄 | u8 레벨, 가변: 카테고리(String) | 템플릿(String)
+    // | 파일(String) | 함수(String). 세션마다 EventId당 한 번이다.
+    static constexpr const char* LogMessageSpecType = "Trace.LogMessageSpec";
+    static constexpr usize LogSpecEventIdOffset = 0;
+    static constexpr usize LogSpecLineOffset = 8;
+    static constexpr usize LogSpecLevelOffset = 12;
+    static constexpr usize LogSpecFixedBytes = 13;
+    // LogMessage(스레드 스트림, 순서 번호): u64 캡처 tick | u64 생산자 OS 스레드 id | u64 프레임 |
+    // u64 EventId | u64 × 5 상관 id(세션·task·에셋·entity·요청, 없으면 0) | u32 LogEventFlags | u8
+    // 레벨 | u8 상관 id 마스크(0이 아닌 칸) | u8 trace 쪽 잘림(1이면 메시지를 잘랐다), 가변: 렌더된
+    // 메시지(String). tick은 로그 캡처 tick 그대로다(같은 원천, 변환 없음).
+    static constexpr const char* LogMessageType = "Trace.LogMessage";
+    static constexpr usize LogMessageTickOffset = 0;
+    static constexpr usize LogMessageThreadOffset = 8;
+    static constexpr usize LogMessageFrameOffset = 16;
+    static constexpr usize LogMessageEventIdOffset = 24;
+    static constexpr usize LogMessageCorrelationOffset = 32;
+    static constexpr usize LogMessageFlagsOffset =
+        LogMessageCorrelationOffset + ContextValueCount * sizeof(uint64);
+    static constexpr usize LogMessageLevelOffset = LogMessageFlagsOffset + sizeof(uint32);
+    static constexpr usize LogMessageCorrelationMaskOffset = LogMessageLevelOffset + 1;
+    static constexpr usize LogMessageTruncatedOffset = LogMessageCorrelationMaskOffset + 1;
+    static constexpr usize LogMessageFixedBytes = LogMessageTruncatedOffset + 1;
+
     // ---- task(TR3) ----
     // Task(스레드 스트림, 순서 번호): u64 tick | u64 task id | u64 관련 task id | u8 사건 종류,
     // 가변: 오류 이름(String, Completed의 실패만, 그 밖에는 빈 문자열).

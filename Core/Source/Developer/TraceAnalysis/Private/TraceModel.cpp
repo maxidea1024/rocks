@@ -27,6 +27,8 @@ struct TypeIds {
     uint16 gpuFrame = TraceFormat::InvalidTypeId;
     uint16 snapshotSync = TraceFormat::InvalidTypeId;
     uint16 stats = TraceFormat::InvalidTypeId;
+    uint16 logSpec = TraceFormat::InvalidTypeId;
+    uint16 logMessage = TraceFormat::InvalidTypeId;
 };
 
 uint16 FindType(const TraceStreamDecoder& decoder, const char* name) noexcept {
@@ -49,6 +51,8 @@ TypeIds ResolveTypes(const TraceStreamDecoder& decoder) noexcept {
     ids.gpuFrame = FindType(decoder, Format::GpuFrameType);
     ids.snapshotSync = FindType(decoder, "Trace.SnapshotSync");
     ids.stats = FindType(decoder, Format::StatsType);
+    ids.logSpec = FindType(decoder, Format::LogMessageSpecType);
+    ids.logMessage = FindType(decoder, Format::LogMessageType);
     return ids;
 }
 
@@ -88,7 +92,18 @@ uint64 TraceTicksToNanoseconds(uint64 ticks, uint64 frequency) noexcept {
 TraceModel::TraceModel(Allocator& allocator) noexcept
     : allocator_(&allocator), decoder_(allocator), threads_(allocator), tasks_(allocator),
       edges_(allocator), counters_(allocator), channelLosses_(allocator), gpuQueues_(allocator),
-      gpuScopes_(allocator), gpuFrames_(allocator), names_(allocator) {
+      gpuScopes_(allocator), gpuFrames_(allocator), logSpecs_(allocator), logs_(allocator),
+      names_(allocator) {
+}
+
+const TraceModelLogSpec* TraceModel::FindLogSpec(uint64 eventId) const noexcept {
+    for (const TraceModelLogSpec& spec : logSpecs_) {
+        if (spec.eventId == eventId) {
+            return &spec;
+        }
+    }
+
+    return nullptr;
 }
 
 StringView TraceModel::ScopeName(uint32 id) const noexcept {
@@ -223,6 +238,22 @@ Result<void> TraceModel::ReadDefinitions() noexcept {
             if (record.variableCount >= 2) {
                 thread->name = TextOf(record.variable[0]);
                 thread->group = TextOf(record.variable[1]);
+            }
+        } else if (record.typeId == types.logSpec && record.variableCount == 4 &&
+                   Covers(record, 0, Format::LogSpecFixedBytes)) {
+            const uint64 eventId = ReadFixed<uint64>(record, Format::LogSpecEventIdOffset);
+            if (FindLogSpec(eventId) == nullptr) {
+                TraceModelLogSpec spec;
+                spec.eventId = eventId;
+                spec.line = ReadFixed<uint32>(record, Format::LogSpecLineOffset);
+                spec.level = ReadFixedByte(record, Format::LogSpecLevelOffset);
+                spec.category = TextOf(record.variable[0]);
+                spec.templateText = TextOf(record.variable[1]);
+                spec.file = TextOf(record.variable[2]);
+                spec.function = TextOf(record.variable[3]);
+                if (!logSpecs_.TryPushBack(spec)) {
+                    return Result<void>::Failure(ErrorCode::OutOfMemory);
+                }
             }
         } else if (record.typeId == types.scopeName && record.variableCount == 1 &&
                    Covers(record, 0, Format::ScopeNameFixedBytes)) {
@@ -397,6 +428,26 @@ Result<void> TraceModel::ReadThread(uint16 stream, Array<OrderedEvent>& ordered)
             if (!ordered.TryPushBack(event)) {
                 return Result<void>::Failure(ErrorCode::OutOfMemory);
             }
+        } else if (record.typeId == types.logMessage && record.hasOrder &&
+                   record.variableCount == 1 && Covers(record, 0, Format::LogMessageFixedBytes)) {
+            TraceModelLog log;
+            log.order = record.order;
+            log.tick = ReadFixed<uint64>(record, Format::LogMessageTickOffset);
+            log.thread = ReadFixed<uint64>(record, Format::LogMessageThreadOffset);
+            log.frame = ReadFixed<uint64>(record, Format::LogMessageFrameOffset);
+            log.eventId = ReadFixed<uint64>(record, Format::LogMessageEventIdOffset);
+            for (usize index = 0; index < Format::ContextValueCount; ++index) {
+                log.correlation[index] = ReadFixed<uint64>(
+                    record, Format::LogMessageCorrelationOffset + index * sizeof(uint64));
+            }
+
+            log.flags = ReadFixed<uint32>(record, Format::LogMessageFlagsOffset);
+            log.level = ReadFixedByte(record, Format::LogMessageLevelOffset);
+            log.truncated = ReadFixedByte(record, Format::LogMessageTruncatedOffset) != 0;
+            log.message = TextOf(record.variable[0]);
+            if (!logs_.TryPushBack(log)) {
+                return Result<void>::Failure(ErrorCode::OutOfMemory);
+            }
         } else if (record.typeId == types.mark) {
             ++summary_.marks;
         } else if (record.typeId == types.gpuScope &&
@@ -552,6 +603,11 @@ Result<void> TraceModel::Build(Span<const uint8> bytes) noexcept {
     if (auto merged = MergeOrdered(ordered); !merged) {
         return merged;
     }
+
+    // 로그는 여러 스레드 스트림(로그 출력 스레드가 바뀔 수 있다)에서 모았으므로 순서 번호로 맞춘다.
+    logs_.Sort([](const TraceModelLog& left, const TraceModelLog& right) noexcept {
+        return left.order < right.order;
+    });
 
     // 이름 정의가 없는 구간 이름 id를 센다(같은 id는 한 번).
     Array<uint32> missing(*allocator_);

@@ -767,6 +767,8 @@ extern TraceEventType TraceContextPushType;
 extern TraceEventType TraceContextPopType;
 extern TraceEventType TraceTaskEventType;
 extern TraceEventType TraceStatsType;
+extern TraceEventType TraceLogMessageSpecType;
+extern TraceEventType TraceLogMessageType;
 
 // 표준 채널(꺼진 상태로)과 표준 형을 등록한다.
 Result<void> RegisterStandardTraceTypes(TraceSession& session) noexcept;
