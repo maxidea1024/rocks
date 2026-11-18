@@ -137,6 +137,11 @@ public:
         return added_ != nullptr;
     }
 
+    // 게시 전 원소 블록을 바꾸는 연산이 시작됐음을 준비물에 알린다(추가 원소 검증 표시를 내린다 —
+    // ValidateAdded 뒤에 AddedTarget으로 쓴 변경도 게시 전에 다시 검증된다). 블록이 아니면 아무것도
+    // 하지 않는다.
+    void MarkAddedElementWritten() noexcept;
+
     // 게시 전 원소 블록 안의 강한 참조 멤버 field에 쓰기 입력(Input()의 reference)을 직접
     // 쓴다(리플렉션 B9i5). 대상의 생존·스키마 기대 타입은 검증 지점이 이미 봤고 여기서는 C++ 대상
     // 타입을 대조한다 (CheckWeakTarget). field가 시작 위치 블록 밖이면 InvalidArgument다. 간선은
@@ -469,6 +474,9 @@ private:
     // 위에서 연산하고 검증한 뒤 게시한다.
     bool redirectHooks_ = false;
     usize hookStep_ = IndexNone;
+    // 끝 단계가 Set 원소(키 단계)인지다. 상자 경로가 InsertKey의 "바뀐 것 없음"(이미 있는 Set
+    // 원소)과 Map 값 초기화(이미 있는 키를 기본 값으로)를 가른다.
+    bool setElement_ = false;
 };
 
 } // namespace rocks::detail

@@ -18,7 +18,7 @@ public abstract class TestsModule : ModuleRules
     private static readonly string[] DeveloperTestModules = ["CompressionTraining", "TraceAnalysis"];
 
     // Tests of Object family modules (included in FoundationTests and EngineTests).
-    private static readonly string[] ObjectTestModules = ["ObjectRuntime", "ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig"];
+    private static readonly string[] ObjectTestModules = ["ObjectRuntime", "ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Curves"];
 
     // Tests of engine layer modules (EngineTests only). Paths are Group/Module under Engine/Source.
     private static readonly string[] EngineTestModules = ["Runtime/Input", "Runtime/PlatformWindow", "Runtime/World", "Runtime/Engine", "Runtime/GraphicsTypes", "Runtime/Graphics", "Runtime/RenderBase", "Runtime/RenderGraph", "Runtime/AssetRuntime", "Developer/AssetTools", "Developer/ShaderToolTable", "Developer/ShaderToolLoader", "Developer/ShaderCompiler", "Developer/ShaderFormatVulkan", "Runtime/VulkanGraphics"];
@@ -66,14 +66,14 @@ public abstract class TestsModule : ModuleRules
                 .. EngineTestDependencies]
         };
 
-        // Object family tests depend on the reflection fixture module (config layer tests on ConfigTestFixtures). Generated headers (<ReflectionTestFixtures/*.generated.h>)
+        // Object family tests depend on the reflection fixture module (config layer tests on ConfigTestFixtures, curve tests on CurvesTestFixtures). Generated headers (<ReflectionTestFixtures/*.generated.h>)
         // propagate through that module's public includes. Engine layer tests also depend on the World reflection fixture (WorldTestFixtures: save and path
         // test types that derive from World types).
         string[] fixtures = Layer switch
         {
             TestLayer.Core => [],
-            TestLayer.Foundation => ["ReflectionTestFixtures", "ConfigTestFixtures"],
-            _ => ["ReflectionTestFixtures", "ConfigTestFixtures", "WorldTestFixtures"]
+            TestLayer.Foundation => ["ReflectionTestFixtures", "ConfigTestFixtures", "CurvesTestFixtures"],
+            _ => ["ReflectionTestFixtures", "ConfigTestFixtures", "CurvesTestFixtures", "WorldTestFixtures"]
         };
         return new()
         {

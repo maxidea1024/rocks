@@ -3,6 +3,13 @@
   "entries": [
     {
       "kind": "field",
+      "name": "rocks::config_fixture::BlobSettings::blob",
+      "id": "cb89c399a8ca43d18b6afac4cef9b1b1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::config_fixture::FixtureLayer::names",
       "id": "25838aedc8ff42468bd3d565a157a68f",
       "aliases": [],
@@ -201,6 +208,13 @@
       "kind": "field",
       "name": "rocks::config_fixture::SpanSettings::span",
       "id": "0405a45113a3430d9052d2f1dd058692",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::config_fixture::BlobSettings",
+      "id": "3ae497ae5d26415291f2a6db47ec0e90",
       "aliases": [],
       "retired": false
     },

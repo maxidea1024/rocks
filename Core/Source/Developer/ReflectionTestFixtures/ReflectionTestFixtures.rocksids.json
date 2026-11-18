@@ -755,6 +755,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::BytesHolder::any",
+      "id": "bd7371f9ca2543019cd5e29ae5b82606",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::BytesHolder::blob",
       "id": "ef80fd9bbfab43b09153536f0c52d619",
       "aliases": [],
@@ -769,8 +776,22 @@
     },
     {
       "kind": "field",
+      "name": "rocks::reflection_fixture::BytesHolder::byKey",
+      "id": "c2fa90093668447fa5ebbcefffcb99d7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::reflection_fixture::BytesHolder::fixed",
       "id": "5dc49b002c7b4bc6b910ecef9de18f13",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::reflection_fixture::BytesHolder::maybe",
+      "id": "3d89f376abe74c338edf9f6164294dd2",
       "aliases": [],
       "retired": false
     },

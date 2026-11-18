@@ -17,7 +17,7 @@
   "stages": ["vertex", "pixel", "compute"],
   "limits": {
     "constantBuffers": 13,
-    "sampledTextures": 128,
+    "sampledTextures": 16,
     "storageBuffers": 128,
     "storageImages": 8,
     "samplers": 16,

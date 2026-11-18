@@ -2,6 +2,7 @@
 #include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/NamePool.h>
+#include <Core/Text/String.h>
 #include <Object/ModuleRegistration.h>
 #include <Object/PropertyPath.h>
 #include <ReflectionText/TextAssignments.h>
@@ -241,4 +242,81 @@ TEST(TextBytes_JsonUsesBase64) {
     fixture.With(copy.Handle(), [](BytesHolder& value) noexcept {
         CHECK(value.plain == 3 && value.payload.Size() == 5);
     });
+}
+
+namespace {
+
+// size 바이트를 넘는 할당을 거부하는 allocator다(긴 텍스트 값이 큰 버퍼를 먼저 잡는지 본다).
+class CappedAllocator final : public Allocator {
+public:
+    CappedAllocator(Allocator& inner, usize limit) noexcept : inner_(inner), limit_(limit) {
+    }
+
+    Result<void*> Allocate(usize bytes, usize alignment, uint32 tag = 0) noexcept override {
+        if (bytes > limit_) {
+            return Result<void*>::Failure(ErrorCode::OutOfMemory);
+        }
+
+        return inner_.Allocate(bytes, alignment, tag);
+    }
+
+    Result<void> Deallocate(void* address) noexcept override {
+        return inner_.Deallocate(address);
+    }
+
+private:
+    Allocator& inner_;
+    usize limit_;
+};
+
+} // namespace
+
+// 원소 수 한도는 풀기·할당 전에 길이와 패딩으로 본다(CV4 리뷰 5): MaxElements 8인 small에 300,000자
+// Base64(225,000 byte)를 주면, 대상 allocator가 64 KiB 넘는 할당을 거부해도 OutOfMemory가 아니라
+// OutOfRange 진단이다. 길이가 4의 배수가 아닌 입력은 할당 없이 InvalidValue다.
+TEST(TextBytes_LengthIsCheckedBeforeDecoding) {
+    SystemAllocator system;
+    CappedAllocator capped(system, 64 * 1024);
+    TypeRegistry types(system);
+    ModuleRegistration registration(types, system);
+    REQUIRE(generated::ReflectionTestFixtures::RegisterModuleTypes(registration));
+    {
+        ObjectRegistry objects(capped, types, {0x5443, 1});
+        const ObjectAccessContext access = objects.OwnerAccess();
+        auto created = objects.NewObject<BytesHolder>(access, TypeIdOf<BytesHolder>());
+        REQUIRE(created);
+        RootRef<BytesHolder> holder = Move(created.Value());
+        String json(system);
+        REQUIRE(json.TryAppend("{\"small\": \""));
+        for (int32 index = 0; index < 300000; ++index) {
+            REQUIRE(json.TryAppend("A"));
+        }
+
+        REQUIRE(json.TryAppend("\"}"));
+        JsonDocument document(system);
+        REQUIRE(document.Parse(json.View()).Succeeded());
+        TextDiagnostics diagnostics(system);
+        TextCodecOptions options;
+        auto imported =
+            ImportJson(document.Root(), AssignmentTarget::Live(objects, access, holder.Handle()),
+                       options, diagnostics);
+        CHECK(!imported && imported.Error() != ErrorCode::OutOfMemory);
+        CHECK(diagnostics.Count() >= 1 &&
+              diagnostics.Get(0).code == TextDiagnosticCode::OutOfRange);
+
+        diagnostics.Clear();
+        JsonDocument odd(system);
+        REQUIRE(odd.Parse("{\"small\": \"AAAAA\"}").Succeeded());
+        auto rejected =
+            ImportJson(odd.Root(), AssignmentTarget::Live(objects, access, holder.Handle()),
+                       options, diagnostics);
+        CHECK(!rejected);
+        CHECK(diagnostics.Count() >= 1 &&
+              diagnostics.Get(0).code == TextDiagnosticCode::InvalidValue);
+        holder.Reset();
+        REQUIRE(objects.Shutdown(objects.OwnerAccess()));
+    }
+
+    CHECK(registration.Unregister());
+    CHECK(types.Shutdown());
 }

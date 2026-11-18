@@ -234,35 +234,25 @@ inline CurveCubicRoots SolveCurveCubic(const double (&coefficients)[4]) noexcept
 
 // ---- 두 키 사이 ----
 
-// 가중 접선 구간(k1, k2)의 time 값이다(UE UE::Curves::WeightedEvalForTwoKeys, CE 93–191). 시간 축과
-// 값 축이 모두 Bezier인 곡선에서 "시간 Bezier x(s) = time"의 근 s를 Cardano로
-// 구하고(SolveCurveCubic) 값 Bezier y(s)를 낸다.
-// - k1의 출발 가중치는 k1.tangentWeight가 Leave·Both일 때 k1.leaveTangentWeight, 아니면 구간 길이로
-//   만든 기본값 √(Δt² + (접선·Δt)²)/3이다. k2의 도착 가중치는 Arrive·Both일 때
-//   k2.arriveTangentWeight다.
-// - 키 시간은 double로 넓혀 시간 칸의 덧셈·뺄셈을 double로 계산한 뒤 float로 저장한다(UE와 같다 —
-// float로만
-//   계산하면 드물게 비트가 달라진다).
-// - 근이 1개면 그 근, 여럿이면 [0, 1](허용오차 1e-8) 안의 근을 UE 순서로 고른다(앞에서부터 보며
-// 고른
-//   값이 음수이거나 더 큰 근이 나오면 바꾼다). 없으면 0이다. UE와 달리 근이 2개일 때 채워지지 않은
-//   세 번째 칸을 읽지 않는다.
-// k2.time > k1.time이어야 뜻이 있다. 아니면(길이 0·NaN) EvalCurveSegment처럼 k1.value를 낸다.
-// 키의 보간 방식은 보지 않는다(호출자 EvalCurveSegment가 Cubic 구간에서만 부른다).
-//
-// 사용 예:
-//   const float value = math::WeightedCurveSegment(key1, key2, 0.25f);
-template <CurveSegmentKey Key>
-float WeightedCurveSegment(const Key& k1, const Key& k2, float time) noexcept {
-    const float difference = k2.time - k1.time;
-    if (!(difference > 0.0f)) {
-        return k1.value;
-    }
+// 가중 접선 구간(k1, k2)의 Bezier 제어점이다(UE WeightedEvalForTwoKeys CE 97–143의 앞부분 —
+// WeightedCurveSegment가 쓰는 값 그대로). 시간 축 제어점은 구간 [k1.time, k2.time]을 [0, 1]로
+// 정규화한 값이고 값 축 제어점은 그대로다. 곡선은 시간 x(s) = Bezier(0, normalizedX1, normalizedX2,
+// 1)(s), 값 y(s) = Bezier(k1.value, valueY1, valueY2, k2.value)(s)다(s ∈ [0, 1]).
+// - normalizedX1·valueY1: k1 출발 제어점, normalizedX2·valueY2: k2 도착 제어점.
+// k2.time > k1.time이어야 뜻이 있다(길이 0·NaN이면 정규화가 0 나눗셈이다 — 호출자가 먼저 거른다).
+// 값 범위 계산(Curves 모듈 TangentCurve::TryGetValueRange)이 Evaluate와 같은 곡선을 보려고 쓴다.
+struct CurveWeightedControls {
+    float normalizedX1 = 0.0f;
+    float normalizedX2 = 0.0f;
+    float valueY1 = 0.0f;
+    float valueY2 = 0.0f;
+};
 
-    const float alpha = (time - k1.time) / difference;
-    const float oneThird = 1.0f / 3.0f;
+template <CurveSegmentKey Key>
+CurveWeightedControls WeightedCurveControls(const Key& k1, const Key& k2) noexcept {
     const double time1 = k1.time;
     const double time2 = k2.time;
+    const float oneThird = 1.0f / 3.0f;
     const float x = static_cast<float>(time2 - time1);
 
     float sine;
@@ -303,6 +293,37 @@ float WeightedCurveSegment(const Key& k1, const Key& k2, float time) noexcept {
     const float dx2 = static_cast<float>(static_cast<double>(key2TangentX) - time1);
     const float normalizedX1 = dx1 / rangeX;
     const float normalizedX2 = dx2 / rangeX;
+    return {normalizedX1, normalizedX2, key1TangentY, key2TangentY};
+}
+
+// 가중 접선 구간(k1, k2)의 time 값이다(UE UE::Curves::WeightedEvalForTwoKeys, CE 93–191). 시간 축과
+// 값 축이 모두 Bezier인 곡선에서 "시간 Bezier x(s) = time"의 근 s를 Cardano로
+// 구하고(SolveCurveCubic) 값 Bezier y(s)를 낸다.
+// - k1의 출발 가중치는 k1.tangentWeight가 Leave·Both일 때 k1.leaveTangentWeight, 아니면 구간 길이로
+//   만든 기본값 √(Δt² + (접선·Δt)²)/3이다. k2의 도착 가중치는 Arrive·Both일 때
+//   k2.arriveTangentWeight다.
+// - 키 시간은 double로 넓혀 시간 칸의 덧셈·뺄셈을 double로 계산한 뒤 float로 저장한다(UE 꼴 그대로
+//   — float 두 값의 연산 한 번이라 float로 계산한 결과와 늘 같다, 설계 17.1절 K5). 제어점은
+//   WeightedCurveControls다.
+// - 근이 1개면 그 근, 여럿이면 [0, 1](허용오차 1e-8) 안의 근을 UE 순서로 고른다(앞에서부터 보며
+//   고른 값이 음수이거나 더 큰 근이 나오면 바꾼다). 없으면 0이다. UE와 달리 근이 2개일 때 채워지지
+//   않은 세 번째 칸을 읽지 않는다.
+// k2.time > k1.time이어야 뜻이 있다. 아니면(길이 0·NaN) EvalCurveSegment처럼 k1.value를 낸다.
+// 키의 보간 방식은 보지 않는다(호출자 EvalCurveSegment가 Cubic 구간에서만 부른다).
+//
+// 사용 예:
+//   const float value = math::WeightedCurveSegment(key1, key2, 0.25f);
+template <CurveSegmentKey Key>
+float WeightedCurveSegment(const Key& k1, const Key& k2, float time) noexcept {
+    const float difference = k2.time - k1.time;
+    if (!(difference > 0.0f)) {
+        return k1.value;
+    }
+
+    const float alpha = (time - k1.time) / difference;
+    const CurveWeightedControls controls = WeightedCurveControls(k1, k2);
+    const float normalizedX1 = controls.normalizedX1;
+    const float normalizedX2 = controls.normalizedX2;
 
     // Bezier(0, x1, x2, 1)를 멱 기저로 바꾼다(UE BezierToPower, CE 81–91 — double).
     const double powerA = static_cast<double>(normalizedX1) - 0.0;
@@ -338,7 +359,7 @@ float WeightedCurveSegment(const Key& k1, const Key& k2, float time) noexcept {
         }
     }
 
-    return BezierCurveValue(k1.value, key1TangentY, key2TangentY, k2.value,
+    return BezierCurveValue(k1.value, controls.valueY1, controls.valueY2, k2.value,
                             static_cast<float>(parameter));
 }
 

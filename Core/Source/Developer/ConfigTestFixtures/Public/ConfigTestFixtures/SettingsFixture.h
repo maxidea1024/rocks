@@ -47,6 +47,16 @@ struct SpanSettings {
     ROCKS_PROPERTY() FixtureSpan span;
 };
 
+// byte 배열 설정 섹션이다(기본 fixture에 등록하지 않는다 — 그 시험이 따로 등록한다). 값은 Base64
+// 문자열이고 배열 연산 객체는 InvalidArrayOperation이다(Docs/Design/CurveData.ko.md 17.3절 B5).
+ROCKS_STRUCT(Settings(Branch = "Render", Section = "BlobCheck"))
+struct BlobSettings {
+    explicit BlobSettings(Allocator& allocator) noexcept : blob(allocator) {
+    }
+
+    ROCKS_PROPERTY() Array<uint8> blob;
+};
+
 // 배열 원소 struct다(원소 안의 배열 연산은 지원하지 않는다 — UnsupportedOperation 시험).
 ROCKS_STRUCT()
 struct FixtureLayer {

@@ -117,8 +117,8 @@ public:
     // 멤버 struct의 hook이다). 추가 원소 안 대입은 블록에 바로 적용되므로 대입 묶음이 게시 전에
     // 부른다. 거부는 InvalidArgument이고 그 원소의 지금 index를 rejected에 둔다. 할당하지 않는다.
     // 게시 전 1회 계약: PreparePublish·staged Publish()가 아직 검증하지 않았으면 부르고, 대입
-    // 묶음은 진단 위치를 얻으려고 먼저 부른다(통과하면 Append·AddedTarget·Reset 전까지 다시 부르지
-    // 않는다). 묶지 않았으면 InvalidArgument다.
+    // 묶음은 진단 위치를 얻으려고 먼저 부른다(통과하면 Append·AddedTarget·Reset·블록 쓰기 전까지
+    // 다시 부르지 않는다). 묶지 않았으면 InvalidArgument다.
     Result<void> ValidateAdded(usize& rejected) noexcept;
 
     // 끝에 기본 원소 하나를 더한다(리플렉션 B9i5): 블록을 배열의 allocator로 할당해 기본 생성하고
@@ -233,7 +233,8 @@ private:
     uint32 revision_ = 0;
     // kept_ 안의 추가 원소 id 수다.
     usize addedKept_ = 0;
-    // 추가 원소를 ValidateAdded로 검증한 뒤 바꾸지 않았는지다(Append·AddedTarget·Reset이 내린다).
+    // 추가 원소를 ValidateAdded로 검증한 뒤 바꾸지 않았는지다(Append·AddedTarget·Reset과
+    // AddedTarget 시작 위치의 변경 연산이 내린다).
     bool addedValidated_ = false;
     // 남은 원소의 묶을 때 index(오름차순 — 추가 원소 id가 뒤에 온다)다.
     Array<uint32> kept_;

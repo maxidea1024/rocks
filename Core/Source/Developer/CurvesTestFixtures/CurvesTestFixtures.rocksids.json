@@ -1,0 +1,54 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::curves_fixture::CurveHolder::any",
+      "id": "a3b072cccd194104bc5970921bc6a8b0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::curves_fixture::CurveHolder::byKey",
+      "id": "cf6d4a5a12584dbbb1fa4914ef157f6d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::curves_fixture::CurveHolder::maybe",
+      "id": "f95c799e9dca464dbd9729851dd5602c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::curves_fixture::CurveHolder::plain",
+      "id": "111d76f464624ee08ca0883bdfce3234",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::curves_fixture::CurveHolder::tangent",
+      "id": "20cc97eeb3f24759a92e0417ab4dbafc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::curves_fixture::CurveHolder::tangents",
+      "id": "ab83f12438444a4f8b0975a54e426936",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::curves_fixture::CurveHolder",
+      "id": "0fdcfeb56d3448c4b0e3df6855d9b19c",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

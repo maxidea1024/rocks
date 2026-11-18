@@ -1,6 +1,6 @@
 # 머티리얼 시스템(MaterialSystem) 설계
 
-기준일: 2026-11-18, 개정 2(초안). [엔진 구현 계획](EngineImplementationPlan.ko.md) 14.1·14.4–14.9절의 머티리얼 요구를 구현 스펙으로 정한다. 범위는 다음과 같다.
+기준일: 2026-11-18, 개정 3(초안). [엔진 구현 계획](EngineImplementationPlan.ko.md) 14.1·14.4–14.9절의 머티리얼 요구를 구현 스펙으로 정한다. 범위는 다음과 같다.
 - 머티리얼 에셋 모델(머티리얼·인스턴스·함수·레이어·파라미터 컬렉션)과 쿠킹 데이터
 - 그래프 스키마, typed IR, IR에서 HLSL을 만드는 코드 생성
 - 퍼뮤테이션, 파라미터 layout과 상수 식, 인스턴스 override와 static 변형
@@ -473,7 +473,7 @@ pass 셰이더(.rsf, Renderer 스펙)                 MaterialCommon.rsh와 Vert
 | 5항 상수 버퍼 layout | `float4` 경계 정렬, 16 byte slot 안에 float·int·uint를 섞지 않음, 배열은 `float4` 배열, bool은 uint 비트. 머티리얼 컴파일러가 이 규칙으로 layout 표를 만들고, 워커가 리플렉션 오프셋과 대조한다 |
 | 6항 행렬 | 변환 노드는 `mul(v, M)`으로 내고 행렬은 행 우선 상수다 |
 | 7항 단계 사이 변수 | 머티리얼 보간 값은 pass가 준 기준 번호부터 `TEXCOORDn`을 이어 쓴다(n ≤ 15, GLES는 형식 상한). struct 멤버 순서는 n 오름차순이다 |
-| 9항 텍스처·샘플러 짝 | 텍스처 `MaterialTexture<k>`마다 `MaterialTexture<k>Sampler`를 낸다(짝 규칙 그대로, 결정 MD4). 공유 샘플러(16절 MSR13)가 생기면 텍스처 slot의 샘플러 출처(자기 샘플러·공유 Wrap·공유 Clamp, UE `ESamplerSourceMode`)로 고른다 |
+| 9항 텍스처·샘플러 짝 | 텍스처 `MaterialTexture<k>`마다 `MaterialTexture<k>Sampler`를 낸다(짝 규칙 그대로, 결정 MD4). 공유 샘플러(16절 MSR13)가 생기면 텍스처 slot의 샘플러 출처(자기 샘플러·공유 Wrap·공유 Clamp, UE `ESamplerSourceMode`)로 고른다. 공유 출처면 `MaterialTexture<k>Sampler`를 내지 않고 `SharedWrapSampler`·`SharedClampSampler`(셰이더 시스템 개정 13, 7.2절 9항)로 샘플링한다 |
 | 결정 7(경고) | 생성 원문도 경고 0이 기준이다. 생성기가 낸 경고는 생성기 버그로 본다 |
 
 **레이아웃 서명.** 머티리얼 상수 블록의 정규 layout 표(멤버 이름·타입·offset·크기, 텍스처·샘플러 순번)의 SHA-256이다. job 키 8항(셰이더 시스템 10절)에 들어가고, 쿠킹 셰이더 집합 항목에도 기록되어 실행 때 상수 블록 layout과 대조한다(RenderBase 9.3절·SX6 서명 검증과 같다).
@@ -1074,7 +1074,7 @@ UE 대조:
 
 | ID | 위치 | 요구 |
 |---|---|---|
-| MSR1 | 7.2절 4항(상한) | 머티리얼 pass 셰이더의 머티리얼 텍스처 예산 = (pass, 퍼뮤테이션, 형식)별 `형식 상한 − 렌더러 합계`(Renderer 7.4절, 결정 MD4). SRV 텍스처 상한은 프로필 공통 상한이 아니라 job 형식의 상한으로 검사하고, 워커 상한 검사 오류에 머티리얼·pass·퍼뮤테이션·형식을 담는다(Renderer RQ22 (2)) |
+| MSR1 | 7.2절 4항(상한) | 머티리얼 pass 셰이더의 머티리얼 텍스처 예산 = (pass, 퍼뮤테이션, 형식)별 `형식 상한 − 렌더러 합계`(Renderer 7.4절, 결정 MD4). SRV 텍스처 상한은 프로필 공통 상한이 아니라 job 형식의 상한으로 검사하고, 워커 상한 검사 오류에 머티리얼·pass·퍼뮤테이션·형식을 담는다(Renderer RQ22 (2)). **반영(셰이더 시스템 개정 13, 7.2절 4항)** |
 | MSR2 | 3절(셰이더 맵 키)·12.2절(조회 키) | 머티리얼 셰이더 집합 id를 키 축으로(8.6절). RenderBase SX5 묶음 id와 같은 값 |
 | MSR3 | 3절(가상 경로)·결정 6(전처리기) | `/Engine/Generated/Material.rsh`를 job마다 메모리 텍스트로 잇는 규칙(7.2절) |
 | MSR4 | 13절(P7)·15절 결정 4 | `ShaderParameterLayout`을 C++ 타입 없이도 만들 수 있는 데이터 형식으로(동적 layout, 결정 MD3). 셰이더 시스템 개정 12가 결정 4를 MetaCompiler 방식으로 확정하고 13절에 이 요구를 적었다 |
@@ -1085,8 +1085,8 @@ UE 대조:
 | MSR9 | 12.1절(형식 정의) | 기능 등급(Mobile·SM5·SM6) 속성과 기능 등급별 지원 shading model·노드 기능 표(V6·Capability Tier Switch 입력) |
 | MSR10 | 12.2·12.3절("없으면 `IncompatibleCook`") | 머티리얼 셰이더는 예외로 (머티리얼, 정점 입력 타입, pass) 조합 단위 기본 머티리얼 대체 + 진단(11.3절). 엔진 셰이더와 엔진 기본 머티리얼은 지금 규칙 그대로 |
 | MSR11 | 12.3절(`shader-compile --engine`) | 엔진 기본 머티리얼 에셋을 번역해 엔진 내장 라이브러리에 넣는 경로(11.3절) |
-| MSR12 | 12.1절(형식 정의 `limits`) | 결정 MD4·RN13 개정. `sampledTextures`를 형식별로: `D3D12_SM6`·`METAL_SM5` 128 유지, `VULKAN_SM5`는 넓히고 장치 요구(`maxPerStageDescriptorSampledImages`·`maxPerStageDescriptorSamplers` 하한)를 더함, `D3D11_SM5`는 128에서 16으로, GLES는 16 유지(Renderer RQ22 (1)과 같은 요구) |
-| MSR13 | 7.2절 9항(텍스처·샘플러 짝) | 머티리얼 텍스처 slot의 샘플러 출처(자기 샘플러·공유 Wrap·공유 Clamp)와 공유 샘플러를 후속에서 앞당김. 공유 샘플러가 없으면 넓힌 형식도 샘플러 16에 묶인다(Metal 장치 상한 16). GLES는 공유 샘플러 객체를 텍스처 유닛마다 묶어 combined sampler 규칙을 유지한다(Renderer RQ23과 같은 요구) |
+| MSR12 | 12.1절(형식 정의 `limits`) | 결정 MD4·RN13 개정. `sampledTextures`를 형식별로: `D3D12_SM6`·`METAL_SM5` 128 유지, `VULKAN_SM5`는 넓히고 장치 요구(`maxPerStageDescriptorSampledImages`·`maxPerStageDescriptorSamplers` 하한)를 더함, `D3D11_SM5`는 128에서 16으로, GLES는 16 유지(Renderer RQ22 (1)과 같은 요구). **반영(셰이더 시스템 개정 13)**: D3D11 16은 12.1절과 형식 정의에 들어갔고, Vulkan은 GX1 측정 뒤 |
+| MSR13 | 7.2절 9항(텍스처·샘플러 짝) | 머티리얼 텍스처 slot의 샘플러 출처(자기 샘플러·공유 Wrap·공유 Clamp)와 공유 샘플러를 후속에서 앞당김. 공유 샘플러가 없으면 넓힌 형식도 샘플러 16에 묶인다(Metal 장치 상한 16). GLES는 공유 샘플러 객체를 텍스처 유닛마다 묶어 combined sampler 규칙을 유지한다(Renderer RQ23과 같은 요구). **반영(셰이더 시스템 개정 13, 7.2절 9항)**: 예약 이름 `SharedWrapSampler`·`SharedClampSampler`, 텍스처마다 출처 하나, SH2와 함께 구현 |
 
 **렌더 기반(RenderBase.ko.md)**
 
@@ -1168,3 +1168,4 @@ UE 대조:
 |---|---|---|
 | 1(초안) | 2026-11-17 – 11-18 | 첫 작성. UE 5.8.4 조사(에셋 계층·파라미터·uniform expression·static 변형·컬렉션, 번역기 기본값과 IR 실험 상태, 템플릿 연결, 셰이더 맵 키·퍼뮤테이션·사용 플래그·품질, 비동기 컴파일·대체·미리보기, DDC·쿠킹, Substrate 기본 여부·Blendable/Adaptive·고전 경로 상태, 도메인·혼합·shading model 레거시 확인, 모바일·SM5 제약). 모듈 배치·에셋 모델·그래프 스키마·IR·코드 생성·퍼뮤테이션·파라미터·표면 모델·컴파일·쿠킹·backend 표·에디터 요구·단계·다른 문서 요구. 2026-11-18: 결정 MD1–MD9 확정(사용자 "권장안대로", MD4는 Renderer RN13에 맞춤), Renderer 개정 2(2dc9068) 14절 계약에 경계를 맞추고 다른 점을 10.4절에 정리, 교차 검증 리뷰 반영(셰이더 집합 id를 내용 hash로, 파라미터 기본값을 번역 키에서 제외, 사용 대상 유도를 cookKey 입력으로, 정점 입력 거르기의 장치 없는 위치, PinKey 정의, 의존 키 규칙, TextureStreaming 5.3 규칙, 요구 ID 접두어 `M`) |
 | 2(초안) | 2026-11-18 | Renderer 개정 2와 교차 검증해 두 문서를 맞췄다(10.4절을 "정합 결과" 표로). D1–D9 판단: WPO는 정점 함수, 번호표 C++ `RenderData`·HLSL `/Engine/Shared/`(순환 해소), `AlphaHoldout`은 Renderer 후속 값, 거르기 인자 `MaterialShaderTraits`, "static 변형" 용어, pass별 경로와 `RENDER_PATH_*`, depth·그림자 pass의 마스크 전용 함수, 영역 이름 유지. 사용자 결정 반영: MD4를 Renderer RN13과 함께 형식별 SRV 상한으로 개정(1·7.4·13·15·16·17절, MSR1·MSR12·MSR13), 셰이더 시스템 결정 4 확정(MetaCompiler 방식)을 MD3·15.1·MSR4에 반영. 그 밖의 수정: Render Path Switch의 깊이 일치 규칙 V15, 경로 전용 pass에 `DepthAux`, 노멀 공간 변환 위치, 노드 미리보기 pass 이름, MaterialCook 의존에 `RendererShaders`, 용어 통일("도메인" → "영역", "혼합 방식" → "블렌드 모드"), Renderer 단계(RS0·RS2·RS5)와의 선후(10.3·15.1절), MS-T6 허용 오차, MRD1–MRD12 처리 상태(16절) |
+| 3(초안) | 2026-11-18 | 셰이더 시스템 개정 13의 MSR1·MSR12·MSR13 반영 상태와 공유 출처일 때의 생성 규칙(13절 9항 대응)을 적었다 |

@@ -440,27 +440,41 @@ namespace detail {
 
 Result<bool> ParseByteList(TextCodecContext& context, const FieldSchema& field, StringView text,
                            TextSource source, StringView pathText, TextValue& out) noexcept {
-    // Base64 4글자가 3 byte다 — 풀기 전에 원소 수 상한을 본다(패딩은 줄일 뿐이다).
-    const usize capacity = text.ByteCount() / 4 * 3;
+    // Base64 4글자가 3 byte다. 풀기·할당 전에 길이와 패딩으로 byte 수를 구해 원소 수 한도를 본다(긴
+    // 입력이 한도와 무관한 큰 버퍼를 먼저 잡지 않게). 길이가 4의 배수가 아니면 Base64가 아니다.
+    const usize length = text.ByteCount();
+    if (length % 4 != 0) {
+        return Report(context, TextDiagnosticCode::InvalidValue, source, pathText,
+                      "expected Base64 bytes (RFC 4648, padded, no whitespace)");
+    }
+
+    usize padding = 0;
+    if (length != 0 && text.Data()[length - 1] == '=') {
+        ++padding;
+        if (text.Data()[length - 2] == '=') {
+            ++padding;
+        }
+    }
+
+    const usize count = length / 4 * 3 - padding;
+    auto fits = CheckElementCount(context, field, count, source, pathText);
+    if (!fits || !fits.Value()) {
+        return fits;
+    }
+
     Array<uint8> bytes(context.GetAllocator());
-    if (auto sized = bytes.TryResize(capacity); !sized) {
+    if (auto sized = bytes.TryResize(count); !sized) {
         return Result<bool>::Failure(sized.Error());
     }
 
     auto decoded = TryBase64Decode(text, bytes.View());
-    if (!decoded) {
-        if (decoded.Error() != ErrorCode::InvalidArgument) {
+    if (!decoded || decoded.Value() != count) {
+        if (!decoded && decoded.Error() != ErrorCode::InvalidArgument) {
             return Result<bool>::Failure(decoded.Error());
         }
 
         return Report(context, TextDiagnosticCode::InvalidValue, source, pathText,
                       "expected Base64 bytes (RFC 4648, padded, no whitespace)");
-    }
-
-    const usize count = decoded.Value();
-    auto fits = CheckElementCount(context, field, count, source, pathText);
-    if (!fits || !fits.Value()) {
-        return fits;
     }
 
     if (auto reserved = out.elements.TryReserve(count); !reserved) {

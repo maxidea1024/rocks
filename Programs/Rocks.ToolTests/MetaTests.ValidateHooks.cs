@@ -95,6 +95,23 @@ internal static partial class MetaTests
             string generated = Compact(File.ReadAllText(probe.Output));
             Verify.That(generated.Contains("staticconstexprboolHasValidateSelf=true;", StringComparison.Ordinal), "alias spelling hook detected");
         });
+        // consteval 판정은 주석을 걷어낸 원문으로 한다(CV4 리뷰 6): 바로 앞 줄·블록 주석의 낱말 `consteval`은 정상 hook을 거부하지 않는다.
+        // 중첩 struct의 별칭은 바깥 struct의 별칭 철자 풀이를 지우지 않는다(중첩 선언은 바깥 멤버 순회가 끝난 뒤 처리된다).
+        suite.Add("Meta.ValidateHookIgnoresCommentsAndNestedAliases", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            await probe.GenerateAsync(ValidateSource("using Self = Range;\n" +
+                "ROCKS_STRUCT()\nstruct Inner {\nusing Self = Inner;\nROCKS_PROPERTY() rocks::int32 n = 0;\n" +
+                "static rocks::Result<void> Validate(const Self&) noexcept { return rocks::Result<void>::Success(); }\n};\n" +
+                "// must not be consteval\n" +
+                "/* nor consteval */ static rocks::Result<void> Validate(const Self& value) noexcept { return value.low <= value.high ? " +
+                "rocks::Result<void>::Success() : rocks::Result<void>::Failure(rocks::ErrorCode::InvalidArgument); }\n"));
+            string generated = Compact(File.ReadAllText(probe.Output));
+            Verify.That(generated.Contains(Compact("static_assert(::rocks::IsSameV<decltype(&::probe::Range::Validate)"), StringComparison.Ordinal),
+                "outer hook detected after a comment naming consteval");
+            Verify.That(generated.Contains(Compact("static_assert(::rocks::IsSameV<decltype(&::probe::Range::Inner::Validate)"), StringComparison.Ordinal),
+                "nested hook detected");
+        });
         // hook struct는 참조 없는 값이다(리플렉션 쓰기가 통째로 복사해 검증한다).
         AddRejectGroup(context, "Meta.ValidateHookRejectsReferenceStructs", [
             ValidateSource(ValidateHook, body: ValidateRangeBody + "ROCKS_PROPERTY() rocks::ObjectRef<Value> owner;\n").Replace(

@@ -259,3 +259,27 @@ TEST(Config_StructValidationHookRejectsLayerValue) {
     REQUIRE(fixture.Context().Sync());
     CHECK(settings.span.low == 1 && settings.span.high == 5);
 }
+
+// byte 배열(`Array<uint8>`) 설정 값은 Base64 문자열이고, 배열 연산
+// 객체($clear·$remove·$add·$append)는 InvalidArrayOperation 진단으로 거부된다(CV4 리뷰 2 — 전에는
+// 적용 전체가 하드 오류였다). 값은 그대로다.
+TEST(Config_ByteArrayRejectsArrayOperations) {
+    ConfigFixture fixture;
+    REQUIRE(fixture.Context().RegisterSettings<config_fixture::BlobSettings>());
+    REQUIRE(fixture.Context().Sync());
+    const auto& settings = fixture.Context().Get<config_fixture::BlobSettings>();
+    REQUIRE(fixture.Context().AddLayerText(ConfigLayer::Engine, "x", "Render", "<test>",
+                                           R"({"BlobCheck": {"blob": "AQID"}})"));
+    REQUIRE(fixture.Context().Sync());
+    REQUIRE(settings.blob.Size() == 3);
+    CHECK(settings.blob[0] == 1 && settings.blob[2] == 3);
+    const char* const operations[] = {R"({"BlobCheck": {"blob": {"$clear": true}}})",
+                                      R"({"BlobCheck": {"blob": {"$remove": [1]}}})",
+                                      R"({"BlobCheck": {"blob": {"$add": [4]}}})",
+                                      R"({"BlobCheck": {"blob": {"$append": [4]}}})"};
+    for (const char* text : operations) {
+        CHECK(fixture.Rejects(ConfigLayer::Project, "Render", text));
+        CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::InvalidArrayOperation, 1, 24));
+        CHECK(settings.blob.Size() == 3);
+    }
+}
