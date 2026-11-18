@@ -234,6 +234,29 @@ TEST(LogLayoutOmitsEmptyTokensWithSeparators) {
     CHECK(Render("{Level}{Category}", fixed.event, out) == "Error Engine.Core");
 }
 
+// 문법 검사는 상수 평가로 쓸 수 있다(설정 검증의 기본값 검사). 이유는 영어 리터럴이다.
+static_assert(CheckLogLayoutSyntax(DefaultConsoleLogLayout).IsEmpty());
+static_assert(CheckLogLayoutSyntax("[{Level:u3}] {Message}{NewLine}").IsEmpty());
+static_assert(CheckLogLayoutSyntax("").IsEmpty());
+static_assert(CheckLogLayoutSyntax("{Unknown}") == "unknown layout token");
+static_assert(CheckLogLayoutSyntax("{Level:u4}") == "unsupported format for this layout token");
+static_assert(CheckLogLayoutSyntax("{0}") == "positional holes are not layout tokens");
+static_assert(!CheckLogLayoutSyntax("{Level").IsEmpty());
+
+// Parse의 오류 출력은 위치(토큰의 '{')와 이유를 준다.
+TEST(LogLayoutParseReportsErrorOffset) {
+    LogLayoutParseError error;
+    CHECK(LogLayout::Parse("[{Level}] {Mesage}", {}, &error).Error() == ErrorCode::InvalidArgument);
+    CHECK(error.offset == 10);
+    CHECK(error.code == ErrorCode::InvalidArgument);
+    CHECK(error.reason == "unknown layout token");
+    CHECK(LogLayout::Parse("ab {Timestamp:s}", {}, &error).Error() == ErrorCode::InvalidArgument);
+    CHECK(error.offset == 3);
+    CHECK(error.reason == "unsupported format for this layout token");
+    CHECK(LogLayout::Parse("abc}", {}, &error).Error() == ErrorCode::InvalidArgument);
+    CHECK(error.offset == 3);
+}
+
 TEST(LogLayoutRejectsBadPatterns) {
     const char* const invalid[] = {"{Unknown}", "{Level:u4}", "{Timestamp:xx}", "{Message:x}",
                                    "{}",        "{0}",        "{Level",         "Level}"};

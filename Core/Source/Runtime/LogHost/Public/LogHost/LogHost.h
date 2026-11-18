@@ -51,6 +51,8 @@ inline constexpr StringView LogFileMaxBytesSetting = "log.file.max_bytes";
 inline constexpr StringView LogFileRetentionSetting = "log.file.retention";
 inline constexpr StringView LogFileEncryptSetting = "log.file.encrypt";
 inline constexpr StringView LogFileRecipientKeySetting = "log.file.recipient_key";
+inline constexpr StringView LogConsoleLayoutSetting = "log.console.layout";
+inline constexpr StringView LogFileLayoutSetting = "log.file.layout";
 
 // log.levels 문자열의 최대 byte 수다.
 inline constexpr usize MaxLogLevelsBytes = 1024;
@@ -62,6 +64,100 @@ Result<void> RegisterLogSettings(config::ConfigContext& context) noexcept;
 
 // 레벨 이름(trace·debug·info·warning·error·fatal, 대소문자 무시)을 읽는다. 모르는 이름이면 false다.
 bool TryParseLogLevel(StringView text, LogLevel& level) noexcept;
+
+namespace detail {
+
+// 설정에 쓰는 레벨 이름이다(대소문자 무시). 순서는 LogLevel 값과 같다.
+inline constexpr StringView LogLevelSettingNames[] = {"trace",   "debug", "info",
+                                                      "warning", "error", "fatal"};
+
+constexpr bool IsLogSettingSpace(char value) noexcept {
+    return value == ' ' || value == '\t' || value == '\r' || value == '\n';
+}
+
+// 앞뒤 ASCII 공백을 뺀 view다(상수 평가용).
+constexpr StringView TrimLogSettingText(StringView text) noexcept {
+    usize start = 0;
+    usize end = text.ByteCount();
+    while (start < end && IsLogSettingSpace(text.Data()[start])) {
+        ++start;
+    }
+
+    while (end > start && IsLogSettingSpace(text.Data()[end - 1])) {
+        --end;
+    }
+
+    return StringView(text.Data() + start, end - start);
+}
+
+constexpr bool IsLogLevelSettingName(StringView text) noexcept {
+    for (StringView name : LogLevelSettingNames) {
+        if (EqualsIgnoringAsciiCase(text, name)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// "접두사=값" 목록의 항목 하나를 나눈다. '='이 없으면 false다.
+constexpr bool SplitLogSettingEntry(StringView entry, StringView& prefix,
+                                    StringView& value) noexcept {
+    for (usize index = 0; index < entry.ByteCount(); ++index) {
+        if (entry.Data()[index] == '=') {
+            prefix = TrimLogSettingText(StringView(entry.Data(), index));
+            value = TrimLogSettingText(
+                StringView(entry.Data() + index + 1, entry.ByteCount() - index - 1));
+            return true;
+        }
+    }
+
+    return false;
+}
+
+} // namespace detail
+
+// log.levels 문자열("Graphics=warning,Engine.World=debug")의 문법만 검사한다(설정 검증용, CVar
+// Validate). 통과하면 빈 view, 아니면 영어 리터럴 이유 문장이다. 순수 함수이고 상수 평가할 수 있다.
+// 빈 항목은 건너뛴다. 항목별 위치 진단과 적용 실패(표 용량·해시 충돌)는 LogHost가 적용 때 남긴다.
+//
+//   static_assert(CheckLogLevelsSyntax("Graphics=Warning, Engine.World=debug").IsEmpty());
+constexpr StringView CheckLogLevelsSyntax(StringView text) noexcept {
+    if (text.ByteCount() > MaxLogLevelsBytes) {
+        return "log.levels is longer than MaxLogLevelsBytes";
+    }
+
+    usize start = 0;
+    while (start <= text.ByteCount()) {
+        usize end = start;
+        while (end < text.ByteCount() && text.Data()[end] != ',') {
+            ++end;
+        }
+
+        const StringView entry =
+            detail::TrimLogSettingText(StringView(text.Data() + start, end - start));
+        start = end + 1;
+        if (entry.IsEmpty()) {
+            continue;
+        }
+
+        StringView prefix;
+        StringView level;
+        if (!detail::SplitLogSettingEntry(entry, prefix, level)) {
+            return "a log.levels entry is not <category prefix>=<level>";
+        }
+
+        if (ValidateLogCategoryName(prefix) != LogCategoryNameError::None) {
+            return "a log.levels category prefix is not a valid category name";
+        }
+
+        if (!detail::IsLogLevelSettingName(level)) {
+            return "a log.levels level is not trace, debug, info, warning, error or fatal";
+        }
+    }
+
+    return StringView();
+}
 
 // 설정으로 만든 LogSystem과 sink 묶음이다. 소유 스레드 하나에서 Start·Watch·Stop을 부른다.
 class LogHost {

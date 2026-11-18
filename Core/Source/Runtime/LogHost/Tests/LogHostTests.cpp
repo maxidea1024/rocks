@@ -314,6 +314,59 @@ TEST(LogHostWritesAPlainFileFromConfig) {
     CHECK(Contains(file, "[Warning][Tests.Host] plain value 7"));
 }
 
+// log.levels 문법 검사는 상수 평가로 쓸 수 있다(설정 검증용). 이유는 영어 리터럴이다.
+static_assert(CheckLogLevelsSyntax("").IsEmpty());
+static_assert(CheckLogLevelsSyntax("Graphics=Warning, engine.world = debug,").IsEmpty());
+static_assert(CheckLogLevelsSyntax("Graphics") ==
+              "a log.levels entry is not <category prefix>=<level>");
+static_assert(CheckLogLevelsSyntax("Graphics..D3D12=info") ==
+              "a log.levels category prefix is not a valid category name");
+static_assert(CheckLogLevelsSyntax("Graphics=loud") ==
+              "a log.levels level is not trace, debug, info, warning, error or fatal");
+
+namespace {
+
+// 파일 하나에 레이아웃 설정을 주고 Warning 한 줄을 쓴 뒤 파일 내용을 돌려준다.
+void WriteWithFileLayout(StringView layoutJson, Array<uint8>& file) noexcept {
+    ScratchDirectory directory;
+    LogSettingsFixture fixture;
+    char settings[512];
+    FixedStringBuilder text{Span<char>(settings)};
+    (void)text.TryAppendFormat(R"({{"log.mode": "sync", "log.file.enabled": true, )"
+                               R"("log.file.directory": "{}", "log.file.layout": {}}})",
+                               directory.View(), layoutJson);
+    fixture.Apply(text.View());
+    Array<char> path(fixture.system);
+    {
+        LogHost host(fixture.system);
+        REQUIRE(host.Start(LogSystemConfig::ForEngineHost(), fixture.context.Get(), "Test"));
+        REQUIRE(host.IsFileLogging());
+        REQUIRE(
+            path.TryAppend(Span<const char>(host.FilePath().Data(), host.FilePath().ByteCount())));
+        {
+            LogInstallScope installed(host.System());
+            Log::Warning(LogHostTests, "layout value {Value}", 9);
+        }
+
+        host.Stop();
+    }
+
+    REQUIRE(ReadAll(StringView(path.Data(), path.Size()), file));
+}
+
+} // namespace
+
+// log.file.layout이 파일 줄 모양을 바꾸고, 잘못된 패턴이면 엔진은 계속하며 기본 레이아웃을 쓴다.
+TEST(LogHostAppliesFileLayoutAndFallsBackOnInvalidPattern) {
+    SystemAllocator allocator;
+    Array<uint8> custom(allocator);
+    WriteWithFileLayout(R"("<{Level:u3}|{Category}> {Message}{NewLine}")", custom);
+    CHECK(Contains(custom, "<WRN|Tests.Host> layout value 9\n"));
+    Array<uint8> fallback(allocator);
+    WriteWithFileLayout(R"("{Level} {Mesage}")", fallback);
+    CHECK(Contains(fallback, "[Warning][Tests.Host] layout value 9"));
+}
+
 namespace {
 
 // 문이 열릴 때까지 Write 안에서 기다리는 sink다(처음에는 닫혀 있다).

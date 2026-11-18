@@ -34,6 +34,28 @@ StringView TextOf(const config::ConfigContext& settings, StringView name) noexce
     return value != nullptr ? value->string.View() : StringView();
 }
 
+// 레이아웃 설정 하나를 해석한다. 비어 있으면 기본 콘솔 레이아웃이다. 잘못되면 Error를 한 번 남기고
+// 기본 레이아웃으로 계속한다(엔진은 멈추지 않는다, P3). 설정 단계 거부는 CVar 이관(CVR7) 뒤의
+// 일이다.
+LogLayout ResolveLayout(const config::ConfigContext* settings, StringView name) noexcept {
+    const StringView pattern = settings != nullptr ? TextOf(*settings, name) : StringView();
+    if (pattern.IsEmpty()) {
+        return LogLayout::DefaultConsole();
+    }
+
+    LogLayoutParseError error;
+    auto parsed = LogLayout::Parse(pattern, {}, &error);
+    if (!parsed) {
+        Log::Error(LogHostCategory,
+                   "{Setting} is not a valid layout at byte {Offset}: {Reason}; using the default "
+                   "layout",
+                   name, error.offset, error.reason);
+        return LogLayout::DefaultConsole();
+    }
+
+    return parsed.Value();
+}
+
 // "prefix=level,prefix=level" 목록을 항목마다 visit(entry)로 넘긴다(빈 항목은 건너뛴다).
 template <class Visit>
 void ForEachEntry(StringView list, Visit&& visit) noexcept {
@@ -168,9 +190,22 @@ Result<void> RegisterLogSettings(config::ConfigContext& context) noexcept {
         "It is not a secret. The private key never goes into the repository or cooked output. "
         "Fixed after startup.",
         ConsoleValueType::String, "", startup);
+    const config::ConsoleSettingDefinition consoleLayout = Define(
+        LogConsoleLayoutSetting,
+        "Layout pattern of the console (stderr) log, for example \"[{Level:u3}] "
+        "{Message}{NewLine}\". "
+        "Empty means the default console layout. An invalid pattern logs an error and falls back "
+        "to the default. Fixed after startup.",
+        ConsoleValueType::String, "", startup);
+    const config::ConsoleSettingDefinition fileLayout = Define(
+        LogFileLayoutSetting,
+        "Layout pattern of text log files. Empty means the default console layout. Ignored when "
+        "log.file.format is jsonlines. An invalid pattern logs an error and falls back to the "
+        "default. Fixed after startup.",
+        ConsoleValueType::String, "", startup);
     const config::ConsoleSettingDefinition* definitions[] = {
-        &mode,   &level,    &levels,    &enabled, &directory,
-        &format, &maxBytes, &retention, &encrypt, &recipient};
+        &mode,     &level,     &levels,  &enabled,   &directory,     &format,
+        &maxBytes, &retention, &encrypt, &recipient, &consoleLayout, &fileLayout};
     for (const config::ConsoleSettingDefinition* definition : definitions) {
         auto registered = context.RegisterConsoleSetting(*definition);
         if (!registered) {
@@ -214,7 +249,8 @@ Result<void> LogHost::Start(const LogSystemConfig& preset, const config::ConfigC
         }
     }
 
-    auto console = UniquePtr<StderrLogSink>::TryMake(allocator_);
+    auto console = UniquePtr<StderrLogSink>::TryMake(
+        allocator_, ResolveLayout(settings, LogConsoleLayoutSetting));
     if (!console) {
         return Result<void>::Failure(console.Error());
     }
@@ -265,6 +301,14 @@ void LogHost::PrepareFileSink(const config::ConfigContext& settings, StringView 
     file.hostName = hostName;
     file.format = TextOf(settings, LogFileFormatSetting) == "jsonlines" ? LogFileFormat::JsonLines
                                                                         : LogFileFormat::Text;
+    if (file.format == LogFileFormat::JsonLines) {
+        if (!TextOf(settings, LogFileLayoutSetting).IsEmpty()) {
+            Log::Warning(LogHostCategory,
+                         "log.file.layout is ignored because log.file.format is jsonlines");
+        }
+    } else {
+        file.layout = ResolveLayout(&settings, LogFileLayoutSetting);
+    }
     if (const FieldValue* maxBytes = ValueOf(settings, LogFileMaxBytesSetting)) {
         file.maxBytes = static_cast<uint64>(maxBytes->signedInteger);
     }
