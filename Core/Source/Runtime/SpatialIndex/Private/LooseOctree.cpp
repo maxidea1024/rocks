@@ -165,6 +165,7 @@ void LooseOctree::TakeFrom(LooseOctree& other) noexcept {
     outOfRangeWarned_ = other.outOfRangeWarned_;
     counters_ = other.counters_;
     peaks_ = other.peaks_;
+    mutationEpoch_ = other.mutationEpoch_;
 
     // 원본은 같은 설정의 빈 트리로 남는다. 컨테이너는 받은 allocator에 직접 묶어 두고, 다음 추가가
     // 새 계수 adapter를 만든다(EnsureCountingAllocator). 여기서는 할당하지 않는다.

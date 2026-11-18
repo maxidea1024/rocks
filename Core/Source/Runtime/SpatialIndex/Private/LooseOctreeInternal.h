@@ -104,6 +104,8 @@ public:
         if (platform::AtomicLoad(&tree.readers_) != 0) {
             platform::Fatal("LooseOctree mutation while a read scope is open");
         }
+        // 이전 읽기 단계에서 모은 노드 묶음을 낡은 것으로 만든다.
+        ++tree.mutationEpoch_;
     }
 
     // 변경이 끝날 때마다 배열별 예약 용량 피크를 갱신한다.

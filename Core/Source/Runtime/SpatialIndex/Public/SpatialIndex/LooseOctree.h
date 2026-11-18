@@ -5,6 +5,7 @@
 #include <Core/Containers/InlineArray.h>
 #include <Core/Containers/SlotArray.h>
 #include <Core/Containers/Span.h>
+#include <Core/Math/Intersection.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
 #include <SpatialIndex/LooseOctreeTypes.h>
@@ -122,12 +123,111 @@ struct OutOfRangeEntry {
     uint64 userValue = 0;
 };
 
-// 명시적 검색 스택의 항목이다. 위치를 함께 실어 검색이 관리용 데이터를 읽지 않게 한다.
+// 명시적 검색 스택의 항목이다. 위치를 함께 실어 검색이 관리용 데이터를 읽지 않게 한다. entry는 ray
+// 질의의 노드 확장 경계 진입 거리이고 다른 형상은 0이다.
 struct SearchStackEntry {
     int64 origin[3];
+    double entry;
     uint32 node;
     uint8 level;
     bool contained;
+};
+
+// 노드 확장 경계와 질의 형상의 관계다.
+enum class NodeClass : uint8 {
+    Outside,
+    Inside,
+    Intersecting
+};
+
+constexpr NodeClass ToNodeClass(Containment containment) noexcept {
+    return containment == Containment::Outside  ? NodeClass::Outside
+           : containment == Containment::Inside ? NodeClass::Inside
+                                                : NodeClass::Intersecting;
+}
+
+// ---- 질의 형상(검색 순회의 정책) ----
+// Classify(노드 확장 경계, 진입 거리 출력)는 노드를 제외·완전 포함·걸침으로 나누고, Test(프록시
+// AABB, 진입 거리 출력)는 프록시 하나가 후보인지 정한다. 둘 다 같은 Core 술어(Intersection.h)를
+// 쓴다. 그 술어들은 box 좌표에 대해 단조인 고정 순서 식이므로(ClassifyContainment 설명) 확장 경계가
+// Outside면 그 안의 어떤 프록시도 후보가 아니고, Inside면 그 안의 모든 프록시가 후보다. 그래서 노드
+// 가지치기와 완전 포함 생략이 프록시 단위 술어와 같은 결과를 낸다(반올림까지 포함해 누락이 없다).
+
+// 박스 질의다. 프록시 판정은 청크의 float 상대 경계로 한다(UsesChunkBounds).
+struct BoxQueryShape {
+    static constexpr bool Ordered = false;
+    static constexpr bool UsesChunkBounds = true;
+    static constexpr SpatialBatchShape Kind = SpatialBatchShape::Box;
+    Box<double> box;
+
+    NodeClass Classify(const Box<double>& loose, double& entry) const noexcept {
+        entry = 0.0;
+        // 닫힌 집합 규약: 접촉은 교차이고 "밖"은 엄격 부등식이다(6.8절).
+        if (loose.min.x > box.max.x || loose.max.x < box.min.x || loose.min.y > box.max.y ||
+            loose.max.y < box.min.y || loose.min.z > box.max.z || loose.max.z < box.min.z) {
+            return NodeClass::Outside;
+        }
+        return box.Contains(loose) ? NodeClass::Inside : NodeClass::Intersecting;
+    }
+
+    // 범위 밖 목록(정확한 double 경계)에만 쓴다.
+    bool Test(const Box<double>& bounds, double& entry) const noexcept {
+        entry = 0.0;
+        return Overlap(box, bounds) == QueryResult::Hit;
+    }
+};
+
+struct SphereQueryShape {
+    static constexpr bool Ordered = false;
+    static constexpr bool UsesChunkBounds = false;
+    static constexpr SpatialBatchShape Kind = SpatialBatchShape::Sphere;
+    Sphere<double> sphere;
+
+    NodeClass Classify(const Box<double>& loose, double& entry) const noexcept {
+        entry = 0.0;
+        return ToNodeClass(ClassifyContainment(sphere, loose));
+    }
+
+    bool Test(const Box<double>& bounds, double& entry) const noexcept {
+        entry = 0.0;
+        return Overlap(sphere, bounds) == QueryResult::Hit;
+    }
+};
+
+// 볼록 영역(프러스텀) 질의다. 후보 술어는 "어느 평면에 대해서도 엄격히 바깥이 아닌 AABB"다(6.8절).
+struct VolumeQueryShape {
+    static constexpr bool Ordered = false;
+    static constexpr bool UsesChunkBounds = false;
+    static constexpr SpatialBatchShape Kind = SpatialBatchShape::ConvexVolume;
+    const ConvexVolume<double>* volume;
+
+    NodeClass Classify(const Box<double>& loose, double& entry) const noexcept {
+        entry = 0.0;
+        return ToNodeClass(ClassifyContainment(*volume, loose));
+    }
+
+    bool Test(const Box<double>& bounds, double& entry) const noexcept {
+        entry = 0.0;
+        return Overlap(*volume, bounds) == QueryResult::Hit;
+    }
+};
+
+// ray 질의다(maxDistance까지의 선분). 완전 포함 분류가 없고, 자식을 진입 거리 순으로 방문한다.
+struct RayQueryShape {
+    static constexpr bool Ordered = true;
+    static constexpr bool UsesChunkBounds = false;
+    Ray<double> ray;
+    double maxDistance;
+
+    NodeClass Classify(const Box<double>& loose, double& entry) const noexcept {
+        return Test(loose, entry) ? NodeClass::Intersecting : NodeClass::Outside;
+    }
+
+    bool Test(const Box<double>& bounds, double& entry) const noexcept {
+        const RayHit<double> hit = Raycast(ray, bounds, maxDistance);
+        entry = hit.distance;
+        return hit.IsHit();
+    }
 };
 
 } // namespace detail
@@ -352,9 +452,27 @@ private:
     bool ShouldCollapse(uint32 node) const noexcept;
 
     // ---- 읽기(LooseOctreeReader가 부른다) ----
-    template <typename Sink>
-    QueryOutcome VisitBox(const Box<double>& box, uint32 filterMask, Sink& sink,
+    template <typename Shape, typename Policy>
+    void Walk(const Shape& shape, Policy& policy, QueryStats* stats) const noexcept;
+    template <typename Shape, typename Emit>
+    bool ForEachNodeCandidate(uint32 nodeIndex, uint32 level, const int64 (&origin)[3],
+                              bool contained, const Shape& shape, uint32 filterMask,
+                              QueryStats* stats, Emit& emit) const noexcept;
+    template <typename Shape, typename Emit>
+    bool ForEachOutOfRangeCandidate(const Shape& shape, uint32 filterMask, QueryStats* stats,
+                                    Emit& emit) const noexcept;
+    template <typename Shape, typename Sink>
+    QueryOutcome RunQuery(const Shape& shape, uint32 filterMask, Sink& sink,
                           QueryStats* stats) const noexcept;
+    template <typename HitTest>
+    NearestHit RunNearest(const detail::RayQueryShape& shape, uint32 filterMask, HitTest& hitTest,
+                          QueryStats* stats) const noexcept;
+    template <typename Shape>
+    BufferQueryOutcome CollectBatches(const Shape& shape,
+                                      Span<SpatialNodeBatch> out) const noexcept;
+    template <typename Shape, typename Sink>
+    Result<QueryOutcome> RunBatch(const SpatialNodeBatch& batch, const Shape& shape,
+                                  uint32 filterMask, Sink& sink, QueryStats* stats) const noexcept;
     bool IsValidHandle(SpatialProxyHandle handle) const noexcept;
     Result<SpatialProxyDesc> TryGetProxy(SpatialProxyHandle handle) const noexcept;
     uint32 ProxyCount() const noexcept;
@@ -424,6 +542,9 @@ private:
     Counters counters_;
     Peaks peaks_;
 
+    // 변경 함수가 시작될 때마다 늘어나는 세대다. 노드 묶음이 모은 뒤의 변경을 검출한다.
+    uint64 mutationEpoch_ = 0;
+
     // 6.9절 위반 검출용이다. readers_는 열린 읽기 범위 수, writer_는 변경 진행 중 표시(0/1)다.
     mutable uint32 readers_ = 0;
     uint32 writer_ = 0;
@@ -433,7 +554,9 @@ private:
 // 여러 스레드에 넘겨도 된다. 범위 밖에 저장하거나 yield 경계를 넘겨 들고 있지 않는다.
 //
 // 모든 질의는 프록시 AABB와 질의 형상의 교차 후보를 돌려준다. 정확한 AABB 교차 집합을 빠짐없이
-// 포함하고, float 상대 경계 때문에 초과 후보가 있을 수 있다(6.8절). 필터는 AABB 판정보다 먼저
+// 포함한다. 박스 질의는 float 상대 경계 때문에 초과 후보가 있을 수 있다(노드 level ℓ의 확장 경계 반
+// 변 k·h_ℓ에 대한 float ULP 몇 개 폭, 6.8절). 구·볼록 영역·ray 질의는 정확한 double AABB에 Core
+// 술어를 적용하므로 초과 후보가 없다. 필터는 AABB 판정보다 먼저
 // 적용하며 질의 mask 0은 아무것도 돌려주지 않는다(오류 아님). 질의 box가 유효하지 않으면 아무것도
 // 방문하지 않고 InvalidArgument다. 검색은 힙 할당을 하지 않는다.
 class LooseOctreeReader {
@@ -457,20 +580,167 @@ public:
         if (!box.IsValid()) {
             return Result<QueryOutcome>::Failure(ErrorCode::InvalidArgument);
         }
-        return Result<QueryOutcome>::Success(tree_->VisitBox(box, filterMask, visitor, stats));
+        return Result<QueryOutcome>::Success(
+            tree_->RunQuery(detail::BoxQueryShape{box}, filterMask, visitor, stats));
+    }
+
+    // sphere와 겹치는(중심에서 AABB까지 거리 ≤ 반지름, 접촉 포함) 프록시마다 visitor를 부른다.
+    // 계약은 QueryBox와 같다. 후보는 정확한 double AABB에 Overlap(sphere, box)를 적용한 결과와 같다
+    // (초과 후보 없음). 오류: sphere가 유효하지 않으면(비유한, 음수 반지름) InvalidArgument.
+    template <typename Visitor>
+    [[nodiscard]] Result<QueryOutcome> QuerySphere(const Sphere<double>& sphere, uint32 filterMask,
+                                                   Visitor&& visitor,
+                                                   QueryStats* stats = nullptr) const noexcept {
+        if (!sphere.IsValid()) {
+            return Result<QueryOutcome>::Failure(ErrorCode::InvalidArgument);
+        }
+        return Result<QueryOutcome>::Success(
+            tree_->RunQuery(detail::SphereQueryShape{sphere}, filterMask, visitor, stats));
+    }
+
+    // 볼록 영역(안쪽 normal 평면 집합, 프러스텀 등)의 어느 평면에 대해서도 엄격히 바깥이 아닌
+    // AABB의 프록시마다 visitor를 부른다(6.8절 술어, 모서리 근처에서 정확한 볼록체 교차보다 넓다).
+    // 후보는 Overlap(volume, box)와 같다. 오류: volume이 유효하지 않으면(평면 없음, 잘못된 평면)
+    // InvalidArgument. volume은 호출 동안만 읽는다.
+    template <typename Visitor>
+    [[nodiscard]] Result<QueryOutcome> QueryFrustum(const ConvexVolume<double>& volume,
+                                                    uint32 filterMask, Visitor&& visitor,
+                                                    QueryStats* stats = nullptr) const noexcept {
+        if (!volume.IsValid()) {
+            return Result<QueryOutcome>::Failure(ErrorCode::InvalidArgument);
+        }
+        return Result<QueryOutcome>::Success(
+            tree_->RunQuery(detail::VolumeQueryShape{&volume}, filterMask, visitor, stats));
+    }
+
+    // ray의 [0, maxDistance] 구간이 AABB와 닿는(Raycast Hit, 시작점 내부·접촉 포함) 프록시마다
+    // visitor를 부른다. 결과는 거리순이 아니다. 노드는 확장 경계 진입 거리가 가까운 자식부터(같으면
+    // 자식 번호 오름차순, 원점이 여러 확장 경계 안이면 모두 0) 방문한다. maxDistance는 +Inf를
+    // 허용한다. 오류: ray가 유효하지 않거나(Ray::IsValid) maxDistance가 음수·NaN이면
+    // InvalidArgument.
+    template <typename Visitor>
+    [[nodiscard]] Result<QueryOutcome> QueryRay(const Ray<double>& ray, double maxDistance,
+                                                uint32 filterMask, Visitor&& visitor,
+                                                QueryStats* stats = nullptr) const noexcept {
+        if (!IsValidRay(ray, maxDistance)) {
+            return Result<QueryOutcome>::Failure(ErrorCode::InvalidArgument);
+        }
+        return Result<QueryOutcome>::Success(
+            tree_->RunQuery(detail::RayQueryShape{ray, maxDistance}, filterMask, visitor, stats));
+    }
+
+    // ray에 가장 가까운 프록시를 정밀 판정 콜백으로 찾는다(6.8절). 후보마다
+    // hitTest(const SpatialProxyHit&, double currentMax)를 불러 RayHitResult를 받는다.
+    // - 전제: hitTest가 돌려주는 거리는 그 프록시 AABB의 ray 진입 거리 이상이다(정밀 형상이 등록
+    //   AABB 안에 있음). 어기면 답을 놓칠 수 있다.
+    // - hit이 참이고 거리가 현재 최단보다 작을 때만(처음 후보는 maxDistance 이하일 때) 최단을
+    //   줄인다. 같은 거리면 먼저 찾은 쪽이 남는다. NaN·음수·maxDistance 초과 거리는 받지 않는다.
+    // - 노드는 확장 경계 진입 거리가 현재 최단보다 엄격히 크면 건너뛰고, 프록시는 AABB 진입 거리가
+    //   현재 최단보다 엄격히 크면 hitTest를 부르지 않는다. AABB 진입 거리만으로 최단을 줄이지
+    //   않는다.
+    // - stats.results는 hitTest 호출 수다.
+    // 오류는 QueryRay와 같다.
+    //
+    // 사용 예:
+    //   auto nearest = reader.QueryRayNearest(ray, 10000.0, mask,
+    //       [&](const SpatialProxyHit& hit, double currentMax) noexcept {
+    //           return TraceMesh(hit.userValue, ray, currentMax);   // RayHitResult
+    //       });
+    template <typename HitTest>
+    [[nodiscard]] Result<NearestHit> QueryRayNearest(const Ray<double>& ray, double maxDistance,
+                                                     uint32 filterMask, HitTest&& hitTest,
+                                                     QueryStats* stats = nullptr) const noexcept {
+        if (!IsValidRay(ray, maxDistance)) {
+            return Result<NearestHit>::Failure(ErrorCode::InvalidArgument);
+        }
+        return Result<NearestHit>::Success(
+            tree_->RunNearest(detail::RayQueryShape{ray, maxDistance}, filterMask, hitTest, stats));
     }
 
     // 후보를 out에 들어가는 만큼 쓰고 끝까지 세어 total을 돌려준다(결과를 조용히 버리지 않는다).
-    // 오류: box가 유효하지 않으면 InvalidArgument.
+    // Any*는 첫 후보에서 끝나고 Count*는 결과를 내지 않고 센다. 오류는 같은 형상의 Query*와 같다.
     [[nodiscard]] Result<BufferQueryOutcome> QueryBoxInto(const Box<double>& box, uint32 filterMask,
                                                           Span<SpatialProxyHit> out) const noexcept;
-
-    // 후보가 하나라도 있는지다. 첫 후보에서 끝난다. 오류: box가 유효하지 않으면 InvalidArgument.
     [[nodiscard]] Result<bool> AnyInBox(const Box<double>& box, uint32 filterMask) const noexcept;
-
-    // 후보 수다. 결과를 내지 않고 센다. 오류: box가 유효하지 않으면 InvalidArgument.
     [[nodiscard]] Result<uint64> CountInBox(const Box<double>& box,
                                             uint32 filterMask) const noexcept;
+    [[nodiscard]] Result<BufferQueryOutcome>
+    QuerySphereInto(const Sphere<double>& sphere, uint32 filterMask,
+                    Span<SpatialProxyHit> out) const noexcept;
+    [[nodiscard]] Result<bool> AnyInSphere(const Sphere<double>& sphere,
+                                           uint32 filterMask) const noexcept;
+    [[nodiscard]] Result<uint64> CountInSphere(const Sphere<double>& sphere,
+                                               uint32 filterMask) const noexcept;
+    [[nodiscard]] Result<BufferQueryOutcome>
+    QueryFrustumInto(const ConvexVolume<double>& volume, uint32 filterMask,
+                     Span<SpatialProxyHit> out) const noexcept;
+    [[nodiscard]] Result<bool> AnyInFrustum(const ConvexVolume<double>& volume,
+                                            uint32 filterMask) const noexcept;
+    [[nodiscard]] Result<uint64> CountInFrustum(const ConvexVolume<double>& volume,
+                                                uint32 filterMask) const noexcept;
+    [[nodiscard]] Result<BufferQueryOutcome> QueryRayInto(const Ray<double>& ray,
+                                                          double maxDistance, uint32 filterMask,
+                                                          Span<SpatialProxyHit> out) const noexcept;
+    [[nodiscard]] Result<bool> AnyOnRay(const Ray<double>& ray, double maxDistance,
+                                        uint32 filterMask) const noexcept;
+    [[nodiscard]] Result<uint64> CountOnRay(const Ray<double>& ray, double maxDistance,
+                                            uint32 filterMask) const noexcept;
+
+    // 형상과 교차하는 노드를 직접 저장 프록시 단위 묶음으로 모은다(6.1절, 그림자 caster 수집처럼
+    // 결과가 많은 질의를 worker에 나눌 때). out에 들어가는 만큼 쓰고 끝까지 세어 total을 돌려준다.
+    // 범위 밖 목록이 비어 있지 않으면 마지막 묶음이다. 묶음 순서는 단일 질의의 방문 순서와 같으므로
+    // 묶음별 QueryBatch 결과를 순서대로 이으면 같은 형상의 단일 질의 결과와 같다(필터는
+    // QueryBatch가 적용). 묶음은 모은 트리의 이번 읽기 단계 안에서만 유효하다. 오류: 형상이
+    // 유효하지 않으면 InvalidArgument.
+    //
+    // 사용 예(worker 분배):
+    //   SpatialNodeBatch batches[256];
+    //   auto collected = reader.CollectNodeBatches(casterVolume, Span<SpatialNodeBatch>(batches));
+    //   // 각 worker가 자기 몫의 batches[i]마다:
+    //   reader.QueryBatch(batches[i], casterVolume, mask, visitor);
+    [[nodiscard]] Result<BufferQueryOutcome>
+    CollectNodeBatches(const Box<double>& box, Span<SpatialNodeBatch> out) const noexcept;
+    [[nodiscard]] Result<BufferQueryOutcome>
+    CollectNodeBatches(const Sphere<double>& sphere, Span<SpatialNodeBatch> out) const noexcept;
+    [[nodiscard]] Result<BufferQueryOutcome>
+    CollectNodeBatches(const ConvexVolume<double>& volume,
+                       Span<SpatialNodeBatch> out) const noexcept;
+
+    // 묶음 하나의 후보마다 visitor를 부른다. 완전 포함 묶음은 공간 판정을 생략하고 필터만 적용한다.
+    // 여러 스레드가 서로 다른 묶음을 동시에 처리해도 된다(검색은 트리를 바꾸지 않는다). 형상은
+    // CollectNodeBatches에 준 것과 같아야 한다(종류만 검사한다). 오류: 다른 트리·다른 종류의
+    // 형상으로 모은 묶음이거나 형상이 유효하지 않으면 InvalidArgument, 모은 뒤 트리가 변경되었으면
+    // StaleHandle.
+    template <typename Visitor>
+    [[nodiscard]] Result<QueryOutcome>
+    QueryBatch(const SpatialNodeBatch& batch, const Box<double>& box, uint32 filterMask,
+               Visitor&& visitor, QueryStats* stats = nullptr) const noexcept {
+        if (!box.IsValid()) {
+            return Result<QueryOutcome>::Failure(ErrorCode::InvalidArgument);
+        }
+        return tree_->RunBatch(batch, detail::BoxQueryShape{box}, filterMask, visitor, stats);
+    }
+
+    template <typename Visitor>
+    [[nodiscard]] Result<QueryOutcome>
+    QueryBatch(const SpatialNodeBatch& batch, const Sphere<double>& sphere, uint32 filterMask,
+               Visitor&& visitor, QueryStats* stats = nullptr) const noexcept {
+        if (!sphere.IsValid()) {
+            return Result<QueryOutcome>::Failure(ErrorCode::InvalidArgument);
+        }
+        return tree_->RunBatch(batch, detail::SphereQueryShape{sphere}, filterMask, visitor, stats);
+    }
+
+    template <typename Visitor>
+    [[nodiscard]] Result<QueryOutcome>
+    QueryBatch(const SpatialNodeBatch& batch, const ConvexVolume<double>& volume, uint32 filterMask,
+               Visitor&& visitor, QueryStats* stats = nullptr) const noexcept {
+        if (!volume.IsValid()) {
+            return Result<QueryOutcome>::Failure(ErrorCode::InvalidArgument);
+        }
+        return tree_->RunBatch(batch, detail::VolumeQueryShape{&volume}, filterMask, visitor,
+                               stats);
+    }
 
     // handle이 살아 있는 프록시를 가리키는지다.
     [[nodiscard]] bool IsValid(SpatialProxyHandle handle) const noexcept;
@@ -518,6 +788,20 @@ private:
 
     explicit LooseOctreeReader(const LooseOctree& tree) noexcept : tree_(&tree) {
     }
+
+    // ray 질의 입력 검사다. maxDistance는 0 이상(+Inf 허용)이어야 하고 NaN은 거부한다.
+    static bool IsValidRay(const Ray<double>& ray, double maxDistance) noexcept {
+        return ray.IsValid() && maxDistance >= 0.0;
+    }
+
+    // Into·Any·Count의 공통 구현이다(LooseOctreeQuery.cpp).
+    template <typename Shape>
+    BufferQueryOutcome IntoShape(const Shape& shape, uint32 filterMask,
+                                 Span<SpatialProxyHit> out) const noexcept;
+    template <typename Shape>
+    bool AnyShape(const Shape& shape, uint32 filterMask) const noexcept;
+    template <typename Shape>
+    uint64 CountShape(const Shape& shape, uint32 filterMask) const noexcept;
 
     const LooseOctree* tree_;
 };
@@ -595,16 +879,189 @@ inline void LooseOctree::ChildOrigin(uint32 level, const int64 (&origin)[3], uin
     }
 }
 
-template <typename Sink>
-QueryOutcome LooseOctree::VisitBox(const Box<double>& box, uint32 filterMask, Sink& sink,
+// 질의 형상으로 트리를 깊이 우선 순회한다. 노드는 쌓을 때 분류해 제외 노드를 쌓지 않는다. 완전 포함
+// 노드의 자식은 분류 없이 완전 포함이다. Shape::Ordered(ray)이면 형제를 진입 거리 오름차순(같으면
+// 자식 번호 오름차순)으로 꺼낸다. policy.SkipEntry(진입 거리)가 참인 노드는 쌓을 때와 꺼낼 때 모두
+// 버린다(최근접 ray의 가지치기). 직접 저장 프록시가 있는 노드마다 policy.OnNode를 부르고, 거짓이면
+// 순회를 끝낸다.
+template <typename Shape, typename Policy>
+void LooseOctree::Walk(const Shape& shape, Policy& policy, QueryStats* stats) const noexcept {
+    if (rootSearch_.subtreeCount == 0) {
+        return;
+    }
+    detail::SearchStackEntry root;
+    root.origin[0] = rootManage_.origin[0];
+    root.origin[1] = rootManage_.origin[1];
+    root.origin[2] = rootManage_.origin[2];
+    root.node = detail::RootNode;
+    root.level = rootManage_.level;
+    if (stats != nullptr) {
+        ++stats->visitedNodes;
+    }
+    const detail::NodeClass rootClass =
+        shape.Classify(LooseBoundsOf(root.level, root.origin), root.entry);
+    if (rootClass == detail::NodeClass::Outside || policy.SkipEntry(root.entry)) {
+        return;
+    }
+    root.contained = rootClass == detail::NodeClass::Inside;
+
+    InlineArray<detail::SearchStackEntry, LooseOctreeSearchStackCapacity> stack;
+    stack.PushBack(root);
+    while (!stack.IsEmpty()) {
+        const detail::SearchStackEntry current = stack.PopBack();
+        if (policy.SkipEntry(current.entry)) {
+            continue;
+        }
+        const detail::SearchNode& node = Search(current.node);
+        if (node.directCount != 0 &&
+            !policy.OnNode(current.node, current.level, current.origin, current.contained)) {
+            return;
+        }
+        if (node.childBlock == detail::NoBlock) {
+            continue;
+        }
+
+        const detail::SearchBlock& block = searchBlocks_[node.childBlock];
+        detail::SearchStackEntry children[8];
+        uint32 count = 0;
+        for (uint32 child = 0; child < 8; ++child) {
+            // 서브트리가 빈 자식은 건너뛴다(점유 마스크와 같은 정보, 검색용 데이터만 읽는다).
+            if (block.nodes[child].subtreeCount == 0) {
+                continue;
+            }
+            detail::SearchStackEntry& next = children[count];
+            ChildOrigin(current.level, current.origin, child, next.origin);
+            next.node = ChildNode(node.childBlock, child);
+            next.level = static_cast<uint8>(current.level - 1);
+            next.contained = current.contained;
+            next.entry = current.entry;
+            if (!current.contained) {
+                if (stats != nullptr) {
+                    ++stats->visitedNodes;
+                }
+                const detail::NodeClass childClass =
+                    shape.Classify(LooseBoundsOf(next.level, next.origin), next.entry);
+                if (childClass == detail::NodeClass::Outside) {
+                    continue;
+                }
+                next.contained = childClass == detail::NodeClass::Inside;
+            }
+            if (policy.SkipEntry(next.entry)) {
+                continue;
+            }
+            ++count;
+        }
+        if constexpr (Shape::Ordered) {
+            // 진입 거리 오름차순, 같으면 자식 번호 오름차순(삽입 정렬은 안정적이고 자식은
+            // 번호순으로 모였다).
+            for (uint32 index = 1; index < count; ++index) {
+                const detail::SearchStackEntry moving = children[index];
+                uint32 position = index;
+                while (position != 0 && children[position - 1].entry > moving.entry) {
+                    children[position] = children[position - 1];
+                    --position;
+                }
+                children[position] = moving;
+            }
+        }
+        // 먼저 볼 자식이 먼저 나오도록 역순으로 쌓는다.
+        for (uint32 index = count; index != 0; --index) {
+            stack.PushBack(children[index - 1]);
+        }
+    }
+}
+
+// 노드 하나의 직접 저장 프록시 중 후보를 emit(handle, userValue, filter, 진입 거리)에 넘긴다.
+// emit이 거짓을 돌려주면 멈추고 거짓을 돌려준다. 필터를 먼저 적용한다. 완전 포함이면 공간 판정을
+// 생략한다. 박스는 저장 float 상대 경계로 판정한다(질의를 확장 경계로 자른 뒤 노드 중심 기준
+// float로 바깥쪽 반올림 — 저장 경계도 바깥쪽이므로 정확한 double 교차를 놓치지 않는다). 구·볼록
+// 영역·ray는 레코드의 정확한 double AABB에 Core 술어(Overlap·Raycast)를 그대로 적용한다(6.8절 대안,
+// 후보가 정답 술어와 정확히 같다).
+template <typename Shape, typename Emit>
+bool LooseOctree::ForEachNodeCandidate(uint32 nodeIndex, uint32 level, const int64 (&origin)[3],
+                                       bool contained, const Shape& shape, uint32 filterMask,
+                                       QueryStats* stats, Emit& emit) const noexcept {
+    const detail::SearchNode& node = Search(nodeIndex);
+    Box<float> query;
+    if constexpr (Shape::UsesChunkBounds) {
+        if (!contained) {
+            const Box<double> loose = LooseBoundsOf(level, origin);
+            const Vec3d center = CenterOf(level, origin);
+            const Box<double> clipped(ComponentMax(shape.box.min, loose.min),
+                                      ComponentMin(shape.box.max, loose.max));
+            query = Box<double>(clipped.min - center, clipped.max - center).ToFloatOutward();
+        }
+    }
+    for (uint32 chunkIndex = node.firstChunk; chunkIndex != detail::NoChunk;) {
+        const detail::ElementChunk& chunk = chunks_[chunkIndex];
+        for (uint32 entry = 0; entry < chunk.count; ++entry) {
+            const uint32 filter = chunk.filter[entry];
+            if ((filter & filterMask) == 0) {
+                continue;
+            }
+            double proxyEntry = 0.0;
+            if (contained) {
+                if (stats != nullptr) {
+                    ++stats->containedProxies;
+                }
+            } else {
+                if (stats != nullptr) {
+                    ++stats->testedProxies;
+                }
+                if constexpr (Shape::UsesChunkBounds) {
+                    if (chunk.minX[entry] > query.max.x || chunk.maxX[entry] < query.min.x ||
+                        chunk.minY[entry] > query.max.y || chunk.maxY[entry] < query.min.y ||
+                        chunk.minZ[entry] > query.max.z || chunk.maxZ[entry] < query.min.z) {
+                        continue;
+                    }
+                } else {
+                    if (!shape.Test(records_.ElementAt(chunk.slot[entry]).bounds, proxyEntry)) {
+                        continue;
+                    }
+                }
+            }
+            const SpatialProxyHandle handle{SlotHandle{chunk.slot[entry], chunk.generation[entry]}};
+            if (!emit(handle, chunk.userValue[entry], filter, proxyEntry)) {
+                return false;
+            }
+        }
+        chunkIndex = chunk.next;
+    }
+    return true;
+}
+
+// 범위 밖 목록의 후보다. 기준 노드가 없으므로 모든 형상을 정확한 double 경계로 판정한다.
+template <typename Shape, typename Emit>
+bool LooseOctree::ForEachOutOfRangeCandidate(const Shape& shape, uint32 filterMask,
+                                             QueryStats* stats, Emit& emit) const noexcept {
+    for (usize index = 0; index < outOfRange_.Size(); ++index) {
+        const detail::OutOfRangeEntry& entry = outOfRange_[index];
+        if ((entry.filter & filterMask) == 0) {
+            continue;
+        }
+        if (stats != nullptr) {
+            ++stats->testedProxies;
+        }
+        double proxyEntry = 0.0;
+        if (!shape.Test(entry.bounds, proxyEntry)) {
+            continue;
+        }
+        const SpatialProxyHandle handle{SlotHandle{entry.slot, entry.generation}};
+        if (!emit(handle, entry.userValue, entry.filter, proxyEntry)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+template <typename Shape, typename Sink>
+QueryOutcome LooseOctree::RunQuery(const Shape& shape, uint32 filterMask, Sink& sink,
                                    QueryStats* stats) const noexcept {
     QueryOutcome outcome;
     if (filterMask == 0) {
         return outcome;
     }
-
-    // 후보 하나를 낸다. Stop이면 true다.
-    const auto emit = [&](SpatialProxyHandle handle, uint64 userValue, uint32 filter) noexcept {
+    auto emit = [&](SpatialProxyHandle handle, uint64 userValue, uint32 filter, double) noexcept {
         SpatialProxyHit hit;
         hit.handle = handle;
         hit.userValue = userValue;
@@ -615,121 +1072,176 @@ QueryOutcome LooseOctree::VisitBox(const Box<double>& box, uint32 filterMask, Si
         }
         if (sink(static_cast<const SpatialProxyHit&>(hit)) == QueryControl::Stop) {
             outcome.stopped = true;
-            return true;
+            return false;
         }
-        return false;
+        return true;
     };
+    struct Policy {
+        const LooseOctree* tree;
+        const Shape* shape;
+        uint32 filterMask;
+        QueryStats* stats;
+        decltype(emit)* emit;
 
-    if (rootSearch_.subtreeCount != 0) {
-        InlineArray<detail::SearchStackEntry, LooseOctreeSearchStackCapacity> stack;
-        detail::SearchStackEntry root;
-        root.origin[0] = rootManage_.origin[0];
-        root.origin[1] = rootManage_.origin[1];
-        root.origin[2] = rootManage_.origin[2];
-        root.node = detail::RootNode;
-        root.level = rootManage_.level;
-        root.contained = false;
-        stack.PushBack(root);
-        while (!stack.IsEmpty()) {
-            const detail::SearchStackEntry current = stack.PopBack();
-            const detail::SearchNode& node = Search(current.node);
-            if (stats != nullptr) {
-                ++stats->visitedNodes;
-            }
-            bool contained = current.contained;
-            const Box<double> loose = LooseBoundsOf(current.level, current.origin);
-            if (!contained) {
-                // 닫힌 집합 규약: 접촉은 교차이고 "밖"은 엄격 부등식이다(6.8절).
-                if (loose.min.x > box.max.x || loose.max.x < box.min.x || loose.min.y > box.max.y ||
-                    loose.max.y < box.min.y || loose.min.z > box.max.z || loose.max.z < box.min.z) {
-                    continue;
-                }
-                contained = box.Contains(loose);
-            }
+        bool SkipEntry(double) const noexcept {
+            return false;
+        }
 
-            if (node.directCount != 0) {
-                // 부분 교차 노드는 질의를 확장 경계로 자른 뒤 노드 중심 기준 float로 바깥쪽
-                // 반올림한다. 저장 경계도 바깥쪽이므로 정확한 double 교차는 반드시 후보가 된다.
-                Box<float> query;
-                if (!contained) {
-                    const Vec3d center = CenterOf(current.level, current.origin);
-                    const Box<double> clipped(ComponentMax(box.min, loose.min),
-                                              ComponentMin(box.max, loose.max));
-                    query =
-                        Box<double>(clipped.min - center, clipped.max - center).ToFloatOutward();
-                }
-                for (uint32 chunkIndex = node.firstChunk; chunkIndex != detail::NoChunk;) {
-                    const detail::ElementChunk& chunk = chunks_[chunkIndex];
-                    for (uint32 entry = 0; entry < chunk.count; ++entry) {
-                        const uint32 filter = chunk.filter[entry];
-                        if ((filter & filterMask) == 0) {
-                            continue;
-                        }
-                        if (contained) {
-                            if (stats != nullptr) {
-                                ++stats->containedProxies;
-                            }
-                        } else {
-                            if (stats != nullptr) {
-                                ++stats->testedProxies;
-                            }
-                            if (chunk.minX[entry] > query.max.x ||
-                                chunk.maxX[entry] < query.min.x ||
-                                chunk.minY[entry] > query.max.y ||
-                                chunk.maxY[entry] < query.min.y ||
-                                chunk.minZ[entry] > query.max.z ||
-                                chunk.maxZ[entry] < query.min.z) {
-                                continue;
-                            }
-                        }
-                        const SpatialProxyHandle handle{
-                            SlotHandle{chunk.slot[entry], chunk.generation[entry]}};
-                        if (emit(handle, chunk.userValue[entry], filter)) {
-                            return outcome;
-                        }
-                    }
-                    chunkIndex = chunk.next;
-                }
-            }
-
-            if (node.childBlock != detail::NoBlock) {
-                const detail::SearchBlock& block = searchBlocks_[node.childBlock];
-                // 자식 0이 먼저 나오도록 역순으로 쌓는다. 서브트리가 빈 자식은 건너뛴다.
-                for (uint32 child = 8; child != 0; --child) {
-                    if (block.nodes[child - 1].subtreeCount == 0) {
-                        continue;
-                    }
-                    detail::SearchStackEntry next;
-                    ChildOrigin(current.level, current.origin, child - 1, next.origin);
-                    next.node = ChildNode(node.childBlock, child - 1);
-                    next.level = static_cast<uint8>(current.level - 1);
-                    next.contained = contained;
-                    stack.PushBack(next);
-                }
-            }
+        bool OnNode(uint32 node, uint32 level, const int64 (&origin)[3], bool contained) noexcept {
+            return tree->ForEachNodeCandidate(node, level, origin, contained, *shape, filterMask,
+                                              stats, *emit);
         }
-    }
-
-    // 범위 밖 목록은 기준 노드가 없으므로 모든 질의가 항상 double로 판정한다.
-    for (usize index = 0; index < outOfRange_.Size(); ++index) {
-        const detail::OutOfRangeEntry& entry = outOfRange_[index];
-        if ((entry.filter & filterMask) == 0) {
-            continue;
-        }
-        if (stats != nullptr) {
-            ++stats->testedProxies;
-        }
-        if (entry.bounds.min.x > box.max.x || entry.bounds.max.x < box.min.x ||
-            entry.bounds.min.y > box.max.y || entry.bounds.max.y < box.min.y ||
-            entry.bounds.min.z > box.max.z || entry.bounds.max.z < box.min.z) {
-            continue;
-        }
-        const SpatialProxyHandle handle{SlotHandle{entry.slot, entry.generation}};
-        if (emit(handle, entry.userValue, entry.filter)) {
-            return outcome;
-        }
+    };
+    Policy policy{this, &shape, filterMask, stats, &emit};
+    Walk(shape, policy, stats);
+    if (!outcome.stopped) {
+        (void)ForEachOutOfRangeCandidate(shape, filterMask, stats, emit);
     }
     return outcome;
+}
+
+// 최근접 ray(6.8절). 후보마다 hitTest(hit, 현재 최단 거리)를 부르고, hit이 참이며 거리가 현재
+// 최단보다 작을 때만(처음은 maxDistance 이하일 때) 줄인다. 노드는 double 확장 경계 진입 거리가 현재
+// 최단보다 엄격히 크면 쌓을 때와 꺼낼 때 모두 버리고, 프록시는 정확한 AABB 진입 거리가 현재
+// 최단보다 엄격히 크면 hitTest를 부르지 않는다. 진입 거리는 단조 식(Raycast)이라 노드 진입 ≤ 그 안
+// 프록시 진입이므로 가지치기가 답을 놓치지 않는다(전제: hitTest 거리 ≥ 프록시 AABB 진입 거리). AABB
+// 진입 거리만으로는 최단을 줄이지 않는다.
+template <typename HitTest>
+NearestHit LooseOctree::RunNearest(const detail::RayQueryShape& shape, uint32 filterMask,
+                                   HitTest& hitTest, QueryStats* stats) const noexcept {
+    NearestHit nearest;
+    if (filterMask == 0) {
+        return nearest;
+    }
+    double best = shape.maxDistance;
+    auto emit = [&](SpatialProxyHandle handle, uint64 userValue, uint32 filter,
+                    double entry) noexcept {
+        if (entry > best) {
+            return true;
+        }
+        SpatialProxyHit hit;
+        hit.handle = handle;
+        hit.userValue = userValue;
+        hit.filterMask = filter;
+        if (stats != nullptr) {
+            ++stats->results;
+        }
+        const RayHitResult result = hitTest(static_cast<const SpatialProxyHit&>(hit), best);
+        // NaN·음수·maxDistance 초과 거리는 계약 위반이므로 받지 않는다.
+        if (result.hit && result.distance >= 0.0 && result.distance <= shape.maxDistance &&
+            (!nearest.found || result.distance < best)) {
+            nearest.found = true;
+            nearest.proxy = hit;
+            nearest.distance = result.distance;
+            best = result.distance;
+        }
+        return true;
+    };
+    struct Policy {
+        const LooseOctree* tree;
+        const detail::RayQueryShape* shape;
+        uint32 filterMask;
+        QueryStats* stats;
+        decltype(emit)* emit;
+        const double* best;
+
+        bool SkipEntry(double entry) const noexcept {
+            return entry > *best;
+        }
+
+        bool OnNode(uint32 node, uint32 level, const int64 (&origin)[3], bool contained) noexcept {
+            return tree->ForEachNodeCandidate(node, level, origin, contained, *shape, filterMask,
+                                              stats, *emit);
+        }
+    };
+    Policy policy{this, &shape, filterMask, stats, &emit, &best};
+    Walk(shape, policy, stats);
+    (void)ForEachOutOfRangeCandidate(shape, filterMask, stats, emit);
+    return nearest;
+}
+
+template <typename Shape>
+BufferQueryOutcome LooseOctree::CollectBatches(const Shape& shape,
+                                               Span<SpatialNodeBatch> out) const noexcept {
+    BufferQueryOutcome outcome;
+    auto record = [&](uint32 node, uint32 proxyCount, bool contained) noexcept {
+        if (outcome.total < out.Size()) {
+            SpatialNodeBatch& batch = out[static_cast<usize>(outcome.total)];
+            batch.node = node;
+            batch.proxyCount = proxyCount;
+            batch.contained = contained;
+            batch.shape = Shape::Kind;
+            batch.tree = this;
+            batch.epoch = mutationEpoch_;
+            ++outcome.written;
+        }
+        ++outcome.total;
+    };
+    struct Policy {
+        const LooseOctree* tree;
+        decltype(record)* record;
+
+        bool SkipEntry(double) const noexcept {
+            return false;
+        }
+
+        bool OnNode(uint32 node, uint32, const int64 (&)[3], bool contained) noexcept {
+            (*record)(node, tree->Search(node).directCount, contained);
+            return true;
+        }
+    };
+    Policy policy{this, &record};
+    Walk(shape, policy, nullptr);
+    if (outOfRange_.Size() != 0) {
+        record(LooseOctreeOutOfRangeBatch, static_cast<uint32>(outOfRange_.Size()), false);
+    }
+    outcome.truncated = outcome.total > out.Size();
+    return outcome;
+}
+
+template <typename Shape, typename Sink>
+Result<QueryOutcome> LooseOctree::RunBatch(const SpatialNodeBatch& batch, const Shape& shape,
+                                           uint32 filterMask, Sink& sink,
+                                           QueryStats* stats) const noexcept {
+    if (batch.tree != this || batch.shape != Shape::Kind) {
+        return Result<QueryOutcome>::Failure(ErrorCode::InvalidArgument);
+    }
+    // 모은 뒤 변경이 있었으면 노드 번호와 프록시 배치가 달라졌을 수 있다.
+    if (batch.epoch != mutationEpoch_) {
+        return Result<QueryOutcome>::Failure(ErrorCode::StaleHandle);
+    }
+    const bool outOfRange = batch.node == LooseOctreeOutOfRangeBatch;
+    if (!outOfRange && batch.node != detail::RootNode &&
+        !searchBlocks_.IsLive(BlockOf(batch.node))) {
+        return Result<QueryOutcome>::Failure(ErrorCode::InvalidArgument);
+    }
+    QueryOutcome outcome;
+    if (filterMask == 0) {
+        return Result<QueryOutcome>::Success(outcome);
+    }
+    auto emit = [&](SpatialProxyHandle handle, uint64 userValue, uint32 filter, double) noexcept {
+        SpatialProxyHit hit;
+        hit.handle = handle;
+        hit.userValue = userValue;
+        hit.filterMask = filter;
+        ++outcome.visited;
+        if (stats != nullptr) {
+            ++stats->results;
+        }
+        if (sink(static_cast<const SpatialProxyHit&>(hit)) == QueryControl::Stop) {
+            outcome.stopped = true;
+            return false;
+        }
+        return true;
+    };
+    if (outOfRange) {
+        (void)ForEachOutOfRangeCandidate(shape, filterMask, stats, emit);
+    } else {
+        const detail::ManageNode& manage = Manage(batch.node);
+        (void)ForEachNodeCandidate(batch.node, manage.level, manage.origin, batch.contained, shape,
+                                   filterMask, stats, emit);
+    }
+    return Result<QueryOutcome>::Success(outcome);
 }
 
 } // namespace rocks::spatial
