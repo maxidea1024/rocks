@@ -9,7 +9,7 @@ using namespace rocks;
 // -Wswitch가 먼저 잡는다. 이 시험은 이름의 고유성과 마지막 열거자 다음 값의 "Unknown"을 확인한다(새
 // 열거자를 더하면 last도 그 값으로 옮긴다).
 TEST(ErrorCodeNamesAreCompleteAndUnique) {
-    constexpr uint32 last = static_cast<uint32>(ErrorCode::CycleDetected);
+    constexpr uint32 last = static_cast<uint32>(ErrorCode::ScopeClosed);
     for (uint32 i = 0; i <= last; ++i) {
         const char* name = ErrorCodeName(static_cast<ErrorCode>(i));
         CHECK(strcmp(name, "Unknown") != 0);
@@ -20,5 +20,8 @@ TEST(ErrorCodeNamesAreCompleteAndUnique) {
 
     CHECK(strcmp(ErrorCodeName(ErrorCode::AuthenticationFailed), "AuthenticationFailed") == 0);
     CHECK(strcmp(ErrorCodeName(ErrorCode::CycleDetected), "CycleDetected") == 0);
+    CHECK(strcmp(ErrorCodeName(ErrorCode::UnsupportedCapability), "UnsupportedCapability") == 0);
+    CHECK(strcmp(ErrorCodeName(ErrorCode::AlreadyRegistered), "AlreadyRegistered") == 0);
+    CHECK(strcmp(ErrorCodeName(ErrorCode::ScopeClosed), "ScopeClosed") == 0);
     CHECK(strcmp(ErrorCodeName(static_cast<ErrorCode>(last + 1)), "Unknown") == 0);
 }

@@ -1,0 +1,670 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::BaseGameAsset::baseName",
+      "id": "6a71d550601e4c66b3e2c2f3e605e6bd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::BaseGameAsset::baseValue",
+      "id": "7ed54f300bbd4728b01b31c2d72f4f75",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::BulkAsset::chunks",
+      "id": "f4aaf6bd181e4f8688b440cfc9173cb5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::BulkAsset::compressible",
+      "id": "0e74402cfeb74dcdbca70bb9cc77ea53",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::BulkAsset::empty",
+      "id": "6f4d78713dfd4ab4a54aa63affc2ae95",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::BulkAsset::incompressible",
+      "id": "e9946a5c95b049379690169aa8c06722",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::DerivedGameAsset::extra",
+      "id": "4734c616260a4a00821f63d5162da682",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::DerivedGameAsset::extras",
+      "id": "b2ac3f37c67940c28a8c80bd93dec76b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::FixtureEntry::cost",
+      "id": "4837a3a4151d410c8fd00a555bc4ecd0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::FixtureEntry::icon",
+      "id": "93c8691d594d410594e14c30ff382bec",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::FixtureEntry::id",
+      "id": "9a51c9c1443c470a9fb3cab4949c1477",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::FixtureEntry::weight",
+      "id": "e5da9251c35d41f3a00175bba530807f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::FixtureGroup::point",
+      "id": "909fb1092e63417ba37a1e03995231fc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::FixtureGroup::points",
+      "id": "11c55869ef2e4690b1f553312806a7ab",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::FixturePayload::factor",
+      "id": "fbf9417d708a484a9adad43a8574dda9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::FixturePayload::steps",
+      "id": "ea50d894e60d46188c7197f8a4d348df",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::FixturePoint::label",
+      "id": "299b685eecee4cf783593d5cb0d0959c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::FixturePoint::weight",
+      "id": "9b8ee3df016644afa9436bc0ce7fe000",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::FixturePoint::x",
+      "id": "74b0e8ec746c45f78b50727e23d485a2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::FixturePoint::y",
+      "id": "925f17a28272498080934d175bd777b7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::FixtureRange::high",
+      "id": "4865dc5c3b2e455195769d1438a26ef4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::FixtureRange::low",
+      "id": "642e7c461ac3405dbe657763197f1eab",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::GameComponent::material",
+      "id": "e0fc513cb72a42df99a6f52d255828d5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::GameComponent::next",
+      "id": "a80197de9c984918a03c13ceb27b721b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::GameComponent::response",
+      "id": "4129cba564d54e089c83b7c4b6b41999",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::GameComponent::slot",
+      "id": "b8f7ff0ca3244c67af4d185b2e5e7de2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::GameDataAsset::balance",
+      "id": "d4609a1a4396484db453a8f9c411078f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::GameDataAsset::byLevel",
+      "id": "2da5e45ce39d4ddbbf9bf51a4499cb90",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::GameDataAsset::components",
+      "id": "0f06aefba78241c6ae96771f38f454e5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::GameDataAsset::dependencies",
+      "id": "99dc2cccf7dc4ccda2a343f1f7c24fa3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::GameDataAsset::entries",
+      "id": "8beb1ed34ba24f49a5ec1170b89032c6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::GameDataAsset::fallback",
+      "id": "57655bc619d5483d88354380ecf85de6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::GameDataAsset::focus",
+      "id": "38bd7aa74a924eaa97c443065f23ef75",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::GameDataAsset::table",
+      "id": "248581bea806446283d6e70c4a462cc6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::GameDataAsset::title",
+      "id": "c29da09ee3ed41a284923246000aaf8e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::GameDataAsset::window",
+      "id": "4f63868dc3a145959cb92f6c85bc6132",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::SimpleAsset::big",
+      "id": "5bab38c0adc74bbeabcd589079124493",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::SimpleAsset::count",
+      "id": "4e872dd8cdca4755b216cf62ed7b2298",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::SimpleAsset::enabled",
+      "id": "e5953c932e9a4b20a9ac2e888803d4ab",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::SimpleAsset::key",
+      "id": "20e29d701bc84ff98f551d82532a9cd6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::SimpleAsset::kind",
+      "id": "d288486b630d4b08967cb387286988ca",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::SimpleAsset::label",
+      "id": "ecabd09619e648f995893d081a39a161",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::SimpleAsset::precise",
+      "id": "636126950aa34682a3d244265f7e3ca8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::SimpleAsset::ratio",
+      "id": "a505deeb008a4d0db58e1c61d1a7580d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::SimpleAsset::tag",
+      "id": "6d8b721019b94330aafe92f86bc016de",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::SimpleAsset::tiny",
+      "id": "13faf86a85c34cad8b6a5e73328e7306",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::TestAsset::editorRef",
+      "id": "15dae6a291fa41e689b863c3626a1730",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::TestAsset::hard",
+      "id": "08c8f220ddd24d988eb135c9f25651d2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::TestAsset::hardList",
+      "id": "b3bf22c36ecd4e1a96aeb70f7cc83dcb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::TestAsset::label",
+      "id": "73dca2a2156d48e7b32ce676e1b9df8a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::TestAsset::note",
+      "id": "e1b475163eda4747b1acbd86c0533d16",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::TestAsset::pixels",
+      "id": "51551fcaf4374773960a339009428519",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::TestAsset::soft",
+      "id": "785ba271361b473481779e7dc2796d81",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::TestAsset::source",
+      "id": "95fb82134794462dade697d478720fcc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::TestAsset::value",
+      "id": "3c3ff1a0c986485ba63b945352dc44cd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::TestPart::data",
+      "id": "a6156fae67e542c4b42137f27f00b580",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::TestPart::index",
+      "id": "af7a18f6cd5448f5b0c81a8eec04f934",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::TestPart::sibling",
+      "id": "c6ff00a503be4753b8daf04291e7770c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::TestRequiredAsset::target",
+      "id": "95b9794fa4f744bcb6dac7331f9b1a72",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::TestScratch::cache",
+      "id": "c107aa2e0c644ba994aa64cae8803cfe",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::ValidatedAsset::range",
+      "id": "eb2a6b1e764d48678da29edf179909a1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::ValidatedAsset::ranges",
+      "id": "116b67163d57431a852f6eb43e3ca325",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::ValueAsset::any",
+      "id": "fa114d034ff74176922cff523c6c9171",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::ValueAsset::bytes",
+      "id": "2a82fa8e7c22408cbece6026b427996f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::ValueAsset::curve",
+      "id": "9c28ba2756c54d9dbbc5588eb28ed3d6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::ValueAsset::fixed",
+      "id": "5c3941cc8f4448c188e5f4c28ee54bd3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::ValueAsset::group",
+      "id": "7564f2caedfc4d69b06d0724a07e4bf7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::ValueAsset::heading",
+      "id": "c031ca14bde04c7cb765d5e4b1b6c708",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::ValueAsset::maybe",
+      "id": "ea7d8750977e4a6595cfdd2ca710c5eb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::ValueAsset::maybePoint",
+      "id": "ff2ee6da6a4c4209afa9d3cfdf609b52",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::ValueAsset::names",
+      "id": "1607c07fee5e4661bb421989ec350657",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::ValueAsset::numbers",
+      "id": "2bd2af4a110d4f94b013134a1ca415f6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::ValueAsset::placement",
+      "id": "c9bc5b6e2df94fe387fa05fc428eba5a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::ValueAsset::position",
+      "id": "2d2cca5f61234455b238b956008c9328",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::ValueAsset::title",
+      "id": "5d3505128eaa4e30a11537969bdc31b7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::ValueAsset::track",
+      "id": "4a9c8cdb675945e0961671c3605de65f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::ValueAsset::words",
+      "id": "3c1466aac39146eba83d8bc7b22a6046",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::asset_fixture::BaseGameAsset",
+      "id": "044d473346c24619bda2b556bb2f62df",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::asset_fixture::BulkAsset",
+      "id": "19f912214c2e464995265356b860685d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::asset_fixture::DerivedGameAsset",
+      "id": "655b449837544a5fb0473a54bb95a997",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::asset_fixture::FixtureEntry",
+      "id": "56d5a42a8ca1490399623eeb752c7a11",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::asset_fixture::FixtureGroup",
+      "id": "39435a995ad4482f98e34b5abbb3732d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::asset_fixture::FixtureKind",
+      "id": "5d7e4fc30afc4c528cc6fc33008d0e14",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::asset_fixture::FixturePayload",
+      "id": "04709956649348aeabcc9d8b9f6f1d53",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::asset_fixture::FixturePoint",
+      "id": "c8b1872856364625abf72baa5c5ab80b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::asset_fixture::FixtureRange",
+      "id": "4713f9ec5f7b4e5585e93ea169379bc5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::asset_fixture::GameComponent",
+      "id": "664505cbbae1490793a4269b6b297b0e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::asset_fixture::GameDataAsset",
+      "id": "fda8d0d9321a462cb8553e393ac12734",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::asset_fixture::SimpleAsset",
+      "id": "f72e2f001bb440d09e6cd17e9f8c4a6f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::asset_fixture::TestAsset",
+      "id": "985f83177cf2447d9e089bee68fb04a8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::asset_fixture::TestPart",
+      "id": "768c50c03ccd4680a5132843306cf113",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::asset_fixture::TestRequiredAsset",
+      "id": "5de49742faa74857af7ee46233f60c30",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::asset_fixture::TestScratch",
+      "id": "b805288b2aab4857a766f61c932dc677",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::asset_fixture::ValidatedAsset",
+      "id": "81b752d208d549c3855dfe1c4e4d7b8a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::asset_fixture::ValueAsset",
+      "id": "be6026c018fc4fec90f39e84d35197e3",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}
