@@ -11,7 +11,7 @@
 | # | 처음 원인 | 현재 | 단계 |
 |---|---|---|---|
 | 1 | 간선마다 전역 잠금 | 표식 중 잠금 없음 | Phase 1 |
-| 2 | 192B Slot에 GC·비GC 필드 혼재 | marker는 GC 밀집 자료(슬롯당 약 21B)만 읽음. Slot 자체는 200B로 남음 | Phase 2(Slot 64B 미달) |
+| 2 | 192B Slot에 GC·비GC 필드 혼재 | marker는 GC 밀집 자료(슬롯당 약 21B)만 읽음. Slot은 hot 64B(조회·Borrow·참조 쓰기) + cold 128B(생성·회수·이름)로 나눔 | Phase 2·17절 |
 | 3 | 간선마다 간접 호출 | 배치 visitor, 생성 타입은 참조 위치 표(M3) | Phase 1·Phase 4 |
 | 4 | prefetch 없음 | prefetch, 참조 배열 버퍼 미리 읽기 | Phase 1·Phase 4 |
 | 5 | 루트 수집·sweep의 전체 Slot 순회 | 루트 목록·비트 sweep | Phase 2 |
@@ -30,7 +30,7 @@
 | sweep 후보 판정 | ≤ 1ms | 7.86ms | 0.01–0.19ms | 같음 | 충족 |
 | 증분 cycle | ≤ 60프레임 | 기본 예산 30,941 Step(60fps 약 8.6분) | 직렬 49–51, 병렬 21 Step | 3–5 Step | 충족 |
 | 증분 Step p99 | ≤ 2ms | 2ms 예산 2.02ms(cycle 669ms) | p95 2.1ms, p99는 부하 아래 판정 불가 | — | 재측정 필요 |
-| Slot 정보 | ≤ 64B | 192B | 200 + 20.8B | 장부 + 24B | 미달 |
+| Slot 정보 | ≤ 64B | 192B | hot 64B(슬롯 전체 192.3B) + 20.8B | 장부 + 24B | hot 충족(17절), 슬롯 전체는 192B |
 | churn 회수(약 98K) | — | 17.8ms | 15–28ms | — | 변화 없음(GC-S5) |
 | 1M 생성·회수(System·Binned 할당자) | — | 측정 불가 | 측정 불가 | — | GC-S6 남음 |
 
@@ -886,3 +886,44 @@ Debug 장부 재계산은 새 배치를 본다: 칸의 `clusterState`·`outCount
 | H5 | 회수 준비가 cold 이름 기록 포인터를 남김 | 실패 없음 | 같은 검사로 Object·GcSoak·Registry 중단 |
 
 보강(설계 개정 4): Debug에서 빈 슬롯을 재사용할 때 cold 칸이 모두 빈 값인지 검사한다("Reused slot kept cold state from its previous object"). 보강 뒤 Debug Foundation 2,063개·EngineTests 2,189개, smoke 3종이 다시 통과했다.
+
+## 18. 리뷰 반영 (2026-11-18)
+
+1913624(선형 검색 점검)의 독립 리뷰 지적 4건과, 반영 시험이 드러낸 결함 3건을 고쳤다. 계약은 설계에 먼저 적었다(엔진 런타임 4.5·7.2·7.4·13절, GC 설계 13.8·14.1절 — a034da3a·4dd80826·0e616e76).
+
+| 지적·발견 | 원인 | 고침 | 시험 |
+|---|---|---|---|
+| [중요] `DetachFromLevel` 좀비 | 끝 원소를 옮기는 `SetReferenceAt`이 옮긴 원소를 다시 검증한다. 끝 Actor가 우회 파괴로 DestroyRequested면 실패하고 그 실패를 버려 지운 Actor가 `Level::Actors()`에 남았다 | Registry `RemoveReferenceAtSwap`(옮긴 원소는 같은 소유자의 기존 간선이라 재검증·장부·관찰자 일이 없다). 실패와 위치 불일치는 Fatal | World (a) 같은 Level에서 끝 원소 포함 4개 우회 파괴, (b) 우회 파괴 + `DestroyActor` + Tick 안 파괴가 한 프레임에 겹침 — 둘 다 목록에 남지 않고 회수 |
+| [사소] `Level::Actors()` 주석 "Spawn 순서" | 바꿔 떼기 뒤 순서가 바뀐다 | "순서를 정하지 않는다"로. 순서에 기대는 호출자는 없었다(`WorldReflectionTests`의 순서 단언은 파괴 없는 로드 직후라 그대로 맞다) | — |
+| [사소] smoke `SyncFlattened`가 Registry 답을 따라감 | 모델이 예측하지 않고 결과를 복사 | 모델이 경계 소속 수를 장부 규칙으로 세고 문턱(80%)으로 해체를 예측, Registry 소속 답·`flattenedClusters`와 대조 | 패키지형 smoke |
+| [사소] 1913624 경로 직접 시험 없음 | — | — | TickScheduler 끝에 붙이기·선행 추가 재구성 생략·의존받는 항목의 미룬 해제·방문 번호 한 바퀴(모듈 Private `TickSchedulerTestAccess.h`), `TakeDestroyRequests`, `RemoveReferenceAtSwap`(배열·관찰자·클러스터 장부), hook 안 활성화의 시작 큐 재등록 |
+| (발견) Level 우회 파괴를 복구하지 않음 | 복구가 Actor만 보고, cycle 시작 전에만 돌았다. World 쪽 파괴가 없으면 GC가 돌지 않아 우회 파괴된 Actor·Level이 영영 남고, cycle 도중 우회 파괴는 정리 없이 회수될 수 있었다 | 복구를 매 프레임 GC step 전으로(목록이 비면 잠금 한 번). Level은 `DestroyLevel`(Level을 빌릴 수 없으면 Actor 레코드에서 소속을 찾음), 영구 Level은 Fatal. Level 판별은 슬롯 번호 집합 | `World_BypassedLevelDestroyIsRepaired`(GC idle·cycle 도중·같은 프레임 `DestroyActor`) |
+| (발견) 패키지 smoke가 문턱 90%를 구별 못 함 | 패키지 소속이 2–4개라 경계 비율이 50·67·75·100%뿐 | 소속 2–10개 | 음성 대조 R3 |
+| (발견) smoke seed 이웃이 같은 실행 | `seed | 1`로 상태를 만들어 짝수 seed와 다음 홀수 seed가 같았다(52·53) | 섞은 뒤 하위 비트 | seed 52·53 결과가 다름 |
+
+같은 패턴 점검: 위치 교체(`SetReferenceAt`)로 원소를 옮기는 곳은 `DetachFromLevel`뿐이었다. World의 다른 Registry 편집 실패 무시(`(void)`)는 정리 경로에서 대상이 이미 회수됐을 때(StaleHandle·Destroyed)의 무시이고, 실패하면 배열에 좀비가 남는 곳은 없었다.
+
+음성 대조(`p4/negctl6.txt`·`negctl6b.txt` — 고친 지점마다 옛 구현이나 잘못된 조건을 넣어 Debug로 빌드하고 해당 시험을 돌린 뒤 되돌림):
+
+| 대조 | 바꾼 것 | 결과 |
+|---|---|---|
+| R1 | 옛 `DetachFromLevel`(위치 교체, 실패 시 그냥 반환) | World 시험 2개 실패((a)·(b) — 목록 잔존·미회수) |
+| R2 | 모델 문턱 70% | 패키지 smoke 3종 모두 실패(3–40 tick) |
+| R3 | 모델 문턱 90% | 처음 smoke(소속 2–4)는 **통과 — 시험 구멍**. 소속 2–10으로 바꾼 뒤 3종 모두 실패(10–146 tick) |
+| R4 | 등록을 끝에 붙이지 않음(늘 재구성) | `Tick_RegistrationAtOrAbove…` 실패(재구성 예약 수) |
+| R5 | priority와 관계없이 끝에 붙임 | Tick 시험 3개 실패(순서) |
+| R6 | 선행 추가가 재구성을 예약하지 않음 | Tick 시험 2개 실패(순서) |
+| R7 | 선행 추가가 늘 재구성 | `Tick_PrerequisiteAlreadyHonoured…` 실패 |
+| R8 | 의존받는 항목 해제가 재구성하지 않음 | Tick 시험 2개 실패(새 미룬 해제 시험·기존 선행 시험) |
+| R9 | 방문 번호가 0으로 돈 뒤 초기화 없음 | `Tick_CycleCheckSurvivesMarkEpochWrap` 실패(사이클을 받아들임) |
+| R10 | 1로 되돌리되 방문 표시를 비우지 않음 | 같은 시험 실패 |
+| R11 | hook 안 활성화가 시작 큐에 다시 넣지 않음 | World 시험 2개 실패(새 hook 시험·기존 꺼진 Actor 시험) |
+| R12 | `TakeDestroyRequests`가 꺼낸 것을 목록에서 빼지 않음 | `TakeDestroyRequests` 시험 실패(같은 handle 반복) |
+| R13 | 바꿔 떼기 대신 당기기 | 배열·클러스터 시험 2개 실패(순서) |
+| R14 | 바꿔 떼기가 장부 몫을 옮긴 원소에서 뺌 | 클러스터 시험이 Debug 장부 검증 Fatal로 중단 |
+| R15 | 복구를 cycle 시작 전에만(처음 구현) | Level 우회 파괴 시험 실패 |
+| R16 | Level을 복구하지 않음 | 같은 시험 실패 |
+| R17 | 우회 파괴된 Level에서 떼기를 불가능으로(Fatal) | World 시험 중단(같은 프레임 `DestroyActor`) |
+| R18 | Level 복구가 Actor 레코드로 대체하지 않음 | Level 우회 파괴 시험 실패 |
+
+검증(a43ca91e): Debug Foundation 전체 2,067개·`--filter Object --repeat 3` 197개×3, Debug EngineTests 전체 2,201개·World `--repeat 3`·`--repeat 5` 57개, Tick `--repeat 5` 13개, 클러스터 smoke Debug 6종(World형 seed 41·47·43(worker 4), 패키지형 seed 42·48·44(worker 4))과 패키지형 seed 52·53(이제 서로 다른 실행), Development soak 10종(일반 300K tick seed 11·12·24(worker 4)·14(시간 예산), 클러스터 World형 seed 31·35·33(worker 4), 패키지형 seed 32·36·34(worker 4)), format·policy 통과. 패키지 smoke의 해체 수는 소속 수를 넓힌 뒤 300–400 tick에 122–159개다(전에는 330–385개 — 큰 패키지는 경계 비율 80%를 덜 넘는다).
