@@ -698,7 +698,7 @@ C06에서 move-only Function과 loader 비의존 ModuleLease를 먼저 도입한
 | 3주 | C09–C11: 참조·생성·full GC | CT stress seed와 graph oracle | root/weak 경합·오수거 |
 | 4주 | C12·R1 통합: destroy·shutdown | 후속 Task/Archive 계약 검토 | 종료 deadlock·leak·type 조기 해제 |
 
-첫 실행은 FoundationTests에서 LeafObject, PairObject, ArrayOwner를 생성하여 strong cycle을 구성하고, RootRef를 제거한 뒤 full GC로 모두 회수하는 경로다. stale WeakRef, 실패한 생성, DestroyRequested인 root 보유 객체, 반복 boot/shutdown을 같은 runner에서 검증한다. 화면·에셋·게임 모듈은 필요하지 않다.
+첫 실행은 FoundationTests에서 LeafObject, PairObject, ArrayOwner를 생성하여 strong cycle을 구성하고, RootRef를 제거한 뒤 full GC로 모두 회수하는 경로다. stale WeakObjectRef, 실패한 생성, DestroyRequested인 root 보유 객체, 반복 boot/shutdown을 같은 runner에서 검증한다. 화면·에셋·게임 모듈은 필요하지 않다.
 
 ### 15.3 작업 완료 규칙
 

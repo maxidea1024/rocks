@@ -350,7 +350,7 @@ RenderLane::Post(표면 작업) ──────────▶ 스왑체인 �
 
 **구현(2026-11-17).** 새 모듈 `Engine/Source/Runtime/RenderBase`(의존 Graphics·Task·MetaSchema)에 `RenderLane`·`FrameTicket`·`RenderLaneProcessor`·`ROCKS_RENDER_TRANSFERABLE`·`RenderNotices`·`RenderHandleTable`·`RenderBlob`을 두었다. 아래 기준은 기록 backend(`RenderBase/Tests/RecordingDevice`) CPU 시험과 Sandbox self-test(D3D12·WARP·OpenGL, Thread·Inline)로 확인한다. 구현 메모:
 - 작업 함수는 캡처 없는 함수 포인터만 받는다. 캡처로 게임 주소를 넘기는 길을 막기 위해서다. lane 쪽 객체는 `RenderLaneContext::Processor`로 얻는다.
-- `ObjectRef`는 이동할 수 없으므로 그 필드를 가진 struct는 등록해도 C++ 타입 검사가 먼저 거부한다. Development 스키마 검사는 이동할 수 있는 `WeakRef`·참조 컨테이너 필드를 거부한다(중첩 struct는 보지 않는다).
+- `ObjectRef`는 이동할 수 없으므로 그 필드를 가진 struct는 등록해도 C++ 타입 검사가 먼저 거부한다. Development 스키마 검사는 이동할 수 있는 `WeakObjectRef`·참조 컨테이너 필드를 거부한다(중첩 struct는 보지 않는다).
 - slot의 GPU 완료 표지는 그 프레임 작업 안의 마지막 제출 fence이며 `NotifyFence`로 받는다. fence 완료는 lane inbox로 들어가 lane 작업(Inline 모드는 기다리는 게임 lane이 실행하는 lane 작업)이 장치 회수 → 통지 순서로 처리한다.
 - 대기 중 펌프는 1 ms 간격(UE와 같다)이며 펌프 hook이 없으면 이벤트만 기다린다. 대기 진단 상한(120초)의 디버거 연결 감지는 아직 없다.
 - `Start`는 시작 작업 완료를 기다리지 않는다(첫 `BeginFrame`이 기다린다). 그래서 이관 중에 게시한 표면 작업도 lane이 소유권을 얻은 뒤 FIFO로 실행된다.
