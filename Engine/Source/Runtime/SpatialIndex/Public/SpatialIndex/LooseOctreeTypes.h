@@ -138,12 +138,16 @@ struct LooseOctreeConfig {
     Vec3d anchor = Vec3d(0.0, 0.0, 0.0);
     // level 0 기본 셀의 한 변이다. 2의 거듭제곱이고 float 최소 정규 값의 2^24배 이상이어야 한다.
     double minCellSize = 128.0;
-    // 초기 루트 level이자 루트 축소의 하한이다. [1, maxRootLevel].
-    uint32 initialRootLevel = 10;
+    // 초기 루트 level이자 루트 축소의 하한이다. [1, maxRootLevel]. 기본 8(한 변 32,768 cm)은 OT6
+    // 조합 측정(2026-11-19, 결정 8)에서 정했다. 데이터보다 훨씬 큰 초기 루트는 looseness가 작을 때
+    // 크기 편차가 큰 분포의 구조를 나쁘게 했다.
+    uint32 initialRootLevel = 8;
     // 루트 확장 한도다. LooseOctreeLevelLimit 이하. 최대 깊이는 maxRootLevel + 1이다.
     uint32 maxRootLevel = 24;
-    // 확장 경계 배율 k다. [1, 2]에서 1/64 단위다(2진 유리수라 k · h가 정확하다).
-    double looseness = 2.0;
+    // 확장 경계 배율 k다. [1, 2]에서 1/64 단위다(2진 유리수라 k · h가 정확하다). 기본 3/2는 OT6
+    // 조합 측정(2026-11-19, 결정 8)에서 정했다(k = 2 대비 균일·군집·겹치는 과밀의 질의가 빨라지고
+    // 크기 편차 분포가 나빠지지 않은 조합).
+    double looseness = 1.5;
     // 잎의 분할 평가를 시작하는 직접 저장 수다(수용 한도가 아니다). 4 이상.
     uint32 splitThreshold = 16;
     // 병합 후보 기준(서브트리 프록시 수)이다. splitThreshold / 2(정수 나눗셈) 이하.

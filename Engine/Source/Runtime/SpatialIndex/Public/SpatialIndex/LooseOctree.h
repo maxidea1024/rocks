@@ -281,7 +281,7 @@ struct RayQueryShape {
 // 순서가 나온다. 시간 예산 유지보수는 순서를 보장하지 않는다.
 //
 // 사용 예:
-//   LooseOctreeConfig config;   // 기본값: 128 cm 최소 셀, 초기 루트 level 10
+//   LooseOctreeConfig config;   // 기본값: 128 cm 최소 셀, 초기 루트 level 8, looseness 3/2
 //   Result<LooseOctree> created = LooseOctree::TryCreate(config, allocator);
 //   if (!created) {
 //       return Result<void>::Failure(created.Error());
