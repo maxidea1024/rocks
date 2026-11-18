@@ -223,9 +223,13 @@ NameOutcome ConvertName(WatchBackend& backend, const wchar_t* name, DWORD nameBy
             }
         }
     }
-    if (!WideToUtf8(name, static_cast<int>(units), backend.names, NameScratchBytes, bytes)) {
+    const windows::TextConversion converted = windows::ConvertWideToUtf8(
+        name, units, backend.names, NameScratchBytes, windows::TextFit::Exact);
+    if (!converted) {
         return NameOutcome::Invalid;
     }
+
+    bytes = converted.length;
     for (usize index = 0; index < bytes; ++index) {
         if (backend.names[index] == '\\') {
             backend.names[index] = '/';

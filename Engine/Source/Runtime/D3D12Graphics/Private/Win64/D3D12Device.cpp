@@ -1,5 +1,7 @@
 #include "D3D12DeviceImpl.h"
 
+#include <DxgiGraphics/DxgiAdapter.h>
+
 namespace rocks::graphics::d3d12 {
 
 D3D12Device::D3D12Device(Allocator& allocator) noexcept
@@ -63,7 +65,7 @@ Result<void> D3D12Device::Initialize(const DeviceDesc& desc) noexcept {
     ComRef<IDXGIAdapter1> adapter;
     if (!desc.preferSoftware) {
         ComRef<IDXGIFactory6> factory6;
-        if (SUCCEEDED(factory_->QueryInterface(IID_PPV_ARGS(factory6.Out())))) {
+        if (SUCCEEDED(factory_.TryQueryAs(factory6))) {
             for (UINT index = 0;; ++index) {
                 ComRef<IDXGIAdapter1> candidate;
                 if (FAILED(factory6->EnumAdapterByGpuPreference(
@@ -100,16 +102,9 @@ Result<void> D3D12Device::Initialize(const DeviceDesc& desc) noexcept {
         software_ = true;
     }
 
-    DXGI_ADAPTER_DESC1 info = {};
-    adapter->GetDesc1(&info);
-    // UTF-16 128자(Description 크기)는 UTF-8로 최대 384 byte다.
-    char name[512] = {};
-    const int written = WideCharToMultiByte(CP_UTF8, 0, info.Description, -1, name,
-                                            static_cast<int>(sizeof(name)), nullptr, nullptr);
-    if (written > 1) {
-        auto assigned = adapterName_.TryAssign(StringView(name, static_cast<usize>(written - 1)));
-        (void)assigned;
-    }
+    // 이름은 진단용이라 읽지 못해도(빈 이름) 장치 생성은 계속한다.
+    auto named = dxgi::AssignAdapterName(adapter.Get(), adapterName_);
+    (void)named;
 
     if (validation_) {
         ConfigureValidationQueues();
@@ -564,7 +559,7 @@ void D3D12Device::KeepUntilDestruction(ComRef<ID3D12Resource>&& object) noexcept
 }
 
 void D3D12Device::ConfigureValidationQueues() noexcept {
-    if (SUCCEEDED(device_->QueryInterface(IID_PPV_ARGS(infoQueue_.Out())))) {
+    if (SUCCEEDED(device_.TryQueryAs(infoQueue_))) {
         // 오류만 저장해 저장 한도(기본 1024개)를 경고가 채우지 않게 한다.
         D3D12_MESSAGE_SEVERITY severities[] = {D3D12_MESSAGE_SEVERITY_CORRUPTION,
                                                D3D12_MESSAGE_SEVERITY_ERROR};

@@ -57,16 +57,12 @@ usize CopyCurrentThreadName(char* buffer, usize capacity) noexcept {
         return 0;
     }
 
-    usize bytes = 0;
-    const bool converted =
-        detail::WideToUtf8(description, lstrlenW(description), buffer, capacity, bytes);
+    const windows::TextConversion converted =
+        windows::ConvertWideToUtf8(description, static_cast<usize>(lstrlenW(description)), buffer,
+                                   capacity, windows::TextFit::Exact);
     LocalFree(description);
-    if (!converted) {
-        buffer[0] = '\0';
-        return 0;
-    }
-
-    return bytes;
+    // 실패하면 buffer는 이미 빈 문자열이다.
+    return converted ? converted.length : 0;
 }
 
 namespace detail {
@@ -83,10 +79,15 @@ unsigned __stdcall ThreadEntry(void* context) noexcept {
 void ApplyCurrentThreadOptions(const ThreadState& state) noexcept {
     if (state.name[0] != '\0') {
         // Start가 UTF-8과 길이를 검사했으므로 변환은 실패하지 않는다. 실패해도 이름은 힌트라
-        // 무시한다.
+        // 무시한다. UTF-8 n byte는 UTF-16 n 단위를 넘지 않으므로 칸이 모자라지 않는다.
         wchar_t wide[MaxThreadNameBytes + 1]{};
-        if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, state.name, -1, wide,
-                                static_cast<int>(MaxThreadNameBytes + 1)) > 0) {
+        usize bytes = 0;
+        while (bytes < MaxThreadNameBytes && state.name[bytes] != '\0') {
+            ++bytes;
+        }
+
+        if (windows::ConvertUtf8ToWide(state.name, bytes, wide, MaxThreadNameBytes + 1,
+                                       windows::TextFit::Exact)) {
             static_cast<void>(SetThreadDescription(GetCurrentThread(), wide));
         }
     }

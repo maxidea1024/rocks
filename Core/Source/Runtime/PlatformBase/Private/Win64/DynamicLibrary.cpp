@@ -115,7 +115,7 @@ FileStatus DynamicLibraryOpenPath(const char* path, usize pathBytes, uptr& handl
 }
 
 FileStatus DynamicLibraryOpenSystem(const char* name, usize nameBytes, uptr& handle) noexcept {
-    WideString wide;
+    windows::WideString wide;
     FileStatus status = wide.AssignUtf8(name, nameBytes);
     if (!status) {
         return status;

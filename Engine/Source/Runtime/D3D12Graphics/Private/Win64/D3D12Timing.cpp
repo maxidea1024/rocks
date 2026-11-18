@@ -1,5 +1,7 @@
 #include "D3D12DeviceImpl.h"
 
+#include <Platform/Win64/WideString.h>
+
 namespace rocks::graphics::d3d12 {
 
 usize D3D12Device::CollectTimestamps(Span<TimestampSample> out) noexcept {
@@ -115,18 +117,15 @@ void D3D12Device::PushMarker(StringView name) noexcept {
     if (!recording_) {
         return;
     }
+    // UTF-8 n byte는 UTF-16 n 단위를 넘지 않으므로 잘리지 않는다. 잘못된 UTF-8이면 빈 이름이다.
     const StringView clipped = ClipDebugMarkerName(name);
     wchar_t text[MaxDebugMarkerNameBytes + 1];
-    int length = 0;
-    if (clipped.ByteCount() != 0) {
-        length =
-            MultiByteToWideChar(CP_UTF8, 0, clipped.Data(), static_cast<int>(clipped.ByteCount()),
-                                text, static_cast<int>(MaxDebugMarkerNameBytes));
-    }
-    text[length > 0 ? length : 0] = L'\0';
+    const platform::windows::TextConversion converted = platform::windows::ConvertUtf8ToWide(
+        clipped.Data(), clipped.ByteCount(), text, MaxDebugMarkerNameBytes + 1,
+        platform::windows::TextFit::Truncate);
     constexpr UINT UnicodeEventMetadata = 0;
     list_->BeginEvent(UnicodeEventMetadata, text,
-                      static_cast<UINT>((length > 0 ? length + 1 : 1) * sizeof(wchar_t)));
+                      static_cast<UINT>((converted.length + 1) * sizeof(wchar_t)));
     ++markerDepth_;
 }
 

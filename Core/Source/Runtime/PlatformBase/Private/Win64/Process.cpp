@@ -170,7 +170,7 @@ bool AppendQuotedArgument(ByteBuffer& line, const char* text, usize bytes) noexc
 // argv[0]은 CRT가 역슬래시를 해석하지 않고 따옴표로만 구분하므로 항상 따옴표로 감싼다(경로에 '"'는
 // 없다). 나머지 인자는 AppendQuotedArgument 규칙이다.
 FileStatus BuildCommandLine(const ProcessStartInfo& info,
-                            detail::WideString& commandLine) noexcept {
+                            windows::WideString& commandLine) noexcept {
     ByteBuffer line;
     bool appended =
         line.Append('"') && line.Append(info.executable, info.executableBytes) && line.Append('"');
@@ -550,9 +550,9 @@ FileStatus Process::Start(const ProcessStartInfo& info) noexcept {
         return {FileCode::Unsupported, 0};
     }
 
-    detail::WideString application;
-    detail::WideString commandLine;
-    detail::WideString directory;
+    windows::WideString application;
+    windows::WideString commandLine;
+    windows::WideString directory;
     status = application.AssignUtf8(info.executable, info.executableBytes);
     if (status) {
         status = BuildCommandLine(info, commandLine);
@@ -1182,7 +1182,7 @@ FileStatus GetExecutablePath(char* buffer, usize capacity, usize& bytes) noexcep
         return {FileCode::InvalidArgument, 0};
     }
 
-    detail::WideString path;
+    windows::WideString path;
     auto status = path.AssignModuleFileName();
     if (!status) {
         return status;
