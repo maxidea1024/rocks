@@ -20,7 +20,7 @@ const char* JsonErrorMessage(JsonErrorCode code) noexcept {
     case JsonErrorCode::InvalidNumber:
         return "invalid number";
     case JsonErrorCode::NumberOutOfRange:
-        return "number is out of double range";
+        return "number is out of range";
     case JsonErrorCode::InvalidEscape:
         return "invalid escape sequence";
     case JsonErrorCode::InvalidUtf8:
