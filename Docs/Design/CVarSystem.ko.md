@@ -132,7 +132,8 @@ public:
     // 공통
     constexpr VarBuilder&& Help(StringView text) && noexcept;          // 필수
     constexpr VarBuilder&& Category(StringView category) && noexcept;  // cvar.find 분류
-    constexpr VarBuilder&& Validate(StringView (*check)(const T&) noexcept) && noexcept;
+    // ValidateArg<T>는 String·Name이면 StringView, 그 밖에는 const T&다.
+    constexpr VarBuilder&& Validate(StringView (*check)(ValidateArg<T>) noexcept) && noexcept;
     // 수(int32·int64·float·double)만
     constexpr VarBuilder&& Range(TypeIdentityT<T> minimum, TypeIdentityT<T> maximum) && noexcept;
     constexpr VarBuilder&& Clamp() && noexcept;                        // Range가 있어야 한다
@@ -150,6 +151,7 @@ public:
 ```
 
 - `Validate`는 갈무리 없는 람다(함수 포인터)다. 통과면 빈 `StringView`, 위반이면 이유(영어 리터럴)를 돌려준다. 검증 함수는 순수해야 하고(입력 값만 본다) 상수 평가가 가능해야 한다. 기본값도 이 함수로 컴파일 때 검사한다.
+- `String`·`Name` 변수의 검증 함수는 `StringView`를 받는다(`StringView (*)(StringView) noexcept`). 핸들이 기본값을 `StringView` 상수로 담고, `String`은 할당이 필요해 상수 평가로 만들 수 없기 때문이다. 실행 중 쓰기도 값 텍스트를 `StringView`로 넘겨 검사한다. 예: 로깅의 `log.levels`는 `.Validate(CheckLogLevelsSyntax)`이고 문법만 본다(Logging L18).
   ```cpp
   CVar<int32> Samples = cvar::Var("render.aa.samples", 4).Help("MSAA sample count")
       .Validate([](const int32& value) noexcept -> StringView {
@@ -649,5 +651,5 @@ public:
 
 ## 23. 개정 이력
 
-- 개정 2(2026-11-18): VD2(소문자 점 경로 이름, `r.X` 안 씀)를 사용자가 권장안으로 확정했다. 22절의 다른 문서 개정을 모두 반영했다(Config 개정 4, RenderBase 개정 13, UiToolkit CU2 행, UnrealCoreFeatureAudit UE-C21·UE-C29 행). 구현 착수는 다른 세션 작업 뒤 사용자가 정한다.
+- 개정 2(2026-11-18): VD2(소문자 점 경로 이름, `r.X` 안 씀)를 사용자가 권장안으로 확정했다. 로깅 세션 조율로 CVR7 `log.*` 이관 규칙을 적고, `String`·`Name` 변수의 `Validate` 인자를 `StringView`로 정했다(`ValidateArg<T>` — 4.2절). 22절의 다른 문서 개정을 모두 반영했다(Config 개정 4, RenderBase 개정 13, UiToolkit CU2 행, UnrealCoreFeatureAudit UE-C21·UE-C29 행). 구현 착수는 다른 세션 작업 뒤 사용자가 정한다.
 - 개정 1(2026-11-18): 초안. 사용자 제공 요구(타입 있는 CVar·부팅 고정·enum·레이어 스택·컨텍스트·프레임 snapshot·프리셋·지연 바인딩·치트·복제·도구)를 Config 개정 3과 엔진 원칙(전역 생성자 금지·JSON·소문자 점 이름·결정적 시험)에 맞춰 옮기고, 객체 시스템 연결(14절)을 더했다. UE 5.8.4 `IConsoleManager.h`(SetBy 순서·`ECVF_Cheat`·`TAutoConsoleVariable`)·`CheatManager`(exec 함수·확장·권한 경로)·`CheatManagerDefines.h`를 조사했다. 같은 날 리뷰어 1명의 교차 검증(clang으로 consteval 빌더·상수 초기화·Release 문자열 제거·다른 TU 주소 항목 시험)을 반영했다: Sync 순서(묶음 해결을 유효값 계산과 한 반복으로), 등록 즉시 게시, 치트 허용 상태를 CVar 하나로, Scoped < 콘솔 < Server, `RequiresRestart`를 BootCVar로 흡수, 범위 값 하나, 문자열·Name 기본값 overload, 지역 핸들 거부, `Get` overload 축소, UE 인용 정정. 사용자 요구(스레드 문제 없음)로 10.1절 스레드 안전성을 더하고 worker가 snapshot 참조를 쥐게 했다.
