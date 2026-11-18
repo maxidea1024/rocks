@@ -193,4 +193,119 @@ inline void MatrixMultiply(const float* a, const float* b, float* output) noexce
     }
 }
 
+// ---- 비교·mask·선택(SoA 일괄 판정용) ----
+// 비교 결과는 lane마다 모든 bit가 1(참) 또는 0(거짓)인 mask다. 같은 Register4f 타입으로 돌려주며
+// BitAnd·BitOr·BitXor·BitAndNot으로 조합하고 Select·MoveMask로 소비한다. IEEE 순서 비교이므로
+// 어느 쪽이든 NaN이면 모든 비교가 거짓이고, -0과 +0은 같다(C++ 비교 연산자와 같은 규약). mask가
+// 아닌 값에 bit 연산·Select를 써도 bit 단위로 정의된다. 모든 backend가 bit 단위로 같은 결과를 낸다.
+//
+// 사용 예(4개 AABB와 질의 박스의 x축 겹침):
+//   const Register4f overlap = BitAnd(CompareLessEqual(minX, Splat(queryMaxX)),
+//                                     CompareGreaterEqual(maxX, Splat(queryMinX)));
+//   uint32 hits = MoveMask(overlap);   // bit i가 lane i의 결과다
+//   while (hits != 0) { ...; hits &= hits - 1; }
+
+inline float MaskLane(bool value) noexcept {
+    return platform::BitCast<float>(value ? NumericLimits<uint32>::Max() : 0u);
+}
+
+// lane별 a == b다.
+inline Register4f CompareEqual(Register4f a, Register4f b) noexcept {
+    Register4f result;
+    for (int i = 0; i < 4; ++i) {
+        result.lane[i] = MaskLane(a.lane[i] == b.lane[i]);
+    }
+    return result;
+}
+
+// lane별 a < b다.
+inline Register4f CompareLess(Register4f a, Register4f b) noexcept {
+    Register4f result;
+    for (int i = 0; i < 4; ++i) {
+        result.lane[i] = MaskLane(a.lane[i] < b.lane[i]);
+    }
+    return result;
+}
+
+// lane별 a <= b다.
+inline Register4f CompareLessEqual(Register4f a, Register4f b) noexcept {
+    Register4f result;
+    for (int i = 0; i < 4; ++i) {
+        result.lane[i] = MaskLane(a.lane[i] <= b.lane[i]);
+    }
+    return result;
+}
+
+// lane별 a > b다.
+inline Register4f CompareGreater(Register4f a, Register4f b) noexcept {
+    Register4f result;
+    for (int i = 0; i < 4; ++i) {
+        result.lane[i] = MaskLane(a.lane[i] > b.lane[i]);
+    }
+    return result;
+}
+
+// lane별 a >= b다.
+inline Register4f CompareGreaterEqual(Register4f a, Register4f b) noexcept {
+    Register4f result;
+    for (int i = 0; i < 4; ++i) {
+        result.lane[i] = MaskLane(a.lane[i] >= b.lane[i]);
+    }
+    return result;
+}
+
+// bit 단위 a & b다.
+inline Register4f BitAnd(Register4f a, Register4f b) noexcept {
+    Register4f result;
+    for (int i = 0; i < 4; ++i) {
+        result.lane[i] = platform::BitCast<float>(platform::BitCast<uint32>(a.lane[i]) &
+                                                  platform::BitCast<uint32>(b.lane[i]));
+    }
+    return result;
+}
+
+// bit 단위 a | b다.
+inline Register4f BitOr(Register4f a, Register4f b) noexcept {
+    Register4f result;
+    for (int i = 0; i < 4; ++i) {
+        result.lane[i] = platform::BitCast<float>(platform::BitCast<uint32>(a.lane[i]) |
+                                                  platform::BitCast<uint32>(b.lane[i]));
+    }
+    return result;
+}
+
+// bit 단위 a ^ b다.
+inline Register4f BitXor(Register4f a, Register4f b) noexcept {
+    Register4f result;
+    for (int i = 0; i < 4; ++i) {
+        result.lane[i] = platform::BitCast<float>(platform::BitCast<uint32>(a.lane[i]) ^
+                                                  platform::BitCast<uint32>(b.lane[i]));
+    }
+    return result;
+}
+
+// bit 단위 a & ~b다(인자 순서에 주의: b 쪽을 뒤집는다).
+inline Register4f BitAndNot(Register4f a, Register4f b) noexcept {
+    Register4f result;
+    for (int i = 0; i < 4; ++i) {
+        result.lane[i] = platform::BitCast<float>(platform::BitCast<uint32>(a.lane[i]) &
+                                                  ~platform::BitCast<uint32>(b.lane[i]));
+    }
+    return result;
+}
+
+// bit 단위 (mask & a) | (~mask & b)다. 비교 mask면 lane별 mask ? a : b다.
+inline Register4f Select(Register4f mask, Register4f a, Register4f b) noexcept {
+    return BitOr(BitAnd(mask, a), BitAndNot(b, mask));
+}
+
+// lane i의 부호 bit를 결과의 bit i로 모은다(0–15). 비교 mask면 참인 lane의 bit가 1이다.
+inline uint32 MoveMask(Register4f value) noexcept {
+    uint32 bits = 0;
+    for (int i = 0; i < 4; ++i) {
+        bits |= (platform::BitCast<uint32>(value.lane[i]) >> 31) << i;
+    }
+    return bits;
+}
+
 } // namespace rocks::platform::scalar

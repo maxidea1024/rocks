@@ -746,6 +746,16 @@ Result<void> GlesDevice::ReadDepthPlane(const TextureRecord& record, uint32 mipL
                           static_cast<GLint>(stencil ? GL_STENCIL_INDEX : GL_DEPTH_COMPONENT));
     }
 
+    // 성분 대응은 텍스처 객체 상태라 마지막 그리기의 swizzle(BindPassTexture)이 남아 있을 수 있다.
+    // 저장된 값을 읽도록 네 성분을 항등으로 둔다(다음 그리기는 묶을 때 다시 정한다).
+    constexpr GLenum Parameters[4] = {GL_TEXTURE_SWIZZLE_R, GL_TEXTURE_SWIZZLE_G,
+                                      GL_TEXTURE_SWIZZLE_B, GL_TEXTURE_SWIZZLE_A};
+    constexpr GLenum Identity[4] = {GL_RED, GL_GREEN, GL_BLUE, GL_ALPHA};
+    for (uint32 channel = 0; channel < 4; ++channel) {
+        gl_.TexParameteri(GL_TEXTURE_2D, Parameters[channel],
+                          static_cast<GLint>(Identity[channel]));
+    }
+
     gl_.DrawArraysInstanced(GL_TRIANGLES, 0, 3, 1);
     gl_.BindVertexArray(0);
     gl_.UseProgram(0);

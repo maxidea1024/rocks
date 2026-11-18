@@ -116,7 +116,8 @@ bool IsAttributeSemantic(const char* name) noexcept;
 D3D11_CULL_MODE RasterCullMode(CullMode mode) noexcept;
 
 // 샘플러 필터다(비교 샘플러면 COMPARISON 계열). AnisotropicPoint는 D3D11에 대응 필터가 없어
-// 호출 전에 거른다(Unsupported, DeviceFeatures::anisotropicPointFilter).
+// AnisotropicLinear와 같은 D3D11_FILTER_ANISOTROPIC이다(UE와 같다,
+// DeviceFeatures::anisotropicPointFilter가 거짓).
 D3D11_FILTER SamplerFilter(Filter filter, bool comparison) noexcept;
 D3D11_TEXTURE_ADDRESS_MODE SamplerAddress(AddressMode mode) noexcept;
 

@@ -142,6 +142,59 @@ inline void MatrixMultiply(const float* a, const float* b, float* output) noexce
     vst1q_f32(output + 12, c3);
 }
 
+// ---- 비교·mask·선택(scalar 기준 구현과 같은 계약) ----
+// vc*q_f32는 순서 비교(NaN이면 거짓)이고 결과 uint32 lane은 모든 bit 1 또는 0이다. mask도 float
+// 레지스터로 다루므로 bit 연산은 uint32로 재해석해 한다.
+
+inline Register4f CompareEqual(Register4f a, Register4f b) noexcept {
+    return vreinterpretq_f32_u32(vceqq_f32(a, b));
+}
+
+inline Register4f CompareLess(Register4f a, Register4f b) noexcept {
+    return vreinterpretq_f32_u32(vcltq_f32(a, b));
+}
+
+inline Register4f CompareLessEqual(Register4f a, Register4f b) noexcept {
+    return vreinterpretq_f32_u32(vcleq_f32(a, b));
+}
+
+inline Register4f CompareGreater(Register4f a, Register4f b) noexcept {
+    return vreinterpretq_f32_u32(vcgtq_f32(a, b));
+}
+
+inline Register4f CompareGreaterEqual(Register4f a, Register4f b) noexcept {
+    return vreinterpretq_f32_u32(vcgeq_f32(a, b));
+}
+
+inline Register4f BitAnd(Register4f a, Register4f b) noexcept {
+    return vreinterpretq_f32_u32(vandq_u32(vreinterpretq_u32_f32(a), vreinterpretq_u32_f32(b)));
+}
+
+inline Register4f BitOr(Register4f a, Register4f b) noexcept {
+    return vreinterpretq_f32_u32(vorrq_u32(vreinterpretq_u32_f32(a), vreinterpretq_u32_f32(b)));
+}
+
+inline Register4f BitXor(Register4f a, Register4f b) noexcept {
+    return vreinterpretq_f32_u32(veorq_u32(vreinterpretq_u32_f32(a), vreinterpretq_u32_f32(b)));
+}
+
+// a & ~b다(vbicq가 두 번째 피연산자를 뒤집는다).
+inline Register4f BitAndNot(Register4f a, Register4f b) noexcept {
+    return vreinterpretq_f32_u32(vbicq_u32(vreinterpretq_u32_f32(a), vreinterpretq_u32_f32(b)));
+}
+
+// vbslq는 bit 단위 선택이다(mask bit 1이면 a, 0이면 b).
+inline Register4f Select(Register4f mask, Register4f a, Register4f b) noexcept {
+    return vbslq_f32(vreinterpretq_u32_f32(mask), a, b);
+}
+
+// lane i의 부호 bit를 bit i로 옮겨 더한다.
+inline uint32 MoveMask(Register4f value) noexcept {
+    const uint32x4_t signs = vshrq_n_u32(vreinterpretq_u32_f32(value), 31);
+    const int32 shiftValues[4] = {0, 1, 2, 3};
+    return vaddvq_u32(vshlq_u32(signs, vld1q_s32(shiftValues)));
+}
+
 } // namespace rocks::platform::neon
 
 #endif

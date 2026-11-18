@@ -1,3 +1,4 @@
+#include <Base/Checked.h>
 #include <Base/NumericLimits.h>
 #include <Graphics/DeviceTypes.h>
 #include <Platform/Atomics.h>
@@ -98,6 +99,21 @@ Result<PixelFormat> ResolveTextureViewFormat(PixelFormat texture,
     return Result<PixelFormat>::Failure(ErrorCode::InvalidArgument);
 }
 
+Result<PixelFormat> ResolveTextureViewFormat(PixelFormat texture, const TextureViewDesc& desc,
+                                             bool comparisonSampler) noexcept {
+    auto resolved = ResolveTextureViewFormat(texture, desc);
+    if (!resolved || !comparisonSampler) {
+        return resolved;
+    }
+
+    const PixelFormatKind kind = GetPixelFormatInfo(resolved.Value()).kind;
+    if (kind != PixelFormatKind::Depth && kind != PixelFormatKind::DepthStencil) {
+        return Result<PixelFormat>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return resolved;
+}
+
 PixelFormatCaps RequiredPixelFormatCaps(const TextureDesc& desc) noexcept {
     PixelFormatCaps caps = PixelFormatCaps::None;
     switch (desc.usage) {
@@ -161,7 +177,8 @@ uint32 TextureMipImageCount(const TextureDesc& desc, uint32 level) noexcept {
 uint64 TextureMipBytes(const TextureDesc& desc, uint32 level) noexcept {
     const uint64 image = PixelFormatImageBytes(desc.format, MipExtent(desc.width, level),
                                                MipExtent(desc.height, level));
-    return image * TextureMipImageCount(desc, level);
+    uint64 bytes = 0;
+    return TryMultiply(image, uint64{TextureMipImageCount(desc, level)}, bytes) ? bytes : 0u;
 }
 
 uint64 TextureMipPlaneBytes(const TextureDesc& desc, uint32 level, uint32 plane) noexcept {
@@ -171,7 +188,8 @@ uint64 TextureMipPlaneBytes(const TextureDesc& desc, uint32 level, uint32 plane)
 
     const uint64 image = PixelFormatPlaneImageBytes(
         desc.format, plane, MipExtent(desc.width, level), MipExtent(desc.height, level));
-    return image * TextureMipImageCount(desc, level);
+    uint64 bytes = 0;
+    return TryMultiply(image, uint64{TextureMipImageCount(desc, level)}, bytes) ? bytes : 0u;
 }
 
 uint64 TextureDataBytes(const TextureDesc& desc) noexcept {
@@ -182,11 +200,9 @@ uint64 TextureDataBytes(const TextureDesc& desc) noexcept {
     uint64 total = 0;
     for (uint32 level = 0; level < desc.mipLevels; ++level) {
         const uint64 bytes = TextureMipBytes(desc, level);
-        if (bytes == 0) {
+        if (bytes == 0 || !TryAdd(total, bytes, total)) {
             return 0;
         }
-
-        total += bytes;
     }
 
     return total;
@@ -218,7 +234,7 @@ Result<void> ValidateTextureDesc(const TextureDesc& desc) noexcept {
     const PixelFormatInfo& info = GetPixelFormatInfo(desc.format);
     const bool depth =
         info.kind == PixelFormatKind::Depth || info.kind == PixelFormatKind::DepthStencil;
-    if (desc.usage == TextureUsage::DepthStencil && !depth) {
+    if ((desc.usage == TextureUsage::DepthStencil || desc.sampler.comparison) && !depth) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

@@ -309,7 +309,8 @@ Result<CommandContext*> VulkanDevice::BeginPass(const PassDesc& pass) noexcept {
         target.key.colorLoad[index] = LoadOf(color.load);
         target.key.colorStore[index] = StoreOf(color.store);
         target.clears[index].color = ClearValueOf(record->format, color.clear);
-        views[index] = record->view;
+        views[index] =
+            record->attachmentView != VK_NULL_HANDLE ? record->attachmentView : record->view;
         if (index == 0) {
             target.image = record->image;
             target.viewFormat = target.key.colors[0];

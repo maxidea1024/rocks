@@ -17,8 +17,9 @@ enum class Filter : uint32 {
     Bilinear = 1,
     // 확대·축소·mip 사이 모두 선형
     Trilinear = 2,
-    // 이방성(SamplerDesc::maxAnisotropy 배율) + 최근접 mip. D3D12는 장치 기능
-    // (AnisoFilterWithPointMipSupported)이 있어야 하고 D3D11은 대응 필터가 없어 Unsupported다.
+    // 이방성(SamplerDesc::maxAnisotropy 배율) + 최근접 mip. 하드웨어 대응이 없는 backend(D3D11,
+    // AnisoFilterWithPointMipSupported가 없는 D3D12)는 UE와 같이 AnisotropicLinear로 만든다
+    // (Graphics DeviceFeatures::anisotropicPointFilter가 거짓).
     AnisotropicPoint = 3,
     // 이방성(SamplerDesc::maxAnisotropy 배율) + 선형 mip
     AnisotropicLinear = 4

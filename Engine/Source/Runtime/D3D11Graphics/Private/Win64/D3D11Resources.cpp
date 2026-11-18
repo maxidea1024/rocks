@@ -198,14 +198,11 @@ Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
         return Result<TextureHandle>::Failure(valid.Error());
     }
 
-    // view swizzle과 이방성 + 최근접 mip 필터는 D3D11에 없다(셰이더 쪽 대체 같은 우회는 하지
-    // 않는다, AssetSystem A0-G).
-    if (!desc.swizzle.IsIdentity() || desc.sampler.filter == Filter::AnisotropicPoint ||
-        !CheckTextureLimits(caps_, desc)) {
+    // view swizzle은 D3D11에 없다(셰이더 쪽 대체 같은 우회는 하지 않는다, AssetSystem A0-G).
+    if (!desc.swizzle.IsIdentity() || !CheckTextureLimits(caps_, desc)) {
         platform::LockGuard lock(gate_);
-        auto failed = Fail(!desc.swizzle.IsIdentity() ? "D3D11 has no texture view swizzle"
-                           : desc.sampler.filter == Filter::AnisotropicPoint
-                               ? "D3D11 has no anisotropic filter with point mip selection"
+        auto failed = Fail(!desc.swizzle.IsIdentity()
+                               ? "D3D11 has no texture view swizzle"
                                : "texture size, slice count or dimension exceeds the D3D11 device "
                                  "limits");
         (void)failed;
@@ -246,6 +243,7 @@ Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
     record.renderTarget = renderTarget;
     record.depthTarget = depthTarget;
     record.sampler = sampler.Value();
+    record.comparison = desc.sampler.comparison;
     // 깊이 형식은 늘 DEPTH_STENCIL bind로 만든다(typeless 깊이 자원의 DSV 조건).
     const UINT bindFlags = (sampled ? static_cast<UINT>(D3D11_BIND_SHADER_RESOURCE) : 0u) |
                            (renderTarget ? static_cast<UINT>(D3D11_BIND_RENDER_TARGET) : 0u) |
@@ -458,7 +456,7 @@ Result<TextureHandle> D3D11Device::CreateTextureView(TextureHandle texture,
         return Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
-    auto resolved = ResolveTextureViewFormat(source->format, desc);
+    auto resolved = ResolveTextureViewFormat(source->format, desc, source->comparison);
     if (!resolved) {
         return Result<TextureHandle>::Failure(resolved.Error());
     }
@@ -496,6 +494,7 @@ Result<TextureHandle> D3D11Device::CreateTextureView(TextureHandle texture,
     record.format = resolved.Value();
     record.view = true;
     record.sampler = source->sampler;
+    record.comparison = source->comparison;
     const HRESULT result = CreatePlaneView(
         record, srvFormat, desc.plane, record.mipLevels,
         GetPixelFormatInfo(source->format).kind == PixelFormatKind::Planar, record.srv);
@@ -654,6 +653,15 @@ Result<ID3D11SamplerState*> D3D11Device::SamplerFor(const SamplerDesc& desc) noe
         auto failed = Fail("sampler cache is full");
         (void)failed;
         return Result<ID3D11SamplerState*>::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    // D3D11에는 이방성 + 최근접 mip 필터가 없어 UE처럼 AnisotropicLinear로 만든다(사용자 결정,
+    // DeviceFeatures::anisotropicPointFilter가 거짓, 처음 한 번 Debug 로그).
+    if (desc.filter == Filter::AnisotropicPoint && !anisotropicPointReported_) {
+        anisotropicPointReported_ = true;
+        Log::Debug(LogGraphicsD3D11, "AnisotropicPoint samplers are created as AnisotropicLinear "
+                                     "because D3D11 has no anisotropic filter with point mip "
+                                     "selection");
     }
 
     D3D11_SAMPLER_DESC sampler = {};
@@ -880,6 +888,18 @@ void D3D11Device::Retire(SwapChainHandle handle) noexcept {
     Defer(Move(record->rtv), Move(record->buffer), Move(record->swapChain));
     auto removed = swapChains_.TryRemove(handle.slot);
     (void)removed;
+}
+
+Result<TextureSubresources>
+D3D11Device::GetTextureSubresources(TextureHandle texture) const noexcept {
+    platform::LockGuard lock(gate_);
+    const TextureRecord* record = textures_.Find(texture.slot);
+    if (record == nullptr) {
+        return Result<TextureSubresources>::Failure(ErrorCode::StaleHandle);
+    }
+
+    return Result<TextureSubresources>::Success(
+        TextureSubresources{record->mipLevels, record->slices});
 }
 
 } // namespace rocks::graphics::d3d11

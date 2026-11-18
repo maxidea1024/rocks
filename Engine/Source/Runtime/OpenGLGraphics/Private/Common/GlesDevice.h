@@ -276,6 +276,8 @@ public:
     PixelFormatCaps GetPixelFormatCaps(PixelFormat format) const noexcept override;
     Result<TextureHandle> CreateTextureView(TextureHandle texture,
                                             const TextureViewDesc& desc) noexcept override;
+    Result<TextureSubresources>
+    GetTextureSubresources(TextureHandle texture) const noexcept override;
     Result<void> ReadTexture(TextureHandle texture, uint32 mipLevel, uint32 plane,
                              Span<uint8> out) noexcept override;
     Result<CommandContext*> BeginFrame(SwapChainHandle handle,

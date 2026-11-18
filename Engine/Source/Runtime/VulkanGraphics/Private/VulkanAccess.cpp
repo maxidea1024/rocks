@@ -205,8 +205,8 @@ namespace {
 
 // 1.1 비트로 sync2 image barrier를 만든다(같은 값의 비트다).
 VkImageMemoryBarrier2 ImageBarrier2(VkImage image, VkImageAspectFlags aspect, uint32 firstMip,
-                                    uint32 mipCount, uint32 layer, ResourceAccess from,
-                                    ResourceAccess to) noexcept {
+                                    uint32 mipCount, uint32 layer, uint32 layerCount,
+                                    ResourceAccess from, ResourceAccess to) noexcept {
     const StageAccess source = StageAccessFor(from);
     const StageAccess destination = StageAccessFor(to);
     VkImageMemoryBarrier2 barrier = {};
@@ -220,7 +220,7 @@ VkImageMemoryBarrier2 ImageBarrier2(VkImage image, VkImageAspectFlags aspect, ui
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.image = image;
-    barrier.subresourceRange = {aspect, firstMip, mipCount, layer, 1};
+    barrier.subresourceRange = {aspect, firstMip, mipCount, layer, layerCount};
     return barrier;
 }
 
@@ -260,14 +260,36 @@ void VulkanDevice::ResumeRenderPass() noexcept {
     BeginRenderPass(true);
 }
 
-void VulkanDevice::TrackTransition(TextureRecord& record, SlotHandle slot,
-                                   const ResolvedSubresourceRange& range, ResourceAccess after,
-                                   bool uavOrder) noexcept {
-    after = CanonicalAccess(after);
-    // subresource마다 상태가 다를 수 있으므로 layer마다 같은 상태가 이어지는 mip 구간씩 barrier를
-    // 낸다.
+namespace {
+
+// layer other가 layer와 범위의 모든 mip에서 같은 상태인지다(같은 layer 구간으로 묶을 수 있다).
+bool SameLayerStates(const SubresourceStates<ResourceAccess>& states,
+                     const ResolvedSubresourceRange& range, uint32 layer, uint32 other) noexcept {
+    for (uint32 mip = range.firstMip; mip < range.firstMip + range.mipCount; ++mip) {
+        if (states.At(mip, layer) != states.At(mip, other)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+} // namespace
+
+template <class Emit>
+void VulkanDevice::ForEachStateRun(const TextureRecord& record,
+                                   const ResolvedSubresourceRange& range, Emit&& emit) noexcept {
+    // 범위의 모든 mip에서 상태 열이 같은 이웃 layer를 한 구간으로 묶고, 그 구간 안에서 같은 상태가
+    // 이어지는 mip 구간마다 emit(firstMip, mipCount, firstLayer, layerCount, from)을 부른다.
     const uint32 lastMip = range.firstMip + range.mipCount;
-    for (uint32 layer = range.firstSlice; layer < range.firstSlice + range.sliceCount; ++layer) {
+    const uint32 lastLayer = range.firstSlice + range.sliceCount;
+    uint32 layer = range.firstSlice;
+    while (layer < lastLayer) {
+        uint32 endLayer = layer + 1;
+        while (endLayer < lastLayer && SameLayerStates(record.current, range, layer, endLayer)) {
+            ++endLayer;
+        }
+
         uint32 mip = range.firstMip;
         while (mip < lastMip) {
             const ResourceAccess from = record.current.At(mip, layer);
@@ -276,17 +298,33 @@ void VulkanDevice::TrackTransition(TextureRecord& record, SlotHandle slot,
                 ++end;
             }
 
-            if (BarrierNeeded(from, after, uavOrder)) {
-                SuspendRenderPass();
-            }
-
-            (void)AccessBarrier(frame_, record.image, mip, end - mip, from, after, uavOrder,
-                                record.aspect, layer, 1);
+            emit(mip, end - mip, layer, endLayer - layer, from);
             mip = end;
         }
 
-        for (uint32 index = range.firstMip; index < lastMip; ++index) {
-            record.current.At(index, layer) = after;
+        layer = endLayer;
+    }
+}
+
+void VulkanDevice::TrackTransition(TextureRecord& record, SlotHandle slot,
+                                   const ResolvedSubresourceRange& range, ResourceAccess after,
+                                   bool uavOrder) noexcept {
+    after = CanonicalAccess(after);
+    // subresource마다 상태가 다를 수 있으므로 같은 상태 열의 layer 구간 × 같은 상태의 mip 구간마다
+    // barrier 하나를 낸다.
+    ForEachStateRun(record, range,
+                    [&](uint32 mip, uint32 mipCount, uint32 layer, uint32 layerCount,
+                        ResourceAccess from) noexcept {
+                        if (BarrierNeeded(from, after, uavOrder)) {
+                            SuspendRenderPass();
+                        }
+
+                        (void)AccessBarrier(frame_, record.image, mip, mipCount, from, after,
+                                            uavOrder, record.aspect, layer, layerCount);
+                    });
+    for (uint32 layer = range.firstSlice; layer < range.firstSlice + range.sliceCount; ++layer) {
+        for (uint32 mip = range.firstMip; mip < range.firstMip + range.mipCount; ++mip) {
+            record.current.At(mip, layer) = after;
         }
     }
 
@@ -561,29 +599,22 @@ VulkanDevice::BeginTransitions(Span<const ResourceTransition> transitions) noexc
 
         const ResourceAccess after = CanonicalAccess(transition.after);
         const bool uav = HasAnyAccess(transition.after, UavAccessMask);
-        const uint32 lastMip = range.firstMip + range.mipCount;
+        ForEachStateRun(*record, range,
+                        [&](uint32 mip, uint32 mipCount, uint32 layer, uint32 layerCount,
+                            ResourceAccess from) noexcept {
+                            if (BarrierNeeded(from, after, uav)) {
+                                (void)splitImageBarriers_.TryPushBack(
+                                    ImageBarrier2(record->image, record->aspect, mip, mipCount,
+                                                  layer, layerCount, from, after));
+                            }
+                        });
+
+        // 이미지 layout은 begin 뒤 바뀌므로 추적 상태를 지금 바꾼다(그 사이 render pass를 다시
+        // 열지 않는다, 사이 접근은 계약 위반이다).
         for (uint32 layer = range.firstSlice; layer < range.firstSlice + range.sliceCount;
              ++layer) {
-            uint32 mip = range.firstMip;
-            while (mip < lastMip) {
-                const ResourceAccess from = record->current.At(mip, layer);
-                uint32 end = mip + 1;
-                while (end < lastMip && record->current.At(end, layer) == from) {
-                    ++end;
-                }
-
-                if (BarrierNeeded(from, after, uav)) {
-                    (void)splitImageBarriers_.TryPushBack(ImageBarrier2(
-                        record->image, record->aspect, mip, end - mip, layer, from, after));
-                }
-
-                mip = end;
-            }
-
-            // 이미지 layout은 begin 뒤 바뀌므로 추적 상태를 지금 바꾼다(그 사이 render pass를
-            // 다시 열지 않는다, 사이 접근은 계약 위반이다).
-            for (uint32 index = range.firstMip; index < lastMip; ++index) {
-                record->current.At(index, layer) = after;
+            for (uint32 mip = range.firstMip; mip < range.firstMip + range.mipCount; ++mip) {
+                record->current.At(mip, layer) = after;
             }
         }
 

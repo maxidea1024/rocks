@@ -27,9 +27,9 @@ inline constexpr TextureDimension MaxTextureDimension = TextureDimension::Textur
 
 // cube 면 하나의 순서다. UE ECubeFace(RHIDefinitions.h)·D3D TEXTURECUBE array slice·Vulkan cube
 // layer·OpenGL ES TEXTURE_CUBE_MAP_POSITIVE_X + n이 모두 같은 순서(+X, −X, +Y, −Y, +Z, −Z)다. 면
-// 방향은 D3D 규약(왼손 좌표, 면을 바깥에서 볼 때 u가 오른쪽·v가 아래쪽: +X 면은 u = −Z, v = −Y)이며
-// UE가 그대로 쓴다. 그래서 cube 데이터는 backend마다 바꾸지 않고 같은 바이트를 올린다(OpenGL ES의
-// cube 면 정의도 같은 축 대응이다 — ES 3.2 8.13절 표 8.19).
+// 방향은 D3D 규약(왼손 좌표, cube 중심에서 그 면을 볼 때 u가 오른쪽·v가 아래쪽: +X 면은 u = −Z, v =
+// −Y)이며 UE가 그대로 쓴다. 그래서 cube 데이터는 backend마다 바꾸지 않고 같은 바이트를
+// 올린다(OpenGL ES의 cube 면 정의도 같은 축 대응이다 — ES 3.2 8.13절 표 8.19).
 enum class CubeFace : uint8 {
     PositiveX = 0,
     NegativeX = 1,

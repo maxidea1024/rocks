@@ -75,6 +75,8 @@ struct TextureRecord {
     bool view = false;
     // 샘플러 캐시의 객체다(장치 수명 동안 산다).
     ID3D11SamplerState* sampler = nullptr;
+    // 샘플러가 깊이 비교 샘플러다(view는 깊이 plane만 읽을 수 있다).
+    bool comparison = false;
 };
 
 // mip level의 깊이 면 수다(3D만 1보다 크다).
@@ -245,6 +247,8 @@ public:
     PixelFormatCaps GetPixelFormatCaps(PixelFormat format) const noexcept override;
     Result<TextureHandle> CreateTextureView(TextureHandle texture,
                                             const TextureViewDesc& desc) noexcept override;
+    Result<TextureSubresources>
+    GetTextureSubresources(TextureHandle texture) const noexcept override;
     Result<void> ReadTexture(TextureHandle texture, uint32 mipLevel, uint32 plane,
                              Span<uint8> out) noexcept override;
     Result<CommandContext*> BeginFrame(SwapChainHandle swapChain,
@@ -558,6 +562,8 @@ private:
     uint32 sampleCounts_[MaxPixelFormatNumber + 1] = {};
     DeviceCaps caps_;
     uint32 samplerCount_ = 0;
+    // AnisotropicPoint를 AnisotropicLinear로 만든 일을 로그에 남겼다(한 번만).
+    bool anisotropicPointReported_ = false;
     ComRef<IDXGIFactory4> factory_;
     ComRef<ID3D11Device5> device_;
     ComRef<ID3D11DeviceContext4> immediate_;

@@ -565,6 +565,7 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
     record.depthTarget = depthTarget;
     record.aspect = format.aspect;
     record.sampler = sampler.Value();
+    record.comparison = desc.sampler.comparison;
     // 업로드로 채운 텍스처와 렌더 타깃 모두 셰이더 읽기 상태로 시작한다(D3D12와 같다, GX5). 아래
     // 업로드 기록이 UNDEFINED에서 그 상태로 바꾼다.
     const ResourceAccess startState = CanonicalAccess(ResourceAccess::SrvGraphics);
@@ -600,7 +601,16 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
     }
 
     cleanup.view = record.view;
-    if (depthTarget && (format.aspect & VK_IMAGE_ASPECT_STENCIL_BIT) != 0) {
+    // attachment용 view는 항등 대응·이미지 전체 aspect다. 깊이·스텐실 타깃(기본 view는 깊이
+    // aspect만)과, 성분 대응이 항등이 아닌 렌더 타깃(Vulkan은 framebuffer view의 대응이 항등이어야
+    // 하고, swizzle은 셰이더 읽기에만 적용한다, TextureDesc::swizzle)에 따로 만든다.
+    const VkComponentMapping& components = viewInfo.components;
+    const bool identity = components.r == VK_COMPONENT_SWIZZLE_IDENTITY &&
+                          components.g == VK_COMPONENT_SWIZZLE_IDENTITY &&
+                          components.b == VK_COMPONENT_SWIZZLE_IDENTITY &&
+                          components.a == VK_COMPONENT_SWIZZLE_IDENTITY;
+    if ((depthTarget && (format.aspect & VK_IMAGE_ASPECT_STENCIL_BIT) != 0) ||
+        (attachment && !identity)) {
         viewInfo.subresourceRange.aspectMask = format.aspect;
         viewInfo.components = {};
         result = functions_.vkCreateImageView(device_, &viewInfo, nullptr, &record.attachmentView);
@@ -699,7 +709,7 @@ Result<TextureHandle> VulkanDevice::CreateTextureView(TextureHandle texture,
         return Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
-    auto resolved = ResolveTextureViewFormat(source->format, desc);
+    auto resolved = ResolveTextureViewFormat(source->format, desc, source->comparison);
     if (!resolved) {
         return Result<TextureHandle>::Failure(resolved.Error());
     }
@@ -730,6 +740,7 @@ Result<TextureHandle> VulkanDevice::CreateTextureView(TextureHandle texture,
     record.format = resolved.Value();
     record.aspect = source->aspect;
     record.sampler = source->sampler;
+    record.comparison = source->comparison;
     record.isView = true;
     record.source = texture.slot;
     VkImageViewCreateInfo viewInfo = {};
@@ -821,6 +832,18 @@ void VulkanDevice::Retire(PipelineHandle handle) noexcept {
     RetireEntry(Move(entry));
     auto removed = pipelines_.TryRemove(handle.slot);
     (void)removed;
+}
+
+Result<TextureSubresources>
+VulkanDevice::GetTextureSubresources(TextureHandle texture) const noexcept {
+    platform::LockGuard lock(gate_);
+    const TextureRecord* record = textures_.Find(texture.slot);
+    if (record == nullptr) {
+        return Result<TextureSubresources>::Failure(ErrorCode::StaleHandle);
+    }
+
+    return Result<TextureSubresources>::Success(
+        TextureSubresources{record->mipLevels, record->slices});
 }
 
 } // namespace rocks::graphics::vulkan

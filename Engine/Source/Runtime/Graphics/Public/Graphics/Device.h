@@ -371,8 +371,9 @@ public:
     // RenderTarget·DepthStencil은 pixels가 비어 있어야 한다. 실패: 규칙 위반(ValidateTextureDesc)·
     // 크기 불일치 InvalidArgument, 이 장치가 형식·용도·차원을 지원하지 않거나(GetPixelFormatCaps,
     // RequiredPixelFormatCaps) 장치 한도를 넘거나(CheckTextureLimits) swizzle·샘플러를 낮출 수
-    // 없으면(D3D11 view swizzle, AnisotropicPoint 등 backend 지원 표 — RenderBase GX2)
-    // Unsupported다. 다른 값으로 바꿔 만들지 않는다.
+    // 없으면(D3D11 view swizzle 등 backend 지원 표 — RenderBase GX2)
+    // Unsupported다. 다른 값으로 바꿔 만들지 않는다(예외: 하드웨어 대응이 없는 AnisotropicPoint는
+    // UE처럼 AnisotropicLinear로 만든다, DeviceFeatures::anisotropicPointFilter).
     virtual Result<TextureHandle> CreateTexture(const TextureDesc& desc,
                                                 Span<const uint8> pixels) noexcept = 0;
 
@@ -408,6 +409,20 @@ public:
         (void)texture;
         (void)desc;
         return Result<TextureHandle>::Failure(ErrorCode::Unsupported);
+    }
+
+    // 텍스처의 mip 수와 slice 수다(subresource 구성, 상태 추적 단위). view면 원 텍스처의 값이다.
+    // 렌더 그래프 import가 선언한 구성(GraphImportOptions)과 대조한다. 실패: 모르는 handle
+    // StaleHandle, 지원하지 않는 장치 Unsupported. 소유 스레드가 부른다(장치 잠금 안에서 기록을
+    // 읽는다).
+    //
+    // 사용 예:
+    //   auto shape = device.GetTextureSubresources(texture);
+    //   if (shape && shape.Value().slices != declared) { ... }
+    virtual Result<TextureSubresources>
+    GetTextureSubresources(TextureHandle texture) const noexcept {
+        (void)texture;
+        return Result<TextureSubresources>::Failure(ErrorCode::Unsupported);
     }
 
     // 텍스처 mip 하나의 plane 하나를 out(TextureMipPlaneBytes 크기: 그 mip의 모든 slice·깊이 면을

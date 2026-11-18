@@ -308,6 +308,9 @@ Result<GraphTexture> RenderGraph::CreateTexture(const graphics::TextureDesc& des
         !graphics::IsValidPixelFormat(desc.format) ||
         (renderTarget && format.compression != graphics::PixelCompression::None) ||
         (sampled && desc.mipLevels > graphics::TextureFullMipCount(desc)) ||
+        // 업로드 자리(초기 데이터 byte)가 uint64·usize를 넘치는 Sampled desc는 받지 않는다.
+        (sampled && (graphics::TextureDataBytes(desc) == 0 ||
+                     graphics::TextureDataBytes(desc) > NumericLimits<usize>::Max())) ||
         graphics::TextureSliceCount(desc) > MaxGraphTextureSlices) {
         return Result<GraphTexture>::Failure(RecordGraphError(
             state, ErrorCode::InvalidArgument, true,
@@ -429,6 +432,23 @@ Result<uint32> ImportResource(FrameArena& arena, GraphState& state, GraphResourc
     record.device = lease.Value().device;
     record.initialAccess = options.initialAccess;
     record.finalAccess = options.finalAccess;
+    // 장치가 텍스처 구성을 알려 주면 선언과 대조한다(다르면 전이가 일부 subresource를 빠뜨리거나
+    // 장치 범위 밖이 된다). 장치가 지원하지 않으면(Unsupported) 선언을 믿는다.
+    if (texture && state.device != nullptr) {
+        auto shape =
+            state.device->GetTextureSubresources(graphics::TextureHandle{lease.Value().device});
+        if (shape && (shape.Value().mipLevels != options.mipLevels ||
+                      shape.Value().slices != options.slices)) {
+            state.handles->ReleaseLease(lease.Value());
+            return Result<uint32>::Failure(RecordGraphError(
+                state, ErrorCode::InvalidArgument, true,
+                "texture '{}' import declares {} mips x {} slices but the device texture has {} x "
+                "{}",
+                label, options.mipLevels, options.slices, shape.Value().mipLevels,
+                shape.Value().slices));
+        }
+    }
+
     record.mipLevels = texture ? options.mipLevels : 1u;
     record.slices = texture ? options.slices : 1u;
     record.subresources = record.mipLevels * record.slices;

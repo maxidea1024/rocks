@@ -133,7 +133,8 @@ struct GraphImportOptions {
     // 그래프가 끝날 때 돌려 둘 상태다. Unknown이면 마지막으로 쓴 상태 그대로 둔다.
     graphics::ResourceAccess finalAccess = graphics::ResourceAccess::Unknown;
     // 텍스처의 mip 수와 slice 수(TextureSliceCount: 배열 층·cube 면)다(subresource 추적 단위
-    // mip × slice). 장치에 자원 desc 조회가 생기면(GX2) 그쪽에서 읽고 이 칸들은 뺀다.
+    // mip × slice). 장치가 Device::GetTextureSubresources를 지원하면 import가 대조하고 다르면
+    // InvalidArgument다(지원하지 않는 장치는 이 선언을 그대로 믿는다).
     uint32 mipLevels = 1;
     uint32 slices = 1;
 };
