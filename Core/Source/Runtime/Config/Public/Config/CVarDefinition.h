@@ -98,7 +98,40 @@ using ValidateFunction = StringView (*)(ValidateArg<T>) noexcept;
 template <class T>
 using DefaultArg = ConditionalT<IsTextVarType<T>, StringView, T>;
 
+// 정의 텍스트의 byte 한도다(컴파일 때 검사 — 4.3절). 콘솔 이름은 ASCII 소문자 점 경로다.
+inline constexpr usize MaxVarNameBytes = 128;
+inline constexpr usize MaxVarHelpBytes = 1024;
+inline constexpr usize MaxVarCategoryBytes = 64;
+inline constexpr usize MaxVarDefaultTextBytes = 4096;
+
+// Name 기본값의 byte 한도다. Name 기본값은 출력 가능한 ASCII(0x20–0x7E)로 한정하므로 byte 수가 곧
+// UTF-16 단위 수이고 NFC 판정이 필요 없다(Name 내용 규칙 — Object/NameField.h
+// MaxNameBaseUtf16Units 1,023과 같은 값).
+inline constexpr usize MaxVarNameDefaultBytes = 1023;
+
 namespace detail {
+
+// text가 NUL 없는 유효 UTF-8인지다(컴파일 때 정의 텍스트 검사).
+constexpr bool IsDefinitionText(StringView text) noexcept {
+    for (const char c : text) {
+        if (c == '\0') {
+            return false;
+        }
+    }
+
+    return text.IsValidUtf8();
+}
+
+// text가 출력 가능한 ASCII(0x20–0x7E)로만 되어 있는지다(Name 기본값).
+constexpr bool IsPrintableAscii(StringView text) noexcept {
+    for (const char c : text) {
+        if (c < 0x20 || c > 0x7E) {
+            return false;
+        }
+    }
+
+    return true;
+}
 
 // 컴파일 때 검사의 표지 함수다. constexpr이 아니므로 consteval 변환 안에서 부르면 컴파일 오류가
 // 나고 진단에 함수 이름이 나온다(LogCategory와 같은 방식 — 4.3절).
@@ -124,6 +157,15 @@ inline void CVarError_DefaultNotInEnum() noexcept {
 }
 
 inline void CVarError_InvalidEnumNames() noexcept {
+}
+
+inline void CVarError_TextTooLong() noexcept {
+}
+
+inline void CVarError_InvalidUtf8() noexcept {
+}
+
+inline void CVarError_NameDefaultNotAscii() noexcept {
 }
 
 // 타입을 지운 값 하나다(검사 함수가 읽고 보정한다). bool은 boolean, 정수·enum은 integer, 실수는

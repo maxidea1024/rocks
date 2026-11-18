@@ -31,7 +31,9 @@ class BootVarBuilder;
 //       return config.Register(ShadowDistance);
 //   }
 //
-// 수명: 프로그램 수명(정적 저장 기간). 함수 안 지역 핸들은 Register가 거부한다(Debug·Development).
+// 수명: 프로그램 수명(정적 저장 기간 — namespace 범위 또는 static 멤버). 힙 생성(new)은 컴파일
+// 오류이고, 함수 안 지역 핸들은 Register가 거부한다(Debug·Development). 비정적 멤버·thread_local·
+// const 정의는 Policy cvar-registration이 거부한다.
 // 스레드: 상수 부분(이름·기본값 등)은 어느 스레드에서나 읽는다. Index는 원자적으로 읽는다.
 template <class T>
 class CVar {
@@ -40,6 +42,12 @@ public:
     CVar& operator=(const CVar&) = delete;
     CVar(CVar&&) = delete;
     CVar& operator=(CVar&&) = delete;
+
+    // 핸들은 정적 저장 기간이어야 하므로 힙에 만들 수 없다(해제 뒤 문맥이 정의를 가리키게 된다).
+    static void* operator new(usize) = delete;
+    static void* operator new[](usize) = delete;
+    static void* operator new(usize, void*) = delete;
+    static void* operator new[](usize, void*) = delete;
 
     // 콘솔 이름이다(정적 저장소). 출시 빌드의 `Cheat()` 변수는 비어 있다(13.1절).
     constexpr StringView Name() const noexcept {
@@ -90,6 +98,12 @@ public:
     BootCVar& operator=(const BootCVar&) = delete;
     BootCVar(BootCVar&&) = delete;
     BootCVar& operator=(BootCVar&&) = delete;
+
+    // 핸들은 정적 저장 기간이어야 하므로 힙에 만들 수 없다(해제 뒤 문맥이 정의를 가리키게 된다).
+    static void* operator new(usize) = delete;
+    static void* operator new[](usize) = delete;
+    static void* operator new(usize, void*) = delete;
+    static void* operator new[](usize, void*) = delete;
 
     constexpr StringView Name() const noexcept {
         return definition_.name;

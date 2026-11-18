@@ -30,6 +30,10 @@ internal static partial class SelfTests
                 "};",
                 "CVar<int32> Holder::Member = cvar::Var(\"render.member\", 1).Help(\"x\");",
                 "CVarGroup ShadowGroup = cvar::Group(\"quality.shadow\", 2).Help(\"x\");",
+                "constinit CVar<int32> Direct(cvar::Var(\"render.direct\", 1).Help(\"x\"));",
+                "CVar<int32> Braced{cvar::Var(\"render.braced\", 1).Help(\"x\")};",
+                "CVar<int32> First = cvar::Var(\"render.first\", 1).Range(0, 4).Help(\"x\"), Second(cvar::Var(\"render.second\", 2).Help(\"x\"));",
+                "class ConsoleCommand final { };",
                 "ConsoleCommand Teleport = cvar::Command(\"cheat.teleport\", &Run).Help(\"x\");",
                 "// CVar<int32> Commented = cvar::Var(\"render.c\", 1);",
                 "const char* text = \"CVar<int32> Quoted = 1;\";",
@@ -40,19 +44,36 @@ internal static partial class SelfTests
                 "namespace rocks::probe {",
                 "Result<void> RegisterProbeVars(ConfigContext& config) noexcept {",
                 "    return config.Register(probe::ShadowDistance, Odd, Holder::Member, Holder::Inline,",
-                "                           ShadowGroup, Teleport);",
+                "                           ShadowGroup, Teleport, Direct, Braced, First, Second);",
                 "}",
                 "} // namespace rocks::probe",
                 ""));
+            temporary.Write("Templates/Game/Probe/Source/Probe/Probe.Build.cs", CVarModuleRule);
+            temporary.Write("Templates/Game/Probe/Source/Probe/Private/Game.cpp",
+                "CVar<int32> GameVar = cvar::Var(\"game.var\", 1).Help(\"x\");\n" +
+                "Result<void> RegisterGameVars(ConfigContext& config) noexcept { return config.Register(GameVar); }\n");
             temporary.Write("Engine/Source/Runtime/Probe/Tests/ProbeTests.cpp",
                 "CVar<int32> Unregistered = cvar::Var(\"render.t\", 1).Help(\"x\");\n" +
                 "void Test() { CVar<int32> local = cvar::Var(\"render.l\", 1).Help(\"x\"); }\n");
             NoFailures(PolicyChecks.CVarRegistrations(temporary.Root));
 
-            // 빠뜨린 등록, 함수 본문(멤버 함수·함수 안 static 포함) 안의 정의, 다른 모듈의 Register는 위반이다.
+            // 빠뜨린 등록(복사·직접·중괄호 초기화, 쉼표 뒤 선언자), 함수 본문(멤버 함수·함수 안 static 포함) 안의 정의, 다른
+            // 모듈의 Register, 핸들 타입 별칭, const·constexpr·thread_local 핸들, 비정적 멤버 핸들은 위반이다.
             string[] rejected =
             [
                 "CVar<int32> Missing = cvar::Var(\"render.missing\", 1).Help(\"x\");",
+                "CVar<int32> Missing(cvar::Var(\"render.missing\", 1).Help(\"x\"));",
+                "BootCVar<int32> Missing{cvar::Boot(\"render.missing\", 1).Help(\"x\")};",
+                "CVar<int32> First = cvar::Var(\"render.first\", 1).Help(\"x\"), Missing = cvar::Var(\"render.m\", 1).Help(\"x\");",
+                "using Handle = CVar<int32>;",
+                "template <class T> using Handle = cvar::BootCVar<T>;",
+                "typedef CVar<float> Handle;",
+                "const CVar<int32> First = cvar::Var(\"render.first\", 1).Help(\"x\");",
+                "constexpr CVar<int32> First = cvar::Var(\"render.first\", 1).Help(\"x\");",
+                "thread_local CVar<int32> First = cvar::Var(\"render.first\", 1).Help(\"x\");",
+                "struct T { static inline thread_local CVar<int32> First = cvar::Var(\"render.first\", 1).Help(\"x\"); };",
+                "struct T { CVar<int32> First = cvar::Var(\"render.first\", 1).Help(\"x\"); };",
+                "struct T { CVar<int32> First{cvar::Var(\"render.first\", 1).Help(\"x\")}; };",
                 "void Setup() { CVar<int32> Local = cvar::Var(\"render.local\", 1).Help(\"x\"); }",
                 "void Setup() { static CVar<int32> Local = cvar::Var(\"render.local\", 1).Help(\"x\"); }",
                 "struct S { void F() { BootCVar<int32> Local = cvar::Boot(\"render.local\", 1).Help(\"x\"); } };",

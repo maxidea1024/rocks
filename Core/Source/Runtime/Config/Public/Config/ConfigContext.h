@@ -314,21 +314,24 @@ public:
     // 누락을 잡는다). 핸들 번호(Index)는 처음 등록될 때 프로세스 전체에서 한 번 정해진다(문맥이
     // 여럿이어도 같은 핸들은 같은 번호). 이미 들어온 층 입력(대기 값)을 바로 검사·적용한다(거부한
     // 값은 진단을 남기고 건너뛴다 — 등록은 성공한다). 등록한 변수는 독립 콘솔 설정과 같은 이름
-    // 공간·값 저장소에 들고(FindConsoleSetting·ConsoleValue로 보인다), 모두 설정 snapshot에
-    // 든다(VD6). 출시 빌드의 `Cheat()` 변수는 건너뛴다(13.1절 — 번호도 받지 않는다).
+    // 공간·값 저장소에 들고(FindConsoleSetting·ConsoleValue로 바로 보인다), 설정 snapshot에는 다음
+    // Sync 뒤에 든다(VD6 — 등록 즉시 게시(VD17)는 CVR2). 출시 빌드의 `Cheat()` 변수는
+    // 건너뛴다(13.1절 — 번호도 받지 않는다).
     //
-    // 넘긴 핸들을 모두 검사한 뒤에 등록한다(하나라도 거부하면 아무것도 등록하지 않는다). 같은
-    // 핸들을 다시 넘기면(같은 호출 안 포함) 성공이다(멱등).
+    // 넘긴 핸들을 모두 검사한 뒤에 등록한다(하나라도 거부하면 아무것도 등록하지 않고 진단도 남기지
+    // 않는다). 같은 핸들을 다시 넘기면(같은 호출 안 포함) 성공이다(멱등).
     //
     // 사용 예:
     //   Result<void> RegisterRenderVars(ConfigContext& config) noexcept {
     //       return config.Register(ShadowDistance, ShadowQualityLevel, GraphicsBackend);
     //   }
     //
-    // 오류: 초기화 전, 영역 표에 없는 이름의 첫 마디, 함수 안 지역 핸들(Debug·Development — 핸들은
-    // 정적 저장 기간이어야 한다) InvalidArgument, 같은 이름을 다른 핸들·독립 설정·설정 struct 필드·
-    // 콘솔 명령이 이미 쓰면 같은 타입 AlreadyExists·다른 타입 TypeMismatch(명령은 AlreadyExists),
-    // 다른 스레드 WrongThread, 할당 실패. 호스트는 AlreadyExists·TypeMismatch를 부트 실패로 다룬다.
+    // 오류: 초기화 전 InvalidArgument, 영역 표에 없는 이름의 첫 마디 InvalidArgument, 호출 스레드
+    // 스택 위의 지역 핸들 InvalidArgument(Debug·Development — 핸들은 정적 저장 기간이어야 한다),
+    // 같은 이름을 다른 핸들·독립 설정·설정 struct 필드가 이미 쓰면 같은 타입 AlreadyExists·다른
+    // 타입 TypeMismatch, 콘솔 명령이 쓰면 AlreadyExists, Name 변수인데 문맥 Registry에 NamePool이
+    // 없으면 Unsupported(pool의 오류 — ShuttingDown 등 — 는 그대로), 소유 스레드가 아니면 모든
+    // 구성에서 WrongThread, 할당 실패. 호스트는 AlreadyExists·TypeMismatch를 부트 실패로 다룬다.
     // 스레드: 게임 lane(소유 스레드) 전용이다.
     template <class... Handles>
     Result<void> Register(const Handles&... handles) noexcept {

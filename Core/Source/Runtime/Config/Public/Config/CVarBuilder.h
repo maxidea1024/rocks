@@ -64,6 +64,27 @@ protected:
             CVarError_MissingHelp();
         }
 
+        // 텍스트는 NUL 없는 UTF-8이고 한도 안이다. Name 기본값은 출력 가능한 ASCII로 한정한다(NFC
+        // 판정 대신 — 4.3절).
+        if (definition.name.ByteCount() > MaxVarNameBytes ||
+            definition.help.ByteCount() > MaxVarHelpBytes ||
+            definition.category.ByteCount() > MaxVarCategoryBytes ||
+            definition.defaultValue.text.ByteCount() > MaxVarDefaultTextBytes) {
+            CVarError_TextTooLong();
+        }
+
+        if (!IsDefinitionText(definition.help) || !IsDefinitionText(definition.category) ||
+            !IsDefinitionText(definition.defaultValue.text)) {
+            CVarError_InvalidUtf8();
+        }
+
+        if constexpr (IsSameV<T, rocks::Name>) {
+            if (!IsPrintableAscii(definition.defaultValue.text) ||
+                definition.defaultValue.text.ByteCount() > MaxVarNameDefaultBytes) {
+                CVarError_NameDefaultNotAscii();
+            }
+        }
+
         const bool ranged = HasFlag(definition.flags, VarFlags::HasRange);
         if (HasFlag(definition.flags, VarFlags::Clamp) && !ranged) {
             CVarError_ClampWithoutRange();
@@ -115,6 +136,8 @@ protected:
                 definition.help = StringView{};
                 definition.category = StringView{};
                 definition.validate = nullptr;
+                // enum 열거자 이름 문자열도 실행 파일에 남지 않게 한다.
+                definition.enumSchema = nullptr;
             }
         }
 

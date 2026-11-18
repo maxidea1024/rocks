@@ -142,15 +142,17 @@ Result<void> FillDefault(ConfigState& state, const VarDefinition& definition,
         return Result<void>::Failure(checked.Error());
     }
 
-    // 기본값 텍스트는 컴파일 때 검사했으므로 거부는 Name pool 쪽 사정(pool 없음 등)이다.
+    // Name 기본값의 문법(출력 가능한 ASCII·길이)은 컴파일 때 검사했으므로 여기서 거부되는 경우는
+    // 문맥 Registry에 NamePool이 없을 때다(pool 자체의 오류는 위 Failure로 온다).
     if (!checked.Value().IsEmpty()) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+        return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
     return detail::CopyFieldValue(parsed, value);
 }
 
-// 정의 하나의 콘솔 설정 상태를 만들고 대기 값을 넘긴다.
+// 정의 하나의 콘솔 설정 상태(이름·도움말·기본값)를 만든다. 대기 값은 넘기지 않는다(진단을 남기므로
+// 모든 검사가 끝난 뒤 RegisterHandles가 넘긴다).
 Result<void> MakeSetting(ConfigState& state, const VarDefinition& definition,
                          UniquePtr<ConsoleSettingState>& out) noexcept {
     auto made = UniquePtr<ConsoleSettingState>::TryMake(state.allocator, state.allocator);
@@ -176,10 +178,6 @@ Result<void> MakeSetting(ConfigState& state, const VarDefinition& definition,
         filled = FillDefault(state, definition, setting);
     }
 
-    if (filled) {
-        filled = detail::AdoptPendingValues(state, setting);
-    }
-
     if (!filled) {
         return filled;
     }
@@ -200,18 +198,23 @@ Result<void> ConfigContext::RegisterHandles(Span<const VarDefinition* const> def
         return Result<void>::Failure(ErrorCode::WrongThread);
     }
 
-    // 1단계: 모두 검사한다(하나라도 거부하면 아무것도 등록하지 않는다). added는 새로 등록할 정의다.
+    // 1단계: 모두 검사하고 설정 상태(기본값 포함)를 만든다. 여기까지는 문맥을 바꾸지
+    // 않는다(하나라도 거부하면 아무것도 등록하지 않는다). added는 새로 등록할 정의다.
     Array<const VarDefinition*> added(*allocator_);
+    // 핸들은 정적 저장 기간이어야 한다(번호·주소가 정체성이고 문맥보다 오래 살아야 한다). 이
+    // 스레드의 스택 범위를 한 번 구해 모든 정의에 쓴다.
+    [[maybe_unused]] platform::ThreadStackRange stack;
+    if constexpr (!IsReleaseBuild) {
+        stack = platform::CurrentThreadStackRange();
+    }
+
     for (const VarDefinition* definition : definitions) {
         if constexpr (IsReleaseBuild) {
             if (cvar::HasFlag(definition->flags, VarFlags::Cheat)) {
                 continue;
             }
-        } else {
-            // 핸들은 정적 저장 기간이어야 한다(번호·주소가 정체성이고 문맥보다 오래 살아야 한다).
-            if (platform::CurrentThreadStackRange().Contains(definition)) {
-                return Result<void>::Failure(ErrorCode::InvalidArgument);
-            }
+        } else if (stack.Contains(definition)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
         if (!HasKnownRegion(*state, definition->name)) {
@@ -255,7 +258,6 @@ Result<void> ConfigContext::RegisterHandles(Span<const VarDefinition* const> def
         return Result<void>::Success();
     }
 
-    // 2단계: 상태를 모두 만든 뒤 한꺼번에 넣는다(넣는 자리를 먼저 확보한다).
     Array<UniquePtr<ConsoleSettingState>> made(*allocator_);
     if (auto reserved = made.TryReserve(added.Size()); !reserved) {
         return reserved;
@@ -277,14 +279,25 @@ Result<void> ConfigContext::RegisterHandles(Span<const VarDefinition* const> def
         return reserved;
     }
 
+    // 2단계: 이미 들어온 층 입력(대기 값)을 넘긴다. 거부한 값은 진단을 남기는데, 넘기다
+    // 실패하면(할당 실패) 이번 호출이 남긴 진단을 되돌려 실패한 등록이 진단을 남기지 않게 한다.
+    const ConfigDiagnosticsMark mark = state->diagnostics.Mark();
     for (UniquePtr<ConsoleSettingState>& setting : made) {
-        AssignIndex(*setting->definition);
-        if (auto pushed = state->settings.TryPushBack(Move(setting)); !pushed) {
-            return pushed;
+        if (auto adopted = detail::AdoptPendingValues(*state, *setting); !adopted) {
+            state->diagnostics.Rewind(mark);
+            return adopted;
         }
     }
 
-    // snapshot·콜백 판정이 새 설정을 보도록 다음 Sync가 다시 합친다(즉시 게시는 CVR2 — 5절).
+    // 3단계: 넣는다(자리를 확보했으므로 실패하지 않는다).
+    for (UniquePtr<ConsoleSettingState>& setting : made) {
+        AssignIndex(*setting->definition);
+        if (auto pushed = state->settings.TryPushBack(Move(setting)); !pushed) {
+            platform::Fatal("CVar registration lost its reserved capacity");
+        }
+    }
+
+    // snapshot·콜백 판정이 새 설정을 보도록 다음 Sync가 다시 합친다(즉시 게시는 CVR2 — VD17).
     state->dirty = true;
     return Result<void>::Success();
 }

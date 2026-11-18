@@ -4,11 +4,32 @@ namespace Rocks.Tooling.Checks;
 
 public static partial class PolicyChecks
 {
-    // CVar 핸들 정의(CVar<T>·BootCVar<T>·CVarGroup·ConsoleCommand 이름 = ...)다. 템플릿 인자는 한 겹 중첩까지 받는다
-    // (CVar<Array<int32>>는 지원 타입이 아니므로 그보다 깊을 일이 없다). 이름은 한정 이름(Owner::Name)일 수 있다.
-    private static readonly Regex CVarHandleDefinition = Pattern(
-        "\\b(?:(?:CVar|BootCVar)\\s*<(?:[^<>;{}()]|<[^<>;{}()]*>)*>|CVarGroup|ConsoleCommand)\\s+" +
-        "((?:[A-Za-z_]\\w*\\s*::\\s*)*[A-Za-z_]\\w*)\\s*=(?!=)");
+    // CVar 핸들 타입 철자다(CVar<T>·BootCVar<T>·CVarGroup·ConsoleCommand). 템플릿 인자는 한 겹 중첩까지 받는다
+    // (CVar<Array<int32>>는 지원 타입이 아니므로 그보다 깊을 일이 없다).
+    private const string CVarHandleType =
+        "\\b(?:(?:CVar|BootCVar)\\s*<(?:[^<>;{}()]|<[^<>;{}()]*>)*>|CVarGroup|ConsoleCommand)";
+
+    // 선언자 하나다(이름 — 한정 이름 Owner::Name일 수 있다 — 와 초기화 시작 `=`·`(`·`{`).
+    private const string CVarDeclarator = "((?:[A-Za-z_]\\w*\\s*::\\s*)*[A-Za-z_]\\w*)\\s*(=(?!=)|[({])";
+
+    // 핸들 정의의 첫 선언자다(복사·직접·중괄호 초기화). 같은 문장의 다음 선언자는 쉼표 뒤에서 따로 찾는다.
+    private static readonly Regex CVarHandleDefinition = Pattern(CVarHandleType + "\\s+" + CVarDeclarator);
+
+    private static readonly Regex CVarNextDeclarator = Pattern("\\G\\s*" + CVarDeclarator);
+
+    // 핸들 타입의 별칭이다(using V = CVar<int32>; typedef ... CVar<...> V;). 별칭으로 쓴 정의는 lexical 검사가 따라가지 못하므로
+    // 별칭 자체를 거부한다.
+    private static readonly Regex CVarHandleAlias = Pattern(
+        "\\busing\\s+[A-Za-z_]\\w*\\s*=[^;]*?\\b(?:CVar|BootCVar|CVarGroup|ConsoleCommand)\\b" +
+        "|\\btypedef\\b[^;]*?\\b(?:CVar|BootCVar|CVarGroup|ConsoleCommand)\\b");
+
+    private static readonly Regex ClassKeyBefore = Pattern("\\b(?:class|struct|union|enum)\\s+$");
+
+    private static readonly Regex StaticSpecifier = Pattern("\\bstatic\\b");
+
+    private static readonly Regex ThreadLocalSpecifier = Pattern("\\bthread_local\\b");
+
+    private static readonly Regex ConstSpecifier = Pattern("\\b(?:const|constexpr)\\b");
 
     private static readonly Regex RegisterCall = Pattern("\\bRegister\\s*\\(");
 
@@ -47,7 +68,8 @@ public static partial class PolicyChecks
         Dictionary<string, HashSet<string>> registered = new(StringComparer.Ordinal);
         List<(string Module, string Relative, int Line, string Name)> definitions = [];
         Dictionary<string, string> modules = new(StringComparer.Ordinal);
-        foreach (string path in NativeSources(root, RuntimeRoots))
+        // 게임 템플릿(Templates)도 모듈 소스이므로 이 검사만 범위를 넓힌다(다른 검사의 RuntimeRoots는 그대로다).
+        foreach (string path in NativeSources(root, [.. RuntimeRoots, "Templates"]))
         {
             string relative = Relative(root, path);
             string original = File.ReadAllText(path, StrictUtf8);
@@ -87,20 +109,41 @@ public static partial class PolicyChecks
                 }
             }
 
+            foreach (Match alias in CVarHandleAlias.Matches(code))
+            {
+                failures.Add(new(relative, LineAt(code, alias.Index), "cvar-registration",
+                    "CVar handle type alias; spell CVar<T>, BootCVar<T>, CVarGroup or ConsoleCommand so the registration check can see the definition"));
+            }
+
             BraceScope[] scopes = ScopesOf(code);
             foreach (Match match in CVarHandleDefinition.Matches(code))
             {
-                int line = 1 + code.AsSpan(0, match.Index).Count('\n');
-                if (scopes[match.Index] == BraceScope.Other)
+                if (ClassKeyBefore.IsMatch(code[StatementStart(code, match.Index)..match.Index]))
                 {
-                    failures.Add(new(relative, line, "cvar-registration",
-                        "CVar handle defined inside a function body; define it at namespace scope (or as a static member) and pass it to ConfigContext::Register"));
                     continue;
                 }
 
-                string qualified = match.Groups[1].Value;
-                string name = qualified[(qualified.LastIndexOf(':') + 1)..].Trim();
-                definitions.Add((module, relative, line, name));
+                string prefix = code[StatementStart(code, match.Index)..match.Index];
+                foreach ((int index, string qualified) in Declarators(code, match))
+                {
+                    int line = LineAt(code, index);
+                    string? problem = scopes[match.Index] == BraceScope.Other
+                        ? "CVar handle defined inside a function body; define it at namespace scope (or as a static member) and pass it to ConfigContext::Register"
+                        : ThreadLocalSpecifier.IsMatch(prefix)
+                        ? "thread_local CVar handle; handles have static storage duration (one per process)"
+                        : ConstSpecifier.IsMatch(prefix)
+                        ? "const or constexpr CVar handle; it has internal linkage, so a header copy makes a separate handle per translation unit (use constinit if needed)"
+                        : scopes[match.Index] == BraceScope.Class && !StaticSpecifier.IsMatch(prefix)
+                        ? "non-static CVar handle member; handles must be static members or at namespace scope"
+                        : null;
+                    if (problem is not null)
+                    {
+                        failures.Add(new(relative, line, "cvar-registration", problem));
+                        continue;
+                    }
+
+                    definitions.Add((module, relative, line, qualified[(qualified.LastIndexOf(':') + 1)..].Trim()));
+                }
             }
         }
 
@@ -114,6 +157,53 @@ public static partial class PolicyChecks
         }
 
         return failures;
+    }
+
+    // index가 속한 문장의 시작(직전 ';'·'{'·'}' 다음)이다.
+    private static int StatementStart(string code, int index)
+    {
+        int start = index;
+        while (start > 0 && code[start - 1] is not (';' or '{' or '}'))
+        {
+            --start;
+        }
+
+        return start;
+    }
+
+    // 핸들 정의 문장의 선언자(위치, 이름)들이다. 첫 선언자는 match이고, 초기화 식을 괄호·중괄호·대괄호 깊이로 건너뛰며 깊이 0의
+    // 쉼표 뒤에서 다음 선언자를 찾는다(문장 끝 ';'까지).
+    private static IEnumerable<(int Index, string Name)> Declarators(string code, Match first)
+    {
+        yield return (first.Groups[1].Index, first.Groups[1].Value);
+        int depth = 0;
+        for (int index = first.Groups[2].Index; index < code.Length; ++index)
+        {
+            char c = code[index];
+            if (c is '(' or '{' or '[')
+            {
+                ++depth;
+            }
+            else if (c is ')' or '}' or ']')
+            {
+                if (--depth < 0)
+                {
+                    yield break;
+                }
+            }
+            else if (depth == 0 && c == ';')
+            {
+                yield break;
+            }
+            else if (depth == 0 && c == ',')
+            {
+                Match next = CVarNextDeclarator.Match(code, index + 1);
+                if (next.Success)
+                {
+                    yield return (next.Groups[1].Index, next.Groups[1].Value);
+                }
+            }
+        }
     }
 
     // 가장 가까운 *.Build.cs가 있는 디렉터리(모듈)다. 없으면 파일의 디렉터리다.
