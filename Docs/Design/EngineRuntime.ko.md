@@ -221,7 +221,7 @@ Uninitialized → Initializing → Running → Stopping → Stopped
 | `WorldStarts.cpp` | 시작 큐와 `OnStart` 처리(`ProcessStarts`·`StartComponent`) | 시작 순서·준비 조건 |
 | `WorldTicks.cpp` | Tick 등록·해제(`RegisterTicks` 등)와 프레임 실행(`ExecuteTick`·`Tick`) | 프레임 단계·Tick 연동 |
 | `WorldDestroys.cpp` | 안전 지점의 파괴 정리(`FlushDestroys`·`DestroyActorNow`·`DestroyComponentNow`·root 비우기) | 파괴 hook·정리 순서 |
-| `WorldGarbageCollection.cpp` | GC step(`StepGarbageCollection`), 소유 객체 파괴 요청, 우회 파괴 복구(`RepairBypassedActors`) | GC 일정·Registry 연동 |
+| `WorldGarbageCollection.cpp` | GC step(`StepGarbageCollection`), 소유 객체 파괴 요청, 우회 파괴 복구(`RepairBypassedObjects`·Component 색인) | GC 일정·Registry 연동 |
 
 - 파일은 수백 줄 안쪽을 유지한다. 한 파일이 천 줄 가까이 커지면 기능 경계로 다시 나눈다(나눔은 동작 불변 이동 커밋).
 - `TickScheduler.cpp`(약 590줄)는 한 클래스의 한 기능이라 나누지 않는다.

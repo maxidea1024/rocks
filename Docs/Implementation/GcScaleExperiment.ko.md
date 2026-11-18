@@ -927,3 +927,40 @@ Debug 장부 재계산은 새 배치를 본다: 칸의 `clusterState`·`outCount
 | R18 | Level 복구가 Actor 레코드로 대체하지 않음 | Level 우회 파괴 시험 실패 |
 
 검증(a43ca91e): Debug Foundation 전체 2,067개·`--filter Object --repeat 3` 197개×3, Debug EngineTests 전체 2,201개·World `--repeat 3`·`--repeat 5` 57개, Tick `--repeat 5` 13개, 클러스터 smoke Debug 6종(World형 seed 41·47·43(worker 4), 패키지형 seed 42·48·44(worker 4))과 패키지형 seed 52·53(이제 서로 다른 실행), Development soak 10종(일반 300K tick seed 11·12·24(worker 4)·14(시간 예산), 클러스터 World형 seed 31·35·33(worker 4), 패키지형 seed 32·36·34(worker 4)), format·policy 통과. 패키지 smoke의 해체 수는 소속 수를 넓힌 뒤 300–400 tick에 122–159개다(전에는 330–385개 — 큰 패키지는 경계 비율 80%를 덜 넘는다).
+
+## 19. 2차 리뷰 반영 (2026-11-19)
+
+a1916228(Slot hot·cold 분리)·a43ca91e(1차 리뷰 반영)의 2차 리뷰 지적 6건을 고쳤다. 계약은 설계에 먼저 적었다(GC 설계 hot·cold 표, 엔진 런타임 4.6·7.4절 — 8b7cef1c). 그 사이 World.cpp를 기능별 파일 9개로 나눴다(100cfe89 스펙 → a5329334 이동).
+
+| 지적 | 확인 | 고침 | 시험 |
+|---|---|---|---|
+| [중] 참조 쓰기·컨테이너 편집의 소유자 범위 검사가 cold `storage`를 읽음(설계 표와 어긋남) | 사실 — `SetEdge`·`CheckContainerOwnerLocked`·batch 세 곳 | 저장소 시작 = hot `object` − 타입의 Object 기반 위치(`TypeLease::ObjectOffset`). 기반 위치는 생성마다 타입 레코드에 기록·대조(다르면 Fatal). 가상 함수가 있는 파생(World의 Actor·Component)은 MSVC ABI에서 기반이 vfptr 뒤라 0이 아니다 | `ObjectRegistry_OwnerRangeUsesObjectBaseOffset`(가상 함수 소유자의 첫·끝 멤버 쓰기, 기록된 기반 위치 = 실제 파생→기반 거리, 유도한 시작 = cold 기록 — `ObjectRegistryAccess`) |
+| [중하] `PinForEncode(level)` 채 Tick → 떼기 Busy → Fatal | 사실(공개 API로 닿음) | World 계약에 "encode 고정도 Tick·Shutdown 전에 반환"을 적고, 떼기 실패가 Busy면 그 계약을 밝히는 메시지로 Fatal(`detail::LevelDetachFailureMessage` — 떼기 시점에만 판정). 대기 목록은 버렸다(고정 해제를 알 길이 없어 매 프레임 재시도하고 그동안 배열과 레코드가 어긋난다) | `World_LevelEncodePinDetachFailureNamesTheContract`(판정 함수), Registry 시험이 encode 고정 owner의 바꿔 떼기가 Busy임을 확인 |
+| [하] 복구 주석·설계의 "매 프레임" 근거가 틀림 | 사실 — hook 안에서도 우회 파괴가 일어난다 | 근거를 "회수는 World 루트·Level 배열·components 간선에서 끊긴 뒤에만, 끊는 것은 World 정리뿐"으로. 매 프레임인 이유는 World 쪽 파괴가 없으면 GC가 돌지 않는 것 하나. 18절의 "cycle 도중 우회 파괴가 정리 없이 회수될 수 있다"는 틀린 설명이다 | `World_BypassInsideHooksIsRepaired`(Tick hook·OnDestroy hook 안 우회 파괴) |
+| [하] 레벨 편입 계약에 `levelPosition` 없음 | 사실(편입 경로는 아직 코드 없음 — 자리) | 4.6절 (1)에 배열 위치 기록·null 정리 뒤 재매김, Component 색인 등록을 넣음 | — |
+| [가능성] Component 단독 우회 파괴 미복구 | **사실** — 시험으로 확인(틱 없는 Component는 소유 Actor 목록·Actor 수에 남고 회수되지 않았다. 틱 있는 Component도 남았다) | World Component 색인(`componentRecords_` — 슬롯 → Component·소유 Actor·Tick handle 사본, AddComponent가 넣고 World 정리가 회수 요청 직전에 뺀다). 복구가 색인으로 가려 파괴 큐에 한 번 넣고, 정리 단계가 색인으로 소유 Actor·Tick 등록을 찾는다 — 정리의 Actor 수 × Borrow 훑기를 없앴다 | `World_BypassedComponentIsRepaired`(틱 있음·없음, World API 파괴는 우회로 세지 않음) |
+| 사소 | — | `RepairBypassedActors` → `RepairBypassedObjects`, `repairedTicks` → `repairedBypasses`, DestroyLevel의 `(void)marked` 주석 | — |
+
+측정 — 소유자 범위 검사의 cold 읽기(지적 1, Development, 높은 우선순위, 패키지 1M·교차 30%, 간선 쓰기 50,000회 × 10 묶음 × 5 round 번갈아 — `p4/rev2-measure.txt`):
+
+| | 추가 중앙값(최소) | 제거 중앙값(최소) |
+|---|---|---|
+| 전(cold `storage`) | 874 ns/op (614) | 693 ns/op (513) |
+| 후(hot `object` − 기반 위치) | 870 ns/op (655) | 705 ns/op (458) |
+
+- 차이는 흔들림 안이다. 무작위 소유자 쓰기 한 번은 Resolve·Borrow·잠금·hot 줄·대상 검증으로 수백 ns이고, cold 줄 하나가 그 안에서 드러나지 않는다. 17절의 "연결 같음"은 이 비용을 가린 것이 아니라 실제로 작았다. 고친 이유는 성능보다 설계 표(쓰기는 hot만)와 코드를 맞추는 것이다.
+
+음성 대조(`p4/negctl7*.txt` — 고친 지점마다 잘못된 구현을 넣어 Debug로 빌드하고 시험을 돌린 뒤 되돌림):
+
+| 대조 | 바꾼 것 | 결과 |
+|---|---|---|
+| S1 | 기반 위치를 기록하지 않음 | `OwnerRange` 시험 실패(기록 값·유도 시작) |
+| S2 | 저장소 시작 = object **+** 기반 위치 | 처음 시험(멤버 쓰기만)은 통과 — **시험 구멍**(컨테이너가 기반 뒤에 있어 범위 안). 유도 시작을 cold 기록과 직접 대조하도록 보강한 뒤 실패 |
+| S3 | 모든 타입에 기반 위치 0 기록 | `OwnerRange` 시험 실패 |
+| S4 | Busy 떼기 실패에 일반 메시지 | `World_LevelEncodePinDetachFailureNamesTheContract` 실패 |
+| S5 | 우회 파괴 복구를 하지 않음 | hook 안 우회 파괴 시험 실패 |
+| S6 | 복구가 Component를 건너뜀 | Component 우회 파괴 시험 실패 |
+| S7 | 정리가 읽을 수 없는 Component를 건너뜀 | Component 우회 파괴 시험 실패(2개) |
+| S8 | World 정리가 Component를 색인에서 빼지 않음 | Component 시험 실패(World API 파괴를 우회로 셈) |
+
+검증(803bcf00): Debug Foundation 전체 2,068개·`--filter Object --repeat 3` 198개×3, Debug EngineTests 전체 2,205개·World `--repeat 3`·`--repeat 5` 60개, 클러스터 smoke Debug 6종, Development soak 10종, format·policy 통과. 이번 측정·검증 동안 기계가 다른 작업으로 바빠 soak 시간이 평소의 1.5–3배였다(통과 판정에는 영향 없음).
