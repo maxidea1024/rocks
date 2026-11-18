@@ -219,9 +219,9 @@ Result<PipelineHandle> GlesDevice::CreateComputePipeline(const ComputePipelineDe
         return Result<PipelineHandle>::Failure(owner.Error());
     }
 
-    if (desc.shader.glsl.ByteCount() == 0) {
+    if (desc.shader.glsl.ByteCount() == 0 || !ValidateComputePipelineDesc(desc)) {
         Diagnostic message;
-        message.Text("compute pipeline needs GLSL ES source");
+        message.Text("compute pipeline needs GLSL ES source and valid drawConstantBytes");
         auto rejected = Reject(message, ErrorCode::InvalidArgument);
         return Result<PipelineHandle>::Failure(rejected.Error());
     }
@@ -249,13 +249,14 @@ Result<PipelineHandle> GlesDevice::CreateComputePipeline(const ComputePipelineDe
         return Result<PipelineHandle>::Failure(ErrorCode::DependencyFailed);
     }
 
+    record.drawConstantBytes = desc.drawConstantBytes;
     auto reflected = ReflectBufferSlots(record.program, record.bufferSlots, &record.writeSlots);
-    if (!reflected) {
+    auto constants = reflected ? ReflectRootConstants(record.program, record) : Move(reflected);
+    if (!constants) {
         gl_.DeleteProgram(record.program);
-        return Result<PipelineHandle>::Failure(reflected.Error());
+        return Result<PipelineHandle>::Failure(constants.Error());
     }
 
-    record.computeConstants = gl_.GetUniformLocation(record.program, ComputeRootConstantsName);
     auto added = pipelines_.TryAdd(record);
     if (!added) {
         gl_.DeleteProgram(record.program);

@@ -222,6 +222,21 @@ ImportRecord (스키마 Guid, 버전 1)
 - 부동소수점: 빌드 전체가 이미 `-ffp-contract=off`이고 fast-math를 쓰지 않으므로 모듈별 모델은 두지 않는다(clang-cl의 `/fp:precise`는 contract=on을 뜻하고 `/WX`에서 옵션 충돌 경고가 오류가 되므로 쓰지 않는다). 결정적 수학 모듈의 fmadd·`long double`·외부 심볼(`llvm-nm`) 검사는 C3에서 모든 구성에 구현되었다([CoreDataFoundations](CoreDataFoundations.ko.md) 2절). `-fno-math-errno`는 clang-cl이 그 형태를 받지 않아 쓰지 않는다.
 - 빌드가 주입하는 상수: 툴체인 지문(너겟 키, 구성·호스트 경로 제외)과 도구 빌드 ID(진단·캐시 무효화용, 입력 내용 해시 기반 — 패키지 Summary에는 넣지 않고 쿠킹 보고서·AssetIndex 캐시 header에 기록)를 Rocks.Build가 실행 파일마다 생성 번역 단위로 넣는다([ReflectionFoundations](ReflectionFoundations.ko.md) 8.1절·결정 17).
 - 엔진 World 타입(Level·Actor·Component)은 `ROCKS_CLASS(WorldOnly)`로 옮긴다(B8).
+### 5.7 구현에서 정한 점(A1a — 패키지 포맷 v1)
+
+A1a 구현(`Engine/Source/Runtime/AssetRuntime` — `PackageFormat.h`·`PackageWriter.h`·`PackageReader.h`·`PackageLoad.h`)이 위 절에서 비어 있던 것을 다음과 같이 정했다.
+
+1. **표 섹션의 바이트 배치**: Exports·ObjectImports·Dependencies·BulkIndex는 Record가 아니라 고정 배치다(`u32 count` + 항목, 정수 little-endian, Guid high·low, 문자열은 `u64 길이 + UTF-8`). Exports 항목 = `{name, typeId, outerIndex u32, flags u32}`, ObjectImports = `{assetId, outerImportIndex u32, name, typeId}`, Dependencies = `{assetId, kind u32, expectedTypeId, flags u32(bit 0 required)}`, BulkIndex = `{bulkId u32, flags u32, offset u64, storedBytes u64, rawBytes u64, codec u32, crc32 u32, sha256 32B}`. Summary만 Record다(스키마·필드 Guid는 `Private/PackageInternal.h`, 버전 표는 RecordList `{id, version}`, 엔진 버전은 중첩 Record `{주, 부, 패치}`, 프로파일 id는 String·설정 SHA-256은 Bytes 32). 섹션 schemaVersion은 모두 1이다.
+2. **패딩·빈 섹션**: 섹션 offset은 정확히 앞 섹션 끝을 정렬한 값이어야 하고(사이 byte는 0), 섹션 표 offset도 마지막 섹션 끝을 8 정렬한 값이다. bytes 0인 섹션은 거부한다 — Bulk만 예외(entry가 모두 0 byte일 때). 존재하는 표 섹션의 count 0도 거부한다.
+3. **Exports 순서 검증**: reader가 깊이 우선 순서(outer는 바로 앞 export 또는 그 조상)와 같은 Outer 안 이름 byte 오름차순(같은 byte 이름 중복 포함)을 검사한다. 대소문자·정규화만 다른 중복은 그래프 1단계(형제 유일성)가 잡는다.
+4. **객체 단위 EditorOnly**: Exports flags의 EditorOnly(2)는 v1에서 예약이다. 객체를 EditorOnly로 표시하는 클래스 지정자가 없으므로 writer는 0을 쓰고 reader는 켜진 비트를 `CorruptPackage`로 거부한다(지정자가 생기면 schemaVersion을 올린다).
+5. **Dependencies 합성 규칙**(writer와 로드 대조가 같은 함수 `MergeDependencyUses`): 에셋마다 hard 계열(외부 참조 대상 객체)은 EditorOnly가 아닌 쓰임이 하나라도 있으면 Hard, EditorOnly 쓰임만 있으면 EditorOnly, soft 계열도 같다(Soft·EditorOnly). 두 계열이 모두 EditorOnly면 EditorOnly 항목 하나다. required는 그 종류를 정한 쓰임들의 OR다. expectedTypeId는 Hard만 저장 때 대상 패키지 대표 에셋의 타입이고 나머지는 0이다(Soft 대상의 타입은 `RequestAsset`의 expectedType이 판정한다). 로드 대조는 (assetId, kind, required)의 정확한 일치(에디터 읽기 전용은 (assetId, kind) 부분집합)이며 모든 import의 에셋은 Hard 또는 EditorOnly 의존이어야 한다.
+6. **bulk**: writer는 저장 그래프의 struct 치환 hook(`SubstituteStruct`)으로 `BulkDataRef`를 첫 출현 순 1부터 다시 매기고 (옛 id → 새 id) 표를 돌려준다. raw byte는 `PackageBulkSource`에서 얻어 크기·SHA-256을 대조한다(다르면 `CorruptPackage`). entry의 EditorOnly 표시는 그 entry의 모든 참조 위치가 EditorOnly일 때다. Zstd 압축이 크기를 줄이지 못하면 그 entry는 None으로 저장한다(결정적). 쿠킹 패키지 v1은 로더가 패키지 전체를 읽으므로(SHA-256 확인) 압축을 푼 raw를 `Package`가 소유하고 `Package::BulkBytes(ref)`로 준다(mip 부분 읽기는 TextureStreaming 단계).
+7. **Package**: 하드 의존 패키지 목록(`ObjectRefArray<Package>`)은 두지 않는다 — AssetManager의 상주 단위 표가 의존과 간선 다중도를 가진다. `Package`의 id(Transient·ReadOnly)·종류·bulk는 로드가 Commit 전에 설정하고, 대표 `Asset`의 `assetId`(Transient·ReadOnly)도 같이 설정한다. 로드가 아닌 생성은 `NewPackage(registry, access, id, kind)`다.
+8. **진단 모델**: API는 `Result`의 `ErrorCode`, 분류는 `AssetDiagnostic{code, error, asset, related, section, detail}` out 인자다(4.6절 이름표 `AssetDiagnosticCode`). 손상은 `InvalidArgument` + `CorruptPackage`, 버전 축은 `Unsupported` + `UnsupportedVersion`·`NewerVersion`, 할당 실패는 진단 코드 None + 원래 오류다. 그래프 단계 오류는 할당·스레드·종료 오류를 그대로, 미등록 타입(NotFound)·버전(Unsupported)은 `UnsupportedVersion`, 나머지는 `CorruptPackage`로 분류하고 원래 오류를 `error`에 남긴다.
+9. **종류 불일치·버전 판정 보강**: 쿠킹을 기대하는 reader가 에디터 패키지를 받으면 `UnsupportedVersion`(다시 쿠킹), 에디터를 기대하는 reader가 쿠킹 패키지를 받으면 `CorruptPackage`다. 쿠킹 패키지의 미등록 export 타입은 `UnsupportedVersion`, 에디터는 읽기 전용이다. 커스텀 버전 표는 쿠킹이면 현재 표와 전체가 같아야 하고 에디터는 높거나 모르는 id면 읽기 전용이다. 쿠킹 로드에서 Required 실효 값 누락은 `CorruptPackage`다(writer가 Required null을 거부하므로).
+10. **로드 단계 나눔**: `PackageLoadState`(소유 스레드에서 생성 → `Prepare`는 어느 스레드: 헤더·표·섹션 검증, bulk 해제·SHA-256, graph 1단계, 저장 버전·BulkDataRef·Dependencies 대조) → `InstantiatePackages`(소유 스레드, SCC 묶음 한 트랜잭션: Package·노드 생성 → import 해석 → 적용 → Required → id·bulk 설정) → 호출자 Commit. 묶음 밖 import는 `PackageImportResolver`가 찾는다.
+
 ## 6. 에셋 타입·객체 통합·참조
 
 ### 6.1 객체 통합
@@ -641,6 +656,22 @@ nugget-gc --max-bytes=<n> --unused-days=<n>
 27. 매니페스트 대조: 프로파일 불일치 `IncompatibleCook`, 크기·SHA·의존 불일치 `CorruptPackage`, 손상된 게시 파일의 재게시
 28. 순환 키: 하드 순환 A↔B·3-node 순환의 cookKey와 Build 순환의 너겟 키가 정의되고, 구성원 하나를 바꾸면 SCC 전체의 키가 바뀐다. 동적 간선으로 생긴 순환의 단위 병합과 해제, 간선 다중도(필드 둘 중 하나 제거)
 29. 저장: 이전 파일의 손상 bulk entry 복사 거부, bulkId 재매핑 후 지연 읽기, 저장 중 편집 시 재연결 생략, 대체 경로(FAT 등)에서 자기 핸들 때문에 실패하지 않음
+
+### 14.1 시험 fixture 에셋(A1부터)
+
+에셋 시스템 시험은 실제 에셋 타입(A5의 Texture 계열 등)이 생기기 전에도 직렬화·로드 경로를 그대로 타도록 시험 전용 리플렉션 에셋 클래스를 쓴다. 위치는 `Engine/Source/Developer/AssetTestFixtures`(EngineTests 전용 header-only fixture 모듈, identity 명세 `AssetTestFixtures.rocksids.json`), 결정적 값 생성기·필드 비교 함수는 `Engine/Source/Runtime/AssetRuntime/Tests/AssetFixtureValues.h`다. 새 에셋 타입(A5 Texture 등)도 같은 방식으로 "Fill(seed) → 저장 → 다른 Registry에 로드 → Check(seed) 필드 비교 → 다시 저장해 byte 동일"을 붙인다(`FixtureAssetTests.cpp`의 `RunRoundTrip`).
+
+| fixture | 단계 | 담는 것 | 시험 |
+|---|---|---|---|
+| `SimpleAsset` | 단순 | int32·int8·uint64·float·double·bool·Name·String·enum·Guid | `FixtureAsset_SimpleRoundTrip` |
+| `ValueAsset`(+`FixturePoint`·`FixtureGroup`·`FixturePayload`) | 값 묶음 | 중첩 struct·struct 배열·Optional 멤버, 정적 배열, Array, OrderedMap·OrderedSet, Optional(String·struct), Text, Bytes(`Array<uint8>`), InstancedStruct, TangentCurve, `InterpCurve<float>`, Transform·Vec3·Rotator(UE 단위: cm·도) | `FixtureAsset_ValueRoundTrip` |
+| `BulkAsset` | 큰 데이터 | 4 MiB 압축되는 무늬·2 MiB 압축되지 않는 무늬·0 byte bulk·bulk 배열(같은 ref 두 번) | `FixtureAsset_BulkRoundTrip`(None·Zstd × 에디터·쿠킹) |
+| `BaseGameAsset`·`DerivedGameAsset` | 상속 | 기반 필드·파생 필드 | `FixtureAsset_InheritanceRoundTrip` |
+| `ValidatedAsset`(+`FixtureRange` Validate hook) | 검증 hook | 필드 struct·struct 배열 원소의 hook | `FixtureAsset_ValidateHook`(유효 왕복, 거부 값은 로드가 CorruptPackage) |
+| `TestAsset`·`TestPart`·`TestScratch`·`TestRequiredAsset` | 참조·구조 | 다른 패키지 Hard(단일·`ObjectRefArray<Object>`)·Soft·EditorOnly Hard·EditorOnly 값·bulk, 하위 객체 사슬(`Body.Socket`)·같은 패키지 안 참조, 저장 불가(Transient) 하위 객체, Required Hard | `AssetPackage_*`(PackageFormatTests·PackageFuzzTests) |
+| `GameDataAsset`·`GameComponent`·`FixtureEntry` | 복합 | 하위 객체 여러 개·다른 에셋 Hard 배열·Soft·weak·커브·bulk·struct 배열·Map·hook struct | (A1a 이후 그래프 시험에서 쓴다 — 아직 없음) |
+
+A1a 상태(2026-11-18): 리플렉션 성질 표의 모든 허용 조합을 덮는 fixture와 그 빠짐 검사 시험, 요구 대조표(포맷 필드·오류 코드·API 오류 반환마다 시험 이름), clang source-based coverage 측정은 아직 끝나지 않았다(진행 메모: A1 구현 에이전트 인계 문서). 그 전까지 A1a는 "구현"이 아니라 진행 중이다.
 
 ## 15. PNG 디코더 범위
 

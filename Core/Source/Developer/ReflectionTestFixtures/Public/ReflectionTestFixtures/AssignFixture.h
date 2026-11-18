@@ -100,7 +100,7 @@ struct AssignHolder final : Object {
     ROCKS_PROPERTY(ReadOnly) int32 locked = 0;
     ROCKS_PROPERTY(ReadOnly) AssignPoint sealed;
     ROCKS_PROPERTY() ClassRef<AssignKindBase> kind;
-    ROCKS_PROPERTY() WeakRef<AssignTarget> peer;
+    ROCKS_PROPERTY() WeakObjectRef<AssignTarget> peer;
     ROCKS_PROPERTY() AssignMixed mixed;
     ROCKS_PROPERTY() ObjectRef<AssignTarget> next;
     ROCKS_PROPERTY(ReadOnly) ObjectRef<AssignTarget> anchorLink;

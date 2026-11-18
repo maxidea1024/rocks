@@ -41,7 +41,7 @@ internal static partial class SchemaValidator
     private static string? TemplateTarget(string spelling, string prefix) =>
         spelling.StartsWith(prefix, StringComparison.Ordinal) && spelling.EndsWith('>') ? spelling[prefix.Length..^1].Trim() : null;
 
-    // 강한 참조(ObjectRef<T>)·weak 참조(WeakRef<T> — 리플렉션 B9d1, Docs/Design/ReflectionExtensions.ko.md 5.1절)·소프트 참조
+    // 강한 참조(ObjectRef<T>)·weak 참조(WeakObjectRef<T> — 리플렉션 B9d1, Docs/Design/ReflectionExtensions.ko.md 5.1절)·소프트 참조
     // (SoftObjectRef<T>)·클래스 참조(ClassRef<Base> — 리플렉션 B9d2, 같은 문서 5.2절) 철자면 대상 T와 값 종류를 돌려준다(아니면 null).
     private static (string Target, string Kind)? ReferenceSpelling(string spelling)
     {
@@ -50,7 +50,7 @@ internal static partial class SchemaValidator
             return (strong, "ObjectReference");
         }
 
-        if (TemplateTarget(spelling, "rocks::WeakRef<") is string weak)
+        if (TemplateTarget(spelling, "rocks::WeakObjectRef<") is string weak)
         {
             return (weak, "WeakObjectReference");
         }
@@ -239,7 +239,7 @@ internal static partial class SchemaValidator
                 return $"Core value types are reflected by the {StructRules.BindingModule} module: depend on {StructRules.BindingModule} (add it to the module's RequiredModules) so its descriptor is imported.";
             }
 
-            return "Use a supported scalar, Guid, String, Name, AssetId, Sha256Digest, ROCKS_ENUM enum, ROCKS_STRUCT struct, ObjectRef, WeakRef, SoftObjectRef, ClassRef, rocks::InstancedStruct<>, rocks::Optional, rocks::OrderedMap/OrderedSet or rocks::Array/ObjectRefArray/StructRefArray field; raw pointers/other containers/cv-qualified fields need an explicit codec extension.";
+            return "Use a supported scalar, Guid, String, Name, AssetId, Sha256Digest, ROCKS_ENUM enum, ROCKS_STRUCT struct, ObjectRef, WeakObjectRef, SoftObjectRef, ClassRef, rocks::InstancedStruct<>, rocks::Optional, rocks::OrderedMap/OrderedSet or rocks::Array/ObjectRefArray/StructRefArray field; raw pointers/other containers/cv-qualified fields need an explicit codec extension.";
         }
 
         // 단일 값 형식 철자 하나를 (값 종류, 대상 정규 이름, 대상 ID)로 푼다(필드와 Array<T> 원소가 같은 해석을 쓴다).
@@ -656,10 +656,10 @@ internal static partial class SchemaValidator
 
                 if (field.Spec.Required && !field.AcceptsRequired)
                 {
-                    // WeakRef는 대상이 죽으면 저절로 null이 되므로 Required를 지킬 수 없다(Docs/Design/ReflectionExtensions.ko.md 5.1절). Map은 값마다,
+                    // WeakObjectRef는 대상이 죽으면 저절로 null이 되므로 Required를 지킬 수 없다(Docs/Design/ReflectionExtensions.ko.md 5.1절). Map은 값마다,
                     // Set은 원소마다 non-null이다(키에는 Required가 없다 — 리플렉션 B9f2).
                     throw new MetadataException($"{field.Owner}::{field.Name}: Required applies only to object, soft object and class reference fields, arrays, static arrays and sets of them and maps with such values", "RMC2202",
-                        "Remove Required or change the field to ObjectRef, SoftObjectRef, ClassRef, ObjectRefArray, ObjectRefMap, Array<SoftObjectRef>, Array<ClassRef>, a static array of ObjectRef/SoftObjectRef/ClassRef, OrderedSet<SoftObjectRef/ClassRef> or OrderedMap<K, SoftObjectRef/ClassRef>; a WeakRef becomes null when its target dies, so it cannot be Required.").At(field.Site);
+                        "Remove Required or change the field to ObjectRef, SoftObjectRef, ClassRef, ObjectRefArray, ObjectRefMap, Array<SoftObjectRef>, Array<ClassRef>, a static array of ObjectRef/SoftObjectRef/ClassRef, OrderedSet<SoftObjectRef/ClassRef> or OrderedMap<K, SoftObjectRef/ClassRef>; a WeakObjectRef becomes null when its target dies, so it cannot be Required.").At(field.Site);
                 }
 
                 // Required와 복제 제외 플래그는 함께 쓸 수 없다(리플렉션 B9h1 — 복제본이 늘 null을 가져 패키지 저장의 rejectMissingRequired가

@@ -169,7 +169,7 @@ TEST(ObjectLifecycleAccessDestroyLeasesAndGeneration) {
         auto root = registry.NewObject<LifecycleProbe>(access, LifecycleType);
         REQUIRE(root);
         const ObjectHandle handle = root.Value().Handle();
-        WeakRef<LifecycleProbe> weak(handle);
+        WeakObjectRef<LifecycleProbe> weak(handle);
         auto borrow = registry.Resolve<LifecycleProbe>(access, handle);
         auto backend = registry.AcquireBackendLease(access, handle);
         REQUIRE(borrow && backend);

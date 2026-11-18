@@ -1,0 +1,1120 @@
+#include "PackageInternal.h"
+
+#include <AssetRuntime/PackageReader.h>
+#include <Compression/Compression.h>
+#include <Core/Encoding/Crc32.h>
+#include <Object/TypeRegistry.h>
+#include <Serialization/Record.h>
+#include <Serialization/RecordList.h>
+
+namespace rocks {
+
+namespace {
+
+using namespace package_detail;
+
+constexpr uint32 SectionKindValue(PackageSectionKind kind) noexcept {
+    return static_cast<uint32>(kind);
+}
+
+// 손상 판정 하나를 진단과 함께 돌려준다.
+template <class T>
+Result<T> Corrupt(AssetDiagnostic* failure, AssetId asset, uint32 section, uint64 detail) noexcept {
+    return FailAsset<T>(failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument,
+                        asset, section, detail);
+}
+
+template <class T>
+Result<T> Unsupported(AssetDiagnostic* failure, AssetDiagnosticCode code, AssetId asset,
+                      uint32 section, uint64 detail) noexcept {
+    return FailAsset<T>(failure, code, ErrorCode::Unsupported, asset, section, detail);
+}
+
+// 할당·자원 실패는 손상이 아니다(진단 코드 None, 원래 오류 보존).
+template <class T>
+Result<T> Resource(AssetDiagnostic* failure, ErrorCode error, AssetId asset,
+                   uint32 section) noexcept {
+    return FailAsset<T>(failure, AssetDiagnosticCode::None, error, asset, section, 0);
+}
+
+Guid LoadGuid(const uint8* bytes) noexcept {
+    return Guid{LoadLittleEndian<uint64>(bytes), LoadLittleEndian<uint64>(bytes + 8)};
+}
+
+bool AllZero(Span<const uint8> bytes) noexcept {
+    for (uint8 value : bytes) {
+        if (value != 0) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// 섹션 표·내용 해석에 쓰는 Archive 한도다(문자열 4 KiB, 작업량은 섹션 상한 기준).
+ArchiveLimits TableLimits() noexcept {
+    ArchiveLimits limits;
+    limits.maxTotalBytes = static_cast<usize>(PackageMaxSectionBytes);
+    limits.maxValueBytes = PackageMaxStringBytes;
+    limits.maxOperations = NumericLimits<uint64>::Max();
+    limits.maxWork = NumericLimits<uint64>::Max();
+    return limits;
+}
+
+RecordLimits SummaryLimits() noexcept {
+    RecordLimits limits;
+    limits.archive = TableLimits();
+    limits.archive.maxValueBytes = static_cast<usize>(PackageMaxSectionBytes);
+    limits.maxFields = 16;
+    return limits;
+}
+
+// Record 필드 payload를 고정 폭 값으로 읽는다(wire가 다르거나 크기가 다르면 실패).
+Result<uint32> FieldU32(const FieldView& field) noexcept {
+    if (field.wireType != static_cast<uint32>(WireType::U32) || field.payload.Size() != 4) {
+        return Result<uint32>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return Result<uint32>::Success(LoadLittleEndian<uint32>(field.payload.Data()));
+}
+
+Result<Guid> FieldGuid(const FieldView& field) noexcept {
+    if (field.wireType != static_cast<uint32>(WireType::Guid) || field.payload.Size() != 16) {
+        return Result<Guid>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return Result<Guid>::Success(LoadGuid(field.payload.Data()));
+}
+
+// 버전 표(RecordList[{id, version}])를 읽는다. id 오름차순·중복 없음이어야 한다.
+template <class Entry>
+Result<void> ReadVersionList(const RecordReader& parent, const FieldView& field,
+                             Array<Entry>& out) noexcept {
+    RecordListLimits listLimits;
+    listLimits.maxItems =
+        PackageMaxExports > PackageMaxObjectImports ? PackageMaxExports : PackageMaxObjectImports;
+    listLimits.maxPayloadBytes = static_cast<usize>(PackageMaxSectionBytes);
+    listLimits.maxItemBytes = static_cast<usize>(PackageMaxSectionBytes);
+    auto list = RecordListReader::OpenField(parent, field, VersionItemSchema, 1, 1, listLimits);
+    if (!list) {
+        return Result<void>::Failure(list.Error());
+    }
+
+    if (auto reserved = out.TryReserve(list.Value().ItemCount()); !reserved) {
+        return reserved;
+    }
+
+    for (usize index = 0; index < list.Value().ItemCount(); ++index) {
+        auto item = list.Value().OpenItem(index, 2);
+        if (!item || item.Value().FieldCount() != 2) {
+            return Result<void>::Failure(item ? ErrorCode::InvalidArgument : item.Error());
+        }
+
+        auto idField = item.Value().Find(VersionItemIdField);
+        auto versionField = item.Value().Find(VersionItemVersionField);
+        if (!idField || !versionField) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        auto id = FieldGuid(idField.Value());
+        auto version = FieldU32(versionField.Value());
+        if (!id || !version) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (!out.IsEmpty() && !GuidLess(out[out.Size() - 1].type, id.Value())) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        Entry entry;
+        entry.type = id.Value();
+        entry.version = version.Value();
+        if (auto pushed = out.TryPushBack(entry); !pushed) {
+            return pushed;
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+// 버전 표 항목의 정렬 키 이름을 맞추는 대리 항목이다(커스텀 버전은 id를 type 칸으로 읽는다).
+struct CustomVersionRow {
+    Guid type{};
+    uint32 version = 0;
+};
+
+Result<EngineVersion> ReadEngineVersion(Allocator& allocator, const RecordReader& parent,
+                                        const FieldView& field) noexcept {
+    auto record = parent.OpenRecordField(allocator, field, EngineVersionSchema, 1, 1, 3);
+    if (!record || record.Value().FieldCount() != 3) {
+        return Result<EngineVersion>::Failure(record ? ErrorCode::InvalidArgument : record.Error());
+    }
+
+    uint32 parts[3] = {};
+    const Guid ids[3] = {EngineVersionMajorField, EngineVersionMinorField, EngineVersionPatchField};
+    for (usize index = 0; index < 3; ++index) {
+        auto part = record.Value().Find(ids[index]);
+        auto value = part ? FieldU32(part.Value()) : Result<uint32>::Failure(part.Error());
+        if (!value || value.Value() > NumericLimits<uint16>::Max()) {
+            return Result<EngineVersion>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        parts[index] = value.Value();
+    }
+
+    return Result<EngineVersion>::Success(EngineVersion{static_cast<uint16>(parts[0]),
+                                                        static_cast<uint16>(parts[1]),
+                                                        static_cast<uint16>(parts[2])});
+}
+
+Result<void> ReadSummary(Allocator& allocator, Span<const uint8> bytes, PackageKind kind,
+                         PackageSummary& summary) noexcept {
+    auto reader = RecordReader::Open(allocator, bytes, SummarySchema, SummarySchemaVersion,
+                                     SummarySchemaVersion, SummaryLimits());
+    if (!reader) {
+        return Result<void>::Failure(reader.Error());
+    }
+
+    RecordReader& record = reader.Value();
+    const usize expected = kind == PackageKind::Editor ? 4 : 5;
+    if (record.FieldCount() != expected) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto types = record.Find(SummaryTypesField);
+    auto customs = record.Find(SummaryCustomVersionsField);
+    if (!types || !customs) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (auto read = ReadVersionList(record, types.Value(), summary.types); !read) {
+        return read;
+    }
+
+    Array<CustomVersionRow> customRows(allocator);
+    if (auto read = ReadVersionList(record, customs.Value(), customRows); !read) {
+        return read;
+    }
+
+    if (auto reserved = summary.customVersions.TryReserve(customRows.Size()); !reserved) {
+        return reserved;
+    }
+
+    for (const CustomVersionRow& row : customRows) {
+        (void)summary.customVersions.TryPushBack(PackageCustomVersion{row.type, row.version});
+    }
+
+    if (kind == PackageKind::Editor) {
+        auto saved = record.Find(SummarySavedByField);
+        auto compatible = record.Find(SummaryCompatibleWithField);
+        if (!saved || !compatible) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        auto savedBy = ReadEngineVersion(allocator, record, saved.Value());
+        auto compatibleWith = ReadEngineVersion(allocator, record, compatible.Value());
+        if (!savedBy || !compatibleWith) {
+            return Result<void>::Failure(savedBy ? compatibleWith.Error() : savedBy.Error());
+        }
+
+        summary.savedBy = savedBy.Value();
+        summary.compatibleWith = compatibleWith.Value();
+        // compatibleWith는 주·부·0이어야 하고 savedBy의 기준선보다 새지 않다(writer 규칙).
+        if (summary.compatibleWith.patchVersion != 0 ||
+            summary.savedBy.CompatibleBaseline() < summary.compatibleWith) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        return Result<void>::Success();
+    }
+
+    auto profile = record.Find(SummaryProfileIdField);
+    auto settings = record.Find(SummaryProfileSettingsField);
+    auto cooker = record.Find(SummaryCookerVersionField);
+    if (!profile || !settings || !cooker) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const FieldView& profileField = profile.Value();
+    if (profileField.wireType != static_cast<uint32>(WireType::String) ||
+        profileField.payload.Size() == 0 || profileField.payload.Size() > PackageMaxStringBytes) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const StringView profileText(reinterpret_cast<const char*>(profileField.payload.Data()),
+                                 profileField.payload.Size());
+    if (!profileText.IsValidUtf8()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (auto assigned = summary.profileId.TryAssign(profileText); !assigned) {
+        return assigned;
+    }
+
+    const FieldView& settingsField = settings.Value();
+    if (settingsField.wireType != static_cast<uint32>(WireType::Bytes) ||
+        settingsField.payload.Size() != Sha256Digest::Bytes) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    for (usize index = 0; index < Sha256Digest::Bytes; ++index) {
+        summary.profileSettings.bytes[index] = settingsField.payload[index];
+    }
+
+    auto cookerVersion = FieldU32(cooker.Value());
+    if (!cookerVersion) {
+        return Result<void>::Failure(cookerVersion.Error());
+    }
+
+    summary.cookerVersion = cookerVersion.Value();
+    return Result<void>::Success();
+}
+
+// 해석 오류를 진단으로 바꾼다. 할당 실패는 자원 실패, 그 밖은 손상이다.
+template <class T>
+Result<T> SectionFailure(AssetDiagnostic* failure, ErrorCode error, AssetId asset,
+                         PackageSectionKind kind, uint64 detail) noexcept {
+    if (error == ErrorCode::OutOfMemory) {
+        return Resource<T>(failure, error, asset, SectionKindValue(kind));
+    }
+
+    return Corrupt<T>(failure, asset, SectionKindValue(kind), detail);
+}
+
+Result<void> ReadExports(Span<const uint8> bytes, PackageContents& contents) noexcept {
+    auto archive = ArchiveReader::Create(bytes, TableLimits());
+    if (!archive) {
+        return Result<void>::Failure(archive.Error());
+    }
+
+    ArchiveReader& in = archive.Value();
+    auto count = in.ReadU32();
+    if (!count || count.Value() == 0 || count.Value() > PackageMaxExports) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (auto reserved = contents.exports.TryReserve(count.Value()); !reserved) {
+        return reserved;
+    }
+
+    for (uint32 index = 0; index < count.Value(); ++index) {
+        auto name = in.ReadStringView();
+        auto type = in.ReadGuid();
+        auto outer = in.ReadU32();
+        auto flags = in.ReadU32();
+        if (!name || !type || !outer || !flags) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        PackageExportEntry entry;
+        entry.name = name.Value();
+        entry.type = type.Value();
+        entry.outerIndex = outer.Value();
+        entry.flags = flags.Value();
+        (void)contents.exports.TryPushBack(entry);
+    }
+
+    if (!in.AtEnd()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return Result<void>::Success();
+}
+
+// export 표 구조를 검증한다: export 1만 Primary·빈 이름·outer 0, 나머지는 이름 있음·outer ≥
+// 1·자기보다 앞, 정의된 flags만(EditorOnly는 v1 예약), 깊이 우선 순서(outer는 바로 앞 export이거나
+// 그 조상), 같은 Outer 안 이름 byte 오름차순(중복 없음), 타입 0 아님.
+Result<uint64> ValidateExports(Allocator& allocator, const PackageContents& contents) noexcept {
+    const Array<PackageExportEntry>& exports = contents.exports;
+    // 깊이 우선 경로(export index, 그 아래 마지막 자식 이름)다.
+    struct PathFrame {
+        uint32 index = 0;
+        StringView lastChild{};
+        bool hasChild = false;
+    };
+
+    Array<PathFrame> path(allocator);
+    if (auto reserved = path.TryReserve(exports.Size() + 1); !reserved) {
+        return Result<uint64>::Failure(reserved.Error());
+    }
+
+    (void)path.TryPushBack(PathFrame{});
+    for (usize position = 0; position < exports.Size(); ++position) {
+        const PackageExportEntry& entry = exports[position];
+        const uint32 index = static_cast<uint32>(position + 1);
+        const bool primary = (entry.flags & static_cast<uint32>(PackageExportFlags::Primary)) != 0;
+        if ((entry.flags & ~static_cast<uint32>(PackageExportFlags::Primary)) != 0 ||
+            entry.type == TypeId{}) {
+            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (index == 1) {
+            if (!primary || entry.name.ByteCount() != 0 || entry.outerIndex != 0) {
+                return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+            }
+        } else if (primary || entry.name.ByteCount() == 0 || entry.outerIndex == 0 ||
+                   entry.outerIndex >= index) {
+            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        // outer가 경로에 있어야 한다(깊이 우선). 경로를 outer까지 줄인다.
+        while (!path.IsEmpty() && path[path.Size() - 1].index != entry.outerIndex) {
+            (void)path.TryPopBack();
+        }
+
+        if (path.IsEmpty()) {
+            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        PathFrame& parent = path[path.Size() - 1];
+        if (parent.hasChild && !BytesLess(parent.lastChild, entry.name)) {
+            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        parent.hasChild = true;
+        parent.lastChild = entry.name;
+        (void)path.TryPushBack(PathFrame{index, {}, false});
+        (void)position;
+    }
+
+    return Result<uint64>::Success(0);
+}
+
+Result<void> ReadImports(Span<const uint8> bytes, PackageContents& contents) noexcept {
+    auto archive = ArchiveReader::Create(bytes, TableLimits());
+    if (!archive) {
+        return Result<void>::Failure(archive.Error());
+    }
+
+    ArchiveReader& in = archive.Value();
+    auto count = in.ReadU32();
+    if (!count || count.Value() == 0 || count.Value() > PackageMaxObjectImports) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (auto reserved = contents.imports.TryReserve(count.Value()); !reserved) {
+        return reserved;
+    }
+
+    for (uint32 index = 0; index < count.Value(); ++index) {
+        auto asset = in.ReadGuid();
+        auto outer = in.ReadU32();
+        auto name = in.ReadStringView();
+        auto type = in.ReadGuid();
+        if (!asset || !outer || !name || !type) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        PackageImportEntry entry;
+        entry.asset = AssetId{asset.Value()};
+        entry.outerImportIndex = outer.Value();
+        entry.name = name.Value();
+        entry.type = type.Value();
+        (void)contents.imports.TryPushBack(entry);
+    }
+
+    if (!in.AtEnd()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return Result<void>::Success();
+}
+
+// import 표를 검증한다: 에셋 null·자기 에셋 금지, outer import는 자기보다 앞·같은 에셋·이름 있는
+// 항목, outer가 있으면 이름 있음, 타입 0 아님, (assetId, 객체 경로) 엄격 오름차순.
+Result<uint64> ValidateImports(Allocator& allocator, const PackageContents& contents) noexcept {
+    const Array<PackageImportEntry>& imports = contents.imports;
+    String previous(allocator);
+    String current(allocator);
+    for (usize position = 0; position < imports.Size(); ++position) {
+        const PackageImportEntry& entry = imports[position];
+        if (entry.asset.IsNull() || entry.asset == contents.header.assetId ||
+            entry.type == TypeId{}) {
+            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (entry.outerImportIndex != 0) {
+            const usize outer = entry.outerImportIndex - 1;
+            if (outer >= position || !(imports[outer].asset == entry.asset) ||
+                imports[outer].name.ByteCount() == 0 || entry.name.ByteCount() == 0) {
+                return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+            }
+        }
+
+        if (auto built = ImportPathOf(imports.View(), position, current); !built) {
+            return Result<uint64>::Failure(built.Error() == ErrorCode::OutOfMemory
+                                               ? ErrorCode::OutOfMemory
+                                               : ErrorCode::InvalidArgument);
+        }
+
+        if (position > 0) {
+            const PackageImportEntry& before = imports[position - 1];
+            bool ordered = false;
+            if (before.asset.value != entry.asset.value) {
+                ordered = GuidLess(before.asset.value, entry.asset.value);
+            } else {
+                ordered = BytesLess(previous.View(), current.View());
+            }
+
+            if (!ordered) {
+                return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+            }
+        }
+
+        if (auto copied = previous.TryAssign(current.View()); !copied) {
+            return Result<uint64>::Failure(copied.Error());
+        }
+    }
+
+    return Result<uint64>::Success(0);
+}
+
+Result<void> ReadDependencies(Span<const uint8> bytes, PackageContents& contents) noexcept {
+    auto archive = ArchiveReader::Create(bytes, TableLimits());
+    if (!archive) {
+        return Result<void>::Failure(archive.Error());
+    }
+
+    ArchiveReader& in = archive.Value();
+    auto count = in.ReadU32();
+    // 의존 수는 import 수 + Soft 수라 따로 상한을 두지 않지만 섹션 크기가 묶는다(항목 40 byte).
+    if (!count || count.Value() == 0 || count.Value() > bytes.Size() / 40) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (auto reserved = contents.dependencies.TryReserve(count.Value()); !reserved) {
+        return reserved;
+    }
+
+    for (uint32 index = 0; index < count.Value(); ++index) {
+        auto asset = in.ReadGuid();
+        auto kind = in.ReadU32();
+        auto expected = in.ReadGuid();
+        auto flags = in.ReadU32();
+        if (!asset || !kind || !expected || !flags) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (kind.Value() < static_cast<uint32>(PackageDependencyKind::Hard) ||
+            kind.Value() > static_cast<uint32>(PackageDependencyKind::ImportOwner) ||
+            (flags.Value() & ~DependencyRequiredFlag) != 0) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        PackageDependencyEntry entry;
+        entry.asset = AssetId{asset.Value()};
+        entry.kind = static_cast<PackageDependencyKind>(kind.Value());
+        entry.expectedType = expected.Value();
+        entry.required = (flags.Value() & DependencyRequiredFlag) != 0;
+        (void)contents.dependencies.TryPushBack(entry);
+    }
+
+    if (!in.AtEnd()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return Result<void>::Success();
+}
+
+Result<uint64> ValidateDependencies(const PackageContents& contents) noexcept {
+    const Array<PackageDependencyEntry>& dependencies = contents.dependencies;
+    for (usize index = 0; index < dependencies.Size(); ++index) {
+        const PackageDependencyEntry& entry = dependencies[index];
+        if (entry.asset.IsNull() || entry.asset == contents.header.assetId) {
+            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (contents.header.kind == PackageKind::Cooked &&
+            entry.kind != PackageDependencyKind::Hard &&
+            entry.kind != PackageDependencyKind::Soft) {
+            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        // Hard만 expectedType을 가진다(writer 규칙).
+        if (entry.kind != PackageDependencyKind::Hard && entry.expectedType != TypeId{}) {
+            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (index > 0 && !DependencyLess(dependencies[index - 1], entry)) {
+            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
+    return Result<uint64>::Success(0);
+}
+
+Result<void> ReadBulkIndex(Span<const uint8> bytes, PackageContents& contents) noexcept {
+    auto archive = ArchiveReader::Create(bytes, TableLimits());
+    if (!archive) {
+        return Result<void>::Failure(archive.Error());
+    }
+
+    ArchiveReader& in = archive.Value();
+    auto count = in.ReadU32();
+    // 항목 하나가 72 byte다.
+    if (!count || count.Value() == 0 || count.Value() > bytes.Size() / 72) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (auto reserved = contents.bulkEntries.TryReserve(count.Value()); !reserved) {
+        return reserved;
+    }
+
+    for (uint32 index = 0; index < count.Value(); ++index) {
+        auto id = in.ReadU32();
+        auto flags = in.ReadU32();
+        auto offset = in.ReadU64();
+        auto stored = in.ReadU64();
+        auto raw = in.ReadU64();
+        auto codec = in.ReadU32();
+        auto crc = in.ReadU32();
+        auto sha = in.ReadRaw(Sha256Digest::Bytes);
+        if (!id || !flags || !offset || !stored || !raw || !codec || !crc || !sha) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        PackageBulkEntry entry;
+        entry.bulkId = id.Value();
+        entry.flags = flags.Value();
+        entry.offset = offset.Value();
+        entry.storedBytes = stored.Value();
+        entry.rawBytes = raw.Value();
+        if (codec.Value() > static_cast<uint32>(BulkCodec::Zstd)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        entry.codec = static_cast<BulkCodec>(codec.Value());
+        entry.crc32 = crc.Value();
+        for (usize byte = 0; byte < Sha256Digest::Bytes; ++byte) {
+            entry.sha256.bytes[byte] = sha.Value()[byte];
+        }
+
+        (void)contents.bulkEntries.TryPushBack(entry);
+    }
+
+    if (!in.AtEnd()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return Result<void>::Success();
+}
+
+// BulkIndex를 Bulk 섹션과 대조한다: bulkId 1부터 연속, offset = 앞 entry 끝을 정렬한 값(첫 entry
+// 0), 마지막 끝 = 섹션 크기, 사이 패딩 0, codec None이면 stored = raw, 정의된 flags만(쿠킹은 0),
+// 저장 CRC.
+Result<uint64> ValidateBulk(const PackageContents& contents) noexcept {
+    const uint64 alignment = contents.header.bulkAlignment;
+    uint64 end = 0;
+    for (usize index = 0; index < contents.bulkEntries.Size(); ++index) {
+        const PackageBulkEntry& entry = contents.bulkEntries[index];
+        const uint64 expectedOffset = index == 0 ? 0 : AlignUp(end, alignment);
+        if (entry.bulkId != index + 1 || entry.offset != expectedOffset ||
+            (entry.flags & ~static_cast<uint32>(BulkEntryFlags::EditorOnly)) != 0 ||
+            (contents.header.kind == PackageKind::Cooked && entry.flags != 0) ||
+            (entry.codec == BulkCodec::None && entry.storedBytes != entry.rawBytes) ||
+            entry.storedBytes > contents.bulk.Size() - entry.offset ||
+            entry.offset > contents.bulk.Size()) {
+            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (!AllZero(contents.bulk.Slice(static_cast<usize>(end),
+                                         static_cast<usize>(entry.offset - end)))) {
+            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        const Span<const uint8> stored = contents.bulk.Slice(static_cast<usize>(entry.offset),
+                                                             static_cast<usize>(entry.storedBytes));
+        if (Crc32(stored) != entry.crc32) {
+            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        end = entry.offset + entry.storedBytes;
+    }
+
+    if (end != contents.bulk.Size()) {
+        return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return Result<uint64>::Success(0);
+}
+
+// Summary 타입 표가 export 타입 집합과 정확히 같은지 본다(정렬은 읽을 때 확인했다).
+bool TypeTableMatchesExports(Allocator& allocator, const PackageContents& contents) noexcept {
+    Array<TypeId> types(allocator);
+    if (!types.TryReserve(contents.exports.Size())) {
+        return false;
+    }
+
+    for (const PackageExportEntry& entry : contents.exports) {
+        (void)types.TryPushBack(entry.type);
+    }
+
+    types.Sort(
+        [](const TypeId& left, const TypeId& right) noexcept { return GuidLess(left, right); });
+    usize unique = 0;
+    for (usize index = 0; index < types.Size(); ++index) {
+        if (unique == 0 || !(types[unique - 1] == types[index])) {
+            types[unique++] = types[index];
+        }
+    }
+
+    if (unique != contents.summary.types.Size()) {
+        return false;
+    }
+
+    for (usize index = 0; index < unique; ++index) {
+        if (!(types[index] == contents.summary.types[index].type)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+} // namespace
+
+const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
+    switch (code) {
+    case AssetDiagnosticCode::None:
+        return "None";
+    case AssetDiagnosticCode::DuplicateAssetId:
+        return "DuplicateAssetId";
+    case AssetDiagnosticCode::DuplicatePath:
+        return "DuplicatePath";
+    case AssetDiagnosticCode::CaseCollision:
+        return "CaseCollision";
+    case AssetDiagnosticCode::InvalidPath:
+        return "InvalidPath";
+    case AssetDiagnosticCode::MissingFile:
+        return "MissingFile";
+    case AssetDiagnosticCode::UnregisteredFile:
+        return "UnregisteredFile";
+    case AssetDiagnosticCode::TypeMismatch:
+        return "TypeMismatch";
+    case AssetDiagnosticCode::MissingDependency:
+        return "MissingDependency";
+    case AssetDiagnosticCode::UnsupportedCycle:
+        return "UnsupportedCycle";
+    case AssetDiagnosticCode::UnpackagedReference:
+        return "UnpackagedReference";
+    case AssetDiagnosticCode::CorruptPackage:
+        return "CorruptPackage";
+    case AssetDiagnosticCode::UnsupportedVersion:
+        return "UnsupportedVersion";
+    case AssetDiagnosticCode::NewerVersion:
+        return "NewerVersion";
+    case AssetDiagnosticCode::ExternalModification:
+        return "ExternalModification";
+    case AssetDiagnosticCode::NotDurable:
+        return "NotDurable";
+    case AssetDiagnosticCode::CorruptEntry:
+        return "CorruptEntry";
+    case AssetDiagnosticCode::IncompatibleCook:
+        return "IncompatibleCook";
+    case AssetDiagnosticCode::NeverCookReferenced:
+        return "NeverCookReferenced";
+    }
+
+    return "Unknown";
+}
+
+Result<PackageHeader> ReadPackageHeader(Span<const uint8> headerBytes, uint64 fileBytes,
+                                        AssetDiagnostic* failure) noexcept {
+    // 1. 크기·magic·headerCrc·flags — 버전 필드를 믿기 전에 본다.
+    if (headerBytes.Size() < PackageHeaderBytes || fileBytes < PackageHeaderBytes) {
+        return Corrupt<PackageHeader>(failure, {}, 0, 0);
+    }
+
+    const uint8* bytes = headerBytes.Data();
+    for (usize index = 0; index < 4; ++index) {
+        if (bytes[index] != PackageMagic[index]) {
+            return Corrupt<PackageHeader>(failure, {}, 0, 0);
+        }
+    }
+
+    if (Crc32(Span<const uint8>(bytes, 60)) != LoadLittleEndian<uint32>(bytes + 60)) {
+        return Corrupt<PackageHeader>(failure, {}, 0, 60);
+    }
+
+    const uint32 flags = LoadLittleEndian<uint32>(bytes + 8);
+    if (flags != static_cast<uint32>(PackageKind::Editor) &&
+        flags != static_cast<uint32>(PackageKind::Cooked)) {
+        return Corrupt<PackageHeader>(failure, {}, 0, 8);
+    }
+
+    PackageHeader header;
+    header.kind = static_cast<PackageKind>(flags);
+    header.assetId = AssetId{LoadGuid(bytes + 32)};
+
+    // 2. formatVersion(AS 5.3절 컨테이너 축).
+    header.formatVersion = LoadLittleEndian<uint16>(bytes + 4);
+    if (header.formatVersion > PackageFormatVersion) {
+        return Unsupported<PackageHeader>(failure,
+                                          header.kind == PackageKind::Editor
+                                              ? AssetDiagnosticCode::NewerVersion
+                                              : AssetDiagnosticCode::UnsupportedVersion,
+                                          header.assetId, 0, 4);
+    }
+
+    if (header.formatVersion < PackageFormatVersion) {
+        return Unsupported<PackageHeader>(failure, AssetDiagnosticCode::UnsupportedVersion,
+                                          header.assetId, 0, 4);
+    }
+
+    // 3. 헤더 나머지.
+    header.sectionCount = LoadLittleEndian<uint32>(bytes + 12);
+    header.sectionTableOffset = LoadLittleEndian<uint64>(bytes + 16);
+    header.fileBytes = LoadLittleEndian<uint64>(bytes + 24);
+    header.bulkAlignment = LoadLittleEndian<uint32>(bytes + 48);
+    const uint64 tableEnd =
+        header.sectionTableOffset + uint64{PackageSectionEntryBytes} * header.sectionCount + 4;
+    if (LoadLittleEndian<uint16>(bytes + 6) != PackageHeaderBytes || header.assetId.IsNull() ||
+        header.sectionCount == 0 || header.sectionCount > PackageMaxSections ||
+        header.sectionTableOffset < PackageHeaderBytes ||
+        header.sectionTableOffset > PackageMaxFileBytes ||
+        header.sectionTableOffset % PackageSectionAlignment != 0 || header.fileBytes != tableEnd ||
+        header.fileBytes != fileBytes || header.fileBytes > PackageMaxFileBytes ||
+        !IsPowerOfTwo(header.bulkAlignment) || header.bulkAlignment < PackageMinBulkAlignment ||
+        header.bulkAlignment > PackageMaxBulkAlignment ||
+        !AllZero(Span<const uint8>(bytes + 52, 8))) {
+        return Corrupt<PackageHeader>(failure, header.assetId, 0, 0);
+    }
+
+    return Result<PackageHeader>::Success(header);
+}
+
+Result<PackageContents> ReadPackage(Allocator& allocator, Span<const uint8> file,
+                                    const PackageReadOptions& options,
+                                    AssetDiagnostic* failure) noexcept {
+    auto header = ReadPackageHeader(file, file.Size(), failure);
+    if (!header) {
+        return Result<PackageContents>::Failure(header.Error());
+    }
+
+    PackageContents contents(allocator);
+    contents.header = header.Value();
+    const AssetId asset = contents.header.assetId;
+    const bool cooked = contents.header.kind == PackageKind::Cooked;
+    if (contents.header.kind != options.expectedKind) {
+        return options.expectedKind == PackageKind::Cooked
+                   ? Unsupported<PackageContents>(failure, AssetDiagnosticCode::UnsupportedVersion,
+                                                  asset, 0, 8)
+                   : Corrupt<PackageContents>(failure, asset, 0, 8);
+    }
+
+    // 3. 섹션 표.
+    const usize tableOffset = static_cast<usize>(contents.header.sectionTableOffset);
+    const usize tableBytes = PackageSectionEntryBytes * contents.header.sectionCount;
+    const Span<const uint8> table = file.Slice(tableOffset, tableBytes);
+    if (Crc32(table) != LoadLittleEndian<uint32>(file.Data() + tableOffset + tableBytes)) {
+        return Corrupt<PackageContents>(failure, asset, 0, tableOffset);
+    }
+
+    if (auto reserved = contents.sections.TryReserve(contents.header.sectionCount); !reserved) {
+        return Resource<PackageContents>(failure, reserved.Error(), asset, 0);
+    }
+
+    uint64 end = PackageHeaderBytes;
+    uint32 previousKind = 0;
+    bool present[PackageKnownSectionKinds + 1] = {};
+    for (uint32 index = 0; index < contents.header.sectionCount; ++index) {
+        const uint8* row = table.Data() + usize{PackageSectionEntryBytes} * index;
+        PackageSectionEntry entry;
+        const uint32 kind = LoadLittleEndian<uint32>(row);
+        entry.kind = static_cast<PackageSectionKind>(kind);
+        entry.flags = LoadLittleEndian<uint32>(row + 4);
+        entry.offset = LoadLittleEndian<uint64>(row + 8);
+        entry.bytes = LoadLittleEndian<uint64>(row + 16);
+        entry.crc32 = LoadLittleEndian<uint32>(row + 24);
+        entry.schemaVersion = LoadLittleEndian<uint32>(row + 28);
+        const uint64 alignment = kind == SectionKindValue(PackageSectionKind::Bulk)
+                                     ? contents.header.bulkAlignment
+                                     : PackageSectionAlignment;
+        const bool perEntry =
+            (entry.flags & static_cast<uint32>(PackageSectionFlags::PerEntryChecksum)) != 0;
+        if (kind <= previousKind || (entry.flags & ~PackageSectionFlagsMask) != 0 ||
+            entry.offset < PackageHeaderBytes ||
+            entry.offset > contents.header.sectionTableOffset ||
+            entry.bytes > contents.header.sectionTableOffset - entry.offset ||
+            (entry.bytes == 0 && kind != SectionKindValue(PackageSectionKind::Bulk)) ||
+            entry.offset != AlignUp(end, alignment) ||
+            (kind != SectionKindValue(PackageSectionKind::Bulk) &&
+             entry.bytes > PackageMaxSectionBytes) ||
+            (perEntry && entry.crc32 != 0)) {
+            return Corrupt<PackageContents>(failure, asset, kind, index);
+        }
+
+        if (!AllZero(file.Slice(static_cast<usize>(end), static_cast<usize>(entry.offset - end)))) {
+            return Corrupt<PackageContents>(failure, asset, kind, end);
+        }
+
+        if (IsKnownPackageSection(kind)) {
+            present[kind] = true;
+        }
+
+        end = entry.offset + entry.bytes;
+        previousKind = kind;
+        (void)contents.sections.TryPushBack(entry);
+    }
+
+    if (contents.header.sectionTableOffset != AlignUp(end, PackageSectionAlignment) ||
+        !AllZero(file.Slice(static_cast<usize>(end),
+                            static_cast<usize>(contents.header.sectionTableOffset - end)))) {
+        return Corrupt<PackageContents>(failure, asset, 0, end);
+    }
+
+    // 항상 있어야 하는 섹션, 함께 있어야 하는 Bulk·BulkIndex, 쿠킹에 없어야 하는 섹션.
+    if (!present[SectionKindValue(PackageSectionKind::Summary)] ||
+        !present[SectionKindValue(PackageSectionKind::Exports)] ||
+        !present[SectionKindValue(PackageSectionKind::Objects)] ||
+        present[SectionKindValue(PackageSectionKind::Bulk)] !=
+            present[SectionKindValue(PackageSectionKind::BulkIndex)] ||
+        (cooked && (present[SectionKindValue(PackageSectionKind::ImportRecord)] ||
+                    present[SectionKindValue(PackageSectionKind::Tags)]))) {
+        return Corrupt<PackageContents>(failure, asset, 0, 0);
+    }
+
+    // 4. 섹션별: 모르는 종류·flags·schemaVersion·CRC·내용.
+    for (const PackageSectionEntry& entry : contents.sections) {
+        const uint32 kind = SectionKindValue(entry.kind);
+        const bool required =
+            (entry.flags & static_cast<uint32>(PackageSectionFlags::Required)) != 0;
+        const Span<const uint8> bytes =
+            file.Slice(static_cast<usize>(entry.offset), static_cast<usize>(entry.bytes));
+        if (!IsKnownPackageSection(kind)) {
+            if (cooked || required) {
+                return Unsupported<PackageContents>(failure,
+                                                    cooked ? AssetDiagnosticCode::UnsupportedVersion
+                                                           : AssetDiagnosticCode::NewerVersion,
+                                                    asset, kind, 0);
+            }
+
+            contents.readOnly = true;
+            continue;
+        }
+
+        if (entry.flags != PackageSectionRequiredFlags(entry.kind)) {
+            return Corrupt<PackageContents>(failure, asset, kind, 0);
+        }
+
+        if (entry.schemaVersion != PackageSectionSchemaVersion) {
+            if (cooked || entry.schemaVersion < PackageSectionSchemaVersion) {
+                return Unsupported<PackageContents>(failure,
+                                                    AssetDiagnosticCode::UnsupportedVersion, asset,
+                                                    kind, entry.schemaVersion);
+            }
+
+            if (required) {
+                return Unsupported<PackageContents>(failure, AssetDiagnosticCode::NewerVersion,
+                                                    asset, kind, entry.schemaVersion);
+            }
+
+            contents.readOnly = true;
+            continue;
+        }
+
+        if (entry.kind != PackageSectionKind::Bulk && Crc32(bytes) != entry.crc32) {
+            return Corrupt<PackageContents>(failure, asset, kind, 0);
+        }
+
+        Result<void> read = Result<void>::Success();
+        switch (entry.kind) {
+        case PackageSectionKind::Summary:
+            read = ReadSummary(allocator, bytes, contents.header.kind, contents.summary);
+            break;
+        case PackageSectionKind::Exports:
+            read = ReadExports(bytes, contents);
+            break;
+        case PackageSectionKind::ObjectImports:
+            read = ReadImports(bytes, contents);
+            break;
+        case PackageSectionKind::Dependencies:
+            read = ReadDependencies(bytes, contents);
+            break;
+        case PackageSectionKind::Objects:
+            contents.objects = bytes;
+            break;
+        case PackageSectionKind::ImportRecord:
+        case PackageSectionKind::Tags: {
+            // 내용 스키마는 A2(AssetDatabase)가 정한다. 여기서는 Record envelope만 확인한다.
+            if (auto record = ReadRecordHeader(bytes); !record) {
+                read = Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+
+            (entry.kind == PackageSectionKind::ImportRecord ? contents.importRecord
+                                                            : contents.tags) = bytes;
+            break;
+        }
+
+        case PackageSectionKind::Bulk:
+            contents.bulk = bytes;
+            break;
+        case PackageSectionKind::BulkIndex:
+            read = ReadBulkIndex(bytes, contents);
+            break;
+        }
+
+        if (!read) {
+            return SectionFailure<PackageContents>(failure, read.Error(), asset, entry.kind, 0);
+        }
+    }
+
+    // 섹션 사이 대조(내용 검증).
+    if (auto valid = ValidateExports(allocator, contents); !valid) {
+        return SectionFailure<PackageContents>(failure, valid.Error(), asset,
+                                               PackageSectionKind::Exports, 0);
+    }
+
+    if (auto valid = ValidateImports(allocator, contents); !valid) {
+        return SectionFailure<PackageContents>(failure, valid.Error(), asset,
+                                               PackageSectionKind::ObjectImports, 0);
+    }
+
+    if (auto valid = ValidateDependencies(contents); !valid) {
+        return SectionFailure<PackageContents>(failure, valid.Error(), asset,
+                                               PackageSectionKind::Dependencies, 0);
+    }
+
+    if (auto valid = ValidateBulk(contents); !valid) {
+        return SectionFailure<PackageContents>(failure, valid.Error(), asset,
+                                               PackageSectionKind::BulkIndex, 0);
+    }
+
+    if (!TypeTableMatchesExports(allocator, contents)) {
+        return Corrupt<PackageContents>(failure, asset,
+                                        SectionKindValue(PackageSectionKind::Summary), 0);
+    }
+
+    // 버전 축(AS 5.3절): 엔진·타입·커스텀 버전.
+    if (!cooked && !options.engineVersion.IsEmpty() &&
+        !options.engineVersion.CanLoadPackageCompatibleWith(contents.summary.compatibleWith)) {
+        return Unsupported<PackageContents>(failure, AssetDiagnosticCode::NewerVersion, asset,
+                                            SectionKindValue(PackageSectionKind::Summary), 0);
+    }
+
+    if (options.types != nullptr) {
+        for (usize index = 0; index < contents.summary.types.Size(); ++index) {
+            const PackageTypeVersion& row = contents.summary.types[index];
+            auto lease = options.types->Acquire(row.type);
+            if (!lease && lease.Error() == ErrorCode::OutOfMemory) {
+                return Resource<PackageContents>(failure, lease.Error(), asset, 0);
+            }
+
+            const uint32 current = lease ? lease.Value().Schema().version : 0;
+            if (cooked) {
+                if (!lease || current != row.version) {
+                    return Unsupported<PackageContents>(
+                        failure, AssetDiagnosticCode::UnsupportedVersion, asset,
+                        SectionKindValue(PackageSectionKind::Summary), index);
+                }
+            } else if (!lease || row.version > current) {
+                contents.readOnly = true;
+            }
+        }
+    }
+
+    // 커스텀 버전: 쿠킹은 표 전체가 같아야 하고, 에디터는 높거나 모르는 id면 읽기 전용이다.
+    const Span<const PackageCustomVersion> currentCustom = options.customVersions;
+    if (cooked) {
+        bool same = currentCustom.Size() == contents.summary.customVersions.Size();
+        for (usize index = 0; same && index < currentCustom.Size(); ++index) {
+            same = currentCustom[index].id == contents.summary.customVersions[index].id &&
+                   currentCustom[index].version == contents.summary.customVersions[index].version;
+        }
+
+        if (!same) {
+            return Unsupported<PackageContents>(failure, AssetDiagnosticCode::UnsupportedVersion,
+                                                asset,
+                                                SectionKindValue(PackageSectionKind::Summary), 0);
+        }
+    } else {
+        for (const PackageCustomVersion& stored : contents.summary.customVersions) {
+            bool known = false;
+            for (const PackageCustomVersion& now : currentCustom) {
+                if (now.id == stored.id) {
+                    known = stored.version <= now.version;
+                    break;
+                }
+            }
+
+            if (!known) {
+                contents.readOnly = true;
+            }
+        }
+    }
+
+    // 지문: 헤더 + 섹션 표(+ tableCrc).
+    Sha256 hash;
+    hash.Update(file.Slice(0, PackageHeaderBytes));
+    hash.Update(file.Slice(tableOffset, tableBytes + 4));
+    contents.fingerprint.digest = hash.Finish();
+    return Result<PackageContents>::Success(Move(contents));
+}
+
+Result<void> DecodePackageBulk(const PackageContents& contents, Array<uint8>& out,
+                               Array<PackageBulkSlot>& slots, uint64 maxRawBytes,
+                               AssetDiagnostic* failure) noexcept {
+    const AssetId asset = contents.header.assetId;
+    const uint32 section = SectionKindValue(PackageSectionKind::Bulk);
+    uint64 total = 0;
+    for (const PackageBulkEntry& entry : contents.bulkEntries) {
+        if (entry.rawBytes > maxRawBytes - total) {
+            return FailAsset<void>(failure, AssetDiagnosticCode::None, ErrorCode::CapacityExceeded,
+                                   asset, section, entry.bulkId);
+        }
+
+        total += entry.rawBytes;
+    }
+
+    const usize baseBytes = out.Size();
+    const usize baseSlots = slots.Size();
+    auto restore = [&]() noexcept {
+        (void)out.TryResize(baseBytes);
+        (void)slots.TryResize(baseSlots);
+    };
+
+    if (auto reserved = slots.TryReserve(baseSlots + contents.bulkEntries.Size()); !reserved) {
+        return Resource<void>(failure, reserved.Error(), asset, section);
+    }
+
+    auto grown = out.TryAppendUninitialized(static_cast<usize>(total));
+    if (!grown) {
+        return Resource<void>(failure, grown.Error(), asset, section);
+    }
+
+    usize cursor = baseBytes;
+    for (const PackageBulkEntry& entry : contents.bulkEntries) {
+        const Span<const uint8> stored = contents.bulk.Slice(static_cast<usize>(entry.offset),
+                                                             static_cast<usize>(entry.storedBytes));
+        const Span<uint8> raw(out.Data() + cursor, static_cast<usize>(entry.rawBytes));
+        if (entry.codec == BulkCodec::None) {
+            for (usize index = 0; index < raw.Size(); ++index) {
+                raw[index] = stored[index];
+            }
+        } else {
+            auto decoded = TryDecompress(CompressionFormat::Zstd, stored, raw, out.GetAllocator());
+            if (!decoded || decoded.Value() != raw.Size()) {
+                restore();
+                if (!decoded && decoded.Error() == ErrorCode::OutOfMemory) {
+                    return Resource<void>(failure, decoded.Error(), asset, section);
+                }
+
+                return FailAsset<void>(
+                    failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument, asset,
+                    section, decoded ? entry.bulkId : static_cast<uint64>(decoded.Error()));
+            }
+        }
+
+        if (!(Sha256::Hash(Span<const uint8>(raw.Data(), raw.Size())) == entry.sha256)) {
+            restore();
+            return Corrupt<void>(failure, asset, section, entry.bulkId);
+        }
+
+        (void)slots.TryPushBack(PackageBulkSlot{cursor - baseBytes, entry.rawBytes, entry.sha256});
+        cursor += raw.Size();
+    }
+
+    return Result<void>::Success();
+}
+
+} // namespace rocks

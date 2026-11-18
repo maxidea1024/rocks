@@ -709,17 +709,17 @@ Result<PipelineHandle> GlesDevice::CreatePipeline(const PipelineDesc& desc) noex
         return Result<PipelineHandle>::Failure(ErrorCode::DependencyFailed);
     }
 
+    // 루트 상수 에뮬레이션 배열 위치·크기는 링크 때 한 번 찾는다(ShaderSystem 7.2절 4항).
+    record.drawConstantBytes = desc.drawConstantBytes;
     auto matched = MatchVertexInputs(record.program, desc.layout);
     auto reflected =
         matched ? ReflectBufferSlots(record.program, record.bufferSlots, nullptr) : Move(matched);
-    if (!reflected) {
+    auto constants = reflected ? ReflectRootConstants(record.program, record) : Move(reflected);
+    if (!constants) {
         gl_.DeleteProgram(record.program);
-        return Result<PipelineHandle>::Failure(reflected.Error());
+        return Result<PipelineHandle>::Failure(constants.Error());
     }
 
-    // 루트 상수 에뮬레이션 배열 위치는 링크 때 한 번 찾는다(ShaderSystem 7.2절 4항).
-    record.vertexConstants = gl_.GetUniformLocation(record.program, VertexRootConstantsName);
-    record.pixelConstants = gl_.GetUniformLocation(record.program, PixelRootConstantsName);
     switch (desc.topology) {
     case PrimitiveTopology::TriangleStrip:
         record.topology = GL_TRIANGLE_STRIP;
@@ -1001,6 +1001,21 @@ Result<void> GlesDevice::Reject(const Diagnostic& message, ErrorCode error) noex
     auto assigned = lastError_.TryAssign(message.View());
     (void)assigned;
     return Result<void>::Failure(error);
+}
+
+Result<void> GlesDevice::RejectDrawConstantSize(bool pipelineBound, usize bytes,
+                                                uint32 drawConstantBytes) noexcept {
+    Diagnostic message;
+    if (!pipelineBound) {
+        message.Text("SetDrawConstants needs a pipeline bound while recording");
+    } else {
+        message.Text("SetDrawConstants got ")
+            .Number(bytes)
+            .Text(" bytes but the bound pipeline declares drawConstantBytes ")
+            .Number(drawConstantBytes);
+    }
+
+    return Reject(message, ErrorCode::InvalidArgument);
 }
 
 bool GlesDevice::MakeCurrentForResources() noexcept {

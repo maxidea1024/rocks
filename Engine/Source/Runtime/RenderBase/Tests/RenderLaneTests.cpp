@@ -19,6 +19,11 @@ struct DrawItem {
     uint32 vertices = 0;
 };
 
+// 시험 그리기의 그리기별 상수다(셰이더 float4 하나, 16 byte).
+struct TintConstants {
+    float color[4];
+};
+
 // 시험 장면 프레임 packet이다.
 struct ScenePacket {
     Span<const DrawItem> items;
@@ -60,8 +65,8 @@ ROCKS_RENDER_TRANSFERABLE(TextureUpload);
 ROCKS_RENDER_TRANSFERABLE(SurfaceResize);
 ROCKS_RENDER_TRANSFERABLE(OrderMark);
 ROCKS_RENDER_TRANSFERABLE(TimedPacket);
-// 리플렉션 struct: ArrayTag는 참조가 없고, WeakLink는 WeakRef 필드를, ArraySlot은 ObjectRef 필드를
-// 가진다.
+// 리플렉션 struct: ArrayTag는 참조가 없고, WeakLink는 WeakObjectRef 필드를, ArraySlot은 ObjectRef
+// 필드를 가진다.
 ROCKS_RENDER_TRANSFERABLE(rocks::reflection_fixture::ArrayTag);
 ROCKS_RENDER_TRANSFERABLE(rocks::reflection_fixture::WeakLink);
 ROCKS_RENDER_TRANSFERABLE(rocks::reflection_fixture::ArraySlot);
@@ -105,6 +110,7 @@ public:
         const graphics::VertexStream streams[] = {{36, graphics::VertexStepRate::Vertex}};
         graphics::PipelineDesc pipelineDesc;
         pipelineDesc.layout = {attributes, streams};
+        pipelineDesc.drawConstantBytes = sizeof(TintConstants);
         auto createdPipeline = device.CreatePipeline(pipelineDesc);
         const uint8 bytes[36] = {};
         graphics::BufferDesc bufferDesc;
@@ -163,9 +169,12 @@ void DrawScene(RenderFrameContext& context, ScenePacket& packet) noexcept {
     auto texture = context.Handles().Texture(packet.texture);
     commands.SetTexture(texture ? texture.Value() : graphics::TextureHandle{});
     for (const DrawItem& item : packet.items) {
-        graphics::DrawConstants constants;
-        constants.color[0] = item.red;
-        commands.SetConstants(constants);
+        const TintConstants constants = {{item.red, 0.0f, 0.0f, 1.0f}};
+        auto set = commands.SetDrawConstants(graphics::DrawConstantBytes(constants));
+        if (!set) {
+            context.ReportFailure(set.Error());
+        }
+
         commands.Draw(item.vertices);
     }
 
@@ -589,7 +598,7 @@ TEST(RenderLane_OnlyRegisteredTypesCrossTheLane) {
     REQUIRE(lane.Start(MakeConfig(RenderLaneMode::Inline, processor)));
     rocks::reflection_fixture::ArrayTag tag(allocator);
     CHECK(lane.PostResource(Move(tag), &NoOp));
-    // 이동할 수 있는 Object 참조(WeakRef) 필드가 있는 등록 타입은 Development 검사가 거부한다
+    // 이동할 수 있는 Object 참조(WeakObjectRef) 필드가 있는 등록 타입은 Development 검사가 거부한다
     // (Release는 검사 생략).
     rocks::reflection_fixture::WeakLink link;
     auto posted = lane.PostResource(Move(link), &NoOpLink);

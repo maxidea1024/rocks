@@ -355,8 +355,8 @@ inline Result<void> ReserveArrayApply(FieldDecodeContext& context, usize count, 
 
 // 단일 값 원소 배열(Array<E>)의 decode다(DecodeArrayField의 ValueArray 가지). target이 없으면
 // 검증만, 있으면(관찰·적용) Clear → TryReserve(count) → 원소마다 채운다. weak 원소
-// (Array<WeakRef<T>>)는 문맥의 ReadWeakReference로 읽고(정적 대상 타입 NativeTypeKey<T>) 2단계에서
-// 노드 handle을 그대로 담는다(GC 간선이 아니므로 Registry 컨테이너가 아니다).
+// (Array<WeakObjectRef<T>>)는 문맥의 ReadWeakReference로 읽고(정적 대상 타입 NativeTypeKey<T>)
+// 2단계에서 노드 handle을 그대로 담는다(GC 간선이 아니므로 Registry 컨테이너가 아니다).
 template <class Element>
 Result<void> DecodeValueArray(Array<Element>* target, const FieldView& field,
                               FieldDecodeContext& context) noexcept {

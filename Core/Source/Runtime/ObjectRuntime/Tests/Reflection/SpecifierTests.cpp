@@ -43,7 +43,7 @@ static_assert(!IsNativeStrongReference<Object*>);
 static_assert(!IsNativeStrongReference<const Node*>);
 static_assert(!IsNativeStrongReference<Node&>);
 static_assert(!IsNativeStrongReference<Node**>);
-static_assert(!IsNativeStrongReference<WeakRef<Node>>);
+static_assert(!IsNativeStrongReference<WeakObjectRef<Node>>);
 static_assert(!IsNativeStrongReference<int32*>);
 static_assert(!IsNativeStrongReference<Opaque*>);
 static_assert(!IsNativeStrongReference<int32>);

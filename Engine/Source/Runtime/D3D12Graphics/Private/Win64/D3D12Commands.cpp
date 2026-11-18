@@ -117,9 +117,10 @@ Result<void> D3D12Device::CreateComputeObjects() noexcept {
 Result<PipelineHandle>
 D3D12Device::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
     platform::LockGuard lock(gate_);
-    if (desc.shader.hlsl.ByteCount() == 0) {
-        return FailCode<PipelineHandle>(ErrorCode::InvalidArgument,
-                                        "compute pipeline needs HLSL source");
+    if (desc.shader.hlsl.ByteCount() == 0 || !ValidateComputePipelineDesc(desc)) {
+        return FailCode<PipelineHandle>(
+            ErrorCode::InvalidArgument,
+            "compute pipeline needs HLSL source and valid drawConstantBytes");
     }
 
     ComRef<ID3DBlob> code;
@@ -130,7 +131,8 @@ D3D12Device::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
 
     DrawBufferSlots readSlots;
     DrawBufferSlots writeSlots;
-    auto reflected = ReflectBindings(code.Get(), ShaderStage::Compute, readSlots, &writeSlots);
+    auto reflected = ReflectBindings(code.Get(), ShaderStage::Compute, desc.drawConstantBytes,
+                                     readSlots, &writeSlots);
     if (!reflected) {
         return Result<PipelineHandle>::Failure(reflected.Error());
     }
@@ -148,6 +150,7 @@ D3D12Device::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
     record.bufferSlots = readSlots;
     record.writeSlots = writeSlots;
     record.compute = true;
+    record.drawConstantBytes = desc.drawConstantBytes;
     auto reserved = ReserveRetireCapacity(1);
     if (!reserved) {
         return Result<PipelineHandle>::Failure(reserved.Error());
@@ -405,7 +408,12 @@ bool D3D12Device::PrepareDispatch() noexcept {
 
     // 읽는 view는 셰이더 읽기, 쓰는 view는 UAV 상태로 맞추고 compute root 인자를 건다.
     list_->SetComputeRootSignature(computeRootSignature_.Get());
-    list_->SetComputeRoot32BitConstants(ComputeRootConstants, ConstantCount, &constants_, 0);
+    if (pipeline->drawConstantBytes != 0) {
+        list_->SetComputeRoot32BitConstants(
+            ComputeRootConstants, static_cast<UINT>(pipeline->drawConstantBytes / sizeof(uint32)),
+            constants_, 0);
+    }
+
     for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
         const BufferViewRecord* read = bufferViews_.Find(boundViews_[slot].slot);
         if (read != nullptr && (pipeline->bufferSlots.usedMask & (1u << slot)) != 0) {

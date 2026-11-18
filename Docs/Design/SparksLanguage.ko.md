@@ -23,7 +23,7 @@
 | 단순성 | 진단은 경고 없이 오류만 두고 모든 오류에 수정 예를 제시한다. 한 가지 일에는 한 가지 방법만 둔다. 실수가 잦은 구조는 언어 규칙으로 제거한다. 기능은 core 프로필과 full 프로필로 구분한다. |
 | 문법 | C 계열이다. `var`/`let`, `fn Name(a: T): R`, 괄호로 감싼 조건식, `on` handler, `@attribute`, 범위 `0..<n`. 타입·멤버는 PascalCase로 C++ 이름과 같고, 내장 값 타입(`float`, `vec3`)과 지역 이름은 소문자로 시작한다. 한 위치에서 이름 하나는 대상 하나만 가리킨다. |
 | 수명 hook | Unity의 hook 체계(종류·의미)를 따르고 이름은 Rocks 어휘를 사용한다: `Awake`, `Enable`, `Start`, `Tick`, `FixedTick`, `LateTick`, `Disable`, `Destroy`, 물리 `TriggerEnter` 등. 프레임 안 순서와 Start 시점은 엔진 World의 tick phase를 따른다(SD24·SD26). 종료 경로마다 실행하는 hook을 정한다(SD20). |
-| 객체 참조 | "없음"은 하나다. 다른 Actor·Component는 `T?`로 받고 약한 handle로 저장하며 파괴되면 null로 읽힌다. 스크립트 단계(§5.4) 안의 파괴 요청은 그 단계가 끝날 때 World에 적용된다(SD3·SD25). 스크립트 상태는 GC root가 되지 않는다. 엔진 쪽 저장 표현은 같은 저장 단위 안 대상만 보존하는 `WeakObjectRef` 필드다(현재 코드 이름 `WeakRef` — 개명은 §17.2 코드 후속. 셀 사이 참조는 World의 영속 entity 참조 — RX 5.1절). |
+| 객체 참조 | "없음"은 하나다. 다른 Actor·Component는 `T?`로 받고 약한 handle로 저장하며 파괴되면 null로 읽힌다. 스크립트 단계(§5.4) 안의 파괴 요청은 그 단계가 끝날 때 World에 적용된다(SD3·SD25). 스크립트 상태는 GC root가 되지 않는다. 엔진 쪽 저장 표현은 같은 저장 단위 안 대상만 보존하는 `WeakObjectRef` 필드다(현재 코드 이름 `WeakObjectRef` — 개명은 §17.2 코드 후속. 셀 사이 참조는 World의 영속 entity 참조 — RX 5.1절). |
 | 이벤트 | `on 경로.이벤트(...)` 한 형태다. 명시 구독·closure가 없으며, 발행은 큐에 등록되어 현재 실행 조각(§5.4)이 끝난 뒤 같은 스크립트 단계 안에서 순서대로 전달된다. 기다리는 handler는 실행 중에 온 이벤트의 처리 방식을 표시한다(SD11). |
 | 유지 자원 | 멈출 때까지 계속되는 자원(반복 사운드·입력 context·로딩 요청 등)은 필드나 지역 변수(`var`·`let`)에 담아야만 생성되고(로딩 요청은 지역 변수 전용), 블록이 끝나거나 다른 값을 넣거나 객체가 비활성화·종료되면 멈춘다. 복사하거나 다른 이름으로 옮길 수 없다. |
 | 비동기 로딩 | `try await X.Load()` 하나로 로드하고, 상주는 결과 값을 보관하는 것으로 유지한다. 진행률은 지역 요청 handle로 조회한다. 이동·travel·준비 대기는 엔진이 prefetch와 로딩 화면을 관리한다. |
@@ -1053,7 +1053,7 @@ public:
 };
 ~~~
 
-Sparks에서는 `var MaxHealth: int`(편집·저장), 읽기 전용 속성 `Current: int`, `event Died(killer: Actor?)`, `fn ApplyDamage(amount: int, instigator: Actor?): Result<void>`로 보인다(Studio hover 표기, 소스 문법이 아님). `WeakObjectRef`는 현재 코드의 `WeakRef`다(개명은 §17.2 코드 후속).
+Sparks에서는 `var MaxHealth: int`(편집·저장), 읽기 전용 속성 `Current: int`, `event Died(killer: Actor?)`, `fn ApplyDamage(amount: int, instigator: Actor?): Result<void>`로 보인다(Studio hover 표기, 소스 문법이 아님). `WeakObjectRef`는 현재 코드의 `WeakObjectRef`다(개명은 §17.2 코드 후속).
 
 | 예시의 이름 | 현재 상태 | 선행 |
 |---|---|---|
@@ -1439,7 +1439,7 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 
 | 대상 | 필요한 변경 | 시점 |
 |---|---|---|
-| **코드베이스: `WeakRef<T>` → `WeakObjectRef<T>`** | `ObjectRuntime/Public/Object/ObjectRefs.h`의 타입 이름, 메타 컴파일러의 타입 인식·오류 문구, 시험, policy, 구현 문서(Docs/Implementation)의 `WeakRef` 표기, 그리고 다른 세션이 수정 중이던 CurveData 문서의 표기 1곳. 별칭 없이 바꾼다(SD23). 설계 문서 표기는 초안 1.3과 함께 바꾸었다 | 리플렉션 매크로 단축 개명과 묶어 사용자 착수 지시 때. **나중에 코드베이스에서도 고칠 것** |
+| **코드베이스: `WeakObjectRef<T>` → `WeakObjectRef<T>`** | `ObjectRuntime/Public/Object/ObjectRefs.h`의 타입 이름, 메타 컴파일러의 타입 인식·오류 문구, 시험, policy, 구현 문서(Docs/Implementation)의 `WeakObjectRef` 표기, 그리고 다른 세션이 수정 중이던 CurveData 문서의 표기 1곳. 별칭 없이 바꾼다(SD23). 설계 문서 표기는 초안 1.3과 함께 바꾸었다 | 리플렉션 매크로 단축 개명과 묶어 사용자 착수 지시 때. **나중에 코드베이스에서도 고칠 것** |
 | 전체 계획 §5.2·§9.2·§20.2–20.5·§23 | Entity → Actor, TransformComponent → SceneComponent, `OnAwake(ComponentContext&)` → 현재 시그니처, tick group 이름을 World tick phase로(ER 2절이 예고한 개정의 미반영분), §23의 도입 단계표(핫 리로드 L1–L3, AOT backend L3)·"LLVM 기반 AOT"를 스크립팅 backend 선택(SD31)으로, §29.6 NL09에 G5·G6 추가 | 다음 전체 계획 개정 |
 | ER 7.2 | Component용 시작 준비 hook(`IsReadyToStart`), Sparks Start bridge 계약(SD24) | L2 전 |
 | ER 7.4·7절 | 스크립트 단계 중 파괴·활성 요청의 bridge 큐 계약(SD25), 프레임 끝 정리 반복 상한, 격리 bridge 계약(§8.3) | L2 전 |
@@ -1492,7 +1492,7 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 - **SD20. 종료 경로별 hook:** `RequestDestroy`·부모 파괴·셀 unload·travel·PIE Stop·process 종료는 Disable(활성이면)·Destroy를 실행한 뒤 Detach한다. fault 격리와 GC 도달 불가 경로는 Disable을 실행하지 않는다(§5.1).
 - **SD21. NextTick의 시계:** `NextTick()`은 게임 시계를 따라 일시 정지 중 재개하지 않으며 `Time.Delta`는 GameClock delta다. UI 시계의 다음 프레임 대기는 `Delay(0.0, Clock.UI)`다(§6.1).
 - **SD22. 엔진 이름 정렬:** 게임 객체는 `Actor`(Entity 대체, ER 2절), 조종 대상은 `Pawn`, `Character`는 Pawn 파생 자리표시, 장면 component는 `SceneComponent`다. `WorldService`는 Object 기반 스크립트 공유 상태 타입이며 엔진 쪽 호스트는 `WorldSubsystem`이다. ID 개념(`SoftEntityId` 등)은 Prefab과 함께 결정할 때까지 유지한다.
-- **SD23. 약한 객체 참조 이름:** `WeakRef<T>`를 `WeakObjectRef<T>`로 부른다(사용자 결정). `ObjectRef`·`WeakObjectRef`·`SoftObjectRef`로 가족을 맞추고 Core `WeakPtr`와 구분한다. 문서는 이번에 바꾸고 코드는 §17.2의 후속으로 바꾼다.
+- **SD23. 약한 객체 참조 이름:** `WeakObjectRef<T>`를 `WeakObjectRef<T>`로 부른다(사용자 결정). `ObjectRef`·`WeakObjectRef`·`SoftObjectRef`로 가족을 맞추고 Core `WeakPtr`와 구분한다. 문서는 이번에 바꾸고 코드는 §17.2의 후속으로 바꾼다.
 - **SD24. Start 시점:** C++ `OnStart`의 엔진 규칙(ER 7.2: 다음 프레임 시작 처리, `IsReadyToStart`)을 따르고, Sparks `on Start`는 그 시점에 시작하는 실행이다. 준비 대기 중에는 bridge가 Tick을 보류한다(§5.1).
 - **SD25. 파괴·활성 전환의 두 시점:** 스크립트 단계 끝에 World API를 호출하는 적용 시점과, 실제 hook·Detach가 실행되는 프레임 끝 정리를 구분한다. 적용 이후 스크립트는 대상을 null로 읽는다(§4.3).
 - **SD26. 프레임 순서:** Unity hook의 종류·의미를 따르되 프레임 안 순서는 엔진 World tick phase(UE tick group)를 따른다. FixedTick은 Tick 뒤이고 물리 이벤트는 프레임당 1 batch다(§5.4).

@@ -831,3 +831,204 @@ TEST(LooseOctree_LO10_FailureInjectionAcrossOutOfRangeAndForcedMaintenance) {
     CHECK(ValidateTree(forced.Tree()));
     CHECK(QueriesMatch(forced, config, system, 0xA13u));
 }
+
+namespace {
+
+// 경계 갱신 품질 대조용 입력이다. 중심은 초기 루트 기본 셀([−32, 32]^3) 안, 반 변은 0.02–0.25다.
+Box<double> RandomSmallBox(RandomStream& random) noexcept {
+    const Vec3d center(random.NextDouble01() * 62.0 - 31.0, random.NextDouble01() * 62.0 - 31.0,
+                       random.NextDouble01() * 62.0 - 31.0);
+    return MakeCube(center, 0.02 + random.NextDouble01() * 0.23);
+}
+
+// 작은 박스 질의 수백 개의 공간 판정 프록시 수 합이다(구조 품질 지표).
+uint64 SmallQueryTestedProxies(const LooseOctree& tree, uint64 seed) noexcept {
+    SpatialReadScope read(tree);
+    const LooseOctreeReader reader = read.Reader();
+    RandomStream random(seed);
+    QueryStats stats;
+    for (uint32 query = 0; query < 256; ++query) {
+        const Box<double> box = MakeCube(RandomSmallBox(random).Center(), 0.5);
+        (void)reader.QueryBox(
+            box, 0xFFu, [](const SpatialProxyHit&) noexcept { return QueryControl::Continue; },
+            &stats);
+    }
+    return stats.testedProxies;
+}
+
+} // namespace
+
+// LO06(구조 품질): 같은 시드의 순간 이동 시퀀스를 TryUpdateBounds로 적용한 트리와 TryRemove +
+// TryAdd로 적용한 트리가 유지보수 뒤 같은 수준의 구조가 된다. 경계 갱신의 재삽입이 새 AABB의 중심을
+// 기본 셀 밖(확장 띠)에 둔 조상에 프록시를 남기면, 그 프록시는 어느 자식에도 들어가지 못해
+// 유지보수로도 내려가지 않는다(내부 노드 직접 저장이 쌓여 작은 질의의 판정 수가 늘어난다).
+TEST(LooseOctree_LO06_UpdateReinsertMatchesAddQuality) {
+    SystemAllocator allocator;
+    const LooseOctreeConfig config = SmallConfig();
+    constexpr uint32 Count = 2000;
+    constexpr uint32 Rounds = 3;
+    constexpr uint32 MovesPerRound = 600;
+    auto createdUpdated = LooseOctree::TryCreate(config, allocator);
+    auto createdReplaced = LooseOctree::TryCreate(config, allocator);
+    REQUIRE(createdUpdated && createdReplaced);
+    OracleTree updated(Move(createdUpdated.Value()), allocator);
+    LooseOctree replaced = Move(createdReplaced.Value());
+    Array<SpatialProxyHandle> handles(allocator);
+    RandomStream random(0x10C6u);
+    for (uint32 index = 0; index < Count; ++index) {
+        const Box<double> box = RandomSmallBox(random);
+        REQUIRE(updated.Add(box, 1) == index);
+        SpatialProxyDesc desc;
+        desc.bounds = box;
+        desc.filterMask = 1;
+        desc.userValue = index;
+        auto added = replaced.TryAdd(desc);
+        REQUIRE(added);
+        REQUIRE(handles.TryPushBack(added.Value()));
+    }
+    const OctreeStats built = StatsOf(updated.Tree());
+    CHECK(built.interiorDirectCount == StatsOf(replaced).interiorDirectCount);
+
+    for (uint32 round = 0; round < Rounds; ++round) {
+        for (uint32 move = 0; move < MovesPerRound; ++move) {
+            const uint32 index = random.NextUInt32Below(Count);
+            const Box<double> box = RandomSmallBox(random);
+            REQUIRE(updated.Update(index, box));
+            REQUIRE(replaced.TryRemove(handles[index]));
+            SpatialProxyDesc desc;
+            desc.bounds = box;
+            desc.filterMask = 1;
+            desc.userValue = index;
+            auto added = replaced.TryAdd(desc);
+            REQUIRE(added);
+            handles[index] = added.Value();
+        }
+    }
+    const OctreeStats movedUpdated = StatsOf(updated.Tree());
+    const OctreeStats movedReplaced = StatsOf(replaced);
+    (void)updated.Tree().RunMaintenance(MaintenanceBudget::All());
+    (void)replaced.RunMaintenance(MaintenanceBudget::All());
+    const OctreeStats maintainedUpdated = StatsOf(updated.Tree());
+    const OctreeStats maintainedReplaced = StatsOf(replaced);
+    const uint64 testedUpdated = SmallQueryTestedProxies(updated.Tree(), 0x10C7u);
+    const uint64 testedReplaced = SmallQueryTestedProxies(replaced, 0x10C7u);
+    CHECK(ValidateTree(updated.Tree()));
+    CHECK(ValidateTree(replaced));
+    CHECK(QueriesMatch(updated, config, allocator, 0x10C8u));
+    // 허용 범위: 두 트리는 같은 프록시 집합이지만 구조가 비트 단위로 같을 필요는 없다. 경계 갱신은
+    // 분할 평가를 유지보수로 미루고(6.4절), 확장 경계 안에 떨어진 순간 이동은 제자리 갱신으로
+    // 노드를 지키며, 삭제 후 재삽입 쪽은 삭제가 병합 대기를 만든다. 그래서 노드 수와 질의 판정 수는
+    // 조금 다르다. 결함(조상의 확장 띠에 남는 재삽입)은 갱신 직후 내부 노드 직접 저장 수백 개,
+    // 유지보수 뒤에도 질의 판정 수 4배 이상으로 나타났다. 기준은 그보다 한 자릿수 엄격하다: 내부
+    // 직접 저장 차이는 프록시의 1% 이하(갱신 직후·유지보수 뒤 모두), 질의 판정 수는 25% + 질의당
+    // 1개 이하, 노드 수는 0.5–2배, 유지보수 뒤 노드당 최대 직접 저장은 분할 임계 이하(보류 노드
+    // 없음).
+    CHECK(movedUpdated.interiorDirectCount <= movedReplaced.interiorDirectCount + Count / 100);
+    CHECK(maintainedUpdated.interiorDirectCount <=
+          maintainedReplaced.interiorDirectCount + Count / 100);
+    CHECK(testedUpdated * 4 <= testedReplaced * 5 + 4 * 256);
+    CHECK(maintainedUpdated.nodeCount * 2 >= maintainedReplaced.nodeCount &&
+          maintainedUpdated.nodeCount <= maintainedReplaced.nodeCount * 2);
+    CHECK(maintainedUpdated.heldNodeCount == 0 &&
+          maintainedUpdated.maxDirectCount <= config.splitThreshold);
+    CHECK(maintainedUpdated.reinserts + maintainedUpdated.inPlaceUpdates == Rounds * MovesPerRound);
+}
+
+// 결정 8(큰 객체 목록): 최대 반 변이 기준을 넘는 프록시는 트리 대신 큰 객체 목록에 있고 모든 질의가
+// 판정한다. 크기가 기준을 넘으면 목록으로, 이력 경계(기준의 3/4) 이하로 줄면 트리로 돌아가고 그
+// 사이에서는 목록에 남는다. 큰 객체는 루트를 키우지 않으며, 범위 밖 목록과 큰 객체 목록 사이도
+// 옮긴다. 필터·사용자 값 변경과 노드 묶음도 목록을 포함한다.
+TEST(LooseOctree_LargeProxyListPlacementAndMoves) {
+    SystemAllocator allocator;
+    LooseOctreeConfig config = SmallConfig();
+    config.largeProxyHalfExtent = 4.0;
+    auto created = LooseOctree::TryCreate(config, allocator);
+    REQUIRE(created);
+    OracleTree tree(Move(created.Value()), allocator);
+    RandomStream random(0x1A26Eu);
+    for (uint32 index = 0; index < 400; ++index) {
+        REQUIRE(tree.Add(RandomSmallBox(random), 1u << (index % 4)) != IndexNone);
+    }
+    const uint32 rootLevel = StatsOf(tree.Tree()).rootLevel;
+
+    // 큰 객체: 기준(4)보다 크다. 루트 기본 셀보다 훨씬 커도 루트를 키우지 않는다.
+    const usize huge = tree.Add(MakeCube(Vec3d(0, 0, 0), 500.0), 1);
+    const usize large = tree.Add(MakeCube(Vec3d(10, -10, 5), 4.5), 2);
+    REQUIRE(huge != IndexNone && large != IndexNone);
+    OctreeStats stats = StatsOf(tree.Tree());
+    CHECK(stats.largeProxyCount == 2 && stats.largeProxyInsertions == 2);
+    CHECK(stats.rootLevel == rootLevel && stats.rootExpansions == 0);
+    CHECK(ValidateTree(tree.Tree()));
+    CHECK(QueriesMatch(tree, config, allocator, 0x1A260u));
+
+    // 이력: 반 변 3.5(기준 4와 경계 3 사이)는 목록에 남고, 2.5는 트리로 돌아간다.
+    REQUIRE(tree.Update(large, MakeCube(Vec3d(10, -10, 5), 3.5)));
+    CHECK(StatsOf(tree.Tree()).largeProxyCount == 2);
+    REQUIRE(tree.Update(large, MakeCube(Vec3d(10, -10, 5), 2.5)));
+    CHECK(StatsOf(tree.Tree()).largeProxyCount == 1);
+    // 트리의 프록시가 3.5로 커져도 기준 이하라 트리에 있고, 4.5가 되면 목록으로 간다.
+    REQUIRE(tree.Update(large, MakeCube(Vec3d(10, -10, 5), 3.5)));
+    CHECK(StatsOf(tree.Tree()).largeProxyCount == 1);
+    REQUIRE(tree.Update(large, MakeCube(Vec3d(10, -10, 5), 4.5)));
+    CHECK(StatsOf(tree.Tree()).largeProxyCount == 2);
+    CHECK(ValidateTree(tree.Tree()));
+
+    // 범위 밖 목록과의 이동: 먼 작은 프록시는 범위 밖, 거기서 커지면 큰 객체 목록, 줄면 다시 범위
+    // 밖.
+    const Vec3d far(5.0e5, 0, 0);
+    REQUIRE(tree.Update(large, MakeCube(far, 1.0)));
+    stats = StatsOf(tree.Tree());
+    CHECK(stats.largeProxyCount == 1 && stats.outOfRangeCount == 1);
+    REQUIRE(tree.Update(large, MakeCube(far, 6.0)));
+    stats = StatsOf(tree.Tree());
+    CHECK(stats.largeProxyCount == 2 && stats.outOfRangeCount == 0);
+    REQUIRE(tree.Update(large, MakeCube(far, 1.0)));
+    stats = StatsOf(tree.Tree());
+    CHECK(stats.largeProxyCount == 1 && stats.outOfRangeCount == 1);
+    CHECK(stats.rootLevel == rootLevel);
+    CHECK(ValidateTree(tree.Tree()));
+
+    // 필터·사용자 값 변경은 목록 원소에도 반영된다.
+    REQUIRE(tree.SetFilter(huge, 8));
+    REQUIRE(tree.Tree().TrySetUserValue(tree.Proxies()[huge].handle, huge));
+    CHECK(ValidateTree(tree.Tree()));
+    CHECK(LogicalStateMatches(tree.Tree(), tree.Proxies()));
+    CHECK(QueriesMatch(tree, config, allocator, 0x1A261u));
+
+    // 노드 묶음: 큰 객체 목록이 마지막 묶음이고, 묶음 결과의 합이 단일 질의와 같다.
+    {
+        SpatialReadScope read(tree.Tree());
+        const LooseOctreeReader reader = read.Reader();
+        const Sphere<double> sphere(Vec3d(0, 0, 0), 20.0);
+        SpatialNodeBatch batches[512];
+        auto collected = reader.CollectNodeBatches(sphere, Span<SpatialNodeBatch>(batches));
+        REQUIRE(collected && !collected.Value().truncated && collected.Value().written > 0);
+        const usize batchCount = collected.Value().written;
+        CHECK(batches[batchCount - 1].node == LooseOctreeLargeProxyBatch);
+        uint64 single = 0;
+        REQUIRE(reader.QuerySphere(sphere, 0xFu, [&](const SpatialProxyHit& hit) noexcept {
+            single += hit.userValue + 1;
+            return QueryControl::Continue;
+        }));
+        uint64 joined = 0;
+        for (usize index = 0; index < batchCount; ++index) {
+            REQUIRE(reader.QueryBatch(batches[index], sphere, 0xFu,
+                                      [&](const SpatialProxyHit& hit) noexcept {
+                                          joined += hit.userValue + 1;
+                                          return QueryControl::Continue;
+                                      }));
+        }
+        CHECK(single == joined && single >= huge + 1);
+    }
+
+    // 목록의 프록시를 지우면 목록에서 빠진다.
+    REQUIRE(tree.Remove(huge));
+    stats = StatsOf(tree.Tree());
+    CHECK(stats.largeProxyCount == 0 && stats.proxyCount == tree.LiveCount());
+    CHECK(ValidateTree(tree.Tree()));
+
+    // 설정 검사: 음수·비유한 기준은 거부한다.
+    LooseOctreeConfig invalid = SmallConfig();
+    invalid.largeProxyHalfExtent = -1.0;
+    CHECK(LooseOctree::TryCreate(invalid, allocator).Error() == ErrorCode::InvalidArgument);
+}

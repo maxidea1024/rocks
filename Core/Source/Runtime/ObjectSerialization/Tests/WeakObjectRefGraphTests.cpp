@@ -1,11 +1,11 @@
-#include "WeakRefGraphTestSupport.h"
+#include "WeakObjectRefGraphTestSupport.h"
 
-// 리플렉션 B9d1 WeakRef PROPERTY의 그래프 저장 시험이다(Docs/Design/ReflectionExtensions.ko.md
-// 5.1절, 17절 B9d 항목): MetaCompiler 생성 fixture(WeakRefFixture.h)로 weak 클래스 필드·struct
-// 멤버·Array<WeakRef> 원소를 같은 그래프 안에서 왕복하고, 저장 집합 밖 weak 대상을 정책별(Reject·
-// Admit·Include 지연 덮어쓰기)로 처리하며, 죽은 대상은 진단 없이 null로 쓰고 산 대상의 형식 위반은
-// 거부함을 본다. 복원·GC·도달 검사는 WeakRefGraphLoadTests.cpp, 쓰기 검증은
-// WeakRefFieldTests.cpp다.
+// 리플렉션 B9d1 WeakObjectRef PROPERTY의 그래프 저장
+// 시험이다(Docs/Design/ReflectionExtensions.ko.md 5.1절, 17절 B9d 항목): MetaCompiler 생성
+// fixture(WeakObjectRefFixture.h)로 weak 클래스 필드·struct 멤버·Array<WeakObjectRef> 원소를 같은
+// 그래프 안에서 왕복하고, 저장 집합 밖 weak 대상을 정책별(Reject· Admit·Include 지연 덮어쓰기)로
+// 처리하며, 죽은 대상은 진단 없이 null로 쓰고 산 대상의 형식 위반은 거부함을 본다. 복원·GC·도달
+// 검사는 WeakObjectRefGraphLoadTests.cpp, 쓰기 검증은 WeakObjectRefFieldTests.cpp다.
 using namespace rocks;
 using namespace rocks::test::weak;
 
@@ -29,7 +29,7 @@ Result<ObjectGraphSaveResult> SaveSet(Allocator& allocator, ObjectRegistry& obje
 // 같은 그래프 안 weak 값(클래스 필드·Object 기대 필드의 자기 참조·struct 멤버·Array 원소와 null
 // 원소·원소 struct 안 멤버·서로를 가리키는 weak 순환)이 노드 번호로 왕복하고, 복원한 weak는 새
 // 노드 객체를 가리키며(TryPin 됨) 다시 저장한 byte가 같다.
-TEST(WeakRefGraph_RoundTripInsideTheGraph) {
+TEST(WeakObjectRefGraph_RoundTripInsideTheGraph) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
     REQUIRE(RegisterFixture(types));
@@ -44,21 +44,21 @@ TEST(WeakRefGraph_RoundTripInsideTheGraph) {
             SetStrong(source, ha, &WeakHolder::strong, hb);
             With(source, ha, [&](WeakHolder& value) noexcept {
                 value.value = 1;
-                value.target = WeakRef<WeakTarget>(hb);
-                value.any = WeakRef<>(ha);
-                value.link.target = WeakRef<WeakTarget>(hb);
+                value.target = WeakObjectRef<WeakTarget>(hb);
+                value.any = WeakObjectRef<>(ha);
+                value.link.target = WeakObjectRef<WeakTarget>(hb);
                 value.link.slot = 4;
-                REQUIRE(value.targets.TryPushBack(WeakRef<WeakTarget>(hb)));
-                REQUIRE(value.targets.TryPushBack(WeakRef<WeakTarget>()));
-                REQUIRE(value.targets.TryPushBack(WeakRef<WeakTarget>(ha)));
+                REQUIRE(value.targets.TryPushBack(WeakObjectRef<WeakTarget>(hb)));
+                REQUIRE(value.targets.TryPushBack(WeakObjectRef<WeakTarget>()));
+                REQUIRE(value.targets.TryPushBack(WeakObjectRef<WeakTarget>(ha)));
                 auto link = value.group.links.TryEmplaceBack();
                 REQUIRE(link);
-                link.Value()->target = WeakRef<WeakTarget>(hb);
+                link.Value()->target = WeakObjectRef<WeakTarget>(hb);
                 link.Value()->slot = 9;
             });
             With(source, hb, [&](WeakHolder& value) noexcept {
                 value.value = 2;
-                value.target = WeakRef<WeakTarget>(ha);
+                value.target = WeakObjectRef<WeakTarget>(ha);
             });
 
             Recorder hooks;
@@ -108,7 +108,7 @@ TEST(WeakRefGraph_RoundTripInsideTheGraph) {
 
 // Reject 정책: 저장 집합 밖 weak 대상은 null로 쓰고 위치마다 ExternalReference 진단(값 2)을 남기며
 // 저장은 성공한다(강한 참조만 거부 대상 — 같은 대상의 강한 참조는 값 0 진단 뒤 InvalidArgument).
-TEST(WeakRefGraph_RejectPolicyWritesNullAndReports) {
+TEST(WeakObjectRefGraph_RejectPolicyWritesNullAndReports) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
     REQUIRE(RegisterFixture(types));
@@ -120,10 +120,10 @@ TEST(WeakRefGraph_RejectPolicyWritesNullAndReports) {
             const ObjectHandle ha = a.Handle();
             const ObjectHandle hb = b.Handle();
             With(objects, ha, [&](WeakHolder& value) noexcept {
-                value.target = WeakRef<WeakTarget>(hb);
-                value.link.target = WeakRef<WeakTarget>(hb);
-                REQUIRE(value.targets.TryPushBack(WeakRef<WeakTarget>(hb)));
-                REQUIRE(value.targets.TryPushBack(WeakRef<WeakTarget>(ha)));
+                value.target = WeakObjectRef<WeakTarget>(hb);
+                value.link.target = WeakObjectRef<WeakTarget>(hb);
+                REQUIRE(value.targets.TryPushBack(WeakObjectRef<WeakTarget>(hb)));
+                REQUIRE(value.targets.TryPushBack(WeakObjectRef<WeakTarget>(ha)));
             });
 
             const ObjectHandle set[] = {ha};
@@ -172,7 +172,7 @@ TEST(WeakRefGraph_RejectPolicyWritesNullAndReports) {
 // Admit 정책: weak는 slot 캐시(앞 노드의 강한 참조가 Import한 대상 포함)를 쓰지 않고 출현마다
 // weak = true·slot 0·Required 아님으로 묻는다. Import·Null 모두 null + 진단(값 2 — weak import는
 // 없다)이고 외부 참조로 집계하지 않으며, Reject는 진단(값 0) 뒤 InvalidArgument다.
-TEST(WeakRefGraph_AdmitAsksEveryWeakOccurrenceWithoutSlotCache) {
+TEST(WeakObjectRefGraph_AdmitAsksEveryWeakOccurrenceWithoutSlotCache) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
     REQUIRE(RegisterFixture(types));
@@ -187,10 +187,10 @@ TEST(WeakRefGraph_AdmitAsksEveryWeakOccurrenceWithoutSlotCache) {
             SetStrong(objects, c.Handle(), &WeakHolder::strong, hb);
             SetStrong(objects, c.Handle(), &WeakHolder::second, a.Handle());
             With(objects, a.Handle(), [&](WeakHolder& value) noexcept {
-                value.target = WeakRef<WeakTarget>(hb);
-                value.link.target = WeakRef<WeakTarget>(hb);
-                REQUIRE(value.targets.TryPushBack(WeakRef<WeakTarget>(hb)));
-                REQUIRE(value.targets.TryPushBack(WeakRef<WeakTarget>(hb)));
+                value.target = WeakObjectRef<WeakTarget>(hb);
+                value.link.target = WeakObjectRef<WeakTarget>(hb);
+                REQUIRE(value.targets.TryPushBack(WeakObjectRef<WeakTarget>(hb)));
+                REQUIRE(value.targets.TryPushBack(WeakObjectRef<WeakTarget>(hb)));
             });
 
             const ObjectHandle set[] = {c.Handle(), a.Handle()};
@@ -257,7 +257,7 @@ TEST(WeakRefGraph_AdmitAsksEveryWeakOccurrenceWithoutSlotCache) {
 // 제자리에 덮어쓴다 — 뒤 노드의 강한 참조가 대상을 더하면 그 local ID, 끝까지 밖이면 0과 기록
 // 순서대로의 진단(값 2 — 기록할 때의 objectIndex·경로)이다. weak는 집합을 넓히지 않는다. 노드
 // 순서를 바꾼 저장 집합도 같은 연결로 복원된다.
-TEST(WeakRefGraph_IncludeOverwritesDeferredWeakIndependentOfNodeOrder) {
+TEST(WeakObjectRefGraph_IncludeOverwritesDeferredWeakIndependentOfNodeOrder) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
     REQUIRE(RegisterFixture(types));
@@ -276,18 +276,18 @@ TEST(WeakRefGraph_IncludeOverwritesDeferredWeakIndependentOfNodeOrder) {
             SetStrong(objects, hb, &WeakHolder::strong, hc);
             With(objects, ha, [&](WeakHolder& value) noexcept {
                 value.value = 1;
-                value.target = WeakRef<WeakTarget>(hc);
-                REQUIRE(value.targets.TryPushBack(WeakRef<WeakTarget>(hd)));
-                REQUIRE(value.targets.TryPushBack(WeakRef<WeakTarget>(hc)));
+                value.target = WeakObjectRef<WeakTarget>(hc);
+                REQUIRE(value.targets.TryPushBack(WeakObjectRef<WeakTarget>(hd)));
+                REQUIRE(value.targets.TryPushBack(WeakObjectRef<WeakTarget>(hc)));
             });
             With(objects, hb, [&](WeakHolder& value) noexcept {
                 value.value = 2;
-                value.target = WeakRef<WeakTarget>(hc);
-                value.link.target = WeakRef<WeakTarget>(hd);
+                value.target = WeakObjectRef<WeakTarget>(hc);
+                value.link.target = WeakObjectRef<WeakTarget>(hd);
             });
             With(objects, hc, [&](WeakHolder& value) noexcept {
                 value.value = 3;
-                value.any = WeakRef<>(ha);
+                value.any = WeakObjectRef<>(ha);
             });
 
             // 노드 순서: Include 발견 순(a, b, c)과 호출자 순(a, c, b).
@@ -376,7 +376,7 @@ Minimums MinimumsFor(Allocator& allocator, ObjectRegistry& objects, ObjectHandle
     With(objects, holder, [&](WeakHolder& value) noexcept {
         value.targets.Clear();
         for (uint32 index = 0; index < count; ++index) {
-            REQUIRE(value.targets.TryPushBack(WeakRef<WeakTarget>(outside)));
+            REQUIRE(value.targets.TryPushBack(WeakObjectRef<WeakTarget>(outside)));
         }
     });
 
@@ -420,7 +420,7 @@ Minimums MinimumsFor(Allocator& allocator, ObjectRegistry& objects, ObjectHandle
 // Include 지연 항목(위치·대상·노드 위치·경로 사본)의 메모리는 외부 참조 위치 표처럼 그래프 바이트
 // 누계와 작업량에 청구된다: 집합 밖 weak 원소의 출력 byte는 null 원소와 같지만 필요한 maxBytes가
 // 항목 수에 비례해 늘고(같은 경로 깊이라 정확히 선형) maxWork도 는다.
-TEST(WeakRefGraph_IncludeDeferralsAreChargedToGraphBytesAndWork) {
+TEST(WeakObjectRefGraph_IncludeDeferralsAreChargedToGraphBytesAndWork) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
     REQUIRE(RegisterFixture(types));
@@ -456,7 +456,7 @@ TEST(WeakRefGraph_IncludeDeferralsAreChargedToGraphBytesAndWork) {
 // 예약이면 항목마다 표 전체를 옮겨 제곱으로 는다): null 원소 대비 필요한 maxWork 증분이 항목 수를
 // 두 배로 할 때마다 두 배 안팎이다(제곱이면 네 배). 기본 한도에서 Reject와 같은 규모(12,000개)도
 // Include로 저장된다.
-TEST(WeakRefGraph_IncludeDeferralWorkIsLinearInEntries) {
+TEST(WeakObjectRefGraph_IncludeDeferralWorkIsLinearInEntries) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
     REQUIRE(RegisterFixture(types));
@@ -485,7 +485,7 @@ TEST(WeakRefGraph_IncludeDeferralWorkIsLinearInEntries) {
             With(objects, holder.Handle(), [&](WeakHolder& value) noexcept {
                 value.targets.Clear();
                 for (uint32 index = 0; index < 12000; ++index) {
-                    REQUIRE(value.targets.TryPushBack(WeakRef<WeakTarget>(outside.Handle())));
+                    REQUIRE(value.targets.TryPushBack(WeakObjectRef<WeakTarget>(outside.Handle())));
                 }
             });
             const ObjectHandle set[] = {holder.Handle()};
@@ -502,7 +502,7 @@ TEST(WeakRefGraph_IncludeDeferralWorkIsLinearInEntries) {
 // 죽은 대상(파괴 요청 — Destroyed, 회수 뒤 — StaleHandle)을 가리키는 weak는 진단·hook 질의 없이
 // null로 쓴다(weak의 정상 상태). 산 대상이 기대 타입을 어기면(C++에서 직접 넣은 다른 타입) 저장이
 // TypeMismatch다(Object 기대 필드는 받는다).
-TEST(WeakRefGraph_DeadTargetsEncodeNullAndTypeMismatchFails) {
+TEST(WeakObjectRefGraph_DeadTargetsEncodeNullAndTypeMismatchFails) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
     REQUIRE(RegisterFixture(types));
@@ -515,8 +515,8 @@ TEST(WeakRefGraph_DeadTargetsEncodeNullAndTypeMismatchFails) {
             const ObjectHandle ha = a.Handle();
             const ObjectHandle hb = b.Handle();
             With(objects, ha, [&](WeakHolder& value) noexcept {
-                value.target = WeakRef<WeakTarget>(hb);
-                REQUIRE(value.targets.TryPushBack(WeakRef<WeakTarget>(hb)));
+                value.target = WeakObjectRef<WeakTarget>(hb);
+                REQUIRE(value.targets.TryPushBack(WeakObjectRef<WeakTarget>(hb)));
             });
 
             REQUIRE(objects.RequestDestroy(access, hb));
@@ -551,7 +551,7 @@ TEST(WeakRefGraph_DeadTargetsEncodeNullAndTypeMismatchFails) {
                     RootRef<WeakHolder> stranger = New<WeakHolder>(foreign);
                     With(objects, ha, [&](WeakHolder& value) noexcept {
                         value.targets.Clear();
-                        value.target = WeakRef<WeakTarget>(stranger.Handle());
+                        value.target = WeakObjectRef<WeakTarget>(stranger.Handle());
                     });
                     for (GraphExternalPolicy policy : policies) {
                         Recorder hooks;
@@ -561,8 +561,9 @@ TEST(WeakRefGraph_DeadTargetsEncodeNullAndTypeMismatchFails) {
                     }
 
                     With(objects, ha, [&](WeakHolder& value) noexcept {
-                        value.target = WeakRef<WeakTarget>();
-                        REQUIRE(value.targets.TryPushBack(WeakRef<WeakTarget>(stranger.Handle())));
+                        value.target = WeakObjectRef<WeakTarget>();
+                        REQUIRE(value.targets.TryPushBack(
+                            WeakObjectRef<WeakTarget>(stranger.Handle())));
                     });
                     auto element = SaveObjectGraph(allocator, objects, access, ha);
                     CHECK(!element && element.Error() == ErrorCode::WrongContext);
@@ -572,25 +573,25 @@ TEST(WeakRefGraph_DeadTargetsEncodeNullAndTypeMismatchFails) {
                 REQUIRE(foreign.Shutdown(foreign.OwnerAccess()));
             }
 
-            // 기대 타입 위반: WeakRef<WeakTarget>에 C++로 직접 넣은 WeakOther.
+            // 기대 타입 위반: WeakObjectRef<WeakTarget>에 C++로 직접 넣은 WeakOther.
             RootRef<WeakOther> other = New<WeakOther>(objects);
             With(objects, ha, [&](WeakHolder& value) noexcept {
                 value.targets.Clear();
-                value.target = WeakRef<WeakTarget>();
-                value.any = WeakRef<>(other.Handle());
+                value.target = WeakObjectRef<WeakTarget>();
+                value.any = WeakObjectRef<>(other.Handle());
             });
             Recorder accepted;
             REQUIRE(SaveSet(allocator, objects, set, GraphExternalPolicy::Reject, &accepted));
             CHECK(accepted.Count(FieldDiagnosticKind::ExternalReference, 2) == 1);
             With(objects, ha, [&](WeakHolder& value) noexcept {
-                value.target = WeakRef<WeakTarget>(other.Handle());
+                value.target = WeakObjectRef<WeakTarget>(other.Handle());
             });
             auto mismatched =
                 SaveSet(allocator, objects, set, GraphExternalPolicy::Reject, nullptr);
             CHECK(!mismatched && mismatched.Error() == ErrorCode::TypeMismatch);
             With(objects, ha, [&](WeakHolder& value) noexcept {
-                value.target = WeakRef<WeakTarget>();
-                REQUIRE(value.targets.TryPushBack(WeakRef<WeakTarget>(other.Handle())));
+                value.target = WeakObjectRef<WeakTarget>();
+                REQUIRE(value.targets.TryPushBack(WeakObjectRef<WeakTarget>(other.Handle())));
             });
             auto element = SaveObjectGraph(allocator, objects, access, ha);
             CHECK(!element && element.Error() == ErrorCode::TypeMismatch);

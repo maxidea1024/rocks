@@ -316,10 +316,10 @@ Result<void> D3D11Device::CreateOnAdapter(IDXGIAdapter1* adapter, bool requestDe
 }
 
 Result<void> D3D11Device::CreateSharedStates() noexcept {
-    // 그리기 상수(D3D12 루트 상수 20개 대응)다. SetConstants마다 WRITE_DISCARD로 갈아 끼운다.
-    static_assert(sizeof(DrawConstants) % 16 == 0, "DrawConstants must be a multiple of 16 bytes");
+    // 그리기별 상수(D3D12 루트 상수 대응)다. 파이프라인 크기와 무관하게 계약 최대 크기 하나를 두고
+    // SetDrawConstants마다 WRITE_DISCARD로 갈아 끼운다(셰이더 cbuffer는 이보다 작아도 된다).
     D3D11_BUFFER_DESC constants = {};
-    constants.ByteWidth = sizeof(DrawConstants);
+    constants.ByteWidth = MaxDrawConstantBytes;
     constants.Usage = D3D11_USAGE_DYNAMIC;
     constants.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     constants.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
@@ -461,6 +461,22 @@ Result<void> D3D11Device::Reject(const Diagnostic& message) noexcept {
     auto assigned = lastError_.TryAssign(StringView(message.CStr(), message.Length()));
     (void)assigned;
     return Result<void>::Failure(ErrorCode::InvalidArgument);
+}
+
+Result<void> D3D11Device::RejectDrawConstantSize(bool pipelineBound, usize bytes,
+                                                 uint32 drawConstantBytes) noexcept {
+    Diagnostic message;
+    if (!pipelineBound) {
+        message.Text("SetDrawConstants needs a pipeline bound while recording");
+    } else {
+        message.Text("SetDrawConstants got ")
+            .Number(bytes > NumericLimits<uint32>::Max() ? NumericLimits<uint32>::Max()
+                                                         : static_cast<uint32>(bytes))
+            .Text(" bytes but the bound pipeline declares drawConstantBytes ")
+            .Number(drawConstantBytes);
+    }
+
+    return Reject(message);
 }
 
 void D3D11Device::DetectLost(HRESULT failure) noexcept {

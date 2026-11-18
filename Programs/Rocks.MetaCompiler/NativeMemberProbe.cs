@@ -303,7 +303,7 @@ internal static class NativeMemberProbe
             {
                 string path = verdict.Code == ObjectTarget ? "raw pointer to Object-derived " + verdict.Target : verdict.Target;
                 throw new MetadataException($"{member.Symbol}: ROCKS_NATIVE member holds a strong object reference ({path})", "RMC2205",
-                    "Native members are not traced; store ObjectRef/RootRef/Object pointers in ROCKS_PROPERTY fields or use WeakRef/ObjectHandle.").At(member.Native.Site);
+                    "Native members are not traced; store ObjectRef/RootRef/Object pointers in ROCKS_PROPERTY fields or use WeakObjectRef/ObjectHandle.").At(member.Native.Site);
             }
         }
 

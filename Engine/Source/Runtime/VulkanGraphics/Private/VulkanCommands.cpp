@@ -434,15 +434,23 @@ void VulkanDevice::SetTexture(TextureHandle handle) noexcept {
     }
 }
 
-void VulkanDevice::SetConstants(const DrawConstants& constants) noexcept {
+Result<void> VulkanDevice::SetDrawConstants(Span<const uint8> bytes) noexcept {
     platform::LockGuard lock(gate_);
-    if (!recording_) {
-        return;
+    const PipelineRecord* pipeline = recording_ ? pipelines_.Find(boundPipeline_) : nullptr;
+    if (pipeline == nullptr || bytes.Size() != pipeline->drawConstantBytes) {
+        return RejectDrawConstantSize(pipeline != nullptr, bytes.Size(),
+                                      pipeline != nullptr ? pipeline->drawConstantBytes : 0u);
     }
 
-    // 행렬은 행 우선 그대로 올린다(셰이더는 -Zpr, ShaderSystem 7.2절 6항).
-    functions_.vkCmdPushConstants(frame_, pipelineLayout_, ConstantStages, 0, ConstantBytes,
-                                  &constants);
+    // 모든 layout의 push constant 범위가 같으므로 공용 layout으로 앞 n byte만 올린다. 값은 다른
+    // 파이프라인(compute 포함)으로 바꿔도 남는다. 행렬은 행 우선 그대로다(셰이더는 -Zpr,
+    // ShaderSystem 7.2절 6항).
+    if (bytes.Size() != 0) {
+        functions_.vkCmdPushConstants(frame_, pipelineLayout_, ConstantStages, 0,
+                                      static_cast<uint32>(bytes.Size()), bytes.Data());
+    }
+
+    return Result<void>::Success();
 }
 
 void VulkanDevice::Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept {

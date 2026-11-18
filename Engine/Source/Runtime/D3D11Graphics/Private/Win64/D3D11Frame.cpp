@@ -120,8 +120,9 @@ void D3D11Device::BeginRecording(const Target& target, const PassDesc& pass) noe
     }
 
     // deferred context의 동적 버퍼 내용은 그 기록 안에서 DISCARD로 쓰기 전까지 정해지지 않는다.
-    const DrawConstants identity;
-    WriteConstants(identity);
+    // 그리기별 상수는 기록마다 0으로 시작한다(CommandContext::SetDrawConstants).
+    platform::MemoryZero(constantValues_, sizeof(constantValues_));
+    WriteConstants();
 }
 
 Result<GpuFencePoint> D3D11Device::EndFrame() noexcept {
@@ -283,14 +284,25 @@ void D3D11Device::SetTexture(TextureHandle handle) noexcept {
     }
 }
 
-void D3D11Device::SetConstants(const DrawConstants& constants) noexcept {
-    // 기록 context는 소유 스레드만 쓰므로 장치 잠금이 필요 없다(D3D12 루트 상수와 같다).
-    WriteConstants(constants);
+Result<void> D3D11Device::SetDrawConstants(Span<const uint8> bytes) noexcept {
+    platform::LockGuard lock(gate_);
+    const PipelineRecord* pipeline = recording_ ? pipelines_.Find(boundPipeline_) : nullptr;
+    if (pipeline == nullptr || bytes.Size() != pipeline->drawConstantBytes) {
+        return RejectDrawConstantSize(pipeline != nullptr, bytes.Size(),
+                                      pipeline != nullptr ? pipeline->drawConstantBytes : 0u);
+    }
+
+    if (bytes.Size() != 0) {
+        platform::MemoryCopy(constantValues_, bytes.Data(), bytes.Size());
+        WriteConstants();
+    }
+
+    return Result<void>::Success();
 }
 
-// 그리기 상수 버퍼를 갈아 끼운다(UE uniform buffer와 같은 WRITE_DISCARD). 앞 그리기는 앞 내용을
-// 그대로 본다.
-void D3D11Device::WriteConstants(const DrawConstants& constants) noexcept {
+// 그리기별 상수 버퍼를 사본 전체로 갈아 끼운다(UE uniform buffer와 같은 WRITE_DISCARD). 앞
+// 그리기는 앞 내용을 그대로 본다.
+void D3D11Device::WriteConstants() noexcept {
     D3D11_MAPPED_SUBRESOURCE mapped = {};
     const HRESULT result = deferred_->Map(constants_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
     if (FAILED(result)) {
@@ -298,7 +310,7 @@ void D3D11Device::WriteConstants(const DrawConstants& constants) noexcept {
         return;
     }
 
-    platform::MemoryCopy(mapped.pData, &constants, sizeof(constants));
+    platform::MemoryCopy(mapped.pData, constantValues_, sizeof(constantValues_));
     deferred_->Unmap(constants_.Get(), 0);
 }
 

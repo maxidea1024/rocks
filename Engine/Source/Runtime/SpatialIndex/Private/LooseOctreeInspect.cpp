@@ -107,6 +107,7 @@ OctreeStats LooseOctree::CollectStats() const noexcept {
     OctreeStats stats;
     stats.proxyCount = static_cast<uint32>(records_.Size());
     stats.outOfRangeCount = static_cast<uint32>(outOfRange_.Size());
+    stats.largeProxyCount = static_cast<uint32>(large_.Size());
     stats.rootLevel = rootManage_.level;
 
     struct Pending {
@@ -152,6 +153,8 @@ OctreeStats LooseOctree::CollectStats() const noexcept {
                               manageBlocks_.Capacity() * sizeof(detail::ManageBlock);
     stats.outOfRangeBytesUsed = outOfRange_.Size() * sizeof(detail::OutOfRangeEntry);
     stats.outOfRangeBytesReserved = outOfRange_.Capacity() * sizeof(detail::OutOfRangeEntry);
+    stats.largeProxyBytesUsed = large_.Size() * sizeof(detail::OutOfRangeEntry);
+    stats.largeProxyBytesReserved = large_.Capacity() * sizeof(detail::OutOfRangeEntry);
     stats.peakRecordBytesReserved = peaks_.recordBytes;
     stats.peakChunkBytesReserved = peaks_.chunkBytes;
     stats.peakNodeBytesReserved = peaks_.nodeBytes;
@@ -183,6 +186,7 @@ OctreeStats LooseOctree::CollectStats() const noexcept {
     stats.parentWarnEvents = counters_.parentWarnEvents;
     stats.outOfRangeWarnEvents = counters_.outOfRangeWarnEvents;
     stats.outOfRangeInsertions = counters_.outOfRangeInsertions;
+    stats.largeProxyInsertions = counters_.largeProxyInsertions;
 
     stats.pendingTotal = queueLength_;
     for (uint32 node = queueHead_; node != detail::NoNode; node = Manage(node).queueNext) {
@@ -278,8 +282,9 @@ Result<OctreeValidationReport> LooseOctree::ValidateStructure() const noexcept {
                 if (!loose.Contains(record.bounds)) {
                     return fail(1, node);
                 }
+                // 트리의 프록시는 큰 객체 기준 이하다(넘으면 큰 객체 목록에 있어야 한다).
                 if (record.filter != elements.filter[entry] ||
-                    record.userValue != elements.userValue[entry]) {
+                    record.userValue != elements.userValue[entry] || IsLargeProxy(record.bounds)) {
                     return fail(OctreeInvariantStorage, node);
                 }
                 // 불변 조건 7: min_f < (min − 중심), max_f > (max − 중심)(double 계산값 기준,
@@ -357,20 +362,32 @@ Result<OctreeValidationReport> LooseOctree::ValidateStructure() const noexcept {
         return fail(OctreeInvariantStorage, detail::NoNode);
     }
 
-    // 범위 밖 목록.
-    for (usize index = 0; index < outOfRange_.Size(); ++index) {
-        const detail::OutOfRangeEntry& entry = outOfRange_[index];
-        const SlotHandle live = records_.HandleAt(entry.slot);
-        if (live.IsNull() || live.generation != entry.generation) {
-            return fail(3, detail::NoNode);
+    // 트리 밖 목록(범위 밖·큰 객체). 레코드가 그 목록의 그 칸을 가리키고 내용이 같아야 한다(3).
+    // 큰 객체 목록의 프록시는 이력 비율을 넘는 크기여야 하고, 범위 밖 목록의 프록시는 큰 객체 기준
+    // 이하여야 한다(저장 구조 일관성).
+    const uint32 listNodes[2] = {detail::OutOfRangeNode, detail::LargeProxyNode};
+    for (const uint32 listNode : listNodes) {
+        const Array<detail::OutOfRangeEntry>& list =
+            listNode == detail::LargeProxyNode ? large_ : outOfRange_;
+        for (usize index = 0; index < list.Size(); ++index) {
+            const detail::OutOfRangeEntry& entry = list[index];
+            const SlotHandle live = records_.HandleAt(entry.slot);
+            if (live.IsNull() || live.generation != entry.generation) {
+                return fail(3, detail::NoNode);
+            }
+            const detail::ProxyRecord& record = records_.ElementAt(entry.slot);
+            if (record.node != listNode || record.chunk != index ||
+                !(record.bounds.min == entry.bounds.min) ||
+                !(record.bounds.max == entry.bounds.max) || record.filter != entry.filter ||
+                record.userValue != entry.userValue) {
+                return fail(3, detail::NoNode);
+            }
+            const bool large = listNode == detail::LargeProxyNode;
+            if (large ? !StaysLargeProxy(record.bounds) : IsLargeProxy(record.bounds)) {
+                return fail(OctreeInvariantStorage, detail::NoNode);
+            }
+            ++proxiesSeen;
         }
-        const detail::ProxyRecord& record = records_.ElementAt(entry.slot);
-        if (record.node != detail::OutOfRangeNode || record.chunk != index ||
-            !(record.bounds.min == entry.bounds.min) || !(record.bounds.max == entry.bounds.max) ||
-            record.filter != entry.filter || record.userValue != entry.userValue) {
-            return fail(3, detail::NoNode);
-        }
-        ++proxiesSeen;
     }
 
     // 불변 조건 4: 살아 있는 프록시는 정확히 한 곳에 있다. 위치마다 레코드가 그 위치를
@@ -386,11 +403,11 @@ Result<OctreeValidationReport> LooseOctree::ValidateStructure() const noexcept {
         if (length >= queueLength_) {
             return fail(9, node);
         }
-        if (node != detail::RootNode && node != detail::OutOfRangeNode &&
-            (!searchBlocks_.IsLive(BlockOf(node)) || !manageBlocks_.IsLive(BlockOf(node)))) {
+        if (detail::IsListNode(node)) {
             return fail(9, node);
         }
-        if (node == detail::OutOfRangeNode) {
+        if (node != detail::RootNode &&
+            (!searchBlocks_.IsLive(BlockOf(node)) || !manageBlocks_.IsLive(BlockOf(node)))) {
             return fail(9, node);
         }
         const detail::ManageNode& manage = Manage(node);
