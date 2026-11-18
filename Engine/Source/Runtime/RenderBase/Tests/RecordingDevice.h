@@ -4,6 +4,7 @@
 #include <Graphics/Device.h>
 #include <Graphics/DeviceOwnership.h>
 #include <Graphics/FenceTimeline.h>
+#include <Graphics/SplitTransitionTracker.h>
 #include <Graphics/StagingPool.h>
 #include <Graphics/TimestampRing.h>
 
@@ -48,7 +49,17 @@ public:
         PushMarker,
         PopMarker,
         // value는 TransitionLog의 순번이다.
-        Transition
+        Transition,
+        // 분리 전이 begin·end다. value는 짝 번호다(전이마다의 내용은 TransitionLog).
+        BeginTransitions,
+        EndTransitions
+    };
+
+    // 기록한 전이의 단계다. Full은 Transition, Begin·End는 분리 전이의 두 끝이다.
+    enum class TransitionPhase : uint8 {
+        Full,
+        Begin,
+        End
     };
 
     // 기록한 명시 전이 하나다(Op::Transition). texture가 false면 버퍼다. index는 handle의 slot
@@ -59,6 +70,9 @@ public:
         graphics::SubresourceRange range;
         graphics::ResourceAccess before = graphics::ResourceAccess::Unknown;
         graphics::ResourceAccess after = graphics::ResourceAccess::Unknown;
+        TransitionPhase phase = TransitionPhase::Full;
+        // 분리 전이의 짝 번호다(Full은 0).
+        uint32 split = 0;
 
         bool operator==(const TransitionCall&) const noexcept = default;
     };
@@ -109,6 +123,10 @@ public:
 
     // 장치가 추적한 텍스처 mip의 접근 상태다(시험이 최종 상태를 단언한다). 모르는 handle은
     // Unknown이다.
+    //
+    // 분리 전이(D3D12와 같은 규칙): begin은 짝만 열고, end가 before 대조와 상태 변경을 한다. 짝
+    // 검사: 모르는·이미 끝난 짝의 end는 IgnoredDraws, begin과 다른 목록의 end·끝나지 않은
+    // 짝(EndFrame)·열린 짝의 subresource를 건드리는 Transition·begin은 검증 오류다.
     //
     // 추적 규칙(D3D12 backend와 같다): 만든 텍스처는 SrvGraphics, 만든 버퍼는 VertexOrIndex에서
     // 시작한다. BeginOffscreen은 대상 mip 0을 RenderTarget으로 바꾼다(attachment 전이). EndFrame은
@@ -299,6 +317,15 @@ private:
     void PushMarker(StringView name) noexcept override;
     void PopMarker() noexcept override;
     void Transition(Span<const graphics::ResourceTransition> transitions) noexcept override;
+    graphics::SplitTransition
+    BeginTransitions(Span<const graphics::ResourceTransition> transitions) noexcept override;
+    void EndTransitions(graphics::SplitTransition split,
+                        Span<const graphics::ResourceTransition> transitions) noexcept override;
+    // 전이를 추적 상태에 적용하고 기록한다(Transition·EndTransitions 공용).
+    void ApplyTransitions(Span<const graphics::ResourceTransition> transitions,
+                          TransitionPhase phase, uint32 split) noexcept;
+    // 열린 분리 전이의 subresource와 겹치면 검증 오류를 센다.
+    void CheckPendingOverlap(Span<const graphics::ResourceTransition> transitions) noexcept;
 
     void Record(Op op, uint64 value = 0) noexcept;
     void CheckDeclared(graphics::ResourceAccess tracked,
@@ -310,6 +337,13 @@ private:
     SlotArray<graphics::ResourceAccess> buffers_;
     SlotArray<TextureState> textures_;
     Array<TransitionCall> transitions_;
+    // 열린 분리 전이 짝과 그 전이다.
+    graphics::SplitTransitionTracker splits_;
+    struct PendingTransition {
+        uint32 split = 0;
+        graphics::ResourceTransition transition;
+    };
+    Array<PendingTransition> pendingSplits_;
     uint64 validationErrors_ = 0;
     uint64 ignoredDraws_ = 0;
     SlotArray<uint8> pipelines_;

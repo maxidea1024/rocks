@@ -1,6 +1,6 @@
 # 렌더 기반(RenderBase) 설계
 
-기준일: 2026-11-18, 개정 17(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-18, 개정 18(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
 - 렌더 lane과 프레임 전달, 장치 스레드 모델, 장치 자원 수명, 렌더 그래프
 - 셰이더 런타임 객체(셰이더 집합·파라미터 바인딩·상수 블록·파이프라인 캐시)
 - 정점 입력 타입, 공용 자원·그리기 유틸리티, GPU 계측
@@ -143,7 +143,7 @@ ID는 이 문서가 붙인다. CP는 Core 선행, GX는 Graphics 확장, RB는 R
 | GX3 | 파이프라인 완성(SH2 범위 밖 부분) | 미설계 | SH2·P2·P14 | RB4, RB5, RB6 | L | 4.4절 |
 | GX3a | 정점 배치 완성: 정점 원소 형식 20종·다중 stream·인스턴스 stream·index 버퍼·instanced·indexed draw·셰이더 입력 대조, CPU 패킹 helper | 구현 | — | RB5, 메시 에셋 | M | 10.4절 |
 | GX4 | 명령 기록 확장 | 미설계 | GX2·GX3 | RB5, RB6, RG1 | L | 4.4절 |
-| GX5 | 명시 접근 상태와 전이 | 구현(최소: 전이 API·D3D12·기록 장치. 분리 전이는 RG2, pipe는 RG4) | GX2·GX4 | RG1 | M–L | 4.4절 |
+| GX5 | 명시 접근 상태와 전이 | 구현(전이 API·분리 전이(begin·end)·D3D12·D3D11·OpenGL ES·Vulkan·기록 장치. pipe는 RG4) | GX2·GX4 | RG1 | M–L | 4.4절 |
 | GX6 | 파라미터 바인딩 런타임(상수 블록·묶음 설정·공유 slot) | 미설계 | P2·SH2 | RB4 | L | 4.4절, 9절 |
 | GX7 | 제출·완료·회수(계획 11.2), descriptor 회수, 스레드 안전 fence 대기 | 구현(lease는 RB2·RG1) | — | RB1·RB2 | L | 4.4절, 6절 |
 | GX8 | 업로드 ring·비동기 readback | 구현 | GX7 | RB2, RB4, RG2 | M | 4.4절 |
@@ -154,7 +154,7 @@ ID는 이 문서가 붙인다. CP는 Core 선행, GX는 Graphics 확장, RB는 R
 | GX13 | subpass·framebuffer fetch(tiled GPU 병합용) | 후속 | GX4·GX5 | RG3 병합 | M | 4.4절 |
 | RB1 | 렌더 lane·프레임 slot·전달 타입 등록·완료 통지·`RenderHandle` 예약 | 구현(설정 snapshot 포함, 12절) | CP1·CP6·GX7·GX10·GX11 | RB2–RB7 | M | 5절 |
 | RG1 | 최소 렌더 그래프 | 구현(명시 접근 목록 경로. 파라미터 구조체 경로는 RB4·SH2 뒤, (g)는 D3D12·D3D11(각 WARP 포함)·OpenGL ES 두 context) | RB7·GX5·CP3(RB4·GX1·GX2·GX4는 범위를 줄여 앞당김) | RG2 | L | 7·8절 |
-| RG2 | 프레임 안 풀 재사용·그래프 안 업로드·분리 전이 | 부분 구현(A부: 프레임 안 재사용·export 풀 반납(결정 R15)·그래프 안 업로드. B부 분리 전이는 Graphics·backend 변경과 함께 남음) | RG1·GX8 | RG3 | M | 8절 |
+| RG2 | 프레임 안 풀 재사용·그래프 안 업로드·분리 전이 | 구현(A부: 프레임 안 재사용·export 풀 반납(결정 R15)·그래프 안 업로드. B부: 분리 전이(begin·end)와 backend 낮추기) | RG1·GX8 | RG3 | M | 8절 |
 
 ### 4.3 Core 선행 작업
 
@@ -250,6 +250,11 @@ RenderCore가 쓰는 RHI 기능군과 Rocks Graphics의 차이다. "SH2" 열은 
   - OpenGL ES: 전이는 대부분 생략하고, UAV(image·storage) 쓰기 뒤 읽기에는 접근 비트에서 고른 `glMemoryBarrier` bit를 둔다(UE는 dispatch 앞뒤에 전체 bit, `OpenGLDrv/Private/OpenGLCommands.cpp:2671–2673`).
   - D3D11·Metal: SH5에서 정한다(미확인).
   - **구현(2026-11-17, RG1 최소 범위).** `Graphics/ResourceAccess.h`(`ResourceAccess`·mask·`CanCombineAccess`·`SubresourceRange`·`ResourceTransition`)와 `CommandContext::Transition(Span<const ResourceTransition>)`. 장치는 텍스처 mip마다 상태를 추적하고 `BeginFrame`·`BeginOffscreen`이 대상을 렌더 타깃으로 바꾼다(attachment 전이, GX4 attachment 시작 전까지). before `Unknown`은 장치 추적 상태에서 바꾼다는 뜻이다. D3D12: 휴지 상태(PSR) 관례를 없애고 mip별 `committed`(제출 끝)·`current`(기록 중) 추적, legacy resource barrier, UAV → UAV는 UAV barrier, 업로드 기록은 `committed` 기준 상태 중립, 검증 장치는 before 불일치를 `ValidationErrorCount`에 센다. 버퍼는 암묵 승격·복귀에 맡겨 UAV barrier만 낸다. 그래프 밖 그리기(`SetTexture`)는 암묵 전이로 메운다. OpenGL·D3D11은 빈 override(드라이버 암묵 전이), Vulkan은 같은 추적에서 pipeline barrier로 낮추고 버퍼는 쓰기가 끼는 전이만 메모리 barrier로 낸다(render pass 안 barrier는 pass를 닫고 다시 연다). 분리 전이(begin·end)와 pipe는 넣지 않았다(RG2·RG4). 계약은 [렌더 기반 구현](../Implementation/RenderBase.ko.md) 8절.
+  - **구현(2026-11-18, RG2 B부: 분리 전이).** `CommandContext::BeginTransitions(Span<const ResourceTransition>) → SplitTransition`과 `EndTransitions(SplitTransition, Span)`(UE `RHIBeginTransitions`·`RHIEndTransitions`). 짝 식별자 `SplitTransition{id}`(0은 null), 기존 `Transition`은 begin·end를 한 지점에서 한 것과 같다. 계약: begin·end는 같은 기록 안에서 같은 목록(같은 순서·값)으로 짝을 맞추고, 그 사이에 그 subresource를 쓰는 명령·전이를 기록하지 않는다. 그래서 before 대조는 begin(Vulkan event 경로)이든 end(D3D12)든 결과가 같다. 추적 상태는 짝이 끝나면 after다. null 짝의 end와 모르는·이미 끝난 짝의 end는 `Transition`처럼 낮추고 뒤의 것은 `IgnoredDraws`를 올린다. 다른 목록의 end와 EndFrame까지 끝나지 않은 짝은 검증 장치에서 `ValidationErrorCount`다. 짝 검사는 공용 `Graphics/SplitTransitionTracker.h`(열린 짝·목록 지문 SipHash)다. 능력 표시 `DeviceFeatures::splitTransitions`(GPU에서 begin·end를 따로 실행하는지)를 더했다.
+    - D3D12: native split barrier(`BEGIN_ONLY`·`END_ONLY`)를 쓰지 않고 end에서 `Transition`과 같이 한 번에 낮춘다(UE도 같다, `D3D12RHI/Private/D3D12LegacyBarriers.cpp:1111–1127`, 표시 기본 false). before 대조와 mip별 `current` 갱신은 end 때다. `splitTransitions` false.
+    - Vulkan: `VK_KHR_synchronization2`(기준 판 1.1이라 확장, 기능 `synchronization2`)가 있으면 begin은 `vkCmdSetEvent2`, end는 같은 `VkDependencyInfo`의 `vkCmdWaitEvents2`다(UE `VulkanBarriers.cpp:661–663, 1405–1414`, `VulkanCommandBuffer.cpp:553–561`). event(`VK_EVENT_CREATE_DEVICE_ONLY_BIT`)는 기록마다 상한 64개를 만들어 두고, 기록 끝에 `vkCmdResetEvent2`로 되돌리며 그 제출의 fence 뒤 기록을 다시 쓸 때 재사용한다(UE는 장치 pool, `VulkanDevice.cpp:1799–1831`). 상한을 넘은 짝은 end에서 `vkCmdPipelineBarrier2`로 낸다. 이미지 layout은 begin 뒤 바뀌므로 before 대조와 추적 상태 갱신을 begin 때 하고, 그래서 사이에 render pass를 다시 열지 않는다(`AttachmentsReady`). `vkCmdSetEvent2`·이미지 layout이 바뀌는 대기는 render pass 밖에서 낸다(열린 pass를 닫는다). 확장·기능이 없으면 end에서 `Transition`처럼 낮춘다. `splitTransitions`는 synchronization2를 켰을 때 참이다.
+    - D3D11·OpenGL ES: begin은 짝만 열고 end는 `Transition`과 같다(드라이버 암묵 전이). `splitTransitions` false.
+    - 기록 장치: begin·end를 `Op::BeginTransitions`·`EndTransitions`(짝 번호)와 `TransitionLog`의 단계(`Full`·`Begin`·`End`)로 기록하고, D3D12와 같이 end에서 대조·적용한다. 모르는 짝의 end는 `IgnoredDraws`, 다른 목록의 end·끝나지 않은 짝·열린 짝의 subresource를 건드리는 전이와 begin은 검증 오류다.
 - **GX6 파라미터 바인딩 런타임.** 9.3–9.5절을 Graphics 쪽에서 받는 부분이다: 상수 블록 생성(수명 3종)·갱신, 파라미터 묶음 설정, 공유 상수 slot 표.
 - **GX7 제출·완료·회수.** 계획 11.2절 계약(`Submit`·`Retire`·`GpuFencePoint`·`RenderResourceLease`·device epoch)을 Graphics `Device`에 들인다.
   - OpenGL ES도 fence sync로 같은 계약을 따르고 "즉시 삭제" 예외를 없앤다.
@@ -576,7 +581,13 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 - 풀 키에 버퍼 `stride`를 더했다(GX2의 구조화 버퍼).
 - 시험(EngineTests `RenderGraphReuseTests`, 기록 backend): view 둘의 프레임 안 재사용과 장치 handle 동일성·`Discard` attachment 전이, Immediate 재사용 없음, export·겹침·다른 desc 비공유, 버퍼 재사용의 `Discard` → UAV 장치 전이(검증 0), 위 R15 시험 넷, 업로드가 첫 기록 앞·두 구간 순서·읽기 전이, 제거된 자원의 업로드 생략, 업로드 대상이 앞 객체를 받지 않고 뒤 자원에 넘김, Immediate 업로드 위치, `Sampled` mip 업로드(생성 → 다시 쓰면 mip 갱신 둘), 업로드 음성 대조(렌더 타깃 `Unsupported`·범위 밖·빈 데이터·mip 크기·두 번·`Sampled` 쓰기·렌더 타깃·올리지 않은 mip 읽기·pass 뒤 업로드·import·빠진 mip).
 - Sandbox self-test(g)에 더한 것: 반납된 history를 GPU 완료 뒤 장치 생성 없이 다시 씀, 같은 그래프 안 재사용 픽셀(앞 결과 빨강 유지, 이어 쓴 텍스처는 자기 파랑만), 버퍼 업로드 → 복사 pass 둘(재사용 버퍼의 `Discard` 전이를 장치에 내림) → export 바이트 대조와 두 번째 실행의 export 버퍼 재사용, `Sampled` 텍스처 업로드 합성(생성·풀 mip 갱신).
-- 남은 것(RG2): B부 begin·end 분리 전이(Graphics·backend 변경 목록은 개정 17 보고), 분리 전후 픽셀 동일.
+**구현(2026-11-18, RG2 B부: 분리 전이).** 장치 API와 backend 낮추기는 4.4절 GX5 구현 메모다. 그래프 쪽:
+- 배치: 전이 기록에 `beginPass`를 더했다(`GraphTransitionRecord`). 같은 pipe에서 생산(마지막 사용) pass epilogue에 begin, 소비 pass prologue에 end한다(UE `RC/Private/RenderGraphBuilder.cpp:3783–3928`). 컴파일이 subresource마다 마지막 사용 pass(`lastUser`)를 따라가 앞 구간의 마지막 사용 pass를 begin 자리로 삼는다(읽기 병합 구간이면 그 마지막 읽기 pass다).
+- 나누는 조건: 그래프 안 전이(attachment·그래프 끝 아님), 앞 사용자가 있음(첫 사용은 장치 추적 상태에서 바꾼다), 사이에 실행되는 pass가 하나 이상(바로 다음이면 이득이 없다), begin과 end가 같은 장치 기록 안. 지금 실행 모델은 Raster pass마다 기록을 새로 열므로 (begin, end] 안에 Raster pass가 없어야 하고, 결과적으로 end는 Compute·Copy pass다. 렌더 타깃 attachment 전이는 장치 `BeginPass`가 낸다.
+- 실행: begin pass의 기록 함수 뒤에 end pass별 묶음으로 `BeginTransitions`를 부르고 짝을 들고 있다가, end pass prologue에서 그 pass의 다른 전이보다 먼저 같은 순서로 만든 목록으로 `EndTransitions`를 부른다. `RenderGraphDesc::splitTransitions`(기본 참)로 끌 수 있고, Immediate 모드는 앞을 내다볼 수 없어 나누지 않는다. 진단 `GraphStats::splitTransitions`.
+- 프레임 안 재사용 보강: 렌더 타깃이었던 객체의 자리는 다음 Raster pass(새 기록)부터 넘긴다(`PhysicalResource::waitsForRecording`). 같은 기록 안의 Copy·Compute pass가 아직 attachment로 묶인 객체를 받으면 장치 `CopyTexture`의 "지금 패스의 attachment 아님" 계약을 어기기 때문이다(분리 전이 GPU 시험에서 드러났다).
+- 시험(EngineTests): `RenderGraphSplitTests`. 기대 열(Raster → Compute → Compute → Compute에서 텍스처·버퍼 분리 둘: begin은 생산 pass 그리기 뒤, end는 소비 pass 그리기 앞, end pass가 같은 두 묶음의 짝 번호, 단계별 before·after), 분리 켬·끔의 전이를 뺀 호출 열과 최종 상태 동일·검증 0, 나누지 않는 경우(바로 다음 pass, 사이 Raster pass, Immediate), 기록 장치 짝 검사(정상·이미 끝난 짝·다른 목록·열린 짝 건드림·끝나지 않은 짝). Graphics `SplitTransitionTrackerTests`. 기존 RG1 기대 열 시험은 분리를 끈 열로 둔다.
+- 시험(Sandbox self-test (g)): Raster A → Raster(새 기록) → Copy C ← A → Copy 버퍼 → Copy D ← C(텍스처 복사 대상 → 원본 분리) → Copy 버퍼(버퍼 분리) → Raster 합성. 분리 켬(분리 2)·끔(0)의 출력 픽셀(빨강)과 복사 버퍼 바이트가 같고 검증 오류 0이다. D3D12·D3D12 WARP·D3D11·D3D11 WARP·OpenGL ES 두 context는 end에서 낮추고, Vulkan(GTX 1060·lavapipe)은 synchronization2 event로 낸다. Vulkan은 검증 층 synchronization validation(`VK_KHRONOS_VALIDATION_VALIDATE_SYNC`)을 켠 실행에서도 확인했다.
 
 ## 9. 셰이더 런타임
 
@@ -1185,4 +1196,5 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
   - 10.5절: typed buffer 원소 용량과 넘침(결정 R16), 행렬식 부호의 인스턴스 단위 분할과 재분류.
   - 11.1절: 빈 light grid의 셀 좌표 clamp, 검은 cube array 알파 0(UE와 같은 반사 합성 의미). 11.2절: MSAA resolve 범위(깊이 늘, velocity는 temporal 때, 색은 결정 R17), 스텐실 0, UE 줄 인용 정정.
   - 2절 용어(`SharedResourceStruct`·`DrawResourceStruct`·`GraphScope`), GX1 기능 이름 "VS layer 출력".
+- 개정 18(2026-11-18): RG2 B부(분리 전이) 구현을 반영했다(4.2절 GX5·RG2 행, 4.4절 GX5 구현 메모, 8절 RG2 B부 기록). Graphics `BeginTransitions`·`EndTransitions`·`SplitTransition`·`SplitTransitionTracker`·`DeviceFeatures::splitTransitions`, D3D12는 end에서 낮춤(native split 미사용), Vulkan은 synchronization2 event(기록별 event·기록 끝 reset·fence 뒤 재사용), D3D11·OpenGL ES는 begin 무동작, 그래프는 생산 pass epilogue begin·소비 pass prologue end(같은 기록, 사이 pass 하나 이상). 프레임 안 재사용에서 렌더 타깃 객체는 다음 Raster pass부터 넘긴다.
 - 개정 17(2026-11-18): RG2 A부 구현을 반영했다(4.2절 RG2 행, 7.4절 export 소유자, 8절 RG1 남은 것 정리와 RG2 구현 메모). 프레임 안 풀 재사용(Deferred 컴파일의 장치 객체 자리 계획, 이어 받은 자원의 첫 전이 `Discard`), 결정 R15(RenderBase `RenderRetireSink`·`ReleaseRetiredResource`, 풀 export·반납 대기·fence 뒤 반납), 그래프 안 업로드(`UploadBuffer`·`UploadTexture`, Deferred는 첫 기록 앞, 텍스처는 새 용도 `Sampled` 그래프 텍스처만). 스펙과 다르게 정한 것: 업로드는 그래프 상태에 복사 대상을 두지 않는다(장치 업로드가 상태 중립이어서), Immediate 모드는 프레임 안 재사용을 하지 않는다, 렌더 타깃 텍스처 업로드는 `Unsupported`(버퍼 → 텍스처 복사 명령 없음). B부 분리 전이는 남았다.

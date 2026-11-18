@@ -52,7 +52,7 @@ GlesDevice::GlesDevice(Allocator& allocator) noexcept
     : adapterName_(allocator), lastError_(allocator), buffers_(allocator), textures_(allocator),
       pipelines_(allocator), swapChains_(allocator), retired_(allocator), readbacks_(allocator),
       bufferViews_(allocator), orphanBuffers_(allocator), timestamps_(allocator),
-      timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics) {
+      timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics), splits_(allocator) {
     stagingSource_.allocator = &allocator;
 }
 

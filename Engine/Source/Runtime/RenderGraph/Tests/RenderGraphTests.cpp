@@ -146,12 +146,14 @@ TEST(RenderGraph_SideEffectPassKeepsItsProducerChain) {
 }
 
 // (b) 기대 전이 열: 읽기 → 읽기 전이 0, UAV → UAV는 생략 표시가 없을 때만, attachment 전이는
-// 장치 Begin이 낸다.
+// 장치 Begin이 낸다. 분리 전이를 끈 열이다(켠 열은 RenderGraphSplitTests).
 TEST(RenderGraph_TransitionsMatchTheExpectedSequence) {
     GraphBench bench;
     passLog.Reset();
     const RenderHandle external = bench.ExternalTarget();
-    RenderGraph graph(bench.Next());
+    RenderGraphDesc desc = bench.Next();
+    desc.splitTransitions = false;
+    RenderGraph graph(desc);
     auto scene = graph.CreateTexture(TargetDesc(), "SceneColor");
     graphics::BufferDesc particlesDesc;
     particlesDesc.size = 64;
@@ -418,7 +420,12 @@ void BuildEquivalenceGraph(RenderGraph& graph, RenderHandle external, bool readM
     REQUIRE(graph.Execute());
 }
 
-// 전이를 뺀 장치 호출 열이 같은지다.
+bool IsTransitionOp(RecordingDevice::Op op) noexcept {
+    return op == RecordingDevice::Op::Transition || op == RecordingDevice::Op::BeginTransitions ||
+           op == RecordingDevice::Op::EndTransitions;
+}
+
+// 전이(분리 전이 포함)를 뺀 장치 호출 열이 같은지다.
 bool SameCallsWithoutTransitions(const RecordingDevice& left,
                                  const RecordingDevice& right) noexcept {
     usize l = 0;
@@ -426,11 +433,11 @@ bool SameCallsWithoutTransitions(const RecordingDevice& left,
     Span<const RecordingDevice::Call> a = left.Calls();
     Span<const RecordingDevice::Call> b = right.Calls();
     for (;;) {
-        while (l < a.Size() && a[l].op == RecordingDevice::Op::Transition) {
+        while (l < a.Size() && IsTransitionOp(a[l].op)) {
             ++l;
         }
 
-        while (r < b.Size() && b[r].op == RecordingDevice::Op::Transition) {
+        while (r < b.Size() && IsTransitionOp(b[r].op)) {
             ++r;
         }
 

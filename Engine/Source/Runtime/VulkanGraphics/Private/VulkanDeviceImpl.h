@@ -13,6 +13,7 @@
 #include <Graphics/GraphicsLog.h>
 #include <Graphics/ResourceAccess.h>
 #include <Graphics/ShaderSourceCompiler.h>
+#include <Graphics/SplitTransitionTracker.h>
 #include <Graphics/StagingPool.h>
 #include <Graphics/TimestampRing.h>
 #include <Graphics/UploadRing.h>
@@ -49,6 +50,8 @@ inline constexpr uint32 SamplerCapacity = 256;
 // - 1)이다. 넘으면 그 뒤 그리기는 무시되고(IgnoredDraws) 처음 한 번 경고 로그를 남긴다.
 inline constexpr uint32 DescriptorSetsPerPool = 1024;
 inline constexpr uint32 MaxDescriptorPoolsPerRecord = 8;
+// 기록 하나가 쓰는 분리 전이 event 수 상한이다(넘으면 그 짝은 end에서 pipeline barrier로 낮춘다).
+inline constexpr uint32 MaxSplitEventsPerRecord = 64;
 // 파이프라인 하나의 descriptor binding 수 상한이다(PS 텍스처·샘플러 2 + 단계마다 버퍼 view 4,
 // compute는 읽기 4 + 쓰기 4).
 inline constexpr uint32 MaxPipelineBindings = 2 + 2 * MaxDrawBufferViews;
@@ -302,6 +305,23 @@ struct CommandRecord {
     VkDescriptorPool pools[MaxDescriptorPoolsPerRecord] = {};
     uint32 poolCount = 0;
     uint32 poolCursor = 0;
+    // 분리 전이 event다(VK_KHR_synchronization2). 기록 끝에 reset하고, 기록을 다시 쓸 때(앞 제출의
+    // fence가 끝났다) eventCursor를 0으로 돌린다. eventCount개를 만들어 두었다.
+    VkEvent events[MaxSplitEventsPerRecord] = {};
+    uint32 eventCount = 0;
+    uint32 eventCursor = 0;
+};
+
+// begin한 분리 전이 하나다(synchronization2 경로). 저장한 barrier로 end의 vkCmdWaitEvents2가
+// begin의 vkCmdSetEvent2와 같은 dependency를 넘긴다(VUID-vkCmdWaitEvents2-pEvents-03838).
+struct PendingSplit {
+    uint32 id = 0;
+    // null이면 event 없이 end에서 vkCmdPipelineBarrier2로 낮춘다(event 상한).
+    VkEvent event = VK_NULL_HANDLE;
+    uint32 firstImage = 0;
+    uint32 imageCount = 0;
+    uint32 firstMemory = 0;
+    uint32 memoryCount = 0;
 };
 
 // acquire semaphore와 그것을 기다린 제출의 fence다.
@@ -435,6 +455,13 @@ private:
     void SetTexture(TextureHandle texture) noexcept override;
     void SetBufferView(uint32 slot, BufferViewHandle view) noexcept override;
     void Transition(Span<const ResourceTransition> transitions) noexcept override;
+    // 분리 전이다(Device.h). synchronization2가 있으면 begin은 vkCmdSetEvent2, end는
+    // vkCmdWaitEvents2(UE VulkanBarriers.cpp:661–663, 1405–1414), 없으면 end에서 Transition처럼
+    // 낮춘다. synchronization2 경로는 before 대조와 추적 상태 갱신을 begin 때 한다(이미지 layout이
+    // begin 뒤 바뀌므로 그 사이 render pass를 다시 열지 않는다).
+    SplitTransition BeginTransitions(Span<const ResourceTransition> transitions) noexcept override;
+    void EndTransitions(SplitTransition split,
+                        Span<const ResourceTransition> transitions) noexcept override;
     void SetConstants(const DrawConstants& constants) noexcept override;
     void Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept override;
     void DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept override;
@@ -652,6 +679,18 @@ private:
     // 프레임 기록을 끝낸다. 제출했으면 current를 committed로, 아니면 committed로 되돌린다.
     void SettleTracking(bool executed) noexcept;
     void SuspendRenderPass() noexcept;
+    // Transition의 잠금 안 본체다.
+    void TransitionLocked(Span<const ResourceTransition> transitions) noexcept;
+    // 텍스처 전이 하나를 해석한다: view면 원 텍스처, 범위, usage 검사, before 대조(검증). 무시할
+    // 전이(모르는 handle·범위 밖·usage 밖·Discard)면 null이다(무시 계수는 이 함수가 올린다).
+    TextureRecord* ResolveTextureTransition(const ResourceTransition& transition, SlotHandle& slot,
+                                            uint32& first, uint32& count) noexcept;
+    // 기록 중 프레임이 상태를 바꾼 텍스처로 표시한다.
+    void MarkTouched(TextureRecord& record, SlotHandle slot) noexcept;
+    // 지금 기록의 분리 전이 event 하나를 준다(없으면 만든다). 상한이면 null이다.
+    VkEvent AcquireSplitEvent() noexcept;
+    // 기록 끝: 쓴 event를 reset하고, 끝나지 않은 짝을 센다(EndFrame, render pass 밖).
+    void CloseSplitTransitions() noexcept;
     // 닫은 render pass를 LOAD로 다시 연다. 패스 대상이 더는 렌더 타깃 상태가 아니면 열지 않고 닫힌
     // 표시를 남긴다(대상이 렌더 타깃으로 돌아오는 다음 전이에서 다시 연다).
     void ResumeRenderPass() noexcept;
@@ -744,6 +783,8 @@ private:
     VkPhysicalDeviceFeatures enabledFeatures_ = {};
     bool viewportLayer_ = false;
     bool atomic64_ = false;
+    // VK_KHR_synchronization2와 그 기능을 켰고 함수가 있다(분리 전이 event 경로).
+    bool sync2_ = false;
     bool rayTracingPipeline_ = false;
     bool rayQuery_ = false;
     // maxMemoryAllocationSize(1.1 maintenance3)다.
@@ -818,6 +859,11 @@ private:
     Array<SlotHandle> touchedTextures_;
     bool touchedOverflow_ = false;
     bool renderPassSuspended_ = false;
+    // 분리 전이: 짝 표, begin한 짝과 그 barrier(기록 끝에 비운다).
+    SplitTransitionTracker splits_;
+    Array<PendingSplit> pendingSplits_;
+    Array<VkImageMemoryBarrier2> splitImageBarriers_;
+    Array<VkMemoryBarrier2> splitMemoryBarriers_;
     Array<AcquireSemaphore> acquireSemaphores_;
     // 신호됐지만 대기자가 없는 acquire semaphore다(제출 실패). queue idle 뒤 파괴한다.
     Array<VkSemaphore> orphanSemaphores_;

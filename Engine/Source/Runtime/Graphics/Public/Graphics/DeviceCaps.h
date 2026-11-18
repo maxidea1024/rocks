@@ -168,6 +168,11 @@ struct DeviceFeatures {
     // WindowsD3D12Device.cpp와 같은 판정, 장치를 만들 때 한 번 본다). Vulkan·OpenGL ES는 surface
     // 질의 전에는 알 수 없어 거짓이다(스왑체인 HDR 단계에서 surface별로 판정한다).
     bool hdrOutput = false;
+    // 분리 전이(CommandContext::BeginTransitions·EndTransitions)를 GPU에서 따로 실행한다(Vulkan
+    // VK_KHR_synchronization2 event, UE r.Vulkan.AllowSplitBarriers). 거짓이면 backend가 end
+    // 지점에서 한 번에 낮춘다(D3D12는 UE처럼 native split barrier를 쓰지 않는다, D3D11·OpenGL ES는
+    // 드라이버).
+    bool splitTransitions = false;
     // D3D12 resource binding tier(1–3)다. 다른 backend는 0이다.
     uint8 resourceBindingTier = 0;
     // 하드웨어 ray tracing이다(Renderer RQ4). rayTracingTier는 D3D12 OPTIONS5 RaytracingTier(major
