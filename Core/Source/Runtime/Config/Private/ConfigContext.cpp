@@ -41,7 +41,7 @@ ConfigState::ConfigState(Allocator& allocator, ObjectRegistry& objects) noexcept
       queue(allocator), diagnostics(allocator), regions(allocator), settings(allocator),
       commands(allocator), pendingCommands(allocator), subscriptions(allocator),
       renderSignature(allocator), pendingRestarts(allocator), ignoredBootWrites(allocator),
-      syncHooks(allocator), onSynced(allocator) {
+      reportedUnresolved(allocator), syncHooks(allocator), onSynced(allocator) {
 }
 
 reflection_text::TextCodecOptions ConfigState::CodecOptions() const noexcept {
@@ -206,7 +206,7 @@ Result<bool> ValidateConsoleValue(ConfigState& state, const ConfigEntry& entry, 
 
     ConfigDiagnosticCode code = ConfigDiagnosticCode::InvalidSetting;
     FieldValue parsed(state.allocator);
-    auto checked = CheckConsoleValue(state, setting, entry.layer, text, parsed, code);
+    auto checked = CheckConsoleValue(state, setting, entry.layer, text, parsed, code, true);
     if (!checked) {
         return Result<bool>::Failure(checked.Error());
     }

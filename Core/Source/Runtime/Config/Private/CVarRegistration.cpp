@@ -139,7 +139,7 @@ Result<void> FillDefault(ConfigState& state, const VarDefinition& definition,
     ConfigDiagnosticCode code = ConfigDiagnosticCode::InvalidSetting;
     FieldValue parsed(state.allocator);
     auto checked = detail::CheckConsoleValue(state, setting, ConfigLayer::CodeDefault,
-                                             definition.defaultValue.text, parsed, code);
+                                             definition.defaultValue.text, parsed, code, false);
     if (!checked) {
         return Result<void>::Failure(checked.Error());
     }
@@ -293,8 +293,15 @@ Result<void> ConfigContext::RegisterHandles(Span<const VarDefinition* const> def
 
     // 3단계: 번호를 주고(첫 등록 — 프로세스 전체) 새 칸만 더한 snapshot을 바로 게시한다(VD17 — 기존
     // 칸은 그대로다. 게시가 실패하면 등록하지 않는다 — 받은 번호는 핸들에 남는다).
+    // 봉인 뒤에 등록한 부팅 변수는 등록 때 값으로 부팅 블록에 굳힌다(9절).
     Array<detail::SlotWrite> writes(*allocator_);
+    Array<detail::SlotWrite> bootWrites(*allocator_);
     if (auto reserved = writes.TryReserve(made.Size()); !reserved) {
+        state->diagnostics.Rewind(mark);
+        return reserved;
+    }
+
+    if (auto reserved = bootWrites.TryReserve(made.Size()); !reserved) {
         state->diagnostics.Rewind(mark);
         return reserved;
     }
@@ -306,9 +313,13 @@ Result<void> ConfigContext::RegisterHandles(Span<const VarDefinition* const> def
             platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&setting->definition->index);
         write.value = &setting->value;
         static_cast<void>(writes.TryPushBack(write)); // 예약했다
+        if (state->startupComplete && setting->definition->kind == HandleKind::Boot) {
+            static_cast<void>(bootWrites.TryPushBack(write)); // 예약했다
+        }
     }
 
-    if (auto published = detail::PublishSnapshot(*state, nullptr, writes.View()); !published) {
+    if (auto published = detail::PublishSnapshot(*state, nullptr, writes.View(), bootWrites.View());
+        !published) {
         state->diagnostics.Rewind(mark);
         return published;
     }

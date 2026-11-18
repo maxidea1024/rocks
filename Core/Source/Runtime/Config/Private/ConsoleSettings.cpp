@@ -128,11 +128,20 @@ uint32 ConsoleFlagsOfField(uint32 settingsFlags) noexcept {
 }
 
 StringView CheckConsoleLayer(bool releaseRules, ConfigLayer layer, uint32 consoleFlags,
-                             ConfigDiagnosticCode& code) noexcept {
+                             ConfigDiagnosticCode& code, bool sealedWrite) noexcept {
+    // 출시 규칙의 개발 전용 판정이 먼저다(출시 빌드에서는 그 설정이 없는 것과 같다).
     code = ConfigDiagnosticCode::LayerNotAllowed;
     if (releaseRules && HasFlag(consoleFlags, ConsoleSettingFlags::DevelopmentOnly) &&
         layer != ConfigLayer::CodeDefault) {
         return "a DevelopmentOnly value keeps its code default under release rules";
+    }
+
+    // 봉인 뒤 부팅 변수에 바로 쓰는 층(콘솔·코드·범위 임시 변경)은 쓰기 때 거부한다(CVar 9절 — 부른
+    // 쪽이 바로 효력을 기대하므로 결과로 알린다). 파일 층·파생 층·휘발 층은 받고 Sync가 지금 값을
+    // 지킨다.
+    if (sealedWrite && HasBootFlags(consoleFlags) && IsDirectWriteLayer(layer)) {
+        code = ConfigDiagnosticCode::BootSealed;
+        return BootSealedMessage;
     }
 
     if (layer == ConfigLayer::Console &&
@@ -379,8 +388,9 @@ Result<void> FormatConsoleValue(ConfigState& state, const ConsoleSettingState& s
 
 Result<StringView> CheckConsoleValue(ConfigState& state, const ConsoleSettingState& setting,
                                      ConfigLayer layer, StringView text, FieldValue& out,
-                                     ConfigDiagnosticCode& code) noexcept {
-    const StringView problem = CheckConsoleLayer(state.releaseRules, layer, setting.flags, code);
+                                     ConfigDiagnosticCode& code, bool writing) noexcept {
+    const StringView problem = CheckConsoleLayer(state.releaseRules, layer, setting.flags, code,
+                                                 writing && state.startupComplete);
     if (!problem.IsEmpty()) {
         return Result<StringView>::Success(problem);
     }
@@ -479,8 +489,23 @@ Result<void> AdoptPendingValues(ConfigState& state, ConsoleSettingState& setting
         return left->layer != right->layer ? left->layer < right->layer
                                            : left->sequence < right->sequence;
     });
-    return RecomputeConsoleSetting(state, setting, order.View(), true, setting.value, setting.text,
-                                   setting.sources);
+    if (auto computed = RecomputeConsoleSetting(state, setting, order.View(), true, setting.value,
+                                                setting.text, setting.sources);
+        !computed) {
+        return computed;
+    }
+
+    // 등록 전에 들어온 값이 적용됐으면 알린다(정보 LateBound — CVar 12절). 출처는 가장 강한
+    // 입력이다.
+    if (setting.sources.IsEmpty()) {
+        return Result<void>::Success();
+    }
+
+    const ConfigEntry* top = state.FindEntry(setting.sources[setting.sources.Size() - 1]);
+    return Report(state, ConfigDiagnosticCode::LateBound, ConfigSeverity::Note,
+                  top != nullptr ? top->layer : ConfigLayer::CodeDefault,
+                  top != nullptr ? top->sourceName.View() : StringView{}, nullptr,
+                  setting.name.View(), "values set before registration were applied");
 }
 
 Result<void> RecomputeConsoleSetting(ConfigState& state, const ConsoleSettingState& setting,
@@ -533,9 +558,25 @@ Result<void> RecomputeConsoleSetting(ConfigState& state, const ConsoleSettingSta
             continue;
         }
 
+        // 봉인 뒤 바로 쓰는 층으로 들어온 입력은 그 뒤에 등록한 부팅 값에 닿지 않는다(쓰기 때
+        // 이름을 몰라 거부하지 못한 늦은 등록 — CVar 9절). 등록 때(report) 한 번 알린다.
+        if (entry->sealedDirectWrite && HasBootFlags(setting.flags)) {
+            if (report) {
+                if (auto reported =
+                        Report(state, ConfigDiagnosticCode::BootSealed, ConfigSeverity::Error,
+                               entry->layer, entry->sourceName.View(), position,
+                               setting.name.View(), BootSealedMessage);
+                    !reported) {
+                    return reported;
+                }
+            }
+
+            continue;
+        }
+
         ConfigDiagnosticCode code = ConfigDiagnosticCode::InvalidSetting;
         auto checked =
-            CheckConsoleValue(state, setting, entry->layer, contribution, candidate, code);
+            CheckConsoleValue(state, setting, entry->layer, contribution, candidate, code, false);
         if (!checked) {
             return Result<void>::Failure(checked.Error());
         }
@@ -1015,7 +1056,7 @@ ConfigContext::RegisterConsoleSetting(const ConsoleSettingDefinition& definition
         ConfigDiagnosticCode code = ConfigDiagnosticCode::InvalidSetting;
         FieldValue parsed(*allocator_);
         auto checked = detail::CheckConsoleValue(*state, setting, ConfigLayer::CodeDefault,
-                                                 definition.defaultValue, parsed, code);
+                                                 definition.defaultValue, parsed, code, false);
         if (!checked) {
             return Result<ConsoleSettingId>::Failure(checked.Error());
         }
@@ -1526,7 +1567,38 @@ Result<void> ConfigContext::CompleteStartup() noexcept {
         return Result<void>::Failure(ErrorCode::WrongThread);
     }
 
+    if (state->startupComplete) {
+        return Result<void>::Success();
+    }
+
+    // 큐에 남은 쓰기는 마지막 Sync 값에 들어 있지 않으므로 그대로 봉인하면 빠진다. 먼저 Sync한다.
+    if (HasPendingChanges()) {
+        return Result<void>::Failure(ErrorCode::Busy);
+    }
+
+    // 봉인: 부팅 변수(BootCVar)의 지금 값을 불변 부팅 블록으로 굳혀 게시한다(CVar 9절 — 봉인 뒤
+    // snapshot의 부팅 값은 모두 같다). 게시가 실패하면 봉인하지 않는다.
+    Array<detail::SlotWrite> boot(*allocator_);
+    for (const UniquePtr<ConsoleSettingState>& setting : state->settings) {
+        if (setting->definition == nullptr || setting->definition->kind != cvar::HandleKind::Boot) {
+            continue;
+        }
+
+        detail::SlotWrite write;
+        write.index =
+            platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&setting->definition->index);
+        write.value = &setting->value;
+        if (auto pushed = boot.TryPushBack(write); !pushed) {
+            return pushed;
+        }
+    }
+
     state->startupComplete = true;
+    if (auto published = detail::PublishSnapshot(*state, nullptr, {}, boot.View()); !published) {
+        state->startupComplete = false;
+        return published;
+    }
+
     return Result<void>::Success();
 }
 

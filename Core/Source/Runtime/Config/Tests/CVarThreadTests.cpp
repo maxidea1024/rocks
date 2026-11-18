@@ -36,6 +36,8 @@ constinit CVar<int32> Arrived =
 
 constinit CVar<int32> Orphan = cvar::Var("game.pair.orphan", 1).Help("Never registered");
 
+constinit BootCVar<int32> BootProbe = cvar::Boot("game.pair.boot", 1).Help("Read before sealing");
+
 } // namespace cvar_thread_test
 
 namespace {
@@ -370,6 +372,15 @@ int CVarDeathProbe(int argc, char** argv) noexcept {
         return 0;
     }
 
+    if (strcmp(scenario, "boot-before-seal") == 0) {
+        if (!fixture.Context().Register(BootProbe)) {
+            return 27;
+        }
+
+        static_cast<void>(BootProbe.Get());
+        return 0;
+    }
+
     if (strcmp(scenario, "binding-out-of-order") == 0) {
         // 같은 snapshot을 두 번 묶고 바깥 것부터 푼다.
         SharedPtr<const ConfigSnapshot> snapshot = fixture.Context().Acquire();
@@ -475,12 +486,18 @@ TEST(CVar_MisuseIsFatal) {
         {"unregistered", "CVar 'game.pair.orphan' is not registered"},
         {"unbound", "read on a thread without a snapshot binding"},
         {"binding-outlives-context", "ConfigContext destroyed while cvar::SnapshotBinding"},
+        {"boot-before-seal", "read before ConfigContext::CompleteStartup sealed the boot values"},
         {"binding-out-of-order",
          "cvar::SnapshotBinding released on another thread or out of order"},
         {"destroyed-off-owner", "ConfigContext destroyed on a thread other than its owner"},
     };
     CHECK(CVarDeathProbeRegistered);
     for (const Case& entry : cases) {
+        // 봉인 전 BootCVar 읽기는 Debug·Development에서만 Fatal이다(출시 빌드는 지금 칸을 읽는다).
+        if (IsReleaseBuild && strcmp(entry.scenario, "boot-before-seal") == 0) {
+            continue;
+        }
+
         const DeathRun run = RunDeathProbe(entry.scenario);
         REQUIRE(run.ran);
         CHECK(run.abnormal);

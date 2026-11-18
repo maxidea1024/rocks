@@ -119,6 +119,10 @@ Result<void> DrainQueue(ConfigState& state) noexcept {
 
         if (change->entry.Get() != nullptr && change->entry->sequence == 0) {
             change->entry->sequence = state.nextSequence++;
+            // 봉인 중에는 큐가 비어 있으므로(CompleteStartup은 남은 쓰기가 있으면 Busy) 여기서 본
+            // 봉인 상태가 넣은 때의 상태다.
+            change->entry->sealedDirectWrite =
+                state.startupComplete && IsDirectWriteLayer(change->entry->layer);
         }
 
         if (kept != index) {
@@ -246,8 +250,9 @@ Result<void> MakeSet(WriteChannel& channel, const cvar::detail::VarDefinition& d
                      const cvar::detail::ScalarValue& value, const cvar::SetOptions& options,
                      SourceLocation where, SharedPtr<QueuedChange>& out) noexcept {
     ConfigDiagnosticCode code = ConfigDiagnosticCode::LayerNotAllowed;
+    // `Set`은 CVar<T>에만 있다(BootCVar는 Set이 없다 — 봉인 검사 대상이 아니다).
     if (!CheckConsoleLayer(channel.releaseRules, options.layer,
-                           ConsoleFlagsOfDefinition(definition), code)
+                           ConsoleFlagsOfDefinition(definition), code, false)
              .IsEmpty()) {
         return Reject(options, code);
     }
@@ -446,6 +451,13 @@ void FatalUnregistered(const VarDefinition& definition) noexcept {
     Log::Fatal(config::detail::LogConfig,
                "CVar '{Name}' is not registered; pass it to ConfigContext::Register in its module",
                definition.name);
+}
+
+void FatalUnsealed(const VarDefinition& definition) noexcept {
+    Log::Fatal(
+        config::detail::LogConfig,
+        "BootCVar '{Name}' read before ConfigContext::CompleteStartup sealed the boot values",
+        definition.name);
 }
 
 Result<void> SubmitSet(const VarDefinition& definition, ScalarValue value,

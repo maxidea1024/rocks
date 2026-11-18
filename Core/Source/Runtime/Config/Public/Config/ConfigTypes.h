@@ -173,6 +173,15 @@ enum class ConfigDiagnosticCode : uint8 {
     Clamped,
     // enum CVar 값이 이름 표에 없다(CVar 4.4·12절).
     InvalidEnum,
+    // 봉인(CompleteStartup) 뒤 부팅 변수(BootCVar·StartupOnly·RestartRequired 독립 콘솔 설정)에
+    // 바로 쓰려 했다(콘솔·코드·범위 임시 변경 층 — CVar 9절). 메시지는 콘솔 안내 문구다("is a boot
+    // variable; set it in a config file or with --set and restart" — 이름 뒤에 붙인다).
+    BootSealed,
+    // 정보: 등록 전에 들어온 값(대기 값)이 등록 때 적용됐다(CVar 12절).
+    LateBound,
+    // 경고: 시작이 끝났는데 등록되지 않은 콘솔 이름의 값이 남았다(ReportUnresolved — 가까운 이름이
+    // 있으면 메시지에 `did you mean '...'?`를 붙인다, CVar 12절).
+    UnresolvedName,
     // CVar의 `Validate` 검사 함수가 값을 거부했다(메시지는 검사 함수가 돌려준 이유 —
     // CVar 4.2·12절).
     ValidationFailed
@@ -257,6 +266,12 @@ public:
     // Error 심각도 진단 수다(넘친 것 제외).
     usize ErrorCount() const noexcept {
         return errors_;
+    }
+
+    // 저장하지 못하고 넘친 진단 수를 count만큼 더한다(다른 모음의 진단을 옮길 때 그 모음의 넘친
+    // 수도 함께 넘긴다 — ConfigContext::TakeDiagnostics).
+    void AddOmitted(uint64 count) noexcept {
+        omitted_ += count;
     }
 
     // 모든 진단을 지운다(한도는 그대로).

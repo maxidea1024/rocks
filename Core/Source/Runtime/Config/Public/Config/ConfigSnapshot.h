@@ -109,12 +109,45 @@ public:
         return *chunks_.Data()[index / ChunkSlotCount]->texts[index % ChunkSlotCount];
     }
 
+    // ---- 부팅 블록(9절) ----
+
+    // 문맥이 봉인(CompleteStartup)된 뒤에 만든 snapshot인지다. 봉인 뒤 snapshot의 부팅 값은 모두
+    // 같다(조각은 공유하고, 봉인 뒤 등록한 부팅 변수의 칸만 그 조각을 복사해 더한다).
+    bool IsSealed() const noexcept {
+        return sealed_;
+    }
+
+    // 부팅 블록에서 번호 index의 칸이다(BootCVar — 봉인 때 값으로 굳었다, 세대는 늘 1). 없으면
+    // null.
+    const CVarSlot* FindBootSlot(uint32 index) const noexcept {
+        const usize chunk = index / ChunkSlotCount;
+        if (chunk >= bootChunks_.Size()) {
+            return nullptr;
+        }
+
+        const CVarChunk* block = bootChunks_.Data()[chunk].Get();
+        if (block == nullptr) {
+            return nullptr;
+        }
+
+        const CVarSlot& slot = block->slots[index % ChunkSlotCount];
+        return slot.generation != 0 ? &slot : nullptr;
+    }
+
+    // 부팅 블록의 String·Name 값 블록이다. 전제: FindBootSlot(index)가 null이 아니다.
+    const CVarText& BootTextAt(uint32 index) const noexcept {
+        return *bootChunks_.Data()[index / ChunkSlotCount]->texts[index % ChunkSlotCount];
+    }
+
 private:
     friend struct detail::SnapshotAccess;
 
     uint64 generation_ = 0;
     SharedPtr<const detail::NamedBlock> named_;
     Array<SharedPtr<const CVarChunk>> chunks_;
+    // 부팅 블록(봉인 때 굳힌 BootCVar 값 — 봉인 뒤 snapshot이 모두 공유한다).
+    Array<SharedPtr<const CVarChunk>> bootChunks_;
+    bool sealed_ = false;
     // 이 snapshot을 만든 문맥의 쓰기 통로다(묶음 계수·`CVar::Set`의 대상 — 문맥보다 오래 살 수
     // 있다).
     SharedPtr<detail::WriteChannel> channel_;

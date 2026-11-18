@@ -14,7 +14,8 @@ using detail::NamedBlock;
 
 } // namespace
 
-ConfigSnapshot::ConfigSnapshot(Allocator& allocator) noexcept : chunks_(allocator) {
+ConfigSnapshot::ConfigSnapshot(Allocator& allocator) noexcept
+    : chunks_(allocator), bootChunks_(allocator) {
 }
 
 ConfigSnapshot::~ConfigSnapshot() = default;
@@ -107,28 +108,17 @@ Result<void> WriteSlot(Allocator& allocator, const FieldValue& value, CVarSlot& 
 
 } // namespace
 
-Result<void> PublishSnapshot(ConfigState& state, const SharedPtr<const NamedBlock>* named,
-                             Span<const SlotWrite> writes) noexcept {
-    const ConfigSnapshot* previous = state.snapshot.Get();
-    auto made = SnapshotAccess::Make(state.allocator);
-    if (!made) {
-        return Result<void>::Failure(made.Error());
-    }
+namespace {
 
-    ConfigSnapshot& snapshot = *made.Value();
-    // 조각 표는 이전 snapshot의 것을 공유하고, 쓰는 칸이 든 조각만 복사본으로 바꾼다.
-    Array<SharedPtr<const CVarChunk>>& chunks = SnapshotAccess::Chunks(snapshot);
-    if (previous != nullptr) {
-        if (auto copied = chunks.TryAppend(SnapshotAccess::Chunks(*previous).View()); !copied) {
-            return copied;
-        }
-    }
-
+// 조각 표 table(이전 snapshot의 것을 복사해 둔 표)에서 writes의 칸이 든 조각만 복사본으로 바꿔
+// 쓴다. 실패하면 table은 일부만 바뀌었을 수 있다(호출자가 snapshot째 버린다).
+Result<void> WriteChunks(ConfigState& state, Array<SharedPtr<const CVarChunk>>& table,
+                         Span<const SlotWrite> writes) noexcept {
     Array<SharedPtr<CVarChunk>> copies(state.allocator);
     for (const SlotWrite& write : writes) {
         const usize chunk = write.index / ChunkSlotCount;
-        if (chunk >= chunks.Size()) {
-            if (auto grown = chunks.TryResize(chunk + 1); !grown) {
+        if (chunk >= table.Size()) {
+            if (auto grown = table.TryResize(chunk + 1); !grown) {
                 return grown;
             }
         }
@@ -145,8 +135,8 @@ Result<void> PublishSnapshot(ConfigState& state, const SharedPtr<const NamedBloc
                 return Result<void>::Failure(copy.Error());
             }
 
-            if (chunks[chunk].Get() != nullptr) {
-                *copy.Value() = *chunks[chunk];
+            if (table[chunk].Get() != nullptr) {
+                *copy.Value() = *table[chunk];
             }
 
             copies[chunk] = Move(copy.Value());
@@ -165,13 +155,50 @@ Result<void> PublishSnapshot(ConfigState& state, const SharedPtr<const NamedBloc
         slot.generation = generation;
     }
 
-    // 여기부터는 실패하지 않는다.
     for (usize chunk = 0; chunk < copies.Size(); ++chunk) {
         if (copies[chunk].Get() != nullptr) {
-            chunks[chunk] = SharedPtr<const CVarChunk>(Move(copies[chunk]));
+            table[chunk] = SharedPtr<const CVarChunk>(Move(copies[chunk]));
         }
     }
 
+    return Result<void>::Success();
+}
+
+} // namespace
+
+Result<void> PublishSnapshot(ConfigState& state, const SharedPtr<const NamedBlock>* named,
+                             Span<const SlotWrite> writes,
+                             Span<const SlotWrite> bootWrites) noexcept {
+    const ConfigSnapshot* previous = state.snapshot.Get();
+    auto made = SnapshotAccess::Make(state.allocator);
+    if (!made) {
+        return Result<void>::Failure(made.Error());
+    }
+
+    ConfigSnapshot& snapshot = *made.Value();
+    // 조각 표·부팅 블록은 이전 snapshot의 것을 공유하고, 쓰는 칸이 든 조각만 복사본으로 바꾼다.
+    Array<SharedPtr<const CVarChunk>>& chunks = SnapshotAccess::Chunks(snapshot);
+    Array<SharedPtr<const CVarChunk>>& bootChunks = SnapshotAccess::BootChunks(snapshot);
+    if (previous != nullptr) {
+        if (auto copied = chunks.TryAppend(SnapshotAccess::Chunks(*previous).View()); !copied) {
+            return copied;
+        }
+
+        if (auto copied = bootChunks.TryAppend(SnapshotAccess::BootChunks(*previous).View());
+            !copied) {
+            return copied;
+        }
+    }
+
+    if (auto written = WriteChunks(state, chunks, writes); !written) {
+        return written;
+    }
+
+    if (auto written = WriteChunks(state, bootChunks, bootWrites); !written) {
+        return written;
+    }
+
+    // 여기부터는 실패하지 않는다.
     SharedPtr<const NamedBlock> block;
     if (named != nullptr) {
         block = *named;
@@ -181,6 +208,7 @@ Result<void> PublishSnapshot(ConfigState& state, const SharedPtr<const NamedBloc
 
     const uint64 generation = previous != nullptr ? previous->Generation() + 1 : 1;
     SnapshotAccess::Assign(snapshot, generation, Move(block), state.channel);
+    SnapshotAccess::Seal(snapshot, state.startupComplete);
     SharedPtr<const ConfigSnapshot> published(Move(made.Value()));
     {
         platform::LockGuard lock(state.channel->mutex);
