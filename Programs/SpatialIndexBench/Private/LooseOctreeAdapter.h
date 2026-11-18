@@ -262,6 +262,7 @@ public:
         }
         json.FieldInteger("proxies", stats.proxyCount);
         json.FieldInteger("outOfRange", stats.outOfRangeCount);
+        json.FieldInteger("largeProxies", stats.largeProxyCount);
         json.FieldInteger("nodes", stats.nodeCount);
         json.FieldInteger("leaves", stats.leafCount);
         json.FieldInteger("maxDepth", stats.maxDepth);
@@ -315,11 +316,12 @@ public:
         return report && report.Value().IsValid();
     }
 
-private:
+    // 병렬 측정용 reader다. BeginRead로 연 읽기 범위 안에서만 쓰며 여러 스레드에 복사해 넘긴다.
     spatial::LooseOctreeReader Reader() const noexcept {
         return scope_->Reader();
     }
 
+private:
     void AfterMutation() noexcept {
         if (variant_.immediateMaintenance) {
             (void)tree_->RunMaintenance(spatial::MaintenanceBudget::All());

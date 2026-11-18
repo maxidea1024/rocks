@@ -14,6 +14,8 @@
 #include <Platform/Memory.h>
 #include <Platform/PlatformMath.h>
 
+#include "ParallelBench.h"
+
 #include <stdio.h>
 
 // 공간 인덱스 벤치마크(Docs/Design/SpatialIndex.ko.md 9절, OT5, SIP8)다. 비교군 하나를 한
@@ -69,7 +71,53 @@ struct Options {
     uint32 distCount = 0;
     uint32 sizes[8];
     uint32 sizeCount = 0;
+    // D 계열 설정 덮어쓰기(조합 측정, 결정 8). 음수·0이면 그 항목을 바꾸지 않는다.
+    double looseness = 0.0;
+    double largeHalf = -1.0;
+    uint32 rootLevel = 0;
 };
+
+// "a/b" 또는 소수를 double로 읽는다.
+bool ParseRatio(const char* text, double& value) noexcept {
+    uint64 numerator = 0;
+    uint64 denominator = 1;
+    char head[32];
+    usize length = 0;
+    const char* slash = nullptr;
+    for (const char* cursor = text; *cursor != '\0'; ++cursor) {
+        if (*cursor == '/') {
+            slash = cursor;
+            break;
+        }
+        if (length + 1 >= sizeof(head)) {
+            return false;
+        }
+        head[length++] = *cursor;
+    }
+    head[length] = '\0';
+    bool ok = true;
+    numerator = 0;
+    for (usize index = 0; index < length; ++index) {
+        if (head[index] < '0' || head[index] > '9') {
+            ok = false;
+        }
+        numerator = numerator * 10 + static_cast<uint64>(head[index] - '0');
+    }
+    if (slash != nullptr) {
+        denominator = 0;
+        for (const char* cursor = slash + 1; *cursor != '\0'; ++cursor) {
+            if (*cursor < '0' || *cursor > '9') {
+                return false;
+            }
+            denominator = denominator * 10 + static_cast<uint64>(*cursor - '0');
+        }
+    }
+    if (!ok || length == 0 || denominator == 0) {
+        return false;
+    }
+    value = static_cast<double>(numerator) / static_cast<double>(denominator);
+    return true;
+}
 
 bool ParseUnsigned(const char* text, uint64& value) noexcept {
     value = 0;
@@ -124,6 +172,20 @@ bool Parse(int argc, char** argv, Options& options) noexcept {
             options.scenarios = false;
         } else if (platform::CStringEquals(argv[index], "--scenarios-only")) {
             options.scenariosOnly = true;
+        } else if (platform::CStringEquals(argv[index], "--looseness") && hasValue) {
+            if (!ParseRatio(argv[++index], options.looseness)) {
+                return false;
+            }
+        } else if (platform::CStringEquals(argv[index], "--large-half") && hasValue) {
+            if (!ParseRatio(argv[++index], options.largeHalf)) {
+                return false;
+            }
+        } else if (platform::CStringEquals(argv[index], "--root-level") && hasValue) {
+            uint64 value = 0;
+            if (!ParseUnsigned(argv[++index], value) || value == 0 || value > 24) {
+                return false;
+            }
+            options.rootLevel = static_cast<uint32>(value);
         } else if (platform::CStringEquals(argv[index], "--seed") && hasValue) {
             if (!ParseUnsigned(argv[++index], options.seed)) {
                 return false;
@@ -185,7 +247,19 @@ void BuildCases(Options& options) noexcept {
         }
         return;
     }
-    if (platform::CStringEquals(options.profile, "variant")) {
+    if (platform::CStringEquals(options.profile, "parallel")) {
+        constexpr uint32 ParallelSizes[] = {100000u, 1000000u};
+        constexpr Distribution ParallelDistributions[] = {Distribution::Uniform,
+                                                          Distribution::Clustered};
+        for (const uint32 size : ParallelSizes) {
+            for (const Distribution distribution : ParallelDistributions) {
+                AddCase(options, distribution, size);
+            }
+        }
+        return;
+    }
+    if (platform::CStringEquals(options.profile, "variant") ||
+        platform::CStringEquals(options.profile, "combo")) {
         constexpr uint32 VariantSizes[] = {10000u, 1000000u};
         for (const uint32 size : VariantSizes) {
             for (const Distribution distribution : RepresentativeDistributions) {
@@ -825,6 +899,9 @@ void RunCase(Index& index, const CaseInput& input, const GroupTraits& traits,
             if (heavyMutationsSkipped && (overlapHeavy ? ratio > 0 : ratio > 10)) {
                 continue;
             }
+            if (sections.framesTenPercentOnly && ratio != 100) {
+                continue;
+            }
             RunFrames(
                 index, input, current, ratio, FrameLightCount, context,
                 [&]() noexcept { hook.Before(index); },
@@ -1008,7 +1085,8 @@ bool ChooseGroup(const char* name, GroupChoice& choice) noexcept {
         choice.kind = GroupKind::C16;
     } else if (platform::CStringEquals(name, "C256")) {
         choice.kind = GroupKind::C256;
-    } else if (platform::CStringEquals(name, "D")) {
+    } else if (platform::CStringEquals(name, "D") || platform::CStringEquals(name, "Dx")) {
+        // Dx는 --looseness·--large-half·--root-level로 바꾼 D 조합의 표시 이름이다.
         choice.kind = GroupKind::D;
     } else {
         choice.kind = GroupKind::D;
@@ -1052,6 +1130,7 @@ void WriteVariant(JsonWriter& json, const GroupChoice& choice) noexcept {
     json.FieldInteger("splitThreshold", config.splitThreshold);
     json.FieldInteger("mergeThreshold", config.mergeThreshold);
     json.FieldInteger("chunkCapacity", spatial::LooseOctreeChunkCapacity);
+    json.Field("largeProxyHalfExtent", config.largeProxyHalfExtent);
     json.FieldBool("inPlaceUpdate", choice.variant.inPlaceUpdate);
     json.FieldBool("immediateMaintenance", choice.variant.immediateMaintenance);
     json.FieldBool("boxAsVolume", choice.variant.boxAsVolume);
@@ -1167,6 +1246,17 @@ int main(int argc, char** argv) {
         printf("unknown group %s\n", options.group);
         return 2;
     }
+    if (choice.kind == GroupKind::D) {
+        if (options.looseness > 0.0) {
+            choice.variant.config.looseness = options.looseness;
+        }
+        if (options.largeHalf >= 0.0) {
+            choice.variant.config.largeProxyHalfExtent = options.largeHalf;
+        }
+        if (options.rootLevel != 0) {
+            choice.variant.config.initialRootLevel = options.rootLevel;
+        }
+    }
     BuildCases(options);
 
     BenchAllocator allocator;
@@ -1224,6 +1314,20 @@ int main(int argc, char** argv) {
             if (platform::CStringEquals(options.profile, "variant")) {
                 sections.lightVariants = false;
                 sections.removeAll = false;
+            }
+            if (platform::CStringEquals(options.profile, "combo")) {
+                sections.lightVariants = false;
+                sections.removeAll = false;
+                sections.framesTenPercentOnly = true;
+            }
+            if (platform::CStringEquals(options.profile, "parallel")) {
+                if (choice.kind != GroupKind::D) {
+                    printf("the parallel profile measures D groups only\n");
+                    return 2;
+                }
+                LooseIndex index(allocator, choice.variant);
+                RunParallelCase(index, input, context.allocator, json);
+                continue;
             }
             ForGroup(choice, allocator, &dataset,
                      [&](auto& index, const GroupTraits& traits) noexcept {
