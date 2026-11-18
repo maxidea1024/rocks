@@ -6,6 +6,8 @@
 
 원칙(RF와 같다): 실패 원자성(읽기 실패는 출력 불변, 쓰기 실패는 미게시, 로드는 전부 공개 또는 전부 rollback), 결정성(같은 입력 → 같은 byte), 모든 길이·개수·작업량에 한도, 하위호환 없음(`FieldSchema`·wire tag·`PathStep`·생성 코드 형식을 바로 바꾸고 시험을 고친다). 필드 접근은 생성 thunk만 쓰고 raw offset을 공개하지 않는다(RF 원칙). 범용 기능(해시·텍스트 분해·숫자 표기·JSON)은 Core 공용 모듈에 두고 기능 모듈에 다시 만들지 않는다.
 
+이름: 약한 객체 참조는 `WeakObjectRef<T>`로 부른다(2026-11-18 사용자 결정, [Sparks](SparksLanguage.ko.md) SD23). 현재 코드 이름은 `WeakRef<T>`이며 코드 개명은 후속 작업이다(Sparks 17.2절). 구현 문서(Docs/Implementation)는 코드 개명 때까지 현재 이름을 쓴다.
+
 약어:
 
 - Rocks 코드: `MS` = Core/Source/Runtime/MetaSchema/Public/Meta, `OR` = Core/Source/Runtime/ObjectRuntime/Public/Object, `ORP` = Core/Source/Runtime/ObjectRuntime/Private, `OS` = Core/Source/Runtime/ObjectSerialization, `MC` = Programs/Rocks.MetaCompiler, `CORE` = Core/Source/Runtime/Core/Public/Core.
@@ -15,7 +17,7 @@
 
 | 항목 | 현재(`a4a7bcc`) | 리플렉션 B9 뒤 |
 |---|---|---|
-| 값 종류 | 스칼라 9종·Guid·String·AssetId·Digest256·ObjectRef·SoftObjectRef·Enum·Struct·Array(MS/TypeSchema.h:79-102) | + Int8·Int16·Name·WeakRef·ClassRef·Optional·Map·Set·StaticArray·InstancedStruct·Text, bitfield bool(Bool) |
+| 값 종류 | 스칼라 9종·Guid·String·AssetId·Digest256·ObjectRef·SoftObjectRef·Enum·Struct·Array(MS/TypeSchema.h:79-102) | + Int8·Int16·Name·WeakObjectRef·ClassRef·Optional·Map·Set·StaticArray·InstancedStruct·Text, bitfield bool(Bool) |
 | enum underlying | uint8·uint16·uint32·int32(RF 3.4절, RMC2401) | UE와 같은 8종 |
 | struct | 상속 금지(RMC2301), 타입 플래그 없음 | 단일 리플렉션 base + 필드 없는 비리플렉션 base, `Atomic` |
 | Core 값 타입 미러 | 15종(`CoreTypeBindings/CoreValueTypes.h`) | 17종(Transform3f·Transform3d 추가), 16종 Atomic |
@@ -39,7 +41,7 @@
 | Int8 | 19 | `int8`(Clang 철자 `signed char`) | I64(4) | B9a |
 | Int16 | 20 | `int16`(`short`) | I64 | B9a |
 | Name | 21 | `rocks::Name` | String(8) | B9c |
-| WeakObjectReference | 22 | `WeakRef<T>` | 참조 wire(graph v2 U32) | B9d |
+| WeakObjectReference | 22 | `WeakObjectRef<T>` | 참조 wire(graph v2 U32) | B9d |
 | ClassReference | 23 | `ClassRef<Base>` | Guid(7) | B9d |
 | Optional | 24 | `Optional<T>` | Optional(14) | B9e |
 | Map | 25 | `OrderedMap<K,V>`·`ObjectRefMap<K,T>` | Map(16) | B9f |
@@ -64,7 +66,7 @@ bitfield bool은 새 종류가 아니다(`Bool`, wire Bool(1) — 14절).
 - `TypeId withinType{}`(클래스만, 0 = 제한 없음 — 9절)와 `Span<const char> toolName{}`(타입 도구 이름 — 5.2절)을 더한다. `toolName`은 B9d2에서 끝 칸으로 더했다(`withinType`은 B9h2).
 - struct의 `baseType`을 연다(12절). RegisterStruct의 `flags != 0` 거부(ORP/TypeRegistryRegisterStruct.cpp `RegisterStruct`)는 struct 전용 허용 mask(`KnownStructFlags` = Atomic)로 바꾼다.
 
-`FieldValue`(OR/RuntimeTypeOps.h:60-91)에 칸을 더한다: `Name name`(B9c), `bool present`(B9e), `Text text`(B9l). ClassRef는 `guid` 칸(클래스 TypeId), WeakRef는 `reference` 칸을 쓴다. Optional 단일 값의 `kind`는 **내부 종류**이고 `present`가 set 여부다.
+`FieldValue`(OR/RuntimeTypeOps.h:60-91)에 칸을 더한다: `Name name`(B9c), `bool present`(B9e), `Text text`(B9l). ClassRef는 `guid` 칸(클래스 TypeId), WeakObjectRef는 `reference` 칸을 쓴다. Optional 단일 값의 `kind`는 **내부 종류**이고 `present`가 set 여부다.
 
 Map 키 대상: 지금 등록·lease·codec frame은 필드당 대상 하나다(TypeRegistryRegisterStruct.cpp `ResolveValueTypes`의 `targets[index]`, RuntimeTypeOps.h `valueNativeType`, `TypeLease::FieldEnum`·`FieldStruct`, `FieldCodecFrame::enumeration`). Map 키가 Enum·ClassRef·Soft면 키 대상이 따로 필요하므로 `RuntimeFieldOps::keyNativeType`·`RuntimeStructFieldOps::keyNativeType`, 등록 레코드의 키 대상 포인터(의존 계수 포함 — ClassRef Base는 값 자리처럼 의존으로 붙잡지 않는다, 5.2절 "구현(B9d2)에서 정한 점"), `TypeLease::FieldKeyEnum(index)`, `FieldCodecFrame::keyEnumeration`을 더한다(B9f2). 구현(B9f2): 레코드는 `fieldTypes` 옆에 같은 길이의 `fieldKeyTypes`(같은 할당 블록)를 두고 키가 Enum인 Map만 그 enum 레코드를 가리킨다(값 대상과 같은 `dependents` 계수 — 의존 계수 여유는 필드 수의 두 배로 본다). Soft 키의 기대 타입도 ClassRef Base처럼 레코드를 붙잡지 않으므로 키 대상 레코드는 Enum뿐이다. `ResolveValueTypes`의 thunkType 콜백은 `key` 인자로 `valueNativeType`·`keyNativeType`을 고르고, 등록은 `keyNativeType`이 있음 ⇔ 키가 Enum인 Map임을 본다(어긋나면 InvalidArgument, 다른 enum이면 TypeMismatch). `StructView::FieldKeyEnum`도 더했다. `FieldScope`는 끝 인자로 키 enum을 받고 `FieldCodecContext::FieldKeyEnum()`이 돌려준다. `RuntimeFieldOps::keyNativeType`은 함수표 끝 칸이다(생성 코드는 Map 필드에서만 path·readStaged 뒤에 싣는다).
 
@@ -98,7 +100,7 @@ Map 키 대상: 지금 등록·lease·codec frame은 필드당 대상 하나다(
 | MapValue(Map 값) | ArrayElement 전부 + Record 52(u64 길이 + Record) |
 | OptionalInner(Optional 내부) | Bool·U32·U64·I64·F32·F64·Guid·String·Bytes + Record 44(길이 prefix 없이 payload의 남은 byte 전부) — 참조·InstancedStruct·Text는 Optional 내부 종류가 없다 |
 
-- 자리 표의 한계: wire가 같은 종류끼리는 tag로 구별할 수 없다. 그 자리에 올 수 없는 종류 중 받는 tag와 wire가 같은 것 — Optional 내부의 ClassRef(Guid)·WeakRef(U32), Set 원소·Map 키의 WeakRef·ObjectRef(U32) — 은 codec(B9e·B9f2)이 schema 종류로 거른다.
+- 자리 표의 한계: wire가 같은 종류끼리는 tag로 구별할 수 없다. 그 자리에 올 수 없는 종류 중 받는 tag와 wire가 같은 것 — Optional 내부의 ClassRef(Guid)·WeakObjectRef(U32), Set 원소·Map 키의 WeakObjectRef·ObjectRef(U32) — 은 codec(B9e·B9f2)이 schema 종류로 거른다.
 - 형식 세부: Optional present는 `ReadBool`과 같은 0·1 검사이고 unset 뒤에 byte가 남으면 InvalidArgument다. Optional 내부 Record·InstancedStruct 내용·Map 값 Record는 `ReadRecordHeader`(새 공개 함수 — envelope header만 검사하고 schema·버전·필드 수를 돌려준다)로 "Record 하나"인지 본다(뒤 byte가 붙으면 payloadBytes 불일치로 InvalidArgument, envelope version ≠ 1은 Unsupported). `ReadRecordHeader`는 44 byte 미만을 magic보다 먼저 InvalidArgument로 거부하고(Open은 잘린 입력도 앞에서부터 읽으므로 magic·envelope가 맞는 짧은 입력에서 Unsupported가 날 수 있다) schema는 0만 본다(기대 schema와의 비교는 Open의 TypeMismatch). 그 밖의 순서는 Open과 같다. InstancedStruct는 담긴 struct ID를 미리 모르므로 reader가 header의 schema·schema version을 돌려준다. Text 형태 byte는 Archive에 새로 둔 `WriteU8`·`ReadU8`로 쓰고, 셋 밖이면 InvalidArgument다. **Localized의 textId·sourceRevision 0은 wire에서 InvalidArgument다**(Localization `Text::Localized`가 거부하는 값이라 복원 2단계가 실패하지 않게 1단계 형식 검사로 당겼다 — 스펙에 없던 규칙, 13절에 교차 참조). Empty 형태는 내용이 없고, 빈 원문 Invariant(형태 1 + 길이 0)는 Empty와 다른 값이다. 원문 상한(`TextCreateLimits`)은 codec(B9l)이 본다. `WriteTextWire`는 고정 칸(형태·Guid·U64·원문 길이)을 prefix 하나로 모아 원문과 함께 Archive의 한 번 붙이기로 쓴다 — Write*처럼 원문이 out 자신의 View를 가리켜도 되고, 실패하면 out은 호출 전 byte 그대로다.
 - shape: `WireValueShape`의 exact는 고정 폭과 길이 prefix 하나로 크기가 정해지는 String·Bytes·SoftObjectReference에만 뜻이 있다. Record·InstancedStruct·Text에 exact를 주면 모순 조합 InvalidArgument다. 열들의 최소 크기 합이 usize를 넘는 shape(Map 키 + 값)도 InvalidArgument다(감기면 count 사전 검사가 무력해진다). Map은 키·값이 모두 exact일 때만 남은 byte = count × (키 + 값)과 항목마다 길이 prefix를 미리 보고, 한쪽이 exact가 아닌 가변이면 항목 간격이 정해지지 않으므로 합계 하한만 본다(원소 경계·exact 길이는 항목 Read와 codec이 본다 — Digest 키는 ReadBytes 뒤 길이 32). 모든 열이 고정 폭이면 원소를 훑지 않는다(지금까지의 ValueArray와 같은 비용).
 - 예산: Record 내용(Optional 내부·Map 값·InstancedStruct)을 넘길 때는 operation 하나만 청구하고, 내용 byte는 단독 reader(`ArchiveReader::Create`)일 때만 청구한다 — Record 트리의 공유 예산 reader면 그 byte를 트리의 Open이 이미 청구했다. 내용 Record는 새 `RecordReader::OpenNestedRecord(allocator, record, schema, min, max, maxFields)`(이 Record 입력 안의 범위만 받는다 — 비었거나 밖이면 InvalidArgument, 색인만 청구. `OpenRecordField`와 본문을 같이 쓴다)로 같은 예산에서 연다. 그래서 값 struct 안 Optional·Map 값 struct처럼 중첩해도 작업이 깊이 배수로 불어나지 않는다(`OpenRecordField`·RecordList와 같은 모델).
@@ -112,7 +114,7 @@ Map 키 대상: 지금 등록·lease·codec frame은 필드당 대상 하나다(
 
 성질(값 종류마다 bool): 단일 필드, struct 멤버, Array 원소, StaticArray 원소, Map 키, Map 값, Set 원소, Optional 내부, InstancedStruct 내용, Required 허용, 대상 타입 있음, 대상 ID 필수, 컨테이너, FieldValue 통째 읽기·쓰기(비aggregate).
 
-MetaCompiler(C#)와 런타임(C++)의 표 대조: MetaCompiler가 "모든 종류 × 모든 성질"의 C# 표를 `static_assert(rocks::ValueKindCanBeMapKey(rocks::ValueKind::Name) == true)` 꼴로 한 번에 내는 대조 헤더를 생성하고, ToolTests가 이를 Clang으로 컴파일한다. 양방향(C#이 허용하고 C++가 거부하는 칸, 그 반대)을 모두 잡고, 생성 헤더마다 비용이 들지 않는다. Sparks 컴파일러·LSP도 같은 constexpr 표를 쓴다(SL 311·1115행의 키·저장 가능 판정).
+MetaCompiler(C#)와 런타임(C++)의 표 대조: MetaCompiler가 "모든 종류 × 모든 성질"의 C# 표를 `static_assert(rocks::ValueKindCanBeMapKey(rocks::ValueKind::Name) == true)` 꼴로 한 번에 내는 대조 헤더를 생성하고, ToolTests가 이를 Clang으로 컴파일한다. 양방향(C#이 허용하고 C++가 거부하는 칸, 그 반대)을 모두 잡고, 생성 헤더마다 비용이 들지 않는다. Sparks 컴파일러·LSP도 같은 constexpr 표를 쓴다(SL 3.3·15절의 키·저장 가능 판정).
 
 허용 표(○ 허용, × 거부, 이름은 쓰는 컨테이너):
 
@@ -124,7 +126,7 @@ MetaCompiler(C#)와 런타임(C++)의 표 대조: MetaCompiler가 "모든 종류
 | Guid·AssetId·Digest256 | ○ | ○ | ○ | ○ | ○ | ○ | ○ | ○ |
 | String·Name | ○ | ○ | ○ | ○ | ○ | ○ | ○ | ○ |
 | ObjectRef | ○ | ObjectRefArray | ○ | × | ObjectRefMap | × | × | ○ |
-| WeakRef | ○ | ○ | ○ | × | ○ | × | × | ○ |
+| WeakObjectRef | ○ | ○ | ○ | × | ○ | × | × | ○ |
 | SoftObjectRef | ○ | ○ | ○ | ○ | ○ | ○ | × | ○ |
 | ClassRef | ○ | ○ | ○ | ○ | ○ | ○ | × | ○ |
 | 값 struct(강한 참조 없음) | ○ | ○ | ○ | × | ○ | × | ○ | × |
@@ -135,7 +137,7 @@ MetaCompiler(C#)와 런타임(C++)의 표 대조: MetaCompiler가 "모든 종류
 
 - "통째 FieldValue"가 ×인 종류는 aggregate다(read·write·writeStaged가 null, 경로 연산으로만 쓴다 — RF 3.6절 규칙을 넓힌다). Optional은 내부가 ○면 비aggregate, 값 struct면 aggregate다.
 - 직접 중첩만 막는다. 값 struct가 Array·Map 멤버를 담고 그 struct가 원소가 되는 간접 중첩은 지금처럼 허용한다(UE도 직접 중첩만 막는다 — 18.7절).
-- Optional 내부에서 참조를 막는 이유: 참조는 이미 null이 "없음"이다(SL 24행 "없음은 하나다", SL 1198행 SD19).
+- Optional 내부에서 참조를 막는 이유: 참조는 이미 null이 "없음"이다(SL 0절 "없음은 하나다", SL 19절 SD19).
 - InstancedStruct 내용으로 받는 struct는 11절 조건(강한 참조·Registry 컨테이너·InstancedStruct·Required 없음, WorldOnly 소유자 요구 없음 — B9j 구현에서 더한 조건)을 지켜야 한다.
 
 구현(B9a1, 동작 불변)에서 정한 점:
@@ -156,9 +158,9 @@ MetaCompiler(C#)와 런타임(C++)의 표 대조: MetaCompiler가 "모든 종류
 - 성질 표에 행 `Name` = 21을 더했다(허용 표의 "String·Name" 칸 — C++ `ValueKindTableEntry`의 keyed 묶음, C# `Keyed`). `ValueKindCount`는 22다. 이번 단계가 여는 자리는 클래스 필드·struct 멤버·Array 원소(`Array<Name>` — 클래스 필드·struct 멤버·struct 원소 배열 안)이고 Map 키·값·Set 원소·StaticArray 원소·Optional 내부는 표 칸만 ○이다(B9e·B9f2·B9g가 연다). 원본 철자 해석 `SchemaValidator.Scalars`에 `rocks::Name` → Name을 더해 `SourceValueKinds` = Array 원소 열이 그대로 성립한다. Required는 표에 없으므로 지금의 RMC2202(지정자-종류 불일치)다.
 - 시험: 성질 표 시험의 새 행, C# `Meta.ValueKindTableMatchesRuntime`의 Name 칸 확인, 대조 헤더 변이에 Name 칸 뒤집기("C# 표에만 있는 종류" 변이는 아직 런타임에 없는 WeakObjectReference로 바꿨다).
 
-구현(B9d1)에서 정한 점(성질 표 — WeakRef의 나머지는 5.1절 "구현(B9d1)에서 정한 점"):
+구현(B9d1)에서 정한 점(성질 표 — WeakObjectRef의 나머지는 5.1절 "구현(B9d1)에서 정한 점"):
 
-- 성질 표에 행 `WeakObjectReference` = 22를 더했다(허용 표의 WeakRef 칸 — 단일·멤버·Array 원소·StaticArray 원소·Map 값·통째 FieldValue, 대상 타입 있음·대상 ID 선택(0 = Object), Required ×). `ValueKindCount`는 23이다. 이번 단계가 여는 자리는 클래스 필드·struct 멤버·Array 원소(`Array<WeakRef<T>>` — 클래스 필드·struct 멤버·struct 원소 배열 안)이고 StaticArray 원소·Map 값은 표 칸만 ○이다(B9g·B9f2가 연다). 원본 철자 해석 `SchemaValidator.ReferenceSpelling`에 `rocks::WeakRef<T>` → WeakObjectReference를 더해 `SourceValueKinds` = Array 원소 열이 그대로 성립한다. 대상은 강한·소프트 참조와 같이 리플렉션 클래스 또는 Object여야 한다(아니면 RMC2003). Required는 표에 없으므로 RMC2202다(안내 문구에 weak가 Required가 될 수 없는 이유를 적었다). descriptor `fieldKind`는 Value다.
+- 성질 표에 행 `WeakObjectReference` = 22를 더했다(허용 표의 WeakObjectRef 칸 — 단일·멤버·Array 원소·StaticArray 원소·Map 값·통째 FieldValue, 대상 타입 있음·대상 ID 선택(0 = Object), Required ×). `ValueKindCount`는 23이다. 이번 단계가 여는 자리는 클래스 필드·struct 멤버·Array 원소(`Array<WeakObjectRef<T>>` — 클래스 필드·struct 멤버·struct 원소 배열 안)이고 StaticArray 원소·Map 값은 표 칸만 ○이다(B9g·B9f2가 연다). 원본 철자 해석 `SchemaValidator.ReferenceSpelling`에 `rocks::WeakObjectRef<T>` → WeakObjectReference를 더해 `SourceValueKinds` = Array 원소 열이 그대로 성립한다. 대상은 강한·소프트 참조와 같이 리플렉션 클래스 또는 Object여야 한다(아니면 RMC2003). Required는 표에 없으므로 RMC2202다(안내 문구에 weak가 Required가 될 수 없는 이유를 적었다). descriptor `fieldKind`는 Value다.
 - 시험: 성질 표 시험의 새 행, C# `Meta.ValueKindTableMatchesRuntime`의 WeakObjectReference 칸 확인, 대조 헤더 변이에 WeakObjectReference의 Required 칸 뒤집기("C# 표에만 있는 종류" 변이는 아직 런타임에 없는 ClassReference로 바꿨다), `Meta.WeakReferenceFieldsReachDescriptorAndGeneratedCode`·`Meta.WeakReferenceRejectsRequired`·`Meta.WeakReferenceTargetMustBeReflectedClass`.
 
 구현(B9d2)에서 정한 점(성질 표 — ClassRef·타입 도구 이름의 나머지는 5.2절 "구현(B9d2)에서 정한 점"):
@@ -377,19 +379,19 @@ Core 수학(`CORE/Math/Transform.h`)에 둘을 더한다(사용자 결정 U4).
 - 한 트랜잭션의 여러 Stage(SCC)는 각자 자기 2a에서 intern한다.
 - 관찰 struct(`FieldCodecHooks::ObservedStructs` — 1단계 임시 값으로 넘긴다)는 Name을 (직간접으로) 담을 수 없다. 참조를 담는 struct와 같은 자리에서 InvalidArgument다(OR/FieldCodecHooks.h 관찰 규칙).
 
-## 5. WeakRef·ClassRef(B9d)
+## 5. WeakObjectRef·ClassRef(B9d)
 
-### 5.1 WeakRef PROPERTY
+### 5.1 WeakObjectRef PROPERTY
 
-- C++ `WeakRef<T>`(OR/ObjectRefs.h:196-214, handle만 담는다). 클래스 필드·struct 멤버·Array·StaticArray 원소·Map 값. `FieldKind::Value`, `value.type` = 기대 대상(0 = Object).
-- GC: 방문하지 않는다(지금도 생성 Trace가 WeakRef를 방문하지 않는다 — RuntimeTypeOps.h:322-323). ReferenceObserver도 관찰하지 않고, 편의 복원의 도달 검사에도 넣지 않는다(OF 5.5절). 쓰기 장벽 없음.
+- C++ `WeakObjectRef<T>`(OR/ObjectRefs.h:196-214, handle만 담는다). 클래스 필드·struct 멤버·Array·StaticArray 원소·Map 값. `FieldKind::Value`, `value.type` = 기대 대상(0 = Object).
+- GC: 방문하지 않는다(지금도 생성 Trace가 WeakObjectRef를 방문하지 않는다 — RuntimeTypeOps.h:322-323). ReferenceObserver도 관찰하지 않고, 편의 복원의 도달 검사에도 넣지 않는다(OF 5.5절). 쓰기 장벽 없음.
 - 쓰기 검증: 대상이 같은 Registry에서 살아 있고 기대 타입의 파생이어야 한다(`TypeRegistry::IsA`). null 허용.
 - encode: 대상이 죽었거나 stale이면 null을 쓴다(진단 없음 — weak의 정상 상태).
 - decode: 노드 번호면 그 객체 handle, 기대 타입 위반은 TypeMismatch(강한 참조와 같은 규칙. UE는 경고 후 null — 18.4절). 외부 번호(`0x80000000 | i`)는 writer가 쓰지 않으므로 InvalidArgument다.
 - 같음(RCM 63행): non-null은 대상 정체성으로 비교한다.
 - Required 거부(RMC2202). 런타임에 저절로 null이 되므로 "늘 non-null" 계약을 지킬 수 없다(UE weak 속성도 NonNullable이 될 수 없다 — PropertyWeakObjectPtr.cpp:56).
 - 참조 wire는 문맥 매개변수(RF 6.1절)이므로 문맥에 `WriteWeakReference`·`ReadWeakReference`를 더한다(graph v2 = U32). `ExternalReferenceInfo`(OF 5.3절)에 `bool weak`를 더한다.
-- 저장 단위: weak는 **같은 저장 단위(그래프) 안만** 보존한다. 셀 사이 entity 참조(SL 495행)는 World 단계의 영속 entity 참조가 맡는다.
+- 저장 단위: weak는 **같은 저장 단위(그래프) 안만** 보존한다. 셀 사이 entity 참조(SL 4.3절)는 World 단계의 영속 entity 참조가 맡는다.
 
 저장 정책별 집합 밖 weak 처리(`GraphExternalPolicy` — Oe의 Reject·Admit·Include):
 
@@ -402,12 +404,12 @@ Core 수학(`CORE/Math/Transform.h`)에 둘을 더한다(사용자 결정 U4).
 - Include의 지연 덮어쓰기는 참조 wire가 U32 고정 폭이라 가능하다(Oe의 외부 번호 위치 표와 같은 방식 — GraphExternal.cpp:77-114). 그래서 노드 encode 순서가 결과를 바꾸지 않는다.
 - 지연 항목은 (출력 위치, 대상 handle, objectIndex, 진단 경로 사본)이다. 경로 사본은 최대 `MaxPropertyPathSteps` 단계이고 1.6절 표기(삽입 순번)라 key를 복사하지 않는다. 그 메모리는 Oe 위치 표처럼 그래프 바이트 누계·작업량에 청구한다(GraphExternal.cpp:90-104). 진단은 모든 노드 encode가 끝난 뒤 기록 순서대로 한 번에 낸다(encode frame이 없어도 경로·objectIndex가 남는다).
 - Admit hook 계약(OF 5.3절 예시 hook)에 `info.weak` 분기를 적는다. weak를 보지 않는 hook이 Import를 골라도 저장은 실패하지 않는다(위 표).
-- 결정 21(RF 1023행): World의 parent·children을 리플렉션 WeakRef로 옮길지는 World 단계가 정한다. 이 단계는 가능하게만 한다.
+- 결정 21(RF 1023행): World의 parent·children을 리플렉션 WeakObjectRef로 옮길지는 World 단계가 정한다. 이 단계는 가능하게만 한다.
 
 구현(B9d1)에서 정한 점:
 
 - 문맥 API(`Object/FieldCodec.h`): `FieldEncodeContext::WriteWeakReference(out, target, expectation)`(Required 검사 없음 — 직렬화기 구현은 가상 `WriteWeakReferenceWire`)와 `FieldDecodeContext::ReadWeakReference(reader, expectation)`. 둘 다 기본 구현은 Unsupported라 weak를 모르는 문맥(시험 문맥 등)은 바꾸지 않아도 된다. wire tag는 강한 참조와 같은 `ReferenceWireType()`이다(`detail::FieldWireType`). `AdmitExternalReference`는 `weak` 인자를 받아 `ExternalReferenceInfo::weak`를 채우고, weak면 `required`는 늘 거짓·`slot`은 0이다(weak import는 없다).
-- 생성 codec: `detail::WeakReferenceField<T>`(부분 특수화)가 `WeakRef<T>`를 알아보고 `ScalarValueKind`가 WeakObjectReference를 준다. `StaticReferenceNative<WeakRef<T>>` = `NativeTypeKey<T>`라 encode·decode가 정적 대상 타입도 기대 형식으로 넘긴다. `Array<WeakRef<T>>`는 `Array<E>`(ValueArray, U32 원소 고정 폭)이고 Registry 컨테이너가 아니다. 생성 Trace는 weak 필드·원소를 방문하지 않는다(`IsReference`는 ObjectReference만, `TraceArrayField(Array<E>)`는 무동작).
+- 생성 codec: `detail::WeakReferenceField<T>`(부분 특수화)가 `WeakObjectRef<T>`를 알아보고 `ScalarValueKind`가 WeakObjectReference를 준다. `StaticReferenceNative<WeakObjectRef<T>>` = `NativeTypeKey<T>`라 encode·decode가 정적 대상 타입도 기대 형식으로 넘긴다. `Array<WeakObjectRef<T>>`는 `Array<E>`(ValueArray, U32 원소 고정 폭)이고 Registry 컨테이너가 아니다. 생성 Trace는 weak 필드·원소를 방문하지 않는다(`IsReference`는 ObjectReference만, `TraceArrayField(Array<E>)`는 무동작).
 - 저장(encode)의 "죽었거나 stale": null·비정규 null, 집합 노드의 생존 조회(`InspectLifecycle`)나 대상 타입 획득(`AcquireType`)이 StaleHandle·Destroyed(회수·재사용·논리 파괴·cutoff)면 진단·hook 질의 없이 0을 쓴다. 그 밖의 오류(다른 Registry의 handle WrongContext, 스레드·종료·재진입)는 그대로 실패한다 — weak가 잘못된 문맥을 가리키는 것은 정상 상태가 아니다(스펙에 없던 구분, 안전한 쪽). 산 대상은 강한 참조와 같이 정적 대상 타입·스키마 기대 타입 검사(TypeMismatch) 뒤 정책을 따른다. weak는 slot 캐시를 보지 않는다.
 - Include 지연 덮어쓰기: encode 때 이미 집합 안인 대상은 바로 local ID를 쓰고(local ID는 한번 정해지면 바뀌지 않는다), 밖이면 자리값 0을 쓰고 지연 항목 `WeakDeferral{position, target, objectIndex, pathOffset, pathSteps}`를 기록한다(경로 사본은 따로 둔 경로 표 — 1.6절 표기라 key를 복사하지 않는다). 메모리는 Oe 위치 표와 한 누계로(`GraphEncodeContext::TableBytes` = 위치 표 + 지연 항목 + 경로 사본) 노드 앞까지의 출력 + 저장 표 ≤ `maxBytes`를 항목마다·노드 끝마다 보고, 항목·경로 byte와 표 성장의 원소 이동을 작업량에 청구한다. 위치는 필드 writer offset → 노드 Record offset으로만 바꾸고(외부 참조 위치 표와 같은 필드 끝 재배정), 모든 노드를 encode한 뒤·NodeTable과 출력 조립 전에 `ResolveWeakDeferrals`가 노드 Record에 제자리로 덮어쓴다(출력 offset까지 옮길 필요가 없다). 항목마다 작업량 2이고, 최종 집합 밖이면 0을 두고 그 항목의 objectIndex·경로(진단 `field` = 경로 마지막 단계, `objectType` = 그 노드 타입)로 진단(값 2)을 기록 순서대로 낸다. 지연 항목도 직렬화기가 준 필드 writer에만 쓸 수 있다(다른 writer InvalidArgument).
 - 복원: 1단계 참조 token에 `weak` 표시를 더했다(`ReferenceToken::weak`). weak 값의 외부 참조 번호(`0x80000000 | i`)와 nodeCount 초과는 InvalidArgument, 노드 번호는 강한 참조와 같이 token으로 기록해 모든 노드를 해석한 뒤 기대 형식을 판정한다(TypeMismatch). 편의 복원의 도달 검사는 weak token을 따라가지 않는다. 2단계는 노드 handle을 대입하며(생성 decode thunk의 weak 갈래 — staged 쓰기의 대상 검사를 다시 하지 않는다, 2단계는 입력 때문에 실패하지 않는다), 2단계 몫은 강한 참조와 같이 참조 연결 1(배열은 non-null 원소 수)을 더해 1단계가 청구한다.
@@ -421,7 +423,7 @@ Core 수학(`CORE/Math/Transform.h`)에 둘을 더한다(사용자 결정 U4).
 
 ### 5.2 ClassRef와 타입 도구 이름
 
-- C++ 값 타입 `ClassRef<Base>`(ObjectRuntime `Object/ClassRef.h`): `TypeId id` 하나, 0 = null. `Base`는 리플렉션 클래스(아니면 RMC2003). 위치는 1.3절 표. SL `Class<T>`(SL 484행)가 이것이다.
+- C++ 값 타입 `ClassRef<Base>`(ObjectRuntime `Object/ClassRef.h`): `TypeId id` 하나, 0 = null. `Base`는 리플렉션 클래스(아니면 RMC2003). 위치는 1.3절 표. SL `Class<T>`(SL 4.2절)가 이것이다.
 - `value.type` = Base ID(필수 — 의존으로 붙잡지 않는다, 아래 "구현(B9d2)에서 정한 점"). wire Guid(7). `FieldValue.guid`.
 - `ClassRef::Resolve(TypeRegistry&) -> Result<TypeLease>`: 등록·클래스·Base 파생을 다시 확인하고 lease를 준다. RCM 2단계의 등록 핸들(세대·revision 캐시 — RCM 30행)은 이 위에 RCM 2단계가 더한다.
 - Required 허용(non-null).
@@ -437,7 +439,7 @@ Core 수학(`CORE/Math/Transform.h`)에 둘을 더한다(사용자 결정 U4).
 - 추상 클래스는 담을 수 있다(UE TSubclassOf도 담는다). 생성 가능성은 생성 때 따로 본다(RCM 37행).
 - Base 판정은 schema 사슬의 `TypeRegistry::IsA`(TypeRegistry.h:120)를 쓴다. 영속 값이 TypeId이므로 판정도 TypeId 사슬로 한다. (구현: 쓰기·encode·decode는 스키마 Base ID의 schema 사슬과 정적 Base의 native 사슬을 함께 보고, `ClassRef::Resolve`는 Base가 불완전 타입일 수 있어 native 사슬만 본다 — 아래 "구현(B9d2)에서 정한 점".)
 - **타입 도구 이름**: `asset-new <Type>`·`asset-list --type=<Type>`(AS 571·573행)·ClassRef 텍스트·InstancedStruct `_structType`·Sparks가 같은 이름 하나를 쓴다.
-  - 문법: `[A-Za-z_][A-Za-z0-9_]*('.' [A-Za-z_][A-Za-z0-9_]*)*`(Sparks 모듈 경로 `Weapons.Sword` — SL 20행). `:`는 쓰지 않는다. `none`은 예약이다(대소문자 무시).
+  - 문법: `[A-Za-z_][A-Za-z0-9_]*('.' [A-Za-z_][A-Za-z0-9_]*)*`(Sparks 모듈 경로 `Weapons.Sword` — SL 0절). `:`는 쓰지 않는다. `none`은 예약이다(대소문자 무시).
   - 기본값은 C++ 타입의 한정하지 않은 이름이다. 충돌하면 `ROCKS_CLASS(Name="…")`·`ROCKS_STRUCT(Name="…")`로 정한다.
   - 유일성: 대소문자 무시로 TypeRegistry 안에서 유일하다(등록 AlreadyExists). MetaCompiler는 모듈과 import 범위에서 RMC2203으로 먼저 잡는다.
   - TypeRegistry에 도구 이름 → TypeId 색인을 더한다(A0-Ob가 둔 TypeId·native 키 색인 자리 — OF 11절 N3).
@@ -460,7 +462,7 @@ Core 수학(`CORE/Math/Transform.h`)에 둘을 더한다(사용자 결정 U4).
 
 ## 6. Optional(B9e)
 
-- C++ `Optional<T>`(CORE/Optional.h — 저장소 + `hasValue_`, :200-201). 클래스 필드·struct 멤버에만 둔다(원소·키·값이면 그 컨테이너 쪽 코드 RMC2304·2305·2307 — 15절, SL 482행 "타입 인자에는 `?`를 쓸 수 없다", SL 483행 "`?`는 중첩되지 않는다").
+- C++ `Optional<T>`(CORE/Optional.h — 저장소 + `hasValue_`, :200-201). 클래스 필드·struct 멤버에만 둔다(원소·키·값이면 그 컨테이너 쪽 코드 RMC2304·2305·2307 — 15절, SL 4.2절 "타입 인자에는 `?`를 쓸 수 없다", SL 4.2절 "`?`는 중첩되지 않는다").
 - 내부: Bool·정수·실수·Enum·Guid·AssetId·Digest·String·Name·값 struct(1.3절). 참조·컨테이너·Optional·InstancedStruct·Text는 거부한다.
 - schema: `value = {Optional, 0}`, `element` = 내부 형식.
 - wire Optional(14): present byte + (set이면) 내부 wire·payload. UE도 present 플래그 + 값의 같은 배치다(18.5절).
@@ -477,7 +479,7 @@ Core 수학(`CORE/Math/Transform.h`)에 둘을 더한다(사용자 결정 U4).
 - 스키마·descriptor: `FieldSchema{value = {Optional, 0}, element = 내부 형식, maxElements = 0}`. 등록(`ValidateFieldList`)은 value.type 0·내부 종류가 성질 표의 Optional 내부·maxElements 0을 보고, Required는 내부 종류와 무관하게 거부한다(InvalidArgument — unset이 정상 값이다). descriptor 필드는 배열처럼 `element`를 쓰고(`value`에는 type이 없다) 읽기가 내부 종류·maxElements 0·Required 없음을 검사한다(RMC1000). 상속 필드 대조는 지금의 element 비교 그대로다.
 - `FieldValue::present`(기본 **true**): Optional 단일 값 필드는 `kind` = 내부 종류, `present` = set 여부다. 기본을 true로 둔 것은 스펙에 없던 결정이다 — Optional이 아닌 필드의 쓰기·읽기 코드가 이 칸을 몰라도 되고, unset은 명시적으로만 생긴다. unset 쓰기는 값 칸을 보지 않는다(enum ID 포함 — `ValidateFieldWrite`는 unset이면 내용 검사를 건너뛴다). Optional이 아닌 필드·배열 원소에 `present = false`를 쓰면 InvalidArgument다(`ValidateFieldWrite`·`WriteTargetValue`·생성 write thunk·`EncodeFieldWire` — 안전한 쪽). unset 읽기는 값 칸을 기본값으로 두고 enum이면 type에 그 enum ID를 싣는다(읽은 값을 그대로 다시 쓸 수 있게).
 - 쓰기: 생성 thunk `detail::WriteOptionalValue`·`AssignOptionalValue`(Object/GeneratedFieldAccess.h). unset 자리에 새 String을 만들 때는 객체 allocator(`ObjectAllocator()` — 살아 있는 객체는 `ObjectRegistry`, staged·복원 2단계는 `ConstructionContext`, 1단계 관찰 임시 값은 `ObservationScratch`), set 자리는 그 값의 allocator로 만들고 할당 없는 Swap·이동으로 게시한다. 살아 있는 객체의 Optional<String> 쓰기는 String 필드와 같이 할당부터 게시까지 encode 고정을 쥔다. unset으로 되돌릴 때는 옛 값을 지역으로 옮긴 뒤 비우고(이동된 값의 소멸자는 allocator를 부르지 않는다) 고정을 푼 뒤 소멸한다. staged 쓰기의 Optional<Name>은 set일 때만 Name 필드와 같은 토큰 검사를 한다.
-- codec: 사슬에 다섯째 조각 `Object/OptionalFieldCodec.h`를 두었다(ArrayFieldCodec 뒤, GeneratedFieldCodec 앞). 단일 값 내부는 `EncodeFieldWire`·`ParseFieldValue`가 Optional 필드를 직접 다루게 넓혔고(수동 함수표의 범용 codec `EncodeThroughFieldValue`·`DecodeThroughFieldValue`도 Optional<단일 값>을 그대로 쓴다) 내부 값 해석 본문을 `ParseValuePayload`로 뽑았다. 값 struct 내부는 `EncodeOptionalStruct`(EncodeStructRecord — 제외 멤버·Required 검사 모드·SubstituteStruct·필드 누계 규칙이 struct 필드와 같다)·`DecodeOptionalStruct`(`StructRecordSource`에 Record 내용 출처 `record`를 더했다 — 버전·마이그레이션 원본 byte·newerVersion·관찰 규칙이 struct 필드와 같다)다. 자리 표가 tag로 거르지 못하는 Optional 내부의 ClassRef·WeakRef는 성질 표가 등록에서 막으므로 codec까지 오지 않는다.
+- codec: 사슬에 다섯째 조각 `Object/OptionalFieldCodec.h`를 두었다(ArrayFieldCodec 뒤, GeneratedFieldCodec 앞). 단일 값 내부는 `EncodeFieldWire`·`ParseFieldValue`가 Optional 필드를 직접 다루게 넓혔고(수동 함수표의 범용 codec `EncodeThroughFieldValue`·`DecodeThroughFieldValue`도 Optional<단일 값>을 그대로 쓴다) 내부 값 해석 본문을 `ParseValuePayload`로 뽑았다. 값 struct 내부는 `EncodeOptionalStruct`(EncodeStructRecord — 제외 멤버·Required 검사 모드·SubstituteStruct·필드 누계 규칙이 struct 필드와 같다)·`DecodeOptionalStruct`(`StructRecordSource`에 Record 내용 출처 `record`를 더했다 — 버전·마이그레이션 원본 byte·newerVersion·관찰 규칙이 struct 필드와 같다)다. 자리 표가 tag로 거르지 못하는 Optional 내부의 ClassRef·WeakObjectRef는 성질 표가 등록에서 막으므로 codec까지 오지 않는다.
 - `FieldDecodeContext::OpenRecordBytes(record, expected, min, max)`(기본 Unsupported): 스펙의 "Span을 받는 OpenRecord판"이다. 같은 이름의 오버로드 대신 새 이름을 쓴 것은 파생 문맥이 한쪽만 override하면 다른 쪽이 가려지는(-Woverloaded-virtual) 일을 막기 위해서다. 그래프 1단계는 맨 위(없으면 객체) Record의 `OpenNestedRecord`와 필드 누계, 최상위면 2단계 몫(단독 reader의 Optional 내용 넘기기 + 단독 Record Open)으로 **Record byte의 두 배**를 미리 청구한다(1.2절 "뒤 단계 주의"). 2단계는 스택이 비면 단독 `RecordReader::Open`, 있으면 맨 위의 `OpenNestedRecord`다.
 - 누락과 unset: Record에 없는 Optional 필드는 생성자 값 그대로이고, unset은 옛 값을 비운다. set으로 저장된 Optional<struct>의 빠진 멤버는 그 자리의 기준 값이다 — 자리가 unset이면 2단계가 먼저 기본 값(`S(Allocator&)` 또는 `S()` — `detail::MakeAllocatedValue`)을 만들고, 생성자가 이미 set으로 만든 자리면 그 값 위에 쓴다(struct 필드의 "누락 = 기준"과 같은 규칙, 스펙에 없던 세부). 2단계가 실패하는 것은 할당뿐이다.
 - 경로(Object/PropertyPath.h): 단일 값 Optional은 최상위면 등록 read·write, struct 멤버면 `detail::PathOptionalValue`가 `present`로 읽고 쓰고 옛 값을 돌려준다(Optional<String> 옛 값은 previous의 allocator로 고정 아래 복사). Optional<값 struct>는 aggregate라 통째 읽기·쓰기가 `AggregateValue`이고, 새 연산 `PathEmplaceOptional`(기본 값 — 이미 set이면 기본 값으로 바꾼다, 스펙에 없던 세부)·`PathResetOptional`(이미 unset이면 무동작)을 더했다. set 여부 조회 `PathIsOptionalSet`(Result<bool> — Optional<struct>는 통째 PathRead가 AggregateValue이고 멤버가 없는 struct도 있으므로 B9i3 asset-info 출력의 `--unset=opt`/`opt={}` 선택과 CU4 Undo가 이것을 쓴다, 읽기라 ReadOnly를 막지 않는다)도 더했다. 세 연산은 끝이 Optional<값 struct>여야 하고(아니면 TypeMismatch 사유 `NotOptional` — 단일 값 Optional은 `present`로 쓴다) ReadOnly 전파는 `detail::ValidateOptionalEdit`가 본다. 멤버 경로 `opt.member`는 set일 때만 닿고 unset이면 NotFound + 사유 `OptionalUnset`이다(읽기·쓰기 모두 — 쓰기는 검증 지점이 thunk보다 먼저라 유효 플래그 ReadOnly인 자리면 ReadOnly가 먼저다). 문자열 경로는 Optional<struct> 뒤의 `.`를 받는다. 생성 thunk의 정적 대조 `PathCursor::CheckTarget`에 Optional 여부를 더해 스키마의 S 필드와 C++ `Optional<S>` 멤버의 혼동을 막는다.
@@ -495,7 +497,7 @@ Core 수학(`CORE/Math/Transform.h`)에 둘을 더한다(사용자 결정 U4).
 `Core/Containers/OrderedMap.h`에 `OrderedMap<K, V, Hasher, KeyEqual>`, `Core/Containers/OrderedSet.h`에 `OrderedSet<T, Hasher, KeyEqual>`을 둔다(사용자 결정 U6). 헤더 첫 주석에 "삽입 순서를 보존한다 — 키 정렬이 아니다"를 적는다. 지금 Core HashMap은 open addressing·tombstone이고 순서를 보존하지 않는다(Core/Containers/HashMap.h의 `HashMap::Erase`·`ForEach`·반복자 — 순회는 슬롯 순서).
 
 - 구조: 조밀 항목 Array(삽입 순서) + open addressing 색인(u32 위치) + 죽은 항목 표시. 제거는 항목을 죽은 것으로 표시하고, 죽은 수가 산 수의 절반을 넘거나 성장할 때 압축한다(상환 O(1)).
-- 같은 키 대입은 위치를 유지하고, 제거 뒤 다시 넣으면 끝에 붙는다(Sparks `m[k] = v` — SL 482행).
+- 같은 키 대입은 위치를 유지하고, 제거 뒤 다시 넣으면 끝에 붙는다(Sparks `m[k] = v` — SL 4.2절).
 - 순서는 해시 값과 무관하다. 그래서 순회·직렬화가 해시 seed·플랫폼과 무관하게 결정적이다.
 - API는 Core HashMap 규약을 따른다(Core/Containers/HashMap.h의 `HashMap` 공개 멤버, Docs/Implementation/HashCollections.ko.md): `explicit OrderedMap(Allocator&, Hasher = {}, KeyEqual = {})`, `Count`·`IsEmpty`·`Find`·`Contains`, `Insert -> Result<InsertOutcome>`(`AlreadyPresent`), `InsertOrAssign`, `FindOrAdd`, `Reserve`, `Compact`, `Erase`, `Clear`·`Reset`, `ForEach`·반복자. 할당은 `Result`, 예외 없음. Name 키는 Core `Hash<Name>`과 같은 필드(Core/Hash.h의 `SeededHash<Name>` — 아래 해시 항목)로 해시한다.
 
@@ -544,7 +546,7 @@ A5 `Downscale` 플랫폼별 값(AS 451행 계약):
 
 ### 7.3 경로 key 단계(B9f3)
 
-- 1.5절 표현. Map 연산: `m[key]` 읽기·쓰기(삽입 또는 교체 — SL 482행), `Erase`, `Clear`, `Count`, `Contains`. 값이 struct면 `m[key].member`와 기본값 삽입·초기화 `InsertDefault`(텍스트 `m[k]={}`).
+- 1.5절 표현. Map 연산: `m[key]` 읽기·쓰기(삽입 또는 교체 — SL 4.2절), `Erase`, `Clear`, `Count`, `Contains`. 값이 struct면 `m[key].member`와 기본값 삽입·초기화 `InsertDefault`(텍스트 `m[k]={}`).
 - Set 연산: `Insert`·`Erase`·`Contains`·`Clear`. 원소는 키라 멤버 경로가 없다. Set 원소는 `s[원소]` key 단계로 가리킨다.
 - Name 키 조회는 `NamePool::TryFind`로 토큰을 얻는다. pool에 없는 이름이면 그 키도 없다(NotFound, 할당 없음).
 - 쓰기 규칙은 B6과 같다: 할당은 게시 전, 게시는 무할당, 옛 값을 돌려준다(RF 결정 20).
@@ -553,7 +555,7 @@ A5 `Downscale` 플랫폼별 값(AS 451행 계약):
 
 - 표현(MS/TypeSchema.h): `PathSelector`·`PathKey`·`PathStep{fieldId, index, selector}`·`PropertyPath{steps, keys}`는 1.5절 그대로다. `IsCanonicalPathStep(step, keyCount = 0)`은 None이면 index 0, Key면 index < keyCount이고 그 밖의 selector 값은 정규형이 아니다(진단 경로는 keys가 없으므로 keyCount 0). `SamePropertyPath`는 Key 단계를 keys 안 위치가 아니라 키 값으로 비교하고(종류와 wire byte, Name은 `NameTextEquals` — 형식이 맞지 않는 Name wire는 byte 비교) Name 비교 때문에 constexpr가 아니다. 진단 경로(`FieldCodecContext::BuildPath`)는 원소·Map 항목·Set 원소를 selector Index로 쓴다.
 - key wire(OR/PathKey.h): 정규형은 그래프 저장의 ValueArray 원소와 같은 byte다(Bool 1 byte 0·1, UInt8·16·32는 U32, UInt64 U64, 부호 있는 정수·enum은 I64, Guid·AssetId·ClassRef 16 byte, String·Name은 u64 길이 + UTF-8, Digest256은 u64 길이 32 + 32 byte, Soft는 Guid + String). Name의 None은 저장 wire처럼 빈 문자열 하나다(`AppendPathKey`가 "None"·"NONE"·빈 base 번호 이름도 빈 문자열로 쓰고 `ReadPathKey`는 빈 문자열이 아닌 None 원문을 거부한다 — 리뷰 반영, Object/NameField.h의 저장 규칙). 비소유 값 `PathKeyValue`(kind별 칸 — Name은 표시 문자열)와 `AppendPathKey(value, Array<uint8>&)`(키 종류가 아니면·UTF-8·Soft 규칙 InvalidArgument, 좁은 정수 범위 밖 Overflow, 실패하면 out 불변)·`ReadPathKey(PathKey)`(정규형이 아니면 InvalidArgument)를 둔다. 문자열 경로 해석의 고정 버퍼용으로 `detail::PathKeyWireBytes`·`WritePathKeyWire`도 있다.
-- 연산(OR/PropertyPath.h): Map 단일 값 항목은 `PathRead`·`PathWrite`(없으면 끝에 넣고 있으면 자리를 지키며 교체 — SL 482행 `m[k] = v`)다. 없던 키를 넣은 `PathWrite`의 previous는 kind = 값 종류, `present = false`이고(enum이면 type에 그 enum ID — Undo는 `PathEraseKey`) 교체면 옛 값이다. Map<K, 값 struct>는 멤버 경로 `m[k].member`와 `PathInsertKey`(InsertDefault — 기본 값을 끝에 넣거나 있으면 자리를 지키며 기본 값으로 바꾼다), Set은 `PathInsertKey`(이미 있으면 무동작)다. `PathInsertKey`는 `Result<bool>`(새로 넣었으면 true)이고 단일 값 Map에는 InvalidArgument(InvalidValue)다(값은 `PathWrite`로 넣는다). 지우기는 `PathEraseKey(…, removed)`, 조회는 `PathContains -> Result<bool>`(읽기 — 할당·고정 없음, ReadOnly를 막지 않는다)다. 원소 수·비우기는 배열과 같은 연산을 쓰도록 `PathArrayLength`·`PathClearArray`를 `PathCount`·`PathClear`(Array·Map·Set)로 이름을 바꿨다(하위호환 없음). Set 원소 key 단계의 값 읽기·쓰기는 TypeMismatch(NotMap)다.
+- 연산(OR/PropertyPath.h): Map 단일 값 항목은 `PathRead`·`PathWrite`(없으면 끝에 넣고 있으면 자리를 지키며 교체 — SL 4.2절 `m[k] = v`)다. 없던 키를 넣은 `PathWrite`의 previous는 kind = 값 종류, `present = false`이고(enum이면 type에 그 enum ID — Undo는 `PathEraseKey`) 교체면 옛 값이다. Map<K, 값 struct>는 멤버 경로 `m[k].member`와 `PathInsertKey`(InsertDefault — 기본 값을 끝에 넣거나 있으면 자리를 지키며 기본 값으로 바꾼다), Set은 `PathInsertKey`(이미 있으면 무동작)다. `PathInsertKey`는 `Result<bool>`(새로 넣었으면 true)이고 단일 값 Map에는 InvalidArgument(InvalidValue)다(값은 `PathWrite`로 넣는다). 지우기는 `PathEraseKey(…, removed)`, 조회는 `PathContains -> Result<bool>`(읽기 — 할당·고정 없음, ReadOnly를 막지 않는다)다. 원소 수·비우기는 배열과 같은 연산을 쓰도록 `PathArrayLength`·`PathClearArray`를 `PathCount`·`PathClear`(Array·Map·Set)로 이름을 바꿨다(하위호환 없음). Set 원소 key 단계의 값 읽기·쓰기는 TypeMismatch(NotMap)다.
 - 없는 키의 `PathEraseKey`는 NotFound(KeyNotFound)다(조정자 결정 — 텍스트 `--erase=`의 오타가 조용히 지나가지 않게). UE는 `FScriptMapHelper::RemovePair`(UnrealType.h:5505)·`Map_Remove`(BlueprintMapLibrary.h:38)가 bool·개수를 돌려주고 없는 키는 오류가 아니다 — `PathInsertKey`의 "이미 있으면 false"와 비대칭인 이유가 이 오타 검출이다. 여러 에셋에 같은 `--erase`를 거는 일괄 편집이 관대함을 원하면 ReflectionText가 `PathContains`로 먼저 본다.
 - 실패 사유(`PropertyPathError`)를 더했다: `NotKeyed`(Map·Set이 아닌 필드의 key 단계 — TypeMismatch), `KeyRequired`(key 연산의 끝이 key 단계가 아님 — InvalidArgument), `KeyNotFound`(NotFound), `InvalidKey`(키 종류 TypeMismatch, wire·텍스트 정규형·미선언 enum 키·Soft 규칙·문자열 경로 key byte 합계 InvalidArgument, hook 없이 텍스트로 쓸 수 없는 키 Unsupported, 새로 넣는 ClassRef 키의 미등록 NotFound·Base 위반 InvalidArgument), `NotMap`. 배열 연산의 index 요구는 selector Index, 원소 수·비우기는 selector None이어야 한다(그 밖은 IndexRequired·IndexNotAllowed).
 - key 해석(실행기 `PathRunner::ResolveKey` — 단계 해석 안, 오류 순서의 "단계 순서의 해석"): 키 종류(Map은 `FieldSchema::key`, Set은 `element`)와 PathKey 종류 대조 → wire 정규형 → enum 키의 선언 값(등록 enum — 생성 thunk는 정적 `IsDeclared`도 본다) → Name 키의 pool 조회(`NamePool::TryFind` — 없으면 할당 없이 "어느 컨테이너에도 없음", pool 없는 Registry는 None만 있다)다.
@@ -614,7 +616,7 @@ A5 `Downscale` 플랫폼별 값(AS 451행 계약):
 - Required: 참조·Soft·ClassRef 원소면 원소마다 non-null.
 - 차이 단위(A5): 통째(배열 규칙). UE는 index마다 태그다(18.8절). 원소별 차이는 A5·prefab 후보다.
 - 텍스트: 정확히 N개의 쉼표 목록, JSON 배열 길이 N.
-- **배열 원소 확장**: Name(B9c2)·WeakRef(B9d1)·ClassRef(B9d2)·Int8·Int16(B9a2)·InstancedStruct(B9j)·Text(B9l)는 각 종류 단계가 Array·StaticArray 원소와 Map 값까지 함께 넣는다(B9f·B9g보다 앞 단계면 B9f2·B9g가 그 종류의 Map 값·StaticArray 원소를 넣고, 뒤 단계면 그 종류 단계가 넣는다). B9g는 정적 배열과 "성질 표 = 실제 지원" 대조 시험을 맡고, 이 대조 시험은 뒤 종류 단계마다 행을 늘린다. RF 1036행의 "WeakRef·클래스 참조·FName·FText 원소"가 이것으로 닫힌다.
+- **배열 원소 확장**: Name(B9c2)·WeakObjectRef(B9d1)·ClassRef(B9d2)·Int8·Int16(B9a2)·InstancedStruct(B9j)·Text(B9l)는 각 종류 단계가 Array·StaticArray 원소와 Map 값까지 함께 넣는다(B9f·B9g보다 앞 단계면 B9f2·B9g가 그 종류의 Map 값·StaticArray 원소를 넣고, 뒤 단계면 그 종류 단계가 넣는다). B9g는 정적 배열과 "성질 표 = 실제 지원" 대조 시험을 맡고, 이 대조 시험은 뒤 종류 단계마다 행을 늘린다. RF 1036행의 "WeakObjectRef·클래스 참조·FName·FText 원소"가 이것으로 닫힌다.
 
 구현(B9g)에서 정한 점:
 
@@ -627,7 +629,7 @@ A5 `Downscale` 플랫폼별 값(AS 451행 계약):
 - NATIVE 형질: `NativeStrongReference<T[N]>`·`NativeStrongReference<T[]>`·`RegistryContainer<T[N]>`(원소로 판정 — 배열을 가리키는 포인터 `ObjectRef<T>(*)[4]`와 다차원도 원소까지 내려간다). MetaCompiler `StrongReferencePath`는 이미 C 배열 철자를 따라가고 있었다(ClangAstParser.Traits.cs — 바꾸지 않았다).
 - MetaCompiler 원소 철자(스펙에 없던 결정): Clang JSON은 배열 형식을 쓰인 그대로 낸다(배열은 sugar가 아니라 desugaredQualType이 없고 원소가 `int16`·`ObjectRef<Owner>`처럼 별칭·한정 없는 이름이다). 그래서 Binds 해석·NATIVE 탐침과 같은 방식으로 두 번째 Clang 실행(`StaticArrayProbe.cs` — 필드마다 `decltype(::Owner::field)`의 원소·N을 템플릿 인자로 받는 탐침 변수, ROCKS_GENERATED_BODY friend인 GeneratedType 특수화 안)으로 정규 철자 `원소[N]`(`FieldModel.CanonicalSpelling`)을 얻는다. C 배열 PROPERTY가 없는 모듈은 실행하지 않는다.
 - MetaCompiler: `StaticArrayRules`(SchemaModel.cs — Clang 정규 철자 `T[N]`의 크기는 숫자로 나온다, 마지막 `[..]`를 떼므로 다차원은 원소가 다시 배열), `ResolveStaticArray`(SchemaValidator.cs). RMC2307 사례: N이 1..65,535 밖, 다차원, 원소가 컨테이너(배열·Map·Set·ObjectRefMap·HashMap·HashSet)·Optional·cv·지원하지 않는 형식, 성질 표의 정적 배열 원소가 아닌 종류, Registry 컨테이너를 담은 원소 struct. `ObjectRef<T>` 원소는 그대로 받는다(Registry 컨테이너 없이 — `FieldKind::ObjectReference`). `MaxElements` 지정자는 RMC2202(정적 배열은 `IsCounted`가 아니다), Required는 원소 종류(참조·Soft·ClassRef)로 판정한다. descriptor는 value `{"kind": "StaticArray"}`, element 원소 형식, maxElements = N이고 import는 원소 종류(성질 표 정적 배열 원소)·N 범위를 검사한다.
-- 배열 원소 확장: 이 단계가 Name·WeakRef·ClassRef·Int8·Int16의 정적 배열 원소를 열었다(fixture `FixedOwner`가 성질 표 정적 배열 원소 열의 모든 ○ 종류 22개를 담고 왕복한다).
+- 배열 원소 확장: 이 단계가 Name·WeakObjectRef·ClassRef·Int8·Int16의 정적 배열 원소를 열었다(fixture `FixedOwner`가 성질 표 정적 배열 원소 열의 모든 ○ 종류 22개를 담고 왕복한다).
 - 성질 표 대조 시험: `ValueKindProperties_TypeRegistryFollowsTable`의 정적 배열 원소 자리(등록 성공 ⇔ `ValueKindCanBeStaticArrayElement`, struct 멤버·클래스 필드 모두)와 N 범위, `ValueKindProperties_MatchSpecTable`의 새 행, C# `Meta.ValueKindTableMatchesRuntime`의 StaticArray 칸(컨테이너 불변식), 대조 헤더 변이에 StaticArray의 StaticArrayElement 칸 뒤집기("C# 표에만 있는 종류" 변이는 아직 런타임에 없는 InstancedStruct로 바꿨다), 왕복 시험이 정적 배열 원소 열의 모든 ○ 칸을 실제로 등록·저장·복원한다. 다른 열(Map 키·값·Set 원소·Optional 내부)의 실제 왕복은 B9e·B9f2·B9f4 시험이 맡고, 뒤 종류 단계(InstancedStruct B9j·Text B9l)가 이 표·fixture에 행을 더한다.
 - 텍스트 codec(정확히 N개의 쉼표 목록·JSON 배열 길이 N)은 B9i가 한다.
 - 시험: ObjectSerialization `StaticArrayGraph_ModuleRegistrationDescribesStaticArrays`·`StaticArrayGraph_RoundTripEveryElementKindTraceAndCycle`·`StaticArrayGraph_SetReferenceAcceptsElementSlots`·`StaticArrayGraph_CountMismatchIsInvalidArgument`·`StaticArrayGraph_RequiredElementsMustBeNonNull`(저장 rejectMissingRequired — RequiredMissing `[f[i]]`·`[f[i].m]` 뒤 InvalidArgument)·`StaticArrayGraph_LoadReportsMissingRequiredElements`(로드 CheckRequiredFields의 `[f[i]]`·`[f[i].m]`)·`StaticArrayGraph_ApplyChargeIgnoresElementSize`(NATIVE 형질 static_assert 포함), `StaticArrayPath_IndexReadWriteAndMembers`·`StaticArrayPath_InsertRemoveClearAreUnsupported`·`StaticArrayPath_WriteReentryAndAllocationFailureKeepOldValue`, ToolTests `Meta.StaticArrayFieldsReachDescriptorAndGeneratedCode`·`Meta.StaticArrayShapesAreRestricted`(다차원·N 범위·Optional·컨테이너·cv·포인터·Registry 컨테이너 원소 struct — RMC2307)·`Meta.StaticArraySpecifiersFollowElementKind`(MaxElements·값 원소 Required·weak 원소 Required — RMC2202), fixture ReflectionTestFixtures/StaticArrayFixture.h.
@@ -695,7 +697,7 @@ enum class UnsaveablePolicy : uint8 {
 
 **MetaCompiler 규칙**
 
-- Deprecated가 아닌 타입의 PROPERTY가 Deprecated 클래스를 가리키면(`ObjectRef<D>`·`WeakRef<D>`·`SoftObjectRef<D>`·`ClassRef<D>`와 그 컨테이너·Map 키·값) RMC2209다. UE도 Deprecated 클래스를 쓰는 비Deprecated 속성을 오류로 막는다(UhtProperty.cs:2612-2631, UhtObjectPropertyBase.cs:752-756). Rocks에는 필드 Deprecated가 없으므로 그 필드를 retire하고, 옛 데이터가 필요하면 Version과 migrate로 옮긴다. Deprecated 타입 자신의 필드와 NATIVE 멤버는 검사하지 않는다.
+- Deprecated가 아닌 타입의 PROPERTY가 Deprecated 클래스를 가리키면(`ObjectRef<D>`·`WeakObjectRef<D>`·`SoftObjectRef<D>`·`ClassRef<D>`와 그 컨테이너·Map 키·값) RMC2209다. UE도 Deprecated 클래스를 쓰는 비Deprecated 속성을 오류로 막는다(UhtProperty.cs:2612-2631, UhtObjectPropertyBase.cs:752-756). Rocks에는 필드 Deprecated가 없으므로 그 필드를 retire하고, 옛 데이터가 필요하면 Version과 migrate로 옮긴다. Deprecated 타입 자신의 필드와 NATIVE 멤버는 검사하지 않는다.
 - Transient는 상속되고 끄는 지정자는 없다(UE `NonTransient` 대응 없음 — 20절 결정 15).
 
 **Within**
@@ -827,7 +829,7 @@ Result<PreparedAssignments> PrepareAssignments(AssignmentTarget, Span<const Text
   - 뒤 대입은 앞 대입이 만든 상태 위에서 해석한다. 대입이 닿는 위치마다 아래 준비 단위를 만들고 대입을 차례로 그 단위에 적용한다. 그래서 `Inst=<타입>` 뒤의 `Inst.m=1`, `m[new]={}` 뒤의 `m[new].x=1`, `opt={}` 뒤의 `opt.m=1`이 된다.
   - Prepare는 경로·값 문자열을 복사한다(입력 `StringView`는 호출 동안만 빌린다).
 - **준비 단위** — 참조 쓰기의 삽입 장벽·관찰자 기록·소유자 주소 범위 검사(RF 4.3절)를 우회하지 않는다:
-  - 참조 없는 값 부분 트리(단일 값·값 struct·값 컨테이너·Optional·InstancedStruct·Text·Name·WeakRef): 사본(`TryClone`)을 고치고 게시 때 옮긴다. 인라인 struct 필드가 참조 멤버를 섞어 가지면 struct 전체가 아니라 참조 없는 멤버마다 이 단위로 나눈다.
+  - 참조 없는 값 부분 트리(단일 값·값 struct·값 컨테이너·Optional·InstancedStruct·Text·Name·WeakObjectRef): 사본(`TryClone`)을 고치고 게시 때 옮긴다. 인라인 struct 필드가 참조 멤버를 섞어 가지면 struct 전체가 아니라 참조 없는 멤버마다 이 단위로 나눈다.
   - 단일 참조 위치(ObjectRef 필드, 인라인 struct의 ObjectRef 멤버, StaticArray의 ObjectRef 원소, StructRefArray 원소의 참조 멤버): (위치, 옛 대상, 새 대상) 간선 변경으로 두고, 게시 때 그 위치에 제자리로 쓰며 삽입 장벽·관찰자 기록을 적용한다.
   - Registry 컨테이너(ObjectRefArray·StructRefArray·ObjectRefMap): 새 버퍼와 간선 차이(더한 대상·뺀 대상)로 두고, 게시 때 버퍼를 바꾸고 더한 대상에 장벽을, 차이에 관찰자 기록을 적용한다.
   - Publish 2단계가 예약할 관찰자 키는 간선 변경·간선 차이에서 센다.
@@ -858,7 +860,7 @@ Result<PreparedAssignments> PrepareAssignments(AssignmentTarget, Span<const Text
 
 - UE 대응: `UScriptStruct::ICppStructOps`(Construct·Destruct·Copy — UE 5.8 CoreUObject/Public/UObject/Class.h:1779·1814·1834·1979)와 `FProperty::CopyCompleteValue`·`DestroyValue`·`InitializeValue`(UnrealType.h:915·1027·1110). UE의 struct 복사는 `STRUCT_CopyNative`면 C++ 복사, POD면 memcpy, 그 밖은 속성마다 복사다(Class.cpp:3697-3725 `CopyScriptStruct`).
 - 값 연산 표 `RuntimeValueOps`(Object/ValueCopy.h): size·alignment·nativeType, `construct(storage, allocator)`(기본 값 — `T(Allocator&)` 또는 `T()`), `destroy`, `copy(destination, source, allocator) -> Result<void>`(깊은 복사), `swap(first, second)`(무할당 교환). `detail::ValueOpsOf<T>()`가 C++ 타입마다 정적 표를 준다(필드·멤버 값 — 경로 thunk가 멤버 형식으로 얻는다). 복사·교환할 수 없는 타입은 그 칸이 null이다.
-- 깊은 복사 `detail::TryCopyValue(destination, source, allocator)`: 새 값을 allocator로 따로 다 만든 뒤 무할당 이동으로 destination에 넣는다 — 실패하면(OutOfMemory 등) destination·source 모두 그대로다. 종류: 단일 값·Name 토큰·WeakRef·ClassRef 등 trivially copyable이면서 복사 생성·대입이 되는 타입(`IsPlainCopyV` — 복사·이동을 모두 지운 ObjectRef를 Clang 형질이 trivially copyable로 답하므로 둘을 함께 본다)은 대입, String·SoftObjectRef는 `TryClone`, Array·OrderedMap·OrderedSet·Optional·정적 배열은 원소마다, 생성 struct는 멤버마다(아래), 그 밖의 C++ 타입은 noexcept 복사 생성·대입이 있으면 C++ 복사, 없으면 지원하지 않음(Unsupported). ObjectRef·Registry 컨테이너는 복사할 수 없다(강한 참조는 대입 묶음의 간선 변경 단위 — 10.2절 준비 단위).
+- 깊은 복사 `detail::TryCopyValue(destination, source, allocator)`: 새 값을 allocator로 따로 다 만든 뒤 무할당 이동으로 destination에 넣는다 — 실패하면(OutOfMemory 등) destination·source 모두 그대로다. 종류: 단일 값·Name 토큰·WeakObjectRef·ClassRef 등 trivially copyable이면서 복사 생성·대입이 되는 타입(`IsPlainCopyV` — 복사·이동을 모두 지운 ObjectRef를 Clang 형질이 trivially copyable로 답하므로 둘을 함께 본다)은 대입, String·SoftObjectRef는 `TryClone`, Array·OrderedMap·OrderedSet·Optional·정적 배열은 원소마다, 생성 struct는 멤버마다(아래), 그 밖의 C++ 타입은 noexcept 복사 생성·대입이 있으면 C++ 복사, 없으면 지원하지 않음(Unsupported). ObjectRef·Registry 컨테이너는 복사할 수 없다(강한 참조는 대입 묶음의 간선 변경 단위 — 10.2절 준비 단위).
 - 생성 struct: MetaCompiler는 struct의 모든 비정적 멤버에 PROPERTY 또는 NATIVE를 요구한다(ClangAstParser `FieldArguments` — 주석 없는 멤버 거부). 그래서 생성 `GeneratedType<S>::CopyValue`가 PROPERTY·NATIVE 멤버를 모두 멤버마다 복사하고(빠지는 멤버 없음 — NATIVE 멤버는 그 C++ 타입의 복사 의미), 한 멤버라도 복사할 수 없으면 `ValueCopyable`이 거짓이고 struct 복사가 없다(조용히 멤버를 빠뜨리지 않는다). Binds 미러는 실제 타입의 멤버마다다(VerifyBinds가 멤버 수·순서를 대조한다). trivially copyable struct는 대입 한 번이다. 생성 코드는 `detail::ValueCopy<S>` 특수화로 이 함수를 다른 타입의 복사에 잇는다.
 - `RuntimeStructOps`에 `copy`(생성 `CopyValue` — 수동 함수표는 null이면 지원하지 않음)와 `swap`(MakeRuntimeStructOps — nothrow 이동 생성·대입이면 무할당 교환)을 더했다. construct·destroy는 그대로다.
 - 수명·allocator: 복사본은 인자 allocator로 할당한다(살아 있는 객체에 옮길 값은 `ObjectRegistry::ObjectAllocator`). 교환은 버퍼 소유를 맞바꿀 뿐이라 옛 값은 교환한 상대가 들고, 그 소멸(반환)은 묶음 게시 구간을 나온 뒤에 한다(B9i2의 옛 버퍼 규칙과 같다).
@@ -989,7 +991,7 @@ public:
 | Digest256 | 64자 소문자 16진 | 문자열 |
 | String | 그대로 | 문자열 |
 | Name | 그대로(NFC로 정규화 후 intern), None 출력 `None` | 문자열 |
-| ObjectRef·WeakRef·Soft | resolver, null은 `none` | 문자열·null |
+| ObjectRef·WeakObjectRef·Soft | resolver, null은 `none` | 문자열·null |
 | ClassRef | 타입 도구 이름·TypeId, null은 `none` | 문자열·null |
 | Array·StaticArray·Set | 쉼표 목록(빈 값 = 빈 배열) | 배열 |
 | `Array<uint8>`(가변 바이트 배열 — 24절, CurveData CV4) | RFC 4648 Base64 하나(빈 값 = 빈 배열), 원소는 `a[i]=v` | Base64 문자열 |
@@ -1036,7 +1038,7 @@ public:
 - GC 없음. Required 거부(RMC2202).
 - 경로: `f` 연산 `SetInstancedType(TypeId)`(그 타입 기본값으로 교체)·`Clear`, 멤버 `f.member`는 지금 타입으로 해석한다. 문자열 경로 해석이 값의 타입에 의존하므로 `ParsePropertyPath`에 객체 문맥 판(registry, handle)을 더한다. `PathStep`은 그대로다(멤버 필드 ID가 전역 유일 Guid).
 - 차이 단위(A5): 통째. 같은 타입이면 기준 대비 멤버 차이로 쓰는 UE 방식(18.11절)은 writer 선택이라 형식을 바꾸지 않고 뒤에 더할 수 있다.
-- 소비자: Sparks 데이터 테이블 행 저장 `OrderedMap<Name, InstancedStruct<>>`(SL 1090행 `@tableRow`), CU6·데이터 에셋.
+- 소비자: Sparks 데이터 테이블 행 저장 `OrderedMap<Name, InstancedStruct<>>`(SL 15절 `@tableRow`), CU6·데이터 에셋.
 
 구현(B9j)에서 정한 점:
 
@@ -1128,7 +1130,7 @@ public:
 
 | 코드 | 판정 | 뜻 |
 |---|---|---|
-| RMC2202(확장) | MetaCompiler | 지정자-종류 불일치에 새 경우를 더한다: Required는 ClassRef와 그 컨테이너·참조 StaticArray·ObjectRefMap 값·Soft·ClassRef 원소 Set까지(WeakRef·Name·Optional·InstancedStruct·Text는 거부), MaxElements는 Map·Set까지(StaticArray는 거부), Required + DuplicateTransient·NonPIEDuplicateTransient 조합 거부. 타입 지정자를 다른 매크로에 쓰면 매크로별 지정자 표에 없으므로 지금의 "모르는 지정자" 오류다 |
+| RMC2202(확장) | MetaCompiler | 지정자-종류 불일치에 새 경우를 더한다: Required는 ClassRef와 그 컨테이너·참조 StaticArray·ObjectRefMap 값·Soft·ClassRef 원소 Set까지(WeakObjectRef·Name·Optional·InstancedStruct·Text는 거부), MaxElements는 Map·Set까지(StaticArray는 거부), Required + DuplicateTransient·NonPIEDuplicateTransient 조합 거부. 타입 지정자를 다른 매크로에 쓰면 매크로별 지정자 표에 없으므로 지금의 "모르는 지정자" 오류다 |
 | RMC2203(확장) | MetaCompiler | 타입 도구 이름의 형식·대소문자 무시 중복(모듈과 import 범위), `none` 예약 |
 | RMC2207(새) | MetaCompiler | PROPERTY·Binds 미러의 bitfield 규칙 위반과 정수·bool이 아닌 NATIVE bitfield(NATIVE bitfield는 정수·bool 모두 허용 — B9m 구현): 폭 ≠ 1, `bool : 1`, 부호 있는 정수·enum·실수 bitfield, Binds 미러 안 bitfield |
 | RMC2208(새) | MetaCompiler | `Within` 오류: 대상이 리플렉션 클래스가 아님, 부모 Within의 파생이 아님, 철자를 풀 수 없음 |
@@ -1142,7 +1144,7 @@ public:
 | RMC2308(새) | MetaCompiler | InstancedStruct 오류: Base가 리플렉션 struct가 아님, Base가 담을 수 없는 struct(11절 조건) |
 | RMC2309(새 — CV3) | MetaCompiler | struct 검증 hook 오류(23절): `Validate`가 함수 템플릿·overload·비정적·consteval·시그니처(`Result<void> (const S&) noexcept`)가 다름·`ROCKS_GENERATED_BODY` 없는 private/protected, 숨은 friend `Validate`·`using …::Validate`, hook struct가 강한 참조·Registry 컨테이너를 담음, Binds 미러의 `Validate`(CurveData CV9까지) |
 | RMC2401(확장) | MetaCompiler | enum underlying 8종을 받는다. uint64 열거자 값이 int64 최댓값을 넘음 |
-| RMC2003(재사용) | MetaCompiler | WeakRef·ClassRef 대상이 리플렉션 클래스가 아님(지금 참조 대상 진단 — MC/SchemaValidator.cs:273) |
+| RMC2003(재사용) | MetaCompiler | WeakObjectRef·ClassRef 대상이 리플렉션 클래스가 아님(지금 참조 대상 진단 — MC/SchemaValidator.cs:273) |
 
 한 사례에는 코드 하나다. 컨테이너 쪽 위치 규칙이 먼저다: Array 원소 위치에 쓸 수 없는 형식은 RMC2304, Map·Set의 키·값·원소 위치는 RMC2305, StaticArray 원소는 RMC2307이고, RMC2306은 Optional의 내부 형식에만 쓴다(예: `Array<Optional<T>>`는 RMC2304, `OrderedMap<K, Optional<V>>`는 RMC2305, `Array<OrderedMap<K,V>>`는 RMC2304, `Optional<Optional<T>>`는 RMC2306).
 
@@ -1161,7 +1163,7 @@ public:
 | B9b2 | Atomic 지정자·TypeFlags·RegisterStruct mask·descriptor·`IsAtomic`, 미러 17종(Transform3f·3d 추가, 16종 Atomic, Transform 멤버 SaveGame은 B9h1 뒤) | B9a1, B9b1 | S |
 | B9c1 | Core `NamePool::TryFind`·`NameTextEquals`·base·번호 분해 | — | S |
 | B9c2 | Name 종류·`RegistryOptions.names`·1단계 수집·2a intern·작업량 청구·관찰 struct 제한·FieldValue·경로·Array 원소 | B9a3, B9c1 | L |
-| B9d1 | WeakRef PROPERTY·Array 원소·문맥 weak 참조·정책별 처리(Include 지연 덮어쓰기)·hook `weak` | B9a1, A0-Oe | L |
+| B9d1 | WeakObjectRef PROPERTY·Array 원소·문맥 weak 참조·정책별 처리(Include 지연 덮어쓰기)·hook `weak` | B9a1, A0-Oe | L |
 | B9d2 | ClassRef·타입 도구 이름(TypeSchema·지정자·TypeRegistry 색인)·`unknownClass` 정책·Array 원소 | B9a1 | M |
 | B9e | Optional·`ObjectAllocator()` | B9a3(B9c2) | M |
 | B9f1 | Core OrderedMap·OrderedSet(+ `SeededHash`) | — | L |
@@ -1193,11 +1195,11 @@ Core 커밋(B9b1·B9c1·B9f1·B9i1)은 다른 단계와 독립이라 먼저 해�
 
 **B9c**: Core `TryFind`(없으면 NotFound·할당 없음·표시 변형은 비교 토큰)·`NameTextEquals`(번호 접미·대소문자), 그래프 왕복(번호 접미·None·대소문자 표시 보존), pool 없는 Registry의 Unsupported, 다른 pool 토큰 WrongContext, NFC·UTF-8·길이(번호 접미를 뗀 base 1,023 UTF-16 단위 — UE와 같다)·NUL 거부, 2a intern의 CapacityExceeded(생성자 미실행·Registry 불변·이미 들어간 entry는 남음), 1단계 청구가 2a 몫을 덮음(작업량 한도 fixture), 관찰 struct의 Name 거부, Array<Name> 왕복, 경로 쓰기.
 
-**B9d**: WeakRef 왕복(집합 안), 정책별 표(Reject는 null·진단·성공, Admit의 Null·Import → null·진단(값 2)과 Reject, 강한 참조가 먼저 Import한 대상을 weak가 slot 캐시 없이 다시 물음, Include 지연 덮어쓰기 — 노드 순서를 바꿔도 같은 결과·지연 진단의 경로·objectIndex·메모리 청구), 죽은 대상 encode null, 외부 번호 decode 거부, 기대 타입 위반 decode 거부, Array<WeakRef> 왕복, GC가 weak만 남은 대상을 회수, 도달 검사에서 weak 제외. ClassRef 왕복, 미등록(Reject·ReportAndNull), Base 위반, struct ID 넣기 거부, 추상 클래스 허용, Required null 저장 거부, 타입 도구 이름(기본·`Name=`·충돌 RMC2203·`none` 예약). 키 위치의 미등록 거부는 B9f, Deprecated ClassRef 로드 진단·재저장은 B9h, ClassRef 텍스트(TypeId 32·36자 입력)는 B9i 목록으로 옮겼다(B9d2 리뷰 반영).
+**B9d**: WeakObjectRef 왕복(집합 안), 정책별 표(Reject는 null·진단·성공, Admit의 Null·Import → null·진단(값 2)과 Reject, 강한 참조가 먼저 Import한 대상을 weak가 slot 캐시 없이 다시 물음, Include 지연 덮어쓰기 — 노드 순서를 바꿔도 같은 결과·지연 진단의 경로·objectIndex·메모리 청구), 죽은 대상 encode null, 외부 번호 decode 거부, 기대 타입 위반 decode 거부, Array<WeakObjectRef> 왕복, GC가 weak만 남은 대상을 회수, 도달 검사에서 weak 제외. ClassRef 왕복, 미등록(Reject·ReportAndNull), Base 위반, struct ID 넣기 거부, 추상 클래스 허용, Required null 저장 거부, 타입 도구 이름(기본·`Name=`·충돌 RMC2203·`none` 예약). 키 위치의 미등록 거부는 B9f, Deprecated ClassRef 로드 진단·재저장은 B9h, ClassRef 텍스트(TypeId 32·36자 입력)는 B9i 목록으로 옮겼다(B9d2 리뷰 반영).
 
 **B9e**: set·unset·누락 세 경우 왕복(누락 → 생성자 값), Optional<String>·Optional<값 struct> 왕복과 2단계 할당 실패 rollback, 거부 내부 형식 RMC2306·Array 원소 위치는 컨테이너 쪽 코드(RMC2304), 순환 RMC2302, 경로 Emplace·Reset·set 여부 조회·unset 멤버 NotFound, FieldValue kind = 내부 종류. Map·Set 위치의 Optional(RMC2305)은 B9f, StaticArray 원소의 Optional(RMC2307)은 B9g 목록으로 옮겼다(B9e 구현 반영).
 
-**B9f**: Core — 순서, 같은 키 대입 위치 유지, 제거 뒤 재삽입, 압축, Reserve, 할당 실패 무변경, 해시 충돌 mask. 리플렉션 — 키 종류별 왕복(Enum 키의 레코드 의존·native 대조), 순서 보존 왕복, 중복 키 decode 거부(String·Name 대소문자), 키 위치의 미선언 enum은 정책과 무관하게 거부, 잘린 payload·count 사전 검사, MaxElements 저장 거부·로드 허용, Name 키 2a intern, 값 struct 누락 멤버 = 원소 기본값, WeakRef 값 왕복, 진단 경로가 삽입 순번, 거부 형식 RMC2305. 경로 — key 읽기·쓰기·Erase·옛 값, `InsertDefault`, 없는 Name 키 NotFound 할당 없음, `SamePropertyPath` key 비교, key 따옴표 문법. 키·값·원소 위치의 Optional(`OrderedMap<K, Optional<V>>`·`OrderedSet<Optional<T>>`·Optional 키)은 RMC2305(B9e에서 옮김). ObjectRefMap — Marking 중 staged 맵, Commit 간선 검증, 관찰자 계수, 장벽·shade, null 값, Required 값, 실패 시 불변. ClassRef 키·원소의 미등록 클래스는 decode 정책 `unknownClass`와 무관하게 거부(1.7절 — ReportAndNull이어도 NotFound).
+**B9f**: Core — 순서, 같은 키 대입 위치 유지, 제거 뒤 재삽입, 압축, Reserve, 할당 실패 무변경, 해시 충돌 mask. 리플렉션 — 키 종류별 왕복(Enum 키의 레코드 의존·native 대조), 순서 보존 왕복, 중복 키 decode 거부(String·Name 대소문자), 키 위치의 미선언 enum은 정책과 무관하게 거부, 잘린 payload·count 사전 검사, MaxElements 저장 거부·로드 허용, Name 키 2a intern, 값 struct 누락 멤버 = 원소 기본값, WeakObjectRef 값 왕복, 진단 경로가 삽입 순번, 거부 형식 RMC2305. 경로 — key 읽기·쓰기·Erase·옛 값, `InsertDefault`, 없는 Name 키 NotFound 할당 없음, `SamePropertyPath` key 비교, key 따옴표 문법. 키·값·원소 위치의 Optional(`OrderedMap<K, Optional<V>>`·`OrderedSet<Optional<T>>`·Optional 키)은 RMC2305(B9e에서 옮김). ObjectRefMap — Marking 중 staged 맵, Commit 간선 검증, 관찰자 계수, 장벽·shade, null 값, Required 값, 실패 시 불변. ClassRef 키·원소의 미등록 클래스는 decode 정책 `unknownClass`와 무관하게 거부(1.7절 — ReportAndNull이어도 NotFound).
 
 **B9g**: 원소 종류별 정적 배열 왕복, ObjectRef 정적 배열의 GC·SetReference·순환 그래프, 참조 struct 정적 배열, NATIVE 형질의 배열 강한 참조 검출, count 불일치 InvalidArgument, 다차원·N 범위 RMC2307·Optional 원소 RMC2307(B9e에서 옮김), 경로 삽입 Unsupported, Required 원소, 성질 표 대조(모든 ○ 칸이 실제로 등록·왕복됨 — 뒤 단계마다 행 추가).
 
@@ -1270,7 +1272,7 @@ Core 커밋(B9b1·B9c1·B9f1·B9i1)은 다른 단계와 독립이라 먼저 해�
 | 텍스트 | Delimited가 아니면 그대로(None은 `None`), Delimited면 None은 `""`(PropertyName.cpp:42-53) | 출력 그대로·None은 `None`, 입력은 빈 값·`None` | 같다(비Delimited) |
 | 차이 판정 | 대소문자 무시 `Identical` | 표시 byte | RCM 63행(사용자 결정 U7) |
 
-### 18.4 WeakRef·ClassRef
+### 18.4 WeakObjectRef·ClassRef
 
 | 항목 | UE 5.8 | Rocks | 다른 이유 |
 |---|---|---|---|
@@ -1381,7 +1383,7 @@ Core 커밋(B9b1·B9c1·B9f1·B9i1)은 다른 단계와 독립이라 먼저 해�
 | invariant | HistoryType None + 문자열(Text.cpp:969·976-988) | 형태 1 | 같다 |
 | 텍스트 | `INVTEXT`·`NSLOCTEXT`(Text.cpp:2052-2059, TextHistory.cpp:1151-1176) | 명령행 Invariant, JSON 문자열·객체 | AS 13절·JSON |
 | 비교 | 문화 불변·지역화·빈 값·문자열 표 여부가 다르면 다름, 지역화는 identity(같은 포인터), 편집기(GIsEditor)·invariant면 표시 문자열 비교(TextProperty.cpp:63-121) | wire byte | RCM 63행 |
-| Sparks | — | Text는 저장 불가(SL 1115행) | B9l은 C++ 에셋 데이터(UI CU8)용 |
+| Sparks | — | Text는 저장 불가(SL 15절) | B9l은 C++ 에셋 데이터(UI CU8)용 |
 
 ### 18.13 bitfield
 
@@ -1412,7 +1414,7 @@ Core 커밋(B9b1·B9c1·B9f1·B9i1)은 다른 단계와 독립이라 먼저 해�
 | A5 | 숨김 열거자 → InvalidSetting | B9i3 | AS 435행 |
 | A6 | 검증 보고 출력(선택 — JsonWriter 직접 출력도 된다) | B9i4 | AS 1절 A6 |
 | (World) | 부착 계층 영속화 재검토(결정 21), 외부 객체 패키지의 weak import | B9d1 | RF 1023행 |
-| (Sparks) | `T?`(같은 저장 단위 안 weak)·`Map`·`Set`·`Class<T>`·`@tableRow`(`OrderedMap<Name, InstancedStruct<>>`), Tag → Name, TagSet → `OrderedSet<Name>`, `Row<T>` → Name(`Tag?`·`Row<T>?`는 None Name — Optional<Name>을 쓰지 않는다, SL 1198행 SD19) | B9c·B9d·B9e·B9f·B9j | SL 311·481-484·495·1090·1115행 |
+| (Sparks) | `T?`(같은 저장 단위 안 weak)·`Map`·`Set`·`Class<T>`·`@tableRow`(`OrderedMap<Name, InstancedStruct<>>`), Tag → Name, TagSet → `OrderedSet<Name>`, `Row<T>` → Name(`Tag?`·`Row<T>?`는 None Name — Optional<Name>을 쓰지 않는다, SL 19절 SD19) | B9c·B9d·B9e·B9f·B9j | SL 311·481-484·495·1090·1115행 |
 | (UI) | CU4 map key 경로(인코딩 가능한 key 단계), CU8 Text(DeepClone) | B9f3·B9l | UI 7절 CU4·CU8 행 |
 
 AS 514행 MinMagFilter·MipFilter는 닫힌 값 집합이므로 enum(B3)으로 충분하다(Name 소비자가 아니다). B9j·B9k·B9l·B9m은 A 단계 소비자가 없지만 사용자 결정대로 A0-G 앞에서 끝낸다.
@@ -1441,7 +1443,7 @@ U5의 Deprecated 저장 범위: UE의 저장 불가 판정은 패키지 저장 �
 2. Rocks `Atomic`은 통째 단위이며 UE `immutable`·native 결과를 따른다. UE `Atomic`의 깊은 전체 쓰기에 대응하는 의미는 없다(3.1절).
 3. Name 복원은 1단계 수집 → 2a 일괄 intern → 2단계 소비. pool 한도 실패는 2a 실패다(4.1절).
 4. Name 길이 상한은 UE 5.8과 같은 규칙이다: 번호 접미를 뗀 base가 1,023 UTF-16 단위 이하(UE 이름 전부 수용 — 처음 확정안의 "UTF-8 3,072 byte"는 번호 접미를 빠뜨려 base 3,069 byte + `_2147483646`인 UE 이름을 거부했다. B9c2 리뷰 반영, 조정자 결정 2026-11-16).
-5. WeakRef는 같은 그래프 안만 보존하고, 정책별 처리는 5.1절 표다. Include는 지연 덮어쓰기로 순서와 무관하게 한다.
+5. WeakObjectRef는 같은 그래프 안만 보존하고, 정책별 처리는 5.1절 표다. Include는 지연 덮어쓰기로 순서와 무관하게 한다.
 6. ClassRef의 영속 값은 TypeId, 검사는 쓰기·encode·decode 1단계, 미등록은 정책(키 위치는 늘 거부).
 7. 타입 도구 이름 하나를 asset 명령·ClassRef·InstancedStruct·Sparks가 같이 쓴다(5.2절).
 8. Optional wire는 전용 tag(present + 값), 위치는 필드·멤버만, 내부에서 참조 제외(6절).
@@ -1481,7 +1483,7 @@ U5의 Deprecated 저장 범위: UE의 저장 불가 판정은 패키지 저장 �
 - reparent된 클래스: Base를 바꾼 뒤 옛 ClassRef 값은 Base 파생 위반이라 정책과 무관하게 로드가 실패한다. 고치는 경로(migrate 또는 A1 decode 정책 선택)는 A1이 정한다.
 - 사용 중인 Registry 사이 값 복사 일반 API(Text DeepClone 외 Name 토큰 pool 일치 등)는 PIE 복제 설계와 함께.
 - `asset-info` 출력 재입력의 override 기록: 값이 같아도 override 경로로 기록되어 A5 뒤 기본값 전파가 끊긴다. A5가 기준 차이 출력과 함께 정한다(재입력 시 기준과 같은 값을 기록하지 않는 옵션 등).
-- Sparks 필드·struct 멤버의 SaveGame 표시 주체: SL `@save`(SL 224행)는 영속 표시다. 결정 U5(멤버마다 표시)에서 Sparks struct 멤버를 누가 SaveGame으로 표시하는지는 Sparks 단계가 정한다.
+- Sparks 필드·struct 멤버의 SaveGame 표시 주체: SL `@save`(SL 2.4절)는 영속 표시다. 결정 U5(멤버마다 표시)에서 Sparks struct 멤버를 누가 SaveGame으로 표시하는지는 Sparks 단계가 정한다.
 - PIE 복제에서 Transient 클래스 객체의 처리: B9는 Keep(보존)으로 정했다. PIE가 그 객체를 다시 만드는 쪽을 원하면 PIE 복제 설계에서 정한다.
 - Deprecated 클래스 ClassRef 값의 같은 값 재기록(B9h2 묶음 리뷰): 쓰기는 Deprecated를 거부하지만 지금 값과 같은 값은 받는다(FieldValue 쓰기·생성 live·staged 쓰기는 무동작, 경로 원소·멤버 쓰기는 지금 값과 대조). 텍스트 대입 묶음(B9i)·undo·붙여넣기 재적용도 같은 규칙을 지켜야 한다 — B9i 시험 목록에 적었다. Map 값 경로 쓰기(`PathWrite`)는 지금 값을 보지 않아 Deprecated를 늘 거부한다. B9i는 쓰기 전에 지금 값과 비교해 같으면 쓰지 않는 쪽으로 정했다(B9i 묶음 리뷰 반영 — 단일 값 `m[k]=v`와 Array·Set·Map 통째 목록 모두, 10.2절). undo·붙여넣기(CU4)도 같은 방법을 쓴다.
 - B9i가 남긴 일과 맡을 단계(B9i 묶음 리뷰 반영 2026-11-17):
@@ -1518,13 +1520,13 @@ U5의 Deprecated 저장 범위: UE의 저장 불가 판정은 패키지 저장 �
 | RF | 3.4절 185행 | enum underlying 8종(RMC2401 뜻 변경) |
 | RF | 3.5절 194-217행 | ValueKind 목록·`FieldSchema.key`·등록 규칙·키 대상 |
 | RF | 4.1절 242행, 4.6절 | 상속 금지 → 12절, 깊이 규칙에 InstancedStruct 합, struct 등록의 base·Atomic mask |
-| RF | 5.1절 382행 | 배열 원소 종류에 Int8·Int16·Name·WeakRef·ClassRef·InstancedStruct·Text |
+| RF | 5.1절 382행 | 배열 원소 종류에 Int8·Int16·Name·WeakObjectRef·ClassRef·InstancedStruct·Text |
 | RF | 5.4절(397-403행) | wire 14–18, 원소 tag 허용 목록 |
 | RF | 6.1·6.2·6.4절 | 참조 문맥의 weak 쓰기·읽기, 2a Name intern, 관찰 struct의 Name 제한, 진단 경로의 삽입 순번 |
 | RF | 7절 647·650행, 7.1절 | `PathStep` 선택자·key 단계, "도구 계층" → ReflectionText, 대입 묶음 게시(`BeginBatchPublish` — 대상 고정·재확인·관찰자 예약·준비 단위), 새 종류 경로 연산 |
 | RF | 10절 표(956-974행) | 15절 진단 |
 | RF | 11절 | 리플렉션 B9 단계 연결 |
-| RF | 12절 결정 4(1006행)·21(1023행)·22(1024행) | B9k로 열림, WeakRef PROPERTY 가능(계층 결정은 World), struct 차이 단위는 Atomic, 세이브게임 "전부" = 기준 차이 없음·필드 범위는 SaveGame |
+| RF | 12절 결정 4(1006행)·21(1023행)·22(1024행) | B9k로 열림, WeakObjectRef PROPERTY 가능(계층 결정은 World), struct 차이 단위는 Atomic, 세이브게임 "전부" = 기준 차이 없음·필드 범위는 SaveGame |
 | RF | 12절 열린 문제 1032·1033·1036행 | TMap·TSet, FText·클래스 참조, 배열 기능(정적 배열·원소)을 지우고 이 문서로 연결. `ScriptName`·`SoftClassRef`·`EditFixedSize`·Instanced·overridable 배열은 남김 |
 | RCM | 18행·81행(2단계) | `ClassRef<Base>` 영속 값 타입은 B9d, 등록 핸들 캐시는 2단계 |
 | RCM | 62·64·70행 | 3.3절 정정 문구 |
@@ -1544,12 +1546,12 @@ U5의 Deprecated 저장 범위: UE의 저장 불가 판정은 패키지 저장 �
 | AS | 451·453행 | Downscale은 Map + Name, OodleTextureSdkVersion은 Name 필드 |
 | AS | 13절(571-600행) | 타입 도구 이름, `--unset`·`--erase` 목록 옵션, Map `k:v`(첫 `:`), Flags `+`, key 경로 문법, escape 표, asset-info 출력(`<경로>=<값>`·`--json`·`--all`) |
 | SL | 20·482-484행 | 컨테이너 = OrderedMap·OrderedSet, `Class<T>` = ClassRef, 타입 도구 이름, 키 제한(실수 키 불가) |
-| SL | 24·213·495행 | 객체 `T?` 필드 = 같은 저장 단위 안 WeakRef, 셀 사이는 World 영속 참조 |
+| SL | 24·213·495행 | 객체 `T?` 필드 = 같은 저장 단위 안 WeakObjectRef, 셀 사이는 World 영속 참조 |
 | SL | 1115·1198행 | 저장 가능 타입의 C++ 대응(Tag → Name, TagSet → OrderedSet<Name>, Row<T> → Name, `?`는 None) |
 | UI | 7절 CU8 행 | 낡은 "bool·정수·실수·Guid·String·ObjectRef만" 서술 정정 — 반영 완료(UI 초안 2.0의 CU8 행이 이미 고친 서술이다) |
 | UI | 7절 CU4 행 | map key 경로는 B9f3(인코딩 가능한 key 단계) |
 | EIP | 2.3절(133-139행) | authoring LocalTransform은 `Transform`(혼합 — 2026-11-17부터 모든 성분 double), Transform3f·Transform3d는 같은 실패 규약의 단일 정밀도 값 타입 |
-| EngineRuntime | 130·271행 | 부착 계층 "WeakObjectRef 뒤 저장 안 됨" → WeakRef PROPERTY 가능, 결정은 World 단계 |
+| EngineRuntime | 130·271행 | 부착 계층 "WeakObjectRef 뒤 저장 안 됨" → WeakObjectRef PROPERTY 가능, 결정은 World 단계 |
 | CoreDataFoundations | Json 절 | `JsonWriter::Float`, `JsonValue::Position` |
 | Implementation/ReflectionMetadata.ko.md(RM) | 지정자 표(85-100행 부근)·struct 절(141-145행)·descriptor 절(198-202행)·65·67행 | 새 지정자·descriptor 키·PROPERTY 거부 목록·상속 규칙(단계별 구현 때) |
 | Implementation/Serialization.ko.md | 55행 부근 | 새 wire·ValueArray 원소 확장 |
