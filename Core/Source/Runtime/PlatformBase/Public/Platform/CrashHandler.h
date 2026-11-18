@@ -48,4 +48,8 @@ void RemoveCrashHandler() noexcept;
 // InstallCrashHandler가 설치한 스레드에 부른다. 그 밖의 스레드(외부 라이브러리)는 직접 부른다.
 void PrepareThreadForCrashHandling() noexcept;
 
+// PrepareThreadForCrashHandling이 그 스레드에 잡은 것을 돌려준다(POSIX 대체 stack).
+// platform::Thread가 끝날 때 부른다.
+void ReleaseThreadCrashHandling() noexcept;
+
 } // namespace rocks::platform

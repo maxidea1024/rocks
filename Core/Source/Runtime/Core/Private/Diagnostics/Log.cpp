@@ -214,14 +214,30 @@ void Log::SetFrame(uint64 frame) noexcept {
 
 namespace detail {
 
-void LogTerminationHook(const char*, usize) noexcept {
-    // Log::Fatal·assert가 이 스레드에서 이미 flush했다(그 뒤 platform::Fatal이 hook을 부른다).
-    if (fatalInProgress) {
-        return;
+namespace {
+
+// 로그 hook을 걸기 전의 hook이다(flush 뒤 연쇄한다).
+constinit platform::TerminationHook chainedTerminationHook = nullptr;
+
+} // namespace
+
+void SetChainedTerminationHook(platform::TerminationHook hook) noexcept {
+    platform::AtomicStore<platform::MemoryOrder::Release>(&chainedTerminationHook, hook);
+}
+
+void LogTerminationHook(const char* message, usize bytes) noexcept {
+    // Log::Fatal·assert가 이 스레드에서 이미 flush했으면(그 뒤 platform::Fatal이 hook을 부른다)
+    // 다시 하지 않는다.
+    if (!fatalInProgress) {
+        fatalInProgress = true;
+        FlushInstalledLogForTermination();
+        fatalInProgress = false;
     }
 
-    fatalInProgress = true;
-    FlushInstalledLogForTermination();
+    if (const platform::TerminationHook chained =
+            platform::AtomicLoad<platform::MemoryOrder::Acquire>(&chainedTerminationHook)) {
+        chained(message, bytes);
+    }
 }
 
 } // namespace detail

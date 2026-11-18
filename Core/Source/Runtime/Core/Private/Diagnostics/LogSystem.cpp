@@ -160,9 +160,17 @@ void RefreshLogFastMinimum(LogSystem& system, uint8 minimum) noexcept {
 // ---- LogInstallScope ----
 
 LogInstallScope::LogInstallScope(LogSystem& system) noexcept {
-    // platform::Fatal·OS 예외·신호 때 설치된 LogSystem을 flush하는 종료 hook이다. 함수는 프로세스
-    // 수명 동안 유효하고 설치된 것이 없으면 아무것도 하지 않으므로 해제 때 되돌리지 않는다.
-    (void)platform::SetTerminationHook(&detail::LogTerminationHook);
+    // platform::Fatal·OS 예외·신호 때 설치된 LogSystem을 flush하는 종료 hook을 건다. 바깥 범위가
+    // 이미 걸었으면 그대로 두고, 처음 거는 범위가 앞 hook을 기억해 해제 때 되돌린다(로그 hook은
+    // flush 뒤 앞 hook에 연쇄한다).
+    const platform::TerminationHook previousHook =
+        platform::SetTerminationHook(&detail::LogTerminationHook);
+    if (previousHook != &detail::LogTerminationHook) {
+        previousHook_ = previousHook;
+        ownsHook_ = true;
+        detail::SetChainedTerminationHook(previousHook);
+    }
+
     uint64 dropped = 0;
     {
         platform::LockGuard lock(InstallMutex());
@@ -187,6 +195,11 @@ LogInstallScope::LogInstallScope(LogSystem& system) noexcept {
 }
 
 LogInstallScope::~LogInstallScope() noexcept {
+    if (ownsHook_) {
+        (void)platform::SetTerminationHook(previousHook_);
+        detail::SetChainedTerminationHook(nullptr);
+    }
+
     platform::LockGuard lock(InstallMutex());
     (void)platform::AtomicExchange<MemoryOrder::SequentiallyConsistent>(&installedSystem,
                                                                         previous_);
@@ -341,6 +354,8 @@ void LogSystem::Stop() noexcept {
 
     {
         platform::LockGuard lock(sinkMutex_);
+        // 마지막 통과 기록 뒤의 버림도 알린다.
+        ReportRateLimits();
         FlushSinks();
     }
 
@@ -475,6 +490,12 @@ usize LogSystem::Pump(usize maxRecords) noexcept {
     }
 
     const usize total = DrainQueue(maxRecords);
+    if (total == 0) {
+        // 통과한 기록이 없어도 버린 수는 알린다(묶음 끝 알림을 기다리지 않게).
+        platform::LockGuard lock(sinkMutex_);
+        ReportRateLimits();
+    }
+
     platform::AtomicStore<MemoryOrder::Release>(&pumping_, 0u);
     return total;
 }
@@ -753,12 +774,15 @@ bool LogSystem::PassRateLimit(LogLevel level, const LogCategory& category, uint6
     // 상한 이하다. CAS 재시도는 같은 칸을 동시에 쓰는 생산자 사이에서만 생긴다.
     constexpr uint32 WindowShift = 32;
     constexpr uint64 CountMask = NumericLimits<uint32>::Max();
-    const uint64 window = (now / clockFrequency_) & CountMask;
+    const uint32 window = static_cast<uint32>(now / clockFrequency_);
     uint64 state = platform::AtomicLoad<MemoryOrder::Relaxed>(&slot->state);
     for (;;) {
         uint64 desired = 0;
-        if ((state >> WindowShift) != window) {
-            desired = (window << WindowShift) | 1u;
+        // 창은 앞으로만 옮긴다. 늦게 온 생산자의 과거 시각은 지금 창의 수로 판정한다(되돌리면 같은
+        // 창의 상한이 여러 번 초기화된다). 차이는 32-bit 순환 차이로 본다.
+        const auto stateWindow = static_cast<uint32>(state >> WindowShift);
+        if (static_cast<int32>(window - stateWindow) > 0) {
+            desired = (static_cast<uint64>(window) << WindowShift) | 1u;
         } else if ((state & CountMask) < limit) {
             desired = state + 1;
         } else {
@@ -783,7 +807,8 @@ void LogSystem::ReportRateLimits() noexcept {
     for (uint32 index = 0; index < high; ++index) {
         RateLimit& slot = rateLimits_[index];
         const uint64 dropped = Load(slot.dropped);
-        if (dropped == slot.reported || (slot.noticed && slot.noticeSecond == second)) {
+        const uint64 reported = Load(slot.reported);
+        if (dropped == reported || (slot.noticed && slot.noticeSecond == second)) {
             continue;
         }
 
@@ -793,7 +818,7 @@ void LogSystem::ReportRateLimits() noexcept {
         {
             platform::LockGuard lock(rateMutex_);
             if (platform::AtomicLoad<MemoryOrder::Relaxed>(&slot.hash) == InvalidLogCategoryHash) {
-                slot.reported = dropped;
+                platform::AtomicStore<MemoryOrder::Relaxed>(&slot.reported, dropped);
                 continue;
             }
 
@@ -805,8 +830,8 @@ void LogSystem::ReportRateLimits() noexcept {
             limit = platform::AtomicLoad<MemoryOrder::Relaxed>(&slot.limit);
         }
 
-        const uint64 delta = dropped - slot.reported;
-        slot.reported = dropped;
+        const uint64 delta = dropped - reported;
+        platform::AtomicStore<MemoryOrder::Relaxed>(&slot.reported, dropped);
         slot.noticeSecond = second;
         slot.noticed = true;
         // 출력 쪽에서 직접 렌더해 넘긴다(큐·rate limit을 거치지 않는다).
@@ -860,6 +885,8 @@ Result<void> LogSystem::SetRateLimit(StringView prefix, uint32 perSecond) noexce
     }
 
     RateLimit& slot = rateLimits_[empty];
+    // 다시 쓰는 칸의 지난 버림 수를 알린 것으로 친다(새 접두사의 알림에 섞이지 않게).
+    platform::AtomicStore<MemoryOrder::Relaxed>(&slot.reported, Load(slot.dropped));
     platform::MemoryCopy(rateLimitNames_[empty], prefix.Data(), prefix.ByteCount());
     rateLimitNames_[empty][prefix.ByteCount()] = '\0';
     // 상한·창을 먼저 쓰고 해시를 공개한다(해시를 본 생산자는 상한도 본다).
@@ -873,6 +900,32 @@ Result<void> LogSystem::SetRateLimit(StringView prefix, uint32 perSecond) noexce
 
     (void)platform::AtomicFetchAdd<MemoryOrder::SequentiallyConsistent>(&rateLimitCount_, 1u);
     return Result<void>::Success();
+}
+
+Result<void> LogSystem::ClearRateLimit(StringView prefix) noexcept {
+    if (inSink) {
+        return Result<void>::Failure(ErrorCode::Busy);
+    }
+
+    if (ValidateLogCategoryName(prefix) != LogCategoryNameError::None) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const uint64 hash = HashLogCategoryName(prefix);
+    platform::LockGuard lock(rateMutex_);
+    for (usize index = 0; index < MaxLogRateLimits; ++index) {
+        if (platform::AtomicLoad<MemoryOrder::Relaxed>(&rateLimits_[index].hash) == hash &&
+            EqualsIgnoringAsciiCase(StringView(rateLimitNames_[index]), prefix)) {
+            platform::AtomicStore<MemoryOrder::SequentiallyConsistent>(&rateLimits_[index].hash,
+                                                                       InvalidLogCategoryHash);
+            (void)platform::AtomicFetchSub<MemoryOrder::SequentiallyConsistent>(&rateLimitCount_,
+                                                                                1u);
+            rateLimitNames_[index][0] = '\0';
+            return Result<void>::Success();
+        }
+    }
+
+    return Result<void>::Failure(ErrorCode::NotFound);
 }
 
 Result<void> LogSystem::ClearRateLimits() noexcept {
@@ -1033,6 +1086,17 @@ void LogSystem::DeliverFatal(Span<const uint8> capture) noexcept {
 bool LogSystem::FlushForTermination(uint32 timeoutMilliseconds) noexcept {
     if (platform::AtomicLoad<MemoryOrder::Acquire>(&started_) == 0 || inSink ||
         detail::OnLogWriterThread()) {
+        return false;
+    }
+
+    // 종료를 부른 스레드(크래시한 스레드)가 출력 스레드 자신이면 큐를 비울 주체가 없다. 기다리지
+    // 않고 비상 경로로 알린다.
+    const uint64 terminating = platform::TerminatingThreadId();
+    if (terminating != 0 &&
+        terminating == platform::AtomicLoad<MemoryOrder::Acquire>(&writerThread_)) {
+        detail::WriteLogEmergencyText(LogLevel::Error, LogLogging.Name(),
+                                      "The log writer thread itself terminated; queued records "
+                                      "are lost");
         return false;
     }
 

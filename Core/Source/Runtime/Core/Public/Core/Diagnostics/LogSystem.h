@@ -10,6 +10,7 @@
 #include <Core/Diagnostics/RuntimeLogSink.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
+#include <Platform/Fatal.h>
 #include <Platform/Sync.h>
 #include <Platform/Thread.h>
 
@@ -143,7 +144,8 @@ struct LogSystemStats {
     uint64 reentered = 0;
     // 설치 전·해제 뒤 버린 낮은 레벨 기록 수(설치 때 받은 값)
     uint64 droppedBeforeInstall = 0;
-    // 카테고리별 rate limit으로 버린 기록 수(모든 칸 합)
+    // 카테고리별 rate limit으로 버린 기록 수(모든 칸 합). 알림은 접두사마다 묶음 끝·Pump·Stop에서
+    // 1초에 한 번까지 나간다.
     uint64 rateLimited = 0;
     // 출력 스레드를 만들지 못해 동기 비상 모드로 낮췄는지
     bool emergencyMode = false;
@@ -162,6 +164,9 @@ void FlushInstalledLogForTermination() noexcept;
 // platform::SetTerminationHook에 거는 함수다. Log::Fatal·assert가 이미 flush했으면(이 스레드의
 // Fatal 진행 표시) 다시 하지 않는다.
 void LogTerminationHook(const char* message, usize bytes) noexcept;
+
+// LogTerminationHook이 flush 뒤 연쇄할 앞 hook이다(LogInstallScope가 정한다).
+void SetChainedTerminationHook(platform::TerminationHook hook) noexcept;
 
 // 설치·해제 때마다 하나씩 오르는 전역 세대 값이다(SRCU 세대 뒤집기). 해제가 뒤집기를 마쳤는지
 // 순서를 확인하는 시험·진단용이다.
@@ -249,7 +254,10 @@ public:
     // 가득 차면 CapacityExceeded, 해시가 같은 다른 이름이 있으면 AlreadyExists, sink 콜백 안 Busy.
     Result<void> SetRateLimit(StringView prefix, uint32 perSecond) noexcept;
 
-    // rate limit을 모두 지운다(설정을 다시 적용할 때). sink 콜백 안에서 부르면 Busy다.
+    // prefix의 rate limit을 지운다. 없으면 NotFound, sink 콜백 안에서 부르면 Busy다.
+    Result<void> ClearRateLimit(StringView prefix) noexcept;
+
+    // rate limit을 모두 지운다. sink 콜백 안에서 부르면 Busy다.
     Result<void> ClearRateLimits() noexcept;
 
     // level·category의 기록이 지금 활성인지다(컴파일 타임 하한은 Log::IsEnabled가 본다). Fatal은 늘
@@ -444,6 +452,9 @@ public:
 
 private:
     LogSystem* previous_;
+    // 이 범위가 건 종료 hook과 그 전 hook이다(해제 때 되돌린다, 로그 hook은 앞 hook에 연쇄한다).
+    platform::TerminationHook previousHook_ = nullptr;
+    bool ownsHook_ = false;
 };
 
 } // namespace rocks

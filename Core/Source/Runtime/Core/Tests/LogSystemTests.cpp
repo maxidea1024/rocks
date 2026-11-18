@@ -2,6 +2,7 @@
 #include <Core/Diagnostics/Log.h>
 #include <Core/Diagnostics/LogSystem.h>
 #include <Core/Memory/SystemAllocator.h>
+#include <Core/Time/DateTime.h>
 #include <Platform/Atomics.h>
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
@@ -1157,4 +1158,91 @@ TEST(LogSystemSyncKeepsLargeValuesLikeManual) {
     CHECK(syncSink.Text() == manualSink.Text());
     CHECK(syncSink.Text().ByteCount() ==
           sizeof("[Info][Tests.System] large \n") - 1 + sizeof(large) - 1);
+}
+
+// Log::Write(RuntimeTemplate)도 사용자 Formatter의 IsValidSpec으로 spec을 검사한다(DateTime은
+// "ms"만).
+TEST(LogWriteRuntimeTemplateChecksFormatterSpec) {
+    ResetUninstalledDrops();
+    SystemAllocator allocator;
+    LogSystem logs(allocator, Config(LogMode::Manual));
+    LineSink sink;
+    REQUIRE(logs.AddSink(sink).IsOk());
+    REQUIRE(logs.Start().IsOk());
+    const DateTime time = DateTime::TryFromDate(2026, 11, 18, 1, 2, 3).Value();
+    {
+        LogInstallScope installed(logs);
+        Log::Write(LogLevel::Info, LogSystemTests, RuntimeTemplate{StringView("at {Time:zz}")},
+                   time);
+        Log::Write(LogLevel::Info, LogSystemTests, RuntimeTemplate{StringView("at {Time:ms}")},
+                   time);
+        CHECK(logs.Pump() == 2);
+    }
+
+    CHECK(sink.Text() ==
+          "[Info][Tests.System] at {Time:zz} [template error: InvalidFormatterSpec]\n"
+          "[Info][Tests.System] at 2026-11-18T01:02:03.000Z\n");
+}
+
+// 창은 앞으로만 옮긴다: 늦게 온 생산자의 과거 시각(6초)이 지금 창(7초)을 되돌려 상한을 다시 열지
+// 않는다. 버린 수는 통과한 기록이 없어도 Pump에서 알린다.
+TEST(LogSystemRateLimitWindowNeverMovesBackward) {
+    ResetUninstalledDrops();
+    SystemAllocator allocator;
+    LogSystem logs(allocator, RateLimitConfig());
+    LineSink sink;
+    REQUIRE(logs.AddSink(sink).IsOk());
+    REQUIRE(logs.Start().IsOk());
+    REQUIRE(logs.SetRateLimit("Tests", 3).IsOk());
+    {
+        LogInstallScope installed(logs);
+        SetTestClockSeconds(7);
+        for (uint32 index = 0; index < 3; ++index) {
+            Log::Info(LogSystemTests, "window record {Index}", index);
+        }
+
+        SetTestClockSeconds(6);
+        Log::Info(LogSystemTests, "late producer {Index}", 0);
+        SetTestClockSeconds(7);
+        Log::Info(LogSystemTests, "after late producer {Index}", 1);
+        CHECK(logs.Pump() == 3);
+        CHECK(logs.Pump() == 0);
+    }
+
+    CHECK(CountText(sink.Text(), "window record") == 3);
+    CHECK(CountText(sink.Text(), "late producer") == 0);
+    CHECK(CountText(sink.Text(), "Rate limit dropped 2 records for Tests (limit 3/s)") == 1);
+    CHECK(logs.Stats().rateLimited == 2);
+}
+
+namespace {
+
+uint32 previousHookCalls = 0;
+
+void CountingTerminationHook(const char*, usize) noexcept {
+    ++previousHookCalls;
+}
+
+} // namespace
+
+// LogInstallScope는 종료 hook을 걸고 해제 때 앞 hook으로 되돌린다. 로그 hook은 flush 뒤 앞 hook에
+// 연쇄한다.
+TEST(LogInstallScopeChainsAndRestoresTerminationHook) {
+    ResetUninstalledDrops();
+    SystemAllocator allocator;
+    LogSystem logs(allocator, Config(LogMode::Manual));
+    REQUIRE(logs.Start().IsOk());
+    previousHookCalls = 0;
+    const platform::TerminationHook original =
+        platform::SetTerminationHook(&CountingTerminationHook);
+    {
+        LogInstallScope installed(logs);
+        const platform::TerminationHook current = platform::SetTerminationHook(nullptr);
+        CHECK(current == &detail::LogTerminationHook);
+        (void)platform::SetTerminationHook(current);
+        current("probe", 5);
+        CHECK(previousHookCalls == 1);
+    }
+
+    CHECK(platform::SetTerminationHook(original) == &CountingTerminationHook);
 }

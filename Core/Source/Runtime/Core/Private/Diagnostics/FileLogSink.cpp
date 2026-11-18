@@ -313,6 +313,7 @@ Result<void> FileLogSink::Write(const LogEvent& event) noexcept {
         return Result<void>::Failure(disabled_ ? ErrorCode::Unsupported : ErrorCode::NotFound);
     }
 
+    eventNanoseconds_ = event.monotonicNanoseconds;
     if (batchUsed_ == 0) {
         batchFirstNanoseconds_ = event.monotonicNanoseconds;
     }
@@ -352,6 +353,9 @@ Result<void> FileLogSink::Append(StringView text) noexcept {
                 outputFailed_ = true;
                 return written;
             }
+
+            // 새 묶음의 첫 기록은 지금 쓰는 기록이다(시간 회전 판정).
+            batchFirstNanoseconds_ = eventNanoseconds_;
         }
 
         const usize room = config_.batchBytes - batchUsed_;

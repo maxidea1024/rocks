@@ -67,7 +67,8 @@ void ForEachEntry(StringView list, Visit&& visit) noexcept {
             ++end;
         }
 
-        const StringView entry = StringView(list.Data() + start, end - start).TrimAscii();
+        const StringView entry =
+            detail::TrimLogSettingText(StringView(list.Data() + start, end - start));
         if (!entry.IsEmpty()) {
             visit(entry);
         }
@@ -76,18 +77,11 @@ void ForEachEntry(StringView list, Visit&& visit) noexcept {
     }
 }
 
-// 항목 하나를 접두사와 레벨로 나눈다.
+// 항목 하나를 접두사와 레벨로 나눈다(상수 평가 검사 CheckLogLevelsSyntax와 같은 나누기).
 bool SplitEntry(StringView entry, StringView& prefix, LogLevel& level) noexcept {
-    for (usize index = 0; index < entry.ByteCount(); ++index) {
-        if (entry.Data()[index] == '=') {
-            prefix = StringView(entry.Data(), index).TrimAscii();
-            const StringView name =
-                StringView(entry.Data() + index + 1, entry.ByteCount() - index - 1).TrimAscii();
-            return !prefix.IsEmpty() && TryParseLogLevel(name, level);
-        }
-    }
-
-    return false;
+    StringView name;
+    return detail::SplitLogSettingEntry(entry, prefix, name) && !prefix.IsEmpty() &&
+           TryParseLogLevel(name, level);
 }
 
 config::ConsoleSettingDefinition Define(StringView name, StringView help,
@@ -486,6 +480,7 @@ void LogHost::Stop() noexcept {
     }
 
     appliedLevelsBytes_ = 0;
+    appliedRateLimitsBytes_ = 0;
     if (logs_) {
         logs_->Stop();
         if (logs_->Stats().writerAbandoned) {
@@ -539,16 +534,44 @@ void LogHost::OnLevelsChanged(void* context, const config::ConfigChange&) noexce
 }
 
 void LogHost::ApplyRateLimits(const config::ConfigContext& settings) noexcept {
-    // 앞 설정을 모두 지우고 다시 적용한다. 잘못된 항목은 Warning 뒤 건너뛴다(설정 단계 거부는
-    // CVar 이관 CVR7의 Validate가 CheckLogRateLimitsSyntax로 한다).
-    (void)logs_->ClearRateLimits();
+    // 내용이 그대로면 아무것도 하지 않는다(다른 설정의 sync 지점에서 창이 초기화되지 않게). 바뀌면
+    // 빠진 접두사만 지우고, 남은 접두사는 상한만 바꾼다(창·수 유지). 잘못된 항목은 Warning 뒤
+    // 건너뛴다(설정 단계 거부는 CVar 이관 CVR7의 Validate가 CheckLogRateLimitsSyntax로 한다).
     const StringView list = TextOf(settings, LogRateLimitsSetting);
+    const StringView applied(appliedRateLimits_, appliedRateLimitsBytes_);
+    if (list == applied) {
+        return;
+    }
+
+    ForEachEntry(applied, [&](StringView old) {
+        StringView prefix;
+        StringView count;
+        if (!detail::SplitLogSettingEntry(old, prefix, count)) {
+            return;
+        }
+
+        bool kept = false;
+        ForEachEntry(list, [&](StringView entry) {
+            StringView newPrefix;
+            StringView newCount;
+            kept = kept || (detail::SplitLogSettingEntry(entry, newPrefix, newCount) &&
+                            EqualsIgnoringAsciiCase(newPrefix, prefix));
+        });
+        if (!kept) {
+            (void)logs_->ClearRateLimit(prefix);
+        }
+    });
+    appliedRateLimitsBytes_ = 0;
     if (list.ByteCount() > MaxLogRateLimitsBytes) {
+        (void)logs_->ClearRateLimits();
         Log::Warning(LogHostCategory,
                      "log.rate_limits is longer than {Limit} bytes; rate limits are not applied",
                      MaxLogRateLimitsBytes);
         return;
     }
+
+    platform::MemoryCopy(appliedRateLimits_, list.Data(), list.ByteCount());
+    appliedRateLimitsBytes_ = list.ByteCount();
 
     ForEachEntry(list, [&](StringView entry) {
         StringView prefix;

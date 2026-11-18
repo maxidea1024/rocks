@@ -326,6 +326,9 @@ private:
     // 마지막으로 적용한 log.levels(지울 접두사를 알려고 복사해 둔다)다.
     char appliedLevels_[MaxLogLevelsBytes]{};
     usize appliedLevelsBytes_ = 0;
+    // 마지막으로 적용한 log.rate_limits(바뀐 칸만 고치려고 복사해 둔다)다.
+    char appliedRateLimits_[MaxLogRateLimitsBytes]{};
+    usize appliedRateLimitsBytes_ = 0;
     ErrorCode fileError_ = ErrorCode::None;
     // Start가 미리 잡아 둔 AbandonedOutputs 저장소다(Stop 때 할당 실패가 없게). 정상 Stop은
     // 돌려준다.

@@ -311,7 +311,7 @@ host.Stop();                                           // WriterAbandoned()면 �
 - **압축·시간 회전:** 압축은 Compression의 `FixedWorkspaceCompressor`(작업 공간을 만들 때 한 번 잡는 zstd 문맥)로 하므로 파일을 연 뒤 할당이 없다. `log decode`·`log view`가 압축·봉인+압축 파일을 푼다. 보관 정리는 `.log`·`.log.zst`를 함께 센다.
 - **rate limit:** `log.rate_limits`(또는 `LogSystem::SetRateLimit`)는 접두사별 1초 창마다 정확히 상한만 통과시킨다. Trace–Warning에만 적용하고 Error·Fatal은 세지 않는다. 버린 수는 접두사마다 1초에 한 번까지 `Rate limit dropped {Dropped} records for {Prefix} (limit {Limit}/s)` Info로 알리고 `Stats().rateLimited`에 쌓인다. 잘못된 항목은 적용 때 Warning 후 건너뛴다(`CheckLogRateLimitsSyntax`가 CVR7의 `Validate`).
 - 기록 시각은 `MonotonicTicks`로 캡처하고 출력 때 ns로 바꾼다(`LogEvent::monotonicTicks`·`monotonicNanoseconds`). 시험은 `LogSystemConfig::clock`·`clockFrequency`로 시계를 주입한다.
-- 레이아웃 패턴이 잘못되면 `LogHost::Start`가 위치와 이유를 담은 Error를 한 번 남기고 기본 레이아웃으로 계속한다(예: `log.file.layout is not a valid layout at byte 8: unknown layout token; using the default layout`). 설정 단계에서 거부하는 일은 CVar 이관(CVR7) 뒤다. 문법만 보는 상수 평가 함수 `CheckLogLayoutSyntax`·`CheckLogLevelsSyntax`(통과면 빈 view, 아니면 영어 이유)가 그때 `Validate`로 쓰인다.
+- 레이아웃 패턴이 잘못되면 `LogHost::Start`가 위치와 이유를 담은 Error를 한 번 남기고 기본 레이아웃으로 계속한다(예: `log.file.layout is not a valid layout at byte 8: unknown layout token; using the default layout`). 설정 단계에서 거부하는 일은 CVar 이관(CVR7) 뒤다. 이 Error는 설치 전에 나므로 stderr(비상 경로)로만 나가고 로그 파일에는 남지 않는다. 문법만 보는 상수 평가 함수 `CheckLogLayoutSyntax`·`CheckLogLevelsSyntax`(통과면 빈 view, 아니면 영어 이유)가 그때 `Validate`로 쓰인다.
 - `log.level`은 늘 값이 있으므로(기본 `info`) 설정 문맥을 주면 호스트 프리셋의 전역 최소를 덮어쓴다. 설정 문맥 없이 `Start`하면 프리셋 그대로다.
 - 멈춘 sink 때문에 `Stop`이 출력 스레드를 남기면 `LogHost`는 LogSystem·sink를 파괴하지 않고 프로세스 끝까지 놓아 두며 `WriterAbandoned()`가 참이 된다(그 뒤 `Start`는 Busy). 호스트는 이때 정리 없이 프로세스를 끝낸다(Sandbox는 `_Exit`). 생성자에 준 allocator도 프로세스 끝까지 살아 있어야 한다.
 - 암호화를 켰는데 공개키가 없거나 틀리면 파일을 쓰지 않고 Error를 한 번 남긴다(평문으로 내려가지 않는다).
@@ -350,6 +350,8 @@ RocksCommandlet log view game.log --key dev.key --correlation request=55
 
 - 파일 하나나 폴더(`*.log`·`*.log.zst`, 시작 시각·번호 순)를 읽는다. `.log.zst`는 풀고, `--key`면 봉인 파일(압축 묶음 포함)을 푼다.
 - 거르기: `--level`(최소), `--category`(점 접두사, 대소문자 무시), `--event`(16진), `--since`·`--until`(UTC ISO 8601 사전순), `--grep`, `--correlation <칸>=<id>`.
+- 봉인 여부는 파일 머리(magic)로 정한다. 키 없이 봉인 파일을 만나면 경고하고 건너뛴다. 압축 파일이 잘렸으면 앞 frame까지 보여 주고 경고한다. `--event`는 16진 숫자로 비교한다. 기본 레이아웃 기록의 이어진 줄(여러 줄 메시지)은 앞 기록을 따른다.
+- `log pack <평문> <out.log.zst>`·`log seal ... --compress`는 압축 파일을 만드는 진단·시험용 명령이다.
 - JSON lines 파일은 모든 필드로 거른다. 기본 레이아웃 텍스트는 시각·레벨·카테고리로, 다른 레이아웃 텍스트는 `--grep`만 된다. 분석이 목적이면 `log.file.format = jsonlines`를 권한다.
 
 ## 시험에서 쓰기

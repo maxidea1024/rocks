@@ -157,6 +157,8 @@ private:
     usize compressedCapacity_ = 0;
     // 시간 회전: 지금 묶음과 지금 파일의 첫 기록 단조 시각(ns)이다.
     uint64 batchFirstNanoseconds_ = 0;
+    // 지금 Write 중인 기록의 단조 시각이다(묶음이 기록 중간에 나뉘면 새 묶음의 첫 시각).
+    uint64 eventNanoseconds_ = 0;
     uint64 fileFirstNanoseconds_ = 0;
     bool fileHasRecords_ = false;
     // 보관 목록: 오래된 것부터 retention칸의 경로 고리다(Open에서 확보).

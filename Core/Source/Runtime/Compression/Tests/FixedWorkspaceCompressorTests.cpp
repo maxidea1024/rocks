@@ -15,8 +15,10 @@ constexpr uint32 Batches = 8;
 
 } // namespace
 
-// 만든 뒤에는 압축마다 할당하지 않고, 각 묶음은 독립 frame이라 이어 붙인 결과가 한 zstd 스트림으로
-// 풀린다. 크기 상한을 넘는 입력·모자란 출력은 CapacityExceeded다.
+// 만든 뒤에는 압축마다 할당하지 않고(CountingAllocator는 우리 할당기만 본다. zstd 내부 malloc이
+// 없다는 근거는 정적 문맥이 크기를 다시 잡지 않고 오류를 낸다는 것이다 — 여러 크기의 묶음이 모두
+// 성공하므로 고정 작업 공간으로 충분하다), 각 묶음은 독립 frame이라 이어 붙인 결과가 한 zstd
+// 스트림으로 풀린다. 크기 상한을 넘는 입력·모자란 출력은 CapacityExceeded다.
 TEST(FixedWorkspaceCompressorCompressesWithoutAllocating) {
     SystemAllocator system;
     CountingAllocator counting(system);

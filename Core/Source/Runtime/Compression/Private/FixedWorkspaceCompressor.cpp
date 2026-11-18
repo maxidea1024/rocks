@@ -123,13 +123,10 @@ Result<usize> FixedWorkspaceCompressor::TryCompress(Span<const uint8> source,
     }
 
     auto* context = static_cast<ZSTD_CCtx*>(context_);
-    // 앞 호출의 실패 상태를 지우고 원본 크기를 frame 머리에 기록한다. 매개변수는 고정이라 작업
-    // 공간이 바뀌지 않는다.
+    // 앞 호출의 실패 상태를 지운다. 원본 크기는 ZSTD_compress2가 frame 머리에 적는다. 매개변수는
+    // 고정이라 작업 공간을 다시 잡지 않는다. 정적 문맥(ZSTD_initStaticCCtx)은 더 큰 작업 공간이
+    // 필요해도 할당하지 않고 오류를 돌려준다(무할당의 근거 — zstd 내부 malloc을 쓰지 않는다).
     (void)ZSTD_CCtx_reset(context, ZSTD_reset_session_only);
-    if (ZSTD_isError(ZSTD_CCtx_setPledgedSrcSize(context, source.Size()))) {
-        return Result<usize>::Failure(ErrorCode::DependencyFailed);
-    }
-
     const size_t written = ZSTD_compress2(context, destination.Data(), destination.Size(),
                                           source.Data(), source.Size());
     if (ZSTD_isError(written)) {

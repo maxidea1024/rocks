@@ -329,21 +329,41 @@ static_assert(CheckLogRateLimitsSyntax("A=1,B=1,C=1,D=1,E=1,F=1,G=1,H=1,I=1,J=1,
               "log.rate_limits has more than MaxLogRateLimits entries");
 
 // 설정 log.rate_limits가 LogSystem에 적용되고, 잘못된 항목은 건너뛴다.
+namespace {
+
+// 늘 같은 시각을 돌려주는 시계다(rate limit 창을 결정적으로).
+uint64 FixedClock() noexcept {
+    constexpr uint64 FixedTicks = 1000;
+    return FixedTicks;
+}
+
+} // namespace
+
+// 설정 log.rate_limits가 LogSystem에 적용되고, 잘못된 항목은 건너뛴다. 같은 내용을 다시 적용하면
+// 창을 초기화하지 않는다.
 TEST(LogHostAppliesRateLimitsFromConfig) {
     LogSettingsFixture fixture;
     fixture.Apply(R"({"log.mode": "sync", "log.rate_limits": "Tests=2, Broken, Audio=0"})");
+    LogSystemConfig preset = LogSystemConfig::ForEngineHost();
+    preset.clock = &FixedClock;
+    preset.clockFrequency = 1;
     LogHost host(fixture.system);
-    REQUIRE(host.Start(LogSystemConfig::ForEngineHost(), fixture.context.Get(), "Test"));
+    REQUIRE(host.Start(preset, fixture.context.Get(), "Test"));
+    REQUIRE(host.Watch(*fixture.context));
     {
         LogInstallScope installed(host.System());
         for (uint32 index = 0; index < 5; ++index) {
             Log::Info(LogHostTests, "rate limited {Index}", index);
         }
+
+        // 다른 설정만 바뀐 sync 지점: rate limit 창은 그대로라 더 통과하지 않는다.
+        REQUIRE(fixture.context->AddAssignment(config::ConfigLayer::Console, "console",
+                                               LogLevelsSetting, "Audio=error"));
+        REQUIRE(fixture.context->Sync());
+        Log::Info(LogHostTests, "rate limited {Index}", 5);
     }
 
-    // 같은 초 안이면 3건, 초 경계를 넘었으면 그보다 적게 버린다(경계는 실제 시계).
-    CHECK(host.System().Stats().rateLimited >= 1);
-    CHECK(host.System().Stats().rateLimited <= 3);
+    CHECK(host.System().Stats().rateLimited == 4);
     host.Stop();
 }
 

@@ -102,6 +102,7 @@ constexpr usize FallbackPageBytes = 4096;
 
 void* ThreadEntry(void* context) noexcept {
     RunThread(*static_cast<ThreadState*>(context));
+    ReleaseThreadCrashHandling();
     return nullptr;
 }
 

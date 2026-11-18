@@ -2,6 +2,8 @@
 
 #include <Platform/Atomics.h>
 #include <Platform/CrashHandler.h>
+#include <Platform/Clock.h>
+#include <Platform/Thread.h>
 
 #include <Windows.h>
 
@@ -61,15 +63,17 @@ DWORD WINAPI FlushThreadMain(void*) noexcept {
 }
 
 LONG WINAPI CrashFilter(EXCEPTION_POINTERS* info) noexcept {
-    // 처음 들어온 스레드만 flush를 맡긴다. 다른 스레드가 겹쳐 들어오면 바로 앞 처리기로 간다.
+    // 처음 들어온 스레드가 flush를 맡긴다. 겹쳐 들어온 스레드도 같은 제한 시간까지 기다린 뒤 앞
+    // 처리기로 간다(먼저 연쇄해 프로세스를 끝내 첫 스레드의 flush를 끊지 않게).
     if (AtomicExchange<MemoryOrder::AcquireRelease>(&crashing, 1u) == 0) {
+        detail::RecordTerminatingThread(CurrentThreadId());
         FormatCrashMessage(info != nullptr && info->ExceptionRecord != nullptr
                                ? info->ExceptionRecord->ExceptionCode
                                : 0);
         SetEvent(crashEvent);
-        (void)WaitForSingleObject(doneEvent,
-                                  AtomicLoad<MemoryOrder::Relaxed>(&timeoutMilliseconds));
     }
+
+    (void)WaitForSingleObject(doneEvent, AtomicLoad<MemoryOrder::Relaxed>(&timeoutMilliseconds));
 
     return previousFilter != nullptr ? previousFilter(info) : EXCEPTION_CONTINUE_SEARCH;
 }
@@ -127,6 +131,10 @@ void RemoveCrashHandler() noexcept {
     SetEvent(crashEvent);
     (void)WaitForSingleObject(flushThread, INFINITE);
     CloseHandles();
+}
+
+void ReleaseThreadCrashHandling() noexcept {
+    // Windows는 스레드별로 따로 잡은 것이 없다(stack 보장분은 스레드 stack 안이다).
 }
 
 void PrepareThreadForCrashHandling() noexcept {

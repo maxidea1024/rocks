@@ -8,6 +8,7 @@
 #include <Core/Text/NumberText.h>
 #include <Core/Text/StringBuilder.h>
 #include <Compression/Compression.h>
+#include <Compression/CompressionStream.h>
 #include <Crypto/Bytes.h>
 #include <Crypto/LogFileSealer.h>
 #include <Platform/File.h>
@@ -27,8 +28,12 @@ constexpr StringView Usage =
     "      Print the plaintext of an encrypted log file. Reports a missing end marker (abnormal\n"
     "      termination) after decoding every complete batch, and reports tampering as an error.\n"
     "      --json writes the status as one JSON object on stderr instead of text.\n"
-    "  log seal <plain input> <out-file> --public <public key file>\n"
-    "      Encrypt a plain file in the same format (diagnostics and tests).\n"
+    "  log seal <plain input> <out-file> --public <public key file> [--compress]\n"
+    "      Encrypt a plain file in the same format (diagnostics and tests). --compress seals\n"
+    "      zstd-compressed batches like log.file.compress.\n"
+    "  log pack <plain input> <out-file>\n"
+    "      Write a plain file as independent zstd frames per batch (*.log.zst, diagnostics and\n"
+    "      tests).\n"
     "  log view <file|folder> [--key <private key file>] [--level <minimum>] [--category "
     "<prefix>]\n"
     "           [--event <id>] [--since <UTC>] [--until <UTC>] [--grep <text>]\n"
@@ -230,14 +235,46 @@ Result<int32> KeyGen(Span<const StringView> args, CommandletOutput& output) noex
     return Write(output, CommandletStream::Output, text.View(), 0);
 }
 
-// 압축 로그 하나를 풀 때 받아들이는 최대 평문 byte 수다(악성 입력의 메모리 폭주 방지).
-constexpr usize MaxDecompressedLogBytes = usize{1} << 32;
+// 압축 로그 하나를 풀 때 받아들이는 최대 평문 byte 수다(악성 입력의 메모리 폭주 방지). 스트림으로
+// 풀므로 인증되지 않은 frame 머리가 주장하는 크기를 미리 잡지 않는다.
+constexpr usize MaxDecompressedLogBytes = usize{1} << 30;
+
+// 스트림 해제에 한 번에 넘기는 압축 입력 byte 수다(실패해도 앞 조각의 출력은 남는다).
+constexpr usize InflateChunkBytes = 64 * 1024;
+
+// 이어 붙인 zstd frame을 스트림으로 풀어 out 뒤에 붙인다. 잘렸거나 손상된 frame에서 멈추고 그
+// 전까지 푼 내용은 남긴다. 실패(잘림·손상·상한 초과)는 그 오류이고, 성공이면 끝까지 풀었다.
+Result<void> InflateFrames(Span<const uint8> input, Allocator& allocator,
+                           Array<uint8>& out) noexcept {
+    DecompressStreamLimits limits;
+    limits.maxOutputBytes = MaxDecompressedLogBytes;
+    auto stream = DecompressStream::TryCreate(CompressionFormat::Zstd, limits, allocator);
+    if (!stream) {
+        return Result<void>::Failure(stream.Error());
+    }
+
+    for (usize offset = 0; offset < input.Size(); offset += InflateChunkBytes) {
+        const usize count =
+            input.Size() - offset < InflateChunkBytes ? input.Size() - offset : InflateChunkBytes;
+        auto written = stream.Value().TryWriteAppend(input.Slice(offset, count), out);
+        if (!written) {
+            return Result<void>::Failure(written.Error());
+        }
+
+        if (out.Size() > MaxDecompressedLogBytes) {
+            return Result<void>::Failure(ErrorCode::CapacityExceeded);
+        }
+    }
+
+    return stream.Value().TryFinish();
+}
 
 // 묶음 평문이 zstd frame(압축 뒤 봉인, 머리 LogFileFlagCompressedBatches)이면 풀어서 넘긴다.
 struct DecodeContext {
     CommandletOutput* output = nullptr;
     uint64 batches = 0;
     Array<uint8>* inflated = nullptr;
+    Allocator* allocator = nullptr;
 };
 
 Result<void> PrintPlaintext(void* raw, Span<const uint8> plaintext) noexcept {
@@ -246,10 +283,9 @@ Result<void> PrintPlaintext(void* raw, Span<const uint8> plaintext) noexcept {
     Span<const uint8> bytes = plaintext;
     if (context.inflated != nullptr && plaintext.Size() != 0) {
         context.inflated->Clear();
-        auto inflated = TryDecompressAppend(CompressionFormat::Zstd, plaintext,
-                                            MaxDecompressedLogBytes, *context.inflated);
-        if (!inflated) {
-            return Result<void>::Failure(inflated.Error());
+        if (auto inflated = InflateFrames(plaintext, *context.allocator, *context.inflated);
+            !inflated) {
+            return inflated;
         }
 
         bytes = context.inflated->View();
@@ -296,7 +332,8 @@ Result<int32> Decode(Span<const StringView> args, CommandletOutput& output) noex
 
     Array<uint8> inflated(allocator);
     DecodeContext context{&output, 0,
-                          crypto::LogFileHasCompressedBatches(file.View()) ? &inflated : nullptr};
+                          crypto::LogFileHasCompressedBatches(file.View()) ? &inflated : nullptr,
+                          &allocator};
     auto decoded =
         crypto::TryDecodeLogFile(pair.Value(), file.View(), allocator, &PrintPlaintext, &context);
     char storage[MessageBytes];
@@ -342,7 +379,8 @@ Result<int32> Decode(Span<const StringView> args, CommandletOutput& output) noex
 
 // 평문 파일을 같은 형식으로 봉인한다(진단·시험용).
 Result<int32> Seal(Span<const StringView> args, CommandletOutput& output) noexcept {
-    if (args.Size() != 4 || args[2] != "--public") {
+    const bool compress = args.Size() == 5 && args[4] == "--compress";
+    if ((args.Size() != 4 && !compress) || args[2] != "--public") {
         return UsageError(output);
     }
 
@@ -355,11 +393,19 @@ Result<int32> Seal(Span<const StringView> args, CommandletOutput& output) noexce
         return failure;
     }
 
-    crypto::LogFileSealer sealer(recipient.View());
+    crypto::LogFileSealer sealer(recipient.View(),
+                                 compress ? crypto::LogFileFlagCompressedBatches : uint8{0});
+    auto settings = CompressionSettings::TryDefault(CompressionFormat::Zstd);
+    auto bound = TryGetCompressBound(CompressionFormat::Zstd, SealBatchBytes);
+    if (!settings || !bound) {
+        return Result<int32>::Failure(ErrorCode::DependencyFailed);
+    }
+
     Array<uint8> sealed(allocator);
+    Array<uint8> frame(allocator);
     const usize batches = (plain.Size() + SealBatchBytes - 1) / SealBatchBytes;
     if (!sealed.TryResize(crypto::LogFileHeaderBytes +
-                          (batches + 1) * (SealBatchBytes + sealer.SealOverhead()))) {
+                          (batches + 1) * (bound.Value() + sealer.SealOverhead()))) {
         return Result<int32>::Failure(ErrorCode::OutOfMemory);
     }
 
@@ -375,8 +421,17 @@ Result<int32> Seal(Span<const StringView> args, CommandletOutput& output) noexce
     for (usize offset = 0; offset < plain.Size(); offset += SealBatchBytes) {
         const usize count =
             plain.Size() - offset < SealBatchBytes ? plain.Size() - offset : SealBatchBytes;
-        auto record =
-            sealer.TrySeal(plain.View().Slice(offset, count), false, sealed.View().RightChop(used));
+        Span<const uint8> batch = plain.View().Slice(offset, count);
+        if (compress) {
+            frame.Clear();
+            if (auto packed = TryCompressAppend(settings.Value(), batch, frame); !packed) {
+                return Result<int32>::Failure(packed.Error());
+            }
+
+            batch = frame.View();
+        }
+
+        auto record = sealer.TrySeal(batch, false, sealed.View().RightChop(used));
         if (!record) {
             return Result<int32>::Failure(record.Error());
         }
@@ -393,9 +448,43 @@ Result<int32> Seal(Span<const StringView> args, CommandletOutput& output) noexce
     return WriteNewFile(output, args[1], sealed.View().Left(used));
 }
 
+// 평문 파일을 묶음(SealBatchBytes)마다 독립 zstd frame으로 압축한다(log.file.compress 파일과 같은
+// 모양, 진단·시험용).
+Result<int32> Pack(Span<const StringView> args, CommandletOutput& output) noexcept {
+    if (args.Size() != 2) {
+        return UsageError(output);
+    }
+
+    SystemAllocator allocator;
+    Array<uint8> plain(allocator);
+    Result<int32> failure = Result<int32>::Success(1);
+    if (!ReadWholeFile(output, args[0], plain, failure)) {
+        return failure;
+    }
+
+    auto settings = CompressionSettings::TryDefault(CompressionFormat::Zstd);
+    if (!settings) {
+        return Result<int32>::Failure(settings.Error());
+    }
+
+    Array<uint8> packed(allocator);
+    for (usize offset = 0; offset < plain.Size(); offset += SealBatchBytes) {
+        const usize count =
+            plain.Size() - offset < SealBatchBytes ? plain.Size() - offset : SealBatchBytes;
+        if (auto frame =
+                TryCompressAppend(settings.Value(), plain.View().Slice(offset, count), packed);
+            !frame) {
+            return Result<int32>::Failure(frame.Error());
+        }
+    }
+
+    return WriteNewFile(output, args[1], packed.View());
+}
+
 // log view가 읽는 파일 확장자와 번호 해석의 진법이다.
 constexpr StringView LogFileExtensionText = ".log";
 constexpr uint64 DecimalBase = 10;
+constexpr uint32 HexBase = 16;
 
 // 압축 로그 파일(봉인하지 않음)의 확장자다.
 constexpr StringView CompressedLogFileExtensionText = ".log.zst";
@@ -404,6 +493,7 @@ constexpr StringView CompressedLogFileExtensionText = ".log.zst";
 struct ViewPlaintext {
     Array<uint8>* text = nullptr;
     bool compressed = false;
+    Allocator* allocator = nullptr;
 };
 
 Result<void> AppendPlaintext(void* raw, Span<const uint8> plaintext) noexcept {
@@ -412,9 +502,21 @@ Result<void> AppendPlaintext(void* raw, Span<const uint8> plaintext) noexcept {
         return context.text->TryAppend(plaintext);
     }
 
-    auto inflated = TryDecompressAppend(CompressionFormat::Zstd, plaintext, MaxDecompressedLogBytes,
-                                        *context.text);
-    return inflated ? Result<void>::Success() : Result<void>::Failure(inflated.Error());
+    return InflateFrames(plaintext, *context.allocator, *context.text);
+}
+
+// 봉인한 로그 파일(magic "RKLOGENC")인지다.
+bool IsSealedLogFile(Span<const uint8> file) noexcept {
+    return file.Size() >= sizeof(crypto::LogFileMagic) &&
+           platform::MemoryEquals(file.Data(), crypto::LogFileMagic, sizeof(crypto::LogFileMagic));
+}
+
+// 파일 하나를 읽지 못했을 때 경고를 남기고 다음 파일로 넘어간다.
+Result<void> WarnFile(CommandletOutput& output, StringView path, StringView reason) noexcept {
+    char storage[MessageBytes];
+    FixedStringBuilder message{Span<char>(storage)};
+    (void)message.TryAppendFormat("log view: '{}': {}\n", path, reason);
+    return output.write(output.context, CommandletStream::Error, message.View());
 }
 
 // 로그 파일 확장자(".log" 또는 ".log.zst")다. 아니면 빈 view다.
@@ -571,8 +673,12 @@ bool Accepts(const ViewFilter& filter, const ViewFields& fields, StringView line
         return false;
     }
 
-    if (!filter.event.IsEmpty() && !EqualsIgnoringAsciiCase(fields.event, filter.event)) {
-        return false;
+    if (!filter.event.IsEmpty()) {
+        auto wanted = TryParseUInt64(filter.event, HexBase);
+        auto actual = TryParseUInt64(fields.event, HexBase);
+        if (!wanted || !actual || wanted.Value() != actual.Value()) {
+            return false;
+        }
     }
 
     // UTC ISO 8601은 같은 모양이면 사전순이 시간순이다.
@@ -762,43 +868,53 @@ Result<int32> View(Span<const StringView> args, CommandletOutput& output) noexce
         }
 
         (void)path.TryAppend(StringView(list.names.Data() + start));
+        if (path.Truncated()) {
+            return Write(output, CommandletStream::Error, "log view: a log file path is too long\n",
+                         1);
+        }
+
         file.Clear();
         if (!ReadWholeFile(output, path.View(), file, failure)) {
             return failure;
         }
 
+        // 봉인 여부는 magic으로 정한다. 압축 파일은 잘린 frame 앞까지 보여 주고 경고한 뒤 다음
+        // 파일로 넘어간다.
         Span<const uint8> text = file.View();
-        if (path.View().EndsWith(CompressedLogFileExtensionText)) {
-            // 묶음마다 독립 frame이다. 이어 붙인 frame을 한 번에 푼다.
-            plain.Clear();
-            auto inflated = TryDecompressAppend(CompressionFormat::Zstd, file.View(),
-                                                MaxDecompressedLogBytes, plain);
-            if (!inflated) {
-                char storage[MessageBytes];
-                FixedStringBuilder message{Span<char>(storage)};
-                (void)message.TryAppendFormat("log view: '{}': {}\n", path.View(),
-                                              ErrorCodeName(inflated.Error()));
-                return Write(output, CommandletStream::Error, message.View(), 1);
+        if (IsSealedLogFile(file.View())) {
+            if (!pair) {
+                if (auto warned =
+                        WarnFile(output, path.View(), "encrypted log file needs --key; skipped");
+                    !warned) {
+                    return Result<int32>::Failure(warned.Error());
+                }
+
+                continue;
             }
 
-            text = plain.View();
-        } else if (pair) {
             plain.Clear();
-            ViewPlaintext collected{&plain, crypto::LogFileHasCompressedBatches(file.View())};
+            ViewPlaintext collected{&plain, crypto::LogFileHasCompressedBatches(file.View()),
+                                    &allocator};
             auto decoded = crypto::TryDecodeLogFile(pair.Value(), file.View(), allocator,
                                                     &AppendPlaintext, &collected);
             if (!decoded) {
-                char storage[MessageBytes];
-                FixedStringBuilder message{Span<char>(storage)};
-                (void)message.TryAppendFormat("log view: '{}': {}\n", path.View(),
-                                              ErrorCodeName(decoded.Error()));
-                return Write(output, CommandletStream::Error, message.View(), 1);
+                (void)WarnFile(output, path.View(), ErrorCodeName(decoded.Error()));
+            }
+
+            text = plain.View();
+        } else if (path.View().EndsWith(CompressedLogFileExtensionText)) {
+            plain.Clear();
+            if (auto inflated = InflateFrames(file.View(), allocator, plain); !inflated) {
+                (void)WarnFile(output, path.View(),
+                               "compressed log is truncated or damaged; showing the frames "
+                               "before it");
             }
 
             text = plain.View();
         }
 
         usize lineStart = 0;
+        bool previousAccepted = false;
         for (usize index = 0; index <= text.Size(); ++index) {
             if (index < text.Size() && text[index] != '\n') {
                 continue;
@@ -815,14 +931,24 @@ Result<int32> View(Span<const StringView> args, CommandletOutput& output) noexce
                 continue;
             }
 
-            ViewFields fields;
-            if (line.Data()[0] == '{') {
-                ReadJsonFields(document, line, fields);
+            // 기본 레이아웃 기록의 이어진 줄(여러 줄 메시지)은 앞 기록의 판정을 따른다.
+            const char first = line.Data()[0];
+            bool accepted = false;
+            if (first != '{' && first != '[') {
+                accepted = previousAccepted;
             } else {
-                ReadTextFields(line, fields);
+                ViewFields fields;
+                if (first == '{') {
+                    ReadJsonFields(document, line, fields);
+                } else {
+                    ReadTextFields(line, fields);
+                }
+
+                accepted = Accepts(filter, fields, line);
+                previousAccepted = accepted;
             }
 
-            if (!Accepts(filter, fields, line)) {
+            if (!accepted) {
                 continue;
             }
 
@@ -862,6 +988,10 @@ Result<int32> RunLogCommand(void*, Span<const StringView> args, CommandletOutput
 
     if (args[0] == "view") {
         return View(rest, output);
+    }
+
+    if (args[0] == "pack") {
+        return Pack(rest, output);
     }
 
     if (args[0] == "--help" && args.Size() == 1) {

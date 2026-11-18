@@ -183,6 +183,24 @@ FormatArg MakeLogArg(const T& value) noexcept {
     }
 }
 
+// 런타임 템플릿이면 인자별 사용자 Formatter spec 검사 함수 배열을 붙인다(공용 FormatArg를 늘리지
+// 않으려고 로그 캡처 전용 배열로 넘긴다). 리터럴 템플릿은 컴파일 타임에 검사했으므로 그대로다.
+// 모든 런타임 템플릿 진입점(CaptureLog, Log::Write)이 이 함수를 거친다.
+template <typename... Args>
+LogCaptureTemplate WithRuntimeSpecChecks(const LogCaptureTemplate& text) noexcept {
+    if constexpr (sizeof...(Args) == 0) {
+        return text;
+    } else {
+        static constexpr LogSpecCheck checks[] = {LogSpecCheckOf<Args>()...};
+        LogCaptureTemplate checked = text;
+        if (checked.runtime) {
+            checked.checks = checks;
+        }
+
+        return checked;
+    }
+}
+
 template <typename... Args>
 Result<usize> CaptureWithArgs(const LogCaptureTarget& target, LogLevel level,
                               const LogCategory& category, const LogCaptureTemplate& text,
@@ -193,15 +211,8 @@ Result<usize> CaptureWithArgs(const LogCaptureTarget& target, LogLevel level,
         return WriteLogCapture(target, level, category, text, nullptr, 0);
     } else {
         const FormatArg list[] = {MakeLogArg(args)...};
-        // 런타임 템플릿의 사용자 Formatter spec 검사 함수(공용 FormatArg를 늘리지 않으려고 로그
-        // 캡처 전용 배열로 넘긴다).
-        static constexpr LogSpecCheck checks[] = {LogSpecCheckOf<Args>()...};
-        LogCaptureTemplate checked = text;
-        if (checked.runtime) {
-            checked.checks = checks;
-        }
-
-        return WriteLogCapture(target, level, category, checked, list, sizeof...(Args));
+        return WriteLogCapture(target, level, category, WithRuntimeSpecChecks<Args...>(text), list,
+                               sizeof...(Args));
     }
 }
 

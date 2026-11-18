@@ -378,6 +378,8 @@ int main(int argc, char** argv) {
                 return test::RunLogCrashProbe(1, i + 1 < argc ? argv[i + 1] : nullptr);
             } else if (strcmp(control, "log-crash-stack-overflow") == 0) {
                 return test::RunLogCrashProbe(2, i + 1 < argc ? argv[i + 1] : nullptr);
+            } else if (strcmp(control, "log-crash-stuck-sink") == 0) {
+                return test::RunLogCrashProbe(3, i + 1 < argc ? argv[i + 1] : nullptr);
             } else if (strcmp(control, "asan-uaf") == 0) {
                 return test::RunAsanNegativeControl();
             } else if (strcmp(control, "assert-stderr-lock") == 0) {

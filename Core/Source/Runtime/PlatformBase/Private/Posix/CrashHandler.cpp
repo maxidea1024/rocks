@@ -2,6 +2,9 @@
 
 #include <Platform/Atomics.h>
 #include <Platform/CrashHandler.h>
+#include <Platform/Memory.h>
+#include <Platform/Clock.h>
+#include <Platform/Thread.h>
 
 #include <pthread.h>
 #include <sched.h>
@@ -33,10 +36,11 @@ struct sigaction previousActions[CrashSignalCount];
 sem_t wakeSemaphore;
 pthread_t flushThread;
 
-// 스레드마다 처리기용 대체 stack이다(정적 TLS, 할당 없음).
+// 스레드마다 처리기용 대체 stack이다. 정적 TLS(모든 스레드가 32 KiB를 차지하고 dlopen 정적 TLS가
+// 모자랄 수 있다) 대신 스레드를 준비할 때 따로 잡고 스레드가 끝나면 돌려준다. 이미 대체 stack이
+// 있으면(ASan 등) 덮어쓰지 않는다.
 constexpr usize AlternateStackAlignment = 16;
-alignas(AlternateStackAlignment) thread_local unsigned char alternateStack[CrashStackReserveBytes];
-thread_local bool alternateStackReady = false;
+thread_local void* alternateStack = nullptr;
 
 void FormatCrashMessage(int signal) noexcept {
     constexpr char Prefix[] = "Fatal signal ";
@@ -94,16 +98,20 @@ usize SignalIndex(int signal) noexcept {
 // 신호 처리기다. flush 스레드를 깨우고(sem_post는 async-signal-safe) 완료 표시를 제한 시간까지
 // 확인한다. 그 뒤 앞 동작을 되돌리고 신호를 다시 낸다(최선 노력).
 void CrashSignalHandler(int signal, siginfo_t*, void*) noexcept {
+    // 처음 들어온 스레드가 flush 스레드를 깨운다. 겹쳐 들어온 스레드도 같은 제한 시간까지 기다린 뒤
+    // 연쇄한다(첫 스레드의 flush를 끊지 않게).
     if (AtomicExchange<MemoryOrder::AcquireRelease>(&crashing, 1u) == 0) {
+        detail::RecordTerminatingThread(CurrentThreadId());
         FormatCrashMessage(signal);
         (void)sem_post(&wakeSemaphore);
-        const int64 deadline =
-            MonotonicNow() +
-            static_cast<int64>(AtomicLoad<MemoryOrder::Relaxed>(&timeoutMilliseconds)) *
-                NanosecondsPerMillisecond;
-        while (AtomicLoad<MemoryOrder::Acquire>(&flushed) == 0 && MonotonicNow() < deadline) {
-            sched_yield();
-        }
+    }
+
+    const int64 deadline =
+        MonotonicNow() +
+        static_cast<int64>(AtomicLoad<MemoryOrder::Relaxed>(&timeoutMilliseconds)) *
+            NanosecondsPerMillisecond;
+    while (AtomicLoad<MemoryOrder::Acquire>(&flushed) == 0 && MonotonicNow() < deadline) {
+        sched_yield();
     }
 
     const usize index = SignalIndex(signal);
@@ -161,15 +169,42 @@ void RemoveCrashHandler() noexcept {
 }
 
 void PrepareThreadForCrashHandling() noexcept {
-    if (alternateStackReady) {
+    if (alternateStack != nullptr) {
+        return;
+    }
+
+    stack_t current{};
+    if (sigaltstack(nullptr, &current) == 0 && (current.ss_flags & SS_DISABLE) == 0) {
+        return;
+    }
+
+    void* memory = AlignedAllocate(CrashStackReserveBytes, AlternateStackAlignment);
+    if (memory == nullptr) {
         return;
     }
 
     stack_t stack{};
-    stack.ss_sp = alternateStack;
-    stack.ss_size = sizeof(alternateStack);
+    stack.ss_sp = memory;
+    stack.ss_size = CrashStackReserveBytes;
     stack.ss_flags = 0;
-    alternateStackReady = sigaltstack(&stack, nullptr) == 0;
+    if (sigaltstack(&stack, nullptr) != 0) {
+        AlignedFree(memory);
+        return;
+    }
+
+    alternateStack = memory;
+}
+
+void ReleaseThreadCrashHandling() noexcept {
+    if (alternateStack == nullptr) {
+        return;
+    }
+
+    stack_t disable{};
+    disable.ss_flags = SS_DISABLE;
+    (void)sigaltstack(&disable, nullptr);
+    AlignedFree(alternateStack);
+    alternateStack = nullptr;
 }
 
 } // namespace rocks::platform
