@@ -1,6 +1,6 @@
 # Rocks GC 대규모 처리 보강 설계
 
-기준일: 2026-11-16, 개정 1(초안). 개정 4(2026-11-18): Registry 규모 점검 반영(14절), Slot hot·cold 분리(6절 GC-S3 "Slot hot·cold 분리", 4절 gate, 11절 결정 5). 개정 2(2026-11-17): 클러스터·영구 영역 상세 설계(13절), 열린 결정 4 확정, 열린 결정 6 해소, UE 클러스터 사실 정정. 개정 3(2026-11-18): 장부 배치·클러스터 표식 경로를 측정에 맞춰 바꾸고 패키지 클러스터의 경계 비율 안전장치를 더함(13.4·13.5·13.9절).
+기준일: 2026-11-16, 개정 1(초안). 개정 4(2026-11-18): Registry 규모 점검 반영(14절), 소스 파일 구성(15절), Slot hot·cold 분리(6절 GC-S3 "Slot hot·cold 분리", 4절 gate, 11절 결정 5). 개정 2(2026-11-17): 클러스터·영구 영역 상세 설계(13절), 열린 결정 4 확정, 열린 결정 6 해소, UE 클러스터 사실 정정. 개정 3(2026-11-18): 장부 배치·클러스터 표식 경로를 측정에 맞춰 바꾸고 패키지 클러스터의 경계 비율 안전장치를 더함(13.4·13.5·13.9절).
 
 **이 문서의 작업은 반드시 해야 하는 작업이다.** 현재 `ObjectRegistry` GC는 AAA급 규모(살아 있는 객체 100만 개 이상)의 게임에서 쓸 수 없는 상태다(2026-11-16 사용자 판단). 이 문서의 GC-S 단계는 선택 최적화가 아니며 성능 미달을 "측정 결과로 관리"하는 대상도 아니다. 단계를 모두 마치고 4절의 성능 gate를 통과해야 GC를 대규모 콘텐츠에 쓸 수 있다고 본다.
 
@@ -520,3 +520,18 @@ outer 간선(생성 때 고정)도 같은 규칙으로 센다. 패키지 고리 
 - 클러스터 레코드 표 훑기(cutoff·정지형 sweep의 표식되지 않은 클러스터 해체와 안전장치): 100K 클러스터에서 약 0.1ms, cutoff slice 최댓값은 10K·100K 모두 1.04–1.10ms로 같았다. slice로 나누는 판(Sweeping의 레코드 커서와 클러스터 epoch로 cutoff 판정)을 만들어 쟀으나 차이가 없어 넣지 않았다.
 - ProcessCluster·해체의 고리 순회(그 클러스터의 경계·소속 수에 비례 — 표식·해체할 양), `ObjectRefArray::IndexOf`·`RemoveReference(handle)`(API 의미), 이름 색인 rehash(분할 상환), 관찰자 `TakeChanges`(키 수), Debug 검증 재계산.
 - 할당자(SystemAllocator·BinnedAllocator·PoolAllocator)의 살아 있는 할당 수에 비례하는 해제·할당은 GC-S6에서 다룬다.
+
+## 15. 소스 파일 구성 (2026-11-18)
+
+GC 구현(`Core/Source/Runtime/ObjectRuntime/Private/`)을 기능별 파일로 나눈다. 한 파일 약 2,000줄(`ObjectRegistryGc.cpp`)을 동작 불변 이동으로 나눴다. 3단계 일반 그래프 표식 개선이 표식 파일만 고치게 하려는 것이다.
+
+| 파일 | 담당 | 새 기능을 넣는 곳 |
+|---|---|---|
+| `ObjectRegistryGc.cpp` | cycle 진행: `Collect`(정지형)·`BeginCollection`·`StepCollection`·`CancelCollection`의 단계 전환, cutoff 뒤 white 판정(`RetireWhiteLocked`), GC 보고 | GC 일정·단계·예산 정책(GC-S5) |
+| `ObjectRegistryGcMark.cpp` | 표식의 공통·직렬 경로: 슬롯 표식(`MarkIndex`)·배치 간선(`MarkHandles`)·참조 위치 표(M3)·신원 간선·직렬 marker(`MarkSerial`)·삽입 장벽(`ShadeLocked`)·cutoff 판정 | 직렬 표식 개선(큐 구조·미리 읽기·M1) |
+| `ObjectRegistryGcParallel.cpp` | 병렬 표식(`MarkParallel` — 참여자 지역 큐·공유 풀·소유 스레드 큐) | 병렬 표식 개선 |
+| `ObjectRegistryGcData.cpp` | GC 밀집 자료: GC 페이지·비트 묶음·타입 표(`AcquireGcType`)·루트 목록과 성장(`PrepareGcGrowth`·`GrowGcLocked`) | 밀집 자료 배치·순서 |
+| `ObjectRegistryGcReclaim.cpp` | sweep 뒤: `RetireLocked`, 회수 대상 목록(Pending·Deferred·Ready), 파괴 요청 목록(`TakeDestroyRequests`), 회수(`ReclaimEligible`·`DrainRetired`) | 회수 예산·잠금(GC-S5) |
+| `ObjectRegistryGcInternal.h` | 위 파일들이 함께 쓰는 상수(시계 간격·미리 읽기 거리·할당 태그)와 작은 helper(표식 비트 읽기·쓰기, 로그) | GC 파일 사이 공용 helper |
+
+클러스터 표식·해체(`ObjectRegistryClusters.cpp`)와 참조 쓰기·장벽 호출부(`ObjectRegistryEdges.cpp` 등)는 이미 따로 있다. 파일은 수백 줄 안쪽을 유지하고, 천 줄 가까이 커지면 기능 경계로 다시 나눈다(나눔은 동작 불변 이동 커밋).
