@@ -23,6 +23,16 @@ namespace rocks::graphics::gles {
 inline constexpr GLuint PixelTextureUnit = 0;
 inline constexpr GLuint VertexTextureUnitBase = 16;
 inline constexpr GLuint UploadTextureUnit = 32;
+// 버퍼 view slot n의 typed view(samplerBuffer)는 PS 유닛 PixelBufferViewUnitBase + n, VS 유닛
+// VertexBufferViewUnitBase + n이다(PS 텍스처 0과 VS 16 뒤, PipelineDesc 고정 배치). 구조화·raw
+// view는 storage block binding n이다.
+inline constexpr GLuint PixelBufferViewUnitBase = PixelTextureUnit + 1;
+inline constexpr GLuint VertexBufferViewUnitBase = VertexTextureUnitBase + 1;
+// 조회 수단이 없는 버퍼 최대 크기의 보수적 값이다(D3D 보장식의 하한 128 MiB, DeviceLimits).
+inline constexpr uint64 ConservativeBufferBytes = uint64{128} << 20;
+// raw view로 읽는 storage block 이름의 접두사다(SPIRV-Cross가 ByteAddressBuffer에 붙이는 이름).
+// 그 밖의 storage block은 구조화 view다.
+inline constexpr char RawStorageBlockPrefix[] = "type_ByteAddressBuffer";
 
 // 그리기 상수(DrawConstants)를 담는 루트 상수 에뮬레이션 배열의 이름과 vec4 수다(ShaderSystem
 // 7.2절 4항: `<단계>u_<타입>`, UE `$Globals`의 pu_h 자리).
@@ -53,6 +63,28 @@ inline constexpr uint32 MaxMipLevels = 16;
 struct BufferRecord {
     GLuint buffer = 0;
     uint64 size = 0;
+    BufferDesc desc;
+    // 살아 있는 view 수다. 0이 아닐 때 Retire하면 버퍼 이름은 orphanBuffers_로 옮겨 마지막 view를
+    // 놓을 때 지운다(storage view는 그리기 때 버퍼 이름으로 묶는다).
+    uint32 viewCount = 0;
+};
+
+struct OrphanBuffer {
+    GLuint buffer = 0;
+    uint32 viewCount = 0;
+};
+
+// 버퍼 view(GX2)다. typed는 버퍼 텍스처 객체(glTexBufferRange), 구조화·raw는 glBindBufferRange로
+// 묶는 (buffer, offset, size)다.
+struct BufferViewRecord {
+    GLuint texture = 0;
+    GLuint buffer = 0;
+    SlotHandle source;
+    uint64 offset = 0;
+    uint64 size = 0;
+    BufferViewKind kind = BufferViewKind::Typed;
+    ViewAccess access = ViewAccess::Read;
+    PixelShaderType shaderType = PixelShaderType::None;
 };
 
 struct TextureRecord {
@@ -98,6 +130,8 @@ struct PipelineRecord {
     uint32 streamMask = 0;
     bool alphaBlend = false;
     CullMode cullMode = CullMode::None;
+    // VS·PS가 읽는 버퍼 view slot이다(program introspection).
+    DrawBufferSlots bufferSlots;
 };
 
 struct SwapChainRecord {
@@ -178,6 +212,11 @@ public:
 
     // --- Device ---
     DeviceInfo Info() const noexcept override;
+    const DeviceCaps& Caps() const noexcept override;
+    uint32 GetPixelFormatSampleCounts(PixelFormat format) const noexcept override;
+    Result<BufferViewHandle> CreateBufferView(BufferHandle buffer,
+                                              const BufferViewDesc& desc) noexcept override;
+    Result<void> ReadBuffer(BufferHandle buffer, uint64 offset, Span<uint8> out) noexcept override;
     Result<SwapChainHandle> CreateSwapChain(const SwapChainDesc& desc) noexcept override;
     Result<void> ResizeSwapChain(SwapChainHandle handle, uint32 width,
                                  uint32 height) noexcept override;
@@ -198,6 +237,7 @@ public:
     Result<GpuFencePoint> EndFrame() noexcept override;
     Result<void> ReadPixels(TextureHandle handle, Span<uint8> out) noexcept override;
     void Retire(BufferHandle handle) noexcept override;
+    void Retire(BufferViewHandle handle) noexcept override;
     void Retire(TextureHandle handle) noexcept override;
     void Retire(PipelineHandle handle) noexcept override;
     void Retire(SwapChainHandle handle) noexcept override;
@@ -244,6 +284,7 @@ private:
                           Span<const VertexBufferBinding> buffers) noexcept override;
     void SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64 offset) noexcept override;
     void SetTexture(TextureHandle handle) noexcept override;
+    void SetBufferView(uint32 slot, BufferViewHandle view) noexcept override;
     void SetConstants(const DrawConstants& constants) noexcept override;
     void Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept override;
     void DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept override;
@@ -319,6 +360,16 @@ private:
     Result<void> PrepareDepthReads() noexcept;
 
     Result<void> MatchVertexInputs(GLuint program, const VertexLayout& layout) noexcept;
+    // --- 장치 능력·버퍼 view(GlesDeviceBuffers.cpp) ---
+    // 장치 한도·기능과 형식별 MSAA 표본 수를 채운다(생성 때 한 번, debug output을 켜기 전).
+    void QueryDeviceCaps(bool desktopContext) noexcept;
+    // 링크한 프로그램의 samplerBuffer uniform·storage block을 고정 배치와 대조해 slot 배치를
+    // 만든다. 배치 밖이면 InvalidArgument다.
+    Result<void> ReflectBufferSlots(GLuint program, DrawBufferSlots& slots) noexcept;
+    bool BufferViewsBound(const PipelineRecord& pipeline) const noexcept;
+    // 파이프라인이 읽는 slot의 view를 유닛·binding에 묶는다(그리기 직전).
+    void ApplyBufferViews(const PipelineRecord& pipeline) noexcept;
+    void ReleaseViewSource(const BufferViewRecord& view) noexcept;
     Result<GLuint> CompileShader(GLenum stage, StringView source) noexcept;
     void StoreLog(GLuint object, bool shader) noexcept;
 
@@ -344,6 +395,12 @@ private:
     SlotArray<SwapChainRecord> swapChains_;
     Array<RetiredObject> retired_;
     SlotArray<ReadbackRecord> readbacks_;
+    SlotArray<BufferViewRecord> bufferViews_;
+    Array<OrphanBuffer> orphanBuffers_;
+    // 장치 능력(GX1)과 형식별 MSAA 표본 수다(생성 때 정해진다).
+    DeviceCaps caps_;
+    uint32 sampleCounts_[MaxPixelFormatNumber + 1] = {};
+    uint32 apiVersion_ = 0;
     GlesStagingSource stagingSource_;
     UniquePtr<StagingPool> staging_;
     UniquePtr<GlesPlatform> platform_;
@@ -396,6 +453,7 @@ private:
     };
     BoundVertexBuffer boundVertex_[MaxVertexStreams];
     BoundIndexBuffer boundIndex_;
+    BufferViewHandle boundViews_[MaxDrawBufferViews];
     DrawConstants constants_;
     uint64 ignoredDraws_ = 0;
     uint64 validationErrors_ = 0;

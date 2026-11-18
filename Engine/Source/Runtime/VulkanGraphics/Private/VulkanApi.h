@@ -32,6 +32,7 @@ namespace rocks::graphics::vulkan {
     X(vkGetPhysicalDeviceFormatProperties)                                                         \
     X(vkGetPhysicalDeviceImageFormatProperties)                                                    \
     X(vkGetPhysicalDeviceFeatures2)                                                                \
+    X(vkGetPhysicalDeviceProperties2)                                                              \
     X(vkEnumerateDeviceExtensionProperties)                                                        \
     X(vkCreateDevice)                                                                              \
     X(vkGetDeviceProcAddr)
@@ -93,7 +94,9 @@ namespace rocks::graphics::vulkan {
     X(vkCreateDescriptorPool)                                                                      \
     X(vkDestroyDescriptorPool)                                                                     \
     X(vkAllocateDescriptorSets)                                                                    \
-    X(vkFreeDescriptorSets)                                                                        \
+    X(vkResetDescriptorPool)                                                                       \
+    X(vkCreateBufferView)                                                                          \
+    X(vkDestroyBufferView)                                                                         \
     X(vkUpdateDescriptorSets)                                                                      \
     X(vkCreateRenderPass)                                                                          \
     X(vkDestroyRenderPass)                                                                         \

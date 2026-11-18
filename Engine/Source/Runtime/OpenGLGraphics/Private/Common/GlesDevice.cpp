@@ -51,7 +51,8 @@ void GlesStagingSource::DestroyStaging(const StagingMemory& memory) noexcept {
 GlesDevice::GlesDevice(Allocator& allocator) noexcept
     : adapterName_(allocator), lastError_(allocator), buffers_(allocator), textures_(allocator),
       pipelines_(allocator), swapChains_(allocator), retired_(allocator), readbacks_(allocator),
-      timestamps_(allocator), timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics) {
+      bufferViews_(allocator), orphanBuffers_(allocator), timestamps_(allocator),
+      timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics) {
     stagingSource_.allocator = &allocator;
 }
 
@@ -88,6 +89,14 @@ GlesDevice::~GlesDevice() {
         }
 
         DeleteRetired(NumericLimits<uint64>::Max());
+        for (const BufferViewRecord& record : bufferViews_) {
+            gl_.DeleteTextures(1, &record.texture);
+        }
+
+        for (const OrphanBuffer& orphan : orphanBuffers_) {
+            gl_.DeleteBuffers(1, &orphan.buffer);
+        }
+
         for (const BufferRecord& record : buffers_) {
             gl_.DeleteBuffers(1, &record.buffer);
         }
@@ -174,6 +183,9 @@ Result<void> GlesDevice::Initialize(const DeviceDesc& desc, const OpenGLDeviceOp
             entry != nullptr ? TextureFormatCaps(*entry, features_) : PixelFormatCaps::None;
     }
 
+    // 장치 능력(GX1)과 MSAA 표본 수(Multisample 능력)를 채운다.
+    QueryDeviceCaps(context.desktopContext);
+
     const uint64 stagingBudget =
         desc.stagingBudgetBytes != 0 ? desc.stagingBudgetBytes : DefaultStagingBudgetBytes;
     auto pool = UniquePtr<StagingPool>::TryMake(
@@ -239,6 +251,7 @@ DeviceInfo GlesDevice::Info() const noexcept {
     info.clockCalibration = timestampsReady_;
     // debug group은 KHR_debug(ES 3.2 core)다.
     info.debugMarkers = true;
+    info.apiVersion = apiVersion_;
     return info;
 }
 
@@ -332,17 +345,26 @@ Result<BufferHandle> GlesDevice::CreateBuffer(const BufferDesc& desc,
         return Result<BufferHandle>::Failure(owner.Error());
     }
 
-    if (desc.size == 0 || initial.Size() != desc.size ||
-        (desc.usage != BufferUsage::Vertex && desc.usage != BufferUsage::Index)) {
+    auto valid = ValidateBufferDesc(desc);
+    if (!valid || initial.Size() != desc.size) {
         return Result<BufferHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (desc.size > caps_.limits.bufferBytes) {
+        Diagnostic message;
+        message.Text("buffer size exceeds the device limit (bufferBytes)");
+        auto rejected = Reject(message, ErrorCode::Unsupported);
+        return Result<BufferHandle>::Failure(rejected.Error());
     }
 
     if (!MakeCurrentForResources()) {
         return FailWith<BufferHandle>("cannot make the OpenGL context current");
     }
 
+    // GL 버퍼 객체는 용도와 무관하게 어느 target에나 묶인다(정점·index·버퍼 텍스처·storage block).
     BufferRecord record;
     record.size = desc.size;
+    record.desc = desc;
     gl_.GenBuffers(1, &record.buffer);
     // 정점 배열(VAO) 상태를 건드리지 않도록 복사 대상 binding에 묶어 채운다(GL_ELEMENT_ARRAY_BUFFER
     // binding은 VAO 상태다).
@@ -622,9 +644,11 @@ Result<PipelineHandle> GlesDevice::CreatePipeline(const PipelineDesc& desc) noex
     }
 
     auto matched = MatchVertexInputs(record.program, desc.layout);
-    if (!matched) {
+    auto reflected =
+        matched ? ReflectBufferSlots(record.program, record.bufferSlots) : Move(matched);
+    if (!reflected) {
         gl_.DeleteProgram(record.program);
-        return Result<PipelineHandle>::Failure(matched.Error());
+        return Result<PipelineHandle>::Failure(reflected.Error());
     }
 
     // 루트 상수 에뮬레이션 배열 위치는 링크 때 한 번 찾는다(ShaderSystem 7.2절 4항).
@@ -682,6 +706,16 @@ void GlesDevice::Retire(BufferHandle handle) noexcept {
     const BufferRecord* record = buffers_.Find(handle.slot);
     if (record == nullptr) {
         return;
+    }
+
+    // view가 남아 있으면 버퍼 이름을 orphan으로 옮겨 마지막 view가 놓일 때 지운다.
+    if (record->viewCount != 0) {
+        auto kept = orphanBuffers_.TryPushBack(OrphanBuffer{record->buffer, record->viewCount});
+        if (kept) {
+            auto removed = buffers_.TryRemove(handle.slot);
+            (void)removed;
+            return;
+        }
     }
 
     RetiredObject entry;

@@ -1,5 +1,7 @@
 #include "D3D12PixelFormats.h"
 
+#include <Graphics/DeviceCaps.h>
+
 namespace rocks::graphics::d3d12 {
 
 namespace {
@@ -339,6 +341,38 @@ PixelFormatCaps QueryFormatCaps(ID3D12Device* device, PixelFormat format) noexce
     Add(caps, buffer && typedUav && Has2(uav, D3D12_FORMAT_SUPPORT2_UAV_ATOMIC_EXCHANGE),
         PixelFormatCaps::TexelBufferAtomic);
     return caps;
+}
+
+uint32 QuerySampleCounts(ID3D12Device* device, PixelFormat format, PixelFormatCaps caps) noexcept {
+    const FormatMapping mapping = MappingOf(format);
+    DXGI_FORMAT target = DXGI_FORMAT_UNKNOWN;
+    if (HasPixelFormatCaps(caps, PixelFormatCaps::RenderTarget)) {
+        target = mapping.rtv;
+    } else if (HasPixelFormatCaps(caps, PixelFormatCaps::DepthStencil)) {
+        target = mapping.dsv;
+    }
+
+    if (device == nullptr || target == DXGI_FORMAT_UNKNOWN) {
+        return 0;
+    }
+
+    uint32 counts = SampleCountBit(1);
+    if (!Has1(Query(device, target), D3D12_FORMAT_SUPPORT1_MULTISAMPLE_RENDERTARGET)) {
+        return counts;
+    }
+
+    for (uint32 samples = 2; samples <= D3D12_MAX_MULTISAMPLE_SAMPLE_COUNT; samples *= 2) {
+        D3D12_FEATURE_DATA_MULTISAMPLE_QUALITY_LEVELS levels = {};
+        levels.Format = target;
+        levels.SampleCount = samples;
+        if (SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_MULTISAMPLE_QUALITY_LEVELS, &levels,
+                                                  sizeof(levels))) &&
+            levels.NumQualityLevels > 0) {
+            counts |= SampleCountBit(samples);
+        }
+    }
+
+    return counts;
 }
 
 } // namespace rocks::graphics::d3d12

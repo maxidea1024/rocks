@@ -95,6 +95,8 @@ Result<void> VulkanDevice::BeginRecording() noexcept {
     }
 
     CommandRecord& record = commands_[picked.Value()];
+    // 앞 제출이 끝난 기록이므로 그 그리기 descriptor set도 더 쓰이지 않는다.
+    ResetRecordPools(record);
     VkCommandBufferBeginInfo begin = {};
     begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -116,6 +118,12 @@ Result<void> VulkanDevice::BeginRecording() noexcept {
     }
 
     boundIndex_ = {};
+    boundTexture_ = white_;
+    for (BufferViewHandle& view : boundViews_) {
+        view = {};
+    }
+
+    descriptorsDirty_ = true;
     ResetTimestampSlots();
     return Result<void>::Success();
 }
@@ -166,12 +174,6 @@ void VulkanDevice::StartPass(const ClearColor& clear) noexcept {
     VkRect2D scissor = {};
     scissor.extent = {target_.width, target_.height};
     functions_.vkCmdSetScissor(frame_, 0, 1, &scissor);
-    const TextureRecord* white = textures_.Find(white_.slot);
-    if (white != nullptr) {
-        functions_.vkCmdBindDescriptorSets(frame_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout_,
-                                           1, 1, &white->set, 0, nullptr);
-    }
-
     const DrawConstants identity;
     functions_.vkCmdPushConstants(frame_, pipelineLayout_,
                                   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
@@ -417,9 +419,11 @@ void VulkanDevice::SetPipeline(PipelineHandle handle) noexcept {
         return;
     }
 
-    // 정점 stride는 파이프라인에 들어 있어 묶인 정점 버퍼가 새 stride로 읽힌다.
+    // 정점 stride는 파이프라인에 들어 있어 묶인 정점 버퍼가 새 stride로 읽힌다. descriptor set
+    // layout은 파이프라인마다 다르므로 다음 그리기가 새로 묶는다.
     functions_.vkCmdBindPipeline(frame_, VK_PIPELINE_BIND_POINT_GRAPHICS, record->pipeline);
     boundPipeline_ = handle.slot;
+    descriptorsDirty_ = true;
 }
 
 void VulkanDevice::SetVertexBuffers(uint32 firstStream,
@@ -470,7 +474,7 @@ void VulkanDevice::SetTexture(TextureHandle handle) noexcept {
 
     TextureRecord* record = textures_.Find(handle.slot);
     SlotHandle slot = handle.slot;
-    if (record == nullptr || record->set == VK_NULL_HANDLE) {
+    if (record == nullptr || record->view == VK_NULL_HANDLE) {
         record = textures_.Find(white_.slot);
         slot = white_.slot;
     }
@@ -479,8 +483,10 @@ void VulkanDevice::SetTexture(TextureHandle handle) noexcept {
         return;
     }
 
-    // view는 descriptor만 자기 것이고 이미지 상태는 원 텍스처 기록이 추적한다.
-    const VkDescriptorSet set = record->set;
+    // view는 image view만 자기 것이고 이미지 상태는 원 텍스처 기록이 추적한다. descriptor는 다음
+    // 그리기가 쓴다(PrepareDescriptors).
+    boundTexture_ = TextureHandle{slot};
+    descriptorsDirty_ = true;
     if (record->isView) {
         slot = record->source;
         record = textures_.Find(slot);
@@ -503,9 +509,6 @@ void VulkanDevice::SetTexture(TextureHandle handle) noexcept {
         TrackTransition(*record, slot, 0, record->mipLevels, ResourceAccess::SrvGraphics, false);
         ResumeRenderPass();
     }
-
-    functions_.vkCmdBindDescriptorSets(frame_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout_, 1,
-                                       1, &set, 0, nullptr);
 }
 
 void VulkanDevice::SetConstants(const DrawConstants& constants) noexcept {
@@ -522,7 +525,7 @@ void VulkanDevice::SetConstants(const DrawConstants& constants) noexcept {
 
 void VulkanDevice::Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept {
     platform::LockGuard lock(gate_);
-    if (!recording_ || !StreamsBound()) {
+    if (!recording_ || !StreamsBound() || !PrepareDescriptors()) {
         ++ignoredDraws_;
         return;
     }
@@ -536,7 +539,7 @@ void VulkanDevice::DrawIndexed(uint32 indexCount, uint32 instanceCount,
     platform::LockGuard lock(gate_);
     const BufferRecord* index = buffers_.Find(boundIndex_.buffer.slot);
     if (!recording_ || !StreamsBound() || index == nullptr || boundIndex_.offset >= index->size ||
-        boundIndex_.offset % IndexFormatSize(boundIndex_.format) != 0) {
+        boundIndex_.offset % IndexFormatSize(boundIndex_.format) != 0 || !PrepareDescriptors()) {
         ++ignoredDraws_;
         return;
     }

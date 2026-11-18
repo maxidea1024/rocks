@@ -170,6 +170,10 @@ void GlesDevice::StartPass(GLuint framebuffer, uint32 width, uint32 height,
     }
 
     boundIndex_ = {};
+    for (BufferViewHandle& view : boundViews_) {
+        view = {};
+    }
+
     constantsDirty_ = true;
     constants_ = DrawConstants{};
     gl_.BindFramebuffer(GL_FRAMEBUFFER, framebuffer);
@@ -363,7 +367,7 @@ const PipelineRecord* GlesDevice::DrawablePipeline() const noexcept {
         }
     }
 
-    return pipeline;
+    return BufferViewsBound(*pipeline) ? pipeline : nullptr;
 }
 
 void GlesDevice::ApplyConstants(const PipelineRecord& pipeline) noexcept {
@@ -507,6 +511,7 @@ void GlesDevice::Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVert
     }
 
     ApplyConstants(*pipeline);
+    ApplyBufferViews(*pipeline);
     // base instance는 0으로 고정한다(RenderBase 10.4절).
     gl_.DrawArraysInstanced(GL_TRIANGLES, static_cast<GLint>(firstVertex),
                             static_cast<GLsizei>(vertexCount), static_cast<GLsizei>(instanceCount));
@@ -521,6 +526,7 @@ void GlesDevice::DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 fir
     }
 
     ApplyConstants(*pipeline);
+    ApplyBufferViews(*pipeline);
     const uint64 start =
         boundIndex_.offset + static_cast<uint64>(firstIndex) * IndexFormatSize(boundIndex_.format);
     // base vertex·base instance는 0으로 고정한다.

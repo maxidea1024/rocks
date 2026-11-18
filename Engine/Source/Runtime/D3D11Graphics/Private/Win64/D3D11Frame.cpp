@@ -80,6 +80,10 @@ void D3D11Device::BeginRecording(const Target& target, const ClearColor& clear) 
     }
 
     boundIndex_ = {};
+    for (BufferViewHandle& view : boundViews_) {
+        view = {};
+    }
+
     ID3D11DeviceContext* context = deferred_.Get();
     context->OMSetRenderTargets(1, &target_.rtv, nullptr);
     const float color[4] = {clear.r, clear.g, clear.b, clear.a};
@@ -275,7 +279,7 @@ void D3D11Device::WriteConstants(const DrawConstants& constants) noexcept {
 
 void D3D11Device::Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept {
     platform::LockGuard lock(gate_);
-    if (!StreamsBound()) {
+    if (!StreamsBound() || !BufferViewsBound()) {
         ++ignoredDraws_;
         return;
     }
@@ -287,7 +291,8 @@ void D3D11Device::Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVer
 void D3D11Device::DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept {
     platform::LockGuard lock(gate_);
     const BufferRecord* index = buffers_.Find(boundIndex_.buffer.slot);
-    if (!StreamsBound() || index == nullptr || boundIndex_.offset >= index->size) {
+    if (!StreamsBound() || !BufferViewsBound() || index == nullptr ||
+        boundIndex_.offset >= index->size) {
         ++ignoredDraws_;
         return;
     }

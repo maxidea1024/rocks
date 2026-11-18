@@ -1,6 +1,6 @@
 # Vulkan 그래픽 backend(VulkanGraphics) 설계
 
-기준일: 2026-11-18, 개정 5(초안). Vulkan backend `VulkanGraphics`가 Graphics 장치 계약(`Graphics/Device.h`)을 Vulkan 1.1 위에서 어떻게 지키는지 정한다. [셰이더 시스템](ShaderSystem.ko.md) P9 "Vulkan 선행"의 산출물이다. 그 문서가 P9 산출물로 "EngineRuntime에 절을 더한다"고 적었지만, 내용이 커서 이 문서로 따로 두고 [엔진 런타임](EngineRuntime.ko.md) 10절에는 요약과 링크만 둔다.
+기준일: 2026-11-18, 개정 6(초안). Vulkan backend `VulkanGraphics`가 Graphics 장치 계약(`Graphics/Device.h`)을 Vulkan 1.1 위에서 어떻게 지키는지 정한다. [셰이더 시스템](ShaderSystem.ko.md) P9 "Vulkan 선행"의 산출물이다. 그 문서가 P9 산출물로 "EngineRuntime에 절을 더한다"고 적었지만, 내용이 커서 이 문서로 따로 두고 [엔진 런타임](EngineRuntime.ko.md) 10절에는 요약과 링크만 둔다.
 
 UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275b`, 로컬 클론) 원본이다. 경로는 `Engine/Source/Runtime/VulkanRHI/` 기준이며 `Private/`는 `P/`, `Public/`은 `Pub/`로 줄인다. Vulkan 사양 근거는 Vulkan 1.4 사양(Vulkan-Docs)의 절 이름으로 적는다.
 
@@ -108,7 +108,9 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 
 ## 6. 자원과 descriptor
 
-**버퍼.** `DEVICE_LOCAL` 메모리, 용도 `VERTEX_BUFFER`·`INDEX_BUFFER` 중 하나와 `TRANSFER_DST`. 초기 데이터와 갱신은 업로드 경로(8절)다.
+**버퍼.** `DEVICE_LOCAL` 메모리. Graphics `BufferUsage` 비트를 옮긴다: `Vertex`·`Index`·`Constant`(UNIFORM)·`Indirect`, 셰이더 용도는 구조화·raw면 `STORAGE_BUFFER`, 구조화가 아니면 읽기 `UNIFORM_TEXEL_BUFFER`·쓰기 `STORAGE_TEXEL_BUFFER`(raw 버퍼는 둘 다)이고 늘 `TRANSFER_SRC | TRANSFER_DST`(갱신·`ReadBuffer`)다. 초기 데이터와 갱신은 업로드 경로(8절)다.
+- 버퍼 view(RenderBase GX2): typed는 `VkBufferView`, 구조화·raw는 (buffer, offset, range)다. typed view 형식은 버퍼의 모든 texel usage를 지원해야 한다(VUID-VkBufferViewCreateInfo-format-08778). view별 usage(`VkBufferUsageFlags2CreateInfo`)는 1.4 maintenance5라 쓰지 않고, 쓰기·atomic 형식 능력은 읽기도 되는 형식만 공개한다. view가 남은 버퍼를 `Retire`하면 버퍼·메모리를 orphan 목록으로 옮겨 마지막 view가 놓일 때 회수한다.
+- 장치 능력(GX1): `VkPhysicalDeviceLimits`와 maintenance3 `maxMemoryAllocationSize`(1.1 core 속성)를 `DeviceCaps`로 옮긴다. 지원하면 `depthClamp`·`multiDrawIndirect`·`drawIndirectFirstInstance`·`imageCubeArray`·`vertexPipelineStoresAndAtomics`·`fragmentStoresAndAtomics`, `VK_EXT_shader_viewport_index_layer`, `VK_KHR_shader_atomic_int64` + `VK_EXT_shader_image_atomic_int64`(+ `shaderInt64`)을 켠다. MSAA 표본 수는 이미지 형식 질의 `sampleCounts`다.
 
 **텍스처.** 2D `VkImage`, 형식 표(아래), `OPTIMAL` tiling.
 - Sampled: 용도 `SAMPLED | TRANSFER_DST`. 쉬는 layout은 `SHADER_READ_ONLY_OPTIMAL`.
@@ -126,12 +128,10 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 **샘플러.** `SamplerDesc` 조합마다 `VkSampler` 하나를 만들어 장치 수명 동안 공유한다(D3D12 샘플러 칸과 같은 규칙, 상한 256). Nearest: NEAREST·NEAREST·mip NEAREST, Bilinear: LINEAR·mip NEAREST, Trilinear: LINEAR·mip LINEAR, Anisotropic: Trilinear + `anisotropyEnable`(`maxAnisotropy`를 `maxSamplerAnisotropy`로 자르고 1이거나 기능이 없으면 끈다). 주소 Wrap → REPEAT, Clamp → CLAMP_TO_EDGE, Mirror → MIRRORED_REPEAT, Border → CLAMP_TO_BORDER. border 색은 세 고정 값이 Vulkan 내장 색과 일대일이다(`FLOAT_TRANSPARENT_BLACK`·`FLOAT_OPAQUE_BLACK`·`FLOAT_OPAQUE_WHITE`). `maxLod = VK_LOD_CLAMP_NONE`.
 
 **descriptor.**
-- 파이프라인 layout은 장치에 하나다. ShaderSystem 7.2절 4항 규칙(set = 단계, binding = 종류 순서)을 지금 고정 자원 배치에 적용한 결과다.
-  - set 0(VS): binding 없음.
-  - set 1(PS): binding 0 `SAMPLED_IMAGE`(t0), binding 1 `SAMPLER`(s0).
-  - push constant 80 byte(`DrawConstants`, VS·PS), 7.2절 2항.
-- 텍스처마다 set 1 하나를 만들 때 할당해 view·샘플러를 한 번 쓴다(바뀌지 않는다). `SetTexture`는 그 set을 묶는다. D3D12의 텍스처별 SRV 칸과 같은 구조이고, 회수도 텍스처와 함께 fence 뒤 `vkFreeDescriptorSets`다(RenderBase GX7 "descriptor도 마지막 사용 fence 뒤 회수").
-- pool은 `FREE_DESCRIPTOR_SET_BIT`로 256 set씩 만들고 모자라면 더한다. UE의 프레임 단위 pool reset은 자원마다 바뀌는 binding(셰이더 파라미터)을 위한 것이다. Rocks는 SH2 전까지 바인딩이 텍스처 하나로 고정이라 자원 수명에 붙이는 쪽이 회수 규칙(GX7)을 그대로 지킨다. SH2의 일반 바인딩은 RenderBase 9.3절 묶음 설정에서 다시 정한다.
+- 파이프라인 layout은 파이프라인마다 만든다(개정 6). 개발 컴파일 훅의 리플렉션(set·binding·종류에 더해 원문 register·space, 자원 모양(이미지·texel buffer·구조화·raw·상수·샘플러), 원소 타입, 쓰기 여부)을 PipelineDesc 고정 배치와 대조해 set 0(VS)·set 1(PS) layout을 만든다(ShaderSystem 7.2절 4항: set = 단계, binding = 종류 순서). binding이 없는 단계는 장치 공용 빈 layout이다.
+  - PS t0 이미지 → `SAMPLED_IMAGE`(SetTexture), PS s0 → `SAMPLER`(그 텍스처의 샘플러), 단계 모두의 t1–t4 → typed는 `UNIFORM_TEXEL_BUFFER`, 구조화·raw는 `STORAGE_BUFFER`(SetBufferView slot 0–3). 그 밖(다른 register·space, 상수 버퍼, 쓰기 자원)은 생성이 `InvalidArgument`다.
+  - push constant 80 byte(`DrawConstants`, VS·PS, 7.2절 2항)는 모든 파이프라인 layout과 공용 layout(두 set이 빈 layout)이 같은 범위라 공용 layout으로 올린다(사양 "Pipeline Layout Compatibility").
+- 그리기 descriptor set은 그리기 직전(바뀐 것이 있을 때만) 지금 명령 버퍼 기록의 pool에서 받아 쓰고 파이프라인 layout으로 묶는다. pool은 기록마다 최대 8개(set 1024개씩)이고, 그 기록을 다시 쓸 때(앞 제출의 fence가 끝났다) `vkResetDescriptorPool`로 통째로 비운다. UE 비-bindless의 프레임 단위 pool과 같은 방식이다(`P/VulkanPendingState.cpp:30–319`). 텍스처마다 고정 set을 두던 개정 5 방식은 파이프라인마다 layout이 달라지면서 없앴다. 한 프레임에 descriptor를 바꾸는 그리기가 8192번을 넘으면 그 뒤 그리기는 무시된다(`IgnoredDraws`, LastError).
 
 ## 7. 파이프라인·render pass
 
@@ -295,3 +295,4 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - 개정 3(2026-11-18): 드라이버 상주(3절). 로더가 `vkDestroyInstance`에서 ICD를 내린 뒤에도 남은 NVIDIA 드라이버 스레드가 내려간 코드를 실행해 EngineTests가 간헐적으로 죽던 문제를 cdb로 확인하고(17절), 프로세스 수명의 상주 instance로 막았다.
 - 개정 4(2026-11-18): 로깅 LG7(`Graphics/GraphicsLog.h` 범주, 검증 메시지 ID 표 규칙, 12절)과 픽셀 형식 PF3(`GetPixelFormatCaps`, 능력으로 생성 판정, 6절)을 반영했다.
 - 개정 5(2026-11-18): lavapipe 창 경로가 끊긴 데스크톱 세션에서 실패하는 원인을 mesa WSI 소스·GDI 프로브·이전 코드 대조로 확정하고, 세션 연결 판정(`QueryDesktopSessionState`)으로 그 경우만 근거를 단 NOT RUN으로 바꿨다(17절).
+- 개정 6(2026-11-18): RenderBase GX1(장치 능력·MSAA 표본 수)·GX2 버퍼 1단계. 버퍼 용도·버퍼 view·`ReadBuffer`(6절), 파이프라인별 layout과 기록 단위 descriptor pool(6절 descriptor, 개정 5의 텍스처별 고정 set 대체), 켜는 장치 기능·확장, 업로드 끝 barrier에 간접 인자·상수·compute 단계를 더했다.

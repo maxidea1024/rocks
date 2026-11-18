@@ -2,6 +2,7 @@
 
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Result.h>
+#include <Graphics/DeviceCaps.h>
 #include <Graphics/DeviceTypes.h>
 #include <Graphics/ResourceAccess.h>
 #include <Platform/Sync.h>
@@ -33,6 +34,22 @@ public:
 
     // 텍스처 슬롯 0에 묶는다. null handle이면 1x1 흰색 텍스처를 쓴다.
     virtual void SetTexture(TextureHandle texture) noexcept = 0;
+
+    // 버퍼 view slot(0 – MaxDrawBufferViews-1)에 읽기 view를 묶는다(PipelineDesc 고정 배치, GX2).
+    // null handle이면 slot을 비운다. 그리기는 파이프라인이 읽는 slot마다 같은 종류(Typed는 같은 값
+    // 계열)의 view가 묶였을 때만 실행하고, 아니면 무시하고 IgnoredDraws를 올린다
+    // (DrawBufferSlotsSatisfied). 범위 밖 slot, stale handle, ReadWrite view(그래픽 단계 UAV는
+    // 없다)도 그 slot을 비운다. 묶인 view의 버퍼를 Retire해도 view가 자원을 붙든다.
+    //
+    // 사용 예(PS가 t1의 Buffer<float4>를 읽는다):
+    //   commands.SetPipeline(pipeline);
+    //   commands.SetBufferView(0, lightsView);
+    //   commands.Draw(3);
+    //
+    // 버퍼 상태: 셰이더 읽기 전 접근은 SrvGraphics다. 렌더 그래프 밖 그리기는 장치가 업로드 뒤
+    // 읽기를 보장한다(D3D12는 버퍼 암묵 승격, Vulkan은 업로드 기록 끝 barrier, D3D11·OpenGL ES는
+    // 드라이버).
+    virtual void SetBufferView(uint32 slot, BufferViewHandle view) noexcept = 0;
     virtual void SetConstants(const DrawConstants& constants) noexcept = 0;
 
     // 삼각형 목록을 그린다(정점 vertexCount개 × 인스턴스 instanceCount개, firstVertex부터). base
@@ -181,6 +198,13 @@ public:
     // 스레드 안전.
     virtual DeviceInfo Info() const noexcept = 0;
 
+    // 장치 능력(전역 한도·기능 표시, RenderBase 4.4절 GX1)이다. 장치 생성 때 정해지고 바뀌지
+    // 않으며 참조는 장치 수명 동안 유효하다. 스레드 안전.
+    //
+    // 사용 예:
+    //   if (device.Caps().limits.colorAttachments < 8) { ... Deferred D·E를 끈다 ... }
+    virtual const DeviceCaps& Caps() const noexcept = 0;
+
     // 창 표면에 스왑체인을 만든다. 크기 0이나 빈 표면은 InvalidArgument, OS·API 실패는
     // DependencyFailed다.
     virtual Result<SwapChainHandle> CreateSwapChain(const SwapChainDesc& desc) noexcept = 0;
@@ -189,10 +213,31 @@ public:
     virtual Result<void> ResizeSwapChain(SwapChainHandle swapChain, uint32 width,
                                          uint32 height) noexcept = 0;
 
-    // 정점·index 버퍼를 만들고 initial을 복사한다. initial 크기가 desc.size와 다르면
-    // InvalidArgument다.
+    // 버퍼를 만들고 initial을 복사한다(BufferDesc·BufferUsage). 실패: 설정 규칙 위반
+    // (ValidateBufferDesc)·initial 크기가 desc.size와 다름 InvalidArgument, 크기가
+    // DeviceLimits::bufferBytes를 넘으면 Unsupported, API 실패 DependencyFailed.
     virtual Result<BufferHandle> CreateBuffer(const BufferDesc& desc,
                                               Span<const uint8> initial) noexcept = 0;
+
+    // buffer의 범위를 셰이더가 읽거나(Read, SRV) 쓰는(ReadWrite, UAV) view를 만든다(GX2). view는
+    // 버퍼 자원을 붙들므로 버퍼를 먼저 Retire해도 view가 산다. Read view는
+    // CommandContext::SetBufferView로 묶고, ReadWrite view는 compute 단계(GX3·GX4)에서 묶는다.
+    // Retire로 놓는다. 다른 스레드 생성 규칙은 DeviceInfo::concurrentResourceCreation이다.
+    //
+    // 사용 예:
+    //   BufferViewDesc desc{.kind = BufferViewKind::Structured};
+    //   auto view = device.CreateBufferView(particles, desc);
+    //
+    // 실패: stale handle StaleHandle, 규칙 위반(ResolveBufferView)·장치 정렬 위반 InvalidArgument,
+    // 형식 능력·범위 한도 밖(CheckBufferViewLimits) Unsupported. 다른 형식·종류로 대체하지 않는다.
+    virtual Result<BufferViewHandle> CreateBufferView(BufferHandle buffer,
+                                                      const BufferViewDesc& desc) noexcept = 0;
+
+    // 버퍼 [offset, offset + out.Size())를 out으로 읽는다. 앞서 쌓인 업로드 뒤에 복사하고 GPU
+    // 완료를 기다린다(시험·캡처용, 프레임 경로에서 쓰지 않는다). 실패: stale StaleHandle, 기록 중
+    // Busy, 빈 out·범위 밖 InvalidArgument.
+    virtual Result<void> ReadBuffer(BufferHandle buffer, uint64 offset,
+                                    Span<uint8> out) noexcept = 0;
 
     // 텍스처를 만든다. Sampled는 pixels(mip 0부터, mip 안은 plane 순서, 행 위→아래 빈틈 없는 행 —
     // MipChainBytes 크기)가 필요하고, RenderTarget·DepthStencil은 pixels가 비어 있어야 한다. 잘못된
@@ -211,6 +256,17 @@ public:
         (void)format;
         return PixelFormatCaps::None;
     }
+
+    // format으로 만들 수 있는 MSAA 표본 수 집합이다(비트 n = 2^n 표본, SampleCountBit). 렌더
+    // 타깃·깊이 형식이면 1표본(비트 0)을 늘 포함하고, 2표본 이상이 하나라도 있으면 그 형식의
+    // GetPixelFormatCaps에 Multisample이 있다. 렌더 타깃·깊이로 만들 수 없는 형식은 0이다. 장치
+    // 생성 때 정해진다(D3D12·D3D11 CheckMultisampleQualityLevels, Vulkan
+    // vkGetPhysicalDeviceImageFormatProperties sampleCounts, OpenGL ES glGetInternalformativ
+    // GL_SAMPLES). MSAA 텍스처 생성은 GX2 텍스처 단계다. 스레드 안전.
+    //
+    // 사용 예:
+    //   if ((device.GetPixelFormatSampleCounts(PixelFormat::RGBA16Float) & SampleCountBit(4)) != 0)
+    virtual uint32 GetPixelFormatSampleCounts(PixelFormat format) const noexcept = 0;
 
     // texture의 자원을 공유하고 형식·plane만 다르게 읽는 view를 만든다(TextureViewDesc). 돌려준
     // handle은 SetTexture로 묶고 Retire로 놓는다. 원 텍스처를 먼저 Retire해도 view가 자원을 붙든다.
@@ -261,6 +317,7 @@ public:
 
     // 자원을 회수 대기로 넘긴다(위 "제출·완료·회수"). 모르는·이미 회수한 handle은 무시한다.
     virtual void Retire(BufferHandle buffer) noexcept = 0;
+    virtual void Retire(BufferViewHandle view) noexcept = 0;
     virtual void Retire(TextureHandle texture) noexcept = 0;
     virtual void Retire(PipelineHandle pipeline) noexcept = 0;
     virtual void Retire(SwapChainHandle swapChain) noexcept = 0;

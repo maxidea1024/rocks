@@ -56,4 +56,10 @@ void FromDeviceLayout(PixelFormat format, uint32 plane, uint32 width, uint32 hei
 // 질의한다(D3D12 질의와 같은 규칙, UE D3D11Device.cpp:457–524).
 PixelFormatCaps QueryFormatCaps(ID3D11Device* device, PixelFormat format) noexcept;
 
+// format의 MSAA 표본 수 집합이다(비트 n = 2^n). caps에 RenderTarget이 있으면 RTV 형식,
+// DepthStencil이면 DSV 형식이 MULTISAMPLE_RENDERTARGET을 지원할 때 2–32표본을
+// CheckMultisampleQualityLevels로 묻는다(품질 수준이 1 이상인 표본 수). 둘 다 없으면 0, 있으면
+// 1표본 비트를 늘 넣는다(D3D12 질의와 같은 규칙).
+uint32 QuerySampleCounts(ID3D11Device* device, PixelFormat format, PixelFormatCaps caps) noexcept;
+
 } // namespace rocks::graphics::d3d11

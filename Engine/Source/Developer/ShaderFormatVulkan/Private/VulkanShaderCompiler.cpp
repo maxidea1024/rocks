@@ -78,6 +78,52 @@ bool BindingKind(SpvReflectDescriptorType type, graphics::ShaderBindingKind& kin
     }
 }
 
+// SPIRV-Reflect descriptor의 모양이다. 구조화·raw 구분은 고쳐 쓰기 전 모듈의
+// SPV_GOOGLE_user_type(-fspv-reflect)에서 온다.
+graphics::ShaderResourceShape BindingShape(SpvReflectDescriptorType type,
+                                           SpvReflectUserType user) noexcept {
+    switch (type) {
+    case SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
+    case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
+        return graphics::ShaderResourceShape::TexelBuffer;
+    case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+        return user == SPV_REFLECT_USER_TYPE_BYTE_ADDRESS_BUFFER ||
+                       user == SPV_REFLECT_USER_TYPE_RW_BYTE_ADDRESS_BUFFER
+                   ? graphics::ShaderResourceShape::RawBuffer
+                   : graphics::ShaderResourceShape::StructuredBuffer;
+    case SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+        return graphics::ShaderResourceShape::ConstantBuffer;
+    case SPV_REFLECT_DESCRIPTOR_TYPE_SAMPLER:
+        return graphics::ShaderResourceShape::Sampler;
+    default:
+        return graphics::ShaderResourceShape::Image;
+    }
+}
+
+// 이미지·texel buffer의 원소 타입 계열이다(SPIRV-Reflect는 sampled type을 type_flags·signedness로
+// 둔다).
+graphics::PixelShaderType SampledType(const SpvReflectDescriptorBinding& binding) noexcept {
+    const SpvReflectTypeDescription* type = binding.type_description;
+    if (type == nullptr ||
+        (binding.descriptor_type != SPV_REFLECT_DESCRIPTOR_TYPE_SAMPLED_IMAGE &&
+         binding.descriptor_type != SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_IMAGE &&
+         binding.descriptor_type != SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER &&
+         binding.descriptor_type != SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER)) {
+        return graphics::PixelShaderType::None;
+    }
+
+    if ((type->type_flags & SPV_REFLECT_TYPE_FLAG_FLOAT) != 0) {
+        return graphics::PixelShaderType::Float;
+    }
+
+    if ((type->type_flags & SPV_REFLECT_TYPE_FLAG_INT) != 0) {
+        return type->traits.numeric.scalar.signedness != 0 ? graphics::PixelShaderType::Int
+                                                           : graphics::PixelShaderType::Uint;
+    }
+
+    return graphics::PixelShaderType::None;
+}
+
 // SPIRV-Reflect 모듈 수명이다.
 class ReflectedModule {
 public:
@@ -114,12 +160,25 @@ Result<void> ReflectFailure(String& diagnostics, StringView message) noexcept {
     return Result<void>::Failure(ErrorCode::DependencyFailed);
 }
 
-// 고쳐 쓴 SPIR-V의 리플렉션(정점 입력·binding·그리기 상수 크기)을 out에 채운다.
-Result<void> Reflect(graphics::ShaderStage stage, graphics::CompiledShader& out,
-                     String& diagnostics) noexcept {
+// 고쳐 쓴 SPIR-V의 리플렉션(정점 입력·binding·그리기 상수 크기)을 out에 채운다. raw는 고쳐 쓰기 전
+// DXC 출력이며 원문 register(고쳐 쓰기 전 set·binding)와 user type을 같은 SPIR-V id로 찾는다
+// (고쳐 쓰기는 id를 바꾸지 않는다).
+Result<void> Reflect(graphics::ShaderStage stage, Span<const uint32> raw,
+                     graphics::CompiledShader& out, String& diagnostics) noexcept {
     ReflectedModule module;
-    if (!module.Open(out.code.View())) {
+    ReflectedModule source;
+    if (!module.Open(out.code.View()) || !source.Open(raw)) {
         return ReflectFailure(diagnostics, StringView("SPIRV-Reflect could not parse the module"));
+    }
+
+    uint32 sourceCount = MaxReflectedItems;
+    SpvReflectDescriptorBinding* sourceBindings[MaxReflectedItems] = {};
+    if (spvReflectEnumerateDescriptorBindings(source.Get(), &sourceCount, nullptr) !=
+            SPV_REFLECT_RESULT_SUCCESS ||
+        sourceCount > MaxReflectedItems ||
+        spvReflectEnumerateDescriptorBindings(source.Get(), &sourceCount, sourceBindings) !=
+            SPV_REFLECT_RESULT_SUCCESS) {
+        return ReflectFailure(diagnostics, StringView("source binding reflection failed"));
     }
 
     uint32 count = MaxReflectedItems;
@@ -164,12 +223,35 @@ Result<void> Reflect(graphics::ShaderStage stage, graphics::CompiledShader& out,
     }
 
     for (uint32 index = 0; index < count; ++index) {
+        const SpvReflectDescriptorBinding& reflected = *bindings[index];
         graphics::ShaderBinding binding;
-        binding.set = bindings[index]->set;
-        binding.binding = bindings[index]->binding;
-        if (!BindingKind(bindings[index]->descriptor_type, binding.kind)) {
+        binding.set = reflected.set;
+        binding.binding = reflected.binding;
+        if (!BindingKind(reflected.descriptor_type, binding.kind)) {
             return ReflectFailure(diagnostics, StringView("unsupported descriptor type"));
         }
+
+        const SpvReflectDescriptorBinding* original = nullptr;
+        for (uint32 candidate = 0; candidate < sourceCount; ++candidate) {
+            if (sourceBindings[candidate]->spirv_id == reflected.spirv_id) {
+                original = sourceBindings[candidate];
+            }
+        }
+
+        if (original == nullptr) {
+            return ReflectFailure(diagnostics,
+                                  StringView("rewritten binding has no source binding"));
+        }
+
+        binding.sourceRegister = original->binding;
+        binding.sourceSpace = original->set;
+        binding.shape = BindingShape(reflected.descriptor_type, original->user_type);
+        binding.sampledType = SampledType(reflected);
+        binding.writable =
+            reflected.descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_IMAGE ||
+            reflected.descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER ||
+            (reflected.descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_BUFFER &&
+             (reflected.decoration_flags & SPV_REFLECT_DECORATION_NON_WRITABLE) == 0);
 
         auto pushed = out.bindings.TryPushBack(binding);
         if (!pushed) {
@@ -348,7 +430,7 @@ Result<void> VulkanShaderCompiler::CompileSpirv(graphics::ShaderStage stage, Str
         return validated;
     }
 
-    return Reflect(stage, out, diagnostics);
+    return Reflect(stage, raw.View(), out, diagnostics);
 }
 
 } // namespace rocks::shader

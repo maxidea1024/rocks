@@ -4,6 +4,7 @@
 #include <Core/Containers/Span.h>
 #include <Core/Result.h>
 #include <Core/Text/StringView.h>
+#include <Graphics/DeviceCaps.h>
 #include <GraphicsTypes/PixelFormat.h>
 #include <GraphicsTypes/Sampler.h>
 #include <GraphicsTypes/VertexFormat.h>
@@ -126,16 +127,183 @@ struct SwapChainDesc {
     bool vsync = true;
 };
 
-// 버퍼 용도다. 정점 버퍼는 SetVertexBuffers, index 버퍼는 SetIndexBuffer로 묶는다.
-enum class BufferUsage : uint8 {
-    Vertex,
-    Index
+// 버퍼 용도다(RenderBase 4.4절 GX2, UE EBufferUsageFlags 대응). 여러 비트를 OR로 묶는다. 정점
+// 버퍼는 SetVertexBuffers, index 버퍼는 SetIndexBuffer로 묶고, 셰이더 읽기·쓰기는 버퍼 view
+// (CreateBufferView)로 묶는다. 조합 규칙은 ValidateBufferDesc다.
+enum class BufferUsage : uint16 {
+    None = 0,
+    Vertex = 1u << 0,
+    Index = 1u << 1,
+    // 상수 버퍼다. 다른 용도와 묶지 않고 크기는 16 byte 배수다(D3D11 bind 규칙). 묶기는 GX6이다.
+    Constant = 1u << 2,
+    // 간접 그리기·dispatch 인자(uint32 배열)다. 명령은 GX4다.
+    Indirect = 1u << 3,
+    // 셰이더 읽기 view(SRV)를 만들 수 있다.
+    ShaderRead = 1u << 4,
+    // 셰이더 쓰기 view(UAV)를 만들 수 있다.
+    ShaderWrite = 1u << 5,
+    // 구조화 버퍼다(원소 크기 BufferDesc::stride). 구조화 view만 만들 수 있다.
+    Structured = 1u << 6,
+    // byte address(raw) view를 만들 수 있다(UE ByteAddressBuffer). typed view도 만들 수 있다.
+    Raw = 1u << 7
 };
 
+constexpr BufferUsage operator|(BufferUsage left, BufferUsage right) noexcept {
+    return static_cast<BufferUsage>(static_cast<uint16>(left) | static_cast<uint16>(right));
+}
+
+constexpr BufferUsage operator&(BufferUsage left, BufferUsage right) noexcept {
+    return static_cast<BufferUsage>(static_cast<uint16>(left) & static_cast<uint16>(right));
+}
+
+// usage에 flags 가운데 하나라도 있는지다.
+constexpr bool HasAnyBufferUsage(BufferUsage usage, BufferUsage flags) noexcept {
+    return (usage & flags) != BufferUsage::None;
+}
+
+// 구조화 버퍼 원소의 최대 byte다(D3D11 StructureByteStride 상한 2048).
+inline constexpr uint32 MaxStructuredStride = 2048;
+// raw view 시작 byte 정렬이다(UE RHIResources.cpp:238과 같은 공통 규칙).
+inline constexpr uint64 RawViewOffsetAlignment = 16;
+
+// 버퍼 설정이다.
+//
+// 사용 예(광원 데이터 typed buffer, PS가 Buffer<float4>로 읽는다):
+//   BufferDesc desc;
+//   desc.size = lightCount * 16;
+//   desc.usage = BufferUsage::ShaderRead | BufferUsage::ShaderWrite;
+//   auto lights = device.CreateBuffer(desc, bytes);
+//
+// 사용 예(구조화 버퍼, 원소 32 byte):
+//   desc.usage = BufferUsage::ShaderRead | BufferUsage::Structured;
+//   desc.stride = 32;
 struct BufferDesc {
-    usize size = 0;
+    uint64 size = 0;
     BufferUsage usage = BufferUsage::Vertex;
+    // 구조화 버퍼 원소 byte다. Structured일 때만 0이 아니다.
+    uint32 stride = 0;
 };
+
+// 장치와 무관한 버퍼 설정 규칙이다(backend가 생성 전에 부른다). 위반은 InvalidArgument다:
+// - size 0, usage None 또는 모르는 비트
+// - Constant를 다른 용도와 묶음, Constant 크기가 16 byte 배수가 아님
+// - Structured와 Raw를 함께 씀
+// - Structured인데 stride가 0·4 byte 배수 아님·MaxStructuredStride 초과·size가 stride 배수 아님,
+//   ShaderRead·ShaderWrite가 없음, Vertex·Index·Indirect와 묶음(D3D11 구조화 버퍼 제약)
+// - Structured가 아닌데 stride가 0이 아님
+// - Raw인데 ShaderRead·ShaderWrite가 없거나 size가 4 byte 배수가 아님
+// - Indirect인데 size가 4 byte 배수가 아님
+// 장치 한도(DeviceLimits::bufferBytes)는 backend가 따로 보고 넘으면 Unsupported다.
+Result<void> ValidateBufferDesc(const BufferDesc& desc) noexcept;
+
+// 버퍼 view 종류다(UE EBufferType 대응).
+enum class BufferViewKind : uint8 {
+    // 형식 지정 원소(HLSL Buffer<T>·RWBuffer<T>, GLSL ES samplerBuffer·imageBuffer)
+    Typed,
+    // 구조화 원소(StructuredBuffer<T>, GLSL ES std430 storage block)
+    Structured,
+    // 32-bit 단위 byte address(ByteAddressBuffer, GLSL ES uint 배열 storage block)
+    Raw
+};
+
+// view 접근이다. Read는 SRV, ReadWrite는 UAV다.
+enum class ViewAccess : uint8 {
+    Read,
+    ReadWrite
+};
+
+// 버퍼 view handle이다(Device::CreateBufferView). Retire로 놓는다.
+struct BufferViewHandle {
+    SlotHandle slot;
+
+    bool IsNull() const noexcept {
+        return slot.IsNull();
+    }
+
+    bool operator==(const BufferViewHandle&) const noexcept = default;
+};
+
+// 버퍼 view 설정이다. 범위는 원소 단위이며 원소 byte는 종류가 정한다(Typed: 형식 블록 byte,
+// Structured: 버퍼 stride, Raw: 4).
+//
+// 사용 예(RGBA32Float typed SRV, 버퍼 전체):
+//   BufferViewDesc view;
+//   view.kind = BufferViewKind::Typed;
+//   view.format = PixelFormat::RGBA32Float;
+//   auto srv = device.CreateBufferView(lights.Value(), view);
+//   commands.SetBufferView(0, srv.Value());
+struct BufferViewDesc {
+    BufferViewKind kind = BufferViewKind::Typed;
+    ViewAccess access = ViewAccess::Read;
+    // Typed만 쓴다. 나머지 종류는 Unknown이어야 한다.
+    PixelFormat format = PixelFormat::Unknown;
+    // 시작 byte다. 원소 byte 배수여야 하고 Raw는 RawViewOffsetAlignment 배수다. 장치 정렬
+    // (DeviceLimits::texelBufferOffsetAlignment·storageBufferOffsetAlignment)도 따른다.
+    uint64 offset = 0;
+    // 원소 수다. 0이면 버퍼 끝까지이며 그때 offset은 0이어야 한다(UE와 같은 규칙).
+    uint64 elementCount = 0;
+};
+
+// 규칙을 통과한 view 범위다.
+struct ResolvedBufferView {
+    uint64 offset = 0;
+    uint64 elementCount = 0;
+    uint32 elementBytes = 0;
+
+    uint64 Bytes() const noexcept {
+        return elementCount * elementBytes;
+    }
+};
+
+// 장치와 무관한 view 규칙이다(backend가 생성 전에 부른다). 위반은 InvalidArgument다:
+// - 모르는 kind·access
+// - Read인데 버퍼에 ShaderRead가 없음, ReadWrite인데 ShaderWrite가 없음
+// - Typed: 구조화 버퍼, 형식이 무효·비압축 단일 plane 색 형식이 아님
+// - Structured: 구조화 버퍼가 아님, 형식 지정
+// - Raw: Raw 버퍼가 아님, 형식 지정, offset이 16 byte 배수가 아님
+// - offset이 원소 byte 배수가 아니거나 버퍼 밖, elementCount 0인데 offset이 0이 아님, 범위가 버퍼
+//   끝을 넘음
+Result<ResolvedBufferView> ResolveBufferView(const BufferDesc& buffer,
+                                             const BufferViewDesc& view) noexcept;
+
+// 장치 한도로 view를 검사한다(backend가 ResolveBufferView 다음에 부른다). formatCaps는 view 형식의
+// 이 장치 능력이다(Typed만 본다). 실패: 시작 byte가 장치 정렬(texelBufferOffsetAlignment·
+// storageBufferOffsetAlignment) 배수가 아니면 InvalidArgument, Typed 형식에 TexelBufferRead(Read)·
+// TexelBufferWrite(ReadWrite) 능력이 없거나 원소 수가 texelBufferElements를 넘거나 구조화·raw
+// 범위가 storageBufferBytes를 넘으면 Unsupported(다른 형식·범위로 바꾸지 않는다).
+Result<void> CheckBufferViewLimits(const DeviceLimits& limits, PixelFormatCaps formatCaps,
+                                   const BufferViewDesc& view,
+                                   const ResolvedBufferView& resolved) noexcept;
+
+// 그리기에 묶는 버퍼 view slot 수다(GX6 파라미터 바인딩 전의 개발 경로 고정 배치, PipelineDesc
+// 주석). slot n은 HLSL register t(n + 1), GLSL ES typed는 텍스처 유닛 PS n + 1·VS n + 17
+// (samplerBuffer), 구조화·raw는 storage block binding n이다. 단계당 SRV 합계는 텍스처 t0와 합쳐
+// 5다(형식 정의 최소 보장 16 안).
+inline constexpr uint32 MaxDrawBufferViews = 4;
+
+// 파이프라인이 읽는 버퍼 view slot 배치다. backend가 셰이더 리플렉션(D3D reflection, SPIR-V
+// 리플렉션, GL program introspection)으로 채우고, 그리기 때 묶인 view가 배치를 채우는지 본다
+// (DrawBufferSlotsSatisfied).
+struct DrawBufferSlots {
+    // slot n을 셰이더가 읽으면 비트 n이다.
+    uint32 usedMask = 0;
+    BufferViewKind kinds[MaxDrawBufferViews] = {};
+    // Typed slot이 돌려주는 값 계열이다(view 형식의 PixelFormatInfo::shaderType과 같아야 한다).
+    PixelShaderType typedShaderTypes[MaxDrawBufferViews] = {};
+};
+
+// 그리기에 묶인 view 하나의 요약이다(backend가 view 기록에서 만든다). bound가 거짓이면 묶인 것이
+// 없다.
+struct BoundBufferViewInfo {
+    bool bound = false;
+    BufferViewKind kind = BufferViewKind::Typed;
+    PixelShaderType shaderType = PixelShaderType::None;
+};
+
+// slots가 읽는 모든 slot에 같은 종류(Typed는 같은 값 계열)의 view가 묶였는지다. 아니면 backend는
+// 그 그리기를 무시하고 IgnoredDraws를 올린다.
+bool DrawBufferSlotsSatisfied(const DrawBufferSlots& slots,
+                              const BoundBufferViewInfo (&bound)[MaxDrawBufferViews]) noexcept;
 
 // index 형식이다(RenderBase 10.4절).
 enum class IndexFormat : uint8 {
@@ -282,10 +450,23 @@ enum class CullMode : uint8 {
     Front
 };
 
-// 그리기 파이프라인 설정이다. 모든 파이프라인은 같은 고정 자원 배치를 쓴다: 그리기 상수
-// (DrawConstants, HLSL b0 / GLSL ES 루트 상수 에뮬레이션 배열 uniform highp vec4 vu_h[5]·pu_h[5])와
-// 텍스처 하나(HLSL t0·s0 / GLSL ES layout(binding = 0) sampler2D ps0). 샘플러는 묶은 텍스처의
-// TextureDesc::sampler를 따른다. 깊이는 쓰지 않는다.
+// 그리기 파이프라인 설정이다. 모든 파이프라인은 같은 고정 자원 배치를 쓴다(파라미터 바인딩 GX6 전의
+// 개발 경로):
+// - 그리기 상수(DrawConstants, HLSL b0 / GLSL ES 루트 상수 에뮬레이션 배열 uniform highp vec4
+//   vu_h[5]·pu_h[5])
+// - PS 텍스처 하나(HLSL t0·s0 / GLSL ES layout(binding = 0) sampler2D ps0). 샘플러는 묶은 텍스처의
+//   TextureDesc::sampler를 따른다.
+// - VS·PS가 읽는 버퍼 view slot 0–3(SetBufferView). HLSL은 register t1–t4에 Buffer<T>·
+//   StructuredBuffer<T>·ByteAddressBuffer를 선언한다. GLSL ES는 typed를 samplerBuffer·
+//   isamplerBuffer·usamplerBuffer로 PS는 layout(binding = 1 + slot), VS는 layout(binding = 17 +
+//   slot)(VS 텍스처 유닛은 16부터, ShaderSystem 7.2절 4항)에, 구조화·raw를 layout(std430,
+//   binding = slot) readonly buffer로 선언하고 raw block 이름은 type_ByteAddressBuffer로
+//   시작한다(SPIRV-Cross 출력 이름). 생성은 셰이더 리플렉션으로 slot 배치(DrawBufferSlots)를
+//   얻는다.
+// 배치 밖 자원(다른 register·상수 버퍼, VS·PS의 UAV)을 선언한 셰이더는 InvalidArgument다(UAV는
+// compute만, ShaderSystem 7.2절 4항). OpenGL ES의 VS·PS storage block은 장치 한도
+// (DeviceLimits::vertex·pixel.storageBuffers, ES 3.2 최소 보장 0)를 넘으면 링크가 실패한다
+// (DependencyFailed). 깊이는 쓰지 않는다.
 //
 // 셰이더 입력 대조(RenderBase 10.4절): 정점 셰이더가 읽는 모든 location이 layout에 있어야 하고
 // 형식의 셰이더 타입 계열(VertexFormatShaderType)이 셰이더 입력 타입과 같아야 한다. 셰이더가 읽지
@@ -549,6 +730,9 @@ struct DeviceInfo {
     // 하지 않는다. D3D12는 command list 이벤트(PIX), D3D11은 ID3DUserDefinedAnnotation, Vulkan은
     // VK_EXT_debug_utils label, OpenGL은 debug group이다.
     bool debugMarkers = false;
+    // API 판 표시다(진단·로그용). D3D는 장치 feature level(예: 0xc100 = 12_1), Vulkan은 장치
+    // apiVersion(VK_MAKE_API_VERSION), OpenGL은 major × 100 + minor × 10(예: 320)이다.
+    uint32 apiVersion = 0;
 };
 
 } // namespace rocks::graphics

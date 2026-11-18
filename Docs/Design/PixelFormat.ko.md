@@ -1,6 +1,6 @@
 # 픽셀 형식(PixelFormat) 설계
 
-기준일: 2026-11-18, 개정 4(초안). UE 5.8이 정의하는 픽셀 형식 전체를 Rocks에 들이기 위한 조사와 구현 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-18, 개정 5(초안). UE 5.8이 정의하는 픽셀 형식 전체를 Rocks에 들이기 위한 조사와 구현 스펙이다. 범위는 다음과 같다.
 - 형식 목록과 고정 번호표, UE 대응표, 제외 형식과 사유
 - 형식 정보 표(`PixelFormatInfo`)와 형식 능력 플래그(`PixelFormatCaps`)
 - backend 대응 표(D3D12·D3D11·Vulkan·OpenGL ES·Metal)와 장치 능력 질의(GX1)의 연결
@@ -550,9 +550,9 @@ uint64 MipChainBytes(PixelFormat format, uint32 width, uint32 height, uint32 dep
 | `StorageRead` | typed UAV load | `TypedUAVLoad` | `SUPPORT2_UAV_TYPED_LOAD` | `STORAGE_IMAGE_BIT`(UE는 load·store를 한 비트로 봄, VK:1165) | Table 8.26 |
 | `StorageWrite` | typed UAV store | `TypedUAVStore`·`TextureStore` | `SUPPORT2_UAV_TYPED_STORE` | `STORAGE_IMAGE_BIT` | Table 8.26 |
 | `StorageAtomic` | image atomic | `TextureAtomics` | `SUPPORT2_UAV_ATOMIC_EXCHANGE` | `STORAGE_IMAGE_ATOMIC_BIT` | R32UI·R32I(Table 8.26 + 사양 8.23절 atomic 대상, 미대조) |
-| `TexelBufferRead` | typed buffer SRV | `BufferLoad` | `SUPPORT1_BUFFER` | `UNIFORM_TEXEL_BUFFER_BIT` | Table 8.18(버퍼 텍스처 형식, 미대조) |
-| `TexelBufferWrite` | typed buffer UAV | `BufferStore` | `SUPPORT2_UAV_TYPED_STORE` | `STORAGE_TEXEL_BUFFER_BIT` | image 형식 + 버퍼 텍스처(미대조) |
-| `TexelBufferAtomic` | typed buffer atomic | `BufferAtomics` | `SUPPORT2_UAV_ATOMIC_EXCHANGE` | `STORAGE_TEXEL_BUFFER_ATOMIC_BIT` | R32UI·R32I(미대조) |
+| `TexelBufferRead` | typed buffer SRV | `BufferLoad` | `SUPPORT1_BUFFER` | `UNIFORM_TEXEL_BUFFER_BIT` | Table 8.18(버퍼 텍스처 형식, 14.3절에서 대조) |
+| `TexelBufferWrite` | typed buffer UAV | `BufferStore` | `SUPPORT2_UAV_TYPED_STORE` | `STORAGE_TEXEL_BUFFER_BIT`(읽기도 되는 형식만, 14.3절) | image 형식(Table 8.26) ∩ Table 8.18 |
+| `TexelBufferAtomic` | typed buffer atomic | `BufferAtomics` | `SUPPORT2_UAV_ATOMIC_EXCHANGE` | `STORAGE_TEXEL_BUFFER_ATOMIC_BIT`(읽기도 되는 형식만) | R32UI·R32I |
 
 UE 플래그 가운데 넣지 않는 것: `Texture1D`(Rocks 차원에 1D 없음, A0-G), `VertexBuffer`·`IndexBuffer`(별도 `VertexFormat`·`IndexFormat`), `UAV`(`StorageRead|StorageWrite`로 나눔), `LossyCompressible`(Vulkan 고정 비율 압축, VK:1183–1203, 후속), `AnyTexture`·`All*`(묶음 이름은 Rocks 상수로 둔다).
 
@@ -881,7 +881,7 @@ D3D12의 능력 없음 26개는 DXGI 형식이 없는 ETC2·EAC 6, ASTC 15, `R8U
   - `ReadTexture(handle, mip, plane, out)`: 렌더 타깃이 아닌 텍스처·블록 압축·깊이 plane·비디오 plane을 읽는 동기 시험 경로다(`ReadPixels`와 같은 readback 경로).
   - 새 virtual(`GetPixelFormatCaps`·`CreateTextureView`·`ReadTexture`)은 기본 구현이 각각 `None`·`Unsupported`·`Unsupported`다. 다른 backend 브랜치가 구현 없이도 빌드된다.
 - 텍스처·파이프라인 생성은 형식 능력으로 판정한다. 파이프라인 색 형식은 `RenderTarget`(알파 블렌드면 `Blendable`도)이 필요하다. 능력이 없으면 `Unsupported`이고 `LastError`에 형식 이름을 기록한다(D3D12·OpenGL).
-- `Multisample` 능력과 표본 수 질의(`GetPixelFormatSampleCounts`)는 MSAA desc가 생기는 GX2로 미뤘다. D3D12의 `Texture3D`·`TextureCube`·`Storage*`·`TexelBuffer*`는 질의해 공개하지만 그 차원·view API가 아직 없어 "능력 ⇔ 생성" 시험 범위 밖이다.
+- `Multisample` 능력과 표본 수 질의(`GetPixelFormatSampleCounts`)는 GX2로 미뤘다(개정 5에서 구현, 14.3절). D3D12의 `Texture3D`·`TextureCube`·`Storage*`·`TexelBuffer*`는 질의해 공개하지만 그 차원·view API가 아직 없어 "능력 ⇔ 생성" 시험 범위 밖이다.
 - `D24Unorm`은 DXGI `R24G8_TYPELESS` 자원의 깊이 plane만 쓴다. 장치 자원의 plane이 Rocks plane보다 많으면 올리지 않은 plane도 생성 직후 쉬는 상태(PIXEL_SHADER_RESOURCE)로 옮긴다(`FormatPlaneCount`, `D3D12_FEATURE_FORMAT_INFO`).
 - 비디오 형식 plane은 SRV만 생성한다(plane RTV·UAV 없음). 비디오 형식의 Sampled 능력은 plane SRV 형식이 아니라 자원 형식 자체의 셰이더 지원으로 판정한다.
 - 자원 상태(RG1 병합 뒤): D3D12 텍스처 상태는 mip별 committed·current로 추적한다(RenderBase GX5). 다중 plane 자원은 mip 하나의 상태를 그 mip의 모든 plane subresource가 함께 따르고, mip별 전이는 plane마다 barrier를 낸다(`TextureRecord::devicePlanes`). view는 상태를 따로 갖지 않고 원 텍스처 기록이 추적한다(`SetTexture`·`Transition`이 원 기록으로 향한다). 원 텍스처를 view보다 먼저 `Retire`하면 기록을 남겨 두었다가 마지막 view를 놓을 때 함께 놓는다. 업로드와 readback(`ReadTexture`)은 상태 중립이다: 그 mip의 committed 상태에서 복사 상태로 바꿨다가 되돌린다. 렌더 그래프의 텍스처 생성은 지금처럼 블록 압축을 거부하고 깊이 형식은 GX4에서 연다.
@@ -927,7 +927,7 @@ D3D12의 능력 없음 26개는 DXGI 형식이 없는 ETC2·EAC 6, ASTC 15, `R8U
   - Filterable은 Table 8.10 TF(32F는 `GL_OES_texture_float_linear`)를 따른다.
   - RenderTarget은 CR(SNORM은 `GL_EXT_render_snorm`, norm16 UNORM은 `GL_EXT_texture_norm16`)을 따른다. Blendable은 렌더 타깃이면서 정수가 아닐 때 준다. 32F는 `GL_EXT_float_blend`가 있어야 한다(없이 블렌드하면 `INVALID_OPERATION`, 확장 사양).
   - Storage는 Table 8.26, atomic은 R32UI·R32I다.
-  - texel buffer(Table 8.18)는 대조하지 않아 공개하지 않는다.
+  - texel buffer(Table 8.18)는 개정 4에서 대조하지 않아 공개하지 않았다(개정 5에서 대조·공개, 14.3절).
   - 깊이는 Filterable이 아니다. 비교 모드 없이 선형 필터를 걸면 불완전 텍스처가 된다.
 - 선형 필터를 받지 않는 형식(정수·깊이·필터 확장 없는 32F)의 샘플러는 최근접 필터로 만든다. ES에서는 그 조합이 불완전 텍스처가 되어 `texelFetch`도 0을 읽는다. 이는 Filterable 능력이 없다고 공개한 형식의 규칙이다.
 - `A8Unorm`은 R8에 텍스처 swizzle (0,0,0,R)을 건다. 렌더 타깃·storage 능력은 주지 않고, readback은 저장소 R8을 읽는다.
@@ -952,6 +952,21 @@ D3D12의 능력 없음 26개는 DXGI 형식이 없는 ETC2·EAC 6, ASTC 15, `R8U
   - ES 3.2 context: Sampled 77·RenderTarget 36·DepthStencil 5·능력 없음 9, 읽지 못한 형식 35(블록 압축 29, `R8UnormSrgb`·`RGB8UnormSrgb`·`RGB32*` 3종·`RGB9E5Ufloat`).
   - 데스크톱 core context: Sampled 53·RenderTarget 28·DepthStencil 5·능력 없음 33, 읽지 못한 형식 19(블록 압축 11, `EXT_render_snorm` 없는 SNORM 2종, `R8UnormSrgb`·`RGB8UnormSrgb`·`RGB32*` 3종·`RGB9E5Ufloat`).
   - 둘 다 "능력 ⇔ 생성"·바이트 왕복(깊이·스텐실 포함)·깊이/스텐실 view 샘플 실패 0, GL debug 오류 0이다.
+
+### 14.3 GX1·GX2 연동(개정 5)
+
+**MSAA 능력(2026-11-18, RenderBase GX1).** 14.1절에서 GX2로 미룬 `Multisample` 능력과 표본 수 질의를 넣었다. 공개 API는 8.2절 그대로 `Device::GetPixelFormatSampleCounts(format)`(비트 n = 2^n 표본, `SampleCountBit`)이다.
+- 렌더 타깃·깊이 능력이 있는 형식만 값이 있고 1표본 비트를 늘 넣는다. 그 밖의 형식은 0이다. 2표본 이상이 하나라도 있으면 `Multisample`을 켠다.
+- D3D12·D3D11: RTV(깊이는 DSV) 형식이 `MULTISAMPLE_RENDERTARGET`을 지원할 때 2–32표본을 `D3D12_FEATURE_MULTISAMPLE_QUALITY_LEVELS`·`CheckMultisampleQualityLevels`로 묻는다(품질 수준 1 이상).
+- Vulkan: 렌더 타깃·깊이와 같은 usage·flags의 `vkGetPhysicalDeviceImageFormatProperties` `sampleCounts`다(VkSampleCountFlags 비트가 Rocks 비트와 같다, 장치 framebuffer·sampled 표본 한도가 반영된다).
+- OpenGL ES: `glGetInternalformativ(GL_TEXTURE_2D_MULTISAMPLE, …, GL_SAMPLES)`(ES 3.1 core)다. 데스크톱 core context는 데스크톱 값(GTX 1060 32표본까지)을 그대로 낸다.
+- 측정(RGBA8Unorm·D32Float): D3D12·D3D11·Vulkan·GLES ES context GTX 1060 1/2/4/8, WARP 1/2/4/8/16, lavapipe 1/4/8, GL core context 1/2/4/8/16/32. `Multisample` 형식 수는 D3D12·D3D11 43, WARP 47, Vulkan 42, lavapipe 45, GLES 41(core context 33).
+- MSAA 텍스처 생성(`TextureDesc` 표본 수)은 텍스처 쪽 GX2 단계다. 그때 "능력 ⇔ 생성" 시험을 표본 수 축으로 넓힌다.
+
+**texel buffer 능력(RQ9).** OpenGL ES의 `TexelBufferRead`는 ES 3.2 버퍼 텍스처 내부 형식 표(Table 8.18, Khronos glTexBuffer ES3 refpage로 대조)에 있는 형식이다: R8·R8I·R8UI·RG8·RG8UI·RGBA8·RGBA8UI·R16I·R16UI·R16F·RG16I·RG16UI·RG16F·RGBA16I·RGBA16UI·RGBA16F·R32I·R32UI·R32F·RG32UI·RG32F·RGB32I·RGB32UI·RGB32F·RGBA32UI·RGBA32F(Rocks 형식이 있는 것). 표의 R16·RG16·RGBA16 UNORM은 ES core 내부 형식이 아니고 `GL_EXT_texture_norm16`의 버퍼 텍스처 조건을 대조하지 않아 공개하지 않는다. `TexelBufferWrite`는 그 가운데 image 형식(Table 8.26), atomic은 R32UI·R32I다. Renderer가 고른 `R32Uint`·`RGBA32Float`는 읽기·쓰기 모두 된다(RQ9 해결).
+- Vulkan: 버퍼 view 형식은 버퍼의 모든 texel usage(읽기 용도면 UNIFORM, 쓰기 용도면 STORAGE)를 지원해야 하므로(VUID-VkBufferViewCreateInfo-format-08778) 쓰기·atomic 능력은 읽기도 되는 형식만 공개하고, 읽기·쓰기 버퍼의 view는 두 능력을 모두 요구한다(아니면 `Unsupported`).
+- D3D11: WARP가 `RGB9E5Ufloat`에 `SUPPORT_BUFFER`를 알리고도 버퍼 SRV 생성 안에서 멈추므로 D3D11은 그 형식의 texel buffer 능력을 공개하지 않는다.
+- 측정(typed view 생성 ⇔ 능력, 47개 비압축 단일 plane 색 형식): D3D12·D3D11 GTX 1060 읽기 36·쓰기 33, D3D12 WARP 39·36, D3D11 WARP 38·35, Vulkan GTX 1060 42·33, lavapipe 44·34, GLES(두 context) 27·10. 모두 "능력 ⇔ 생성" 실패 0이다.
 
 ## 15. A0-G와의 분담
 
@@ -1003,3 +1018,4 @@ D3D12의 능력 없음 26개는 DXGI 형식이 없는 ETC2·EAC 6, ASTC 15, `R8U
 - 개정 2(2026-11-17): 사용자 결정 반영. PX1 (가) sRGB 별도 형식, PX2 계열별 번호 구간, PX3 비디오 형식은 D3D12 생성까지 지금 구현(권장안이던 "생성은 미디어 단계까지 계약"이 아님). 1·11·16절과 PF6 행을 고쳤다.
 - 개정 3(2026-11-17): PF2(D3D12)·PF3 틀·PF6(D3D12) 구현과 스펙 차이를 14.1절에 기록하였다. 깊이·스텐실 이미지 크기를 plane 합으로 바꾸었고, `TextureUsage::DepthStencil`·`CreateTextureView`·`ReadTexture`·`GetPixelFormatCaps`를 Graphics 계약에 더하였다.
 - 개정 4(2026-11-18): PF4. D3D11·Vulkan·OpenGL ES 대응 표·능력 질의·깊이·스텐실·비디오·view·readback(14.2절). 8.6절 표의 norm16·SNORM 렌더 타깃·BGRA8 조건을 확장 사양으로 대조해 고치고 32F 블렌드 조건(`GL_EXT_float_blend`)을 더하였다.
+- 개정 5(2026-11-18): RenderBase GX1·GX2(버퍼) 1단계와 함께 `Multisample` 능력·`GetPixelFormatSampleCounts`를 모든 backend에 넣고, GLES texel buffer 형식을 ES 3.2 Table 8.18로 대조해 공개했다(RQ9, 7절 표·14.3절). Vulkan texel buffer 쓰기 능력은 읽기도 되는 형식만, D3D11 `RGB9E5Ufloat` texel buffer는 공개하지 않는다.

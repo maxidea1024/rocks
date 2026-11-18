@@ -106,10 +106,11 @@ constexpr uint32 CpuRank = 4;
 VulkanDevice::VulkanDevice(Allocator& allocator) noexcept
     : allocator_(allocator), adapterName_(allocator), lastError_(allocator), memory_(allocator),
       buffers_(allocator), textures_(allocator), pipelines_(allocator), swapChains_(allocator),
-      readbacks_(allocator), retired_(allocator), descriptorPools_(allocator),
-      renderPasses_(allocator), timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics),
-      touchedTextures_(allocator), acquireSemaphores_(allocator), orphanSemaphores_(allocator),
-      ring_(allocator), stagingBlocks_(allocator), timestamps_(allocator) {
+      readbacks_(allocator), bufferViews_(allocator), orphanBuffers_(allocator),
+      retired_(allocator), renderPasses_(allocator),
+      timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics), touchedTextures_(allocator),
+      acquireSemaphores_(allocator), orphanSemaphores_(allocator), ring_(allocator),
+      stagingBlocks_(allocator), timestamps_(allocator) {
     stagingSource_.owner = this;
     timestampSource_.owner = this;
 }
@@ -179,6 +180,19 @@ VulkanDevice::~VulkanDevice() {
         }
 
         textures_.Clear();
+        for (BufferViewRecord& record : bufferViews_) {
+            if (record.view != VK_NULL_HANDLE) {
+                functions_.vkDestroyBufferView(device_, record.view, nullptr);
+            }
+        }
+
+        bufferViews_.Clear();
+        for (OrphanBuffer& orphan : orphanBuffers_) {
+            functions_.vkDestroyBuffer(device_, orphan.buffer, nullptr);
+            FreeMemoryLocked(orphan.memory);
+        }
+
+        orphanBuffers_.Clear();
         for (BufferRecord& record : buffers_) {
             functions_.vkDestroyBuffer(device_, record.buffer, nullptr);
             FreeMemoryLocked(record.memory);
@@ -187,6 +201,7 @@ VulkanDevice::~VulkanDevice() {
         buffers_.Clear();
         for (PipelineRecord& record : pipelines_) {
             functions_.vkDestroyPipeline(device_, record.pipeline, nullptr);
+            DestroyPipelineLayout(record);
         }
 
         pipelines_.Clear();
@@ -205,11 +220,7 @@ VulkanDevice::~VulkanDevice() {
         }
 
         samplerCount_ = 0;
-        for (VkDescriptorPool pool : descriptorPools_) {
-            functions_.vkDestroyDescriptorPool(device_, pool, nullptr);
-        }
-
-        descriptorPools_.Clear();
+        DestroyRecordPools();
         for (RenderPassEntry& entry : renderPasses_) {
             functions_.vkDestroyRenderPass(device_, entry.renderPass, nullptr);
         }
@@ -217,10 +228,6 @@ VulkanDevice::~VulkanDevice() {
         renderPasses_.Clear();
         if (pipelineLayout_ != VK_NULL_HANDLE) {
             functions_.vkDestroyPipelineLayout(device_, pipelineLayout_, nullptr);
-        }
-
-        if (textureSetLayout_ != VK_NULL_HANDLE) {
-            functions_.vkDestroyDescriptorSetLayout(device_, textureSetLayout_, nullptr);
         }
 
         if (emptySetLayout_ != VK_NULL_HANDLE) {
@@ -347,8 +354,10 @@ Result<void> VulkanDevice::Initialize(const DeviceDesc& desc, DeviceCreateReport
         return device;
     }
 
-    // 형식 능력은 켠 기능(Y′CbCr·ASTC HDR)에 따라 달라지므로 논리 장치를 만든 뒤 묻는다.
+    // 형식 능력은 켠 기능(Y′CbCr·ASTC HDR)에 따라 달라지므로 논리 장치를 만든 뒤 묻는다. 장치
+    // 능력(GX1)도 켠 기능 기준이다.
     QueryFormatCaps();
+    QueryDeviceCaps();
 
     auto shared = CreateSharedObjects(desc);
     if (!shared) {
@@ -543,12 +552,35 @@ Result<void> VulkanDevice::CreateLogicalDevice() noexcept {
                                                VK_EXT_TEXTURE_COMPRESSION_ASTC_HDR_EXTENSION_NAME);
     // multi-planar 이미지(NV12·P010)를 만들려면 samplerYcbcrConversion 기능을 켜야 한다(Vulkan 1.1
     // core 기능, 지원하면 켠다). plane view만 쓰므로 Y′CbCr 변환 객체는 만들지 않는다.
+    // 64 bit atomic은 버퍼(VK_KHR_shader_atomic_int64)와 이미지(VK_EXT_shader_image_atomic_int64)가
+    // 모두 있을 때만 켠다(UE VulkanExtensions.cpp:536과 같은 조건). VS 층 출력은
+    // VK_EXT_shader_viewport_index_layer다(UE :560). 확장이 없으면 그 기능 구조를 묻지 않는다.
+    const bool atomicInt64Extension =
+        HasExtension(extensions, extensionCount, VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME);
+    const bool imageAtomicInt64Extension =
+        HasExtension(extensions, extensionCount, VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME);
+    viewportLayer_ =
+        HasExtension(extensions, extensionCount, VK_EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME);
+    if (viewportLayer_) {
+        enabled[enabledCount++] = VK_EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME;
+    }
+
+    VkPhysicalDeviceShaderAtomicInt64Features atomicSupported = {};
+    atomicSupported.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES;
+    VkPhysicalDeviceShaderImageAtomicInt64FeaturesEXT imageAtomicSupported = {};
+    imageAtomicSupported.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_IMAGE_ATOMIC_INT64_FEATURES_EXT;
+    const bool atomicQuery = atomicInt64Extension && imageAtomicInt64Extension;
+    atomicSupported.pNext = &imageAtomicSupported;
     VkPhysicalDeviceTextureCompressionASTCHDRFeatures astcHdrSupported = {};
     astcHdrSupported.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TEXTURE_COMPRESSION_ASTC_HDR_FEATURES;
+    astcHdrSupported.pNext = atomicQuery ? &atomicSupported : nullptr;
     VkPhysicalDeviceSamplerYcbcrConversionFeatures ycbcrSupported = {};
     ycbcrSupported.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES;
-    ycbcrSupported.pNext = astcHdrExtension ? &astcHdrSupported : nullptr;
+    ycbcrSupported.pNext = astcHdrExtension ? static_cast<void*>(&astcHdrSupported)
+                           : atomicQuery    ? static_cast<void*>(&atomicSupported)
+                                            : nullptr;
     VkPhysicalDeviceFeatures2 supported2 = {};
     supported2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     supported2.pNext = &ycbcrSupported;
@@ -560,13 +592,31 @@ Result<void> VulkanDevice::CreateLogicalDevice() noexcept {
         enabled[enabledCount++] = VK_EXT_TEXTURE_COMPRESSION_ASTC_HDR_EXTENSION_NAME;
     }
 
+    atomic64_ = atomicQuery && atomicSupported.shaderBufferInt64Atomics == VK_TRUE &&
+                imageAtomicSupported.shaderImageInt64Atomics == VK_TRUE;
+    if (atomic64_) {
+        enabled[enabledCount++] = VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME;
+        enabled[enabledCount++] = VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME;
+    }
+
+    VkPhysicalDeviceShaderImageAtomicInt64FeaturesEXT imageAtomicEnabled = {};
+    imageAtomicEnabled.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_IMAGE_ATOMIC_INT64_FEATURES_EXT;
+    imageAtomicEnabled.shaderImageInt64Atomics = VK_TRUE;
+    VkPhysicalDeviceShaderAtomicInt64Features atomicEnabled = {};
+    atomicEnabled.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES;
+    atomicEnabled.shaderBufferInt64Atomics = VK_TRUE;
+    atomicEnabled.pNext = &imageAtomicEnabled;
     VkPhysicalDeviceTextureCompressionASTCHDRFeatures astcHdrEnabled = {};
     astcHdrEnabled.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TEXTURE_COMPRESSION_ASTC_HDR_FEATURES;
     astcHdrEnabled.textureCompressionASTC_HDR = VK_TRUE;
+    astcHdrEnabled.pNext = atomic64_ ? &atomicEnabled : nullptr;
     VkPhysicalDeviceSamplerYcbcrConversionFeatures ycbcrEnabled = {};
     ycbcrEnabled.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES;
     ycbcrEnabled.samplerYcbcrConversion = ycbcr_ ? VK_TRUE : VK_FALSE;
-    ycbcrEnabled.pNext = astcHdr_ ? &astcHdrEnabled : nullptr;
+    ycbcrEnabled.pNext = astcHdr_    ? static_cast<void*>(&astcHdrEnabled)
+                         : atomic64_ ? static_cast<void*>(&atomicEnabled)
+                                     : nullptr;
     VkPhysicalDeviceFeatures features = {};
     anisotropy_ = supported.samplerAnisotropy == VK_TRUE;
     gather_ = supported.shaderImageGatherExtended == VK_TRUE;
@@ -575,6 +625,14 @@ Result<void> VulkanDevice::CreateLogicalDevice() noexcept {
     features.textureCompressionBC = supported.textureCompressionBC;
     features.textureCompressionETC2 = supported.textureCompressionETC2;
     features.textureCompressionASTC_LDR = supported.textureCompressionASTC_LDR;
+    // 장치 능력(GX1)으로 공개하는 기능은 지원하면 켠다(UE도 지원하는 core 기능을 켠다).
+    features.depthClamp = supported.depthClamp;
+    features.multiDrawIndirect = supported.multiDrawIndirect;
+    features.drawIndirectFirstInstance = supported.drawIndirectFirstInstance;
+    features.imageCubeArray = supported.imageCubeArray;
+    features.vertexPipelineStoresAndAtomics = supported.vertexPipelineStoresAndAtomics;
+    features.fragmentStoresAndAtomics = supported.fragmentStoresAndAtomics;
+    features.shaderInt64 = atomic64_ ? supported.shaderInt64 : VK_FALSE;
     const float priority = 1.0f;
     VkDeviceQueueCreateInfo queue = {};
     queue.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
@@ -594,6 +652,8 @@ Result<void> VulkanDevice::CreateLogicalDevice() noexcept {
         device_ = VK_NULL_HANDLE;
         return Fail("vkCreateDevice", result);
     }
+
+    enabledFeatures_ = features;
 
     const char* missingFunction = LoadDeviceFunctions(device_, functions_);
     if (missingFunction != nullptr) {
@@ -694,6 +754,7 @@ DeviceInfo VulkanDevice::Info() const noexcept {
     info.clockCalibration = info.timestamps && getCalibratedTimestamps_ != nullptr;
     info.debugMarkers = debugUtils_ && functions_.vkCmdBeginDebugUtilsLabelEXT != nullptr &&
                         functions_.vkCmdEndDebugUtilsLabelEXT != nullptr;
+    info.apiVersion = properties_.apiVersion;
     return info;
 }
 

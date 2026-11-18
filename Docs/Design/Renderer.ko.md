@@ -1,6 +1,6 @@
 # 렌더러(Renderer) 설계
 
-기준일: 2026-11-18, 개정 3(초안). UE 5.8 Renderer 모듈이 맡는 일 가운데 **렌더 경로**(Forward+·Deferred)와 그 위에 올라가는 그림자·투명·하늘·안개·후처리의 구조, GI 두 축과 PathTracing 모드의 연결점을 Rocks에 세우는 설계 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-18, 개정 4(초안). UE 5.8 Renderer 모듈이 맡는 일 가운데 **렌더 경로**(Forward+·Deferred)와 그 위에 올라가는 그림자·투명·하늘·안개·후처리의 구조, GI 두 축과 PathTracing 모드의 연결점을 Rocks에 세우는 설계 스펙이다. 범위는 다음과 같다.
 - 장면 표현과 게임 → 렌더 전달, view와 가시성
 - 공통 frame graph, Forward+와 Deferred가 갈라지는 곳
 - GBuffer layout, light grid, 조명 평가, 그림자, 투명·하늘·안개, 후처리·업스케일 연결
@@ -950,10 +950,10 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 | GLES 간접 draw base instance 0 규칙 | 15.2절 | ES 3.1·3.2 사양 `DrawElementsIndirectCommand` 대조 |
 | 공유 상수의 GLES `vec4` 크기 | 15.2절 | 구조체 확정 뒤 워커 검사 |
 | UE path tracing에서 depth prepass·velocity 유지 여부 | 12.3절 | `DSR` path tracing 분기 전후 조사 |
-| GLES texel buffer 형식(`R32Uint`·`RGBA32Float`) | 8.1절, RQ9 | ES 3.2 사양 Table 8.18 대조 |
+| GLES texel buffer 형식(`R32Uint`·`RGBA32Float`) | 8.1절, RQ9 | **확인(2026-11-18)**: Table 8.18(Khronos glTexBuffer ES3 refpage)에 둘 다 있고 image 형식이라 typed SRV·UAV 모두 된다. GTX 1060 ES context에서 SRV 생성·VS·PS 읽기 픽셀 대조(PixelFormat.ko.md 14.3절) |
 | SPIRV-Cross의 HLSL `Buffer<T>` → ESSL `samplerBuffer` 변환 | RQ10 | SH0 측정 |
-| 데스크톱 Vulkan 장치의 `maxColorAttachments` 분포 | 결정 RN3 | GX1 조회·장치 표본 |
-| 데스크톱 Vulkan 장치의 `maxPerStageDescriptorSampledImages`·`maxPerStageDescriptorSamplers` 분포 | 결정 RN13, RQ22 | GX1 조회·장치 표본 |
+| 데스크톱 Vulkan 장치의 `maxColorAttachments` 분포 | 결정 RN3 | GX1 조회·장치 표본. 측정(2026-11-18): GTX 1060·lavapipe 모두 8(RenderBase 4.4절 GX1 표). 장치 표본을 넓히는 것은 남음 |
+| 데스크톱 Vulkan 장치의 `maxPerStageDescriptorSampledImages`·`maxPerStageDescriptorSamplers` 분포 | 결정 RN13, RQ22 | GX1 조회·장치 표본. 측정(2026-11-18): GTX 1060 단계당 1048576·1048576, set 1048576, `maxPerStageResources` 4294967295 / lavapipe 모두 1015808(RenderBase 4.4절 GX1 표). 장치 표본을 넓히는 것은 남음 |
 | D3D12 resource binding tier 1 장치가 `D3D12_SHADER_MODEL_6_6` 요구를 통과하는지(샘플러 상한 16 여부) | RQ23 | 장치 표본. 개발 기계 GTX 1060은 tier 3(셰이더 시스템 15절 결정 3 측정) |
 | Metal MRT·layer 출력·깊이 clamp·HDR 능력 | 13.1절 | SH5 착수 때 Apple 능력 표 |
 | GLES 깊이 clamp 확장 | 13.1절 | 확장 목록 조사(P13 기기) |
@@ -964,3 +964,4 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 - 개정 1(2026-11-18): 초안. 사용자 지시 "스펙 지금 시작해"에 따라 작성했다. UE 5.8.4 Renderer 네 갈래 조사(프레임 흐름·desktop forward·light grid·모바일 선택 / GBuffer·Substrate·shading model·deferred 조명·그림자·정적 조명 / 장면 표현·그리기 명령·GPU Scene·view·가시성·투명·하늘·안개·후처리 / GI·RT·path tracing 진입점)를 종합하고, 핵심 근거 약 40곳을 원문 줄로 다시 대조했다. 사용자 결정(렌더 경로 Forward+·Deferred 둘, GI 두 축, PathTracing 별도 모드, UE 좌표·행렬, Rocks 이름, 레거시 제외, 5개 backend와 지원표)을 1절에 반영했다. 머티리얼 쪽 계약은 동시에 작성 중인 머티리얼 시스템 스펙과 겹치지 않게 14.6절 경계표로 나눴다. 독립 리뷰 1건(UE 인용 약 75곳 대조, 차단 2·중요 11·사소 다수)을 반영했다: GLES image 형식에 맞춰 grid를 `R32Uint` 하나로(8.1절), 큰 월드 위치를 GPU Scene 상위·하위 + view 이동 보정으로(5.1절), light grid 셀 상한 없음과 넘침 보수 대체(8.1절), 그림자 깊이를 UE와 같은 보통 Z·`D16Unorm`으로(9.2절), 단계당 SRV 16 예산표(7.4절, 결정 RN13), 공유 상수와 자원 묶음 분리(15.2절), 간접 draw의 인스턴스 offset(15.2절), 조명 pass의 깊이·스텐실 attachment 제거(GLES feedback loop, 7.3절), Forward+ DBuffer decal(6.2절), skinned 단계 RS12, 텍스처 스트리밍 요구 RQ21, 인용 경로·줄 번호 정정, PostChain ID를 PC로 변경.
 - 개정 2(2026-11-18): 사용자 지시 "결정사항들은 권장안대로 하면됨"으로 RN1–RN11·RN13을 권장안으로 확정했다(19.1절). RN12는 RS10에서 정하고, RN5는 머티리얼 스펙과의 교차 검증에서 경계를 맞춘다.
 - 개정 3(2026-11-18): 머티리얼 시스템 개정 1과 교차 검증해 두 문서를 맞췄다(머티리얼 시스템 10.4절 "정합 결과"). 사용자 결정 반영: RN13을 형식별 SRV 상한으로 개정(1·7.4·13.1·19.1절, RQ22), RN5 번호표의 C++ 정의를 `RenderData`·HLSL 상수를 `/Engine/Shared/`로(3.2·14.2절, 순환 해소). D1–D9 반영: WPO를 정점 함수로 분리하고 머티리얼 생성 함수 표를 둠(14.1절), `AlphaHoldout`을 후속 값으로 명시(14.2·10.2절), 거르기 인자를 `MaterialShaderTraits`로(14.3·14.5·15.3절), "static switch 차원"을 "static 변형"으로(14.6절), pass 표에 경로 열·`RENDER_PATH_*` 정의, depth·그림자 pass의 마스크 전용 함수(14.1·14.3절). 그 밖의 불일치 수정: Render Path Switch의 깊이 일치 규칙, 마스크를 퍼뮤테이션 차원에서 뺌, PDO 함수와 depth PS 조건, 노드 미리보기 pass `MaterialPreview`, 조회 키에 단계·SX5, mask clip 값이 static 정의임, 노멀 공간 변환 위치, `GBuffer`·depth 계열 pass의 렌더러 SRV 합계, 짝 규칙과 샘플러 상한(RQ23), 확정된 RN3을 지원표에 반영, 머티리얼 단계(MS)와 RS 선후(17절), 머티리얼 요구 MRD1–MRD12 처리(14.7절), 대체 계수(16.2절).
+- 개정 4(2026-11-18): 19.2절 미확인 3건(GLES texel buffer 형식 RQ9 확인, Vulkan `maxColorAttachments`·단계당 SRV·샘플러 분포)에 RenderBase GX1 측정을 적었다. RQ11·RQ22 값 결정은 하지 않았다.

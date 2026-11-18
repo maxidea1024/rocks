@@ -41,7 +41,13 @@ uint32 FormatPlaneCount(ID3D12Device* device, DXGI_FORMAT format) noexcept;
 
 // device에서 format의 능력을 CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT)로 질의한다. 자원·
 // SRV·RTV·DSV·UAV 형식마다 FORMAT_SUPPORT1·2 비트를 PixelFormatCaps로 옮긴다(UE D3D12Device.cpp:
-// 202–270과 같은 구조). Multisample은 MSAA desc가 생기는 GX2까지 채우지 않는다.
+// 202–270과 같은 구조). Multisample 비트는 QuerySampleCounts 결과로 장치가 더한다.
 PixelFormatCaps QueryFormatCaps(ID3D12Device* device, PixelFormat format) noexcept;
+
+// format의 MSAA 표본 수 집합이다(비트 n = 2^n, Device::GetPixelFormatSampleCounts). caps에
+// RenderTarget이 있으면 RTV 형식, DepthStencil이면 DSV 형식이 MULTISAMPLE_RENDERTARGET을 지원할 때
+// 2–32표본을 CheckFeatureSupport(D3D12_FEATURE_MULTISAMPLE_QUALITY_LEVELS)로 묻는다(품질 수준이 1
+// 이상인 표본 수). 둘 다 없으면 0, 있으면 1표본 비트를 늘 넣는다.
+uint32 QuerySampleCounts(ID3D12Device* device, PixelFormat format, PixelFormatCaps caps) noexcept;
 
 } // namespace rocks::graphics::d3d12

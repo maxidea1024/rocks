@@ -19,6 +19,7 @@
 #include <dxgidebug.h>
 #include <Platform/Atomics.h>
 
+#include "D3D12Caps.h"
 #include "D3D12PixelFormats.h"
 #include <Platform/Memory.h>
 
@@ -74,6 +75,12 @@ constexpr uint64 RetainUntilDestructionFence = NumericLimits<uint64>::Max();
 constexpr GUID DxgiDebugDxgi = {
     0x25cddaa4, 0xb1c6, 0x47e1, {0xac, 0x3e, 0x98, 0x87, 0x5b, 0x5a, 0x2e, 0x2a}};
 static_assert(ConstantCount == 20, "DrawConstants must fit in 20 root constants");
+// root signature 매개변수 번호다: 그리기 상수(b0), PS 텍스처(t0)·샘플러(s0) table, 버퍼 view slot
+// table(t1–t4, 단계 모두, PipelineDesc 고정 배치).
+constexpr UINT RootConstants = 0;
+constexpr UINT RootTexture = 1;
+constexpr UINT RootSampler = 2;
+constexpr UINT RootBufferViews = 3;
 
 // COM 객체 참조다. 소멸 시 Release한다(예외 없이 쓰는 최소 RAII).
 template <class T>
@@ -381,6 +388,17 @@ struct BufferRecord {
     ComRef<ID3D12Resource> resource;
     D3D12_GPU_VIRTUAL_ADDRESS address = 0;
     uint64 size = 0;
+    BufferDesc desc;
+};
+
+// 버퍼 view(GX2)다. 버퍼 자원 참조를 쥐므로 버퍼를 먼저 놓아도 산다. descriptor는 shader-visible
+// SRV heap(CBV_SRV_UAV)의 칸이다(UAV view도 같은 heap, compute 묶기는 GX3·GX4).
+struct BufferViewRecord {
+    ComRef<ID3D12Resource> resource;
+    uint32 descriptor = 0;
+    BufferViewKind kind = BufferViewKind::Typed;
+    ViewAccess access = ViewAccess::Read;
+    PixelShaderType shaderType = PixelShaderType::None;
 };
 
 struct TextureRecord {
@@ -425,6 +443,8 @@ struct PipelineRecord {
     // stream별 stride와 배치가 선언한 stream mask다(그리기 때 묶인 정점 버퍼를 확인한다).
     uint32 strides[MaxVertexStreams] = {};
     uint32 streamMask = 0;
+    // VS·PS가 읽는 버퍼 view slot이다(리플렉션).
+    DrawBufferSlots bufferSlots;
 };
 
 struct SwapChainRecord {
@@ -627,7 +647,7 @@ public:
           dsvs_(allocator), srvs_(allocator), samplers_(allocator), allocators_(allocator),
           messageScratch_(allocator), timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics),
           allocator_(allocator), readbacks_(allocator), ring_(allocator), timestamps_(allocator),
-          touchedTextures_(allocator) {
+          touchedTextures_(allocator), bufferViews_(allocator) {
     }
 
     ~D3D12Device() override {
@@ -652,6 +672,7 @@ public:
         swapChains_.Clear();
         textures_.Clear();
         pipelines_.Clear();
+        bufferViews_.Clear();
         buffers_.Clear();
         if (fenceEvent_ != nullptr) {
             CloseHandle(fenceEvent_);
@@ -797,11 +818,32 @@ public:
             return Fail("descriptor heap creation failed");
         }
 
-        // 형식 능력은 장치 수명 동안 바뀌지 않으므로 한 번 질의해 둔다(PixelFormat.ko.md PF3).
+        // 장치 능력(GX1)과 형식 능력은 장치 수명 동안 바뀌지 않으므로 한 번 질의해
+        // 둔다(PixelFormat.ko.md PF3). MSAA 표본 수가 2 이상이면 Multisample 능력이다.
+        caps_ = d3d12::QueryDeviceCaps(device_.Get(), adapter.Get(), featureLevel_);
         for (uint32 number = 0; number <= MaxPixelFormatNumber; ++number) {
-            formatCaps_[number] =
-                d3d12::QueryFormatCaps(device_.Get(), static_cast<PixelFormat>(number));
+            const PixelFormat format = static_cast<PixelFormat>(number);
+            PixelFormatCaps formatCaps = d3d12::QueryFormatCaps(device_.Get(), format);
+            sampleCounts_[number] = d3d12::QuerySampleCounts(device_.Get(), format, formatCaps);
+            if (sampleCounts_[number] > SampleCountBit(1)) {
+                formatCaps = formatCaps | PixelFormatCaps::Multisample;
+            }
+
+            formatCaps_[number] = formatCaps;
         }
+
+        // 버퍼 view slot이 비었을 때 묶는 null SRV다(셰이더가 읽지 않는 table도 채워 둔다).
+        auto nullSrv = srvs_.Allocate();
+        if (!nullSrv) {
+            return Fail("null buffer SRV descriptor allocation failed");
+        }
+
+        nullBufferSrv_ = nullSrv.Value();
+        D3D12_SHADER_RESOURCE_VIEW_DESC nullDesc = {};
+        nullDesc.Format = DXGI_FORMAT_R32_UINT;
+        nullDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+        nullDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        device_->CreateShaderResourceView(nullptr, &nullDesc, srvs_.Cpu(nullBufferSrv_));
 
         auto signature = CreateRootSignature();
         if (!signature) {
@@ -871,7 +913,17 @@ public:
         info.timestampFrequency = timestampFrequency_;
         info.clockCalibration = info.timestamps;
         info.debugMarkers = true;
+        info.apiVersion = featureLevel_;
         return info;
+    }
+
+    const DeviceCaps& Caps() const noexcept override {
+        return caps_;
+    }
+
+    uint32 GetPixelFormatSampleCounts(PixelFormat format) const noexcept override {
+        const uint32 number = PixelFormatNumber(format);
+        return number <= MaxPixelFormatNumber ? sampleCounts_[number] : 0;
     }
 
     Result<SwapChainHandle> CreateSwapChain(const SwapChainDesc& desc) noexcept override {
@@ -997,17 +1049,26 @@ public:
     // 복사를 기록한다. 소유 스레드의 다음 제출이 실행한다.
     Result<BufferHandle> CreateBuffer(const BufferDesc& desc,
                                       Span<const uint8> initial) noexcept override {
-        if (desc.size == 0 || initial.Size() != desc.size ||
-            (desc.usage != BufferUsage::Vertex && desc.usage != BufferUsage::Index) ||
-            desc.size > NumericLimits<uint32>::Max()) {
+        auto valid = ValidateBufferDesc(desc);
+        if (!valid || initial.Size() != desc.size) {
             return Result<BufferHandle>::Failure(ErrorCode::InvalidArgument);
         }
 
         platform::LockGuard lock(gate_);
+        if (desc.size > caps_.limits.bufferBytes) {
+            return FailCode<BufferHandle>(ErrorCode::Unsupported,
+                                          "buffer size exceeds the device limit (bufferBytes)");
+        }
+
         BufferRecord record;
         const D3D12_HEAP_PROPERTIES heap = HeapProperties(D3D12_HEAP_TYPE_DEFAULT);
-        const D3D12_RESOURCE_DESC resource = BufferResource(desc.size);
-        // 버퍼는 COMMON에서 복사·정점·index 읽기로 암묵 승격되고 제출이 끝나면 COMMON으로 돌아온다.
+        D3D12_RESOURCE_DESC resource = BufferResource(desc.size);
+        if (HasAnyBufferUsage(desc.usage, BufferUsage::ShaderWrite)) {
+            resource.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+        }
+
+        // 버퍼는 COMMON에서 복사·정점·index·셰이더 읽기로 암묵 승격되고 제출이 끝나면 COMMON으로
+        // 돌아온다.
         if (FAILED(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &resource,
                                                     D3D12_RESOURCE_STATE_COMMON, nullptr,
                                                     IID_PPV_ARGS(record.resource.Out())))) {
@@ -1015,6 +1076,7 @@ public:
         }
         record.address = record.resource->GetGPUVirtualAddress();
         record.size = desc.size;
+        record.desc = desc;
 
         auto reserved = ReserveRetireCapacity(1);
         if (!reserved) {
@@ -1029,6 +1091,180 @@ public:
             return Result<BufferHandle>::Failure(added.Error());
         }
         return Result<BufferHandle>::Success(BufferHandle{added.Value()});
+    }
+
+    // 다른 스레드에서도 부를 수 있다(concurrentResourceCreation). descriptor는 shader-visible SRV
+    // heap 칸 하나다(SRV·UAV 모두, GX2).
+    Result<BufferViewHandle> CreateBufferView(BufferHandle handle,
+                                              const BufferViewDesc& desc) noexcept override {
+        platform::LockGuard lock(gate_);
+        const BufferRecord* buffer = buffers_.Find(handle.slot);
+        if (buffer == nullptr) {
+            return Result<BufferViewHandle>::Failure(ErrorCode::StaleHandle);
+        }
+
+        auto resolved = ResolveBufferView(buffer->desc, desc);
+        if (!resolved) {
+            return FailCode<BufferViewHandle>(resolved.Error(),
+                                              "buffer view breaks the view rules (kind, access, "
+                                              "format or range)");
+        }
+
+        const ResolvedBufferView range = resolved.Value();
+        auto limited = CheckBufferViewLimits(caps_.limits, FormatCaps(desc.format), desc, range);
+        if (!limited) {
+            return FailCode<BufferViewHandle>(limited.Error(),
+                                              "buffer view needs a format capability, alignment "
+                                              "or range the D3D12 device does not provide");
+        }
+
+        auto reserved = ReserveRetireCapacity(1);
+        if (!reserved) {
+            return Result<BufferViewHandle>::Failure(reserved.Error());
+        }
+
+        auto descriptor = srvs_.Allocate();
+        if (!descriptor) {
+            return FailWith<BufferViewHandle>("SRV descriptor heap is full");
+        }
+
+        const d3d12::FormatMapping mapping = d3d12::MappingOf(desc.format);
+        const UINT64 first = range.offset / range.elementBytes;
+        const UINT count = static_cast<UINT>(range.elementCount);
+        if (desc.access == ViewAccess::Read) {
+            D3D12_SHADER_RESOURCE_VIEW_DESC view = {};
+            view.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+            view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            view.Buffer.FirstElement = first;
+            view.Buffer.NumElements = count;
+            if (desc.kind == BufferViewKind::Typed) {
+                view.Format = mapping.srv;
+            } else if (desc.kind == BufferViewKind::Structured) {
+                view.Buffer.StructureByteStride = range.elementBytes;
+            } else {
+                view.Format = DXGI_FORMAT_R32_TYPELESS;
+                view.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
+            }
+
+            device_->CreateShaderResourceView(buffer->resource.Get(), &view,
+                                              srvs_.Cpu(descriptor.Value()));
+        } else {
+            D3D12_UNORDERED_ACCESS_VIEW_DESC view = {};
+            view.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+            view.Buffer.FirstElement = first;
+            view.Buffer.NumElements = count;
+            if (desc.kind == BufferViewKind::Typed) {
+                view.Format = mapping.uav;
+            } else if (desc.kind == BufferViewKind::Structured) {
+                view.Buffer.StructureByteStride = range.elementBytes;
+            } else {
+                view.Format = DXGI_FORMAT_R32_TYPELESS;
+                view.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
+            }
+
+            device_->CreateUnorderedAccessView(buffer->resource.Get(), nullptr, &view,
+                                               srvs_.Cpu(descriptor.Value()));
+        }
+
+        BufferViewRecord record;
+        buffer->resource->AddRef();
+        record.resource.Attach(buffer->resource.Get());
+        record.descriptor = descriptor.Value();
+        record.kind = desc.kind;
+        record.access = desc.access;
+        record.shaderType = desc.kind == BufferViewKind::Typed
+                                ? GetPixelFormatInfo(desc.format).shaderType
+                                : PixelShaderType::None;
+        auto added = bufferViews_.TryAdd(Move(record));
+        if (!added) {
+            srvs_.Free(descriptor.Value());
+            return Result<BufferViewHandle>::Failure(added.Error());
+        }
+
+        return Result<BufferViewHandle>::Success(BufferViewHandle{added.Value()});
+    }
+
+    // 버퍼 구간을 동기로 읽는다(시험·캡처용). 업로드 기록 뒤에 복사를 붙여 앞선 갱신 뒤의 내용을
+    // 본다. 버퍼는 COMMON에서 복사 원본으로 암묵 승격된다.
+    Result<void> ReadBuffer(BufferHandle handle, uint64 offset, Span<uint8> out) noexcept override {
+        auto owner = ownership_.Check();
+        if (!owner) {
+            return owner;
+        }
+
+        platform::LockGuard lock(gate_);
+        const BufferRecord* record = buffers_.Find(handle.slot);
+        if (record == nullptr) {
+            return Result<void>::Failure(ErrorCode::StaleHandle);
+        }
+
+        if (recording_) {
+            return Result<void>::Failure(ErrorCode::Busy);
+        }
+
+        if (out.Size() == 0 || offset > record->size || out.Size() > record->size - offset) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        ReadbackRecord readback;
+        readback.rowBytes = out.Size();
+        readback.rows = 1;
+        readback.total = out.Size();
+        readback.footprint.Footprint.RowPitch = static_cast<UINT>(out.Size());
+        const D3D12_HEAP_PROPERTIES heap = HeapProperties(D3D12_HEAP_TYPE_READBACK);
+        const D3D12_RESOURCE_DESC buffer = BufferResource(out.Size());
+        if (FAILED(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &buffer,
+                                                    D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+                                                    IID_PPV_ARGS(readback.resource.Out())))) {
+            return Fail("readback buffer creation failed");
+        }
+
+        auto reserved = ReserveRetireCapacity(1);
+        if (!reserved) {
+            return reserved;
+        }
+
+        // 버퍼는 암묵 승격으로 상태가 바뀐다. 같은 업로드 기록에서 이미 복사 대상으로 승격됐으면
+        // 복사 원본으로 다시 승격할 수 없으므로 쌓인 업로드를 먼저 제출한다(제출 끝에 COMMON으로
+        // 돌아온다).
+        auto pending = FlushUploadsLocked();
+        if (!pending) {
+            return Result<void>::Failure(pending.Error());
+        }
+
+        auto opened = OpenUploadList();
+        if (!opened) {
+            return opened;
+        }
+
+        uploadList_->CopyBufferRegion(readback.resource.Get(), 0, record->resource.Get(), offset,
+                                      out.Size());
+        auto flushed = FlushUploadsLocked();
+        if (!flushed) {
+            KeepUntilDestruction(Move(readback.resource));
+            return Result<void>::Failure(flushed.Error());
+        }
+
+        readback.fenceValue = flushed.Value();
+        auto added = readbacks_.TryAdd(Move(readback));
+        if (!added) {
+            return Result<void>::Failure(added.Error());
+        }
+
+        const ReadbackHandle readbackHandle{added.Value()};
+        auto waited = WaitFenceOwner(flushed.Value());
+        Result<void> outcome = Result<void>::Success();
+        if (!waited) {
+            outcome = Move(waited);
+        } else {
+            auto copied = TryReadbackLocked(readbackHandle, out);
+            if (!copied || !copied.Value()) {
+                outcome = Fail("buffer readback did not complete");
+            }
+        }
+
+        ReleaseReadbackLocked(readbackHandle);
+        return outcome;
     }
 
     // 다른 스레드에서도 부를 수 있다(concurrentResourceCreation). 초기 픽셀은 업로드 기록으로 간다.
@@ -1369,6 +1605,14 @@ public:
             return Result<PipelineHandle>::Failure(pixel.Error());
         }
 
+        DrawBufferSlots bufferSlots;
+        auto vertexBindings = ReflectBindings(vertexCode.Get(), false, bufferSlots);
+        auto pixelBindings = vertexBindings ? ReflectBindings(pixelCode.Get(), true, bufferSlots)
+                                            : Move(vertexBindings);
+        if (!pixelBindings) {
+            return Result<PipelineHandle>::Failure(pixelBindings.Error());
+        }
+
         D3D12_INPUT_ELEMENT_DESC elements[MaxVertexAttributes] = {};
         for (usize index = 0; index < desc.layout.attributes.Size(); ++index) {
             const VertexAttribute& attribute = desc.layout.attributes[index];
@@ -1414,6 +1658,7 @@ public:
         state.SampleDesc.Count = 1;
 
         PipelineRecord record;
+        record.bufferSlots = bufferSlots;
         for (usize index = 0; index < desc.layout.streams.Size(); ++index) {
             record.strides[index] = desc.layout.streams[index].stride;
             record.streamMask |= 1u << index;
@@ -1816,6 +2061,22 @@ public:
         }
         Defer(Move(record->resource), -1, -1);
         auto removed = buffers_.TryRemove(handle.slot);
+        (void)removed;
+    }
+
+    void Retire(BufferViewHandle handle) noexcept override {
+        if (!ownership_.Check()) {
+            return;
+        }
+
+        platform::LockGuard lock(gate_);
+        BufferViewRecord* record = bufferViews_.Find(handle.slot);
+        if (record == nullptr) {
+            return;
+        }
+
+        Defer(Move(record->resource), record->descriptor, -1);
+        auto removed = bufferViews_.TryRemove(handle.slot);
         (void)removed;
     }
 
@@ -2237,6 +2498,14 @@ private:
         return Result<T>::Failure(failed.Error());
     }
 
+    // 인자·능력 실패를 code로 돌려주고 LastError에 message를 남긴다(API 실패가 아니다).
+    template <class T>
+    Result<T> FailCode(ErrorCode code, const char* message) noexcept {
+        auto assigned = lastError_.TryAssign(StringView(message, platform::CStringLength(message)));
+        (void)assigned;
+        return Result<T>::Failure(code);
+    }
+
     // 이 backend가 대응하지 않는 픽셀 형식이다. 다른 형식으로 바꾸지 않고 Unsupported로
     // 실패한다(PixelFormat.ko.md 8.3절). 호출자는 gate_를 잡고 있어야 한다.
     template <class T>
@@ -2345,6 +2614,90 @@ private:
         return Result<void>::Success();
     }
 
+    // 셰이더가 선언한 자원이 고정 배치(PipelineDesc) 안인지 보고 버퍼 view slot 배치를 slots에
+    // 더한다. b0 상수, PS t0 텍스처·s0 샘플러, t1–t4 버퍼 SRV만 받는다. 두 단계가 같은 slot을 다른
+    // 종류로 읽거나 배치 밖 자원(UAV 포함)이면 InvalidArgument다.
+    Result<void> ReflectBindings(ID3DBlob* code, bool pixel, DrawBufferSlots& slots) noexcept {
+        ComRef<ID3D12ShaderReflection> reflection;
+        D3D12_SHADER_DESC shader = {};
+        if (FAILED(D3DReflect(code->GetBufferPointer(), code->GetBufferSize(),
+                              IID_PPV_ARGS(reflection.Out()))) ||
+            FAILED(reflection->GetDesc(&shader))) {
+            return Fail("shader resource reflection failed");
+        }
+
+        for (UINT index = 0; index < shader.BoundResources; ++index) {
+            D3D12_SHADER_INPUT_BIND_DESC resource = {};
+            if (FAILED(reflection->GetResourceBindingDesc(index, &resource))) {
+                return Fail("shader resource binding description failed");
+            }
+
+            const bool single = resource.BindCount == 1 && resource.Space == 0;
+            const uint32 slot = resource.BindPoint - 1;
+            const bool viewSlot = resource.BindPoint >= 1 && slot < MaxDrawBufferViews;
+            bool fits = false;
+            BufferViewKind kind = BufferViewKind::Typed;
+            PixelShaderType type = PixelShaderType::None;
+            switch (resource.Type) {
+            case D3D_SIT_CBUFFER:
+                fits = single && resource.BindPoint == 0;
+                break;
+            case D3D_SIT_SAMPLER:
+                fits = single && pixel && resource.BindPoint == 0;
+                break;
+            case D3D_SIT_TEXTURE:
+                if (resource.Dimension != D3D_SRV_DIMENSION_BUFFER) {
+                    fits = single && pixel && resource.BindPoint == 0;
+                    break;
+                }
+
+                fits = single && viewSlot;
+                type = resource.ReturnType == D3D_RETURN_TYPE_SINT   ? PixelShaderType::Int
+                       : resource.ReturnType == D3D_RETURN_TYPE_UINT ? PixelShaderType::Uint
+                                                                     : PixelShaderType::Float;
+                if (fits) {
+                    fits = AddBufferSlot(slots, slot, BufferViewKind::Typed, type);
+                }
+
+                break;
+            case D3D_SIT_STRUCTURED:
+            case D3D_SIT_BYTEADDRESS:
+                kind = resource.Type == D3D_SIT_STRUCTURED ? BufferViewKind::Structured
+                                                           : BufferViewKind::Raw;
+                fits = single && viewSlot && AddBufferSlot(slots, slot, kind, type);
+                break;
+            default:
+                break;
+            }
+
+            if (!fits) {
+                Diagnostic message;
+                message.Text(pixel ? "pixel" : "vertex")
+                    .Text(" shader resource ")
+                    .Text(resource.Name != nullptr ? resource.Name : "?")
+                    .Text(" is outside the fixed layout (b0, pixel t0 and s0, buffer views t1-t4; "
+                          "no UAVs in graphics stages)");
+                return Reject(message);
+            }
+        }
+
+        return Result<void>::Success();
+    }
+
+    // slot을 배치에 더한다. 이미 다른 종류·값 계열로 쓰는 slot이면 거짓이다.
+    static bool AddBufferSlot(DrawBufferSlots& slots, uint32 slot, BufferViewKind kind,
+                              PixelShaderType type) noexcept {
+        const uint32 bit = 1u << slot;
+        if ((slots.usedMask & bit) != 0) {
+            return slots.kinds[slot] == kind && slots.typedShaderTypes[slot] == type;
+        }
+
+        slots.usedMask |= bit;
+        slots.kinds[slot] = kind;
+        slots.typedShaderTypes[slot] = type;
+        return true;
+    }
+
     Result<void> Reject(const Diagnostic& message) noexcept {
         auto assigned = lastError_.TryAssign(
             StringView(message.CStr(), platform::CStringLength(message.CStr())));
@@ -2395,21 +2748,35 @@ private:
         samplerRange.NumDescriptors = 1;
         samplerRange.BaseShaderRegister = 0;
         samplerRange.OffsetInDescriptorsFromTableStart = 0;
-        D3D12_ROOT_PARAMETER parameters[3] = {};
-        parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-        parameters[0].Constants.ShaderRegister = 0;
-        parameters[0].Constants.Num32BitValues = ConstantCount;
-        parameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-        parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-        parameters[1].DescriptorTable.NumDescriptorRanges = 1;
-        parameters[1].DescriptorTable.pDescriptorRanges = &range;
-        parameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
-        parameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-        parameters[2].DescriptorTable.NumDescriptorRanges = 1;
-        parameters[2].DescriptorTable.pDescriptorRanges = &samplerRange;
-        parameters[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        // 버퍼 view slot n은 register t(n + 1)이고 VS·PS 모두 읽는다(PipelineDesc 고정 배치).
+        // slot마다 table 하나라 view의 descriptor 칸을 그대로 가리킨다(descriptor 복사 없음).
+        D3D12_DESCRIPTOR_RANGE viewRanges[MaxDrawBufferViews] = {};
+        D3D12_ROOT_PARAMETER parameters[RootBufferViews + MaxDrawBufferViews] = {};
+        parameters[RootConstants].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+        parameters[RootConstants].Constants.ShaderRegister = 0;
+        parameters[RootConstants].Constants.Num32BitValues = ConstantCount;
+        parameters[RootConstants].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        parameters[RootTexture].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        parameters[RootTexture].DescriptorTable.NumDescriptorRanges = 1;
+        parameters[RootTexture].DescriptorTable.pDescriptorRanges = &range;
+        parameters[RootTexture].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        parameters[RootSampler].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        parameters[RootSampler].DescriptorTable.NumDescriptorRanges = 1;
+        parameters[RootSampler].DescriptorTable.pDescriptorRanges = &samplerRange;
+        parameters[RootSampler].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
+            viewRanges[slot].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+            viewRanges[slot].NumDescriptors = 1;
+            viewRanges[slot].BaseShaderRegister = slot + 1;
+            D3D12_ROOT_PARAMETER& parameter = parameters[RootBufferViews + slot];
+            parameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+            parameter.DescriptorTable.NumDescriptorRanges = 1;
+            parameter.DescriptorTable.pDescriptorRanges = &viewRanges[slot];
+            parameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        }
+
         D3D12_ROOT_SIGNATURE_DESC desc = {};
-        desc.NumParameters = 3;
+        desc.NumParameters = RootBufferViews + MaxDrawBufferViews;
         desc.pParameters = parameters;
         desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
         ComRef<ID3DBlob> blob;
@@ -2555,6 +2922,9 @@ private:
             bound = {};
         }
         boundIndex_ = {};
+        for (BufferViewHandle& view : boundViews_) {
+            view = {};
+        }
         return Result<void>::Success();
     }
 
@@ -2587,11 +2957,15 @@ private:
         list_->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         const TextureRecord* white = textures_.Find(white_.slot);
         if (white != nullptr) {
-            list_->SetGraphicsRootDescriptorTable(1, srvs_.Gpu(white->srv));
-            list_->SetGraphicsRootDescriptorTable(2, samplers_.Gpu(white->sampler));
+            list_->SetGraphicsRootDescriptorTable(RootTexture, srvs_.Gpu(white->srv));
+            list_->SetGraphicsRootDescriptorTable(RootSampler, samplers_.Gpu(white->sampler));
+        }
+        for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
+            list_->SetGraphicsRootDescriptorTable(RootBufferViews + slot,
+                                                  srvs_.Gpu(nullBufferSrv_));
         }
         const DrawConstants identity;
-        list_->SetGraphicsRoot32BitConstants(0, ConstantCount, &identity, 0);
+        list_->SetGraphicsRoot32BitConstants(RootConstants, ConstantCount, &identity, 0);
     }
 
     // 업로드 기록 list를 연다(잠금 안). 이미 열려 있으면 그대로 쓴다.
@@ -3084,8 +3458,9 @@ private:
     // 살아 있는 자원이 모두 retire되어도 목록이 자라지 않도록 용량을 확보한다. Retire가 할당 실패로
     // GPU 사용 중인 자원을 놓는 경로를 없앤다.
     Result<void> ReserveRetireCapacity(usize extra) noexcept {
-        const usize live = buffers_.Size() + textures_.Size() + pipelines_.Size() +
-                           readbacks_.Size() + swapChains_.Size() * SwapChainRetireEntries;
+        const usize live = buffers_.Size() + bufferViews_.Size() + textures_.Size() +
+                           pipelines_.Size() + readbacks_.Size() +
+                           swapChains_.Size() * SwapChainRetireEntries;
         return retired_.TryEnsureCapacity(retired_.Size() + live + extra);
     }
 
@@ -3194,18 +3569,50 @@ private:
             if (owner != nullptr && !readable && recording_) {
                 TrackTransition(*owner, ownerSlot, 0, owner->mipLevels, ShaderReadStates);
             }
-            list_->SetGraphicsRootDescriptorTable(1, srvs_.Gpu(record->srv));
-            list_->SetGraphicsRootDescriptorTable(2, samplers_.Gpu(record->sampler));
+            list_->SetGraphicsRootDescriptorTable(RootTexture, srvs_.Gpu(record->srv));
+            list_->SetGraphicsRootDescriptorTable(RootSampler, samplers_.Gpu(record->sampler));
         }
     }
 
     void SetConstants(const DrawConstants& constants) noexcept override {
-        list_->SetGraphicsRoot32BitConstants(0, ConstantCount, &constants, 0);
+        list_->SetGraphicsRoot32BitConstants(RootConstants, ConstantCount, &constants, 0);
+    }
+
+    void SetBufferView(uint32 slot, BufferViewHandle handle) noexcept override {
+        platform::LockGuard lock(gate_);
+        if (slot >= MaxDrawBufferViews) {
+            return;
+        }
+
+        // 그래픽 단계에는 UAV가 없으므로 ReadWrite view와 stale handle은 slot을 비운다.
+        const BufferViewRecord* view = bufferViews_.Find(handle.slot);
+        const bool readable = view != nullptr && view->access == ViewAccess::Read;
+        boundViews_[slot] = readable ? handle : BufferViewHandle{};
+        list_->SetGraphicsRootDescriptorTable(
+            RootBufferViews + slot, srvs_.Gpu(readable ? view->descriptor : nullBufferSrv_));
+    }
+
+    // 파이프라인이 읽는 버퍼 view slot이 모두 맞는 view로 채워졌는지다(DrawBufferSlotsSatisfied).
+    bool BufferViewsBound() const noexcept {
+        const PipelineRecord* pipeline = pipelines_.Find(boundPipeline_);
+        if (pipeline == nullptr) {
+            return false;
+        }
+
+        BoundBufferViewInfo bound[MaxDrawBufferViews] = {};
+        for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
+            const BufferViewRecord* view = bufferViews_.Find(boundViews_[slot].slot);
+            if (view != nullptr) {
+                bound[slot] = {true, view->kind, view->shaderType};
+            }
+        }
+
+        return DrawBufferSlotsSatisfied(pipeline->bufferSlots, bound);
     }
 
     void Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept override {
         platform::LockGuard lock(gate_);
-        if (!StreamsBound()) {
+        if (!StreamsBound() || !BufferViewsBound()) {
             ++ignoredDraws_;
             return;
         }
@@ -3216,7 +3623,8 @@ private:
     void DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept override {
         platform::LockGuard lock(gate_);
         const BufferRecord* index = buffers_.Find(boundIndex_.buffer.slot);
-        if (!StreamsBound() || index == nullptr || boundIndex_.offset >= index->size) {
+        if (!StreamsBound() || !BufferViewsBound() || index == nullptr ||
+            boundIndex_.offset >= index->size) {
             ++ignoredDraws_;
             return;
         }
@@ -3478,6 +3886,11 @@ private:
     SamplerEntry samplerDescs_[SamplerCapacity];
     // 형식 번호별 능력이다(장치 생성 때 채우고 바꾸지 않는다).
     PixelFormatCaps formatCaps_[MaxPixelFormatNumber + 1] = {};
+    // 형식 번호별 MSAA 표본 수 집합이다(GetPixelFormatSampleCounts).
+    uint32 sampleCounts_[MaxPixelFormatNumber + 1] = {};
+    // 장치 능력(GX1)과 최고 feature level이다(생성 때 정해진다).
+    DeviceCaps caps_;
+    uint32 featureLevel_ = 0;
     uint32 samplerCount_ = 0;
     ComRef<IDXGIFactory4> factory_;
     ComRef<ID3D12Device> device_;
@@ -3544,6 +3957,10 @@ private:
     // 모든 텍스처를 훑는다.
     Array<SlotHandle> touchedTextures_;
     bool touchedOverflow_ = false;
+    // 버퍼 view(GX2)와 그리기 slot에 묶인 view, 빈 slot에 묶는 null SRV 칸이다.
+    SlotArray<BufferViewRecord> bufferViews_;
+    BufferViewHandle boundViews_[MaxDrawBufferViews];
+    uint32 nullBufferSrv_ = 0;
     bool recording_ = false;
     bool validation_ = false;
     bool software_ = false;

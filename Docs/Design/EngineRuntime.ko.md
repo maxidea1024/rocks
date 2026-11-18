@@ -283,6 +283,12 @@ D3D11은 필수 backend다(2026-11-13 사용자 결정). D3D12의 SM 6.6 기준�
 - readback: `D3D11_USAGE_STAGING` 텍스처로 `CopyResource`하고 fence가 끝난 뒤에만 `Map(READ)`으로 읽는다(UE `Private/D3D11RenderTarget.cpp:520–563`과 같은 staging 경로). `D3D11_MAP_FLAG_DO_NOT_WAIT`은 쓰지 않는다. 하드웨어 드라이버(GTX 1060)에서 runtime의 자원 사용 추적이 fence보다 늦게 풀려, 끝난 복사에도 `DXGI_ERROR_WAS_STILL_DRAWING`을 돌려주는 것을 확인했다. fence 뒤의 map은 GPU를 기다리지 않는다.
 - 그리기 상수(D3D12 루트 상수 20개 대응)는 80 byte 동적 상수 버퍼(b0, VS·PS)다. `SetConstants`마다 deferred context에서 `Map(WRITE_DISCARD)`한다(UE uniform buffer와 같다, `Private/D3D11UniformBuffer.cpp:161`). `NO_OVERWRITE`는 deferred context의 상수 버퍼에 11.1 기능(`MapNoOverwriteOnDynamicConstantBuffer`)이 필요해 쓰지 않는다. SH2·P2의 b13 그리기 상수(셰이더 시스템 7.2절 4항)로 옮기는 것은 SH5다.
 
+**장치 능력·버퍼(GX1·GX2, 2026-11-18).**
+- `DeviceCaps`는 d3d11.h 상수와 feature level(FL 11.0은 UAV 8·VS UAV 없음, 11.1 이상은 UAV 64·모든 단계 UAV), `D3D11_FEATURE_D3D11_OPTIONS3`(VS 층 출력), DXGI 출력 HDR 색 공간이다. 64 bit atomic·multi draw indirect는 거짓이다. MSAA 표본 수는 `CheckMultisampleQualityLevels`다.
+- 버퍼 용도는 bind·misc flag로 옮긴다(UE `Private/D3D11Buffer.cpp:38–83`). raw SRV는 `D3D11_SRV_DIMENSION_BUFFEREX` + RAW다. 버퍼 view slot n은 VS·PS `t(n + 1)`(`VSSetShaderResources`·`PSSetShaderResources`).
+- 상수 버퍼는 `UpdateSubresource`에 대상 구간을 줄 수 없어(debug layer 288) 전체 갱신만 받고 부분 갱신은 `Unsupported`다. WARP가 `RGB9E5Ufloat` 버퍼 SRV 생성에서 멈추므로 그 형식의 texel buffer 능력은 공개하지 않는다.
+- `ReadBuffer`는 staging 버퍼로 구간 `CopySubresourceRegion`(원본 box) 뒤 fence를 기다려 `Map(READ)`이다.
+
 **GPU 계측(GX9).**
 - timestamp: query 객체(slot 4 × 256개)를 deferred context에서 `End`로 기록한다. 프레임 실행(`ExecuteCommandList`) 앞뒤를 slot별 `D3D11_QUERY_TIMESTAMP_DISJOINT`로 감싼다.
 - 회수는 fence 완료 뒤 소유 스레드가 `GetData(DONOTFLUSH)`로 한다. 아직 값이 없으면 미완료로 남긴다.

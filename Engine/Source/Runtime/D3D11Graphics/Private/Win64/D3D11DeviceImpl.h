@@ -28,6 +28,17 @@ namespace rocks::graphics::d3d11 {
 struct BufferRecord {
     ComRef<ID3D11Buffer> buffer;
     uint64 size = 0;
+    BufferDesc desc;
+};
+
+// 버퍼 view(GX2)다. D3D11 view가 버퍼 참조를 쥐므로 버퍼를 먼저 놓아도 산다. Read view는 srv,
+// ReadWrite view는 uav만 있다.
+struct BufferViewRecord {
+    ComRef<ID3D11ShaderResourceView> srv;
+    ComRef<ID3D11UnorderedAccessView> uav;
+    BufferViewKind kind = BufferViewKind::Typed;
+    ViewAccess access = ViewAccess::Read;
+    PixelShaderType shaderType = PixelShaderType::None;
 };
 
 struct TextureRecord {
@@ -63,6 +74,8 @@ struct PipelineRecord {
     // stream별 stride와 배치가 선언한 stream mask다(그리기 때 묶인 정점 버퍼를 확인한다).
     uint32 strides[MaxVertexStreams] = {};
     uint32 streamMask = 0;
+    // VS·PS가 읽는 버퍼 view slot이다(리플렉션).
+    DrawBufferSlots bufferSlots;
 };
 
 // flip model 스왑체인이다. D3D11 runtime이 버퍼를 돌리므로 버퍼 0과 그 RTV만 쥔다.
@@ -112,8 +125,8 @@ struct UploadOp {
         Update,
         // CopyResource(destination, copySource) — readback
         Copy,
-        // CopySubresourceRegion(destination, subresource, copySource, sourceSubresource) — 깊이·
-        // 비디오 staging 업로드와 mip·plane readback
+        // CopySubresourceRegion(destination, subresource, copySource, sourceSubresource, box) —
+        // 깊이· 비디오 staging 업로드와 mip·plane readback, 버퍼 구간 readback(hasBox면 원본 구간)
         CopyRegion
     };
 
@@ -178,6 +191,11 @@ public:
     // --- Device ---
 
     DeviceInfo Info() const noexcept override;
+    const DeviceCaps& Caps() const noexcept override;
+    uint32 GetPixelFormatSampleCounts(PixelFormat format) const noexcept override;
+    Result<BufferViewHandle> CreateBufferView(BufferHandle buffer,
+                                              const BufferViewDesc& desc) noexcept override;
+    Result<void> ReadBuffer(BufferHandle buffer, uint64 offset, Span<uint8> out) noexcept override;
     Result<SwapChainHandle> CreateSwapChain(const SwapChainDesc& desc) noexcept override;
     Result<void> ResizeSwapChain(SwapChainHandle swapChain, uint32 width,
                                  uint32 height) noexcept override;
@@ -199,6 +217,7 @@ public:
     Result<GpuFencePoint> EndFrame() noexcept override;
     Result<void> ReadPixels(TextureHandle target, Span<uint8> out) noexcept override;
     void Retire(BufferHandle buffer) noexcept override;
+    void Retire(BufferViewHandle view) noexcept override;
     void Retire(TextureHandle texture) noexcept override;
     void Retire(PipelineHandle pipeline) noexcept override;
     void Retire(SwapChainHandle swapChain) noexcept override;
@@ -281,6 +300,7 @@ private:
                           Span<const VertexBufferBinding> buffers) noexcept override;
     void SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64 offset) noexcept override;
     void SetTexture(TextureHandle texture) noexcept override;
+    void SetBufferView(uint32 slot, BufferViewHandle view) noexcept override;
     void SetConstants(const DrawConstants& constants) noexcept override;
     void Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept override;
     void DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept override;
@@ -378,6 +398,11 @@ private:
     Result<void> Compile(StringView source, const char* entry, const char* target,
                          ComRef<ID3DBlob>& code) noexcept;
     Result<void> MatchVertexInputs(ID3DBlob* code, const VertexLayout& layout) noexcept;
+    // --- 버퍼 view(D3D11Buffers.cpp) ---
+    // 셰이더 자원이 고정 배치(PipelineDesc) 안인지 보고 버퍼 view slot 배치를 slots에 더한다.
+    Result<void> ReflectBindings(ID3DBlob* code, bool pixel, DrawBufferSlots& slots) noexcept;
+    // 지금 파이프라인이 읽는 버퍼 view slot이 모두 맞는 view로 채워졌는지다(잠금 안).
+    bool BufferViewsBound() const noexcept;
     Result<void> CheckVertexFormats(const VertexLayout& layout) noexcept;
     Result<void> CreateSwapChainView(SwapChainRecord& record) noexcept;
     // 2D SRV를 만든다. 비디오 형식은 PlaneSlice로, 깊이·스텐실은 view 형식으로 plane을 고른다.
@@ -398,6 +423,9 @@ private:
     Result<void> PushUpload(const UploadOp& op) noexcept;
     Result<void> RecordBufferUpload(ID3D11Buffer* target, uint64 offset,
                                     Span<const uint8> data) noexcept;
+    // 상수 버퍼의 부분 갱신을 거부한다(D3D11은 상수 버퍼 대상 구간을 받지 않는다).
+    Result<void> CheckConstantUpdate(const BufferRecord& record, uint64 offset,
+                                     uint64 size) noexcept;
     Result<void> RecordTextureUpload(const TextureRecord& record, uint32 mipLevel,
                                      const uint8* pixels) noexcept;
     // 깊이·스텐실·비디오 형식의 mip 하나를 D3D11 배치로 바꾼 staging 텍스처에서 복사한다(잠금 안).
@@ -429,12 +457,16 @@ private:
     SlotArray<PipelineRecord> pipelines_;
     SlotArray<SwapChainRecord> swapChains_;
     SlotArray<ReadbackRecord> readbacks_;
+    SlotArray<BufferViewRecord> bufferViews_;
     Array<Retired> retired_;
     Array<DedicatedUpload> dedicated_;
     Array<UploadOp> uploadOps_;
     SamplerEntry samplers_[SamplerCapacity];
     // 형식 번호별 능력이다(장치 생성 때 채우고 바꾸지 않는다).
     PixelFormatCaps formatCaps_[MaxPixelFormatNumber + 1] = {};
+    // 형식 번호별 MSAA 표본 수 집합과 장치 능력(GX1)이다(생성 때 정해진다).
+    uint32 sampleCounts_[MaxPixelFormatNumber + 1] = {};
+    DeviceCaps caps_;
     uint32 samplerCount_ = 0;
     ComRef<IDXGIFactory4> factory_;
     ComRef<ID3D11Device5> device_;
@@ -464,6 +496,8 @@ private:
     SlotHandle boundPipeline_;
     BoundVertexBuffer boundVertex_[MaxVertexStreams];
     BoundIndexBuffer boundIndex_;
+    // 그리기 slot에 묶인 버퍼 view다(GX2).
+    BufferViewHandle boundViews_[MaxDrawBufferViews];
     uint64 ignoredDraws_ = 0;
     // 검증 메시지는 읽을 때마다 비우고 여기에 누적한다(저장 한도로 오래된 오류가 밀려나지 않게).
     mutable uint64 validationErrors_ = 0;

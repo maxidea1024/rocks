@@ -204,108 +204,51 @@ Result<VkSampler> VulkanDevice::SamplerFor(const SamplerDesc& desc) noexcept {
     return Result<VkSampler>::Success(sampler);
 }
 
-Result<void> VulkanDevice::AllocateTextureSet(VkImageView view, VkSampler sampler,
-                                              VkDescriptorSet& set, uint32& pool) noexcept {
-    VkDescriptorSetAllocateInfo allocate = {};
-    allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocate.descriptorSetCount = 1;
-    allocate.pSetLayouts = &textureSetLayout_;
-    set = VK_NULL_HANDLE;
-    for (uint32 index = 0; index < descriptorPools_.Size() && set == VK_NULL_HANDLE; ++index) {
-        allocate.descriptorPool = descriptorPools_[index];
-        const VkResult result = functions_.vkAllocateDescriptorSets(device_, &allocate, &set);
-        if (result == VK_SUCCESS) {
-            pool = index;
-        } else if (result != VK_ERROR_OUT_OF_POOL_MEMORY && result != VK_ERROR_FRAGMENTED_POOL) {
-            set = VK_NULL_HANDLE;
-            return Fail("vkAllocateDescriptorSets", result);
-        } else {
-            set = VK_NULL_HANDLE;
-        }
-    }
-
-    if (set == VK_NULL_HANDLE) {
-        const VkDescriptorPoolSize sizes[] = {
-            {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, DescriptorSetsPerPool},
-            {VK_DESCRIPTOR_TYPE_SAMPLER, DescriptorSetsPerPool}};
-        VkDescriptorPoolCreateInfo info = {};
-        info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-        info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-        info.maxSets = DescriptorSetsPerPool;
-        info.poolSizeCount = 2;
-        info.pPoolSizes = sizes;
-        VkDescriptorPool created = VK_NULL_HANDLE;
-        VkResult result = functions_.vkCreateDescriptorPool(device_, &info, nullptr, &created);
-        if (result != VK_SUCCESS) {
-            return Fail("vkCreateDescriptorPool", result);
-        }
-
-        auto pushed = descriptorPools_.TryPushBack(created);
-        if (!pushed) {
-            functions_.vkDestroyDescriptorPool(device_, created, nullptr);
-            return pushed;
-        }
-
-        allocate.descriptorPool = created;
-        result = functions_.vkAllocateDescriptorSets(device_, &allocate, &set);
-        if (result != VK_SUCCESS) {
-            set = VK_NULL_HANDLE;
-            return Fail("vkAllocateDescriptorSets", result);
-        }
-
-        pool = static_cast<uint32>(descriptorPools_.Size() - 1);
-    }
-
-    VkDescriptorImageInfo image = {};
-    image.imageView = view;
-    image.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    VkDescriptorImageInfo samplerInfo = {};
-    samplerInfo.sampler = sampler;
-    VkWriteDescriptorSet writes[2] = {};
-    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[0].dstSet = set;
-    writes[0].dstBinding = 0;
-    writes[0].descriptorCount = 1;
-    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-    writes[0].pImageInfo = &image;
-    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[1].dstSet = set;
-    writes[1].dstBinding = 1;
-    writes[1].descriptorCount = 1;
-    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-    writes[1].pImageInfo = &samplerInfo;
-    functions_.vkUpdateDescriptorSets(device_, 2, writes, 0, nullptr);
-    return Result<void>::Success();
-}
-
-void VulkanDevice::FreeTextureSet(VkDescriptorSet set, uint32 pool) noexcept {
-    if (set != VK_NULL_HANDLE && pool < descriptorPools_.Size()) {
-        (void)functions_.vkFreeDescriptorSets(device_, descriptorPools_[pool], 1, &set);
-    }
-}
-
 // 다른 스레드에서도 부를 수 있다(concurrentResourceCreation). 초기 데이터는 업로드 ring에 쓰고
 // 복사를 기록한다. 소유 스레드의 다음 제출이 실행한다.
 Result<BufferHandle> VulkanDevice::CreateBuffer(const BufferDesc& desc,
                                                 Span<const uint8> initial) noexcept {
-    if (desc.size == 0 || initial.Size() != desc.size ||
-        (desc.usage != BufferUsage::Vertex && desc.usage != BufferUsage::Index) ||
-        desc.size > NumericLimits<uint32>::Max()) {
+    auto valid = ValidateBufferDesc(desc);
+    if (!valid || initial.Size() != desc.size) {
         return Result<BufferHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
     platform::LockGuard lock(gate_);
+    if (desc.size > caps_.limits.bufferBytes) {
+        auto failed = FailCode("CreateBuffer", ErrorCode::Unsupported,
+                               "buffer size exceeds the device limit (bufferBytes)");
+        return Result<BufferHandle>::Failure(failed.Error());
+    }
+
     auto reserved = ReserveRetireCapacity(1);
     if (!reserved) {
         return Result<BufferHandle>::Failure(reserved.Error());
     }
 
-    const VkBufferUsageFlags usage =
-        (desc.usage == BufferUsage::Vertex ? VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
-                                           : VK_BUFFER_USAGE_INDEX_BUFFER_BIT) |
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    // 용도를 Vulkan buffer usage로 옮긴다. typed view는 texel buffer, 구조화·raw view는 storage
+    // buffer usage가 필요하다(raw 버퍼는 typed view도 받는다). 복사 원본은 ReadBuffer용이다.
+    const BufferUsage use = desc.usage;
+    const bool storageLayout = HasAnyBufferUsage(use, BufferUsage::Structured | BufferUsage::Raw);
+    const bool typedViews = !HasAnyBufferUsage(use, BufferUsage::Structured);
+    VkBufferUsageFlags usage =
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+        (HasAnyBufferUsage(use, BufferUsage::Vertex) ? VK_BUFFER_USAGE_VERTEX_BUFFER_BIT : 0u) |
+        (HasAnyBufferUsage(use, BufferUsage::Index) ? VK_BUFFER_USAGE_INDEX_BUFFER_BIT : 0u) |
+        (HasAnyBufferUsage(use, BufferUsage::Constant) ? VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT : 0u) |
+        (HasAnyBufferUsage(use, BufferUsage::Indirect) ? VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT : 0u);
+    if (HasAnyBufferUsage(use, BufferUsage::ShaderRead)) {
+        usage |= (storageLayout ? VK_BUFFER_USAGE_STORAGE_BUFFER_BIT : 0u) |
+                 (typedViews ? VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT : 0u);
+    }
+
+    if (HasAnyBufferUsage(use, BufferUsage::ShaderWrite)) {
+        usage |= (storageLayout ? VK_BUFFER_USAGE_STORAGE_BUFFER_BIT : 0u) |
+                 (typedViews ? VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT : 0u);
+    }
+
     BufferRecord record;
     record.size = desc.size;
+    record.desc = desc;
     auto created =
         CreateBufferWithMemory(desc.size, usage, MemoryUsage::Device, record.buffer, record.memory);
     if (!created) {
@@ -441,10 +384,25 @@ void VulkanDevice::QueryFormatCaps() noexcept {
             if (depth) {
                 caps = caps | PixelFormatCaps::DepthStencil;
             }
+
+            // MSAA 표본 수는 렌더 타깃·깊이와 같은 usage의 이미지 형식 질의 sampleCounts다
+            // (VkSampleCountFlags 비트가 Rocks 표본 수 비트와 같다, 장치 framebuffer·sampled
+            // 표본 한도가 이미 반영된다).
+            const bool target = HasPixelFormatCaps(caps, PixelFormatCaps::RenderTarget) || depth;
+            VkImageFormatProperties multisample = {};
+            if (target &&
+                functions_.vkGetPhysicalDeviceImageFormatProperties(
+                    physical_, format.format, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL,
+                    ImageUsageFor(pixelFormat, !depth), flags, &multisample) == VK_SUCCESS) {
+                sampleCounts_[number] =
+                    (multisample.sampleCounts & (MaxSampleCount * 2 - 1)) | SampleCountBit(1);
+                if (sampleCounts_[number] > SampleCountBit(1)) {
+                    caps = caps | PixelFormatCaps::Multisample;
+                }
+            }
         }
 
-        // storage image·texel buffer는 형식 기능 bit를 옮긴다(view API는 GX2). MSAA는 표본 수
-        // 질의와 함께 GX2로 미룬다(D3D와 같다).
+        // storage image·texel buffer는 형식 기능 bit를 옮긴다.
         if (identity && !depth && !planar) {
             if ((features & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) != 0) {
                 caps = caps | PixelFormatCaps::StorageRead | PixelFormatCaps::StorageWrite;
@@ -454,16 +412,21 @@ void VulkanDevice::QueryFormatCaps() noexcept {
                 caps = caps | PixelFormatCaps::StorageAtomic;
             }
 
+            // 버퍼 view 형식은 버퍼의 모든 texel usage를 지원해야 한다
+            // (VUID-VkBufferViewCreateInfo-format-08778, view별 usage는 1.4 maintenance5).
+            // 읽기·쓰기 버퍼(ShaderRead | ShaderWrite)의 쓰기 view가 늘 만들어지도록 쓰기·atomic은
+            // 읽기도 되는 형식만 공개한다(보수적 값).
             const VkFormatFeatureFlags buffer = support.bufferFeatures;
-            if ((buffer & VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT) != 0) {
+            const bool texelRead = (buffer & VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT) != 0;
+            if (texelRead) {
                 caps = caps | PixelFormatCaps::TexelBufferRead;
             }
 
-            if ((buffer & VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT) != 0) {
+            if (texelRead && (buffer & VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT) != 0) {
                 caps = caps | PixelFormatCaps::TexelBufferWrite;
             }
 
-            if ((buffer & VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_ATOMIC_BIT) != 0) {
+            if (texelRead && (buffer & VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_ATOMIC_BIT) != 0) {
                 caps = caps | PixelFormatCaps::TexelBufferAtomic;
             }
         }
@@ -614,14 +577,6 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
     }
 
     cleanup.view = record.view;
-    auto set = AllocateTextureSet(record.view, sampler.Value(), record.set, record.pool);
-    if (!set) {
-        DestroyRetired(cleanup);
-        return Result<TextureHandle>::Failure(set.Error());
-    }
-
-    cleanup.set = record.set;
-    cleanup.setPool = record.pool;
     if (renderTarget) {
         auto renderPass = RenderPassFor(format.format, false);
         if (!renderPass) {
@@ -686,6 +641,29 @@ void VulkanDevice::Retire(BufferHandle handle) noexcept {
     platform::LockGuard lock(gate_);
     BufferRecord* record = buffers_.Find(handle.slot);
     if (record == nullptr) {
+        return;
+    }
+
+    // view가 남아 있으면 버퍼·메모리를 orphan으로 옮겨 마지막 view가 놓일 때 회수한다.
+    if (record->viewCount != 0) {
+        OrphanBuffer orphan;
+        orphan.buffer = record->buffer;
+        orphan.memory = record->memory;
+        orphan.viewCount = record->viewCount;
+        auto kept = orphanBuffers_.TryPushBack(orphan);
+        if (kept) {
+            auto removed = buffers_.TryRemove(handle.slot);
+            (void)removed;
+            return;
+        }
+
+        // 기록할 자리가 없으면 소멸 때까지 놓지 않는다(view가 쓰는 버퍼를 먼저 놓지 않는다).
+        Retired entry;
+        entry.buffer = record->buffer;
+        entry.memory = record->memory;
+        KeepUntilDestruction(Move(entry));
+        auto removed = buffers_.TryRemove(handle.slot);
+        (void)removed;
         return;
     }
 
@@ -754,14 +732,6 @@ Result<TextureHandle> VulkanDevice::CreateTextureView(TextureHandle texture,
 
     Retired cleanup;
     cleanup.view = record.view;
-    auto set = AllocateTextureSet(record.view, record.sampler, record.set, record.pool);
-    if (!set) {
-        DestroyRetired(cleanup);
-        return Result<TextureHandle>::Failure(set.Error());
-    }
-
-    cleanup.set = record.set;
-    cleanup.setPool = record.pool;
     auto added = textures_.TryAdd(Move(record));
     if (!added) {
         DestroyRetired(cleanup);
@@ -809,8 +779,6 @@ void VulkanDevice::RetireTextureRecord(SlotHandle slot, TextureRecord& record) n
         entry.framebuffer = record.framebuffer;
     }
     entry.view = record.view;
-    entry.set = record.set;
-    entry.setPool = record.pool;
     RetireEntry(Move(entry));
     auto removed = textures_.TryRemove(slot);
     (void)removed;
@@ -829,6 +797,9 @@ void VulkanDevice::Retire(PipelineHandle handle) noexcept {
 
     Retired entry;
     entry.pipeline = record->pipeline;
+    entry.pipelineLayout = record->layout;
+    entry.setLayouts[0] = record->setLayouts[0];
+    entry.setLayouts[1] = record->setLayouts[1];
     RetireEntry(Move(entry));
     auto removed = pipelines_.TryRemove(handle.slot);
     (void)removed;

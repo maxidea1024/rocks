@@ -16,7 +16,27 @@ Result<void> D3D11Device::UpdateBuffer(BufferHandle handle, uint64 offset,
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    auto whole = CheckConstantUpdate(*record, offset, data.Size());
+    if (!whole) {
+        return whole;
+    }
+
     return RecordBufferUpload(record->buffer.Get(), offset, data);
+}
+
+// D3D11 상수 버퍼는 UpdateSubresource의 대상 구간을 받지 않는다(부분 갱신 불가, debug layer
+// 288). 상수 버퍼는 전체 갱신만 받고 부분 갱신은 Unsupported다(D3D11 backend 제약).
+Result<void> D3D11Device::CheckConstantUpdate(const BufferRecord& record, uint64 offset,
+                                              uint64 size) noexcept {
+    if (!HasAnyBufferUsage(record.desc.usage, BufferUsage::Constant) ||
+        (offset == 0 && size == record.size)) {
+        return Result<void>::Success();
+    }
+
+    auto assigned =
+        lastError_.TryAssign(StringView("D3D11 constant buffers accept only whole-buffer updates"));
+    (void)assigned;
+    return Result<void>::Failure(ErrorCode::Unsupported);
 }
 
 Result<void> D3D11Device::UpdateTexture(TextureHandle handle, uint32 mipLevel,
@@ -119,6 +139,11 @@ Result<void> D3D11Device::UploadBufferFromStaging(BufferHandle handle, uint64 de
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    auto whole = CheckConstantUpdate(*record, destinationOffset, size);
+    if (!whole) {
+        return whole;
+    }
+
     auto marked = staging_->MarkPending(staging);
     if (!marked) {
         return marked;
@@ -126,7 +151,7 @@ Result<void> D3D11Device::UploadBufferFromStaging(BufferHandle handle, uint64 de
 
     UploadOp op;
     op.destination = record->buffer.Get();
-    op.hasBox = true;
+    op.hasBox = !HasAnyBufferUsage(record->desc.usage, BufferUsage::Constant);
     op.box = {static_cast<UINT>(destinationOffset),        0, 0,
               static_cast<UINT>(destinationOffset + size), 1, 1};
     op.source = memory.Value().data + sourceOffset;
@@ -214,7 +239,10 @@ Result<void> D3D11Device::RecordBufferUpload(ID3D11Buffer* target, uint64 offset
     platform::MemoryCopy(space.Value().data, data.Data(), data.Size());
     UploadOp op;
     op.destination = target;
-    op.hasBox = true;
+    // 상수 버퍼(전체 갱신만 온다, CheckConstantUpdate)는 대상 구간 없이 올린다.
+    D3D11_BUFFER_DESC desc = {};
+    target->GetDesc(&desc);
+    op.hasBox = (desc.BindFlags & D3D11_BIND_CONSTANT_BUFFER) == 0;
     op.box = {static_cast<UINT>(offset), 0, 0, static_cast<UINT>(offset + data.Size()), 1, 1};
     op.source = space.Value().data;
     return PushUpload(op);
@@ -389,7 +417,8 @@ Result<uint64> D3D11Device::FlushUploadsLocked() noexcept {
             immediate_->CopyResource(op.destination, op.copySource);
         } else if (op.kind == UploadOp::Kind::CopyRegion) {
             immediate_->CopySubresourceRegion(op.destination, op.subresource, 0, 0, 0,
-                                              op.copySource, op.sourceSubresource, nullptr);
+                                              op.copySource, op.sourceSubresource,
+                                              op.hasBox ? &op.box : nullptr);
         } else {
             immediate_->UpdateSubresource(op.destination, op.subresource,
                                           op.hasBox ? &op.box : nullptr, op.source, op.rowPitch,

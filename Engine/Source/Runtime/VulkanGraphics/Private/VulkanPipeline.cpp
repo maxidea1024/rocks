@@ -62,7 +62,9 @@ VkCullModeFlags CullModeOf(CullMode mode) noexcept {
 } // namespace
 
 Result<void> VulkanDevice::CreatePipelineLayout() noexcept {
-    // set 0(VS)은 binding이 없고 set 1(PS)은 텍스처 t0·샘플러 s0이다(ShaderSystem 7.2절 4항).
+    // 공용 layout이다: 두 set 모두 빈 layout이고 push constant만 있다. 파이프라인마다 리플렉션으로
+    // set layout을 만들고(BuildPipelineLayout) push constant 범위는 이 layout과 같아 그리기 상수를
+    // 이 layout으로 올린다(사양 "Pipeline Layout Compatibility": push constant 범위가 같으면 호환).
     VkDescriptorSetLayoutCreateInfo empty = {};
     empty.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     VkResult result =
@@ -72,27 +74,8 @@ Result<void> VulkanDevice::CreatePipelineLayout() noexcept {
         return Fail("vkCreateDescriptorSetLayout", result);
     }
 
-    VkDescriptorSetLayoutBinding bindings[2] = {};
-    bindings[0].binding = 0;
-    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-    bindings[0].descriptorCount = 1;
-    bindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    bindings[1].binding = 1;
-    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-    bindings[1].descriptorCount = 1;
-    bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    VkDescriptorSetLayoutCreateInfo texture = {};
-    texture.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    texture.bindingCount = 2;
-    texture.pBindings = bindings;
-    result = functions_.vkCreateDescriptorSetLayout(device_, &texture, nullptr, &textureSetLayout_);
-    if (result != VK_SUCCESS) {
-        textureSetLayout_ = VK_NULL_HANDLE;
-        return Fail("vkCreateDescriptorSetLayout", result);
-    }
-
     // 그리기 상수는 push constant다(ShaderSystem 7.2절 2항, 80 byte ≤ 최소 보장 128 byte).
-    const VkDescriptorSetLayout layouts[] = {emptySetLayout_, textureSetLayout_};
+    const VkDescriptorSetLayout layouts[] = {emptySetLayout_, emptySetLayout_};
     VkPushConstantRange constants = {};
     constants.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     constants.offset = 0;
@@ -230,28 +213,158 @@ Result<void> VulkanDevice::MatchVertexInputs(const CompiledShader& vertex,
     return Result<void>::Success();
 }
 
-// 셰이더 binding이 고정 자원 배치(PipelineDesc 계약: PS의 텍스처 t0·샘플러 s0) 안인지 본다.
-Result<void> VulkanDevice::MatchBindings(const CompiledShader& shader, ShaderStage stage) noexcept {
-    if (shader.rootConstantBytes > ConstantBytes) {
+namespace {
+
+// 리플렉션 binding 하나를 고정 배치(PipelineDesc)의 입력에 잇는다. PS의 t0 이미지와 s0 샘플러,
+// 단계 모두의 t1–t4 버퍼 SRV(typed·구조화·raw)만 받는다. 그 밖(상수 버퍼, 다른 register, space,
+// 쓰기 자원)이면 거짓이다.
+bool MapBinding(const ShaderBinding& binding, ShaderStage stage, PipelineBinding& out,
+                DrawBufferSlots& slots) noexcept {
+    if (binding.sourceSpace != 0 || binding.writable) {
+        return false;
+    }
+
+    out.binding = binding.binding;
+    out.set = binding.set;
+    const bool pixel = stage == ShaderStage::Pixel;
+    if (binding.shape == ShaderResourceShape::Image &&
+        binding.kind == ShaderBindingKind::SampledImage) {
+        out.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        out.source = BindingSource::Texture;
+        return pixel && binding.sourceRegister == 0;
+    }
+
+    if (binding.shape == ShaderResourceShape::Sampler) {
+        out.type = VK_DESCRIPTOR_TYPE_SAMPLER;
+        out.source = BindingSource::Sampler;
+        return pixel && binding.sourceRegister == 0;
+    }
+
+    const uint32 slot = binding.sourceRegister - 1;
+    if (binding.sourceRegister == 0 || slot >= MaxDrawBufferViews) {
+        return false;
+    }
+
+    BufferViewKind kind = BufferViewKind::Typed;
+    if (binding.shape == ShaderResourceShape::TexelBuffer &&
+        binding.kind == ShaderBindingKind::SampledImage) {
+        out.type = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
+    } else if (binding.shape == ShaderResourceShape::StructuredBuffer ||
+               binding.shape == ShaderResourceShape::RawBuffer) {
+        out.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        kind = binding.shape == ShaderResourceShape::StructuredBuffer ? BufferViewKind::Structured
+                                                                      : BufferViewKind::Raw;
+    } else {
+        return false;
+    }
+
+    out.source = BindingSource::BufferView;
+    out.slot = slot;
+    const PixelShaderType type =
+        kind == BufferViewKind::Typed ? binding.sampledType : PixelShaderType::None;
+    const uint32 bit = 1u << slot;
+    if ((slots.usedMask & bit) != 0) {
+        return slots.kinds[slot] == kind && slots.typedShaderTypes[slot] == type;
+    }
+
+    slots.usedMask |= bit;
+    slots.kinds[slot] = kind;
+    slots.typedShaderTypes[slot] = type;
+    return true;
+}
+
+} // namespace
+
+Result<void> VulkanDevice::BuildPipelineLayout(const CompiledShader& vertex,
+                                               const CompiledShader& pixel,
+                                               PipelineRecord& record) noexcept {
+    if (vertex.rootConstantBytes > ConstantBytes || pixel.rootConstantBytes > ConstantBytes) {
         return Reject("draw constants block is larger than DrawConstants (80 bytes)");
     }
 
-    for (const ShaderBinding& binding : shader.bindings) {
-        const bool texture =
-            binding.binding == 0 && binding.kind == ShaderBindingKind::SampledImage;
-        const bool sampler = binding.binding == 1 && binding.kind == ShaderBindingKind::Sampler;
-        if (stage != ShaderStage::Pixel || binding.set != 1 || !(texture || sampler)) {
-            Diagnostic message;
-            message.Text("shader resource at set ")
-                .Number(binding.set)
-                .Text(" binding ")
-                .Number(binding.binding)
-                .Text(" is outside the fixed layout (pixel texture t0 and sampler s0 only)");
-            return Reject(message.CStr());
+    const CompiledShader* shaders[2] = {&vertex, &pixel};
+    VkDescriptorSetLayoutBinding layoutBindings[2][MaxPipelineBindings] = {};
+    uint32 layoutCounts[2] = {};
+    for (uint32 stage = 0; stage < 2; ++stage) {
+        const ShaderStage shaderStage = stage == 0 ? ShaderStage::Vertex : ShaderStage::Pixel;
+        for (const ShaderBinding& binding : shaders[stage]->bindings) {
+            PipelineBinding mapped;
+            if (binding.set != stage || record.bindingCount == MaxPipelineBindings ||
+                !MapBinding(binding, shaderStage, mapped, record.bufferSlots)) {
+                Diagnostic message;
+                message.Text(stage == 0 ? "vertex" : "pixel")
+                    .Text(" shader resource at register ")
+                    .Number(binding.sourceRegister)
+                    .Text(" is outside the fixed layout (pixel t0 and s0, buffer views t1-t4; no "
+                          "UAVs in graphics stages)");
+                return Reject(message.CStr());
+            }
+
+            record.bindings[record.bindingCount++] = mapped;
+            VkDescriptorSetLayoutBinding& entry = layoutBindings[stage][layoutCounts[stage]++];
+            entry.binding = mapped.binding;
+            entry.descriptorType = mapped.type;
+            entry.descriptorCount = 1;
+            entry.stageFlags =
+                stage == 0 ? VK_SHADER_STAGE_VERTEX_BIT : VK_SHADER_STAGE_FRAGMENT_BIT;
         }
     }
 
+    VkDescriptorSetLayout layouts[2] = {emptySetLayout_, emptySetLayout_};
+    for (uint32 stage = 0; stage < 2; ++stage) {
+        if (layoutCounts[stage] == 0) {
+            continue;
+        }
+
+        VkDescriptorSetLayoutCreateInfo info = {};
+        info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        info.bindingCount = layoutCounts[stage];
+        info.pBindings = layoutBindings[stage];
+        const VkResult result = functions_.vkCreateDescriptorSetLayout(device_, &info, nullptr,
+                                                                       &record.setLayouts[stage]);
+        if (result != VK_SUCCESS) {
+            record.setLayouts[stage] = VK_NULL_HANDLE;
+            DestroyPipelineLayout(record);
+            return Fail("vkCreateDescriptorSetLayout", result);
+        }
+
+        layouts[stage] = record.setLayouts[stage];
+        record.setMask |= 1u << stage;
+    }
+
+    VkPushConstantRange constants = {};
+    constants.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    constants.offset = 0;
+    constants.size = ConstantBytes;
+    VkPipelineLayoutCreateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    info.setLayoutCount = 2;
+    info.pSetLayouts = layouts;
+    info.pushConstantRangeCount = 1;
+    info.pPushConstantRanges = &constants;
+    const VkResult result =
+        functions_.vkCreatePipelineLayout(device_, &info, nullptr, &record.layout);
+    if (result != VK_SUCCESS) {
+        record.layout = VK_NULL_HANDLE;
+        DestroyPipelineLayout(record);
+        return Fail("vkCreatePipelineLayout", result);
+    }
+
     return Result<void>::Success();
+}
+
+void VulkanDevice::DestroyPipelineLayout(PipelineRecord& record) noexcept {
+    if (record.layout != VK_NULL_HANDLE) {
+        functions_.vkDestroyPipelineLayout(device_, record.layout, nullptr);
+        record.layout = VK_NULL_HANDLE;
+    }
+
+    for (VkDescriptorSetLayout& layout : record.setLayouts) {
+        if (layout != VK_NULL_HANDLE) {
+            functions_.vkDestroyDescriptorSetLayout(device_, layout, nullptr);
+            layout = VK_NULL_HANDLE;
+        }
+    }
 }
 
 Result<VkShaderModule> VulkanDevice::CreateShaderModule(const CompiledShader& shader) noexcept {
@@ -342,12 +455,6 @@ Result<PipelineHandle> VulkanDevice::CreatePipeline(const PipelineDesc& desc) no
         return Result<PipelineHandle>::Failure(matched.Error());
     }
 
-    auto vertexBound = MatchBindings(vertex, ShaderStage::Vertex);
-    auto pixelBound = vertexBound ? MatchBindings(pixel, ShaderStage::Pixel) : Move(vertexBound);
-    if (!pixelBound) {
-        return Result<PipelineHandle>::Failure(pixelBound.Error());
-    }
-
     auto renderPass = RenderPassFor(color.format, false);
     if (!renderPass) {
         return Result<PipelineHandle>::Failure(renderPass.Error());
@@ -358,14 +465,22 @@ Result<PipelineHandle> VulkanDevice::CreatePipeline(const PipelineDesc& desc) no
         return Result<PipelineHandle>::Failure(reserved.Error());
     }
 
+    PipelineRecord record;
+    auto layout = BuildPipelineLayout(vertex, pixel, record);
+    if (!layout) {
+        return Result<PipelineHandle>::Failure(layout.Error());
+    }
+
     auto vertexModule = CreateShaderModule(vertex);
     if (!vertexModule) {
+        DestroyPipelineLayout(record);
         return Result<PipelineHandle>::Failure(vertexModule.Error());
     }
 
     auto pixelModule = CreateShaderModule(pixel);
     if (!pixelModule) {
         functions_.vkDestroyShaderModule(device_, vertexModule.Value(), nullptr);
+        DestroyPipelineLayout(record);
         return Result<PipelineHandle>::Failure(pixelModule.Error());
     }
 
@@ -379,7 +494,6 @@ Result<PipelineHandle> VulkanDevice::CreatePipeline(const PipelineDesc& desc) no
     stages[1].module = pixelModule.Value();
     stages[1].pName = "PSMain";
 
-    PipelineRecord record;
     VkVertexInputBindingDescription bindings[MaxVertexStreams] = {};
     for (usize index = 0; index < desc.layout.streams.Size(); ++index) {
         const VertexStream& stream = desc.layout.streams[index];
@@ -448,7 +562,7 @@ Result<PipelineHandle> VulkanDevice::CreatePipeline(const PipelineDesc& desc) no
     info.pMultisampleState = &multisample;
     info.pColorBlendState = &colorBlend;
     info.pDynamicState = &dynamic;
-    info.layout = pipelineLayout_;
+    info.layout = record.layout;
     info.renderPass = renderPass.Value();
     info.subpass = 0;
     const VkResult result = functions_.vkCreateGraphicsPipelines(device_, pipelineCache_, 1, &info,
@@ -456,13 +570,16 @@ Result<PipelineHandle> VulkanDevice::CreatePipeline(const PipelineDesc& desc) no
     functions_.vkDestroyShaderModule(device_, vertexModule.Value(), nullptr);
     functions_.vkDestroyShaderModule(device_, pixelModule.Value(), nullptr);
     if (result != VK_SUCCESS) {
+        DestroyPipelineLayout(record);
         return FailWith<PipelineHandle>("vkCreateGraphicsPipelines", result);
     }
 
     const VkPipeline pipeline = record.pipeline;
+    PipelineRecord cleanup = record;
     auto added = pipelines_.TryAdd(Move(record));
     if (!added) {
         functions_.vkDestroyPipeline(device_, pipeline, nullptr);
+        DestroyPipelineLayout(cleanup);
         return Result<PipelineHandle>::Failure(added.Error());
     }
 

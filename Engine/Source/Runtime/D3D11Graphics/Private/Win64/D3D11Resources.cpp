@@ -127,22 +127,43 @@ Result<void> D3D11Device::CreateSwapChainView(SwapChainRecord& record) noexcept 
 // 다른 스레드에서도 부를 수 있다(concurrentResourceCreation). 초기 데이터는 생성 호출이 올린다.
 Result<BufferHandle> D3D11Device::CreateBuffer(const BufferDesc& desc,
                                                Span<const uint8> initial) noexcept {
-    if (desc.size == 0 || initial.Size() != desc.size ||
-        (desc.usage != BufferUsage::Vertex && desc.usage != BufferUsage::Index) ||
-        desc.size > NumericLimits<uint32>::Max()) {
+    auto valid = ValidateBufferDesc(desc);
+    if (!valid || initial.Size() != desc.size) {
         return Result<BufferHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
     platform::LockGuard lock(gate_);
+    if (desc.size > caps_.limits.bufferBytes) {
+        auto assigned =
+            lastError_.TryAssign(StringView("buffer size exceeds the device limit (bufferBytes)"));
+        (void)assigned;
+        return Result<BufferHandle>::Failure(ErrorCode::Unsupported);
+    }
+
+    // 용도 비트를 bind·misc flag로 옮긴다(UE D3D11Buffer.cpp:38–83과 같은 대응).
     D3D11_BUFFER_DESC bufferDesc = {};
     bufferDesc.ByteWidth = static_cast<UINT>(desc.size);
     bufferDesc.Usage = D3D11_USAGE_DEFAULT;
+    const BufferUsage usage = desc.usage;
     bufferDesc.BindFlags =
-        desc.usage == BufferUsage::Index ? D3D11_BIND_INDEX_BUFFER : D3D11_BIND_VERTEX_BUFFER;
+        (HasAnyBufferUsage(usage, BufferUsage::Vertex) ? D3D11_BIND_VERTEX_BUFFER : 0u) |
+        (HasAnyBufferUsage(usage, BufferUsage::Index) ? D3D11_BIND_INDEX_BUFFER : 0u) |
+        (HasAnyBufferUsage(usage, BufferUsage::Constant) ? D3D11_BIND_CONSTANT_BUFFER : 0u) |
+        (HasAnyBufferUsage(usage, BufferUsage::ShaderRead) ? D3D11_BIND_SHADER_RESOURCE : 0u) |
+        (HasAnyBufferUsage(usage, BufferUsage::ShaderWrite) ? D3D11_BIND_UNORDERED_ACCESS : 0u);
+    bufferDesc.MiscFlags =
+        (HasAnyBufferUsage(usage, BufferUsage::Raw) ? D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS
+                                                    : 0u) |
+        (HasAnyBufferUsage(usage, BufferUsage::Structured) ? D3D11_RESOURCE_MISC_BUFFER_STRUCTURED
+                                                           : 0u) |
+        (HasAnyBufferUsage(usage, BufferUsage::Indirect) ? D3D11_RESOURCE_MISC_DRAWINDIRECT_ARGS
+                                                         : 0u);
+    bufferDesc.StructureByteStride = desc.stride;
     D3D11_SUBRESOURCE_DATA data = {};
     data.pSysMem = initial.Data();
     BufferRecord record;
     record.size = desc.size;
+    record.desc = desc;
     const HRESULT created = device_->CreateBuffer(&bufferDesc, &data, record.buffer.Out());
     if (FAILED(created)) {
         return FailWith<BufferHandle>("ID3D11Device::CreateBuffer", created);
@@ -432,6 +453,13 @@ Result<PipelineHandle> D3D11Device::CreatePipeline(const PipelineDesc& desc) noe
     }
 
     PipelineRecord record;
+    auto vertexBindings = ReflectBindings(vertexCode.Get(), false, record.bufferSlots);
+    auto pixelBindings = vertexBindings ? ReflectBindings(pixelCode.Get(), true, record.bufferSlots)
+                                        : Move(vertexBindings);
+    if (!pixelBindings) {
+        return Result<PipelineHandle>::Failure(pixelBindings.Error());
+    }
+
     record.alphaBlend = desc.alphaBlend;
     if (static_cast<usize>(desc.cullMode) >= CullModeCount) {
         return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);

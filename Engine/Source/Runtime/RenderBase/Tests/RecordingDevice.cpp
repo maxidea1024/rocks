@@ -446,6 +446,41 @@ void RecordingDevice::Defer() noexcept {
     }
 }
 
+// 기록 장치는 능력 질의·버퍼 view를 쓰지 않는 시험용이다(빈 능력, view Unsupported).
+const DeviceCaps& RecordingDevice::Caps() const noexcept {
+    static const DeviceCaps none;
+    return none;
+}
+
+uint32 RecordingDevice::GetPixelFormatSampleCounts(PixelFormat format) const noexcept {
+    (void)format;
+    return 0;
+}
+
+Result<BufferViewHandle> RecordingDevice::CreateBufferView(BufferHandle buffer,
+                                                           const BufferViewDesc& desc) noexcept {
+    (void)buffer;
+    (void)desc;
+    return Result<BufferViewHandle>::Failure(ErrorCode::Unsupported);
+}
+
+Result<void> RecordingDevice::ReadBuffer(BufferHandle buffer, uint64 offset,
+                                         Span<uint8> out) noexcept {
+    (void)buffer;
+    (void)offset;
+    (void)out;
+    return Result<void>::Failure(ErrorCode::Unsupported);
+}
+
+void RecordingDevice::Retire(BufferViewHandle view) noexcept {
+    (void)view;
+}
+
+void RecordingDevice::SetBufferView(uint32 slot, BufferViewHandle view) noexcept {
+    (void)slot;
+    (void)view;
+}
+
 void RecordingDevice::Retire(BufferHandle buffer) noexcept {
     if (!ownership_.Check() || !buffers_.TryRemove(buffer.slot)) {
         return;

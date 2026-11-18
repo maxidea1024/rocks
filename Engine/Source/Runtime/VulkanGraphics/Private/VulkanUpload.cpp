@@ -9,15 +9,18 @@ namespace rocks::graphics::vulkan {
 
 namespace {
 
-// 업로드 묶음이 앞 제출의 정점·index·셰이더 읽기와 전송을 기다리는 단계다(WAR·WAW).
+// 업로드 묶음이 앞 제출의 간접 인자·정점·index·셰이더(상수·버퍼 view 포함) 읽기와 전송을
+// 기다리는 단계다(WAR·WAW).
 constexpr VkPipelineStageFlags EarlierUseStages =
-    VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
-    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT;
+    VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_VERTEX_INPUT_BIT |
+    VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT;
 // 업로드 묶음 뒤 제출이 업로드 결과를 읽는 단계와 접근이다.
 constexpr VkPipelineStageFlags LaterUseStages = EarlierUseStages;
-constexpr VkAccessFlags LaterUseAccess = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT |
-                                         VK_ACCESS_INDEX_READ_BIT | VK_ACCESS_SHADER_READ_BIT |
-                                         VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+constexpr VkAccessFlags LaterUseAccess =
+    VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT |
+    VK_ACCESS_INDEX_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT | VK_ACCESS_SHADER_READ_BIT |
+    VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
 
 void GlobalBarrier(const Functions& functions, VkCommandBuffer buffer, VkPipelineStageFlags from,
                    VkAccessFlags fromAccess, VkPipelineStageFlags to,

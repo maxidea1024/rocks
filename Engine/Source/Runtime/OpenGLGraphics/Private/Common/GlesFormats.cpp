@@ -272,6 +272,7 @@ GlesFeatures DetectFeatures(const GlesFunctions& gl, bool desktopContext) noexce
 
     features.disjointTimerQuery = HasGlExtension(gl, "GL_EXT_disjoint_timer_query");
     features.srgbWriteControl = desktopContext || HasGlExtension(gl, "GL_EXT_sRGB_write_control");
+    features.depthClamp = HasGlExtension(gl, "GL_EXT_depth_clamp");
     return features;
 }
 
@@ -283,6 +284,40 @@ const GlesTextureFormat* FindTextureFormat(PixelFormat format) noexcept {
     }
 
     return nullptr;
+}
+
+bool IsBufferTextureFormat(GLenum internalFormat) noexcept {
+    switch (internalFormat) {
+    case GL_R8:
+    case GL_R8I:
+    case GL_R8UI:
+    case GL_RG8:
+    case GL_RG8UI:
+    case GL_RGBA8:
+    case GL_RGBA8UI:
+    case GL_R16I:
+    case GL_R16UI:
+    case GL_R16F:
+    case GL_RG16I:
+    case GL_RG16UI:
+    case GL_RG16F:
+    case GL_RGBA16I:
+    case GL_RGBA16UI:
+    case GL_RGBA16F:
+    case GL_R32I:
+    case GL_R32UI:
+    case GL_R32F:
+    case GL_RG32UI:
+    case GL_RG32F:
+    case GL_RGB32I:
+    case GL_RGB32UI:
+    case GL_RGB32F:
+    case GL_RGBA32UI:
+    case GL_RGBA32F:
+        return true;
+    default:
+        return false;
+    }
 }
 
 PixelFormatCaps TextureFormatCaps(const GlesTextureFormat& format,
@@ -329,7 +364,22 @@ PixelFormatCaps TextureFormatCaps(const GlesTextureFormat& format,
         caps = caps | PixelFormatCaps::StorageAtomic;
     }
 
-    // texel buffer(Table 8.18)는 사양 표를 대조하지 않아 공개하지 않는다(PixelFormat.ko.md 14.2절).
+    // texel buffer(GL_TEXTURE_BUFFER)는 ES 3.2 버퍼 텍스처 내부 형식 표(Table 8.18, Khronos
+    // glTexBuffer ES3 refpage와 대조)에 있는 형식만이다. R16·RG16·RGBA16 UNORM은 표에 있지만 ES
+    // core 내부 형식이 아니고(GL_EXT_texture_norm16) 그 확장의 버퍼 텍스처 조건을 대조하지 않아
+    // 공개하지 않는다. 쓰기(imageBuffer)는 image 형식(Table 8.26)이면서 버퍼 텍스처 형식인 것,
+    // atomic은 R32UI·R32I다(RQ9).
+    if (IsBufferTextureFormat(format.internalFormat)) {
+        caps = caps | PixelFormatCaps::TexelBufferRead;
+        if (format.Is(GlesStorage)) {
+            caps = caps | PixelFormatCaps::TexelBufferWrite;
+        }
+
+        if (format.Is(GlesAtomic)) {
+            caps = caps | PixelFormatCaps::TexelBufferAtomic;
+        }
+    }
+
     return caps;
 }
 

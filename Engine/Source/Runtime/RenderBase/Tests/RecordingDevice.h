@@ -158,6 +158,13 @@ public:
 
     // --- Device ---
     graphics::DeviceInfo Info() const noexcept override;
+    const graphics::DeviceCaps& Caps() const noexcept override;
+    uint32 GetPixelFormatSampleCounts(graphics::PixelFormat format) const noexcept override;
+    Result<graphics::BufferViewHandle>
+    CreateBufferView(graphics::BufferHandle buffer,
+                     const graphics::BufferViewDesc& desc) noexcept override;
+    Result<void> ReadBuffer(graphics::BufferHandle buffer, uint64 offset,
+                            Span<uint8> out) noexcept override;
     Result<graphics::SwapChainHandle>
     CreateSwapChain(const graphics::SwapChainDesc& desc) noexcept override;
     Result<void> ResizeSwapChain(graphics::SwapChainHandle swapChain, uint32 width,
@@ -177,6 +184,7 @@ public:
     Result<graphics::GpuFencePoint> EndFrame() noexcept override;
     Result<void> ReadPixels(graphics::TextureHandle target, Span<uint8> out) noexcept override;
     void Retire(graphics::BufferHandle buffer) noexcept override;
+    void Retire(graphics::BufferViewHandle view) noexcept override;
     void Retire(graphics::TextureHandle texture) noexcept override;
     void Retire(graphics::PipelineHandle pipeline) noexcept override;
     void Retire(graphics::SwapChainHandle swapChain) noexcept override;
@@ -267,6 +275,7 @@ private:
     void SetIndexBuffer(graphics::BufferHandle buffer, graphics::IndexFormat format,
                         uint64 offset) noexcept override;
     void SetTexture(graphics::TextureHandle texture) noexcept override;
+    void SetBufferView(uint32 slot, graphics::BufferViewHandle view) noexcept override;
     void SetConstants(const graphics::DrawConstants& constants) noexcept override;
     void Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept override;
     void DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept override;

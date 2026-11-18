@@ -1,5 +1,6 @@
 #include "D3D11PixelFormats.h"
 
+#include <Graphics/DeviceCaps.h>
 #include <Platform/Memory.h>
 
 namespace rocks::graphics::d3d11 {
@@ -413,13 +414,46 @@ PixelFormatCaps QueryFormatCaps(ID3D11Device* device, PixelFormat format) noexce
         PixelFormatCaps::StorageWrite);
     Add(caps, typedUav && Has2(uav, D3D11_FORMAT_SUPPORT2_UAV_ATOMIC_EXCHANGE),
         PixelFormatCaps::StorageAtomic);
-    const bool buffer = Has(srv, D3D11_FORMAT_SUPPORT_BUFFER) && info.planeCount == 1 && !depth;
+    // 공유 지수 형식(RGB9E5)의 버퍼 view는 WARP D3D11이 SUPPORT_BUFFER를 알리고도
+    // CreateShaderResourceView 안에서 멈춘다(2026-11-18 Sandbox self-test, d3d10warp 접근 위반).
+    // 렌더러가 버퍼에 쓰지 않는 형식이라 D3D11에서는 공개하지 않는다(보수적 값).
+    const bool buffer = Has(srv, D3D11_FORMAT_SUPPORT_BUFFER) && info.planeCount == 1 && !depth &&
+                        format != PixelFormat::RGB9E5Ufloat;
     Add(caps, buffer, PixelFormatCaps::TexelBufferRead);
     Add(caps, buffer && typedUav && Has2(uav, D3D11_FORMAT_SUPPORT2_UAV_TYPED_STORE),
         PixelFormatCaps::TexelBufferWrite);
     Add(caps, buffer && typedUav && Has2(uav, D3D11_FORMAT_SUPPORT2_UAV_ATOMIC_EXCHANGE),
         PixelFormatCaps::TexelBufferAtomic);
     return caps;
+}
+
+uint32 QuerySampleCounts(ID3D11Device* device, PixelFormat format, PixelFormatCaps caps) noexcept {
+    const FormatMapping mapping = MappingOf(format);
+    DXGI_FORMAT target = DXGI_FORMAT_UNKNOWN;
+    if (HasPixelFormatCaps(caps, PixelFormatCaps::RenderTarget)) {
+        target = mapping.rtv;
+    } else if (HasPixelFormatCaps(caps, PixelFormatCaps::DepthStencil)) {
+        target = mapping.dsv;
+    }
+
+    if (device == nullptr || target == DXGI_FORMAT_UNKNOWN) {
+        return 0;
+    }
+
+    uint32 counts = SampleCountBit(1);
+    if (!Has(Query(device, target), D3D11_FORMAT_SUPPORT_MULTISAMPLE_RENDERTARGET)) {
+        return counts;
+    }
+
+    for (uint32 samples = 2; samples <= D3D11_MAX_MULTISAMPLE_SAMPLE_COUNT; samples *= 2) {
+        UINT levels = 0;
+        if (SUCCEEDED(device->CheckMultisampleQualityLevels(target, samples, &levels)) &&
+            levels > 0) {
+            counts |= SampleCountBit(samples);
+        }
+    }
+
+    return counts;
 }
 
 } // namespace rocks::graphics::d3d11

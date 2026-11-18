@@ -278,6 +278,53 @@ inline constexpr GLenum GL_TIMESTAMP = 0x8E28;
 inline constexpr GLenum GL_QUERY_COUNTER_BITS = 0x8864;
 inline constexpr GLenum GL_GPU_DISJOINT = 0x8FBB;
 
+// --- 장치 한도(GX1, ES 3.2 core 6.1절 표 20.40–20.48) ---
+inline constexpr GLenum GL_MAX_COLOR_ATTACHMENTS = 0x8CDF;
+inline constexpr GLenum GL_MAX_DRAW_BUFFERS = 0x8824;
+inline constexpr GLenum GL_MAX_VERTEX_UNIFORM_BLOCKS = 0x8A2B;
+inline constexpr GLenum GL_MAX_FRAGMENT_UNIFORM_BLOCKS = 0x8A2D;
+inline constexpr GLenum GL_MAX_COMPUTE_UNIFORM_BLOCKS = 0x91BB;
+inline constexpr GLenum GL_MAX_TEXTURE_IMAGE_UNITS = 0x8872;
+inline constexpr GLenum GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS = 0x8B4C;
+inline constexpr GLenum GL_MAX_COMPUTE_TEXTURE_IMAGE_UNITS = 0x91BC;
+inline constexpr GLenum GL_MAX_VERTEX_SHADER_STORAGE_BLOCKS = 0x90D6;
+inline constexpr GLenum GL_MAX_FRAGMENT_SHADER_STORAGE_BLOCKS = 0x90DA;
+inline constexpr GLenum GL_MAX_COMPUTE_SHADER_STORAGE_BLOCKS = 0x90DB;
+inline constexpr GLenum GL_MAX_COMBINED_SHADER_STORAGE_BLOCKS = 0x90DC;
+inline constexpr GLenum GL_MAX_VERTEX_IMAGE_UNIFORMS = 0x90CA;
+inline constexpr GLenum GL_MAX_FRAGMENT_IMAGE_UNIFORMS = 0x90CE;
+inline constexpr GLenum GL_MAX_COMPUTE_IMAGE_UNIFORMS = 0x91BD;
+inline constexpr GLenum GL_MAX_COMBINED_IMAGE_UNIFORMS = 0x90CF;
+inline constexpr GLenum GL_MAX_COMPUTE_UNIFORM_COMPONENTS = 0x8263;
+inline constexpr GLenum GL_MAX_UNIFORM_BLOCK_SIZE = 0x8A30;
+inline constexpr GLenum GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT = 0x8A34;
+inline constexpr GLenum GL_SHADER_STORAGE_BUFFER_OFFSET_ALIGNMENT = 0x90DF;
+inline constexpr GLenum GL_TEXTURE_BUFFER_OFFSET_ALIGNMENT = 0x919F;
+inline constexpr GLenum GL_MAX_SHADER_STORAGE_BLOCK_SIZE = 0x90DE;
+inline constexpr GLenum GL_MAX_TEXTURE_BUFFER_SIZE = 0x8C2B;
+inline constexpr GLenum GL_MAX_VERTEX_ATTRIB_BINDINGS = 0x82DA;
+inline constexpr GLenum GL_MAX_VARYING_VECTORS = 0x8DFC;
+inline constexpr GLenum GL_MAX_COMPUTE_WORK_GROUP_COUNT = 0x91BE;
+inline constexpr GLenum GL_MAX_COMPUTE_WORK_GROUP_SIZE = 0x91BF;
+inline constexpr GLenum GL_MAX_COMPUTE_WORK_GROUP_INVOCATIONS = 0x90EB;
+inline constexpr GLenum GL_MAX_COMPUTE_SHARED_MEMORY_SIZE = 0x8262;
+inline constexpr GLenum GL_MAX_3D_TEXTURE_SIZE = 0x8073;
+inline constexpr GLenum GL_MAX_CUBE_MAP_TEXTURE_SIZE = 0x851C;
+inline constexpr GLenum GL_MAX_ARRAY_TEXTURE_LAYERS = 0x88FF;
+// --- MSAA 질의(glGetInternalformativ, ES 3.1 core) ---
+inline constexpr GLenum GL_TEXTURE_2D_MULTISAMPLE = 0x9100;
+inline constexpr GLenum GL_SAMPLES = 0x80A9;
+inline constexpr GLenum GL_NUM_SAMPLE_COUNTS = 0x9380;
+// --- 버퍼 view(GX2): 버퍼 텍스처(ES 3.2 core)·storage block(ES 3.1 core) ---
+inline constexpr GLenum GL_TEXTURE_BUFFER = 0x8C2A;
+inline constexpr GLenum GL_SHADER_STORAGE_BUFFER = 0x90D2;
+inline constexpr GLenum GL_ACTIVE_UNIFORMS = 0x8B86;
+inline constexpr GLenum GL_SAMPLER_BUFFER = 0x8DC2;
+inline constexpr GLenum GL_INT_SAMPLER_BUFFER = 0x8DD0;
+inline constexpr GLenum GL_UNSIGNED_INT_SAMPLER_BUFFER = 0x8DD8;
+inline constexpr GLenum GL_SHADER_STORAGE_BLOCK = 0x92E6;
+inline constexpr GLenum GL_ACTIVE_RESOURCES = 0x92F5;
+inline constexpr GLenum GL_BUFFER_BINDING = 0x9302;
 // --- debug(KHR_debug, ES 3.2 core) ---
 inline constexpr GLenum GL_DEBUG_SOURCE_APPLICATION = 0x824A;
 inline constexpr GLenum GL_DEBUG_TYPE_ERROR = 0x824C;
@@ -291,6 +338,16 @@ inline constexpr GLenum GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR = 0x824E;
     X(const GLubyte*, GetStringi, (GLenum, GLuint))                                                \
     X(void, GetIntegerv, (GLenum, GLint*))                                                         \
     X(void, GetInteger64v, (GLenum, GLint64*))                                                     \
+    X(void, GetIntegeri_v, (GLenum, GLuint, GLint*))                                               \
+    X(void, GetInternalformativ, (GLenum, GLenum, GLenum, GLsizei, GLint*))                        \
+    X(void, TexBufferRange, (GLenum, GLenum, GLuint, GLintptr, GLsizeiptr))                        \
+    X(void, BindBufferRange, (GLenum, GLuint, GLuint, GLintptr, GLsizeiptr))                       \
+    X(void, GetActiveUniform, (GLuint, GLuint, GLsizei, GLsizei*, GLint*, GLenum*, GLchar*))       \
+    X(void, GetUniformiv, (GLuint, GLint, GLint*))                                                 \
+    X(void, GetProgramInterfaceiv, (GLuint, GLenum, GLenum, GLint*))                               \
+    X(void, GetProgramResourceiv,                                                                  \
+      (GLuint, GLenum, GLuint, GLsizei, const GLenum*, GLsizei, GLsizei*, GLint*))                 \
+    X(void, GetProgramResourceName, (GLuint, GLenum, GLuint, GLsizei, GLsizei*, GLchar*))          \
     X(void, GetFloatv, (GLenum, GLfloat*))                                                         \
     X(void, Enable, (GLenum))                                                                      \
     X(void, Disable, (GLenum))                                                                     \

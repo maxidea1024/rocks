@@ -1,3 +1,4 @@
+#include "D3D11Caps.h"
 #include "D3D11DeviceImpl.h"
 
 #include <Core/Diagnostics/Log.h>
@@ -40,9 +41,9 @@ bool FenceEventSource::WaitSubmission(uint64 value, void* token) noexcept {
 D3D11Device::D3D11Device(Allocator& allocator) noexcept
     : allocator_(allocator), adapterName_(allocator), lastError_(allocator), buffers_(allocator),
       textures_(allocator), pipelines_(allocator), swapChains_(allocator), readbacks_(allocator),
-      retired_(allocator), dedicated_(allocator), uploadOps_(allocator), messageScratch_(allocator),
-      timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics), ring_(allocator),
-      timestamps_(allocator) {
+      bufferViews_(allocator), retired_(allocator), dedicated_(allocator), uploadOps_(allocator),
+      messageScratch_(allocator), timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics),
+      ring_(allocator), timestamps_(allocator) {
 }
 
 D3D11Device::~D3D11Device() {
@@ -74,6 +75,7 @@ D3D11Device::~D3D11Device() {
     swapChains_.Clear();
     textures_.Clear();
     pipelines_.Clear();
+    bufferViews_.Clear();
     buffers_.Clear();
     if (ringData_ != nullptr) {
         (void)allocator_.Deallocate(ringData_);
@@ -209,9 +211,18 @@ Result<void> D3D11Device::Initialize(const DeviceDesc& desc) noexcept {
         return states;
     }
 
-    // 형식 능력은 장치 수명 동안 바뀌지 않으므로 한 번 질의해 둔다(PixelFormat.ko.md PF4).
+    // 장치 능력(GX1)과 형식 능력은 장치 수명 동안 바뀌지 않으므로 한 번 질의해
+    // 둔다(PixelFormat.ko.md PF4). MSAA 표본 수가 2 이상이면 Multisample 능력이다.
+    caps_ = QueryDeviceCaps(device_.Get(), adapter.Get());
     for (uint32 number = 0; number <= MaxPixelFormatNumber; ++number) {
-        formatCaps_[number] = QueryFormatCaps(device_.Get(), static_cast<PixelFormat>(number));
+        const PixelFormat format = static_cast<PixelFormat>(number);
+        PixelFormatCaps formatCaps = QueryFormatCaps(device_.Get(), format);
+        sampleCounts_[number] = QuerySampleCounts(device_.Get(), format, formatCaps);
+        if (sampleCounts_[number] > SampleCountBit(1)) {
+            formatCaps = formatCaps | PixelFormatCaps::Multisample;
+        }
+
+        formatCaps_[number] = formatCaps;
     }
 
     // 업로드 ring(GX8): 시스템 메모리 하나를 나눠 쓴다.
@@ -405,6 +416,7 @@ DeviceInfo D3D11Device::Info() const noexcept {
     info.timestampDisjointDetection = info.timestamps;
     info.clockCalibration = info.timestamps;
     info.debugMarkers = annotation_.Get() != nullptr;
+    info.apiVersion = device_ ? static_cast<uint32>(device_->GetFeatureLevel()) : 0;
     return info;
 }
 
@@ -611,8 +623,8 @@ void D3D11Device::KeepUntilDestruction(ComRef<IUnknown>&& object) noexcept {
 }
 
 Result<void> D3D11Device::ReserveRetireCapacity(usize extra) noexcept {
-    const usize live = buffers_.Size() + textures_.Size() + pipelines_.Size() + readbacks_.Size() +
-                       swapChains_.Size();
+    const usize live = buffers_.Size() + bufferViews_.Size() + textures_.Size() +
+                       pipelines_.Size() + readbacks_.Size() + swapChains_.Size();
     return retired_.TryEnsureCapacity(retired_.Size() + live + extra);
 }
 

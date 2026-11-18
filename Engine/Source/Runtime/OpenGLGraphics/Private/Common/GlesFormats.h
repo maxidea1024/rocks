@@ -64,6 +64,8 @@ struct GlesFeatures {
     // 렌더 타깃의 sRGB 쓰기 변환을 끄고 켤 수 있는지다(GL_FRAMEBUFFER_SRGB: 데스크톱 core 또는
     // GL_EXT_sRGB_write_control).
     bool srgbWriteControl = false;
+    // 깊이 clamp(GL_EXT_depth_clamp, UE OpenGLES.cpp:185와 같은 판정)다.
+    bool depthClamp = false;
 
     bool Has(GlesFeature feature) const noexcept;
 };
@@ -142,6 +144,10 @@ struct GlesTextureFormat {
 
 // format의 대응이다. 표에 없는 형식(Unknown 포함)은 nullptr이다.
 const GlesTextureFormat* FindTextureFormat(PixelFormat format) noexcept;
+
+// internalFormat이 ES 3.2 버퍼 텍스처(GL_TEXTURE_BUFFER) 내부 형식인지다(Table 8.18 가운데 Rocks
+// 형식이 쓰는 것, norm16 제외).
+bool IsBufferTextureFormat(GLenum internalFormat) noexcept;
 
 // 이 장치에서 format의 능력이다(PixelFormat.ko.md 7절 OpenGL ES 열). 표에 없으면 None이다.
 PixelFormatCaps TextureFormatCaps(const GlesTextureFormat& format,

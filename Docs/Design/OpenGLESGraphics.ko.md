@@ -1,6 +1,6 @@
 # OpenGL ES 그래픽 backend(P11)
 
-기준일: 2026-11-17, 개정 1. [셰이더 시스템](ShaderSystem.ko.md) 선행 작업 P11("OpenGLGraphics를 UE `OpenGLDrv` 방식으로")의 설계와 구현 상태다. `OpenGLGraphics` 모듈을 데스크톱 GL 4.5 core + DSA에서 **OpenGL ES 3.2 공통 API**로 바꾸고, Windows 개발용 미리보기(`GLES31_PC`)와 Android(`GLES31_ANDROID`)를 같은 공통 코드로 맡는다.
+기준일: 2026-11-18, 개정 2. [셰이더 시스템](ShaderSystem.ko.md) 선행 작업 P11("OpenGLGraphics를 UE `OpenGLDrv` 방식으로")의 설계와 구현 상태다. `OpenGLGraphics` 모듈을 데스크톱 GL 4.5 core + DSA에서 **OpenGL ES 3.2 공통 API**로 바꾸고, Windows 개발용 미리보기(`GLES31_PC`)와 Android(`GLES31_ANDROID`)를 같은 공통 코드로 맡는다.
 
 UE 근거는 UE 5.8.4(로컬 클론, `release` 브랜치)의 `Engine/Source/Runtime/OpenGLDrv`이며, 아래 경로는 `Runtime/OpenGLDrv/Private/` 기준이다(셰이더 컴파일러는 `Developer/ShaderFormatOpenGL/Private/`). 레거시·deprecated 경로와 데스크톱 GL SM5 경로는 보지 않았다.
 
@@ -118,6 +118,8 @@ Engine/Source/Runtime/OpenGLGraphics/
   Windows 데스크톱 core context도 ES 확장 이름으로 판정한다. 그래서 그 context에서는 이방성 밖의 확장 형식이 미지원으로 나온다(형식이 생기면 데스크톱 core에서 그 형식 시험은 `Unsupported` 음성 대조다).
 - 정점: 파이프라인마다 VAO 하나에 `glVertexAttribFormat`/`glVertexAttribIFormat`(정규화 없는 정수)·`glVertexAttribBinding`·`glVertexBindingDivisor`를 한 번 두고, 버퍼는 그릴 때 `glBindVertexBuffer`다. `Bgra8Unorm`은 ES에 BGRA 정점 배열이 없어 `Unsupported`(RenderBase 10.4절).
 - RenderTarget: 색 attachment 하나의 framebuffer. 기록 중 만들어도 그리기 binding을 바꾸지 않도록 읽기 binding에서 만든다.
+- 버퍼 view(RenderBase GX2, 2026-11-18): typed view는 버퍼 텍스처(`GL_TEXTURE_BUFFER` + `glTexBufferRange`, ES 3.2 core)이고 텍스처 유닛을 차지한다(ShaderSystem 7.2절 4항 RQ10). slot n은 PS 유닛 1 + n, VS 유닛 17 + n(VS 텍스처 유닛 16부터 규약)이며 그리기 직전 두 유닛에 묶는다. 구조화·raw view는 `glBindBufferRange(GL_SHADER_STORAGE_BUFFER, n, …)`이고 raw는 block 이름 접두사 `type_ByteAddressBuffer`(SPIRV-Cross 출력 이름)로 가른다. 파이프라인 생성이 program introspection(`glGetActiveUniform`·`glGetUniformiv`, `glGetProgramResourceiv(GL_SHADER_STORAGE_BLOCK, GL_BUFFER_BINDING)`)으로 slot 배치를 얻는다. VS·PS storage block 한도(ES 3.2 최소 보장 0)는 `DeviceCaps`로 공개하고 넘으면 링크 실패다. view 시작 정렬은 `GL_TEXTURE_BUFFER_OFFSET_ALIGNMENT`·`GL_SHADER_STORAGE_BUFFER_OFFSET_ALIGNMENT`다. `ReadBuffer`는 `glMapBufferRange(GL_MAP_READ_BIT)`(앞선 GPU 쓰기를 동기화한다)다. view가 남은 버퍼를 `Retire`하면 버퍼 이름을 마지막 view가 놓일 때까지 남긴다.
+- 장치 능력(GX1): `glGetIntegerv`·`glGetIntegeri_v`·`glGetInteger64v` 한도, `GL_EXT_depth_clamp`, MSAA 표본 수 `glGetInternalformativ(GL_TEXTURE_2D_MULTISAMPLE)`. 버퍼 최대 크기는 조회 수단이 없어 보수적 128 MiB다.
 
 ### 5.2 패스·present·창 경로
 
@@ -216,3 +218,8 @@ Engine/Source/Runtime/OpenGLGraphics/
 | 루트 상수 배열 `vu_h`·`pu_h` | 전역 packed uniform 배열(`$Globals`) |
 | `GlesFeature`·`GlesFeatures` | `FOpenGLES::bSupports*` |
 | fence 관찰 스레드 | `FOpenGLGPUFence`·RHI 스레드 polling |
+
+## 12. 개정 이력
+
+- 개정 1(2026-11-17): 초안·P11 구현.
+- 개정 2(2026-11-18): RenderBase GX1·GX2 버퍼 1단계(5.1절 버퍼 view·장치 능력). texel buffer 형식 능력은 PixelFormat.ko.md 14.3절(RQ9).

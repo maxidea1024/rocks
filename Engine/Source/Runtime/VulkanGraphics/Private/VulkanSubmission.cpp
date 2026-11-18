@@ -328,7 +328,8 @@ void VulkanDevice::AssignPendingUploads(uint64 value) noexcept {
 }
 
 Result<void> VulkanDevice::ReserveRetireCapacity(usize extra) noexcept {
-    const usize live = buffers_.Size() + textures_.Size() + pipelines_.Size() + readbacks_.Size() +
+    const usize live = buffers_.Size() + bufferViews_.Size() + orphanBuffers_.Size() +
+                       textures_.Size() + pipelines_.Size() + readbacks_.Size() +
                        swapChains_.Size();
     return retired_.TryEnsureCapacity(retired_.Size() + live + extra);
 }
@@ -361,8 +362,8 @@ void VulkanDevice::DestroyRetired(Retired& entry) noexcept {
         functions_.vkDestroyFramebuffer(device_, entry.framebuffer, nullptr);
     }
 
-    if (entry.set != VK_NULL_HANDLE) {
-        FreeTextureSet(entry.set, entry.setPool);
+    if (entry.bufferView != VK_NULL_HANDLE) {
+        functions_.vkDestroyBufferView(device_, entry.bufferView, nullptr);
     }
 
     if (entry.view != VK_NULL_HANDLE) {
@@ -379,6 +380,16 @@ void VulkanDevice::DestroyRetired(Retired& entry) noexcept {
 
     if (entry.pipeline != VK_NULL_HANDLE) {
         functions_.vkDestroyPipeline(device_, entry.pipeline, nullptr);
+    }
+
+    if (entry.pipelineLayout != VK_NULL_HANDLE) {
+        functions_.vkDestroyPipelineLayout(device_, entry.pipelineLayout, nullptr);
+    }
+
+    for (VkDescriptorSetLayout layout : entry.setLayouts) {
+        if (layout != VK_NULL_HANDLE) {
+            functions_.vkDestroyDescriptorSetLayout(device_, layout, nullptr);
+        }
     }
 
     FreeMemoryLocked(entry.memory);

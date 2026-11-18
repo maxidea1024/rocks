@@ -4,6 +4,7 @@
 #include <Core/Result.h>
 #include <Core/Text/String.h>
 #include <Core/Text/StringView.h>
+#include <GraphicsTypes/PixelFormat.h>
 #include <GraphicsTypes/VertexFormat.h>
 
 // 실행 중 컴파일러가 없는 backend의 개발용 셰이더 컴파일 훅이다(Docs/Design/VulkanGraphics.ko.md
@@ -29,11 +30,35 @@ enum class ShaderBindingKind : uint8 {
     Sampler
 };
 
+// 자원의 모양이다. 같은 종류 안에서 Vulkan descriptor 타입과 Graphics 버퍼 view 종류를 가른다.
+enum class ShaderResourceShape : uint8 {
+    // 텍스처·storage image(SAMPLED_IMAGE·STORAGE_IMAGE)
+    Image,
+    // typed buffer(HLSL Buffer<T>·RWBuffer<T>, UNIFORM·STORAGE_TEXEL_BUFFER)
+    TexelBuffer,
+    // 구조화 버퍼(StructuredBuffer<T>, STORAGE_BUFFER)
+    StructuredBuffer,
+    // byte address 버퍼(ByteAddressBuffer, STORAGE_BUFFER)
+    RawBuffer,
+    // 상수 버퍼(UNIFORM_BUFFER)
+    ConstantBuffer,
+    Sampler
+};
+
 // 컴파일한 셰이더의 descriptor binding 하나다(set = 단계, binding = 종류 순서 번호).
 struct ShaderBinding {
     uint32 set = 0;
     uint32 binding = 0;
     ShaderBindingKind kind = ShaderBindingKind::ConstantBuffer;
+    ShaderResourceShape shape = ShaderResourceShape::Image;
+    // HLSL 원문의 register 번호(t·s·b·u 뒤의 수)와 space다(DXC 기본 대응: 고쳐 쓰기 전 binding =
+    // register, set = space). 장치가 고정 배치 slot을 찾는 데 쓴다.
+    uint32 sourceRegister = 0;
+    uint32 sourceSpace = 0;
+    // 이미지·texel buffer가 돌려주는 값 계열이다(그 밖은 None).
+    PixelShaderType sampledType = PixelShaderType::None;
+    // 셰이더가 쓰기도 한다(UAV·storage). 읽기 전용 storage buffer·이미지는 거짓이다.
+    bool writable = false;
 };
 
 // 정점 셰이더가 읽는 입력 하나다. location은 시맨틱 ATTRIBUTEn의 n이다.
