@@ -25,6 +25,17 @@ VirtualMemoryResult QueryVirtualMemoryInfo(VirtualMemoryInfo& info) noexcept {
     return Success();
 }
 
+VirtualMemoryResult QueryPhysicalMemory(uint64& totalBytes) noexcept {
+    MEMORYSTATUSEX status{};
+    status.dwLength = sizeof(status);
+    if (!GlobalMemoryStatusEx(&status)) {
+        return OsFailure();
+    }
+
+    totalBytes = static_cast<uint64>(status.ullTotalPhys);
+    return Success();
+}
+
 namespace detail {
 
 VirtualMemoryResult ReserveVirtualMemory(usize bytes, void*& address) noexcept {

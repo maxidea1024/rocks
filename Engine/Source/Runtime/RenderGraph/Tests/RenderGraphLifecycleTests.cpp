@@ -21,21 +21,6 @@ auto Draw() noexcept {
     return [](GraphPassContext& pass) noexcept { pass.Commands().Draw(3); };
 }
 
-bool Contains(StringView text, const char* part) noexcept {
-    const StringView needle(part);
-    if (needle.ByteCount() > text.ByteCount()) {
-        return false;
-    }
-
-    for (usize offset = 0; offset + needle.ByteCount() <= text.ByteCount(); ++offset) {
-        if (platform::MemoryEquals(text.Data() + offset, needle.Data(), needle.ByteCount())) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
 } // namespace
 
 // (e) 생산 전 읽기: pass를 넣지 않고 그래프 전체가 실패한다.
@@ -50,7 +35,7 @@ TEST(RenderGraph_RejectsReadBeforeProduce) {
     auto added = graph.AddPass(ReadName, GraphPassKind::Raster, GraphPassFlags::HasSideEffects,
                                accesses, Draw());
     CHECK(added.Error() == ErrorCode::InvalidArgument);
-    CHECK(Contains(graph.LastError(), "before any pass produced it"));
+    CHECK(ContainsText(graph.LastError(), "before any pass produced it"));
     CHECK(graph.Stats().validationErrors == 1);
     CHECK(graph.Execute().Error() == ErrorCode::InvalidArgument);
     CHECK(bench.Count(RecordingDevice::Op::BeginOffscreen) == 0);
@@ -69,7 +54,7 @@ TEST(RenderGraph_RejectsConflictingAccessWithinAPass) {
     feedback.Texture(texture.Value(), ResourceAccess::SrvGraphics).RenderTarget(texture.Value());
     CHECK(graph.AddPass(ReadName, GraphPassKind::Raster, GraphPassFlags::None, feedback, Draw())
               .Error() == ErrorCode::InvalidArgument);
-    CHECK(Contains(graph.LastError(), "conflicting accesses"));
+    CHECK(ContainsText(graph.LastError(), "conflicting accesses"));
     GraphPassAccesses readWrite(graph);
     readWrite.Texture(texture.Value(), ResourceAccess::SrvCompute)
         .Texture(texture.Value(), ResourceAccess::UavCompute);
@@ -97,7 +82,7 @@ TEST(RenderGraph_RejectsUavInRasterPasses) {
     accesses.Buffer(buffer.Value(), ResourceAccess::UavGraphics).RenderTarget(target.Value());
     CHECK(graph.AddPass(WriteName, GraphPassKind::Raster, GraphPassFlags::None, accesses, Draw())
               .Error() == ErrorCode::InvalidArgument);
-    CHECK(Contains(graph.LastError(), "UAVs are compute only"));
+    CHECK(ContainsText(graph.LastError(), "UAVs are compute only"));
     GraphPassAccesses copy(graph);
     copy.Buffer(buffer.Value(), ResourceAccess::UavCompute);
     CHECK(
@@ -123,7 +108,7 @@ TEST(RenderGraph_RejectsRetiredImportsAndForeignHandles) {
     RenderGraph graph(bench.Next());
     auto imported = graph.ImportTexture(external, "Retired");
     CHECK(imported.Error() == ErrorCode::StaleHandle);
-    CHECK(Contains(graph.LastError(), "retired"));
+    CHECK(ContainsText(graph.LastError(), "retired"));
     CHECK(graph.Execute().Error() == ErrorCode::StaleHandle);
 
     RenderGraph other(bench.Next());
@@ -143,7 +128,7 @@ TEST(RenderGraph_RejectsCompressedOrUnknownTextureFormats) {
     graphics::TextureDesc compressed = TargetDesc();
     compressed.format = graphics::PixelFormat::BC7UnormSrgb;
     CHECK(graph.CreateTexture(compressed, "Compressed").Error() == ErrorCode::InvalidArgument);
-    CHECK(Contains(graph.LastError(), "BC7UnormSrgb"));
+    CHECK(ContainsText(graph.LastError(), "BC7UnormSrgb"));
     graphics::TextureDesc unknown = TargetDesc();
     unknown.format = graphics::PixelFormat::Unknown;
     CHECK(graph.CreateTexture(unknown, "Unknown").Error() == ErrorCode::InvalidArgument);
@@ -161,7 +146,7 @@ TEST(RenderGraph_RejectsExportBeforeProduce) {
     auto exported = graph.ExportTexture(texture.Value());
     REQUIRE(exported);
     CHECK(graph.Execute().Error() == ErrorCode::InvalidArgument);
-    CHECK(Contains(graph.LastError(), "exported before any pass produced it"));
+    CHECK(ContainsText(graph.LastError(), "exported before any pass produced it"));
     // 실패한 그래프의 export handle은 Failed다.
     auto state = bench.handles.State(exported.Value());
     REQUIRE(state);
@@ -204,7 +189,8 @@ TEST(RenderGraph_ImportLeaseDefersRetire) {
     CHECK(!bench.handles.TakeReleasedRetire(handle, released));
 }
 
-// export(history): 풀 자원의 소유가 렌더 handle로 넘어가고 다음 그래프가 import로 읽는다.
+// export(history): 풀 자원이 렌더 handle에 이어지고(풀 소속 그대로, 결정 R15) 다음 그래프가
+// import로 읽는다.
 TEST(RenderGraph_ExportedTextureIsImportedByTheNextGraph) {
     GraphBench bench;
     RenderHandle history;
@@ -224,7 +210,8 @@ TEST(RenderGraph_ExportedTextureIsImportedByTheNextGraph) {
     }
 
     CHECK(bench.handles.State(history).Value() == RenderResourceState::Ready);
-    CHECK(bench.pool.Stats().detached == 1 && bench.pool.Stats().resources == 0);
+    CHECK(bench.pool.Stats().exported == 1 && bench.pool.Stats().resources == 1 &&
+          bench.pool.Stats().inUse == 0);
     const graphics::TextureHandle device = bench.DeviceTexture(history);
     CHECK(bench.device.TextureAccess(device) == ResourceAccess::SrvGraphics);
     {

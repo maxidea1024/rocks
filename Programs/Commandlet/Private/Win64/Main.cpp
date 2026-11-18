@@ -1,4 +1,5 @@
 #include "CommandletHost.h"
+#include <Platform/Win64/WideString.h>
 #include <Windows.h>
 
 namespace {
@@ -22,12 +23,16 @@ rocks::Result<void> Write(void*, rocks::CommandletStream stream, rocks::StringVi
         return rocks::Result<void>::Success();
     DWORD mode = 0;
     if (GetConsoleMode(handle, &mode)) {
+        // UTF-8 n byte는 UTF-16 n 단위를 넘지 않으므로 MaxArgumentBytes 단위면 충분하다.
         wchar_t converted[rocks::CommandletRegistry::MaxArgumentBytes + 1]{};
-        int count = MultiByteToWideChar(
-            CP_UTF8, MB_ERR_INVALID_CHARS, text.Data(), static_cast<int>(text.ByteCount()),
-            converted, static_cast<int>(rocks::CommandletRegistry::MaxArgumentBytes));
-        if (count <= 0)
+        const rocks::platform::windows::TextConversion wide =
+            rocks::platform::windows::ConvertUtf8ToWide(
+                text.Data(), text.ByteCount(), converted,
+                rocks::CommandletRegistry::MaxArgumentBytes + 1,
+                rocks::platform::windows::TextFit::Exact);
+        if (!wide)
             return rocks::Result<void>::Failure(rocks::ErrorCode::InvalidArgument);
+        const int count = static_cast<int>(wide.length);
         int offset = 0;
         while (offset < count) {
             DWORD written = 0;
@@ -66,17 +71,18 @@ int wmain(int argc, wchar_t** argv) {
     for (int index = 1; index < argc; ++index) {
         if (!argv[index])
             return Write(nullptr, rocks::CommandletStream::Error, "Invalid argument.\n") ? 2 : 1;
-        int bytes = WideCharToMultiByte(
-            CP_UTF8, WC_ERR_INVALID_CHARS, argv[index], -1, argumentStorage[index - 1],
-            static_cast<int>(rocks::CommandletRegistry::MaxArgumentBytes + 1), nullptr, nullptr);
-        if (bytes <= 0) {
+        const rocks::platform::windows::TextConversion converted =
+            rocks::platform::windows::ConvertWideToUtf8(
+                argv[index], static_cast<rocks::usize>(lstrlenW(argv[index])),
+                argumentStorage[index - 1], rocks::CommandletRegistry::MaxArgumentBytes + 1,
+                rocks::platform::windows::TextFit::Exact);
+        if (!converted) {
             return Write(nullptr, rocks::CommandletStream::Error,
                          "Invalid or oversized UTF-16 argument.\n")
                        ? 2
                        : 1;
         }
-        args[index - 1] =
-            rocks::StringView(argumentStorage[index - 1], static_cast<rocks::usize>(bytes - 1));
+        args[index - 1] = rocks::StringView(argumentStorage[index - 1], converted.length);
     }
     return rocks::commandlet_host::Run({args, static_cast<rocks::usize>(argc - 1)},
                                        {&Write, nullptr});

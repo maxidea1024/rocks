@@ -113,10 +113,9 @@ Result<void> PushOrigins(Allocator& allocator, JsonValue value, const JsonPositi
 class SectionApplier {
 public:
     SectionApplier(ConfigState& state, SectionState& section, void* storage,
-                   const ConfigEntry& entry, bool incoming) noexcept
+                   const ConfigEntry& entry) noexcept
         : state_(state), section_(section), storage_(storage), entry_(entry),
-          allocator_(state.allocator), keep_(state.allocator), path_(state.allocator),
-          incoming_(incoming) {
+          allocator_(state.allocator), keep_(state.allocator), path_(state.allocator) {
     }
 
     Result<bool> ApplyDocument(JsonValue object, Array<String>& paths) noexcept;
@@ -170,8 +169,6 @@ private:
     JsonValue current_{};
     // 진단 경로 텍스트(섹션 안 도구 이름 경로)다.
     Array<char> path_;
-    // 새로 들어오는 입력의 검사인지다(시작 뒤 StartupOnly 거부).
-    bool incoming_ = false;
     bool failed_ = false;
 };
 
@@ -922,7 +919,7 @@ Result<bool> SectionApplier::FinishPrepared(Result<PreparedAssignments> prepared
         }
 
         const StringView reason = CheckLayerAllowed(
-            state_, entry_.layer, SettingsFlagsOf(section_, path.steps[0].fieldId), incoming_);
+            state_, entry_.layer, SettingsFlagsOf(section_, path.steps[0].fieldId));
         if (reason.IsEmpty()) {
             continue;
         }
@@ -1055,8 +1052,7 @@ Result<bool> SectionApplier::ApplyConsoleValue(usize field, StringView text, Jso
 
     ConfigDiagnosticCode code = ConfigDiagnosticCode::LayerNotAllowed;
     const StringView problem = CheckConsoleLayer(
-        state_, entry_.layer, ConsoleFlagsOfField(SettingsFlagsOf(section_, schema.id)), incoming_,
-        code);
+        state_, entry_.layer, ConsoleFlagsOfField(SettingsFlagsOf(section_, schema.id)), code);
     if (!problem.IsEmpty()) {
         if (auto reported = Diagnose(code, position, problem); !reported) {
             return Result<bool>::Failure(reported.Error());
@@ -1113,10 +1109,9 @@ JsonValue SettingsSectionOf(const ConfigEntry& entry) noexcept {
 }
 
 Result<bool> ApplyEntryToSection(ConfigState& state, SectionState& section, void* storage,
-                                 const ConfigEntry& entry, bool incoming,
-                                 Array<String>& paths) noexcept {
+                                 const ConfigEntry& entry, Array<String>& paths) noexcept {
     if (entry.kind == EntryKind::Assignment) {
-        SectionApplier applier(state, section, storage, entry, incoming);
+        SectionApplier applier(state, section, storage, entry);
         return applier.ApplyAssignment(paths);
     }
 
@@ -1126,7 +1121,7 @@ Result<bool> ApplyEntryToSection(ConfigState& state, SectionState& section, void
             return Result<bool>::Success(true);
         }
 
-        SectionApplier applier(state, section, storage, entry, incoming);
+        SectionApplier applier(state, section, storage, entry);
         return applier.ApplyConsoleValue(field, entry.value.View(), JsonValue{}, paths);
     }
 
@@ -1134,7 +1129,7 @@ Result<bool> ApplyEntryToSection(ConfigState& state, SectionState& section, void
     // 적용한다(같은 입력 안에서는 콘솔 이름 값이 이긴다).
     const JsonValue object = FindMemberIgnoringCase(entry.document->Root(), section.section.View());
     if (object.IsValid()) {
-        SectionApplier applier(state, section, storage, entry, incoming);
+        SectionApplier applier(state, section, storage, entry);
         auto applied = applier.ApplyDocument(object, paths);
         if (!applied || !applied.Value()) {
             return applied;
@@ -1148,7 +1143,7 @@ Result<bool> ApplyEntryToSection(ConfigState& state, SectionState& section, void
             continue;
         }
 
-        SectionApplier applier(state, section, storage, entry, incoming);
+        SectionApplier applier(state, section, storage, entry);
         auto applied = applier.ApplyConsoleValue(field, {}, settings.ValueAt(member), paths);
         if (!applied || !applied.Value()) {
             return applied;

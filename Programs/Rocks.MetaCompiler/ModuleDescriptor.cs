@@ -23,7 +23,7 @@ internal static class ModuleDescriptor
 
     // enum 항목: 필드·base 대신 underlying·열거자다(Docs/Design/ReflectionFoundations.ko.md 3.4절).
     private static readonly string[] EnumKeys =
-        ["kind", "name", "id", "header", "visibility", "underlying", "flags", "toolPrefix", "values"];
+        ["kind", "name", "id", "header", "visibility", "underlying", "flags", "toolPrefix", "binds", "values"];
 
     private static readonly string[] EnumeratorKeys = ["name", "toolName", "displayName", "value", "flags"];
 
@@ -268,6 +268,8 @@ internal static class ModuleDescriptor
 
         json.WriteEndArray();
         json.WriteString("toolPrefix", type.ToolPrefix);
+        // Binds 미러 enum(CurveData CV9)의 실제 enum 정규 철자다(미러가 아니면 "").
+        json.WriteString("binds", type.Binds);
         json.WriteStartArray("values");
         foreach (EnumeratorModel value in type.Enumerators)
         {
@@ -739,6 +741,13 @@ internal static class ModuleDescriptor
             throw Invalid("toolPrefix of " + name);
         }
 
+        // binds는 struct와 같은 문법의 실제 enum 정규 철자이거나 ""다(생성 C++에 그대로 들어간다).
+        string binds = type.GetProperty("binds").GetString() ?? throw Invalid("binds of " + name);
+        if (binds.Length != 0 && (!StructRules.IsBindsSpelling(binds) || binds.StartsWith("::", StringComparison.Ordinal)))
+        {
+            throw Invalid("binds of " + name + ": " + binds);
+        }
+
         List<EnumeratorModel> values = [];
         foreach (JsonElement entry in type.GetProperty("values").EnumerateArray())
         {
@@ -790,7 +799,8 @@ internal static class ModuleDescriptor
             Underlying = underlying,
             FlagsEnum = flagsEnum,
             ToolPrefix = prefix,
-            Enumerators = values
+            Enumerators = values,
+            Binds = binds
         };
     }
 

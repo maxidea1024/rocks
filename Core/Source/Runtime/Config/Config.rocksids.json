@@ -1,0 +1,166 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::config::ConfigValueSet::values",
+      "id": "a644d1da1eef48259456a339719cbca3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config::DeviceCondition::atLeast",
+      "id": "4ac5a462f68645d6a34872a7359271a6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config::DeviceCondition::below",
+      "id": "8377116f6cba4a03bba12d520e1cd3c3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config::DeviceCondition::contains",
+      "id": "eab5d03a461a48e49ff7f2b7e250389c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config::DeviceCondition::equals",
+      "id": "22443b2860364abf9c9228c3b93d69bd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config::DeviceCondition::trait",
+      "id": "9397392677084e14b7b19a65765904a9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config::DeviceProfileDefinition::match",
+      "id": "697ef9aa1afb4f98aa278ac88a04dda3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config::DeviceProfileDefinition::matchPriority",
+      "id": "d2d7b91c18094a4fa3f6a12e16242d8e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config::DeviceProfileDefinition::memoryValues",
+      "id": "6e2811a048f44cc3a14ba35bbb9da406",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config::DeviceProfileDefinition::parent",
+      "id": "4f47006dbd3a4562b9dd6fb6c62e0b9e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config::DeviceProfileDefinition::platforms",
+      "id": "5622b7f423ed4da081818659fcec5ac6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config::DeviceProfileDefinition::values",
+      "id": "4faf2128d3d8408aba4c76a6b11faf0a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config::DeviceProfileSettings::memoryBuckets",
+      "id": "3245137af92a46b8b6a063d72c0ac56d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config::DeviceProfileSettings::platformDefaults",
+      "id": "6687ecf3abf0492693ec24857ddc506d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config::DeviceProfileSettings::profile",
+      "id": "fdb3b98657634baaada1550be37eaad7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config::DeviceProfileSettings::profiles",
+      "id": "abd46cc49ecb4d3eb740bbc042d282ed",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config::MemoryBucketDefinition::minimumMiB",
+      "id": "0e0e00d2431d4adbb8a3a3ff1191fee1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config::MemoryBucketDefinition::name",
+      "id": "3c119ddaa1794feb8c831c36e85f32ee",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::config::ConfigValueSet",
+      "id": "8f55ccd17dc1468d90266358d6b717a0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::config::DeviceCondition",
+      "id": "5a5284c8725547bbbf25b2fd0f92cb4f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::config::DeviceProfileDefinition",
+      "id": "c8345600cdc74078ab9af217406d5615",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::config::DeviceProfileSettings",
+      "id": "1213ebdbe3f945be906d965fad02fddb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::config::MemoryBucketDefinition",
+      "id": "d4d4df8d066c47d58d62a30200f072ce",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

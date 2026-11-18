@@ -110,10 +110,15 @@ internal static partial class SchemaValidator
 
             // 미러의 멤버는 실제 타입의 공개 데이터 멤버와 1:1이다(생성 static_assert가 이름·형식·개수·순서를 대조한다).
             // NATIVE 멤버·Migrate는 실제 타입에 둘 수 없으므로 받지 않는다(그 멤버 위치로 보고한다).
+            // enum 미러(CurveData CV9)는 열거자를 실제 enum의 같은 이름·값으로 나열한다(생성 static_assert가 대조한다).
+            if (mirror.IsEnum)
+            {
+                continue;
+            }
+
             (string? invalid, SourceSite site) = mirror.NativeMembers.Count != 0
                 ? ("a Binds mirror lists only persistent members (ROCKS_NATIVE is not allowed)", mirror.NativeMembers[0].Site)
                 : mirror.HasMigrate ? ("a Binds mirror cannot declare Migrate (the real type owns its layout)", mirror.MigrateSite ?? mirror.Site)
-                : mirror.HasValidate ? ("a Binds mirror cannot declare Validate yet (mirror validation hooks arrive with CurveData CV9)", mirror.ValidateSite ?? mirror.Site)
                 : mirror.OwnFields.Count == 0 ? ("a Binds mirror needs the real type's public data members as ROCKS_PROPERTY fields", mirror.Site)
                 : ((string?)null, mirror.Site);
             if (invalid is not null)
@@ -128,13 +133,15 @@ internal static partial class SchemaValidator
         ClassModel? ValueType(string spelling, bool structs, string owner, SourceSite site)
         {
             string name = spelling.StartsWith("::", StringComparison.Ordinal) ? spelling[2..] : spelling;
-            if (structs && ((classes.TryGetValue(name, out ClassModel? named) || imported.TryGetValue(name, out named)) && named.Binds.Length != 0))
+            if ((classes.TryGetValue(name, out ClassModel? named) || imported.TryGetValue(name, out named)) && named.Binds.Length != 0 &&
+                named.IsEnum == !structs)
             {
                 throw new MetadataException($"{owner}: '{name}' is a Binds mirror declaration; use the real type {named.Binds}", "RMC2000",
                     $"Declare the field with the real type ({named.Binds}); the mirror only describes it to the metadata compiler.").At(site);
             }
 
-            if (structs && !classes.ContainsKey(name) && !imported.ContainsKey(name) && mirrors.TryGetValue(name, out ClassModel? mirror))
+            if (!classes.ContainsKey(name) && !imported.ContainsKey(name) && mirrors.TryGetValue(name, out ClassModel? mirror) &&
+                mirror.IsEnum == !structs)
             {
                 name = mirror.Name;
             }

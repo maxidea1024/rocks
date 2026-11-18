@@ -1,10 +1,15 @@
 #include "../Common/VirtualMemoryBackend.h"
 #include "PosixPlatform.h"
 
+#include <Base/Compiler.h>
 #include <Platform/Fatal.h>
 #include <errno.h>
 #include <sys/mman.h>
 #include <unistd.h>
+
+#if ROCKS_PLATFORM_MAC
+#include <sys/sysctl.h>
+#endif
 
 namespace rocks::platform {
 namespace {
@@ -25,6 +30,28 @@ VirtualMemoryResult QueryVirtualMemoryInfo(VirtualMemoryInfo& info) noexcept {
         return OsFailure();
     }
     info = {static_cast<usize>(pageSize), static_cast<usize>(pageSize)};
+    return Success();
+}
+
+VirtualMemoryResult QueryPhysicalMemory(uint64& totalBytes) noexcept {
+#if ROCKS_PLATFORM_MAC
+    uint64_t bytes = 0;
+    size_t size = sizeof(bytes);
+    if (sysctlbyname("hw.memsize", &bytes, &size, nullptr, 0) != 0) {
+        return OsFailure();
+    }
+
+    totalBytes = static_cast<uint64>(bytes);
+#else
+    errno = 0;
+    const long pages = sysconf(_SC_PHYS_PAGES);
+    const long pageSize = sysconf(_SC_PAGESIZE);
+    if (pages <= 0 || pageSize <= 0) {
+        return OsFailure();
+    }
+
+    totalBytes = static_cast<uint64>(pages) * static_cast<uint64>(pageSize);
+#endif
     return Success();
 }
 

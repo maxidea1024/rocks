@@ -1,4 +1,5 @@
 #include <Platform/Path.h>
+#include <Platform/Win64/ComRef.h>
 #include <ShaderToolLoader/ShaderToolLoader.h>
 #include <string.h>
 
@@ -60,10 +61,9 @@ ShaderToolLoadStatus QueryDxcVersion(const DxcFunctions& functions, uint32& majo
     }
 
     const auto create = reinterpret_cast<DxcCreateInstanceProc>(address);
-    IDxcVersionInfo* info = nullptr;
-    const HRESULT created =
-        create(CLSID_DxcCompiler, __uuidof(IDxcVersionInfo), reinterpret_cast<void**>(&info));
-    if (FAILED(created) || info == nullptr) {
+    platform::windows::ComRef<IDxcVersionInfo> info;
+    const HRESULT created = create(CLSID_DxcCompiler, IID_PPV_ARGS(info.Out()));
+    if (FAILED(created) || !info) {
         status.code = ShaderToolLoadCode::CallFailed;
         status.file.nativeError = static_cast<uint32>(created);
         return status;
@@ -72,7 +72,6 @@ ShaderToolLoadStatus QueryDxcVersion(const DxcFunctions& functions, uint32& majo
     UINT32 versionMajor = 0;
     UINT32 versionMinor = 0;
     const HRESULT read = info->GetVersion(&versionMajor, &versionMinor);
-    info->Release();
     if (FAILED(read)) {
         status.code = ShaderToolLoadCode::CallFailed;
         status.file.nativeError = static_cast<uint32>(read);
