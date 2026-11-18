@@ -1,5 +1,6 @@
 #include "TextAssignApplyInternal.h"
 #include "TextJsonInternal.h"
+#include <Object/FieldValueWire.h>
 #include <Object/ValueText.h>
 
 // JSON import다(리플렉션 B9i4 — ReflectionText/TextJson.h의 ImportJson). JSON 객체를 스키마와 함께
@@ -347,6 +348,32 @@ Result<void> Importer::ScalarAt(const TextSlot& slot, JsonValue value) noexcept 
 
 Result<void> Importer::Elements(const TextSlot& slot, JsonValue value) noexcept {
     const FieldSchema& field = *slot.field;
+    // 바이트 배열은 Base64 문자열 하나다(Docs/Design/CurveData.ko.md D18 — 통째 교체).
+    if (::rocks::detail::IsByteArrayField(field)) {
+        if (!value.IsString()) {
+            return Report(TextDiagnosticCode::InvalidValue, value, "expected a Base64 string");
+        }
+
+        String text(state.allocator);
+        if (auto made = PathText(text); !made) {
+            return made;
+        }
+
+        TextValue bytes(state.allocator);
+        auto parsed = detail::ParseByteList(Context(), field, value.GetString(),
+                                            TextSource::Json(value.Position()), text.View(), bytes);
+        if (!parsed) {
+            return Result<void>::Failure(parsed.Error());
+        }
+
+        if (!parsed.Value()) {
+            state.failed = true;
+            return Result<void>::Success();
+        }
+
+        return Assign(AssignmentKind::Set, slot, value, &bytes);
+    }
+
     if (!value.IsArray()) {
         return Report(TextDiagnosticCode::InvalidValue, value, "expected an array");
     }

@@ -1,6 +1,6 @@
 # 커브 데이터 계층 설계
 
-개정 4(CV1·CV2 단계 리뷰 반영 — 17.1절, CV3 구현 반영 — 17.2절), 기준일 2026-11-18. 이 문서는 Curve 단계(리플렉션 B9 직후, A0-G 앞 — 2026-11-15 사용자 결정)의 **값 타입 층** 설계다. 근거는 [에셋 시스템](AssetSystem.ko.md) 1절 Curve 행, [Core 상세 명세](CoreDetailedSpec.ko.md) G09, 이미 구현된 수학 층 [키 커브](../Implementation/InterpCurve.ko.md)(`InterpCurve<T>`)다. UE 대응 대상은 UE 5.8.4의 `Engine/Source/Runtime/Engine/Classes/Curves`(`FRealCurve`·`FRichCurve`·`FSimpleCurve`·`FIndexedCurve`·`FKeyHandle`·`FKeyHandleMap`·`FIntegralCurve`·`FNameCurve`·`FStringCurve`·`FCompressedRichCurve`)와 평가 함수 `Public/Curves/CurveEvaluation.h`(`UE::Curves::EvalForTwoKeys`·`BezierInterp`·`WeightedEvalForTwoKeys`), 그리고 G09가 이 단계로 미룬 `FInterpCurve<T>`의 리플렉션·직렬화·`CalcBounds`(12절)다. 아래에서 `RC` = `Engine/Source/Runtime/Engine/Private/Curves/RichCurve.cpp`, `CE` = 같은 폴더 `CurveEvaluation.cpp`, `SC` = `SimpleCurve.cpp`, `KH` = `Classes/Curves/KeyHandle.h`, `UMU` = `Core/Public/Math/UnrealMathUtility.h`, `UPM` = `Core/Public/Math/UnrealPlatformMathSSE.h`다. 레거시·deprecated 경로(옛 버전 키 직렬화 보정, `UE_DEPRECATED` 함수, `FInterpCurvePoint` → `FRichCurveKey` 변환 생성자)는 대응하지 않는다.
+개정 6(CV4 구현 반영 — 17.3절, CV3 단계 리뷰 반영 — 17.2절 V9–V12), 기준일 2026-11-18. 이 문서는 Curve 단계(리플렉션 B9 직후, A0-G 앞 — 2026-11-15 사용자 결정)의 **값 타입 층** 설계다. 근거는 [에셋 시스템](AssetSystem.ko.md) 1절 Curve 행, [Core 상세 명세](CoreDetailedSpec.ko.md) G09, 이미 구현된 수학 층 [키 커브](../Implementation/InterpCurve.ko.md)(`InterpCurve<T>`)다. UE 대응 대상은 UE 5.8.4의 `Engine/Source/Runtime/Engine/Classes/Curves`(`FRealCurve`·`FRichCurve`·`FSimpleCurve`·`FIndexedCurve`·`FKeyHandle`·`FKeyHandleMap`·`FIntegralCurve`·`FNameCurve`·`FStringCurve`·`FCompressedRichCurve`)와 평가 함수 `Public/Curves/CurveEvaluation.h`(`UE::Curves::EvalForTwoKeys`·`BezierInterp`·`WeightedEvalForTwoKeys`), 그리고 G09가 이 단계로 미룬 `FInterpCurve<T>`의 리플렉션·직렬화·`CalcBounds`(12절)다. 아래에서 `RC` = `Engine/Source/Runtime/Engine/Private/Curves/RichCurve.cpp`, `CE` = 같은 폴더 `CurveEvaluation.cpp`, `SC` = `SimpleCurve.cpp`, `KH` = `Classes/Curves/KeyHandle.h`, `UMU` = `Core/Public/Math/UnrealMathUtility.h`, `UPM` = `Core/Public/Math/UnrealPlatformMathSSE.h`다. 레거시·deprecated 경로(옛 버전 키 직렬화 보정, `UE_DEPRECATED` 함수, `FInterpCurvePoint` → `FRichCurveKey` 변환 생성자)는 대응하지 않는다.
 
 에셋 층(`UCurveFloat`·`UCurveVector`·`UCurveLinearColor`·`UCurveTable`·`FRuntimeFloatCurve`·`FCurveTableRowHandle`)은 A1 에셋 시스템 뒤 A 단계의 일이라 범위 밖이다. 이 문서는 그 층이 기댈 경계(14절)만 정한다.
 
@@ -581,6 +581,34 @@ struct 검증 hook(9.1절, D7)을 리플렉션 기반에 넣었다. 기반 쪽 �
 - **V7 `PathPrepareAttach`** — 객체(게시·staged) 자리에 놓는 상자는 상자 값 트리를 검증한다. 자리 위(바깥)에 hook struct가 있으면 상자만으로 감싼 hook을 검증할 수 없으므로 Unsupported(`PropertyPathError::InsideValidatedStruct` — 그 hook struct 단계)다. 대입 묶음 단위와 V6의 분리 자리는 언제나 가장 바깥 hook 이상이라 걸리지 않는다. `DetachedValue::ValidateTree()`를 공개했다(묶음이 진단용으로도 쓸 수 있다).
 - **V8 시험 관찰** — fixture hook은 호출 순서 시험을 위해 스레드별 기록(`CurrentValidateLog`)에 글자를 남긴다(계약상 실제 hook은 전역 상태를 쓰지 않는다 — 시험 관찰용 예외).
 
+- **V9 단계 리뷰 반영 — 값 대상·Attach·준비물(2026-11-18)** — 리뷰 항목마다 시험으로 먼저 재현한 뒤(수정을 되돌린 빌드에서 새 시험이 실패) 고쳤다.
+  - (1, 재현) struct 값 대상(`AssignmentTarget::Value` — 설정 층·콘솔 명령 인자)의 대입 묶음·JSON import가 hook을 부르지 않았다. `PathPrepareAttach`가 struct 값 시작 위치에서도 상자 트리를 검증하고 자리 위 hook을 거부한다. 루트 struct 자신에 hook이 있으면 Publish가 루트의 깊은 사본(대상 값의 allocator)에 모든 단위를 놓고 사본 트리를 검증한 뒤 루트와 통째로 맞바꾼다(거부는 진단 `InvalidStructValue`, 경로 빈 문자열 — 대상 그대로). 설정 층 적용(`SectionApplier::FinishPrepared`)은 게시 때의 진단도 설정 진단(FieldValue + `InvalidStructValue`)으로 옮긴다. 콘솔은 이미 게시 실패 진단을 옮기고 있었고 같은 Value 대상 경로라 함께 고쳐진다. 시험: Value·staged 대상(`TextValidateHook_ValueAndStagedTargets`), 설정 층(`Config_StructValidationHookRejectsLayerValue` — hook 멤버를 담은 섹션 `SpanSettings`는 그 시험만 등록한다).
+  - (2, 재현) `PathPrepareAttach`가 자리 바로 위 InstancedStruct에 담긴 hook struct를 놓쳤다(`any`에 ValidBox, `any.range` 상자의 range.high > limit). hook 단계 탐색이 검사 범위와 경로 전체 단계 수를 따로 받는다.
+  - (3, 재현) `PreparedStructElements`를 직접 쓰면 추가 원소가 검증 없이 게시됐다. `PreparePublish`·staged `Publish()`가 아직 검증하지 않았으면 `ValidateAdded`를 부른다(게시 전 1회 — 대입 묶음이 먼저 부르면 다시 부르지 않고, `Append`·`AddedTarget`·`Reset`이 표시를 내린다). 묶지 않은 준비물의 `ValidateAdded`는 InvalidArgument다.
+  - (4, 재현) staged 객체의 상자 경로가 Required 검사 중 Busy 규칙을 우회했다. `PreparedAttach::Publish()`의 staged 갈래가 staged 쓰기 판정(`CheckStagedWrite` — 검사 중 Busy)을 따르고, 상자 경로 진입 전에 쓰기 접근(`GetForWrite`)을 먼저 본다.
+- **V10 단계 리뷰 반영 — 상자 경로 의미** —
+  - (5, 재현) 값을 만드는 연산(원소 넣기·키 넣기·Optional 만들기·형 바꾸기)이 hook 트리가 있는 struct 기본값을 만들면 끝 단계를 상자 경로로 보내 기본값도 검증한다(기본값이 어기는 `ValidNonEmpty`를 만드는 네 연산이 거부되고 그대로다). 예외: Registry 컨테이너(StructRefArray — 참조 struct 원소)는 상자로 분리할 수 없어 경로 원소 넣기가 기본 원소를 제자리로 만든다(그 원소의 hook 멤버는 대입 묶음의 추가 원소 검증과 그 뒤의 경로 쓰기가 본다).
+  - (6, 재현) 상자 경로가 실패해도 출력 인자(previous·removed·length)를 바꿨다(PropertyPath.h 계약 위반). 출력은 지역 값에 받아 두고 게시가 끝난 뒤 옮긴다.
+  - (7, 재현) 바뀐 것이 없는 연산(이미 있는 키의 InsertKey)도 게시해 변경 표지·관찰자 알림을 냈다. 그런 연산은 게시하지 않는다. 경로 쓰기의 검증 범위는 9.1절보다 넓다 — 분리한 자리(원소면 그 컨테이너 필드 통째) 안의 모든 hook struct(형제 원소 포함)를 본다(V6 보강).
+  - (8, 부분 재현) 우회 판정이 끝 지점 분류·검증보다 먼저 돌아 값싼 거부보다 깊은 복사가 먼저였고 오류 순서가 경로마다 달랐다. 판정을 분류·검증(FixedLength·NotOptional·ReadOnly 등) 뒤, Borrow 직전으로 옮겼다. staged 객체는 쓰기 접근 판정(`GetForWrite` — Required 검사 중 Busy 등)을 상자 분리보다 먼저 본다. 게시된 객체는 쓰기 Borrow가 변경 표지를 올리므로 먼저 얻지 않는다 — 같은 코드(encode 고정 Busy는 묶음 게시 구간, 파괴·무효 handle은 분리의 읽기 Borrow)가 분리 뒤에 나온다(깊은 복사가 먼저일 수 있다). `PathSetInstancedType`도 이제 같은 진입점(우회 판정)을 지난다(수정 전에는 hook struct 안의 형 바꾸기도 검증하지 않았다). 재현 시험(encode 고정 Busy)은 게시된 객체에서는 수정 전에도 Busy였고 staged Required 검사 중 표시에서 갈렸다(4와 같은 시험).
+  - (11, 재현) staged 객체의 상자 게시에 재확인이 없어 상자 연산 중 할당 콜백이 같은 트랜잭션에 쓴 변경을 덮었다. `ConstructionContext::WriteCount()`(staged 쓰기 접근 누계)를 분리 뒤와 게시 직전에 대조해 다르면 Busy로 게시하지 않는다(그 트랜잭션의 다른 staged 쓰기도 막는 보수적 판정이다).
+- **V11 단계 리뷰 반영 — 진단·MetaCompiler** —
+  - (9, 재현) 추가 원소 거부 진단의 경로가 배열 필드였다. 거부한 원소의 지금 index를 붙인다(`elements[0]`). decode 거부는 진단 경로 없이 오류 코드만 남는다(V4 — 9.1절 "진단 경로는 그 struct의 위치"는 대입 묶음·JSON import에만 해당한다).
+  - (10, Clang AST로 재현) 숨은 friend `Validate`(FriendDecl이라 조용히 무시), `::rocks::Result<void>`·`const Self&` 철자(정규식 불일치로 거부), consteval·`using Base::Validate`(생성 코드 컴파일 오류)를 고쳤다: friend·using-declaration·consteval은 RMC2309, 철자는 쓴 철자·desugar 철자·struct 안 별칭을 푼 철자 중 하나가 맞으면 받는다(consteval은 Clang JSON이 constexpr와 구별하지 않아 선언 앞 원문으로 본다).
+- **V12 시험(단계 리뷰)** — `ValidateHookPath_AttachSeesHookInsideInstancedStruct`·`CreatedDefaultsAreValidated`·`EveryOperationInsideHook`(넣기·지우기·비우기·키 넣기·지우기·Optional 만들기·비우기·형 바꾸기·비우기, 실패 단계 재매핑, InsertKey 결과와 무게시, 거부 시 출력 보존)·`BusyRulesMatchInPlaceWrites`(encode 고정, staged Required 검사 중)·`ReentrantStagedWriteIsBusy`·`PreparedElementsValidateAddedDirectly`, ToolTests `Meta.ValidateHookRejectsFriendAndUsing`·`Meta.ValidateHookAcceptsQualifiedAndAliasSpellings`와 consteval 거부. 게시된 객체의 변경 표지 불일치(재진입 변경)는 기존 묶음 게시(`BeginBatchPublish` Busy)가 같은 규칙으로 막으므로 따로 시험하지 않았다.
+
+### 17.3 구현(CV4)에서 정한 점
+
+D18(`Array<uint8>` Bytes 블록 wire)을 넣었다. 기반 쪽 요약은 [리플렉션 보강](ReflectionExtensions.ko.md) 24절이고, 시험은 `ObjectSerialization/Tests/BytesGraphTests.cpp`·`ReflectionText/Tests/TextBytesTests.cpp`, fixture는 `ReflectionTestFixtures/BytesFixture.h`다.
+
+- **B1 자리** — 가변 배열 `Array<uint8>`(클래스 필드·struct 멤버 — struct 원소 배열·Optional·InstancedStruct 안 struct의 멤버 포함)만 Bytes 블록이다. 정적 배열 `uint8 x[N]`은 늘 N개라 원소마다(ValueArray) 그대로 둔다. `Array<uint8>`은 다른 컨테이너의 원소·값이 될 수 없으므로(직접 중첩 금지 — ReflectionExtensions 1.3절) D18의 "원소 자리"는 struct 원소 안 멤버를 뜻한다.
+- **B2 새 값 종류를 두지 않는다** — 스키마는 지금처럼 `{Array, 원소 UInt8}`이고 wire만 필드 단위로 고른다(`FieldWireType(field)`·`detail::IsByteArrayField`). 그래서 MetaSchema·C# `ValueKindTable` 성질 표와 descriptor·MetaCompiler는 바뀌지 않는다(대조 시험 그대로 통과). 경로 연산은 C++ 메모리에 닿으므로 원소 경로(`bytes[3]` 읽기·쓰기·넣기·지우기·원소 수)도 그대로다.
+- **B3 wire와 한도** — u64 길이 + byte(`ArchiveWriter::WriteBytes`·`ArchiveReader::ReadBytes`)이고 필드 payload 전부가 블록 하나여야 한다(남은 byte는 InvalidArgument). 원문 String과 같은 규칙이다: 블록 크기는 archive 값 한도(maxValueBytes — 넘으면 CapacityExceeded)로 막고, 원소 누계(AddElements)에는 세지 않으며, 2단계 몫은 1 + 2 × byte 수를 1단계가 미리 청구한다. 배열 규칙도 함께 지킨다: 길이 ≤ MaxArrayElements(저장·로드 모두 CapacityExceeded), 필드 MaxElements는 저장에서 건다(ArrayTooLong 진단 뒤 CapacityExceeded — 로드는 걸지 않는다). 기본 MaxElements(65,536)는 바꾸지 않았다 — 큰 블록(압축 커브 등)은 `MaxElements`를 명시한다(CV8 `PackedTangentCurve::packed`).
+- **B4 하위호환 없음** — 원소별 ValueArray wire를 읽는 경로는 남기지 않았다. 옛 데이터는 wire 대조(TypeMismatch)로 거부된다.
+- **B5 텍스트 표기** — 통째 값은 명령행·JSON 모두 RFC 4648 Base64 문자열 하나다(Core `Encoding/Base64.h` 그대로 — 엄격한 디코딩: 길이 4의 배수, '=' 패딩, 공백·URL-safe 알파벳 거부, 비정규 끝 비트 거부). 빈 문자열은 빈 배열이다. 잘못된 Base64는 InvalidValue, 필드 MaxElements를 넘는 길이는 OutOfRange 진단이다. 원소 대입은 지금처럼 `bytes[i]=v`(0–255)다. JSON 숫자 배열은 받지 않는다(InvalidValue). 정적 배열 `uint8 x[N]`은 쉼표 목록·JSON 숫자 배열 그대로다. 권장안의 근거: 숫자 목록은 byte당 2–4글자에 구분자가 붙어 블록 텍스트가 3–5배 커지고, Base64는 4/3배이며 공용 구현이 이미 Core에 있다(기능 모듈에 따로 두지 않는다 — 16진은 2배라 쓰지 않았다).
+- **B6 텍스트 경로의 비용** — 텍스트 값은 원소 목록(`TextValue` — byte마다 FieldValue 하나)을 거쳐 원소마다 경로 연산으로 적용하므로 큰 블록의 명령행·JSON 입출력은 byte 수에 비례해 느리다. 큰 블록은 wire로 옮기는 것이 정상 경로이고 텍스트는 편집·확인용이다(필요해지면 TextValue에 byte 버퍼 모양을 더한다).
+- **B7 시험** — 왕복(빈 배열·100,000 byte·MaxArrayElements 경계·struct 멤버·struct 원소 안 멤버·정적 배열), 다시 저장 byte 같음, 저장 크기 = 빈 배열 크기 + byte 수, 필드 MaxElements·MaxArrayElements 초과 저장 거부, 변조한 블록 길이(길게·짧게·255) 로드 거부와 무게시, 경로 원소 연산, 로드 할당 실패 전 지점의 rollback, 명령행·JSON Base64 왕복과 거부.
+
 ## 18. 결정 목록
 
 권장안으로 확정했다(2026-11-18, 교차검증 1차 반영).
@@ -620,6 +648,8 @@ struct 검증 hook(9.1절, D7)을 리플렉션 기반에 넣었다. 기반 쪽 �
 ## 20. 변경 이력
 
 - **개정 1 초안(2026-11-18, 36027f9)**: 값 타입·평가·편집·핸들·압축 설계, 결정 D1–D15, 단계 CV1–CV7.
+- **개정 6(2026-11-18, CV3 단계 리뷰 반영)**: 17.2절 V9–V12.
+- **개정 5(2026-11-18, CV4 구현 반영)**: 17.3절 B1–B7(`Array<uint8>` Bytes 블록 wire, Base64 텍스트).
 - **개정 4(2026-11-18, CV1·CV2 단계 리뷰·CV3 구현 반영)**: 순환 int32 경로를 |몫| < 2^30으로 좁히고 double 경로의 끝 바로잡기를 뺌(5.1절, 15절 1, D16, 17.1절 K3·K8), UE 비트 범위 기준을 Bezier에 넣는 비율로(15절 2, 16절, K13), 17.2절 V1–V8(struct 검증 hook).
 - **개정 3(2026-11-18, CV1·CV2 구현 반영)**: 17.1절 K1–K12. 5.4절 double 시간 혼용 설명 정정(float와 늘 같음)과 근 고르기 문구, 16절 해당 시험, D17 조건(UE `/fp:precise`·릴리스 C 런타임), 19절 1번 확인 결과.
 - **개정 2(2026-11-18, 교차검증 1차 반영, 결정 D1–D21 확정)**:

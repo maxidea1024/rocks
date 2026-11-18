@@ -24,6 +24,20 @@
     },
     {
       "kind": "field",
+      "name": "rocks::config_fixture::FixtureSpan::high",
+      "id": "14a3118efb804d2aad8ac5dbc7747b3b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::FixtureSpan::low",
+      "id": "1b84252579d7450e8be1a799287b440c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::config_fixture::GameplaySettings::lives",
       "id": "c43288390e234f7dad07fe6b5b7e33cd",
       "aliases": [],
@@ -184,6 +198,13 @@
       "retired": false
     },
     {
+      "kind": "field",
+      "name": "rocks::config_fixture::SpanSettings::span",
+      "id": "0405a45113a3430d9052d2f1dd058692",
+      "aliases": [],
+      "retired": false
+    },
+    {
       "kind": "type",
       "name": "rocks::config_fixture::FixtureLayer",
       "id": "85e4c03454d0426e949a41484cd2141e",
@@ -206,6 +227,13 @@
     },
     {
       "kind": "type",
+      "name": "rocks::config_fixture::FixtureSpan",
+      "id": "ec6e9820c70a4aaa8dd0c88fd56596e1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::config_fixture::GameplaySettings",
       "id": "da0f566d04b846e8860e982ffa835fcf",
       "aliases": [],
@@ -222,6 +250,13 @@
       "kind": "type",
       "name": "rocks::config_fixture::ReloadArgs",
       "id": "e27d8970abcc4c7cace3fa293346be4e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::config_fixture::SpanSettings",
+      "id": "c1b856f12bf5479ebca0679697b33b0e",
       "aliases": [],
       "retired": false
     }

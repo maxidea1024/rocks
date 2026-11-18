@@ -855,13 +855,10 @@ Result<bool> SectionApplier::FinishPrepared(Result<PreparedAssignments> prepared
                                             const Array<OffsetOrigin>* map, JsonValue original,
                                             const JsonPosition* fallback,
                                             Array<String>* paths) noexcept {
-    if (!prepared) {
-        if (!diagnostics.HasErrors()) {
-            return Result<bool>::Failure(prepared.Error());
-        }
-
+    // 묶음 진단(준비 실패·게시 전 struct 검증 hook 거부 — Docs/Design/CurveData.ko.md 17.2절)을
+    // 설정 진단으로 옮긴다.
+    const auto reportText = [&]() noexcept -> Result<bool> {
         failed_ = true;
-
         for (usize index = 0; index < diagnostics.Count(); ++index) {
             const TextDiagnostic item = diagnostics.Get(index);
             ConfigDiagnostic diagnostic;
@@ -892,6 +889,14 @@ Result<bool> SectionApplier::FinishPrepared(Result<PreparedAssignments> prepared
         }
 
         return Result<bool>::Success(false);
+    };
+
+    if (!prepared) {
+        if (!diagnostics.HasErrors()) {
+            return Result<bool>::Failure(prepared.Error());
+        }
+
+        return reportText();
     }
 
     // 층 허용(사용자 층의 UserConfig, 출시 규칙의 DevelopmentOnly)은 override 단위의 최상위 필드로
@@ -935,6 +940,10 @@ Result<bool> SectionApplier::FinishPrepared(Result<PreparedAssignments> prepared
 
     auto published = prepared.Value().Publish();
     if (!published) {
+        if (diagnostics.HasErrors()) {
+            return reportText();
+        }
+
         return Result<bool>::Failure(published.Error());
     }
 

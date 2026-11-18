@@ -2,6 +2,7 @@
 
 #include <Core/Containers/Array.h>
 #include <Core/Containers/OrderedMap.h>
+#include <Core/Containers/OrderedSet.h>
 #include <Core/Optional.h>
 #include <Core/Result.h>
 #include <Meta/Annotations.h>
@@ -99,6 +100,54 @@ struct ValidDerived : ValidRange {
     }
 };
 
+// 기본값이 hook을 어기는 struct다(count > 0 — 값을 만드는 경로 연산이 기본값을 검증하는지 본다, n).
+ROCKS_STRUCT()
+struct ValidNonEmpty {
+    ROCKS_PROPERTY() int32 count = 0;
+
+    static Result<void> Validate(const ValidNonEmpty& value) noexcept {
+        CurrentValidateLog().Note('n');
+        return value.count > 0 ? Result<void>::Success()
+                               : Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+};
+
+// 자기 hook은 없고 hook 멤버를 담는다(트리에만 hook이 있다).
+ROCKS_STRUCT()
+struct ValidWrapper {
+    ROCKS_PROPERTY() ValidNonEmpty item;
+};
+
+// 컨테이너·Optional·InstancedStruct를 담은 hook struct다(values ≤ 3개, 키 집합 map ≤ 2개 — l).
+// 경로의 원소 넣기· 지우기·비우기·키 넣기·지우기·Optional 만들기·비우기·형 바꾸기·비우기가 hook
+// 안을 바꾸는 경우다.
+ROCKS_STRUCT()
+struct ValidList {
+    explicit ValidList(Allocator& allocator) noexcept : values(allocator), map(allocator) {
+    }
+
+    ROCKS_PROPERTY() Array<int32> values;
+    ROCKS_PROPERTY() OrderedSet<int32> map;
+    ROCKS_PROPERTY() Optional<ValidRange> opt;
+    ROCKS_PROPERTY() InstancedStruct<> inner;
+
+    static Result<void> Validate(const ValidList& value) noexcept {
+        CurrentValidateLog().Note('l');
+        return value.values.Size() <= 3 && value.map.Count() <= 2
+                   ? Result<void>::Success()
+                   : Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+};
+
+// hook 없는 바깥 struct다(hook struct가 경로의 둘째 단계 — 실패 단계 재매핑 시험).
+ROCKS_STRUCT()
+struct ValidOuter {
+    explicit ValidOuter(Allocator& allocator) noexcept : list(allocator) {
+    }
+
+    ROCKS_PROPERTY() ValidList list;
+};
+
 class ValidHolder;
 
 ROCKS_STRUCT()
@@ -111,7 +160,8 @@ ROCKS_CLASS()
 class ValidHolder : public Object {
 public:
     explicit ValidHolder(Allocator& allocator) noexcept
-        : ranges(allocator), byKey(allocator), elements(allocator) {
+        : ranges(allocator), byKey(allocator), elements(allocator), outer(allocator),
+          wrappers(allocator), byKeyEmpty(allocator) {
     }
 
     ROCKS_PROPERTY() ValidBox box;
@@ -123,6 +173,10 @@ public:
     ROCKS_PROPERTY() ValidDerived derived;
     ROCKS_PROPERTY() StructRefArray<ValidRefElement> elements;
     ROCKS_PROPERTY() int32 plain = 0;
+    ROCKS_PROPERTY() ValidOuter outer;
+    ROCKS_PROPERTY() Array<ValidWrapper> wrappers;
+    ROCKS_PROPERTY() Optional<ValidNonEmpty> maybeEmpty;
+    ROCKS_PROPERTY() OrderedMap<int32, ValidNonEmpty> byKeyEmpty;
 };
 
 } // namespace rocks::reflection_fixture

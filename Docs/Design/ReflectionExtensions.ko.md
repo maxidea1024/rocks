@@ -992,6 +992,7 @@ public:
 | ObjectRef·WeakRef·Soft | resolver, null은 `none` | 문자열·null |
 | ClassRef | 타입 도구 이름·TypeId, null은 `none` | 문자열·null |
 | Array·StaticArray·Set | 쉼표 목록(빈 값 = 빈 배열) | 배열 |
+| `Array<uint8>`(가변 바이트 배열 — 24절, CurveData CV4) | RFC 4648 Base64 하나(빈 값 = 빈 배열), 원소는 `a[i]=v` | Base64 문자열 |
 | Map | `k:v` 쉼표 목록 | 객체(키 텍스트 표기, 삽입 순서) |
 | Optional | 대입 종류 Unset(`--unset=<경로 목록>`), set은 내부 표기, struct 내부는 `opt={}` | null = unset |
 | struct | 경로 대입 `<f>.<m>=v`, 기본값으로 `<f>={}` | 객체(키 = 필드 도구 이름) |
@@ -1139,7 +1140,7 @@ public:
 | RMC2306(새) | MetaCompiler | Optional 내부 형식 오류(중첩 Optional 포함 — B9e에서 구현: 배열·참조·cv·지원하지 않는 형식·참조 struct 내부도) |
 | RMC2307(새) | MetaCompiler | 정적 배열 오류: 다차원, N 범위(1..65,535), 원소 형식 |
 | RMC2308(새) | MetaCompiler | InstancedStruct 오류: Base가 리플렉션 struct가 아님, Base가 담을 수 없는 struct(11절 조건) |
-| RMC2309(새 — CV3) | MetaCompiler | struct 검증 hook 오류(23절): `Validate`가 함수 템플릿·overload·비정적·시그니처(`Result<void> (const S&) noexcept`)가 다름·`ROCKS_GENERATED_BODY` 없는 private/protected, hook struct가 강한 참조·Registry 컨테이너를 담음, Binds 미러의 `Validate`(CurveData CV9까지) |
+| RMC2309(새 — CV3) | MetaCompiler | struct 검증 hook 오류(23절): `Validate`가 함수 템플릿·overload·비정적·consteval·시그니처(`Result<void> (const S&) noexcept`)가 다름·`ROCKS_GENERATED_BODY` 없는 private/protected, 숨은 friend `Validate`·`using …::Validate`, hook struct가 강한 참조·Registry 컨테이너를 담음, Binds 미러의 `Validate`(CurveData CV9까지) |
 | RMC2401(확장) | MetaCompiler | enum underlying 8종을 받는다. uint64 열거자 값이 int64 최댓값을 넘음 |
 | RMC2003(재사용) | MetaCompiler | WeakRef·ClassRef 대상이 리플렉션 클래스가 아님(지금 참조 대상 진단 — MC/SchemaValidator.cs:273) |
 
@@ -1708,4 +1709,15 @@ B9j–B9m 묶음 리뷰(2026-11-18 — 코드만 읽은 리뷰, 각 항목은 �
 - 선언: `ROCKS_STRUCT`의 `static Result<void> Validate(const S&) noexcept`. 모양 오류와 참조 struct는 RMC2309(15절). 생성 특수화는 `HasValidateSelf`·`ValidateSelf`(base 사슬 다음 자기 hook)·`HasValidateTree`·`ValidateTree`(트리 전체)와 `detail::ValueValidate<S>` 특수화를 낸다.
 - 표: `RuntimeStructOps::validate`(자기 수준)·`validateTree`(트리), `RuntimeValueOps::validateTree`. TypeRegistry는 `validate`가 있으면 강한 참조·Registry 컨테이너가 없고 `validateTree`·`copy`·`swap`이 있어야 등록한다.
 - 부르는 곳: graph decode 2단계의 `DecodeStructValue` 끝(복원 전체 InvalidArgument), 대입 묶음·JSON import의 `Publish` 단계 0(추가 StructRefArray 원소)과 `PathPrepareAttach`(값 단위 상자 — 진단 `TextDiagnosticCode::InvalidStructValue`), 객체 시작 위치의 공개 경로 변경 연산(hook struct 자리를 상자로 분리·연산·검증·게시 — `PropertyPathError::StructValidation`), hook struct 안 자리에 상자를 놓는 `PathPrepareAttach`는 `PropertyPathError::InsideValidatedStruct`(Unsupported).
+- 단계 리뷰 반영(CurveData 17.2절 V9–V12): struct 값 시작 위치(대입 묶음 Value 대상 — 설정·콘솔)도 `PathPrepareAttach`가 검증하고, 루트 struct의 hook은 Publish가 루트 사본으로 검증한다. hook 단계 탐색은 InstancedStruct 내용까지 본다. `PreparedStructElements::PreparePublish`·staged `Publish()`가 추가 원소를 한 번 검증한다. 상자 경로는 분류·검증 뒤 Borrow 직전에 고르고(staged는 쓰기 접근 판정을 먼저 — `PathSetInstancedType`도 같은 진입점), 값을 만드는 연산(넣기·키 넣기·Optional 만들기·형 바꾸기)도 hook 트리가 있으면 상자로 보낸다. 실패하면 출력 인자는 그대로, 바뀐 것이 없으면(이미 있는 키의 InsertKey) 게시하지 않고, staged는 `ConstructionContext::WriteCount()` 대조와 `CheckStagedWrite`로 재진입 변경·Required 검사 중 쓰기를 Busy로 막는다. MetaCompiler는 friend·using-declaration·consteval `Validate`를 RMC2309로 거부하고 `::`·별칭 철자를 받는다.
 - 성질 표(1.3절)와의 관계: hook은 값 종류의 성질이 아니라 struct 형질이다. hook struct는 표의 "값 struct(강한 참조 없음)" 행에만 오고 "참조 struct" 행(StructRefArray 원소 등)에는 올 수 없다(참조 struct는 hook struct를 멤버로 담을 수 있다 — 그 멤버는 원소 decode·추가 원소 검증·경로 쓰기가 본다).
+
+## 24. 바이트 배열 Bytes 블록(CurveData CV4)
+
+[커브 데이터](CurveData.ko.md) D18을 기반에 넣었다. 결정과 세부는 그 문서 17.3절 B1–B7이고 여기에는 기반 쪽 접점만 적는다.
+
+- wire: `Array<uint8>`(가변 배열·원소 UInt8) 필드·멤버는 ValueArray(원소당 U32 4 byte) 대신 `WireType::Bytes` 블록 하나(u64 길이 + byte)다. 필드 단위 wire 판정 `FieldWireType(const FieldSchema&)`가 `detail::IsByteArrayField`로 고른다(정적 배열 `uint8 x[N]`은 ValueArray 그대로). 저장은 `EncodeArrayField`의 `Array<uint8>` 가지, 로드는 `DecodeArrayField`의 `DecodeByteArray`다. 원소별 wire는 읽지 않는다(하위호환 없음).
+- 한도: 블록 크기는 원문 String과 같이 archive 값 한도(maxValueBytes)로, 원소 수는 MaxArrayElements와 필드 MaxElements(저장만)로 막는다. 원소 누계에는 세지 않고 2단계 몫은 1 + 2 × byte 수다.
+- 성질 표(1.3절): 새 값 종류를 두지 않았다(스키마는 `{Array, UInt8}` 그대로 — wire만 필드 단위로 다르다). 그래서 성질 표·C# `ValueKindTable`·descriptor는 바뀌지 않는다.
+- 경로: 원소 경로(`bytes[3]`)와 원소 수·넣기·지우기는 그대로다.
+- 텍스트(10.4절 표의 Array 행 예외): 통째 값은 명령행·JSON 모두 RFC 4648 Base64 문자열 하나(Core `Encoding/Base64.h`, 빈 문자열 = 빈 배열)이고 JSON 숫자 배열은 InvalidValue다. 원소 대입은 `bytes[i]=v` 그대로다.

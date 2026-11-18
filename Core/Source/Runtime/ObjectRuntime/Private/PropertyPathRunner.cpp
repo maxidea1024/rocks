@@ -64,18 +64,18 @@ bool IsMutation(PathOperation operation) noexcept {
     }
 }
 
-// 해석한 단계 0..count 중 위치 값이 검증 hook 있는 struct인 가장 바깥 단계다(없으면 IndexNone).
+// 해석한 단계 0..limit 중 위치 값이 검증 hook 있는 struct인 가장 바깥 단계다(없으면 IndexNone).
 // struct 위치는 struct 필드·멤버·원소·Map 값과 멤버 단계로 들어가는 InstancedStruct(담긴 struct를
-// 이미 풀었다)다.
-usize FindHookStep(const PathFrame* frames, usize count) noexcept {
-    for (usize index = 0; index < count; ++index) {
+// 이미 풀었다 — total은 경로의 전체 단계 수라 그 뒤 단계가 있는지로 본다)다.
+usize FindHookStep(const PathFrame* frames, usize limit, usize total) noexcept {
+    for (usize index = 0; index < limit; ++index) {
         const PathFrame& frame = frames[index];
         const ValueKind kind = StepValueType(*frame.field, frame.selector).kind;
         const bool setElement =
             frame.selector == PathSelector::Key && frame.field->value.kind == ValueKind::Set;
         const bool structure = !setElement && !frame.target.IsEmpty() &&
                                (kind == ValueKind::Struct ||
-                                (kind == ValueKind::InstancedStruct && index + 1 < count));
+                                (kind == ValueKind::InstancedStruct && index + 1 < total));
         if (structure && frame.target.StructOps().validate) {
             return index;
         }
@@ -548,20 +548,8 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         }
     }
 
-    // 객체(게시·staged)의 변경이 검증 hook 있는 struct 안을 바꾸면 여기서 멈추고 그 가장 바깥
-    // 단계를 남긴다 — 진입점이 그 자리를 상자로 분리해 연산·검증한 뒤
-    // 게시한다(Docs/Design/CurveData.ko.md 9.1절). 참조 자리·준비 사본·원소 준비물은 hook struct
-    // 안에 없다(hook struct는 참조가 없다).
     const bool objectRoot =
         cursor.root_ == PathTarget::Kind::Object || cursor.root_ == PathTarget::Kind::Staged;
-    if (cursor.redirectHooks_ && objectRoot && IsMutation(operation) && !cursor.reference_ &&
-        !cursor.stage_ && !cursor.elements_) {
-        const usize hook = FindHookStep(cursor.frames_, steps.Size());
-        if (hook != IndexNone) {
-            cursor.hookStep_ = hook;
-            return Result<void>::Success();
-        }
-    }
 
     cursor.current_ = last;
     PathFrame& end = cursor.frames_[last];
@@ -651,8 +639,9 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         // 객체(게시·staged)에 놓는 상자는 게시 전에 검증 hook을 지난다(Docs/Design/CurveData.ko.md
         // 9.1절): 자리 위(바깥) struct에 hook이 있으면 상자만으로 검증할 수 없으므로 거부하고, 상자
         // 값 트리 안의 hook은 안쪽부터 부른다.
-        if (objectRoot) {
-            const usize hook = FindHookStep(cursor.frames_, last);
+        // struct 값 시작 위치(대입 묶음의 Value 대상 — 설정·콘솔)도 같다(게시 자리다).
+        if (objectRoot || cursor.root_ == PathTarget::Kind::Struct) {
+            const usize hook = FindHookStep(cursor.frames_, last, steps.Size());
             if (hook != IndexNone) {
                 cursor.current_ = hook;
                 return cursor.Fail(ErrorCode::Unsupported,
@@ -899,6 +888,50 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
         return operation == PathOperation::Read ? RunTopRead(cursor) : RunTopWrite(cursor);
     }
 
+    // 검증 hook 우회(Docs/Design/CurveData.ko.md 9.1절·17.2절): 객체(게시·staged)의 변경이 hook
+    // 있는 struct 안을 바꾸거나(가장 바깥 hook struct 단계), 값을 만드는 연산(원소·Map 값·Optional
+    // 내부· InstancedStruct 내용)이 트리에 hook이 있는 struct 기본값을 만들면(끝 단계) 연산하지
+    // 않고 그 단계를 남긴다 — 진입점이 그 자리를 상자로 분리해 연산·검증한 뒤 게시한다. 끝 지점
+    // 분류·검증(값싼 거부) 뒤, Borrow 직전이다. 쓰기 접근 판정(Busy·Destroyed·StaleHandle)은 제자리
+    // 경로와 같은 순서·코드로 먼저 본다. 참조 자리·준비 사본·원소 준비물은 hook struct 안에
+    // 없다(hook struct는 참조가 없다).
+    if (cursor.redirectHooks_ && objectRoot && IsMutation(operation) && !cursor.reference_ &&
+        !cursor.stage_ && !cursor.elements_) {
+        usize hook = FindHookStep(cursor.frames_, steps.Size(), steps.Size());
+        if (hook == IndexNone) {
+            // Registry 컨테이너(StructRefArray — 참조 struct 원소)는 상자로 분리할 수 없으므로 원소
+            // 기본값은 제자리로 만든다(그 원소의 hook 멤버는 대입 묶음의 추가 원소 검증과 뒤 쓰기가
+            // 본다).
+            const bool structEnd = kind == ValueKind::Struct && !end.target.IsEmpty() &&
+                                   !end.target.ContainsStrongReference() &&
+                                   end.target.StructOps().validateTree != nullptr;
+            const bool creates =
+                ((operation == PathOperation::Insert ||
+                  (operation == PathOperation::InsertKey && !setElement) ||
+                  operation == PathOperation::EmplaceOptional) &&
+                 structEnd) ||
+                (operation == PathOperation::SetInstancedType && cursor.instancedInput_.IsValid() &&
+                 cursor.instancedInput_.StructOps().validateTree != nullptr);
+            hook = creates ? last : IndexNone;
+        }
+
+        if (hook != IndexNone) {
+            // staged는 쓰기 접근 판정(Required 검사 중 Busy 등)을 먼저 본다. 게시된 객체는 쓰기
+            // Borrow가 변경 표지를 올리므로 먼저 얻지 않는다 — encode 고정 Busy는 묶음 게시 구간이,
+            // 파괴·무효 handle은 분리(읽기 Borrow)가 같은 코드로 낸다.
+            cursor.current_ = 0;
+            if (cursor.root_ == PathTarget::Kind::Staged) {
+                auto probe = cursor.construction_->GetForWrite<Object>(cursor.owner_);
+                if (!probe) {
+                    return cursor.Fail(probe.Error());
+                }
+            }
+
+            cursor.hookStep_ = hook;
+            return Result<void>::Success();
+        }
+    }
+
     // 7. Borrow(쓰기는 ResolveForWrite — encode 고정 중이면 Busy)와 읽기 고정. Detach·Attach는
     // 대상을 바꾸지 않으므로 읽기 Borrow다(변경 표지를 올리지 않는다 — 대입 묶음이 표지를 읽은 뒤
     // 준비한다). staged 객체는 트랜잭션의 Get(쓰기는 GetForWrite), 분리된 값은 Borrow가 없다.
@@ -964,16 +997,20 @@ namespace {
 using detail::PathOperation;
 using detail::PathRunner;
 
-// 객체(게시·staged)의 변경이 검증 hook 있는 struct(단계 hook) 안을 바꾸는 경로다(Docs/Design/
-// CurveData.ko.md 9.1절): 그 struct를 담은 자리(그 단계 — 원소·Map 값이면 선택자를 뗀 컨테이너
-// 필드)를 상자로 분리하고, 상자 위에서 같은 연산을 한 뒤 원래 자리와 맞바꾼다. 상자 값 트리의
-// 검증은 PathPrepareAttach가 한다(거부는 InvalidArgument(StructValidation)). 게시된 객체는 묶음
-// 게시 구간이다(변경 표지·관찰자 규칙은 대입 묶음과 같다). 실패하면 객체는 그대로다. 상자 위 연산의
-// 실패 위치는 원래 경로의 단계로 옮겨 알린다.
+// 객체(게시·staged)의 변경이 검증 hook 있는 struct(단계 hook) 안을 바꾸거나 hook 트리가 있는 값을
+// 만드는 경로다(Docs/Design/CurveData.ko.md 9.1절·17.2절): 그 자리(그 단계 — 원소·Map 값이면
+// 선택자를 뗀 컨테이너 필드)를 상자로 분리하고, 상자 위에서 같은 연산을 한 뒤 원래 자리와 맞바꾼다.
+// 상자 값 트리의 검증은 PathPrepareAttach가 한다(거부는 InvalidArgument(StructValidation)). 게시된
+// 객체는 묶음 게시 구간이다(변경 표지·관찰자 규칙은 대입 묶음과 같다). staged 객체는 분리와 게시
+// 사이에 그 트랜잭션의 staged 쓰기가 있었으면(재진입 변경) Busy로 게시하지 않는다. 바뀐 것이 없는
+// 연산(이미 있는 키의 InsertKey)은 게시하지 않는다. 실패하면 객체와 출력 인자(output·length)는
+// 그대로다 — 출력은 지역 값에 받아 두고 게시가 끝난 뒤 옮긴다. 상자 위 연산의 실패 위치는 원래
+// 경로의 단계로 옮겨 알린다.
 Result<void> RunThroughHookBox(ObjectRegistry& registry, const ObjectAccessContext& access,
                                const PathTarget& target, PropertyPath path, usize hook,
                                PathOperation operation, const FieldValue* input, FieldValue* output,
-                               PropertyPathFailure* failure, usize* length) noexcept {
+                               PropertyPathFailure* failure, usize* length,
+                               TypeId instancedRequest) noexcept {
     PathStep unitSteps[MaxPropertyPathSteps];
     for (usize index = 0; index <= hook; ++index) {
         unitSteps[index] = path.steps[index];
@@ -998,11 +1035,24 @@ Result<void> RunThroughHookBox(ObjectRegistry& registry, const ObjectAccessConte
         return detached;
     }
 
+    ConstructionContext* transaction = target.Transaction();
+    const uint64 writes = !live && transaction ? transaction->WriteCount() : 0;
     const PropertyPath inner{
         Span<const PathStep>(path.steps.Data() + hook, path.steps.Size() - hook), path.keys};
+    Optional<FieldValue> result;
+    if (output) {
+        result.Emplace(output->GetAllocator());
+    }
+
+    usize produced = 0;
     {
-        detail::PathCursor cursor = PathRunner::Make(registry, access, PathTarget::Value(box),
-                                                     operation, input, output, failure);
+        detail::PathCursor cursor =
+            PathRunner::Make(registry, access, PathTarget::Value(box), operation, input,
+                             result.HasValue() ? &result.Value() : nullptr, failure);
+        if (operation == PathOperation::SetInstancedType) {
+            PathRunner::BindInstancedRequest(cursor, instancedRequest);
+        }
+
         if (auto ran = PathRunner::Run(cursor, inner); !ran) {
             if (failure) {
                 failure->step += hook;
@@ -1011,45 +1061,67 @@ Result<void> RunThroughHookBox(ObjectRegistry& registry, const ObjectAccessConte
             return ran;
         }
 
-        if (length) {
-            *length = PathRunner::Length(cursor);
+        produced = PathRunner::Length(cursor);
+    }
+
+    // 이미 있는 키의 InsertKey는 바뀐 것이 없다(게시·변경 표지·관찰자 알림 없음).
+    const bool changed = !(operation == PathOperation::InsertKey && produced == 0);
+    if (changed) {
+        if (!live && transaction && transaction->WriteCount() != writes) {
+            return Result<void>::Failure(ErrorCode::Busy);
+        }
+
+        PreparedAttach prepared;
+        if (auto located =
+                PathPrepareAttach(registry, access, target, unit, box, prepared, failure);
+            !located) {
+            return located;
+        }
+
+        if (!live) {
+            if (auto published = prepared.Publish(); !published) {
+                return published;
+            }
+        } else {
+            auto owner = registry.Resolve(access, target.Object());
+            if (!owner) {
+                return Result<void>::Failure(owner.Error());
+            }
+
+            auto batch = registry.BeginBatchPublish(access, target.Object(), stamp, {}, {});
+            if (!batch) {
+                return Result<void>::Failure(batch.Error());
+            }
+
+            prepared.Publish(batch.Value());
+            batch.Value().End();
         }
     }
 
-    PreparedAttach prepared;
-    if (auto located = PathPrepareAttach(registry, access, target, unit, box, prepared, failure);
-        !located) {
-        return located;
+    if (output) {
+        *output = Move(result.Value());
     }
 
-    if (!live) {
-        return prepared.Publish();
+    if (length) {
+        *length = produced;
     }
 
-    auto owner = registry.Resolve(access, target.Object());
-    if (!owner) {
-        return Result<void>::Failure(owner.Error());
-    }
-
-    auto batch = registry.BeginBatchPublish(access, target.Object(), stamp, {}, {});
-    if (!batch) {
-        return Result<void>::Failure(batch.Error());
-    }
-
-    prepared.Publish(batch.Value());
-    batch.Value().End();
     return Result<void>::Success();
 }
 
 Result<void> RunOperation(ObjectRegistry& registry, const ObjectAccessContext& access,
                           const PathTarget& target, PropertyPath path, PathOperation operation,
                           const FieldValue* input, FieldValue* output, PropertyPathFailure* failure,
-                          usize* length) noexcept {
+                          usize* length, TypeId instancedRequest = {}) noexcept {
     usize hook = IndexNone;
     {
         detail::PathCursor cursor =
             PathRunner::Make(registry, access, target, operation, input, output, failure);
         PathRunner::RedirectHooks(cursor);
+        if (operation == PathOperation::SetInstancedType) {
+            PathRunner::BindInstancedRequest(cursor, instancedRequest);
+        }
+
         Result<void> result = PathRunner::Run(cursor, path);
         if (!result) {
             return result;
@@ -1066,7 +1138,7 @@ Result<void> RunOperation(ObjectRegistry& registry, const ObjectAccessContext& a
     }
 
     return RunThroughHookBox(registry, access, target, path, hook, operation, input, output,
-                             failure, length);
+                             failure, length, instancedRequest);
 }
 
 // 결과가 Length 칸의 0·1인 연산(PathContains·PathInsertKey·PathIsOptionalSet)이다.
@@ -1184,10 +1256,8 @@ Result<bool> PathIsOptionalSet(ObjectRegistry& registry, const ObjectAccessConte
 Result<void> PathSetInstancedType(ObjectRegistry& registry, const ObjectAccessContext& access,
                                   const PathTarget& target, PropertyPath path, TypeId type,
                                   PropertyPathFailure* failure) noexcept {
-    detail::PathCursor cursor = PathRunner::Make(
-        registry, access, target, PathOperation::SetInstancedType, nullptr, nullptr, failure);
-    PathRunner::BindInstancedRequest(cursor, type);
-    return PathRunner::Run(cursor, path);
+    return RunOperation(registry, access, target, path, PathOperation::SetInstancedType, nullptr,
+                        nullptr, failure, nullptr, type);
 }
 
 Result<void> PathClearInstanced(ObjectRegistry& registry, const ObjectAccessContext& access,

@@ -1,6 +1,7 @@
 #include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
 #include <ReflectionTestFixtures/ValidateFixture.generated.h>
 #include <Core/Memory/SystemAllocator.h>
+#include <Object/ConstructionContext.h>
 #include <Object/ModuleRegistration.h>
 #include <Object/PropertyPath.h>
 #include <ReflectionText/TextAssignments.h>
@@ -161,7 +162,7 @@ TEST(TextValidateHook_AddedElementIsValidated) {
     const TextAssignment invalid[] = {Set("elements[0]", "{}"),
                                       Set("elements[0].range.low", "4", 1)};
     CHECK(!fixture.Apply(object, invalid));
-    CHECK(fixture.OnlyStructDiagnostic("elements"));
+    CHECK(fixture.OnlyStructDiagnostic("elements[0]"));
     fixture.With(object, [](ValidHolder& value) noexcept { CHECK(value.elements.Size() == 0); });
 
     const TextAssignment valid[] = {Set("elements[0]", "{}"),
@@ -191,4 +192,50 @@ TEST(TextValidateHook_JsonImportValidates) {
     fixture.With(object, [](ValidHolder& value) noexcept {
         CHECK(value.plain == 4 && !value.byKey.Find(2));
     });
+}
+
+// struct 값 대상(AssignmentTarget::Value — 설정·콘솔 경로)과 staged 대상도 게시 전에 hook을
+// 부른다(CV3 리뷰 1): 멤버 hook(range)은 단위 상자 검증으로, 루트 자신의 hook(ValidBox: range.high
+// ≤ limit)은 루트 사본 검증으로 거부하고 값은 그대로다.
+TEST(TextValidateHook_ValueAndStagedTargets) {
+    Objects fixture;
+    auto lease = fixture.types.AcquireValueType(
+        GeneratedType<reflection_fixture::ValidBox>::Schema().id, TypeKind::Struct);
+    REQUIRE(lease);
+    reflection_fixture::ValidBox value;
+    const auto apply = [&](Span<const TextAssignment> inputs) noexcept -> Result<void> {
+        fixture.diagnostics.Clear();
+        auto prepared =
+            PrepareAssignments(AssignmentTarget::Value(fixture.objects, fixture.access,
+                                                       lease.Value(), &value, fixture.system),
+                               inputs, fixture.options, fixture.diagnostics);
+        if (!prepared) {
+            return Result<void>::Failure(prepared.Error());
+        }
+
+        auto published = prepared.Value().Publish();
+        return published ? Result<void>::Success() : Result<void>::Failure(published.Error());
+    };
+
+    const TextAssignment member[] = {Set("range.low", "9")};
+    CHECK(!apply(member));
+    CHECK(fixture.OnlyStructDiagnostic("range"));
+    const TextAssignment root[] = {Set("limit", "-1")};
+    CHECK(!apply(root));
+    CHECK(fixture.OnlyStructDiagnostic(""));
+    CHECK(value.range.low == 0 && value.limit == 100);
+    const TextAssignment fine[] = {Set("range.high", "7"), Set("limit", "8", 1)};
+    REQUIRE(apply(fine));
+    CHECK(value.range.high == 7 && value.limit == 8);
+
+    ConstructionContext transaction(fixture.objects, fixture.access);
+    auto made = transaction.Create<ValidHolder>(GeneratedType<ValidHolder>::Schema().id);
+    REQUIRE(made);
+    const TextAssignment staged[] = {Set("box.range.low", "9")};
+    fixture.diagnostics.Clear();
+    auto prepared = PrepareAssignments(AssignmentTarget::Staged(transaction, made.Value()), staged,
+                                       fixture.options, fixture.diagnostics);
+    REQUIRE(prepared);
+    CHECK(!prepared.Value().Publish());
+    CHECK(fixture.OnlyStructDiagnostic("box"));
 }

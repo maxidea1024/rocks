@@ -181,7 +181,15 @@ public:
             return Result<T*>::Failure(ErrorCode::Busy);
         }
 
+        ++writes_;
         return Get<T>(handle);
+    }
+
+    // staged 쓰기 접근(GetForWrite·참조·컨테이너 쓰기 판정)의 누계다. 값이 같으면 그 사이 이
+    // 트랜잭션의 staged 객체에 쓰기가 없었다(경로 쓰기의 검증 상자 경로가 분리와 게시 사이 재진입
+    // 변경을 잡는다 — Docs/Design/CurveData.ko.md 17.2절).
+    uint64 WriteCount() const noexcept {
+        return writes_;
     }
 
     // staged owner의 ObjectRef field에 target을 쓴다. 트랜잭션이 끝났거나 오류 상태면
@@ -380,6 +388,8 @@ private:
     friend class ObjectRegistry;
     // staged 배열 원소 지우기의 게시(리플렉션 B9i3c4)가 트랜잭션 문맥으로 압축한다.
     friend class PreparedStructElements;
+    // staged 자리의 상자 게시가 staged 쓰기 판정(Required 검사 중 Busy)을 따른다.
+    friend class PreparedAttach;
     // 검사 중 표시를 세우고 내린다(BeginRequiredCheck·문맥 소멸).
     friend class FieldEncodeContext;
 
@@ -394,6 +404,7 @@ private:
             return Result<void>::Failure(ErrorCode::Busy);
         }
 
+        ++writes_;
         return Result<void>::Success();
     }
 
@@ -406,6 +417,7 @@ private:
     uint64 transaction_ = 0;
     ErrorCode error_ = ErrorCode::None;
     bool finished_ = false;
+    mutable uint64 writes_ = 0;
     // Required 검사 중 표시다(클래스 주석).
     bool requiredCheck_ = false;
 };

@@ -23,6 +23,10 @@ bool RegisterFixture(TypeRegistry& types) noexcept {
            GeneratedType<reflection_fixture::ValidBox>::Register(types).IsOk() &&
            GeneratedType<ValidDerived>::Register(types).IsOk() &&
            GeneratedType<reflection_fixture::ValidRefElement>::Register(types).IsOk() &&
+           GeneratedType<reflection_fixture::ValidNonEmpty>::Register(types).IsOk() &&
+           GeneratedType<reflection_fixture::ValidWrapper>::Register(types).IsOk() &&
+           GeneratedType<reflection_fixture::ValidList>::Register(types).IsOk() &&
+           GeneratedType<reflection_fixture::ValidOuter>::Register(types).IsOk() &&
            GeneratedType<ValidHolder>::Register(types).IsOk();
 }
 
@@ -123,9 +127,9 @@ TEST(ValidateHookGraph_ValidValuesLoadInnerFirst) {
                                           saved.Value().View());
             REQUIRE(loaded);
             // box(r b), ranges 둘(r r), maybe(r), byKey 값(r), any 내용(r), fixed 둘(r r),
-            // derived(r d), elements 원소의 range(r)가 한 번씩이다(저장하지 않는 C++ 생성 값은
-            // 부르지 않는다 — 기록 수가 정확히 자리 수다).
-            CHECK(CurrentValidateLog().count == 12);
+            // derived(r d), elements 원소의 range(r), outer.list 기본값(l)이 한 번씩이다(저장하지
+            // 않는 C++ 생성 값은 부르지 않는다 — 기록 수가 정확히 자리 수다).
+            CHECK(CurrentValidateLog().count == 13);
             const auto& log = CurrentValidateLog();
             bool boxOrder = false;
             bool derivedOrder = false;

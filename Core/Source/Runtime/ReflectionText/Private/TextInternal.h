@@ -57,6 +57,16 @@ private:
 Result<bool> CheckElementCount(TextCodecContext& context, const FieldSchema& field, usize count,
                                TextSource source, StringView pathText) noexcept;
 
+// 바이트 배열(`Array<uint8>` 필드·멤버 통째 — Docs/Design/CurveData.ko.md D18, CV4)의 값 텍스트는
+// 명령행·JSON 모두 RFC 4648 Base64 문자열 하나다(Core/Encoding/Base64.h — 엄격: 4의 배수 길이·'='
+// 패딩·공백 없음, 빈 텍스트는 빈 배열). text를 풀어 out을 원소 목록(UInt8 FieldValue)으로 채운다.
+// Base64가 아니면 InvalidValue, 원소 수 한도(CheckElementCount)를 넘으면 그 진단을 남기고 false다.
+Result<bool> ParseByteList(TextCodecContext& context, const FieldSchema& field, StringView text,
+                           TextSource source, StringView pathText, TextValue& out) noexcept;
+
+// bytes의 Base64 텍스트를 out 끝에 붙인다(빈 배열은 아무것도 붙이지 않는다).
+Result<void> AppendByteText(Allocator& allocator, Span<const uint8> bytes, String& out) noexcept;
+
 // Map 키·Set 원소 값(value)의 경로 key wire를 wire 뒤에 붙인다(Name은 names의 표시 문자열을
 // allocator로 얻는다). 오류: AppendPathKey·Name 조회의 오류.
 Result<void> AppendValueKeyWire(NamePool* names, Allocator& allocator, const FieldValue& value,

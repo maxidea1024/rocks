@@ -79,6 +79,11 @@ Result<void> PreparedAttach::Publish() noexcept {
         if (auto open = transaction_->CheckOpen(); !open) {
             return open;
         }
+
+        // staged 쓰기와 같은 판정이다(Required 검사 중 표시 동안 Busy — 상태를 고정하지 않는다).
+        if (auto writable = transaction_->CheckStagedWrite(); !writable) {
+            return writable;
+        }
     }
 
     swap_(location_, boxStorage_);

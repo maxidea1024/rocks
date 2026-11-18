@@ -265,7 +265,7 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
 
     // struct 검증 hook 선언의 Clang 함수 형식 철자다: `Result<void> (const S &) noexcept`(이름공간 한정은 선택).
     private static readonly System.Text.RegularExpressions.Regex ValidateSignature = new(
-        @"^(?:[A-Za-z_][\w]*::)*Result<void> \(const (?:struct |class )?(?:[A-Za-z_][\w]*::)*(?<type>[A-Za-z_][\w]*) &\) noexcept$",
+        @"^(?:::)?(?:[A-Za-z_][\w]*::)*Result<void> \(const (?:struct |class )?(?:::)?(?:[A-Za-z_][\w]*::)*(?<type>[A-Za-z_][\w]*) &\) noexcept$",
         System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
     // struct의 Validate 멤버 하나를 검증 hook으로 받는다(RMC2309): 함수 템플릿·두 번째 선언(overload)·비정적·시그니처가 다른 선언과
@@ -289,10 +289,24 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
             throw new MetadataException($"{qualified}::Validate: the struct validation hook must be a static member function", "RMC2309", hint);
         }
 
-        // Binds 미러의 Validate는 SchemaValidator가 미러 규칙으로 거부한다(인자가 실제 타입이라 모양을 여기서 보지 않는다).
+        // consteval 함수는 런타임 함수표가 부를 수 없다(생성 코드 컴파일 오류 대신 RMC로 거부한다).
+        if (DeclarationPrefixHas(member, "consteval"))
+        {
+            throw new MetadataException($"{qualified}::Validate: the struct validation hook cannot be consteval", "RMC2309", hint);
+        }
+
+        // Binds 미러의 Validate는 SchemaValidator가 미러 규칙으로 거부한다(인자가 실제 타입이라 모양을 여기서 보지 않는다). 철자
+        // (`::rocks::Result<void>`·별칭 `const Self&`)에 기대지 않도록 쓴 철자와 desugar한 철자 중 하나가 맞으면 받는다.
         string spelling = member.TryGetProperty("type", out JsonElement type) ? Text(type, "qualType") : "";
-        System.Text.RegularExpressions.Match match = ValidateSignature.Match(spelling);
-        if (model.BindsSpelling.Length == 0 && (!match.Success || match.Groups["type"].Value != unqualified))
+        string desugared = member.TryGetProperty("type", out JsonElement sugarType) ? Text(sugarType, "desugaredQualType") : "";
+        bool Matches(string text)
+        {
+            System.Text.RegularExpressions.Match match = ValidateSignature.Match(text);
+            return match.Success && match.Groups["type"].Value == unqualified;
+        }
+
+        if (model.BindsSpelling.Length == 0 && !Matches(spelling) && !(desugared.Length != 0 && Matches(desugared)) &&
+            !Matches(SelfAliasResolved(spelling, member)))
         {
             throw new MetadataException($"{qualified}::Validate: the struct validation hook signature is `{spelling}`, not `Result<void> (const {unqualified} &) noexcept`",
                 "RMC2309", hint);
@@ -305,6 +319,54 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
 
         model.HasValidate = true;
         model.ValidateSite ??= currentSite;
+    }
+
+    // Validate 인자 철자의 별칭(`using Self = S;`처럼 struct 안에서 선언한 TypeAliasDecl·TypedefDecl)을 그 대상 철자로 바꾼다(Clang JSON의
+    // 함수 형식은 desugaredQualType을 주지 않는 경우가 있다). 별칭이 없으면 그대로다.
+    private string SelfAliasResolved(string spelling, JsonElement member)
+    {
+        foreach ((string alias, string target) in currentAliases)
+        {
+            string written = $"(const {alias} &)";
+            if (spelling.Contains(written, StringComparison.Ordinal))
+            {
+                return spelling.Replace(written, $"(const {target} &)", StringComparison.Ordinal);
+            }
+        }
+
+        _ = member;
+        return spelling;
+    }
+
+    // 지금 struct 안의 타입 별칭(이름 → 대상 철자)이다(Validate 시그니처 대조용 — 멤버 순회가 채운다).
+    private readonly List<(string Alias, string Target)> currentAliases = [];
+
+    // 선언 node의 이름 앞(같은 선언의 시작 — 앞의 ';'·'{'·'}' 뒤부터)에 word가 낱말로 쓰여 있는지다(consteval처럼 Clang JSON이
+    // 구별하지 않는 지정자). 원문 위치를 모르면 거짓이다.
+    private bool DeclarationPrefixHas(JsonElement node, string word)
+    {
+        if (!locations.TryGetValue(Text(node, "id"), out var location) || location.File is null || location.Offset < 0 ||
+            !File.Exists(location.File))
+        {
+            return false;
+        }
+
+        if (!sourceBytes.TryGetValue(location.File, out byte[]? bytes))
+        {
+            bytes = File.ReadAllBytes(location.File);
+            sourceBytes.Add(location.File, bytes);
+        }
+
+        int end = Math.Min(location.Offset, bytes.Length);
+        int start = end;
+        while (start > 0 && bytes[start - 1] is not ((byte)';' or (byte)'{' or (byte)'}'))
+        {
+            --start;
+        }
+
+        string prefix = System.Text.Encoding.UTF8.GetString(bytes, start, end - start);
+        return System.Text.RegularExpressions.Regex.IsMatch(prefix, $@"\b{word}\b", System.Text.RegularExpressions.RegexOptions.CultureInvariant,
+            TimeSpan.FromSeconds(1));
     }
 
     // 노드 타입의 Clang 정규 철자다(별칭은 desugar한 철자). CompilerDriver가 Binds 별칭을 풀 때도 쓴다.
@@ -585,6 +647,7 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                 }
 
                 JsonElement[] members = Children(node).ToArray();
+                currentAliases.Clear();
                 bool generatedBody = members.Any(member => Annotation(member, "rocks.generated") is not null);
                 string access = Text(node, "tagUsed") == "class" ? "private" : "public";
                 foreach (JsonElement member in members)
@@ -629,6 +692,25 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                     if (isStruct && memberName == "Validate" && memberKind is ("CXXMethodDecl" or "FunctionTemplateDecl"))
                     {
                         CheckValidateHook(model, member, memberKind, qualified, access, generatedBody);
+                    }
+
+                    if (isStruct && memberKind is "TypeAliasDecl" or "TypedefDecl" && member.TryGetProperty("type", out JsonElement aliasType))
+                    {
+                        currentAliases.Add((memberName, Text(aliasType, "qualType")));
+                    }
+
+                    // 숨은 friend `Validate`와 `using Base::Validate`는 hook이 아니다(조용히 무시되거나 자기 hook과 overload를 만든다).
+                    if (isStruct && memberKind == "FriendDecl" &&
+                        Children(member).Any(inner => Text(inner, "kind") is "FunctionDecl" or "FunctionTemplateDecl" && Text(inner, "name") == "Validate"))
+                    {
+                        throw new MetadataException($"{qualified}: a friend Validate is not a struct validation hook", "RMC2309",
+                            "Declare `static rocks::Result<void> Validate(const S& value) noexcept;` as a member instead.");
+                    }
+
+                    if (isStruct && memberKind == "UsingDecl" && (memberName == "Validate" || memberName.EndsWith("::Validate", StringComparison.Ordinal)))
+                    {
+                        throw new MetadataException($"{qualified}: a using-declaration of Validate is not supported", "RMC2309",
+                            "Remove it: a reflected base's Validate hook already runs before the derived struct's own hook.");
                     }
 
                     if (memberKind != "FieldDecl")

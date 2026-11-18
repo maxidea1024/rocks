@@ -4,6 +4,7 @@
 #include <Core/Containers/OrderedMap.h>
 #include <Core/Containers/OrderedSet.h>
 #include <Core/Text/Name.h>
+#include <Core/Result.h>
 #include <Core/Text/String.h>
 #include <Meta/Annotations.h>
 
@@ -25,6 +26,25 @@ ROCKS_STRUCT()
 struct FixturePoint {
     ROCKS_PROPERTY() int32 x = 0;
     ROCKS_PROPERTY() int32 y = 0;
+};
+
+// struct 검증 hook이 있는 값이다(low ≤ high — 설정 층 적용이 게시 전에 거부하는지, Docs/Design/
+// CurveData.ko.md 9.1·17.2절).
+ROCKS_STRUCT()
+struct FixtureSpan {
+    ROCKS_PROPERTY() int32 low = 0;
+    ROCKS_PROPERTY() int32 high = 0;
+
+    static Result<void> Validate(const FixtureSpan& value) noexcept {
+        return value.low <= value.high ? Result<void>::Success()
+                                       : Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+};
+
+// hook 멤버를 담은 설정 섹션이다(기본 fixture에 등록하지 않는다 — 그 시험이 따로 등록한다).
+ROCKS_STRUCT(Settings(Branch = "Render", Section = "SpanCheck"))
+struct SpanSettings {
+    ROCKS_PROPERTY() FixtureSpan span;
 };
 
 // 배열 원소 struct다(원소 안의 배열 연산은 지원하지 않는다 — UnsupportedOperation 시험).

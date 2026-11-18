@@ -2,6 +2,7 @@
 
 #include <Core/Math/MathUtility.h>
 #include <Object/ConstructionContext.h>
+#include <Object/FieldValueWire.h>
 
 // JSON export다(리플렉션 B9i4 — ReflectionText/TextJson.h의 ExportJson). 대상의 스키마를 따라
 // 경로를 만들며 단일 값은 PathRead, 배열은 PathCount와 원소 경로, Map·Set은 PathReadKeys와 key
@@ -282,6 +283,36 @@ Result<void> Exporter::WriteArray(const TextSlot& slot) noexcept {
         }
 
         count = counted.Value();
+    }
+
+    // 바이트 배열은 Base64 문자열 하나다(Docs/Design/CurveData.ko.md D18 — 명령행과 같은 텍스트).
+    if (::rocks::detail::IsByteArrayField(field)) {
+        Array<uint8> bytes(allocator);
+        if (auto reserved = bytes.TryReserve(count); !reserved) {
+            return reserved;
+        }
+
+        FieldValue value(allocator);
+        for (usize index = 0; index < count; ++index) {
+            path.SetIndex(static_cast<uint32>(index));
+            auto read = PathRead(registry, access, root, path.View(), value);
+            path.ClearSelector();
+            if (!read) {
+                return read;
+            }
+
+            if (auto pushed = bytes.TryPushBack(static_cast<uint8>(value.unsignedInteger));
+                !pushed) {
+                return pushed;
+            }
+        }
+
+        String text(allocator);
+        if (auto encoded = detail::AppendByteText(allocator, bytes.View(), text); !encoded) {
+            return encoded;
+        }
+
+        return writer.String(text.View());
     }
 
     if (auto begun = writer.BeginArray(); !begun) {

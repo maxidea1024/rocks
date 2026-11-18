@@ -2,7 +2,9 @@
 
 #include <Core/Containers/OrderedSet.h>
 #include <Core/Guid.h>
+#include <Core/Encoding/Base64.h>
 #include <Core/Text/StringSplit.h>
+#include <Object/FieldValueWire.h>
 #include <Object/ValueText.h>
 
 // 자리 하나의 값 텍스트(단일 값·`{}`·쉼표 목록·Map `k:v` 목록)다(리플렉션 B9i3b — Docs/Design/
@@ -434,6 +436,71 @@ Result<bool> CheckElementCount(TextCodecContext& context, const FieldSchema& fie
 
 } // namespace detail
 
+namespace detail {
+
+Result<bool> ParseByteList(TextCodecContext& context, const FieldSchema& field, StringView text,
+                           TextSource source, StringView pathText, TextValue& out) noexcept {
+    // Base64 4글자가 3 byte다 — 풀기 전에 원소 수 상한을 본다(패딩은 줄일 뿐이다).
+    const usize capacity = text.ByteCount() / 4 * 3;
+    Array<uint8> bytes(context.GetAllocator());
+    if (auto sized = bytes.TryResize(capacity); !sized) {
+        return Result<bool>::Failure(sized.Error());
+    }
+
+    auto decoded = TryBase64Decode(text, bytes.View());
+    if (!decoded) {
+        if (decoded.Error() != ErrorCode::InvalidArgument) {
+            return Result<bool>::Failure(decoded.Error());
+        }
+
+        return Report(context, TextDiagnosticCode::InvalidValue, source, pathText,
+                      "expected Base64 bytes (RFC 4648, padded, no whitespace)");
+    }
+
+    const usize count = decoded.Value();
+    auto fits = CheckElementCount(context, field, count, source, pathText);
+    if (!fits || !fits.Value()) {
+        return fits;
+    }
+
+    if (auto reserved = out.elements.TryReserve(count); !reserved) {
+        return Result<bool>::Failure(reserved.Error());
+    }
+
+    for (usize index = 0; index < count; ++index) {
+        FieldValue element(context.GetAllocator());
+        element.kind = ValueKind::UInt8;
+        element.unsignedInteger = bytes[index];
+        if (auto pushed = out.elements.TryPushBack(Move(element)); !pushed) {
+            return Result<bool>::Failure(pushed.Error());
+        }
+    }
+
+    out.shape = TextValueShape::List;
+    return Result<bool>::Success(true);
+}
+
+Result<void> AppendByteText(Allocator& allocator, Span<const uint8> bytes, String& out) noexcept {
+    auto size = Base64EncodedSize(bytes.Size());
+    if (!size) {
+        return Result<void>::Failure(size.Error());
+    }
+
+    Array<char> text(allocator);
+    if (auto sized = text.TryResize(size.Value()); !sized) {
+        return sized;
+    }
+
+    auto written = TryBase64Encode(bytes, text.View());
+    if (!written) {
+        return Result<void>::Failure(written.Error());
+    }
+
+    return out.TryAppend(StringView(text.Data(), written.Value()));
+}
+
+} // namespace detail
+
 Result<bool> ParseTextValue(TextCodecContext& context, const TextSlot& slot, StringView text,
                             TextSource source, StringView pathText, TextValue& out) noexcept {
     out.Reset();
@@ -493,6 +560,12 @@ Result<bool> ParseTextValue(TextCodecContext& context, const TextSlot& slot, Str
             return detail::Report(
                 context, TextDiagnosticCode::InvalidValue, source, pathText,
                 "struct element arrays take an empty value; set elements by path");
+        }
+
+        // 바이트 배열은 Base64 문자열 하나다(Docs/Design/CurveData.ko.md D18 — 원소는 경로
+        // `a[i]=v`로).
+        if (::rocks::detail::IsByteArrayField(field)) {
+            return detail::ParseByteList(context, field, text, source, pathText, out);
         }
 
         return ParseList(context, slot, text, source, pathText, out);
@@ -571,6 +644,26 @@ Result<void> FormatTextValue(TextCodecContext& context, const TextSlot& slot,
     case TextValueShape::List: {
         if (!list) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (::rocks::detail::IsByteArrayField(*slot.field)) {
+            Array<uint8> bytes(context.GetAllocator());
+            if (auto reserved = bytes.TryReserve(value.elements.Size()); !reserved) {
+                return reserved;
+            }
+
+            for (const FieldValue& element : value.elements) {
+                if (element.kind != ValueKind::UInt8 || element.unsignedInteger > 255u) {
+                    return Result<void>::Failure(ErrorCode::InvalidArgument);
+                }
+
+                if (auto pushed = bytes.TryPushBack(static_cast<uint8>(element.unsignedInteger));
+                    !pushed) {
+                    return pushed;
+                }
+            }
+
+            return detail::AppendByteText(context.GetAllocator(), bytes.View(), out);
         }
 
         const TextScalarType type =

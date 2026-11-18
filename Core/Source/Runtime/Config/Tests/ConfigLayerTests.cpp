@@ -240,3 +240,22 @@ TEST(Config_AssignmentTargets) {
                                           reflection_text::TextDiagnosticCode::UnknownProperty));
     CHECK(!context.HasPendingChanges());
 }
+
+// 설정 층 적용(struct 값 대상 대입 묶음)도 struct 검증 hook을 게시 전에
+// 부른다(Docs/Design/CurveData.ko.md 17.2절 — CV3 리뷰 1): low > high인 span은
+// FieldValue(InvalidStructValue) 진단이고 값은 그대로다.
+TEST(Config_StructValidationHookRejectsLayerValue) {
+    ConfigFixture fixture;
+    REQUIRE(fixture.Context().RegisterSettings<config_fixture::SpanSettings>());
+    REQUIRE(fixture.Context().Sync());
+    const auto& settings = fixture.Context().Get<config_fixture::SpanSettings>();
+    CHECK(fixture.Rejects(ConfigLayer::Engine, "Render",
+                          R"({"SpanCheck": {"span": {"low": 5, "high": 1}}})"));
+    CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::FieldValue, 0, 0,
+                                reflection_text::TextDiagnosticCode::InvalidStructValue));
+    CHECK(settings.span.low == 0 && settings.span.high == 0);
+    REQUIRE(fixture.Context().AddLayerText(ConfigLayer::Engine, "x", "Render", "<test>",
+                                           R"({"SpanCheck": {"span": {"low": 1, "high": 5}}})"));
+    REQUIRE(fixture.Context().Sync());
+    CHECK(settings.span.low == 1 && settings.span.high == 5);
+}

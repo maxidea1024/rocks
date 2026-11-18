@@ -75,8 +75,26 @@ internal static partial class MetaTests
             ValidateSource("static bool Validate(const Range&) noexcept { return true; }\n"),
             ValidateSource("template <class T>\nstatic rocks::Result<void> Validate(const T&) noexcept { return rocks::Result<void>::Success(); }\n"),
             ValidateSource(ValidateHook + "static rocks::Result<void> Validate(const Range&, int) noexcept { return rocks::Result<void>::Success(); }\n"),
-            ValidateSource("private:\n" + ValidateHook)],
+            ValidateSource("private:\n" + ValidateHook),
+            ValidateSource("static consteval rocks::Result<void> Validate(const Range&) noexcept { return rocks::Result<void>::Success(); }\n")],
             "RMC2309", "validation hook");
+        // 숨은 friend Validate와 using-declaration(CV3 리뷰 10)도 RMC2309다.
+        AddRejectGroup(context, "Meta.ValidateHookRejectsFriendAndUsing", [
+            ValidateSource("friend rocks::Result<void> Validate(const Range&) noexcept { return rocks::Result<void>::Success(); }\n"),
+            ValidateSource(ValidateHook + "using HookBase::Validate;\n").Replace("ROCKS_STRUCT()\nstruct Range {",
+                "struct HookBase { static rocks::Result<void> Validate(const HookBase&) noexcept { return rocks::Result<void>::Success(); } };\n" +
+                "ROCKS_STRUCT()\nstruct Range : HookBase {", StringComparison.Ordinal)],
+            "RMC2309", "Validate");
+        // 정상 선언의 다른 철자(이름공간 처음 `::`, 별칭 `const Self&`)는 hook으로 받는다(CV3 리뷰 10).
+        suite.Add("Meta.ValidateHookAcceptsQualifiedAndAliasSpellings", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            await probe.GenerateAsync(ValidateSource("using Self = Range;\n" +
+                "static ::rocks::Result<void> Validate(const Self& value) noexcept { return value.low <= value.high ? " +
+                "rocks::Result<void>::Success() : rocks::Result<void>::Failure(rocks::ErrorCode::InvalidArgument); }\n"));
+            string generated = Compact(File.ReadAllText(probe.Output));
+            Verify.That(generated.Contains("staticconstexprboolHasValidateSelf=true;", StringComparison.Ordinal), "alias spelling hook detected");
+        });
         // hook struct는 참조 없는 값이다(리플렉션 쓰기가 통째로 복사해 검증한다).
         AddRejectGroup(context, "Meta.ValidateHookRejectsReferenceStructs", [
             ValidateSource(ValidateHook, body: ValidateRangeBody + "ROCKS_PROPERTY() rocks::ObjectRef<Value> owner;\n").Replace(
