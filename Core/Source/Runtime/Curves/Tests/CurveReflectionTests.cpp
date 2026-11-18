@@ -2,6 +2,7 @@
 #include <CurvesTestFixtures/CurvesTestFixtures.module.generated.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/StringBuilder.h>
+#include <Curves/CurveKeyHandleTable.h>
 #include <Object/ModuleRegistration.h>
 #include <Object/PropertyPath.h>
 #include <ObjectSerialization/ObjectGraph.h>
@@ -474,4 +475,29 @@ TEST(CurveReflection_KeyWireSize) {
     const usize plainPerKey = (measure(1000, false) - measure(0, false)) / 1000;
     CHECK(tangentPerKey == 352);
     CHECK(plainPerKey == 116);
+}
+
+// 리플렉션 경로 쓰기는 표를 거치지 않은 수정이다: 키 핸들 표는 다음 호출에서 StaleHandle이고(설계
+// 8절 — 사본 비트 비교), TryRebuild 뒤 다시 쓸 수 있다(CV7).
+TEST(CurveReflection_PathWriteMakesHandleTableStale) {
+    Objects fixture;
+    auto holder = fixture.Make();
+    const ObjectHandle handle = holder.Handle();
+    fixture.Fill(handle);
+    CurveKeyHandleTable<TangentCurve> table(fixture.system);
+    fixture.With(handle,
+                 [&](CurveHolder& value) noexcept { REQUIRE(table.TryRebuild(value.tangent)); });
+    PropertyPathBuffer path;
+    REQUIRE(ParsePropertyPath(fixture.objects, fixture.access, handle,
+                              StringView("tangent.keys[1].value"), path));
+    FieldValue input(fixture.system);
+    input.kind = ValueKind::Float32;
+    input.float32 = 42.0f;
+    REQUIRE(PathWrite(fixture.objects, fixture.access, handle, path.View(), input));
+    fixture.With(handle, [&](CurveHolder& value) noexcept {
+        auto stale = table.TryGetHandle(value.tangent, 0);
+        CHECK(!stale && stale.Error() == ErrorCode::StaleHandle);
+        REQUIRE(table.TryRebuild(value.tangent));
+        CHECK(table.TryGetHandle(value.tangent, 1));
+    });
 }

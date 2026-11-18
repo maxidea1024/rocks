@@ -387,6 +387,7 @@ CVarGroup ShadowGroup = cvar::Group("quality.shadow", 2)
 - 같은 등급에 같은 변수 두 번, 같은 등급 두 번 정의, 기본 등급 미정의는 컴파일 오류다. 크기 한도는 이름 있는 상수 `MaxGroupLevels`(8)·`MaxEntriesPerLevel`(32)이다. consteval 안에서는 할당할 수 없으므로 `CVarGroup`은 이 고정 용량을 품는다(항목 24 byte 기준 묶음 하나에 약 6 KiB의 정적 데이터). 묶음은 수십 개 이하라 받아들인다.
 - 프로젝트는 `Quality.json`(Config 6.1)에서 코드가 정의한 항목의 **값만** 바꿀 수 있다. 항목 추가는 코드에서 한다.
 - Config 6.1의 나머지 규칙은 그대로다: 사용자가 고른 등급은 사용자 층에 저장한다(묶음 변수는 늘 `UserSetting()`). 등급 조합이 장치 능력(`DeviceCaps`)으로 불가능하면 정해진 순서로 낮추고 사유를 진단에 남긴다.
+- 낮춘 등급은 묶음 변수에 쓰지 않는다. 묶음 변수(`ShadowGroup.Get()`)는 사용자가 고른 등급 그대로이고, 낮춤은 펼칠 때 쓰는 등급에만 적용된다. 그래서 Quality 층 항목 값이 낮춘 등급의 것이 된다. 사용자 층보다 약한 Quality 층에 등급을 써서는 효력이 없고, 고른 값을 덮어쓰면 장치가 바뀐 뒤 원래 선택을 잃기 때문이다. 펼친 등급은 Explain·진단에 `quality.shadow@1 (requested 3, lowered: <사유>)`로 보인다.
 - `GroupBuilder`도 복사·이동 삭제와 `&&` 체인을 따른다.
 
 ## 12. 지연 바인딩과 진단
