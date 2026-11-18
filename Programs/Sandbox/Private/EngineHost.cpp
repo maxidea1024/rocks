@@ -42,6 +42,25 @@ constexpr uint32 SelfTestTimeoutMilliseconds = 60000;
 // 자식 stderr를 모으는 버퍼 크기다.
 constexpr usize SelfTestOutputBytes = 64 * 1024;
 
+// 최소 크래시 처리기를 걸고, 건 경우에만 범위가 끝날 때 뗀다(이른 return도 거친다).
+class CrashHandlerScope {
+public:
+    CrashHandlerScope() noexcept : installed_(platform::InstallCrashHandler()) {
+    }
+
+    ~CrashHandlerScope() noexcept {
+        if (installed_) {
+            platform::RemoveCrashHandler();
+        }
+    }
+
+    CrashHandlerScope(const CrashHandlerScope&) = delete;
+    CrashHandlerScope& operator=(const CrashHandlerScope&) = delete;
+
+private:
+    bool installed_;
+};
+
 // 엔진을 World 하나로 frames만큼 돌린다. 실패 원인은 엔진이 한 번 기록한다(호스트는 다시 기록하지
 // 않는다).
 int RunEngine(Allocator& allocator, uint64 frames, config::ConfigContext& settings) noexcept {
@@ -273,8 +292,9 @@ int RunEngineHost(Allocator& allocator, const EngineHostOptions& options) noexce
     }
 
     // 6) 로그. log.mode·log.file.* 는 5)에서 고정됐다. 접근 위반·치명 신호 때도 마지막 로그를
-    // flush하도록 최소 크래시 처리기를 둔다(앞 처리기로 연쇄한다).
-    const bool crashHandler = platform::InstallCrashHandler();
+    // flush하도록 최소 크래시 처리기를 둔다(앞 처리기로 연쇄한다). host보다 먼저 만들어 host 소멸
+    // 뒤에 뗀다.
+    CrashHandlerScope crashHandler;
     LogHost host(allocator);
     if (!host.Start(LogSystemConfig::ForEngineHost(), &settings.Context(), "Sandbox")) {
         Log::Error(LogSandboxHost, "The log system could not start");
@@ -326,10 +346,6 @@ int RunEngineHost(Allocator& allocator, const EngineHostOptions& options) noexce
         // 멈춘 sink에 걸린 출력 스레드가 남았다. 설정 문맥·전역 소멸자·CRT 종료 처리를 돌리면 그
         // 스레드와 겹칠 수 있으므로 정리 없이 끝낸다(LogHost::Stop 설명).
         _Exit(exitCode);
-    }
-
-    if (crashHandler) {
-        platform::RemoveCrashHandler();
     }
 
     return exitCode;
