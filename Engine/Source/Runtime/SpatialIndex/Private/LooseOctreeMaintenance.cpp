@@ -110,7 +110,8 @@ MaintenanceReport LooseOctree::RunMaintenance(const MaintenanceBudget& budget) n
         const bool search = static_cast<bool>(searchBlocks_.TryShrink());
         const bool manage = static_cast<bool>(manageBlocks_.TryShrink());
         const bool outOfRange = static_cast<bool>(outOfRange_.TryShrink());
-        report.shrunk = chunks && search && manage && outOfRange;
+        const bool large = static_cast<bool>(large_.TryShrink());
+        report.shrunk = chunks && search && manage && outOfRange && large;
     }
     NotePeaks();
     report.remaining = queueLength_;
