@@ -211,10 +211,12 @@ UE가 1M을 감당하는 이유는 세 가지가 함께 작동하기 때문이�
 | 경로 | hot | cold |
 |---|---|---|
 | handle 조회(`FindSlot` — 세대·상태), Borrow 얻기·놓기, 루트 보유·반환 | 예 | 아니오 |
-| 참조 쓰기(소유자·대상 검증, 변경 표지, encode 고정, 클러스터 inCount) | 예 | Outer·Discard 검사가 필요한 경로만 |
+| 참조 쓰기·컨테이너 편집(소유자·대상 검증, 소유자 저장소 범위, 변경 표지, encode 고정, 클러스터 inCount) | 예 | 생성 트랜잭션(staged 쓰기의 Reserved 소유자·대상)과 관찰자 Registry의 패키지 쌍(`outer`·`outermost`)만 |
 | GC 표식(직렬·병렬) | 아니오(GC 밀집 자료만) | 패키지 정책의 자식 고리(`firstChild`·`nextSibling`)만 |
 | sweep·Retire | 상태·회수 목록 종류 | 회수 목록 고리, 파괴 요청 목록 |
 | 생성(Reserve·Commit), 회수(FinishReclaim), 이름 조회·Discard·부분 트리 순회, backend 보유 | 예 | 예 |
+
+소유자 저장소 범위 검사(컨테이너·참조 칸이 소유자 객체 안에 있는지 — `SetEdge`·`CheckContainerOwnerLocked`·batch)는 cold의 `storage`가 아니라 hot의 `object`에서 시작 주소를 유도한다: 저장소 시작 = `object` − 타입의 Object 기반 위치(`TypeLease::ObjectOffset`). 기반 위치는 C++ 타입마다 고정이지만(단일 비가상 상속) 0이라는 보장은 없다 — `Object`는 가상 함수가 없어 파생이 가상 함수를 가지면 MSVC ABI는 vfptr를 맨 앞에 두고 `Object` 기반을 그 뒤에 놓는다(World의 Actor·Component). 그래서 Registry가 생성마다 `object − storage`를 타입 레코드에 기록하고(첫 생성이 정하고 이후는 같아야 한다 — 다르면 Fatal) 범위 검사가 그 값을 읽는다. 타입 레코드는 같은 검사가 이미 읽는 `Ops().size` 옆이라 줄이 늘지 않는다. 처음 분리(a1916228)는 이 검사가 cold를 읽어 위 표의 "참조 쓰기는 hot만"과 어긋났다(리뷰 지적 — 측정은 실험 19절). 버린 대안: (1) `MakeRuntimeTypeOps`에서 기반 위치를 상수로 계산 — 생성되지 않은 저장소에서 파생→기반 포인터 변환이 필요해 정의되지 않은 동작이고 수동 함수표는 값을 줄 수 없다. (2) `object`를 시작으로 보고 범위를 `size`로 — 기반 위치만큼 저장소 끝 뒤를 받아 준다. (3) hot에 저장소 포인터를 더함 — hot이 72B가 된다.
 
 불변식: 두 레코드는 같은 슬롯 번호로 짝지어지고 chunk와 함께만 생기고 사라진다(chunk는 Registry 소멸 전까지 옮기지 않는다). 회수(`FinishReclaim`)는 cold를 빈 상태로 되돌린다. 재사용되는 빈 슬롯의 cold가 빈 상태라는 것을 Debug에서 생성 때 검사한다(아래 시험 보강).
 
