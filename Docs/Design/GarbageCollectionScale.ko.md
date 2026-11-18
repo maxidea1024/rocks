@@ -501,7 +501,7 @@ outer 간선(생성 때 고정)도 같은 규칙으로 센다. 패키지 고리 
 ### 14.1 파괴 요청 목록 (`TakeDestroyRequests`)
 
 - `RequestDestroy`·`Object::Destroy`·Discard가 객체를 DestroyRequested로 바꿀 때 그 슬롯을 Registry의 파괴 요청 목록(이중 연결 — cold의 `nextInList`·`prevInList`, `destroyListed`)에 넣는다. Retire가 목록에서 뺀다. 세 슬롯 목록(빈 슬롯·회수 대기·파괴 요청)은 상태로 배타적이라 같은 고리를 쓴다.
-- `TakeDestroyRequests(access, Span<ObjectHandle> out)`가 지난 호출 뒤의 요청을 꺼낸다(할당 없음, 순서 정하지 않음, 0이 나올 때까지 되풀이). 소유 계층(World)이 자기 API 밖 파괴를 객체 수에 비례하는 훑기 없이 찾는다.
+- `TakeDestroyRequests(access, Span<ObjectHandle> out)`가 지난 호출 뒤의 요청을 꺼낸다(할당 없음, 순서 정하지 않음, 0이 나올 때까지 되풀이). 소유 계층(World)이 자기 API 밖 파괴를 객체 수에 비례하는 훑기 없이 찾는다. 회수된 요청은 목록에서 빠지므로, 소유 계층은 회수가 일어날 수 있는 지점(GC step) 전마다 꺼내야 빠뜨리지 않는다(World는 매 프레임 step 전 — 엔진 런타임 7.4절).
 - 버린 대안: World가 cycle마다 Actor를 모두 `InspectLifecycle`로 조회(Actor 수에 비례), 파괴 콜백(잠금 안 사용자 코드).
 - 한계: 꺼내지 않으면 목록은 회수 때까지 남는다(메모리 증가 없음 — 슬롯 안 고리).
 

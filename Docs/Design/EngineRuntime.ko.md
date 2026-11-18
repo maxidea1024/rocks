@@ -1,6 +1,6 @@
 # 엔진 런타임·월드·그래픽 최소 경로 설계
 
-기준일: 2026-11-12. 2026-11-18 갱신: 4.5절 위치 교체 제거, 7.2·7.4절 Level 배열·우회 파괴 복구·시작 큐, 8절 증분 틱 순서(GC 실험 [16절](../Implementation/GcScaleExperiment.ko.md) 선형 검색 점검). 이 문서는 Core·Object 위에 처음 올리는 엔진 계층의 구조와 계약을 정한다. 범위는 **엔진 틱 → 월드 → Actor/Component → 텍스처 에셋 → D3D12·OpenGL로 화면에 그리기**까지의 수직 경로와, 그 위에 올릴 게임플레이 프레임워크(GameInstance·GameDirector·GameState·Controller·Pawn)의 골격이다. 전체 계획은 [엔진 구현 계획](EngineImplementationPlan.ko.md)을 따르며, 이 문서와 충돌하는 부분은 개정 1.8에서 이 문서 기준으로 바꾼다.
+기준일: 2026-11-12. 2026-11-18 갱신: 4.5절 위치 교체 제거, 7.2·7.4절 Level 배열·우회 파괴 복구(매 프레임, Level 포함)·시작 큐, 8절 증분 틱 순서(GC 실험 [16절](../Implementation/GcScaleExperiment.ko.md) 선형 검색 점검). 이 문서는 Core·Object 위에 처음 올리는 엔진 계층의 구조와 계약을 정한다. 범위는 **엔진 틱 → 월드 → Actor/Component → 텍스처 에셋 → D3D12·OpenGL로 화면에 그리기**까지의 수직 경로와, 그 위에 올릴 게임플레이 프레임워크(GameInstance·GameDirector·GameState·Controller·Pawn)의 골격이다. 전체 계획은 [엔진 구현 계획](EngineImplementationPlan.ko.md)을 따르며, 이 문서와 충돌하는 부분은 개정 1.8에서 이 문서 기준으로 바꾼다.
 
 ## 1. 범위와 단계
 
@@ -201,7 +201,10 @@ Uninitialized → Initializing → Running → Stopping → Stopped
 - Tick 순회 중 파괴·Tick 등록 변경·Component 제거는 큐에 넣는다. 안전 지점은 **각 phase 경계**(Tick 등록 변경 반영)와 **World Tick 끝**(파괴 완료)이다.
 - 같은 객체의 중복 파괴 요청은 성공으로 처리하고 한 번만 실행한다. 큐에 남은 핸들이 이미 무효이면 건너뛴다.
 - World Tick 끝에 제한된 예산으로 증분 GC를 진행해 파괴된 객체 저장소를 회수한다.
-- World API 밖에서 파괴(`Object::Destroy`)된 Actor는 GC cycle을 시작하기 전에 Registry의 파괴 요청 목록(`ObjectRegistry::TakeDestroyRequests` — 지난 호출 뒤 DestroyRequested가 된 객체, GC 설계 14절)에서 찾아 정리한다. 비용은 그 사이 파괴 수에 비례한다(Actor 수가 아니다). 목록의 객체가 Actor 레코드가 없거나 이미 PendingDestroy면(World가 요청한 파괴, Component) 건너뛴다. 처음 구현은 cycle마다 모든 Actor를 `InspectLifecycle`로 조회했다(cycle 시작 프레임 Actor 10K → 100K: 207 → 2,390us, 지금 2–13us).
+- World API 밖에서 파괴(`RequestDestroy`·`Object::Destroy`)된 Actor와 Level은 **매 프레임 GC step 전**(World Tick 끝, 파괴 정리 뒤)에 Registry의 파괴 요청 목록(`ObjectRegistry::TakeDestroyRequests` — 지난 호출 뒤 DestroyRequested가 된 객체, GC 설계 14절)에서 찾아 World 파괴로 돌린다. Actor는 `DestroyActor`, Level은 `DestroyLevel`(소속 Actor 전부 정리 후 회수)이다. 영구 Level의 우회 파괴는 복구할 수 없는 계약 위반이라 Fatal이다(World API로도 파괴할 수 없고 Spawn 기본 대상이다). 목록의 객체가 Actor·Level 레코드가 없거나 이미 PendingDestroy면(World가 요청한 파괴, Component) 건너뛴다. Level 여부는 슬롯 번호 집합(`levelSlots_`)으로 가려 Level 수에 비례하는 훑기를 하지 않는다. 비용은 그 사이 파괴 수에 비례하고(Actor 수가 아니다) 목록이 비면 잠금 한 번이다.
+  - 매 프레임인 이유: 우회 파괴는 Tick 밖(GC step 사이)에서만 일어나므로 매 step 전에 보면 sweep이 그 객체를 회수하기 전에 반드시 정리한다. cycle 시작 전에만 보던 처음 방식은 (1) cycle 도중의 우회 파괴를 정리 없이 회수할 수 있고(Level이 사라지면 그 클러스터의 Actor도 도달하지 못해 레코드만 남는다), (2) World 쪽 파괴가 없으면 GC가 돌지 않아 우회 파괴된 Actor·Level이 영영 남았다(2026-11-18 리뷰 반영 시험 `World_BypassedLevelDestroyIsRepaired`가 드러냄 — Level 우회 파괴는 아예 복구하지 않았다).
+  - 처음 구현은 cycle마다 모든 Actor를 `InspectLifecycle`로 조회했다(cycle 시작 프레임 Actor 10K → 100K: 207 → 2,390us, 파괴 요청 목록으로 2–13us).
+  - Level 배열에서 뗄 때(`DetachFromLevel`)는 `RemoveReferenceAtSwap`(4.5절)을 쓴다. 옮겨 오는 끝 Actor도 우회 파괴로 DestroyRequested일 수 있는데, 위치 교체 `SetReferenceAt`은 그 원소를 새로 쓰는 것이라 재검증에서 실패하고 그 실패를 버리면 지운 Actor가 배열에 좀비로 남았다(리뷰 지적). 이 경로의 실패와 Actor 레코드 위치·배열 불일치는 일어날 수 없으므로 Fatal이다. 예외는 Level 객체 자체가 우회 파괴돼(DestroyRequested — Registry가 빌려 주지 않는다) 복구 전인 경우다. 그 배열은 Level과 함께 사라지므로 뗄 것이 없고, 복구의 `DestroyLevel`은 Level 배열 대신 World의 Actor 레코드에서 소속 Actor를 찾는다(이 계약 위반의 복구에서만 Actor 수에 비례).
 
 ## 8. Tick Scheduler
 
@@ -358,7 +361,7 @@ RenderGraph·Deferred/Forward 경로·깊이 버퍼·MSAA·멀티 큐·bindless�
 
 - `Engine` 타깃의 헤드리스 테스트: GameClock, Engine 상태 기계·실패 복구, World·Actor·Component 수명 순서, Tick phase·priority·interval·pause·지연 변경, 복수 World 격리, 지연 파괴, BMP 파싱, 에셋 파일 왕복, AssetManager 참조 계수.
 - World 리플렉션(B8b — `WorldReflectionTests`·`WorldTests`·`EngineTests`): 네 타입의 WorldOnly·필드 형태와 멱등 등록, native 파생의 base 상속, GC(Spawn 생존·제거 회수·native 파생의 Component 생존·Marking 중 AddComponent의 newborn shade·Marking 중 참조 쓰기의 삽입 장벽·root 참조 방문과 파괴 시 비우기·우회 파괴 수리), Level 그래프 저장 → 별도 Registry 로드 → 필드·간선·root·소프트 참조 → 재저장 byte 동일(NATIVE 기본값, 계층 비저장), native 파생이 든 Level 저장 Unsupported, 장부 밖 객체 API 거부, null 원소 순회, 경로 읽기와 World 필드 쓰기 거부·fixture 쓰기와 옛 값, Engine 등록 순서와 native 파생을 둔 Shutdown·초기화 실패 정리.
-- 규모 경로(2026-11-18 — 실험 16절): 같은 Level에서 끝 원소를 포함한 여러 Actor의 World API 밖 파괴, 우회 파괴와 `DestroyActor`가 같은 프레임에 겹치는 경우(둘 다 `Level::Actors()`에 남지 않고 회수된다), `RemoveReferenceAtSwap`(끝 원소가 DestroyRequested여도 성공, 장부·관찰자), `TakeDestroyRequests`(꺼낸 뒤 비고, 회수된 요청은 빠지고, 묶음이 작으면 나눠 꺼낸다), hook 안에서 활성화된 꺼진 Actor의 시작, TickScheduler의 끝에 붙이기·이미 지켜지는 선행 추가의 재구성 생략·의존받는 항목의 미룬 해제·도달 검사 번호 한 바퀴.
+- 규모 경로(2026-11-18 — 실험 16절): 같은 Level에서 끝 원소를 포함한 여러 Actor의 World API 밖 파괴, 우회 파괴와 `DestroyActor`가 같은 프레임에 겹치는 경우(둘 다 `Level::Actors()`에 남지 않고 회수된다), `RemoveReferenceAtSwap`(끝 원소가 DestroyRequested여도 성공, 장부·관찰자), `TakeDestroyRequests`(꺼낸 뒤 비고, 회수된 요청은 빠지고, 묶음이 작으면 나눠 꺼낸다), Level 우회 파괴(GC idle 중·cycle 도중 — 소속 Actor 전부 정리·회수), hook 안에서 활성화된 꺼진 Actor의 시작, TickScheduler의 끝에 붙이기·이미 지켜지는 선행 추가의 재구성 생략·의존받는 항목의 미룬 해제·도달 검사 번호 한 바퀴(모듈 Private의 `TickSchedulerTestAccess.h` — 시험 실행 파일은 엔진 계층에도 `Engine/Source/Runtime`을 include 경로로 둬 `<Module/Private/...>`로 읽는다). 각 시험은 고친 지점마다 음성 대조(옛 구현·잘못된 조건을 넣으면 실패)로 확인한다.
 - GPU 시험은 별도 실행(`Sandbox --self-test`): D3D12(WARP 허용)와 OpenGL에서 offscreen 또는 backbuffer readback으로 삼각형·텍스처 픽셀을 확인한다. GPU 없는 CI에서는 실행하지 않고 NOT RUN으로 보고한다.
 - 각 단계는 Debug·ASan 테스트와 `clang-format` 검사를 통과한 상태로 커밋한다.
 
