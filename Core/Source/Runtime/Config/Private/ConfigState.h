@@ -68,6 +68,9 @@ struct ConfigEntry {
     usize section = 0;
     String path;
     String value;
+    // 봉인 뒤 바로 쓰는 층(콘솔·코드·범위 임시 변경)으로 들어온 입력이다(Sync가 순번을 매길 때
+    // 정한다). 그 뒤에 등록한 부팅 독립 콘솔 설정은 이 입력을 받지 않는다(BootSealed — CVar 9절).
+    bool sealedDirectWrite = false;
 };
 
 // 큐 항목이다: 입력 추가 또는 빼기.
@@ -263,6 +266,8 @@ struct ConfigState {
     // 진단을 이미 낸 무시된 시작 뒤 쓰기(이름·층·출처를 줄바꿈으로 이은 키) — 같은 것에 한 번만
     // 낸다.
     Array<String> ignoredBootWrites;
+    // ReportUnresolved가 이미 보고한 이름이다(문맥마다 이름당 한 번).
+    Array<String> reportedUnresolved;
     // sync 지점 앞 hook(등록 순서).
     Array<SyncHook> syncHooks;
     // Sync마다 한 번 부르는 변경 알림(7.3절).
@@ -340,8 +345,23 @@ StringView CheckLayerAllowed(const ConfigState& state, ConfigLayer layer,
                              uint32 settingsFlags) noexcept;
 
 // 봉인 뒤 부팅 변수에 바로 쓰려 할 때의 안내 문구다(이름 뒤에 붙인다 — CVar 9절, 콘솔이 쓴다).
+// 지금 진단 형식(`error BootSealed <이름>: <문구>`)과 스펙 콘솔 형식(`<이름> <문구>`)의 차이는 CVR6
+// 콘솔이 맞춘다.
 inline constexpr StringView BootSealedMessage =
     "is a boot variable; set it in a config file or with --set and restart";
+
+// 부르는 쪽이 바로 효력을 기대하는 층(콘솔·코드·범위 임시 변경)이다. 봉인 뒤 부팅 값에 이 층으로
+// 쓰면 BootSealed로 거부한다(CVar 9절).
+inline bool IsDirectWriteLayer(ConfigLayer layer) noexcept {
+    return layer == ConfigLayer::Console || layer == ConfigLayer::Code ||
+           layer == ConfigLayer::Scoped;
+}
+
+// 부팅 값 플래그(StartupOnly·RestartRequired)가 있는지다.
+inline bool HasBootFlags(uint32 consoleFlags) noexcept {
+    return HasFlag(consoleFlags, ConsoleSettingFlags::StartupOnly) ||
+           HasFlag(consoleFlags, ConsoleSettingFlags::RestartRequired);
+}
 
 // 콘솔 이름으로 쓰는 값의 층 허용 판정이다(콘솔 플래그 — 읽기 전용·품질 구성원·개발 전용·사용자
 // 설정). code에 거부 진단 종류를 쓴다. 쓸 수 있으면 빈 view다. sealedWrite면(봉인 뒤 쓰기 — 넣을

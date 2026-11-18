@@ -268,6 +268,12 @@ public:
         return errors_;
     }
 
+    // 저장하지 못하고 넘친 진단 수를 count만큼 더한다(다른 모음의 진단을 옮길 때 그 모음의 넘친
+    // 수도 함께 넘긴다 — ConfigContext::TakeDiagnostics).
+    void AddOmitted(uint64 count) noexcept {
+        omitted_ += count;
+    }
+
     // 모든 진단을 지운다(한도는 그대로).
     void Clear() noexcept;
 

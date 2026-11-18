@@ -251,7 +251,9 @@ public:
     // 무관하다(Busy가 없다 — 소유자가 스스로 조절한다). 오류: 진단을 남겼으면
     // InvalidArgument(Diagnostics 참조 — 아무것도 큐에 넣지 않는다), layer가 CodeDefault이거나
     // 정의되지 않음 InvalidArgument, 모르는 branch NotFound(진단 UnknownBranch), 다른 스레드
-    // WrongThread, 할당 실패.
+    // WrongThread, 할당 실패. 봉인 뒤 바로 쓰는 층(콘솔·코드·범위 임시 변경)의 입력에 부팅 독립
+    // 콘솔 설정 값이 하나라도 있으면 문서 전체를 거부한다(진단 BootSealed — 같은 입력의 나머지만
+    // 적용하지 않는다).
     Result<void> AddLayerText(ConfigLayer layer, StringView tag, StringView branch,
                               StringView sourceName, StringView text) noexcept;
 
@@ -317,16 +319,19 @@ public:
     // 진단 모음이다(AddLayerText·AddAssignment·Sync가 더한다 — 호출자가 Clear로 비운다).
     ConfigDiagnostics& Diagnostics() noexcept;
 
-    // 모은 진단을 out 뒤에 옮겨 담고 문맥의 모음을 비운다(CVar 12절 — 넘친 수는 옮기지 않는다).
-    // 오류: 초기화 전 InvalidArgument, 다른 스레드 WrongThread, out의 할당 실패(그때 문맥의 모음은
-    // 그대로다).
+    // 모은 진단을 out 뒤에 옮겨 담고 문맥의 모음을 비운다(CVar 12절 — 넘친 수도 out에 더한다). 전부
+    // 옮기거나 하나도 옮기지 않는다. 오류: 초기화 전·out이 문맥의 모음 자신이면 InvalidArgument,
+    // 다른 스레드 WrongThread, out의 할당 실패(그때 out과 문맥의 모음 모두 그대로다).
     Result<void> TakeDiagnostics(ConfigDiagnostics& out) noexcept;
 
     // 시작 뒤에도 등록되지 않은 콘솔 이름의 값(파일 `Settings`·콘솔 이름 대입의 대기 값)을 이름마다
-    // 한 번 Warning UnresolvedName으로 남긴다(CVar 12절). 편집 거리가 MaxSuggestionDistance 이하인
-    // 등록 이름(콘솔 설정·명령 — 출시 규칙에서 숨긴 것 제외)이 있으면 가장 가까운 것을 메시지에
-    // `did you mean '<이름>'?`로 붙인다. 호스트가 CompleteStartup 바로 뒤에 부른다. 반환: 보고한
-    // 이름 수. 오류: 초기화 전 InvalidArgument, 다른 스레드 WrongThread, 할당 실패.
+    // 한 번 Warning UnresolvedName으로 남긴다(CVar 12절). 편집 거리(Core EditDistance — 대소문자
+    // 구분)가 MaxSuggestionDistance 이하인 등록 이름(콘솔 설정·명령 — 출시 규칙에서 숨긴 것
+    // 제외)이 있으면 가장 가까운 것을 메시지에 `did you mean '<이름>'?`로 붙인다. 콘솔 명령 이름에
+    // 넣은 값도 같은 코드로 "명령은 값을 받지 않는다"고 알린다. 한 문맥에서 이미 보고한 이름은 다시
+    // 보고하지 않는다(여러 번 불러도 된다). 호스트가 CompleteStartup 바로 뒤에 부른다. 반환: 이번에
+    // 새로 보고한 이름 수. 오류: 초기화 전 InvalidArgument, 다른 스레드 WrongThread, 할당 실패(그때
+    // 보고하지 못한 이름은 다음 호출이 다시 본다).
     //
     // 사용 예:
     //   REQUIRE(config.CompleteStartup());
@@ -455,11 +460,19 @@ public:
     // NotFound, 다른 스레드 WrongThread.
     Result<void> Unsubscribe(ConfigSubscriptionId id) noexcept;
 
-    // 시작이 끝났음을 알린다. 그 뒤로 부팅 값(StartupOnly·RestartRequired — 콘솔 설정·설정 struct
-    // 필드)은 이번 실행 동안 지금 값을 유지한다: 파일 층(엔진·프로젝트·플랫폼·사용자)에서 온 변경은
-    // 재시작 대기(GetPendingRestarts)로, 그 밖의 층(기기 프로필·품질 같은 파생 층, 세션·콘솔 같은
-    // 휘발 층)에서 온 변경은 Warning BootValueIgnored(같은 이름·층·출처에 한 번)로 남긴다. 쓰기
-    // 자체는 거부하지 않는다. 오류: 다른 스레드 WrongThread.
+    // 시작이 끝났음을 알리고 부팅 값을 봉인한다(CVar 9절). 부팅 변수(BootCVar)의 지금 값을 불변
+    // 부팅 블록으로 굳혀 새 snapshot으로 게시한다(봉인 뒤 snapshot의 부팅 값은 모두 같다 —
+    // BootCVar::Get이 읽는다). 그 뒤로 부팅 값(StartupOnly·RestartRequired — 콘솔 설정·설정 struct
+    // 필드)은 이번 실행 동안 지금 값을 유지한다:
+    // - 독립 콘솔 설정(BootCVar 포함)에 바로 쓰는 층(콘솔·코드·범위 임시 변경)의 쓰기는 넣을 때
+    //   Error BootSealed로 거부한다(이름을 몰라 받은 쓰기는 그 이름을 늦게 등록할 때 받지 않고
+    //   BootSealed를 남긴다).
+    // - 파일 층(엔진·프로젝트·플랫폼·사용자)에서 온 변경은 재시작 대기(GetPendingRestarts)다.
+    // - 그 밖의 층(기기 프로필·품질 같은 파생 층, 세션·서버 같은 휘발 층)과 설정 struct 필드의 콘솔
+    //   쓰기는 Warning BootValueIgnored(같은 이름·층·출처에 한 번)다.
+    // 큐에 남은 쓰기가 있으면(HasPendingChanges) 봉인하지 않고 Busy다 — 먼저 Sync한다. 두 번째
+    // 호출은 아무것도 하지 않고 성공한다. 오류: 초기화 전 InvalidArgument, 남은 쓰기 Busy, 다른
+    // 스레드 WrongThread, 할당 실패(그때는 봉인하지 않는다 — 다시 부를 수 있다).
     Result<void> CompleteStartup() noexcept;
 
     // 마지막으로 게시한 설정 snapshot이다(Docs/Design/CVarSystem.ko.md 7.2절 — CVar 칸과 RenderRead

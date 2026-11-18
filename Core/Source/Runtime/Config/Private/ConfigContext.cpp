@@ -41,7 +41,7 @@ ConfigState::ConfigState(Allocator& allocator, ObjectRegistry& objects) noexcept
       queue(allocator), diagnostics(allocator), regions(allocator), settings(allocator),
       commands(allocator), pendingCommands(allocator), subscriptions(allocator),
       renderSignature(allocator), pendingRestarts(allocator), ignoredBootWrites(allocator),
-      syncHooks(allocator), onSynced(allocator) {
+      reportedUnresolved(allocator), syncHooks(allocator), onSynced(allocator) {
 }
 
 reflection_text::TextCodecOptions ConfigState::CodecOptions() const noexcept {

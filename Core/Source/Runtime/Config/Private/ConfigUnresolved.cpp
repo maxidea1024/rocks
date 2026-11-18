@@ -17,18 +17,18 @@ using detail::ConfigState;
 using detail::ConsoleSettingState;
 using detail::EntryKind;
 
-// 이름이 콘솔 설정·명령으로 등록돼 있는지다.
-bool IsKnownName(const ConfigState& state, StringView name) noexcept {
-    return state.FindSetting(name) != IndexNone || state.FindCommand(name) != IndexNone;
-}
+static_assert(MaxSuggestionDistance <= MaxEditDistanceLimit,
+              "MaxSuggestionDistance must not exceed MaxEditDistanceLimit");
 
 // name에 가장 가까운 등록 이름이다(거리 ≤ MaxSuggestionDistance, 같으면 byte 순서로 앞 — 없으면 빈
-// view). 출시 규칙에서 숨긴 설정은 제안하지 않는다.
+// view). 콘솔 이름은 소문자 규칙이므로 대소문자를 구분해 비교한다. 출시 규칙에서 숨긴 설정은
+// 제안하지 않는다.
 StringView NearestName(const ConfigState& state, StringView name) noexcept {
     StringView best;
     usize bestDistance = MaxSuggestionDistance + 1;
     auto consider = [&](StringView candidate) noexcept {
-        const usize distance = EditDistanceWithin(name, candidate, MaxSuggestionDistance);
+        const usize distance =
+            EditDistance(name, candidate, MaxSuggestionDistance, EditDistanceCase::Sensitive);
         if (distance > MaxSuggestionDistance) {
             return;
         }
@@ -55,38 +55,60 @@ StringView NearestName(const ConfigState& state, StringView name) noexcept {
     return best;
 }
 
-// 대기 이름 하나를 보고한다(같은 이름은 한 번만 — reported에 모은다).
+// 값의 대상 이름 하나를 보고한다(등록된 설정이면 무동작, 이 문맥에서 이미 보고한 이름은 다시
+// 보고하지 않는다 — state.reportedUnresolved). 명령 이름에 값을 넣었으면 따로 알린다(명령은 값을
+// 받지 않는다). 보고했으면 reported를 1 올린다.
 Result<void> ReportName(ConfigState& state, const ConfigEntry& entry, StringView name,
-                        const JsonPosition* position, Array<StringView>& reported) noexcept {
-    if (IsKnownName(state, name)) {
+                        const JsonPosition* position, usize& reported) noexcept {
+    if (state.FindSetting(name) != IndexNone) {
         return Result<void>::Success();
     }
 
-    for (const StringView seen : reported) {
-        if (seen == name) {
+    for (const String& seen : state.reportedUnresolved) {
+        if (seen.View() == name) {
             return Result<void>::Success();
         }
     }
 
-    if (auto pushed = reported.TryPushBack(name); !pushed) {
-        return pushed;
-    }
-
     StringBuilder<160> message(state.allocator);
-    const StringView suggestion = NearestName(state, name);
-    if (suggestion.IsEmpty()) {
-        static_cast<void>(message.TryAppend("no console setting or command has this name"));
+    if (state.FindCommand(name) != IndexNone) {
+        static_cast<void>(
+            message.TryAppend("is a console command, not a setting; it does not take a value"));
     } else {
-        static_cast<void>(message.TryAppendFormat(
-            "no console setting or command has this name; did you mean '{}'?", suggestion));
+        const StringView suggestion = NearestName(state, name);
+        if (suggestion.IsEmpty()) {
+            static_cast<void>(message.TryAppend("no console setting or command has this name"));
+        } else {
+            static_cast<void>(message.TryAppendFormat(
+                "no console setting or command has this name; did you mean '{}'?", suggestion));
+        }
     }
 
     if (auto status = message.Status(); !status) {
         return status;
     }
 
-    return detail::Report(state, ConfigDiagnosticCode::UnresolvedName, ConfigSeverity::Warning,
-                          entry.layer, entry.sourceName.View(), position, name, message.View());
+    // 자리를 먼저 잡아 보고 뒤 기록이 실패하지 않게 한다(실패하면 다음 호출이 다시 본다).
+    String stored(state.allocator);
+    if (auto assigned = stored.TryAssign(name); !assigned) {
+        return assigned;
+    }
+
+    if (auto reserved = state.reportedUnresolved.TryReserve(state.reportedUnresolved.Size() + 1);
+        !reserved) {
+        return reserved;
+    }
+
+    if (auto reportedNow =
+            detail::Report(state, ConfigDiagnosticCode::UnresolvedName, ConfigSeverity::Warning,
+                           entry.layer, entry.sourceName.View(), position, name, message.View());
+        !reportedNow) {
+        return reportedNow;
+    }
+
+    static_cast<void>(state.reportedUnresolved.TryPushBack(Move(stored))); // 예약했다
+    ++reported;
+    return Result<void>::Success();
 }
 
 } // namespace
@@ -102,7 +124,7 @@ Result<usize> ConfigContext::ReportUnresolved() noexcept {
     }
 
     // 적용 중인 입력에서 콘솔 이름(파일의 `Settings` 멤버·콘솔 이름 대입)을 넣은 순서로 본다.
-    Array<StringView> reported(*allocator_);
+    usize reported = 0;
     for (const UniquePtr<ConfigEntry>& owned : state->entries) {
         const ConfigEntry& entry = *owned;
         if (entry.kind == EntryKind::Console) {
@@ -128,7 +150,7 @@ Result<usize> ConfigContext::ReportUnresolved() noexcept {
         }
     }
 
-    return Result<usize>::Success(reported.Size());
+    return Result<usize>::Success(reported);
 }
 
 Result<void> ConfigContext::TakeDiagnostics(ConfigDiagnostics& out) noexcept {
@@ -141,12 +163,20 @@ Result<void> ConfigContext::TakeDiagnostics(ConfigDiagnostics& out) noexcept {
         return Result<void>::Failure(ErrorCode::WrongThread);
     }
 
+    if (&out == &state->diagnostics) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 전부 옮기거나 하나도 옮기지 않는다(중간 실패면 out을 처음 자리로 되돌린다).
+    const ConfigDiagnosticsMark mark = out.Mark();
     for (usize index = 0; index < state->diagnostics.Count(); ++index) {
         if (auto added = out.Add(state->diagnostics.Get(index)); !added) {
+            out.Rewind(mark);
             return added;
         }
     }
 
+    out.AddOmitted(state->diagnostics.Omitted());
     state->diagnostics.Clear();
     return Result<void>::Success();
 }
@@ -169,8 +199,7 @@ ConfigContext::DescribeConsoleSetting(ConsoleSettingId id) const noexcept {
     info.kind = setting.kind;
     info.flags = setting.flags;
     info.value = setting.text.View();
-    info.boot = HasFlag(setting.flags, ConsoleSettingFlags::StartupOnly) ||
-                HasFlag(setting.flags, ConsoleSettingFlags::RestartRequired);
+    info.boot = detail::HasBootFlags(setting.flags);
     for (const UniquePtr<detail::PendingRestart>& pending : state->pendingRestarts) {
         if (pending->name.View() == info.name) {
             info.pendingRestart = pending->pending.View();

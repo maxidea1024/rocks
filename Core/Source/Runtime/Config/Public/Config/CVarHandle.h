@@ -272,9 +272,10 @@ private:
 };
 
 // 이번 실행 동안 고정인 설정 변수다(9절 — UE ECVF_ReadOnly + 시작 시 값). `cvar::Boot` 빌더로
-// 정의한다. 값은 파일·`--set` 등 시작 전 층에서 정하고, ConfigContext::CompleteStartup 뒤에는 이번
-// 실행 값이 바뀌지 않는다(지금은 Config의 StartupOnly 규칙 — 봉인 뒤 쓰기 거부 BootSealed는 CVR4).
-// `Set`·`Clear`가 없다(부르면 컴파일 오류).
+// 정의한다. 값은 파일·`--set` 등 시작 전 층에서 정하고, ConfigContext::CompleteStartup(봉인) 뒤에는
+// 이번 실행 값이 바뀌지 않는다: 이름으로 하는 콘솔·코드 쓰기는 넣을 때 Error BootSealed로 거부하고,
+// 파일 층 변경은 재시작 대기, 파생·휘발 층 변경은 Warning BootValueIgnored다. `Set`·`Clear`가
+// 없다(부르면 컴파일 오류).
 //
 // 사용 예:
 //   BootCVar<String> GraphicsBackend = cvar::Boot("render.backend", "vulkan")
@@ -313,10 +314,11 @@ public:
     }
 
     // 이번 실행의 값이다(9절): 이 스레드에 묶인 snapshot의 부팅 블록을 읽는다(봉인 때 굳은 값 —
-    // 봉인 뒤 snapshot이 모두 같은 블록을 공유하므로 어느 스레드·프레임이든 같다). 봉인
-    // (ConfigContext::CompleteStartup) 전에 부르면 Debug·Development에서 Fatal이다(초기화 순서 버그
-    // — 출시 빌드는 지금 칸을 읽는다). 봉인 뒤에 등록한 부팅 변수는 등록 때 값으로 굳는다.
-    // 묶음·등록 규칙은 CVar::Get과 같다.
+    // 봉인 뒤 snapshot의 부팅 값은 모두 같으므로 어느 스레드·프레임이든 같다). 묶인 snapshot이 봉인
+    // 전 snapshot이면 Debug·Development에서 Fatal이다(초기화 순서 버그 — 봉인 전 호출뿐 아니라
+    // 봉인을 넘겨 살아 있는 명시 SnapshotBinding이나 다른 스레드가 쥔 봉인 전 snapshot도 같다;
+    // 출시 빌드는 그 snapshot의 지금 칸을 읽는다). 봉인 뒤에 등록한 부팅 변수는 등록 때 값으로
+    // 굳는다. 묶음·등록 규칙은 CVar::Get과 같다.
     GetResult<T> Get() const noexcept {
         return detail::ReadBound<T, true>(definition_);
     }

@@ -111,8 +111,8 @@ public:
 
     // ---- 부팅 블록(9절) ----
 
-    // 문맥이 봉인(CompleteStartup)된 뒤에 만든 snapshot인지다. 봉인 뒤 snapshot은 모두 같은 부팅
-    // 블록을 공유한다.
+    // 문맥이 봉인(CompleteStartup)된 뒤에 만든 snapshot인지다. 봉인 뒤 snapshot의 부팅 값은 모두
+    // 같다(조각은 공유하고, 봉인 뒤 등록한 부팅 변수의 칸만 그 조각을 복사해 더한다).
     bool IsSealed() const noexcept {
         return sealed_;
     }

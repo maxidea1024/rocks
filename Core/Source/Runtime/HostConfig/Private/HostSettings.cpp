@@ -532,11 +532,10 @@ Result<void> HostSettings::CompleteStartup() noexcept {
     }
 
     // 시작이 끝났는데 아무도 등록하지 않은 이름의 값은 오타일 수 있다(CVar 12절 — 경고만, 시작은
-    // 계속한다).
+    // 계속한다). 보고 자체가 할당 실패로 끝나도 기록만 하고 시작을 이어 간다(봉인은 끝났다).
     if (auto unresolved = context.ReportUnresolved(); !unresolved) {
         Log::Error(LogHostConfig, "Unresolved config names could not be reported: {Error}",
                    ErrorCodeName(unresolved.Error()));
-        return Result<void>::Failure(unresolved.Error());
     }
 
     ReportWarnings();

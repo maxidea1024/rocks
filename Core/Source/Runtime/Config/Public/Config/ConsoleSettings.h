@@ -34,10 +34,13 @@ enum class ConsoleSettingFlags : uint32 {
     DevelopmentOnly = 2,
     // 설정 snapshot에 넣는다(UE ECVF_RenderThreadSafe).
     RenderRead = 4,
-    // 바뀐 값이 다음 시작 때 효력을 갖는다(시작 뒤에는 지금 값을 유지 — CompleteStartup 참고).
+    // 바뀐 값이 다음 시작 때 효력을 갖는다(시작 뒤에는 지금 값을 유지 — StartupOnly와 같은 규칙,
+    // CompleteStartup 참고).
     RestartRequired = 8,
     // 시작(ConfigContext::CompleteStartup) 뒤에는 이번 실행 값이 바뀌지 않는다(RestartRequired와
-    // 같은 규칙 — 파일 층 변경은 재시작 대기, 그 밖은 BootValueIgnored).
+    // 같은 규칙): 독립 콘솔 설정에 바로 쓰는 층(콘솔·코드·범위 임시 변경)의 쓰기는 넣을 때 Error
+    // BootSealed로 거부하고, 파일 층 변경은 재시작 대기, 파생·휘발 층 변경은 Warning
+    // BootValueIgnored다. 설정 struct 필드는 콘솔 이름으로 써도 BootValueIgnored다(Config 8절).
     StartupOnly = 16,
     // 사용자 층이 쓸 수 있다.
     UserConfig = 32,

@@ -129,22 +129,19 @@ uint32 ConsoleFlagsOfField(uint32 settingsFlags) noexcept {
 
 StringView CheckConsoleLayer(bool releaseRules, ConfigLayer layer, uint32 consoleFlags,
                              ConfigDiagnosticCode& code, bool sealedWrite) noexcept {
-    // 봉인 뒤 부팅 변수에 바로 쓰는 층(콘솔·코드·범위 임시 변경)은 쓰기 때 거부한다(CVar 9절 — 부른
-    // 쪽이 바로 효력을 기대하므로 결과로 알린다). 파일 층·파생 층·휘발 층은 받고 Sync가 지금 값을
-    // 지킨다.
-    if (sealedWrite &&
-        (HasFlag(consoleFlags, ConsoleSettingFlags::StartupOnly) ||
-         HasFlag(consoleFlags, ConsoleSettingFlags::RestartRequired)) &&
-        (layer == ConfigLayer::Console || layer == ConfigLayer::Code ||
-         layer == ConfigLayer::Scoped)) {
-        code = ConfigDiagnosticCode::BootSealed;
-        return BootSealedMessage;
-    }
-
+    // 출시 규칙의 개발 전용 판정이 먼저다(출시 빌드에서는 그 설정이 없는 것과 같다).
     code = ConfigDiagnosticCode::LayerNotAllowed;
     if (releaseRules && HasFlag(consoleFlags, ConsoleSettingFlags::DevelopmentOnly) &&
         layer != ConfigLayer::CodeDefault) {
         return "a DevelopmentOnly value keeps its code default under release rules";
+    }
+
+    // 봉인 뒤 부팅 변수에 바로 쓰는 층(콘솔·코드·범위 임시 변경)은 쓰기 때 거부한다(CVar 9절 — 부른
+    // 쪽이 바로 효력을 기대하므로 결과로 알린다). 파일 층·파생 층·휘발 층은 받고 Sync가 지금 값을
+    // 지킨다.
+    if (sealedWrite && HasBootFlags(consoleFlags) && IsDirectWriteLayer(layer)) {
+        code = ConfigDiagnosticCode::BootSealed;
+        return BootSealedMessage;
     }
 
     if (layer == ConfigLayer::Console &&
@@ -558,6 +555,22 @@ Result<void> RecomputeConsoleSetting(ConfigState& state, const ConsoleSettingSta
 
             contribution = converted.View();
         } else {
+            continue;
+        }
+
+        // 봉인 뒤 바로 쓰는 층으로 들어온 입력은 그 뒤에 등록한 부팅 값에 닿지 않는다(쓰기 때
+        // 이름을 몰라 거부하지 못한 늦은 등록 — CVar 9절). 등록 때(report) 한 번 알린다.
+        if (entry->sealedDirectWrite && HasBootFlags(setting.flags)) {
+            if (report) {
+                if (auto reported =
+                        Report(state, ConfigDiagnosticCode::BootSealed, ConfigSeverity::Error,
+                               entry->layer, entry->sourceName.View(), position,
+                               setting.name.View(), BootSealedMessage);
+                    !reported) {
+                    return reported;
+                }
+            }
+
             continue;
         }
 
@@ -1558,8 +1571,13 @@ Result<void> ConfigContext::CompleteStartup() noexcept {
         return Result<void>::Success();
     }
 
+    // 큐에 남은 쓰기는 마지막 Sync 값에 들어 있지 않으므로 그대로 봉인하면 빠진다. 먼저 Sync한다.
+    if (HasPendingChanges()) {
+        return Result<void>::Failure(ErrorCode::Busy);
+    }
+
     // 봉인: 부팅 변수(BootCVar)의 지금 값을 불변 부팅 블록으로 굳혀 게시한다(CVar 9절 — 봉인 뒤
-    // snapshot이 모두 공유한다). 게시가 실패하면 봉인하지 않는다.
+    // snapshot의 부팅 값은 모두 같다). 게시가 실패하면 봉인하지 않는다.
     Array<detail::SlotWrite> boot(*allocator_);
     for (const UniquePtr<ConsoleSettingState>& setting : state->settings) {
         if (setting->definition == nullptr || setting->definition->kind != cvar::HandleKind::Boot) {

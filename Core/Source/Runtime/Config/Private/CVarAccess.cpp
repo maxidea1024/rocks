@@ -119,6 +119,10 @@ Result<void> DrainQueue(ConfigState& state) noexcept {
 
         if (change->entry.Get() != nullptr && change->entry->sequence == 0) {
             change->entry->sequence = state.nextSequence++;
+            // 봉인 중에는 큐가 비어 있으므로(CompleteStartup은 남은 쓰기가 있으면 Busy) 여기서 본
+            // 봉인 상태가 넣은 때의 상태다.
+            change->entry->sealedDirectWrite =
+                state.startupComplete && IsDirectWriteLayer(change->entry->layer);
         }
 
         if (kept != index) {
