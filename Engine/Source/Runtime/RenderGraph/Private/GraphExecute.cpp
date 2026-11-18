@@ -1,23 +1,65 @@
 #include "RenderGraphInternal.h"
 
-// 그래프 실행이다: 첫 사용 pass 직전 풀 할당, Raster pass마다 장치 기록 열기, prologue 즉시 전이,
-// pass 기록 함수와 CPU·GPU 구간, 그래프 끝 마무리(Docs/Design/RenderBase.ko.md 7.1절 실행 행, UE
-// RC/Private/RenderGraphBuilder.cpp:2104–2167, 3424–3528).
+// 그래프 실행이다: 그래프 시작 업로드, 첫 사용 pass 직전 할당(같은 그래프 안 재사용 자리 또는 풀),
+// Raster pass마다 장치 기록 열기, prologue 즉시 전이, pass 기록 함수와 CPU·GPU 구간, 그래프 끝
+// 마무리(Docs/Design/RenderBase.ko.md 7.1절 실행·업로드 행, 8절 RG2, UE
+// RC/Private/RenderGraphBuilder.cpp:2104–2167, 2691–2837, 3424–3528).
 namespace rocks::render::detail {
 
 using graphics::ResourceAccess;
 
-namespace {
-
-// 만든 자원의 장치 자원을 풀에서 받는다.
-Result<void> AllocateResource(GraphState& state, uint32 index) noexcept {
+Result<void> AllocateResource(FrameArena& arena, GraphState& state, uint32 index) noexcept {
     ResourceRecord& resource = state.resources[index];
     if (resource.allocated) {
         return Result<void>::Success();
     }
 
+    // Immediate 모드(계획 없음)는 자원마다 새 자리다.
+    if (resource.physical == GraphIndexNone) {
+        PhysicalResource physical;
+        physical.owner = index;
+        physical.held = true;
+        auto pushed = state.physicals.TryPushBack(arena, physical);
+        if (!pushed) {
+            return Result<void>::Failure(
+                RecordGraphError(state, pushed.Error(), false, "'{}' could not be allocated ({})",
+                                 resource.name, ErrorCodeName(pushed.Error())));
+        }
+
+        resource.physical = static_cast<uint32>(state.physicals.Size() - 1);
+    }
+
+    PhysicalResource& physical = state.physicals[resource.physical];
+    if (physical.acquired) {
+        // 같은 그래프의 앞 자원이 놓은 객체를 이어 쓴다(풀에 가지 않는다).
+        resource.device = physical.device;
+        resource.poolEntry = physical.entry;
+        resource.allocated = true;
+        ++state.stats.reusedWithinGraph;
+        return Result<void>::Success();
+    }
+
+    Span<const uint8> pixels;
+    if (resource.kind == GraphResourceKind::Texture &&
+        resource.textureDesc.usage == graphics::TextureUsage::Sampled) {
+        // Immediate 모드는 컴파일 검사가 없으므로 여기서 mip 사슬이 다 올라왔는지 본다.
+        for (uint32 mip = 0; mip < resource.subresources; ++mip) {
+            if (!state.tracks[resource.firstTrack + mip].uploaded) {
+                return Result<void>::Failure(RecordGraphError(
+                    state, ErrorCode::InvalidArgument, true,
+                    "sampled graph texture '{}' has no upload for mip {}", resource.name, mip));
+            }
+        }
+
+        pixels =
+            Span<const uint8>(resource.uploadPixels,
+                              static_cast<usize>(graphics::MipChainBytes(
+                                  resource.textureDesc.format, resource.textureDesc.width,
+                                  resource.textureDesc.height, 1, resource.textureDesc.mipLevels)));
+    }
+
     auto acquired = resource.kind == GraphResourceKind::Texture
-                        ? state.pool->AcquireTexture(resource.textureDesc)
+                        ? state.pool->AcquireTexture(resource.textureDesc, pixels)
                         : state.pool->AcquireBuffer(resource.bufferDesc);
     if (!acquired) {
         return Result<void>::Failure(
@@ -25,8 +67,11 @@ Result<void> AllocateResource(GraphState& state, uint32 index) noexcept {
                              resource.name, ErrorCodeName(acquired.Error())));
     }
 
-    resource.device = acquired.Value().device;
-    resource.poolEntry = acquired.Value().entry;
+    physical.acquired = true;
+    physical.entry = acquired.Value().entry;
+    physical.device = acquired.Value().device;
+    resource.device = physical.device;
+    resource.poolEntry = physical.entry;
     resource.allocated = true;
     if (acquired.Value().reused) {
         ++state.stats.reusedResources;
@@ -34,8 +79,53 @@ Result<void> AllocateResource(GraphState& state, uint32 index) noexcept {
         ++state.stats.createdResources;
     }
 
+    // 텍스처 업로드는 풀이 생성 초기 데이터나 mip별 갱신으로 이미 올렸다.
+    if (!pixels.IsEmpty()) {
+        state.stats.uploads += resource.subresources;
+    }
+
+    // 버퍼 업로드를 선언 순서대로 올린다(장치 업로드 경로: 다음 제출 앞에서 실행된다).
+    if (resource.kind == GraphResourceKind::Buffer && resource.uploadTarget) {
+        for (const BufferUpload& upload : state.bufferUploads) {
+            if (upload.resource != index) {
+                continue;
+            }
+
+            auto updated =
+                state.device->UpdateBuffer(graphics::BufferHandle{resource.device}, upload.offset,
+                                           Span<const uint8>(upload.data, upload.size));
+            if (!updated) {
+                return Result<void>::Failure(
+                    RecordGraphError(state, updated.Error(), false, "upload into '{}' failed ({})",
+                                     resource.name, ErrorCodeName(updated.Error())));
+            }
+
+            ++state.stats.uploads;
+        }
+    }
+
     return Result<void>::Success();
 }
+
+Result<void> ExecuteUploads(FrameArena& arena, GraphState& state) noexcept {
+    for (uint32 index = 0; index < state.resources.Size(); ++index) {
+        const ResourceRecord& resource = state.resources[index];
+        // 남은 pass가 쓰지 않고 export도 아니면 올리지 않는다(할당도 하지 않는다).
+        const bool live = resource.references != 0 || resource.exported;
+        if (resource.imported || !resource.uploadTarget || !live) {
+            continue;
+        }
+
+        auto allocated = AllocateResource(arena, state, index);
+        if (!allocated) {
+            return allocated;
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+namespace {
 
 // 열린 장치 기록을 제출한다.
 Result<void> CloseRecording(GraphState& state) noexcept {
@@ -136,10 +226,11 @@ Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& stat
     PassRecord& record = state.passes[pass];
     const char* passName = record.name->Name() != nullptr ? record.name->Name() : "";
 
-    // 첫 사용 pass 직전에 풀에서 받는다(두 모드가 같은 지점이다).
+    // 첫 사용 pass 직전에 받는다(두 모드가 같은 지점이다. Deferred의 업로드 대상은 그래프 시작에
+    // 이미 받았다).
     for (uint32 index = record.firstUse; index < record.firstUse + record.useCount; ++index) {
         const uint32 resource = state.uses[index].resource;
-        auto allocated = AllocateResource(state, resource);
+        auto allocated = AllocateResource(arena, state, resource);
         if (!allocated) {
             return allocated;
         }
@@ -257,30 +348,14 @@ Result<void> FinishGraph(FrameArena& arena, GraphState& state, bool success) noe
         }
 
         if (resource.exported) {
-            // 소유를 export handle로 넘긴다. 실패한 그래프의 export handle은 Failed다.
+            // 풀 자원을 export handle에 잇는다(결정 R15: 자원은 풀 소속 그대로이고 handle의
+            // Retire는 fence 뒤 풀 반납이다). 실패한 그래프의 export handle은 Failed다.
             bool bound = false;
             if (completed && resource.allocated) {
-                auto detached = state.pool->Detach(resource.poolEntry);
-                if (detached) {
-                    auto attached =
-                        resource.kind == GraphResourceKind::Texture
-                            ? state.handles->BindTexture(resource.handle,
-                                                         graphics::TextureHandle{detached.Value()})
-                            : state.handles->BindBuffer(resource.handle,
-                                                        graphics::BufferHandle{detached.Value()});
-                    bound = attached.IsOk();
-                    if (!bound) {
-                        // 잇지 못한 장치 자원은 바로 회수한다(장치가 마지막 사용 fence 뒤에
-                        // 놓는다).
-                        if (resource.kind == GraphResourceKind::Texture) {
-                            state.device->Retire(graphics::TextureHandle{detached.Value()});
-                        } else {
-                            state.device->Retire(graphics::BufferHandle{detached.Value()});
-                        }
-                    }
-
-                    resource.allocated = false;
-                }
+                PhysicalResource& physical = state.physicals[resource.physical];
+                auto exported = state.pool->Export(physical.entry, *state.handles, resource.handle);
+                bound = exported.IsOk();
+                physical.exported = bound;
             }
 
             if (!bound) {
@@ -291,10 +366,17 @@ Result<void> FinishGraph(FrameArena& arena, GraphState& state, bool success) noe
             }
         }
 
-        if (resource.allocated) {
-            state.pool->Release(resource.poolEntry, lastUse, state.frame);
-            resource.allocated = false;
+        resource.allocated = false;
+    }
+
+    // 풀에서 받은 자리를 그래프 끝에 한 번씩 돌려준다(같은 그래프 안에서 여러 자원이 쓴 자리도
+    // 하나다). export한 자리는 handle이 가진다.
+    for (PhysicalResource& physical : state.physicals) {
+        if (physical.acquired && !physical.exported) {
+            state.pool->Release(physical.entry, lastUse, state.frame);
         }
+
+        physical.acquired = false;
     }
 
     state.pool->Evict(state.frame);

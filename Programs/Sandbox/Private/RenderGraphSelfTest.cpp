@@ -11,6 +11,7 @@ namespace {
 
 using namespace rocks;
 using namespace rocks::graphics;
+using rocks::render::GraphBuffer;
 using rocks::render::GraphLoadAction;
 using rocks::render::GraphPassAccesses;
 using rocks::render::GraphPassContext;
@@ -18,6 +19,7 @@ using rocks::render::GraphPassFlags;
 using rocks::render::GraphPassKind;
 using rocks::render::GraphResourcePool;
 using rocks::render::GraphTexture;
+using rocks::render::ReleaseRetiredResource;
 using rocks::render::RenderGraph;
 using rocks::render::RenderGraphDesc;
 using rocks::render::RenderHandle;
@@ -32,6 +34,11 @@ constexpr int ChannelTolerance = 8;
 TraceScopeName SceneName("SelfTest.Scene");
 TraceScopeName UnusedName("SelfTest.Unused");
 TraceScopeName CompositeName("SelfTest.Composite");
+TraceScopeName CopyName("SelfTest.Copy");
+TraceScopeName ClearName("SelfTest.Clear");
+
+// 업로드·복사 시험 버퍼 크기다(4 byte 배수).
+constexpr uint32 CopyBytes = 256;
 
 uint32 failures = 0;
 const char* backendName = "";
@@ -186,6 +193,171 @@ bool RunGraph(GraphBench& bench, RenderHandle output, RenderHandle history, Rend
     return true;
 }
 
+// 그래프 오류를 찍는다.
+void PrintGraphError(const RenderGraph& graph) noexcept {
+    printf("    graph error: %.*s\n", static_cast<int>(graph.LastError().ByteCount()),
+           graph.LastError().Data());
+}
+
+// 같은 그래프 안 재사용(RG2): A(빨강) → B(A를 읽음) → C(파랑으로 clear, A가 놓은 객체를 이어 씀) →
+// output(B를 합성) · second(C를 합성). B가 빨강이면 C가 A의 객체를 이어 쓴 뒤에도 앞 pass의 결과가
+// 맞고, C가 파랑이면 이어 쓴 객체의 이전 내용이 새지 않았다.
+bool RunReuseGraph(GraphBench& bench, RenderHandle output, RenderHandle second) noexcept {
+    RenderGraph graph(bench.Desc());
+    auto first = graph.ImportTexture(output, "Output");
+    auto other = graph.ImportTexture(second, "Second");
+    auto a = graph.CreateTexture(TargetDesc(), "A");
+    auto b = graph.CreateTexture(TargetDesc(), "B");
+    auto c = graph.CreateTexture(TargetDesc(), "C");
+    if (!first || !other || !a || !b || !c) {
+        PrintGraphError(graph);
+        return false;
+    }
+
+    GraphPassAccesses a0(graph);
+    a0.RenderTarget(a.Value(), GraphLoadAction::Clear, {0, 0, 0, 1});
+    auto p0 =
+        graph.AddPass(SceneName, GraphPassKind::Raster, GraphPassFlags::None, a0,
+                      FullScreen(bench.renderer, bench.redTexture, {}, LinearColor(1, 1, 1, 1)));
+    GraphPassAccesses a1(graph);
+    a1.Texture(a.Value(), ResourceAccess::SrvGraphics)
+        .RenderTarget(b.Value(), GraphLoadAction::Clear, {0, 1, 0, 1});
+    auto p1 = graph.AddPass(CompositeName, GraphPassKind::Raster, GraphPassFlags::None, a1,
+                            FullScreen(bench.renderer, {}, a.Value(), LinearColor(1, 1, 1, 1)));
+    GraphPassAccesses a2(graph);
+    a2.RenderTarget(c.Value(), GraphLoadAction::Clear, {0, 0, 1, 1});
+    auto p2 = graph.AddPass(ClearName, GraphPassKind::Raster, GraphPassFlags::None, a2,
+                            [](GraphPassContext& pass) noexcept { (void)pass; });
+    GraphPassAccesses a3(graph);
+    a3.Texture(b.Value(), ResourceAccess::SrvGraphics)
+        .RenderTarget(first.Value(), GraphLoadAction::Clear, {0, 0, 0, 1});
+    auto p3 = graph.AddPass(CompositeName, GraphPassKind::Raster, GraphPassFlags::None, a3,
+                            FullScreen(bench.renderer, {}, b.Value(), LinearColor(1, 1, 1, 1)));
+    GraphPassAccesses a4(graph);
+    a4.Texture(c.Value(), ResourceAccess::SrvGraphics)
+        .RenderTarget(other.Value(), GraphLoadAction::Clear, {0, 0, 0, 1});
+    auto p4 = graph.AddPass(CompositeName, GraphPassKind::Raster, GraphPassFlags::None, a4,
+                            FullScreen(bench.renderer, {}, c.Value(), LinearColor(1, 1, 1, 1)));
+    if (!p0 || !p1 || !p2 || !p3 || !p4 || !graph.Execute()) {
+        PrintGraphError(graph);
+        return false;
+    }
+
+    Check(graph.Lifetime(c.Value()).reusedWithinGraph, "C takes the object A released");
+    Check(graph.Stats().reusedWithinGraph == 1, "one in-graph reuse");
+    return true;
+}
+
+// 그래프 안 업로드와 버퍼 재사용: 업로드한 source를 복사 pass가 middle로, 다시 last로 복사한다.
+// last는 source가 놓은 객체를 이어 쓴다(버퍼 첫 전이 before Discard를 장치에 내린다). middle·last를
+// export해 바이트를 읽는다. 기록을 여는 clear pass가 앞에 있다(열린 기록 없는 Copy pass는 GX4 전).
+bool RunUploadCopyGraph(GraphBench& bench, const uint8* data, RenderHandle* middleOut,
+                        RenderHandle* lastOut) noexcept {
+    RenderGraph graph(bench.Desc());
+    auto target = graph.CreateTexture(TargetDesc(), "Opener");
+    BufferDesc desc;
+    desc.size = CopyBytes;
+    auto source = graph.CreateBuffer(desc, "Source");
+    auto middle = graph.CreateBuffer(desc, "Middle");
+    auto last = graph.CreateBuffer(desc, "Last");
+    if (!target || !source || !middle || !last ||
+        !graph.UploadBuffer(source.Value(), Span<const uint8>(data, CopyBytes))) {
+        PrintGraphError(graph);
+        return false;
+    }
+
+    GraphPassAccesses opener(graph);
+    opener.RenderTarget(target.Value(), GraphLoadAction::Clear, {0, 0, 0, 1});
+    auto p0 = graph.AddPass(ClearName, GraphPassKind::Raster, GraphPassFlags::HasSideEffects,
+                            opener, [](GraphPassContext& pass) noexcept { (void)pass; });
+    auto copy = [](GraphBuffer to, GraphBuffer from) noexcept {
+        return [to, from](GraphPassContext& pass) noexcept {
+            auto copied =
+                pass.Commands().CopyBuffer(pass.Buffer(to), 0, pass.Buffer(from), 0, CopyBytes);
+            Check(copied.IsOk(), "graph copy pass copies the buffer");
+        };
+    };
+    GraphPassAccesses c1(graph);
+    c1.Buffer(source.Value(), ResourceAccess::CopySource)
+        .Buffer(middle.Value(), ResourceAccess::CopyDestination);
+    auto p1 = graph.AddPass(CopyName, GraphPassKind::Copy, GraphPassFlags::None, c1,
+                            copy(middle.Value(), source.Value()));
+    GraphPassAccesses c2(graph);
+    c2.Buffer(middle.Value(), ResourceAccess::CopySource)
+        .Buffer(last.Value(), ResourceAccess::CopyDestination);
+    auto p2 = graph.AddPass(CopyName, GraphPassKind::Copy, GraphPassFlags::None, c2,
+                            copy(last.Value(), middle.Value()));
+    auto middleHandle = graph.ExportBuffer(middle.Value());
+    auto lastHandle = graph.ExportBuffer(last.Value());
+    if (!p0 || !p1 || !p2 || !middleHandle || !lastHandle || !graph.Execute()) {
+        PrintGraphError(graph);
+        return false;
+    }
+
+    Check(graph.Stats().uploads == 1, "the upload runs once");
+    Check(graph.Lifetime(last.Value()).reusedWithinGraph, "Last takes the object Source released");
+    *middleOut = middleHandle.Value();
+    *lastOut = lastHandle.Value();
+    return true;
+}
+
+// export handle을 Retire한다(렌더 lane의 Retire 경로와 같다: 풀 반납, 결정 R15).
+void RetireExport(RenderHandleTable& handles, Device& device, RenderHandle handle) noexcept {
+    auto retired = handles.BeginRetire(handle);
+    Check(retired && !retired.Value().deferred, "export handle retires without leases");
+    if (retired) {
+        ReleaseRetiredResource(device, handle, retired.Value());
+    }
+}
+
+// export한 버퍼 바이트가 data와 같은지다.
+bool BufferMatches(Device& device, RenderHandleTable& handles, RenderHandle handle,
+                   const uint8* data) noexcept {
+    auto buffer = handles.Buffer(handle);
+    uint8 read[CopyBytes] = {};
+    if (!buffer || !device.ReadBuffer(buffer.Value(), 0, Span<uint8>(read)).IsOk()) {
+        return false;
+    }
+
+    for (uint32 index = 0; index < CopyBytes; ++index) {
+        if (read[index] != data[index]) {
+            printf("    byte %u is %u, expected %u\n", index, read[index], data[index]);
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// Sampled 그래프 텍스처(1×1)에 color를 올려 output에 합성한다(두 번째부터는 풀이 mip 갱신으로
+// 올린다).
+bool RunSampledUploadGraph(GraphBench& bench, RenderHandle output, const uint8* color) noexcept {
+    RenderGraph graph(bench.Desc());
+    TextureDesc desc;
+    desc.width = 1;
+    desc.height = 1;
+    desc.usage = TextureUsage::Sampled;
+    desc.sampler.filter = Filter::Nearest;
+    auto lut = graph.CreateTexture(desc, "Uploaded");
+    auto target = graph.ImportTexture(output, "Output");
+    if (!lut || !target || !graph.UploadTexture(lut.Value(), 0, Span<const uint8>(color, 4))) {
+        PrintGraphError(graph);
+        return false;
+    }
+
+    GraphPassAccesses accesses(graph);
+    accesses.Texture(lut.Value(), ResourceAccess::SrvGraphics)
+        .RenderTarget(target.Value(), GraphLoadAction::Clear, {0, 0, 0, 1});
+    auto pass = graph.AddPass(CompositeName, GraphPassKind::Raster, GraphPassFlags::None, accesses,
+                              FullScreen(bench.renderer, {}, lut.Value(), LinearColor(1, 1, 1, 1)));
+    if (!pass || !graph.Execute()) {
+        PrintGraphError(graph);
+        return false;
+    }
+
+    return true;
+}
+
 } // namespace
 
 uint32 RunRenderGraphChecks(const char* name, Device& device, sample::Renderer& renderer,
@@ -250,6 +422,81 @@ uint32 RunRenderGraphChecks(const char* name, Device& device, sample::Renderer& 
               "graph with a pooled scene texture composites red");
     }
 
+    // 결정 R15: history handle의 Retire는 장치 해제가 아니라 풀 반납이다. GPU 완료를 기다린 뒤
+    // (fence gate를 결정적으로 통과) 다음 그래프의 장면 텍스처가 그 객체를 장치 생성 없이 다시
+    // 쓴다.
+    if (ok) {
+        const uint64 createdBefore = pool.Stats().created;
+        RetireExport(handles, device, history);
+        Check(pool.Stats().returning == 1, "retired history waits for its fence in the pool");
+        Check(device.WaitIdle().IsOk(), "wait idle before reusing the history");
+        auto cleared = arena.Reset();
+        (void)cleared;
+        ok = RunGraph(bench, output.Value(), {}, nullptr);
+        Check(ok && pool.Stats().returned == 1 && pool.Stats().created == createdBefore,
+              "the returned history is reused without a device creation");
+    }
+
+    // RG2: 같은 그래프 안 재사용(픽셀).
+    auto secondTexture = device.CreateTexture(TargetDesc(), {});
+    auto second = handles.Reserve(RenderResourceKind::Texture);
+    if (ok && secondTexture && second &&
+        handles.BindTexture(second.Value(), secondTexture.Value()).IsOk()) {
+        auto cleared = arena.Reset();
+        (void)cleared;
+        ok = RunReuseGraph(bench, output.Value(), second.Value());
+        Check(ok && device.ReadPixels(outputTexture.Value(), pixels.View()).IsOk() &&
+                  CenterIs(pixels, 255, 0, 0),
+              "in-graph reuse keeps the earlier result red");
+        Check(ok && device.ReadPixels(secondTexture.Value(), pixels.View()).IsOk() &&
+                  CenterIs(pixels, 0, 0, 255),
+              "the reused texture shows only its own blue clear");
+    } else {
+        Check(false, "second output creation");
+    }
+
+    // RG2: 그래프 안 업로드 → 복사 pass 두 번(버퍼 재사용·Discard 전이) → export 바이트. 두 번째
+    // 그래프는 반납된 export 버퍼를 다시 쓴다(GPU 완료를 기다린 뒤).
+    for (uint32 run = 0; ok && run < 2; ++run) {
+        uint8 data[CopyBytes];
+        for (uint32 index = 0; index < CopyBytes; ++index) {
+            data[index] = static_cast<uint8>(index * 7 + run * 13 + 1);
+        }
+
+        auto cleared = arena.Reset();
+        (void)cleared;
+        const uint64 buffersBefore = pool.Stats().created;
+        RenderHandle middle;
+        RenderHandle last;
+        ok = RunUploadCopyGraph(bench, data, &middle, &last);
+        Check(ok && BufferMatches(device, handles, middle, data),
+              "uploaded bytes reach the first copy");
+        Check(ok && BufferMatches(device, handles, last, data),
+              "uploaded bytes reach the reused buffer");
+        if (run == 1) {
+            Check(pool.Stats().created == buffersBefore,
+                  "returned export buffers are reused without device creations");
+        }
+
+        if (ok) {
+            RetireExport(handles, device, middle);
+            RetireExport(handles, device, last);
+            Check(device.WaitIdle().IsOk(), "wait idle after the copy graph");
+        }
+    }
+
+    // RG2: Sampled 그래프 텍스처 업로드(처음은 생성 초기 데이터, 두 번째는 풀의 mip 갱신).
+    const uint8 colors[2][4] = {{0, 255, 0, 255}, {0, 0, 255, 255}};
+    for (uint32 run = 0; ok && run < 2; ++run) {
+        auto cleared = arena.Reset();
+        (void)cleared;
+        ok = RunSampledUploadGraph(bench, output.Value(), colors[run]);
+        Check(ok && device.ReadPixels(outputTexture.Value(), pixels.View()).IsOk() &&
+                  CenterIs(pixels, colors[run][0], colors[run][1], colors[run][2]),
+              run == 0 ? "uploaded sampled texture composites green"
+                       : "re-uploaded pooled sampled texture composites blue");
+    }
+
     const rocks::render::GraphPoolStats stats = pool.Stats();
     Check(stats.reused >= 1, "pool reuses graph textures across graphs");
     const uint64 validationErrors = device.ValidationErrorCount() - validationBefore;
@@ -259,9 +506,11 @@ uint32 RunRenderGraphChecks(const char* name, Device& device, sample::Renderer& 
            static_cast<unsigned long long>(stats.reused),
            static_cast<unsigned long long>(validationErrors));
 
-    auto historyTexture = handles.Texture(history);
-    if (historyTexture) {
-        device.Retire(historyTexture.Value());
+    if (second) {
+        auto retired = handles.BeginRetire(second.Value());
+        if (retired) {
+            ReleaseRetiredResource(device, second.Value(), retired.Value());
+        }
     }
 
     device.Retire(redTexture.Value());

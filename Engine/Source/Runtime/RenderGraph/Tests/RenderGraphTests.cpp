@@ -285,7 +285,8 @@ TEST(RenderGraph_TracksSubresourcesPerMip) {
     CHECK(bench.device.ValidationErrorCount() == 0);
 }
 
-// (c) 할당·해제 pass 번호(참조 수 수명).
+// (c) 할당·해제 pass 번호(참조 수 수명)와 같은 그래프 안 재사용(RG2): A가 놓인 뒤 처음 쓰는 C가
+// A의 장치 객체를 이어 쓴다.
 TEST(RenderGraph_LifetimesFollowReferenceCounts) {
     GraphBench bench;
     passLog.Reset();
@@ -328,21 +329,34 @@ TEST(RenderGraph_LifetimesFollowReferenceCounts) {
         CHECK(lifeB.firstPass == 1 && lifeB.lastPass == 3 && lifeB.references == 2);
         const GraphLifetime lifeC = graph.Lifetime(c.Value());
         CHECK(lifeC.firstPass == 3 && lifeC.lastPass == 4 && lifeC.released);
+        // A는 pass 1 뒤에 놓이고 C는 pass 3에서 처음 쓰므로 A의 객체를 이어 쓴다. B는 pass 1–3이라
+        // A와 겹친다.
+        CHECK(!lifeA.reusedWithinGraph && !lifeB.reusedWithinGraph && lifeC.reusedWithinGraph);
         const GraphLifetime lifeUnused = graph.Lifetime(unused.Value());
         CHECK(lifeUnused.firstPass == GraphIndexNone && lifeUnused.references == 0 &&
               !lifeUnused.released);
         // import 자원은 해제하지 않는다.
         const GraphLifetime lifeOutput = graph.Lifetime(output.Value());
         CHECK(lifeOutput.firstPass == 4 && lifeOutput.lastPass == 4 && !lifeOutput.released);
-        CHECK(graph.Stats().createdResources == 3);
+        CHECK(graph.Stats().createdResources == 2);
+        CHECK(graph.Stats().reusedWithinGraph == 1);
+        // C의 첫 전이(attachment)는 이전 내용 무효(Discard)에서 시작한다.
+        bool discardFound = false;
+        for (const GraphTransitionRecord& record : graph.Transitions()) {
+            if (record.resource == c.Value().index && record.pass == 3) {
+                discardFound = record.before == ResourceAccess::Discard && record.attachment;
+            }
+        }
+
+        CHECK(discardFound);
         const uint32 executed[] = {0, 1, 3, 4};
         CHECK(passLog.Equals(Span<const uint32>(executed)));
     }
 
-    // RG1은 그래프 안에서 재사용하지 않고 그래프 끝에 풀로 돌려준다. 다음 그래프는 같은 desc를 다시
-    // 쓴다(GPU 완료를 기다리지 않는다: 단일 queue).
+    // 풀 반환은 그래프 끝이다. 다음 그래프는 같은 desc를 다시 쓴다(GPU 완료를 기다리지 않는다:
+    // 단일 queue).
     const GraphPoolStats pooled = bench.pool.Stats();
-    CHECK(pooled.resources == 3 && pooled.inUse == 0);
+    CHECK(pooled.resources == 2 && pooled.inUse == 0);
     {
         RenderGraph graph(bench.Next());
         auto again = graph.CreateTexture(TargetDesc(), "Again");
@@ -361,10 +375,11 @@ TEST(RenderGraph_LifetimesFollowReferenceCounts) {
 namespace {
 
 // 즉시·지연 대조용 그래프다. readMerge면 compute 읽기와 그래픽 읽기가 이어져 지연 모드에서 한
-// 상태로 합쳐진다.
+// 상태로 합쳐진다. 같은 그래프 안 재사용은 Deferred만 하므로(Immediate는 앞을 내다볼 수 없다) 두
+// 텍스처의 desc를 달리해 재사용이 없는 그래프로 대조한다(재사용은 RenderGraphReuseTests).
 void BuildEquivalenceGraph(RenderGraph& graph, RenderHandle external, bool readMerge) noexcept {
     auto scene = graph.CreateTexture(TargetDesc(), "Scene");
-    auto blur = graph.CreateTexture(TargetDesc(), "Blur");
+    auto blur = graph.CreateTexture(TargetDesc(8), "Blur");
     graphics::BufferDesc bufferDesc;
     bufferDesc.size = 32;
     auto histogram = graph.CreateBuffer(bufferDesc, "Histogram");
