@@ -149,6 +149,8 @@ class ConfigContext;
 // 적용된다 — 사용자 층이면 SaveUserConfig가 저장한다). name은 독립 콘솔 설정이면 콘솔 이름, 설정
 // struct 필드면 `<Branch>.<Section>.<필드 도구 이름>`이다. pending·current는 표기다(필드는 compact
 // JSON — `4`·`"High"`·`[1,2]`, 콘솔 설정은 콘솔 표기). view는 다음 Sync까지 유효하다.
+// CVar 설계(Docs/Design/CVarSystem.ko.md 9절, VD15)의 `BootCVar` + `UserSetting()` 다음 실행용 값과
+// Explain `pending restart`가 이 목록을 쓴다(CVR4).
 struct ConfigPendingRestart {
     StringView name;
     StringView pending;

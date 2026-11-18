@@ -120,12 +120,9 @@ enum class ConfigDiagnosticCode : uint8 {
     UserFileVersion,
     // 경고: 사용자 파일의 `Settings`에 등록되지 않은 콘솔 설정 이름이 있다(버렸다).
     UnknownSetting,
-    // 정보: 시작 뒤 RestartRequired 값이 바뀌어 다음 시작 때 적용된다(지금 값은 그대로 — 8절).
-    RestartPending,
-    // 경고: 품질 등급이 장치 요구·예산을 맞추지 못해 낮아졌다(6.1절 품질 조합 검증).
-    QualityLowered,
-    // 품질 묶음 정의 오류(모르는 묶음·등급, 등급 상속 순환, 가장 낮은 등급도 맞지 않음 등 — 6.1절).
-    InvalidQuality,
+    // 정보: 시작 뒤 RestartRequired 값이 바뀌어 다음 실행 때 적용된다(지금 값은 그대로 — 8절, CVar
+    // VD15의 `RestartRequired` 진단).
+    RestartRequired,
     // 기기 프로필 정의·선택 오류(모르는 프로필·부모, 부모 순환, 모르는 메모리 등급 — 6.2절).
     InvalidDeviceProfile
 };

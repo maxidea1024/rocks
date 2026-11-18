@@ -72,12 +72,8 @@ StringView ConfigDiagnosticCodeName(ConfigDiagnosticCode code) noexcept {
         return "UserFileVersion";
     case ConfigDiagnosticCode::UnknownSetting:
         return "UnknownSetting";
-    case ConfigDiagnosticCode::RestartPending:
-        return "RestartPending";
-    case ConfigDiagnosticCode::QualityLowered:
-        return "QualityLowered";
-    case ConfigDiagnosticCode::InvalidQuality:
-        return "InvalidQuality";
+    case ConfigDiagnosticCode::RestartRequired:
+        return "RestartRequired";
     case ConfigDiagnosticCode::InvalidDeviceProfile:
         return "InvalidDeviceProfile";
     }

@@ -285,7 +285,7 @@ TEST(Config_RestartRequiredChangeWaitsForNextStart) {
               pending[0].current == "768");
         CHECK(pending[1].name == "net.listen.port" && pending[1].pending == "9000" &&
               pending[1].current == "7777");
-        CHECK(HasEntry(fixture, ConfigSeverity::Note, ConfigDiagnosticCode::RestartPending,
+        CHECK(HasEntry(fixture, ConfigSeverity::Note, ConfigDiagnosticCode::RestartRequired,
                        "Game.Display.textureBudget"));
         // 출처는 지금 값의 출처(Project)다.
         const ConfigLayer projectTop[] = {ConfigLayer::Project};

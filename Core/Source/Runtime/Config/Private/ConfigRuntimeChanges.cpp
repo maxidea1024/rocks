@@ -137,7 +137,7 @@ Result<void> AddPending(ConfigState& state, StringView name, StringView pending,
         return status;
     }
 
-    return Report(state, ConfigDiagnosticCode::RestartPending, ConfigSeverity::Note,
+    return Report(state, ConfigDiagnosticCode::RestartRequired, ConfigSeverity::Note,
                   ConfigLayer::CodeDefault, {}, nullptr, name, message.View());
 }
 
