@@ -1,6 +1,6 @@
 # Rocks GC 대규모 처리 보강 설계
 
-기준일: 2026-11-16, 개정 1(초안). 개정 2(2026-11-17): 클러스터·영구 영역 상세 설계(13절), 열린 결정 4 확정, 열린 결정 6 해소, UE 클러스터 사실 정정. 개정 3(2026-11-18): 장부 배치·클러스터 표식 경로를 측정에 맞춰 바꾸고 패키지 클러스터의 경계 비율 안전장치를 더함(13.4·13.5·13.9절).
+기준일: 2026-11-16, 개정 1(초안). 개정 4(2026-11-18): Slot hot·cold 분리(6절 GC-S3 "Slot hot·cold 분리", 4절 gate, 11절 결정 5). 개정 2(2026-11-17): 클러스터·영구 영역 상세 설계(13절), 열린 결정 4 확정, 열린 결정 6 해소, UE 클러스터 사실 정정. 개정 3(2026-11-18): 장부 배치·클러스터 표식 경로를 측정에 맞춰 바꾸고 패키지 클러스터의 경계 비율 안전장치를 더함(13.4·13.5·13.9절).
 
 **이 문서의 작업은 반드시 해야 하는 작업이다.** 현재 `ObjectRegistry` GC는 AAA급 규모(살아 있는 객체 100만 개 이상)의 게임에서 쓸 수 없는 상태다(2026-11-16 사용자 판단). 이 문서의 GC-S 단계는 선택 최적화가 아니며 성능 미달을 "측정 결과로 관리"하는 대상도 아니다. 단계를 모두 마치고 4절의 성능 gate를 통과해야 GC를 대규모 콘텐츠에 쓸 수 있다고 본다.
 
@@ -115,7 +115,7 @@ UE 소스는 설계 사실의 대조에만 쓰고 코드를 옮기지 않는다.
 | 증분 Step 한 번 | ≤ 2ms(p99) | GC-S의 통과 조건(gate)이다. 계획 §6.3의 mark slice 0.5ms·safepoint 1.0ms는 그보다 엄격한 soft 목표로 따로 기록하며 gate가 아니다 |
 | 증분 cycle 완료 | 1M에서 60프레임 이내 | 시간 예산이 2ms일 때 |
 | 대량 파괴(레벨 언로드 등) | 프레임당 시간 예산 안에서 나눠 처리 | UE 기본 2ms/프레임 |
-| 객체당 GC·관리 메모리 | Slot 정보 합계 ≤ 64B | 지금 192B |
+| 객체당 GC·관리 메모리 | Slot 정보 합계 ≤ 64B | 지금 192B. 개정 4: hot 레코드 64B(GC·자주 쓰는 경로가 읽는 칸)는 충족, 슬롯 전체는 192.3B(hot 64 + cold 128) — 합계 목표의 재정의는 11절 결정 5 |
 | 기본 상한 | `maxSlots` ≥ 2,097,152 | UE `MaxUObjects` 기본 2M(`Private/UObject/UObjectBase.cpp` 1363행) |
 | 3M 객체 | 위 수치의 선형 비례 이내 | 대규모 회귀 시나리오 |
 
@@ -180,6 +180,55 @@ UE가 1M을 감당하는 이유는 세 가지가 함께 작동하기 때문이�
 - 패키지 정책 Registry에서는 `VisitIdentityEdges`가 자식 고리(`firstChild`·`nextSibling`)를 따라간다(`Private/ObjectRegistryGc.cpp` 22–26행). 이 고리를 cold로 남기면 marker가 cold Slot을 계속 읽게 된다. 방법은 둘 중 하나다. hot 쪽에 자식 index 목록을 두거나, cold 접근을 허용하고 그 비용을 GC-S0으로 잰다. 이 단계에서 둘 중 하나로 정한다.
 - sweep은 `live & ~mark`를 word 단위로 계산해 white 후보만 `RetireLocked`로 보낸다. 순서는 슬롯 순서(새 chunk부터)를 유지한다.
 - `maxSlots` 기본값을 4절 상한으로 올린다. Slot 정보 합계를 4절 목표(≤ 64B)로 줄이는 방안(cold 필드의 이름·고리 정보 분리 포함)을 이 단계에서 정한다.
+
+#### Slot hot·cold 분리 (개정 4, 2026-11-18 구현)
+
+`Slot`을 캐시 줄 하나의 hot 레코드와 같은 chunk 안에 나란히 둔 cold 레코드 `SlotCold`로 나눈다. chunk는 `Slot slots[64]`와 `SlotCold colds[64]`를 갖고, `ObjectRegistry::ColdOf(slot)`가 `chunks_[index / 64]->colds[index % 64]`를 돌려준다(chunk 표 조회 하나, 추가 할당 없음).
+
+| hot `Slot` (64 B, `alignas(64)`, `static_assert`) | 크기 |
+|---|---|
+| `generation`·`index` | 8 |
+| `state`·`queue`(회수 목록 종류)·`indexed`·`linked` | 4 |
+| `clusterInCount`(13.4절 장부 inCount) | 4 |
+| `object` | 8 |
+| `type`(TypeLease) | 16 |
+| `roots`·`borrows`·`encodePins`·`rootPosition` | 16 |
+| `mutations`(변경 표지) | 8 |
+
+| cold `SlotCold` (128 B) | 크기 |
+|---|---|
+| `nextInList`·`prevInList`(빈 슬롯·회수 대기·파괴 요청 목록) | 16 |
+| `storage` | 8 |
+| `stableType` | 16 |
+| `transaction`(생성 트랜잭션) | 8 |
+| `outer`(ObjectHandle) | 16 |
+| `outermost`·`parent`·`firstChild`·`lastChild`·`nextSibling`·`prevSibling`(Slot*) | 48 |
+| `name`(NameRecord*) | 8 |
+| `backendHolds`·`pathBytes`·`discarded`·`destroyListed` | 8 |
+
+접근 경로별로 읽는 쪽:
+
+| 경로 | hot | cold |
+|---|---|---|
+| handle 조회(`FindSlot` — 세대·상태), Borrow 얻기·놓기, 루트 보유·반환 | 예 | 아니오 |
+| 참조 쓰기(소유자·대상 검증, 변경 표지, encode 고정, 클러스터 inCount) | 예 | Outer·Discard 검사가 필요한 경로만 |
+| GC 표식(직렬·병렬) | 아니오(GC 밀집 자료만) | 패키지 정책의 자식 고리(`firstChild`·`nextSibling`)만 |
+| sweep·Retire | 상태·회수 목록 종류 | 회수 목록 고리, 파괴 요청 목록 |
+| 생성(Reserve·Commit), 회수(FinishReclaim), 이름 조회·Discard·부분 트리 순회, backend 보유 | 예 | 예 |
+
+불변식: 두 레코드는 같은 슬롯 번호로 짝지어지고 chunk와 함께만 생기고 사라진다(chunk는 Registry 소멸 전까지 옮기지 않는다). 회수(`FinishReclaim`)는 cold를 빈 상태로 되돌린다. 재사용되는 빈 슬롯의 cold가 빈 상태라는 것을 Debug에서 생성 때 검사한다(아래 시험 보강).
+
+측정(1M · 간선 4, 같은 실행 번갈아 세 round — 실험 17절): Slot 메모리 200.3 → 192.3 B/slot, 생성·연결·직렬·병렬 표식은 흔들림 안에서 같고, churn 회수가 230–254 → 256–262 ns/object로 5–10% 느려졌다(회수가 두 줄을 고친다).
+
+검토하고 버린 대안: (1) hot에 cold 포인터를 두는 방식 — hot이 72B가 되어 줄 하나를 넘는다. (2) 자식 고리를 hot에 두는 방식 — 패키지 정책 표식만 쓰는 48B 때문에 모든 Registry의 hot이 두 줄이 된다. (3) cold를 별도 할당 배열로 — chunk 안에 두면 할당·수명이 chunk와 같아 잠금 안 할당이 늘지 않는다.
+
+64B(합계)를 못 채운 이유와 다음 방안: hot만 64B이고 cold가 128B다. 합계를 더 줄이려면 cold의 Slot* 고리 8개를 슬롯 번호(4B)로(−32B), Outer handle을 hot 레코드(GC `GcHot::outer`)의 Outer 번호와 그 슬롯의 세대로(−16B), stableType을 타입 표 번호로(−12B), 생성 트랜잭션을 생성 중에만 쓰는 곁 표로(−8B), 이름·자식 고리를 이름 있는/Outer 있는 객체만 갖는 identity 레코드로 옮겨야 한다. 이 모두를 해도 슬롯 정보 합계는 약 80–100B다(이름과 Outer 고리가 Registry 안에 있는 한). 그래서 4절 "Slot 정보 합계 ≤ 64B"는 "GC·자주 쓰는 경로가 읽는 hot 레코드 ≤ 64B"로 바꾸고, 합계는 별도 목표(위 방안 적용 뒤 재측정)로 두기를 제안한다(11절 결정 5).
+
+시험 보강(음성 대조 H1–H3에서 드러남):
+
+- H1(모든 cold 조회를 이웃 슬롯의 cold로 — 한 chunk 안의 일관된 순열)은 어떤 시험도 실패하지 않았다. 순열이 일관되면 동작이 같으므로 결함이 아니다(cold 대응은 같은 함수 하나로만 정한다 — `ColdOf`).
+- H2(회수가 cold Outer를 비우지 않음)·H3(cold 생성 트랜잭션을 비우지 않음)도 실패하지 않았다. 재사용 생성이 두 칸을 덮어써 지금은 결과가 같지만, 회수의 "cold를 빈 상태로" 계약이 깨져도 아무 검사가 없다는 뜻이다. 보강: Debug에서 빈 슬롯을 재사용할 때 cold 칸(목록 고리·storage·stableType·트랜잭션·Outer·고리·이름·backend 보유·경로 길이·플래그)이 모두 빈 값인지 검사하고 아니면 Fatal("Reused slot kept cold state from its previous object")로 멈춘다.
+- 다른 chunk의 cold를 읽는 결함(H4)과 회수가 이름 기록 포인터를 남기는 결함(H5)은 실험 17절에 결과를 남긴다.
 - 완료 기준: Begin·sweep 후보 판정이 각 1ms 이하이고, 단일 스레드 표식이 4절 목표를 만족한다.
 
 ### GC-S4 · 병렬 표식
@@ -305,7 +354,7 @@ GC slice는 `processing_` 아래에서 실행되며, 그동안 생성·간선 �
 | 2 | 표식 단위 | epoch 바이트(1M → 1 MiB, 단순) 또는 bit(128 KiB, `fetch_or`). GC-S0 측정으로 정한다 |
 | 3 | STW 전체 수집 주기 | 시간 간격·메모리 임계·레벨 전환 조합. 기본값은 GC-S5에서 정한다 |
 | 4 | 영구 객체가 일반 객체를 가리킬 때의 규칙 | **확정(2026-11-17): 금지.** 위반 쓰기·Commit은 `Unsupported`다. 일반 객체를 붙잡아야 하면 RootRef를 쓴다(13.7절) |
-| 5 | Slot 정보 64B 목표의 달성 방법 | cold 필드 분리·이름 정보 외부화 등. GC-S3에서 정한다 |
+| 5 | Slot 정보 64B 목표의 달성 방법 | 개정 4: hot·cold 분리로 hot 64B 달성(6절 GC-S3). 합계(192B)는 cold 고리 번호화·Outer·identity 레코드 분리로 약 80–100B까지 가능 — 4절 gate를 "hot ≤ 64B"와 별도 합계 목표로 나누기를 제안 |
 | 6 | 배타 소유 하위 객체의 표시 방식(M6) | **해소(개정 2).** 패키지·Level 소속으로 경계를 정하므로 표시가 필요 없다(13.3절) |
 | 7 | slice 중 루트 해제의 루트 목록 반영 시점 | 즉시 반영 / 다음 Begin까지 지연. GC-S3에서 정한다 |
 
