@@ -638,11 +638,13 @@ Result<uint64> ValidateBulk(const PackageContents& contents) noexcept {
     return Result<uint64>::Success(0);
 }
 
-// Summary 타입 표가 export 타입 집합과 정확히 같은지 본다(정렬은 읽을 때 확인했다).
-bool TypeTableMatchesExports(Allocator& allocator, const PackageContents& contents) noexcept {
+// Summary 타입 표가 export 타입 집합과 정확히 같은지 본다(정렬은 읽을 때 확인했다). 할당 실패는
+// 그 오류다(손상으로 분류하지 않는다).
+Result<bool> TypeTableMatchesExports(Allocator& allocator,
+                                     const PackageContents& contents) noexcept {
     Array<TypeId> types(allocator);
-    if (!types.TryReserve(contents.exports.Size())) {
-        return false;
+    if (auto reserved = types.TryReserve(contents.exports.Size()); !reserved) {
+        return Result<bool>::Failure(reserved.Error());
     }
 
     for (const PackageExportEntry& entry : contents.exports) {
@@ -659,16 +661,16 @@ bool TypeTableMatchesExports(Allocator& allocator, const PackageContents& conten
     }
 
     if (unique != contents.summary.types.Size()) {
-        return false;
+        return Result<bool>::Success(false);
     }
 
     for (usize index = 0; index < unique; ++index) {
         if (!(types[index] == contents.summary.types[index].type)) {
-            return false;
+            return Result<bool>::Success(false);
         }
     }
 
-    return true;
+    return Result<bool>::Success(true);
 }
 
 } // namespace
@@ -980,7 +982,13 @@ Result<PackageContents> ReadPackage(Allocator& allocator, Span<const uint8> file
                                                PackageSectionKind::BulkIndex, 0);
     }
 
-    if (!TypeTableMatchesExports(allocator, contents)) {
+    auto typesMatch = TypeTableMatchesExports(allocator, contents);
+    if (!typesMatch) {
+        return Resource<PackageContents>(failure, typesMatch.Error(), asset,
+                                         SectionKindValue(PackageSectionKind::Summary));
+    }
+
+    if (!typesMatch.Value()) {
         return Corrupt<PackageContents>(failure, asset,
                                         SectionKindValue(PackageSectionKind::Summary), 0);
     }
