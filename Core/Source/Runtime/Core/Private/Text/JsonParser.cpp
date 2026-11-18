@@ -1,6 +1,7 @@
 #include <Core/Text/Json.h>
 
 #include "JsonInternal.h"
+#include "JsonParser.h"
 #include <Core/Text/NumberText.h>
 #include <Platform/Memory.h>
 
@@ -10,94 +11,14 @@ using detail::Overlaps;
 
 namespace {
 
-// 입력 상한: 노드·문자열 위치가 uint32이고 텍스트(이스케이프를 푼 문자열 + 숫자 원문)는 입력을 넘지
-// 않는다.
+// 입력 상한: 노드·문자열 위치가 uint32다. 텍스트(이스케이프를 푼 문자열 + 숫자 토큰)는 엄격
+// 문법에서 입력을 넘지 않고, Json5의 숫자 정규화(".5" → "0.5", 16진수 → 10진수)도 토큰
+// 길이의 1.5배를 넘지 않으므로 텍스트는 1.5 GiB 아래다(uint32 위치로 충분하다).
 constexpr uint64 HardInputLimit = 1ull << 30;
 
 } // namespace
 
 // ---- 파서 ----
-
-class JsonParser {
-public:
-    JsonParser(JsonDocument& document, StringView input, const JsonReadOptions& options) noexcept
-        : document_(document), data_(reinterpret_cast<const uint8*>(input.Data())),
-          size_(input.ByteCount()), options_(options), frames_(document.nodes_.GetAllocator()),
-          pendingElements_(document.nodes_.GetAllocator()),
-          pendingMembers_(document.nodes_.GetAllocator()) {
-    }
-
-    JsonError Run() noexcept;
-
-private:
-    struct Frame {
-        uint32 node;
-        bool object;
-        uint32 pendingStart;
-    };
-
-    using Node = JsonDocument::Node;
-    using Member = JsonDocument::Member;
-
-    // 오류 위치를 기록하고 false를 돌려준다(첫 오류만 남긴다).
-    bool Fail(JsonErrorCode code, usize offset) noexcept {
-        if (errorCode_ == JsonErrorCode::None) {
-            errorCode_ = code;
-            errorOffset_ = offset;
-        }
-
-        return false;
-    }
-
-    bool Memory(Result<void> result) noexcept {
-        return result ? true : Fail(JsonErrorCode::OutOfMemory, position_);
-    }
-
-    // 공백(과 allowLineComments면 줄 주석)을 건너뛴다. 주석 안의 잘못된 UTF-8은 그 byte에서 첫
-    // 오류(InvalidUtf8)로 기록하고 멈춘다 — 위치가 그 byte에 남으므로 다음 토큰 해석도 실패하고,
-    // Run은 기록된 첫 오류를 돌려준다.
-    void SkipWhitespace() noexcept;
-
-    // 노드를 추가한다. at은 값의 시작 위치(한도 초과 보고용)다. 스칼라는 서브트리 끝이 자기
-    // 다음이다.
-    bool AddNode(Node node, uint32& index, usize at) noexcept {
-        if (document_.nodes_.Size() >= options_.maxNodes) {
-            return Fail(JsonErrorCode::TooManyNodes, at);
-        }
-
-        index = static_cast<uint32>(document_.nodes_.Size());
-        node.end = index + 1;
-        // line·column은 성공한 뒤 FillPositions가 한 번에 채운다(at은 입력 상한 1 GiB 아래다).
-        return Memory(document_.nodes_.TryPushBack(node)) &&
-               Memory(document_.positions_.TryPushBack(
-                   JsonDocument::NodePosition{static_cast<uint32>(at), 0, 0}));
-    }
-
-    bool ParseValue(uint32& node) noexcept;
-    bool ParseString(uint32& offset, uint32& length) noexcept;
-    bool ParseNumber(uint32& node) noexcept;
-    bool ParseLiteral(uint32& node) noexcept;
-    bool ReadHex(usize escape, uint32& unit) noexcept;
-    bool AppendText(const void* bytes, usize count) noexcept;
-    bool AppendCodePoint(uint32 codePoint) noexcept;
-    bool BeginKey() noexcept;
-    bool CloseContainer() noexcept;
-    JsonPosition PositionOf(usize offset) const noexcept;
-    void Advance(JsonPosition& position, usize& index, usize offset) const noexcept;
-    void FillPositions() noexcept;
-
-    JsonDocument& document_;
-    const uint8* data_;
-    usize size_;
-    const JsonReadOptions& options_;
-    usize position_ = 0;
-    usize bomLength_ = 0;
-    Array<Frame> frames_;
-    Array<uint32> pendingElements_;
-    Array<Member> pendingMembers_;
-    JsonErrorCode errorCode_ = JsonErrorCode::None;
-    usize errorOffset_ = 0;
-};
 
 JsonPosition JsonParser::PositionOf(usize offset) const noexcept {
     // 오류 때만 앞에서부터 센다. 건너뛴 BOM은 세지 않는다.
@@ -108,7 +29,9 @@ JsonPosition JsonParser::PositionOf(usize offset) const noexcept {
 }
 
 // position(입력 index 앞까지 센 위치)을 offset 앞까지 진행한다. CRLF는 줄바꿈 1개, CR 단독도
-// 줄바꿈, column은 code point(UTF-8 이어지는 byte는 세지 않는다)다.
+// 줄바꿈, column은 code point(UTF-8 이어지는 byte는 세지 않는다)다. U+2028·U+2029는 Json5 문법에서
+// 줄 끝(주석 끝·줄 이음)이어도 위치 계산에서는 줄바꿈이 아니다(편집기·LSP의 줄 번호와 맞춘다 — C#
+// Json5Reader도 같다).
 void JsonParser::Advance(JsonPosition& position, usize& index, usize offset) const noexcept {
     position.byteOffset = offset;
     for (; index < offset && index < size_; ++index) {
@@ -166,41 +89,32 @@ bool JsonParser::AppendCodePoint(uint32 codePoint) noexcept {
 
 namespace {
 
-int HexValue(uint8 byte) noexcept {
-    if (byte >= '0' && byte <= '9') {
-        return byte - '0';
-    }
-
-    if (byte >= 'a' && byte <= 'f') {
-        return byte - 'a' + 10;
-    }
-
-    if (byte >= 'A' && byte <= 'F') {
-        return byte - 'A' + 10;
-    }
-
-    return -1;
+// data[position]에서 시작하는 UTF-8 한 글자의 길이(잘못되면 0)다(detail::DecodeUtf8 참고).
+usize Utf8Length(const uint8* data, usize size, usize position) noexcept {
+    uint32 codePoint = 0;
+    return detail::DecodeUtf8(data, size, position, codePoint);
 }
 
-// data[position]에서 시작하는 UTF-8 한 글자의 길이(잘못되면 0). overlong·surrogate 부호화·U+10FFFF
-// 초과·잘림을 거부한다.
-usize Utf8Length(const uint8* data, usize size, usize position) noexcept {
+} // namespace
+
+usize detail::DecodeUtf8(const uint8* data, usize size, usize position,
+                         uint32& codePoint) noexcept {
     const uint8 lead = data[position];
     usize length = 0;
     uint32 minimum = 0;
-    uint32 codePoint = 0;
+    uint32 value = 0;
     if (lead >= 0xC2 && lead <= 0xDF) {
         length = 2;
         minimum = 0x80;
-        codePoint = lead & 0x1F;
+        value = lead & 0x1F;
     } else if (lead >= 0xE0 && lead <= 0xEF) {
         length = 3;
         minimum = 0x800;
-        codePoint = lead & 0x0F;
+        value = lead & 0x0F;
     } else if (lead >= 0xF0 && lead <= 0xF4) {
         length = 4;
         minimum = 0x10000;
-        codePoint = lead & 0x07;
+        value = lead & 0x07;
     } else {
         return 0;
     }
@@ -215,20 +129,23 @@ usize Utf8Length(const uint8* data, usize size, usize position) noexcept {
             return 0;
         }
 
-        codePoint = (codePoint << 6) | (next & 0x3F);
+        value = (value << 6) | (next & 0x3F);
     }
 
-    if (codePoint < minimum || codePoint > 0x10FFFF ||
-        (codePoint >= 0xD800 && codePoint <= 0xDFFF)) {
+    if (value < minimum || value > 0x10FFFF || (value >= 0xD800 && value <= 0xDFFF)) {
         return 0;
     }
 
+    codePoint = value;
     return length;
 }
 
-} // namespace
-
 void JsonParser::SkipWhitespace() noexcept {
+    if (json5_) {
+        SkipJson5Whitespace();
+        return;
+    }
+
     while (position_ < size_) {
         const uint8 byte = data_[position_];
         if (byte == ' ' || byte == '\t' || byte == '\n' || byte == '\r') {
@@ -271,7 +188,7 @@ bool JsonParser::ReadHex(usize escape, uint32& unit) noexcept {
             return Fail(JsonErrorCode::UnexpectedEnd, size_);
         }
 
-        const int digit = HexValue(data_[position_ + index]);
+        const int digit = detail::HexDigitValue(data_[position_ + index]);
         if (digit < 0) {
             return Fail(JsonErrorCode::InvalidEscape, escape);
         }
@@ -280,6 +197,45 @@ bool JsonParser::ReadHex(usize escape, uint32& unit) noexcept {
     }
 
     position_ += 4;
+    return true;
+}
+
+bool JsonParser::ReadUnicodeEscape(usize escape, uint32& codePoint) noexcept {
+    uint32 unit = 0;
+    if (!ReadHex(escape, unit)) {
+        return false;
+    }
+
+    if (unit >= 0xDC00 && unit <= 0xDFFF) {
+        return Fail(JsonErrorCode::UnpairedSurrogate, escape);
+    }
+
+    if (unit >= 0xD800 && unit <= 0xDBFF) {
+        // 바로 뒤에 낮은 surrogate 이스케이프가 와야 한다. 그 전에 입력이 끝나면 문자열이 끝나지
+        // 않은 것이다.
+        if (position_ >= size_ || (data_[position_] == '\\' && position_ + 1 >= size_)) {
+            return Fail(JsonErrorCode::UnexpectedEnd, size_);
+        }
+
+        if (data_[position_] != '\\' || data_[position_ + 1] != 'u') {
+            return Fail(JsonErrorCode::UnpairedSurrogate, escape);
+        }
+
+        const usize second = position_;
+        position_ += 2;
+        uint32 low = 0;
+        if (!ReadHex(second, low)) {
+            return false;
+        }
+
+        if (low < 0xDC00 || low > 0xDFFF) {
+            return Fail(JsonErrorCode::UnpairedSurrogate, second);
+        }
+
+        unit = 0x10000 + ((unit - 0xD800) << 10) + (low - 0xDC00);
+    }
+
+    codePoint = unit;
     return true;
 }
 
@@ -398,40 +354,11 @@ bool JsonParser::ParseString(uint32& offset, uint32& length) noexcept {
         }
 
         uint32 unit = 0;
-        if (!ReadHex(escape, unit)) {
+        if (!ReadUnicodeEscape(escape, unit)) {
             return false;
         }
 
-        if (unit >= 0xDC00 && unit <= 0xDFFF) {
-            return Fail(JsonErrorCode::UnpairedSurrogate, escape);
-        }
-
-        if (unit >= 0xD800 && unit <= 0xDBFF) {
-            // 바로 뒤에 낮은 surrogate 이스케이프가 와야 한다. 그 전에 입력이 끝나면 문자열이
-            // 끝나지 않은 것이다.
-            if (position_ >= size_ || (data_[position_] == '\\' && position_ + 1 >= size_)) {
-                return Fail(JsonErrorCode::UnexpectedEnd, size_);
-            }
-
-            if (data_[position_] != '\\' || data_[position_ + 1] != 'u') {
-                return Fail(JsonErrorCode::UnpairedSurrogate, escape);
-            }
-
-            const usize second = position_;
-            position_ += 2;
-            uint32 low = 0;
-            if (!ReadHex(second, low)) {
-                return false;
-            }
-
-            if (low < 0xDC00 || low > 0xDFFF) {
-                return Fail(JsonErrorCode::UnpairedSurrogate, second);
-            }
-
-            unit = 0x10000 + ((unit - 0xD800) << 10) + (low - 0xDC00);
-        }
-
-        if (!withinLimit(4)) {
+        if (!withinLimit(detail::Utf8EncodedLength(unit))) {
             return Fail(JsonErrorCode::StringTooLong, start);
         }
 
@@ -505,14 +432,19 @@ bool JsonParser::ParseNumber(uint32& node) noexcept {
     }
 
     position_ = index;
-    const StringView token(reinterpret_cast<const char*>(data_ + start), index - start);
-    Node value{};
-    value.first = static_cast<uint32>(document_.text_.Size());
-    value.count = static_cast<uint32>(token.ByteCount());
-    if (!AppendText(token.Data(), token.ByteCount())) {
+    const usize textStart = document_.text_.Size();
+    if (!AppendText(data_ + start, index - start)) {
         return false;
     }
 
+    return AddNumberNode(textStart, integer, start, node);
+}
+
+bool JsonParser::AddNumberNode(usize textStart, bool integer, usize start, uint32& node) noexcept {
+    const StringView token(document_.text_.Data() + textStart, document_.text_.Size() - textStart);
+    Node value{};
+    value.first = static_cast<uint32>(textStart);
+    value.count = static_cast<uint32>(token.ByteCount());
     const bool negativeZero = token == StringView("-0");
     if (integer && !negativeZero) {
         if (auto parsed = TryParseInt64(token)) {
@@ -580,6 +512,10 @@ bool JsonParser::ParseLiteral(uint32& node) noexcept {
 
 bool JsonParser::ParseValue(uint32& node) noexcept {
     // position_은 공백 뒤 값의 첫 byte다(스칼라만 — 컨테이너는 Run이 처리한다).
+    if (json5_) {
+        return ParseJson5Value(node);
+    }
+
     const usize start = position_;
     const uint8 byte = data_[position_];
     if (byte == '"') {
@@ -595,20 +531,31 @@ bool JsonParser::ParseValue(uint32& node) noexcept {
     return ParseLiteral(node);
 }
 
-// 객체 안에서 키 문자열과 ':'까지 읽는다(position_은 공백 뒤).
+// 객체 안에서 키와 ':'까지 읽는다(position_은 공백 뒤). 키는 문자열이고, Json5면 작은따옴표
+// 문자열과 식별자 이름도 받는다.
 bool JsonParser::BeginKey() noexcept {
     if (position_ >= size_) {
         return Fail(JsonErrorCode::UnexpectedEnd, position_);
     }
 
-    if (data_[position_] != '"') {
-        return Fail(JsonErrorCode::UnexpectedCharacter, position_);
-    }
-
     const usize keyStart = position_;
     Member member{};
-    if (!ParseString(member.keyOffset, member.keyLength)) {
-        return false;
+    if (json5_) {
+        const uint8 quote = data_[position_];
+        const bool parsed = quote == '"' || quote == '\''
+                                ? ParseJson5String(member.keyOffset, member.keyLength)
+                                : ParseJson5Identifier(member.keyOffset, member.keyLength);
+        if (!parsed) {
+            return false;
+        }
+    } else {
+        if (data_[position_] != '"') {
+            return Fail(JsonErrorCode::UnexpectedCharacter, position_);
+        }
+
+        if (!ParseString(member.keyOffset, member.keyLength)) {
+            return false;
+        }
     }
 
     const uint32 object = frames_[frames_.Size() - 1].node;
@@ -775,6 +722,15 @@ JsonError JsonParser::Run() noexcept {
         if (byte == ',') {
             ++position_;
             SkipWhitespace();
+            // Json5는 원소·멤버 뒤 끝 쉼표 하나를 받는다(빈 컨테이너의 쉼표·연속 쉼표는 다음 값
+            // 해석이 거부한다).
+            if (json5_ && position_ < size_ && data_[position_] == (frame.object ? '}' : ']')) {
+                ++position_;
+                value = frame.node;
+                ok = CloseContainer();
+                continue;
+            }
+
             haveValue = false;
             if (frame.object) {
                 ok = BeginKey();
