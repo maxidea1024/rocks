@@ -11,7 +11,8 @@
 #include <TraceControl/TraceSettings.generated.h>
 
 // 호스트 설정 부트 시험이다(Docs/Design/ConfigSystem.ko.md 5.3절): 등록 → 엔진 층 파일 → 추가 파일
-// → --set → CompleteStartup 순서와, 시작 뒤 고정 값(log.mode)의 거부.
+// → --set → CompleteStartup 순서와, 시작 뒤 고정 값(log.mode)의 거부, 시작 완료의 기기 프로필 적용,
+// 프로젝트 폴더·사용자 데이터 폴더 찾기.
 using namespace rocks;
 
 namespace {
@@ -129,4 +130,79 @@ TEST(HostSettings_RejectedEngineFileReportsFailure) {
     REQUIRE(settings.Initialize(options));
     CHECK(settings.LoadFiles().Error() == ErrorCode::InvalidArgument);
     REQUIRE(settings.CompleteStartup());
+}
+
+// 시작 완료(5단계)가 기기 프로필을 고르고(플랫폼 기본 → 명령줄 --device-profile) 그 값을 적용한다.
+// 플랫폼 특성(플랫폼 이름·시스템 메모리)은 Initialize가 채운다.
+TEST(HostSettings_DeviceProfileAppliedAtStartup) {
+    EngineTree tree;
+    REQUIRE(tree.ready);
+    char profilesPath[256];
+    REQUIRE(tree.Write("Engine/Config/DeviceProfiles.json",
+                       R"({ "DeviceProfiles": {
+                              "platformDefaults": { "TestPlatform": "Bench" },
+                              "profiles": {
+                                "Bench": { "values": { "log.level": "error" } },
+                                "Quiet": { "parent": "Bench", "values": { "log.levels": "Engine=warning" } } } } })",
+                       profilesPath));
+    for (int run = 0; run < 2; ++run) {
+        SystemAllocator allocator;
+        HostSettings settings(allocator);
+        HostSettingsOptions options;
+        options.engineDir = tree.EngineDir();
+        options.platform = "TestPlatform";
+        REQUIRE(settings.Initialize(options));
+        config::DeviceTrait platform;
+        REQUIRE(settings.DeviceTraits().Find(config::DeviceTraitNames::Platform, platform));
+        CHECK(platform.text == StringView("TestPlatform"));
+        config::DeviceTrait memory;
+        REQUIRE(settings.DeviceTraits().Find(config::DeviceTraitNames::SystemMemoryMiB, memory));
+        CHECK(memory.numeric && memory.number > 0);
+        REQUIRE(settings.LoadFiles());
+        const StringView arguments[] = {"--device-profile=Quiet"};
+        REQUIRE(settings.ApplyCommandLine(Span<const StringView>(arguments, run == 0 ? 0 : 1)));
+        REQUIRE(settings.CompleteStartup());
+        config::ConfigContext& context = settings.Context();
+        auto level = context.FindConsoleSetting(LogLevelSetting);
+        REQUIRE(level);
+        CHECK(context.ConsoleValue(level.Value()).string.View() == StringView("error"));
+        if (run == 0) {
+            CHECK(settings.DeviceProfile().profile.View() == StringView("Bench"));
+            CHECK(settings.DeviceProfile().source == config::DeviceProfileSource::PlatformDefault);
+        } else {
+            CHECK(settings.DeviceProfile().profile.View() == StringView("Quiet"));
+            CHECK(settings.DeviceProfile().source == config::DeviceProfileSource::CommandLine);
+            auto levels = context.FindConsoleSetting(LogLevelsSetting);
+            REQUIRE(levels);
+            CHECK(context.ConsoleValue(levels.Value()).string.View() ==
+                  StringView("Engine=warning"));
+        }
+    }
+}
+
+// 프로젝트 폴더는 시작 폴더부터 위로 올라가며 `*.rocksproject`를 가진 첫 폴더다(여럿이면 이름
+// 순서로 첫 기술자). 사용자 층 뿌리는 OS 사용자 데이터 폴더다.
+TEST(HostSettings_ProjectDirectoryAndUserData) {
+    EngineTree tree;
+    REQUIRE(tree.ready);
+    char nested[256];
+    FixedStringBuilder nestedText{Span<char>(nested)};
+    REQUIRE(
+        nestedText.TryAppendFormat("{}/Game/out/Debug/bin", StringView(tree.root, tree.rootBytes)));
+    REQUIRE(platform::MakeDirectoryTree(platform::PhysicalFileSystem(), nested,
+                                        nestedText.ByteCount()));
+    char path[256];
+    REQUIRE(tree.Write("Game/Zeta.rocksproject", "{}", path));
+    REQUIRE(tree.Write("Game/Alpha.rocksproject", "{}", path));
+    SystemAllocator allocator;
+    String directory(allocator);
+    String name(allocator);
+    REQUIRE(FindProjectFrom(nestedText.View(), directory, name));
+    CHECK(directory.View().EndsWith("/Game", StringComparison::CaseSensitive));
+    CHECK(name.View() == StringView("Alpha"));
+
+    String user(allocator);
+    REQUIRE(UserDataDirectory(user));
+    CHECK(!user.IsEmpty() && !user.View().Contains("\\", StringComparison::CaseSensitive));
+    CHECK(!HostPlatformName().IsEmpty());
 }

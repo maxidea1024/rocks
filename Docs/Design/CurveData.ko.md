@@ -1,6 +1,6 @@
 # 커브 데이터 계층 설계
 
-개정 10(CV8 구현 반영 — 17.7절), 기준일 2026-11-18. 이 문서는 Curve 단계(리플렉션 B9 직후, A0-G 앞 — 2026-11-15 사용자 결정)의 **값 타입 층** 설계다. 근거는 [에셋 시스템](AssetSystem.ko.md) 1절 Curve 행, [Core 상세 명세](CoreDetailedSpec.ko.md) G09, 이미 구현된 수학 층 [키 커브](../Implementation/InterpCurve.ko.md)(`InterpCurve<T>`)다. UE 대응 대상은 UE 5.8.4의 `Engine/Source/Runtime/Engine/Classes/Curves`(`FRealCurve`·`FRichCurve`·`FSimpleCurve`·`FIndexedCurve`·`FKeyHandle`·`FKeyHandleMap`·`FIntegralCurve`·`FNameCurve`·`FStringCurve`·`FCompressedRichCurve`)와 평가 함수 `Public/Curves/CurveEvaluation.h`(`UE::Curves::EvalForTwoKeys`·`BezierInterp`·`WeightedEvalForTwoKeys`), 그리고 G09가 이 단계로 미룬 `FInterpCurve<T>`의 리플렉션·직렬화·`CalcBounds`(12절)다. 아래에서 `RC` = `Engine/Source/Runtime/Engine/Private/Curves/RichCurve.cpp`, `CE` = 같은 폴더 `CurveEvaluation.cpp`, `SC` = `SimpleCurve.cpp`, `KH` = `Classes/Curves/KeyHandle.h`, `UMU` = `Core/Public/Math/UnrealMathUtility.h`, `UPM` = `Core/Public/Math/UnrealPlatformMathSSE.h`다. 레거시·deprecated 경로(옛 버전 키 직렬화 보정, `UE_DEPRECATED` 함수, `FInterpCurvePoint` → `FRichCurveKey` 변환 생성자)는 대응하지 않는다.
+개정 12(CV10 — Curve 단계 CV1–CV10 완료, 다른 문서 반영·남은 일 17.9절), 기준일 2026-11-18. 이 문서는 Curve 단계(리플렉션 B9 직후, A0-G 앞 — 2026-11-15 사용자 결정)의 **값 타입 층** 설계다. 근거는 [에셋 시스템](AssetSystem.ko.md) 1절 Curve 행, [Core 상세 명세](CoreDetailedSpec.ko.md) G09, 이미 구현된 수학 층 [키 커브](../Implementation/InterpCurve.ko.md)(`InterpCurve<T>`)다. UE 대응 대상은 UE 5.8.4의 `Engine/Source/Runtime/Engine/Classes/Curves`(`FRealCurve`·`FRichCurve`·`FSimpleCurve`·`FIndexedCurve`·`FKeyHandle`·`FKeyHandleMap`·`FIntegralCurve`·`FNameCurve`·`FStringCurve`·`FCompressedRichCurve`)와 평가 함수 `Public/Curves/CurveEvaluation.h`(`UE::Curves::EvalForTwoKeys`·`BezierInterp`·`WeightedEvalForTwoKeys`), 그리고 G09가 이 단계로 미룬 `FInterpCurve<T>`의 리플렉션·직렬화·`CalcBounds`(12절)다. 아래에서 `RC` = `Engine/Source/Runtime/Engine/Private/Curves/RichCurve.cpp`, `CE` = 같은 폴더 `CurveEvaluation.cpp`, `SC` = `SimpleCurve.cpp`, `KH` = `Classes/Curves/KeyHandle.h`, `UMU` = `Core/Public/Math/UnrealMathUtility.h`, `UPM` = `Core/Public/Math/UnrealPlatformMathSSE.h`다. 레거시·deprecated 경로(옛 버전 키 직렬화 보정, `UE_DEPRECATED` 함수, `FInterpCurvePoint` → `FRichCurveKey` 변환 생성자)는 대응하지 않는다.
 
 에셋 층(`UCurveFloat`·`UCurveVector`·`UCurveLinearColor`·`UCurveTable`·`FRuntimeFloatCurve`·`FCurveTableRowHandle`)은 A1 에셋 시스템 뒤 A 단계의 일이라 범위 밖이다. 이 문서는 그 층이 기댈 경계(14절)만 정한다.
 
@@ -448,9 +448,9 @@ G09와 [키 커브](../Implementation/InterpCurve.ko.md) 2절(`operator<<` → "
 ### 12.1 미러
 
 - 대상은 UE에 USTRUCT가 있는 다섯 형식이다: `InterpCurve<float>`(UE `FInterpCurveFloat`), `InterpCurve<Vec2d>`(`FInterpCurveVector2D` — UE 5의 `FVector2D`는 double), `InterpCurve<Vec3d>`(`FInterpCurveVector`), `InterpCurve<Quatd>`(`FInterpCurveQuat`), `InterpCurve<LinearColor>`(`FInterpCurveLinearColor`)와 각 `InterpCurvePoint<T>`. `FInterpCurveTwoVectors`는 Rocks 값 형식이 없어 두지 않는다. 다른 형식(`double`·float 벡터 등)은 소비자가 생길 때 미러를 더한다.
-- `InterpCurvePoint<T>`는 멤버가 public(`inValue`·`outValue`·`arriveTangent`·`leaveTangent`·`mode`)이라 지금 Binds 규칙("공개 데이터 멤버를 같은 이름·형식·선언 순서로" — ReflectionExtensions 3.2절)으로 미러한다. `Atomic`이다(키 struct와 같은 이유). `InterpCurveMode` enum의 미러가 필요하다(Core enum의 Binds 지원 여부는 CV9에서 확인하고, 없으면 같은 단계에서 더한다).
+- `InterpCurvePoint<T>`는 멤버가 public(`inValue`·`outValue`·`arriveTangent`·`leaveTangent`·`mode`)이라 지금 Binds 규칙("공개 데이터 멤버를 같은 이름·형식·선언 순서로" — ReflectionExtensions 3.2절)으로 미러한다. `Atomic`이다(키 struct와 같은 이유). `InterpCurveMode` enum의 미러가 필요하다(Core enum Binds는 없어서 CV9에서 더했다 — 17.8절 I2).
 - `InterpCurve<T>`는 키 배열 `points_`·`looped_`·`loopKeyOffset_`이 private이다(정렬 불변식). 접근자로 미러하지 않고 **private 멤버 접근을 기반에 보강**한다: Core 쪽 `InterpCurve<T>`가 `template <class> friend struct ::rocks::GeneratedType;`을 선언한다(Core는 `GeneratedType`을 앞 선언만 하므로 의존이 생기지 않는다 — `ROCKS_GENERATED_BODY`가 넣는 friend와 같은 것, `Meta/Annotations.h` 101–105). MetaCompiler는 Binds 미러 멤버가 실제 타입의 private 멤버여도 이 friend를 통해 접근하는 생성 코드를 낸다. 미러 멤버 이름은 C++ 이름(`points_` 등)이고 도구·JSON 이름은 `Name="points"`·`"looped"`·`"loopKeyOffset"`이다.
-- 미러는 `Validate`를 둔다(9.1절): 키 입력값 비내림차순·유한, `loopKeyOffset` 유한, `looped`이면 키가 있다.
+- 미러는 `Validate`를 둔다(9.1절): 키 입력값 비내림차순·유한, `loopKeyOffset` 유한, `looped`이면 키가 있고 offset > 0이다(17.8절 I4).
 - 생성·복사: `InterpCurve<T>`는 `Allocator&` 생성자와 `TryCopyFrom`이 있어 `RuntimeStructOps`의 construct·copy를 채울 수 있다. 같음은 리플렉션 값 기준이다(UE `operator==`는 루프가 꺼져 있으면 offset을 비교하지 않는다 — 리플렉션 같음은 모든 칸).
 
 ### 12.2 `TryCalcBounds`
@@ -507,7 +507,7 @@ A1 에셋 시스템 뒤 A 단계에서 아래를 만든다. 이 문서는 그것
 19. ◇ 리플렉션 경로의 정렬·유한 시간·압축 정합 위반은 InvalidArgument다(UE는 확인하지 않는다).
 20. ★ 압축 Constant 형식은 비트 같은 값만(UE 허용오차 1e-8 — RC 1286).
 21. ★ 압축 Weighted 형식은 구간 단위 가중 판정(UE는 Cubic 키의 가중 방식만 — RC 1296–1302).
-22. ★ `InterpCurve` 값 범위의 루프 닫는 구간에 루프 끝 시간을 쓴다(UE는 첫 키 입력값 — UE `InterpCurve.h` 765–770).
+22. ★ `InterpCurve` 값 범위의 루프 닫는 구간에 루프 끝 시간을 쓰고, 키 하나의 루프 커브도 그 닫는 구간을 본다(UE는 첫 키 입력값을 끝 시간으로 넘기고 키 하나면 구간을 보지 않는다 — UE `InterpCurve.h` 746–772).
 23. ◇ 허용오차 인자(UpdateOrAdd·중복 제거)가 NaN·음수면 InvalidArgument, `FindKey`는 `IndexNone`이다(UE는 음수를 그대로 써 늘 불일치·늘 보존 — 17.4절 C5).
 24. ★ 회전 풀기는 UE가 끝나는 입력에서 비트가 같고, 360을 더하고 빼도 값이 그대로인 큰 값(UE는 끝나지 않는다)·비유한 값은 double 나머지로 옮기거나 그대로 둔다(17.4절 C6).
 25. ★ Bake는 표본 2^24개 상한(CapacityExceeded), 표본판 중복 제거는 프레임 번호 int32 끝에서 멈추고 호출 하나 표본 2^24개 상한(CapacityExceeded)이다(UE는 감싸 돌아 끝나지 않거나 상한이 없다 — 17.4절 C9).
@@ -515,8 +515,10 @@ A1 에셋 시스템 뒤 A 단계에서 아래를 만든다. 이 문서는 그것
 27. ◇ `TrySetKeys`는 정렬·유한 시간을 확인한다(UE `SetKeys`는 확인하지 않는다).
 28. ◇ `TryGetTimeRange`·`TryGetValueRange`는 키가 없으면 NotFound다(UE는 (0, 0)).
 29. ◇ `TryShiftTime`·`TryScaleTime`은 키 순서를 그대로 둔다(UE `ShiftCurve`·`ScaleCurve`는 키마다 `SetKeyTime`이라 같은 시간이 된 키의 순서가 바뀔 수 있다).
-30. ★ 압축 키 시간 판정: 표본 시간은 누적하지 않고(`min + k/rate` — UE float 누적, RC 1435), errorThreshold·sampleRateHz가 NaN·Inf이거나 표본이 2^24개를 넘으면 Float32다(UE는 0 이하만 보고 표본 수 상한이 없다). 시간이 모두 같은 키(Δ = 0)도 Float32다(17.7절 P4).
+30. ★ 압축 키 시간 판정: 표본 시간은 누적하지 않고(`min + k·(1/rate)` — UE float 누적, RC 1435), errorThreshold·sampleRateHz가 NaN·Inf이거나 표본이 2^24개를 넘으면 Float32다(UE는 0 이하만 보고 표본 수 상한이 없다). 시간이 모두 같은 키(Δ = 0)도 Float32다(17.7절 P4).
 31. ◇ 압축 풀기는 Linear 형식의 접선, Linear·Cubic·Mixed 형식의 가중 칸을 0·None으로 푼다(압축이 담지 않는다 — UE도 같다). 압축 칸은 정규형이다(Empty만 기본값, Constant만 상수 칸 — 17.7절 P5).
+32. ★ 압축 키 시간 판정(UE `FindRichCurveKeyFormat`)의 손실 키 전진 뒤 범위 검사가 `CurrentLossyKey >= NumKeys`라, 복원한 마지막 키 시간이 max보다 작으면(1 ulp — 예: Linear 키 (−3, 0)·(6.4, 1), 1e-4·120 Hz) `Keys[NumKeys]`를 읽는다(RC 1413–1421 — 배열 밖 읽기, check 빌드는 assert). Rocks는 표본을 `Evaluate`와 같은 평가로 보므로 해당 없고, 시험 참조는 `CurrentLossyKey + 1 >= NumKeys`로 막아 옮겼다(17.7절 P10).
+33. ◇ 압축 키 시간 양자화의 Clamp는 UE `FMath::Clamp`(Max(Min(X, 1), 0) — NaN이면 1)와 같은 선택이다(17.7절 P4). Rocks `math::Clamp`(NaN 그대로)를 쓰지 않는다.
 
 ## 16. 시험 계획
 
@@ -543,18 +545,18 @@ A1 에셋 시스템 뒤 A 단계에서 아래를 만든다. 이 문서는 그것
 
 단계 기호는 CV(CurVe)다. 리플렉션 확장 문서의 CU(UI·Undo 소비자 단계)와 겹치지 않게 했다. **교차검증은 단계마다** 리뷰어 1명이 한다(구현 → Debug·format·policy·바뀐 부분 시험 → 리뷰 → 반영). 스펙·문서 관점 리뷰는 묶음 끝 CV10에서 한 번 한다.
 
-| 단계 | 범위 | 선행 | 규모 |
-|---|---|---|---|
-| CV1 | Core 수학 층 `KeyCurveMath.h`: `CycleCurveTime`(D16)·`EvalCurveSegment`·`BezierCurveValue`·`CurveSinCos`·`WeightedCurveSegment`·`SolveCurveCubic`·`ComputeCurveTangent`, UE 식 참조 구현·독립 고정 벡터·golden 시험, 참조 원본 대조 리뷰 | — | M |
-| CV2 | Core `FrameRate`·`FrameNumber`·`FrameTime`(D20) | — | S |
-| CV3 | 리플렉션 struct 검증 hook(D7): MetaCompiler 감지·RMC 진단, `RuntimeStructOps::validate`, graph decode·InstancedStruct·Optional·Map·배열 codec, 대입 묶음·JSON import, 경로 쓰기의 사본 적용, ReflectionExtensions 개정 | — | L |
-| CV4 | 리플렉션 `Array<uint8>` Bytes 블록 wire(D18): Serialization·codec·경로·JSON 표기·성질 표, ReflectionExtensions 개정 | — | M |
-| CV5 | `Curves` 모듈, `ScalarCurveBase`·`TangentCurve`·`PlainCurve`와 키, 평가·자동 접선·편집 연산·중복 제거·값 범위, 리플렉션 왕복·JSON·hook 시험, 키 wire 실측(D8) | CV1·CV2·CV3 | L |
-| CV6 | 계단 커브 셋(Integer·Name·String) | CV5 | S |
-| CV7 | `CurveKeyHandleTable`과 표 판 편집 함수 | CV5 | S |
-| CV8 | `PackedTangentCurve` 형식 결정·양자화·배치·평가·풀기, 정합 hook과 평가 진입 대조(D21), golden byte 시험 | CV4·CV5 | M |
-| CV9 | `InterpCurve<T>` 미러 다섯 형식(미러 private 멤버 접근 보강, `InterpCurveMode` enum 미러), `TryCalcBounds`(D19) | CV3 | M |
-| CV10 | 문서 반영(에셋 시스템 Curve 행·Core 상세 G09·InterpCurve 구현 문서·ReflectionExtensions 정리·이 문서의 구현 결과), 묶음 끝 스펙·문서 관점 리뷰 | CV1–CV9 | S |
+| 단계 | 범위 | 선행 | 규모 | 상태 |
+|---|---|---|---|---|
+| CV1 | Core 수학 층 `KeyCurveMath.h`: `CycleCurveTime`(D16)·`EvalCurveSegment`·`BezierCurveValue`·`CurveSinCos`·`WeightedCurveSegment`·`SolveCurveCubic`·`ComputeCurveTangent`, UE 식 참조 구현·독립 고정 벡터·golden 시험, 참조 원본 대조 리뷰 | — | M | 완료 `b82396df`·리뷰 `bdbf2569` |
+| CV2 | Core `FrameRate`·`FrameNumber`·`FrameTime`(D20) | — | S | 완료 `b82396df` |
+| CV3 | 리플렉션 struct 검증 hook(D7): MetaCompiler 감지·RMC 진단, `RuntimeStructOps::validate`, graph decode·InstancedStruct·Optional·Map·배열 codec, 대입 묶음·JSON import, 경로 쓰기의 사본 적용, ReflectionExtensions 개정 | — | L | 완료 `a06c0b76` |
+| CV4 | 리플렉션 `Array<uint8>` Bytes 블록 wire(D18): Serialization·codec·경로·JSON 표기·성질 표, ReflectionExtensions 개정 | — | M | 완료 `797bb1f9` |
+| CV5 | `Curves` 모듈, `ScalarCurveBase`·`TangentCurve`·`PlainCurve`와 키, 평가·자동 접선·편집 연산·중복 제거·값 범위, 리플렉션 왕복·JSON·hook 시험, 키 wire 실측(D8) | CV1·CV2·CV3 | L | 완료 `518a7f97` |
+| CV6 | 계단 커브 셋(Integer·Name·String) | CV5 | S | 완료 `ed0e2b8b` |
+| CV7 | `CurveKeyHandleTable`과 표 판 편집 함수 | CV5 | S | 완료 `1f36afed` |
+| CV8 | `PackedTangentCurve` 형식 결정·양자화·배치·평가·풀기, 정합 hook과 평가 진입 대조(D21), golden byte 시험 | CV4·CV5 | M | 완료 `b958ed24` |
+| CV9 | `InterpCurve<T>` 미러 다섯 형식(미러 private 멤버 접근 보강, `InterpCurveMode` enum 미러), `TryCalcBounds`(D19) | CV3 | M | 완료 `c257e5f4` |
+| CV10 | 문서 반영(에셋 시스템 Curve 행·Core 상세 G09·InterpCurve 구현 문서·ReflectionExtensions 정리·이 문서의 구현 결과), 묶음 끝 스펙·문서 관점 리뷰 | CV1–CV9 | S | 완료(개정 12) — 묶음 끝 리뷰 대기 |
 
 ### 17.1 구현(CV1·CV2)에서 정한 점
 
@@ -659,7 +661,7 @@ D18(`Array<uint8>` Bytes 블록 wire)을 넣었다. 기반 쪽 요약은 [리플
 - **S2 평가** — 5.8절 규칙 그대로다. UE의 앞에서부터 훑기(`Time < Keys[i].Time`인 첫 i의 앞 키)는 결과가 같은 이진 탐색(시간 초과 첫 키 − 1)이다(golden). 같은 시간 키가 여럿이면 그 시간의 마지막 키다. **NaN 시간은 기본값(없으면 fallback)이다** — UE는 비교가 모두 거짓이라 키가 있으면 마지막 키(키 하나면 그 키)를 낸다. 스칼라 커브의 NaN 규칙(5.6절 — 위치가 없는 시간으로 키를 고르지 않는다)과 같은 취지이고 정수·Name·String에는 NaN 값이 없어 기본값으로 둔다. ±Inf는 첫·마지막 키 규칙 그대로다. `StringStepCurve::Evaluate`는 할당 없이 `StringView`(키 값·기본값 — 다음 편집까지, 또는 fallback)를, `NameStepCurve::Evaluate`는 `Name`을 돌려준다.
 - **S3 기본값** — 셋 다 `Optional`이다(D6). String은 빈 문자열도 기본값이다(UE는 빈 문자열이 "없음"이라 빈 기본값을 둘 수 없다). Name 기본값은 Rocks가 더한 칸이다(D9).
 - **S4 편집 연산** — 7.1절 표의 시간·값 연산을 같은 규칙으로 둔다: `TryAddKey`(같은 시간 키 앞, 회전 풀기 없음), `TryUpdateOrAddKey`(허용오차 1e-4 — UE `UE_KINDA_SMALL_NUMBER`), `TryRemoveKey`, `TrySetKeyTime`(UE `SetKeyTime`은 접선이 없어 결과가 같다), `TrySetKeyValue`, `TrySetKeys`, `Reset`, `TryShiftTime`·`TryScaleTime`·`TryShiftKeyTimes`, `FindKey`(가장 앞 키 — 15절 6), `TryGetTimeRange`, 그리고 UE `FIntegralCurve::FindKeyBeforeOrAt` 대응 `FindKeyAtOrBefore`(셋 다 — UE는 Integer에만 있다)다. Bake·값 범위는 두지 않는다(UE에도 없다). String 값은 키 배열의 allocator로 복사하고, 할당이 실패하면 OutOfMemory이고 커브는 그대로다(새 문자열을 먼저 만든 뒤 바꾼다).
-- **S5 중복 키 제거** — UE 판정(원래 배열에서 앞·뒤 키와 값이 같은 안쪽 키 — 평가가 바뀌지 않는다)을 옮기고, 남은 키 하나를 기본값으로 바꾸는 UE 동작은 하지 않는다(15절 9). 값 같음은 int32 `==`, Name은 Rocks Name 규칙(ASCII 대소문자 무시 — UE `FName`과 같다)에 **표시 철자(displayId)까지 같아야** 하고(CV6·CV7 리뷰 6 — 철자만 다른 키를 지우면 평가 결과의 표시 철자가 바뀐다. 키 핸들 표 H2의 Name 비교와 같은 판단), String은 byte 비교다(UE `FString ==`는 대소문자를 무시해 "walk"·"Walk"·"walk"의 가운데를 지운다 — 15절 10의 같음 규칙을 여기에도 적용). UE `FNameCurve`에는 중복 제거가 없지만 String과 같은 규칙으로 더했다.
+- **S5 중복 키 제거** — UE 판정(원래 배열에서 앞·뒤 키와 값이 같은 안쪽 키 — 평가가 바뀌지 않는다)을 옮기고, 남은 키 하나를 기본값으로 바꾸는 UE 동작은 하지 않는다(15절 9). 값 같음은 int32 `==`, Name은 Rocks Name 규칙(ASCII 대소문자 무시 — UE `FName`과 같다)가 아니라 **토큰의 모든 칸(domain·id·displayId·number·kind)이 같아야** 하고(CV6·CV7 리뷰 6, CV8 리뷰 8 — 철자만 다른 키를 지우면 평가 결과의 표시 철자가 바뀌고, Name 규칙은 None 표시 이름의 domain을 보지 않는다. 키 핸들 표 H2의 Name 비교와 같은 판단), String은 byte 비교다(UE `FString ==`는 대소문자를 무시해 "walk"·"Walk"·"walk"의 가운데를 지운다 — 15절 10의 같음 규칙을 여기에도 적용). UE `FNameCurve`에는 중복 제거가 없지만 String과 같은 규칙으로 더했다.
 - **S6 리플렉션** — 검증 hook은 CV5와 같은 `ValidateKeys`(키 시간 유한·비내림차순)다. Name 값 키 커브를 담은 객체의 decode·JSON은 기존 Name 필드 규칙(Registry·텍스트 옵션의 NamePool)을 따른다. 키 struct는 Atomic이고 키 배열의 도구 이름은 `keys`다.
 - **S7 golden 범위** — 무작위 Integer 3,000개 × 시간 30개(키 시간 정확히·범위 안팎·NaN, `useDefaultBeforeFirstKey`·기본값 조합)가 수정을 켠 참조와 같고 UE 그대로와는 NaN에서만 다르다. `FindKeyAtOrBefore`도 UE `FindKeyBeforeOrAt`과 같다. String·Name 3,000개가 `FStringCurve::Eval` 참조(Name은 D9의 String 규칙 — 기본값·fallback은 키 단어 표 밖의 이름)와 같다. 편집 순서 Integer 400 × 30단계·String 300 × 30단계(대소문자만 다른 값 포함), 중복 제거 2,000개(UE 그대로는 남은 키 기본값 변환으로 첫 키 이전 평가가, FString 같음으로 남는 키 수가 달라지는 사례 존재).
 
@@ -684,14 +686,46 @@ D18(`Array<uint8>` Bytes 블록 wire)을 넣었다. 기반 쪽 요약은 [리플
 
 - **P1 배치** — `Curves/PackedTangentCurve.h`(`PackedCurveFormat`·`PackedKeyTimeFormat` enum, `PackedTangentCurve`)와 `Private/PackedTangentCurve.cpp`. 공통 평가 틀(`curves_detail::EvaluateCurve`)을 키 목록 템플릿(Size·operator[] — Span 또는 packed 키 보기)으로 넓혀 `TangentCurve`·`PlainCurve`·압축이 같은 틀을 쓴다. 압축 평가는 키를 읽을 때 byte에서 `TangentCurveKey`로 푸는 보기(`PackedKeyView`)를 넘긴다 — 할당이 없다.
 - **P2 Constant 형식 조건** — 키 1개, 또는 Cubic 키가 없고 값이 비트까지 같은 **유한 값**이며 앞·뒤 외삽이 모두 Linear가 아닐 때다. 11.1절의 "비트 같은 값"만으로는 원본과 비트가 같지 않다: Linear 외삽은 ±Inf 시간에서 기울기 0 × Inf = NaN, ±Inf 값은 구간 Lerp(Inf − Inf)·CycleWithOffset 차가 NaN이다. 이 조건이면 원본은 NaN 시간 말고 모든 시간에서 `값 + 0`(−0은 +0)이고 압축 Constant 평가와 같다(NaN 시간은 NaN — 원본과 같다).
-- **P3 Weighted 판정** — 11.1절대로 구간 단위다. 가중 방식은 있지만 가중 구간이 없는 커브(첫 키 Arrive, 마지막 키 Leave·Both 등)는 Mixed·Cubic이 되고 가중 칸은 버린다 — 그 칸은 평가에 쓰이지 않으므로 평가는 비트가 같다(시험 반례: UE Weighted 5 float/키 → Rocks Cubic 3 float/키).
-- **P4 키 시간 형식 판정** — Linear 이상 형식에서만 본다. errorThreshold·sampleRateHz가 NaN·Inf·0 이하, Δ = 0·비유한, `SizeUInt16 ≥ SizeFloat32`(UE와 같은 식 — 데이터 부분이 같아 전체 크기 비교와 같다), 표본(`min + k·(1/rate)`, k = 0부터 시간이 max 이하인 동안)이 2^24개를 넘으면 Float32다. 그 밖은 표본마다 원본 쪽(압축이 담는 칸만 남긴 키)과 손실 쪽(같은 키 + 양자화 후 복원한 시간)을 **`Evaluate`와 같은 평가**(구간 탐색·외삽 틀까지 — 11.2절의 "구간 이진 탐색"을 이렇게 구체화했다)로 구해 차가 모두 errorThreshold 이하면 Quantized16이다. 그래서 고른 Quantized16은 표본 시간마다 `|압축 Evaluate − 원본 Evaluate| ≤ errorThreshold`가 보장된다(복원된 마지막 키 시간이 max와 1 ulp 다를 때 외삽 갈래로 가는 경우까지 같은 식으로 본다). 판정이 키 사본 둘을 만들어 OutOfMemory가 날 수 있다.
+- **P3 Weighted 판정** — 11.1절대로 구간 단위다. 가중 방식은 있지만 가중 구간이 없는 커브(첫 키 Arrive, 마지막 키 Leave — 마지막 키 Both는 앞 구간의 도착이 가중이다)는 Mixed·Cubic이 되고 가중 칸은 버린다 — 그 칸은 평가에 쓰이지 않으므로 평가는 비트가 같다(시험 반례: UE Weighted 5 float/키 → Rocks Cubic 3 float/키).
+- **P4 키 시간 형식 판정** — Linear 이상 형식에서만 본다. errorThreshold·sampleRateHz가 NaN·Inf·0 이하, Δ = 0·비유한, `SizeUInt16 ≥ SizeFloat32`(UE와 같은 식 — 데이터 부분이 같아 전체 크기 비교와 같다), 표본(`min + k·(1/rate)`, k = 0부터 시간이 max 이하인 동안)이 2^24개를 넘으면 Float32다. 그 밖은 표본마다 원본 쪽(압축이 담는 칸만 남긴 키)과 손실 쪽(같은 키 + 양자화 후 복원한 시간)을 **`Evaluate`와 같은 평가**(구간 탐색·외삽 틀까지 — 11.2절의 "구간 이진 탐색"을 이렇게 구체화했다)로 구해 차가 모두 errorThreshold 이하면 Quantized16이다. 그래서 고른 Quantized16은 표본 시간마다 `|압축 Evaluate − 원본 Evaluate| ≤ errorThreshold`가 보장된다(복원된 마지막 키 시간이 max와 1 ulp 다를 때 외삽 갈래로 가는 경우까지 같은 식으로 본다). 판정이 키 사본 둘을 만들어 OutOfMemory가 날 수 있다. **CV8 단계 리뷰 반영**: 길이의 역수(1/Δ — Δ가 denormal이면 Inf)·표본 간격(1/rate — denormal rate면 Inf)이 비유한이거나 손실 쪽 복원 시간 하나라도 비유한이면(min·Δ가 float 끝 근처 — 예: min = 3·2^103, max = FLT_MAX) Float32다. 처음 구현은 이 경우 Validate가 거부하는 Quantized16을 만들었다. 양자화 Clamp는 UE 식(NaN이면 1 — 15절 33)이고, 평가의 이진 탐색은 키 시간만 읽는다(`PackedKeyView::TimeAt` — 키 전체를 풀지 않는다).
 - **P5 칸 정규형** — `emptyDefault`는 Empty에서만 있고, `constantValue`는 Constant가 아니면 비트 0, Empty·Constant의 시간 형식은 Float32다. `TryPack`은 늘 이 정규형을 만들고(같은 커브 → 같은 값 → 다시 저장 byte 같음) `Validate`는 어긋나면 거부한다. 외삽은 모든 형식에서 원본 값을 옮긴다(Empty·Constant 평가에는 쓰이지 않지만 풀기가 되돌린다).
 - **P6 한도** — 키 수가 uint32를 넘거나 packed가 1 MiB(`packed` 필드 `MaxElements` = MaxArrayElements — decode 한도와 같다)를 넘으면 `TryPack`은 CapacityExceeded이고 그대로다. Linear Float32는 131072키(정확히 1 MiB)까지다.
 - **P7 평가** — 진입에서 O(1) 대조(enum 범위, Empty·Constant는 keyCount 0·packed 비어 있음, 그 밖은 keyCount ≥ 2·packed 크기 = 기대 크기)를 하고 어긋나면 `Evaluate` quiet NaN·`TryEvaluate` InvalidArgument다. Empty는 (기본값, 없으면 fallback) + 0, Constant는 NaN 시간이면 NaN, 아니면 값 + 0이다(원본 키 하나 커브와 같다). 키 형식은 공통 틀이고, 탐색 중 읽은 키의 보간 byte가 {1, 2, 3} 밖이거나 가중 byte가 3을 넘으면 NaN·InvalidArgument다(읽지 않은 키의 byte·정렬·유한 시간은 Validate 몫 — 이진 탐색은 범위 안 index만 읽으므로 메모리 밖 읽기는 없다).
 - **P8 풀기** — `Validate`를 먼저 하고(위반 InvalidArgument), 키는 User 접선 방식, Linear 형식은 접선 0·Linear, Cubic 형식은 Cubic, 가중 칸은 Weighted 형식에서만 옮긴다. Constant는 (0, 값, Linear) 키 하나, Empty는 키 없음 + 기본값이다. 외삽을 옮기고 Empty가 아니면 기본값을 지운다. 키 교체는 `TrySetKeys`라 실패하면 out이 그대로다. Float32 형식은 풀어서 다시 압축하면 byte가 같다(시험).
-- **P9 복사** — `TryCopyFrom`(실패하면 그대로), 이동은 noexcept. 칸을 직접 바꾸는 시험 접근점은 모듈 Private의 `PackedTangentCurveTestAccess.h`다.
-- **P10 UE golden 범위** — 참조(`CurvePackUeReference.h`)는 UE `FindRichCurveCompressionFormat`·`FindRichCurveKeyFormat`·`CompressCurve`·`RoundHalfFromZero`를 그대로 옮겼다. 무작위 1500커브에서 (1) Rocks가 고른 형식·시간 형식으로 만든 UE 배치와 packed byte가 모두 같고, (2) 형식이 다른 사례는 UE Constant(1e-8·Linear 외삽)와 UE Weighted(가중 구간 없음)뿐이며, (3) 시간 형식 판정은 방식이 달라(P4) 다를 수 있어 일치 비율만 본다. UE 압축 평가(`FCompressedRichCurve::Eval`)는 옮기지 않았다 — Rocks 평가는 원본 `TangentCurve`와 비트 대조한다(D14).
+- **P9 복사·이동** — `TryCopyFrom`(실패하면 그대로). 이동(생성·대입, noexcept)은 옮겨진 쪽을 새로 만든 값과 같은 Empty 정규형으로 되돌린다(CV8 단계 리뷰 — 처음에는 packed만 비고 형식·키 수가 남아 Validate를 통과하지 못했다). 칸을 직접 바꾸는 시험 접근점은 모듈 Private의 `PackedTangentCurveTestAccess.h`다.
+- **P10 UE golden 범위** — 참조(`CurvePackUeReference.h`)는 UE `FindRichCurveCompressionFormat`·`FindRichCurveKeyFormat`·`CompressCurve`·`RoundHalfFromZero`를 그대로 옮겼다. 무작위 1500커브에서 (1) Rocks가 고른 형식·시간 형식으로 만든 UE 배치와 packed byte가 모두 같고, (2) 형식이 다른 사례는 UE Constant(1e-8·Linear 외삽)와 UE Weighted(가중 구간 없음)뿐이며, (3) 시간 형식 판정은 방식이 달라(P4) 다를 수 있어 일치 비율만 본다. UE 압축 평가(`FCompressedRichCurve::Eval`)는 옮기지 않았다 — Rocks 평가는 원본 `TangentCurve`와 비트 대조한다(D14). 참조는 UE의 손실 키 범위 밖 읽기를 고쳐 옮겼고(15절 32 — 반례 세 개를 고정 시험 `PackedTangentCurve_UeLossyKeyOverrunCounterexamples`로 둔다), Clamp는 UE 식이다.
+
+### 17.8 구현(CV9)에서 정한 점
+
+InterpCurve 미러와 값 범위(12절, D19)를 넣었다. 시험은 `Curves/Tests/InterpCurveReflectionTests.cpp`(fixture `CurvesTestFixtures/CurveFixture.h`의 `InterpCurveHolder`), `Core/Tests/MathInterpCurveBoundsTests.cpp`(UE `CalcBounds`·`FindBounds` 참조 — 머리 주석에 줄 대조표), MetaCompiler 시험 `Meta.BindsEnumMirrorPrivateMembersAndValidate`·`Meta.BindsEnum*`(ToolTests `MetaTests.Binds.cs`)다.
+
+- **I1 대상 형식** — UE `NoExportTypes.h`의 USTRUCT 다섯(FInterpCurveFloat·Vector2D·Vector·Quat·LinearColor)은 UE 5에서 `float`·`FVector2D`(double)·`FVector`(double)·`FQuat`(double)·`FLinearColor`(float)다(UE `MathFwd.h` 47–50, `InterpCurvePoint.h` 446–451). 미러는 `InterpCurve<float>`·`<Vec2d>`·`<Vec3d>`·`<Quatd>`·`<LinearColor>`와 각 `InterpCurvePoint`로 12.1절과 같다. 미러 이름은 `InterpCurve{Float,Vector2d,Vector,Quat,LinearColor}Binding`·`InterpCurvePoint…Binding`이고 헤더는 `CoreTypeBindings/InterpCurveTypes.h`다.
+- **I2 enum Binds(19절 확인 결과)** — MetaCompiler에 Core enum Binds가 없어 더했다: `ROCKS_ENUM(Binds = "rocks::InterpCurveMode") enum class InterpCurveModeBinding : uint8 { … }`. 생성 코드는 실제 enum의 `GeneratedType`을 내고(스키마 이름은 미러 이름), 미러 열거자마다 `static_assert(static_cast<int64>(실제::이름) == 값)`, underlying 같음을 대조한다. 미러가 나열한 열거자만 선언 값이다. 실제 enum 필드(클래스 필드·미러 멤버)는 미러로 풀린다. descriptor enum 항목에 `binds` 칸을 더했다. 대상이 enum이 아니면 RMC3000, CoreTypeBindings 밖이면 RMC2004다.
+- **I3 private 멤버** — Core `InterpCurve<T>`가 `template <class> friend struct ::rocks::GeneratedType;`을 선언하고(Core는 `GeneratedType`을 앞 선언만 한다) 미러가 `points_`·`looped_`·`loopKeyOffset_`을 `Name = "points"`·`"looped"`·`"loopKeyOffset"`로 나열한다. 생성 코드(대조 static_assert·구조적 바인딩·멤버 포인터 thunk·깊은 복사·검증 트리)는 모두 `GeneratedType` 특수화 안이라 friend로 닿는다 — MetaCompiler 생성 코드는 바꾸지 않았다(구조적 바인딩은 C++20 접근 가능한 멤버 규칙). friend가 없는 private 멤버는 지금처럼 생성 코드 컴파일이 거부한다.
+- **I4 미러 Validate** — Binds 미러의 `static Result<void> Validate(const 실제 타입&) noexcept`를 검증 hook으로 받는다(CV3이 막아 둔 것을 풀었다). 생성 코드는 미러 struct의 함수를 부르고 시그니처를 static_assert로 대조한다. InterpCurve 미러의 규칙(`ValidateInterpCurve`): 키 입력값 유한·비내림차순, `loopKeyOffset` 유한, 루프면 키가 있고 offset > 0(Core 불변식 "루프 offset은 유한한 양수"와 같다 — 12.1절의 "루프면 키가 있다"에 양수를 더했다). 모드 enum 범위는 enum decode가 이미 본다.
+- **I5 TryCalcBounds** — `Result<CurveBounds<T>> TryCalcBounds() const`(`CurveBounds{minimum, maximum}`), 구간 식은 `math::CurveSegmentBounds`(UE `FindBounds`를 같은 식·연산 순서로 — 구간 길이 float 뺄셈, 0 허용오차 1e-8f·1e-8, UE `Min`·`Max` 선택 규칙). 지원 형식은 새 성질 `CurveValueTraits::HasBounds`(scalar·Vector2/3·LinearColor 참, Vector4·quaternion 거짓 — requires로 컴파일을 막는다). 구간 수는 Eval과 같다(루프면 키 수 — 키 하나의 루프 커브도 자기 자신으로 가는 닫는 구간 하나를 본다. UE는 키 하나면 그 값만이라 Eval이 내는 곡선 극값을 놓친다 — 15절 22에 묶는다). 닫는 구간의 끝 시간은 `마지막 키 + loopKeyOffset`(float 덧셈)이다 — Eval은 구간 길이로 offset 자체를 쓰므로 두 값은 float 반올림만큼 다를 수 있다(UE 비교 기준을 유지했다).
+- **I6 golden 범위** — 무작위 3,000 × 일곱 형식(float·double·Vec2·Vec2d·Vec3·Vec3d·LinearColor)이 닫는 구간 수정을 켠 UE 참조와 비트가 같고 UE 그대로와는 루프 커브에서만 다르며, 촘촘한 Eval 표본이 범위 안이다. 손 계산 벡터(곡선 두 키 극값 4/9, 루프 닫는 구간 극값 −4/9 — UE는 찾지 못한다)와 NaN 값의 UE 선택 규칙도 본다.
+
+### 17.9 남은 일과 후속 과제(CV10)
+
+Curve 단계 CV1–CV10을 마쳤다(2026-11-18). 다른 문서에 반영한 곳: [에셋 시스템](AssetSystem.ko.md) 1절 Curve 행, [Core 상세 명세](CoreDetailedSpec.ko.md) G09, [키 커브 구현](../Implementation/InterpCurve.ko.md) 2절 표·4절 7·5절, [리플렉션 보강](ReflectionExtensions.ko.md) 23·24절 보강과 25절(Binds 확장), [리플렉션·빌드 보강](ReflectionFoundations.ko.md) 4.5절·지정자 표.
+
+남은 일:
+- 묶음 끝 스펙·문서 관점 리뷰(17절 — CV9 코드와 함께 리뷰어 1명).
+
+UE 기능 중 두지 않은 것(결정·이유는 해당 절):
+- `RCTM_SmartAuto`(D5 — 시퀀서 채널을 만들 때), `RCIM_None`·`RCTM_None`·`RCCE_None`(D4), `ReadjustTimeRange`(D12 — 시퀀서·도구 층).
+- 키 핸들의 저장·undo 기록(D3 — 리플렉션 확장 CU4가 정한다), UE 핸들 판 `GetNextKey`·`GetPreviousKey`·핸들 집합 `ScaleCurve`·Bake(H4 — index 연산과 `TryGetHandle`로 한다).
+- UE 압축 평가(`FCompressedRichCurve::Eval`)의 참조 이식(P10 — Rocks 평가는 원본과 비트 대조한다), `FInterpCurveTwoVectors`(Rocks 값 형식 없음), double·float 벡터 `InterpCurve` 미러(I1 — 소비자가 생길 때).
+- UE 이진 키 직렬화(`FRichCurveKey` 27 byte — RC 163–181)와 열 단위 키 배열·전용 codec(D8 — 저작 데이터는 RecordList wire, 런타임은 `PackedTangentCurve`. 크기가 측정상 문제가 되면 에셋 층에서 다시 본다).
+- 에셋 층(`UCurveFloat`·`UCurveVector`·`UCurveLinearColor`·`UCurveTable`·`FRuntimeFloatCurve`·`FCurveTableRowHandle` — 14절, A 단계)과 UE 에셋 반입.
+
+UE 결함 기록: 15절의 ★ 항목이 UE 5.8.4에서 확인한 결함과 Rocks 수정이다(순환 0 길이·SSE 몫, Lerp 끝점, 근 2개 가중, Bake 누적, 범위판 중복 제거 기준, 계단 커브 남은 키 기본값, 압축 표본 탐색·Weighted 판정 위치·순환 오프셋·풀기 접선 손실·Empty 무한 반복, Constant 허용오차, Weighted 형식 판정, InterpCurve 닫는 구간, 회전 풀기, 표본 상한, 손실 키 범위 밖 읽기). UE에 보고할 때는 15절 문구와 해당 시험의 반례(`*Counterexample*`·`*_FormatDecisionFixes`·`InterpCurveBounds_HandVectors`)를 쓴다.
+
+알려 둘 한계:
+- 가중 경로(`atanf`·double libm)의 비트 결정성은 Windows x64 릴리스 C 런타임 조건에서만 UE와 맞춘다(D17·K12). 다른 플랫폼은 상대 오차 대조다.
+- 압축 Quantized16은 표본 시간에서만 오차 상한을 보장한다(P4 — 표본 사이는 UE처럼 보장하지 않는다).
+- 19절의 확인하지 못한 항목(SmartAuto 세부 식, `FRichCurveKey` 실제 크기, UE 쿡 데이터의 Weighted 빈도)은 설계에 영향이 없어 열어 둔다.
 
 ## 18. 결정 목록
 
@@ -725,13 +759,15 @@ D18(`Array<uint8>` Bytes 블록 wire)을 넣었다. 기반 쪽 요약은 [리플
 - UE `FRichCurveKey`의 실제 메모리 크기(28바이트로 보이지만 static_assert로 확인하지 않았다) — Rocks 설계에 영향 없음.
 - ~~가중 경로의 `atanf`·double libm이 Rocks Windows x64 빌드(Clang + MSVC 런타임)와 UE 빌드(MSVC)에서 같은 C 런타임 구현으로 묶이는지~~ — CV1에서 확인했다(17.1절 K12): 같다. D17의 Windows x64 비트 목표를 유지한다(릴리스 C 런타임 조건).
 - ~~리플렉션 키 wire의 정확한 byte 수(기본값 필드 생략 여부)~~ — CV5에서 실측했다(9.2절): 생략 없이 키당 352 byte.
-- Core enum(`InterpCurveMode`)의 Binds 미러 지원 여부, Binds 생성 코드가 실제 타입의 private 멤버에 `GeneratedType` friend로 닿는 경로 — CV9 착수 때 확인한다.
+- ~~Core enum(`InterpCurveMode`)의 Binds 미러 지원 여부, Binds 생성 코드가 실제 타입의 private 멤버에 `GeneratedType` friend로 닿는 경로~~ — CV9에서 확인했다(17.8절 I2·I3): enum Binds는 없어 더했고, private 멤버는 friend로 생성 코드 수정 없이 닿는다.
 - UE 압축 Weighted 결함(11절)이 UE 쿡 데이터에서 실제로 드러나는지(애니메이션 코덱이 Weighted를 고르는 빈도) — Rocks 설계는 결함을 고치는 쪽이라 확인하지 않아도 된다.
 - ~~가중 구간 값 범위(7.3절)의 비단조 판정이 x′ 근의 수치 오차로 갈리는 경계~~ — CV5 단계 리뷰에서 실제 문제는 x′ 근이 아니라 Evaluate 풀이의 판별식 띠(|D| ≤ 1e-8)였다. 범위가 그 띠에서 풀이가 고르는 매개변수를 넣도록 고쳤고, 띠를 겨냥한 무작위 표본(접힘 점 근처 포함)으로 확인했다(17.4절 C10).
 
 ## 20. 변경 이력
 
 - **개정 1 초안(2026-11-18, 36027f9)**: 값 타입·평가·편집·핸들·압축 설계, 결정 D1–D15, 단계 CV1–CV7.
+- **개정 12(2026-11-18, CV10)**: 17절 진행 표에 상태 칸(CV1–CV10 완료·커밋), 17.9절(다른 문서 반영 목록·남은 일·두지 않은 UE 기능·UE 결함 기록·한계). 다른 문서: 에셋 시스템 Curve 행, Core 상세 G09, InterpCurve 구현 문서, 리플렉션 보강 23–25절, 리플렉션·빌드 보강 4.5절.
+- **개정 11(2026-11-18, CV9 구현·CV8 단계 리뷰 반영)**: 17.8절 I1–I6(InterpCurve 미러 다섯 형식·enum Binds·private 멤버 friend·미러 Validate·`TryCalcBounds`), 19절 확인 결과. CV8 리뷰 — 15절 32·33(UE 손실 키 범위 밖 읽기, UE Clamp), 17.7절 P3 예시·P4(비유한 역수·간격·복원 시간은 Float32, 시간 전용 탐색)·P9(이동된 쪽 Empty)·P10, 15절 30 표본 식, 17.5절 S5(Name 토큰 모든 칸).
 - **개정 10(2026-11-18, CV8 구현·CV6·CV7 묶음 리뷰 반영)**: 리뷰 — 17.6절 H4(`TryEditKeys` 키별 칸 편집자·`TryAutoSetTangents`·표 판 중복 제거·Shift·Scale, UE `ShiftCurve` 핸들 차이)·H5 예외·H8·H9·H10, 17.5절 S5(Name 중복 제거는 표시 철자까지)·S7, 7.3절 반례 값 정정. CV8 — 17.7절 P1–P10(압축 커브 — Constant 외삽·유한 조건, 키 시간 판정을 Evaluate와 같은 평가로, 칸 정규형, 한도, 평가·풀기), 11.1·11.2·11.4절 정정(Bytes wire는 CV4에서 적용됨), 15절 30–31.
 - **개정 9(2026-11-18, CV7 구현 반영)**: 17.6절 H1–H8(키 핸들 표 — 칸별 비트 비교 감지, 표 판 편집 함수, 원자성, `TryEditKeys`).
 - **개정 8(2026-11-18, CV6 구현·CV5 단계 리뷰 반영)**: 17.5절 S1–S7(계단 커브 셋 — NaN 시간은 기본값, String 빈 기본값, 중복 제거의 같음 규칙, `FindKeyAtOrBefore`). CV5 리뷰: 값 범위가 풀이 판별식 띠의 매개변수까지 담음(7.3절·C10·D11·19절), 회전 풀기 UE 비트 일치(C6), 표본판 상한·NaN 키 보존(C9), 순환 int32 경로 벗어남 표현(5.1절·C4), golden 참조 표현(C13), 15절 23–29, D8 확정, 7.1표.

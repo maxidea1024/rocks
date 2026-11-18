@@ -111,7 +111,7 @@ internal static class CppEmitter
         {
             if (type.IsEnum)
             {
-                Line($"if (auto added = registration.RegisterEnumIfAbsent(::rocks::GeneratedType<::{type.Name}>::Schema(), ::rocks::RuntimeEnumOps{{::rocks::NativeTypeKey<::{type.Name}>(), module}}); !added) return fail(added.Error());");
+                Line($"if (auto added = registration.RegisterEnumIfAbsent(::rocks::GeneratedType<::{type.NativeName}>::Schema(), ::rocks::RuntimeEnumOps{{::rocks::NativeTypeKey<::{type.NativeName}>(), module}}); !added) return fail(added.Error());");
                 continue;
             }
 
@@ -304,7 +304,7 @@ internal static class CppEmitter
                         // native 키를 싣는다(Docs/Design/ReflectionExtensions.ko.md 7.2·7.3절).
                         Line("nullptr, {}, nullptr,");
                         string mapValueNative = ValueNativeType(schema, field);
-                        string keyNative = field.KeyKind == "Enum" ? $", nullptr, NativeTypeKey<::{field.KeyReference}>()" : "";
+                        string keyNative = field.KeyKind == "Enum" ? $", nullptr, NativeTypeKey<::{schema.Find(field.KeyReference!).NativeName}>()" : "";
                         EmitClassCodec(native, member, (mapValueNative.Length == 0 ? ", nullptr" : mapValueNative) + ClassPathThunk(native, member, field) + keyNative, Line);
                         continue;
                     }
@@ -344,7 +344,7 @@ internal static class CppEmitter
                     // Enum 필드(Optional<enum> 포함)는 정적 thunk의 enum native 키를 싣는다(등록이 대상 enum 레코드와 대조한다). 단일 값
                     // 필드도 경로 접근 thunk를 싣는다(리플렉션 B9i3c0 — staged 객체의 경로 연산과 Detach·Attach가 쓴다. 게시된 객체의
                     // 최상위 단일 값 읽기·쓰기는 그래도 read·write 한 경로다).
-                    string scalarNative = field.TargetKind == "Enum" ? $", NativeTypeKey<::{field.Reference}>()" : ", nullptr";
+                    string scalarNative = field.TargetKind == "Enum" ? $", NativeTypeKey<::{schema.Find(field.Reference!).NativeName}>()" : ", nullptr";
                     EmitClassCodec(native, member, scalarNative + ClassPathThunk(native, member, field), Line);
                 }
 
@@ -399,7 +399,7 @@ internal static class CppEmitter
     private static string ValueNativeType(SchemaModel schema, FieldModel field) => field.TargetKind switch
     {
         "Struct" => $", NativeTypeKey<::{schema.Find(field.Reference!).NativeName}>()",
-        "Enum" => $", NativeTypeKey<::{field.Reference}>()",
+        "Enum" => $", NativeTypeKey<::{schema.Find(field.Reference!).NativeName}>()",
         _ => ""
     };
 
@@ -752,9 +752,11 @@ internal static class CppEmitter
         string selfHook = (type.HasValidate ? "true" : "false") + (baseNative is null ? "" : $" || GeneratedType<{baseNative}>::HasValidateSelf");
         Line($"static constexpr bool HasValidateSelf = {selfHook};");
         Line($"static_assert(!HasValidateSelf || (!ContainsStrongReference && ValueCopyable), \"{type.Name} has a Validate hook (its own or a base's) and must be a deep-copyable value without strong references: reflected writes validate a copy before publishing it\");");
+        // Binds 미러(CurveData CV9)의 hook은 미러 struct의 static Validate(const 실제 타입&)다(실제 Core 타입에는 hook을 둘 수 없다).
+        string hookOwner = type.Binds.Length != 0 ? "::" + type.Name : native;
         if (type.HasValidate)
         {
-            Line($"static_assert(::rocks::IsSameV<decltype(&{native}::Validate), ::rocks::Result<void> (*)(const {native}&) noexcept>, \"{type.Name}::Validate must be declared as static rocks::Result<void> Validate(const {type.Name}&) noexcept\");");
+            Line($"static_assert(::rocks::IsSameV<decltype(&{hookOwner}::Validate), ::rocks::Result<void> (*)(const {native}&) noexcept>, \"{type.Name}::Validate must be declared as static rocks::Result<void> Validate(const {(type.Binds.Length != 0 ? type.Binds : type.Name)}&) noexcept\");");
         }
 
         Line($"static Result<void> ValidateSelf([[maybe_unused]] const {native}& value) noexcept {{");
@@ -766,7 +768,7 @@ internal static class CppEmitter
         }
 
         Line(type.HasValidate
-            ? $"return ::rocks::detail::StructValidationResult({native}::Validate(value));"
+            ? $"return ::rocks::detail::StructValidationResult({hookOwner}::Validate(value));"
             : "return Result<void>::Success();");
         Line("}");
 
@@ -786,7 +788,7 @@ internal static class CppEmitter
         }
 
         Line(type.HasValidate
-            ? $"return ::rocks::detail::StructValidationResult({native}::Validate(value));"
+            ? $"return ::rocks::detail::StructValidationResult({hookOwner}::Validate(value));"
             : "return Result<void>::Success();");
         Line("}");
     }
@@ -893,9 +895,12 @@ internal static class CppEmitter
 
     // 리플렉션 enum의 GeneratedType 특수화다: Id, Schema(EnumSchema), constexpr IsDeclared(쓰기·복원 검증),
     // Register. C++ underlying이 스키마와 같은지 컴파일 시 확인한다.
+    // Binds 미러 enum(CurveData CV9 — Core enum)은 실제 enum(NativeName)의 특수화를 내고 열거자 이름·값을 실제 enum과
+    // 대조한다(미러가 나열한 열거자만 선언 값이다 — 실제 enum의 다른 열거자는 저장·쓰기에서 거부된다). 스키마 이름은
+    // 미러 이름이다.
     private static void EmitEnum(ClassModel type, Action<string> Line)
     {
-        string native = "::" + type.Name;
+        string native = "::" + type.NativeName;
         Line($"template <> struct GeneratedType<{native}> {{");
         Line($"static_assert(::rocks::IsSameV<::rocks::UnderlyingTypeT<{native}>, {EnumRules.NativeType(type.Underlying)}>, \"ROCKS_ENUM {type.Name} underlying type changed; regenerate metadata\");");
         // 스키마의 값이 C++ 값과 같은지 컴파일 시 대조한다(MetaCompiler가 AST에서 읽은 값을 믿지 않는다).

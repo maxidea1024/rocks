@@ -356,8 +356,10 @@ TEST(AtomicStruct_CoreValueMirrorsAreAtomicExceptTransform) {
     {
         ModuleRegistration registration(types, allocator);
         REQUIRE(generated::CoreTypeBindings::RegisterModuleTypes(registration));
-        // 모듈이 미러 17종만 등록한다(표의 ID가 모두 다르고 빠진 미러가 없다).
-        CHECK(types.Stats().registeredTypes == MirrorCount);
+        // 모듈이 값 타입 미러 17종과 InterpCurve 미러 11종(enum 1·키 5·커브 5 — CurveData CV9)을
+        // 등록한다(표의 ID가 모두 다르고 빠진 미러가 없다).
+        constexpr usize InterpCurveMirrorCount = 11;
+        CHECK(types.Stats().registeredTypes == MirrorCount + InterpCurveMirrorCount);
         usize atomic = 0;
         for (const Mirror& mirror : mirrors) {
             auto lease = types.AcquireValueType(mirror.id, TypeKind::Struct);

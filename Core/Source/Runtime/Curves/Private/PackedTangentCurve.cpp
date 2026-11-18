@@ -7,8 +7,8 @@
 
 // PackedTangentCurve 압축·평가·풀기·정합이다(Docs/Design/CurveData.ko.md 11절 — UE 5.8
 // RichCurve.cpp FindRichCurveCompressionFormat 1279–1330·FindRichCurveKeyFormat
-// 1332–1475·CompressCurve 1477–1700·키 시간·데이터 어댑터 1712–1935·InterpEval
-// 2001–2120·PopulateCurve 2423–2433를 고친 것).
+// 1332–1475·CompressCurve 1477–1682·키 시간·데이터 어댑터 1694–1947·InterpEval
+// 2016–2135·PopulateCurve 2441–2452를 고친 것).
 namespace rocks {
 
 namespace {
@@ -135,8 +135,12 @@ float RoundHalfFromZeroNonNegative(float value) noexcept {
 
 // 키 시간의 16비트 양자화(UE CompressCurve 1634–1635)와 복원(Quantized16BitKeyTimeAdapter::GetTime
 // 1720–1721)이다.
+// Clamp는 UE FMath::Clamp(Max(Min(X, 1), 0) — UnrealMathUtility.h 592–595)와 같은 선택이다(NaN이면
+// 1).
 uint16 QuantizeTime(float time, float minimum, float inverseDelta) noexcept {
-    const float normalized = math::Clamp((time - minimum) * inverseDelta, 0.0f, 1.0f);
+    const float scaled = (time - minimum) * inverseDelta;
+    const float lower = scaled < 1.0f ? scaled : 1.0f;
+    const float normalized = 0.0f < lower ? lower : 0.0f;
     return static_cast<uint16>(RoundHalfFromZeroNonNegative(normalized * 65535.0f));
 }
 
@@ -241,8 +245,10 @@ Result<PackedKeyTimeFormat> ChooseKeyTimeFormat(Allocator& allocator, const Tang
     const float minimum = keys[0].time;
     const float maximum = keys[count - 1].time;
     const float delta = maximum - minimum;
-    if (!math::IsFinite(delta) || !(delta > 0.0f)) {
-        // 시간이 모두 같으면 양자화 범위가 없다(UE는 1/0과 NaN Clamp로 판정한다).
+    const float inverseDelta = 1.0f / delta;
+    if (!math::IsFinite(delta) || !(delta > 0.0f) || !math::IsFinite(inverseDelta)) {
+        // 시간이 모두 같거나(UE는 1/0과 NaN Clamp로 판정한다) 길이가 denormal이라 역수가 넘치면
+        // 양자화 범위가 없다.
         return Result<PackedKeyTimeFormat>::Success(float32);
     }
 
@@ -253,6 +259,11 @@ Result<PackedKeyTimeFormat> ChooseKeyTimeFormat(Allocator& allocator, const Tang
     }
 
     const float increment = 1.0f / sampleRateHz;
+    if (!math::IsFinite(increment)) {
+        // denormal sampleRateHz는 간격이 Inf라 표본이 없다(판정 없이 Quantized16이 되지 않게).
+        return Result<PackedKeyTimeFormat>::Success(float32);
+    }
+
     usize samples = 0;
     while (minimum + static_cast<float>(samples) * increment <= maximum) {
         if (samples == MaxQuantizationSamples) {
@@ -272,11 +283,15 @@ Result<PackedKeyTimeFormat> ChooseKeyTimeFormat(Allocator& allocator, const Tang
         return Result<PackedKeyTimeFormat>::Failure(reserved.Error());
     }
 
-    const float inverseDelta = 1.0f / delta;
     for (const TangentCurveKey& key : keys) {
         TangentCurveKey kept = StoredKey(key, format);
         static_cast<void>(stored.TryPushBack(kept)); // 예약했으므로 실패하지 않는다
         kept.time = RestoreTime(QuantizeTime(key.time, minimum, inverseDelta), minimum, delta);
+        if (!math::IsFinite(kept.time)) {
+            // 복원 시간이 넘치면(min·길이가 float 끝 근처) Validate가 거부하는 값이 된다.
+            return Result<PackedKeyTimeFormat>::Success(float32);
+        }
+
         static_cast<void>(lossy.TryPushBack(kept));
     }
 
@@ -417,6 +432,41 @@ static bool IsPackedConsistent(PackedCurveFormat format, PackedKeyTimeFormat key
 
     return keyCount >= 2 &&
            packedSize == PackedTangentCurve::ExpectedPackedSize(format, keyTimeFormat, keyCount);
+}
+
+PackedTangentCurve::PackedTangentCurve(PackedTangentCurve&& other) noexcept
+    : format_(other.format_), keyTimeFormat_(other.keyTimeFormat_),
+      preExtrapolation_(other.preExtrapolation_), postExtrapolation_(other.postExtrapolation_),
+      keyCount_(other.keyCount_), constantValue_(other.constantValue_),
+      emptyDefault_(other.emptyDefault_), packed_(Move(other.packed_)) {
+    other.ResetFieldsToEmpty();
+}
+
+PackedTangentCurve& PackedTangentCurve::operator=(PackedTangentCurve&& other) noexcept {
+    if (this != &other) {
+        format_ = other.format_;
+        keyTimeFormat_ = other.keyTimeFormat_;
+        preExtrapolation_ = other.preExtrapolation_;
+        postExtrapolation_ = other.postExtrapolation_;
+        keyCount_ = other.keyCount_;
+        constantValue_ = other.constantValue_;
+        emptyDefault_ = other.emptyDefault_;
+        packed_ = Move(other.packed_);
+        other.ResetFieldsToEmpty();
+    }
+
+    return *this;
+}
+
+void PackedTangentCurve::ResetFieldsToEmpty() noexcept {
+    format_ = PackedCurveFormat::Empty;
+    keyTimeFormat_ = PackedKeyTimeFormat::Float32;
+    preExtrapolation_ = CurveExtrapolation::Constant;
+    postExtrapolation_ = CurveExtrapolation::Constant;
+    keyCount_ = 0;
+    constantValue_ = 0.0f;
+    emptyDefault_ = Optional<float>{};
+    packed_.Clear(); // 이동된 배열은 이미 비었다(자기 이동이 아닌 한 할 일 없음)
 }
 
 Result<void> PackedTangentCurve::TryCopyFrom(const PackedTangentCurve& other) noexcept {
