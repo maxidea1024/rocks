@@ -171,6 +171,8 @@ enum class ConfigDiagnosticCode : uint8 {
     InvalidDeviceProfile,
     // 정보: `Clamp()` CVar의 범위 밖 값을 범위 끝으로 보정해 받았다(CVar 6.2·12절).
     Clamped,
+    // enum CVar 값이 이름 표에 없다(CVar 4.4·12절).
+    InvalidEnum,
     // CVar의 `Validate` 검사 함수가 값을 거부했다(메시지는 검사 함수가 돌려준 이유 —
     // CVar 4.2·12절).
     ValidationFailed

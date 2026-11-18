@@ -16,9 +16,22 @@ inline constexpr usize ScopedTagBytes = 32;
 // 프로세스 전체에서 겹치지 않는 범위 임시 변경 태그를 tag에 쓰고 그 view를 돌려준다.
 StringView MakeScopedTag(char (&tag)[ScopedTagBytes]) noexcept;
 
-// 범위 임시 변경을 끝낸다(Scoped 층의 그 태그를 지운다). 문맥이 이미 없어졌으면 할 일이 없다. 큐가
-// 가득 차는 등으로 넣지 못하면 Fatal이다(값이 남으면 범위가 끝났다는 약속이 깨진다).
-void EndScopedOverride(const VarDefinition& definition, StringView tag) noexcept;
+// 범위 임시 변경을 끝낼 지우기다. 생성 때 미리 만들고 큐 자리도 잡아 두므로 소멸에 실패 경로가
+// 없다. channel은 값을 쓴 문맥의 통로다(소멸 때 묶인 문맥과 무관하게 이 문맥의 값을 지운다).
+struct ScopedRemoval {
+    SharedPtr<config::detail::WriteChannel> channel;
+    SharedPtr<config::detail::QueuedChange> change;
+};
+
+// 이 스레드에 묶인 문맥의 Scoped 층 (tag)에 값을 쓰고, 끝낼 때 넣을 지우기를 removal에 만든다.
+// 오류: CVar::Set과 같다(실패하면 removal은 비어 있다).
+Result<void> BeginScopedOverride(const VarDefinition& definition, const ScalarValue& value,
+                                 StringView tag, SourceLocation where,
+                                 ScopedRemoval& removal) noexcept;
+
+// 범위 임시 변경을 끝낸다: 미리 만든 지우기를 그 문맥의 큐에 넣는다(큐 한도와 무관 — 실패하지
+// 않는다). 문맥이 이미 없어졌으면 할 일이 없다. 어느 스레드에서나 부를 수 있다.
+void EndScopedOverride(ScopedRemoval& removal) noexcept;
 
 } // namespace detail
 
@@ -41,8 +54,6 @@ public:
     SnapshotBinding& operator=(const SnapshotBinding&) = delete;
     SnapshotBinding(SnapshotBinding&&) = delete;
     SnapshotBinding& operator=(SnapshotBinding&&) = delete;
-    static void* operator new(usize) = delete;
-    static void* operator new[](usize) = delete;
 
     // 묶은 snapshot이다.
     const config::ConfigSnapshot& Snapshot() const noexcept {
@@ -56,6 +67,8 @@ private:
     // — 그 사이 Sync가 앞 snapshot을 바꿨을 수 있다).
     SharedPtr<config::detail::WriteChannel> previousGameLane_;
     uint64 thread_ = 0;
+    // 이 묶음의 중첩 깊이(1부터 — 풀 때 LIFO를 확인한다).
+    uint32 depth_ = 0;
 };
 
 // 변수 값의 세대가 바뀌었는지 묻는 감시자다(7.3절 — UE FConsoleVariableSinkHandle 대응). 마지막으로
@@ -110,7 +123,9 @@ Watcher(const CVar<T>&) -> Watcher<T>;
 // 범위 임시 변경이다(6.3절 — UE TGuardConsoleVariable 대응). Scoped 층에 고유 태그로 쓰고 소멸 때
 // 그 태그만 지운다. 중첩하면 나중 것이 이기고, 어떤 순서로 풀어도 남은 것 중 가장 나중 것이 이긴다.
 // 적용은 다른 쓰기와 같이 Sync에서 한다. Scoped 층은 콘솔보다 약하다(6.1절). BootCVar는 받지 않는다
-// (컴파일 오류).
+// (컴파일 오류). 값은 만들 때 이 스레드에 묶인 문맥에 쓰고, 지우기는 소멸 때 묶음과 무관하게 그
+// 문맥에 간다(다른 문맥의 묶음 안·다른 스레드에서 소멸해도 된다). 지우기는 만들 때 미리 만들고 큐
+// 자리도 잡아 두므로 소멸에 실패 경로가 없다. 그 문맥이 먼저 없어졌으면 소멸은 할 일이 없다.
 //
 // 사용 예:
 //   {
@@ -119,18 +134,17 @@ Watcher(const CVar<T>&) -> Watcher<T>;
 //       CHECK(ShadowDistance.Get() == 500.f);
 //   }
 //
-// 수명: 쓰기가 실패했으면(Status) 소멸 때 할 일이 없다. 스레드: 이 스레드에 묶인 문맥에 쓴다.
+// 수명: 쓰기가 실패했으면(Status) 소멸 때 할 일이 없다. 스레드: 만들 때 이 스레드에 묶인 문맥에
+// 쓴다.
 template <class T>
 class ScopedOverride {
 public:
     ScopedOverride(const CVar<T>& handle, SetArg<T> value,
-                   SourceLocation where = SourceLocation::Current()) noexcept
-        : definition_(&detail::HandleAccess::Definition(handle)) {
+                   SourceLocation where = SourceLocation::Current()) noexcept {
         const StringView tag = detail::MakeScopedTag(tag_);
-        SetOptions options;
-        options.layer = config::ConfigLayer::Scoped;
-        options.tag = tag;
-        auto written = handle.Set(value, options, where);
+        auto written =
+            detail::BeginScopedOverride(detail::HandleAccess::Definition(handle),
+                                        detail::ScalarOfArg<T>(value), tag, where, removal_);
         error_ = written ? ErrorCode::None : written.Error();
     }
 
@@ -142,9 +156,7 @@ public:
     }
 
     ~ScopedOverride() {
-        if (definition_ != nullptr && error_ == ErrorCode::None) {
-            detail::EndScopedOverride(*definition_, StringView(tag_));
-        }
+        detail::EndScopedOverride(removal_);
     }
 
     ScopedOverride(const ScopedOverride&) = delete;
@@ -158,7 +170,7 @@ public:
     }
 
 private:
-    const detail::VarDefinition* definition_ = nullptr;
+    detail::ScopedRemoval removal_;
     char tag_[detail::ScopedTagBytes] = {};
     ErrorCode error_ = ErrorCode::InvalidArgument;
 };

@@ -30,12 +30,15 @@
 //
 // 스레드: 소유 스레드(만든 스레드 — 게임 lane)에서 쓴다. 다른 스레드의 호출은 WrongThread다(Get은
 // Fatal). 예외는 Acquire·ClearLayer와 CVar 핸들의 `Set`·`Clear`(쓰기 큐 —
-// Docs/Design/CVarSystem.ko.md 6.2·10.1절)다. 다른 스레드에서 쓰려면 allocator가 여러 스레드의 동시
-// 호출을 받아야 한다 (SystemAllocator 등). 값은 Sync에서만 바뀌므로 그 사이 Get이 돌려준 참조의
-// 내용은 바뀌지 않는다. 소유 스레드는 문맥이 스스로 최신 snapshot에
-// 묶는다(Initialize·Register·Sync가 게시할 때).
+// Docs/Design/CVarSystem.ko.md 6.2·10.1절)다. 다른 스레드가 snapshot을 쥐기만 해도(마지막 참조를 그
+// 스레드가 놓으면 해제도 그 스레드에서 한다) allocator가 여러 스레드의 동시 호출을 받아야
+// 한다(SystemAllocator 등). 값은 Sync에서만 바뀌므로 그 사이 Get이 돌려준 참조의 내용은 바뀌지
+// 않는다. 소유 스레드는 문맥이 스스로 최신 snapshot에 묶는다(Initialize·Register·Sync — 그 스레드에
+// 명시 묶음이 없을 때). 한 스레드가 여러 문맥의 게임 lane이면 가장 최근에 게시하거나 Sync한 문맥이
+// 묶인다(다른 문맥은 SnapshotBinding 으로 읽는다). 문맥은 소유 스레드에서만 없앤다(아니면 Fatal).
 //
-// 수명: allocator·objects는 문맥보다 오래 살아야 한다. 설정 struct 타입의 모듈(생성 코드)과 그
+// 수명: allocator·objects는 문맥보다 오래 살아야 한다. allocator는 마지막 snapshot 참조와 쓰기
+// 통로(snapshot들이 공유한다)보다도 오래 살아야 한다. 설정 struct 타입의 모듈(생성 코드)과 그
 // TypeRegistry 등록도 문맥보다 오래 살아야 한다(문맥이 TypeLease를 쥔다).
 //
 // 사용 예(시험 — 봉인 모드):
@@ -169,6 +172,11 @@ struct ConfigPendingRestart {
 // 지점에 넣는 데 쓴다.
 using ConfigSyncHook = void (*)(void* context, ConfigContext& config) noexcept;
 
+// 다른 스레드에서 넣은 쓰기(`CVar::Set`·`Clear`·`ClearLayer`)가 한 번의 Sync 전까지 쓰기 큐에 머물
+// 수 있는 수다(넘으면 Busy — 버리지 않는다, Docs/Design/CVarSystem.ko.md 10.1절 표). 소유 스레드의
+// 입력은 이 한도와 무관하다.
+inline constexpr usize MaxQueuedChanges = 65536;
+
 // Sync 한 번의 변경 목록이다(ConfigContext::OnSynced 인자 — CVarSystem.ko.md 7.3절, VD9).
 // variables는 유효값이 바뀐 CVar 핸들 번호(이름 순서), settings는 값이 바뀐 설정 struct(등록
 // 순서)다. 바뀐 것이 없는 Sync도 빈 목록으로 한 번 부른다. view는 콜백 동안만 유효하다.
@@ -236,7 +244,8 @@ public:
     // 이름 → 값)다. 섹션은 코드 기본값 위에 적용해 보아 모르는 키·형식·`$` 위치·경로 이름·층 허용을
     // 검사한다(이전 층에 따라 달라지는 배열 연산 결과의 한도는 Sync가 본다).
     // tag는 묶음 이름(같은 층·태그를 Unset으로 한꺼번에 뺀다), sourceName은 진단·출처 표시용이다.
-    // 반환: 진단에 Error가 없으면 성공(Note는 남을 수 있다). 오류: 진단을 남겼으면
+    // 반환: 진단에 Error가 없으면 성공(Note는 남을 수 있다). 소유 스레드의 입력은 쓰기 큐 한도와
+    // 무관하다(Busy가 없다 — 소유자가 스스로 조절한다). 오류: 진단을 남겼으면
     // InvalidArgument(Diagnostics 참조 — 아무것도 큐에 넣지 않는다), layer가 CodeDefault이거나
     // 정의되지 않음 InvalidArgument, 모르는 branch NotFound(진단 UnknownBranch), 다른 스레드
     // WrongThread, 할당 실패.
@@ -254,15 +263,17 @@ public:
                                StringView value) noexcept;
 
     // (layer, tag)의 입력을 text 하나로 바꾼다(hot reload — 8절). AddLayerText처럼 검사하고, 받으면
-    // 그 앞에 Unset(layer, tag)를 넣는다(다음 Sync가 옛 입력을 빼고 새 입력을 적용한다). 거부하면
-    // 아무것도 넣지 않는다(옛 입력이 그대로 남는다 — 잘못 고친 파일이 값을 지우지 않는다). 오류:
-    // AddLayerText와 같다.
+    // Unset(layer, tag)과 새 입력을 한꺼번에 큐에 넣는다(다음 Sync가 옛 입력을 빼고 새 입력을
+    // 적용한다 — 다른 스레드의 쓰기가 그 사이에 끼지 않는다). 거부하면 아무것도 넣지 않는다(옛
+    // 입력이 그대로 남는다 — 잘못 고친 파일이 값을 지우지 않는다). 오류: AddLayerText와 같다(Busy
+    // 없음).
     Result<void> ReplaceLayerText(ConfigLayer layer, StringView tag, StringView branch,
                                   StringView sourceName, StringView text) noexcept;
 
     // (layer, tag)의 모든 입력을 다음 Sync에서 뺀다(3.1절 `Unset` — 기능 묶음 해제, 품질 등급 변경,
     // 시험 정리). 큐 순서대로 처리하므로 그보다 먼저 넣은 입력(같은 Sync에 들어갈 것 포함)만 뺀다.
-    // 없는 태그는 무동작이다. 오류: layer 범위 InvalidArgument, 다른 스레드 WrongThread, 할당 실패.
+    // 없는 태그는 무동작이다. 쓰기 큐 한도와 무관하다(Busy 없음). 오류: 초기화 전·layer 범위
+    // InvalidArgument, 다른 스레드 WrongThread, 할당 실패.
     Result<void> Unset(ConfigLayer layer, StringView tag) noexcept;
 
     // sync 지점이다(Docs/Design/CVarSystem.ko.md 10절 순서): 0) sync hook을 등록 순서대로 부른다
@@ -440,8 +451,8 @@ public:
 
     // 층 하나의 모든 입력(모든 태그)을 다음 Sync에서 뺀다(6.1절 —
     // `ClearLayer(ConfigLayer::Hotfix)`로 핫픽스 전체를 되돌린다). 어느 스레드에서나 부를 수
-    // 있다(쓰기 큐에 넣는다). 오류: 초기화 전· CodeDefault·정의되지 않은 층 InvalidArgument, 큐가
-    // 가득 차면 Busy, 할당 실패.
+    // 있다(쓰기 큐에 넣는다). 오류: 초기화 전·CodeDefault·정의되지 않은 층 InvalidArgument, 다른
+    // 스레드에서 불렀는데 큐 한도를 넘으면 Busy, 할당 실패.
     Result<void> ClearLayer(ConfigLayer layer) noexcept;
 
     // Sync마다 한 번(값 적용·snapshot 게시·명령 실행 뒤) 부르는 변경 알림이다(7.3절, VD9 — 변수

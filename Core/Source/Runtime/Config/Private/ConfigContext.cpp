@@ -1,4 +1,5 @@
 #include "ConfigState.h"
+#include "ConfigText.h"
 
 #include <Core/Algorithms.h>
 #include <Core/ScopeExit.h>
@@ -462,23 +463,12 @@ StringView ToView(Span<const char> text) noexcept {
     return StringView(text.Data(), text.Size());
 }
 
-// byte 순서 비교(사전식)다.
-bool NameLess(StringView left, StringView right) noexcept {
-    const usize count = left.ByteCount() < right.ByteCount() ? left.ByteCount() : right.ByteCount();
-    for (usize index = 0; index < count; ++index) {
-        const auto a = static_cast<uint8>(left.Data()[index]);
-        const auto b = static_cast<uint8>(right.Data()[index]);
-        if (a != b) {
-            return a < b;
-        }
-    }
-
-    return left.ByteCount() < right.ByteCount();
-}
-
 // OnSynced를 부른다(Sync마다 한 번 — 7.3절). 콜백 안의 Sync는 Busy다.
 void NotifySynced(ConfigState& state, Span<const cvar::Index> variables,
                   Span<const TypeId> settings) noexcept {
+    // 바뀐 것이 없는 Sync도 소유 스레드를 이 문맥에 다시 묶는다(한 스레드에 문맥이 여럿이면 가장
+    // 최근에 Sync한 문맥이 묶인다 — 10.1절).
+    detail::RebindGameLane(state);
     SyncChanges changes;
     changes.variables = variables;
     changes.settings = settings;
@@ -502,6 +492,11 @@ ConfigContext::~ConfigContext() {
 
     // 묶음이 남은 채 문맥을 없애면 그 묶음의 Set이 닫힌 통로에 가고 종료 순서가 틀린 것이다(10.1절
     // — 조용히 넘기지 않는다). 게임 lane의 자동 묶음은 여기서 푼다.
+    // 문맥은 소유 스레드에서만 없앤다(그 스레드의 자동 묶음을 여기서 풀어야 한다 — 10.1절).
+    if (platform::CurrentThreadId() != state->owner) {
+        platform::Fatal("ConfigContext destroyed on a thread other than its owner");
+    }
+
     detail::WriteChannel& channel = *state->channel;
     if (platform::AtomicLoad<platform::MemoryOrder::Acquire>(&channel.bindings) != 0) {
         platform::Fatal(
@@ -594,6 +589,7 @@ Result<void> ConfigContext::Initialize() noexcept {
     }
 
     channel.Value()->releaseRules = state.releaseRules;
+    channel.Value()->owner = state.owner;
     state.channel = Move(channel.Value());
     // 빈 snapshot을 게시하고 소유 스레드(게임 lane)를 묶는다(CVar 칸·이름 블록 없음, 세대 1).
     if (auto published = detail::PublishSnapshot(state, nullptr, {}); !published) {
@@ -754,7 +750,7 @@ Result<void> QueueLayerText(ConfigState& owner, ConfigLayer layer, StringView ta
         return Result<void>::Failure(ErrorCode::NotFound);
     }
 
-    auto queued = UniquePtr<QueuedChange>::TryMake(*allocator_, *allocator_);
+    auto queued = SharedPtr<QueuedChange>::TryMake(*allocator_, *allocator_);
     auto entry = UniquePtr<ConfigEntry>::TryMake(*allocator_, *allocator_);
     auto document = UniquePtr<JsonDocument>::TryMake(*allocator_, *allocator_);
     if (!queued || !entry || !document) {
@@ -818,7 +814,7 @@ Result<void> QueueLayerText(ConfigState& owner, ConfigLayer layer, StringView ta
     // 바꾸기(hot reload — 8절)면 새 입력 앞에 (층, 태그) 빼기를 함께 넣는다. 한꺼번에 넣으므로 다른
     // 스레드의 쓰기가 그 사이에 끼지 않는다.
     if (replace) {
-        auto removal = UniquePtr<QueuedChange>::TryMake(*allocator_, *allocator_);
+        auto removal = SharedPtr<QueuedChange>::TryMake(*allocator_, *allocator_);
         if (!removal) {
             return Result<void>::Failure(removal.Error());
         }
@@ -828,12 +824,12 @@ Result<void> QueueLayerText(ConfigState& owner, ConfigLayer layer, StringView ta
             return assigned;
         }
 
-        UniquePtr<QueuedChange> pair[] = {Move(removal.Value()), Move(queued.Value())};
-        return Enqueue(*state->channel, Span<UniquePtr<QueuedChange>>(pair));
+        SharedPtr<QueuedChange> pair[] = {Move(removal.Value()), Move(queued.Value())};
+        return Enqueue(*state->channel, Span<SharedPtr<QueuedChange>>(pair), false);
     }
 
-    UniquePtr<QueuedChange> one[] = {Move(queued.Value())};
-    return Enqueue(*state->channel, Span<UniquePtr<QueuedChange>>(one));
+    SharedPtr<QueuedChange> one[] = {Move(queued.Value())};
+    return Enqueue(*state->channel, Span<SharedPtr<QueuedChange>>(one), false);
 }
 
 } // namespace detail
@@ -852,15 +848,15 @@ Result<void> ConfigContext::AddLayerText(ConfigLayer layer, StringView tag, Stri
     return detail::QueueLayerText(*state, layer, tag, branch, sourceName, text, false);
 }
 
-Result<void> ConfigContext::AddAssignment(ConfigLayer layer, StringView tag, StringView target,
-                                          StringView value) noexcept {
-    ConfigState* state = state_.Get();
-    if (state == nullptr || !IsConfigLayer(layer) || layer == ConfigLayer::CodeDefault) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
-    }
+namespace detail {
 
-    if (platform::CurrentThreadId() != state->owner) {
-        return Result<void>::Failure(ErrorCode::WrongThread);
+Result<void> PrepareAssignment(ConfigState& owner, ConfigLayer layer, StringView tag,
+                               StringView target, StringView value,
+                               SharedPtr<QueuedChange>& out) noexcept {
+    ConfigState* state = &owner;
+    Allocator* allocator_ = &owner.allocator;
+    if (!IsConfigLayer(layer) || layer == ConfigLayer::CodeDefault) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     // 출처 이름은 대입 원문(`<target>=<value>`)이다.
@@ -873,7 +869,7 @@ Result<void> ConfigContext::AddAssignment(ConfigLayer layer, StringView tag, Str
     // 콘솔 설정 이름(소문자 점 경로)이면 콘솔 이름 대입이다. 등록되지 않은 이름이면 대기 값으로
     // 받는다.
     if (IsConsoleSettingName(target)) {
-        auto queued = UniquePtr<QueuedChange>::TryMake(*allocator_, *allocator_);
+        auto queued = SharedPtr<QueuedChange>::TryMake(*allocator_, *allocator_);
         auto entry = UniquePtr<ConfigEntry>::TryMake(*allocator_, *allocator_);
         if (!queued || !entry) {
             return Result<void>::Failure(ErrorCode::OutOfMemory);
@@ -909,8 +905,8 @@ Result<void> ConfigContext::AddAssignment(ConfigLayer layer, StringView tag, Str
         }
 
         queued.Value()->entry = Move(entry.Value());
-        UniquePtr<QueuedChange> one[] = {Move(queued.Value())};
-        return detail::Enqueue(*state->channel, Span<UniquePtr<QueuedChange>>(one));
+        out = Move(queued.Value());
+        return Result<void>::Success();
     }
 
     StringView branchName;
@@ -937,7 +933,7 @@ Result<void> ConfigContext::AddAssignment(ConfigLayer layer, StringView tag, Str
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    auto queued = UniquePtr<QueuedChange>::TryMake(*allocator_, *allocator_);
+    auto queued = SharedPtr<QueuedChange>::TryMake(*allocator_, *allocator_);
     auto entry = UniquePtr<ConfigEntry>::TryMake(*allocator_, *allocator_);
     if (!queued || !entry) {
         return Result<void>::Failure(ErrorCode::OutOfMemory);
@@ -975,8 +971,46 @@ Result<void> ConfigContext::AddAssignment(ConfigLayer layer, StringView tag, Str
     }
 
     queued.Value()->entry = Move(entry.Value());
-    UniquePtr<QueuedChange> one[] = {Move(queued.Value())};
-    return detail::Enqueue(*state->channel, Span<UniquePtr<QueuedChange>>(one));
+    out = Move(queued.Value());
+    return Result<void>::Success();
+}
+
+Result<void> PrepareUnset(ConfigState& state, ConfigLayer layer, StringView tag,
+                          SharedPtr<QueuedChange>& out) noexcept {
+    auto queued = SharedPtr<QueuedChange>::TryMake(state.allocator, state.allocator);
+    if (!queued) {
+        return Result<void>::Failure(queued.Error());
+    }
+
+    queued.Value()->layer = layer;
+    if (auto assigned = queued.Value()->tag.TryAssign(tag); !assigned) {
+        return assigned;
+    }
+
+    out = Move(queued.Value());
+    return Result<void>::Success();
+}
+
+} // namespace detail
+
+Result<void> ConfigContext::AddAssignment(ConfigLayer layer, StringView tag, StringView target,
+                                          StringView value) noexcept {
+    ConfigState* state = state_.Get();
+    if (state == nullptr || !IsConfigLayer(layer) || layer == ConfigLayer::CodeDefault) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (platform::CurrentThreadId() != state->owner) {
+        return Result<void>::Failure(ErrorCode::WrongThread);
+    }
+
+    SharedPtr<QueuedChange> one[1];
+    if (auto prepared = detail::PrepareAssignment(*state, layer, tag, target, value, one[0]);
+        !prepared) {
+        return prepared;
+    }
+
+    return detail::Enqueue(*state->channel, Span<SharedPtr<QueuedChange>>(one), false);
 }
 
 Result<void> ConfigContext::Unset(ConfigLayer layer, StringView tag) noexcept {
@@ -989,18 +1023,12 @@ Result<void> ConfigContext::Unset(ConfigLayer layer, StringView tag) noexcept {
         return Result<void>::Failure(ErrorCode::WrongThread);
     }
 
-    auto queued = UniquePtr<QueuedChange>::TryMake(*allocator_, *allocator_);
-    if (!queued) {
-        return Result<void>::Failure(queued.Error());
+    SharedPtr<QueuedChange> one[1];
+    if (auto prepared = detail::PrepareUnset(*state, layer, tag, one[0]); !prepared) {
+        return prepared;
     }
 
-    queued.Value()->layer = layer;
-    if (auto assigned = queued.Value()->tag.TryAssign(tag); !assigned) {
-        return assigned;
-    }
-
-    UniquePtr<QueuedChange> one[] = {Move(queued.Value())};
-    return detail::Enqueue(*state->channel, Span<UniquePtr<QueuedChange>>(one));
+    return detail::Enqueue(*state->channel, Span<SharedPtr<QueuedChange>>(one), false);
 }
 
 bool ConfigContext::HasPendingChanges() const noexcept {
@@ -1076,7 +1104,7 @@ Result<void> ConfigContext::Sync() noexcept {
     }
 
     uint64 firstNew = state->nextSequence;
-    for (UniquePtr<QueuedChange>& change : state->queue) {
+    for (SharedPtr<QueuedChange>& change : state->queue) {
         // 빼기(Unset·Clear·ClearLayer)와 바꾸기(Set — 같은 자리의 이전 쓰기를 뺀다)다.
         if (change->entry.Get() == nullptr || change->replace) {
             usize kept = 0;
@@ -1277,7 +1305,7 @@ Result<void> ConfigContext::Sync() noexcept {
 
     changedVariables.Sort(
         [](const ConsoleSettingState* left, const ConsoleSettingState* right) noexcept {
-            return NameLess(left->name.View(), right->name.View());
+            return detail::LessBytes(left->name.View(), right->name.View());
         });
     Array<cvar::Index> variableIndexes(*allocator_);
     Array<TypeId> changedSettings(*allocator_);
@@ -1342,7 +1370,7 @@ Result<void> ConfigContext::Sync() noexcept {
             }
         }
 
-        for (UniquePtr<QueuedChange>& change : state->queue) {
+        for (SharedPtr<QueuedChange>& change : state->queue) {
             if (change->entry.Get() == kept) {
                 static_cast<void>(next.TryPushBack(Move(change->entry))); // 예약했다
                 break;

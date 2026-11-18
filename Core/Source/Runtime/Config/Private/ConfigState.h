@@ -71,14 +71,12 @@ struct ConfigEntry {
 };
 
 // 큐 항목이다: 입력 추가 또는 빼기.
-// - entry가 있으면 입력을 더한다. replace면 그 앞에 같은 (층, 태그, 콘솔 이름)의 콘솔 이름 입력을
+// entry가 있으면 입력을 더한다. replace면 그 앞에 같은 (층, 태그, 콘솔 이름)의 콘솔 이름 입력을
 // 뺀다
-//   (`CVar::Set` — 같은 자리의 이전 쓰기를 바꾼다). validateAtApply면 Sync가 적용 전에 소유
-//   스레드에서 다시 검사하고(진단을 남긴다) 거부되면 항목 전체를 버린다(다른 스레드에서 넣은 쓰기
-//   — 6.2절).
-// - entry가 없으면 빼기다: allTags면 층 전체, 아니면 (층, 태그)이고 path가 있으면 그 콘솔 이름
-// 입력만
-//   뺀다(`CVar::Clear`·`ClearLayer`·Unset).
+// (`CVar::Set` — 같은 자리의 이전 쓰기를 바꾼다). validateAtApply면 Sync가 적용 전에 소유
+// 스레드에서 다시 검사하고(진단을 남긴다) 거부되면 항목 전체를 버린다(다른 스레드에서 넣은 쓰기
+// — 6.2절). entry가 없으면 빼기다. allTags면 층 전체, 아니면 (층, 태그)이고 path가 있으면 그 콘솔
+// 이름 입력만 뺀다(`CVar::Clear`·`ClearLayer`·Unset).
 struct QueuedChange {
     explicit QueuedChange(Allocator& allocator) noexcept : tag(allocator), path(allocator) {
     }
@@ -92,9 +90,6 @@ struct QueuedChange {
     bool validateAtApply = false;
 };
 
-// 쓰기 큐 길이 한도다(넘으면 Busy — 버리지 않는다, 10.1절 표).
-inline constexpr usize MaxQueuedChanges = 65536;
-
 // 문맥의 쓰기 통로다(10.1절 — 다른 스레드가 문맥에 들어오는 길은 이것 하나다). 문맥과 그 문맥이
 // 만든 snapshot들이 참조 계수로 공유하므로 문맥보다 오래 살 수 있다(open이 거짓이면 쓰기를 받지
 // 않는다). mutex가 queue·current·open을 지킨다. 읽기 경로(`Get`)는 이 잠금을 잡지 않는다.
@@ -105,7 +100,15 @@ struct WriteChannel {
     Allocator& allocator;
     platform::Mutex mutex;
     // 넣은 순서의 쓰기(소유 스레드의 층 입력 포함 — 하나의 순서다).
-    Array<UniquePtr<QueuedChange>> queue;
+    Array<SharedPtr<QueuedChange>> queue;
+    // queue 안의 다른 스레드 쓰기 수(MaxQueuedChanges 한도는 이것에만 건다 — 소유 스레드 입력은
+    // 소유자가 스스로 조절한다).
+    usize limitedChanges = 0;
+    // 미리 만들어 둔 범위 임시 변경 지우기 수다. queue는 늘 이만큼 자리를 더 잡아 두어 지우기를
+    // 넣을 때 할당하지 않는다(실패 경로가 없다).
+    usize reservedRemovals = 0;
+    // 문맥 소유 스레드(게임 lane)다.
+    uint64 owner = 0;
     // 마지막으로 게시한 snapshot(Acquire가 돌려준다).
     SharedPtr<const ConfigSnapshot> current;
     bool open = true;
@@ -235,7 +238,7 @@ struct ConfigState {
     Array<UniquePtr<ConfigEntry>> entries;
     // 통로에서 꺼냈지만 아직 적용하지 않은 쓰기(넣은 순서 — Sync가 실패하면 다음 Sync가 이어서
     // 적용한다).
-    Array<UniquePtr<QueuedChange>> queue;
+    Array<SharedPtr<QueuedChange>> queue;
     uint64 nextSequence = 1;
     // 섹션 등록처럼 큐 밖의 변경이 있어 다음 Sync가 다시 합쳐야 한다.
     bool dirty = false;
@@ -487,9 +490,33 @@ struct SnapshotAccess {
     }
 };
 
-// 쓰기 큐에 changes를 이 순서대로 한꺼번에 넣는다(어느 스레드에서나). 오류: 통로가 닫혔으면
-// ShuttingDown, 넣으면 MaxQueuedChanges를 넘으면 Busy, 할당 실패. 실패하면 아무것도 넣지 않는다.
-Result<void> Enqueue(WriteChannel& channel, Span<UniquePtr<QueuedChange>> changes) noexcept;
+// 쓰기 큐에 changes를 이 순서대로 한꺼번에 넣는다(어느 스레드에서나). limited면 다른 스레드의
+// 쓰기라 MaxQueuedChanges 한도를 건다(소유 스레드 입력은 한도와 무관하다). 오류: 통로가 닫혔으면
+// ShuttingDown, limited인데 한도를 넘으면 Busy, 할당 실패. 실패하면 아무것도 넣지 않는다.
+Result<void> Enqueue(WriteChannel& channel, Span<SharedPtr<QueuedChange>> changes,
+                     bool limited) noexcept;
+
+// 범위 임시 변경 지우기 자리 하나를 잡는다(queue 용량을 미리 늘린다). 오류: 통로가 닫혔으면
+// ShuttingDown, 할당 실패.
+Result<void> ReserveRemoval(WriteChannel& channel) noexcept;
+
+// 잡아 둔 자리에 지우기를 넣는다(한도와 무관 — 실패하지 않는다). 통로가 닫혔으면 버린다.
+void SubmitRemoval(WriteChannel& channel, SharedPtr<QueuedChange> change) noexcept;
+
+// 소유 스레드(게임 lane)를 문맥의 지금 snapshot에 다시 묶는다. 그 스레드에 명시 묶음
+// (cvar::SnapshotBinding)이 살아 있으면 그대로 둔다(묶음이 풀릴 때 최신 snapshot으로 되돌아온다).
+// 한 스레드가 여러 문맥의 게임 lane이면 가장 최근에 게시하거나 Sync한 문맥이 묶인다(10.1절).
+void RebindGameLane(ConfigState& state) noexcept;
+
+// 콘솔 이름 대입 하나(AddAssignment의 콘솔 이름 경로)·섹션 경로 대입을 검사해 큐 항목으로
+// 만든다(넣지 않는다 — 여러 항목을 한꺼번에 넣는 쪽이 쓴다). 오류: AddAssignment와 같다.
+Result<void> PrepareAssignment(ConfigState& state, ConfigLayer layer, StringView tag,
+                               StringView target, StringView value,
+                               SharedPtr<QueuedChange>& out) noexcept;
+
+// (layer, tag) 빼기 큐 항목을 만든다. 오류: 할당 실패.
+Result<void> PrepareUnset(ConfigState& state, ConfigLayer layer, StringView tag,
+                          SharedPtr<QueuedChange>& out) noexcept;
 
 // 층 입력 하나(branch 파일 내용)를 검사하고 쓰기 큐에 넣는다(ConfigContext::AddLayerText의 본체 —
 // 소유 스레드). replace면 그 앞에 (층, 태그) 빼기를 함께 넣는다(ReplaceLayerText). 오류는

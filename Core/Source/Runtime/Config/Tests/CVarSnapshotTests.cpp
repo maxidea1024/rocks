@@ -1,6 +1,7 @@
 #include "ConfigTestSupport.h"
 
 #include <Config/CVar.h>
+#include <Platform/Memory.h>
 
 // CVar CVR2 시험이다(Docs/Design/CVarSystem.ko.md 6·7·10·19절): 게임 lane의 `Get()`(등록 즉시 게시
 // — VD17, 값은 Sync에서만 바뀐다), 조각 snapshot(바뀐 것이 없으면 재사용, 바뀐 칸만 세대 +1), 층
@@ -266,4 +267,147 @@ TEST(CVar_WatcherAndOnSynced) {
     CHECK(watcher.Changed());
     CHECK(!watcher.Changed());
     CHECK(context.OnSynced().Remove(added.Value()));
+}
+
+// float·double 값은 NaN·무한대를 늘 거부한다(4.2절 — Set·층 입력 모두). 거부 이유는
+// SetOptions::reason으로 받는다(6.2절). 통과·보정이면 reason은 그대로다.
+TEST(CVar_SetRejectsNonFiniteAndReportsReason) {
+    ConfigFixture fixture;
+    ConfigContext& context = fixture.Context();
+    REQUIRE(RegisterSnapshotVars(context));
+    ConfigDiagnosticCode reason = ConfigDiagnosticCode::WeakWrite;
+    auto nan = SnapDistance.Set(platform::BitCast<float>(0x7fc00000u), {.reason = &reason});
+    CHECK(!nan && nan.Error() == ErrorCode::InvalidArgument);
+    CHECK(reason == ConfigDiagnosticCode::ValueOutOfRange);
+    reason = ConfigDiagnosticCode::WeakWrite;
+    auto infinite = SnapDistance.Set(platform::BitCast<float>(0x7f800000u), {.reason = &reason});
+    CHECK(!infinite && reason == ConfigDiagnosticCode::ValueOutOfRange);
+    reason = ConfigDiagnosticCode::WeakWrite;
+    auto locked = SnapLocked.Set(2, {.layer = ConfigLayer::Console, .tag = {}, .reason = &reason});
+    CHECK(!locked && reason == ConfigDiagnosticCode::ConsoleReadOnly);
+    reason = ConfigDiagnosticCode::WeakWrite;
+    auto badEnum = DetailLevel.Set(static_cast<Detail>(9), {.reason = &reason});
+    CHECK(!badEnum && reason == ConfigDiagnosticCode::InvalidEnum);
+    reason = ConfigDiagnosticCode::WeakWrite;
+    REQUIRE(SnapDistance.Set(5000.f, {.reason = &reason}));
+    CHECK(reason == ConfigDiagnosticCode::WeakWrite);
+
+    // 층 입력의 nan·inf 표기도 거부한다.
+    context.Diagnostics().Clear();
+    auto file = context.AddAssignment(ConfigLayer::Session, "--set", "render.snap.distance", "nan");
+    CHECK(!file && fixture.HasDiagnostic(ConfigDiagnosticCode::ValueOutOfRange));
+    auto infiniteFile =
+        context.AddAssignment(ConfigLayer::Session, "--set", "render.snap.distance", "inf");
+    CHECK(!infiniteFile);
+}
+
+// 같은 Sync에서 갔다가 돌아온 값은 세대가 오르지 않고 snapshot을 재사용한다(10절 3단계).
+TEST(CVar_RoundTripInOneSyncKeepsGeneration) {
+    ConfigFixture fixture;
+    ConfigContext& context = fixture.Context();
+    REQUIRE(RegisterSnapshotVars(context));
+    SharedPtr<const ConfigSnapshot> before = context.Acquire();
+    REQUIRE(SnapCount.Set(5));
+    REQUIRE(SnapCount.Set(4));
+    REQUIRE(context.Sync());
+    SharedPtr<const ConfigSnapshot> after = context.Acquire();
+    CHECK(after.Get() == before.Get());
+    CHECK(after->FindSlot(SnapCount.Index().value)->generation ==
+          before->FindSlot(SnapCount.Index().value)->generation);
+}
+
+// OnSynced 안의 Set은 다음 Sync에 적용되고, 안에서 Sync를 부르면 Busy다.
+TEST(CVar_OnSyncedWritesApplyNextSync) {
+    ConfigFixture fixture;
+    ConfigContext& context = fixture.Context();
+    REQUIRE(RegisterSnapshotVars(context));
+
+    struct Probe {
+        ConfigContext* context = nullptr;
+        bool once = false;
+        bool setOk = false;
+        bool syncBusy = false;
+    };
+
+    Probe probe{&context};
+    auto added = context.OnSynced().TryAddLambda([&probe](const SyncChanges&) noexcept {
+        if (probe.once) {
+            return;
+        }
+
+        probe.once = true;
+        probe.setOk = static_cast<bool>(SnapCount.Set(6));
+        auto nested = probe.context->Sync();
+        probe.syncBusy = !nested && nested.Error() == ErrorCode::Busy;
+    });
+    REQUIRE(added);
+    REQUIRE(context.Sync());
+    CHECK(probe.setOk && probe.syncBusy);
+    CHECK(SnapCount.Get() == 4);
+    REQUIRE(context.Sync());
+    CHECK(SnapCount.Get() == 6);
+    CHECK(context.OnSynced().Remove(added.Value()));
+}
+
+// 한 스레드가 두 문맥의 게임 lane이면 가장 최근에 게시하거나 Sync한 문맥이 묶인다(10.1절). 앞
+// 문맥을 없애도 남은 문맥의 Sync가 다시 묶는다. 묶음이 없는 스레드의 Set은 NotFound다.
+TEST(CVar_TwoContextsOnOneThreadFollowTheLatestSync) {
+    ConfigFixture first;
+    REQUIRE(first.Context().Register(SnapCount));
+    REQUIRE(SnapCount.Set(5));
+    REQUIRE(first.Context().Sync());
+    CHECK(SnapCount.Get() == 5);
+    {
+        ConfigFixture second;
+        REQUIRE(second.Context().Register(SnapCount));
+        CHECK(SnapCount.Get() == 4);
+        REQUIRE(first.Context().Sync());
+        CHECK(SnapCount.Get() == 5);
+        REQUIRE(second.Context().Sync());
+        CHECK(SnapCount.Get() == 4);
+    }
+
+    // second가 없어지며 묶음을 풀었다. first의 바뀐 것 없는 Sync가 다시 묶는다.
+    auto unbound = SnapCount.Set(3);
+    CHECK(!unbound && unbound.Error() == ErrorCode::NotFound);
+    REQUIRE(first.Context().Sync());
+    CHECK(SnapCount.Get() == 5);
+}
+
+// 범위 임시 변경의 지우기는 소멸 때 묶인 문맥과 무관하게 값을 쓴 문맥에 간다. 그 문맥이 먼저
+// 없어졌으면 소멸은 할 일이 없다.
+TEST(CVar_ScopedOverrideRemovesFromItsOwnContext) {
+    ConfigFixture fixture;
+    ConfigContext& context = fixture.Context();
+    REQUIRE(RegisterSnapshotVars(context));
+    auto scoped = UniquePtr<cvar::ScopedOverride<int32>>::TryMake(fixture.system, SnapCount, 7);
+    REQUIRE(scoped && scoped.Value()->Status());
+    REQUIRE(context.Sync());
+    CHECK(SnapCount.Get() == 7);
+    {
+        // 다른 문맥의 snapshot에 묶인 채 소멸한다.
+        ConfigFixture other;
+        cvar::SnapshotBinding bind{other.Context().Acquire()};
+        scoped.Value() = nullptr;
+    }
+
+    REQUIRE(context.Sync());
+    CHECK(SnapCount.Get() == 4);
+
+    // 문맥이 먼저 없어져도 소멸은 할 일이 없다(Fatal이 아니다). allocator는 쓰기 통로보다 오래
+    // 살아야 하므로 같은 fixture의 allocator로 문맥을 만든다.
+    UniquePtr<cvar::ScopedOverride<int32>> orphan;
+    {
+        auto shortLived = UniquePtr<ConfigContext>::TryMake(
+            fixture.system, fixture.system, fixture.objects, ConfigContextOptions{});
+        REQUIRE(shortLived && shortLived.Value()->Initialize());
+        REQUIRE(shortLived.Value()->Register(SnapCount));
+        auto made = UniquePtr<cvar::ScopedOverride<int32>>::TryMake(fixture.system, SnapCount, 2);
+        REQUIRE(made && made.Value()->Status());
+        orphan = Move(made.Value());
+    }
+
+    orphan = nullptr;
+    REQUIRE(context.Sync());
+    CHECK(SnapCount.Get() == 4);
 }

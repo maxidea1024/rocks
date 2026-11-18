@@ -1,4 +1,5 @@
 #include "ConfigState.h"
+#include "ConfigText.h"
 
 #include <Platform/Clock.h>
 #include <Platform/Memory.h>
@@ -9,19 +10,6 @@ namespace rocks::config {
 namespace {
 
 // byte 순서 비교(사전식)다(이름 블록의 정렬 순서와 같다).
-bool NameLess(StringView left, StringView right) noexcept {
-    const usize count = left.ByteCount() < right.ByteCount() ? left.ByteCount() : right.ByteCount();
-    for (usize index = 0; index < count; ++index) {
-        const auto a = static_cast<uint8>(left.Data()[index]);
-        const auto b = static_cast<uint8>(right.Data()[index]);
-        if (a != b) {
-            return a < b;
-        }
-    }
-
-    return left.ByteCount() < right.ByteCount();
-}
-
 using detail::NamedBlock;
 
 } // namespace
@@ -56,7 +44,7 @@ const FieldValue* ConfigSnapshot::Find(StringView name) const noexcept {
     usize high = Count();
     while (low < high) {
         const usize middle = low + (high - low) / 2;
-        if (NameLess(named_->entries[middle]->name.View(), name)) {
+        if (detail::LessBytes(named_->entries[middle]->name.View(), name)) {
             low = middle + 1;
         } else {
             high = middle;
@@ -166,7 +154,8 @@ Result<void> PublishSnapshot(ConfigState& state, const SharedPtr<const NamedBloc
 
         const usize slotIndex = write.index % ChunkSlotCount;
         CVarSlot& slot = copies[chunk]->slots[slotIndex];
-        const uint32 generation = slot.generation + 1;
+        // 세대 0은 "칸 없음"이므로 감길 때 건너뛴다.
+        const uint32 generation = slot.generation + 1 != 0 ? slot.generation + 1 : 1;
         if (auto written =
                 WriteSlot(state.allocator, *write.value, slot, copies[chunk]->texts[slotIndex]);
             !written) {
@@ -198,16 +187,10 @@ Result<void> PublishSnapshot(ConfigState& state, const SharedPtr<const NamedBloc
         state.channel->current = published;
     }
 
-    // 소유 스레드(게임 lane)를 다시 묶는다. 이 스레드가 이 문맥의 자동 묶음이거나 아무 묶음도 없을
-    // 때만이다(명시 묶음·다른 문맥의 자동 묶음은 그대로 둔다).
-    ThreadBinding& binding = CurrentBinding;
-    if (binding.snapshot == nullptr || binding.gameLane == state.channel.Get()) {
-        binding.snapshot = published.Get();
-        binding.gameLane = state.channel.Get();
-    }
-
+    // 소유 스레드(게임 lane)를 이 문맥에 다시 묶는다(명시 묶음이 살아 있으면 그대로 둔다 — 10.1절).
     state.snapshot = Move(published);
     state.snapshotGeneration = generation;
+    RebindGameLane(state);
     return Result<void>::Success();
 }
 

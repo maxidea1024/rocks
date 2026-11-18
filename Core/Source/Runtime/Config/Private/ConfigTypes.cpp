@@ -88,6 +88,8 @@ StringView ConfigDiagnosticCodeName(ConfigDiagnosticCode code) noexcept {
         return "InvalidDeviceProfile";
     case ConfigDiagnosticCode::Clamped:
         return "Clamped";
+    case ConfigDiagnosticCode::InvalidEnum:
+        return "InvalidEnum";
     case ConfigDiagnosticCode::ValidationFailed:
         return "ValidationFailed";
     }

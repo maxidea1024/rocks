@@ -1,4 +1,5 @@
 #include "ConfigState.h"
+#include "ConfigText.h"
 
 #include <Core/Text/StringBuilder.h>
 #include <Object/PropertyPath.h>
@@ -36,20 +37,6 @@ bool IsRegionName(StringView text) noexcept {
     }
 
     return !first;
-}
-
-// byte 순서 비교(사전식)다.
-bool LessBytes(StringView left, StringView right) noexcept {
-    const usize count = left.ByteCount() < right.ByteCount() ? left.ByteCount() : right.ByteCount();
-    for (usize index = 0; index < count; ++index) {
-        const auto a = static_cast<uint8>(left.Data()[index]);
-        const auto b = static_cast<uint8>(right.Data()[index]);
-        if (a != b) {
-            return a < b;
-        }
-    }
-
-    return left.ByteCount() < right.ByteCount();
 }
 
 Result<void> Write(ConsoleOutput& output, StringView text) noexcept {
@@ -781,7 +768,7 @@ Result<void> PrepareNamedBlock(ConfigState& state, Span<const UniquePtr<SettingR
 
     block.entries.Sort([](const UniquePtr<NamedBlock::Entry>& left,
                           const UniquePtr<NamedBlock::Entry>& right) noexcept {
-        return LessBytes(left->name.View(), right->name.View());
+        return detail::LessBytes(left->name.View(), right->name.View());
     });
     // 서명은 이름 순서의 `이름=표기` 줄이다. 이전 서명과 같으면 이전 블록을 쓴다(out은 null).
     for (const UniquePtr<NamedBlock::Entry>& entry : block.entries) {
@@ -1433,7 +1420,8 @@ Result<void> ConfigContext::CompleteConsoleName(StringView prefix,
         }
     }
 
-    out.Sort([](StringView left, StringView right) noexcept { return LessBytes(left, right); });
+    out.Sort(
+        [](StringView left, StringView right) noexcept { return detail::LessBytes(left, right); });
     return Result<void>::Success();
 }
 

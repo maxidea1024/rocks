@@ -18,10 +18,13 @@ namespace rocks::cvar {
 
 // `Set`·`Clear`의 선택 사항이다(6.2절). layer는 쓸 층(기본 Code — CodeDefault는 받지 않는다), tag는
 // 그 층 안의 묶음 이름이다(같은 (층, 태그)의 이전 `Set`을 바꾸고, `Clear`는 그 자리를 지운다).
+// reason이 있으면 `InvalidArgument`로 거부할 때 그 이유를 쓴다(ValueOutOfRange·ValidationFailed·
+// InvalidEnum·ConsoleReadOnly·LayerNotAllowed 등 — 통과·보정이면 그대로 둔다, 콘솔 도구가 쓴다).
 // 범위(scope)는 CVR3에서 더한다.
 struct SetOptions {
     config::ConfigLayer layer = config::ConfigLayer::Code;
     StringView tag{};
+    config::ConfigDiagnosticCode* reason = nullptr;
 };
 
 // `Set`의 값 인자 타입이다(String·Name은 StringView — Name은 적용 때 문맥의 NamePool에 intern한다).
@@ -180,10 +183,14 @@ public:
     }
 
     // 이 스레드에 묶인 snapshot의 값이다(7.1절). 게임 lane은 문맥이 스스로
-    // 묶고(Initialize·Register· Sync), 다른 스레드는 cvar::SnapshotBinding으로 묶는다. 한 프레임
-    // 동안 같은 스레드는 같은 값을 본다(값은 sync 지점에서만 바뀐다). 잠금·할당·문자열 연산이 없다.
+    // 묶고(Initialize·Register· Sync), 다른 스레드는 cvar::SnapshotBinding으로 묶는다. 한 스레드가
+    // 여러 문맥의 게임 lane이면 가장 최근에 게시하거나 Sync한 문맥이 묶이므로, 다른 문맥을 읽으려면
+    // SnapshotBinding을 쓴다. 한 프레임 동안 같은 스레드는 같은 값을 본다(값은 sync 지점에서만
+    // 바뀐다). 잠금·할당·문자열 연산이 없다.
     // - 묶음이 없으면 Fatal이다.
-    // - 등록되지 않은 핸들은 게임 lane에서 Fatal, 다른 스레드에서는 기본값이다(5절).
+    // - 어느 문맥에도 등록된 적 없는 핸들(번호 없음)은 게임 lane에서 Fatal, 다른 스레드에서는
+    //   기본값이다(5절). 번호는 프로세스 전체이므로 다른 문맥에만 등록된 핸들은 게임 lane에서도
+    //   Fatal이 아니라 기본값이다(이 문맥 snapshot에 칸이 없다).
     // - 묶인 snapshot에 칸이 없으면(그 snapshot 뒤에 등록됐다) 기본값이다. Name 변수의 기본값은
     //   None이다(pool 토큰을 상수로 담을 수 없다).
     // - String은 StringView이고 묶인 snapshot이 바뀔 때까지 유효하다(게임 lane은 다음 Sync·Register
@@ -205,10 +212,12 @@ public:
     //   Result<void> written = ShadowDistance.Set(4000.f);
     //   ShadowDistance.Set(4000.f, {.layer = ConfigLayer::Console});
     //
-    // 오류: 묶음 없음 NotFound(쓸 문맥을 모른다), 출시 빌드 치트 변수 Unsupported,
-    // CodeDefault·정의되지 않은 층·층 권한(콘솔 읽기 전용·사용자 설정 아님·출시 규칙의
-    // 치트)·범위·Validate 위반 InvalidArgument, 문맥이 없어졌으면 ShuttingDown, 큐가 가득 차면
-    // Busy(버리지 않는다), 할당 실패.
+    // 오류: 묶음 없음 NotFound(쓸 문맥을 모른다), 출시 빌드 치트 변수 Unsupported, CodeDefault·
+    // 정의되지 않은 층·층 권한(콘솔 읽기 전용·사용자 설정 아님·출시 규칙의 치트)·범위(NaN·무한대
+    // 포함)·Validate 위반·이름 표에 없는 enum 값 InvalidArgument(이유는 options.reason에 —
+    // ValueOutOfRange·ValidationFailed·InvalidEnum·ConsoleReadOnly·LayerNotAllowed 등), 문맥이
+    // 없어졌으면 ShuttingDown, 다른 스레드의 쓰기가 큐 한도(MaxQueuedChanges)를 넘으면 Busy(버리지
+    // 않는다 — 소유 스레드의 쓰기에는 한도가 없다), 할당 실패.
     Result<void> Set(SetArg<T> value, const SetOptions& options = {},
                      SourceLocation where = SourceLocation::Current()) const noexcept {
         return detail::SubmitSet(definition_, detail::ScalarOfArg<T>(value), options, where);

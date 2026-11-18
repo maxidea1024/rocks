@@ -28,6 +28,7 @@ namespace detail {
 struct SnapshotAccess;
 struct NamedBlock;
 struct WriteChannel;
+struct QueuedChange;
 
 } // namespace detail
 
@@ -39,7 +40,7 @@ struct CVarText {
     explicit CVarText(Allocator& allocator) noexcept : text(allocator) {
     }
 
-    // String 값(Name 값이면 표시 텍스트).
+    // String 값이다(Name 값이면 비어 있다 — 값은 토큰이다).
     String text;
     // Name 값의 토큰(문맥 Registry의 NamePool 것 — String 값이면 None).
     Name name{};
@@ -122,10 +123,13 @@ private:
 namespace detail {
 
 // 이 스레드에 묶인 snapshot이다(7.1절). gameLane은 문맥이 자기 소유 스레드(게임 lane)에 스스로
-// 묶은 것이면 그 문맥의 통로다(cvar::SnapshotBinding으로 묶은 것이면 null).
+// 묶은 것이면 그 문맥의 통로다(cvar::SnapshotBinding으로 묶은 것이면 null). depth는 지금 살아 있는
+// 명시 묶음(cvar::SnapshotBinding)의 중첩 깊이다(0이면 명시 묶음이 없다 — 게임 lane 자동 묶음이거나
+// 묶음 없음). 풀 때 깊이로 LIFO를 확인한다.
 struct ThreadBinding {
     const ConfigSnapshot* snapshot = nullptr;
     const WriteChannel* gameLane = nullptr;
+    uint32 depth = 0;
 };
 
 // 스레드 묶음이다. 그 스레드만 읽고 쓴다(10.1절 표).
