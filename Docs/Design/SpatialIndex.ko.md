@@ -1,6 +1,6 @@
 # Rocks 공간 인덱스: 구조 선택과 Loose Octree 설계
 
-기준일: 2026-11-16, 개정 1(초안). 2026-11-17: 길이 단위를 UE 5.8과 같은 cm로 바꿨다(설정값 표·11절 예시·LO02·LO03).
+기준일: 2026-11-18, 개정 2. 2026-11-17: 길이 단위를 UE 5.8과 같은 cm로 바꿨다(설정값 표·11절 예시·LO02·LO03).
 
 이 문서는 엔진의 공간 분할·탐색 구조를 용도별로 무엇으로 할지 검토하고, 그 결과로 `SpatialIndex` 모듈에 둘 범용 영역 질의 구조 `LooseOctree`의 설계를 정한다. 문서 전체가 설계이며 구현된 항목은 없다. 수치는 모두 측정 전 제안값이다. 상태 표기는 **설계**(이 문서가 정한 계약, 코드 없음), **결정 필요**(14절), **후속**(범위 밖)이다.
 
@@ -20,7 +20,7 @@
 | 전체 전략 | 구조 하나로 통일하지 않고 소비자별로 질의 형태에 맞는 구조를 둔다. EngineImplementationPlan 10.4절의 분담을 유지한다 | 3.3절. UE 5.8.4도 용도별로 구조가 다르다 |
 | 매 프레임 가시성 | 평면 SoA 경계 배열의 병렬 전수 판정(10.4절). 트리를 쓰지 않는다 | 3.2절. UE의 프러스텀 컬링 기본 경로가 이 방식이고 옥트리 경로는 기본 꺼짐이다 |
 | `LooseOctree`의 자리 | `SpatialIndex` 모듈의 범용 영역 질의 부품. 소비자별 인스턴스이며 단일 월드 옥트리가 아니다 | 5절. 10.4절의 "단일 월드 octree를 두지 않는다"를 따른다 |
-| 소비자 배정 | 10.4절이 다른 구조로 정한 소비자에는 측정 전에 배정하지 않는다 | 14절 결정 필요 1–3 |
+| 소비자 배정 | 이동 primitive–local light 상호작용과 CPU 판정 경로의 그림자 caster 수집은 `LooseOctree`(primitive 인스턴스, local light 인스턴스). 형상 기반 게임플레이 질의는 Jolt scene query | 사용자 결정(2026-11-18), EngineImplementationPlan 개정 1.13. UE 5.8.4와 같은 분담이다(3.5절) |
 | 등록 방식 | 프록시 하나는 정확히 한 곳(노드 하나 또는 범위 밖 목록)에 저장한다 | 6.2절. 결과 중복 제거가 필요 없다 |
 | 식별 | 세대 번호 핸들(`SpatialProxyHandle{SlotHandle}`). 논리 핸들과 물리 위치를 분리한다 | 6.3절. UE의 요소 ID는 구조 변경마다 바뀌고 낡은 ID를 검출하지 못한다 |
 | 이동 | 현재 노드의 확장 경계 안이면 경계만 갱신한다. 벗어나면 조상에서 재삽입한다. 채택은 9.6절 기준으로 확정한다 | 6.5절. UnityOctree와 `TOctree2`에는 이동 API가 없다 |
@@ -40,7 +40,7 @@
 
 **이 문서가 정하지 않는 것**
 
-- 평면 SoA 가시성 판정, 계층 공간 해시, SpatialQueryService, World Partition grid. EngineImplementationPlan 10.2·10.4절이 담당한다.
+- 평면 SoA 가시성 판정, 계층 공간 해시, 후속 2D 격자, World Partition grid. EngineImplementationPlan 10.2·10.4절이 담당한다.
 - 물리 충돌 질의와 trigger. 16절 물리 adapter가 담당한다. `LooseOctree`는 trigger event를 만들지 않고 충돌 형상 overlap을 대체하지 않는다.
 - 정밀 메시 교차, Actor 소유 관계, 부착 계층, 객체 수명, 스트리밍 정책. 옥트리는 AABB 후보만 돌려준다.
 
@@ -125,7 +125,19 @@
   - 셀 경계는 반 셀 확장한다(HierarchicalSpatialHashGrid.h:393-406).
   - 10.4절 규약 2·3과 같은 방향이다. 도입 버전과 WP level 선택식은 여전히 미확인이다(15절).
 - 10.4절 본문의 UE 근거는 5.4 기준의 공개 문서와 2차 출처다. 5.8 기준 재확인은 14절 결정 필요 6이다.
-- 10.4절은 이동 primitive–local light 상호작용과 reflection capture·probe 선택을 "같은 해시 코드의 별도 light 인스턴스"로 정했다(EngineImplementationPlan 10.4 광원·decal·capture). UE 5.8.4는 광원 상호작용에 `TOctree2`를 쓴다. 어느 쪽이 Rocks에 맞는지는 측정으로 정한다(14절 결정 필요 1).
+- 10.4절은 이동 primitive–local light 상호작용과 reflection capture·probe 선택을 "같은 해시 코드의 별도 light 인스턴스"로 정했다(EngineImplementationPlan 10.4 광원·decal·capture). UE 5.8.4는 광원 상호작용에 `TOctree2`를 쓴다. 개정 1.13(2026-11-18 사용자 결정)에서 Rocks도 옥트리로 정했다(5.1절).
+
+### 3.5 Unreal Engine 5.8.4의 게임플레이 공간 질의
+
+| 질의 | 수단 | 근거 |
+|---|---|---|
+| trace·sweep·overlap | 물리 인터페이스(`FPhysicsInterface::RaycastMulti`, `GeomOverlapMulti` 등) | Engine/Private/Collision/WorldCollision.cpp:144-205 |
+| AI 시야 | 물리 trace(동기·비동기) | AIModule/Private/Perception/AISense_Sight.cpp:556, 571 |
+| EQS 클래스별 액터 수집 | 공간 구조 없이 액터 전체 순회 후 반경으로 거름 | AIModule/Private/EnvironmentQuery/Generators/EnvQueryGenerator_ActorsOfClass.cpp:57, 71 |
+| 네트워크 관련성 | 2D 격자(Replication Graph, Iris grid filter) | Plugins/Runtime/ReplicationGraph/Source/Public/ReplicationGraph.h:579, Net/Iris/Public/Iris/ReplicationSystem/Filtering/NetObjectGridFilter.h:88 |
+| Mass·SmartObject | 2D 계층 해시 격자 | AIModule/Public/HierarchicalHashGrid2D.h |
+
+형상 질의는 물리로, 대량·비충돌 관심 판정은 가벼운 격자로 나눈다. 충돌하지 않는 대상을 물리 질의에 올리는 방식(query 전용 collision)은 일반 지식이며 이번에 소스로 확인하지 않았다.
 
 ### 3.4 채택 판단 비교표
 
@@ -167,26 +179,33 @@ UE의 다른 구조에서 가져오는 것은 다음과 같다.
 
 ### 5.1 소비자와 구조
 
-10.4절의 분담을 유지하고 `LooseOctree`의 자리를 다음과 같이 둔다.
+전략은 UE 5.8.4와 같은 방식이다(사용자 결정 2026-11-18, EngineImplementationPlan 개정 1.13).
 
-| 소비자 | 10.4절의 구조 | `LooseOctree` | 상태 |
-|---|---|---|---|
-| 이동 대상의 뷰 가시성 | 평면 SoA | 대상 아님 | 변경 없음 |
-| 정적 mesh·instanced·foliage의 가시성 | 계층 공간 해시 | 대상 아님 | 변경 없음 |
-| 그림자 caster 수집 | caster volume 가시성 판정(평면 SoA + 계층 해시, 10.4 가시성 보수성) | 대상 아님 | 변경 없음. UE는 이 일에 옥트리를 쓰나 Rocks는 가시성 경로로 처리한다 |
-| 이동 primitive–local light 상호작용(그림자 cache 무효화) | 계층 해시의 light 인스턴스 | 비교 후보 | 결정 필요 1 |
-| forward·mobile의 reflection capture·probe 선택 | 계층 해시의 light 인스턴스 | 비교 후보 | 결정 필요 1 |
-| 에디터 비가시 대상 선택, headless | EditorBackend 해시 + double 정밀 판정 | 비교 후보 | 결정 필요 2 |
-| 비충돌 게임플레이 질의 | SpatialQueryService(2D 계층 해시) | 3D 범위가 필요한 질의에 한해 비교 후보 | 결정 필요 3 |
-| 충돌 trace·sweep·overlap·trigger | 물리 adapter scene query | 대상 아님 | 변경 없음 |
-| 스트리밍, 내비게이션 | 10.2절 grid, 19절 tile index | 대상 아님 | 변경 없음 |
-| 도구·소규모 동적 집합 등 10.4절 표에 없는 용도 | 없음 | 사용 | 설계 |
+1. 형상 기반 게임플레이 질의(trace·sweep·overlap)는 물리 adapter의 Jolt scene query를 쓴다.
+2. 이동 primitive–local light 상호작용과 CPU 판정 경로의 그림자 caster 수집은 `LooseOctree`를 쓴다.
+3. 매 프레임 view 가시성은 평면 SoA, 정적·대량 instance는 계층 공간 해시를 쓴다.
+4. 네트워크 관심·대량 군중의 관심 판정용 2D 격자는 필요해질 때 도입한다.
+
+| 소비자 | 구조 | 상태 |
+|---|---|---|
+| 이동 대상의 뷰 가시성 | 평면 SoA(10.4절) | 변경 없음 |
+| 정적 mesh·instanced·foliage의 가시성 | 계층 공간 해시(10.4절) | 변경 없음 |
+| 그림자 caster 수집, CPU 판정 경로 | `LooseOctree` primitive 인스턴스를 caster volume으로 질의. 노드 묶음 단위로 worker에 분배(6.8절) | 설계 |
+| 그림자 caster 수집, GPU-driven 경로 | GPU 판정(10.4절). 옥트리를 쓰지 않는다 | 변경 없음 |
+| 이동 primitive–local light 상호작용(그림자 cache 무효화) | `LooseOctree` 두 인스턴스. 광원이 추가·이동하면 primitive 인스턴스를 광원 범위로, primitive가 추가·이동하면 local light 인스턴스를 primitive 범위로 질의 | 설계 |
+| forward·mobile의 reflection capture·probe 선택 | 평면 SoA(UE 5.8.4도 옥트리를 쓰지 않음) | 변경 |
+| 에디터 비가시 대상 선택, headless | EditorBackend 해시 + double 정밀 판정(10.4절). `LooseOctree`는 비교 후보 | 결정 필요 2 |
+| 충돌 trace·sweep·overlap·trigger, 형상 기반 게임플레이 질의 | Jolt scene query(10.4절, 16절). 비충돌 대상은 query 전용 body | 설계(물리 adapter 소관) |
+| 네트워크 관심, 대량 군중 | 후속 2D 격자 | 후속 |
+| 스트리밍, 내비게이션 | 10.2절 grid, 19절 tile index | 변경 없음 |
+| 도구·소규모 동적 집합 | `LooseOctree` | 설계 |
 
 근거는 다음과 같다.
 
-- 옥트리는 크기 편차가 큰 대상을 한 구조에 담고, 큰 질의에서 완전 포함된 가지를 통째로 처리한다. 광원 영향 범위처럼 질의 크기가 대상 크기와 크게 다른 경우에 맞는다.
-- 계층 해시는 삽입이 O(1)이고 월드 크기에 제한이 없으나, 큰 질의는 level마다 셀을 열거하거나 블록 목록을 전수 판정한다.
-- 어느 쪽이 나은지는 분포와 질의 크기에 달려 있으므로 이론으로 정하지 않는다. 9절 비교군 D와 E를 같은 입력으로 측정하고 9.6절의 기준으로 판정한다.
+- UE 5.8.4가 같은 분담을 쓴다(3.2·3.5절).
+- 옥트리는 크기 편차가 큰 대상을 한 구조에 담고, 큰 질의에서 완전 포함된 가지를 통째로 처리한다. 광원 영향 범위와 caster volume처럼 질의 크기가 대상 크기와 크게 다른 경우에 맞는다.
+- Rocks는 CPU 판정 장치(mobile·D3D11·OpenGL ES)를 정식 경로로 둔다. GPU-driven 경로가 옥트리를 쓰지 않아도 CPU 경로에는 그림자 caster 후보 수집 구조가 필요하다.
+- 광원 수가 적으면 평면 전수 판정이 더 빠를 수 있다. 옥트리가 이기는 규모는 9.6절 측정으로 기록한다.
 
 33.10절의 결론은 그대로 적용된다. loose 확장만으로는 직선 이동의 노드 변경 빈도가 줄지 않는다. 제자리 갱신(6.5절)이 없애는 것은 경계 부근 왕복과, 상위 노드에 저장된 대상의 여유 범위 안 이동이다. 10.4절이 같은 원리의 위치 hysteresis를 SI05 측정으로 채택하는 것처럼, 제자리 갱신도 9.6절 기준으로 확정한다.
 
@@ -204,7 +223,9 @@ UE의 다른 구조에서 가져오는 것은 다음과 같다.
 | 정적 삼각형 메시 BVH | 후속. 물리 cook과 에디터 headless의 double 정밀 ray/triangle 판정(10.4 에디터 선택)에서 필요해질 때 정한다 | 16절, 에디터 문서 |
 | 계층 공간 해시 | 10.4절 규약대로 둔다 | 10.4절 |
 | kd-tree | 씬 질의용으로 두지 않는다. UE 런타임 씬 질의에 사례가 없고, 균형 kd-tree는 대상이 움직이면 재구축 또는 재균형이 필요하다(일반적 성질). 고차원 점 집합의 최근접 질의(예: 애니메이션 포즈 매칭)가 필요한 기능이 생기면 그 기능의 문서에서 정한다 | 해당 기능 문서 |
-| quadtree | 두지 않는다. 2D 질의는 SpatialQueryService가 담당한다 | 10.4절 |
+| 게임플레이 공간 질의 | 자체 인덱스를 두지 않는다. Jolt scene query와 결과 정렬 계층을 쓴다 | EngineImplementationPlan 10.4·16절 |
+| 2D 격자 | 네트워크 관심·대량 군중용으로 필요해질 때 도입한다. 물리 query 전용 body 비용이 SI09 기준을 넘는 용도가 대상이다 | EngineImplementationPlan 10.4절 |
+| quadtree | 두지 않는다. 2D 관심 판정은 후속 2D 격자가 담당한다 | 10.4절 |
 
 ## 6. LooseOctree 설계
 
@@ -308,6 +329,14 @@ public:
     [[nodiscard]] OctreeStats Stats() const noexcept;
     [[nodiscard]] Result<void> Validate() const noexcept;
     template <typename NodeVisitor> void VisitNodes(NodeVisitor&& visitor) const noexcept;
+
+    // 노드 묶음 수집: 그림자 caster 수집처럼 결과가 많은 질의를 worker에 나눌 때 쓴다
+    [[nodiscard]] Result<BufferQueryOutcome> CollectNodeBatches(const ConvexVolume& volume,
+                                                                Span<SpatialNodeBatch> out) const noexcept;
+    template <typename Visitor>
+    [[nodiscard]] Result<QueryOutcome> QueryBatch(const SpatialNodeBatch& batch,
+                                                  const ConvexVolume& volume, uint32 filterMask,
+                                                  Visitor&& visitor) const noexcept;
 };
 
 } // namespace rocks::spatial
@@ -327,6 +356,7 @@ public:
 - **실패 시 상태.** 실패한 변경 호출은 논리 상태(프록시 집합, 각 프록시의 AABB·필터·사용자 값·핸들)를 바꾸지 않는다. 구조(루트 level, 분할 여부)는 달라질 수 있으며 그 경우에도 불변 조건은 모두 성립한다. 구체 절차는 6.4·6.5절이다.
 - **이동과 수명.** 옥트리는 복사할 수 없고 이동할 수 있다. 이동 뒤 기존 핸들은 이동 대상에서 유효하다. 이동된 원본은 빈 상태이며 새 핸들을 세대 1부터 발급하므로, 원본에 옛 핸들을 쓰면 검출되지 않는다(`SlotArray` 규칙과 같다). 다른 인스턴스가 발급한 핸들도 검출하지 않는다. 읽기 범위가 열려 있는 동안 이동하거나 파괴하면 `platform::Fatal`이다. allocator는 옥트리보다 오래 살아야 한다.
 - **`Clear`.** 모든 프록시를 지우고 루트를 초기 상태로 되돌린다. 핸들 세대 번호는 유지되므로 지우기 전 핸들은 `StaleHandle`이 된다. 예약 용량은 유지한다.
+- **노드 묶음.** `CollectNodeBatches`는 질의 형상과 교차하는 노드를 직접 저장 프록시 단위로 묶어 `SpatialNodeBatch{노드 색인, 완전 포함 여부}` 목록을 돌려준다(박스·구 형태도 같은 이름 규칙으로 둔다). 각 묶음은 서로 다른 프록시를 담으므로 여러 worker가 `QueryBatch`로 나눠 처리해도 결과 합집합이 단일 질의와 같고 중복이 없다. 완전 포함 묶음은 프록시 공간 판정을 생략한다. UE 5.8.4 그림자 수집의 노드 단위 작업 분배(ShadowSetup.cpp:4997-5010, 5416)에 대응한다. 묶음은 같은 읽기 범위 안에서만 유효하다.
 - **일괄 API.** 프레임당 일괄 적용(UE `FScene`의 방식)은 소비자가 변경을 모아 변경 단계에서 차례로 호출하는 것으로 한다. 선확보를 한 번에 하는 일괄 추가·갱신 API는 9절 측정에서 호출당 비용이 문제로 확인되면 추가한다(후속).
 - **원점 이동.** 좌표는 절대 월드 double이며 origin epoch 변경에 저장 값을 재계산하지 않는다(10.4 규약 7과 같다). 결과의 WorldId·tick·origin epoch 정합은 소유자 책임이다.
 
@@ -740,7 +770,7 @@ HEAD `1c0ef8a` 기준이다.
 | B | UnityOctree(commit bbc4735)의 동작과 자료구조를 보존한 C++ 이식 | "UnityOctree C++ 이식" |
 | C | `TOctree2`(UE 5.8.4)의 설계에 기반한 독립 구현 | "TOctree2 설계 기반 독립 구현". Unreal의 성능으로 표시하지 않는다 |
 | D | `LooseOctree` | |
-| E | 계층 공간 해시(10.4절) | 구현된 뒤에 추가한다 |
+| E | 계층 공간 해시(10.4절) | 참고 측정. 구현된 뒤에 추가하며 판정 기준에는 쓰지 않는다 |
 
 **공통 조건.**
 
@@ -782,7 +812,7 @@ HEAD `1c0ef8a` 기준이다.
 ### 9.3 측정 항목
 
 - **연산별**: 구축, 삽입, 삭제, 작은 이동, 경계 통과, 순간 이동, 크기 변경, 박스·구·프러스텀·ray·최근접·존재·개수 검색. 검색은 결과가 없는 경우, 적은 경우, 많은 경우를 나눈다.
-- **프레임 작업 부하**: 이동 비율 r의 갱신 N회 + 질의 M회 + 작업 수 예산의 유지보수를 한 프레임으로 합산한다. 광원 상호작용 대표 부하(광원 수와 반경 분포, 이동 primitive 수, 프레임당 질의 수)를 정의해 결정 필요 1의 판정에 쓴다.
+- **프레임 작업 부하**: 이동 비율 r의 갱신 N회 + 질의 M회 + 작업 수 예산의 유지보수를 한 프레임으로 합산한다. 광원 상호작용과 그림자 caster 수집의 대표 부하(광원 수와 반경 분포, 이동 primitive 수, 프레임당 질의 수, caster volume 크기)를 정의해 9.6절 판정에 쓴다.
 - **별도 시나리오**: 루트 확장·축소, 대량 생성·삭제, 분할·병합 집중, 유지보수 비용(변경 시간에 합산한 값과 분리한 값을 모두 보고한다).
 - **트리 상태 구분**: 질의는 구축 직후, 변동 뒤 유지보수 완료, 유지보수 대기 중의 세 상태에서 따로 측정한다.
 - **지표**:
@@ -830,7 +860,8 @@ HEAD `1c0ef8a` 기준이다.
 | 판정 | 기준 |
 |---|---|
 | 제자리 갱신 채택 | 이동 비율 10%·100%에서 재삽입이 30% 이상 줄고 검색 시간 증가가 10% 이하 |
-| 결정 필요 1의 `LooseOctree` 배정 | 광원 상호작용 대표 부하의 프레임 합산 시간이 E 대비 20% 이상 빠르고 메모리가 E의 1.5배 이내. 미달이면 10.4절 유지 |
+| 평면 전수 판정으로 대신하는 규모 | 대표 부하에서 A2(평면 SoA 전수)가 D보다 빠른 프록시 수·광원 수 구간을 기록한다. 그 구간에서는 소비자가 옥트리 대신 평면 전수 판정을 쓸 수 있다 |
+| 그림자 caster 수집 노드 묶음 | 노드 묶음 병렬 수집이 단일 질의 대비 worker 8개에서 확장 효율 0.6 이상 |
 | 저장 변형 채택 | 대표 부분집합 전체에서 중앙값이 나빠지는 분포가 없고, 어느 한 분포에서 10% 이상 나아짐 |
 
 ## 10. 단계
@@ -845,7 +876,7 @@ HEAD `1c0ef8a` 기준이다.
 | OT3 | 구·프러스텀·ray·최근접, 버퍼·존재·개수 질의 | OT2, SIP1 | LO01 전체·LO02·LO12·LO13·LO14 |
 | OT4 | 읽기·변경 단계 검증 | OT3, SIP9 | LO11·LO15 |
 | OT5 | `SpatialIndexBench`, 비교군 A·B·C, 단계별 변형 측정 | OT4, SIP3, SIP8 | 9절 원시 결과와 보고서 |
-| OT6 | 병렬 검색 측정, 비교군 E, 초기값 확정, 소비자 판정 | OT5, SIP5, 계층 공간 해시(렌더러 단계 이후) | 9.6절 판정 |
+| OT6 | 병렬 검색·노드 묶음 수집 측정, 초기값 확정, 비교군 E 참고 측정 | OT5, SIP5 | 9.6절 판정 |
 
 엔진 소비자 연결(World·RenderScene)은 transform commit과 경계를 가진 컴포넌트가 생긴 뒤의 후속이다. 최종 저장 구조와 갱신 정책은 OT5·OT6의 측정으로 확정하며, 성능이 나빠지는 조건과 적용 한계도 보고한다.
 
@@ -908,7 +939,7 @@ octree.RunMaintenance(MaintenanceBudget::Operations(256));
 - 이 문서는 계약을 미리 정할 뿐 구현 순서를 앞당기지 않는다.
 - OT 단계와 SIP 선행 작업은 화면 마일스톤 이전에 착수하지 않는다. 착수 시점은 14절 결정 필요 7이다.
 - SIP1–SIP7은 Core 작업이지만 이 문서를 근거로 A0-B → … → A1–A6 사이에 끼워 넣지 않는다. 다른 단계가 같은 기반을 먼저 필요로 하면 그 단계의 일정에 따른다.
-- OT6의 비교군 E는 계층 공간 해시가 렌더러 단계에서 구현된 뒤에만 측정할 수 있다.
+- 비교군 E(참고 측정)는 계층 공간 해시가 렌더러 단계에서 구현된 뒤에만 측정할 수 있다.
 
 ## 13. 다른 문서 개정
 
@@ -916,17 +947,16 @@ octree.RunMaintenance(MaintenanceBudget::Operations(256));
 
 | 문서 | 개정 내용 | 시점 |
 |---|---|---|
-| EngineImplementationPlan 3.1 | `SpatialIndex` 책임에 범용 영역 질의 부품(`LooseOctree`) 추가 | 이 문서 확정 시 |
-| EngineImplementationPlan 10.4 | 결정 필요 1–4의 판정 반영, 5.8 기준 UE 근거 갱신 | OT6 이후 |
-| EngineImplementationPlan 31(R21), 33.10, 34 | 위험 대응 문구, 미확인 표기 갱신, 참고 출처 추가 | 10.4 개정과 함께 |
+| EngineImplementationPlan 3.1·10.4·31(R21)·33.10·33.18 | 공간 질의 전략, `LooseOctree` 배정, 5.8.4 근거, SI09–SI11 | 완료(개정 1.13, 2026-11-18) |
+| EngineImplementationPlan 10.4 | 결정 필요 2·4의 판정, 33.10절 미확인 표기 갱신 | 판정 시 |
 | CoreDetailedSpec G04·G05·G06·G08·C01·M03 | SIP1–SIP4·SIP7의 요구 반영 | OT0 착수 전 |
 | CoreDetailedSpec(새 항목) | SIP5(범위 분할 병렬 helper), SIP6(`SlotArray` 색인 접근) | OT0 착수 전 |
 
 ## 14. 결정 필요 사항
 
-1. **이동 primitive–local light 상호작용과 reflection capture·probe 선택의 구조.** 10.4절은 계층 해시의 light 인스턴스로 정했다. 제안: OT6에서 D·E를 같은 대표 부하로 측정하고 9.6절 기준으로 판정한다. 그 전에는 10.4절을 고치지 않는다.
-2. **에디터 비가시 대상 선택과 headless 질의.** 10.4절은 EditorBackend 해시와 double 정밀 판정으로 정했다. 제안: 에디터 문서 작성 시점에 1과 같은 방식으로 비교한다.
-3. **3D 범위 게임플레이 질의.** 10.4절은 비충돌 게임플레이 질의를 2D SpatialQueryService에 두었다. 제안: SpatialQueryService가 못 다루는 3D 질의가 실제로 생길 때 SI09 조건(결정성, 0.5 ms)으로 비교한다. trigger와 충돌 overlap은 어느 경우에도 물리가 담당한다.
+1. **이동 primitive–local light 상호작용과 reflection capture·probe 선택의 구조.** 결정됨(2026-11-18): 광원 상호작용과 CPU 경로 그림자 caster 수집은 `LooseOctree`, reflection capture·probe 선택은 평면 SoA. EngineImplementationPlan 개정 1.13.
+2. **에디터 비가시 대상 선택과 headless 질의.** 10.4절은 EditorBackend 해시와 double 정밀 판정으로 정했다. 제안: 에디터 문서 작성 시점에 OT5 측정 결과로 비교한다.
+3. **게임플레이 공간 질의.** 결정됨(2026-11-18): Jolt scene query를 쓰고 SpatialQueryService는 폐기한다. 대량 대상의 관심 판정은 SI09 기준을 넘을 때 후속 2D 격자로 옮긴다. EngineImplementationPlan 개정 1.13.
 4. **비유한 입력의 처리.** 10.4절은 격리 목록에 넣어 항상 판정하고, 이 문서는 거부한다. 제안: 범용 부품은 거부하고, 가시성 보수성이 필요한 렌더 소비자가 자기 격리 목록을 둔다. 10.4절 개정 때 문구를 맞춘다.
 5. **실제 `TOctree2`의 직접 측정 여부.** UE 빌드 안에서 같은 입력으로 측정할 수 있으나 EULA의 관련 조항을 확인하지 못했다. 제안: 기본 계획에서 제외하고 독립 구현(C)만 측정한다.
 6. **10.4절의 UE 근거 갱신.** 10.4절의 근거는 5.4 기준이다. SceneCulling의 level 산정과 loose 여부는 5.8.4 소스에서 확인되었다(3.3절). 제안: 다음 EngineImplementationPlan 개정 때 33.10절의 미확인 표기를 갱신하고 5.8 기준으로 재확인한다.
@@ -953,3 +983,4 @@ octree.RunMaintenance(MaintenanceBudget::Operations(256));
 ## 16. 개정 이력
 
 - 개정 1(2026-11-16): 초안. UnityOctree bbc4735와 UE 5.8.4(f45729c0b6f0) 소스 조사, 용도별 구조 선택, `LooseOctree` 설계, 시험·벤치마크 계획. 반영 전 교차검증 3건(설계 반례, 참조 사실, 계획 정합·누락)의 지적을 반영하였다. 주요 변경은 분할 판정의 분리 level 계산, 루트 확장의 사전 수용 판정과 중심 조건, 구·프러스텀·ray의 오차 넓힘, 실패 시 논리 상태 보존 절차, 상향식 병합과 대기 항목 제거, reader 기반 동시성 강제, 10.4절 소비자 배정의 결정 필요 분리다.
+- 개정 2(2026-11-18): 사용자 결정으로 공간 질의 전략을 UE 5.8.4와 같게 정했다(EngineImplementationPlan 개정 1.13). 결정 필요 1·3을 결정됨으로 바꾸고, 5.1절 소비자 표를 다시 썼다. 3.5절(UE 게임플레이 공간 질의 근거), 그림자 caster 수집용 노드 묶음 API(6.1절), 9.6절 판정 기준(평면 전수 대체 규모, 노드 묶음 확장 효율)을 추가했다. 비교군 E는 참고 측정으로 내렸다.

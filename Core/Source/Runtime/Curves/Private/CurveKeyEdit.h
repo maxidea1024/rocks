@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Base/NumericLimits.h>
+#include <Base/TypeTraits.h>
 #include <Base/Types.h>
 #include <Core/Containers/Array.h>
 #include <Core/Containers/Span.h>
@@ -11,10 +12,44 @@
 #include <Curves/CurveTypes.h>
 #include <Platform/PlatformMath.h>
 
-// TangentCurve·PlainCurve가 함께 쓰는 키 배열 연산이다(Docs/Design/CurveData.ko.md 5·7절). 키
-// 형식은 float time·value 칸을 가진 struct이고 배열은 시간 오름차순·유한 시간이다. 함수마다
-// 실패하면 배열을 바꾸지 않는다.
+// 커브 값 타입(TangentCurve·PlainCurve·계단 커브 셋)이 함께 쓰는 키 배열 연산이다(Docs/Design/
+// CurveData.ko.md 5·7절). 키 형식은 float time 칸과 value 칸을 가진 struct이고 배열은 시간
+// 오름차순·유한 시간이다. 키는 옮기기(Move)로 다루고 복사가 필요한 곳은 CloneCurveKey를 쓴다
+// (String 키는 할당하는 복사다). 함수마다 실패하면 배열을 바꾸지 않는다.
+namespace rocks {
+
+struct StringStepKey;
+
+} // namespace rocks
+
 namespace rocks::curves_detail {
+
+// 키 하나의 복사본이다. 비트 복사 가능한 키는 그대로, StringStepKey는 값 문자열을 allocator로
+// 복제한다(StepCurves.cpp — 실패하면 OutOfMemory).
+template <class Key>
+    requires IsTriviallyCopyableV<Key>
+Result<Key> CloneCurveKey(const Key& key, Allocator&) noexcept {
+    return Result<Key>::Success(key);
+}
+
+Result<StringStepKey> CloneCurveKey(const StringStepKey& key, Allocator& allocator) noexcept;
+
+// source의 키를 모두 복제해 out 끝에 더한다(out은 source.Size()만큼 미리 예약돼 있어야 한다).
+template <class Key>
+Result<void> AppendCloned(Array<Key>& out, Span<const Key> source) noexcept {
+    for (const Key& key : source) {
+        auto cloned = CloneCurveKey(key, out.GetAllocator());
+        if (!cloned) {
+            return Result<void>::Failure(cloned.Error());
+        }
+
+        if (auto pushed = out.TryPushBack(Move(cloned.Value())); !pushed) {
+            return pushed;
+        }
+    }
+
+    return Result<void>::Success();
+}
 
 // 허용오차 인자가 쓸 수 있는 값인지다(0 이상 — NaN·음수는 거부한다).
 inline bool IsUsableTolerance(float tolerance) noexcept {
@@ -72,14 +107,15 @@ usize FindWithinTolerance(Span<Key> keys, float time, float tolerance) noexcept 
 }
 
 // UE AddKey의 회전 풀기다(RC 319–334): 앞 키 값과의 차가 (−180, 180] 쪽에 들도록 360씩 옮긴다. UE
-// 반복 뺄셈을 그대로 하되, 어느 값이 비유한이면 옮기지 않고, 2^20번 안에 끝나지 않거나 더 움직이지
-// 않는 크기(아주 큰 차·값 — UE는 끝나지 않는다)면 double 나머지로 한 번에 옮긴다.
+// 반복 뺄셈을 그대로 해서 UE가 끝나는 모든 입력에서 비트가 같다(360을 더하고 빼도 값이 바뀌는 크기
+// — 약 2^33 아래 — 는 2^26번 안에 끝난다). 어느 값이 비유한이면 옮기지 않고, 360을 더하고 빼도 값이
+// 그대로인 큰 값(UE는 끝나지 않는다)이면 double 나머지로 한 번에 옮긴다. 2^26번 상한은 안전장치다.
 inline float UnwindRotation(float previous, float value) noexcept {
     if (!math::IsFinite(previous) || !math::IsFinite(value)) {
         return value;
     }
 
-    constexpr uint32 MaxSteps = 1u << 20;
+    constexpr uint32 MaxSteps = 1u << 26;
     float moved = value;
     uint32 steps = 0;
     bool stuck = false;
@@ -131,11 +167,15 @@ Result<usize> AddKey(Array<Key>& keys, Key key, bool unwindRotation) noexcept {
     }
 
     const usize index = LowerBound(keys.View(), key.time);
-    if (unwindRotation && index > 0) {
-        key.value = UnwindRotation(keys[index - 1].value, key.value);
+    if constexpr (IsSameV<decltype(key.value), float>) {
+        if (unwindRotation && index > 0) {
+            key.value = UnwindRotation(keys[index - 1].value, key.value);
+        }
+    } else {
+        static_cast<void>(unwindRotation); // 회전 풀기는 실수 값 커브만이다
     }
 
-    if (auto inserted = keys.TryInsert(key, index); !inserted) {
+    if (auto inserted = keys.TryInsert(Move(key), index); !inserted) {
         return Result<usize>::Failure(inserted.Error());
     }
 
@@ -152,11 +192,11 @@ Result<usize> UpdateOrAddKey(Array<Key>& keys, Key key, bool unwindRotation,
 
     const usize found = FindWithinTolerance(keys.View(), key.time, tolerance);
     if (found != IndexNone) {
-        keys[found].value = key.value;
+        keys[found].value = Move(key.value);
         return Result<usize>::Success(found);
     }
 
-    return AddKey(keys, key, unwindRotation);
+    return AddKey(keys, Move(key), unwindRotation);
 }
 
 // index 키를 새 시간 자리(같은 시간 키들 앞)로 옮긴다. 다른 칸은 그대로다. 할당하지 않는다.
@@ -166,8 +206,8 @@ Result<usize> SetKeyTime(Array<Key>& keys, usize index, float time) noexcept {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
 
-    Key moved = keys[index];
-    // 그 키를 뺀 배열에서 time보다 앞선 키 수가 새 자리다.
+    Key moved = Move(keys[index]);
+    // 그 키를 뺀 배열에서 time보다 앞선 키 수가 새 자리다(옮긴 자리의 시간 칸은 그대로 남아 있다).
     usize target = LowerBound(keys.View(), time);
     if (moved.time < time) {
         --target;
@@ -176,15 +216,15 @@ Result<usize> SetKeyTime(Array<Key>& keys, usize index, float time) noexcept {
     moved.time = time;
     if (target < index) {
         for (usize position = index; position > target; --position) {
-            keys[position] = keys[position - 1];
+            keys[position] = Move(keys[position - 1]);
         }
     } else {
         for (usize position = index; position < target; ++position) {
-            keys[position] = keys[position + 1];
+            keys[position] = Move(keys[position + 1]);
         }
     }
 
-    keys[target] = moved;
+    keys[target] = Move(moved);
     return Result<usize>::Success(target);
 }
 
@@ -200,7 +240,7 @@ Result<void> SetKeys(Array<Key>& keys, Span<const Key> source) noexcept {
         return reserved;
     }
 
-    if (auto appended = next.TryAppend(source); !appended) {
+    if (auto appended = AppendCloned(next, source); !appended) {
         return appended;
     }
 
@@ -283,15 +323,16 @@ Result<void> ShiftKeyTimes(Array<Key>& keys, Span<const usize> indices, float de
 
     for (usize index = 0; index < keys.Size(); ++index) {
         if (selected[index] == 0) {
-            static_cast<void>(next.TryPushBack(keys[index])); // 예약했으므로 실패하지 않는다
+            static_cast<void>(next.TryPushBack(Move(keys[index]))); // 예약했으므로 실패하지 않는다
         }
     }
 
     for (usize index = 0; index < keys.Size(); ++index) {
         if (selected[index] != 0) {
-            Key moved = keys[index];
+            Key moved = Move(keys[index]);
             moved.time = moved.time + delta;
-            static_cast<void>(next.TryInsert(moved, LowerBound(next.View(), moved.time)));
+            const usize at = LowerBound(next.View(), moved.time);
+            static_cast<void>(next.TryInsert(Move(moved), at));
         }
     }
 
@@ -379,6 +420,102 @@ bool FindRedundantRange(Span<Key> keys, float first, float last, usize& start,
     }
 
     return start != IndexNone && end != IndexNone;
+}
+
+// 첫 keys[i].time > time인 i다(없으면 Size).
+template <class Key>
+usize UpperBound(Span<Key> keys, float time) noexcept {
+    usize first = 0;
+    usize count = keys.Size();
+    while (count > 0) {
+        const usize step = count / 2;
+        const usize middle = first + step;
+        if (!(time < keys[middle].time)) {
+            first = middle + 1;
+            count -= step + 1;
+        } else {
+            count = step;
+        }
+    }
+
+    return first;
+}
+
+// 시간이 time 이하인 마지막 키다(없거나 time이 NaN이면 IndexNone — UE FIntegralCurve::
+// FindKeyBeforeOrAt). 같은 시간 키가 여럿이면 그 시간의 마지막 키다.
+template <class Key>
+usize FindAtOrBefore(Span<Key> keys, float time) noexcept {
+    if (keys.Size() == 0 || math::IsNaN(time) || time < keys[0].time) {
+        return IndexNone;
+    }
+
+    return UpperBound(keys, time) - 1;
+}
+
+// 계단 커브 평가의 키 index다(UE FIntegralCurve::Evaluate·FStringCurve::Eval — 설계 5.8절).
+// 기본값을 써야 하면 IndexNone이다: 키가 없을 때, defaultBeforeFirst이고 첫 키 시간보다 앞일 때,
+// 시간이 NaN일 때(UE는 마지막 키 — 17.5절). 키 하나이거나 첫 키 앞이면 첫 키, 마지막 키 시간보다
+// 앞이면 시간 이하인 마지막 키(UE의 앞에서부터 훑기와 같은 결과), 그 밖은 마지막 키다.
+template <class Key>
+usize StepKeyIndex(Span<Key> keys, float time, bool defaultBeforeFirst) noexcept {
+    const usize count = keys.Size();
+    if (count == 0 || math::IsNaN(time) || (defaultBeforeFirst && time < keys[0].time)) {
+        return IndexNone;
+    }
+
+    if (count < 2 || time < keys[0].time) {
+        return 0;
+    }
+
+    if (time < keys[count - 1].time) {
+        return UpperBound(keys, time) - 1;
+    }
+
+    return count - 1;
+}
+
+// 계단 커브의 중복 키 제거다(UE FIntegralCurve·FStringCurve::RemoveRedundantKeys — 원래 배열에서
+// 앞·뒤 키와 값이 같은 안쪽 키를 지운다). UE와 달리 남은 키 하나를 기본값으로 바꾸지 않는다(설계
+// 15절 9). same(a, b)가 값 같음이다.
+template <class Key, class Same>
+Result<void> RemoveStepRedundantKeys(Array<Key>& keys, Same&& same) noexcept {
+    const usize count = keys.Size();
+    if (count < 3) {
+        return Result<void>::Success();
+    }
+
+    Allocator& allocator = keys.GetAllocator();
+    Array<uint8> removed(allocator);
+    if (auto sized = removed.TryResize(count); !sized) {
+        return sized;
+    }
+
+    usize kept = count;
+    for (usize index = 0; index < count; ++index) {
+        const bool middle = index > 0 && index + 1 < count &&
+                            same(keys[index - 1].value, keys[index].value) &&
+                            same(keys[index].value, keys[index + 1].value);
+        removed[index] = middle ? 1 : 0;
+        kept -= middle ? 1 : 0;
+    }
+
+    if (kept == count) {
+        return Result<void>::Success();
+    }
+
+    Array<Key> next(allocator);
+    if (auto reserved = next.TryReserve(kept); !reserved) {
+        return reserved;
+    }
+
+    for (usize index = 0; index < count; ++index) {
+        if (removed[index] == 0) {
+            static_cast<void>(next.TryPushBack(Move(keys[index]))); // 예약했으므로 실패하지 않는다
+        }
+    }
+
+    keys = Move(next);
+    return Result<void>::Success();
 }
 
 template <class Key>

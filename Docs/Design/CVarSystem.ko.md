@@ -1,6 +1,6 @@
 # CVar·치트 명령 설계
 
-기준일: 2026-11-18, 개정 1(초안). 실행 중 이름으로 읽고 바꾸는 타입 있는 설정 변수 **CVar**와, 개발 빌드에서 게임 상태를 직접 바꾸는 **치트 명령**을 정한다.
+기준일: 2026-11-18, 개정 2(결정 확정). 실행 중 이름으로 읽고 바꾸는 타입 있는 설정 변수 **CVar**와, 개발 빌드에서 게임 상태를 직접 바꾸는 **치트 명령**을 정한다.
 
 이 문서는 [설정 계층과 콘솔 설정](ConfigSystem.ko.md)(이하 Config)의 5절 "콘솔 설정과 명령"을 대체하는 상세 스펙이다. 값 저장소·층·출처 스택·sync 지점·JSON 파일·`--set`·설정 struct는 Config를 그대로 쓰고, 이 문서는 그 위에 다음을 더한다.
 - 한 문장으로 정의하고 `.Get()`으로 읽는 타입 있는 핸들(`CVar<T>`·`BootCVar<T>`·`CVarGroup`·`ConsoleCommand`)
@@ -10,7 +10,7 @@
 
 UE 근거는 UE 5.8.4(`release`, 로컬 클론)의 현재 기본 경로이고 경로는 `Engine/Source/Runtime/` 기준이다. 레거시·deprecated 경로는 보지 않았다.
 
-상태: **초안**(리뷰어 1명 교차 검증 반영). 결정 VD1–VD18 중 VD1은 사용자 결정(권장안), VD2는 사용자 확인이 필요하고(namespace `cvar`는 확인됨) 나머지는 권장안이다(17절). 구현 착수 시점은 계획 순서에 따라 사용자가 정한다.
+상태: **설계 확정**(리뷰어 1명 교차 검증 반영). 결정 VD1–VD18 중 VD1·VD2는 사용자 결정(권장안)이고 나머지는 권장안이다(17절). 다른 문서 개정(22절)은 모두 반영했다. 구현 착수 시점은 다른 세션 작업을 본 뒤 사용자가 정한다.
 
 ## 1. 한눈에 보기
 
@@ -132,7 +132,8 @@ public:
     // 공통
     constexpr VarBuilder&& Help(StringView text) && noexcept;          // 필수
     constexpr VarBuilder&& Category(StringView category) && noexcept;  // cvar.find 분류
-    constexpr VarBuilder&& Validate(StringView (*check)(const T&) noexcept) && noexcept;
+    // ValidateArg<T>는 String·Name이면 StringView, 그 밖에는 const T&다.
+    constexpr VarBuilder&& Validate(StringView (*check)(ValidateArg<T>) noexcept) && noexcept;
     // 수(int32·int64·float·double)만
     constexpr VarBuilder&& Range(TypeIdentityT<T> minimum, TypeIdentityT<T> maximum) && noexcept;
     constexpr VarBuilder&& Clamp() && noexcept;                        // Range가 있어야 한다
@@ -150,6 +151,7 @@ public:
 ```
 
 - `Validate`는 갈무리 없는 람다(함수 포인터)다. 통과면 빈 `StringView`, 위반이면 이유(영어 리터럴)를 돌려준다. 검증 함수는 순수해야 하고(입력 값만 본다) 상수 평가가 가능해야 한다. 기본값도 이 함수로 컴파일 때 검사한다.
+- `String`·`Name` 변수의 검증 함수는 `StringView`를 받는다(`StringView (*)(StringView) noexcept`). 핸들이 기본값을 `StringView` 상수로 담고, `String`은 할당이 필요해 상수 평가로 만들 수 없기 때문이다. 실행 중 쓰기도 값 텍스트를 `StringView`로 넘겨 검사한다. 예: 로깅의 `log.levels`는 `.Validate(CheckLogLevelsSyntax)`이고 문법만 본다(Logging L18).
   ```cpp
   CVar<int32> Samples = cvar::Var("render.aa.samples", 4).Help("MSAA sample count")
       .Validate([](const int32& value) noexcept -> StringView {
@@ -385,6 +387,7 @@ CVarGroup ShadowGroup = cvar::Group("quality.shadow", 2)
 - 같은 등급에 같은 변수 두 번, 같은 등급 두 번 정의, 기본 등급 미정의는 컴파일 오류다. 크기 한도는 이름 있는 상수 `MaxGroupLevels`(8)·`MaxEntriesPerLevel`(32)이다. consteval 안에서는 할당할 수 없으므로 `CVarGroup`은 이 고정 용량을 품는다(항목 24 byte 기준 묶음 하나에 약 6 KiB의 정적 데이터). 묶음은 수십 개 이하라 받아들인다.
 - 프로젝트는 `Quality.json`(Config 6.1)에서 코드가 정의한 항목의 **값만** 바꿀 수 있다. 항목 추가는 코드에서 한다.
 - Config 6.1의 나머지 규칙은 그대로다: 사용자가 고른 등급은 사용자 층에 저장한다(묶음 변수는 늘 `UserSetting()`). 등급 조합이 장치 능력(`DeviceCaps`)으로 불가능하면 정해진 순서로 낮추고 사유를 진단에 남긴다.
+- 낮춘 등급은 묶음 변수에 쓰지 않는다. 묶음 변수(`ShadowGroup.Get()`)는 사용자가 고른 등급 그대로이고, 낮춤은 펼칠 때 쓰는 등급에만 적용된다. 그래서 Quality 층 항목 값이 낮춘 등급의 것이 된다. 사용자 층보다 약한 Quality 층에 등급을 써서는 효력이 없고, 고른 값을 덮어쓰면 장치가 바뀐 뒤 원래 선택을 잃기 때문이다. 펼친 등급은 Explain·진단에 `quality.shadow@1 (requested 3, lowered: <사유>)`로 보인다.
 - `GroupBuilder`도 복사·이동 삭제와 `&&` 체인을 따른다.
 
 ## 12. 지연 바인딩과 진단
@@ -536,7 +539,7 @@ public:
 | ID | 결정 | 상태 |
 |---|---|---|
 | VD1 | 등록은 모듈 등록 함수의 `Register(핸들…)` + Policy `cvar-registration`. 정적 초기화 때 스스로 목록에 붙는 방식(프롬프트의 "변환 순간 등록")은 쓰지 않는다. 이유: 엔진 전역 생성자 금지 원칙(Config 5.1·Trace T3), 정적 라이브러리에서 참조 없는 .cpp의 변수가 링크에서 빠지는 문제, 모듈 해제 때 목록 정리 문제 | 결정됨(2026-11-18, 사용자 — 권장안) |
-| VD2 | 이름: 타입은 `CVar<T>`(업계 공용어), namespace `rocks::cvar`(2026-11-18 사용자 확인). 콘솔 이름은 Config D7의 소문자 점 경로(`render.shadow.distance`)이고 UE식 `r.ShadowDistance`는 쓰지 않는다. 프롬프트의 `cvar::Registry`·`cvar::Snapshot`은 기존 `ConfigContext`·`ConfigSnapshot`이 맡는다(같은 것에 이름 둘을 두지 않는다) | **사용자 확인 필요** |
+| VD2 | 이름: 타입은 `CVar<T>`(업계 공용어), namespace `rocks::cvar`(2026-11-18 사용자 확인). 콘솔 이름은 Config D7의 소문자 점 경로(`render.shadow.distance`)이고 UE식 `r.ShadowDistance`는 쓰지 않는다. 프롬프트의 `cvar::Registry`·`cvar::Snapshot`은 기존 `ConfigContext`·`ConfigSnapshot`이 맡는다(같은 것에 이름 둘을 두지 않는다) | 결정됨(2026-11-18, 사용자 — 권장안) |
 | VD3 | 입력 형식은 JSON `Settings` 섹션·`--set`(Config D1). 프롬프트의 ini `LoadIni`·`-cvar=`는 두지 않는다 | 권장안 |
 | VD4 | 층 순서는 6.1절. 품질 묶음은 프로젝트 파일보다 강하다(구현과 같다. UE는 반대 — 프로젝트 ini가 이긴다). Config 3.1 표 비고의 "UE처럼 프로젝트보다 약하다"는 구현·표와 어긋나므로 고친다 | 권장안 |
 | VD5 | Config의 `DevelopmentOnly`를 `Cheat`로 합친다(출시 빌드 제거 + 개발 빌드 치트 허용 검사). 치트 허용 상태는 복제 CVar `cheat.enabled` 하나 | 권장안 |
@@ -610,7 +613,7 @@ public:
 | CVR4 | `BootCVar`·봉인·대기 값 늦은 적용·`ReportUnresolved`(Core 편집 거리)·진단 코드 | CVR2 | 부팅·미해결 시험 |
 | CVR5 | `CVarGroup`·Quality 층 펼침·되풀이 한도 | CVR2 | 프리셋 시험. Config CF4는 이 묶음을 쓴다 |
 | CVR6 | 콘솔 도구(Explain·find·dump·reset·enum 표시)·`cvar::Command`·치트 허용 상태·네트워크 역할·Export/Import | CVR4 | 권한·dump 왕복 시험 |
-| CVR7 | 이관: `log.*`(LogHost)·`trace.*`(TraceControl)·호스트 설정을 핸들로, `RegisterConsoleSetting` 공개 경로를 `RegisterDynamic`으로 | CVR6 | 기존 Config·LogHost·Trace 시험 통과 |
+| CVR7 | 이관: `log.*`(LogHost)·`trace.*`(TraceControl)·호스트 설정을 핸들로, `RegisterConsoleSetting` 공개 경로를 `RegisterDynamic`으로. `log.*`는 로깅 문서 L18과 맞춘다: `log.level`은 enum 핸들(대소문자 무시 입력), `log.levels`·`log.rate_limits`·레이아웃 문자열은 `Validate`로 문법만 검사(순수 함수라 런타임 카테고리 목록은 못 본다 — 모르는 카테고리는 LogHost가 적용 때 진단), `log.mode`·`log.file.*`는 `BootCVar` | CVR6 | 기존 Config·LogHost·Trace 시험 통과 |
 | CVR8 | `CheatSet`·`ROCKS_FUNCTION(Cheat)`·객체 콘솔(14.3·14.4) | CVR6, CU2 | 치트 집합 등록·실행·출시 규칙 시험 |
 
 - CVR1–CVR7은 Core 단독(Config 모듈)이고 World 연결만 Engine이다. CVR8은 함수 리플렉션 뒤다.
@@ -636,17 +639,18 @@ public:
 
 ## 22. 다른 문서 개정
 
-| 문서 | 위치 | 개정 |
-|---|---|---|
-| ConfigSystem | 3.1절 표·규칙 | Hotfix·Code·Scoped·Server 층, 품질 묶음 비고(VD4), "범위 임시 변경은 콘솔 층 + 태그" 규칙을 Scoped 층으로 |
-| ConfigSystem | 5.3절 | `Snapshot()` → `Acquire()`, 아무 스레드 쓰기 큐, 스레드 안전성은 이 문서 10.1절 |
-| ConfigSystem | 5절 | 이 문서로 대체한다는 안내, 플래그 표·snapshot·구독·쓰기 스레드 문단 갱신 |
-| ConfigSystem | 6.1절 | 품질 묶음 정의는 코드 `CVarGroup`, `Quality.json`은 값만 |
-| ConfigSystem | 7절 지정자 표 | `DevelopmentOnly` → `Cheat`, `StartupOnly`는 설정 struct 필드에만 |
-| UiToolkit | CU2 행 | 사용처에 치트 함수(`Cheat`·`Authority` 지정자) |
-| RenderBase | RB1 | 프레임 packet이 든 snapshot을 렌더 lane에 묶는 지점 |
-| UnrealCoreFeatureAudit | 콘솔 변수·치트 행 | 이 문서 단계(CVR1–CVR8) |
+| 문서 | 위치 | 개정 | 상태 |
+|---|---|---|---|
+| ConfigSystem | 3.1절 표·규칙 | Hotfix·Code·Scoped·Server 층, 품질 묶음 비고(VD4), "범위 임시 변경은 콘솔 층 + 태그" 규칙을 Scoped 층으로 | 반영(Config 개정 4) |
+| ConfigSystem | 5.3절 | `Snapshot()` → `Acquire()`, 아무 스레드 쓰기 큐, 스레드 안전성은 이 문서 10.1절 | 반영(Config 개정 4) |
+| ConfigSystem | 5절 | 이 문서로 대체한다는 안내, 플래그 표·snapshot·구독·쓰기 스레드 문단 갱신 | 반영(Config 개정 4) |
+| ConfigSystem | 6.1절 | 품질 묶음 정의는 코드 `CVarGroup`, `Quality.json`은 값만 | 반영(Config 개정 4) |
+| ConfigSystem | 7절 지정자 표 | `DevelopmentOnly` → `Cheat`, `StartupOnly`는 설정 struct 필드에만 | 반영(Config 개정 4) |
+| UiToolkit | CU2 행 | 사용처에 치트 함수(`Cheat`·`Authority` 지정자) | 반영 |
+| RenderBase | RB1 | 프레임 packet이 든 snapshot을 렌더 lane에 묶는 지점 | 반영(RenderBase 개정 13, 12절) |
+| UnrealCoreFeatureAudit | 콘솔 변수·치트 행 | 이 문서 단계(CVR1–CVR8) | 반영(UE-C21·UE-C29) |
 
 ## 23. 개정 이력
 
+- 개정 2(2026-11-18): VD2(소문자 점 경로 이름, `r.X` 안 씀)를 사용자가 권장안으로 확정했다. 로깅 세션 조율로 CVR7 `log.*` 이관 규칙을 적고, `String`·`Name` 변수의 `Validate` 인자를 `StringView`로 정했다(`ValidateArg<T>` — 4.2절). 22절의 다른 문서 개정을 모두 반영했다(Config 개정 4, RenderBase 개정 13, UiToolkit CU2 행, UnrealCoreFeatureAudit UE-C21·UE-C29 행). 구현 착수는 다른 세션 작업 뒤 사용자가 정한다.
 - 개정 1(2026-11-18): 초안. 사용자 제공 요구(타입 있는 CVar·부팅 고정·enum·레이어 스택·컨텍스트·프레임 snapshot·프리셋·지연 바인딩·치트·복제·도구)를 Config 개정 3과 엔진 원칙(전역 생성자 금지·JSON·소문자 점 이름·결정적 시험)에 맞춰 옮기고, 객체 시스템 연결(14절)을 더했다. UE 5.8.4 `IConsoleManager.h`(SetBy 순서·`ECVF_Cheat`·`TAutoConsoleVariable`)·`CheatManager`(exec 함수·확장·권한 경로)·`CheatManagerDefines.h`를 조사했다. 같은 날 리뷰어 1명의 교차 검증(clang으로 consteval 빌더·상수 초기화·Release 문자열 제거·다른 TU 주소 항목 시험)을 반영했다: Sync 순서(묶음 해결을 유효값 계산과 한 반복으로), 등록 즉시 게시, 치트 허용 상태를 CVar 하나로, Scoped < 콘솔 < Server, `RequiresRestart`를 BootCVar로 흡수, 범위 값 하나, 문자열·Name 기본값 overload, 지역 핸들 거부, `Get` overload 축소, UE 인용 정정. 사용자 요구(스레드 문제 없음)로 10.1절 스레드 안전성을 더하고 worker가 snapshot 참조를 쥐게 했다.

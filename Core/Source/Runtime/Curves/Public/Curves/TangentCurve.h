@@ -89,17 +89,15 @@ public:
     // [첫 키 시간, 마지막 키 시간]이다. 실패: 키가 없으면 NotFound(UE는 (0, 0)).
     Result<Interval<float>> TryGetTimeRange() const noexcept;
 
-    // 키 범위 [첫 키, 마지막 키] 안에서 Evaluate가 낼 수 있는 값의 닫힌 범위 [최소,
+    // 키 범위 [첫 키, 마지막 키] 안에서 Evaluate가 낼 수 있는 값을 모두 담는 닫힌 범위 [최소,
     // 최대]다(설계 7.3절, D11). 구간마다 그 구간이 실제로 쓰는 값을 해석적으로 구한다: Linear는 두
-    // 끝, Constant는 앞 키 값(마지막 구간은 끝 키 값도), Cubic은 두 끝과 극값(가중 구간은
-    // Evaluate가 실제로 쓰는 매개변수 집합 위에서). 구간 끝은 극한으로 넣는다. 쓰이지 않는 키
-    // 값(길이 0 구간의 앞 키, 가중 구간이 건너뛰는 시작 값)은 넣지 않는다. 외삽은 보지 않는다(UE와
-    // 같다). 결과는 수학적 극값이라 Evaluate의 float 결과가 반올림 오차만큼 넘을 수 있고, 가중
-    // 구간의 접힘(시간 Bezier가 되돌아가는 곳) 근처에서는 Evaluate의 3차 방정식 풀이(UE 식 —
-    // 판별식이 1e-8 이하면 겹근으로 본다)가 정확한 곡선에서 조금 벗어나 그만큼 더 넘을 수
-    // 있다(무작위 시험에서 폭의 약 1.3e-4). UE는 표본 재귀(FeaturePointMethod)라 결과가 다를 수
-    // 있다(설계 15절 18). 실패: 키가 없으면 NotFound, 키 값·접선이 비유한이라 범위가 유한하지
-    // 않으면 InvalidArgument.
+    // 끝, Constant는 앞 키 값(마지막 구간은 끝 키 값도), Cubic은 극값과 쓰이는 끝(가중 구간은
+    // Evaluate가 쓰는 매개변수 집합 위에서, 그리고 Evaluate의 3차 방정식 풀이가 판별식 1e-8 띠에서
+    // 겹근 근사로 고르는 매개변수까지). 구간 끝은 극한으로 넣는다. 쓰이지 않는 키 값(길이 0 구간의
+    // 앞 키, 가중 구간이 건너뛰는 시작·끝 값)은 넣지 않는다. 외삽은 보지 않는다(UE와 같다).
+    // Evaluate 결과와는 float 반올림 차이만 날 수 있다. UE는 표본 재귀(FeaturePointMethod)라 결과가
+    // 다를 수 있다(설계 15절 18). 실패: 키가 없으면 NotFound, 키 값·접선이 비유한이라 범위가
+    // 유한하지 않으면 InvalidArgument.
     Result<Interval<float>> TryGetValueRange() const noexcept;
 
     // ---- 자동 접선 ----
@@ -118,10 +116,10 @@ public:
 
     // (time, value) 키를 더하고 그 index를 돌려준다(UE AddKey). 같은 시간 키가 있으면 그 키들 앞에
     // 넣는다. 새 키는 Linear·Auto·가중 없음·접선 0이다. unwindRotation이면 값을 도 단위 회전으로
-    // 보고 바로 앞 키 값과의 차가 [−180, 180]에 들도록 360씩 옮긴다(UE와 같은 반복 뺄셈 — 2^20번
-    // 안에 끝나지 않거나 360을 더하고 빼도 값이 그대로인 큰 값이면 double 나머지로 한 번에 옮기고,
-    // 어느 한 값이 비유한이면 옮기지 않는다. UE 반복은 그런 값에서 끝나지 않는다). 실패: time이
-    // 비유한이면 InvalidArgument, 할당 실패면 OutOfMemory.
+    // 보고 바로 앞 키 값과의 차가 [−180, 180]에 들도록 360씩 옮긴다(UE와 같은 반복 뺄셈이라 UE가
+    // 끝나는 입력에서 비트가 같다. 360을 더하고 빼도 값이 그대로인 큰 값이면 double 나머지로 한
+    // 번에 옮기고, 어느 한 값이 비유한이면 옮기지 않는다 — UE 반복은 그런 값에서 끝나지 않는다).
+    // 실패: time이 비유한이면 InvalidArgument, 할당 실패면 OutOfMemory.
     Result<usize> TryAddKey(float time, float value, bool unwindRotation = false) noexcept;
 
     // |키 시간 − time| ≤ tolerance인 가장 앞 키가 있으면 그 키 값만 바꾸고(unwind 없음 — UE와
@@ -195,8 +193,11 @@ public:
     // - 없으면 세 키(직전에 남긴 키·이 키·다음 키)가 모두 User·Break가 아닐 때만 이 키 시간에서
     //   비교한다.
     // 지운 뒤 AutoSetTangents를 부르지 않는다(D10 — UE와 결과를 맞추려면 호출자가 이어서 부른다).
-    // 키가 3개 미만이면 아무것도 하지 않는다. 표본판의 표본 수는 키 간격 × 프레임 속도에 비례한다.
-    // 실패: tolerance가 NaN·음수면 InvalidArgument, 할당 실패면 OutOfMemory.
+    // 키가 3개 미만이면 아무것도 하지 않는다. 차가 NaN인 키(NaN 값·접선)는 남긴다(UE는 지운다).
+    // 표본판의 표본 수는 키 간격 × 프레임 속도에 비례하고, 호출 하나에 2^24개를 넘으면
+    // CapacityExceeded다(UE는 상한이 없다).
+    // 실패: tolerance가 NaN·음수면 InvalidArgument, 표본 상한을 넘으면 CapacityExceeded, 할당
+    // 실패면 OutOfMemory(실패하면 커브는 그대로다).
     Result<void> TryRemoveRedundantKeys(float tolerance,
                                         Optional<FrameRate> sampleRate = {}) noexcept;
 
