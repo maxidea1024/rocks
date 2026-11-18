@@ -57,6 +57,10 @@ struct TextCodecOptions {
     NamePool* names = nullptr;
     // JSON import의 Map 병합 방식(10.4절).
     MapMergeMode mapMerge = MapMergeMode::Replace;
+    // 게시 전 struct 검증 hook(Docs/Design/CurveData.ko.md 9.1절)을 부르는지다. false는 최종 값이
+    // 아닌 중간 값(설정 층 배열 연산 목록의 정규 표기를 얻으려고 기본값에 잠시 넣는 import 등)에만
+    // 쓴다 — 그 결과를 게시할 최종 값은 반드시 true로 다시 거친다. 기본은 true다.
+    bool validateStructHooks = true;
     // 저장할 진단 수 상한(TextDiagnostics::SetLimit). 1 이상.
     uint32 maxDiagnostics = DefaultMaxTextDiagnostics;
     // 입력 텍스트 byte 합 상한. 넘으면 CapacityExceeded다. 1 이상.

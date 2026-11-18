@@ -649,8 +649,11 @@ Result<void> PathRunner::Run(PathCursor& cursor, PropertyPath path) noexcept {
                                    PropertyPathError::InsideValidatedStruct);
             }
 
-            if (auto checked = cursor.box_->ValidateTree(); !checked) {
-                return cursor.Fail(ErrorCode::InvalidArgument, PropertyPathError::StructValidation);
+            if (cursor.validateHooks_) {
+                if (auto checked = cursor.box_->ValidateTree(); !checked) {
+                    return cursor.Fail(ErrorCode::InvalidArgument,
+                                       PropertyPathError::StructValidation);
+                }
             }
         }
 
