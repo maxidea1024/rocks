@@ -933,3 +933,102 @@ TEST(LooseOctree_LO06_UpdateReinsertMatchesAddQuality) {
           maintainedUpdated.maxDirectCount <= config.splitThreshold);
     CHECK(maintainedUpdated.reinserts + maintainedUpdated.inPlaceUpdates == Rounds * MovesPerRound);
 }
+
+// 결정 8(큰 객체 목록): 최대 반 변이 기준을 넘는 프록시는 트리 대신 큰 객체 목록에 있고 모든 질의가
+// 판정한다. 크기가 기준을 넘으면 목록으로, 이력 경계(기준의 3/4) 이하로 줄면 트리로 돌아가고 그
+// 사이에서는 목록에 남는다. 큰 객체는 루트를 키우지 않으며, 범위 밖 목록과 큰 객체 목록 사이도
+// 옮긴다. 필터·사용자 값 변경과 노드 묶음도 목록을 포함한다.
+TEST(LooseOctree_LargeProxyListPlacementAndMoves) {
+    SystemAllocator allocator;
+    LooseOctreeConfig config = SmallConfig();
+    config.largeProxyHalfExtent = 4.0;
+    auto created = LooseOctree::TryCreate(config, allocator);
+    REQUIRE(created);
+    OracleTree tree(Move(created.Value()), allocator);
+    RandomStream random(0x1A26Eu);
+    for (uint32 index = 0; index < 400; ++index) {
+        REQUIRE(tree.Add(RandomSmallBox(random), 1u << (index % 4)) != IndexNone);
+    }
+    const uint32 rootLevel = StatsOf(tree.Tree()).rootLevel;
+
+    // 큰 객체: 기준(4)보다 크다. 루트 기본 셀보다 훨씬 커도 루트를 키우지 않는다.
+    const usize huge = tree.Add(MakeCube(Vec3d(0, 0, 0), 500.0), 1);
+    const usize large = tree.Add(MakeCube(Vec3d(10, -10, 5), 4.5), 2);
+    REQUIRE(huge != IndexNone && large != IndexNone);
+    OctreeStats stats = StatsOf(tree.Tree());
+    CHECK(stats.largeProxyCount == 2 && stats.largeProxyInsertions == 2);
+    CHECK(stats.rootLevel == rootLevel && stats.rootExpansions == 0);
+    CHECK(ValidateTree(tree.Tree()));
+    CHECK(QueriesMatch(tree, config, allocator, 0x1A260u));
+
+    // 이력: 반 변 3.5(기준 4와 경계 3 사이)는 목록에 남고, 2.5는 트리로 돌아간다.
+    REQUIRE(tree.Update(large, MakeCube(Vec3d(10, -10, 5), 3.5)));
+    CHECK(StatsOf(tree.Tree()).largeProxyCount == 2);
+    REQUIRE(tree.Update(large, MakeCube(Vec3d(10, -10, 5), 2.5)));
+    CHECK(StatsOf(tree.Tree()).largeProxyCount == 1);
+    // 트리의 프록시가 3.5로 커져도 기준 이하라 트리에 있고, 4.5가 되면 목록으로 간다.
+    REQUIRE(tree.Update(large, MakeCube(Vec3d(10, -10, 5), 3.5)));
+    CHECK(StatsOf(tree.Tree()).largeProxyCount == 1);
+    REQUIRE(tree.Update(large, MakeCube(Vec3d(10, -10, 5), 4.5)));
+    CHECK(StatsOf(tree.Tree()).largeProxyCount == 2);
+    CHECK(ValidateTree(tree.Tree()));
+
+    // 범위 밖 목록과의 이동: 먼 작은 프록시는 범위 밖, 거기서 커지면 큰 객체 목록, 줄면 다시 범위
+    // 밖.
+    const Vec3d far(5.0e5, 0, 0);
+    REQUIRE(tree.Update(large, MakeCube(far, 1.0)));
+    stats = StatsOf(tree.Tree());
+    CHECK(stats.largeProxyCount == 1 && stats.outOfRangeCount == 1);
+    REQUIRE(tree.Update(large, MakeCube(far, 6.0)));
+    stats = StatsOf(tree.Tree());
+    CHECK(stats.largeProxyCount == 2 && stats.outOfRangeCount == 0);
+    REQUIRE(tree.Update(large, MakeCube(far, 1.0)));
+    stats = StatsOf(tree.Tree());
+    CHECK(stats.largeProxyCount == 1 && stats.outOfRangeCount == 1);
+    CHECK(stats.rootLevel == rootLevel);
+    CHECK(ValidateTree(tree.Tree()));
+
+    // 필터·사용자 값 변경은 목록 원소에도 반영된다.
+    REQUIRE(tree.SetFilter(huge, 8));
+    REQUIRE(tree.Tree().TrySetUserValue(tree.Proxies()[huge].handle, huge));
+    CHECK(ValidateTree(tree.Tree()));
+    CHECK(LogicalStateMatches(tree.Tree(), tree.Proxies()));
+    CHECK(QueriesMatch(tree, config, allocator, 0x1A261u));
+
+    // 노드 묶음: 큰 객체 목록이 마지막 묶음이고, 묶음 결과의 합이 단일 질의와 같다.
+    {
+        SpatialReadScope read(tree.Tree());
+        const LooseOctreeReader reader = read.Reader();
+        const Sphere<double> sphere(Vec3d(0, 0, 0), 20.0);
+        SpatialNodeBatch batches[512];
+        auto collected = reader.CollectNodeBatches(sphere, Span<SpatialNodeBatch>(batches));
+        REQUIRE(collected && !collected.Value().truncated && collected.Value().written > 0);
+        const usize batchCount = collected.Value().written;
+        CHECK(batches[batchCount - 1].node == LooseOctreeLargeProxyBatch);
+        uint64 single = 0;
+        REQUIRE(reader.QuerySphere(sphere, 0xFu, [&](const SpatialProxyHit& hit) noexcept {
+            single += hit.userValue + 1;
+            return QueryControl::Continue;
+        }));
+        uint64 joined = 0;
+        for (usize index = 0; index < batchCount; ++index) {
+            REQUIRE(reader.QueryBatch(batches[index], sphere, 0xFu,
+                                      [&](const SpatialProxyHit& hit) noexcept {
+                                          joined += hit.userValue + 1;
+                                          return QueryControl::Continue;
+                                      }));
+        }
+        CHECK(single == joined && single >= huge + 1);
+    }
+
+    // 목록의 프록시를 지우면 목록에서 빠진다.
+    REQUIRE(tree.Remove(huge));
+    stats = StatsOf(tree.Tree());
+    CHECK(stats.largeProxyCount == 0 && stats.proxyCount == tree.LiveCount());
+    CHECK(ValidateTree(tree.Tree()));
+
+    // 설정 검사: 음수·비유한 기준은 거부한다.
+    LooseOctreeConfig invalid = SmallConfig();
+    invalid.largeProxyHalfExtent = -1.0;
+    CHECK(LooseOctree::TryCreate(invalid, allocator).Error() == ErrorCode::InvalidArgument);
+}

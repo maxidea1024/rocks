@@ -220,9 +220,9 @@ void VulkanDevice::StartPass() noexcept {
     }
 
     functions_.vkCmdSetStencilReference(frame_, VK_STENCIL_FACE_FRONT_AND_BACK, 0);
-    const DrawConstants identity;
-    functions_.vkCmdPushConstants(frame_, pipelineLayout_, ConstantStages, 0, ConstantBytes,
-                                  &identity);
+    // 그리기별 상수는 기록마다 0으로 시작한다(CommandContext::SetDrawConstants).
+    const uint8 zeros[ConstantBytes] = {};
+    functions_.vkCmdPushConstants(frame_, pipelineLayout_, ConstantStages, 0, ConstantBytes, zeros);
 }
 
 Result<CommandContext*> VulkanDevice::BeginPass(const PassDesc& pass) noexcept {

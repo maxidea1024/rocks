@@ -103,7 +103,8 @@ enum class SpatialBatchShape : uint8 {
 // 합집합이 단일 질의와 같다. 모은 트리의 같은 읽기 단계 안에서만 유효하다(그 뒤 변경이 있으면
 // QueryBatch가 StaleHandle). 필드는 진단·작업 분배용으로 읽을 수 있으나 바꾸지 않는다.
 struct SpatialNodeBatch {
-    // 노드 번호다. 범위 밖 목록 묶음이면 LooseOctreeOutOfRangeBatch다.
+    // 노드 번호다. 범위 밖 목록 묶음이면 LooseOctreeOutOfRangeBatch, 큰 객체 목록 묶음이면
+    // LooseOctreeLargeProxyBatch다.
     uint32 node = 0;
     // 묶음의 프록시 수(필터 적용 전)다. worker 분배의 무게로 쓴다.
     uint32 proxyCount = 0;
@@ -137,12 +138,16 @@ struct LooseOctreeConfig {
     Vec3d anchor = Vec3d(0.0, 0.0, 0.0);
     // level 0 기본 셀의 한 변이다. 2의 거듭제곱이고 float 최소 정규 값의 2^24배 이상이어야 한다.
     double minCellSize = 128.0;
-    // 초기 루트 level이자 루트 축소의 하한이다. [1, maxRootLevel].
-    uint32 initialRootLevel = 10;
+    // 초기 루트 level이자 루트 축소의 하한이다. [1, maxRootLevel]. 기본 8(한 변 32,768 cm)은 OT6
+    // 조합 측정(2026-11-19, 결정 8)에서 정했다. 데이터보다 훨씬 큰 초기 루트는 looseness가 작을 때
+    // 크기 편차가 큰 분포의 구조를 나쁘게 했다.
+    uint32 initialRootLevel = 8;
     // 루트 확장 한도다. LooseOctreeLevelLimit 이하. 최대 깊이는 maxRootLevel + 1이다.
     uint32 maxRootLevel = 24;
-    // 확장 경계 배율 k다. [1, 2]에서 1/64 단위다(2진 유리수라 k · h가 정확하다).
-    double looseness = 2.0;
+    // 확장 경계 배율 k다. [1, 2]에서 1/64 단위다(2진 유리수라 k · h가 정확하다). 기본 3/2는 OT6
+    // 조합 측정(2026-11-19, 결정 8)에서 정했다(k = 2 대비 균일·군집·겹치는 과밀의 질의가 빨라지고
+    // 크기 편차 분포가 나빠지지 않은 조합).
+    double looseness = 1.5;
     // 잎의 분할 평가를 시작하는 직접 저장 수다(수용 한도가 아니다). 4 이상.
     uint32 splitThreshold = 16;
     // 병합 후보 기준(서브트리 프록시 수)이다. splitThreshold / 2(정수 나눗셈) 이하.
@@ -157,7 +162,16 @@ struct LooseOctreeConfig {
     uint32 outOfRangeWarnCount = 64;
     // 유지보수 대기량 강제 처리 한도의 하한이다(한도 = max(이 값, 노드 수 / 4)). 1 이상.
     uint32 pendingLimitFloor = 64;
+    // 큰 객체 목록의 기준 반 변(cm)이다(결정 8). 0이면 끔. 양수이면 AABB의 최대 반 변이 이 값보다
+    // 큰 프록시를 트리 대신 큰 객체 목록(정확한 double 경계의 선형 목록, 모든 질의가 항상 판정)에
+    // 둔다. 목록에서 트리로 돌아가는 것은 최대 반 변이 이 값의 LooseOctreeLargeProxyExitRatio배
+    // 이하가 될 때다(이력: 기준 부근의 크기 변화가 목록과 트리를 오가지 않게 한다). 큰 객체는 루트
+    // 크기에 영향을 주지 않는다. 0 이상의 유한값.
+    double largeProxyHalfExtent = 0.0;
 };
+
+// 큰 객체 목록에서 트리로 돌아가는 크기 비율이다(largeProxyHalfExtent의 3/4).
+inline constexpr double LooseOctreeLargeProxyExitRatio = 0.75;
 
 // RunMaintenance의 예산이다(6.6절). operations와 timeNanoseconds가 모두 0이면 대기열을 처리하지
 // 않고 루트 확인도 하지 않는다(유지보수를 미룸). shrink는 두 예산과 무관하게 수행한다.
@@ -220,6 +234,8 @@ struct OctreeStats {
     // ---- 현재 구조 ----
     uint32 proxyCount = 0;
     uint32 outOfRangeCount = 0;
+    // 큰 객체 목록의 프록시 수다(largeProxyHalfExtent).
+    uint32 largeProxyCount = 0;
     uint32 nodeCount = 0;
     uint32 leafCount = 0;
     // 루트가 깊이 1이다.
@@ -246,6 +262,8 @@ struct OctreeStats {
     usize peakChunkBytesReserved = 0;
     usize peakNodeBytesReserved = 0;
     usize peakOutOfRangeBytesReserved = 0;
+    usize largeProxyBytesUsed = 0;
+    usize largeProxyBytesReserved = 0;
     // 내부 컨테이너가 allocator에 요청한 할당·해제 횟수와 살아 있는·피크 byte(요청 크기 기준, 계수
     // adapter의 머리 정보 제외)다. 이동하면 함께 옮겨 가고 이동된 원본은 0부터 다시 센다.
     uint64 allocationCount = 0;
@@ -278,6 +296,8 @@ struct OctreeStats {
     uint64 outOfRangeWarnEvents = 0;
     // 범위 밖 목록에 넣은 횟수(추가·갱신)다.
     uint64 outOfRangeInsertions = 0;
+    // 큰 객체 목록에 넣은 횟수(추가·갱신)다.
+    uint64 largeProxyInsertions = 0;
     // ---- 유지보수 대기량 ----
     uint32 pendingTotal = 0;
     uint32 pendingReevaluations = 0;
@@ -308,6 +328,9 @@ inline constexpr uint32 LooseOctreeNoNode = NumericLimits<uint32>::Max();
 
 // 범위 밖 목록 전체를 가리키는 SpatialNodeBatch::node 값이다.
 inline constexpr uint32 LooseOctreeOutOfRangeBatch = LooseOctreeNoNode - 1;
+
+// 큰 객체 목록 전체를 가리키는 SpatialNodeBatch::node 값이다.
+inline constexpr uint32 LooseOctreeLargeProxyBatch = LooseOctreeNoNode - 2;
 
 // OctreeValidationReport::invariant 값이다. 1–9는 Docs/Design/SpatialIndex.ko.md 6.2절 불변 조건
 // 번호이고, 그 밖의 저장 구조 일관성(청크 연결·사용 수, 풀 사용량과 도달 가능한 블록·청크 수, 범위

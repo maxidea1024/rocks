@@ -62,15 +62,19 @@ struct SequenceSession {
     RandomStream random;
     uint64 operations = 0;
 
-    SequenceSession() noexcept
-        : config(SessionConfig()), tree(CreateTree(config, allocator), allocator, true),
-          random(0x105EEDu ^ rocks::test::CurrentSeed()) {
+    explicit SequenceSession(bool largeProxyList) noexcept
+        : config(SessionConfig(largeProxyList)),
+          tree(CreateTree(config, allocator), allocator, true),
+          random((largeProxyList ? 0x1A26E0u : 0x105EEDu) ^ rocks::test::CurrentSeed()) {
     }
 
-    static LooseOctreeConfig SessionConfig() noexcept {
+    // largeProxyList이면 큰 객체 목록을 켠다. 기준 반 변 4는 MovedBox의 크기 변경(반 변 0–6)이
+    // 기준(4)과 이력 경계(3)를 자주 넘나들게 한다.
+    static LooseOctreeConfig SessionConfig(bool largeProxyList) noexcept {
         LooseOctreeConfig session = SmallConfig();
         session.maxRootLevel = 14;
         session.pendingLimitFloor = 16;
+        session.largeProxyHalfExtent = largeProxyList ? 4.0 : 0.0;
         return session;
     }
 
@@ -84,7 +88,12 @@ struct SequenceSession {
 };
 
 SequenceSession& Session() noexcept {
-    static SequenceSession session;
+    static SequenceSession session(false);
+    return session;
+}
+
+SequenceSession& LargeProxySession() noexcept {
+    static SequenceSession session(true);
     return session;
 }
 
@@ -100,10 +109,7 @@ Box<double> NextQuery(RandomStream& random, uint64 query) noexcept {
     return Box<double>(center - half, center + half);
 }
 
-} // namespace
-
-TEST(LooseOctree_LO05_FixedSeedSequenceMatchesOracle) {
-    SequenceSession& session = Session();
+void RunSequence(SequenceSession& session, uint32 operations) noexcept {
     OracleTree& tree = session.tree;
     RandomStream& random = session.random;
     const LooseOctreeConfig& config = session.config;
@@ -113,7 +119,7 @@ TEST(LooseOctree_LO05_FixedSeedSequenceMatchesOracle) {
     uint32 queryFailures = 0;
     uint64 queries = 0;
     uint64 farExact = 0;
-    for (uint32 iteration = 0; iteration < SequenceOperations; ++iteration) {
+    for (uint32 iteration = 0; iteration < operations; ++iteration) {
         const uint32 step = static_cast<uint32>(session.operations++ % 0xFFFFFFu);
         const uint32 action = random.NextUInt32Below(100);
         // 살아 있는 수가 대략 1500 근처를 오가도록 삽입·삭제 비율을 바꾼다.
@@ -161,7 +167,7 @@ TEST(LooseOctree_LO05_FixedSeedSequenceMatchesOracle) {
     }
     CHECK(violations == 0);
     CHECK(queryFailures == 0);
-    CHECK(queries > 1000);
+    CHECK(queries >= operations / QueryInterval);
     // 먼 질의가 실제로 범위 밖 프록시를 후보로 냈다.
     CHECK(farExact > 0);
 
@@ -180,4 +186,22 @@ TEST(LooseOctree_LO05_FixedSeedSequenceMatchesOracle) {
     CHECK(stats.inPlaceUpdates > 0 && stats.reinserts > 0 && stats.rootExpansions > 0);
     CHECK(stats.outOfRangeInsertions > 0);
     CHECK(stats.proxyCount == tree.LiveCount());
+    if (config.largeProxyHalfExtent > 0.0) {
+        // 큰 객체 목록을 오가는 경로를 지났다.
+        CHECK(stats.largeProxyInsertions > 0);
+    } else {
+        CHECK(stats.largeProxyInsertions == 0 && stats.largeProxyCount == 0);
+    }
+}
+
+} // namespace
+
+TEST(LooseOctree_LO05_FixedSeedSequenceMatchesOracle) {
+    RunSequence(Session(), SequenceOperations);
+}
+
+// 결정 8: 큰 객체 목록을 켠 같은 시퀀스다. 크기 변경이 기준 반 변(4)과 이력 경계(3)를 넘나들어
+// 트리·범위 밖 목록·큰 객체 목록 사이의 이동을 모두 지난다. 시간 때문에 기본 시퀀스의 1/3이다.
+TEST(LooseOctree_LO05_LargeProxyListSequenceMatchesOracle) {
+    RunSequence(LargeProxySession(), SequenceOperations / 3);
 }

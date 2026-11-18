@@ -19,6 +19,11 @@ struct DrawItem {
     uint32 vertices = 0;
 };
 
+// 시험 그리기의 그리기별 상수다(셰이더 float4 하나, 16 byte).
+struct TintConstants {
+    float color[4];
+};
+
 // 시험 장면 프레임 packet이다.
 struct ScenePacket {
     Span<const DrawItem> items;
@@ -105,6 +110,7 @@ public:
         const graphics::VertexStream streams[] = {{36, graphics::VertexStepRate::Vertex}};
         graphics::PipelineDesc pipelineDesc;
         pipelineDesc.layout = {attributes, streams};
+        pipelineDesc.drawConstantBytes = sizeof(TintConstants);
         auto createdPipeline = device.CreatePipeline(pipelineDesc);
         const uint8 bytes[36] = {};
         graphics::BufferDesc bufferDesc;
@@ -163,9 +169,12 @@ void DrawScene(RenderFrameContext& context, ScenePacket& packet) noexcept {
     auto texture = context.Handles().Texture(packet.texture);
     commands.SetTexture(texture ? texture.Value() : graphics::TextureHandle{});
     for (const DrawItem& item : packet.items) {
-        graphics::DrawConstants constants;
-        constants.color[0] = item.red;
-        commands.SetConstants(constants);
+        const TintConstants constants = {{item.red, 0.0f, 0.0f, 1.0f}};
+        auto set = commands.SetDrawConstants(graphics::DrawConstantBytes(constants));
+        if (!set) {
+            context.ReportFailure(set.Error());
+        }
+
         commands.Draw(item.vertices);
     }
 

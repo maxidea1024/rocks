@@ -422,6 +422,54 @@ void GlesDevice::ApplyBufferViews(const PipelineRecord& pipeline) noexcept {
     }
 }
 
+Result<void> GlesDevice::ReflectRootConstants(GLuint program, PipelineRecord& record) noexcept {
+    struct RootArray {
+        const char* name;
+        GLint* location;
+        GLsizei* vectors;
+    };
+    const RootArray arrays[] = {
+        {VertexRootConstantsName, &record.vertexConstants, &record.vertexConstantVectors},
+        {PixelRootConstantsName, &record.pixelConstants, &record.pixelConstantVectors},
+        {ComputeRootConstantsName, &record.computeConstants, &record.computeConstantVectors}};
+    GLint uniforms = 0;
+    gl_.GetProgramiv(program, GL_ACTIVE_UNIFORMS, &uniforms);
+    for (GLint index = 0; index < uniforms; ++index) {
+        GLchar name[128] = {};
+        GLsizei length = 0;
+        GLint size = 0;
+        GLenum type = 0;
+        gl_.GetActiveUniform(program, static_cast<GLuint>(index), sizeof(name), &length, &size,
+                             &type, name);
+        for (const RootArray& array : arrays) {
+            // 배열 uniform 이름은 "<이름>[0]"이다(드라이버에 따라 "[0]"이 없을 수도 있다).
+            const usize prefix = platform::CStringLength(array.name);
+            if (!StartsWith(name, array.name) ||
+                (name[prefix] != '\0' && !StartsWith(name + prefix, "[0]"))) {
+                continue;
+            }
+
+            const uint64 bytes = static_cast<uint64>(size > 0 ? size : 0) * RootConstantVectorBytes;
+            if (type != GL_FLOAT_VEC4 || bytes > record.drawConstantBytes) {
+                Diagnostic message;
+                message.Text("draw constants array ")
+                    .Text(array.name)
+                    .Text(" reads ")
+                    .Number(bytes)
+                    .Text(" bytes (vec4 array required) but the pipeline declares "
+                          "drawConstantBytes ")
+                    .Number(record.drawConstantBytes);
+                return Reject(message, ErrorCode::InvalidArgument);
+            }
+
+            *array.location = gl_.GetUniformLocation(program, array.name);
+            *array.vectors = static_cast<GLsizei>(size);
+        }
+    }
+
+    return Result<void>::Success();
+}
+
 Result<void> GlesDevice::ReflectBufferSlots(GLuint program, DrawBufferSlots& slots,
                                             DrawBufferSlots* writeSlots) noexcept {
     GLint uniforms = 0;

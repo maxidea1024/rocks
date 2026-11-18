@@ -193,8 +193,10 @@ void D3D11Device::Retire(BufferViewHandle handle) noexcept {
 }
 
 // b0 상수, PS t0 텍스처·s0 샘플러, t1–t4 버퍼 SRV만 받는다(PipelineDesc 고정 배치). 두 단계가 같은
-// slot을 다른 종류로 읽거나 배치 밖 자원(UAV 포함)이면 InvalidArgument다.
-Result<void> D3D11Device::ReflectBindings(ID3DBlob* code, ShaderStage stage, DrawBufferSlots& slots,
+// slot을 다른 종류로 읽거나 배치 밖 자원(UAV 포함)이거나 b0 cbuffer가 drawConstantBytes보다 크면
+// InvalidArgument다.
+Result<void> D3D11Device::ReflectBindings(ID3DBlob* code, ShaderStage stage,
+                                          uint32 drawConstantBytes, DrawBufferSlots& slots,
                                           DrawBufferSlots* writeSlots) noexcept {
     ComRef<ID3D11ShaderReflection> reflection;
     HRESULT result =
@@ -227,9 +229,26 @@ Result<void> D3D11Device::ReflectBindings(ID3DBlob* code, ShaderStage stage, Dra
                                                           : PixelShaderType::Float;
         bool fits = false;
         switch (resource.Type) {
-        case D3D_SIT_CBUFFER:
+        case D3D_SIT_CBUFFER: {
             fits = single && resource.BindPoint == 0;
+            // 그리기별 상수 블록은 파이프라인이 선언한 크기 안이어야 한다(작은 것은 허용).
+            ID3D11ShaderReflectionConstantBuffer* block =
+                fits ? reflection->GetConstantBufferByName(resource.Name) : nullptr;
+            D3D11_SHADER_BUFFER_DESC blockDesc = {};
+            if (block != nullptr && SUCCEEDED(block->GetDesc(&blockDesc)) &&
+                blockDesc.Size > drawConstantBytes) {
+                Diagnostic message;
+                message
+                    .Text(pixel ? "pixel" : (stage == ShaderStage::Vertex ? "vertex" : "compute"))
+                    .Text(" shader reads ")
+                    .Number(blockDesc.Size)
+                    .Text(" bytes of draw constants but the pipeline declares drawConstantBytes ")
+                    .Number(drawConstantBytes);
+                return Reject(message);
+            }
+
             break;
+        }
         case D3D_SIT_SAMPLER:
             fits = single && pixel && resource.BindPoint == 0;
             break;

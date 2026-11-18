@@ -109,6 +109,15 @@ private:
     RenderStats stats_;
 };
 
+// 내장 셰이더(BuiltinShaderHlsl)의 그리기별 상수다(cbuffer DrawConstants의 float4x4 transform·
+// float4 color, 80 byte). 파이프라인은 drawConstantBytes = sizeof(ObjectConstants)로 만든다.
+// transform은 행 벡터 규약의 행렬을 행 우선으로 담고(Core Mat4 저장 순서 그대로), color는 선형
+// RGBA다. 기본값은 단위 행렬과 흰색이다.
+struct ObjectConstants {
+    float transform[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+    float color[4] = {1, 1, 1, 1};
+};
+
 // "Rocks 정점 형식"(위치 float3, UV float2, 색 float4)의 파이프라인 셰이더다. 사용자 파이프라인의
 // 시작점으로 쓸 수 있다.
 StringView BuiltinShaderHlsl() noexcept;

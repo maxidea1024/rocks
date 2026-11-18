@@ -9,8 +9,8 @@
 
 namespace rocks::shader {
 
-// 그리기 상수 블록의 이름이다(Graphics DrawConstants, ShaderSystem 7.2절 2항 ROCKS_ROOT_CONSTANTS의
-// SH2 전 대역). 원문의 cbuffer DrawConstants가 push constant가 된다.
+// 그리기별 상수 블록의 이름이다(Graphics PipelineDesc::drawConstantBytes, ShaderSystem 7.2절 2항
+// ROCKS_ROOT_CONSTANTS의 SH2 전 대역). 원문의 cbuffer DrawConstants가 push constant가 된다.
 inline constexpr char DrawConstantsBlockName[] = "DrawConstants";
 
 // DXC가 낸 SPIR-V(-fspv-reflect로 시맨틱 정보 포함)를 Rocks Vulkan 규약으로 다시 쓴다

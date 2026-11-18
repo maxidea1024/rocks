@@ -32,7 +32,9 @@ public:
         SetVertexBuffers,
         SetIndexBuffer,
         SetTexture,
-        SetConstants,
+        // value는 받은 byte 수(위 32 bit)와 첫 float × 255(아래 32 bit)다. 거부된 호출은 넣지
+        // 않는다.
+        SetDrawConstants,
         Draw,
         DrawIndexed,
         CopyPassTarget,
@@ -312,7 +314,7 @@ private:
                              graphics::TextureHandle source) noexcept override;
     Result<void> ClearWritableBufferView(graphics::BufferViewHandle view,
                                          uint32 value) noexcept override;
-    void SetConstants(const graphics::DrawConstants& constants) noexcept override;
+    Result<void> SetDrawConstants(Span<const uint8> bytes) noexcept override;
     void Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept override;
     void DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept override;
     Result<void> CopyPassTarget(graphics::TextureHandle destination) noexcept override;
@@ -350,7 +352,10 @@ private:
     Array<PendingTransition> pendingSplits_;
     uint64 validationErrors_ = 0;
     uint64 ignoredDraws_ = 0;
-    SlotArray<uint8> pipelines_;
+    // 파이프라인마다 선언한 그리기별 상수 byte 수다(SetDrawConstants 크기 검사).
+    SlotArray<uint32> pipelines_;
+    // 묶인 파이프라인이다(stale·null이면 SetDrawConstants가 거부한다).
+    graphics::PipelineHandle boundPipeline_;
     SlotArray<uint8> swapChains_;
     Array<Retired> retired_;
     SlotArray<Readback> readbacks_;

@@ -1,12 +1,7 @@
 #include "GlesDevice.h"
 
-#include <Base/Compiler.h>
-
 // 프레임 기록·CommandContext·present다(GlesDevice.h).
 namespace rocks::graphics::gles {
-
-static_assert(ROCKS_OFFSET_OF(DrawConstants, color) == 16 * sizeof(float),
-              "DrawConstants must be transform[16] followed by color[4] without padding");
 
 Result<CommandContext*> GlesDevice::BeginFrame(SwapChainHandle handle,
                                                const ClearColor& clear) noexcept {
@@ -170,7 +165,7 @@ void GlesDevice::StartPass(const PassDesc& pass) noexcept {
 
     stencilReference_ = 0;
     constantsDirty_ = true;
-    constants_ = DrawConstants{};
+    platform::MemoryZero(constants_, sizeof(constants_));
     gl_.BindFramebuffer(GL_FRAMEBUFFER, pass_.framebuffer);
     gl_.Viewport(0, 0, static_cast<GLsizei>(pass_.width), static_cast<GLsizei>(pass_.height));
     gl_.DepthRangef(0.0f, 1.0f);
@@ -365,9 +360,19 @@ void GlesDevice::SetTexture(TextureHandle handle) noexcept {
     }
 }
 
-void GlesDevice::SetConstants(const DrawConstants& constants) noexcept {
-    constants_ = constants;
-    constantsDirty_ = true;
+Result<void> GlesDevice::SetDrawConstants(Span<const uint8> bytes) noexcept {
+    const PipelineRecord* pipeline = recording_ ? pipelines_.Find(boundPipeline_.slot) : nullptr;
+    if (pipeline == nullptr || bytes.Size() != pipeline->drawConstantBytes) {
+        return RejectDrawConstantSize(pipeline != nullptr, bytes.Size(),
+                                      pipeline != nullptr ? pipeline->drawConstantBytes : 0u);
+    }
+
+    if (bytes.Size() != 0) {
+        platform::MemoryCopy(constants_, bytes.Data(), bytes.Size());
+        constantsDirty_ = true;
+    }
+
+    return Result<void>::Success();
 }
 
 void GlesDevice::ApplyVertexBuffer(uint32 stream) noexcept {
@@ -417,20 +422,20 @@ void GlesDevice::ApplyConstants(const PipelineRecord& pipeline) noexcept {
         return;
     }
 
-    // DrawConstants 80 byte를 vec4 5개로 그대로 올린다(루트 상수 에뮬레이션, ShaderSystem 7.2절
-    // 4항). transform은 행 우선 바이트 그대로이며 셰이더가 mat4(vu_h[0..3])로 읽어(열 우선 → Mᵀ)
-    // Mᵀ * v = v·M으로 쓴다. 전치하지 않는다(7.2절 6항).
-    const auto* vectors = reinterpret_cast<const GLfloat*>(&constants_);
+    // 그리기별 상수 byte를 단계 배열의 active vec4 수만큼 그대로 올린다(루트 상수 에뮬레이션,
+    // ShaderSystem 7.2절 4항). 행렬은 행 우선 바이트 그대로이며 셰이더가 mat4(vu_h[0..3])로 읽어
+    // (열 우선 → Mᵀ) Mᵀ * v = v·M으로 쓴다. 전치하지 않는다(7.2절 6항).
+    const auto* vectors = reinterpret_cast<const GLfloat*>(constants_);
     if (pipeline.vertexConstants >= 0) {
-        gl_.Uniform4fv(pipeline.vertexConstants, RootConstantVectors, vectors);
+        gl_.Uniform4fv(pipeline.vertexConstants, pipeline.vertexConstantVectors, vectors);
     }
 
     if (pipeline.pixelConstants >= 0) {
-        gl_.Uniform4fv(pipeline.pixelConstants, RootConstantVectors, vectors);
+        gl_.Uniform4fv(pipeline.pixelConstants, pipeline.pixelConstantVectors, vectors);
     }
 
     if (pipeline.computeConstants >= 0) {
-        gl_.Uniform4fv(pipeline.computeConstants, RootConstantVectors, vectors);
+        gl_.Uniform4fv(pipeline.computeConstants, pipeline.computeConstantVectors, vectors);
     }
 
     constantsDirty_ = false;

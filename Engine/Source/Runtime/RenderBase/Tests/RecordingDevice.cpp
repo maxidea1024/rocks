@@ -2,6 +2,7 @@
 
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
+#include <Platform/Memory.h>
 
 namespace rocks::render::testing {
 
@@ -335,7 +336,11 @@ Result<PipelineHandle> RecordingDevice::CreatePipeline(const PipelineDesc& desc)
         return Result<PipelineHandle>::Failure(owner.Error());
     }
 
-    auto added = pipelines_.TryAdd(uint8{0});
+    if (!graphics::IsValidDrawConstantBytes(desc.drawConstantBytes)) {
+        return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto added = pipelines_.TryAdd(desc.drawConstantBytes);
     if (!added) {
         return Result<PipelineHandle>::Failure(added.Error());
     }
@@ -901,6 +906,7 @@ usize RecordingDevice::PendingRetireCount() const noexcept {
 }
 
 void RecordingDevice::SetPipeline(PipelineHandle pipeline) noexcept {
+    boundPipeline_ = pipelines_.IsValid(pipeline.slot) ? pipeline : PipelineHandle{};
     Record(Op::SetPipeline, pipelines_.IsValid(pipeline.slot) ? 1u : 0u);
 }
 
@@ -935,8 +941,21 @@ void RecordingDevice::SetTexture(TextureHandle texture) noexcept {
     Record(Op::SetTexture, state != nullptr ? 1u : 0u);
 }
 
-void RecordingDevice::SetConstants(const DrawConstants& constants) noexcept {
-    Record(Op::SetConstants, static_cast<uint64>(constants.color[0] * 255.0f));
+Result<void> RecordingDevice::SetDrawConstants(Span<const uint8> bytes) noexcept {
+    // 실제 장치와 같은 계약이다: 묶인 파이프라인이 있고 크기가 그 선언과 같아야 한다.
+    const uint32* declared = recording_ ? pipelines_.Find(boundPipeline_.slot) : nullptr;
+    if (declared == nullptr || bytes.Size() != *declared) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    float first = 0.0f;
+    if (bytes.Size() >= sizeof(first)) {
+        platform::MemoryCopy(&first, bytes.Data(), sizeof(first));
+    }
+
+    Record(Op::SetDrawConstants,
+           (static_cast<uint64>(bytes.Size()) << 32) | static_cast<uint32>(first * 255.0f));
+    return Result<void>::Success();
 }
 
 void RecordingDevice::Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept {

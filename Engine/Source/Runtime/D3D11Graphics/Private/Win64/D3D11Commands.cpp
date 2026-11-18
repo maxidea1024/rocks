@@ -175,8 +175,8 @@ Result<void> D3D11Device::CreatePipelineStates(const PipelineDesc& desc,
 Result<PipelineHandle>
 D3D11Device::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
     platform::LockGuard lock(gate_);
-    if (desc.shader.hlsl.ByteCount() == 0) {
-        auto failed = Fail("compute pipeline needs HLSL source");
+    if (desc.shader.hlsl.ByteCount() == 0 || !ValidateComputePipelineDesc(desc)) {
+        auto failed = Fail("compute pipeline needs HLSL source and valid drawConstantBytes");
         (void)failed;
         return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
     }
@@ -188,8 +188,9 @@ D3D11Device::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
     }
 
     PipelineRecord record;
-    auto reflected =
-        ReflectBindings(code.Get(), ShaderStage::Compute, record.bufferSlots, &record.writeSlots);
+    record.drawConstantBytes = desc.drawConstantBytes;
+    auto reflected = ReflectBindings(code.Get(), ShaderStage::Compute, desc.drawConstantBytes,
+                                     record.bufferSlots, &record.writeSlots);
     if (!reflected) {
         return Result<PipelineHandle>::Failure(reflected.Error());
     }

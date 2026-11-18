@@ -199,7 +199,7 @@ Result<void> VulkanDevice::CreatePipelineLayout() noexcept {
         return Fail("vkCreateDescriptorSetLayout", result);
     }
 
-    // 그리기 상수는 push constant다(ShaderSystem 7.2절 2항, 80 byte ≤ 최소 보장 128 byte).
+    // 그리기별 상수는 push constant다(ShaderSystem 7.2절 2항, 계약 최대 128 byte = 최소 보장).
     const VkDescriptorSetLayout layouts[] = {emptySetLayout_, emptySetLayout_};
     VkPushConstantRange constants = {};
     constants.stageFlags = ConstantStages;
@@ -333,6 +333,22 @@ Result<void> VulkanDevice::Reject(const char* message) noexcept {
     return Result<void>::Failure(ErrorCode::InvalidArgument);
 }
 
+Result<void> VulkanDevice::RejectDrawConstantSize(bool pipelineBound, usize bytes,
+                                                  uint32 drawConstantBytes) noexcept {
+    Diagnostic message;
+    if (!pipelineBound) {
+        message.Text("SetDrawConstants needs a pipeline bound while recording");
+    } else {
+        message.Text("SetDrawConstants got ")
+            .Number(bytes > NumericLimits<uint32>::Max() ? NumericLimits<uint32>::Max()
+                                                         : static_cast<uint32>(bytes))
+            .Text(" bytes but the bound pipeline declares drawConstantBytes ")
+            .Number(drawConstantBytes);
+    }
+
+    return Reject(message.CStr());
+}
+
 // 컴파일 훅의 정점 입력 리플렉션을 배치와 대조한다(RenderBase 10.4절 셰이더 입력 대조, D3D12와
 // 같은 규칙과 진단 문구).
 Result<void> VulkanDevice::MatchVertexInputs(const CompiledShader& vertex,
@@ -435,9 +451,19 @@ bool MapBinding(const ShaderBinding& binding, ShaderStage stage, PipelineBinding
 Result<void> VulkanDevice::BuildPipelineLayout(const CompiledShader& first,
                                                const CompiledShader* pixel, bool compute,
                                                PipelineRecord& record) noexcept {
-    if (first.rootConstantBytes > ConstantBytes ||
-        (pixel != nullptr && pixel->rootConstantBytes > ConstantBytes)) {
-        return Reject("draw constants block is larger than DrawConstants (80 bytes)");
+    // 그리기별 상수 블록은 파이프라인이 선언한 크기 안이어야 한다(작은 것은 허용).
+    const CompiledShader* stages[2] = {&first, pixel};
+    for (uint32 stage = 0; stage < 2; ++stage) {
+        if (stages[stage] != nullptr &&
+            stages[stage]->rootConstantBytes > record.drawConstantBytes) {
+            Diagnostic message;
+            message.Text(compute ? "compute" : (stage == 0 ? "vertex" : "pixel"))
+                .Text(" shader reads ")
+                .Number(stages[stage]->rootConstantBytes)
+                .Text(" bytes of draw constants but the pipeline declares drawConstantBytes ")
+                .Number(record.drawConstantBytes);
+            return Reject(message.CStr());
+        }
     }
 
     // set = 단계다: VS(compute면 CS) 0, PS 1(ShaderSystem 7.2절).
@@ -655,6 +681,7 @@ Result<PipelineHandle> VulkanDevice::CreatePipeline(const PipelineDesc& desc) no
     }
 
     PipelineRecord record;
+    record.drawConstantBytes = desc.drawConstantBytes;
     auto layout = BuildPipelineLayout(vertex, &pixel, false, record);
     if (!layout) {
         return Result<PipelineHandle>::Failure(layout.Error());
