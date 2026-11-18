@@ -508,3 +508,110 @@ TEST(RenderGraph_ImmediateAndDeferredModesAreEquivalent) {
         }
     }
 }
+
+// slice 단위 추적(A0-G): 2D 배열(mip 2 × layer 3)을 import해 layer 1만 UAV로 쓰고 다음 pass가
+// 전체를 읽는다. 전이 기록은 같은 전이의 mip·slice 직사각형으로 묶이고 장치 추적 상태와 맞는다.
+TEST(RenderGraph_TracksSubresourcesPerSlice) {
+    GraphBench bench;
+    passLog.Reset();
+    graphics::TextureDesc arrayDesc;
+    arrayDesc.dimension = graphics::TextureDimension::Texture2DArray;
+    arrayDesc.width = 4;
+    arrayDesc.height = 4;
+    arrayDesc.arraySize = 3;
+    arrayDesc.mipLevels = 2;
+    arrayDesc.format = graphics::PixelFormat::RGBA8Unorm;
+    auto created = bench.device.CreateTexture(arrayDesc, {});
+    auto reserved = bench.handles.Reserve(RenderResourceKind::Texture);
+    REQUIRE(created && reserved && bench.handles.BindTexture(reserved.Value(), created.Value()));
+
+    RenderGraph graph(bench.Next());
+    GraphImportOptions options;
+    options.initialAccess = ResourceAccess::SrvGraphics;
+    options.finalAccess = ResourceAccess::SrvGraphics;
+    options.mipLevels = 2;
+    options.slices = 3;
+    auto layers = graph.ImportTexture(reserved.Value(), "Layers", options);
+    auto sink = graph.CreateBuffer(BufferOf(16), "Sink");
+    auto target = graph.CreateTexture(TargetDesc(), "Target");
+    REQUIRE(layers && sink && target);
+    // compute pass는 열린 장치 기록 안에서 실행되므로 Raster pass로 기록을 연다.
+    GraphPassAccesses opener(graph);
+    opener.RenderTarget(target.Value());
+    REQUIRE(graph.AddPass(PassNames[0], GraphPassKind::Raster, GraphPassFlags::HasSideEffects,
+                          opener, Logged(0)));
+    GraphPassAccesses a0(graph);
+    a0.Texture(layers.Value(), ResourceAccess::UavCompute,
+               {0, graphics::RemainingSubresources, 1, 1})
+        .Buffer(sink.Value(), ResourceAccess::UavCompute);
+    REQUIRE(graph.AddPass(PassNames[1], GraphPassKind::Compute, GraphPassFlags::HasSideEffects, a0,
+                          Logged(1)));
+    GraphPassAccesses a1(graph);
+    a1.Texture(layers.Value(), ResourceAccess::SrvCompute)
+        .Buffer(sink.Value(), ResourceAccess::UavCompute);
+    REQUIRE(graph.AddPass(PassNames[2], GraphPassKind::Compute, GraphPassFlags::HasSideEffects, a1,
+                          Logged(2)));
+    REQUIRE(graph.Execute());
+
+    const uint32 index = layers.Value().index;
+    Span<const GraphTransitionRecord> transitions = graph.Transitions();
+    usize found = 0;
+    for (const GraphTransitionRecord& record : transitions) {
+        if (record.kind != GraphResourceKind::Texture || record.resource != index) {
+            continue;
+        }
+
+        ++found;
+        if (record.pass == 1) {
+            // layer 1의 두 mip이 한 기록이다.
+            CHECK(record.firstMip == 0 && record.mipCount == 2 && record.firstSlice == 1 &&
+                  record.sliceCount == 1 && record.after == ResourceAccess::UavCompute);
+        } else if (record.pass == 2) {
+            CHECK(record.firstMip == 0 && record.mipCount == 2);
+            CHECK(record.after == ResourceAccess::SrvCompute);
+        }
+    }
+
+    CHECK(found >= 3);
+    CHECK(bench.device.ValidationErrorCount() == 0);
+    const graphics::TextureHandle device = created.Value();
+    CHECK(bench.device.TextureAccess(device, 1, 1) == ResourceAccess::SrvGraphics);
+    CHECK(bench.device.TextureAccess(device, 0, 2) == ResourceAccess::SrvGraphics);
+
+    // slice 범위가 밖이면 그 pass 선언은 InvalidArgument다.
+    RenderGraph rejected(bench.Next());
+    auto imported = rejected.ImportTexture(reserved.Value(), "Layers", options);
+    REQUIRE(imported);
+    GraphPassAccesses outside(rejected);
+    outside.Texture(imported.Value(), ResourceAccess::SrvCompute, {0, 1, 3, 1});
+    auto added = rejected.AddPass(PassNames[3], GraphPassKind::Compute,
+                                  GraphPassFlags::HasSideEffects, outside, Logged(2));
+    CHECK(!added && added.Error() == ErrorCode::InvalidArgument);
+}
+
+// import 선언(mip·slice 수)이 장치 텍스처 구성과 다르면 InvalidArgument다
+// (Device::GetTextureSubresources 대조).
+TEST(RenderGraph_ImportRejectsSubresourceMismatch) {
+    GraphBench bench;
+    graphics::TextureDesc arrayDesc;
+    arrayDesc.dimension = graphics::TextureDimension::Texture2DArray;
+    arrayDesc.width = 4;
+    arrayDesc.height = 4;
+    arrayDesc.arraySize = 3;
+    arrayDesc.format = graphics::PixelFormat::RGBA8Unorm;
+    auto created = bench.device.CreateTexture(arrayDesc, {});
+    auto reserved = bench.handles.Reserve(RenderResourceKind::Texture);
+    REQUIRE(created && reserved && bench.handles.BindTexture(reserved.Value(), created.Value()));
+    auto shape = bench.device.GetTextureSubresources(created.Value());
+    REQUIRE(shape);
+    CHECK(shape.Value().mipLevels == 1 && shape.Value().slices == 3);
+
+    RenderGraph graph(bench.Next());
+    GraphImportOptions options;
+    options.slices = 2;
+    auto wrong = graph.ImportTexture(reserved.Value(), "Layers", options);
+    CHECK(!wrong && wrong.Error() == ErrorCode::InvalidArgument);
+    options.slices = 3;
+    auto right = graph.ImportTexture(reserved.Value(), "Layers", options);
+    CHECK(right.IsOk());
+}

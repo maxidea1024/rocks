@@ -48,7 +48,8 @@ struct BufferViewRecord {
 };
 
 struct TextureRecord {
-    ComRef<ID3D11Texture2D> texture;
+    // ID3D11Texture2D(2D·배열·cube) 또는 ID3D11Texture3D다.
+    ComRef<ID3D11Resource> texture;
     // 형식이 Sampled일 때만 있다. 없으면 SetTexture는 흰 텍스처로 대신한다.
     ComRef<ID3D11ShaderResourceView> srv;
     // RenderTarget만 있다.
@@ -57,9 +58,14 @@ struct TextureRecord {
     // attachment(DepthAttachment::readOnly)용이다.
     ComRef<ID3D11DepthStencilView> dsv;
     ComRef<ID3D11DepthStencilView> readOnlyDsv;
+    TextureDimension dimension = TextureDimension::Texture2D;
     uint32 width = 0;
     uint32 height = 0;
+    // 3D 깊이다(다른 차원은 1).
+    uint32 depth = 1;
     uint32 mipLevels = 1;
+    // subresource slice 수(TextureSliceCount)이며 2D 자원의 ArraySize(3D는 1)와 같다.
+    uint32 slices = 1;
     // view(CreateTextureView)면 view가 읽는 형식, 아니면 텍스처 형식이다.
     PixelFormat format = PixelFormat::Unknown;
     bool renderTarget = false;
@@ -69,7 +75,21 @@ struct TextureRecord {
     bool view = false;
     // 샘플러 캐시의 객체다(장치 수명 동안 산다).
     ID3D11SamplerState* sampler = nullptr;
+    // 샘플러가 깊이 비교 샘플러다(view는 깊이 plane만 읽을 수 있다).
+    bool comparison = false;
 };
+
+// mip level의 깊이 면 수다(3D만 1보다 크다).
+inline uint32 MipDepth(const TextureRecord& record, uint32 level) noexcept {
+    return record.dimension == TextureDimension::Texture3D ? MipExtent(record.depth, level) : 1u;
+}
+
+// mip level 하나의 데이터 byte다(모든 slice·깊이 면, TextureMipBytes와 같은 값).
+inline uint64 MipBytes(const TextureRecord& record, uint32 level) noexcept {
+    return PixelFormatImageBytes(record.format, MipExtent(record.width, level),
+                                 MipExtent(record.height, level)) *
+           MipDepth(record, level) * record.slices;
+}
 
 struct PipelineRecord {
     ComRef<ID3D11VertexShader> vertexShader;
@@ -225,6 +245,8 @@ public:
     PixelFormatCaps GetPixelFormatCaps(PixelFormat format) const noexcept override;
     Result<TextureHandle> CreateTextureView(TextureHandle texture,
                                             const TextureViewDesc& desc) noexcept override;
+    Result<TextureSubresources>
+    GetTextureSubresources(TextureHandle texture) const noexcept override;
     Result<void> ReadTexture(TextureHandle texture, uint32 mipLevel, uint32 plane,
                              Span<uint8> out) noexcept override;
     Result<CommandContext*> BeginFrame(SwapChainHandle swapChain,
@@ -461,7 +483,7 @@ private:
     Result<void> CheckVertexFormats(const VertexLayout& layout) noexcept;
     Result<void> CreateSwapChainView(SwapChainRecord& record) noexcept;
     // 2D SRV를 만든다. 비디오 형식은 PlaneSlice로, 깊이·스텐실은 view 형식으로 plane을 고른다.
-    HRESULT CreatePlaneView(ID3D11Texture2D* texture, DXGI_FORMAT format, uint32 plane,
+    HRESULT CreatePlaneView(const TextureRecord& record, DXGI_FORMAT format, uint32 plane,
                             uint32 mipLevels, bool planar,
                             ComRef<ID3D11ShaderResourceView>& out) noexcept;
 
@@ -481,12 +503,21 @@ private:
     // 상수 버퍼의 부분 갱신을 거부한다(D3D11은 상수 버퍼 대상 구간을 받지 않는다).
     Result<void> CheckConstantUpdate(const BufferRecord& record, uint64 offset,
                                      uint64 size) noexcept;
+    // mip 하나(모든 slice·깊이 면, TextureDesc 초기 픽셀 배치)를 subresource마다
+    // UpdateSubresource로 올리는 기록을 쌓는다(잠금 안).
     Result<void> RecordTextureUpload(const TextureRecord& record, uint32 mipLevel,
                                      const uint8* pixels) noexcept;
-    // 깊이·스텐실·비디오 형식의 mip 하나를 D3D11 배치로 바꾼 staging 텍스처에서 복사한다(잠금 안).
-    // UpdateSubresource는 깊이·스텐실 자원에 쓸 수 없다.
+    // 깊이·스텐실·비디오 형식의 mip 하나(모든 slice)를 slice마다 D3D11 배치로 바꾼 staging
+    // 텍스처에서 복사한다(잠금 안). UpdateSubresource는 깊이·스텐실 자원에 쓸 수 없다.
     Result<void> RecordStagedUpload(const TextureRecord& record, uint32 mipLevel,
                                     const uint8* pixels) noexcept;
+    // RecordStagedUpload의 slice 하나다.
+    Result<void> RecordStagedSlice(const TextureRecord& record, uint32 mipLevel, uint32 slice,
+                                   const uint8* pixels) noexcept;
+    // subresource(mip, slice) 하나의 plane 하나를 staging 복사로 읽는다(잠금 안, 소유 스레드,
+    // 3D는 그 mip의 모든 깊이 면).
+    Result<void> ReadSubresource(const TextureRecord& record, uint32 mipLevel, uint32 slice,
+                                 uint32 plane, Span<uint8> out) noexcept;
     // 형식 종류에 맞는 업로드 경로를 고른다(잠금 안).
     Result<void> RecordAnyUpload(const TextureRecord& record, uint32 mipLevel,
                                  const uint8* pixels) noexcept;
@@ -523,6 +554,8 @@ private:
     uint32 sampleCounts_[MaxPixelFormatNumber + 1] = {};
     DeviceCaps caps_;
     uint32 samplerCount_ = 0;
+    // AnisotropicPoint를 AnisotropicLinear로 만든 일을 로그에 남겼다(한 번만).
+    bool anisotropicPointReported_ = false;
     ComRef<IDXGIFactory4> factory_;
     ComRef<ID3D11Device5> device_;
     ComRef<ID3D11DeviceContext4> immediate_;

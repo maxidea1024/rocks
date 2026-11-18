@@ -187,6 +187,10 @@ GlesVertexAttribute VertexAttributeFormat(VertexFormat format) noexcept;
 bool ShaderTypeOf(GLenum type, VertexShaderType& out) noexcept;
 
 // 샘플러 객체의 축소·확대 필터와 주소 모드다.
+// 차원의 GL 텍스처 대상이다.
+GLenum TextureTarget(TextureDimension dimension) noexcept;
+// 성분 출처의 TEXTURE_SWIZZLE_* 값(GL_RED·GREEN·BLUE·ALPHA·ZERO·ONE)이다.
+GLint SwizzleParameter(SwizzleSource source) noexcept;
 GLint MinFilter(Filter filter) noexcept;
 GLint MagFilter(Filter filter) noexcept;
 GLint WrapMode(AddressMode mode) noexcept;

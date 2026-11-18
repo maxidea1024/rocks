@@ -152,6 +152,10 @@ void GlesDevice::QueryDeviceCaps(bool desktopContext) noexcept {
     features.indirectFirstInstance = false;
     features.multiDrawIndirect = false;
     features.textureCubeArray = true;
+    // 채널별 TEXTURE_SWIZZLE_R/G/B/A는 ES 3.0 core다. AnisotropicPoint는 LINEAR_MIPMAP_NEAREST에
+    // 이방성(GL_EXT_texture_filter_anisotropic, 없으면 배율 1)을 더한다.
+    features.textureViewSwizzle = true;
+    features.anisotropicPointFilter = true;
     features.srgbPairView = false;
     features.vertexStores = limits.vertex.storageBuffers != 0 || limits.vertex.storageImages != 0;
     features.pixelStores = limits.pixel.storageBuffers != 0 || limits.pixel.storageImages != 0;

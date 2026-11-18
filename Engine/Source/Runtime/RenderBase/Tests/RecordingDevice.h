@@ -5,6 +5,7 @@
 #include <Graphics/DeviceOwnership.h>
 #include <Graphics/FenceTimeline.h>
 #include <Graphics/SplitTransitionTracker.h>
+#include <Graphics/SubresourceStates.h>
 #include <Graphics/StagingPool.h>
 #include <Graphics/TimestampRing.h>
 
@@ -133,8 +134,8 @@ public:
     // 상태를 바꾸지 않는다. Transition은 before가 Unknown이 아니면 추적 상태와 같은지
     // 검사하고(다르면 검증 오류) after로 바꾼다. SetTexture는 SrvGraphics가 아닌 텍스처를 묶으면
     // 검증 오류다(이 장치는 암묵 전이를 하지 않는다).
-    graphics::ResourceAccess TextureAccess(graphics::TextureHandle texture,
-                                           uint32 mip = 0) const noexcept;
+    graphics::ResourceAccess TextureAccess(graphics::TextureHandle texture, uint32 mip = 0,
+                                           uint32 slice = 0) const noexcept;
     graphics::ResourceAccess BufferAccess(graphics::BufferHandle buffer) const noexcept;
 
     uint64 Reclaimed() const noexcept {
@@ -191,6 +192,8 @@ public:
                                  uint32 height) noexcept override;
     Result<graphics::BufferHandle> CreateBuffer(const graphics::BufferDesc& desc,
                                                 Span<const uint8> initial) noexcept override;
+    Result<graphics::TextureSubresources>
+    GetTextureSubresources(graphics::TextureHandle texture) const noexcept override;
     Result<graphics::TextureHandle> CreateTexture(const graphics::TextureDesc& desc,
                                                   Span<const uint8> pixels) noexcept override;
     Result<graphics::PipelineHandle>
@@ -261,9 +264,9 @@ private:
         uint64 bytes = 0;
     };
 
+    // subresource(mip × slice)마다 추적한 상태다.
     struct TextureState {
-        uint32 mipLevels = 1;
-        graphics::ResourceAccess states[MaxTrackedMips] = {};
+        graphics::SubresourceStates<graphics::ResourceAccess> states;
     };
 
     // CPU 메모리 staging이다.
@@ -335,6 +338,7 @@ private:
     graphics::FenceTimeline timeline_;
     graphics::DeviceOwnership ownership_;
     SlotArray<graphics::ResourceAccess> buffers_;
+    Allocator& allocator_;
     SlotArray<TextureState> textures_;
     Array<TransitionCall> transitions_;
     // 열린 분리 전이 짝과 그 전이다.

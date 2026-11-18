@@ -1,14 +1,17 @@
+#include "EnumNames.h"
+
 #include <GraphicsTypes/Sampler.h>
-#include <Platform/Memory.h>
 
 namespace rocks::graphics {
 
 bool IsValidSamplerDesc(const SamplerDesc& desc) noexcept {
-    return static_cast<uint32>(desc.filter) <= static_cast<uint32>(Filter::Anisotropic) &&
+    return static_cast<uint32>(desc.filter) <= static_cast<uint32>(MaxFilter) &&
            static_cast<uint32>(desc.addressU) <= static_cast<uint32>(AddressMode::Border) &&
            static_cast<uint32>(desc.addressV) <= static_cast<uint32>(AddressMode::Border) &&
+           static_cast<uint32>(desc.addressW) <= static_cast<uint32>(AddressMode::Border) &&
            static_cast<uint32>(desc.borderColor) <= static_cast<uint32>(BorderColor::OpaqueWhite) &&
-           desc.maxAnisotropy >= 1 && desc.maxAnisotropy <= 16;
+           IsValidCompareFunction(desc.compare) && desc.maxAnisotropy >= 1 &&
+           desc.maxAnisotropy <= 16;
 }
 
 void BorderColorValue(BorderColor color, float (&out)[4]) noexcept {
@@ -21,14 +24,16 @@ void BorderColorValue(BorderColor color, float (&out)[4]) noexcept {
 
 const char* FilterName(Filter filter) noexcept {
     switch (filter) {
-    case Filter::Nearest:
-        return "Nearest";
+    case Filter::Point:
+        return "Point";
     case Filter::Bilinear:
         return "Bilinear";
     case Filter::Trilinear:
         return "Trilinear";
-    case Filter::Anisotropic:
-        return "Anisotropic";
+    case Filter::AnisotropicPoint:
+        return "AnisotropicPoint";
+    case Filter::AnisotropicLinear:
+        return "AnisotropicLinear";
     }
 
     return "Unknown";
@@ -62,49 +67,16 @@ const char* BorderColorName(BorderColor color) noexcept {
     return "Unknown";
 }
 
-namespace {
-
-bool EqualsIgnoringCase(StringView text, const char* name) noexcept {
-    const usize nameBytes = platform::CStringLength(name);
-    if (text.ByteCount() != nameBytes) {
-        return false;
-    }
-    for (usize index = 0; index < nameBytes; ++index) {
-        char left = text.Data()[index];
-        char right = name[index];
-        left = left >= 'A' && left <= 'Z' ? static_cast<char>(left - 'A' + 'a') : left;
-        right = right >= 'A' && right <= 'Z' ? static_cast<char>(right - 'A' + 'a') : right;
-        if (left != right) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-template <class Enum>
-Result<Enum> ParseByName(StringView name, uint32 count, const char* (*nameOf)(Enum)) noexcept {
-    for (uint32 value = 0; value < count; ++value) {
-        if (EqualsIgnoringCase(name, nameOf(static_cast<Enum>(value)))) {
-            return Result<Enum>::Success(static_cast<Enum>(value));
-        }
-    }
-
-    return Result<Enum>::Failure(ErrorCode::InvalidArgument);
-}
-
-} // namespace
-
 Result<Filter> ParseFilter(StringView name) noexcept {
-    return ParseByName<Filter>(name, 4, &FilterName);
+    return detail::ParseByName<Filter>(name, static_cast<uint32>(MaxFilter) + 1, &FilterName);
 }
 
 Result<AddressMode> ParseAddressMode(StringView name) noexcept {
-    return ParseByName<AddressMode>(name, 4, &AddressModeName);
+    return detail::ParseByName<AddressMode>(name, 4, &AddressModeName);
 }
 
 Result<BorderColor> ParseBorderColor(StringView name) noexcept {
-    return ParseByName<BorderColor>(name, 3, &BorderColorName);
+    return detail::ParseByName<BorderColor>(name, 3, &BorderColorName);
 }
 
 } // namespace rocks::graphics

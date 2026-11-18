@@ -302,17 +302,19 @@ Result<void> VulkanDevice::CopyTexture(TextureHandle destination, TextureHandle 
     const PixelFormatInfo& info = GetPixelFormatInfo(from->format);
     if (destination == source || to->isView || from->isView || to->width != from->width ||
         to->height != from->height || to->format != from->format || info.planeCount > 1 ||
-        IsPassAttachment(destination.slot) || IsPassAttachment(source.slot)) {
+        to->dimension != TextureDimension::Texture2D ||
+        from->dimension != TextureDimension::Texture2D || IsPassAttachment(destination.slot) ||
+        IsPassAttachment(source.slot)) {
         return FailCode("CopyTexture", ErrorCode::InvalidArgument,
-                        "texture copy needs two distinct non-view single-plane textures of the "
+                        "texture copy needs two distinct non-view single-plane 2D textures of the "
                         "same size and format outside the current pass");
     }
 
     // 두 텍스처의 mip 0을 복사 상태로 바꾼다(TrackTransition이 render pass를 닫는다). 상태는 복사
     // 상태로 남는다(GX5: 다음 사용이 명시 전이나 암묵 전이로 바꾼다).
     SuspendRenderPass();
-    TrackTransition(*from, source.slot, 0, 1, ResourceAccess::CopySource, false);
-    TrackTransition(*to, destination.slot, 0, 1, ResourceAccess::CopyDestination, false);
+    TrackTransition(*from, source.slot, {0, 1, 0, 1}, ResourceAccess::CopySource, false);
+    TrackTransition(*to, destination.slot, {0, 1, 0, 1}, ResourceAccess::CopyDestination, false);
     VkImageCopy region = {};
     region.srcSubresource = {from->aspect, 0, 0, 1};
     region.dstSubresource = {to->aspect, 0, 0, 1};

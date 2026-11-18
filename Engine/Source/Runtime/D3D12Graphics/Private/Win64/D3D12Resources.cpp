@@ -290,23 +290,31 @@ Result<TextureHandle> D3D12Device::CreateTexture(const TextureDesc& desc,
     const bool renderTarget = desc.usage == TextureUsage::RenderTarget;
     const bool depthTarget = desc.usage == TextureUsage::DepthStencil;
     const PixelFormatInfo& info = GetPixelFormatInfo(desc.format);
-    if (IsValidPixelFormat(desc.format) &&
-        !HasPixelFormatCaps(FormatCaps(desc.format),
-                            RequiredPixelFormatCaps(desc.usage, desc.mipLevels))) {
+    // 형식·용도·차원 능력을 먼저 본다(능력 밖은 다른 인자 검사보다 앞서 Unsupported다).
+    if (IsValidPixelFormat(desc.format) && IsValidTextureDimension(desc.dimension) &&
+        !HasPixelFormatCaps(FormatCaps(desc.format), RequiredPixelFormatCaps(desc))) {
         platform::LockGuard lock(gate_);
         return UnsupportedFormat<TextureHandle>(desc.format);
     }
+    auto valid = ValidateTextureDesc(desc);
+    if (!valid) {
+        return Result<TextureHandle>::Failure(valid.Error());
+    }
+    if (!CheckTextureLimits(caps_, desc)) {
+        platform::LockGuard lock(gate_);
+        return FailCode<TextureHandle>(ErrorCode::Unsupported,
+                                       "texture size, slice count or dimension exceeds the D3D12 "
+                                       "device limits");
+    }
     const bool depth =
         info.kind == PixelFormatKind::Depth || info.kind == PixelFormatKind::DepthStencil;
-    const uint64 size = MipChainBytes(desc.format, desc.width, desc.height, 1, desc.mipLevels);
+    const uint64 size = TextureDataBytes(desc);
     const bool attachment = renderTarget || depthTarget;
     // BC는 최상위 크기가 블록 배수여야 한다(D3D12 요구, PixelFormatInfo::topLevelBlockAligned).
     const bool aligned = !info.topLevelBlockAligned ||
                          (desc.width % info.blockWidth == 0 && desc.height % info.blockHeight == 0);
-    if (desc.width > 16384 || desc.height > 16384 || size == 0 || !aligned ||
-        desc.mipLevels > MaxMipLevels || !IsValidSamplerDesc(desc.sampler) ||
-        (attachment ? (pixels.Size() != 0 || desc.mipLevels != 1) : pixels.Size() != size) ||
-        (depthTarget && !depth)) {
+    if (size == 0 || !aligned || desc.mipLevels > MaxMipLevels ||
+        (attachment ? pixels.Size() != 0 : pixels.Size() != size) || (depthTarget && !depth)) {
         return Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
     }
     platform::LockGuard lock(gate_);
@@ -318,18 +326,25 @@ Result<TextureHandle> D3D12Device::CreateTexture(const TextureDesc& desc,
     const d3d12::FormatMapping mapping = d3d12::MappingOf(desc.format);
     const bool sampled = HasPixelFormatCaps(FormatCaps(desc.format), PixelFormatCaps::Sampled);
     TextureRecord record;
+    record.dimension = desc.dimension;
     record.width = desc.width;
     record.height = desc.height;
+    record.depth = desc.depth;
     record.mipLevels = desc.mipLevels;
+    record.slices = TextureSliceCount(desc);
     record.format = desc.format;
     record.renderTarget = renderTarget;
     record.depthTarget = depthTarget;
     record.sampler = sampler.Value();
+    record.comparison = desc.sampler.comparison;
+    const bool volume = desc.dimension == TextureDimension::Texture3D;
     D3D12_RESOURCE_DESC resource = {};
-    resource.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    // cube·배열은 2D 배열 자원이다(cube 면은 UE·D3D 순서대로 slice 0–5).
+    resource.Dimension =
+        volume ? D3D12_RESOURCE_DIMENSION_TEXTURE3D : D3D12_RESOURCE_DIMENSION_TEXTURE2D;
     resource.Width = desc.width;
     resource.Height = desc.height;
-    resource.DepthOrArraySize = 1;
+    resource.DepthOrArraySize = static_cast<UINT16>(volume ? desc.depth : record.slices);
     resource.MipLevels = static_cast<UINT16>(desc.mipLevels);
     resource.Format = mapping.resource;
     resource.SampleDesc.Count = 1;
@@ -350,9 +365,11 @@ Result<TextureHandle> D3D12Device::CreateTexture(const TextureDesc& desc,
                                                 IID_PPV_ARGS(record.resource.Out())))) {
         return FailWith<TextureHandle>("texture creation failed");
     }
-    for (uint32 mip = 0; mip < record.mipLevels; ++mip) {
-        record.committed[mip] = initialState;
-        record.current[mip] = initialState;
+    auto committed =
+        record.committed.Reset(allocator_, record.mipLevels, record.slices, initialState);
+    auto current = record.current.Reset(allocator_, record.mipLevels, record.slices, initialState);
+    if (!committed || !current) {
+        return Result<TextureHandle>::Failure(!committed ? committed.Error() : current.Error());
     }
     record.devicePlanes = d3d12::FormatPlaneCount(device_.Get(), mapping.resource);
 
@@ -369,16 +386,19 @@ Result<TextureHandle> D3D12Device::CreateTexture(const TextureDesc& desc,
         // 올리지 않은 plane도 쉬는 상태로 옮긴다.
         for (uint32 plane = PixelFormatPlaneCount(desc.format); plane < record.devicePlanes;
              ++plane) {
-            for (uint32 mip = 0; mip < record.mipLevels; ++mip) {
-                const D3D12_RESOURCE_BARRIER toShader = TransitionSubresource(
-                    record.resource.Get(), d3d12::SubresourceIndex(mip, plane, record.mipLevels),
-                    D3D12_RESOURCE_STATE_COPY_DEST, ShaderReadStates);
-                uploadList_->ResourceBarrier(1, &toShader);
+            for (uint32 slice = 0; slice < record.slices; ++slice) {
+                for (uint32 mip = 0; mip < record.mipLevels; ++mip) {
+                    const D3D12_RESOURCE_BARRIER toShader = TransitionSubresource(
+                        record.resource.Get(),
+                        d3d12::SubresourceIndex(mip, slice, plane, record.mipLevels, record.slices),
+                        D3D12_RESOURCE_STATE_COPY_DEST, ShaderReadStates);
+                    uploadList_->ResourceBarrier(1, &toShader);
+                }
             }
         }
     }
 
-    auto views = CreateTextureViews(record, mapping, sampled);
+    auto views = CreateTextureViews(record, mapping, sampled, desc.swizzle);
     if (!views) {
         return Result<TextureHandle>::Failure(views.Error());
     }
@@ -388,8 +408,8 @@ Result<TextureHandle> D3D12Device::CreateTexture(const TextureDesc& desc,
 // 기본 SRV(형식이 Sampled일 때, plane 0)·RTV·DSV를 만든다(잠금 안). 실패하면 이미 잡은 칸을
 // 놓는다.
 Result<void> D3D12Device::CreateTextureViews(TextureRecord& record,
-                                             const d3d12::FormatMapping& mapping,
-                                             bool sampled) noexcept {
+                                             const d3d12::FormatMapping& mapping, bool sampled,
+                                             const ChannelSwizzle& swizzle) noexcept {
     if (sampled) {
         auto srv = srvs_.Allocate();
         if (!srv) {
@@ -397,8 +417,7 @@ Result<void> D3D12Device::CreateTextureViews(TextureRecord& record,
         }
         record.srv = srv.Value();
         record.hasSrv = true;
-        WriteShaderResourceView(record.resource.Get(), mapping.srv, 0, record.mipLevels,
-                                record.srv);
+        WriteShaderResourceView(record, mapping.srv, 0, swizzle, record.srv);
     }
     if (record.renderTarget) {
         auto rtv = rtvs_.Allocate();
@@ -448,17 +467,46 @@ void D3D12Device::ReleaseTextureViews(const TextureRecord& record) noexcept {
     }
 }
 
-// 2D texture SRV를 쓴다. plane은 깊이·스텐실·비디오 plane 선택이다.
-void D3D12Device::WriteShaderResourceView(ID3D12Resource* resource, DXGI_FORMAT format,
-                                          uint32 plane, uint32 mipLevels, uint32 slot) noexcept {
+// 텍스처 차원의 SRV(모든 mip·slice)를 쓴다. plane은 깊이·스텐실·비디오 plane 선택이다(2D만
+// 다중 plane이다). swizzle은 Shader4ComponentMapping이다: SwizzleSource의 값(Red–Alpha 0–3,
+// Zero 4, One 5)이 D3D12_SHADER_COMPONENT_MAPPING의 FROM_MEMORY_COMPONENT_0–3·FORCE_VALUE_0·1과
+// 같다. 스텐실 plane 형식(X24_TYPELESS_G8_UINT·X32_TYPELESS_G8X24_UINT)은 스텐실이 G 성분이라
+// 그대로 Rocks 규칙(값은 G)이고 swizzle은 그 위에 놓인다.
+void D3D12Device::WriteShaderResourceView(const TextureRecord& record, DXGI_FORMAT format,
+                                          uint32 plane, const ChannelSwizzle& swizzle,
+                                          uint32 slot) noexcept {
     D3D12_SHADER_RESOURCE_VIEW_DESC view = {};
     view.Format = format;
-    view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-    view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    view.Texture2D.MostDetailedMip = 0;
-    view.Texture2D.MipLevels = mipLevels;
-    view.Texture2D.PlaneSlice = plane;
-    device_->CreateShaderResourceView(resource, &view, srvs_.Cpu(slot));
+    view.Shader4ComponentMapping = D3D12_ENCODE_SHADER_4_COMPONENT_MAPPING(
+        static_cast<UINT>(swizzle.red), static_cast<UINT>(swizzle.green),
+        static_cast<UINT>(swizzle.blue), static_cast<UINT>(swizzle.alpha));
+    switch (record.dimension) {
+    case TextureDimension::Texture2D:
+        view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        view.Texture2D.MipLevels = record.mipLevels;
+        view.Texture2D.PlaneSlice = plane;
+        break;
+    case TextureDimension::Texture2DArray:
+        view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+        view.Texture2DArray.MipLevels = record.mipLevels;
+        view.Texture2DArray.ArraySize = record.slices;
+        view.Texture2DArray.PlaneSlice = plane;
+        break;
+    case TextureDimension::Texture3D:
+        view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
+        view.Texture3D.MipLevels = record.mipLevels;
+        break;
+    case TextureDimension::TextureCube:
+        view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
+        view.TextureCube.MipLevels = record.mipLevels;
+        break;
+    case TextureDimension::TextureCubeArray:
+        view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBEARRAY;
+        view.TextureCubeArray.MipLevels = record.mipLevels;
+        view.TextureCubeArray.NumCubes = record.slices / CubeFaceCount;
+        break;
+    }
+    device_->CreateShaderResourceView(record.resource.Get(), &view, srvs_.Cpu(slot));
 }
 
 // 기록을 표에 넣고 handle을 돌려준다(잠금 안). 실패하면 descriptor 칸을 놓는다.
@@ -500,7 +548,7 @@ Result<TextureHandle> D3D12Device::CreateTextureView(TextureHandle texture,
     if (source->view) {
         return Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
     }
-    auto resolved = ResolveTextureViewFormat(source->format, desc);
+    auto resolved = ResolveTextureViewFormat(source->format, desc, source->comparison);
     if (!resolved) {
         return Result<TextureHandle>::Failure(resolved.Error());
     }
@@ -525,18 +573,21 @@ Result<TextureHandle> D3D12Device::CreateTextureView(TextureHandle texture,
     TextureRecord record;
     // view는 원 자원에 참조를 하나 더 잡는다(원 텍스처를 먼저 Retire해도 자원이 산다).
     record.resource = source->resource.Share();
+    record.dimension = source->dimension;
     record.width = MipExtent(source->width, layout.widthShift);
     record.height = MipExtent(source->height, layout.heightShift);
+    record.depth = source->depth;
     record.mipLevels = source->mipLevels;
+    record.slices = source->slices;
     record.format = resolved.Value();
     record.view = true;
     record.source = texture.slot;
     record.devicePlanes = source->devicePlanes;
     record.sampler = source->sampler;
+    record.comparison = source->comparison;
     record.srv = srv.Value();
     record.hasSrv = true;
-    WriteShaderResourceView(record.resource.Get(), srvFormat, desc.plane, record.mipLevels,
-                            record.srv);
+    WriteShaderResourceView(record, srvFormat, desc.plane, desc.swizzle, record.srv);
     auto added = AddTextureRecord(Move(record));
     if (added) {
         ++source->viewCount;
@@ -665,13 +716,28 @@ Result<uint32> D3D12Device::SamplerFor(const SamplerDesc& desc) noexcept {
     if (!slot) {
         return Result<uint32>::Failure(slot.Error());
     }
+    // AnisotropicPoint 하드웨어 필터가 없으면 UE처럼 AnisotropicLinear로 만든다(사용자 결정,
+    // DeviceFeatures::anisotropicPointFilter가 거짓, 처음 한 번 Debug 로그).
+    Filter filter = desc.filter;
+    if (filter == Filter::AnisotropicPoint && !caps_.features.anisotropicPointFilter) {
+        filter = Filter::AnisotropicLinear;
+        if (!anisotropicPointReported_) {
+            anisotropicPointReported_ = true;
+            Log::Debug(LogGraphicsD3D12,
+                       "AnisotropicPoint samplers are created as AnisotropicLinear because the "
+                       "device has no AnisoFilterWithPointMipSupported");
+        }
+    }
     D3D12_SAMPLER_DESC sampler = {};
-    sampler.Filter = SamplerFilter(desc.filter);
+    sampler.Filter = SamplerFilter(filter, desc.comparison);
     sampler.AddressU = SamplerAddress(desc.addressU);
     sampler.AddressV = SamplerAddress(desc.addressV);
-    sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
-    sampler.MaxAnisotropy = desc.filter == Filter::Anisotropic ? desc.maxAnisotropy : 1u;
-    sampler.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+    sampler.AddressW = SamplerAddress(desc.addressW);
+    sampler.MaxAnisotropy = IsAnisotropicFilter(desc.filter) ? desc.maxAnisotropy : 1u;
+    // D3D12_COMPARISON_FUNC는 NEVER = 1부터 CompareFunction과 같은 순서다.
+    sampler.ComparisonFunc =
+        desc.comparison ? static_cast<D3D12_COMPARISON_FUNC>(static_cast<uint32>(desc.compare) + 1)
+                        : D3D12_COMPARISON_FUNC_NEVER;
     sampler.MaxLOD = D3D12_FLOAT32_MAX;
     BorderColorValue(desc.borderColor, sampler.BorderColor);
     device_->CreateSampler(&sampler, samplers_.Cpu(slot.Value()));
@@ -691,6 +757,18 @@ Result<void> D3D12Device::CreateSwapChainViews(SwapChainRecord& record) noexcept
                                         rtvs_.Cpu(record.rtv[index]));
     }
     return Result<void>::Success();
+}
+
+Result<TextureSubresources>
+D3D12Device::GetTextureSubresources(TextureHandle texture) const noexcept {
+    platform::LockGuard lock(gate_);
+    const TextureRecord* record = textures_.Find(texture.slot);
+    if (record == nullptr) {
+        return Result<TextureSubresources>::Failure(ErrorCode::StaleHandle);
+    }
+
+    return Result<TextureSubresources>::Success(
+        TextureSubresources{record->mipLevels, record->slices});
 }
 
 } // namespace rocks::graphics::d3d12

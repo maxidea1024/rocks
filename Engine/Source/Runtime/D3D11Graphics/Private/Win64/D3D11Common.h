@@ -115,7 +115,10 @@ bool IsAttributeSemantic(const char* name) noexcept;
 // 컬 모드의 D3D11 값이다. 앞면 규약(FrontCounterClockwise = TRUE)과 함께 쓴다.
 D3D11_CULL_MODE RasterCullMode(CullMode mode) noexcept;
 
-D3D11_FILTER SamplerFilter(Filter filter) noexcept;
+// 샘플러 필터다(비교 샘플러면 COMPARISON 계열). AnisotropicPoint는 D3D11에 대응 필터가 없어
+// AnisotropicLinear와 같은 D3D11_FILTER_ANISOTROPIC이다(UE와 같다,
+// DeviceFeatures::anisotropicPointFilter가 거짓).
+D3D11_FILTER SamplerFilter(Filter filter, bool comparison) noexcept;
 D3D11_TEXTURE_ADDRESS_MODE SamplerAddress(AddressMode mode) noexcept;
 
 // 장치 제거·재설정을 뜻하는 HRESULT인지다.

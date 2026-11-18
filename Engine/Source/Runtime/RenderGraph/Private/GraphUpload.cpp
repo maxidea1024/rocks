@@ -122,14 +122,13 @@ Result<void> RenderGraph::UploadTexture(GraphTexture texture, uint32 mipLevel,
             resource.name));
     }
 
-    const uint64 expected =
-        graphics::PixelFormatImageBytes(desc.format, graphics::MipExtent(desc.width, mipLevel),
-                                        graphics::MipExtent(desc.height, mipLevel));
-    if (mipLevel >= resource.subresources || pixels.Size() != expected) {
+    // mip 하나는 모든 slice·깊이 면이다(장치 UpdateTexture와 같은 배치).
+    const uint64 expected = graphics::TextureMipBytes(desc, mipLevel);
+    if (mipLevel >= resource.mipLevels || pixels.Size() != expected) {
         return Result<void>::Failure(RecordGraphError(
             state, ErrorCode::InvalidArgument, true,
             "upload of {} bytes into mip {} of '{}' does not match the mip ({} mips)",
-            pixels.Size(), mipLevel, resource.name, resource.subresources));
+            pixels.Size(), mipLevel, resource.name, resource.mipLevels));
     }
 
     SubresourceTrack& track = state.tracks[resource.firstTrack + mipLevel];
@@ -139,10 +138,14 @@ Result<void> RenderGraph::UploadTexture(GraphTexture texture, uint32 mipLevel,
                                                       resource.name));
     }
 
-    // mip 사슬 자리를 처음 업로드 때 잡는다(장치 생성 초기 데이터 배치: mip 0부터 빈틈 없이).
+    // 초기 데이터 자리를 처음 업로드 때 잡는다(장치 생성 초기 데이터 배치: mip 0부터 빈틈 없이).
     if (resource.uploadPixels == nullptr) {
-        const uint64 chain =
-            graphics::MipChainBytes(desc.format, desc.width, desc.height, 1, desc.mipLevels);
+        const uint64 chain = graphics::TextureDataBytes(desc);
+        // CreateTexture가 넘침을 이미 거르지만 arena 할당 전에 다시 본다.
+        if (chain == 0 || chain > NumericLimits<usize>::Max()) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
         auto memory = arena_.TryAllocate(static_cast<usize>(chain), alignof(uint64));
         if (!memory) {
             return Result<void>::Failure(memory.Error());
@@ -153,12 +156,15 @@ Result<void> RenderGraph::UploadTexture(GraphTexture texture, uint32 mipLevel,
 
     uint64 offset = 0;
     for (uint32 mip = 0; mip < mipLevel; ++mip) {
-        offset += graphics::PixelFormatImageBytes(desc.format, graphics::MipExtent(desc.width, mip),
-                                                  graphics::MipExtent(desc.height, mip));
+        offset += graphics::TextureMipBytes(desc, mip);
     }
 
     platform::MemoryCopy(resource.uploadPixels + offset, pixels.Data(), pixels.Size());
-    track.uploaded = true;
+    // 그 mip의 모든 slice가 내용을 받았다(slice 0 칸이 중복 검사를 맡는다).
+    for (uint32 slice = 0; slice < resource.slices; ++slice) {
+        state.tracks[resource.firstTrack + SubresourceIndex(resource, mipLevel, slice)].uploaded =
+            true;
+    }
     resource.uploadTarget = true;
     resource.produced = true;
     return Result<void>::Success();
