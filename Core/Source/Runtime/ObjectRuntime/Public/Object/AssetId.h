@@ -81,6 +81,10 @@ struct Formatter<AssetId> {
                                StringView spec) noexcept {
         return Formatter<Guid>::Format(out, id.value, spec);
     }
+
+    static constexpr bool IsValidSpec(StringView spec) noexcept {
+        return Formatter<Guid>::IsValidSpec(spec);
+    }
 };
 
 } // namespace rocks

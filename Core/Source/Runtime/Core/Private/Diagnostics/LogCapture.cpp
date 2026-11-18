@@ -18,6 +18,8 @@ constexpr uint32 CaptureMagic = 0x474F4C52u;
 constexpr uint8 CaptureRuntimeTemplate = 1u << 0;
 constexpr uint8 CaptureValueTruncated = 1u << 1;
 constexpr uint8 CaptureContextTruncated = 1u << 2;
+// 런타임 템플릿의 사용자 Formatter spec을 IsValidSpec이 거부했다(렌더가 템플릿 오류로 낸다).
+constexpr uint8 CaptureFormatterSpecRejected = 1u << 3;
 
 using detail::LogCaptureContext;
 
@@ -587,7 +589,11 @@ Result<usize> WriteLogCapture(const LogCaptureTarget& target, LogLevel level,
 
     LogTemplateLayout layout;
     if (hasCustom && text.specs == nullptr) {
-        (void)AnalyzeLogTemplate(text.text, kinds, count, layout);
+        // 렌더 쪽은 인자 타입을 모르므로 사용자 Formatter spec 검사 결과는 여기서 표시로 남긴다.
+        if (AnalyzeLogTemplate(text.text, kinds, count, layout, text.checks) ==
+            LogTemplateError::InvalidFormatterSpec) {
+            header.flags |= CaptureFormatterSpecRejected;
+        }
     }
 
     LogCaptureValue values[MaxLogArguments];
@@ -674,6 +680,10 @@ Result<void> RenderLogCapture(Span<const uint8> capture, const LogBlockProvider*
         }
 
         error = detail::AnalyzeLogTemplate(templateText, kinds, count, layout);
+        if (error == LogTemplateError::None && (header.flags & CaptureFormatterSpecRejected) != 0) {
+            error = LogTemplateError::InvalidFormatterSpec;
+        }
+
         if (error != LogTemplateError::None) {
             RenderTemplateError(message, templateText, error, flags);
         } else {

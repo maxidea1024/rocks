@@ -83,7 +83,7 @@ inline constexpr LogCategory LogGraphicsD3D12{"Graphics.D3D12"};
 | `{{` · `}}` | 중괄호 문자 |
 
 - **컴파일 타임에 검증하는 것**(리터럴 템플릿): 중괄호 짝, 이름·위치 혼용, 자리 수와 인자 수(위치 자리는 모든 인자를 한 번 이상 써야 한다), 위치 번호 범위, 이름 문법, UTF-8, **내장 타입**의 spec, 같은 사용자 타입 인자에 서로 다른 spec. 어기면 영어 이름의 오류 함수(`LogTemplateError_*`)가 진단에 나온다.
-- **검증하지 않는 것:** 사용자 `Formatter<T>`의 spec은 런타임에 해석한다. 잘못되면 그 자리만 `<format error>`로 나온다. 이 부분은 부분 검증이다.
+- **사용자 `Formatter<T>`의 spec:** 특수화에 `static constexpr bool IsValidSpec(StringView spec) noexcept`를 두면 리터럴 템플릿은 컴파일 타임에(`LogTemplateError_InvalidFormatterSpec`), `RuntimeTemplate`은 캡처 때 검사한다(거부되면 `[template error: InvalidFormatterSpec]`). 없으면 런타임에 `Format`이 판단하고, 잘못되면 그 자리만 `<format error>`로 나온다. `Guid`·`DateTime`(`ms`)·`TimeSpan`·`AssetId`는 검사 함수를 가진다.
 - **동적 템플릿:** 설정이나 데이터에서 온 문자열은 `Log::Write(level, category, RuntimeTemplate{text}, args...)`로 넘긴다. 검증은 런타임에 하고, 잘못되면 원문에 `[template error: ...]`를 붙여 그대로 기록한다.
 - 인자는 최대 16개(`MaxLogArguments`)다.
 - 사용자 타입은 기존 `Formatter<T>` 특수화로 지원한다. 값은 기록하는 순간 텍스트로 렌더되며, 이 비용은 호출 스레드가 낸다. 내장 타입(정수·실수·bool·포인터·enum·문자열)은 원시 값으로 복사하고 출력 스레드가 렌더한다.
@@ -316,4 +316,4 @@ host.Stop();                                           // WriterAbandoned()면 �
 
 ## 아직 구현되지 않은 것
 
-- TraceCapture `log` 채널 연결과 상관 id, 구조체 펼치기(`{@Obj}`), 사용자 Formatter spec의 컴파일 타임 검증: 후속
+- TraceCapture `log` 채널 연결과 상관 id, 구조체 펼치기(`{@Obj}`): 후속

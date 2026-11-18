@@ -147,6 +147,9 @@ struct LogCaptureTemplate {
     SourceLocation location;
     bool runtime = false;
     const LogArgumentSpec* specs = nullptr;
+    // runtime일 때 인자별 사용자 Formatter spec 검사 함수다(CaptureWithArgs가 채운다, 없으면
+    // nullptr). 리터럴 템플릿은 컴파일 타임에 검사했으므로 쓰지 않는다.
+    const LogSpecCheck* checks = nullptr;
 };
 
 // 타입을 지운 인자 배열로 캡처한다. 공개 진입점은 CaptureLog다.
@@ -185,7 +188,15 @@ Result<usize> CaptureWithArgs(const LogCaptureTarget& target, LogLevel level,
         return WriteLogCapture(target, level, category, text, nullptr, 0);
     } else {
         const FormatArg list[] = {MakeLogArg(args)...};
-        return WriteLogCapture(target, level, category, text, list, sizeof...(Args));
+        // 런타임 템플릿의 사용자 Formatter spec 검사 함수(공용 FormatArg를 늘리지 않으려고 로그
+        // 캡처 전용 배열로 넘긴다).
+        static constexpr LogSpecCheck checks[] = {LogSpecCheckOf<Args>()...};
+        LogCaptureTemplate checked = text;
+        if (checked.runtime) {
+            checked.checks = checks;
+        }
+
+        return WriteLogCapture(target, level, category, checked, list, sizeof...(Args));
     }
 }
 

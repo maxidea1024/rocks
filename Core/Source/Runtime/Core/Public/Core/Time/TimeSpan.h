@@ -246,6 +246,10 @@ template <>
 struct Formatter<TimeSpan> {
     static Result<void> Format(StringBuilderBase& out, const TimeSpan& span,
                                StringView spec) noexcept;
+
+    static constexpr bool IsValidSpec(StringView spec) noexcept {
+        return spec.IsEmpty();
+    }
 };
 
 } // namespace rocks

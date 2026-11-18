@@ -16,6 +16,17 @@ internal static class LogCompilerTests
                 return out.TryAppendFormat("{}", point.x);
             }
         };
+        struct Checked { int x; };
+        template <> struct rocks::Formatter<Checked> {
+            static rocks::Result<void> Format(rocks::StringBuilderBase& out, const Checked& value,
+                                              rocks::StringView) noexcept {
+                return out.TryAppendFormat("{}", value.x);
+            }
+
+            static constexpr bool IsValidSpec(rocks::StringView spec) noexcept {
+                return spec.IsEmpty() || spec == "short";
+            }
+        };
         inline constexpr rocks::LogCategory LogValid{"Graphics.D3D12"};
         template <typename... Args>
         void Capture(rocks::Span<rocks::uint8> buffer,
@@ -71,8 +82,9 @@ internal static class LogCompilerTests
                 return $"inline constexpr rocks::LogCategory LogInvalid{{{literal}}};";
             }
 
-            // 위치 자리·이름 자리·사용자 Formatter spec(런타임 검사)·런타임 템플릿은 컴파일된다.
-            string valid = Call("\"{Count} {Ratio:.2f} {P:anything} {M}\", 1, 2.0, Point{3}, Mode::Fast") + "\n" +
+            // 위치 자리·이름 자리·사용자 Formatter spec(검사 함수가 없으면 런타임, 있으면 통과하는 spec)·
+            // 런타임 템플릿은 컴파일된다.
+            string valid = Call("\"{Count} {Ratio:.2f} {P:anything} {M} {C:short}\", 1, 2.0, Point{3}, Mode::Fast, Checked{4}") + "\n" +
                 "void Other(rocks::Span<rocks::uint8> buffer) noexcept {\n" +
                 "    (void)rocks::CaptureLog({buffer}, rocks::LogLevel::Info, LogValid, \"{} {{x}} {}\", 1, \"x\");\n" +
                 "    (void)rocks::CaptureLog({buffer}, rocks::LogLevel::Info, LogValid, rocks::RuntimeTemplate{rocks::StringView(\"{A\")}, 1);\n" +
@@ -94,6 +106,7 @@ internal static class LogCompilerTests
                 ("index_leading_zero", Call("\"{01} {1}\", 1, 2"), "LogTemplateError_InvalidArgumentIndex"),
                 ("invalid_utf8", Call("\"\\xff{A}\", 1"), "LogTemplateError_InvalidUtf8"),
                 ("formatter_spec_conflict", Call("\"{0} {0:x}\", Point{1}"), "LogTemplateError_ConflictingFormatterSpec"),
+                ("formatter_spec_rejected", Call("\"{C:long}\", Checked{1}"), "LogTemplateError_InvalidFormatterSpec"),
                 ("not_null_terminated",
                     "void Test(rocks::Span<rocks::uint8> buffer) noexcept {\n" +
                     "    static constexpr char text[3] = {'a', 'b', 'c'};\n" +
