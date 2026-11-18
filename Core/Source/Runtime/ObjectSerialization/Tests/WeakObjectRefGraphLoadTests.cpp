@@ -1,9 +1,10 @@
-#include "WeakRefGraphTestSupport.h"
+#include "WeakObjectRefGraphTestSupport.h"
 
-// 리플렉션 B9d1 WeakRef PROPERTY의 복원·GC 시험이다(Docs/Design/ReflectionExtensions.ko.md 5.1절,
-// 17절 B9d 항목): weak 값은 같은 그래프 안 노드 번호만 받고(외부 참조 번호·범위 밖 번호
-// InvalidArgument), 노드 대상은 강한 참조와 같은 기대 형식 규칙(TypeMismatch)을 따르며, weak 간선은
-// 편의 복원의 도달 검사·GC가 따라가지 않고, weak를 담은 struct는 1단계 관찰 대상이 될 수 없다.
+// 리플렉션 B9d1 WeakObjectRef PROPERTY의 복원·GC
+// 시험이다(Docs/Design/ReflectionExtensions.ko.md 5.1절, 17절 B9d 항목): weak 값은 같은 그래프 안
+// 노드 번호만 받고(외부 참조 번호·범위 밖 번호 InvalidArgument), 노드 대상은 강한 참조와 같은 기대
+// 형식 규칙(TypeMismatch)을 따르며, weak 간선은 편의 복원의 도달 검사·GC가 따라가지 않고, weak를
+// 담은 struct는 1단계 관찰 대상이 될 수 없다.
 using namespace rocks;
 using namespace rocks::test::weak;
 
@@ -51,7 +52,7 @@ ErrorCode Validate(Allocator& allocator, ObjectRegistry& objects, TypeRegistry& 
 // weak 값은 같은 그래프 안 노드 번호만 받는다: 외부 참조 번호(0x80000000 | i — 같은 번호의 강한
 // 참조는 받는다)와 nodeCount를 넘는 번호는 단일 필드·배열 원소 모두 InvalidArgument다. 0(null)과
 // 자기 번호는 받는다.
-TEST(WeakRefGraphLoad_RejectsExternalAndOutOfRangeNumbers) {
+TEST(WeakObjectRefGraphLoad_RejectsExternalAndOutOfRangeNumbers) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
     REQUIRE(RegisterFixture(types));
@@ -109,7 +110,7 @@ TEST(WeakRefGraphLoad_RejectsExternalAndOutOfRangeNumbers) {
 // 노드 대상의 기대 형식은 강한 참조와 같은 규칙이다(UE는 경고 후 null — 18.4절 차이): 기대 타입
 // WeakTarget인 필드·배열 원소·struct 멤버가 WeakOther 노드를 가리키면 TypeMismatch이고, 기대 타입
 // Object 필드(any)와 WeakTarget 파생(WeakHolder) 노드는 받는다.
-TEST(WeakRefGraphLoad_ExpectedTypeViolationIsRejected) {
+TEST(WeakObjectRefGraphLoad_ExpectedTypeViolationIsRejected) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
     REQUIRE(RegisterFixture(types));
@@ -164,7 +165,7 @@ TEST(WeakRefGraphLoad_ExpectedTypeViolationIsRejected) {
 // 거부하고(객체를 만들지 않는다 — 강한 참조로 닿으면 복원된다), 단계형 복원 1단계(Validate)는 그
 // 그래프를 받으며, GC는
 // weak만 남은 대상을 회수한다(그 뒤 weak의 TryPin은 실패하고 다시 저장하면 진단 없는 null이다).
-TEST(WeakRefGraphLoad_WeakEdgesAreNotReachabilityOrGcEdges) {
+TEST(WeakObjectRefGraphLoad_WeakEdgesAreNotReachabilityOrGcEdges) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
     REQUIRE(RegisterFixture(types));
@@ -176,7 +177,7 @@ TEST(WeakRefGraphLoad_WeakEdgesAreNotReachabilityOrGcEdges) {
             RootRef<WeakHolder> a = New<WeakHolder>(objects);
             RootRef<WeakHolder> b = New<WeakHolder>(objects);
             With(objects, a.Handle(), [&](WeakHolder& value) noexcept {
-                value.target = WeakRef<WeakTarget>(b.Handle());
+                value.target = WeakObjectRef<WeakTarget>(b.Handle());
             });
 
             const ObjectHandle set[] = {a.Handle(), b.Handle()};
@@ -234,7 +235,7 @@ TEST(WeakRefGraphLoad_WeakEdgesAreNotReachabilityOrGcEdges) {
 
 // weak 참조를 (직간접으로) 담는 struct는 형질 ContainsWeakReference가 서고(강한 참조 형질과
 // 무관하다) 1단계 관찰 대상이 될 수 없다(InvalidArgument — 1단계에는 대상 handle이 없다).
-TEST(WeakRefGraphLoad_ObservedStructsCannotHoldWeakReferences) {
+TEST(WeakObjectRefGraphLoad_ObservedStructsCannotHoldWeakReferences) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
     REQUIRE(RegisterFixture(types));

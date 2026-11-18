@@ -48,7 +48,7 @@ struct AllocatorDeleter {
 // - Reset은 deleter를 지역으로 옮긴 뒤 호출하므로 소멸자가 같은 UniquePtr에 재진입해 새 객체를
 //   넣어도 안전하다.
 // - 같은 UniquePtr을 여러 스레드가 동시에 변경하지 않는다. 객체 자체의 스레드 안전성과 무관하다.
-// - GC 객체 참조(RootRef/WeakRef)가 아니다. Object 시스템 객체에는 사용하지 않는다.
+// - GC 객체 참조(RootRef/WeakObjectRef)가 아니다. Object 시스템 객체에는 사용하지 않는다.
 template <typename T, typename Deleter = AllocatorDeleter>
 class UniquePtr {
     static_assert(IsNothrowMoveConstructibleV<Deleter>, "UniquePtr deleter needs noexcept move");

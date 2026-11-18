@@ -60,8 +60,8 @@ ROCKS_RENDER_TRANSFERABLE(TextureUpload);
 ROCKS_RENDER_TRANSFERABLE(SurfaceResize);
 ROCKS_RENDER_TRANSFERABLE(OrderMark);
 ROCKS_RENDER_TRANSFERABLE(TimedPacket);
-// 리플렉션 struct: ArrayTag는 참조가 없고, WeakLink는 WeakRef 필드를, ArraySlot은 ObjectRef 필드를
-// 가진다.
+// 리플렉션 struct: ArrayTag는 참조가 없고, WeakLink는 WeakObjectRef 필드를, ArraySlot은 ObjectRef
+// 필드를 가진다.
 ROCKS_RENDER_TRANSFERABLE(rocks::reflection_fixture::ArrayTag);
 ROCKS_RENDER_TRANSFERABLE(rocks::reflection_fixture::WeakLink);
 ROCKS_RENDER_TRANSFERABLE(rocks::reflection_fixture::ArraySlot);
@@ -589,7 +589,7 @@ TEST(RenderLane_OnlyRegisteredTypesCrossTheLane) {
     REQUIRE(lane.Start(MakeConfig(RenderLaneMode::Inline, processor)));
     rocks::reflection_fixture::ArrayTag tag(allocator);
     CHECK(lane.PostResource(Move(tag), &NoOp));
-    // 이동할 수 있는 Object 참조(WeakRef) 필드가 있는 등록 타입은 Development 검사가 거부한다
+    // 이동할 수 있는 Object 참조(WeakObjectRef) 필드가 있는 등록 타입은 Development 검사가 거부한다
     // (Release는 검사 생략).
     rocks::reflection_fixture::WeakLink link;
     auto posted = lane.PostResource(Move(link), &NoOpLink);

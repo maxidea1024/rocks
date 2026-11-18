@@ -73,13 +73,13 @@ public static partial class PolicyChecks
                relative.StartsWith("Programs/FoundationTests/", StringComparison.Ordinal);
     }
 
-    // 리플렉션 필드 템플릿(rocks::Array·ObjectRefArray·StructRefArray·ObjectRefMap·ObjectRef·WeakRef·SoftObjectRef·ClassRef)의 명시적 인스턴스화·extern
+    // 리플렉션 필드 템플릿(rocks::Array·ObjectRefArray·StructRefArray·ObjectRefMap·ObjectRef·WeakObjectRef·SoftObjectRef·ClassRef)의 명시적 인스턴스화·extern
     // template 선언이다. 그런 선언이 보이면 Clang이 필드 타입을 desugar 정규 철자가 아니라 작성 철자로 출력할 수 있어
     // MetaCompiler의 원소·대상 해석(Binds 미러 조회 등)이 어긋난다(Docs/Design/ReflectionFoundations.ko.md 5.6절). 명시적
     // 특수화(template <>)와 부분 특수화는 대상이 아니다. 주석·문자열을 지운 텍스트 전체에 맞추므로 여러 줄에 걸친 선언도 찾고
     // 주석 안 예시는 잡지 않는다.
     private static readonly Regex ReflectionTemplateInstantiation = Pattern(
-        "\\btemplate\\s+(?:class|struct)\\s+(?:::\\s*)?(?:rocks\\s*::\\s*)?(?:Array|ObjectRefArray|StructRefArray|ObjectRefMap|ObjectRef|WeakRef|SoftObjectRef|ClassRef)\\s*<");
+        "\\btemplate\\s+(?:class|struct)\\s+(?:::\\s*)?(?:rocks\\s*::\\s*)?(?:Array|ObjectRefArray|StructRefArray|ObjectRefMap|ObjectRef|WeakObjectRef|SoftObjectRef|ClassRef)\\s*<");
 
     public static IReadOnlyList<CheckFailure> Runtime(string root)
     {
@@ -92,7 +92,7 @@ public static partial class PolicyChecks
             {
                 int line = 1 + code.AsSpan(0, match.Index).Count('\n');
                 failures.Add(new(Relative(root, path), line, "reflection-container-instantiation",
-                    "explicit instantiation or extern template of a reflected field template (rocks::Array/ObjectRefArray/StructRefArray/ObjectRefMap/ObjectRef/WeakRef/SoftObjectRef/ClassRef)"));
+                    "explicit instantiation or extern template of a reflected field template (rocks::Array/ObjectRefArray/StructRefArray/ObjectRefMap/ObjectRef/WeakObjectRef/SoftObjectRef/ClassRef)"));
             }
         }
 

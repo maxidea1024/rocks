@@ -211,7 +211,8 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
         // struct 제한이 쓴다).
         nameMember = nameMember || FieldTargetType(field).kind == ValueKind::Name ||
                      FieldKeyType(field).kind == ValueKind::Name;
-        // weak 참조 멤버: 단일 WeakRef와 Array<WeakRef>(Transient 포함 — 관찰 struct 제한이 쓴다).
+        // weak 참조 멤버: 단일 WeakObjectRef와 Array<WeakObjectRef>(Transient 포함 — 관찰 struct
+        // 제한이 쓴다).
         weakMember = weakMember || FieldTargetType(field).kind == ValueKind::WeakObjectReference;
         // InstancedStruct 멤버: 단일·원소 배열·정적 배열·Map 값(리플렉션 B9j — Transient 포함).
         instancedMember =

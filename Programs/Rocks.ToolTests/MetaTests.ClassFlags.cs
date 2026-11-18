@@ -36,7 +36,7 @@ internal static partial class MetaTests
             Preamble + "ROCKS_CLASS(Deprecated)\nstruct Holder : public rocks::Object {};\n" +
                 "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() rocks::ObjectRef<Holder> next;\n};\n}\n",
             Preamble + "ROCKS_CLASS(Deprecated)\nstruct Holder : public rocks::Object {};\n" +
-                "ROCKS_STRUCT()\nstruct Leaf {\nROCKS_PROPERTY() rocks::WeakRef<Holder> target;\n};\n" +
+                "ROCKS_STRUCT()\nstruct Leaf {\nROCKS_PROPERTY() rocks::WeakObjectRef<Holder> target;\n};\n" +
                 "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() rocks::int32 count = 0;\n};\n}\n"],
             "RMC2209", "refers to Deprecated class");
         AddRejectGroup(context, "Meta.WithinMustNarrowBaseWithin", [

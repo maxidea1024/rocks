@@ -200,11 +200,11 @@ private:
 // Registry 포인터를 보관하지 않는 약한 값 참조다. 대상의 수명을 연장하지 않는다.
 // 살아 있는 Registry와 문맥을 명시해 TryPin하며, 폐기·재사용된 핸들은 거부한다.
 template <class T = Object>
-class WeakRef {
+class WeakObjectRef {
 public:
-    WeakRef() noexcept = default;
+    WeakObjectRef() noexcept = default;
 
-    explicit WeakRef(ObjectHandle handle) noexcept : handle_(handle) {
+    explicit WeakObjectRef(ObjectHandle handle) noexcept : handle_(handle) {
     }
 
     Result<RootRef<T>> TryPin(ObjectRegistry&, const ObjectAccessContext&) const noexcept;

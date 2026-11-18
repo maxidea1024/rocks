@@ -444,8 +444,8 @@ using StructMigration = Result<Array<uint8>> (*)(Allocator&, TypeId type, uint32
                                                  Span<const uint8> sourceRecord) noexcept;
 
 // Trace 호출 동안만 유효한 방문자다. 보관하거나 다른 스레드에 전달하지 않는다.
-// 객체가 가진 모든 강한 ObjectRef를 빠짐없이 Visit해야 한다. WeakRef는 방문하지 않는다(WeakRef
-// PROPERTY 포함 — 생성 Trace는 weak 필드·원소를 방문하지 않는다,
+// 객체가 가진 모든 강한 ObjectRef를 빠짐없이 Visit해야 한다. WeakObjectRef는 방문하지
+// 않는다(WeakObjectRef PROPERTY 포함 — 생성 Trace는 weak 필드·원소를 방문하지 않는다,
 // Docs/Design/ReflectionExtensions.ko.md 5.1절).
 class TraceVisitor {
 public:

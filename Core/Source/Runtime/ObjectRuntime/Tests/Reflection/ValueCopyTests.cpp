@@ -15,7 +15,7 @@ using reflection_fixture::StructLeaf;
 using reflection_fixture::StructMiddle;
 
 static_assert(detail::ValueCopy<Name>::Supported);
-static_assert(detail::ValueCopy<WeakRef<Object>>::Supported);
+static_assert(detail::ValueCopy<WeakObjectRef<Object>>::Supported);
 static_assert(detail::ValueCopy<Guid>::Supported);
 static_assert(detail::ValueCopy<String>::Supported);
 static_assert(detail::ValueCopy<Array<StructLeaf>>::Supported);

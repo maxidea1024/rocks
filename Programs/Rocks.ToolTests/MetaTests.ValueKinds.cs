@@ -3,10 +3,10 @@ using Rocks.Tooling.Common;
 
 namespace Rocks.ToolTests;
 
-// meta 시험 중 지정자와 값 종류(enum·정수 폭·Name·WeakRef) 시험이다.
+// meta 시험 중 지정자와 값 종류(enum·정수 폭·Name·WeakObjectRef) 시험이다.
 internal static partial class MetaTests
 {
-    // CLASS·PROPERTY 지정자(B2), enum·정수 폭·Name·WeakRef·평범한 char 등 값 종류 시험이다.
+    // CLASS·PROPERTY 지정자(B2), enum·정수 폭·Name·WeakObjectRef·평범한 char 등 값 종류 시험이다.
     private static void RegisterValueKinds(MetaContext context)
     {
         var (suite, options, actualEnvironment, generator, compiler) = context;
@@ -24,7 +24,7 @@ internal static partial class MetaTests
                 "ROCKS_PROPERTY(Required) rocks::ObjectRef<Value> next;\n" +
                 "ROCKS_PROPERTY(Name=\"other\") rocks::int32 other = 0;\n" +
                 "ROCKS_NATIVE() rocks::int32 cache = 0;\n" +
-                "ROCKS_NATIVE() rocks::WeakRef<Value> weak;\n" +
+                "ROCKS_NATIVE() rocks::WeakObjectRef<Value> weak;\n" +
                 "ROCKS_NATIVE() int* raw = nullptr;\n" +
                 "ROCKS_NATIVE() Cache* borrowed = nullptr;\n" +
                 "ROCKS_NATIVE() Lease lease;\n" +
@@ -249,7 +249,7 @@ internal static partial class MetaTests
                 .Replace("namespace probe {", "#include <Core/Containers/Array.h>\n#include <Core/Text/Name.h>\nnamespace probe {",
                     StringComparison.Ordinal)],
             "RMC2202", "applies only to");
-        // 리플렉션 B9d1: rocks::WeakRef<T> 클래스 필드·struct 멤버·Array<WeakRef<T>> 원소가 descriptor의 WeakObjectReference 종류(값 필드 —
+        // 리플렉션 B9d1: rocks::WeakObjectRef<T> 클래스 필드·struct 멤버·Array<WeakObjectRef<T>> 원소가 descriptor의 WeakObjectReference 종류(값 필드 —
         // fieldKind Value, 대상 ID는 기대 타입·Object는 비어 있음)와 생성 코드(스키마·경로 thunk)에 닿고, 생성 Trace는 weak 필드를 방문하지
         // 않으며 생성 헤더가 컴파일된다(Docs/Design/ReflectionExtensions.ko.md 5.1절).
         suite.Add("Meta.WeakReferenceFieldsReachDescriptorAndGeneratedCode", async () =>
@@ -257,11 +257,11 @@ internal static partial class MetaTests
             using Probe probe = new(options, actualEnvironment, generator, compiler);
             string source = "#include <Core/Containers/Array.h>\n" + Preamble +
                 "ROCKS_STRUCT()\nstruct Leaf {\nexplicit Leaf(rocks::Allocator& allocator) noexcept : links(allocator) {}\n" +
-                "ROCKS_PROPERTY() rocks::WeakRef<> anything;\nROCKS_PROPERTY() rocks::Array<rocks::WeakRef<rocks::Object>> links;\n};\n" +
+                "ROCKS_PROPERTY() rocks::WeakObjectRef<> anything;\nROCKS_PROPERTY() rocks::Array<rocks::WeakObjectRef<rocks::Object>> links;\n};\n" +
                 "ROCKS_CLASS()\nstruct Value : public rocks::Object {\n" +
                 "explicit Value(rocks::Allocator& allocator) noexcept : leaf(allocator), peers(allocator) {}\n" +
-                "ROCKS_PROPERTY() rocks::WeakRef<Value> target;\nROCKS_PROPERTY() Leaf leaf;\n" +
-                "ROCKS_PROPERTY() rocks::Array<rocks::WeakRef<Value>> peers;\nROCKS_PROPERTY() rocks::ObjectRef<Value> strong;\n};\n}\n";
+                "ROCKS_PROPERTY() rocks::WeakObjectRef<Value> target;\nROCKS_PROPERTY() Leaf leaf;\n" +
+                "ROCKS_PROPERTY() rocks::Array<rocks::WeakObjectRef<Value>> peers;\nROCKS_PROPERTY() rocks::ObjectRef<Value> strong;\n};\n}\n";
             await probe.GenerateAsync(source);
             using System.Text.Json.JsonDocument descriptor = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(probe.Descriptor));
             System.Text.Json.JsonElement Type(string name) => descriptor.RootElement.GetProperty("types").EnumerateArray()
@@ -291,18 +291,18 @@ internal static partial class MetaTests
             ProcessResult compiled = await probe.CompileGeneratedAsync();
             Verify.Equal(0, compiled.ExitCode, "generated weak reference header compiles: " + compiled.StdOut + compiled.StdErr);
         });
-        // WeakRef는 Required를 받지 않는다(대상이 죽으면 저절로 null — 단일 필드·Array<WeakRef> 모두 RMC2202).
+        // WeakObjectRef는 Required를 받지 않는다(대상이 죽으면 저절로 null — 단일 필드·Array<WeakObjectRef> 모두 RMC2202).
         AddRejectGroup(context, "Meta.WeakReferenceRejectsRequired", [
-            Declaration("ROCKS_PROPERTY(Required) rocks::WeakRef<Value> target;"),
-            "#include <Core/Containers/Array.h>\n" + Declaration("ROCKS_PROPERTY(Required) rocks::Array<rocks::WeakRef<Value>> targets;",
+            Declaration("ROCKS_PROPERTY(Required) rocks::WeakObjectRef<Value> target;"),
+            "#include <Core/Containers/Array.h>\n" + Declaration("ROCKS_PROPERTY(Required) rocks::Array<rocks::WeakObjectRef<Value>> targets;",
                 extra: "explicit Value(rocks::Allocator& allocator) noexcept : targets(allocator) {}")],
             "RMC2202", "cannot be Required");
-        // WeakRef의 대상은 리플렉션 클래스(또는 Object)다: 리플렉션 struct·enum·리플렉션되지 않은 타입은 RMC2003.
+        // WeakObjectRef의 대상은 리플렉션 클래스(또는 Object)다: 리플렉션 struct·enum·리플렉션되지 않은 타입은 RMC2003.
         AddRejectGroup(context, "Meta.WeakReferenceTargetMustBeReflectedClass", [
             Preamble + "ROCKS_STRUCT()\nstruct Leaf { ROCKS_PROPERTY() rocks::int32 count = 0; };\n" +
-                "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() rocks::WeakRef<Leaf> target;\n};\n}\n",
+                "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() rocks::WeakObjectRef<Leaf> target;\n};\n}\n",
             Preamble + "struct Plain : public rocks::Object {};\n" +
-                "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() rocks::WeakRef<Plain> target;\n};\n}\n"],
+                "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() rocks::WeakObjectRef<Plain> target;\n};\n}\n"],
             "RMC2003", "reference");
         // 평범한 char는 부호가 구현 정의라 필드·배열 원소 모두 받지 않고 int8·uint8을 안내한다.
         AddRejectGroup(context, "Meta.PlainCharFieldIsUnsupported", [

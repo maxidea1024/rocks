@@ -80,7 +80,7 @@ internal static partial class MetaTests
         AddRejectGroup(context, "Meta.MapKeyKindsAreRestricted", [
             MapDeclaration("ROCKS_PROPERTY() rocks::OrderedMap<float, rocks::int32> byRatio;"),
             MapDeclaration("ROCKS_PROPERTY() rocks::OrderedMap<rocks::ObjectRef<Value>, rocks::int32> byObject;"),
-            MapDeclaration("ROCKS_PROPERTY() rocks::OrderedMap<rocks::WeakRef<Value>, rocks::int32> byWeak;"),
+            MapDeclaration("ROCKS_PROPERTY() rocks::OrderedMap<rocks::WeakObjectRef<Value>, rocks::int32> byWeak;"),
             MapDeclaration("ROCKS_PROPERTY() rocks::OrderedMap<Leaf, rocks::int32> byLeaf;"),
             MapDeclaration("ROCKS_PROPERTY() rocks::OrderedSet<double> ratios;")],
             "RMC2305", "cannot be a");

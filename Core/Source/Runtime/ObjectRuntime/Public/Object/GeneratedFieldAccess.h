@@ -26,15 +26,16 @@ struct ObjectReferenceField<ObjectRef<T>> {
     using Target = T;
 };
 
-// weak 참조 PROPERTY(WeakRef<T> — 리플렉션 B9d1, Docs/Design/ReflectionExtensions.ko.md 5.1절)다.
-// GC가 추적하지 않는 값 필드이고 Target은 정적 기대 대상 타입이다.
+// weak 참조 PROPERTY(WeakObjectRef<T> — 리플렉션 B9d1,
+// Docs/Design/ReflectionExtensions.ko.md 5.1절)다. GC가 추적하지 않는 값 필드이고 Target은 정적
+// 기대 대상 타입이다.
 template <class T>
 struct WeakReferenceField {
     static constexpr bool Supported = false;
 };
 
 template <class T>
-struct WeakReferenceField<WeakRef<T>> {
+struct WeakReferenceField<WeakObjectRef<T>> {
     static constexpr bool Supported = true;
     using Target = T;
 };
@@ -84,7 +85,7 @@ struct ReflectedStructField {
 
 // 리플렉션 배열 필드의 컨테이너다(Docs/Design/ReflectionFoundations.ko.md 5.6절). 부분 특수화로만
 // 고르며(requires 탐지 없음) Element는 원소의 C++ 형식이다: Array<E>는 E(스칼라·String·Name·Guid·
-// AssetId·Digest·enum·SoftObjectRef·WeakRef·ClassRef·참조 없는 struct), ObjectRefArray<T>는
+// AssetId·Digest·enum·SoftObjectRef·WeakObjectRef·ClassRef·참조 없는 struct), ObjectRefArray<T>는
 // ObjectRef<T>(원소 null 허용), StructRefArray<S>는 참조 struct S다. Registry는 원소를 Registry가
 // 관리하는 컨테이너(ObjectRefArray·StructRefArray)인지다.
 template <class T>
@@ -165,12 +166,12 @@ struct MapField<ObjectRefMap<K, T>> {
 };
 
 // 리플렉션 정적 배열 필드(T x[N] — 리플렉션 B9g, Docs/Design/ReflectionExtensions.ko.md 8절)다.
-// 부분 특수화로만 고르며 Element는 원소 C++ 형식(단일 값·ObjectRef·WeakRef·ClassRef·SoftObjectRef·
-// enum·struct — 참조 struct 포함), Count는 N이다. 원소가 소유 객체 저장소 안에 있으므로 Registry
-// 컨테이너가 아니다(ObjectRef 원소의 쓰기는 SetReference의 주소 범위 검사를 그대로 지난다).
-// 다차원 배열(T x[M][N])은 Element가 다시 배열이라 FieldValueKind가 StaticArray이고 성질 표의
-// 정적 배열 원소가 아니므로 생성 codec의 static_assert가 거부한다(MetaCompiler RMC2307이 먼저
-// 막는다).
+// 부분 특수화로만 고르며 Element는 원소 C++ 형식(단일
+// 값·ObjectRef·WeakObjectRef·ClassRef·SoftObjectRef· enum·struct — 참조 struct 포함), Count는
+// N이다. 원소가 소유 객체 저장소 안에 있으므로 Registry 컨테이너가 아니다(ObjectRef 원소의 쓰기는
+// SetReference의 주소 범위 검사를 그대로 지난다). 다차원 배열(T x[M][N])은 Element가 다시 배열이라
+// FieldValueKind가 StaticArray이고 성질 표의 정적 배열 원소가 아니므로 생성 codec의 static_assert가
+// 거부한다(MetaCompiler RMC2307이 먼저 막는다).
 template <class T>
 struct StaticArrayField {
     static constexpr bool Supported = false;
