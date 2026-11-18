@@ -61,7 +61,9 @@ constexpr uint32 MaxMipLevels = 16;
 constexpr uint64 TexturePlacementAlignment = D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT;
 // 업로드 ring 안 버퍼 복사 원본 정렬이다.
 constexpr uint64 BufferUploadAlignment = 16;
-constexpr uint32 ConstantCount = sizeof(DrawConstants) / sizeof(uint32);
+// 그리기별 상수 b0의 루트 상수 수다. 파이프라인 크기와 무관하게 계약 최대(32개)를 둬 root
+// signature를 하나로 유지한다(RenderBase 4.4절 GX4 SX2 구현).
+constexpr uint32 ConstantCount = MaxDrawConstantBytes / sizeof(uint32);
 // 스왑체인 하나가 파괴될 때 retire 목록에 넣는 항목 수(스왑체인 + 버퍼마다 하나)다.
 constexpr usize SwapChainRetireEntries = 1 + SwapChainBufferCount;
 // 소멸 때까지 놓지 않을 retire 항목의 fence 값이다. 정상 동작 중의 완료 값은 이 값에 닿지
@@ -70,7 +72,8 @@ constexpr uint64 RetainUntilDestructionFence = NumericLimits<uint64>::Max();
 // dxgidebug.h의 DXGI_DEBUG_DXGI다(dxguid.lib 없이 쓰려고 값을 직접 둔다).
 constexpr GUID DxgiDebugDxgi = {
     0x25cddaa4, 0xb1c6, 0x47e1, {0xac, 0x3e, 0x98, 0x87, 0x5b, 0x5a, 0x2e, 0x2a}};
-static_assert(ConstantCount == 20, "DrawConstants must fit in 20 root constants");
+static_assert(MaxDrawConstantBytes % sizeof(uint32) == 0,
+              "Draw constants must be a whole number of root constants");
 // root signature 매개변수 번호다: 그리기 상수(b0), PS 텍스처(t0)·샘플러(s0) table, 버퍼 view slot
 // table(t1–t4, 단계 모두, PipelineDesc 고정 배치).
 constexpr UINT RootConstants = 0;
@@ -237,6 +240,8 @@ struct PipelineRecord {
     // VS·PS(compute면 CS)가 읽는 버퍼 view slot과 CS가 쓰는 slot이다(리플렉션).
     DrawBufferSlots bufferSlots;
     DrawBufferSlots writeSlots;
+    // 선언한 그리기별 상수 byte 수다(SetDrawConstants 크기 검사, dispatch 때 올릴 수).
+    uint32 drawConstantBytes = 0;
     // compute 파이프라인이다(Dispatch만 쓴다).
     bool compute = false;
     D3D_PRIMITIVE_TOPOLOGY topology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
@@ -732,9 +737,19 @@ private:
 
     // 셰이더가 선언한 자원이 고정 배치(PipelineDesc) 안인지 보고 버퍼 view slot 배치를 slots에
     // 더한다. b0 상수, PS t0 텍스처·s0 샘플러, t1–t4 버퍼 SRV만 받는다. 두 단계가 같은 slot을 다른
-    // 종류로 읽거나 배치 밖 자원(UAV 포함)이면 InvalidArgument다.
-    Result<void> ReflectBindings(ID3DBlob* code, ShaderStage stage, DrawBufferSlots& slots,
-                                 DrawBufferSlots* writeSlots) noexcept;
+    // 종류로 읽거나 배치 밖 자원(UAV 포함)이거나 b0 cbuffer가 drawConstantBytes보다 크면
+    // InvalidArgument다.
+    Result<void> ReflectBindings(ID3DBlob* code, ShaderStage stage, uint32 drawConstantBytes,
+                                 DrawBufferSlots& slots, DrawBufferSlots* writeSlots) noexcept;
+
+    // 셰이더 단계의 그리기별 상수 블록(shaderBytes)이 파이프라인 선언보다 큰 경우의
+    // InvalidArgument다(LastError에 두 크기).
+    Result<void> RejectDrawConstants(ShaderStage stage, uint32 shaderBytes,
+                                     uint32 drawConstantBytes) noexcept;
+
+    // SetDrawConstants 거부(묶인 파이프라인 없음, 크기가 선언과 다름)의 InvalidArgument다.
+    Result<void> RejectDrawConstantSize(bool pipelineBound, usize bytes,
+                                        uint32 drawConstantBytes) noexcept;
 
     Result<void> Reject(const Diagnostic& message) noexcept;
 
@@ -860,7 +875,7 @@ private:
 
     void SetTexture(TextureHandle handle) noexcept override;
 
-    void SetConstants(const DrawConstants& constants) noexcept override;
+    Result<void> SetDrawConstants(Span<const uint8> bytes) noexcept override;
 
     void SetBufferView(uint32 slot, BufferViewHandle handle) noexcept override;
 
@@ -1046,8 +1061,8 @@ private:
     uint32 nullBufferUav_ = 0;
     DescriptorPool cpuUavs_;
     uint32 scratchDsv_ = 0;
-    // 마지막 SetConstants 값이다(compute root 상수로도 올린다).
-    DrawConstants constants_;
+    // 기록의 그리기별 상수 값이다(기록 시작 때 0, compute root 상수로도 올린다).
+    alignas(16) uint8 constants_[MaxDrawConstantBytes] = {};
     uint32 stencilReference_ = 0;
     Array<BufferState> bufferStates_;
     // 기록 중 열린 분리 전이 짝이다.

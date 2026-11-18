@@ -58,7 +58,7 @@ inline constexpr uint32 MaxSplitEventsPerRecord = 64;
 inline constexpr uint32 MaxPipelineBindings = 2 + 2 * MaxDrawBufferViews;
 // framebuffer 하나의 attachment 수 상한이다(색 MaxColorTargets + 깊이 1).
 inline constexpr uint32 MaxPassAttachments = MaxColorTargets + 1;
-// 그리기 상수 push constant 범위의 단계다(모든 파이프라인 layout이 같은 범위를 둬 서로 호환된다).
+// 그리기별 상수 push constant 범위의 단계다(모든 파이프라인 layout이 같은 범위를 둬 서로 호환된다).
 inline constexpr VkShaderStageFlags ConstantStages =
     VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
 inline constexpr uint32 RequestedSwapChainImages = 3;
@@ -67,7 +67,9 @@ inline constexpr uint32 MaxSwapChainImages = 8;
 inline constexpr uint64 UploadAlignment = 16;
 // 정점 버퍼 offset 정렬(속성 성분 크기의 최댓값)이다.
 inline constexpr uint64 VertexOffsetAlignment = 4;
-inline constexpr uint32 ConstantBytes = sizeof(DrawConstants);
+// 그리기별 상수 push constant 범위다. 파이프라인 크기와 무관하게 계약 최대를 둬 모든 layout의
+// 범위가 같다(파이프라인을 바꿔도 descriptor set·상수가 유지된다, RenderBase 4.4절 GX4 SX2 구현).
+inline constexpr uint32 ConstantBytes = MaxDrawConstantBytes;
 // 소멸 때까지 놓지 않을 회수 항목의 fence 값이다.
 inline constexpr uint64 RetainUntilDestructionFence = NumericLimits<uint64>::Max();
 // 한 업로드 묶음 안에서 겹침을 추적하는 버퍼 쓰기 구간 수다(넘치면 barrier를 두고 비운다).
@@ -202,6 +204,8 @@ struct PipelineRecord {
     DrawBufferSlots writeSlots;
     uint32 strides[MaxVertexStreams] = {};
     uint32 streamMask = 0;
+    // 선언한 그리기별 상수 byte 수다(SetDrawConstants 크기 검사, BuildPipelineLayout 대조).
+    uint32 drawConstantBytes = 0;
     bool compute = false;
     // 깊이·스텐실을 쓴다(읽기 전용 깊이 attachment에서 그리기를 거른다).
     bool writesDepthStencil = false;
@@ -480,7 +484,7 @@ private:
     SplitTransition BeginTransitions(Span<const ResourceTransition> transitions) noexcept override;
     void EndTransitions(SplitTransition split,
                         Span<const ResourceTransition> transitions) noexcept override;
-    void SetConstants(const DrawConstants& constants) noexcept override;
+    Result<void> SetDrawConstants(Span<const uint8> bytes) noexcept override;
     void Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept override;
     void DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept override;
     Result<void> CopyPassTarget(TextureHandle destination) noexcept override;
@@ -640,12 +644,16 @@ private:
     Result<void> MatchVertexInputs(const CompiledShader& vertex,
                                    const VertexLayout& layout) noexcept;
     // 단계들의 리플렉션을 고정 배치(PipelineDesc·ComputePipelineDesc)와 대조하고 set
-    // layout·파이프라인 layout·binding 표를 record에 만든다. compute면 pixel은 null이다. 실패하면
+    // layout·파이프라인 layout·binding 표를 record에 만든다. 단계의 push constant 블록이
+    // record.drawConstantBytes보다 크면 InvalidArgument다. compute면 pixel은 null이다. 실패하면
     // 만든 객체를 파괴한다.
     Result<void> BuildPipelineLayout(const CompiledShader& first, const CompiledShader* pixel,
                                      bool compute, PipelineRecord& record) noexcept;
     void DestroyPipelineLayout(PipelineRecord& record) noexcept;
     Result<void> Reject(const char* message) noexcept;
+    // SetDrawConstants 거부(묶인 파이프라인 없음, 크기가 선언과 다름)의 InvalidArgument다.
+    Result<void> RejectDrawConstantSize(bool pipelineBound, usize bytes,
+                                        uint32 drawConstantBytes) noexcept;
     Result<VkShaderModule> CreateShaderModule(const CompiledShader& shader) noexcept;
 
     // --- VulkanCommands.cpp ---

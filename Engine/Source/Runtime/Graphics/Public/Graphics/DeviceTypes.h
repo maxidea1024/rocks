@@ -521,10 +521,50 @@ struct ShaderSource {
     StringView glsl;
 };
 
+// 그리기별 상수(RenderBase 결정 R7, ShaderSystem 7.2절 2항 루트 상수)의 크기 규칙이다. 파이프라인이
+// drawConstantBytes로 선언하며 0(없음)부터 MaxDrawConstantBytes까지 DrawConstantAlignment 배수다.
+// 최대는 Rocks 루트 상수 계약(32 DWORD = Vulkan push constant 최소 보장)과 같다.
+inline constexpr uint32 MaxDrawConstantBytes = RootConstantContractBytes;
+inline constexpr uint32 DrawConstantAlignment = 16;
+
+// drawConstantBytes 값이 규칙(DrawConstantAlignment 배수, MaxDrawConstantBytes 이하) 안인지다. 0은
+// 유효하다(그리기별 상수를 쓰지 않는 파이프라인).
+bool IsValidDrawConstantBytes(uint32 bytes) noexcept;
+
+// 그리기별 상수 구조체를 CommandContext::SetDrawConstants가 받는 byte view로 본다. 결과의 수명은
+// constants와 같다. 크기 규칙(16 byte 배수, 128 byte 이하)과 trivially copyable을 컴파일 시간에
+// 검사한다. Core AsBytes는 float 멤버(표현이 여럿)를 받지 않으므로 GPU 상수용으로 따로 둔다. 멤버
+// 배치는 셰이더 블록과 같아야 한다(ShaderSystem 7.2절 5항, 패딩은 명시 멤버로 둔다).
+//
+// 행렬 멤버는 행 벡터 규약(p' = p · M)의 4x4 행렬을 행 우선(row-major)으로 담는다: Core Mat4의 저장
+// 순서(m[row * 4 + column], 이동은 m[12..14]) 그대로이며 올릴 때 전치하지 않는다. 셰이더는
+// mul(float4(position, 1), transform)으로 쓰고, 장치가 행렬을 행 우선으로 담는다(UE와 같다,
+// ShaderSystem 7.2절 6항): D3D는 HLSL을 D3DCOMPILE_PACK_MATRIX_ROW_MAJOR(FXC /Zpr)로 컴파일하고,
+// OpenGL ES는 byte를 vec4 배열(vu_h·pu_h)로 그대로 올리며 GLSL ES 원문이
+// mat4(vu_h[0], vu_h[1], vu_h[2], vu_h[3]) * v로 쓴다(열 우선으로 읽은 Mᵀ와 v의 곱 = v·M,
+// 쿠킹된 ESSL과 같다).
+//
+// 사용 예:
+//   struct TintConstants { float color[4]; };   // HLSL cbuffer DrawConstants { float4 color; }
+//   desc.drawConstantBytes = sizeof(TintConstants);
+//   ...
+//   const TintConstants tint = {{1, 0, 0, 1}};
+//   auto set = commands.SetDrawConstants(DrawConstantBytes(tint));
+template <typename T>
+Span<const uint8> DrawConstantBytes(const T& constants) noexcept {
+    static_assert(IsTriviallyCopyableV<T>, "Draw constants must be trivially copyable");
+    static_assert(sizeof(T) % DrawConstantAlignment == 0,
+                  "Draw constants must be a multiple of 16 bytes");
+    static_assert(sizeof(T) <= MaxDrawConstantBytes, "Draw constants must not exceed 128 bytes");
+    return Span<const uint8>(reinterpret_cast<const uint8*>(&constants), sizeof(T));
+}
+
 // 그리기 파이프라인 설정이다. 모든 파이프라인은 같은 고정 자원 배치를 쓴다(파라미터 바인딩 GX6 전의
 // 개발 경로):
-// - 그리기 상수(DrawConstants, HLSL b0 / GLSL ES 루트 상수 에뮬레이션 배열 uniform highp vec4
-//   vu_h[5]·pu_h[5])
+// - 그리기별 상수 drawConstantBytes byte(HLSL b0의 cbuffer DrawConstants / GLSL ES 루트 상수
+//   에뮬레이션 배열 uniform highp vec4 vu_h[N]·pu_h[N], N = byte / 16). 셰이더 단계마다 읽는
+//   블록 크기(HLSL cbuffer 크기, GLSL ES 배열의 active 크기 × 16)가 drawConstantBytes 이하여야
+//   하고(작아도 된다), 넘으면 InvalidArgument다. 값은 CommandContext::SetDrawConstants로 올린다.
 // - PS 텍스처 하나(HLSL t0·s0 / GLSL ES layout(binding = 0) sampler2D ps0). 셰이더는 묶을 텍스처의
 //   차원에 맞는 타입(Texture2D·Texture2DArray·Texture3D·TextureCube·TextureCubeArray / sampler2D·
 //   sampler2DArray·sampler3D·samplerCube·samplerCubeArray)을 선언한다. 샘플러는 묶은 텍스처의
@@ -563,6 +603,7 @@ struct ShaderSource {
 //   desc.depthFormat = PixelFormat::D32Float;
 //   desc.depthStencil.depthTest = true;
 //   desc.depthStencil.depthWrite = true;   // depthCompare 기본 GreaterEqual
+//   desc.drawConstantBytes = 64;           // 셰이더가 float4x4 하나를 읽는다
 struct PipelineDesc {
     ShaderSource vertex;
     ShaderSource pixel;
@@ -575,13 +616,16 @@ struct PipelineDesc {
     PixelFormat depthFormat = PixelFormat::Unknown;
     DepthStencilState depthStencil;
     RasterState raster;
+    // 그리기별 상수 byte 수다(0 = 없음, IsValidDrawConstantBytes).
+    uint32 drawConstantBytes = 0;
 };
 
 // 장치와 무관한 파이프라인 상태 규칙이다(backend가 생성 전에 부른다). 위반은 InvalidArgument다:
-// colorTargetCount가 MaxColorTargets 초과, 무효한 형식 번호, 색 attachment도 깊이도 없음, 깊이
-// attachment 없이 깊이·스텐실 시험, 스텐실 plane 없는 깊이 형식에 스텐실 시험, 모르는 enum 값
-// (기본도형·비교·스텐실 연산·블렌드 계수·식·쓰기 mask·컬). 형식이 렌더 타깃·깊이 타깃이 될 수
-// 있는지는 장치 능력이라 backend가 Unsupported로 공개한다.
+// drawConstantBytes가 규칙 밖(IsValidDrawConstantBytes), colorTargetCount가 MaxColorTargets 초과,
+// 무효한 형식 번호, 색 attachment도 깊이도 없음, 깊이 attachment 없이 깊이·스텐실 시험, 스텐실
+// plane 없는 깊이 형식에 스텐실 시험, 모르는 enum 값(기본도형·비교·스텐실 연산·블렌드 계수·식·쓰기
+// mask·컬). 형식이 렌더 타깃·깊이 타깃이 될 수 있는지는 장치 능력이라 backend가 Unsupported로
+// 공개한다.
 Result<void> ValidatePipelineDesc(const PipelineDesc& desc) noexcept;
 
 // 파이프라인이 장치 능력(DeviceCaps) 안인지다(backend가 ValidatePipelineDesc 다음에 부른다). 넘으면
@@ -596,7 +640,8 @@ bool PipelineWritesDepthStencil(const PipelineDesc& desc) noexcept;
 
 // compute 파이프라인 설정이다. 진입점은 HLSL CSMain, GLSL ES는 main(#version 320 es compute 셰이더,
 // layout(local_size_*))이다. 자원 배치(GX6 전 개발 경로 고정 배치):
-// - 그리기 상수 DrawConstants(HLSL b0 / GLSL ES uniform highp vec4 cu_h[5])
+// - 그리기별 상수 drawConstantBytes byte(HLSL b0 / GLSL ES uniform highp vec4 cu_h[N], N = byte /
+//   16). 규칙은 PipelineDesc와 같다.
 // - 읽기 버퍼 view slot 0–3(SetBufferView): HLSL t1–t4, GLSL ES typed는 텍스처 유닛 1 + slot
 //   (samplerBuffer), 구조화·raw는 storage block binding slot
 // - 쓰기 버퍼 view slot 0–3(SetWritableBufferView): HLSL u0–u3(RWBuffer<T>·RWStructuredBuffer<T>·
@@ -605,21 +650,13 @@ bool PipelineWritesDepthStencil(const PipelineDesc& desc) noexcept;
 // 배치 밖 자원은 InvalidArgument다.
 struct ComputePipelineDesc {
     ShaderSource shader;
+    // 그리기별 상수 byte 수다(0 = 없음, IsValidDrawConstantBytes).
+    uint32 drawConstantBytes = 0;
 };
 
-// 그리기마다 넘기는 상수다. color는 선형 RGBA다.
-//
-// transform은 행 벡터 규약(p' = p · M)의 4x4 행렬을 행 우선(row-major)으로 담는다: Core Mat4의 저장
-// 순서(m[row * 4 + column], 이동은 m[12..14]) 그대로이며 올릴 때 전치하지 않는다. 셰이더는
-// mul(float4(position, 1), transform)으로 쓰고, 장치가 행렬을 행 우선으로 담는다(UE와 같다,
-// ShaderSystem 7.2절 6항): D3D12는 HLSL을 D3DCOMPILE_PACK_MATRIX_ROW_MAJOR(FXC /Zpr)로 컴파일하고,
-// OpenGL ES는 80 byte를 vec4 5개(vu_h·pu_h)로 그대로 올리며 GLSL ES 원문이
-// mat4(vu_h[0], vu_h[1], vu_h[2], vu_h[3]) * v로 쓴다(열 우선으로 읽은 Mᵀ와 v의 곱 = v·M,
-// 쿠킹된 ESSL과 같다).
-struct DrawConstants {
-    float transform[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
-    float color[4] = {1, 1, 1, 1};
-};
+// 장치와 무관한 compute 파이프라인 규칙이다(backend가 생성 전에 부른다). 위반은 InvalidArgument다:
+// drawConstantBytes가 규칙 밖.
+Result<void> ValidateComputePipelineDesc(const ComputePipelineDesc& desc) noexcept;
 
 struct ClearColor {
     float r = 0.0f;

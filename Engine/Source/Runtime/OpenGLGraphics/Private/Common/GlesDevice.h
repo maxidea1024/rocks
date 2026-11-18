@@ -40,14 +40,15 @@ inline constexpr char RawWritableStorageBlockPrefix[] = "type_RWByteAddressBuffe
 // typed는 image unit n이다(ComputePipelineDesc 고정 배치).
 inline constexpr GLuint WritableStorageBindingBase = MaxDrawBufferViews;
 
-// 그리기 상수(DrawConstants)를 담는 루트 상수 에뮬레이션 배열의 이름과 vec4 수다(ShaderSystem
-// 7.2절 4항: `<단계>u_<타입>`, UE `$Globals`의 pu_h 자리).
+// 그리기별 상수를 담는 루트 상수 에뮬레이션 배열(uniform highp vec4 <이름>[N])의 이름과 vec4 한
+// 칸의 byte 수다(ShaderSystem 7.2절 4항: `<단계>u_<타입>`, UE `$Globals`의 pu_h 자리). N은 셰이더가
+// 정하며 N × 16이 파이프라인의 drawConstantBytes 이하여야 한다.
 inline constexpr char VertexRootConstantsName[] = "vu_h";
 inline constexpr char PixelRootConstantsName[] = "pu_h";
 inline constexpr char ComputeRootConstantsName[] = "cu_h";
-inline constexpr GLsizei RootConstantVectors = sizeof(DrawConstants) / (4 * sizeof(float));
-static_assert(sizeof(DrawConstants) == RootConstantVectors * 4 * sizeof(float),
-              "DrawConstants must be a whole number of vec4 slots");
+inline constexpr uint32 RootConstantVectorBytes = 4 * sizeof(GLfloat);
+static_assert(MaxDrawConstantBytes % RootConstantVectorBytes == 0,
+              "Draw constants must be a whole number of vec4 slots");
 
 // 로그 카테고리다(LoggingSystem 13절: 장치 생성·present 실패·장치 손실, 검증 계층 메시지).
 inline constexpr LogCategory LogGraphicsOpenGL{"Graphics.OpenGL"};
@@ -152,10 +153,15 @@ inline uint64 MipBytes(const TextureRecord& record, uint32 level) noexcept {
 struct PipelineRecord {
     GLuint program = 0;
     GLuint vertexArray = 0;
-    // 루트 상수 에뮬레이션 배열 위치다(셰이더가 쓰지 않으면 -1).
+    // 루트 상수 에뮬레이션 배열 위치(셰이더가 쓰지 않으면 -1)와 active vec4 수다.
     GLint vertexConstants = -1;
     GLint pixelConstants = -1;
     GLint computeConstants = -1;
+    GLsizei vertexConstantVectors = 0;
+    GLsizei pixelConstantVectors = 0;
+    GLsizei computeConstantVectors = 0;
+    // 선언한 그리기별 상수 byte 수다(SetDrawConstants 크기 검사).
+    uint32 drawConstantBytes = 0;
     // stream별 stride와 배치가 선언한 stream mask다.
     uint32 strides[MaxVertexStreams] = {};
     uint32 streamMask = 0;
@@ -326,7 +332,7 @@ private:
     void SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64 offset) noexcept override;
     void SetTexture(TextureHandle handle) noexcept override;
     void SetBufferView(uint32 slot, BufferViewHandle view) noexcept override;
-    void SetConstants(const DrawConstants& constants) noexcept override;
+    Result<void> SetDrawConstants(Span<const uint8> bytes) noexcept override;
     void Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept override;
     void DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept override;
     Result<void> CopyPassTarget(TextureHandle destination) noexcept override;
@@ -384,6 +390,9 @@ private:
 
     // message를 LastError에 두고 error로 실패한다.
     Result<void> Reject(const Diagnostic& message, ErrorCode error) noexcept;
+    // SetDrawConstants 거부(묶인 파이프라인 없음, 크기가 선언과 다름)의 InvalidArgument다.
+    Result<void> RejectDrawConstantSize(bool pipelineBound, usize bytes,
+                                        uint32 drawConstantBytes) noexcept;
 
     // 자원 생성·파괴는 어느 표면에 붙어 있든 이 context면 된다. 붙어 있지 않을 때만 장치 표면에
     // 붙인다.
@@ -449,6 +458,10 @@ private:
     // readonly로 선언해야 하고, 쿠킹 경로는 SPIR-V 리플렉션이 거른다).
     Result<void> ReflectBufferSlots(GLuint program, DrawBufferSlots& slots,
                                     DrawBufferSlots* writeSlots) noexcept;
+    // 링크한 프로그램의 루트 상수 에뮬레이션 배열(vu_h·pu_h·cu_h) 위치와 active vec4 수를 record에
+    // 채운다. vec4 배열이 아니거나 active 크기 × 16이 record.drawConstantBytes보다 크면
+    // InvalidArgument다.
+    Result<void> ReflectRootConstants(GLuint program, PipelineRecord& record) noexcept;
     bool BufferViewsBound(const PipelineRecord& pipeline) const noexcept;
     // 파이프라인이 읽는 slot의 view를 유닛·binding에 묶는다(그리기 직전).
     void ApplyBufferViews(const PipelineRecord& pipeline) noexcept;
@@ -550,7 +563,8 @@ private:
     GLuint passFramebuffer_ = 0;
     // glPolygonOffsetClampEXT다(GL_EXT_polygon_offset_clamp가 없으면 null).
     void (*polygonOffsetClamp_)(GLfloat, GLfloat, GLfloat) = nullptr;
-    DrawConstants constants_;
+    // 기록의 그리기별 상수 값이다(기록 시작 때 0, 그리기·dispatch 때 program에 올린다).
+    alignas(16) uint8 constants_[MaxDrawConstantBytes] = {};
     uint64 ignoredDraws_ = 0;
     uint64 validationErrors_ = 0;
     // 마지막으로 제출한 fence 값이다.

@@ -50,7 +50,27 @@ public:
     // 읽기를 보장한다(D3D12는 버퍼 암묵 승격, Vulkan은 업로드 기록 끝 barrier, D3D11·OpenGL ES는
     // 드라이버).
     virtual void SetBufferView(uint32 slot, BufferViewHandle view) noexcept = 0;
-    virtual void SetConstants(const DrawConstants& constants) noexcept = 0;
+
+    // 그리기별 상수(RenderBase 결정 R7)를 bytes로 바꾼다. 묶인 파이프라인(그래픽·compute)이 있어야
+    // 하고 bytes.Size()가 그 파이프라인의 drawConstantBytes와 같아야 한다(0 byte 파이프라인에는 빈
+    // Span만 맞다). bytes는 호출 안에서 복사하므로 호출 뒤 버려도 된다.
+    //
+    // 값의 수명: 기록(BeginFrame·BeginOffscreen·BeginPass)마다 MaxDrawConstantBytes byte 값 하나가
+    // 0으로 시작한다. 이 함수는 그 앞 bytes.Size() byte를 바꾸고, SetPipeline은 값을 바꾸지 않는다.
+    // 그리기·dispatch는 묶인 파이프라인이 선언한 앞 drawConstantBytes byte를 읽는다. 그래서 같은
+    // 크기 파이프라인으로 바꿔도 다시 올릴 필요가 없고, 올리지 않은 상수는 0이다.
+    //
+    // 사용 예(셰이더 cbuffer DrawConstants { float4x4 transform; float4 color; }):
+    //   struct ObjectConstants { float transform[16]; float color[4]; };   // 80 byte
+    //   desc.drawConstantBytes = sizeof(ObjectConstants);                  // 파이프라인 생성
+    //   ...
+    //   commands.SetPipeline(pipeline);
+    //   auto set = commands.SetDrawConstants(DrawConstantBytes(object));
+    //   commands.Draw(3);
+    //
+    // 실패: 기록 중 아님·묶인 파이프라인 없음·크기가 선언과 다름 InvalidArgument(LastError에 두
+    // 크기). 실패하면 값은 그대로다.
+    virtual Result<void> SetDrawConstants(Span<const uint8> bytes) noexcept = 0;
 
     // 기본도형을 그린다(파이프라인 topology, 정점 vertexCount개 × 인스턴스 instanceCount개,
     // firstVertex부터). base

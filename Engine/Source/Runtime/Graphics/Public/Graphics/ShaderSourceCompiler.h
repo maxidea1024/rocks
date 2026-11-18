@@ -81,7 +81,8 @@ struct CompiledShader {
     // 정점 셰이더만 채운다(시스템 값 입력은 뺀다).
     Array<ShaderVertexInput> vertexInputs;
     Array<ShaderBinding> bindings;
-    // 그리기 상수 블록(DrawConstants)을 읽으면 그 크기(byte), 안 읽으면 0이다.
+    // 그리기별 상수 블록(cbuffer DrawConstants, push constant)을 읽으면 읽는 끝 byte, 안 읽으면
+    // 0이다. 장치는 이 값이 파이프라인의 drawConstantBytes 이하인지 본다.
     uint32 rootConstantBytes = 0;
 };
 

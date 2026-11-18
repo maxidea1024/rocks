@@ -217,7 +217,7 @@ Result<void> D3D12Device::BeginRecording() noexcept {
     }
 
     bufferStates_.Clear();
-    constants_ = DrawConstants{};
+    platform::MemoryZero(constants_, sizeof(constants_));
     stencilReference_ = 0;
     return Result<void>::Success();
 }
@@ -299,7 +299,7 @@ void D3D12Device::StartPass(const PassDesc& pass) noexcept {
         list_->SetGraphicsRootDescriptorTable(RootBufferViews + slot, srvs_.Gpu(nullBufferSrv_));
     }
 
-    list_->SetGraphicsRoot32BitConstants(RootConstants, ConstantCount, &constants_, 0);
+    list_->SetGraphicsRoot32BitConstants(RootConstants, ConstantCount, constants_, 0);
 }
 
 void D3D12Device::SetPipeline(PipelineHandle handle) noexcept {
@@ -392,10 +392,24 @@ void D3D12Device::SetTexture(TextureHandle handle) noexcept {
     }
 }
 
-void D3D12Device::SetConstants(const DrawConstants& constants) noexcept {
+Result<void> D3D12Device::SetDrawConstants(Span<const uint8> bytes) noexcept {
+    platform::LockGuard lock(gate_);
+    const PipelineRecord* pipeline = recording_ ? pipelines_.Find(boundPipeline_) : nullptr;
+    if (pipeline == nullptr || bytes.Size() != pipeline->drawConstantBytes) {
+        return RejectDrawConstantSize(pipeline != nullptr, bytes.Size(),
+                                      pipeline != nullptr ? pipeline->drawConstantBytes : 0u);
+    }
+
+    if (bytes.Size() == 0) {
+        return Result<void>::Success();
+    }
+
+    // 그래픽 root에는 바로 올리고(compute 파이프라인이 묶여 있어도 다음 그리기가 같은 값을 본다),
     // compute는 dispatch 때 같은 값을 compute root 상수로 올린다.
-    constants_ = constants;
-    list_->SetGraphicsRoot32BitConstants(RootConstants, ConstantCount, &constants, 0);
+    platform::MemoryCopy(constants_, bytes.Data(), bytes.Size());
+    list_->SetGraphicsRoot32BitConstants(
+        RootConstants, static_cast<UINT>(bytes.Size() / sizeof(uint32)), constants_, 0);
+    return Result<void>::Success();
 }
 
 void D3D12Device::SetBufferView(uint32 slot, BufferViewHandle handle) noexcept {

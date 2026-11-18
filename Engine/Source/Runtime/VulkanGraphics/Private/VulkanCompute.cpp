@@ -23,8 +23,8 @@ constexpr VkAccessFlags BufferAccess =
 Result<PipelineHandle>
 VulkanDevice::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
     platform::LockGuard lock(gate_);
-    if (desc.shader.hlsl.ByteCount() == 0) {
-        auto failed = Reject("compute pipeline needs HLSL source");
+    if (desc.shader.hlsl.ByteCount() == 0 || !ValidateComputePipelineDesc(desc)) {
+        auto failed = Reject("compute pipeline needs HLSL source and valid drawConstantBytes");
         return Result<PipelineHandle>::Failure(failed.Error());
     }
 
@@ -50,6 +50,7 @@ VulkanDevice::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
 
     PipelineRecord record;
     record.compute = true;
+    record.drawConstantBytes = desc.drawConstantBytes;
     auto layout = BuildPipelineLayout(shader, nullptr, true, record);
     if (!layout) {
         return Result<PipelineHandle>::Failure(layout.Error());

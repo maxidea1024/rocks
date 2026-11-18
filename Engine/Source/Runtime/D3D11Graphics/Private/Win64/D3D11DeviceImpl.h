@@ -107,6 +107,8 @@ struct PipelineRecord {
     // VS·PS(compute면 CS)가 읽는 버퍼 view slot과 CS가 쓰는 slot이다(리플렉션).
     DrawBufferSlots bufferSlots;
     DrawBufferSlots writeSlots;
+    // 선언한 그리기별 상수 byte 수다(SetDrawConstants 크기 검사).
+    uint32 drawConstantBytes = 0;
     bool compute = false;
     // 깊이·스텐실을 쓴다(읽기 전용 깊이 attachment에서 그리기를 거른다).
     bool writesDepthStencil = false;
@@ -343,7 +345,7 @@ private:
     void SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64 offset) noexcept override;
     void SetTexture(TextureHandle texture) noexcept override;
     void SetBufferView(uint32 slot, BufferViewHandle view) noexcept override;
-    void SetConstants(const DrawConstants& constants) noexcept override;
+    Result<void> SetDrawConstants(Span<const uint8> bytes) noexcept override;
     void Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept override;
     void DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept override;
     Result<void> CopyPassTarget(TextureHandle destination) noexcept override;
@@ -414,6 +416,10 @@ private:
     // 정점 셰이더 입력 대조 실패를 남기고 InvalidArgument를 돌려준다.
     Result<void> Reject(const Diagnostic& message) noexcept;
 
+    // SetDrawConstants 거부(묶인 파이프라인 없음, 크기가 선언과 다름)의 InvalidArgument다.
+    Result<void> RejectDrawConstantSize(bool pipelineBound, usize bytes,
+                                        uint32 drawConstantBytes) noexcept;
+
     // 이 장치가 형식·용도를 지원하지 않는다는 진단을 남기고 Unsupported를 돌려준다(잠금 안).
     template <class T>
     Result<T> UnsupportedFormat(PixelFormat format) noexcept {
@@ -472,8 +478,9 @@ private:
     // --- 버퍼 view(D3D11Buffers.cpp) ---
     // 셰이더 자원이 고정 배치(PipelineDesc·ComputePipelineDesc) 안인지 보고 버퍼 view slot 배치를
     // slots에, CS 쓰기 slot을 writeSlots에 더한다.
-    Result<void> ReflectBindings(ID3DBlob* code, ShaderStage stage, DrawBufferSlots& slots,
-                                 DrawBufferSlots* writeSlots) noexcept;
+    // b0 cbuffer가 drawConstantBytes보다 크면 InvalidArgument다(작은 것은 허용).
+    Result<void> ReflectBindings(ID3DBlob* code, ShaderStage stage, uint32 drawConstantBytes,
+                                 DrawBufferSlots& slots, DrawBufferSlots* writeSlots) noexcept;
     // 지금 파이프라인이 읽는 버퍼 view slot이 모두 맞는 view로 채워졌는지다(잠금 안).
     bool BufferViewsBound() const noexcept;
     Result<void> CheckVertexFormats(const VertexLayout& layout) noexcept;
@@ -486,7 +493,8 @@ private:
     // --- 기록(D3D11Frame.cpp) ---
 
     void BeginRecording(const Target& target, const PassDesc& pass) noexcept;
-    void WriteConstants(const DrawConstants& constants) noexcept;
+    // CPU 사본 constantValues_ 전체를 상수 버퍼에 WRITE_DISCARD로 쓴다.
+    void WriteConstants() noexcept;
     void ApplyVertexBuffer(uint32 stream) noexcept;
     bool StreamsBound() const noexcept;
 
@@ -564,8 +572,10 @@ private:
     HANDLE watcherEvent_ = nullptr;
     // 마지막으로 신호한 fence 값이다.
     uint64 fenceValue_ = 0;
-    // 그리기 상수(DrawConstants, b0) 동적 상수 버퍼다.
+    // 그리기별 상수(b0, VS·PS·CS) 동적 상수 버퍼(MaxDrawConstantBytes)와 그 CPU 사본이다. 사본은
+    // 기록 시작 때 0이고 SetDrawConstants가 앞부분을 바꾼다.
     ComRef<ID3D11Buffer> constants_;
+    alignas(16) uint8 constantValues_[MaxDrawConstantBytes] = {};
     Target target_;
     SwapChainHandle presentTarget_;
     TextureHandle white_;

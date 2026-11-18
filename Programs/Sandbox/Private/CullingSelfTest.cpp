@@ -182,6 +182,7 @@ struct Bench {
         desc.vertex = {sample::BuiltinShaderHlsl(), sample::BuiltinVertexGlsl()};
         desc.pixel = {sample::BuiltinShaderHlsl(), sample::BuiltinPixelGlsl()};
         desc.layout = {attributes, streams};
+        desc.drawConstantBytes = sizeof(sample::ObjectConstants);
         desc.colorFormats[0] = PixelFormat::RGBA8UnormSrgb;
         desc.raster.cullMode = cull;
         return device->CreatePipeline(desc);
@@ -245,7 +246,10 @@ void RunWindingChecks(Bench& bench, bool window, Array<uint8>& pixels) noexcept 
 
         auto draw = [&](CommandContext& commands) {
             commands.SetPipeline(pipeline.Value());
-            commands.SetConstants(DrawConstants{});
+            // 단위 변환·흰색이다(정점이 NDC 그대로 그려진다).
+            const sample::ObjectConstants identity;
+            Check(commands.SetDrawConstants(DrawConstantBytes(identity)).IsOk(),
+                  "identity draw constants are accepted");
             commands.SetTexture({});
             const VertexBufferBinding binding{bench.winding, 0};
             commands.SetVertexBuffers(0, Span<const VertexBufferBinding>(&binding, 1));
