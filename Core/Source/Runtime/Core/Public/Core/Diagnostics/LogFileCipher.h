@@ -48,4 +48,21 @@ public:
     virtual Result<usize> TrySeal(Span<const uint8> batch, bool last, Span<uint8> out) noexcept = 0;
 };
 
+// FileLogSink가 flush 묶음을 압축하는 변환 지점이다(Docs/Design/LoggingSystem.ko.md 14.1.7, L23).
+// Core는 Compression 아래 계층이라 인터페이스만 두고, 구현(zstd 고정 작업 공간 문맥)은 위
+// 계층(LogHost)이 둔다. 묶음 하나가 독립 frame 하나다(이어 붙인 frame은 그대로 올바른 스트림이다).
+// cipher가 있으면 압축한 frame을 봉인한다.
+//
+// 계약: Open 뒤 TryCompress는 할당하지 않는다. 출력은 Bound(batch 크기) 이하다.
+class LogBatchCompressor {
+public:
+    virtual ~LogBatchCompressor() noexcept = default;
+
+    // batchBytes를 압축한 결과의 최악 크기다.
+    virtual usize Bound(usize batchBytes) const noexcept = 0;
+
+    // batch를 독립 frame 하나로 압축해 out에 쓰고 쓴 byte 수를 돌려준다.
+    virtual Result<usize> TryCompress(Span<const uint8> batch, Span<uint8> out) noexcept = 0;
+};
+
 } // namespace rocks

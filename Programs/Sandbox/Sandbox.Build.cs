@@ -12,15 +12,19 @@ public sealed class SandboxProgram : ModuleRules
     public override NativeModuleInput Configure(BuildContext context)
     {
         bool shaderCompiler = context.Configuration != NativeConfiguration.Release;
+        // The self-test reads the trace file of --trace-file with TraceAnalysis (Developer) outside Release only.
+        bool traceAnalysis = context.Configuration != NativeConfiguration.Release;
         return new()
         {
             Name = "Sandbox",
             Kind = NativeModuleKind.Executable,
             Sources = context.Sources("Programs/Sandbox/Private"),
             PrivateIncludeDirectories = [context.PathInRoot("Programs/Sandbox/Private")],
-            PrivateDefines = [$"SANDBOX_SHADER_SOURCE_COMPILER={(shaderCompiler ? 1 : 0)}"],
+            PrivateDefines = [$"SANDBOX_SHADER_SOURCE_COMPILER={(shaderCompiler ? 1 : 0)}",
+                $"SANDBOX_TRACE_ANALYSIS={(traceAnalysis ? 1 : 0)}"],
             Dependencies = ["Engine", "HostConfig", "PlatformWindow", "RenderBase", "RenderGraph", "D3D12Graphics", "D3D11Graphics", "OpenGLGraphics", "VulkanGraphics",
-                .. (shaderCompiler ? ["ShaderFormatVulkan"] : Array.Empty<string>())]
+                .. (shaderCompiler ? ["ShaderFormatVulkan"] : Array.Empty<string>()),
+                .. (traceAnalysis ? ["TraceAnalysis"] : Array.Empty<string>())]
         };
     }
 }

@@ -46,7 +46,18 @@ TraceScopeName& TraceTaskRunName() noexcept;
 //   record->trace = TraceCreateTask();
 //   for (each dependency) TraceTaskDependency(record->trace.id, dependency->trace.id);
 inline TraceTaskInfo TraceCreateTask() noexcept {
-    return TraceTaskChannel.IsEnabled() ? detail::CreateTraceTask() : TraceTaskInfo{};
+    if (TraceTaskChannel.IsEnabled()) {
+        return detail::CreateTraceTask();
+    }
+
+    // 상관 id 전파는 채널과 무관하게 한다(로그가 같은 값을 쓴다, 로깅 L15). 스택이 비면 분기
+    // 하나다.
+    TraceTaskInfo info;
+    if (CorrelationDepth() != 0) {
+        info.context = CaptureCorrelation();
+    }
+
+    return info;
 }
 
 // 의존 추가(앞 prerequisite → 뒤 task)다. 둘 중 하나라도 기록하지 않은 task면 아무것도 하지 않는다.
@@ -96,28 +107,23 @@ inline void TraceTaskWaitEnd(const TraceTaskId& waited) noexcept {
     }
 }
 
-// task 실행 구간이다. 생성 때 Started를 기록하고, 저장한 문맥을 복원하고, CPU 구간 "Task.Run"을
-// 연다. 소멸 때 Finished를 기록하고 역순으로 닫는다. 기록하지 않은 task면 아무것도 하지 않는다.
+// task 실행 구간이다. 생성 때 저장한 문맥을 복원하고, 기록하는 task면 Started를 기록하고 CPU 구간
+// "Task.Run"을 연다. 소멸 때 역순으로 닫는다(Finished 기록 → 문맥 내림). 기록하지 않는 task이고
+// 넘겨받은 문맥도 없으면(채널 꺼짐·스택 빔) 생성·소멸이 분기 하나씩으로 끝난다(scheduler가 task마다
+// 거친다, 로깅 L15).
 // 스레드: 실행하는 스레드의 스택 객체로 쓴다.
 class TraceTaskScope {
 public:
-    explicit TraceTaskScope(const TraceTaskInfo& info) noexcept
-        : id_(info.id), context_(info.id.IsTraced() ? info.context : TraceContextToken{}) {
-        if (id_.IsTraced()) {
-            detail::BeginTraceTaskExecution(id_, previousTask_);
-            if (TraceCpuChannel.IsEnabled()) {
-                run_ = detail::BeginCpuScope(detail::TraceTaskRunName());
-            }
+    explicit TraceTaskScope(const TraceTaskInfo& info) noexcept {
+        // 기록 여부와 문맥 유무를 한 판정으로 묶는다.
+        if ((info.id.value | static_cast<uint64>(info.context.valid)) != 0) {
+            Begin(info);
         }
     }
 
     ~TraceTaskScope() noexcept {
-        if (id_.IsTraced()) {
-            if (run_ != 0) {
-                detail::EndCpuScope(run_);
-            }
-
-            detail::EndTraceTaskExecution(id_, previousTask_);
+        if (active_) {
+            End();
         }
     }
 
@@ -125,10 +131,14 @@ public:
     TraceTaskScope& operator=(const TraceTaskScope&) = delete;
 
 private:
+    void Begin(const TraceTaskInfo& info) noexcept;
+    void End() noexcept;
+
     TraceTaskId id_;
-    TraceContextScope context_;
     uint64 previousTask_ = 0;
     uint64 run_ = 0;
+    CorrelationPushState context_ = CorrelationPushState::None;
+    bool active_ = false;
 };
 
 } // namespace rocks

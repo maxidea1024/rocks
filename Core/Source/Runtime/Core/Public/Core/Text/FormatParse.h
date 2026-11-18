@@ -306,6 +306,11 @@ public:
         return error_;
     }
 
+    // 다음 토큰이 시작할 byte 위치다. 오류 뒤에는 오류를 알아챈 위치다.
+    constexpr usize Position() const noexcept {
+        return index_;
+    }
+
     // 지금까지 이름 자리를 만났는지다.
     constexpr bool SawNamedHole() const noexcept {
         return named_;

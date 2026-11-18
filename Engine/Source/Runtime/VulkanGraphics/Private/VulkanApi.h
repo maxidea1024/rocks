@@ -136,7 +136,9 @@ namespace rocks::graphics::vulkan {
     X(vkCmdCopyBufferToImage)                                                                      \
     X(vkCmdCopyImageToBuffer)                                                                      \
     X(vkCmdCopyImage)                                                                              \
-    X(vkCmdBlitImage)
+    X(vkCmdBlitImage)                                                                              \
+    X(vkCreateEvent)                                                                               \
+    X(vkDestroyEvent)
 
 #define ROCKS_VULKAN_DEVICE_OPTIONAL_FUNCTIONS(X)                                                  \
     X(vkCreateSwapchainKHR)                                                                        \
@@ -145,7 +147,11 @@ namespace rocks::graphics::vulkan {
     X(vkAcquireNextImageKHR)                                                                       \
     X(vkQueuePresentKHR)                                                                           \
     X(vkGetCalibratedTimestampsKHR)                                                                \
-    X(vkGetCalibratedTimestampsEXT)
+    X(vkGetCalibratedTimestampsEXT)                                                                \
+    X(vkCmdSetEvent2KHR)                                                                           \
+    X(vkCmdWaitEvents2KHR)                                                                         \
+    X(vkCmdResetEvent2KHR)                                                                         \
+    X(vkCmdPipelineBarrier2KHR)
 
 #define ROCKS_VULKAN_DECLARE_FUNCTION(name) PFN_##name name = nullptr;
 

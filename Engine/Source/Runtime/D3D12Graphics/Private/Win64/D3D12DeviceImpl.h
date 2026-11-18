@@ -9,6 +9,7 @@
 #include <Graphics/FenceTimeline.h>
 #include <Graphics/GraphicsLog.h>
 #include <Graphics/ShaderSourceCompiler.h>
+#include <Graphics/SplitTransitionTracker.h>
 #include <Graphics/StagingPool.h>
 #include <Graphics/TimestampRing.h>
 #include <Graphics/UploadRing.h>
@@ -890,6 +891,16 @@ private:
     // 명시 전이를 resource barrier로 낮춘다(GX5, Device.h Transition 주석).
     void Transition(Span<const ResourceTransition> transitions) noexcept override;
 
+    // 분리 전이다. UE D3D12와 같이 native split barrier(BEGIN_ONLY·END_ONLY)를 쓰지 않고 end에서
+    // Transition과 같이 한 번에 낮춘다(D3D12LegacyBarriers.cpp:1111–1127). begin은 짝만 연다.
+    // before 대조와 mip별 current 갱신은 end 때다(사이 접근 금지 계약이므로 begin 때와 같다).
+    SplitTransition BeginTransitions(Span<const ResourceTransition> transitions) noexcept override;
+    void EndTransitions(SplitTransition split,
+                        Span<const ResourceTransition> transitions) noexcept override;
+
+    // Transition의 잠금 안 본체다.
+    void TransitionLocked(Span<const ResourceTransition> transitions) noexcept;
+
     // 버퍼 전이다. 기록 중 추적 상태(RequireBufferState)로 COMMON 암묵 승격·읽기 누적·barrier를
     // 고르고, UAV → UAV는 UAV barrier다(GX5).
     void LowerBufferTransition(const ResourceTransition& transition) noexcept;
@@ -1015,6 +1026,8 @@ private:
     DrawConstants constants_;
     uint32 stencilReference_ = 0;
     Array<BufferState> bufferStates_;
+    // 기록 중 열린 분리 전이 짝이다.
+    SplitTransitionTracker splits_;
     bool recording_ = false;
     bool validation_ = false;
     bool software_ = false;

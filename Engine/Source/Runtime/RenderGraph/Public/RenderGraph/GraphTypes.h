@@ -137,9 +137,15 @@ struct GraphImportOptions {
     uint32 mipLevels = 1;
 };
 
-// 계산한 전이 하나다(진단·시험). pass는 이 전이를 prologue에서 내는 pass 번호이며
-// GraphIndexNone이면 그래프 끝(export·import 마지막 상태)이다. attachment면 그 pass의 렌더 타깃
-// 전이라 장치의 BeginOffscreen이 낸다(CommandContext::Transition으로 내지 않는다).
+// 계산한 전이 하나다(진단·시험). pass는 이 전이를 prologue에서 내는(분리 전이면 end하는) pass
+// 번호이며 GraphIndexNone이면 그래프 끝(export·import 마지막 상태)이다. attachment면 그 pass의 렌더
+// 타깃 전이라 장치의 BeginOffscreen이 낸다(CommandContext::Transition으로 내지 않는다).
+//
+// beginPass가 GraphIndexNone이 아니면 분리 전이다(RG2): 그 subresource를 마지막으로 쓴 pass
+// beginPass의 epilogue에서 begin하고 pass의 prologue에서 end한다(UE와 같이 같은 pipe에서 생산 pass
+// epilogue begin, 소비 pass prologue end). 지금은 begin과 end가 같은 장치 기록 안이고 그 사이에
+// 다른 pass가 하나 이상 있을 때만 나눈다(Raster pass는 새 기록을 열므로 Compute·Copy pass가
+// end한다).
 //
 // 만든 자원의 첫 전이 before는 Unknown(내용 불필요, 장치가 추적한 상태에서 바꾼다)이고, 같은 그래프
 // 안에서 앞 자원이 놓은 장치 객체를 이어 쓰는 자원(GraphLifetime::reusedWithinGraph)은 Discard다
@@ -154,6 +160,7 @@ struct GraphTransitionRecord {
     graphics::ResourceAccess before = graphics::ResourceAccess::Unknown;
     graphics::ResourceAccess after = graphics::ResourceAccess::Unknown;
     bool attachment = false;
+    uint32 beginPass = GraphIndexNone;
 
     bool operator==(const GraphTransitionRecord&) const noexcept = default;
 };
@@ -178,8 +185,10 @@ struct GraphStats {
     uint32 passes = 0;
     uint32 culledPasses = 0;
     uint32 executedPasses = 0;
-    // 장치에 낸 전이 수(attachment 제외)와 attachment 전이 수다.
+    // 장치에 낸 전이 수(attachment 제외, 분리 전이 포함)와 attachment 전이 수다.
     uint32 transitions = 0;
+    // 그 가운데 begin·end로 나눠 낸 전이 수다.
+    uint32 splitTransitions = 0;
     uint32 attachmentTransitions = 0;
     // 연 장치 기록(BeginOffscreen·BeginFrame) 수다.
     uint32 recordings = 0;

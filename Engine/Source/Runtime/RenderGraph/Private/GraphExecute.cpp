@@ -163,9 +163,85 @@ graphics::ResourceTransition ToDevice(const GraphState& state,
     return transition;
 }
 
+// 분리 전이 묶음(beginPass, endPass)의 장치 전이 목록을 state.lowered에 만든다(begin과 end가 같은
+// 목록을 넘기도록 늘 같은 순서로 만든다). 임시 공간 할당이 실패하면 false다.
+bool BuildSplitList(FrameArena& arena, GraphState& state, uint32 beginPass,
+                    uint32 endPass) noexcept {
+    state.lowered.Clear();
+    for (const GraphTransitionRecord& record : state.transitions) {
+        if (record.beginPass != beginPass || record.pass != endPass) {
+            continue;
+        }
+
+        if (!state.lowered.TryPushBack(arena, ToDevice(state, record))) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// pass의 epilogue: 그 pass가 마지막 사용자인 분리 전이를 end pass별 묶음으로 begin한다.
+void IssueSplitBegins(FrameArena& arena, GraphState& state, uint32 pass) noexcept {
+    if (!state.splitEnabled || state.commands == nullptr) {
+        return;
+    }
+
+    for (const GraphTransitionRecord& record : state.transitions) {
+        if (record.beginPass != pass) {
+            continue;
+        }
+
+        bool known = false;
+        for (const SplitGroup& group : state.splitGroups) {
+            known = known || (group.beginPass == pass && group.endPass == record.pass);
+        }
+
+        if (known) {
+            continue;
+        }
+
+        SplitGroup group;
+        group.beginPass = pass;
+        group.endPass = record.pass;
+        // 목록을 만들지 못하면 짝 없이 둔다(end가 null 짝으로 Transition처럼 낮춘다).
+        if (BuildSplitList(arena, state, pass, record.pass)) {
+            group.split = state.commands->BeginTransitions(state.lowered.View());
+        }
+
+        auto pushed = state.splitGroups.TryPushBack(arena, group);
+        (void)pushed;
+        state.lowered.Clear();
+    }
+}
+
+// pass의 prologue에서 그 pass가 end하는 분리 전이 묶음을 끝낸다.
+void IssueSplitEnds(FrameArena& arena, GraphState& state, uint32 pass) noexcept {
+    if (!state.splitEnabled || state.commands == nullptr) {
+        return;
+    }
+
+    for (const SplitGroup& group : state.splitGroups) {
+        if (group.endPass != pass) {
+            continue;
+        }
+
+        if (!BuildSplitList(arena, state, group.beginPass, pass)) {
+            continue;
+        }
+
+        state.commands->EndTransitions(group.split, state.lowered.View());
+        state.stats.transitions += static_cast<uint32>(state.lowered.Size());
+        state.stats.splitTransitions += static_cast<uint32>(state.lowered.Size());
+    }
+
+    state.lowered.Clear();
+}
+
 // 전이 기록 가운데 pass 번호가 pass인 것을 커서부터 장치에 낸다(attachment는 장치 Begin이 이미
-// 냈으므로 세기만 한다).
+// 냈으므로 세기만 한다). 분리 전이는 먼저 end하고(IssueSplitEnds) 나머지를 한 번에 낸다.
 void IssueTransitions(FrameArena& arena, GraphState& state, uint32 pass) noexcept {
+    IssueSplitEnds(arena, state, pass);
     state.lowered.Clear();
     while (state.nextTransition < state.transitions.Size() &&
            state.transitions[state.nextTransition].pass == pass) {
@@ -173,6 +249,10 @@ void IssueTransitions(FrameArena& arena, GraphState& state, uint32 pass) noexcep
         ++state.nextTransition;
         if (record.attachment) {
             ++state.stats.attachmentTransitions;
+            continue;
+        }
+
+        if (record.beginPass != GraphIndexNone && state.splitEnabled) {
             continue;
         }
 
@@ -300,6 +380,7 @@ Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& stat
 
     IssueTransitions(arena, state, pass);
     GraphExecutionAccess::Run(graph, *record.executor, *state.commands, pass);
+    IssueSplitBegins(arena, state, pass);
     record.executed = true;
     ++state.stats.executedPasses;
     return Result<void>::Success();

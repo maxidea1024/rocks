@@ -59,6 +59,12 @@ Result<GpuFencePoint> GlesDevice::EndFrame() noexcept {
         return Result<GpuFencePoint>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // 끝나지 않은 분리 전이는 계약 위반이다(검증 장치는 오류로 센다).
+    const usize unended = splits_.Close();
+    if (validation_) {
+        validationErrors_ += unended;
+    }
+
     recording_ = false;
     ResetPassState();
     // 패스 framebuffer의 attachment를 뗀다(놓인 텍스처 이름을 붙들지 않는다).
@@ -422,6 +428,28 @@ void GlesDevice::ApplyConstants(const PipelineRecord& pipeline) noexcept {
 // glMemoryBarrier는 dispatch마다 모든 bit로 낸다(GlesDeviceCommands.cpp).
 void GlesDevice::Transition(Span<const ResourceTransition> transitions) noexcept {
     (void)transitions;
+}
+
+SplitTransition GlesDevice::BeginTransitions(Span<const ResourceTransition> transitions) noexcept {
+    if (!recording_) {
+        return {};
+    }
+
+    return splits_.Begin(transitions);
+}
+
+void GlesDevice::EndTransitions(SplitTransition split,
+                                Span<const ResourceTransition> transitions) noexcept {
+    if (!recording_) {
+        return;
+    }
+
+    const SplitEndResult ended = splits_.End(split, transitions);
+    if (ended == SplitEndResult::Unknown) {
+        ++ignoredDraws_;
+    } else if (ended == SplitEndResult::Mismatch && validation_) {
+        ++validationErrors_;
+    }
 }
 
 Result<void> GlesDevice::CopyPassTarget(TextureHandle destination) noexcept {

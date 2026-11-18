@@ -4,6 +4,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/NamePool.h>
 #include <Core/Text/StringBuilder.h>
+#include <Compression/Compression.h>
 #include <Crypto/Bytes.h>
 #include <LogHost/LogHost.h>
 #include <Object/ObjectRegistry.h>
@@ -328,6 +329,111 @@ TEST(LogHostWritesAPlainFileFromConfig) {
     CHECK(Contains(file, "[Warning][Tests.Host] plain value 7"));
 }
 
+// log.rate_limits 문법 검사도 상수 평가로 쓸 수 있다.
+static_assert(CheckLogRateLimitsSyntax("").IsEmpty());
+static_assert(CheckLogRateLimitsSyntax("Graphics=20, Engine.World.Tick=1000000").IsEmpty());
+static_assert(CheckLogRateLimitsSyntax("Graphics=0") ==
+              "a log.rate_limits value is not a whole number from 1 to 1000000");
+static_assert(CheckLogRateLimitsSyntax("Graphics=1000001") ==
+              "a log.rate_limits value is not a whole number from 1 to 1000000");
+static_assert(CheckLogRateLimitsSyntax("Graphics") ==
+              "a log.rate_limits entry is not <category prefix>=<records per second>");
+static_assert(CheckLogRateLimitsSyntax("A=1,B=1,C=1,D=1,E=1,F=1,G=1,H=1,I=1,J=1,K=1,L=1,M=1,N=1,"
+                                       "O=1,P=1,Q=1") ==
+              "log.rate_limits has more than MaxLogRateLimits entries");
+
+// 설정 log.rate_limits가 LogSystem에 적용되고, 잘못된 항목은 건너뛴다.
+namespace {
+
+// 늘 같은 시각을 돌려주는 시계다(rate limit 창을 결정적으로).
+uint64 FixedClock() noexcept {
+    constexpr uint64 FixedTicks = 1000;
+    return FixedTicks;
+}
+
+} // namespace
+
+// 설정 log.rate_limits가 LogSystem에 적용되고, 잘못된 항목은 건너뛴다. 같은 내용을 다시 적용하면
+// 창을 초기화하지 않는다.
+TEST(LogHostAppliesRateLimitsFromConfig) {
+    LogSettingsFixture fixture;
+    fixture.Apply(R"({"log.mode": "sync", "log.rate_limits": "Tests=2, Broken, Audio=0"})");
+    LogSystemConfig preset = LogSystemConfig::ForEngineHost();
+    preset.clock = &FixedClock;
+    preset.clockFrequency = 1;
+    LogHost host(fixture.system);
+    REQUIRE(host.Start(preset, fixture.context.Get(), "Test"));
+    REQUIRE(host.Watch(*fixture.context));
+    {
+        LogInstallScope installed(host.System());
+        for (uint32 index = 0; index < 5; ++index) {
+            Log::Info(LogHostTests, "rate limited {Index}", index);
+        }
+
+        // 다른 설정만 바뀐 sync 지점: rate limit 창은 그대로라 더 통과하지 않는다.
+        REQUIRE(fixture.context->AddAssignment(config::ConfigLayer::Console, "console",
+                                               LogLevelsSetting, "Audio=error"));
+        REQUIRE(fixture.context->Sync());
+        Log::Info(LogHostTests, "rate limited {Index}", 5);
+    }
+
+    CHECK(host.System().Stats().rateLimited == 4);
+    host.Stop();
+}
+
+// log.levels 문법 검사는 상수 평가로 쓸 수 있다(설정 검증용). 이유는 영어 리터럴이다.
+static_assert(CheckLogLevelsSyntax("").IsEmpty());
+static_assert(CheckLogLevelsSyntax("Graphics=Warning, engine.world = debug,").IsEmpty());
+static_assert(CheckLogLevelsSyntax("Graphics") ==
+              "a log.levels entry is not <category prefix>=<level>");
+static_assert(CheckLogLevelsSyntax("Graphics..D3D12=info") ==
+              "a log.levels category prefix is not a valid category name");
+static_assert(CheckLogLevelsSyntax("Graphics=loud") ==
+              "a log.levels level is not trace, debug, info, warning, error or fatal");
+
+namespace {
+
+// 파일 하나에 레이아웃 설정을 주고 Warning 한 줄을 쓴 뒤 파일 내용을 돌려준다.
+void WriteWithFileLayout(StringView layoutJson, Array<uint8>& file) noexcept {
+    ScratchDirectory directory;
+    LogSettingsFixture fixture;
+    char settings[512];
+    FixedStringBuilder text{Span<char>(settings)};
+    (void)text.TryAppendFormat(R"({{"log.mode": "sync", "log.file.enabled": true, )"
+                               R"("log.file.directory": "{}", "log.file.layout": {}}})",
+                               directory.View(), layoutJson);
+    fixture.Apply(text.View());
+    Array<char> path(fixture.system);
+    {
+        LogHost host(fixture.system);
+        REQUIRE(host.Start(LogSystemConfig::ForEngineHost(), fixture.context.Get(), "Test"));
+        REQUIRE(host.IsFileLogging());
+        REQUIRE(
+            path.TryAppend(Span<const char>(host.FilePath().Data(), host.FilePath().ByteCount())));
+        {
+            LogInstallScope installed(host.System());
+            Log::Warning(LogHostTests, "layout value {Value}", 9);
+        }
+
+        host.Stop();
+    }
+
+    REQUIRE(ReadAll(StringView(path.Data(), path.Size()), file));
+}
+
+} // namespace
+
+// log.file.layout이 파일 줄 모양을 바꾸고, 잘못된 패턴이면 엔진은 계속하며 기본 레이아웃을 쓴다.
+TEST(LogHostAppliesFileLayoutAndFallsBackOnInvalidPattern) {
+    SystemAllocator allocator;
+    Array<uint8> custom(allocator);
+    WriteWithFileLayout(R"("<{Level:u3}|{Category}> {Message}{NewLine}")", custom);
+    CHECK(Contains(custom, "<WRN|Tests.Host> layout value 9\n"));
+    Array<uint8> fallback(allocator);
+    WriteWithFileLayout(R"("{Level} {Mesage}")", fallback);
+    CHECK(Contains(fallback, "[Warning][Tests.Host] layout value 9"));
+}
+
 namespace {
 
 // 문이 열릴 때까지 Write 안에서 기다리는 sink다(처음에는 닫혀 있다).
@@ -388,4 +494,81 @@ TEST(LogHostStopLeavesTheLogSystemWhenTheWriterIsStuck) {
     CHECK(!restarted && restarted.Error() == ErrorCode::Busy);
     host.Stop();
     sink.release.Signal();
+}
+
+namespace {
+
+// 봉인한 묶음 평문(zstd frame)을 풀어 모은다.
+Result<void> CollectInflated(void* raw, Span<const uint8> frame) noexcept {
+    if (frame.Size() == 0) {
+        return Result<void>::Success();
+    }
+
+    constexpr usize MaxInflatedBytes = 1u << 20;
+    auto inflated = TryDecompressAppend(CompressionFormat::Zstd, frame, MaxInflatedBytes,
+                                        *static_cast<Array<uint8>*>(raw));
+    return inflated ? Result<void>::Success() : Result<void>::Failure(inflated.Error());
+}
+
+} // namespace
+
+// log.file.compress: 묶음마다 독립 zstd frame(.log.zst)이고 Compression으로 풀린다. 봉인과 함께면
+// 압축한 뒤 봉인하고(머리에 표시) 묶음마다 풀어 원문이 나온다.
+TEST(LogHostWritesCompressedFiles) {
+    constexpr bool SealModes[] = {false, true};
+    for (const bool sealed : SealModes) {
+        ScratchDirectory directory;
+        auto pair = crypto::KemKeyPair::TryGenerate(crypto::KemAlgorithm::XWing);
+        REQUIRE(pair);
+        char base64[2048];
+        auto encoded = crypto::TryToBase64(pair.Value().PublicKey().View(),
+                                           crypto::Base64Variant::Standard, Span<char>(base64));
+        REQUIRE(encoded);
+        LogSettingsFixture fixture;
+        char settings[4096];
+        FixedStringBuilder text{Span<char>(settings)};
+        (void)text.TryAppendFormat(
+            R"({{"log.mode": "sync", "log.file.enabled": true, "log.file.directory": "{}",
+                 "log.file.compress": true, "log.file.encrypt": {},
+                 "log.file.recipient_key": "{}"}})",
+            directory.View(), sealed ? "true" : "false", StringView(base64, encoded.Value()));
+        fixture.Apply(text.View());
+        Array<char> path(fixture.system);
+        {
+            LogHost host(fixture.system);
+            REQUIRE(host.Start(LogSystemConfig::ForEngineHost(), fixture.context.Get(), "Test"));
+            REQUIRE(host.IsFileLogging());
+            REQUIRE(path.TryAppend(
+                Span<const char>(host.FilePath().Data(), host.FilePath().ByteCount())));
+            {
+                LogInstallScope installed(host.System());
+                for (uint32 index = 0; index < 3; ++index) {
+                    Log::Warning(LogHostTests, "compressed value {Value}", index);
+                }
+            }
+
+            host.Stop();
+        }
+
+        const StringView name(path.Data(), path.Size());
+        CHECK(name.EndsWith(sealed ? ".log" : ".log.zst", StringComparison::CaseSensitive));
+        Array<uint8> file(fixture.system);
+        REQUIRE(ReadAll(name, file));
+        CHECK(!Contains(file, "compressed value"));
+        Array<uint8> plain(fixture.system);
+        if (sealed) {
+            CHECK(crypto::LogFileHasCompressedBatches(file.View()));
+            auto summary = crypto::TryDecodeLogFile(pair.Value(), file.View(), fixture.system,
+                                                    &CollectInflated, &plain);
+            REQUIRE(summary);
+            CHECK(summary.Value().compressedBatches && summary.Value().endMarker);
+        } else {
+            constexpr usize MaxInflatedBytes = 1u << 20;
+            REQUIRE(
+                TryDecompressAppend(CompressionFormat::Zstd, file.View(), MaxInflatedBytes, plain));
+        }
+
+        CHECK(Contains(plain, "[Warning][Tests.Host] compressed value 0"));
+        CHECK(Contains(plain, "[Warning][Tests.Host] compressed value 2"));
+    }
 }

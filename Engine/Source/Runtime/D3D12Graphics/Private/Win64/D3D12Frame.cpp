@@ -63,6 +63,14 @@ Result<GpuFencePoint> D3D12Device::EndFrame() noexcept {
         return Result<GpuFencePoint>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // 끝나지 않은 분리 전이는 적용하지 않는다(계약 위반이므로 검증 장치는 오류로 센다).
+    const usize unended = splits_.Close();
+    if (validation_ && unended != 0) {
+        validationErrors_ += unended;
+        auto failed = Fail("split transitions were begun but not ended before EndFrame");
+        (void)failed;
+    }
+
     // 스왑체인 백버퍼만 present 상태로 돌린다. offscreen 대상은 RenderTarget 그대로 둔다(GX5:
     // 다음 사용이 명시 전이나 암묵 전이로 바꾼다).
     if (!presentTarget_.IsNull()) {
@@ -499,6 +507,38 @@ Result<void> D3D12Device::CopyPassTarget(TextureHandle destination) noexcept {
 // 명시 전이를 resource barrier로 낮춘다(GX5, Device.h Transition 주석).
 void D3D12Device::Transition(Span<const ResourceTransition> transitions) noexcept {
     platform::LockGuard lock(gate_);
+    TransitionLocked(transitions);
+}
+
+SplitTransition D3D12Device::BeginTransitions(Span<const ResourceTransition> transitions) noexcept {
+    platform::LockGuard lock(gate_);
+    if (!recording_) {
+        return {};
+    }
+
+    return splits_.Begin(transitions);
+}
+
+void D3D12Device::EndTransitions(SplitTransition split,
+                                 Span<const ResourceTransition> transitions) noexcept {
+    platform::LockGuard lock(gate_);
+    if (!recording_) {
+        return;
+    }
+
+    const SplitEndResult ended = splits_.End(split, transitions);
+    if (ended == SplitEndResult::Unknown) {
+        ++ignoredDraws_;
+    } else if (ended == SplitEndResult::Mismatch && validation_) {
+        ++validationErrors_;
+        auto failed = Fail("split transition ended with a list different from its begin");
+        (void)failed;
+    }
+
+    TransitionLocked(transitions);
+}
+
+void D3D12Device::TransitionLocked(Span<const ResourceTransition> transitions) noexcept {
     if (!recording_) {
         return;
     }

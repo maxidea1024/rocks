@@ -2,6 +2,7 @@
 
 #include <Core/Containers/Array.h>
 #include <Core/Memory/FrameArena.h>
+#include <Platform/Memory.h>
 #include <RenderGraph/RenderGraph.h>
 #include <stdio.h>
 
@@ -331,6 +332,91 @@ bool BufferMatches(Device& device, RenderHandleTable& handles, RenderHandle hand
 
 // Sampled 그래프 텍스처(1×1)에 color를 올려 output에 합성한다(두 번째부터는 풀이 mip 갱신으로
 // 올린다).
+// 분리 전이(RG2 B부) 그래프다. 같은 장치 기록 안에서 생산 pass와 소비 Copy pass 사이에 다른 pass가
+// 있어 텍스처(복사 대상 → 원본, 이미지 layout 전이)와 버퍼(복사 대상 → 원본)가 begin·end로 나뉜다:
+//   p0 Raster A ← 빨강 / p1 Raster opener(새 기록) / p2 Copy C ← A / p3 Copy M ← 업로드 S /
+//   p4 Copy D ← C (C 분리) / p5 Copy L ← M (M 분리) / p6 Raster output ← D 합성
+// split이 거짓이면 같은 그래프를 분리 없이 낸다. L은 export해 바이트를 읽는다.
+bool RunSplitGraph(GraphBench& bench, RenderHandle output, const uint8* data, bool split,
+                   RenderHandle* lastOut, uint32* splitCount) noexcept {
+    RenderGraphDesc desc = bench.Desc();
+    desc.splitTransitions = split;
+    RenderGraph graph(desc);
+    auto target = graph.ImportTexture(output, "Output");
+    auto a = graph.CreateTexture(TargetDesc(), "A");
+    auto opener = graph.CreateTexture(TargetDesc(), "Opener");
+    auto c = graph.CreateTexture(TargetDesc(), "C");
+    auto d = graph.CreateTexture(TargetDesc(), "D");
+    BufferDesc bufferDesc;
+    bufferDesc.size = CopyBytes;
+    auto source = graph.CreateBuffer(bufferDesc, "Source");
+    auto middle = graph.CreateBuffer(bufferDesc, "Middle");
+    auto last = graph.CreateBuffer(bufferDesc, "Last");
+    if (!target || !a || !opener || !c || !d || !source || !middle || !last ||
+        !graph.UploadBuffer(source.Value(), Span<const uint8>(data, CopyBytes))) {
+        PrintGraphError(graph);
+        return false;
+    }
+
+    auto copyTexture = [](GraphTexture to, GraphTexture from) noexcept {
+        return [to, from](GraphPassContext& pass) noexcept {
+            auto copied = pass.Commands().CopyTexture(pass.Texture(to), pass.Texture(from));
+            Check(copied.IsOk(), "graph copy pass copies the texture");
+        };
+    };
+    auto copyBuffer = [](GraphBuffer to, GraphBuffer from) noexcept {
+        return [to, from](GraphPassContext& pass) noexcept {
+            auto copied =
+                pass.Commands().CopyBuffer(pass.Buffer(to), 0, pass.Buffer(from), 0, CopyBytes);
+            Check(copied.IsOk(), "graph copy pass copies the buffer");
+        };
+    };
+    GraphPassAccesses p0(graph);
+    p0.RenderTarget(a.Value(), GraphLoadAction::Clear, {0, 0, 0, 1});
+    GraphPassAccesses p1(graph);
+    p1.RenderTarget(opener.Value(), GraphLoadAction::Clear, {0, 0, 0, 1});
+    GraphPassAccesses p2(graph);
+    p2.Texture(a.Value(), ResourceAccess::CopySource)
+        .Texture(c.Value(), ResourceAccess::CopyDestination);
+    GraphPassAccesses p3(graph);
+    p3.Buffer(source.Value(), ResourceAccess::CopySource)
+        .Buffer(middle.Value(), ResourceAccess::CopyDestination);
+    GraphPassAccesses p4(graph);
+    p4.Texture(c.Value(), ResourceAccess::CopySource)
+        .Texture(d.Value(), ResourceAccess::CopyDestination);
+    GraphPassAccesses p5(graph);
+    p5.Buffer(middle.Value(), ResourceAccess::CopySource)
+        .Buffer(last.Value(), ResourceAccess::CopyDestination);
+    GraphPassAccesses p6(graph);
+    p6.Texture(d.Value(), ResourceAccess::SrvGraphics)
+        .RenderTarget(target.Value(), GraphLoadAction::Clear, {0, 1, 0, 1});
+    auto added0 =
+        graph.AddPass(SceneName, GraphPassKind::Raster, GraphPassFlags::None, p0,
+                      FullScreen(bench.renderer, bench.redTexture, {}, LinearColor(1, 1, 1, 1)));
+    auto added1 = graph.AddPass(ClearName, GraphPassKind::Raster, GraphPassFlags::HasSideEffects,
+                                p1, [](GraphPassContext& pass) noexcept { (void)pass; });
+    auto added2 = graph.AddPass(CopyName, GraphPassKind::Copy, GraphPassFlags::None, p2,
+                                copyTexture(c.Value(), a.Value()));
+    auto added3 = graph.AddPass(CopyName, GraphPassKind::Copy, GraphPassFlags::None, p3,
+                                copyBuffer(middle.Value(), source.Value()));
+    auto added4 = graph.AddPass(CopyName, GraphPassKind::Copy, GraphPassFlags::None, p4,
+                                copyTexture(d.Value(), c.Value()));
+    auto added5 = graph.AddPass(CopyName, GraphPassKind::Copy, GraphPassFlags::None, p5,
+                                copyBuffer(last.Value(), middle.Value()));
+    auto added6 = graph.AddPass(CompositeName, GraphPassKind::Raster, GraphPassFlags::None, p6,
+                                FullScreen(bench.renderer, {}, d.Value(), LinearColor(1, 1, 1, 1)));
+    auto lastHandle = graph.ExportBuffer(last.Value());
+    if (!added0 || !added1 || !added2 || !added3 || !added4 || !added5 || !added6 || !lastHandle ||
+        !graph.Execute()) {
+        PrintGraphError(graph);
+        return false;
+    }
+
+    *lastOut = lastHandle.Value();
+    *splitCount = graph.Stats().splitTransitions;
+    return true;
+}
+
 bool RunSampledUploadGraph(GraphBench& bench, RenderHandle output, const uint8* color) noexcept {
     RenderGraph graph(bench.Desc());
     TextureDesc desc;
@@ -496,6 +582,49 @@ uint32 RunRenderGraphChecks(const char* name, Device& device, sample::Renderer& 
               run == 0 ? "uploaded sampled texture composites green"
                        : "re-uploaded pooled sampled texture composites blue");
     }
+
+    // RG2 B부: 분리 전이를 켜고 끈 그래프의 픽셀·바이트가 같다(분리 켬은 텍스처·버퍼 전이 둘을
+    // 나눈다, Vulkan은 synchronization2 event, 그 밖은 end에서 한 번에 낮춘다).
+    uint8 splitData[CopyBytes];
+    for (uint32 index = 0; index < CopyBytes; ++index) {
+        splitData[index] = static_cast<uint8>(255 - index);
+    }
+
+    uint8 splitPixels[2][4] = {};
+    for (uint32 run = 0; ok && run < 2; ++run) {
+        const bool split = run == 0;
+        auto cleared = arena.Reset();
+        (void)cleared;
+        RenderHandle last;
+        uint32 splitCount = 0;
+        ok = RunSplitGraph(bench, output.Value(), splitData, split, &last, &splitCount);
+        Check(ok && (split ? splitCount == 2 : splitCount == 0),
+              split ? "split graph splits the texture and buffer transitions"
+                    : "unsplit graph splits nothing");
+        Check(ok && device.ReadPixels(outputTexture.Value(), pixels.View()).IsOk() &&
+                  CenterIs(pixels, 255, 0, 0),
+              split ? "split transitions composite red" : "unsplit transitions composite red");
+        if (ok) {
+            const usize center =
+                (static_cast<usize>(TargetSize / 2) * TargetSize + TargetSize / 2) * 4;
+            for (uint32 channel = 0; channel < 4; ++channel) {
+                splitPixels[run][channel] = pixels[center + channel];
+            }
+        }
+
+        Check(ok && BufferMatches(device, handles, last, splitData),
+              split ? "split buffer transition keeps the copied bytes"
+                    : "unsplit buffer transition keeps the copied bytes");
+        if (ok) {
+            RetireExport(handles, device, last);
+            Check(device.WaitIdle().IsOk(), "wait idle after the split graph");
+        }
+    }
+
+    Check(!ok || platform::MemoryEquals(splitPixels[0], splitPixels[1], 4),
+          "split and unsplit transitions give the same pixels");
+    printf("  %s render graph split transitions: native %s\n", name,
+           device.Caps().features.splitTransitions ? "yes" : "no (lowered at end)");
 
     const rocks::render::GraphPoolStats stats = pool.Stats();
     Check(stats.reused >= 1, "pool reuses graph textures across graphs");

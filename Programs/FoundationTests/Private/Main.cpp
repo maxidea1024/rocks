@@ -10,6 +10,7 @@
 namespace rocks::test {
 int RunLoggerFailureProbe() noexcept;
 int RunLogFatalProbe(uint32 mode) noexcept;
+int RunLogCrashProbe(uint32 mode, const char* directory) noexcept;
 int RunProcessProbe(int argc, char** argv) noexcept;
 int RunHashTraversalNegativeControl(bool useSet, uint32 operation) noexcept;
 int RunHashOperationsNegativeControl(uint32 operation) noexcept;
@@ -371,6 +372,14 @@ int main(int argc, char** argv) {
                 return test::RunLogFatalProbe(2);
             } else if (strcmp(control, "log-fatal-recursive") == 0) {
                 return test::RunLogFatalProbe(3);
+            } else if (strcmp(control, "log-crash-platform-fatal") == 0) {
+                return test::RunLogCrashProbe(0, i + 1 < argc ? argv[i + 1] : nullptr);
+            } else if (strcmp(control, "log-crash-access-violation") == 0) {
+                return test::RunLogCrashProbe(1, i + 1 < argc ? argv[i + 1] : nullptr);
+            } else if (strcmp(control, "log-crash-stack-overflow") == 0) {
+                return test::RunLogCrashProbe(2, i + 1 < argc ? argv[i + 1] : nullptr);
+            } else if (strcmp(control, "log-crash-stuck-sink") == 0) {
+                return test::RunLogCrashProbe(3, i + 1 < argc ? argv[i + 1] : nullptr);
             } else if (strcmp(control, "asan-uaf") == 0) {
                 return test::RunAsanNegativeControl();
             } else if (strcmp(control, "assert-stderr-lock") == 0) {

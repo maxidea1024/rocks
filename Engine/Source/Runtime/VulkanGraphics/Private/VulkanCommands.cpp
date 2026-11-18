@@ -205,6 +205,8 @@ Result<GpuFencePoint> VulkanDevice::EndFrame() noexcept {
         insideRenderPass_ = false;
     }
 
+    CloseSplitTransitions();
+
     Result<void> outcome = Result<void>::Success();
     SwapChainRecord* present =
         presentTarget_.IsNull() ? nullptr : swapChains_.Find(presentTarget_.slot);

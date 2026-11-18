@@ -124,6 +124,82 @@ try
     {
         ++failures;
     }
+
+    // log view: 폴더는 시작 시각·번호 순, JSON lines는 모든 필드, 기본 레이아웃 텍스트는 시각·레벨·
+    // 카테고리로 거른다. 봉인 파일은 --key로 읽는다.
+    string viewDirectory = Path.Combine(logDirectory, "view");
+    Directory.CreateDirectory(viewDirectory);
+    const string JsonWarning = "{\"t\":\"2026-11-18T00:00:01.000Z\",\"lvl\":\"Warning\",\"cat\":\"Net\"," +
+        "\"event\":\"00000000000000ab\",\"msg\":\"slow request\",\"corr\":{\"request\":55}}";
+    const string JsonInfo = "{\"t\":\"2026-11-18T00:00:02.000Z\",\"lvl\":\"Info\",\"cat\":\"Net\"," +
+        "\"event\":\"00000000000000cd\",\"msg\":\"ok\"}";
+    const string TextInfo = "[2026-11-18T01:02:03.004Z][Info][Engine] engine started";
+    const string TextWarning = "[2026-11-18T01:02:04.000Z][Warning][Graphics.D3D12] device slow";
+    const string TextError = "[2026-11-18T01:02:05.000Z][Error][Graphics] device lost";
+    File.WriteAllText(Path.Combine(viewDirectory, "Host-20261118T010203004Z-2.log"), TextError + "\n");
+    File.WriteAllText(Path.Combine(viewDirectory, "Host-20261118T010203004Z.log"), TextInfo + "\n" + TextWarning + "\n");
+    File.WriteAllText(Path.Combine(viewDirectory, "Host-20261118T000000000Z.log"), JsonWarning + "\n" + JsonInfo + "\n");
+    File.WriteAllText(Path.Combine(viewDirectory, "notes.txt"), "not a log\n");
+    async Task CheckView(string label, string[] filters, params string[] lines)
+    {
+        string[] arguments = ["log", "view", viewDirectory, .. filters];
+        ProcessResult result = await ProcessRunner.RunAsync(new(executable, arguments, workingDirectory,
+            Timeout: TimeSpan.FromSeconds(15)));
+        string expected = string.Concat(lines.Select(line => line + "\n"));
+        bool passed = result.ExitCode == 0 && result.StdOut == expected && result.StdErr.Length == 0;
+        Console.WriteLine($"{label}: {(passed ? "PASS" : "FAIL")}");
+        if (!passed)
+        {
+            ++failures;
+            Console.Error.WriteLine($"  exit={result.ExitCode}; stdout={result.StdOut}; stderr={result.StdErr}");
+        }
+    }
+
+    await CheckView("log view folder order", [], JsonWarning, JsonInfo, TextInfo, TextWarning, TextError);
+    await CheckView("log view level", ["--level", "warning"], JsonWarning, TextWarning, TextError);
+    await CheckView("log view category", ["--category", "graphics"], TextWarning, TextError);
+    await CheckView("log view correlation", ["--correlation", "request=55"], JsonWarning);
+    await CheckView("log view event", ["--event", "00000000000000AB"], JsonWarning);
+    await CheckView("log view since and until", ["--since", "2026-11-18T01:02:04", "--until", "2026-11-18T01:02:04.999Z"],
+        TextWarning);
+    await CheckView("log view grep", ["--grep", "device"], TextWarning, TextError);
+    await Check("log view sealed", ["log", "view", sealedLog, "--key", privateKey, "--grep", "line 29"], 0,
+        "] line 29\n[Info][Game] line 290\n", "");
+    await Check("log view bad level", ["log", "view", viewDirectory, "--level", "loud"], 2, "", "log view");
+
+    // 압축(.log.zst)·봉인+압축 읽기, 잘린 frame은 앞 frame까지 보여 주고 경고, 키 없는 봉인 파일은
+    // 건너뛴다(섞인 폴더).
+    string packDirectory = Path.Combine(logDirectory, "pack");
+    Directory.CreateDirectory(packDirectory);
+    string packSource = Path.Combine(logDirectory, "pack-source.txt");
+    File.WriteAllText(packSource, string.Concat(Enumerable.Range(0, 400).Select(index =>
+        $"[2026-11-18T02:00:00.000Z][{(index % 2 == 0 ? "Info" : "Warning")}][Pack] packed {index}\n")));
+    string packed = Path.Combine(packDirectory, "Host-20261118T020000000Z.log.zst");
+    await Check("log pack", ["log", "pack", packSource, packed], 0, "", "");
+    await Check("log view compressed", ["log", "view", packed, "--grep", "packed 399"], 0, "packed 399\n", "");
+    await Check("log view compressed level", ["log", "view", packed, "--level", "error"], 0, "", "");
+    byte[] packedBytes = File.ReadAllBytes(packed);
+    string truncatedPack = Path.Combine(logDirectory, "truncated.log.zst");
+    File.WriteAllBytes(truncatedPack, packedBytes[..^10]);
+    await Check("log view truncated frame", ["log", "view", truncatedPack, "--grep", "packed 0\n"], 0, "",
+        "truncated or damaged");
+    ProcessResult truncatedView = await ProcessRunner.RunAsync(new(executable, ["log", "view", truncatedPack],
+        workingDirectory, Timeout: TimeSpan.FromSeconds(15)));
+    bool keptFrames = truncatedView.StdOut.Contains("packed 0\n", StringComparison.Ordinal) &&
+                      !truncatedView.StdOut.Contains("packed 399", StringComparison.Ordinal);
+    Console.WriteLine($"log view truncated keeps earlier frames: {(keptFrames ? "PASS" : "FAIL")}");
+    if (!keptFrames)
+    {
+        ++failures;
+    }
+
+    string sealedPacked = Path.Combine(packDirectory, "Host-20261118T030000000Z.log");
+    await Check("log seal compress", ["log", "seal", packSource, sealedPacked, "--public", publicKey, "--compress"], 0, "", "");
+    await Check("log view sealed compressed", ["log", "view", sealedPacked, "--key", privateKey, "--grep", "packed 398"], 0,
+        "packed 398\n", "");
+    await Check("log decode sealed compressed", ["log", "decode", sealedPacked, "--key", privateKey], 0, "packed 397\n", "");
+    await Check("log view mixed folder without key", ["log", "view", packDirectory, "--grep", "packed 5\n"], 0, "",
+        "needs --key");
 }
 finally
 {

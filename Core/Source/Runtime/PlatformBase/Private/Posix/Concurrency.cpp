@@ -1,3 +1,4 @@
+#include <Platform/CrashHandler.h>
 #include <Platform/Thread.h>
 #include <Platform/Fatal.h>
 #include "../Common/ThreadInternal.h"
@@ -101,12 +102,15 @@ constexpr usize FallbackPageBytes = 4096;
 
 void* ThreadEntry(void* context) noexcept {
     RunThread(*static_cast<ThreadState*>(context));
+    ReleaseThreadCrashHandling();
     return nullptr;
 }
 
 } // namespace
 
 void ApplyCurrentThreadOptions(const ThreadState& state) noexcept {
+    // 치명 신호 처리기가 돌 대체 stack(sigaltstack)을 둔다.
+    PrepareThreadForCrashHandling();
     if (state.name[0] != '\0') {
         PosixSetCurrentThreadName(state.name);
     }

@@ -53,7 +53,9 @@ enum class LogTemplateError : uint8 {
     // 인자가 MaxLogArguments보다 많다
     TooManyArguments,
     // 사용자 Formatter 인자 하나를 서로 다른 spec으로 썼다(Formatter는 캡처 때 한 번만 렌더한다)
-    ConflictingFormatterSpec
+    ConflictingFormatterSpec,
+    // 사용자 Formatter의 IsValidSpec이 spec을 거부했다
+    InvalidFormatterSpec
 };
 
 // 오류 종류의 영어 이름이다(None은 "None").
@@ -85,6 +87,8 @@ constexpr StringView LogTemplateErrorName(LogTemplateError error) noexcept {
         return "TooManyArguments";
     case LogTemplateError::ConflictingFormatterSpec:
         return "ConflictingFormatterSpec";
+    case LogTemplateError::InvalidFormatterSpec:
+        return "InvalidFormatterSpec";
     }
 
     return "Unknown";
@@ -131,6 +135,23 @@ inline void LogTemplateError_NotNullTerminated() noexcept {
 }
 
 inline void LogTemplateError_ConflictingFormatterSpec() noexcept {
+}
+
+inline void LogTemplateError_InvalidFormatterSpec() noexcept {
+}
+
+// 사용자 Formatter의 spec 검사 함수다(Formatter<T>::IsValidSpec). 없으면 nullptr다.
+using LogSpecCheck = bool (*)(StringView spec) noexcept;
+
+// 로그 인자 타입의 spec 검사 함수다. IsValidSpec을 가진 사용자 Formatter 타입만 함수가 있다.
+template <typename T>
+consteval LogSpecCheck LogSpecCheckOf() noexcept {
+    using U = RemoveCvRefT<T>;
+    if constexpr (HasFormatterSpecCheck<U>) {
+        return &Formatter<U>::IsValidSpec;
+    } else {
+        return nullptr;
+    }
 }
 
 // 인자 하나의 spec이 템플릿 원문 어디에 있는지다(사용자 Formatter 인자의 캡처용). LogTemplate의
@@ -188,8 +209,12 @@ constexpr LogTemplateError ToLogTemplateError(FormatParseError error) noexcept {
 // 템플릿 text를 인자 종류 kinds[0..count)에 대해 검증하고 layout을 채운다. 컴파일 타임 검증
 // (LogTemplate)과 런타임 템플릿의 렌더가 같은 함수를 쓴다. 오류가 나면 그 앞까지의 layout만
 // 채워진다.
+// checks가 있으면 checks[i]는 i번째 인자의 spec 검사 함수다(없는 인자는 nullptr). 사용자 Formatter
+// 자리의 spec을 그 함수로 검사해 거부되면 InvalidFormatterSpec이다. checks가 nullptr이면 사용자
+// Formatter spec은 검사하지 않는다(렌더 때 kinds만 아는 경로).
 constexpr LogTemplateError AnalyzeLogTemplate(StringView text, const FormatArgKind* kinds,
-                                              usize count, LogTemplateLayout& layout) noexcept {
+                                              usize count, LogTemplateLayout& layout,
+                                              const LogSpecCheck* checks = nullptr) noexcept {
     if (count > MaxLogArguments) {
         return LogTemplateError::TooManyArguments;
     }
@@ -233,6 +258,9 @@ constexpr LogTemplateError AnalyzeLogTemplate(StringView text, const FormatArgKi
             if (!IsValidBuiltinFormatSpec(kinds[argument], spec)) {
                 return LogTemplateError::InvalidSpec;
             }
+        } else if (checks != nullptr && checks[argument] != nullptr &&
+                   !checks[argument](token.spec)) {
+            return LogTemplateError::InvalidFormatterSpec;
         }
 
         if (!layout.referenced[argument]) {
@@ -307,6 +335,9 @@ constexpr void ReportLogTemplateError(LogTemplateError error) noexcept {
     case LogTemplateError::ConflictingFormatterSpec:
         LogTemplateError_ConflictingFormatterSpec();
         break;
+    case LogTemplateError::InvalidFormatterSpec:
+        LogTemplateError_InvalidFormatterSpec();
+        break;
     }
 }
 
@@ -346,9 +377,10 @@ public:
         // 인자가 없을 때 길이 0 배열을 피하려고 끝에 표지 하나를 더 둔다(쓰지 않는다).
         constexpr detail::FormatArgKind kinds[] = {detail::LogArgKindOf<Args>()...,
                                                    detail::FormatArgKind::Custom};
+        constexpr detail::LogSpecCheck checks[] = {detail::LogSpecCheckOf<Args>()..., nullptr};
         detail::LogTemplateLayout layout{};
-        detail::ReportLogTemplateError(detail::AnalyzeLogTemplate(StringView(text, Count - 1),
-                                                                  kinds, sizeof...(Args), layout));
+        detail::ReportLogTemplateError(detail::AnalyzeLogTemplate(
+            StringView(text, Count - 1), kinds, sizeof...(Args), layout, checks));
         for (usize index = 0; index < sizeof...(Args); ++index) {
             specs_[index].offset = static_cast<uint32>(layout.specs[index].Data() - text);
             specs_[index].bytes = static_cast<uint32>(layout.specs[index].ByteCount());

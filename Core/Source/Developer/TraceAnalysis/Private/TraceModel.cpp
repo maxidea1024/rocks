@@ -27,6 +27,8 @@ struct TypeIds {
     uint16 gpuFrame = TraceFormat::InvalidTypeId;
     uint16 snapshotSync = TraceFormat::InvalidTypeId;
     uint16 stats = TraceFormat::InvalidTypeId;
+    uint16 logSpec = TraceFormat::InvalidTypeId;
+    uint16 logMessage = TraceFormat::InvalidTypeId;
 };
 
 uint16 FindType(const TraceStreamDecoder& decoder, const char* name) noexcept {
@@ -49,6 +51,8 @@ TypeIds ResolveTypes(const TraceStreamDecoder& decoder) noexcept {
     ids.gpuFrame = FindType(decoder, Format::GpuFrameType);
     ids.snapshotSync = FindType(decoder, "Trace.SnapshotSync");
     ids.stats = FindType(decoder, Format::StatsType);
+    ids.logSpec = FindType(decoder, Format::LogMessageSpecType);
+    ids.logMessage = FindType(decoder, Format::LogMessageType);
     return ids;
 }
 
@@ -88,7 +92,28 @@ uint64 TraceTicksToNanoseconds(uint64 ticks, uint64 frequency) noexcept {
 TraceModel::TraceModel(Allocator& allocator) noexcept
     : allocator_(&allocator), decoder_(allocator), threads_(allocator), tasks_(allocator),
       edges_(allocator), counters_(allocator), channelLosses_(allocator), gpuQueues_(allocator),
-      gpuScopes_(allocator), gpuFrames_(allocator), names_(allocator) {
+      gpuScopes_(allocator), gpuFrames_(allocator), logSpecs_(allocator), logs_(allocator),
+      names_(allocator) {
+}
+
+const TraceModelLogSpec* TraceModel::FindLogSpec(uint64 specId) const noexcept {
+    usize low = 0;
+    usize high = logSpecs_.Size();
+    while (low < high) {
+        const usize middle = low + (high - low) / 2;
+        if (logSpecs_[middle].specId < specId) {
+            low = middle + 1;
+        } else {
+            high = middle;
+        }
+    }
+
+    return low < logSpecs_.Size() && logSpecs_[low].specId == specId ? &logSpecs_[low] : nullptr;
+}
+
+StringView TraceModel::LogCategoryOf(const TraceModelLog& log) const noexcept {
+    const TraceModelLogSpec* spec = FindLogSpec(log.specId);
+    return spec != nullptr ? spec->category : log.inlineCategory;
 }
 
 StringView TraceModel::ScopeName(uint32 id) const noexcept {
@@ -223,6 +248,23 @@ Result<void> TraceModel::ReadDefinitions() noexcept {
             if (record.variableCount >= 2) {
                 thread->name = TextOf(record.variable[0]);
                 thread->group = TextOf(record.variable[1]);
+            }
+        } else if (record.typeId == types.logSpec && record.variableCount == 4 &&
+                   Covers(record, 0, Format::LogSpecFixedBytes)) {
+            // 정의는 모은 뒤 spec id로 정렬하고 겹친 것은 처음 것만 남긴다(Build).
+            {
+                TraceModelLogSpec spec;
+                spec.specId = ReadFixed<uint64>(record, Format::LogSpecIdOffset);
+                spec.eventId = ReadFixed<uint64>(record, Format::LogSpecEventIdOffset);
+                spec.line = ReadFixed<uint32>(record, Format::LogSpecLineOffset);
+                spec.level = ReadFixedByte(record, Format::LogSpecLevelOffset);
+                spec.category = TextOf(record.variable[0]);
+                spec.templateText = TextOf(record.variable[1]);
+                spec.file = TextOf(record.variable[2]);
+                spec.function = TextOf(record.variable[3]);
+                if (!logSpecs_.TryPushBack(spec)) {
+                    return Result<void>::Failure(ErrorCode::OutOfMemory);
+                }
             }
         } else if (record.typeId == types.scopeName && record.variableCount == 1 &&
                    Covers(record, 0, Format::ScopeNameFixedBytes)) {
@@ -397,6 +439,31 @@ Result<void> TraceModel::ReadThread(uint16 stream, Array<OrderedEvent>& ordered)
             if (!ordered.TryPushBack(event)) {
                 return Result<void>::Failure(ErrorCode::OutOfMemory);
             }
+        } else if (record.typeId == types.logMessage && record.hasOrder &&
+                   record.variableCount == 3 && Covers(record, 0, Format::LogMessageFixedBytes)) {
+            TraceModelLog log;
+            log.order = record.order;
+            log.tick = ReadFixed<uint64>(record, Format::LogMessageTickOffset);
+            log.thread = ReadFixed<uint64>(record, Format::LogMessageThreadOffset);
+            log.frame = ReadFixed<uint64>(record, Format::LogMessageFrameOffset);
+            log.specId = ReadFixed<uint64>(record, Format::LogMessageSpecIdOffset);
+            log.eventId = ReadFixed<uint64>(record, Format::LogMessageEventIdOffset);
+            for (usize index = 0; index < Format::ContextValueCount; ++index) {
+                log.correlation[index] = ReadFixed<uint64>(
+                    record, Format::LogMessageCorrelationOffset + index * sizeof(uint64));
+            }
+
+            log.flags = ReadFixed<uint32>(record, Format::LogMessageFlagsOffset);
+            log.level = ReadFixedByte(record, Format::LogMessageLevelOffset);
+            const uint8 truncated = ReadFixedByte(record, Format::LogMessageTruncatedOffset);
+            log.truncated = (truncated & Format::LogMessageTruncatedMessage) != 0;
+            log.templateTruncated = (truncated & Format::LogMessageTruncatedTemplate) != 0;
+            log.message = TextOf(record.variable[0]);
+            log.inlineCategory = TextOf(record.variable[1]);
+            log.inlineTemplate = TextOf(record.variable[2]);
+            if (!logs_.TryPushBack(log)) {
+                return Result<void>::Failure(ErrorCode::OutOfMemory);
+            }
         } else if (record.typeId == types.mark) {
             ++summary_.marks;
         } else if (record.typeId == types.gpuScope &&
@@ -552,6 +619,24 @@ Result<void> TraceModel::Build(Span<const uint8> bytes) noexcept {
     if (auto merged = MergeOrdered(ordered); !merged) {
         return merged;
     }
+
+    // 로그는 여러 스레드 스트림(로그 출력 스레드가 바뀔 수 있다)에서 모았으므로 순서 번호로 맞춘다.
+    logs_.Sort([](const TraceModelLog& left, const TraceModelLog& right) noexcept {
+        return left.order < right.order;
+    });
+    // spec은 spec id로 찾는다(이진 탐색). 같은 id(같은 호출 지점)의 정의는 내용이 같으므로 하나만
+    // 남긴다.
+    logSpecs_.Sort([](const TraceModelLogSpec& left, const TraceModelLogSpec& right) noexcept {
+        return left.specId < right.specId;
+    });
+    usize kept = 0;
+    for (usize index = 0; index < logSpecs_.Size(); ++index) {
+        if (kept == 0 || logSpecs_[kept - 1].specId != logSpecs_[index].specId) {
+            logSpecs_[kept++] = logSpecs_[index];
+        }
+    }
+
+    (void)logSpecs_.TryResize(kept); // 축소는 실패하지 않는다
 
     // 이름 정의가 없는 구간 이름 id를 센다(같은 id는 한 번).
     Array<uint32> missing(*allocator_);

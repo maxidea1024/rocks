@@ -4,7 +4,9 @@
 
 // 명시 접근 상태와 전이(RenderBase 4.4절 GX5, Docs/Design/VulkanGraphics.ko.md 8절)다. 추상 접근
 // 상태를 image layout과 pipeline stage·access mask로 낮춘다(UE VulkanBarriers.cpp의
-// GetVkStageAndAccessFlags와 같은 대응). 1.1 core vkCmdPipelineBarrier를 쓴다(sync2는 1.3).
+// GetVkStageAndAccessFlags와 같은 대응). 한 지점 전이는 1.1 core vkCmdPipelineBarrier를 쓰고, 분리
+// 전이는 VK_KHR_synchronization2 event(vkCmdSetEvent2·vkCmdWaitEvents2)를 쓴다. sync2의
+// stage·access 비트는 1.1 비트와 같은 값이므로 같은 대응을 넓혀 쓴다.
 namespace rocks::graphics::vulkan {
 
 namespace {
@@ -181,6 +183,42 @@ bool VulkanDevice::AccessBarrier(VkCommandBuffer buffer, VkImage image, uint32 f
     return true;
 }
 
+namespace {
+
+// 1.1 비트로 sync2 image barrier를 만든다(같은 값의 비트다).
+VkImageMemoryBarrier2 ImageBarrier2(VkImage image, VkImageAspectFlags aspect, uint32 firstMip,
+                                    uint32 mipCount, ResourceAccess from,
+                                    ResourceAccess to) noexcept {
+    const StageAccess source = StageAccessFor(from);
+    const StageAccess destination = StageAccessFor(to);
+    VkImageMemoryBarrier2 barrier = {};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    barrier.srcStageMask = source.stage;
+    barrier.srcAccessMask = WriteAccess(source.access);
+    barrier.dstStageMask = destination.stage;
+    barrier.dstAccessMask = destination.access;
+    barrier.oldLayout = LayoutFor(from);
+    barrier.newLayout = LayoutFor(to);
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = image;
+    barrier.subresourceRange = {aspect, firstMip, mipCount, 0, 1};
+    return barrier;
+}
+
+VkDependencyInfo DependencyOf(const VkMemoryBarrier2* memory, uint32 memoryCount,
+                              const VkImageMemoryBarrier2* images, uint32 imageCount) noexcept {
+    VkDependencyInfo dependency = {};
+    dependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    dependency.memoryBarrierCount = memoryCount;
+    dependency.pMemoryBarriers = memoryCount != 0 ? memory : nullptr;
+    dependency.imageMemoryBarrierCount = imageCount;
+    dependency.pImageMemoryBarriers = imageCount != 0 ? images : nullptr;
+    return dependency;
+}
+
+} // namespace
+
 void VulkanDevice::SuspendRenderPass() noexcept {
     if (insideRenderPass_) {
         functions_.vkCmdEndRenderPass(frame_);
@@ -229,6 +267,10 @@ void VulkanDevice::TrackTransition(TextureRecord& record, SlotHandle slot, uint3
         record.current[index] = after;
     }
 
+    MarkTouched(record, slot);
+}
+
+void VulkanDevice::MarkTouched(TextureRecord& record, SlotHandle slot) noexcept {
     if (!record.touched) {
         record.touched = true;
         if (!touchedTextures_.TryPushBack(slot)) {
@@ -304,6 +346,59 @@ void VulkanDevice::LowerBufferTransition(const ResourceTransition& transition) n
 // layout 전이를 할 수 없으므로 barrier가 필요하면 render pass를 닫고 전이한 뒤 LOAD로 다시 연다.
 void VulkanDevice::Transition(Span<const ResourceTransition> transitions) noexcept {
     platform::LockGuard lock(gate_);
+    TransitionLocked(transitions);
+}
+
+TextureRecord* VulkanDevice::ResolveTextureTransition(const ResourceTransition& transition,
+                                                      SlotHandle& slot, uint32& first,
+                                                      uint32& count) noexcept {
+    // view의 전이는 이미지 상태를 추적하는 원 텍스처 기록에 낸다.
+    slot = transition.texture.slot;
+    TextureRecord* record = textures_.Find(slot);
+    if (record != nullptr && record->isView) {
+        slot = record->source;
+        record = textures_.Find(slot);
+    }
+
+    if (record == nullptr || transition.range.firstMip >= record->mipLevels) {
+        ++ignoredDraws_;
+        return nullptr;
+    }
+
+    // 내용 버림은 지금 낮출 것이 없다(aliasing은 RG5·GX12).
+    if (transition.after == ResourceAccess::Discard) {
+        return nullptr;
+    }
+
+    // 이미지 usage에 없는 layout으로는 바꿀 수 없다. 렌더 타깃이 아닌 텍스처의 렌더 타깃 상태와
+    // 깊이 타깃이 아닌 텍스처의 깊이 상태는 무시로 센다.
+    if ((HasAnyAccess(transition.after, ResourceAccess::RenderTarget) && !record->renderTarget) ||
+        (HasAnyAccess(transition.after, DepthAccessMask) && !record->depthTarget)) {
+        ++ignoredDraws_;
+        return nullptr;
+    }
+
+    first = transition.range.firstMip;
+    const uint32 available = record->mipLevels - first;
+    count = transition.range.mipCount < available ? transition.range.mipCount : available;
+    if (validation_ && transition.before != ResourceAccess::Unknown &&
+        transition.before != ResourceAccess::Discard) {
+        for (uint32 mip = first; mip < first + count; ++mip) {
+            if (record->current[mip] != CanonicalAccess(transition.before)) {
+                platform::AtomicFetchAdd<platform::MemoryOrder::AcquireRelease>(
+                    &validationState_.errors, uint64{1});
+                auto failed = FailCode("Transition", ErrorCode::InvalidArgument,
+                                       "transition before-state differs from the tracked state");
+                (void)failed;
+                break;
+            }
+        }
+    }
+
+    return record;
+}
+
+void VulkanDevice::TransitionLocked(Span<const ResourceTransition> transitions) noexcept {
     if (!recording_) {
         return;
     }
@@ -319,49 +414,12 @@ void VulkanDevice::Transition(Span<const ResourceTransition> transitions) noexce
             continue;
         }
 
-        // view의 전이는 이미지 상태를 추적하는 원 텍스처 기록에 낸다.
-        SlotHandle slot = transition.texture.slot;
-        TextureRecord* record = textures_.Find(slot);
-        if (record != nullptr && record->isView) {
-            slot = record->source;
-            record = textures_.Find(slot);
-        }
-        if (record == nullptr || transition.range.firstMip >= record->mipLevels) {
-            ++ignoredDraws_;
+        SlotHandle slot;
+        uint32 first = 0;
+        uint32 count = 0;
+        TextureRecord* record = ResolveTextureTransition(transition, slot, first, count);
+        if (record == nullptr) {
             continue;
-        }
-
-        // 내용 버림은 지금 낮출 것이 없다(aliasing은 RG5·GX12).
-        if (transition.after == ResourceAccess::Discard) {
-            continue;
-        }
-
-        // 이미지 usage에 없는 layout으로는 바꿀 수 없다. 렌더 타깃이 아닌 텍스처의 렌더 타깃 상태와
-        // 깊이 타깃이 아닌 텍스처의 깊이 상태는 무시로 센다.
-        if ((HasAnyAccess(transition.after, ResourceAccess::RenderTarget) &&
-             !record->renderTarget) ||
-            (HasAnyAccess(transition.after, DepthAccessMask) && !record->depthTarget)) {
-            ++ignoredDraws_;
-            continue;
-        }
-
-        const uint32 first = transition.range.firstMip;
-        const uint32 available = record->mipLevels - first;
-        const uint32 count =
-            transition.range.mipCount < available ? transition.range.mipCount : available;
-        if (validation_ && transition.before != ResourceAccess::Unknown &&
-            transition.before != ResourceAccess::Discard) {
-            for (uint32 mip = first; mip < first + count; ++mip) {
-                if (record->current[mip] != CanonicalAccess(transition.before)) {
-                    platform::AtomicFetchAdd<platform::MemoryOrder::AcquireRelease>(
-                        &validationState_.errors, uint64{1});
-                    auto failed =
-                        FailCode("Transition", ErrorCode::InvalidArgument,
-                                 "transition before-state differs from the tracked state");
-                    (void)failed;
-                    break;
-                }
-            }
         }
 
         const bool uav = HasAnyAccess(transition.after, UavAccessMask);
@@ -369,6 +427,231 @@ void VulkanDevice::Transition(Span<const ResourceTransition> transitions) noexce
     }
 
     ResumeRenderPass();
+}
+
+VkEvent VulkanDevice::AcquireSplitEvent() noexcept {
+    CommandRecord& record = commands_[frameRecord_];
+    if (record.eventCursor < record.eventCount) {
+        return record.events[record.eventCursor++];
+    }
+
+    if (record.eventCount == MaxSplitEventsPerRecord) {
+        return VK_NULL_HANDLE;
+    }
+
+    VkEventCreateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
+    info.flags = VK_EVENT_CREATE_DEVICE_ONLY_BIT;
+    VkEvent event = VK_NULL_HANDLE;
+    if (functions_.vkCreateEvent(device_, &info, nullptr, &event) != VK_SUCCESS) {
+        return VK_NULL_HANDLE;
+    }
+
+    record.events[record.eventCount++] = event;
+    ++record.eventCursor;
+    return event;
+}
+
+SplitTransition
+VulkanDevice::BeginTransitions(Span<const ResourceTransition> transitions) noexcept {
+    platform::LockGuard lock(gate_);
+    if (!recording_) {
+        return {};
+    }
+
+    const SplitTransition split = splits_.Begin(transitions);
+    if (split.IsNull() || !sync2_) {
+        return split;
+    }
+
+    // 담을 자리를 먼저 잡는다(텍스처 전이 하나는 mip 구간마다 barrier 하나, 많아야 mip 수). 잡지
+    // 못하면 이 짝은 event 없이 end에서 Transition처럼 낮춘다(pendingSplits_에 없는 짝).
+    if (!pendingSplits_.TryEnsureCapacity(pendingSplits_.Size() + 1) ||
+        !splitMemoryBarriers_.TryEnsureCapacity(splitMemoryBarriers_.Size() + transitions.Size()) ||
+        !splitImageBarriers_.TryEnsureCapacity(splitImageBarriers_.Size() +
+                                               transitions.Size() * MaxMipLevels)) {
+        return split;
+    }
+
+    PendingSplit pending;
+    pending.id = split.id;
+    pending.firstImage = static_cast<uint32>(splitImageBarriers_.Size());
+    pending.firstMemory = static_cast<uint32>(splitMemoryBarriers_.Size());
+    for (const ResourceTransition& transition : transitions) {
+        if (!CanCombineAccess(transition.after)) {
+            ++ignoredDraws_;
+            continue;
+        }
+
+        if (!transition.buffer.IsNull()) {
+            if (buffers_.Find(transition.buffer.slot) == nullptr) {
+                ++ignoredDraws_;
+                continue;
+            }
+
+            // LowerBufferTransition과 같은 조건이다.
+            const ResourceAccess before = CanonicalAccess(transition.before);
+            const ResourceAccess after = CanonicalAccess(transition.after);
+            const bool unknown =
+                before == ResourceAccess::Unknown || before == ResourceAccess::Discard;
+            if (!unknown && !IsWritableAccess(before) && !IsWritableAccess(after) &&
+                CoversStages(before, after)) {
+                continue;
+            }
+
+            const StageAccess source = unknown ? StageAccess{VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                                             VK_ACCESS_MEMORY_WRITE_BIT}
+                                               : StageAccessFor(before);
+            const StageAccess destination = StageAccessFor(after);
+            VkMemoryBarrier2 barrier = {};
+            barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+            barrier.srcStageMask = source.stage;
+            barrier.srcAccessMask = WriteAccess(source.access);
+            barrier.dstStageMask = destination.stage;
+            barrier.dstAccessMask = destination.access;
+            (void)splitMemoryBarriers_.TryPushBack(barrier);
+            continue;
+        }
+
+        SlotHandle slot;
+        uint32 first = 0;
+        uint32 count = 0;
+        TextureRecord* record = ResolveTextureTransition(transition, slot, first, count);
+        if (record == nullptr) {
+            continue;
+        }
+
+        const ResourceAccess after = CanonicalAccess(transition.after);
+        const bool uav = HasAnyAccess(transition.after, UavAccessMask);
+        uint32 mip = first;
+        while (mip < first + count) {
+            const ResourceAccess from = record->current[mip];
+            uint32 end = mip + 1;
+            while (end < first + count && record->current[end] == from) {
+                ++end;
+            }
+
+            if (BarrierNeeded(from, after, uav)) {
+                (void)splitImageBarriers_.TryPushBack(
+                    ImageBarrier2(record->image, record->aspect, mip, end - mip, from, after));
+            }
+
+            mip = end;
+        }
+
+        // 이미지 layout은 begin 뒤 바뀌므로 추적 상태를 지금 바꾼다(그 사이 render pass를 다시
+        // 열지 않는다, 사이 접근은 계약 위반이다).
+        for (uint32 index = first; index < first + count; ++index) {
+            record->current[index] = after;
+        }
+
+        MarkTouched(*record, slot);
+    }
+
+    pending.imageCount = static_cast<uint32>(splitImageBarriers_.Size()) - pending.firstImage;
+    pending.memoryCount = static_cast<uint32>(splitMemoryBarriers_.Size()) - pending.firstMemory;
+    if (pending.imageCount + pending.memoryCount != 0) {
+        pending.event = AcquireSplitEvent();
+        if (pending.event != VK_NULL_HANDLE) {
+            // vkCmdSetEvent2는 render pass 밖에서만 기록한다.
+            SuspendRenderPass();
+            const VkDependencyInfo dependency =
+                DependencyOf(splitMemoryBarriers_.Data() + pending.firstMemory, pending.memoryCount,
+                             splitImageBarriers_.Data() + pending.firstImage, pending.imageCount);
+            functions_.vkCmdSetEvent2KHR(frame_, pending.event, &dependency);
+            ResumeRenderPass();
+        }
+    }
+
+    (void)pendingSplits_.TryPushBack(pending);
+    return split;
+}
+
+void VulkanDevice::EndTransitions(SplitTransition split,
+                                  Span<const ResourceTransition> transitions) noexcept {
+    platform::LockGuard lock(gate_);
+    if (!recording_) {
+        return;
+    }
+
+    const SplitEndResult ended = splits_.End(split, transitions);
+    if (ended == SplitEndResult::Unknown) {
+        ++ignoredDraws_;
+        TransitionLocked(transitions);
+        return;
+    }
+
+    if (ended == SplitEndResult::Null || !sync2_) {
+        TransitionLocked(transitions);
+        return;
+    }
+
+    if (ended == SplitEndResult::Mismatch && validation_) {
+        platform::AtomicFetchAdd<platform::MemoryOrder::AcquireRelease>(&validationState_.errors,
+                                                                        uint64{1});
+        auto failed = FailCode("EndTransitions", ErrorCode::InvalidArgument,
+                               "split transition ended with a list different from its begin");
+        (void)failed;
+    }
+
+    usize found = pendingSplits_.Size();
+    for (usize index = 0; index < pendingSplits_.Size(); ++index) {
+        if (pendingSplits_[index].id == split.id) {
+            found = index;
+            break;
+        }
+    }
+
+    if (found == pendingSplits_.Size()) {
+        TransitionLocked(transitions);
+        return;
+    }
+
+    const PendingSplit pending = pendingSplits_[found];
+    pendingSplits_[found] = pendingSplits_[pendingSplits_.Size() - 1];
+    auto popped = pendingSplits_.TryPopBack();
+    (void)popped;
+    if (pending.imageCount + pending.memoryCount == 0) {
+        return;
+    }
+
+    // 레이아웃 전이가 낀 대기는 render pass 밖에서 한다.
+    SuspendRenderPass();
+    const VkDependencyInfo dependency =
+        DependencyOf(splitMemoryBarriers_.Data() + pending.firstMemory, pending.memoryCount,
+                     splitImageBarriers_.Data() + pending.firstImage, pending.imageCount);
+    if (pending.event != VK_NULL_HANDLE) {
+        functions_.vkCmdWaitEvents2KHR(frame_, 1, &pending.event, &dependency);
+    } else {
+        functions_.vkCmdPipelineBarrier2KHR(frame_, &dependency);
+    }
+
+    ResumeRenderPass();
+}
+
+void VulkanDevice::CloseSplitTransitions() noexcept {
+    const usize unended = splits_.Close();
+    if (validation_ && unended != 0) {
+        platform::AtomicFetchAdd<platform::MemoryOrder::AcquireRelease>(&validationState_.errors,
+                                                                        uint64{unended});
+        auto failed = FailCode("EndFrame", ErrorCode::InvalidArgument,
+                               "split transitions were begun but not ended before EndFrame");
+        (void)failed;
+    }
+
+    // 이 기록이 신호한 event를 기록 끝에서 되돌린다(UE FVulkanCommandBuffer::End와 같다). 다음
+    // 사용은 이 제출의 fence 뒤다(ResetRecordPools).
+    if (sync2_) {
+        const CommandRecord& record = commands_[frameRecord_];
+        for (uint32 index = 0; index < record.eventCursor; ++index) {
+            functions_.vkCmdResetEvent2KHR(frame_, record.events[index],
+                                           VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+        }
+    }
+
+    pendingSplits_.Clear();
+    splitImageBarriers_.Clear();
+    splitMemoryBarriers_.Clear();
 }
 
 } // namespace rocks::graphics::vulkan

@@ -564,6 +564,8 @@ void RenderLane::PushInbox(const InboxItem& item) noexcept {
 }
 
 void RenderLane::ProcessInbox() noexcept {
+    // 상관 id: 이 lane 작업은 처음 Post한 쪽의 상관 id로 돈다(DedicatedLane 전파). 한 번에 처리하는
+    // 여러 통지는 각자 올린 쪽의 상관 id를 따로 갖지 않는다.
     // 장치를 가진 실행 흐름에서만 처리한다(소유권 반납 뒤의 lane 작업은 건너뛴다).
     if (!laneOwnsDevice_) {
         return;

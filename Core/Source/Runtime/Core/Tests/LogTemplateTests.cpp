@@ -2,6 +2,8 @@
 #include <Core/Diagnostics/LogCapture.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/StringBuilder.h>
+#include <Core/Time/DateTime.h>
+#include <Platform/Clock.h>
 #include <Platform/Memory.h>
 
 using namespace rocks;
@@ -41,6 +43,9 @@ struct Reserving {};
 
 // spec을 그대로 "[spec]"으로 낸다(미리 계산한 spec 위치 확인).
 struct EchoSpec {};
+
+// IsValidSpec이 "short"만 받는 사용자 Formatter 타입이다.
+struct CheckedSpec {};
 
 } // namespace
 
@@ -90,6 +95,17 @@ struct Formatter<Reserving> {
         }
 
         return out.TryAppend("reserved");
+    }
+};
+
+template <>
+struct Formatter<CheckedSpec> {
+    static Result<void> Format(StringBuilderBase& out, const CheckedSpec&, StringView) noexcept {
+        return out.TryAppend("checked");
+    }
+
+    static constexpr bool IsValidSpec(StringView spec) noexcept {
+        return spec.IsEmpty() || spec == "short";
     }
 };
 
@@ -171,6 +187,22 @@ static_assert(Analyze("{0:x} {0:x}", Customs, 1) == LogTemplateError::None);
 static_assert(Analyze("{0} {0:x}", Customs, 1) == LogTemplateError::ConflictingFormatterSpec);
 static_assert(Analyze("{0:x} {0:y}", Customs, 1) == LogTemplateError::ConflictingFormatterSpec);
 static_assert(Analyze("{0:.1f} {0:.2f}", Doubles, 1) == LogTemplateError::None);
+
+constexpr LogTemplateError AnalyzeChecked(StringView text) noexcept {
+    constexpr detail::LogSpecCheck checks[] = {detail::LogSpecCheckOf<CheckedSpec>()};
+    LogTemplateLayout layout{};
+    return AnalyzeLogTemplate(text, Customs, 1, layout, checks);
+}
+
+// IsValidSpec이 있으면 사용자 Formatter spec도 검사한다(없으면 위처럼 통과).
+static_assert(detail::LogSpecCheckOf<CheckedSpec>() != nullptr);
+static_assert(detail::LogSpecCheckOf<EchoSpec>() == nullptr);
+static_assert(detail::LogSpecCheckOf<int>() == nullptr);
+static_assert(AnalyzeChecked("{A}") == LogTemplateError::None);
+static_assert(AnalyzeChecked("{A:short}") == LogTemplateError::None);
+static_assert(AnalyzeChecked("{A:long}") == LogTemplateError::InvalidFormatterSpec);
+static_assert(detail::HasFormatterSpecCheck<DateTime> && Formatter<DateTime>::IsValidSpec("ms") &&
+              !Formatter<DateTime>::IsValidSpec("s"));
 static_assert(Analyze("{A}", Ints, MaxLogArguments + 1) == LogTemplateError::TooManyArguments);
 static_assert(Analyze(StringView("\xff{A}", 4), Ints, 1) == LogTemplateError::InvalidUtf8);
 
@@ -381,7 +413,9 @@ TEST(LogCaptureRoundTripsNamedValues) {
     CHECK(event.messageTemplate ==
           "{Count} items {Ratio:.2f} {Name} {Flag} {Letter} {Shade} {Point} {Delta}");
     CHECK(event.eventId == HashStringBytes(event.messageTemplate));
-    CHECK(event.monotonicNanoseconds == 111 && event.threadId == 222 && event.frame == 333);
+    CHECK(event.monotonicTicks == 111 && event.threadId == 222 && event.frame == 333);
+    CHECK(event.monotonicNanoseconds ==
+          detail::LogTicksToNanoseconds(111, platform::MonotonicTickFrequency()));
     REQUIRE(event.properties.Size() == 8);
 
     const LogProperty* p = event.properties.Data();
@@ -781,6 +815,21 @@ TEST(LogCaptureGivesFormatterItsSpec) {
     Rendered third;
     REQUIRE(third.From(Span<const uint8>(slot, conflict.Value())).IsOk());
     CHECK(third.event.message == "{0:a} {0:b} [template error: ConflictingFormatterSpec]");
+
+    // 런타임 템플릿에서도 IsValidSpec이 거부하면 템플릿 오류다(검사는 캡처 때, 표시는 렌더 때).
+    const auto rejected = CaptureLog({Span<uint8>(slot)}, LogLevel::Info, LogTests,
+                                     RuntimeTemplate{StringView("{Value:long}")}, CheckedSpec{});
+    REQUIRE(rejected.IsOk());
+    Rendered fourth;
+    REQUIRE(fourth.From(Span<const uint8>(slot, rejected.Value())).IsOk());
+    CHECK(fourth.event.message == "{Value:long} [template error: InvalidFormatterSpec]");
+    CHECK(HasAnyLogEventFlags(fourth.event.flags, LogEventFlags::TemplateError));
+    const auto accepted = CaptureLog({Span<uint8>(slot)}, LogLevel::Info, LogTests,
+                                     RuntimeTemplate{StringView("{Value:short}")}, CheckedSpec{});
+    REQUIRE(accepted.IsOk());
+    Rendered fifth;
+    REQUIRE(fifth.From(Span<const uint8>(slot, accepted.Value())).IsOk());
+    CHECK(fifth.event.message == "checked");
 }
 
 // 잘림 모드 builder의 TryReserve는 할당하지 않고 성공한다. Formatter가 불러도 실패하지 않는다.

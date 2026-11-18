@@ -87,7 +87,7 @@ void LogWrite(LogLevel level, const LogCategory& category, const LogCaptureTempl
         LogSubmit(level, category, text, nullptr, 0);
     } else {
         const FormatArg list[] = {MakeLogArg(args)...};
-        LogSubmit(level, category, text, list, sizeof...(Args));
+        LogSubmit(level, category, WithRuntimeSpecChecks<Args...>(text), list, sizeof...(Args));
     }
 }
 

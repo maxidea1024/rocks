@@ -33,6 +33,10 @@ namespace rocks {
 template <>
 struct Formatter<Guid> {
     static Result<void> Format(StringBuilderBase& out, const Guid& value, StringView spec) noexcept;
+
+    static constexpr bool IsValidSpec(StringView spec) noexcept {
+        return spec.IsEmpty();
+    }
 };
 
 } // namespace rocks

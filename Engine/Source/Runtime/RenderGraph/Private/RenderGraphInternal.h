@@ -145,6 +145,8 @@ struct SubresourceTrack {
     uint32 chain = GraphIndexNone;
     // 이 subresource의 마지막 생산자 pass다(culling 간선).
     uint32 lastProducer = GraphIndexNone;
+    // 전이 추적 중 이 subresource를 마지막으로 쓴(접근한) pass다(분리 전이의 begin 자리).
+    uint32 lastUser = GraphIndexNone;
     // 그래프 안 업로드가 내용을 채운다(생산자 pass 없이도 읽을 수 있다).
     bool uploaded = false;
 };
@@ -193,6 +195,8 @@ struct ResourceRecord {
     bool accessed = false;
     // 그래프 안 업로드를 받는다(그래프 시작에 할당하고 올린다).
     bool uploadTarget = false;
+    // 어느 Raster pass의 렌더 타깃(attachment)이다.
+    bool renderTarget = false;
     // Sampled 텍스처 업로드의 mip 사슬(MipChainBytes, 프레임 arena)이다.
     uint8* uploadPixels = nullptr;
 };
@@ -205,6 +209,8 @@ struct PhysicalResource {
     uint32 owner = GraphIndexNone;
     // 계획 중 지금 자원이 쓰는 중이다(놓이면 같은 키의 뒤 자원이 받을 수 있다).
     bool held = false;
+    // 놓였지만 아직 열린 장치 기록의 attachment일 수 있다. 다음 Raster pass(새 기록)부터 받는다.
+    bool waitsForRecording = false;
     // 풀에서 받았다(entry·device 유효).
     bool acquired = false;
     // 그래프 끝에 export로 넘겼다(풀에 Release하지 않는다).
@@ -256,6 +262,16 @@ struct ChainEntry {
     GraphAccessFlags beforeFlags = GraphAccessFlags::None;
     GraphAccessFlags afterFlags = GraphAccessFlags::None;
     bool attachment = false;
+    // 앞 구간을 마지막으로 쓴 pass다(없으면 None).
+    uint32 previousUser = GraphIndexNone;
+};
+
+// 분리 전이 묶음 하나다: beginPass epilogue에서 begin한 전이 가운데 endPass에서 end하는 것들이다.
+// 장치가 준 짝을 end까지 들고 있는다.
+struct SplitGroup {
+    uint32 beginPass = GraphIndexNone;
+    uint32 endPass = GraphIndexNone;
+    graphics::SplitTransition split;
 };
 
 // 오류 문구 버퍼 크기다(영어 진단 문구 하나).
@@ -283,6 +299,9 @@ struct GraphState {
     ArenaArray<uint32> stack;
     // 장치 전이 묶음 임시 공간이다.
     ArenaArray<graphics::ResourceTransition> lowered;
+    ArenaArray<SplitGroup> splitGroups;
+    // 분리 전이를 쓴다(Deferred이고 RenderGraphDesc::splitTransitions).
+    bool splitEnabled = false;
 
     // 실행 상태다.
     graphics::CommandContext* commands = nullptr;
@@ -373,7 +392,8 @@ Result<void> AllocateResource(FrameArena& arena, GraphState& state, uint32 index
 // Deferred 실행 앞부분: 남은 업로드 대상을 할당하고 올린다(UE SubmitBufferUploads와 같은 자리).
 Result<void> ExecuteUploads(FrameArena& arena, GraphState& state) noexcept;
 
-// pass 하나를 실행한다(자원 할당 → 기록 열기 → prologue 전이 → 기록 함수).
+// pass 하나를 실행한다(자원 할당 → 기록 열기 → prologue 전이(분리 전이 end 포함) → 기록 함수 →
+// epilogue 분리 전이 begin).
 Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& state,
                          uint32 pass) noexcept;
 

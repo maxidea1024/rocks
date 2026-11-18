@@ -400,3 +400,94 @@ TEST(FileLogSinkRejectsInvalidConfig) {
     CHECK(FileLogSink(allocator, config).Open().Error() == ErrorCode::InvalidArgument);
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+
+namespace {
+
+constexpr uint64 NanosecondsPerSecond = 1000000000;
+constexpr uint64 MaxAgeSeconds = 10;
+
+// 시험용 압축: 앞에 'Z' 한 byte를 붙여 복사한다(배선·확장자 확인용).
+class MarkingCompressor final : public LogBatchCompressor {
+public:
+    usize Bound(usize batchBytes) const noexcept override {
+        return batchBytes + 1;
+    }
+
+    Result<usize> TryCompress(Span<const uint8> batch, Span<uint8> out) noexcept override {
+        if (out.Size() < batch.Size() + 1) {
+            return Result<usize>::Failure(ErrorCode::CapacityExceeded);
+        }
+
+        out[0] = 'Z';
+        platform::MemoryCopy(out.Data() + 1, batch.Data(), batch.Size());
+        ++calls;
+        return Result<usize>::Success(batch.Size() + 1);
+    }
+
+    uint32 calls = 0;
+};
+
+bool CollectZst(const platform::DirectoryEntry& entry, void* raw) noexcept {
+    const StringView name(entry.name, entry.nameBytes);
+    if (name.EndsWith(".log.zst", StringComparison::CaseSensitive)) {
+        ++*static_cast<usize*>(raw);
+    }
+
+    return true;
+}
+
+} // namespace
+
+// 시간 기준 회전은 기록의 단조 시각으로 판정한다: 파일 첫 기록 + 상한을 넘은 묶음이 새 파일로 간다.
+// 시계를 주입하지 않고 LogEvent에 시각을 정해 넣으므로 결정적이다.
+TEST(FileLogSinkRotatesByElapsedRecordTime) {
+    ScratchDirectory directory;
+    SystemAllocator allocator;
+    FileLogSinkConfig config = Config(directory);
+    config.maxAgeNanoseconds = MaxAgeSeconds * NanosecondsPerSecond;
+    FileLogSink file(allocator, config);
+    REQUIRE(file.Open().IsOk());
+    const uint64 seconds[] = {0, 5, 11, 15, 22};
+    for (uint64 second : seconds) {
+        LogEvent event = Event("timed record");
+        event.monotonicNanoseconds = second * NanosecondsPerSecond;
+        REQUIRE(file.Write(event).IsOk());
+        REQUIRE(file.Flush().IsOk());
+    }
+
+    // 0·5초는 첫 파일, 11·15초는 둘째(11초에 회전), 22초는 셋째(11 + 10을 넘음)다.
+    CHECK(file.Rotations() == 2);
+    file.Close();
+    CHECK(CountFiles(directory) == 3);
+}
+
+// 압축이 있으면 묶음마다 압축하고, 봉인하지 않은 파일은 ".log.zst"다.
+TEST(FileLogSinkCompressesBatches) {
+    ScratchDirectory directory;
+    SystemAllocator allocator;
+    MarkingCompressor compressor;
+    FileLogSinkConfig config = Config(directory);
+    config.compressor = &compressor;
+    Array<char> path(allocator);
+    {
+        FileLogSink file(allocator, config);
+        REQUIRE(file.Open().IsOk());
+        REQUIRE(file.Write(Event("compressed record")).IsOk());
+        REQUIRE(file.Flush().IsOk());
+        REQUIRE(path.TryAppend(
+            Span<const char>(file.CurrentPath().Data(), file.CurrentPath().ByteCount())));
+        file.Close();
+    }
+
+    CHECK(compressor.calls == 1);
+    CHECK(
+        StringView(path.Data(), path.Size()).EndsWith(".log.zst", StringComparison::CaseSensitive));
+    usize compressed = 0;
+    (void)platform::PhysicalFileSystem().EnumerateDirectory(directory.root, directory.length,
+                                                            &CollectZst, &compressed);
+    CHECK(compressed == 1);
+    Array<uint8> bytes(allocator);
+    REQUIRE(ReadAll(StringView(path.Data(), path.Size()), bytes));
+    REQUIRE(bytes.Size() > 1);
+    CHECK(bytes[0] == 'Z');
+}

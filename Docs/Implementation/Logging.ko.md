@@ -83,7 +83,7 @@ inline constexpr LogCategory LogGraphicsD3D12{"Graphics.D3D12"};
 | `{{` · `}}` | 중괄호 문자 |
 
 - **컴파일 타임에 검증하는 것**(리터럴 템플릿): 중괄호 짝, 이름·위치 혼용, 자리 수와 인자 수(위치 자리는 모든 인자를 한 번 이상 써야 한다), 위치 번호 범위, 이름 문법, UTF-8, **내장 타입**의 spec, 같은 사용자 타입 인자에 서로 다른 spec. 어기면 영어 이름의 오류 함수(`LogTemplateError_*`)가 진단에 나온다.
-- **검증하지 않는 것:** 사용자 `Formatter<T>`의 spec은 런타임에 해석한다. 잘못되면 그 자리만 `<format error>`로 나온다. 이 부분은 부분 검증이다.
+- **사용자 `Formatter<T>`의 spec:** 특수화에 `static constexpr bool IsValidSpec(StringView spec) noexcept`를 두면 리터럴 템플릿은 컴파일 타임에(`LogTemplateError_InvalidFormatterSpec`), `RuntimeTemplate`은 캡처 때 검사한다(거부되면 `[template error: InvalidFormatterSpec]`). 없으면 런타임에 `Format`이 판단하고, 잘못되면 그 자리만 `<format error>`로 나온다. `Guid`·`DateTime`(`ms`)·`TimeSpan`·`AssetId`는 검사 함수를 가진다.
 - **동적 템플릿:** 설정이나 데이터에서 온 문자열은 `Log::Write(level, category, RuntimeTemplate{text}, args...)`로 넘긴다. 검증은 런타임에 하고, 잘못되면 원문에 `[template error: ...]`를 붙여 그대로 기록한다.
 - 인자는 최대 16개(`MaxLogArguments`)다.
 - 사용자 타입은 기존 `Formatter<T>` 특수화로 지원한다. 값은 기록하는 순간 텍스트로 렌더되며, 이 비용은 호출 스레드가 낸다. 내장 타입(정수·실수·bool·포인터·enum·문자열)은 원시 값으로 복사하고 출력 스레드가 렌더한다.
@@ -294,6 +294,7 @@ host.Stop();                                           // WriterAbandoned()면 �
 | `log.mode` | string | `default`(호스트 프리셋) · `async` · `sync` | 시작 뒤 고정 |
 | `log.level` | string | `info` (`trace`…`fatal`) | 실행 중, sync 지점 |
 | `log.levels` | string | `""` — `Graphics=warning,Engine.World=debug` | 실행 중, sync 지점 |
+| `log.rate_limits` | string | `""` — `Graphics=20,Engine.World.Tick=100`(접두사별 초당 기록 수, 최대 16항목) | 실행 중, sync 지점 |
 | `log.file.enabled` | bool | `false` | 시작 뒤 고정 |
 | `log.file.directory` | string | `Saved/Logs` | 시작 뒤 고정 |
 | `log.file.format` | string | `text` · `jsonlines` | 시작 뒤 고정 |
@@ -301,12 +302,57 @@ host.Stop();                                           // WriterAbandoned()면 �
 | `log.file.retention` | int32 | `8` (1–256) | 시작 뒤 고정 |
 | `log.file.encrypt` | bool | `false` | 시작 뒤 고정 |
 | `log.file.recipient_key` | string | `""` — X-Wing 공개키 base64(`log keygen`이 출력) | 시작 뒤 고정 |
+| `log.file.max_age_minutes` | int32 | `0`(끔) — 0–10080. 파일 첫 기록 뒤 경과 시간(단조)으로 회전 | 시작 뒤 고정 |
+| `log.file.compress` | bool | `false` — 묶음마다 독립 zstd frame(`.log.zst`, `zstd -d`로 풀림). 봉인과 함께면 압축 뒤 봉인 | 시작 뒤 고정 |
+| `log.console.layout` | string | `""`(기본 콘솔 레이아웃) — 예: `"[{Level:u3}] {Message}{NewLine}"` | 시작 뒤 고정 |
+| `log.file.layout` | string | `""`(기본 콘솔 레이아웃). `log.file.format = jsonlines`이면 쓰이지 않는다(Warning 한 번) | 시작 뒤 고정 |
 
 - 레벨 이름과 `log.levels`의 접두사는 대소문자를 가리지 않는다(`"log.level": "Warning"`도 된다). `log.level`에 모르는 이름을 넣으면 설정 단계에서 거부되고(Config 진단) 앞 값이 남는다. `log.levels`의 잘못된 항목은 Warning을 남기고 건너뛴다.
+- **압축·시간 회전:** 압축은 Compression의 `FixedWorkspaceCompressor`(작업 공간을 만들 때 한 번 잡는 zstd 문맥)로 하므로 파일을 연 뒤 할당이 없다. `log decode`·`log view`가 압축·봉인+압축 파일을 푼다. 보관 정리는 `.log`·`.log.zst`를 함께 센다.
+- **rate limit:** `log.rate_limits`(또는 `LogSystem::SetRateLimit`)는 접두사별 1초 창마다 정확히 상한만 통과시킨다. Trace–Warning에만 적용하고 Error·Fatal은 세지 않는다. 버린 수는 접두사마다 1초에 한 번까지 `Rate limit dropped {Dropped} records for {Prefix} (limit {Limit}/s)` Info로 알리고 `Stats().rateLimited`에 쌓인다. 잘못된 항목은 적용 때 Warning 후 건너뛴다(`CheckLogRateLimitsSyntax`가 CVR7의 `Validate`).
+- 기록 시각은 `MonotonicTicks`로 캡처하고 출력 때 ns로 바꾼다(`LogEvent::monotonicTicks`·`monotonicNanoseconds`). 시험은 `LogSystemConfig::clock`·`clockFrequency`로 시계를 주입한다.
+- 레이아웃 패턴이 잘못되면 `LogHost::Start`가 위치와 이유를 담은 Error를 한 번 남기고 기본 레이아웃으로 계속한다(예: `log.file.layout is not a valid layout at byte 8: unknown layout token; using the default layout`). 설정 단계에서 거부하는 일은 CVar 이관(CVR7) 뒤다. 이 Error는 설치 전에 나므로 stderr(비상 경로)로만 나가고 로그 파일에는 남지 않는다. 문법만 보는 상수 평가 함수 `CheckLogLayoutSyntax`·`CheckLogLevelsSyntax`(통과면 빈 view, 아니면 영어 이유)가 그때 `Validate`로 쓰인다.
 - `log.level`은 늘 값이 있으므로(기본 `info`) 설정 문맥을 주면 호스트 프리셋의 전역 최소를 덮어쓴다. 설정 문맥 없이 `Start`하면 프리셋 그대로다.
 - 멈춘 sink 때문에 `Stop`이 출력 스레드를 남기면 `LogHost`는 LogSystem·sink를 파괴하지 않고 프로세스 끝까지 놓아 두며 `WriterAbandoned()`가 참이 된다(그 뒤 `Start`는 Busy). 호스트는 이때 정리 없이 프로세스를 끝낸다(Sandbox는 `_Exit`). 생성자에 준 allocator도 프로세스 끝까지 살아 있어야 한다.
 - 암호화를 켰는데 공개키가 없거나 틀리면 파일을 쓰지 않고 Error를 한 번 남긴다(평문으로 내려가지 않는다).
 - Sandbox: `Sandbox --engine --config <Engine.json>`의 `"Settings"` 섹션이 이 값들이다. 예: `{"Settings": {"log.mode": "sync", "log.file.enabled": true}}`.
+
+## 상관 id
+
+```cpp
+CorrelationScope request(CorrelationIds{.request = requestId});   // 이 범위의 기록에 request=... 
+Log::Info(LogNet, "Request accepted");
+```
+
+- `Core/Diagnostics/Correlation.h`의 스레드별 스택(깊이 16)이다. 로그 기록은 맨 위 값(5칸, 40 B)을 캡처 때 복사한다. 비어 있으면 0 B다.
+- 출력: 레이아웃 토큰 `{Correlation}`(`session=3 task=1842`, 0인 칸은 뺌), JSON lines `corr` 객체. 기본 콘솔 레이아웃에는 넣지 않았다.
+- trace와 같은 스택이다(`TraceContextScope`는 별칭 래퍼). task(`WorkerScheduler`)와 `DedicatedLane::Post`는 trace 채널과 무관하게 상관 id를 넘긴다. lane 작업이 끝나면 lane 스레드의 스택은 원래 깊이로 돌아온다.
+
+## trace로 보내기
+
+- `TraceLogSink`(TraceCapture)를 trace 세션 시작 뒤 `LogSystem::AddSink`로 더한다. 끝낼 때는 `LogSystem::Flush` → `RemoveSink` → `TraceSession::Stop` 순서다(Sandbox `--engine`이 이렇게 하고, `--trace-file <path>`로 trace 파일을 쓴다). 채널 `log`(기본 묶음 `default`에 있다)가 켜져 있을 때만 `Trace.LogMessageSpec`·`Trace.LogMessage`를 쓴다.
+- 카테고리 `Trace`·`Trace.*` 기록과 세션이 없을 때의 기록은 보내지 않는다. 메시지는 1024 byte까지다(UTF-8 경계).
+- spec(카테고리·템플릿·위치)은 호출 지점마다 세션에 한 번 쓴다. 호출 지점은 파일·함수 문자열의 내용으로 가린다. 중복 표가 차거나, spec이 정의 기록 상한(16 KiB)을 넘거나, 정의 버퍼가 차면 그 기록에 카테고리·템플릿(1024 byte까지)을 싣는다. 이 기록에는 위치가 없다. 실린 횟수는 `SpecTableOverflows()`·`SpecWriteFailures()`로 본다.
+- `trace-report`에 `logs`(레벨별 수, Warning 이상 목록)가 나온다.
+
+## 비정상 종료 때 마지막 로그
+
+- `LogInstallScope`는 `platform::SetTerminationHook`에 로그 종료 hook을 건다. `platform::Fatal`(Log를 거치지 않는 Fatal 포함)은 abort 전에 이 hook을 한 번 부르고, hook은 설치된 LogSystem의 `FlushForTermination`을 부른다. 막히는 lock 없이 출력 스레드를 깨우고 큐가 sink flush까지 끝나기를 `fatalFlushTimeoutMilliseconds`까지 기다린다. `Log::Fatal`·assert가 이미 flush했으면 다시 하지 않는다.
+- 엔진 호스트는 `platform::InstallCrashHandler()`(`Platform/CrashHandler.h`)로 접근 위반·stack overflow(Windows unhandled exception filter)와 치명 신호(POSIX)에서도 같은 hook을 부르게 할 수 있다. 처리기는 flush만 하고 앞 처리기로 넘긴다. stack overflow 대비로 hook은 미리 만든 flush 전용 스레드에서 돈다. `platform::Thread`로 만든 스레드는 처리기용 여유 stack(32 KiB)을 시작 때 확보한다.
+- 비정상 종료한 봉인 파일에는 끝 표시가 없다(`log decode`가 비정상 종료로 알린다).
+
+## 로그 파일 보기(`log view`)
+
+```
+RocksCommandlet log view Saved/Logs --level warning --category Graphics
+RocksCommandlet log view game.log --key dev.key --correlation request=55
+```
+
+- 파일 하나나 폴더(`*.log`·`*.log.zst`, 시작 시각·번호 순)를 읽는다. `.log.zst`는 풀고, `--key`면 봉인 파일(압축 묶음 포함)을 푼다.
+- 거르기: `--level`(최소), `--category`(점 접두사, 대소문자 무시), `--event`(16진), `--since`·`--until`(UTC ISO 8601 사전순), `--grep`, `--correlation <칸>=<id>`.
+- 봉인 여부는 파일 머리(magic)로 정한다. 키 없이 봉인 파일을 만나면 경고하고 건너뛴다. 압축 파일이 잘렸으면 앞 frame까지 보여 주고 경고한다. `--event`는 16진 숫자로 비교한다. 기본 레이아웃 기록의 이어진 줄(여러 줄 메시지)은 앞 기록을 따른다.
+- `log pack <평문> <out.log.zst>`·`log seal ... --compress`는 압축 파일을 만드는 진단·시험용 명령이다.
+- JSON lines 파일은 모든 필드로 거른다. 기본 레이아웃 텍스트는 시각·레벨·카테고리로, 다른 레이아웃 텍스트는 `--grep`만 된다. 분석이 목적이면 `log.file.format = jsonlines`를 권한다.
 
 ## 시험에서 쓰기
 
@@ -316,4 +362,6 @@ host.Stop();                                           // WriterAbandoned()면 �
 
 ## 아직 구현되지 않은 것
 
-- TraceCapture `log` 채널 연결과 상관 id, 구조체 펼치기(`{@Obj}`), 사용자 Formatter spec의 컴파일 타임 검증: 후속
+- 구조체 펼치기(`{@Obj}`): 후속(GC 세션 병합 뒤)
+- 설정 단계 거부(`log.levels`·`log.rate_limits`·레이아웃의 문법 오류): CVar 이관(CVR7)의 `Validate`. 지금은 적용 때 Warning·Error
+- POSIX 크래시 처리기: 코드는 있으나 이 저장소의 Windows 환경에서만 빌드·시험했다

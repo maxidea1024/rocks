@@ -1,3 +1,4 @@
+#include <Platform/CrashHandler.h>
 #include <Platform/Thread.h>
 #include <Platform/Fatal.h>
 #include "../Common/ThreadInternal.h"
@@ -77,6 +78,8 @@ unsigned __stdcall ThreadEntry(void* context) noexcept {
 } // namespace
 
 void ApplyCurrentThreadOptions(const ThreadState& state) noexcept {
+    // 크래시 처리기(filter)가 돌 여유 stack을 확보한다(stack overflow 대응).
+    PrepareThreadForCrashHandling();
     if (state.name[0] != '\0') {
         // Start가 UTF-8과 길이를 검사했으므로 변환은 실패하지 않는다. 실패해도 이름은 힌트라
         // 무시한다. UTF-8 n byte는 UTF-16 n 단위를 넘지 않으므로 칸이 모자라지 않는다.

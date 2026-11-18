@@ -135,6 +135,12 @@ Result<GpuFencePoint> D3D11Device::EndFrame() noexcept {
         return Result<GpuFencePoint>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // 끝나지 않은 분리 전이는 계약 위반이다(검증 장치는 오류로 센다).
+    const usize unended = splits_.Close();
+    if (validation_) {
+        validationErrors_ += unended;
+    }
+
     CloseMarkers();
     const TimestampRange stamps = timestamps_.OpenRange();
     recording_ = false;
@@ -322,6 +328,30 @@ void D3D11Device::DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 fi
 // 없다(RenderBase GX5, UE D3D11 RHI도 전이가 빈 함수다).
 void D3D11Device::Transition(Span<const ResourceTransition> transitions) noexcept {
     (void)transitions;
+}
+
+SplitTransition D3D11Device::BeginTransitions(Span<const ResourceTransition> transitions) noexcept {
+    platform::LockGuard lock(gate_);
+    if (!recording_) {
+        return {};
+    }
+
+    return splits_.Begin(transitions);
+}
+
+void D3D11Device::EndTransitions(SplitTransition split,
+                                 Span<const ResourceTransition> transitions) noexcept {
+    platform::LockGuard lock(gate_);
+    if (!recording_) {
+        return;
+    }
+
+    const SplitEndResult ended = splits_.End(split, transitions);
+    if (ended == SplitEndResult::Unknown) {
+        ++ignoredDraws_;
+    } else if (ended == SplitEndResult::Mismatch && validation_) {
+        ++validationErrors_;
+    }
 }
 
 Result<void> D3D11Device::CopyPassTarget(TextureHandle destination) noexcept {

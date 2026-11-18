@@ -11,7 +11,7 @@ D3D12Device::D3D12Device(Allocator& allocator) noexcept
       messageScratch_(allocator), timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics),
       allocator_(allocator), readbacks_(allocator), ring_(allocator), timestamps_(allocator),
       touchedTextures_(allocator), bufferViews_(allocator), cpuUavs_(allocator),
-      bufferStates_(allocator) {
+      bufferStates_(allocator), splits_(allocator) {
 }
 
 D3D12Device::~D3D12Device() {

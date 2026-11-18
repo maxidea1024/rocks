@@ -241,6 +241,7 @@ RenderGraph::RenderGraph(const RenderGraphDesc& desc) noexcept : arena_(RequireA
     state_->trace = desc.trace;
     state_->frame = desc.frame;
     state_->mode = desc.mode;
+    state_->splitEnabled = desc.splitTransitions && desc.mode == GraphMode::Deferred;
     state_->serial = NextGraphSerial();
 }
 
@@ -739,6 +740,7 @@ Result<GraphPass> RenderGraph::AddPassWithAccesses(TraceScopeName& name, GraphPa
 
         auto added = AddUse(arena_, state, passName, firstUse, target.texture.index, 0,
                             ResourceAccess::RenderTarget, GraphAccessFlags::None);
+        state.resources[target.texture.index].renderTarget = true;
         if (!added) {
             return rollback(added.Error());
         }

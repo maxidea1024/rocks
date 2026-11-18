@@ -64,6 +64,13 @@ Result<void> PlanResourceReuse(FrameArena& arena, GraphState& state) noexcept {
             continue;
         }
 
+        // Raster pass는 새 장치 기록을 연다. 앞 기록의 attachment였던 자리도 이제 받을 수 있다.
+        if (record.kind == GraphPassKind::Raster) {
+            for (PhysicalResource& physical : state.physicals) {
+                physical.waitsForRecording = false;
+            }
+        }
+
         const uint32 endUse = record.firstUse + record.useCount;
         for (uint32 use = record.firstUse; use < endUse; ++use) {
             const uint32 index = state.uses[use].resource;
@@ -75,7 +82,8 @@ Result<void> PlanResourceReuse(FrameArena& arena, GraphState& state) noexcept {
             uint32 found = GraphIndexNone;
             for (uint32 slot = 0; slot < state.physicals.Size(); ++slot) {
                 const PhysicalResource& physical = state.physicals[slot];
-                if (!physical.held && SameResourceKey(state.resources[physical.owner], resource)) {
+                if (!physical.held && !physical.waitsForRecording &&
+                    SameResourceKey(state.resources[physical.owner], resource)) {
                     found = slot;
                     break;
                 }
@@ -107,6 +115,9 @@ Result<void> PlanResourceReuse(FrameArena& arena, GraphState& state) noexcept {
             }
 
             state.physicals[resource.physical].held = false;
+            // 렌더 타깃이었던 객체는 그 장치 기록(attachment로 묶인 채)이 닫힌 뒤에 넘긴다(같은
+            // 기록의 복사·compute가 attachment 객체를 쓰지 않게, 장치 CopyTexture 계약).
+            state.physicals[resource.physical].waitsForRecording = resource.renderTarget;
         }
     }
 
@@ -159,6 +170,8 @@ Result<void> TrackPassTransitions(FrameArena& arena, GraphState& state, uint32 p
 
         // 앞 pass들과 한 상태로 합칠 수 있으면 그 구간을 넓힌다. 그러면 구간의 첫 pass에서 넓힌
         // 상태로 한 번만 바꾸고 이 pass에는 전이가 없다(읽기 → 읽기 전이 0).
+        const uint32 previousUser = track.lastUser;
+        track.lastUser = pass;
         if (allowMerge && track.chain != GraphIndexNone &&
             CanMergeAcrossPasses(track.access, track.flags, use.access, use.flags)) {
             track.access |= use.access;
@@ -167,6 +180,7 @@ Result<void> TrackPassTransitions(FrameArena& arena, GraphState& state, uint32 p
         }
 
         ChainEntry entry;
+        entry.previousUser = previousUser;
         entry.pass = pass;
         entry.resource = use.resource;
         entry.subresource = use.subresource;
@@ -227,6 +241,40 @@ Result<void> TrackFinalTransitions(FrameArena& arena, GraphState& state) noexcep
     return Result<void>::Success();
 }
 
+namespace {
+
+// 분리 전이의 begin pass다(나누지 않으면 None). 앞 구간을 마지막으로 쓴 pass(previous)의
+// epilogue에서 begin하고 pass의 prologue에서 end한다. 나누는 조건: 그래프 안 전이(attachment·그래프
+// 끝 아님), 앞 사용자가 있음(첫 사용은 앞 상태가 장치 추적 상태라 begin 자리가 없다), 그 사이에
+// 실행되는 pass가 하나 이상 있음(바로 다음이면 나눌 이득이 없다), begin과 end가 같은 장치 기록
+// 안(Raster pass는 새 기록을 열므로 (previous, pass] 안에 Raster pass가 없어야 한다). UE도 같은
+// pipe에서 생산 pass epilogue begin, 소비 pass prologue
+// end다(RC/Private/RenderGraphBuilder.cpp:3783–3928).
+uint32 SplitBeginPass(const GraphState& state, const ChainEntry& entry) noexcept {
+    if (!state.splitEnabled || entry.attachment || entry.pass == GraphIndexNone ||
+        entry.previousUser == GraphIndexNone || entry.previousUser >= entry.pass) {
+        return GraphIndexNone;
+    }
+
+    bool between = false;
+    for (uint32 pass = entry.previousUser + 1; pass <= entry.pass; ++pass) {
+        const PassRecord& record = state.passes[pass];
+        if (record.culled) {
+            continue;
+        }
+
+        if (record.kind == GraphPassKind::Raster) {
+            return GraphIndexNone;
+        }
+
+        between = between || pass != entry.pass;
+    }
+
+    return between ? entry.previousUser : GraphIndexNone;
+}
+
+} // namespace
+
 Result<void> CollectTransitions(FrameArena& arena, GraphState& state, usize first) noexcept {
     for (usize index = first; index < state.chains.Size(); ++index) {
         const ChainEntry& entry = state.chains[index];
@@ -235,14 +283,15 @@ Result<void> CollectTransitions(FrameArena& arena, GraphState& state, usize firs
         }
 
         const GraphResourceKind kind = state.resources[entry.resource].kind;
-        // 같은 pass·자원·전후 상태의 바로 다음 mip이면 앞 범위를 늘린다.
+        const uint32 beginPass = SplitBeginPass(state, entry);
+        // 같은 pass·자원·전후 상태·begin 자리의 바로 다음 mip이면 앞 범위를 늘린다.
         if (!state.transitions.IsEmpty()) {
             GraphTransitionRecord& last = state.transitions.Back();
             const usize lastIndex = state.transitions.Size() - 1;
             if (lastIndex >= state.nextTransition && last.pass == entry.pass && last.kind == kind &&
                 last.resource == entry.resource && last.before == entry.before &&
                 last.after == entry.after && last.attachment == entry.attachment &&
-                last.firstMip + last.mipCount == entry.subresource) {
+                last.beginPass == beginPass && last.firstMip + last.mipCount == entry.subresource) {
                 ++last.mipCount;
                 continue;
             }
@@ -257,6 +306,7 @@ Result<void> CollectTransitions(FrameArena& arena, GraphState& state, usize firs
         record.before = entry.before;
         record.after = entry.after;
         record.attachment = entry.attachment;
+        record.beginPass = beginPass;
         auto pushed = state.transitions.TryPushBack(arena, record);
         if (!pushed) {
             return pushed;

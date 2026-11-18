@@ -75,6 +75,7 @@ void VulkanDevice::QueryDeviceCaps() noexcept {
     const bool multiViewport = enabledFeatures_.multiViewport == VK_TRUE;
     features.vertexViewportLayerOutput = viewportLayer_ && multiViewport;
     features.atomic64 = atomic64_;
+    features.splitTransitions = sync2_;
     features.rayTracingPipeline = rayTracingPipeline_;
     features.rayQuery = rayQuery_;
     features.indirectFirstInstance = enabledFeatures_.drawIndirectFirstInstance == VK_TRUE;
@@ -387,6 +388,8 @@ void VulkanDevice::ResetRecordPools(CommandRecord& record) noexcept {
     }
 
     record.poolCursor = 0;
+    // 앞 제출이 끝났고 그 기록 끝에서 event를 reset했으므로 다시 쓴다.
+    record.eventCursor = 0;
 }
 
 void VulkanDevice::DestroyRecordPools() noexcept {
@@ -397,6 +400,12 @@ void VulkanDevice::DestroyRecordPools() noexcept {
 
         record.poolCount = 0;
         record.poolCursor = 0;
+        for (uint32 index = 0; index < record.eventCount; ++index) {
+            functions_.vkDestroyEvent(device_, record.events[index], nullptr);
+        }
+
+        record.eventCount = 0;
+        record.eventCursor = 0;
     }
 }
 

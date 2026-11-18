@@ -41,18 +41,18 @@ TraceScopeName& TraceTaskRunName() noexcept {
 }
 
 TraceTaskInfo CreateTraceTask() noexcept {
+    TraceTaskInfo info;
+    // 문맥 사본은 세션과 무관하게 받는다(상관 id 전파, 로깅 L15). 세션이 있으면 정의도 미리 쓴다.
+    info.context = TraceCaptureContext();
     const uint64 serial = AtomicLoad<MemoryOrder::Acquire>(&currentSessionSerial);
     if (serial == 0) {
-        return {};
+        return info;
     }
 
-    TraceTaskInfo info;
-    // 문맥 사본은 세션 접근 전에 받는다(사본 자체가 필요하면 세션을 빌린다).
-    info.context = TraceCaptureContext();
     TraceSessionGuard guard;
     TraceSessionState* session = guard.Session(serial);
     if (session == nullptr) {
-        return {};
+        return info;
     }
 
     info.id.value = platform::AtomicFetchAdd<MemoryOrder::Relaxed>(&session->nextTaskId, 1) + 1;
@@ -87,3 +87,37 @@ void EndTraceTaskExecution(const TraceTaskId& task, uint64 previousTask) noexcep
 }
 
 } // namespace rocks::detail
+
+namespace rocks {
+
+void TraceTaskScope::Begin(const TraceTaskInfo& info) noexcept {
+    active_ = true;
+    id_ = info.id;
+    // 문맥을 먼저 복원한다(실행 사건과 CPU 구간이 복원한 문맥 안에 놓인다).
+    if (info.context.valid) {
+        context_ = detail::PushCorrelation(info.context.entry, true);
+    }
+
+    if (id_.IsTraced()) {
+        detail::BeginTraceTaskExecution(id_, previousTask_);
+        if (TraceCpuChannel.IsEnabled()) {
+            run_ = detail::BeginCpuScope(detail::TraceTaskRunName());
+        }
+    }
+}
+
+void TraceTaskScope::End() noexcept {
+    if (id_.IsTraced()) {
+        if (run_ != 0) {
+            detail::EndCpuScope(run_);
+        }
+
+        detail::EndTraceTaskExecution(id_, previousTask_);
+    }
+
+    if (context_ != CorrelationPushState::None) {
+        detail::PopCorrelation(context_);
+    }
+}
+
+} // namespace rocks

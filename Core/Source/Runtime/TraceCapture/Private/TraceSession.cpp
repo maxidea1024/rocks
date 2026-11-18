@@ -433,6 +433,7 @@ Result<void> TraceSession::Start(const TraceSessionSettings& settings) noexcept 
 
     state_ = state;
     // 표준 채널(cpu·counter·mark·span·frame·context, 꺼진 상태)과 표준 형을 등록한다.
+    detail::InstallTraceContextObserver();
     if (auto standard = detail::RegisterStandardTraceTypes(*this); !standard) {
         Stop();
         return standard;

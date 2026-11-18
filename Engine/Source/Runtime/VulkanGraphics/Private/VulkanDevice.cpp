@@ -109,8 +109,9 @@ VulkanDevice::VulkanDevice(Allocator& allocator) noexcept
       readbacks_(allocator), bufferViews_(allocator), orphanBuffers_(allocator),
       retired_(allocator), renderPasses_(allocator), framebuffers_(allocator),
       timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics), touchedTextures_(allocator),
-      acquireSemaphores_(allocator), orphanSemaphores_(allocator), ring_(allocator),
-      stagingBlocks_(allocator), timestamps_(allocator) {
+      splits_(allocator), pendingSplits_(allocator), splitImageBarriers_(allocator),
+      splitMemoryBarriers_(allocator), acquireSemaphores_(allocator), orphanSemaphores_(allocator),
+      ring_(allocator), stagingBlocks_(allocator), timestamps_(allocator) {
     stagingSource_.owner = this;
     timestampSource_.owner = this;
 }
@@ -586,9 +587,17 @@ Result<void> VulkanDevice::CreateLogicalDevice() noexcept {
     ycbcrSupported.pNext = astcHdrExtension ? static_cast<void*>(&astcHdrSupported)
                            : atomicQuery    ? static_cast<void*>(&atomicSupported)
                                             : nullptr;
+    // 분리 전이 event 경로는 VK_KHR_synchronization2다(UE VulkanExtensions.cpp:603–633, 1.3 core).
+    // 기준 판이 1.1이라 확장으로 켠다.
+    const bool sync2Extension =
+        HasExtension(extensions, extensionCount, VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME);
+    VkPhysicalDeviceSynchronization2FeaturesKHR sync2Supported = {};
+    sync2Supported.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR;
+    sync2Supported.pNext = &ycbcrSupported;
     VkPhysicalDeviceFeatures2 supported2 = {};
     supported2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    supported2.pNext = &ycbcrSupported;
+    supported2.pNext =
+        sync2Extension ? static_cast<void*>(&sync2Supported) : static_cast<void*>(&ycbcrSupported);
     functions_.vkGetPhysicalDeviceFeatures2(physical_, &supported2);
     const VkPhysicalDeviceFeatures& supported = supported2.features;
     ycbcr_ = ycbcrSupported.samplerYcbcrConversion == VK_TRUE;
@@ -612,6 +621,11 @@ Result<void> VulkanDevice::CreateLogicalDevice() noexcept {
     if (atomic64_) {
         enabled[enabledCount++] = VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME;
         enabled[enabledCount++] = VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME;
+    }
+
+    const bool sync2Feature = sync2Extension && sync2Supported.synchronization2 == VK_TRUE;
+    if (sync2Feature) {
+        enabled[enabledCount++] = VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME;
     }
 
     VkPhysicalDeviceShaderImageAtomicInt64FeaturesEXT imageAtomicEnabled = {};
@@ -665,7 +679,12 @@ Result<void> VulkanDevice::CreateLogicalDevice() noexcept {
     info.enabledExtensionCount = enabledCount;
     info.ppEnabledExtensionNames = enabled;
     info.pEnabledFeatures = &features;
-    info.pNext = &ycbcrEnabled;
+    VkPhysicalDeviceSynchronization2FeaturesKHR sync2Enabled = {};
+    sync2Enabled.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR;
+    sync2Enabled.synchronization2 = VK_TRUE;
+    sync2Enabled.pNext = &ycbcrEnabled;
+    info.pNext = sync2Feature ? static_cast<const void*>(&sync2Enabled)
+                              : static_cast<const void*>(&ycbcrEnabled);
     result = functions_.vkCreateDevice(physical_, &info, nullptr, &device_);
     if (result != VK_SUCCESS) {
         device_ = VK_NULL_HANDLE;
@@ -689,6 +708,10 @@ Result<void> VulkanDevice::CreateLogicalDevice() noexcept {
     }
 
     functions_.vkGetDeviceQueue(device_, queueFamily_, 0, &queue_);
+    sync2_ = sync2Feature && functions_.vkCmdSetEvent2KHR != nullptr &&
+             functions_.vkCmdWaitEvents2KHR != nullptr &&
+             functions_.vkCmdResetEvent2KHR != nullptr &&
+             functions_.vkCmdPipelineBarrier2KHR != nullptr;
     if (calibratedKhr || calibratedExt) {
         getCalibratedTimestamps_ = calibratedKhr
                                        ? functions_.vkGetCalibratedTimestampsKHR
