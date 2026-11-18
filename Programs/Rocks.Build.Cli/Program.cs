@@ -291,7 +291,7 @@ namespace Rocks.Build.Cli
                     var testStart = System.Diagnostics.Stopwatch.GetTimestamp();
                     // 제한은 멈춘 시험을 끊는 장치다. 네이티브 시험은 그래프 한도 fixture처럼 큰 입력을 쓰고 Asan은 계측 때문에
                     // 몇 배 느리므로(Windows CI 러너 Asan에서 기본값 5분을 넘겼다) 구성별로 넉넉히 둔다.
-                    TimeSpan nativeLimit = configuration == NativeConfiguration.Asan ? TimeSpan.FromMinutes(30) : TimeSpan.FromMinutes(15);
+                    TimeSpan nativeLimit = configuration is NativeConfiguration.Asan or NativeConfiguration.Coverage ? TimeSpan.FromMinutes(30) : TimeSpan.FromMinutes(15);
                     var native = await ProcessRunner.RunAsync(new(executable, ["--seed", "7351", "--json", report], root, toolchain.Environment,
                         Timeout: nativeLimit), cancellationToken);
                     Console.Write(native.StdOut);

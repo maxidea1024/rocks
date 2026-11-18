@@ -37,11 +37,14 @@ public static class NativeArchitectures
 /// <item>Release: 최적화와 ThinLTO, NDEBUG. 배포용(UE Shipping). UE Shipping처럼 디버그 정보(PDB)를 만들어
 /// 배포본 크래시 덤프를 심볼화한다(PDB는 배포 파일과 분리해 보관한다).</item>
 /// <item>Asan: Debug와 같은 코드 생성에 AddressSanitizer를 더한다. 릴리스 CRT를 쓴다.</item>
+/// <item>Coverage: Debug와 같은 코드 생성에 clang source-based coverage 계측(<c>-fprofile-instr-generate
+/// -fcoverage-mapping</c>, 링크는 clang_rt.profile)을 더한다. 릴리스 CRT를 쓴다(Asan과 같다). 측정 절차는
+/// Build/MeasureCoverage.ps1이다(Docs/Design/AssetSystem.ko.md 14.1절).</item>
 /// </list>
 /// 각 구성은 정확히 하나의 ROCKS_BUILD_DEBUG·ROCKS_BUILD_DEVELOPMENT·ROCKS_BUILD_RELEASE를 1로 정의한다
-/// (Asan은 ROCKS_BUILD_DEBUG).
+/// (Asan·Coverage는 ROCKS_BUILD_DEBUG).
 /// </summary>
-public enum NativeConfiguration { Debug, Development, Release, Asan }
+public enum NativeConfiguration { Debug, Development, Release, Asan, Coverage }
 
 /// <summary>
 /// 구성 매크로다. 컴파일과, 생성 헤더를 따로 컴파일하는 도구(MetaCompiler 검사 시험)가 같은 정의를 쓴다.
@@ -49,11 +52,11 @@ public enum NativeConfiguration { Debug, Development, Release, Asan }
 public static class NativeConfigurations
 {
     /// <summary>
-    /// 구성의 매크로 정의(<c>NAME=1</c>)다. Asan은 Debug 계열이다.
+    /// 구성의 매크로 정의(<c>NAME=1</c>)다. Asan·Coverage는 Debug 계열이다.
     /// </summary>
     public static string BuildMacro(NativeConfiguration configuration) => configuration switch
     {
-        NativeConfiguration.Debug or NativeConfiguration.Asan => "ROCKS_BUILD_DEBUG=1",
+        NativeConfiguration.Debug or NativeConfiguration.Asan or NativeConfiguration.Coverage => "ROCKS_BUILD_DEBUG=1",
         NativeConfiguration.Development => "ROCKS_BUILD_DEVELOPMENT=1",
         NativeConfiguration.Release => "ROCKS_BUILD_RELEASE=1",
         _ => throw new ArgumentException($"Invalid native configuration: {configuration}")
@@ -88,10 +91,10 @@ public static class LogCompiledMinimums
     /// <summary>매크로 이름이다. 값은 <see cref="LogLevel"/>의 숫자다.</summary>
     public const string MacroName = "ROCKS_LOG_COMPILED_MINIMUM";
 
-    /// <summary>구성 기본값이다: Debug·Asan은 Trace, Development는 Debug, Release는 Info.</summary>
+    /// <summary>구성 기본값이다: Debug·Asan·Coverage는 Trace, Development는 Debug, Release는 Info.</summary>
     public static LogLevel Default(NativeConfiguration configuration) => configuration switch
     {
-        NativeConfiguration.Debug or NativeConfiguration.Asan => LogLevel.Trace,
+        NativeConfiguration.Debug or NativeConfiguration.Asan or NativeConfiguration.Coverage => LogLevel.Trace,
         NativeConfiguration.Development => LogLevel.Debug,
         NativeConfiguration.Release => LogLevel.Info,
         _ => throw new ArgumentException($"Invalid native configuration: {configuration}")

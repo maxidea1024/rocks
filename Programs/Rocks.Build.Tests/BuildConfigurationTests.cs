@@ -2,7 +2,7 @@ using Rocks.Build;
 using Rocks.Tooling.Common;
 
 /// <summary>
-/// 빌드 구성(Debug·Development·Release·Asan)과 모듈 최적화 재정의가 만드는 compile·link 인자를 검사하고,
+/// 빌드 구성(Debug·Development·Release·Asan·Coverage)과 모듈 최적화 재정의가 만드는 compile·link 인자를 검사하고,
 /// 실제 toolchain으로 Development와 Release(ThinLTO, 최적화를 끈 모듈과 섞인 경우)를 빌드·실행한다.
 /// </summary>
 internal static class BuildConfigurationTests
@@ -42,6 +42,18 @@ internal static class BuildConfigurationTests
         if (request.Toolchain.Platform != NativePlatform.Android)
         {
             Expect(NativeConfiguration.Asan, Unoptimized(), ndebug: false, lto: false, "ROCKS_BUILD_DEBUG=1");
+            Expect(NativeConfiguration.Coverage, Unoptimized(), ndebug: false, lto: false, "ROCKS_BUILD_DEBUG=1");
+            // Coverage: 모든 compile이 계측 인자 둘을 받고 link driver가 profile 런타임(clang_rt.profile)을 링크한다.
+            var coverage = ActionGraph.Create(request with { Configuration = NativeConfiguration.Coverage }).Actions;
+            Check(coverage.Where(action => action.Kind == "Compile").All(action =>
+                action.Arguments.Contains("-fprofile-instr-generate") && action.Arguments.Contains("-fcoverage-mapping")),
+                "Coverage: every compile is instrumented");
+            Check(coverage.Where(action => action.Kind == "Link").All(action => windows
+                    ? action.Arguments.Any(argument => Path.GetFileName(argument).StartsWith("clang_rt.profile", StringComparison.OrdinalIgnoreCase))
+                    : action.Arguments.Contains("-fprofile-instr-generate")),
+                "Coverage: every link pulls the profile runtime");
+            Check(ActionGraph.Create(request with { Configuration = NativeConfiguration.Debug }).Actions
+                .All(action => !action.Arguments.Contains("-fprofile-instr-generate")), "Debug: no coverage instrumentation");
         }
 
         // 로그 컴파일 하한(LoggingSystem.ko.md 6.4절): 모든 모듈·번역 단위가 같은 값을 정확히 한 번 받는다. 기본은 구성별
@@ -64,6 +76,7 @@ internal static class BuildConfigurationTests
         if (request.Toolchain.Platform != NativePlatform.Android)
         {
             ExpectLogMinimum(request with { Configuration = NativeConfiguration.Asan }, 0, "Asan");
+            ExpectLogMinimum(request with { Configuration = NativeConfiguration.Coverage }, 0, "Coverage");
         }
 
         ExpectLogMinimum(request with { Configuration = NativeConfiguration.Release, LogCompiledMinimum = LogLevel.Warning }, 3, "Release override");
