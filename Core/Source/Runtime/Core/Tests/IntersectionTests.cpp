@@ -2157,16 +2157,35 @@ void CheckSphereContainsBox() {
 }
 
 // 단조성: box A ⊆ B이면 B가 Inside일 때 A도 Inside이고, A가 Outside가 아니면 B도 Outside가 아니다.
+// 면을 공유하는 경우(A의 면 좌표가 B와 같음)와 Raycast(A Hit ⇒ B Hit, B 진입 ≤ A 진입)도 본다.
 // 공간 인덱스가 노드 확장 경계로 가지를 칠 때 프록시를 놓치지 않게 하는 성질이다.
 void CheckContainmentMonotonicity() {
     RandomStream random(0xC0417u);
     const auto uniform = [&](double low, double high) noexcept {
         return low + (high - low) * random.NextDouble01();
     };
+    // 축 평행 단위 벡터 6개 중 하나다(축 평행 normal·방향과 −0 성분을 섞는다).
+    const auto axis = [&]() noexcept {
+        const uint32 pick = random.NextUInt32Below(6);
+        const double sign = pick < 3 ? 1.0 : -1.0;
+        const double zero = random.NextUInt32Below(2) == 0 ? 0.0 : -0.0;
+        return Vec3d(pick % 3 == 0 ? sign : zero, pick % 3 == 1 ? sign : zero,
+                     pick % 3 == 2 ? sign : zero);
+    };
+    // 바깥 box의 면을 절반 확률로 안쪽 box와 같은 좌표에 둔다(면 공유).
+    const auto grow = [&]() noexcept {
+        return random.NextUInt32Below(2) == 0 ? 0.0 : uniform(0, 1);
+    };
     uint32 violations = 0;
-    for (uint32 trial = 0; trial < 4000; ++trial) {
+    uint32 sharedFaces = 0;
+    uint32 rayHits = 0;
+    for (uint32 trial = 0; trial < 6000; ++trial) {
         Plane<double> planes[5];
         for (Plane<double>& plane : planes) {
+            if (random.NextUInt32Below(3) == 0) {
+                plane = Plane<double>(axis(), uniform(-5, 5));
+                continue;
+            }
             const Vec3d normal(uniform(-1, 1), uniform(-1, 1), uniform(-1, 1));
             auto made = Plane<double>::TryMake(normal + Vec3d(1.0e-3, 0, 0), uniform(-5, 5));
             plane = made ? made.Value() : Plane<double>();
@@ -2176,8 +2195,9 @@ void CheckContainmentMonotonicity() {
                                     uniform(0, 4));
         const Vec3d lowA(uniform(-6, 6), uniform(-6, 6), uniform(-6, 6));
         const Box<double> inner(lowA, lowA + Vec3d(uniform(0, 3), uniform(0, 3), uniform(0, 3)));
-        const Box<double> outer(inner.min - Vec3d(uniform(0, 1), uniform(0, 1), uniform(0, 1)),
-                                inner.max + Vec3d(uniform(0, 1), uniform(0, 1), uniform(0, 1)));
+        const Box<double> outer(inner.min - Vec3d(grow(), grow(), grow()),
+                                inner.max + Vec3d(grow(), grow(), grow()));
+        sharedFaces += (outer.min.x == inner.min.x || outer.max.y == inner.max.y) ? 1u : 0u;
         if (!volume) {
             continue;
         }
@@ -2189,8 +2209,32 @@ void CheckContainmentMonotonicity() {
         const Containment d = ClassifyContainment(sphere, outer);
         violations += (d == Containment::Inside && c != Containment::Inside) ? 1u : 0u;
         violations += (c != Containment::Outside && d == Containment::Outside) ? 1u : 0u;
+
+        // Raycast 단조성: 안쪽 box에 닿으면 바깥 box에도 닿고, 바깥 진입 거리가 작거나 같다. 원점을
+        // 안쪽 box 면 위에 두는 경우와 축 평행 방향을 섞는다.
+        Vec3d origin(uniform(-9, 9), uniform(-9, 9), uniform(-9, 9));
+        if (random.NextUInt32Below(4) == 0) {
+            origin.x = inner.min.x;
+        }
+        const Vec3d direction =
+            random.NextUInt32Below(3) == 0
+                ? axis()
+                : (inner.Center() - origin + Vec3d(uniform(-1, 1), uniform(-1, 1), uniform(-1, 1)));
+        auto ray = Ray<double>::TryMake(origin, direction);
+        if (!ray) {
+            continue;
+        }
+        const double maxDistance = random.NextUInt32Below(3) == 0 ? uniform(0, 20) : 1.0e30;
+        const RayHit<double> innerHit = Raycast(ray.Value(), inner, maxDistance);
+        const RayHit<double> outerHit = Raycast(ray.Value(), outer, maxDistance);
+        if (innerHit.IsHit()) {
+            ++rayHits;
+            violations += !outerHit.IsHit() ? 1u : 0u;
+            violations += outerHit.IsHit() && outerHit.distance > innerHit.distance ? 1u : 0u;
+        }
     }
     CHECK(violations == 0);
+    CHECK(sharedFaces > 1000 && rayHits > 500);
 }
 
 } // namespace

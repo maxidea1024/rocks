@@ -918,6 +918,10 @@ RayHit<T> Raycast(const Ray<T>& ray, const Sphere<T>& sphere,
 
 // slab 판정이다. 면에 평행하게 면 위를 스치는 ray도 Hit다. point의 진입 축 좌표는 면 좌표와 정확히
 // 같다. UE LineBoxIntersection의 0.1 단위 측면 허용 오차(BOX_SIDE_THRESHOLD) 같은 숨은 여유는 없다.
+// 접촉 = Hit은 반올림 한계 안에서 성립한다: slab 진입·이탈 시각을 나눗셈으로 구하므로 정확한
+// 판정과 다를 수 있는데, 정수 정확 판정과 대조한 시험에서 다른 경우는 모두 Hit로 넓히는 쪽이었다
+// (실제로 닿지 않는 거의 접선인 ray가 Hit). 진입 거리는 box 좌표에 대해 단조라 더 큰 box의 진입
+// 거리는 작거나 같다.
 template <typename T>
 RayHit<T> Raycast(const Ray<T>& ray, const Box<T>& box,
                   detail::GeometryScalar<T> maxDistance = detail::GeometryInfinity<T>()) noexcept {
@@ -1132,6 +1136,11 @@ QueryResult Overlap(const Sphere<T>& first, const Sphere<T>& second) noexcept {
 }
 
 // sphere 중심에서 box까지 제곱 거리 <= r²(Arvo 방식, UE SphereAABBIntersection과 같은 의미)다.
+// 접촉 = Hit은 반올림 한계 안에서 성립한다: 축별 차이의 제곱 합과 r²를 각각 반올림하므로, 제곱 합이
+// T의 가수 폭(double 53비트)을 넘는 큰 좌표에서는 정확히 표면에 닿는 box를 Miss로 볼 수 있다(정수
+// 128비트 정확 판정과 대조한 무작위 시험에서 큰 좌표의 정확 접촉 사례 중 약 1.4%). 접촉을 반드시
+// 잡아야 하면 호출자가 반지름에 여유를 더한다. 식은 box 좌표에 대해 단조라 더 큰 box의 거리는
+// 작거나 같다.
 template <typename T>
 QueryResult Overlap(const Sphere<T>& sphere, const Box<T>& box) noexcept {
     if (!sphere.IsValid() || !box.IsValid()) {
@@ -1484,7 +1493,11 @@ constexpr Containment ClassifySphereBoxUnchecked(const Sphere<T>& sphere,
 } // namespace detail
 
 // box가 볼록 영역 밖·안·걸침인지다. 어느 평면에서든 가장 앞 꼭짓점이 엄격히 뒤(SignedDistance <
-// 0)면 Outside, 모든 평면에서 가장 뒤 꼭짓점이 앞이거나 평면 위(>= 0)면 Inside다.
+// 0)면 Outside, 모든 평면에서 가장 뒤 꼭짓점이 앞이거나 평면 위(>= 0)면 Inside다. 접촉 = 교차는
+// 반올림 한계 안에서 성립한다: SignedDistance는 내적과 뺄셈을 반올림하므로 평면이 꼭짓점을 정확히
+// 지날 때 그 꼭짓점의 부호가 양쪽 어느 쪽으로도 틀릴 수 있다(정수 정확 판정과 대조한 시험에서 확인,
+// 접촉 box를 Outside로 보거나 바깥 box를 Intersecting으로 본다). 이 오차와 무관하게 식은 box 좌표에
+// 대해 단조다. Overlap(volume, box)도 같다.
 template <typename T>
 Containment ClassifyContainment(const ConvexVolume<T>& volume, const Box<T>& box) noexcept {
     if (!volume.IsValid() || !box.IsValid()) {

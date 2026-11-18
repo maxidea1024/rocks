@@ -668,7 +668,11 @@ inline constexpr uint32 ConvexVolumeMaxPlanes = 32;
 // 향한다: 점 p는 모든 평면에서 SignedDistance(p) >= 0일 때 영역 안이다(경계 포함). 평면 수는
 // [1, ConvexVolumeMaxPlanes]이며 평면 사이의 관계(실제로 닫힌 영역인지, 비어 있는지)는 검사하지
 // 않는다. 열린 영역(평면 하나 등)도 유효하다. 판정은 Intersection.h의
-// ClassifyContainment·Overlap이다.
+// ClassifyContainment·Overlap이다. 평면 normal은 길이 오차 ShapeUnitTolerance(1e-5)까지 단위로
+// 받아들이므로 SignedDistance는 정확한 거리가 아니라 normal 길이 비율만큼 다른 근사 거리다. 영역
+// 자체(SignedDistance >= 0인 반공간들의 교집합)는 그대로 정의되므로 안·밖 판정에는 영향이 없고,
+// sphere 판정처럼 거리를 반지름과 비교하는 곳에서는 반지름의 약 1e-5 비율만큼 경계가 달라질 수
+// 있다. 정확한 거리가 필요하면 Plane::TryMake로 정규화한 평면을 쓴다.
 //
 // 좌표계와 무관하다. 안쪽 normal 규약만 지키면 왼손(UE)·오른손 어느 좌표에서 만든 평면이든 같은
 // 뜻이다. 프러스텀을 만들 때 평면을 바깥쪽 normal로 얻었다면 Plane::Flipped()로 뒤집어 넣는다.
