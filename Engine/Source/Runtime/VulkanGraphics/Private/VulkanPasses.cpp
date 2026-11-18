@@ -189,13 +189,13 @@ void VulkanDevice::StartPass() noexcept {
     } else {
         for (uint32 index = 0; index < target_.colorCount; ++index) {
             TextureRecord* color = textures_.Find(target_.colors[index].slot);
-            TrackTransition(*color, target_.colors[index].slot, 0, 1, ResourceAccess::RenderTarget,
-                            false);
+            TrackTransition(*color, target_.colors[index].slot, {0, 1, 0, 1},
+                            ResourceAccess::RenderTarget, false);
         }
 
         TextureRecord* depth = textures_.Find(target_.depth.slot);
         if (depth != nullptr) {
-            TrackTransition(*depth, target_.depth.slot, 0, 1,
+            TrackTransition(*depth, target_.depth.slot, {0, 1, 0, 1},
                             target_.depthReadOnly ? ResourceAccess::DepthRead
                                                   : ResourceAccess::DepthWrite,
                             false);

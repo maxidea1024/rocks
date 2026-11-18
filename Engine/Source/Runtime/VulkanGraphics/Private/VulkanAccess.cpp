@@ -161,7 +161,8 @@ bool BarrierNeeded(ResourceAccess from, ResourceAccess to, bool uavOrder) noexce
 
 bool VulkanDevice::AccessBarrier(VkCommandBuffer buffer, VkImage image, uint32 firstMip,
                                  uint32 mipCount, ResourceAccess from, ResourceAccess to,
-                                 bool uavOrder, VkImageAspectFlags aspect) noexcept {
+                                 bool uavOrder, VkImageAspectFlags aspect, uint32 firstLayer,
+                                 uint32 layerCount) noexcept {
     if (!BarrierNeeded(from, to, uavOrder)) {
         return false;
     }
@@ -177,17 +178,34 @@ bool VulkanDevice::AccessBarrier(VkCommandBuffer buffer, VkImage image, uint32 f
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.image = image;
-    barrier.subresourceRange = {aspect, firstMip, mipCount, 0, 1};
+    barrier.subresourceRange = {aspect, firstMip, mipCount, firstLayer, layerCount};
     functions_.vkCmdPipelineBarrier(buffer, source.stage, destination.stage, 0, 0, nullptr, 0,
                                     nullptr, 1, &barrier);
     return true;
+}
+
+void VulkanDevice::MipLayerBarriers(VkCommandBuffer buffer, const TextureRecord& record,
+                                    const SubresourceStates<ResourceAccess>& states,
+                                    uint32 mipLevel, ResourceAccess to, bool toResting) noexcept {
+    uint32 layer = 0;
+    while (layer < record.slices) {
+        const ResourceAccess resting = states.At(mipLevel, layer);
+        uint32 end = layer + 1;
+        while (end < record.slices && states.At(mipLevel, end) == resting) {
+            ++end;
+        }
+
+        (void)AccessBarrier(buffer, record.image, mipLevel, 1, toResting ? to : resting,
+                            toResting ? resting : to, false, record.aspect, layer, end - layer);
+        layer = end;
+    }
 }
 
 namespace {
 
 // 1.1 비트로 sync2 image barrier를 만든다(같은 값의 비트다).
 VkImageMemoryBarrier2 ImageBarrier2(VkImage image, VkImageAspectFlags aspect, uint32 firstMip,
-                                    uint32 mipCount, ResourceAccess from,
+                                    uint32 mipCount, uint32 layer, ResourceAccess from,
                                     ResourceAccess to) noexcept {
     const StageAccess source = StageAccessFor(from);
     const StageAccess destination = StageAccessFor(to);
@@ -202,7 +220,7 @@ VkImageMemoryBarrier2 ImageBarrier2(VkImage image, VkImageAspectFlags aspect, ui
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.image = image;
-    barrier.subresourceRange = {aspect, firstMip, mipCount, 0, 1};
+    barrier.subresourceRange = {aspect, firstMip, mipCount, layer, 1};
     return barrier;
 }
 
@@ -242,29 +260,34 @@ void VulkanDevice::ResumeRenderPass() noexcept {
     BeginRenderPass(true);
 }
 
-void VulkanDevice::TrackTransition(TextureRecord& record, SlotHandle slot, uint32 first,
-                                   uint32 count, ResourceAccess after, bool uavOrder) noexcept {
+void VulkanDevice::TrackTransition(TextureRecord& record, SlotHandle slot,
+                                   const ResolvedSubresourceRange& range, ResourceAccess after,
+                                   bool uavOrder) noexcept {
     after = CanonicalAccess(after);
-    // mip마다 상태가 다를 수 있으므로 같은 상태가 이어지는 구간씩 barrier를 낸다.
-    uint32 mip = first;
-    while (mip < first + count) {
-        const ResourceAccess from = record.current[mip];
-        uint32 end = mip + 1;
-        while (end < first + count && record.current[end] == from) {
-            ++end;
+    // subresource마다 상태가 다를 수 있으므로 layer마다 같은 상태가 이어지는 mip 구간씩 barrier를
+    // 낸다.
+    const uint32 lastMip = range.firstMip + range.mipCount;
+    for (uint32 layer = range.firstSlice; layer < range.firstSlice + range.sliceCount; ++layer) {
+        uint32 mip = range.firstMip;
+        while (mip < lastMip) {
+            const ResourceAccess from = record.current.At(mip, layer);
+            uint32 end = mip + 1;
+            while (end < lastMip && record.current.At(end, layer) == from) {
+                ++end;
+            }
+
+            if (BarrierNeeded(from, after, uavOrder)) {
+                SuspendRenderPass();
+            }
+
+            (void)AccessBarrier(frame_, record.image, mip, end - mip, from, after, uavOrder,
+                                record.aspect, layer, 1);
+            mip = end;
         }
 
-        if (BarrierNeeded(from, after, uavOrder)) {
-            SuspendRenderPass();
+        for (uint32 index = range.firstMip; index < lastMip; ++index) {
+            record.current.At(index, layer) = after;
         }
-
-        (void)AccessBarrier(frame_, record.image, mip, end - mip, from, after, uavOrder,
-                            record.aspect);
-        mip = end;
-    }
-
-    for (uint32 index = first; index < first + count; ++index) {
-        record.current[index] = after;
     }
 
     MarkTouched(record, slot);
@@ -281,12 +304,10 @@ void VulkanDevice::MarkTouched(TextureRecord& record, SlotHandle slot) noexcept 
 
 void VulkanDevice::SettleTracking(bool executed) noexcept {
     auto settle = [executed](TextureRecord& record) noexcept {
-        for (uint32 mip = 0; mip < record.mipLevels; ++mip) {
-            if (executed) {
-                record.committed[mip] = record.current[mip];
-            } else {
-                record.current[mip] = record.committed[mip];
-            }
+        if (executed) {
+            record.committed.CopyFrom(record.current);
+        } else {
+            record.current.CopyFrom(record.committed);
         }
 
         record.touched = false;
@@ -350,8 +371,8 @@ void VulkanDevice::Transition(Span<const ResourceTransition> transitions) noexce
 }
 
 TextureRecord* VulkanDevice::ResolveTextureTransition(const ResourceTransition& transition,
-                                                      SlotHandle& slot, uint32& first,
-                                                      uint32& count) noexcept {
+                                                      SlotHandle& slot,
+                                                      ResolvedSubresourceRange& range) noexcept {
     // view의 전이는 이미지 상태를 추적하는 원 텍스처 기록에 낸다.
     slot = transition.texture.slot;
     TextureRecord* record = textures_.Find(slot);
@@ -360,7 +381,10 @@ TextureRecord* VulkanDevice::ResolveTextureTransition(const ResourceTransition& 
         record = textures_.Find(slot);
     }
 
-    if (record == nullptr || transition.range.firstMip >= record->mipLevels) {
+    range = record == nullptr
+                ? ResolvedSubresourceRange{}
+                : ResolveSubresourceRange(transition.range, record->mipLevels, record->slices);
+    if (range.IsEmpty()) {
         ++ignoredDraws_;
         return nullptr;
     }
@@ -378,20 +402,25 @@ TextureRecord* VulkanDevice::ResolveTextureTransition(const ResourceTransition& 
         return nullptr;
     }
 
-    first = transition.range.firstMip;
-    const uint32 available = record->mipLevels - first;
-    count = transition.range.mipCount < available ? transition.range.mipCount : available;
     if (validation_ && transition.before != ResourceAccess::Unknown &&
         transition.before != ResourceAccess::Discard) {
-        for (uint32 mip = first; mip < first + count; ++mip) {
-            if (record->current[mip] != CanonicalAccess(transition.before)) {
-                platform::AtomicFetchAdd<platform::MemoryOrder::AcquireRelease>(
-                    &validationState_.errors, uint64{1});
-                auto failed = FailCode("Transition", ErrorCode::InvalidArgument,
-                                       "transition before-state differs from the tracked state");
-                (void)failed;
-                break;
+        bool matched = true;
+        for (uint32 layer = range.firstSlice;
+             matched && layer < range.firstSlice + range.sliceCount; ++layer) {
+            for (uint32 mip = range.firstMip; mip < range.firstMip + range.mipCount; ++mip) {
+                if (record->current.At(mip, layer) != CanonicalAccess(transition.before)) {
+                    matched = false;
+                    break;
+                }
             }
+        }
+
+        if (!matched) {
+            platform::AtomicFetchAdd<platform::MemoryOrder::AcquireRelease>(
+                &validationState_.errors, uint64{1});
+            auto failed = FailCode("Transition", ErrorCode::InvalidArgument,
+                                   "transition before-state differs from the tracked state");
+            (void)failed;
         }
     }
 
@@ -415,15 +444,14 @@ void VulkanDevice::TransitionLocked(Span<const ResourceTransition> transitions) 
         }
 
         SlotHandle slot;
-        uint32 first = 0;
-        uint32 count = 0;
-        TextureRecord* record = ResolveTextureTransition(transition, slot, first, count);
+        ResolvedSubresourceRange range;
+        TextureRecord* record = ResolveTextureTransition(transition, slot, range);
         if (record == nullptr) {
             continue;
         }
 
         const bool uav = HasAnyAccess(transition.after, UavAccessMask);
-        TrackTransition(*record, slot, first, count, transition.after, uav);
+        TrackTransition(*record, slot, range, transition.after, uav);
     }
 
     ResumeRenderPass();
@@ -464,12 +492,23 @@ VulkanDevice::BeginTransitions(Span<const ResourceTransition> transitions) noexc
         return split;
     }
 
-    // 담을 자리를 먼저 잡는다(텍스처 전이 하나는 mip 구간마다 barrier 하나, 많아야 mip 수). 잡지
-    // 못하면 이 짝은 event 없이 end에서 Transition처럼 낮춘다(pendingSplits_에 없는 짝).
+    // 담을 자리를 먼저 잡는다(텍스처 전이 하나는 layer마다 mip 구간당 barrier 하나, 많아야 그
+    // 텍스처의 subresource 수). 잡지 못하면 이 짝은 event 없이 end에서 Transition처럼 낮춘다
+    // (pendingSplits_에 없는 짝).
+    usize imageBarriers = 0;
+    for (const ResourceTransition& transition : transitions) {
+        const TextureRecord* texture =
+            transition.texture.IsNull() ? nullptr : textures_.Find(transition.texture.slot);
+        if (texture != nullptr && texture->isView) {
+            texture = textures_.Find(texture->source);
+        }
+
+        imageBarriers += texture != nullptr ? usize{texture->mipLevels} * texture->slices : 0u;
+    }
+
     if (!pendingSplits_.TryEnsureCapacity(pendingSplits_.Size() + 1) ||
         !splitMemoryBarriers_.TryEnsureCapacity(splitMemoryBarriers_.Size() + transitions.Size()) ||
-        !splitImageBarriers_.TryEnsureCapacity(splitImageBarriers_.Size() +
-                                               transitions.Size() * MaxMipLevels)) {
+        !splitImageBarriers_.TryEnsureCapacity(splitImageBarriers_.Size() + imageBarriers)) {
         return split;
     }
 
@@ -514,35 +553,38 @@ VulkanDevice::BeginTransitions(Span<const ResourceTransition> transitions) noexc
         }
 
         SlotHandle slot;
-        uint32 first = 0;
-        uint32 count = 0;
-        TextureRecord* record = ResolveTextureTransition(transition, slot, first, count);
+        ResolvedSubresourceRange range;
+        TextureRecord* record = ResolveTextureTransition(transition, slot, range);
         if (record == nullptr) {
             continue;
         }
 
         const ResourceAccess after = CanonicalAccess(transition.after);
         const bool uav = HasAnyAccess(transition.after, UavAccessMask);
-        uint32 mip = first;
-        while (mip < first + count) {
-            const ResourceAccess from = record->current[mip];
-            uint32 end = mip + 1;
-            while (end < first + count && record->current[end] == from) {
-                ++end;
+        const uint32 lastMip = range.firstMip + range.mipCount;
+        for (uint32 layer = range.firstSlice; layer < range.firstSlice + range.sliceCount;
+             ++layer) {
+            uint32 mip = range.firstMip;
+            while (mip < lastMip) {
+                const ResourceAccess from = record->current.At(mip, layer);
+                uint32 end = mip + 1;
+                while (end < lastMip && record->current.At(end, layer) == from) {
+                    ++end;
+                }
+
+                if (BarrierNeeded(from, after, uav)) {
+                    (void)splitImageBarriers_.TryPushBack(ImageBarrier2(
+                        record->image, record->aspect, mip, end - mip, layer, from, after));
+                }
+
+                mip = end;
             }
 
-            if (BarrierNeeded(from, after, uav)) {
-                (void)splitImageBarriers_.TryPushBack(
-                    ImageBarrier2(record->image, record->aspect, mip, end - mip, from, after));
+            // 이미지 layout은 begin 뒤 바뀌므로 추적 상태를 지금 바꾼다(그 사이 render pass를
+            // 다시 열지 않는다, 사이 접근은 계약 위반이다).
+            for (uint32 index = range.firstMip; index < lastMip; ++index) {
+                record->current.At(index, layer) = after;
             }
-
-            mip = end;
-        }
-
-        // 이미지 layout은 begin 뒤 바뀌므로 추적 상태를 지금 바꾼다(그 사이 render pass를 다시
-        // 열지 않는다, 사이 접근은 계약 위반이다).
-        for (uint32 index = first; index < first + count; ++index) {
-            record->current[index] = after;
         }
 
         MarkTouched(*record, slot);

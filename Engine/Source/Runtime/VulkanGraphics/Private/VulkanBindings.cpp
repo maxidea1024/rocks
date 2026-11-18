@@ -81,6 +81,10 @@ void VulkanDevice::QueryDeviceCaps() noexcept {
     features.indirectFirstInstance = enabledFeatures_.drawIndirectFirstInstance == VK_TRUE;
     features.multiDrawIndirect = enabledFeatures_.multiDrawIndirect == VK_TRUE;
     features.textureCubeArray = enabledFeatures_.imageCubeArray == VK_TRUE;
+    // VkComponentMapping은 core다. AnisotropicPoint는 mipmapMode NEAREST에 이방성 배율을 더하므로
+    // 늘 된다(배율은 samplerAnisotropy 한도로 줄인다).
+    features.textureViewSwizzle = true;
+    features.anisotropicPointFilter = true;
     // sRGB 짝 형식은 MUTABLE_FORMAT 이미지의 view로 읽는다(PixelFormat.ko.md 14.2절).
     features.srgbPairView = true;
     features.vertexStores = enabledFeatures_.vertexPipelineStoresAndAtomics == VK_TRUE;

@@ -104,10 +104,21 @@ struct TextureRecord {
     GLuint sampler = 0;
     // RenderTarget이면 색 attachment 하나의 framebuffer다.
     GLuint framebuffer = 0;
+    // 차원과 그 GL 대상(TEXTURE_2D·2D_ARRAY·3D·CUBE_MAP·CUBE_MAP_ARRAY)이다.
+    TextureDimension dimension = TextureDimension::Texture2D;
+    GLenum target = GL_TEXTURE_2D;
     uint32 width = 0;
     uint32 height = 0;
+    // 3D 깊이다(다른 차원은 1).
+    uint32 depth = 1;
     uint32 mipLevels = 1;
+    // subresource slice 수(TextureSliceCount)다. 2D 배열·cube 배열은 GL layer 수, cube는 면 6이다.
+    uint32 slices = 1;
     PixelFormat format = PixelFormat::Unknown;
+    // 묶을 때 셰이더가 읽는 성분 대응이다(TextureDesc·TextureViewDesc::swizzle). 성분 대응은 GL
+    // 텍스처 객체 상태라 view와 원 텍스처가 공유하므로, 묶을 때마다 형식 흉내(A8)·스텐실 plane
+    // 대응과 합성해 TEXTURE_SWIZZLE_R/G/B/A로 다시 정한다(BindPassTexture).
+    ChannelSwizzle swizzle;
     // TextureUsage::DepthStencil로 만들었다(초기 데이터 없음).
     bool depthTarget = false;
     // 깊이·스텐실 텍스처를 묶을 때 읽는 plane이다(GL_DEPTH_STENCIL_TEXTURE_MODE, 1이면 스텐실).
@@ -128,6 +139,15 @@ struct TextureRecord {
     uint32 viewCount = 0;
     bool retirePending = false;
 };
+
+// mip level 하나의 데이터 byte다(모든 slice·깊이 면, TextureMipBytes와 같은 값).
+inline uint64 MipBytes(const TextureRecord& record, uint32 level) noexcept {
+    const uint32 depth =
+        record.dimension == TextureDimension::Texture3D ? MipExtent(record.depth, level) : 1u;
+    return PixelFormatImageBytes(record.format, MipExtent(record.width, level),
+                                 MipExtent(record.height, level)) *
+           depth * record.slices;
+}
 
 struct PipelineRecord {
     GLuint program = 0;
@@ -389,15 +409,21 @@ private:
     GLuint CreateColorFramebuffer(GLuint texture) noexcept;
 
     // 텍스처 하나의 샘플러 객체를 만든다. filterable이 false면(정수·깊이 형식) 최근접 필터다.
+    // filterable은 형식이 선형 필터를 받는지다(비교 샘플러의 깊이 형식은 선형 필터를 받는다).
     GLuint CreateSampler(const SamplerDesc& desc, bool filterable) noexcept;
 
     // texture mip 하나를 올린다(업로드 유닛에서 묶는다). 원본은 Rocks 배치(mip 안 plane 순서)다.
     // 깊이·스텐실은 plane을 GL 외부 배치로 엮는 임시 버퍼가 필요하다(할당 실패면 OutOfMemory).
+    // mip 하나(모든 slice·깊이 면, TextureDesc 초기 픽셀 배치)를 올린다.
     Result<void> UploadMip(const TextureRecord& record, uint32 level, const uint8* pixels) noexcept;
+    // 2D 이미지 images개(같은 크기)를 GL 외부 배치로 바꿔(깊이 형식 묶기) 대상 하나에 올린다.
+    Result<void> UploadImages(const TextureRecord& record, GLenum target, uint32 level,
+                              uint32 firstLayer, uint32 images, const uint8* pixels) noexcept;
 
     // mip 하나를 색 attachment로 읽어 Rocks 배치로 out에 둔다(ReadTexture·ReadPixels·readback의
     // 공통 경로). 읽기 조합은 구현 선택 조합이 업로드 배치와 같으면 그것, 아니면 표준 조합이다.
-    Result<void> ReadColorLevel(const TextureRecord& record, uint32 mipLevel,
+    // layer는 배열 layer·cube 면(cube 배열은 cube × 6 + 면)·3D 깊이 면이다.
+    Result<void> ReadColorLevel(const TextureRecord& record, uint32 mipLevel, uint32 layer,
                                 Span<uint8> out) noexcept;
     // 깊이·스텐실 plane 하나를 셰이더로 R32F·R32UI 대상에 옮겨 읽는다(ES는 깊이·스텐실을
     // glReadPixels로 읽지 못한다).

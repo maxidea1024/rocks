@@ -402,8 +402,8 @@ void RunCapsMatchCreation(Device& device, PixelFormat format, Allocator& allocat
         SanitizeDepth(format, 1, data.View());
         auto sampled = device.CreateTexture(desc, Span<const uint8>(data.Data(), data.Size()));
         ExpectCreation(sampled.IsOk(), sampled.IsOk() ? ErrorCode::None : sampled.Error(),
-                       HasPixelFormatCaps(caps, RequiredPixelFormatCaps(TextureUsage::Sampled, 1)),
-                       format, "Sampled creation matches the Sampled capability");
+                       HasPixelFormatCaps(caps, RequiredPixelFormatCaps(desc)), format,
+                       "Sampled creation matches the Sampled capability");
         if (sampled) {
             device.Retire(sampled.Value());
         }
@@ -412,8 +412,8 @@ void RunCapsMatchCreation(Device& device, PixelFormat format, Allocator& allocat
     desc.usage = TextureUsage::RenderTarget;
     auto target = device.CreateTexture(desc, {});
     ExpectCreation(target.IsOk(), target.IsOk() ? ErrorCode::None : target.Error(),
-                   HasPixelFormatCaps(caps, RequiredPixelFormatCaps(TextureUsage::RenderTarget, 1)),
-                   format, "RenderTarget creation matches the RenderTarget capability");
+                   HasPixelFormatCaps(caps, RequiredPixelFormatCaps(desc)), format,
+                   "RenderTarget creation matches the RenderTarget capability");
     if (target) {
         device.Retire(target.Value());
     }
@@ -421,8 +421,8 @@ void RunCapsMatchCreation(Device& device, PixelFormat format, Allocator& allocat
     desc.usage = TextureUsage::DepthStencil;
     auto depth = device.CreateTexture(desc, {});
     ExpectCreation(depth.IsOk(), depth.IsOk() ? ErrorCode::None : depth.Error(),
-                   HasPixelFormatCaps(caps, RequiredPixelFormatCaps(TextureUsage::DepthStencil, 1)),
-                   format, "DepthStencil creation matches the DepthStencil capability");
+                   HasPixelFormatCaps(caps, RequiredPixelFormatCaps(desc)), format,
+                   "DepthStencil creation matches the DepthStencil capability");
     if (depth) {
         device.Retire(depth.Value());
     }
@@ -519,10 +519,10 @@ void RunSrgbView(ViewBench& bench, Allocator& allocator) noexcept {
     if (!texture) {
         return;
     }
-    auto wrong = device.CreateTextureView(texture.Value(), {PixelFormat::BGRA8Unorm, 0});
+    auto wrong = device.CreateTextureView(texture.Value(), {PixelFormat::BGRA8Unorm, 0, {}});
     Check(!wrong && wrong.Error() == ErrorCode::InvalidArgument, format,
           "view with a non-pair format is InvalidArgument");
-    auto view = device.CreateTextureView(texture.Value(), {PixelFormat::RGBA8UnormSrgb, 0});
+    auto view = device.CreateTextureView(texture.Value(), {PixelFormat::RGBA8UnormSrgb, 0, {}});
     const bool expected = HasPixelFormatCaps(device.GetPixelFormatCaps(PixelFormat::RGBA8UnormSrgb),
                                              PixelFormatCaps::Sampled);
     // OpenGL ES core에는 형식을 바꾸는 texture view가 없어 sRGB 짝 view는 Unsupported다.
@@ -565,7 +565,7 @@ void RunDepthStencilViews(ViewBench& bench, PixelFormat format, Allocator& alloc
         return;
     }
     auto depthView = device.CreateTextureView(texture.Value(), {});
-    auto stencilView = device.CreateTextureView(texture.Value(), {PixelFormat::Unknown, 1});
+    auto stencilView = device.CreateTextureView(texture.Value(), {PixelFormat::Unknown, 1, {}});
     Check(depthView.IsOk() && stencilView.IsOk(), format,
           "depth and stencil plane views are created");
     uint8 color[4] = {};
@@ -601,11 +601,11 @@ void RunVideoViews(ViewBench& bench, PixelFormat format, Allocator& allocator) n
     if (!texture) {
         return;
     }
-    auto outside = device.CreateTextureView(texture.Value(), {PixelFormat::Unknown, 2});
+    auto outside = device.CreateTextureView(texture.Value(), {PixelFormat::Unknown, 2, {}});
     Check(!outside && outside.Error() == ErrorCode::InvalidArgument, format,
           "plane 2 view is InvalidArgument");
     auto luma = device.CreateTextureView(texture.Value(), {});
-    auto chroma = device.CreateTextureView(texture.Value(), {PixelFormat::Unknown, 1});
+    auto chroma = device.CreateTextureView(texture.Value(), {PixelFormat::Unknown, 1, {}});
     Check(luma.IsOk() && chroma.IsOk(), format, "Y and UV plane views are created");
     uint8 color[4] = {};
     if (luma) {

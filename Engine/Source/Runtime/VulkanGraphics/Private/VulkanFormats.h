@@ -42,6 +42,14 @@ struct ViewFormatInfo {
 // 만들 수 없으면 format이 UNDEFINED다.
 ViewFormatInfo ViewFormat(PixelFormat texture, uint32 plane, PixelFormat viewFormat) noexcept;
 
+// outer(Rocks view swizzle)를 inner(형식 흉내·스텐실 plane의 성분 대응) 위에 합성한
+// VkComponentMapping이다(ComposeSwizzle과 같은 규칙, IDENTITY는 자기 성분).
+VkComponentMapping ComposeComponents(const ChannelSwizzle& outer,
+                                     const VkComponentMapping& inner) noexcept;
+
+// 텍스처 차원의 기본 view 종류다(2D·2D_ARRAY·3D·CUBE·CUBE_ARRAY).
+VkImageViewType ViewTypeOf(TextureDimension dimension) noexcept;
+
 // 정점 원소 형식의 Vulkan 형식이다(RenderBase 10.4절 표의 Vulkan 열).
 VkFormat VertexAttributeFormat(VertexFormat format) noexcept;
 

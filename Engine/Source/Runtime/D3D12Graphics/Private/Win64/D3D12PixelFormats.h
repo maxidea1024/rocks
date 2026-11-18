@@ -30,9 +30,11 @@ FormatMapping MappingOf(PixelFormat format) noexcept;
 // 확인한 값). 같은 자원으로 만들 수 없는 조합(다른 typeless 계열)이면 UNKNOWN이다.
 DXGI_FORMAT ViewSrvFormat(PixelFormat texture, uint32 plane, PixelFormat viewFormat) noexcept;
 
-// D3D12 subresource 번호다(plane 순서가 mip보다 바깥, 배열 1).
-constexpr uint32 SubresourceIndex(uint32 mipLevel, uint32 plane, uint32 mipLevels) noexcept {
-    return mipLevel + plane * mipLevels;
+// D3D12 subresource 번호다(D3D12CalcSubresource: mip이 가장 안쪽, 그다음 배열 slice, plane이
+// 가장 바깥). arraySize는 자원의 배열 크기(DepthOrArraySize, 3D는 1)다.
+constexpr uint32 SubresourceIndex(uint32 mipLevel, uint32 slice, uint32 plane, uint32 mipLevels,
+                                  uint32 arraySize) noexcept {
+    return mipLevel + slice * mipLevels + plane * mipLevels * arraySize;
 }
 
 // DXGI 형식의 plane 수다(D3D12_FEATURE_FORMAT_INFO). 깊이·스텐실 typeless와 비디오는 2, 질의

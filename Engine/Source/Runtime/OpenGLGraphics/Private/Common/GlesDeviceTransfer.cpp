@@ -79,10 +79,8 @@ Result<void> GlesDevice::UpdateTexture(TextureHandle handle, uint32 mipLevel,
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    const uint32 width = MipExtent(record->width, mipLevel);
-    const uint32 height = MipExtent(record->height, mipLevel);
     if (record->isView || mipLevel >= record->mipLevels ||
-        pixels.Size() != PixelFormatImageBytes(record->format, width, height)) {
+        pixels.Size() != MipBytes(*record, mipLevel)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -122,8 +120,7 @@ Result<void> GlesDevice::UploadTextureFromStaging(TextureHandle handle, uint32 m
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    const uint64 bytes = PixelFormatImageBytes(record->format, MipExtent(record->width, mipLevel),
-                                               MipExtent(record->height, mipLevel));
+    const uint64 bytes = mipLevel < record->mipLevels ? MipBytes(*record, mipLevel) : 0u;
     if (offset > memory.Value().size || bytes > memory.Value().size - offset) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -463,9 +460,14 @@ Result<void> GlesDevice::ReadTexture(TextureHandle handle, uint32 mipLevel, uint
     const TextureRecord record = *found;
     const uint32 width = MipExtent(record.width, mipLevel);
     const uint32 height = MipExtent(record.height, mipLevel);
-    const uint64 bytes = PixelFormatPlaneImageBytes(record.format, plane, width, height);
+    const uint64 image = PixelFormatPlaneImageBytes(record.format, plane, width, height);
+    // 그 mip의 모든 layer·cube 면·깊이 면(초기 픽셀과 같은 순서)이다.
+    const uint32 layers = record.dimension == TextureDimension::Texture3D
+                              ? MipExtent(record.depth, mipLevel)
+                              : record.slices;
     if (record.isView || mipLevel >= record.mipLevels ||
-        plane >= PixelFormatPlaneCount(record.format) || bytes == 0 || out.Size() != bytes) {
+        plane >= PixelFormatPlaneCount(record.format) || image == 0 ||
+        out.Size() != image * layers) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -489,10 +491,28 @@ Result<void> GlesDevice::ReadTexture(TextureHandle handle, uint32 mipLevel, uint
     }
 
     if (format->read == GlesReadClass::DepthStencil) {
+        // 깊이 plane 읽기 셰이더는 sampler2D다. 2D가 아닌 깊이 텍스처는 읽지 않는다.
+        if (record.dimension != TextureDimension::Texture2D) {
+            Diagnostic message;
+            message.Text("ReadTexture of a non-2D depth texture is not supported by the OpenGL ES "
+                         "backend");
+            return Reject(message, ErrorCode::Unsupported);
+        }
+
         return ReadDepthPlane(record, mipLevel, plane, out);
     }
 
-    return ReadColorLevel(record, mipLevel, out);
+    // layer마다 framebuffer에 붙여 읽는다.
+    const usize imageBytes = static_cast<usize>(image);
+    for (uint32 layer = 0; layer < layers; ++layer) {
+        auto read =
+            ReadColorLevel(record, mipLevel, layer, out.Slice(layer * imageBytes, imageBytes));
+        if (!read) {
+            return read;
+        }
+    }
+
+    return Result<void>::Success();
 }
 
 GlesReadPair GlesDevice::ChooseReadPair(const GlesTextureFormat& format, bool& direct) noexcept {
@@ -512,7 +532,7 @@ GlesReadPair GlesDevice::ChooseReadPair(const GlesTextureFormat& format, bool& d
     return CanonicalReadPair(format.read);
 }
 
-Result<void> GlesDevice::ReadColorLevel(const TextureRecord& record, uint32 mipLevel,
+Result<void> GlesDevice::ReadColorLevel(const TextureRecord& record, uint32 mipLevel, uint32 layer,
                                         Span<uint8> out) noexcept {
     const GlesTextureFormat* format = FindTextureFormat(record.format);
     const uint32 width = MipExtent(record.width, mipLevel);
@@ -520,8 +540,18 @@ Result<void> GlesDevice::ReadColorLevel(const TextureRecord& record, uint32 mipL
     GLuint framebuffer = 0;
     gl_.GenFramebuffers(1, &framebuffer);
     gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
-    gl_.FramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-                             record.texture, static_cast<GLint>(mipLevel));
+    // 2D는 FramebufferTexture2D, cube 면은 면 대상으로, 2D 배열·cube 배열·3D는
+    // FramebufferTextureLayer(cube 배열 layer = cube × 6 + 면, ES 3.2 9.2.8절)로 붙인다.
+    if (record.target == GL_TEXTURE_2D || record.target == GL_TEXTURE_CUBE_MAP) {
+        const GLenum attach = record.target == GL_TEXTURE_CUBE_MAP
+                                  ? GL_TEXTURE_CUBE_MAP_POSITIVE_X + layer
+                                  : GL_TEXTURE_2D;
+        gl_.FramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, attach, record.texture,
+                                 static_cast<GLint>(mipLevel));
+    } else {
+        gl_.FramebufferTextureLayer(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, record.texture,
+                                    static_cast<GLint>(mipLevel), static_cast<GLint>(layer));
+    }
     if (gl_.CheckFramebufferStatus(GL_READ_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
         gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, 0);
         gl_.DeleteFramebuffers(1, &framebuffer);

@@ -10,6 +10,7 @@
 #include <Graphics/GraphicsLog.h>
 #include <Graphics/ShaderSourceCompiler.h>
 #include <Graphics/SplitTransitionTracker.h>
+#include <Graphics/SubresourceStates.h>
 #include <Graphics/StagingPool.h>
 #include <Graphics/TimestampRing.h>
 #include <Graphics/UploadRing.h>
@@ -123,7 +124,9 @@ private:
     usize length_ = 0;
 };
 
-D3D12_FILTER SamplerFilter(Filter filter) noexcept;
+// 샘플러 필터다(비교 샘플러면 COMPARISON 계열). AnisotropicPoint는
+// D3D12_FILTER_MIN_MAG_ANISOTROPIC_MIP_POINT(장치 기능 AnisoFilterWithPointMipSupported)다.
+D3D12_FILTER SamplerFilter(Filter filter, bool comparison) noexcept;
 
 D3D12_TEXTURE_ADDRESS_MODE SamplerAddress(AddressMode mode) noexcept;
 
@@ -175,9 +178,14 @@ struct BufferViewRecord {
 
 struct TextureRecord {
     ComRef<ID3D12Resource> resource;
+    TextureDimension dimension = TextureDimension::Texture2D;
     uint32 width = 0;
     uint32 height = 0;
+    // 3D 깊이다(다른 차원은 1).
+    uint32 depth = 1;
     uint32 mipLevels = 1;
+    // subresource slice 수(TextureSliceCount)이며 D3D12 자원의 배열 크기(3D는 1)와 같다.
+    uint32 slices = 1;
     // view(CreateTextureView)면 view가 읽는 형식, 아니면 텍스처 형식이다.
     PixelFormat format = PixelFormat::Unknown;
     bool renderTarget = false;
@@ -201,14 +209,25 @@ struct TextureRecord {
     uint32 dsv = 0;
     // 샘플러 힙의 칸이다(SamplerFor가 같은 설정끼리 공유한다).
     uint32 sampler = 0;
-    // mip마다 장치가 추적한 상태다(RenderBase GX5). committed는 제출한 프레임 기록 끝의 상태이고,
-    // current는 기록 중인 프레임 안의 상태다(기록 중이 아니면 둘이 같다). 업로드 기록은 프레임
-    // 기록보다 먼저 실행되므로 committed에서 바꿨다가 committed로 되돌려 놓는다(상태 중립).
-    D3D12_RESOURCE_STATES committed[MaxMipLevels] = {};
-    D3D12_RESOURCE_STATES current[MaxMipLevels] = {};
+    // subresource(mip × slice)마다 장치가 추적한 상태다(RenderBase GX5). committed는 제출한 프레임
+    // 기록 끝의 상태이고, current는 기록 중인 프레임 안의 상태다(기록 중이 아니면 둘이 같다).
+    // 업로드 기록은 프레임 기록보다 먼저 실행되므로 committed에서 바꿨다가 committed로 되돌려
+    // 놓는다(상태 중립). 장치 plane들은 같은 상태를 따른다. view 기록은 비어 있다(원 기록이
+    // 추적한다).
+    SubresourceStates<D3D12_RESOURCE_STATES> committed;
+    SubresourceStates<D3D12_RESOURCE_STATES> current;
     // 기록 중인 프레임이 current를 바꿨다(touchedTextures_에 있다).
     bool touched = false;
 };
+
+// mip level 하나의 데이터 byte다(모든 slice·깊이 면, TextureMipBytes와 같은 값).
+inline uint64 MipBytes(const TextureRecord& record, uint32 level) noexcept {
+    const uint64 image = PixelFormatImageBytes(record.format, MipExtent(record.width, level),
+                                               MipExtent(record.height, level));
+    const uint32 depth =
+        record.dimension == TextureDimension::Texture3D ? MipExtent(record.depth, level) : 1u;
+    return image * depth * record.slices;
+}
 
 struct PipelineRecord {
     ComRef<ID3D12PipelineState> state;
@@ -384,6 +403,8 @@ struct ReadbackRecord {
     // 빈틈 없는 행 하나의 바이트와 행 수다(블록 형식은 블록 행).
     uint64 rowBytes = 0;
     uint32 rows = 0;
+    // 2D 이미지 수다(3D mip의 깊이 면, footprint 안에서 RowPitch × rows 간격). 다른 차원은 1이다.
+    uint32 images = 1;
 };
 
 // fence 관찰 스레드가 제출 하나의 완료를 기다리는 경계다. 장치가 제거되면 fence 완료 값이
@@ -458,15 +479,15 @@ public:
     // 기본 SRV(형식이 Sampled일 때, plane 0)·RTV·DSV를 만든다(잠금 안). 실패하면 이미 잡은 칸을
     // 놓는다.
     Result<void> CreateTextureViews(TextureRecord& record, const d3d12::FormatMapping& mapping,
-                                    bool sampled) noexcept;
+                                    bool sampled, const ChannelSwizzle& swizzle) noexcept;
 
     // 다 만든 텍스처 기록의 descriptor 칸을 바로 놓는다(잠금 안, 아직 어떤 명령도 참조하지 않을
     // 때).
     void ReleaseTextureViews(const TextureRecord& record) noexcept;
 
     // 2D texture SRV를 쓴다. plane은 깊이·스텐실·비디오 plane 선택이다.
-    void WriteShaderResourceView(ID3D12Resource* resource, DXGI_FORMAT format, uint32 plane,
-                                 uint32 mipLevels, uint32 slot) noexcept;
+    void WriteShaderResourceView(const TextureRecord& record, DXGI_FORMAT format, uint32 plane,
+                                 const ChannelSwizzle& swizzle, uint32 slot) noexcept;
 
     // 기록을 표에 넣고 handle을 돌려준다(잠금 안). 실패하면 descriptor 칸을 놓는다.
     Result<TextureHandle> AddTextureRecord(TextureRecord&& record) noexcept;
@@ -773,12 +794,13 @@ private:
     // 제출한 상태(committed)에서 복사 대상으로 바꿨다가 되돌린다(업로드 기록은 프레임 기록보다 먼저
     // 실행되므로 상태 중립이어야 한다). 처음 생성(COPY_DEST)이면 복사 뒤 셰이더 읽기 상태로 바꾸고
     // 그것을 추적 상태로 삼는다. 상태는 mip 단위로 추적하고 그 mip의 plane들이 함께 따른다.
-    void CopyTextureFrom(TextureRecord& record, uint32 mipLevel, uint32 subresource,
+    void CopyTextureFrom(TextureRecord& record, uint32 mipLevel, uint32 slice, uint32 subresource,
                          ID3D12Resource* source,
                          const D3D12_PLACED_SUBRESOURCE_FOOTPRINT& footprint,
                          bool restore) noexcept;
 
-    // 빈틈 없는 행의 픽셀(mip firstMip부터 count개, mip 안은 plane 순서)을 장치 행 정렬로 ring에
+    // 빈틈 없는 행의 픽셀(mip firstMip부터 count개, mip 안은 slice·깊이 면 순서, 이미지 안은 plane
+    // 순서 — TextureDesc 초기 픽셀 배치)을 장치 행 정렬로 ring에
     // 옮기고 복사를 기록한다. 블록 압축 형식의 행은 블록 행이다.
     Result<void> RecordTextureUpload(TextureRecord& record, uint32 firstMip, uint32 count,
                                      Span<const uint8> pixels, bool restore) noexcept;
@@ -788,11 +810,12 @@ private:
 
     void AssignPendingUploads(uint64 value) noexcept;
 
-    // 텍스처 mip 하나의 plane 하나를 readback 버퍼로 복사하는 기록을 쌓고 바로 제출한다(잠금 안).
-    // requireRenderTarget이면 RenderTarget 텍스처만 받는다(ReadPixels·RequestReadback 계약).
+    // 텍스처 mip 하나·slice 하나의 plane 하나를 readback 버퍼로 복사하는 기록을 쌓고 바로
+    // 제출한다(잠금 안). 3D면 그 mip의 모든 깊이 면이다. requireRenderTarget이면 RenderTarget
+    // 텍스처만 받는다(ReadPixels·RequestReadback 계약).
     Result<ReadbackRequest> RequestReadbackLocked(TextureHandle target, uint32 mipLevel = 0,
-                                                  uint32 plane = 0,
-                                                  bool requireRenderTarget = true) noexcept;
+                                                  uint32 plane = 0, bool requireRenderTarget = true,
+                                                  uint32 slice = 0) noexcept;
 
     Result<bool> TryReadbackLocked(ReadbackHandle handle, Span<uint8> out) noexcept;
 
@@ -908,8 +931,9 @@ private:
     // 기록 중 프레임에서 텍스처 mip [first, first + count)를 after로 바꾼다(잠금 안). 바뀌는 mip만
     // barrier를 내고, 모든 mip이 같은 상태에서 바뀌면 한 barrier로 낸다. uavOrder면 이미 같은 UAV
     // 상태인 mip에 UAV barrier를 낸다.
-    void TrackTransition(TextureRecord& record, SlotHandle slot, uint32 first, uint32 count,
-                         D3D12_RESOURCE_STATES after, bool uavOrder = false) noexcept;
+    void TrackTransition(TextureRecord& record, SlotHandle slot,
+                         const ResolvedSubresourceRange& range, D3D12_RESOURCE_STATES after,
+                         bool uavOrder = false) noexcept;
 
     // 프레임 기록을 끝낸다(잠금 안). 제출했으면 바뀐 상태를 committed로 삼고, 제출하지 못했으면
     // current를 committed로 되돌린다.

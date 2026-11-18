@@ -159,9 +159,9 @@ constexpr bool CanCombineAccess(ResourceAccess value) noexcept {
 // subresource 개수 "끝까지"를 뜻하는 값이다(SubresourceRange::mipCount·sliceCount).
 inline constexpr uint32 RemainingSubresources = NumericLimits<uint32>::Max();
 
-// 텍스처 subresource 범위다(mip × array slice). 버퍼는 범위를 쓰지 않는다(전체 하나). 기본값은
-// 전체다. 지금 텍스처는 2D·slice 하나이므로 slice 범위는 0부터 1개다(GX2에서 array·cube가 들어오면
-// 넓힌다).
+// 텍스처 subresource 범위다(mip × slice). slice는 배열 층·cube 면(cube array는 cube c의 면 f가
+// c × 6 + f)이고 3D·2D 텍스처는 slice 0 하나다(TextureSliceCount, DeviceTypes.h). 버퍼는 범위를
+// 쓰지 않는다(전체 하나). 기본값은 전체다. 개수 RemainingSubresources는 끝까지다.
 struct SubresourceRange {
     uint32 firstMip = 0;
     uint32 mipCount = RemainingSubresources;
@@ -170,6 +170,60 @@ struct SubresourceRange {
 
     bool operator==(const SubresourceRange&) const noexcept = default;
 };
+
+// 텍스처(mip mipLevels개 × slice slices개)에 맞춰 자른 범위다. 시작이 밖이거나 개수가 0이면
+// IsEmpty다.
+struct ResolvedSubresourceRange {
+    uint32 firstMip = 0;
+    uint32 mipCount = 0;
+    uint32 firstSlice = 0;
+    uint32 sliceCount = 0;
+
+    bool IsEmpty() const noexcept {
+        return mipCount == 0 || sliceCount == 0;
+    }
+
+    // mip·slice가 범위 안인지다.
+    bool Contains(uint32 mip, uint32 slice) const noexcept {
+        return mip >= firstMip && mip - firstMip < mipCount && slice >= firstSlice &&
+               slice - firstSlice < sliceCount;
+    }
+};
+
+// range를 텍스처 크기로 자른다(backend 전이·상태 추적 공용). 끝을 넘는 개수는 끝까지로 줄인다.
+//
+// 사용 예:
+//   const ResolvedSubresourceRange resolved =
+//       ResolveSubresourceRange(transition.range, record.mipLevels, record.slices);
+//   if (resolved.IsEmpty()) { ++ignoredDraws_; continue; }
+constexpr ResolvedSubresourceRange
+ResolveSubresourceRange(const SubresourceRange& range, uint32 mipLevels, uint32 slices) noexcept {
+    ResolvedSubresourceRange resolved;
+    if (range.firstMip >= mipLevels || range.firstSlice >= slices) {
+        return resolved;
+    }
+
+    const uint32 mipsLeft = mipLevels - range.firstMip;
+    const uint32 slicesLeft = slices - range.firstSlice;
+    resolved.firstMip = range.firstMip;
+    resolved.mipCount = range.mipCount < mipsLeft ? range.mipCount : mipsLeft;
+    resolved.firstSlice = range.firstSlice;
+    resolved.sliceCount = range.sliceCount < slicesLeft ? range.sliceCount : slicesLeft;
+    return resolved;
+}
+
+// 두 범위가 mip과 slice 모두에서 겹치는지다(텍스처 크기를 모를 때 RemainingSubresources는 끝없음).
+// 분리 전이 begin·end 사이 접근 검사가 쓴다.
+constexpr bool SubresourceRangesOverlap(const SubresourceRange& left,
+                                        const SubresourceRange& right) noexcept {
+    auto overlaps = [](uint32 leftFirst, uint32 leftCount, uint32 rightFirst, uint32 rightCount) {
+        const uint64 leftEnd = uint64{leftFirst} + leftCount;
+        const uint64 rightEnd = uint64{rightFirst} + rightCount;
+        return leftCount != 0 && rightCount != 0 && leftFirst < rightEnd && rightFirst < leftEnd;
+    };
+    return overlaps(left.firstMip, left.mipCount, right.firstMip, right.mipCount) &&
+           overlaps(left.firstSlice, left.sliceCount, right.firstSlice, right.sliceCount);
+}
 
 // 전이 하나다(CommandContext::Transition). texture와 buffer 가운데 하나만 null이 아니다.
 //

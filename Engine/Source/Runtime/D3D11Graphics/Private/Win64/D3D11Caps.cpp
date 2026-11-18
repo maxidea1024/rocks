@@ -91,6 +91,9 @@ DeviceCaps QueryDeviceCaps(ID3D11Device* device, IDXGIAdapter1* adapter) noexcep
     features.indirectFirstInstance = true;
     features.multiDrawIndirect = false;
     features.textureCubeArray = true;
+    // D3D11 SRV에는 성분 대응이 없고 이방성 필터의 mip은 늘 선형이다(D3D11_FILTER_ANISOTROPIC).
+    features.textureViewSwizzle = false;
+    features.anisotropicPointFilter = false;
     features.srgbPairView = true;
     features.vertexStores = level11_1;
     features.pixelStores = true;

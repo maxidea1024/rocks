@@ -7,10 +7,9 @@ namespace rocks::render {
 
 namespace {
 
-// 텍스처 byte 추정이다(mip 사슬 전체, 장치 정렬 제외). PixelFormatInfo의 블록 크기·byte로
-// 계산한다(MipChainBytes, 2D라 depth 1). 지금 텍스처 desc에는 깊이·array가 없다(GX2).
+// 텍스처 byte 추정이다(모든 mip·slice·깊이 면, 장치 정렬 제외, TextureDataBytes).
 uint64 TextureBytes(const graphics::TextureDesc& desc) noexcept {
-    return graphics::MipChainBytes(desc.format, desc.width, desc.height, 1, desc.mipLevels);
+    return graphics::TextureDataBytes(desc);
 }
 
 } // namespace
@@ -38,9 +37,11 @@ GraphResourcePool::~GraphResourcePool() noexcept {
 
 bool GraphResourcePool::SameTextureKey(const graphics::TextureDesc& left,
                                        const graphics::TextureDesc& right) noexcept {
-    return left.width == right.width && left.height == right.height &&
-           left.format == right.format && left.usage == right.usage &&
-           left.mipLevels == right.mipLevels && left.sampler == right.sampler;
+    return left.dimension == right.dimension && left.width == right.width &&
+           left.height == right.height && left.depth == right.depth &&
+           left.arraySize == right.arraySize && left.format == right.format &&
+           left.usage == right.usage && left.mipLevels == right.mipLevels &&
+           left.swizzle == right.swizzle && left.sampler == right.sampler;
 }
 
 bool GraphResourcePool::SameBufferKey(const graphics::BufferDesc& left,
@@ -65,14 +66,12 @@ void GraphResourcePool::RetireEntry(const Entry& entry) noexcept {
     }
 }
 
-// Sampled 텍스처의 mip 사슬을 mip마다 장치 갱신으로 올린다(다시 준 자원).
+// Sampled 텍스처의 초기 데이터를 mip(모든 slice)마다 장치 갱신으로 올린다(다시 준 자원).
 Result<void> GraphResourcePool::FillTexture(const Entry& entry, Span<const uint8> pixels) noexcept {
     const graphics::TextureDesc& desc = entry.key.textureDesc;
     usize offset = 0;
     for (uint32 mip = 0; mip < desc.mipLevels; ++mip) {
-        const usize bytes = static_cast<usize>(
-            graphics::PixelFormatImageBytes(desc.format, graphics::MipExtent(desc.width, mip),
-                                            graphics::MipExtent(desc.height, mip)));
+        const usize bytes = static_cast<usize>(graphics::TextureMipBytes(desc, mip));
         auto updated = device_.UpdateTexture(graphics::TextureHandle{entry.device}, mip,
                                              pixels.Slice(offset, bytes));
         if (!updated) {
@@ -158,7 +157,8 @@ Result<GraphResourcePool::Acquired> GraphResourcePool::Acquire(const Key& key,
 Result<GraphResourcePool::Acquired>
 GraphResourcePool::AcquireTexture(const graphics::TextureDesc& desc,
                                   Span<const uint8> pixels) noexcept {
-    if (desc.width == 0 || desc.height == 0 || desc.mipLevels == 0) {
+    if (desc.width == 0 || desc.height == 0 || desc.mipLevels == 0 ||
+        graphics::TextureSliceCount(desc) == 0) {
         return Result<Acquired>::Failure(ErrorCode::InvalidArgument);
     }
 

@@ -563,9 +563,11 @@ Result<void> D3D11Device::CopyTexture(TextureHandle destination, TextureHandle s
     const PixelFormatInfo& info = GetPixelFormatInfo(from->format);
     if (destination == source || to->view || from->view || to->width != from->width ||
         to->height != from->height || to->format != from->format || info.planeCount > 1 ||
-        attached(destination) || attached(source)) {
-        auto failed = Fail("texture copy needs two distinct non-view single-plane textures of the "
-                           "same size and format outside the current pass");
+        to->dimension != TextureDimension::Texture2D ||
+        from->dimension != TextureDimension::Texture2D || attached(destination) ||
+        attached(source)) {
+        auto failed = Fail("texture copy needs two distinct non-view single-plane 2D textures of "
+                           "the same size and format outside the current pass");
         (void)failed;
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }

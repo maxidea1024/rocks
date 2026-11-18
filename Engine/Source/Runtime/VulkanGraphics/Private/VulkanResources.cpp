@@ -170,9 +170,11 @@ Result<VkSampler> VulkanDevice::SamplerFor(const SamplerDesc& desc) noexcept {
         return Result<VkSampler>::Failure(ErrorCode::CapacityExceeded);
     }
 
-    // UE 대응: Point만 NEAREST, mip은 Trilinear·Anisotropic만 LINEAR(VulkanState.cpp:16–48).
-    const bool nearest = desc.filter == Filter::Nearest;
-    const bool linearMip = desc.filter == Filter::Trilinear || desc.filter == Filter::Anisotropic;
+    // UE 대응(VulkanState.cpp:16–48): Point만 NEAREST, mip은 Trilinear·AnisotropicLinear만
+    // LINEAR이고 AnisotropicPoint는 NEAREST mip에 이방성을 더한다.
+    const bool nearest = desc.filter == Filter::Point;
+    const bool linearMip =
+        desc.filter == Filter::Trilinear || desc.filter == Filter::AnisotropicLinear;
     VkSamplerCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     info.magFilter = nearest ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
@@ -180,7 +182,7 @@ Result<VkSampler> VulkanDevice::SamplerFor(const SamplerDesc& desc) noexcept {
     info.mipmapMode = linearMip ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
     info.addressModeU = AddressMode(desc.addressU);
     info.addressModeV = AddressMode(desc.addressV);
-    info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    info.addressModeW = AddressMode(desc.addressW);
     // 이방성은 장치 한계로 자르고, 기능이 없거나 1이면 끈다(SamplerDesc 계약 "장치 한계로 줄인다").
     float anisotropy = static_cast<float>(desc.maxAnisotropy);
     if (anisotropy > properties_.limits.maxSamplerAnisotropy) {
@@ -188,9 +190,11 @@ Result<VkSampler> VulkanDevice::SamplerFor(const SamplerDesc& desc) noexcept {
     }
 
     info.anisotropyEnable =
-        desc.filter == Filter::Anisotropic && anisotropy_ && anisotropy > 1.0f ? VK_TRUE : VK_FALSE;
+        IsAnisotropicFilter(desc.filter) && anisotropy_ && anisotropy > 1.0f ? VK_TRUE : VK_FALSE;
     info.maxAnisotropy = info.anisotropyEnable == VK_TRUE ? anisotropy : 1.0f;
-    info.compareOp = VK_COMPARE_OP_NEVER;
+    // VkCompareOp는 CompareFunction과 같은 순서다(NEVER = 0).
+    info.compareEnable = desc.comparison ? VK_TRUE : VK_FALSE;
+    info.compareOp = desc.comparison ? static_cast<VkCompareOp>(desc.compare) : VK_COMPARE_OP_NEVER;
     info.minLod = 0.0f;
     info.maxLod = VK_LOD_CLAMP_NONE;
     info.borderColor = BorderColorOf(desc.borderColor);
@@ -480,13 +484,25 @@ PixelFormatCaps VulkanDevice::GetPixelFormatCaps(PixelFormat format) const noexc
 Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
                                                   Span<const uint8> pixels) noexcept {
     const TextureFormatInfo format = TextureFormat(desc.format);
-    // 형식·용도 지원은 장치 능력으로 판정한다(PixelFormat.ko.md 8.3절). 대응하지 않으면 다른
-    // 형식으로 바꾸지 않고 Unsupported다.
-    if (IsValidPixelFormat(desc.format) &&
-        !HasPixelFormatCaps(GetPixelFormatCaps(desc.format),
-                            RequiredPixelFormatCaps(desc.usage, desc.mipLevels))) {
+    // 형식·용도·차원 지원은 장치 능력으로 판정한다(PixelFormat.ko.md 8.3절). 대응하지 않으면 다른
+    // 형식으로 바꾸지 않고 Unsupported다. 다른 인자 검사보다 먼저 본다.
+    if (IsValidPixelFormat(desc.format) && IsValidTextureDimension(desc.dimension) &&
+        !HasPixelFormatCaps(GetPixelFormatCaps(desc.format), RequiredPixelFormatCaps(desc))) {
         platform::LockGuard lock(gate_);
         return UnsupportedFormat<TextureHandle>(desc.format);
+    }
+
+    auto valid = ValidateTextureDesc(desc);
+    if (!valid) {
+        return Result<TextureHandle>::Failure(valid.Error());
+    }
+
+    if (!CheckTextureLimits(caps_, desc)) {
+        platform::LockGuard lock(gate_);
+        return Result<TextureHandle>::Failure(
+            FailCode("CreateTexture", ErrorCode::Unsupported,
+                     "texture size, layer count or dimension exceeds the Vulkan device limits")
+                .Error());
     }
 
     const bool renderTarget = desc.usage == TextureUsage::RenderTarget;
@@ -495,19 +511,15 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
     const PixelFormatInfo& pixelInfo = GetPixelFormatInfo(desc.format);
     const bool depth =
         pixelInfo.kind == PixelFormatKind::Depth || pixelInfo.kind == PixelFormatKind::DepthStencil;
-    const uint64 size = MipChainBytes(desc.format, desc.width, desc.height, 1, desc.mipLevels);
-    const uint32 limit = properties_.limits.maxImageDimension2D < MaxTextureExtent
-                             ? properties_.limits.maxImageDimension2D
-                             : MaxTextureExtent;
+    const uint64 size = TextureDataBytes(desc);
     // BC는 최상위 크기가 블록 배수여야 한다(PixelFormatInfo::topLevelBlockAligned, D3D와 같은
     // 계약).
     const bool aligned =
         !pixelInfo.topLevelBlockAligned ||
         (desc.width % pixelInfo.blockWidth == 0 && desc.height % pixelInfo.blockHeight == 0);
-    if (desc.width > limit || desc.height > limit || size == 0 || !aligned ||
-        desc.mipLevels > MaxMipLevels || !IsValidSamplerDesc(desc.sampler) ||
-        (attachment ? (pixels.Size() != 0 || desc.mipLevels != 1) : pixels.Size() != size) ||
-        (depthTarget && !depth)) {
+    if (desc.width > MaxTextureExtent || desc.height > MaxTextureExtent || size == 0 || !aligned ||
+        desc.mipLevels > MaxMipLevels ||
+        (attachment ? pixels.Size() != 0 : pixels.Size() != size) || (depthTarget && !depth)) {
         return Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -522,24 +534,32 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
         return Result<TextureHandle>::Failure(sampler.Error());
     }
 
+    const bool volume = desc.dimension == TextureDimension::Texture3D;
+    const uint32 slices = TextureSliceCount(desc);
     VkImageCreateInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    info.imageType = VK_IMAGE_TYPE_2D;
+    info.imageType = volume ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
     info.format = format.format;
-    info.extent = {desc.width, desc.height, 1};
+    info.extent = {desc.width, desc.height, volume ? desc.depth : 1u};
     info.mipLevels = desc.mipLevels;
-    info.arrayLayers = 1;
+    // cube·배열은 layer 배열이다(cube 면은 UE·D3D 순서대로 layer 0–5, Vulkan cube 면 순서와
+    // 같다).
+    info.arrayLayers = slices;
     info.samples = VK_SAMPLE_COUNT_1_BIT;
     info.tiling = VK_IMAGE_TILING_OPTIMAL;
     info.usage = ImageUsageFor(desc.format, renderTarget);
-    info.flags = ImageFlagsFor(desc.format);
+    info.flags = ImageFlagsFor(desc.format) |
+                 (IsCubeDimension(desc.dimension) ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0u);
 
     info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     TextureRecord record;
+    record.dimension = desc.dimension;
     record.width = desc.width;
     record.height = desc.height;
+    record.depth = desc.depth;
     record.mipLevels = desc.mipLevels;
+    record.slices = slices;
     record.format = desc.format;
     record.renderTarget = renderTarget;
     record.depthTarget = depthTarget;
@@ -547,9 +567,11 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
     record.sampler = sampler.Value();
     // 업로드로 채운 텍스처와 렌더 타깃 모두 셰이더 읽기 상태로 시작한다(D3D12와 같다, GX5). 아래
     // 업로드 기록이 UNDEFINED에서 그 상태로 바꾼다.
-    for (uint32 mip = 0; mip < desc.mipLevels; ++mip) {
-        record.committed[mip] = CanonicalAccess(ResourceAccess::SrvGraphics);
-        record.current[mip] = CanonicalAccess(ResourceAccess::SrvGraphics);
+    const ResourceAccess startState = CanonicalAccess(ResourceAccess::SrvGraphics);
+    auto committed = record.committed.Reset(allocator_, desc.mipLevels, slices, startState);
+    auto current = record.current.Reset(allocator_, desc.mipLevels, slices, startState);
+    if (!committed || !current) {
+        return Result<TextureHandle>::Failure(!committed ? committed.Error() : current.Error());
     }
 
     auto image = CreateImageWithMemory(info, record.image, record.memory);
@@ -562,14 +584,15 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
     cleanup.image = record.image;
     cleanup.memory = record.memory;
     // 기본 view: 깊이·스텐실은 깊이 aspect, 비디오는 plane 0(휘도)이다(PixelFormat.ko.md 10·11절).
+    // 성분 대응은 형식 흉내(A8 등)의 대응 위에 TextureDesc::swizzle을 합성한다.
     const ViewFormatInfo viewFormat = ViewFormat(desc.format, 0, desc.format);
     VkImageViewCreateInfo viewInfo = {};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     viewInfo.image = record.image;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.viewType = ViewTypeOf(desc.dimension);
     viewInfo.format = viewFormat.format;
-    viewInfo.components = viewFormat.components;
-    viewInfo.subresourceRange = {viewFormat.aspect, 0, desc.mipLevels, 0, 1};
+    viewInfo.components = ComposeComponents(desc.swizzle, viewFormat.components);
+    viewInfo.subresourceRange = {viewFormat.aspect, 0, desc.mipLevels, 0, slices};
     VkResult result = functions_.vkCreateImageView(device_, &viewInfo, nullptr, &record.view);
     if (result != VK_SUCCESS) {
         DestroyRetired(cleanup);
@@ -603,7 +626,8 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
         uploaded = OpenUploadList();
         if (uploaded) {
             (void)AccessBarrier(upload_, stored.image, 0, stored.mipLevels, ResourceAccess::Unknown,
-                                CanonicalAccess(ResourceAccess::SrvGraphics), false, stored.aspect);
+                                CanonicalAccess(ResourceAccess::SrvGraphics), false, stored.aspect,
+                                0, stored.slices);
         }
     } else {
         uploaded = RecordTextureUpload(stored, 0, stored.mipLevels, pixels, true);
@@ -697,9 +721,12 @@ Result<TextureHandle> VulkanDevice::CreateTextureView(TextureHandle texture,
     const PixelFormatPlane& layout = GetPixelFormatInfo(source->format).planes[desc.plane];
     TextureRecord record;
     record.image = source->image;
+    record.dimension = source->dimension;
     record.width = MipExtent(source->width, layout.widthShift);
     record.height = MipExtent(source->height, layout.heightShift);
+    record.depth = source->depth;
     record.mipLevels = source->mipLevels;
+    record.slices = source->slices;
     record.format = resolved.Value();
     record.aspect = source->aspect;
     record.sampler = source->sampler;
@@ -708,10 +735,11 @@ Result<TextureHandle> VulkanDevice::CreateTextureView(TextureHandle texture,
     VkImageViewCreateInfo viewInfo = {};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     viewInfo.image = source->image;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.viewType = ViewTypeOf(record.dimension);
     viewInfo.format = view.format;
-    viewInfo.components = view.components;
-    viewInfo.subresourceRange = {view.aspect, 0, record.mipLevels, 0, 1};
+    // view swizzle은 스텐실 plane(R → G)·형식 흉내 대응 위에 합성한다(TextureViewDesc::swizzle).
+    viewInfo.components = ComposeComponents(desc.swizzle, view.components);
+    viewInfo.subresourceRange = {view.aspect, 0, record.mipLevels, 0, record.slices};
     const VkResult result = functions_.vkCreateImageView(device_, &viewInfo, nullptr, &record.view);
     if (result != VK_SUCCESS) {
         return FailWith<TextureHandle>("vkCreateImageView (texture view)", result);

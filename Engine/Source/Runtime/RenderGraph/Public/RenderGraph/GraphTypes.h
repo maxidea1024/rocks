@@ -132,9 +132,10 @@ struct GraphImportOptions {
     graphics::ResourceAccess initialAccess = graphics::ResourceAccess::Unknown;
     // 그래프가 끝날 때 돌려 둘 상태다. Unknown이면 마지막으로 쓴 상태 그대로 둔다.
     graphics::ResourceAccess finalAccess = graphics::ResourceAccess::Unknown;
-    // 텍스처의 mip 수다(subresource 추적 단위). 장치에 자원 desc 조회가 생기면(GX2) 그쪽에서 읽고
-    // 이 칸은 뺀다.
+    // 텍스처의 mip 수와 slice 수(TextureSliceCount: 배열 층·cube 면)다(subresource 추적 단위
+    // mip × slice). 장치에 자원 desc 조회가 생기면(GX2) 그쪽에서 읽고 이 칸들은 뺀다.
     uint32 mipLevels = 1;
+    uint32 slices = 1;
 };
 
 // 계산한 전이 하나다(진단·시험). pass는 이 전이를 prologue에서 내는(분리 전이면 end하는) pass
@@ -154,9 +155,11 @@ struct GraphTransitionRecord {
     uint32 pass = GraphIndexNone;
     GraphResourceKind kind = GraphResourceKind::Texture;
     uint32 resource = GraphIndexNone;
-    // 연속한 mip 범위다(slice는 지금 하나뿐이다).
+    // 연속한 mip 범위와 slice 범위다(그 직사각형 안의 subresource가 모두 같은 전이다).
     uint32 firstMip = 0;
     uint32 mipCount = 1;
+    uint32 firstSlice = 0;
+    uint32 sliceCount = 1;
     graphics::ResourceAccess before = graphics::ResourceAccess::Unknown;
     graphics::ResourceAccess after = graphics::ResourceAccess::Unknown;
     bool attachment = false;

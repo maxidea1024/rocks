@@ -228,7 +228,8 @@ void D3D12Device::StartPass(const PassDesc& pass) noexcept {
     for (uint32 index = 0; index < target_.colorCount; ++index) {
         TextureRecord* color = textures_.Find(target_.colors[index].slot);
         if (color != nullptr) {
-            TrackTransition(*color, target_.colors[index].slot, 0, 1,
+            TrackTransition(*color, target_.colors[index].slot,
+                            ResolvedSubresourceRange{0, 1, 0, 1},
                             D3D12_RESOURCE_STATE_RENDER_TARGET);
         } else if (index == 0 && target_.resource != nullptr) {
             const D3D12_RESOURCE_BARRIER toTarget = TransitionBarrier(
@@ -239,7 +240,7 @@ void D3D12Device::StartPass(const PassDesc& pass) noexcept {
 
     TextureRecord* depth = textures_.Find(target_.depth.slot);
     if (depth != nullptr) {
-        TrackTransition(*depth, target_.depth.slot, 0, 1,
+        TrackTransition(*depth, target_.depth.slot, ResolvedSubresourceRange{0, 1, 0, 1},
                         target_.depthReadOnly ? D3D12_RESOURCE_STATE_DEPTH_READ
                                               : D3D12_RESOURCE_STATE_DEPTH_WRITE);
     }
@@ -375,13 +376,15 @@ void D3D12Device::SetTexture(TextureHandle handle) noexcept {
         // 명시 전이 없이 셰이더 읽기 상태가 아닌 텍스처를 읽으면 암묵 전이로 메운다(GX5. 렌더
         // 그래프를 거치지 않는 그리기용이다).
         bool readable = true;
-        for (uint32 mip = 0; owner != nullptr && mip < owner->mipLevels; ++mip) {
-            readable =
-                readable && (owner->current[mip] & D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE) != 0;
+        for (uint32 index = 0; owner != nullptr && index < owner->current.Count(); ++index) {
+            readable = readable &&
+                       (owner->current[index] & D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE) != 0;
         }
 
         if (owner != nullptr && !readable && recording_) {
-            TrackTransition(*owner, ownerSlot, 0, owner->mipLevels, ShaderReadStates);
+            TrackTransition(*owner, ownerSlot,
+                            ResolveSubresourceRange({}, owner->mipLevels, owner->slices),
+                            ShaderReadStates);
         }
 
         list_->SetGraphicsRootDescriptorTable(RootTexture, srvs_.Gpu(record->srv));
@@ -562,7 +565,11 @@ void D3D12Device::TransitionLocked(Span<const ResourceTransition> transitions) n
             record = textures_.Find(slot);
         }
 
-        if (record == nullptr || transition.range.firstMip >= record->mipLevels) {
+        const ResolvedSubresourceRange range =
+            record == nullptr
+                ? ResolvedSubresourceRange{}
+                : ResolveSubresourceRange(transition.range, record->mipLevels, record->slices);
+        if (range.IsEmpty()) {
             ++ignoredDraws_;
             continue;
         }
@@ -572,26 +579,29 @@ void D3D12Device::TransitionLocked(Span<const ResourceTransition> transitions) n
             continue;
         }
 
-        const uint32 first = transition.range.firstMip;
-        const uint32 available = record->mipLevels - first;
-        const uint32 count =
-            transition.range.mipCount < available ? transition.range.mipCount : available;
         if (validation_ && transition.before != ResourceAccess::Unknown &&
             transition.before != ResourceAccess::Discard) {
             const D3D12_RESOURCE_STATES declared = StatesFor(transition.before);
-            for (uint32 mip = first; mip < first + count; ++mip) {
-                if (record->current[mip] != declared) {
-                    ++validationErrors_;
-                    auto failed = Fail("transition before-state differs from the tracked state");
-                    (void)failed;
-                    break;
+            bool matched = true;
+            for (uint32 slice = range.firstSlice;
+                 matched && slice < range.firstSlice + range.sliceCount; ++slice) {
+                for (uint32 mip = range.firstMip; mip < range.firstMip + range.mipCount; ++mip) {
+                    if (record->current.At(mip, slice) != declared) {
+                        matched = false;
+                        break;
+                    }
                 }
+            }
+            if (!matched) {
+                ++validationErrors_;
+                auto failed = Fail("transition before-state differs from the tracked state");
+                (void)failed;
             }
         }
 
         const D3D12_RESOURCE_STATES after = StatesFor(transition.after);
         const bool uav = HasAnyAccess(transition.after, UavAccessMask);
-        TrackTransition(*record, slot, first, count, after, uav);
+        TrackTransition(*record, slot, range, after, uav);
     }
 }
 
@@ -607,45 +617,65 @@ void D3D12Device::LowerBufferTransition(const ResourceTransition& transition) no
     RequireBufferState(record->resource.Get(), StatesFor(transition.after));
 }
 
-// 기록 중 프레임에서 텍스처 mip [first, first + count)를 after로 바꾼다(잠금 안). 바뀌는 mip만
-// barrier를 내고, 모든 mip이 같은 상태에서 바뀌면 한 barrier로 낸다. uavOrder면 이미 같은 UAV
-// 상태인 mip에 UAV barrier를 낸다.
-void D3D12Device::TrackTransition(TextureRecord& record, SlotHandle slot, uint32 first,
-                                  uint32 count, D3D12_RESOURCE_STATES after,
-                                  bool uavOrder) noexcept {
-    bool uniform = first == 0 && count == record.mipLevels;
-    for (uint32 mip = first; mip < first + count && uniform; ++mip) {
-        uniform = record.current[mip] == record.current[first];
+// 기록 중 프레임에서 텍스처 subresource 범위(mip × slice)를 after로 바꾼다(잠금 안). 바뀌는
+// subresource만 barrier를 내고, 전체 범위가 같은 상태에서 바뀌면 한 barrier(ALL_SUBRESOURCES)로
+// 낸다. uavOrder면 이미 같은 UAV 상태인 범위에 UAV barrier를 낸다. barrier는 묶음 칸이 차면 나눠
+// 낸다(배열 slice 수에 상한이 없다).
+void D3D12Device::TrackTransition(TextureRecord& record, SlotHandle slot,
+                                  const ResolvedSubresourceRange& range,
+                                  D3D12_RESOURCE_STATES after, bool uavOrder) noexcept {
+    const D3D12_RESOURCE_STATES firstState = record.current.At(range.firstMip, range.firstSlice);
+    bool uniform = range.mipCount == record.mipLevels && range.sliceCount == record.slices;
+    for (uint32 index = 0; index < record.current.Count() && uniform; ++index) {
+        uniform = record.current[index] == firstState;
     }
 
     constexpr uint32 MaxPlanes = 2;
-    D3D12_RESOURCE_BARRIER barriers[MaxMipLevels * MaxPlanes] = {};
+    constexpr uint32 BatchCapacity = 32;
+    D3D12_RESOURCE_BARRIER barriers[BatchCapacity] = {};
     uint32 used = 0;
-    if (uniform && record.current[first] != after) {
-        barriers[used++] = TransitionBarrier(record.resource.Get(), record.current[first], after);
+    bool emitted = false;
+    auto flush = [&]() noexcept {
+        if (used != 0) {
+            list_->ResourceBarrier(used, barriers);
+            used = 0;
+            emitted = true;
+        }
+    };
+    if (uniform) {
+        if (firstState != after) {
+            barriers[used++] = TransitionBarrier(record.resource.Get(), firstState, after);
+        }
     } else {
-        for (uint32 mip = first; mip < first + count; ++mip) {
-            for (uint32 plane = 0; plane < record.devicePlanes && plane < MaxPlanes; ++plane) {
-                if (record.current[mip] != after) {
-                    barriers[used++] =
-                        TransitionSubresource(record.resource.Get(),
-                                              d3d12::SubresourceIndex(mip, plane, record.mipLevels),
-                                              record.current[mip], after);
+        for (uint32 slice = range.firstSlice; slice < range.firstSlice + range.sliceCount;
+             ++slice) {
+            for (uint32 mip = range.firstMip; mip < range.firstMip + range.mipCount; ++mip) {
+                const D3D12_RESOURCE_STATES before = record.current.At(mip, slice);
+                for (uint32 plane = 0; plane < record.devicePlanes && plane < MaxPlanes; ++plane) {
+                    if (before == after) {
+                        continue;
+                    }
+                    if (used == BatchCapacity) {
+                        flush();
+                    }
+                    barriers[used++] = TransitionSubresource(
+                        record.resource.Get(),
+                        d3d12::SubresourceIndex(mip, slice, plane, record.mipLevels, record.slices),
+                        before, after);
                 }
             }
         }
     }
 
-    if (used == 0 && uavOrder) {
+    if (used == 0 && !emitted && uavOrder) {
         barriers[used++] = UavBarrier(record.resource.Get());
     }
 
-    if (used != 0) {
-        list_->ResourceBarrier(used, barriers);
-    }
-
-    for (uint32 mip = first; mip < first + count; ++mip) {
-        record.current[mip] = after;
+    flush();
+    for (uint32 slice = range.firstSlice; slice < range.firstSlice + range.sliceCount; ++slice) {
+        for (uint32 mip = range.firstMip; mip < range.firstMip + range.mipCount; ++mip) {
+            record.current.At(mip, slice) = after;
+        }
     }
 
     if (!record.touched) {
@@ -660,12 +690,10 @@ void D3D12Device::TrackTransition(TextureRecord& record, SlotHandle slot, uint32
 // current를 committed로 되돌린다.
 void D3D12Device::SettleTracking(bool executed) noexcept {
     auto settle = [executed](TextureRecord& record) noexcept {
-        for (uint32 mip = 0; mip < record.mipLevels; ++mip) {
-            if (executed) {
-                record.committed[mip] = record.current[mip];
-            } else {
-                record.current[mip] = record.committed[mip];
-            }
+        if (executed) {
+            record.committed.CopyFrom(record.current);
+        } else {
+            record.current.CopyFrom(record.committed);
         }
 
         record.touched = false;

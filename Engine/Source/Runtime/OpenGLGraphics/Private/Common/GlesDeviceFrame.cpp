@@ -148,7 +148,7 @@ Result<void> GlesDevice::ReadPixels(TextureHandle handle, Span<uint8> out) noexc
     // RenderTarget 저장소의 첫 행이 이미지 위쪽이므로 뒤집지 않고 읽는다. sRGB 형식도 저장된
     // 값(인코딩된 byte)을 그대로 읽는다.
     const TextureRecord copy = *record;
-    return ReadColorLevel(copy, 0, out);
+    return ReadColorLevel(copy, 0, 0, out);
 }
 
 void GlesDevice::StartPass(const PassDesc& pass) noexcept {
@@ -228,22 +228,35 @@ void GlesDevice::StartPass(const PassDesc& pass) noexcept {
 
 void GlesDevice::BindPassTexture(const TextureRecord& record) noexcept {
     gl_.ActiveTexture(GL_TEXTURE0 + PixelTextureUnit);
-    gl_.BindTexture(GL_TEXTURE_2D, record.texture);
+    gl_.BindTexture(record.target, record.texture);
     gl_.BindSampler(PixelTextureUnit, record.sampler);
     // 깊이·스텐실 텍스처는 읽을 plane이 텍스처 객체 상태(ES 3.1 core)이므로 묶을 때 정한다. 한
     // 그리기에 텍스처 하나만 묶으므로 깊이 view와 스텐실 view가 서로 덮지 않는다.
     // 스텐실 plane은 다른 backend와 같이 값을 G 채널에서 읽는다(성분 대응 (R, R, 0, 1),
-    // PixelFormat.ko.md 10절). 깊이 plane은 항등 대응으로 되돌린다.
+    // PixelFormat.ko.md 10절).
+    const bool stencil = record.depthStencilTexture && record.plane == 1;
     if (record.depthStencilTexture) {
-        const bool stencil = record.plane == 1;
-        gl_.TexParameteri(GL_TEXTURE_2D, GL_DEPTH_STENCIL_TEXTURE_MODE,
+        gl_.TexParameteri(record.target, GL_DEPTH_STENCIL_TEXTURE_MODE,
                           static_cast<GLint>(stencil ? GL_STENCIL_INDEX : GL_DEPTH_COMPONENT));
-        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_G,
-                          static_cast<GLint>(stencil ? GL_RED : GL_GREEN));
-        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_B,
-                          static_cast<GLint>(stencil ? GL_ZERO : GL_BLUE));
-        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A,
-                          static_cast<GLint>(stencil ? GL_ONE : GL_ALPHA));
+    }
+
+    // 성분 대응도 텍스처 객체 상태(view와 원 텍스처가 공유)라 묶을 때마다 정한다. 사용자
+    // swizzle(record.swizzle)을 형식 흉내(A8 = R8 + (0, 0, 0, R))·스텐실 plane 대응 위에 합성해
+    // 채널별 TEXTURE_SWIZZLE_R/G/B/A로 둔다(TEXTURE_SWIZZLE_RGBA는 ES에 없다).
+    ChannelSwizzle inner;
+    const GlesTextureFormat* format = FindTextureFormat(record.format);
+    if (stencil) {
+        inner = {SwizzleSource::Red, SwizzleSource::Red, SwizzleSource::Zero, SwizzleSource::One};
+    } else if (format != nullptr && format->Is(GlesAlphaSwizzle)) {
+        inner = {SwizzleSource::Zero, SwizzleSource::Zero, SwizzleSource::Zero, SwizzleSource::Red};
+    }
+
+    const ChannelSwizzle applied = ComposeSwizzle(record.swizzle, inner);
+    constexpr GLenum Parameters[4] = {GL_TEXTURE_SWIZZLE_R, GL_TEXTURE_SWIZZLE_G,
+                                      GL_TEXTURE_SWIZZLE_B, GL_TEXTURE_SWIZZLE_A};
+    for (uint32 channel = 0; channel < 4; ++channel) {
+        gl_.TexParameteri(record.target, Parameters[channel],
+                          SwizzleParameter(applied.Channel(channel)));
     }
 }
 

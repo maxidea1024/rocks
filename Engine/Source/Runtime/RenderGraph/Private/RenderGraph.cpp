@@ -33,6 +33,16 @@ FrameArena& RequireArena(const RenderGraphDesc& desc) noexcept {
 
 // 최대 mip 수다(장치 텍스처 한계와 같다, 2^15 크기까지).
 constexpr uint32 MaxGraphTextureMips = 16;
+// 그래프 텍스처 slice 수 상한이다(장치 한도 textureArrayLayers의 D3D 최소값 2048).
+constexpr uint32 MaxGraphTextureSlices = 2048;
+
+} // namespace
+
+uint32 detail::SubresourceIndex(const ResourceRecord& resource, uint32 mip, uint32 slice) noexcept {
+    return slice * resource.mipLevels + mip;
+}
+
+namespace {
 
 // 접근 이름을 담을 임시 버퍼 크기다.
 constexpr usize AccessNameBytes = 160;
@@ -284,11 +294,21 @@ Result<GraphTexture> RenderGraph::CreateTexture(const graphics::TextureDesc& des
     const graphics::PixelFormatInfo& format = graphics::GetPixelFormatInfo(desc.format);
     const bool renderTarget = desc.usage == graphics::TextureUsage::RenderTarget;
     const bool sampled = desc.usage == graphics::TextureUsage::Sampled;
+    // 차원 모양은 장치 규칙(ValidateTextureDesc)과 같다. 렌더 타깃은 2D만이다(slice attachment는
+    // 렌더 세션 GX2 몫).
+    const bool shaped =
+        graphics::IsValidTextureDimension(desc.dimension) && desc.depth != 0 &&
+        desc.arraySize != 0 &&
+        (desc.dimension == graphics::TextureDimension::Texture3D || desc.depth == 1) &&
+        (graphics::IsArrayDimension(desc.dimension) || desc.arraySize == 1) &&
+        (!graphics::IsCubeDimension(desc.dimension) || desc.width == desc.height) &&
+        (!renderTarget || desc.dimension == graphics::TextureDimension::Texture2D);
     if (desc.width == 0 || desc.height == 0 || desc.mipLevels == 0 ||
-        desc.mipLevels > MaxGraphTextureMips || (!renderTarget && !sampled) ||
+        desc.mipLevels > MaxGraphTextureMips || (!renderTarget && !sampled) || !shaped ||
         !graphics::IsValidPixelFormat(desc.format) ||
         (renderTarget && format.compression != graphics::PixelCompression::None) ||
-        (sampled && desc.mipLevels > graphics::FullMipCount(desc.width, desc.height))) {
+        (sampled && desc.mipLevels > graphics::TextureFullMipCount(desc)) ||
+        graphics::TextureSliceCount(desc) > MaxGraphTextureSlices) {
         return Result<GraphTexture>::Failure(RecordGraphError(
             state, ErrorCode::InvalidArgument, true,
             "texture '{}' has an invalid description (graph textures are uncompressed render "
@@ -300,7 +320,9 @@ Result<GraphTexture> RenderGraph::CreateTexture(const graphics::TextureDesc& des
     record.kind = GraphResourceKind::Texture;
     record.name = name != nullptr ? name : "";
     record.textureDesc = desc;
-    record.subresources = desc.mipLevels;
+    record.mipLevels = desc.mipLevels;
+    record.slices = graphics::TextureSliceCount(desc);
+    record.subresources = record.mipLevels * record.slices;
     record.firstTrack = static_cast<uint32>(state.tracks.Size());
     for (uint32 index = 0; index < record.subresources; ++index) {
         auto pushed = state.tracks.TryPushBack(arena_, SubresourceTrack{});
@@ -367,10 +389,12 @@ Result<uint32> ImportResource(FrameArena& arena, GraphState& state, GraphResourc
     }
 
     const bool texture = kind == GraphResourceKind::Texture;
-    if (texture && (options.mipLevels == 0 || options.mipLevels > MaxGraphTextureMips)) {
-        return Result<uint32>::Failure(RecordGraphError(state, ErrorCode::InvalidArgument, true,
-                                                        "texture '{}' import has {} mip levels",
-                                                        label, options.mipLevels));
+    if (texture && (options.mipLevels == 0 || options.mipLevels > MaxGraphTextureMips ||
+                    options.slices == 0 || options.slices > MaxGraphTextureSlices)) {
+        return Result<uint32>::Failure(
+            RecordGraphError(state, ErrorCode::InvalidArgument, true,
+                             "texture '{}' import has {} mip levels and {} slices", label,
+                             options.mipLevels, options.slices));
     }
 
     if ((options.initialAccess != ResourceAccess::Unknown &&
@@ -405,7 +429,9 @@ Result<uint32> ImportResource(FrameArena& arena, GraphState& state, GraphResourc
     record.device = lease.Value().device;
     record.initialAccess = options.initialAccess;
     record.finalAccess = options.finalAccess;
-    record.subresources = texture ? options.mipLevels : 1u;
+    record.mipLevels = texture ? options.mipLevels : 1u;
+    record.slices = texture ? options.slices : 1u;
+    record.subresources = record.mipLevels * record.slices;
     record.firstTrack = static_cast<uint32>(state.tracks.Size());
     SubresourceTrack initial;
     initial.access = options.initialAccess;
@@ -703,26 +729,26 @@ Result<GraphPass> RenderGraph::AddPassWithAccesses(TraceScopeName& name, GraphPa
                                              resource.name));
         }
 
-        uint32 first = 0;
-        uint32 count = 1;
+        graphics::ResolvedSubresourceRange range{0, 1, 0, 1};
         if (access.kind == GraphResourceKind::Texture) {
-            first = access.range.firstMip;
-            if (first >= resource.subresources || access.range.firstSlice != 0 ||
-                access.range.sliceCount == 0 || access.range.mipCount == 0) {
+            range = graphics::ResolveSubresourceRange(access.range, resource.mipLevels,
+                                                      resource.slices);
+            if (range.IsEmpty()) {
                 return rollback(RecordGraphError(state, ErrorCode::InvalidArgument, true,
                                                  "pass '{}' declares an invalid range of '{}'",
                                                  passName, resource.name));
             }
-
-            const uint32 available = resource.subresources - first;
-            count = access.range.mipCount < available ? access.range.mipCount : available;
         }
 
-        for (uint32 subresource = first; subresource < first + count; ++subresource) {
-            auto added = AddUse(arena_, state, passName, firstUse, access.resource, subresource,
-                                access.access, access.flags);
-            if (!added) {
-                return rollback(added.Error());
+        for (uint32 slice = range.firstSlice; slice < range.firstSlice + range.sliceCount;
+             ++slice) {
+            for (uint32 mip = range.firstMip; mip < range.firstMip + range.mipCount; ++mip) {
+                auto added =
+                    AddUse(arena_, state, passName, firstUse, access.resource,
+                           SubresourceIndex(resource, mip, slice), access.access, access.flags);
+                if (!added) {
+                    return rollback(added.Error());
+                }
             }
         }
     }

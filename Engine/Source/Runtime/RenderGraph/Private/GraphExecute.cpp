@@ -43,7 +43,7 @@ Result<void> AllocateResource(FrameArena& arena, GraphState& state, uint32 index
     if (resource.kind == GraphResourceKind::Texture &&
         resource.textureDesc.usage == graphics::TextureUsage::Sampled) {
         // Immediate 모드는 컴파일 검사가 없으므로 여기서 mip 사슬이 다 올라왔는지 본다.
-        for (uint32 mip = 0; mip < resource.subresources; ++mip) {
+        for (uint32 mip = 0; mip < resource.mipLevels; ++mip) {
             if (!state.tracks[resource.firstTrack + mip].uploaded) {
                 return Result<void>::Failure(RecordGraphError(
                     state, ErrorCode::InvalidArgument, true,
@@ -53,9 +53,7 @@ Result<void> AllocateResource(FrameArena& arena, GraphState& state, uint32 index
 
         pixels =
             Span<const uint8>(resource.uploadPixels,
-                              static_cast<usize>(graphics::MipChainBytes(
-                                  resource.textureDesc.format, resource.textureDesc.width,
-                                  resource.textureDesc.height, 1, resource.textureDesc.mipLevels)));
+                              static_cast<usize>(graphics::TextureDataBytes(resource.textureDesc)));
     }
 
     auto acquired = resource.kind == GraphResourceKind::Texture
@@ -81,7 +79,7 @@ Result<void> AllocateResource(FrameArena& arena, GraphState& state, uint32 index
 
     // 텍스처 업로드는 풀이 생성 초기 데이터나 mip별 갱신으로 이미 올렸다.
     if (!pixels.IsEmpty()) {
-        state.stats.uploads += resource.subresources;
+        state.stats.uploads += resource.mipLevels;
     }
 
     // 버퍼 업로드를 선언 순서대로 올린다(장치 업로드 경로: 다음 제출 앞에서 실행된다).
@@ -152,8 +150,8 @@ graphics::ResourceTransition ToDevice(const GraphState& state,
         transition.texture = graphics::TextureHandle{resource.device};
         transition.range.firstMip = record.firstMip;
         transition.range.mipCount = record.mipCount;
-        transition.range.firstSlice = 0;
-        transition.range.sliceCount = 1;
+        transition.range.firstSlice = record.firstSlice;
+        transition.range.sliceCount = record.sliceCount;
     } else {
         transition.buffer = graphics::BufferHandle{resource.device};
     }

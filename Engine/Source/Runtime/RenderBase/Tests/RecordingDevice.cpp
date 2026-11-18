@@ -9,8 +9,9 @@ using namespace rocks::graphics;
 
 RecordingDevice::RecordingDevice(Allocator& allocator) noexcept
     : timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics), buffers_(allocator),
-      textures_(allocator), transitions_(allocator), splits_(allocator), pendingSplits_(allocator),
-      pipelines_(allocator), swapChains_(allocator), retired_(allocator), readbacks_(allocator),
+      allocator_(allocator), textures_(allocator), transitions_(allocator), splits_(allocator),
+      pendingSplits_(allocator), pipelines_(allocator), swapChains_(allocator), retired_(allocator),
+      readbacks_(allocator),
       staging_(allocator, stagingSource_, graphics::DefaultStagingBudgetBytes),
       timestamps_(allocator), timestampPool_(allocator) {
     stagingSource_.allocator = &allocator;
@@ -311,12 +312,15 @@ Result<TextureHandle> RecordingDevice::CreateTexture(const TextureDesc& desc,
 
     (void)pixels;
     TextureState state;
-    state.mipLevels = desc.mipLevels == 0 || desc.mipLevels > MaxTrackedMips ? 1u : desc.mipLevels;
-    for (ResourceAccess& access : state.states) {
-        access = ResourceAccess::SrvGraphics;
+    const uint32 mipLevels =
+        desc.mipLevels == 0 || desc.mipLevels > MaxTrackedMips ? 1u : desc.mipLevels;
+    const uint32 slices = TextureSliceCount(desc) == 0 ? 1u : TextureSliceCount(desc);
+    auto reset = state.states.Reset(allocator_, mipLevels, slices, ResourceAccess::SrvGraphics);
+    if (!reset) {
+        return Result<TextureHandle>::Failure(reset.Error());
     }
 
-    auto added = textures_.TryAdd(state);
+    auto added = textures_.TryAdd(Move(state));
     if (!added) {
         return Result<TextureHandle>::Failure(added.Error());
     }
@@ -381,7 +385,7 @@ Result<CommandContext*> RecordingDevice::BeginPass(const PassDesc& pass) noexcep
     }
 
     // attachment 전이다(Device.h Transition 주석).
-    textures_.Find(target.slot)->states[0] = ResourceAccess::RenderTarget;
+    textures_.Find(target.slot)->states.At(0, 0) = ResourceAccess::RenderTarget;
     recording_ = true;
     Record(Op::BeginOffscreen);
     return Result<CommandContext*>::Success(this);
@@ -690,13 +694,14 @@ uint64 RecordingDevice::ValidationErrorCount() const noexcept {
     return validationErrors_;
 }
 
-ResourceAccess RecordingDevice::TextureAccess(TextureHandle texture, uint32 mip) const noexcept {
+ResourceAccess RecordingDevice::TextureAccess(TextureHandle texture, uint32 mip,
+                                              uint32 slice) const noexcept {
     const TextureState* state = textures_.Find(texture.slot);
-    if (state == nullptr || mip >= state->mipLevels) {
+    if (state == nullptr || mip >= state->states.MipLevels() || slice >= state->states.Slices()) {
         return ResourceAccess::Unknown;
     }
 
-    return state->states[mip];
+    return state->states.At(mip, slice);
 }
 
 ResourceAccess RecordingDevice::BufferAccess(BufferHandle buffer) const noexcept {
@@ -722,7 +727,7 @@ void RecordingDevice::Transition(Span<const ResourceTransition> transitions) noe
 
 namespace {
 
-// 두 전이가 같은 자원의 겹치는 subresource를 가리키는지다.
+// 두 전이가 같은 자원의 겹치는 subresource(mip·slice 모두)를 가리키는지다.
 bool Overlaps(const ResourceTransition& left, const ResourceTransition& right) noexcept {
     if (!left.buffer.IsNull() || !right.buffer.IsNull()) {
         return left.buffer == right.buffer && !left.buffer.IsNull();
@@ -732,9 +737,7 @@ bool Overlaps(const ResourceTransition& left, const ResourceTransition& right) n
         return false;
     }
 
-    const uint64 leftEnd = uint64{left.range.firstMip} + left.range.mipCount;
-    const uint64 rightEnd = uint64{right.range.firstMip} + right.range.mipCount;
-    return left.range.firstMip < rightEnd && right.range.firstMip < leftEnd;
+    return SubresourceRangesOverlap(left.range, right.range);
 }
 
 } // namespace
@@ -849,19 +852,24 @@ void RecordingDevice::ApplyTransitions(Span<const ResourceTransition> transition
             call.index = transition.buffer.slot.index;
         } else {
             TextureState* state = textures_.Find(transition.texture.slot);
-            if (state == nullptr || transition.range.firstMip >= state->mipLevels) {
+            const ResolvedSubresourceRange range =
+                state == nullptr
+                    ? ResolvedSubresourceRange{}
+                    : ResolveSubresourceRange(transition.range, state->states.MipLevels(),
+                                              state->states.Slices());
+            if (range.IsEmpty()) {
                 ++ignoredDraws_;
                 continue;
             }
 
-            const uint32 available = state->mipLevels - transition.range.firstMip;
-            const uint32 count =
-                transition.range.mipCount < available ? transition.range.mipCount : available;
-            for (uint32 mip = transition.range.firstMip; mip < transition.range.firstMip + count;
-                 ++mip) {
-                CheckDeclared(state->states[mip], transition.before);
-                if (transition.after != ResourceAccess::Discard) {
-                    state->states[mip] = transition.after;
+            for (uint32 slice = range.firstSlice; slice < range.firstSlice + range.sliceCount;
+                 ++slice) {
+                for (uint32 mip = range.firstMip; mip < range.firstMip + range.mipCount; ++mip) {
+                    ResourceAccess& tracked = state->states.At(mip, slice);
+                    CheckDeclared(tracked, transition.before);
+                    if (transition.after != ResourceAccess::Discard) {
+                        tracked = transition.after;
+                    }
                 }
             }
 
@@ -905,8 +913,8 @@ void RecordingDevice::SetIndexBuffer(BufferHandle buffer, IndexFormat format,
 void RecordingDevice::SetTexture(TextureHandle texture) noexcept {
     const TextureState* state = textures_.Find(texture.slot);
     if (state != nullptr) {
-        for (uint32 mip = 0; mip < state->mipLevels; ++mip) {
-            if (!HasAnyAccess(state->states[mip], ResourceAccess::SrvGraphics)) {
+        for (uint32 index = 0; index < state->states.Count(); ++index) {
+            if (!HasAnyAccess(state->states[index], ResourceAccess::SrvGraphics)) {
                 ++validationErrors_;
                 break;
             }

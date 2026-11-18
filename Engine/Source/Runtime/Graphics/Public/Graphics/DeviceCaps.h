@@ -157,6 +157,17 @@ struct DeviceFeatures {
     bool multiDrawIndirect = false;
     // cube array 텍스처(Vulkan imageCubeArray, D3D·OpenGL ES 3.2 늘 참).
     bool textureCubeArray = false;
+    // 텍스처 view swizzle(TextureDesc·TextureViewDesc::swizzle, AssetSystem A0-G)이다. D3D12
+    // Shader4ComponentMapping, Vulkan VkComponentMapping, OpenGL ES TEXTURE_SWIZZLE_R/G/B/A는 늘
+    // 참이고 D3D11은 view swizzle이 없어 거짓이다(항등이 아닌 swizzle은 Unsupported).
+    bool textureViewSwizzle = false;
+    // 이방성 + 최근접 mip 필터(Filter::AnisotropicPoint)다. D3D12는 OPTIONS19
+    // AnisoFilterWithPointMipSupported(D3D12_FILTER_MIN_MAG_ANISOTROPIC_MIP_POINT)일 때다. Vulkan·
+    // OpenGL ES는 늘 참이다(mipmapMode NEAREST·LINEAR_MIPMAP_NEAREST에 이방성 배율을 더하며, 배율은
+    // 다른 이방성 필터처럼 장치 한도 samplerAnisotropy로 줄인다). D3D11은 대응 필터가 없어
+    // 거짓이다. 거짓이면 그 필터의 텍스처 생성이 Unsupported다(UE는 이방성 선형으로 바꾸지만
+    // Rocks는 다른 필터로 바꾸지 않는다).
+    bool anisotropicPointFilter = false;
     // sRGB 짝 형식 view(PixelFormat.ko.md 9절). OpenGL ES는 형식을 재해석하는 view가 없어 거짓이다.
     bool srgbPairView = false;
     // VS·PS가 storage 자원에 쓸 수 있다(Vulkan vertexPipelineStoresAndAtomics·

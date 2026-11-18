@@ -576,14 +576,17 @@ Result<void> D3D12Device::CopyTexture(TextureHandle destination, TextureHandle s
     };
     if (destination == source || to->view || from->view || to->width != from->width ||
         to->height != from->height || to->format != from->format || to->devicePlanes != 1 ||
-        attached(destination) || attached(source)) {
+        to->dimension != TextureDimension::Texture2D ||
+        from->dimension != TextureDimension::Texture2D || attached(destination) ||
+        attached(source)) {
         return FailCode<void>(ErrorCode::InvalidArgument,
-                              "texture copy needs two distinct non-view single-plane textures of "
-                              "the same size and format outside the current pass");
+                              "texture copy needs two distinct non-view single-plane 2D textures "
+                              "of the same size and format outside the current pass");
     }
 
-    TrackTransition(*from, source.slot, 0, 1, D3D12_RESOURCE_STATE_COPY_SOURCE);
-    TrackTransition(*to, destination.slot, 0, 1, D3D12_RESOURCE_STATE_COPY_DEST);
+    const ResolvedSubresourceRange top{0, 1, 0, 1};
+    TrackTransition(*from, source.slot, top, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    TrackTransition(*to, destination.slot, top, D3D12_RESOURCE_STATE_COPY_DEST);
     D3D12_TEXTURE_COPY_LOCATION target = {};
     target.pResource = to->resource.Get();
     target.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;

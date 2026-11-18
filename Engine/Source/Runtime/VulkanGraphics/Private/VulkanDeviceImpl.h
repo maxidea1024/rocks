@@ -14,6 +14,7 @@
 #include <Graphics/ResourceAccess.h>
 #include <Graphics/ShaderSourceCompiler.h>
 #include <Graphics/SplitTransitionTracker.h>
+#include <Graphics/SubresourceStates.h>
 #include <Graphics/StagingPool.h>
 #include <Graphics/TimestampRing.h>
 #include <Graphics/UploadRing.h>
@@ -118,9 +119,14 @@ struct TextureRecord {
     // 읽으므로 스텐실 plane이 있는 깊이 타깃에만 따로 만든다. 없으면 view를 attachment로 쓴다.
     VkImageView attachmentView = VK_NULL_HANDLE;
     MemoryAllocation memory;
+    TextureDimension dimension = TextureDimension::Texture2D;
     uint32 width = 0;
     uint32 height = 0;
+    // 3D 깊이다(다른 차원은 1).
+    uint32 depth = 1;
     uint32 mipLevels = 1;
+    // subresource slice 수(TextureSliceCount)이며 이미지 array layer 수(3D는 1)와 같다.
+    uint32 slices = 1;
     // view(CreateTextureView)면 view가 읽는 형식, 아니면 텍스처 형식이다.
     PixelFormat format = PixelFormat::Unknown;
     bool renderTarget = false;
@@ -137,15 +143,27 @@ struct TextureRecord {
     // 마지막 view를 놓을 때 함께 놓는다(상태 추적의 주인을 하나로 유지한다).
     uint32 viewCount = 0;
     bool retirePending = false;
-    // mip마다 장치가 추적한 접근 상태다(RenderBase GX5). committed는 제출한 프레임 기록 끝의 상태,
-    // current는 기록 중인 프레임 안의 상태다(기록 중이 아니면 같다). 업로드 기록은 프레임 기록보다
-    // 먼저 실행되므로 committed에서 바꿨다가 되돌린다(상태 중립). layout은 상태에서
-    // 정한다(LayoutFor).
-    ResourceAccess committed[MaxMipLevels] = {};
-    ResourceAccess current[MaxMipLevels] = {};
+    // subresource(mip × layer)마다 장치가 추적한 접근 상태다(RenderBase GX5). committed는 제출한
+    // 프레임 기록 끝의 상태, current는 기록 중인 프레임 안의 상태다(기록 중이 아니면 같다). 업로드
+    // 기록은 프레임 기록보다 먼저 실행되므로 committed에서 바꿨다가 되돌린다(상태 중립). layout은
+    // 상태에서 정한다(LayoutFor). view 기록은 비어 있다(원 기록이 추적한다).
+    SubresourceStates<ResourceAccess> committed;
+    SubresourceStates<ResourceAccess> current;
     // 기록 중인 프레임이 current를 바꿨다(touchedTextures_에 있다).
     bool touched = false;
 };
+
+// mip level의 깊이 면 수다(3D만 1보다 크다).
+inline uint32 MipDepth(const TextureRecord& record, uint32 level) noexcept {
+    return record.dimension == TextureDimension::Texture3D ? MipExtent(record.depth, level) : 1u;
+}
+
+// mip level 하나의 데이터 byte다(모든 layer·깊이 면, TextureMipBytes와 같은 값).
+inline uint64 MipBytes(const TextureRecord& record, uint32 level) noexcept {
+    return PixelFormatImageBytes(record.format, MipExtent(record.width, level),
+                                 MipExtent(record.height, level)) *
+           MipDepth(record, level) * record.slices;
+}
 
 // 파이프라인 descriptor binding 하나가 읽는 것이다(PipelineDesc 고정 배치).
 enum class BindingSource : uint8 {
@@ -669,13 +687,22 @@ private:
     // --- VulkanAccess.cpp(GX5 명시 접근 상태) ---
     // image mip 구간의 접근 상태 from → to barrier를 buffer에 기록한다. 같은 상태의 읽기는
     // 건너뛰고, uavOrder면 같은 UAV 상태 사이에도 쓰기 순서 barrier를 낸다. 기록했는지를 돌려준다.
+    // layer 구간 [firstLayer, firstLayer + layerCount)도 함께 받는다.
     bool AccessBarrier(VkCommandBuffer buffer, VkImage image, uint32 firstMip, uint32 mipCount,
                        ResourceAccess from, ResourceAccess to, bool uavOrder,
-                       VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) noexcept;
-    // 기록 중 프레임에서 텍스처 mip [first, first + count)를 after로 바꾼다(잠금 안). barrier가
+                       VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT, uint32 firstLayer = 0,
+                       uint32 layerCount = 1) noexcept;
+    // states의 mip 하나에서 같은 상태가 이어지는 layer 구간마다 from(그 상태) → to barrier를 낸다
+    // (업로드·readback 기록이 mip 하나의 모든 layer를 옮길 때). toResting이면 거꾸로 to → 그
+    // 상태다.
+    void MipLayerBarriers(VkCommandBuffer buffer, const TextureRecord& record,
+                          const SubresourceStates<ResourceAccess>& states, uint32 mipLevel,
+                          ResourceAccess to, bool toResting) noexcept;
+    // 기록 중 프레임에서 텍스처 subresource 범위(mip × layer)를 after로 바꾼다(잠금 안). barrier가
     // 필요하면 열린 render pass를 먼저 닫는다(호출자가 ResumeRenderPass로 다시 연다).
-    void TrackTransition(TextureRecord& record, SlotHandle slot, uint32 first, uint32 count,
-                         ResourceAccess after, bool uavOrder) noexcept;
+    void TrackTransition(TextureRecord& record, SlotHandle slot,
+                         const ResolvedSubresourceRange& range, ResourceAccess after,
+                         bool uavOrder) noexcept;
     // 프레임 기록을 끝낸다. 제출했으면 current를 committed로, 아니면 committed로 되돌린다.
     void SettleTracking(bool executed) noexcept;
     void SuspendRenderPass() noexcept;
@@ -684,7 +711,7 @@ private:
     // 텍스처 전이 하나를 해석한다: view면 원 텍스처, 범위, usage 검사, before 대조(검증). 무시할
     // 전이(모르는 handle·범위 밖·usage 밖·Discard)면 null이다(무시 계수는 이 함수가 올린다).
     TextureRecord* ResolveTextureTransition(const ResourceTransition& transition, SlotHandle& slot,
-                                            uint32& first, uint32& count) noexcept;
+                                            ResolvedSubresourceRange& range) noexcept;
     // 기록 중 프레임이 상태를 바꾼 텍스처로 표시한다.
     void MarkTouched(TextureRecord& record, SlotHandle slot) noexcept;
     // 지금 기록의 분리 전이 event 하나를 준다(없으면 만든다). 상한이면 null이다.

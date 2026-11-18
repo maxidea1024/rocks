@@ -6,8 +6,10 @@
 #include <Core/Text/StringView.h>
 #include <Graphics/DeviceCaps.h>
 #include <Graphics/PipelineState.h>
+#include <GraphicsTypes/ChannelSwizzle.h>
 #include <GraphicsTypes/PixelFormat.h>
 #include <GraphicsTypes/Sampler.h>
+#include <GraphicsTypes/TextureDimension.h>
 #include <GraphicsTypes/VertexFormat.h>
 
 // 그래픽 장치 계약의 값 타입(handle·장치·자원 설정)이다. backend와 무관하며 API 객체를 담지
@@ -342,47 +344,116 @@ enum class TextureUsage : uint8 {
     DepthStencil
 };
 
-// 텍스처 설정이다.
+// 텍스처 설정이다(AssetSystem A0-G 차원·swizzle·샘플러).
 //
-// 초기 픽셀 배치(Sampled): mip 0부터 mipLevels개를 빈틈 없이 잇는다. 각 mip은 MipExtent(width,
-// level) × MipExtent(height, level) 픽셀(블록 형식은 블록 행 단위), 첫 행이 위, 행 사이 padding이
-// 없다(MipChainBytes 크기). 장치가 대응하지 않는 형식은 생성이 Unsupported다(PixelFormat.ko.md
-// 8.3절).
+// 차원(dimension)과 크기:
+// - Texture2D: width × height. depth·arraySize는 1이다.
+// - Texture2DArray: width × height × arraySize 층.
+// - Texture3D: width × height × depth. mip마다 세 축이 모두 절반으로 준다.
+// - TextureCube: 한 변 width(= height)의 6면(CubeFace 순서, UE·D3D 규약).
+// - TextureCubeArray: cube arraySize개(면 6 × arraySize). 장치 기능 DeviceFeatures::
+//   textureCubeArray가 필요하다.
+// subresource(전이·상태 추적 단위)는 mip × slice다. slice는 배열 층·cube 면(cube array는 cube
+// c의 면 f가 c × 6 + f)이고 3D는 slice가 하나(깊이 면은 subresource가 아니다)다
+// (TextureSliceCount).
+//
+// 초기 픽셀 배치(Sampled): mip 0부터 mipLevels개를 빈틈 없이 잇는다(mip 우선). mip 하나는 그 mip의
+// 2D 이미지 TextureMipImageCount개(배열 층·cube 면 순서, 3D는 깊이 면 z = 0부터)를 잇고, 이미지
+// 하나는 MipExtent(width, level) × MipExtent(height, level) 픽셀(블록 형식은 블록 행 단위), 첫 행이
+// 위, 행 사이 padding이 없다. 다중 plane 형식은 이미지 안에서 plane 0 다음 plane 1이다. 전체 크기는
+// TextureDataBytes, mip 하나는 TextureMipBytes다. UpdateTexture·UploadTextureFromStaging·
+// ReadTexture도 mip 하나 전체(모든 slice)를 같은 배치로 다룬다. 장치가 대응하지 않는 형식·차원은
+// 생성이 Unsupported다(PixelFormat.ko.md 8.3절).
+//
+// 사용 예(6면 cube, mip 하나, 면마다 64×64 RGBA8):
+//   TextureDesc desc;
+//   desc.dimension = TextureDimension::TextureCube;
+//   desc.width = desc.height = 64;
+//   desc.format = PixelFormat::RGBA8Unorm;
+//   auto cube = device.CreateTexture(desc, faces);   // faces: 6 × 64 × 64 × 4 byte, +X 면부터
 struct TextureDesc {
+    TextureDimension dimension = TextureDimension::Texture2D;
     uint32 width = 0;
     uint32 height = 0;
+    // Texture3D의 깊이다. 다른 차원은 1이다.
+    uint32 depth = 1;
+    // Texture2DArray의 층 수, TextureCubeArray의 cube 수다. 다른 차원은 1이다.
+    uint32 arraySize = 1;
     PixelFormat format = PixelFormat::RGBA8UnormSrgb;
     TextureUsage usage = TextureUsage::Sampled;
-    // 1–FullMipCount(width, height)다. RenderTarget은 1이어야 한다.
+    // 1–TextureFullMipCount(desc)다. RenderTarget·DepthStencil은 1이어야 한다.
     uint32 mipLevels = 1;
-    // 이 텍스처를 묶을 때 쓰는 샘플러다.
+    // 이 텍스처를 묶을 때(SetTexture) 셰이더가 읽는 성분 대응이다(view swizzle). 항등이 아니면
+    // D3D11은 Unsupported다(view swizzle이 없다). attachment·복사·ReadTexture에는 적용하지 않는다.
+    ChannelSwizzle swizzle;
+    // 이 텍스처를 묶을 때 쓰는 기본 샘플러다(결정 R12: 바인딩 때 다른 샘플러를 고르는 것은 GX6).
     SamplerDesc sampler;
 };
 
-// 텍스처 view 설정이다(Device::CreateTextureView). 원 텍스처의 자원을 공유하고 형식·plane만 다르게
-// 읽는다(PixelFormat.ko.md 9·10·11절).
+// 텍스처의 subresource slice 수다(2D·3D 1, 2DArray arraySize, Cube 6, CubeArray 6 × arraySize).
+// 무효 차원은 0이다.
+uint32 TextureSliceCount(const TextureDesc& desc) noexcept;
+
+// desc 크기의 전체 mip 수다(3D는 깊이도 본다).
+uint32 TextureFullMipCount(const TextureDesc& desc) noexcept;
+
+// mip level의 2D 이미지 수다(slice 수 × 3D면 그 mip의 깊이).
+uint32 TextureMipImageCount(const TextureDesc& desc, uint32 level) noexcept;
+
+// mip level 하나의 데이터 byte다(모든 이미지, 다중 plane은 plane 합). 형식·크기가 잘못되면 0이다.
+uint64 TextureMipBytes(const TextureDesc& desc, uint32 level) noexcept;
+
+// mip level 하나의 plane 하나 데이터 byte다(ReadTexture 출력 크기).
+uint64 TextureMipPlaneBytes(const TextureDesc& desc, uint32 level, uint32 plane) noexcept;
+
+// 초기 픽셀 전체 byte다(mip 0부터 mipLevels개의 TextureMipBytes 합). 잘못된 desc는 0이다.
+uint64 TextureDataBytes(const TextureDesc& desc) noexcept;
+
+// 장치와 무관한 텍스처 설정 규칙이다(backend가 생성 전에 부른다).
+// InvalidArgument:
+// - 모르는 차원·용도·형식, 0 크기, 무효 샘플러·swizzle
+// - 3D가 아닌데 depth ≠ 1, 배열 차원이 아닌데 arraySize ≠ 1, depth·arraySize 0
+// - Cube·CubeArray인데 width ≠ height
+// - mipLevels가 0이거나 TextureFullMipCount 초과, RenderTarget·DepthStencil인데 mipLevels ≠ 1
+// - DepthStencil인데 깊이 형식이 아님
+// Unsupported(이 단계의 계약 밖):
+// - RenderTarget·DepthStencil인데 Texture2D가 아님(slice attachment는 렌더 세션 GX2 몫)
+// - 다중 plane 형식(깊이·스텐실 D24S8·D32S8, 비디오)인데 Texture2D가 아님
+Result<void> ValidateTextureDesc(const TextureDesc& desc) noexcept;
+
+// 장치 한도로 텍스처를 검사한다(ValidateTextureDesc 다음). 넘으면 Unsupported다: 한 변이
+// textureSize2D(Cube·CubeArray는 textureSizeCube, 3D는 세 축 모두 textureSize3D)를 넘음, slice
+// 수가 textureArrayLayers를 넘음, textureCubeArray 기능 없이 CubeArray.
+Result<void> CheckTextureLimits(const DeviceCaps& caps, const TextureDesc& desc) noexcept;
+
+// 텍스처 view 설정이다(Device::CreateTextureView). 원 텍스처의 자원을 공유하고 형식·plane·성분
+// 대응만 다르게 읽는다(PixelFormat.ko.md 9·10·11절). 차원·mip·slice는 원 텍스처 전체다(mip·slice
+// 범위 view는 렌더 세션 GX2 몫).
 // - format: Unknown이면 그 plane의 기본 형식이다. 색·압축 형식은 자기 형식이나 sRGB 짝,
-// 깊이·스텐실과
-//   비디오는 plane 형식(PixelFormatInfo::planes)만 받는다.
+//   깊이·스텐실과 비디오는 plane 형식(PixelFormatInfo::planes)만 받는다.
 // - plane: 단일 plane 형식은 0, 깊이·스텐실은 0(깊이)·1(스텐실, uint으로 읽고 값은 G 채널),
 //   비디오는 0(휘도 Y)·1(색차 CbCr)이다.
+// - swizzle: view 형식의 성분 기준 대응이다(원 텍스처의 TextureDesc::swizzle은 이어받지 않는다).
+//   스텐실 plane의 "값은 G" 규칙 위에 합성된다. 항등이 아니면 D3D11은 Unsupported다.
 //
 // 사용 예(NV12의 색차 plane을 RG8로 샘플):
-//   auto uv = device.CreateTextureView(video, {PixelFormat::Unknown, 1});
+//   auto uv = device.CreateTextureView(video, {PixelFormat::Unknown, 1, {}});
 //   commands.SetTexture(uv.Value());
 struct TextureViewDesc {
     PixelFormat format = PixelFormat::Unknown;
     uint32 plane = 0;
+    ChannelSwizzle swizzle;
 };
 
 // texture 형식에 desc가 맞는지 확인하고 view가 읽는 픽셀 형식(plane 형식 또는 sRGB 짝)을 돌려준다.
 // 장치와 무관한 규칙이며 backend가 생성 전에 부른다. 실패: 무효 형식·plane 범위 밖·plane에 맞지
-// 않는 형식 InvalidArgument.
+// 않는 형식·무효 swizzle InvalidArgument.
 Result<PixelFormat> ResolveTextureViewFormat(PixelFormat texture,
                                              const TextureViewDesc& desc) noexcept;
 
-// usage로 mipLevels개 mip 텍스처를 만들 때 형식에 필요한 능력이다(TextureUsage 주석).
-PixelFormatCaps RequiredPixelFormatCaps(TextureUsage usage, uint32 mipLevels) noexcept;
+// desc의 텍스처를 만들 때 형식에 필요한 능력이다(TextureUsage 주석, 3D는 Texture3D, Cube·
+// CubeArray는 TextureCube를 더한다).
+PixelFormatCaps RequiredPixelFormatCaps(const TextureDesc& desc) noexcept;
 
 // 정점 배치 한계다(RenderBase 10.4절). 장치 최소 보장 쪽 값이다: 속성 16(Vulkan
 // maxVertexInputAttributes·GL_MAX_VERTEX_ATTRIBS 최소), stream 8(Metal 정점 buffer 상한), offset ≤
@@ -454,8 +525,11 @@ struct ShaderSource {
 // 개발 경로):
 // - 그리기 상수(DrawConstants, HLSL b0 / GLSL ES 루트 상수 에뮬레이션 배열 uniform highp vec4
 //   vu_h[5]·pu_h[5])
-// - PS 텍스처 하나(HLSL t0·s0 / GLSL ES layout(binding = 0) sampler2D ps0). 샘플러는 묶은 텍스처의
-//   TextureDesc::sampler를 따른다.
+// - PS 텍스처 하나(HLSL t0·s0 / GLSL ES layout(binding = 0) sampler2D ps0). 셰이더는 묶을 텍스처의
+//   차원에 맞는 타입(Texture2D·Texture2DArray·Texture3D·TextureCube·TextureCubeArray / sampler2D·
+//   sampler2DArray·sampler3D·samplerCube·samplerCubeArray)을 선언한다. 샘플러는 묶은 텍스처의
+//   TextureDesc::sampler를 따르며, 비교 샘플러(SamplerDesc::comparison)면 HLSL은
+//   SamplerComparisonState s0, GLSL ES는 sampler*Shadow ps0으로 선언한다.
 // - VS·PS가 읽는 버퍼 view slot 0–3(SetBufferView). HLSL은 register t1–t4에 Buffer<T>·
 //   StructuredBuffer<T>·ByteAddressBuffer를 선언한다. GLSL ES는 typed를 samplerBuffer·
 //   isamplerBuffer·usamplerBuffer로 PS는 layout(binding = 1 + slot), VS는 layout(binding = 17 +
