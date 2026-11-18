@@ -2,6 +2,7 @@
 
 #include <Base/Types.h>
 #include <Core/Result.h>
+#include <Core/Text/StringView.h>
 
 // 상관 id다(Docs/Design/LoggingSystem.ko.md 14.1.4, L14). 로그와 trace가 같은 값을
 // 쓴다(계획 29.4절). 스레드별 고정 깊이 스택이고 할당·lock이 없다. 로그 기록은 맨 위 값을 캡처한다.
@@ -21,6 +22,10 @@ inline constexpr usize MaxCorrelationDepth = 16;
 
 // 상위 계층용 확장 칸 수다(Core는 뜻을 모르고 옮기기만 한다).
 inline constexpr usize CorrelationExtensionCount = 2;
+// 확장 칸의 쓰임 규칙이다. 사본 칸(0)은 사본·복원 때 그대로 옮겨지고, 쌓기 칸(1)은 쌓기·복원마다
+// 0에서 시작한다(사본에 실려 다니지 않는다 — 다른 쌓기의 상태가 섞이지 않게).
+inline constexpr usize CorrelationCarriedExtension = 0;
+inline constexpr usize CorrelationPushExtension = 1;
 
 // 상관 id 묶음이다. 0은 "없음"이다.
 struct CorrelationIds {
@@ -31,7 +36,29 @@ struct CorrelationIds {
     uint64 request = 0;
 };
 
-// 스택 칸 하나다. ext는 상위 계층(trace)이 쓰는 칸이다. 새로 쌓으면 0, 복원하면 사본의 값이다.
+// 상관 id 칸 수와 출력 이름·순서다(레이아웃 {Correlation}, JSON lines corr, trace, log view가 같이
+// 쓴다).
+inline constexpr usize CorrelationFieldCount = 5;
+inline constexpr StringView CorrelationFieldNames[CorrelationFieldCount] = {
+    "session", "task", "asset", "entity", "request"};
+
+// ids를 CorrelationFieldNames 순서의 값 배열로 옮긴다.
+constexpr void CorrelationFieldValues(const CorrelationIds& ids,
+                                      uint64 (&values)[CorrelationFieldCount]) noexcept {
+    values[0] = ids.session;
+    values[1] = ids.task;
+    values[2] = ids.asset;
+    values[3] = ids.entity;
+    values[4] = ids.request;
+}
+
+// 모든 칸이 0인지다.
+constexpr bool IsEmptyCorrelation(const CorrelationIds& ids) noexcept {
+    return (ids.session | ids.task | ids.asset | ids.entity | ids.request) == 0;
+}
+
+// 스택 칸 하나다. ext는 상위 계층(trace)이 쓰는 칸이다(CorrelationCarriedExtension·
+// CorrelationPushExtension 규칙).
 struct CorrelationEntry {
     CorrelationIds ids;
     uint64 ext[CorrelationExtensionCount]{};
@@ -55,6 +82,16 @@ struct CorrelationObserver {
 // 객체로 쓴다). 순서가 어긋나면 Fatal이다.
 class CorrelationScope {
 public:
+    // 쌓기 결과다.
+    enum class PushState : uint8 {
+        // 쌓지 않음(빈 사본)
+        None,
+        // 스택에 쌓음
+        Pushed,
+        // 깊이 상한으로 세기만 함
+        Counted
+    };
+
     explicit CorrelationScope(const CorrelationIds& ids) noexcept;
     explicit CorrelationScope(const CorrelationToken& token) noexcept;
     ~CorrelationScope() noexcept;
@@ -63,8 +100,7 @@ public:
     CorrelationScope& operator=(const CorrelationScope&) = delete;
 
 private:
-    // 0 = 쌓지 않음(빈 사본), 1 = 스택에 쌓음, 2 = 깊이 상한으로 세기만 함.
-    uint8 pushed_ = 0;
+    PushState pushed_ = PushState::None;
 };
 
 // 이 스레드 스택 맨 위 칸의 사본이다. 비어 있으면 valid가 false다.
@@ -73,13 +109,24 @@ CorrelationToken CaptureCorrelation() noexcept;
 // 이 스레드 스택 맨 위의 id를 out에 쓴다. 비어 있으면 false이고 out은 바뀌지 않는다.
 bool CurrentCorrelation(CorrelationIds& out) noexcept;
 
-// 이 스레드 스택의 깊이다(넘쳐 세기만 한 쌓기는 빼고). 비어 있는지를 분기 하나로 볼 때 쓴다.
-usize CorrelationDepth() noexcept;
+namespace detail {
 
-// 쌓기·내리기 관찰자를 정한다(원자 포인터 하나). 프로세스 시작 단계(다른 스레드가 쌓기 전)에
-// 부른다. 같은 관찰자를 다시 주면 성공하고, 다른 관찰자가 이미 있으면 AlreadyExists다. nullptr은
+// 이 스레드 스택의 깊이다(CorrelationDepth가 인라인으로 읽는다).
+extern thread_local constinit uint32 correlationDepth;
+
+} // namespace detail
+
+// 이 스레드 스택의 깊이다(넘쳐 세기만 한 쌓기는 빼고). 인라인 TLS 읽기 하나라 비어 있는지를 분기
+// 하나로 볼 수 있다.
+inline usize CorrelationDepth() noexcept {
+    return detail::correlationDepth;
+}
+
+// 쌓기·내리기 관찰자를 정한다(원자 포인터 하나). 같은 관찰자를 다시 주면 아무것도 바꾸지 않고
+// 성공하고(trace는 세션 Start마다 다시 건다), 다른 관찰자가 이미 있으면 AlreadyExists다. nullptr은
 // 해제이며, 다른 스레드가 쌓기·내리기를 하지 않는 종료 단계에서만 부른다(그래서 해제 뒤에는 불리지
-// 않는다). observer는 해제될 때까지 살아 있어야 한다.
+// 않는다). observer와 그 함수는 해제될 때까지 살아 있어야 한다(보통 정적 객체로 두고 해제하지
+// 않는다).
 Result<void> SetCorrelationObserver(const CorrelationObserver* observer) noexcept;
 
 namespace detail {

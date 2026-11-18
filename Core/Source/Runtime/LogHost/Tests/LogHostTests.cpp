@@ -481,7 +481,8 @@ Result<void> CollectInflated(void* raw, Span<const uint8> frame) noexcept {
 // log.file.compress: 묶음마다 독립 zstd frame(.log.zst)이고 Compression으로 풀린다. 봉인과 함께면
 // 압축한 뒤 봉인하고(머리에 표시) 묶음마다 풀어 원문이 나온다.
 TEST(LogHostWritesCompressedFiles) {
-    for (const bool sealed : {false, true}) {
+    constexpr bool SealModes[] = {false, true};
+    for (const bool sealed : SealModes) {
         ScratchDirectory directory;
         auto pair = crypto::KemKeyPair::TryGenerate(crypto::KemAlgorithm::XWing);
         REQUIRE(pair);

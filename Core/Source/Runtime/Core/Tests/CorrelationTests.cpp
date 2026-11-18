@@ -1,8 +1,10 @@
 #include <TestSupport/Test.h>
 #include <Core/Diagnostics/Correlation.h>
+#include <Core/Diagnostics/Log.h>
 #include <Core/Diagnostics/LogCapture.h>
 #include <Core/Diagnostics/LogLayout.h>
 #include <Core/Diagnostics/LogSystem.h>
+#include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/StringBuilder.h>
 #include <Platform/Fatal.h>
 #include <Platform/Thread.h>
@@ -200,4 +202,67 @@ TEST(LogCaptureCopiesTheCurrentCorrelation) {
     FixedStringBuilder second{Span<char>(storage)};
     layout.Value().Render(without.event, {&second, &AppendText});
     CHECK(second.View() == "plain\n");
+}
+
+namespace {
+
+// 모든 할당을 센다.
+class CountingCorrelationAllocator final : public Allocator {
+public:
+    Result<void*> Allocate(usize bytes, usize alignment, uint32 tag = 0) noexcept override {
+        ++allocations;
+        return inner.Allocate(bytes, alignment, tag);
+    }
+
+    Result<void> Deallocate(void* address) noexcept override {
+        return inner.Deallocate(address);
+    }
+
+    SystemAllocator inner;
+    uint64 allocations = 0;
+};
+
+class CountingSink final : public RuntimeLogSink {
+public:
+    Result<void> Write(const LogEvent& event) noexcept override {
+        correlated += event.hasCorrelation && event.correlation.request == 5 ? 1u : 0u;
+        return Result<void>::Success();
+    }
+
+    Result<void> Flush() noexcept override {
+        return Result<void>::Success();
+    }
+
+    uint32 correlated = 0;
+};
+
+} // namespace
+
+// 상관 id 쌓기·사본·복원과 상관 id가 실린 기록의 캡처·렌더는 Start 뒤 할당하지 않는다.
+TEST(CorrelationCaptureDoesNotAllocate) {
+    CountingCorrelationAllocator allocator;
+    LogSystemConfig config;
+    config.mode = LogMode::Manual;
+    config.globalMinimum = LogLevel::Trace;
+    LogSystem logs(allocator, config);
+    CountingSink sink;
+    REQUIRE(logs.AddSink(sink));
+    REQUIRE(logs.Start());
+    const uint64 before = allocator.allocations;
+    {
+        LogInstallScope installed(logs);
+        CorrelationScope request(CorrelationIds{0, 0, 0, 0, 5});
+        const CorrelationToken token = CaptureCorrelation();
+        {
+            CorrelationScope restored(token);
+            Log::Info(LogCorrelationTests, "correlated {Value}", 1);
+        }
+
+        // 앞 시험이 설치 없이 남긴 기록 수 알림이 하나 더 있을 수 있다.
+        CHECK(logs.Pump() != 0);
+    }
+
+    CHECK(allocator.allocations == before);
+    CHECK(sink.correlated == 1);
+    logs.Stop();
 }

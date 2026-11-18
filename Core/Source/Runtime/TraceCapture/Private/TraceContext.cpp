@@ -1,6 +1,7 @@
 #include "TraceSessionInternal.h"
 
 #include <Base/Endian.h>
+#include <Core/Diagnostics/Log.h>
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
@@ -16,16 +17,22 @@ using platform::AtomicLoad;
 using platform::MemoryOrder;
 using Format = TraceStandardFormat;
 
+// 문맥 관찰자 진단의 카테고리다.
+constexpr LogCategory LogTraceContext{"Trace.Context"};
+
 namespace {
 
 static_assert(Format::MaxContextDepth == MaxCorrelationDepth,
               "trace context depth must match the correlation stack depth");
 
 // Core 스택 칸의 확장 칸 쓰임새다(Core는 뜻을 모른다).
-constexpr usize CacheExtension = 0;
-constexpr usize RecordedExtension = 1;
-static_assert(RecordedExtension < CorrelationExtensionCount,
-              "trace needs two correlation extension slots");
+// 정의 캐시는 사본에 실려 다녀야 하고(복원 때 id만 기록), 쌓기 기록 serial은 쌓기마다 새로
+// 정한다(사본에 실려 다니면 짝 없는 ContextPop이 생긴다). Core의 두 칸 규칙과 같다.
+constexpr usize CacheExtension = CorrelationCarriedExtension;
+constexpr usize RecordedExtension = CorrelationPushExtension;
+
+// 관찰자를 걸지 못한 횟수다(다른 관찰자가 이미 있음). 그동안 문맥 기록이 빠진다.
+constinit uint64 observerInstallFailures = 0;
 
 uint64 CurrentSerial() noexcept {
     return AtomicLoad<MemoryOrder::Acquire>(&detail::currentSessionSerial);
@@ -141,8 +148,19 @@ usize CopyName(StringView source, char* destination) noexcept {
 namespace detail {
 
 void InstallTraceContextObserver() noexcept {
-    // 같은 관찰자를 다시 걸면 성공한다. 다른 관찰자가 이미 있으면 trace 기록만 빠진다.
-    (void)SetCorrelationObserver(&ContextObserver);
+    // 세션 Start마다 부른다. 같은 관찰자를 다시 걸면 아무것도 바뀌지 않는다. 다른 관찰자가 이미
+    // 있으면 문맥 기록(정의·쌓기·내리기)이 빠지므로 알리고 센다(상관 id 자체는 Core 스택이라
+    // 로그·전파는 그대로다).
+    if (!SetCorrelationObserver(&ContextObserver)) {
+        (void)platform::AtomicFetchAdd<MemoryOrder::Relaxed>(&observerInstallFailures, uint64{1});
+        Log::Warning(LogTraceContext,
+                     "Another correlation observer is installed; trace context records are not "
+                     "written");
+    }
+}
+
+uint64 TraceContextObserverInstallFailures() noexcept {
+    return platform::AtomicLoad<MemoryOrder::Relaxed>(&observerInstallFailures);
 }
 
 } // namespace detail

@@ -1,4 +1,5 @@
 #include <Core/Algorithms.h>
+#include <Core/Diagnostics/Correlation.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/Diagnostics/LogSystem.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -118,6 +119,30 @@ void Run(LogMode mode, const char* enabledName, uint32 count) {
         Log::Info(LogBench, "enabled {Index} {Ratio}", index, 0.5);
     });
     Report(enabledName, count, enabled);
+    {
+        // 상관 id가 있을 때의 활성 기록(머리 뒤 40 B 복사)과, task·lane 전파 한 번(사본 + 복원)의
+        // 비용이다(LoggingSystem.ko.md 14.1.4 측정 항목). 스택이 비면 전파는 분기 하나다.
+        const uint64 emptyPropagation = Measure(logs, count, [](uint32) noexcept {
+            if (CorrelationDepth() != 0) {
+                const CorrelationToken token = CaptureCorrelation();
+                CorrelationScope restored(token);
+            }
+        });
+        Report("propagate empty", count, emptyPropagation);
+        CorrelationScope request(CorrelationIds{0, 0, 0, 0, 42});
+        const uint64 correlated = Measure(logs, count, [](uint32 index) noexcept {
+            Log::Info(LogBench, "correlated {Index} {Ratio}", index, 0.5);
+        });
+        Report("with correlation", count, correlated);
+        const uint64 propagation = Measure(logs, count, [](uint32) noexcept {
+            if (CorrelationDepth() != 0) {
+                const CorrelationToken token = CaptureCorrelation();
+                CorrelationScope restored(token);
+            }
+        });
+        Report("propagate", count, propagation);
+    }
+
     const LogSystemStats stats = logs.Stats();
     printf("%-16s written %llu, dropped Info %llu\n", "",
            static_cast<unsigned long long>(stats.written),

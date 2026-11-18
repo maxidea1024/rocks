@@ -472,6 +472,8 @@ void WriteLogs(JsonWriter& json, const TraceModel& model) noexcept {
         return;
     }
 
+    const uint64 frequency = model.Decoder().Header().tickFrequency;
+
     uint64 counts[LevelCount]{};
     for (const TraceModelLog& log : model.Logs()) {
         if (log.level < LevelCount) {
@@ -496,15 +498,14 @@ void WriteLogs(JsonWriter& json, const TraceModel& model) noexcept {
             continue;
         }
 
-        const TraceModelLogSpec* spec = model.FindLogSpec(log.eventId);
         json.Element();
         json.Open('{');
         json.KeyUnsigned("order", log.order);
-        json.KeyUnsigned("tick", log.tick);
+        json.KeyUnsigned("ns", TraceTicksToNanoseconds(log.tick, frequency));
         json.KeyUnsigned("thread", log.thread);
         json.KeyUnsigned("frame", log.frame);
         json.KeyString("level", LogLevelName(static_cast<LogLevel>(log.level)));
-        json.KeyString("category", spec != nullptr ? spec->category : StringView());
+        json.KeyString("category", model.LogCategoryOf(log));
         json.KeyString("message", log.message);
         json.KeyBool("truncated", log.truncated);
         json.Close('}');

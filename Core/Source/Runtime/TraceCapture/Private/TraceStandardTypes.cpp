@@ -29,6 +29,7 @@ constexpr TraceField ScopeNameFields[] = {
 };
 
 constexpr TraceField LogMessageSpecFields[] = {
+    {"specId", TraceFieldType::UInt64, Format::LogSpecIdOffset},
     {"eventId", TraceFieldType::UInt64, Format::LogSpecEventIdOffset},
     {"line", TraceFieldType::UInt32, Format::LogSpecLineOffset},
     {"level", TraceFieldType::UInt8, Format::LogSpecLevelOffset},
@@ -42,6 +43,7 @@ constexpr TraceField LogMessageFields[] = {
     {"tick", TraceFieldType::UInt64, Format::LogMessageTickOffset},
     {"thread", TraceFieldType::UInt64, Format::LogMessageThreadOffset},
     {"frame", TraceFieldType::UInt64, Format::LogMessageFrameOffset},
+    {"specId", TraceFieldType::UInt64, Format::LogMessageSpecIdOffset},
     {"eventId", TraceFieldType::UInt64, Format::LogMessageEventIdOffset},
     {"session", TraceFieldType::UInt64, Format::LogMessageCorrelationOffset},
     {"task", TraceFieldType::UInt64, Format::LogMessageCorrelationOffset + 1 * sizeof(uint64)},
@@ -53,6 +55,8 @@ constexpr TraceField LogMessageFields[] = {
     {"correlationMask", TraceFieldType::UInt8, Format::LogMessageCorrelationMaskOffset},
     {"truncated", TraceFieldType::Bool, Format::LogMessageTruncatedOffset},
     {"message", TraceFieldType::String, TraceField::Variable},
+    {"category", TraceFieldType::String, TraceField::Variable},
+    {"template", TraceFieldType::String, TraceField::Variable},
 };
 
 constexpr TraceField CpuScopeBatchFields[] = {

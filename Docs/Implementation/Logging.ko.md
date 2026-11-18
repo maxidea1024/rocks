@@ -330,8 +330,9 @@ Log::Info(LogNet, "Request accepted");
 
 ## trace로 보내기
 
-- `TraceLogSink`(TraceCapture)를 trace 세션 시작 뒤 `LogSystem::AddSink`로 더하고, `TraceSession::Stop` 전에 `RemoveSink`로 뺀다. 채널 `log`(기본 묶음 `default`에 있다)가 켜져 있을 때만 `Trace.LogMessageSpec`·`Trace.LogMessage`를 쓴다.
-- 카테고리 `Trace`·`Trace.*` 기록과 세션이 없을 때의 기록은 보내지 않는다. 메시지는 1024 byte까지다.
+- `TraceLogSink`(TraceCapture)를 trace 세션 시작 뒤 `LogSystem::AddSink`로 더한다. 끝낼 때는 `LogSystem::Flush` → `RemoveSink` → `TraceSession::Stop` 순서다(Sandbox `--engine`이 이렇게 하고, `--trace-file <path>`로 trace 파일을 쓴다). 채널 `log`(기본 묶음 `default`에 있다)가 켜져 있을 때만 `Trace.LogMessageSpec`·`Trace.LogMessage`를 쓴다.
+- 카테고리 `Trace`·`Trace.*` 기록과 세션이 없을 때의 기록은 보내지 않는다. 메시지는 1024 byte까지다(UTF-8 경계).
+- spec(카테고리·템플릿·위치)은 호출 지점마다 세션에 한 번 쓴다. 중복 표가 차면 그 뒤 기록에 카테고리·템플릿을 싣는다.
 - `trace-report`에 `logs`(레벨별 수, Warning 이상 목록)가 나온다.
 
 ## 비정상 종료 때 마지막 로그
@@ -360,3 +361,5 @@ RocksCommandlet log view game.log --key dev.key --correlation request=55
 ## 아직 구현되지 않은 것
 
 - 구조체 펼치기(`{@Obj}`): 후속(GC 세션 병합 뒤)
+- 설정 단계 거부(`log.levels`·`log.rate_limits`·레이아웃의 문법 오류): CVar 이관(CVR7)의 `Validate`. 지금은 적용 때 Warning·Error
+- POSIX 크래시 처리기: 코드는 있으나 이 저장소의 Windows 환경에서만 빌드·시험했다

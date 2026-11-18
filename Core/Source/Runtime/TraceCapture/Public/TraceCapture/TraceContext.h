@@ -60,8 +60,13 @@ inline bool TraceCurrentContext(TraceContextValues& out) noexcept {
 
 namespace detail {
 
-// Core 상관 id 스택에 trace 관찰자를 건다(세션 Start가 부른다, 프로세스 수명 동안 유지).
+// Core 상관 id 스택에 trace 관찰자를 건다. 세션 Start마다 부르고(같은 관찰자면 무동작), 떼지
+// 않는다(관찰자는 정적 객체라 프로세스 수명 동안 유효하다). 다른 관찰자가 이미 있으면 Warning을
+// 남기고 센다.
 void InstallTraceContextObserver() noexcept;
+
+// 관찰자를 걸지 못한 횟수다(진단·시험).
+uint64 TraceContextObserverInstallFailures() noexcept;
 
 } // namespace detail
 

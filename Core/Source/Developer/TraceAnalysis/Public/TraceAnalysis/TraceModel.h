@@ -103,8 +103,9 @@ struct TraceModelGpuFrame {
     uint64 endTick = 0;
 };
 
-// 로그 사건 종류의 정의(Trace.LogMessageSpec)다. 같은 EventId가 다시 나오면 처음 것을 쓴다.
+// 로그 호출 지점의 정의(Trace.LogMessageSpec)다. 같은 spec id가 다시 나오면 처음 것을 쓴다.
 struct TraceModelLogSpec {
+    uint64 specId = 0;
     uint64 eventId = 0;
     uint32 line = 0;
     uint8 level = 0;
@@ -121,12 +122,16 @@ struct TraceModelLog {
     uint64 tick = 0;
     uint64 thread = 0;
     uint64 frame = 0;
+    uint64 specId = 0;
     uint64 eventId = 0;
     uint64 correlation[TraceStandardFormat::ContextValueCount]{};
     uint32 flags = 0;
     uint8 level = 0;
     bool truncated = false;
     StringView message;
+    // spec 정의 대신 기록에 실린 카테고리·템플릿이다(중복 표가 찼을 때만, 평소에는 빈 값).
+    StringView inlineCategory;
+    StringView inlineTemplate;
 };
 
 // 채널별 손실 합이다.
@@ -228,13 +233,16 @@ public:
         return logs_;
     }
 
-    // 로그 사건 종류 정의다(처음 나온 순서).
+    // 로그 호출 지점 정의다(spec id 순).
     const Array<TraceModelLogSpec>& LogSpecs() const noexcept {
         return logSpecs_;
     }
 
-    // EventId의 정의다. 없으면 nullptr다.
-    const TraceModelLogSpec* FindLogSpec(uint64 eventId) const noexcept;
+    // spec id의 정의다(이진 탐색). 없으면 nullptr다.
+    const TraceModelLogSpec* FindLogSpec(uint64 specId) const noexcept;
+
+    // 기록의 카테고리다: spec 정의가 있으면 그것, 없으면 기록에 실린 값이다.
+    StringView LogCategoryOf(const TraceModelLog& log) const noexcept;
 
     // 채널 id 순이다.
     const Array<TraceModelChannelLoss>& ChannelLosses() const noexcept {

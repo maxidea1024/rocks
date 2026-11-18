@@ -304,10 +304,12 @@ TEST(DedicatedLane_PropagatesCorrelationWithoutLeakingAcrossTasks) {
         }));
         REQUIRE(lane.Flush());
         CHECK(seenRequest == 77);
-        // Inline은 올린 스레드에서 바로 돌므로 올린 쪽 범위 위에 복원 칸이 하나 더 쌓인다.
-        CHECK(depthInside == outerDepth + (mode == DedicatedLaneMode::Inline ? 2u : 1u));
+        // Thread는 lane 스레드 기준(빈 스택 위에 복원 칸 하나), Inline은 올린 스레드에서 바로
+        // 돌므로 올린 쪽 범위 위에 복원 칸이 하나 더 쌓인다.
+        const bool inlineMode = mode == DedicatedLaneMode::Inline;
+        CHECK(depthInside == (inlineMode ? outerDepth + 2 : 1u));
         CHECK(emptyInNext);
-        CHECK(depthAfter == outerDepth);
+        CHECK(depthAfter == (inlineMode ? outerDepth : 0u));
         CHECK(CorrelationDepth() == outerDepth);
         REQUIRE(lane.Shutdown());
     }

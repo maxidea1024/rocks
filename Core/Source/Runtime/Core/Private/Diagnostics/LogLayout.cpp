@@ -53,40 +53,22 @@ void AppendFormatted(Writer& writer, StringView format, const Args&... args) noe
     }
 }
 
-// 상관 id 칸 수와 칸 이름·값이다(출력 순서).
-constexpr usize CorrelationFieldCount = 5;
-
-struct CorrelationField {
-    StringView name;
-    uint64 value;
-};
-
-void CorrelationFields(const CorrelationIds& ids,
-                       CorrelationField (&fields)[CorrelationFieldCount]) noexcept {
-    fields[0] = {"session", ids.session};
-    fields[1] = {"task", ids.task};
-    fields[2] = {"asset", ids.asset};
-    fields[3] = {"entity", ids.entity};
-    fields[4] = {"request", ids.request};
-}
-
 bool HasCorrelationIds(const LogEvent& event) noexcept {
-    const CorrelationIds& ids = event.correlation;
-    return event.hasCorrelation &&
-           (ids.session | ids.task | ids.asset | ids.entity | ids.request) != 0;
+    return event.hasCorrelation && !IsEmptyCorrelation(event.correlation);
 }
 
 // "session=3 task=1842"(0인 칸은 뺀다)
 void AppendCorrelation(Writer& writer, const LogEvent& event) noexcept {
-    CorrelationField fields[CorrelationFieldCount];
-    CorrelationFields(event.correlation, fields);
+    uint64 values[CorrelationFieldCount];
+    CorrelationFieldValues(event.correlation, values);
     bool first = true;
-    for (const CorrelationField& field : fields) {
-        if (field.value == 0) {
+    for (usize index = 0; index < CorrelationFieldCount; ++index) {
+        if (values[index] == 0) {
             continue;
         }
 
-        AppendFormatted(writer, first ? "{}={}" : " {}={}", field.name, field.value);
+        AppendFormatted(writer, first ? "{}={}" : " {}={}", CorrelationFieldNames[index],
+                        values[index]);
         first = false;
     }
 }

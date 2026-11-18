@@ -316,23 +316,28 @@ struct TraceStandardFormat {
     static constexpr usize MaxContextDepth = 16;
 
     // ---- 로그(로깅 LG15, 채널 "log") ----
-    // LogMessageSpec(정의): u64 EventId | u32 줄 | u8 레벨, 가변: 카테고리(String) | 템플릿(String)
-    // | 파일(String) | 함수(String). 세션마다 EventId당 한 번이다.
+    // LogMessageSpec(정의): u64 spec id(호출 지점: EventId·카테고리·위치) | u64 EventId | u32 줄 |
+    // u8 레벨, 가변: 카테고리(String) | 템플릿(String) | 파일(String) | 함수(String). 세션마다 호출
+    // 지점당 한 번이다.
     static constexpr const char* LogMessageSpecType = "Trace.LogMessageSpec";
-    static constexpr usize LogSpecEventIdOffset = 0;
-    static constexpr usize LogSpecLineOffset = 8;
-    static constexpr usize LogSpecLevelOffset = 12;
-    static constexpr usize LogSpecFixedBytes = 13;
+    static constexpr usize LogSpecIdOffset = 0;
+    static constexpr usize LogSpecEventIdOffset = 8;
+    static constexpr usize LogSpecLineOffset = 16;
+    static constexpr usize LogSpecLevelOffset = 20;
+    static constexpr usize LogSpecFixedBytes = 21;
     // LogMessage(스레드 스트림, 순서 번호): u64 캡처 tick | u64 생산자 OS 스레드 id | u64 프레임 |
-    // u64 EventId | u64 × 5 상관 id(세션·task·에셋·entity·요청, 없으면 0) | u32 LogEventFlags | u8
-    // 레벨 | u8 상관 id 마스크(0이 아닌 칸) | u8 trace 쪽 잘림(1이면 메시지를 잘랐다), 가변: 렌더된
-    // 메시지(String). tick은 로그 캡처 tick 그대로다(같은 원천, 변환 없음).
+    // u64 spec id | u64 EventId | u64 × 5 상관 id(세션·task·에셋·entity·요청, 없으면 0) | u32
+    // LogEventFlags | u8 레벨 | u8 상관 id 마스크(0이 아닌 칸) | u8 trace 쪽 잘림(1이면 메시지를
+    // 잘랐다), 가변: 렌더된 메시지(String) | 카테고리(String) | 템플릿(String). 카테고리·템플릿은
+    // spec 정의를 쓰지 못했을 때(중복 표가 참·정의 버퍼 부족)만 채우고 평소에는 비어 있다. tick은
+    // 로그 캡처 tick 그대로다(같은 원천, 변환 없음).
     static constexpr const char* LogMessageType = "Trace.LogMessage";
     static constexpr usize LogMessageTickOffset = 0;
     static constexpr usize LogMessageThreadOffset = 8;
     static constexpr usize LogMessageFrameOffset = 16;
-    static constexpr usize LogMessageEventIdOffset = 24;
-    static constexpr usize LogMessageCorrelationOffset = 32;
+    static constexpr usize LogMessageSpecIdOffset = 24;
+    static constexpr usize LogMessageEventIdOffset = 32;
+    static constexpr usize LogMessageCorrelationOffset = 40;
     static constexpr usize LogMessageFlagsOffset =
         LogMessageCorrelationOffset + ContextValueCount * sizeof(uint64);
     static constexpr usize LogMessageLevelOffset = LogMessageFlagsOffset + sizeof(uint32);

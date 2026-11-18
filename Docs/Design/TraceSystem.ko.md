@@ -258,14 +258,15 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론)의 현재 기본 경로다. 경�
 ### 6.6 로그(로깅 LG15, 개정 7)
 
 - 채널 `log`. 기록은 `TraceLogSink`(TraceCapture, `RuntimeLogSink` 구현)가 쓴다. 엔진 호스트가 trace 세션을 시작한 뒤 LogSystem에 더하고, 정지 전에 뺀다. 채널이 꺼져 있으면 sink 비용은 분기 하나다.
-- `Trace.LogMessageSpec`(정의): u64 EventId | u32 줄 | u8 레벨, 가변 카테고리 | 템플릿 | 파일 | 함수. 세션마다 EventId당 한 번이다(sink의 고정 중복 표 4096칸, 3/4가 차면 매번 다시 쓰고 센다).
-- `Trace.LogMessage`(스레드 스트림, 순서 번호): u64 캡처 tick | u64 생산자 OS 스레드 id | u64 프레임 | u64 EventId | u64 × 5 상관 id | u32 LogEventFlags | u8 레벨 | u8 상관 id 마스크 | u8 trace 쪽 잘림, 가변 렌더된 메시지(최대 1024 byte, UTF-8 경계에서 자름).
+- `Trace.LogMessageSpec`(정의): u64 spec id(호출 지점 = EventId·카테고리·위치) | u64 EventId | u32 줄 | u8 레벨, 가변 카테고리 | 템플릿 | 파일 | 함수. 세션마다 호출 지점당 한 번이다(sink의 고정 중복 표 4096칸, 3/4까지). 정의 쓰기가 성공한 뒤에만 표에 넣는다. 표가 차거나 쓰기가 실패하면 정의를 더 쓰지 않고 기록에 카테고리·템플릿을 싣는다.
+- `Trace.LogMessage`(스레드 스트림, 순서 번호): u64 캡처 tick | u64 생산자 OS 스레드 id | u64 프레임 | u64 spec id | u64 EventId | u64 × 5 상관 id | u32 LogEventFlags | u8 레벨 | u8 상관 id 마스크 | u8 trace 쪽 잘림, 가변 렌더된 메시지(최대 1024 byte, UTF-8 경계에서 자름) | 카테고리 | 템플릿(뒤 둘은 spec 정의를 쓰지 못했을 때만).
   - tick은 로그 캡처 tick 그대로다(로그가 `MonotonicTicks`로 캡처한다, 변환 오차 없음).
   - sink는 로그 출력 스레드에서 불리므로 생산자 스레드·시각·상관 id를 기록에 명시한다. 스레드는 `Trace.ThreadInfo`의 OS id로 대응한다.
   - 속성·문맥은 보내지 않는다(메시지에 렌더되어 있다).
 - **재귀 차단:** 스레드별 재진입 표시, 카테고리 `Trace`·`Trace.*` 기록 제외(TraceWriter의 `Log::Warning(LogTrace, ...)`가 다시 trace로 돌지 않게), 세션이 없으면 보내지 않는다.
 - **손실:** 다른 기록과 같은 비대기 규칙이다. 버퍼가 없으면 버리고 채널 손실과 sink `Lost()`로 센다.
-- **분석:** TraceAnalysis 모델 `Logs()`·`LogSpecs()`, `trace-report`의 `logs`(레벨별 수와 Warning 이상 목록, 로그가 없으면 키 없음).
+- **분석:** TraceAnalysis 모델 `Logs()`·`LogSpecs()`(spec id 순, 이진 탐색)·`LogCategoryOf`, `trace-report` 판 4의 `logs`(레벨별 수와 Warning 이상 목록, 시각은 정수 ns, 로그가 없으면 키 없음).
+- **호스트 순서:** trace 시작 → `AddSink` … 엔진 정리 → `LogSystem::Flush` → `RemoveSink` → trace 정지(Sandbox `--engine`, `--trace-file <path>`로 파일 출력).
 
 ## 7. task 연동
 

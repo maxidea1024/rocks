@@ -6,11 +6,8 @@
 namespace rocks {
 
 struct DedicatedLane::Node {
-    explicit Node(Function<void()>&& body) noexcept : task(Move(body)) {
-        // 올린 스레드의 상관 id를 lane 작업에 넘긴다(로깅 L15). 스택이 비면 분기 하나다.
-        if (CorrelationDepth() != 0) {
-            correlation = CaptureCorrelation();
-        }
+    Node(Function<void()>&& body, const CorrelationToken& captured) noexcept
+        : task(Move(body)), correlation(captured) {
     }
 
     Function<void()> task;
@@ -148,13 +145,17 @@ Result<void> DedicatedLane::Post(Function<void()>&& task) noexcept {
         return Result<void>::Failure(memory.Error());
     }
 
+    // 올린 스레드의 상관 id를 lane 작업에 넘긴다(로깅 L15). 사본은 잠금 밖에서 만든다. 스택이 비면
+    // 분기 하나다.
+    const CorrelationToken correlation =
+        CorrelationDepth() != 0 ? CaptureCorrelation() : CorrelationToken{};
     bool accepted = false;
     bool drain = false;
     {
         platform::LockGuard lock(gate_);
         const bool laneContinuation = running_ && stopping_ && IsInsideLane();
         if (accepting_ || laneContinuation) {
-            Node* node = ConstructAt<Node>(memory.Value(), Move(task));
+            Node* node = ConstructAt<Node>(memory.Value(), Move(task), correlation);
             if (tail_ != nullptr) {
                 tail_->next = node;
             } else {

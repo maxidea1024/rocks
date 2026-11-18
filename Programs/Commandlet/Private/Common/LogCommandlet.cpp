@@ -1,6 +1,7 @@
 #include "LogCommandlet.h"
 
 #include <Core/Containers/Array.h>
+#include <Core/Diagnostics/Correlation.h>
 #include <Core/Diagnostics/LogRecord.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/Json.h>
@@ -33,7 +34,8 @@ constexpr StringView Usage =
     "           [--event <id>] [--since <UTC>] [--until <UTC>] [--grep <text>]\n"
     "           [--correlation <session|task|asset|entity|request>=<id>]\n"
     "      Print matching lines of plain or encrypted log files. A folder is read in start-time\n"
-    "      and part order (*.log, *.log.zst). JSON lines files filter on every field; text files with the\n"
+    "      and part order (*.log, *.log.zst). JSON lines files filter on every field; text files "
+    "with the\n"
     "      default layout filter on time, level and category, other text layouts only on --grep.\n";
 
 // 봉인 도구가 묶음 하나에 담는 평문 byte 수다.
@@ -394,8 +396,6 @@ Result<int32> Seal(Span<const StringView> args, CommandletOutput& output) noexce
 // log view가 읽는 파일 확장자와 번호 해석의 진법이다.
 constexpr StringView LogFileExtensionText = ".log";
 constexpr uint64 DecimalBase = 10;
-// 상관 id 칸 수다(session·task·asset·entity·request).
-constexpr usize CorrelationFieldCount = 5;
 
 // 압축 로그 파일(봉인하지 않음)의 확장자다.
 constexpr StringView CompressedLogFileExtensionText = ".log.zst";
@@ -477,9 +477,6 @@ struct ViewFilter {
     usize correlationField = CorrelationFieldCount;
     uint64 correlationValue = 0;
 };
-
-constexpr StringView CorrelationFieldNames[CorrelationFieldCount] = {"session", "task", "asset",
-                                                                     "entity", "request"};
 
 // 기본 레이아웃 줄 "[시각][레벨][카테고리] 메시지"의 대괄호 칸 하나를 읽는다.
 bool ReadBracket(StringView line, usize& cursor, StringView& value) noexcept {

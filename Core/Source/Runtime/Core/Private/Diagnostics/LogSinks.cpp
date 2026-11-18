@@ -252,29 +252,23 @@ Result<void> WriteRecord(JsonWriter& json, const LogEvent& event) noexcept {
         result = json.EndObject();
     }
 
-    // 상관 id: 0이 아닌 칸만, 비었으면 키를 쓰지 않는다.
-    if (result && event.hasCorrelation) {
-        const struct {
-            StringView name;
-            uint64 value;
-        } fields[] = {{"session", event.correlation.session},
-                      {"task", event.correlation.task},
-                      {"asset", event.correlation.asset},
-                      {"entity", event.correlation.entity},
-                      {"request", event.correlation.request}};
+    // 상관 id: 0이 아닌 칸만, 모두 0이거나 없으면 키를 쓰지 않는다.
+    if (result && event.hasCorrelation && !IsEmptyCorrelation(event.correlation)) {
+        uint64 values[CorrelationFieldCount];
+        CorrelationFieldValues(event.correlation, values);
         result = json.Key("corr");
         if (result) {
             result = json.BeginObject();
         }
 
-        for (usize index = 0; result && index < sizeof(fields) / sizeof(fields[0]); ++index) {
-            if (fields[index].value == 0) {
+        for (usize index = 0; result && index < CorrelationFieldCount; ++index) {
+            if (values[index] == 0) {
                 continue;
             }
 
-            result = json.Key(fields[index].name);
+            result = json.Key(CorrelationFieldNames[index]);
             if (result) {
-                result = json.UInt64(fields[index].value);
+                result = json.UInt64(values[index]);
             }
         }
 
