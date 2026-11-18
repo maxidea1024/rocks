@@ -155,6 +155,8 @@ void GlesDevice::QueryDeviceCaps(bool desktopContext) noexcept {
     // 채널별 TEXTURE_SWIZZLE_R/G/B/A는 ES 3.0 core다. AnisotropicPoint는 LINEAR_MIPMAP_NEAREST에
     // 이방성(GL_EXT_texture_filter_anisotropic, 없으면 배율 1)을 더한다.
     features.textureViewSwizzle = true;
+    // texture view가 없다(ES 3.2 core 밖). 읽기 view는 텍스처 전체를 묶는다(TextureViewBaseMip).
+    features.textureViewRanges = false;
     features.anisotropicPointFilter = true;
     features.srgbPairView = false;
     features.vertexStores = limits.vertex.storageBuffers != 0 || limits.vertex.storageImages != 0;
@@ -471,7 +473,8 @@ Result<void> GlesDevice::ReflectRootConstants(GLuint program, PipelineRecord& re
 }
 
 Result<void> GlesDevice::ReflectBufferSlots(GLuint program, DrawBufferSlots& slots,
-                                            DrawBufferSlots* writeSlots) noexcept {
+                                            DrawBufferSlots* writeSlots,
+                                            uint32* writeTextures) noexcept {
     GLint uniforms = 0;
     gl_.GetProgramiv(program, GL_ACTIVE_UNIFORMS, &uniforms);
     for (GLint index = 0; index < uniforms; ++index) {
@@ -485,6 +488,27 @@ Result<void> GlesDevice::ReflectBufferSlots(GLuint program, DrawBufferSlots& slo
         // 텍스처 sampler는 PS 텍스처 유닛 0(ps0)만 받는다.
         const bool imageBuffer = type == GL_IMAGE_BUFFER || type == GL_INT_IMAGE_BUFFER ||
                                  type == GL_UNSIGNED_INT_IMAGE_BUFFER;
+        // compute의 텍스처 image(SetWritableTexture, 텍스처 GX2 A부)다.
+        const bool imageTexture =
+            type == GL_IMAGE_2D || type == GL_IMAGE_3D || type == GL_IMAGE_2D_ARRAY ||
+            type == GL_INT_IMAGE_2D || type == GL_INT_IMAGE_3D || type == GL_INT_IMAGE_2D_ARRAY ||
+            type == GL_UNSIGNED_INT_IMAGE_2D || type == GL_UNSIGNED_INT_IMAGE_3D ||
+            type == GL_UNSIGNED_INT_IMAGE_2D_ARRAY;
+        GLint unit = -1;
+        if (imageTexture && writeTextures != nullptr) {
+            gl_.GetUniformiv(program, gl_.GetUniformLocation(program, name), &unit);
+            if (size != 1 || unit < 0 || static_cast<uint32>(unit) >= MaxDrawBufferViews) {
+                Diagnostic message;
+                message.Text("image uniform ")
+                    .Text(name)
+                    .Text(" is outside the fixed layout (compute image units 0-3)");
+                return Reject(message, ErrorCode::InvalidArgument);
+            }
+
+            *writeTextures |= 1u << static_cast<uint32>(unit);
+            continue;
+        }
+
         if (type >= GL_FIRST_IMAGE_TYPE && type <= GL_LAST_IMAGE_TYPE &&
             !(imageBuffer && writeSlots != nullptr)) {
             Diagnostic message;
@@ -494,7 +518,6 @@ Result<void> GlesDevice::ReflectBufferSlots(GLuint program, DrawBufferSlots& slo
             return Reject(message, ErrorCode::InvalidArgument);
         }
 
-        GLint unit = -1;
         if (IsTextureSampler(type)) {
             gl_.GetUniformiv(program, gl_.GetUniformLocation(program, name), &unit);
             if (size != 1 || unit != static_cast<GLint>(PixelTextureUnit)) {

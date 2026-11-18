@@ -134,6 +134,12 @@ struct TextureRecord {
     PixelFormat format = PixelFormat::Unknown;
     bool renderTarget = false;
     bool depthTarget = false;
+    // 만든 용도다(view는 원 텍스처의 용도, ResolveTextureViewRange).
+    TextureUsage usage = TextureUsage::Sampled;
+    // view가 가리키는 mip·slice 범위다(view가 아니면 전체). 묶기 전이는 이 범위만 바꾼다.
+    ResolvedSubresourceRange viewRange;
+    // 쓰기 view(ViewAccess::ReadWrite)다. SetWritableTexture로만 묶는다(storage image, GENERAL).
+    bool writable = false;
     // 이미지 전체의 aspect다(barrier, TextureFormatInfo::aspect).
     VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
     // 묶을 때 쓰는 샘플러다(장치 수명 동안 산다). view도 원 텍스처의 샘플러를 쓴다.
@@ -179,7 +185,9 @@ enum class BindingSource : uint8 {
     // SetBufferView slot(t1–t4)
     BufferView,
     // SetWritableBufferView slot(compute u0–u3)
-    WritableBufferView
+    WritableBufferView,
+    // SetWritableTexture slot(compute u0–u3의 storage image)
+    WritableTexture
 };
 
 struct PipelineBinding {
@@ -200,6 +208,8 @@ struct PipelineRecord {
     VkDescriptorSetLayout setLayouts[2] = {};
     PipelineBinding bindings[MaxPipelineBindings] = {};
     uint32 bindingCount = 0;
+    // compute가 텍스처(storage image)로 쓰는 쓰기 slot 비트다(SetWritableTexture가 묶여야 한다).
+    uint32 writeTextures = 0;
     // binding이 있는 set 비트다.
     uint32 setMask = 0;
     DrawBufferSlots bufferSlots;
@@ -498,6 +508,7 @@ private:
     void PopMarker() noexcept override;
     // --- GX3·GX4(VulkanCompute.cpp) ---
     void SetWritableBufferView(uint32 slot, BufferViewHandle view) noexcept override;
+    void SetWritableTexture(uint32 slot, TextureHandle view) noexcept override;
     void DrawIndirect(BufferHandle arguments, uint64 offset) noexcept override;
     void DrawIndexedIndirect(BufferHandle arguments, uint64 offset) noexcept override;
     void Dispatch(uint32 groupCountX, uint32 groupCountY, uint32 groupCountZ) noexcept override;
@@ -600,7 +611,8 @@ private:
     // 형식 표에 있는 형식마다 optimal tiling 기능을 물어 능력을 정한다(장치 생성 때 한 번).
     void QueryFormatCaps() noexcept;
     // format으로 만드는 이미지의 usage·flags다(QueryFormatCaps와 CreateTexture가 같은 값을 쓴다).
-    VkImageUsageFlags ImageUsageFor(PixelFormat format, bool renderTarget) const noexcept;
+    VkImageUsageFlags ImageUsageFor(PixelFormat format, bool renderTarget,
+                                    bool storage = false) const noexcept;
     VkImageCreateFlags ImageFlagsFor(PixelFormat format) const noexcept;
     // 그 usage·flags로 2D 이미지를 만들 수 있는지와 mip 사슬 지원을 묻는다.
     bool ImageSupported(VkFormat format, VkImageUsageFlags usage, VkImageCreateFlags flags,
@@ -895,6 +907,8 @@ private:
     TextureHandle boundTexture_;
     BufferViewHandle boundViews_[MaxDrawBufferViews];
     BufferViewHandle boundWriteViews_[MaxDrawBufferViews];
+    // compute 쓰기 slot에 묶인 텍스처 쓰기 view다(버퍼 view와 같은 slot 공간, 하나만 남는다).
+    TextureHandle boundWriteTextures_[MaxDrawBufferViews];
     bool descriptorsDirty_ = true;
     // 프레임 descriptor pool이 바닥난 횟수다(첫 번째만 경고 로그).
     uint64 descriptorExhaustions_ = 0;

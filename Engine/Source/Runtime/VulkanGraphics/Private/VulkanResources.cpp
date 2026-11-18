@@ -439,14 +439,18 @@ void VulkanDevice::QueryFormatCaps() noexcept {
     }
 }
 
-VkImageUsageFlags VulkanDevice::ImageUsageFor(PixelFormat format,
-                                              bool renderTarget) const noexcept {
+VkImageUsageFlags VulkanDevice::ImageUsageFor(PixelFormat format, bool renderTarget,
+                                              bool storage) const noexcept {
     const PixelFormatKind kind = GetPixelFormatInfo(format).kind;
     // 모든 텍스처가 복사 원본이 될 수 있다(readback·그래프 CopySource, D3D12도 허용한다).
     VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                               VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     if (renderTarget) {
         usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    }
+
+    if (storage) {
+        usage |= VK_IMAGE_USAGE_STORAGE_BIT;
     }
 
     if (kind == PixelFormatKind::Depth || kind == PixelFormatKind::DepthStencil) {
@@ -507,7 +511,9 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
 
     const bool renderTarget = desc.usage == TextureUsage::RenderTarget;
     const bool depthTarget = desc.usage == TextureUsage::DepthStencil;
-    const bool attachment = renderTarget || depthTarget;
+    const bool storage = desc.usage == TextureUsage::Storage;
+    // 렌더 타깃·깊이·Storage는 초기 픽셀이 없다(업로드하지 않는다).
+    const bool attachment = renderTarget || depthTarget || storage;
     const PixelFormatInfo& pixelInfo = GetPixelFormatInfo(desc.format);
     const bool depth =
         pixelInfo.kind == PixelFormatKind::Depth || pixelInfo.kind == PixelFormatKind::DepthStencil;
@@ -547,7 +553,7 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
     info.arrayLayers = slices;
     info.samples = VK_SAMPLE_COUNT_1_BIT;
     info.tiling = VK_IMAGE_TILING_OPTIMAL;
-    info.usage = ImageUsageFor(desc.format, renderTarget);
+    info.usage = ImageUsageFor(desc.format, renderTarget, storage);
     info.flags = ImageFlagsFor(desc.format) |
                  (IsCubeDimension(desc.dimension) ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0u);
 
@@ -563,6 +569,8 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
     record.format = desc.format;
     record.renderTarget = renderTarget;
     record.depthTarget = depthTarget;
+    record.usage = desc.usage;
+    record.viewRange = {0, desc.mipLevels, 0, slices};
     record.aspect = format.aspect;
     record.sampler = sampler.Value();
     record.comparison = desc.sampler.comparison;
@@ -610,7 +618,7 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
                           components.b == VK_COMPONENT_SWIZZLE_IDENTITY &&
                           components.a == VK_COMPONENT_SWIZZLE_IDENTITY;
     if ((depthTarget && (format.aspect & VK_IMAGE_ASPECT_STENCIL_BIT) != 0) ||
-        (attachment && !identity)) {
+        ((renderTarget || depthTarget) && !identity)) {
         viewInfo.subresourceRange.aspectMask = format.aspect;
         viewInfo.components = {};
         result = functions_.vkCreateImageView(device_, &viewInfo, nullptr, &record.attachmentView);
@@ -714,11 +722,22 @@ Result<TextureHandle> VulkanDevice::CreateTextureView(TextureHandle texture,
         return Result<TextureHandle>::Failure(resolved.Error());
     }
 
-    // sRGB 짝 view는 짝 형식이, plane view는 원 형식이 샘플 가능해야 한다.
+    auto range = ResolveTextureViewRange(source->dimension, source->usage,
+                                         {source->mipLevels, source->slices}, desc);
+    if (!range) {
+        return Result<TextureHandle>::Failure(range.Error());
+    }
+
+    // sRGB 짝 view는 짝 형식이, plane view는 원 형식이 샘플 가능해야 한다. 쓰기 view는 view 형식이
+    // storage image로 쓸 수 있어야 한다.
+    const bool writable = desc.access == ViewAccess::ReadWrite;
     const bool planes = PixelFormatPlaneCount(source->format) == 2;
     const PixelFormat sampledFormat = planes ? source->format : resolved.Value();
     const ViewFormatInfo view = ViewFormat(source->format, desc.plane, resolved.Value());
-    if (!HasPixelFormatCaps(GetPixelFormatCaps(sampledFormat), PixelFormatCaps::Sampled) ||
+    const PixelFormatCaps needed =
+        writable ? PixelFormatCaps::StorageWrite : PixelFormatCaps::Sampled;
+    if (!HasPixelFormatCaps(GetPixelFormatCaps(writable ? resolved.Value() : sampledFormat),
+                            needed) ||
         view.format == VK_FORMAT_UNDEFINED) {
         return UnsupportedFormat<TextureHandle>(resolved.Value());
     }
@@ -738,6 +757,9 @@ Result<TextureHandle> VulkanDevice::CreateTextureView(TextureHandle texture,
     record.mipLevels = source->mipLevels;
     record.slices = source->slices;
     record.format = resolved.Value();
+    record.usage = source->usage;
+    record.viewRange = range.Value();
+    record.writable = writable;
     record.aspect = source->aspect;
     record.sampler = source->sampler;
     record.comparison = source->comparison;
@@ -749,8 +771,13 @@ Result<TextureHandle> VulkanDevice::CreateTextureView(TextureHandle texture,
     viewInfo.viewType = ViewTypeOf(record.dimension);
     viewInfo.format = view.format;
     // view swizzle은 스텐실 plane(R → G)·형식 흉내 대응 위에 합성한다(TextureViewDesc::swizzle).
-    viewInfo.components = ComposeComponents(desc.swizzle, view.components);
-    viewInfo.subresourceRange = {view.aspect, 0, record.mipLevels, 0, record.slices};
+    // storage image view는 성분 대응이 항등이어야
+    // 한다(VUID-VkWriteDescriptorSet-descriptorType-00336).
+    viewInfo.components =
+        writable ? VkComponentMapping{} : ComposeComponents(desc.swizzle, view.components);
+    const ResolvedSubresourceRange& viewRange = range.Value();
+    viewInfo.subresourceRange = {view.aspect, viewRange.firstMip, viewRange.mipCount,
+                                 viewRange.firstSlice, viewRange.sliceCount};
     const VkResult result = functions_.vkCreateImageView(device_, &viewInfo, nullptr, &record.view);
     if (result != VK_SUCCESS) {
         return FailWith<TextureHandle>("vkCreateImageView (texture view)", result);

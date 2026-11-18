@@ -424,6 +424,15 @@ inline constexpr GLenum GL_READ_WRITE = 0x88BA;
 // 모든 memory barrier bit다(GL 헤더의 0xFFFFFFFF).
 inline constexpr GLbitfield GL_ALL_BARRIER_BITS = NumericLimits<GLbitfield>::Max();
 inline constexpr GLenum GL_IMAGE_BUFFER = 0x9051;
+inline constexpr GLenum GL_IMAGE_2D = 0x904D;
+inline constexpr GLenum GL_IMAGE_3D = 0x904E;
+inline constexpr GLenum GL_IMAGE_2D_ARRAY = 0x9053;
+inline constexpr GLenum GL_INT_IMAGE_2D = 0x9058;
+inline constexpr GLenum GL_INT_IMAGE_3D = 0x9059;
+inline constexpr GLenum GL_INT_IMAGE_2D_ARRAY = 0x905E;
+inline constexpr GLenum GL_UNSIGNED_INT_IMAGE_2D = 0x9063;
+inline constexpr GLenum GL_UNSIGNED_INT_IMAGE_3D = 0x9064;
+inline constexpr GLenum GL_UNSIGNED_INT_IMAGE_2D_ARRAY = 0x9069;
 inline constexpr GLenum GL_INT_IMAGE_BUFFER = 0x905C;
 inline constexpr GLenum GL_UNSIGNED_INT_IMAGE_BUFFER = 0x9067;
 // --- debug(KHR_debug, ES 3.2 core) ---

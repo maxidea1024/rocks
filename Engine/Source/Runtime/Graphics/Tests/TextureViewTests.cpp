@@ -1,5 +1,6 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Graphics/DeviceTypes.h>
+#include <Graphics/ResourceAccess.h>
 #include <Graphics/SubresourceStates.h>
 #include <TestSupport/Test.h>
 
@@ -284,4 +285,125 @@ TEST(TextureDesc_ComparisonSamplerNeedsDepth) {
     CHECK(
         ResolveTextureViewFormat(PixelFormat::D24UnormS8Uint, {PixelFormat::Unknown, 1, {}}, false)
             .Value() == PixelFormat::R8Uint);
+}
+
+TEST(TextureDesc_StorageUsageRules) {
+    // Storage는 초기 픽셀 없이 mip 여러 개를 가질 수 있고 Sampled·StorageWrite(·Mipmaps)를
+    // 요구한다.
+    TextureDesc desc;
+    desc.width = 16;
+    desc.height = 16;
+    desc.format = PixelFormat::R32Float;
+    desc.usage = TextureUsage::Storage;
+    desc.mipLevels = 5;
+    CHECK(ValidateTextureDesc(desc).IsOk());
+    CHECK(RequiredPixelFormatCaps(desc) ==
+          (PixelFormatCaps::Sampled | PixelFormatCaps::StorageWrite | PixelFormatCaps::Mipmaps));
+    desc.mipLevels = 1;
+    CHECK(RequiredPixelFormatCaps(desc) ==
+          (PixelFormatCaps::Sampled | PixelFormatCaps::StorageWrite));
+    desc.dimension = TextureDimension::Texture2DArray;
+    desc.arraySize = 3;
+    CHECK(ValidateTextureDesc(desc).IsOk());
+    desc.dimension = TextureDimension::Texture3D;
+    desc.arraySize = 1;
+    desc.depth = 4;
+    CHECK(ValidateTextureDesc(desc).IsOk());
+    // cube Storage는 이 단계 밖(Unsupported), 깊이 형식은 규칙 위반이다.
+    desc.dimension = TextureDimension::TextureCube;
+    desc.depth = 1;
+    CHECK(ValidateTextureDesc(desc).Error() == ErrorCode::Unsupported);
+    desc.dimension = TextureDimension::Texture2D;
+    desc.format = PixelFormat::D32Float;
+    CHECK(ValidateTextureDesc(desc).Error() == ErrorCode::InvalidArgument);
+}
+
+TEST(TextureView_RangeRules) {
+    const TextureSubresources chain{5, 1};
+    TextureViewDesc whole;
+    auto all =
+        ResolveTextureViewRange(TextureDimension::Texture2D, TextureUsage::Sampled, chain, whole);
+    REQUIRE(all);
+    CHECK(all.Value().firstMip == 0 && all.Value().mipCount == 5 && all.Value().sliceCount == 1);
+    TextureViewDesc tail;
+    tail.firstMip = 2;
+    auto rest =
+        ResolveTextureViewRange(TextureDimension::Texture2D, TextureUsage::Sampled, chain, tail);
+    REQUIRE(rest);
+    CHECK(rest.Value().firstMip == 2 && rest.Value().mipCount == 3);
+    // 범위 밖·끝 넘침은 잘라 받지 않고 거부한다.
+    TextureViewDesc outside;
+    outside.firstMip = 5;
+    CHECK(
+        ResolveTextureViewRange(TextureDimension::Texture2D, TextureUsage::Sampled, chain, outside)
+            .Error() == ErrorCode::InvalidArgument);
+    TextureViewDesc overflow;
+    overflow.firstMip = 3;
+    overflow.mipCount = 3;
+    CHECK(
+        ResolveTextureViewRange(TextureDimension::Texture2D, TextureUsage::Sampled, chain, overflow)
+            .Error() == ErrorCode::InvalidArgument);
+    // 배열 slice 범위, cube는 6면 전체, cube 배열은 6의 배수, 3D는 slice 전체다.
+    TextureViewDesc layers;
+    layers.firstSlice = 1;
+    layers.sliceCount = 2;
+    auto arrayRange = ResolveTextureViewRange(TextureDimension::Texture2DArray,
+                                              TextureUsage::Sampled, {1, 4}, layers);
+    REQUIRE(arrayRange);
+    CHECK(arrayRange.Value().firstSlice == 1 && arrayRange.Value().sliceCount == 2);
+    CHECK(ResolveTextureViewRange(TextureDimension::TextureCube, TextureUsage::Sampled, {1, 6},
+                                  layers)
+              .Error() == ErrorCode::InvalidArgument);
+    TextureViewDesc secondCube;
+    secondCube.firstSlice = 6;
+    secondCube.sliceCount = 6;
+    CHECK(ResolveTextureViewRange(TextureDimension::TextureCubeArray, TextureUsage::Sampled,
+                                  {1, 12}, secondCube)
+              .IsOk());
+    CHECK(ResolveTextureViewRange(TextureDimension::TextureCubeArray, TextureUsage::Sampled,
+                                  {1, 12}, layers)
+              .Error() == ErrorCode::InvalidArgument);
+    TextureViewDesc firstSliceOnly;
+    firstSliceOnly.sliceCount = 1;
+    CHECK(ResolveTextureViewRange(TextureDimension::Texture3D, TextureUsage::Sampled, {3, 1},
+                                  firstSliceOnly)
+              .IsOk());
+}
+
+TEST(TextureView_WritableViewRules) {
+    // 쓰기 view는 Storage 텍스처의 mip 하나, plane 0, swizzle 항등이다.
+    TextureViewDesc write;
+    write.access = ViewAccess::ReadWrite;
+    write.firstMip = 1;
+    write.mipCount = 1;
+    CHECK(ResolveTextureViewRange(TextureDimension::Texture2D, TextureUsage::Storage, {4, 1}, write)
+              .IsOk());
+    CHECK(ResolveTextureViewRange(TextureDimension::Texture2D, TextureUsage::Sampled, {4, 1}, write)
+              .Error() == ErrorCode::InvalidArgument);
+    TextureViewDesc twoMips = write;
+    twoMips.mipCount = 2;
+    CHECK(
+        ResolveTextureViewRange(TextureDimension::Texture2D, TextureUsage::Storage, {4, 1}, twoMips)
+            .Error() == ErrorCode::InvalidArgument);
+    TextureViewDesc swizzled = write;
+    swizzled.swizzle.red = SwizzleSource::Green;
+    CHECK(ResolveTextureViewRange(TextureDimension::Texture2D, TextureUsage::Storage, {4, 1},
+                                  swizzled)
+              .Error() == ErrorCode::InvalidArgument);
+    // 마지막 mip 하나만 남으면 mipCount 0(끝까지)도 mip 하나다.
+    TextureViewDesc last;
+    last.access = ViewAccess::ReadWrite;
+    last.firstMip = 3;
+    CHECK(ResolveTextureViewRange(TextureDimension::Texture2D, TextureUsage::Storage, {4, 1}, last)
+              .IsOk());
+}
+
+TEST(TextureView_BaseMipFollowsViewRangeSupport) {
+    TextureViewDesc desc;
+    desc.firstMip = 3;
+    DeviceFeatures ranged;
+    ranged.textureViewRanges = true;
+    CHECK(TextureViewBaseMip(ranged, desc) == 0u);
+    DeviceFeatures whole;
+    CHECK(TextureViewBaseMip(whole, desc) == 3u);
 }

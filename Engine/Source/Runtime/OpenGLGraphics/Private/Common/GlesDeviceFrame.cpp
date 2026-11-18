@@ -163,6 +163,10 @@ void GlesDevice::StartPass(const PassDesc& pass) noexcept {
         view = {};
     }
 
+    for (TextureHandle& view : boundWriteTextures_) {
+        view = {};
+    }
+
     stencilReference_ = 0;
     constantsDirty_ = true;
     platform::MemoryZero(constants_, sizeof(constants_));
@@ -351,7 +355,7 @@ void GlesDevice::SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64 
 
 void GlesDevice::SetTexture(TextureHandle handle) noexcept {
     const TextureRecord* record = textures_.Find(handle.slot);
-    if (record == nullptr) {
+    if (record == nullptr || record->writable) {
         record = textures_.Find(white_.slot);
     }
 

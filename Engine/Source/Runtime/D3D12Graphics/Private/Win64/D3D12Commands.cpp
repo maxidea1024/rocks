@@ -11,7 +11,10 @@ namespace {
 constexpr UINT ComputeRootConstants = 0;
 constexpr UINT ComputeRootReads = 1;
 constexpr UINT ComputeRootWrites = ComputeRootReads + MaxDrawBufferViews;
-constexpr UINT ComputeRootCount = ComputeRootWrites + MaxDrawBufferViews;
+// SetTexture의 텍스처(t0)·샘플러(s0) table이다(텍스처 GX2 A부).
+constexpr UINT ComputeRootTexture = ComputeRootWrites + MaxDrawBufferViews;
+constexpr UINT ComputeRootSampler = ComputeRootTexture + 1;
+constexpr UINT ComputeRootCount = ComputeRootSampler + 1;
 
 // 읽기 전용 상태 묶음이다(같은 기록 안에서 서로 합칠 수 있다).
 constexpr D3D12_RESOURCE_STATES ReadOnlyStates =
@@ -29,6 +32,20 @@ Result<void> D3D12Device::CreateComputeObjects() noexcept {
     D3D12_DESCRIPTOR_RANGE readRanges[MaxDrawBufferViews] = {};
     D3D12_DESCRIPTOR_RANGE writeRanges[MaxDrawBufferViews] = {};
     D3D12_ROOT_PARAMETER parameters[ComputeRootCount] = {};
+    D3D12_DESCRIPTOR_RANGE textureRange = {};
+    textureRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    textureRange.NumDescriptors = 1;
+    D3D12_DESCRIPTOR_RANGE samplerRange = {};
+    samplerRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
+    samplerRange.NumDescriptors = 1;
+    parameters[ComputeRootTexture].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    parameters[ComputeRootTexture].DescriptorTable.NumDescriptorRanges = 1;
+    parameters[ComputeRootTexture].DescriptorTable.pDescriptorRanges = &textureRange;
+    parameters[ComputeRootTexture].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    parameters[ComputeRootSampler].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    parameters[ComputeRootSampler].DescriptorTable.NumDescriptorRanges = 1;
+    parameters[ComputeRootSampler].DescriptorTable.pDescriptorRanges = &samplerRange;
+    parameters[ComputeRootSampler].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
     parameters[ComputeRootConstants].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
     parameters[ComputeRootConstants].Constants.ShaderRegister = 0;
     parameters[ComputeRootConstants].Constants.Num32BitValues = ConstantCount;
@@ -131,8 +148,9 @@ D3D12Device::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
 
     DrawBufferSlots readSlots;
     DrawBufferSlots writeSlots;
+    uint32 writeTextures = 0;
     auto reflected = ReflectBindings(code.Get(), ShaderStage::Compute, desc.drawConstantBytes,
-                                     readSlots, &writeSlots);
+                                     readSlots, &writeSlots, &writeTextures);
     if (!reflected) {
         return Result<PipelineHandle>::Failure(reflected.Error());
     }
@@ -151,6 +169,7 @@ D3D12Device::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
     record.writeSlots = writeSlots;
     record.compute = true;
     record.drawConstantBytes = desc.drawConstantBytes;
+    record.writeTextures = writeTextures;
     auto reserved = ReserveRetireCapacity(1);
     if (!reserved) {
         return Result<PipelineHandle>::Failure(reserved.Error());
@@ -294,6 +313,20 @@ void D3D12Device::SetWritableBufferView(uint32 slot, BufferViewHandle view) noex
     const BufferViewRecord* record = bufferViews_.Find(view.slot);
     const bool writable = record != nullptr && record->access == ViewAccess::ReadWrite;
     boundWriteViews_[slot] = writable ? view : BufferViewHandle{};
+    // 쓰기 slot은 버퍼·텍스처가 같은 번호 공간이다(나중에 묶은 하나만 남는다).
+    boundWriteTextures_[slot] = {};
+}
+
+void D3D12Device::SetWritableTexture(uint32 slot, TextureHandle view) noexcept {
+    platform::LockGuard lock(gate_);
+    if (slot >= MaxDrawBufferViews) {
+        return;
+    }
+
+    const TextureRecord* record = textures_.Find(view.slot);
+    const bool writable = record != nullptr && record->writable;
+    boundWriteTextures_[slot] = writable ? view : TextureHandle{};
+    boundWriteViews_[slot] = {};
 }
 
 void D3D12Device::RequireBufferState(ID3D12Resource* resource,
@@ -406,8 +439,38 @@ bool D3D12Device::PrepareDispatch() noexcept {
         return false;
     }
 
+    // 텍스처로 쓰는 slot마다 쓰기 텍스처 view가 묶여야 한다.
+    for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
+        if ((pipeline->writeTextures & (1u << slot)) != 0 &&
+            textures_.Find(boundWriteTextures_[slot].slot) == nullptr) {
+            return false;
+        }
+    }
+
+    // 쓰는 텍스처 view의 범위를 UAV 상태로 맞춘다(같은 상태가 이어지면 UAV barrier로 앞 dispatch의
+    // 쓰기를 기다린다).
+    for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
+        const TextureRecord* view = (pipeline->writeTextures & (1u << slot)) != 0
+                                        ? textures_.Find(boundWriteTextures_[slot].slot)
+                                        : nullptr;
+        TextureRecord* owner = view != nullptr ? textures_.Find(view->source) : nullptr;
+        if (owner != nullptr) {
+            TrackTransition(*owner, view->source, view->viewRange,
+                            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, true);
+        }
+    }
+
     // 읽는 view는 셰이더 읽기, 쓰는 view는 UAV 상태로 맞추고 compute root 인자를 건다.
     list_->SetComputeRootSignature(computeRootSignature_.Get());
+    const TextureRecord* texture = textures_.Find(boundTexture_);
+    if (texture == nullptr) {
+        texture = textures_.Find(white_.slot);
+    }
+
+    if (texture != nullptr) {
+        list_->SetComputeRootDescriptorTable(ComputeRootTexture, srvs_.Gpu(texture->srv));
+        list_->SetComputeRootDescriptorTable(ComputeRootSampler, samplers_.Gpu(texture->sampler));
+    }
     if (pipeline->drawConstantBytes != 0) {
         list_->SetComputeRoot32BitConstants(
             ComputeRootConstants, static_cast<UINT>(pipeline->drawConstantBytes / sizeof(uint32)),
@@ -428,9 +491,15 @@ bool D3D12Device::PrepareDispatch() noexcept {
             RequireBufferState(write->resource.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         }
 
-        list_->SetComputeRootDescriptorTable(
-            ComputeRootWrites + slot,
-            srvs_.Gpu(write != nullptr ? write->descriptor : nullBufferUav_));
+        const TextureRecord* writeTexture = (pipeline->writeTextures & (1u << slot)) != 0
+                                                ? textures_.Find(boundWriteTextures_[slot].slot)
+                                                : nullptr;
+        uint32 descriptor = write != nullptr ? write->descriptor : nullBufferUav_;
+        if (writeTexture != nullptr) {
+            descriptor = writeTexture->srv;
+        }
+
+        list_->SetComputeRootDescriptorTable(ComputeRootWrites + slot, srvs_.Gpu(descriptor));
     }
 
     return true;

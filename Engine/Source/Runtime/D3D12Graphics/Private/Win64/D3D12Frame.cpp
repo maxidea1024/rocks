@@ -216,6 +216,12 @@ Result<void> D3D12Device::BeginRecording() noexcept {
         view = {};
     }
 
+    for (TextureHandle& view : boundWriteTextures_) {
+        view = {};
+    }
+
+    boundTexture_ = white_.slot;
+
     bufferStates_.Clear();
     platform::MemoryZero(constants_, sizeof(constants_));
     stencilReference_ = 0;
@@ -358,7 +364,7 @@ void D3D12Device::SetTexture(TextureHandle handle) noexcept {
     platform::LockGuard lock(gate_);
     TextureRecord* record = textures_.Find(handle.slot);
     SlotHandle slot = handle.slot;
-    if (record == nullptr || !record->hasSrv) {
+    if (record == nullptr || !record->hasSrv || record->writable) {
         record = textures_.Find(white_.slot);
         slot = white_.slot;
     }
@@ -374,19 +380,22 @@ void D3D12Device::SetTexture(TextureHandle handle) noexcept {
         }
 
         // 명시 전이 없이 셰이더 읽기 상태가 아닌 텍스처를 읽으면 암묵 전이로 메운다(GX5. 렌더
-        // 그래프를 거치지 않는 그리기용이다).
+        // 그래프를 거치지 않는 그리기용이다). view는 자기 mip·slice 범위만 본다(텍스처 GX2 A부).
+        const ResolvedSubresourceRange& range = record->viewRange;
         bool readable = true;
-        for (uint32 index = 0; owner != nullptr && index < owner->current.Count(); ++index) {
-            readable = readable &&
-                       (owner->current[index] & D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE) != 0;
+        for (uint32 slice = range.firstSlice;
+             owner != nullptr && slice < range.firstSlice + range.sliceCount; ++slice) {
+            for (uint32 mip = range.firstMip; mip < range.firstMip + range.mipCount; ++mip) {
+                readable = readable && (owner->current.At(mip, slice) &
+                                        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE) != 0;
+            }
         }
 
         if (owner != nullptr && !readable && recording_) {
-            TrackTransition(*owner, ownerSlot,
-                            ResolveSubresourceRange({}, owner->mipLevels, owner->slices),
-                            ShaderReadStates);
+            TrackTransition(*owner, ownerSlot, range, ShaderReadStates);
         }
 
+        boundTexture_ = slot;
         list_->SetGraphicsRootDescriptorTable(RootTexture, srvs_.Gpu(record->srv));
         list_->SetGraphicsRootDescriptorTable(RootSampler, samplers_.Gpu(record->sampler));
     }

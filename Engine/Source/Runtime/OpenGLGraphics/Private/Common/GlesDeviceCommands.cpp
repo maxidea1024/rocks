@@ -250,7 +250,8 @@ Result<PipelineHandle> GlesDevice::CreateComputePipeline(const ComputePipelineDe
     }
 
     record.drawConstantBytes = desc.drawConstantBytes;
-    auto reflected = ReflectBufferSlots(record.program, record.bufferSlots, &record.writeSlots);
+    auto reflected = ReflectBufferSlots(record.program, record.bufferSlots, &record.writeSlots,
+                                        &record.writeTextures);
     auto constants = reflected ? ReflectRootConstants(record.program, record) : Move(reflected);
     if (!constants) {
         gl_.DeleteProgram(record.program);
@@ -413,6 +414,19 @@ void GlesDevice::SetWritableBufferView(uint32 slot, BufferViewHandle view) noexc
     const BufferViewRecord* record = bufferViews_.Find(view.slot);
     const bool writable = record != nullptr && record->access == ViewAccess::ReadWrite;
     boundWriteViews_[slot] = writable ? view : BufferViewHandle{};
+    // 쓰기 slot은 버퍼·텍스처가 같은 번호 공간이다(나중에 묶은 하나만 남는다).
+    boundWriteTextures_[slot] = {};
+}
+
+void GlesDevice::SetWritableTexture(uint32 slot, TextureHandle view) noexcept {
+    if (!recording_ || slot >= MaxDrawBufferViews) {
+        return;
+    }
+
+    const TextureRecord* record = textures_.Find(view.slot);
+    const bool writable = record != nullptr && record->writable;
+    boundWriteTextures_[slot] = writable ? view : TextureHandle{};
+    boundWriteViews_[slot] = {};
 }
 
 const PipelineRecord* GlesDevice::PrepareDraw(bool indexed) noexcept {
@@ -453,6 +467,14 @@ const PipelineRecord* GlesDevice::PrepareDispatch() noexcept {
         return nullptr;
     }
 
+    // 텍스처로 쓰는 slot마다 쓰기 텍스처 view가 묶여야 한다.
+    for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
+        if ((pipeline->writeTextures & (1u << slot)) != 0 &&
+            textures_.Find(boundWriteTextures_[slot].slot) == nullptr) {
+            return nullptr;
+        }
+    }
+
     ApplyConstants(*pipeline);
     ApplyBufferViews(*pipeline);
     for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
@@ -470,6 +492,21 @@ const PipelineRecord* GlesDevice::PrepareDispatch() noexcept {
                                 view->buffer, static_cast<GLintptr>(view->offset),
                                 static_cast<GLsizeiptr>(view->size));
         }
+    }
+
+    // 쓰기 텍스처 view는 level 하나를 image unit slot에 묶는다(배열·3D는 layered로 모든 층).
+    for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
+        if ((pipeline->writeTextures & (1u << slot)) == 0) {
+            continue;
+        }
+
+        const TextureRecord* view = textures_.Find(boundWriteTextures_[slot].slot);
+        const GlesTextureFormat* format = FindTextureFormat(view->format);
+        const bool layered = view->dimension == TextureDimension::Texture2DArray ||
+                             view->dimension == TextureDimension::Texture3D;
+        gl_.BindImageTexture(slot, view->texture, static_cast<GLint>(view->viewRange.firstMip),
+                             layered ? GL_TRUE : GL_FALSE, 0, GL_READ_WRITE,
+                             format->internalFormat);
     }
 
     return pipeline;

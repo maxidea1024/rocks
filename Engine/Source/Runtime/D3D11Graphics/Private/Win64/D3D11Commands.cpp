@@ -190,7 +190,7 @@ D3D11Device::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
     PipelineRecord record;
     record.drawConstantBytes = desc.drawConstantBytes;
     auto reflected = ReflectBindings(code.Get(), ShaderStage::Compute, desc.drawConstantBytes,
-                                     record.bufferSlots, &record.writeSlots);
+                                     record.bufferSlots, &record.writeSlots, &record.writeTextures);
     if (!reflected) {
         return Result<PipelineHandle>::Failure(reflected.Error());
     }
@@ -324,6 +324,20 @@ void D3D11Device::SetWritableBufferView(uint32 slot, BufferViewHandle view) noex
     const BufferViewRecord* record = bufferViews_.Find(view.slot);
     const bool writable = record != nullptr && record->access == ViewAccess::ReadWrite;
     boundWriteViews_[slot] = writable ? view : BufferViewHandle{};
+    // 쓰기 slot은 버퍼·텍스처가 같은 번호 공간이다(나중에 묶은 하나만 남는다).
+    boundWriteTextures_[slot] = {};
+}
+
+void D3D11Device::SetWritableTexture(uint32 slot, TextureHandle view) noexcept {
+    platform::LockGuard lock(gate_);
+    if (slot >= MaxDrawBufferViews) {
+        return;
+    }
+
+    const TextureRecord* record = textures_.Find(view.slot);
+    const bool writable = record != nullptr && record->uav;
+    boundWriteTextures_[slot] = writable ? view : TextureHandle{};
+    boundWriteViews_[slot] = {};
 }
 
 bool D3D11Device::PrepareDraw(bool indexed) noexcept {
@@ -353,6 +367,16 @@ bool D3D11Device::PrepareDraw(bool indexed) noexcept {
                                             ? DXGI_FORMAT_R16_UINT
                                             : DXGI_FORMAT_R32_UINT,
                                         static_cast<UINT>(boundIndex_.offset));
+        }
+
+        const TextureRecord* texture = textures_.Find(boundTexture_);
+        if (texture == nullptr) {
+            texture = textures_.Find(white_.slot);
+        }
+
+        if (texture != nullptr) {
+            ID3D11ShaderResourceView* textureView = texture->srv.Get();
+            deferred_->PSSetShaderResources(0, 1, &textureView);
         }
 
         inputsDirty_ = false;
@@ -389,10 +413,35 @@ bool D3D11Device::PrepareDispatch() noexcept {
         return false;
     }
 
-    // 그래픽 단계의 SRV를 먼저 풀어 같은 버퍼를 UAV로 묶을 때의 hazard를 없앤다.
-    ID3D11ShaderResourceView* none[MaxDrawBufferViews] = {};
+    // 텍스처로 쓰는 slot마다 쓰기 텍스처 view가 묶여야 한다.
+    for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
+        if ((pipeline->writeTextures & (1u << slot)) == 0) {
+            continue;
+        }
+
+        const TextureRecord* view = textures_.Find(boundWriteTextures_[slot].slot);
+        if (view == nullptr) {
+            return false;
+        }
+
+        uavs[slot] = view->uav.Get();
+    }
+
+    // 그래픽 단계의 SRV(텍스처 t0 포함)를 먼저 풀어 같은 자원을 UAV로 묶을 때의 hazard를 없앤다.
+    // 다음 그리기가 다시 묶는다(inputsDirty_).
+    ID3D11ShaderResourceView* none[MaxDrawBufferViews + 1] = {};
     deferred_->VSSetShaderResources(1, MaxDrawBufferViews, none);
-    deferred_->PSSetShaderResources(1, MaxDrawBufferViews, none);
+    deferred_->PSSetShaderResources(0, MaxDrawBufferViews + 1, none);
+    const TextureRecord* texture = textures_.Find(boundTexture_);
+    if (texture == nullptr) {
+        texture = textures_.Find(white_.slot);
+    }
+
+    if (texture != nullptr) {
+        ID3D11ShaderResourceView* textureView = texture->srv.Get();
+        deferred_->CSSetShaderResources(0, 1, &textureView);
+        deferred_->CSSetSamplers(0, 1, &texture->sampler);
+    }
     ID3D11ShaderResourceView* reads[MaxDrawBufferViews] = {};
     for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
         const BufferViewRecord* view = bufferViews_.Find(boundViews_[slot].slot);
@@ -407,9 +456,9 @@ bool D3D11Device::PrepareDispatch() noexcept {
 
 void D3D11Device::FinishDispatch() noexcept {
     ID3D11UnorderedAccessView* noUavs[MaxDrawBufferViews] = {};
-    ID3D11ShaderResourceView* noViews[MaxDrawBufferViews] = {};
+    ID3D11ShaderResourceView* noViews[MaxDrawBufferViews + 1] = {};
     deferred_->CSSetUnorderedAccessViews(0, MaxDrawBufferViews, noUavs, nullptr);
-    deferred_->CSSetShaderResources(1, MaxDrawBufferViews, noViews);
+    deferred_->CSSetShaderResources(0, MaxDrawBufferViews + 1, noViews);
 }
 
 ID3D11Buffer* D3D11Device::IndirectArguments(BufferHandle arguments, uint64 offset,

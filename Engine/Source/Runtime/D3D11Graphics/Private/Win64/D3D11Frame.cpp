@@ -64,6 +64,12 @@ void D3D11Device::BeginRecording(const Target& target, const PassDesc& pass) noe
         view = {};
     }
 
+    for (TextureHandle& view : boundWriteTextures_) {
+        view = {};
+    }
+
+    boundTexture_ = white_.slot;
+
     stencilReference_ = 0;
     inputsDirty_ = false;
     ID3D11DeviceContext* context = deferred_.Get();
@@ -273,11 +279,15 @@ void D3D11Device::SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64
 void D3D11Device::SetTexture(TextureHandle handle) noexcept {
     platform::LockGuard lock(gate_);
     const TextureRecord* record = textures_.Find(handle.slot);
+    SlotHandle slot = handle.slot;
     if (record == nullptr || !record->srv) {
         record = textures_.Find(white_.slot);
+        slot = white_.slot;
     }
 
     if (record != nullptr) {
+        // compute는 dispatch 때 같은 텍스처를 CS t0·s0에 건다.
+        boundTexture_ = slot;
         ID3D11ShaderResourceView* view = record->srv.Get();
         deferred_->PSSetShaderResources(0, 1, &view);
         deferred_->PSSetSamplers(0, 1, &record->sampler);

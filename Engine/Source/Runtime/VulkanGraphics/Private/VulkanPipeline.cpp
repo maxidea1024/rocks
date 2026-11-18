@@ -398,25 +398,42 @@ namespace {
 // 이미지와 s0 샘플러, 단계 모두의 t1–t4 버퍼 SRV(typed·구조화·raw), compute의 u0–u3 버퍼 UAV만
 // 받는다. 그 밖 (상수 버퍼, 다른 register, space, 그래픽 단계의 쓰기 자원)이면 거짓이다.
 bool MapBinding(const ShaderBinding& binding, ShaderStage stage, PipelineBinding& out,
-                DrawBufferSlots& slots, DrawBufferSlots& writeSlots) noexcept {
+                DrawBufferSlots& slots, DrawBufferSlots& writeSlots,
+                uint32& writeTextures) noexcept {
     if (binding.sourceSpace != 0 || (binding.writable && stage != ShaderStage::Compute)) {
         return false;
     }
 
     out.binding = binding.binding;
     out.set = binding.set;
-    const bool pixel = stage == ShaderStage::Pixel;
+    // t0·s0(SetTexture)는 PS와 CS가 읽는다(텍스처 GX2 A부).
+    const bool textureStage = stage == ShaderStage::Pixel || stage == ShaderStage::Compute;
     if (binding.shape == ShaderResourceShape::Image &&
         binding.kind == ShaderBindingKind::SampledImage) {
         out.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
         out.source = BindingSource::Texture;
-        return pixel && binding.sourceRegister == 0;
+        return textureStage && binding.sourceRegister == 0;
     }
 
     if (binding.shape == ShaderResourceShape::Sampler) {
         out.type = VK_DESCRIPTOR_TYPE_SAMPLER;
         out.source = BindingSource::Sampler;
-        return pixel && binding.sourceRegister == 0;
+        return textureStage && binding.sourceRegister == 0;
+    }
+
+    // compute 쓰기 slot의 storage image(RWTexture*)는 SetWritableTexture slot이다.
+    if (binding.shape == ShaderResourceShape::Image &&
+        binding.kind == ShaderBindingKind::StorageImage) {
+        out.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        out.source = BindingSource::WritableTexture;
+        out.slot = binding.sourceRegister;
+        if (!binding.writable || binding.sourceRegister >= MaxDrawBufferViews ||
+            (writeSlots.usedMask & (1u << binding.sourceRegister)) != 0) {
+            return false;
+        }
+
+        writeTextures |= 1u << binding.sourceRegister;
+        return true;
     }
 
     // 쓰기 자원은 register u(slot), 읽기는 t(slot + 1)이다.
@@ -478,7 +495,8 @@ Result<void> VulkanDevice::BuildPipelineLayout(const CompiledShader& first,
         for (const ShaderBinding& binding : shaders[stage]->bindings) {
             PipelineBinding mapped;
             if (binding.set != stage || record.bindingCount == MaxPipelineBindings ||
-                !MapBinding(binding, shaderStage, mapped, record.bufferSlots, record.writeSlots)) {
+                !MapBinding(binding, shaderStage, mapped, record.bufferSlots, record.writeSlots,
+                            record.writeTextures)) {
                 Diagnostic message;
                 message.Text(compute ? "compute" : (stage == 0 ? "vertex" : "pixel"))
                     .Text(" shader resource at register ")

@@ -58,6 +58,8 @@ struct TextureRecord {
     // attachment(DepthAttachment::readOnly)용이다.
     ComRef<ID3D11DepthStencilView> dsv;
     ComRef<ID3D11DepthStencilView> readOnlyDsv;
+    // 쓰기 view(ViewAccess::ReadWrite)의 UAV다. 있으면 SetWritableTexture로만 묶는다.
+    ComRef<ID3D11UnorderedAccessView> uav;
     TextureDimension dimension = TextureDimension::Texture2D;
     uint32 width = 0;
     uint32 height = 0;
@@ -70,6 +72,8 @@ struct TextureRecord {
     PixelFormat format = PixelFormat::Unknown;
     bool renderTarget = false;
     bool depthTarget = false;
+    // 만든 용도다(view는 원 텍스처의 용도, ResolveTextureViewRange).
+    TextureUsage usage = TextureUsage::Sampled;
     // 다른 텍스처의 자원을 공유하는 view다(SRV와 texture 참조가 자원을 붙든다). 업로드·readback·
     // 그리기 대상이 될 수 없다.
     bool view = false;
@@ -111,6 +115,8 @@ struct PipelineRecord {
     DrawBufferSlots writeSlots;
     // 선언한 그리기별 상수 byte 수다(SetDrawConstants 크기 검사).
     uint32 drawConstantBytes = 0;
+    // compute가 텍스처 UAV로 쓰는 쓰기 slot 비트다(SetWritableTexture가 묶여야 한다).
+    uint32 writeTextures = 0;
     bool compute = false;
     // 깊이·스텐실을 쓴다(읽기 전용 깊이 attachment에서 그리기를 거른다).
     bool writesDepthStencil = false;
@@ -365,6 +371,7 @@ private:
     // --- GX3·GX4(D3D11Commands.cpp) ---
 
     void SetWritableBufferView(uint32 slot, BufferViewHandle view) noexcept override;
+    void SetWritableTexture(uint32 slot, TextureHandle view) noexcept override;
     void DrawIndirect(BufferHandle arguments, uint64 offset) noexcept override;
     void DrawIndexedIndirect(BufferHandle arguments, uint64 offset) noexcept override;
     void Dispatch(uint32 groupCountX, uint32 groupCountY, uint32 groupCountZ) noexcept override;
@@ -483,15 +490,19 @@ private:
     // 셰이더 자원이 고정 배치(PipelineDesc·ComputePipelineDesc) 안인지 보고 버퍼 view slot 배치를
     // slots에, CS 쓰기 slot을 writeSlots에 더한다.
     // b0 cbuffer가 drawConstantBytes보다 크면 InvalidArgument다(작은 것은 허용).
+    Result<TextureHandle> CreateWritableTextureView(const TextureRecord& source, PixelFormat format,
+                                                    const ResolvedSubresourceRange& range) noexcept;
+    // compute의 텍스처 UAV(u0–u3의 RWTexture*) slot은 writeTextures에 더한다.
     Result<void> ReflectBindings(ID3DBlob* code, ShaderStage stage, uint32 drawConstantBytes,
-                                 DrawBufferSlots& slots, DrawBufferSlots* writeSlots) noexcept;
+                                 DrawBufferSlots& slots, DrawBufferSlots* writeSlots,
+                                 uint32* writeTextures = nullptr) noexcept;
     // 지금 파이프라인이 읽는 버퍼 view slot이 모두 맞는 view로 채워졌는지다(잠금 안).
     bool BufferViewsBound() const noexcept;
     Result<void> CheckVertexFormats(const VertexLayout& layout) noexcept;
     Result<void> CreateSwapChainView(SwapChainRecord& record) noexcept;
     // 2D SRV를 만든다. 비디오 형식은 PlaneSlice로, 깊이·스텐실은 view 형식으로 plane을 고른다.
     HRESULT CreatePlaneView(const TextureRecord& record, DXGI_FORMAT format, uint32 plane,
-                            uint32 mipLevels, bool planar,
+                            const ResolvedSubresourceRange& range, bool planar,
                             ComRef<ID3D11ShaderResourceView>& out) noexcept;
 
     // --- 기록(D3D11Frame.cpp) ---
@@ -592,6 +603,10 @@ private:
     BufferViewHandle boundViews_[MaxDrawBufferViews];
     // compute 쓰기 slot에 묶인 view(GX4)와 스텐실 기준 값이다.
     BufferViewHandle boundWriteViews_[MaxDrawBufferViews];
+    // compute 쓰기 slot에 묶인 텍스처 쓰기 view(버퍼 view와 같은 slot 공간)와 SetTexture로 묶은
+    // 텍스처 기록이다(dispatch가 CS t0·s0에 걸고, 그리기가 PS t0을 다시 건다).
+    TextureHandle boundWriteTextures_[MaxDrawBufferViews];
+    SlotHandle boundTexture_;
     uint32 stencilReference_ = 0;
     // dispatch가 UAV를 묶어 런타임이 입력 binding(정점·index·SRV)을 풀었을 수 있다. 다음 그리기가
     // 정점·index 버퍼를 다시 묶는다.

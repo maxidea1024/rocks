@@ -1,6 +1,7 @@
 #include <Base/Checked.h>
 #include <Base/NumericLimits.h>
 #include <Graphics/DeviceTypes.h>
+#include <Graphics/ResourceAccess.h>
 #include <Platform/Atomics.h>
 
 namespace rocks::graphics {
@@ -114,6 +115,56 @@ Result<PixelFormat> ResolveTextureViewFormat(PixelFormat texture, const TextureV
     return resolved;
 }
 
+Result<ResolvedSubresourceRange> ResolveTextureViewRange(TextureDimension dimension,
+                                                         TextureUsage usage,
+                                                         const TextureSubresources& shape,
+                                                         const TextureViewDesc& desc) noexcept {
+    const auto invalid = []() noexcept {
+        return Result<ResolvedSubresourceRange>::Failure(ErrorCode::InvalidArgument);
+    };
+    if (desc.access != ViewAccess::Read && desc.access != ViewAccess::ReadWrite) {
+        return invalid();
+    }
+
+    // 개수 0은 끝까지다. 시작이 밖이거나 끝이 넘치면 거부한다(잘라 받지 않는다).
+    if (desc.firstMip >= shape.mipLevels || desc.firstSlice >= shape.slices) {
+        return invalid();
+    }
+
+    ResolvedSubresourceRange range;
+    range.firstMip = desc.firstMip;
+    range.mipCount = desc.mipCount != 0 ? desc.mipCount : shape.mipLevels - desc.firstMip;
+    range.firstSlice = desc.firstSlice;
+    range.sliceCount = desc.sliceCount != 0 ? desc.sliceCount : shape.slices - desc.firstSlice;
+    if (range.mipCount > shape.mipLevels - range.firstMip ||
+        range.sliceCount > shape.slices - range.firstSlice) {
+        return invalid();
+    }
+
+    const bool wholeSlices = range.firstSlice == 0 && range.sliceCount == shape.slices;
+    if ((dimension == TextureDimension::Texture3D || dimension == TextureDimension::TextureCube) &&
+        !wholeSlices) {
+        return invalid();
+    }
+
+    if (dimension == TextureDimension::TextureCubeArray &&
+        (range.firstSlice % CubeFaceCount != 0 || range.sliceCount % CubeFaceCount != 0)) {
+        return invalid();
+    }
+
+    if (desc.access == ViewAccess::ReadWrite &&
+        (usage != TextureUsage::Storage || range.mipCount != 1 || desc.plane != 0 ||
+         !desc.swizzle.IsIdentity())) {
+        return invalid();
+    }
+
+    return Result<ResolvedSubresourceRange>::Success(range);
+}
+
+uint32 TextureViewBaseMip(const DeviceFeatures& features, const TextureViewDesc& desc) noexcept {
+    return features.textureViewRanges ? 0u : desc.firstMip;
+}
+
 PixelFormatCaps RequiredPixelFormatCaps(const TextureDesc& desc) noexcept {
     PixelFormatCaps caps = PixelFormatCaps::None;
     switch (desc.usage) {
@@ -126,6 +177,11 @@ PixelFormatCaps RequiredPixelFormatCaps(const TextureDesc& desc) noexcept {
         break;
     case TextureUsage::DepthStencil:
         caps = PixelFormatCaps::DepthStencil;
+        break;
+    case TextureUsage::Storage:
+        caps = desc.mipLevels > 1 ? PixelFormatCaps::Sampled | PixelFormatCaps::StorageWrite |
+                                        PixelFormatCaps::Mipmaps
+                                  : PixelFormatCaps::Sampled | PixelFormatCaps::StorageWrite;
         break;
     }
     if (desc.dimension == TextureDimension::Texture3D) {
@@ -209,9 +265,9 @@ uint64 TextureDataBytes(const TextureDesc& desc) noexcept {
 }
 
 Result<void> ValidateTextureDesc(const TextureDesc& desc) noexcept {
-    const bool usageKnown = desc.usage == TextureUsage::Sampled ||
-                            desc.usage == TextureUsage::RenderTarget ||
-                            desc.usage == TextureUsage::DepthStencil;
+    const bool usageKnown =
+        desc.usage == TextureUsage::Sampled || desc.usage == TextureUsage::RenderTarget ||
+        desc.usage == TextureUsage::DepthStencil || desc.usage == TextureUsage::Storage;
     if (!IsValidTextureDimension(desc.dimension) || !usageKnown ||
         !IsValidPixelFormat(desc.format) || desc.width == 0 || desc.height == 0 ||
         desc.depth == 0 || desc.arraySize == 0 || !IsValidSamplerDesc(desc.sampler) ||
@@ -225,7 +281,8 @@ Result<void> ValidateTextureDesc(const TextureDesc& desc) noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    const bool attachment = desc.usage != TextureUsage::Sampled;
+    const bool attachment =
+        desc.usage == TextureUsage::RenderTarget || desc.usage == TextureUsage::DepthStencil;
     if (desc.mipLevels == 0 || desc.mipLevels > TextureFullMipCount(desc) ||
         (attachment && desc.mipLevels != 1)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -236,6 +293,14 @@ Result<void> ValidateTextureDesc(const TextureDesc& desc) noexcept {
         info.kind == PixelFormatKind::Depth || info.kind == PixelFormatKind::DepthStencil;
     if ((desc.usage == TextureUsage::DepthStencil || desc.sampler.comparison) && !depth) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (desc.usage == TextureUsage::Storage && (depth || info.planeCount > 1)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (desc.usage == TextureUsage::Storage && IsCubeDimension(desc.dimension)) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
     if (desc.dimension != TextureDimension::Texture2D && (attachment || info.planeCount > 1)) {

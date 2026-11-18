@@ -127,6 +127,10 @@ Result<void> VulkanDevice::BeginRecording() noexcept {
         view = {};
     }
 
+    for (TextureHandle& view : boundWriteTextures_) {
+        view = {};
+    }
+
     descriptorsDirty_ = true;
     ResetTimestampSlots();
     return Result<void>::Success();
@@ -395,7 +399,7 @@ void VulkanDevice::SetTexture(TextureHandle handle) noexcept {
 
     TextureRecord* record = textures_.Find(handle.slot);
     SlotHandle slot = handle.slot;
-    if (record == nullptr || record->view == VK_NULL_HANDLE) {
+    if (record == nullptr || record->view == VK_NULL_HANDLE || record->writable) {
         record = textures_.Find(white_.slot);
         slot = white_.slot;
     }
@@ -408,6 +412,8 @@ void VulkanDevice::SetTexture(TextureHandle handle) noexcept {
     // 그리기가 쓴다(PrepareDescriptors).
     boundTexture_ = TextureHandle{slot};
     descriptorsDirty_ = true;
+    // view는 자기 mip·slice 범위만 전이한다(텍스처 GX2 A부).
+    const ResolvedSubresourceRange range = record->viewRange;
     if (record->isView) {
         slot = record->source;
         record = textures_.Find(slot);
@@ -421,15 +427,16 @@ void VulkanDevice::SetTexture(TextureHandle handle) noexcept {
     // (descriptor를 그 layout으로 썼다. D3D12는 PIXEL_SHADER_RESOURCE 비트만 본다). 패스 대상
     // 자신은 attachment라 바꾸지 않는다(샘플링할 수 없다).
     bool readable = true;
-    for (uint32 index = 0; index < record->current.Count(); ++index) {
-        readable = readable && HasAnyAccess(record->current[index], ResourceAccess::SrvGraphics) &&
-                   (record->current[index] & ~SrvAccessMask) == ResourceAccess::Unknown;
+    for (uint32 layer = range.firstSlice; layer < range.firstSlice + range.sliceCount; ++layer) {
+        for (uint32 mip = range.firstMip; mip < range.firstMip + range.mipCount; ++mip) {
+            const ResourceAccess state = record->current.At(mip, layer);
+            readable = readable && HasAnyAccess(state, ResourceAccess::SrvGraphics) &&
+                       (state & ~SrvAccessMask) == ResourceAccess::Unknown;
+        }
     }
 
     if (!readable && !IsPassAttachment(slot)) {
-        TrackTransition(*record, slot,
-                        ResolveSubresourceRange({}, record->mipLevels, record->slices),
-                        ResourceAccess::SrvGraphics, false);
+        TrackTransition(*record, slot, range, ResourceAccess::SrvGraphics, false);
         ResumeRenderPass();
     }
 }

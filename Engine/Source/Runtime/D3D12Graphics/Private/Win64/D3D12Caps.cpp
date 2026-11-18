@@ -164,6 +164,7 @@ DeviceCaps QueryDeviceCaps(ID3D12Device* device, IDXGIAdapter1* adapter,
     features.textureCubeArray = true;
     features.anisotropicPointFilter = options19Known && options19.AnisoFilterWithPointMipSupported;
     features.textureViewSwizzle = true;
+    features.textureViewRanges = true;
     features.srgbPairView = true;
     // VS UAV는 FL 11.1 이상이다(FL 11.0은 PS·CS만).
     features.vertexStores = featureLevel >= D3D_FEATURE_LEVEL_11_1;
