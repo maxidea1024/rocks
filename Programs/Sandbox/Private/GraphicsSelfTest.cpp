@@ -702,6 +702,10 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     // 확인한다(RunD3D11ValidationProbe).
     if ((info.backend == graphics::Backend::D3D12 || info.backend == graphics::Backend::Vulkan) &&
         info.validationEnabled) {
+        // 이 아래 검증 계층 메시지(D3D12 613, Vulkan render pass 호환성 VUID)는 의도한 것이다.
+        // 로그만 보고 실패로 오해하지 않도록 앞뒤를 표시한다.
+        printf("    -- begin intentional validation messages (RTV format mismatch probe) --\n");
+        fflush(stdout);
         const uint64 before = device.ValidationErrorCount();
         sample::Renderer mismatched;
         if (mismatched.Initialize(device, graphics::PixelFormat::RGBA8Unorm)) {
@@ -715,6 +719,8 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
             }
             mismatched.Shutdown();
         }
+        fflush(stderr);
+        printf("    -- end intentional validation messages --\n");
         Check(device.ValidationErrorCount() > before, name,
               "validation layer error is counted (intentional RTV format mismatch)");
     }
