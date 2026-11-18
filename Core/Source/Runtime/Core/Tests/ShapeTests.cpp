@@ -1,5 +1,6 @@
 #include <Core/Math/Shapes.h>
 #include <TestSupport/Test.h>
+#include <Platform/FloatingPointEnvironment.h>
 #include <Platform/PlatformMath.h>
 
 using namespace rocks;
@@ -568,8 +569,9 @@ TEST(MathDirectedFloatRoundingBracketsDoubleValues) {
     CHECK(math::ToFloatRoundedUp(1.0e300) == Infinity<float>());
     CHECK(math::ToFloatRoundedDown(-1.0e300) == -Infinity<float>());
     CHECK(math::ToFloatRoundedUp(-1.0e300) == NumericLimits<float>::Lowest());
-    CHECK(math::ToFloatRoundedDown(Infinity<double>()) == NumericLimits<float>::Max());
-    CHECK(math::ToFloatRoundedUp(-Infinity<double>()) == NumericLimits<float>::Lowest());
+    // 무한대는 float에서도 표현되므로 그대로다(가장 가까운 아래·위 값이 자기 자신).
+    CHECK(math::ToFloatRoundedDown(Infinity<double>()) == Infinity<float>());
+    CHECK(math::ToFloatRoundedUp(-Infinity<double>()) == -Infinity<float>());
     CHECK(math::IsNaN(math::ToFloatRoundedDown(QuietNaN<double>())));
 
     const Box<double> wide(Vec3d(0.1, -0.1, 1.0e10 + 0.5), Vec3d(0.3, 1.0 / 3.0, 1.0e10 + 1.5));
@@ -581,4 +583,70 @@ TEST(MathDirectedFloatRoundingBracketsDoubleValues) {
     CHECK(static_cast<double>(narrow.max.y) >= wide.max.y);
     CHECK(static_cast<double>(narrow.max.z) >= wide.max.z);
     CHECK(Box<double>(narrow).Contains(wide));
+}
+
+namespace {
+
+uint32 Bits(float value) noexcept {
+    return platform::BitCast<uint32>(value);
+}
+
+// 방향 반올림의 비정규·정규 경계 입력과 기대 비트다(아래, 위). 기대값은 IEEE 754 정의에서 손으로
+// 구한 것이다: 2^-149는 가장 작은 비정규 float(비트 1), 2^-126은 가장 작은 정규 float(비트
+// 0x00800000)다.
+struct DirectedCase {
+    double value;
+    uint32 down;
+    uint32 up;
+};
+
+const DirectedCase DirectedCases[] = {
+    {0x1.0p-149, 0x00000001u, 0x00000001u},
+    {0x1.0p-150, 0x00000000u, 0x00000001u},
+    {-0x1.0p-150, 0x80000001u, 0x80000000u},
+    {0x1.8p-149, 0x00000001u, 0x00000002u},
+    {0x1.0p-1074, 0x00000000u, 0x00000001u},
+    {-0x1.0p-1074, 0x80000001u, 0x80000000u},
+    {0x0.fffffep-126, 0x007fffffu, 0x007fffffu},
+    {0x0.ffffffp-126, 0x007fffffu, 0x00800000u},
+    {0x1.0p-126, 0x00800000u, 0x00800000u},
+    {-0x0.ffffffp-126, 0x80800000u, 0x807fffffu},
+    {0.0, 0x00000000u, 0x00000000u},
+    {-0.0, 0x80000000u, 0x80000000u},
+    {0x1.fffffep127, 0x7f7fffffu, 0x7f7fffffu},
+    {0x1.ffffffp127, 0x7f7fffffu, 0x7f800000u},
+    {-0x1.ffffffp127, 0xff800000u, 0xff7fffffu},
+};
+
+bool DirectedCasesMatch() noexcept {
+    bool same = true;
+    for (const DirectedCase& entry : DirectedCases) {
+        same = same && Bits(math::ToFloatRoundedDown(entry.value)) == entry.down &&
+               Bits(math::ToFloatRoundedUp(entry.value)) == entry.up;
+    }
+    // 비정규 값의 이웃(NextUp·NextDown)도 비트 연산이다.
+    same = same && Bits(math::NextDown(platform::BitCast<float>(0x00000001u))) == 0 &&
+           Bits(math::NextUp(platform::BitCast<float>(0x807fffffu))) == 0x807ffffeu &&
+           Bits(math::NextUp(platform::BitCast<float>(0x007fffffu))) == 0x00800000u;
+    return same;
+}
+
+} // namespace
+
+// 비정규 경계: 방향 반올림은 비정규 값까지 정확하다(정수 비트 연산).
+TEST(MathDirectedFloatRoundingSubnormalBoundaries) {
+    CHECK(DirectedCasesMatch());
+    static_assert(math::ToFloatRoundedUp(0x1.0p-150) > 0.0f,
+                  "Directed rounding must be usable in constant evaluation");
+}
+
+// FTZ·DAZ를 켜도 같은 비트를 낸다. 부동소수 비교가 비정규 입력을 0으로 보는 환경에서도 계약("항상
+// value 이하/이상")이 깨지지 않아야 공간 인덱스의 외향 보정이 성립한다.
+TEST(MathDirectedFloatRoundingIgnoresFlushToZero) {
+    const uint64 original = platform::detail::ReadFloatingPointControl();
+    platform::detail::WriteFloatingPointControl(original | platform::detail::FlushToZeroBit() |
+                                                platform::detail::DenormalsAreZeroBit());
+    const bool same = DirectedCasesMatch();
+    platform::detail::WriteFloatingPointControl(original);
+    CHECK(same);
 }
