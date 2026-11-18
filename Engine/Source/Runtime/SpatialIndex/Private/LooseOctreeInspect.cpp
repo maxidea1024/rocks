@@ -43,48 +43,6 @@ bool FloatAbove(float stored, double value) noexcept {
 
 // ---- LooseOctreeReader ----
 
-Result<BufferQueryOutcome>
-LooseOctreeReader::QueryBoxInto(const Box<double>& box, uint32 filterMask,
-                                Span<SpatialProxyHit> out) const noexcept {
-    if (!box.IsValid()) {
-        return Result<BufferQueryOutcome>::Failure(ErrorCode::InvalidArgument);
-    }
-    BufferQueryOutcome outcome;
-    const auto sink = [&](const SpatialProxyHit& hit) noexcept {
-        if (outcome.total < out.Size()) {
-            out[static_cast<usize>(outcome.total)] = hit;
-            ++outcome.written;
-        }
-        ++outcome.total;
-        return QueryControl::Continue;
-    };
-    tree_->VisitBox(box, filterMask, sink, nullptr);
-    outcome.truncated = outcome.total > out.Size();
-    return Result<BufferQueryOutcome>::Success(outcome);
-}
-
-Result<bool> LooseOctreeReader::AnyInBox(const Box<double>& box, uint32 filterMask) const noexcept {
-    if (!box.IsValid()) {
-        return Result<bool>::Failure(ErrorCode::InvalidArgument);
-    }
-    const auto sink = [](const SpatialProxyHit&) noexcept { return QueryControl::Stop; };
-    return Result<bool>::Success(tree_->VisitBox(box, filterMask, sink, nullptr).stopped);
-}
-
-Result<uint64> LooseOctreeReader::CountInBox(const Box<double>& box,
-                                             uint32 filterMask) const noexcept {
-    if (!box.IsValid()) {
-        return Result<uint64>::Failure(ErrorCode::InvalidArgument);
-    }
-    uint64 count = 0;
-    const auto sink = [&](const SpatialProxyHit&) noexcept {
-        ++count;
-        return QueryControl::Continue;
-    };
-    tree_->VisitBox(box, filterMask, sink, nullptr);
-    return Result<uint64>::Success(count);
-}
-
 bool LooseOctreeReader::IsValid(SpatialProxyHandle handle) const noexcept {
     return tree_->IsValidHandle(handle);
 }

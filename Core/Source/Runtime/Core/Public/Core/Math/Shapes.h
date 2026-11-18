@@ -660,4 +660,80 @@ struct OrientedBox {
     }
 };
 
+// ConvexVolume이 담을 수 있는 평면 수의 상한이다. 뷰 프러스텀(6)과 그림자 caster volume(광원
+// 프러스텀에 돌출 면을 더해도 십여 개)을 넉넉히 덮는다. 고정 용량이라 heap을 쓰지 않는다.
+inline constexpr uint32 ConvexVolumeMaxPlanes = 32;
+
+// 평면들의 교집합인 닫힌 볼록 영역이다(UE FConvexVolume 대응). 각 평면의 normal은 영역 **안쪽**을
+// 향한다: 점 p는 모든 평면에서 SignedDistance(p) >= 0일 때 영역 안이다(경계 포함). 평면 수는
+// [1, ConvexVolumeMaxPlanes]이며 평면 사이의 관계(실제로 닫힌 영역인지, 비어 있는지)는 검사하지
+// 않는다. 열린 영역(평면 하나 등)도 유효하다. 판정은 Intersection.h의
+// ClassifyContainment·Overlap이다. 평면 normal은 길이 오차 ShapeUnitTolerance(1e-5)까지 단위로
+// 받아들이므로 SignedDistance는 정확한 거리가 아니라 normal 길이 비율만큼 다른 근사 거리다. 영역
+// 자체(SignedDistance >= 0인 반공간들의 교집합)는 그대로 정의되므로 안·밖 판정에는 영향이 없고,
+// sphere 판정처럼 거리를 반지름과 비교하는 곳에서는 반지름의 약 1e-5 비율만큼 경계가 달라질 수
+// 있다. 정확한 거리가 필요하면 Plane::TryMake로 정규화한 평면을 쓴다.
+//
+// 좌표계와 무관하다. 안쪽 normal 규약만 지키면 왼손(UE)·오른손 어느 좌표에서 만든 평면이든 같은
+// 뜻이다. 프러스텀을 만들 때 평면을 바깥쪽 normal로 얻었다면 Plane::Flipped()로 뒤집어 넣는다.
+//
+// 사용 예:
+//   const Plane<double> planes[] = {near, far, left, right, top, bottom};   // 안쪽 normal
+//   Result<ConvexVolume<double>> frustum = ConvexVolume<double>::TryMake(planes);
+//   if (frustum && Overlap(frustum.Value(), bounds) == QueryResult::Hit) { ... }
+template <typename T>
+struct ConvexVolume {
+    static_assert(math::IsFloatingPointV<T>, "ConvexVolume supports float and double");
+
+    Plane<T> planes[ConvexVolumeMaxPlanes];
+    // 유효한 평면 수다. 기본값 0은 평면이 없는 잘못된 값이다(IsValid false).
+    uint32 planeCount = 0;
+
+    constexpr ConvexVolume() noexcept = default;
+
+    template <typename U>
+        requires(math::IsFloatingPointV<U> && !IsSameV<U, T>)
+    explicit constexpr ConvexVolume(const ConvexVolume<U>& other) noexcept
+        : planeCount(other.planeCount) {
+        for (uint32 index = 0; index < ConvexVolumeMaxPlanes; ++index) {
+            planes[index] = Plane<T>(other.planes[index]);
+        }
+    }
+
+    // 평면들을 복사해 만든다. 실패(InvalidArgument): 평면이 없거나 ConvexVolumeMaxPlanes보다 많음,
+    // 어느 평면이든 IsValid가 아님(비유한 값, 단위가 아닌 normal).
+    static Result<ConvexVolume> TryMake(Span<const Plane<T>> source) noexcept {
+        if (source.Size() == 0 || source.Size() > ConvexVolumeMaxPlanes) {
+            return Result<ConvexVolume>::Failure(ErrorCode::InvalidArgument);
+        }
+        ConvexVolume volume;
+        for (usize index = 0; index < source.Size(); ++index) {
+            if (!source[index].IsValid()) {
+                return Result<ConvexVolume>::Failure(ErrorCode::InvalidArgument);
+            }
+            volume.planes[index] = source[index];
+        }
+        volume.planeCount = static_cast<uint32>(source.Size());
+        return Result<ConvexVolume>::Success(volume);
+    }
+
+    // 평면 수가 [1, ConvexVolumeMaxPlanes]이고 모든 평면이 유효하면 true다.
+    constexpr bool IsValid() const noexcept {
+        if (planeCount == 0 || planeCount > ConvexVolumeMaxPlanes) {
+            return false;
+        }
+        for (uint32 index = 0; index < planeCount; ++index) {
+            if (!planes[index].IsValid()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // 유효한 평면들이다. 이 값보다 오래 쓰지 않는다.
+    Span<const Plane<T>> Planes() const noexcept {
+        return Span<const Plane<T>>(planes, planeCount > ConvexVolumeMaxPlanes ? 0 : planeCount);
+    }
+};
+
 } // namespace rocks

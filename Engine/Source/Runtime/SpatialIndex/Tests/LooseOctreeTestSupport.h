@@ -2,7 +2,9 @@
 
 #include <Core/Containers/Array.h>
 #include <Core/Math/RandomStream.h>
+#include <Core/Math/Intersection.h>
 #include <Core/Memory/Allocator.h>
+#include <Platform/PlatformMath.h>
 #include <SpatialIndex/LooseOctree.h>
 #include <TestSupport/Test.h>
 
@@ -391,5 +393,359 @@ inline double ToleranceFor(const LooseOctree& tree, const LooseOctreeConfig& con
     }
     return half * 0x1.0p-20 + config.minCellSize * 0x1.0p-20;
 }
+
+// ---- 구·볼록 영역·ray 질의(OT3) ----
+
+enum class ShapeKind : uint8 {
+    Box,
+    Sphere,
+    Volume,
+    Ray
+};
+
+// 시험 질의 하나다. kind에 맞는 필드만 쓴다.
+struct ShapeQuery {
+    ShapeKind kind = ShapeKind::Box;
+    Box<double> box;
+    Sphere<double> sphere;
+    ConvexVolume<double> volume;
+    Ray<double> ray;
+    double maxDistance = 0.0;
+};
+
+// 정답 술어다. 구·볼록 영역·ray는 Core 술어(Overlap·Raycast)를 정확한 double AABB에 그대로 쓴다
+// (6.8절: 프러스텀은 "어느 평면에 대해서도 엄격히 바깥이 아닌 AABB").
+inline bool ExactHit(const ShapeQuery& query, const Box<double>& bounds) noexcept {
+    switch (query.kind) {
+    case ShapeKind::Box:
+        return BoxesOverlap(query.box, bounds);
+    case ShapeKind::Sphere:
+        return Overlap(query.sphere, bounds) == QueryResult::Hit;
+    case ShapeKind::Volume:
+        return Overlap(query.volume, bounds) == QueryResult::Hit;
+    case ShapeKind::Ray:
+        return Raycast(query.ray, bounds, query.maxDistance).IsHit();
+    }
+    return false;
+}
+
+template <typename Visitor>
+Result<QueryOutcome> RunShape(const LooseOctreeReader& reader, const ShapeQuery& query, uint32 mask,
+                              Visitor&& visitor) noexcept {
+    switch (query.kind) {
+    case ShapeKind::Box:
+        return reader.QueryBox(query.box, mask, visitor);
+    case ShapeKind::Sphere:
+        return reader.QuerySphere(query.sphere, mask, visitor);
+    case ShapeKind::Volume:
+        return reader.QueryFrustum(query.volume, mask, visitor);
+    case ShapeKind::Ray:
+        break;
+    }
+    return reader.QueryRay(query.ray, query.maxDistance, mask, visitor);
+}
+
+inline Result<uint64> CountShape(const LooseOctreeReader& reader, const ShapeQuery& query,
+                                 uint32 mask) noexcept {
+    switch (query.kind) {
+    case ShapeKind::Box:
+        return reader.CountInBox(query.box, mask);
+    case ShapeKind::Sphere:
+        return reader.CountInSphere(query.sphere, mask);
+    case ShapeKind::Volume:
+        return reader.CountInFrustum(query.volume, mask);
+    case ShapeKind::Ray:
+        break;
+    }
+    return reader.CountOnRay(query.ray, query.maxDistance, mask);
+}
+
+inline Result<bool> AnyShape(const LooseOctreeReader& reader, const ShapeQuery& query,
+                             uint32 mask) noexcept {
+    switch (query.kind) {
+    case ShapeKind::Box:
+        return reader.AnyInBox(query.box, mask);
+    case ShapeKind::Sphere:
+        return reader.AnyInSphere(query.sphere, mask);
+    case ShapeKind::Volume:
+        return reader.AnyInFrustum(query.volume, mask);
+    case ShapeKind::Ray:
+        break;
+    }
+    return reader.AnyOnRay(query.ray, query.maxDistance, mask);
+}
+
+inline Result<BufferQueryOutcome> IntoShape(const LooseOctreeReader& reader,
+                                            const ShapeQuery& query, uint32 mask,
+                                            Span<SpatialProxyHit> out) noexcept {
+    switch (query.kind) {
+    case ShapeKind::Box:
+        return reader.QueryBoxInto(query.box, mask, out);
+    case ShapeKind::Sphere:
+        return reader.QuerySphereInto(query.sphere, mask, out);
+    case ShapeKind::Volume:
+        return reader.QueryFrustumInto(query.volume, mask, out);
+    case ShapeKind::Ray:
+        break;
+    }
+    return reader.QueryRayInto(query.ray, query.maxDistance, mask, out);
+}
+
+// 형상 질의를 전수 검색과 대조한다. 누락 0건·중복 0건이고 handle·필터가 모형과 같아야 한다. 박스는
+// boxTolerance 폭의 초과 후보를 허용하고(float 상대 경계), 구·볼록 영역·ray는 초과 후보가 없어야
+// 한다(정답과 같은 Core 술어). Into·Any·Count도 같은 후보 수를 세는지 본다.
+inline QueryCheck CheckShapeQuery(const LooseOctreeReader& reader,
+                                  const Array<OracleProxy>& proxies, const ShapeQuery& query,
+                                  uint32 mask, double boxTolerance, Allocator& allocator) noexcept {
+    QueryCheck check;
+    Array<uint8> seen(allocator);
+    if (!seen.TryResize(proxies.Size())) {
+        check.ok = false;
+        return check;
+    }
+    auto queried = RunShape(reader, query, mask, [&](const SpatialProxyHit& hit) noexcept {
+        ++check.results;
+        const uint64 index = hit.userValue;
+        if (index >= proxies.Size() || seen[index] != 0) {
+            check.ok = false;
+            return QueryControl::Continue;
+        }
+        seen[index] = 1;
+        const OracleProxy& proxy = proxies[index];
+        if (!proxy.live || !(proxy.handle == hit.handle) || proxy.filter != hit.filterMask ||
+            (proxy.filter & mask) == 0) {
+            check.ok = false;
+        }
+        return QueryControl::Continue;
+    });
+    if (!queried || queried.Value().stopped || queried.Value().visited != check.results) {
+        check.ok = false;
+        return check;
+    }
+    const Box<double> widened = query.box.ExpandedBy(Vec3d::Splat(boxTolerance));
+    for (usize index = 0; index < proxies.Size(); ++index) {
+        const OracleProxy& proxy = proxies[index];
+        const bool exact =
+            proxy.live && (proxy.filter & mask) != 0 && ExactHit(query, proxy.bounds);
+        if (exact) {
+            ++check.exact;
+            if (seen[index] == 0) {
+                check.ok = false;
+            }
+        } else if (seen[index] != 0) {
+            ++check.extra;
+            if (query.kind != ShapeKind::Box || !BoxesOverlap(proxy.bounds, widened)) {
+                check.ok = false;
+            }
+        }
+    }
+    auto counted = CountShape(reader, query, mask);
+    auto any = AnyShape(reader, query, mask);
+    if (!counted || counted.Value() != check.results || !any ||
+        any.Value() != (check.results != 0)) {
+        check.ok = false;
+    }
+    SpatialProxyHit buffer[4];
+    auto into = IntoShape(reader, query, mask, Span<SpatialProxyHit>(buffer, 4));
+    if (!into || into.Value().total != check.results ||
+        into.Value().written != (check.results < 4 ? check.results : 4) ||
+        into.Value().truncated != (check.results > 4)) {
+        check.ok = false;
+    }
+    return check;
+}
+
+inline Vec3d RandomUnitVector(RandomStream& random) noexcept {
+    for (;;) {
+        const Vec3d candidate(Uniform(random, -1, 1), Uniform(random, -1, 1),
+                              Uniform(random, -1, 1));
+        const double lengthSquared = candidate.LengthSquared();
+        if (lengthSquared > 1.0e-4 && lengthSquared <= 1.0) {
+            auto unit = candidate.TryNormalize();
+            if (unit) {
+                return unit.Value();
+            }
+        }
+    }
+}
+
+// 무작위 질의 형상이다. extent는 분포의 대표 크기(cm)이고 center는 질의가 모이는 곳이다.
+inline ShapeQuery MakeShapeQuery(ShapeKind kind, RandomStream& random, double extent,
+                                 const Vec3d& center = Vec3d(0, 0, 0)) noexcept {
+    ShapeQuery query;
+    query.kind = kind;
+    const Vec3d focus = center + Vec3d(Uniform(random, -extent * 1.2, extent * 1.2),
+                                       Uniform(random, -extent * 1.2, extent * 1.2),
+                                       Uniform(random, -extent * 1.2, extent * 1.2));
+    const uint32 scale = random.NextUInt32Below(3);
+    const double size = scale == 0   ? Uniform(random, 0.0, extent / 50.0)
+                        : scale == 1 ? Uniform(random, 0.0, extent / 4.0)
+                                     : Uniform(random, extent / 2.0, extent * 3.0);
+    switch (kind) {
+    case ShapeKind::Box: {
+        const Vec3d half(size, size * Uniform(random, 0.2, 1.0), size * Uniform(random, 0.2, 1.0));
+        query.box = Box<double>(focus - half, focus + half);
+        break;
+    }
+    case ShapeKind::Sphere:
+        query.sphere = Sphere<double>(focus, size);
+        break;
+    case ShapeKind::Volume: {
+        // focus를 안쪽에 두는 평면 4–8개(안쪽 normal, focus에서 평면까지 거리 r_i).
+        const uint32 count = 4 + random.NextUInt32Below(5);
+        Plane<double> planes[8];
+        for (uint32 index = 0; index < count; ++index) {
+            const Vec3d normal = RandomUnitVector(random);
+            const double margin = Uniform(random, 0.0, size + extent / 100.0);
+            planes[index] = Plane<double>(normal, Dot(normal, focus) - margin);
+        }
+        auto volume = ConvexVolume<double>::TryMake(Span<const Plane<double>>(planes, count));
+        if (volume) {
+            query.volume = volume.Value();
+        }
+        break;
+    }
+    case ShapeKind::Ray: {
+        auto ray = Ray<double>::TryMake(focus, RandomUnitVector(random));
+        if (ray) {
+            query.ray = ray.Value();
+        }
+        query.maxDistance = random.NextUInt32Below(4) == 0
+                                ? platform::PlatformMath::Infinity<double>()
+                                : Uniform(random, 0.0, extent * 3.0);
+        break;
+    }
+    }
+    return query;
+}
+
+// 경계 사례 질의 형상이다. 살아 있는 프록시 하나를 골라 그 꼭짓점·면에 정확히 닿게 만든다.
+// - 볼록 영역: 축 평행 normal의 두께 0 slab(마주 보는 두 평면이 같은 좌표), 빈 slab(평면 사이가
+//   뒤집힘), 프록시 꼭짓점을 지나는 임의 평면.
+// - ray: 축 평행 방향(−0 성분 포함)으로 프록시 면 위를 스치는 ray, maxDistance = 정확히 그 프록시의
+//   진입 거리.
+// - sphere: 중심이 프록시 꼭짓점이고 반지름 0, 또는 면에서 축 방향으로 정확히 반지름만큼 떨어진
+// 중심.
+// - box: 프록시 면에 면으로 닿는 box.
+// 살아 있는 프록시가 없으면 일반 생성기로 대신한다.
+inline ShapeQuery MakeEdgeShapeQuery(ShapeKind kind, RandomStream& random, double extent,
+                                     const Array<OracleProxy>& proxies) noexcept {
+    usize live = 0;
+    for (const OracleProxy& proxy : proxies) {
+        live += proxy.live ? 1 : 0;
+    }
+    if (live == 0) {
+        return MakeShapeQuery(kind, random, extent);
+    }
+    usize pick = random.NextUInt32Below(static_cast<uint32>(proxies.Size()));
+    while (!proxies[pick].live) {
+        pick = (pick + 1) % proxies.Size();
+    }
+    const Box<double> target = proxies[pick].bounds;
+    const uint32 axisIndex = random.NextUInt32Below(3);
+    const auto axisVector = [](uint32 index, double sign) noexcept {
+        // 다른 성분은 −0으로 둔다(−0 성분도 유효한 단위 벡터다).
+        return Vec3d(index == 0 ? sign : -0.0, index == 1 ? sign : -0.0, index == 2 ? sign : -0.0);
+    };
+    const double faceLow = target.min[axisIndex];
+    const double faceHigh = target.max[axisIndex];
+    ShapeQuery query;
+    query.kind = kind;
+    switch (kind) {
+    case ShapeKind::Box: {
+        Vec3d minimum = target.max;
+        Vec3d maximum = target.max + Vec3d::Splat(Uniform(random, 0, extent / 10.0));
+        if (axisIndex == 0) {
+            minimum.y = target.min.y;
+            minimum.z = target.min.z;
+        }
+        query.box = Box<double>(minimum, maximum);
+        break;
+    }
+    case ShapeKind::Sphere: {
+        if (random.NextUInt32Below(2) == 0) {
+            query.sphere = Sphere<double>(target.min, 0.0);
+        } else {
+            const double radius = static_cast<double>(1 + random.NextUInt32Below(8));
+            Vec3d center = target.Center();
+            if (axisIndex == 0) {
+                center.x = faceHigh + radius;
+            } else if (axisIndex == 1) {
+                center.y = faceHigh + radius;
+            } else {
+                center.z = faceHigh + radius;
+            }
+            query.sphere = Sphere<double>(center, radius);
+        }
+        break;
+    }
+    case ShapeKind::Volume: {
+        const uint32 variant = random.NextUInt32Below(3);
+        Plane<double> planes[2];
+        uint32 count = 2;
+        if (variant == 0) {
+            // 두께 0 slab: 프록시 면 좌표에서 마주 보는 두 평면.
+            planes[0] = Plane<double>(axisVector(axisIndex, 1.0), faceLow);
+            planes[1] = Plane<double>(axisVector(axisIndex, -1.0), -faceLow);
+        } else if (variant == 1) {
+            // 빈 slab: 앞 평면이 뒤 평면보다 앞에 있다(술어는 평면별이라 걸친 box는 여전히 후보다).
+            planes[0] = Plane<double>(axisVector(axisIndex, 1.0), faceHigh);
+            planes[1] = Plane<double>(axisVector(axisIndex, -1.0), -faceLow);
+        } else {
+            // 프록시 꼭짓점을 지나는 임의 평면 하나.
+            const Vec3d normal = RandomUnitVector(random);
+            planes[0] = Plane<double>(normal, Dot(normal, target.max));
+            count = 1;
+        }
+        auto volume = ConvexVolume<double>::TryMake(Span<const Plane<double>>(planes, count));
+        if (volume) {
+            query.volume = volume.Value();
+        }
+        break;
+    }
+    case ShapeKind::Ray: {
+        // 프록시 면(axisIndex 축의 min 면) 위에서 다른 축 방향으로 스치는 ray, 또는 축 방향으로
+        // 들어가 maxDistance가 정확히 진입 거리인 ray.
+        const uint32 along = (axisIndex + 1) % 3;
+        Vec3d origin = target.Center();
+        if (random.NextUInt32Below(2) == 0) {
+            if (axisIndex == 0) {
+                origin.x = faceLow;
+            } else if (axisIndex == 1) {
+                origin.y = faceLow;
+            } else {
+                origin.z = faceLow;
+            }
+            const double back = target.max[along] - target.min[along] + 5.0;
+            if (along == 0) {
+                origin.x -= back;
+            } else if (along == 1) {
+                origin.y -= back;
+            } else {
+                origin.z -= back;
+            }
+            query.ray = Ray<double>(origin, axisVector(along, 1.0));
+            query.maxDistance = platform::PlatformMath::Infinity<double>();
+        } else {
+            const double back = Uniform(random, 1.0, extent / 4.0);
+            if (axisIndex == 0) {
+                origin.x = faceLow - back;
+            } else if (axisIndex == 1) {
+                origin.y = faceLow - back;
+            } else {
+                origin.z = faceLow - back;
+            }
+            query.ray = Ray<double>(origin, axisVector(axisIndex, 1.0));
+            query.maxDistance =
+                Raycast(query.ray, target, platform::PlatformMath::Infinity<double>()).distance;
+        }
+        break;
+    }
+    }
+    return query;
+}
+
+inline constexpr ShapeKind AllShapeKinds[] = {ShapeKind::Box, ShapeKind::Sphere, ShapeKind::Volume,
+                                              ShapeKind::Ray};
 
 } // namespace rocks::spatial::oracle

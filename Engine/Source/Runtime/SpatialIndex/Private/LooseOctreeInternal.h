@@ -11,6 +11,14 @@ namespace rocks::spatial {
 
 inline constexpr LogCategory LogSpatialIndex{"SpatialIndex"};
 
+// 프로세스 전역에서 한 번도 쓰지 않은 변경 세대를 돌려준다(1부터 늘어난다). 트리마다 세대를 따로
+// 세면 이동 대입이나 같은 주소에 다시 만든 트리가 우연히 같은 세대를 가져 다른 트리에서 모은 노드
+// 묶음을 받아들일 수 있다. 전역 단조 계수는 생성·이동·대입·변경마다 새 값을 주므로
+// SpatialNodeBatch의 (트리 주소, 세대) 쌍이 다른 트리 상태와 겹치지 않는다. 값이 겹치지 않기만 하면
+// 되고 다른 메모리와의 순서는 필요 없으므로(묶음의 발행·소비 순서는 읽기 범위의 atomic이 맡는다)
+// relaxed 증가로 충분하다.
+uint64 NextMutationEpoch() noexcept;
+
 // 옥트리가 받은 allocator를 감싸 내부 컨테이너의 할당·해제 횟수와 살아 있는·피크 byte를
 // 센다(6.10절). 해제는 주소만 받으므로 크기를 알 수 없어, 할당마다 사용자 영역 앞에 머리 정보(요청
 // 크기, 머리 크기)를 둔다. 머리 크기는 max(정렬, 16)이라 사용자 영역의 정렬이 지켜진다. 0 byte
@@ -104,6 +112,8 @@ public:
         if (platform::AtomicLoad(&tree.readers_) != 0) {
             platform::Fatal("LooseOctree mutation while a read scope is open");
         }
+        // 이전 읽기 단계에서 모은 노드 묶음을 낡은 것으로 만든다.
+        tree.mutationEpoch_ = NextMutationEpoch();
     }
 
     // 변경이 끝날 때마다 배열별 예약 용량 피크를 갱신한다.
