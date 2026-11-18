@@ -337,6 +337,17 @@ Log::Info(LogNet, "Request accepted");
 - 엔진 호스트는 `platform::InstallCrashHandler()`(`Platform/CrashHandler.h`)로 접근 위반·stack overflow(Windows unhandled exception filter)와 치명 신호(POSIX)에서도 같은 hook을 부르게 할 수 있다. 처리기는 flush만 하고 앞 처리기로 넘긴다. stack overflow 대비로 hook은 미리 만든 flush 전용 스레드에서 돈다. `platform::Thread`로 만든 스레드는 처리기용 여유 stack(32 KiB)을 시작 때 확보한다.
 - 비정상 종료한 봉인 파일에는 끝 표시가 없다(`log decode`가 비정상 종료로 알린다).
 
+## 로그 파일 보기(`log view`)
+
+```
+RocksCommandlet log view Saved/Logs --level warning --category Graphics
+RocksCommandlet log view game.log --key dev.key --correlation request=55
+```
+
+- 파일 하나나 폴더(`*.log`, 시작 시각·번호 순)를 읽는다. `--key`면 봉인 파일을 푼다.
+- 거르기: `--level`(최소), `--category`(점 접두사, 대소문자 무시), `--event`(16진), `--since`·`--until`(UTC ISO 8601 사전순), `--grep`, `--correlation <칸>=<id>`.
+- JSON lines 파일은 모든 필드로 거른다. 기본 레이아웃 텍스트는 시각·레벨·카테고리로, 다른 레이아웃 텍스트는 `--grep`만 된다. 분석이 목적이면 `log.file.format = jsonlines`를 권한다.
+
 ## 시험에서 쓰기
 
 - `LogMode::Manual` LogSystem과 캡처 sink를 시험 안에서 `LogInstallScope`로 설치한다. 기록한 뒤 `Pump()`를 부르고 단언한다. sleep을 쓰지 않는다.
