@@ -23,14 +23,14 @@ namespace rocks {
 // - 색인은 [0, SlotCount())이며 MaxElements 미만이다. 생성자의 maxElements로 상한을 더 낮출 수 있다
 //   (예: 색인 × 8 + 1이 uint32에 들어가야 하는 노드 블록). 상한을 넘는 확보는 Overflow다.
 // - 확보(TryReserveAdditional) 뒤의 AllocateReserved와 Free는 할당하지 않으므로 실패하지 않는다.
-// 여러
-//   저장소를 함께 바꾸는 caller는 필요한 수를 모두 먼저 확보한 뒤 바꿔 실패 시 상태를 보존한다.
+//   여러 저장소를 함께 바꾸는 caller는 필요한 수를 모두 먼저 확보한 뒤 바꿔 실패 시 상태를
+//   보존한다.
 // - 원소 참조·포인터는 저장소가 커지면(확보·TryAllocate) 무효다. 색인은 Free·Clear 전까지 유효하다.
 // - operator[]는 범위만 검사하고 살아 있는지는 검사하지 않는다(검색 경로 비용). 반환한 색인에 다시
 //   접근하는 것은 caller의 계약 위반이며, 살아 있는지 확인이 필요하면 IsLive를 쓴다.
 // - 제거해도 저장소를 줄이지 않는다. TryShrink만 용량을 사용 높이(SlotCount)에 맞춘다.
-// - 이동하면 원소·색인·재사용 목록이 대상으로 옮겨 가고 원본은 비어 같은 allocator로 다시 쓸 수
-// 있다.
+// - 이동하면 원소·색인·재사용 목록이 대상으로 옮겨 간다. 원본은 비며 같은 allocator로 다시 쓸 수
+//   있다.
 // - 동시 접근의 동기화는 caller 책임이다. 읽기만 하는 여러 스레드는 동시에 operator[] const를 써도
 //   된다.
 //
@@ -129,7 +129,7 @@ public:
 
     // 다음 count번의 AllocateReserved가 할당 없이 성공하도록 저장소를 확보한다. 이미 충분하면
     // 아무것도 하지 않고, 모자라면 Array와 같은 기하 성장 규칙으로 늘린다. 오류: 원소 수가
-    // maxElements를 넘게 되면 Overflow, 할당 실패는 allocator 오류다. 실패하면 원소· 색인·재사용
+    // maxElements를 넘게 되면 Overflow, 할당 실패는 allocator 오류다. 실패하면 원소·색인·재사용
     // 목록은 그대로다(일부 내부 배열의 용량만 늘어 있을 수 있다).
     Result<void> TryReserveAdditional(uint32 count) noexcept {
         if (count <= freeCount_) {
