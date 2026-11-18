@@ -205,6 +205,7 @@ Result<BufferViewHandle> D3D12Device::CreateBufferView(BufferHandle handle,
     }
 
     const d3d12::FormatMapping mapping = d3d12::MappingOf(desc.format);
+    int64 cpuDescriptor = -1;
     const UINT64 first = range.offset / range.elementBytes;
     const UINT count = static_cast<UINT>(range.elementCount);
     if (desc.access == ViewAccess::Read) {
@@ -240,12 +241,31 @@ Result<BufferViewHandle> D3D12Device::CreateBufferView(BufferHandle handle,
 
         device_->CreateUnorderedAccessView(buffer->resource.Get(), nullptr, &view,
                                            srvs_.Cpu(descriptor.Value()));
+        // ClearWritableBufferView가 받는 view(raw, R32Uint·R32Sint typed)는 CPU 전용 칸에도
+        // 같은 UAV를 둔다(ClearUnorderedAccessViewUint가 shader-visible이 아닌 칸을 요구한다).
+        const bool clearable =
+            desc.kind == BufferViewKind::Raw ||
+            (desc.kind == BufferViewKind::Typed &&
+             (desc.format == PixelFormat::R32Uint || desc.format == PixelFormat::R32Sint));
+        if (clearable) {
+            auto cpu = cpuUavs_.Allocate();
+            if (!cpu) {
+                srvs_.Free(descriptor.Value());
+                return FailWith<BufferViewHandle>("CPU UAV descriptor heap is full");
+            }
+
+            cpuDescriptor = cpu.Value();
+            device_->CreateUnorderedAccessView(buffer->resource.Get(), nullptr, &view,
+                                               cpuUavs_.Cpu(cpu.Value()));
+        }
     }
 
     BufferViewRecord record;
     buffer->resource->AddRef();
     record.resource.Attach(buffer->resource.Get());
     record.descriptor = descriptor.Value();
+    record.cpuDescriptor = cpuDescriptor;
+    record.format = desc.format;
     record.kind = desc.kind;
     record.access = desc.access;
     record.stride = desc.kind == BufferViewKind::Structured ? range.elementBytes : 0u;
@@ -255,6 +275,9 @@ Result<BufferViewHandle> D3D12Device::CreateBufferView(BufferHandle handle,
     auto added = bufferViews_.TryAdd(Move(record));
     if (!added) {
         srvs_.Free(descriptor.Value());
+        if (cpuDescriptor >= 0) {
+            cpuUavs_.Free(static_cast<uint32>(cpuDescriptor));
+        }
         return Result<BufferViewHandle>::Failure(added.Error());
     }
 
@@ -549,6 +572,10 @@ void D3D12Device::Retire(BufferViewHandle handle) noexcept {
         return;
     }
 
+    // CPU 전용 UAV 칸은 ClearUnorderedAccessViewUint 기록 때만 읽히므로 바로 놓는다.
+    if (record->cpuDescriptor >= 0) {
+        cpuUavs_.Free(static_cast<uint32>(record->cpuDescriptor));
+    }
     Defer(Move(record->resource), record->descriptor, -1);
     auto removed = bufferViews_.TryRemove(handle.slot);
     (void)removed;

@@ -66,6 +66,8 @@ struct GlesFeatures {
     bool srgbWriteControl = false;
     // 깊이 clamp(GL_EXT_depth_clamp, UE OpenGLES.cpp:185와 같은 판정)다.
     bool depthClamp = false;
+    // 깊이 bias 상한(GL_EXT_polygon_offset_clamp, glPolygonOffsetClampEXT)이다.
+    bool polygonOffsetClamp = false;
 
     bool Has(GlesFeature feature) const noexcept;
 };

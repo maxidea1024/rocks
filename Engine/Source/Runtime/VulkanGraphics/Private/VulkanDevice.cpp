@@ -107,7 +107,7 @@ VulkanDevice::VulkanDevice(Allocator& allocator) noexcept
     : allocator_(allocator), adapterName_(allocator), lastError_(allocator), memory_(allocator),
       buffers_(allocator), textures_(allocator), pipelines_(allocator), swapChains_(allocator),
       readbacks_(allocator), bufferViews_(allocator), orphanBuffers_(allocator),
-      retired_(allocator), renderPasses_(allocator),
+      retired_(allocator), renderPasses_(allocator), framebuffers_(allocator),
       timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics), touchedTextures_(allocator),
       acquireSemaphores_(allocator), orphanSemaphores_(allocator), ring_(allocator),
       stagingBlocks_(allocator), timestamps_(allocator) {
@@ -166,12 +166,17 @@ VulkanDevice::~VulkanDevice() {
         }
 
         swapChains_.Clear();
+        for (FramebufferEntry& entry : framebuffers_) {
+            functions_.vkDestroyFramebuffer(device_, entry.framebuffer, nullptr);
+        }
+
+        framebuffers_.Clear();
         for (TextureRecord& record : textures_) {
-            if (record.framebuffer != VK_NULL_HANDLE) {
-                functions_.vkDestroyFramebuffer(device_, record.framebuffer, nullptr);
+            functions_.vkDestroyImageView(device_, record.view, nullptr);
+            if (record.attachmentView != VK_NULL_HANDLE) {
+                functions_.vkDestroyImageView(device_, record.attachmentView, nullptr);
             }
 
-            functions_.vkDestroyImageView(device_, record.view, nullptr);
             // view는 원 텍스처의 이미지를 공유하므로 원 기록만 이미지·메모리를 놓는다.
             if (!record.isView) {
                 functions_.vkDestroyImage(device_, record.image, nullptr);
@@ -639,6 +644,8 @@ Result<void> VulkanDevice::CreateLogicalDevice() noexcept {
     features.depthClamp = supported.depthClamp;
     // viewport 여럿(VS viewport 출력, DeviceLimits::viewports)이다.
     features.multiViewport = supported.multiViewport;
+    features.depthBiasClamp = supported.depthBiasClamp;
+    features.independentBlend = supported.independentBlend;
     features.multiDrawIndirect = supported.multiDrawIndirect;
     features.drawIndirectFirstInstance = supported.drawIndirectFirstInstance;
     features.imageCubeArray = supported.imageCubeArray;

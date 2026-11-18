@@ -322,59 +322,6 @@ Result<void> D3D11Device::CreateOnAdapter(IDXGIAdapter1* adapter, bool requestDe
 }
 
 Result<void> D3D11Device::CreateSharedStates() noexcept {
-    // 앞면은 화면 반시계다(UE D3D11State.cpp:211, ShaderSystem 7.2절 8항, D3D12와 같다). 컬
-    // 모드마다 상태 하나를 만든다. 깊이는 아직 PipelineDesc에 없다(쓰지 않는다).
-    constexpr CullMode Modes[CullModeCount] = {CullMode::None, CullMode::Back, CullMode::Front};
-    HRESULT result = S_OK;
-    for (CullMode mode : Modes) {
-        D3D11_RASTERIZER_DESC raster = {};
-        raster.FillMode = D3D11_FILL_SOLID;
-        raster.CullMode = RasterCullMode(mode);
-        raster.FrontCounterClockwise = TRUE;
-        raster.DepthClipEnable = TRUE;
-        result =
-            device_->CreateRasterizerState(&raster, rasterizers_[static_cast<usize>(mode)].Out());
-        if (FAILED(result)) {
-            return Fail("CreateRasterizerState", result);
-        }
-    }
-
-    D3D11_DEPTH_STENCIL_DESC depth = {};
-    depth.DepthEnable = FALSE;
-    depth.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
-    depth.DepthFunc = D3D11_COMPARISON_ALWAYS;
-    depth.StencilEnable = FALSE;
-    result = device_->CreateDepthStencilState(&depth, depthDisabled_.Out());
-    if (FAILED(result)) {
-        return Fail("CreateDepthStencilState", result);
-    }
-
-    D3D11_BLEND_DESC blend = {};
-    D3D11_RENDER_TARGET_BLEND_DESC& target = blend.RenderTarget[0];
-    target.BlendEnable = FALSE;
-    target.SrcBlend = D3D11_BLEND_ONE;
-    target.DestBlend = D3D11_BLEND_ZERO;
-    target.BlendOp = D3D11_BLEND_OP_ADD;
-    target.SrcBlendAlpha = D3D11_BLEND_ONE;
-    target.DestBlendAlpha = D3D11_BLEND_ZERO;
-    target.BlendOpAlpha = D3D11_BLEND_OP_ADD;
-    target.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
-    result = device_->CreateBlendState(&blend, opaqueBlend_.Out());
-    if (FAILED(result)) {
-        return Fail("CreateBlendState", result);
-    }
-
-    // 소스 알파로 섞는다(D3D12 파이프라인과 같은 식).
-    target.BlendEnable = TRUE;
-    target.SrcBlend = D3D11_BLEND_SRC_ALPHA;
-    target.DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
-    target.SrcBlendAlpha = D3D11_BLEND_ONE;
-    target.DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
-    result = device_->CreateBlendState(&blend, alphaBlend_.Out());
-    if (FAILED(result)) {
-        return Fail("CreateBlendState", result);
-    }
-
     // 그리기 상수(D3D12 루트 상수 20개 대응)다. SetConstants마다 WRITE_DISCARD로 갈아 끼운다.
     static_assert(sizeof(DrawConstants) % 16 == 0, "DrawConstants must be a multiple of 16 bytes");
     D3D11_BUFFER_DESC constants = {};
@@ -382,7 +329,7 @@ Result<void> D3D11Device::CreateSharedStates() noexcept {
     constants.Usage = D3D11_USAGE_DYNAMIC;
     constants.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     constants.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-    result = device_->CreateBuffer(&constants, nullptr, constants_.Out());
+    const HRESULT result = device_->CreateBuffer(&constants, nullptr, constants_.Out());
     if (FAILED(result)) {
         return Fail("CreateBuffer (draw constants)", result);
     }

@@ -110,6 +110,7 @@ GlesDevice::~GlesDevice() {
             gl_.DeleteVertexArrays(1, &record.vertexArray);
         }
 
+        gl_.DeleteFramebuffers(1, &passFramebuffer_);
         gl_.DeleteProgram(depthReadProgram_);
         gl_.DeleteProgram(stencilReadProgram_);
         gl_.DeleteVertexArrays(1, &readVertexArray_);
@@ -210,6 +211,13 @@ Result<void> GlesDevice::Initialize(const DeviceDesc& desc, const OpenGLDeviceOp
         gl_.Enable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
         gl_.DebugMessageCallback(&GlesDevice::DebugMessage, this);
         validation_ = true;
+    }
+
+    // 깊이 bias 상한 확장 함수다(없으면 depthBiasClamp를 공개하지 않는다).
+    if (features_.polygonOffsetClamp) {
+        polygonOffsetClamp_ = reinterpret_cast<void (*)(GLfloat, GLfloat, GLfloat)>(
+            platform_->ProcAddress("glPolygonOffsetClampEXT"));
+        caps_.features.depthBiasClamp = polygonOffsetClamp_ != nullptr;
     }
 
     // 모든 패스가 같은 클립 공간 규약이므로 앞면 감김은 한 번만 정한다.
@@ -573,23 +581,48 @@ Result<PipelineHandle> GlesDevice::CreatePipeline(const PipelineDesc& desc) noex
         return Result<PipelineHandle>::Failure(owner.Error());
     }
 
-    const GlesTextureFormat* colorFormat = FindTextureFormat(desc.colorFormat);
     if (desc.vertex.glsl.ByteCount() == 0 || desc.pixel.glsl.ByteCount() == 0 ||
-        !IsValidPixelFormat(desc.colorFormat)) {
-        return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
+        !ValidatePipelineDesc(desc)) {
+        Diagnostic message;
+        message.Text("pipeline description breaks the pipeline rules");
+        auto rejected = Reject(message, ErrorCode::InvalidArgument);
+        return Result<PipelineHandle>::Failure(rejected.Error());
     }
 
     // 렌더 타깃으로 대응하지 않는 형식은 대신하지 않고 Unsupported다(PixelFormat.ko.md 8.3절).
     // 블렌드를 켜면 그 형식이 블렌드를 받아야 한다(32-bit float는 GL_EXT_float_blend).
-    if (colorFormat == nullptr ||
-        !HasPixelFormatCaps(GetPixelFormatCaps(desc.colorFormat),
-                            desc.alphaBlend
-                                ? PixelFormatCaps::RenderTarget | PixelFormatCaps::Blendable
-                                : PixelFormatCaps::RenderTarget)) {
+    for (uint32 index = 0; index < desc.colorTargetCount; ++index) {
+        const PixelFormat format = desc.colorFormats[index];
+        const PixelFormatCaps required =
+            desc.blend[index].enable ? PixelFormatCaps::RenderTarget | PixelFormatCaps::Blendable
+                                     : PixelFormatCaps::RenderTarget;
+        if (FindTextureFormat(format) == nullptr ||
+            !HasPixelFormatCaps(GetPixelFormatCaps(format), required)) {
+            Diagnostic message;
+            message.Text("pixel format ")
+                .Text(PixelFormatName(format))
+                .Text(" is not supported as a render target by this OpenGL ES device");
+            auto rejected = Reject(message, ErrorCode::Unsupported);
+            return Result<PipelineHandle>::Failure(rejected.Error());
+        }
+    }
+
+    if (desc.depthFormat != PixelFormat::Unknown &&
+        (FindTextureFormat(desc.depthFormat) == nullptr ||
+         !HasPixelFormatCaps(GetPixelFormatCaps(desc.depthFormat),
+                             PixelFormatCaps::DepthStencil))) {
         Diagnostic message;
         message.Text("pixel format ")
-            .Text(PixelFormatName(desc.colorFormat))
-            .Text(" is not supported as a render target by this OpenGL ES device");
+            .Text(PixelFormatName(desc.depthFormat))
+            .Text(" is not supported as a depth target by this OpenGL ES device");
+        auto rejected = Reject(message, ErrorCode::Unsupported);
+        return Result<PipelineHandle>::Failure(rejected.Error());
+    }
+
+    if (!CheckPipelineFeatures(caps_, desc)) {
+        Diagnostic message;
+        message.Text("pipeline needs more color targets or a raster feature than the device "
+                     "supports");
         auto rejected = Reject(message, ErrorCode::Unsupported);
         return Result<PipelineHandle>::Failure(rejected.Error());
     }
@@ -645,7 +678,7 @@ Result<PipelineHandle> GlesDevice::CreatePipeline(const PipelineDesc& desc) noex
 
     auto matched = MatchVertexInputs(record.program, desc.layout);
     auto reflected =
-        matched ? ReflectBufferSlots(record.program, record.bufferSlots) : Move(matched);
+        matched ? ReflectBufferSlots(record.program, record.bufferSlots, nullptr) : Move(matched);
     if (!reflected) {
         gl_.DeleteProgram(record.program);
         return Result<PipelineHandle>::Failure(reflected.Error());
@@ -654,8 +687,33 @@ Result<PipelineHandle> GlesDevice::CreatePipeline(const PipelineDesc& desc) noex
     // 루트 상수 에뮬레이션 배열 위치는 링크 때 한 번 찾는다(ShaderSystem 7.2절 4항).
     record.vertexConstants = gl_.GetUniformLocation(record.program, VertexRootConstantsName);
     record.pixelConstants = gl_.GetUniformLocation(record.program, PixelRootConstantsName);
-    record.alphaBlend = desc.alphaBlend;
-    record.cullMode = desc.cullMode;
+    switch (desc.topology) {
+    case PrimitiveTopology::TriangleStrip:
+        record.topology = GL_TRIANGLE_STRIP;
+        break;
+    case PrimitiveTopology::LineList:
+        record.topology = GL_LINES;
+        break;
+    case PrimitiveTopology::LineStrip:
+        record.topology = GL_LINE_STRIP;
+        break;
+    case PrimitiveTopology::PointList:
+        record.topology = GL_POINTS;
+        break;
+    default:
+        record.topology = GL_TRIANGLES;
+        break;
+    }
+
+    record.colorTargetCount = desc.colorTargetCount;
+    for (uint32 index = 0; index < MaxColorTargets; ++index) {
+        record.blend[index] = desc.blend[index];
+    }
+
+    record.alphaToCoverage = desc.alphaToCoverage;
+    record.depthStencil = desc.depthStencil;
+    record.raster = desc.raster;
+    record.writesDepthStencil = PipelineWritesDepthStencil(desc);
     for (usize index = 0; index < desc.layout.streams.Size(); ++index) {
         record.strides[index] = desc.layout.streams[index].stride;
         record.streamMask |= 1u << index;

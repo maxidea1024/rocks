@@ -1,5 +1,6 @@
 #include "GraphicsSelfTest.h"
 #include "BufferSelfTest.h"
+#include "CommandSelfTest.h"
 #include "CullingSelfTest.h"
 #include "RenderGraphSelfTest.h"
 #include "RenderLaneSelfTest.h"
@@ -687,6 +688,8 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     failures += RunCapsChecks(name, device);
     // 버퍼 용도·view(GX2): 생성·업로드·readback, typed view 능력 ⇔ 생성, VS·PS의 view 읽기.
     failures += RunBufferChecks(name, device, result.triangle.GetAllocator());
+    // 파이프라인 완성·명령 기록 확장(GX3·GX4): compute·간접·MRT·깊이·스텐실·복사·UAV clear.
+    failures += RunCommandChecks(name, device, result.triangle.GetAllocator());
     // 렌더 그래프(RG1): 그래프 텍스처·명시 전이·culling·history export/import.
     failures += RunRenderGraphChecks(name, device, renderer, result.triangle.GetAllocator());
     // GPU 계측(GX9): timestamp 쌍·slot 재사용·calibration·debug marker.

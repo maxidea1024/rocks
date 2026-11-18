@@ -8,7 +8,8 @@ D3D12Device::D3D12Device(Allocator& allocator) noexcept
       dsvs_(allocator), srvs_(allocator), samplers_(allocator), allocators_(allocator),
       messageScratch_(allocator), timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics),
       allocator_(allocator), readbacks_(allocator), ring_(allocator), timestamps_(allocator),
-      touchedTextures_(allocator), bufferViews_(allocator) {
+      touchedTextures_(allocator), bufferViews_(allocator), cpuUavs_(allocator),
+      bufferStates_(allocator) {
 }
 
 D3D12Device::~D3D12Device() {
@@ -205,6 +206,11 @@ Result<void> D3D12Device::Initialize(const DeviceDesc& desc) noexcept {
     auto signature = CreateRootSignature();
     if (!signature) {
         return signature;
+    }
+
+    auto compute = CreateComputeObjects();
+    if (!compute) {
+        return compute;
     }
 
     // 업로드 ring(GX8): upload heap 버퍼 하나를 계속 map해 두고 구간을 나눠 쓴다.

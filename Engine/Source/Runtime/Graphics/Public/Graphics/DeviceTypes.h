@@ -5,6 +5,7 @@
 #include <Core/Result.h>
 #include <Core/Text/StringView.h>
 #include <Graphics/DeviceCaps.h>
+#include <Graphics/PipelineState.h>
 #include <GraphicsTypes/PixelFormat.h>
 #include <GraphicsTypes/Sampler.h>
 #include <GraphicsTypes/VertexFormat.h>
@@ -449,19 +450,6 @@ struct ShaderSource {
     StringView glsl;
 };
 
-// 삼각형 컬링이다(UE ERasterizerCullMode 대응). 앞면은 표시된 화면에서 반시계로 감긴 삼각형이다
-// (UE와 같다, ShaderSystem 7.2절 8항). 창·RenderTarget 어느 대상에 그려도 같은 삼각형이 같은 면으로
-// 판정되며, backend는 이 규약을 자기 API의 앞면·컬 설정으로 옮긴다(D3D12 FrontCounterClockwise,
-// OpenGL glFrontFace·glCullFace).
-enum class CullMode : uint8 {
-    // 컬링하지 않는다(양면).
-    None,
-    // 뒤면(화면에서 시계 방향)을 버린다. 일반 메시 그리기의 기본이다(UE CM_CW).
-    Back,
-    // 앞면(화면에서 반시계)을 버린다. 음수 행렬식 반전에 쓴다(UE CM_CCW).
-    Front
-};
-
 // 그리기 파이프라인 설정이다. 모든 파이프라인은 같은 고정 자원 배치를 쓴다(파라미터 바인딩 GX6 전의
 // 개발 경로):
 // - 그리기 상수(DrawConstants, HLSL b0 / GLSL ES 루트 상수 에뮬레이션 배열 uniform highp vec4
@@ -485,17 +473,64 @@ enum class CullMode : uint8 {
 // 않는 속성은 허용한다. 입력은 D3D12가 컴파일한 VS 입력 signature(시맨틱 ATTRIBUTEn), OpenGL이 링크
 // 뒤 active attribute에서 얻는다. 위반은 InvalidArgument이며 LastError에 location·형식·셰이더
 // 타입을 적는다. 정점 입력 시맨틱은 ATTRIBUTEn만 쓴다(SV_ 시스템 값 제외).
+//
+// 출력·고정 기능 상태(GX3, Renderer RQ5): 색 attachment 형식 colorFormats[0 .. colorTargetCount),
+// 깊이 attachment 형식 depthFormat(없으면 Unknown), 타깃별 블렌드·쓰기 mask, alpha-to-coverage,
+// 깊이·스텐실·래스터 상태, 기본도형 종류. 그릴 패스의 attachment 형식과 같아야 한다(다르면 검증
+// 계층 오류이며 장치는 검사하지 않는다). 색 attachment가 없는 파이프라인(깊이만)은
+// colorTargetCount 0이다. 규칙 위반은 InvalidArgument(ValidatePipelineDesc), 장치 능력 밖(형식의
+// RenderTarget·Blendable·DepthStencil, colorAttachments 수, depthClamp·depthBiasClamp 기능)은
+// Unsupported다.
+//
+// 사용 예(GBuffer 3장 + reverse-Z 깊이):
+//   PipelineDesc desc;
+//   desc.colorTargetCount = 3;
+//   desc.colorFormats[0] = PixelFormat::RGBA8Unorm; ...
+//   desc.depthFormat = PixelFormat::D32Float;
+//   desc.depthStencil.depthTest = true;
+//   desc.depthStencil.depthWrite = true;   // depthCompare 기본 GreaterEqual
 struct PipelineDesc {
     ShaderSource vertex;
     ShaderSource pixel;
     VertexLayout layout;
-    PixelFormat colorFormat = PixelFormat::RGBA8UnormSrgb;
-    // 소스 알파로 섞는다(premultiplied가 아닌 일반 알파).
-    bool alphaBlend = false;
-    // 버릴 면이다. 기본은 None이다(UE TStaticRasterizerState 기본 CM_None과 같고, 감김 순서를
-    // 정하지 않은 화면 채우기·시험 그리기가 그대로 보인다). 메시 그리기는 Back을 쓰고, 물체·view
-    // 행렬식이 음수면 Front 파이프라인으로 바꾼다(ShaderSystem 7.2절 8항).
-    CullMode cullMode = CullMode::None;
+    PrimitiveTopology topology = PrimitiveTopology::TriangleList;
+    uint32 colorTargetCount = 1;
+    PixelFormat colorFormats[MaxColorTargets] = {PixelFormat::RGBA8UnormSrgb};
+    ColorTargetBlend blend[MaxColorTargets];
+    bool alphaToCoverage = false;
+    PixelFormat depthFormat = PixelFormat::Unknown;
+    DepthStencilState depthStencil;
+    RasterState raster;
+};
+
+// 장치와 무관한 파이프라인 상태 규칙이다(backend가 생성 전에 부른다). 위반은 InvalidArgument다:
+// colorTargetCount가 MaxColorTargets 초과, 무효한 형식 번호, 색 attachment도 깊이도 없음, 깊이
+// attachment 없이 깊이·스텐실 시험, 스텐실 plane 없는 깊이 형식에 스텐실 시험, 모르는 enum 값
+// (기본도형·비교·스텐실 연산·블렌드 계수·식·쓰기 mask·컬). 형식이 렌더 타깃·깊이 타깃이 될 수
+// 있는지는 장치 능력이라 backend가 Unsupported로 공개한다.
+Result<void> ValidatePipelineDesc(const PipelineDesc& desc) noexcept;
+
+// 파이프라인이 장치 능력(DeviceCaps) 안인지다(backend가 ValidatePipelineDesc 다음에 부른다). 넘으면
+// Unsupported다: colorTargetCount > DeviceLimits::colorAttachments, 기능이 없는데 depthClamp·0이
+// 아닌 depthBiasClamp·alphaToCoverage를 켬, independentBlend 없이 타깃마다 다른 블렌드. 다른 값으로
+// 바꿔 만들지 않는다.
+Result<void> CheckPipelineFeatures(const DeviceCaps& caps, const PipelineDesc& desc) noexcept;
+
+// 파이프라인이 깊이나 스텐실 값을 쓰는지다(깊이 쓰기, 또는 Keep이 아닌 스텐실 연산과 0이 아닌 쓰기
+// mask). 읽기 전용 깊이 attachment(DepthAttachment::readOnly)에서는 그런 그리기를 무시한다.
+bool PipelineWritesDepthStencil(const PipelineDesc& desc) noexcept;
+
+// compute 파이프라인 설정이다. 진입점은 HLSL CSMain, GLSL ES는 main(#version 320 es compute 셰이더,
+// layout(local_size_*))이다. 자원 배치(GX6 전 개발 경로 고정 배치):
+// - 그리기 상수 DrawConstants(HLSL b0 / GLSL ES uniform highp vec4 cu_h[5])
+// - 읽기 버퍼 view slot 0–3(SetBufferView): HLSL t1–t4, GLSL ES typed는 텍스처 유닛 1 + slot
+//   (samplerBuffer), 구조화·raw는 storage block binding slot
+// - 쓰기 버퍼 view slot 0–3(SetWritableBufferView): HLSL u0–u3(RWBuffer<T>·RWStructuredBuffer<T>·
+//   RWByteAddressBuffer), GLSL ES typed는 image unit slot(layout(binding = slot, <형식>)
+//   imageBuffer), 구조화·raw는 storage block binding 4 + slot
+// 배치 밖 자원은 InvalidArgument다.
+struct ComputePipelineDesc {
+    ShaderSource shader;
 };
 
 // 그리기마다 넘기는 상수다. color는 선형 RGBA다.
@@ -517,6 +552,64 @@ struct ClearColor {
     float g = 0.0f;
     float b = 0.0f;
     float a = 1.0f;
+};
+
+// 패스의 색 attachment 하나다(RenderTarget 텍스처, mip 0). 정수 형식의 clear는 값을 그 형식으로
+// 바꿔 쓴다.
+struct ColorAttachment {
+    TextureHandle texture;
+    LoadAction load = LoadAction::Clear;
+    StoreAction store = StoreAction::Store;
+    ClearColor clear;
+};
+
+// 패스의 깊이·스텐실 attachment다(DepthStencil 텍스처). readOnly면 깊이·스텐실을 읽기 전용으로
+// 붙인다(접근 DepthRead, 같은 패스에서 SRV로 함께 읽기는 RQ6의 GX5 단계). 그때 깊이·스텐실을 쓰는
+// 파이프라인의 그리기는 무시된다(IgnoredDraws). clearDepth 기본 0은 UE reverse-Z의 먼 평면이다.
+struct DepthAttachment {
+    TextureHandle texture;
+    LoadAction depthLoad = LoadAction::Clear;
+    StoreAction depthStore = StoreAction::Store;
+    float clearDepth = 0.0f;
+    LoadAction stencilLoad = LoadAction::Clear;
+    StoreAction stencilStore = StoreAction::Store;
+    uint8 clearStencil = 0;
+    bool readOnly = false;
+};
+
+// 패스 시작 설정이다(Device::BeginPass, GX4). 색 attachment는 앞에서부터 colorCount개를 쓴다. 모든
+// attachment의 크기가 같아야 한다. 색도 깊이도 없는 패스는 compute·복사 전용이고 그 안의 그리기는
+// 무시된다.
+//
+// 사용 예(MRT 2장 + 깊이):
+//   PassDesc pass;
+//   pass.colorCount = 2;
+//   pass.colors[0] = {albedo};
+//   pass.colors[1] = {normal, LoadAction::Clear, StoreAction::Store, {0.5f, 0.5f, 1, 1}};
+//   pass.depth.texture = depth;
+//   auto commands = device.BeginPass(pass);
+struct PassDesc {
+    ColorAttachment colors[MaxColorTargets];
+    uint32 colorCount = 0;
+    DepthAttachment depth;
+};
+
+// viewport다(픽셀 단위, 원점은 대상 왼쪽 위). 깊이 범위 기본은 [0, 1]이다.
+struct Viewport {
+    float x = 0.0f;
+    float y = 0.0f;
+    float width = 0.0f;
+    float height = 0.0f;
+    float minDepth = 0.0f;
+    float maxDepth = 1.0f;
+};
+
+// scissor 사각형이다(픽셀, 원점은 대상 왼쪽 위, [x, x + width) × [y, y + height)).
+struct ScissorRect {
+    uint32 x = 0;
+    uint32 y = 0;
+    uint32 width = 0;
+    uint32 height = 0;
 };
 
 // 제출 queue 종류다(계획 11.2절 QueueId). 1차 범위는 graphics queue 하나다(RenderBase 1절 렌더

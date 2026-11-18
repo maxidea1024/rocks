@@ -287,8 +287,13 @@ D3D11은 필수 backend다(2026-11-13 사용자 결정). D3D12의 SM 6.6 기준�
 **장치 능력·버퍼(GX1·GX2, 2026-11-18).**
 - `DeviceCaps`는 d3d11.h 상수와 feature level(FL 11.0은 UAV 8·VS UAV 없음, 11.1 이상은 UAV 64·모든 단계 UAV), `D3D11_FEATURE_D3D11_OPTIONS3`(VS 층 출력), DXGI 출력 HDR 색 공간이다. 64 bit atomic·multi draw indirect는 거짓이다. MSAA 표본 수는 `CheckMultisampleQualityLevels`다.
 - 버퍼 용도는 bind·misc flag로 옮긴다(UE `Private/D3D11Buffer.cpp:38–83`). raw SRV는 `D3D11_SRV_DIMENSION_BUFFEREX` + RAW다. 버퍼 view slot n은 VS·PS `t(n + 1)`(`VSSetShaderResources`·`PSSetShaderResources`).
-- 상수 버퍼는 `UpdateSubresource`에 대상 구간을 줄 수 없어(debug layer 288) 전체 갱신만 받고 부분 갱신은 `Unsupported`다. WARP가 `RGB9E5Ufloat` 버퍼 SRV 생성에서 멈추므로 그 형식의 texel buffer 능력은 공개하지 않는다.
+- 상수 버퍼는 `UpdateSubresource`에 대상 구간을 줄 수 없어(debug layer 288) 전체 갱신만 받고 부분 갱신은 `Unsupported`다. WARP가 `RGB9E5Ufloat` 버퍼 SRV 생성에서 멈추므로 WARP에서만 그 형식의 texel buffer 능력을 공개하지 않는다.
 - `ReadBuffer`는 staging 버퍼로 구간 `CopySubresourceRegion`(원본 box) 뒤 fence를 기다려 `Map(READ)`이다.
+
+**파이프라인·명령 기록 확장(GX3·GX4, 2026-11-18).**
+- 파이프라인마다 blend(타깃별, `IndependentBlendEnable`, alpha-to-coverage)·래스터(컬·깊이 bias·clamp, scissor는 늘 켬)·깊이·스텐실 상태 객체와 기본도형을 만든다. compute는 `cs_5_0`이고 CS 상수는 그리기 상수 버퍼 slot 0을 같이 쓴다.
+- `BeginPass`는 RTV 0–8과 DSV(읽기 전용 깊이는 깊이 텍스처마다 만든 `D3D11_DSV_READ_ONLY_*` view)를 묶고 load 동작을 `ClearRenderTargetView`·`ClearDepthStencilView`로 한다. 스텐실 기준은 깊이·스텐실 상태와 함께 건다.
+- dispatch는 CS에 읽기 SRV(t1–t4)·UAV(u0–u3)를 묶고 끝나면 풀며, 그래픽 SRV는 그리기 직전에 묶는다(같은 버퍼의 SRV·UAV가 겹쳐 런타임이 binding을 풀지 않게). dispatch 뒤 첫 그리기는 정점·index 버퍼를 다시 묶는다. 간접 명령은 `DrawInstancedIndirect`·`DrawIndexedInstancedIndirect`·`DispatchIndirect`, 복사는 `CopySubresourceRegion`, UAV clear는 `ClearUnorderedAccessViewUint`다.
 
 **GPU 계측(GX9).**
 - timestamp: query 객체(slot 4 × 256개)를 deferred context에서 `End`로 기록한다. 프레임 실행(`ExecuteCommandList`) 앞뒤를 slot별 `D3D11_QUERY_TIMESTAMP_DISJOINT`로 감싼다.

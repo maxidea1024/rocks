@@ -8,6 +8,7 @@
 #include <Graphics/DeviceOwnership.h>
 #include <Graphics/FenceTimeline.h>
 #include <Graphics/GraphicsLog.h>
+#include <Graphics/ShaderSourceCompiler.h>
 #include <Graphics/StagingPool.h>
 #include <Graphics/TimestampRing.h>
 #include <Graphics/UploadRing.h>
@@ -31,6 +32,7 @@
 // - D3D12Resources.cpp: 스왑체인·버퍼·버퍼 view·텍스처·텍스처 view·샘플러·Retire
 // - D3D12Pipeline.cpp: 셰이더 컴파일·리플렉션·root signature·파이프라인
 // - D3D12Frame.cpp: 프레임 시작·제출과 기록(CommandContext)·명시 전이
+// - D3D12Commands.cpp: 패스 attachment·compute·간접 명령·복사·UAV clear·버퍼 상태 추적(GX3·GX4)
 // - D3D12Upload.cpp: 업로드 기록·ring·staging·readback
 // - D3D12Timing.cpp: timestamp·calibration·marker
 namespace rocks::graphics::d3d12 {
@@ -224,6 +226,9 @@ struct BufferRecord {
 struct BufferViewRecord {
     ComRef<ID3D12Resource> resource;
     uint32 descriptor = 0;
+    // ReadWrite view의 CPU 전용 UAV 칸이다(ClearUnorderedAccessViewUint가 요구한다). 없으면 -1이다.
+    int64 cpuDescriptor = -1;
+    PixelFormat format = PixelFormat::Unknown;
     BufferViewKind kind = BufferViewKind::Typed;
     ViewAccess access = ViewAccess::Read;
     PixelShaderType shaderType = PixelShaderType::None;
@@ -273,8 +278,14 @@ struct PipelineRecord {
     // stream별 stride와 배치가 선언한 stream mask다(그리기 때 묶인 정점 버퍼를 확인한다).
     uint32 strides[MaxVertexStreams] = {};
     uint32 streamMask = 0;
-    // VS·PS가 읽는 버퍼 view slot이다(리플렉션).
+    // VS·PS(compute면 CS)가 읽는 버퍼 view slot과 CS가 쓰는 slot이다(리플렉션).
     DrawBufferSlots bufferSlots;
+    DrawBufferSlots writeSlots;
+    // compute 파이프라인이다(Dispatch만 쓴다).
+    bool compute = false;
+    D3D_PRIMITIVE_TOPOLOGY topology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+    // 깊이·스텐실을 쓴다(읽기 전용 깊이 attachment에서 그리기를 거른다).
+    bool writesDepthStencil = false;
 };
 
 struct SwapChainRecord {
@@ -538,12 +549,12 @@ public:
 
     // 다른 스레드에서도 부를 수 있다(concurrentResourceCreation, 내부 잠금으로 직렬화한다).
     Result<PipelineHandle> CreatePipeline(const PipelineDesc& desc) noexcept override;
+    Result<PipelineHandle> CreateComputePipeline(const ComputePipelineDesc& desc) noexcept override;
 
     Result<CommandContext*> BeginFrame(SwapChainHandle handle,
                                        const ClearColor& clear) noexcept override;
 
-    Result<CommandContext*> BeginOffscreen(TextureHandle handle,
-                                           const ClearColor& clear) noexcept override;
+    Result<CommandContext*> BeginPass(const PassDesc& pass) noexcept override;
 
     Result<GpuFencePoint> EndFrame() noexcept override;
 
@@ -639,6 +650,7 @@ private:
         bool inUse = false;
     };
 
+    // 패스 대상이다. 색 0(resource·rtv·format·texture)은 CopyPassTarget이 쓴다.
     struct Target {
         ID3D12Resource* resource = nullptr;
         D3D12_RESOURCE_STATES restState = D3D12_RESOURCE_STATE_COMMON;
@@ -649,6 +661,20 @@ private:
         PixelFormat format = PixelFormat::Unknown;
         // offscreen 패스의 대상 텍스처다(스왑체인 패스는 null).
         TextureHandle texture;
+        // BeginPass의 attachment들이다(스왑체인 패스는 색 1개).
+        uint32 colorCount = 0;
+        TextureHandle colors[MaxColorTargets];
+        D3D12_CPU_DESCRIPTOR_HANDLE rtvs[MaxColorTargets] = {};
+        TextureHandle depth;
+        D3D12_CPU_DESCRIPTOR_HANDLE dsv = {};
+        bool depthReadOnly = false;
+    };
+
+    // 기록 중 버퍼 자원의 상태다. 버퍼는 제출 끝에 COMMON으로 돌아가므로 기록마다 비우고, 처음 쓰면
+    // 암묵 승격으로 그 상태가 된다(RequireBufferState).
+    struct BufferState {
+        ID3D12Resource* resource = nullptr;
+        D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_COMMON;
     };
 
     // 기록 중 묶인 정점·index 버퍼다(파이프라인을 바꾸면 그 stride로 다시 묶는다).
@@ -749,7 +775,8 @@ private:
     // 셰이더가 선언한 자원이 고정 배치(PipelineDesc) 안인지 보고 버퍼 view slot 배치를 slots에
     // 더한다. b0 상수, PS t0 텍스처·s0 샘플러, t1–t4 버퍼 SRV만 받는다. 두 단계가 같은 slot을 다른
     // 종류로 읽거나 배치 밖 자원(UAV 포함)이면 InvalidArgument다.
-    Result<void> ReflectBindings(ID3DBlob* code, bool pixel, DrawBufferSlots& slots) noexcept;
+    Result<void> ReflectBindings(ID3DBlob* code, ShaderStage stage, DrawBufferSlots& slots,
+                                 DrawBufferSlots* writeSlots) noexcept;
 
     Result<void> Reject(const Diagnostic& message) noexcept;
 
@@ -760,6 +787,8 @@ private:
     bool StreamsBound() const noexcept;
 
     Result<void> CreateRootSignature() noexcept;
+    // compute root signature와 간접 명령 signature를 만든다(D3D12Commands.cpp).
+    Result<void> CreateComputeObjects() noexcept;
 
     Result<void> Compile(StringView source, const char* entry, const char* target,
                          ComRef<ID3DBlob>& code) noexcept;
@@ -782,7 +811,7 @@ private:
 
     Result<void> BeginRecording() noexcept;
 
-    void StartPass(const ClearColor& clear) noexcept;
+    void StartPass(const PassDesc& pass) noexcept;
 
     // 업로드 기록 list를 연다(잠금 안). 이미 열려 있으면 그대로 쓴다.
     Result<void> OpenUploadList() noexcept;
@@ -875,6 +904,44 @@ private:
 
     void SetBufferView(uint32 slot, BufferViewHandle handle) noexcept override;
 
+    // --- GX3·GX4(D3D12Commands.cpp) ---
+
+    void SetWritableBufferView(uint32 slot, BufferViewHandle view) noexcept override;
+
+    void DrawIndirect(BufferHandle arguments, uint64 offset) noexcept override;
+
+    void DrawIndexedIndirect(BufferHandle arguments, uint64 offset) noexcept override;
+
+    void Dispatch(uint32 groupCountX, uint32 groupCountY, uint32 groupCountZ) noexcept override;
+
+    void DispatchIndirect(BufferHandle arguments, uint64 offset) noexcept override;
+
+    void SetViewport(const Viewport& viewport) noexcept override;
+
+    void SetScissor(const ScissorRect& scissor) noexcept override;
+
+    void SetStencilReference(uint32 reference) noexcept override;
+
+    Result<void> CopyBuffer(BufferHandle destination, uint64 destinationOffset, BufferHandle source,
+                            uint64 sourceOffset, uint64 size) noexcept override;
+
+    Result<void> CopyTexture(TextureHandle destination, TextureHandle source) noexcept override;
+
+    Result<void> ClearWritableBufferView(BufferViewHandle view, uint32 value) noexcept override;
+
+    // 기록 중 버퍼의 상태를 needed로 맞춘다(COMMON이면 암묵 승격, 읽기끼리는 누적, 그 밖은
+    // barrier, UAV → UAV는 UAV barrier).
+    void RequireBufferState(ID3D12Resource* resource, D3D12_RESOURCE_STATES needed) noexcept;
+
+    // 그리기 직전 조건을 보고 묶인 정점·index 버퍼·view의 상태를 맞춘다. 그릴 수 없으면 거짓이다.
+    bool PrepareDraw(bool indexed) noexcept;
+
+    // dispatch 직전 조건을 보고 compute root 인자와 view 상태를 맞춘다.
+    bool PrepareDispatch() noexcept;
+
+    // 간접 인자 버퍼를 확인하고 INDIRECT_ARGUMENT로 맞춘다.
+    ID3D12Resource* IndirectArguments(BufferHandle arguments, uint64 offset, uint64 bytes) noexcept;
+
     // 파이프라인이 읽는 버퍼 view slot이 모두 맞는 view로 채워졌는지다(DrawBufferSlotsSatisfied).
     bool BufferViewsBound() const noexcept;
 
@@ -887,8 +954,8 @@ private:
     // 명시 전이를 resource barrier로 낮춘다(GX5, Device.h Transition 주석).
     void Transition(Span<const ResourceTransition> transitions) noexcept override;
 
-    // 버퍼 전이다. 버퍼는 COMMON 암묵 승격과 제출 끝 복귀를 쓰므로 상태 전이를 내지 않는다(GX5:
-    // 버퍼 쓰기 명령이 생기는 GX4에서 추적을 더한다). UAV → UAV만 UAV barrier다.
+    // 버퍼 전이다. 기록 중 추적 상태(RequireBufferState)로 COMMON 암묵 승격·읽기 누적·barrier를
+    // 고르고, UAV → UAV는 UAV barrier다(GX5).
     void LowerBufferTransition(const ResourceTransition& transition) noexcept;
 
     // 기록 중 프레임에서 텍스처 mip [first, first + count)를 after로 바꾼다(잠금 안). 바뀌는 mip만
@@ -935,6 +1002,11 @@ private:
     ComRef<ID3D12GraphicsCommandList> list_;
     ComRef<ID3D12GraphicsCommandList> uploadList_;
     ComRef<ID3D12RootSignature> rootSignature_;
+    // compute root signature(b0 상수, t1–t4 SRV table, u0–u3 UAV table)와 간접 명령 signature다.
+    ComRef<ID3D12RootSignature> computeRootSignature_;
+    ComRef<ID3D12CommandSignature> drawSignature_;
+    ComRef<ID3D12CommandSignature> drawIndexedSignature_;
+    ComRef<ID3D12CommandSignature> dispatchSignature_;
     ComRef<ID3D12Fence> fence_;
     HANDLE fenceEvent_ = nullptr;
     // fence 관찰 스레드 전용 이벤트다(소유 스레드의 fenceEvent_와 나눈다).
@@ -997,6 +1069,16 @@ private:
     SlotArray<BufferViewRecord> bufferViews_;
     BufferViewHandle boundViews_[MaxDrawBufferViews];
     uint32 nullBufferSrv_ = 0;
+    // compute 쓰기 slot에 묶인 view와 빈 slot의 null UAV, ReadWrite view의 CPU UAV 칸 pool,
+    // 읽기 전용 DSV를 그때그때 쓰는 칸이다(DSV는 OMSetRenderTargets가 기록 때 읽는다).
+    BufferViewHandle boundWriteViews_[MaxDrawBufferViews];
+    uint32 nullBufferUav_ = 0;
+    DescriptorPool cpuUavs_;
+    uint32 scratchDsv_ = 0;
+    // 마지막 SetConstants 값이다(compute root 상수로도 올린다).
+    DrawConstants constants_;
+    uint32 stencilReference_ = 0;
+    Array<BufferState> bufferStates_;
     bool recording_ = false;
     bool validation_ = false;
     bool software_ = false;

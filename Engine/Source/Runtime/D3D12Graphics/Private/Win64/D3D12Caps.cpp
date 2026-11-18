@@ -146,6 +146,9 @@ DeviceCaps QueryDeviceCaps(ID3D12Device* device, IDXGIAdapter1* adapter,
     DeviceFeatures& features = caps.features;
     features.computeShaders = true;
     features.depthClamp = true;
+    features.depthBiasClamp = true;
+    features.alphaToCoverage = true;
+    features.independentBlend = true;
     // D3D12는 VS의 layer·viewport 출력을 늘 받는다. OPTIONS의
     // VPAndRTArrayIndexFromAnyShaderFeedingRasterizerSupportedWithoutGSEmulation은 드라이버가 GS
     // 에뮬레이션 없이 하는지일 뿐이다(UE 5.8도 D3D12에서 무조건 참: D3D12Device.cpp:272,

@@ -273,6 +273,7 @@ GlesFeatures DetectFeatures(const GlesFunctions& gl, bool desktopContext) noexce
     features.disjointTimerQuery = HasGlExtension(gl, "GL_EXT_disjoint_timer_query");
     features.srgbWriteControl = desktopContext || HasGlExtension(gl, "GL_EXT_sRGB_write_control");
     features.depthClamp = HasGlExtension(gl, "GL_EXT_depth_clamp");
+    features.polygonOffsetClamp = HasGlExtension(gl, "GL_EXT_polygon_offset_clamp");
     return features;
 }
 

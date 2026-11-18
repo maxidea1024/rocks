@@ -8,18 +8,22 @@ Result<CommandContext*> D3D12Device::BeginFrame(SwapChainHandle handle,
     if (!owner) {
         return Result<CommandContext*>::Failure(owner.Error());
     }
+
     platform::LockGuard lock(gate_);
 
     SwapChainRecord* record = swapChains_.Find(handle.slot);
     if (record == nullptr) {
         return Result<CommandContext*>::Failure(ErrorCode::StaleHandle);
     }
+
     if (recording_) {
         return Result<CommandContext*>::Failure(ErrorCode::Busy);
     }
+
     if (timeline_.IsLost()) {
         return Result<CommandContext*>::Failure(ErrorCode::Destroyed);
     }
+
     if (record->broken) {
         return FailWith<CommandContext*>("swap chain has no buffers after a failed resize");
     }
@@ -29,51 +33,21 @@ Result<CommandContext*> D3D12Device::BeginFrame(SwapChainHandle handle,
     if (!begun) {
         return Result<CommandContext*>::Failure(begun.Error());
     }
-    target_ = {record->buffers[backBuffer].Get(),
-               D3D12_RESOURCE_STATE_PRESENT,
-               rtvs_.Cpu(record->rtv[backBuffer]),
-               record->width,
-               record->height,
-               PixelFormat::RGBA8UnormSrgb,
-               {}};
+
+    target_ = {};
+    target_.resource = record->buffers[backBuffer].Get();
+    target_.restState = D3D12_RESOURCE_STATE_PRESENT;
+    target_.rtv = rtvs_.Cpu(record->rtv[backBuffer]);
+    target_.width = record->width;
+    target_.height = record->height;
+    target_.format = PixelFormat::RGBA8UnormSrgb;
+    target_.colorCount = 1;
+    target_.rtvs[0] = target_.rtv;
     presentTarget_ = handle;
-    StartPass(clear);
-    return Result<CommandContext*>::Success(this);
-}
-
-Result<CommandContext*> D3D12Device::BeginOffscreen(TextureHandle handle,
-                                                    const ClearColor& clear) noexcept {
-    auto owner = ownership_.Check();
-    if (!owner) {
-        return Result<CommandContext*>::Failure(owner.Error());
-    }
-    platform::LockGuard lock(gate_);
-
-    TextureRecord* record = textures_.Find(handle.slot);
-    if (record == nullptr || !record->renderTarget) {
-        return Result<CommandContext*>::Failure(record == nullptr ? ErrorCode::StaleHandle
-                                                                  : ErrorCode::InvalidArgument);
-    }
-    if (recording_) {
-        return Result<CommandContext*>::Failure(ErrorCode::Busy);
-    }
-    if (timeline_.IsLost()) {
-        return Result<CommandContext*>::Failure(ErrorCode::Destroyed);
-    }
-
-    auto begun = BeginRecording();
-    if (!begun) {
-        return Result<CommandContext*>::Failure(begun.Error());
-    }
-    target_ = {record->resource.Get(),
-               D3D12_RESOURCE_STATE_COMMON,
-               rtvs_.Cpu(record->rtv),
-               record->width,
-               record->height,
-               record->format,
-               handle};
-    presentTarget_ = {};
-    StartPass(clear);
+    PassDesc pass;
+    pass.colorCount = 1;
+    pass.colors[0].clear = clear;
+    StartPass(pass);
     return Result<CommandContext*>::Success(this);
 }
 
@@ -82,6 +56,7 @@ Result<GpuFencePoint> D3D12Device::EndFrame() noexcept {
     if (!owner) {
         return Result<GpuFencePoint>::Failure(owner.Error());
     }
+
     platform::LockGuard lock(gate_);
 
     if (!recording_) {
@@ -90,11 +65,12 @@ Result<GpuFencePoint> D3D12Device::EndFrame() noexcept {
 
     // 스왑체인 백버퍼만 present 상태로 돌린다. offscreen 대상은 RenderTarget 그대로 둔다(GX5:
     // 다음 사용이 명시 전이나 암묵 전이로 바꾼다).
-    if (target_.texture.IsNull()) {
+    if (!presentTarget_.IsNull()) {
         const D3D12_RESOURCE_BARRIER back = TransitionBarrier(
             target_.resource, D3D12_RESOURCE_STATE_RENDER_TARGET, target_.restState);
         list_->ResourceBarrier(1, &back);
     }
+
     CloseMarkers();
     const TimestampRange stamps = timestamps_.OpenRange();
     if (stamps.count != 0) {
@@ -102,6 +78,7 @@ Result<GpuFencePoint> D3D12Device::EndFrame() noexcept {
                                 stamps.count, timestampReadback_.Get(),
                                 uint64{stamps.first} * sizeof(uint64));
     }
+
     recording_ = false;
     allocators_[recordingAllocator_].inUse = false;
     // 이 프레임 전에 쌓인 업로드(생성 초기 데이터·내용 갱신)를 먼저 실행한다.
@@ -114,6 +91,7 @@ Result<GpuFencePoint> D3D12Device::EndFrame() noexcept {
         SettleTracking(false);
         return Result<GpuFencePoint>::Failure(uploads.Error());
     }
+
     if (FAILED(list_->Close())) {
         // 아무것도 제출하지 않았다. 이 기록만 참조하던 자원은 지금까지의 제출 뒤에 놓아도 된다.
         allocators_[recordingAllocator_].fenceValue = fenceValue_;
@@ -122,6 +100,7 @@ Result<GpuFencePoint> D3D12Device::EndFrame() noexcept {
         SettleTracking(false);
         return FailWith<GpuFencePoint>("command list close failed");
     }
+
     ID3D12CommandList* lists[] = {list_.Get()};
     queue_->ExecuteCommandLists(1, lists);
     SettleTracking(true);
@@ -148,6 +127,7 @@ Result<GpuFencePoint> D3D12Device::EndFrame() noexcept {
         DrainValidationMessages();
         return Result<GpuFencePoint>::Failure(signaled.Error());
     }
+
     const uint64 value = signaled.Value();
     allocators_[recordingAllocator_].fenceValue = value;
     AssignPendingRetires(value);
@@ -157,6 +137,7 @@ Result<GpuFencePoint> D3D12Device::EndFrame() noexcept {
     if (!outcome) {
         return Result<GpuFencePoint>::Failure(outcome.Error());
     }
+
     return Result<GpuFencePoint>::Success(timeline_.Point(value));
 }
 
@@ -167,6 +148,7 @@ void D3D12Device::ApplyVertexBuffer(uint32 stream) noexcept {
     if (buffer == nullptr || boundVertex_[stream].offset >= buffer->size) {
         return;
     }
+
     D3D12_VERTEX_BUFFER_VIEW view = {};
     view.BufferLocation = buffer->address + boundVertex_[stream].offset;
     view.SizeInBytes = static_cast<UINT>(buffer->size - boundVertex_[stream].offset);
@@ -180,15 +162,18 @@ bool D3D12Device::StreamsBound() const noexcept {
     if (pipeline == nullptr) {
         return false;
     }
+
     for (uint32 stream = 0; stream < MaxVertexStreams; ++stream) {
         if ((pipeline->streamMask & (1u << stream)) == 0) {
             continue;
         }
+
         const BufferRecord* buffer = buffers_.Find(boundVertex_[stream].buffer.slot);
         if (buffer == nullptr || boundVertex_[stream].offset >= buffer->size) {
             return false;
         }
     }
+
     return true;
 }
 
@@ -219,37 +204,82 @@ Result<void> D3D12Device::BeginRecording() noexcept {
         view = {};
     }
 
+    for (BufferViewHandle& view : boundWriteViews_) {
+        view = {};
+    }
+
+    bufferStates_.Clear();
+    constants_ = DrawConstants{};
+    stencilReference_ = 0;
     return Result<void>::Success();
 }
 
-void D3D12Device::StartPass(const ClearColor& clear) noexcept {
+void D3D12Device::StartPass(const PassDesc& pass) noexcept {
     // attachment 전이다(GX5): offscreen 대상은 추적한 상태에서, 스왑체인 백버퍼는 present에서
-    // 렌더 타깃으로 바꾼다.
-    TextureRecord* targetRecord = textures_.Find(target_.texture.slot);
-    if (targetRecord != nullptr) {
-        TrackTransition(*targetRecord, target_.texture.slot, 0, 1,
-                        D3D12_RESOURCE_STATE_RENDER_TARGET);
-    } else {
-        const D3D12_RESOURCE_BARRIER toTarget = TransitionBarrier(
-            target_.resource, target_.restState, D3D12_RESOURCE_STATE_RENDER_TARGET);
-        list_->ResourceBarrier(1, &toTarget);
+    // 렌더 타깃으로 바꾼다. 깊이는 DepthWrite(읽기 전용이면 DepthRead)다.
+    for (uint32 index = 0; index < target_.colorCount; ++index) {
+        TextureRecord* color = textures_.Find(target_.colors[index].slot);
+        if (color != nullptr) {
+            TrackTransition(*color, target_.colors[index].slot, 0, 1,
+                            D3D12_RESOURCE_STATE_RENDER_TARGET);
+        } else if (index == 0 && target_.resource != nullptr) {
+            const D3D12_RESOURCE_BARRIER toTarget = TransitionBarrier(
+                target_.resource, target_.restState, D3D12_RESOURCE_STATE_RENDER_TARGET);
+            list_->ResourceBarrier(1, &toTarget);
+        }
     }
 
-    list_->OMSetRenderTargets(1, &target_.rtv, FALSE, nullptr);
-    const float color[4] = {clear.r, clear.g, clear.b, clear.a};
-    list_->ClearRenderTargetView(target_.rtv, color, 0, nullptr);
-    D3D12_VIEWPORT viewport = {};
-    viewport.Width = static_cast<float>(target_.width);
-    viewport.Height = static_cast<float>(target_.height);
-    viewport.MaxDepth = 1.0f;
-    const D3D12_RECT scissor = {0, 0, static_cast<LONG>(target_.width),
-                                static_cast<LONG>(target_.height)};
-    list_->RSSetViewports(1, &viewport);
-    list_->RSSetScissorRects(1, &scissor);
+    TextureRecord* depth = textures_.Find(target_.depth.slot);
+    if (depth != nullptr) {
+        TrackTransition(*depth, target_.depth.slot, 0, 1,
+                        target_.depthReadOnly ? D3D12_RESOURCE_STATE_DEPTH_READ
+                                              : D3D12_RESOURCE_STATE_DEPTH_WRITE);
+    }
+
+    list_->OMSetRenderTargets(target_.colorCount, target_.colorCount != 0 ? target_.rtvs : nullptr,
+                              FALSE, depth != nullptr ? &target_.dsv : nullptr);
+    for (uint32 index = 0; index < target_.colorCount; ++index) {
+        if (pass.colors[index].load == LoadAction::Clear) {
+            const ClearColor& clear = pass.colors[index].clear;
+            const float color[4] = {clear.r, clear.g, clear.b, clear.a};
+            list_->ClearRenderTargetView(target_.rtvs[index], color, 0, nullptr);
+        }
+    }
+
+    if (depth != nullptr && !target_.depthReadOnly) {
+        D3D12_CLEAR_FLAGS flags = static_cast<D3D12_CLEAR_FLAGS>(0);
+        if (pass.depth.depthLoad == LoadAction::Clear) {
+            flags |= D3D12_CLEAR_FLAG_DEPTH;
+        }
+
+        if (pass.depth.stencilLoad == LoadAction::Clear &&
+            GetPixelFormatInfo(depth->format).stencilBits != 0) {
+            flags |= D3D12_CLEAR_FLAG_STENCIL;
+        }
+
+        if (flags != 0) {
+            list_->ClearDepthStencilView(target_.dsv, flags, pass.depth.clearDepth,
+                                         pass.depth.clearStencil, 0, nullptr);
+        }
+    }
+
+    if (target_.width != 0) {
+        D3D12_VIEWPORT viewport = {};
+        viewport.Width = static_cast<float>(target_.width);
+        viewport.Height = static_cast<float>(target_.height);
+        viewport.MaxDepth = 1.0f;
+        const D3D12_RECT scissor = {0, 0, static_cast<LONG>(target_.width),
+                                    static_cast<LONG>(target_.height)};
+        list_->RSSetViewports(1, &viewport);
+        list_->RSSetScissorRects(1, &scissor);
+    }
+
     list_->SetGraphicsRootSignature(rootSignature_.Get());
+    list_->SetComputeRootSignature(computeRootSignature_.Get());
     ID3D12DescriptorHeap* heaps[] = {srvs_.Heap(), samplers_.Heap()};
     list_->SetDescriptorHeaps(2, heaps);
     list_->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    list_->OMSetStencilRef(0);
     const TextureRecord* white = textures_.Find(white_.slot);
     if (white != nullptr) {
         list_->SetGraphicsRootDescriptorTable(RootTexture, srvs_.Gpu(white->srv));
@@ -260,8 +290,7 @@ void D3D12Device::StartPass(const ClearColor& clear) noexcept {
         list_->SetGraphicsRootDescriptorTable(RootBufferViews + slot, srvs_.Gpu(nullBufferSrv_));
     }
 
-    const DrawConstants identity;
-    list_->SetGraphicsRoot32BitConstants(RootConstants, ConstantCount, &identity, 0);
+    list_->SetGraphicsRoot32BitConstants(RootConstants, ConstantCount, &constants_, 0);
 }
 
 void D3D12Device::SetPipeline(PipelineHandle handle) noexcept {
@@ -271,8 +300,14 @@ void D3D12Device::SetPipeline(PipelineHandle handle) noexcept {
         boundPipeline_ = {};
         return;
     }
+
     list_->SetPipelineState(record->state.Get());
     boundPipeline_ = handle.slot;
+    if (record->compute) {
+        return;
+    }
+
+    list_->IASetPrimitiveTopology(record->topology);
     // 이미 묶인 정점 버퍼를 새 파이프라인의 stride로 다시 묶는다.
     for (uint32 stream = 0; stream < MaxVertexStreams; ++stream) {
         if (!boundVertex_[stream].buffer.IsNull()) {
@@ -289,6 +324,7 @@ void D3D12Device::SetVertexBuffers(uint32 firstStream,
         if (stream >= MaxVertexStreams) {
             return;
         }
+
         boundVertex_[stream] = {buffers[index].buffer, buffers[index].offset};
         ApplyVertexBuffer(static_cast<uint32>(stream));
     }
@@ -301,6 +337,7 @@ void D3D12Device::SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64
     if (record == nullptr || offset >= record->size) {
         return;
     }
+
     D3D12_INDEX_BUFFER_VIEW view = {};
     view.BufferLocation = record->address + offset;
     view.SizeInBytes = static_cast<UINT>(record->size - offset);
@@ -316,6 +353,7 @@ void D3D12Device::SetTexture(TextureHandle handle) noexcept {
         record = textures_.Find(white_.slot);
         slot = white_.slot;
     }
+
     if (record != nullptr) {
         // view는 자원 상태를 원 텍스처 기록이 추적한다(원 텍스처는 view가 남아 있는 동안 표에
         // 남는다, Retire 참고).
@@ -325,6 +363,7 @@ void D3D12Device::SetTexture(TextureHandle handle) noexcept {
             ownerSlot = record->source;
             owner = textures_.Find(ownerSlot);
         }
+
         // 명시 전이 없이 셰이더 읽기 상태가 아닌 텍스처를 읽으면 암묵 전이로 메운다(GX5. 렌더
         // 그래프를 거치지 않는 그리기용이다).
         bool readable = true;
@@ -332,15 +371,19 @@ void D3D12Device::SetTexture(TextureHandle handle) noexcept {
             readable =
                 readable && (owner->current[mip] & D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE) != 0;
         }
+
         if (owner != nullptr && !readable && recording_) {
             TrackTransition(*owner, ownerSlot, 0, owner->mipLevels, ShaderReadStates);
         }
+
         list_->SetGraphicsRootDescriptorTable(RootTexture, srvs_.Gpu(record->srv));
         list_->SetGraphicsRootDescriptorTable(RootSampler, samplers_.Gpu(record->sampler));
     }
 }
 
 void D3D12Device::SetConstants(const DrawConstants& constants) noexcept {
+    // compute는 dispatch 때 같은 값을 compute root 상수로 올린다.
+    constants_ = constants;
     list_->SetGraphicsRoot32BitConstants(RootConstants, ConstantCount, &constants, 0);
 }
 
@@ -378,22 +421,22 @@ bool D3D12Device::BufferViewsBound() const noexcept {
 
 void D3D12Device::Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept {
     platform::LockGuard lock(gate_);
-    if (!StreamsBound() || !BufferViewsBound()) {
+    if (!PrepareDraw(false)) {
         ++ignoredDraws_;
         return;
     }
+
     // base instance는 0으로 고정한다(RenderBase 10.4절).
     list_->DrawInstanced(vertexCount, instanceCount, firstVertex, 0);
 }
 
 void D3D12Device::DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept {
     platform::LockGuard lock(gate_);
-    const BufferRecord* index = buffers_.Find(boundIndex_.buffer.slot);
-    if (!StreamsBound() || !BufferViewsBound() || index == nullptr ||
-        boundIndex_.offset >= index->size) {
+    if (!PrepareDraw(true)) {
         ++ignoredDraws_;
         return;
     }
+
     // base vertex·base instance는 0으로 고정한다.
     list_->DrawIndexedInstanced(indexCount, instanceCount, firstIndex, 0, 0);
 }
@@ -403,12 +446,15 @@ Result<void> D3D12Device::CopyPassTarget(TextureHandle destination) noexcept {
     if (!recording_) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
+
     const TextureRecord* record = textures_.Find(destination.slot);
     if (record == nullptr) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
-    if (!record->renderTarget || destination == target_.texture || record->width != target_.width ||
-        record->height != target_.height || record->format != target_.format) {
+
+    if (target_.resource == nullptr || !record->renderTarget || destination == target_.texture ||
+        record->width != target_.width || record->height != target_.height ||
+        record->format != target_.format) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -429,6 +475,7 @@ Result<void> D3D12Device::CopyPassTarget(TextureHandle destination) noexcept {
                                             sourceState);
         ++count;
     }
+
     if (resting != D3D12_RESOURCE_STATE_COPY_DEST) {
         toCopy[count] = TransitionSubresource(record->resource.Get(), 0, resting,
                                               D3D12_RESOURCE_STATE_COPY_DEST);
@@ -436,13 +483,16 @@ Result<void> D3D12Device::CopyPassTarget(TextureHandle destination) noexcept {
                                             D3D12_RESOURCE_STATE_COPY_DEST, resting);
         ++count;
     }
+
     if (count != 0) {
         list_->ResourceBarrier(count, toCopy);
     }
+
     list_->CopyResource(record->resource.Get(), target_.resource);
     if (count != 0) {
         list_->ResourceBarrier(count, back);
     }
+
     return Result<void>::Success();
 }
 
@@ -452,15 +502,18 @@ void D3D12Device::Transition(Span<const ResourceTransition> transitions) noexcep
     if (!recording_) {
         return;
     }
+
     for (const ResourceTransition& transition : transitions) {
         if (!CanCombineAccess(transition.after)) {
             ++ignoredDraws_;
             continue;
         }
+
         if (!transition.buffer.IsNull()) {
             LowerBufferTransition(transition);
             continue;
         }
+
         // view의 전이는 자원 상태를 추적하는 원 텍스처 기록에 낸다.
         SlotHandle slot = transition.texture.slot;
         TextureRecord* record = textures_.Find(slot);
@@ -468,14 +521,17 @@ void D3D12Device::Transition(Span<const ResourceTransition> transitions) noexcep
             slot = record->source;
             record = textures_.Find(slot);
         }
+
         if (record == nullptr || transition.range.firstMip >= record->mipLevels) {
             ++ignoredDraws_;
             continue;
         }
+
         // 내용 버림은 지금 낮출 것이 없다(aliasing은 RG5·GX12).
         if (transition.after == ResourceAccess::Discard) {
             continue;
         }
+
         const uint32 first = transition.range.firstMip;
         const uint32 available = record->mipLevels - first;
         const uint32 count =
@@ -492,25 +548,23 @@ void D3D12Device::Transition(Span<const ResourceTransition> transitions) noexcep
                 }
             }
         }
+
         const D3D12_RESOURCE_STATES after = StatesFor(transition.after);
         const bool uav = HasAnyAccess(transition.after, UavAccessMask);
         TrackTransition(*record, slot, first, count, after, uav);
     }
 }
 
-// 버퍼 전이다. 버퍼는 COMMON 암묵 승격과 제출 끝 복귀를 쓰므로 상태 전이를 내지 않는다(GX5:
-// 버퍼 쓰기 명령이 생기는 GX4에서 추적을 더한다). UAV → UAV만 UAV barrier다.
+// 버퍼 전이다. 기록 중 추적 상태(RequireBufferState)로 COMMON 암묵 승격·읽기 누적·barrier를 고르고,
+// UAV → UAV는 UAV barrier다(GX5).
 void D3D12Device::LowerBufferTransition(const ResourceTransition& transition) noexcept {
     const BufferRecord* record = buffers_.Find(transition.buffer.slot);
     if (record == nullptr) {
         ++ignoredDraws_;
         return;
     }
-    if (HasAnyAccess(transition.before, UavAccessMask) &&
-        HasAnyAccess(transition.after, UavAccessMask)) {
-        const D3D12_RESOURCE_BARRIER barrier = UavBarrier(record->resource.Get());
-        list_->ResourceBarrier(1, &barrier);
-    }
+
+    RequireBufferState(record->resource.Get(), StatesFor(transition.after));
 }
 
 // 기록 중 프레임에서 텍스처 mip [first, first + count)를 after로 바꾼다(잠금 안). 바뀌는 mip만
@@ -523,6 +577,7 @@ void D3D12Device::TrackTransition(TextureRecord& record, SlotHandle slot, uint32
     for (uint32 mip = first; mip < first + count && uniform; ++mip) {
         uniform = record.current[mip] == record.current[first];
     }
+
     constexpr uint32 MaxPlanes = 2;
     D3D12_RESOURCE_BARRIER barriers[MaxMipLevels * MaxPlanes] = {};
     uint32 used = 0;
@@ -540,15 +595,19 @@ void D3D12Device::TrackTransition(TextureRecord& record, SlotHandle slot, uint32
             }
         }
     }
+
     if (used == 0 && uavOrder) {
         barriers[used++] = UavBarrier(record.resource.Get());
     }
+
     if (used != 0) {
         list_->ResourceBarrier(used, barriers);
     }
+
     for (uint32 mip = first; mip < first + count; ++mip) {
         record.current[mip] = after;
     }
+
     if (!record.touched) {
         record.touched = true;
         if (!touchedTextures_.TryPushBack(slot)) {
@@ -568,6 +627,7 @@ void D3D12Device::SettleTracking(bool executed) noexcept {
                 record.current[mip] = record.committed[mip];
             }
         }
+
         record.touched = false;
     };
     if (touchedOverflow_) {
@@ -584,6 +644,7 @@ void D3D12Device::SettleTracking(bool executed) noexcept {
             }
         }
     }
+
     touchedTextures_.Clear();
     touchedOverflow_ = false;
 }

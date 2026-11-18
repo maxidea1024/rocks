@@ -127,6 +127,14 @@ struct DeviceFeatures {
     // 깊이 clamp(깊이 clip 끄기)를 쓸 수 있다(D3D 늘 참, Vulkan depthClamp, OpenGL ES
     // GL_EXT_depth_clamp).
     bool depthClamp = false;
+    // 깊이 bias 상한(RasterState::depthBiasClamp)을 쓸 수 있다(D3D 늘 참, Vulkan depthBiasClamp,
+    // OpenGL ES GL_EXT_polygon_offset_clamp).
+    bool depthBiasClamp = false;
+    // alpha-to-coverage를 쓸 수 있다(D3D·Vulkan·OpenGL ES 3.2 모두 core라 늘 참).
+    bool alphaToCoverage = false;
+    // 색 타깃마다 다른 블렌드·쓰기 mask를 쓸 수 있다(D3D 늘 참, Vulkan independentBlend, OpenGL ES
+    // 3.2 core). 거짓이면 모든 타깃의 ColorTargetBlend가 같아야 한다.
+    bool independentBlend = false;
     // VS가 렌더 타깃 array 층(SV_RenderTargetArrayIndex)과 viewport 번호(SV_ViewportArrayIndex)를
     // 낼 수 있다(ShaderSystem 7.2절 7항 vertexViewportLayerOutput, Renderer RQ14). 셰이더 형식
     // 선택이 거르지 않는 런타임 확인 기능이다. D3D12는 늘 참이다(UE와 같다, OPTIONS의

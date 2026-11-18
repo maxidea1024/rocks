@@ -14,10 +14,11 @@
 // 않는다(ShaderSystem P4).
 namespace rocks::graphics {
 
-// 셰이더 단계다. 진입점 이름은 HLSL에서 VSMain·PSMain이다.
+// 셰이더 단계다. 진입점 이름은 HLSL에서 VSMain·PSMain·CSMain이다.
 enum class ShaderStage : uint8 {
     Vertex,
-    Pixel
+    Pixel,
+    Compute
 };
 
 // 셰이더가 쓰는 descriptor 종류다. 값 순서가 binding 번호를 매기는 종류 순서다(ShaderSystem 7.2절

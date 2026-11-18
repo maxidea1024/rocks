@@ -183,6 +183,16 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - staging pool: `StagingPool`에 `HOST_VISIBLE | HOST_COHERENT` 버퍼(`TRANSFER_SRC`)를 대 준다. IO가 바로 쓸 수 있는 고정 주소다.
 - readback: `HOST_CACHED` 우선 버퍼에 `vkCmdCopyImageToBuffer`(빽빽한 행), 버퍼에 `TRANSFER_WRITE → HOST_READ` barrier, 곧바로 제출한다. `TryReadback`은 fence가 끝났을 때만 (필요하면 invalidate 뒤) 복사한다.
 
+### 10.1 파이프라인·패스·명령 기록 확장(GX3·GX4)
+
+- render pass는 열쇠(색 형식·load·store 0–8, 깊이 형식·깊이/스텐실 load·store, 읽기 전용 깊이)마다 캐시한다. layout은 시작·끝 모두 attachment layout(색 `COLOR_ATTACHMENT_OPTIMAL`, 깊이 `DEPTH_STENCIL_ATTACHMENT_OPTIMAL`·읽기 전용 `DEPTH_STENCIL_READ_ONLY_OPTIMAL`)이고 전이는 바깥 barrier(GX5)가 한다. 바깥 의존은 색·깊이 attachment 쓰기 → 읽기·쓰기다. 파이프라인은 같은 형식의 호환 render pass로 만든다(load·store·layout은 호환성에 들지 않는다).
+- framebuffer는 attachment view 묶음(크기 포함)으로 캐시하고, attachment 텍스처를 놓을 때 그 view를 쓰는 framebuffer를 회수 목록으로 넘긴다(텍스처마다 framebuffer를 두던 방식을 없앴다). 스텐실이 있는 깊이 타깃은 깊이·스텐실 aspect 둘의 attachment view를 따로 만든다(기본 view는 깊이 aspect만 읽는다).
+- 전이·dispatch·복사로 render pass를 닫으면 모든 attachment를 LOAD로 다시 연다. attachment가 attachment 상태를 떠났으면 열지 않는다.
+- 파이프라인 상태: 타깃별 블렌드(`independentBlend`가 없으면 같아야 한다), alpha-to-coverage, 깊이 bias(`depthBiasClamp` 기능), `depthClampEnable`, 깊이·스텐실 상태, 기본도형, 동적 viewport·scissor·스텐실 기준. `SetViewport`는 음수 높이로 뒤집는다.
+- compute: 개발 훅이 `CSMain`을 `cs_6_0`으로 컴파일하고 set 0에 읽기(t1–t4)·쓰기(u0–u3, storage buffer·storage texel buffer) binding을 둔다. 모든 파이프라인 layout의 push constant 범위는 VS·PS·CS다. dispatch는 render pass 밖에서 기록하고 descriptor set은 compute bind point에 묶는다. 프레임 descriptor pool에 storage texel buffer 크기를 더했다.
+- 버퍼 쓰기 명령(dispatch·`vkCmdCopyBuffer`·UAV clear의 `vkCmdFillBuffer`) 앞에는 앞선 읽기와의 실행 의존(WAR), 뒤에는 모든 버퍼 읽기·쓰기 단계(간접 인자·정점·index·셰이더·전송)로 가는 메모리 barrier를 둔다. 렌더 그래프 밖 기록의 보수적 순서이고 렌더 그래프가 버퍼 전이를 내면 좁힐 수 있다.
+- `CopyTexture`는 두 mip 0을 복사 원본·대상 상태로 바꿔 `vkCmdCopyImage`(이미지 aspect 그대로)다.
+
 ## 11. 좌표·앞면·컬(C7, ShaderSystem 7.2절 8항)
 
 - viewport는 `y = 높이`, `height = -높이`다(D3D와 같은 NDC y 위를 화면 위로). 깊이 범위 [0, 1]은 Vulkan 기본이다.
@@ -296,3 +306,4 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - 개정 4(2026-11-18): 로깅 LG7(`Graphics/GraphicsLog.h` 범주, 검증 메시지 ID 표 규칙, 12절)과 픽셀 형식 PF3(`GetPixelFormatCaps`, 능력으로 생성 판정, 6절)을 반영했다.
 - 개정 5(2026-11-18): lavapipe 창 경로가 끊긴 데스크톱 세션에서 실패하는 원인을 mesa WSI 소스·GDI 프로브·이전 코드 대조로 확정하고, 세션 연결 판정(`QueryDesktopSessionState`)으로 그 경우만 근거를 단 NOT RUN으로 바꿨다(17절).
 - 개정 6(2026-11-18): RenderBase GX1(장치 능력·MSAA 표본 수)·GX2 버퍼 1단계. 버퍼 용도·버퍼 view·`ReadBuffer`(6절), 파이프라인별 layout과 기록 단위 descriptor pool(6절 descriptor, 개정 5의 텍스처별 고정 set 대체), 켜는 장치 기능·확장, 업로드 끝 barrier에 간접 인자·상수·compute 단계를 더했다.
+- 개정 7(2026-11-18): GX1·GX2 리뷰 반영(업로드 묶음 RAW barrier, descriptor pool 두 배 증가·경고, `atomic64`의 `shaderInt64`, `apiVersion` 실효 판, ray tracing 확장 공개, VS layer·viewport 출력과 `multiViewport`·viewport 수)과 RenderBase GX3·GX4(10.1절): render pass 열쇠·framebuffer 캐시·깊이 attachment view, 파이프라인 고정 기능 상태, compute 파이프라인과 쓰기 view, 간접 그리기·dispatch, 버퍼 쓰기 명령 barrier, 복사·UAV clear.

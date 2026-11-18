@@ -24,6 +24,9 @@
 // - VulkanBindings.cpp: 장치 능력(GX1), 버퍼 view·ReadBuffer(GX2), 그리기 descriptor set
 // - VulkanPipeline.cpp: render pass·파이프라인 layout·파이프라인
 // - VulkanCommands.cpp: 프레임 기록(CommandContext)·EndFrame
+// - VulkanPasses.cpp: 패스 attachment(BeginPass)·render pass 열쇠·framebuffer 캐시(GX4)
+// - VulkanCompute.cpp: compute 파이프라인·dispatch·간접 명령·복사·UAV clear·버퍼 쓰기
+// barrier(GX3·GX4)
 // - VulkanSwapChain.cpp: surface·swapchain·present
 // - VulkanUpload.cpp: 업로드 ring·staging·readback
 // - VulkanTiming.cpp: timestamp·calibration·debug label·검증 messenger
@@ -46,8 +49,14 @@ inline constexpr uint32 SamplerCapacity = 256;
 // - 1)이다. 넘으면 그 뒤 그리기는 무시되고(IgnoredDraws) 처음 한 번 경고 로그를 남긴다.
 inline constexpr uint32 DescriptorSetsPerPool = 1024;
 inline constexpr uint32 MaxDescriptorPoolsPerRecord = 8;
-// 파이프라인 하나의 descriptor binding 수 상한이다(PS 텍스처·샘플러 2 + 단계마다 버퍼 view 4).
+// 파이프라인 하나의 descriptor binding 수 상한이다(PS 텍스처·샘플러 2 + 단계마다 버퍼 view 4,
+// compute는 읽기 4 + 쓰기 4).
 inline constexpr uint32 MaxPipelineBindings = 2 + 2 * MaxDrawBufferViews;
+// framebuffer 하나의 attachment 수 상한이다(색 MaxColorTargets + 깊이 1).
+inline constexpr uint32 MaxPassAttachments = MaxColorTargets + 1;
+// 그리기 상수 push constant 범위의 단계다(모든 파이프라인 layout이 같은 범위를 둬 서로 호환된다).
+inline constexpr VkShaderStageFlags ConstantStages =
+    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
 inline constexpr uint32 RequestedSwapChainImages = 3;
 inline constexpr uint32 MaxSwapChainImages = 8;
 // 업로드 ring 안 복사 원본 정렬이다(texel 크기 4와 버퍼 복사 모두 만족).
@@ -91,6 +100,7 @@ struct BufferViewRecord {
     SlotHandle source;
     uint64 offset = 0;
     uint64 range = 0;
+    PixelFormat format = PixelFormat::Unknown;
     BufferViewKind kind = BufferViewKind::Typed;
     ViewAccess access = ViewAccess::Read;
     PixelShaderType shaderType = PixelShaderType::None;
@@ -101,9 +111,10 @@ struct BufferViewRecord {
 struct TextureRecord {
     VkImage image = VK_NULL_HANDLE;
     VkImageView view = VK_NULL_HANDLE;
+    // 깊이·스텐실 attachment용 view(깊이와 스텐실 aspect 모두)다. 기본 view는 깊이 aspect만
+    // 읽으므로 스텐실 plane이 있는 깊이 타깃에만 따로 만든다. 없으면 view를 attachment로 쓴다.
+    VkImageView attachmentView = VK_NULL_HANDLE;
     MemoryAllocation memory;
-    // RenderTarget의 framebuffer(CLEAR·LOAD render pass 모두 호환)다.
-    VkFramebuffer framebuffer = VK_NULL_HANDLE;
     uint32 width = 0;
     uint32 height = 0;
     uint32 mipLevels = 1;
@@ -140,7 +151,9 @@ enum class BindingSource : uint8 {
     // SetTexture 텍스처의 샘플러(s0)
     Sampler,
     // SetBufferView slot(t1–t4)
-    BufferView
+    BufferView,
+    // SetWritableBufferView slot(compute u0–u3)
+    WritableBufferView
 };
 
 struct PipelineBinding {
@@ -151,9 +164,9 @@ struct PipelineBinding {
     uint32 slot = 0;
 };
 
-// 파이프라인과 그 layout이다. set 0(VS)·1(PS) layout은 셰이더 리플렉션에서 만들고(binding이 없는
-// 단계는 장치 공용 빈 layout), push constant 범위는 모든 파이프라인이 같다(공용 layout으로 올린
-// 상수가 이 layout과 호환된다).
+// 파이프라인과 그 layout이다. set 0(VS, compute면 CS)·1(PS) layout은 셰이더 리플렉션에서 만들고
+// (binding이 없는 단계는 장치 공용 빈 layout), push constant 범위는 모든 파이프라인이 같다(공용
+// layout으로 올린 상수가 이 layout과 호환된다).
 struct PipelineRecord {
     VkPipeline pipeline = VK_NULL_HANDLE;
     VkPipelineLayout layout = VK_NULL_HANDLE;
@@ -164,8 +177,39 @@ struct PipelineRecord {
     // binding이 있는 set 비트다.
     uint32 setMask = 0;
     DrawBufferSlots bufferSlots;
+    // compute가 쓰는 slot이다.
+    DrawBufferSlots writeSlots;
     uint32 strides[MaxVertexStreams] = {};
     uint32 streamMask = 0;
+    bool compute = false;
+    // 깊이·스텐실을 쓴다(읽기 전용 깊이 attachment에서 그리기를 거른다).
+    bool writesDepthStencil = false;
+};
+
+// render pass 하나를 가르는 값이다. 형식·표본 수가 같으면 load·store·layout만 다른 render pass끼리
+// 호환이다(사양 "Render Pass Compatibility").
+struct RenderPassKey {
+    uint32 colorCount = 0;
+    VkFormat colors[MaxColorTargets] = {};
+    VkAttachmentLoadOp colorLoad[MaxColorTargets] = {};
+    VkAttachmentStoreOp colorStore[MaxColorTargets] = {};
+    VkFormat depth = VK_FORMAT_UNDEFINED;
+    VkAttachmentLoadOp depthLoad = VK_ATTACHMENT_LOAD_OP_LOAD;
+    VkAttachmentStoreOp depthStore = VK_ATTACHMENT_STORE_OP_STORE;
+    VkAttachmentLoadOp stencilLoad = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    VkAttachmentStoreOp stencilStore = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    bool depthReadOnly = false;
+};
+
+bool SameRenderPassKey(const RenderPassKey& left, const RenderPassKey& right) noexcept;
+
+// attachment view 묶음 하나의 framebuffer다(BeginPass가 만들고 attachment 텍스처를 놓을 때 회수).
+struct FramebufferEntry {
+    VkImageView views[MaxPassAttachments] = {};
+    uint32 count = 0;
+    uint32 width = 0;
+    uint32 height = 0;
+    VkFramebuffer framebuffer = VK_NULL_HANDLE;
 };
 
 // 창 출력 하나다. 패스는 중간 이미지(target)에 그리고 EndFrame이 swapchain 이미지로 blit한다.
@@ -217,6 +261,7 @@ struct Retired {
     VkBuffer buffer = VK_NULL_HANDLE;
     VkImage image = VK_NULL_HANDLE;
     VkImageView view = VK_NULL_HANDLE;
+    VkImageView attachmentView = VK_NULL_HANDLE;
     VkFramebuffer framebuffer = VK_NULL_HANDLE;
     VkPipeline pipeline = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
@@ -329,10 +374,10 @@ public:
     Result<void> ReadTexture(TextureHandle texture, uint32 mipLevel, uint32 plane,
                              Span<uint8> out) noexcept override;
     Result<PipelineHandle> CreatePipeline(const PipelineDesc& desc) noexcept override;
+    Result<PipelineHandle> CreateComputePipeline(const ComputePipelineDesc& desc) noexcept override;
     Result<CommandContext*> BeginFrame(SwapChainHandle swapChain,
                                        const ClearColor& clear) noexcept override;
-    Result<CommandContext*> BeginOffscreen(TextureHandle target,
-                                           const ClearColor& clear) noexcept override;
+    Result<CommandContext*> BeginPass(const PassDesc& pass) noexcept override;
     Result<GpuFencePoint> EndFrame() noexcept override;
     Result<void> ReadPixels(TextureHandle target, Span<uint8> out) noexcept override;
     void Retire(BufferHandle buffer) noexcept override;
@@ -397,12 +442,26 @@ private:
     Result<uint64> WriteTimestamp() noexcept override;
     void PushMarker(StringView name) noexcept override;
     void PopMarker() noexcept override;
+    // --- GX3·GX4(VulkanCompute.cpp) ---
+    void SetWritableBufferView(uint32 slot, BufferViewHandle view) noexcept override;
+    void DrawIndirect(BufferHandle arguments, uint64 offset) noexcept override;
+    void DrawIndexedIndirect(BufferHandle arguments, uint64 offset) noexcept override;
+    void Dispatch(uint32 groupCountX, uint32 groupCountY, uint32 groupCountZ) noexcept override;
+    void DispatchIndirect(BufferHandle arguments, uint64 offset) noexcept override;
+    void SetViewport(const Viewport& viewport) noexcept override;
+    void SetScissor(const ScissorRect& scissor) noexcept override;
+    void SetStencilReference(uint32 reference) noexcept override;
+    Result<void> CopyBuffer(BufferHandle destination, uint64 destinationOffset, BufferHandle source,
+                            uint64 sourceOffset, uint64 size) noexcept override;
+    Result<void> CopyTexture(TextureHandle destination, TextureHandle source) noexcept override;
+    Result<void> ClearWritableBufferView(BufferViewHandle view, uint32 value) noexcept override;
 
-    // 패스 대상이다(RenderTarget 텍스처 또는 swapchain 중간 이미지).
+    // 패스 대상이다(BeginPass attachment 또는 swapchain 중간 이미지). 색 0(image·viewFormat·format·
+    // texture)은 CopyPassTarget이 쓴다.
     struct Target {
         VkImage image = VK_NULL_HANDLE;
         VkFramebuffer framebuffer = VK_NULL_HANDLE;
-        // 그리기 view의 형식(render pass 형식)이다.
+        // 색 0 그리기 view의 형식(render pass 형식)이다.
         VkFormat viewFormat = VK_FORMAT_UNDEFINED;
         // 패스가 끝난 뒤 돌아갈 layout이다.
         VkImageLayout restLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -411,6 +470,13 @@ private:
         PixelFormat format = PixelFormat::Unknown;
         // offscreen 패스의 대상 텍스처다(창 패스는 null).
         TextureHandle texture;
+        // 모든 attachment와 패스 시작 render pass·clear 값이다(창 패스는 색 1개).
+        uint32 colorCount = 0;
+        TextureHandle colors[MaxColorTargets];
+        TextureHandle depth;
+        bool depthReadOnly = false;
+        RenderPassKey key;
+        VkClearValue clears[MaxPassAttachments] = {};
     };
 
     struct BoundVertexBuffer {
@@ -429,10 +495,9 @@ private:
         VkSampler sampler = VK_NULL_HANDLE;
     };
 
-    // render pass 캐시 칸이다(형식 × load op).
+    // render pass 캐시 칸이다.
     struct RenderPassEntry {
-        VkFormat format = VK_FORMAT_UNDEFINED;
-        bool load = false;
+        RenderPassKey key;
         VkRenderPass renderPass = VK_NULL_HANDLE;
     };
 
@@ -524,22 +589,51 @@ private:
 
     // --- VulkanPipeline.cpp ---
     Result<void> CreatePipelineLayout() noexcept;
+    Result<VkRenderPass> RenderPassFor(const RenderPassKey& key) noexcept;
+    // 색 하나·깊이 없는 render pass다(swapchain 중간 이미지).
     Result<VkRenderPass> RenderPassFor(VkFormat format, bool load) noexcept;
     Result<void> MatchVertexInputs(const CompiledShader& vertex,
                                    const VertexLayout& layout) noexcept;
-    // 두 단계의 리플렉션을 고정 배치(PipelineDesc)와 대조하고 set layout·파이프라인 layout·binding
-    // 표를 record에 만든다. 실패하면 만든 객체를 파괴한다.
-    Result<void> BuildPipelineLayout(const CompiledShader& vertex, const CompiledShader& pixel,
-                                     PipelineRecord& record) noexcept;
+    // 단계들의 리플렉션을 고정 배치(PipelineDesc·ComputePipelineDesc)와 대조하고 set
+    // layout·파이프라인 layout·binding 표를 record에 만든다. compute면 pixel은 null이다. 실패하면
+    // 만든 객체를 파괴한다.
+    Result<void> BuildPipelineLayout(const CompiledShader& first, const CompiledShader* pixel,
+                                     bool compute, PipelineRecord& record) noexcept;
     void DestroyPipelineLayout(PipelineRecord& record) noexcept;
     Result<void> Reject(const char* message) noexcept;
     Result<VkShaderModule> CreateShaderModule(const CompiledShader& shader) noexcept;
 
     // --- VulkanCommands.cpp ---
     Result<void> BeginRecording() noexcept;
-    void StartPass(const ClearColor& clear) noexcept;
-    void BeginRenderPass(bool load, const ClearColor* clear) noexcept;
     bool StreamsBound() const noexcept;
+
+    // --- VulkanPasses.cpp ---
+    // 패스를 연다: 대상 attachment 전이, render pass(시작 load), viewport·scissor·스텐실 기준·상수.
+    void StartPass() noexcept;
+    // render pass를 연다. resume이면 모든 attachment를 LOAD로 다시 연다(전이·dispatch·복사 뒤).
+    void BeginRenderPass(bool resume) noexcept;
+    // attachment view 묶음의 framebuffer를 캐시에서 찾고 없으면 만든다.
+    Result<VkFramebuffer> FramebufferFor(VkRenderPass renderPass, const VkImageView* views,
+                                         uint32 count, uint32 width, uint32 height) noexcept;
+    // view를 쓰는 framebuffer를 캐시에서 빼서 회수한다(텍스처를 놓을 때).
+    void RetireFramebuffers(VkImageView view) noexcept;
+    // 패스 attachment가 모두 attachment 상태인지다(다시 열 수 있는지).
+    bool AttachmentsReady() const noexcept;
+    // 텍스처가 지금 패스의 attachment인지다.
+    bool IsPassAttachment(SlotHandle slot) const noexcept;
+
+    // --- VulkanCompute.cpp ---
+    // 그리기 직전 조건(파이프라인 종류·attachment·stream·view·읽기 전용 깊이)을 보고 descriptor를
+    // 묶는다.
+    bool PrepareDraw(bool indexed) noexcept;
+    // dispatch 직전 조건을 보고 render pass를 닫고 descriptor를 묶는다.
+    bool PrepareDispatch() noexcept;
+    // 버퍼를 쓰는 명령(dispatch·복사·fill) 앞뒤의 전역 메모리 barrier다. 앞은 앞선 읽기와의 실행
+    // 의존(WAR), 뒤는 다음 모든 읽기·쓰기가 결과를 보게 한다(RAW·WAW). 렌더 그래프 밖 기록의 보수적
+    // 순서다.
+    void BeforeBufferWrite(VkPipelineStageFlags writeStage) noexcept;
+    void AfterBufferWrite(VkPipelineStageFlags writeStage) noexcept;
+    VkBuffer IndirectArguments(BufferHandle arguments, uint64 offset, uint64 bytes) noexcept;
     void Barrier(VkCommandBuffer buffer, VkImage image, VkImageLayout from, VkImageLayout to,
                  uint32 baseMip = 0, uint32 mipCount = VK_REMAINING_MIP_LEVELS,
                  VkPipelineStageFlags extraSourceStages = 0) const noexcept;
@@ -568,7 +662,7 @@ private:
     void QueryDeviceCaps() noexcept;
     // 그리기 전에 지금 파이프라인의 descriptor set을 기록 pool에서 받아 쓰고 묶는다(바뀐 것이 있을
     // 때만). 묶을 수 없으면(버퍼 view 배치 불일치, pool 한도) 거짓이고 그리기를 무시한다.
-    bool PrepareDescriptors() noexcept;
+    bool PrepareDescriptors(VkPipelineBindPoint bindPoint) noexcept;
     Result<VkDescriptorSet> AllocateFrameSet(VkDescriptorSetLayout layout) noexcept;
     // 기록을 다시 쓸 때 그 기록의 descriptor pool을 비운다.
     void ResetRecordPools(CommandRecord& record) noexcept;
@@ -677,6 +771,7 @@ private:
     SamplerEntry samplers_[SamplerCapacity];
     uint32 samplerCount_ = 0;
     Array<RenderPassEntry> renderPasses_;
+    Array<FramebufferEntry> framebuffers_;
     VkDescriptorSetLayout emptySetLayout_ = VK_NULL_HANDLE;
     // 공용 layout(두 set 모두 빈 layout + push constant)이다. 그리기 상수를 올릴 때 쓴다.
     VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
@@ -713,6 +808,7 @@ private:
     // 그리기 descriptor 입력(SetTexture·SetBufferView)과 다시 써야 하는지다.
     TextureHandle boundTexture_;
     BufferViewHandle boundViews_[MaxDrawBufferViews];
+    BufferViewHandle boundWriteViews_[MaxDrawBufferViews];
     bool descriptorsDirty_ = true;
     // 프레임 descriptor pool이 바닥난 횟수다(첫 번째만 경고 로그).
     uint64 descriptorExhaustions_ = 0;

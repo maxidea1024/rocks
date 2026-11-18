@@ -81,6 +81,9 @@ DeviceCaps QueryDeviceCaps(ID3D11Device* device, IDXGIAdapter1* adapter) noexcep
     DeviceFeatures& features = caps.features;
     features.computeShaders = true;
     features.depthClamp = true;
+    features.depthBiasClamp = true;
+    features.alphaToCoverage = true;
+    features.independentBlend = true;
     features.vertexViewportLayerOutput =
         options3Known && options3.VPAndRTArrayIndexFromAnyShaderFeedingRasterizer;
     // SM 5.0에는 64 bit atomic이 없다(UE는 벤더 확장으로만 켠다, 쓰지 않는다).
