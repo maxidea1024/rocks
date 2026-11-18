@@ -165,6 +165,56 @@ public:
         return slots_[handle.index].value;
     }
 
+    // ---- slot 색인 접근 ----
+    // handle 대신 slot 색인(SlotHandle::index)으로 원소에 닿는다. 다른 자료구조가 handle 전체 대신
+    // 32-bit 색인만 저장하고, 그 색인에서 원소와 지금의 handle을 다시 얻을 때 쓴다(예: 공간
+    // 인덱스의 요소 청크가 swap-remove로 옮긴 프록시의 레코드를 색인으로 찾아 위치를 고친다).
+    // 색인은 그 slot이 비거나 재사용되어도 범위 안에 남으므로, 색인이 가리키는 원소가 처음 저장한
+    // 원소인지는 caller가 generation(HandleAt)으로 확인한다.
+    //
+    // 사용 예:
+    //   const SlotHandle current = records.HandleAt(slotIndex);   // 빈 slot이면 빈 handle
+    //   if (current.generation == storedGeneration) {
+    //       records.ElementAt(slotIndex).position = newPosition;
+    //   }
+
+    // index slot에 살아 있는 원소가 있으면 true다. 범위 밖·빈·폐기 slot은 false다.
+    bool IsOccupiedAt(usize index) const noexcept {
+        return index < slotCount_ && slots_[index].next == Occupied;
+    }
+
+    // index slot의 원소 주소, 살아 있지 않으면 nullptr다. 주소의 수명은 Find와 같다.
+    T* FindAt(usize index) noexcept {
+        return IsOccupiedAt(index) ? &slots_[index].value : nullptr;
+    }
+
+    const T* FindAt(usize index) const noexcept {
+        return IsOccupiedAt(index) ? &slots_[index].value : nullptr;
+    }
+
+    // index slot의 원소다. 살아 있지 않은 slot(범위 밖·빈·폐기)은 Fatal이다.
+    T& ElementAt(usize index) noexcept {
+        CheckOccupied(index);
+        return slots_[index].value;
+    }
+
+    const T& ElementAt(usize index) const noexcept {
+        CheckOccupied(index);
+        return slots_[index].value;
+    }
+
+    // index slot에 살아 있는 원소의 지금 handle이다. 살아 있지 않으면 빈 handle이다.
+    SlotHandle HandleAt(usize index) const noexcept {
+        return IsOccupiedAt(index)
+                   ? SlotHandle{static_cast<uint32>(index), slots_[index].generation}
+                   : SlotHandle{};
+    }
+
+    // 원소를 지워 비어 있고 다음 추가에 재사용할 수 있는 slot 수다(폐기 slot 제외).
+    usize FreeSlotCount() const noexcept {
+        return slotCount_ - size_ - retired_;
+    }
+
     // 원소를 만들고 handle을 반환한다. 인자가 이 배열의 원소를 가리켜도 된다. 모든 slot이 폐기되어
     // 더 만들 수 없으면 CapacityExceeded다. 실패하면 상태를 보존한다.
     Result<SlotHandle> TryAdd(const T& value) noexcept {
@@ -266,6 +316,35 @@ public:
         slots_ = allocation.Value();
         capacity_ = capacity;
         return Result<void>::Success();
+    }
+
+    // slot required개를 재할당 없이 담을 용량을 확보한다(Array::TryEnsureCapacity와 같은 성장
+    // 규칙). 이미 충분하면 아무것도 하지 않는다. TryReserve(SlotCount() + 1)를 추가마다 반복하면
+    // 매번 재할당하지만, 이 함수는 기하급수적으로만 늘린다. "자리 먼저 확보 → 다른 실패 가능 작업 →
+    // 할당 없는 추가" 순서로 여러 저장소를 함께 바꾸는 caller가 실패 시 상태를 보존하는 데 쓴다.
+    //
+    // 사용 예:
+    //   if (records.FreeSlotCount() == 0) {
+    //       auto reserved = records.TryEnsureCapacity(records.SlotCount() + 1);
+    //       if (!reserved) {
+    //           return reserved;   // 아직 아무것도 바꾸지 않았다
+    //       }
+    //   }
+    //   ...   // 다른 저장소 확보
+    //   auto added = records.TryEmplace(value);   // 할당하지 않으므로 OutOfMemory가 없다
+    //
+    // 반환: 성공하면 Capacity() >= required다. 그 뒤 빈 slot이 없어도 SlotCount() < Capacity()인
+    // 동안 TryEmplace는 할당하지 않는다(모든 slot이 폐기되어 MaxSlots에 닿은 CapacityExceeded만
+    // 남는다). 오류: 표현 한도(MaxSlots·byte 수)를 넘으면 Overflow, 할당 실패는 allocator 오류이며
+    // 상태를 보존한다. 실제로 늘면 원소 주소가 바뀐다.
+    Result<void> TryEnsureCapacity(usize required) noexcept {
+        if (required <= capacity_) {
+            return Result<void>::Success();
+        }
+        if (required > Limit()) {
+            return Result<void>::Failure(ErrorCode::Overflow);
+        }
+        return TryReserve(GrowthCapacity(required));
     }
 
     // 살아 있는 원소를 slot 역순으로 지운다. 지운 slot은 TryRemove와 같이 generation이 올라가거나
@@ -463,6 +542,12 @@ private:
     void CheckHandle(SlotHandle handle) const noexcept {
         if (!IsValid(handle)) {
             platform::Fatal("SlotArray handle is stale or invalid");
+        }
+    }
+
+    void CheckOccupied(usize index) const noexcept {
+        if (!IsOccupiedAt(index)) {
+            platform::Fatal("SlotArray slot index is out of range or not occupied");
         }
     }
 

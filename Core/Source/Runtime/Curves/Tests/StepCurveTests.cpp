@@ -97,7 +97,9 @@ TEST(StepCurve_StringAndNameEvaluateVectors) {
         REQUIRE(names.TryAddKey(2.0f, lowerWalk));
         REQUIRE(names.TryAddKey(3.0f, walk));
         REQUIRE(names.TryRemoveRedundantKeys());
-        CHECK(names.KeyCount() == 2); // 가운데 "walk"는 앞뒤와 같아 지운다
+        // 가운데 "walk"는 앞뒤와 같은 Name이지만 표시 철자가 달라 남긴다(지우면 평가 결과의 철자가
+        // 바뀐다 — CV6·CV7 리뷰 6).
+        CHECK(names.KeyCount() == 3);
     }
 
     CHECK(pool.Shutdown());
@@ -235,6 +237,75 @@ TEST(StepCurve_StringAllocationFailureLeavesCurveUnchanged) {
                 CHECK(curve.Keys()[0].time == 0.0f &&
                       curve.Keys()[0].value.View() == StringView("first value with enough bytes"));
                 CHECK(curve.Keys()[1].value.View() == StringView("second value with enough bytes"));
+            }
+        }
+
+        CHECK(injected); // 실패가 실제로 주입됐다
+    }
+}
+
+// 리뷰 6 재현: Name 중복 제거는 표시 철자가 다른 키를 남긴다(평가 결과의 철자가 바뀌지 않는다 —
+// 키 핸들 표의 Name 비교와 같은 판단).
+TEST(StepCurve_NameRedundantKeepsDisplaySpelling) {
+    SystemAllocator allocator;
+    NamePool pool(allocator);
+    REQUIRE(pool.Initialize());
+    {
+        NameStepCurve curve(allocator);
+        REQUIRE(curve.TryAddKey(0.0f, Intern(pool, "Walk")));
+        REQUIRE(curve.TryAddKey(1.0f, Intern(pool, "walk")));
+        REQUIRE(curve.TryAddKey(2.0f, Intern(pool, "Walk")));
+        REQUIRE(curve.TryAddKey(3.0f, Intern(pool, "Walk")));
+        REQUIRE(curve.TryAddKey(4.0f, Intern(pool, "Walk")));
+        REQUIRE(curve.TryRemoveRedundantKeys());
+        REQUIRE(curve.KeyCount() == 4);
+        auto lease = pool.Acquire(curve.Evaluate(1.5f));
+        CHECK(lease && lease.Value().View() == StringView("walk"));
+        CHECK(curve.Keys()[3].time == 4.0f);
+    }
+
+    CHECK(pool.Shutdown());
+}
+
+// String 중복 제거의 할당 실패: 지울 키가 있어야 할당하므로(지울 표·새 키 배열·남은 index 목록)
+// 키를 늘려 실제로 할당하게 한다. 실패하면 OutOfMemory이고 커브(와 남은 index 목록)가 그대로다
+// (주입 단언).
+TEST(StepCurve_StringRemoveRedundantAllocationFailure) {
+    SystemAllocator system;
+    const char* const values[] = {"repeated value long enough to allocate",
+                                  "repeated value long enough to allocate",
+                                  "repeated value long enough to allocate", "the last value"};
+    for (int32 withIndices = 0; withIndices < 2; ++withIndices) {
+        bool injected = false;
+        for (uint64 attempt = 1; attempt <= 6; ++attempt) {
+            test::NFailAllocator failing(system);
+            StringStepCurve curve(failing);
+            for (usize index = 0; index < 4; ++index) {
+                REQUIRE(curve.TryAddKey(static_cast<float>(index), values[index]));
+            }
+
+            Array<usize> kept(failing);
+            REQUIRE(kept.TryPushBack(usize{77}));
+            failing.FailOnAttempt(attempt); // 시도 수는 여기서 0부터 센다
+            const Result<void> result = withIndices != 0 ? curve.TryRemoveRedundantKeys(kept)
+                                                         : curve.TryRemoveRedundantKeys();
+            failing.DisableFailure();
+            if (!result) {
+                injected = true;
+                CHECK(result.Error() == ErrorCode::OutOfMemory);
+                REQUIRE(curve.KeyCount() == 4);
+                for (usize index = 0; index < 4; ++index) {
+                    CHECK(curve.Keys()[index].time == static_cast<float>(index) &&
+                          curve.Keys()[index].value.View() == StringView(values[index]));
+                }
+
+                CHECK(kept.Size() == 1 && kept[0] == 77);
+            } else {
+                REQUIRE(curve.KeyCount() == 3);
+                if (withIndices != 0) {
+                    REQUIRE(kept.Size() == 3);
+                    CHECK(kept[0] == 0 && kept[1] == 2 && kept[2] == 3);
+                }
             }
         }
 

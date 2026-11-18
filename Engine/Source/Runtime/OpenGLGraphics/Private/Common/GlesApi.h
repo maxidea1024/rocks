@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/NumericLimits.h>
 #include <Base/Types.h>
 
 // OpenGL ES 3.2 공통 API의 형식·상수·함수 표다(설계: Docs/Design/OpenGLESGraphics.ko.md 3절).
@@ -322,9 +323,98 @@ inline constexpr GLenum GL_ACTIVE_UNIFORMS = 0x8B86;
 inline constexpr GLenum GL_SAMPLER_BUFFER = 0x8DC2;
 inline constexpr GLenum GL_INT_SAMPLER_BUFFER = 0x8DD0;
 inline constexpr GLenum GL_UNSIGNED_INT_SAMPLER_BUFFER = 0x8DD8;
+// 그 밖의 sampler 타입(배치 대조용, ES 3.2 Table 7.3)이다.
+inline constexpr GLenum GL_SAMPLER_2D = 0x8B5E;
+inline constexpr GLenum GL_SAMPLER_3D = 0x8B5F;
+inline constexpr GLenum GL_SAMPLER_CUBE = 0x8B60;
+inline constexpr GLenum GL_SAMPLER_2D_SHADOW = 0x8B62;
+inline constexpr GLenum GL_SAMPLER_2D_ARRAY = 0x8DC1;
+inline constexpr GLenum GL_SAMPLER_2D_ARRAY_SHADOW = 0x8DC4;
+inline constexpr GLenum GL_SAMPLER_CUBE_SHADOW = 0x8DC5;
+inline constexpr GLenum GL_INT_SAMPLER_2D = 0x8DCA;
+inline constexpr GLenum GL_INT_SAMPLER_3D = 0x8DCB;
+inline constexpr GLenum GL_INT_SAMPLER_CUBE = 0x8DCC;
+inline constexpr GLenum GL_INT_SAMPLER_2D_ARRAY = 0x8DCF;
+inline constexpr GLenum GL_UNSIGNED_INT_SAMPLER_2D = 0x8DD2;
+inline constexpr GLenum GL_UNSIGNED_INT_SAMPLER_3D = 0x8DD3;
+inline constexpr GLenum GL_UNSIGNED_INT_SAMPLER_CUBE = 0x8DD4;
+inline constexpr GLenum GL_UNSIGNED_INT_SAMPLER_2D_ARRAY = 0x8DD7;
+inline constexpr GLenum GL_SAMPLER_CUBE_MAP_ARRAY = 0x900C;
+inline constexpr GLenum GL_SAMPLER_CUBE_MAP_ARRAY_SHADOW = 0x900D;
+inline constexpr GLenum GL_INT_SAMPLER_CUBE_MAP_ARRAY = 0x900E;
+inline constexpr GLenum GL_UNSIGNED_INT_SAMPLER_CUBE_MAP_ARRAY = 0x900F;
+inline constexpr GLenum GL_SAMPLER_2D_MULTISAMPLE = 0x9108;
+inline constexpr GLenum GL_INT_SAMPLER_2D_MULTISAMPLE = 0x9109;
+inline constexpr GLenum GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE = 0x910A;
+inline constexpr GLenum GL_SAMPLER_2D_MULTISAMPLE_ARRAY = 0x910B;
+inline constexpr GLenum GL_INT_SAMPLER_2D_MULTISAMPLE_ARRAY = 0x910C;
+inline constexpr GLenum GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE_ARRAY = 0x910D;
+// image uniform 타입 범위다(GL_IMAGE_1D 0x904C부터 GL_UNSIGNED_INT_IMAGE_2D_MULTISAMPLE_ARRAY
+// 0x906C까지, ES 타입은 이 안에 있다).
+inline constexpr GLenum GL_FIRST_IMAGE_TYPE = 0x904C;
+inline constexpr GLenum GL_LAST_IMAGE_TYPE = 0x906C;
 inline constexpr GLenum GL_SHADER_STORAGE_BLOCK = 0x92E6;
 inline constexpr GLenum GL_ACTIVE_RESOURCES = 0x92F5;
 inline constexpr GLenum GL_BUFFER_BINDING = 0x9302;
+inline constexpr GLenum GL_BUFFER_VARIABLE = 0x92E5;
+inline constexpr GLenum GL_NUM_ACTIVE_VARIABLES = 0x9304;
+inline constexpr GLenum GL_ACTIVE_VARIABLES = 0x9305;
+inline constexpr GLenum GL_TOP_LEVEL_ARRAY_STRIDE = 0x930D;
+// --- 파이프라인 고정 기능 상태(GX3, ES 3.2 core) ---
+inline constexpr GLenum GL_STENCIL_TEST = 0x0B90;
+inline constexpr GLenum GL_POLYGON_OFFSET_FILL = 0x8037;
+inline constexpr GLenum GL_SAMPLE_ALPHA_TO_COVERAGE = 0x809E;
+// GL_EXT_depth_clamp(ES)·데스크톱 GL core의 깊이 clamp 스위치다(같은 값).
+inline constexpr GLenum GL_DEPTH_CLAMP = 0x864F;
+inline constexpr GLenum GL_FRONT_AND_BACK = 0x0408;
+inline constexpr GLenum GL_POINTS = 0x0000;
+inline constexpr GLenum GL_LINES = 0x0001;
+inline constexpr GLenum GL_LINE_STRIP = 0x0003;
+inline constexpr GLenum GL_TRIANGLE_STRIP = 0x0005;
+inline constexpr GLenum GL_NEVER = 0x0200;
+inline constexpr GLenum GL_LESS = 0x0201;
+inline constexpr GLenum GL_EQUAL = 0x0202;
+inline constexpr GLenum GL_LEQUAL = 0x0203;
+inline constexpr GLenum GL_GREATER = 0x0204;
+inline constexpr GLenum GL_NOTEQUAL = 0x0205;
+inline constexpr GLenum GL_GEQUAL = 0x0206;
+inline constexpr GLenum GL_ALWAYS = 0x0207;
+inline constexpr GLenum GL_KEEP = 0x1E00;
+inline constexpr GLenum GL_REPLACE = 0x1E01;
+inline constexpr GLenum GL_INCR = 0x1E02;
+inline constexpr GLenum GL_DECR = 0x1E03;
+inline constexpr GLenum GL_INVERT = 0x150A;
+inline constexpr GLenum GL_INCR_WRAP = 0x8507;
+inline constexpr GLenum GL_DECR_WRAP = 0x8508;
+inline constexpr GLenum GL_SRC_COLOR = 0x0300;
+inline constexpr GLenum GL_ONE_MINUS_SRC_COLOR = 0x0301;
+inline constexpr GLenum GL_DST_ALPHA = 0x0304;
+inline constexpr GLenum GL_ONE_MINUS_DST_ALPHA = 0x0305;
+inline constexpr GLenum GL_DST_COLOR = 0x0306;
+inline constexpr GLenum GL_ONE_MINUS_DST_COLOR = 0x0307;
+inline constexpr GLenum GL_SRC_ALPHA_SATURATE = 0x0308;
+inline constexpr GLenum GL_FUNC_ADD = 0x8006;
+inline constexpr GLenum GL_MIN = 0x8007;
+inline constexpr GLenum GL_MAX = 0x8008;
+inline constexpr GLenum GL_FUNC_SUBTRACT = 0x800A;
+inline constexpr GLenum GL_FUNC_REVERSE_SUBTRACT = 0x800B;
+// --- 패스 attachment(GX4) ---
+inline constexpr GLenum GL_COLOR = 0x1800;
+inline constexpr GLenum GL_DEPTH = 0x1801;
+inline constexpr GLenum GL_STENCIL = 0x1802;
+inline constexpr GLenum GL_NONE = 0;
+inline constexpr GLenum GL_DEPTH_ATTACHMENT = 0x8D00;
+inline constexpr GLenum GL_DEPTH_STENCIL_ATTACHMENT = 0x821A;
+// --- compute·간접 명령·복사(GX3·GX4, ES 3.1·3.2 core) ---
+inline constexpr GLenum GL_COMPUTE_SHADER = 0x91B9;
+inline constexpr GLenum GL_DRAW_INDIRECT_BUFFER = 0x8F3F;
+inline constexpr GLenum GL_DISPATCH_INDIRECT_BUFFER = 0x90EE;
+inline constexpr GLenum GL_READ_WRITE = 0x88BA;
+// 모든 memory barrier bit다(GL 헤더의 0xFFFFFFFF).
+inline constexpr GLbitfield GL_ALL_BARRIER_BITS = NumericLimits<GLbitfield>::Max();
+inline constexpr GLenum GL_IMAGE_BUFFER = 0x9051;
+inline constexpr GLenum GL_INT_IMAGE_BUFFER = 0x905C;
+inline constexpr GLenum GL_UNSIGNED_INT_IMAGE_BUFFER = 0x9067;
 // --- debug(KHR_debug, ES 3.2 core) ---
 inline constexpr GLenum GL_DEBUG_SOURCE_APPLICATION = 0x824A;
 inline constexpr GLenum GL_DEBUG_TYPE_ERROR = 0x824C;
@@ -417,6 +507,34 @@ inline constexpr GLenum GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR = 0x824E;
     X(void, DeleteFramebuffers, (GLsizei, const GLuint*))                                          \
     X(void, BindFramebuffer, (GLenum, GLuint))                                                     \
     X(void, FramebufferTexture2D, (GLenum, GLenum, GLenum, GLuint, GLint))                         \
+    X(void, Enablei, (GLenum, GLuint))                                                             \
+    X(void, Disablei, (GLenum, GLuint))                                                            \
+    X(void, BlendFuncSeparatei, (GLuint, GLenum, GLenum, GLenum, GLenum))                          \
+    X(void, BlendEquationSeparatei, (GLuint, GLenum, GLenum))                                      \
+    X(void, ColorMaski, (GLuint, GLboolean, GLboolean, GLboolean, GLboolean))                      \
+    X(void, DepthFunc, (GLenum))                                                                   \
+    X(void, DepthMask, (GLboolean))                                                                \
+    X(void, DepthRangef, (GLfloat, GLfloat))                                                       \
+    X(void, StencilFuncSeparate, (GLenum, GLenum, GLint, GLuint))                                  \
+    X(void, StencilOpSeparate, (GLenum, GLenum, GLenum, GLenum))                                   \
+    X(void, StencilMaskSeparate, (GLenum, GLuint))                                                 \
+    X(void, PolygonOffset, (GLfloat, GLfloat))                                                     \
+    X(void, Scissor, (GLint, GLint, GLsizei, GLsizei))                                             \
+    X(void, ClearBufferfv, (GLenum, GLint, const GLfloat*))                                        \
+    X(void, ClearBufferiv, (GLenum, GLint, const GLint*))                                          \
+    X(void, ClearBufferuiv, (GLenum, GLint, const GLuint*))                                        \
+    X(void, ClearBufferfi, (GLenum, GLint, GLfloat, GLint))                                        \
+    X(void, DrawBuffers, (GLsizei, const GLenum*))                                                 \
+    X(void, DispatchCompute, (GLuint, GLuint, GLuint))                                             \
+    X(void, DispatchComputeIndirect, (GLintptr))                                                   \
+    X(void, MemoryBarrier, (GLbitfield))                                                           \
+    X(void, BindImageTexture, (GLuint, GLuint, GLint, GLboolean, GLint, GLenum, GLenum))           \
+    X(void, DrawArraysIndirect, (GLenum, const void*))                                             \
+    X(void, DrawElementsIndirect, (GLenum, GLenum, const void*))                                   \
+    X(void, CopyBufferSubData, (GLenum, GLenum, GLintptr, GLintptr, GLsizeiptr))                   \
+    X(void, CopyImageSubData,                                                                      \
+      (GLuint, GLenum, GLint, GLint, GLint, GLint, GLuint, GLenum, GLint, GLint, GLint, GLint,     \
+       GLsizei, GLsizei, GLsizei))                                                                 \
     X(GLenum, CheckFramebufferStatus, (GLenum))                                                    \
     X(void, BlitFramebuffer,                                                                       \
       (GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLbitfield, GLenum))                \

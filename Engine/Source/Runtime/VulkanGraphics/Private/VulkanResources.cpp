@@ -577,30 +577,17 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
     }
 
     cleanup.view = record.view;
-    if (renderTarget) {
-        auto renderPass = RenderPassFor(format.format, false);
-        if (!renderPass) {
-            DestroyRetired(cleanup);
-            return Result<TextureHandle>::Failure(renderPass.Error());
-        }
-
-        VkFramebufferCreateInfo framebuffer = {};
-        framebuffer.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-        framebuffer.renderPass = renderPass.Value();
-        framebuffer.attachmentCount = 1;
-        framebuffer.pAttachments = &record.view;
-        framebuffer.width = desc.width;
-        framebuffer.height = desc.height;
-        framebuffer.layers = 1;
-        result =
-            functions_.vkCreateFramebuffer(device_, &framebuffer, nullptr, &record.framebuffer);
+    if (depthTarget && (format.aspect & VK_IMAGE_ASPECT_STENCIL_BIT) != 0) {
+        viewInfo.subresourceRange.aspectMask = format.aspect;
+        viewInfo.components = {};
+        result = functions_.vkCreateImageView(device_, &viewInfo, nullptr, &record.attachmentView);
         if (result != VK_SUCCESS) {
-            record.framebuffer = VK_NULL_HANDLE;
+            record.attachmentView = VK_NULL_HANDLE;
             DestroyRetired(cleanup);
-            return FailWith<TextureHandle>("vkCreateFramebuffer", result);
+            return FailWith<TextureHandle>("vkCreateImageView (attachment)", result);
         }
 
-        cleanup.framebuffer = record.framebuffer;
+        cleanup.attachmentView = record.attachmentView;
     }
 
     auto added = textures_.TryAdd(Move(record));
@@ -776,9 +763,12 @@ void VulkanDevice::RetireTextureRecord(SlotHandle slot, TextureRecord& record) n
     if (!record.isView) {
         entry.image = record.image;
         entry.memory = record.memory;
-        entry.framebuffer = record.framebuffer;
     }
+    // 이 view를 attachment로 쓴 framebuffer를 먼저 회수한다(같은 fence 뒤에 파괴된다).
+    RetireFramebuffers(record.view);
+    RetireFramebuffers(record.attachmentView);
     entry.view = record.view;
+    entry.attachmentView = record.attachmentView;
     RetireEntry(Move(entry));
     auto removed = textures_.TryRemove(slot);
     (void)removed;

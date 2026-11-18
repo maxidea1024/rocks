@@ -209,26 +209,36 @@ TEST(ShaderFormat_EngineWindowsProfileCarriesDecisionsAndMeasurements) {
     CHECK((pc->deviceRequirements & DeviceRequiresGlArbEs32Compatibility) != 0);
     CHECK((pc->deviceRequirements & DeviceRequiresGlArbClipControl) != 0);
 
-    // 프로필 공통 상한(7.2절 4항): 데스크톱 공통에 GLES 모바일 상한이 더해진다.
-    const ShaderFormatLimits common = CommonLimits(profile.Formats());
-    CHECK(common.constantBuffers == 12u);
-    CHECK(common.sampledTextures == 16u);
-    CHECK(common.storageBuffers == 4u);
-    CHECK(common.storageImages == 4u);
-    CHECK(common.samplers == 16u);
-    CHECK(common.uavTotal == 8u);
-    CHECK(common.uavStages == ShaderStageCompute);
-    CHECK(common.renderTargets == 4u);
-    CHECK(common.interStageVectors == 15u);
-    CHECK(common.rootConstantBytes == 128u);
-    CHECK(common.uniformVectors[0] == 256u && common.uniformVectors[1] == 224u &&
-          common.uniformVectors[2] == 128u);
+    // 상한은 job 형식마다 따로다(7.2절 4항, 개정 13·14·17). 데스크톱 형식은 넓고 GLES·D3D11은
+    // 16이다.
+    const ShaderFormatDefinition* vulkan = Find(profile, "VULKAN_SM5");
+    REQUIRE(vulkan != nullptr);
+    CHECK(d3d12->limits.sampledTextures == 128u);
+    CHECK(d3d11->limits.sampledTextures == 16u);
+    CHECK(vulkan->limits.sampledTextures == 128u);
+    CHECK(vulkan->limits.renderTargets == 8u);
+    CHECK(pc->limits.sampledTextures == 16u && android->limits.sampledTextures == 16u);
+    CHECK(pc->limits.renderTargets == 4u);
+    CHECK(pc->limits.interStageVectors == 15u);
+    CHECK(pc->limits.uniformVectors[0] == 256u && pc->limits.uniformVectors[1] == 224u &&
+          pc->limits.uniformVectors[2] == 128u);
+    CHECK(vulkan->limits.uniformVectors[0] == NoShaderLimit);
+    for (const ShaderFormatDefinition& format : profile.Formats()) {
+        CHECK(format.limits.samplers == 16u);
+        CHECK(format.limits.uavStages == ShaderStageCompute);
+        CHECK(format.limits.rootConstantBytes == 128u);
+    }
 
-    // 공통 상한은 프로필에 든 형식만 본다: GLES를 뺀 데스크톱 형식에는 모바일 상한이 없다.
-    const ShaderFormatLimits desktop =
-        CommonLimits(Span<const ShaderFormatDefinition>(profile.formats, 3));
-    CHECK(desktop.interStageVectors == 16u);
-    CHECK(desktop.uniformVectors[0] == NoShaderLimit);
+    // 결정 12: VS layer·viewport 출력은 D3D12·Vulkan(·Metal)에 런타임 확인 기능으로 있고 D3D11(S14
+    // 뒤 SH5)·GLES에는 없다.
+    CHECK((d3d12->features & ShaderFeatureVertexViewportLayerOutput) != 0);
+    CHECK((vulkan->features & ShaderFeatureVertexViewportLayerOutput) != 0);
+    CHECK((d3d11->features & ShaderFeatureVertexViewportLayerOutput) == 0);
+    CHECK((pc->features & ShaderFeatureVertexViewportLayerOutput) == 0);
+    CHECK((android->features & ShaderFeatureVertexViewportLayerOutput) == 0);
+    CHECK(IsRuntimeCheckedShaderFeature(ShaderFeatureVertexViewportLayerOutput));
+    CHECK(!IsRuntimeCheckedShaderFeature(ShaderFeatureCompute));
+    CHECK(!IsRuntimeCheckedShaderFeature(ShaderFeatureWaveOperations));
 }
 
 TEST(ShaderFormat_EngineMacProfileUsesSystemMetalTools) {
@@ -238,6 +248,7 @@ TEST(ShaderFormat_EngineMacProfileUsesSystemMetalTools) {
     REQUIRE(profile.formatCount == 2u);
     const ShaderFormatDefinition* metal = Find(profile, "METAL_SM5");
     REQUIRE(metal != nullptr);
+    CHECK((metal->features & ShaderFeatureVertexViewportLayerOutput) != 0);
     CHECK(metal->hlsl2021);
     CHECK(metal->compiler.mslVersion == (ShaderVersion{2, 4}));
     // 결정 5: metallib은 Windows에서도 Apple Metal Developer Tools가 있으면 만든다.

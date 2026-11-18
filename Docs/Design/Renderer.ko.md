@@ -1,6 +1,6 @@
 # 렌더러(Renderer) 설계
 
-기준일: 2026-11-18, 개정 6(초안). UE 5.8 Renderer 모듈이 맡는 일 가운데 **렌더 경로**(Forward+·Deferred)와 그 위에 올라가는 그림자·투명·하늘·안개·후처리의 구조, GI 두 축과 PathTracing 모드의 연결점을 Rocks에 세우는 설계 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-18, 개정 9(초안). UE 5.8 Renderer 모듈이 맡는 일 가운데 **렌더 경로**(Forward+·Deferred)와 그 위에 올라가는 그림자·투명·하늘·안개·후처리의 구조, GI 두 축과 PathTracing 모드의 연결점을 Rocks에 세우는 설계 스펙이다. 범위는 다음과 같다.
 - 장면 표현과 게임 → 렌더 전달, view와 가시성
 - 공통 frame graph, Forward+와 Deferred가 갈라지는 곳
 - GBuffer layout, light grid, 조명 평가, 그림자, 투명·하늘·안개, 후처리·업스케일 연결
@@ -370,6 +370,7 @@ DeferredLightingPass (전체 화면 PS, 렌더 타깃은 SceneColor 하나·가�
 - 셀 64 px × 64 px, Z 32단, 같은 로그 분포 식이다. reversed-Z이므로 셀 Z는 깊이 버퍼 값이 아니라 **view 공간 Z(전방 거리)**로 계산한다(5.1절). 값은 콘솔 설정(ConfigSystem)으로 두고 프레임 packet snapshot으로 넘긴다.
 - **생성.** CS 두 단계다. (1) 셀마다 view 공간 광원 bounds(구·원뿔, rect는 구로 보수 근사)를 셀 frustum과 판정해 개수를 센다. HZB(furthest)가 유효하면 셀 깊이 범위를 좁힌다. (2) 개수의 prefix sum으로 셀마다 목록 시작 위치를 정하고 index를 쓴다. 그래서 셀당 상한이 없다(UE 연결 목록 방식과 같은 효과, 전체 상한만 있다).
 - **전체 상한 넘침.** 목록 버퍼는 전체 용량을 가진다. 이번 프레임 합계가 용량을 넘으면 넘친 셀에 "넘침" 표시를 하고, 셰이더는 그 셀에서 가시 local 광원 **전체**를 순회한다(느리지만 광원을 빠뜨리지 않는 보수 대체). 넘침 수를 계측에 남기고 다음 프레임에 용량을 늘린다. 계획 13.1절 "overflow 시 객체를 임의로 소실시키지 않고 … 보수적 fallback·다음 frame 재요청"을 따른다.
+- **원소 상한(개정 8).** 목록 버퍼(셀 머리 + 광원 index)와 광원 데이터 버퍼의 용량은 typed buffer view 원소 상한 `DeviceCaps.limits.texelBufferElements` 이하로 둔다(GLES·Vulkan 최소 보장 65536, RenderBase 10.5절·결정 R16). 넘치면 위 넘침 보수 대체를 쓴다. 셀 조회는 셀 좌표를 grid 크기 − 1로 clamp한 뒤 읽는다. 범위 밖 texel fetch 결과에 기대지 않고, 빈 grid(1×1×1 내장 자원, RenderBase 11.1절)도 같은 경로로 셀 0을 읽는다.
 - **형식.** grid 자원은 모든 backend에서 **typed buffer**다: 광원 데이터 `RGBA32Float`, 셀 머리(시작·개수)와 광원 index를 합친 `R32Uint` 하나(7.4절 SRV 예산). PS는 typed buffer SRV로 읽는다. ES 3.2 PS의 storage block 최소 보장이 0이기 때문이고(셰이더 시스템 7.2절 4항), 계획 11.1절의 GLES "typed buffer(texture buffer)로 읽는다"를 모든 backend로 넓혀 셰이더 경로를 하나로 둔다. CS는 같은 버퍼를 typed UAV로 쓴다. 쓰기 형식을 `R32Uint`·`RGBA32Float`로 고른 이유는 GLES image 형식이 이 둘을 받기 때문이다(PixelFormat 8.6절 "image" 표시, `R16Uint`에는 없다). 두 형식이 GLES texel buffer(읽기) 형식인지는 PixelFormat 8.6절에서 아직 대조하지 않았다(**미확인**, RQ9).
 - **광원 데이터.** 광원당 float4 6–8개: 위치·역반경, 색·광량, 방향·spot 각, 종류·그림자 index·IES·광원 함수 index, source 크기. 단위는 계획 14.2절(directional lux, local lumen·candela)이며 렌더러는 GPU에 올리기 전에 내부 단위로 바꾼다.
 - 로컬 광원이 없는 view는 grid 생성을 건너뛰고 빈 grid(내장 자원)를 묶는다(계획 11.1절).
@@ -379,7 +380,7 @@ DeferredLightingPass (전체 화면 PS, 렌더 타깃은 SceneColor 하나·가�
 - 전체 prepass(F4), base pass 깊이 `Equal`·쓰기 없음. UE도 forward에서 전체 prepass를 강제하고 base pass를 깊이 읽기로 둔다(`RU:681–700`, `R/RendererScene.cpp:4408–4419`, `DSR:2105–2114`).
 - base pass가 깊이를 읽기 전용 attachment로 붙인 채 같은 깊이를 SRV로 읽는 기능(Forward+ contact shadow)은 GLES에서 feedback loop이므로 깊이 복사본을 읽는다(7.4절). D3D·Vulkan의 읽기 전용 깊이 + SRV 동시 사용은 GX5 요구(RQ6)다.
 - MSAA 1·2·4(계획 11.1절, 기본 4x는 품질 profile). UE도 MSAA는 forward 경로만 받는다(`EN/Private/SceneUtils.cpp:184–225`, `EN/Classes/Engine/RendererSettings.h:731–736`). MSAA view는 velocity를 depth pass에서 쓰지 않고 별도 pass로 쓴다(UE 조건 `R/VelocityRendering.cpp:821–826`).
-- MSAA와 temporal upscaling을 함께 쓰면 계획 11.1절의 검증된 resolve pass(깊이·velocity는 전경 표본 선택)를 거친다(RQ16).
+- MSAA view의 resolve는 RenderBase 11.2절 유틸리티다(RQ16, 개정 8에서 범위를 맞춤). 깊이는 temporal 유무와 무관하게 늘 resolve한다(전경 표본, HZB·하늘·안개·후처리가 단일 표본 깊이를 읽는다). velocity는 temporal·motion blur가 있을 때 깊이와 같은 표본을 쓴다. 색은 temporal이 있으면 셰이더 휘도 가중이고, 없으면 데스크톱은 같은 셰이더·tiled GPU는 base pass attachment resolve다(RenderBase 결정 R17, 지원표에 표시). 계획 11.1절의 "검증된 resolve pass"가 이것이다.
 - masked 머티리얼은 MSAA에서 alpha-to-coverage를 쓴다(GX3 요구, RQ5).
 
 ### 8.3 base pass 조명 평가
@@ -399,6 +400,7 @@ ForwardOpaquePS
 - `EvaluateLight` 이하는 7.3절과 같은 함수다. UE도 forward base pass가 forward 조명 공통 원문을 include해 같은 grid를 순회한다(`SH/BasePassPixelShader.usf:203–206, 1366, 1480`).
 - UE forward는 그림자 광원을 4채널 동적 그림자 채널에 배정하고("This is used in forward only", `R/DynamicShadowMapChannelBindingHelper.h:15–21`) screen-space 그림자 mask 하나(`PF_B8G8R8A8`)에 투영한다(`R/LightGridInjection.cpp:2045–2080`). 채널을 받지 못한 광원의 동작은 확인하지 못했다(**미확인**). Rocks는 atlas 직접 표본이므로 채널 상한이 없다(9절).
 - 퍼뮤테이션은 정적 조명 정책(없음·라이트맵·프로브)과 동적 GI 표본 유무로 제한하고, 광원 수·그림자 유무는 동적 분기다(14.3절).
+- **반사 capture 알파(개정 8).** capture cube array의 알파는 그 capture가 덮는 비율이다. 겹친 capture를 앞에서부터 `덮음 *= 1 − capture 알파`로 쌓고 남은 비율에 sky light 반사를 더한다(UE `SH/ReflectionEnvironmentComposite.ush:158–163, 242`). 그래서 capture가 없을 때 묶는 검은 cube array는 알파 0이다(RenderBase 11.1절). 반사 합성 세부는 RS7에서 정한다.
 
 ### 8.4 Forward+ 보조 출력
 
@@ -445,7 +447,7 @@ ForwardOpaquePS
 | 거리장·RT 그림자 | SDF(DynamicGI G3)·`RayScene` 공유 | — | 후속 |
 
 - **screen shadow mask를 두지 않는다.** 두 경로가 `EvaluateLight` 안에서 atlas·CSM을 직접 표본한다. 그래서 그림자가 F7(base pass 전)에 있어야 하고(6.2절), Forward+의 채널 상한이 없다. 대가는 픽셀당 그림자 표본 비용이고, 측정 MR1에 포함한다.
-- **point 6면.** 정점 셰이더 layer 출력(`SV_RenderTargetArrayIndex`)은 셰이더 시스템에서 선택 기능·후속이고(7.2절 7항), UE의 geometry shader 대체(`R/ShadowDepthRendering.cpp:1883`)는 Rocks 셰이더 단계(VS·PS·CS)에 없다. 그래서 1차는 면마다 그리기다. layer 출력 지원 장치의 한 번 그리기는 능력 확장이다(결정 RN10).
+- **point 6면.** atlas 타일 6개에 면마다 그린다. 한 번 그리기는 정점 셰이더가 타일마다 viewport를 고르는 viewport index 출력(`SV_ViewportArrayIndex`)이 필요하다. layer 출력(`SV_RenderTargetArrayIndex`)은 cube·array 렌더 타깃용이라 2D atlas(결정 RN10 (가))에는 맞지 않는다(개정 8에서 바로잡음). 셰이더 시스템 개정 17은 두 출력을 런타임 확인 기능 `vertexViewportLayerOutput`으로 열었다(7.2절 7항, 결정 12). UE의 geometry shader 대체(`R/ShadowDepthRendering.cpp:1883`)는 Rocks 셰이더 단계(VS·PS·CS)에 없다. 그래서 1차는 면마다 그리기이고, viewport 출력이 되는 장치의 한 번 그리기는 능력 확장 후속이다(결정 RN10).
 - **atlas 하나.** CSM 단과 local 광원 그림자를 같은 atlas에 둔다. 단계당 SRV 16 예산 때문이다(7.4절). 단마다 크기가 크므로 atlas 기본 크기는 CSM 단 수 × 단 해상도를 담을 수 있게 정한다.
 - **깊이 규약과 형식.** UE를 따른다. 그림자 depth는 보통 Z(가까움 0, `LessEqual`, clear 1)이고 형식은 `D16Unorm`이다(PixelFormat 10절 그림자 기본). 화면 깊이(reversed-Z 무한 원평면)와 다른 이유는 그림자 투영은 유한 원평면이고 UE도 그렇게 쓰기 때문이다. 정밀도가 부족한 장면용 `D32Float` atlas는 설정으로 둔다. 비교 샘플러 함수는 이 규약에 맞춘다(SX13). slope-scaled bias·직교 투영의 깊이 clamp(pancaking)가 GX3에 필요하다(RQ5). 깊이 clamp 능력이 없는 backend는 그림자 depth 정점 셰이더가 깊이를 clamp하는 셰이더 대체를 쓰고 지원표에 그렇게 표시한다(Rocks 설계, UE 대응은 확인하지 않았다).
 - **caster 판정.** 광원 view마다 별도 frustum 판정(V5)이고 caster 집합·revision이 같은 view 묶음끼리만 그림자를 공유한다(계획 11.4절).
@@ -578,7 +580,7 @@ ForwardOpaquePS
 | `RGB10A2Unorm` GBufferA | ○ | ○ | ○ | ○ | ○(core) | PixelFormat 8.6절 |
 | 비교 샘플러(PCF) | ○ | ○ | ○ | ○ | ○ | SX13, RenderBase 9.6절 |
 | Forward+ MSAA 2·4 | △ | △ | △ | △ | △ | 형식별 `Multisample` 능력(PixelFormat 7절) |
-| layer 출력(point 한 번 그리기) | △ | △ | △ | 미확인 | ×(형식 단계 VS·PS·CS) | 셰이더 시스템 2절·7.2절 7항 |
+| VS layer·viewport 출력(point atlas 한 번 그리기는 viewport, 후속) | ○(D3D12는 늘 된다) | △(OPTIONS3, D3D11 형식 포함은 SH5) | △(`VK_EXT_shader_viewport_index_layer`, viewport는 `multiViewport`) | 미확인 | ×(ES core에 없고 `GL_NV_viewport_array2` 확장만, Rocks는 쓰지 않음) | 셰이더 시스템 7.2절 7항·결정 12 |
 | 깊이 clamp(CSM pancaking) | ○ | ○ | △(`depthClamp` 기능) | 미확인 | 미확인(ES 3.2 core 여부·확장 미확인) | RQ5. D3D는 rasterizer depth clip 끄기. 없는 backend는 셰이더에서 깊이를 clamp하는 공개 대체(9.2절) |
 | indirect draw·dispatch | ○ | ○ | ○ | ○ | ○(단일 draw, multi-draw는 확장) | RQ3. GLES 3.1 `glDrawElementsIndirect` |
 | async compute(RG4) | △ | × | △ | △ | × | RenderBase RG4, 계획 11.5절 |
@@ -749,20 +751,21 @@ ForwardOpaquePS
 
 결정 R4(파라미터 구조체가 셰이더 상수·자원 바인딩과 그래프 의존을 함께 맡는다)를 그대로 쓴다. UE uniform buffer는 상수와 자원을 함께 담지만, RenderBase 9.4·9.5절의 공유 slot은 **상수 블록**이고 GLES에서는 uniform `vec4` 배열로 바뀌므로 자원을 담을 수 없다. 그래서 묶음마다 둘로 나눈다.
 - **상수 부분**: 공유 상수 slot(RenderBase 9.5절)에 정적 등록한다.
-- **자원 부분**: "펼쳐 넣기" 파라미터 구조체(RenderBase 9.6절)로 정의하고, 그 자원을 쓰는 pass의 파라미터 구조체가 포함한다. 그래프 의존도 이 멤버로 생긴다.
+- **자원 부분**: 공유 자원 구조체 `SharedResourceStruct`(RenderBase 9.6절)로 정의하고, 그 자원을 쓰는 pass의 파라미터 구조체가 포함한다. 그래프 의존도 이 멤버로 생긴다.
+- **그리기마다 바뀌는 것**(`PrecomputedLighting`)은 공유 slot이 아니라 그리기별 바인딩이다: 상수 블록 하나와 그리기별 자원 구조체 `DrawResourceStruct`(RenderBase 9.3·9.6절, 개정 8). UE도 그리기마다 묶는다(`R/LightMapRendering.cpp:312–360`).
 
-| 묶음 | 상수 부분(slot) | 자원 부분(펼쳐 넣기) | 수명 | UE 5.8 대응 |
+| 묶음 | 상수 부분(slot) | 자원 부분(공유 자원 구조체) | 수명 | UE 5.8 대응 |
 |---|---|---|---|---|
 | `View` | 행렬(현재·이전, jitter 유무), 카메라 이동 보정 상위·하위, render 크기, 시간, 노출, mip bias, 정적 간접 배율 둘 | — | `PerFrame`(view마다) | view uniform buffer(`EN/Public/SceneView.h:1157`) |
-| `Scene` | 인스턴스 수 | GPU Scene typed buffer들 | `PerFrame` | GPU Scene(`SH/SceneData.ush:351`) |
-| `ForwardLight` | grid 크기·Z 인자, directional 목록(최대 4) | 광원 데이터·grid typed buffer | `PerFrame` | `ForwardLightStruct`(`R/SceneRendering.h:728–763`) |
+| `Scene` | 인스턴스 수 | GPU Scene typed buffer들, 인스턴스 번호 목록 | `PerFrame`(`ViewSet`마다) | GPU Scene(`SH/SceneData.ush:351`) |
+| `ForwardLight` | grid 크기·Z 인자, local 광원 수, directional 목록(최대 4) | 광원 데이터·grid typed buffer | `PerFrame` | `ForwardLightStruct`(`R/SceneRendering.h:728–763`) |
 | `Shadow` | CSM 행렬·분할, atlas 크기 | shadow atlas(비교 샘플러 짝) | `PerFrame` | `R/SceneRendering.h:765–779` |
 | `SceneTextures` | — | 깊이·GBuffer·AO·velocity·HZB | 그래프 수명 | scene textures uniform buffer |
 | `Fog` | height fog 인자 | aerial perspective LUT | `PerFrame` | `FogStruct`(`R/FogRendering.cpp:85`) |
-| `PrecomputedLighting` | 정적 조명 상수 | 라이트맵·프로브 텍스처 | `Persistent`(인스턴스 묶음) | `EN/Public/LightmapUniformShaderParameters.h:16` |
+| `PrecomputedLighting` | 정적 조명 상수(slot 아님, 그리기별 상수 블록) | 라이트맵·프로브 텍스처(그리기별 자원 구조체) | `Persistent`(그리기마다 바인딩) | `EN/Public/LightmapUniformShaderParameters.h:16`, `EN/Public/SceneManagement.h:725` |
 
-- 상수 slot 수(6)는 형식 정의 상수 버퍼 상한(데스크톱 공통 12) 안이다. pass마다 실제 쓰는 멤버만 바인딩 layout에 남는다(RenderBase 9.6절 미사용 멤버 거르기).
-- **GLES uniform 예산.** GLES PS 에뮬레이션 상한은 `vec4` 224개다(형식 정의). 위 상수의 추정 크기는 `View` 약 40, `ForwardLight` 약 20, `Shadow` 약 20, `Fog` 약 8, `PrecomputedLighting` 약 8, `Scene` 1로 합계 약 100이다. 머티리얼 상수와 루트 상수(최대 8)를 더해도 남지만 실제 크기는 구조체를 정한 뒤 워커 검사로 확인한다(**미확인**, 추정값).
+- 공유 상수 slot은 다섯(`View`·`Scene`·`ForwardLight`·`Shadow`·`Fog`)이다. pass 셰이더 하나의 상수 버퍼는 slot 5 + `PrecomputedLighting` 1 + 머티리얼 1 + 머티리얼 파라미터 컬렉션 최대 2 + pass 1 = 최대 10이고 형식 정의 상수 버퍼 상한(12–14) 안이다(RenderBase 9.5절, 개정 8). pass마다 실제 쓰는 멤버만 바인딩 layout에 남는다(RenderBase 9.6절 미사용 멤버 거르기).
+- **GLES uniform 예산.** GLES PS 에뮬레이션 상한은 `vec4` 224개다(형식 정의). 위 상수의 추정 크기는 `View` 약 40, `ForwardLight` 약 20, `Shadow` 약 20, `Fog` 약 8, `PrecomputedLighting` 약 8, `Scene` 1로 합계 약 100이다. 워커는 이 합에 머티리얼 상수·머티리얼 파라미터 컬렉션·pass 상수·루트 상수(최대 8)를 더한 단계 합을 job 형식 상한으로 검사한다(RenderBase 9.5절). 실제 크기는 구조체를 정한 뒤 확인한다(**미확인**, 추정값). 컬렉션 크기 상한은 이 합의 나머지에서 정한다(머티리얼 시스템 9.7절).
 - **그리기별 값.** 인스턴스 offset은 루트 상수(`ROCKS_ROOT_CONSTANTS`, 128 byte, 셰이더 시스템 7.2절 2항)로 넘긴다. `SV_InstanceID`에 base instance가 들어가는지가 backend마다 다르므로 시스템 값에 기대지 않는다(셰이더 시스템 7.2절 7항).
 - **GPU가 만드는 간접 draw(RS4).** GLES 3.1 간접 draw 명령의 base instance 자리는 0이어야 하므로 base instance로 offset을 넘길 수 없다. 1차 규칙: 그리기 항목 하나에 간접 draw 하나를 CPU가 기록하고 그 직전에 루트 상수로 인스턴스 offset을 둔다. GPU culling은 인스턴스 수와 인스턴스 index 목록만 쓴다. draw 여러 개를 한 호출로 묶는 것(D3D12 command signature의 루트 상수, Vulkan multi-draw)은 backend별 최적화로 후속이다. GLES base instance 규칙의 사양 원문 대조는 **미확인**(RQ3).
 
@@ -865,23 +868,23 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 
 | ID | 대상 | 요구 | 기한 |
 |---|---|---|---|
-| RQ1 | GX2 버퍼 | 용도: structured(SRV·UAV), typed buffer(SRV·UAV, `PixelFormat` 지정), 간접 인자. typed buffer 형식 `R32Uint`·`RGBA32Float`(GLES image 가능 형식, 8.1절) | RS0 |
+| RQ1 | GX2 버퍼 | 용도: structured(SRV·UAV), typed buffer(SRV·UAV, `PixelFormat` 지정), 간접 인자. typed buffer 형식 `R32Uint`·`RGBA32Float`(GLES image 가능 형식, 8.1절) **구현(2026-11-18, GX2 버퍼, RenderBase 4.4절)**: 버퍼 용도 비트·structured·raw·typed·간접 인자, 버퍼 view, `ReadBuffer`. GLES typed 형식은 ES 3.2 표 대조(`R32Uint`·`RGBA32Float` 읽기·쓰기 가능) | RS0 |
 | RQ2 | GX2 텍스처 | `D32FloatS8Uint`·`D32Float` 깊이, 깊이 읽기 전용 view와 스텐실 plane view(PixelFormat 10절), MSAA, cube array(반사 capture), 3D(LUT·후속 GI), UAV 텍스처, mip별 view(HZB) | RS0·RS3 |
-| RQ3 | GX4 | MRT 최대 8(타깃별 load·store·clear), 깊이 attachment 읽기 전용 표시, 스텐실 ref, dispatch·간접 dispatch, indexed instanced 간접 draw, 텍스처 복사(history·distortion), UAV clear, viewport·scissor | RS0 |
-| RQ4 | GX1 | `maxColorAttachments`, 형식별 MSAA 표본 수, typed UAV load 형식(HZB `R32Float`·`RG16Float`), texel buffer 형식 능력, 깊이 clamp, layer 출력, 64 bit atomic, RT tier, HDR 출력 능력 | RS0·RS3·RS11 |
-| RQ5 | GX3 | 깊이 `GreaterEqual`·`Equal`, slope-scaled 깊이 bias, 깊이 clamp, 타깃별 블렌드(decal), 스텐실 연산, 색 쓰기 mask, alpha-to-coverage | RS0·RS3·RS8 |
+| RQ3 | GX4 | MRT 최대 8(타깃별 load·store·clear), 깊이 attachment 읽기 전용 표시, 스텐실 ref, dispatch·간접 dispatch, indexed instanced 간접 draw, 텍스처 복사(history·distortion), UAV clear, viewport·scissor **구현(2026-11-18, GX4 5beb4540)**: `BeginPass`(색 8·깊이·load·store·clear·읽기 전용 깊이), `Dispatch`·`DispatchIndirect`·`DrawIndirect`·`DrawIndexedIndirect`, `CopyBuffer`·`CopyTexture`(mip 0), `ClearWritableBufferView`, viewport·scissor, 스텐실 ref. 남은 것: mip·slice attachment(GX2 텍스처), 구조화 view UAV clear는 `Unsupported`(D3D12 debug layer 거부), GLES indexed 간접은 index offset 0만 | RS0 |
+| RQ4 | GX1 | `maxColorAttachments`, 형식별 MSAA 표본 수, typed UAV load 형식(HZB `R32Float`·`RG16Float`), texel buffer 형식 능력, 깊이 clamp, VS layer·viewport 출력과 viewport 수, 64 bit atomic, RT tier, HDR 출력 능력 **구현(2026-11-18, GX1)**: `DeviceCaps`(MRT·형식별 MSAA·typed UAV load·texel buffer 형식·깊이 clamp·layer·viewport 출력·atomic64·RT tier·HDR 출력·viewport 수). 측정값은 RenderBase 4.4절 | RS0·RS3·RS11 |
+| RQ5 | GX3 | 깊이 `GreaterEqual`·`Equal`, slope-scaled 깊이 bias, 깊이 clamp, 타깃별 블렌드(decal), 스텐실 연산, 색 쓰기 mask, alpha-to-coverage **구현(2026-11-18, GX3 5beb4540)**: `Graphics/PipelineState.h`의 비교 함수 전부(깊이 기본 reverse-Z `GreaterEqual`), 깊이 bias·기울기·상한, 깊이 clamp, 타깃별 블렌드·색 쓰기 mask, alpha-to-coverage, 스텐실 연산, 기본도형 5종, compute 파이프라인. 능력 밖은 `CheckPipelineFeatures`가 `Unsupported` | RS0·RS3·RS8 |
 | RQ6 | GX5 | 깊이 읽기 전용 상태(DSV 읽기 + SRV 동시, D3D·Vulkan·Metal. GLES는 feedback loop이므로 깊이 복사 경로, 8.2절), compute 사슬의 UAV→SRV, MSAA resolve 상태 | RS0 |
-| RQ7 | RenderBase 9.5·9.6절 | 15.2절 상수 slot 6개 등록, 자원 부분을 펼쳐 넣기 구조체로 공유하는 방식(같은 자원 묶음을 여러 pass가 포함)을 9.6절 규칙에 적는다 | RS0 |
-| RQ8 | RenderBase 10절 | 정점 입력 타입이 GPU Scene typed buffer로 인스턴스 변환을 읽는 규약, 인스턴스 offset 루트 상수 | RS0 |
+| RQ7 | RenderBase 9.5·9.6절 | 15.2절 상수 slot 6개 등록, 자원 부분을 펼쳐 넣기 구조체로 공유하는 방식(같은 자원 묶음을 여러 pass가 포함)을 9.6절 규칙에 적는다. **반영(RenderBase 개정 15, 9.5·9.6절)**: slot 여섯의 선언 위치(`RendererShaders`)·묶는 단위·상수 버퍼 예산, 자원 묶음 규칙(이름 `<묶음>_<멤버>`, 쓰는 멤버만 의존). 개정 8: `PrecomputedLighting`을 그리기별 바인딩으로 옮겨 공유 slot은 다섯, `Scene`은 `ViewSet` 단위, 상수 버퍼 예산 최대 10(RenderBase 개정 16) | RS0 |
+| RQ8 | RenderBase 10절 | 정점 입력 타입이 GPU Scene typed buffer로 인스턴스 변환을 읽는 규약, 인스턴스 offset 루트 상수. **반영(RenderBase 개정 15, 10.5절)**: `InstanceIndices[instanceListOffset + SV_InstanceID]`로 인스턴스 번호를 얻고 GPU Scene typed buffer를 읽는다. 늘 목록을 거친다(RenderBase 결정 R13). 루트 상수 앞 16 byte `MeshDrawConstants`. 개정 8: typed buffer 원소 상한과 넘침(RenderBase 결정 R16) | RS0 |
 | RQ9 | PixelFormat 8.6절 | GLES texel buffer 형식(ES 3.2 Table 8.18)에서 `R32Uint`·`RGBA32Float` 대조(지금 "미대조") | RS1 |
 | RQ10 | 셰이더 시스템 7.2절 4항 | GLES에서 typed buffer SRV가 텍스처 유닛을 차지함을 상한 계산에 명시(이미 "SRV 텍스처(typed buffer 포함)"이나 GLES `samplerBuffer` 관계를 적는다), SPIRV-Cross가 HLSL `Buffer<T>`를 ESSL `samplerBuffer`·`texelFetch`로 내는지 SH0 측정에 추가 | RS1 |
 | RQ11 | 셰이더 시스템 12.1절(형식 정의) | `VULKAN_SM5` `renderTargets`를 8로 올리고 `deviceRequirements`에 `maxColorAttachments ≥ 8`(결정 RN3 (가)) 또는 별도 형식 id. **반영(셰이더 시스템 개정 14)**: (가)로 `renderTargets` 8. 장치 요구는 형식 `limits`를 런타임 형식 선택이 `DeviceCaps`와 대조하는 규칙으로 둔다(별도 어휘 없음) | RS7 전(RS2는 기본 layout으로 진행, 결정 RN3과 같다) |
 | RQ12 | 셰이더 시스템 7.2절 4항·12.1절 | 렌더러 자원(`DeferredLightingPass`·`ForwardOpaque`·`Translucent`)을 GLES 보장치 16 안에 두는 예산표 유지(7.4절) | RS2 |
-| RQ13 | 셰이더 시스템 12.2절(P14) | pass 셰이더 타입의 거르기 함수가 `MaterialShaderTraits`·정점 입력 타입·퍼뮤테이션·형식을 받는 것(SX4와 함께, 머티리얼 MSR5와 같은 요구), 쿠커의 퍼뮤테이션 수 보고 | RS0 |
-| RQ14 | 셰이더 시스템 7.2절 7항 | `SV_Target0–7`과 형식별 MRT 상한 검사(이미 있음) 확인, `SV_RenderTargetArrayIndex`(VS)를 능력 형식으로 열 때의 형식 id 규칙 | RS3(한 번 그리기는 후속) |
-| RQ15 | RenderGraph | `GraphSharedData`로 `SceneTextureSet` 전달, history export·import, mip view 그래프 자원, view 여럿의 한 그래프 구성 | RS0 |
-| RQ16 | RenderBase 11·14절 | MSAA 색·깊이 resolve 셰이더(깊이·velocity 전경 선택, 계획 11.1절)를 그리기 유틸리티로 | RS8 |
-| RQ17 | RenderBase 11.1절 내장 자원 팩 | 빈 light grid, 빈 그림자(깊이 1 = 원평면, 9.2절 보통 Z 규약에서 비교 결과 "그림자 없음"), 검은 cube, 기본 BRDF LUT(또는 시작 때 생성) | RS1·RS3·RS7 |
+| RQ13 | 셰이더 시스템 12.2절(P14) | pass 셰이더 타입의 거르기 함수가 `MaterialShaderTraits`·정점 입력 타입·퍼뮤테이션·형식을 받는 것(SX4와 함께, 머티리얼 MSR5와 같은 요구), 쿠커의 퍼뮤테이션 수 보고. **반영(셰이더 시스템 개정 16, 12.2절)**: 머티리얼 셰이더·정점 입력 축 표지, 머티리얼 시스템 8.3절과 같은 서명과 AND 결합, 형식 사실 조회, 퍼뮤테이션 수 보고 | RS0 |
+| RQ14 | 셰이더 시스템 7.2절 7항 | `SV_Target0–7`과 형식별 MRT 상한 검사(이미 있음) 확인, `SV_RenderTargetArrayIndex`(VS)를 능력 형식으로 열 때의 형식 id 규칙. **반영(셰이더 시스템 개정 16, 7.2절 4·7항)**: MRT는 이미 있었으나 프로필 공통 상한(4)으로 검사하던 것을 job 형식 `renderTargets` 검사로 고쳤다. VS 층 출력은 런타임 확인 기능 `vertexLayerOutput`이고 형식 id를 나누지 않는다(셰이더 시스템 결정 12). 개정 8: 2D atlas 한 번 그리기는 layer가 아니라 viewport 출력이므로 어휘를 `vertexViewportLayerOutput`으로 넓혔다(셰이더 시스템 개정 17), 공통 상한 폐기 | RS3(한 번 그리기는 후속) |
+| RQ15 | RenderGraph | `GraphSharedData`로 `SceneTextureSet` 전달, history export·import, mip view 그래프 자원, view 여럿의 한 그래프 구성. **반영(RenderBase 개정 15, 7.5절)**: 렌더 그래프 별도 문서가 없어 RenderBase 7절에 두었다. 개정 8: `ViewSet` 여럿의 `SceneTextureTable`, history 풀 반납(RenderBase 결정 R15) | RS0 |
+| RQ16 | RenderBase 11·14절 | MSAA 색·깊이 resolve 셰이더(깊이·velocity 전경 선택, 계획 11.1절)를 그리기 유틸리티로. **반영(RenderBase 개정 15, 11.2·14절)**: 색 휘도 가중 평균, 깊이 최댓값(전경), 같은 표본의 velocity, coverage 선택 출력. 개정 8: 깊이 늘·velocity는 temporal 때·색 수단(RenderBase 결정 R17), 8.2절 문구 | RS8 |
+| RQ17 | RenderBase 11.1절 내장 자원 팩 | 빈 light grid, 빈 그림자(깊이 1 = 원평면, 9.2절 보통 Z 규약에서 비교 결과 "그림자 없음"), 검은 cube, 기본 BRDF LUT(또는 시작 때 생성). **반영(RenderBase 개정 15, 11.1절)**: BRDF LUT는 시작 때 CPU 생성 128×32 `RG16Float`(RenderBase 결정 R14). 개정 8: 검은 cube array 알파 0(8.3절 capture 알파) | RS1·RS3·RS7 |
 | RQ18 | 머티리얼 시스템 | 14절 계약 전체, 특히 `SurfaceAttributes`·생성 함수(14.1절)·번호표 참조(`RenderData`, 결정 RN5)·pass 셰이더 목록과 경로·`MaterialShaderTraits` 거르기, (pass, 퍼뮤테이션, 형식)별 머티리얼 텍스처 상한 표시(7.4절), Render Path Switch의 깊이 일치 검사(14.3절). 머티리얼 시스템 개정 2가 10.1·10.4절에 반영했다 | MS2(MAT0) |
 | RQ19 | AssetSystem 메시 단계 | 정적 메시: 위치·패킹 법선·tangent·UV, section·머티리얼 slot, bounds, LOD. 이동 물체 velocity를 위한 이전 위치는 렌더러가 변환으로 계산(skinned는 이전 pose를 렌더러에 넘김) | RS0 |
 | RQ20 | WorldIntegration | `SceneChangeList`·`ViewDesc` 생성, teleport·cut 표시, `RenderNotices` 처리 | RS0 |
@@ -899,15 +902,17 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 | 〃 | 14.2절 | "cascaded/atlas shadow" | 두 경로 직접 표본, point 6면(결정 RN10) |
 | 〃 | 14.3절 조합 규칙 | 동적 GI 결과 소비 | `IndirectLightingInputs` 두 제품(12.2절), 정적 배율 두 값 |
 | RenderBase | 4.4절 GX1·GX2·GX3·GX4·GX5 항목 | 일반 범위 | RQ1–RQ6 항목 추가 |
-| 〃 | 9.5·9.6절 공유 상수 slot·펼쳐 넣기 | 일반 규칙 | 렌더러 상수 slot 목록과 공유 자원 묶음(RQ7) |
-| 〃 | 11.1절 내장 자원 팩 | 1차 내용 | RQ17 |
-| 〃 | 14절 표 "GBuffer 메타"·"MSAA resolve"·"렌더러 모듈 인터페이스" 행 | "Deferred 경로", "Forward+ MSAA", "Renderer 설계" | 이 문서 3.2절 배치(GBuffer 메타 `RendererShaders`, resolve RenderBase 유틸리티 RQ16) |
+| 〃 | 9.5·9.6절 공유 상수 slot·펼쳐 넣기 | 일반 규칙 | 렌더러 상수 slot 목록과 공유 자원 묶음(RQ7). **반영(RenderBase 개정 15)** |
+| 〃 | 7절 렌더 그래프 | 일반 규칙 | RQ15. **반영(RenderBase 개정 15, 7.5절)** |
+| 〃 | 10절 정점 입력 타입 | 인스턴스 데이터 규약 없음 | RQ8. **반영(RenderBase 개정 15, 10.5절)** |
+| 〃 | 11.1절 내장 자원 팩 | 1차 내용 | RQ17. **반영(RenderBase 개정 15)** |
+| 〃 | 14절 표 "GBuffer 메타"·"MSAA resolve"·"렌더러 모듈 인터페이스" 행 | "Deferred 경로", "Forward+ MSAA", "Renderer 설계" | 이 문서 3.2절 배치(GBuffer 메타 `RendererShaders`, resolve RenderBase 유틸리티 RQ16). MSAA resolve 행은 **반영(RenderBase 개정 15, 11.2절)**, GBuffer 메타·렌더러 인터페이스 행은 남았다 |
 | 〃 | 18.1절 "범위 밖" 첫 항목 | "Forward+·Deferred 조명 경로와 GI(계획 11·14절)" | 이 문서 17절 RS0–RS11 참조 |
 | ShaderSystem | 7.2절 4항 | GLES 모바일 상한, SRV 상한을 프로필 공통 상한으로 검사 | RQ10·RQ12, SRV 텍스처는 job 형식 상한으로 검사(RQ22) |
 | 〃 | 7.2절 9항 | 공유·정적 샘플러는 후속 | 머티리얼 공유 샘플러(RQ23) |
 | 〃 | 12.1절 형식 정의 | `VULKAN_SM5` `renderTargets` 4, `sampledTextures` D3D11 128·Vulkan 16 | RQ11(결정 RN3), RQ22(결정 RN13 개정) |
-| 〃 | 12.2절 P14 | 셰이더 타입·거르기 | RQ13 |
-| 〃 | 7.2절 7항 | 시스템 값 목록 | RQ14 |
+| 〃 | 12.2절 P14 | 셰이더 타입·거르기 | RQ13. **반영(셰이더 시스템 개정 16)** |
+| 〃 | 7.2절 7항 | 시스템 값 목록 | RQ14. **반영(셰이더 시스템 개정 16, 4·7항)** |
 | PixelFormat | 8.6절 texel buffer 열 | "미대조" | RQ9 |
 | TextureStreaming | 4.1절 사용 기록·표본 해상도 입력 | 렌더러 쪽 형식 미정 | 렌더러가 넘기는 사용 기록·mip bias 형식(RQ21) |
 | RenderingGuide | 9절 | 계획 기반 개요 | 이 문서 6.2절 순서와 13절 지원표 참조 |
@@ -928,8 +933,8 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 | RN6 | velocity 형식 | (가) 권장: 모든 backend `RG16Float`. (나) UE처럼 `RG16Unorm` 인코딩(GLES는 확장 조건) | RS0 전 |
 | RN7 | 화면 마일스톤 다음 순서 | (가) 권장: RS0 → RS1 Forward+ → RS2 Deferred → RS3 그림자 → …(17.2절). (나) Deferred 먼저 | RS0 착수 전 |
 | RN8 | 하늘·안개 위치 | (가) 권장: 두 경로 모두 전체 화면 pass(F13), 투명은 자기 셰이더. (나) Forward+는 base pass 안에서 안개 적용 | RS5 전 |
-| RN9 | GPU Scene 저장 형태 | (가) 권장: 모든 backend typed buffer(float4) 하나의 경로. MR4로 재검토. (나) 데스크톱 structured + GLES typed 두 경로 | RS0 전 |
-| RN10 | point 그림자 | (가) 권장: atlas 6면 개별 그리기(모든 backend). layer 출력 한 번 그리기는 능력 확장 후속. (나) cube 텍스처 + layer 출력 필수(GLES 불가) | RS3 전 |
+| RN9 | GPU Scene 저장 형태 | (가) 권장: 모든 backend typed buffer(float4) 하나의 경로. MR4로 재검토. 재검토 조건에 typed buffer 원소 상한을 더한다(개정 8): 대상 기기의 `texelBufferElements`가 최소 보장 65536이면 인스턴스 약 5,000이 상한이므로(RenderBase 10.5절·결정 R16) 2D 텍스처 대체 등 저장 형태를 다시 연다(19.2절 측정). (나) 데스크톱 structured + GLES typed 두 경로 | RS0 전 |
+| RN10 | point 그림자 | (가) 권장: atlas 6면 개별 그리기(모든 backend). viewport index 출력 한 번 그리기는 능력 확장 후속(셰이더 시스템 7.2절 7항, 개정 8에서 layer를 viewport로 바로잡음). (나) cube 텍스처 + layer 출력 필수(GLES 불가) | RS3 전 |
 | RN11 | 모듈·이름 | 2절 이름과 3.2절 배치(`RenderData`·`RendererShaders`·`Renderer` 셋). 대안: `RendererShaders`를 두지 않고 쿠커가 `Renderer`를 링크(Host 쿠커에 장치 모듈 의존이 생긴다) | 문서 확정 |
 | RN12 | Forward+ 보조 출력 배치 | 8.4절 roughness 자리(두 번째 `R8Unorm` 타깃 또는 법선 octahedral + roughness 한 타깃). 권장안은 RS10 측정 뒤 | RS10 전 |
 | RN13 | 단계당 SRV 상한 대응(7.4절) | **개정 3(2026-11-18 사용자 결정): 형식별 상한.** 셰이더 원문은 모든 형식에 하나로 유지하고 자원 합치기(grid 버퍼 하나·shadow atlas 하나·atlas 묶기)로 렌더러 자원을 16 안에 둔다. 단계당 SRV 상한은 형식 정의가 정한다(D3D12·Vulkan·Metal 넓게, GLES·D3D11 SM5 16). 머티리얼 텍스처 상한은 (pass, 퍼뮤테이션, 형식)별 `형식 상한 − 렌더러 합계`이고, 모바일 형식에서 넘는 머티리얼은 그 형식 쿠킹의 명시 오류다(RQ22). 넓은 형식이 16장을 넘으려면 공유 샘플러가 필요하다(RQ23). 개정 2의 확정안은 (가) 모든 형식 `16 − 렌더러 합계`였다. 그 밖의 선택지: (나) 16-SRV 형식용 pass 셰이더 타입을 따로 둠(셰이더 타입 수 증가), (다) bindless를 앞당김 | RS1 전 |
@@ -949,6 +954,8 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 | GLES에서 깊이를 읽기 전용 attachment로 붙인 채 샘플하는 것이 feedback loop인지(쓰기를 끈 경우 포함) | 8.2절, RQ6 | ES 3.2 사양 "rendering feedback loop" 절 대조. 확인 전에는 깊이 복사로 설계 |
 | GLES 간접 draw base instance 0 규칙 | 15.2절 | ES 3.1·3.2 사양 `DrawElementsIndirectCommand` 대조 |
 | 공유 상수의 GLES `vec4` 크기 | 15.2절 | 구조체 확정 뒤 워커 검사 |
+| 기기별 typed buffer 원소 상한(`GL_MAX_TEXTURE_BUFFER_SIZE`·`maxTexelBufferElements`) | 8.1절, 결정 RN9, RenderBase 10.5절 | GX1 조회(`DeviceCaps.limits.texelBufferElements`)를 GX1 측정 표에 더하고 Android 대상 기기 표본을 잰다 |
+| GLES의 on-tile MSAA 색 resolve 수단 | 8.2절, RenderBase 결정 R17 | RS8 측정(확장 유무) |
 | UE path tracing에서 depth prepass·velocity 유지 여부 | 12.3절 | `DSR` path tracing 분기 전후 조사 |
 | GLES texel buffer 형식(`R32Uint`·`RGBA32Float`) | 8.1절, RQ9 | **확인(2026-11-18)**: Table 8.18(Khronos glTexBuffer ES3 refpage)에 둘 다 있고 image 형식이라 typed SRV·UAV 모두 된다. GTX 1060 ES context에서 SRV 생성·VS·PS 읽기 픽셀 대조(PixelFormat.ko.md 14.3절) |
 | SPIRV-Cross의 HLSL `Buffer<T>` → ESSL `samplerBuffer` 변환 | RQ10 | SH0 측정 |
@@ -967,3 +974,6 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 - 개정 4(2026-11-18): 셰이더 시스템 개정 13의 RQ22·RQ23 반영 상태를 적었다(7.4절, 19.1절 표, 18절 RQ22·RQ23).
 - 개정 5(2026-11-18): 19.2절 미확인 3건(GLES texel buffer 형식 RQ9 확인, Vulkan `maxColorAttachments`·단계당 SRV·샘플러 분포)에 RenderBase GX1 측정을 적었다. RQ11·RQ22 값 결정은 하지 않았다.
 - 개정 6(2026-11-18): 셰이더 시스템 개정 14 반영(RQ11·RQ22 Vulkan 값, 19.1절 MRT 행).
+- 개정 7(2026-11-18): 18절 요구 RQ7·RQ8·RQ15·RQ16·RQ17(RenderBase 개정 15)과 RQ13·RQ14(셰이더 시스템 개정 16) 반영 상태를 18.1·18.2절에 적었다. RQ14를 반영하면서 MRT 상한을 프로필 공통 상한으로 검사하던 빈틈을 셰이더 시스템에서 고쳤다.
+- 개정 8(2026-11-18): RenderBase 개정 16·셰이더 시스템 개정 17(교차 검증 반영)에 맞췄다. 8.1절 원소 상한과 셀 좌표 clamp, 8.2절 MSAA resolve 범위(결정 R17), 8.3절 반사 capture 알파, 9.2절과 결정 RN10의 point 한 번 그리기를 layer가 아니라 viewport 출력으로 바로잡음, 13.1절 지원표 행, 15.2절 `PrecomputedLighting` 그리기별 바인딩·`ForwardLight` local 광원 수·`Scene`의 `ViewSet` 단위·상수 버퍼 예산, 결정 RN9 재검토 조건, 19.2절 측정 두 건, 18.1절 RQ4·7·8·14–17 행.
+- 개정 9(2026-11-18): Graphics GX1–GX4 구현(98b6e524)을 18절 RQ1·RQ3·RQ4·RQ5에 적었다.

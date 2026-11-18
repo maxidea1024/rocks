@@ -32,11 +32,9 @@ inline constexpr uint64 RemovedFenceValue = NumericLimits<uint64>::Max();
 inline constexpr uint32 TimestampQueryCount = TimestampFrameSlots * MaxTimestampsPerFrame;
 // CalibrateClocks가 disjoint 구간을 만나면 다시 재는 최대 횟수다(UE CalibrateTimers와 같다).
 inline constexpr uint32 MaxCalibrationAttempts = 10;
-// 회수 항목 하나가 쥐는 COM 객체 수의 상한이다(텍스처: 자원·SRV·RTV, 파이프라인: VS·PS·입력
-// layout, 스왑체인: 스왑체인·버퍼·RTV).
-inline constexpr usize MaxRetiredObjects = 3;
-// 컬 모드 수(CullMode None·Back·Front)다. 래스터 상태를 모드마다 하나씩 만든다.
-inline constexpr usize CullModeCount = 3;
+// 회수 항목 하나가 쥐는 COM 객체 수의 상한이다(텍스처: 자원·SRV·RTV·DSV·읽기 전용 DSV,
+// 파이프라인: VS·PS·입력 layout·blend·raster·depth-stencil·CS, 스왑체인: 스왑체인·버퍼·RTV).
+inline constexpr usize MaxRetiredObjects = 7;
 // dxgidebug.h의 DXGI_DEBUG_DXGI다(dxguid.lib 없이 쓰려고 값을 직접 둔다).
 inline constexpr GUID DxgiDebugDxgi = {
     0x25cddaa4, 0xb1c6, 0x47e1, {0xac, 0x3e, 0x98, 0x87, 0x5b, 0x5a, 0x2e, 0x2a}};

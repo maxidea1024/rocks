@@ -49,6 +49,7 @@ constexpr uint32 StorageStorageBuffer = 12;
 
 constexpr uint32 ExecutionModelVertex = 0;
 constexpr uint32 ExecutionModelFragment = 4;
+constexpr uint32 ExecutionModelGLCompute = 5;
 
 // OpTypeImage의 Sampled 피연산자 위치와 storage image 값이다.
 constexpr usize ImageSampledWord = 7;
@@ -350,7 +351,10 @@ private:
 
     Result<void> CheckStage(graphics::ShaderStage stage) noexcept {
         const uint32 expected =
-            stage == graphics::ShaderStage::Vertex ? ExecutionModelVertex : ExecutionModelFragment;
+            stage == graphics::ShaderStage::Vertex
+                ? ExecutionModelVertex
+                : (stage == graphics::ShaderStage::Compute ? ExecutionModelGLCompute
+                                                           : ExecutionModelFragment);
         if (!hasEntryPoint_ || executionModel_ != expected) {
             return Reject(diagnostics_,
                           StringView("SPIR-V entry point does not match the shader stage"));
@@ -659,7 +663,8 @@ private:
             return left.binding != right.binding ? left.binding < right.binding
                                                  : left.id < right.id;
         });
-        const uint32 newSet = stage == graphics::ShaderStage::Vertex ? 0u : 1u;
+        // compute 파이프라인은 단계가 하나라 set 0이다(ShaderSystem 7.2절 4항: VS 0, PS 1, CS 0).
+        const uint32 newSet = stage == graphics::ShaderStage::Pixel ? 1u : 0u;
         for (usize index = 0; index < resources_.Size(); ++index) {
             const Decoration* set = FindDecoration(resources_[index].id, DecorationDescriptorSet);
             const Decoration* binding = FindDecoration(resources_[index].id, DecorationBinding);

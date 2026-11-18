@@ -15,10 +15,10 @@
 #include <TestSupport/Test.h>
 
 // 계단 커브 셋의 리플렉션 시험이다(Docs/Design/CurveData.ko.md 9절·16절 — CV6, fixture
-// CurvesTestFixtures/CurveFixture.h의 StepCurveHolder): 필드·Array 원소·Optional·Map 값 자리의
-// 그래프 왕복(Name 표시 철자·String 값 보존)과 다시 저장 byte 같음, 도구 이름 keys·키 Atomic, JSON
-// 왕복, 검증 hook(정렬·유한 시간)이 graph decode·JSON import·대입 묶음·경로 쓰기에서 어기는 값을
-// 거부하고 값이 그대로인지.
+// CurvesTestFixtures/CurveFixture.h의 StepCurveHolder): 필드·Array 원소·Optional·Map 값·
+// InstancedStruct 내용 자리의 그래프 왕복(Name 표시 철자·대소문자만 다른 Name의 같음·String 값
+// 보존)과 다시 저장 byte 같음, 도구 이름 keys·키 Atomic, JSON 왕복, 검증 hook(정렬·유한 시간)이
+// graph decode·JSON import·대입 묶음·경로 쓰기에서 어기는 값을 거부하고 값이 그대로인지.
 using namespace rocks;
 using namespace rocks::reflection_text;
 using curves_fixture::StepCurveHolder;
@@ -75,8 +75,8 @@ struct Objects {
         edit(*value.Value());
     }
 
-    // 자리마다 고유한 키 시간(3.25 / 6.25 / 8.75 / 12.5 / 16.75 / 20.5 — 변조 시험이 찾는다)을
-    // 둔다.
+    // 자리마다 고유한 키 시간(3.25 / 6.25 / 8.75 / 12.5 / 16.75 / 20.5 / 24.5 — 변조 시험이
+    // 찾는다)을 둔다. InstancedStruct 자리에는 대소문자만 다른 Name 두 키("walk"·"WALK")를 둔다.
     void Fill(ObjectHandle object) noexcept {
         const Name walk = Intern("Walk");
         const Name run = Intern("RUN_3");
@@ -103,6 +103,9 @@ struct Objects {
             REQUIRE(mapped.TryAddKey(19.0f, 1));
             REQUIRE(mapped.TryAddKey(20.5f, 2));
             REQUIRE(value.byKey.Insert(int32{7}, Move(mapped)));
+            REQUIRE(value.anyNames.Emplace<NameStepCurve>(types, system));
+            REQUIRE(value.anyNames.Get<NameStepCurve>()->TryAddKey(22.0f, Intern("walk")));
+            REQUIRE(value.anyNames.Get<NameStepCurve>()->TryAddKey(24.5f, Intern("WALK")));
         });
     }
 
@@ -183,6 +186,13 @@ void CheckFilled(const StepCurveHolder& value, NamePool& pool) noexcept {
     CHECK(value.stringList[0].Keys()[1].time == 12.5f);
     CHECK(value.maybeNames.Value().Keys()[1].time == 16.75f);
     CHECK(value.byKey.Find(7)->Keys()[1].time == 20.5f);
+    const NameStepCurve* const any = value.anyNames.Get<NameStepCurve>();
+    REQUIRE(any != nullptr && any->KeyCount() == 2);
+    CHECK(any->Keys()[1].time == 24.5f);
+    // 대소문자만 다른 Name은 같고(Name 규칙) 표시 철자는 그대로다.
+    CHECK(any->Keys()[0].value == any->Keys()[1].value);
+    CHECK(DisplayIs(pool, any->Keys()[0].value, "walk"));
+    CHECK(DisplayIs(pool, any->Keys()[1].value, "WALK"));
 }
 
 usize CountOccurrences(Span<const uint8> haystack, Span<const uint8> needle,
@@ -314,7 +324,7 @@ TEST(StepCurveReflection_DecodeRejectsUnsortedOrNonFiniteKeys) {
     REQUIRE(saved);
     NamePool targetNames(fixture.system);
     REQUIRE(targetNames.Initialize());
-    const float times[] = {3.25f, 6.25f, 8.75f, 12.5f, 16.75f, 20.5f};
+    const float times[] = {3.25f, 6.25f, 8.75f, 12.5f, 16.75f, 20.5f, 24.5f};
     for (const float time : times) {
         for (int32 nonFinite = 0; nonFinite < 2; ++nonFinite) {
             Array<uint8> bytes(fixture.system);
@@ -355,7 +365,7 @@ TEST(StepCurveReflection_JsonRoundTripAndHookRejection) {
     REQUIRE(fixture.Export(copy.Handle(), again));
     CHECK(again.View() == text.View());
 
-    const char* const times[] = {"3.25", "6.25", "8.75", "12.5", "16.75", "20.5"};
+    const char* const times[] = {"3.25", "6.25", "8.75", "12.5", "16.75", "20.5", "24.5"};
     for (const char* time : times) {
         StringBuilder<8192> broken(fixture.system);
         ReplaceOnce(text.View(), StringView(time), StringView("-1000"), broken);
@@ -414,7 +424,8 @@ TEST(StepCurveReflection_PathWritesValidate) {
     const Case cases[] = {
         {"integers.keys[1].time", 2.0f, 0.5f},     {"names.keys[0].time", 4.0f, 7.0f},
         {"strings.keys[1].time", 9.0f, 6.0f},      {"stringList[0].keys[0].time", 10.0f, 13.0f},
-        {"maybeNames.keys[1].time", 17.0f, 14.0f}, {"byKey[7].keys[0].time", 18.0f, 21.0f}};
+        {"maybeNames.keys[1].time", 17.0f, 14.0f}, {"byKey[7].keys[0].time", 18.0f, 21.0f},
+        {"anyNames.keys[1].time", 25.0f, 21.5f}};
     for (const Case& item : cases) {
         PropertyPathBuffer path;
         REQUIRE(ParsePropertyPath(fixture.objects, fixture.access, handle, StringView(item.path),
@@ -436,5 +447,6 @@ TEST(StepCurveReflection_PathWritesValidate) {
         CHECK(value.strings.Keys()[1].time == 9.0f && value.stringList[0].Keys()[0].time == 10.0f);
         CHECK(value.maybeNames.Value().Keys()[1].time == 17.0f &&
               value.byKey.Find(7)->Keys()[0].time == 18.0f);
+        CHECK(value.anyNames.Get<NameStepCurve>()->Keys()[1].time == 25.0f);
     });
 }

@@ -34,8 +34,9 @@ S4·S5는 S2·S3과 독립이다. 이번 범위에서 macOS는 창·Metal 구현
 | `PlatformWindow` | Input | 창 생성·이벤트 펌프·네이티브 핸들 노출, 입력 backend(Win32 메시지 키보드·마우스, XInput 게임패드) | Graphics·World 참조 |
 | `GraphicsTypes` | Core | 그래픽 값 타입: 픽셀 형식·mip 크기 계산(`PixelFormat.h`), 필터·주소 모드·테두리 색·`SamplerDesc`(`Sampler.h`). 장치 계약·에셋·도구가 함께 쓴다 | 장치·창·World 참조 |
 | `Graphics` | GraphicsTypes | 장치·스왑체인·버퍼·텍스처(mip·텍스처별 샘플러)·파이프라인·명령 기록 계약, backend 열거 | World·Object·창 모듈 참조 |
-| `D3D12Graphics` | Graphics | D3D12 구현(Windows) | 다른 backend 참조 |
-| `D3D11Graphics` | Graphics | D3D11 구현(Windows, feature level 11_0 이상, 10.2절) | 〃 |
+| `DxgiGraphics` | Core | D3D11·D3D12가 함께 쓰는 DXGI 어댑터 도우미(HDR 출력 판정·D3D 보장 자원 크기, GX1). 어댑터 질의는 Windows 빌드에만 있다 | Graphics·backend 참조 |
+| `D3D12Graphics` | Graphics, DxgiGraphics | D3D12 구현(Windows) | 다른 backend 참조 |
+| `D3D11Graphics` | Graphics, DxgiGraphics | D3D11 구현(Windows, feature level 11_0 이상, 10.2절) | 〃 |
 | `OpenGLGraphics` | Graphics | OpenGL ES 3.2 구현(Windows `GLES31_PC` 미리보기 WGL, Android EGL, [OpenGL ES backend](OpenGLESGraphics.ko.md)) | 〃 |
 | `VulkanGraphics` | Graphics | Vulkan 1.1 구현(Windows·Android, 10.3절·[VulkanGraphics](VulkanGraphics.ko.md)) | 다른 backend 참조 |
 | `MetalGraphics` | Graphics | 자리만 둔다. 장치 생성은 `Unsupported`를 반환한다 | 동작하는 척하는 가짜 구현 |
@@ -286,8 +287,13 @@ D3D11은 필수 backend다(2026-11-13 사용자 결정). D3D12의 SM 6.6 기준�
 **장치 능력·버퍼(GX1·GX2, 2026-11-18).**
 - `DeviceCaps`는 d3d11.h 상수와 feature level(FL 11.0은 UAV 8·VS UAV 없음, 11.1 이상은 UAV 64·모든 단계 UAV), `D3D11_FEATURE_D3D11_OPTIONS3`(VS 층 출력), DXGI 출력 HDR 색 공간이다. 64 bit atomic·multi draw indirect는 거짓이다. MSAA 표본 수는 `CheckMultisampleQualityLevels`다.
 - 버퍼 용도는 bind·misc flag로 옮긴다(UE `Private/D3D11Buffer.cpp:38–83`). raw SRV는 `D3D11_SRV_DIMENSION_BUFFEREX` + RAW다. 버퍼 view slot n은 VS·PS `t(n + 1)`(`VSSetShaderResources`·`PSSetShaderResources`).
-- 상수 버퍼는 `UpdateSubresource`에 대상 구간을 줄 수 없어(debug layer 288) 전체 갱신만 받고 부분 갱신은 `Unsupported`다. WARP가 `RGB9E5Ufloat` 버퍼 SRV 생성에서 멈추므로 그 형식의 texel buffer 능력은 공개하지 않는다.
+- 상수 버퍼는 `UpdateSubresource`에 대상 구간을 줄 수 없어(debug layer 288) 전체 갱신만 받고 부분 갱신은 `Unsupported`다. WARP가 `RGB9E5Ufloat` 버퍼 SRV 생성에서 멈추므로 WARP에서만 그 형식의 texel buffer 능력을 공개하지 않는다.
 - `ReadBuffer`는 staging 버퍼로 구간 `CopySubresourceRegion`(원본 box) 뒤 fence를 기다려 `Map(READ)`이다.
+
+**파이프라인·명령 기록 확장(GX3·GX4, 2026-11-18).**
+- 파이프라인마다 blend(타깃별, `IndependentBlendEnable`, alpha-to-coverage)·래스터(컬·깊이 bias·clamp, scissor는 늘 켬)·깊이·스텐실 상태 객체와 기본도형을 만든다. compute는 `cs_5_0`이고 CS 상수는 그리기 상수 버퍼 slot 0을 같이 쓴다.
+- `BeginPass`는 RTV 0–8과 DSV(읽기 전용 깊이는 깊이 텍스처마다 만든 `D3D11_DSV_READ_ONLY_*` view)를 묶고 load 동작을 `ClearRenderTargetView`·`ClearDepthStencilView`로 한다. 스텐실 기준은 깊이·스텐실 상태와 함께 건다.
+- dispatch는 CS에 읽기 SRV(t1–t4)·UAV(u0–u3)를 묶고 끝나면 풀며, 그래픽 SRV는 그리기 직전에 묶는다(같은 버퍼의 SRV·UAV가 겹쳐 런타임이 binding을 풀지 않게). dispatch 뒤 첫 그리기는 정점·index 버퍼를 다시 묶는다. 간접 명령은 `DrawInstancedIndirect`·`DrawIndexedInstancedIndirect`·`DispatchIndirect`, 복사는 `CopySubresourceRegion`, UAV clear는 `ClearUnorderedAccessViewUint`다.
 
 **GPU 계측(GX9).**
 - timestamp: query 객체(slot 4 × 256개)를 deferred context에서 `End`로 기록한다. 프레임 실행(`ExecuteCommandList`) 앞뒤를 slot별 `D3D11_QUERY_TIMESTAMP_DISJOINT`로 감싼다.

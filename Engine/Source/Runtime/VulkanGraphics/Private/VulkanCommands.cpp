@@ -123,61 +123,13 @@ Result<void> VulkanDevice::BeginRecording() noexcept {
         view = {};
     }
 
+    for (BufferViewHandle& view : boundWriteViews_) {
+        view = {};
+    }
+
     descriptorsDirty_ = true;
     ResetTimestampSlots();
     return Result<void>::Success();
-}
-
-void VulkanDevice::BeginRenderPass(bool load, const ClearColor* clear) noexcept {
-    auto renderPass = RenderPassFor(target_.viewFormat, load);
-    if (!renderPass) {
-        return;
-    }
-
-    VkClearValue value = {};
-    if (clear != nullptr) {
-        value.color.float32[0] = clear->r;
-        value.color.float32[1] = clear->g;
-        value.color.float32[2] = clear->b;
-        value.color.float32[3] = clear->a;
-    }
-
-    VkRenderPassBeginInfo begin = {};
-    begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    begin.renderPass = renderPass.Value();
-    begin.framebuffer = target_.framebuffer;
-    begin.renderArea.extent = {target_.width, target_.height};
-    begin.clearValueCount = load ? 0u : 1u;
-    begin.pClearValues = load ? nullptr : &value;
-    functions_.vkCmdBeginRenderPass(frame_, &begin, VK_SUBPASS_CONTENTS_INLINE);
-    insideRenderPass_ = true;
-}
-
-void VulkanDevice::StartPass(const ClearColor& clear) noexcept {
-    // attachment 전이다(GX5). offscreen 대상은 BeginOffscreen이 추적 상태에서 바꿨다. swapchain
-    // 중간 이미지는 앞 프레임 blit(TRANSFER 읽기) 뒤일 수 있다(WAR).
-    if (target_.texture.IsNull()) {
-        Barrier(frame_, target_.image, target_.restLayout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                0, VK_REMAINING_MIP_LEVELS, VK_PIPELINE_STAGE_TRANSFER_BIT);
-    }
-
-    BeginRenderPass(false, &clear);
-    // NDC y 위를 화면 위로 둔다(음수 viewport 높이, Vulkan 1.1 core, ShaderSystem 7.2절 8항).
-    VkViewport viewport = {};
-    viewport.x = 0.0f;
-    viewport.y = static_cast<float>(target_.height);
-    viewport.width = static_cast<float>(target_.width);
-    viewport.height = -static_cast<float>(target_.height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    functions_.vkCmdSetViewport(frame_, 0, 1, &viewport);
-    VkRect2D scissor = {};
-    scissor.extent = {target_.width, target_.height};
-    functions_.vkCmdSetScissor(frame_, 0, 1, &scissor);
-    const DrawConstants identity;
-    functions_.vkCmdPushConstants(frame_, pipelineLayout_,
-                                  VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                                  ConstantBytes, &identity);
 }
 
 Result<CommandContext*> VulkanDevice::BeginFrame(SwapChainHandle handle,
@@ -213,61 +165,26 @@ Result<CommandContext*> VulkanDevice::BeginFrame(SwapChainHandle handle,
     }
 
     // 패스는 swapchain마다 하나인 중간 이미지(SRGB view)에 그린다.
-    target_ = {
-        record->target, record->framebuffer, VK_FORMAT_R8G8B8A8_SRGB,     record->targetLayout,
-        record->width,  record->height,      PixelFormat::RGBA8UnormSrgb, {}};
+    target_ = {};
+    target_.image = record->target;
+    target_.framebuffer = record->framebuffer;
+    target_.viewFormat = VK_FORMAT_R8G8B8A8_SRGB;
+    target_.restLayout = record->targetLayout;
+    target_.width = record->width;
+    target_.height = record->height;
+    target_.format = PixelFormat::RGBA8UnormSrgb;
+    target_.colorCount = 1;
+    target_.key.colorCount = 1;
+    target_.key.colors[0] = VK_FORMAT_R8G8B8A8_SRGB;
+    target_.key.colorLoad[0] = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    target_.key.colorStore[0] = VK_ATTACHMENT_STORE_OP_STORE;
+    target_.clears[0].color.float32[0] = clear.r;
+    target_.clears[0].color.float32[1] = clear.g;
+    target_.clears[0].color.float32[2] = clear.b;
+    target_.clears[0].color.float32[3] = clear.a;
     presentTarget_ = handle;
-    StartPass(clear);
-    return Result<CommandContext*>::Success(this);
-}
-
-Result<CommandContext*> VulkanDevice::BeginOffscreen(TextureHandle handle,
-                                                     const ClearColor& clear) noexcept {
-    auto owner = ownership_.Check();
-    if (!owner) {
-        return Result<CommandContext*>::Failure(owner.Error());
-    }
-
-    platform::LockGuard lock(gate_);
-    const TextureRecord* record = textures_.Find(handle.slot);
-    if (record == nullptr || !record->renderTarget) {
-        return Result<CommandContext*>::Failure(record == nullptr ? ErrorCode::StaleHandle
-                                                                  : ErrorCode::InvalidArgument);
-    }
-
-    if (recording_) {
-        return Result<CommandContext*>::Failure(ErrorCode::Busy);
-    }
-
-    if (timeline_.IsLost()) {
-        return Result<CommandContext*>::Failure(ErrorCode::Destroyed);
-    }
-
-    const VkImage image = record->image;
-    const VkFramebuffer framebuffer = record->framebuffer;
-    const uint32 width = record->width;
-    const uint32 height = record->height;
-    const PixelFormat format = record->format;
-    auto begun = BeginRecording();
-    if (!begun) {
-        return Result<CommandContext*>::Failure(begun.Error());
-    }
-
-    target_ = {image,
-               framebuffer,
-               format == PixelFormat::RGBA8UnormSrgb ? VK_FORMAT_R8G8B8A8_SRGB
-                                                     : VK_FORMAT_R8G8B8A8_UNORM,
-               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-               width,
-               height,
-               format,
-               handle};
-    presentTarget_ = {};
-    // attachment 전이: 대상 mip 0을 추적한 상태에서 렌더 타깃으로 바꾼다(GX5).
-    TextureRecord* targetRecord = textures_.Find(handle.slot);
-    TrackTransition(*targetRecord, handle.slot, 0, 1, ResourceAccess::RenderTarget, false);
     renderPassSuspended_ = false;
-    StartPass(clear);
+    StartPass();
     return Result<CommandContext*>::Success(this);
 }
 
@@ -392,7 +309,7 @@ Result<GpuFencePoint> VulkanDevice::EndFrame() noexcept {
 
 bool VulkanDevice::StreamsBound() const noexcept {
     const PipelineRecord* pipeline = pipelines_.Find(boundPipeline_);
-    if (pipeline == nullptr || !insideRenderPass_) {
+    if (pipeline == nullptr || pipeline->compute || !insideRenderPass_) {
         return false;
     }
 
@@ -421,7 +338,9 @@ void VulkanDevice::SetPipeline(PipelineHandle handle) noexcept {
 
     // 정점 stride는 파이프라인에 들어 있어 묶인 정점 버퍼가 새 stride로 읽힌다. descriptor set
     // layout은 파이프라인마다 다르므로 다음 그리기가 새로 묶는다.
-    functions_.vkCmdBindPipeline(frame_, VK_PIPELINE_BIND_POINT_GRAPHICS, record->pipeline);
+    functions_.vkCmdBindPipeline(
+        frame_, record->compute ? VK_PIPELINE_BIND_POINT_COMPUTE : VK_PIPELINE_BIND_POINT_GRAPHICS,
+        record->pipeline);
     boundPipeline_ = handle.slot;
     descriptorsDirty_ = true;
 }
@@ -505,7 +424,7 @@ void VulkanDevice::SetTexture(TextureHandle handle) noexcept {
                    (record->current[mip] & ~SrvAccessMask) == ResourceAccess::Unknown;
     }
 
-    if (!readable && !(target_.texture == TextureHandle{slot})) {
+    if (!readable && !IsPassAttachment(slot)) {
         TrackTransition(*record, slot, 0, record->mipLevels, ResourceAccess::SrvGraphics, false);
         ResumeRenderPass();
     }
@@ -518,14 +437,13 @@ void VulkanDevice::SetConstants(const DrawConstants& constants) noexcept {
     }
 
     // 행렬은 행 우선 그대로 올린다(셰이더는 -Zpr, ShaderSystem 7.2절 6항).
-    functions_.vkCmdPushConstants(frame_, pipelineLayout_,
-                                  VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                                  ConstantBytes, &constants);
+    functions_.vkCmdPushConstants(frame_, pipelineLayout_, ConstantStages, 0, ConstantBytes,
+                                  &constants);
 }
 
 void VulkanDevice::Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept {
     platform::LockGuard lock(gate_);
-    if (!recording_ || !StreamsBound() || !PrepareDescriptors()) {
+    if (!PrepareDraw(false)) {
         ++ignoredDraws_;
         return;
     }
@@ -537,9 +455,7 @@ void VulkanDevice::Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVe
 void VulkanDevice::DrawIndexed(uint32 indexCount, uint32 instanceCount,
                                uint32 firstIndex) noexcept {
     platform::LockGuard lock(gate_);
-    const BufferRecord* index = buffers_.Find(boundIndex_.buffer.slot);
-    if (!recording_ || !StreamsBound() || index == nullptr || boundIndex_.offset >= index->size ||
-        boundIndex_.offset % IndexFormatSize(boundIndex_.format) != 0 || !PrepareDescriptors()) {
+    if (!PrepareDraw(true)) {
         ++ignoredDraws_;
         return;
     }
@@ -559,14 +475,10 @@ Result<void> VulkanDevice::CopyPassTarget(TextureHandle destination) noexcept {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (!record->renderTarget || destination == target_.texture || record->width != target_.width ||
+    if (target_.image == VK_NULL_HANDLE || !record->renderTarget ||
+        destination == target_.texture || record->width != target_.width ||
         record->height != target_.height || record->format != target_.format) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
-    }
-
-    auto load = RenderPassFor(target_.viewFormat, true);
-    if (!load) {
-        return Result<void>::Failure(load.Error());
     }
 
     // render pass 안에서는 복사할 수 없으므로 닫고 복사한 뒤 LOAD render pass로 이어 연다. 묶인
@@ -597,8 +509,8 @@ Result<void> VulkanDevice::CopyPassTarget(TextureHandle destination) noexcept {
                         false);
     (void)AccessBarrier(frame_, record->image, 0, 1, ResourceAccess::CopyDestination, resting,
                         false);
-    if (sourceState == ResourceAccess::RenderTarget) {
-        BeginRenderPass(true, nullptr);
+    if (sourceState == ResourceAccess::RenderTarget && AttachmentsReady()) {
+        BeginRenderPass(true);
     }
     return Result<void>::Success();
 }

@@ -1,5 +1,6 @@
 #include "GraphicsSelfTest.h"
 #include "BufferSelfTest.h"
+#include "CommandSelfTest.h"
 #include "CullingSelfTest.h"
 #include "RenderGraphSelfTest.h"
 #include "RenderLaneSelfTest.h"
@@ -687,6 +688,8 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     failures += RunCapsChecks(name, device);
     // 버퍼 용도·view(GX2): 생성·업로드·readback, typed view 능력 ⇔ 생성, VS·PS의 view 읽기.
     failures += RunBufferChecks(name, device, result.triangle.GetAllocator());
+    // 파이프라인 완성·명령 기록 확장(GX3·GX4): compute·간접·MRT·깊이·스텐실·복사·UAV clear.
+    failures += RunCommandChecks(name, device, result.triangle.GetAllocator());
     // 렌더 그래프(RG1): 그래프 텍스처·명시 전이·culling·history export/import.
     failures += RunRenderGraphChecks(name, device, renderer, result.triangle.GetAllocator());
     // GPU 계측(GX9): timestamp 쌍·slot 재사용·calibration·debug marker.
@@ -699,6 +702,10 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     // 확인한다(RunD3D11ValidationProbe).
     if ((info.backend == graphics::Backend::D3D12 || info.backend == graphics::Backend::Vulkan) &&
         info.validationEnabled) {
+        // 이 아래 검증 계층 메시지(D3D12 613, Vulkan render pass 호환성 VUID)는 의도한 것이다.
+        // 로그만 보고 실패로 오해하지 않도록 앞뒤를 표시한다.
+        printf("    -- begin intentional validation messages (RTV format mismatch probe) --\n");
+        fflush(stdout);
         const uint64 before = device.ValidationErrorCount();
         sample::Renderer mismatched;
         if (mismatched.Initialize(device, graphics::PixelFormat::RGBA8Unorm)) {
@@ -712,6 +719,8 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
             }
             mismatched.Shutdown();
         }
+        fflush(stderr);
+        printf("    -- end intentional validation messages --\n");
         Check(device.ValidationErrorCount() > before, name,
               "validation layer error is counted (intentional RTV format mismatch)");
     }

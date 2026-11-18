@@ -203,3 +203,30 @@ TEST(DrawBufferSlots_RequireMatchingViews) {
     CHECK(SampleCountBit(4) == 4u);
     CHECK(SampleCountBit(32) == 32u);
 }
+
+TEST(DrawBufferSlots_AddSlotAndStructureStride) {
+    DrawBufferSlots slots;
+    CHECK(AddDrawBufferSlot(slots, 0, BufferViewKind::Typed, PixelShaderType::Float));
+    // 다른 단계가 같은 slot을 같은 종류로 읽으면 받고, 다른 종류·값 계열이면 거부한다.
+    CHECK(AddDrawBufferSlot(slots, 0, BufferViewKind::Typed, PixelShaderType::Float));
+    CHECK(!AddDrawBufferSlot(slots, 0, BufferViewKind::Typed, PixelShaderType::Uint));
+    CHECK(!AddDrawBufferSlot(slots, 0, BufferViewKind::Raw, PixelShaderType::None));
+    CHECK(
+        !AddDrawBufferSlot(slots, MaxDrawBufferViews, BufferViewKind::Raw, PixelShaderType::None));
+    // 구조화 stride는 둘 다 알 때 같아야 한다(0은 모름).
+    CHECK(AddDrawBufferSlot(slots, 1, BufferViewKind::Structured, PixelShaderType::None, 32));
+    CHECK(AddDrawBufferSlot(slots, 1, BufferViewKind::Structured, PixelShaderType::None, 0));
+    CHECK(!AddDrawBufferSlot(slots, 1, BufferViewKind::Structured, PixelShaderType::None, 16));
+    CHECK(slots.usedMask == 0b11u && slots.structureStrides[1] == 32u);
+
+    BoundBufferViewInfo bound[MaxDrawBufferViews] = {};
+    bound[0] = {true, BufferViewKind::Typed, PixelShaderType::Float, 0};
+    bound[1] = {true, BufferViewKind::Structured, PixelShaderType::None, 16};
+    CHECK(!DrawBufferSlotsSatisfied(slots, bound));
+    bound[1].stride = 32;
+    CHECK(DrawBufferSlotsSatisfied(slots, bound));
+    // 셰이더 stride를 모르는 slot은 view stride를 대조하지 않는다.
+    slots.structureStrides[1] = 0;
+    bound[1].stride = 48;
+    CHECK(DrawBufferSlotsSatisfied(slots, bound));
+}
