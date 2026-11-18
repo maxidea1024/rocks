@@ -197,3 +197,29 @@ TEST(PlatformWindowsComRefTryQueryAsKeepsHresultAndCounts) {
     first.Reset();
     CHECK(object.references == 0);
 }
+
+TEST(PlatformWindowsComRefTryQueryAsIntoItselfKeepsObjectAlive) {
+    FakeObject object;
+    ComRef<IFakeFirst> ref;
+    ref.Attach(&object);
+
+    // 같은 interface로 자기 자신에 조회해도 조회가 끝난 뒤 옛 참조를 놓으므로 객체가 살아 있다.
+    CHECK(ref.TryQueryAs(ref) == S_OK);
+    CHECK(ref.Get() == &object && object.references == 1 && ref->First() == 1);
+
+    // IUnknown 판도 같다.
+    ComRef<IUnknown> unknown;
+    unknown.Attach(static_cast<IFakeFirst*>(&object));
+    object.references = 2;
+    CHECK(unknown.TryQueryAs(unknown) == S_OK);
+    CHECK(unknown.Get() == static_cast<IFakeFirst*>(&object) && object.references == 2);
+
+    // 지원하지 않는 interface를 별칭 out으로 받는 형태는 형식이 달라 만들 수 없으므로, 빈 자신에
+    // 대한 조회만 본다(E_POINTER, 그대로 빈 상태).
+    ComRef<IFakeFirst> empty;
+    CHECK(empty.TryQueryAs(empty) == E_POINTER && !empty);
+
+    unknown.Reset();
+    ref.Reset();
+    CHECK(object.references == 0);
+}

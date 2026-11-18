@@ -236,10 +236,10 @@ Key KeyFromMessage(LPARAM lParam) noexcept {
     return extended ? ExtendedKey(scanCode) : BaseKey(scanCode);
 }
 
-// 창 제목 UTF-8 → UTF-16(널 종료). 넘치면 글자 경계에서 자른다. 잘못된 UTF-8은 빈 제목이다.
-void ToWide(StringView text, wchar_t (&buffer)[MaxTitleCharacters]) noexcept {
-    (void)windows::ConvertUtf8ToWide(text.Data(), text.ByteCount(), buffer, MaxTitleCharacters,
-                                     windows::TextFit::Truncate);
+// 창 제목 UTF-8 → UTF-16(널 종료). 넘치면 글자 경계에서 자른다. 잘못된 UTF-8이면 거짓이다.
+bool ToWide(StringView text, wchar_t (&buffer)[MaxTitleCharacters]) noexcept {
+    return static_cast<bool>(windows::ConvertUtf8ToWide(
+        text.Data(), text.ByteCount(), buffer, MaxTitleCharacters, windows::TextFit::Truncate));
 }
 
 class Win64Window final : public Window {
@@ -254,6 +254,12 @@ public:
     }
 
     Result<void> Create(const WindowDesc& desc) noexcept {
+        // 제목은 OS 호출 전에 바꿔 둔다. 잘못된 UTF-8은 입력 오류다(Window::Create가 먼저 거른다).
+        wchar_t title[MaxTitleCharacters];
+        if (!ToWide(desc.title, title)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
         instance_ = GetModuleHandleW(nullptr);
         WNDCLASSEXW windowClass = {};
         windowClass.cbSize = sizeof(windowClass);
@@ -275,8 +281,6 @@ public:
                                 : (WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX);
         RECT rectangle = {0, 0, static_cast<LONG>(desc.width), static_cast<LONG>(desc.height)};
         AdjustWindowRectEx(&rectangle, style, FALSE, 0);
-        wchar_t title[MaxTitleCharacters];
-        ToWide(desc.title, title);
         window_ =
             CreateWindowExW(0, WindowClassName, title, style, CW_USEDEFAULT, CW_USEDEFAULT,
                             rectangle.right - rectangle.left, rectangle.bottom - rectangle.top,
@@ -352,7 +356,10 @@ public:
 
     Result<void> SetTitle(StringView text) noexcept override {
         wchar_t title[MaxTitleCharacters];
-        ToWide(text, title);
+        if (!ToWide(text, title)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
         return SetWindowTextW(window_, title) ? Result<void>::Success()
                                               : Result<void>::Failure(ErrorCode::DependencyFailed);
     }
@@ -650,7 +657,7 @@ Result<UniquePtr<Window>> Window::Create(Allocator& allocator, const WindowDesc&
         return Result<UniquePtr<Window>>::Failure(error);
     };
 
-    if (desc.width == 0 || desc.height == 0) {
+    if (desc.width == 0 || desc.height == 0 || !desc.title.IsValidUtf8()) {
         return fail(ErrorCode::InvalidArgument, nullptr, 0);
     }
 

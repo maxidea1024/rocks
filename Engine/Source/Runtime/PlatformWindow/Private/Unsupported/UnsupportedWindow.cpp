@@ -7,8 +7,9 @@ namespace rocks::platform {
 
 Result<UniquePtr<Window>> Window::Create(Allocator&, const WindowDesc& desc,
                                          WindowCreateReport* report) noexcept {
-    const ErrorCode error =
-        desc.width == 0 || desc.height == 0 ? ErrorCode::InvalidArgument : ErrorCode::Unsupported;
+    const ErrorCode error = desc.width == 0 || desc.height == 0 || !desc.title.IsValidUtf8()
+                                ? ErrorCode::InvalidArgument
+                                : ErrorCode::Unsupported;
     if (report != nullptr) {
         *report = WindowCreateReport{};
         report->code = error;

@@ -1,4 +1,5 @@
 #include <Core/Math/Intersection.h>
+#include <Core/Math/RandomStream.h>
 #include <TestSupport/Test.h>
 #include <Platform/Memory.h>
 #include <Platform/PlatformMath.h>
@@ -2061,4 +2062,212 @@ TEST(IntersectionRereviewTriangleStartContact) {
     CHECK(!Raycast(Ray<double>(Vec3d(0.25, 0.25, 0.0), Vec3d::Up()), flat,
                    detail::GeometryInfinity<double>(), TriangleSides::FrontOnly)
                .IsHit());
+}
+
+namespace {
+
+// 단위 cube [0, 1]^3을 안쪽 normal 평면 6개로 만든다. mirror가 참이면 x축을 뒤집은 좌표계(x →
+// −x)에서 같은 영역을 만든다(판정이 좌표계 손잡이와 무관한지 본다).
+template <typename T>
+ConvexVolume<T> UnitCubeVolume(bool mirror) noexcept {
+    const T sign = mirror ? static_cast<T>(-1) : static_cast<T>(1);
+    const Plane<T> planes[] = {
+        Plane<T>(Vector3<T>(sign, 0, 0), 0), Plane<T>(Vector3<T>(-sign, 0, 0), -1),
+        Plane<T>(Vector3<T>(0, 1, 0), 0),    Plane<T>(Vector3<T>(0, -1, 0), -1),
+        Plane<T>(Vector3<T>(0, 0, 1), 0),    Plane<T>(Vector3<T>(0, 0, -1), -1),
+    };
+    auto volume = ConvexVolume<T>::TryMake(planes);
+    return volume ? volume.Value() : ConvexVolume<T>{};
+}
+
+template <typename T>
+Box<T> MirroredBox(const Box<T>& box, bool mirror) noexcept {
+    if (!mirror) {
+        return box;
+    }
+    return Box<T>(Vector3<T>(-box.max.x, box.min.y, box.min.z),
+                  Vector3<T>(-box.min.x, box.max.y, box.max.z));
+}
+
+template <typename T>
+void CheckConvexVolumeClassification() {
+    const bool mirrors[] = {false, true};
+    for (const bool mirror : mirrors) {
+        const ConvexVolume<T> cube = UnitCubeVolume<T>(mirror);
+        REQUIRE(cube.IsValid() && cube.Planes().Size() == 6);
+        const auto classify = [&](const Box<T>& box) noexcept {
+            return ClassifyContainment(cube, MirroredBox(box, mirror));
+        };
+        CHECK(classify(Box<T>(V<T>(0.2, 0.2, 0.2), V<T>(0.8, 0.8, 0.8))) == Containment::Inside);
+        // 닫힌 포함: 경계에 붙은 box와 꼭짓점의 점도 Inside다.
+        CHECK(classify(Box<T>(V<T>(0, 0, 0), V<T>(1, 1, 1))) == Containment::Inside);
+        CHECK(classify(Box<T>(V<T>(1, 1, 1), V<T>(1, 1, 1))) == Containment::Inside);
+        // 면 접촉은 교차다(Outside는 엄격).
+        CHECK(classify(Box<T>(V<T>(1, 0.5, 0.5), V<T>(2, 0.6, 0.6))) == Containment::Intersecting);
+        CHECK(classify(Box<T>(V<T>(0.5, 0.5, 0.5), V<T>(2, 0.6, 0.6))) ==
+              Containment::Intersecting);
+        CHECK(classify(Box<T>(V<T>(1.25, 0.5, 0.5), V<T>(2, 0.6, 0.6))) == Containment::Outside);
+        CHECK(classify(Box<T>(V<T>(0.5, -3, 0.5), V<T>(0.6, -0.25, 0.6))) == Containment::Outside);
+        // 두 평면 바깥(대각선 쪽)도 한 평면이라도 엄격히 바깥이면 Miss다.
+        CHECK(Overlap(cube, MirroredBox(Box<T>(V<T>(1.1, 1.1, 0.5), V<T>(1.2, 1.2, 0.6)),
+                                        mirror)) == QueryResult::Miss);
+
+        const auto sphere = [&](double x, double y, double z, double radius) noexcept {
+            const double mirroredX = mirror ? -x : x;
+            return ClassifyContainment(cube,
+                                       Sphere<T>(V<T>(mirroredX, y, z), static_cast<T>(radius)));
+        };
+        CHECK(sphere(0.5, 0.5, 0.5, 0.25) == Containment::Inside);
+        CHECK(sphere(0.5, 0.5, 0.5, 0.5) == Containment::Inside);
+        CHECK(sphere(1.5, 0.5, 0.5, 0.5) == Containment::Intersecting);
+        CHECK(sphere(1.5, 0.5, 0.5, 0.25) == Containment::Outside);
+        CHECK(Overlap(cube, Sphere<T>(V<T>(mirror ? -1.5 : 1.5, 0.5, 0.5), static_cast<T>(0.5))) ==
+              QueryResult::Hit);
+    }
+
+    // 입력 오류: 평면 없는 영역, 역전 box, 음수 반지름.
+    const ConvexVolume<T> empty;
+    CHECK(!empty.IsValid());
+    const ConvexVolume<T> cube = UnitCubeVolume<T>(false);
+    CHECK(ClassifyContainment(empty, Box<T>(V<T>(0, 0, 0), V<T>(1, 1, 1))) ==
+          Containment::InvalidInput);
+    CHECK(ClassifyContainment(cube, Box<T>(V<T>(1, 0, 0), V<T>(0, 1, 1))) ==
+          Containment::InvalidInput);
+    CHECK(ClassifyContainment(cube, Sphere<T>(V<T>(0, 0, 0), static_cast<T>(-1))) ==
+          Containment::InvalidInput);
+    CHECK(Overlap(empty, Sphere<T>(V<T>(0, 0, 0), static_cast<T>(1))) == QueryResult::InvalidInput);
+}
+
+template <typename T>
+void CheckSphereContainsBox() {
+    const Sphere<T> sphere(V<T>(0, 0, 0), static_cast<T>(2));
+    CHECK(ClassifyContainment(sphere, Box<T>(V<T>(-1, -1, -1), V<T>(1, 1, 1))) ==
+          Containment::Inside);
+    // 가장 먼 꼭짓점이 표면 위(거리 정확히 2)여도 Inside다.
+    CHECK(ClassifyContainment(sphere, Box<T>(V<T>(0, 0, 0), V<T>(2, 0, 0))) == Containment::Inside);
+    CHECK(ClassifyContainment(sphere, Box<T>(V<T>(1, 1, 1), V<T>(3, 3, 3))) ==
+          Containment::Intersecting);
+    // 표면에 닿는 box는 Outside가 아니다.
+    CHECK(ClassifyContainment(sphere, Box<T>(V<T>(2, 0, 0), V<T>(3, 1, 1))) ==
+          Containment::Intersecting);
+    CHECK(ClassifyContainment(sphere, Box<T>(V<T>(2.25, 0, 0), V<T>(3, 1, 1))) ==
+          Containment::Outside);
+    CHECK(ClassifyContainment(Sphere<T>(V<T>(0, 0, 0), static_cast<T>(-1)),
+                              Box<T>(V<T>(0, 0, 0), V<T>(1, 1, 1))) == Containment::InvalidInput);
+}
+
+// 단조성: box A ⊆ B이면 B가 Inside일 때 A도 Inside이고, A가 Outside가 아니면 B도 Outside가 아니다.
+// 면을 공유하는 경우(A의 면 좌표가 B와 같음)와 Raycast(A Hit ⇒ B Hit, B 진입 ≤ A 진입)도 본다.
+// 공간 인덱스가 노드 확장 경계로 가지를 칠 때 프록시를 놓치지 않게 하는 성질이다.
+void CheckContainmentMonotonicity() {
+    RandomStream random(0xC0417u);
+    const auto uniform = [&](double low, double high) noexcept {
+        return low + (high - low) * random.NextDouble01();
+    };
+    // 축 평행 단위 벡터 6개 중 하나다(축 평행 normal·방향과 −0 성분을 섞는다).
+    const auto axis = [&]() noexcept {
+        const uint32 pick = random.NextUInt32Below(6);
+        const double sign = pick < 3 ? 1.0 : -1.0;
+        const double zero = random.NextUInt32Below(2) == 0 ? 0.0 : -0.0;
+        return Vec3d(pick % 3 == 0 ? sign : zero, pick % 3 == 1 ? sign : zero,
+                     pick % 3 == 2 ? sign : zero);
+    };
+    // 바깥 box의 면을 절반 확률로 안쪽 box와 같은 좌표에 둔다(면 공유).
+    const auto grow = [&]() noexcept {
+        return random.NextUInt32Below(2) == 0 ? 0.0 : uniform(0, 1);
+    };
+    uint32 violations = 0;
+    uint32 sharedFaces = 0;
+    uint32 rayHits = 0;
+    for (uint32 trial = 0; trial < 6000; ++trial) {
+        Plane<double> planes[5];
+        for (Plane<double>& plane : planes) {
+            if (random.NextUInt32Below(3) == 0) {
+                plane = Plane<double>(axis(), uniform(-5, 5));
+                continue;
+            }
+            const Vec3d normal(uniform(-1, 1), uniform(-1, 1), uniform(-1, 1));
+            auto made = Plane<double>::TryMake(normal + Vec3d(1.0e-3, 0, 0), uniform(-5, 5));
+            plane = made ? made.Value() : Plane<double>();
+        }
+        auto volume = ConvexVolume<double>::TryMake(planes);
+        const Sphere<double> sphere(Vec3d(uniform(-3, 3), uniform(-3, 3), uniform(-3, 3)),
+                                    uniform(0, 4));
+        const Vec3d lowA(uniform(-6, 6), uniform(-6, 6), uniform(-6, 6));
+        const Box<double> inner(lowA, lowA + Vec3d(uniform(0, 3), uniform(0, 3), uniform(0, 3)));
+        const Box<double> outer(inner.min - Vec3d(grow(), grow(), grow()),
+                                inner.max + Vec3d(grow(), grow(), grow()));
+        sharedFaces += (outer.min.x == inner.min.x || outer.max.y == inner.max.y) ? 1u : 0u;
+        if (!volume) {
+            continue;
+        }
+        const Containment a = ClassifyContainment(volume.Value(), inner);
+        const Containment b = ClassifyContainment(volume.Value(), outer);
+        violations += (b == Containment::Inside && a != Containment::Inside) ? 1u : 0u;
+        violations += (a != Containment::Outside && b == Containment::Outside) ? 1u : 0u;
+        const Containment c = ClassifyContainment(sphere, inner);
+        const Containment d = ClassifyContainment(sphere, outer);
+        violations += (d == Containment::Inside && c != Containment::Inside) ? 1u : 0u;
+        violations += (c != Containment::Outside && d == Containment::Outside) ? 1u : 0u;
+
+        // Raycast 단조성: 안쪽 box에 닿으면 바깥 box에도 닿고, 바깥 진입 거리가 작거나 같다. 원점을
+        // 안쪽 box 면 위에 두는 경우와 축 평행 방향을 섞는다.
+        Vec3d origin(uniform(-9, 9), uniform(-9, 9), uniform(-9, 9));
+        if (random.NextUInt32Below(4) == 0) {
+            origin.x = inner.min.x;
+        }
+        const Vec3d direction =
+            random.NextUInt32Below(3) == 0
+                ? axis()
+                : (inner.Center() - origin + Vec3d(uniform(-1, 1), uniform(-1, 1), uniform(-1, 1)));
+        auto ray = Ray<double>::TryMake(origin, direction);
+        if (!ray) {
+            continue;
+        }
+        const double maxDistance = random.NextUInt32Below(3) == 0 ? uniform(0, 20) : 1.0e30;
+        const RayHit<double> innerHit = Raycast(ray.Value(), inner, maxDistance);
+        const RayHit<double> outerHit = Raycast(ray.Value(), outer, maxDistance);
+        if (innerHit.IsHit()) {
+            ++rayHits;
+            violations += !outerHit.IsHit() ? 1u : 0u;
+            violations += outerHit.IsHit() && outerHit.distance > innerHit.distance ? 1u : 0u;
+        }
+    }
+    CHECK(violations == 0);
+    CHECK(sharedFaces > 1000 && rayHits > 500);
+}
+
+} // namespace
+
+TEST(IntersectionConvexVolumeMakeValidatesPlanes) {
+    const Plane<double> good[] = {Plane<double>(Vec3d(0, 0, 1), 0)};
+    CHECK(ConvexVolume<double>::TryMake(good));
+    CHECK(!ConvexVolume<double>::TryMake(Span<const Plane<double>>()));
+    const Plane<double> notUnit[] = {Plane<double>(Vec3d(0, 0, 2), 0)};
+    CHECK(!ConvexVolume<double>::TryMake(notUnit));
+    const Plane<double> nonFinite[] = {
+        Plane<double>(Vec3d(0, 0, 1), platform::PlatformMath::QuietNaN<double>())};
+    CHECK(!ConvexVolume<double>::TryMake(nonFinite));
+    Plane<double> tooMany[ConvexVolumeMaxPlanes + 1];
+    CHECK(!ConvexVolume<double>::TryMake(tooMany));
+    CHECK(ConvexVolume<double>::TryMake(Span<const Plane<double>>(tooMany, ConvexVolumeMaxPlanes)));
+    // 정밀도 변환은 명시적이다.
+    auto made = ConvexVolume<double>::TryMake(good);
+    REQUIRE(made);
+    const ConvexVolume<float> narrow(made.Value());
+    CHECK(narrow.IsValid() && narrow.planeCount == 1 && narrow.planes[0].normal.z == 1.0f);
+}
+
+TEST(IntersectionConvexVolumeClassifiesBoxAndSphere) {
+    CheckConvexVolumeClassification<float>();
+    CheckConvexVolumeClassification<double>();
+}
+
+TEST(IntersectionSphereContainmentOfBox) {
+    CheckSphereContainsBox<float>();
+    CheckSphereContainsBox<double>();
+}
+
+TEST(IntersectionContainmentIsMonotoneUnderBoxGrowth) {
+    CheckContainmentMonotonicity();
 }

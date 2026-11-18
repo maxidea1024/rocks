@@ -77,12 +77,52 @@ struct BufferQueryOutcome {
     bool truncated = false;
 };
 
+// QueryRayNearest의 hitTest가 돌려주는 정밀 판정 결과다. hit이 참이면 distance는 ray 원점에서 잰
+// 거리(cm)이며 그 프록시 AABB의 ray 진입 거리 이상이어야 한다(6.8절 전제).
+struct RayHitResult {
+    bool hit = false;
+    double distance = 0.0;
+};
+
+// QueryRayNearest의 결과다. found가 거짓이면 나머지는 의미가 없다.
+struct NearestHit {
+    bool found = false;
+    SpatialProxyHit proxy;
+    double distance = 0.0;
+};
+
+// 노드 묶음을 모은 질의 형상이다. QueryBatch가 같은 종류의 형상으로 불렸는지 확인한다.
+enum class SpatialBatchShape : uint8 {
+    Box,
+    Sphere,
+    ConvexVolume
+};
+
+// 노드 묶음 하나다(6.1절 CollectNodeBatches). 노드 하나의 직접 저장 프록시 또는 범위 밖 목록 전체를
+// 가리킨다. 묶음끼리 프록시가 겹치지 않으므로 여러 worker가 QueryBatch로 나눠 처리해도 결과
+// 합집합이 단일 질의와 같다. 모은 트리의 같은 읽기 단계 안에서만 유효하다(그 뒤 변경이 있으면
+// QueryBatch가 StaleHandle). 필드는 진단·작업 분배용으로 읽을 수 있으나 바꾸지 않는다.
+struct SpatialNodeBatch {
+    // 노드 번호다. 범위 밖 목록 묶음이면 LooseOctreeOutOfRangeBatch다.
+    uint32 node = 0;
+    // 묶음의 프록시 수(필터 적용 전)다. worker 분배의 무게로 쓴다.
+    uint32 proxyCount = 0;
+    // 노드 확장 경계가 형상 안에 완전히 들어가 프록시 공간 판정을 생략한다.
+    bool contained = false;
+    SpatialBatchShape shape = SpatialBatchShape::Box;
+    // 모은 트리와 그때의 변경 세대다(QueryBatch가 확인한다).
+    const void* tree = nullptr;
+    uint64 epoch = 0;
+};
+
 // 질의 하나의 계수다. 호출자가 질의마다 넘기며 트리의 공유 상태에 쓰지 않으므로 병렬 검색에서
 // 경합이 없다. 필드는 더하기만 하므로 여러 질의에 같은 구조체를 넘기면 합계가 된다.
 struct QueryStats {
-    // 꺼내 판정한 노드 수(제외 판정으로 버린 노드 포함)다.
+    // 형상과 판정한 노드 수(제외로 버린 노드 포함)다. 완전 포함 가지 아래의 노드는 판정 없이 세지
+    // 않는다.
     uint64 visitedNodes = 0;
-    // 공간 판정(float 상대 경계)을 한 프록시 수다.
+    // 공간 판정을 한 프록시 수다(박스는 float 상대 경계, 구·볼록 영역·ray는 정확한 double AABB에
+    // Core 술어, 범위 밖 목록은 double).
     uint64 testedProxies = 0;
     // 완전 포함 노드에 있어 공간 판정을 생략한 프록시 수다.
     uint64 containedProxies = 0;
@@ -265,6 +305,9 @@ struct SpatialNodeInfo {
 
 // 노드 번호 칸의 "없음" 표지다(SpatialNodeInfo::parent 등).
 inline constexpr uint32 LooseOctreeNoNode = NumericLimits<uint32>::Max();
+
+// 범위 밖 목록 전체를 가리키는 SpatialNodeBatch::node 값이다.
+inline constexpr uint32 LooseOctreeOutOfRangeBatch = LooseOctreeNoNode - 1;
 
 // OctreeValidationReport::invariant 값이다. 1–9는 Docs/Design/SpatialIndex.ko.md 6.2절 불변 조건
 // 번호이고, 그 밖의 저장 구조 일관성(청크 연결·사용 수, 풀 사용량과 도달 가능한 블록·청크 수, 범위

@@ -97,11 +97,17 @@ Result<LooseOctree> LooseOctree::TryCreate(const LooseOctreeConfig& config,
     return Result<LooseOctree>::Success(LooseOctree(config, allocator, counting));
 }
 
+uint64 NextMutationEpoch() noexcept {
+    static uint64 counter = 0;
+    return platform::AtomicFetchAdd<platform::MemoryOrder::Relaxed>(&counter, uint64{1}) + 1;
+}
+
 LooseOctree::LooseOctree(const LooseOctreeConfig& config, Allocator& backing,
                          detail::CountingAllocator* counting) noexcept
     : config_(config), backing_(&backing), counting_(counting),
       records_(*counting, config.maxProxyGeneration), searchBlocks_(*counting, MaxNodeBlocks),
       manageBlocks_(*counting, MaxNodeBlocks), chunks_(*counting), outOfRange_(*counting) {
+    mutationEpoch_ = NextMutationEpoch();
     InitializeTables();
     const int64 origin[3] = {initialOrigin_, initialOrigin_, initialOrigin_};
     ResetRoot(config.initialRootLevel, origin);
@@ -165,6 +171,9 @@ void LooseOctree::TakeFrom(LooseOctree& other) noexcept {
     outOfRangeWarned_ = other.outOfRangeWarned_;
     counters_ = other.counters_;
     peaks_ = other.peaks_;
+    // 받은 쪽과 원본 모두 새 세대다. 옮기기 전에 어느 쪽에서 모은 묶음도 받아들이지 않는다.
+    mutationEpoch_ = NextMutationEpoch();
+    other.mutationEpoch_ = NextMutationEpoch();
 
     // 원본은 같은 설정의 빈 트리로 남는다. 컨테이너는 받은 allocator에 직접 묶어 두고, 다음 추가가
     // 새 계수 adapter를 만든다(EnsureCountingAllocator). 여기서는 할당하지 않는다.

@@ -143,8 +143,8 @@ public:
     // --- 명시 접근 상태와 전이(RenderBase 4.4절 GX5) ---
 
     // 자원 접근 상태를 바꾼다. 이 호출 앞에 기록한 명령의 접근이 끝난 뒤, 뒤에 기록할 명령 전에
-    // 바뀐다(begin·end를 한 지점에서 한다. 분리 전이는 RG2). 렌더 그래프가 pass prologue에서
-    // 부른다. 각 전이의 before·after 규칙은 ResourceTransition 주석이다.
+    // 바뀐다(begin·end를 한 지점에서 한다. 나눠 내려면 BeginTransitions·EndTransitions). 렌더
+    // 그래프가 pass prologue에서 부른다. 각 전이의 before·after 규칙은 ResourceTransition 주석이다.
     //
     // 사용 예(렌더 타깃으로 그린 텍스처를 다음 pass에서 읽기):
     //   const ResourceTransition toRead{.texture = sceneColor,
@@ -170,6 +170,45 @@ public:
     // 실패: 기록 중이 아니면 무시한다. stale handle·after가 Unknown이거나 성립하지 않는 조합인
     // 전이는 그 전이만 무시하고 IgnoredDraws를 올린다.
     virtual void Transition(Span<const ResourceTransition> transitions) noexcept = 0;
+
+    // 분리 전이(begin·end, RenderBase 4.4절 GX5·8절 RG2)다. BeginTransitions는 "이 호출 앞에 기록한
+    // 명령의 접근이 끝나면 전이를 시작해도 된다"를, EndTransitions는 "이 호출 뒤에 기록할 명령 전에
+    // 전이가 끝나 있어야 한다"를 기록한다. 그 사이의 다른 명령은 전이와 겹쳐 실행될 수 있다(UE
+    // RHIBeginTransitions·RHIEndTransitions). Transition 하나는 begin과 end를 같은 지점에서 한
+    // 것과 같다.
+    //
+    // 사용 예(생산 pass 끝에 begin, 소비 pass 앞에 end):
+    //   const ResourceTransition toRead{.buffer = particles,
+    //                                   .before = ResourceAccess::UavCompute,
+    //                                   .after = ResourceAccess::SrvCompute};
+    //   const Span<const ResourceTransition> list(&toRead, 1);
+    //   SplitTransition split = commands.BeginTransitions(list);
+    //   ... 다른 자원을 쓰는 명령 ...
+    //   commands.EndTransitions(split, list);
+    //
+    // 규칙:
+    // - begin과 end는 같은 기록(Begin… EndFrame) 안에서 짝을 맞춘다. end에는 begin과 같은 목록(같은
+    //   순서·같은 값)을 넘긴다.
+    // - begin과 end 사이에 그 subresource를 쓰는 명령·전이·다른 분리 전이를 기록하지 않는다(그래서
+    //   before가 장치 추적 상태와 같은지는 begin과 end 어느 쪽에서 보아도 같다). 검증 장치는 begin
+    //   때(Vulkan) 또는 end 때(D3D12) 대조해 ValidationErrorCount를 올린다.
+    // - 장치 추적 상태는 짝이 끝나면 after다(이후 Transition의 before 대조 기준).
+    // - begin이 null을 돌려주면(기록 중이 아님·빈 목록) end에 null을 넘겨도 되고, 그때 end는
+    //   Transition과 같다. 모르는·이미 끝난 짝의 end도 Transition처럼 낮추고 IgnoredDraws를 올린다.
+    // - EndFrame까지 끝나지 않은 짝은 계약 위반이다. 그 자원의 추적 상태는 backend마다 다를 수
+    //   있다(D3D12는 before, Vulkan event 경로는 after). 검증 장치는 오류로 센다.
+    //
+    // backend 낮추기(DeviceFeatures::splitTransitions):
+    // - Vulkan(synchronization2가 있을 때): begin은 vkCmdSetEvent2, end는 vkCmdWaitEvents2(같은
+    //   dependency). event는 기록마다 두고 기록 끝에 reset하며 그 제출의 fence 뒤 다시 쓴다. render
+    //   pass 안에서는 pass를 닫고 낸다. synchronization2가 없으면 end에서 한 번에 낮춘다.
+    // - D3D12: native split barrier를 쓰지 않고 end에서 한 번에 낮춘다(UE도 같다,
+    //   D3D12LegacyBarriers.cpp).
+    // - D3D11·OpenGL ES: begin은 아무것도 하지 않고 end는 Transition과 같다.
+    virtual SplitTransition
+    BeginTransitions(Span<const ResourceTransition> transitions) noexcept = 0;
+    virtual void EndTransitions(SplitTransition split,
+                                Span<const ResourceTransition> transitions) noexcept = 0;
 
     // --- GPU 계측(RenderBase 13.2절, GX9) ---
 

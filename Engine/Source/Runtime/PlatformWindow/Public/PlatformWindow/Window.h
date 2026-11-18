@@ -9,7 +9,8 @@ namespace rocks::platform {
 
 // 창 생성 설정이다.
 struct WindowDesc {
-    // UTF-8 제목이다. 창이 복사한다(255자를 넘으면 자른다).
+    // UTF-8 제목이다. 창이 복사한다(UTF-16 255단위를 넘으면 글자 경계에서 자른다). 잘못된 UTF-8은
+    // InvalidArgument다.
     StringView title = "Rocks";
     // client 영역 크기(픽셀)다. 0이면 InvalidArgument다.
     uint32 width = 1280;
@@ -72,9 +73,9 @@ struct NativeWindowHandle {
 // - 키는 스캔코드(물리 위치) 기준 input::Key이고, 입력 문자는 Text 이벤트(UTF-32)로 따로 온다.
 class Window {
 public:
-    // 창을 만든다. 크기 0은 InvalidArgument, 창 backend가 없는 플랫폼은 Unsupported, OS 실패는
-    // DependencyFailed다. report가 null이 아니면 결과를 채운다(OS 실패면 실패한 호출과
-    // GetLastError). 실패 로그는 호출자가 남긴다.
+    // 창을 만든다. 크기 0·잘못된 UTF-8 제목은 InvalidArgument(창을 만들기 전에 거른다), 창
+    // backend가 없는 플랫폼은 Unsupported, OS 실패는 DependencyFailed다. report가 null이 아니면
+    // 결과를 채운다(OS 실패면 실패한 호출과 GetLastError). 실패 로그는 호출자가 남긴다.
     static Result<UniquePtr<Window>> Create(Allocator& allocator, const WindowDesc& desc,
                                             WindowCreateReport* report = nullptr) noexcept;
 
@@ -101,7 +102,8 @@ public:
 
     virtual NativeWindowHandle NativeHandle() const noexcept = 0;
 
-    // 제목을 바꾼다(UTF-8). OS 실패는 DependencyFailed다.
+    // 제목을 바꾼다(UTF-8, WindowDesc::title과 같은 자름 규칙). 잘못된 UTF-8은 InvalidArgument이고
+    // 제목은 그대로다. OS 실패는 DependencyFailed다.
     virtual Result<void> SetTitle(StringView title) noexcept = 0;
 };
 

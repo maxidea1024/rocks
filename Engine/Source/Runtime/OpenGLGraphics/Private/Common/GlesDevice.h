@@ -9,6 +9,7 @@
 #include <Core/Text/String.h>
 #include <Graphics/DeviceOwnership.h>
 #include <Graphics/FenceTimeline.h>
+#include <Graphics/SplitTransitionTracker.h>
 #include <Graphics/StagingPool.h>
 #include <Graphics/TimestampRing.h>
 
@@ -310,6 +311,10 @@ private:
     void DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept override;
     Result<void> CopyPassTarget(TextureHandle destination) noexcept override;
     void Transition(Span<const ResourceTransition> transitions) noexcept override;
+    // 분리 전이다. 드라이버가 암묵 전이하므로 begin은 짝만 열고 end는 Transition과 같다.
+    SplitTransition BeginTransitions(Span<const ResourceTransition> transitions) noexcept override;
+    void EndTransitions(SplitTransition split,
+                        Span<const ResourceTransition> transitions) noexcept override;
     Result<uint64> WriteTimestamp() noexcept override;
     void PushMarker(StringView name) noexcept override;
     void PopMarker() noexcept override;
@@ -526,6 +531,8 @@ private:
     uint64 fenceValue_ = 0;
     FenceTimeline timeline_;
     DeviceOwnership ownership_;
+    // 기록 중 열린 분리 전이 짝이다.
+    SplitTransitionTracker splits_;
     bool recording_ = false;
     bool constantsDirty_ = false;
     bool validation_ = false;

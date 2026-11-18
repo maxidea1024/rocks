@@ -9,8 +9,8 @@ using namespace rocks::graphics;
 
 RecordingDevice::RecordingDevice(Allocator& allocator) noexcept
     : timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics), buffers_(allocator),
-      textures_(allocator), transitions_(allocator), pipelines_(allocator), swapChains_(allocator),
-      retired_(allocator), readbacks_(allocator),
+      textures_(allocator), transitions_(allocator), splits_(allocator), pendingSplits_(allocator),
+      pipelines_(allocator), swapChains_(allocator), retired_(allocator), readbacks_(allocator),
       staging_(allocator, stagingSource_, graphics::DefaultStagingBudgetBytes),
       timestamps_(allocator), timestampPool_(allocator) {
     stagingSource_.allocator = &allocator;
@@ -398,6 +398,9 @@ Result<GpuFencePoint> RecordingDevice::EndFrame() noexcept {
     }
 
     recording_ = false;
+    // 끝나지 않은 분리 전이는 계약 위반이다.
+    validationErrors_ += splits_.Close();
+    pendingSplits_.Clear();
     const uint64 value = ++fenceValue_;
     for (Retired& entry : retired_) {
         if (entry.pending) {
@@ -713,6 +716,111 @@ void RecordingDevice::Transition(Span<const ResourceTransition> transitions) noe
         return;
     }
 
+    CheckPendingOverlap(transitions);
+    ApplyTransitions(transitions, TransitionPhase::Full, 0);
+}
+
+namespace {
+
+// 두 전이가 같은 자원의 겹치는 subresource를 가리키는지다.
+bool Overlaps(const ResourceTransition& left, const ResourceTransition& right) noexcept {
+    if (!left.buffer.IsNull() || !right.buffer.IsNull()) {
+        return left.buffer == right.buffer && !left.buffer.IsNull();
+    }
+
+    if (!(left.texture == right.texture)) {
+        return false;
+    }
+
+    const uint64 leftEnd = uint64{left.range.firstMip} + left.range.mipCount;
+    const uint64 rightEnd = uint64{right.range.firstMip} + right.range.mipCount;
+    return left.range.firstMip < rightEnd && right.range.firstMip < leftEnd;
+}
+
+} // namespace
+
+void RecordingDevice::CheckPendingOverlap(Span<const ResourceTransition> transitions) noexcept {
+    for (const PendingTransition& pending : pendingSplits_) {
+        for (const ResourceTransition& transition : transitions) {
+            if (Overlaps(pending.transition, transition)) {
+                ++validationErrors_;
+                return;
+            }
+        }
+    }
+}
+
+SplitTransition
+RecordingDevice::BeginTransitions(Span<const ResourceTransition> transitions) noexcept {
+    if (!recording_) {
+        return {};
+    }
+
+    CheckPendingOverlap(transitions);
+    const SplitTransition split = splits_.Begin(transitions);
+    if (split.IsNull()) {
+        return split;
+    }
+
+    for (const ResourceTransition& transition : transitions) {
+        PendingTransition pending;
+        pending.split = split.id;
+        pending.transition = transition;
+        if (!pendingSplits_.TryPushBack(pending)) {
+            platform::Fatal("RecordingDevice split transition list allocation failed");
+        }
+
+        TransitionCall call;
+        call.texture = transition.buffer.IsNull();
+        call.index = call.texture ? transition.texture.slot.index : transition.buffer.slot.index;
+        call.range = transition.range;
+        call.before = transition.before;
+        call.after = transition.after;
+        call.phase = TransitionPhase::Begin;
+        call.split = split.id;
+        if (!transitions_.TryPushBack(call)) {
+            platform::Fatal("RecordingDevice transition log allocation failed");
+        }
+    }
+
+    Record(Op::BeginTransitions, split.id);
+    return split;
+}
+
+void RecordingDevice::EndTransitions(SplitTransition split,
+                                     Span<const ResourceTransition> transitions) noexcept {
+    if (!recording_) {
+        return;
+    }
+
+    const SplitEndResult ended = splits_.End(split, transitions);
+    if (ended == SplitEndResult::Unknown) {
+        ++ignoredDraws_;
+    } else if (ended == SplitEndResult::Mismatch) {
+        ++validationErrors_;
+    }
+
+    for (usize index = 0; index < pendingSplits_.Size();) {
+        if (pendingSplits_[index].split == split.id && !split.IsNull()) {
+            pendingSplits_[index] = pendingSplits_[pendingSplits_.Size() - 1];
+            auto popped = pendingSplits_.TryPopBack();
+            (void)popped;
+            continue;
+        }
+
+        ++index;
+    }
+
+    if (ended == SplitEndResult::Null || ended == SplitEndResult::Unknown) {
+        CheckPendingOverlap(transitions);
+    }
+
+    Record(Op::EndTransitions, split.id);
+    ApplyTransitions(transitions, TransitionPhase::End, split.id);
+}
+
+void RecordingDevice::ApplyTransitions(Span<const ResourceTransition> transitions,
+                                       TransitionPhase phase, uint32 split) noexcept {
     for (const ResourceTransition& transition : transitions) {
         if (!CanCombineAccess(transition.after)) {
             ++ignoredDraws_;
@@ -723,6 +831,8 @@ void RecordingDevice::Transition(Span<const ResourceTransition> transitions) noe
         call.range = transition.range;
         call.before = transition.before;
         call.after = transition.after;
+        call.phase = phase;
+        call.split = split;
         if (!transition.buffer.IsNull()) {
             ResourceAccess* state = buffers_.Find(transition.buffer.slot);
             if (state == nullptr) {

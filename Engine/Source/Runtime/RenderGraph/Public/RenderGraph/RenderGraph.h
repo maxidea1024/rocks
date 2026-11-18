@@ -103,6 +103,9 @@ struct RenderGraphDesc {
     // 프레임 번호다(풀 축출 나이·GPU 프레임 번호).
     uint64 frame = 0;
     GraphMode mode = GraphMode::Deferred;
+    // 분리 전이(begin·end)를 쓴다(Deferred만, GraphTransitionRecord::beginPass). 끄면 모든 전이를
+    // 소비 pass prologue에서 한 번에 낸다(분리 켬·끔 대조 시험·디버그).
+    bool splitTransitions = true;
 };
 
 // 렌더 lane 프레임 작업에서 그래프 설정을 만든다: 장치·handle 표·그 slot의 프레임 arena·프레임
@@ -163,8 +166,10 @@ RenderGraphDesc MakeRenderGraphDesc(RenderFrameContext& frame, GraphResourcePool
 //   업로드는 하지 않는다.
 // - 전이: subresource마다 상태를 추적하며, 연속한 pass의 접근이 합칠 수 있으면(읽기끼리, 같은 UAV에
 //   생략 표시) 한 상태로 합쳐 그 첫 pass의 prologue에서 한 번만 바꾼다. 그래서 읽기 → 읽기 전이는
-//   없고 UAV → UAV는 생략 표시가 없을 때만 UAV barrier다. 전이는 그 pass 기록 함수 앞에 바로
-//   낸다(분리 전이는 RG2). Raster pass의 렌더 타깃 전이는 장치 BeginOffscreen이 낸다(attachment).
+//   없고 UAV → UAV는 생략 표시가 없을 때만 UAV barrier다. 전이는 그 pass 기록 함수 앞에 낸다.
+//   Deferred는 같은 장치 기록 안에서 생산 pass와 소비 pass 사이에 다른 pass가 있으면 생산 pass
+//   끝에 begin하고 소비 pass 앞에서 end한다(분리 전이, CommandContext::BeginTransitions). Raster
+//   pass의 렌더 타깃 전이는 장치 BeginOffscreen이 낸다(attachment).
 // - 실행: Raster pass마다 장치 기록(BeginOffscreen·BeginFrame … EndFrame)을 하나 연다. Compute·Copy
 //   pass는 열린 기록에 이어 쓴다(기록 없는 그래프 앞부분의 Compute·Copy pass는 GX4 전까지
 //   Unsupported). pass마다 CPU 구간과(trace가 있으면) GpuScope 구간을 둔다.
