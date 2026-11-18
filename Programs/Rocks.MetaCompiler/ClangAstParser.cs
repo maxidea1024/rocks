@@ -90,11 +90,11 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
         "rocks::ObjectRef", "rocks::RootRef", "rocks::ObjectRefArray", "rocks::StructRefArray", "rocks::ObjectRefMap"
     };
 
-    // 대상 객체를 담지도 추적하지도 않는 참조 템플릿이다. 인자 타입을 따라가지 않는다(WeakRef<T>는 T의 필드를 담지 않고,
+    // 대상 객체를 담지도 추적하지도 않는 참조 템플릿이다. 인자 타입을 따라가지 않는다(WeakObjectRef<T>는 T의 필드를 담지 않고,
     // SoftObjectRef<T>는 에셋 ID와 경로만 담는다).
     private static readonly HashSet<string> NonOwningTemplates = new(StringComparer.Ordinal)
     {
-        "rocks::WeakRef",
+        "rocks::WeakObjectRef",
         "rocks::SoftObjectRef"
     };
 
@@ -929,7 +929,7 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                         if (StrongReferencePath(nativeType, []) is string path)
                         {
                             throw new MetadataException($"{symbol}: ROCKS_NATIVE member holds a strong object reference ({path})", "RMC2205",
-                                "Native members are not traced; store ObjectRef/RootRef/Object pointers in ROCKS_PROPERTY fields or use WeakRef/ObjectHandle.");
+                                "Native members are not traced; store ObjectRef/RootRef/Object pointers in ROCKS_PROPERTY fields or use WeakObjectRef/ObjectHandle.");
                         }
 
                         if (RequiresWorldOnlyOwnerPath(nativeType, []) is string worldOnlyPath)

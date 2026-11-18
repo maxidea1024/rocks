@@ -70,6 +70,16 @@ void YieldThread() noexcept {
     sched_yield();
 }
 
+ThreadStackRange CurrentThreadStackRange() noexcept {
+    ThreadStackRange range;
+    detail::PosixCurrentThreadStack(range.low, range.high);
+    if (range.low >= range.high) {
+        Fatal("thread stack range query returned an empty range");
+    }
+
+    return range;
+}
+
 usize CopyCurrentThreadName(char* buffer, usize capacity) noexcept {
     if (buffer == nullptr || capacity == 0) {
         return 0;

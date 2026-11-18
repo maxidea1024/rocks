@@ -1,6 +1,6 @@
 # Rocks 공간 인덱스: 구조 선택과 Loose Octree 설계
 
-기준일: 2026-11-18, 개정 5. 2026-11-17: 길이 단위를 UE 5.8과 같은 cm로 바꿨다(설정값 표·11절 예시·LO02·LO03).
+기준일: 2026-11-19, 개정 6. 2026-11-17: 길이 단위를 UE 5.8과 같은 cm로 바꿨다(설정값 표·11절 예시·LO02·LO03).
 
 이 문서는 엔진의 공간 분할·탐색 구조를 용도별로 무엇으로 할지 검토하고, 그 결과로 `SpatialIndex` 모듈에 둘 범용 영역 질의 구조 `LooseOctree`의 설계를 정한다. OT0–OT2(선행 SIP2·SIP4·SIP6·SIP7·SIP10, 저장 구조·삽입·삭제·박스 검색·분할·이동·루트·유지보수)는 구현했고(2026-11-18, 10절), 그 밖은 설계다. 수치는 모두 측정 전 제안값이다. 상태 표기는 **구현**(코드와 시험이 있음), **설계**(이 문서가 정한 계약, 코드 없음), **결정 필요**(14절), **후속**(범위 밖)이다.
 
@@ -539,7 +539,7 @@ swap-remove 뒤 옮겨진 프록시의 레코드를 슬롯 색인으로 찾아�
 
 1. 새 AABB를 검증한다.
 2. 새 AABB가 현재 노드의 확장 경계에 들어가면 float 경계와 레코드의 double AABB만 고치고 끝낸다. 현재 노드가 잎이 아니고 새 AABB가 중심으로 고른 자식의 확장 경계에도 들어가면 그 노드를 재배치 대기로 표시한다(판정 O(1)).
-3. 벗어나면 대상 위치를 먼저 계산한다. 부모 링크를 따라 올라가며 새 AABB를 포함하는 확장 경계를 가진 첫 조상 A를 찾고, A에서 배치 규칙으로 내려가 새 노드 N을 정한다. 루트에도 들어가지 않으면 6.5절 루트 조건으로 처리한다.
+3. 벗어나면 대상 위치를 먼저 계산한다. 부모 링크를 따라 올라가며 확장 경계가 새 AABB를 포함하고 기본 셀이 새 AABB 중심을 포함하는 첫 조상 A를 찾고, A에서 배치 규칙으로 내려가 새 노드 N을 정한다. 그런 조상이 없으면 6.5절 루트 조건(확장 또는 범위 밖 목록)으로 처리한다. 중심 조건은 필수다. 중심이 A의 확장 띠에 있으면 A가 고른 자식에 들어가지 못해 프록시가 A(내부 노드)에 남고, 어느 자식에도 맞지 않으므로 하강 재배치로도 내려가지 않는다. OT5 측정에서 이 조건이 빠져 순간 이동 3,000회 뒤 내부 노드 직접 저장 2,431개, 작은 질의 판정 수 25배가 생겼고 유지보수로 회복되지 않았다(2026-11-18 수정, 시험 `LooseOctree_LO06_UpdateReinsertMatchesAddQuality`). 중심이 A의 기본 셀 안이면 루트에서 A까지가 배치 규칙의 경로이므로(불변 조건 2) A에서의 하강이 `TryAdd`와 같은 노드에 닿는다.
 4. N의 청크 자리(필요하면 새 청크)와 루트 확장 블록을 모두 확보한다. 하나라도 실패하면 `OutOfMemory`를 돌려주고 프록시는 옛 AABB로 옛 위치에 남는다.
 5. 옛 위치에서 swap-remove하고 N에 저장한다. 서브트리 수는 옛 노드부터 A의 자식까지(A 제외) 줄이고, A의 자식부터 N까지(A 제외) 늘린다. 점유 비트와 대기 등록은 삽입·삭제와 같은 규칙이다.
 
@@ -727,12 +727,12 @@ HEAD `1c0ef8a` 기준이다.
 |---|---|---|---|---|
 | SIP1 | `ConvexVolume<T>`(평면 최대 32개, 법선 안쪽, 힙 없음)과 `Containment`·`ClassifyContainment`(밖·안·교차)·`Overlap(volume, box|sphere)` | CoreDetailedSpec G04·G06 | 구현 | OT3 |
 | SIP2 | `Box<T>` 보조 연산: `Contains`, `Union`, `ExpandedBy`, `ToFloatOutward`와 `math::ToFloatRoundedDown/Up`·`NextUp/NextDown`(정수 비트 연산, 부동소수 환경 무관). 이름은 `Box2` 선례를 따른다 | CoreDetailedSpec G04·G05 | 구현 | OT1 |
-| SIP3 | SIMD 비교·mask·select·movemask 연산, SoA batch 판정 | CoreDetailedSpec G08 | 후속 | OT5(SIMD 변형) |
+| SIP3 | SIMD 비교·mask·select·movemask 연산(`Register4f`의 `Compare*`·`Bit*`·`Select`·`MoveMask`, scalar·SSE2·NEON) | CoreDetailedSpec G08 | 구현 | OT5(SIMD 변형) |
 | SIP4 | 고정 용량 배열 `InlineArray<T, N>`(객체 안 저장, 힙 넘침 없음) | CoreDetailedSpec C01 | 구현 | OT3(검색 스택) |
 | SIP5 | 범위 분할 병렬 실행 helper | CoreDetailedSpec에 항목 추가 필요(현재 대응 ID 없음) | 후속 | OT6(병렬 검색 측정) |
 | SIP6 | `SlotArray`의 색인 접근(`IsOccupiedAt`·`FindAt`·`ElementAt`)과 색인 → 핸들(`HandleAt`), 사전 확보 `TryEnsureCapacity` | CoreDetailedSpec C03 | 구현 | OT1 |
 | SIP7 | 범용 색인 풀 `IndexPool<T>`(평탄 저장소 + uint32 LIFO 재사용 목록, 할당 없는 사전 확보 경로) | CoreDetailedSpec C03 | 구현 | OT1 |
-| SIP8 | 벤치마크 실행 파일 `Programs/SpatialIndexBench`. 공용 하니스가 없으므로 통계(백분위)·JSON 출력을 새로 만든다 | 이 문서 | 설계 | OT5 |
+| SIP8 | 벤치마크 실행 파일 `Programs/SpatialIndexBench`(묶음 분위수·JSON·실행 스크립트 `RunBench.ps1`) | 이 문서 | 구현 | OT5 |
 | SIP9 | 읽기·변경 접근 겹침 검출기 `AccessOverlapChecker`(재귀 정책 `ReadsOnly`·`NestedWrites`·`NestedWritesAndReads`, 범위 객체 `ReadAccessScope`·`WriteAccessScope`) | 이 문서, EngineImplementationPlan 8.4 | 구현 | OT4 |
 | SIP10 | `SpatialIndex` 모듈(`Engine/Source/Runtime/SpatialIndex`, Build.cs, EngineTests 등록) | EngineImplementationPlan 3.1·3.2 | 구현 | OT1 |
 
@@ -871,6 +871,15 @@ HEAD `1c0ef8a` 기준이다.
 | 그림자 caster 수집 노드 묶음 | 노드 묶음 병렬 수집이 단일 질의 대비 worker 8개에서 확장 효율 0.6 이상 |
 | 저장 변형 채택 | 대표 부분집합 전체에서 중앙값이 나빠지는 분포가 없고, 어느 한 분포에서 10% 이상 나아짐 |
 
+**OT5 예비 결과(2026-11-18, [보고서](../Benchmarks/SpatialIndex/2026-11-18/report.ko.md)).** 측정 내내 기기 CPU가 대부분 80–100%여서 프로세스 간 잡음이 −37%~+17%였다. 몇 배 단위 차이와 계수만 근거로 쓴다. 기기가 한가할 때 다시 잰다.
+
+- 대표 부하 정의: 광원 64개(16·256 변형) 구 질의, 반경 3–30 m, caster 프러스텀 4개, 걷기 이동 ±50 cm, 유지보수 `Operations(256)`.
+- 제자리 갱신: 경계 갱신 결함(6.5절) 수정 뒤 10⁴ 대표 4분포에서 재삽입 93–100% 감소, 프레임 질의 시간 −31%~+5%로 **기준 충족**(`rerun-update-fix/`). 10⁶ 행은 수정 뒤 다시 재지 않았다.
+- 평면 전수 대체 규모: A2가 D보다 빠른 구간은 10³의 여러 분포, 10⁴·10⁵의 분리 가능 과밀·겹치는 과밀, 10⁶의 겹치는 과밀이다(결함 수정 전 D 기준, 보고서 6.2절).
+- 저장 변형: 모두 **미충족**. looseness 1–5/4는 균일·군집·겹치는 과밀에서 크게 좋아지고 크기 편차에서 크게 나빠진다(큰 프록시가 위 노드에 쌓임). 박스 질의는 float 상대 청크가 double 레코드보다 빠르다.
+- TOctree2 설계 기반 독립 구현(C)이 D보다 작은 질의에서 2–8배 빠르다. 계수로 D는 노드 163개, C는 9개를 판정한다(looseness 2의 겹침, 데이터보다 큰 초기 루트). 결정 필요 8과 함께 다룬다.
+- 결과가 많은 구·프러스텀·ray는 후보마다 레코드를 읽는 D가 순차 전수보다 3–6배 느리다. 6.8절 float + 넓힘 대안은 미구현이라 비교하지 못했다.
+
 ## 10. 단계
 
 접두사 OT는 이 문서의 단계다. OT0–OT3은 별도 브랜치에서 먼저 진행하고, OT4 이후는 착수 시점을 따로 정한다(12절).
@@ -882,7 +891,7 @@ HEAD `1c0ef8a` 기준이다.
 | OT2 | 분할 평가·보류, 경계 갱신, 루트 확장·축소, 유지보수 — **구현**(2026-11-18) | OT1 | LO05–LO09 |
 | OT3 | 구·프러스텀·ray·최근접, 버퍼·존재·개수 질의, 노드 묶음 — **구현**(2026-11-18) | OT2, SIP1 | LO01 전체·LO02·LO12·LO13·LO14 |
 | OT4 | 읽기·변경 단계 검증 — **구현**(2026-11-18) | OT3, SIP9 | LO11·LO15 |
-| OT5 | `SpatialIndexBench`, 비교군 A·B·C, 단계별 변형 측정 | OT4, SIP3, SIP8 | 9절 원시 결과와 보고서 |
+| OT5 | `SpatialIndexBench`, 비교군 A·B·C, 단계별 변형 측정 — **구현·예비 측정**(2026-11-18, 부하 있는 환경) | OT4, SIP3, SIP8 | 9절 원시 결과와 보고서 |
 | OT6 | 병렬 검색·노드 묶음 수집 측정, 초기값 확정, 비교군 E 참고 측정 | OT5, SIP5 | 9.6절 판정 |
 
 엔진 소비자 연결(World·RenderScene)은 transform commit과 경계를 가진 컴포넌트가 생긴 뒤의 후속이다. 최종 저장 구조와 갱신 정책은 OT5·OT6의 측정으로 확정하며, 성능이 나빠지는 조건과 적용 한계도 보고한다.
@@ -975,15 +984,15 @@ octree.RunMaintenance(MaintenanceBudget::Operations(256));
 5. **실제 `TOctree2`의 직접 측정 여부.** UE 빌드 안에서 같은 입력으로 측정할 수 있으나 EULA의 관련 조항을 확인하지 못했다. 제안: 기본 계획에서 제외하고 독립 구현(C)만 측정한다.
 6. **10.4절의 UE 근거 갱신.** 10.4절의 근거는 5.4 기준이다. SceneCulling의 level 산정과 loose 여부는 5.8.4 소스에서 확인되었다(3.3절). 제안: 다음 EngineImplementationPlan 개정 때 33.10절의 미확인 표기를 갱신하고 5.8 기준으로 재확인한다.
 7. **착수 시점.** 결정됨(2026-11-18): OT0–OT2는 별도 브랜치에서 지금 진행한다. OT3은 OT2 병합 뒤 이어 진행한다(2026-11-18). OT4 이후는 따로 정한다.
-8. **큰 객체 전용 목록.** 내부 노드 누적과 장대 객체의 루트 고정을 별도 목록으로 줄일지. 제안: OT5 측정 뒤 결정한다.
-9. **비교군 B 이식 코드의 외부 코드 정책.** `Programs/SpatialIndexBench` 안에 BSD 고지와 함께 둔 이식 파일이 `ThirdParty/`·`ThirdParty.json` 관리 대상인지(RepositoryLayout). 제안: 원본을 가져오지 않고 동작을 다시 작성한 이식이므로 `ThirdParty.json`에 출처·라이선스·기준 commit을 등록하고 파일은 벤치 프로그램 안에 둔다.
-10. **하드웨어 계수기 수집 도구와 대상 환경.** 제안: OT5 착수 시 정한다. 정하기 전에는 미측정으로 기록한다.
+8. **큰 객체 전용 목록과 looseness 기본값.** OT5에서 looseness를 줄이면 대부분의 분포가 크게 좋아지나 크기 편차 분포가 크게 나빠졌다(9.6절). 제안: OT6에서 큰 객체 목록(기준 크기를 넘는 프록시를 별도 선형 목록에 두는 변형)과 작은 looseness를 함께 구현해 같은 부하로 측정하고, 크기 편차를 포함한 대표 부분집합 전체에서 9.6절 기준을 충족하는 조합을 기본값으로 정한다.
+9. **비교군 B 이식 코드의 외부 코드 정책.** 결정됨(2026-11-18): `ThirdParty.json`이 원본 파일 SHA-256을 대조하므로 이식 코드 자체는 등록할 수 없다. `Engine/Source/ThirdParty/UnityOctree/`에 `kind: data`로 등록하고 commit archive의 `LICENCE` 원문만 원본 디렉터리에 둔다(archive·LICENCE SHA-256, BSD-2-Clause, `binaryNoticeRequired`). 이식 파일(`Programs/SpatialIndexBench/Private/UnityOctreePort.*`)은 머리에 BSD 원문과 기준 commit을 두고, manifest `notes`에 위치와 달라진 점을 적는다. 엔진 바이너리에는 들어가지 않는다.
+10. **하드웨어 계수기 수집 도구와 대상 환경.** 결정됨(2026-11-18): OT5에서는 제외하고 미측정으로 기록했다. 수집 도구는 필요해질 때 정한다.
 11. **검색용 경계 정밀도, 루트 방식, 자식 배치.** 제안: 9.4절 측정으로 정한다.
 
 ## 15. 미확인 사항
 
 - UE EULA의 코드 열람·이식·측정 공표 관련 조항. 저장소에는 링크 한 줄만 있다.
-- UnityOctree가 의존하는 Unity `Bounds`의 경계 포함 규칙과 `IntersectRay`의 세부. 비교군 B 이식 전에 확정해야 한다.
+- Unity `Bounds`의 `Contains`·`IntersectRay`·`GeometryUtility.TestPlanesAABB`는 native라 소스가 공개되지 않았다. 비교군 B는 닫힌 구간·slab 진입 거리·평면 술어로 가정했다(`Intersects`와 `min`·`max`는 UnityCsReference cf583fbe에서 확인).
 - UnityOctree 저장소의 보관 상태는 GitHub 표시이며 로컬 클론으로는 확인되지 않는다.
 - `TOctree2`에서 루트 밖 요소가 가장자리 노드에 저장되는 동작. 코드 해석이며 실행으로 확인하지 않았다.
 - `TOctree2` 분할 재삽입 루프의 안전 조건(해석).
@@ -1000,3 +1009,4 @@ octree.RunMaintenance(MaintenanceBudget::Operations(256));
 - 개정 3(2026-11-18): OT0–OT2 구현 결과를 반영했다. 노드 번호와 레코드 슬롯 표현(6.3절), 분리 level 계산과 체인 중간 노드의 잔류(6.4절), 경계 갱신 중 분할 평가 지연과 보류 기준 수 갱신(6.4절), 루트 수용 판정의 격자 범위 조건(6.5절), 예산 0·축소 요청·마감 포화(6.6절), 할당 계수 통계와 `Validate()` 보고 반환(6.10절), 선행 작업 상태(7절), 시험 실행 방법(8절)을 고쳤다.
 - 개정 4(2026-11-18): OT3 구현 결과를 반영했다. 구·프러스텀·ray의 프록시 판정을 double Core 술어로 바꾸고 단조성 근거와 Core 술어의 접촉 한계를 적었다(6.8절). 최근접 전제와 거리 처리, 노드 묶음 필드·유효성(6.1절), LO02 기준을 고쳤고 δ(ℓ) 미확인 항목을 지웠다. SpatialIndex 모듈을 엔진 계층으로 옮겼다(6.1절).
 - 개정 5(2026-11-18): OT4 구현을 반영했다. 위반 검출을 Core `AccessOverlapChecker`(SIP9, UE `FRWAccessDetector` 대응, 단일 atomic 단어의 읽고-쓰기 연산, 진입·종료 양쪽 검사)로 옮기고 6.9절을 고쳤다.
+- 개정 6(2026-11-19): OT5(벤치마크, SIP3·SIP8) 예비 결과를 반영했다(9.6절). 측정에서 드러난 경계 갱신 재삽입의 조상 선택 결함을 고치고 6.5절에 중심 조건을 넣었다. 결정 9·10을 결정됨으로, 결정 8을 looseness 기본값과 함께 OT6 측정으로 정하도록 바꿨다. Unity `Bounds` 미확인 항목을 갱신했다.

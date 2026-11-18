@@ -1,6 +1,6 @@
-#include "WeakRefGraphTestSupport.h"
+#include "WeakObjectRefGraphTestSupport.h"
 
-// 리플렉션 B9d1 WeakRef PROPERTY의 쓰기 검증 시험이다(Docs/Design/ReflectionExtensions.ko.md
+// 리플렉션 B9d1 WeakObjectRef PROPERTY의 쓰기 검증 시험이다(Docs/Design/ReflectionExtensions.ko.md
 // 5.1절): 등록된 write(FieldWriteOperation — 경로의 최상위 필드 쓰기도 같은 경로)·경로 쓰기(struct
 // 멤버·Array 원소 쓰기·삽입·원소 struct 안 멤버)·staged 쓰기가 대상이 같은 Registry의 생존
 // 객체(staged는 이 트랜잭션의 객체도)이고 기대 타입의 파생인지 보고(null 허용), 실패한 쓰기는 값을
@@ -26,7 +26,7 @@ const RuntimeFieldOps* FindOps(const TypeLease& lease, Guid id) noexcept {
 // WeakHolder(기대 WeakTarget의 파생)와 null은 받고, WeakOther는 TypeMismatch, 파괴 요청한 대상은
 // Destroyed, 다른 Registry의 객체는 WrongContext로 실패하며 값은 그대로다. 기대 타입 Object 필드는
 // WeakOther도 받는다. 경로 읽기·옛 값은 weak handle이다.
-TEST(WeakRefField_WritesCheckLiveTargetAndExpectedType) {
+TEST(WeakObjectRefField_WritesCheckLiveTargetAndExpectedType) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
     REQUIRE(RegisterFixture(types));
@@ -134,7 +134,7 @@ TEST(WeakRefField_WritesCheckLiveTargetAndExpectedType) {
 // staged 쓰기(writeStaged)는 같은 트랜잭션의 공개 전 객체와 생존 객체를 받고, 기대 타입 위반
 // (TypeMismatch)·파괴 요청한 객체(StaleHandle — staged 참조 대상 규칙)·다른 Registry의
 // 객체(WrongContext)는 거부한다. Commit 뒤 값이 남는다.
-TEST(WeakRefField_StagedWritesAcceptTransactionObjects) {
+TEST(WeakObjectRefField_StagedWritesAcceptTransactionObjects) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
     REQUIRE(RegisterFixture(types));

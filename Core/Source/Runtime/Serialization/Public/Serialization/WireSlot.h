@@ -34,8 +34,8 @@ struct WireValueShape {
 // 단일 값이 놓이는 컨테이너 안 자리다. 자리마다 받는 tag는 아래와 같다(Record·RecordList·
 // ValueArray·Optional·Set·Map·0·모르는 값은 어느 자리에서도 받지 않는다). wire가 같은 종류끼리는
 // tag로 구별할 수 없으므로, 그 자리에 올 수 없는 종류 중 받는 tag와 wire가 같은 것(Optional 내부의
-// ClassRef·WeakRef = Guid·U32, Set 원소·Map 키의 WeakRef·ObjectRef = U32)은 codec이 schema로
-// 거른다.
+// ClassRef·WeakObjectRef = Guid·U32, Set 원소·Map 키의 WeakObjectRef·ObjectRef = U32)은 codec이
+// schema로 거른다.
 enum class WireSlot : uint8 {
     // ValueArray 원소(13): Bool·U32·U64·I64·F32·F64·Guid·String·Bytes·SoftObjectReference·
     // InstancedStruct(u64 길이 + 내용)·Text. struct 원소 배열은 RecordList다.

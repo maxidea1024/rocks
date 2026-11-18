@@ -831,3 +831,105 @@ TEST(LooseOctree_LO10_FailureInjectionAcrossOutOfRangeAndForcedMaintenance) {
     CHECK(ValidateTree(forced.Tree()));
     CHECK(QueriesMatch(forced, config, system, 0xA13u));
 }
+
+namespace {
+
+// 경계 갱신 품질 대조용 입력이다. 중심은 초기 루트 기본 셀([−32, 32]^3) 안, 반 변은 0.02–0.25다.
+Box<double> RandomSmallBox(RandomStream& random) noexcept {
+    const Vec3d center(random.NextDouble01() * 62.0 - 31.0, random.NextDouble01() * 62.0 - 31.0,
+                       random.NextDouble01() * 62.0 - 31.0);
+    return MakeCube(center, 0.02 + random.NextDouble01() * 0.23);
+}
+
+// 작은 박스 질의 수백 개의 공간 판정 프록시 수 합이다(구조 품질 지표).
+uint64 SmallQueryTestedProxies(const LooseOctree& tree, uint64 seed) noexcept {
+    SpatialReadScope read(tree);
+    const LooseOctreeReader reader = read.Reader();
+    RandomStream random(seed);
+    QueryStats stats;
+    for (uint32 query = 0; query < 256; ++query) {
+        const Box<double> box = MakeCube(RandomSmallBox(random).Center(), 0.5);
+        (void)reader.QueryBox(
+            box, 0xFFu, [](const SpatialProxyHit&) noexcept { return QueryControl::Continue; },
+            &stats);
+    }
+    return stats.testedProxies;
+}
+
+} // namespace
+
+// LO06(구조 품질): 같은 시드의 순간 이동 시퀀스를 TryUpdateBounds로 적용한 트리와 TryRemove +
+// TryAdd로 적용한 트리가 유지보수 뒤 같은 수준의 구조가 된다. 경계 갱신의 재삽입이 새 AABB의 중심을
+// 기본 셀 밖(확장 띠)에 둔 조상에 프록시를 남기면, 그 프록시는 어느 자식에도 들어가지 못해
+// 유지보수로도 내려가지 않는다(내부 노드 직접 저장이 쌓여 작은 질의의 판정 수가 늘어난다).
+TEST(LooseOctree_LO06_UpdateReinsertMatchesAddQuality) {
+    SystemAllocator allocator;
+    const LooseOctreeConfig config = SmallConfig();
+    constexpr uint32 Count = 2000;
+    constexpr uint32 Rounds = 3;
+    constexpr uint32 MovesPerRound = 600;
+    auto createdUpdated = LooseOctree::TryCreate(config, allocator);
+    auto createdReplaced = LooseOctree::TryCreate(config, allocator);
+    REQUIRE(createdUpdated && createdReplaced);
+    OracleTree updated(Move(createdUpdated.Value()), allocator);
+    LooseOctree replaced = Move(createdReplaced.Value());
+    Array<SpatialProxyHandle> handles(allocator);
+    RandomStream random(0x10C6u);
+    for (uint32 index = 0; index < Count; ++index) {
+        const Box<double> box = RandomSmallBox(random);
+        REQUIRE(updated.Add(box, 1) == index);
+        SpatialProxyDesc desc;
+        desc.bounds = box;
+        desc.filterMask = 1;
+        desc.userValue = index;
+        auto added = replaced.TryAdd(desc);
+        REQUIRE(added);
+        REQUIRE(handles.TryPushBack(added.Value()));
+    }
+    const OctreeStats built = StatsOf(updated.Tree());
+    CHECK(built.interiorDirectCount == StatsOf(replaced).interiorDirectCount);
+
+    for (uint32 round = 0; round < Rounds; ++round) {
+        for (uint32 move = 0; move < MovesPerRound; ++move) {
+            const uint32 index = random.NextUInt32Below(Count);
+            const Box<double> box = RandomSmallBox(random);
+            REQUIRE(updated.Update(index, box));
+            REQUIRE(replaced.TryRemove(handles[index]));
+            SpatialProxyDesc desc;
+            desc.bounds = box;
+            desc.filterMask = 1;
+            desc.userValue = index;
+            auto added = replaced.TryAdd(desc);
+            REQUIRE(added);
+            handles[index] = added.Value();
+        }
+    }
+    const OctreeStats movedUpdated = StatsOf(updated.Tree());
+    const OctreeStats movedReplaced = StatsOf(replaced);
+    (void)updated.Tree().RunMaintenance(MaintenanceBudget::All());
+    (void)replaced.RunMaintenance(MaintenanceBudget::All());
+    const OctreeStats maintainedUpdated = StatsOf(updated.Tree());
+    const OctreeStats maintainedReplaced = StatsOf(replaced);
+    const uint64 testedUpdated = SmallQueryTestedProxies(updated.Tree(), 0x10C7u);
+    const uint64 testedReplaced = SmallQueryTestedProxies(replaced, 0x10C7u);
+    CHECK(ValidateTree(updated.Tree()));
+    CHECK(ValidateTree(replaced));
+    CHECK(QueriesMatch(updated, config, allocator, 0x10C8u));
+    // 허용 범위: 두 트리는 같은 프록시 집합이지만 구조가 비트 단위로 같을 필요는 없다. 경계 갱신은
+    // 분할 평가를 유지보수로 미루고(6.4절), 확장 경계 안에 떨어진 순간 이동은 제자리 갱신으로
+    // 노드를 지키며, 삭제 후 재삽입 쪽은 삭제가 병합 대기를 만든다. 그래서 노드 수와 질의 판정 수는
+    // 조금 다르다. 결함(조상의 확장 띠에 남는 재삽입)은 갱신 직후 내부 노드 직접 저장 수백 개,
+    // 유지보수 뒤에도 질의 판정 수 4배 이상으로 나타났다. 기준은 그보다 한 자릿수 엄격하다: 내부
+    // 직접 저장 차이는 프록시의 1% 이하(갱신 직후·유지보수 뒤 모두), 질의 판정 수는 25% + 질의당
+    // 1개 이하, 노드 수는 0.5–2배, 유지보수 뒤 노드당 최대 직접 저장은 분할 임계 이하(보류 노드
+    // 없음).
+    CHECK(movedUpdated.interiorDirectCount <= movedReplaced.interiorDirectCount + Count / 100);
+    CHECK(maintainedUpdated.interiorDirectCount <=
+          maintainedReplaced.interiorDirectCount + Count / 100);
+    CHECK(testedUpdated * 4 <= testedReplaced * 5 + 4 * 256);
+    CHECK(maintainedUpdated.nodeCount * 2 >= maintainedReplaced.nodeCount &&
+          maintainedUpdated.nodeCount <= maintainedReplaced.nodeCount * 2);
+    CHECK(maintainedUpdated.heldNodeCount == 0 &&
+          maintainedUpdated.maxDirectCount <= config.splitThreshold);
+    CHECK(maintainedUpdated.reinserts + maintainedUpdated.inPlaceUpdates == Rounds * MovesPerRound);
+}

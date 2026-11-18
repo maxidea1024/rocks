@@ -118,7 +118,7 @@ struct MapHolder final : Object {
     ROCKS_PROPERTY() OrderedMap<String, MapPoint> points;
     ROCKS_PROPERTY() OrderedMap<uint32, MapVersioned> versioned;
     ROCKS_PROPERTY() OrderedMap<uint32, MapLink> links;
-    ROCKS_PROPERTY() OrderedMap<uint32, WeakRef<MapHolder>> weak;
+    ROCKS_PROPERTY() OrderedMap<uint32, WeakObjectRef<MapHolder>> weak;
     ROCKS_PROPERTY(Required) OrderedMap<uint32, SoftObjectRef<>> required;
     ROCKS_PROPERTY() OrderedSet<String> words;
     ROCKS_PROPERTY() OrderedSet<Name> tags;

@@ -200,7 +200,7 @@ TEST(ClassFlagGraph_ExcludeAndKeepPolicies) {
             const auto access = objects.OwnerAccess();
             CHECK(objects.SetReference(access, holder.Handle(), value.strong, transient.Handle()));
             CHECK(objects.SetReference(access, holder.Handle(), value.needed, plain.Handle()));
-            value.weak = WeakRef<Object>(deprecated.Handle());
+            value.weak = WeakObjectRef<Object>(deprecated.Handle());
         });
 
         ClassFlagDiagnostics saved;
@@ -448,7 +448,7 @@ TEST(ClassFlagGraph_UnsaveableAncestorsAreExcluded) {
         With<ClassFlagHolder>(objects, holder.Handle(), [&](ClassFlagHolder& value) noexcept {
             CHECK(objects.SetReference(access, holder.Handle(), value.strong,
                                        underTransient.Value().Handle()));
-            value.weak = WeakRef<Object>(underDeprecated.Value().Handle());
+            value.weak = WeakObjectRef<Object>(underDeprecated.Value().Handle());
         });
 
         ClassFlagDiagnostics included;

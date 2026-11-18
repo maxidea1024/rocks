@@ -30,9 +30,9 @@ enum class FieldDiagnosticKind : uint8 {
     // ReflectionExtensions.ko.md 5.1·15절). 그래프 저장의 Reject 정책, Include 거부 조건(기준
     // Outer·노드 1의 조상·다른 패키지), Admit 정책에서 AdmitExternalReference가 Reject를 고른
     // 위치(weak 포함)가 value 0 뒤 InvalidArgument이고, 강한 참조에 Null을 고른 위치는 value 1을
-    // 남기고 그 위치를 null로 쓴다. weak 참조(WeakRef PROPERTY)의 대상이 저장 집합 밖이면 value 2를
-    // 남기고 null로 쓴다(저장은 실패하지 않는다): Reject 정책, Admit에서 Null·Import(weak import는
-    // 없다), Include에서 모든 노드를 encode한 뒤의 최종 집합 밖(그때 기록 순서대로 —
+    // 남기고 그 위치를 null로 쓴다. weak 참조(WeakObjectRef PROPERTY)의 대상이 저장 집합 밖이면
+    // value 2를 남기고 null로 쓴다(저장은 실패하지 않는다): Reject 정책, Admit에서 Null·Import(weak
+    // import는 없다), Include에서 모든 노드를 encode한 뒤의 최종 집합 밖(그때 기록 순서대로 —
     // objectIndex·path는 기록할 때의 위치다). 저장 정책 UnsaveablePolicy::Exclude에서 저장 불가
     // 객체(클래스 Transient·Deprecated — 리플렉션 B9h2)를 가리키는 강한·weak 참조는 value 3
     // (Transient 클래스)·4(Deprecated 클래스)를 남기고 null로 쓴다.
@@ -98,11 +98,11 @@ struct ExternalReferenceInfo {
     // Import를 고르면 이 대상이 받을 외부 번호(slot — 1부터, 첫 출현 순)다. Null·Reject면 쓰이지
     // 않는다(다음 대상이 같은 번호를 받는다). weak면 0이다(weak import는 없다).
     uint32 slot = 0;
-    // weak 참조(WeakRef PROPERTY — 리플렉션 B9d1) 위치인지다. weak는 같은 그래프 안만 보존하므로
-    // Null·Import 모두 그 위치를 null로 쓰고 ExternalReference 진단(value 2)을 남기며 저장은
-    // 실패하지 않는다. Reject만 진단(value 0) 뒤 InvalidArgument다. weak 질의는 slot 캐시를 쓰지
-    // 않는다 — 같은 대상의 출현마다(강한 참조가 먼저 Import한 대상이어도) 다시 묻는다. required는
-    // 늘 거짓이다.
+    // weak 참조(WeakObjectRef PROPERTY — 리플렉션 B9d1) 위치인지다. weak는 같은 그래프 안만
+    // 보존하므로 Null·Import 모두 그 위치를 null로 쓰고 ExternalReference 진단(value 2)을 남기며
+    // 저장은 실패하지 않는다. Reject만 진단(value 0) 뒤 InvalidArgument다. weak 질의는 slot 캐시를
+    // 쓰지 않는다 — 같은 대상의 출현마다(강한 참조가 먼저 Import한 대상이어도) 다시 묻는다.
+    // required는 늘 거짓이다.
     bool weak = false;
 };
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ReflectionTestFixtures/WeakRefFixture.generated.h>
+#include <ReflectionTestFixtures/WeakObjectRefFixture.generated.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Object/ConstructionContext.h>
 #include <Object/PropertyPath.h>
@@ -12,9 +12,10 @@
 #include <TestSupport/Test.h>
 #include "GraphTestSupport.h"
 
-// 리플렉션 B9d1 WeakRef PROPERTY 시험(WeakRefGraphTests.cpp·WeakRefGraphLoadTests.cpp·
-// WeakRefFieldTests.cpp)의 공용 도우미다: 생성 fixture(WeakRefFixture.h) 등록, 객체 생성·값 편집,
-// 진단·외부 참조 허락을 기록하는 hook, U32·U32 배열 payload와 단일 필드 Record 조립.
+// 리플렉션 B9d1 WeakObjectRef PROPERTY
+// 시험(WeakObjectRefGraphTests.cpp·WeakObjectRefGraphLoadTests.cpp· WeakObjectRefFieldTests.cpp)의
+// 공용 도우미다: 생성 fixture(WeakObjectRefFixture.h) 등록, 객체 생성·값 편집, 진단·외부 참조
+// 허락을 기록하는 hook, U32·U32 배열 payload와 단일 필드 Record 조립.
 namespace rocks::test::weak {
 
 using reflection_fixture::WeakHolder;

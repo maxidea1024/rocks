@@ -427,7 +427,7 @@ internal static class CompilerDriver
         if (found.Native)
         {
             return new MetadataException($"{found.Symbol}: ROCKS_NATIVE member '{found.Spelling}' holds a strong object reference ({found.StrongPath})", "RMC2205",
-                "Native members are not traced; store ObjectRef/RootRef/Object pointers in ROCKS_PROPERTY fields (ObjectRefArray, StructRefArray) or use WeakRef/ObjectHandle.").At(found.Site);
+                "Native members are not traced; store ObjectRef/RootRef/Object pointers in ROCKS_PROPERTY fields (ObjectRefArray, StructRefArray) or use WeakObjectRef/ObjectHandle.").At(found.Site);
         }
 
         // OrderedMap·OrderedSet(리플렉션 B9f2)의 키·값·원소가 강한 참조를 담으면 Map·Set 위치 규칙 RMC2305다(강한 참조 값은

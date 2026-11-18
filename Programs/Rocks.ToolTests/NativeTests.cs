@@ -27,6 +27,7 @@ internal static class NativeTests
         LoggerOutputTests.Register(suite, options, environment);
         AlgorithmsCompilerTests.Register(suite, options, environment);
         LogCompilerTests.Register(suite, options, environment);
+        CVarCompilerTests.Register(suite, options, environment);
         string executable = Path.GetFullPath(options.Required("native-executable"));
         if (!File.Exists(executable))
         {

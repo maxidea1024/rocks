@@ -360,7 +360,7 @@ Rocks(D3):
 | Atomic(B9b) | 키 struct |
 | private 필드·필드 `Name`(B2) | `keys_`(`Name = "keys"`) |
 | 이 문서가 보강하는 것 | struct 검증 hook(9.1절, D7), `Array<uint8>`의 Bytes 블록 wire(11절, D18), 미러의 private 멤버 접근(12절, D19) |
-| InstancedStruct·Map·Text·bitfield·WeakRef·ClassRef | 이 층에서는 쓰지 않는다(InstancedStruct·Map은 에셋 층이 고를 수 있다 — 14절) |
+| InstancedStruct·Map·Text·bitfield·WeakObjectRef·ClassRef | 이 층에서는 쓰지 않는다(InstancedStruct·Map은 에셋 층이 고를 수 있다 — 14절) |
 
 - JSON은 ReflectionText 규칙 그대로다. 예:
 
