@@ -66,6 +66,286 @@
     },
     {
       "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurveFloatBinding::loopKeyOffset_",
+      "id": "f9fc12622285499e8d0421dcc921f34b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurveFloatBinding::looped_",
+      "id": "2cc9506cde9943f79626b1ead8d26d76",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurveFloatBinding::points_",
+      "id": "24c7ee66f3ba4952b401b19f17a533b2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurveLinearColorBinding::loopKeyOffset_",
+      "id": "e89baa454d5449b19318fdf4c2439b4d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurveLinearColorBinding::looped_",
+      "id": "2d7af049af764efd9d6e67c09d80f18b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurveLinearColorBinding::points_",
+      "id": "df7d78ece556459ba55308febe96b705",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurvePointFloatBinding::arriveTangent",
+      "id": "d243d385d72c49c9bc3214f856508594",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurvePointFloatBinding::inValue",
+      "id": "65daaf615616419e90a5ae8a0e78ba09",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurvePointFloatBinding::leaveTangent",
+      "id": "733ad5e7b4b9435da65f8f231499fd6f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurvePointFloatBinding::mode",
+      "id": "c29e8cd451d14b04a572ea8c0da2b864",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurvePointFloatBinding::outValue",
+      "id": "627a1c56f1334d48865f1ad8de4eb4ee",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurvePointLinearColorBinding::arriveTangent",
+      "id": "6c3f56c34e544f3ebcdd0f4391e6cd3f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurvePointLinearColorBinding::inValue",
+      "id": "eb038b53645d40e9a12454a96cd1d807",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurvePointLinearColorBinding::leaveTangent",
+      "id": "ad7563f27c95419ca41a1a9d5580f871",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurvePointLinearColorBinding::mode",
+      "id": "8a906e9787344bbe84f363f39b7ba55b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurvePointLinearColorBinding::outValue",
+      "id": "4cb3239270a047d98ca3376331f83a4a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurvePointQuatBinding::arriveTangent",
+      "id": "d47bc2266de34fc499e883c65a05a539",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurvePointQuatBinding::inValue",
+      "id": "3d489c224a224d69aeafb86b0b8fb8bd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurvePointQuatBinding::leaveTangent",
+      "id": "4639e21b44544039ac89149ecc031296",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurvePointQuatBinding::mode",
+      "id": "d376be652648486ebafc434042a424fa",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurvePointQuatBinding::outValue",
+      "id": "cd6c186e025849bab4cf55cea80d5fe1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurvePointVector2dBinding::arriveTangent",
+      "id": "996416bcbaa04c41927a4223887db5e0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurvePointVector2dBinding::inValue",
+      "id": "12128cddf56a4971a9ff58c75e13a2fb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurvePointVector2dBinding::leaveTangent",
+      "id": "a2d498cf455e416c9a673242971dd7d6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurvePointVector2dBinding::mode",
+      "id": "e59284941d62444f8d1992a654bd55be",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurvePointVector2dBinding::outValue",
+      "id": "74ea0c36b26f44e38d00a5fe40ca16bb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurvePointVectorBinding::arriveTangent",
+      "id": "c957b53416eb4d15bd8a9c3becf2db52",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurvePointVectorBinding::inValue",
+      "id": "87091f3b18c74cbea29cb4b8326f49f8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurvePointVectorBinding::leaveTangent",
+      "id": "a4c8300e8c1b45bbb83ffbd4e59a9061",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurvePointVectorBinding::mode",
+      "id": "5ae91a729e09426e8b2f71729a792e92",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurvePointVectorBinding::outValue",
+      "id": "1afc3638804142a3833a1acc9e5c0d8b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurveQuatBinding::loopKeyOffset_",
+      "id": "e8b56ec5d64641c5ab6cf9f17c50a67e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurveQuatBinding::looped_",
+      "id": "799f8aaca9494577983dd549ee5b5e8b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurveQuatBinding::points_",
+      "id": "9cb2e2d9f91945cfa1eb18ce8d573bad",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurveVector2dBinding::loopKeyOffset_",
+      "id": "28b434ab4a884992b8a2186471d035fe",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurveVector2dBinding::looped_",
+      "id": "a29e26ae571a4a58abad39571428f233",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurveVector2dBinding::points_",
+      "id": "798644044d454a9890698facc1993ee6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurveVectorBinding::loopKeyOffset_",
+      "id": "38a28e413e5b4c259202a05518d4db8f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurveVectorBinding::looped_",
+      "id": "5a597ba6cf3c41aaa48733cbeb3a0d14",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::InterpCurveVectorBinding::points_",
+      "id": "0e4b042054cb4bc897266a83e053b053",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::core_type_bindings::LinearColorBinding::a",
       "id": "49aaffbf84774991b8dd3dc9bcb89e64",
       "aliases": [],
@@ -397,6 +677,83 @@
       "kind": "type",
       "name": "rocks::core_type_bindings::IntVec3Binding",
       "id": "1cdc0fd69fc040e28b222893061edb3b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::InterpCurveFloatBinding",
+      "id": "f060c62b3ee1499788ca2852b2c88872",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::InterpCurveLinearColorBinding",
+      "id": "a14a4e2c5eae49289d3186b475ed857e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::InterpCurveModeBinding",
+      "id": "37cb42246de047db828c745fdc44c882",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::InterpCurvePointFloatBinding",
+      "id": "dc2ea7a63d014ea0bbb274ffc2afbed1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::InterpCurvePointLinearColorBinding",
+      "id": "71f04bc72c94407382834ba6c104dfc3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::InterpCurvePointQuatBinding",
+      "id": "5852b617ee4b45b8800382c898f36b2a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::InterpCurvePointVector2dBinding",
+      "id": "e5b3bdbd89c2452f89c6bbf67ce92a22",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::InterpCurvePointVectorBinding",
+      "id": "a9d97769085d4d979be11edeab261d38",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::InterpCurveQuatBinding",
+      "id": "2b26a537f3df4e4c8fcaedc40e05b667",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::InterpCurveVector2dBinding",
+      "id": "41be1cd05de548a9999647ee308f8d07",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::InterpCurveVectorBinding",
+      "id": "1c85e7676201461a996ab59ffd21fec2",
       "aliases": [],
       "retired": false
     },

@@ -665,7 +665,10 @@ internal static class CompilerDriver
         {
             string spelling = mirrors[index].BindsSpelling.StartsWith("::", StringComparison.Ordinal) ? mirrors[index].BindsSpelling : "::" + mirrors[index].BindsSpelling;
             aliases.Append($"using rocksBinds_{index} = {spelling};\n");
-            aliases.Append($"static_assert(sizeof(rocksBinds_{index}) > 0 && ::rocks::IsClassV<rocksBinds_{index}>, \"Binds target must be a complete class type\");\n");
+            // enum 미러(CurveData CV9)는 enum 타입, struct 미러는 완전한 class 타입을 묶는다.
+            aliases.Append(mirrors[index].IsEnum
+                ? $"static_assert(::rocks::IsEnumV<rocksBinds_{index}>, \"Binds target of an enum mirror must be an enum type\");\n"
+                : $"static_assert(sizeof(rocksBinds_{index}) > 0 && ::rocks::IsClassV<rocksBinds_{index}>, \"Binds target must be a complete class type\");\n");
         }
 
         const string hint = "Spell the real type fully qualified from the global scope as it is declared (e.g. rocks::Vector3<float> or an alias such as rocks::Vec3) and include its header before the mirror declaration.";
@@ -678,7 +681,7 @@ internal static class CompilerDriver
             int failed = line.Success && int.TryParse(line.Groups[1].Value, out int number) && number > aliasBaseLines ? (number - aliasBaseLines - 1) / 2
                 : named.Success && int.TryParse(named.Groups[1].Value, out int alias) ? alias : 0;
             ClassModel mirror = mirrors[failed >= 0 && failed < mirrors.Length ? failed : 0];
-            throw new MetadataException($"{mirror.Name}: Binds = \"{mirror.BindsSpelling}\" does not name a complete class type visible from the reflected headers:\n" + result.StdErr,
+            throw new MetadataException($"{mirror.Name}: Binds = \"{mirror.BindsSpelling}\" does not name {(mirror.IsEnum ? "an enum type" : "a complete class type")} visible from the reflected headers:\n" + result.StdErr,
                 "RMC3000", hint).At(mirror.BindsSite ?? mirror.Site);
         }
 

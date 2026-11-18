@@ -45,6 +45,55 @@
     },
     {
       "kind": "field",
+      "name": "rocks::curves_fixture::InterpCurveHolder::colors",
+      "id": "fca3b80ecdfc40deb3caf35ca44e46e3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::curves_fixture::InterpCurveHolder::floats",
+      "id": "fed6868762d14f869a3d5d291bcd12a2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::curves_fixture::InterpCurveHolder::list",
+      "id": "2d6bdab7c71443aabd520ef17c6153f6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::curves_fixture::InterpCurveHolder::maybe",
+      "id": "03fe7cf0bfb9496f8a875e3b012be71b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::curves_fixture::InterpCurveHolder::rotations",
+      "id": "76a1d449ef8b4af1a1802d2c7321e5cf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::curves_fixture::InterpCurveHolder::vectors",
+      "id": "abedcacc0d804e06ae9d829741c9202a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::curves_fixture::InterpCurveHolder::vectors2",
+      "id": "b1a0f07e327e44fda8b4126cf1964533",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::curves_fixture::PackedCurveHolder::list",
       "id": "47076bb176ee4f01b0fb59b6e19986e0",
       "aliases": [],
@@ -117,6 +166,13 @@
       "kind": "type",
       "name": "rocks::curves_fixture::CurveHolder",
       "id": "0fdcfeb56d3448c4b0e3df6855d9b19c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::curves_fixture::InterpCurveHolder",
+      "id": "ef68e2879bd94d389bef040072cb81d7",
       "aliases": [],
       "retired": false
     },

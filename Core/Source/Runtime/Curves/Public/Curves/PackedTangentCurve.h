@@ -71,6 +71,11 @@ public:
     explicit PackedTangentCurve(Allocator& allocator) noexcept : packed_(allocator) {
     }
 
+    // 이동한다. 옮겨진 쪽은 새로 만든 값과 같은 Empty 정규형(키 없음·기본값 없음·외삽
+    // Constant·packed 비어 있음 — Validate를 통과한다)이 된다. 복사는 TryCopyFrom이다.
+    PackedTangentCurve(PackedTangentCurve&& other) noexcept;
+    PackedTangentCurve& operator=(PackedTangentCurve&& other) noexcept;
+
     // other의 모든 칸을 복사한다. 실패(OutOfMemory)면 그대로다.
     Result<void> TryCopyFrom(const PackedTangentCurve& other) noexcept;
 
@@ -148,6 +153,9 @@ public:
 
 private:
     friend struct curves_detail::PackedTangentCurveTestAccess;
+
+    // packed_ 말고 모든 칸을 Empty 정규형으로 둔다(이동된 쪽).
+    void ResetFieldsToEmpty() noexcept;
 
     ROCKS_PROPERTY(Name = "format") PackedCurveFormat format_ = PackedCurveFormat::Empty;
     ROCKS_PROPERTY(Name = "keyTimeFormat")

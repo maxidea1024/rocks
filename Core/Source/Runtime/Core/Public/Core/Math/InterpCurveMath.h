@@ -134,6 +134,65 @@ constexpr S ClampCurveTangent(S previousValue, K previousTime, S currentValue, K
     return clamped;
 }
 
+// 한 구간의 성분 하나의 값 범위다(UE 5.8 UnrealMath.cpp 1512–1573 FindBounds를 같은 식·같은 연산
+// 순서로 옮긴 것). start·end는 끝 값, startLeaveTangent·endArriveTangent는 입력 단위 접선,
+// startTime·endTime은 키 입력값이다. 두 끝 값의 최소·최대에서 시작하고, curve(곡선 키)면 접선에
+// 구간 길이를 곱한 Hermite 도함수 a·α² + b·α + c의 근 중 구간 안(startTime < t < endTime)의 값을
+// 더한다. 근 판정의 0 허용오차는 UE IsNearlyZero 기본값(float 1e-8, double 1e-8)이다.
+// minimum·maximum은 UE FMath::Min·Max(`A < B ? A : B`, `B < A ? A : B`)로 고른다 — NaN 비교의
+// 결과까지 UE와 같다. 할당하지 않는다.
+template <typename S>
+    requires IsFloatingPointV<S>
+inline void CurveSegmentBounds(S& minimum, S& maximum, S start, S startLeaveTangent,
+                               float startTime, S end, S endArriveTangent, float endTime,
+                               bool curve) noexcept {
+    auto ueMin = [](S a, S b) noexcept { return a < b ? a : b; };
+    auto ueMax = [](S a, S b) noexcept { return b < a ? a : b; };
+    minimum = ueMin(start, end);
+    maximum = ueMax(start, end);
+    if (!curve) {
+        return;
+    }
+
+    // UE: T Diff = EndT − StartT(float 뺄셈 뒤 T로 넓힌다).
+    const S difference = static_cast<S>(endTime - startTime);
+    startLeaveTangent *= difference;
+    endArriveTangent *= difference;
+    const S a = static_cast<S>(6.0f) * start + static_cast<S>(3.0f) * startLeaveTangent +
+                static_cast<S>(3.0f) * endArriveTangent - static_cast<S>(6.0f) * end;
+    const S b = static_cast<S>(-6.0f) * start - static_cast<S>(4.0f) * startLeaveTangent -
+                static_cast<S>(2.0f) * endArriveTangent + static_cast<S>(6.0f) * end;
+    const S c = startLeaveTangent;
+    // UE_SMALL_NUMBER(1.e-8f)·UE_DOUBLE_SMALL_NUMBER(1.e-8) — float는 float 리터럴 그대로다.
+    constexpr S nearlyZero = IsSameV<S, float> ? static_cast<S>(1.0e-8f) : static_cast<S>(1.0e-8);
+    // UE: t = StartT + x·(EndT − StartT) — 구간 길이는 float로 뺀 뒤 넓히고, 비교는 S로 한다.
+    const S span = static_cast<S>(endTime - startTime);
+    auto consider = [&](S alpha) noexcept {
+        const S time = static_cast<S>(startTime) + alpha * span;
+        if (time > static_cast<S>(startTime) && time < static_cast<S>(endTime)) {
+            const S value = CurveHermite(start, startLeaveTangent, end, endArriveTangent, alpha);
+            minimum = ueMin(minimum, value);
+            maximum = ueMax(maximum, value);
+        }
+    };
+
+    if (Abs(a) <= nearlyZero) {
+        // 도함수가 일차식이다.
+        if (!(Abs(b) <= nearlyZero)) {
+            consider(-c / b);
+        }
+
+        return;
+    }
+
+    const S discriminant = (b * b) - (static_cast<S>(4.0f) * a * c);
+    if (discriminant >= static_cast<S>(0.0f)) {
+        const S root = Sqrt(discriminant);
+        consider((-b + root) / (static_cast<S>(2.0f) * a));
+        consider((-b - root) / (static_cast<S>(2.0f) * a));
+    }
+}
+
 } // namespace rocks::math
 
 namespace rocks {
