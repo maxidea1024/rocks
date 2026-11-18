@@ -68,6 +68,18 @@ StringView ConfigDiagnosticCodeName(ConfigDiagnosticCode code) noexcept {
         return "ValueOutOfRange";
     case ConfigDiagnosticCode::WeakWrite:
         return "WeakWrite";
+    case ConfigDiagnosticCode::UserFileVersion:
+        return "UserFileVersion";
+    case ConfigDiagnosticCode::UnknownSetting:
+        return "UnknownSetting";
+    case ConfigDiagnosticCode::RestartPending:
+        return "RestartPending";
+    case ConfigDiagnosticCode::QualityLowered:
+        return "QualityLowered";
+    case ConfigDiagnosticCode::InvalidQuality:
+        return "InvalidQuality";
+    case ConfigDiagnosticCode::InvalidDeviceProfile:
+        return "InvalidDeviceProfile";
     }
 
     return {};
@@ -117,6 +129,7 @@ void ConfigDiagnostics::SetLimit(uint32 maxDiagnostics) noexcept {
 Result<void> ConfigDiagnostics::Add(const ConfigDiagnostic& diagnostic) noexcept {
     const bool known = !ConfigDiagnosticCodeName(diagnostic.code).IsEmpty() &&
                        (diagnostic.severity == ConfigSeverity::Error ||
+                        diagnostic.severity == ConfigSeverity::Warning ||
                         diagnostic.severity == ConfigSeverity::Note) &&
                        IsConfigLayer(diagnostic.layer);
     if (!known) {
@@ -187,6 +200,23 @@ void ConfigDiagnostics::Clear() noexcept {
     entries_.Clear();
     omitted_ = 0;
     errors_ = 0;
+}
+
+ConfigDiagnosticsMark ConfigDiagnostics::Mark() const noexcept {
+    return ConfigDiagnosticsMark{entries_.Size(), errors_, omitted_, text_.Size()};
+}
+
+void ConfigDiagnostics::Rewind(const ConfigDiagnosticsMark& mark) noexcept {
+    if (mark.count > entries_.Size() || mark.textBytes > text_.Size() || mark.errors > errors_ ||
+        mark.omitted > omitted_) {
+        platform::Fatal("ConfigDiagnostics::Rewind with a mark from after the current state");
+    }
+
+    // 줄이기는 할당하지 않는다.
+    static_cast<void>(entries_.TryResize(mark.count));
+    static_cast<void>(text_.TryResize(mark.textBytes));
+    errors_ = mark.errors;
+    omitted_ = mark.omitted;
 }
 
 } // namespace rocks::config

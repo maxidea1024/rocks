@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Config/ConfigContext.h>
+#include <Config/ConfigReload.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Text/NamePool.h>
 #include <Object/ModuleRegistration.h>
@@ -71,6 +72,11 @@ public:
     // 5) 큐를 적용하고 시작을 끝낸다. 오류: Sync·CompleteStartup의 오류(진단을 기록한다).
     Result<void> CompleteStartup() noexcept;
 
+    // 설정 파일 hot reload를 켠다(개발 빌드 — ConfigFileReloader, 엔진·프로젝트·사용자 Config 폴더
+    // 감시). 이후 Sync(엔진 프레임 sync 지점)마다 바뀐 파일을 적용한다. 출시 규칙이면 아무것도 하지
+    // 않고 Unsupported다(기록하지 않는다). 오류: 그 밖의 ConfigFileReloader::Start 오류(기록한다).
+    Result<void> StartHotReload() noexcept;
+
     // 설정 문맥이다. 전제: Initialize 성공 — 아니면 Fatal.
     config::ConfigContext& Context() noexcept;
 
@@ -82,6 +88,8 @@ private:
     static RegistryOptions MakeOptions(NamePool& names) noexcept;
     // 거부를 진단과 함께 기록한다(진단은 비운다).
     void ReportRejected(StringView what, ErrorCode error) noexcept;
+    // 남은 Warning 진단(오래된 사용자 파일의 버린 키 등)을 Warning 로그로 남기고 진단을 비운다.
+    void ReportWarnings() noexcept;
 
     Allocator& allocator_;
     TypeRegistry types_;
@@ -89,6 +97,8 @@ private:
     NamePool names_;
     ObjectRegistry objects_;
     UniquePtr<config::ConfigContext> context_;
+    // 문맥보다 먼저 파괴한다(sync hook을 뺀다).
+    UniquePtr<config::ConfigFileReloader> reloader_;
     bool namesReady_ = false;
 };
 

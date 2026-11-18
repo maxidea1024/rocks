@@ -10,7 +10,7 @@
 #include <Object/ObjectRegistry.h>
 #include <Platform/Fatal.h>
 
-// 설정 문맥이다(Docs/Design/ConfigSystem.ko.md 3·4·5·7·8절 — 설정 CF1·CF2). 한 실행(또는 시험
+// 설정 문맥이다(Docs/Design/ConfigSystem.ko.md 3·4·5·7·8절 — 설정 CF1·CF2·CF3). 한 실행(또는 시험
 // 하나)의 설정 계층을 소유한다: 등록한 설정 struct(섹션)마다 현재 값과 필드 경로별 출처 스택을
 // 두고, 층 입력(branch 파일·메모리 문자열·대입)을 큐에 쌓았다가 Sync에서만 합친다. 전역 싱글턴이
 // 아니다(UE `GConfig` 대응이지만 문맥 객체로 넘긴다).
@@ -142,6 +142,25 @@ struct ConfigSourceRef {
     StringView sourceName;
 };
 
+class ConfigContext;
+
+// 재시작 대기 값 하나다(8절 "실행 중 변경"). 시작(CompleteStartup) 뒤 RestartRequired 값의 새 합친
+// 값이 지금 값과 다르면 지금 값을 유지하고 새 값을 대기로 둔다(다음 시작 때 같은 층을 읽으면
+// 적용된다 — 사용자 층이면 SaveUserConfig가 저장한다). name은 독립 콘솔 설정이면 콘솔 이름, 설정
+// struct 필드면 `<Branch>.<Section>.<필드 도구 이름>`이다. pending·current는 표기다(필드는 compact
+// JSON — `4`·`"High"`·`[1,2]`, 콘솔 설정은 콘솔 표기). view는 다음 Sync까지 유효하다.
+struct ConfigPendingRestart {
+    StringView name;
+    StringView pending;
+    StringView current;
+};
+
+// sync 지점 앞 hook이다(ConfigContext::AddSyncHook). Sync가 큐를 보기 전에 소유 스레드에서 등록
+// 순서대로 부른다. hook 안에서는 층 입력·Unset·ReplaceLayerText로 큐에 넣을 수 있고(이번 Sync가
+// 적용한다) Sync를 다시 부르면 Busy다. 파일 감시(ConfigFileReloader)가 바뀐 파일을 이번 sync
+// 지점에 넣는 데 쓴다.
+using ConfigSyncHook = void (*)(void* context, ConfigContext& config) noexcept;
+
 class ConfigContext {
 public:
     ConfigContext(Allocator& allocator, ObjectRegistry& objects,
@@ -218,6 +237,13 @@ public:
     Result<void> AddAssignment(ConfigLayer layer, StringView tag, StringView target,
                                StringView value) noexcept;
 
+    // (layer, tag)의 입력을 text 하나로 바꾼다(hot reload — 8절). AddLayerText처럼 검사하고, 받으면
+    // 그 앞에 Unset(layer, tag)를 넣는다(다음 Sync가 옛 입력을 빼고 새 입력을 적용한다). 거부하면
+    // 아무것도 넣지 않는다(옛 입력이 그대로 남는다 — 잘못 고친 파일이 값을 지우지 않는다). 오류:
+    // AddLayerText와 같다.
+    Result<void> ReplaceLayerText(ConfigLayer layer, StringView tag, StringView branch,
+                                  StringView sourceName, StringView text) noexcept;
+
     // (layer, tag)의 모든 입력을 다음 Sync에서 뺀다(3.1절 `Unset` — 기능 묶음 해제, 품질 등급 변경,
     // 시험 정리). 큐 순서대로 처리하므로 그보다 먼저 넣은 입력(같은 Sync에 들어갈 것 포함)만 뺀다.
     // 없는 태그는 무동작이다. 오류: layer 범위 InvalidArgument, 다른 스레드 WrongThread, 할당 실패.
@@ -235,6 +261,18 @@ public:
 
     // 다음 Sync가 적용할 입력이 큐에 있는지다.
     bool HasPendingChanges() const noexcept;
+
+    // sync 지점 앞 hook을 더한다(ConfigSyncHook). context는 RemoveSyncHook 또는 문맥 파괴까지 살아
+    // 있어야 한다. 오류: hook 없음 InvalidArgument, 같은 (hook, context)가 이미 있으면
+    // AlreadyExists, 다른 스레드 WrongThread, 할당 실패.
+    Result<void> AddSyncHook(ConfigSyncHook hook, void* context) noexcept;
+
+    // hook을 뺀다. 오류: 없으면 NotFound, hook 안에서 부르면 Busy, 다른 스레드 WrongThread.
+    Result<void> RemoveSyncHook(ConfigSyncHook hook, void* context) noexcept;
+
+    // 재시작 대기 값을 이름 순서로 out에 쓴다(마지막 Sync 기준 — 없으면 빈 목록). 오류: 다른 스레드
+    // WrongThread, 할당 실패.
+    Result<void> GetPendingRestarts(Array<ConfigPendingRestart>& out) const noexcept;
 
     // 섹션(branch, section)의 필드 경로(도구 이름 — `Inner.x`, 컨테이너는 그 필드)의 출처 스택을
     // out에 쓴다(약한 것부터 — 마지막이 현재 값의 출처). 경로는 대입이 닿은 override
@@ -324,7 +362,8 @@ public:
     Result<void> Unsubscribe(ConfigSubscriptionId id) noexcept;
 
     // 시작이 끝났음을 알린다. 그 뒤로 StartupOnly 값(콘솔 설정·설정 struct 필드)에 새로 들어오는
-    // 쓰기는 거부한다(이미 들어온 값은 그대로). 오류: 다른 스레드 WrongThread.
+    // 쓰기는 거부하고(이미 들어온 값은 그대로), RestartRequired 값의 변경은 재시작 대기로 돌린다
+    // (GetPendingRestarts). 오류: 다른 스레드 WrongThread.
     Result<void> CompleteStartup() noexcept;
 
     // 마지막 Sync의 설정 snapshot이다(5.3절 — RenderRead 값의 불변 블록과 세대 번호). 첫 Sync

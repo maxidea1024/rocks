@@ -6,14 +6,19 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/NamePool.h>
 #include <Object/ModuleRegistration.h>
+#include <Platform/Atomics.h>
+#include <Platform/Clock.h>
+#include <Platform/File.h>
 #include <TestSupport/Test.h>
 #include <stdio.h>
+#include <string.h>
 
 // 설정 계층 시험의 공용 준비다(Docs/Design/ConfigSystem.ko.md 8절 "시험" — 전역 싱글턴 없이
 // 시험마다 설정 문맥을 만든다, 기본은 봉인 모드). fixture: ConfigTestFixtures/SettingsFixture.h.
 namespace rocks::test::config {
 
 using namespace rocks::config;
+using config_fixture::DisplaySettings;
 using config_fixture::FixtureQuality;
 using config_fixture::GameplaySettings;
 using config_fixture::GraphSettings;
@@ -45,6 +50,106 @@ bool JoinedEquals(const Container& values, StringView expected) noexcept {
 
     return true;
 }
+
+// 작업 디렉터리 아래 시험 전용 폴더다(소멸 때 지운다). 이름은 실행·시험마다 다르다(시간은 이름에만
+// 쓴다).
+struct ScratchTree {
+    char root[200]{};
+    usize length = 0;
+
+    bool Make() noexcept {
+        static int32 counter = 0;
+        const int count =
+            snprintf(root, sizeof(root), "rocks-config-%llu-%d",
+                     static_cast<unsigned long long>(platform::MonotonicNanoseconds()),
+                     platform::AtomicFetchAdd<platform::MemoryOrder::Relaxed>(&counter, 1) + 1);
+        if (count <= 0 || static_cast<usize>(count) >= sizeof(root)) {
+            return false;
+        }
+
+        length = static_cast<usize>(count);
+        return static_cast<bool>(platform::PhysicalFileSystem().MakeDirectory(root, length));
+    }
+
+    // root/relative 파일을 content로 만든다(중간 디렉터리 포함).
+    bool Write(const char* relative, const char* content) noexcept {
+        char path[400];
+        const int count = snprintf(path, sizeof(path), "%s/%s", root, relative);
+        if (count <= 0 || static_cast<usize>(count) >= sizeof(path)) {
+            return false;
+        }
+
+        const char* slash = strrchr(path, '/');
+        if (slash == nullptr || !platform::MakeDirectoryTree(platform::PhysicalFileSystem(), path,
+                                                             static_cast<usize>(slash - path))) {
+            return false;
+        }
+
+        platform::File file;
+        if (!file.Open(platform::PhysicalFileSystem(), path, static_cast<usize>(count),
+                       platform::FileOpenMode::CreateAlways)) {
+            return false;
+        }
+
+        const bool written = static_cast<bool>(file.WriteAll(content, strlen(content)).status);
+        const bool closed = static_cast<bool>(file.Close());
+        return written && closed;
+    }
+
+    // root/relative 파일 내용이다(없으면 빈 문자열, exists는 false).
+    String Read(Allocator& allocator, const char* relative, bool* exists = nullptr) const noexcept {
+        String text(allocator);
+        const String path = Path(allocator, relative);
+        platform::File file;
+        const bool opened =
+            static_cast<bool>(file.Open(platform::PhysicalFileSystem(), path.Data(),
+                                        path.ByteCount(), platform::FileOpenMode::ReadExisting));
+        if (exists != nullptr) {
+            *exists = opened;
+        }
+
+        if (!opened) {
+            return text;
+        }
+
+        char buffer[4096];
+        for (;;) {
+            const platform::FileTransfer read = file.Read(buffer, sizeof(buffer));
+            if (!read.status || read.bytes == 0) {
+                break;
+            }
+
+            CHECK(text.TryAppend(StringView(buffer, read.bytes)));
+        }
+
+        CHECK(file.Close());
+        return text;
+    }
+
+    // root/relative 파일을 지운다.
+    bool Remove(const char* relative) noexcept {
+        SystemAllocator allocator;
+        const String path = Path(allocator, relative);
+        return static_cast<bool>(
+            platform::PhysicalFileSystem().Delete(path.Data(), path.ByteCount()));
+    }
+
+    // root/relative 경로 텍스트다.
+    String Path(Allocator& allocator, const char* relative) const noexcept {
+        String text(allocator);
+        CHECK(text.TryAppend(StringView(root, length)));
+        CHECK(text.TryAppend("/"));
+        CHECK(text.TryAppend(relative));
+        return text;
+    }
+
+    ~ScratchTree() noexcept {
+        if (length != 0) {
+            static_cast<void>(
+                platform::DeleteDirectoryTree(platform::PhysicalFileSystem(), root, length));
+        }
+    }
+};
 
 // 타입 등록·Name pool·객체 Registry와 설정 문맥이다. 설정 struct
 // 둘(GraphSettings·GameplaySettings)을 등록해 둔다. 소멸 순서: 문맥(TypeLease) → Registry → 등록 →

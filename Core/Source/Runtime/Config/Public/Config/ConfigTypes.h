@@ -114,7 +114,20 @@ enum class ConfigDiagnosticCode : uint8 {
     // 콘솔 설정 값이 범위·허용 값 밖이다.
     ValueOutOfRange,
     // 정보: 더 강한 출처가 이미 있어 값이 바뀌지 않은 쓰기다(출처 스택에는 남았다 — 3.1절).
-    WeakWrite
+    WeakWrite,
+    // 경고: 사용자 파일의 스키마 버전(`$version`)이 없거나 지금 버전과 다르다(8절 — 파일은 관대하게
+    // 읽는다).
+    UserFileVersion,
+    // 경고: 사용자 파일의 `Settings`에 등록되지 않은 콘솔 설정 이름이 있다(버렸다).
+    UnknownSetting,
+    // 정보: 시작 뒤 RestartRequired 값이 바뀌어 다음 시작 때 적용된다(지금 값은 그대로 — 8절).
+    RestartPending,
+    // 경고: 품질 등급이 장치 요구·예산을 맞추지 못해 낮아졌다(6.1절 품질 조합 검증).
+    QualityLowered,
+    // 품질 묶음 정의 오류(모르는 묶음·등급, 등급 상속 순환, 가장 낮은 등급도 맞지 않음 등 — 6.1절).
+    InvalidQuality,
+    // 기기 프로필 정의·선택 오류(모르는 프로필·부모, 부모 순환, 모르는 메모리 등급 — 6.2절).
+    InvalidDeviceProfile
 };
 
 // 진단 이름(열거자 철자)이다. 정의되지 않은 값이면 빈 view다.
@@ -123,8 +136,19 @@ StringView ConfigDiagnosticCodeName(ConfigDiagnosticCode code) noexcept;
 // 진단 심각도다. Error가 하나라도 있으면 그 입력(층 추가·대입)은 받지 않는다.
 enum class ConfigSeverity : uint8 {
     Error,
+    // 경고 — 입력의 그 조각만 버리거나(오래된 사용자 파일의 모르는 키 — 8절) 값을 바꿔(품질 등급
+    // 낮춤) 계속했다. ErrorCount에 들지 않는다.
+    Warning,
     // 정보(WeakWrite 등) — 입력은 받았다.
     Note
+};
+
+// 진단 모음의 한 시점이다(ConfigDiagnostics::Mark — Rewind로 그 뒤 진단을 버린다).
+struct ConfigDiagnosticsMark {
+    usize count = 0;
+    usize errors = 0;
+    uint64 omitted = 0;
+    usize textBytes = 0;
 };
 
 // 진단 하나의 읽기 view다. source(층 출처 이름 — 파일 경로·`<memory>` 등)·path(섹션 안 필드 경로
@@ -189,6 +213,14 @@ public:
 
     // 모든 진단을 지운다(한도는 그대로).
     void Clear() noexcept;
+
+    // 지금 시점이다. 시험 적용처럼 진단을 남기지 않을 검사를 하기 전에 잡고, 끝나면 Rewind로 그 뒤
+    // 진단을 버린다(관대한 사용자 파일 읽기가 조각마다 쓴다).
+    ConfigDiagnosticsMark Mark() const noexcept;
+
+    // mark 뒤에 더한 진단(넘친 개수 포함)을 버린다. 전제: mark는 이 모음의 Mark가 돌려준 것이고 그
+    // 뒤 Clear하지 않았다 — 아니면 Fatal.
+    void Rewind(const ConfigDiagnosticsMark& mark) noexcept;
 
 private:
     struct Entry {

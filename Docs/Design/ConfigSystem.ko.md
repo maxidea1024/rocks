@@ -1,6 +1,6 @@
 # 설정 계층과 콘솔 설정 설계
 
-기준일: 2026-11-18, 개정 3(엔진 연결 반영). 엔진·프로젝트·플랫폼·기기·사용자·세션·콘솔에서 오는 설정 값을 하나의 우선순위로 합치는 **설정 계층**과, 실행 중 이름으로 읽고 바꾸는 **콘솔 설정**(변수·명령)을 정한다.
+기준일: 2026-11-18, 개정 4(CF3 구현 반영). 엔진·프로젝트·플랫폼·기기·사용자·세션·콘솔에서 오는 설정 값을 하나의 우선순위로 합치는 **설정 계층**과, 실행 중 이름으로 읽고 바꾸는 **콘솔 설정**(변수·명령)을 정한다.
 
 [렌더 기반](RenderBase.ko.md)의 선행 작업 CP8(Config 계층)·CP4(콘솔 설정)이며, [엔진 구현 계획](EngineImplementationPlan.ko.md)의 다음 요구를 구현 스펙으로 옮긴다.
 - 24.1절 표의 "Device Profile / Scalability / CVar" 행
@@ -8,7 +8,7 @@
 
 UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275b`, 로컬 클론)의 현재 기본 경로이고, 경로는 `Engine/Source/Runtime/` 기준이다. UE 이름은 대응표와 근거에만 적는다. 레거시·deprecated 경로는 보지 않았다.
 
-상태: **설계 확정**(결정 D1–D9). 구현 단계는 9절이다. 구현: CF1·CF2(2026-11-17, Core 모듈 `Config` — `Core/Source/Runtime/Config`), 엔진 연결(2026-11-18, 5.4절 — `HostConfig` 모듈·엔진 sync 지점·`--set`·`config-dump` 등록).
+상태: **설계 확정**(결정 D1–D9). 구현 단계는 9절이다. 구현: CF1·CF2(2026-11-17, Core 모듈 `Config` — `Core/Source/Runtime/Config`), 엔진 연결(2026-11-18, 5.4절 — `HostConfig` 모듈·엔진 sync 지점·`--set`·`config-dump` 등록), CF3(2026-11-18, 8절 — 사용자 층 저장·관대한 읽기·재시작 대기·hot reload).
 
 ## 1. 결정 요약
 
@@ -133,7 +133,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 | 품질 묶음 구성원 | 품질 묶음 층이 바꿀 수 있다. 다른 변수는 품질 묶음 층 쓰기를 거부한다 | `ECVF_Scalability` |
 | 출시 제외 | 쿠킹 결과에 넣지 않는다 | (거부 목록) |
 
-- 플래그 동작(구현): 콘솔 읽기 전용은 콘솔 층만 거부한다(`ConsoleReadOnly`). 품질 묶음 구성원이 아니면 콘솔 이름으로 오는 품질 층 쓰기를 거부한다(`NotQualityMember` — 설정 struct 필드의 콘솔 이름은 아직 구성원 지정자가 없어 늘 거부되고, 필드 지정자는 CF4가 더한다. 섹션 JSON으로 오는 품질 층 쓰기는 이 규칙 밖이다). 개발 전용은 출시 규칙에서 등록은 되지만 콘솔 조회·자동완성에 보이지 않고 어떤 층도 쓸 수 없어 코드 기본값으로 고정된다. 시작 뒤 고정은 `CompleteStartup` 뒤 새로 들어오는 쓰기를 거부한다(이미 들어온 값은 유지). 재시작 필요는 표시만 하고(CF3), 출시 제외는 쿠킹(CF5)이 쓴다.
+- 플래그 동작(구현): 콘솔 읽기 전용은 콘솔 층만 거부한다(`ConsoleReadOnly`). 품질 묶음 구성원이 아니면 콘솔 이름으로 오는 품질 층 쓰기를 거부한다(`NotQualityMember` — 설정 struct 필드의 콘솔 이름은 아직 구성원 지정자가 없어 늘 거부되고, 필드 지정자는 CF4가 더한다. 섹션 JSON으로 오는 품질 층 쓰기는 이 규칙 밖이다). 개발 전용은 출시 규칙에서 등록은 되지만 콘솔 조회·자동완성에 보이지 않고 어떤 층도 쓸 수 없어 코드 기본값으로 고정된다. 시작 뒤 고정은 `CompleteStartup` 뒤 새로 들어오는 쓰기를 거부한다(이미 들어온 값은 유지). 재시작 필요는 `CompleteStartup` 뒤 쓰기를 받되 지금 값을 유지하고 새 합친 값을 재시작 대기로 기록한다(8절 — CF3). 출시 제외는 쿠킹(CF5)이 쓴다.
 - 셰이더·쿠킹 결과에 영향을 주는 값은 콘솔 설정으로 두지 않고 셰이더 형식 정의·TargetProfile에 둔다. 쿠킹 키에 들어가야 하기 때문이다(RenderBase 12절). UE의 셰이더 변경 플래그(`IConsoleManager.h:1488–1496`)는 두지 않는다.
 
 ### 5.2 콘솔 명령
@@ -219,10 +219,16 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - 사용자 층만 저장한다. 그 아래 층을 합친 값과의 차이만 쓴다(UE `ConfigCacheIni.h:1161–1170`과 같다).
 - 쓰기는 임시 파일 → Flush → 원자적 `Replace`(`Core/Source/Runtime/PlatformBase/Public/Platform/File.h:177–196`)다.
 - 사용자 파일에는 스키마 버전을 둔다. 사용자 기기의 오래된 파일에 든 모르는 키는 경고 후 버린다. 엔진·프로젝트 파일의 모르는 키는 오류로 실패한다.
+- 구현(CF3, `Config/UserConfig.h`):
+  - 사용자 설정 변경은 `SetUserValue(context, target, value)`(사용자 층 대입, 태그 `user`)다. 저장은 `SaveUserConfig(context, files)`이고 branch마다 `WriteUserConfig`가 "사용자 층까지 합친 값"과 "그 아래 층(Engine … DeviceProfile)만 합친 값"을 필드 정규 JSON으로 비교해 다른 UserConfig 필드만 쓴다. 세션·콘솔 층 값은 쓰지 않는다. 독립 콘솔 설정(UserConfig 플래그)은 branch가 없으므로 `Engine` branch 파일의 `Settings`에 쓴다. 값이 없는 branch의 옛 파일은 지운다(UE `SaveBranch`와 같다). 쓰기는 `<Branch>.json.tmp` → Flush → `Replace`다.
+  - 파일 형식은 Core canonical JSON이고 첫 키가 `"$version": 1`(`UserConfigSchemaVersion`)이다. 섹션은 이름 byte 순서, 필드는 스키마 순서다.
+  - 읽기는 `AddUserFileText`(LoadConfigFiles가 사용자 층에 쓴다)다. 최상위 키·섹션 멤버·`Settings` 이름마다 따로 검사해 받을 수 없는 조각만 버리고 원문 위치의 Warning 진단을 남긴다(JSON 문법 오류는 파일 전체). 버전이 없거나 다르면 Warning `UserFileVersion`이다(키 검사로 처리하므로 이전 버전 변환 규칙은 아직 없다). 등록되지 않은 콘솔 이름은 대기 값으로 받지 않고 `UnknownSetting`으로 버린다(사용자 파일은 모든 등록 뒤에 읽는다). 진단 심각도에 Warning을 더했다(`ErrorCount`에 들지 않는다).
 
 **실행 중 변경**
 - 재시작이 필요한 값은 "다음 시작 때 적용 예정"으로 기록하고 진단·UI에 보인다.
+  - 구현(CF3): `CompleteStartup` 뒤 Sync가 RestartRequired 필드·콘솔 설정의 새 합친 값이 지금 값과 다르면 지금 값(과 그 출처 스택)을 유지하고 `GetPendingRestarts`에 (이름, 대기 값, 지금 값)으로 남긴다. 새로 대기가 된 것은 Note `RestartPending`과 Info 로그다. 변경 콜백·snapshot은 바뀌지 않는다. 사용자 층 값이면 저장되어 다음 시작에 적용되고, 되돌리면 대기가 없어진다. UE `ConfigRestartRequired`는 값을 바로 바꾸고 알림만 띄우지만, Rocks는 효력 시점을 문맥이 지킨다.
 - hot reload는 에디터·개발 빌드에서 `DirectoryWatcher`(`Platform/DirectoryWatch.h:48–93`)로 `Config/`를 감시한다. 바뀐 층만 다시 읽어 출처 스택을 갱신하고, sync 지점에서 적용한다. 출시 빌드는 감시하지 않는다.
+  - 구현(CF3, `Config/ConfigReload.h`): `ConfigFileReloader`가 엔진·프로젝트·사용자 `Config/` 폴더를 감시하고 문맥의 sync hook(`ConfigContext::AddSyncHook` — Sync가 큐를 보기 전에 부른다)에서 감시 이벤트를 모아 바뀐 파일만 다시 읽는다. 이벤트는 표시일 뿐이라 값은 그 sync 지점에서만 바뀐다. 파일 하나는 `ReplaceLayerText`(검사에 통과해야 그 앞에 `Unset`을 넣는다 — 잘못 고친 파일은 옛 값을 지우지 않는다)로, 지운 파일은 `Unset`으로, 사용자 파일은 관대한 읽기로 바꾼다. Overflow는 그 루트의 모든 branch 파일을 다시 읽는다. 출시 규칙이면 `Start`가 Unsupported다. `HostSettings::StartHotReload`가 호스트에서 켠다(Sandbox는 LogHost 설치 뒤).
 
 **쿠킹**
 - TargetProfile마다 층 1–4와 그 대상 기기 프로필 정의·품질 묶음 정의를 합친다. 허용 목록 밖의 필드(출시 제외·개발 전용·에디터 전용)는 빼고 결정적 JSON으로 쓴다.
@@ -246,6 +252,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 | CF4 | 품질 묶음·기기 프로필(상속·메모리 등급·선택 규칙)·품질 조합 검증 | CF2, GX1(장치 능력) | 상속 우선순위, 등급 변경 `Unset`, 선택 순서, 불가능 조합 낮춤과 진단 |
 | CF5 | 쿠킹(허용 목록·결정적 출력·SHA)·실행 파일 읽기 순서 | CF4, AssetSystem A4(쿠커) | 같은 입력 같은 바이트, 출시 제외 필드 부재, 쿠킹 설정 + 사용자 층 순서 |
 
+- 진척: CF1·CF2 구현(2026-11-17), CF3 구현(2026-11-18 — 시험 `UserConfigTests.cpp`·`ConfigReloadTests.cpp`: 저장 왕복 golden과 차이만 기록, 오래된 사용자 파일의 키별 Warning, 재시작 대기와 다음 시작 적용, 감시 이벤트(시험 gate `NotifyChanged`)가 sync 지점에서만 적용됨과 실제 감시기 이벤트).
 - CF1·CF2는 미리 할 수 있다(Core 단독). RenderBase RB1의 설정 snapshot은 CF2 뒤에 잇는다.
 - CF4의 장치 능력 연결은 GX1 뒤다. CF5는 쿠커(A4) 뒤다.
 
@@ -275,6 +282,8 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 | D9 | 콘솔 명령과 Commandlet registry는 따로, 이름 문법만 공유 | 결정됨(2026-11-17, 권장안) |
 
 ## 12. 개정 이력
+
+- 개정 4(2026-11-18): CF3 구현을 반영했다. 사용자 층 저장(아래 층과의 차이, 독립 콘솔 설정은 Engine branch, 빈 branch의 옛 파일 삭제, 원자적 교체)과 파일 형식(`$version`), 오래된 사용자 파일의 키별 관대한 읽기(Warning 심각도), 재시작 필요 값의 대기(지금 값 유지), hot reload(sync hook·`ReplaceLayerText`)를 8절에 적었다.
 
 - 개정 3(2026-11-18): 엔진 연결을 반영했다(5.4절). 호스트가 문맥 하나를 만드는 `HostConfig` 모듈과 부트 순서(등록 → 층 파일 → 추가 파일 → `--set` → `CompleteStartup` → LogHost → 엔진 루프), 엔진의 프레임 sync 지점, `AddCommandLineAssignments`, RocksCommandlet의 `config-dump` 등록, 실행 파일 위쪽에서 엔진 폴더를 찾는 규칙을 적었다.
 - 개정 2(2026-11-17): CF1·CF2 구현을 반영했다. 배열 연산은 ReflectionText 확장이 아니라 Config 모듈의 import 앞 단계(4.2절), 경로 이름 문법(4.3절), 섹션 키 대소문자·대입 대상 문법(3.2절), 콘솔 이름 영역 표·값 모양·플래그 동작·명령 인자·snapshot·콜백 구현(5절), 지정자 실림 위치(7절).

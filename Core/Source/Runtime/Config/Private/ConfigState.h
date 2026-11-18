@@ -4,6 +4,7 @@
 #include <Core/Diagnostics/Log.h>
 #include <Core/Text/Json.h>
 #include <Object/TypeLease.h>
+#include <Platform/File.h>
 #include <ReflectionText/TextCodecOptions.h>
 
 // 설정 문맥의 내부 상태다(ConfigContext의 pimpl — 모듈 안 구현만 쓴다).
@@ -130,6 +131,25 @@ struct PendingCommand {
     ConsoleOutput output;
 };
 
+// 재시작 대기 값 하나다(시작 뒤 RestartRequired 값이 바뀐 것 — 8절). name은 콘솔 설정 이름이거나
+// `<Branch>.<Section>.<필드>`이고 pending·current는 값 표기다(필드는 compact JSON, 콘솔 설정은 콘솔
+// 표기).
+struct PendingRestart {
+    explicit PendingRestart(Allocator& allocator) noexcept
+        : name(allocator), pending(allocator), current(allocator) {
+    }
+
+    String name;
+    String pending;
+    String current;
+};
+
+// sync 지점 앞 hook 하나다(ConfigContext::AddSyncHook).
+struct SyncHook {
+    ConfigSyncHook hook = nullptr;
+    void* context = nullptr;
+};
+
 // 변경 구독 하나다(setting 또는 section 하나를 가리킨다).
 struct Subscription {
     uint64 id = 0;
@@ -176,6 +196,10 @@ struct ConfigState {
     String renderSignature;
     bool startupComplete = false;
     bool syncing = false;
+    // 재시작 대기 값(마지막 Sync 기준 — CF3).
+    Array<UniquePtr<PendingRestart>> pendingRestarts;
+    // sync 지점 앞 hook(등록 순서).
+    Array<SyncHook> syncHooks;
 
     // 텍스트 codec 옵션(Edit 용도, Map 키별 병합, 대상 Registry의 Name pool).
     reflection_text::TextCodecOptions CodecOptions() const noexcept;
@@ -195,6 +219,41 @@ struct ConfigState {
     // 이름이 같은 콘솔 명령 번호다. 없으면 IndexNone.
     usize FindCommand(StringView name) const noexcept;
 };
+
+// 섹션 하나를 다시 합친 결과다(Sync·사용자 층 차이 계산이 만든다). value는 ops.create로 만든
+// 값이고 소유자가 ops.destroy로 돌려준다.
+struct SectionResult {
+    explicit SectionResult(Allocator& allocator) noexcept : sources(allocator) {
+    }
+
+    void* value = nullptr;
+    Array<UniquePtr<SourceStack>> sources;
+};
+
+// 섹션 하나를 코드 기본값에서 order 순서의 입력으로 다시 합친다(거부되는 입력은 그 섹션에서
+// 건너뛰고 진단을 남긴다). 실패하면 out.value가 만들어졌을 수 있다(호출자가 돌려준다).
+Result<void> RecomputeSection(ConfigState& state, SectionState& section, usize sectionIndex,
+                              Span<ConfigEntry* const> order, SectionResult& out) noexcept;
+
+// 적용 중인 입력(state.entries)에서 keep이 참인 것을 적용 순서(층, 넣은 순서)로 out에 쓴다.
+Result<void> SortedEntries(ConfigState& state, bool (*keep)(const ConfigEntry& entry) noexcept,
+                           Array<ConfigEntry*>& out) noexcept;
+
+// 섹션 값 storage의 정규 JSON(ExportJson — 변경 감지·차이 계산용)을 out에 쓴다.
+Result<void> ExportSection(ConfigState& state, const SectionState& section, void* storage,
+                           String& out) noexcept;
+
+// 시작 뒤 RestartRequired 값이 바뀌었으면 지금 값(sections[i]->value·settings[i]->value)을 유지하고
+// 새 값은 재시작 대기로 기록한다(Sync가 값 계산 뒤, 맞바꾸기 전에 부른다). values·sources는 섹션
+// 순서의 새 값과 출처 스택, settings는 콘솔 설정 순서의 새 값이다(필드 설정은 values를 고친 뒤 다시
+// 읽어야 하므로 호출자가 ComputeSettingResults 전에 HoldRestartSections를, 뒤에
+// HoldRestartSettings를 부른다). pending에 새 대기 목록을 쓴다.
+Result<void> HoldRestartSections(ConfigState& state, Span<void* const> values,
+                                 Span<Array<UniquePtr<SourceStack>>* const> sources,
+                                 Array<UniquePtr<PendingRestart>>& pending) noexcept;
+// path 파일을 out에 통째로 읽는다(files의 파일 시스템). 반환: 없으면 false(out은 비운다). 오류:
+// 파일 상태의 대응 ErrorCode, 할당 실패.
+Result<bool> ReadWholeFile(platform::FileSystem& files, StringView path, Array<char>& out) noexcept;
 
 // 진단 하나를 더한다(실패는 할당 오류).
 Result<void> Report(ConfigState& state, ConfigDiagnosticCode code, ConfigSeverity severity,
@@ -292,6 +351,11 @@ struct SettingResult {
 Result<void> ComputeSettingResults(ConfigState& state, Span<ConfigEntry* const> order,
                                    Span<void* const> sectionValues,
                                    Array<UniquePtr<SettingResult>>& out) noexcept;
+
+// HoldRestartSections의 콘솔 설정 짝이다(독립 콘솔 설정만 — 필드 설정은 섹션 값을 따른다). 대기로
+// 돌린 결과는 지금 값·표기·출처로 되돌리고 changed를 끈다.
+Result<void> HoldRestartSettings(ConfigState& state, Span<const UniquePtr<SettingResult>> settings,
+                                 Array<UniquePtr<PendingRestart>>& pending) noexcept;
 
 // 새 값으로 설정 snapshot을 만든다. RenderRead 값의 서명(signature에 쓴다)이 이전과 같고 snapshot이
 // 이미 있으면 out은 null(재사용)이다. 아니면 세대 +1의 새 snapshot이다.

@@ -73,6 +73,7 @@ HostSettings::HostSettings(Allocator& allocator) noexcept
 }
 
 HostSettings::~HostSettings() noexcept {
+    reloader_ = nullptr;
     context_ = nullptr;
     (void)objects_.Shutdown(objects_.OwnerAccess());
     (void)modules_.Unregister();
@@ -156,13 +157,31 @@ void HostSettings::ReportRejected(StringView what, ErrorCode error) noexcept {
                ErrorCodeName(error), all.Count());
     for (usize index = 0; index < all.Count(); ++index) {
         const config::ConfigDiagnostic item = all.Get(index);
-        if (item.severity != config::ConfigSeverity::Error) {
+        if (item.severity == config::ConfigSeverity::Error) {
+            Log::Error(LogHostConfig, "  {Source}:{Line}:{Column} {Code} at '{Path}': {Message}",
+                       item.source, item.position.line, item.position.column,
+                       config::ConfigDiagnosticCodeName(item.code), item.path, item.message);
+        } else if (item.severity == config::ConfigSeverity::Warning) {
+            Log::Warning(LogHostConfig, "  {Source}:{Line}:{Column} {Code} at '{Path}': {Message}",
+                         item.source, item.position.line, item.position.column,
+                         config::ConfigDiagnosticCodeName(item.code), item.path, item.message);
+        }
+    }
+
+    all.Clear();
+}
+
+void HostSettings::ReportWarnings() noexcept {
+    config::ConfigDiagnostics& all = context_->Diagnostics();
+    for (usize index = 0; index < all.Count(); ++index) {
+        const config::ConfigDiagnostic item = all.Get(index);
+        if (item.severity != config::ConfigSeverity::Warning) {
             continue;
         }
 
-        Log::Error(LogHostConfig, "  {Source}:{Line}:{Column} {Code} at '{Path}': {Message}",
-                   item.source, item.position.line, item.position.column,
-                   config::ConfigDiagnosticCodeName(item.code), item.path, item.message);
+        Log::Warning(LogHostConfig, "Config {Source}:{Line}:{Column} {Code} at '{Path}': {Message}",
+                     item.source, item.position.line, item.position.column,
+                     config::ConfigDiagnosticCodeName(item.code), item.path, item.message);
     }
 
     all.Clear();
@@ -172,6 +191,9 @@ Result<void> HostSettings::LoadFiles() noexcept {
     auto loaded = config::LoadConfigFiles(Context(), platform::PhysicalFileSystem());
     if (!loaded) {
         ReportRejected("files", loaded.Error());
+    } else {
+        // 사용자 파일에서 버린 키(오래된 파일)는 실패가 아니지만 남긴다.
+        ReportWarnings();
     }
 
     return loaded;
@@ -267,6 +289,31 @@ Result<void> HostSettings::CompleteStartup() noexcept {
     }
 
     return completed;
+}
+
+Result<void> HostSettings::StartHotReload() noexcept {
+    config::ConfigContext& context = Context();
+    auto made = UniquePtr<config::ConfigFileReloader>::TryMake(allocator_, context,
+                                                               platform::PhysicalFileSystem());
+    if (!made) {
+        Log::Error(LogHostConfig, "Config hot reload could not start: {Error}",
+                   ErrorCodeName(made.Error()));
+        return Result<void>::Failure(made.Error());
+    }
+
+    auto started = made.Value()->Start(true);
+    if (!started) {
+        if (started.Error() != ErrorCode::Unsupported) {
+            Log::Error(LogHostConfig, "Config hot reload could not start: {Error}",
+                       ErrorCodeName(started.Error()));
+        }
+
+        return started;
+    }
+
+    reloader_ = Move(made.Value());
+    Log::Info(LogHostConfig, "Config hot reload is watching the config folders");
+    return Result<void>::Success();
 }
 
 } // namespace rocks
