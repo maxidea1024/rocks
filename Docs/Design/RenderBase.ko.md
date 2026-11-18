@@ -1,6 +1,6 @@
 # 렌더 기반(RenderBase) 설계
 
-기준일: 2026-11-18, 개정 15(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-18, 개정 16(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
 - 렌더 lane과 프레임 전달, 장치 스레드 모델, 장치 자원 수명, 렌더 그래프
 - 셰이더 런타임 객체(셰이더 집합·파라미터 바인딩·상수 블록·파이프라인 캐시)
 - 정점 입력 타입, 공용 자원·그리기 유틸리티, GPU 계측
@@ -59,7 +59,9 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 | 그래프 자원 풀 `GraphResourcePool` | `FRenderTargetPool`·`FRDGBufferPool` | 같은 desc 자원의 프레임 안팎 재사용 |
 | 그래프 공유 값 `GraphSharedData` | `FRDGBlackboard` | 그래프 수명 동안 pass 사이에 넘기는 타입별 값 |
 | 그래프 텍스처 view `GraphTextureView` | `FRDGTextureSRV`·`FRDGTextureUAV` | 그래프 텍스처의 mip·slice 범위 view(7.5절) |
-| 자원 묶음 | `SHADER_PARAMETER_STRUCT_INCLUDE`로 펼쳐 넣는 구조체 | 여러 pass가 펼쳐 넣는 자원 멤버 묶음(9.6절) |
+| 공유 자원 구조체 `SharedResourceStruct` | `SHADER_PARAMETER_STRUCT`(중첩 구조체, 멤버 이름 접두어) | 여러 pass 구조체가 포함하는 자원 멤버 구조체(9.6절) |
+| 그리기별 자원 구조체 `DrawResourceStruct` | 그리기마다 묶는 uniform buffer(예: `FLightmapResourceClusterShaderParameters`) | 그리기마다 바뀌는 자원(9.3·9.6절) |
+| 그래프 구간 `GraphScope` | `RDG_EVENT_SCOPE` | pass 여러 개를 감싸는 이름 구간(7.5절) |
 | 부수 효과 pass `HasSideEffects` | `ERDGPassFlags::NeverCull` | 미사용 제거 대상이 아닌 pass |
 | 그래프 접근 `GraphResourceAccess`, 접근 선언 builder `GraphPassAccesses` | `FRDGPass`의 자원 상태 목록(파라미터 구조체에서 수집) | pass 하나가 자원 subresource 범위를 어떤 접근으로 쓰는지(그래프 내부 접근 모델) |
 | 접근 상태 `ResourceAccess`, 전이 `ResourceTransition`·`CommandContext::Transition` | `ERHIAccess`, `FRHITransitionInfo` | GX5 명시 접근 상태와 장치 전이 |
@@ -208,7 +210,7 @@ RenderCore가 쓰는 RHI 기능군과 Rocks Graphics의 차이다. "SH2" 열은 
 - **GX1 장치 능력.** 셰이더 형식 목록(셰이더 시스템 12.3절 런타임 형식 선택), 형식별 지원 표(A0-G G1), 전역 한도(dispatch 그룹 수·view 크기·MRT 수·상수 버퍼 크기·정점 속성 수), 동작 표시(자원 생성 스레드 안전 여부(GX11), native split barrier·async compute·transient aliasing·timestamp·tiled GPU 여부). 형식 정의(셰이더 시스템 12.1절)는 "쿠킹 때 가정하는 상한"이고 `DeviceCaps`는 "실행 장치의 실제 값"이다. 시작 때 장치 값이 형식 정의 상한 이상인지 검사하고, 아니면 그 형식을 고르지 않는다. 픽셀 형식별 능력(`PixelFormatCaps`·MSAA 표본 수)과 backend 형식 대응 표는 [픽셀 형식](PixelFormat.ko.md) 7·8절(PF3)이 정한다.
   - **구현(2026-11-18, 1단계).** `Graphics/DeviceCaps.h`의 `DeviceCaps`(`DeviceLimits`·`DeviceFeatures`)를 `Device::Caps()`(스레드 안전, 장치 수명 동안 불변)로, 형식별 MSAA 표본 수를 `Device::GetPixelFormatSampleCounts`(비트 n = 2^n, `SampleCountBit`)로 공개한다. 2표본 이상이면 그 형식의 `PixelFormatCaps::Multisample`이 켜진다(PixelFormat.ko.md 14.3절). `DeviceInfo::apiVersion`(D3D feature level, Vulkan apiVersion, GL major × 100 + minor × 10)을 더했다.
     - 한도: 단계(VS·PS·CS)별 상수 버퍼·SRV 텍스처(typed buffer SRV 포함)·샘플러·구조화·raw 버퍼·storage image·GLES uniform vec4, 파이프라인 합(Vulkan `maxDescriptorSet*`, D3D binding tier heap, GLES `GL_MAX_COMBINED_*`), `perStageResources`(Vulkan `maxPerStageResources`), `pipelineUavs`(형식 정의 `uavTotal`), `boundDescriptorSets`, `colorAttachments`, 상수 버퍼·루트 상수 크기, 상수·storage·texel view 시작 정렬, storage view·texel 원소·버퍼 최대 크기, 정점 속성·stream, 단계 사이 vec4, compute 그룹 수·크기·invocation·shared memory, 텍스처 크기(2D·3D·cube·층), 이방성. backend에 해당 없는 값은 `NotApplicableLimit`(0)다.
-    - 기능: compute, 깊이 clamp, VS 층 출력, 64 bit atomic, 간접 인자 첫 인스턴스, multi draw indirect, cube array, sRGB 짝 view, VS·PS storage 쓰기, HDR 출력, D3D12 binding tier, D3D 셰이더 모델. Vulkan은 지원하면 그 기능·확장을 켜고 켠 것만 참이다(`depthClamp`·`multiDrawIndirect`·`drawIndirectFirstInstance`·`imageCubeArray`·`vertexPipelineStoresAndAtomics`·`fragmentStoresAndAtomics`, `VK_EXT_shader_viewport_index_layer`, `VK_KHR_shader_atomic_int64` + `VK_EXT_shader_image_atomic_int64`, UE `VulkanExtensions.cpp:536, 560`과 같은 조건).
+    - 기능: compute, 깊이 clamp, VS layer 출력, 64 bit atomic, 간접 인자 첫 인스턴스, multi draw indirect, cube array, sRGB 짝 view, VS·PS storage 쓰기, HDR 출력, D3D12 binding tier, D3D 셰이더 모델. Vulkan은 지원하면 그 기능·확장을 켜고 켠 것만 참이다(`depthClamp`·`multiDrawIndirect`·`drawIndirectFirstInstance`·`imageCubeArray`·`vertexPipelineStoresAndAtomics`·`fragmentStoresAndAtomics`, `VK_EXT_shader_viewport_index_layer`, `VK_KHR_shader_atomic_int64` + `VK_EXT_shader_image_atomic_int64`, UE `VulkanExtensions.cpp:536, 560`과 같은 조건).
     - 출처: D3D12는 d3d12.h 상수와 resource binding tier·`CheckFeatureSupport`(FEATURE_LEVELS·SHADER_MODEL·OPTIONS·OPTIONS9, UE `D3D12Adapter.cpp:1392`), D3D11은 d3d11.h 상수와 feature level(FL 11.0은 UAV 8·VS UAV 없음)·OPTIONS3, Vulkan은 `VkPhysicalDeviceLimits`와 maintenance3 `maxMemoryAllocationSize`, GLES는 `glGetIntegerv`·`glGetIntegeri_v`·`glGetInteger64v`와 ES 확장 이름(`GL_EXT_depth_clamp`, UE `OpenGLES.cpp:185`). HDR 출력은 DXGI 출력 색 공간(UE `WindowsD3D12Device.cpp:573–602`)이고 Vulkan·GLES는 surface 질의 전에는 몰라 거짓이다. 조회 수단이 없는 GLES 버퍼 최대 크기는 보수적 128 MiB, D3D 버퍼 최대 크기는 보장식 min(max(128, 전용 VRAM × 0.25), 2048) MiB다.
     - 측정(Sandbox `--self-test`, 2026-11-18): Renderer RQ11·RQ22 판단 근거.
 
@@ -474,7 +476,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 ### 7.4 그래프 자원 수명
 
 - **import.** `ImportTexture`·`ImportBuffer`는 처음 접근 상태와 함께 장치 자원을 들이며 그 자원의 `RenderResourceLease`를 얻는다. `Retire`된 자원이면 lease를 얻지 못하고 import가 오류를 돌려준다. 호출자는 내장 typed fallback을 import하거나 그 pass를 추가하지 않는다. 그래프는 조용히 대체하지 않는다.
-- **export.** `ExportTexture`·`ExportBuffer`는 마지막 접근 상태(기본 SRV)를 정하고, 풀 자원의 소유를 호출자의 `DeviceResourceOwner`로 넘긴다. 이후 수명은 그 소유자의 `Retire`가 정한다. history(이전 프레임 결과)가 이 경로다.
+- **export.** `ExportTexture`·`ExportBuffer`는 마지막 접근 상태(기본 SRV)를 정하고, 풀 자원의 사용권을 호출자의 `DeviceResourceOwner`로 넘긴다. 자원은 풀 소속 그대로다. 소유자의 `Retire`는 장치 해제가 아니라 마지막 사용 `GpuFencePoint`가 끝난 뒤 `GraphResourcePool` 반납이고, 아래 풀 축출 규칙은 반납 뒤부터 적용된다(결정 R15, 개정 16). history(이전 프레임 결과)가 이 경로다(7.5절).
 - **풀 축출.** `GraphResourcePool`의 자원은 마지막 사용 `GpuFencePoint`가 완료되었고, 설정한 프레임 수 동안 쓰이지 않았고, 풀 메모리가 예산을 넘을 때 오래된 순으로 `Retire`한다. 계획 8.2절 "경과 프레임 수만으로 회수하지 않는다"에 따라 fence 완료가 필수 조건이다.
 - **풀 키.** desc(크기·형식·용도·mip·array·샘플 수)이며 샘플러는 넣지 않는다(결정 R12).
 
@@ -487,27 +489,28 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 | 항목 | UE 5.8 | 근거 |
 |---|---|---|
 | 그래프 공유 값 | 타입마다 정적 등록한 구조체 하나. 이미 있는데 만들거나 없는데 `GetChecked`하면 assert | `RC/Public/RenderGraphBlackboard.h:15–20, 56–61, 120–126`, 등록 예 `Renderer/Private/SceneTextures.cpp:82` |
-| 장면 텍스처 소유 | view 묶음이 장면 텍스처 묶음 하나를 가지고 그래프 구성 때 채운다 | `Renderer/Private/SceneTextures.cpp:735–738` |
+| 장면 텍스처 소유 | view family(Rocks `ViewSet`)가 장면 텍스처 묶음 하나를 가지고 그래프 구성 때 채운다 | `Renderer/Private/SceneTextures.cpp:735–738` |
 | history | 이전 결과를 외부 텍스처로 등록해 읽고, 새 결과를 추출 예약한다 | 읽기 `Renderer/Private/PostProcess/TemporalAA.cpp:803`, `Renderer/Private/HZB.cpp:97`. 추출 `Renderer/Private/PostProcess/TemporalAA.cpp:1003`, `Renderer/Private/DeferredShadingRenderer.cpp:607` |
+| history 수명 | history는 풀 render target의 참조 계수 포인터다. 새 history로 바꾸면 이전 것은 참조가 풀 하나만 남아 다음 할당이 다시 쓴다 | `Renderer/Private/SceneRendering.h:943–950`, `RC/Private/RenderTargetPool.cpp:202, 754–760` |
 | mip view | HZB pass 하나가 위 mip의 SRV를 읽고 아래 mip 여럿을 mip별 UAV로 쓴다. texture view가 없는 장치는 텍스처 전체 SRV를 쓴다 | `Renderer/Private/SceneTextureReductions.cpp:210, 214, 345, 355`. OpenGL ES는 texture view 없음(`OpenGLDrv/Private/OpenGLDevice.cpp:900–901`) |
-| view 여럿 | 장면 렌더러(view 묶음) 하나에 그래프 하나이고, 그 안에서 기능 함수가 view를 돈다. 이름 구간으로 pass를 묶는다 | `Renderer/Private/SceneRenderBuilder.cpp:873`, `Renderer/Private/LightGridInjection.cpp:1100`, `RC/Public/RenderGraphEvent.h:479` |
+| view 여럿 | 장면 렌더러(view family 하나)마다 그래프 하나이고, 그 안에서 기능 함수가 view를 돈다. 이름 구간은 형식 문자열로 만든다 | `Renderer/Private/SceneRenderBuilder.cpp:873`, `Renderer/Private/LightGridInjection.cpp:1100`, `RC/Public/RenderGraphEvent.h:479` |
 
 **Rocks 규칙.**
 - **`GraphSharedData`.** 타입마다 값 하나, 그래프 수명이다(프레임 arena). 타입은 정적 등록하고, 등록하지 않은 타입은 컴파일 오류다. 이미 있는 타입을 만들면 검증 오류, 없는 값을 반드시 읽는 조회도 검증 오류이고, 있을 때만 읽는 조회는 null을 돌려준다. 값에는 그 그래프의 handle만 담는다(다른 그래프 handle은 7.3절 검증이 거부한다). 값은 그래프가 파괴될 때 렌더 lane에서 파괴된다(8절 구현 메모의 pass 함수와 같다).
-- **`SceneTextureSet` 전달.** 렌더러는 `ViewSet`의 장면 텍스처를 view 번호로 찾는 표 하나를 `GraphSharedData`에 둔다. view마다 크기가 다를 수 있어 장면 텍스처는 view마다 따로이고(Renderer 5.1절), 타입별 값 하나 규칙은 그대로 둔다(UE도 view 묶음이 장면 텍스처를 가진다). pass는 이 표에서 자기 view의 `SceneTextureSet`을 꺼내 자원 묶음(9.6절)을 채운다. 장면 텍스처를 만들기 전에 꺼내면 검증 오류다(생산 전 읽기와 같은 성격).
+- **`SceneTextureSet` 전달(개정 16).** 프레임 packet 하나에 `ViewSet`이 여럿일 수 있다(EditorWorld·PIE 등, Renderer 4.2·5.1절). 그래서 렌더러는 packet 전체의 장면 텍스처를 (ViewSet 번호, view 번호)로 찾는 표 하나(`SceneTextureTable`)를 `GraphSharedData`에 둔다. `ViewSet`마다 값을 두면 타입별 값 하나 규칙과 부딪치기 때문이다. view마다 크기가 다를 수 있어 장면 텍스처는 view마다 따로다(Renderer 5.1절). `ViewSet` 단위 값(GPU Scene 자원·공유 그림자)도 같은 방식으로 ViewSet 번호를 키로 한 표에 둔다. pass는 표에서 자기 (ViewSet, view)의 `SceneTextureSet`을 꺼내 공유 자원 구조체(9.6절)를 채운다. 장면 텍스처를 만들기 전에 꺼내면 검증 오류다(생산 전 읽기와 같은 성격).
 - **history export·import.** `ViewHistory` 소유자(`DeviceResourceOwner`)가 history 텍스처를 가진다(Renderer 5.1절).
   - 이번 프레임은 이전 history를 `ImportTexture`(처음 상태 SRV)로 읽고, 새 history를 그래프 텍스처로 만들어 `ExportTexture`한다. 같은 텍스처를 한 프레임에 읽고 쓰지 않는다(이중 버퍼, UE TAA와 같다).
   - export는 그래프 실행이 성공했을 때만 소유자에게 넘어간다. 검증 실패로 그래프를 버리면(8절) export가 없고, `ViewHistory`는 그 history를 무효로 표시해 다음 프레임에 reset한다. 이전 프레임의 history를 한 번 더 쓰지 않는다(시간 순서가 어긋난 history를 쓰지 않는다).
-  - 이전 history의 `Retire`는 새 history export가 성공한 뒤다. import lease가 있으므로 GPU가 읽는 동안 회수되지 않는다(7.4절).
+  - **풀 반납(결정 R15).** history 텍스처는 풀 자원이다. 새 history export가 성공하면 소유자는 이전 history를 `Retire`하고, 그 자원은 마지막 사용 fence 뒤 `GraphResourcePool`로 돌아가 같은 desc의 다음 할당이 다시 쓴다(7.4절). 그래서 매 프레임 history를 만들고 놓아도 정상 상태에서는 장치 생성·해제 없이 2–3장이 돈다. UE도 같은 구조다(위 표 "history 수명"). import lease가 있으므로 GPU가 읽는 동안 반납되지 않는다.
   - history가 없는 프레임(첫 프레임·cut·크기 변경, Renderer 5.1절)은 import하지 않고, history 없음 퍼뮤테이션이나 내장 자원을 명시적으로 묶는다(7.4절 "조용히 대체하지 않는다").
 - **mip view 그래프 자원.** `GraphTextureView`는 (텍스처, mip 범위, slice 범위, SRV·UAV)다. 상태 추적과 상충 검사는 subresource 단위이므로 한 Compute pass가 mip k의 SRV와 mip k+1…k+n의 UAV를 함께 가질 수 있다(HZB). 범위가 겹치면 한 pass 안 상충 접근이다. 장치 view는 GX2의 텍스처 view(mip·slice 범위)로 낮춘다.
-  - texture view가 없는 backend(OpenGL ES)는 SRV에 텍스처 전체를 묶는다. 그래서 mip view를 읽는 셰이더는 그래프가 view마다 주는 **view 기준 mip**(view를 지원하는 backend는 0, 아니면 view의 첫 mip)을 상수로 받아 명시 LOD로 읽는다(`SampleLevel`·`Load`). backend마다 원문을 바꾸지 않기 위해서다. UAV는 GLES image 묶기가 level 하나를 받으므로 그대로 한 mip이다.
+  - texture view가 없는 backend(OpenGL ES)는 SRV에 텍스처 전체를 묶는다. 그래서 mip view를 읽는 셰이더는 그래프가 view마다 주는 **view 기준 mip**(view를 지원하는 backend는 0, 아니면 view의 첫 mip)을 상수로 받아 명시 LOD로 읽는다(`SampleLevel`·`Load`). 크기 조회(`GetDimensions`)도 같은 기준 mip을 명시한다. 텍스처 전체가 묶인 GLES에서 mip 0 크기를 읽지 않기 위해서다(개정 16). backend마다 원문을 바꾸지 않는다. UAV는 GLES image 묶기가 level 하나를 받으므로 그대로 한 mip이다.
   - 같은 텍스처의 mip k 표본과 mip k+1 image 쓰기를 한 dispatch에서 하는 것이 ES 3.2에서 정의된 동작인지는 사양 대조가 남았다(**미확인**). RG1 GLES 시험에서 확인하고, 안 되면 GLES는 mip마다 pass를 나눈다.
-- **view 여럿을 한 그래프에.** 프레임 packet 하나가 그래프 하나다(7.3절). 그 안에 `ViewSet`의 view 여럿과 packet이 담은 `ViewSet` 여럿이 모두 들어간다. UE는 view 묶음마다 그래프 하나다.
-  - 선언 순서: `ViewSet` 공통 pass(장면 변경 적용·GPU Scene 업로드·sky LUT·공유 그림자, Renderer 6.2절 F1–F3·F7)를 먼저 넣고, 그다음 view 순서대로 그 view의 pass 묶음을 넣는다(view 단위). UE는 기능 함수 안에서 view를 도는 pass 단위다. Rocks가 view 단위인 이유: 한 view의 그래프 자원 수명이 그 view 구간에서 끝나므로 다음 view가 같은 desc 자원을 프레임 안 풀로 다시 쓸 수 있다(RG2). 선언 순서가 실행 순서다(결정 R5).
-  - **pass 묶음 구간.** 그래프에 pass 여러 개를 감싸는 이름 구간을 둔다(`GpuScope` 중첩, 13절). view 구간과 기능 구간(예: 그림자)에 쓴다. pass 이름은 정적 이름(`TraceScopeName`)이므로 view 번호는 구간 이름이 나타낸다.
+- **view 여럿을 한 그래프에.** 프레임 packet 하나가 그래프 하나다(7.3절). 그 안에 packet이 담은 `ViewSet` 여럿과 각 `ViewSet`의 view 여럿이 모두 들어간다. UE는 view family마다 그래프 하나다.
+  - 선언 순서(개정 16): `ViewSet` A 공통 pass(장면 변경 적용·GPU Scene 업로드·sky LUT·공유 그림자, Renderer 6.2절 F1–F3·F7) → A의 view들(view 순서, view마다 그 view의 pass 전체) → `ViewSet` B 공통 pass → B의 view들 …. UE는 기능 함수 안에서 view를 도는 pass 단위다. Rocks가 view 단위인 이유: 한 view의 그래프 자원 수명이 그 view 구간에서 끝나므로 다음 view가 같은 desc 자원을 프레임 안 풀로 다시 쓸 수 있다(RG2). 선언 순서가 실행 순서다(결정 R5).
+  - **그래프 구간 `GraphScope`.** 그래프에 pass 여러 개를 감싸는 이름 구간을 둔다(`GpuScope` 중첩, 13절). `ViewSet` 구간·view 구간·기능 구간(예: 그림자)에 쓴다. 구간 이름은 정적 이름(`TraceScopeName`, CP7 정적 이름 + 64 bit 해시)이므로 view 구간은 이름 `View`, ViewSet 구간은 `ViewSet`이고, 번호는 구간을 연 직후 trace 표지(`ROCKS_TRACE_MARK`, [다중 스레드 trace](TraceSystem.ko.md) 표지 규칙)로 남긴다(개정 16). 캡처 도구의 GPU marker에는 번호가 보이지 않는다. UE는 형식 문자열로 구간 이름을 만든다(`RC/Public/RenderGraphEvent.h:479`).
   - view마다 다른 자원은 다른 그래프 자원이다. view 사이에 공유하는 자원(shadow atlas·GPU Scene)은 한 번 만들거나 import하고 여러 view의 pass가 읽는다. 공유할지(같은 light/caster revision 등)는 렌더러가 정한다(Renderer 5.1절).
-- **완료 기준(RG1 남은 것에 더한다).** `GraphSharedData` 중복 생성·없는 값 필수 조회의 음성 대조와 다른 그래프 handle을 담은 값 거부, 검증 실패 그래프의 export 0건과 history 무효 표시, 같은 텍스처의 mip k SRV + mip k+1 UAV pass 통과와 범위가 겹치는 pass 음성 대조, GLES view 기준 mip 경로의 HZB 축소 픽셀 대조(D3D12·Vulkan과 같은 결과), view 2개 그래프의 pass 순서·구간 중첩 기록, RG2에서 view 사이 풀 재사용 기록.
+- **완료 기준(RG1 남은 것에 더한다).** `GraphSharedData` 중복 생성·없는 값 필수 조회의 음성 대조와 다른 그래프 handle을 담은 값 거부, `ViewSet` 둘·view 셋인 packet의 `SceneTextureTable` 조회, 검증 실패 그래프의 export 0건과 history 무효 표시, history 반납 뒤 같은 desc 할당의 재사용(장치 생성 0건, fence gate 전에는 재사용 0건), 같은 텍스처의 mip k SRV + mip k+1 UAV pass 통과와 범위가 겹치는 pass 음성 대조, GLES view 기준 mip 경로의 HZB 축소 픽셀 대조(D3D12·Vulkan과 같은 결과), packet의 pass 순서·구간 중첩·trace 표지 기록, RG2에서 view 사이 풀 재사용 기록.
 
 ## 8. 렌더 그래프 단계와 완료 기준
 
@@ -544,7 +547,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
   - `GraphSharedData`(7.3절)는 넣지 않았다.
   - GPU 계측: 그래프의 장치 기록 전체를 GPU 프레임 하나로 묶는다(첫 기록에서 `GpuTrace::BeginFrame`, 마지막 기록에서 `EndFrame`). pass마다 `CpuScope`와 `GpuScope`(pass 이름은 정적 `TraceScopeName`)를 둔다(13.3절 스펙과 다른 점 (4) 해소).
   - 렌더 lane 연결: `RenderFrameContext::Arena()`(그 slot의 FrameArena)를 더했다. 그래프 수명 표는 그 arena에 두고, pass 함수(람다)는 그래프 파괴 때 렌더 lane에서 부순다(arena Reset은 게임 lane에서 일어나기 때문이다).
-- 남은 것(RG1): 파라미터 구조체 수집기(RB4·SH2·P7), `GraphSharedData`, attachment load·MRT·깊이·렌더 타깃 없는 기록(GX4), 버퍼 용도·텍스처 차원·형식 확장(GX2·픽셀 형식), Vulkan 픽셀 대조, 그래프 설정 변수(CP4), 캡처 도구 수동 확인 기록(13.3절). 렌더러 사용 요구(7.5절: `GraphSharedData` 규칙, mip view와 view 기준 mip, pass 묶음 구간, export 성공 조건)도 RG1에 넣는다.
+- 남은 것(RG1): 파라미터 구조체 수집기(RB4·SH2·P7), `GraphSharedData`, attachment load·MRT·깊이·렌더 타깃 없는 기록(GX4), 버퍼 용도·텍스처 차원·형식 확장(GX2·픽셀 형식), Vulkan 픽셀 대조, 그래프 설정 변수(CP4), 캡처 도구 수동 확인 기록(13.3절). 렌더러 사용 요구(7.5절: `GraphSharedData` 규칙, mip view와 view 기준 mip, 그래프 구간 `GraphScope`, export 성공 조건)도 RG1에 넣는다. export한 풀 자원의 `Retire`를 장치 해제가 아니라 fence 뒤 풀 반납으로 바꾼다(결정 R15, 지금 구현은 새 `RenderHandle`의 `Retire`가 장치 자원을 놓는다).
 
 ## 9. 셰이더 런타임
 
@@ -572,6 +575,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 - **표현.** UE frozen memory image를 들이지 않는다. 정규화 표는 Core Archive·Record로 읽는다. memory image의 이득에 대한 Epic의 설계 근거는 확인하지 못했고(미확인), 로드 비용이 문제가 되면 측정 M3로 다시 본다.
 - **수명.** 셰이더 집합은 `DeviceResourceOwner`다. 쓰는 쪽(파이프라인 캐시 항목, 기록 packet)은 집합의 lease를 잡는다. `Retire`된 집합은 새 lease와 새 장치 셰이더 생성을 막는다.
 - **장치 셰이더 생성.** 처음 쓸 때 만든다. 만드는 스레드는 GX11 규칙을 따른다: 스레드 안전 생성 backend는 요청한 스레드에서, OpenGL ES는 렌더 lane 작업으로. 경쟁 시 생성이 두 번 일어날 수 있으나 게시는 한 번이고 진 쪽은 `Retire`한다(UE와 같다, `ShaderResource.cpp:579–657`). 만든 뒤 코드 바이트를 놓는다. 로드 때 일괄 생성 선택을 콘솔 설정으로 두며 병렬 일괄 생성은 CP2를 쓴다.
+- **런타임 확인 기능(개정 16).** 셰이더 시스템 7.2절 7항의 런타임 확인 기능(`vertexViewportLayerOutput`)을 요구하는 셰이더는 라이브러리 항목에 그 기능 비트가 있다(셰이더 시스템 12.2절). 셰이더 집합은 장치 셰이더를 만들기 전에 이 비트를 `DeviceCaps.features`와 대조하고, 없으면 만들지 않고 `Unsupported`를 돌려준다. 그 셰이더를 쓰는 파이프라인 캐시 항목도 만들지 않는다. 완결성 검사(아래)는 장치와 무관하게 그 항목이 라이브러리에 있는지 본다(쿠킹은 형식 기준이다). 호출자는 능력을 먼저 확인해 대체 경로를 고른다.
 - **엔진 셰이더 집합과 완결성 검사.** 렌더 lane 시작 단계(5.5절)에서 엔진 셰이더 집합을 연다. 형식마다 공급 경로가 둘이다.
   - **쿠킹 라이브러리 형식**(셰이더 시스템 12.3절 엔진 내장 라이브러리): 등록된 엔진 셰이더 타입 × 정점 입력 타입 × 그 형식에서 컴파일되는 퍼뮤테이션(P14 거르기 결과) 전체가 라이브러리에 있는지 검사한다. 하나라도 없으면 시작이 `IncompatibleCook`으로 실패한다. UE는 엔진 셰이더 맵이 없으면 종료하고(창 지원 플랫폼은 오류 대화상자 뒤 종료 요청, 9.1절) 개별 셰이더는 로드 때 오류다. Rocks는 정적 등록으로 전체를 알 수 있으므로 시작 때 결정적으로 실패시킨다.
   - **필요 시 컴파일 형식**(`GLES31_PC`, 개발 트리에서 내장 라이브러리가 없는 형식, 셰이더 시스템 12.3절): Runtime 모듈은 Developer 셰이더 컴파일러에 의존할 수 없으므로 RenderBase가 **셰이더 공급자** interface를 정의하고, Development 실행 파일이 Developer/ShaderCompiler 구현을 등록한다(SX14). 집합은 "공급 대기" 상태로 열리고, 공급자가 엔진 셰이더 전체를 컴파일해 완료 통지를 보내면 같은 완결성 검사를 한 뒤 `Ready`가 된다. 공급자가 없는 실행 파일(Release)에서 이 형식이 선택되면 `UnsupportedCapability`다.
@@ -584,6 +588,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 - **만드는 시점.** 셰이더 집합을 열 때 라이브러리의 바인딩 layout과 파라미터 구조체 스키마로 만든다(결정 R11). 스키마는 MetaSchema `TypeOf<T>()`(`Meta/GeneratedType.h`)로 얻는다. RenderBase는 MetaSchema에 의존하고 ObjectRuntime에는 의존하지 않는다(계획 3.1절 렌더 층 "Object 없음"). 스키마를 오래 붙잡는 경우의 타입 lease 수명은 집합 수명과 같게 한다. 만드는 비용은 측정 M3로 확인하고, 문제가 되면 라이브러리 부분으로 굽는다(UE는 오프라인에서 만들어 셰이더 맵에 굽는다).
 - **레이아웃 서명 런타임 검증.** 셰이더 시스템은 레이아웃 서명을 job 키에만 넣는다(10절 8항, 13절). 그러면 실행 파일과 쿠킹 라이브러리의 빌드가 어긋날 때 잘못된 오프셋으로 조용히 올라간다. 라이브러리 항목에 서명을 넣고(SX6), 셰이더 집합을 열 때 실행 파일의 구조체 서명과 다르면 `IncompatibleCook`이다. UE는 그리기 때 Development에서만 검사한다(`ShaderParameterStruct.cpp:520–527`). Rocks는 열 때 모든 구성에서 검사한다.
 - **묶음 설정** `ParameterBatch`: 상수 칸·자원·상수 블록 참조를 모아 장치에 한 번에 올리는 기록 객체(GX6). Development에서 null 자원·종류 불일치를 검증한다. P7(셰이더 시스템 13절) 전에는 손으로 쓴 레이아웃 표(7.2절 5항)를 입력으로 쓴다.
+- **그리기별 바인딩(개정 16, Renderer RQ7).** 그리기마다 바뀌는 상수·자원(머티리얼 파라미터와 텍스처, 정적 조명 `PrecomputedLighting`)은 공유 slot이나 pass 구조체가 아니라 그리기 항목(`MeshDrawItem`)이 가진 바인딩으로 `ParameterBatch`에 넣는다. 상수는 상수 블록 참조, 자원은 그리기별 자원 구조체 `DrawResourceStruct`(9.6절)다. 그래프 의존은 그리기마다 선언하지 않는다. pass가 그 pass의 그리기들이 쓸 수 있는 import 자원 집합(예: 상주 라이트맵 전체, 스트리밍 바인딩 snapshot의 텍스처)을 접근만 선언(9.6절 표)으로 한 번 선언한다. 그래서 pass 구조체가 그리기 수만큼 커지지 않고, 그래프는 그 집합을 pass 동안 SRV 상태로 둔다. 머티리얼 텍스처가 이미 쓰는 경로와 같다(Renderer 14.5절). UE도 라이트맵 자원 구조체와 정적 조명 상수를 그리기 바인딩으로 그리기마다 넣는다(`Renderer/Private/LightMapRendering.cpp:312–333, 346–360`, 구조체 `Engine/Public/SceneManagement.h:725`).
 
 ### 9.4 상수 블록
 
@@ -600,22 +605,23 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 - slot은 정적 등록(이름, 파라미터 구조체 identity)이다. 최대 수는 형식 정의 상한 안이다.
 - 셰이더 쪽: 컴파일러가 셰이더마다 정한 상수 버퍼 번호와 slot을 잇는 표가 필요하므로 `ShaderBindingLayout`의 상수 버퍼 항목에 **파라미터 구조체 identity**를 둔다(SX8).
 - 명령 쪽: 기록 객체에 slot 표를 묶고, 파이프라인 설정 때 셰이더의 slot 표로 적용한다(UE와 같다, 9.1절 UB 런타임 행). GLES도 같은 방식이고 업로드는 9.4절 판단을 따른다(UE OpenGL과 같다).
-- **렌더러 slot(Renderer RQ7, 개정 15).** 렌더러가 등록하는 공유 상수 slot은 아래 여섯이다(Renderer 15.2절). 선언(이름·파라미터 구조체 identity·수명)은 장치 없는 `RendererShaders`(Renderer 3.2절)에 정적으로 둔다. 쿠커는 이 선언으로 바인딩 layout의 구조체 identity를 맞추고(SX8), RenderBase slot 표는 시작 때 정적 등록 표로 받는다(10.2절 정점 입력 타입 등록과 같은 시점, 늦은 등록은 거부).
+- **렌더러 slot(Renderer RQ7, 개정 15·16).** 렌더러가 등록하는 공유 상수 slot은 아래 다섯이다(Renderer 15.2절). 선언(이름·파라미터 구조체 identity·수명)은 장치 없는 `RendererShaders`(Renderer 3.2절)에 정적으로 둔다. 쿠커는 이 선언으로 바인딩 layout의 구조체 identity를 맞추고(SX8), RenderBase slot 표는 시작 때 정적 등록 표로 받는다(10.2절 정점 입력 타입 등록과 같은 시점, 늦은 등록은 거부).
 
-  | slot | 상수 내용(Renderer 15.2절) | 수명 | 묶는 단위 | 짝 자원 묶음(9.6절) |
+  | slot | 상수 내용(Renderer 15.2절) | 수명 | 묶는 단위 | 짝 공유 자원 구조체(9.6절) |
   |---|---|---|---|---|
   | `View` | 행렬(현재·이전, jitter 유무), 카메라 이동 보정 상위·하위, render 크기, 시간, 노출, mip bias, 정적 간접 배율 둘 | `PerFrame` | view | — |
-  | `Scene` | 인스턴스 수 | `PerFrame` | 프레임 | `SceneResources`: GPU Scene typed buffer, 인스턴스 번호 목록(10.5절) |
+  | `Scene` | 인스턴스 수 | `PerFrame` | `ViewSet`(장면 snapshot 하나) | `SceneResources`: GPU Scene typed buffer, 인스턴스 번호 목록(10.5절) |
   | `ForwardLight` | grid 크기·Z 인자, local 광원 수, directional 목록(최대 4) | `PerFrame` | view | `ForwardLightResources`: 광원 데이터·grid typed buffer |
   | `Shadow` | CSM 행렬·분할, atlas 크기 | `PerFrame` | view | `ShadowResources`: shadow atlas(비교 샘플러 짝) |
   | `Fog` | height fog 인자 | `PerFrame` | view | `FogResources`: aerial perspective LUT |
-  | `PrecomputedLighting` | 정적 조명 상수 | `Persistent` | 인스턴스 묶음(그리기 사이에 바뀔 수 있다) | `PrecomputedLightingResources`: 라이트맵·프로브 텍스처 |
 
-  - `SceneTextures`는 상수 부분이 없어 slot이 아니다. 자원 묶음 `SceneTextureResources`(깊이·GBuffer·AO·velocity·HZB)만 있다.
-  - 상수 버퍼 예산: pass 셰이더 하나가 쓰는 상수 버퍼는 여섯 slot + 머티리얼 상수 블록 1 + pass 파라미터 구조체 1 = 최대 8이다. 형식 정의 `constantBuffers`(GLES·Vulkan·Metal 12, D3D11 13, D3D12 14, 셰이더 시스템 12.1절) 안이고, 루트 상수는 따로다(셰이더 시스템 7.2절 2항). GLES는 이 합이 PS 에뮬레이션 `vec4` 224 안이어야 하며 구조체를 정한 뒤 워커가 검사한다(Renderer 15.2절 추정 약 100).
+  - `PrecomputedLighting`(정적 조명 상수, 라이트맵·프로브 텍스처)은 개정 16에서 slot에서 뺐다. 그리기마다 바뀌므로 그리기별 바인딩(9.3절)의 상수 블록 하나와 `DrawResourceStruct` 하나다.
+  - `SceneTextures`는 상수 부분이 없어 slot이 아니다. 공유 자원 구조체 `SceneTextureResources`(깊이·GBuffer·AO·velocity·HZB)만 있다.
+  - **상수 버퍼 예산(개정 16).** pass 셰이더 하나가 쓰는 상수 버퍼는 공유 slot 5 + `PrecomputedLighting` 1 + 머티리얼 상수 블록 1 + 머티리얼 파라미터 컬렉션 최대 2(머티리얼 시스템 9.7절, 각각 cbuffer) + pass 파라미터 구조체 1 = 최대 10이다. 형식 정의 `constantBuffers`(GLES·Vulkan·Metal 12, D3D11 13, D3D12 14, 셰이더 시스템 12.1절) 안이고, 루트 상수는 따로다(셰이더 시스템 7.2절 2항). 이 수는 job 형식 상한으로 워커가 검사한다(셰이더 시스템 7.2절 4항).
+  - **GLES uniform 예산.** GLES는 상수 버퍼와 루트 상수가 모두 uniform `vec4` 배열이므로(9.4절), PS 에뮬레이션 `vec4` 224(ES 3.2 최소 보장)를 공유 slot·`PrecomputedLighting`·머티리얼 블록·컬렉션·pass 상수·루트 상수(8 `vec4`)의 **합**으로 검사한다. 렌더러 쪽 합은 구조체를 정한 뒤 정하고(Renderer 15.2절 추정 약 100), 머티리얼 블록과 컬렉션 크기 상한은 그 나머지 안에서 정한다(머티리얼 시스템 9.7절).
   - HLSL 이름은 slot 이름과 같은 cbuffer 이름이다(SX1 "파라미터 구조체 하나 = 이름 있는 cbuffer 하나"). 원문은 공용 `.rsh`의 선언을 include한다. UE도 정적 slot을 이름으로 묶는다(`RC/Public/ShaderParameterMacros.h:1511–1590`).
-  - 렌더러는 view마다(또는 프레임에 한 번) 기록 객체의 slot 표를 바꾼다. `PrecomputedLighting`처럼 그리기 사이에 바뀌는 slot도 같은 표를 쓰고, GLES는 9.4절의 (program, 순번)별 identity·version 판단으로 바뀐 것만 올린다.
-  - 머티리얼 파라미터 컬렉션의 동적 slot(머티리얼 시스템 MRB4)은 이 정적 표 밖이며 머티리얼 단계에서 정한다.
+  - 렌더러는 `ViewSet`마다 `Scene`을, view마다 나머지 slot을 기록 객체의 slot 표에 다시 묶는다(7.5절 선언 순서). GLES는 9.4절의 (program, 순번)별 identity·version 판단으로 바뀐 것만 올린다.
+  - 머티리얼 파라미터 컬렉션의 동적 slot(머티리얼 시스템 MRB4)은 이 정적 표 밖이며 머티리얼 단계에서 정한다. 위 예산에는 넣는다.
 
 ### 9.6 파라미터 구조체와 렌더 그래프
 
@@ -637,14 +643,15 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 - "상수 블록 참조 = 별도 cbuffer", "펼쳐 넣기 = 평탄화"로 정하면 셰이더 시스템 7.2절 5항의 금지(cbuffer 안 구조체 배열·2단 중첩)와 충돌하지 않는다.
 - 그래프 수명 구조체는 프레임 arena에 할당하고 pass에 넘긴 뒤 바꾸지 않는다.
 - 셰이더가 쓰지 않는 멤버는 바인딩 layout으로 걸러 의존에서 뺀다(UE `RC/Private/RenderGraphUtils.cpp:22–101`). 그래서 바인딩 지도에 멤버 오프셋이 함께 있어야 한다(9.3절).
-- **공유 자원 묶음(Renderer RQ7, 개정 15).** 공유 상수 slot은 상수 블록이라 자원을 담지 못한다(GLES는 uniform `vec4` 배열, 9.4절). 그래서 렌더러 묶음은 상수 부분(9.5절 slot)과 자원 부분으로 나누고, 자원 부분은 **자원 묶음** 구조체로 정의해 그 자원을 쓰는 pass의 파라미터 구조체가 펼쳐 넣는다.
-  - **정의.** 자원 묶음은 그래프 자원·장치 자원·샘플러 지정 멤버만 가진 파라미터 구조체다. 상수 멤버와 렌더 타깃 slot 묶음은 넣지 않는다(상수는 slot 쪽, 렌더 타깃은 pass 쪽이다).
-  - **포함.** 같은 묶음을 여러 pass 구조체가 펼쳐 넣는다. 값은 handle 복사다. 렌더러는 묶음 값을 그래프 구성 때 한 번 채우고(장면 텍스처는 `GraphSharedData`의 `SceneTextureSet`에서, 7.5절) pass마다 복사해 넣는다. UE의 펼쳐 넣기도 값으로 평탄화한다(`RC/Public/ShaderParameterMacros.h:1840`).
-  - **이름.** 생성 HLSL 전역 자원 이름은 `<묶음 이름>_<멤버 이름>`이다(예: `SceneTextures_Depth`, 짝 샘플러 `SceneTextures_DepthSampler`, 셰이더 시스템 7.2절 9항). 한 pass에 묶음 둘을 펼쳐 넣어도 이름이 겹치지 않고, 같은 자원은 모든 셰이더에서 같은 이름이다. 그래도 겹치면 생성기 오류다.
-  - **의존은 쓰는 멤버만.** 바로 위 미사용 멤버 거르기가 묶음 멤버에도 적용된다. `SceneTextureResources`를 포함한 pass가 깊이만 읽으면 깊이에만 의존한다. 깊이를 attachment로 쓰는 pass가 같은 묶음을 포함해도 셰이더가 깊이를 읽지 않으면 상충이 아니고, 읽으면 렌더 그래프가 한 pass 안 상충 접근으로 거부한다(7.2절, Renderer 6.2절 순환 금지).
-  - **단계 상한.** 묶음 멤버도 그 단계의 SRV 텍스처 수에 든다. 렌더러 예산표(Renderer 7.4절)는 셰이더가 실제로 읽는 멤버로 센다.
-  - **영구 자원.** 라이트맵·스트리밍 텍스처처럼 그래프 밖 자원은 import한 그래프 자원으로 묶음에 넣는다(Renderer 15.1절). 묶음 값의 수명은 그래프 수명이다.
+- **공유 자원 구조체 `SharedResourceStruct`(Renderer RQ7, 개정 15·16).** 공유 상수 slot은 상수 블록이라 자원을 담지 못한다(GLES는 uniform `vec4` 배열, 9.4절). 그래서 렌더러 자원은 상수 부분(9.5절 slot)과 자원 부분으로 나누고, 자원 부분은 공유 자원 구조체로 정의해 그 자원을 쓰는 pass의 파라미터 구조체가 포함한다.
+  - **정의.** 그래프 자원·장치 자원·샘플러 지정 멤버만 가진 파라미터 구조체다. 상수 멤버와 렌더 타깃 slot은 넣지 않는다(상수는 slot 쪽, 렌더 타깃은 pass 쪽이다).
+  - **포함.** 같은 구조체를 여러 pass 구조체가 멤버 하나로 포함한다. 값은 handle 복사다. 렌더러는 구조체 값을 그래프 구성 때 한 번 채우고(장면 텍스처는 `GraphSharedData`의 `SceneTextureTable`에서, 7.5절) pass마다 복사해 넣는다.
+  - **이름(개정 16).** 생성 HLSL 전역 자원 이름은 `<포함 멤버 이름>_<자원 멤버 이름>`이다. pass 구조체가 `SceneTextureResources` 타입 멤버를 `SceneTextures`라는 이름으로 포함하면 `SceneTextures_Depth`, 짝 샘플러는 `SceneTextures_DepthSampler`다(셰이더 시스템 7.2절 9항). 공유 자원 구조체는 렌더러가 정한 표준 멤버 이름(`SceneTextures`·`SceneResources`·`ForwardLight`·`Shadow`·`Fog`)으로만 포함해 모든 셰이더에서 같은 자원이 같은 이름이다. 접두어는 UE 중첩 구조체의 `멤버_` 규칙과 같다(`RC/Private/ShaderParameterStruct.cpp:123–130`). UE의 펼쳐 넣기(`SHADER_PARAMETER_STRUCT_INCLUDE`)는 접두어 없이 평탄화하지만(`:100–107`), Rocks는 한 pass에 둘을 포함해도 이름이 겹치지 않게 접두어를 쓴다. 그래도 겹치면 생성기 오류다.
+  - **의존은 쓰는 멤버만.** 바로 위 미사용 멤버 거르기가 포함 멤버에도 적용된다. `SceneTextureResources`를 포함한 pass가 깊이만 읽으면 깊이에만 의존한다. 깊이를 attachment로 쓰는 pass가 같은 구조체를 포함해도 셰이더가 깊이를 읽지 않으면 상충이 아니고, 읽으면 렌더 그래프가 한 pass 안 상충 접근으로 거부한다(7.2절, Renderer 6.2절 순환 금지).
+  - **단계 상한.** 포함 멤버도 그 단계의 SRV 텍스처 수에 든다. 렌더러 예산표(Renderer 7.4절)는 셰이더가 실제로 읽는 멤버로 센다.
+  - **영구 자원.** 그래프 밖 자원(스트리밍 텍스처 등)은 import한 그래프 자원으로 넣는다(Renderer 15.1절). 구조체 값의 수명은 그래프 수명이다.
   - **view마다.** view가 여럿이면 view마다 다른 값을 담은 pass 구조체가 따로 생긴다(7.5절).
+- **그리기별 자원 구조체 `DrawResourceStruct`(개정 16).** 그리기마다 바뀌는 자원(라이트맵·프로브 텍스처 등 `PrecomputedLighting` 자원)을 담는 구조체다. 멤버 종류는 공유 자원 구조체와 같되 그래프 자원은 import 자원만 가리킨다. pass 구조체에 넣지 않고 그리기 항목의 바인딩(9.3절)으로 그리기마다 묶는다. 그래프 의존은 pass가 그 그리기들이 쓸 수 있는 import 자원 집합을 접근만 선언으로 한 번 선언한다(9.3절). HLSL 이름 규칙은 위와 같다(표준 멤버 이름 `PrecomputedLighting`).
 
 ### 9.7 파이프라인 캐시
 
@@ -825,11 +832,17 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 
 **Rocks 규칙.**
 - **인스턴스 데이터는 typed buffer.** GPU Scene 인스턴스 데이터는 `RGBA32Float` typed buffer이고 VS가 typed buffer SRV로 읽는다(Renderer 결정 RN9). 인스턴스 데이터를 정점 stream(10.4절 인스턴스 stream)으로 넣지 않는다. GLES VS의 storage block 최소 보장이 0이라 구조화 버퍼를 쓸 수 없고, 모든 backend를 한 경로로 둔다. GLES에서 typed buffer SRV는 VS 텍스처 유닛을 차지한다(셰이더 시스템 7.2절 4항).
-- **인스턴스 번호.** `instanceIndex = InstanceIndices[instanceListOffset + SV_InstanceID]`다. `InstanceIndices`는 `R32Uint` typed buffer(자원 묶음 `SceneResources`, 9.5·9.6절)이고 `instanceListOffset`은 루트 상수다. 그리기는 늘 첫 인스턴스 0으로 하므로 `SV_InstanceID`는 그리기 안 번호 0…n−1이다. base instance가 시스템 값에 들어가는지가 backend마다 다른 문제를 피한다(셰이더 시스템 7.2절 7항). GLES 3.1 간접 draw의 base instance 0 제약에도 그대로 맞는다(Renderer 15.2절).
+- **인스턴스 번호.** `instanceIndex = InstanceIndices[instanceListOffset + SV_InstanceID]`다. `InstanceIndices`는 `R32Uint` typed buffer(공유 자원 구조체 `SceneResources`, 9.5·9.6절)이고 `instanceListOffset`은 루트 상수다. 그리기는 늘 첫 인스턴스 0으로 하므로 `SV_InstanceID`는 그리기 안 번호 0…n−1이다. base instance가 시스템 값에 들어가는지가 backend마다 다른 문제를 피한다(셰이더 시스템 7.2절 7항). GLES 3.1 간접 draw의 base instance 0 제약에도 그대로 맞는다(Renderer 15.2절).
 - **늘 목록을 거친다(결정 R13).** CPU 가시성만 쓰는 단계(Renderer RS0–RS3)에도 렌더러가 그리기 항목마다 인스턴스 번호 목록을 프레임 업로드로 쓰고, GPU culling(RS4)은 같은 목록을 GPU가 쓴다. 셰이더 경로가 하나라 RS4 전후로 pass 셰이더가 바뀌지 않는다. UE도 일반 경로는 늘 instance id 버퍼를 거친다.
+- **용량(개정 16).** typed buffer view 하나의 원소 수는 `DeviceCaps.limits.texelBufferElements` 이하다(GX1: D3D 2^27, Vulkan `maxTexelBufferElements` 최소 보장 65536, GLES `GL_MAX_TEXTURE_BUFFER_SIZE` 최소 보장 65536). 인스턴스 데이터 용량 = `texelBufferElements` ÷ 인스턴스당 `float4` 수(약 10–12로 추정, RS0에서 확정)다. 최소 보장 장치에서는 약 5,000 인스턴스이고 D3D는 사실상 제한이 없다. 실제 기기 값은 Renderer 19.2절 측정으로 본다. UE도 typed buffer view의 원소 상한을 장치 값으로 두고(`RHI/Public/RHIGlobals.h:321`, Vulkan `VulkanRHI/Private/VulkanRHI.cpp:1005`, OpenGL ES `OpenGLDrv/Private/OpenGLDevice.cpp:921–924`) 넘는 view 생성을 검증 오류로 본다(`RHI/Private/RHIValidation.cpp:1061–1062`).
+- **넘침(결정 R16).** typed buffer를 다른 자원으로 몰래 바꾸지 않는다.
+  - 인스턴스 데이터: 용량을 넘는 인스턴스 추가는 `Unsupported`로 실패하고 `RenderNotices`로 게임 lane에 알리며 계수를 올린다. 이미 있는 인스턴스는 그대로 그린다. 조용히 빠뜨리지 않는다(계획 13.1절).
+  - `InstanceIndices`: 프레임 목록이 원소 상한을 넘으면 목록을 상한 크기 조각으로 나누고, 그리기 항목은 자기 조각의 view를 그리기별 바인딩(9.3절)으로 묶는다. 셰이더 경로는 그대로다.
+  - light grid: 목록 용량을 원소 상한 이하로 두고, 넘치면 Renderer 8.1절의 넘침 보수 대체(그 셀에서 전체 순회)를 쓴다.
+  - 최소 보장 기기가 대상 Android 기기에 실제로 있으면 GPU Scene 저장 형태(Renderer 결정 RN9, 2D 텍스처 대체 등)를 다시 연다. 재검토 조건은 RN9의 측정 MR4에 더했다.
 - **루트 상수 배치.** 메시 pass 셰이더의 루트 상수 구조체는 앞 16 byte에 `MeshDrawConstants`(첫 `uint`가 `instanceListOffset`, 나머지 12 byte는 예약 padding)를 펼쳐 넣는다. 정점 입력 `.rsh`가 이 이름으로 읽는다. 나머지 112 byte는 pass가 쓴다(루트 상수 128 byte, 셰이더 시스템 7.2절 2·5항). UE는 같은 값을 정점 stream으로 넘긴다. Rocks는 루트 상수가 모든 형식에 있으므로(GLES는 uniform 에뮬레이션) 정점 stream·attribute 자리를 쓰지 않는다(stream 8개·attribute 16개 상한, 10.2절·SX9).
 - **`.rsh` 인터페이스.** 메시 정점 입력 `.rsh`의 함수 인터페이스(10.2절 include 연결)에 "인스턴스 번호 → 현재·이전 변환" 단계를 넣는다. 읽기 함수는 GPU Scene 배치를 아는 렌더러 공용 `.rsh`가 제공하고 정점 입력 `.rsh`는 그것을 부른다. world 위치는 `(인스턴스 상위 − view 상위) + 상대 변환`으로 카메라 상대 값을 만든다(Renderer 5.1절, `View` slot의 이동 보정). 행렬은 행 벡터 `p·M`이고 셰이더는 `mul(v, M)`이다(셰이더 시스템 7.2절 6항).
-- **앞면.** 컬 방향은 파이프라인 상태라 한 그리기 안에서 인스턴스마다 바꿀 수 없다. 그래서 local-to-world 행렬식 부호가 다른 인스턴스는 한 그리기에 묶지 않는다(렌더러 상태 묶음 키에 부호를 넣는다, 셰이더 시스템 7.2절 8항 음수 행렬식).
+- **앞면(개정 16).** 컬 방향은 파이프라인 상태라 한 그리기 안에서 인스턴스마다 바꿀 수 없다. 그래서 local-to-world 행렬식 부호는 인스턴스마다 보고, 부호가 다른 인스턴스는 한 그리기에 묶지 않는다(렌더러 상태 묶음 키에 부호를 넣는다, 셰이더 시스템 7.2절 8항 음수 행렬식). 변환 갱신으로 부호가 바뀐 인스턴스는 그 그리기 항목을 다시 분류한다(재질 교체와 같은 캐시 무효화, Renderer 4.2절).
 - 엔진 기본 정점 입력 타입과 정점 입력 없음(10.2절 (1)·(2))은 이 규약 밖이다. 내장 메시는 지금처럼 그리기별 상수의 변환을 쓴다.
 - **완료 기준(Renderer RS0에서).** (`instanceListOffset`, `SV_InstanceID`) → 인스턴스 변환이 CPU 참조와 같은지 픽셀 대조(D3D12·Vulkan·GLES 미리보기, GLES는 VS texel buffer 경로), offset이 0이 아닌 그리기, 행렬식이 음수인 인스턴스의 별도 그리기와 컬링 픽셀.
 
@@ -846,9 +859,9 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 | 기본 메시 | cube·plane(엔진 기본 정점 입력 타입) | `RC/Public/RenderUtils.h:402–405`(단위 cube 버퍼) | 지금 Sandbox 샘플 렌더러(`SampleRenderer`)의 내장 메시(삼각형·사각형)를 옮긴다. 최소 렌더러는 엔진 모듈이 아니다(2026-11-17 Sandbox로 이동) |
 | fallback 셰이더 | 엔진 기본 정점 입력 타입의 VS·PS | (UE 엔진 셰이더 맵) | 엔진 셰이더 집합에서 온다(9.2절) |
 | checker·error 텍스처, error material, UI 글꼴 | 9.6절 | UE는 Engine UObject 에셋(`Engine/Classes/Engine/Engine.h:903, 911`) | 에셋·머티리얼·UI 단계에서 팩 범위를 넓힌다 |
-| 빈 light grid | `R32Uint` typed buffer(셀 하나의 머리: 시작 0·개수 0)와 `RGBA32Float` typed buffer(원소 1개, 0) | UE는 원소 하나짜리 기본 버퍼를 묶는다(`Renderer/Private/LightGridInjection.cpp:236–271`) | 렌더러는 이 grid를 묶을 때 `ForwardLight` 상수를 grid 크기 1×1×1·local 광원 0으로 둔다. 모든 픽셀이 셀 0을 읽어 광원 0개를 돌므로 범위 밖 읽기가 없다. Renderer 8.1절 "광원 없는 view", RS1 |
+| 빈 light grid | `R32Uint` typed buffer(셀 하나의 머리: 시작 0·개수 0)와 `RGBA32Float` typed buffer(원소 1개, 0) | UE는 원소 하나짜리 기본 버퍼를 묶는다(`Renderer/Private/LightGridInjection.cpp:236–271`) | 렌더러는 이 grid를 묶을 때 `ForwardLight` 상수를 grid 크기 1×1×1·local 광원 0으로 둔다. 셰이더는 셀 좌표를 grid 크기 − 1로 clamp한 뒤 읽으므로(Renderer 8.1절) 모든 픽셀이 셀 0을 읽어 광원 0개를 돈다. 범위 밖 texel fetch 결과에 기대지 않는다(개정 16). Renderer 8.1절 "광원 없는 view", RS1 |
 | 빈 그림자 depth | 1×1 `D16Unorm`, 깊이 1.0(보통 Z의 원평면, Renderer 9.2절). 팩을 만들 때 깊이 attachment clear 1로 채운다 | UE는 directional 그림자가 없을 때 검은 텍스처를 묶는다(`Renderer/Private/LightGridInjection.cpp:274–279`) | Rocks는 값이 아니라 비교 결과로 정한다: 그림자 비교(`LessEqual`)는 수신 깊이 [0,1] 전체에서 "빛 받음"이다. 그림자 함수는 비교 전에 수신 깊이를 [0,1]로 clamp한다. 그래서 셰이더가 분기 없이 표본해도 그림자가 생기지 않는다. 비교 샘플러 짝(SX13). RS3 |
-| 검은 cube·cube array | 1×1 cube(면 6)와 1×1 층 1 cube array, (0,0,0,1) 선형 RGBA8 | `RC/Private/GlobalRenderResources.cpp:573`(cube, `FColor::Black` 알파 255), `:578–612`(cube array, (0,0,0,0)) | 위 "차원별 대체" 가운데 반사 capture cube array·sky light 자리(Renderer 7.4절)의 값을 정한 것이다. 알파는 2D black과 같게 1(계획 9.6절). cube array는 `DeviceCaps` cube array 능력이 있는 장치에서 만든다(GX1). RS7 |
+| 검은 cube·cube array | 1×1 cube(면 6) (0,0,0,1), 1×1 층 1 cube array (0,0,0,0), 선형 RGBA8 | `RC/Private/GlobalRenderResources.cpp:573`(cube, `FColor::Black` 알파 255), `:578–612`(cube array, (0,0,0,0), 주석 "alpha is used by reflection environment to say how much of the foreground texture is visible" `:597`) | 위 "차원별 대체" 가운데 sky light 자리(cube)와 반사 capture 자리(cube array, Renderer 7.4절)의 값이다. cube array 알파 0은 UE와 같은 이유다: capture 알파는 capture가 덮는 비율이고 남는 비율에 sky를 더하므로(UE `Engine/Shaders/Private/ReflectionEnvironmentComposite.ush:158–163, 242`, Renderer 8.3절), 알파 0이면 capture 기여 0·sky 전부다(개정 16). cube는 2D black과 같게 알파 1(계획 9.6절). cube array는 `DeviceCaps` cube array 능력이 있는 장치에서 만든다(GX1). RS7 |
 | 기본 BRDF LUT | 128×32 `RG16Float`. x = NoV, y = roughness(셀 중심), R = 스케일·G = 바이어스(split-sum 환경 BRDF). 시작 때 CPU로 만든다: double 계산, 셀마다 GGX 중요도 표본 128개(Hammersley 수열), Smith 결합 가시성 근사, [0,1] clamp 뒤 half 반올림(round-to-nearest-even) | `Renderer/Private/SystemTextures.cpp:534–670`(128×32, 필터 가능하면 `PF_G16R16` 아니면 `PF_R8G8`, 표본 128개, 시작 때 CPU 생성) | 결정 R14. `RG16Float`은 ES 3.2 core에서 표본·필터가 된다(Renderer 7.1절 velocity 형식과 같은 근거). UE와 달리 장치마다 형식을 바꾸지 않는다. RS7 |
 
 - 지금 null 텍스처를 묶으면 backend가 직접 만든 1×1 white를 쓴다(`Device.h:15–16`, `D3D12Device.cpp:438–445`). Graphics는 RenderBase에 의존할 수 없으므로 backend의 white는 "빈 바인딩 방지" 용도로 남긴다. RenderBase는 null을 묶지 않고 팩의 typed 자원을 명시적으로 묶는다.
@@ -861,9 +874,9 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 - **상태 프리셋.** 블렌드·래스터·깊이 desc를 값 타입으로 두고 자주 쓰는 조합(불투명·알파 블렌드·가산, 컬 없음·뒤면 컬, 깊이 끔·읽기·읽기쓰기)을 이름 붙은 상수로 둔다. UE의 정적 상태 템플릿 캐시(`RC/Public/RHIStaticStates.h:20–53`)에 해당하나, Rocks는 상태를 파이프라인에 넣으므로 캐시가 필요 없다.
 - **clear.** 전체 clear는 attachment load 동작과 clear 값으로 한다(그래픽 API는 임의 clear 값을 받는다). UE는 viewport 지정이 없고 clear 색이 텍스처의 fast clear 색과 같을 때만 load 동작을 쓰고 나머지는 쿼드 clear로 간다(`RC/Private/RenderGraphUtils.cpp:682–735`). viewport 부분 clear·UAV clear 셰이더는 후속이다.
 - **크기 계산.** `MipExtent`·`MipChainBytes`는 이미 있다(`GraphicsTypes/Public/GraphicsTypes/PixelFormat.h`). A0-G 형식 확장 때 형식별 바이트·채널 정보를 같이 늘린다(UE `RC/Public/RenderUtils.h:147–262`).
-- **MSAA resolve(Renderer RQ16, 개정 15).** Forward+ MSAA(Renderer 8.2절)가 쓰는 그리기 유틸리티다. 하드웨어 resolve에 맡기지 않고 셰이더로 한다. 결과가 backend와 무관해야 하고, 깊이·velocity는 평균하면 안 되기 때문이다(계획 11.1절 "깊이와 motion vector를 단순 평균하지 않고 전경 sample 선택과 coverage 규칙"). 표본 수 2·4·8은 퍼뮤테이션이다(UE도 표본 수별 셰이더 타입, `RC/Public/ResolveShader.h:20–113`). 구현은 Renderer RS8이고 화면 마일스톤 범위 밖이다.
-  - **색.** HDR scene color는 휘도 가중 평균이다: 표본마다 `c / (1 + luma(c))`(Rec.601 가중 0.299·0.587·0.114)로 바꿔 평균한 뒤 되돌린다. 밝은 표본 하나가 가장자리 평균을 지배하는 것을 막는다. UE scene color resolve와 같은 식이다(`Engine/Shaders/Private/HdrCustomResolveShaders.usf:46–54, 81`, 호출 `Renderer/Private/SceneRendering.cpp:6250, 6322`). alpha는 단순 평균이다(UE도 rgb만 가중한다).
-  - **깊이.** 깊이 값이 가장 큰 표본(reversed-Z에서 가장 가까운 전경)을 골라 `SV_Depth`로 단일 표본 깊이 attachment에 쓴다(깊이 비교 `Always`, 쓰기 켬). UE 깊이 resolve도 최댓값을 고른다(`Engine/Shaders/Private/ResolvePixelShader.usf:47–57`, 상태 `Renderer/Private/SceneRendering.cpp:6459`).
+- **MSAA resolve(Renderer RQ16, 개정 15·16).** Forward+ MSAA view(Renderer 8.2절)가 쓰는 그리기 유틸리티다. MSAA view는 temporal 유무와 무관하게 단일 표본 깊이가 필요하다(HZB·하늘·안개·후처리, Renderer 6.2절). 그래서 깊이 resolve는 늘 하고, velocity resolve는 temporal(또는 motion blur)이 있을 때, 색 resolve는 아래 규칙대로 한다. 깊이·velocity는 평균하면 안 되므로 늘 셰이더로 한다(계획 11.1절 "깊이와 motion vector를 단순 평균하지 않고 전경 sample 선택과 coverage 규칙"). 표본 수 2·4·8은 퍼뮤테이션이다(UE도 표본 수별 셰이더 타입, `RC/Public/ResolveShader.h:20–113`). 구현은 Renderer RS8이고 화면 마일스톤 범위 밖이다.
+  - **색(결정 R17).** temporal이 있는 view는 셰이더 휘도 가중 평균으로 고정한다(upscaler 입력이 backend와 무관해야 한다): 표본마다 `c / (1 + luma(c))`(Rec.601 가중 0.299·0.587·0.114)로 바꿔 평균한 뒤 되돌린다. 밝은 표본 하나가 가장자리 평균을 지배하는 것을 막는다. UE desktop scene color resolve와 같은 식이다(`Engine/Shaders/Private/HdrCustomResolveShaders.usf:46–54, 90–144`, 호출 `Renderer/Private/SceneRendering.cpp:6250, 6322`). alpha는 단순 평균이다(UE도 rgb만 가중한다). temporal이 없는 view(품질 profile Forward+ 4x MSAA + native·spatial, 계획 11.1절)는 데스크톱 형식에서 같은 셰이더를 쓰고, tiled GPU에서는 base pass attachment의 resolve(박스 평균)를 허용한다. MSAA 색을 메모리에 쓰지 않아 대역폭이 준다. UE도 모바일은 base pass 렌더 타깃의 resolve 대상으로 색·깊이를 resolve한다(`Renderer/Private/MobileShadingRenderer.cpp:2071, 2085–2087`). tiled GPU 여부는 GX1 계획의 표시(아직 `DeviceCaps`에 없다)로 정하고, 두 결과가 다르므로 Renderer 지원표에 표시한다. GLES의 on-tile resolve 수단(확장 여부)은 RS8에서 측정한다(**미확인**).
+  - **깊이.** 깊이 값이 가장 큰 표본(reversed-Z에서 가장 가까운 전경)을 골라 `SV_Depth`로 단일 표본 깊이 attachment에 쓴다(깊이 비교 `Always`, 쓰기 켬). UE 깊이 resolve도 최댓값을 고른다(`Engine/Shaders/Private/ResolvePixelShader.usf:47–57`, 상태 `Renderer/Private/SceneRendering.cpp:6459`). 스텐실은 0을 쓴다(UE도 스텐실 `Always`·`SO_Zero`, 같은 줄). 셰이더가 스텐실을 표본별로 고를 수단이 없고, Forward+ MSAA에서 resolve 뒤 스텐실을 읽는 pass가 없기 때문이다(스텐실을 쓰는 decal 수신은 Deferred GBuffer decal, Renderer 7.2절). 개정 16.
   - **velocity.** 깊이에서 고른 **같은 표본**의 velocity를 쓴다. 깊이가 같은 표본이 여럿이면 번호가 가장 작은 것이다(결정적). 깊이와 velocity를 한 pass에서 resolve한다(MSAA 깊이·velocity SRV → 깊이 attachment + velocity 렌더 타깃). 고른 표본이 velocity를 쓰지 않은 표본(clear 값, 정지 물체)이면 그 값을 그대로 내고, 소비자가 resolve된 깊이와 이전 view 행렬로 계산한다(Renderer 7.1절). UE는 velocity 텍스처가 단일 표본이라 대응이 없다(`Renderer/Private/VelocityRendering.cpp:808–811`, `RC/Public/RenderGraphDefinitions.h:711–723`).
   - **coverage.** 고른 전경 표본과 깊이가 같은 표본의 비율을 선택 출력(`R8Unorm`)으로 낼 수 있게 둔다. temporal upscaler가 이것을 받을지(reactive·가장자리 표시)는 RS8에서 정한다.
   - **입력.** MSAA 텍스처는 표본 번호로 읽는다(HLSL `Texture2DMS.Load`, GLES `sampler2DMS`·`texelFetch`). MSAA 깊이 SRV는 GX2 깊이 읽기 view다(Renderer RQ2).
@@ -998,6 +1011,9 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 | R12 | 샘플러 값 위치 | 권장: 텍스처 desc 샘플러는 기본값, 파라미터 멤버가 바인딩 때 지정 가능, 그래프 풀 키에서 제외, 비교 샘플러 추가(9.6절, SX13). 대안: 샘플러를 텍스처 desc에서 완전히 빼고 늘 바인딩 때 지정(에셋 텍스처의 샘플러 설정이 머티리얼 쪽으로 옮겨진다) | **A0-G 착수 전**. 2026-11-16 권장안과 비교 샘플러(SX13)를 AssetSystem A0-G 행에 요구로 반영했다(사용자 지시 "미리해도 되는게 유리하다면 미리하는것도 좋음") |
 | R13 | 인스턴스 번호 경로 | **결정됨(2026-11-18, 권장안)**: (가) 늘 인스턴스 번호 목록을 거친다(10.5절, UE와 같다). CPU 단계도 목록을 업로드한다. (나) CPU 단계는 `offset + SV_InstanceID`로 연속 배치를 직접 읽고 GPU culling만 목록(셰이더 경로 둘, RS4에서 pass 셰이더 퍼뮤테이션이 는다) | Renderer RS0 전 |
 | R14 | 기본 BRDF LUT 생성·형식 | **결정됨(2026-11-18, 권장안)**: 시작 때 CPU로 만든다(UE와 같다), 128×32 `RG16Float`을 모든 backend에(11.1절). 대안: 미리 계산한 표를 엔진 데이터로 싣는다(시작 비용 없음, 데이터 파일 하나 더), UE처럼 장치마다 `RG16Unorm`·`RG8Unorm`을 고른다(GLES `RG16Unorm`은 확장 조건) | Renderer RS7 전 |
+| R15 | export한 history의 수명 | **결정됨(2026-11-18, 권장안)**: (가) export는 풀 자원의 사용권만 넘기고, 소유자의 `Retire`는 마지막 사용 fence 뒤 `GraphResourcePool` 반납이다(7.4·7.5절). UE history도 풀 render target 참조이고 참조가 풀 하나만 남으면 다시 쓴다(`Renderer/Private/SceneRendering.h:943–950`, `RC/Private/RenderTargetPool.cpp:202, 754–760`). (나) `ViewHistory`가 두 장을 소유하고 번갈아 import·쓰기(풀 밖 고정 자원, 크기 변경 때 따로 재생성) | RG1 남은 것 |
+| R16 | typed buffer 원소 상한 넘침 | **결정됨(2026-11-18, 권장안)**: (가) 용량은 `DeviceCaps.limits.texelBufferElements`로 계산하고, 인스턴스 데이터는 넘는 추가를 `Unsupported`로 실패·통지, `InstanceIndices`는 조각으로 나눠 그리기별로 묶고, light grid는 기존 넘침 보수 대체(10.5절). 최소 보장 기기가 대상에 있으면 Renderer RN9을 다시 연다. (나) 인스턴스 데이터를 typed buffer 여럿으로 나눔(셰이더가 버퍼를 골라야 하고 SRV 수가 는다, 최소 보장 장치에서 버퍼 수가 16을 넘는다). (다) 2D 텍스처 대체(GLES 한 경로 추가, RN9 개정이 필요해 이 결정 범위 밖) | Renderer RS0 전 |
+| R17 | MSAA 색 resolve 수단 | **결정됨(2026-11-18, 권장안)**: (가) temporal이 있으면 셰이더 휘도 가중 고정, temporal이 없으면 데스크톱은 같은 셰이더·tiled GPU는 attachment resolve 허용(11.2절, UE desktop·모바일과 같은 나눔). 깊이·velocity는 늘 셰이더. (나) 모든 경우 셰이더(tiled GPU 대역폭 손해). (다) 모든 경우 하드웨어 resolve(HDR 가장자리 품질, upscaler 입력이 backend마다 다름) | Renderer RS8 전 |
 
 ## 17. 측정
 
@@ -1134,3 +1150,9 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
   - RQ16: 11.2절 MSAA resolve(색 휘도 가중, 깊이 전경 최댓값, 같은 표본 velocity, coverage 선택 출력), 14절 MSAA resolve 행.
   - RQ17: 11.1절 빈 light grid·빈 그림자 depth(깊이 1)·검은 cube·기본 BRDF LUT(결정 R14).
   - 2절 용어에 `GraphTextureView`·자원 묶음을 더하고, 9.9절 SX4에 셰이더 시스템 개정 16 반영을 적었다.
+- 개정 16(2026-11-18): 개정 15 교차 검증 반영.
+  - 7.4·7.5절: packet 하나에 `ViewSet`이 여럿인 경우 `SceneTextureTable`을 (ViewSet, view) 키 표 하나로, 선언 순서 A 공통 → A view들 → B 공통 …, history export를 풀 반납으로(결정 R15), GLES mip view의 크기 조회도 기준 mip 명시, 그래프 구간 `GraphScope`의 번호는 trace 표지로.
+  - 9.2절: 런타임 확인 기능 비트 대조와 `Unsupported`. 9.3절: 그리기별 바인딩. 9.5절: `PrecomputedLighting`을 slot에서 그리기별 바인딩으로 옮겨 공유 slot 다섯, `Scene`은 `ViewSet` 단위, 상수 버퍼 예산 최대 10(머티리얼 파라미터 컬렉션 2 포함), GLES `vec4`는 합으로 검사. 9.6절: 이름 `<포함 멤버 이름>_<자원 멤버 이름>`(UE 중첩 구조체 규칙), `SharedResourceStruct`·`DrawResourceStruct` 용어.
+  - 10.5절: typed buffer 원소 용량과 넘침(결정 R16), 행렬식 부호의 인스턴스 단위 분할과 재분류.
+  - 11.1절: 빈 light grid의 셀 좌표 clamp, 검은 cube array 알파 0(UE와 같은 반사 합성 의미). 11.2절: MSAA resolve 범위(깊이 늘, velocity는 temporal 때, 색은 결정 R17), 스텐실 0, UE 줄 인용 정정.
+  - 2절 용어(`SharedResourceStruct`·`DrawResourceStruct`·`GraphScope`), GX1 기능 이름 "VS layer 출력".
