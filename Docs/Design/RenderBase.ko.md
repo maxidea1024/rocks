@@ -1,6 +1,6 @@
 # 렌더 기반(RenderBase) 설계
 
-기준일: 2026-11-18, 개정 12(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-18, 개정 13(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
 - 렌더 lane과 프레임 전달, 장치 스레드 모델, 장치 자원 수명, 렌더 그래프
 - 셰이더 런타임 객체(셰이더 집합·파라미터 바인딩·상수 블록·파이프라인 캐시)
 - 정점 입력 타입, 공용 자원·그리기 유틸리티, GPU 계측
@@ -129,7 +129,7 @@ ID는 이 문서가 붙인다. CP는 Core 선행, GX는 Graphics 확장, RB는 R
 | CP1 | 전용 lane 실행기, 스레드 이름·우선순위·스택 크기 | 구현 | Thread·Sync(구현) | RB1 | M | 4.3절 |
 | CP2 | 직렬 작업 체인·ParallelFor·작업 문맥 표지 | 구현 | WorkerScheduler(구현) | RG3, RB3 일괄 생성 선택 | M | 4.3절 |
 | CP3 | 프레임 arena | 구현 | Allocator(구현) | RG1, RB4(GLES `PerDraw`) | M | 4.3절 |
-| CP4 | 콘솔 설정(타입 있는 변수·명령·출처·렌더 snapshot) | 구현(ConfigSystem CF2, 프레임 packet 연결은 RB1) | CP8 | RB1 설정 snapshot, RG1 디버그 설정 | M | 12절 |
+| CP4 | 콘솔 설정(타입 있는 변수·명령·출처·렌더 snapshot) | 구현(ConfigSystem CF2, 프레임 packet 연결은 RB1). 상세 스펙은 [CVar](CVarSystem.ko.md)(CVR1–CVR8, 구현 전 — 12절) | CP8 | RB1 설정 snapshot, RG1 디버그 설정 | M | 12절 |
 | CP5 | 다중 스레드 CPU 구간 계측·카운터·GPU 상관 | 구현(TR1–TR4, GPU 기록 형은 RB7에서 구현) | TraceCapture·TraceAnalysis | RB7 | M | 13절, [TraceSystem](TraceSystem.ko.md) |
 | CP6 | 엔진 종료 단계 hook(기존 `EngineSubsystem`·`EngineLoopHooks` 확장) | 구현 | Engine(구현) | RB1 종료 순서 | S | 4.3절 |
 | CP7 | 엔진 전역 `Name` pool 결정 | 미결정 | Name(구현) | RB3 | S | 4.3절 |
@@ -795,6 +795,13 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 - **구현(2026-11-17, RB1 설정 snapshot).** 게임 lane은 sync 지점(`ConfigContext::Sync`) 뒤 `ConfigContext::Snapshot()`을 `RenderSettingsRef::Share`로 감싸 `RenderLane::AttachSettings(ticket, ...)`로 그 프레임 slot에 담는다. 렌더 lane은 프레임 작업 안에서 `RenderFrameContext::Settings().Get<config::ConfigSnapshot>()`만 읽는다(registry·문맥은 읽지 않는다). slot의 참조는 그 slot을 다음에 다시 확보할 때(`BeginFrame`, GPU 완료 뒤) 또는 lane 정지 때 게임 lane에서 놓는다. 그래서 snapshot 수명은 그 프레임 slot이 끝날 때까지이고 파괴는 게임 lane에서 일어난다. 시험(`RenderBase/Tests/RenderSettingsTests.cpp`): sync 지점에서 바꾼 값은 다음 packet부터 보이고 이전 packet은 옛 값을 읽는다. GPU 완료 gate가 닫힌 동안 옛 snapshot이 살아 있고, slot을 다시 확보하면 놓인다.
   - 스펙과 다른 점: RenderBase는 ObjectRuntime에 의존하지 않으므로(9.3절) Config 타입을 직접 이름 짓지 않는다. `RenderSettingsRef`는 snapshot의 공유 소유권(`SharedPtr` aliasing)과 타입 표지만 들고, 꺼낼 때 같은 타입으로만 돌려준다(다른 타입이면 null). 타입은 Config를 아는 쪽(실행 파일·렌더러 모듈)이 정한다. 담지 않은 프레임은 빈 참조를 읽는다(직전 프레임 값을 물려받지 않는다).
 
+- **CVar 이관(설계, 구현 전).** [CVar·치트 명령 설계](CVarSystem.ko.md)(개정 2)가 콘솔 설정을 타입 있는 핸들 `CVar<T>`로 바꾼다. 착수 시점은 사용자가 정한다. 그때 RB1 연결은 다음처럼 바뀐다.
+  - 렌더 snapshot은 "렌더 읽기" 표시가 있는 값만이 아니라 **모든 CVar**를 담는다(CVar VD6). 설정 struct 필드의 `RenderRead` 블록은 같은 snapshot 안에 남는다.
+  - 게임 lane은 `ConfigContext::Snapshot()` 대신 `Acquire()`로 얻은 참조를 지금처럼 `RenderSettingsRef`로 프레임 slot에 담는다(CVar 7.2절).
+  - 렌더 lane은 프레임 작업을 시작할 때 packet의 snapshot을 `cvar::SnapshotBinding`으로 그 스레드에 묶고, 작업이 끝날 때 놓는다. 그 사이 렌더 코드는 이름 탐색 없이 `ShadowDistance.Get()`처럼 읽는다(CVar 7.1·16절).
+  - 이관 뒤에는 게임 lane이 **모든 프레임**에 snapshot을 담는다. 바뀐 것이 없으면 같은 snapshot 참조다. 그래서 렌더 lane은 늘 묶을 snapshot이 있고, 묶음 없는 `Get()`은 Fatal이라는 CVar 규칙(VD7)과 어긋나지 않는다. 지금의 "담지 않은 프레임은 빈 참조" 규칙은 이관 때 없앤다.
+  - 렌더 lane이 만든 worker 작업은 묶인 snapshot의 참조를 작업 문맥으로 넘겨받는다(CVar 10.1절).
+
 ## 13. GPU 계측(RB7)
 
 ### 13.1 UE 5.8 방식
@@ -1026,3 +1033,4 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 - 개정 10(2026-11-17): GX5(최소)·RG1 구현을 반영했다(2절 용어, 4.2절 GX5·RG1 행, 4.4절 GX5 구현 메모, 8절 구현 메모). 사용자 지시 "렌더 그래프도 미리 하자"에 따라 선행(RB4·GX1·GX2·GX4)이 없는 부분은 범위를 줄였다. 스펙과 다르게 정한 것: 의존 선언을 명시 접근 목록으로(파라미터 구조체 수집기가 같은 목록을 만든다), GX5 분리 전이·pipe 없음과 attachment 전이는 장치 Begin, 즉시·지연 동치의 정의, 풀 키에 샘플러 포함, 풀 반환은 그래프 끝, lease를 `RenderHandleTable`에, 검증 항상 켬, 그래프 기록 전체를 GPU 프레임 하나로. 픽셀 형식 PF1 병합 뒤 그래프 텍스처 desc는 `PixelFormat`이고, 풀 byte 추정은 `MipChainBytes(format, w, h, 1, mips)`(PixelFormatInfo), `CreateTexture`는 번호표 밖·블록 압축 형식을 거부한다.
 - 개정 11(2026-11-17): Vulkan GX5 전이 구현을 반영했다(4.4절 GX5 구현 메모, RG1 완료 기준 (g)에 Vulkan 하드웨어·lavapipe). 처리는 [렌더 기반 구현](../Implementation/RenderBase.ko.md) 8절과 [VulkanGraphics](VulkanGraphics.ko.md) 8절.
 - 개정 12(2026-11-18): GX1(장치 능력·MSAA 표본 수)·GX2 버퍼 부분(버퍼 용도·버퍼 view·`ReadBuffer`·그리기 slot) 1단계 구현을 반영했다(4.2절 GX1·GX2 상태, 4.4절 구현 메모와 장치 측정 표). 스펙과 다르게 정한 것: 버퍼 view 묶기는 GX6 전 개발 경로 고정 배치(slot 0–3 = `t1–t4`)이고, Vulkan 그리기 descriptor는 파이프라인별 layout과 기록 단위 pool로 바꿨다.
+- 개정 13(2026-11-18): [CVar·치트 명령 설계](CVarSystem.ko.md) 개정 2를 반영했다(4.2절 CP4 행, 12절 CVar 이관 메모). RB1의 설정 snapshot 연결은 CVar 구현 때 `Acquire()`·모든 CVar 포함·렌더 lane `SnapshotBinding`으로 바뀐다.
