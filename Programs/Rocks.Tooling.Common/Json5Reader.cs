@@ -21,7 +21,10 @@ public enum Json5ErrorCode
     /// <summary>true·false·null·Infinity·NaN이 아닌 단어다.</summary>
     InvalidLiteral,
 
-    /// <summary>숫자 문법 오류다(앞자리 0, 지수 숫자 없음, 숫자 바로 뒤 식별자 글자 등).</summary>
+    /// <summary>
+    /// 숫자 문법 오류다(앞자리 0, 지수 숫자 없음, 숫자 바로 뒤 식별자 글자 등). 단 <c>Infinity1</c>·<c>-Infinityx</c>·<c>+NaN1</c>처럼
+    /// 단어 뒤에 식별자 글자가 붙으면 <see cref="InvalidLiteral"/>이다.
+    /// </summary>
     InvalidNumber,
 
     /// <summary>double로 표현할 수 없는 크기이거나 64비트 크기를 넘는 16진수다.</summary>
@@ -182,13 +185,13 @@ public static class Json5Reader
         return JsonDocument.Parse(buffer.WrittenMemory, new JsonDocumentOptions { MaxDepth = limits.MaxDepth + 1 });
     }
 
-    /// <summary>오류 코드의 짧은 영어 설명이다(C++ <c>JsonErrorMessage</c>와 같은 문구).</summary>
+    /// <summary>오류 코드의 짧은 영어 설명이다(C++ <c>JsonErrorMessage(code, JsonSyntax::Json5)</c>와 같은 문구).</summary>
     public static string Message(Json5ErrorCode code) => code switch
     {
         Json5ErrorCode.InputTooLarge => "input is larger than the read limit",
         Json5ErrorCode.UnexpectedEnd => "unexpected end of input",
         Json5ErrorCode.UnexpectedCharacter => "unexpected character",
-        Json5ErrorCode.InvalidLiteral => "invalid literal (expected true, false or null)",
+        Json5ErrorCode.InvalidLiteral => "invalid literal (expected true, false, null, Infinity or NaN)",
         Json5ErrorCode.InvalidNumber => "invalid number",
         Json5ErrorCode.NumberOutOfRange => "number is out of range",
         Json5ErrorCode.InvalidEscape => "invalid escape sequence",

@@ -27,6 +27,9 @@ internal ref struct Json5Parser
 
     private const int ByteOrderMark = 0xFEFF;
 
+    // NaN은 C++과 같은 한 비트 패턴(양의 quiet NaN)이다. double.NaN은 부호 비트가 켜진 0xFFF8000000000000이다.
+    private static readonly double QuietNan = BitConverter.UInt64BitsToDouble(0x7FF8000000000000UL);
+
     // 값 자리의 단어 리터럴이다(C++ ParseJson5Word와 같은 순서).
     private static readonly string[] Literals = ["true", "false", "null"];
 
@@ -814,7 +817,7 @@ internal ref struct Json5Parser
                         return false;
                     }
 
-                    if (!WithinStringLimit(4))
+                    if (!WithinStringLimit(Utf8EncodedLength(codePoint)))
                     {
                         return Fail(Json5ErrorCode.StringTooLong, stringStart);
                     }
@@ -1054,7 +1057,7 @@ internal ref struct Json5Parser
                 nonFiniteOffset = start;
             }
 
-            value = JsonValue.Create(infinity ? (negative ? double.NegativeInfinity : double.PositiveInfinity) : double.NaN);
+            value = JsonValue.Create(infinity ? (negative ? double.NegativeInfinity : double.PositiveInfinity) : QuietNan);
             return true;
         }
 

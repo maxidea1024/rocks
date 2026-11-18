@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Rocks.Tooling.Checks;
@@ -39,12 +40,24 @@ internal static class Json5ReaderTests
 
     private static void ParityCases(string root)
     {
-        var cases = ReadTable(Path.Combine(root, TestsDirectory, "Json5ParityCases.h"), "Json5ParityCases");
+        string header = Path.Combine(root, TestsDirectory, "Json5ParityCases.h");
+        var cases = ReadTable(header, "Json5ParityCases");
         Verify.That(cases.Count > 100, "parity table must be read from the C++ header");
+        Compare(cases, null);
+        // 문자열·키 길이 한도 경계 사례는 헤더의 Json5StringLimit로 읽는다.
+        Match limit = Regex.Match(File.ReadAllText(header), @"Json5StringLimit = (\d+);");
+        Verify.That(limit.Success, "Json5StringLimit must be read from the C++ header");
+        var limitCases = ReadTable(header, "Json5StringLimitCases");
+        Verify.That(limitCases.Count > 10, "string limit table must be read from the C++ header");
+        Compare(limitCases, new Json5ReadOptions { MaxStringBytes = long.Parse(limit.Groups[1].Value, CultureInfo.InvariantCulture) });
+    }
+
+    private static void Compare(List<(byte[] First, byte[] Second)> cases, Json5ReadOptions? options)
+    {
         var failures = new List<string>();
         foreach ((byte[] input, byte[] expected) in cases)
         {
-            string actual = DumpResult(input);
+            string actual = DumpResult(input, options);
             string wanted = Encoding.UTF8.GetString(expected);
             if (actual != wanted)
             {
@@ -239,11 +252,11 @@ internal static class Json5ReaderTests
         throw new InvalidOperationException("expected a Json5Exception");
     }
 
-    private static string DumpResult(byte[] input)
+    private static string DumpResult(byte[] input, Json5ReadOptions? options)
     {
         try
         {
-            return Dump(Json5Reader.Parse(input));
+            return Dump(Json5Reader.Parse(input, options));
         }
         catch (Json5Exception error)
         {
@@ -321,13 +334,13 @@ internal static class Json5ReaderTests
     }
 
     // 숫자: 원문 토큰을 C++과 같은 규칙(소수부·지수 없음 → int64 → uint64, 그 밖·"-0" → double)으로 판정한다. 비유한 수는
-    // JsonValue&lt;double&gt;이고 NaN은 C++이 저장하는 한 비트 패턴(양의 quiet NaN)으로 쓴다.
+    // JsonValue&lt;double&gt;의 비트 그대로다(NaN도 정규화하지 않아 C++과 비트가 다르면 대조가 잡는다).
     private static void AppendNumber(JsonValue scalar, StringBuilder text)
     {
         if (!scalar.TryGetValue(out JsonElement element))
         {
             double special = scalar.GetValue<double>();
-            ulong bits = double.IsNaN(special) ? 0x7FF8000000000000UL : BitConverter.DoubleToUInt64Bits(special);
+            ulong bits = BitConverter.DoubleToUInt64Bits(special);
             text.Append('d').Append(bits.ToString("x16", CultureInfo.InvariantCulture));
             return;
         }
