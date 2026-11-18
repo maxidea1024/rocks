@@ -84,6 +84,7 @@ void VulkanDevice::QueryDeviceCaps() noexcept {
     // VkComponentMapping은 core다. AnisotropicPoint는 mipmapMode NEAREST에 이방성 배율을 더하므로
     // 늘 된다(배율은 samplerAnisotropy 한도로 줄인다).
     features.textureViewSwizzle = true;
+    features.textureViewRanges = true;
     features.anisotropicPointFilter = true;
     // sRGB 짝 형식은 MUTABLE_FORMAT 이미지의 view로 읽는다(PixelFormat.ko.md 14.2절).
     features.srgbPairView = true;
@@ -442,6 +443,19 @@ bool VulkanDevice::PrepareDescriptors(VkPipelineBindPoint bindPoint) noexcept {
         return false;
     }
 
+    // 텍스처로 쓰는 slot마다 쓰기 텍스처 view가 묶여야 한다.
+    const TextureRecord* writeTextures[MaxDrawBufferViews] = {};
+    for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
+        if ((pipeline->writeTextures & (1u << slot)) == 0) {
+            continue;
+        }
+
+        writeTextures[slot] = textures_.Find(boundWriteTextures_[slot].slot);
+        if (writeTextures[slot] == nullptr) {
+            return false;
+        }
+    }
+
     if (!descriptorsDirty_) {
         return true;
     }
@@ -487,6 +501,10 @@ bool VulkanDevice::PrepareDescriptors(VkPipelineBindPoint bindPoint) noexcept {
             } else if (binding.source == BindingSource::Sampler) {
                 images[count] = {texture != nullptr ? texture->sampler : VK_NULL_HANDLE,
                                  VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED};
+                write.pImageInfo = &images[count];
+            } else if (binding.source == BindingSource::WritableTexture) {
+                images[count] = {VK_NULL_HANDLE, writeTextures[binding.slot]->view,
+                                 VK_IMAGE_LAYOUT_GENERAL};
                 write.pImageInfo = &images[count];
             } else {
                 const BufferViewRecord* view = binding.source == BindingSource::WritableBufferView

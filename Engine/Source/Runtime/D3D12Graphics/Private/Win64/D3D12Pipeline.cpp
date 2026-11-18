@@ -248,7 +248,8 @@ Result<PipelineHandle> D3D12Device::CreatePipeline(const PipelineDesc& desc) noe
                          static_cast<UINT>(desc.layout.attributes.Size())};
     state.PrimitiveTopologyType = TopologyTypeOf(desc.topology);
     state.NumRenderTargets = desc.colorTargetCount;
-    state.SampleDesc.Count = 1;
+    state.SampleDesc.Count = desc.sampleCount;
+    state.RasterizerState.MultisampleEnable = desc.sampleCount > 1 ? TRUE : FALSE;
 
     PipelineRecord record;
     record.bufferSlots = bufferSlots;
@@ -354,7 +355,8 @@ Result<void> D3D12Device::MatchVertexInputs(ID3DBlob* code, const VertexLayout& 
 // 받는다. 두 단계가 같은 slot을 다른 종류로 읽거나 배치 밖 자원이면 InvalidArgument다.
 Result<void> D3D12Device::ReflectBindings(ID3DBlob* code, ShaderStage stage,
                                           uint32 drawConstantBytes, DrawBufferSlots& slots,
-                                          DrawBufferSlots* writeSlots) noexcept {
+                                          DrawBufferSlots* writeSlots,
+                                          uint32* writeTextures) noexcept {
     ComRef<ID3D12ShaderReflection> reflection;
     D3D12_SHADER_DESC shader = {};
     if (FAILED(D3DReflect(code->GetBufferPointer(), code->GetBufferSize(),
@@ -364,6 +366,8 @@ Result<void> D3D12Device::ReflectBindings(ID3DBlob* code, ShaderStage stage,
     }
 
     const bool pixel = stage == ShaderStage::Pixel;
+    // t0·s0(SetTexture)는 PS와 CS가 읽는다(텍스처 GX2 A부).
+    const bool textureStage = pixel || stage == ShaderStage::Compute;
     for (UINT index = 0; index < shader.BoundResources; ++index) {
         D3D12_SHADER_INPUT_BIND_DESC resource = {};
         if (FAILED(reflection->GetResourceBindingDesc(index, &resource))) {
@@ -395,11 +399,11 @@ Result<void> D3D12Device::ReflectBindings(ID3DBlob* code, ShaderStage stage,
             break;
         }
         case D3D_SIT_SAMPLER:
-            fits = single && pixel && resource.BindPoint == 0;
+            fits = single && textureStage && resource.BindPoint == 0;
             break;
         case D3D_SIT_TEXTURE:
             if (resource.Dimension != D3D_SRV_DIMENSION_BUFFER) {
-                fits = single && pixel && resource.BindPoint == 0;
+                fits = single && textureStage && resource.BindPoint == 0;
                 break;
             }
 
@@ -418,7 +422,21 @@ Result<void> D3D12Device::ReflectBindings(ID3DBlob* code, ShaderStage stage,
                                   resource.Type == D3D_SIT_STRUCTURED ? resource.NumSamples : 0u);
             break;
         case D3D_SIT_UAV_RWTYPED:
-            fits = single && writeSlot && resource.Dimension == D3D_SRV_DIMENSION_BUFFER &&
+            if (resource.Dimension != D3D_SRV_DIMENSION_BUFFER) {
+                // 텍스처 UAV(RWTexture2D·2DArray·3D)는 SetWritableTexture slot이다.
+                const bool textureDimension =
+                    resource.Dimension == D3D_SRV_DIMENSION_TEXTURE2D ||
+                    resource.Dimension == D3D_SRV_DIMENSION_TEXTURE2DARRAY ||
+                    resource.Dimension == D3D_SRV_DIMENSION_TEXTURE3D;
+                fits = single && writeSlot && writeTextures != nullptr && textureDimension;
+                if (fits) {
+                    *writeTextures |= 1u << resource.BindPoint;
+                }
+
+                break;
+            }
+
+            fits = single && writeSlot &&
                    AddDrawBufferSlot(*writeSlots, resource.BindPoint, BufferViewKind::Typed, type);
             break;
         case D3D_SIT_UAV_RWSTRUCTURED:
@@ -440,8 +458,9 @@ Result<void> D3D12Device::ReflectBindings(ID3DBlob* code, ShaderStage stage,
             message.Text(pixel ? "pixel" : (stage == ShaderStage::Vertex ? "vertex" : "compute"))
                 .Text(" shader resource ")
                 .Text(resource.Name != nullptr ? resource.Name : "?")
-                .Text(" is outside the fixed layout (b0, pixel t0 and s0, buffer views t1-t4, "
-                      "compute buffer UAVs u0-u3; no UAVs in graphics stages)");
+                .Text(" is outside the fixed layout (b0, pixel and compute t0 and s0, buffer "
+                      "views t1-t4, compute buffer or texture UAVs u0-u3; no UAVs in graphics "
+                      "stages)");
             return Reject(message);
         }
     }

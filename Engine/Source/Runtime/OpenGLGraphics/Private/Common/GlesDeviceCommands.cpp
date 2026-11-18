@@ -250,7 +250,8 @@ Result<PipelineHandle> GlesDevice::CreateComputePipeline(const ComputePipelineDe
     }
 
     record.drawConstantBytes = desc.drawConstantBytes;
-    auto reflected = ReflectBufferSlots(record.program, record.bufferSlots, &record.writeSlots);
+    auto reflected = ReflectBufferSlots(record.program, record.bufferSlots, &record.writeSlots,
+                                        &record.writeTextures);
     auto constants = reflected ? ReflectRootConstants(record.program, record) : Move(reflected);
     if (!constants) {
         gl_.DeleteProgram(record.program);
@@ -299,12 +300,14 @@ Result<CommandContext*> GlesDevice::BeginPass(const PassDesc& pass) noexcept {
         }
 
         if (record->isView || (depth ? !record->depthTarget : record->framebuffer == 0) ||
-            (sized && (record->width != target.width || record->height != target.height))) {
+            (sized && (record->width != target.width || record->height != target.height ||
+                       record->sampleCount != target.sampleCount))) {
             return ErrorCode::InvalidArgument;
         }
 
         target.width = record->width;
         target.height = record->height;
+        target.sampleCount = record->sampleCount;
         sized = true;
         return ErrorCode::None;
     };
@@ -330,6 +333,36 @@ Result<CommandContext*> GlesDevice::BeginPass(const PassDesc& pass) noexcept {
             return fail(checked, "depth attachment is stale, not a depth target, a view or of a "
                                  "different size");
         }
+    }
+
+    // resolve 대상: MSAA attachment의 1표본 RenderTarget, 같은 형식·크기, view 아님, 겹침 없음.
+    for (uint32 index = 0; index < pass.colorCount; ++index) {
+        const TextureHandle resolve = pass.colors[index].resolveTarget;
+        if (resolve.IsNull()) {
+            continue;
+        }
+
+        const TextureRecord* source = textures_.Find(pass.colors[index].texture.slot);
+        const TextureRecord* resolved = textures_.Find(resolve.slot);
+        if (resolved == nullptr) {
+            return Result<CommandContext*>::Failure(ErrorCode::StaleHandle);
+        }
+
+        bool overlaps = resolve == pass.depth.texture;
+        for (uint32 other = 0; other < pass.colorCount; ++other) {
+            overlaps = overlaps || pass.colors[other].texture == resolve ||
+                       (other != index && pass.colors[other].resolveTarget == resolve);
+        }
+
+        if (source->sampleCount < 2 || resolved->isView || resolved->framebuffer == 0 ||
+            resolved->sampleCount != 1 || resolved->format != source->format ||
+            resolved->width != source->width || resolved->height != source->height || overlaps) {
+            return fail(ErrorCode::InvalidArgument,
+                        "resolve target needs an MSAA color attachment and a distinct "
+                        "single-sample render target of the same format and size");
+        }
+
+        target.resolves[index] = resolve;
     }
 
     if (recording_) {
@@ -371,7 +404,8 @@ Result<CommandContext*> GlesDevice::BeginPass(const PassDesc& pass) noexcept {
         for (uint32 index = 0; index < MaxColorTargets; ++index) {
             const TextureRecord* color =
                 index < pass.colorCount ? textures_.Find(pass.colors[index].texture.slot) : nullptr;
-            gl_.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + index, GL_TEXTURE_2D,
+            gl_.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + index,
+                                     color != nullptr ? color->target : GL_TEXTURE_2D,
                                      color != nullptr ? color->texture : 0u, 0);
             drawBuffers[index] = index < pass.colorCount ? GL_COLOR_ATTACHMENT0 + index : GL_NONE;
         }
@@ -382,7 +416,7 @@ Result<CommandContext*> GlesDevice::BeginPass(const PassDesc& pass) noexcept {
         if (depth != nullptr) {
             gl_.FramebufferTexture2D(GL_FRAMEBUFFER,
                                      stencil ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT,
-                                     GL_TEXTURE_2D, depth->texture, 0);
+                                     depth->target, depth->texture, 0);
         }
 
         gl_.DrawBuffers(pass.colorCount != 0 ? static_cast<GLsizei>(pass.colorCount) : 1,
@@ -413,6 +447,19 @@ void GlesDevice::SetWritableBufferView(uint32 slot, BufferViewHandle view) noexc
     const BufferViewRecord* record = bufferViews_.Find(view.slot);
     const bool writable = record != nullptr && record->access == ViewAccess::ReadWrite;
     boundWriteViews_[slot] = writable ? view : BufferViewHandle{};
+    // 쓰기 slot은 버퍼·텍스처가 같은 번호 공간이다(나중에 묶은 하나만 남는다).
+    boundWriteTextures_[slot] = {};
+}
+
+void GlesDevice::SetWritableTexture(uint32 slot, TextureHandle view) noexcept {
+    if (!recording_ || slot >= MaxDrawBufferViews) {
+        return;
+    }
+
+    const TextureRecord* record = textures_.Find(view.slot);
+    const bool writable = record != nullptr && record->writable;
+    boundWriteTextures_[slot] = writable ? view : TextureHandle{};
+    boundWriteViews_[slot] = {};
 }
 
 const PipelineRecord* GlesDevice::PrepareDraw(bool indexed) noexcept {
@@ -453,6 +500,14 @@ const PipelineRecord* GlesDevice::PrepareDispatch() noexcept {
         return nullptr;
     }
 
+    // 텍스처로 쓰는 slot마다 쓰기 텍스처 view가 묶여야 한다.
+    for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
+        if ((pipeline->writeTextures & (1u << slot)) != 0 &&
+            textures_.Find(boundWriteTextures_[slot].slot) == nullptr) {
+            return nullptr;
+        }
+    }
+
     ApplyConstants(*pipeline);
     ApplyBufferViews(*pipeline);
     for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
@@ -470,6 +525,21 @@ const PipelineRecord* GlesDevice::PrepareDispatch() noexcept {
                                 view->buffer, static_cast<GLintptr>(view->offset),
                                 static_cast<GLsizeiptr>(view->size));
         }
+    }
+
+    // 쓰기 텍스처 view는 level 하나를 image unit slot에 묶는다(배열·3D는 layered로 모든 층).
+    for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
+        if ((pipeline->writeTextures & (1u << slot)) == 0) {
+            continue;
+        }
+
+        const TextureRecord* view = textures_.Find(boundWriteTextures_[slot].slot);
+        const GlesTextureFormat* format = FindTextureFormat(view->format);
+        const bool layered = view->dimension == TextureDimension::Texture2DArray ||
+                             view->dimension == TextureDimension::Texture3D;
+        gl_.BindImageTexture(slot, view->texture, static_cast<GLint>(view->viewRange.firstMip),
+                             layered ? GL_TRUE : GL_FALSE, 0, GL_READ_WRITE,
+                             format->internalFormat);
     }
 
     return pipeline;
@@ -640,6 +710,7 @@ Result<void> GlesDevice::CopyTexture(TextureHandle destination, TextureHandle so
     const PixelFormatInfo& info = GetPixelFormatInfo(from->format);
     if (destination == source || to->isView || from->isView || to->width != from->width ||
         to->height != from->height || to->format != from->format || info.planeCount > 1 ||
+        to->sampleCount > 1 || from->sampleCount > 1 ||
         to->dimension != TextureDimension::Texture2D ||
         from->dimension != TextureDimension::Texture2D || attached(destination) ||
         attached(source)) {

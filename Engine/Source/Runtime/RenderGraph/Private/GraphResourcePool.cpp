@@ -176,6 +176,9 @@ GraphResourcePool::AcquireTexture(const graphics::TextureDesc& desc,
 
         break;
     case graphics::TextureUsage::DepthStencil:
+    // Storage 그래프 텍스처(UAV)는 그래프의 텍스처 view(GraphTextureView, RenderBase 7.5절)와 함께
+    // 들인다.
+    case graphics::TextureUsage::Storage:
         return Result<Acquired>::Failure(ErrorCode::Unsupported);
     }
 

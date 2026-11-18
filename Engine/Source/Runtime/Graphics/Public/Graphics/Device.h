@@ -32,7 +32,10 @@ public:
     virtual void SetIndexBuffer(BufferHandle buffer, IndexFormat format,
                                 uint64 offset = 0) noexcept = 0;
 
-    // 텍스처 슬롯 0에 묶는다. null handle이면 1x1 흰색 텍스처를 쓴다.
+    // 텍스처 슬롯 0에 묶는다(그래픽은 PS t0·s0, compute는 CS t0·s0, GLSL ES는 텍스처 유닛 0). null
+    // handle이면 1x1 흰색 텍스처를 쓴다. Read view(CreateTextureView)면 그 mip·slice 범위만 셰이더
+    // 읽기 상태로 바꾼다(같은 텍스처의 다른 범위를 SetWritableTexture로 함께 묶을 수 있다).
+    // ReadWrite view는 흰 텍스처로 대신한다.
     virtual void SetTexture(TextureHandle texture) noexcept = 0;
 
     // 버퍼 view slot(0 – MaxDrawBufferViews-1)에 읽기 view를 묶는다(PipelineDesc 고정 배치, GX2).
@@ -104,8 +107,8 @@ public:
 
     // 묶인 compute 파이프라인(CreateComputePipeline)으로 그룹 groupCountX × Y × Z개를 실행한다.
     // 그룹 수는 DeviceLimits::computeGroupCount 안이어야 한다. 읽는 slot·쓰는 slot에 맞는 view가
-    // 묶여야 한다(SetBufferView·SetWritableBufferView). 색·깊이 attachment가 있는 패스 안에서도
-    // 부를 수 있다(Vulkan은 render pass를 닫고 다시 연다).
+    // 묶여야 한다(SetBufferView·SetWritableBufferView·SetWritableTexture). 색·깊이 attachment가
+    // 있는 패스 안에서도 부를 수 있다(Vulkan은 render pass를 닫고 다시 연다).
     virtual void Dispatch(uint32 groupCountX, uint32 groupCountY = 1,
                           uint32 groupCountZ = 1) noexcept = 0;
 
@@ -116,6 +119,21 @@ public:
     // null handle·Read view·stale handle은 slot을 비운다. 그래픽 단계에는 UAV가 없으므로 그리기는
     // 이 slot을 쓰지 않는다.
     virtual void SetWritableBufferView(uint32 slot, BufferViewHandle view) noexcept = 0;
+
+    // compute 쓰기 slot(0 – MaxDrawBufferViews-1)에 ReadWrite 텍스처 view(TextureViewDesc::access,
+    // Storage 텍스처의 mip 하나)를 묶는다. HLSL은 register u0–u3의 RWTexture2D·RWTexture2DArray·
+    // RWTexture3D, GLSL ES는 image unit slot의 image2D·image2DArray·image3D(형식 한정자 필요)다.
+    // 쓰기 slot은 SetWritableBufferView와 같은 번호 공간이라 한 slot에는 나중에 묶은 하나만 남는다.
+    // view의 범위만 UAV 상태로 바꾼다. null handle·Read view·stale handle은 slot을 비운다.
+    // dispatch는 파이프라인이 텍스처로 쓰는 slot마다 텍스처 view가 묶였을 때만 실행한다(아니면
+    // IgnoredDraws).
+    //
+    // 사용 예(mip k를 읽어 mip k + 1을 쓴다):
+    //   commands.SetPipeline(downsample);
+    //   commands.SetTexture(mipK);              // Read view, firstMip k, mipCount 1
+    //   commands.SetWritableTexture(0, mipK1);  // ReadWrite view, firstMip k + 1
+    //   commands.Dispatch(groupsX, groupsY);
+    virtual void SetWritableTexture(uint32 slot, TextureHandle view) noexcept = 0;
 
     // viewport·scissor를 바꾼다. 패스 시작 때 둘 다 대상 전체로 돌아간다. 크기 0 viewport는
     // 무시한다.

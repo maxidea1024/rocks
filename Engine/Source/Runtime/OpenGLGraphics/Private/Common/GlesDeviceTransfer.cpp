@@ -168,7 +168,7 @@ Result<ReadbackRequest> GlesDevice::RequestReadback(TextureHandle target) noexce
         return Result<ReadbackRequest>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (record->framebuffer == 0 || recording_) {
+    if (record->framebuffer == 0 || record->sampleCount > 1 || recording_) {
         return Result<ReadbackRequest>::Failure(recording_ ? ErrorCode::Busy
                                                            : ErrorCode::InvalidArgument);
     }
@@ -455,6 +455,11 @@ Result<void> GlesDevice::ReadTexture(TextureHandle handle, uint32 mipLevel, uint
 
     if (recording_) {
         return Result<void>::Failure(ErrorCode::Busy);
+    }
+
+    // MSAA는 resolve한 뒤 읽는다(텍스처 GX2 B부).
+    if (found->sampleCount > 1) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     const TextureRecord record = *found;

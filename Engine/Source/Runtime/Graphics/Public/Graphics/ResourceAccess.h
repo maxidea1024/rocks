@@ -212,6 +212,16 @@ ResolveSubresourceRange(const SubresourceRange& range, uint32 mipLevels, uint32 
     return resolved;
 }
 
+// view의 mip·slice 범위를 원 텍스처(dimension·usage·shape)에 맞춰 정한다(개수 0은 끝까지). 장치와
+// 무관한 규칙이며 backend의 CreateTextureView가 부른다. InvalidArgument: 범위가 텍스처 밖이거나 빔,
+// 3D의 slice 범위가 전체가 아님, cube의 slice 범위가 6면 전체가 아님, cube 배열의 시작·개수가 6의
+// 배수가 아님, 모르는 access, ReadWrite인데 Storage 텍스처가 아니거나 mip이 하나가 아니거나 plane
+// 0이 아니거나 swizzle이 항등이 아님. 형식 능력(StorageWrite)은 backend가 Unsupported로 본다.
+Result<ResolvedSubresourceRange> ResolveTextureViewRange(TextureDimension dimension,
+                                                         TextureUsage usage,
+                                                         const TextureSubresources& shape,
+                                                         const TextureViewDesc& desc) noexcept;
+
 // 두 범위가 mip과 slice 모두에서 겹치는지다(텍스처 크기를 모를 때 RemainingSubresources는 끝없음).
 // 분리 전이 begin·end 사이 접근 검사가 쓴다.
 constexpr bool SubresourceRangesOverlap(const SubresourceRange& left,

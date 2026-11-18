@@ -300,6 +300,7 @@ private:
     void SetTexture(graphics::TextureHandle texture) noexcept override;
     void SetBufferView(uint32 slot, graphics::BufferViewHandle view) noexcept override;
     void SetWritableBufferView(uint32 slot, graphics::BufferViewHandle view) noexcept override;
+    void SetWritableTexture(uint32 slot, graphics::TextureHandle view) noexcept override;
     void DrawIndirect(graphics::BufferHandle arguments, uint64 offset) noexcept override;
     void DrawIndexedIndirect(graphics::BufferHandle arguments, uint64 offset) noexcept override;
     void Dispatch(uint32 groupCountX, uint32 groupCountY, uint32 groupCountZ) noexcept override;

@@ -410,7 +410,8 @@ Result<TextureHandle> GlesDevice::CreateTexture(const TextureDesc& desc,
     // 대신하지 않고 Unsupported다(PixelFormat.ko.md 8.3절). 다른 인자 검사보다 먼저 한다.
     const bool renderTarget = desc.usage == TextureUsage::RenderTarget;
     const bool depthTarget = desc.usage == TextureUsage::DepthStencil;
-    const bool attachment = renderTarget || depthTarget;
+    // 렌더 타깃·깊이·Storage는 초기 픽셀이 없다(업로드하지 않는다).
+    const bool attachment = renderTarget || depthTarget || desc.usage == TextureUsage::Storage;
     const GlesTextureFormat* format = FindTextureFormat(desc.format);
     if (IsValidPixelFormat(desc.format) && IsValidTextureDimension(desc.dimension) &&
         !HasPixelFormatCaps(GetPixelFormatCaps(desc.format), RequiredPixelFormatCaps(desc))) {
@@ -427,6 +428,18 @@ Result<TextureHandle> GlesDevice::CreateTexture(const TextureDesc& desc,
     auto valid = ValidateTextureDesc(desc);
     if (!valid) {
         return Result<TextureHandle>::Failure(valid.Error());
+    }
+
+    if (desc.sampleCount > 1 &&
+        (GetPixelFormatSampleCounts(desc.format) & SampleCountBit(desc.sampleCount)) == 0) {
+        Diagnostic message;
+        message.Text("MSAA sample count ")
+            .Number(desc.sampleCount)
+            .Text(" for ")
+            .Text(PixelFormatName(desc.format))
+            .Text(" is not supported by this OpenGL ES device");
+        auto rejected = Reject(message, ErrorCode::Unsupported);
+        return Result<TextureHandle>::Failure(rejected.Error());
     }
 
     // 장치 한도를 크기 계산보다 먼저 본다(한도 안의 desc는 데이터 byte가 넘치지 않는다).
@@ -463,7 +476,10 @@ Result<TextureHandle> GlesDevice::CreateTexture(const TextureDesc& desc,
 
     TextureRecord record;
     record.dimension = desc.dimension;
-    record.target = TextureTarget(desc.dimension);
+    // MSAA는 TEXTURE_2D_MULTISAMPLE(ES 3.1 core)이다.
+    record.target =
+        desc.sampleCount > 1 ? GL_TEXTURE_2D_MULTISAMPLE : TextureTarget(desc.dimension);
+    record.sampleCount = desc.sampleCount;
     record.width = desc.width;
     record.height = desc.height;
     record.depth = desc.depth;
@@ -472,6 +488,8 @@ Result<TextureHandle> GlesDevice::CreateTexture(const TextureDesc& desc,
     record.format = desc.format;
     record.swizzle = desc.swizzle;
     record.depthTarget = depthTarget;
+    record.usage = desc.usage;
+    record.viewRange = {0, record.mipLevels, 0, record.slices};
     record.depthStencilTexture = info.kind == PixelFormatKind::DepthStencil;
     record.samplerDesc = desc.sampler;
     gl_.GenTextures(1, &record.texture);
@@ -480,7 +498,12 @@ Result<TextureHandle> GlesDevice::CreateTexture(const TextureDesc& desc,
     // 2D·cube는 TexStorage2D(cube는 6면을 한 번에), 2D 배열·cube 배열·3D는 TexStorage3D다(cube
     // 배열의 깊이는 layer 수 = cube × 6, ES 3.2 8.18절).
     const auto levels = static_cast<GLsizei>(desc.mipLevels);
-    if (record.target == GL_TEXTURE_2D || record.target == GL_TEXTURE_CUBE_MAP) {
+    if (record.target == GL_TEXTURE_2D_MULTISAMPLE) {
+        // 표본 위치는 고정이다(fixedsamplelocations, D3D 표준 배치와 같은 결정성).
+        gl_.TexStorage2DMultisample(record.target, static_cast<GLsizei>(desc.sampleCount),
+                                    format->internalFormat, static_cast<GLsizei>(desc.width),
+                                    static_cast<GLsizei>(desc.height), GL_TRUE);
+    } else if (record.target == GL_TEXTURE_2D || record.target == GL_TEXTURE_CUBE_MAP) {
         gl_.TexStorage2D(record.target, levels, format->internalFormat,
                          static_cast<GLsizei>(desc.width), static_cast<GLsizei>(desc.height));
     } else {
@@ -520,7 +543,7 @@ Result<TextureHandle> GlesDevice::CreateTexture(const TextureDesc& desc,
             offset += static_cast<usize>(TextureMipBytes(desc, level));
         }
     } else if (renderTarget) {
-        record.framebuffer = CreateColorFramebuffer(record.texture);
+        record.framebuffer = CreateColorFramebuffer(record.texture, record.target);
         if (record.framebuffer == 0) {
             ReleaseTexture(record);
             return FailWith<TextureHandle>("render target framebuffer is incomplete");
@@ -560,6 +583,35 @@ Result<TextureHandle> GlesDevice::CreateTextureView(TextureHandle texture,
         return Result<TextureHandle>::Failure(resolved.Error());
     }
 
+    auto range = ResolveTextureViewRange(source->dimension, source->usage,
+                                         {source->mipLevels, source->slices}, desc);
+    if (!range) {
+        return Result<TextureHandle>::Failure(range.Error());
+    }
+
+    // texture view가 없어 읽기 view는 텍스처 전체를 묶는다(mip은 셰이더가 TextureViewBaseMip으로
+    // 고른다). slice 범위를 고를 수단은 없으므로 일부 slice view는 Unsupported다. 쓰기 view는
+    // level 하나를 묶고, 배열은 layered(모든 층)로만 묶는다(셰이더 image2DArray의 층 번호가 view
+    // 기준이 되도록).
+    const bool writable = desc.access == ViewAccess::ReadWrite;
+    if (range.Value().sliceCount != source->slices) {
+        Diagnostic message;
+        message.Text("texture view over part of the slices is not supported by OpenGL ES (no "
+                     "texture views in ES core)");
+        auto rejected = Reject(message, ErrorCode::Unsupported);
+        return Result<TextureHandle>::Failure(rejected.Error());
+    }
+
+    if (writable &&
+        !HasPixelFormatCaps(GetPixelFormatCaps(resolved.Value()), PixelFormatCaps::StorageWrite)) {
+        Diagnostic message;
+        message.Text("pixel format ")
+            .Text(PixelFormatName(resolved.Value()))
+            .Text(" as a storage image is not supported by this OpenGL ES device");
+        auto rejected = Reject(message, ErrorCode::Unsupported);
+        return Result<TextureHandle>::Failure(rejected.Error());
+    }
+
     const PixelFormatKind kind = GetPixelFormatInfo(source->format).kind;
     const bool depth = kind == PixelFormatKind::Depth || kind == PixelFormatKind::DepthStencil;
     if (!HasPixelFormatCaps(GetPixelFormatCaps(source->format), PixelFormatCaps::Sampled) ||
@@ -592,6 +644,10 @@ Result<TextureHandle> GlesDevice::CreateTextureView(TextureHandle texture,
     record.plane = desc.plane;
     record.depthStencilTexture = source->depthStencilTexture;
     record.samplerDesc = source->samplerDesc;
+    record.usage = source->usage;
+    record.sampleCount = source->sampleCount;
+    record.viewRange = range.Value();
+    record.writable = writable;
     record.isView = true;
     record.source = texture.slot;
     record.sampler =
@@ -1166,12 +1222,12 @@ bool GlesDevice::CreateBackBuffer(SwapChainRecord& record, uint32 width, uint32 
     return true;
 }
 
-GLuint GlesDevice::CreateColorFramebuffer(GLuint texture) noexcept {
+GLuint GlesDevice::CreateColorFramebuffer(GLuint texture, GLenum target) noexcept {
     // 기록 중인 패스의 그리기 framebuffer를 건드리지 않도록 읽기 binding에서 만든다.
     GLuint framebuffer = 0;
     gl_.GenFramebuffers(1, &framebuffer);
     gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
-    gl_.FramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
+    gl_.FramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, target, texture, 0);
     const GLenum status = gl_.CheckFramebufferStatus(GL_READ_FRAMEBUFFER);
     gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, 0);
     if (status != GL_FRAMEBUFFER_COMPLETE) {

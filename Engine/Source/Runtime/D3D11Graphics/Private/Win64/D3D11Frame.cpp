@@ -64,6 +64,12 @@ void D3D11Device::BeginRecording(const Target& target, const PassDesc& pass) noe
         view = {};
     }
 
+    for (TextureHandle& view : boundWriteTextures_) {
+        view = {};
+    }
+
+    boundTexture_ = white_.slot;
+
     stencilReference_ = 0;
     inputsDirty_ = false;
     ID3D11DeviceContext* context = deferred_.Get();
@@ -140,6 +146,16 @@ Result<GpuFencePoint> D3D11Device::EndFrame() noexcept {
     const usize unended = splits_.Close();
     if (validation_) {
         validationErrors_ += unended;
+    }
+
+    // 패스 끝 MSAA resolve다(ColorAttachment::resolveTarget, 박스 평균, 결정 R17).
+    for (uint32 index = 0; index < target_.colorCount; ++index) {
+        const TextureRecord* source = textures_.Find(target_.colors[index].slot);
+        const TextureRecord* resolved = textures_.Find(target_.resolves[index].slot);
+        if (source != nullptr && resolved != nullptr) {
+            deferred_->ResolveSubresource(resolved->texture.Get(), 0, source->texture.Get(), 0,
+                                          MappingOf(source->format).rtv);
+        }
     }
 
     CloseMarkers();
@@ -273,11 +289,15 @@ void D3D11Device::SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64
 void D3D11Device::SetTexture(TextureHandle handle) noexcept {
     platform::LockGuard lock(gate_);
     const TextureRecord* record = textures_.Find(handle.slot);
+    SlotHandle slot = handle.slot;
     if (record == nullptr || !record->srv) {
         record = textures_.Find(white_.slot);
+        slot = white_.slot;
     }
 
     if (record != nullptr) {
+        // compute는 dispatch 때 같은 텍스처를 CS t0·s0에 건다.
+        boundTexture_ = slot;
         ID3D11ShaderResourceView* view = record->srv.Get();
         deferred_->PSSetShaderResources(0, 1, &view);
         deferred_->PSSetSamplers(0, 1, &record->sampler);
@@ -377,7 +397,8 @@ Result<void> D3D11Device::CopyPassTarget(TextureHandle destination) noexcept {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (target_.resource == nullptr || !record->renderTarget || destination == target_.texture ||
+    if (target_.resource == nullptr || !record->renderTarget || record->sampleCount > 1 ||
+        target_.sampleCount > 1 || destination == target_.texture ||
         record->width != target_.width || record->height != target_.height ||
         record->format != target_.format) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);

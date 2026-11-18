@@ -198,6 +198,15 @@ Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
         return Result<TextureHandle>::Failure(valid.Error());
     }
 
+    if (desc.sampleCount > 1 &&
+        (GetPixelFormatSampleCounts(desc.format) & SampleCountBit(desc.sampleCount)) == 0) {
+        platform::LockGuard lock(gate_);
+        auto failed = Fail("MSAA sample count is not supported for this format by the D3D11 "
+                           "device");
+        (void)failed;
+        return Result<TextureHandle>::Failure(ErrorCode::Unsupported);
+    }
+
     // view swizzle은 D3D11에 없다(셰이더 쪽 대체 같은 우회는 하지 않는다, AssetSystem A0-G).
     if (!desc.swizzle.IsIdentity() || !CheckTextureLimits(caps_, desc)) {
         platform::LockGuard lock(gate_);
@@ -211,7 +220,9 @@ Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
 
     const bool renderTarget = desc.usage == TextureUsage::RenderTarget;
     const bool depthTarget = desc.usage == TextureUsage::DepthStencil;
-    const bool attachment = renderTarget || depthTarget;
+    const bool storage = desc.usage == TextureUsage::Storage;
+    // 렌더 타깃·깊이·Storage는 초기 픽셀이 없다(업로드하지 않는다).
+    const bool attachment = renderTarget || depthTarget || storage;
     const PixelFormatInfo& info = GetPixelFormatInfo(desc.format);
     const bool depth =
         info.kind == PixelFormatKind::Depth || info.kind == PixelFormatKind::DepthStencil;
@@ -242,12 +253,15 @@ Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
     record.format = desc.format;
     record.renderTarget = renderTarget;
     record.depthTarget = depthTarget;
+    record.usage = desc.usage;
+    record.sampleCount = desc.sampleCount;
     record.sampler = sampler.Value();
     record.comparison = desc.sampler.comparison;
     // 깊이 형식은 늘 DEPTH_STENCIL bind로 만든다(typeless 깊이 자원의 DSV 조건).
     const UINT bindFlags = (sampled ? static_cast<UINT>(D3D11_BIND_SHADER_RESOURCE) : 0u) |
                            (renderTarget ? static_cast<UINT>(D3D11_BIND_RENDER_TARGET) : 0u) |
-                           (depth ? static_cast<UINT>(D3D11_BIND_DEPTH_STENCIL) : 0u);
+                           (depth ? static_cast<UINT>(D3D11_BIND_DEPTH_STENCIL) : 0u) |
+                           (storage ? static_cast<UINT>(D3D11_BIND_UNORDERED_ACCESS) : 0u);
     // 색·블록 압축 형식은 초기 데이터로 바로 만든다(빈틈 없는 행, 블록 형식은 블록 행).
     // subresource 배열은 D3D11 순서(slice 바깥, mip 안쪽)이고 원본은 mip 우선(TextureDesc 배치)이라
     // offset을 slice마다 따로 센다. 깊이·스텐실·비디오는 D3D11 배치가 달라 만든 뒤 staging 복사로
@@ -299,7 +313,7 @@ Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
         textureDesc.MipLevels = desc.mipLevels;
         textureDesc.ArraySize = record.slices;
         textureDesc.Format = mapping.resource;
-        textureDesc.SampleDesc.Count = 1;
+        textureDesc.SampleDesc.Count = desc.sampleCount;
         textureDesc.Usage = D3D11_USAGE_DEFAULT;
         textureDesc.BindFlags = bindFlags;
         textureDesc.MiscFlags = IsCubeDimension(desc.dimension)
@@ -319,7 +333,7 @@ Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
     }
 
     if (sampled) {
-        result = CreatePlaneView(record, mapping.srv, 0, desc.mipLevels,
+        result = CreatePlaneView(record, mapping.srv, 0, {0, record.mipLevels, 0, record.slices},
                                  info.kind == PixelFormatKind::Planar, record.srv);
         if (FAILED(result)) {
             return FailWith<TextureHandle>("CreateShaderResourceView", result);
@@ -329,7 +343,8 @@ Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
     if (renderTarget) {
         D3D11_RENDER_TARGET_VIEW_DESC view = {};
         view.Format = mapping.rtv;
-        view.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+        view.ViewDimension = record.sampleCount > 1 ? D3D11_RTV_DIMENSION_TEXTURE2DMS
+                                                    : D3D11_RTV_DIMENSION_TEXTURE2D;
         result = device_->CreateRenderTargetView(record.texture.Get(), &view, record.rtv.Out());
         if (FAILED(result)) {
             return FailWith<TextureHandle>("CreateRenderTargetView", result);
@@ -339,7 +354,8 @@ Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
     if (depthTarget) {
         D3D11_DEPTH_STENCIL_VIEW_DESC view = {};
         view.Format = mapping.dsv;
-        view.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+        view.ViewDimension = record.sampleCount > 1 ? D3D11_DSV_DIMENSION_TEXTURE2DMS
+                                                    : D3D11_DSV_DIMENSION_TEXTURE2D;
         result = device_->CreateDepthStencilView(record.texture.Get(), &view, record.dsv.Out());
         if (FAILED(result)) {
             return FailWith<TextureHandle>("CreateDepthStencilView", result);
@@ -383,14 +399,15 @@ Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
 }
 
 HRESULT D3D11Device::CreatePlaneView(const TextureRecord& record, DXGI_FORMAT format, uint32 plane,
-                                     uint32 mipLevels, bool planar,
+                                     const ResolvedSubresourceRange& range, bool planar,
                                      ComRef<ID3D11ShaderResourceView>& out) noexcept {
+    const uint32 mipLevels = range.mipCount;
     if (planar) {
         // 다중 plane 비디오 형식은 2D만이다(ValidateTextureDesc).
         D3D11_SHADER_RESOURCE_VIEW_DESC1 view = {};
         view.Format = format;
         view.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-        view.Texture2D.MostDetailedMip = 0;
+        view.Texture2D.MostDetailedMip = range.firstMip;
         view.Texture2D.MipLevels = mipLevels;
         view.Texture2D.PlaneSlice = plane;
         ID3D11ShaderResourceView1* created = nullptr;
@@ -407,26 +424,39 @@ HRESULT D3D11Device::CreatePlaneView(const TextureRecord& record, DXGI_FORMAT fo
     view.Format = format;
     switch (record.dimension) {
     case TextureDimension::Texture2D:
+        if (record.sampleCount > 1) {
+            // MSAA는 표본 번호 읽기(Texture2DMS)다.
+            view.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DMS;
+            break;
+        }
+
         view.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+        view.Texture2D.MostDetailedMip = range.firstMip;
         view.Texture2D.MipLevels = mipLevels;
         break;
     case TextureDimension::Texture2DArray:
         view.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+        view.Texture2DArray.MostDetailedMip = range.firstMip;
         view.Texture2DArray.MipLevels = mipLevels;
-        view.Texture2DArray.ArraySize = record.slices;
+        view.Texture2DArray.FirstArraySlice = range.firstSlice;
+        view.Texture2DArray.ArraySize = range.sliceCount;
         break;
     case TextureDimension::Texture3D:
         view.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE3D;
+        view.Texture3D.MostDetailedMip = range.firstMip;
         view.Texture3D.MipLevels = mipLevels;
         break;
     case TextureDimension::TextureCube:
         view.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
+        view.TextureCube.MostDetailedMip = range.firstMip;
         view.TextureCube.MipLevels = mipLevels;
         break;
     case TextureDimension::TextureCubeArray:
         view.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBEARRAY;
+        view.TextureCubeArray.MostDetailedMip = range.firstMip;
         view.TextureCubeArray.MipLevels = mipLevels;
-        view.TextureCubeArray.NumCubes = record.slices / CubeFaceCount;
+        view.TextureCubeArray.First2DArrayFace = range.firstSlice;
+        view.TextureCubeArray.NumCubes = range.sliceCount / CubeFaceCount;
         break;
     }
 
@@ -461,10 +491,20 @@ Result<TextureHandle> D3D11Device::CreateTextureView(TextureHandle texture,
         return Result<TextureHandle>::Failure(resolved.Error());
     }
 
+    auto range = ResolveTextureViewRange(source->dimension, source->usage,
+                                         {source->mipLevels, source->slices}, desc);
+    if (!range) {
+        return Result<TextureHandle>::Failure(range.Error());
+    }
+
     if (!desc.swizzle.IsIdentity()) {
         auto failed = Fail("D3D11 has no texture view swizzle");
         (void)failed;
         return Result<TextureHandle>::Failure(ErrorCode::Unsupported);
+    }
+
+    if (desc.access == ViewAccess::ReadWrite) {
+        return CreateWritableTextureView(*source, resolved.Value(), range.Value());
     }
 
     // sRGB 짝 view는 짝 형식이, plane view는 원 형식이 샘플 가능해야 한다.
@@ -492,16 +532,81 @@ Result<TextureHandle> D3D11Device::CreateTextureView(TextureHandle texture,
     record.mipLevels = source->mipLevels;
     record.slices = source->slices;
     record.format = resolved.Value();
+    record.usage = source->usage;
+    record.sampleCount = source->sampleCount;
     record.view = true;
     record.sampler = source->sampler;
     record.comparison = source->comparison;
     const HRESULT result = CreatePlaneView(
-        record, srvFormat, desc.plane, record.mipLevels,
+        record, srvFormat, desc.plane, range.Value(),
         GetPixelFormatInfo(source->format).kind == PixelFormatKind::Planar, record.srv);
     if (FAILED(result)) {
         return FailWith<TextureHandle>("CreateShaderResourceView (texture view)", result);
     }
 
+    auto added = textures_.TryAdd(Move(record));
+    if (!added) {
+        return Result<TextureHandle>::Failure(added.Error());
+    }
+
+    return Result<TextureHandle>::Success(TextureHandle{added.Value()});
+}
+
+// Storage 텍스처 mip 하나(slice 범위)의 UAV view다(잠금 안, SetWritableTexture로 묶는다). 형식이
+// StorageWrite가 아니면 Unsupported다.
+Result<TextureHandle>
+D3D11Device::CreateWritableTextureView(const TextureRecord& source, PixelFormat format,
+                                       const ResolvedSubresourceRange& range) noexcept {
+    const DXGI_FORMAT uavFormat = MappingOf(format).uav;
+    if (!HasPixelFormatCaps(FormatCaps(format), PixelFormatCaps::StorageWrite) ||
+        uavFormat == DXGI_FORMAT_UNKNOWN) {
+        return UnsupportedFormat<TextureHandle>(format);
+    }
+
+    auto reserved = ReserveRetireCapacity(1);
+    if (!reserved) {
+        return Result<TextureHandle>::Failure(reserved.Error());
+    }
+
+    D3D11_UNORDERED_ACCESS_VIEW_DESC view = {};
+    view.Format = uavFormat;
+    switch (source.dimension) {
+    case TextureDimension::Texture3D:
+        view.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE3D;
+        view.Texture3D.MipSlice = range.firstMip;
+        view.Texture3D.FirstWSlice = 0;
+        view.Texture3D.WSize = MipExtent(source.depth, range.firstMip);
+        break;
+    case TextureDimension::Texture2DArray:
+        view.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2DARRAY;
+        view.Texture2DArray.MipSlice = range.firstMip;
+        view.Texture2DArray.FirstArraySlice = range.firstSlice;
+        view.Texture2DArray.ArraySize = range.sliceCount;
+        break;
+    default:
+        view.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+        view.Texture2D.MipSlice = range.firstMip;
+        break;
+    }
+
+    TextureRecord record;
+    const HRESULT result =
+        device_->CreateUnorderedAccessView(source.texture.Get(), &view, record.uav.Out());
+    if (FAILED(result)) {
+        return FailWith<TextureHandle>("CreateUnorderedAccessView (texture view)", result);
+    }
+
+    record.texture = source.texture.Share();
+    record.dimension = source.dimension;
+    record.width = source.width;
+    record.height = source.height;
+    record.depth = source.depth;
+    record.mipLevels = source.mipLevels;
+    record.slices = source.slices;
+    record.format = format;
+    record.usage = source.usage;
+    record.view = true;
+    record.sampler = source.sampler;
     auto added = textures_.TryAdd(Move(record));
     if (!added) {
         return Result<TextureHandle>::Failure(added.Error());

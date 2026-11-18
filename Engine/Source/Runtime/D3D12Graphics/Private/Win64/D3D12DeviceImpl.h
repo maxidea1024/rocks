@@ -195,10 +195,19 @@ struct TextureRecord {
     bool renderTarget = false;
     // 깊이·스텐실 타깃(TextureUsage::DepthStencil)이다.
     bool depthTarget = false;
+    // 만든 용도다(view는 원 텍스처의 용도, ResolveTextureViewRange).
+    TextureUsage usage = TextureUsage::Sampled;
+    // MSAA 표본 수다(TextureDesc::sampleCount, view는 원 텍스처의 값).
+    uint32 sampleCount = 1;
     // 다른 텍스처의 자원을 공유하는 view다. 업로드·readback·그리기 대상이 될 수 없다. 자원 상태는
     // 원 텍스처 기록(source)이 추적한다.
     bool view = false;
     SlotHandle source;
+    // view가 가리키는 mip·slice 범위다(view가 아니면 전체). 묶기 전이는 이 범위만 바꾼다.
+    ResolvedSubresourceRange viewRange;
+    // 쓰기 view(ViewAccess::ReadWrite)다. srv 칸에 UAV descriptor가 있고 SetWritableTexture로만
+    // 묶는다(hasSrv 거짓).
+    bool writable = false;
     // 이 텍스처를 가리키는 살아 있는 view 수다. 0이 아니면 Retire는 기록을 남겨 두고(retirePending)
     // 마지막 view가 놓일 때 함께 놓는다(상태 추적의 주인을 하나로 유지한다).
     uint32 viewCount = 0;
@@ -245,6 +254,8 @@ struct PipelineRecord {
     DrawBufferSlots writeSlots;
     // 선언한 그리기별 상수 byte 수다(SetDrawConstants 크기 검사, dispatch 때 올릴 수).
     uint32 drawConstantBytes = 0;
+    // compute가 텍스처 UAV로 쓰는 쓰기 slot 비트다(SetWritableTexture가 묶여야 한다).
+    uint32 writeTextures = 0;
     // compute 파이프라인이다(Dispatch만 쓴다).
     bool compute = false;
     D3D_PRIMITIVE_TOPOLOGY topology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
@@ -494,6 +505,11 @@ public:
     void ReleaseTextureViews(const TextureRecord& record) noexcept;
 
     // 2D texture SRV를 쓴다. plane은 깊이·스텐실·비디오 plane 선택이다.
+    // 패스 끝 MSAA resolve다(EndFrame, 잠금 안).
+    void ResolveAttachments() noexcept;
+    Result<TextureHandle> CreateWritableTextureView(TextureHandle texture, TextureRecord& source,
+                                                    PixelFormat format,
+                                                    const ResolvedSubresourceRange& range) noexcept;
     void WriteShaderResourceView(const TextureRecord& record, DXGI_FORMAT format, uint32 plane,
                                  const ChannelSwizzle& swizzle, uint32 slot) noexcept;
 
@@ -636,6 +652,10 @@ private:
         TextureHandle depth;
         D3D12_CPU_DESCRIPTOR_HANDLE dsv = {};
         bool depthReadOnly = false;
+        // 색 attachment마다 패스 끝에 resolve할 대상이다(ColorAttachment::resolveTarget).
+        TextureHandle resolves[MaxColorTargets];
+        // attachment 표본 수다(1이면 MSAA가 아니다).
+        uint32 sampleCount = 1;
     };
 
     // 기록 중 버퍼 자원의 상태다. 버퍼는 제출 끝에 COMMON으로 돌아가므로 기록마다 비우고, 처음 쓰면
@@ -744,8 +764,10 @@ private:
     // 더한다. b0 상수, PS t0 텍스처·s0 샘플러, t1–t4 버퍼 SRV만 받는다. 두 단계가 같은 slot을 다른
     // 종류로 읽거나 배치 밖 자원(UAV 포함)이거나 b0 cbuffer가 drawConstantBytes보다 크면
     // InvalidArgument다.
+    // compute의 텍스처 UAV(u0–u3의 RWTexture*) slot은 writeTextures에 더한다.
     Result<void> ReflectBindings(ID3DBlob* code, ShaderStage stage, uint32 drawConstantBytes,
-                                 DrawBufferSlots& slots, DrawBufferSlots* writeSlots) noexcept;
+                                 DrawBufferSlots& slots, DrawBufferSlots* writeSlots,
+                                 uint32* writeTextures = nullptr) noexcept;
 
     // 셰이더 단계의 그리기별 상수 블록(shaderBytes)이 파이프라인 선언보다 큰 경우의
     // InvalidArgument다(LastError에 두 크기).
@@ -887,6 +909,7 @@ private:
     // --- GX3·GX4(D3D12Commands.cpp) ---
 
     void SetWritableBufferView(uint32 slot, BufferViewHandle view) noexcept override;
+    void SetWritableTexture(uint32 slot, TextureHandle view) noexcept override;
 
     void DrawIndirect(BufferHandle arguments, uint64 offset) noexcept override;
 
@@ -1065,6 +1088,10 @@ private:
     // compute 쓰기 slot에 묶인 view와 빈 slot의 null UAV, ReadWrite view의 CPU UAV 칸 pool,
     // 읽기 전용 DSV를 그때그때 쓰는 칸이다(DSV는 OMSetRenderTargets가 기록 때 읽는다).
     BufferViewHandle boundWriteViews_[MaxDrawBufferViews];
+    // compute 쓰기 slot에 묶인 텍스처 쓰기 view다(버퍼 view와 같은 slot 공간, 하나만 남는다).
+    TextureHandle boundWriteTextures_[MaxDrawBufferViews];
+    // SetTexture로 묶은 텍스처 기록이다(compute t0·s0를 dispatch 때 건다).
+    SlotHandle boundTexture_;
     uint32 nullBufferUav_ = 0;
     DescriptorPool cpuUavs_;
     uint32 scratchDsv_ = 0;

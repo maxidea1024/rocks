@@ -11,7 +11,10 @@ namespace {
 constexpr UINT ComputeRootConstants = 0;
 constexpr UINT ComputeRootReads = 1;
 constexpr UINT ComputeRootWrites = ComputeRootReads + MaxDrawBufferViews;
-constexpr UINT ComputeRootCount = ComputeRootWrites + MaxDrawBufferViews;
+// SetTexture의 텍스처(t0)·샘플러(s0) table이다(텍스처 GX2 A부).
+constexpr UINT ComputeRootTexture = ComputeRootWrites + MaxDrawBufferViews;
+constexpr UINT ComputeRootSampler = ComputeRootTexture + 1;
+constexpr UINT ComputeRootCount = ComputeRootSampler + 1;
 
 // 읽기 전용 상태 묶음이다(같은 기록 안에서 서로 합칠 수 있다).
 constexpr D3D12_RESOURCE_STATES ReadOnlyStates =
@@ -29,6 +32,20 @@ Result<void> D3D12Device::CreateComputeObjects() noexcept {
     D3D12_DESCRIPTOR_RANGE readRanges[MaxDrawBufferViews] = {};
     D3D12_DESCRIPTOR_RANGE writeRanges[MaxDrawBufferViews] = {};
     D3D12_ROOT_PARAMETER parameters[ComputeRootCount] = {};
+    D3D12_DESCRIPTOR_RANGE textureRange = {};
+    textureRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    textureRange.NumDescriptors = 1;
+    D3D12_DESCRIPTOR_RANGE samplerRange = {};
+    samplerRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
+    samplerRange.NumDescriptors = 1;
+    parameters[ComputeRootTexture].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    parameters[ComputeRootTexture].DescriptorTable.NumDescriptorRanges = 1;
+    parameters[ComputeRootTexture].DescriptorTable.pDescriptorRanges = &textureRange;
+    parameters[ComputeRootTexture].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    parameters[ComputeRootSampler].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    parameters[ComputeRootSampler].DescriptorTable.NumDescriptorRanges = 1;
+    parameters[ComputeRootSampler].DescriptorTable.pDescriptorRanges = &samplerRange;
+    parameters[ComputeRootSampler].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
     parameters[ComputeRootConstants].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
     parameters[ComputeRootConstants].Constants.ShaderRegister = 0;
     parameters[ComputeRootConstants].Constants.Num32BitValues = ConstantCount;
@@ -131,8 +148,9 @@ D3D12Device::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
 
     DrawBufferSlots readSlots;
     DrawBufferSlots writeSlots;
+    uint32 writeTextures = 0;
     auto reflected = ReflectBindings(code.Get(), ShaderStage::Compute, desc.drawConstantBytes,
-                                     readSlots, &writeSlots);
+                                     readSlots, &writeSlots, &writeTextures);
     if (!reflected) {
         return Result<PipelineHandle>::Failure(reflected.Error());
     }
@@ -151,6 +169,7 @@ D3D12Device::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
     record.writeSlots = writeSlots;
     record.compute = true;
     record.drawConstantBytes = desc.drawConstantBytes;
+    record.writeTextures = writeTextures;
     auto reserved = ReserveRetireCapacity(1);
     if (!reserved) {
         return Result<PipelineHandle>::Failure(reserved.Error());
@@ -182,9 +201,10 @@ Result<CommandContext*> D3D12Device::BeginPass(const PassDesc& pass) noexcept {
             ErrorCode::Unsupported, "pass has more color attachments than the device supports");
     }
 
-    // attachment 확인: 살아 있는 텍스처, view 아님, 용도, 같은 크기, 중복 없음.
+    // attachment 확인: 살아 있는 텍스처, view 아님, 용도, 같은 크기·표본 수, 중복 없음.
     uint32 width = 0;
     uint32 height = 0;
+    uint32 samples = 1;
     bool sized = false;
     const auto check = [&](TextureHandle handle, bool depth) noexcept -> ErrorCode {
         const TextureRecord* record = textures_.Find(handle.slot);
@@ -193,12 +213,14 @@ Result<CommandContext*> D3D12Device::BeginPass(const PassDesc& pass) noexcept {
         }
 
         if (record->view || (depth ? !record->depthTarget : !record->renderTarget) ||
-            (sized && (record->width != width || record->height != height))) {
+            (sized && (record->width != width || record->height != height ||
+                       record->sampleCount != samples))) {
             return ErrorCode::InvalidArgument;
         }
 
         width = record->width;
         height = record->height;
+        samples = record->sampleCount;
         sized = true;
         return ErrorCode::None;
     };
@@ -226,6 +248,35 @@ Result<CommandContext*> D3D12Device::BeginPass(const PassDesc& pass) noexcept {
         }
     }
 
+    // resolve 대상: MSAA attachment의 1표본 RenderTarget, 같은 형식·크기, view 아님, 겹침 없음.
+    for (uint32 index = 0; index < pass.colorCount; ++index) {
+        const TextureHandle resolve = pass.colors[index].resolveTarget;
+        if (resolve.IsNull()) {
+            continue;
+        }
+
+        const TextureRecord* source = textures_.Find(pass.colors[index].texture.slot);
+        const TextureRecord* target = textures_.Find(resolve.slot);
+        if (target == nullptr) {
+            return Result<CommandContext*>::Failure(ErrorCode::StaleHandle);
+        }
+
+        bool overlaps = resolve == pass.depth.texture;
+        for (uint32 other = 0; other < pass.colorCount; ++other) {
+            overlaps = overlaps || pass.colors[other].texture == resolve ||
+                       (other != index && pass.colors[other].resolveTarget == resolve);
+        }
+
+        if (source->sampleCount < 2 || target->view || !target->renderTarget ||
+            target->sampleCount != 1 || target->format != source->format ||
+            target->width != source->width || target->height != source->height || overlaps) {
+            return FailCode<CommandContext*>(
+                ErrorCode::InvalidArgument,
+                "resolve target needs an MSAA color attachment and a distinct single-sample "
+                "render target of the same format and size");
+        }
+    }
+
     if (recording_) {
         return Result<CommandContext*>::Failure(ErrorCode::Busy);
     }
@@ -242,10 +293,12 @@ Result<CommandContext*> D3D12Device::BeginPass(const PassDesc& pass) noexcept {
     target_ = {};
     target_.width = width;
     target_.height = height;
+    target_.sampleCount = samples;
     target_.colorCount = pass.colorCount;
     for (uint32 index = 0; index < pass.colorCount; ++index) {
         const TextureRecord* record = textures_.Find(pass.colors[index].texture.slot);
         target_.colors[index] = pass.colors[index].texture;
+        target_.resolves[index] = pass.colors[index].resolveTarget;
         target_.rtvs[index] = rtvs_.Cpu(record->rtv);
     }
 
@@ -267,7 +320,8 @@ Result<CommandContext*> D3D12Device::BeginPass(const PassDesc& pass) noexcept {
             const d3d12::FormatMapping mapping = d3d12::MappingOf(depth->format);
             D3D12_DEPTH_STENCIL_VIEW_DESC view = {};
             view.Format = mapping.dsv;
-            view.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+            view.ViewDimension = depth->sampleCount > 1 ? D3D12_DSV_DIMENSION_TEXTURE2DMS
+                                                        : D3D12_DSV_DIMENSION_TEXTURE2D;
             view.Flags = D3D12_DSV_FLAG_READ_ONLY_DEPTH;
             if (GetPixelFormatInfo(depth->format).stencilBits != 0) {
                 view.Flags |= D3D12_DSV_FLAG_READ_ONLY_STENCIL;
@@ -294,6 +348,20 @@ void D3D12Device::SetWritableBufferView(uint32 slot, BufferViewHandle view) noex
     const BufferViewRecord* record = bufferViews_.Find(view.slot);
     const bool writable = record != nullptr && record->access == ViewAccess::ReadWrite;
     boundWriteViews_[slot] = writable ? view : BufferViewHandle{};
+    // 쓰기 slot은 버퍼·텍스처가 같은 번호 공간이다(나중에 묶은 하나만 남는다).
+    boundWriteTextures_[slot] = {};
+}
+
+void D3D12Device::SetWritableTexture(uint32 slot, TextureHandle view) noexcept {
+    platform::LockGuard lock(gate_);
+    if (slot >= MaxDrawBufferViews) {
+        return;
+    }
+
+    const TextureRecord* record = textures_.Find(view.slot);
+    const bool writable = record != nullptr && record->writable;
+    boundWriteTextures_[slot] = writable ? view : TextureHandle{};
+    boundWriteViews_[slot] = {};
 }
 
 void D3D12Device::RequireBufferState(ID3D12Resource* resource,
@@ -406,8 +474,38 @@ bool D3D12Device::PrepareDispatch() noexcept {
         return false;
     }
 
+    // 텍스처로 쓰는 slot마다 쓰기 텍스처 view가 묶여야 한다.
+    for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
+        if ((pipeline->writeTextures & (1u << slot)) != 0 &&
+            textures_.Find(boundWriteTextures_[slot].slot) == nullptr) {
+            return false;
+        }
+    }
+
+    // 쓰는 텍스처 view의 범위를 UAV 상태로 맞춘다(같은 상태가 이어지면 UAV barrier로 앞 dispatch의
+    // 쓰기를 기다린다).
+    for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
+        const TextureRecord* view = (pipeline->writeTextures & (1u << slot)) != 0
+                                        ? textures_.Find(boundWriteTextures_[slot].slot)
+                                        : nullptr;
+        TextureRecord* owner = view != nullptr ? textures_.Find(view->source) : nullptr;
+        if (owner != nullptr) {
+            TrackTransition(*owner, view->source, view->viewRange,
+                            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, true);
+        }
+    }
+
     // 읽는 view는 셰이더 읽기, 쓰는 view는 UAV 상태로 맞추고 compute root 인자를 건다.
     list_->SetComputeRootSignature(computeRootSignature_.Get());
+    const TextureRecord* texture = textures_.Find(boundTexture_);
+    if (texture == nullptr) {
+        texture = textures_.Find(white_.slot);
+    }
+
+    if (texture != nullptr) {
+        list_->SetComputeRootDescriptorTable(ComputeRootTexture, srvs_.Gpu(texture->srv));
+        list_->SetComputeRootDescriptorTable(ComputeRootSampler, samplers_.Gpu(texture->sampler));
+    }
     if (pipeline->drawConstantBytes != 0) {
         list_->SetComputeRoot32BitConstants(
             ComputeRootConstants, static_cast<UINT>(pipeline->drawConstantBytes / sizeof(uint32)),
@@ -428,9 +526,15 @@ bool D3D12Device::PrepareDispatch() noexcept {
             RequireBufferState(write->resource.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         }
 
-        list_->SetComputeRootDescriptorTable(
-            ComputeRootWrites + slot,
-            srvs_.Gpu(write != nullptr ? write->descriptor : nullBufferUav_));
+        const TextureRecord* writeTexture = (pipeline->writeTextures & (1u << slot)) != 0
+                                                ? textures_.Find(boundWriteTextures_[slot].slot)
+                                                : nullptr;
+        uint32 descriptor = write != nullptr ? write->descriptor : nullBufferUav_;
+        if (writeTexture != nullptr) {
+            descriptor = writeTexture->srv;
+        }
+
+        list_->SetComputeRootDescriptorTable(ComputeRootWrites + slot, srvs_.Gpu(descriptor));
     }
 
     return true;
@@ -584,6 +688,7 @@ Result<void> D3D12Device::CopyTexture(TextureHandle destination, TextureHandle s
     };
     if (destination == source || to->view || from->view || to->width != from->width ||
         to->height != from->height || to->format != from->format || to->devicePlanes != 1 ||
+        to->sampleCount > 1 || from->sampleCount > 1 ||
         to->dimension != TextureDimension::Texture2D ||
         from->dimension != TextureDimension::Texture2D || attached(destination) ||
         attached(source)) {

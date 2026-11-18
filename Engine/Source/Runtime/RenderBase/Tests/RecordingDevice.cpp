@@ -505,6 +505,11 @@ void RecordingDevice::SetWritableBufferView(uint32 slot, BufferViewHandle view) 
     (void)view;
 }
 
+void RecordingDevice::SetWritableTexture(uint32 slot, TextureHandle view) noexcept {
+    (void)slot;
+    (void)view;
+}
+
 void RecordingDevice::DrawIndirect(BufferHandle arguments, uint64 offset) noexcept {
     (void)arguments;
     (void)offset;
