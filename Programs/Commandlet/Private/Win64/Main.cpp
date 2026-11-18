@@ -11,9 +11,6 @@ char argumentStorage[rocks::CommandletRegistry::MaxArguments]
 rocks::Result<void> Write(void*, rocks::CommandletStream stream, rocks::StringView text) noexcept {
     if (!text.ValidateUtf8())
         return rocks::Result<void>::Failure(rocks::ErrorCode::InvalidArgument);
-    if (text.ByteCount() > rocks::CommandletRegistry::MaxArgumentBytes) {
-        return rocks::Result<void>::Failure(rocks::ErrorCode::CapacityExceeded);
-    }
     HANDLE handle = GetStdHandle(stream == rocks::CommandletStream::Output ? STD_OUTPUT_HANDLE
                                                                            : STD_ERROR_HANDLE);
     if (handle == nullptr || handle == INVALID_HANDLE_VALUE) {
@@ -23,25 +20,37 @@ rocks::Result<void> Write(void*, rocks::CommandletStream stream, rocks::StringVi
         return rocks::Result<void>::Success();
     DWORD mode = 0;
     if (GetConsoleMode(handle, &mode)) {
-        // UTF-8 n byte는 UTF-16 n 단위를 넘지 않으므로 MaxArgumentBytes 단위면 충분하다.
-        wchar_t converted[rocks::CommandletRegistry::MaxArgumentBytes + 1]{};
-        const rocks::platform::windows::TextConversion wide =
-            rocks::platform::windows::ConvertUtf8ToWide(
-                text.Data(), text.ByteCount(), converted,
-                rocks::CommandletRegistry::MaxArgumentBytes + 1,
-                rocks::platform::windows::TextFit::Exact);
-        if (!wide)
-            return rocks::Result<void>::Failure(rocks::ErrorCode::InvalidArgument);
-        const int count = static_cast<int>(wide.length);
-        int offset = 0;
-        while (offset < count) {
-            DWORD written = 0;
-            if (!WriteConsoleW(handle, converted + offset, static_cast<DWORD>(count - offset),
-                               &written, nullptr) ||
-                written == 0) {
-                return rocks::Result<void>::Failure(rocks::ErrorCode::DependencyFailed);
+        // 출력(config-dump 등)은 인자 상한보다 클 수 있다. 글자 경계에서 ConsoleChunkBytes씩 나눠
+        // 바꾼다. UTF-8 n byte는 UTF-16 n 단위를 넘지 않으므로 조각 크기 + 1 단위면 충분하다.
+        constexpr rocks::usize ConsoleChunkBytes = rocks::CommandletRegistry::MaxArgumentBytes;
+        wchar_t converted[ConsoleChunkBytes + 1]{};
+        rocks::StringView rest = text;
+        while (rest.ByteCount() > 0) {
+            const rocks::StringView chunk = rest.LeftBytesAtCodePoint(ConsoleChunkBytes);
+            if (chunk.ByteCount() == 0) {
+                return rocks::Result<void>::Failure(rocks::ErrorCode::InvalidArgument);
             }
-            offset += static_cast<int>(written);
+
+            const rocks::platform::windows::TextConversion wide =
+                rocks::platform::windows::ConvertUtf8ToWide(
+                    chunk.Data(), chunk.ByteCount(), converted, ConsoleChunkBytes + 1,
+                    rocks::platform::windows::TextFit::Exact);
+            if (!wide)
+                return rocks::Result<void>::Failure(rocks::ErrorCode::InvalidArgument);
+            const int count = static_cast<int>(wide.length);
+            int offset = 0;
+            while (offset < count) {
+                DWORD written = 0;
+                if (!WriteConsoleW(handle, converted + offset, static_cast<DWORD>(count - offset),
+                                   &written, nullptr) ||
+                    written == 0) {
+                    return rocks::Result<void>::Failure(rocks::ErrorCode::DependencyFailed);
+                }
+                offset += static_cast<int>(written);
+            }
+
+            rest = rocks::StringView(rest.Data() + chunk.ByteCount(),
+                                     rest.ByteCount() - chunk.ByteCount());
         }
     } else {
         rocks::usize offset = 0;
