@@ -923,19 +923,22 @@ Result<void> LooseOctree::TryUpdateBounds(SpatialProxyHandle handle,
         return Result<void>::Success();
     }
 
-    // 벗어났다: 새 AABB를 포함하는 첫 조상 A를 찾는다. 루트에도 들어가지 않거나 A가 루트인데 중심이
-    // 루트 기본 셀 밖이면 루트 조건(확장 또는 범위 밖 목록)으로 처리한다.
+    // 벗어났다: 확장 경계가 새 AABB를 포함하고 기본 셀이 새 중심을 포함하는 첫 조상 A를 찾는다.
+    // 중심 조건이 있어야 A에서의 하강이 루트에서의 하강(TryAdd)과 같은 노드에 닿는다: 중심이 A의
+    // 기본 셀 안이면 루트에서 A까지의 경로가 배치 규칙의 경로이고, 밖(확장 띠)이면 배치 규칙으로
+    // 고른 어느 자식에도 들어가지 못해 A(내부 노드)에 머물고 유지보수의 하강 재배치로도 내려가지
+    // 않는다. 그런 조상이 없으면 루트 조건(확장 또는 범위 밖 목록)으로 처리한다(루트도 같은 두
+    // 조건이다).
     uint32 ancestor = ParentOf(node);
     while (ancestor != detail::NoNode) {
         const detail::ManageNode& ancestorManage = Manage(ancestor);
-        if (LooseBoundsOf(ancestorManage.level, ancestorManage.origin).Contains(bounds)) {
+        if (LooseBoundsOf(ancestorManage.level, ancestorManage.origin).Contains(bounds) &&
+            CellBoundsOf(ancestorManage.level, ancestorManage.origin).Contains(center)) {
             break;
         }
         ancestor = ParentOf(ancestor);
     }
-    const bool needsRoot = ancestor == detail::NoNode ||
-                           (ancestor == detail::RootNode &&
-                            !CellBoundsOf(rootManage_.level, rootManage_.origin).Contains(center));
+    const bool needsRoot = ancestor == detail::NoNode;
     Placement placement;
     if (needsRoot) {
         placement = PlanPlacement(bounds);
