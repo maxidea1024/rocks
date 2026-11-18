@@ -849,3 +849,132 @@ TEST(PackedTangentCurve_CapacityExceeded) {
 }
 
 } // namespace rocks::test::packed_curve
+
+namespace rocks::test::packed_curve {
+
+// CV8 리뷰 1: UE FindKeyFormat은 복원한 마지막 키 시간이 max보다 작으면(1 ulp) 손실 키를 마지막
+// 키까지 전진한 뒤 Keys[NumKeys]를 읽는다(UE 배열 밖 읽기 — 참조는 고쳐 옮겼다, 15절 32). 반례 세
+// 개에서 전제(복원 시간 < max)가 성립하고, 고친 참조와 Rocks가 끝까지 돌며 byte가 같다.
+TEST(PackedTangentCurve_UeLossyKeyOverrunCounterexamples) {
+    SystemAllocator system;
+    const float ranges[][2] = {{-3.0f, 6.4f}, {-4.0f, 7.2666669f}, {-5.0f, 6.2666669f}};
+    for (const auto& range : ranges) {
+        TangentCurve curve(system);
+        const TangentCurveKey keys[2] = {MakeKey(range[0], 0.0f), MakeKey(range[1], 1.0f)};
+        REQUIRE(curve.TrySetKeys(Span<const TangentCurveKey>(keys, 2)));
+        const float delta = range[1] - range[0];
+        const float normalized =
+            ue58pack::Clamp((range[1] - range[0]) * (1.0f / delta), 0.0f, 1.0f);
+        const float restored =
+            (ue58pack::RoundHalfFromZero(normalized * 65535.0f) * (1.0f / 65535.0f)) * delta +
+            range[0];
+        CHECK(restored < range[1]); // UE가 Keys[NumKeys]를 읽는 전제
+        const Array<RichKey> reference = ReferenceKeys(system, curve);
+        const ue58curve::Options options{.exactLerpEndpoints = false, .fixCycle = false};
+        const ue58pack::KeyFormat format =
+            ue58pack::FindKeyFormat(reference, 1.0e-4f, 120.0f, ue58pack::Format::Linear, options);
+        CHECK(format == ue58pack::KeyFormat::Float32); // 키 2개는 크기가 작아지지 않는다
+        PackedTangentCurve packed(system);
+        REQUIRE(packed.TryPack(curve));
+        const auto rocksFormat = static_cast<ue58pack::Format>(packed.Format());
+        const auto rocksKeyFormat = static_cast<ue58pack::KeyFormat>(packed.KeyTimeFormat());
+        ue58pack::Compressed ue(system);
+        ue58pack::CompressCurve(reference, ue58richcurve::StateOf(curve), 1.0e-4f, 120.0f, ue,
+                                options, &rocksFormat, &rocksKeyFormat);
+        CHECK(SameBytes(packed.Packed(), ue.CompressedKeys.View()));
+    }
+}
+
+// CV8 리뷰 2: 복원 시간이 넘치거나(min = 3·2^103, max = FLT_MAX — 마지막 복원 시간 Inf) 표본 간격이
+// 비유한(denormal sampleRateHz → 1/rate = Inf, 표본 0개)이면 Validate가 거부하는 Quantized16을
+// 만들지 않고 Float32다. 표본이 2^24개를 넘는 rate도 Float32다.
+TEST(PackedTangentCurve_ExtremeRangesAndRatesStayFloat32) {
+    SystemAllocator system;
+    const double minimum = 3.0 * 10141204801825835211973625643008.0; // 3·2^103
+    const double maximum = static_cast<double>(NumericLimits<float>::Max());
+    Array<TangentCurveKey> keys(system);
+    for (int32 index = 0; index < 7; ++index) {
+        const float time = static_cast<float>(minimum + (maximum - minimum) * index / 6.0);
+        REQUIRE(keys.TryPushBack(MakeKey(time, 1.0f)));
+    }
+
+    TangentCurve huge(system);
+    REQUIRE(huge.TrySetKeys(keys.View()));
+    huge.postExtrapolation = CurveExtrapolation::Linear;
+    PackedTangentCurve packed(system);
+    REQUIRE(packed.TryPack(huge, 1.0e-4f, 1.0e-38f));
+    CHECK(packed.Format() == PackedCurveFormat::Linear);
+    CHECK(packed.KeyTimeFormat() == PackedKeyTimeFormat::Float32);
+    CHECK(PackedTangentCurve::Validate(packed));
+
+    const TangentCurve linear = Linear8(system);
+    REQUIRE(packed.TryPack(linear, 1.0e-4f, 1.0e-40f)); // denormal rate
+    CHECK(packed.KeyTimeFormat() == PackedKeyTimeFormat::Float32);
+    CHECK(PackedTangentCurve::Validate(packed));
+    REQUIRE(packed.TryPack(linear, 1.0e-4f, 1.0e7f)); // 7초 × 1e7 Hz > 2^24 표본
+    CHECK(packed.KeyTimeFormat() == PackedKeyTimeFormat::Float32);
+    REQUIRE(packed.TryPack(linear, 1.0e-4f, 1.0e6f)); // 7e6 표본 — 상한 안
+    CHECK(packed.KeyTimeFormat() == PackedKeyTimeFormat::Quantized16);
+}
+
+// CV8 리뷰 7: 이동된 쪽은 Empty 정규형이라 Validate를 통과하고 빈 커브로 평가된다(이동 생성·대입).
+TEST(PackedTangentCurve_MovedFromIsEmpty) {
+    SystemAllocator system;
+    PackedTangentCurve source(system);
+    REQUIRE(source.TryPack(Mixed3(system)));
+    PackedTangentCurve moved(Move(source));
+    CHECK(moved.Format() == PackedCurveFormat::Mixed && moved.KeyCount() == 3);
+    CHECK(source.Format() == PackedCurveFormat::Empty && source.KeyCount() == 0 &&
+          source.Packed().Size() == 0 && !source.EmptyDefault().HasValue());
+    CHECK(source.PostExtrapolation() == CurveExtrapolation::Constant);
+    CHECK(PackedTangentCurve::Validate(source));
+    CHECK(source.Evaluate(1.0f, 4.0f) == 4.0f);
+
+    PackedTangentCurve assigned(system);
+    TangentCurve empty(system);
+    empty.defaultValue = 2.0f;
+    REQUIRE(assigned.TryPack(empty));
+    assigned = Move(moved);
+    CHECK(assigned.Format() == PackedCurveFormat::Mixed && !assigned.EmptyDefault().HasValue());
+    CHECK(moved.Format() == PackedCurveFormat::Empty && PackedTangentCurve::Validate(moved));
+}
+
+// 시험 공백(CV8 리뷰): Weighted의 가중 byte가 3을 넘는 변조는 Validate와 평가가 모두 거부하고,
+// Quantized16 범위 변조(NaN·음수 길이)는 Validate가 거부하며 평가는 메모리 안에서 끝난다.
+TEST(PackedTangentCurve_TamperedWeightAndRange) {
+    SystemAllocator system;
+    using Access = PackedTangentCurveTestAccess;
+    TangentCurve weightedCurve(system);
+    TangentCurveKey keys[2] = {MakeKey(0.0f, 0.0f, CurveInterp::Cubic),
+                               MakeKey(1.0f, 1.0f, CurveInterp::Cubic)};
+    keys[0].tangentWeight = CurveTangentWeight::Both;
+    keys[0].leaveTangentWeight = 0.5f;
+    REQUIRE(weightedCurve.TrySetKeys(Span<const TangentCurveKey>(keys, 2)));
+    PackedTangentCurve weighted(system);
+    REQUIRE(weighted.TryPack(weightedCurve));
+    REQUIRE(weighted.Format() == PackedCurveFormat::Weighted);
+    Access::Packed(weighted)[1] = 4; // 첫 키의 가중 byte
+    CHECK(!PackedTangentCurve::Validate(weighted));
+    CHECK(platform::PlatformMath::IsNaN(weighted.Evaluate(0.5f)));
+    CHECK(weighted.TryEvaluate(0.5f).Error() == ErrorCode::InvalidArgument);
+
+    const uint32 bits[] = {platform::BitCast<uint32>(platform::PlatformMath::QuietNaN<float>()),
+                           platform::BitCast<uint32>(-7.0f)};
+    for (const uint32 value : bits) {
+        PackedTangentCurve quantized(system);
+        REQUIRE(quantized.TryPack(Linear8(system)));
+        REQUIRE(quantized.KeyTimeFormat() == PackedKeyTimeFormat::Quantized16);
+        for (usize index = 0; index < 4; ++index) {
+            Access::Packed(quantized)[20 + index] = static_cast<uint8>(value >> (8 * index));
+        }
+
+        CHECK(!PackedTangentCurve::Validate(quantized));
+        const float samples[] = {-1.0f, 0.0f, 3.5f,
+                                 7.0f,  9.0f, platform::PlatformMath::QuietNaN<float>()};
+        for (const float time : samples) {
+            static_cast<void>(quantized.Evaluate(time)); // 범위 안 index만 읽는다
+        }
+    }
+}
+
+} // namespace rocks::test::packed_curve

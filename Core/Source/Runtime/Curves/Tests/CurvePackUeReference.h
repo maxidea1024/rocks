@@ -15,8 +15,13 @@
 //   ue58pack::FindCompressionFormat ↔ RichCurve.cpp 1279–1330(IsConstant 485–502, 허용오차
 //                                     UE_SMALL_NUMBER — RichCurve.h 277)
 //   ue58pack::FindKeyFormat         ↔ RichCurve.cpp 1332–1475
-//   ue58pack::CompressCurve         ↔ RichCurve.cpp 1477–1700(RichCurve.cpp 10의
-//   MIXEDKEY_STRIPS_TANGENTS 0 갈래) ue58pack::RoundHalfFromZero     ↔ UnrealMath.cpp 3033–3046
+//   ue58pack::CompressCurve         ↔ RichCurve.cpp 1477–1682(MIXEDKEY_STRIPS_TANGENTS 0 갈래 —
+//                                     RichCurve.cpp 10)
+//   ue58pack::RoundHalfFromZero     ↔ UnrealMath.cpp 3033–3046
+//   ue58pack::Clamp                 ↔ UnrealMathUtility.h 592–595(NaN이면 Max)
+// UE 결함 하나는 고쳐 옮겼다(설계 15절 32): FindKeyFormat의 손실 키 전진 뒤 범위 검사가
+// `>= NumKeys`라 복원한 마지막 키 시간이 max보다 작으면 Keys[NumKeys]를 읽는다(UE도 배열 밖
+// 읽기, check 빌드는 assert). 참조는 `CurrentLossyKey + 1 >= NumKeys`로 막는다.
 namespace rocks::test::ue58pack {
 
 using ue58richcurve::Interp;
@@ -56,6 +61,13 @@ constexpr float UE_SMALL_NUMBER = 1.e-8f;
 
 inline int32 Align(int32 Value, int32 Alignment) noexcept {
     return (Value + Alignment - 1) & ~(Alignment - 1);
+}
+
+// UnrealMathUtility.h 592–595: Max(Min(X, MaxValue), MinValue) — Min·Max는 GenericPlatformMath의
+// `A < B ? A : B`·`B < A ? A : B`라 X가 NaN이면 MaxValue다.
+inline float Clamp(float X, float MinValue, float MaxValue) noexcept {
+    const float Lower = (X < MaxValue) ? X : MaxValue;
+    return (MinValue < Lower) ? Lower : MinValue;
 }
 
 // UnrealMath.cpp 3033–3046(Modf = 0 쪽으로 자른 정수부와 나머지).
@@ -153,7 +165,7 @@ inline KeyFormat FindKeyFormat(const Array<RichKey>& Keys, float ErrorThreshold,
 
     auto DecayTime = [](const RichKey& Key, float MinTime, float DeltaTime, float InvDeltaTime,
                         float QuantizationScale, float InvQuantizationScale) noexcept {
-        const float NormalizedTime = math::Clamp((Key.time - MinTime) * InvDeltaTime, 0.0f, 1.0f);
+        const float NormalizedTime = Clamp((Key.time - MinTime) * InvDeltaTime, 0.0f, 1.0f);
         const float QuantizedTime = RoundHalfFromZero(NormalizedTime * QuantizationScale);
         const float LossyNormalizedTime = QuantizedTime * InvQuantizationScale;
         return (LossyNormalizedTime * DeltaTime) + MinTime;
@@ -185,7 +197,9 @@ inline KeyFormat FindKeyFormat(const Array<RichKey>& Keys, float ErrorThreshold,
         if (CurrentTime > LossyTime2_16) {
             CurrentLossyKey++;
 
-            if (CurrentLossyKey >= NumKeys) {
+            // UE 결함 수정(15절 32): UE는 `CurrentLossyKey >= NumKeys`라 마지막 키에서
+            // Keys[NumKeys]를 읽는다(RC 1413–1421 — 복원한 마지막 시간이 max보다 1 ulp 작을 때).
+            if (CurrentLossyKey + 1 >= NumKeys) {
                 break;
             }
 
@@ -249,7 +263,7 @@ inline uint8 InterpCode(Interp Mode) noexcept {
     }
 }
 
-// RichCurve.cpp 1477–1700. FindCompressionFormat·FindKeyFormat 대신 정해 둔 형식을 받을 수 있다
+// RichCurve.cpp 1477–1682. FindCompressionFormat·FindKeyFormat 대신 정해 둔 형식을 받을 수 있다
 // (Rocks가 UE와 다르게 정하는 사례에서 같은 형식의 배치만 대조하려고 —
 // forcedFormat·forcedKeyFormat).
 inline void CompressCurve(const Array<RichKey>& Keys, const ue58richcurve::CurveState& State,
@@ -342,8 +356,7 @@ inline void CompressCurve(const Array<RichKey>& Keys, const ue58richcurve::Curve
             WriteOffset += Num * 2;
 
             for (const RichKey& Key : Keys.View()) {
-                const float NormalizedTime =
-                    math::Clamp((Key.time - MinTime) * InvDeltaTime, 0.0f, 1.0f);
+                const float NormalizedTime = Clamp((Key.time - MinTime) * InvDeltaTime, 0.0f, 1.0f);
                 const uint16 QuantizedTime =
                     static_cast<uint16>(RoundHalfFromZero(NormalizedTime * 65535.0f));
                 WriteUint16(OutCurve.CompressedKeys, KeyTimes16, QuantizedTime);

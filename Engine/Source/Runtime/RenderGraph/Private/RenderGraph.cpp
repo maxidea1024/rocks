@@ -276,19 +276,22 @@ Result<GraphTexture> RenderGraph::CreateTexture(const graphics::TextureDesc& des
         return Result<GraphTexture>::Failure(ErrorCode::Busy);
     }
 
-    // 그래프 텍스처는 GPU가 채우는 렌더 타깃이므로 번호표 안의 비압축 형식이어야 한다(블록 압축
-    // 형식은 렌더 타깃이 될 수 없다, PixelFormatInfo). 장치가 그 형식을 지원하는지는 풀 할당 때
-    // 장치 생성이 판단한다(Unsupported).
+    // 렌더 타깃 그래프 텍스처는 GPU가 채우므로 번호표 안의 비압축 형식이어야 한다(블록 압축 형식은
+    // 렌더 타깃이 될 수 없다, PixelFormatInfo). Sampled 그래프 텍스처는 내용을 업로드로만 받으므로
+    // (UploadTexture) 압축 형식도 된다. 장치가 그 형식을 지원하는지는 풀 할당 때 장치 생성이
+    // 판단한다(Unsupported).
     const graphics::PixelFormatInfo& format = graphics::GetPixelFormatInfo(desc.format);
+    const bool renderTarget = desc.usage == graphics::TextureUsage::RenderTarget;
+    const bool sampled = desc.usage == graphics::TextureUsage::Sampled;
     if (desc.width == 0 || desc.height == 0 || desc.mipLevels == 0 ||
-        desc.mipLevels > MaxGraphTextureMips ||
-        desc.usage != graphics::TextureUsage::RenderTarget ||
+        desc.mipLevels > MaxGraphTextureMips || (!renderTarget && !sampled) ||
         !graphics::IsValidPixelFormat(desc.format) ||
-        format.compression != graphics::PixelCompression::None) {
+        (renderTarget && format.compression != graphics::PixelCompression::None) ||
+        (sampled && desc.mipLevels > graphics::FullMipCount(desc.width, desc.height))) {
         return Result<GraphTexture>::Failure(RecordGraphError(
             state, ErrorCode::InvalidArgument, true,
             "texture '{}' has an invalid description (graph textures are uncompressed render "
-            "targets, format {})",
+            "targets or uploaded sampled textures, format {})",
             name != nullptr ? name : "", graphics::PixelFormatName(desc.format)));
     }
 
@@ -675,6 +678,16 @@ Result<GraphPass> RenderGraph::AddPassWithAccesses(TraceScopeName& name, GraphPa
                                              passName, StringView(accessName), resource.name));
         }
 
+        // Sampled 그래프 텍스처의 내용은 업로드뿐이다(장치 용도에 쓰기가 없다).
+        if (resource.kind == GraphResourceKind::Texture && !resource.imported &&
+            resource.textureDesc.usage == graphics::TextureUsage::Sampled &&
+            graphics::IsWritableAccess(access.access)) {
+            return rollback(RecordGraphError(
+                state, ErrorCode::InvalidArgument, true,
+                "pass '{}' writes sampled graph texture '{}'; its content comes from uploads only",
+                passName, resource.name));
+        }
+
         if (graphics::HasAnyAccess(access.access, forbidden)) {
             if (raster && graphics::HasAnyAccess(access.access, graphics::UavAccessMask)) {
                 return rollback(RecordGraphError(
@@ -715,6 +728,15 @@ Result<GraphPass> RenderGraph::AddPassWithAccesses(TraceScopeName& name, GraphPa
 
     // 렌더 타깃 접근이다(attachment).
     if (target.kind == GraphTargetKind::Texture) {
+        const ResourceRecord& resource = state.resources[target.texture.index];
+        if (!resource.imported &&
+            resource.textureDesc.usage != graphics::TextureUsage::RenderTarget) {
+            return rollback(RecordGraphError(state, ErrorCode::InvalidArgument, true,
+                                             "pass '{}' renders to '{}', which is not a render "
+                                             "target graph texture",
+                                             passName, resource.name));
+        }
+
         auto added = AddUse(arena_, state, passName, firstUse, target.texture.index, 0,
                             ResourceAccess::RenderTarget, GraphAccessFlags::None);
         if (!added) {
@@ -727,7 +749,7 @@ Result<GraphPass> RenderGraph::AddPassWithAccesses(TraceScopeName& name, GraphPa
         const SubresourceUse& use = state.uses[index];
         const ResourceRecord& resource = state.resources[use.resource];
         const SubresourceTrack& track = state.tracks[resource.firstTrack + use.subresource];
-        if (!resource.imported && track.lastProducer == GraphIndexNone &&
+        if (!resource.imported && track.lastProducer == GraphIndexNone && !track.uploaded &&
             graphics::HasAnyAccess(use.access, graphics::ReadOnlyAccessMask)) {
             return rollback(
                 RecordGraphError(state, ErrorCode::InvalidArgument, true,
@@ -774,11 +796,13 @@ Result<GraphPass> RenderGraph::AddPassWithAccesses(TraceScopeName& name, GraphPa
                                          ErrorCodeName(pushed.Error())));
     }
 
-    // pass를 넣은 뒤에만 마지막 생산자를 바꾼다(실패한 pass가 생산자로 남지 않는다).
+    // pass를 넣은 뒤에만 마지막 생산자를 바꾼다(실패한 pass가 생산자로 남지 않는다). 접근을 선언한
+    // 자원에는 그 뒤 업로드를 받지 않는다(업로드는 첫 pass 앞에서 실행된다).
     for (usize index = firstUse; index < state.uses.Size(); ++index) {
         const SubresourceUse use = state.uses[index];
+        ResourceRecord& resource = state.resources[use.resource];
+        resource.accessed = true;
         if (graphics::IsWritableAccess(use.access)) {
-            ResourceRecord& resource = state.resources[use.resource];
             state.tracks[resource.firstTrack + use.subresource].lastProducer = passIndex;
             resource.produced = true;
         }
@@ -825,6 +849,11 @@ Result<void> RenderGraph::Execute() noexcept {
         outcome = Result<void>::Failure(state.failure);
     } else if (state.mode == GraphMode::Deferred) {
         outcome = CompileGraph(arena_, state);
+        // 업로드는 첫 pass 앞에서 한다(UE SubmitBufferUploads와 같은 자리, 기록이 열리기 전).
+        if (outcome) {
+            outcome = ExecuteUploads(arena_, state);
+        }
+
         if (outcome) {
             for (uint32 pass = 0; pass < state.passes.Size() && outcome; ++pass) {
                 if (!state.passes[pass].culled) {
@@ -865,6 +894,7 @@ GraphLifetime LifetimeOf(const GraphState* state, GraphResourceKind kind, uint32
     lifetime.lastPass = record.lastPass;
     lifetime.references = record.references;
     lifetime.released = record.released;
+    lifetime.reusedWithinGraph = record.reusedWithinGraph;
     return lifetime;
 }
 

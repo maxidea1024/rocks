@@ -10,6 +10,34 @@
     },
     {
       "kind": "field",
+      "name": "rocks::config_fixture::DisplaySettings::frameCap",
+      "id": "96a3b58a21e04e51815b798b143505bd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::DisplaySettings::gamma",
+      "id": "76fc572d1f704e5da51d146b06c113ea",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::DisplaySettings::recentMaps",
+      "id": "c84ab416274b49fc9f569cb7246cb403",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::config_fixture::DisplaySettings::textureBudget",
+      "id": "3d152870aadd4037b8932dab0b7cbd0b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::config_fixture::FixtureLayer::names",
       "id": "25838aedc8ff42468bd3d565a157a68f",
       "aliases": [],
@@ -215,6 +243,13 @@
       "kind": "type",
       "name": "rocks::config_fixture::BlobSettings",
       "id": "3ae497ae5d26415291f2a6db47ec0e90",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::config_fixture::DisplaySettings",
+      "id": "94f56763aaeb48988f53e9fc894a1bc3",
       "aliases": [],
       "retired": false
     },

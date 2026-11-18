@@ -1,0 +1,20 @@
+// Device profiles (Docs/Design/ConfigSystem.ko.md section 6.2). Selection order: --device-profile=<name>, the project's "profile",
+// match rules (device traits such as gpu.memory_mib), then the platform default. Projects add profiles and values in their own
+// Config/DeviceProfiles.json; values target console setting names or <Branch>.<Section>.<field path> (for example
+// "quality.shadow": "1" for the quality group variable, Docs/Design/CVarSystem.ko.md section 11).
+{
+  "DeviceProfiles": {
+    // Memory buckets, largest first: a device belongs to the first bucket whose minimum it reaches (memory.system_mib).
+    "memoryBuckets": [
+      { "name": "Large", "minimumMiB": 16384 },
+      { "name": "Medium", "minimumMiB": 8192 },
+      { "name": "Small", "minimumMiB": 4096 },
+      { "name": "Tiny", "minimumMiB": 0 }
+    ],
+    "profiles": {
+      "Windows": { "platforms": ["Windows"] },
+      "Mac": { "platforms": ["Mac"] },
+      "Android": { "platforms": ["Android"] }
+    }
+  }
+}

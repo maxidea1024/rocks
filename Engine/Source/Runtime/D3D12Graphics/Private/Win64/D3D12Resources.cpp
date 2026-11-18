@@ -32,7 +32,7 @@ Result<SwapChainHandle> D3D12Device::CreateSwapChain(const SwapChainDesc& desc) 
     factory_->MakeWindowAssociation(window, DXGI_MWA_NO_ALT_ENTER);
 
     SwapChainRecord record;
-    if (FAILED(swapChain1->QueryInterface(IID_PPV_ARGS(record.swapChain.Out())))) {
+    if (FAILED(swapChain1.TryQueryAs(record.swapChain))) {
         return FailWith<SwapChainHandle>("IDXGISwapChain3 is not available");
     }
     record.width = desc.width;
@@ -261,8 +261,7 @@ Result<BufferViewHandle> D3D12Device::CreateBufferView(BufferHandle handle,
     }
 
     BufferViewRecord record;
-    buffer->resource->AddRef();
-    record.resource.Attach(buffer->resource.Get());
+    record.resource = buffer->resource.Share();
     record.descriptor = descriptor.Value();
     record.cpuDescriptor = cpuDescriptor;
     record.format = desc.format;
@@ -525,8 +524,7 @@ Result<TextureHandle> D3D12Device::CreateTextureView(TextureHandle texture,
     const PixelFormatPlane& layout = GetPixelFormatInfo(source->format).planes[desc.plane];
     TextureRecord record;
     // view는 원 자원에 참조를 하나 더 잡는다(원 텍스처를 먼저 Retire해도 자원이 산다).
-    source->resource->AddRef();
-    record.resource.Attach(source->resource.Get());
+    record.resource = source->resource.Share();
     record.width = MipExtent(source->width, layout.widthShift);
     record.height = MipExtent(source->height, layout.heightShift);
     record.mipLevels = source->mipLevels;

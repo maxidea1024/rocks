@@ -40,9 +40,10 @@ enum class ConsoleSettingFlags : uint32 {
     DevelopmentOnly = 2,
     // 설정 snapshot에 넣는다(UE ECVF_RenderThreadSafe).
     RenderRead = 4,
-    // 바뀐 값이 다음 시작 때 효력을 갖는다(표시·저장은 CF3).
+    // 바뀐 값이 다음 시작 때 효력을 갖는다(시작 뒤에는 지금 값을 유지 — CompleteStartup 참고).
     RestartRequired = 8,
-    // 시작(ConfigContext::CompleteStartup) 뒤에는 새로 쓸 수 없다.
+    // 시작(ConfigContext::CompleteStartup) 뒤에는 이번 실행 값이 바뀌지 않는다(RestartRequired와
+    // 같은 규칙 — 파일 층 변경은 재시작 대기, 그 밖은 BootValueIgnored).
     StartupOnly = 16,
     // 사용자 층이 쓸 수 있다.
     UserConfig = 32,

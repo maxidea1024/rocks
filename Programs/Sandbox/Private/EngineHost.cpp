@@ -1,7 +1,10 @@
 #include "EngineHost.h"
 
+#include "GraphicsDeviceTraits.h"
+
 #include <Core/Containers/Array.h>
 #include <Core/Diagnostics/Log.h>
+#include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/StringBuilder.h>
 #include <Engine/Engine.h>
 #include <HostConfig/HostSettings.h>
@@ -263,6 +266,36 @@ bool CheckConfiguredFileLogging() noexcept {
     return passed;
 }
 
+// 장치 능력을 기기 특성으로 옮기면 품질 등급 요구(기기 조건)가 그 값으로 판정된다(설정 CF4 —
+// Config는 Graphics를 모르고 호스트가 특성을 채운다).
+bool CheckDeviceTraitsFromCaps(Allocator& allocator) noexcept {
+    graphics::DeviceCaps caps;
+    caps.limits.textureSize2D = 16384;
+    caps.limits.colorAttachments = 8;
+    caps.features.computeShaders = true;
+    config::DeviceTraits traits(allocator);
+    if (!AppendGraphicsDeviceTraits(caps, traits)) {
+        return false;
+    }
+
+    config::DeviceCondition large(allocator);
+    config::DeviceCondition huge(allocator);
+    String reason(allocator);
+    if (!large.trait.TryAssign(config::DeviceTraitNames::GpuTextureSize2D) ||
+        !huge.trait.TryAssign(config::DeviceTraitNames::GpuTextureSize2D)) {
+        return false;
+    }
+
+    large.atLeast = 8192.0;
+    huge.atLeast = 32768.0;
+    auto fits = config::MatchDeviceCondition(traits, large, reason);
+    auto exceeds = config::MatchDeviceCondition(traits, huge, reason);
+    config::DeviceTrait compute;
+    return fits && fits.Value() && exceeds && !exceeds.Value() &&
+           traits.Find(config::DeviceTraitNames::GpuComputeShaders, compute) &&
+           compute.number == 1.0;
+}
+
 } // namespace
 
 int RunEngineHost(Allocator& allocator, const EngineHostOptions& options) noexcept {
@@ -306,6 +339,9 @@ int RunEngineHost(Allocator& allocator, const EngineHostOptions& options) noexce
         LogInstallScope installed(host.System());
         (void)host.System().SetThreadName("GameThread");
         (void)host.Watch(settings.Context());
+        // 개발 빌드는 설정 파일을 감시해 프레임 sync 지점에서 다시 읽는다(출시 규칙이면 Unsupported
+        // — 기록하지 않는다).
+        (void)settings.StartHotReload();
         // 7) trace 세션(설정 섹션 Trace)·콘솔 명령·--trace. 세션을 열지 못해도 엔진은 돈다.
         TraceSession trace;
         TraceSessionSettings traceSettings = trace_control::MakeTraceSessionSettings(
@@ -390,7 +426,11 @@ uint32 RunEngineHostSelfTest() noexcept {
     printf("  [NOT RUN] engine host: trace file log records (TraceAnalysis is not linked in "
            "Release)\n");
 #endif
-    return (passed ? 0u : 1u) + (configured ? 0u : 1u) + (traced ? 0u : 1u);
+    SystemAllocator allocator;
+    const bool traits = CheckDeviceTraitsFromCaps(allocator);
+    printf("  [%s] engine host: device caps become config device traits\n",
+           traits ? "PASS" : "FAIL");
+    return (passed ? 0u : 1u) + (configured ? 0u : 1u) + (traced ? 0u : 1u) + (traits ? 0u : 1u);
 }
 
 } // namespace sandbox

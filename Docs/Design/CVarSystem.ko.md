@@ -1,6 +1,6 @@
 # CVar·치트 명령 설계
 
-기준일: 2026-11-18, 개정 2(결정 확정). 실행 중 이름으로 읽고 바꾸는 타입 있는 설정 변수 **CVar**와, 개발 빌드에서 게임 상태를 직접 바꾸는 **치트 명령**을 정한다.
+기준일: 2026-11-18, 개정 3(결정 확정). 실행 중 이름으로 읽고 바꾸는 타입 있는 설정 변수 **CVar**와, 개발 빌드에서 게임 상태를 직접 바꾸는 **치트 명령**을 정한다.
 
 이 문서는 [설정 계층과 콘솔 설정](ConfigSystem.ko.md)(이하 Config)의 5절 "콘솔 설정과 명령"을 대체하는 상세 스펙이다. 값 저장소·층·출처 스택·sync 지점·JSON 파일·`--set`·설정 struct는 Config를 그대로 쓰고, 이 문서는 그 위에 다음을 더한다.
 - 한 문장으로 정의하고 `.Get()`으로 읽는 타입 있는 핸들(`CVar<T>`·`BootCVar<T>`·`CVarGroup`·`ConsoleCommand`)
@@ -70,7 +70,7 @@ ConsoleCommand TeleportCommand = cvar::Command("cheat.teleport", &Teleport)
 | 쓰기 | 어느 스레드에서나 부를 수 있다. 검증은 즉시, 적용은 다음 sync 지점이다 | Config 5.3을 확장(이전에는 게임 lane만 쓰기 가능) |
 | 우선순위 | Config 층 순서에 Hotfix·Code·Server·Scoped 층을 더한 하나의 순서(6절) | UE SetBy 16단계(`IConsoleManager.h:152–187`) |
 | 범위 | Global → World → 플레이어·Viewport. 자식 범위 값이 층과 무관하게 이긴다. 범위는 소유 객체와 수명을 같이한다 | UE에는 없다(전역 값 하나) |
-| 부팅 고정 | `BootCVar<T>`는 `Get()`만 있다. `ConfigContext::CompleteStartup` 뒤에는 이번 실행 값을 바꾸는 쓰기를 모두 거부한다. 사용자가 다음 실행용으로 고르는 값(`UserSetting()`)만 저장한다 | Config `StartupOnly`·`RestartRequired` 플래그를 타입 하나로 올렸다 |
+| 부팅 고정 | `BootCVar<T>`는 `Get()`만 있다. `ConfigContext::CompleteStartup` 뒤에는 이번 실행 값이 바뀌지 않는다. 직접 쓰기는 거부하고, 파일 층(사용자가 다음 실행용으로 고르는 `UserSetting()` 값 포함) 변경은 재시작 대기로, 파생·휘발 층 변경은 무시로 처리한다(9절) | Config `StartupOnly`·`RestartRequired` 플래그를 타입 하나로 올렸다 |
 | 프리셋 | `CVarGroup`을 코드에서 정의하고 Quality 층에 펼친다. 구성원 여부는 항목에서 자동으로 정해진다 | UE scalability group 적용(`Engine/Private/Scalability.cpp:412–446` `SetGroupQualityLevel`) |
 | 치트 | `Cheat()` 변수·명령은 출시 빌드에서 등록되지 않고 값은 기본값 상수다. 개발 빌드에서는 치트가 꺼진 동안 콘솔 쓰기를 거부한다 | UE `ECVF_Cheat`(`IConsoleManager.h:72–76`), `UE_WITH_CHEAT_MANAGER`(`Engine/Classes/GameFramework/CheatManagerDefines.h:9`), `AGameModeBase::AllowCheats`(`GameModeBase.h:479`) |
 | 치트 명령 | 지금은 함수 포인터 빌더, 함수 리플렉션(CU2) 뒤에는 `CheatSet` 객체의 리플렉션 함수다 | UE `UCheatManager`의 `UFUNCTION(exec)`와 확장(`CheatManager.h:69–103`, `Engine/Private/CheatManager.cpp:93–147`) |
@@ -316,8 +316,18 @@ cvar::Index Index() const noexcept;
 ## 9. 부팅 고정 변수
 
 - `cvar::Boot(name, default)` → `BootCVar<T>`. `Get()`만 있다.
-- `ConfigContext::CompleteStartup`(Config 5.4 부트 5단계)이 봉인이다. 봉인 전에는 엔진·엔진 플랫폼·프로젝트·프로젝트 플랫폼·기기 프로필·사용자(`UserSetting()`일 때)·세션 층 쓰기만 받는다. 봉인 뒤에는 콘솔·핫픽스·hot reload를 포함해 이번 실행 값을 바꾸는 쓰기를 모두 거부하고 `BootSealed` 진단을 남긴다.
-- **다음 실행용 값.** `UserSetting()` 부팅 변수는 봉인 뒤에도 사용자 층 쓰기(옵션 메뉴에서 그래픽 backend 고르기 등)를 받는다. 그 값은 사용자 파일에 저장되고 이번 실행의 `Get()`은 바뀌지 않는다. Explain은 `pending restart: <값>`을 보이고 `RestartRequired` 진단을 남긴다. 이것이 프롬프트의 `RequiresRestart`를 대신한다(17절 VD15).
+- `ConfigContext::CompleteStartup`(Config 5.4 부트 5단계)이 봉인이다. 봉인 전에는 엔진·엔진 플랫폼·프로젝트·프로젝트 플랫폼·기기 프로필·사용자(`UserSetting()`일 때)·세션 층이 값을 정한다.
+- 봉인 뒤 이번 실행 값은 바뀌지 않는다. 들어온 변경은 경로에 따라 셋으로 나뉜다. 설정 struct 필드의 `RestartRequired`·`StartupOnly`와 같은 "부팅 값" 규칙이다(Config 5.1·8절 — CF3 구현, Config 개정 7·8).
+
+| 들어온 길 | 처리 | 진단 |
+|---|---|---|
+| 이번 실행에 바로 쓰는 쓰기(콘솔 입력·이름으로 하는 `Set`·`ScopedOverride`) | 쓰기 때 거부한다. 부른 쪽이 바로 효력을 기대하므로 결과로 알린다 | Error `BootSealed` |
+| 파일 층(엔진·엔진 플랫폼·프로젝트·프로젝트 플랫폼 파일의 hot reload, `UserSetting()` 변수의 사용자 층) | 층에는 받아 두고 Sync가 지금 값과 출처를 유지한다. (이름, 대기 값, 지금 값)을 재시작 대기 목록(`ConfigContext::GetPendingRestarts`)에 남긴다. 다음 실행에 같은 파일이 다시 읽히기 때문이다. 되돌리면 대기가 없어진다 | Note `RestartRequired` |
+| 그 밖의 층(기기 프로필·품질·기능 묶음 같은 파생 층, 핫픽스·세션 같은 휘발 층) | 지금 값을 유지하고 대기를 만들지 않는다 | Warning `BootValueIgnored`(같은 이름·층·출처에 한 번) |
+
+- 파생 층을 대기로 두지 않는 까닭: 시작 뒤 GPU 특성으로 다시 고른 기기 프로필이 부팅 변수를 정하면, 다음 실행의 부팅 때는 GPU 특성이 없어 같은 값이 다시 대기가 된다("영원한 대기"). 부팅 때 GPU 특성을 아는 방법은 Config 11절의 결정 필요 항목이다.
+- **다음 실행용 값.** `UserSetting()` 부팅 변수는 봉인 뒤에도 사용자 층 쓰기(옵션 메뉴에서 그래픽 backend 고르기 등)를 받는다. 그 값은 사용자 파일에 저장되고 이번 실행의 `Get()`은 바뀌지 않는다. 위 표의 파일 층 행 그대로 대기 목록에 오르고, Explain은 `pending restart: <값>`을 보인다. 옵션 메뉴는 대기 목록으로 "재시작 필요" 표시를 한다. 이것이 프롬프트의 `RequiresRestart`를 대신한다(17절 VD15).
+- 대기 목록은 Config CF3 구현(`ConfigPendingRestart`·`GetPendingRestarts`)을 그대로 쓴다. CVR4는 그 위에 `BootCVar`를 올리고, 쓰기 때 거부(`BootSealed`)를 더한다. CF3 구현에서는 콘솔 쓰기도 `BootValueIgnored`로 처리된다.
 - 봉인 때 부팅 값을 불변 블록으로 굳혀 모든 snapshot이 그 블록을 공유한다. `Get()`은 묶인 snapshot의 부팅 블록 칸을 읽는다(범위·세대 없음).
 - 봉인 전 `Get()`은 Debug·Development 빌드에서 assert다(초기화 순서 버그를 잡는다). 렌더 lane과 worker는 봉인 뒤에 시작하므로(Config 5.4 순서) 실제로는 게임 lane의 부트 코드만 해당한다.
 - 콘솔에서 바꾸려 하면 `render.backend is a boot variable; set it in a config file or with --set and restart`를 출력한다. Explain·dump는 `[boot]`를 붙인다.
@@ -327,14 +337,22 @@ cvar::Index Index() const noexcept;
 
 Config 5.3·5.4의 sync 지점(엔진 `RunFrame` 2단계 뒤, 3단계 전)에서 게임 lane이 `ConfigContext::Sync`를 부른다. 순서는 다음과 같다.
 
+0. sync hook을 등록 순서대로 부른다(`ConfigContext::AddSyncHook`·`RemoveSyncHook` — Config CF3 구현). hook은 게임 lane에서 큐를 보기 전에 불리고, 층 입력·`Unset`·`ReplaceLayerText`로 쓰기 큐에 넣을 수 있다. 넣은 것은 이번 Sync의 1단계가 적용한다. hook 안에서 `Sync`를 부르거나 hook을 빼면 `Busy`다. hot reload가 이 단계를 쓴다(아래).
 1. 쓰기 큐를 넣은 순서대로 층 스택·범위 값에 적용한다(권한 재검사 — 6.2절).
-2. 묶음 해결 반복: 건드린 변수의 유효값을 계산한다 → 유효값이 바뀐 `CVarGroup`의 등급을 Quality 층에 펼친다 → 펼친 결과로 다시 계산한다. 바뀐 묶음이 없으면 멈춘다. 8번(`MaxGroupPasses`) 안에 멈추지 않으면 마지막 결과를 쓰고 `GroupNoConverge` 진단을 남긴다.
+2. 묶음 해결 반복: 건드린 변수의 유효값을 계산한다 → 유효값이 바뀐 `CVarGroup`의 등급을 Quality 층에 펼친다 → 펼친 결과로 다시 계산한다. 바뀐 묶음이 없으면 멈춘다. 8번(`MaxGroupPasses`) 안에 멈추지 않으면 마지막 결과를 쓰고 `GroupNoConverge` 진단을 남긴다. 봉인 뒤 부팅 변수는 이 계산에서 지금 값을 유지하고 9절 표대로 대기 목록·진단을 남긴다.
 3. 이번 Sync 전체에서 유효값이 바뀐 칸의 세대를 올린다(반복 중 값이 갔다가 되돌아온 칸은 올리지 않는다).
 4. 바뀐 조각만 복사한 새 snapshot을 게시하고 게임 lane을 다시 묶는다.
 5. 큐에 든 콘솔 명령을 실행한다(Config 5.2와 같다).
 6. `OnSynced`를 부른다.
 
 대기 값은 `Register`가 바로 적용하므로(5절) Sync 순서에 들어가지 않는다.
+
+**hot reload**(에디터·개발 빌드, Config 8절 — CF3 구현 `ConfigFileReloader`, `Config/ConfigReload.h`)
+- 엔진·프로젝트·사용자 `Config/` 폴더를 감시한다. 감시 이벤트는 "다시 읽을 파일" 표시만 하고 값을 바꾸지 않는다. 그래서 값은 sync 지점에서만 바뀐다는 규칙이 hot reload에도 그대로다.
+- 0단계 hook이 표시된 파일만 다시 읽는다. 있는 파일은 `ReplaceLayerText`로 그 (층, 태그) 입력을 바꾼다(사용자 파일은 관대한 읽기로 바꾼다). 지운 파일은 `Unset(층, 태그)`로 뺀다. 감시 이벤트를 잃었으면(Overflow) 그 루트의 모든 branch 파일을 다시 읽는다.
+- `ReplaceLayerText`는 새 내용을 `AddLayerText`처럼 검사하고, 통과해야만 그 앞에 `Unset`을 넣는다. 잘못 고친 파일은 옛 입력을 지우지 않고 진단만 남긴다. 같은 Sync의 1단계가 `Unset`과 새 입력을 함께 적용하므로 다른 스레드는 옛 값 전체나 새 값 전체만 본다.
+- 바뀐 값이 부팅 변수면 9절 표의 파일 층 행(재시작 대기)이다. 출시 규칙에서는 감시하지 않는다(`Start`가 `Unsupported`).
+- CVR2에서 쓰기 큐(6.2절)가 생기면 hook은 그 큐에 넣는다. 감시 이벤트를 받는 스레드가 직접 큐에 넣지 않고 hook을 거치는 까닭은, 파일 읽기와 검사를 게임 lane의 sync 지점에 모아 한 Sync에 한 파일의 입력이 통째로 들어가게 하기 위해서다.
 
 - 게임 lane 전용 API(`Sync`·`CompleteStartup`·`Register`·`CreateScope`·`DestroyScope`·`Explain`·`DumpOverrides`·`ReportUnresolved`)는 Debug·Development 빌드에서 소유 스레드를 assert한다.
 - 같은 Sync에서 바뀐 값은 같은 snapshot에 함께 들어간다. 다른 스레드는 그 snapshot 전체를 보거나 이전 snapshot 전체를 본다.
@@ -350,7 +368,8 @@ Config 5.3·5.4의 sync 지점(엔진 `RunFrame` 2단계 뒤, 3단계 전)에서
 |---|---|---|---|---|
 | 핸들 상수 부분 | 없음(상수 초기화) | 모두 | 필요 없음 | 프로그램 |
 | 핸들 번호 `index_` | 첫 `Register`(CAS 한 번, 이후 불변) | 모두 | 원자 값(relaxed). 그 칸이 든 snapshot은 등록 뒤 release로 게시되므로, 그 snapshot을 acquire로 얻은 스레드는 번호도 본다. 번호가 안 보이면 칸도 없으므로 결과가 같다(5절) | 프로그램 |
-| 쓰기 큐 | 모든 스레드(`Set`·`Clear`·콘솔 입력·hot reload·`ScopedOverride` 소멸) | 게임 lane(Sync) | 다중 생산자·단일 소비자 큐(Core `BoundedMpscQueue` 또는 잠금 큐 — 쓰기는 읽기 경로가 아니다). 꽉 차면 `Busy`를 돌려주고 버리지 않는다 | 문맥 |
+| sync hook 목록 | 게임 lane(`AddSyncHook`·`RemoveSyncHook`) | 게임 lane(Sync 0단계) | 소유 스레드 assert. hook 안에서 빼면 `Busy` | 문맥(hook의 context는 뺄 때까지 산다) |
+| 쓰기 큐 | 모든 스레드(`Set`·`Clear`·콘솔 입력·`ScopedOverride` 소멸), 게임 lane의 sync hook(hot reload) | 게임 lane(Sync) | 다중 생산자·단일 소비자 큐(Core `BoundedMpscQueue` 또는 잠금 큐 — 쓰기는 읽기 경로가 아니다). 꽉 차면 `Busy`를 돌려주고 버리지 않는다 | 문맥 |
 | 현재 snapshot 포인터 | 게임 lane(Sync·`Register`) | `Acquire()` | 짧은 잠금 안에서 바꾸고 참조 계수를 올려 돌려준다. 잠금은 게시·`Acquire`만 잡고 `Get()`은 잡지 않는다 | 참조 계수 |
 | snapshot·조각·문자열 블록 | 만들 때 한 번(게임 lane) | 묶인 모든 스레드 | 불변 + 원자 참조 계수. 바뀐 조각은 새로 만들고 옛 조각은 마지막 참조가 놓일 때 해제한다 | 마지막 참조까지 |
 | 스레드 묶음 | 그 스레드만 | 그 스레드만 | thread_local. 묶음이 참조 하나를 쥔다(게임 lane은 현재 snapshot, 렌더 lane은 packet, worker는 작업 문맥) | 묶음 범위 |
@@ -404,7 +423,8 @@ CVarGroup ShadowGroup = cvar::Group("quality.shadow", 2)
 | `BootSealed`·`ScopeNotAllowed` | 9절·8절 |
 | `UndefinedLevel`·`GroupNoConverge` | 11절·10절 |
 | `LateBound`·`UnresolvedName` | 이 절 |
-| `RestartRequired` | 부팅 변수에 다음 실행용 사용자 값을 저장했다(9절) |
+| `RestartRequired` | 봉인 뒤 파일 층(사용자 층 포함)이 부팅 변수를 바꿨다 — 재시작 대기(9절) |
+| `BootValueIgnored` | 봉인 뒤 파생·휘발 층이 부팅 변수를 바꾸려 했다 — 지금 값 유지(9절) |
 
 ## 13. 치트와 네트워크
 
@@ -592,7 +612,7 @@ public:
 - 미해결: 오타 이름이 `ReportUnresolved`에 did-you-mean과 함께 나온다. 늦게 등록한 변수에 대기 값이 적용되고 `LateBound`가 남는다.
 - 층: 세션 > 기기 프로필 > 프로젝트. 콘솔 `reset` 뒤 세션 값이 드러난다. Explain에 `파일:줄:열`. `ClearLayer(Hotfix)`로 핫픽스 롤백.
 - 권한: 치트 꺼짐에서 콘솔 쓰기 거부, 클라이언트에서 `Replicated()` 콘솔 쓰기 거부, Server 층 값이 클라이언트 콘솔 값을 이긴다.
-- 부팅: 봉인 전 파일·`--set` 값 적용, 봉인 뒤 모든 쓰기 거부 + `BootSealed`, 봉인 전 `Get()` assert(사망 시험).
+- 부팅: 봉인 전 파일·`--set` 값 적용, 봉인 뒤 콘솔·`Set` 거부 + `BootSealed`, 봉인 뒤 파일 층(hot reload·사용자 층) 변경은 대기 목록에 오르고 `Get()` 불변·되돌리면 대기 없어짐, 기기 프로필 재적용은 `BootValueIgnored` 한 번·대기 없음, 봉인 전 `Get()` assert(사망 시험).
 - 범위: global=90, world=100, player1=110, player2(상속)=100. world 파괴 뒤 player2=90.
 - 프리셋: 묶음을 0으로 바꾸면 구성원이 Quality 층 값이 되고 프로젝트 값을 이긴다. 정의되지 않은 등급 거부. 순환 묶음은 8회 뒤 `GroupNoConverge`.
 - Watcher: 첫 호출 true, 변경 없으면 false, 변경 뒤 true.
@@ -652,5 +672,6 @@ public:
 
 ## 23. 개정 이력
 
+- 개정 3(2026-11-18): Config CF3·CF4 병합(78d69a5d, Config 개정 5–8)에 맞췄다. 10절 Sync 순서에 sync hook(`AddSyncHook`, 큐 적용 전 0단계)을 넣고 hot reload 경로(`ConfigFileReloader` → hook → `ReplaceLayerText`·`Unset`)를 적었다. 10.1절 표에 sync hook 목록을 더했다. 9절 봉인 뒤 처리를 Config의 부팅 값 규칙과 같게 바꿨다: 직접 쓰기는 `BootSealed` 거부, 파일 층 변경은 재시작 대기(`GetPendingRestarts`, `RestartRequired`), 파생·휘발 층 변경은 지금 값 유지와 `BootValueIgnored`. 앞의 "봉인 뒤 모든 쓰기 거부"는 시작 뒤 기기 프로필 재적용마다 오류를 내고 hot reload한 파일의 다음 실행 효력을 보이지 못했다. 1·12·19절을 함께 고쳤다.
 - 개정 2(2026-11-18): VD2(소문자 점 경로 이름, `r.X` 안 씀)를 사용자가 권장안으로 확정했다. 로깅 세션 조율로 CVR7 `log.*` 이관 규칙을 적고, `String`·`Name` 변수의 `Validate` 인자를 `StringView`로 정했다(`ValidateArg<T>` — 4.2절). 22절의 다른 문서 개정을 모두 반영했다(Config 개정 4, RenderBase 개정 13, UiToolkit CU2 행, UnrealCoreFeatureAudit UE-C21·UE-C29 행). 구현 착수는 다른 세션 작업 뒤 사용자가 정한다.
 - 개정 1(2026-11-18): 초안. 사용자 제공 요구(타입 있는 CVar·부팅 고정·enum·레이어 스택·컨텍스트·프레임 snapshot·프리셋·지연 바인딩·치트·복제·도구)를 Config 개정 3과 엔진 원칙(전역 생성자 금지·JSON·소문자 점 이름·결정적 시험)에 맞춰 옮기고, 객체 시스템 연결(14절)을 더했다. UE 5.8.4 `IConsoleManager.h`(SetBy 순서·`ECVF_Cheat`·`TAutoConsoleVariable`)·`CheatManager`(exec 함수·확장·권한 경로)·`CheatManagerDefines.h`를 조사했다. 같은 날 리뷰어 1명의 교차 검증(clang으로 consteval 빌더·상수 초기화·Release 문자열 제거·다른 TU 주소 항목 시험)을 반영했다: Sync 순서(묶음 해결을 유효값 계산과 한 반복으로), 등록 즉시 게시, 치트 허용 상태를 CVar 하나로, Scoped < 콘솔 < Server, `RequiresRestart`를 BootCVar로 흡수, 범위 값 하나, 문자열·Name 기본값 overload, 지역 핸들 거부, `Get` overload 축소, UE 인용 정정. 사용자 요구(스레드 문제 없음)로 10.1절 스레드 안전성을 더하고 worker가 snapshot 참조를 쥐게 했다.

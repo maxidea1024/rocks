@@ -180,7 +180,8 @@ TEST(LogHostKeepsThePresetByDefault) {
     host.Stop();
 }
 
-// 실행 중 log.level·log.levels 변경은 sync 지점에서 적용되고, 시작 뒤 고정 설정의 변경은 거부된다.
+// 실행 중 log.level·log.levels 변경은 sync 지점에서 적용되고, 시작 뒤 고정 설정의 콘솔 변경은 값을
+// 바꾸지 않는다(Warning BootValueIgnored — Docs/Design/ConfigSystem.ko.md 8절).
 TEST(LogHostAppliesRuntimeLevelChangesAndRejectsStartupOnlyChanges) {
     LogSettingsFixture fixture;
     fixture.Apply(R"({"log.levels": "Audio=error"})");
@@ -207,10 +208,23 @@ TEST(LogHostAppliesRuntimeLevelChangesAndRejectsStartupOnlyChanges) {
     CHECK(logs.IsEnabled(LogLevel::Error, audio) && !logs.IsEnabled(LogLevel::Warning, audio));
 
     context.Diagnostics().Clear();
-    CHECK(!context.AddAssignment(config::ConfigLayer::Console, "console", LogModeSetting, "sync"));
-    CHECK(!context.AddAssignment(config::ConfigLayer::Console, "console", LogFileEnabledSetting,
-                                 "true"));
+    REQUIRE(context.AddAssignment(config::ConfigLayer::Console, "console", LogModeSetting, "sync"));
+    REQUIRE(context.AddAssignment(config::ConfigLayer::Console, "console", LogFileEnabledSetting,
+                                  "true"));
+    REQUIRE(context.Sync());
     CHECK(logs.Mode() == LogMode::Async);
+    auto mode = context.FindConsoleSetting(LogModeSetting);
+    REQUIRE(mode);
+    CHECK(context.ConsoleValue(mode.Value()).string.View() != StringView("sync"));
+    usize ignored = 0;
+    for (usize index = 0; index < context.Diagnostics().Count(); ++index) {
+        ignored +=
+            context.Diagnostics().Get(index).code == config::ConfigDiagnosticCode::BootValueIgnored
+                ? 1
+                : 0;
+    }
+
+    CHECK(ignored == 2);
     host.Stop();
 }
 

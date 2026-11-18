@@ -2,6 +2,7 @@
 
 #include <Base/NumericLimits.h>
 #include <Graphics/DeviceTypes.h>
+#include <Platform/Win64/ComRef.h>
 
 #include "D3D11PixelFormats.h"
 
@@ -9,9 +10,9 @@
 #include <d3d11_4.h>
 #include <dxgi1_6.h>
 
-// D3D11Graphics 내부 공용 도구다(COM 참조·형식 표·진단 문자열). 장치 구현 파일들만 쓴다.
-// D3D12Graphics에도 같은 모양의 COM 참조·DXGI 형식 표가 있다. D3D 공용 도우미 모듈로 합치는 것은
-// 후속이다(좌표 전환 C7이 D3D12Device.cpp를 고치는 동안 그 파일을 건드리지 않으려고 미뤘다).
+// D3D11Graphics 내부 공용 도구다(형식 표·진단 문자열). 장치 구현 파일들만 쓴다. COM 참조는
+// PlatformBase(Platform/Win64/ComRef.h), DXGI 어댑터 도우미는 DxgiGraphics가 D3D12Graphics와 함께
+// 쓴다. D3D12Graphics에도 같은 모양의 DXGI 형식 표가 있으며 합치는 것은 후속이다.
 namespace rocks::graphics::d3d11 {
 
 // 기록 중 그릴 수 있는 스왑체인 버퍼 수다(flip model 최소 2).
@@ -39,74 +40,8 @@ inline constexpr usize MaxRetiredObjects = 7;
 inline constexpr GUID DxgiDebugDxgi = {
     0x25cddaa4, 0xb1c6, 0x47e1, {0xac, 0x3e, 0x98, 0x87, 0x5b, 0x5a, 0x2e, 0x2a}};
 
-// COM 객체 참조다. 소멸 시 Release한다(예외 없이 쓰는 최소 RAII).
-template <class T>
-class ComRef {
-public:
-    ComRef() noexcept = default;
-
-    ComRef(const ComRef&) = delete;
-    ComRef& operator=(const ComRef&) = delete;
-
-    ComRef(ComRef&& other) noexcept : pointer_(other.pointer_) {
-        other.pointer_ = nullptr;
-    }
-
-    ComRef& operator=(ComRef&& other) noexcept {
-        if (this != &other) {
-            Reset();
-            pointer_ = other.pointer_;
-            other.pointer_ = nullptr;
-        }
-
-        return *this;
-    }
-
-    ~ComRef() {
-        Reset();
-    }
-
-    void Reset() noexcept {
-        if (pointer_ != nullptr) {
-            pointer_->Release();
-            pointer_ = nullptr;
-        }
-    }
-
-    T* Get() const noexcept {
-        return pointer_;
-    }
-
-    T* operator->() const noexcept {
-        return pointer_;
-    }
-
-    // 출력 인자로 넘길 주소다. 기존 참조는 먼저 해제한다.
-    T** Out() noexcept {
-        Reset();
-        return &pointer_;
-    }
-
-    // 소유권을 넘겨준다(참조 수는 그대로다).
-    T* Detach() noexcept {
-        T* pointer = pointer_;
-        pointer_ = nullptr;
-        return pointer;
-    }
-
-    // 이미 참조를 하나 가진 포인터의 소유를 넘겨받는다.
-    void Attach(T* pointer) noexcept {
-        Reset();
-        pointer_ = pointer;
-    }
-
-    explicit operator bool() const noexcept {
-        return pointer_ != nullptr;
-    }
-
-private:
-    T* pointer_ = nullptr;
-};
+// COM 참조는 PlatformBase 공용 도구를 쓴다(Platform/Win64/ComRef.h).
+using platform::windows::ComRef;
 
 // 진단 문자열 조립 칸이다(셰이더 입력 대조 실패, HRESULT가 붙은 실패 설명). 넘치면 자른다.
 class Diagnostic {

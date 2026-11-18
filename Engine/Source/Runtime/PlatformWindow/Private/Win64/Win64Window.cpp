@@ -1,5 +1,6 @@
 #include <Platform/Clock.h>
 #include <Platform/DynamicLibrary.h>
+#include <Platform/Win64/WideString.h>
 #include <PlatformWindow/Window.h>
 
 #include <Windows.h>
@@ -235,22 +236,10 @@ Key KeyFromMessage(LPARAM lParam) noexcept {
     return extended ? ExtendedKey(scanCode) : BaseKey(scanCode);
 }
 
-// UTF-8 → UTF-16(널 종료). 넘치면 자른다. 변환할 수 없는 입력은 빈 문자열이다.
+// 창 제목 UTF-8 → UTF-16(널 종료). 넘치면 글자 경계에서 자른다. 잘못된 UTF-8은 빈 제목이다.
 void ToWide(StringView text, wchar_t (&buffer)[MaxTitleCharacters]) noexcept {
-    buffer[0] = L'\0';
-    if (text.ByteCount() == 0) {
-        return;
-    }
-    constexpr int MaxBytes = NumericLimits<int>::Max();
-    const int bytes = text.ByteCount() > static_cast<usize>(MaxBytes)
-                          ? MaxBytes
-                          : static_cast<int>(text.ByteCount());
-    int written = MultiByteToWideChar(CP_UTF8, 0, text.Data(), bytes, buffer,
-                                      static_cast<int>(MaxTitleCharacters - 1));
-    if (written <= 0) {
-        written = 0;
-    }
-    buffer[written] = L'\0';
+    (void)windows::ConvertUtf8ToWide(text.Data(), text.ByteCount(), buffer, MaxTitleCharacters,
+                                     windows::TextFit::Truncate);
 }
 
 class Win64Window final : public Window {

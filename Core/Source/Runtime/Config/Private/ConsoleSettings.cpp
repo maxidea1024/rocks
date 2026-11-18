@@ -206,7 +206,7 @@ uint32 ConsoleFlagsOfField(uint32 settingsFlags) noexcept {
 }
 
 StringView CheckConsoleLayer(const ConfigState& state, ConfigLayer layer, uint32 consoleFlags,
-                             bool incoming, ConfigDiagnosticCode& code) noexcept {
+                             ConfigDiagnosticCode& code) noexcept {
     code = ConfigDiagnosticCode::LayerNotAllowed;
     if (state.releaseRules && HasFlag(consoleFlags, ConsoleSettingFlags::DevelopmentOnly) &&
         layer != ConfigLayer::CodeDefault) {
@@ -227,11 +227,6 @@ StringView CheckConsoleLayer(const ConfigState& state, ConfigLayer layer, uint32
 
     if (layer == ConfigLayer::User && !HasFlag(consoleFlags, ConsoleSettingFlags::UserConfig)) {
         return "the user layer can write UserConfig settings only";
-    }
-
-    if (incoming && state.startupComplete &&
-        HasFlag(consoleFlags, ConsoleSettingFlags::StartupOnly)) {
-        return "a StartupOnly value cannot change after startup";
     }
 
     return {};
@@ -415,9 +410,9 @@ Result<void> FormatConsoleValue(ConfigState& state, const ConsoleSettingState& s
 }
 
 Result<StringView> CheckConsoleValue(ConfigState& state, const ConsoleSettingState& setting,
-                                     ConfigLayer layer, bool incoming, StringView text,
-                                     FieldValue& out, ConfigDiagnosticCode& code) noexcept {
-    const StringView problem = CheckConsoleLayer(state, layer, setting.flags, incoming, code);
+                                     ConfigLayer layer, StringView text, FieldValue& out,
+                                     ConfigDiagnosticCode& code) noexcept {
+    const StringView problem = CheckConsoleLayer(state, layer, setting.flags, code);
     if (!problem.IsEmpty()) {
         return Result<StringView>::Success(problem);
     }
@@ -535,7 +530,7 @@ Result<void> RecomputeConsoleSetting(ConfigState& state, const ConsoleSettingSta
 
         ConfigDiagnosticCode code = ConfigDiagnosticCode::InvalidSetting;
         auto checked =
-            CheckConsoleValue(state, setting, entry->layer, false, contribution, candidate, code);
+            CheckConsoleValue(state, setting, entry->layer, contribution, candidate, code);
         if (!checked) {
             return Result<void>::Failure(checked.Error());
         }
@@ -985,7 +980,7 @@ ConfigContext::RegisterConsoleSetting(const ConsoleSettingDefinition& definition
     if (!definition.defaultValue.IsEmpty()) {
         ConfigDiagnosticCode code = ConfigDiagnosticCode::InvalidSetting;
         FieldValue parsed(*allocator_);
-        auto checked = detail::CheckConsoleValue(*state, setting, ConfigLayer::CodeDefault, false,
+        auto checked = detail::CheckConsoleValue(*state, setting, ConfigLayer::CodeDefault,
                                                  definition.defaultValue, parsed, code);
         if (!checked) {
             return Result<ConsoleSettingId>::Failure(checked.Error());

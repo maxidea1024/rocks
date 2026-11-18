@@ -2342,7 +2342,7 @@ local content-addressed store → 팀 shared cache → 필요 시 승인된 remo
 | C++ module/header unit | 생성 헤더·macro·toolchain·cache 지원을 검증한 선택 실험 | 전면 필수화하지 않고 PCH 기준과 비교 |
 | Worker/agent 수 조정 | CPU뿐 아니라 TU peak RAM·IO·PCH 비용·사용자 작업 여유 반영 | swap/메모리 초과·editor 응답·critical path |
 
-Unity Build가 include 누락을 감추지 않도록 CI에 non-unity와 PCH 비활성 표본을 유지한다. adaptive 판단은 source-control writable 상태만이 아니라 최근 편집·TU 비용을 함께 사용한다. game module의 가벼운 변경이 Core public API·editor 전체를 재빌드하지 않게 module boundary를 지속 측정한다.
+유니티 빌드·작업 파일 분리·PCH의 구현 스펙은 [유니티 빌드·PCH 설계](UnityBuildPch.ko.md)다. Unity Build가 include 누락을 감추지 않도록 CI에 non-unity와 PCH 비활성 표본을 유지한다. adaptive 판단은 source-control writable 상태만이 아니라 최근 편집·TU 비용을 함께 사용한다. game module의 가벼운 변경이 Core public API·editor 전체를 재빌드하지 않게 module boundary를 지속 측정한다.
 
 ### 27.4 Incredibuild·FASTBuild·캐시 adapter
 

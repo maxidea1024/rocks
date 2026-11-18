@@ -694,20 +694,8 @@ void RenderLane::FinishDeferredRetires() noexcept {
 
 void RenderLane::RetireOnDevice(RenderHandle handle,
                                 const RenderHandleTable::RetiredResource& retired) noexcept {
-    const SlotHandle device = retired.device;
-    if (!device.IsNull()) {
-        switch (retired.kind) {
-        case RenderResourceKind::Buffer:
-            device_.Retire(graphics::BufferHandle{device});
-            break;
-        case RenderResourceKind::Texture:
-            device_.Retire(graphics::TextureHandle{device});
-            break;
-        case RenderResourceKind::Pipeline:
-            device_.Retire(graphics::PipelineHandle{device});
-            break;
-        }
-    }
+    // 장치 Retire 또는 Retire 대행자(풀 반납, 결정 R15)로 넘긴다.
+    ReleaseRetiredResource(device_, handle, retired);
 
     {
         platform::LockGuard lock(gate_);

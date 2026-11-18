@@ -4,7 +4,9 @@
 
 #include <Core/Memory/FrameArena.h>
 #include <Core/Memory/SystemAllocator.h>
+#include <Core/Text/StringView.h>
 #include <Platform/Fatal.h>
+#include <Platform/Memory.h>
 #include <RenderGraph/RenderGraph.h>
 
 // 렌더 그래프 시험 공용 준비물이다. 기록 장치(RenderBase/Tests/RecordingDevice) 위에 handle 표·풀·
@@ -100,7 +102,62 @@ struct GraphBench {
 
         return count;
     }
+
+    // 기록한 장치 호출 가운데 nth번째(0부터) op의 위치다. 없으면 NumericLimits<usize>::Max()다.
+    usize IndexOf(RecordingDevice::Op op, usize nth = 0) const noexcept {
+        Span<const RecordingDevice::Call> calls = device.Calls();
+        for (usize index = 0; index < calls.Size(); ++index) {
+            if (calls[index].op != op) {
+                continue;
+            }
+
+            if (nth == 0) {
+                return index;
+            }
+
+            --nth;
+        }
+
+        return NumericLimits<usize>::Max();
+    }
+
+    // handle을 Retire하고 ReleaseRetiredResource로 넘긴다(렌더 lane 없는 시험의 Retire 경로).
+    // lease가 남았으면 미룬다(deferred를 돌려준다).
+    bool RetireHandle(RenderHandle handle) noexcept {
+        auto retired = handles.BeginRetire(handle);
+        if (!retired) {
+            platform::Fatal("render graph test retire failed");
+        }
+
+        if (!retired.Value().deferred) {
+            ReleaseRetiredResource(device, handle, retired.Value());
+        }
+
+        return retired.Value().deferred;
+    }
 };
+
+// text가 part를 포함하는지다(오류 문구 확인).
+inline bool ContainsText(StringView text, const char* part) noexcept {
+    const StringView needle(part);
+    if (needle.ByteCount() > text.ByteCount()) {
+        return false;
+    }
+
+    for (usize offset = 0; offset + needle.ByteCount() <= text.ByteCount(); ++offset) {
+        if (platform::MemoryEquals(text.Data() + offset, needle.Data(), needle.ByteCount())) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+inline graphics::BufferDesc BufferOf(uint64 size) noexcept {
+    graphics::BufferDesc desc;
+    desc.size = size;
+    return desc;
+}
 
 inline graphics::TextureDesc TargetDesc(uint32 size = 4, uint32 mips = 1) noexcept {
     graphics::TextureDesc desc;

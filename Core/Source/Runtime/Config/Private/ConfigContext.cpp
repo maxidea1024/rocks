@@ -39,7 +39,8 @@ ConfigState::ConfigState(Allocator& allocator, ObjectRegistry& objects) noexcept
       projectName(allocator), branches(allocator), sections(allocator), entries(allocator),
       queue(allocator), diagnostics(allocator), regions(allocator), settings(allocator),
       commands(allocator), pendingCommands(allocator), subscriptions(allocator),
-      renderSignature(allocator) {
+      renderSignature(allocator), pendingRestarts(allocator), ignoredBootWrites(allocator),
+      syncHooks(allocator) {
 }
 
 reflection_text::TextCodecOptions ConfigState::CodecOptions() const noexcept {
@@ -104,8 +105,8 @@ Result<void> Report(ConfigState& state, ConfigDiagnosticCode code, ConfigSeverit
     return state.diagnostics.Add(diagnostic);
 }
 
-StringView CheckLayerAllowed(const ConfigState& state, ConfigLayer layer, uint32 settingsFlags,
-                             bool incoming) noexcept {
+StringView CheckLayerAllowed(const ConfigState& state, ConfigLayer layer,
+                             uint32 settingsFlags) noexcept {
     if (state.releaseRules && HasFlag(settingsFlags, SettingsFieldFlags::DevelopmentOnly) &&
         layer != ConfigLayer::CodeDefault) {
         return "a DevelopmentOnly value keeps its code default under release rules";
@@ -113,11 +114,6 @@ StringView CheckLayerAllowed(const ConfigState& state, ConfigLayer layer, uint32
 
     if (layer == ConfigLayer::User && !HasFlag(settingsFlags, SettingsFieldFlags::UserConfig)) {
         return "the user layer can write UserConfig fields only";
-    }
-
-    if (incoming && state.startupComplete &&
-        HasFlag(settingsFlags, SettingsFieldFlags::StartupOnly)) {
-        return "a StartupOnly value cannot change after startup";
     }
 
     return {};
@@ -209,7 +205,7 @@ Result<bool> ValidateConsoleValue(ConfigState& state, const ConfigEntry& entry, 
 
     ConfigDiagnosticCode code = ConfigDiagnosticCode::InvalidSetting;
     FieldValue parsed(state.allocator);
-    auto checked = CheckConsoleValue(state, setting, entry.layer, true, text, parsed, code);
+    auto checked = CheckConsoleValue(state, setting, entry.layer, text, parsed, code);
     if (!checked) {
         return Result<bool>::Failure(checked.Error());
     }
@@ -292,7 +288,7 @@ Result<bool> ValidateEntry(ConfigState& state, const ConfigEntry& entry) noexcep
         auto release =
             MakeScopeExit([&]() noexcept { section.ops.destroy(state.allocator, scratch); });
         Array<String> paths(state.allocator);
-        auto applied = ApplyEntryToSection(state, section, scratch, entry, true, paths);
+        auto applied = ApplyEntryToSection(state, section, scratch, entry, paths);
         if (!applied) {
             return applied;
         }
@@ -356,22 +352,8 @@ using detail::SectionState;
 using detail::SettingResult;
 using detail::SourceStack;
 
-namespace {
+namespace detail {
 
-StringView ToView(Span<const char> text) noexcept {
-    return StringView(text.Data(), text.Size());
-}
-
-// 섹션 하나를 다시 합친 결과다(Sync가 모두 만든 뒤 한 번에 맞바꾼다).
-struct SectionResult {
-    explicit SectionResult(Allocator& allocator) noexcept : sources(allocator) {
-    }
-
-    void* value = nullptr;
-    Array<UniquePtr<SourceStack>> sources;
-};
-
-// 섹션 하나를 코드 기본값에서 order 순서의 입력으로 다시 합친다.
 Result<void> RecomputeSection(ConfigState& state, SectionState& section, usize sectionIndex,
                               Span<ConfigEntry* const> order, SectionResult& out) noexcept {
     out.value = section.ops.create(state.allocator);
@@ -380,7 +362,7 @@ Result<void> RecomputeSection(ConfigState& state, SectionState& section, usize s
     }
 
     for (ConfigEntry* entry : order) {
-        if (!detail::EntryTouchesSection(state, sectionIndex, *entry)) {
+        if (!EntryTouchesSection(state, sectionIndex, *entry)) {
             continue;
         }
 
@@ -399,7 +381,7 @@ Result<void> RecomputeSection(ConfigState& state, SectionState& section, usize s
         }
 
         Array<String> paths(state.allocator);
-        auto applied = detail::ApplyEntryToSection(state, section, trial, *entry, false, paths);
+        auto applied = ApplyEntryToSection(state, section, trial, *entry, paths);
         if (!applied) {
             return Result<void>::Failure(applied.Error());
         }
@@ -438,6 +420,36 @@ Result<void> RecomputeSection(ConfigState& state, SectionState& section, usize s
     }
 
     return Result<void>::Success();
+}
+
+Result<void> SortedEntries(ConfigState& state, bool (*keep)(const ConfigEntry& entry) noexcept,
+                           Array<ConfigEntry*>& out) noexcept {
+    out.Clear();
+    for (UniquePtr<ConfigEntry>& entry : state.entries) {
+        if (keep != nullptr && !keep(*entry)) {
+            continue;
+        }
+
+        if (auto pushed = out.TryPushBack(entry.Get()); !pushed) {
+            return pushed;
+        }
+    }
+
+    out.Sort([](const ConfigEntry* left, const ConfigEntry* right) noexcept {
+        return left->layer != right->layer ? left->layer < right->layer
+                                           : left->sequence < right->sequence;
+    });
+    return Result<void>::Success();
+}
+
+} // namespace detail
+
+using detail::SectionResult;
+
+namespace {
+
+StringView ToView(Span<const char> text) noexcept {
+    return StringView(text.Data(), text.Size());
 }
 
 } // namespace
@@ -914,6 +926,18 @@ Result<void> ConfigContext::Sync() noexcept {
         return Result<void>::Failure(ErrorCode::Busy);
     }
 
+    // 0. sync 지점 앞 hook(파일 감시 등)이 이번 sync에 넣을 입력을 큐에 넣는다. hook 안의 Sync는
+    // Busy다. 등록 순서대로 부르고, hook 안에서 목록을 바꿀 수 없다(RemoveSyncHook은 Busy).
+    if (!state->syncHooks.IsEmpty()) {
+        state->syncing = true;
+        for (usize index = 0; index < state->syncHooks.Size(); ++index) {
+            const detail::SyncHook hook = state->syncHooks[index];
+            hook.hook(hook.context, *this);
+        }
+
+        state->syncing = false;
+    }
+
     if (state->queue.IsEmpty() && !state->dirty && !state->pendingCommands.IsEmpty()) {
         // 값은 그대로이고 큐에 든 명령만 실행한다.
         Array<bool> none(*allocator_);
@@ -996,8 +1020,8 @@ Result<void> ConfigContext::Sync() noexcept {
             return pushed;
         }
 
-        if (auto computed = RecomputeSection(*state, *state->sections[index], index, order.View(),
-                                             *results[index]);
+        if (auto computed = detail::RecomputeSection(*state, *state->sections[index], index,
+                                                     order.View(), *results[index]);
             !computed) {
             return computed;
         }
@@ -1046,12 +1070,26 @@ Result<void> ConfigContext::Sync() noexcept {
         }
     }
 
-    // 4. 콘솔 설정의 새 값, 섹션 값의 변경 여부(정규 JSON 비교), 설정 snapshot을 만든다.
+    // 4. 시작 뒤 바뀐 RestartRequired 값은 지금 값을 두고 재시작 대기로 돌린다(섹션 값 먼저 —
+    // 필드 콘솔 설정은 고친 섹션 값에서 읽는다). 그다음 콘솔 설정의 새 값, 섹션 값의 변경
+    // 여부(정규 JSON 비교), 설정 snapshot을 만든다.
     Array<void*> values(*allocator_);
+    Array<Array<UniquePtr<SourceStack>>*> sourceLists(*allocator_);
     for (const UniquePtr<SectionResult>& result : results) {
         if (auto pushed = values.TryPushBack(result->value); !pushed) {
             return pushed;
         }
+
+        if (auto pushed = sourceLists.TryPushBack(&result->sources); !pushed) {
+            return pushed;
+        }
+    }
+
+    Array<UniquePtr<detail::PendingRestart>> pendingRestarts(*allocator_);
+    if (auto held = detail::HoldBootSections(*state, order.View(), values.View(),
+                                             sourceLists.View(), pendingRestarts);
+        !held) {
+        return held;
     }
 
     Array<UniquePtr<SettingResult>> settingResults(*allocator_);
@@ -1059,6 +1097,12 @@ Result<void> ConfigContext::Sync() noexcept {
             detail::ComputeSettingResults(*state, order.View(), values.View(), settingResults);
         !computed) {
         return computed;
+    }
+
+    if (auto held =
+            detail::HoldBootSettings(*state, order.View(), settingResults.View(), pendingRestarts);
+        !held) {
+        return held;
     }
 
     Array<String> exports(*allocator_);
@@ -1123,6 +1167,8 @@ Result<void> ConfigContext::Sync() noexcept {
         state->snapshotGeneration = state->snapshot->Generation();
         state->renderSignature = Move(signature);
     }
+
+    state->pendingRestarts = Move(pendingRestarts);
 
     for (ConfigEntry* kept : plan) {
         for (UniquePtr<ConfigEntry>& owned : state->entries) {

@@ -312,3 +312,48 @@ TEST(StepCurve_StringRemoveRedundantAllocationFailure) {
         CHECK(injected); // 실패가 실제로 주입됐다
     }
 }
+
+// CV8 리뷰 8: Name 중복 제거의 같음은 토큰의 모든 칸(domain·id·displayId·number·kind)이다 — 키 핸들
+// 표 H2와 같은 판단. 두 pool의 None 계열·대소문자 변형 이름 쌍마다 [x, y, x] 커브의 가운데 키는
+// x·y의 모든 칸이 같을 때만 지워진다(Name 규칙의 같음과 무관하다).
+TEST(StepCurve_NameRedundantComparesEveryTokenField) {
+    SystemAllocator allocator;
+    NamePool first(allocator);
+    NamePool second(allocator);
+    REQUIRE(first.Initialize());
+    REQUIRE(second.Initialize());
+    {
+        const Name names[] = {Name{},
+                              Intern(first, "None"),
+                              Intern(second, "None"),
+                              Intern(first, "NONE"),
+                              Intern(second, "NONE"),
+                              Intern(first, "Walk"),
+                              Intern(second, "Walk"),
+                              Intern(first, "walk")};
+        auto sameFields = [](Name left, Name right) noexcept {
+            return left.domain == right.domain && left.id == right.id &&
+                   left.displayId == right.displayId && left.number == right.number &&
+                   left.kind == right.kind;
+        };
+        int32 mismatches = 0;
+        int32 nameEqualButDifferent = 0;
+        for (const Name x : names) {
+            for (const Name y : names) {
+                NameStepCurve curve(allocator);
+                REQUIRE(curve.TryAddKey(0.0f, x));
+                REQUIRE(curve.TryAddKey(1.0f, y));
+                REQUIRE(curve.TryAddKey(2.0f, x));
+                REQUIRE(curve.TryRemoveRedundantKeys());
+                mismatches += curve.KeyCount() == (sameFields(x, y) ? 2u : 3u) ? 0 : 1;
+                nameEqualButDifferent += x == y && !sameFields(x, y) ? 1 : 0;
+            }
+        }
+
+        CHECK(mismatches == 0);
+        CHECK(nameEqualButDifferent > 0); // Name 규칙으로는 같지만 칸이 다른 쌍이 있다
+    }
+
+    CHECK(second.Shutdown());
+    CHECK(first.Shutdown());
+}
