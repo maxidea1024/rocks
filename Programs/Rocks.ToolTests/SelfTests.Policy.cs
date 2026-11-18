@@ -635,6 +635,18 @@ internal static partial class SelfTests
             NoFailures(PolicyChecks.PlatformBoundary(temporary.Root));
             temporary.Write("Core/Source/Runtime/PlatformBase/Private/Win64Wrong/Probe.cpp", "#include <Windows.h>\n");
             Verify.Equal(1, PolicyChecks.PlatformBoundary(temporary.Root).Count, "prefix lookalike must not be allowlisted");
+            // Windows 전용 공개 헤더 디렉터리는 허용하고, 다른 공개 디렉터리·유사 이름은 여전히 거부한다.
+            temporary.Write("Core/Source/Runtime/PlatformBase/Private/Win64Wrong/Probe.cpp", "#pragma once\n");
+            temporary.Write("Core/Source/Runtime/PlatformBase/Public/Platform/Win64/Probe.h",
+                "#include <Base/Compiler.h>\n#if !ROCKS_PLATFORM_WINDOWS\n#error \"Windows only\"\n#endif\n#include <Windows.h>\n");
+            NoFailures(PolicyChecks.PlatformBoundary(temporary.Root));
+            foreach (string lookalike in new[] { "Core/Source/Runtime/PlatformBase/Public/Platform/Win64Wrong/Probe.h",
+                "Core/Source/Runtime/PlatformBase/Public/Platform/Probe.h", "Core/Source/Runtime/Core/Public/Platform/Win64/Probe.h" })
+            {
+                temporary.Write(lookalike, "#include <Windows.h>\n");
+                Verify.Equal(1, PolicyChecks.PlatformBoundary(temporary.Root).Count, "public Windows header allowance too wide: " + lookalike);
+                temporary.Write(lookalike, "#pragma once\n");
+            }
         });
         suite.Add("Policy.TargetMacroControls", () =>
         {

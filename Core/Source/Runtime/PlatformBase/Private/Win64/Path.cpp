@@ -65,7 +65,7 @@ FileStatus GetStandardDirectory(StandardDirectory kind, char* buffer, usize capa
     switch (kind) {
     case StandardDirectory::Executable: {
         // 실행 파일 경로를 읽고 파일 이름을 뗀다.
-        detail::WideString path;
+        windows::WideString path;
         auto status = path.AssignModuleFileName();
         if (!status) {
             return status;

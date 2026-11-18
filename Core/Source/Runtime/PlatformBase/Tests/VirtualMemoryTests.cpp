@@ -48,6 +48,15 @@ void FinishWorker(Thread& thread) noexcept {
 
 } // namespace
 
+// 물리 메모리 총량은 0보다 크고 페이지 크기의 배수 이상이다(시험 기기의 실제 값 — 하한만 본다).
+TEST(PlatformPhysicalMemoryIsReported) {
+    VirtualMemoryInfo info{};
+    REQUIRE(QueryVirtualMemoryInfo(info));
+    uint64 bytes = 0;
+    REQUIRE(QueryPhysicalMemory(bytes));
+    CHECK(bytes >= info.pageSize);
+}
+
 TEST(PlatformVirtualMemoryValidationAndReuse) {
     VirtualMemoryInfo info{};
     REQUIRE(QueryVirtualMemoryInfo(info));

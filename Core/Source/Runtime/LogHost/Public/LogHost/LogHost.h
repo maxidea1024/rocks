@@ -35,7 +35,7 @@
 //   if (!host.Start(LogSystemConfig::ForEngineHost(), &context, "Sandbox")) { ... }
 //   LogInstallScope installed(host.System());
 //   (void)host.Watch(context);
-//   context.CompleteStartup();          // 그 뒤 log.mode·log.file.* 변경은 거부된다
+//   context.CompleteStartup();          // 그 뒤 log.mode·log.file.*는 바뀌지 않는다
 //   ... 엔진 실행 ...
 //   host.Stop();                        // 설치 범위가 끝난 뒤
 //   if (host.WriterAbandoned()) { 정리 없이 프로세스 종료(_Exit) }

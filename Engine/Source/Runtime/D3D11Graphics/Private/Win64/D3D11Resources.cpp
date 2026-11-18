@@ -396,8 +396,7 @@ Result<TextureHandle> D3D11Device::CreateTextureView(TextureHandle texture,
     const PixelFormatPlane& layout = GetPixelFormatInfo(source->format).planes[desc.plane];
     TextureRecord record;
     // view는 원 텍스처에 참조를 하나 더 잡는다(원 텍스처를 먼저 Retire해도 자원이 산다).
-    source->texture->AddRef();
-    record.texture.Attach(source->texture.Get());
+    record.texture = source->texture.Share();
     record.width = MipExtent(source->width, layout.widthShift);
     record.height = MipExtent(source->height, layout.heightShift);
     record.mipLevels = source->mipLevels;

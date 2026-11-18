@@ -13,6 +13,7 @@
 #include <Graphics/TimestampRing.h>
 #include <Graphics/UploadRing.h>
 #include <Platform/Fatal.h>
+#include <Platform/Win64/ComRef.h>
 
 #include <Windows.h>
 #include <d3d12.h>
@@ -75,73 +76,8 @@ constexpr UINT RootTexture = 1;
 constexpr UINT RootSampler = 2;
 constexpr UINT RootBufferViews = 3;
 
-// COM 객체 참조다. 소멸 시 Release한다(예외 없이 쓰는 최소 RAII).
-template <class T>
-class ComRef {
-public:
-    ComRef() noexcept = default;
-
-    ComRef(const ComRef&) = delete;
-    ComRef& operator=(const ComRef&) = delete;
-
-    ComRef(ComRef&& other) noexcept : pointer_(other.pointer_) {
-        other.pointer_ = nullptr;
-    }
-
-    ComRef& operator=(ComRef&& other) noexcept {
-        if (this != &other) {
-            Reset();
-            pointer_ = other.pointer_;
-            other.pointer_ = nullptr;
-        }
-        return *this;
-    }
-
-    ~ComRef() {
-        Reset();
-    }
-
-    void Reset() noexcept {
-        if (pointer_ != nullptr) {
-            pointer_->Release();
-            pointer_ = nullptr;
-        }
-    }
-
-    T* Get() const noexcept {
-        return pointer_;
-    }
-
-    T* operator->() const noexcept {
-        return pointer_;
-    }
-
-    // 출력 인자로 넘길 주소다. 기존 참조는 먼저 해제한다.
-    T** Out() noexcept {
-        Reset();
-        return &pointer_;
-    }
-
-    // 소유권을 넘겨준다(참조 수는 그대로다).
-    T* Detach() noexcept {
-        T* pointer = pointer_;
-        pointer_ = nullptr;
-        return pointer;
-    }
-
-    // 이미 참조를 하나 가진 포인터의 소유를 넘겨받는다.
-    void Attach(T* pointer) noexcept {
-        Reset();
-        pointer_ = pointer;
-    }
-
-    explicit operator bool() const noexcept {
-        return pointer_ != nullptr;
-    }
-
-private:
-    T* pointer_ = nullptr;
-};
+// COM 참조는 PlatformBase 공용 도구를 쓴다(Platform/Win64/ComRef.h).
+using platform::windows::ComRef;
 
 // 컬 모드의 D3D12 값이다. 앞면 규약(FrontCounterClockwise = TRUE)과 함께 쓴다.
 D3D12_CULL_MODE RasterCullMode(CullMode mode) noexcept;

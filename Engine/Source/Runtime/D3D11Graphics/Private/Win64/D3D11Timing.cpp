@@ -1,6 +1,7 @@
 #include "D3D11DeviceImpl.h"
 
 #include <Platform/Clock.h>
+#include <Platform/Win64/WideString.h>
 
 namespace rocks::graphics::d3d11 {
 
@@ -219,16 +220,12 @@ void D3D11Device::PushMarker(StringView name) noexcept {
         return;
     }
 
+    // UTF-8 n byte는 UTF-16 n 단위를 넘지 않으므로 잘리지 않는다. 잘못된 UTF-8이면 빈 이름이다.
     const StringView clipped = ClipDebugMarkerName(name);
     wchar_t text[MaxDebugMarkerNameBytes + 1];
-    int length = 0;
-    if (clipped.ByteCount() != 0) {
-        length =
-            MultiByteToWideChar(CP_UTF8, 0, clipped.Data(), static_cast<int>(clipped.ByteCount()),
-                                text, static_cast<int>(MaxDebugMarkerNameBytes));
-    }
-
-    text[length > 0 ? length : 0] = L'\0';
+    (void)platform::windows::ConvertUtf8ToWide(clipped.Data(), clipped.ByteCount(), text,
+                                               MaxDebugMarkerNameBytes + 1,
+                                               platform::windows::TextFit::Truncate);
     (void)annotation_->BeginEvent(text);
     ++markerDepth_;
 }

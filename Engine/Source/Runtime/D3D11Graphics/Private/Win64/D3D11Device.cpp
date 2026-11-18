@@ -2,6 +2,7 @@
 #include "D3D11DeviceImpl.h"
 
 #include <Core/Diagnostics/Log.h>
+#include <DxgiGraphics/DxgiAdapter.h>
 #include <Platform/Atomics.h>
 
 #include <Platform/Fatal.h>
@@ -116,7 +117,7 @@ Result<void> D3D11Device::Initialize(const DeviceDesc& desc) noexcept {
     ComRef<IDXGIAdapter1> adapter;
     if (!desc.preferSoftware) {
         ComRef<IDXGIFactory6> factory6;
-        if (SUCCEEDED(factory_->QueryInterface(IID_PPV_ARGS(factory6.Out())))) {
+        if (SUCCEEDED(factory_.TryQueryAs(factory6))) {
             for (UINT index = 0;; ++index) {
                 ComRef<IDXGIAdapter1> candidate;
                 if (FAILED(factory6->EnumAdapterByGpuPreference(
@@ -168,16 +169,9 @@ Result<void> D3D11Device::Initialize(const DeviceDesc& desc) noexcept {
         }
     }
 
-    DXGI_ADAPTER_DESC1 info = {};
-    adapter->GetDesc1(&info);
-    // UTF-16 128자(Description 크기)는 UTF-8로 최대 384 byte다.
-    char name[512] = {};
-    const int written = WideCharToMultiByte(CP_UTF8, 0, info.Description, -1, name,
-                                            static_cast<int>(sizeof(name)), nullptr, nullptr);
-    if (written > 1) {
-        auto assigned = adapterName_.TryAssign(StringView(name, static_cast<usize>(written - 1)));
-        (void)assigned;
-    }
+    // 이름은 진단용이라 읽지 못해도(빈 이름) 장치 생성은 계속한다.
+    auto named = dxgi::AssignAdapterName(adapter.Get(), adapterName_);
+    (void)named;
 
     if (validation_) {
         ConfigureValidationQueues();
@@ -189,7 +183,7 @@ Result<void> D3D11Device::Initialize(const DeviceDesc& desc) noexcept {
     }
 
     // marker는 기록 context(deferred)에서 얻는다. 없으면 debugMarkers를 거짓으로 공개한다.
-    if (FAILED(deferred_->QueryInterface(IID_PPV_ARGS(annotation_.Out())))) {
+    if (FAILED(deferred_.TryQueryAs(annotation_))) {
         annotation_.Reset();
     }
 
@@ -295,13 +289,13 @@ Result<void> D3D11Device::CreateOnAdapter(IDXGIAdapter1* adapter, bool requestDe
 
     // GX7(다른 스레드의 GPU 완료 대기)에는 ID3D11Fence가 필요하다.
     // 아래 셋이 없으면 계약을 지킬 수 없으므로 이 어댑터는 미지원이다(featureMissing_).
-    result = device->QueryInterface(IID_PPV_ARGS(device_.Out()));
+    result = device.TryQueryAs(device_);
     if (FAILED(result)) {
         featureMissing_ = true;
         return Fail("ID3D11Device5 (Windows 10 1703 or later)", result);
     }
 
-    result = context->QueryInterface(IID_PPV_ARGS(immediate_.Out()));
+    result = context.TryQueryAs(immediate_);
     if (FAILED(result)) {
         device_.Reset();
         featureMissing_ = true;
@@ -627,7 +621,7 @@ void D3D11Device::ProcessRetired() noexcept {
 }
 
 void D3D11Device::ConfigureValidationQueues() noexcept {
-    if (SUCCEEDED(device_->QueryInterface(IID_PPV_ARGS(infoQueue_.Out())))) {
+    if (SUCCEEDED(device_.TryQueryAs(infoQueue_))) {
         // 오류만 저장해 저장 한도를 경고가 채우지 않게 한다.
         D3D11_MESSAGE_SEVERITY severities[] = {D3D11_MESSAGE_SEVERITY_CORRUPTION,
                                                D3D11_MESSAGE_SEVERITY_ERROR};
