@@ -1,6 +1,6 @@
 # 설정 계층과 콘솔 설정 설계
 
-기준일: 2026-11-18, 개정 8(시작 뒤 고정 값도 재시작 필요와 같은 규칙). 엔진·프로젝트·플랫폼·기기·사용자·세션·콘솔에서 오는 설정 값을 하나의 우선순위로 합치는 **설정 계층**과, 실행 중 이름으로 읽고 바꾸는 **콘솔 설정**(변수·명령)을 정한다.
+기준일: 2026-11-19, 개정 9(봉인 뒤 독립 콘솔 설정 직접 쓰기 BootSealed). 엔진·프로젝트·플랫폼·기기·사용자·세션·콘솔에서 오는 설정 값을 하나의 우선순위로 합치는 **설정 계층**과, 실행 중 이름으로 읽고 바꾸는 **콘솔 설정**(변수·명령)을 정한다.
 
 [렌더 기반](RenderBase.ko.md)의 선행 작업 CP8(Config 계층)·CP4(콘솔 설정)이며, [엔진 구현 계획](EngineImplementationPlan.ko.md)의 다음 요구를 구현 스펙으로 옮긴다.
 - 24.1절 표의 "Device Profile / Scalability / CVar" 행
@@ -247,7 +247,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 
 **실행 중 변경**
 - 재시작이 필요한 값은 "다음 시작 때 적용 예정"으로 기록하고 진단·UI에 보인다.
-  - 구현(CF3, 개정 8에서 StartupOnly도 같은 규칙): `CompleteStartup` 뒤 Sync가 부팅 값(RestartRequired·StartupOnly 필드·콘솔 설정)의 새 합친 값이 지금 값과 다르면 지금 값(과 그 출처 스택)을 유지한다. 새 값의 가장 강한 출처가 **파일 층**(엔진·엔진 플랫폼·프로젝트·프로젝트 플랫폼·사용자 — hot reload 포함, 파일이 지워져 코드 기본값으로 돌아간 경우도)이면 `GetPendingRestarts`에 (이름, 대기 값, 지금 값)으로 남긴다. 다음 실행에도 같은 입력이 다시 들어오기 때문이다. 그 밖의 층(기기 프로필·품질·기능 묶음처럼 시작 뒤 다시 계산되는 파생 층, 세션·콘솔·코드처럼 저장되지 않는 휘발 층)은 대기를 만들지 않고 Warning `BootValueIgnored`("boot value ignored after startup")를 같은 이름·층·출처에 한 번만 낸다(개정 7). 그렇지 않으면 예를 들어 시작 뒤 GPU 특성으로 골라진 기기 프로필이 정한 값은 다음 실행에도 부팅 때는 GPU 특성이 없어 다시 대기가 되는 "영원한 대기"가 되고, 콘솔 값은 저장되지 않는데 "다음 시작에 적용"으로 보인다. StartupOnly도 같은 까닭으로 쓰기 단계의 Error 거부 대신 이 규칙을 따른다(개정 8 — 시작 뒤 기기 프로필 재적용이 StartupOnly 값을 정할 때마다 거부 오류가 나던 것을 없앴다. 파일 층의 StartupOnly 변경은 그 파일이 다음 실행에 읽히므로 대기다). 새로 대기가 된 것은 Note `RestartRequired`(CVar VD15 진단 이름)와 Info 로그다. 변경 콜백·snapshot은 바뀌지 않는다. 사용자 층 값이면 저장되어 다음 실행에 적용되고, 되돌리면 대기가 없어진다. UE `ConfigRestartRequired`는 값을 바로 바꾸고 알림만 띄우지만, Rocks는 효력 시점을 문맥이 지킨다(CVar 9절 "세 번째 종류를 두지 않는다"와 같은 뜻).
+  - 구현(CF3, 개정 8에서 StartupOnly도 같은 규칙): `CompleteStartup` 뒤 Sync가 부팅 값(RestartRequired·StartupOnly 필드·콘솔 설정)의 새 합친 값이 지금 값과 다르면 지금 값(과 그 출처 스택)을 유지한다. 새 값의 가장 강한 출처가 **파일 층**(엔진·엔진 플랫폼·프로젝트·프로젝트 플랫폼·사용자 — hot reload 포함, 파일이 지워져 코드 기본값으로 돌아간 경우도)이면 `GetPendingRestarts`에 (이름, 대기 값, 지금 값)으로 남긴다. 다음 실행에도 같은 입력이 다시 들어오기 때문이다. 그 밖의 층(기기 프로필·품질·기능 묶음처럼 시작 뒤 다시 계산되는 파생 층, 세션·콘솔·코드처럼 저장되지 않는 휘발 층)은 대기를 만들지 않고 Warning `BootValueIgnored`("boot value ignored after startup")를 같은 이름·층·출처에 한 번만 낸다(개정 7). 그렇지 않으면 예를 들어 시작 뒤 GPU 특성으로 골라진 기기 프로필이 정한 값은 다음 실행에도 부팅 때는 GPU 특성이 없어 다시 대기가 되는 "영원한 대기"가 되고, 콘솔 값은 저장되지 않는데 "다음 시작에 적용"으로 보인다. 예외로, 봉인 뒤 독립 콘솔 설정(CVar `BootCVar` 포함)의 StartupOnly·RestartRequired 값에 바로 쓰는 층(콘솔·코드·범위 임시 변경)의 쓰기는 넣을 때 Error `BootSealed`로 거부한다(개정 9, CVar 9절 — 부른 쪽이 바로 효력을 기대하므로 결과로 알린다. 파생·휘발 층·파일 층은 아래 규칙 그대로라 기기 프로필 재적용 문제는 다시 생기지 않는다). 설정 struct 필드는 콘솔 이름으로 써도 이 규칙(BootValueIgnored)을 유지한다. StartupOnly도 같은 까닭으로 쓰기 단계의 Error 거부 대신 이 규칙을 따른다(개정 8 — 시작 뒤 기기 프로필 재적용이 StartupOnly 값을 정할 때마다 거부 오류가 나던 것을 없앴다. 파일 층의 StartupOnly 변경은 그 파일이 다음 실행에 읽히므로 대기다). 새로 대기가 된 것은 Note `RestartRequired`(CVar VD15 진단 이름)와 Info 로그다. 변경 콜백·snapshot은 바뀌지 않는다. 사용자 층 값이면 저장되어 다음 실행에 적용되고, 되돌리면 대기가 없어진다. UE `ConfigRestartRequired`는 값을 바로 바꾸고 알림만 띄우지만, Rocks는 효력 시점을 문맥이 지킨다(CVar 9절 "세 번째 종류를 두지 않는다"와 같은 뜻).
 - hot reload는 에디터·개발 빌드에서 `DirectoryWatcher`(`Platform/DirectoryWatch.h:48–93`)로 `Config/`를 감시한다. 바뀐 층만 다시 읽어 출처 스택을 갱신하고, sync 지점에서 적용한다. 출시 빌드는 감시하지 않는다.
   - 구현(CF3, `Config/ConfigReload.h`): `ConfigFileReloader`가 엔진·프로젝트·사용자 `Config/` 폴더를 감시하고 문맥의 sync hook(`ConfigContext::AddSyncHook` — Sync가 큐를 보기 전에 부른다)에서 감시 이벤트를 모아 바뀐 파일만 다시 읽는다. 이벤트는 표시일 뿐이라 값은 그 sync 지점에서만 바뀐다. 파일 하나는 `ReplaceLayerText`(검사에 통과해야 그 앞에 `Unset`을 넣는다 — 잘못 고친 파일은 옛 값을 지우지 않는다)로, 지운 파일은 `Unset`으로, 사용자 파일은 관대한 읽기로 바꾼다. Overflow는 그 루트의 모든 branch 파일을 다시 읽는다. 출시 규칙이면 `Start`가 Unsupported다. `HostSettings::StartHotReload`가 호스트에서 켠다(Sandbox는 LogHost 설치 뒤). CVar 10절의 쓰기 큐가 생기면 hook은 그 큐에 넣는 쪽으로 옮긴다(CVR2).
 
@@ -311,6 +311,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 
 ## 12. 개정 이력
 
+- 개정 9(2026-11-19): CVar CVR4. 봉인 뒤 독립 콘솔 설정(`BootCVar` 포함)의 부팅 값에 콘솔·코드·범위 임시 변경 층으로 바로 쓰면 넣을 때 `BootSealed`로 거부한다(CVar 9절). 파생·휘발·파일 층 규칙과 설정 struct 필드는 그대로다. 8절.
 - 개정 8(2026-11-18): 시작 뒤 고정(`StartupOnly`) 값도 재시작 필요와 같은 부팅 값 규칙을 따른다(사용자 결정). 시작 뒤 파생 층·휘발 층의 변경은 쓰기 단계 Error 거부 대신 지금 값 유지와 Warning `BootValueIgnored`(같은 이름·층·출처에 한 번), 파일 층의 변경은 재시작 대기다(권장안 — VD15와 같은 뜻). 5.1·8절.
 
 - 개정 7(2026-11-18): 재시작 대기를 파일 층에서 온 변경으로 한정했다(5.1·8절). 시작 뒤 파생 층(기기 프로필·품질·기능 묶음)과 휘발 층(세션·콘솔 등)의 RestartRequired 변경은 대기 없이 Warning `BootValueIgnored`를 한 번 낸다. 다음 실행 부팅 때 GPU 특성을 아는 방법을 결정 필요 항목으로 11절에 적었다.

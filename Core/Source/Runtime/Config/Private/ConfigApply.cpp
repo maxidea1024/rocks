@@ -1059,7 +1059,7 @@ Result<bool> SectionApplier::ApplyConsoleValue(usize field, StringView text, Jso
     ConfigDiagnosticCode code = ConfigDiagnosticCode::LayerNotAllowed;
     const StringView problem =
         CheckConsoleLayer(state_.releaseRules, entry_.layer,
-                          ConsoleFlagsOfField(SettingsFlagsOf(section_, schema.id)), code);
+                          ConsoleFlagsOfField(SettingsFlagsOf(section_, schema.id)), code, false);
     if (!problem.IsEmpty()) {
         if (auto reported = Diagnose(code, position, problem); !reported) {
             return Result<bool>::Failure(reported.Error());

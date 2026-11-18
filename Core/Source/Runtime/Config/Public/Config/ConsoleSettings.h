@@ -118,6 +118,25 @@ struct ConsoleSettingId {
     }
 };
 
+// 콘솔 설정 하나의 설명이다(ConfigContext::DescribeConsoleSetting — 콘솔 Explain·dump가 쓴다, CVar
+// 9·15절). view는 다음 Sync·등록까지 유효하다.
+struct ConsoleSettingInfo {
+    StringView name;
+    StringView help;
+    // 값 종류(ConsoleValueKind — Enum은 Enum).
+    ValueKind kind = ValueKind::Opaque;
+    // ConsoleSettingFlags 비트.
+    uint32 flags = 0;
+    // 지금 값의 콘솔 표기.
+    StringView value;
+    // 이번 실행 동안 고정인 부팅 변수인지다(BootCVar·StartupOnly·RestartRequired — Explain·dump의
+    // `[boot]`).
+    bool boot = false;
+    // 재시작 대기 값이 있는지와 그 표기다(Explain의 `pending restart: <값>` — 9절).
+    bool hasPendingRestart = false;
+    StringView pendingRestart;
+};
+
 // 콘솔 출력 sink다(콘솔 입력의 응답·명령 출력). write는 호출 동안만 text를 빌린다.
 struct ConsoleOutput {
     using WriteFn = Result<void> (*)(void* context, StringView text) noexcept;

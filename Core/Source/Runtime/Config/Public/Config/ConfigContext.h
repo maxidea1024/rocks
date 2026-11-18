@@ -177,6 +177,9 @@ using ConfigSyncHook = void (*)(void* context, ConfigContext& config) noexcept;
 // 입력은 이 한도와 무관하다.
 inline constexpr usize MaxQueuedChanges = 65536;
 
+// ReportUnresolved가 제안할 가까운 이름의 최대 편집 거리다(CVar 12절).
+inline constexpr usize MaxSuggestionDistance = 3;
+
 // Sync 한 번의 변경 목록이다(ConfigContext::OnSynced 인자 — CVarSystem.ko.md 7.3절, VD9).
 // variables는 유효값이 바뀐 CVar 핸들 번호(이름 순서), settings는 값이 바뀐 설정 struct(등록
 // 순서)다. 바뀐 것이 없는 Sync도 빈 목록으로 한 번 부른다. view는 콜백 동안만 유효하다.
@@ -313,6 +316,27 @@ public:
 
     // 진단 모음이다(AddLayerText·AddAssignment·Sync가 더한다 — 호출자가 Clear로 비운다).
     ConfigDiagnostics& Diagnostics() noexcept;
+
+    // 모은 진단을 out 뒤에 옮겨 담고 문맥의 모음을 비운다(CVar 12절 — 넘친 수는 옮기지 않는다).
+    // 오류: 초기화 전 InvalidArgument, 다른 스레드 WrongThread, out의 할당 실패(그때 문맥의 모음은
+    // 그대로다).
+    Result<void> TakeDiagnostics(ConfigDiagnostics& out) noexcept;
+
+    // 시작 뒤에도 등록되지 않은 콘솔 이름의 값(파일 `Settings`·콘솔 이름 대입의 대기 값)을 이름마다
+    // 한 번 Warning UnresolvedName으로 남긴다(CVar 12절). 편집 거리가 MaxSuggestionDistance 이하인
+    // 등록 이름(콘솔 설정·명령 — 출시 규칙에서 숨긴 것 제외)이 있으면 가장 가까운 것을 메시지에
+    // `did you mean '<이름>'?`로 붙인다. 호스트가 CompleteStartup 바로 뒤에 부른다. 반환: 보고한
+    // 이름 수. 오류: 초기화 전 InvalidArgument, 다른 스레드 WrongThread, 할당 실패.
+    //
+    // 사용 예:
+    //   REQUIRE(config.CompleteStartup());
+    //   auto unresolved = config.ReportUnresolved();
+    Result<usize> ReportUnresolved() noexcept;
+
+    // 콘솔 설정 하나의 설명이다(이름·도움말·종류·지금 값·부팅 변수 여부·재시작 대기 값 — 콘솔
+    // Explain·dump가 `[boot]`·`pending restart: <값>`을 보이는 데 쓴다). 오류: 무효 핸들
+    // InvalidArgument, 다른 스레드 WrongThread.
+    Result<ConsoleSettingInfo> DescribeConsoleSetting(ConsoleSettingId id) const noexcept;
 
     // ---- 콘솔 설정·명령(Docs/Design/ConfigSystem.ko.md 5절 — 설정 CF2) ----
     //

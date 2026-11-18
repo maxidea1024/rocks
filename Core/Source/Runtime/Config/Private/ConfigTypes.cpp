@@ -90,6 +90,12 @@ StringView ConfigDiagnosticCodeName(ConfigDiagnosticCode code) noexcept {
         return "Clamped";
     case ConfigDiagnosticCode::InvalidEnum:
         return "InvalidEnum";
+    case ConfigDiagnosticCode::BootSealed:
+        return "BootSealed";
+    case ConfigDiagnosticCode::LateBound:
+        return "LateBound";
+    case ConfigDiagnosticCode::UnresolvedName:
+        return "UnresolvedName";
     case ConfigDiagnosticCode::ValidationFailed:
         return "ValidationFailed";
     }

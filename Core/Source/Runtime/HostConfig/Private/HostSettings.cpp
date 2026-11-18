@@ -528,8 +528,18 @@ Result<void> HostSettings::CompleteStartup() noexcept {
     if (!completed) {
         Log::Error(LogHostConfig, "Config startup could not complete: {Error}",
                    ErrorCodeName(completed.Error()));
+        return completed;
     }
 
+    // 시작이 끝났는데 아무도 등록하지 않은 이름의 값은 오타일 수 있다(CVar 12절 — 경고만, 시작은
+    // 계속한다).
+    if (auto unresolved = context.ReportUnresolved(); !unresolved) {
+        Log::Error(LogHostConfig, "Unresolved config names could not be reported: {Error}",
+                   ErrorCodeName(unresolved.Error()));
+        return Result<void>::Failure(unresolved.Error());
+    }
+
+    ReportWarnings();
     return completed;
 }
 

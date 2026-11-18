@@ -339,10 +339,16 @@ Result<void> Report(ConfigState& state, ConfigDiagnosticCode code, ConfigSeverit
 StringView CheckLayerAllowed(const ConfigState& state, ConfigLayer layer,
                              uint32 settingsFlags) noexcept;
 
+// 봉인 뒤 부팅 변수에 바로 쓰려 할 때의 안내 문구다(이름 뒤에 붙인다 — CVar 9절, 콘솔이 쓴다).
+inline constexpr StringView BootSealedMessage =
+    "is a boot variable; set it in a config file or with --set and restart";
+
 // 콘솔 이름으로 쓰는 값의 층 허용 판정이다(콘솔 플래그 — 읽기 전용·품질 구성원·개발 전용·사용자
-// 설정). code에 거부 진단 종류를 쓴다. 쓸 수 있으면 빈 view다. 시작 뒤 고정 값은 Sync가 지킨다.
+// 설정). code에 거부 진단 종류를 쓴다. 쓸 수 있으면 빈 view다. sealedWrite면(봉인 뒤 쓰기 — 넣을
+// 때의 검사) 부팅 변수(StartupOnly·RestartRequired)의 콘솔·코드·범위 임시 변경 층 쓰기를
+// BootSealed로 거부한다. 그 밖의 시작 뒤 고정 값은 Sync가 지킨다(재시작 대기·BootValueIgnored).
 StringView CheckConsoleLayer(bool releaseRules, ConfigLayer layer, uint32 consoleFlags,
-                             ConfigDiagnosticCode& code) noexcept;
+                             ConfigDiagnosticCode& code, bool sealedWrite) noexcept;
 
 // CVar 핸들 정의의 성질을 콘솔 설정 플래그로 옮긴다. 부팅 변수는 StartupOnly(CompleteStartup 뒤
 // 고정 — 9절), Cheat는 DevelopmentOnly(VD5 — 출시 규칙 시험에서 숨김·고정)다. 모든 CVar는
@@ -396,9 +402,11 @@ Result<void> RecomputeConsoleSetting(ConfigState& state, const ConsoleSettingSta
 // 콘솔 값 하나를 검사한다(층 허용·형식·범위·허용 값, CVar 핸들 설정은 정의의 범위·보정·Validate).
 // 받으면 out에 값을 쓰고 빈 view를, 거부하면 code·사유를 돌려준다. `Clamp()` CVar의 범위 밖 값을
 // 보정해 받았으면 빈 view에 code가 Clamped다(호출자가 Note 진단을 남긴다). 오류: 할당 실패.
+// writing이면 넣을 때의 검사다(봉인 뒤 부팅 변수 직접 쓰기를 BootSealed로 거부한다 — Sync의 다시
+// 합치기는 writing이 아니다).
 Result<StringView> CheckConsoleValue(ConfigState& state, const ConsoleSettingState& setting,
                                      ConfigLayer layer, StringView text, FieldValue& out,
-                                     ConfigDiagnosticCode& code) noexcept;
+                                     ConfigDiagnosticCode& code, bool writing) noexcept;
 
 // 새로 만든 독립 콘솔 설정(setting — 아직 state.settings에 넣지 않았다)에 이미 들어온 층 입력(대기
 // 값)을 적용 순서로 넘긴다. 거부한 값은 진단을 남기고 건너뛴다. 오류: 할당 실패.
@@ -453,12 +461,15 @@ struct SlotWrite {
 };
 
 // 지금 snapshot을 바탕으로 새 snapshot을 만들어 게시한다(소유 스레드 — 10절 4단계·5절 등록 즉시
-// 게시). named가 null이 아니면 이름 블록을 바꾸고, writes의 칸만 새 값으로 바꾼다(바뀐 칸이 든
-// 조각만 새로 만들고 나머지는 공유한다 — 칸의 세대는 이전 세대 + 1, 처음이면 1). 세대 번호는 이전 +
-// 1이다. 게시하면 통로의 current를 바꾸고 소유 스레드를 다시 묶는다(그 스레드가 다른 문맥·명시
-// 묶음에 묶여 있으면 그대로 둔다). 오류: 할당 실패(그때 게시하지 않는다).
+// 게시·9절 봉인). named가 null이 아니면 이름 블록을 바꾸고, writes의 칸만 새 값으로 바꾼다(바뀐
+// 칸이 든 조각만 새로 만들고 나머지는 공유한다 — 칸의 세대는 이전 세대 + 1, 처음이면 1).
+// bootWrites는 부팅 블록 칸이다(봉인 때와 봉인 뒤 등록한 BootCVar — 한 번 쓴 칸은 바뀌지 않는다).
+// 봉인 여부는 state.startupComplete다. 세대 번호는 이전 + 1이다. 게시하면 통로의 current를 바꾸고
+// 소유 스레드를 다시 묶는다(명시 묶음이 살아 있으면 그대로 둔다). 오류: 할당 실패(그때 게시하지
+// 않는다).
 Result<void> PublishSnapshot(ConfigState& state, const SharedPtr<const NamedBlock>* named,
-                             Span<const SlotWrite> writes) noexcept;
+                             Span<const SlotWrite> writes,
+                             Span<const SlotWrite> bootWrites = {}) noexcept;
 
 // 설정 snapshot의 내부 접근이다(ConfigSnapshot의 friend — Config 모듈 안만 쓴다).
 struct SnapshotAccess {
@@ -487,6 +498,19 @@ struct SnapshotAccess {
 
     static const SharedPtr<const NamedBlock>& Named(const ConfigSnapshot& snapshot) noexcept {
         return snapshot.named_;
+    }
+
+    static Array<SharedPtr<const CVarChunk>>& BootChunks(ConfigSnapshot& snapshot) noexcept {
+        return snapshot.bootChunks_;
+    }
+
+    static const Array<SharedPtr<const CVarChunk>>&
+    BootChunks(const ConfigSnapshot& snapshot) noexcept {
+        return snapshot.bootChunks_;
+    }
+
+    static void Seal(ConfigSnapshot& snapshot, bool sealed) noexcept {
+        snapshot.sealed_ = sealed;
     }
 };
 

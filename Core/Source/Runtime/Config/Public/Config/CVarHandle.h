@@ -43,6 +43,9 @@ namespace detail {
 // 게임 lane에서 등록되지 않은 핸들을 읽었다(Fatal — 5절).
 [[noreturn]] void FatalUnregistered(const VarDefinition& definition) noexcept;
 
+// 봉인(CompleteStartup) 전에 BootCVar를 읽었다(Debug·Development Fatal — 초기화 순서 버그, 9절).
+[[noreturn]] void FatalUnsealed(const VarDefinition& definition) noexcept;
+
 // 이 스레드에 묶인 문맥의 쓰기 큐에 (layer, tag)의 값 쓰기를 넣는다(6.2절). value는 범위·Validate로
 // 바로 검사한다(Clamp는 보정한다). 오류: 묶음 없음 NotFound, 출시 빌드 치트 변수 Unsupported, 층·
 // 범위·Validate 위반 InvalidArgument, 문맥이 없어졌으면 ShuttingDown, 큐가 가득 차면 Busy, 할당
@@ -66,12 +69,12 @@ GetResult<T> FallbackOf(const VarDefinition& definition) noexcept {
 
 // 칸의 값이다.
 template <class T>
-GetResult<T> ReadSlot(const config::ConfigSnapshot& snapshot, uint32 index,
+GetResult<T> ReadSlot([[maybe_unused]] const config::CVarText* text,
                       const config::CVarSlot& slot) noexcept {
     if constexpr (IsSameV<T, String>) {
-        return snapshot.TextAt(index).text.View();
+        return text->text.View();
     } else if constexpr (IsSameV<T, rocks::Name>) {
-        return snapshot.TextAt(index).name;
+        return text->name;
     } else if constexpr (IsSameV<T, bool>) {
         return slot.bits != 0;
     } else if constexpr (IsSameV<T, float> || IsSameV<T, double>) {
@@ -83,8 +86,9 @@ GetResult<T> ReadSlot(const config::ConfigSnapshot& snapshot, uint32 index,
 
 // 이 스레드에 묶인 snapshot에서 정의의 값을 읽는다(7.1절 경로 — 묶음 → 조각 표 → 조각 → 칸). 번호가
 // 없으면 게임 lane에서는 Fatal, 다른 스레드에서는 기본값이다(5절). 이 snapshot에 칸이 없으면
-// 기본값이다.
-template <class T>
+// 기본값이다. Boot면 부팅 블록을 읽는다(9절 — 봉인 전 snapshot이면 Debug·Development Fatal, 출시
+// 빌드는 일반 칸을 읽는다).
+template <class T, bool Boot = false>
 GetResult<T> ReadBound(const VarDefinition& definition) noexcept {
     if constexpr (IsReleaseBuild) {
         if (HasFlag(definition.flags, VarFlags::Cheat)) {
@@ -106,9 +110,36 @@ GetResult<T> ReadBound(const VarDefinition& definition) noexcept {
         return FallbackOf<T>(definition);
     }
 
-    const config::CVarSlot* slot = binding.snapshot->FindSlot(index);
-    return slot != nullptr ? ReadSlot<T>(*binding.snapshot, index, *slot)
-                           : FallbackOf<T>(definition);
+    const config::ConfigSnapshot& snapshot = *binding.snapshot;
+    if constexpr (Boot) {
+        if (snapshot.IsSealed()) {
+            const config::CVarSlot* slot = snapshot.FindBootSlot(index);
+            if (slot == nullptr) {
+                return FallbackOf<T>(definition);
+            }
+
+            if constexpr (IsTextVarType<T>) {
+                return ReadSlot<T>(&snapshot.BootTextAt(index), *slot);
+            } else {
+                return ReadSlot<T>(nullptr, *slot);
+            }
+        }
+
+        if constexpr (!IsReleaseBuild) {
+            FatalUnsealed(definition);
+        }
+    }
+
+    const config::CVarSlot* slot = snapshot.FindSlot(index);
+    if (slot == nullptr) {
+        return FallbackOf<T>(definition);
+    }
+
+    if constexpr (IsTextVarType<T>) {
+        return ReadSlot<T>(&snapshot.TextAt(index), *slot);
+    } else {
+        return ReadSlot<T>(nullptr, *slot);
+    }
 }
 
 // `Set` 인자의 ScalarValue다.
@@ -281,9 +312,13 @@ public:
             platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&definition_.index)};
     }
 
-    // 이 스레드에 묶인 snapshot의 값이다(CVar::Get과 같다 — 봉인 뒤 불변 블록 읽기는 CVR4).
+    // 이번 실행의 값이다(9절): 이 스레드에 묶인 snapshot의 부팅 블록을 읽는다(봉인 때 굳은 값 —
+    // 봉인 뒤 snapshot이 모두 같은 블록을 공유하므로 어느 스레드·프레임이든 같다). 봉인
+    // (ConfigContext::CompleteStartup) 전에 부르면 Debug·Development에서 Fatal이다(초기화 순서 버그
+    // — 출시 빌드는 지금 칸을 읽는다). 봉인 뒤에 등록한 부팅 변수는 등록 때 값으로 굳는다.
+    // 묶음·등록 규칙은 CVar::Get과 같다.
     GetResult<T> Get() const noexcept {
-        return detail::ReadBound<T>(definition_);
+        return detail::ReadBound<T, true>(definition_);
     }
 
     // 부팅 변수는 실행 중에 쓸 수 없다(4.3절 표).

@@ -206,7 +206,7 @@ Result<bool> ValidateConsoleValue(ConfigState& state, const ConfigEntry& entry, 
 
     ConfigDiagnosticCode code = ConfigDiagnosticCode::InvalidSetting;
     FieldValue parsed(state.allocator);
-    auto checked = CheckConsoleValue(state, setting, entry.layer, text, parsed, code);
+    auto checked = CheckConsoleValue(state, setting, entry.layer, text, parsed, code, true);
     if (!checked) {
         return Result<bool>::Failure(checked.Error());
     }

@@ -67,7 +67,9 @@ TEST(CVar_GetReadsTheGameLaneSnapshot) {
     REQUIRE(context.Sync());
     REQUIRE(RegisterSnapshotVars(context));
     CHECK(SnapDistance.Get() == 100.f && SnapCount.Get() == 6 && !SnapEnabled.Get());
-    CHECK(DetailLevel.Get() == Detail::Low && SnapLabel.Get() == "first" && SnapThreads.Get() == 2);
+    CHECK(DetailLevel.Get() == Detail::Low && SnapLabel.Get() == "first");
+    REQUIRE(context.CompleteStartup());
+    CHECK(SnapThreads.Get() == 2);
     auto alpha = fixture.names.TryIntern("Alpha");
     REQUIRE(alpha);
     CHECK(SnapTag.Get() == alpha.Value());

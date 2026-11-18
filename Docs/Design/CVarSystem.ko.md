@@ -1,6 +1,6 @@
 # CVar·치트 명령 설계
 
-기준일: 2026-11-19, 개정 7(결정 확정, CVR1·CVR2 구현). 실행 중 이름으로 읽고 바꾸는 타입 있는 설정 변수 **CVar**와, 개발 빌드에서 게임 상태를 직접 바꾸는 **치트 명령**을 정한다.
+기준일: 2026-11-19, 개정 8(결정 확정, CVR1·CVR2·CVR4 구현). 실행 중 이름으로 읽고 바꾸는 타입 있는 설정 변수 **CVar**와, 개발 빌드에서 게임 상태를 직접 바꾸는 **치트 명령**을 정한다.
 
 이 문서는 [설정 계층과 콘솔 설정](ConfigSystem.ko.md)(이하 Config)의 5절 "콘솔 설정과 명령"을 대체하는 상세 스펙이다. 값 저장소·층·출처 스택·sync 지점·JSON 파일·`--set`·설정 struct는 Config를 그대로 쓰고, 이 문서는 그 위에 다음을 더한다.
 - 한 문장으로 정의하고 `.Get()`으로 읽는 타입 있는 핸들(`CVar<T>`·`BootCVar<T>`·`CVarGroup`·`ConsoleCommand`)
@@ -332,7 +332,7 @@ cvar::Index Index() const noexcept;
 
 - 파생 층을 대기로 두지 않는 까닭: 시작 뒤 GPU 특성으로 다시 고른 기기 프로필이 부팅 변수를 정하면, 다음 실행의 부팅 때는 GPU 특성이 없어 같은 값이 다시 대기가 된다("영원한 대기"). 부팅 때 GPU 특성을 아는 방법은 Config 11절의 결정 필요 항목이다.
 - **다음 실행용 값.** `UserSetting()` 부팅 변수는 봉인 뒤에도 사용자 층 쓰기(옵션 메뉴에서 그래픽 backend 고르기 등)를 받는다. 그 값은 사용자 파일에 저장되고 이번 실행의 `Get()`은 바뀌지 않는다. 위 표의 파일 층 행 그대로 대기 목록에 오르고, Explain은 `pending restart: <값>`을 보인다. 옵션 메뉴는 대기 목록으로 "재시작 필요" 표시를 한다. 이것이 프롬프트의 `RequiresRestart`를 대신한다(17절 VD15).
-- 대기 목록은 Config CF3 구현(`ConfigPendingRestart`·`GetPendingRestarts`)을 그대로 쓴다. CVR4는 그 위에 `BootCVar`를 올리고, 쓰기 때 거부(`BootSealed`)를 더한다. CF3 구현에서는 콘솔 쓰기도 `BootValueIgnored`로 처리된다.
+- 대기 목록은 Config CF3 구현(`ConfigPendingRestart`·`GetPendingRestarts`)을 그대로 쓴다. CVR4는 그 위에 `BootCVar`를 올리고, 쓰기 때 거부(`BootSealed`)를 더했다. 직접 쓰기 거부는 `BootCVar`와 CF2 독립 콘솔 설정의 `StartupOnly`·`RestartRequired` 모두에 건다(CVR7에서 그 설정들이 `BootCVar`가 되므로 미리 같은 규칙이다). 설정 struct 필드는 Config 8절 규칙(콘솔 쓰기도 `BootValueIgnored`)을 유지한다.
 - 봉인 때 부팅 값을 불변 블록으로 굳혀 모든 snapshot이 그 블록을 공유한다. `Get()`은 묶인 snapshot의 부팅 블록 칸을 읽는다(범위·세대 없음).
 - 봉인 전 `Get()`은 Debug·Development 빌드에서 assert다(초기화 순서 버그를 잡는다). 렌더 lane과 worker는 봉인 뒤에 시작하므로(Config 5.4 순서) 실제로는 게임 lane의 부트 코드만 해당한다.
 - 콘솔에서 바꾸려 하면 `render.backend is a boot variable; set it in a config file or with --set and restart`를 출력한다. Explain·dump는 `[boot]`를 붙인다.
@@ -671,6 +671,17 @@ public:
 - CF2 이관(21절): `Snapshot()`은 `Acquire()`로 바꿨다(snapshot 구조가 바뀌어 같은 API를 둘 수 없다 — RenderBase와 시험을 함께 바꿨다). 변수별 `Subscribe`는 남겼다: 21절대로 쓰는 곳(LogHost)을 CVR7에서 핸들·`OnSynced`·`Watcher`로 한꺼번에 옮긴다(LogHost의 `log.*`는 아직 핸들이 없는 CF2 독립 설정이라 지금 옮기면 CVR7에서 한 번 더 바꾼다).
 - 넘긴 것: `Get(scope)`·`SetOptions::scope`(CVR3), 봉인 뒤 `BootSealed`·불변 부팅 블록(CVR4), 묶음 펼침 반복(CVR5), 권한(치트 허용·복제) 적용 때 재판정(CVR6 — 지금 적용 때 다시 보는 권한은 층 권한뿐이다), 렌더 lane이 프레임 packet snapshot을 묶는 연결(RenderBase RB1 — RenderBase는 Config를 모른다, 16절 엔진 연결)·Task 작업 문맥 슬롯으로 worker에 묶음 넘기기(16절), 묶음 없는 `Set`의 프로세스 기본 문맥(6.2절 — `HostSettings`가 정하는 것으로 CVR7 호스트 설정 이관 때 넣는다. 지금은 `NotFound`), macOS TSan(CI).
 
+**CVR4 구현(2026-11-19, `feature/cvar`)**
+- 봉인(`ConfigContext::CompleteStartup`)은 `BootCVar`의 지금 값을 부팅 블록(조각 표 — `ConfigSnapshot::FindBootSlot`)으로 굳혀 게시한다. 봉인 뒤 snapshot은 모두 같은 부팅 블록 조각을 공유하고(`IsSealed()`), `BootCVar::Get()`은 부팅 블록 칸을 읽는다. 봉인 전 `Get()`은 Debug·Development에서 Fatal이다(출시 빌드는 지금 칸을 읽는다). 봉인 뒤에 등록한 부팅 변수는 등록 때 값(대기 값 포함)으로 부팅 블록에 굳는다. 두 번째 `CompleteStartup`은 무동작이다.
+- 봉인 뒤 직접 쓰기(콘솔·코드·범위 임시 변경 층 — 콘솔 입력·이름으로 하는 대입)는 넣을 때 Error `BootSealed`로 거부한다. 메시지는 콘솔 안내 문구(`is a boot variable; set it in a config file or with --set and restart` — 이름 뒤에 붙인다)다. 다른 스레드의 쓰기는 꺼낼 때 다시 검사한다. Sync의 다시 합치기는 이 검사를 하지 않는다(봉인 전에 들어간 콘솔 값이 봉인 뒤 Sync에서 빠지지 않게). `CVar<T>::Set`·`ScopedOverride`는 `BootCVar`에 컴파일 단계에서 막혀 있다.
+- 파일 층 변경은 CF3 재시작 대기(`GetPendingRestarts`·Note `RestartRequired`), 파생·휘발 층은 `BootValueIgnored` 그대로다. `UserSetting()` 부팅 변수의 사용자 층 쓰기는 대기로 오른다.
+- Explain·dump 자료: `ConfigContext::DescribeConsoleSetting`(`ConsoleSettingInfo` — 이름·도움말·종류·지금 값·`boot`(`[boot]`)·재시작 대기 값(`pending restart: <값>`)). 표시는 CVR6 콘솔 도구다.
+- 대기 값 늦은 적용: 등록 때 대기 값이 적용되면 Note `LateBound`(독립 콘솔 설정·CVar 모두 — 출처는 가장 강한 입력).
+- `ReportUnresolved()`: 적용 중인 입력의 콘솔 이름(파일 `Settings` 멤버·콘솔 이름 대입) 중 등록되지 않은 이름마다 한 번 Warning `UnresolvedName`, 편집 거리 `MaxSuggestionDistance`(3) 이하의 가장 가까운 등록 이름(같으면 byte 순서로 앞, 출시 규칙에서 숨긴 것 제외)을 `did you mean '...'?`로 붙인다. 반환은 보고한 이름 수다. `HostSettings::CompleteStartup`이 봉인 바로 뒤에 부르고 경고를 기록한다.
+- 편집 거리: Core·다른 모듈에 없어 Core 공용 `Core/Text/EditDistance.h`의 `EditDistanceWithin(left, right, limit)`(byte 단위 Levenshtein, 한도 폭 띠만 계산 — 할당 없음, 한도 `MaxEditDistanceLimit` 32)를 만들고 전수 대조 시험을 붙였다(UE `Algo::LevenshteinDistance` 대응).
+- 진단 코드: `BootSealed`·`LateBound`·`UnresolvedName`을 더했다(CVR2의 `InvalidEnum`·CVR1의 `Clamped`·`ValidationFailed`와 함께). `CheatsDisabled`·`ReplicatedOnClient`(CVR6), `ScopeNotAllowed`(CVR3), `UndefinedLevel`·`GroupNoConverge`(CVR5)는 그 단계에서 쓰기 시작할 때 더한다(쓰지 않는 코드를 미리 두지 않는다). `ConsoleReadOnly`·`ValueOutOfRange`·`InvalidSetting`·`RestartRequired`·`BootValueIgnored`는 이미 있다.
+- `TakeDiagnostics(out)`: 모은 진단을 out 뒤에 옮기고 문맥의 모음을 비운다(`ConfigDiagnostics`는 복사·이동이 없으므로 출력 인자다).
+
 **CVR1 이후 결정·후속 항목**
 - `Register`는 타입을 지운 `const cvar::detail::VarDefinition*`만 받는다. CVR5 `CVarGroup`·CVR6 `ConsoleCommand`가 같은 경로로 오려면 종류(`HandleKind`)를 가진 공통 정의 머리가 필요하다(지금 `VarDefinition`을 머리로 쓰고 종류별 꼬리를 덧붙이는 모양).
 - 플러그인(모듈)을 내릴 때의 처리가 스펙에 없다: 문맥이 핸들 정의 포인터를 쥐므로, 모듈 코드가 내려가면 포인터가 dangling이 된다. `Unregister` 또는 모듈 언로드 때 그 모듈 핸들을 문맥에서 빼는 규칙을 정해야 한다(결정 필요).
@@ -709,6 +720,7 @@ public:
 
 ## 23. 개정 이력
 
+- 개정 8(2026-11-19): CVR4 구현 결과를 20절에 적었다(봉인과 부팅 블록, 직접 쓰기 `BootSealed`의 범위 — CF2 독립 콘솔 설정 포함·설정 struct 필드는 Config 규칙, `DescribeConsoleSetting`, `LateBound`, `ReportUnresolved`·Core 편집 거리, 진단 코드, `TakeDiagnostics`). 9절 CF3 비고를 고쳤다.
 - 개정 7(2026-11-19): CVR2 리뷰 반영. 4.2절에 float·double의 NaN·무한대 거부를, 6.2절에 `Set`의 반환(`ErrorCode`)과 거부 이유 출력(`SetOptions::reason`)·큐 한도는 다른 스레드 쓰기에만을, 6.3절에 `ScopedOverride`의 지우기가 값을 쓴 문맥으로 가고 소멸에 실패 경로가 없음을, 7.1절에 다른 문맥에만 등록된 핸들은 기본값임을, 10.1절에 한 스레드 여러 문맥의 묶음 규칙·묶음 깊이 확인·소유 스레드만 파괴·allocator 수명을 적었다.
 - 개정 6(2026-11-19): CVR2 구현 결과를 20절에 적었다(조각 snapshot·이름 블록, Initialize 빈 snapshot, 스레드 묶음·묶음 계수, `Get()`·Name 기본값, 하나의 쓰기 큐와 적용 때 재검사, 새 층 넷, Sync 순서, `Set` 오류 코드, CF2 이관 — `Snapshot()`→`Acquire()`, `Subscribe`는 CVR7, 넘긴 것). CVR1 메모의 dirty 반영을 즉시 게시로 고쳤다.
 - 개정 5(2026-11-18): CVR1 리뷰 반영. 4.2절에 힙 생성 금지·Policy 거부 형태·정의 텍스트 규칙(Name 기본값 ASCII 한정으로 NFC 판정 대신)을, 10절에 `Register` 등 게임 lane API의 소유 스레드 위반은 모든 구성에서 `WrongThread`임을, 20절에 `Register`의 dirty 반영(즉시 게시는 CVR2)·리뷰 반영 내용·후속 항목(공통 정의 머리, 모듈 언로드, `rocks::Name`)을 적었다.

@@ -256,7 +256,8 @@ TEST(Config_OldUserFileDropsUnknownKeysWithWarnings) {
 
 // 시작 뒤 RestartRequired 값의 변경은 지금 값을 둔다(구독 콜백·snapshot은 바뀌지 않는다). 출처가
 // 파일 층(사용자·프로젝트)이면 재시작 대기로 기록하고 사용자 값은 저장되어 다음 시작 때 적용된다.
-// 콘솔 층 같은 휘발 층이면 대기 없이 Warning BootValueIgnored를 한 번만 낸다. 되돌리면 대기가
+// 세션 층 같은 휘발 층이면 대기 없이 Warning BootValueIgnored를 한 번만 낸다(콘솔 층 쓰기는 넣을
+// 때 BootSealed로 거부한다). 되돌리면 대기가
 // 없어진다. 시작 전 변경은 바로 적용된다.
 TEST(Config_RestartRequiredChangeWaitsForNextStart) {
     UserTree paths;
@@ -283,7 +284,14 @@ TEST(Config_RestartRequiredChangeWaitsForNextStart) {
         REQUIRE(context.SubscribeSettings<DisplaySettings>(
             [](void* raw, const ConfigChange&) noexcept { ++*static_cast<int32*>(raw); }, &calls));
         REQUIRE(SetUserValue(context, "Game.Display.textureBudget", "2048"));
-        REQUIRE(context.AddAssignment(ConfigLayer::Console, "console", "net.listen.port", "9000"));
+        // 봉인 뒤 부팅 독립 콘솔 설정의 콘솔 쓰기는 넣을 때 거부한다(BootSealed — CVar 9절).
+        auto console =
+            context.AddAssignment(ConfigLayer::Console, "console", "net.listen.port", "9000");
+        CHECK(!console && console.Error() == ErrorCode::InvalidArgument);
+        CHECK(HasEntry(fixture, ConfigSeverity::Error, ConfigDiagnosticCode::BootSealed,
+                       "net.listen.port"));
+        // 휘발 층(세션)의 변경은 받되 지금 값을 지킨다(BootValueIgnored).
+        REQUIRE(context.AddAssignment(ConfigLayer::Session, "--set", "net.listen.port", "9000"));
         REQUIRE(context.Sync());
         CHECK(context.Get<DisplaySettings>().textureBudget == 768);
         CHECK(calls == 0);
@@ -297,7 +305,7 @@ TEST(Config_RestartRequiredChangeWaitsForNextStart) {
               pending[0].current == "768");
         CHECK(HasEntry(fixture, ConfigSeverity::Note, ConfigDiagnosticCode::RestartRequired,
                        "Game.Display.textureBudget"));
-        // 콘솔 값은 다음 실행에 다시 오지 않으므로 대기가 아니다(진단만).
+        // 세션 값은 다음 실행에 다시 오지 않으므로 대기가 아니다(진단만).
         CHECK(HasEntry(fixture, ConfigSeverity::Warning, ConfigDiagnosticCode::BootValueIgnored,
                        "net.listen.port"));
         CHECK(CountEntries(fixture, ConfigDiagnosticCode::BootValueIgnored) == 1);
@@ -318,8 +326,8 @@ TEST(Config_RestartRequiredChangeWaitsForNextStart) {
         // 사용자 값은 저장된다(다음 시작 때 적용).
         REQUIRE(SaveUserConfig(context, platform::PhysicalFileSystem()));
 
-        // 콘솔 값을 빼고 프로젝트 파일이 바꾸면(hot reload와 같은 파일 층) 그것은 대기가 된다.
-        REQUIRE(context.Unset(ConfigLayer::Console, "console"));
+        // 세션 값을 빼고 프로젝트 파일이 바꾸면(hot reload와 같은 파일 층) 그것은 대기가 된다.
+        REQUIRE(context.Unset(ConfigLayer::Session, "--set"));
         REQUIRE(context.AddLayerText(ConfigLayer::Project, "Game.json", "Game", "project/Game.json",
                                      R"({"Settings": {"net.listen.port": 9100}})"));
         REQUIRE(context.Sync());
