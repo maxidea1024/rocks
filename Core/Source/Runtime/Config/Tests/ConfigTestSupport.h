@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Config/Config.module.generated.h>
 #include <ConfigTestFixtures/ConfigTestFixtures.module.generated.h>
 #include <ConfigTestFixtures/SettingsFixture.generated.h>
 #include <Config/ConfigContext.h>
@@ -158,6 +159,7 @@ struct ConfigFixture {
     explicit ConfigFixture(const ConfigContextOptions& options = {}) noexcept
         : types(system), registration(types, system), names(system),
           objects(system, types, {0x434f4e46, 1}, MakeOptions(names)) {
+        REQUIRE(generated::Config::RegisterModuleTypes(registration));
         REQUIRE(generated::ConfigTestFixtures::RegisterModuleTypes(registration));
         REQUIRE(names.Initialize());
         auto made = UniquePtr<ConfigContext>::TryMake(system, system, objects, options);

@@ -1,13 +1,17 @@
 #include <HostConfig/HostSettings.h>
 
+#include <Config/Config.module.generated.h>
 #include <Config/ConfigLoader.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/FileError.h>
 #include <Core/Text/StringBuilder.h>
 #include <LogHost/LogHost.h>
+#include <Base/Compiler.h>
 #include <Platform/Fatal.h>
 #include <Platform/File.h>
+#include <Platform/Path.h>
 #include <Platform/Process.h>
+#include <Platform/VirtualMemory.h>
 #include <TraceControl/TraceController.h>
 
 namespace rocks {
@@ -24,7 +28,170 @@ bool IsPathSeparator(char c) noexcept {
     return c == '/' || c == '\\';
 }
 
+// 경로의 구분자를 '/'로 바꿔 out에 쓴다.
+Result<void> AssignForwardSlashes(StringView path, String& out) noexcept {
+    if (auto assigned = out.TryAssign(path); !assigned) {
+        return assigned;
+    }
+
+    auto replaced = out.TryReplace("\\", "/", StringComparison::CaseSensitive);
+    return replaced ? Result<void>::Success() : Result<void>::Failure(replaced.Error());
+}
+
+// 디렉터리에서 이름 byte 순서로 첫 `*.rocksproject` 파일 이름(확장자 제외)을 찾는다.
+struct ProjectScan {
+    explicit ProjectScan(Allocator& allocator) noexcept : name(allocator) {
+    }
+
+    String name;
+    bool found = false;
+    bool failed = false;
+};
+
+bool VisitProjectCandidate(const platform::DirectoryEntry& entry, void* raw) noexcept {
+    constexpr StringView Extension = ".rocksproject";
+    auto& scan = *static_cast<ProjectScan*>(raw);
+    const StringView name(entry.name, entry.nameBytes);
+    if (entry.info.type != platform::FileType::File || name.ByteCount() <= Extension.ByteCount() ||
+        !name.EndsWith(Extension, StringComparison::CaseSensitive)) {
+        return true;
+    }
+
+    const StringView stem = name.TryLeftBytes(name.ByteCount() - Extension.ByteCount()).Value();
+    bool earlier = !scan.found;
+    if (!earlier) {
+        const StringView current = scan.name.View();
+        const usize count =
+            stem.ByteCount() < current.ByteCount() ? stem.ByteCount() : current.ByteCount();
+        usize index = 0;
+        while (index < count && stem.Data()[index] == current.Data()[index]) {
+            ++index;
+        }
+
+        earlier = index < count ? static_cast<uint8>(stem.Data()[index]) <
+                                      static_cast<uint8>(current.Data()[index])
+                                : stem.ByteCount() < current.ByteCount();
+    }
+
+    if (earlier) {
+        scan.failed = scan.failed || !scan.name.TryAssign(stem);
+        scan.found = true;
+    }
+
+    return true;
+}
+
 } // namespace
+
+StringView HostPlatformName() noexcept {
+    if constexpr (IsWindows) {
+        return "Windows";
+    } else if constexpr (IsMac) {
+        return "Mac";
+    } else {
+        return "Android";
+    }
+}
+
+Result<void> CollectPlatformDeviceTraits(StringView platform,
+                                         config::DeviceTraits& traits) noexcept {
+    if (auto named = traits.SetText(config::DeviceTraitNames::Platform, platform); !named) {
+        return named;
+    }
+
+    uint64 bytes = 0;
+    if (!platform::QueryPhysicalMemory(bytes)) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    return traits.SetNumber(config::DeviceTraitNames::SystemMemoryMiB,
+                            static_cast<double>(bytes / (1024 * 1024)));
+}
+
+Result<void> FindProjectFrom(StringView start, String& directory, String& name) noexcept {
+    Allocator& allocator = directory.GetAllocator();
+    String current(allocator);
+    if (auto assigned = AssignForwardSlashes(start, current); !assigned) {
+        return assigned;
+    }
+
+    platform::FileSystem& files = platform::PhysicalFileSystem();
+    while (!current.IsEmpty()) {
+        ProjectScan scan(allocator);
+        const platform::FileStatus listed = files.EnumerateDirectory(
+            current.Data(), current.ByteCount(), &VisitProjectCandidate, &scan);
+        if (!listed && listed.code != platform::FileCode::NotFound) {
+            return Result<void>::Failure(FileErrorCode(listed));
+        }
+
+        if (scan.failed) {
+            return Result<void>::Failure(ErrorCode::OutOfMemory);
+        }
+
+        if (scan.found) {
+            if (auto assigned = directory.TryAssign(current.View()); !assigned) {
+                return assigned;
+            }
+
+            return name.TryAssign(scan.name.View());
+        }
+
+        // 부모 폴더로 올라간다(마지막 구분자 앞까지 — 루트에서 멈춘다).
+        StringView parent;
+        StringView leaf;
+        if (!current.View().Split("/", parent, leaf, StringComparison::CaseSensitive,
+                                  StringSearchDirection::FromEnd) ||
+            parent.IsEmpty() || parent.EndsWith(":", StringComparison::CaseSensitive)) {
+            break;
+        }
+
+        String next(allocator);
+        if (auto assigned = next.TryAssign(parent); !assigned) {
+            return assigned;
+        }
+
+        current = Move(next);
+    }
+
+    return Result<void>::Failure(ErrorCode::NotFound);
+}
+
+Result<void> FindProjectDirectory(String& directory, String& name) noexcept {
+    char executable[4096];
+    usize length = 0;
+    if (const platform::FileStatus found =
+            platform::GetExecutablePath(executable, sizeof(executable), length);
+        !found) {
+        return Result<void>::Failure(FileErrorCode(found));
+    }
+
+    // 실행 파일이 있는 폴더부터 찾는다.
+    StringView folder;
+    StringView file;
+    String path(directory.GetAllocator());
+    if (auto assigned = AssignForwardSlashes(StringView(executable, length), path); !assigned) {
+        return assigned;
+    }
+
+    if (!path.View().Split("/", folder, file, StringComparison::CaseSensitive,
+                           StringSearchDirection::FromEnd)) {
+        return Result<void>::Failure(ErrorCode::NotFound);
+    }
+
+    return FindProjectFrom(folder, directory, name);
+}
+
+Result<void> UserDataDirectory(String& out) noexcept {
+    char buffer[4096];
+    usize bytes = 0;
+    if (const platform::FileStatus found = platform::GetStandardDirectory(
+            platform::StandardDirectory::UserData, buffer, sizeof(buffer), bytes);
+        !found) {
+        return Result<void>::Failure(FileErrorCode(found));
+    }
+
+    return AssignForwardSlashes(StringView(buffer, bytes), out);
+}
 
 Result<usize> FindEngineDirectory(Span<char> out) noexcept {
     char executable[4096];
@@ -69,7 +236,8 @@ Result<usize> FindEngineDirectory(Span<char> out) noexcept {
 
 HostSettings::HostSettings(Allocator& allocator) noexcept
     : allocator_(allocator), types_(allocator), modules_(types_, allocator), names_(allocator),
-      objects_(allocator, types_, HostSettingsContext, MakeOptions(names_)) {
+      objects_(allocator, types_, HostSettingsContext, MakeOptions(names_)), traits_(allocator),
+      profile_(allocator), profileArgument_(allocator) {
 }
 
 HostSettings::~HostSettings() noexcept {
@@ -104,6 +272,10 @@ Result<void> HostSettings::Initialize(const HostSettingsOptions& options) noexce
     const char* stage = "name pool";
     if (step) {
         stage = "module types";
+        step = generated::Config::RegisterModuleTypes(modules_);
+    }
+
+    if (step) {
         step = trace_control::RegisterTraceControlTypes(modules_);
     }
 
@@ -120,6 +292,8 @@ Result<void> HostSettings::Initialize(const HostSettingsOptions& options) noexce
         contextOptions.projectName = options.projectName;
         contextOptions.userDataDir = options.userDataDir;
         contextOptions.savedDir = options.savedDir;
+        contextOptions.platform =
+            options.platform.IsEmpty() ? HostPlatformName() : options.platform;
         auto made = UniquePtr<config::ConfigContext>::TryMake(allocator_, allocator_, objects_,
                                                               contextOptions);
         step = made ? Result<void>::Success() : Result<void>::Failure(made.Error());
@@ -138,8 +312,28 @@ Result<void> HostSettings::Initialize(const HostSettingsOptions& options) noexce
         step = trace_control::RegisterTraceSettings(*context_);
     }
 
+    if (step) {
+        step = config::RegisterDeviceProfileSettings(*context_);
+    }
+
     if (step && options.registerSettings != nullptr) {
         step = options.registerSettings(*context_);
+    }
+
+    if (step) {
+        stage = "device traits";
+        // 메모리를 조회할 수 없는 플랫폼은 메모리 등급 없이 돈다(기록만 한다).
+        const StringView platform =
+            options.platform.IsEmpty() ? HostPlatformName() : options.platform;
+        if (auto collected = CollectPlatformDeviceTraits(platform, traits_); !collected) {
+            if (collected.Error() != ErrorCode::Unsupported) {
+                step = Result<void>::Failure(collected.Error());
+            } else {
+                Log::Warning(LogHostConfig,
+                             "System memory could not be queried; device profiles see no memory "
+                             "bucket");
+            }
+        }
     }
 
     if (!step) {
@@ -149,6 +343,25 @@ Result<void> HostSettings::Initialize(const HostSettingsOptions& options) noexce
     }
 
     return step;
+}
+
+config::DeviceTraits& HostSettings::DeviceTraits() noexcept {
+    if (context_.Get() == nullptr) {
+        platform::Fatal("HostSettings::DeviceTraits called before a successful Initialize");
+    }
+
+    return traits_;
+}
+
+Result<void> HostSettings::ApplyDeviceTraits() noexcept {
+    config::ConfigContext& context = Context();
+    auto applied = config::ApplyDeviceProfile(context, profileArgument_.View(), traits_, profile_);
+    if (!applied) {
+        Log::Error(LogHostConfig, "Device profile could not be applied: {Error}",
+                   ErrorCodeName(applied.Error()));
+    }
+
+    return applied;
 }
 
 void HostSettings::ReportRejected(StringView what, ErrorCode error) noexcept {
@@ -253,6 +466,11 @@ Result<void> HostSettings::ApplyCommandLine(Span<const StringView> arguments) no
         }
     }
 
+    if (auto copied = profileArgument_.TryAssign(config::FindDeviceProfileArgument(arguments));
+        !copied) {
+        return copied;
+    }
+
     auto added = config::AddCommandLineAssignments(Context(), arguments);
     if (!added) {
         ReportRejected("--set", added.Error());
@@ -262,16 +480,16 @@ Result<void> HostSettings::ApplyCommandLine(Span<const StringView> arguments) no
     return Result<void>::Success();
 }
 
-Result<void> HostSettings::CompleteStartup() noexcept {
+Result<void> HostSettings::SyncAndReport(StringView what) noexcept {
     config::ConfigContext& context = Context();
     auto synced = context.Sync();
     if (!synced) {
-        ReportRejected("startup sync", synced.Error());
+        ReportRejected(what, synced.Error());
         return synced;
     }
 
-    // Sync가 거부한 입력(이전 층에 따라 달라진 배열 연산 등)은 값에서 빠지고 진단만 남는다. 시작은
-    // 계속하되 남은 Error 진단을 기록한다.
+    // Sync가 거부한 입력(이전 층에 따라 달라진 배열 연산 등)·프로필과 품질 정의 오류는 값에서
+    // 빠지고 진단만 남는다. 시작은 계속하되 남은 진단을 기록한다.
     bool rejected = false;
     for (usize index = 0; index < context.Diagnostics().Count(); ++index) {
         rejected =
@@ -279,7 +497,31 @@ Result<void> HostSettings::CompleteStartup() noexcept {
     }
 
     if (rejected) {
-        ReportRejected("inputs at startup", ErrorCode::InvalidArgument);
+        ReportRejected(what, ErrorCode::InvalidArgument);
+    } else {
+        ReportWarnings();
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> HostSettings::CompleteStartup() noexcept {
+    config::ConfigContext& context = Context();
+    if (auto synced = SyncAndReport("inputs at startup"); !synced) {
+        return synced;
+    }
+
+    // 기기 프로필은 파일·--set 값(프로젝트 지정·정의)을 본다.
+    if (auto applied =
+            config::ApplyDeviceProfile(context, profileArgument_.View(), traits_, profile_);
+        !applied) {
+        Log::Error(LogHostConfig, "Device profile could not be applied: {Error}",
+                   ErrorCodeName(applied.Error()));
+        return applied;
+    }
+
+    if (auto synced = SyncAndReport("device profile"); !synced) {
+        return synced;
     }
 
     auto completed = context.CompleteStartup();

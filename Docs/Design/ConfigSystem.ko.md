@@ -1,6 +1,6 @@
 # 설정 계층과 콘솔 설정 설계
 
-기준일: 2026-11-18, 개정 4(CVar 스펙 반영). 엔진·프로젝트·플랫폼·기기·사용자·세션·콘솔에서 오는 설정 값을 하나의 우선순위로 합치는 **설정 계층**과, 실행 중 이름으로 읽고 바꾸는 **콘솔 설정**(변수·명령)을 정한다.
+기준일: 2026-11-18, 개정 6(CF4 구현·호스트 부트 반영). 엔진·프로젝트·플랫폼·기기·사용자·세션·콘솔에서 오는 설정 값을 하나의 우선순위로 합치는 **설정 계층**과, 실행 중 이름으로 읽고 바꾸는 **콘솔 설정**(변수·명령)을 정한다.
 
 [렌더 기반](RenderBase.ko.md)의 선행 작업 CP8(Config 계층)·CP4(콘솔 설정)이며, [엔진 구현 계획](EngineImplementationPlan.ko.md)의 다음 요구를 구현 스펙으로 옮긴다.
 - 24.1절 표의 "Device Profile / Scalability / CVar" 행
@@ -8,7 +8,7 @@
 
 UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275b`, 로컬 클론)의 현재 기본 경로이고, 경로는 `Engine/Source/Runtime/` 기준이다. UE 이름은 대응표와 근거에만 적는다. 레거시·deprecated 경로는 보지 않았다.
 
-상태: **설계 확정**(결정 D1–D9). 구현 단계는 9절이다. 구현: CF1·CF2(2026-11-17, Core 모듈 `Config` — `Core/Source/Runtime/Config`), 엔진 연결(2026-11-18, 5.4절 — `HostConfig` 모듈·엔진 sync 지점·`--set`·`config-dump` 등록). 5절 콘솔 설정의 상세 스펙은 [CVar·치트 명령 설계](CVarSystem.ko.md)로 옮겼다(개정 4). 그 단계 CVR1–CVR8의 착수 시점은 다른 세션 작업을 본 뒤 사용자가 정하고, 그 전까지는 CF2 구현이 현재 동작이다.
+상태: **설계 확정**(결정 D1–D9). 구현 단계는 9절이다. 구현: CF1·CF2(2026-11-17, Core 모듈 `Config` — `Core/Source/Runtime/Config`), 엔진 연결(2026-11-18, 5.4절 — `HostConfig` 모듈·엔진 sync 지점·`--set`·`config-dump` 등록), CF3(2026-11-18, 8절 — 사용자 층 저장·관대한 읽기·재시작 대기·hot reload), CF4(2026-11-18, 6절 — 기기 프로필·품질 조합 검증 함수. 품질 묶음 정의·펼침은 CVR5). 5절 콘솔 설정의 상세 스펙은 [CVar·치트 명령 설계](CVarSystem.ko.md)로 옮겼다(개정 4). 그 단계 CVR1–CVR8의 착수 시점은 다른 세션 작업을 본 뒤 사용자가 정하고, 그 전까지는 CF2 구현이 현재 동작이다.
 
 ## 1. 결정 요약
 
@@ -145,6 +145,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 | (자동) 프리셋 항목 | 어떤 `CVarGroup`의 항목인 변수만 품질 묶음 층 쓰기를 받는다 | `ECVF_Scalability` | `QualityMember` |
 | (자동) snapshot | 모든 CVar가 snapshot에 든다 | `ECVF_RenderThreadSafe` | `RenderRead` |
 
+- **현재 구현(CF2·CF3)의 플래그 동작**(CVR 전까지): 콘솔 읽기 전용은 콘솔 층만 거부한다(`ConsoleReadOnly`). 품질 묶음 구성원 플래그가 없는 콘솔 설정은 콘솔 이름으로 오는 품질 층 쓰기를 거부한다(`NotQualityMember` — CVR5에서 프리셋 항목 자동 판정으로 바뀐다). 개발 전용은 출시 규칙에서 등록은 되지만 콘솔 조회·자동완성에 보이지 않고 어떤 층도 쓸 수 없어 코드 기본값으로 고정된다. 시작 뒤 고정(`StartupOnly`)은 `CompleteStartup` 뒤 새로 들어오는 쓰기를 거부한다. 재시작 필요(`RestartRequired`)는 `CompleteStartup` 뒤 쓰기를 받되 지금 값과 그 출처를 유지하고 새 합친 값을 재시작 대기로 기록한다(`GetPendingRestarts`, Note `RestartRequired` — 8절). CVar의 `BootCVar` + `UserSetting()`(VD15)은 이 대기 기록을 그대로 쓰고, 봉인 뒤 사용자 층이 아닌 쓰기를 `BootSealed`로 거부하는 규칙만 더한다(CVR4). 설정 struct 필드의 `RestartRequired`·`StartupOnly` 지정자는 이 동작 그대로 남는다(7절).
 - 거부 코드와 진단은 CVar 6.2·12·13절이다. 권한(치트·복제·부팅 봉인)은 쓰기를 받을 때 한 번, Sync 적용 때 한 번 검사한다.
 - 출시 쿠킹에서 빼는 값은 설정 struct 필드 `ShippingExcluded`와 `Cheat()` 변수다(8절 쿠킹 허용 목록).
 - 셰이더·쿠킹 결과에 영향을 주는 값은 CVar로 두지 않고 셰이더 형식 정의·TargetProfile에 둔다. 쿠킹 키에 들어가야 하기 때문이다(RenderBase 12절). UE의 셰이더 변경 플래그(`IConsoleManager.h:1488–1496`)는 두지 않는다.
@@ -176,13 +177,16 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
   1. 등록: 모듈 타입(TraceControl + 호스트 콜백) → 설정(`log.*` — LogHost, `trace.*`·`TracePresets`·`Trace` — TraceControl, 호스트 콜백). 파일을 읽기 전이다(모르는 섹션·설정은 오류이기 때문이다).
   2. `LoadConfigFiles`: 엔진·프로젝트(·플랫폼·사용자) 층 파일. 엔진 폴더는 호스트가 정한다. Sandbox·RocksCommandlet은 실행 파일 위쪽에서 `Engine/Config`를 가진 첫 폴더를 찾는다(`FindEngineDirectory`).
   3. 호스트의 추가 파일(Sandbox `--config` — Project 층).
-  4. 명령줄 `--set=<target>=<value>`(`AddCommandLineAssignments` — Session 층, 태그 `--set`, 값은 첫 `=` 뒤 전부).
-  5. Sync → `CompleteStartup`(StartupOnly 값 고정 — `log.mode`·`log.file.*` 등).
+  4. 명령줄 `--set=<target>=<value>`(`AddCommandLineAssignments` — Session 층, 태그 `--set`, 값은 첫 `=` 뒤 전부)와 `--device-profile=<이름>`(기억만 한다).
+  5. Sync → 기기 프로필 적용(`ApplyDeviceProfile` — 6.2절) → Sync → `CompleteStartup`(StartupOnly 값 고정 — `log.mode`·`log.file.*` 등). 프로필 정의 오류는 기록하고 시작은 계속한다. 기기 프로필이 정한 StartupOnly 값도 시작에 들어간다. 품질 묶음 펼침(CVR5)은 이 단계의 기기 프로필 뒤에 들어간다.
   6. 그다음 LogHost 설치 → trace 세션·콘솔 명령·`--trace` → 엔진 루프.
 - **설정 오류의 출력.** 1–5단계의 거부는 `HostSettings`가 진단(파일·줄·열·코드·경로·메시지)과 함께 한 번 기록한다. LogHost 설치 전이므로 비상 경로(stderr, Warning 이상)로 나간다. 호출자는 다시 기록하지 않는다.
 - **sync 지점.** 엔진 `RunFrame`은 2단계(시간 갱신) 뒤, 3단계(프레임 시작 — hooks.BeginFrame·Subsystem.OnFrameBegin·client.OnEngineTick) 전에 `Sync`를 부른다. 그래서 프레임 사이 변경은 다음 프레임 시작부터 보이고, 프레임 안에서 넣은 변경은 그 프레임 동안 값을 바꾸지 않는다. Sync 실패는 그 프레임의 첫 오류로 돌려주고 프레임은 계속한다(연속 실패는 첫 번째만 Error 로그).
 - **종료 순서.** 엔진 정리 → trace 세션 정지 → 로그 설치 범위 해제 → `LogHost::Stop`(구독 해제) → 설정 문맥 파괴. 문맥은 LogHost·trace 제어기·엔진보다 오래 산다.
 - **config-dump.** RocksCommandlet이 같은 부트(1·2·5단계)로 문맥을 만들어 `config-dump`를 등록한다. 엔진 폴더를 못 찾으면 엔진 층 없이 코드 기본값을 낸다.
+- **기기 특성.** `HostSettings::Initialize`가 플랫폼 특성(플랫폼 이름 — 옵션 `platform`, 비면 `HostPlatformName()`, 시스템 메모리)을 채운다. 플랫폼 이름은 문맥의 플랫폼(플랫폼 층 폴더)이기도 하다. 그래픽 장치를 만든 호스트는 `DeviceTraits()`에 GPU 특성(`DeviceCaps` — Sandbox `AppendGraphicsDeviceTraits`)을 더하고 `ApplyDeviceTraits()`로 기기 프로필을 다시 적용한다(다음 Sync, 시작 뒤라 StartupOnly 값은 바뀌지 않는다).
+- **프로젝트 폴더·사용자 층(게임·에디터 실행 파일 — 2026-11-18 결정, 권장안).** 프로젝트 폴더는 실행 파일 폴더부터 위로 올라가며 프로젝트 기술자(`*.rocksproject`)를 가진 첫 폴더이고 프로젝트 이름은 그 기술자 파일 이름이다(`FindProjectDirectory`·`FindProjectFrom` — 여럿이면 이름 byte 순서로 첫 것). 사용자 층은 Standard 모드에서 `<UserData>/<프로젝트 이름>/Config`다(`UserDataDirectory` — Windows Roaming AppData, macOS `~/Library/Application Support`, Android는 등록한 앱 data 폴더). 프로젝트가 없는 도구(Sandbox·RocksCommandlet)는 봉인 모드다. hot reload는 `StartHotReload`(개발 빌드)다.
+- **남은 일.** 게임·에디터 실행 파일을 HostSettings 부트로 바꾸는 일은 대상이 없어 하지 않았다(2026-11-18 확인): 저장소의 실행 파일은 Sandbox·RocksCommandlet·시험·벤치 프로그램과 Foundation 게임 템플릿(`Templates/Game/Foundation` — 엔진 루프 없이 Object·리플렉션만 쓰는 예제)뿐이고 에디터는 없다. 템플릿을 바꾸려면 설치 SDK(`Engine` 타깃 — ObjectSerialization·Localization·CoreTypeBindings)에 HostConfig와 그 의존(LogHost → Crypto → 외부 라이브러리 Sodium)을 넣어야 하는데 SDK 내보내기는 외부 라이브러리 모듈을 아직 거부한다. 엔진 루프를 쓰는 게임 템플릿·에디터가 생길 때 위 결정대로 main을 짠다(Sandbox `RunEngineHost`가 본보기다). 실제 그래픽 장치의 특성 연결도 장치를 만드는 엔진 호스트가 생길 때 한다(지금 Sandbox 엔진 호스트는 headless다).
 - 스펙과 다른 점: 문맥·부트를 엔진 안이 아니라 호스트 모듈(`HostConfig`)에 둔다(로그 설정이 엔진 초기화보다 먼저 필요하다). 엔진은 문맥을 빌린다. 엔진 폴더는 실행 파일 위치에서 찾는다(설치 경로 규칙은 패키징 단계에서 정한다).
 
 ## 6. 품질 묶음과 기기 프로필
@@ -195,6 +199,8 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - 등급을 바꾸면 그 묶음 태그의 품질 묶음 층 값을 `Unset`하고 새 등급 값을 쓴다.
 - 사용자가 고른 등급은 사용자 층에 저장한다.
 - 품질 조합 검증(계획 24.2절): 등급 조합이 장치 능력(`DeviceCaps`)으로 불가능하면 정해진 순서로 낮추고, 낮춘 결과와 사유를 진단에 남긴다.
+- 구현 메모(CF4, `Config/QualityValidation.h`): 묶음 정의와 Quality 층 펼침은 CVR5(`CVarGroup`)의 일이고, CF4는 그 앞의 **순수 함수** `ResolveQualityLevels`만 둔다. 입력은 "묶음 이름 → 요청 등급(묶음 변수 = `CVar<int32>`의 값)"·묶음 규칙(정의된 등급·우선순위·등급별 기기 조건 `requirements`와 예산 비용)·예산(한도 = 수 특성 × `fraction`)·기기 특성이고, 출력은 "묶음 이름 → 펼칠 등급 + 사유"다. 층에 아무것도 쓰지 않는다. 낮춤 순서: ① 등급 요구가 거짓이면 정의된 바로 아래 등급으로(가장 낮은 등급도 거짓이면 그대로 두고 unmet) ② 예산을 넘으면 우선순위가 낮은 묶음부터(같으면 이름 byte 순서) 그 예산 비용을 줄이는 한 칸씩(더 낮출 수 없으면 사유를 남기고 멈춘다). 낮춘 등급은 묶음 변수에 쓰지 않고 펼칠 때만 쓴다(CVar 11절). 표기는 `FormatQualityResolution` — `quality.shadow@1 (requested 3, lowered: <사유>)`.
+- CVR5로 넘기는 것: 등급 요구·비용을 어디서 정하는지(`CVarGroup` 빌더 또는 `Quality.json` 값), 펼침 전에 이 함수를 부르는 것, 낮춤의 Explain·진단(`QualityLowered` 등) 기록, 품질 묶음이 실제로 있어야 하는 시험(등급 변경 `Unset`, 낮춘 등급의 펼침, 장치 변경 뒤 원래 선택 복귀).
 
 ### 6.2 기기 프로필
 
@@ -203,6 +209,10 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - **메모리 등급별 묶음**: 기기 메모리 등급에 따라 추가로 적용할 값 묶음이다. 등급 판정은 장치 정보 입력으로 한다(UE `CVars_<Bucket>`, `:471–487`).
 - **선택 순서**: 명령줄 지정 → 프로젝트 지정 → 선택 규칙(장치 정보를 인자로 받는 순수 함수) → 플랫폼 기본. UE 선택 순서(`:1631–1655`)에 대응한다. 봉인 모드는 선택 규칙을 쓰지 않고 id를 명시한다.
 - **쿠킹 경계**: 쿠킹에 영향을 주는 것(텍스처 LOD 그룹·압축 형식 등)은 TargetProfile에 두고 기기 프로필에는 두지 않는다.
+- 구현(CF4, `Config/DeviceProfiles.h`·`Config/DeviceProfileSettings.h`·`Config/DeviceTraits.h`):
+  - 정의는 설정 struct `DeviceProfileSettings`(branch `DeviceProfiles`, 섹션 `DeviceProfiles`): `profiles`(이름 → `parent`·`platforms`·`match`(기기 조건)·`matchPriority`·`values`(대상 → 명령행 값 표기)·`memoryValues`(등급 → 값)), 프로젝트 지정 `profile`, `platformDefaults`(플랫폼 → 프로필, 없으면 플랫폼 이름과 같은 프로필), `memoryBuckets`(큰 것부터 `name`·`minimumMiB`). 대상은 콘솔 이름(품질 묶음 변수 `quality.shadow` 포함) 또는 `<Branch>.<Section>.<경로>`다. 엔진 기본은 `Engine/Config/DeviceProfiles.json`(메모리 등급과 Windows·Mac·Android 기본 프로필 — 값은 아직 없다)이다.
+  - `ApplyDeviceProfile(context, 명령줄 이름, traits, out)`이 선택 순서(명령줄 `--device-profile=` → 프로젝트 지정 → 규칙(이 플랫폼의 후보 중 `matchPriority`가 크고 이름이 앞선 것) → 플랫폼 기본)로 고른다. 정의에 없는 이름은 Error `InvalidDeviceProfile` 뒤 다음 단계이고, 봉인 모드는 규칙을 건너뛴다. 자식부터 부모로 "같은 프로필의 메모리 등급 값 → 일반 값"을 아직 없는 대상만 모아(UE `CVars_<Bucket>` 먼저와 같다) 기기 프로필 층(태그 `DeviceProfile`)을 `Unset` 뒤 다시 쓴다. 모르는 부모·순환은 진단 후 거기서 멈춘다. 거부된 값은 그 값만 건너뛴다.
+  - 기기 정보 입력: Config는 Graphics에 의존하지 않는다. `DeviceTraits`(이름 → 수·문자열, 표준 이름 `DeviceTraitNames` — `platform`·`memory.system_mib`·`gpu.memory_mib`·`gpu.texture_size_2d` 등)를 호스트가 채운다. 플랫폼 특성은 `HostConfig`의 `CollectPlatformDeviceTraits`(새 `platform::QueryPhysicalMemory`), GPU 특성은 장치를 만든 호스트가 `DeviceCaps`에서 옮긴다(Sandbox `AppendGraphicsDeviceTraits`). 기기 조건 `DeviceCondition`은 `trait`·`equals`·`contains`(ASCII 대소문자 무시)·`atLeast`·`below`다.
 - 이름 충돌 주의: 입력 계획의 "device profile"(`Docs/Design/CoreObjectInputDetailedPlan.ko.md:994`)은 다른 개념이므로 그쪽 이름을 바꾸는 개정을 10절에 올린다.
 
 ## 7. 리플렉션 연결
@@ -230,10 +240,16 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - 사용자 층만 저장한다. 그 아래 층을 합친 값과의 차이만 쓴다(UE `ConfigCacheIni.h:1161–1170`과 같다).
 - 쓰기는 임시 파일 → Flush → 원자적 `Replace`(`Core/Source/Runtime/PlatformBase/Public/Platform/File.h:177–196`)다.
 - 사용자 파일에는 스키마 버전을 둔다. 사용자 기기의 오래된 파일에 든 모르는 키는 경고 후 버린다. 엔진·프로젝트 파일의 모르는 키는 오류로 실패한다.
+- 구현(CF3, `Config/UserConfig.h`):
+  - 사용자 설정 변경은 `SetUserValue(context, target, value)`(사용자 층 대입, 태그 `user`)다. 저장은 `SaveUserConfig(context, files)`이고 branch마다 `WriteUserConfig`가 "사용자 층까지 합친 값"과 "그 아래 층(Engine … DeviceProfile)만 합친 값"을 필드 정규 JSON으로 비교해 다른 UserConfig 필드만 쓴다. 사용자 층보다 강한 층(세션·콘솔 등) 값은 쓰지 않는다. 독립 콘솔 설정(UserConfig 플래그)은 branch가 없으므로 `Engine` branch 파일의 `Settings`에 쓴다. 값이 없는 branch의 옛 파일은 지운다(UE `SaveBranch`와 같다). 쓰기는 `<Branch>.json.tmp` → Flush → `Replace`다.
+  - 파일 형식은 Core canonical JSON이고 첫 키가 `"$version": 1`(`UserConfigSchemaVersion`)이다. 섹션은 이름 byte 순서, 필드는 스키마 순서다.
+  - 읽기는 `AddUserFileText`(LoadConfigFiles가 사용자 층에 쓴다)다. 최상위 키·섹션 멤버·`Settings` 이름마다 따로 검사해 받을 수 없는 조각만 버리고 원문 위치의 Warning 진단을 남긴다(JSON 문법 오류는 파일 전체). 버전이 없거나 다르면 Warning `UserFileVersion`이다(키 검사로 처리하므로 버전 변환 규칙은 아직 없다). 등록되지 않은 콘솔 이름은 대기 값으로 받지 않고 `UnknownSetting`으로 버린다(사용자 파일은 모든 등록 뒤에 읽는다). 진단 심각도에 Warning을 더했다(`ErrorCount`에 들지 않는다).
 
 **실행 중 변경**
 - 재시작이 필요한 값은 "다음 시작 때 적용 예정"으로 기록하고 진단·UI에 보인다.
+  - 구현(CF3): `CompleteStartup` 뒤 Sync가 RestartRequired 필드·콘솔 설정의 새 합친 값이 지금 값과 다르면 지금 값(과 그 출처 스택)을 유지하고 `GetPendingRestarts`에 (이름, 대기 값, 지금 값)으로 남긴다. 새로 대기가 된 것은 Note `RestartRequired`(CVar VD15 진단 이름)와 Info 로그다. 변경 콜백·snapshot은 바뀌지 않는다. 사용자 층 값이면 저장되어 다음 실행에 적용되고, 되돌리면 대기가 없어진다. UE `ConfigRestartRequired`는 값을 바로 바꾸고 알림만 띄우지만, Rocks는 효력 시점을 문맥이 지킨다(CVar 9절 "세 번째 종류를 두지 않는다"와 같은 뜻).
 - hot reload는 에디터·개발 빌드에서 `DirectoryWatcher`(`Platform/DirectoryWatch.h:48–93`)로 `Config/`를 감시한다. 바뀐 층만 다시 읽어 출처 스택을 갱신하고, sync 지점에서 적용한다. 출시 빌드는 감시하지 않는다.
+  - 구현(CF3, `Config/ConfigReload.h`): `ConfigFileReloader`가 엔진·프로젝트·사용자 `Config/` 폴더를 감시하고 문맥의 sync hook(`ConfigContext::AddSyncHook` — Sync가 큐를 보기 전에 부른다)에서 감시 이벤트를 모아 바뀐 파일만 다시 읽는다. 이벤트는 표시일 뿐이라 값은 그 sync 지점에서만 바뀐다. 파일 하나는 `ReplaceLayerText`(검사에 통과해야 그 앞에 `Unset`을 넣는다 — 잘못 고친 파일은 옛 값을 지우지 않는다)로, 지운 파일은 `Unset`으로, 사용자 파일은 관대한 읽기로 바꾼다. Overflow는 그 루트의 모든 branch 파일을 다시 읽는다. 출시 규칙이면 `Start`가 Unsupported다. `HostSettings::StartHotReload`가 호스트에서 켠다(Sandbox는 LogHost 설치 뒤). CVar 10절의 쓰기 큐가 생기면 hook은 그 큐에 넣는 쪽으로 옮긴다(CVR2).
 
 **쿠킹**
 - TargetProfile마다 층 1–4와 그 대상 기기 프로필 정의·품질 묶음 정의를 합친다. 허용 목록 밖의 값(출시 제외 필드·`Cheat` 값·에디터 전용)은 빼고 결정적 JSON으로 쓴다.
@@ -257,6 +273,8 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 | CF4 | 품질 묶음·기기 프로필(상속·메모리 등급·선택 규칙)·품질 조합 검증 | CF2, GX1(장치 능력) | 상속 우선순위, 등급 변경 `Unset`, 선택 순서, 불가능 조합 낮춤과 진단 |
 | CF5 | 쿠킹(허용 목록·결정적 출력·SHA)·실행 파일 읽기 순서 | CF4, AssetSystem A4(쿠커) | 같은 입력 같은 바이트, 출시 제외 필드 부재, 쿠킹 설정 + 사용자 층 순서 |
 
+- 진척: CF4 구현(2026-11-18 — 시험 `DeviceProfileTests.cpp`: 기기 조건, 선택 순서·봉인 모드, 부모 사슬·메모리 등급 우선순위·순환·프로필 바꿈의 `Unset`. `QualityValidationTests.cpp`: 요구·예산 낮춤과 순서, unmet, 표기. `HostSettingsTests`: 시작 완료의 기기 프로필 적용, 프로젝트 폴더 찾기). 품질 묶음이 있어야 하는 완료 기준(등급 변경 `Unset`, 낮춘 등급의 펼침)은 CVR5로 넘긴다. 남은 단계: CF5.
+- 진척: CF1·CF2 구현(2026-11-17), CF3 구현(2026-11-18 — 시험 `UserConfigTests.cpp`·`ConfigReloadTests.cpp`: 저장 왕복 golden과 차이만 기록, 오래된 사용자 파일의 키별 Warning, 재시작 대기와 다음 실행 적용, 감시 이벤트(시험 gate `NotifyChanged`)가 sync 지점에서만 적용됨과 실제 감시기 이벤트).
 - CF1·CF2는 미리 할 수 있다(Core 단독). RenderBase RB1의 설정 snapshot은 CF2 뒤에 잇는다.
 - CF2의 콘솔 설정 부분(registry·플래그·snapshot·구독)은 CVar 단계 CVR1–CVR8이 대체한다. CF4의 품질 묶음은 CVR5의 `CVarGroup`을 쓴다. CVR 착수 시점은 사용자가 정한다.
 - CF4의 장치 능력 연결은 GX1 뒤다. CF5는 쿠커(A4) 뒤다.
@@ -289,6 +307,10 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 콘솔 설정·치트 명령의 결정은 CVar 문서 17절(VD1–VD18)이다.
 
 ## 12. 개정 이력
+
+- 개정 6(2026-11-18): CF4 구현을 반영했다. 기기 프로필(`DeviceProfileSettings` — 선택 순서·부모 사슬·메모리 등급, 기기 프로필 층), 기기 특성 입력(`DeviceTraits` — Config는 Graphics를 모른다), 품질 조합 검증 순수 함수(`ResolveQualityLevels` — 품질 묶음 정의·펼침은 CVar CVR5), 호스트 부트의 기기 프로필 단계·기기 특성·프로젝트 폴더와 사용자 층 결정, 게임·에디터 main의 남은 일(5.4·6·9절).
+
+- 개정 5(2026-11-18): CF3 구현을 반영했다(개정 4 위에 다시 붙임). 사용자 층 저장(아래 층과의 차이, 독립 콘솔 설정은 Engine branch, 빈 branch의 옛 파일 삭제, 원자적 교체)과 파일 형식(`$version`), 오래된 사용자 파일의 키별 관대한 읽기(Warning 심각도), 재시작 필요 값의 대기(지금 값 유지 — CVar VD15가 그대로 쓰는 모양, 진단 이름 `RestartRequired`), hot reload(sync hook·`ReplaceLayerText`)를 5.1·8·9절에 적었다.
 
 - 개정 4(2026-11-18): [CVar·치트 명령 설계](CVarSystem.ko.md) 개정 1을 반영했다. 5절을 그 문서로 대체하고 Config 쪽 규칙만 남겼다. 반영한 내용은 다음과 같다.
   - 3.1절: 층 넷(핫픽스·코드·범위 임시·서버)을 더하고, 품질 묶음 비고를 프로젝트보다 강한 실제 순서로 고쳤다. 범위 임시 변경은 범위 임시 층으로 옮겼다.
