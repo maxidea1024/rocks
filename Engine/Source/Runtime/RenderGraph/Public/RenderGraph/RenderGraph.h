@@ -10,7 +10,7 @@
 #include <RenderGraph/GraphTypes.h>
 #include <TraceCapture/TraceCpuScope.h>
 
-// 렌더 그래프다(Docs/Design/RenderBase.ko.md 7·8절 RG1, UE FRDGBuilder 대응).
+// 렌더 그래프다(Docs/Design/RenderBase.ko.md 7·8절 RG1·RG2, UE FRDGBuilder 대응).
 namespace rocks::render {
 
 class RenderFrameContext;
@@ -112,7 +112,8 @@ RenderGraphDesc MakeRenderGraphDesc(RenderFrameContext& frame, GraphResourcePool
                                     GraphMode mode = GraphMode::Deferred) noexcept;
 
 // 렌더 그래프다. 한 프레임(또는 offscreen 작업 하나)의 pass를 모아 선언 순서대로 실행한다(결정 R5:
-// 재배치 없음). 1차 범위(RG1): 단일 graphics queue, aliasing·render pass 병합 끔, 단일 스레드 기록.
+// 재배치 없음). 범위(RG1·RG2 A부): 단일 graphics queue, aliasing·render pass 병합 끔, 단일 스레드
+// 기록, 같은 그래프 안 풀 재사용, 그래프 안 업로드. begin·end 분리 전이는 RG2 B부다.
 //
 // 사용 예(렌더 lane 프레임 작업):
 //   static TraceScopeName SceneName("Scene");
@@ -136,6 +137,13 @@ RenderGraphDesc MakeRenderGraphDesc(RenderFrameContext& frame, GraphResourcePool
 //                 });
 //   auto history = graph.ExportTexture(scene.Value());   // 다음 프레임에 ImportTexture로 읽는다
 //   graph.Execute();
+//   ... 다음 프레임에 새 history를 export한 뒤 lane.Retire(previousHistory)  // 풀 반납(결정 R15)
+//
+// 업로드(그래프 시작에 장치 업로드 경로로 올린다):
+//   auto lights = graph.CreateBuffer({.size = bytes, .usage = BufferUsage::ShaderRead}, "Lights");
+//   graph.UploadBuffer(lights.Value(), lightBytes);       // 첫 pass보다 먼저 선언한다
+//   accesses.Buffer(lights.Value(), graphics::ResourceAccess::SrvGraphics);   // 전이는 그래프가
+//   낸다
 //
 // 동작:
 // - 의존: pass는 자원 접근 목록(GraphResourceAccess, subresource 범위·접근 상태)으로 의존을
@@ -144,8 +152,15 @@ RenderGraphDesc MakeRenderGraphDesc(RenderFrameContext& frame, GraphResourcePool
 // - 미사용 제거(점진 culling): 부수 효과 pass(HasSideEffects·스왑체인 타깃), import 자원에 쓰는
 //   pass(외부 출력), export 자원의 마지막 생산자에서 생산자 간선을 거꾸로 따라 살린 pass만
 //   실행한다. 앞의 둘은 AddPass 때, export는 Execute 때 살린다.
-// - 수명: 남은 pass의 참조 수로 첫 사용 pass에서 풀 자원을 받고 마지막 사용 pass 뒤에 놓는다(풀
-//   반환은 그래프 끝, GraphLifetime).
+// - 수명: 남은 pass의 참조 수로 첫 사용 pass에서 장치 객체를 받고 마지막 사용 pass 뒤에 놓는다
+//   (GraphLifetime). Deferred는 놓인 객체를 뒤 pass에서 처음 쓰는 같은 desc 자원이 이어 쓴다(같은
+//   그래프 안 재사용, 첫 전이 before Discard). 풀 반환은 그래프 끝이다. Immediate는 앞을 내다볼 수
+//   없어 같은 그래프 안 재사용을 하지 않는다.
+// - 업로드: UploadBuffer·UploadTexture가 선언한 CPU 데이터를 Deferred는 그래프 시작(첫 기록 앞),
+//   Immediate는 그 자원의 첫 pass 직전에 장치 업로드 경로로 올린다. 업로드가 생산자이므로 뒤 pass는
+//   생산자 pass 없이 읽을 수 있고, 읽기 전이는 장치가 추적한 상태에서 그래프가 낸다(장치 업로드는
+//   상태 중립이다, UE도 Unknown → CopyDest → Unknown). 남은 pass가 쓰지 않고 export도 아닌 자원의
+//   업로드는 하지 않는다.
 // - 전이: subresource마다 상태를 추적하며, 연속한 pass의 접근이 합칠 수 있으면(읽기끼리, 같은 UAV에
 //   생략 표시) 한 상태로 합쳐 그 첫 pass의 prologue에서 한 번만 바꾼다. 그래서 읽기 → 읽기 전이는
 //   없고 UAV → UAV는 생략 표시가 없을 때만 UAV barrier다. 전이는 그 pass 기록 함수 앞에 바로
@@ -172,16 +187,43 @@ public:
 
     // --- 자원 ---
 
-    // 그래프 수명 텍스처를 선언한다. 장치 자원은 첫 사용 pass 직전에 풀에서 받는다. usage는
-    // RenderTarget이고 형식은 번호표 안의 비압축 PixelFormat이어야 한다(그래프 텍스처는 GPU가
-    // 채운다). name은 정적 수명 문자열(진단)이다. 실패: 잘못된 desc InvalidArgument, arena 할당
-    // 실패는 그 오류다. 장치가 지원하지 않는 형식은 풀 할당 때 장치 오류(Unsupported)로 Execute가
-    // 실패한다.
+    // 그래프 수명 텍스처를 선언한다. 장치 자원은 첫 사용 pass 직전에 받는다(같은 그래프 안 재사용
+    // 자리 또는 풀). usage는 둘 가운데 하나다:
+    // - RenderTarget: GPU가 채운다. 형식은 번호표 안의 비압축 PixelFormat이다.
+    // - Sampled: 내용을 UploadTexture로만 받는다(모든 mip, pass는 읽기만). 압축 형식도 된다.
+    // name은 정적 수명 문자열(진단)이다. 실패: 잘못된 desc InvalidArgument, arena 할당 실패는 그
+    // 오류다. 장치가 지원하지 않는 형식은 풀 할당 때 장치 오류(Unsupported)로 Execute가 실패한다.
     Result<GraphTexture> CreateTexture(const graphics::TextureDesc& desc,
                                        const char* name) noexcept;
 
-    // 그래프 수명 버퍼를 선언한다(풀에서 0으로 채운 버퍼를 받는다).
+    // 그래프 수명 버퍼를 선언한다. 풀에서 새로 만든 버퍼는 0으로 채워져 있고, 다시 쓰는 버퍼의
+    // 내용은 정해지지 않는다(업로드하거나 pass가 쓴다).
     Result<GraphBuffer> CreateBuffer(const graphics::BufferDesc& desc, const char* name) noexcept;
+
+    // --- 그래프 안 업로드(RG2, UE QueueBufferUpload 대응) ---
+    //
+    // 만든 자원에 CPU 데이터를 올린다고 선언한다. 데이터는 이 호출 안에서 프레임 arena에 복사한다
+    // (호출 뒤 원본을 바꿔도 된다). 업로드는 그 자원의 생산자이고, 자원을 쓰는 어느 pass보다 먼저
+    // 선언해야 한다(업로드는 첫 pass 앞에서 실행된다). 업로드를 받는 자원은 그래프 시작에
+    // 할당하므로 같은 그래프의 앞 자원 객체를 이어 쓰지 않는다.
+
+    // 버퍼 [offset, offset + data.Size())에 올린다. 같은 버퍼에 여러 번 선언하면 선언 순서대로
+    // 올린다. 올리지 않은 구간의 내용은 정해지지 않는다(다시 쓰는 풀 버퍼). 실패: 다른 그래프
+    // handle·import 자원·이미 pass가 선언한 자원·빈 data·범위 밖 InvalidArgument, arena 할당 실패는
+    // 그 오류다.
+    //
+    // 사용 예:
+    //   graph.UploadBuffer(constants.Value(), Span<const uint8>(bytes, size));
+    Result<void> UploadBuffer(GraphBuffer buffer, Span<const uint8> data,
+                              uint64 offset = 0) noexcept;
+
+    // Sampled 그래프 텍스처의 mip 하나를 올린다(pixels는 빈틈 없는 행, 첫 행이 위,
+    // PixelFormatImageBytes 크기). 모든 mip을 한 번씩 올려야 한다(장치 생성에 mip 사슬 전체가
+    // 필요하다: 빠진 mip은 Execute의 검증 오류). 실패: 위 공통 조건, mip 범위 밖·크기 불일치·같은
+    // mip 두 번 InvalidArgument, RenderTarget 텍스처 Unsupported(버퍼 → 텍스처 복사 명령이 없다,
+    // GX4).
+    Result<void> UploadTexture(GraphTexture texture, uint32 mipLevel,
+                               Span<const uint8> pixels) noexcept;
 
     // 렌더 handle의 장치 자원을 그래프에 들인다(7.4절). handle의 lease를 얻어 그래프가 끝날 때까지
     // 잡는다. 실패: Retired·모르는 handle StaleHandle(LastError "retired"), 종류 TypeMismatch,
@@ -192,11 +234,13 @@ public:
     Result<GraphBuffer> ImportBuffer(RenderHandle handle, const char* name,
                                      const GraphImportOptions& options = {}) noexcept;
 
-    // 자원을 그래프 밖으로 내보낸다(7.4절, history 경로). 그래프가 끝날 때 finalAccess로 바꾸고, 풀
-    // 자원이면 소유를 새 렌더 handle로 넘긴다(돌려준 handle은 Execute가 성공하면 Ready, 실패하면
-    // Failed가 된다. 이후 수명은 그 handle의 Retire가 정한다). import 자원이면 그 handle을 그대로
-    // 돌려주고 마지막 상태만 정한다. export 자원의 마지막 생산자는 미사용 제거되지 않는다. 실패:
-    // 다른 그래프 handle·이미 export InvalidArgument, handle 예약 실패는 그 오류다.
+    // 자원을 그래프 밖으로 내보낸다(7.4절, history 경로). 그래프가 끝날 때 finalAccess로 바꾸고,
+    // 만든 자원이면 그 풀 자원을 새 렌더 handle에 잇는다(돌려준 handle은 Execute가 성공하면 Ready,
+    // 실패하면 Failed가 된다). 자원은 풀 소속 그대로이고 풀이 그 handle의 Retire 대행자다(결정
+    // R15): handle의 Retire(렌더 lane Retire 또는 ReleaseRetiredResource)는 장치 해제가 아니라
+    // 마지막 사용 fence 뒤 풀 반납이며, 같은 desc의 다음 할당이 다시 쓴다. import 자원이면 그
+    // handle을 그대로 돌려주고 마지막 상태만 정한다. export 자원의 마지막 생산자는 미사용 제거되지
+    // 않는다. 실패: 다른 그래프 handle·이미 export InvalidArgument, handle 예약 실패는 그 오류다.
     Result<RenderHandle> ExportTexture(
         GraphTexture texture,
         graphics::ResourceAccess finalAccess = graphics::ResourceAccess::SrvGraphics) noexcept;

@@ -1,5 +1,6 @@
 #include <RenderBase/RenderHandle.h>
 
+#include <Graphics/Device.h>
 #include <Platform/Fatal.h>
 
 namespace rocks::render {
@@ -21,7 +22,7 @@ Result<RenderHandle> RenderHandleTable::Reserve(RenderResourceKind kind) noexcep
 }
 
 Result<void> RenderHandleTable::Bind(RenderHandle handle, RenderResourceKind kind,
-                                     SlotHandle device) noexcept {
+                                     SlotHandle device, RenderRetireSink* sink) noexcept {
     platform::LockGuard lock(gate_);
     Entry* entry = entries_.Find(handle.slot);
     if (entry == nullptr) {
@@ -41,23 +42,24 @@ Result<void> RenderHandleTable::Bind(RenderHandle handle, RenderResourceKind kin
     }
 
     entry->device = device;
+    entry->sink = sink;
     entry->state = RenderResourceState::Ready;
     return Result<void>::Success();
 }
 
-Result<void> RenderHandleTable::BindBuffer(RenderHandle handle,
-                                           graphics::BufferHandle buffer) noexcept {
-    return Bind(handle, RenderResourceKind::Buffer, buffer.slot);
+Result<void> RenderHandleTable::BindBuffer(RenderHandle handle, graphics::BufferHandle buffer,
+                                           RenderRetireSink* sink) noexcept {
+    return Bind(handle, RenderResourceKind::Buffer, buffer.slot, sink);
 }
 
-Result<void> RenderHandleTable::BindTexture(RenderHandle handle,
-                                            graphics::TextureHandle texture) noexcept {
-    return Bind(handle, RenderResourceKind::Texture, texture.slot);
+Result<void> RenderHandleTable::BindTexture(RenderHandle handle, graphics::TextureHandle texture,
+                                            RenderRetireSink* sink) noexcept {
+    return Bind(handle, RenderResourceKind::Texture, texture.slot, sink);
 }
 
 Result<void> RenderHandleTable::BindPipeline(RenderHandle handle,
                                              graphics::PipelineHandle pipeline) noexcept {
-    return Bind(handle, RenderResourceKind::Pipeline, pipeline.slot);
+    return Bind(handle, RenderResourceKind::Pipeline, pipeline.slot, nullptr);
 }
 
 Result<void> RenderHandleTable::MarkFailed(RenderHandle handle, ErrorCode error) noexcept {
@@ -146,6 +148,7 @@ RenderHandleTable::BeginRetire(RenderHandle handle) noexcept {
 
     RetiredResource retired;
     retired.kind = entry->kind;
+    retired.sink = entry->sink;
     entry->state = RenderResourceState::Retired;
     if (entry->leases != 0) {
         // 승인된 기록이 아직 쓴다. 장치 handle은 마지막 lease가 풀릴 때 넘긴다.
@@ -222,12 +225,22 @@ bool RenderHandleTable::TakeReleasedRetire(RenderHandle& handle,
         retired.kind = entry->kind;
         retired.device = entry->device;
         retired.deferred = false;
+        retired.sink = entry->sink;
         entry->device = {};
         handle = next;
         return true;
     }
 
     return false;
+}
+
+void RenderHandleTable::DetachRetireSink(RenderHandle handle,
+                                         const RenderRetireSink* sink) noexcept {
+    platform::LockGuard lock(gate_);
+    Entry* entry = entries_.Find(handle.slot);
+    if (entry != nullptr && entry->sink == sink) {
+        entry->sink = nullptr;
+    }
 }
 
 Result<void> RenderHandleTable::Remove(RenderHandle handle) noexcept {
@@ -247,6 +260,31 @@ Result<void> RenderHandleTable::Remove(RenderHandle handle) noexcept {
 usize RenderHandleTable::Count() const noexcept {
     platform::LockGuard lock(gate_);
     return entries_.Size();
+}
+
+void ReleaseRetiredResource(graphics::Device& device, RenderHandle handle,
+                            const RenderHandleTable::RetiredResource& retired) noexcept {
+    if (retired.device.IsNull()) {
+        return;
+    }
+
+    if (retired.sink != nullptr) {
+        retired.sink->OnRenderRetire(handle, retired.kind, retired.device,
+                                     device.LastSubmittedFence());
+        return;
+    }
+
+    switch (retired.kind) {
+    case RenderResourceKind::Buffer:
+        device.Retire(graphics::BufferHandle{retired.device});
+        break;
+    case RenderResourceKind::Texture:
+        device.Retire(graphics::TextureHandle{retired.device});
+        break;
+    case RenderResourceKind::Pipeline:
+        device.Retire(graphics::PipelineHandle{retired.device});
+        break;
+    }
 }
 
 } // namespace rocks::render
