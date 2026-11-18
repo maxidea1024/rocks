@@ -17,6 +17,9 @@ class SpatialReadScope;
 
 namespace detail {
 
+// 내부 컨테이너 할당을 세는 adapter다(Private/LooseOctreeInternal.h).
+class CountingAllocator;
+
 // 저장 구조(Docs/Design/SpatialIndex.ko.md 6.3절)다. LooseOctree 내부 표현이며 공개 API가 아니다.
 // 템플릿 검색이 헤더에서 읽으므로 여기에 둔다.
 
@@ -137,27 +140,23 @@ struct SearchStackEntry {
 // - 소비자(World·RenderScene·도구)가 인스턴스를 소유한다. 전역 singleton이 아니다.
 // - Allocator를 빌린다. allocator는 옥트리보다 오래 살아야 한다.
 // - 복사할 수 없고 이동할 수 있다. 이동 뒤 기존 handle은 대상에서 유효하다. 이동된 원본은 빈
-// 상태이며
-//   새 handle을 세대 1부터 발급하므로 원본에 옛 handle을 쓰면 검출하지 않는다(SlotArray 규칙). 다른
-//   인스턴스가 발급한 handle도 검출하지 않는다.
+//   상태이며 새 handle을 세대 1부터 발급하므로 원본에 옛 handle을 쓰면 검출하지 않는다(SlotArray
+//   규칙). 다른 인스턴스가 발급한 handle도 검출하지 않는다.
 // - 읽기 범위(SpatialReadScope)가 열려 있는 동안 이동·파괴하면 platform::Fatal이다.
 //
 // 동시성(6.9절)
 // - 변경 단계: 한 스레드만 변경 함수(Try*·RunMaintenance·Clear)를 부른다.
 // - 읽기 단계: SpatialReadScope로 얻은 LooseOctreeReader로만 검색한다. 여러 스레드가 동시에
-// 검색해도
-//   된다(검색은 트리 상태를 바꾸지 않는다).
+//   검색해도 된다(검색은 트리 상태를 바꾸지 않는다).
 // - 두 단계가 겹치면 platform::Fatal이다: 읽기 범위가 열린 동안의 변경, 변경 중 읽기 범위 생성,
-// 변경
-//   함수끼리의 겹침. visitor 안에서 같은 트리를 다시 검색하는 것은 허용하고 변경은 위반이다.
+//   변경 함수끼리의 겹침. visitor 안에서 같은 트리를 다시 검색하는 것은 허용하고 변경은 위반이다.
 //
 // 실패 계약(6.1절)
 // - 빈 handle은 InvalidArgument, 낡은 handle은 StaleHandle, 유효하지 않은 AABB는 InvalidArgument,
 //   프록시 수 한도 초과는 CapacityExceeded, 노드·청크 색인 폭 초과는 Overflow, 할당 실패는
 //   OutOfMemory다.
 // - 실패한 변경 호출은 논리 상태(프록시 집합, 각 프록시의 AABB·필터·사용자 값·handle)를 바꾸지
-// 않는다.
-//   구조(루트 level, 분할 여부)는 달라질 수 있으나 불변 조건은 모두 성립한다.
+//   않는다. 구조(루트 level, 분할 여부)는 달라질 수 있으나 불변 조건은 모두 성립한다.
 // - 루트 확장 한도 안에 들어가지 않는 위치·크기는 오류가 아니다. 범위 밖 목록에 넣고 성공한다.
 //
 // 결과 순서: 같은 초기 상태에 같은 연산열(작업 수 예산의 RunMaintenance 포함)을 적용하면 같은
@@ -189,8 +188,9 @@ struct SearchStackEntry {
 //   }
 class LooseOctree {
 public:
-    // 설정을 검사하고 빈 옥트리를 만든다. 할당하지 않는다(저장소는 첫 변경에서 잡는다).
-    // 오류(InvalidArgument): LooseOctreeConfig의 범위 위반, |anchor| + 2^(maxRootLevel+1) ·
+    // 설정을 검사하고 빈 옥트리를 만든다. 내부 할당 계수 adapter 하나(수십 byte)를 allocator에서
+    // 할당한다. 컨테이너 저장소는 첫 변경에서 잡는다. 할당 실패는 그 allocator 오류(OutOfMemory
+    // 등)다. 오류(InvalidArgument): LooseOctreeConfig의 범위 위반, |anchor| + 2^(maxRootLevel+1) ·
     // minCellSize가 2^52 · minCellSize 이상(격자 계산의 정확 범위 밖), k · 2^maxRootLevel ·
     // minCellSize가 float 정규 범위 밖.
     [[nodiscard]] static Result<LooseOctree> TryCreate(const LooseOctreeConfig& config,
@@ -219,8 +219,10 @@ public:
 
     // 프록시 AABB를 바꾼다. 새 AABB가 지금 노드의 확장 경계에 들어가면 제자리에서 고치고(구조 변경
     // 없음), 벗어나면 그것을 포함하는 첫 조상에서 다시 내려가 옮긴다. 순간 이동·크기 변경도 같은
-    // 경로다. handle은 그대로다. 오류: handle 오류는 TryRemove와 같고, bounds가 유효하지 않으면
-    // InvalidArgument, 할당 실패는 OutOfMemory(프록시는 옛 AABB로 옛 위치에 남는다).
+    // 경로다. handle은 그대로다. 옮겨 간 잎이 분할 임계를 넘어도 이 호출은 분할을 평가하지 않고
+    // 재평가 대기만 표시한다(유지보수나 다음 TryAdd가 평가한다). 오류: handle 오류는 TryRemove와
+    // 같고, bounds가 유효하지 않으면 InvalidArgument, 할당 실패는 OutOfMemory(프록시는 옛 AABB로 옛
+    // 위치에 남는다).
     [[nodiscard]] Result<void> TryUpdateBounds(SpatialProxyHandle handle,
                                                const Box<double>& bounds) noexcept;
 
@@ -252,7 +254,16 @@ private:
     class WriterGuard;
     struct Placement;
 
-    LooseOctree(const LooseOctreeConfig& config, Allocator& allocator) noexcept;
+    LooseOctree(const LooseOctreeConfig& config, Allocator& backing,
+                detail::CountingAllocator* counting) noexcept;
+
+    // ---- 생성·이동·저장소 ----
+    void InitializeTables() noexcept;
+    void TakeFrom(LooseOctree& other) noexcept;
+    void RebindContainers(Allocator& allocator) noexcept;
+    void ReleaseStorage() noexcept;
+    Result<void> EnsureCountingAllocator() noexcept;
+    void NotePeaks() noexcept;
 
     // ---- 노드 접근 ----
     detail::SearchNode& Search(uint32 node) noexcept;
@@ -299,9 +310,12 @@ private:
     void RemoveEntry(uint32 node, uint32 chunk, uint32 entry) noexcept;
     EntryData EntryOfRecord(const detail::ProxyRecord& record, SlotHandle handle) const noexcept;
     void AdjustPath(uint32 from, uint32 stopExclusive, bool increment) noexcept;
-    void AfterDirectGrowth(uint32 node) noexcept;
+    // 직접 저장 수가 늘어난 잎의 분할 평가 시점을 정한다. evaluateNow가 거짓(경계 갱신)이면 재평가
+    // 대기만 표시한다.
+    void AfterDirectGrowth(uint32 node, bool evaluateNow) noexcept;
     void NoteHeldChange(uint32 node) noexcept;
-    void InsertIntoTree(uint32 start, uint32 stopExclusive, uint32 slot) noexcept;
+    void InsertIntoTree(uint32 start, uint32 stopExclusive, uint32 slot,
+                        bool evaluateSplit) noexcept;
     void MoveToOutOfRange(uint32 slot) noexcept;
     void RemoveFromOutOfRange(uint32 index) noexcept;
     void NoteOutOfRangeGrowth() noexcept;
@@ -345,7 +359,7 @@ private:
     Result<SpatialProxyDesc> TryGetProxy(SpatialProxyHandle handle) const noexcept;
     uint32 ProxyCount() const noexcept;
     OctreeStats CollectStats() const noexcept;
-    Result<void> ValidateStructure(ValidationFailure* failure) const noexcept;
+    Result<OctreeValidationReport> ValidateStructure() const noexcept;
     SpatialNodeInfo DescribeNode(uint32 node, uint32 depth) const noexcept;
     void CheckNoOpenScope(const char* message) const noexcept;
 
@@ -370,7 +384,20 @@ private:
         uint64 outOfRangeInsertions = 0;
     };
 
+    // 배열별 예약 용량의 피크(byte)다. 변경 함수가 끝날 때마다 갱신한다.
+    struct Peaks {
+        usize recordBytes = 0;
+        usize chunkBytes = 0;
+        usize nodeBytes = 0;
+        usize outOfRangeBytes = 0;
+    };
+
     LooseOctreeConfig config_;
+    // 받은 allocator와 그것을 감싼 계수 adapter다. 컨테이너는 adapter에 묶인다. 이동된 원본은
+    // adapter가 없고(nullptr) 컨테이너가 받은 allocator에 직접 묶이며, 다음 추가가 adapter를 다시
+    // 만든다.
+    Allocator* backing_ = nullptr;
+    detail::CountingAllocator* counting_ = nullptr;
     // 레벨별 기본 셀 한 변과 확장 경계 반 변이다(정확한 2진 유리수).
     double cellSize_[LooseOctreeLevelLimit + 1] = {};
     double looseHalf_[LooseOctreeLevelLimit + 1] = {};
@@ -395,6 +422,7 @@ private:
     uint32 rootShrinkObservations_ = 0;
     bool outOfRangeWarned_ = false;
     Counters counters_;
+    Peaks peaks_;
 
     // 6.9절 위반 검출용이다. readers_는 열린 읽기 범위 수, writer_는 변경 진행 중 표시(0/1)다.
     mutable uint32 readers_ = 0;
@@ -456,10 +484,10 @@ public:
     // 구조·메모리·누적 계수다(6.10절). O(노드 수)다.
     [[nodiscard]] OctreeStats Stats() const noexcept;
 
-    // 6.2절 불변 조건 1–9와 저장 구조의 일관성을 모두 검사한다. 첫 위반에서 InvalidArgument를
-    // 돌려주고 failure가 있으면 위반 번호와 노드를 채운다. O(노드 + 프록시)이므로 시험과 진단에서만
-    // 부른다.
-    [[nodiscard]] Result<void> Validate(ValidationFailure* failure = nullptr) const noexcept;
+    // 6.2절 불변 조건 1–9와 저장 구조의 일관성을 모두 검사하고 첫 위반을 report에 담는다
+    // (DebugAllocator::Validate 관례). 지금 구현은 할당하지 않으므로 호출 자체는 실패하지 않는다.
+    // 손상 여부는 Value().IsValid()로 확인한다. O(노드 + 프록시)이므로 시험과 진단에서만 부른다.
+    [[nodiscard]] Result<OctreeValidationReport> Validate() const noexcept;
 
     // 트리의 모든 노드를 깊이 우선(자식 0–7 순)으로 visitor(const SpatialNodeInfo&)에 넘긴다.
     // 디버그 그리기·통계용이다. visitor 안에서 같은 트리를 변경하면 Fatal이다.

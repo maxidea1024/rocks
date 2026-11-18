@@ -19,19 +19,31 @@ bool RegisterProcessProbe(const char* mode, int (*function)(int, char**) noexcep
 
 namespace {
 
-// Allocate가 불리면(옥트리가 변경 함수 안에서 저장소를 늘릴 때) 같은 트리의 읽기 범위를 연다.
+SpatialProxyDesc UnitProxy() noexcept;
+
+// Allocate가 불리면(옥트리가 변경 함수 안에서 저장소를 늘릴 때) 같은 트리의 읽기 범위를 열거나
+// (ArmScope) 같은 트리를 다시 변경한다(ArmMutation). 겹침을 호출 구조로 결정적으로 만든다.
 class ScopeOpeningAllocator final : public Allocator {
 public:
     explicit ScopeOpeningAllocator(Allocator& backing) noexcept : backing_(backing) {
     }
 
-    void Arm(const LooseOctree& tree) noexcept {
+    void ArmScope(const LooseOctree& tree) noexcept {
         tree_ = &tree;
+    }
+
+    void ArmMutation(LooseOctree& tree) noexcept {
+        mutated_ = &tree;
     }
 
     Result<void*> Allocate(usize bytes, usize alignment, uint32 tag = 0) noexcept override {
         if (tree_ != nullptr) {
             SpatialReadScope read(*tree_);
+        }
+        if (mutated_ != nullptr) {
+            LooseOctree* tree = mutated_;
+            mutated_ = nullptr;
+            (void)tree->TryAdd(UnitProxy());
         }
         return backing_.Allocate(bytes, alignment, tag);
     }
@@ -43,6 +55,7 @@ public:
 private:
     Allocator& backing_;
     const LooseOctree* tree_ = nullptr;
+    LooseOctree* mutated_ = nullptr;
 };
 
 SpatialProxyDesc UnitProxy() noexcept {
@@ -82,8 +95,36 @@ int SpatialIndexFatalProbe(int argc, char** argv) noexcept {
     }
     if (strcmp(argv[3], "scope-during-mutation") == 0) {
         // 첫 TryAdd가 레코드 저장소를 할당하는 순간 읽기 범위를 연다.
-        allocator.Arm(octree);
+        allocator.ArmScope(octree);
         (void)octree.TryAdd(UnitProxy());
+        return 0;
+    }
+    if (strcmp(argv[3], "mutation-overlap") == 0) {
+        // 변경자끼리의 겹침: TryAdd가 할당하는 순간 같은 트리에 TryAdd를 다시 부른다.
+        allocator.ArmMutation(octree);
+        (void)octree.TryAdd(UnitProxy());
+        return 0;
+    }
+    if (strcmp(argv[3], "move-with-scope") == 0) {
+        SpatialReadScope read(octree);
+        LooseOctree moved(Move(octree));
+        return 0;
+    }
+    if (strcmp(argv[3], "assign-with-scope") == 0) {
+        auto other = LooseOctree::TryCreate(LooseOctreeConfig{}, allocator);
+        if (!other) {
+            return 22;
+        }
+        SpatialReadScope read(octree);
+        octree = Move(other.Value());
+        return 0;
+    }
+    if (strcmp(argv[3], "destroy-with-scope") == 0) {
+        // 범위보다 트리가 먼저 끝나도록 객체 수명을 직접 다룬다.
+        alignas(LooseOctree) unsigned char storage[sizeof(LooseOctree)];
+        LooseOctree* tree = InitializeAt<LooseOctree>(storage, Move(octree));
+        SpatialReadScope read(*tree);
+        DestroyAt(tree);
         return 0;
     }
     return 24;
@@ -142,6 +183,40 @@ TEST(LooseOctree_LO11_MutationInsideVisitorIsFatal) {
     REQUIRE(run.ran);
     CHECK(run.abnormal);
     CHECK(strstr(run.error, "LooseOctree mutation while a read scope is open") != nullptr);
+}
+
+TEST(LooseOctree_LO11_MutationOverlapIsFatal) {
+    if (!rocks::test::ProcessSpawnExpected()) {
+        return;
+    }
+    REQUIRE(SpatialIndexProbeRegistered);
+    const ProbeRun run = RunProbe("mutation-overlap");
+    REQUIRE(run.ran);
+    CHECK(run.abnormal);
+    CHECK(strstr(run.error, "LooseOctree mutation overlaps another mutation") != nullptr);
+}
+
+// 읽기 범위가 열린 채 이동·대입·파괴하면 Fatal이다(reader가 옛 저장소를 가리키게 되므로).
+TEST(LooseOctree_LO11_MoveAssignDestroyWithOpenScopeIsFatal) {
+    if (!rocks::test::ProcessSpawnExpected()) {
+        return;
+    }
+    REQUIRE(SpatialIndexProbeRegistered);
+    struct Case {
+        const char* scenario;
+        const char* message;
+    };
+    const Case cases[] = {
+        {"move-with-scope", "LooseOctree moved while a read scope is open"},
+        {"assign-with-scope", "LooseOctree overwritten while a read scope is open"},
+        {"destroy-with-scope", "LooseOctree destroyed while a read scope is open"},
+    };
+    for (const Case& entry : cases) {
+        const ProbeRun run = RunProbe(entry.scenario);
+        REQUIRE(run.ran);
+        CHECK(run.abnormal);
+        CHECK(strstr(run.error, entry.message) != nullptr);
+    }
 }
 
 TEST(LooseOctree_LO11_ReadScopeDuringMutationIsFatal) {

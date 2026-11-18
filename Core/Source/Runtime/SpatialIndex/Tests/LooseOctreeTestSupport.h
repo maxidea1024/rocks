@@ -39,8 +39,11 @@ inline LooseOctreeConfig SmallConfig() noexcept {
 // 반영한다.
 class OracleTree {
 public:
-    OracleTree(LooseOctree&& tree, Allocator& allocator) noexcept
-        : tree_(rocks::Move(tree)), proxies_(allocator) {
+    // reuseIndices이면 지운 프록시의 모형 색인(userValue)을 다음 추가에 다시 쓴다. 긴 시퀀스에서
+    // 전수 대조 비용이 지금까지 만든 수가 아니라 살아 있는 수에 비례하게 한다.
+    OracleTree(LooseOctree&& tree, Allocator& allocator, bool reuseIndices = false) noexcept
+        : tree_(rocks::Move(tree)), proxies_(allocator), free_(allocator),
+          reuseIndices_(reuseIndices) {
     }
 
     LooseOctree& Tree() noexcept {
@@ -57,24 +60,29 @@ public:
 
     // 추가가 성공하면 모형 색인, 실패하면 IndexNone이다.
     usize Add(const Box<double>& bounds, uint32 filter) noexcept {
+        const bool reuse = reuseIndices_ && !free_.IsEmpty();
+        const usize index = reuse ? free_[free_.Size() - 1] : proxies_.Size();
         SpatialProxyDesc desc;
         desc.bounds = bounds;
         desc.filterMask = filter;
-        desc.userValue = proxies_.Size();
+        desc.userValue = index;
         auto added = tree_.TryAdd(desc);
         if (!added) {
             return IndexNone;
         }
         OracleProxy proxy;
         proxy.handle = added.Value();
-        proxy.bounds = bounds;
+        proxy.bounds = desc.bounds;
         proxy.filter = filter;
         proxy.live = true;
-        if (!proxies_.TryPushBack(proxy)) {
+        if (reuse) {
+            proxies_[index] = proxy;
+            (void)free_.TryPopBack();
+        } else if (!proxies_.TryPushBack(proxy)) {
             return IndexNone;
         }
         ++live_;
-        return proxies_.Size() - 1;
+        return index;
     }
 
     // 옥트리에 이미 넣은 프록시를 모형에 기록한다(할당 실패 주입 시험처럼 옥트리를 직접 부를 때).
@@ -103,6 +111,9 @@ public:
         }
         proxies_[index].live = false;
         --live_;
+        if (reuseIndices_ && !free_.TryPushBack(index)) {
+            return false;
+        }
         return true;
     }
 
@@ -137,6 +148,8 @@ public:
 private:
     LooseOctree tree_;
     Array<OracleProxy> proxies_;
+    Array<usize> free_;
+    bool reuseIndices_ = false;
     uint32 live_ = 0;
 };
 
@@ -155,7 +168,7 @@ struct QueryCheck {
 
 // 옥트리 박스 질의를 전수 검색과 대조한다. 누락 0건, 중복 0건, 결과의 handle·filter가 모형과 같고,
 // 초과 후보는 질의를 tolerance만큼 넓혀야 겹치는 것뿐이어야 한다(float 상대 경계의 보수성, 6.8절).
-// 버퍼·존재· 개수 질의가 같은 후보 집합을 세는지도 확인한다.
+// 버퍼·존재·개수 질의가 같은 후보 집합을 세는지도 확인한다.
 inline QueryCheck CheckBoxQuery(const LooseOctreeReader& reader, const Array<OracleProxy>& proxies,
                                 const Box<double>& box, uint32 mask, double tolerance,
                                 Allocator& allocator) noexcept {
@@ -218,10 +231,24 @@ inline QueryCheck CheckBoxQuery(const LooseOctreeReader& reader, const Array<Ora
     return check;
 }
 
-// 열린 읽기 범위 없이 불변 조건을 검사한다.
-inline bool ValidateTree(const LooseOctree& tree, ValidationFailure* failure = nullptr) noexcept {
+// 읽기 범위를 잠깐 열어 통계를 얻는다.
+inline OctreeStats StatsOf(const LooseOctree& tree) noexcept {
     SpatialReadScope read(tree);
-    return static_cast<bool>(read.Reader().Validate(failure));
+    return read.Reader().Stats();
+}
+
+// 열린 읽기 범위 없이 불변 조건을 검사한다.
+inline bool ValidateTree(const LooseOctree& tree,
+                         OctreeValidationReport* report = nullptr) noexcept {
+    SpatialReadScope read(tree);
+    auto validated = read.Reader().Validate();
+    if (!validated) {
+        return false;
+    }
+    if (report != nullptr) {
+        *report = validated.Value();
+    }
+    return validated.Value().IsValid();
 }
 
 // 모형의 살아 있는 모든 프록시가 같은 내용으로 조회되고 수가 같은지다(논리 상태 비교).

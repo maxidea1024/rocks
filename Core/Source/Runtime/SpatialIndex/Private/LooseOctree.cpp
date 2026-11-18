@@ -82,49 +82,39 @@ Result<LooseOctree> LooseOctree::TryCreate(const LooseOctreeConfig& config,
         return invalid();
     }
 
-    return Result<LooseOctree>::Success(LooseOctree(config, allocator));
+    // 내부 컨테이너의 할당을 세는 adapter를 받은 allocator에서 하나 만든다(6.10절 할당 횟수·피크).
+    // 컨테이너가 그 주소를 쥐므로 옥트리 객체 밖에 둔다(옥트리를 옮겨도 주소가 같다).
+    auto memory =
+        allocator.Allocate(sizeof(detail::CountingAllocator), alignof(detail::CountingAllocator));
+    if (!memory) {
+        return Result<LooseOctree>::Failure(memory.Error());
+    }
+    if (memory.Value() == nullptr) {
+        platform::Fatal("Allocator returned null for a nonzero allocation");
+    }
+    detail::CountingAllocator* counting =
+        InitializeAt<detail::CountingAllocator>(memory.Value(), allocator);
+    return Result<LooseOctree>::Success(LooseOctree(config, allocator, counting));
 }
 
-LooseOctree::LooseOctree(const LooseOctreeConfig& config, Allocator& allocator) noexcept
-    : config_(config), records_(allocator, config.maxProxyGeneration),
-      searchBlocks_(allocator, MaxNodeBlocks), manageBlocks_(allocator, MaxNodeBlocks),
-      chunks_(allocator), outOfRange_(allocator) {
-    double size = config.minCellSize;
-    for (uint32 level = 0; level <= LooseOctreeLevelLimit; ++level) {
-        cellSize_[level] = size;
-        looseHalf_[level] = config.looseness * (size * 0.5);
-        size *= 2.0;
-    }
-    halfMinCell_ = config.minCellSize * 0.5;
-    initialOrigin_ = -(int64{1} << (config.initialRootLevel - 1));
-    gridLimit_ = int64{1} << (config.maxRootLevel + 1);
+LooseOctree::LooseOctree(const LooseOctreeConfig& config, Allocator& backing,
+                         detail::CountingAllocator* counting) noexcept
+    : config_(config), backing_(&backing), counting_(counting),
+      records_(*counting, config.maxProxyGeneration), searchBlocks_(*counting, MaxNodeBlocks),
+      manageBlocks_(*counting, MaxNodeBlocks), chunks_(*counting), outOfRange_(*counting) {
+    InitializeTables();
     const int64 origin[3] = {initialOrigin_, initialOrigin_, initialOrigin_};
     ResetRoot(config.initialRootLevel, origin);
 }
 
 LooseOctree::LooseOctree(LooseOctree&& other) noexcept
-    : config_(other.config_), halfMinCell_(other.halfMinCell_),
-      initialOrigin_(other.initialOrigin_), gridLimit_(other.gridLimit_),
-      records_(Move(other.records_)), searchBlocks_(Move(other.searchBlocks_)),
-      manageBlocks_(Move(other.manageBlocks_)), chunks_(Move(other.chunks_)),
-      outOfRange_(Move(other.outOfRange_)), rootSearch_(other.rootSearch_),
-      rootManage_(other.rootManage_), queueHead_(other.queueHead_), queueTail_(other.queueTail_),
-      queueLength_(other.queueLength_), rootShrinkObservations_(other.rootShrinkObservations_),
-      outOfRangeWarned_(other.outOfRangeWarned_), counters_(other.counters_) {
+    : config_(other.config_), backing_(other.backing_), counting_(nullptr),
+      records_(*other.backing_, other.config_.maxProxyGeneration),
+      searchBlocks_(*other.backing_, MaxNodeBlocks), manageBlocks_(*other.backing_, MaxNodeBlocks),
+      chunks_(*other.backing_), outOfRange_(*other.backing_) {
     other.CheckNoOpenScope("LooseOctree moved while a read scope is open");
-    for (uint32 level = 0; level <= LooseOctreeLevelLimit; ++level) {
-        cellSize_[level] = other.cellSize_[level];
-        looseHalf_[level] = other.looseHalf_[level];
-    }
-    // 원본은 같은 설정의 빈 트리로 남는다. 저장소는 옮겨 갔으므로 할당하지 않는다.
-    other.queueHead_ = detail::NoNode;
-    other.queueTail_ = detail::NoNode;
-    other.queueLength_ = 0;
-    other.rootShrinkObservations_ = 0;
-    other.outOfRangeWarned_ = false;
-    other.counters_ = Counters{};
-    const int64 origin[3] = {other.initialOrigin_, other.initialOrigin_, other.initialOrigin_};
-    other.ResetRoot(other.config_.initialRootLevel, origin);
+    InitializeTables();
+    TakeFrom(other);
 }
 
 LooseOctree& LooseOctree::operator=(LooseOctree&& other) noexcept {
@@ -133,19 +123,39 @@ LooseOctree& LooseOctree::operator=(LooseOctree&& other) noexcept {
     }
     CheckNoOpenScope("LooseOctree overwritten while a read scope is open");
     other.CheckNoOpenScope("LooseOctree moved while a read scope is open");
+    ReleaseStorage();
     config_ = other.config_;
+    backing_ = other.backing_;
+    InitializeTables();
+    TakeFrom(other);
+    return *this;
+}
+
+LooseOctree::~LooseOctree() noexcept {
+    CheckNoOpenScope("LooseOctree destroyed while a read scope is open");
+    ReleaseStorage();
+}
+
+void LooseOctree::InitializeTables() noexcept {
+    double size = config_.minCellSize;
     for (uint32 level = 0; level <= LooseOctreeLevelLimit; ++level) {
-        cellSize_[level] = other.cellSize_[level];
-        looseHalf_[level] = other.looseHalf_[level];
+        cellSize_[level] = size;
+        looseHalf_[level] = config_.looseness * (size * 0.5);
+        size *= 2.0;
     }
-    halfMinCell_ = other.halfMinCell_;
-    initialOrigin_ = other.initialOrigin_;
-    gridLimit_ = other.gridLimit_;
+    halfMinCell_ = config_.minCellSize * 0.5;
+    initialOrigin_ = -(int64{1} << (config_.initialRootLevel - 1));
+    gridLimit_ = int64{1} << (config_.maxRootLevel + 1);
+}
+
+void LooseOctree::TakeFrom(LooseOctree& other) noexcept {
+    // 이 객체의 컨테이너는 비어 있다(저장소 없음). 저장소와 계수 adapter를 함께 넘겨받는다.
     records_ = Move(other.records_);
     searchBlocks_ = Move(other.searchBlocks_);
     manageBlocks_ = Move(other.manageBlocks_);
     chunks_ = Move(other.chunks_);
     outOfRange_ = Move(other.outOfRange_);
+    counting_ = other.counting_;
     rootSearch_ = other.rootSearch_;
     rootManage_ = other.rootManage_;
     queueHead_ = other.queueHead_;
@@ -154,20 +164,71 @@ LooseOctree& LooseOctree::operator=(LooseOctree&& other) noexcept {
     rootShrinkObservations_ = other.rootShrinkObservations_;
     outOfRangeWarned_ = other.outOfRangeWarned_;
     counters_ = other.counters_;
+    peaks_ = other.peaks_;
 
+    // 원본은 같은 설정의 빈 트리로 남는다. 컨테이너는 받은 allocator에 직접 묶어 두고, 다음 추가가
+    // 새 계수 adapter를 만든다(EnsureCountingAllocator). 여기서는 할당하지 않는다.
+    other.counting_ = nullptr;
+    other.RebindContainers(*other.backing_);
     other.queueHead_ = detail::NoNode;
     other.queueTail_ = detail::NoNode;
     other.queueLength_ = 0;
-    other.rootShrinkObservations_ = 0;
     other.outOfRangeWarned_ = false;
     other.counters_ = Counters{};
+    other.peaks_ = Peaks{};
     const int64 origin[3] = {other.initialOrigin_, other.initialOrigin_, other.initialOrigin_};
     other.ResetRoot(other.config_.initialRootLevel, origin);
-    return *this;
 }
 
-LooseOctree::~LooseOctree() noexcept {
-    CheckNoOpenScope("LooseOctree destroyed while a read scope is open");
+void LooseOctree::RebindContainers(Allocator& allocator) noexcept {
+    // 대입이 옛 저장소를 옛 allocator로 돌려준 뒤 빈 컨테이너를 allocator에 묶는다.
+    records_ = SlotArray<detail::ProxyRecord>(allocator, config_.maxProxyGeneration);
+    searchBlocks_ = IndexPool<detail::SearchBlock>(allocator, MaxNodeBlocks);
+    manageBlocks_ = IndexPool<detail::ManageBlock>(allocator, MaxNodeBlocks);
+    chunks_ = IndexPool<detail::ElementChunk>(allocator);
+    outOfRange_ = Array<detail::OutOfRangeEntry>(allocator);
+}
+
+void LooseOctree::ReleaseStorage() noexcept {
+    // 컨테이너 저장소를 adapter로 먼저 돌려준 뒤 adapter를 없앤다.
+    RebindContainers(*backing_);
+    if (counting_ != nullptr) {
+        detail::CountingAllocator* counting = counting_;
+        counting_ = nullptr;
+        DestroyAt(counting);
+        if (!backing_->Deallocate(counting)) {
+            platform::Fatal("LooseOctree counting allocator was not owned by its allocator");
+        }
+    }
+}
+
+Result<void> LooseOctree::EnsureCountingAllocator() noexcept {
+    if (counting_ != nullptr) {
+        return Result<void>::Success();
+    }
+    // 이동된 원본이다. 컨테이너가 비어 있으므로 새 adapter에 다시 묶기만 하면 된다.
+    auto memory =
+        backing_->Allocate(sizeof(detail::CountingAllocator), alignof(detail::CountingAllocator));
+    if (!memory) {
+        return Result<void>::Failure(memory.Error());
+    }
+    if (memory.Value() == nullptr) {
+        platform::Fatal("Allocator returned null for a nonzero allocation");
+    }
+    counting_ = InitializeAt<detail::CountingAllocator>(memory.Value(), *backing_);
+    RebindContainers(*counting_);
+    return Result<void>::Success();
+}
+
+void LooseOctree::NotePeaks() noexcept {
+    const auto raise = [](usize& peak, usize value) noexcept {
+        peak = value > peak ? value : peak;
+    };
+    raise(peaks_.recordBytes, records_.Capacity() * sizeof(detail::ProxyRecord));
+    raise(peaks_.chunkBytes, chunks_.Capacity() * sizeof(detail::ElementChunk));
+    raise(peaks_.nodeBytes, searchBlocks_.Capacity() * sizeof(detail::SearchBlock) +
+                                manageBlocks_.Capacity() * sizeof(detail::ManageBlock));
+    raise(peaks_.outOfRangeBytes, outOfRange_.Capacity() * sizeof(detail::OutOfRangeEntry));
 }
 
 void LooseOctree::CheckNoOpenScope(const char* message) const noexcept {
@@ -380,6 +441,8 @@ void LooseOctree::ExpandRootOnce(const Vec3d& center) noexcept {
         }
     }
     ++counters_.rootExpansions;
+    // 확장은 축소 이력을 처음부터 다시 센다(확장 직후의 축소 왕복을 막는다).
+    rootShrinkObservations_ = 0;
 
     if (rootSearch_.subtreeCount == 0) {
         // 내용이 없는 루트는 옮길 것이 없다. 남은 빈 블록만 버리고 새 루트로 바꾼다.
@@ -616,27 +679,48 @@ void LooseOctree::NoteHeldChange(uint32 node) noexcept {
     }
 }
 
-void LooseOctree::AfterDirectGrowth(uint32 node) noexcept {
+void LooseOctree::AfterDirectGrowth(uint32 node, bool evaluateNow) noexcept {
     if (Search(node).childBlock != detail::NoBlock) {
         return;
     }
     detail::ManageNode& manage = Manage(node);
     const uint32 direct = Search(node).directCount;
+    bool due = (manage.flags & detail::NodeReevaluationPending) != 0;
+    bool reevaluation = due;
     if ((manage.flags & detail::NodeHeld) != 0) {
         ++manage.changesSinceHold;
         if (static_cast<uint64>(direct) >= static_cast<uint64>(manage.heldCount) * 2 ||
             manage.changesSinceHold >= manage.reevaluationInterval) {
-            ++counters_.reevaluations;
-            EvaluateSplits(node);
+            due = true;
+            reevaluation = true;
         }
+    } else if (direct > config_.splitThreshold) {
+        due = true;
+    }
+    if (!due) {
         return;
     }
-    if (direct > config_.splitThreshold) {
-        EvaluateSplits(node);
+    if (direct <= config_.splitThreshold) {
+        // 대기 표시 뒤 수가 줄었다. 평가할 것이 없다.
+        ReleaseHold(node);
+        return;
     }
+    if (!evaluateNow) {
+        // 경계 갱신은 분할 평가를 하지 않고 재평가 대기만 표시한다. 유지보수나 다음 삽입이 수행한다
+        // (6.4절 보류 상태: 갱신 호출이 분할 비용을 지지 않게 한다).
+        manage.flags |= detail::NodeReevaluationPending;
+        Enqueue(node);
+        return;
+    }
+    manage.flags &= static_cast<uint8>(~detail::NodeReevaluationPending);
+    if (reevaluation) {
+        ++counters_.reevaluations;
+    }
+    EvaluateSplits(node);
 }
 
-void LooseOctree::InsertIntoTree(uint32 start, uint32 stopExclusive, uint32 slot) noexcept {
+void LooseOctree::InsertIntoTree(uint32 start, uint32 stopExclusive, uint32 slot,
+                                 bool evaluateSplit) noexcept {
     detail::ProxyRecord& record = records_.ElementAt(slot);
     const uint32 target = Descend(start, record.bounds);
     uint32 chunk = 0;
@@ -646,7 +730,7 @@ void LooseOctree::InsertIntoTree(uint32 start, uint32 stopExclusive, uint32 slot
     record.chunk = chunk;
     record.entry = entry;
     AdjustPath(target, stopExclusive, true);
-    AfterDirectGrowth(target);
+    AfterDirectGrowth(target, evaluateSplit);
 }
 
 void LooseOctree::NoteOutOfRangeGrowth() noexcept {
@@ -712,6 +796,10 @@ Result<SpatialProxyHandle> LooseOctree::TryAdd(const SpatialProxyDesc& desc) noe
     if (records_.Size() >= config_.maxProxies) {
         return Result<SpatialProxyHandle>::Failure(ErrorCode::CapacityExceeded);
     }
+    auto counted = EnsureCountingAllocator();
+    if (!counted) {
+        return Result<SpatialProxyHandle>::Failure(counted.Error());
+    }
 
     // 실패할 수 있는 확보(레코드 slot, 범위 밖 목록 또는 청크와 확장 블록)를 모두 먼저 한다. 그
     // 뒤로는 할당이 없으므로 논리 상태가 반쯤 바뀐 채 실패하지 않는다.
@@ -744,7 +832,7 @@ Result<SpatialProxyHandle> LooseOctree::TryAdd(const SpatialProxyDesc& desc) noe
         MoveToOutOfRange(handle.index);
     } else {
         ApplyRootChanges(placement, BoxCenter(desc.bounds));
-        InsertIntoTree(detail::RootNode, detail::NoNode, handle.index);
+        InsertIntoTree(detail::RootNode, detail::NoNode, handle.index, true);
     }
     EnforcePendingLimit();
     return Result<SpatialProxyHandle>::Success(SpatialProxyHandle{handle});
@@ -802,7 +890,7 @@ Result<void> LooseOctree::TryUpdateBounds(SpatialProxyHandle handle,
         RemoveFromOutOfRange(record.chunk);
         record.bounds = bounds;
         ApplyRootChanges(placement, center);
-        InsertIntoTree(detail::RootNode, detail::NoNode, slot);
+        InsertIntoTree(detail::RootNode, detail::NoNode, slot, false);
         ++counters_.reinserts;
         EnforcePendingLimit();
         return Result<void>::Success();
@@ -887,7 +975,7 @@ Result<void> LooseOctree::TryUpdateBounds(SpatialProxyHandle handle,
     AdjustPath(current, ancestor, false);
     NoteHeldChange(current);
     records_.ElementAt(slot).bounds = bounds;
-    InsertIntoTree(ancestor, ancestor, slot);
+    InsertIntoTree(ancestor, ancestor, slot, false);
     ++counters_.reinserts;
     EnforcePendingLimit();
     return Result<void>::Success();
@@ -929,6 +1017,10 @@ Result<void> LooseOctree::TryReserve(uint32 proxyCount) noexcept {
     WriterGuard guard(*this);
     if (proxyCount > config_.maxProxies) {
         return Result<void>::Failure(ErrorCode::CapacityExceeded);
+    }
+    auto counted = EnsureCountingAllocator();
+    if (!counted) {
+        return counted;
     }
     auto records = records_.TryReserve(proxyCount);
     if (!records) {

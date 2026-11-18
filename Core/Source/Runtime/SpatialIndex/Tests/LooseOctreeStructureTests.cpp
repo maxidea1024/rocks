@@ -21,11 +21,6 @@ Box<double> MakePoint(const Vec3d& point) noexcept {
     return Box<double>(point, point);
 }
 
-OctreeStats StatsOf(const LooseOctree& tree) noexcept {
-    SpatialReadScope read(tree);
-    return read.Reader().Stats();
-}
-
 uint32 RootDirectCount(const LooseOctree& tree) noexcept {
     SpatialReadScope read(tree);
     uint32 direct = 0;
@@ -375,9 +370,9 @@ TEST(LooseOctree_LO09_DeferredMaintenance) {
     // 한 항목씩 처리해도(블록 해제가 대기 중인 자식 항목을 지운다) 불변 조건 9가 성립한다.
     for (uint32 run = 0; run < 40; ++run) {
         (void)tree.Tree().RunMaintenance(MaintenanceBudget::Operations(1));
-        ValidationFailure failure;
-        CHECK(ValidateTree(tree.Tree(), &failure));
-        CHECK(failure.invariant == 0);
+        OctreeValidationReport report;
+        CHECK(ValidateTree(tree.Tree(), &report));
+        CHECK(report.invariant == OctreeInvariantNone);
     }
     const MaintenanceReport drained = tree.Tree().RunMaintenance(MaintenanceBudget::All());
     CHECK(drained.remaining == 0);
@@ -578,4 +573,261 @@ TEST(LooseOctree_LO10_StorageReuseRetireAndFailureInjection) {
     CHECK(injected > 10);
     CHECK(LogicalStateMatches(tree.Tree(), tree.Proxies()));
     CHECK(QueriesMatch(tree, config, system, 0xA02u));
+}
+
+// 6.4절: 경계 갱신(재삽입)은 분할을 평가하지 않고 재평가 대기만 표시한다. 대기는 유지보수(변형 0)나
+// 다음 삽입(변형 1)이 처리한다.
+TEST(LooseOctree_LO08_UpdatesDeferSplitEvaluation) {
+    SystemAllocator allocator;
+    const LooseOctreeConfig config = SmallConfig();
+    for (uint32 variant = 0; variant < 2; ++variant) {
+        auto created = LooseOctree::TryCreate(config, allocator);
+        REQUIRE(created);
+        OracleTree tree(Move(created.Value()), allocator);
+        AddOctantPoints(tree);
+        REQUIRE(tree.Add(MakePoint(Vec3d(-10, 10, -10)), 1) != IndexNone);
+        REQUIRE(StatsOf(tree.Tree()).splits == 1);
+        // 이동할 프록시 8개를 팔분 공간 1–7에 흩어 둔다(어느 자식도 임계를 넘지 않는다).
+        usize movers[8];
+        for (uint32 index = 0; index < 8; ++index) {
+            const uint32 octant = 1 + index % 7;
+            const double offset = 0.3 * index;
+            const Vec3d point((octant & 1u) != 0 ? 20.0 + offset : -20.0 - offset,
+                              (octant & 2u) != 0 ? 20.0 + offset : -20.0 - offset,
+                              (octant & 4u) != 0 ? 20.0 + offset : -20.0 - offset);
+            movers[index] = tree.Add(MakePoint(point), 1);
+            REQUIRE(movers[index] != IndexNone);
+        }
+        REQUIRE(StatsOf(tree.Tree()).splits == 1);
+        // 모두 자식 0(셀 [−32, 0]^3)의 축마다 −16보다 작은 곳으로 옮긴다. 다른 자식의 확장 경계(k =
+        // 2라 이웃 셀 반 변만큼 넓다)를 벗어나므로 제자리 갱신이 아니라 재삽입이고, 자식 0의 직접
+        // 저장 수가 9가 되어 임계(8)를 넘는다.
+        for (uint32 index = 0; index < 8; ++index) {
+            const Vec3d point(-17.5 - 1.5 * index, -18.0 - 1.2 * index, -30.0 + 1.5 * index);
+            REQUIRE(tree.Update(movers[index], MakePoint(point)));
+        }
+        OctreeStats stats = StatsOf(tree.Tree());
+        CHECK(stats.splits == 1 && stats.pendingReevaluations == 1 && stats.nodeCount == 9);
+        CHECK(ValidateTree(tree.Tree()));
+        CHECK(QueriesMatch(tree, config, allocator, 0x810u + variant));
+        if (variant == 0) {
+            const MaintenanceReport report = tree.Tree().RunMaintenance(MaintenanceBudget::All());
+            CHECK(report.reevaluations == 1);
+        } else {
+            REQUIRE(tree.Add(MakePoint(Vec3d(-2, -2, -2)), 1) != IndexNone);
+        }
+        stats = StatsOf(tree.Tree());
+        CHECK(stats.splits == 2 && stats.pendingReevaluations == 0);
+        CHECK(ValidateTree(tree.Tree()));
+        CHECK(QueriesMatch(tree, config, allocator, 0x812u + variant));
+    }
+}
+
+namespace {
+
+// 시험 쪽의 독립 계수기다. 옥트리의 Stats 할당 계수와 대조한다.
+class TallyAllocator final : public Allocator {
+public:
+    explicit TallyAllocator(Allocator& backing) noexcept : backing_(backing) {
+    }
+
+    Result<void*> Allocate(usize bytes, usize alignment, uint32 tag = 0) noexcept override {
+        auto allocated = backing_.Allocate(bytes, alignment, tag);
+        if (allocated && bytes != 0) {
+            ++allocations;
+            ++live;
+        }
+        return allocated;
+    }
+
+    Result<void> Deallocate(void* address) noexcept override {
+        auto released = backing_.Deallocate(address);
+        if (released && address != nullptr) {
+            ++deallocations;
+            --live;
+        }
+        return released;
+    }
+
+    uint64 allocations = 0;
+    uint64 deallocations = 0;
+    uint64 live = 0;
+
+private:
+    Allocator& backing_;
+};
+
+} // namespace
+
+// 6.10절: 할당·해제 횟수와 살아 있는·피크 byte, 배열별 예약 용량 피크. 옥트리의 계수 adapter
+// 자체(생성 때 하나)를 뺀 할당 수가 바깥 계수기와 같아야 한다. 이동하면 계수가 함께 옮겨 가고
+// 이동된 원본은 다음 추가에서 새 adapter를 만든다.
+TEST(LooseOctree_LO10_StatsCountAllocations) {
+    SystemAllocator system;
+    TallyAllocator tally(system);
+    {
+        auto created = LooseOctree::TryCreate(SmallConfig(), tally);
+        REQUIRE(created);
+        CHECK(tally.allocations == 1);
+        OracleTree tree(Move(created.Value()), system);
+        RandomStream random(0xA10u);
+        for (uint32 index = 0; index < 600; ++index) {
+            REQUIRE(tree.Add(MakeBox(Distribution::Uniform, random, 60.0), 1) != IndexNone);
+        }
+        OctreeStats stats = StatsOf(tree.Tree());
+        CHECK(stats.allocationCount == tally.allocations - 1);
+        CHECK(stats.deallocationCount == tally.deallocations);
+        CHECK(stats.allocationCount > 0 && stats.deallocationCount > 0);
+        CHECK(stats.liveAllocatedBytes > 0 && stats.liveAllocatedBytes <= stats.peakAllocatedBytes);
+        // 살아 있는 byte는 예약 용량(원소 크기 × 용량)의 합보다 작을 수 없다.
+        CHECK(stats.liveAllocatedBytes >=
+              stats.recordBytesReserved + stats.chunkBytesReserved + stats.nodeBytesReserved);
+        CHECK(stats.peakChunkBytesReserved >= stats.chunkBytesReserved &&
+              stats.peakNodeBytesReserved >= stats.nodeBytesReserved &&
+              stats.peakRecordBytesReserved >= stats.recordBytesReserved);
+        const usize peakBefore = stats.peakAllocatedBytes;
+
+        // 모두 지우고 축소하면 해제가 늘고 살아 있는 byte는 줄지만 피크는 그대로다.
+        for (usize index = 0; index < tree.Proxies().Size(); ++index) {
+            REQUIRE(tree.Remove(index));
+        }
+        MaintenanceBudget shrink = MaintenanceBudget::All();
+        shrink.shrink = true;
+        CHECK(tree.Tree().RunMaintenance(shrink).shrunk);
+        stats = StatsOf(tree.Tree());
+        CHECK(stats.allocationCount == tally.allocations - 1);
+        CHECK(stats.deallocationCount == tally.deallocations);
+        CHECK(stats.peakAllocatedBytes == peakBefore && stats.liveAllocatedBytes < peakBefore);
+        CHECK(stats.chunkBytesReserved == 0 && stats.peakChunkBytesReserved > 0);
+
+        // 이동: 계수는 대상으로 옮겨 가고 원본은 0이다. 원본에 다시 넣으면 새 adapter를 만든다.
+        LooseOctree moved = Move(tree.Tree());
+        CHECK(StatsOf(moved).allocationCount == tally.allocations - 1);
+        CHECK(StatsOf(tree.Tree()).allocationCount == 0);
+        const uint64 before = tally.allocations;
+        SpatialProxyDesc desc;
+        desc.bounds = MakeCube(Vec3d(1, 1, 1), 1);
+        desc.filterMask = 1;
+        REQUIRE(tree.Tree().TryAdd(desc));
+        stats = StatsOf(tree.Tree());
+        CHECK(stats.allocationCount > 0 && stats.allocationCount == tally.allocations - before - 1);
+        CHECK(ValidateTree(tree.Tree()) && ValidateTree(moved));
+    }
+    // 두 트리(이동 대상과 원본)가 모두 끝나면 남는 할당이 없다.
+    CHECK(tally.live == 0);
+}
+
+// LO10 확대: 범위 밖 ↔ 트리 전이와, 삭제가 일으킨 강제 유지보수 중의 할당 실패. 변경 호출은
+// 실패하면 OutOfMemory로 논리 상태를 보존하고, 삭제는 할당 실패와 무관하게 성공한다(강제 처리의
+// 청크 확보 실패는 항목을 다시 대기시킬 뿐이다).
+TEST(LooseOctree_LO10_FailureInjectionAcrossOutOfRangeAndForcedMaintenance) {
+    SystemAllocator system;
+    test::NFailAllocator allocator(system);
+    LooseOctreeConfig config = SmallConfig();
+    config.maxRootLevel = 8;
+    config.pendingLimitFloor = 1;
+    auto created = LooseOctree::TryCreate(config, allocator);
+    REQUIRE(created);
+    OracleTree tree(Move(created.Value()), system);
+    // 원점의 프록시는 지우지 않아 루트가 원점에 고정된다(빈 트리 재고정 없음).
+    REQUIRE(tree.Add(MakeCube(Vec3d(0, 0, 0), 1), 1) != IndexNone);
+    RandomStream random(0xA11u);
+    for (uint32 index = 0; index < 200; ++index) {
+        REQUIRE(tree.Add(MakeBox(Distribution::Uniform, random, 60.0), 1) != IndexNone);
+    }
+
+    uint32 injected = 0;
+    uint32 transitions = 0;
+    bool consistent = true;
+    for (uint32 step = 0; step < 120; ++step) {
+        const usize target =
+            1 + random.NextUInt32Below(static_cast<uint32>(tree.Proxies().Size() - 1));
+        // 트리 → 범위 밖(10^6 cm) 또는 범위 밖 → 트리로 번갈아 옮긴다.
+        const bool outside = tree.Proxies()[target].bounds.min.x > 1.0e5;
+        const Box<double> bounds = outside ? MakeBox(Distribution::Uniform, random, 60.0)
+                                           : MakeCube(Vec3d(1.0e6, Uniform(random, -10, 10), 0), 1);
+        for (uint64 attempt = 1;; ++attempt) {
+            allocator.FailOnAttempt(attempt);
+            auto updated = tree.Tree().TryUpdateBounds(tree.Proxies()[target].handle, bounds);
+            const uint64 attempts = allocator.Attempts();
+            allocator.DisableFailure();
+            if (updated) {
+                tree.RecordBounds(target, bounds);
+                ++transitions;
+                break;
+            }
+            ++injected;
+            consistent = consistent && updated.Error() == ErrorCode::OutOfMemory &&
+                         attempts >= attempt && LogicalStateMatches(tree.Tree(), tree.Proxies()) &&
+                         ValidateTree(tree.Tree());
+            REQUIRE(attempt < 64);
+        }
+    }
+
+    // 삭제마다 첫 할당을 실패시킨다. 삭제는 할당 실패와 무관하게 성공하고 상태가 맞아야 한다.
+    for (usize index = 1; index < tree.Proxies().Size(); ++index) {
+        allocator.FailOnAttempt(1);
+        const bool removed = tree.Remove(index);
+        allocator.DisableFailure();
+        consistent = consistent && removed;
+        if (index % 16 == 0) {
+            consistent = consistent && LogicalStateMatches(tree.Tree(), tree.Proxies()) &&
+                         ValidateTree(tree.Tree());
+        }
+    }
+    CHECK(consistent);
+    CHECK(injected > 0 && transitions > 20);
+    CHECK(LogicalStateMatches(tree.Tree(), tree.Proxies()));
+    (void)tree.Tree().RunMaintenance(MaintenanceBudget::All());
+    CHECK(ValidateTree(tree.Tree()));
+    CHECK(QueriesMatch(tree, config, system, 0xA12u));
+
+    // 삭제가 일으킨 강제 유지보수: 보류된 잎 7개와 분할된 자식 하나(노드 17개, 한도 max(1, 4) =
+    // 4)에서 분할된 자식을 병합 후보로 만들고 보류 잎마다 하나씩 지워 재평가 대기를 쌓으면 대기량이
+    // 한도를 넘어 삭제 호출 안에서 처리된다. 그 동안 할당을 실패시킨다(병합 청크 확보가 실패하면
+    // 항목을 다시 대기시킨다).
+    auto forcedCreated = LooseOctree::TryCreate(config, allocator);
+    REQUIRE(forcedCreated);
+    OracleTree forced(Move(forcedCreated.Value()), system);
+    usize firsts[8] = {};
+    for (uint32 round = 0; round < 20; ++round) {
+        for (uint32 octant = 1; octant < 8; ++octant) {
+            const Vec3d center((octant & 1u) != 0 ? 10.0 : -10.0, (octant & 2u) != 0 ? 10.0 : -10.0,
+                               (octant & 4u) != 0 ? 10.0 : -10.0);
+            const usize index = forced.Add(MakeCube(center, 0.5), 1);
+            REQUIRE(index != IndexNone);
+            if (round == 0) {
+                firsts[octant] = index;
+            }
+        }
+    }
+    usize separable[9];
+    for (uint32 index = 0; index < 9; ++index) {
+        const Vec3d point(-4.0 - 3.0 * index, -6.0 - 2.5 * index, -25.0 + 3.0 * index);
+        separable[index] = forced.Add(MakePoint(point), 1);
+        REQUIRE(separable[index] != IndexNone);
+    }
+    OctreeStats forcedStats = StatsOf(forced.Tree());
+    REQUIRE(forcedStats.nodeCount == 17 && forcedStats.heldNodeCount == 7);
+    bool forcedConsistent = true;
+    const auto removeWithFailure = [&](usize index) noexcept {
+        allocator.FailOnAttempt(1);
+        const bool removed = forced.Remove(index);
+        allocator.DisableFailure();
+        forcedConsistent = forcedConsistent && removed &&
+                           LogicalStateMatches(forced.Tree(), forced.Proxies()) &&
+                           ValidateTree(forced.Tree());
+    };
+    for (uint32 index = 0; index < 5; ++index) {
+        removeWithFailure(separable[index]);
+    }
+    for (uint32 octant = 1; octant < 8; ++octant) {
+        removeWithFailure(firsts[octant]);
+    }
+    forcedStats = StatsOf(forced.Tree());
+    CHECK(forcedConsistent);
+    CHECK(forcedStats.forcedMaintenanceRuns > 0 && forcedStats.forcedMaintenanceItems > 0);
+    (void)forced.Tree().RunMaintenance(MaintenanceBudget::All());
+    CHECK(ValidateTree(forced.Tree()));
+    CHECK(QueriesMatch(forced, config, system, 0xA13u));
 }

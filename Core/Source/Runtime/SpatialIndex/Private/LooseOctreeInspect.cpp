@@ -1,5 +1,8 @@
 #include "LooseOctreeInternal.h"
 
+#include <Core/Math/MathUtility.h>
+#include <Platform/Memory.h>
+
 namespace rocks::spatial {
 
 namespace {
@@ -13,6 +16,27 @@ uint32 HistogramBucket(uint32 count) noexcept {
         bound *= 4;
     }
     return bucket;
+}
+
+// float 값의 전순서 키다(−0과 +0은 같고, 비정규 값도 비트대로 구별한다). 부동소수 비교는 DAZ
+// 환경에서 비정규 입력을 0으로 보므로 불변 조건 7을 거짓으로 보고할 수 있어 정수로 비교한다. NaN은
+// 오지 않는다.
+int64 FloatOrderKey(float value) noexcept {
+    const uint32 raw = platform::BitCast<uint32>(value);
+    const int64 magnitude = static_cast<int64>(raw & 0x7fffffffu);
+    return (raw & 0x80000000u) != 0 ? -magnitude : magnitude;
+}
+
+// stored < value(double)인지다. value 이상인 가장 작은 float r에 대해 stored < value ⇔ stored <
+// r이다 (stored와 value 사이에 float가 끼지 않으므로).
+bool FloatBelow(float stored, double value) noexcept {
+    return FloatOrderKey(stored) < FloatOrderKey(math::ToFloatRoundedUp(value));
+}
+
+// stored > value(double)인지다. value 이하인 가장 큰 float r에 대해 stored > value ⇔ stored >
+// r이다.
+bool FloatAbove(float stored, double value) noexcept {
+    return FloatOrderKey(stored) > FloatOrderKey(math::ToFloatRoundedDown(value));
 }
 
 } // namespace
@@ -77,8 +101,8 @@ OctreeStats LooseOctreeReader::Stats() const noexcept {
     return tree_->CollectStats();
 }
 
-Result<void> LooseOctreeReader::Validate(ValidationFailure* failure) const noexcept {
-    return tree_->ValidateStructure(failure);
+Result<OctreeValidationReport> LooseOctreeReader::Validate() const noexcept {
+    return tree_->ValidateStructure();
 }
 
 // ---- 조회 ----
@@ -170,6 +194,16 @@ OctreeStats LooseOctree::CollectStats() const noexcept {
                               manageBlocks_.Capacity() * sizeof(detail::ManageBlock);
     stats.outOfRangeBytesUsed = outOfRange_.Size() * sizeof(detail::OutOfRangeEntry);
     stats.outOfRangeBytesReserved = outOfRange_.Capacity() * sizeof(detail::OutOfRangeEntry);
+    stats.peakRecordBytesReserved = peaks_.recordBytes;
+    stats.peakChunkBytesReserved = peaks_.chunkBytes;
+    stats.peakNodeBytesReserved = peaks_.nodeBytes;
+    stats.peakOutOfRangeBytesReserved = peaks_.outOfRangeBytes;
+    if (counting_ != nullptr) {
+        stats.allocationCount = counting_->Allocations();
+        stats.deallocationCount = counting_->Deallocations();
+        stats.liveAllocatedBytes = counting_->LiveBytes();
+        stats.peakAllocatedBytes = counting_->PeakBytes();
+    }
     stats.freeChunkCount = chunks_.FreeCount();
     stats.freeBlockCount = searchBlocks_.FreeCount();
 
@@ -210,13 +244,13 @@ OctreeStats LooseOctree::CollectStats() const noexcept {
 
 // ---- 검증(6.2절 불변 조건 1–9) ----
 
-Result<void> LooseOctree::ValidateStructure(ValidationFailure* failure) const noexcept {
-    const auto fail = [failure](uint32 invariant, uint32 node) noexcept {
-        if (failure != nullptr) {
-            failure->invariant = invariant;
-            failure->node = node;
-        }
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
+Result<OctreeValidationReport> LooseOctree::ValidateStructure() const noexcept {
+    // 위반은 호출 실패가 아니라 report 값이다(DebugAllocator::Validate 관례).
+    const auto fail = [](uint32 invariant, uint32 node) noexcept {
+        OctreeValidationReport report;
+        report.invariant = invariant;
+        report.node = node;
+        return Result<OctreeValidationReport>::Success(report);
     };
 
     // 각 항목은 부모에서 유도한 위치를 함께 싣는다(불변 조건 8).
@@ -261,22 +295,22 @@ Result<void> LooseOctree::ValidateStructure(ValidationFailure* failure) const no
         uint32 previous = detail::NoChunk;
         for (uint32 chunk = search.firstChunk; chunk != detail::NoChunk;) {
             if (!chunks_.IsLive(chunk)) {
-                return fail(0, node);
+                return fail(OctreeInvariantStorage, node);
             }
             const detail::ElementChunk& elements = chunks_[chunk];
             if (elements.previous != previous || elements.count == 0 ||
                 elements.count > LooseOctreeChunkCapacity ||
                 (elements.next != detail::NoChunk && elements.count != LooseOctreeChunkCapacity)) {
-                return fail(0, node);
+                return fail(OctreeInvariantStorage, node);
             }
             ++chunksSeen;
             if (chunksSeen > chunks_.LiveCount()) {
-                return fail(0, node);
+                return fail(OctreeInvariantStorage, node);
             }
             for (uint32 entry = 0; entry < elements.count; ++entry) {
                 const uint32 slot = elements.slot[entry];
-                const SlotHandle current = records_.HandleAt(slot);
-                if (current.IsNull() || current.generation != elements.generation[entry]) {
+                const SlotHandle live = records_.HandleAt(slot);
+                if (live.IsNull() || live.generation != elements.generation[entry]) {
                     return fail(3, node);
                 }
                 const detail::ProxyRecord& record = records_.ElementAt(slot);
@@ -288,18 +322,18 @@ Result<void> LooseOctree::ValidateStructure(ValidationFailure* failure) const no
                 }
                 if (record.filter != elements.filter[entry] ||
                     record.userValue != elements.userValue[entry]) {
-                    return fail(0, node);
+                    return fail(OctreeInvariantStorage, node);
                 }
                 // 불변 조건 7: min_f < (min − 중심), max_f > (max − 중심)(double 계산값 기준,
-                // 엄격).
+                // 엄격). float와 double 비교를 float 비트 순서로 한다(FloatBelow·FloatAbove).
                 const Vec3d relativeMin = record.bounds.min - center;
                 const Vec3d relativeMax = record.bounds.max - center;
-                if (!(static_cast<double>(elements.minX[entry]) < relativeMin.x) ||
-                    !(static_cast<double>(elements.minY[entry]) < relativeMin.y) ||
-                    !(static_cast<double>(elements.minZ[entry]) < relativeMin.z) ||
-                    !(static_cast<double>(elements.maxX[entry]) > relativeMax.x) ||
-                    !(static_cast<double>(elements.maxY[entry]) > relativeMax.y) ||
-                    !(static_cast<double>(elements.maxZ[entry]) > relativeMax.z)) {
+                if (!FloatBelow(elements.minX[entry], relativeMin.x) ||
+                    !FloatBelow(elements.minY[entry], relativeMin.y) ||
+                    !FloatBelow(elements.minZ[entry], relativeMin.z) ||
+                    !FloatAbove(elements.maxX[entry], relativeMax.x) ||
+                    !FloatAbove(elements.maxY[entry], relativeMax.y) ||
+                    !FloatAbove(elements.maxZ[entry], relativeMax.z)) {
                     return fail(7, node);
                 }
                 ++direct;
@@ -309,7 +343,7 @@ Result<void> LooseOctree::ValidateStructure(ValidationFailure* failure) const no
             chunk = elements.next;
         }
         if (direct != search.directCount || manage.lastChunk != previous) {
-            return fail(0, node);
+            return fail(OctreeInvariantStorage, node);
         }
 
         if (search.childBlock == detail::NoBlock) {
@@ -362,14 +396,14 @@ Result<void> LooseOctree::ValidateStructure(ValidationFailure* failure) const no
     // 도달할 수 있는 블록·청크가 풀의 사용량과 같다(누수·이중 소속 없음).
     if (blocksSeen != searchBlocks_.LiveCount() || blocksSeen != manageBlocks_.LiveCount() ||
         chunksSeen != chunks_.LiveCount()) {
-        return fail(0, detail::NoNode);
+        return fail(OctreeInvariantStorage, detail::NoNode);
     }
 
     // 범위 밖 목록.
     for (usize index = 0; index < outOfRange_.Size(); ++index) {
         const detail::OutOfRangeEntry& entry = outOfRange_[index];
-        const SlotHandle current = records_.HandleAt(entry.slot);
-        if (current.IsNull() || current.generation != entry.generation) {
+        const SlotHandle live = records_.HandleAt(entry.slot);
+        if (live.IsNull() || live.generation != entry.generation) {
             return fail(3, detail::NoNode);
         }
         const detail::ProxyRecord& record = records_.ElementAt(entry.slot);
@@ -412,7 +446,7 @@ Result<void> LooseOctree::ValidateStructure(ValidationFailure* failure) const no
     if (previous != queueTail_ || length != queueLength_ || length != queuedSeen) {
         return fail(9, detail::NoNode);
     }
-    return Result<void>::Success();
+    return Result<OctreeValidationReport>::Success(OctreeValidationReport{});
 }
 
 } // namespace rocks::spatial

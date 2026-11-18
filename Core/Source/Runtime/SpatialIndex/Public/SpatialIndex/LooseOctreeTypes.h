@@ -120,7 +120,7 @@ struct LooseOctreeConfig {
 };
 
 // RunMaintenance의 예산이다(6.6절). operations와 timeNanoseconds가 모두 0이면 대기열을 처리하지
-// 않고 루트 확인도 하지 않는다(유지보수를 미룸).
+// 않고 루트 확인도 하지 않는다(유지보수를 미룸). shrink는 두 예산과 무관하게 수행한다.
 struct MaintenanceBudget {
     // 처리할 대기열 항목 수의 상한이다. 결과가 결정적이다. 0이면 시간 예산만 본다.
     uint32 operations = 0;
@@ -201,6 +201,17 @@ struct OctreeStats {
     usize nodeBytesReserved = 0;
     usize outOfRangeBytesUsed = 0;
     usize outOfRangeBytesReserved = 0;
+    // 배열별 예약 용량의 피크(byte)다(생성 또는 이동 대상이 된 뒤부터).
+    usize peakRecordBytesReserved = 0;
+    usize peakChunkBytesReserved = 0;
+    usize peakNodeBytesReserved = 0;
+    usize peakOutOfRangeBytesReserved = 0;
+    // 내부 컨테이너가 allocator에 요청한 할당·해제 횟수와 살아 있는·피크 byte(요청 크기 기준, 계수
+    // adapter의 머리 정보 제외)다. 이동하면 함께 옮겨 가고 이동된 원본은 0부터 다시 센다.
+    uint64 allocationCount = 0;
+    uint64 deallocationCount = 0;
+    usize liveAllocatedBytes = 0;
+    usize peakAllocatedBytes = 0;
     // 풀 재사용 목록 길이다.
     uint32 freeChunkCount = 0;
     uint32 freeBlockCount = 0;
@@ -255,12 +266,32 @@ struct SpatialNodeInfo {
 // 노드 번호 칸의 "없음" 표지다(SpatialNodeInfo::parent 등).
 inline constexpr uint32 LooseOctreeNoNode = NumericLimits<uint32>::Max();
 
-// Validate가 실패할 때 채우는 위치다. invariant는 6.2절 불변 조건 번호(1–9), 0이면 그 밖의 구조
-// 검사 (청크 연결·풀 사용량·범위 밖 목록·필터·사용자 값 대조)다. node는 위반한 노드 번호이며 노드가
-// 아니면 LooseOctreeNoNode다.
-struct ValidationFailure {
-    uint32 invariant = 0;
+// OctreeValidationReport::invariant 값이다. 1–9는 Docs/Design/SpatialIndex.ko.md 6.2절 불변 조건
+// 번호이고, 그 밖의 저장 구조 일관성(청크 연결·사용 수, 풀 사용량과 도달 가능한 블록·청크 수, 범위
+// 밖 목록, 레코드와 청크의 필터·사용자 값 대조)은 OctreeInvariantStorage로 구분한다.
+inline constexpr uint32 OctreeInvariantNone = 0;
+inline constexpr uint32 OctreeInvariantStorage = 10;
+
+// LooseOctreeReader::Validate의 결과다(DebugAllocator::Validate와 같은 관례: Result는 검사 호출이
+// 수행되었는지, 실제 손상 여부는 이 값이다). 첫 위반 하나만 담는다.
+//
+// 사용 예:
+//   auto report = reader.Validate();
+//   if (report && !report.Value().IsValid()) {
+//       Log::Error(LogGame, "octree invariant {Invariant} broken at node {Node}",
+//                  report.Value().invariant, report.Value().node);
+//   }
+struct OctreeValidationReport {
+    // OctreeInvariantNone이면 위반이 없다. 1–9는 불변 조건 번호, OctreeInvariantStorage는 저장 구조
+    // 일관성 위반이다.
+    uint32 invariant = OctreeInvariantNone;
+    // 위반을 발견한 노드 번호다. 노드에 속하지 않는 위반(범위 밖 목록·풀 사용량·전체 수)이면
+    // LooseOctreeNoNode다.
     uint32 node = LooseOctreeNoNode;
+
+    [[nodiscard]] constexpr bool IsValid() const noexcept {
+        return invariant == OctreeInvariantNone;
+    }
 };
 
 } // namespace rocks::spatial

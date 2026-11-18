@@ -87,16 +87,22 @@ void LooseOctree::EnforcePendingLimit() noexcept {
 MaintenanceReport LooseOctree::RunMaintenance(const MaintenanceBudget& budget) noexcept {
     WriterGuard guard(*this);
     MaintenanceReport report;
-    if (budget.operations == 0 && budget.timeNanoseconds == 0) {
-        report.remaining = queueLength_;
-        return report;
-    }
     const uint64 start = platform::MonotonicNanoseconds();
-    const uint32 maxItems =
-        budget.operations != 0 ? budget.operations : NumericLimits<uint32>::Max();
-    const uint64 deadline = budget.timeNanoseconds != 0 ? start + budget.timeNanoseconds : 0;
-    ProcessQueue(maxItems, deadline, report);
-    CheckRoot(report);
+    // 작업 수·시간 예산이 모두 0이면 대기열 처리와 루트 확인을 미룬다. 축소 요청은 그와 별개로
+    // 수행한다.
+    if (budget.operations != 0 || budget.timeNanoseconds != 0) {
+        const uint32 maxItems =
+            budget.operations != 0 ? budget.operations : NumericLimits<uint32>::Max();
+        // 0은 "시간 한도 없음"이다. 덧셈은 포화시켜 아주 큰 예산이 과거 시각으로 돌지 않게 한다.
+        uint64 deadline = 0;
+        if (budget.timeNanoseconds != 0) {
+            deadline = budget.timeNanoseconds > NumericLimits<uint64>::Max() - start
+                           ? NumericLimits<uint64>::Max()
+                           : start + budget.timeNanoseconds;
+        }
+        ProcessQueue(maxItems, deadline, report);
+        CheckRoot(report);
+    }
     if (budget.shrink) {
         // SlotArray는 handle 세대 기록을 지키려고 저장소를 줄이지 않는다(옛 handle이 다시
         // 유효해지는 것을 막는다). 나머지 배열과 풀만 줄인다.
@@ -106,6 +112,7 @@ MaintenanceReport LooseOctree::RunMaintenance(const MaintenanceBudget& budget) n
         const bool outOfRange = static_cast<bool>(outOfRange_.TryShrink());
         report.shrunk = chunks && search && manage && outOfRange;
     }
+    NotePeaks();
     report.remaining = queueLength_;
     report.elapsedNanoseconds = platform::MonotonicNanoseconds() - start;
     return report;
@@ -144,7 +151,8 @@ bool LooseOctree::ProcessItem(uint32 node, MaintenanceReport& report) noexcept {
     const bool leaf = Search(node).childBlock == detail::NoBlock;
     if ((manage.flags & detail::NodeReevaluationPending) != 0) {
         manage.flags &= static_cast<uint8>(~detail::NodeReevaluationPending);
-        if (leaf && (manage.flags & detail::NodeHeld) != 0) {
+        // 보류 중인 잎의 재평가, 또는 경계 갱신이 미룬 분할 평가다.
+        if (leaf) {
             if (Search(node).directCount > config_.splitThreshold) {
                 ++counters_.reevaluations;
                 ++report.reevaluations;

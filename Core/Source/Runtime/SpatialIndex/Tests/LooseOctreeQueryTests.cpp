@@ -1,6 +1,7 @@
 #include "LooseOctreeTestSupport.h"
 
 #include <Core/Memory/SystemAllocator.h>
+#include <Platform/FloatingPointEnvironment.h>
 #include <Platform/PlatformMath.h>
 
 using namespace rocks;
@@ -65,9 +66,9 @@ TEST(LooseOctree_LO01_BoxQueriesMatchExhaustiveSearch) {
             REQUIRE(tree.Remove(tree.PickLive(random)));
             REQUIRE(tree.Update(tree.PickLive(random), MakeBox(distribution, random, 200.0)));
         }
-        ValidationFailure failure;
-        CHECK(ValidateTree(tree.Tree(), &failure));
-        CHECK(failure.invariant == 0);
+        OctreeValidationReport report;
+        CHECK(ValidateTree(tree.Tree(), &report));
+        CHECK(report.invariant == OctreeInvariantNone);
 
         const double tolerance = ToleranceFor(tree.Tree(), config);
         SpatialReadScope read(tree.Tree());
@@ -511,12 +512,12 @@ TEST(LooseOctree_LO14_ApiContracts) {
         SpatialReadScope read(moved);
         const LooseOctreeReader reader = read.Reader();
         CHECK(reader.Count() == 200 && reader.IsValid(handles[0]) && reader.IsValid(handles[199]));
-        CHECK(static_cast<bool>(reader.Validate()));
+        CHECK(reader.Validate().Value().IsValid());
     }
     {
         SpatialReadScope read(octree);
         CHECK(read.Reader().Count() == 0);
-        CHECK(static_cast<bool>(read.Reader().Validate()));
+        CHECK(read.Reader().Validate().Value().IsValid());
     }
     SpatialProxyDesc desc;
     desc.bounds = MakeCube(Vec3d(0, 0, 0), 1);
@@ -533,7 +534,7 @@ TEST(LooseOctree_LO14_ApiContracts) {
     CHECK(!(again.Value() == handles[0]) && !(again.Value() == handles[199]));
     SpatialReadScope read(moved);
     CHECK(read.Reader().Count() == 1 && !read.Reader().IsValid(handles[5]));
-    CHECK(static_cast<bool>(read.Reader().Validate()));
+    CHECK(read.Reader().Validate().Value().IsValid());
 }
 
 // LO15: 결정성. 같은 연산열과 작업 수 예산에서 결과 순서와 구조가 같고, Stats()의 구조 값이 독립
@@ -594,4 +595,141 @@ TEST(LooseOctree_LO15_DeterministicOrderAndIndependentCounts) {
     CHECK(stats.nodeCount == nodes && stats.leafCount == leaves && stats.maxDepth == maxDepth);
     CHECK(stats.interiorDirectCount == interior);
     CHECK(inTree + stats.outOfRangeCount == stats.proxyCount);
+}
+
+namespace {
+
+// LO15 독립 모형의 범위 판정이다. 루트가 커질 수 없는 설정(maxRootLevel = initialRootLevel = 6,
+// k = 2)에서 트리에 들어가려면 AABB가 루트 확장 경계 [−64, 64]^3 안이고 중심이 루트 셀 [−32, 32]^3
+// 안이어야 한다(6.5절 루트 조건). 옥트리 내부 구조를 읽지 않고 입력만으로 정한다.
+bool FitsFixedRoot(const Box<double>& box) noexcept {
+    const Box<double> loose(Vec3d(-64, -64, -64), Vec3d(64, 64, 64));
+    const Box<double> cell(Vec3d(-32, -32, -32), Vec3d(32, 32, 32));
+    return loose.Contains(box) && cell.Contains(box.Center());
+}
+
+// allowBand가 거짓이면 루트 셀 밖·확장 경계 안의 띠를 만들지 않는다. 경계 갱신은 지금 노드의 확장
+// 경계 안이면 중심 조건 없이 제자리에서 끝나므로(6.5절) 띠로의 갱신은 노드를 모르는 모형이 예측할
+// 수 없다.
+Box<double> ModelBox(RandomStream& random, bool allowBand) noexcept {
+    const uint32 kind = random.NextUInt32Below(10);
+    if (kind < 6 || (!allowBand && kind < 8)) {
+        return MakeCube(
+            Vec3d(Uniform(random, -30, 30), Uniform(random, -30, 30), Uniform(random, -30, 30)),
+            Uniform(random, 0, 0.6));
+    }
+    if (kind < 8) {
+        // 루트 셀 밖·확장 경계 안의 띠: 루트를 키울 수 없으므로 범위 밖이다.
+        return MakeCube(Vec3d(Uniform(random, 33, 60), Uniform(random, -30, 30), 0), 0.5);
+    }
+    return MakeCube(Vec3d(1.0e4 + Uniform(random, -100, 100), 0, 0), 1);
+}
+
+} // namespace
+
+// LO15: Stats()의 값을 옥트리 내부 배열(VisitNodes)에 기대지 않는 독립 모형과 대조한다. 모형은
+// 입력과 연산 기록만으로 프록시 수, 범위 밖 수, 범위 밖 삽입 수, 경계 갱신 수(제자리 + 재삽입),
+// 루트 확장·축소·빈 트리 재설정 수(모두 0)를 계산한다.
+TEST(LooseOctree_LO15_StatsMatchIndependentModel) {
+    SystemAllocator allocator;
+    LooseOctreeConfig config = SmallConfig();
+    config.maxRootLevel = config.initialRootLevel;
+    auto created = LooseOctree::TryCreate(config, allocator);
+    REQUIRE(created);
+    OracleTree tree(Move(created.Value()), allocator);
+    // 원점의 프록시는 지우지 않아 빈 트리 재고정이 일어나지 않는다.
+    REQUIRE(tree.Add(MakeCube(Vec3d(0, 0, 0), 1), 1) != IndexNone);
+
+    uint64 live = 1;
+    uint64 outside = 0;
+    uint64 outsideInsertions = 0;
+    uint64 treeUpdates = 0;
+    RandomStream random(0x1515u);
+    for (uint32 step = 0; step < 3000; ++step) {
+        const uint32 action = random.NextUInt32Below(10);
+        if (action < 4 || live < 2) {
+            const Box<double> box = ModelBox(random, true);
+            REQUIRE(tree.Add(box, 1) != IndexNone);
+            ++live;
+            if (!FitsFixedRoot(box)) {
+                ++outside;
+                ++outsideInsertions;
+            }
+        } else if (action < 6) {
+            usize index = tree.PickLive(random);
+            if (index == 0) {
+                continue;
+            }
+            const bool wasOutside = !FitsFixedRoot(tree.Proxies()[index].bounds);
+            REQUIRE(tree.Remove(index));
+            --live;
+            outside -= wasOutside ? 1 : 0;
+        } else {
+            const usize index = tree.PickLive(random);
+            const Box<double> box = ModelBox(random, false);
+            const bool wasOutside = !FitsFixedRoot(tree.Proxies()[index].bounds);
+            const bool nowOutside = !FitsFixedRoot(box);
+            REQUIRE(tree.Update(index, box));
+            if (!(wasOutside && nowOutside)) {
+                // 트리 안 이동(제자리 또는 재삽입), 트리와 범위 밖 사이 이동은 모두 갱신 계수에
+                // 든다.
+                ++treeUpdates;
+            }
+            if (!wasOutside && nowOutside) {
+                ++outsideInsertions;
+            }
+            outside = outside + (nowOutside ? 1 : 0) - (wasOutside ? 1 : 0);
+        }
+        if (step % 50 == 49) {
+            (void)tree.Tree().RunMaintenance(MaintenanceBudget::Operations(4));
+        }
+    }
+
+    const OctreeStats stats = StatsOf(tree.Tree());
+    CHECK(stats.proxyCount == live && stats.proxyCount == tree.LiveCount());
+    CHECK(stats.outOfRangeCount == outside);
+    CHECK(stats.outOfRangeInsertions == outsideInsertions);
+    CHECK(stats.inPlaceUpdates + stats.reinserts == treeUpdates);
+    CHECK(stats.rootExpansions == 0 && stats.rootShrinks == 0 && stats.emptyResets == 0);
+    CHECK(stats.rootLevel == config.initialRootLevel);
+    CHECK(outside > 0 && treeUpdates > 0);
+    CHECK(ValidateTree(tree.Tree()));
+}
+
+// FTZ·DAZ 환경에서도 불변 조건 7을 거짓으로 보고하지 않고 접촉 질의가 후보를 놓치지 않는다. 상대
+// 좌표가 정확히 0이거나 float 비정규 범위인 경계는 저장 float가 비정규 값이 된다.
+TEST(LooseOctree_ValidateAndQueriesUnderFlushToZero) {
+    SystemAllocator allocator;
+    LooseOctreeConfig config;
+    config.minCellSize = 1.0;
+    config.initialRootLevel = 4;
+    config.maxRootLevel = 8;
+    auto created = LooseOctree::TryCreate(config, allocator);
+    REQUIRE(created);
+    LooseOctree octree = Move(created.Value());
+
+    const uint64 original = platform::detail::ReadFloatingPointControl();
+    platform::detail::WriteFloatingPointControl(original | platform::detail::FlushToZeroBit() |
+                                                platform::detail::DenormalsAreZeroBit());
+    SpatialProxyDesc desc;
+    desc.filterMask = 1;
+    // 루트 중심이 원점이므로 min.x의 상대 좌표가 정확히 0, 그리고 float 비정규 값(2e-40)이다.
+    desc.bounds = Box<double>(Vec3d(0, 0, 0), Vec3d(1, 1, 1));
+    const bool firstAdded = static_cast<bool>(octree.TryAdd(desc));
+    desc.bounds = Box<double>(Vec3d(2.0e-40, 0, 0), Vec3d(1, 1, 1));
+    const bool secondAdded = static_cast<bool>(octree.TryAdd(desc));
+    OctreeValidationReport report;
+    const bool valid = ValidateTree(octree, &report);
+    uint64 touching = 0;
+    {
+        SpatialReadScope read(octree);
+        auto counted =
+            read.Reader().CountInBox(Box<double>(Vec3d(-1, -1, -1), Vec3d(2.0e-40, 0, 0)), 1);
+        touching = counted ? counted.Value() : 0;
+    }
+    platform::detail::WriteFloatingPointControl(original);
+
+    CHECK(firstAdded && secondAdded);
+    CHECK(valid && report.invariant == OctreeInvariantNone);
+    CHECK(touching == 2);
 }
