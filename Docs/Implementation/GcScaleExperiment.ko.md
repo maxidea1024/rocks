@@ -762,3 +762,87 @@ Debug 장부 재계산은 새 배치를 본다: 칸의 `clusterState`·`outCount
 - 해체된 패키지는 다시 묶지 않는다. 경계가 나중에 줄어도 일반 객체로 남는다.
 - 섞인 chunk(클러스터 셋 이상 — 작은 패키지가 많을 때)는 장부 상태를 읽는다. 패키지 크기가 64보다 작은 그래프를 따로 재지 않았다.
 - 측정은 다른 세션의 빌드·에뮬레이터가 도는 기계에서 했다. 높은 우선순위와 최솟값으로 선점의 영향을 줄였지만 캐시 경합은 남는다.
+
+## 15. 클러스터 시험 구멍과 작은 패키지 (2026-11-18)
+
+### 15.1 시험 구멍
+
+| 구멍(13.11절·13.7절) | 메운 것 | 확인(음성 대조, `p4/negctl3.txt`) |
+|---|---|---|
+| 소속 소유자의 `StructRefArray` 원소 제거·비우기 장부 경로를 아무 시험도 지나지 않음 | 등록 struct 원소를 둔 시험 타입으로 `ObjectGcCluster_MemberStructElementRemovalKeepsLedger`(같은 클러스터 대상 둘·밖 대상 하나를 원소로 가리키고, 원소 제거 → 밖 대상 회수, 이탈한 대상은 원소가 가리키는 동안 detached, 비우기 → 회수). 클러스터 smoke에 원소 추가·제거·비우기를 섞음(World형·패키지형 모두) | 제거 경로의 장부 갱신 생략(S1)·비우기 경로의 생략(S2) 모두 "Cluster ledger diverged from a recount"로 잡힌다. Foundation의 짧은 smoke 시험은 잡지 못한다(긴 smoke 실행은 원소 편집을 지난다) |
+| 삽입 장벽을 끈 결함(음성 대조 7)을 클러스터 결정적 시험이 못 잡음 — keeper가 연결 시점에 아직 trace 전이었다 | 첫 slice가 루트(keeper 포함 다섯)를 모두 trace하고 루트 없는 사슬이 남아 표식이 끝나지 않게 한 뒤 keeper → 소속 간선을 건다(이 간선은 장벽만 지킨다) | 장벽을 끄면 `ObjectGcCluster_IncrementalBarrierCasesKeepReachableObjects`가 소속·밖 대상 회수로 실패한다(smoke·병렬·증분 시험도 함께) |
+| 경계 비율 안전장치가 smoke에서 일어나지 않음(패키지 객체에 간선이 없어 경계가 75%를 넘지 못했다) | smoke가 패키지 객체에도 간선을 두고, 기존 패키지 아래 새 객체를 만들며, 해체된 클러스터를 모델에 옮긴다. 이를 위해 진단용 공개 조회 `ObjectRegistry::InspectClusterMembership`을 더했다 | 패키지형 smoke 300 tick에서 안전장치 해체 372–420건. 해체된 패키지 인식을 끄면(F1) 안전장치 시험이 새 객체 생성 실패로 잡는다 |
+
+### 15.2 작은 패키지(64개 미만 — chunk 하나에 클러스터 셋 이상)
+
+`GcBench --package-profile CROSS --package-size N`(1M 객체를 N개씩 패키지로)으로 쟀다. 14절 배치는 chunk 표가 클러스터 둘까지만 담아, 패키지가 10–30개면 거의 모든 chunk가 "섞임"이 되어 소속을 처음 만날 때마다 장부 칸(28MB 배열)을 읽었다(크기 10·사이 30%에서 표식의 29%가 그 한 줄).
+
+고친 것: **2단계 chunk 표.** `GcBits`의 표(클러스터 둘)가 넘치면 클러스터를 켠 Registry만 가진 넓은 표(`ClusterChunk`, chunk당 64 B — 클러스터 8개와 소속마다 3비트 고름)로 옮기고, 그것도 넘치면 장부 상태를 읽는다. `clusterSeen`은 비트 묶음에 남겼다 — 넓은 표에 함께 두었더니 같은 소속으로 가는 반복 간선마다 줄 하나를 더 읽어 패키지 100개 그래프가 76 → 90ms로 느려졌다.
+
+| 패키지 크기 · 사이 간선 | 14절 배치 | 2단계 표 | 끔 |
+|---|---:|---:|---:|
+| 10 · 1% | 9.3–13.6 | 8.6–13.9 | 47–69 |
+| 10 · 10% | 50–66 | 54–60 | 60–73 |
+| 10 · 30% | 101–110 | 75–87 | 52–60 |
+| 30 · 1% | 11.7–13.4 | 8.0–10.1 | 62–67 |
+| 30 · 10% | 66–74 | 54 | 69 |
+| 30 · 30% | 102–108 | 57–77 | 50–57 |
+| 100 · 10% | 38–42 | 37–45 | 49–62 |
+| 100 · 30% | 50–58 | 47–64 | 50–55 |
+
+표식 최솟값(ms), 높은 우선순위, 같은 실행 번갈아 두 round(`p4/two.txt`). 부하가 적던 round만 보면 2단계 표는 크기 10에서 38 · 56 · 58ms(끔 49 · 52 · 50), 크기 30에서 39 · 48 · 54ms(끔 50 · 56 · 74)다(`p4/smallvalve.txt`).
+
+- 남은 차이: 크기 10·사이 30%(경계 58%)는 끔보다 15–40% 느리다. 프로파일에서 넓은 표 읽기 19%, 클러스터 epoch 비교 11%다(소속 1M을 처음 만날 때마다 — 클러스터 100K개).
+- 시도하고 버린 것: (1) 간선 배치에서 넓은 표 미리 읽기 — 크기 10에서 들쭉날쭉, 크기 100에서 느려짐. (2) 작은 클러스터(소속 32개 미만)의 안전장치 문턱을 40·55%로 — 해체된 패키지와 남은 클러스터가 섞여 오히려 느려졌다(부하가 적은 round: 크기 10·30%에서 안전장치 없음 57.7, 40% 61.8, 55% 65.1ms).
+- 메모리: 넓은 표가 클러스터 Registry에 슬롯당 1 B를 더한다(GC 밀집 자료 45.4 → 46.4 B/slot).
+
+## 16. 선형 검색 점검 (2026-11-18)
+
+범위: ObjectRuntime(Registry·GC·장부·관찰자·이름 색인), World·Actor·Level·TickScheduler, Engine 서브시스템, Core 할당자. 연산 하나나 cycle·프레임 하나의 비용이 객체·클러스터·Actor·할당 수에 비례하는 곳을 모두 찾았다(읽기 전용 조사 1회 + 직접 확인). 측정은 새 도구 `Programs/WorldBench`(Actor N개 World — 파괴 O(1) 벤치 할당자, Actor 하나의 파괴, GC cycle을 시작하는 프레임, Actor 하나를 만든 뒤의 프레임, 작은 Level 파괴)와 GcBench `--package-size`·`--incremental-reps`로 했다. 전·후는 같은 실행에서 번갈아 높은 우선순위로 쟀다(`p4/worldbench2.txt`·`p4/worldbench4.txt`·`p4/settle.txt`).
+
+### 16.1 고친 것 (연산·cycle·프레임마다 규모에 비례하던 곳)
+
+| 위치 | 비례 대상 | 빈도 | 전: 10K → 100K Actor | 후: 10K → 100K | 처치 |
+|---|---|---|---:|---:|---|
+| `World.cpp` RepairBypassedActors(구 1779행) | 모든 Actor(Actor마다 `InspectLifecycle` 잠금 1회) | GC cycle 시작마다 | cycle 시작 프레임 207 → 2,390us | 2.0 → 3.8–13.2us | Registry의 파괴 요청 목록(`TakeDestroyRequests` — DestroyRequested가 된 슬롯의 이중 연결 목록, 회수 때 뺀다)에서 그 사이 파괴만 꺼낸다. O(파괴 수) |
+| `World.cpp` DestroyActorNow → `RemoveReference(Level.actors_)` | 그 Level의 Actor 수(찾기 + 뒤 원소 당기기) | Actor 파괴마다(대량 파괴는 O(A²)) | 5.0 → 43.7us/Actor | 0.71 → 0.52–1.02us/Actor | Actor 레코드가 Level 배열 위치를 기억하고 끝 원소와 바꿔 뗀다(`SetReferenceAt` + 끝 `RemoveReferenceAt`, 둘 다 O(1)). Level 배열 순서는 생성 순서가 아니게 됐다 |
+| `World.cpp` DestroyLevel(구 387행) | World 전체 Actor | Level 파괴마다 | 작은 Level(16 Actor) 21 → 716us | 1.3 → 1.5us | 그 Level의 배열만 훑는다 |
+| `TickScheduler.cpp` RebuildOrder | 모든 틱 등록(전 단계 훑기 + 위상 정렬) | 등록·해제·선행 추가가 있던 단계마다 프레임 경계에서 | 틱 있는 Actor 하나 생성 뒤 프레임 − 빈 프레임: 약 1.6 → 22ms | 약 0 → 0(−2 … +0.1ms 측정 흔들림) | 새 등록이 priority 최댓값 이상이면 순서 끝에 붙인다(재구성 결과와 같다). 해제는 순서에 남겨 실행이 건너뛰고 절반을 넘으면 재구성한다. 선행 추가는 지금 순서가 이미 지키면 재구성하지 않는다(그 간선이 막는 선택은 원래도 일어나지 않았다). 그 밖은 지금처럼 재구성 |
+| `TickScheduler.cpp` Reaches | 모든 틱 칸(방문 표시 배열 비우기) | 선행 추가마다 | — | — | 호출 번호(epoch) 표시로 방문한 칸만 본다 |
+| `TickScheduler.cpp` ApplyPendingRemovals | 모든 틱 등록 | 실행 중 해제가 있던 단계 경계 | — | — | 미룬 해제 목록만 지운다(용량은 등록 때 확보 — 해제는 할당하지 않는다) |
+| `World.cpp` ProcessStarts | 시작을 기다리는 꺼진 Actor | 프레임마다 | — | — | 꺼진 Actor는 큐에서 빼고 활성화가 다시 넣는다 |
+| `ObjectRegistryGc.cpp` AcquireGcType | GC 타입 수 | 객체 생성마다 | — | — | 타입 키 → 번호 개방 주소 색인(적재율 ≤ 1/2) |
+
+"—"는 따로 재지 않은 것(구조상 비용이 방문·변경 수에 비례한다). 틱 있는 World의 "Actor 하나의 파괴" 값은 정리 프레임 하나(모든 Actor 틱)를 200개로 나눈 것이 섞여 크기에 비례해 보인다(후 10K 3.0–7.2us, 100K 57–108us — 빈 프레임 10–21ms / 200). 틱 없는 World에서는 0.5–1.0us로 같다.
+
+### 16.2 그대로 둔 것
+
+| 위치 | 비례 대상 | 빈도 | 1M · 10K 클러스터 · 10만 Actor 규모 | 판단 |
+|---|---|---|---|---|
+| `ObjectRegistryClusters.cpp` DissolveUnmarked·FlattenBoundary 레코드 표 훑기 | 레코드 표(최고 수위) | cycle마다 1회(cutoff slice 안, 정지형 sweep) | 10K·100K 클러스터 모두 cutoff slice 최댓값 1.04–1.10ms(예산 1ms의 soft 초과 범위 — 클러스터 수와 무관). 표 훑기는 100K에 약 0.1ms | 그대로. slice마다 나누는 판(Sweeping의 레코드 커서, IsCutoff의 클러스터 epoch 판정)을 만들어 쟀으나 차이가 없어 되돌렸다 |
+| ProcessCluster·해체의 경계·소속·detached 고리 | 그 클러스터의 경계·소속 수 | 표식된 클러스터마다 cycle 1회, 해체마다 | 경계 소속당 약 7ns(14.1절) — 9만 소속 Level의 해체 약 0.6ms | 그대로(표식·해체할 양에 비례하는 일). slice로 나누지 못한다 |
+| `ObjectRefArray::IndexOf`·`RemoveReference(handle)` | 그 배열 크기 | 호출마다 | 배열 크기만큼 | API 의미(값으로 찾기). 큰 배열은 위치로 지운다 — World는 16.1처럼 바꿨다 |
+| 이름 색인 rehash | 이름 있는 객체 수 | 색인이 찰 때(분할 상환 O(1)) | 1M 이름에서 한 Create가 rehash 하나를 진다 | 그대로(분할 상환). 잠금 안에서 일어나는 단발 지연은 기록 |
+| `ReferenceObserver::TakeChanges`의 색인 비우기 | 관찰 키 색인 용량 | TakeChanges마다 | 키(패키지 쌍) 수 — 객체 수가 아니다 | 그대로 |
+| `World.cpp` FindLevelRecord | Level 수 | Spawn·파괴마다 | Level 수십 | 그대로 |
+| `World.cpp` 우회 파괴 Component의 소유 Actor 찾기 | Actor × Component | World API 밖에서 파괴된 Component마다(드묾) | — | 그대로(드문 복구 경로) |
+| `World.cpp` ProcessStarts의 준비 안 된 Actor 재검사 | 준비를 기다리는 Actor | 프레임마다 | 그런 Actor 수 | 그대로(`IsReadyToStart` 폴링 API의 의미) |
+| TickScheduler RunPhase | 등록된 틱(꺼진 것 포함) | 프레임마다 | 틱 수 | 그대로(프레임마다 실행할 일). 틱 하나의 비용이 10K에서 약 86ns, 100K에서 약 210ns로 늘어난다(Actor 레코드 해시와 Borrow의 캐시 미스) — 남은 일 |
+| `VerifyClusterLedger`, Debug `Stats()` 재계산 | 모든 슬롯 | Begin·Collect·Stats마다 | — | Debug 전용 검증 |
+| SystemAllocator Deallocate(살아 있는 할당 목록), BinnedAllocator Allocate·Deallocate(원장), PoolAllocator Deallocate(chunk 목록) | 살아 있는 할당 수·chunk 수 | 할당·해제마다 | 1M 생성·회수가 끝나지 않는다(13.10절 이전 측정) | GC-S6(8단계)에서 같은 기준으로 고친다 |
+| GcSoak·클러스터 smoke 모델의 훑기 | 모델 객체 수 | slice·파괴마다 | 객체 수천 | 도구 쪽(정확성 대조용). 그대로 |
+
+### 16.3 검증
+
+- 15·16절 변경을 함께 넣은 상태: Debug Foundation 전체 2,063개, Debug EngineTests 전체 2,189개 통과. 클러스터 smoke(Debug — Begin·Collect마다 장부 재계산, World형은 소속 불변식) World형 seed 41(직렬)·43(worker 4) 1,500 tick, 패키지형 seed 42·44 300 tick 모두 PASS(패키지형 안전장치 해체 372–420건). clang-format·policy 통과.
+- 음성 대조(`p4/negctl4.txt` — Debug Foundation·EngineTests를 고쳐 빌드하고 클러스터·smoke·증분·World·Tick 시험을 돌린 뒤 되돌림):
+
+| 대조 | 바꾼 것 | 잡은 시험 | 증상 |
+|---|---|---|---|
+| A1 | RequestDestroy가 파괴 요청 목록에 넣지 않음 | World 시험 | Debug 검증 Fatal로 중단(우회 파괴 Actor의 Component가 고아 소속으로 남는다) |
+| B1 | Level 배열에서 끝 원소를 옮긴 뒤 그 Actor의 위치를 고치지 않음 | World·Tick 시험 | "Actor record position diverged from its Level array" |
+| C1 | 틱 도달 검사의 방문 번호가 오르지 않음 | Tick 시험 2개 | 사이클이 될 선행 추가를 받아들인다 |
+| E1 | 꺼진 채 시작 큐에서 빠진 Actor를 활성화가 다시 넣지 않음 | `World_DisabledActorDefersStartUntilEnabled` | 활성화 뒤 OnStart·틱이 없다 |
+| T2 | 새 틱 등록을 priority와 관계없이 끝에 붙임 | `Tick_PriorityThenRegistrationOrderWithinPhase` | 순서가 priority를 따르지 않는다 |
+| T3 | 지금 순서가 어기는 선행 추가에도 재구성하지 않음 | `Tick_PrerequisitesOverridePriorityAndCyclesAreRejected` | 선행보다 먼저 실행된다 |
+| T4 | 의존받는 틱의 해제를 재구성 없이 처리(의존 계수 없음) | 같은 시험 | 해제 뒤 풀린 의존의 순서가 옛 순서로 남는다 — 처음 구현에서 이 시험이 실제로 실패해 의존 계수를 더했다 |
