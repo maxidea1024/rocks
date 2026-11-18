@@ -53,9 +53,13 @@ inline constexpr StringView LogFileEncryptSetting = "log.file.encrypt";
 inline constexpr StringView LogFileRecipientKeySetting = "log.file.recipient_key";
 inline constexpr StringView LogConsoleLayoutSetting = "log.console.layout";
 inline constexpr StringView LogFileLayoutSetting = "log.file.layout";
+inline constexpr StringView LogRateLimitsSetting = "log.rate_limits";
 
 // log.levels 문자열의 최대 byte 수다.
 inline constexpr usize MaxLogLevelsBytes = 1024;
+
+// log.rate_limits 문자열의 최대 byte 수다.
+inline constexpr usize MaxLogRateLimitsBytes = 1024;
 
 // log.* 콘솔 설정을 등록한다(모듈 등록 함수에서 명시적으로 — 전역 생성자 없음). 이미 들어온 층
 // 입력은 등록 때 적용된다. 오류: ConfigContext::RegisterConsoleSetting의 오류(이미 등록했으면
@@ -159,6 +163,83 @@ constexpr StringView CheckLogLevelsSyntax(StringView text) noexcept {
     return StringView();
 }
 
+namespace detail {
+
+// 10진 양의 정수를 읽는다(상수 평가용). 숫자가 아니거나 maximum을 넘으면 false다.
+constexpr bool ParseLogSettingCount(StringView text, uint32 maximum, uint32& value) noexcept {
+    if (text.IsEmpty()) {
+        return false;
+    }
+
+    uint64 total = 0;
+    for (usize index = 0; index < text.ByteCount(); ++index) {
+        const char digit = text.Data()[index];
+        if (digit < '0' || digit > '9') {
+            return false;
+        }
+
+        total = total * 10 + static_cast<uint64>(digit - '0');
+        if (total > maximum) {
+            return false;
+        }
+    }
+
+    value = static_cast<uint32>(total);
+    return true;
+}
+
+} // namespace detail
+
+// log.rate_limits 문자열("Graphics=20,Engine.World.Tick=100", 접두사별 초당 기록 수)의 문법만
+// 검사한다(설정 검증용, CVar Validate). 통과하면 빈 view, 아니면 영어 리터럴 이유 문장이다. 순수
+// 함수이고 상수 평가할 수 있다. 항목은 MaxLogRateLimits개까지, 수는 MinLogRateLimitPerSecond–
+// MaxLogRateLimitPerSecond다.
+//
+//   static_assert(CheckLogRateLimitsSyntax("Graphics=20, Engine.World.Tick=100").IsEmpty());
+constexpr StringView CheckLogRateLimitsSyntax(StringView text) noexcept {
+    if (text.ByteCount() > MaxLogRateLimitsBytes) {
+        return "log.rate_limits is longer than MaxLogRateLimitsBytes";
+    }
+
+    usize entries = 0;
+    usize start = 0;
+    while (start <= text.ByteCount()) {
+        usize end = start;
+        while (end < text.ByteCount() && text.Data()[end] != ',') {
+            ++end;
+        }
+
+        const StringView entry =
+            detail::TrimLogSettingText(StringView(text.Data() + start, end - start));
+        start = end + 1;
+        if (entry.IsEmpty()) {
+            continue;
+        }
+
+        StringView prefix;
+        StringView count;
+        if (!detail::SplitLogSettingEntry(entry, prefix, count)) {
+            return "a log.rate_limits entry is not <category prefix>=<records per second>";
+        }
+
+        if (ValidateLogCategoryName(prefix) != LogCategoryNameError::None) {
+            return "a log.rate_limits category prefix is not a valid category name";
+        }
+
+        uint32 value = 0;
+        if (!detail::ParseLogSettingCount(count, MaxLogRateLimitPerSecond, value) ||
+            value < MinLogRateLimitPerSecond) {
+            return "a log.rate_limits value is not a whole number from 1 to 1000000";
+        }
+
+        if (++entries > MaxLogRateLimits) {
+            return "log.rate_limits has more than MaxLogRateLimits entries";
+        }
+    }
+
+    return StringView();
+}
+
 // 설정으로 만든 LogSystem과 sink 묶음이다. 소유 스레드 하나에서 Start·Watch·Stop을 부른다.
 class LogHost {
 public:
@@ -217,6 +298,7 @@ public:
 private:
     static void OnLevelsChanged(void* context, const config::ConfigChange& change) noexcept;
     void ApplyLevels(const config::ConfigContext& settings) noexcept;
+    void ApplyRateLimits(const config::ConfigContext& settings) noexcept;
     void PrepareFileSink(const config::ConfigContext& settings, StringView hostName) noexcept;
 
     // Stop이 출력 스레드를 남길 때 LogSystem과 sink를 옮겨 놓고 파괴하지 않는 묶음이다.
@@ -229,7 +311,7 @@ private:
     UniquePtr<crypto::LogFileSealer> sealer_;
     UniquePtr<FileLogSink> file_;
     config::ConfigContext* watched_ = nullptr;
-    config::ConfigSubscriptionId subscriptions_[2]{};
+    config::ConfigSubscriptionId subscriptions_[3]{};
     uint32 subscriptionCount_ = 0;
     // 마지막으로 적용한 log.levels(지울 접두사를 알려고 복사해 둔다)다.
     char appliedLevels_[MaxLogLevelsBytes]{};

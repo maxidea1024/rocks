@@ -810,6 +810,134 @@ TEST(LogSystemWriterStartFailureFallsBackToEmergencyOutput) {
 }
 
 // 비활성 레벨 판정은 컴파일 타임 하한과 설치된 LogSystem을 함께 본다.
+namespace {
+
+// 시험이 정하는 단조 tick 시계다(초당 TestClockFrequency tick). rate limit 창을 결정적으로 정한다.
+constexpr uint64 TestClockFrequency = 1000;
+uint64 testClockTicks = 0;
+
+uint64 TestClock() noexcept {
+    return platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&testClockTicks);
+}
+
+void SetTestClockSeconds(uint64 seconds) noexcept {
+    platform::AtomicStore<platform::MemoryOrder::Relaxed>(&testClockTicks,
+                                                          seconds * TestClockFrequency);
+}
+
+LogSystemConfig RateLimitConfig() noexcept {
+    LogSystemConfig config = Config(LogMode::Manual);
+    config.clock = &TestClock;
+    config.clockFrequency = TestClockFrequency;
+    return config;
+}
+
+usize CountText(StringView text, StringView needle) noexcept {
+    usize count = 0;
+    for (usize index = 0; index + needle.ByteCount() <= text.ByteCount(); ++index) {
+        if (StringView(text.Data() + index, needle.ByteCount()) == needle) {
+            ++count;
+        }
+    }
+
+    return count;
+}
+
+constexpr uint32 RateLimitThreads = 4;
+constexpr uint32 RecordsPerThread = 50;
+constexpr uint32 SharedRateLimit = 20;
+
+void EmitLimitedRecords(void*) noexcept {
+    for (uint32 index = 0; index < RecordsPerThread; ++index) {
+        Log::Info(LogSystemTests, "shared {Index}", index);
+    }
+}
+
+} // namespace
+
+// rate limit은 창(1초)마다 정확히 상한만 통과시키고, Error는 세지도 버리지도 않는다. 버린 수는
+// 출력 쪽이 접두사마다 1초에 한 번까지 알린다.
+TEST(LogSystemRateLimitPassesExactlyTheLimitPerWindow) {
+    ResetUninstalledDrops();
+    SystemAllocator allocator;
+    SetTestClockSeconds(5);
+    LogSystem logs(allocator, RateLimitConfig());
+    LineSink sink;
+    REQUIRE(logs.AddSink(sink).IsOk());
+    REQUIRE(logs.Start().IsOk());
+    REQUIRE(logs.SetRateLimit("Tests", 3).IsOk());
+    CHECK(logs.SetRateLimit("Tests", 0).Error() == ErrorCode::InvalidArgument);
+    {
+        LogInstallScope installed(logs);
+        for (uint32 index = 0; index < 10; ++index) {
+            Log::Info(LogSystemTests, "limited {Index}", index);
+        }
+
+        Log::Error(LogSystemTests, "error is never limited");
+        CHECK(logs.Pump() == 4);
+        CHECK(CountText(sink.Text(), "limited ") == 3);
+        CHECK(CountText(sink.Text(), "Rate limit dropped 7 records for Tests (limit 3/s)") == 1);
+
+        // 같은 창: 모두 버리고, 같은 초에는 다시 알리지 않는다.
+        for (uint32 index = 0; index < 10; ++index) {
+            Log::Info(LogSystemTests, "limited {Index}", index);
+        }
+
+        Log::Error(LogSystemTests, "error is never limited");
+        CHECK(logs.Pump() == 1);
+        CHECK(CountText(sink.Text(), "Rate limit dropped") == 1);
+
+        // 다음 창: 다시 3건이 통과하고, 지난 알림 뒤로 버린 수를 한 번 알린다.
+        SetTestClockSeconds(6);
+        for (uint32 index = 0; index < 10; ++index) {
+            Log::Info(LogSystemTests, "limited {Index}", index);
+        }
+
+        CHECK(logs.Pump() == 3);
+        CHECK(CountText(sink.Text(), "limited ") == 6);
+        CHECK(CountText(sink.Text(), "Rate limit dropped 17 records for Tests (limit 3/s)") == 1);
+        CHECK(logs.Stats().rateLimited == 24);
+
+        // 지우면 모두 통과한다.
+        REQUIRE(logs.ClearRateLimits().IsOk());
+        for (uint32 index = 0; index < 10; ++index) {
+            Log::Info(LogSystemTests, "limited {Index}", index);
+        }
+
+        CHECK(logs.Pump() == 10);
+    }
+
+    CHECK(CountText(sink.Text(), "error is never limited") == 2);
+}
+
+// 여러 생산자가 같은 칸을 동시에 써도 창마다 통과 수는 정확히 상한이다(창·수를 원자 값 하나로
+// 바꾸므로).
+TEST(LogSystemRateLimitIsExactUnderConcurrentProducers) {
+    ResetUninstalledDrops();
+    SystemAllocator allocator;
+    SetTestClockSeconds(9);
+    LogSystem logs(allocator, RateLimitConfig());
+    LineSink sink;
+    REQUIRE(logs.AddSink(sink).IsOk());
+    REQUIRE(logs.Start().IsOk());
+    REQUIRE(logs.SetRateLimit("Tests.System", SharedRateLimit).IsOk());
+    {
+        LogInstallScope installed(logs);
+        platform::Thread threads[RateLimitThreads];
+        for (platform::Thread& thread : threads) {
+            REQUIRE(thread.Start(&EmitLimitedRecords, nullptr) == platform::ThreadStatus::Success);
+        }
+
+        for (platform::Thread& thread : threads) {
+            Join(thread);
+        }
+
+        CHECK(logs.Pump() == SharedRateLimit);
+    }
+
+    CHECK(logs.Stats().rateLimited == RateLimitThreads * RecordsPerThread - SharedRateLimit);
+}
+
 TEST(LogIsEnabledCombinesCompiledAndRuntimeLevels) {
     SystemAllocator allocator;
     LogSystemConfig config = Config(LogMode::Manual);

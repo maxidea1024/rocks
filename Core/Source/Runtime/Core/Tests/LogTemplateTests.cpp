@@ -3,6 +3,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/StringBuilder.h>
 #include <Core/Time/DateTime.h>
+#include <Platform/Clock.h>
 #include <Platform/Memory.h>
 
 using namespace rocks;
@@ -412,7 +413,9 @@ TEST(LogCaptureRoundTripsNamedValues) {
     CHECK(event.messageTemplate ==
           "{Count} items {Ratio:.2f} {Name} {Flag} {Letter} {Shade} {Point} {Delta}");
     CHECK(event.eventId == HashStringBytes(event.messageTemplate));
-    CHECK(event.monotonicNanoseconds == 111 && event.threadId == 222 && event.frame == 333);
+    CHECK(event.monotonicTicks == 111 && event.threadId == 222 && event.frame == 333);
+    CHECK(event.monotonicNanoseconds ==
+          detail::LogTicksToNanoseconds(111, platform::MonotonicTickFrequency()));
     REQUIRE(event.properties.Size() == 8);
 
     const LogProperty* p = event.properties.Data();

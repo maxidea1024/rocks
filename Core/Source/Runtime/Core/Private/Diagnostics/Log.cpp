@@ -76,10 +76,9 @@ void WriteLogEmergencyText(LogLevel level, StringView category, StringView messa
 void WriteLogEmergency(LogLevel level, const LogCategory& category, const LogCaptureTemplate& text,
                        const FormatArg* args, usize count) noexcept {
     uint8 capture[LogSlotBytes];
-    const auto captured =
-        WriteLogCapture({Span<uint8>(capture), nullptr, platform::MonotonicNanoseconds(),
-                         platform::CurrentThreadId(), 0},
-                        level, category, text, args, count);
+    const auto captured = WriteLogCapture(
+        {Span<uint8>(capture), nullptr, platform::MonotonicTicks(), platform::CurrentThreadId(), 0},
+        level, category, text, args, count);
     if (!captured) {
         WriteLogEmergencyText(level, category.Name(), text.text);
         return;
@@ -161,10 +160,9 @@ void LogAppendLine(FixedStringBuilder& out, const LogCaptureTemplate& text, cons
 
     fatalInProgress = true;
     uint8 capture[LogSlotBytes];
-    const auto captured =
-        WriteLogCapture({Span<uint8>(capture), nullptr, platform::MonotonicNanoseconds(),
-                         platform::CurrentThreadId(), 0},
-                        LogLevel::Fatal, category, text, args, count);
+    const auto captured = WriteLogCapture(
+        {Span<uint8>(capture), nullptr, platform::MonotonicTicks(), platform::CurrentThreadId(), 0},
+        LogLevel::Fatal, category, text, args, count);
     if (captured) {
         const Span<const uint8> record(capture, captured.Value());
         // 1) 비상 출력 2) 설치된 LogSystem에 전달(조건부, 제한 시간) 3) 종료
@@ -190,10 +188,9 @@ void LogAppendLine(FixedStringBuilder& out, const LogCaptureTemplate& text, cons
     WriteLogEmergencyText(LogLevel::Fatal, LogAssert.Name(), text);
     uint8 capture[LogSlotBytes];
     const FormatArg arg = MakeFormatArg(text);
-    const auto captured =
-        WriteLogCapture({Span<uint8>(capture), nullptr, platform::MonotonicNanoseconds(),
-                         platform::CurrentThreadId(), 0},
-                        LogLevel::Fatal, LogAssert, LazyTemplate(SourceLocation()), &arg, 1);
+    const auto captured = WriteLogCapture(
+        {Span<uint8>(capture), nullptr, platform::MonotonicTicks(), platform::CurrentThreadId(), 0},
+        LogLevel::Fatal, LogAssert, LazyTemplate(SourceLocation()), &arg, 1);
     if (captured) {
         LogReadScope scope;
         if (scope.System() != nullptr) {

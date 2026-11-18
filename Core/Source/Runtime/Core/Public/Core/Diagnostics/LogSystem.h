@@ -44,6 +44,13 @@ inline constexpr usize MaxLogSinks = 16;
 // 카테고리 레벨 재정의 표의 칸 수다.
 inline constexpr usize LogLevelOverrideCapacity = 64;
 
+// 카테고리별 rate limit 표의 칸 수다.
+inline constexpr usize MaxLogRateLimits = 16;
+
+// rate limit 하나의 초당 상한 범위다.
+inline constexpr uint32 MinLogRateLimitPerSecond = 1;
+inline constexpr uint32 MaxLogRateLimitPerSecond = 1000000;
+
 // 스레드 이름 표의 칸 수와 이름 하나의 최대 byte 수다.
 inline constexpr usize LogThreadNameCapacity = 64;
 inline constexpr usize MaxLogThreadNameBytes = 63;
@@ -99,6 +106,10 @@ struct LogSystemConfig {
     uint32 fatalFlushTimeoutMilliseconds = DefaultFatalFlushTimeoutMilliseconds;
     // 출력 스레드 스택 크기(0은 플랫폼 기본, platform::ThreadOptions::stackBytes).
     usize writerStackBytes = 0;
+    // 기록 시각을 읽는 단조 tick 시계와 그 초당 tick 수다(시험 주입용). nullptr·0이면
+    // platform::MonotonicTicks·MonotonicTickFrequency다. rate limit 창과 캡처 시각이 이 값을 쓴다.
+    uint64 (*clock)() noexcept = nullptr;
+    uint64 clockFrequency = 0;
 
     // tick이 있는 엔진 호스트용(Async)이다.
     static LogSystemConfig ForEngineHost() noexcept {
@@ -132,6 +143,8 @@ struct LogSystemStats {
     uint64 reentered = 0;
     // 설치 전·해제 뒤 버린 낮은 레벨 기록 수(설치 때 받은 값)
     uint64 droppedBeforeInstall = 0;
+    // 카테고리별 rate limit으로 버린 기록 수(모든 칸 합)
+    uint64 rateLimited = 0;
     // 출력 스레드를 만들지 못해 동기 비상 모드로 낮췄는지
     bool emergencyMode = false;
     // Stop이 멈춘 sink 때문에 출력 스레드를 회수하지 못하고 남겨 두었는지(Stop 설명)
@@ -221,6 +234,17 @@ public:
     // 재정의를 지운다. 없으면 NotFound, sink 콜백 안에서 부르면 Busy다.
     Result<void> ClearLevel(StringView prefix) noexcept;
 
+    // 카테고리 이름 접두사(prefix)의 초당 기록 수 상한을 정한다(점 접두사 최장 일치, ASCII 대소문자
+    // 무시). 1초 고정 창이고 창마다 통과 수가 정확히 perSecond 이하다. Trace–Warning에만 적용하고
+    // Error·Fatal은 세지도 버리지도 않는다. 버린 수는 출력 쪽이 접두사마다 1초에 한 번까지
+    // "Rate limit dropped ..." Info로 알린다.
+    // 실패: 이름 문법·범위(MinLogRateLimitPerSecond–MaxLogRateLimitPerSecond) InvalidArgument, 표가
+    // 가득 차면 CapacityExceeded, 해시가 같은 다른 이름이 있으면 AlreadyExists, sink 콜백 안 Busy.
+    Result<void> SetRateLimit(StringView prefix, uint32 perSecond) noexcept;
+
+    // rate limit을 모두 지운다(설정을 다시 적용할 때). sink 콜백 안에서 부르면 Busy다.
+    Result<void> ClearRateLimits() noexcept;
+
     // level·category의 기록이 지금 활성인지다(컴파일 타임 하한은 Log::IsEnabled가 본다). Fatal은 늘
     // 참이다. 잠금 없이 원자 변수만 읽는다.
     bool IsEnabled(LogLevel level, const LogCategory& category) const noexcept;
@@ -263,6 +287,18 @@ private:
         uint8 level = 0;
     };
 
+    // rate limit 칸이다. 생산자는 원자 변수만 읽는다. state는 (창 번호 << 32) | 창 안 통과 수다.
+    struct RateLimit {
+        uint64 hash = 0;
+        uint32 limit = 0;
+        uint64 state = 0;
+        uint64 dropped = 0;
+        // 출력 쪽만 쓴다: 마지막으로 알린 버림 누계와 알린 초
+        uint64 reported = 0;
+        uint64 noticeSecond = 0;
+        bool noticed = false;
+    };
+
     struct ThreadName {
         uint64 threadId = 0;
         uint8 bytes = 0;
@@ -285,6 +321,12 @@ private:
                 const detail::FormatArg* args, usize count) noexcept;
     void DeliverFatal(Span<const uint8> capture) noexcept;
     void CountDrop(LogLevel level) noexcept;
+    // 기록 시각(주입 시계 또는 platform::MonotonicTicks)이다.
+    uint64 Now() const noexcept;
+    // level·category 기록이 rate limit을 통과하는지다(통과 못 하면 칸의 버림 수를 올린다).
+    bool PassRateLimit(LogLevel level, const LogCategory& category, uint64 now) noexcept;
+    // 칸별 버림 증가분을 Info로 알린다(출력 쪽, sinkMutex_ 안).
+    void ReportRateLimits() noexcept;
     void WarnOnce(uint32& flag, StringView message) noexcept;
     uint8 EffectiveMinimum() const noexcept;
     StringView FindThreadName(uint64 threadId) noexcept;
@@ -330,6 +372,17 @@ private:
     LevelOverride overrides_[LogLevelOverrideCapacity];
     char overrideNames_[LogLevelOverrideCapacity][MaxLogCategoryNameBytes + 1]{};
     uint32 warnedCompiledMinimum_ = 0;
+
+    // rate limit 표(생산자는 원자 변수만 읽는다, 이름은 rateMutex_ 안)
+    platform::Mutex rateMutex_;
+    uint32 rateLimitCount_ = 0;
+    uint32 rateLimitHighWater_ = 0;
+    RateLimit rateLimits_[MaxLogRateLimits];
+    char rateLimitNames_[MaxLogRateLimits][MaxLogCategoryNameBytes + 1]{};
+
+    // 기록 시각 시계(Start 전에 정해진다)
+    uint64 (*clock_)() noexcept = nullptr;
+    uint64 clockFrequency_ = 0;
 
     uint64 frame_ = 0;
 

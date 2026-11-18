@@ -150,6 +150,13 @@ Result<void> RegisterLogSettings(config::ConfigContext& context) noexcept {
                "\"Graphics=warning,Engine.World=debug\". Prefixes match dotted category names "
                "case-insensitively (longest prefix wins). Applied at the next config sync.",
                ConsoleValueType::String, "", 0);
+    const config::ConsoleSettingDefinition rateLimits = Define(
+        LogRateLimitsSetting,
+        "Per-category rate limits as comma-separated prefix=records-per-second pairs, for "
+        "example \"Graphics=20,Engine.World.Tick=100\" (at most 16 entries, 1 to 1000000 each). "
+        "Trace to Warning records above the limit in a one-second window are dropped and counted; "
+        "Error and Fatal are never limited. Applied at the next config sync.",
+        ConsoleValueType::String, "", 0);
     const config::ConsoleSettingDefinition enabled =
         Define(LogFileEnabledSetting, "Write log records to files. Fixed after startup.",
                ConsoleValueType::Bool, "false", startup);
@@ -204,8 +211,8 @@ Result<void> RegisterLogSettings(config::ConfigContext& context) noexcept {
         "default. Fixed after startup.",
         ConsoleValueType::String, "", startup);
     const config::ConsoleSettingDefinition* definitions[] = {
-        &mode,     &level,     &levels,  &enabled,   &directory,     &format,
-        &maxBytes, &retention, &encrypt, &recipient, &consoleLayout, &fileLayout};
+        &mode,     &level,     &levels,  &rateLimits, &enabled,       &directory, &format,
+        &maxBytes, &retention, &encrypt, &recipient,  &consoleLayout, &fileLayout};
     for (const config::ConsoleSettingDefinition* definition : definitions) {
         auto registered = context.RegisterConsoleSetting(*definition);
         if (!registered) {
@@ -380,7 +387,7 @@ Result<void> LogHost::Watch(config::ConfigContext& settings) noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    const StringView names[] = {LogLevelSetting, LogLevelsSetting};
+    const StringView names[] = {LogLevelSetting, LogLevelsSetting, LogRateLimitsSetting};
     for (StringView name : names) {
         auto subscribed = settings.Subscribe(name, &LogHost::OnLevelsChanged, this);
         if (!subscribed) {
@@ -461,11 +468,46 @@ void LogHost::OnLevelsChanged(void* context, const config::ConfigChange&) noexce
     }
 }
 
+void LogHost::ApplyRateLimits(const config::ConfigContext& settings) noexcept {
+    // 앞 설정을 모두 지우고 다시 적용한다. 잘못된 항목은 Warning 뒤 건너뛴다(설정 단계 거부는
+    // CVar 이관 CVR7의 Validate가 CheckLogRateLimitsSyntax로 한다).
+    (void)logs_->ClearRateLimits();
+    const StringView list = TextOf(settings, LogRateLimitsSetting);
+    if (list.ByteCount() > MaxLogRateLimitsBytes) {
+        Log::Warning(LogHostCategory,
+                     "log.rate_limits is longer than {Limit} bytes; rate limits are not applied",
+                     MaxLogRateLimitsBytes);
+        return;
+    }
+
+    ForEachEntry(list, [&](StringView entry) {
+        StringView prefix;
+        StringView count;
+        uint32 perSecond = 0;
+        if (!detail::SplitLogSettingEntry(entry, prefix, count) ||
+            !detail::ParseLogSettingCount(count, MaxLogRateLimitPerSecond, perSecond)) {
+            Log::Warning(LogHostCategory,
+                         "log.rate_limits entry '{Entry}' is not <category prefix>=<records per "
+                         "second>; ignored",
+                         entry);
+            return;
+        }
+
+        if (auto set = logs_->SetRateLimit(prefix, perSecond); !set) {
+            Log::Warning(LogHostCategory,
+                         "log.rate_limits entry '{Entry}' was not applied: {Error}", entry,
+                         ErrorCodeName(set.Error()));
+        }
+    });
+}
+
 void LogHost::ApplyLevels(const config::ConfigContext& settings) noexcept {
     LogLevel level = LogLevel::Info;
     if (TryParseLogLevel(TextOf(settings, LogLevelSetting), level)) {
         (void)logs_->SetGlobalMinimum(level);
     }
+
+    ApplyRateLimits(settings);
 
     // 앞서 적용한 재정의를 지우고 새 목록을 적용한다.
     ForEachEntry(StringView(appliedLevels_, appliedLevelsBytes_), [&](StringView entry) {

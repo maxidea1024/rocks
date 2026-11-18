@@ -314,6 +314,38 @@ TEST(LogHostWritesAPlainFileFromConfig) {
     CHECK(Contains(file, "[Warning][Tests.Host] plain value 7"));
 }
 
+// log.rate_limits 문법 검사도 상수 평가로 쓸 수 있다.
+static_assert(CheckLogRateLimitsSyntax("").IsEmpty());
+static_assert(CheckLogRateLimitsSyntax("Graphics=20, Engine.World.Tick=1000000").IsEmpty());
+static_assert(CheckLogRateLimitsSyntax("Graphics=0") ==
+              "a log.rate_limits value is not a whole number from 1 to 1000000");
+static_assert(CheckLogRateLimitsSyntax("Graphics=1000001") ==
+              "a log.rate_limits value is not a whole number from 1 to 1000000");
+static_assert(CheckLogRateLimitsSyntax("Graphics") ==
+              "a log.rate_limits entry is not <category prefix>=<records per second>");
+static_assert(CheckLogRateLimitsSyntax("A=1,B=1,C=1,D=1,E=1,F=1,G=1,H=1,I=1,J=1,K=1,L=1,M=1,N=1,"
+                                       "O=1,P=1,Q=1") ==
+              "log.rate_limits has more than MaxLogRateLimits entries");
+
+// 설정 log.rate_limits가 LogSystem에 적용되고, 잘못된 항목은 건너뛴다.
+TEST(LogHostAppliesRateLimitsFromConfig) {
+    LogSettingsFixture fixture;
+    fixture.Apply(R"({"log.mode": "sync", "log.rate_limits": "Tests=2, Broken, Audio=0"})");
+    LogHost host(fixture.system);
+    REQUIRE(host.Start(LogSystemConfig::ForEngineHost(), fixture.context.Get(), "Test"));
+    {
+        LogInstallScope installed(host.System());
+        for (uint32 index = 0; index < 5; ++index) {
+            Log::Info(LogHostTests, "rate limited {Index}", index);
+        }
+    }
+
+    // 같은 초 안이면 3건, 초 경계를 넘었으면 그보다 적게 버린다(경계는 실제 시계).
+    CHECK(host.System().Stats().rateLimited >= 1);
+    CHECK(host.System().Stats().rateLimited <= 3);
+    host.Stop();
+}
+
 // log.levels 문법 검사는 상수 평가로 쓸 수 있다(설정 검증용). 이유는 영어 리터럴이다.
 static_assert(CheckLogLevelsSyntax("").IsEmpty());
 static_assert(CheckLogLevelsSyntax("Graphics=Warning, engine.world = debug,").IsEmpty());

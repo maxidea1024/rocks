@@ -196,7 +196,10 @@ LogInstallScope::~LogInstallScope() noexcept {
 
 LogSystem::LogSystem(Allocator& allocator, const LogSystemConfig& config) noexcept
     : allocator_(&allocator), config_(config),
-      globalMinimum_(static_cast<uint8>(config.globalMinimum)) {
+      globalMinimum_(static_cast<uint8>(config.globalMinimum)),
+      clock_(config.clock != nullptr ? config.clock : &platform::MonotonicTicks),
+      clockFrequency_(config.clockFrequency != 0 ? config.clockFrequency
+                                                 : platform::MonotonicTickFrequency()) {
 }
 
 LogSystem::~LogSystem() noexcept {
@@ -521,6 +524,7 @@ usize LogSystem::DrainBatch(usize limit) noexcept {
         // 있다).
         if (count != 0 && platform::AtomicLoad<MemoryOrder::Acquire>(&abandoned_) == 0) {
             ReportDrops();
+            ReportRateLimits();
             FlushSinks();
         }
     }
@@ -538,7 +542,8 @@ void LogSystem::Dispatch(Span<const uint8> capture, const LogBlockProvider* bloc
     const usize messageBytes = config_.renderBytes / 4 * 3;
     LogRenderTarget target{Span<char>(render_, messageBytes),
                            Span<char>(render_ + messageBytes, config_.renderBytes - messageBytes),
-                           Span<LogProperty>(properties_), Span<LogProperty>(context_)};
+                           Span<LogProperty>(properties_), Span<LogProperty>(context_),
+                           clockFrequency_};
     LogEvent event;
     if (!RenderLogCapture(capture, blocks, target, event)) {
         // 손상된 기록은 버린다(이 경로에서 손상은 결함이지만 Fatal로 가지 않는다).
@@ -646,8 +651,7 @@ void LogSystem::ReportDrops() noexcept {
     // 출력 쪽에서 직접 렌더해 넘긴다(큐를 거치지 않는다).
     uint8 capture[LogSlotBytes];
     const auto captured = CaptureLog(
-        {Span<uint8>(capture), nullptr, platform::MonotonicNanoseconds(),
-         platform::CurrentThreadId(), Load(frame_)},
+        {Span<uint8>(capture), nullptr, Now(), platform::CurrentThreadId(), Load(frame_)},
         LogLevel::Warning, LogLogging,
         "{Dropped} log records dropped since the last report ({Trace} Trace, {Debug} Debug, "
         "{Info} Info, {Warning} Warning, {Error} Error)",
@@ -705,6 +709,189 @@ void LogSystem::CountDrop(LogLevel level) noexcept {
     Increment(dropped_[static_cast<usize>(level)]);
 }
 
+uint64 LogSystem::Now() const noexcept {
+    return clock_();
+}
+
+bool LogSystem::PassRateLimit(LogLevel level, const LogCategory& category, uint64 now) noexcept {
+    // Error·Fatal은 원인 기록이라 세지도 버리지도 않는다(설계 L21).
+    if (level >= LogLevel::Error ||
+        platform::AtomicLoad<MemoryOrder::Relaxed>(&rateLimitCount_) == 0) {
+        return true;
+    }
+
+    const uint32 high = platform::AtomicLoad<MemoryOrder::Acquire>(&rateLimitHighWater_);
+    RateLimit* slot = nullptr;
+    uint32 limit = 0;
+    // 긴 접두사부터 표와 대조한다(최장 일치). 해시 → 상한 → 해시 다시 읽기(레벨 표와 같은 순서).
+    for (usize prefix = category.PrefixCount(); slot == nullptr && prefix-- > 0;) {
+        const uint64 hash = category.PrefixHash(prefix);
+        for (uint32 index = 0; index < high; ++index) {
+            RateLimit& candidate = rateLimits_[index];
+            if (platform::AtomicLoad<MemoryOrder::Acquire>(&candidate.hash) != hash) {
+                continue;
+            }
+
+            limit = platform::AtomicLoad<MemoryOrder::Acquire>(&candidate.limit);
+            if (platform::AtomicLoad<MemoryOrder::Acquire>(&candidate.hash) == hash) {
+                slot = &candidate;
+                break;
+            }
+        }
+    }
+
+    if (slot == nullptr) {
+        return true;
+    }
+
+    // 창 번호(초, 하위 32-bit)와 창 안 수를 한 원자 값으로 바꾼다. 그래서 창마다 통과 수가 정확히
+    // 상한 이하다. CAS 재시도는 같은 칸을 동시에 쓰는 생산자 사이에서만 생긴다.
+    constexpr uint32 WindowShift = 32;
+    constexpr uint64 CountMask = NumericLimits<uint32>::Max();
+    const uint64 window = (now / clockFrequency_) & CountMask;
+    uint64 state = platform::AtomicLoad<MemoryOrder::Relaxed>(&slot->state);
+    for (;;) {
+        uint64 desired = 0;
+        if ((state >> WindowShift) != window) {
+            desired = (window << WindowShift) | 1u;
+        } else if ((state & CountMask) < limit) {
+            desired = state + 1;
+        } else {
+            Increment(slot->dropped);
+            return false;
+        }
+
+        if (platform::AtomicCompareExchangeWeak<MemoryOrder::Relaxed, MemoryOrder::Relaxed>(
+                &slot->state, state, desired)) {
+            return true;
+        }
+    }
+}
+
+void LogSystem::ReportRateLimits() noexcept {
+    if (platform::AtomicLoad<MemoryOrder::Relaxed>(&rateLimitCount_) == 0) {
+        return;
+    }
+
+    const uint64 second = Now() / clockFrequency_;
+    const uint32 high = platform::AtomicLoad<MemoryOrder::Acquire>(&rateLimitHighWater_);
+    for (uint32 index = 0; index < high; ++index) {
+        RateLimit& slot = rateLimits_[index];
+        const uint64 dropped = Load(slot.dropped);
+        if (dropped == slot.reported || (slot.noticed && slot.noticeSecond == second)) {
+            continue;
+        }
+
+        char name[MaxLogCategoryNameBytes + 1];
+        usize nameBytes = 0;
+        uint32 limit = 0;
+        {
+            platform::LockGuard lock(rateMutex_);
+            if (platform::AtomicLoad<MemoryOrder::Relaxed>(&slot.hash) == InvalidLogCategoryHash) {
+                slot.reported = dropped;
+                continue;
+            }
+
+            while (rateLimitNames_[index][nameBytes] != '\0') {
+                name[nameBytes] = rateLimitNames_[index][nameBytes];
+                ++nameBytes;
+            }
+
+            limit = platform::AtomicLoad<MemoryOrder::Relaxed>(&slot.limit);
+        }
+
+        const uint64 delta = dropped - slot.reported;
+        slot.reported = dropped;
+        slot.noticeSecond = second;
+        slot.noticed = true;
+        // 출력 쪽에서 직접 렌더해 넘긴다(큐·rate limit을 거치지 않는다).
+        uint8 capture[LogSlotBytes];
+        const auto captured = CaptureLog(
+            {Span<uint8>(capture), nullptr, Now(), platform::CurrentThreadId(), Load(frame_)},
+            LogLevel::Info, LogLogging,
+            "Rate limit dropped {Dropped} records for {Prefix} (limit {Limit}/s)", delta,
+            StringView(name, nameBytes), limit);
+        if (captured) {
+            Dispatch(Span<const uint8>(capture, captured.Value()), nullptr);
+        }
+    }
+}
+
+Result<void> LogSystem::SetRateLimit(StringView prefix, uint32 perSecond) noexcept {
+    if (inSink) {
+        return Result<void>::Failure(ErrorCode::Busy);
+    }
+
+    if (perSecond < MinLogRateLimitPerSecond || perSecond > MaxLogRateLimitPerSecond ||
+        ValidateLogCategoryName(prefix) != LogCategoryNameError::None) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const uint64 hash = HashLogCategoryName(prefix);
+    platform::LockGuard lock(rateMutex_);
+    usize empty = MaxLogRateLimits;
+    for (usize index = 0; index < MaxLogRateLimits; ++index) {
+        const uint64 current = platform::AtomicLoad<MemoryOrder::Relaxed>(&rateLimits_[index].hash);
+        if (current == InvalidLogCategoryHash) {
+            empty = empty == MaxLogRateLimits ? index : empty;
+            continue;
+        }
+
+        if (current != hash) {
+            continue;
+        }
+
+        if (!EqualsIgnoringAsciiCase(StringView(rateLimitNames_[index]), prefix)) {
+            return Result<void>::Failure(ErrorCode::AlreadyExists);
+        }
+
+        platform::AtomicStore<MemoryOrder::SequentiallyConsistent>(&rateLimits_[index].limit,
+                                                                   perSecond);
+        return Result<void>::Success();
+    }
+
+    if (empty == MaxLogRateLimits) {
+        return Result<void>::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    RateLimit& slot = rateLimits_[empty];
+    platform::MemoryCopy(rateLimitNames_[empty], prefix.Data(), prefix.ByteCount());
+    rateLimitNames_[empty][prefix.ByteCount()] = '\0';
+    // 상한·창을 먼저 쓰고 해시를 공개한다(해시를 본 생산자는 상한도 본다).
+    platform::AtomicStore<MemoryOrder::Relaxed>(&slot.state, uint64{0});
+    platform::AtomicStore<MemoryOrder::Release>(&slot.limit, perSecond);
+    platform::AtomicStore<MemoryOrder::SequentiallyConsistent>(&slot.hash, hash);
+    if (empty + 1 > platform::AtomicLoad<MemoryOrder::Relaxed>(&rateLimitHighWater_)) {
+        platform::AtomicStore<MemoryOrder::Release>(&rateLimitHighWater_,
+                                                    static_cast<uint32>(empty + 1));
+    }
+
+    (void)platform::AtomicFetchAdd<MemoryOrder::SequentiallyConsistent>(&rateLimitCount_, 1u);
+    return Result<void>::Success();
+}
+
+Result<void> LogSystem::ClearRateLimits() noexcept {
+    if (inSink) {
+        return Result<void>::Failure(ErrorCode::Busy);
+    }
+
+    platform::LockGuard lock(rateMutex_);
+    for (usize index = 0; index < MaxLogRateLimits; ++index) {
+        if (platform::AtomicLoad<MemoryOrder::Relaxed>(&rateLimits_[index].hash) ==
+            InvalidLogCategoryHash) {
+            continue;
+        }
+
+        // 해시를 먼저 비운다(그 뒤 시작한 호출은 이 칸을 보지 않는다).
+        platform::AtomicStore<MemoryOrder::SequentiallyConsistent>(&rateLimits_[index].hash,
+                                                                   InvalidLogCategoryHash);
+        (void)platform::AtomicFetchSub<MemoryOrder::SequentiallyConsistent>(&rateLimitCount_, 1u);
+        rateLimitNames_[index][0] = '\0';
+    }
+
+    return Result<void>::Success();
+}
+
 void LogSystem::Submit(LogLevel level, const LogCategory& category,
                        const detail::LogCaptureTemplate& text, const detail::FormatArg* args,
                        usize count) noexcept {
@@ -731,6 +918,11 @@ void LogSystem::Submit(LogLevel level, const LogCategory& category,
         return;
     }
 
+    const uint64 now = Now();
+    if (!PassRateLimit(level, category, now)) {
+        return;
+    }
+
     StagingScope staging;
     if (!staging.Available()) {
         // Formatter·Lazy 안에서 다시 들어온 로그가 깊이 1을 넘었다.
@@ -740,8 +932,8 @@ void LogSystem::Submit(LogLevel level, const LogCategory& category,
     }
 
     const bool sync = config_.mode == LogMode::Sync;
-    const LogCaptureTarget target{staging.Buffer(), &blocks_, platform::MonotonicNanoseconds(),
-                                  platform::CurrentThreadId(), Load(frame_)};
+    const LogCaptureTarget target{staging.Buffer(), &blocks_, now, platform::CurrentThreadId(),
+                                  Load(frame_)};
     const auto captured = detail::WriteLogCapture(target, level, category, text, args, count);
     if (!captured) {
         CountDrop(level);
@@ -754,6 +946,7 @@ void LogSystem::Submit(LogLevel level, const LogCategory& category,
             platform::LockGuard lock(sinkMutex_);
             RefreshUtcAnchor();
             Dispatch(capture, &blocks_);
+            ReportRateLimits();
             FlushSinks();
         }
 
@@ -1065,6 +1258,10 @@ LogSystemStats LogSystem::Stats() const noexcept {
     stats.sinkBlocks = Load(sinkBlocks_);
     stats.reentered = Load(reentered_);
     stats.droppedBeforeInstall = Load(droppedBeforeInstall_);
+    for (const RateLimit& slot : rateLimits_) {
+        stats.rateLimited += Load(slot.dropped);
+    }
+
     stats.emergencyMode = platform::AtomicLoad<MemoryOrder::Acquire>(&emergency_) != 0;
     stats.writerAbandoned = writerLeaked_;
     return stats;

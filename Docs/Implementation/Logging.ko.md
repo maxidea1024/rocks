@@ -294,6 +294,7 @@ host.Stop();                                           // WriterAbandoned()면 �
 | `log.mode` | string | `default`(호스트 프리셋) · `async` · `sync` | 시작 뒤 고정 |
 | `log.level` | string | `info` (`trace`…`fatal`) | 실행 중, sync 지점 |
 | `log.levels` | string | `""` — `Graphics=warning,Engine.World=debug` | 실행 중, sync 지점 |
+| `log.rate_limits` | string | `""` — `Graphics=20,Engine.World.Tick=100`(접두사별 초당 기록 수, 최대 16항목) | 실행 중, sync 지점 |
 | `log.file.enabled` | bool | `false` | 시작 뒤 고정 |
 | `log.file.directory` | string | `Saved/Logs` | 시작 뒤 고정 |
 | `log.file.format` | string | `text` · `jsonlines` | 시작 뒤 고정 |
@@ -305,6 +306,8 @@ host.Stop();                                           // WriterAbandoned()면 �
 | `log.file.layout` | string | `""`(기본 콘솔 레이아웃). `log.file.format = jsonlines`이면 쓰이지 않는다(Warning 한 번) | 시작 뒤 고정 |
 
 - 레벨 이름과 `log.levels`의 접두사는 대소문자를 가리지 않는다(`"log.level": "Warning"`도 된다). `log.level`에 모르는 이름을 넣으면 설정 단계에서 거부되고(Config 진단) 앞 값이 남는다. `log.levels`의 잘못된 항목은 Warning을 남기고 건너뛴다.
+- **rate limit:** `log.rate_limits`(또는 `LogSystem::SetRateLimit`)는 접두사별 1초 창마다 정확히 상한만 통과시킨다. Trace–Warning에만 적용하고 Error·Fatal은 세지 않는다. 버린 수는 접두사마다 1초에 한 번까지 `Rate limit dropped {Dropped} records for {Prefix} (limit {Limit}/s)` Info로 알리고 `Stats().rateLimited`에 쌓인다. 잘못된 항목은 적용 때 Warning 후 건너뛴다(`CheckLogRateLimitsSyntax`가 CVR7의 `Validate`).
+- 기록 시각은 `MonotonicTicks`로 캡처하고 출력 때 ns로 바꾼다(`LogEvent::monotonicTicks`·`monotonicNanoseconds`). 시험은 `LogSystemConfig::clock`·`clockFrequency`로 시계를 주입한다.
 - 레이아웃 패턴이 잘못되면 `LogHost::Start`가 위치와 이유를 담은 Error를 한 번 남기고 기본 레이아웃으로 계속한다(예: `log.file.layout is not a valid layout at byte 8: unknown layout token; using the default layout`). 설정 단계에서 거부하는 일은 CVar 이관(CVR7) 뒤다. 문법만 보는 상수 평가 함수 `CheckLogLayoutSyntax`·`CheckLogLevelsSyntax`(통과면 빈 view, 아니면 영어 이유)가 그때 `Validate`로 쓰인다.
 - `log.level`은 늘 값이 있으므로(기본 `info`) 설정 문맥을 주면 호스트 프리셋의 전역 최소를 덮어쓴다. 설정 문맥 없이 `Start`하면 프리셋 그대로다.
 - 멈춘 sink 때문에 `Stop`이 출력 스레드를 남기면 `LogHost`는 LogSystem·sink를 파괴하지 않고 프로세스 끝까지 놓아 두며 `WriterAbandoned()`가 참이 된다(그 뒤 `Start`는 Busy). 호스트는 이때 정리 없이 프로세스를 끝낸다(Sandbox는 `_Exit`). 생성자에 준 allocator도 프로세스 끝까지 살아 있어야 한다.

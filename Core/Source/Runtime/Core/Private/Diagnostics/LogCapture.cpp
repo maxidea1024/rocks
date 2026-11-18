@@ -1,6 +1,7 @@
 #include "../Text/DecimalConversion.h"
 
 #include <Core/Diagnostics/LogCapture.h>
+#include <Platform/Clock.h>
 #include <Platform/Memory.h>
 
 namespace rocks {
@@ -560,7 +561,7 @@ Result<usize> WriteLogCapture(const LogCaptureTarget& target, LogLevel level,
     header.categoryHash = category.NameHash();
     header.eventId = text.eventId;
     header.location = text.location;
-    header.monotonicNanoseconds = target.monotonicNanoseconds;
+    header.monotonicTicks = target.monotonicTicks;
     header.threadId = target.threadId;
     header.frame = target.frame;
     header.contextCount = static_cast<uint8>(contextCount);
@@ -750,7 +751,10 @@ Result<void> RenderLogCapture(Span<const uint8> capture, const LogBlockProvider*
     event.location = header.location;
     event.threadId = header.threadId;
     event.frame = header.frame;
-    event.monotonicNanoseconds = header.monotonicNanoseconds;
+    event.monotonicTicks = header.monotonicTicks;
+    event.monotonicNanoseconds = detail::LogTicksToNanoseconds(
+        header.monotonicTicks,
+        target.tickFrequency != 0 ? target.tickFrequency : platform::MonotonicTickFrequency());
     event.flags = flags;
     return Result<void>::Success();
 }
