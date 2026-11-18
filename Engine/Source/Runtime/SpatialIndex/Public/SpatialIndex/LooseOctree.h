@@ -5,6 +5,7 @@
 #include <Core/Containers/InlineArray.h>
 #include <Core/Containers/SlotArray.h>
 #include <Core/Containers/Span.h>
+#include <Core/Diagnostics/AccessOverlapChecker.h>
 #include <Core/Math/Intersection.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
@@ -31,6 +32,15 @@ inline constexpr uint32 NoNode = LooseOctreeNoNode;
 inline constexpr uint32 OutOfRangeNode = NoNode - 1;
 // 루트는 객체 안에 따로 두고 번호 0을 쓴다. 자식 블록 b의 자식 i는 1 + 8b + i다.
 inline constexpr uint32 RootNode = 0;
+
+// 읽기·변경 단계 위반의 Fatal 메시지다(6.9절). 이동·대입·파괴 메시지는 LooseOctree가 CheckIdle에
+// 넘긴다.
+inline constexpr AccessOverlapMessages LooseOctreeAccessMessages{
+    .writeDuringRead = "LooseOctree mutation while a read scope is open",
+    .readDuringWrite = "LooseOctree read scope opened during a mutation",
+    .writeDuringWrite = "LooseOctree mutation overlaps another mutation",
+    .destroyedWhileOpen = "LooseOctree destroyed while a read scope is open",
+    .unbalancedRelease = "LooseOctree access released without a matching acquire"};
 
 // 노드의 검색용 데이터(16 byte)다. 검색은 이것과 요소 청크만 읽는다.
 struct SearchNode {
@@ -546,9 +556,10 @@ private:
     // 받는다(NextMutationEpoch). 노드 묶음이 모은 뒤의 변경과 다른 트리 상태를 검출한다.
     uint64 mutationEpoch_ = 0;
 
-    // 6.9절 위반 검출용이다. readers_는 열린 읽기 범위 수, writer_는 변경 진행 중 표시(0/1)다.
-    mutable uint32 readers_ = 0;
-    uint32 writer_ = 0;
+    // 6.9절 위반 검출(Core AccessOverlapChecker)이다. 읽기 범위(SpatialReadScope)는 여럿·중첩 허용,
+    // 변경 함수(WriterGuard)는 단독이며 재귀하지 않는다(ReadsOnly). 이동·대입 대상은 새 검출기를
+    // 쓰고 원본은 CheckNoOpenScope로 열린 범위가 없음을 확인한다.
+    AccessOverlapChecker access_{AccessRecursion::ReadsOnly, detail::LooseOctreeAccessMessages};
 };
 
 // 읽기 단계의 검색 창구다. SpatialReadScope에서만 얻으며 그 범위가 살아 있는 동안만 쓴다. 복사해
@@ -810,9 +821,10 @@ private:
     const LooseOctree* tree_;
 };
 
-// 읽기 단계 하나(예: 한 프레임의 질의 작업 전체)를 여는 범위다(6.9절). 생성자는 트리의 reader 수를
-// 올린 뒤 변경 중 표시를 읽고, 변경 중이면 platform::Fatal이다. 소멸자가 reader 수를 내린다. 범위가
-// 살아 있는 동안 트리를 변경·이동·파괴하면 Fatal이다. 검색 호출마다 atomic을 건드리지 않도록 범위는
+// 읽기 단계 하나(예: 한 프레임의 질의 작업 전체)를 여는 범위다(6.9절). 트리의 접근 검출기(Core
+// AccessOverlapChecker)에 읽기 범위를 연다: 변경 중이면 platform::Fatal이고, 범위가 살아 있는 동안
+// 트리를 변경하면 그 변경 또는 이 범위의 종료가 Fatal이다. 이동·파괴도 Fatal이다. 같은 스레드에서
+// 겹쳐 열어도 된다(visitor 안의 재검색). 검색 호출마다 atomic을 건드리지 않도록 범위는
 // 질의 단위가 아니라 읽기 묶음 단위로 둔다. 범위는 복사·이동할 수 없고 만든 스레드에서
 // 끝낸다(reader는 복사해 다른 스레드에 넘길 수 있다).
 class SpatialReadScope {
@@ -832,6 +844,7 @@ public:
 
 private:
     const LooseOctree* tree_;
+    ReadAccessScope access_;
 };
 
 // ---- 템플릿 구현 ----

@@ -1,6 +1,6 @@
 # Rocks 공간 인덱스: 구조 선택과 Loose Octree 설계
 
-기준일: 2026-11-18, 개정 4. 2026-11-17: 길이 단위를 UE 5.8과 같은 cm로 바꿨다(설정값 표·11절 예시·LO02·LO03).
+기준일: 2026-11-18, 개정 5. 2026-11-17: 길이 단위를 UE 5.8과 같은 cm로 바꿨다(설정값 표·11절 예시·LO02·LO03).
 
 이 문서는 엔진의 공간 분할·탐색 구조를 용도별로 무엇으로 할지 검토하고, 그 결과로 `SpatialIndex` 모듈에 둘 범용 영역 질의 구조 `LooseOctree`의 설계를 정한다. OT0–OT2(선행 SIP2·SIP4·SIP6·SIP7·SIP10, 저장 구조·삽입·삭제·박스 검색·분할·이동·루트·유지보수)는 구현했고(2026-11-18, 10절), 그 밖은 설계다. 수치는 모두 측정 전 제안값이다. 상태 표기는 **구현**(코드와 시험이 있음), **설계**(이 문서가 정한 계약, 코드 없음), **결정 필요**(14절), **후속**(범위 밖)이다.
 
@@ -680,9 +680,9 @@ swap-remove 뒤 옮겨진 프록시의 레코드를 슬롯 색인으로 찾아�
 
 **위반 검출.**
 
-- `SpatialReadScope`의 생성자는 트리의 reader 수를 atomic으로 올린 뒤 writer 플래그를 읽고, 서 있으면 `platform::Fatal`이다. 소멸자는 reader 수를 내린다.
-- 변경 함수는 writer 플래그를 세운 뒤 reader 수를 읽고, 0이 아니면 `platform::Fatal`이다. 끝에서 플래그를 내린다. 두 쪽 모두 쓰기 뒤 읽기를 seq_cst로 하므로 겹친 경우 최소 한쪽이 검출한다.
-- writer 플래그가 이미 서 있는 상태의 변경 진입(변경자끼리의 경합)도 `platform::Fatal`이다.
+- 검출은 Core 범용 검출기 `AccessOverlapChecker`(`Core/Diagnostics/AccessOverlapChecker.h`, SIP9)가 한다. 읽기 수와 변경 수를 담은 atomic 단어 하나에 범위 진입·종료마다 seq_cst 읽고-쓰기 연산을 하고, 상대 범위가 열려 있으면 `platform::Fatal`이다. 한 객체에 대한 읽고-쓰기 연산은 하나의 수정 순서를 이루므로, 겹친 두 범위 중 나중에 진입한 쪽의 진입이나 먼저 진입한 쪽의 종료가 반드시 상대를 본다. UE 5.8.4 `FRWAccessDetector`(Core/Public/Misc/MTAccessDetector.h)와 같은 방식이며, UE와 달리 모든 빌드 구성에서 켠다.
+- `SpatialReadScope`는 읽기 범위, 모든 변경 함수는 변경 범위를 연다. LooseOctree는 재귀 정책 `ReadsOnly`(같은 스레드의 읽기 안 읽기만 허용, 변경 재귀 금지)를 쓴다. 변경끼리의 겹침도 `platform::Fatal`이다.
+- 옥트리를 이동·대입·파괴할 때 열린 범위가 있으면 `CheckIdle`로 `platform::Fatal`이다. 검출기 자체는 이동하지 않고, 이동 대상은 새 검출기를 쓴다.
 - 범위는 질의 단위가 아니라 읽기 묶음(예: 한 프레임의 질의 작업 전체) 단위로 두어, 검색 호출마다 atomic을 건드리지 않는다. reader는 여러 스레드에 복사해 넘길 수 있다.
 - 범위와 reader는 저장하거나 yield 경계를 넘겨 들고 있지 않는다. 물리의 `QueryReadScope`(EngineImplementationPlan 16.3절)와 같은 규칙이며 TK06의 read/write 충돌 시험과 같은 방식으로 검사한다.
 
@@ -733,7 +733,7 @@ HEAD `1c0ef8a` 기준이다.
 | SIP6 | `SlotArray`의 색인 접근(`IsOccupiedAt`·`FindAt`·`ElementAt`)과 색인 → 핸들(`HandleAt`), 사전 확보 `TryEnsureCapacity` | CoreDetailedSpec C03 | 구현 | OT1 |
 | SIP7 | 범용 색인 풀 `IndexPool<T>`(평탄 저장소 + uint32 LIFO 재사용 목록, 할당 없는 사전 확보 경로) | CoreDetailedSpec C03 | 구현 | OT1 |
 | SIP8 | 벤치마크 실행 파일 `Programs/SpatialIndexBench`. 공용 하니스가 없으므로 통계(백분위)·JSON 출력을 새로 만든다 | 이 문서 | 설계 | OT5 |
-| SIP9 | 읽기·변경 단계 검증 도구(`SpatialReadScope`의 일반화) | 이 문서, EngineImplementationPlan 8.4 | 설계 | OT4 |
+| SIP9 | 읽기·변경 접근 겹침 검출기 `AccessOverlapChecker`(재귀 정책 `ReadsOnly`·`NestedWrites`·`NestedWritesAndReads`, 범위 객체 `ReadAccessScope`·`WriteAccessScope`) | 이 문서, EngineImplementationPlan 8.4 | 구현 | OT4 |
 | SIP10 | `SpatialIndex` 모듈(`Engine/Source/Runtime/SpatialIndex`, Build.cs, EngineTests 등록) | EngineImplementationPlan 3.1·3.2 | 구현 | OT1 |
 
 기반이 부족한 곳은 옥트리 안에서 우회하지 않고 해당 기반을 보강한다. SIP1–SIP7은 Core 쪽 작업이며 옥트리 전용 사본을 만들지 않는다.
@@ -881,7 +881,7 @@ HEAD `1c0ef8a` 기준이다.
 | OT1 | 저장 구조, 삽입, 삭제, `Validate()`, 박스 검색 — **구현**(2026-11-18) | OT0 | LO01(박스)·LO03·LO04·LO10 |
 | OT2 | 분할 평가·보류, 경계 갱신, 루트 확장·축소, 유지보수 — **구현**(2026-11-18) | OT1 | LO05–LO09 |
 | OT3 | 구·프러스텀·ray·최근접, 버퍼·존재·개수 질의, 노드 묶음 — **구현**(2026-11-18) | OT2, SIP1 | LO01 전체·LO02·LO12·LO13·LO14 |
-| OT4 | 읽기·변경 단계 검증 | OT3, SIP9 | LO11·LO15 |
+| OT4 | 읽기·변경 단계 검증 — **구현**(2026-11-18) | OT3, SIP9 | LO11·LO15 |
 | OT5 | `SpatialIndexBench`, 비교군 A·B·C, 단계별 변형 측정 | OT4, SIP3, SIP8 | 9절 원시 결과와 보고서 |
 | OT6 | 병렬 검색·노드 묶음 수집 측정, 초기값 확정, 비교군 E 참고 측정 | OT5, SIP5 | 9.6절 판정 |
 
@@ -999,3 +999,4 @@ octree.RunMaintenance(MaintenanceBudget::Operations(256));
 - 개정 2(2026-11-18): 사용자 결정으로 공간 질의 전략을 UE 5.8.4와 같게 정했다(EngineImplementationPlan 개정 1.13). 결정 필요 1·3을 결정됨으로 바꾸고, 5.1절 소비자 표를 다시 썼다. 3.5절(UE 게임플레이 공간 질의 근거), 그림자 caster 수집용 노드 묶음 API(6.1절), 9.6절 판정 기준(평면 전수 대체 규모, 노드 묶음 확장 효율)을 추가했다. 비교군 E는 참고 측정으로 내렸다.
 - 개정 3(2026-11-18): OT0–OT2 구현 결과를 반영했다. 노드 번호와 레코드 슬롯 표현(6.3절), 분리 level 계산과 체인 중간 노드의 잔류(6.4절), 경계 갱신 중 분할 평가 지연과 보류 기준 수 갱신(6.4절), 루트 수용 판정의 격자 범위 조건(6.5절), 예산 0·축소 요청·마감 포화(6.6절), 할당 계수 통계와 `Validate()` 보고 반환(6.10절), 선행 작업 상태(7절), 시험 실행 방법(8절)을 고쳤다.
 - 개정 4(2026-11-18): OT3 구현 결과를 반영했다. 구·프러스텀·ray의 프록시 판정을 double Core 술어로 바꾸고 단조성 근거와 Core 술어의 접촉 한계를 적었다(6.8절). 최근접 전제와 거리 처리, 노드 묶음 필드·유효성(6.1절), LO02 기준을 고쳤고 δ(ℓ) 미확인 항목을 지웠다. SpatialIndex 모듈을 엔진 계층으로 옮겼다(6.1절).
+- 개정 5(2026-11-18): OT4 구현을 반영했다. 위반 검출을 Core `AccessOverlapChecker`(SIP9, UE `FRWAccessDetector` 대응, 단일 atomic 단어의 읽고-쓰기 연산, 진입·종료 양쪽 검사)로 옮기고 6.9절을 고쳤다.

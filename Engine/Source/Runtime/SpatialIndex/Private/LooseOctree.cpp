@@ -241,23 +241,18 @@ void LooseOctree::NotePeaks() noexcept {
 }
 
 void LooseOctree::CheckNoOpenScope(const char* message) const noexcept {
-    if (platform::AtomicLoad(&readers_) != 0 || platform::AtomicLoad(&writer_) != 0) {
-        platform::Fatal(message);
-    }
+    access_.CheckIdle(message);
 }
 
 // ---- 읽기 범위 ----
 
-SpatialReadScope::SpatialReadScope(const LooseOctree& tree) noexcept : tree_(&tree) {
-    platform::AtomicFetchAdd(&tree.readers_, 1u);
-    if (platform::AtomicLoad(&tree.writer_) != 0) {
-        platform::Fatal("LooseOctree read scope opened during a mutation");
-    }
+// 읽기 범위를 여는 것은 Core 검출기의 읽기 진입이다. 변경 중이면 "read scope opened during a
+// mutation"으로, 범위가 열린 동안 변경이 시작되면 그 변경 쪽 또는 이 범위의 종료가 Fatal을 낸다.
+SpatialReadScope::SpatialReadScope(const LooseOctree& tree) noexcept
+    : tree_(&tree), access_(tree.access_) {
 }
 
-SpatialReadScope::~SpatialReadScope() noexcept {
-    platform::AtomicFetchSub(&tree_->readers_, 1u);
-}
+SpatialReadScope::~SpatialReadScope() noexcept = default;
 
 // ---- 노드 접근·격자 ----
 
