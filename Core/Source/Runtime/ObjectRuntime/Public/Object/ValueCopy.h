@@ -13,7 +13,8 @@
 // 않는다) 게시 때 무할당으로 옮긴다(SwapValues).
 //
 // 복사 규칙(ValueCopy<T>):
-//   - trivially copyable(단일 값·Guid·AssetId·Digest·Name 토큰·WeakRef·ClassRef·enum)은 대입이다.
+//   - trivially copyable(단일 값·Guid·AssetId·Digest·Name 토큰·WeakObjectRef·ClassRef·enum)은
+//   대입이다.
 //   - String·SoftObjectRef는 TryClone이다.
 //   - Array·OrderedMap·OrderedSet·Optional·정적 배열(E[N])은 원소·키·값마다 복사한다.
 //   - InstancedStruct는 TryClone이다(리플렉션 B9j).

@@ -118,9 +118,10 @@ struct RequiresWorldOnlyOwnerOf<T, decltype(void(T::RocksRequiresWorldOnlyOwner)
 } // namespace detail
 
 // T(배열이면 원소)가 ObjectRef·RootRef·ObjectRefArray·StructRefArray·ObjectRefMap이거나 그것을
-// 가리키는 포인터· 참조면 참이다. WeakRef와 ObjectHandle은 추적하지 않는 참조라 거짓이다. 직접
-// 타입만 보고 대상 타입의 완전성에 기대지 않는다 — Object 파생 타입을 가리키는 raw 포인터·참조,
-// 멤버를 값으로 담는 타입의 필드·템플릿 인자는 MetaCompiler(탐침과 AST 재귀 검사, RMC2205)가 본다.
+// 가리키는 포인터· 참조면 참이다. WeakObjectRef와 ObjectHandle은 추적하지 않는 참조라 거짓이다.
+// 직접 타입만 보고 대상 타입의 완전성에 기대지 않는다 — Object 파생 타입을 가리키는 raw
+// 포인터·참조, 멤버를 값으로 담는 타입의 필드·템플릿 인자는 MetaCompiler(탐침과 AST 재귀 검사,
+// RMC2205)가 본다.
 template <class T>
 inline constexpr bool IsNativeStrongReference =
     detail::NativeStrongReference<RemoveCvT<RemoveAllExtentsT<T>>>::value;

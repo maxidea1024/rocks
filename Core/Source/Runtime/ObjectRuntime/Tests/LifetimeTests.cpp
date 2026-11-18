@@ -57,7 +57,7 @@ TEST(ObjectRootCloneAndWeakPromotionPreserveStorage) {
         auto root = registry.NewObject<LifetimeProbe>(access, LifetimeType);
         REQUIRE(root.IsOk());
         const ObjectHandle handle = root.Value().Handle();
-        WeakRef<LifetimeProbe> weak(handle);
+        WeakObjectRef<LifetimeProbe> weak(handle);
         auto clone = root.Value().Clone();
         REQUIRE(clone.IsOk());
         root.Value().Reset();

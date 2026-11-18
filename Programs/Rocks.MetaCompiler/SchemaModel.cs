@@ -327,7 +327,7 @@ internal static class StaticArrayRules
     // RMC2307 진단의 공통 안내다.
     public const string Hint =
         "A reflected static array T name[N] holds N (1..65535) scalars, Guid, String, Name, AssetId, Sha256Digest, ROCKS_ENUM enums, ROCKS_STRUCT structs or " +
-        "ObjectRef/WeakRef/SoftObjectRef/ClassRef elements; multi-dimensional arrays, containers, Optional and cv-qualified elements are not reflected " +
+        "ObjectRef/WeakObjectRef/SoftObjectRef/ClassRef elements; multi-dimensional arrays, containers, Optional and cv-qualified elements are not reflected " +
         "(wrap an inner array in a ROCKS_STRUCT element, or use rocks::Array<T> for a variable count).";
 }
 

@@ -80,8 +80,8 @@ TEST(MapGraph_RoundTripKeyKindsAndInsertionOrder) {
                 versioned.value = 6;
                 versioned.extra = 7;
                 Put(value.versioned, uint32{1}, versioned);
-                Put(value.weak, uint32{1}, WeakRef<MapHolder>(holder.Handle()));
-                Put(value.weak, uint32{2}, WeakRef<MapHolder>());
+                Put(value.weak, uint32{1}, WeakObjectRef<MapHolder>(holder.Handle()));
+                Put(value.weak, uint32{2}, WeakObjectRef<MapHolder>());
                 SoftObjectRef<> required(objects);
                 REQUIRE(required.TryAssign(AssetId{Guid{0x4d4150, 4}}, ""));
                 Put(value.required, uint32{8}, Move(required));

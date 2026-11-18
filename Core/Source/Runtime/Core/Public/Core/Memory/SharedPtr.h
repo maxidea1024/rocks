@@ -188,7 +188,8 @@ void SharedAdoptedStorage<T, Deleter>::Destroy(SharedControlBlock* control) noex
 // - 서로 다른 SharedPtr/WeakPtr 인스턴스는 같은 객체를 가리켜도 여러 스레드에서 동시에 복사·
 //   소멸·Lock할 수 있다. 같은 인스턴스를 동시에 변경하는 것과 객체 자체의 동기화는 호출자 책임이다.
 // - 마지막 SharedPtr를 놓는 스레드에서 객체 소멸자가 실행된다. 강한 순환 참조는 회수되지 않으므로
-//   역참조에는 WeakPtr를 쓴다. GC 객체 참조(RootRef/WeakRef)가 아니며 Object 시스템에 쓰지 않는다.
+//   역참조에는 WeakPtr를 쓴다. GC 객체 참조(RootRef/WeakObjectRef)가 아니며 Object 시스템에 쓰지
+//   않는다.
 // - 파생 → 기반 변환은 원래 타입의 소멸 함수를 유지하므로 기반 타입에 가상 소멸자가 없어도 된다.
 // - 빈 포인터 역참조는 Fatal이다. UseCount는 진단용 순간 값이며 동기화 판단에 쓰지 않는다.
 template <typename T>

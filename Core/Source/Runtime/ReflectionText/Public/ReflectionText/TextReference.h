@@ -12,7 +12,7 @@ namespace rocks::reflection_text {
 enum class TextReferenceKind : uint8 {
     // 강한 참조(ObjectRef 필드·ObjectRefArray·ObjectRefMap 값) — 같은 Registry의 살아 있는 handle.
     Hard,
-    // weak 참조(WeakRef) — 같은 Registry의 살아 있는 handle.
+    // weak 참조(WeakObjectRef) — 같은 Registry의 살아 있는 handle.
     Weak,
     // 소프트 참조(SoftObjectRef) — AssetId와 객체 경로만(로드하지 않는다 — AS 6.2절).
     Soft

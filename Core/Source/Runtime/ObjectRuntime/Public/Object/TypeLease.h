@@ -77,7 +77,7 @@ public:
     //   }
     bool ContainsName() const noexcept;
 
-    // weak 참조 값(ValueKind::WeakObjectReference — 단일 멤버·Array<WeakRef> 멤버)을
+    // weak 참조 값(ValueKind::WeakObjectReference — 단일 멤버·Array<WeakObjectRef> 멤버)을
     // 담는지다(리플렉션 B9d1). 등록이 계산한 형질이며 중첩 struct 멤버와 struct 원소 배열 멤버의
     // 원소 struct에서 전파되고 Transient 멤버도 센다. weak는 강한 참조가 아니므로
     // ContainsStrongReference와 무관하다(Array<S>·SubstituteStruct 대상 그대로다). 이것이 참인

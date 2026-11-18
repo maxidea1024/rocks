@@ -25,7 +25,7 @@ static_assert(IsNativeStrongReference<ObjectRef<FixedOwner>[4]>);
 static_assert(detail::NativeStrongReference<ObjectRef<FixedOwner>[4]>::value);
 static_assert(detail::NativeStrongReference<ObjectRef<FixedOwner> (*)[4]>::value);
 static_assert(detail::NativeStrongReference<ObjectRef<FixedOwner>[2][3]>::value);
-static_assert(!detail::NativeStrongReference<WeakRef<FixedOwner>[4]>::value);
+static_assert(!detail::NativeStrongReference<WeakObjectRef<FixedOwner>[4]>::value);
 static_assert(!detail::NativeStrongReference<uint32[4]>::value);
 static_assert(detail::RegistryContainer<ObjectRefArray<FixedOwner>[2]>::value);
 static_assert(!detail::RegistryContainer<ObjectRef<FixedOwner>[2]>::value);
@@ -102,7 +102,7 @@ Result<RootRef<Object>> MakeGraph(ObjectRegistry& objects, NamePool& names) noex
     value.precise[1] = 1.0e300;
     value.guids[0] = Guid{1, 2};
     value.names[0] = socket.Value();
-    value.watchers[0] = WeakRef<FixedOwner>(first.Value());
+    value.watchers[0] = WeakObjectRef<FixedOwner>(first.Value());
     value.kinds[0] = ClassRef<FixedOwner>(TypeIdOf<FixedOwner>());
     value.modes[0] = FixedMode::Second;
     value.points[1].x = 7;
@@ -309,11 +309,11 @@ TEST(StaticArrayGraph_ModuleRegistrationDescribesStaticArrays) {
           pair.maxElements == 2);
 }
 
-// 원소 종류마다(정수 8종·Bool·실수·Guid·String·Name·ObjectRef·WeakRef·ClassRef·enum·값 struct(정적
-// 배열 멤버 포함)·참조 struct·AssetId·Soft·Digest) 값이 그대로 돌아오고 다른 Registry에서 다시
-// 저장한 byte가 같다. 생성 Trace가 ObjectRef 원소(refs[1])와 참조 struct 원소(links[1].target)를
-// 방문해 그 원소로만 닿는 객체가 수집에서 살고, 자기 참조·객체 사이 순환은 root를 놓으면 모두
-// 회수된다.
+// 원소 종류마다(정수 8종·Bool·실수·Guid·String·Name·ObjectRef·WeakObjectRef·ClassRef·enum·값
+// struct(정적 배열 멤버 포함)·참조 struct·AssetId·Soft·Digest) 값이 그대로 돌아오고 다른
+// Registry에서 다시 저장한 byte가 같다. 생성 Trace가 ObjectRef 원소(refs[1])와 참조 struct
+// 원소(links[1].target)를 방문해 그 원소로만 닿는 객체가 수집에서 살고, 자기 참조·객체 사이 순환은
+// root를 놓으면 모두 회수된다.
 TEST(StaticArrayGraph_RoundTripEveryElementKindTraceAndCycle) {
     SystemAllocator allocator;
     Fixture fixture(allocator);

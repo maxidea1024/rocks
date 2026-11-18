@@ -47,6 +47,20 @@ void YieldThread() noexcept {
     SwitchToThread();
 }
 
+ThreadStackRange CurrentThreadStackRange() noexcept {
+    ULONG_PTR low = 0;
+    ULONG_PTR high = 0;
+    GetCurrentThreadStackLimits(&low, &high);
+    if (low >= high) {
+        Fatal("GetCurrentThreadStackLimits returned an empty range");
+    }
+
+    ThreadStackRange range;
+    range.low = static_cast<uptr>(low);
+    range.high = static_cast<uptr>(high);
+    return range;
+}
+
 usize CopyCurrentThreadName(char* buffer, usize capacity) noexcept {
     if (buffer == nullptr || capacity == 0) {
         return 0;

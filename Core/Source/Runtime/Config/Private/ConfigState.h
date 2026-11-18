@@ -109,6 +109,9 @@ struct ConsoleSettingState {
     String text;
     // 독립 설정의 출처 스택(입력 순번 — 약한 것부터).
     Array<uint64> sources;
+    // CVar 핸들로 등록한 설정이면 그 핸들의 상수 정의다(범위·보정·Validate 검사와 멱등 등록 판정 —
+    // Docs/Design/CVarSystem.ko.md 5절). 핸들은 정적 저장 기간이라 문맥보다 오래 산다.
+    const cvar::detail::VarDefinition* definition = nullptr;
 };
 
 // 콘솔 명령 하나다. args.create가 있으면 인자 struct 스키마가 있다.
@@ -324,11 +327,16 @@ Result<void> RecomputeConsoleSetting(ConfigState& state, const ConsoleSettingSta
                                      Span<ConfigEntry* const> order, bool report, FieldValue& value,
                                      String& text, Array<uint64>& sources) noexcept;
 
-// 콘솔 값 하나를 검사한다(층 허용·형식·범위·허용 값). 받으면 out에 값을 쓰고 빈 view를, 거부하면
-// code·사유를 돌려준다. 오류: 할당 실패.
+// 콘솔 값 하나를 검사한다(층 허용·형식·범위·허용 값, CVar 핸들 설정은 정의의 범위·보정·Validate).
+// 받으면 out에 값을 쓰고 빈 view를, 거부하면 code·사유를 돌려준다. `Clamp()` CVar의 범위 밖 값을
+// 보정해 받았으면 빈 view에 code가 Clamped다(호출자가 Note 진단을 남긴다). 오류: 할당 실패.
 Result<StringView> CheckConsoleValue(ConfigState& state, const ConsoleSettingState& setting,
                                      ConfigLayer layer, StringView text, FieldValue& out,
                                      ConfigDiagnosticCode& code) noexcept;
+
+// 새로 만든 독립 콘솔 설정(setting — 아직 state.settings에 넣지 않았다)에 이미 들어온 층 입력(대기
+// 값)을 적용 순서로 넘긴다. 거부한 값은 진단을 남기고 건너뛴다. 오류: 할당 실패.
+Result<void> AdoptPendingValues(ConfigState& state, ConsoleSettingState& setting) noexcept;
 
 // 값의 콘솔 표기(리플렉션 명령행 단일 값)를 out에 쓴다.
 Result<void> FormatConsoleValue(ConfigState& state, const ConsoleSettingState& setting,
