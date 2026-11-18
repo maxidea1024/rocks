@@ -1,6 +1,6 @@
 # 로깅 시스템 설계
 
-기준일: 2026-11-18, 개정 8. 엔진 전반에서 쓰는 **로그**(사람이 읽는 사건 기록)의 호출 API, 카테고리·레벨 필터, 비동기 기록 경로, 출력 형식, 장애 격리, 엔진 적용 범위를 정한다.
+기준일: 2026-11-18, 개정 9. 엔진 전반에서 쓰는 **로그**(사람이 읽는 사건 기록)의 호출 API, 카테고리·레벨 필터, 비동기 기록 경로, 출력 형식, 장애 격리, 엔진 적용 범위를 정한다.
 
 요구는 다음 문서에서 온다.
 - [엔진 구현 계획](EngineImplementationPlan.ko.md) 29.4절(필수 로깅·프로파일러: level/category, UTC+monotonic, rate limit·중복 집계, compile/runtime level, error/fatal 비상 경로, 임계 구간에서 file IO·heap·lock wait 금지)
@@ -17,10 +17,14 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론)의 현재 기본 경로다. 경�
 | `SL` | `Public/Logging/StructuredLog.h` |
 | `OR` | `Private/Misc/OutputDeviceRedirector.cpp` |
 | `ORH` | `Public/Misc/OutputDeviceRedirector.h` |
+| `SLC` | `Private/Logging/StructuredLog.cpp` |
+| `LT` | `Private/Logging/LogTrace.cpp` |
+| `ODF` | `Private/Misc/OutputDeviceFile.cpp` |
+| `FH` | `Private/Misc/FileHelper.cpp` |
 
 UE의 매크로 중심 API(`UE_LOG`, `DECLARE_LOG_CATEGORY_*`)는 따르지 않는다. 일반 로그는 함수 호출로 쓴다. 메시지 템플릿과 출력 레이아웃은 Serilog·log4j의 개념을 Rocks 이름으로 가져온다. UE 이름은 대응표(4절)에만 둔다.
 
-상태: **설계 확정**(결정 L1–L13, 17절). 단계는 14절이다. 다른 세션과의 순서는 15절이다.
+상태: LG0–LG10 **구현 완료**(결정 L1–L13). 후속 LG11–LG19는 **설계 확정**(개정 9, 결정 L14–L27, 14.1절, 다른 세션 합의가 필요한 결정은 17절에 표시)이다. 단계는 14절, 다른 세션과의 순서는 15절, 결정은 17절이다.
 
 ## 1. 결정 요약
 
@@ -167,7 +171,7 @@ inline constexpr LogCategory LogGraphicsD3D12{"Graphics.D3D12"};
 - consteval 안에서는 `static_assert`로 문자열을 낼 수 없다. 그래서 오류마다 영어 이름의 constexpr 아닌 함수(예: `LogTemplateError_ArgumentCountMismatch()`)를 부르고, 컴파일러 진단에 그 이름이 나오게 한다. 인자 수처럼 타입만으로 판정할 수 있는 것은 `static_assert`의 영어 메시지로도 낸다.
 - **동적 템플릿:** `RuntimeTemplate{text}`로 명시한다. 검증은 런타임, 문자열은 기록에 복사한다. 오류는 10절대로 처리한다.
 - `EventId`는 리터럴 템플릿의 `consteval` 64-bit 해시다(런타임 템플릿은 런타임 해시). 반복 집계·도구 묶음에 쓴다.
-- 구조체 펼치기(Serilog `{@Obj}`)는 후속이다(16절).
+- 구조체 펼치기(Serilog `{@Obj}`)는 LG16이다(14.1.6절). 사용자 `Formatter`의 spec 컴파일 타임 검증은 LG11이다(14.1.1절).
 
 ### 6.4 호출 위치
 
@@ -494,8 +498,217 @@ Result<UniquePtr<Device>> CreateD3D12Device(Allocator&, const DeviceDesc&, Devic
 | LG8 | 호스트: Sandbox 헤드리스 `--engine`(Async, L1), Commandlet 등 명령줄 도구(Sync). 사용 가이드 `Docs/Implementation/Logging.ko.md`, FoundationStatus·UE-C22·D01 갱신 | LG6, LG7 | Sandbox 실행으로 시작·종료·실패 원인 추적 확인 |
 | LG9 | 설정 `log.mode`·`log.level`·`log.levels`·`log.file.*` 등록·읽기(`LogHost` 모듈, 9.2절) | LG8, LG10, ConfigSystem CF2 | 설정 파일 값으로 모드·레벨·파일 기록이 바뀌고, 레벨은 sync 지점에서만 바뀌며, 시작 뒤 고정 항목의 실행 중 변경은 거부 |
 | LG10 | `FileLogSink`(실행별 파일·크기 회전·보관 상한), `LogFileCipher` 인터페이스(Core), `crypto::LogFileSealer`(Crypto: KEM 캡슐화 + SecretStream 묶음 봉인), Commandlet `log keygen`·`log decode` | LG4 | 평문·암호 파일 왕복, `Final` 없는 파일 부분 복호·경고, 변조 검출, 키 준비 실패 시 평문으로 내려가지 않음, 무할당(파일 열기 뒤) |
+| LG11 | 사용자 `Formatter<T>` spec 컴파일 타임 검증 규약(14.1.1, L20) | LG2 | 잘못된 spec 컴파일 실패 시험, 검사 함수 없는 Formatter 통과, 런타임 템플릿 같은 판정, 무할당 시험 불변 |
+| LG12 | Config 설정 검증 hook, `log.console.layout`·`log.file.layout`, `log.levels` 설정 단계 검증, 가이드 갱신(14.1.2, L17·L18) | LG9, **15.1절 Config 조율** | 잘못된 값이 진단과 함께 그 층 입력째 거부(앞 값 유지), 적용 실패는 Warning 후 건너뜀, 레이아웃 설정별 결정적 출력, 시작 뒤 변경 거부, 무할당 |
+| LG13 | 카테고리별 rate limit `log.rate_limits`, 캡처 시각을 tick으로·시계 주입(14.1.3, L21) | LG12 | 주입 시계로 창별 통과 수가 정확히 상한(단일·다중 생산자), Error·Fatal 제외, 알림 1회, 16칸 초과 설정 거부, 무할당 |
+| LG14 | 상관 id: Core 스택(`CorrelationScope`, 확장 칸, 관찰자 hook), 기록 캡처·`{Correlation}`·JSON `corr`, task·전용 lane 상시 전파(14.1.4, L14·L15) | LG4, **15.1절 trace 조율** | 중첩·넘침·스레드 격리, 범위가 끝난 뒤 렌더해도 같은 값(Manual), 공개 `CorrelationScope`로 쌓은 값이 로그·trace에 같게 실림, trace 세션 없이 task 전파, trace 기존 시험 통과, 무할당, 생산자 비용 측정 |
+| LG15 | trace `log` 채널: `TraceLogSink`, `Log.MessageSpec`·`Log.Message`, TraceAnalysis·`trace-report`, 호스트 연결(14.1.5, L16) | LG13, LG14, **15.1절 trace 조율** | 기록 → 분석 왕복(spec 1회, 순서·스레드·tick·상관 id 일치), 채널 꺼짐 기록 0, 중복 표 넘침·세션 교체, 무할당(초기화 뒤), Sandbox trace 산출물 |
+| LG16 | 구조체 펼치기 `{@Obj}`: `LogStructure<T>` 확장점, 캡처 시점 복사, ObjectRuntime 일반 특수화·생성 필드 방문 함수(14.1.6, L19) | LG11, **15.1절 리플렉션 조율** | 캡처 뒤 원본 변경·파괴에도 출력 불변, 상한 잘림, 텍스트·JSON 결정적 출력, 생성 struct 왕복, 특수화 없는 타입 컴파일 실패, 무할당 |
+| LG17 | 시간 기준 회전 `log.file.max_age_minutes`, 압축 `log.file.compress`(묶음별 zstd frame), 봉인과의 순서(14.1.7, L22·L23) | LG10, **15.1절 Compression 조율(고정 작업 공간 문맥)** | `LogEvent`를 sink에 직접 넣어 회전 결정적 시험, 압축 왕복·잘린 끝 frame 복원, 봉인+압축 왕복·변조 검출, 보관 정리, 무할당(Open 뒤) |
+| LG18 | 종료 경로의 마지막 로그: `platform::SetTerminationHook`, `LogSystem::FlushForTermination`, OS 예외·치명 신호 최소 처리기(14.1.8, L24·L25) | LG3, **15.1절 PlatformBase 조율** | 자식 프로세스 시험으로 `platform::Fatal`·접근 위반·stack overflow·SIGSEGV 직전 Async 기록 보존, 앞 처리기 연쇄, 멈춘 sink에서도 종료, 대화상자 억제 |
+| LG19 | Commandlet `log view`(거르기·여러 파일·평문·zst·봉인)(14.1.9, L26) | LG14, LG17 | 고정 입력 파일의 필터 결과 결정적 비교(Rocks.Commandlet.Tests) |
 
 검증: 커밋마다 Debug 빌드·format·변경 부분 시험. 처음에는 전체 체인(Asan·TSan)을 LG3과 LG8 끝에 한 번씩 돌리기로 했으나, 2026-11-17 저장소 검증 기준이 바뀌어(Asan은 필요할 때만) 돌리지 않았다. 메인 트리 구현은 에이전트 하나가 순서대로 하고 커밋은 경로를 지정한다.
+
+LG11–LG19의 검증도 같다: Debug 빌드, format, policy, 바뀐 부분 시험. 무할당 시험은 호출 수를 세는 할당기로 Start(또는 sink 초기화) 뒤 0회를 단언한다. 시간에 기대는 sleep 시험은 쓰지 않고 시각은 주입한다.
+
+### 14.1 후속 단계 설계(개정 9, LG11–LG19)
+
+개정 8의 16절 후속 항목을 단계로 설계했다. 순서는 의존 관계다.
+- LG11·LG12·LG13은 Core·LogHost와 Config hook 하나로 끝난다.
+- LG14·LG15는 trace 세션, LG16은 리플렉션 세션, LG17은 Compression 소유 세션, LG18은 PlatformBase와 맞춘다(15.1절).
+- WorkerScheduler 진단은 선행 조건이 갖춰지지 않아 단계로 두지 않았다(16절).
+- **LG18(종료 경로 flush, L24·L25)과 LG19(`log view`, L26)는 개정 8의 16절 밖, 새 범위다**(2026-11-18 사용자 진행 지시·L25 선택으로 확정). 저장소 상태 문서의 "crash 수집·viewer" 가운데 로깅 범위로 할 만한 것만 골랐다.
+
+새 설정(단계를 마치면 9.2절 표로 옮긴다):
+
+| 이름 | 종류 | 기본값 | 허용 값·범위 | 변경 | 단계 |
+|---|---|---|---|---|---|
+| `log.console.layout` | string | `""`(기본 콘솔 레이아웃) | 레이아웃 패턴(9절) | 시작 뒤 고정 | LG12 |
+| `log.file.layout` | string | `""`(기본 콘솔 레이아웃) | 레이아웃 패턴. `log.file.format = jsonlines`이면 쓰이지 않는다 | 시작 뒤 고정 | LG12 |
+| `log.rate_limits` | string | `""` | `"Graphics=20,Engine.World.Tick=100"`(접두사별 초당 기록 수 1–1000000, 접두사 대소문자 무시, 최대 16항목) | 실행 중, sync 지점 | LG13 |
+| `log.file.max_age_minutes` | int32 | `0`(끔) | 0–10080 | 시작 뒤 고정 | LG17 |
+| `log.file.compress` | bool | `false` | | 시작 뒤 고정 | LG17 |
+
+#### 14.1.1 LG11 사용자 `Formatter<T>` spec 컴파일 타임 검증
+
+지금 `LogTemplate`의 consteval 생성자는 내장 타입 spec만 검사한다(`AnalyzeLogTemplate`, `IsValidBuiltinFormatSpec`). 사용자 Formatter 자리는 같은 자리에 같은 spec을 쓰는지만 보고(`ConflictingFormatterSpec`), spec 자체는 캡처 때 `Formatter<T>::Format`이 판단한다.
+
+- **규약:** `Formatter<T>`는 선택 멤버 `static constexpr bool IsValidSpec(StringView spec) noexcept`를 가질 수 있다. false면 새 오류 `LogTemplateError::InvalidFormatterSpec`이고, 기존 방식대로 표지 함수 `detail::LogTemplateError_InvalidFormatterSpec()`가 컴파일러 진단에 이름을 남긴다.
+- **리터럴 템플릿:** consteval 생성자는 인자 타입을 알므로 Custom 자리마다 `Formatter<T>::IsValidSpec`을 직접 부른다(컴파일 타임).
+- **런타임 템플릿(`RuntimeTemplate`):** 타입 정보가 없으므로 검사 함수를 넘겨야 한다. 공용 `FormatArg`(일반 서식과 함께 쓰는 형식)는 늘리지 않는다. 로그 캡처 전용으로 인자별 함수 포인터 배열(`bool (*)(StringView) noexcept`, 없으면 nullptr)을 `LogArgKindOf`와 같은 자리에서 만들어 `AnalyzeLogTemplate`의 런타임 호출에 넘긴다. 정적 배열이라 할당이 없다.
+- **없으면** 지금처럼 캡처 때 판단한다(부분 검증, `<format error>`). 감지는 concept `detail::HasFormatterSpecCheck<T>`다.
+- consteval이 아니라 constexpr인 이유: 같은 함수를 런타임 템플릿 검증에도 써야 한다. Formatter는 공용 `ParseFormatSpec`(constexpr)을 재사용할 수 있다.
+- 저장소 안에서 spec을 받는 Formatter는 이 단계에서 `IsValidSpec`을 갖춘다. `StringBuilder::TryAppendFormat`(일반 서식)의 동작은 바꾸지 않는다.
+- 완료 기준: 잘못된 spec이 컴파일 실패 시험(Rocks.ToolTests, clang-cl `-fsyntax-only`)에서 `InvalidFormatterSpec` 이름으로 거부, `IsValidSpec` 없는 Formatter는 그대로 통과, 같은 템플릿을 `RuntimeTemplate`으로 쓰면 같은 판정, 생산자 무할당 시험 불변.
+
+#### 14.1.2 LG12 설정 검증 hook과 레이아웃 설정
+
+- **Config 검증 hook(L18):** `ConsoleSettingDefinition`에 선택 필드 `validate`(`bool (*)(StringView consoleText, FixedStringBuilder& reason) noexcept`, 상태 없는 함수 포인터)를 더한다. reason은 잘림 모드 builder라 쓴 길이가 남는다. Config는 종류·범위·허용 값 검사 뒤 정규 콘솔 표기로 부르고, false면 `InvalidSetting` 진단(이유 문장 포함)으로 거부한다. 지금 Config에는 이런 hook이 없다(`ConsoleSettings.cpp` `CheckConsoleValue`는 범위·허용 값만 본다). Config 소유 세션과 맞춘다(15.1절).
+- **거부 범위(Config 동작 그대로):** 검증에 실패한 항목이 하나라도 있으면 **그 층 입력 전체**가 거부된다(`ConfigContext.cpp:731–738`의 `ValidateEntry` → `InvalidArgument`). 설정 파일 하나에 잘못된 값이 있으면 그 파일 층이 통째로 빠지고 호스트가 거부를 알린다(`HostSettings.cpp:207–213`). 콘솔 변경은 그 한 줄이 거부된다. 어느 쪽이든 앞 값이 유지된다.
+- **레이아웃 설정:** `log.console.layout`·`log.file.layout`. validate가 `LogLayout::Parse`를 부른다. 이유 문장을 위해 `Parse`에 선택 출력 `LogLayoutParseError { usize offset; ErrorCode code; }`를 더한다(예: `unknown layout token near offset 14`). 빈 값은 기본 콘솔 레이아웃이다.
+- **시작 뒤 고정:** sink는 생성 때 레이아웃을 해석해 값으로 가진다(9절). 실행 중에 바꾸려면 sink를 빼고 다시 넣어야 하고, 그 사이 기록의 모양이 섞인다. 얻는 것보다 복잡하다.
+- `log.file.format = jsonlines`인데 `log.file.layout`이 비어 있지 않으면 `LogHost::Start`가 Warning을 한 번 남긴다(`log.file.layout is ignored because log.file.format is jsonlines`). 두 설정에 걸친 검사라 validate가 아니라 Start에서 한다.
+- **`log.levels`:** 문법 오류(`접두사=레벨` 모양, 레벨 이름, 접두사 문법)는 validate가 거부한다(위 거부 범위). 문법은 맞지만 **적용에 실패한 항목**(재정의 표 용량 64 초과, 접두사 해시 충돌 `AlreadyExists`, sink 콜백 안 `Busy`)은 지금처럼 적용 시점에 Warning을 남기고 건너뛴다. 9.2절과 가이드 `Docs/Implementation/Logging.ko.md`의 "잘못된 항목은 Warning을 남기고 건너뛴다" 줄을 이 단계에서 이 구분으로 고친다.
+- `log.rate_limits`(LG13)도 같은 validate를 쓰고, 16항목을 넘으면 설정 단계에서 거부한다.
+- UE: 줄 머리 모양은 고정이고(`[시각][프레임]Category: Verbosity: `, `Private/Misc/OutputDeviceHelper.cpp:12–75`) 시각 종류만 설정으로 고른다(`ELogTimes` `Public/Misc/OutputDevice.h:109–129`, `[LogFiles] LogTimes`·`-LogTimes`는 `Runtime/Launch/Private/LaunchEngineLoop.cpp:6262–6318`). Rocks는 패턴 전체를 설정으로 받는다(P4).
+- 완료 기준: 잘못된 레이아웃·`log.levels` 문자열이 진단과 함께 그 층 입력째 거부되고 앞 값이 남는다, 적용 실패 항목은 Warning 후 건너뛴다, 올바른 레이아웃이 콘솔·파일 출력 모양을 바꾼다(결정적 출력 비교), 시작 뒤 변경 거부, Config 쪽 validate 단위 시험, Start 뒤 무할당.
+
+#### 14.1.3 LG13 카테고리별 rate limit
+
+지금은 같은 EventId 반복 요약(12절)과 큐 포화 처리(8.5)만 있다. 특정 카테고리가 많이 쏟아질 때 상한을 정하는 수단이 없다.
+
+- **설정:** `log.rate_limits = "Graphics=20,Engine.World.Tick=100"`. 접두사별 초당 기록 수이고, 실행 중 sync 지점에서 다시 적용한다(`log.levels`와 같은 경로, LG12 validate, 16항목 초과 거부).
+- **표:** LogSystem 안 고정 표 `MaxLogRateLimits`(16칸). 칸마다 원자 변수로 접두사 해시, 상한, **창 상태 `Atomic<uint64>` 하나**(상위 32-bit 창 번호 = 초 단위 단조 시각, 하위 32-bit 창 안 통과 수), 버린 누계를 둔다. 조회는 레벨 재정의 표와 같은 최장 접두사 일치이고, 칸을 바꾸는 순서도 같다(7절). 표가 비면(원자 개수 0) 생산자는 보지 않는다.
+- **생산자(8.1):** 레벨 검사를 통과한 뒤, 캡처 전에 본다. 단조 시각 읽기를 이 앞으로 당긴다(어차피 한 번 읽는다). 창 번호는 `ticks / 주파수`(초)의 하위 32-bit다(136년에 한 번 돈다).
+  - 상태를 읽어 창 번호가 지금과 다르면 CAS로 `(지금 창, 1)`을 넣는다. 성공하면 통과, 실패하면 다시 읽는다.
+  - 같은 창이고 수가 상한보다 작으면 CAS로 수를 1 올린다. 성공하면 통과, 실패하면 다시 읽는다.
+  - 같은 창이고 수가 상한이면 버리고 그 칸의 버린 수를 올린다.
+  - 창 번호와 수를 한 원자 값으로 바꾸므로 **창마다 통과 수가 정확히 상한 이하**다. lock·할당이 없다. CAS 재시도는 같은 칸을 동시에 쓰는 생산자 사이에서만 생긴다.
+- **적용 레벨:** Trace–Warning. **Error·Fatal은 세지도 버리지도 않는다.** 원인 기록을 잃지 않기 위해서다(P1). Error 폭주는 EventId 반복 요약과 Warning 예약 칸(8.5)이 다룬다.
+- **알림:** 출력 스레드가 묶음 끝에 칸별 버린 수의 증가분을 보고 `Rate limit dropped {Dropped} records for {Prefix} (limit {Limit}/s)`를 Info로 한 번 남긴다. 같은 칸은 1초에 한 번까지다. `LogSystemStats`에 칸별 누계를 더한다.
+- **캡처 시각과 시험용 시계:** 이 단계에서 기록 머리의 시각을 `MonotonicNanoseconds` 대신 `MonotonicTicks`로 캡처한다(나눗셈이 없어 더 싸다). 출력 스레드가 `LogEvent`를 만들 때 ns로 바꾼다. 두 값은 같은 원천이고 `Clock.h`가 정한 관계(ticks / 주파수 × 10⁹, 소수 버림)를 그대로 쓰므로 출력은 지금과 같다. `LogEvent`에는 ns와 함께 원래 tick도 둔다(LG15). `LogSystemConfig::clock`(tick을 돌려주는 함수 포인터, 기본 `platform::MonotonicTicks`)과 `clockFrequency`를 더해 캡처 시각을 주입한다.
+- UE에는 카테고리별 rate limit이 없다. `FLogSuppressionInterface`는 카테고리 verbosity 변경(`[Core.Log]`, `-LogCmds=`, `Log` 명령)만 한다(`Public/Logging/LogSuppressionInterface.h`). `UE_CALL_ONCE`(`Public/Misc/CoreMiscDefines.h:181`)는 로그 전용이 아닌 1회 호출이다.
+- 완료 기준(Manual, 주입 시계): 상한 3/s에 10건 → 정확히 3건 통과·7건 버림, 다음 창에서 다시 3건, 여러 생산자 스트레스에서도 창마다 통과 수가 정확히 상한(상한보다 많이 넣을 때), Error는 영향 없음, 알림 정확히 1회, 실행 중 설정 변경이 sync 지점에서만 적용, 16칸 초과 설정 거부, 무할당.
+
+#### 14.1.4 LG14 상관 id
+
+현재: 상관 id는 TraceCapture에 있다.
+- `TraceContextValues { session, task, asset, entity, request }`(각 `uint64`, 0은 없음, `TraceCapture/TraceContext.h`)와 스레드별 고정 깊이 스택(`MaxContextDepth` 16, 세션 없이도 동작)이다. API는 `TraceContextScope`·`TraceCaptureContext`·`TraceCurrentContext`다.
+- 저장 사본 `TraceContextToken`은 값과 함께 trace 정의 캐시(`cache` = 세션 serial 하위 32-bit << 32 | 문맥 id)를 가진다. 스택 칸은 그 칸의 쌓기를 기록했는지도 기억한다(내림 기록 짝).
+- TraceSystem 6.4절은 "로그와 trace가 같은 상관 id를 쓴다"고 하고, trace와 별개로 로그 상관 id를 늘 전파할지는 로깅 연결 때 정한다고 남겼다(TR3 주석, TraceSystem.ko.md 7절).
+- Core는 TraceCapture 아래라 이 스택을 읽을 수 없다(5절).
+
+**스택을 Core로 내린다(L14).** `Core/Diagnostics/Correlation.h`:
+- `struct CorrelationIds { uint64 session, task, asset, entity, request; }`(0은 없음, 40 B)
+- 스택 칸은 `CorrelationIds ids`와 **상위 계층용 확장 칸 `uint64 ext[2]`**다. Core는 확장 칸의 뜻을 모르고, 쌓을 때 0으로 두고 사본·복원 때 그대로 옮기기만 한다.
+- `CorrelationScope`(RAII 쌓기·내리기, `thread_local` 고정 깊이 16, 넘침은 세기만), `CorrelationToken CaptureCorrelation()`(맨 위 칸 사본 56 B + valid), `CorrelationScope(const CorrelationToken&)`(복원), `bool CurrentCorrelation(CorrelationIds&)`.
+- **쌓기·내리기 관찰자 hook:** 원자 포인터 하나 `SetCorrelationObserver(const CorrelationObserver*)`. 관찰자는 `OnPush(CorrelationEntry&, bool restored)`·`OnPop(const CorrelationEntry&)` 함수 포인터 둘이다. 쌓기·내리기 때만 acquire 읽기 한 번과 (있으면) 간접 호출을 한다. **로그 기록마다 드는 비용은 0이다**(생산자는 스택만 읽는다).
+
+**trace는 이 둘로 지금 동작을 그대로 지킨다.**
+- TraceCapture가 관찰자를 건다(표준 형식 등록 때, 프로세스 수명).
+  - `OnPush`: 채널 `context`가 켜져 있고 세션이 있으면 지금 `TraceContextScope`가 하던 일을 한다. 정의가 없으면 `Trace.ContextDefinition`을 쓰고 `ext[0]`에 cache를 둔다. 복원이면 cache가 같은 세션인지 보고 id만 쓴다. 그다음 `Trace.ContextPush`를 쓰고 `ext[1]`에 "쌓기 기록함"을 둔다.
+  - `OnPop`: `ext[1]`이 서 있을 때만 `Trace.ContextPop`을 쓴다.
+- `TraceContextValues`는 `CorrelationIds`의 별칭, `TraceContextToken`은 `CorrelationToken`(값 + `ext[0]` cache + valid)이 된다. `TraceContextScope`·`TraceCaptureContext`·`TraceCurrentContext`는 같은 이름·의미의 얇은 래퍼로 남는다. TraceCapture의 스레드 슬롯에 있던 `contexts[]`·`contextDepth`는 지운다.
+- **`TraceTaskInfo`는 trace cache를 계속 가진다.** `context` 필드가 `CorrelationToken`(확장 칸 포함)이라 task 복원 때 정의를 다시 쓰지 않는 지금 최적화가 유지된다.
+- 공개 `CorrelationScope`로 쌓아도 관찰자가 같은 기록을 내므로 로그와 trace의 상관 id가 같다.
+- **"trace 기록 형식 불변, 기존 시험 통과"의 근거:**
+  - 기록을 내는 코드(정의·쌓기·내리기, cache 판정)가 관찰자 안으로 자리만 옮긴다. 기록 필드·순서·조건(채널 `context`, 세션 유무)은 같다.
+  - 깊이 상한(16)과 넘침 처리(쌓지 않고 세기만, 짝 내림도 무동작)는 Core 스택이 같은 규칙으로 한다. trace 통계의 넘침 수는 Core 카운터를 읽는다.
+  - 공개 래퍼의 시그니처·의미가 같으므로 TR2·TR3 시험(`TraceStandardTests.cpp`의 문맥·task 시험)은 고치지 않고 통과해야 한다. 이것을 LG14 완료 기준으로 둔다.
+- **다른 안과 비교**(trace가 Core에 "현재 상관 id 읽기" 함수 포인터를 설치하고 스택은 TraceCapture에 둔다):
+  - 활성 로그 기록마다 간접 호출이 하나 생긴다. 이 설계는 TLS 읽기 하나다.
+  - 로그의 상관 id가 TraceCapture의 설치 시점에 묶인다(설치 전 기록에는 없다). Commandlet도 TraceAnalysis를 통해 TraceCapture를 링크하므로 "trace 없는 도구"가 문제는 아니다. 그래도 Core의 로그가 상위 모듈의 설치에 기대는 의존이 남는다.
+  - 상관 id는 로그와 trace가 함께 쓰는 개념이라(계획 29.4절) 둘 아래인 Core가 소유하고, trace는 확장 칸과 관찰자로 자기 상태만 덧붙인다.
+- **캡처:** 생산자 5단계(8.1)에서 스택이 비어 있지 않으면 맨 위 `ids` 40 B를 기록 머리 뒤에 복사하고 플래그 `HasCorrelation`을 세운다. 비어 있으면 0 B다. TLS 읽기 한 번, 할당 없음. Sync도 같다.
+- **출력:** `LogEvent::correlation`(+ 있음 표시). 레이아웃 토큰 `{Correlation}` → `session=3 task=1842`(0인 칸은 빼고, 모두 0이면 토큰을 생략). JSON lines는 `corr` 객체(`{"session":3,"task":1842}`). 기본 콘솔 레이아웃은 바꾸지 않는다.
+
+**전파(L15).**
+- 지금 TR3 훅(`TraceCapture/Private/TraceTasks.cpp`)은 task 채널이 켜졌을 때만 문맥을 저장·복원한다. 상관 id 전파는 trace 채널과 무관하게 **항상** 한다.
+  - task를 만들 때 token을 복사하고 실행할 때 scope로 복원한다. trace 기록(`Task.*`, 문맥 쌓기 기록)만 채널을 따른다.
+  - **스택이 비어 있으면 분기 하나**다(복사·복원 없음). TraceSystem.ko.md 7절의 "채널 꺼짐 비용 분기 하나" 요구는 상관 id를 쓰지 않는 실행에서 그대로 지켜진다.
+  - 상관 id가 있으면 task당 56 B 복사와 TLS 쌓기·내리기가 든다. LG14에서 측정해 보고한다.
+- **`DedicatedLane::Post`도 전파한다.** 렌더·IO 같은 전용 lane에 넘긴 일도 게임 스레드의 요청·asset id를 이어받아야 원인을 따라갈 수 있다(P1). 지금 `Task/Private/DedicatedLane.cpp`에는 trace 문맥 처리가 없다. 같은 규칙(비면 분기 하나)으로 넣는다.
+- `LogContextScope`(이름=문자열 문맥, 6.5절)와는 별개다. 상관 id는 trace와 공유하는 숫자 5칸 고정이고, 문맥은 사람이 읽는 속성이다.
+- **L14–L16은 trace 세션 합의가 필요하다**(15.1절).
+- UE: `UE_LOG_CONTEXT(Name, Value)`는 범위에 들어갈 때 값을 compact binary로 직렬화해 thread-local 목록에 두고(`SL:143`, `FLogContext` `SL:523–535`), 기록 때 필드로 복사한다. 로그와 trace가 공유하는 상관 id는 없다(`Logging.LogMessage`에 문맥·id가 없다, `LT:32–36`).
+- 완료 기준: Core 시험(중첩·넘침·스레드 격리·확장 칸 사본·관찰자 호출 순서), 로그 기록에 맨 위 값이 실리고 범위가 끝난 뒤 렌더해도 같다(Manual, 결정적), 공개 `CorrelationScope`로 쌓은 값이 로그와 trace 문맥 기록에 같게 나온다, trace 세션 없이 task·lane 전파, trace 기존 시험 무수정 통과, 무할당 시험, 생산자 비용 측정(상관 없음·있음, task 제출 비용).
+
+#### 14.1.5 LG15 trace `log` 채널
+
+현재: TraceSystem은 `log`를 채널 이름 공간과 기본 preset에만 적었고(TraceSystem.ko.md 5절), 코드에는 채널도 기록 형식도 없다. 표준 채널은 cpu·counter·mark·span·frame·context·task·stats이다(`TraceStandardTypes.cpp`).
+
+- **`TraceLogSink`**(TraceCapture 모듈, `RuntimeLogSink` 구현, L16). 채널 `log`는 TraceCapture가 표준 형식 등록에서 기본 꺼짐으로 등록한다(T3). `Write`는 채널이 꺼져 있으면 relaxed load 한 번으로 돌아온다.
+- **기록 형식**(이름은 trace 표기를 따른다):
+  - `Log.MessageSpec`(정의 기록): EventId(u64), 레벨(u8), 카테고리 이름, 템플릿, 파일, 줄(u32), 함수. 세션마다 EventId당 한 번 쓴다. 중복은 sink가 초기화 때 확보한 고정 열린 주소 표(4096칸)로 막는다. 표가 차면 그 뒤로는 spec을 매번 다시 쓰고 센다. 세션이 바뀌면 표를 비운다. 런타임 템플릿은 런타임 해시 EventId로 같은 경로를 탄다.
+  - `Log.Message`(Ordered): tick, 생산자 OS 스레드 id, 프레임, EventId, 레벨, 플래그, 상관 id(있는 칸 마스크 + 값), 렌더된 메시지(가변 부분).
+  - **tick은 변환 없이 캡처 tick 그대로다.** LG13에서 기록 머리가 `MonotonicTicks`를 캡처하므로 trace의 다른 기록과 같은 시간 축이고 오차가 없다. (ns에서 tick으로 되돌리면 ns가 소수 버림 값이라 최대 1 ns에 해당하는 tick 차가 생긴다. 그래서 그 안을 쓰지 않는다.)
+  - 생산자 스레드·시각·상관 id를 기록에 명시하는 이유: sink는 로그 출력 스레드에서 불리므로 trace 스레드 슬롯과 시각이 출력 스레드 것이 된다. trace 문맥 스택 기록으로 추정하지 않는다. OS 스레드 id는 `Trace.ThreadInfo`의 OS id로 대응한다.
+  - 속성·문맥은 이번에 보내지 않는다. 메시지에 이미 렌더되어 있다(16절).
+- **호스트:** trace 세션을 시작한 뒤 `LogHost::System().AddSink(traceSink)`, trace를 멈추기 전에 `RemoveSink`. 9.2절 종료 순서는 "엔진 정리 → trace sink 제거 → trace 정지 → 설치 해제 → `LogHost::Stop`"이 된다. 레벨 거르기 설정은 따로 두지 않는다. LogSystem 필터를 통과한 기록이 채널 `log`가 켜진 동안 들어간다.
+- **분석:** TraceAnalysis가 두 기록을 읽고 `trace-report`가 레벨별 수와 Warning 이상 목록을 낸다(trace 세션 소유, 15.1절).
+- UE: `LogChannel`과 `Logging.LogCategory`·`Logging.LogMessageSpec`·`Logging.LogMessage`(`LT:13–36`). spec은 로그 지점 주소마다 한 번 쓴다(`SLC:1268–1277`). 엔진 경로는 형식 문자열을 `%s`로 두고 서식된 메시지를 인자 하나로 보낸다(`SLC:1274`, `SLC:1281–1286`). Rocks는 실제 템플릿을 spec에 담아 EventId로 묶어 볼 수 있게 한다.
+- 완료 기준: Manual LogSystem과 시험 trace 세션으로 기록하고 TraceAnalysis로 읽는 왕복(spec 한 번, 메시지 순서·스레드·tick·상관 id 일치), 채널이 꺼지면 기록 0, 중복 표 넘침 경로, 세션 교체 뒤 spec 다시 씀, 초기화 뒤 무할당, Sandbox `--engine --trace=default` 산출물에 로그 기록.
+
+#### 14.1.6 LG16 구조체 펼치기 `{@Obj}`
+
+- **문법:** 이름 자리 앞 `@`(`{@Player}`). spec은 쓸 수 없다(`{@Player:x}`는 템플릿 오류). `@`는 로그 템플릿에서만 받는다(일반 서식 파서는 지금처럼 거부).
+- **확장점(Core):** `template <class T> struct LogStructure;` 특수화가 `static void Write(LogStructureWriter& out, const T& value) noexcept`를 가진다. `LogStructureWriter`는 Core 타입이다. 필드(이름 + 값), 중첩 객체 시작·끝, 배열 시작·끝을 받아 **캡처 버퍼(준비 버퍼·블록)에 바로 인코딩**한다. `@` 자리 인자에 특수화가 없으면 영어 `static_assert`로 거부한다.
+- **캡처 시점 값 복사(L19):** 렌더는 출력 스레드가 나중에 하므로 그때 객체가 살아 있다는 보장이 없다(스택 객체, GC). 게임 스레드 밖에서 객체를 읽으면 경쟁이기도 하다. 그래서 생산자 5단계에서 값을 복사한다. 필드 이름은 생성 코드의 정적 리터럴 포인터를 담고, 값은 원시 값·문자열 바이트를 복사한다. UE도 호출 지점에서 필드를 compact binary로 직렬화해 기록이 사본을 가진다(`SLC:1398–1418`, `SerializeLogFields` `SLC:1302`, 사용자 타입은 `SerializeForLog` `SL:297`).
+- **상한:** 깊이 4, 필드 32, 배열은 앞 8원소와 전체 개수. 넘치면 `truncated`. 크기는 슬롯·블록 한도(8.3)를 따른다.
+- **리플렉션 연결과 의존 방향:** Core는 확장점만 정의한다(Core는 리플렉션 모듈 아래다).
+  - 리플렉션 타입의 일반 특수화는 **ObjectRuntime** 헤더 `Object/LogStructure.h`가 `requires` 조건으로 제공한다. 객체 참조(`ObjectRefs.h`)·`AssetId`·약한 참조와 생성 필드 접근(`GeneratedFieldAccess.h`)이 ObjectRuntime에 있어서다. MetaSchema에는 `GeneratedType<T>`와 스키마만 있다.
+  - 필드 값 읽기는 **MetaCompiler가 새로 생성하는 constexpr 필드 방문 함수**(`GeneratedType<T>::VisitFields(const T&, Visitor&)`, 멤버 포인터로 직접 읽기)로 한다.
+  - 지금 공개된 값 읽기(`PathRead`·`FieldValue`)는 ObjectRegistry가 필요하고 문자열을 할당한다(`Object/RuntimeTypeOps.h`, `Object/PropertyPath.h`). 그래서 생산자 경로에 쓸 수 없다. `TypeOf<T>()`는 registry 없이 필드 이름·종류를 주지만 값 접근이 없다.
+- **종류:** Bool·정수·실수는 원시 값, Enum은 생성 이름(없으면 정수), Utf8String은 바이트 복사, 중첩 Struct는 재귀, 배열은 위 상한. Name·Text·AssetId 등 다른 종류는 `Formatter`가 있으면 캡처 때 그 렌더 문자열을 담고, 없으면 `<unsupported>`. 객체 참조는 역참조하지 않고 id만 담는다(GC·스레드 안전).
+- **출력:** 텍스트는 Serilog 모양 `Player { Name: "Ann", Hp: 30 }`, JSON lines는 `props` 안 중첩 객체. `LogProperty`에 Structure 종류와 자식 범위(평탄 배열 + 부모 번호)를 더한다(`LogEvent` 변경).
+- 완료 기준: 캡처 뒤 원본을 바꾸거나 파괴해도 출력 불변(결정적), 깊이·필드·배열 상한 잘림, 텍스트·JSON 결정적 출력, MetaCompiler 생성 struct 왕복, 특수화 없는 타입의 컴파일 실패 시험, 무할당.
+
+#### 14.1.7 LG17 시간 기준 회전과 압축 보관
+
+- **시간 회전(L22):** `log.file.max_age_minutes`(0 = 끔). 묶음을 쓰기 전에, 그 묶음 첫 기록의 단조 시각이 "**그 파일 첫 기록의 단조 시각** + 상한"을 넘으면 회전한다(크기 회전과 같은 자리, 9.1절). 벽시계 날짜 경계가 아니라 경과 시간이다. 시계 조정에 흔들리지 않고, 기록 시각만으로 판정하므로 시험이 결정적이다. 파일 이름 규칙(UTC 시작 시각 + `-N`)은 그대로다.
+- **압축(L23):** `log.file.compress = true`이면 flush 묶음마다 **독립 zstd frame**으로 압축해 쓴다. 파일은 `<호스트>-<시각>[-N].log.zst`다.
+  - 이어 붙인 zstd frame은 그 자체로 올바른 zstd 스트림이라 `zstd -d`로 풀린다. 비정상 종료로 마지막 frame이 잘려도 앞 frame은 풀린다.
+  - 자체 구현은 하지 않는다. Compression 모듈의 zstd(`CompressionFormat::Zstd`)를 쓴다. Compression은 Core 위라서 Core에는 `LogFileCipher`처럼 인터페이스 `LogBatchCompressor`(`Bound`·`TryCompress`)만 두고, 구현은 LogHost(의존에 Compression 추가)가 둔다.
+  - **무할당은 지금 Compression API로는 보장되지 않는다.** 재사용 문맥 `Compressor`도 호출마다 pledged size를 바꾸고(`Compression/Private/ZstdCodec.cpp:312–315` `ZSTD_CCtx_setPledgedSrcSize`), zstd가 작업 공간을 다시 잡을 수 있다. 그래서 **Compression 모듈에 고정 작업 공간 문맥을 요청한다**(15.1절, LG17 선행 조건): 최대 묶음 크기(`batchBytes`)와 고정 매개변수(수준·window)로 `ZSTD_estimateCCtxSize` 계열 크기를 구해 한 번 확보하고 `ZSTD_initStaticCCtx`로 만든다. 그 크기를 넘는 요청은 할당하지 않고 실패한다. 출력 버퍼(압축 bound)도 sink Open 전에 확보한다.
+  - 수준은 zstd 3(기본값). 출력 스레드 비용을 측정해 보고한다.
+  - 닫힌 파일을 나중에 통째로 압축하지 않는 이유: 출력 스레드가 수십 ms 멈추거나 별도 스레드·임시 파일이 필요하고, 비정상 종료한 파일은 압축되지 않는다. UE는 이전 로그를 `-backup-` 사본으로 남기고(`ODF:420–435`) 시작 때 날짜·개수로 지울 뿐이다(`PurgeLogsDays`·`MaxLogFilesOnDisk`, `FH:1284–1360`). 압축과 실행 중 회전은 없다.
+- **암호화와의 관계:** **압축한 뒤 봉인한다**(암호문은 압축되지 않는다). 압축 frame 하나가 secretstream 메시지 하나다. 봉인 파일 머리(`LogFileSealer`)에 압축 표시를 더한다. 봉인 파일은 압축 여부와 상관없이 `.log`다(일반 도구로 읽을 수 없으므로 `.zst`를 붙이지 않는다). 압축 뒤 크기가 내용에 따라 달라 암호문 길이가 내용을 조금 드러낸다. 9.1절 보안 목표(사용자가 읽을 수 없으면 된다)에서는 받아들인다.
+- 보관 정리는 `.log`와 `.log.zst`를 함께 센다(이름 모양이 정확히 맞는 것만). `log decode`는 봉인+압축 파일을 풀고, `log view`(LG19)는 `.log.zst`도 읽는다.
+- 완료 기준: `LogEvent`를 sink에 직접 넣어(단조 시각을 정해 둔 기록) 회전 결정적 시험 — 시계 주입이 필요 없다, 압축 파일을 Compression `DecompressStream`으로 풀어 왕복, 잘린 마지막 frame에서 앞부분 복원, 봉인+압축 왕복·변조 검출, 보관 정리(다른 호스트 파일 보존), Open 뒤 무할당.
+
+#### 14.1.8 LG18 종료 경로의 마지막 로그
+
+개정 8의 16절 밖, 새 범위다(2026-11-18 사용자 진행 지시·L25 선택으로 확정). minidump·스택 수집 같은 crash 수집 전반은 여전히 범위 밖이다(16절).
+
+- `Log::Fatal`과 assert는 이미 비상 출력 뒤 best effort flush를 한다(11절). 하지만 `platform::Fatal`을 바로 부르는 코드(UniquePtr 반환 실패 등)는 큐에 남은 기록을 버린다. `platform::Fatal`은 stderr 쓰기 뒤 바로 abort한다. 접근 위반·치명 신호에는 처리기가 아예 없다.
+
+**종료 hook(L24).**
+- PlatformBase에 `platform::SetTerminationHook(void (*)(const char* message, usize bytes) noexcept)`(원자 포인터 하나)를 더한다. PlatformBase는 Core 아래라 `StringView`를 쓸 수 없어 포인터와 길이를 받는다.
+- `platform::Fatal`은 abort 전에 이 hook을 한 번 부른다(재귀 표시).
+- Core는 `LogInstallScope` 설치 때 hook을 걸고 해제 때 되돌린다. hook은 `LogSystem::FlushForTermination(timeout)`을 부른다.
+- **`FlushForTermination`은 막히는 lock을 쓰지 않는다.** UE Panic(`OR:981–1016`, lock을 제한 시간만 기다린 뒤 진행)과 같은 모양이다.
+  - Async: 출력 스레드를 깨운다. 깨우기는 PlatformBase에 주소 대기(WaitOnAddress·futex)가 생기면 그것으로 lock 없이 한다. 그 전에는 `ManualResetEvent::TrySignal`(이벤트 mutex를 TryLock으로 몇 번 시도)을 더해 대신한다. 그런 다음 lock 없이 큐 완료 위치를 원자로 확인하며 `fatalFlushTimeoutMilliseconds`까지 기다린다(양보하며 단조 시계로 상한 확인).
+  - Sync: sink mutex를 TryLock으로 잡아 fan-out·flush하고, 못 잡으면 건너뛴다.
+  - 출력 스레드 자신·sink 안·Manual이면 건너뛴다.
+- 중복 flush는 기존 스레드별 `fatalInProgress`(`Core/Private/Diagnostics/Log.cpp`)로 판정한다. `Log::Fatal`·assert가 이미 flush를 시작했으면 hook은 다시 하지 않는다.
+
+**OS 예외·치명 신호 최소 처리기(L25, 사용자 선택 A).**
+- PlatformBase가 프로세스에 하나 설치한다(호스트가 명시적으로 켬, 전역 생성자 없음). 하는 일은 "마지막 로그 flush"뿐이고, 처리 결과는 앞 처리기로 넘긴다.
+- **Windows:** `SetUnhandledExceptionFilter`로 설치하고, 돌려받은 앞 filter를 보관한다.
+  - **stack overflow 대응:** filter는 깨진 스레드의 남은 stack에서 돈다. 그래서 flush를 그 스레드에서 하지 않는다.
+  - 설치 때 **flush 전용 스레드**(작은 stack, 커널 이벤트 대기)를 미리 만든다. filter는 커널 이벤트를 `SetEvent`로 알리고, 완료 이벤트를 제한 시간만큼 `WaitForSingleObject`로 기다린다. 둘 다 사용자 공간 lock이 없고 stack을 거의 쓰지 않는다.
+  - 오래 사는 엔진 스레드(게임·렌더 lane·worker·로그 출력)는 `SetThreadStackGuarantee`로 처리기용 여유 stack을 확보해, 처리기 자신이 넘치는 경우를 줄인다.
+  - 끝나면 앞 filter를 부르고 그 결과를 돌려준다(없으면 `EXCEPTION_CONTINUE_SEARCH`).
+- **POSIX:** SIGSEGV·SIGBUS·SIGILL·SIGFPE·SIGABRT에 `sigaction`(`SA_ONSTACK`)으로 설치하고 앞 동작을 보관한다.
+  - 엔진 스레드와 주 스레드는 `sigaltstack`을 가진다.
+  - 처리기는 미리 만든 flush 전용 스레드를 `sem_post`(async-signal-safe)로 깨우고, 완료 원자 표시를 단조 시계로 제한 시간까지 확인한다.
+  - 끝나면 앞 동작을 되돌리고 신호를 다시 낸다.
+  - **신호 처리기 안의 flush는 최선 노력이다.** flush 스레드가 쓰는 경로(TryLock·원자 대기)는 async-signal-safe 보장 밖이다. 깨진 스레드가 쥔 lock은 TryLock 실패로 건너뛴다.
+- **flush 전용 스레드**는 `FlushForTermination`을 부르고 완료를 알린다. 깨진 스레드가 출력 스레드 자신이면 큐를 비울 주체가 없으므로 비상 출력만 남긴다.
+- **겹침:** 디버거와 이후 crash reporter가 같은 자리를 쓴다. 처리기는 앞 처리기로 연쇄하고, 결과를 바꾸지 않으며, 제거 함수를 둔다. crash 수집을 설계할 때 이 처리기를 그 안의 첫 단계로 옮긴다.
+- **비용:**
+  - 기록마다 드는 비용은 없다.
+  - 프로세스당 flush 전용 스레드 하나(대기만 함, stack 64 KiB)와 커널 이벤트 둘(Windows) 또는 세마포어 하나(POSIX)가 든다.
+  - 엔진 스레드마다 Windows는 stack 보장분(예: 32 KiB 예약), POSIX는 `sigaltstack` 32 KiB가 든다. 둘 다 Start 때 확보하고 이후 할당은 없다.
+  - 크래시 때 최대 지연은 `fatalFlushTimeoutMilliseconds`(기본 2초)다.
+- 봉인 파일의 끝 표시: 비정상 종료에서는 `Final`을 쓰지 않는다. "끝 표시 없음 = 비정상 종료" 판정이 맞기 때문이다(9.1절).
+- UE: 크래시 보고 전에 `GLog->Panic()`을 부른다(`Private/Windows/WindowsPlatformCrashContext.cpp:1833–1837`). Panic은 출력 장치 lock을 최대 1초 기다린 뒤 그대로 flush로 넘어간다(`OR:981–1016`).
+- 완료 기준(자식 프로세스 시험, Sandbox self-test처럼 `RunProcess`):
+  - `platform::Fatal`·접근 위반·stack overflow(Windows)·SIGSEGV(POSIX) 직전의 Async 기록이 파일·stderr에 남는다.
+  - 앞 처리기가 불린다(시험용 앞 처리기가 표시를 남긴다).
+  - 출력 스레드가 멈춘 sink 안에 있어도 프로세스가 끝난다. 단언은 종료 코드와 내용이다.
+  - abort·WER 대화상자를 억제한다.
+
+#### 14.1.9 LG19 `log view`
+
+개정 8의 16절 밖, 새 범위다(2026-11-18 사용자 진행 지시로 확정).
+
+- Commandlet `log view <파일|폴더> [--key <개인키>] [--level <최소>] [--category <접두사>] [--event <id>] [--since <UTC>] [--until <UTC>] [--grep <문자열>] [--correlation <칸>=<id>] [--json]`.
+- 평문 `.log`(text·jsonlines), `.log.zst`, 봉인 파일을 읽는다. 폴더를 주면 같은 호스트 파일을 시작 시각·번호 순으로 이어 읽는다.
+- 필드 거르기는 JSON lines 파일에서 모두 된다. text 파일은 기본 레이아웃일 때 레벨·카테고리·시각과 `--grep`만 된다(레이아웃을 바꾼 text 파일은 `--grep`만). 분석이 목적이면 `log.file.format = jsonlines`를 권한다(가이드에 적는다).
+- 전문 viewer(Lens, 계획 M3)는 범위 밖이다(16절).
+- 완료 기준: 고정 입력 파일(평문·zst·봉인)의 거르기 결과를 결정적으로 비교한다(Rocks.Commandlet.Tests).
 
 ## 15. 다른 세션과의 조율
 
@@ -533,12 +746,32 @@ Result<UniquePtr<Device>> CreateD3D12Device(Allocator&, const DeviceDesc&, Devic
   4. 병합하면 이 세션(로깅)에 알린다.
 - 이 문서의 개정과 LG3·LG4 완료는 그래픽 세션에 알린다.
 
+### 15.1 후속 단계 조율(개정 9)
+
+LG11–LG19 중 다른 세션 소유 모듈을 고쳐야 하는 곳이다. 그 단계는 해당 세션과 맞춘 뒤 시작한다.
+
+| 단계 | 모듈(소유) | 필요한 변경 | 비고 |
+|---|---|---|---|
+| LG12 | Config(ConfigSystem 세션) | `ConsoleSettingDefinition::validate`(`bool (*)(StringView, FixedStringBuilder& reason) noexcept`), 거부 진단에 이유 문장 | 범용 기능이다. LG8·LG9 리뷰 때 더한 `allowedValuesIgnoreCase`와 같은 자리. 층 단위 거부 동작은 그대로 |
+| LG14 | TraceCapture·Task(trace 세션) | 상관 id 스택을 Core `CorrelationScope`(확장 칸 `ext[2]`, 관찰자 hook)로 옮기고 `TraceContext*`는 관찰자·래퍼로 바꾼다. TR3 훅(`TraceTasks.cpp`)과 `DedicatedLane::Post`가 trace 채널과 무관하게 상관 id를 전파(비면 분기 하나) | L14–L16 합의 필요. TraceSystem.ko.md 6.4절·7절 개정. 기록 형식 불변, TR2·TR3 시험 무수정 통과 |
+| LG15 | TraceCapture·TraceAnalysis·`trace-report`(trace 세션) | 채널 `log` 등록, `Log.MessageSpec`·`Log.Message` 형식, 분석·보고 | `TraceLogSink`는 로깅이 쓰고 형식 표는 trace 쪽 문서에 둔다 |
+| LG15 | 엔진 호스트(Sandbox `EngineHost`), HostConfig(rocks-95) | trace 세션 시작 뒤 sink 추가, 정지 전 제거 | `HostSettings`는 설정 문맥만 만들므로 고칠 것이 없다. 새 `log.*` 설정은 LogHost가 등록한다 |
+| LG16 | ObjectRuntime·MetaCompiler(리플렉션 세션) | MetaCompiler가 `GeneratedType<T>::VisitFields`를 생성, ObjectRuntime에 `Object/LogStructure.h`(일반 특수화) | 객체 참조·AssetId·약한 참조·`GeneratedFieldAccess`가 ObjectRuntime에 있다. 생성 코드 크기 증가를 리플렉션 세션이 판단한다 |
+| LG17 | Compression(Compression 소유 세션) | 고정 작업 공간 zstd 압축 문맥: 최대 입력 크기·고정 매개변수로 `ZSTD_estimateCCtxSize` 계열 크기를 한 번 확보하고 `ZSTD_initStaticCCtx`, 이후 할당 없음(넘치면 실패) | LG17 선행 조건. 지금 `Compressor`는 호출마다 pledged size를 바꿔 작업 공간을 다시 잡을 수 있다(`ZstdCodec.cpp:312–315`) |
+| LG17 | Crypto(`LogFileSealer`, 로깅이 LG10에서 작성) | 봉인 파일 머리에 압축 표시 | crypto 세션에 알린다 |
+| LG18 | PlatformBase(공용) | `platform::SetTerminationHook(const char*, usize)`, `ManualResetEvent::TrySignal`, Windows unhandled exception filter·flush 전용 스레드·`SetThreadStackGuarantee`, POSIX 치명 신호 처리기·`sigaltstack` | 앞 처리기 연쇄. 이후 crash 수집 설계가 같은 자리를 이어 쓴다. 주소 대기(WaitOnAddress·futex)가 생기면 깨우기를 그것으로 바꾼다 |
+
 ## 16. 범위 밖·후속
 
-- 시간 기준 회전·압축 보관, TraceSystem `log` 채널 sink와 `TraceContext` 상관 id 연결(TR 단계 뒤), ConfigSystem에서 레벨·레이아웃 읽기(CF 단계 뒤).
-- 리플렉션 기반 구조체 펼치기(`{@Obj}`), 사용자 `Formatter<T>` spec의 컴파일 타임 검증 규약.
-- 카테고리별 일반 rate limit 설정(이번에는 EventId 반복 요약만).
-- WorkerScheduler 지연·포화 진단(Engine이 스케줄러를 소유할 때).
+개정 8의 후속 항목은 14.1절 LG11–LG19로 옮겼다. 남은 것은 다음과 같다.
+
+- **WorkerScheduler 지연·포화 진단:** 단계로 두지 않는다(L27). 선행 조건이 둘 있다.
+  1. Engine(또는 엔진 호스트)이 WorkerScheduler를 소유해야 한다. 지금 Engine에는 스케줄러가 없고 실행기를 끝내는 `StopExecutors` hook만 있다(`Engine/Engine.h`). 인스턴스는 시험·도구의 지역 객체뿐이다(Sandbox `GraphicsSelfTest.cpp`, CompressionBench).
+  2. `WorkerSchedulerStats`(`Task/WorkerScheduler.h`)에 대기 시간·포화·거부 수가 있어야 한다. 지금은 worker 수·진행 중 수·예약 수·세대·accepting뿐이고, 꽉 찼다는 사실은 `Submit`의 `CapacityExceeded`로만 알 수 있다.
+  두 조건이 생기면 "포화 지속" Warning(rate limit 적용)과 주기 통계 Debug로 설계한다.
+- **crash 수집 전반:** minidump, 스택 수집, crash reporter, 사전 확보 breadcrumb 저장소(계획 29.4절). 로깅 범위는 종료 경로의 flush(LG18)까지다. GPU 진단은 사용자가 보류했다.
+- **전문 viewer:** Lens 통합(계획 M3). 로깅은 명령줄 `log view`(LG19)까지 한다.
+- trace로 속성·문맥 보내기(LG15에서 뺐다), 실행 중 레이아웃 변경(LG12에서 시작 뒤 고정).
 
 ## 17. 결정 사항
 
@@ -557,6 +790,20 @@ Result<UniquePtr<Device>> CreateD3D12Device(Allocator&, const DeviceDesc&, Devic
 | L11 | 비동기는 선택 사항이다. 명령줄 도구는 기본 Sync, tick이 있는 엔진 호스트(게임·에디터)는 기본 Async이며, 설정 파일 `log.mode`로 동기·비동기를 고른다(시작 뒤 고정) | 결정됨(2026-11-17, 사용자 지시) |
 | L12 | 파일 기록 암호화는 선택이고 **기본은 끔**이다(`log.file.encrypt`). 켜면 Crypto `SecretStream`으로 flush 묶음 단위로 봉인한다. 키 준비에 실패하면 평문으로 내려가지 않고 파일 sink를 끈다 | 결정됨(2026-11-17, 사용자 지시) |
 | L13 | 파일 키는 파일마다 개발자 공개키로 KEM(X-Wing) 캡슐화한다. 바이너리에는 공개키만 들어간다. 대안은 바이너리에 고정 대칭키를 숨기는 것이다(요구 수준은 충족하지만 바이너리 분석으로 풀린다) | 결정됨(2026-11-17, 사용자 확인 — 권장안) |
+| L14 | 상관 id 스택은 Core가 소유한다(`CorrelationIds` 5×u64 + 상위 계층용 확장 칸 `ext[2]`, `CorrelationScope`, 쌓기·내리기 관찰자 hook). TraceCapture의 `TraceContext*`는 관찰자와 래퍼로 기존 cache·기록을 유지한다. 로그는 생산자에서 맨 위 40 B를 복사한다(비면 0 B, 할당 없음) | 결정됨(2026-11-18, 권장안 — trace 세션 합의 필요) |
+| L15 | 상관 id 전파(task·`DedicatedLane::Post`)는 trace 채널과 무관하게 늘 한다. 스택이 비면 분기 하나다. trace 기록만 채널을 따른다 | 결정됨(2026-11-18, 권장안 — trace 세션 합의 필요) |
+| L16 | trace `log` 채널은 TraceCapture의 `TraceLogSink`가 쓴다. `Log.MessageSpec`(세션·EventId당 1회)과 `Log.Message`(캡처 tick·생산자 스레드·상관 id 명시, 렌더된 메시지)다. 기록 머리는 tick을 캡처한다(LG13). 속성은 보내지 않는다 | 결정됨(2026-11-18, 권장안 — trace 세션 합의 필요) |
+| L17 | 레이아웃 설정 `log.console.layout`·`log.file.layout`은 시작 뒤 고정이고, 잘못된 패턴은 설정 단계에서 거부한다. jsonlines 파일에서 `log.file.layout`은 Warning 후 무시 | 결정됨(2026-11-18, 권장안) |
+| L18 | Config에 범용 설정 검증 hook(`validate`)을 더한다. `log.levels`·레이아웃·`log.rate_limits`(16항목 초과 포함)의 문법 오류는 설정 단계에서 그 층 입력째 거부하고, 적용 실패(용량·해시 충돌·Busy)는 적용 시점 Warning 후 건너뛴다 | 결정됨(2026-11-18, 권장안 — Config 세션 합의 필요) |
+| L19 | `{@Obj}`는 캡처 시점에 값을 복사한다. Core는 `LogStructure<T>` 확장점만 두고, 일반 특수화는 ObjectRuntime이 MetaCompiler 생성 필드 방문 함수로 registry·할당 없이 읽는다. 객체 참조는 역참조하지 않는다 | 결정됨(2026-11-18, 권장안 — 리플렉션 세션 합의 필요) |
+| L20 | 사용자 Formatter spec 검증은 선택 멤버 `static constexpr bool IsValidSpec(StringView)`이다. 리터럴 템플릿은 컴파일 타임에, 런타임 템플릿은 로그 캡처 전용 함수 포인터 배열로 검사하고, 없으면 캡처 때 판단한다 | 결정됨(2026-11-18, 권장안) |
+| L21 | 카테고리별 rate limit은 접두사별 1초 창이고, 창 번호(32-bit)와 수(32-bit)를 `Atomic<uint64>` 하나에 묶어 CAS로 바꾼다(창마다 통과 수 정확히 상한). 최대 16칸, Trace–Warning에만 적용, Error·Fatal 제외. 버린 수는 출력 스레드가 1초에 한 번까지 알린다 | 결정됨(2026-11-18, 권장안) |
+| L22 | 시간 기준 회전은 벽시계 날짜가 아니라 그 파일 첫 기록 뒤 경과 시간(기록의 단조 시각)으로 판정한다 | 결정됨(2026-11-18, 권장안) |
+| L23 | 압축은 flush 묶음마다 독립 zstd frame(Compression 모듈, `.log.zst`)이다. 암호화와 함께면 압축한 뒤 봉인한다. 닫힌 파일 후처리 압축은 하지 않는다. 무할당을 위해 Compression에 고정 작업 공간 문맥을 요청한다 | 결정됨(2026-11-18, 권장안 — Compression 세션 합의 필요) |
+| L24 | `platform::SetTerminationHook(const char*, usize)`를 두어 Log를 거치지 않는 Fatal도 flush한다. `FlushForTermination`은 막히는 lock 없이 TryLock·원자 완료 확인·제한 시간 대기만 쓰고, 중복은 `fatalInProgress`로 판정한다. 개정 8의 16절 밖, 새 범위(2026-11-18 사용자 진행 지시·L25 선택으로 확정) | 결정됨(2026-11-18) |
+| L25 | OS 예외·치명 신호에서 로그를 flush한다(A). Windows unhandled exception filter는 미리 만든 flush 전용 스레드에 커널 이벤트로 넘기고(stack overflow 대응, 엔진 스레드는 `SetThreadStackGuarantee`), POSIX는 `sigaltstack`·`sem_post`로 같은 스레드를 깨운다(신호 처리기 쪽은 최선 노력). 앞 처리기로 연쇄한다. 비용은 기록당 0, 프로세스당 대기 스레드 하나, 스레드당 여유 stack 32 KiB, 크래시 때 최대 `fatalFlushTimeoutMilliseconds` | 결정됨(2026-11-18, 사용자 선택 A) |
+| L26 | 로그 보기는 Commandlet `log view`(거르기·여러 파일·평문·zst·봉인)까지 한다. 전문 viewer는 Lens(M3). 개정 8의 16절 밖, 새 범위(2026-11-18 사용자 진행 지시·L25 선택으로 확정) | 결정됨(2026-11-18) |
+| L27 | WorkerScheduler 지연·포화 진단은 단계로 두지 않는다. Engine의 스케줄러 소유와 스케줄러 통계 확장이 선행 조건이다(16절) | 결정됨(2026-11-18, 권장안) |
 
 ## 18. 개정 이력
 
@@ -580,3 +827,4 @@ Result<UniquePtr<Device>> CreateD3D12Device(Allocator&, const DeviceDesc&, Devic
 - 개정 6(2026-11-17): LG6 구현과 LG3–LG5 리뷰 반영 — `ErrorCode::CycleDetected`, `World::AddActorTickPrerequisite`, Tick 실패 첫 1회+요약, `Log::SetFrame`, `SetGlobalMinimum`의 `Result<void>` 반환과 sink 안 레벨 변경 Busy, Sync Fatal은 `Mutex::TryLock`, Stop 시간 초과 포기 처리.
 - 개정 7(2026-11-18): LG7 구현 반영 — `CreateD3D12Device`·`Window::Create`에 report 인자(기본 nullptr), `Graphics/GraphicsLog.h` 카테고리와 `ValidationMessageFilter`, 셰이더 실패는 장치 LastError + 호출자 기록, Sandbox는 backend별 실행이라 "건너뛴 backend Warning·모두 실패 Error", OpenGL 기존 로그는 규칙 충족으로 유지.
 - 개정 8(2026-11-18): LG8·LG9 구현 반영 — 설정 이름을 Config 규칙에 맞춰 `log.file.max_bytes`·`log.file.recipient_key`로 바꿨다. `log.mode` 기본값 `default`(호스트 프리셋)를 더했다. 카테고리 재정의는 문자열 `log.levels`이고, 설정 처리는 새 `LogHost` 모듈에 둔다(9.2절). 보관 정리는 파일 이름 모양이 정확히 맞는 것만 센다. Asan·TSan 전체 체인은 저장소 검증 기준 변경으로 생략했다. Templates/Game은 tick·Engine이 없어 엔진 호스트로 다루지 않는다.
+- 개정 9(2026-11-18): 후속 설계 초안 — 16절 항목을 LG11–LG19로 설계했다(14.1절, 결정 L14–L27). 상관 id 스택을 Core로 내리고 trace `log` 채널은 `TraceLogSink`가 쓴다. 레이아웃 설정과 Config 검증 hook, 카테고리별 rate limit, `{@Obj}` 캡처 시점 복사와 생성 필드 방문 함수, Formatter spec 검증 규약, 시간 회전과 묶음별 zstd 압축(압축 뒤 봉인), `platform::Fatal` hook, `log view`를 다룬다. WorkerScheduler 진단은 선행 조건만 적었다. UE 5.8.4 `StructuredLog`·`LogTrace`·`OutputDeviceFile`·`FileHelper`·`OutputDeviceRedirector::Panic`을 확인했다. 다른 세션 조율은 15.1절이다. 리뷰 반영: 상관 id 스택에 확장 칸·관찰자 hook(H1), rate limit 창·수 단일 원자 값(M1), Compression 고정 작업 공간 문맥 요청(M2), 종료 hook `const char*`·막히지 않는 flush(M3), `log.levels` 거부 범위(M5), `{@Obj}` 특수화를 ObjectRuntime으로(M6), 런타임 템플릿 spec 검사 경로·전파 분기 하나·`DedicatedLane` 전파·tick 캡처·LG17 시험 방식·validate reason(Low). L25는 사용자 선택 A로 확정했고, L24·L26은 개정 8의 16절 밖 새 범위로 표시했다.
