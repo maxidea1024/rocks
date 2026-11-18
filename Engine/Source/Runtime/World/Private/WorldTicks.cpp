@@ -118,6 +118,15 @@ void World::RegisterComponentTicks(ObjectHandle component) noexcept {
     });
     if (!stored) {
         UnregisterTicks(handles);
+        return;
+    }
+
+    // Component 색인의 사본도 맞춘다(우회 파괴된 Component의 등록을 정리 단계가 해제한다).
+    if (ComponentRecord* entry = componentRecords_.Find(component.slot);
+        entry != nullptr && entry->component == component) {
+        for (uint32 hook = 0; hook < detail::TickHookCount; ++hook) {
+            entry->ticks[hook] = handles[hook];
+        }
     }
 }
 
@@ -148,7 +157,7 @@ void World::ExecuteTick(const TickTarget& target, const TickContext& context) no
             // Registry를 직접 조작해 우회 파괴된 Actor다. 레코드를 정리 대기로 돌린다(hook은 받지
             // 못한다).
             ++skippedTicks_;
-            ++repairedTicks_;
+            ++repairedBypasses_;
             auto removed = ticks_.Unregister(context.handle);
             (void)removed;
             auto destroyed = DestroyActor(target.object);
@@ -181,12 +190,13 @@ void World::ExecuteTick(const TickTarget& target, const TickContext& context) no
         return true;
     });
     if (!called) {
-        // 우회 파괴된 Component다. 등록을 해제하고 소유 Actor의 간선 정리를 예약한다.
-        ++repairedTicks_;
+        // 우회 파괴된 Component다. 등록을 해제하고 소유 Actor의 간선 정리를 예약한다(복구와 같은
+        // 큐 — 한 번만 넣는다).
         auto removed = ticks_.Unregister(context.handle);
         (void)removed;
-        auto queued = destroyComponents_.TryPushBack(target.object);
-        (void)queued;
+        if (QueueBypassedComponent(target.object)) {
+            ++repairedBypasses_;
+        }
     }
 
     if (!called || !called.Value()) {

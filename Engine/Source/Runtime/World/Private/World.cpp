@@ -70,9 +70,9 @@ World::World(Allocator& allocator, TypeRegistry& types, const WorldDesc& desc) n
     : allocator_(allocator), objects_(allocator, types, desc.context, WorldRegistryOptions(desc)),
       name_(allocator), ticks_(allocator), subsystems_(allocator), subsystemTypes_(desc.subsystems),
       timeStep_(desc.timeStep), actors_(allocator), actorIndex_(allocator), levels_(allocator),
-      levelSlots_(allocator), pendingStart_(allocator), pendingComponentStart_(allocator),
-      destroyActors_(allocator), destroyComponents_(allocator), gcBudget_(desc.gcBudget),
-      gcScheduler_(desc.gcScheduler) {
+      levelSlots_(allocator), componentRecords_(allocator), pendingStart_(allocator),
+      pendingComponentStart_(allocator), destroyActors_(allocator), destroyComponents_(allocator),
+      gcBudget_(desc.gcBudget), gcScheduler_(desc.gcScheduler) {
     // 이름은 진단용이다. 복사에 실패하면 빈 이름으로 둔다.
     auto named = name_.TryAssign(desc.name);
     (void)named;
@@ -340,7 +340,7 @@ WorldStats World::Stats() const noexcept {
 
     stats.tickNanoseconds = tickNanoseconds_;
     stats.skippedTicks = skippedTicks_;
-    stats.repairedTicks = repairedTicks_;
+    stats.repairedBypasses = repairedBypasses_;
     stats.externalBorrows = objects_.Stats().borrows;
     return stats;
 }

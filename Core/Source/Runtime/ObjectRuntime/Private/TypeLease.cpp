@@ -1,6 +1,7 @@
 #include "TypeRegistryInternal.h"
 
 #include <Object/TypeRegistry.h>
+#include <Platform/Atomics.h>
 #include <Platform/Fatal.h>
 
 // TypeLease·StructView(TypeLease.h)의 레코드 접근이다. 스키마·함수표·enum·struct 필드 대상, 필드
@@ -287,6 +288,31 @@ const RuntimeTypeOps& TypeLease::Ops() const& noexcept {
     }
 
     return static_cast<TypeRegistry::Record*>(record_)->ops;
+}
+
+usize TypeLease::ObjectOffset() const noexcept {
+    if (!record_) {
+        platform::Fatal("Access to an empty TypeLease");
+    }
+
+    return platform::AtomicLoad<platform::MemoryOrder::Relaxed>(
+        &static_cast<TypeRegistry::Record*>(record_)->objectOffset);
+}
+
+bool TypeLease::RecordObjectOffset(usize offset) const noexcept {
+    if (!record_) {
+        platform::Fatal("Access to an empty TypeLease");
+    }
+
+    usize* slot = &static_cast<TypeRegistry::Record*>(record_)->objectOffset;
+    usize expected = NoObjectOffset;
+    if (platform::AtomicCompareExchangeStrong<platform::MemoryOrder::Relaxed,
+                                              platform::MemoryOrder::Relaxed>(slot, expected,
+                                                                              offset)) {
+        return true;
+    }
+
+    return expected == offset;
 }
 
 bool TypeLease::IsA(TypeId expected) const noexcept {

@@ -548,6 +548,10 @@ inline ObjectRegistry::SlotCold& ObjectRegistry::ColdOf(const Slot& slot) const 
         ->colds[slot.index % registry_detail::SlotsPerChunk];
 }
 
+inline uptr ObjectRegistry::StorageStartOf(const Slot& slot) noexcept {
+    return reinterpret_cast<uptr>(slot.object) - slot.type.ObjectOffset();
+}
+
 inline ObjectRegistry::Slot* ObjectRegistry::FindSlot(ObjectHandle handle) const noexcept {
     if (handle.registry != domain_ || handle.generation == 0 || handle.slot >= options_.maxSlots) {
         return nullptr;

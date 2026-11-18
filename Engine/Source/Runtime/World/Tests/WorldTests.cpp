@@ -3,6 +3,7 @@
 #include <Core/Memory/UniquePtr.h>
 #include <ObjectSerialization/ObjectGraph.h>
 #include <TestSupport/Test.h>
+#include <World/Private/WorldInternal.h>
 #include <World/SceneComponent.h>
 #include <World/World.h>
 #include <World/World.module.generated.h>
@@ -138,6 +139,12 @@ public:
         if (destroySelf) {
             CHECK(Destroy().IsOk());
         }
+
+        // hook 안에서 World API를 거치지 않고 파괴한다(계약 위반 — 복구 시험).
+        if (!bypassVictim.IsNull()) {
+            CHECK(GetWorld().Objects().RequestDestroy(GetWorld().Access(), bypassVictim).IsOk());
+            bypassVictim = {};
+        }
     }
 
     void OnDisable() noexcept override {
@@ -146,6 +153,13 @@ public:
 
     void OnDestroy() noexcept override {
         Record("a.destroy");
+        if (!destroyBypassVictim.IsNull()) {
+            CHECK(GetWorld()
+                      .Objects()
+                      .RequestDestroy(GetWorld().Access(), destroyBypassVictim)
+                      .IsOk());
+            destroyBypassVictim = {};
+        }
     }
 
     bool IsReadyToStart() const noexcept override {
@@ -155,6 +169,8 @@ public:
     static inline bool failAwake = false;
     uint32 ticks = 0;
     ObjectHandle victim;
+    ObjectHandle bypassVictim;
+    ObjectHandle destroyBypassVictim;
     bool destroySelf = false;
     bool ready = true;
 };
@@ -1024,7 +1040,7 @@ TEST(World_BypassedObjectDestroyIsRepairedByTick) {
     REQUIRE(world.Objects().RequestDestroy(world.Access(), actor.Value()));
     REQUIRE(world.Tick(0.016));
     CHECK(!world.HasActor(actor.Value()));
-    CHECK(world.Stats().repairedTicks == 1);
+    CHECK(world.Stats().repairedBypasses == 1);
     REQUIRE(world.Shutdown());
 }
 
@@ -1339,6 +1355,100 @@ TEST(World_BypassedLevelDestroyIsRepaired) {
     }
 }
 
+// Tick hook과 OnDestroy hook 안에서도 World API 밖 파괴가 일어난다. 대상(틱 없는 Actor)은 Level
+// 배열이 붙잡고 있어 World 정리 전에는 회수되지 않으므로, 다음 복구(같은 프레임 끝 GC step 전)가
+// 정리한다.
+TEST(World_BypassInsideHooksIsRepaired) {
+    Fixture fixture;
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    REQUIRE(world.BeginPlay());
+    auto ticker = world.SpawnActor<LoggingActor>();
+    auto dying = world.SpawnActor<LoggingActor>();
+    auto first = world.SpawnActor<Actor>();
+    auto second = world.SpawnActor<Actor>();
+    REQUIRE(ticker && dying && first && second);
+    REQUIRE(world.Tick(0.016));
+    {
+        Borrow<LoggingActor> borrow;
+        LoggingActor* actor = fixture.Pointer(ticker.Value(), borrow);
+        REQUIRE(actor != nullptr);
+        actor->bypassVictim = first.Value();
+    }
+
+    {
+        Borrow<LoggingActor> borrow;
+        LoggingActor* actor = fixture.Pointer(dying.Value(), borrow);
+        REQUIRE(actor != nullptr);
+        actor->destroyBypassVictim = second.Value();
+    }
+
+    REQUIRE(world.DestroyActor(dying.Value()));
+    REQUIRE(world.Tick(0.016));
+    CHECK(!world.HasActor(first.Value()) && !world.HasActor(second.Value()));
+    for (uint32 frame = 0; frame < 16; ++frame) {
+        REQUIRE(world.Tick(0.016));
+    }
+
+    CHECK(!world.Objects().InspectLifecycle(world.Access(), first.Value()));
+    CHECK(!world.Objects().InspectLifecycle(world.Access(), second.Value()));
+    const ObjectHandle survivors[] = {ticker.Value()};
+    CHECK(LevelHoldsExactly(world, world.PersistentLevel(), survivors));
+    REQUIRE(world.Shutdown());
+}
+
+// Component만 World API 밖에서 파괴한다(틱 없는 SceneComponent와 틱 있는 Component). 소유 Actor는
+// 살아 있다. 복구가 그 Component를 소유 Actor 목록·클러스터에서 떼어 회수한다.
+TEST(World_BypassedComponentIsRepaired) {
+    Fixture fixture;
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    REQUIRE(world.BeginPlay());
+    const ObjectStats before = world.Objects().Stats();
+    auto actor = world.SpawnActor<Actor>();
+    REQUIRE(actor);
+    auto kept = world.AddComponent<SceneComponent>(actor.Value());
+    auto quiet = world.AddComponent<SceneComponent>(actor.Value());
+    auto ticking = world.AddComponent<LoggingComponent>(actor.Value());
+    auto removed = world.AddComponent<SceneComponent>(actor.Value());
+    REQUIRE(kept && quiet && ticking && removed);
+    REQUIRE(world.Tick(0.016));
+    const uint32 repairedBefore = world.Stats().repairedBypasses;
+    REQUIRE(world.Objects().RequestDestroy(world.Access(), quiet.Value()));
+    REQUIRE(world.Objects().RequestDestroy(world.Access(), ticking.Value()));
+    // World API 파괴는 우회 파괴로 세지 않는다(정리가 회수 요청 전에 Component 색인에서 뺀다).
+    REQUIRE(world.DestroyComponent(removed.Value()));
+    for (uint32 frame = 0; frame < 16; ++frame) {
+        REQUIRE(world.Tick(0.016));
+    }
+
+    ObjectHandle listed[4];
+    auto count = world.GetComponents(actor.Value(), listed);
+    REQUIRE(count);
+    CHECK(count.Value() == 1 && listed[0] == kept.Value());
+    CHECK(world.Stats().components == 1);
+    CHECK(!world.Objects().InspectLifecycle(world.Access(), quiet.Value()));
+    CHECK(!world.Objects().InspectLifecycle(world.Access(), ticking.Value()));
+    CHECK(!world.Objects().InspectLifecycle(world.Access(), removed.Value()));
+    CHECK(world.Objects().Stats().clusterMembers == before.clusterMembers + 2);
+    CHECK(world.Stats().repairedBypasses == repairedBefore + 2);
+    REQUIRE(world.Shutdown());
+}
+
+// Level을 PinForEncode로 고정한 채 Tick하면 그 프레임의 Actor 정리에서 Level 배열 떼기가 Busy이고
+// World는 Fatal한다. 그 메시지는 계약(고정도 Tick 전에 반환)을 밝혀야 한다(판정 함수 — 매 프레임
+// Level을 훑지 않고 떼기 시점의 Busy로만 판정한다). Busy가 실제로 고정에서 오는 것은 Registry 시험
+// ObjectRefArray_RemoveAtSwapMovesLastWithoutRevalidating이 본다.
+TEST(World_LevelEncodePinDetachFailureNamesTheContract) {
+    const char* const pinned = detail::LevelDetachFailureMessage(ErrorCode::Busy);
+    const char* const other = detail::LevelDetachFailureMessage(ErrorCode::InvalidArgument);
+    REQUIRE(pinned != nullptr && other != nullptr);
+    CHECK(strstr(pinned, "PinForEncode") != nullptr);
+    CHECK(strstr(pinned, "before Tick") != nullptr);
+    CHECK(strstr(other, "PinForEncode") == nullptr);
+    CHECK(strcmp(pinned, other) != 0);
+}
+
 TEST(World_MassShutdownReleasesThousandsOfActors) {
     Fixture fixture;
     World& world = *fixture.world;
@@ -1524,7 +1634,7 @@ TEST(World_BypassedRootComponentDestroyClearsRoot) {
     REQUIRE(world.GetComponentState(scene.Value()).Value() == ComponentState::Playing);
     REQUIRE(world.Objects().RequestDestroy(world.Access(), scene.Value()));
     REQUIRE(world.Tick(0.016));
-    CHECK(world.Stats().repairedTicks == 1);
+    CHECK(world.Stats().repairedBypasses == 1);
     auto root = world.With<Actor>(actor.Value(),
                                   [](Actor& value) noexcept { return value.RootComponent(); });
     CHECK(root && root.Value().IsNull());

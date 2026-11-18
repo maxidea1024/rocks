@@ -74,7 +74,10 @@ void World::DestroyComponentNow(ObjectHandle actor, ObjectHandle component,
         }
     }
 
-    // Object::Destroy로 우회 파괴되어 접근할 수 없는 Component도 회수 요청은 그대로 한다.
+    // Object::Destroy로 우회 파괴되어 접근할 수 없는 Component도 회수 요청은 그대로 한다. 그 전에
+    // 색인에서 빼 복구가 World의 요청을 우회 파괴로 보지 않게 한다(사본 Tick 등록도 해제 — 우회
+    // 파괴된 Component는 ticks_를 읽을 수 없다).
+    ForgetComponent(component);
     RequestDestroyOwned(component);
     gcPending_ = true;
     destroyedDuringCycle_ = true;
@@ -198,32 +201,36 @@ void World::FlushDestroys() noexcept {
                 continue;
             }
 
-            // Object::Destroy로 우회 파괴되어 접근할 수 없으면 소유 Actor를 찾아 간선만 정리한다.
-            for (const ActorRecord& record : actors_) {
-                auto contains = With<Actor>(record.handle, [component](Actor& actor) noexcept {
-                    return actor.components_.Contains(component);
-                });
-                if (contains && contains.Value()) {
-                    const ObjectHandle actor = record.handle;
-                    // 대표였다면 함께 비운다(우회 파괴된 객체를 root가 붙잡아 좀비로 남지 않게).
-                    auto detached = With<Actor>(actor, [&](Actor& value) noexcept {
-                        ClearRootComponent(actor, value, component);
-                        return objects_.RemoveReference(Access(), actor, value.components_,
-                                                        component);
-                    });
-                    if (detached && componentCount_ != 0) {
-                        --componentCount_;
-                    }
+            // World API 밖에서 파괴되어 접근할 수 없으면 Component 색인으로 소유 Actor를 찾아
+            // 간선과 Tick 등록만 정리한다(Actor를 훑지 않는다). 색인에 없으면 이미 정리됐다(중복
+            // 항목).
+            const ComponentRecord* entry = componentRecords_.Find(component.slot);
+            if (entry == nullptr || entry->component != component) {
+                continue;
+            }
 
-                    if (ActorRecord* owner = FindActorRecord(actor)) {
-                        const usize at = owner->components.Find(component);
-                        if (at != Array<ObjectHandle>::NotFound) {
-                            auto removed = owner->components.TryRemoveAt(at);
-                            (void)removed;
-                        }
-                    }
+            const ObjectHandle actor = entry->actor;
+            const ActorRecord* ownerRecord = FindActorRecord(actor);
+            if (ownerRecord != nullptr && ownerRecord->state == ActorState::PendingDestroy) {
+                // 소유 Actor 정리가 레코드의 목록으로 함께 정리한다.
+                continue;
+            }
 
-                    break;
+            ForgetComponent(component);
+            // 대표였다면 함께 비운다(우회 파괴된 객체를 root가 붙잡아 좀비로 남지 않게).
+            auto detached = With<Actor>(actor, [&](Actor& value) noexcept {
+                ClearRootComponent(actor, value, component);
+                return objects_.RemoveReference(Access(), actor, value.components_, component);
+            });
+            if (detached && componentCount_ != 0) {
+                --componentCount_;
+            }
+
+            if (ActorRecord* owner = FindActorRecord(actor)) {
+                const usize at = owner->components.Find(component);
+                if (at != Array<ObjectHandle>::NotFound) {
+                    auto removed = owner->components.TryRemoveAt(at);
+                    (void)removed;
                 }
             }
         }

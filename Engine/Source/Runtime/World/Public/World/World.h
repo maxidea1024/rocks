@@ -154,8 +154,10 @@ inline constexpr bool IsSpanV<Span<R>> = true;
 // 소유·수명 규약:
 // - 외부 코드는 Actor·Component·Level의 ObjectHandle을 보관하고 필요할 때 With로 접근한다.
 // RootRef를
-//   따로 잡지 않는다(정리 후에도 저장소가 남는다). Resolve로 받은 Borrow는 Tick·Shutdown 전에
-//   반환한다(Borrow가 남으면 GC가 미뤄지고 Shutdown이 Busy다. WorldStats::externalBorrows 참고).
+//   따로 잡지 않는다(정리 후에도 저장소가 남는다). Resolve로 받은 Borrow와 PinForEncode 고정은
+//   Tick·Shutdown 전에 반환한다(Borrow가 남으면 GC가 미뤄지고 Shutdown이 Busy다 —
+//   WorldStats::externalBorrows. 고정한 Level에서 그 프레임에 Actor를 정리하면 Level 배열을 고칠 수
+//   없어 Fatal이다).
 // - 파괴 요청(DestroyActor·DestroyComponent·DestroyLevel)은 즉시 메모리를 해제하지 않는다. 대상은
 //   곧바로 Tick에서 빠지고, 프레임 끝(4단계)에서 hook과 함께 정리된다. 같은 대상의 중복 요청은
 //   성공이다.
@@ -461,6 +463,18 @@ private:
         TickHandle ticks[detail::TickHookCount];
     };
 
+    // World가 만든 Component의 레코드다(componentRecords_). Component 객체가 World API 밖에서
+    // 파괴되면 객체를 읽을 수 없으므로 정리에 필요한 것을 World 쪽에 둔다.
+    struct ComponentRecord {
+        ObjectHandle component;
+        ObjectHandle actor;
+        // Component의 ticks_ 사본이다(등록 때 맞춘다). 이미 해제된 handle이 남아도 해제는 세대로
+        // 거부되므로 안전하다.
+        TickHandle ticks[detail::TickHookCount];
+        // 우회 파괴 정리가 파괴 큐에 넣었다(Tick 실행과 복구가 같은 Component를 두 번 넣지 않게).
+        bool bypassQueued = false;
+    };
+
     // Level 루트다. World가 보유하는 유일한 객체 루트다.
     struct LevelRecord {
         RootRef<Level> root;
@@ -550,12 +564,18 @@ private:
     // 남는다 — 13.3절). 이미 파괴됐거나 종료 중이면 무시하고, 그 밖의 실패는 불변식 위반으로
     // Fatal이다.
     void RequestDestroyOwned(ObjectHandle object) noexcept;
-    // World API 밖에서 파괴(RequestDestroy·Object::Destroy)된 Actor와 Level을 찾아 World 파괴로
-    // 돌린다(Actor는 DestroyActor, Level은 DestroyLevel — 영구 Level은 Fatal). 하나라도 있으면 참.
-    bool RepairBypassedActors() noexcept;
+    // 우회 파괴된 Component를 파괴 큐에 한 번만 넣는다(Component 색인에 없거나 이미 넣었으면
+    // 거짓).
+    bool QueueBypassedComponent(ObjectHandle component) noexcept;
+    // Component를 색인에서 빼고 사본 Tick 등록을 해제한다(World 정리가 회수 요청 직전에 부른다).
+    void ForgetComponent(ObjectHandle component) noexcept;
+    // World API 밖에서 파괴(RequestDestroy·Object::Destroy)된 Actor·Component·Level을 찾아 World
+    // 파괴로 돌린다(Actor는 DestroyActor, Component는 파괴 큐, Level은 DestroyLevel — 영구 Level은
+    // Fatal). 하나라도 있으면 참.
+    bool RepairBypassedObjects() noexcept;
     // Actor를 Level의 actors_에서 O(1)로 뗀다(끝 원소와 바꾼다).
     void DetachFromLevel(ObjectHandle level, const ActorRecord& record) noexcept;
-    // RepairBypassedActors가 파괴 요청 목록을 한 번에 꺼내는 수다.
+    // RepairBypassedObjects가 파괴 요청 목록을 한 번에 꺼내는 수다.
     static constexpr usize RepairBatch = 64;
     // 새 객체의 타입이 클러스터 소속 조건(완전한 필드 배치)을 맞추는지다.
     static bool JoinsCluster(ConstructionContext& transaction, ObjectHandle object) noexcept;
@@ -574,8 +594,11 @@ private:
     HashMap<uint32, SlotHandle> actorIndex_;
     Array<LevelRecord> levels_;
     // Level 객체의 슬롯 번호 집합이다(값은 쓰지 않는다). 파괴 요청 목록에서 Level을 Level 수에
-    // 비례하는 훑기 없이 가려낸다(RepairBypassedActors).
+    // 비례하는 훑기 없이 가려낸다(RepairBypassedObjects).
     HashMap<uint32, uint32> levelSlots_;
+    // Component 색인이다(슬롯 번호 → ComponentRecord). AddComponent가 넣고 World 정리가 회수 요청
+    // 직전에 뺀다. 우회 파괴로 Borrow를 얻을 수 없는 Component의 소유 Actor·Tick 등록을 찾는다.
+    HashMap<uint32, ComponentRecord> componentRecords_;
     ObjectHandle persistentLevel_;
     Array<ObjectHandle> pendingStart_;
     Array<ObjectHandle> pendingComponentStart_;
@@ -595,7 +618,7 @@ private:
     uint64 phaseNanoseconds_[TickPhaseCount] = {};
     uint64 tickNanoseconds_ = 0;
     uint32 skippedTicks_ = 0;
-    uint32 repairedTicks_ = 0;
+    uint32 repairedBypasses_ = 0;
 };
 
 } // namespace rocks

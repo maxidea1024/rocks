@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/NumericLimits.h>
 #include <Core/Result.h>
 #include <Core/Text/StringView.h>
 #include <Meta/TypeSchema.h>
@@ -145,6 +146,21 @@ public:
     const TypeSchema& Schema() const&& = delete;
     const RuntimeTypeOps& Ops() const& noexcept;
     const RuntimeTypeOps& Ops() const&& = delete;
+
+    // 아직 이 타입의 객체를 만든 적이 없을 때의 ObjectOffset이다.
+    static constexpr usize NoObjectOffset = NumericLimits<usize>::Max();
+
+    // 이 타입 객체의 저장소 시작에서 Object 기반까지의 byte 거리다. C++ 타입마다 고정이지만 0이라는
+    // 보장은 없다(Object는 가상 함수가 없어 가상 함수를 가진 파생은 MSVC ABI에서 vfptr 뒤에 Object
+    // 기반을 둔다). ObjectRegistry가 첫 생성 때 기록하므로 그 전에는 NoObjectOffset이다. Registry는
+    // 소유자 저장소 범위 검사에서 `object - ObjectOffset()`으로 저장소 시작을 얻는다(Docs/Design/
+    // GarbageCollectionScale.ko.md 6.4절 hot·cold). 빈 lease는 Fatal이다.
+    usize ObjectOffset() const noexcept;
+
+    // ObjectRegistry 생성 경로가 생성마다 부른다. 기록이 없으면 offset을 기록하고 true, 있으면
+    // 같은지를 돌려준다(다르면 construct가 같은 타입에서 다른 기반 위치를 돌려준 함수표 오류다). 빈
+    // lease는 Fatal이다.
+    bool RecordObjectOffset(usize offset) const noexcept;
 
     // ID는 값으로 반환하므로 lease 종료 후에도 보관할 수 있다. 빈 lease는 Fatal이다.
     TypeId Id() const noexcept;

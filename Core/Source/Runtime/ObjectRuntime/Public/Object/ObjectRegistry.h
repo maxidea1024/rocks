@@ -768,6 +768,9 @@ private:
     inline Slot* SlotAt(uint32) const noexcept;
     // 슬롯의 cold 레코드(이름·고리·회수 목록·생성 트랜잭션·Outer)다.
     inline SlotCold& ColdOf(const Slot&) const noexcept;
+    // 생성된 객체(object가 있는 슬롯)의 저장소 시작 주소다. hot의 object와 타입의 기반 위치
+    // (TypeLease::ObjectOffset)에서 유도한다 — 소유자 범위 검사가 cold를 읽지 않게 한다.
+    static inline uptr StorageStartOf(const Slot&) noexcept;
     // GC 밀집 자료(GC-S3, 정의는 ObjectRegistryInternal.h). 슬롯 index의 페이지·hot 레코드·비트
     // 묶음과 그 묶음 안의 비트다. index는 chunk가 있는 슬롯이어야 한다.
     inline GcPage& PageOf(uint32) const noexcept;

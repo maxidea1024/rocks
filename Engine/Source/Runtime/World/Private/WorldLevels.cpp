@@ -1,3 +1,5 @@
+#include "WorldInternal.h"
+
 #include <Object/ConstructionContext.h>
 #include <Platform/Fatal.h>
 #include <World/World.h>
@@ -113,6 +115,8 @@ Result<void> World::DestroyLevel(ObjectHandle level) noexcept {
 
     ObjectAccessScope scope(Access());
     record->pendingDestroy = true;
+    // Level 객체가 World API 밖에서 파괴됐으면(우회 파괴 복구) 빌릴 수 없어 pendingDestroy_를 켜지
+    // 않는다 — 그 Level은 곧 회수되고 World 쪽 판단은 레코드의 pendingDestroy로 한다.
     auto marked = With<Level>(level, [](Level& value) noexcept { value.pendingDestroy_ = true; });
     (void)marked;
     // 소속 Actor를 모두 파괴 대기로 만든다(hook 없음). 정리 단계가 Actor를 정리한 뒤 Level을
@@ -187,8 +191,9 @@ void World::DetachFromLevel(ObjectHandle level, const ActorRecord& record) noexc
 
         const usize last = owner.actors_.Size() - 1;
         const ObjectHandle moved = owner.actors_[last];
-        if (!objects_.RemoveReferenceAtSwap(Access(), level, owner.actors_, at)) {
-            platform::Fatal("World could not detach an actor from its Level");
+        if (auto removed = objects_.RemoveReferenceAtSwap(Access(), level, owner.actors_, at);
+            !removed) {
+            platform::Fatal(detail::LevelDetachFailureMessage(removed.Error()));
         }
 
         if (at != last) {

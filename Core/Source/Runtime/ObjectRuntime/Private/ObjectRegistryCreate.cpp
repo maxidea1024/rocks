@@ -388,6 +388,14 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
         platform::Fatal("A noexcept object constructor must return its object");
     }
 
+    // 소유자 범위 검사가 hot의 object에서 저장소 시작을 유도할 수 있게 타입의 기반 위치를 기록한다.
+    const uptr base = reinterpret_cast<uptr>(object);
+    const uptr start = reinterpret_cast<uptr>(memory.Value());
+    if (base < start || base - start >= freeSlot->type.Ops().size ||
+        !freeSlot->type.RecordObjectOffset(base - start)) {
+        platform::Fatal("Object base offset differs between objects of one type");
+    }
+
     object->registry_ = this;
     object->handle_ = handle;
     // 그 타입의 첫 객체면 참조 위치 표를 정한다(M3 — 처리 표시 아래라 marker와 겹치지 않는다).

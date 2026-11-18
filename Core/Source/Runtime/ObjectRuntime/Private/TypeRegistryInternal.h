@@ -24,6 +24,10 @@ struct TypeRegistry::Record {
     Record* previous = nullptr;
     TypeKind kind = TypeKind::Class;
     TypeSchema schema;
+    // 저장소 시작에서 Object 기반까지의 거리다(TypeLease::ObjectOffset — ObjectRegistry가 첫 생성
+    // 때 기록한다. 여러 Registry·스레드가 같은 값을 쓰므로 원자적으로 읽고 쓴다). ops.size 옆에 둬
+    // 소유자 범위 검사가 줄 하나만 읽는다.
+    usize objectOffset = TypeLease::NoObjectOffset;
     RuntimeTypeOps ops;
     EnumSchema enumSchema;
     RuntimeStructOps structOps;

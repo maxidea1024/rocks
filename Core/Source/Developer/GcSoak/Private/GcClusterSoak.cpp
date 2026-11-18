@@ -16,7 +16,7 @@
 // - World형(packages = false): Level(루트 보유, 지정 클러스터 루트) 아래 Actor·Component가 가입하고
 //   Level → Actor, Actor → Component 소유 간선을 둔다. 같은 Level Actor 사이 참조, Level 밖 일반
 //   객체와 그 간선, Actor·Component·Level 파괴, World API 밖 Actor 파괴(Component 정리는 다음 Begin
-//   전에 — World의 RepairBypassedActors와 같다)를 섞는다. 소속 불변식 검증을 켠다.
+//   전에 — World의 RepairBypassedObjects와 같다)를 섞는다. 소속 불변식 검증을 켠다.
 // - 패키지형(packages = true): 패키지 정책 Registry에서 패키지 생성(outer 사슬 포함), 패키지 사이
 //   간선 편집, 부분 트리 Discard, 패키지 Discard와 루트 반환, Discard 없이 루트 반환(버그 경로)을
 //   섞는다.
@@ -833,7 +833,7 @@ private:
         --levels_;
     }
 
-    // World API 밖 Actor 파괴는 다음 Begin 전에 정리한다(World::RepairBypassedActors와 같다).
+    // World API 밖 Actor 파괴는 다음 Begin 전에 정리한다(World::RepairBypassedObjects와 같다).
     void RepairBypassed() noexcept {
         if (options_.packages) {
             return;

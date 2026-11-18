@@ -53,6 +53,7 @@ Result<ObjectHandle> World::AddComponent(ObjectHandle actor, TypeId type) noexce
 
     const ObjectHandle handle = created.Value().Handle();
     auto rollback = [&](ErrorCode error) noexcept {
+        componentRecords_.Erase(handle.slot);
         RequestDestroyOwned(handle);
         created.Value().Reset();
         return Result<ObjectHandle>::Failure(error);
@@ -64,6 +65,14 @@ Result<ObjectHandle> World::AddComponent(ObjectHandle actor, TypeId type) noexce
     });
     if (!attached) {
         return rollback(attached.Error());
+    }
+
+    ComponentRecord entry;
+    entry.component = handle;
+    entry.actor = actor;
+    auto indexed = componentRecords_.Insert(handle.slot, entry);
+    if (!indexed) {
+        return rollback(indexed.Error());
     }
 
     // Actor의 강한 간선으로 소유를 넘긴다. 이후 임시 루트를 놓아도 Actor가 살아 있는 동안 보존된다.

@@ -39,7 +39,8 @@ Result<void> ObjectRegistry::CheckContainerOwnerLocked(ObjectHandle owner, const
     }
 
     // 컨테이너 객체는 owner 저장소 안에 직접 포함되어야 한다(SetEdge의 필드 위치 검사와 같다).
-    const uptr start = reinterpret_cast<uptr>(ColdOf(*source).storage);
+    // 저장소 시작은 hot의 object에서 유도한다(StorageStartOf — cold를 읽지 않는다).
+    const uptr start = StorageStartOf(*source);
     const uptr location = reinterpret_cast<uptr>(storage);
     const usize size = source->type.Ops().size;
     if (size < storageBytes || location < start || location - start > size - storageBytes) {
@@ -138,7 +139,7 @@ Result<void> ObjectRegistry::SetEdge(const ObjectAccessContext& access, ObjectHa
                     return Result<void>::Failure(ErrorCode::StaleHandle);
                 }
 
-                const uptr start = reinterpret_cast<uptr>(ColdOf(*source).storage);
+                const uptr start = StorageStartOf(*source);
                 const usize size = source->type.Ops().size;
                 if (location < start || location - start > size - sizeof(ObjectHandle)) {
                     return Result<void>::Failure(ErrorCode::InvalidArgument);
