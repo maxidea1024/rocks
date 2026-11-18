@@ -15,14 +15,14 @@
 //
 // 참조 함수 ↔ UE 5.8.4 원본(Engine/Source/Runtime/Engine/Private/Curves, 리뷰어 줄 단위 대조용):
 //   ue58step::IntegralEvaluate        ↔ IntegralCurve.cpp 7–40
-//   ue58step::AddKey                  ↔ IntegralCurve.cpp 49–57(StringCurve.cpp 25–35·NameCurve.cpp
-//                                       25–35는 같은 위치)
-//   ue58step::UpdateOrAddKey          ↔ IntegralCurve.cpp 70–91(StringCurve.cpp 176–199)
-//   ue58step::SetKeyTime              ↔ IntegralCurve.cpp 94–107(DeleteKey 60–67 + AddKey)
-//   ue58step::FindKeyBeforeOrAt       ↔ IntegralCurve.cpp 186–225
-//   ue58step::IntegralRemoveRedundant ↔ IntegralCurve.cpp 227–257
-//   ue58step::StringEval              ↔ StringCurve.cpp 46–80
-//   ue58step::StringRemoveRedundant   ↔ StringCurve.cpp 202–232
+//   ue58step::AddKey                  ↔ IntegralCurve.cpp 49–58(StringCurve.cpp 33–44·NameCurve.cpp
+//                                       33–44는 같은 위치)
+//   ue58step::UpdateOrAddKey          ↔ IntegralCurve.cpp 71–93(StringCurve.cpp 183–207)
+//   ue58step::SetKeyTime              ↔ IntegralCurve.cpp 96–110(DeleteKey 61–68 + AddKey)
+//   ue58step::FindKeyBeforeOrAt       ↔ IntegralCurve.cpp 186–226
+//   ue58step::IntegralRemoveRedundant ↔ IntegralCurve.cpp 228–257
+//   ue58step::StringEval              ↔ StringCurve.cpp 57–90
+//   ue58step::StringRemoveRedundant   ↔ StringCurve.cpp 209–238
 namespace rocks::test::step_golden {
 
 namespace ue58step {
@@ -117,7 +117,7 @@ inline int32 IntegralEvaluate(const IntegralCurve& Curve, float Time, int32 InDe
     return ReturnVal;
 }
 
-// StringCurve.cpp 46–80
+// StringCurve.cpp 57–90
 inline StringView StringEval(const StringCurve& Curve, float Time, StringView InDefaultValue,
                              const Options& options) noexcept {
     const Array<StringKey>& Keys = Curve.Keys;
@@ -146,7 +146,7 @@ inline StringView StringEval(const StringCurve& Curve, float Time, StringView In
     return ReturnVal;
 }
 
-// IntegralCurve.cpp 49–57(키 핸들 빼고). 새 index다.
+// IntegralCurve.cpp 49–58(키 핸들 빼고). 새 index다.
 template <class K, class V>
 int32 AddKey(Array<K>& Keys, float InTime, V InValue) noexcept {
     int32 Index = 0;
@@ -159,7 +159,7 @@ int32 AddKey(Array<K>& Keys, float InTime, V InValue) noexcept {
     return Index;
 }
 
-// IntegralCurve.cpp 70–91
+// IntegralCurve.cpp 71–93
 template <class K, class V>
 int32 UpdateOrAddKey(Array<K>& Keys, float InTime, V Value, float KeyTimeTolerance) noexcept {
     for (int32 KeyIndex = 0; KeyIndex < static_cast<int32>(Keys.Size()); ++KeyIndex) {
@@ -178,7 +178,7 @@ int32 UpdateOrAddKey(Array<K>& Keys, float InTime, V Value, float KeyTimeToleran
     return AddKey(Keys, InTime, Value);
 }
 
-// IntegralCurve.cpp 94–107(DeleteKey + AddKey, 옛 칸 복원). 새 index다.
+// IntegralCurve.cpp 96–110(DeleteKey 61–68 + AddKey, 옛 칸 복원). 새 index다.
 template <class K>
 int32 SetKeyTime(Array<K>& Keys, int32 Index, float NewTime) noexcept {
     const K OldKey = Keys[Index];
@@ -190,7 +190,7 @@ int32 SetKeyTime(Array<K>& Keys, int32 Index, float NewTime) noexcept {
     return NewIndex;
 }
 
-// IntegralCurve.cpp 186–225(핸들 대신 index, 없으면 -1).
+// IntegralCurve.cpp 186–226(핸들 대신 index, 없으면 -1).
 template <class K>
 int32 FindKeyBeforeOrAt(const Array<K>& Keys, float KeyTime) noexcept {
     const int32 Num = static_cast<int32>(Keys.Size());
@@ -223,7 +223,7 @@ int32 FindKeyBeforeOrAt(const Array<K>& Keys, float KeyTime) noexcept {
     return FoundIndex;
 }
 
-// IntegralCurve.cpp 227–257(핸들 대신 index — 지울 index를 모은 뒤 뒤에서부터 지운다: 원래 배열
+// IntegralCurve.cpp 228–257(핸들 대신 index — 지울 index를 모은 뒤 뒤에서부터 지운다: 원래 배열
 // 기준의 판정은 같다).
 inline void IntegralRemoveRedundant(IntegralCurve& Curve, Allocator& allocator,
                                     const Options& options) noexcept {
@@ -251,7 +251,7 @@ inline void IntegralRemoveRedundant(IntegralCurve& Curve, Allocator& allocator,
     }
 }
 
-// StringCurve.cpp 202–232
+// StringCurve.cpp 209–238
 inline void StringRemoveRedundant(StringCurve& Curve, Allocator& allocator,
                                   const Options& options) noexcept {
     Array<StringKey>& Keys = Curve.Keys;
@@ -390,7 +390,8 @@ TEST(StepCurveGolden_IntegerEvaluateMatchesUe) {
 }
 
 // 무작위 StringStepCurve·NameStepCurve의 Evaluate가 UE FStringCurve::Eval 참조와 같다(Name은 D9 —
-// String 규칙). 값 비교는 String byte, Name은 같은 단어 표에서 고른 index다.
+// String 규칙). 값 비교는 String byte, Name은 표시 철자다. 기본값·fallback은 키 단어 표 밖의
+// 이름이라 어느 갈래가 냈는지 구별된다.
 TEST(StepCurveGolden_StringAndNameEvaluateMatchUe) {
     SystemAllocator allocator;
     NamePool pool(allocator);
@@ -401,6 +402,10 @@ TEST(StepCurveGolden_StringAndNameEvaluateMatchUe) {
         REQUIRE(interned);
         names[index] = interned.Value();
     }
+
+    auto defaultName = pool.TryIntern(StringView("Default"));
+    auto fallbackName = pool.TryIntern(StringView("Fallback"));
+    REQUIRE(defaultName && fallbackName);
 
     MathRandom random(0x57E1);
     Array<float> times(allocator);
@@ -421,7 +426,7 @@ TEST(StepCurveGolden_StringAndNameEvaluateMatchUe) {
             String fallbackDefault(allocator);
             REQUIRE(fallbackDefault.TryAssign("Default"));
             strings.defaultValue.Emplace(Move(fallbackDefault));
-            namesCurve.defaultValue = names[0];
+            namesCurve.defaultValue = defaultName.Value();
             reference.DefaultValue = StringView("Default");
         }
 
@@ -431,16 +436,9 @@ TEST(StepCurveGolden_StringAndNameEvaluateMatchUe) {
             const StringView expected =
                 ue58step::StringEval(reference, time, StringView("Fallback"), {});
             mismatches += strings.Evaluate(time, StringView("Fallback")) == expected ? 0 : 1;
-            const Name name = namesCurve.Evaluate(time, names[4]);
-            const bool defaulted =
-                expected == StringView("Default") || expected == StringView("Fallback");
-            if (defaulted) {
-                const Name wanted = expected == StringView("Default") ? names[0] : names[4];
-                mismatches += name == wanted ? 0 : 1;
-            } else {
-                auto lease = pool.Acquire(name);
-                mismatches += lease && lease.Value().View() == expected ? 0 : 1;
-            }
+            const Name name = namesCurve.Evaluate(time, fallbackName.Value());
+            auto lease = pool.Acquire(name);
+            mismatches += lease && lease.Value().View() == expected ? 0 : 1;
         }
     }
 
@@ -497,6 +495,69 @@ TEST(StepCurveGolden_EditSequenceMatchesUe) {
             }
 
             mismatches += SameIntegerKeys(curve, reference) ? 0 : 1;
+        }
+    }
+
+    CHECK(mismatches == 0);
+}
+
+// String 키 편집 순서(더하기·같은 시간 더하기·UpdateOrAdd·SetKeyTime·지우기)가 UE FStringCurve
+// 참조(같은 index 규칙 — AddKey 33–44, UpdateOrAddKey 183–207, SetKeyTime 159–173)와 같은 키 배열을
+// 만든다. 값은 단어 표에서 고른다(대소문자만 다른 "Walk"·"walk" 포함 — UpdateOrAdd는 시간으로만
+// 고른다).
+TEST(StepCurveGolden_StringEditSequenceMatchesUe) {
+    SystemAllocator allocator;
+    MathRandom random(0x57ED);
+    int32 mismatches = 0;
+    for (int32 curveIndex = 0; curveIndex < 300; ++curveIndex) {
+        StringStepCurve curve(allocator);
+        ue58step::StringCurve reference(allocator);
+        for (int32 step = 0; step < 30; ++step) {
+            const usize count = curve.KeyCount();
+            const uint64 operation = count == 0 ? 0 : random.Next() % 4;
+            const StringView value(Words[random.Next() % 5]);
+            if (operation == 0) {
+                const float time = count > 0 && random.Next() % 3 == 0
+                                       ? curve.Keys()[random.Next() % count].time
+                                       : RandomFloat(random, -10.0, 10.0);
+                auto added = curve.TryAddKey(time, value);
+                REQUIRE(added);
+                mismatches += added.Value() == static_cast<usize>(
+                                                   ue58step::AddKey(reference.Keys, time, value))
+                                  ? 0
+                                  : 1;
+            } else if (operation == 1) {
+                const float time = random.Next() % 2 == 0
+                                       ? curve.Keys()[random.Next() % count].time + 5.0e-5f
+                                       : RandomFloat(random, -10.0, 10.0);
+                auto updated = curve.TryUpdateOrAddKey(time, value);
+                REQUIRE(updated);
+                mismatches += updated.Value() == static_cast<usize>(ue58step::UpdateOrAddKey(
+                                                     reference.Keys, time, value, 1.0e-4f))
+                                  ? 0
+                                  : 1;
+            } else if (operation == 2) {
+                const usize index = random.Next() % count;
+                const float time = RandomFloat(random, -10.0, 10.0);
+                auto moved = curve.TrySetKeyTime(index, time);
+                REQUIRE(moved);
+                mismatches += moved.Value() == static_cast<usize>(ue58step::SetKeyTime(
+                                                   reference.Keys, static_cast<int32>(index), time))
+                                  ? 0
+                                  : 1;
+            } else {
+                const usize index = random.Next() % count;
+                REQUIRE(curve.TryRemoveKey(index));
+                static_cast<void>(reference.Keys.TryRemoveAt(index));
+            }
+
+            bool same = curve.KeyCount() == reference.Keys.Size();
+            for (usize index = 0; same && index < curve.KeyCount(); ++index) {
+                same = curve.Keys()[index].time == reference.Keys[index].time &&
+                       curve.Keys()[index].value.View() == reference.Keys[index].value;
+            }
+
+            mismatches += same ? 0 : 1;
         }
     }
 

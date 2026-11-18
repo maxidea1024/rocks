@@ -162,6 +162,11 @@ Result<void> IntegerStepCurve::TryRemoveRedundantKeys() noexcept {
         keys_, [](int32 left, int32 right) noexcept { return left == right; });
 }
 
+Result<void> IntegerStepCurve::TryRemoveRedundantKeys(Array<usize>& keptIndices) noexcept {
+    return curves_detail::RemoveStepRedundantKeys(
+        keys_, [](int32 left, int32 right) noexcept { return left == right; }, &keptIndices);
+}
+
 Result<void> IntegerStepCurve::Validate(const IntegerStepCurve& curve) noexcept {
     return curves_detail::ValidateKeys(curve.keys_.View());
 }
@@ -247,9 +252,22 @@ Result<void> NameStepCurve::TryShiftKeyTimes(Span<const usize> indices, float de
     return curves_detail::ShiftKeyTimes(keys_, indices, delta);
 }
 
+namespace {
+
+// Name 중복 제거의 같음이다: Name 규칙(대소문자 무시)에 표시 철자(displayId)까지 같아야 한다 —
+// 철자만 다른 키를 지우면 평가 결과의 표시 철자가 바뀐다(키 핸들 표의 Name 비교와 같은 판단).
+bool SameNameSpelling(Name left, Name right) noexcept {
+    return left == right && left.displayId == right.displayId;
+}
+
+} // namespace
+
 Result<void> NameStepCurve::TryRemoveRedundantKeys() noexcept {
-    return curves_detail::RemoveStepRedundantKeys(
-        keys_, [](Name left, Name right) noexcept { return left == right; });
+    return curves_detail::RemoveStepRedundantKeys(keys_, SameNameSpelling);
+}
+
+Result<void> NameStepCurve::TryRemoveRedundantKeys(Array<usize>& keptIndices) noexcept {
+    return curves_detail::RemoveStepRedundantKeys(keys_, SameNameSpelling, &keptIndices);
 }
 
 Result<void> NameStepCurve::Validate(const NameStepCurve& curve) noexcept {
@@ -378,6 +396,15 @@ Result<void> StringStepCurve::TryRemoveRedundantKeys() noexcept {
         keys_, [](const String& left, const String& right) noexcept {
             return left.View() == right.View();
         });
+}
+
+Result<void> StringStepCurve::TryRemoveRedundantKeys(Array<usize>& keptIndices) noexcept {
+    return curves_detail::RemoveStepRedundantKeys(
+        keys_,
+        [](const String& left, const String& right) noexcept {
+            return left.View() == right.View();
+        },
+        &keptIndices);
 }
 
 Result<void> StringStepCurve::Validate(const StringStepCurve& curve) noexcept {
