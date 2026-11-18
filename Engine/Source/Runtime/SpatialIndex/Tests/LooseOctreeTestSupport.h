@@ -619,6 +619,132 @@ inline ShapeQuery MakeShapeQuery(ShapeKind kind, RandomStream& random, double ex
     return query;
 }
 
+// 경계 사례 질의 형상이다. 살아 있는 프록시 하나를 골라 그 꼭짓점·면에 정확히 닿게 만든다.
+// - 볼록 영역: 축 평행 normal의 두께 0 slab(마주 보는 두 평면이 같은 좌표), 빈 slab(평면 사이가
+//   뒤집힘), 프록시 꼭짓점을 지나는 임의 평면.
+// - ray: 축 평행 방향(−0 성분 포함)으로 프록시 면 위를 스치는 ray, maxDistance = 정확히 그 프록시의
+//   진입 거리.
+// - sphere: 중심이 프록시 꼭짓점이고 반지름 0, 또는 면에서 축 방향으로 정확히 반지름만큼 떨어진
+// 중심.
+// - box: 프록시 면에 면으로 닿는 box.
+// 살아 있는 프록시가 없으면 일반 생성기로 대신한다.
+inline ShapeQuery MakeEdgeShapeQuery(ShapeKind kind, RandomStream& random, double extent,
+                                     const Array<OracleProxy>& proxies) noexcept {
+    usize live = 0;
+    for (const OracleProxy& proxy : proxies) {
+        live += proxy.live ? 1 : 0;
+    }
+    if (live == 0) {
+        return MakeShapeQuery(kind, random, extent);
+    }
+    usize pick = random.NextUInt32Below(static_cast<uint32>(proxies.Size()));
+    while (!proxies[pick].live) {
+        pick = (pick + 1) % proxies.Size();
+    }
+    const Box<double> target = proxies[pick].bounds;
+    const uint32 axisIndex = random.NextUInt32Below(3);
+    const auto axisVector = [](uint32 index, double sign) noexcept {
+        // 다른 성분은 −0으로 둔다(−0 성분도 유효한 단위 벡터다).
+        return Vec3d(index == 0 ? sign : -0.0, index == 1 ? sign : -0.0, index == 2 ? sign : -0.0);
+    };
+    const double faceLow = target.min[axisIndex];
+    const double faceHigh = target.max[axisIndex];
+    ShapeQuery query;
+    query.kind = kind;
+    switch (kind) {
+    case ShapeKind::Box: {
+        Vec3d minimum = target.max;
+        Vec3d maximum = target.max + Vec3d::Splat(Uniform(random, 0, extent / 10.0));
+        if (axisIndex == 0) {
+            minimum.y = target.min.y;
+            minimum.z = target.min.z;
+        }
+        query.box = Box<double>(minimum, maximum);
+        break;
+    }
+    case ShapeKind::Sphere: {
+        if (random.NextUInt32Below(2) == 0) {
+            query.sphere = Sphere<double>(target.min, 0.0);
+        } else {
+            const double radius = static_cast<double>(1 + random.NextUInt32Below(8));
+            Vec3d center = target.Center();
+            if (axisIndex == 0) {
+                center.x = faceHigh + radius;
+            } else if (axisIndex == 1) {
+                center.y = faceHigh + radius;
+            } else {
+                center.z = faceHigh + radius;
+            }
+            query.sphere = Sphere<double>(center, radius);
+        }
+        break;
+    }
+    case ShapeKind::Volume: {
+        const uint32 variant = random.NextUInt32Below(3);
+        Plane<double> planes[2];
+        uint32 count = 2;
+        if (variant == 0) {
+            // 두께 0 slab: 프록시 면 좌표에서 마주 보는 두 평면.
+            planes[0] = Plane<double>(axisVector(axisIndex, 1.0), faceLow);
+            planes[1] = Plane<double>(axisVector(axisIndex, -1.0), -faceLow);
+        } else if (variant == 1) {
+            // 빈 slab: 앞 평면이 뒤 평면보다 앞에 있다(술어는 평면별이라 걸친 box는 여전히 후보다).
+            planes[0] = Plane<double>(axisVector(axisIndex, 1.0), faceHigh);
+            planes[1] = Plane<double>(axisVector(axisIndex, -1.0), -faceLow);
+        } else {
+            // 프록시 꼭짓점을 지나는 임의 평면 하나.
+            const Vec3d normal = RandomUnitVector(random);
+            planes[0] = Plane<double>(normal, Dot(normal, target.max));
+            count = 1;
+        }
+        auto volume = ConvexVolume<double>::TryMake(Span<const Plane<double>>(planes, count));
+        if (volume) {
+            query.volume = volume.Value();
+        }
+        break;
+    }
+    case ShapeKind::Ray: {
+        // 프록시 면(axisIndex 축의 min 면) 위에서 다른 축 방향으로 스치는 ray, 또는 축 방향으로
+        // 들어가 maxDistance가 정확히 진입 거리인 ray.
+        const uint32 along = (axisIndex + 1) % 3;
+        Vec3d origin = target.Center();
+        if (random.NextUInt32Below(2) == 0) {
+            if (axisIndex == 0) {
+                origin.x = faceLow;
+            } else if (axisIndex == 1) {
+                origin.y = faceLow;
+            } else {
+                origin.z = faceLow;
+            }
+            const double back = target.max[along] - target.min[along] + 5.0;
+            if (along == 0) {
+                origin.x -= back;
+            } else if (along == 1) {
+                origin.y -= back;
+            } else {
+                origin.z -= back;
+            }
+            query.ray = Ray<double>(origin, axisVector(along, 1.0));
+            query.maxDistance = platform::PlatformMath::Infinity<double>();
+        } else {
+            const double back = Uniform(random, 1.0, extent / 4.0);
+            if (axisIndex == 0) {
+                origin.x = faceLow - back;
+            } else if (axisIndex == 1) {
+                origin.y = faceLow - back;
+            } else {
+                origin.z = faceLow - back;
+            }
+            query.ray = Ray<double>(origin, axisVector(axisIndex, 1.0));
+            query.maxDistance =
+                Raycast(query.ray, target, platform::PlatformMath::Infinity<double>()).distance;
+        }
+        break;
+    }
+    }
+    return query;
+}
+
 inline constexpr ShapeKind AllShapeKinds[] = {ShapeKind::Box, ShapeKind::Sphere, ShapeKind::Volume,
                                               ShapeKind::Ray};
 

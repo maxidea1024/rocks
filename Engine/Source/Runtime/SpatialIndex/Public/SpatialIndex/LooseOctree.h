@@ -542,7 +542,8 @@ private:
     Counters counters_;
     Peaks peaks_;
 
-    // 변경 함수가 시작될 때마다 늘어나는 세대다. 노드 묶음이 모은 뒤의 변경을 검출한다.
+    // 트리 상태의 세대다. 생성·이동·대입·변경 함수 시작마다 프로세스 전역 단조 계수에서 새 값을
+    // 받는다(NextMutationEpoch). 노드 묶음이 모은 뒤의 변경과 다른 트리 상태를 검출한다.
     uint64 mutationEpoch_ = 0;
 
     // 6.9절 위반 검출용이다. readers_는 열린 읽기 범위 수, writer_는 변경 진행 중 표시(0/1)다.
@@ -556,9 +557,10 @@ private:
 // 모든 질의는 프록시 AABB와 질의 형상의 교차 후보를 돌려준다. 정확한 AABB 교차 집합을 빠짐없이
 // 포함한다. 박스 질의는 float 상대 경계 때문에 초과 후보가 있을 수 있다(노드 level ℓ의 확장 경계 반
 // 변 k·h_ℓ에 대한 float ULP 몇 개 폭, 6.8절). 구·볼록 영역·ray 질의는 정확한 double AABB에 Core
-// 술어를 적용하므로 초과 후보가 없다. 필터는 AABB 판정보다 먼저
-// 적용하며 질의 mask 0은 아무것도 돌려주지 않는다(오류 아님). 질의 box가 유효하지 않으면 아무것도
-// 방문하지 않고 InvalidArgument다. 검색은 힙 할당을 하지 않는다.
+// 술어(Overlap·Raycast)를 적용하므로 후보가 그 술어의 결과와 같다(초과 후보 없음, 술어 자체의
+// 반올림 한계는 Intersection.h 설명을 따른다). 필터는 공간 판정보다 먼저 적용하며 질의 mask 0은
+// 아무것도 돌려주지 않는다(오류 아님). 질의 형상이 유효하지 않으면 아무것도 방문하지 않고
+// InvalidArgument다. 검색은 힙 할당을 하지 않는다.
 class LooseOctreeReader {
 public:
     LooseOctreeReader(const LooseOctreeReader&) noexcept = default;
@@ -631,8 +633,10 @@ public:
 
     // ray에 가장 가까운 프록시를 정밀 판정 콜백으로 찾는다(6.8절). 후보마다
     // hitTest(const SpatialProxyHit&, double currentMax)를 불러 RayHitResult를 받는다.
-    // - 전제: hitTest가 돌려주는 거리는 그 프록시 AABB의 ray 진입 거리 이상이다(정밀 형상이 등록
-    //   AABB 안에 있음). 어기면 답을 놓칠 수 있다.
+    // - 전제: hitTest가 돌려주는 거리는 Core Raycast(ray, 프록시 AABB, maxDistance)가 계산한 진입
+    //   거리 이상이다(정밀 형상이 등록 AABB 안에 있음). 가지치기가 이 진입 거리로 하므로, 정밀
+    //   거리를 다른 식으로 계산해 그보다 1–2 ULP 작을 수 있으면 그 진입 거리로 clamp해 돌려준다.
+    //   어기면 답을 놓칠 수 있다.
     // - hit이 참이고 거리가 현재 최단보다 작을 때만(처음 후보는 maxDistance 이하일 때) 최단을
     //   줄인다. 같은 거리면 먼저 찾은 쪽이 남는다. NaN·음수·maxDistance 초과 거리는 받지 않는다.
     // - 노드는 확장 경계 진입 거리가 현재 최단보다 엄격히 크면 건너뛰고, 프록시는 AABB 진입 거리가

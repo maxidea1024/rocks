@@ -70,7 +70,10 @@ TEST(LooseOctree_LO01_AllShapesMatchExhaustiveSearch) {
         SpatialReadScope read(tree.Tree());
         for (uint32 query = 0; query < 160; ++query) {
             const ShapeKind kind = AllShapeKinds[query % 4];
-            const ShapeQuery shape = MakeShapeQuery(kind, random, 200.0);
+            // 세 번에 한 번은 프록시 꼭짓점·면에 정확히 닿는 경계 사례다.
+            const ShapeQuery shape = query % 3 == 2
+                                         ? MakeEdgeShapeQuery(kind, random, 200.0, tree.Proxies())
+                                         : MakeShapeQuery(kind, random, 200.0);
             const uint32 mask = query % 13 == 0 ? 0u : 1u + random.NextUInt32Below(15);
             const QueryCheck check =
                 CheckShapeQuery(read.Reader(), tree.Proxies(), shape, mask, tolerance, allocator);
@@ -109,7 +112,9 @@ TEST(LooseOctree_LO02_ConservativenessBoundsPerShape) {
         uint64 boxExtra = 0;
         for (uint32 query = 0; query < 120; ++query) {
             const ShapeKind kind = AllShapeKinds[query % 4];
-            const ShapeQuery shape = MakeShapeQuery(kind, random, 5000.0, center);
+            const ShapeQuery shape = query % 3 == 2
+                                         ? MakeEdgeShapeQuery(kind, random, 5000.0, tree.Proxies())
+                                         : MakeShapeQuery(kind, random, 5000.0, center);
             const QueryCheck check =
                 CheckShapeQuery(read.Reader(), tree.Proxies(), shape, 1, tolerance, allocator);
             CHECK(check.ok);
@@ -607,4 +612,133 @@ TEST(LooseOctree_ShapeQueriesStayConservativeUnderFlushToZero) {
         }
     }
     CHECK(missing == 0 && exactTotal > 0);
+}
+
+// 노드 묶음 유효성: 다른 트리에서 모은 묶음은 InvalidArgument이고, 이동 대입 뒤와 같은 주소에
+// 트리를 다시 만든 뒤에는 변경 횟수가 같아도 StaleHandle이다(세대는 프로세스 전역 단조 계수에서
+// 받는다). 막지 못하면 완전 포함 묶음이 옮겨 온 다른 트리의 프록시를 낸다.
+TEST(LooseOctree_NodeBatchesRejectOtherTreesAndReplacedState) {
+    SystemAllocator allocator;
+    const LooseOctreeConfig config = SmallConfig();
+    const Sphere<double> sphere(Vec3d(0, 0, 0), 30.0);
+    const auto fill = [&](LooseOctree& tree, const Vec3d& shift) noexcept {
+        RandomStream random(7);
+        bool ok = true;
+        for (uint32 index = 0; index < 400; ++index) {
+            SpatialProxyDesc desc;
+            desc.bounds = MakeCube(shift + Vec3d(Uniform(random, -20, 20), Uniform(random, -20, 20),
+                                                 Uniform(random, -20, 20)),
+                                   0.1);
+            desc.filterMask = 1;
+            desc.userValue = index;
+            ok = ok && static_cast<bool>(tree.TryAdd(desc));
+        }
+        return ok;
+    };
+    const auto ignore = [](const SpatialProxyHit&) noexcept { return QueryControl::Continue; };
+    auto createdA = LooseOctree::TryCreate(config, allocator);
+    auto createdB = LooseOctree::TryCreate(config, allocator);
+    REQUIRE(createdA && createdB);
+    LooseOctree a = Move(createdA.Value());
+    LooseOctree b = Move(createdB.Value());
+    // 같은 연산 수, 같은 구조, 먼 위치.
+    REQUIRE(fill(a, Vec3d(0, 0, 0)));
+    REQUIRE(fill(b, Vec3d(5000, 5000, 5000)));
+    static SpatialNodeBatch batches[1024];
+    usize written = 0;
+    {
+        SpatialReadScope read(a);
+        auto collected = read.Reader().CollectNodeBatches(sphere, Span<SpatialNodeBatch>(batches));
+        REQUIRE(collected && collected.Value().written > 0);
+        written = collected.Value().written;
+    }
+    {
+        // 다른 트리의 reader에 넘기면 InvalidArgument다.
+        SpatialReadScope read(b);
+        CHECK(read.Reader().QueryBatch(batches[0], sphere, 1, ignore).Error() ==
+              ErrorCode::InvalidArgument);
+    }
+    a = Move(b);
+    {
+        SpatialReadScope read(a);
+        uint64 emitted = 0;
+        bool allStale = true;
+        for (usize index = 0; index < written; ++index) {
+            auto queried = read.Reader().QueryBatch(batches[index], sphere, 1,
+                                                    [&](const SpatialProxyHit&) noexcept {
+                                                        ++emitted;
+                                                        return QueryControl::Continue;
+                                                    });
+            allStale = allStale && queried.Error() == ErrorCode::StaleHandle;
+        }
+        CHECK(allStale && emitted == 0);
+    }
+    // 이동된 원본(b)의 reader에 넘겨도 받지 않는다(다른 트리 주소).
+    {
+        SpatialReadScope read(b);
+        CHECK(read.Reader().QueryBatch(batches[0], sphere, 1, ignore).Error() ==
+              ErrorCode::InvalidArgument);
+    }
+
+    // 같은 주소에 트리를 다시 만든다.
+    alignas(LooseOctree) static unsigned char storage[sizeof(LooseOctree)];
+    auto first = LooseOctree::TryCreate(config, allocator);
+    REQUIRE(first);
+    LooseOctree* tree = InitializeAt<LooseOctree>(storage, Move(first.Value()));
+    REQUIRE(fill(*tree, Vec3d(0, 0, 0)));
+    {
+        SpatialReadScope read(*tree);
+        auto collected = read.Reader().CollectNodeBatches(sphere, Span<SpatialNodeBatch>(batches));
+        REQUIRE(collected && collected.Value().written > 0);
+    }
+    DestroyAt(tree);
+    auto second = LooseOctree::TryCreate(config, allocator);
+    REQUIRE(second);
+    tree = InitializeAt<LooseOctree>(storage, Move(second.Value()));
+    REQUIRE(fill(*tree, Vec3d(5000, 5000, 5000)));
+    {
+        SpatialReadScope read(*tree);
+        CHECK(read.Reader().QueryBatch(batches[0], sphere, 1, ignore).Error() ==
+              ErrorCode::StaleHandle);
+    }
+    DestroyAt(tree);
+}
+
+// LO13 경계: 같은 거리면 먼저 찾은 쪽이 남고, hitTest가 NaN·음수·maxDistance 초과 거리를 주면 받지
+// 않는다.
+TEST(LooseOctree_LO13_NearestTieAndRejectedDistances) {
+    SystemAllocator allocator;
+    auto created = LooseOctree::TryCreate(SmallConfig(), allocator);
+    REQUIRE(created);
+    OracleTree tree(Move(created.Value()), allocator);
+    // 같은 AABB 둘(같은 노드에 넣은 순서대로 방문된다).
+    REQUIRE(tree.Add(MakeCube(Vec3d(10, 0, 0), 1), 1) == 0);
+    REQUIRE(tree.Add(MakeCube(Vec3d(10, 0, 0), 1), 1) == 1);
+    SpatialReadScope read(tree.Tree());
+    const LooseOctreeReader reader = read.Reader();
+    const Ray<double> ray(Vec3d(0, 0, 0), Vec3d(1, 0, 0));
+    uint32 calls = 0;
+    auto tie = reader.QueryRayNearest(ray, 100.0, 1, [&](const SpatialProxyHit&, double) noexcept {
+        ++calls;
+        return RayHitResult{true, 9.0};
+    });
+    REQUIRE(tie && tie.Value().found);
+    CHECK(tie.Value().proxy.userValue == 0 && tie.Value().distance == 9.0 && calls == 2);
+
+    const double rejected[] = {platform::PlatformMath::QuietNaN<double>(), -1.0, 100.5};
+    for (const double distance : rejected) {
+        auto nearest =
+            reader.QueryRayNearest(ray, 100.0, 1, [&](const SpatialProxyHit&, double) noexcept {
+                return RayHitResult{true, distance};
+            });
+        REQUIRE(nearest);
+        CHECK(!nearest.Value().found);
+    }
+    // maxDistance와 정확히 같은 거리는 받는다(닫힌 구간).
+    auto boundary =
+        reader.QueryRayNearest(ray, 100.0, 1, [](const SpatialProxyHit&, double) noexcept {
+            return RayHitResult{true, 100.0};
+        });
+    REQUIRE(boundary);
+    CHECK(boundary.Value().found && boundary.Value().distance == 100.0);
 }
