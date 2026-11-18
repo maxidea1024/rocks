@@ -105,8 +105,8 @@ Result<void> Report(ConfigState& state, ConfigDiagnosticCode code, ConfigSeverit
     return state.diagnostics.Add(diagnostic);
 }
 
-StringView CheckLayerAllowed(const ConfigState& state, ConfigLayer layer, uint32 settingsFlags,
-                             bool incoming) noexcept {
+StringView CheckLayerAllowed(const ConfigState& state, ConfigLayer layer,
+                             uint32 settingsFlags) noexcept {
     if (state.releaseRules && HasFlag(settingsFlags, SettingsFieldFlags::DevelopmentOnly) &&
         layer != ConfigLayer::CodeDefault) {
         return "a DevelopmentOnly value keeps its code default under release rules";
@@ -114,11 +114,6 @@ StringView CheckLayerAllowed(const ConfigState& state, ConfigLayer layer, uint32
 
     if (layer == ConfigLayer::User && !HasFlag(settingsFlags, SettingsFieldFlags::UserConfig)) {
         return "the user layer can write UserConfig fields only";
-    }
-
-    if (incoming && state.startupComplete &&
-        HasFlag(settingsFlags, SettingsFieldFlags::StartupOnly)) {
-        return "a StartupOnly value cannot change after startup";
     }
 
     return {};
@@ -210,7 +205,7 @@ Result<bool> ValidateConsoleValue(ConfigState& state, const ConfigEntry& entry, 
 
     ConfigDiagnosticCode code = ConfigDiagnosticCode::InvalidSetting;
     FieldValue parsed(state.allocator);
-    auto checked = CheckConsoleValue(state, setting, entry.layer, true, text, parsed, code);
+    auto checked = CheckConsoleValue(state, setting, entry.layer, text, parsed, code);
     if (!checked) {
         return Result<bool>::Failure(checked.Error());
     }
@@ -293,7 +288,7 @@ Result<bool> ValidateEntry(ConfigState& state, const ConfigEntry& entry) noexcep
         auto release =
             MakeScopeExit([&]() noexcept { section.ops.destroy(state.allocator, scratch); });
         Array<String> paths(state.allocator);
-        auto applied = ApplyEntryToSection(state, section, scratch, entry, true, paths);
+        auto applied = ApplyEntryToSection(state, section, scratch, entry, paths);
         if (!applied) {
             return applied;
         }
@@ -386,7 +381,7 @@ Result<void> RecomputeSection(ConfigState& state, SectionState& section, usize s
         }
 
         Array<String> paths(state.allocator);
-        auto applied = ApplyEntryToSection(state, section, trial, *entry, false, paths);
+        auto applied = ApplyEntryToSection(state, section, trial, *entry, paths);
         if (!applied) {
             return Result<void>::Failure(applied.Error());
         }
@@ -1091,8 +1086,8 @@ Result<void> ConfigContext::Sync() noexcept {
     }
 
     Array<UniquePtr<detail::PendingRestart>> pendingRestarts(*allocator_);
-    if (auto held = detail::HoldRestartSections(*state, order.View(), values.View(),
-                                                sourceLists.View(), pendingRestarts);
+    if (auto held = detail::HoldBootSections(*state, order.View(), values.View(),
+                                             sourceLists.View(), pendingRestarts);
         !held) {
         return held;
     }
@@ -1104,8 +1099,8 @@ Result<void> ConfigContext::Sync() noexcept {
         return computed;
     }
 
-    if (auto held = detail::HoldRestartSettings(*state, order.View(), settingResults.View(),
-                                                pendingRestarts);
+    if (auto held =
+            detail::HoldBootSettings(*state, order.View(), settingResults.View(), pendingRestarts);
         !held) {
         return held;
     }

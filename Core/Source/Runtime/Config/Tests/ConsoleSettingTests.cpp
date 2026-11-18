@@ -84,8 +84,9 @@ TEST(Config_PendingValuesMoveAtRegistration) {
 }
 
 // 플래그가 층 쓰기를 거부한다: 콘솔 읽기 전용은 콘솔 층만, 품질 구성원이 아니면 품질 층을(설정
-// struct 필드의 콘솔 이름은 구성원이 아니다), 사용자 설정이 아니면 사용자 층을, 시작 뒤 고정은
-// CompleteStartup 뒤 새 쓰기를 거부한다. 다른 층은 받는다.
+// struct 필드의 콘솔 이름은 구성원이 아니다), 사용자 설정이 아니면 사용자 층을 거부한다. 시작 뒤
+// 고정은 CompleteStartup 뒤 콘솔 쓰기를 받되 값은 그대로이고 Warning BootValueIgnored를 한 번만
+// 낸다(대기가 아니다). 다른 층은 받는다.
 TEST(Config_ConsoleFlagsRejectLayers) {
     ConfigFixture fixture;
     ConfigContext& context = fixture.Context();
@@ -117,14 +118,42 @@ TEST(Config_ConsoleFlagsRejectLayers) {
     CHECK(fixture.Rejects(ConfigLayer::User, "Game",
                           R"({"Settings": {"game.rules.score_limit": 5}})"));
     CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::LayerNotAllowed, 1, 41));
-    // 시작 뒤 고정: CompleteStartup 전에는 받고, 뒤에는 새 쓰기를 거부하며 값은 그대로다.
+    // 시작 뒤 고정: CompleteStartup 전에는 바로 적용된다. 뒤의 콘솔 쓰기는 받지만 값은 그대로이고
+    // 대기도 아니다(콘솔 값은 다음 실행에 오지 않는다). 진단은 같은 이름·출처에 한 번이다.
     REQUIRE(context.AddAssignment(ConfigLayer::Project, "seed", "game.rules.seed", "11"));
     REQUIRE(context.Sync());
     REQUIRE(context.CompleteStartup());
     context.Diagnostics().Clear();
-    auto late = context.AddAssignment(ConfigLayer::Console, "console", "game.rules.seed", "12");
-    CHECK(!late && fixture.HasDiagnostic(ConfigDiagnosticCode::LayerNotAllowed));
+    REQUIRE(context.AddAssignment(ConfigLayer::Console, "console", "game.rules.seed", "12"));
+    REQUIRE(context.Sync());
+    REQUIRE(context.AddAssignment(ConfigLayer::Console, "console", "game.rules.title", "late"));
+    REQUIRE(context.Sync());
     CHECK(fixture.Gameplay().seed == 11 && fixture.Gameplay().sensitivity == 2.5f);
+    CHECK(fixture.Gameplay().title.View() == "late");
+    usize ignored = 0;
+    for (usize index = 0; index < context.Diagnostics().Count(); ++index) {
+        const ConfigDiagnostic item = context.Diagnostics().Get(index);
+        ignored += item.code == ConfigDiagnosticCode::BootValueIgnored &&
+                           item.severity == ConfigSeverity::Warning &&
+                           item.path == "Game.Gameplay.seed"
+                       ? 1
+                       : 0;
+    }
+
+    CHECK(ignored == 1);
+    Array<ConfigPendingRestart> pending(fixture.system);
+    REQUIRE(context.GetPendingRestarts(pending));
+    CHECK(pending.IsEmpty());
+
+    // 파일 층(프로젝트)에서 온 시작 뒤 변경은 재시작 대기다(RestartRequired와 같은 규칙).
+    REQUIRE(context.Unset(ConfigLayer::Console, "console"));
+    REQUIRE(context.AddAssignment(ConfigLayer::Project, "seed", "game.rules.seed", "13"));
+    REQUIRE(context.Sync());
+    CHECK(fixture.Gameplay().seed == 11);
+    REQUIRE(context.GetPendingRestarts(pending));
+    REQUIRE(pending.Size() == 1);
+    CHECK(pending[0].name == "Game.Gameplay.seed" && pending[0].pending == "13" &&
+          pending[0].current == "11");
 }
 
 // 출시 규칙에서 개발 전용 설정은 등록되지만 콘솔에 보이지 않고, 어느 층도 쓸 수 없어 기본값으로

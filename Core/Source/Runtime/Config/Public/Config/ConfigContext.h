@@ -363,9 +363,11 @@ public:
     // NotFound, 다른 스레드 WrongThread.
     Result<void> Unsubscribe(ConfigSubscriptionId id) noexcept;
 
-    // 시작이 끝났음을 알린다. 그 뒤로 StartupOnly 값(콘솔 설정·설정 struct 필드)에 새로 들어오는
-    // 쓰기는 거부하고(이미 들어온 값은 그대로), RestartRequired 값의 변경은 재시작 대기로 돌린다
-    // (GetPendingRestarts). 오류: 다른 스레드 WrongThread.
+    // 시작이 끝났음을 알린다. 그 뒤로 부팅 값(StartupOnly·RestartRequired — 콘솔 설정·설정 struct
+    // 필드)은 이번 실행 동안 지금 값을 유지한다: 파일 층(엔진·프로젝트·플랫폼·사용자)에서 온 변경은
+    // 재시작 대기(GetPendingRestarts)로, 그 밖의 층(기기 프로필·품질 같은 파생 층, 세션·콘솔 같은
+    // 휘발 층)에서 온 변경은 Warning BootValueIgnored(같은 이름·층·출처에 한 번)로 남긴다. 쓰기
+    // 자체는 거부하지 않는다. 오류: 다른 스레드 WrongThread.
     Result<void> CompleteStartup() noexcept;
 
     // 마지막 Sync의 설정 snapshot이다(5.3절 — RenderRead 값의 불변 블록과 세대 번호). 첫 Sync

@@ -190,10 +190,10 @@ TEST(Config_DeviceProfileInheritanceAndMemoryBuckets) {
 // 기기 프로필이 품질 등급 기본값을 정하고(품질 구독이 다시 적용한다) 사용자가 고른 등급이 그보다
 // 강하다.
 
-// 시작 뒤에 GPU 특성을 더해(HostSettings::ApplyDeviceTraits) 규칙으로 골라진 프로필이
-// RestartRequired 값을 정해도 재시작 대기가 아니다: 다음 실행도 부팅 때는 GPU 특성이 없어 같은 일이
-// 되풀이되므로 "영원한 대기"가 된다. 지금 값을 두고 Warning BootValueIgnored를 같은 이름·출처에 한
-// 번만 낸다.
+// 시작 뒤에 GPU 특성을 더해(HostSettings::ApplyDeviceTraits) 규칙으로 골라진 프로필이 부팅
+// 값(RestartRequired textureBudget·StartupOnly seed)을 정해도 재시작 대기가 아니고 쓰기 거부 오류도
+// 없다: 다음 실행도 부팅 때는 GPU 특성이 없어 같은 일이 되풀이되므로 "영원한 대기"가 된다. 지금
+// 값을 두고 Warning BootValueIgnored를 같은 이름·출처에 한 번만 낸다(두 번 다시 적용해도).
 TEST(Config_DeviceProfileAfterStartupDoesNotQueueRestart) {
     ConfigContextOptions options;
     options.mode = ConfigMode::Standard; // 봉인 모드는 선택 규칙을 쓰지 않는다
@@ -205,7 +205,7 @@ TEST(Config_DeviceProfileAfterStartupDoesNotQueueRestart) {
                                  "engine",
                                  R"({"DeviceProfiles": {"profiles": {"BigGpu": {
               "match": [{"trait": "gpu.memory_mib", "atLeast": 4096}],
-              "values": {"Game.Display.textureBudget": "4096"}}}}})"));
+              "values": {"Game.Display.textureBudget": "4096", "game.rules.seed": "99"}}}}})"));
     REQUIRE(context.Sync());
     SystemAllocator allocator;
     DeviceTraits traits(allocator);
@@ -225,20 +225,25 @@ TEST(Config_DeviceProfileAfterStartupDoesNotQueueRestart) {
 
     CHECK(selected.profile.View() == "BigGpu" && selected.source == DeviceProfileSource::Rule);
     CHECK(context.Get<DisplaySettings>().textureBudget == 512);
+    CHECK(fixture.Gameplay().seed == 7);
+    CHECK(context.Diagnostics().ErrorCount() == 0);
+    CHECK(selected.values == 2);
     SystemAllocator listAllocator;
     Array<ConfigPendingRestart> pending(listAllocator);
     REQUIRE(context.GetPendingRestarts(pending));
     CHECK(pending.IsEmpty());
-    usize ignored = 0;
-    for (usize index = 0; index < context.Diagnostics().Count(); ++index) {
-        const ConfigDiagnostic item = context.Diagnostics().Get(index);
-        ignored += item.code == ConfigDiagnosticCode::BootValueIgnored &&
-                           item.severity == ConfigSeverity::Warning &&
-                           item.layer == ConfigLayer::DeviceProfile &&
-                           item.path == "Game.Display.textureBudget"
-                       ? 1
-                       : 0;
-    }
+    const StringView paths[] = {"Game.Display.textureBudget", "Game.Gameplay.seed"};
+    for (const StringView path : paths) {
+        usize ignored = 0;
+        for (usize index = 0; index < context.Diagnostics().Count(); ++index) {
+            const ConfigDiagnostic item = context.Diagnostics().Get(index);
+            ignored += item.code == ConfigDiagnosticCode::BootValueIgnored &&
+                               item.severity == ConfigSeverity::Warning &&
+                               item.layer == ConfigLayer::DeviceProfile && item.path == path
+                           ? 1
+                           : 0;
+        }
 
-    CHECK(ignored == 1);
+        CHECK(ignored == 1);
+    }
 }

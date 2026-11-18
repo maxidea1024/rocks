@@ -141,6 +141,12 @@ Result<void> AddPending(ConfigState& state, StringView name, StringView pending,
                   ConfigLayer::CodeDefault, {}, nullptr, name, message.View());
 }
 
+// 시작 뒤 이번 실행 값이 고정되는 필드(부팅 값 — RestartRequired·StartupOnly)인지다.
+bool IsBootField(uint32 flags) noexcept {
+    return HasFlag(flags, SettingsFieldFlags::RestartRequired) ||
+           HasFlag(flags, SettingsFieldFlags::StartupOnly);
+}
+
 // 다음 실행에도 같은 입력이 다시 오는 층인지다(파일 층과 코드 기본값 — 지운 파일이면 코드 기본값이
 // 드러난다). 기기 프로필·품질·기능 묶음은 시작 뒤 다시 계산되는 파생 층이고 세션 이후 층은 휘발
 // 층이다.
@@ -214,7 +220,7 @@ Result<void> ReportIgnored(ConfigState& state, StringView name, const ConfigEntr
     StringBuilder<256> message(state.allocator);
     static_cast<void>(message.TryAppendFormat(
         "boot value ignored after startup: {} {} sets {}; the current value {} stays (only config "
-        "files change a RestartRequired value for the next start)",
+        "files change a boot value for the next start)",
         ConfigLayerName(source.layer), source.sourceName.View(), ignored, current));
     if (auto status = message.Status(); !status) {
         return status;
@@ -237,23 +243,22 @@ Result<void> HoldOne(ConfigState& state, StringView name, const ConfigEntry* sou
 
 } // namespace
 
-Result<void> HoldRestartSections(ConfigState& state, Span<ConfigEntry* const> order,
-                                 Span<void* const> values,
-                                 Span<Array<UniquePtr<SourceStack>>* const> sources,
-                                 Array<UniquePtr<PendingRestart>>& pending) noexcept {
+Result<void> HoldBootSections(ConfigState& state, Span<ConfigEntry* const> order,
+                              Span<void* const> values,
+                              Span<Array<UniquePtr<SourceStack>>* const> sources,
+                              Array<UniquePtr<PendingRestart>>& pending) noexcept {
     if (!state.startupComplete) {
         return Result<void>::Success();
     }
 
     for (usize index = 0; index < state.sections.Size(); ++index) {
         SectionState& section = *state.sections[index];
-        bool restartFields = false;
+        bool bootFields = false;
         for (const SettingsFieldSchema& field : section.ops.settings->fields) {
-            restartFields =
-                restartFields || HasFlag(field.flags, SettingsFieldFlags::RestartRequired);
+            bootFields = bootFields || IsBootField(field.flags);
         }
 
-        if (!restartFields) {
+        if (!bootFields) {
             continue;
         }
 
@@ -280,7 +285,7 @@ Result<void> HoldRestartSections(ConfigState& state, Span<ConfigEntry* const> or
         static_cast<void>(restore.BeginObject());
         bool restoring = false;
         for (const SettingsFieldSchema& field : section.ops.settings->fields) {
-            if (!HasFlag(field.flags, SettingsFieldFlags::RestartRequired)) {
+            if (!IsBootField(field.flags)) {
                 continue;
             }
 
@@ -369,9 +374,9 @@ Result<void> HoldRestartSections(ConfigState& state, Span<ConfigEntry* const> or
     return Result<void>::Success();
 }
 
-Result<void> HoldRestartSettings(ConfigState& state, Span<ConfigEntry* const> order,
-                                 Span<const UniquePtr<SettingResult>> settings,
-                                 Array<UniquePtr<PendingRestart>>& pending) noexcept {
+Result<void> HoldBootSettings(ConfigState& state, Span<ConfigEntry* const> order,
+                              Span<const UniquePtr<SettingResult>> settings,
+                              Array<UniquePtr<PendingRestart>>& pending) noexcept {
     if (!state.startupComplete) {
         return Result<void>::Success();
     }
@@ -380,7 +385,8 @@ Result<void> HoldRestartSettings(ConfigState& state, Span<ConfigEntry* const> or
         const ConsoleSettingState& setting = *state.settings[index];
         SettingResult& result = *settings[index];
         if (setting.section != IndexNone ||
-            !HasFlag(setting.flags, ConsoleSettingFlags::RestartRequired) ||
+            !(HasFlag(setting.flags, ConsoleSettingFlags::RestartRequired) ||
+              HasFlag(setting.flags, ConsoleSettingFlags::StartupOnly)) ||
             result.text.View() == setting.text.View()) {
             continue;
         }

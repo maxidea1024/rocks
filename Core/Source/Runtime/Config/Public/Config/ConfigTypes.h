@@ -124,8 +124,8 @@ enum class ConfigDiagnosticCode : uint8 {
     // VD15의 `RestartRequired` 진단).
     RestartRequired,
     // 경고: 시작 뒤 파일 층이 아닌 층(기기 프로필·품질 같은 파생 층, 세션·콘솔 같은 휘발 층)이
-    // RestartRequired 값을 바꾸려 했다. 다음 실행에 같은 입력이 다시 오지 않으므로 대기로 두지 않고
-    // 지금 값을 유지한다(같은 이름·출처에 한 번만 — 8절).
+    // 부팅 값(RestartRequired·StartupOnly)을 바꾸려 했다. 다음 실행에 같은 입력이 다시 오지
+    // 않으므로 대기로 두지 않고 지금 값을 유지한다(같은 이름·출처에 한 번만 — 8절).
     BootValueIgnored,
     // 기기 프로필 정의·선택 오류(모르는 프로필·부모, 부모 순환, 모르는 메모리 등급 — 6.2절).
     InvalidDeviceProfile
