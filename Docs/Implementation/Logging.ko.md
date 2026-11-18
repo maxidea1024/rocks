@@ -337,8 +337,10 @@ Log::Info(LogNet, "Request accepted");
 
 ## 비정상 종료 때 마지막 로그
 
-- `LogInstallScope`는 `platform::SetTerminationHook`에 로그 종료 hook을 건다. `platform::Fatal`(Log를 거치지 않는 Fatal 포함)은 abort 전에 이 hook을 한 번 부르고, hook은 설치된 LogSystem의 `FlushForTermination`을 부른다. 막히는 lock 없이 출력 스레드를 깨우고 큐가 sink flush까지 끝나기를 `fatalFlushTimeoutMilliseconds`까지 기다린다. `Log::Fatal`·assert가 이미 flush했으면 다시 하지 않는다.
-- 엔진 호스트는 `platform::InstallCrashHandler()`(`Platform/CrashHandler.h`)로 접근 위반·stack overflow(Windows unhandled exception filter)와 치명 신호(POSIX)에서도 같은 hook을 부르게 할 수 있다. 처리기는 flush만 하고 앞 처리기로 넘긴다. stack overflow 대비로 hook은 미리 만든 flush 전용 스레드에서 돈다. `platform::Thread`로 만든 스레드는 처리기용 여유 stack(32 KiB)을 시작 때 확보한다.
+- 크래시(접근 위반·stack overflow·치명 신호)와 `platform::Fatal`의 처리는 크래시 수집기가 맡는다([크래시 처리·실행 진입점](../Design/CrashHandlingAndLaunch.ko.md)). Rocks 실행 파일은 Launch가 수집기를 설치하므로 호스트가 따로 할 일은 없다. 수집기를 설치하지 않은 프로세스(C# 도구·외부 호스트)는 크래시 때 큐에 남은 기록을 잃는다.
+- 첫 `LogInstallScope`가 수집기에 로그 종료 콜백을 한 번 등록한다(해제하지 않음). 크래시가 나면 수집기의 크래시 처리 스레드가 이 콜백을 부르고, 콜백은 그때 설치된 LogSystem의 `FlushForTermination`을 부른다. 막히는 lock 없이 출력 스레드를 깨우고 큐가 sink flush까지 끝나기를 기다린다. 대기는 `fatalFlushTimeoutMilliseconds`와 수집기의 공용 마감 중 짧은 쪽까지다.
+- `Log::Fatal`·assert는 자기 스레드에서 먼저 flush를 시도한다. 그 뒤 수집기의 콜백이 남은 기록을 마감 안에서 한 번 더 기다린다.
+- 크래시한 스레드가 로그 출력 스레드 자신이면(sink 안의 크래시 등) 큐를 비울 주체가 없다. 그때는 비상 출력(stderr)만 남는다.
 - 비정상 종료한 봉인 파일에는 끝 표시가 없다(`log decode`가 비정상 종료로 알린다).
 
 ## 로그 파일 보기(`log view`)
