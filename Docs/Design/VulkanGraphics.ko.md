@@ -130,7 +130,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 **descriptor.**
 - 파이프라인 layout은 파이프라인마다 만든다(개정 6). 개발 컴파일 훅의 리플렉션(set·binding·종류에 더해 원문 register·space, 자원 모양(이미지·texel buffer·구조화·raw·상수·샘플러), 원소 타입, 쓰기 여부)을 PipelineDesc 고정 배치와 대조해 set 0(VS)·set 1(PS) layout을 만든다(ShaderSystem 7.2절 4항: set = 단계, binding = 종류 순서). binding이 없는 단계는 장치 공용 빈 layout이다.
   - PS t0 이미지 → `SAMPLED_IMAGE`(SetTexture), PS s0 → `SAMPLER`(그 텍스처의 샘플러), 단계 모두의 t1–t4 → typed는 `UNIFORM_TEXEL_BUFFER`, 구조화·raw는 `STORAGE_BUFFER`(SetBufferView slot 0–3). 그 밖(다른 register·space, 상수 버퍼, 쓰기 자원)은 생성이 `InvalidArgument`다.
-  - push constant 80 byte(`DrawConstants`, VS·PS, 7.2절 2항)는 모든 파이프라인 layout과 공용 layout(두 set이 빈 layout)이 같은 범위라 공용 layout으로 올린다(사양 "Pipeline Layout Compatibility").
+  - 그리기별 상수 push constant 범위는 계약 최대 128 byte(VS·PS·CS, 7.2절 2항, RenderBase SX2)로 모든 파이프라인 layout과 공용 layout(두 set이 빈 layout)이 같다. 그래서 공용 layout으로 파이프라인이 선언한 n byte(`drawConstantBytes`)만 올리고, 파이프라인을 바꿔도 값과 descriptor set이 유지된다(사양 "Pipeline Layout Compatibility").
 - 그리기 descriptor set은 그리기 직전(바뀐 것이 있을 때만) 지금 명령 버퍼 기록의 pool에서 받아 쓰고 파이프라인 layout으로 묶는다. pool은 기록마다 최대 8개이고 첫 pool이 set 1024개, 다음 pool은 앞 pool의 두 배다. 그 기록을 다시 쓸 때(앞 제출의 fence가 끝났다) `vkResetDescriptorPool`로 통째로 비운다. UE 비-bindless의 프레임 단위 pool과 같은 방식이다(`P/VulkanPendingState.cpp:30–319`). 텍스처마다 고정 set을 두던 개정 5 방식은 파이프라인마다 layout이 달라지면서 없앴다. 한 프레임에 descriptor를 바꾸는 그리기가 1024 × (2^8 − 1) = 261120번을 넘으면 그 뒤 그리기는 무시되고(`IgnoredDraws`, LastError) 처음 한 번 Warning 로그를 남긴다(GX1·GX2 리뷰 반영).
 
 ## 7. 파이프라인·render pass
@@ -140,7 +140,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - 파이프라인 상태: 삼각형 목록, viewport·scissor 동적 상태, 깊이 없음, 블렌드는 D3D12와 같은 식, 래스터는 11절. 정점 입력은 `VertexLayout` 그대로(stream = binding, 인스턴스 stream은 `VK_VERTEX_INPUT_RATE_INSTANCE`, 간격 1)다.
 - stride는 파이프라인에 들어가므로 파이프라인을 바꾸면 이미 묶은 정점 버퍼가 새 stride로 읽힌다(계약 "새 파이프라인 배치의 stride로 다시 묶인다"를 Vulkan이 그대로 만족한다).
 - 정점 형식 대응은 RenderBase 10.4절 표의 Vulkan 열이다. 장치가 그 형식의 `VERTEX_BUFFER` 기능을 주지 않으면 파이프라인 생성이 `Unsupported`다(OpenGL의 `Bgra8Unorm`과 같은 공개 방식).
-- 셰이더 입력 대조: 컴파일 훅이 돌려준 리플렉션(정점 입력 location·셰이더 타입, descriptor binding, push constant 크기)으로 D3D12와 같은 규칙과 같은 진단 문구를 쓴다. 고정 배치 밖 binding이나 80 byte를 넘는 push constant는 `InvalidArgument`다.
+- 셰이더 입력 대조: 컴파일 훅이 돌려준 리플렉션(정점 입력 location·셰이더 타입, descriptor binding, push constant 크기)으로 D3D12와 같은 규칙과 같은 진단 문구를 쓴다. 고정 배치 밖 binding이나 파이프라인이 선언한 `drawConstantBytes`보다 큰 push constant는 `InvalidArgument`다.
 - `VkPipelineCache` 하나를 장치 안에서 공유한다(메모리 안, 파일 저장은 RenderBase 9.7절 파이프라인 캐시에서).
 - index 버퍼 offset이 index 크기 배수가 아니거나 정점 버퍼 offset이 4 byte 배수가 아니면 묶지 않은 것으로 보고 그리기를 무시한다(`IgnoredDraws`). Vulkan은 index offset을 그 크기 배수로만 받고(`vkCmdBindIndexBuffer`), 속성 주소가 성분 크기 배수여야 한다(사양 "Vertex Input Address Calculation", 속성 offset은 이미 4 배수다). 이식 규칙으로 `Device.h`의 두 호출 주석에 적는다.
 
@@ -289,7 +289,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 
 ## 18. 남은 일
 
-- SH2: 쿠킹된 `VULKAN_SM5` SPIR-V와 리플렉션 머리(UE `FVulkanShaderHeader` 대응)를 받는 Graphics API. 그때 개발용 컴파일 훅과 `DrawConstants` 이름 규칙이 `ROCKS_ROOT_CONSTANTS`로 바뀐다.
+- SH2: 쿠킹된 `VULKAN_SM5` SPIR-V와 리플렉션 머리(UE `FVulkanShaderHeader` 대응)를 받는 Graphics API. 그때 개발용 컴파일 훅과 `cbuffer DrawConstants` 이름 규칙이 `ROCKS_ROOT_CONSTANTS`로 바뀐다.
 - SH6·P13: Android 실행(surface 수명, `ANativeWindow`, 회전 `preTransform`).
 - 멀티 큐(async compute·copy)와 timeline semaphore 경로, 동적 렌더링·sync2 선택 경로(장치가 주면).
 - 파이프라인 캐시 파일 저장(RenderBase 9.7절), 메모리 예산 확장, 객체 debug 이름.

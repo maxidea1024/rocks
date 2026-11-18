@@ -1,6 +1,6 @@
 # 셰이더 시스템 설계
 
-기준일: 2026-11-18, 개정 18(초안). 셰이더 원문을 HLSL 하나로 쓰고 오프라인에서 D3D12·D3D11·Vulkan·Metal·OpenGL ES용 코드로 바꾸는 구조와, 그 구현에 앞서 갖춰야 할 **선행 작업**을 정한다. 개정 7은 현재 코드베이스(HEAD `0be1e64`, 2026-11-14)와 다른 설계 문서의 상태를 다시 조사해 선행 작업과 순서를 새로 세웠다(4–6절).
+기준일: 2026-11-18, 개정 19(초안). 셰이더 원문을 HLSL 하나로 쓰고 오프라인에서 D3D12·D3D11·Vulkan·Metal·OpenGL ES용 코드로 바꾸는 구조와, 그 구현에 앞서 갖춰야 할 **선행 작업**을 정한다. 개정 7은 현재 코드베이스(HEAD `0be1e64`, 2026-11-14)와 다른 설계 문서의 상태를 다시 조사해 선행 작업과 순서를 새로 세웠다(4–6절).
 
 UE 근거는 UE 5.8.4(EpicGames/UnrealEngine `release` 브랜치 commit `f45729c0b6f097038e72b52d366a62baeca3275b`)의 원본이다. 2026-11-14 사용자 지시로 기준을 5.6에서 5.8로 올렸고, 개정 6까지의 5.6 근거를 모두 5.8.4로 다시 확인했다(17절). 경로는 `Engine/Source/` 기준이며 `Engine/Shaders`·`Engine/Config`·`Engine/Build`는 그대로 적는다. UE 밖 도구(DXC·SPIRV-Cross·SPIRV-Tools·Vulkan)에 관한 사실은 그 출처를 따로 적는다. 개정 6까지의 조사 문서(UE 5.6 기준)는 [Rocks 셰이더 시스템](https://claude.ai/artifact/U5uNh2EWGvXKQiNYXnuc1Q)이다.
 
@@ -306,7 +306,10 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
 ### 7.2 Rocks 규약
 
 1. **선언.** 셰이더 원문은 register·`[[vk::*]]`를 적지 않는다(UE의 일반 파라미터와 같다). 예외는 `Platform.rsh`가 형식별로 전개하는 매크로 둘이다: 루트 상수(2항)와 storage image 형식 `ROCKS_IMAGE_FORMAT(<형식>)`. DXC는 `RWTexture2D<float4>`의 SPIR-V 형식을 원소 타입으로 추론하므로(예: Rgba32f) 실제 형식이 다르면 Vulkan 검증 오류가 나고, ESSL image는 형식 한정자가 필요하다. 이 매크로는 SPIR-V 형식에서 DXC의 image format 지정으로, D3D 형식에서는 빈 것으로 전개한다. DXC가 지정을 지원하는지는 SH0에서 확인하고, 안 되면 워커가 SPIR-V `OpTypeImage`의 형식 operand를 고친다. SH0 확인(2026-11-17): DXC 1.9.2609가 지원한다(`[[vk::image_format("rgba8")]]` 등 7종이 SPIR-V 형식으로 나오고, DXIL에서는 attribute를 무시하며 `-Wignored-attributes` 경고를 낸다, 16절). 그래서 D3D 형식의 빈 전개가 맞고, 셰이더 경고를 오류로 하는 정책(결정 7)에서는 D3D 형식에 attribute가 남지 않아야 한다. Vulkan 형식 정의는 `shaderStorageImageWriteWithoutFormat`을 요구하지 않는다. 정적 샘플러 같은 다른 예약 space는 후속이다. 상수는 `cbuffer`·`ConstantBuffer<T>`·루트 상수로만 선언하고, 이름 없는 전역 uniform(`$Globals`가 되는 전역 변수)은 컴파일 오류다. UE는 느슨한 파라미터를 `$Globals`에 두지만, Rocks 파라미터는 언제나 이름 있는 버퍼다(13절).
-2. **루트 상수(그리기별 상수).** `ROCKS_ROOT_CONSTANTS(Type, Name)` 하나로 선언한다. 크기는 최대 128 byte(32 DWORD, Vulkan push constant 최소 보장)이고 멤버는 5항 규칙을 따른다. 현재 `DrawConstants`(80 byte)가 첫 사용자다.
+2. **루트 상수(그리기별 상수).** `ROCKS_ROOT_CONSTANTS(Type, Name)` 하나로 선언한다. 크기는 최대 128 byte(32 DWORD, Vulkan push constant 최소 보장)이고 16 byte 배수이며 멤버는 5항 규칙을 따른다.
+   - **배치는 선언이 정한다**([렌더 기반](RenderBase.ko.md) 결정 R7, RenderBase 개정 20·이 문서 개정 19에서 확정). 파라미터 구조체 종류에 "그리기별 상수" 표시가 있는 구조체만 루트 상수로 가고, 표시가 없는 구조체는 크기가 128 byte 이하여도 1항의 이름 있는 cbuffer다. 표시가 있는데 128 byte를 넘으면 워커(P7 뒤에는 MetaCompiler) 오류이고 cbuffer로 옮기지 않는다. 크기 기준 자동 배치는 버렸다: 멤버 하나를 더해 경계를 넘으면 root signature·pipeline layout·GLES 복사 표·쓰는 API가 조용히 바뀐다(근거 전체는 RenderBase 9.4절).
+   - 파이프라인 하나에 그리기별 상수 블록은 하나이고 모든 단계가 같은 값을 본다. 파이프라인 layout이 크기를 선언하고(Graphics `PipelineDesc::drawConstantBytes`, 0 = 없음), 장치는 단계별 리플렉션 크기가 선언보다 크면 생성을 거부한다. 값은 `CommandContext::SetDrawConstants`로 선언과 같은 byte 수만 받는다.
+   - SH2 전 개발 경로에서는 원문이 `cbuffer DrawConstants : register(b0)` 이름 규칙으로 쓰고(Vulkan 컴파일 훅이 push constant로 바꾼다), C++ 쪽 고정 구조체는 없다(호출자가 자기 구조체를 둔다). 예전 고정 `DrawConstants`(80 byte: 변환 행렬 + 색)는 개정 19에서 없앴다.
 
    | 형식 | 전개 | 실제 위치 |
    |---|---|---|
@@ -360,10 +363,10 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
    - 배열: 원소 크기가 16 byte 배수일 때만 허용한다. 스칼라·2·3성분 배열은 float4 배열로 묶는다(UE `SHADER_PARAMETER_SCALAR_ARRAY`·`GET_SCALAR_ARRAY_ELEMENT`와 같은 방식).
    - 기본 타입 슬롯: 16 byte 슬롯 하나 안에 float·int·uint를 섞지 않는다(예: `float a; int b;`는 b 앞에 padding을 두어 다음 슬롯으로 보낸다). GLES 에뮬레이션이 슬롯을 타입별 배열에 나눠 담기 때문이다(4항).
    - 구조체: 16 byte 정렬로 시작하고 크기를 padding으로 16 byte 배수로 맞춘다. 상수 버퍼 안의 구조체는 1단까지이고 구조체 배열은 금지한다. 상수 버퍼 전체를 한 번에 읽는 것(`Type t = Name;`, 함수 인자로 버퍼 전체를 넘기기)도 금지한다. GLES 에뮬레이션이 멤버 참조를 텍스트로 바꾸기 때문이며(UE도 1단까지만 처리한다, `OpenGLShaderCompiler.cpp:1517–1548`), 한 원문을 모든 형식에 쓰므로 모든 형식에서 같은 규칙이다.
-   - **워커 검사.** 모든 형식의 리플렉션 오프셋이 위 규칙으로 계산한 오프셋과 같아야 하며, 다르면(암묵 padding·다른 배치) 컴파일 오류다. GLES 복사 표는 이 오프셋으로 만든다. 손으로 쓴 구조체(SH0–SH2의 `ROCKS_ROOT_CONSTANTS`, `DrawConstants`)도 같다.
+   - **워커 검사.** 모든 형식의 리플렉션 오프셋이 위 규칙으로 계산한 오프셋과 같아야 하며, 다르면(암묵 padding·다른 배치) 컴파일 오류다. GLES 복사 표는 이 오프셋으로 만든다. 손으로 쓴 구조체(SH0–SH2의 `ROCKS_ROOT_CONSTANTS`, 개발 경로의 `cbuffer DrawConstants`)도 같다.
    - **손으로 쓴 레이아웃 표.** P7(13절) 전에는 손으로 쓴 구조체마다 C++ 쪽에 레이아웃 표(멤버 이름·타입·오프셋·크기)를 두고 `static_assert`로 C++ 오프셋과 맞춘다. 이 표의 SHA-256이 파라미터 레이아웃 서명(job 키 8항, 10절)이고, 워커는 이 표를 받아 리플렉션 오프셋과 대조한다(7.3절 (a)). P7 뒤에는 MetaCompiler가 같은 형식의 표를 만든다.
    - 반례(이 규칙이 막는 것): `float a[2]; float b;`는 D3D에서 b가 20(마지막 원소의 남는 자리에 채움), std140에서 32이고, 명시 padding으로도 두 규칙을 함께 맞출 수 없다. `float3x3 m; float s;`는 D3D 44, std140 48이다. push constant의 스칼라 배열은 std430 stride 4, D3D root constant는 16이다. `struct S { float4 v; }; struct R { float a; S s; }`의 s는 D3D·std140 16, push constant(std430, 구조체 정렬 4) 4다. 명시 padding이 없으면 워커 검사가 거부한다.
-   - C++ 타입: Core `Matrix4`·`Vector3`는 정렬 지정이 없다(`Matrix4.h:56–61`, `Vector3.h:19–24`). 그래서 ShaderCore에 셰이더 전용 정렬 타입(`alignas(8)` 2성분, `alignas(16)` 3·4성분·`float4x4`)을 두고, 셰이더 파라미터 구조체는 이 타입만 쓴다(13절에서 MetaCompiler가 강제). `DrawConstants`의 C++ `float transform[16]`(`DeviceTypes.h:161–164`)은 이 행렬 타입으로 바꾼다.
+   - C++ 타입: Core `Matrix4`·`Vector3`는 정렬 지정이 없다(`Matrix4.h:56–61`, `Vector3.h:19–24`). 그래서 ShaderCore에 셰이더 전용 정렬 타입(`alignas(8)` 2성분, `alignas(16)` 3·4성분·`float4x4`)을 두고, 셰이더 파라미터 구조체는 이 타입만 쓴다(13절에서 MetaCompiler가 강제). 그리기별 상수 구조체의 C++ 행렬 멤버(개정 19 전 Graphics `DrawConstants::transform`, 지금은 호출자 구조체의 `float transform[16]`)도 이 행렬 타입으로 바꾼다.
    - Rocks는 수정되지 않은 DXC를 쓰므로 scalar block layout을 쓰지 않는다(Android Vulkan 1.1·GLES와 호환).
 6. **행렬.** 2026-11-17 사용자 결정으로 Rocks 수학 규약을 UE와 같게 바꾼다. 행렬은 행 벡터(`p' = p·M`, `A*B`는 A 먼저)와 행 우선 저장이다. 그래서 셰이더 규약도 UE와 같다.
    - 셰이더는 `mul(v, M)`으로 쓰고, 모든 형식에서 행렬을 행 우선으로 담는다.
@@ -372,7 +375,7 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
      - SPIR-V에서 나오는 Vulkan·Metal·GLES 경로도 행 우선이다. UE ShaderConductor 기본값은 `bPackMatricesInRowMajor = true`다(`Developer/ShaderCompilerCommon/Public/ShaderConductorContext.h:78`).
    - CPU 행렬의 메모리 배치는 전환 전후에 바이트 단위로 같다(이동이 평면 index 12–14). 그래서 상수를 올릴 때 전치하지 않는다.
    - 비대칭 행렬 픽셀 대조 시험(SH2, 측정 S5)은 옵션을 고르는 시험이 아니다. 형식마다 위 규약이 지켜지는지 확인하는 시험이다.
-   - 렌더 코드 반영(C7, 2026-11-17 구현): `DrawConstants::transform`은 행 우선이고 샘플 렌더러 원문은 `mul(float4(position, 1), transform)`이다. SH2 전 런타임 경로에서 D3D12는 `D3DCompile`에 `D3DCOMPILE_PACK_MATRIX_ROW_MAJOR`(FXC `/Zpr`와 같은 플래그)를 준다. 원문에 `row_major`를 적지 않고 컴파일 옵션으로 담는 것은 위 DXC `-Zpr`·FXC `/Zpr` 규약과 같게 하려는 것이다. 그러면 SH2에서 쿠킹 경로로 바꿔도 원문이 그대로다. OpenGL ES(P11, 2026-11-17)는 쿠킹된 ESSL과 같은 방식으로 행 우선 byte를 4항의 루트 상수 `vec4` 배열(`vu_h`)에 전치 없이 올리고, 손으로 쓴 GLSL ES 원문이 `mat4(vu_h[0], vu_h[1], vu_h[2], vu_h[3]) * v`로 쓴다(C7의 `glProgramUniformMatrix4fv(transpose = GL_TRUE)` 방식을 대신했다). 스파이크(`Programs/ShaderToolSpike`)도 DXC `-Zpr`·FXC `D3DCOMPILE_PACK_MATRIX_ROW_MAJOR`로 컴파일한다. 그 산출에서 SPIRV-Cross ESSL·MSL은 기본(열 우선) `mat4`·`float4x4`와 `M * v`로, HLSL 5.0은 `row_major float4x4`와 `mul(v, M)`로 나온다. 둘은 같은 바이트를 같은 행렬로 읽는다(열 우선으로 읽은 행렬은 Mᵀ이고 Mᵀ·v = v·M). 시험 결과는 S5에 적었다.
+   - 렌더 코드 반영(C7, 2026-11-17 구현): 샘플 렌더러 그리기 상수의 `transform`(개정 19 전에는 Graphics `DrawConstants::transform`)은 행 우선이고 샘플 렌더러 원문은 `mul(float4(position, 1), transform)`이다. SH2 전 런타임 경로에서 D3D12는 `D3DCompile`에 `D3DCOMPILE_PACK_MATRIX_ROW_MAJOR`(FXC `/Zpr`와 같은 플래그)를 준다. 원문에 `row_major`를 적지 않고 컴파일 옵션으로 담는 것은 위 DXC `-Zpr`·FXC `/Zpr` 규약과 같게 하려는 것이다. 그러면 SH2에서 쿠킹 경로로 바꿔도 원문이 그대로다. OpenGL ES(P11, 2026-11-17)는 쿠킹된 ESSL과 같은 방식으로 행 우선 byte를 4항의 루트 상수 `vec4` 배열(`vu_h`)에 전치 없이 올리고, 손으로 쓴 GLSL ES 원문이 `mat4(vu_h[0], vu_h[1], vu_h[2], vu_h[3]) * v`로 쓴다(C7의 `glProgramUniformMatrix4fv(transpose = GL_TRUE)` 방식을 대신했다). 스파이크(`Programs/ShaderToolSpike`)도 DXC `-Zpr`·FXC `D3DCOMPILE_PACK_MATRIX_ROW_MAJOR`로 컴파일한다. 그 산출에서 SPIRV-Cross ESSL·MSL은 기본(열 우선) `mat4`·`float4x4`와 `M * v`로, HLSL 5.0은 `row_major float4x4`와 `mul(v, M)`로 나온다. 둘은 같은 바이트를 같은 행렬로 읽는다(열 우선으로 읽은 행렬은 Mᵀ이고 Mᵀ·v = v·M). 시험 결과는 S5에 적었다.
 7. **정점 입력과 단계 사이 변수.** DXC `-spirv`는 입출력 location을 시맨틱 번호가 아니라 선언 순서로 준다(기본 `-fvk-stage-io-order=decl`). D3D11·D3D12는 VS 출력과 PS 입력을 register 위치로 맞추고 register는 선언 순서로 정해진다. 그래서 두 단계를 따로 컴파일해도 맞도록 다음을 지킨다.
    - 정점 입력 시맨틱은 `ATTRIBUTEn`이다(현재 `TEXCOORDn`, `DeviceTypes.h:130–136`). n은 `VertexAttribute::location`이다.
    - 단계 사이 변수는 하나의 struct로 선언하고 VS 출력과 PS 입력이 같은 struct를 쓴다(공용 `.rsh`). struct 멤버 순서는 `SV_Position` 다음 `TEXCOORDn`을 n 오름차순으로 둔다. 그러면 선언 순서 = location 순서라 FXC 경로(선언 순서)와 SPIRV-Cross 경로(location 순서)의 signature가 같다. PS 입력에 다른 struct를 쓰려면 VS 출력의 앞부분(같은 순서)이어야 한다.
@@ -697,7 +700,7 @@ Rocks 규칙:
   - HLSL: `<out>/Generated/<Module>/Shaders/<Name>.rsh`(기존 `<out>/Generated/<Module>` 규칙). 이름 있는 `cbuffer`로 낸다(7.2절 1항). 가상 경로 `/Engine/Generated/<Module>/<Name>.rsh`(플러그인·프로젝트는 각자의 `Generated`)로 연결하며, UE `/Engine/Generated/`에 해당한다(`ShaderCore.cpp:2490,3081,3096`). 생성 HLSL은 셰이더 맵 키의 include 폐포에 들어간다. 설치 SDK로 내보내는 경로는 후속이다.
 - **레이아웃 서명.** 정규화한 레이아웃(멤버 이름·타입·offset·크기, 자원 종류·순번)의 SHA-256이다. job 키 8항(10절)이다.
 - **`ShaderParameterLayout`(데이터 형식).** 위 레이아웃 표를 C++ 타입과 무관한 데이터 형식으로 정한다: 멤버(이름·타입·offset·크기), 자원(종류·순번, 텍스처·샘플러 짝), 서명. MetaCompiler 생성물은 이 형식의 상수 표를 내고, [머티리얼 시스템](MaterialSystem.ko.md)의 머티리얼 컴파일러는 C++ 구조체 없이 같은 형식의 **동적 layout**을 실행 중 데이터로 낸다(결정 MD3, 요구 MSR4). 워커의 리플렉션 대조(7.2절 5항), 바인딩 지도([렌더 기반](RenderBase.ko.md) 9.3절, 머티리얼 요구 MRB2), GLES 복사 표가 두 출처를 같은 경로 하나로 다룬다. UE도 머티리얼 uniform buffer는 매크로가 아니라 실행 중 layout으로 만든다(`Runtime/Engine/Private/Materials/MaterialUniformExpressions.cpp:524`). 형식 정의는 P7 착수 때 확정하고, 머티리얼 단계 MS2 전이어야 한다.
-- `DrawConstants`는 이 종류로 옮긴다.
+- 그리기별 상수(7.2절 2항 루트 상수)도 이 종류로 선언하고 종류 표시 "그리기별 상수"를 붙인다(RenderBase 결정 R7). 표시가 있는 구조체는 `ROCKS_ROOT_CONSTANTS`로, 없는 구조체는 이름 있는 cbuffer로 생성하며, 표시가 있는데 128 byte를 넘거나 16 byte 배수가 아니면 MetaCompiler 오류다.
 
 완료 기준: MetaCompiler 음성 대조(금지 타입), identity 명세 검증(일반 구조체와 같은 규칙), 7.3절 시험 (a)·(f)를 생성 구조체로 통과.
 
@@ -848,3 +851,4 @@ SH0 진척(2026-11-17, `feature/shader-tools`, Windows 부분 구현):
   - 7.2절 7항: VS 출력 규칙을 layer·viewport 둘로 넓혀 어휘를 `vertexViewportLayerOutput` 하나로 했다. Renderer 결정 RN10 (가)의 2D atlas는 layer가 아니라 viewport 출력이 맞다. D3D12는 이 기능이 늘 된다(UE `D3D12Device.cpp:272`)는 점, ES는 `GL_NV_viewport_array2` 확장만 있고 Rocks·UE가 쓰지 않는다는 점, UE 조건의 두 범주(정적 표시 OR (설정 AND 장치 값))를 고쳐 적었다. Graphics `DeviceCaps` 이름·viewport 수·D3D12 값은 Graphics 쪽 일로 적었다. S14·시험 (j)·결정 12를 맞췄다.
   - 12.2절: 라이브러리 항목에 런타임 확인 기능 비트(RenderBase 9.2절이 대조), 형식 사실에 기능 등급 자리(머티리얼 시스템 MSR9).
 - 개정 18(2026-11-18): 12.1절 진척 두 항목(런타임 확인 기능 `vertexViewportLayerOutput`, `CommonLimits` 제거)을 SH2 전에 구현했다.
+- 개정 19(2026-11-18): [렌더 기반](RenderBase.ko.md) SX2 반영. 7.2절 2항에 결정 R7 확정(루트 상수 배치는 선언 명시, 128 byte·16 byte 배수, 크기 기준 자동 배치는 버림)과 파이프라인 layout의 크기 선언(Graphics `drawConstantBytes`·`SetDrawConstants`)을 적었다. Graphics 고정 구조체 `DrawConstants`를 없앴으므로 7.2절 5항·6항과 13절의 해당 문구를 고쳤다(13절은 그리기별 상수도 파라미터 구조체 종류 표시로 선언).

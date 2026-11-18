@@ -282,7 +282,7 @@ D3D11은 필수 backend다(2026-11-13 사용자 결정). D3D12의 SM 6.6 기준�
 - 생성 초기 데이터는 `D3D11_SUBRESOURCE_DATA`로 생성 호출 안에서 올린다(장치 호출이라 스레드 안전, 생성 즉시 내용이 정해진다).
 - staging에서 올리는 경로는 행 정렬 요구가 없어 언제나 그대로 올린다. D3D12처럼 ring으로 다시 옮기는 경로가 없다.
 - readback: `D3D11_USAGE_STAGING` 텍스처로 `CopyResource`하고 fence가 끝난 뒤에만 `Map(READ)`으로 읽는다(UE `Private/D3D11RenderTarget.cpp:520–563`과 같은 staging 경로). `D3D11_MAP_FLAG_DO_NOT_WAIT`은 쓰지 않는다. 하드웨어 드라이버(GTX 1060)에서 runtime의 자원 사용 추적이 fence보다 늦게 풀려, 끝난 복사에도 `DXGI_ERROR_WAS_STILL_DRAWING`을 돌려주는 것을 확인했다. fence 뒤의 map은 GPU를 기다리지 않는다.
-- 그리기 상수(D3D12 루트 상수 20개 대응)는 80 byte 동적 상수 버퍼(b0, VS·PS)다. `SetConstants`마다 deferred context에서 `Map(WRITE_DISCARD)`한다(UE uniform buffer와 같다, `Private/D3D11UniformBuffer.cpp:161`). `NO_OVERWRITE`는 deferred context의 상수 버퍼에 11.1 기능(`MapNoOverwriteOnDynamicConstantBuffer`)이 필요해 쓰지 않는다. SH2·P2의 b13 그리기 상수(셰이더 시스템 7.2절 4항)로 옮기는 것은 SH5다.
+- 그리기별 상수(D3D12 루트 상수 대응, RenderBase 결정 R7·SX2)는 128 byte 동적 상수 버퍼(b0, VS·PS·CS) 하나다. 파이프라인이 선언한 크기(`drawConstantBytes`)만 셰이더가 읽고, `SetDrawConstants`마다 CPU 사본 전체를 deferred context에서 `Map(WRITE_DISCARD)`한다(UE uniform buffer와 같다, `Private/D3D11UniformBuffer.cpp:161`). `NO_OVERWRITE`는 deferred context의 상수 버퍼에 11.1 기능(`MapNoOverwriteOnDynamicConstantBuffer`)이 필요해 쓰지 않는다. SH2·P2의 b13 그리기 상수(셰이더 시스템 7.2절 4항)로 옮기는 것은 SH5다.
 
 **장치 능력·버퍼(GX1·GX2, 2026-11-18).**
 - `DeviceCaps`는 d3d11.h 상수와 feature level(FL 11.0은 UAV 8·VS UAV 없음, 11.1 이상은 UAV 64·모든 단계 UAV), `D3D11_FEATURE_D3D11_OPTIONS3`(VS 층 출력), DXGI 출력 HDR 색 공간이다. 64 bit atomic·multi draw indirect는 거짓이다. MSAA 표본 수는 `CheckMultisampleQualityLevels`다.
