@@ -331,6 +331,12 @@ Log::Info(LogNet, "Request accepted");
 - 카테고리 `Trace`·`Trace.*` 기록과 세션이 없을 때의 기록은 보내지 않는다. 메시지는 1024 byte까지다.
 - `trace-report`에 `logs`(레벨별 수, Warning 이상 목록)가 나온다.
 
+## 비정상 종료 때 마지막 로그
+
+- `LogInstallScope`는 `platform::SetTerminationHook`에 로그 종료 hook을 건다. `platform::Fatal`(Log를 거치지 않는 Fatal 포함)은 abort 전에 이 hook을 한 번 부르고, hook은 설치된 LogSystem의 `FlushForTermination`을 부른다. 막히는 lock 없이 출력 스레드를 깨우고 큐가 sink flush까지 끝나기를 `fatalFlushTimeoutMilliseconds`까지 기다린다. `Log::Fatal`·assert가 이미 flush했으면 다시 하지 않는다.
+- 엔진 호스트는 `platform::InstallCrashHandler()`(`Platform/CrashHandler.h`)로 접근 위반·stack overflow(Windows unhandled exception filter)와 치명 신호(POSIX)에서도 같은 hook을 부르게 할 수 있다. 처리기는 flush만 하고 앞 처리기로 넘긴다. stack overflow 대비로 hook은 미리 만든 flush 전용 스레드에서 돈다. `platform::Thread`로 만든 스레드는 처리기용 여유 stack(32 KiB)을 시작 때 확보한다.
+- 비정상 종료한 봉인 파일에는 끝 표시가 없다(`log decode`가 비정상 종료로 알린다).
+
 ## 시험에서 쓰기
 
 - `LogMode::Manual` LogSystem과 캡처 sink를 시험 안에서 `LogInstallScope`로 설치한다. 기록한 뒤 `Pump()`를 부르고 단언한다. sleep을 쓰지 않는다.

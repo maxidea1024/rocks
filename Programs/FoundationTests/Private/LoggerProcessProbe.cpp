@@ -1,9 +1,13 @@
 #include <TestSupport/HostFailure.h>
 #include <Core/Assert.h>
+#include <Core/Diagnostics/FileLogSink.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/Diagnostics/LogSystem.h>
 #include <Core/Diagnostics/RuntimeLogSink.h>
 #include <Core/Memory/SystemAllocator.h>
+#include <Core/Text/StringView.h>
+#include <Platform/CrashHandler.h>
+#include <Platform/Fatal.h>
 
 namespace rocks::test {
 bool ConfigureLoggerFailureProbe() noexcept;
@@ -84,6 +88,68 @@ int RunLogFatalProbe(uint32 mode) noexcept {
     }
 
     return 4;
+}
+
+namespace {
+
+inline constexpr LogCategory LogCrashProbe{"Tests.Crash"};
+
+// 끝없는 재귀로 stack을 넘친다. 깊이 검사는 무한 재귀 경고를 피하려는 것이고, 닿지 않는다.
+[[gnu::noinline]] uint64 OverflowStack(uint64 depth) noexcept {
+    constexpr usize OverflowFrameBytes = 1024;
+    volatile uint8 frame[OverflowFrameBytes];
+    frame[0] = static_cast<uint8>(depth);
+    if (depth == NumericLimits<uint64>::Max()) {
+        return frame[0];
+    }
+
+    return OverflowStack(depth + 1) + frame[0];
+}
+
+} // namespace
+
+// 비정상 종료 직전의 Async 기록이 파일에 남는지 별도 child에서 확인한다(설계 14.1.8, L24·L25).
+// directory에 Probe-*.log를 쓴다. 정상이면 반환하지 않는다.
+// - mode 0: platform::Fatal을 바로 부른다(종료 hook)
+// - mode 1: 크래시 처리기를 설치하고 접근 위반
+// - mode 2: 크래시 처리기를 설치하고 stack overflow
+int RunLogCrashProbe(uint32 mode, const char* directory) noexcept {
+    // 준비 실패 종료 코드다. 크래시 종료 코드(abort 3, 예외 코드)와 겹치지 않게 따로 둔다.
+    constexpr int MissingDirectory = 20;
+    constexpr int HandlerFailed = 21;
+    constexpr int SetupFailed = 22;
+    constexpr int DidNotCrash = 23;
+    PrepareFatalTestProcess();
+    if (directory == nullptr) {
+        return MissingDirectory;
+    }
+
+    if (mode != 0 && !platform::InstallCrashHandler()) {
+        return HandlerFailed;
+    }
+
+    SystemAllocator allocator;
+    FileLogSinkConfig config;
+    config.directory = StringView(directory);
+    config.hostName = "Probe";
+    FileLogSink file(allocator, config);
+    LogSystem logs(allocator, LogSystemConfig::ForEngineHost());
+    if (!file.Open() || !logs.AddSink(file) || !logs.Start()) {
+        return SetupFailed;
+    }
+
+    LogInstallScope installed(logs);
+    Log::Info(LogCrashProbe, "last record before crash mode {Mode}", mode);
+    if (mode == 0) {
+        platform::Fatal("log crash probe: platform fatal");
+    } else if (mode == 1) {
+        int* volatile target = nullptr;
+        *target = 1;
+    } else {
+        (void)OverflowStack(0);
+    }
+
+    return DidNotCrash;
 }
 
 } // namespace rocks::test

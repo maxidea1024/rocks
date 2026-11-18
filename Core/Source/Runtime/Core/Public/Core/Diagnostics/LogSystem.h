@@ -156,6 +156,13 @@ class LogSystem;
 namespace detail {
 struct LogSystemAccess;
 
+// 설치된 LogSystem을 종료 전에 flush한다(종료 hook이 부른다, LogSystem::FlushForTermination).
+void FlushInstalledLogForTermination() noexcept;
+
+// platform::SetTerminationHook에 거는 함수다. Log::Fatal·assert가 이미 flush했으면(이 스레드의
+// Fatal 진행 표시) 다시 하지 않는다.
+void LogTerminationHook(const char* message, usize bytes) noexcept;
+
 // 설치·해제 때마다 하나씩 오르는 전역 세대 값이다(SRCU 세대 뒤집기). 해제가 뒤집기를 마쳤는지
 // 순서를 확인하는 시험·진단용이다.
 uint64 LogInstallGeneration() noexcept;
@@ -259,12 +266,20 @@ public:
 
     LogSystemStats Stats() const noexcept;
 
+    // 비정상 종료 직전의 best effort flush다(platform::Fatal·OS 예외·신호의 종료 hook이 부른다,
+    // 설계 14.1.8). 막히는 lock을 쓰지 않는다: Async는 출력 스레드를 TrySignal로 깨우고 이 호출
+    // 전에 넣은 기록이 sink flush까지 끝났는지 원자 위치로 확인하며 timeout까지 기다린다. Sync는
+    // sink lock을 TryLock으로 잡을 때만 flush한다. 출력 스레드 자신·sink 콜백 안·Manual·비상
+    // 모드에서는 하지 않는다. 다 비웠으면 true다.
+    bool FlushForTermination(uint32 timeoutMilliseconds) noexcept;
+
     LogMode Mode() const noexcept {
         return config_.mode;
     }
 
 private:
     friend struct detail::LogSystemAccess;
+    friend void detail::FlushInstalledLogForTermination() noexcept;
     friend class LogInstallScope;
 
     struct SinkSlot {
@@ -353,6 +368,8 @@ private:
     // Stop이 출력 스레드를 회수하지 못하고 메모리와 함께 남겨 두었다(소유 스레드만 읽고 쓴다).
     bool writerLeaked_ = false;
     uint64 writerThread_ = 0;
+    // 출력 쪽이 sink flush까지 끝낸 큐 위치다(종료 flush가 lock 없이 읽는다).
+    uint64 drainedPosition_ = 0;
 
     // sink 표(sinkMutex_가 보호). 출력 쪽은 묶음 동안 이 lock을 쥔다.
     platform::Mutex sinkMutex_;

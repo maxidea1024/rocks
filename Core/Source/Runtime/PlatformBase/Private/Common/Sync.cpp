@@ -1,5 +1,6 @@
 #include <Platform/Sync.h>
 #include <Platform/Fatal.h>
+#include <Platform/Thread.h>
 #include "WaitDeadline.h"
 
 namespace rocks::platform {
@@ -13,6 +14,21 @@ void ManualResetEvent::Signal() noexcept {
         signaled_ = true;
     }
     changed_.NotifyAll();
+}
+
+bool ManualResetEvent::TrySignal(uint32 attempts) noexcept {
+    for (uint32 attempt = 0; attempt < attempts; ++attempt) {
+        if (gate_.TryLock()) {
+            signaled_ = true;
+            gate_.Unlock();
+            changed_.NotifyAll();
+            return true;
+        }
+
+        YieldThread();
+    }
+
+    return false;
 }
 
 void ManualResetEvent::Reset() noexcept {

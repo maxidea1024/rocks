@@ -160,6 +160,9 @@ void RefreshLogFastMinimum(LogSystem& system, uint8 minimum) noexcept {
 // ---- LogInstallScope ----
 
 LogInstallScope::LogInstallScope(LogSystem& system) noexcept {
+    // platform::Fatal·OS 예외·신호 때 설치된 LogSystem을 flush하는 종료 hook이다. 함수는 프로세스
+    // 수명 동안 유효하고 설치된 것이 없으면 아무것도 하지 않으므로 해제 때 되돌리지 않는다.
+    (void)platform::SetTerminationHook(&detail::LogTerminationHook);
     uint64 dropped = 0;
     {
         platform::LockGuard lock(InstallMutex());
@@ -259,6 +262,7 @@ Result<void> LogSystem::Start() noexcept {
     }
 
     platform::AtomicStore<MemoryOrder::Relaxed>(&stopping_, 0u);
+    platform::AtomicStore<MemoryOrder::Relaxed>(&drainedPosition_, uint64{0});
     platform::AtomicStore<MemoryOrder::Relaxed>(&abandoned_, 0u);
     platform::AtomicStore<MemoryOrder::Relaxed>(&emergency_, 0u);
     platform::AtomicStore<MemoryOrder::Release>(&started_, 1u);
@@ -526,6 +530,7 @@ usize LogSystem::DrainBatch(usize limit) noexcept {
             ReportDrops();
             ReportRateLimits();
             FlushSinks();
+            platform::AtomicStore<MemoryOrder::Release>(&drainedPosition_, queue_.PopPosition());
         }
     }
 
@@ -1024,6 +1029,58 @@ void LogSystem::DeliverFatal(Span<const uint8> capture) noexcept {
         (void)Flush(config_.fatalFlushTimeoutMilliseconds);
     }
 }
+
+bool LogSystem::FlushForTermination(uint32 timeoutMilliseconds) noexcept {
+    if (platform::AtomicLoad<MemoryOrder::Acquire>(&started_) == 0 || inSink ||
+        detail::OnLogWriterThread()) {
+        return false;
+    }
+
+    if (config_.mode == LogMode::Sync) {
+        // 기록은 이미 sink에 갔다. 묶어 둔 출력(파일 묶음)만 비운다. lock을 쥔 스레드가 멈췄으면
+        // 건너뛴다.
+        if (!sinkMutex_.TryLock()) {
+            return false;
+        }
+
+        FlushSinks();
+        sinkMutex_.Unlock();
+        return true;
+    }
+
+    if (config_.mode != LogMode::Async ||
+        platform::AtomicLoad<MemoryOrder::Acquire>(&emergency_) != 0) {
+        return false;
+    }
+
+    // 이 호출 전에 넣은 기록이 sink flush까지 끝나기를 lock 없이 기다린다. 깨우기는 막히지 않는
+    // TrySignal로 계속 시도한다(출력 스레드는 깨어 있어도 다시 확인하므로 남는 신호는 해가 없다).
+    constexpr uint64 NanosecondsPerMillisecond = 1000000;
+    const uint64 target = queue_.PushPosition();
+    const uint64 deadline = platform::MonotonicNanoseconds() +
+                            static_cast<uint64>(timeoutMilliseconds) * NanosecondsPerMillisecond;
+    while (platform::AtomicLoad<MemoryOrder::Acquire>(&drainedPosition_) < target) {
+        if (platform::MonotonicNanoseconds() >= deadline) {
+            return false;
+        }
+
+        (void)wake_.TrySignal();
+        platform::YieldThread();
+    }
+
+    return true;
+}
+
+namespace detail {
+
+void FlushInstalledLogForTermination() noexcept {
+    LogReadScope scope;
+    if (LogSystem* system = scope.System()) {
+        (void)system->FlushForTermination(system->config_.fatalFlushTimeoutMilliseconds);
+    }
+}
+
+} // namespace detail
 
 uint8 LogSystem::EffectiveMinimum() const noexcept {
     // 빠른 거부 하한: 전역 최소와 모든 재정의 레벨 중 가장 낮은 값이다.

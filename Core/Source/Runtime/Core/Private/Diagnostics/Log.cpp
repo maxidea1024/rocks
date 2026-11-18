@@ -212,4 +212,18 @@ void Log::SetFrame(uint64 frame) noexcept {
     }
 }
 
+namespace detail {
+
+void LogTerminationHook(const char*, usize) noexcept {
+    // Log::Fatal·assert가 이 스레드에서 이미 flush했다(그 뒤 platform::Fatal이 hook을 부른다).
+    if (fatalInProgress) {
+        return;
+    }
+
+    fatalInProgress = true;
+    FlushInstalledLogForTermination();
+}
+
+} // namespace detail
+
 } // namespace rocks

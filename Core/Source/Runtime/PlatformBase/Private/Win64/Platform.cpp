@@ -3,6 +3,7 @@
 #include <Platform/Memory.h>
 #include <Platform/Sync.h>
 #include <Base/Checked.h>
+#include "../Common/TerminationInternal.h"
 
 #include <Windows.h>
 #include <malloc.h>
@@ -129,6 +130,7 @@ void WriteDiagnostic(const char* bytes, usize count) noexcept {
     const HANDLE errorStream = GetStdHandle(STD_ERROR_HANDLE);
     WriteFile(errorStream, text, length, &written, nullptr);
     WriteFile(errorStream, "\n", 1, &written, nullptr);
+    detail::RunTerminationHook(text, length);
     abort();
 }
 
