@@ -550,7 +550,8 @@ private:
     // 남는다 — 13.3절). 이미 파괴됐거나 종료 중이면 무시하고, 그 밖의 실패는 불변식 위반으로
     // Fatal이다.
     void RequestDestroyOwned(ObjectHandle object) noexcept;
-    // World API 밖에서 파괴(Object::Destroy)된 Actor를 찾아 정리 대기로 돌린다. 하나라도 있으면 참.
+    // World API 밖에서 파괴(RequestDestroy·Object::Destroy)된 Actor와 Level을 찾아 World 파괴로
+    // 돌린다(Actor는 DestroyActor, Level은 DestroyLevel — 영구 Level은 Fatal). 하나라도 있으면 참.
     bool RepairBypassedActors() noexcept;
     // Actor를 Level의 actors_에서 O(1)로 뗀다(끝 원소와 바꾼다).
     void DetachFromLevel(ObjectHandle level, const ActorRecord& record) noexcept;
@@ -572,6 +573,9 @@ private:
     SlotArray<ActorRecord> actors_;
     HashMap<uint32, SlotHandle> actorIndex_;
     Array<LevelRecord> levels_;
+    // Level 객체의 슬롯 번호 집합이다(값은 쓰지 않는다). 파괴 요청 목록에서 Level을 Level 수에
+    // 비례하는 훑기 없이 가려낸다(RepairBypassedActors).
+    HashMap<uint32, uint32> levelSlots_;
     ObjectHandle persistentLevel_;
     Array<ObjectHandle> pendingStart_;
     Array<ObjectHandle> pendingComponentStart_;

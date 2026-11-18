@@ -191,6 +191,63 @@ TEST(ObjectGcCluster_BoundaryMemberKeepsOutsideTargetAndLeaveDetaches) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
+// 클러스터 소속 owner의 바꿔 떼기(RemoveReferenceAtSwap)는 지운 간선만 장부에서 뺀다. 옮긴 끝
+// 원소가 이탈한(파괴 요청된) 소속이어도 그 간선의 계수는 그대로라 detached로 살고, 그 간선을 마저
+// 지우면 회수된다. 매 Collect가 장부를 다시 세어 대조한다(verifyClusterLedger).
+TEST(ObjectGcCluster_SwapRemoveKeepsLedgerForMovedDetachedMember) {
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterClusterTypes(types));
+        ObjectRegistry objects(allocator, types, Guid{0x4743, 20}, ClusterOptions());
+        const auto access = objects.OwnerAccess();
+        SmallCluster cluster;
+        REQUIRE(MakeCluster(objects, 3, cluster));
+        auto outside = objects.NewObject<ClusterNode>(access, PlainNodeType);
+        REQUIRE(outside);
+        const ObjectHandle outsideHandle = outside.Value().Handle();
+        const ObjectHandle root = cluster.root.Handle();
+        // 루트 items: [m0, outside, m1, m2]. m2(끝)가 이탈한 뒤 0번을 바꿔 떼면 m2가 0번으로 온다.
+        REQUIRE(Link(objects, root, cluster.members[0]));
+        REQUIRE(Link(objects, root, outsideHandle));
+        REQUIRE(Link(objects, root, cluster.members[1]));
+        REQUIRE(Link(objects, root, cluster.members[2]));
+        outside.Value().Reset();
+        REQUIRE(objects.RequestDestroy(access, cluster.members[2]));
+        {
+            auto borrowed = objects.Resolve<ClusterNode>(access, root);
+            REQUIRE(borrowed);
+            ClusterNode* node = borrowed.Value().Get().Value();
+            REQUIRE(objects.RemoveReferenceAtSwap(access, root, node->items, 0));
+            REQUIRE(node->items.Size() == 3);
+            CHECK(node->items[0] == cluster.members[2]);
+        }
+
+        REQUIRE(objects.Collect(access));
+        CHECK(Exists(objects, cluster.members[2]));
+        CHECK(Exists(objects, outsideHandle));
+        {
+            auto borrowed = objects.Resolve<ClusterNode>(access, root);
+            REQUIRE(borrowed);
+            ClusterNode* node = borrowed.Value().Get().Value();
+            // m2를 지우면(끝 원소 m1이 옮겨 온다) detached가 풀린다. 경계 간선도 바꿔 뗀다.
+            REQUIRE(objects.RemoveReferenceAtSwap(access, root, node->items, 0));
+            CHECK(node->items[0] == cluster.members[1]);
+            REQUIRE(objects.RemoveReferenceAtSwap(access, root, node->items, 1));
+            CHECK(node->items.Size() == 1);
+        }
+
+        REQUIRE(objects.Collect(access));
+        CHECK(!Exists(objects, cluster.members[2]));
+        CHECK(!Exists(objects, outsideHandle));
+        CHECK(Exists(objects, cluster.members[0]) && Exists(objects, cluster.members[1]));
+        cluster.root.Reset();
+        REQUIRE(objects.Shutdown(access));
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
 TEST(ObjectGcCluster_RootDestroyDissolvesAndJoinRulesHold) {
     SystemAllocator allocator;
     {

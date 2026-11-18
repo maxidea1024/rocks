@@ -348,6 +348,18 @@ public:
     Result<void> RemoveReferenceAt(const ObjectAccessContext& access, ObjectHandle owner,
                                    ObjectRefArray<T>& array, usize index) noexcept;
 
+    // index 원소를 지우고 끝 원소를 그 자리로 옮긴다(순서를 지키지 않는다 — O(1)). 지운 원소의
+    // 규칙(장부·관찰자 기록·오류)은 RemoveReferenceAt과 같다. 옮기는 원소는 같은 배열에 이미 있는
+    // 간선이라 대상의 생존·cutoff·세대를 다시 묻지 않는다(대상이 DestroyRequested여도 성공한다 —
+    // SetReferenceAt으로 옮기면 대상 검증이 실패한다). 순서가 의미 없는 큰 목록의 제거에 쓴다
+    // (Docs/Design/EngineRuntime.ko.md 4.5절).
+    //
+    // 사용 예(World가 Level의 Actor 배열에서 위치를 기억해 뗀다):
+    //   registry.RemoveReferenceAtSwap(access, level, levelPointer->actors_, position);
+    template <class T>
+    Result<void> RemoveReferenceAtSwap(const ObjectAccessContext& access, ObjectHandle owner,
+                                       ObjectRefArray<T>& array, usize index) noexcept;
+
     // target과 같은 첫 원소를 지운다(null이면 첫 null 원소). 없으면 NotFound다. 관찰자 Registry의
     // 예약 뒤 재검증에서 그 원소가 사라졌으면 Busy다.
     template <class T>
@@ -898,9 +910,10 @@ private:
     Result<void> ReplaceArrayEdge(const ObjectAccessContext&, ObjectHandle,
                                   detail::ObjectRefArrayStorage&, usize index, ObjectHandle,
                                   const void*) noexcept;
+    // swap이면 지운 자리에 끝 원소를 옮긴다(RemoveReferenceAtSwap), 아니면 뒤를 당긴다.
     Result<void> RemoveArrayEdge(const ObjectAccessContext&, ObjectHandle,
-                                 detail::ObjectRefArrayStorage&, usize, ObjectHandle,
-                                 bool byHandle) noexcept;
+                                 detail::ObjectRefArrayStorage&, usize, ObjectHandle, bool byHandle,
+                                 bool swap = false) noexcept;
     Result<void> ClearArrayEdges(const ObjectAccessContext&, ObjectHandle,
                                  detail::ObjectRefArrayStorage&) noexcept;
     Result<void> AssignArrayEdges(const ObjectAccessContext&, ObjectHandle,

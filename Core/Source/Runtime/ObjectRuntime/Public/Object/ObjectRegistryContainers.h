@@ -44,6 +44,13 @@ Result<void> ObjectRegistry::RemoveReferenceAt(const ObjectAccessContext& access
 }
 
 template <class T>
+Result<void> ObjectRegistry::RemoveReferenceAtSwap(const ObjectAccessContext& access,
+                                                   ObjectHandle owner, ObjectRefArray<T>& array,
+                                                   usize index) noexcept {
+    return RemoveArrayEdge(access, owner, array.storage_, index, ObjectHandle{}, false, true);
+}
+
+template <class T>
 Result<void> ObjectRegistry::RemoveReference(const ObjectAccessContext& access, ObjectHandle owner,
                                              ObjectRefArray<T>& array,
                                              ObjectHandle target) noexcept {

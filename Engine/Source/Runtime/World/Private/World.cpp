@@ -96,8 +96,9 @@ World::World(Allocator& allocator, TypeRegistry& types, const WorldDesc& desc) n
     : allocator_(allocator), objects_(allocator, types, desc.context, WorldRegistryOptions(desc)),
       name_(allocator), ticks_(allocator), subsystems_(allocator), subsystemTypes_(desc.subsystems),
       timeStep_(desc.timeStep), actors_(allocator), actorIndex_(allocator), levels_(allocator),
-      pendingStart_(allocator), pendingComponentStart_(allocator), destroyActors_(allocator),
-      destroyComponents_(allocator), gcBudget_(desc.gcBudget), gcScheduler_(desc.gcScheduler) {
+      levelSlots_(allocator), pendingStart_(allocator), pendingComponentStart_(allocator),
+      destroyActors_(allocator), destroyComponents_(allocator), gcBudget_(desc.gcBudget),
+      gcScheduler_(desc.gcScheduler) {
     // 이름은 진단용이다. 복사에 실패하면 빈 이름으로 둔다.
     auto named = name_.TryAssign(desc.name);
     (void)named;
@@ -346,6 +347,12 @@ Result<ObjectHandle> World::CreateLevelInternal(StringView name, bool persistent
         return Result<ObjectHandle>::Failure(configured.Error());
     }
 
+    auto indexed = levelSlots_.Insert(handle.slot, 0);
+    if (!indexed) {
+        RequestDestroyOwned(handle);
+        return Result<ObjectHandle>::Failure(indexed.Error());
+    }
+
     // 용량을 위에서 확보했으므로 실패하지 않는다.
     auto added = levels_.TryEmplaceBack();
     added.Value()->root = Move(created.Value());
@@ -394,7 +401,17 @@ Result<void> World::DestroyLevel(ObjectHandle level) noexcept {
             }
         }
     });
-    (void)listed;
+    if (!listed) {
+        // Level 객체가 World API 밖에서 파괴돼(DestroyRequested) 빌릴 수 없다(우회 파괴 복구). 소속
+        // Actor를 World 레코드에서 찾는다 — 이 계약 위반의 복구에서만 Actor 수에 비례한다.
+        // DestroyActor는 큐에만 넣으므로 레코드를 훑는 동안 저장소가 바뀌지 않는다.
+        for (const ActorRecord& actor : actors_) {
+            if (actor.level == level && actor.state != ActorState::PendingDestroy) {
+                auto destroyed = DestroyActor(actor.handle);
+                (void)destroyed;
+            }
+        }
+    }
 
     // Tick·hook 밖에서 요청했고 소속 Actor가 이미 없으면 바로 회수한다.
     if (!inTick_ && hookDepth_ == 0) {
@@ -414,6 +431,7 @@ void World::ReleaseLevel(usize index) noexcept {
     RootRef<Level> root = Move(levels_[index].root);
     auto removed = levels_.TryRemoveAt(index);
     (void)removed;
+    levelSlots_.Erase(handle.slot);
     RequestDestroyOwned(handle);
     root.Reset();
     gcPending_ = true;
@@ -1752,17 +1770,20 @@ void World::FlushDestroys() noexcept {
 }
 
 void World::StepGarbageCollection() noexcept {
+    // World API 밖에서 파괴된 Actor·Level을 매 프레임 GC step 전에 정리한다. 우회 파괴는 Tick 밖
+    // (step 사이)에서만 일어나므로 sweep이 그 객체를 회수하기 전에 늘 여기를 지난다 — cycle 시작
+    // 전에만 보면 cycle 도중의 우회 파괴가 정리 없이 회수되거나(Level이 사라지면 소속 Actor도
+    // 도달하지 못한다), 다른 World 파괴가 없으면 GC가 돌지 않아 영영 남는다. 그 Component가 Level
+    // 클러스터의 고아 소속으로 남지 않게도 한다(13.3·13.8절). 목록이 비면 잠금 한 번이다.
+    if (RepairBypassedActors()) {
+        FlushDestroys();
+    }
+
     if (!gcPending_) {
         return;
     }
 
     if (objects_.CollectionPhase() == GcPhase::Idle) {
-        // cycle 시작 전에 World API 밖에서 파괴된 Actor를 정리한다(그 Component가 Level 클러스터의
-        // 고아 소속으로 남지 않게 — 13.3·13.8절).
-        if (RepairBypassedActors()) {
-            FlushDestroys();
-        }
-
         auto begun = objects_.BeginCollection(Access());
         // 외부가 Borrow를 보유하면 Busy다. 다음 프레임에 다시 시도한다.
         if (!begun) {
@@ -1800,6 +1821,27 @@ bool World::RepairBypassedActors() noexcept {
         }
 
         for (usize at = 0; at < taken.Value(); ++at) {
+            if (levelSlots_.Find(batch[at].slot) != nullptr) {
+                const LevelRecord* level = FindLevelRecord(batch[at]);
+                if (level == nullptr || level->pendingDestroy) {
+                    continue;
+                }
+
+                // 영구 Level은 World API로도 파괴할 수 없다(Spawn 기본 대상) — 복구할 수 없는 계약
+                // 위반이다.
+                if (batch[at] == persistentLevel_) {
+                    platform::Fatal("Persistent Level was destroyed outside the World API");
+                }
+
+                ++repairedTicks_;
+                repaired = true;
+                if (!DestroyLevel(batch[at])) {
+                    platform::Fatal("World could not repair a Level destroyed outside its API");
+                }
+
+                continue;
+            }
+
             const ActorRecord* record = FindActorRecord(batch[at]);
             if (record == nullptr || record->state == ActorState::PendingDestroy) {
                 continue;
@@ -1816,22 +1858,25 @@ bool World::RepairBypassedActors() noexcept {
 }
 
 void World::DetachFromLevel(ObjectHandle level, const ActorRecord& record) noexcept {
-    // 끝 원소를 이 Actor 자리로 옮기고 끝을 지운다(두 쓰기 모두 O(1) — 앞에서 찾지도, 뒤를 당기지도
-    // 않는다). 옮긴 Actor의 위치를 고친다.
-    auto detached = With<Level>(level, [&](Level& owner) noexcept -> Result<void> {
-        const usize last = owner.actors_.Size() - 1;
+    // 끝 원소를 이 Actor 자리로 옮기고 끝을 지운다(O(1) — RemoveReferenceAtSwap은 옮기는 원소를
+    // 다시 검증하지 않으므로 끝 Actor가 World API 밖에서 파괴돼 DestroyRequested여도 성공한다).
+    // 옮긴 Actor의 위치를 고친다. 이 경로의 실패(파괴 정리는 안전 지점에서만 하고 World
+    // Registry에는 관찰자가 없다)는 일어날 수 없으므로 Fatal로 막는다 — 버리면 지울 Actor가 배열에
+    // 남는다.
+    auto detached = With<Level>(level, [&](Level& owner) noexcept {
         const uint32 at = record.levelPosition;
-        if (owner.actors_.IsEmpty() || at > last || owner.actors_[at] != record.handle) {
+        if (owner.actors_.IsEmpty() || at >= owner.actors_.Size() ||
+            owner.actors_[at] != record.handle) {
             platform::Fatal("Actor record position diverged from its Level array");
         }
 
-        if (at != last) {
-            const ObjectHandle moved = owner.actors_[last];
-            if (auto set = objects_.SetReferenceAt(Access(), level, owner.actors_, at, moved);
-                !set) {
-                return set;
-            }
+        const usize last = owner.actors_.Size() - 1;
+        const ObjectHandle moved = owner.actors_[last];
+        if (!objects_.RemoveReferenceAtSwap(Access(), level, owner.actors_, at)) {
+            platform::Fatal("World could not detach an actor from its Level");
+        }
 
+        if (at != last) {
             ActorRecord* movedRecord = FindActorRecord(moved);
             if (movedRecord == nullptr) {
                 platform::Fatal("Level array holds an actor without a record");
@@ -1839,10 +1884,13 @@ void World::DetachFromLevel(ObjectHandle level, const ActorRecord& record) noexc
 
             movedRecord->levelPosition = at;
         }
-
-        return objects_.RemoveReferenceAt(Access(), level, owner.actors_, last);
     });
-    (void)detached;
+    // Level 객체 자체가 World API 밖에서 파괴됐으면(DestroyRequested — 다음 복구가 Level을
+    // 정리한다) 배열은 Level과 함께 사라지므로 뗄 것이 없다. 그 밖의 실패(회수된 Level의 레코드
+    // 등)는 복구가 매 GC step 전에 돌아 일어날 수 없다.
+    if (!detached && detached.Error() != ErrorCode::Destroyed) {
+        platform::Fatal("World could not borrow the Level of an actor it destroys");
+    }
 }
 
 bool World::JoinsCluster(ConstructionContext& transaction, ObjectHandle object) noexcept {

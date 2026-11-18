@@ -388,6 +388,43 @@ TEST(ReferenceObserver_ArrayEditsMergePerPackagePair) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
+// RemoveReferenceAtSwap은 지운 간선 하나만 기록한다(옮긴 끝 원소는 같은 소유자의 간선이라 패키지
+// 쌍 계수가 바뀌지 않는다).
+TEST(ReferenceObserver_SwapRemoveRecordsOnlyTheRemovedEdge) {
+    SystemAllocator allocator;
+    {
+        Fixture fixture(allocator, 3);
+        const auto access = fixture.Access();
+        const ObjectHandle p = fixture.Package();
+        const ObjectHandle q = fixture.Package();
+        const ObjectHandle r = fixture.Package();
+        const ObjectHandle a = fixture.Node(p);
+        const ObjectHandle b = fixture.Node(q);
+        const ObjectHandle c = fixture.Node(r);
+        Borrow<ObservedNode> borrow;
+        ObservedNode* node = fixture.Pin(a, borrow);
+        ObjectRefArray<Object>& items = node->items;
+        REQUIRE(fixture.registry.AddReference(access, a, items, c));
+        REQUIRE(fixture.registry.AddReference(access, a, items, b));
+        REQUIRE(fixture.registry.AddReference(access, a, items, b));
+        (void)fixture.Take();
+        REQUIRE(fixture.registry.RemoveReferenceAtSwap(access, a, items, 0));
+        REQUIRE(items.Size() == 2);
+        CHECK(items[0] == b && items[1] == b);
+        auto changes = fixture.Take();
+        REQUIRE(changes.Size() == 1);
+        CHECK(Is(changes[0], p, r, -1));
+        REQUIRE(fixture.registry.RemoveReferenceAtSwap(access, a, items, 0));
+        changes = fixture.Take();
+        REQUIRE(changes.Size() == 1);
+        CHECK(Is(changes[0], p, q, -1));
+        REQUIRE(fixture.registry.ClearReferences(access, a, items));
+        (void)fixture.Take();
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
 // StructRefArray: 원소 추가·삽입은 기록이 없고(참조가 null), 제거·비우기는 떼어 낸 원소만 등록
 // struct trace로 훑는다(소유자 Trace 호출 0). 원소 안 참조 쓰기는 SetReference와 같다.
 TEST(ReferenceObserver_StructElementRemovalTracesOnlyDetachedElements) {

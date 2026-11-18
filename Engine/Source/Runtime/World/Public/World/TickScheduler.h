@@ -101,6 +101,10 @@ struct TickStats {
     uint32 pendingChanges = 0;
 };
 
+namespace detail {
+struct TickSchedulerTestAccess;
+} // namespace detail
+
 // 등록 기반 Tick 스케줄러다. 매 프레임 모든 객체를 순회하지 않고 등록된 항목만 단계별 밀집 배열로
 // 실행한다.
 //
@@ -161,6 +165,9 @@ public:
     TickStats Stats() const noexcept;
 
 private:
+    // 시험이 Reaches 방문 번호를 한 바퀴 끝 근처로 옮긴다(Private/TickSchedulerTestAccess.h).
+    friend struct detail::TickSchedulerTestAccess;
+
     struct Entry {
         Entry(Allocator& allocator, const TickRegistration& value, uint64 order) noexcept;
 

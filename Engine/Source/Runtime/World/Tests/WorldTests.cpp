@@ -262,7 +262,8 @@ public:
 struct Fixture {
     static constexpr uint32 MaxTokens = 16;
 
-    explicit Fixture(uint64 context = 1, Span<const WorldSubsystemType> subsystems = {}) noexcept
+    explicit Fixture(uint64 context = 1, Span<const WorldSubsystemType> subsystems = {},
+                     const GcBudget* gcBudget = nullptr) noexcept
         : types(allocator), modules(types, allocator) {
         registered = RegisterWorldTypes(modules).IsOk() && Register<LoggingComponent>() &&
                      Register<LoggingActor>() && Register<PhaseActor>() &&
@@ -272,6 +273,10 @@ struct Fixture {
         desc.context = {0x574f524c44ull, context};
         desc.timeStep = {1.0 / 60.0, 0.25, 8};
         desc.subsystems = subsystems;
+        if (gcBudget != nullptr) {
+            desc.gcBudget = *gcBudget;
+        }
+
         // Debug에서 GC cycle마다 Level 클러스터 장부와 소속 불변식(고아 소속)을 검증한다(GC-S7).
         desc.objects.verifyClusterLedger = true;
         desc.objects.verifyClusterOwnership = true;
@@ -1082,6 +1087,256 @@ TEST(World_BypassedActorComponentsLeaveLevelCluster) {
     CHECK(!world.Objects().InspectLifecycle(world.Access(), first.Value()));
     CHECK(!world.Objects().InspectLifecycle(world.Access(), second.Value()));
     REQUIRE(world.Shutdown());
+}
+
+namespace {
+
+// Level의 Actor 목록이 기대한 살아 있는 Actor만 정확히 담는지 본다(순서는 정하지 않는다).
+bool LevelHoldsExactly(World& world, ObjectHandle level,
+                       Span<const ObjectHandle> expected) noexcept {
+    auto held = world.With<Level>(level, [&](Level& value) noexcept {
+        const Span<const ObjectHandle> actors = value.Actors();
+        if (actors.Size() != expected.Size()) {
+            return false;
+        }
+
+        for (const ObjectHandle& wanted : expected) {
+            uint32 found = 0;
+            for (const ObjectHandle& actor : actors) {
+                found += actor == wanted ? 1u : 0u;
+            }
+
+            if (found != 1) {
+                return false;
+            }
+        }
+
+        return true;
+    });
+    return held && held.Value();
+}
+
+} // namespace
+
+// 같은 Level에서 끝 원소를 포함해 여럿을 World 밖에서 파괴한다. 바꿔 떼기가 옮기는 끝 원소도 파괴
+// 요청 상태이므로, 옮긴 칸을 다시 검증하면 떼기가 실패해 목록에 좀비 handle이 남는다
+// (EngineRuntime 4.5절 RemoveReferenceAtSwap).
+TEST(World_SeveralBypassedActorsIncludingLastLeaveLevelArray) {
+    Fixture fixture;
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    REQUIRE(world.BeginPlay());
+    const ObjectHandle level = world.PersistentLevel();
+    constexpr uint32 Count = 6;
+    ObjectHandle actors[Count];
+    for (uint32 index = 0; index < Count; ++index) {
+        // 틱 있는 Actor(Tick이 발견)와 틱 없는 Actor(파괴 요청 목록만 발견)를 섞는다.
+        auto spawned =
+            index % 2 == 0 ? world.SpawnActor<LoggingActor>() : world.SpawnActor<Actor>();
+        REQUIRE(spawned);
+        actors[index] = spawned.Value();
+    }
+
+    REQUIRE(LevelHoldsExactly(world, level, Span<const ObjectHandle>(actors, Count)));
+    REQUIRE(world.Tick(0.016));
+    // 처음 파괴하는 칸을 떼면 끝 원소(5번)가 그 자리로 옮겨지고, 5번 자신도 파괴 요청 상태다.
+    const uint32 bypassed[] = {1, 5, 4, 2};
+    for (uint32 index : bypassed) {
+        REQUIRE(world.Objects().RequestDestroy(world.Access(), actors[index]));
+    }
+
+    REQUIRE(world.Tick(0.016));
+    const ObjectHandle survivors[] = {actors[0], actors[3]};
+    CHECK(LevelHoldsExactly(world, level, survivors));
+    for (uint32 index : bypassed) {
+        CHECK(!world.HasActor(actors[index]));
+    }
+
+    for (uint32 frame = 0; frame < 16; ++frame) {
+        REQUIRE(world.Tick(0.016));
+    }
+
+    for (uint32 index : bypassed) {
+        CHECK(!world.Objects().InspectLifecycle(world.Access(), actors[index]));
+    }
+
+    CHECK(LevelHoldsExactly(world, level, survivors));
+    CHECK(world.HasActor(actors[0]) && world.HasActor(actors[3]));
+    REQUIRE(world.Shutdown());
+}
+
+// 우회 파괴와 DestroyActor가 같은 프레임에 겹친다. DestroyActor가 떼는 칸에 우회 파괴된 끝 원소가
+// 옮겨 와도 두 Actor 모두 목록에서 빠지고 회수된다.
+TEST(World_BypassedAndWorldDestroyInSameFrameLeaveLevelArray) {
+    Fixture fixture;
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    REQUIRE(world.BeginPlay());
+    auto dungeon = world.CreateLevel("Dungeon");
+    REQUIRE(dungeon);
+    SpawnParams inDungeon;
+    inDungeon.level = dungeon.Value();
+    constexpr uint32 Count = 5;
+    ObjectHandle actors[Count];
+    for (uint32 index = 0; index < Count; ++index) {
+        auto spawned = world.SpawnActor<LoggingActor>(inDungeon);
+        REQUIRE(spawned);
+        actors[index] = spawned.Value();
+    }
+
+    REQUIRE(world.Tick(0.016));
+    // 끝 원소(4번)를 우회 파괴한 뒤 첫 원소(0번)를 World로 파괴한다. 실행 중 파괴(Tick 안)도
+    // 겹치도록 1번 Tick이 3번을 파괴한다.
+    REQUIRE(world.Objects().RequestDestroy(world.Access(), actors[4]));
+    REQUIRE(world.DestroyActor(actors[0]));
+    {
+        Borrow<LoggingActor> borrow;
+        LoggingActor* killer = fixture.Pointer(actors[1], borrow);
+        REQUIRE(killer != nullptr);
+        killer->victim = actors[3];
+    }
+
+    REQUIRE(world.Tick(0.016));
+    const ObjectHandle survivors[] = {actors[1], actors[2]};
+    CHECK(LevelHoldsExactly(world, dungeon.Value(), survivors));
+    for (uint32 frame = 0; frame < 16; ++frame) {
+        REQUIRE(world.Tick(0.016));
+    }
+
+    const uint32 destroyed[] = {0, 3, 4};
+    for (uint32 index : destroyed) {
+        CHECK(!world.HasActor(actors[index]));
+        CHECK(!world.Objects().InspectLifecycle(world.Access(), actors[index]));
+    }
+
+    CHECK(LevelHoldsExactly(world, dungeon.Value(), survivors));
+    // Level 파괴도 남은 목록만 정리한다(좀비 handle이 있으면 파괴할 Actor를 찾지 못한다).
+    REQUIRE(world.DestroyLevel(dungeon.Value()));
+    for (uint32 frame = 0; frame < 16; ++frame) {
+        REQUIRE(world.Tick(0.016));
+    }
+
+    CHECK(!world.HasLevel(dungeon.Value()));
+    CHECK(!world.Objects().InspectLifecycle(world.Access(), actors[1]));
+    CHECK(!world.Objects().InspectLifecycle(world.Access(), actors[2]));
+    REQUIRE(world.Shutdown());
+}
+
+namespace {
+
+// OnStart에서 다른 Actor를 활성화하는 Actor다(시작 처리 중 hook이 시작 큐를 바꾸는 경로).
+class EnablerActor final : public Actor {
+    ROCKS_NATIVE_TYPE(EnablerActor, Actor, 0x5d0e3a7f1c2b4e91ull, 0x8f4a6b2c9d1e7a35ull)
+
+public:
+    explicit EnablerActor(Allocator& allocator) noexcept : Actor(allocator) {
+    }
+
+    void OnStart() noexcept override {
+        Record("e.start");
+        auto enabled = GetWorld().With<Actor>(
+            target, [](Actor& value) noexcept { return value.SetEnabled(true); });
+        CHECK(enabled.IsOk());
+    }
+
+    static inline ObjectHandle target;
+};
+
+} // namespace
+
+// 꺼진 채 시작을 미룬 Actor를 같은 시작 처리의 다른 Actor OnStart가 켜면, 시작 큐에 다시 들어가
+// 다음 프레임에 시작한다(큐에서 빠진 채 남지 않는다).
+TEST(World_ActorEnabledInsideStartHookIsRequeued) {
+    ResetEvents();
+    Fixture fixture;
+    REQUIRE(fixture.Register<EnablerActor>());
+    World& world = *fixture.world;
+    REQUIRE(world.Initialize());
+    REQUIRE(world.BeginPlay());
+    auto sleeper = world.SpawnActorDeferred<LoggingActor>();
+    REQUIRE(sleeper);
+    auto disabled = world.With<Actor>(
+        sleeper.Value(), [](Actor& value) noexcept { return value.SetEnabled(false); });
+    REQUIRE(disabled);
+    REQUIRE(world.FinishSpawning(sleeper.Value()));
+    // 시작 큐 순서: sleeper(꺼져 있어 미룬다) -> enabler(OnStart가 sleeper를 켠다).
+    EnablerActor::target = sleeper.Value();
+    auto enabler = world.SpawnActor<EnablerActor>();
+    REQUIRE(enabler);
+    REQUIRE(world.Tick(0.016));
+    CHECK(CountEvent("e.start") == 1);
+    CHECK(CountEvent("a.enable") == 1 && CountEvent("a.start") == 0);
+    CHECK(world.GetActorState(sleeper.Value()).Value() == ActorState::Initialized);
+    CHECK(world.Stats().waitingToStart == 1);
+    REQUIRE(world.Tick(0.016));
+    CHECK(CountEvent("a.start") == 1 && CountEvent("a.tick") == 1);
+    CHECK(world.GetActorState(sleeper.Value()).Value() == ActorState::Playing);
+    CHECK(world.Stats().waitingToStart == 0);
+    EnablerActor::target = {};
+    REQUIRE(world.Shutdown());
+}
+
+// Level 객체 자체를 World API 밖에서 파괴한다(GC idle 중, GC cycle 진행 중, 같은 프레임에 그
+// Level의 Actor를 DestroyActor). World는 그 Level을 파괴 대기로 정리하고 소속 Actor를 모두
+// 정리한다(엔진 런타임 7.4절 — 복구는 매 프레임 GC step 전).
+TEST(World_BypassedLevelDestroyIsRepaired) {
+    for (uint32 mode = 0; mode < 3; ++mode) {
+        // slice마다 객체 하나만 처리해 GC cycle이 여러 Tick에 걸치게 한다.
+        GcBudget budget;
+        budget.maxObjects = 1;
+        budget.maxNanoseconds = 0;
+        Fixture fixture(1, {}, &budget);
+        World& world = *fixture.world;
+        REQUIRE(world.Initialize());
+        REQUIRE(world.BeginPlay());
+        auto dungeon = world.CreateLevel("Dungeon");
+        REQUIRE(dungeon);
+        SpawnParams inDungeon;
+        inDungeon.level = dungeon.Value();
+        ObjectHandle actors[4];
+        for (ObjectHandle& actor : actors) {
+            auto spawned = world.SpawnActor<LoggingActor>(inDungeon);
+            REQUIRE(spawned);
+            actor = spawned.Value();
+        }
+
+        auto hero = world.SpawnActor<LoggingActor>();
+        REQUIRE(hero);
+        REQUIRE(world.Tick(0.016));
+        if (mode == 1) {
+            // 다른 Actor 파괴로 GC cycle을 시작시키고 Marking 중에 Level을 우회 파괴한다.
+            auto extra = world.SpawnActor<Actor>();
+            REQUIRE(extra);
+            REQUIRE(world.DestroyActor(extra.Value()));
+            for (uint32 frame = 0; frame < 64 && world.Objects().CollectionPhase() == GcPhase::Idle;
+                 ++frame) {
+                REQUIRE(world.Tick(0.016));
+            }
+
+            REQUIRE(world.Objects().CollectionPhase() != GcPhase::Idle);
+        }
+
+        REQUIRE(world.Objects().RequestDestroy(world.Access(), dungeon.Value()));
+        if (mode == 2) {
+            // 복구 전에 그 Level의 Actor를 World로 파괴한다(Level 배열을 빌릴 수 없어도 정리된다).
+            REQUIRE(world.DestroyActor(actors[3]));
+            REQUIRE(world.DestroyActor(actors[0]));
+        }
+
+        for (uint32 frame = 0; frame < 32; ++frame) {
+            REQUIRE(world.Tick(0.016));
+        }
+
+        for (const ObjectHandle& actor : actors) {
+            CHECK(!world.HasActor(actor));
+            CHECK(!world.Objects().InspectLifecycle(world.Access(), actor));
+        }
+
+        CHECK(!world.HasLevel(dungeon.Value()));
+        CHECK(world.HasActor(hero.Value()));
+        CHECK(world.Stats().levels == 1);
+        REQUIRE(world.Shutdown());
+    }
 }
 
 TEST(World_MassShutdownReleasesThousandsOfActors) {

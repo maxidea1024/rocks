@@ -35,6 +35,20 @@ constexpr uint32 MaxEdges = 48;
 constexpr uint32 OtherEdges = 6;
 // 모델 StructRefArray 원소 칸 수다.
 constexpr uint32 MaxSlots = 4;
+// 경계 비율 안전장치 문턱(Docs/Design/GarbageCollectionScale.ko.md 13.5절 — 패키지 클러스터의 경계
+// 소속이 소속의 이 백분율을 넘으면 cycle 끝에 해체). 모델이 Registry와 따로 예측하려고 스펙 값을
+// 그대로 둔다.
+constexpr uint32 ModelFlattenBoundaryPercent = 80;
+
+// 새 패키지의 inner 수 상한이다(패키지 2–10개 소속). 소속 수가 다양해야 경계 비율이 문턱
+// 양쪽(예: 5/6 = 83%, 9/10 = 90%)에 고루 놓여 모델 예측이 문턱 값을 실제로 가린다 — 2–4개만
+// 만들던 처음 smoke는 80%와 90% 문턱을 구별하지 못했다(음성 대조 R3).
+constexpr uint32 MaxPackageInners = 9;
+// seed를 xorshift 상태로 섞는 상수다(곱은 홀수라 일대일이다). 상태는 0이 아니어야 해서 섞은 뒤 맨
+// 아래 비트를 켠다 — 섞기 전에 켜던 처음 구현(seed | 1)은 짝수 seed와 다음 홀수 seed를 같은
+// 실행으로 만들었다(seed 52·53이 같은 결과).
+constexpr uint64 SeedMixMultiplier = 0x9e3779b97f4a7c15ULL;
+constexpr uint64 SeedMixIncrement = 0x7f4a7c159e3779b9ULL;
 constexpr TypeId ClusterSoakNodeType{0x4743534b4e4f4431ULL, 1};
 constexpr TypeId ClusterSoakPackageType{0x4743534b504b4731ULL, 1};
 constexpr TypeId ClusterSoakSlotType{0x4743534b534c5431ULL, 1};
@@ -144,6 +158,11 @@ struct Entry {
     bool bypassed = false;
     bool dead = false;
     bool reachable = false;
+    // 이 객체가 이탈한 클러스터의 루트 번호다(그 클러스터 소속에서 오는 간선이 남은 동안 — 장부의
+    // detached). 남은 간선이 없어지거나 클러스터가 해체되면 NoIndex다.
+    uint32 detachedOf = NoIndex;
+    // 부분 트리 Discard 중 클러스터를 떠났다(NoteLeft가 detached를 정한다).
+    bool leftPending = false;
     RootRef<Object> held;
 };
 
@@ -151,7 +170,8 @@ class ClusterSoak {
 public:
     ClusterSoak(Allocator& allocator, const GcClusterSoakOptions& options,
                 GcClusterSoakReport& report) noexcept
-        : options_(options), report_(report), rng_{options.seed | 1u}, entries_(allocator),
+        : options_(options), report_(report),
+          rng_{(options.seed * SeedMixMultiplier + SeedMixIncrement) | 1u}, entries_(allocator),
           stack_(allocator), memberHead_(allocator), memberNext_(allocator), childHead_(allocator),
           childNext_(allocator) {
     }
@@ -186,12 +206,18 @@ public:
             ++report_.cyclesBegun;
             while (objects.CollectionPhase() != GcPhase::Idle && report_.failure == nullptr) {
                 const GcBudget budget{1 + rng_.Below(48), 0};
+                const GcPhase before = objects.CollectionPhase();
                 auto step = objects.StepCollection(Access(), budget, options_.scheduler);
                 if (!step) {
                     return Fail("StepCollection failed", NoIndex, step.Error());
                 }
 
                 ++report_.steps;
+                // cutoff를 게시한 slice 직후다(그 사이 변경이 없어 장부가 cutoff 때와 같다).
+                if (before == GcPhase::Marking && objects.CollectionPhase() != GcPhase::Marking) {
+                    SettleFlattened(false);
+                }
+
                 CheckSafety();
                 for (uint32 edits = rng_.Below(6); edits != 0; --edits) {
                     Mutate();
@@ -199,6 +225,7 @@ public:
             }
 
             ++report_.cyclesCompleted;
+            CheckFlattenCount(objects.LastGcReport().flattenedClusters);
             CheckSafety();
         }
 
@@ -326,6 +353,7 @@ private:
 
             --entry.degree;
             ++report_.edgeWrites;
+            NoteEdgeRemoved(owner, target);
             return;
         }
     }
@@ -347,8 +375,10 @@ private:
             return;
         }
 
+        const uint32 previous = entries_[owner].single;
         entries_[owner].single = target;
         ++report_.edgeWrites;
+        NoteEdgeRemoved(owner, previous);
     }
 
     // items의 at번 원소를 target으로 바꾼다(SetReferenceAt — 모델 간선 순서는 배열과 같다).
@@ -362,8 +392,10 @@ private:
             return;
         }
 
+        const uint32 previous = entries_[owner].edges[at];
         entries_[owner].edges[at] = target;
         ++report_.edgeWrites;
+        NoteEdgeRemoved(owner, previous);
     }
 
     // 단일 필드 쓰기 또는 배열 원소 교체다(소유 간선 — Actor의 Component — 은 건드리지 않는다).
@@ -402,8 +434,17 @@ private:
             return;
         }
 
+        uint32 removed[MaxEdges];
+        const uint32 count = entries_[owner].degree;
+        for (uint32 edge = 0; edge < count; ++edge) {
+            removed[edge] = entries_[owner].edges[edge];
+        }
+
         entries_[owner].degree = 0;
         ++report_.edgeWrites;
+        for (uint32 edge = 0; edge < count; ++edge) {
+            NoteEdgeRemoved(owner, removed[edge]);
+        }
     }
 
     // StructRefArray 편집이다(Borrow를 쥐고 한다). 패키지 객체는 원소가 없다.
@@ -464,12 +505,14 @@ private:
             return;
         }
 
+        const uint32 previous = entry.slots[at];
         for (uint32 next = at + 1; next < entry.slotCount; ++next) {
             entry.slots[next - 1] = entry.slots[next];
         }
 
         --entry.slotCount;
         ++report_.edgeWrites;
+        NoteEdgeRemoved(owner, previous);
     }
 
     void ClearSlots(uint32 owner) noexcept {
@@ -484,8 +527,17 @@ private:
             return;
         }
 
+        uint32 removed[MaxSlots];
+        const uint32 count = entries_[owner].slotCount;
+        for (uint32 slot = 0; slot < count; ++slot) {
+            removed[slot] = entries_[owner].slots[slot];
+        }
+
         entries_[owner].slotCount = 0;
         ++report_.edgeWrites;
+        for (uint32 slot = 0; slot < count; ++slot) {
+            NoteEdgeRemoved(owner, removed[slot]);
+        }
     }
 
     // 원소 추가·제거·비우기다(소유자 규칙은 간선 추가와 같다 — World형 Actor는 같은 Level Actor만
@@ -685,7 +737,84 @@ private:
             if (entry.cluster == root) {
                 entry.cluster = NoIndex;
             }
+
+            if (entry.detachedOf == root) {
+                entry.detachedOf = NoIndex;
+            }
         }
+    }
+
+    // ---- 장부 모델(경계 비율 안전장치 예측) ----
+
+    // owner의 강한 간선(배열·단일 필드·원소·outer)을 visit(target)에 넘긴다.
+    template <class Visit>
+    void ForEachEdge(uint32 owner, Visit&& visit) const noexcept {
+        const Entry& entry = entries_[owner];
+        for (uint32 edge = 0; edge < entry.degree; ++edge) {
+            visit(entry.edges[edge]);
+        }
+
+        if (entry.single != NoIndex) {
+            visit(entry.single);
+        }
+
+        for (uint32 slot = 0; slot < entry.slotCount; ++slot) {
+            if (entry.slots[slot] != NoIndex) {
+                visit(entry.slots[slot]);
+            }
+        }
+
+        if (entry.outer != NoIndex) {
+            visit(entry.outer);
+        }
+    }
+
+    // 클러스터 root 소속에서 target으로 오는 간선 수다(장부의 inCount).
+    uint32 CountInside(uint32 root, uint32 target) const noexcept {
+        uint32 count = 0;
+        for (uint32 index = 0; index < entries_.Size(); ++index) {
+            if (entries_[index].cluster == root && !entries_[index].dead) {
+                ForEachEdge(index, [&](uint32 to) noexcept { count += to == target ? 1u : 0u; });
+            }
+        }
+
+        return count;
+    }
+
+    // owner → target 간선이 지워진 뒤: target이 owner 클러스터의 detached이고 남은 안쪽 간선이
+    // 없으면 클러스터 없음이 된다(장부와 같다).
+    void NoteEdgeRemoved(uint32 owner, uint32 target) noexcept {
+        if (target == NoIndex || entries_[target].detachedOf == NoIndex ||
+            entries_[target].detachedOf != entries_[owner].cluster ||
+            entries_[owner].cluster == NoIndex) {
+            return;
+        }
+
+        if (CountInside(entries_[target].detachedOf, target) == 0) {
+            entries_[target].detachedOf = NoIndex;
+        }
+    }
+
+    // 클러스터 root의 경계 소속 수가 문턱을 넘는지 장부 규칙으로 센다(안쪽 = 같은 클러스터 소속이나
+    // 그 클러스터의 detached).
+    bool ExceedsFlattenThreshold(uint32 root) const noexcept {
+        uint32 members = 0;
+        uint32 boundary = 0;
+        for (uint32 index = 0; index < entries_.Size(); ++index) {
+            if (entries_[index].cluster != root || entries_[index].dead) {
+                continue;
+            }
+
+            ++members;
+            bool outside = false;
+            ForEachEdge(index, [&](uint32 to) noexcept {
+                outside =
+                    outside || (entries_[to].cluster != root && entries_[to].detachedOf != root);
+            });
+            boundary += outside ? 1u : 0u;
+        }
+
+        return uint64(boundary) * 100 > uint64(members) * ModelFlattenBoundaryPercent;
     }
 
     void DestroyLevel(uint32 level) noexcept {
@@ -780,7 +909,7 @@ private:
     // ---- 패키지형 ----
 
     void CreatePackage() noexcept {
-        if (entries_.Size() + 4 > options_.maxObjects) {
+        if (entries_.Size() + 1 + MaxPackageInners > options_.maxObjects) {
             return;
         }
 
@@ -791,9 +920,9 @@ private:
             return;
         }
 
-        ObjectHandle inners[3];
-        uint32 outers[3];
-        const uint32 count = 1 + rng_.Below(3);
+        ObjectHandle inners[MaxPackageInners];
+        uint32 outers[MaxPackageInners];
+        const uint32 count = 1 + rng_.Below(MaxPackageInners);
         for (uint32 index = 0; index < count; ++index) {
             // outer 사슬: 패키지 아래 또는 앞 inner 아래.
             outers[index] = index == 0 || rng_.Below(2) == 0 ? NoIndex : index - 1;
@@ -816,7 +945,7 @@ private:
         entries_[packageIndex].cluster = packageIndex;
         entries_[packageIndex].clusterRoot = true;
         entries_[packageIndex].held = Move(out[0]);
-        uint32 placed[3];
+        uint32 placed[MaxPackageInners];
         for (uint32 index = 0; index < count; ++index) {
             const uint32 outer = outers[index] == NoIndex ? packageIndex : placed[outers[index]];
             placed[index] = Append(inners[index], Role::Inner, outer, packageIndex, NoIndex);
@@ -851,22 +980,74 @@ private:
     }
 
     // 안전장치가 해체한 패키지 클러스터를 모델에 옮긴다(cycle 끝 — cutoff·정지형 sweep 뒤).
-    void SyncFlattened() noexcept {
-        if (!options_.packages) {
+    // 부분 트리 Discard로 cluster를 떠난 객체(이번에 discarded가 된 이전 소속)의 detached를 정한다:
+    // 남은 소속에서 오는 간선이 있으면 그 클러스터의 detached, 없으면 클러스터 없음.
+    void NoteLeft(uint32 cluster) noexcept {
+        if (cluster == NoIndex || !entries_[cluster].clusterRoot) {
             return;
         }
 
         for (uint32 index = 0; index < entries_.Size(); ++index) {
+            Entry& entry = entries_[index];
+            if (entry.leftPending) {
+                entry.leftPending = false;
+                entry.detachedOf = CountInside(cluster, index) != 0 ? cluster : NoIndex;
+            }
+        }
+    }
+
+    // cycle 끝(증분 cutoff 직후·정지형 Collect 뒤): 모델이 예측한 해체 대상과 Registry 답을
+    // 대조하고 해체를 모델에 옮긴다. 도달한(표식된) 클러스터는 예측과 정확히 같아야 한다. 도달하지
+    // 않은 클러스터(증분의 떠도는 쓰레기)는 표식 여부를 모델이 모르므로 수의 범위만 본다.
+    void SettleFlattened(bool exact) noexcept {
+        if (!options_.packages) {
+            return;
+        }
+
+        Reach();
+        uint32 sure = 0;
+        uint32 maybe = 0;
+        for (uint32 index = 0; index < entries_.Size() && report_.failure == nullptr; ++index) {
             const Entry& entry = entries_[index];
-            if (!entry.clusterRoot || !Usable(index)) {
+            if (!entry.clusterRoot || entry.dead) {
                 continue;
             }
 
+            const bool exceeds = ExceedsFlattenThreshold(index);
             auto member = objects_->InspectClusterMembership(Access(), entry.handle);
-            if (member && !member.Value()) {
-                Dissolve(index);
-                ++report_.flattened;
+            const bool dissolved = member && !member.Value();
+            if (entry.reachable) {
+                sure += exceeds ? 1u : 0u;
+                if (dissolved != exceeds) {
+                    Fail(exceeds ? "Predicted boundary valve flatten did not happen"
+                                 : "Boundary valve flattened a cluster the model did not predict",
+                         index, ErrorCode::None);
+                    return;
+                }
+            } else {
+                maybe += exceeds ? 1u : 0u;
             }
+
+            if (dissolved) {
+                report_.flattened += exceeds ? 1u : 0u;
+                Dissolve(index);
+            }
+        }
+
+        expectedFlattenMin_ = sure;
+        expectedFlattenMax_ = exact ? sure : sure + maybe;
+        flattenPending_ = true;
+    }
+
+    // Registry가 센 안전장치 해체 수가 예측 범위 안인지 본다(cycle이 끝난 뒤).
+    void CheckFlattenCount(uint32 counted) noexcept {
+        if (!flattenPending_) {
+            return;
+        }
+
+        flattenPending_ = false;
+        if (counted < expectedFlattenMin_ || counted > expectedFlattenMax_) {
+            Fail("Flattened cluster count diverged from the model", NoIndex, ErrorCode::None);
         }
     }
 
@@ -877,6 +1058,7 @@ private:
         if (entries_[index].clusterRoot) {
             Dissolve(index);
         } else {
+            entries_[index].leftPending = entries_[index].cluster != NoIndex;
             entries_[index].cluster = NoIndex;
         }
 
@@ -922,7 +1104,9 @@ private:
                 }
 
                 ++report_.discards;
+                const uint32 cluster = entries_[inner].cluster;
                 MarkDiscarded(inner);
+                NoteLeft(cluster);
             }
         } else if (roll < 14) {
             // 패키지 Discard와 루트 반환.
@@ -1103,7 +1287,6 @@ private:
 
     // 회수된 객체를 dead로 옮기고 oracle에서 닿지 않았는지 본다.
     void CheckSafety() noexcept {
-        SyncFlattened();
         Reach();
         for (uint32 index = 0; index < entries_.Size(); ++index) {
             Entry& entry = entries_[index];
@@ -1120,6 +1303,7 @@ private:
             entry.degree = 0;
             entry.single = NoIndex;
             entry.slotCount = 0;
+            entry.detachedOf = NoIndex;
             entry.held.Reset();
             ++report_.reclaimed;
             if (entry.clusterRoot) {
@@ -1138,6 +1322,8 @@ private:
         }
 
         ++report_.collects;
+        SettleFlattened(true);
+        CheckFlattenCount(collected.Value().flattenedClusters);
         CheckSafety();
         Reach();
         uint32 clusters = 0;
@@ -1176,6 +1362,10 @@ private:
     Array<uint32> childHead_;
     Array<uint32> childNext_;
     uint32 names_ = 0;
+    // cycle 끝에 예측한 안전장치 해체 수의 범위다(CheckFlattenCount).
+    uint32 expectedFlattenMin_ = 0;
+    uint32 expectedFlattenMax_ = 0;
+    bool flattenPending_ = false;
     // 살아 있는(파괴하지 않은) Level 수다.
     uint32 levels_ = 0;
 };

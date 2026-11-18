@@ -168,6 +168,100 @@ bool InnersAre(ObjectRegistry& registry, ObjectHandle outer, Span<const ObjectHa
 
 // 부분 트리 전체가 DestroyRequested가 되고 이름 색인·고리에서 바로 빠진다(GC 전 같은 이름 재생성).
 // 논리 정체성(GetName·GetObjectPath·GetOuter)은 회수 전까지 남는다.
+namespace {
+
+// handles 안에 handle이 정확히 한 번 있는지다.
+bool ContainsOnce(Span<const ObjectHandle> handles, ObjectHandle handle) noexcept {
+    uint32 found = 0;
+    for (const ObjectHandle& each : handles) {
+        found += each == handle ? 1u : 0u;
+    }
+
+    return found == 1;
+}
+
+} // namespace
+
+// 파괴 요청 목록(GarbageCollectionScale 14절): RequestDestroy·Object::Destroy·Discard(부분 트리)가
+// 넣고, TakeDestroyRequests가 묶음 크기만큼 나눠 한 번씩 꺼낸다. 꺼낸 뒤에는 비고, 꺼내기 전에
+// 회수된 요청은 빠진다. 이미 파괴 요청된 객체를 다시 요청해도 두 번 들어가지 않는다.
+TEST(ObjectRegistry_TakeDestroyRequestsDrainsEachRequestOnce) {
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterTypes(types));
+        ObjectRegistry registry(allocator, types, {0x4f6201, 9});
+        const auto access = registry.OwnerAccess();
+        ObjectHandle out[2];
+        auto taken = registry.TakeDestroyRequests(access, Span<ObjectHandle>(out, 2));
+        REQUIRE(taken);
+        CHECK(taken.Value() == 0);
+
+        // inner도 루트로 쥔다(Outer는 inner를 살리지 않는다 — 아래 첫 Collect가 회수한다).
+        RootRef<Object> roots[4];
+        auto outer = NewNode(registry, {}, {}, &roots[0]);
+        auto inner = NewNode(registry, outer.Value(), "Inner", &roots[3]);
+        auto self = NewNode(registry, {}, {}, &roots[1]);
+        auto plain = NewNode(registry, {}, {}, &roots[2]);
+        auto early = NewNode(registry, {}, {});
+        REQUIRE(outer && inner && self && plain && early);
+
+        // 꺼내기 전에 회수되는 요청: 루트 없는 객체를 파괴 요청하고 GC가 회수한다.
+        REQUIRE(registry.RequestDestroy(access, early.Value()));
+        REQUIRE(registry.Collect(access));
+        CHECK(Reclaimed(registry, early.Value()));
+        taken = registry.TakeDestroyRequests(access, Span<ObjectHandle>(out, 2));
+        REQUIRE(taken);
+        CHECK(taken.Value() == 0);
+
+        REQUIRE(registry.Discard(access, outer.Value()));
+        REQUIRE(registry.RequestDestroy(access, plain.Value()));
+        // 이미 파괴 요청된 객체를 다시 요청해도 목록에 두 번 들어가지 않는다.
+        (void)registry.RequestDestroy(access, plain.Value());
+        {
+            auto borrowed = registry.Resolve<Object>(access, self.Value());
+            REQUIRE(borrowed);
+            auto pointer = borrowed.Value().Get();
+            REQUIRE(pointer);
+            REQUIRE(pointer.Value()->Destroy());
+        }
+
+        // 넷(outer·inner·plain·self)을 둘씩 나눠 꺼낸다.
+        ObjectHandle all[4];
+        usize count = 0;
+        for (uint32 round = 0; round < 3; ++round) {
+            taken = registry.TakeDestroyRequests(access, Span<ObjectHandle>(out, 2));
+            REQUIRE(taken);
+            CHECK(taken.Value() == (round < 2 ? 2u : 0u));
+            for (usize at = 0; at < taken.Value() && count < 4; ++at) {
+                all[count++] = out[at];
+            }
+        }
+
+        REQUIRE(count == 4);
+        const Span<const ObjectHandle> drained(all, count);
+        CHECK(ContainsOnce(drained, outer.Value()));
+        CHECK(ContainsOnce(drained, inner.Value()));
+        CHECK(ContainsOnce(drained, plain.Value()));
+        CHECK(ContainsOnce(drained, self.Value()));
+        // 꺼낸 요청은 다시 나오지 않는다(이미 파괴 요청된 객체의 재요청도 넣지 않는다).
+        (void)registry.RequestDestroy(access, plain.Value());
+        taken = registry.TakeDestroyRequests(access, Span<ObjectHandle>(out, 2));
+        REQUIRE(taken);
+        CHECK(taken.Value() == 0);
+
+        for (RootRef<Object>& root : roots) {
+            root.Reset();
+        }
+
+        REQUIRE(registry.Collect(access));
+        CHECK(registry.Stats().liveObjects == 0);
+        REQUIRE(registry.Shutdown(access));
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
 TEST(ObjectDiscard_SubtreeLeavesTheNameIndexImmediately) {
     SystemAllocator allocator;
     {

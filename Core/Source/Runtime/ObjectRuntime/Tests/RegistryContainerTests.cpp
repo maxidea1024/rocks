@@ -450,6 +450,83 @@ TEST(ObjectRefArray_InsertAndSetAtValidateLikeAdd) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
+// RemoveReferenceAtSwap(EngineRuntime 4.5절): 지운 자리에 끝 원소를 옮긴다. 옮기는 원소는 같은
+// 소유자의 기존 간선이라 다시 검증하지 않으므로 끝 원소가 DestroyRequested여도 성공한다(위치
+// 교체 SetReferenceAt은 그 원소를 새로 쓰는 것이라 StaleHandle로 거부한다). 범위·owner 규칙은
+// RemoveReferenceAt과 같다.
+TEST(ObjectRefArray_RemoveAtSwapMovesLastWithoutRevalidating) {
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterAll(types));
+        ObjectRegistry objects(allocator, types, {0x4352, 9});
+        const auto access = objects.OwnerAccess();
+        auto holder = objects.NewObject<Holder>(access, NativeTypeIdOf<Holder>());
+        REQUIRE(holder);
+        const ObjectHandle owner = holder.Value().Handle();
+        ObjectHandle items[5];
+        for (ObjectHandle& item : items) {
+            item = Unrooted(objects);
+            REQUIRE(!item.IsNull());
+        }
+
+        Holder* pointer = nullptr;
+        {
+            auto borrowed = objects.Resolve<Holder>(access, owner);
+            REQUIRE(borrowed);
+            pointer = Get(borrowed.Value());
+            REQUIRE(pointer != nullptr);
+            for (const ObjectHandle& item : items) {
+                REQUIRE(objects.AddReference(access, owner, pointer->items, item));
+            }
+
+            // 끝 원소(4번)를 World 밖에서 파괴한 것처럼 파괴 요청한다.
+            REQUIRE(objects.RequestDestroy(access, items[4]));
+            CHECK(objects.SetReferenceAt(access, owner, pointer->items, 0, items[4]).Error() ==
+                  ErrorCode::StaleHandle);
+            REQUIRE(objects.RemoveReferenceAtSwap(access, owner, pointer->items, 0));
+            REQUIRE(pointer->items.Size() == 4);
+            CHECK(pointer->items[0] == items[4] && pointer->items[1] == items[1] &&
+                  pointer->items[2] == items[2] && pointer->items[3] == items[3]);
+            // 끝 원소 자신을 지우면 옮길 원소가 없다.
+            REQUIRE(objects.RemoveReferenceAtSwap(access, owner, pointer->items, 3));
+            REQUIRE(pointer->items.Size() == 3);
+            CHECK(pointer->items[0] == items[4] && pointer->items[1] == items[1] &&
+                  pointer->items[2] == items[2]);
+            // 범위 밖·owner 밖 배열은 InvalidArgument다.
+            CHECK(objects.RemoveReferenceAtSwap(access, owner, pointer->items, 3).Error() ==
+                  ErrorCode::InvalidArgument);
+            ObjectRefArray<Item> local(allocator);
+            CHECK(objects.RemoveReferenceAtSwap(access, owner, local, 0).Error() ==
+                  ErrorCode::InvalidArgument);
+        }
+
+        // Borrow 없는 owner는 InvalidArgument다.
+        CHECK(objects.RemoveReferenceAtSwap(access, owner, pointer->items, 0).Error() ==
+              ErrorCode::InvalidArgument);
+        // 지운 대상(0번·3번)과 파괴 요청 대상(4번 — 아직 배열에 있어도)은 회수되고 남은 원소는
+        // 산다.
+        REQUIRE(objects.Collect(access));
+        CHECK(!IsAlive(objects, items[0]) && !IsAlive(objects, items[3]));
+        CHECK(!IsAlive(objects, items[4]));
+        CHECK(IsAlive(objects, items[1]) && IsAlive(objects, items[2]));
+        {
+            // 파괴 요청된 owner의 정리도 바꿔 떼기를 쓸 수 있다.
+            auto borrowed = objects.Resolve<Holder>(access, owner);
+            REQUIRE(borrowed);
+            REQUIRE(objects.RequestDestroy(access, owner));
+            REQUIRE(objects.RemoveReferenceAtSwap(access, owner, pointer->items, 0));
+            CHECK(pointer->items.Size() == 2);
+        }
+
+        holder.Value().Reset();
+        REQUIRE(objects.Collect(access));
+        CHECK(objects.Stats().liveObjects == 0);
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
 TEST(ObjectRefArray_InsertAndSetAtShadeDuringMarkingAndRejectCutoff) {
     SystemAllocator allocator;
     {

@@ -283,7 +283,8 @@ Result<void> ObjectRegistry::ReplaceArrayEdge(const ObjectAccessContext& access,
 
 Result<void> ObjectRegistry::RemoveArrayEdge(const ObjectAccessContext& access, ObjectHandle owner,
                                              detail::ObjectRefArrayStorage& storage, usize index,
-                                             ObjectHandle target, bool byHandle) noexcept {
+                                             ObjectHandle target, bool byHandle,
+                                             bool swap) noexcept {
     auto valid = CheckAccess(access);
     if (!valid) {
         return valid;
@@ -337,8 +338,14 @@ Result<void> ObjectRegistry::RemoveArrayEdge(const ObjectAccessContext& access, 
                 // 삽입 장벽 GC에서 간선 삭제는 장벽이 필요 없다. 지운 대상은 다른 경로로 도달하지
                 // 않으면 회수된다.
                 LedgerEditLocked(*FindSlot(owner), storage.data[position], ObjectHandle{});
-                for (usize at = position + 1; at < storage.size; ++at) {
-                    storage.data[at - 1] = storage.data[at];
+                if (swap) {
+                    // 끝 원소를 옮긴다. 같은 소유자의 간선이 그대로라 장부·관찰자·장벽 일이 없다
+                    // (표식은 slice 안에서만 배열을 읽고 그동안 변경은 Busy다).
+                    storage.data[position] = storage.data[storage.size - 1];
+                } else {
+                    for (usize at = position + 1; at < storage.size; ++at) {
+                        storage.data[at - 1] = storage.data[at];
+                    }
                 }
 
                 --storage.size;

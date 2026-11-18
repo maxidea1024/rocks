@@ -83,9 +83,11 @@ public abstract class TestsModule : ModuleRules
             Name = ExecutableName,
             Kind = NativeModuleKind.Executable,
             Sources = sources,
-            // Core/Source/Runtime: tests include module Private headers with the <Module/Private/...> spelling. The repository root is not included
-            // (so headers of gitignored outputs, user directories and nested working copies do not enter the include inventory).
+            // Core/Source/Runtime (and Engine/Source/Runtime for the engine layer): tests include module Private headers with the
+            // <Module/Private/...> spelling. The repository root is not included (so headers of gitignored outputs, user directories and
+            // nested working copies do not enter the include inventory).
             PrivateIncludeDirectories = [context.PathInRoot("Core/Source/Runtime"), context.PathInRoot($"{support}/Public"),
+                .. (Layer == TestLayer.Engine ? [context.PathInRoot("Engine/Source/Runtime")] : Array.Empty<string>()),
                 .. (Layer == TestLayer.Engine ? ThirdPartyModuleRules.ConsumerIncludeDirectories(context, EngineThirdPartyHeaders) : [])],
             PrivateDefines = ["ROCKS_TESTING=1",
                 .. (Layer == TestLayer.Engine ? ThirdPartyModuleRules.ConsumerDefines(context, EngineThirdPartyHeaders) : [])],
