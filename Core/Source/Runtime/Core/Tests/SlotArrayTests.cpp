@@ -382,3 +382,62 @@ TEST(SlotArray_RandomizedOracle) {
     // 폐기된 slot이 실제로 생겼는지(경로를 지났는지) 확인한다.
     CHECK(retiredCount != 0);
 }
+
+// 색인 접근: 살아 있는 slot은 원소와 지금 handle을, 빈·폐기·범위 밖 slot은 nullptr와 빈 handle을
+// 준다. 재사용된 slot의 handle은 generation이 달라 옛 handle과 구별된다.
+TEST(SlotArray_IndexAccessReportsCurrentHandle) {
+    SystemAllocator allocator;
+    SlotArray<int> slots(allocator, 2);
+    auto a = slots.TryAdd(10);
+    auto b = slots.TryAdd(20);
+    REQUIRE(a && b);
+    CHECK(slots.IsOccupiedAt(0) && slots.IsOccupiedAt(1) && !slots.IsOccupiedAt(2));
+    CHECK(slots.HandleAt(1) == b.Value());
+    CHECK(slots.ElementAt(1) == 20 && *slots.FindAt(0) == 10);
+    slots.ElementAt(0) = 11;
+    CHECK(slots[a.Value()] == 11);
+    CHECK(slots.FindAt(5) == nullptr && slots.HandleAt(5).IsNull());
+    CHECK(slots.FreeSlotCount() == 0);
+
+    REQUIRE(slots.TryRemove(a.Value()));
+    CHECK(!slots.IsOccupiedAt(0) && slots.FindAt(0) == nullptr && slots.HandleAt(0).IsNull());
+    CHECK(slots.FreeSlotCount() == 1);
+
+    auto c = slots.TryAdd(30);
+    REQUIRE(c);
+    // 같은 slot을 재사용하지만 handle의 generation이 달라 옛 handle과 다르다.
+    CHECK(c.Value().index == 0 && slots.HandleAt(0) == c.Value() &&
+          !(slots.HandleAt(0) == a.Value()));
+
+    // maxGeneration 2에 닿은 slot은 폐기되어 빈 slot으로 세지 않는다.
+    REQUIRE(slots.TryRemove(c.Value()));
+    CHECK(slots.RetiredCount() == 1 && slots.FreeSlotCount() == 0 && !slots.IsOccupiedAt(0));
+}
+
+// TryEnsureCapacity는 기하급수적으로 늘리고, 확보 뒤 추가는 할당하지 않는다(N번째 할당 실패를
+// 걸어도 성공한다). 확보 실패는 상태를 바꾸지 않는다.
+TEST(SlotArray_EnsureCapacityMakesNextAddAllocationFree) {
+    SystemAllocator system;
+    test::NFailAllocator allocator(system);
+    SlotArray<int> slots(allocator);
+    usize growths = 0;
+    usize capacity = 0;
+    for (int value = 0; value < 1000; ++value) {
+        REQUIRE(slots.TryEnsureCapacity(slots.SlotCount() + 1));
+        if (slots.Capacity() != capacity) {
+            ++growths;
+            capacity = slots.Capacity();
+        }
+        allocator.FailOnAttempt(1);
+        REQUIRE(slots.TryAdd(value));
+        allocator.DisableFailure();
+    }
+    CHECK(slots.Size() == 1000 && growths < 20);
+
+    allocator.FailOnAttempt(1);
+    const usize before = slots.Capacity();
+    CHECK(slots.TryEnsureCapacity(before + 1).Error() == ErrorCode::OutOfMemory);
+    CHECK(slots.Capacity() == before && slots.Size() == 1000);
+    allocator.DisableFailure();
+    CHECK(slots.TryEnsureCapacity(SlotArray<int>::MaxSlots + 1).Error() == ErrorCode::Overflow);
+}
