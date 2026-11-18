@@ -145,6 +145,8 @@ struct SubresourceTrack {
     uint32 chain = GraphIndexNone;
     // 이 subresource의 마지막 생산자 pass다(culling 간선).
     uint32 lastProducer = GraphIndexNone;
+    // 그래프 안 업로드가 내용을 채운다(생산자 pass 없이도 읽을 수 있다).
+    bool uploaded = false;
 };
 
 // pass가 subresource 하나에 하는 접근(같은 pass 안의 여러 선언을 합친 것)이다.
@@ -182,6 +184,41 @@ struct ResourceRecord {
     uint32 lastPass = GraphIndexNone;
     uint32 references = 0;
     bool released = false;
+    // 이 자원이 쓰는 장치 객체 자리다(GraphState::physicals). 같은 그래프 안 재사용이면 앞 자원과
+    // 같은 자리다. 아직 정하지 않았으면 None이다(import는 늘 None).
+    uint32 physical = GraphIndexNone;
+    // 앞 자원이 놓은 장치 객체를 이어 쓴다(첫 전이 before가 Discard).
+    bool reusedWithinGraph = false;
+    // 어느 pass가 접근을 선언했다(그 뒤 업로드는 순서 위반이다).
+    bool accessed = false;
+    // 그래프 안 업로드를 받는다(그래프 시작에 할당하고 올린다).
+    bool uploadTarget = false;
+    // Sampled 텍스처 업로드의 mip 사슬(MipChainBytes, 프레임 arena)이다.
+    uint8* uploadPixels = nullptr;
+};
+
+// 그래프 자원이 쓰는 장치 객체 자리 하나다(같은 그래프 안 재사용 단위, RG2). 수명이 겹치지 않는
+// 같은 desc 자원 여럿이 한 자리를 차례로 쓴다. 풀에서 받는 것은 첫 자원의 첫 pass 직전이고 풀에
+// 돌려주는 것은 그래프 끝이다.
+struct PhysicalResource {
+    // 키(desc)를 대표하는 첫 자원 번호다.
+    uint32 owner = GraphIndexNone;
+    // 계획 중 지금 자원이 쓰는 중이다(놓이면 같은 키의 뒤 자원이 받을 수 있다).
+    bool held = false;
+    // 풀에서 받았다(entry·device 유효).
+    bool acquired = false;
+    // 그래프 끝에 export로 넘겼다(풀에 Release하지 않는다).
+    bool exported = false;
+    GraphPoolEntry entry;
+    SlotHandle device;
+};
+
+// 버퍼 업로드 하나다(데이터는 프레임 arena에 복사해 둔다).
+struct BufferUpload {
+    uint32 resource = GraphIndexNone;
+    uint64 offset = 0;
+    const uint8* data = nullptr;
+    usize size = 0;
 };
 
 // pass 하나다.
@@ -240,6 +277,8 @@ struct GraphState {
     ArenaArray<ProducerLink> producers;
     ArenaArray<ChainEntry> chains;
     ArenaArray<GraphTransitionRecord> transitions;
+    ArenaArray<PhysicalResource> physicals;
+    ArenaArray<BufferUpload> bufferUploads;
     // culling DFS 작업 스택이다.
     ArenaArray<uint32> stack;
     // 장치 전이 묶음 임시 공간이다.
@@ -321,8 +360,18 @@ Result<void> TrackFinalTransitions(FrameArena& arena, GraphState& state) noexcep
 // state.transitions에 붙인다.
 Result<void> CollectTransitions(FrameArena& arena, GraphState& state, usize first) noexcept;
 
-// Deferred 컴파일: export 뿌리 culling, 수명, 전이.
+// 두 자원이 같은 풀 키(desc)인지다.
+bool SameResourceKey(const ResourceRecord& left, const ResourceRecord& right) noexcept;
+
+// Deferred 컴파일: export 뿌리 culling, 수명, 같은 그래프 안 재사용 계획, 전이.
 Result<void> CompileGraph(FrameArena& arena, GraphState& state) noexcept;
+
+// 자원의 장치 객체를 정한다: 자리가 이미 풀에서 받았으면 이어 쓰고, 아니면 풀에서 받는다(자리가
+// 없으면 새로 만든다). 업로드 대상이면 이때 올린다.
+Result<void> AllocateResource(FrameArena& arena, GraphState& state, uint32 index) noexcept;
+
+// Deferred 실행 앞부분: 남은 업로드 대상을 할당하고 올린다(UE SubmitBufferUploads와 같은 자리).
+Result<void> ExecuteUploads(FrameArena& arena, GraphState& state) noexcept;
 
 // pass 하나를 실행한다(자원 할당 → 기록 열기 → prologue 전이 → 기록 함수).
 Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& state,

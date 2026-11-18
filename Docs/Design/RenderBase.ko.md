@@ -1,6 +1,6 @@
 # 렌더 기반(RenderBase) 설계
 
-기준일: 2026-11-18, 개정 16(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-18, 개정 17(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
 - 렌더 lane과 프레임 전달, 장치 스레드 모델, 장치 자원 수명, 렌더 그래프
 - 셰이더 런타임 객체(셰이더 집합·파라미터 바인딩·상수 블록·파이프라인 캐시)
 - 정점 입력 타입, 공용 자원·그리기 유틸리티, GPU 계측
@@ -154,6 +154,7 @@ ID는 이 문서가 붙인다. CP는 Core 선행, GX는 Graphics 확장, RB는 R
 | GX13 | subpass·framebuffer fetch(tiled GPU 병합용) | 후속 | GX4·GX5 | RG3 병합 | M | 4.4절 |
 | RB1 | 렌더 lane·프레임 slot·전달 타입 등록·완료 통지·`RenderHandle` 예약 | 구현(설정 snapshot 포함, 12절) | CP1·CP6·GX7·GX10·GX11 | RB2–RB7 | M | 5절 |
 | RG1 | 최소 렌더 그래프 | 구현(명시 접근 목록 경로. 파라미터 구조체 경로는 RB4·SH2 뒤, (g)는 D3D12·D3D11(각 WARP 포함)·OpenGL ES 두 context) | RB7·GX5·CP3(RB4·GX1·GX2·GX4는 범위를 줄여 앞당김) | RG2 | L | 7·8절 |
+| RG2 | 프레임 안 풀 재사용·그래프 안 업로드·분리 전이 | 부분 구현(A부: 프레임 안 재사용·export 풀 반납(결정 R15)·그래프 안 업로드. B부 분리 전이는 Graphics·backend 변경과 함께 남음) | RG1·GX8 | RG3 | M | 8절 |
 
 ### 4.3 Core 선행 작업
 
@@ -486,7 +487,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 ### 7.4 그래프 자원 수명
 
 - **import.** `ImportTexture`·`ImportBuffer`는 처음 접근 상태와 함께 장치 자원을 들이며 그 자원의 `RenderResourceLease`를 얻는다. `Retire`된 자원이면 lease를 얻지 못하고 import가 오류를 돌려준다. 호출자는 내장 typed fallback을 import하거나 그 pass를 추가하지 않는다. 그래프는 조용히 대체하지 않는다.
-- **export.** `ExportTexture`·`ExportBuffer`는 마지막 접근 상태(기본 SRV)를 정하고, 풀 자원의 사용권을 호출자의 `DeviceResourceOwner`로 넘긴다. 자원은 풀 소속 그대로다. 소유자의 `Retire`는 장치 해제가 아니라 마지막 사용 `GpuFencePoint`가 끝난 뒤 `GraphResourcePool` 반납이고, 아래 풀 축출 규칙은 반납 뒤부터 적용된다(결정 R15, 개정 16). history(이전 프레임 결과)가 이 경로다(7.5절).
+- **export.** `ExportTexture`·`ExportBuffer`는 마지막 접근 상태(기본 SRV)를 정하고, 풀 자원의 사용권을 호출자의 `DeviceResourceOwner`로 넘긴다. 자원은 풀 소속 그대로다. 소유자의 `Retire`는 장치 해제가 아니라 마지막 사용 `GpuFencePoint`가 끝난 뒤 `GraphResourcePool` 반납이고, 아래 풀 축출 규칙은 반납 뒤부터 적용된다(결정 R15, 개정 16). history(이전 프레임 결과)가 이 경로다(7.5절). `DeviceResourceOwner`(RB2) 전에는 export가 돌려준 `RenderHandle`이 소유자이고, 풀이 그 handle의 Retire 대행자(`RenderRetireSink`)다(8절 RG2 구현, 개정 17).
 - **풀 축출.** `GraphResourcePool`의 자원은 마지막 사용 `GpuFencePoint`가 완료되었고, 설정한 프레임 수 동안 쓰이지 않았고, 풀 메모리가 예산을 넘을 때 오래된 순으로 `Retire`한다. 계획 8.2절 "경과 프레임 수만으로 회수하지 않는다"에 따라 fence 완료가 필수 조건이다.
 - **풀 키.** desc(크기·형식·용도·mip·array·샘플 수)이며 샘플러는 넣지 않는다(결정 R12).
 
@@ -557,7 +558,25 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
   - `GraphSharedData`(7.3절)는 넣지 않았다.
   - GPU 계측: 그래프의 장치 기록 전체를 GPU 프레임 하나로 묶는다(첫 기록에서 `GpuTrace::BeginFrame`, 마지막 기록에서 `EndFrame`). pass마다 `CpuScope`와 `GpuScope`(pass 이름은 정적 `TraceScopeName`)를 둔다(13.3절 스펙과 다른 점 (4) 해소).
   - 렌더 lane 연결: `RenderFrameContext::Arena()`(그 slot의 FrameArena)를 더했다. 그래프 수명 표는 그 arena에 두고, pass 함수(람다)는 그래프 파괴 때 렌더 lane에서 부순다(arena Reset은 게임 lane에서 일어나기 때문이다).
-- 남은 것(RG1): 파라미터 구조체 수집기(RB4·SH2·P7), `GraphSharedData`, attachment load·MRT·깊이·렌더 타깃 없는 기록(GX4), 버퍼 용도·텍스처 차원·형식 확장(GX2·픽셀 형식), Vulkan 픽셀 대조, 그래프 설정 변수(CP4), 캡처 도구 수동 확인 기록(13.3절). 렌더러 사용 요구(7.5절: `GraphSharedData` 규칙, mip view와 view 기준 mip, 그래프 구간 `GraphScope`, export 성공 조건)도 RG1에 넣는다. export한 풀 자원의 `Retire`를 장치 해제가 아니라 fence 뒤 풀 반납으로 바꾼다(결정 R15, 지금 구현은 새 `RenderHandle`의 `Retire`가 장치 자원을 놓는다).
+- 남은 것(RG1): 파라미터 구조체 수집기(RB4·SH2·P7), `GraphSharedData`, attachment load·MRT·깊이·렌더 타깃 없는 기록(GX4는 구현됐고 그래프 쪽 연결이 남음: 지금 그래프는 `BeginOffscreen`(색 하나·clear)만 쓰고 열린 기록이 없는 Compute·Copy pass는 `Unsupported`), 버퍼 용도·텍스처 차원·형식 확장(GX2·픽셀 형식), 그래프 설정 변수(CP4), 캡처 도구 수동 확인 기록(13.3절). 렌더러 사용 요구(7.5절: `GraphSharedData`·`SceneTextureTable` 규칙, mip view와 view 기준 mip, 그래프 구간 `GraphScope`)도 RG1에 넣는다. export 성공 조건(검증 실패 그래프의 export handle은 Failed)은 RG1에 이미 있다. export한 풀 자원의 fence 뒤 풀 반납(결정 R15)과 Vulkan 픽셀 대조는 끝났다(아래 RG2 구현, 4.4절 GX5 Vulkan).
+
+**구현(2026-11-18, RG2 A부).** 프레임 안 풀 재사용, export 자원의 풀 반납(결정 R15), 그래프 안 업로드다. begin·end 분리 전이(B부)는 Graphics `ResourceAccess`·`Transition`과 D3D12·Vulkan backend를 고쳐야 하므로 다른 세션의 D3D11·D3D12 공용 코드 정리 병합 뒤에 한다. 계약은 [렌더 기반 구현](../Implementation/RenderBase.ko.md) 9절이다.
+- **프레임 안 재사용.** Deferred 컴파일이 culling·수명 뒤 남은 pass를 실행 순서로 훑어 장치 객체 자리(`PhysicalResource`)를 정한다: pass p에서 처음 쓰는 자원은 p 앞에서 놓인 같은 풀 키의 자리를 받고(없으면 새 자리), p에서 마지막으로 쓰는 자원은 p 뒤에 자리를 놓는다. 같은 pass에서 쓰는 두 자원은 자리를 나누지 않는다. export 자원은 그래프 끝까지 놓지 않고, 업로드 대상은 그래프 시작에 자리를 받는다(업로드가 첫 pass 앞에서 실행되므로 앞 자원의 객체를 덮지 않기 위해서다). 자리는 첫 자원의 첫 pass 직전에 풀에서 받고 그래프 끝에 한 번 돌려준다. UE도 마지막 사용 pass에서 풀 자원을 놓고 뒤 pass의 할당이 같은 desc를 다시 받는다(`RC/Private/RenderGraphBuilder.cpp:3128–3175, 3632–3646`).
+  - 이어 받은 자원의 첫 전이 before는 `Discard`다(이전 내용 무효). backend는 `Discard` before를 `Unknown`처럼 장치 추적 상태에서 바꾼다(D3D12 `D3D12Frame.cpp`, Vulkan `VulkanAccess.cpp`의 검증 생략·추적 상태 사용, Vulkan 버퍼는 모든 쓰기를 기다리는 barrier). UE 풀 재사용은 앞 자원의 마지막 상태를 이어받고 `Discard`는 transient aliasing에만 쓴다(`RenderGraphBuilder.cpp:4060–4080`). Rocks는 이전 내용이 필요 없음을 전이 열에 드러내려고 `Discard`로 했다(결과는 같다).
+  - Immediate 모드는 앞을 내다볼 수 없어 같은 그래프 안 재사용을 하지 않는다(자원마다 자리 하나). 그래서 완료 기준 (d)의 즉시·지연 동치 시험은 재사용이 없는 그래프로 대조한다.
+  - 진단: `GraphLifetime::reusedWithinGraph`, `GraphStats::reusedWithinGraph`(풀 생성·재사용 계수와 따로).
+  - 7.5절 view 단위 선언에서 뒤 view의 장면 텍스처가 앞 view의 객체를 이어 쓴다(시험 `RenderGraph_ViewsReuseSceneTexturesWithinAGraph`: view 둘 × 텍스처 둘 → 장치 생성 2). `SceneTextureTable`(키 (ViewSet, view))·`GraphSharedData`는 RG1 남은 것과 Renderer RS0 범위이고 이번에 넣지 않았다.
+- **export 풀 반납(결정 R15).** RenderBase에 Retire 대행자 `RenderRetireSink`를 두었다. `RenderHandleTable::BindTexture`·`BindBuffer`가 sink를 받고, `BeginRetire`·`TakeReleasedRetire` 결과(`RetiredResource::sink`)가 그것을 실어 나르며, 새 공용 함수 `ReleaseRetiredResource(device, handle, retired)`가 sink가 있으면 sink로, 없으면 장치 Retire로 넘긴다(렌더 lane `RetireOnDevice`도 이 함수를 쓴다). `GraphResourcePool`은 sink다: `Export`가 풀 자원을 handle에 잇고 export 상태로 두며(풀 byte 합에 든다), handle의 Retire(lease가 남았으면 마지막 lease가 풀린 뒤)가 오면 반납 대기로 두었다가 마지막 사용 fence가 끝난 뒤(`CollectReturned`, Acquire·Evict가 부른다) 쓰지 않음으로 돌린다. 풀이 먼저 파괴되면 export 자원의 소유를 handle에 넘긴다(`DetachRetireSink`, 그 뒤 Retire는 장치 Retire). 풀 계수: `exported`·`returning`(지금 수), `exports`·`returned`(누적). RG1의 `Detach`·`detached`는 없앴다.
+  - 시험: 완료를 미룬 동안 반납된 history를 다시 주지 않음(장치 생성 3), 완료 뒤에는 다시 줌, 정상 상태 8프레임 동안 장치 생성 3·장치 Retire 0. import lease가 남은 동안의 Retire는 lease가 풀린 뒤 반납. 렌더 lane `Retire`로 6프레임 history를 돌려 장치 생성 2·장치 Retire 0·handle 표 0. 풀 파괴 뒤 handle Retire는 장치 Retire.
+- **그래프 안 업로드.** `RenderGraph::UploadBuffer(buffer, data, offset)`·`UploadTexture(texture, mip, pixels)`(UE `QueueBufferUpload`, `RC/Public/RenderGraphBuilder.h:309–333`). 데이터는 선언 때 프레임 arena에 복사한다. 업로드는 그 자원의 생산자이고(생산 전 읽기 검사를 통과한다) 자원을 쓰는 어느 pass보다 먼저 선언해야 한다(아니면 검증 오류). Deferred는 컴파일 뒤 첫 기록을 열기 전에(UE `SubmitBufferUploads`와 같은 자리, `RenderGraphBuilder.cpp:2691–2837`), Immediate는 그 자원의 첫 pass 직전에 장치 업로드 경로(`Device::UpdateBuffer`·`UpdateTexture`, GX8 업로드 ring)로 올린다. 남은 pass가 쓰지 않고 export도 아닌 자원은 올리지도 할당하지도 않는다.
+  - 전이: 장치 업로드는 상태 중립이다(D3D12·Vulkan 업로드 기록은 제출 끝 상태에서 복사 대상으로 갔다 돌아온다, GLES·D3D11은 드라이버). UE도 업로드를 그래프 상태 추적 밖에서 `Unknown → CopyDest → Unknown`으로 감싼다(`RenderGraphBuilder.cpp:2750–2796`). 그래서 그래프는 업로드에 복사 대상 상태를 따로 두지 않고, 뒤 pass의 읽기 전이를 장치 추적 상태(before `Unknown`)에서 낸다. 요청의 "복사 대상 접근 선언"을 그래프 상태로 두면 장치 상태와 어긋나 D3D12·Vulkan 검증 오류가 되므로 이렇게 정했다.
+  - 텍스처: D3D12·D3D11 `UpdateTexture`는 렌더 타깃 텍스처를 받지 않고, 버퍼 → 텍스처 복사 명령이 아직 없다(GX4 범위 밖). 그래서 업로드는 새 그래프 텍스처 용도 `Sampled`에만 받는다: 모든 mip을 한 번씩 올려야 하고(빠지면 Execute 검증 오류), pass는 읽기만 한다(쓰기·렌더 타깃은 검증 오류). 풀은 새로 만들면 mip 사슬을 생성 초기 데이터로, 다시 주면 mip마다 `UpdateTexture`로 채운다(`GraphResourcePool::AcquireTexture(desc, pixels)`). `Sampled` 그래프 텍스처는 압축 형식도 된다. 렌더 타깃 텍스처 업로드는 `Unsupported`다.
+  - import 자원에는 올리지 않는다(렌더 lane `UpdateBuffer`·`UpdateTexture` 경로). UE는 한 그래프에서 버퍼마다 업로드 하나지만 Rocks는 같은 버퍼의 여러 구간 업로드를 선언 순서대로 올린다.
+  - 진단: `GraphStats::uploads`(버퍼 업로드 하나, 텍스처 mip 하나가 1).
+- 풀 키에 버퍼 `stride`를 더했다(GX2의 구조화 버퍼).
+- 시험(EngineTests `RenderGraphReuseTests`, 기록 backend): view 둘의 프레임 안 재사용과 장치 handle 동일성·`Discard` attachment 전이, Immediate 재사용 없음, export·겹침·다른 desc 비공유, 버퍼 재사용의 `Discard` → UAV 장치 전이(검증 0), 위 R15 시험 넷, 업로드가 첫 기록 앞·두 구간 순서·읽기 전이, 제거된 자원의 업로드 생략, 업로드 대상이 앞 객체를 받지 않고 뒤 자원에 넘김, Immediate 업로드 위치, `Sampled` mip 업로드(생성 → 다시 쓰면 mip 갱신 둘), 업로드 음성 대조(렌더 타깃 `Unsupported`·범위 밖·빈 데이터·mip 크기·두 번·`Sampled` 쓰기·렌더 타깃·올리지 않은 mip 읽기·pass 뒤 업로드·import·빠진 mip).
+- Sandbox self-test(g)에 더한 것: 반납된 history를 GPU 완료 뒤 장치 생성 없이 다시 씀, 같은 그래프 안 재사용 픽셀(앞 결과 빨강 유지, 이어 쓴 텍스처는 자기 파랑만), 버퍼 업로드 → 복사 pass 둘(재사용 버퍼의 `Discard` 전이를 장치에 내림) → export 바이트 대조와 두 번째 실행의 export 버퍼 재사용, `Sampled` 텍스처 업로드 합성(생성·풀 mip 갱신).
+- 남은 것(RG2): B부 begin·end 분리 전이(Graphics·backend 변경 목록은 개정 17 보고), 분리 전후 픽셀 동일.
 
 ## 9. 셰이더 런타임
 
@@ -1166,3 +1185,4 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
   - 10.5절: typed buffer 원소 용량과 넘침(결정 R16), 행렬식 부호의 인스턴스 단위 분할과 재분류.
   - 11.1절: 빈 light grid의 셀 좌표 clamp, 검은 cube array 알파 0(UE와 같은 반사 합성 의미). 11.2절: MSAA resolve 범위(깊이 늘, velocity는 temporal 때, 색은 결정 R17), 스텐실 0, UE 줄 인용 정정.
   - 2절 용어(`SharedResourceStruct`·`DrawResourceStruct`·`GraphScope`), GX1 기능 이름 "VS layer 출력".
+- 개정 17(2026-11-18): RG2 A부 구현을 반영했다(4.2절 RG2 행, 7.4절 export 소유자, 8절 RG1 남은 것 정리와 RG2 구현 메모). 프레임 안 풀 재사용(Deferred 컴파일의 장치 객체 자리 계획, 이어 받은 자원의 첫 전이 `Discard`), 결정 R15(RenderBase `RenderRetireSink`·`ReleaseRetiredResource`, 풀 export·반납 대기·fence 뒤 반납), 그래프 안 업로드(`UploadBuffer`·`UploadTexture`, Deferred는 첫 기록 앞, 텍스처는 새 용도 `Sampled` 그래프 텍스처만). 스펙과 다르게 정한 것: 업로드는 그래프 상태에 복사 대상을 두지 않는다(장치 업로드가 상태 중립이어서), Immediate 모드는 프레임 안 재사용을 하지 않는다, 렌더 타깃 텍스처 업로드는 `Unsupported`(버퍼 → 텍스처 복사 명령 없음). B부 분리 전이는 남았다.
