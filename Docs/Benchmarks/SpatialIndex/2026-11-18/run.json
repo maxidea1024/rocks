@@ -1,0 +1,4678 @@
+{
+  "tool": "SpatialIndexBench RunBench.ps1",
+  "startedUtc": "2026-11-18T13:00:41.6270233Z",
+  "machine": {
+    "cpu": "13th Gen Intel(R) Core(TM) i5-13600KF",
+    "cores": 14,
+    "logicalProcessors": 20,
+    "maxClockMHz": 3500,
+    "memoryBytes": 68523843584,
+    "os": "Microsoft Windows 11 Pro 10.0.26200",
+    "powerPlan": "381b4222-f694-41f0-9685-ff5bb260df2e (Windows Balanced plan; the localized name was garbled by the console code page and replaced by hand)",
+    "coreAffinity": "none (not pinned)"
+  },
+  "compilerOnPath": "clang version 21.1.6",
+  "gitHead": "bba0d618613bad98daf9acbc9e4b0be7bae31a73",
+  "repeats": 3,
+  "runs": [
+    {
+      "name": "timing-r0-A1",
+      "command": "SpatialIndexBench.exe --group A1 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-r0-A1.json",
+      "exitCode": 0,
+      "seconds": 50.76,
+      "loadBefore": {
+        "utc": "2026-11-18T13:00:47.1084680Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 9.56
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 7.06
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 6.82
+          },
+          {
+            "name": "dotnet",
+            "id": 30484,
+            "cpuPercentOfMachine": 3.96
+          },
+          {
+            "name": "dotnet",
+            "id": 36040,
+            "cpuPercentOfMachine": 3.78
+          },
+          {
+            "name": "pwsh",
+            "id": 37464,
+            "cpuPercentOfMachine": 3.62
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:01:40.9705483Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.05
+          },
+          {
+            "name": "dotnet",
+            "id": 9724,
+            "cpuPercentOfMachine": 4.95
+          },
+          {
+            "name": "dotnet",
+            "id": 45788,
+            "cpuPercentOfMachine": 4.71
+          },
+          {
+            "name": "dotnet",
+            "id": 37628,
+            "cpuPercentOfMachine": 3.85
+          },
+          {
+            "name": "dotnet",
+            "id": 39176,
+            "cpuPercentOfMachine": 3.59
+          },
+          {
+            "name": "dotnet",
+            "id": 26024,
+            "cpuPercentOfMachine": 3.41
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-r0-A2",
+      "command": "SpatialIndexBench.exe --group A2 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-r0-A2.json",
+      "exitCode": 0,
+      "seconds": 52.41,
+      "loadBefore": {
+        "utc": "2026-11-18T13:01:44.3176303Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 5.62
+          },
+          {
+            "name": "dotnet",
+            "id": 19120,
+            "cpuPercentOfMachine": 5.42
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.39
+          },
+          {
+            "name": "dotnet",
+            "id": 38840,
+            "cpuPercentOfMachine": 3.85
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.78
+          },
+          {
+            "name": "dotnet",
+            "id": 18960,
+            "cpuPercentOfMachine": 3.65
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:02:39.9292569Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.29
+          },
+          {
+            "name": "dotnet",
+            "id": 20908,
+            "cpuPercentOfMachine": 5.05
+          },
+          {
+            "name": "dotnet",
+            "id": 16528,
+            "cpuPercentOfMachine": 4.84
+          },
+          {
+            "name": "dotnet",
+            "id": 34020,
+            "cpuPercentOfMachine": 4.48
+          },
+          {
+            "name": "dotnet",
+            "id": 9288,
+            "cpuPercentOfMachine": 4.43
+          },
+          {
+            "name": "dotnet",
+            "id": 11720,
+            "cpuPercentOfMachine": 4.4
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-r0-A2s",
+      "command": "SpatialIndexBench.exe --group A2s --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-r0-A2s.json",
+      "exitCode": 0,
+      "seconds": 45.03,
+      "loadBefore": {
+        "utc": "2026-11-18T13:02:43.1776308Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.31
+          },
+          {
+            "name": "dotnet",
+            "id": 16528,
+            "cpuPercentOfMachine": 4.71
+          },
+          {
+            "name": "dotnet",
+            "id": 20908,
+            "cpuPercentOfMachine": 3.85
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 3.83
+          },
+          {
+            "name": "dotnet",
+            "id": 21348,
+            "cpuPercentOfMachine": 3.44
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 2.89
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:03:31.2351621Z",
+        "totalCpuPercent": 52.46,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 11.15
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.35
+          },
+          {
+            "name": "VBCSCompiler",
+            "id": 33356,
+            "cpuPercentOfMachine": 2.71
+          },
+          {
+            "name": "dotnet",
+            "id": 520,
+            "cpuPercentOfMachine": 0.62
+          },
+          {
+            "name": "dotnet",
+            "id": 924,
+            "cpuPercentOfMachine": 0.62
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-r0-B",
+      "command": "SpatialIndexBench.exe --group B --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-r0-B.json",
+      "exitCode": 0,
+      "seconds": 20.29,
+      "loadBefore": {
+        "utc": "2026-11-18T13:03:34.2678338Z",
+        "totalCpuPercent": 44.82,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 10.44
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.32
+          },
+          {
+            "name": "VBCSCompiler",
+            "id": 33356,
+            "cpuPercentOfMachine": 2.99
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:03:57.5899396Z",
+        "totalCpuPercent": 50.73,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 15.94
+          },
+          {
+            "name": "dotnet",
+            "id": 23420,
+            "cpuPercentOfMachine": 5.6
+          },
+          {
+            "name": "dotnet",
+            "id": 35192,
+            "cpuPercentOfMachine": 5.6
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.08
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.45
+          },
+          {
+            "name": "Code",
+            "id": 39236,
+            "cpuPercentOfMachine": 1.28
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-r0-C16",
+      "command": "SpatialIndexBench.exe --group C16 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-r0-C16.json",
+      "exitCode": 0,
+      "seconds": 10.82,
+      "loadBefore": {
+        "utc": "2026-11-18T13:04:00.6100415Z",
+        "totalCpuPercent": 44.83,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 14.32
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.05
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.32
+          },
+          {
+            "name": "claude",
+            "id": 36108,
+            "cpuPercentOfMachine": 0.6
+          },
+          {
+            "name": "dotnet",
+            "id": 23420,
+            "cpuPercentOfMachine": 0.57
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:04:14.4691002Z",
+        "totalCpuPercent": 43.99,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 14.38
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "dotnet",
+            "id": 19120,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.04
+          },
+          {
+            "name": "dotnet",
+            "id": 57480,
+            "cpuPercentOfMachine": 2.73
+          },
+          {
+            "name": "Code",
+            "id": 39236,
+            "cpuPercentOfMachine": 0.7
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-r0-C256",
+      "command": "SpatialIndexBench.exe --group C256 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-r0-C256.json",
+      "exitCode": 0,
+      "seconds": 9.24,
+      "loadBefore": {
+        "utc": "2026-11-18T13:04:17.5066418Z",
+        "totalCpuPercent": 43.58,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 13.85
+          },
+          {
+            "name": "dotnet",
+            "id": 19120,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.43
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:04:29.7735350Z",
+        "totalCpuPercent": 36.6,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 9.69
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "dotnet",
+            "id": 19120,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.14
+          },
+          {
+            "name": "Code",
+            "id": 39236,
+            "cpuPercentOfMachine": 0.62
+          },
+          {
+            "name": "Code",
+            "id": 28136,
+            "cpuPercentOfMachine": 0.57
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-r0-D",
+      "command": "SpatialIndexBench.exe --group D --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-r0-D.json",
+      "exitCode": 0,
+      "seconds": 20.52,
+      "loadBefore": {
+        "utc": "2026-11-18T13:04:32.8066382Z",
+        "totalCpuPercent": 41.95,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 11.9
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.08
+          },
+          {
+            "name": "dotnet",
+            "id": 19120,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.3
+          },
+          {
+            "name": "claude",
+            "id": 32460,
+            "cpuPercentOfMachine": 0.7
+          },
+          {
+            "name": "Code",
+            "id": 28136,
+            "cpuPercentOfMachine": 0.65
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:04:56.3465233Z",
+        "totalCpuPercent": 40.93,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 12.73
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.08
+          },
+          {
+            "name": "FoundationTests",
+            "id": 49716,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.14
+          },
+          {
+            "name": "dotnet",
+            "id": 18184,
+            "cpuPercentOfMachine": 1.85
+          },
+          {
+            "name": "Code",
+            "id": 39236,
+            "cpuPercentOfMachine": 0.62
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-r1-A2",
+      "command": "SpatialIndexBench.exe --group A2 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-r1-A2.json",
+      "exitCode": 0,
+      "seconds": 33.71,
+      "loadBefore": {
+        "utc": "2026-11-18T13:04:59.3753518Z",
+        "totalCpuPercent": 40.77,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 11.69
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "FoundationTests",
+            "id": 49716,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.17
+          },
+          {
+            "name": "Code",
+            "id": 28136,
+            "cpuPercentOfMachine": 1.04
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:05:36.1319206Z",
+        "totalCpuPercent": 84.56,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 13.65
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.32
+          },
+          {
+            "name": "Code",
+            "id": 35940,
+            "cpuPercentOfMachine": 3.98
+          },
+          {
+            "name": "dotnet",
+            "id": 19000,
+            "cpuPercentOfMachine": 3.31
+          },
+          {
+            "name": "Code",
+            "id": 28136,
+            "cpuPercentOfMachine": 0.83
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-r1-A2s",
+      "command": "SpatialIndexBench.exe --group A2s --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-r1-A2s.json",
+      "exitCode": 0,
+      "seconds": 44.61,
+      "loadBefore": {
+        "utc": "2026-11-18T13:05:39.1876837Z",
+        "totalCpuPercent": 79.77,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 10.23
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.1
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.51
+          },
+          {
+            "name": "dotnet",
+            "id": 12584,
+            "cpuPercentOfMachine": 4.11
+          },
+          {
+            "name": "Code",
+            "id": 35940,
+            "cpuPercentOfMachine": 3.78
+          },
+          {
+            "name": "dotnet",
+            "id": 19000,
+            "cpuPercentOfMachine": 2.24
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:06:26.8292585Z",
+        "totalCpuPercent": 83.33,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 13.41
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "bash",
+            "id": 38384,
+            "cpuPercentOfMachine": 4.97
+          },
+          {
+            "name": "dotnet",
+            "id": 19000,
+            "cpuPercentOfMachine": 4.61
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.43
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-r1-B",
+      "command": "SpatialIndexBench.exe --group B --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-r1-B.json",
+      "exitCode": 0,
+      "seconds": 28.45,
+      "loadBefore": {
+        "utc": "2026-11-18T13:06:29.8705960Z",
+        "totalCpuPercent": 85.52,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 12.21
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.08
+          },
+          {
+            "name": "bash",
+            "id": 38384,
+            "cpuPercentOfMachine": 4.84
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.19
+          },
+          {
+            "name": "dotnet",
+            "id": 19000,
+            "cpuPercentOfMachine": 3.26
+          },
+          {
+            "name": "claude",
+            "id": 32460,
+            "cpuPercentOfMachine": 0.6
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:07:01.3505989Z",
+        "totalCpuPercent": 78.05,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 14.74
+          },
+          {
+            "name": "clang-cl",
+            "id": 13080,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "clang-cl",
+            "id": 13232,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "clang-cl",
+            "id": 27268,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "clang-cl",
+            "id": 32244,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "clang-cl",
+            "id": 18536,
+            "cpuPercentOfMachine": 4.97
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-r1-C16",
+      "command": "SpatialIndexBench.exe --group C16 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-r1-C16.json",
+      "exitCode": 0,
+      "seconds": 14.8,
+      "loadBefore": {
+        "utc": "2026-11-18T13:07:04.3878728Z",
+        "totalCpuPercent": 89.62,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 12.81
+          },
+          {
+            "name": "Code",
+            "id": 28136,
+            "cpuPercentOfMachine": 5.55
+          },
+          {
+            "name": "clang-cl",
+            "id": 18536,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "bash",
+            "id": 38384,
+            "cpuPercentOfMachine": 4.9
+          },
+          {
+            "name": "clang-cl",
+            "id": 13232,
+            "cpuPercentOfMachine": 4.87
+          },
+          {
+            "name": "clang-cl",
+            "id": 27268,
+            "cpuPercentOfMachine": 4.84
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:07:22.2175710Z",
+        "totalCpuPercent": 76.89,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 12.24
+          },
+          {
+            "name": "clang-cl",
+            "id": 10092,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "clang-cl",
+            "id": 47756,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "clang-cl",
+            "id": 50256,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "clang-cl",
+            "id": 51796,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "clang-cl",
+            "id": 54044,
+            "cpuPercentOfMachine": 5.0
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-r1-C256",
+      "command": "SpatialIndexBench.exe --group C256 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-r1-C256.json",
+      "exitCode": 0,
+      "seconds": 12.73,
+      "loadBefore": {
+        "utc": "2026-11-18T13:07:25.2483502Z",
+        "totalCpuPercent": 84.39,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 12.73
+          },
+          {
+            "name": "clang-cl",
+            "id": 47756,
+            "cpuPercentOfMachine": 4.95
+          },
+          {
+            "name": "bash",
+            "id": 38384,
+            "cpuPercentOfMachine": 4.9
+          },
+          {
+            "name": "clang-cl",
+            "id": 10092,
+            "cpuPercentOfMachine": 4.9
+          },
+          {
+            "name": "clang-cl",
+            "id": 54044,
+            "cpuPercentOfMachine": 4.9
+          },
+          {
+            "name": "clang-cl",
+            "id": 4660,
+            "cpuPercentOfMachine": 4.87
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:07:41.0502868Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 6.2
+          },
+          {
+            "name": "clang-cl",
+            "id": 10092,
+            "cpuPercentOfMachine": 4.79
+          },
+          {
+            "name": "clang-cl",
+            "id": 10568,
+            "cpuPercentOfMachine": 4.77
+          },
+          {
+            "name": "clang-cl",
+            "id": 10704,
+            "cpuPercentOfMachine": 4.77
+          },
+          {
+            "name": "clang-cl",
+            "id": 10360,
+            "cpuPercentOfMachine": 4.74
+          },
+          {
+            "name": "bash",
+            "id": 38384,
+            "cpuPercentOfMachine": 4.71
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-r1-D",
+      "command": "SpatialIndexBench.exe --group D --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-r1-D.json",
+      "exitCode": 0,
+      "seconds": 36.69,
+      "loadBefore": {
+        "utc": "2026-11-18T13:07:44.4005150Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 7.37
+          },
+          {
+            "name": "clang-cl",
+            "id": 10360,
+            "cpuPercentOfMachine": 5.29
+          },
+          {
+            "name": "clang-cl",
+            "id": 10568,
+            "cpuPercentOfMachine": 5.23
+          },
+          {
+            "name": "clang-cl",
+            "id": 51744,
+            "cpuPercentOfMachine": 5.23
+          },
+          {
+            "name": "clang-cl",
+            "id": 44340,
+            "cpuPercentOfMachine": 5.08
+          },
+          {
+            "name": "clang-cl",
+            "id": 37068,
+            "cpuPercentOfMachine": 5.05
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:08:24.1369674Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 6.15
+          },
+          {
+            "name": "dotnet",
+            "id": 11052,
+            "cpuPercentOfMachine": 4.92
+          },
+          {
+            "name": "clang-cl",
+            "id": 40404,
+            "cpuPercentOfMachine": 4.82
+          },
+          {
+            "name": "clang-cl",
+            "id": 29936,
+            "cpuPercentOfMachine": 4.77
+          },
+          {
+            "name": "clang-cl",
+            "id": 38964,
+            "cpuPercentOfMachine": 4.71
+          },
+          {
+            "name": "clang-cl",
+            "id": 28596,
+            "cpuPercentOfMachine": 4.69
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-r1-A1",
+      "command": "SpatialIndexBench.exe --group A1 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-r1-A1.json",
+      "exitCode": 0,
+      "seconds": 47.07,
+      "loadBefore": {
+        "utc": "2026-11-18T13:08:27.2943636Z",
+        "totalCpuPercent": 99.92,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 7.06
+          },
+          {
+            "name": "clang-cl",
+            "id": 40404,
+            "cpuPercentOfMachine": 4.97
+          },
+          {
+            "name": "clang-cl",
+            "id": 29936,
+            "cpuPercentOfMachine": 4.84
+          },
+          {
+            "name": "clang-cl",
+            "id": 36668,
+            "cpuPercentOfMachine": 4.84
+          },
+          {
+            "name": "clang-cl",
+            "id": 28596,
+            "cpuPercentOfMachine": 4.82
+          },
+          {
+            "name": "clang-cl",
+            "id": 54116,
+            "cpuPercentOfMachine": 4.82
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:09:17.4118960Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 6.15
+          },
+          {
+            "name": "clang-cl",
+            "id": 44776,
+            "cpuPercentOfMachine": 4.74
+          },
+          {
+            "name": "clang-cl",
+            "id": 13828,
+            "cpuPercentOfMachine": 4.66
+          },
+          {
+            "name": "bash",
+            "id": 54160,
+            "cpuPercentOfMachine": 4.64
+          },
+          {
+            "name": "clang-cl",
+            "id": 41544,
+            "cpuPercentOfMachine": 4.61
+          },
+          {
+            "name": "clang-cl",
+            "id": 43896,
+            "cpuPercentOfMachine": 4.61
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-r2-A2s",
+      "command": "SpatialIndexBench.exe --group A2s --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-r2-A2s.json",
+      "exitCode": 0,
+      "seconds": 50.0,
+      "loadBefore": {
+        "utc": "2026-11-18T13:09:20.5531507Z",
+        "totalCpuPercent": 99.97,
+        "busiest": [
+          {
+            "name": "Code",
+            "id": 28136,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 4.64
+          },
+          {
+            "name": "clang-cl",
+            "id": 43896,
+            "cpuPercentOfMachine": 4.61
+          },
+          {
+            "name": "clang-cl",
+            "id": 18468,
+            "cpuPercentOfMachine": 4.51
+          },
+          {
+            "name": "clang-cl",
+            "id": 44776,
+            "cpuPercentOfMachine": 4.48
+          },
+          {
+            "name": "bash",
+            "id": 54160,
+            "cpuPercentOfMachine": 4.45
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:10:13.5907179Z",
+        "totalCpuPercent": 87.62,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 10.55
+          },
+          {
+            "name": "bash",
+            "id": 54160,
+            "cpuPercentOfMachine": 5.05
+          },
+          {
+            "name": "clang-cl",
+            "id": 48148,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "clang-cl",
+            "id": 2608,
+            "cpuPercentOfMachine": 4.97
+          },
+          {
+            "name": "bash",
+            "id": 38384,
+            "cpuPercentOfMachine": 4.95
+          },
+          {
+            "name": "clang-cl",
+            "id": 26560,
+            "cpuPercentOfMachine": 4.95
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-r2-B",
+      "command": "SpatialIndexBench.exe --group B --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-r2-B.json",
+      "exitCode": 0,
+      "seconds": 30.86,
+      "loadBefore": {
+        "utc": "2026-11-18T13:10:16.6290659Z",
+        "totalCpuPercent": 78.1,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 12.68
+          },
+          {
+            "name": "clang-cl",
+            "id": 7552,
+            "cpuPercentOfMachine": 5.05
+          },
+          {
+            "name": "clang-cl",
+            "id": 33552,
+            "cpuPercentOfMachine": 5.05
+          },
+          {
+            "name": "clang-cl",
+            "id": 56336,
+            "cpuPercentOfMachine": 5.05
+          },
+          {
+            "name": "clang-cl",
+            "id": 2608,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "clang-cl",
+            "id": 26560,
+            "cpuPercentOfMachine": 5.03
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:10:50.5365128Z",
+        "totalCpuPercent": 80.01,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 10.21
+          },
+          {
+            "name": "clang-cl",
+            "id": 30148,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "clang-cl",
+            "id": 28476,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "clang-cl",
+            "id": 31304,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "clang-cl",
+            "id": 38576,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "clang-cl",
+            "id": 43188,
+            "cpuPercentOfMachine": 5.0
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-r2-C16",
+      "command": "SpatialIndexBench.exe --group C16 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-r2-C16.json",
+      "exitCode": 0,
+      "seconds": 17.55,
+      "loadBefore": {
+        "utc": "2026-11-18T13:10:53.5811845Z",
+        "totalCpuPercent": 85.56,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 12.06
+          },
+          {
+            "name": "clang-cl",
+            "id": 30148,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "dotnet",
+            "id": 17772,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "clang-cl",
+            "id": 28476,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "clang-cl",
+            "id": 38576,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "clang-cl",
+            "id": 39376,
+            "cpuPercentOfMachine": 5.0
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:11:14.1713323Z",
+        "totalCpuPercent": 85.36,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 11.25
+          },
+          {
+            "name": "bash",
+            "id": 38384,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "clang-cl",
+            "id": 38908,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "clang-cl",
+            "id": 44596,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "clang-cl",
+            "id": 27268,
+            "cpuPercentOfMachine": 4.95
+          },
+          {
+            "name": "clang-cl",
+            "id": 38576,
+            "cpuPercentOfMachine": 4.92
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-r2-C256",
+      "command": "SpatialIndexBench.exe --group C256 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-r2-C256.json",
+      "exitCode": 0,
+      "seconds": 13.06,
+      "loadBefore": {
+        "utc": "2026-11-18T13:11:17.2504850Z",
+        "totalCpuPercent": 91.1,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 14.43
+          },
+          {
+            "name": "clang-cl",
+            "id": 4684,
+            "cpuPercentOfMachine": 5.05
+          },
+          {
+            "name": "clang-cl",
+            "id": 38908,
+            "cpuPercentOfMachine": 5.05
+          },
+          {
+            "name": "clang-cl",
+            "id": 43188,
+            "cpuPercentOfMachine": 5.05
+          },
+          {
+            "name": "clang-cl",
+            "id": 41716,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "bash",
+            "id": 38384,
+            "cpuPercentOfMachine": 5.0
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:11:33.3504385Z",
+        "totalCpuPercent": 89.01,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 9.19
+          },
+          {
+            "name": "clang-cl",
+            "id": 38908,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "dotnet",
+            "id": 37808,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "bash",
+            "id": 54160,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "clang-cl",
+            "id": 34936,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "clang-cl",
+            "id": 35312,
+            "cpuPercentOfMachine": 4.97
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-r2-D",
+      "command": "SpatialIndexBench.exe --group D --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-r2-D.json",
+      "exitCode": 0,
+      "seconds": 34.72,
+      "loadBefore": {
+        "utc": "2026-11-18T13:11:36.3921215Z",
+        "totalCpuPercent": 84.17,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 10.83
+          },
+          {
+            "name": "clang-cl",
+            "id": 34936,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "clang-cl",
+            "id": 38908,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "clang-cl",
+            "id": 27268,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "clang-cl",
+            "id": 50468,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "bash",
+            "id": 54160,
+            "cpuPercentOfMachine": 4.97
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:12:14.1816665Z",
+        "totalCpuPercent": 99.61,
+        "busiest": [
+          {
+            "name": "dotnet",
+            "id": 2616,
+            "cpuPercentOfMachine": 10.08
+          },
+          {
+            "name": "dotnet",
+            "id": 11052,
+            "cpuPercentOfMachine": 4.66
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 4.61
+          },
+          {
+            "name": "clang-cl",
+            "id": 55576,
+            "cpuPercentOfMachine": 4.51
+          },
+          {
+            "name": "bash",
+            "id": 38384,
+            "cpuPercentOfMachine": 4.35
+          },
+          {
+            "name": "bash",
+            "id": 17872,
+            "cpuPercentOfMachine": 4.27
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-r2-A1",
+      "command": "SpatialIndexBench.exe --group A1 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-r2-A1.json",
+      "exitCode": 0,
+      "seconds": 51.31,
+      "loadBefore": {
+        "utc": "2026-11-18T13:12:17.3071299Z",
+        "totalCpuPercent": 99.72,
+        "busiest": [
+          {
+            "name": "dotnet",
+            "id": 2616,
+            "cpuPercentOfMachine": 9.74
+          },
+          {
+            "name": "dotnet",
+            "id": 11052,
+            "cpuPercentOfMachine": 5.57
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 4.92
+          },
+          {
+            "name": "clang-cl",
+            "id": 55576,
+            "cpuPercentOfMachine": 4.64
+          },
+          {
+            "name": "bash",
+            "id": 38384,
+            "cpuPercentOfMachine": 4.48
+          },
+          {
+            "name": "bash",
+            "id": 17872,
+            "cpuPercentOfMachine": 4.14
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:13:11.7288781Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 5.26
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.13
+          },
+          {
+            "name": "FoundationTests",
+            "id": 41008,
+            "cpuPercentOfMachine": 4.51
+          },
+          {
+            "name": "clang-cl",
+            "id": 57264,
+            "cpuPercentOfMachine": 4.51
+          },
+          {
+            "name": "clang-cl",
+            "id": 30592,
+            "cpuPercentOfMachine": 4.51
+          },
+          {
+            "name": "clang-cl",
+            "id": 40308,
+            "cpuPercentOfMachine": 4.45
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-r2-A2",
+      "command": "SpatialIndexBench.exe --group A2 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-r2-A2.json",
+      "exitCode": 0,
+      "seconds": 53.37,
+      "loadBefore": {
+        "utc": "2026-11-18T13:13:14.9025829Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 5.7
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.18
+          },
+          {
+            "name": "dotnet",
+            "id": 20320,
+            "cpuPercentOfMachine": 4.74
+          },
+          {
+            "name": "clang-cl",
+            "id": 39724,
+            "cpuPercentOfMachine": 4.71
+          },
+          {
+            "name": "clang-cl",
+            "id": 30592,
+            "cpuPercentOfMachine": 4.64
+          },
+          {
+            "name": "bash",
+            "id": 38384,
+            "cpuPercentOfMachine": 4.53
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:14:11.3929064Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.13
+          },
+          {
+            "name": "clang-cl",
+            "id": 40988,
+            "cpuPercentOfMachine": 4.74
+          },
+          {
+            "name": "clang-cl",
+            "id": 48084,
+            "cpuPercentOfMachine": 4.66
+          },
+          {
+            "name": "clang-cl",
+            "id": 18984,
+            "cpuPercentOfMachine": 4.51
+          },
+          {
+            "name": "bash",
+            "id": 17872,
+            "cpuPercentOfMachine": 4.35
+          },
+          {
+            "name": "bash",
+            "id": 38384,
+            "cpuPercentOfMachine": 3.93
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-large-r0-A1",
+      "command": "SpatialIndexBench.exe --group A1 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-large-r0-A1.json --profile large",
+      "exitCode": 0,
+      "seconds": 62.36,
+      "loadBefore": {
+        "utc": "2026-11-18T13:14:14.5413222Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.18
+          },
+          {
+            "name": "clang-cl",
+            "id": 40988,
+            "cpuPercentOfMachine": 4.79
+          },
+          {
+            "name": "clang-cl",
+            "id": 18984,
+            "cpuPercentOfMachine": 4.74
+          },
+          {
+            "name": "clang-cl",
+            "id": 48084,
+            "cpuPercentOfMachine": 4.64
+          },
+          {
+            "name": "clang-cl",
+            "id": 54416,
+            "cpuPercentOfMachine": 4.58
+          },
+          {
+            "name": "bash",
+            "id": 38384,
+            "cpuPercentOfMachine": 4.27
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:15:19.9612793Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 7.4
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.08
+          },
+          {
+            "name": "dotnet",
+            "id": 2616,
+            "cpuPercentOfMachine": 4.9
+          },
+          {
+            "name": "bash",
+            "id": 54676,
+            "cpuPercentOfMachine": 3.98
+          },
+          {
+            "name": "clang-cl",
+            "id": 30592,
+            "cpuPercentOfMachine": 3.96
+          },
+          {
+            "name": "bash",
+            "id": 38384,
+            "cpuPercentOfMachine": 3.78
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-large-r0-A2",
+      "command": "SpatialIndexBench.exe --group A2 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-large-r0-A2.json --profile large",
+      "exitCode": 0,
+      "seconds": 55.2,
+      "loadBefore": {
+        "utc": "2026-11-18T13:15:23.0536291Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 7.53
+          },
+          {
+            "name": "dotnet",
+            "id": 38748,
+            "cpuPercentOfMachine": 5.62
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.1
+          },
+          {
+            "name": "clang-cl",
+            "id": 32596,
+            "cpuPercentOfMachine": 4.58
+          },
+          {
+            "name": "clang-cl",
+            "id": 30592,
+            "cpuPercentOfMachine": 4.51
+          },
+          {
+            "name": "clang-cl",
+            "id": 27184,
+            "cpuPercentOfMachine": 4.32
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:16:21.2810087Z",
+        "totalCpuPercent": 94.04,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 14.22
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "clang-cl",
+            "id": 7308,
+            "cpuPercentOfMachine": 4.82
+          },
+          {
+            "name": "clang-cl",
+            "id": 31808,
+            "cpuPercentOfMachine": 4.82
+          },
+          {
+            "name": "clang-cl",
+            "id": 49168,
+            "cpuPercentOfMachine": 4.79
+          },
+          {
+            "name": "clang-cl",
+            "id": 3092,
+            "cpuPercentOfMachine": 4.79
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-large-r0-A2s",
+      "command": "SpatialIndexBench.exe --group A2s --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-large-r0-A2s.json --profile large",
+      "exitCode": 0,
+      "seconds": 58.73,
+      "loadBefore": {
+        "utc": "2026-11-18T13:16:24.3764958Z",
+        "totalCpuPercent": 99.53,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 14.53
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.21
+          },
+          {
+            "name": "Code",
+            "id": 28136,
+            "cpuPercentOfMachine": 4.9
+          },
+          {
+            "name": "clang-cl",
+            "id": 8576,
+            "cpuPercentOfMachine": 4.87
+          },
+          {
+            "name": "clang-cl",
+            "id": 7308,
+            "cpuPercentOfMachine": 4.71
+          },
+          {
+            "name": "clang-cl",
+            "id": 3092,
+            "cpuPercentOfMachine": 4.69
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:17:26.4138776Z",
+        "totalCpuPercent": 96.74,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 14.74
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 6.07
+          },
+          {
+            "name": "clang-cl",
+            "id": 13248,
+            "cpuPercentOfMachine": 5.31
+          },
+          {
+            "name": "clang-cl",
+            "id": 51320,
+            "cpuPercentOfMachine": 5.31
+          },
+          {
+            "name": "clang-cl",
+            "id": 48584,
+            "cpuPercentOfMachine": 5.23
+          },
+          {
+            "name": "bash",
+            "id": 34136,
+            "cpuPercentOfMachine": 5.21
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-large-r0-B",
+      "command": "SpatialIndexBench.exe --group B --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-large-r0-B.json --profile large",
+      "exitCode": 0,
+      "seconds": 52.91,
+      "loadBefore": {
+        "utc": "2026-11-18T13:17:29.4750688Z",
+        "totalCpuPercent": 96.24,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 15.68
+          },
+          {
+            "name": "clang-cl",
+            "id": 48584,
+            "cpuPercentOfMachine": 4.97
+          },
+          {
+            "name": "clang-cl",
+            "id": 47448,
+            "cpuPercentOfMachine": 4.95
+          },
+          {
+            "name": "clang-cl",
+            "id": 26744,
+            "cpuPercentOfMachine": 4.92
+          },
+          {
+            "name": "clang-cl",
+            "id": 50656,
+            "cpuPercentOfMachine": 4.9
+          },
+          {
+            "name": "clang-cl",
+            "id": 51320,
+            "cpuPercentOfMachine": 4.9
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:18:25.4535720Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 7.86
+          },
+          {
+            "name": "dotnet",
+            "id": 56268,
+            "cpuPercentOfMachine": 6.77
+          },
+          {
+            "name": "clang-cl",
+            "id": 10284,
+            "cpuPercentOfMachine": 4.64
+          },
+          {
+            "name": "clang-cl",
+            "id": 31488,
+            "cpuPercentOfMachine": 4.64
+          },
+          {
+            "name": "bash",
+            "id": 34136,
+            "cpuPercentOfMachine": 4.58
+          },
+          {
+            "name": "clang-cl",
+            "id": 48116,
+            "cpuPercentOfMachine": 4.53
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-large-r0-C16",
+      "command": "SpatialIndexBench.exe --group C16 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-large-r0-C16.json --profile large",
+      "exitCode": 0,
+      "seconds": 35.8,
+      "loadBefore": {
+        "utc": "2026-11-18T13:18:28.6684698Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 8.88
+          },
+          {
+            "name": "dotnet",
+            "id": 56268,
+            "cpuPercentOfMachine": 5.29
+          },
+          {
+            "name": "bash",
+            "id": 33184,
+            "cpuPercentOfMachine": 4.79
+          },
+          {
+            "name": "clang-cl",
+            "id": 29548,
+            "cpuPercentOfMachine": 4.66
+          },
+          {
+            "name": "clang-cl",
+            "id": 31488,
+            "cpuPercentOfMachine": 4.66
+          },
+          {
+            "name": "clang-cl",
+            "id": 48116,
+            "cpuPercentOfMachine": 4.64
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:19:07.7735899Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 9.95
+          },
+          {
+            "name": "clang-cl",
+            "id": 12484,
+            "cpuPercentOfMachine": 4.84
+          },
+          {
+            "name": "clang-cl",
+            "id": 37692,
+            "cpuPercentOfMachine": 4.71
+          },
+          {
+            "name": "bash",
+            "id": 33184,
+            "cpuPercentOfMachine": 4.66
+          },
+          {
+            "name": "clang-cl",
+            "id": 33420,
+            "cpuPercentOfMachine": 4.66
+          },
+          {
+            "name": "bash",
+            "id": 34136,
+            "cpuPercentOfMachine": 4.66
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-large-r0-C256",
+      "command": "SpatialIndexBench.exe --group C256 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-large-r0-C256.json --profile large",
+      "exitCode": 0,
+      "seconds": 34.36,
+      "loadBefore": {
+        "utc": "2026-11-18T13:19:11.0923093Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "VBCSCompiler",
+            "id": 19388,
+            "cpuPercentOfMachine": 7.79
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 6.35
+          },
+          {
+            "name": "clang-cl",
+            "id": 15868,
+            "cpuPercentOfMachine": 4.74
+          },
+          {
+            "name": "clang-cl",
+            "id": 42292,
+            "cpuPercentOfMachine": 4.69
+          },
+          {
+            "name": "clang-cl",
+            "id": 35684,
+            "cpuPercentOfMachine": 4.56
+          },
+          {
+            "name": "dotnet",
+            "id": 58044,
+            "cpuPercentOfMachine": 4.51
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:19:48.5044070Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "dotnet",
+            "id": 56036,
+            "cpuPercentOfMachine": 7.29
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 6.56
+          },
+          {
+            "name": "dotnet",
+            "id": 38748,
+            "cpuPercentOfMachine": 5.16
+          },
+          {
+            "name": "bash",
+            "id": 33184,
+            "cpuPercentOfMachine": 4.74
+          },
+          {
+            "name": "clang-cl",
+            "id": 18348,
+            "cpuPercentOfMachine": 4.56
+          },
+          {
+            "name": "clang-cl",
+            "id": 43968,
+            "cpuPercentOfMachine": 4.51
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-large-r0-D",
+      "command": "SpatialIndexBench.exe --group D --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-large-r0-D.json --profile large",
+      "exitCode": 0,
+      "seconds": 83.66,
+      "loadBefore": {
+        "utc": "2026-11-18T13:19:51.6035890Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 8.2
+          },
+          {
+            "name": "dotnet",
+            "id": 56036,
+            "cpuPercentOfMachine": 6.54
+          },
+          {
+            "name": "clang-cl",
+            "id": 54440,
+            "cpuPercentOfMachine": 4.69
+          },
+          {
+            "name": "dotnet",
+            "id": 38748,
+            "cpuPercentOfMachine": 4.69
+          },
+          {
+            "name": "VBCSCompiler",
+            "id": 19388,
+            "cpuPercentOfMachine": 4.45
+          },
+          {
+            "name": "clang-cl",
+            "id": 18348,
+            "cpuPercentOfMachine": 4.38
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:21:18.3152000Z",
+        "totalCpuPercent": 99.9,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 9.51
+          },
+          {
+            "name": "dotnet",
+            "id": 56268,
+            "cpuPercentOfMachine": 8.33
+          },
+          {
+            "name": "dotnet",
+            "id": 39536,
+            "cpuPercentOfMachine": 6.54
+          },
+          {
+            "name": "dotnet",
+            "id": 19168,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 4.97
+          },
+          {
+            "name": "bash",
+            "id": 12688,
+            "cpuPercentOfMachine": 4.38
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-large-r1-A2",
+      "command": "SpatialIndexBench.exe --group A2 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-large-r1-A2.json --profile large",
+      "exitCode": 0,
+      "seconds": 41.25,
+      "loadBefore": {
+        "utc": "2026-11-18T13:21:21.3962015Z",
+        "totalCpuPercent": 99.36,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 11.28
+          },
+          {
+            "name": "dotnet",
+            "id": 39536,
+            "cpuPercentOfMachine": 7.68
+          },
+          {
+            "name": "dotnet",
+            "id": 56268,
+            "cpuPercentOfMachine": 6.74
+          },
+          {
+            "name": "dotnet",
+            "id": 19168,
+            "cpuPercentOfMachine": 4.97
+          },
+          {
+            "name": "bash",
+            "id": 12688,
+            "cpuPercentOfMachine": 4.58
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 4.58
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:22:05.6861731Z",
+        "totalCpuPercent": 69.58,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 21.54
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.05
+          },
+          {
+            "name": "FoundationTests",
+            "id": 25200,
+            "cpuPercentOfMachine": 5.05
+          },
+          {
+            "name": "bash",
+            "id": 12688,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "bash",
+            "id": 33184,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "clang-cl",
+            "id": 45380,
+            "cpuPercentOfMachine": 5.0
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-large-r1-A2s",
+      "command": "SpatialIndexBench.exe --group A2s --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-large-r1-A2s.json --profile large",
+      "exitCode": 0,
+      "seconds": 48.33,
+      "loadBefore": {
+        "utc": "2026-11-18T13:22:08.7190885Z",
+        "totalCpuPercent": 65.49,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 20.26
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "bash",
+            "id": 33184,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "bash",
+            "id": 12688,
+            "cpuPercentOfMachine": 4.97
+          },
+          {
+            "name": "FoundationTests",
+            "id": 25200,
+            "cpuPercentOfMachine": 4.74
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.24
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:23:00.1073083Z",
+        "totalCpuPercent": 99.07,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 12.37
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.13
+          },
+          {
+            "name": "FoundationTests",
+            "id": 25200,
+            "cpuPercentOfMachine": 4.77
+          },
+          {
+            "name": "bash",
+            "id": 33184,
+            "cpuPercentOfMachine": 4.74
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.38
+          },
+          {
+            "name": "dotnet",
+            "id": 15004,
+            "cpuPercentOfMachine": 3.98
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-large-r1-B",
+      "command": "SpatialIndexBench.exe --group B --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-large-r1-B.json --profile large",
+      "exitCode": 0,
+      "seconds": 51.02,
+      "loadBefore": {
+        "utc": "2026-11-18T13:23:03.1844198Z",
+        "totalCpuPercent": 99.72,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 11.2
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.08
+          },
+          {
+            "name": "bash",
+            "id": 33184,
+            "cpuPercentOfMachine": 4.71
+          },
+          {
+            "name": "bash",
+            "id": 57784,
+            "cpuPercentOfMachine": 4.66
+          },
+          {
+            "name": "dotnet",
+            "id": 44396,
+            "cpuPercentOfMachine": 4.24
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.09
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:23:57.3456588Z",
+        "totalCpuPercent": 99.97,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 12.32
+          },
+          {
+            "name": "dotnet",
+            "id": 15004,
+            "cpuPercentOfMachine": 5.65
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.16
+          },
+          {
+            "name": "bash",
+            "id": 33184,
+            "cpuPercentOfMachine": 4.74
+          },
+          {
+            "name": "clang-cl",
+            "id": 6508,
+            "cpuPercentOfMachine": 4.66
+          },
+          {
+            "name": "bash",
+            "id": 57784,
+            "cpuPercentOfMachine": 4.58
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-large-r1-C16",
+      "command": "SpatialIndexBench.exe --group C16 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-large-r1-C16.json --profile large",
+      "exitCode": 0,
+      "seconds": 32.77,
+      "loadBefore": {
+        "utc": "2026-11-18T13:24:00.4405548Z",
+        "totalCpuPercent": 99.9,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 12.53
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.1
+          },
+          {
+            "name": "dotnet",
+            "id": 54028,
+            "cpuPercentOfMachine": 4.69
+          },
+          {
+            "name": "clang-cl",
+            "id": 22492,
+            "cpuPercentOfMachine": 4.64
+          },
+          {
+            "name": "bash",
+            "id": 33184,
+            "cpuPercentOfMachine": 4.61
+          },
+          {
+            "name": "clang-cl",
+            "id": 6508,
+            "cpuPercentOfMachine": 4.61
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:24:36.2769672Z",
+        "totalCpuPercent": 99.74,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 14.64
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.16
+          },
+          {
+            "name": "dotnet",
+            "id": 37900,
+            "cpuPercentOfMachine": 5.05
+          },
+          {
+            "name": "clang-cl",
+            "id": 9136,
+            "cpuPercentOfMachine": 4.79
+          },
+          {
+            "name": "clang-cl",
+            "id": 20024,
+            "cpuPercentOfMachine": 4.77
+          },
+          {
+            "name": "clang-cl",
+            "id": 1588,
+            "cpuPercentOfMachine": 4.71
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-large-r1-C256",
+      "command": "SpatialIndexBench.exe --group C256 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-large-r1-C256.json --profile large",
+      "exitCode": 0,
+      "seconds": 29.63,
+      "loadBefore": {
+        "utc": "2026-11-18T13:24:39.3233193Z",
+        "totalCpuPercent": 99.95,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 13.31
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.13
+          },
+          {
+            "name": "clang-cl",
+            "id": 31740,
+            "cpuPercentOfMachine": 4.66
+          },
+          {
+            "name": "dotnet",
+            "id": 22972,
+            "cpuPercentOfMachine": 4.64
+          },
+          {
+            "name": "clang-cl",
+            "id": 1588,
+            "cpuPercentOfMachine": 4.58
+          },
+          {
+            "name": "clang-cl",
+            "id": 20024,
+            "cpuPercentOfMachine": 4.58
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:25:12.2410300Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 9.38
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.6
+          },
+          {
+            "name": "clang-cl",
+            "id": 4712,
+            "cpuPercentOfMachine": 5.1
+          },
+          {
+            "name": "clang-cl",
+            "id": 37396,
+            "cpuPercentOfMachine": 4.95
+          },
+          {
+            "name": "clang-cl",
+            "id": 51776,
+            "cpuPercentOfMachine": 4.87
+          },
+          {
+            "name": "dotnet",
+            "id": 4276,
+            "cpuPercentOfMachine": 4.87
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-large-r1-D",
+      "command": "SpatialIndexBench.exe --group D --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-large-r1-D.json --profile large",
+      "exitCode": 0,
+      "seconds": 87.55,
+      "loadBefore": {
+        "utc": "2026-11-18T13:25:15.4018602Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 7.84
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.29
+          },
+          {
+            "name": "clang-cl",
+            "id": 27584,
+            "cpuPercentOfMachine": 4.61
+          },
+          {
+            "name": "clang-cl",
+            "id": 29528,
+            "cpuPercentOfMachine": 4.61
+          },
+          {
+            "name": "clang-cl",
+            "id": 40148,
+            "cpuPercentOfMachine": 4.61
+          },
+          {
+            "name": "clang-cl",
+            "id": 16640,
+            "cpuPercentOfMachine": 4.51
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:26:46.0190371Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 6.17
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.1
+          },
+          {
+            "name": "dotnet",
+            "id": 35068,
+            "cpuPercentOfMachine": 4.79
+          },
+          {
+            "name": "clang-cl",
+            "id": 54480,
+            "cpuPercentOfMachine": 4.51
+          },
+          {
+            "name": "clang-cl",
+            "id": 23308,
+            "cpuPercentOfMachine": 4.51
+          },
+          {
+            "name": "clang-cl",
+            "id": 55328,
+            "cpuPercentOfMachine": 4.48
+          }
+        ]
+      }
+    },
+    {
+      "name": "timing-large-r1-A1",
+      "command": "SpatialIndexBench.exe --group A1 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\timing-large-r1-A1.json --profile large",
+      "exitCode": 0,
+      "seconds": 66.25,
+      "loadBefore": {
+        "utc": "2026-11-18T13:26:49.5062073Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 9.24
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.73
+          },
+          {
+            "name": "clang-cl",
+            "id": 2060,
+            "cpuPercentOfMachine": 5.36
+          },
+          {
+            "name": "clang-cl",
+            "id": 55328,
+            "cpuPercentOfMachine": 5.31
+          },
+          {
+            "name": "clang-cl",
+            "id": 10600,
+            "cpuPercentOfMachine": 5.29
+          },
+          {
+            "name": "clang-cl",
+            "id": 23308,
+            "cpuPercentOfMachine": 5.0
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:27:58.8835633Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.96
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.53
+          },
+          {
+            "name": "clang-cl",
+            "id": 2304,
+            "cpuPercentOfMachine": 4.48
+          },
+          {
+            "name": "clang-cl",
+            "id": 30300,
+            "cpuPercentOfMachine": 4.38
+          },
+          {
+            "name": "clang-cl",
+            "id": 18848,
+            "cpuPercentOfMachine": 4.32
+          },
+          {
+            "name": "clang-cl",
+            "id": 23752,
+            "cpuPercentOfMachine": 4.27
+          }
+        ]
+      }
+    },
+    {
+      "name": "counters-r0-A1",
+      "command": "SpatialIndexBench.exe --group A1 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\counters-r0-A1.json --counters --no-scenarios",
+      "exitCode": 0,
+      "seconds": 28.1,
+      "loadBefore": {
+        "utc": "2026-11-18T13:28:02.0186017Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 5.34
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.13
+          },
+          {
+            "name": "clang-cl",
+            "id": 40764,
+            "cpuPercentOfMachine": 4.45
+          },
+          {
+            "name": "clang-cl",
+            "id": 30300,
+            "cpuPercentOfMachine": 4.38
+          },
+          {
+            "name": "clang-cl",
+            "id": 23752,
+            "cpuPercentOfMachine": 4.19
+          },
+          {
+            "name": "dotnet",
+            "id": 11240,
+            "cpuPercentOfMachine": 4.09
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:28:33.3166318Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 6.09
+          },
+          {
+            "name": "clang-cl",
+            "id": 53748,
+            "cpuPercentOfMachine": 4.77
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 4.3
+          },
+          {
+            "name": "clang-cl",
+            "id": 40764,
+            "cpuPercentOfMachine": 4.22
+          },
+          {
+            "name": "bash",
+            "id": 36560,
+            "cpuPercentOfMachine": 4.14
+          },
+          {
+            "name": "clang-cl",
+            "id": 23752,
+            "cpuPercentOfMachine": 3.98
+          }
+        ]
+      }
+    },
+    {
+      "name": "counters-r0-A2",
+      "command": "SpatialIndexBench.exe --group A2 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\counters-r0-A2.json --counters --no-scenarios",
+      "exitCode": 0,
+      "seconds": 29.25,
+      "loadBefore": {
+        "utc": "2026-11-18T13:28:36.3709879Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 5.52
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "clang-cl",
+            "id": 23752,
+            "cpuPercentOfMachine": 4.48
+          },
+          {
+            "name": "clang-cl",
+            "id": 15084,
+            "cpuPercentOfMachine": 4.24
+          },
+          {
+            "name": "clang-cl",
+            "id": 53748,
+            "cpuPercentOfMachine": 4.19
+          },
+          {
+            "name": "dotnet",
+            "id": 53452,
+            "cpuPercentOfMachine": 4.04
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:29:08.7517927Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 7.11
+          },
+          {
+            "name": "dotnet",
+            "id": 53452,
+            "cpuPercentOfMachine": 5.47
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.13
+          },
+          {
+            "name": "clang-cl",
+            "id": 29176,
+            "cpuPercentOfMachine": 4.58
+          },
+          {
+            "name": "clang-cl",
+            "id": 16840,
+            "cpuPercentOfMachine": 4.56
+          },
+          {
+            "name": "clang-cl",
+            "id": 27780,
+            "cpuPercentOfMachine": 4.45
+          }
+        ]
+      }
+    },
+    {
+      "name": "counters-r0-A2s",
+      "command": "SpatialIndexBench.exe --group A2s --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\counters-r0-A2s.json --counters --no-scenarios",
+      "exitCode": 0,
+      "seconds": 30.92,
+      "loadBefore": {
+        "utc": "2026-11-18T13:29:12.0306724Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 8.44
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.36
+          },
+          {
+            "name": "clang-cl",
+            "id": 57044,
+            "cpuPercentOfMachine": 4.77
+          },
+          {
+            "name": "clang-cl",
+            "id": 53748,
+            "cpuPercentOfMachine": 4.58
+          },
+          {
+            "name": "clang-cl",
+            "id": 39056,
+            "cpuPercentOfMachine": 4.58
+          },
+          {
+            "name": "bash",
+            "id": 53468,
+            "cpuPercentOfMachine": 4.56
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:29:46.1536580Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 7.99
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.29
+          },
+          {
+            "name": "dotnet",
+            "id": 53452,
+            "cpuPercentOfMachine": 4.74
+          },
+          {
+            "name": "clang-cl",
+            "id": 41712,
+            "cpuPercentOfMachine": 4.64
+          },
+          {
+            "name": "clang-cl",
+            "id": 41432,
+            "cpuPercentOfMachine": 4.61
+          },
+          {
+            "name": "clang-cl",
+            "id": 41516,
+            "cpuPercentOfMachine": 4.53
+          }
+        ]
+      }
+    },
+    {
+      "name": "counters-r0-B",
+      "command": "SpatialIndexBench.exe --group B --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\counters-r0-B.json --counters --no-scenarios",
+      "exitCode": 0,
+      "seconds": 17.82,
+      "loadBefore": {
+        "utc": "2026-11-18T13:29:49.3490170Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 8.05
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.23
+          },
+          {
+            "name": "clang-cl",
+            "id": 41712,
+            "cpuPercentOfMachine": 4.74
+          },
+          {
+            "name": "clang-cl",
+            "id": 41516,
+            "cpuPercentOfMachine": 4.71
+          },
+          {
+            "name": "clang-cl",
+            "id": 49128,
+            "cpuPercentOfMachine": 4.38
+          },
+          {
+            "name": "clang-cl",
+            "id": 32560,
+            "cpuPercentOfMachine": 4.35
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:30:10.2713862Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 7.19
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.08
+          },
+          {
+            "name": "clang-cl",
+            "id": 18944,
+            "cpuPercentOfMachine": 4.71
+          },
+          {
+            "name": "clang-cl",
+            "id": 8060,
+            "cpuPercentOfMachine": 4.61
+          },
+          {
+            "name": "clang-cl",
+            "id": 38308,
+            "cpuPercentOfMachine": 4.61
+          },
+          {
+            "name": "clang-cl",
+            "id": 52452,
+            "cpuPercentOfMachine": 4.53
+          }
+        ]
+      }
+    },
+    {
+      "name": "counters-r0-C16",
+      "command": "SpatialIndexBench.exe --group C16 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\counters-r0-C16.json --counters --no-scenarios",
+      "exitCode": 0,
+      "seconds": 11.65,
+      "loadBefore": {
+        "utc": "2026-11-18T13:30:13.3818985Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 8.59
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.13
+          },
+          {
+            "name": "bash",
+            "id": 36560,
+            "cpuPercentOfMachine": 4.48
+          },
+          {
+            "name": "clang-cl",
+            "id": 3756,
+            "cpuPercentOfMachine": 4.45
+          },
+          {
+            "name": "clang-cl",
+            "id": 49308,
+            "cpuPercentOfMachine": 4.35
+          },
+          {
+            "name": "clang-cl",
+            "id": 8060,
+            "cpuPercentOfMachine": 4.3
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:30:28.1414707Z",
+        "totalCpuPercent": 99.97,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 9.45
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.16
+          },
+          {
+            "name": "dotnet",
+            "id": 6264,
+            "cpuPercentOfMachine": 4.45
+          },
+          {
+            "name": "clang-cl",
+            "id": 8060,
+            "cpuPercentOfMachine": 4.32
+          },
+          {
+            "name": "clang-cl",
+            "id": 18944,
+            "cpuPercentOfMachine": 4.3
+          },
+          {
+            "name": "clang-cl",
+            "id": 3756,
+            "cpuPercentOfMachine": 4.06
+          }
+        ]
+      }
+    },
+    {
+      "name": "counters-r0-C256",
+      "command": "SpatialIndexBench.exe --group C256 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\counters-r0-C256.json --counters --no-scenarios",
+      "exitCode": 0,
+      "seconds": 10.22,
+      "loadBefore": {
+        "utc": "2026-11-18T13:30:31.4221088Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 8.41
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.39
+          },
+          {
+            "name": "clang-cl",
+            "id": 19908,
+            "cpuPercentOfMachine": 4.61
+          },
+          {
+            "name": "dotnet",
+            "id": 6264,
+            "cpuPercentOfMachine": 4.51
+          },
+          {
+            "name": "clang-cl",
+            "id": 3756,
+            "cpuPercentOfMachine": 4.43
+          },
+          {
+            "name": "bash",
+            "id": 36560,
+            "cpuPercentOfMachine": 4.38
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:30:44.7261336Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 7.29
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.08
+          },
+          {
+            "name": "dotnet",
+            "id": 6264,
+            "cpuPercentOfMachine": 4.56
+          },
+          {
+            "name": "bash",
+            "id": 36560,
+            "cpuPercentOfMachine": 4.38
+          },
+          {
+            "name": "clang-cl",
+            "id": 33680,
+            "cpuPercentOfMachine": 4.35
+          },
+          {
+            "name": "clang-cl",
+            "id": 8060,
+            "cpuPercentOfMachine": 4.32
+          }
+        ]
+      }
+    },
+    {
+      "name": "counters-r0-D",
+      "command": "SpatialIndexBench.exe --group D --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\counters-r0-D.json --counters --no-scenarios",
+      "exitCode": 0,
+      "seconds": 15.48,
+      "loadBefore": {
+        "utc": "2026-11-18T13:30:48.0202748Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 6.8
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.36
+          },
+          {
+            "name": "dotnet",
+            "id": 6264,
+            "cpuPercentOfMachine": 4.48
+          },
+          {
+            "name": "clang-cl",
+            "id": 18944,
+            "cpuPercentOfMachine": 4.3
+          },
+          {
+            "name": "clang-cl",
+            "id": 3756,
+            "cpuPercentOfMachine": 4.24
+          },
+          {
+            "name": "clang-cl",
+            "id": 8060,
+            "cpuPercentOfMachine": 4.22
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:31:06.7920792Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 11.38
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.57
+          },
+          {
+            "name": "clang-cl",
+            "id": 8928,
+            "cpuPercentOfMachine": 4.97
+          },
+          {
+            "name": "clang-cl",
+            "id": 17296,
+            "cpuPercentOfMachine": 4.87
+          },
+          {
+            "name": "bash",
+            "id": 53468,
+            "cpuPercentOfMachine": 4.79
+          },
+          {
+            "name": "bash",
+            "id": 36560,
+            "cpuPercentOfMachine": 4.77
+          }
+        ]
+      }
+    },
+    {
+      "name": "counters-large-r0-A1",
+      "command": "SpatialIndexBench.exe --group A1 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\counters-large-r0-A1.json --counters --profile large",
+      "exitCode": 0,
+      "seconds": 35.14,
+      "loadBefore": {
+        "utc": "2026-11-18T13:31:09.9789258Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 12.73
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.29
+          },
+          {
+            "name": "clang-cl",
+            "id": 17296,
+            "cpuPercentOfMachine": 4.9
+          },
+          {
+            "name": "clang-cl",
+            "id": 22020,
+            "cpuPercentOfMachine": 4.64
+          },
+          {
+            "name": "dotnet",
+            "id": 6264,
+            "cpuPercentOfMachine": 4.61
+          },
+          {
+            "name": "bash",
+            "id": 53468,
+            "cpuPercentOfMachine": 4.58
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:31:48.2061425Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "dotnet",
+            "id": 15976,
+            "cpuPercentOfMachine": 15.44
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 8.36
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.26
+          },
+          {
+            "name": "clang-cl",
+            "id": 54776,
+            "cpuPercentOfMachine": 4.38
+          },
+          {
+            "name": "dotnet",
+            "id": 50368,
+            "cpuPercentOfMachine": 4.3
+          },
+          {
+            "name": "clang-cl",
+            "id": 26200,
+            "cpuPercentOfMachine": 4.19
+          }
+        ]
+      }
+    },
+    {
+      "name": "counters-large-r0-A2",
+      "command": "SpatialIndexBench.exe --group A2 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\counters-large-r0-A2.json --counters --profile large",
+      "exitCode": 0,
+      "seconds": 30.01,
+      "loadBefore": {
+        "utc": "2026-11-18T13:31:51.5425969Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "dotnet",
+            "id": 15976,
+            "cpuPercentOfMachine": 16.98
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 9.45
+          },
+          {
+            "name": "dotnet",
+            "id": 53452,
+            "cpuPercentOfMachine": 5.23
+          },
+          {
+            "name": "dotnet",
+            "id": 50368,
+            "cpuPercentOfMachine": 5.18
+          },
+          {
+            "name": "FoundationTests",
+            "id": 37900,
+            "cpuPercentOfMachine": 4.84
+          },
+          {
+            "name": "FoundationTests",
+            "id": 55928,
+            "cpuPercentOfMachine": 4.79
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:32:24.7845597Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 10.81
+          },
+          {
+            "name": "FoundationTests",
+            "id": 55928,
+            "cpuPercentOfMachine": 5.78
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.47
+          },
+          {
+            "name": "dotnet",
+            "id": 50368,
+            "cpuPercentOfMachine": 5.1
+          },
+          {
+            "name": "clang-cl",
+            "id": 56924,
+            "cpuPercentOfMachine": 5.08
+          },
+          {
+            "name": "clang-cl",
+            "id": 20164,
+            "cpuPercentOfMachine": 5.0
+          }
+        ]
+      }
+    },
+    {
+      "name": "counters-large-r0-A2s",
+      "command": "SpatialIndexBench.exe --group A2s --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\counters-large-r0-A2s.json --counters --profile large",
+      "exitCode": 0,
+      "seconds": 31.98,
+      "loadBefore": {
+        "utc": "2026-11-18T13:32:28.1927251Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 9.84
+          },
+          {
+            "name": "clang-cl",
+            "id": 20164,
+            "cpuPercentOfMachine": 5.18
+          },
+          {
+            "name": "clang-cl",
+            "id": 22096,
+            "cpuPercentOfMachine": 5.18
+          },
+          {
+            "name": "dotnet",
+            "id": 50368,
+            "cpuPercentOfMachine": 5.13
+          },
+          {
+            "name": "clang-cl",
+            "id": 20312,
+            "cpuPercentOfMachine": 5.13
+          },
+          {
+            "name": "clang-cl",
+            "id": 25196,
+            "cpuPercentOfMachine": 5.08
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:33:03.3028492Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "dotnet",
+            "id": 38340,
+            "cpuPercentOfMachine": 17.19
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 8.75
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.16
+          },
+          {
+            "name": "clang-cl",
+            "id": 43996,
+            "cpuPercentOfMachine": 4.4
+          },
+          {
+            "name": "clang-cl",
+            "id": 53832,
+            "cpuPercentOfMachine": 4.38
+          },
+          {
+            "name": "bash",
+            "id": 53468,
+            "cpuPercentOfMachine": 4.35
+          }
+        ]
+      }
+    },
+    {
+      "name": "counters-large-r0-B",
+      "command": "SpatialIndexBench.exe --group B --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\counters-large-r0-B.json --counters --profile large",
+      "exitCode": 0,
+      "seconds": 21.16,
+      "loadBefore": {
+        "utc": "2026-11-18T13:33:06.5027364Z",
+        "totalCpuPercent": 99.59,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 11.93
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.31
+          },
+          {
+            "name": "clang-cl",
+            "id": 52112,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "bash",
+            "id": 53464,
+            "cpuPercentOfMachine": 4.95
+          },
+          {
+            "name": "clang-cl",
+            "id": 1580,
+            "cpuPercentOfMachine": 4.92
+          },
+          {
+            "name": "clang-cl",
+            "id": 26112,
+            "cpuPercentOfMachine": 4.92
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:33:30.7370536Z",
+        "totalCpuPercent": 99.95,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 10.26
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 7.34
+          },
+          {
+            "name": "dotnet",
+            "id": 53452,
+            "cpuPercentOfMachine": 6.17
+          },
+          {
+            "name": "bash",
+            "id": 53464,
+            "cpuPercentOfMachine": 4.71
+          },
+          {
+            "name": "bash",
+            "id": 53468,
+            "cpuPercentOfMachine": 4.66
+          },
+          {
+            "name": "clang-cl",
+            "id": 13132,
+            "cpuPercentOfMachine": 4.66
+          }
+        ]
+      }
+    },
+    {
+      "name": "counters-large-r0-C16",
+      "command": "SpatialIndexBench.exe --group C16 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\counters-large-r0-C16.json --counters --profile large",
+      "exitCode": 0,
+      "seconds": 16.7,
+      "loadBefore": {
+        "utc": "2026-11-18T13:33:33.8249768Z",
+        "totalCpuPercent": 99.97,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 11.98
+          },
+          {
+            "name": "dotnet",
+            "id": 53452,
+            "cpuPercentOfMachine": 7.84
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.99
+          },
+          {
+            "name": "FoundationTests",
+            "id": 55928,
+            "cpuPercentOfMachine": 4.9
+          },
+          {
+            "name": "clang-cl",
+            "id": 52112,
+            "cpuPercentOfMachine": 4.82
+          },
+          {
+            "name": "bash",
+            "id": 53468,
+            "cpuPercentOfMachine": 4.79
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:33:53.5889686Z",
+        "totalCpuPercent": 99.66,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 10.34
+          },
+          {
+            "name": "dotnet",
+            "id": 53452,
+            "cpuPercentOfMachine": 7.08
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "bash",
+            "id": 53464,
+            "cpuPercentOfMachine": 4.64
+          },
+          {
+            "name": "bash",
+            "id": 53468,
+            "cpuPercentOfMachine": 4.56
+          },
+          {
+            "name": "dotnet",
+            "id": 15596,
+            "cpuPercentOfMachine": 4.35
+          }
+        ]
+      }
+    },
+    {
+      "name": "counters-large-r0-C256",
+      "command": "SpatialIndexBench.exe --group C256 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\counters-large-r0-C256.json --counters --profile large",
+      "exitCode": 0,
+      "seconds": 13.71,
+      "loadBefore": {
+        "utc": "2026-11-18T13:33:56.6632175Z",
+        "totalCpuPercent": 99.58,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 13.62
+          },
+          {
+            "name": "dotnet",
+            "id": 53452,
+            "cpuPercentOfMachine": 7.27
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.05
+          },
+          {
+            "name": "bash",
+            "id": 53464,
+            "cpuPercentOfMachine": 4.9
+          },
+          {
+            "name": "bash",
+            "id": 53468,
+            "cpuPercentOfMachine": 4.58
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.17
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:34:13.4388652Z",
+        "totalCpuPercent": 99.59,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 14.38
+          },
+          {
+            "name": "dotnet",
+            "id": 50348,
+            "cpuPercentOfMachine": 5.62
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.08
+          },
+          {
+            "name": "dotnet",
+            "id": 42160,
+            "cpuPercentOfMachine": 4.9
+          },
+          {
+            "name": "bash",
+            "id": 53464,
+            "cpuPercentOfMachine": 4.61
+          },
+          {
+            "name": "clang-cl",
+            "id": 45704,
+            "cpuPercentOfMachine": 4.61
+          }
+        ]
+      }
+    },
+    {
+      "name": "counters-large-r0-D",
+      "command": "SpatialIndexBench.exe --group D --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\counters-large-r0-D.json --counters --profile large",
+      "exitCode": 0,
+      "seconds": 25.14,
+      "loadBefore": {
+        "utc": "2026-11-18T13:34:16.5010605Z",
+        "totalCpuPercent": 97.41,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 14.01
+          },
+          {
+            "name": "VBCSCompiler",
+            "id": 19388,
+            "cpuPercentOfMachine": 8.2
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 4.87
+          },
+          {
+            "name": "clang-cl",
+            "id": 45704,
+            "cpuPercentOfMachine": 4.51
+          },
+          {
+            "name": "bash",
+            "id": 53468,
+            "cpuPercentOfMachine": 4.24
+          },
+          {
+            "name": "dotnet",
+            "id": 50348,
+            "cpuPercentOfMachine": 4.04
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:34:44.6959051Z",
+        "totalCpuPercent": 95.46,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 16.95
+          },
+          {
+            "name": "dotnet",
+            "id": 48620,
+            "cpuPercentOfMachine": 5.31
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.05
+          },
+          {
+            "name": "bash",
+            "id": 25336,
+            "cpuPercentOfMachine": 4.79
+          },
+          {
+            "name": "EngineTests",
+            "id": 27508,
+            "cpuPercentOfMachine": 4.77
+          },
+          {
+            "name": "bash",
+            "id": 53468,
+            "cpuPercentOfMachine": 4.74
+          }
+        ]
+      }
+    },
+    {
+      "name": "variant-r0-D",
+      "command": "SpatialIndexBench.exe --group D --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\variant-r0-D.json --profile variant",
+      "exitCode": 0,
+      "seconds": 80.58,
+      "loadBefore": {
+        "utc": "2026-11-18T13:34:47.7456362Z",
+        "totalCpuPercent": 87.63,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 19.17
+          },
+          {
+            "name": "dotnet",
+            "id": 15148,
+            "cpuPercentOfMachine": 6.38
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "EngineTests",
+            "id": 27508,
+            "cpuPercentOfMachine": 4.95
+          },
+          {
+            "name": "bash",
+            "id": 25336,
+            "cpuPercentOfMachine": 4.9
+          },
+          {
+            "name": "bash",
+            "id": 53468,
+            "cpuPercentOfMachine": 4.87
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:36:11.4483602Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 11.12
+          },
+          {
+            "name": "dotnet",
+            "id": 27996,
+            "cpuPercentOfMachine": 6.64
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.13
+          },
+          {
+            "name": "bash",
+            "id": 25336,
+            "cpuPercentOfMachine": 3.83
+          },
+          {
+            "name": "bash",
+            "id": 53468,
+            "cpuPercentOfMachine": 3.75
+          },
+          {
+            "name": "EngineTests",
+            "id": 27508,
+            "cpuPercentOfMachine": 3.07
+          }
+        ]
+      }
+    },
+    {
+      "name": "variant-r0-D-k1",
+      "command": "SpatialIndexBench.exe --group D-k1 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\variant-r0-D-k1.json --profile variant",
+      "exitCode": 0,
+      "seconds": 51.18,
+      "loadBefore": {
+        "utc": "2026-11-18T13:36:14.9894103Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 8.7
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.78
+          },
+          {
+            "name": "dotnet",
+            "id": 29160,
+            "cpuPercentOfMachine": 4.58
+          },
+          {
+            "name": "bash",
+            "id": 53468,
+            "cpuPercentOfMachine": 4.04
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.57
+          },
+          {
+            "name": "dotnet",
+            "id": 43196,
+            "cpuPercentOfMachine": 3.49
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:37:09.2397273Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 11.35
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "bash",
+            "id": 25336,
+            "cpuPercentOfMachine": 3.98
+          },
+          {
+            "name": "bash",
+            "id": 53468,
+            "cpuPercentOfMachine": 3.78
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.78
+          },
+          {
+            "name": "dotnet",
+            "id": 40600,
+            "cpuPercentOfMachine": 2.84
+          }
+        ]
+      }
+    },
+    {
+      "name": "variant-r0-D-k65_64",
+      "command": "SpatialIndexBench.exe --group D-k65_64 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\variant-r0-D-k65_64.json --profile variant",
+      "exitCode": 0,
+      "seconds": 50.42,
+      "loadBefore": {
+        "utc": "2026-11-18T13:37:12.2996124Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 9.77
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.05
+          },
+          {
+            "name": "bash",
+            "id": 53468,
+            "cpuPercentOfMachine": 4.06
+          },
+          {
+            "name": "dotnet",
+            "id": 49584,
+            "cpuPercentOfMachine": 4.01
+          },
+          {
+            "name": "bash",
+            "id": 25336,
+            "cpuPercentOfMachine": 3.54
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.44
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:38:05.8064723Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 10.68
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 6.8
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.67
+          },
+          {
+            "name": "dotnet",
+            "id": 22364,
+            "cpuPercentOfMachine": 3.62
+          },
+          {
+            "name": "dotnet",
+            "id": 42216,
+            "cpuPercentOfMachine": 3.57
+          },
+          {
+            "name": "bash",
+            "id": 56640,
+            "cpuPercentOfMachine": 3.54
+          }
+        ]
+      }
+    },
+    {
+      "name": "variant-r0-D-k5_4",
+      "command": "SpatialIndexBench.exe --group D-k5_4 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\variant-r0-D-k5_4.json --profile variant",
+      "exitCode": 0,
+      "seconds": 55.91,
+      "loadBefore": {
+        "utc": "2026-11-18T13:38:08.9476995Z",
+        "totalCpuPercent": 99.97,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 11.43
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 4.69
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.7
+          },
+          {
+            "name": "dotnet",
+            "id": 19712,
+            "cpuPercentOfMachine": 3.52
+          },
+          {
+            "name": "dotnet",
+            "id": 8196,
+            "cpuPercentOfMachine": 3.2
+          },
+          {
+            "name": "dotnet",
+            "id": 46716,
+            "cpuPercentOfMachine": 3.12
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:39:07.9100127Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "dotnet",
+            "id": 34860,
+            "cpuPercentOfMachine": 4.95
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 4.38
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 4.14
+          },
+          {
+            "name": "dotnet",
+            "id": 37084,
+            "cpuPercentOfMachine": 3.41
+          },
+          {
+            "name": "dotnet",
+            "id": 54884,
+            "cpuPercentOfMachine": 3.2
+          },
+          {
+            "name": "dotnet",
+            "id": 38676,
+            "cpuPercentOfMachine": 3.12
+          }
+        ]
+      }
+    },
+    {
+      "name": "variant-r0-D-k3_2",
+      "command": "SpatialIndexBench.exe --group D-k3_2 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\variant-r0-D-k3_2.json --profile variant",
+      "exitCode": 0,
+      "seconds": 64.53,
+      "loadBefore": {
+        "utc": "2026-11-18T13:39:11.0499509Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 7.92
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 4.17
+          },
+          {
+            "name": "dotnet",
+            "id": 34232,
+            "cpuPercentOfMachine": 3.65
+          },
+          {
+            "name": "dotnet",
+            "id": 2688,
+            "cpuPercentOfMachine": 3.52
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.2
+          },
+          {
+            "name": "dotnet",
+            "id": 54896,
+            "cpuPercentOfMachine": 3.1
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:40:18.7984287Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 10.13
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.31
+          },
+          {
+            "name": "bash",
+            "id": 56640,
+            "cpuPercentOfMachine": 4.32
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.57
+          },
+          {
+            "name": "dotnet",
+            "id": 54736,
+            "cpuPercentOfMachine": 3.54
+          },
+          {
+            "name": "dotnet",
+            "id": 29140,
+            "cpuPercentOfMachine": 3.46
+          }
+        ]
+      }
+    },
+    {
+      "name": "variant-r0-D-s8",
+      "command": "SpatialIndexBench.exe --group D-s8 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\variant-r0-D-s8.json --profile variant",
+      "exitCode": 0,
+      "seconds": 95.4,
+      "loadBefore": {
+        "utc": "2026-11-18T13:40:21.9853830Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 6.8
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.1
+          },
+          {
+            "name": "dotnet",
+            "id": 58088,
+            "cpuPercentOfMachine": 3.31
+          },
+          {
+            "name": "dotnet",
+            "id": 45596,
+            "cpuPercentOfMachine": 3.31
+          },
+          {
+            "name": "dotnet",
+            "id": 26980,
+            "cpuPercentOfMachine": 3.31
+          },
+          {
+            "name": "dotnet",
+            "id": 35124,
+            "cpuPercentOfMachine": 3.28
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:42:00.4153622Z",
+        "totalCpuPercent": 69.66,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 20.68
+          },
+          {
+            "name": "bash",
+            "id": 53028,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "bash",
+            "id": 56608,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.43
+          },
+          {
+            "name": "dotnet",
+            "id": 11740,
+            "cpuPercentOfMachine": 2.24
+          }
+        ]
+      }
+    },
+    {
+      "name": "variant-r0-D-s32",
+      "command": "SpatialIndexBench.exe --group D-s32 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\variant-r0-D-s32.json --profile variant",
+      "exitCode": 0,
+      "seconds": 88.97,
+      "loadBefore": {
+        "utc": "2026-11-18T13:42:03.4449154Z",
+        "totalCpuPercent": 77.32,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 20.39
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.29
+          },
+          {
+            "name": "dotnet",
+            "id": 11740,
+            "cpuPercentOfMachine": 5.21
+          },
+          {
+            "name": "dotnet",
+            "id": 39760,
+            "cpuPercentOfMachine": 5.08
+          },
+          {
+            "name": "bash",
+            "id": 56608,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "bash",
+            "id": 53028,
+            "cpuPercentOfMachine": 5.0
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:43:35.4787806Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 5.81
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.05
+          },
+          {
+            "name": "clang-cl",
+            "id": 52960,
+            "cpuPercentOfMachine": 4.53
+          },
+          {
+            "name": "bash",
+            "id": 56608,
+            "cpuPercentOfMachine": 4.38
+          },
+          {
+            "name": "clang-cl",
+            "id": 16580,
+            "cpuPercentOfMachine": 4.22
+          },
+          {
+            "name": "clang-cl",
+            "id": 51412,
+            "cpuPercentOfMachine": 3.62
+          }
+        ]
+      }
+    },
+    {
+      "name": "variant-r0-D-s64",
+      "command": "SpatialIndexBench.exe --group D-s64 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\variant-r0-D-s64.json --profile variant",
+      "exitCode": 0,
+      "seconds": 99.02,
+      "loadBefore": {
+        "utc": "2026-11-18T13:43:38.6317796Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 6.72
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.21
+          },
+          {
+            "name": "bash",
+            "id": 53028,
+            "cpuPercentOfMachine": 4.38
+          },
+          {
+            "name": "clang-cl",
+            "id": 57516,
+            "cpuPercentOfMachine": 4.27
+          },
+          {
+            "name": "clang-cl",
+            "id": 52960,
+            "cpuPercentOfMachine": 4.24
+          },
+          {
+            "name": "clang-cl",
+            "id": 2836,
+            "cpuPercentOfMachine": 3.85
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:45:21.3745210Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 6.93
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 6.25
+          },
+          {
+            "name": "clang-cl",
+            "id": 50796,
+            "cpuPercentOfMachine": 5.13
+          },
+          {
+            "name": "FoundationTests",
+            "id": 43360,
+            "cpuPercentOfMachine": 5.08
+          },
+          {
+            "name": "bash",
+            "id": 31032,
+            "cpuPercentOfMachine": 4.82
+          },
+          {
+            "name": "clang-cl",
+            "id": 8224,
+            "cpuPercentOfMachine": 4.71
+          }
+        ]
+      }
+    },
+    {
+      "name": "variant-r0-D-noinplace",
+      "command": "SpatialIndexBench.exe --group D-noinplace --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\variant-r0-D-noinplace.json --profile variant",
+      "exitCode": 0,
+      "seconds": 88.29,
+      "loadBefore": {
+        "utc": "2026-11-18T13:45:25.9641834Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 7.76
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 7.47
+          },
+          {
+            "name": "clang-cl",
+            "id": 52180,
+            "cpuPercentOfMachine": 6.22
+          },
+          {
+            "name": "FoundationTests",
+            "id": 43360,
+            "cpuPercentOfMachine": 6.2
+          },
+          {
+            "name": "clang-cl",
+            "id": 8224,
+            "cpuPercentOfMachine": 5.78
+          },
+          {
+            "name": "bash",
+            "id": 31032,
+            "cpuPercentOfMachine": 5.78
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:46:57.3223404Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 5.62
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.23
+          },
+          {
+            "name": "dotnet",
+            "id": 38432,
+            "cpuPercentOfMachine": 4.35
+          },
+          {
+            "name": "FoundationTests",
+            "id": 43360,
+            "cpuPercentOfMachine": 3.59
+          },
+          {
+            "name": "dotnet",
+            "id": 7440,
+            "cpuPercentOfMachine": 3.33
+          },
+          {
+            "name": "bash",
+            "id": 56608,
+            "cpuPercentOfMachine": 3.31
+          }
+        ]
+      }
+    },
+    {
+      "name": "variant-r0-D-immediate",
+      "command": "SpatialIndexBench.exe --group D-immediate --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\variant-r0-D-immediate.json --profile variant",
+      "exitCode": 1,
+      "seconds": 491.07,
+      "loadBefore": {
+        "utc": "2026-11-18T13:47:00.5130974Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 6.38
+          },
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.29
+          },
+          {
+            "name": "bash",
+            "id": 31032,
+            "cpuPercentOfMachine": 4.43
+          },
+          {
+            "name": "bash",
+            "id": 56608,
+            "cpuPercentOfMachine": 4.27
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.46
+          },
+          {
+            "name": "dotnet",
+            "id": 40996,
+            "cpuPercentOfMachine": 3.02
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:55:14.6342910Z",
+        "totalCpuPercent": 84.63,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 21.02
+          },
+          {
+            "name": "EngineTests",
+            "id": 56428,
+            "cpuPercentOfMachine": 5.99
+          },
+          {
+            "name": "bash",
+            "id": 23760,
+            "cpuPercentOfMachine": 4.97
+          },
+          {
+            "name": "dotnet",
+            "id": 27936,
+            "cpuPercentOfMachine": 4.95
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.3
+          },
+          {
+            "name": "dotnet",
+            "id": 43700,
+            "cpuPercentOfMachine": 3.49
+          }
+        ]
+      },
+      "note": "Stopped by hand after about 8 minutes on overlap-dense 1e6 (RunMaintenance(All) after every mutation); the process was killed, so this run wrote no JSON. Replaced by the two manualRuns below, which leave out overlap-dense 1e6."
+    },
+    {
+      "name": "variant-r0-D-boxdouble",
+      "command": "SpatialIndexBench.exe --group D-boxdouble --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\variant-r0-D-boxdouble.json --profile variant",
+      "exitCode": 0,
+      "seconds": 71.02,
+      "loadBefore": {
+        "utc": "2026-11-18T13:55:17.7487428Z",
+        "totalCpuPercent": 82.88,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 18.49
+          },
+          {
+            "name": "dotnet",
+            "id": 27936,
+            "cpuPercentOfMachine": 5.08
+          },
+          {
+            "name": "EngineTests",
+            "id": 56428,
+            "cpuPercentOfMachine": 5.08
+          },
+          {
+            "name": "bash",
+            "id": 48980,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "bash",
+            "id": 23760,
+            "cpuPercentOfMachine": 4.9
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.35
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T13:56:31.8344563Z",
+        "totalCpuPercent": 97.35,
+        "busiest": [
+          {
+            "name": "dotnet",
+            "id": 40208,
+            "cpuPercentOfMachine": 17.11
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 12.81
+          },
+          {
+            "name": "dotnet",
+            "id": 41124,
+            "cpuPercentOfMachine": 5.31
+          },
+          {
+            "name": "bash",
+            "id": 48980,
+            "cpuPercentOfMachine": 4.84
+          },
+          {
+            "name": "EngineTests",
+            "id": 38944,
+            "cpuPercentOfMachine": 4.71
+          },
+          {
+            "name": "EngineTests",
+            "id": 56428,
+            "cpuPercentOfMachine": 4.64
+          }
+        ]
+      }
+    }
+  ],
+  "finishedUtc": "2026-11-18T13:56:31.8348164Z",
+  "manualRuns": [
+    {
+      "name": "variant-r0-D-immediate",
+      "command": "SpatialIndexBench.exe --group D-immediate --profile variant --sizes 10000 --dists uniform,clustered,size-varied,overlap-dense --out Docs/Benchmarks/SpatialIndex/2026-11-18/variant-r0-D-immediate.json",
+      "note": "run right after RunBench.ps1 finished, no load sampling"
+    },
+    {
+      "name": "variant-r0-D-immediate-large",
+      "command": "SpatialIndexBench.exe --group D-immediate --profile variant --sizes 1000000 --dists uniform,clustered,size-varied --out Docs/Benchmarks/SpatialIndex/2026-11-18/variant-r0-D-immediate-large.json",
+      "note": "run right after RunBench.ps1 finished, no load sampling; the two manual runs took 65 s together"
+    }
+  ]
+}

@@ -66,7 +66,37 @@ inline constexpr StringView ConsoleSettingsSection = "Settings";
 // 사용 예:
 //   IsConsoleSettingName("render.graph.immediate");  // true
 //   IsConsoleSettingName("Render.Graph");            // false(대문자)
-bool IsConsoleSettingName(StringView name) noexcept;
+//
+// constexpr이라 CVar 빌더가 컴파일 때 같은 함수로 이름을 검사한다(Docs/Design/CVarSystem.ko.md
+// 4.3절).
+constexpr bool IsConsoleSettingName(StringView name) noexcept {
+    usize segments = 0;
+    bool start = true;
+    for (const char c : name) {
+        if (c == '.') {
+            if (start) {
+                return false;
+            }
+
+            start = true;
+            continue;
+        }
+
+        const bool lower = c >= 'a' && c <= 'z';
+        const bool digit = c >= '0' && c <= '9';
+        if (start ? !lower : !(lower || digit || c == '_')) {
+            return false;
+        }
+
+        if (start) {
+            ++segments;
+        }
+
+        start = false;
+    }
+
+    return !start && segments >= 2;
+}
 
 // 문자열 필드 값에서 읽을 때 펼치는 경로 이름 표다(4.3절 — UE `%GAMEDIR%` 등 대응). 값은
 // ConfigContextOptions의 같은 이름 디렉터리다. 표에 없는 `{이름}`과 값이 비어 있는 이름은 오류다.
@@ -128,7 +158,12 @@ enum class ConfigDiagnosticCode : uint8 {
     // 않으므로 대기로 두지 않고 지금 값을 유지한다(같은 이름·출처에 한 번만 — 8절).
     BootValueIgnored,
     // 기기 프로필 정의·선택 오류(모르는 프로필·부모, 부모 순환, 모르는 메모리 등급 — 6.2절).
-    InvalidDeviceProfile
+    InvalidDeviceProfile,
+    // 정보: `Clamp()` CVar의 범위 밖 값을 범위 끝으로 보정해 받았다(CVar 6.2·12절).
+    Clamped,
+    // CVar의 `Validate` 검사 함수가 값을 거부했다(메시지는 검사 함수가 돌려준 이유 —
+    // CVar 4.2·12절).
+    ValidationFailed
 };
 
 // 진단 이름(열거자 철자)이다. 정의되지 않은 값이면 빈 view다.

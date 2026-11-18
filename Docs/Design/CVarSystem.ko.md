@@ -1,6 +1,6 @@
 # CVar·치트 명령 설계
 
-기준일: 2026-11-18, 개정 3(결정 확정). 실행 중 이름으로 읽고 바꾸는 타입 있는 설정 변수 **CVar**와, 개발 빌드에서 게임 상태를 직접 바꾸는 **치트 명령**을 정한다.
+기준일: 2026-11-18, 개정 5(결정 확정, CVR1 구현·리뷰 반영). 실행 중 이름으로 읽고 바꾸는 타입 있는 설정 변수 **CVar**와, 개발 빌드에서 게임 상태를 직접 바꾸는 **치트 명령**을 정한다.
 
 이 문서는 [설정 계층과 콘솔 설정](ConfigSystem.ko.md)(이하 Config)의 5절 "콘솔 설정과 명령"을 대체하는 상세 스펙이다. 값 저장소·층·출처 스택·sync 지점·JSON 파일·`--set`·설정 struct는 Config를 그대로 쓰고, 이 문서는 그 위에 다음을 더한다.
 - 한 문장으로 정의하고 `.Get()`으로 읽는 타입 있는 핸들(`CVar<T>`·`BootCVar<T>`·`CVarGroup`·`ConsoleCommand`)
@@ -159,7 +159,8 @@ public:
       });
   ```
 - `BootVarBuilder<T>`는 `Help`·`Category`·`Range`·`Validate`·`UserSetting`만 가진다. `Clamp`·`Cheat`·`Replicated`가 없으므로 부르면 컴파일 오류다. "바꾸면 재시작해야 적용"인 값은 `BootCVar` + `UserSetting()`이다(9절 — 따로 `RequiresRestart` 플래그를 두지 않는다).
-- **핸들은 정적 저장 기간이어야 한다**(namespace 범위나 static 멤버). 함수 안 지역 핸들도 컴파일은 되므로 `Register`가 Debug·Development 빌드에서 핸들 주소가 호출 스레드 스택 범위 안이면 `InvalidArgument`로 거부한다. Policy `cvar-registration`도 함수 본문 안의 핸들 정의를 거부한다.
+- **핸들은 정적 저장 기간이어야 한다**(namespace 범위나 static 멤버). 핸들 타입은 `operator new`·`new[]`(placement 포함)를 지워 힙 생성이 컴파일 오류다. 함수 안 지역 핸들도 컴파일은 되므로 `Register`가 Debug·Development 빌드에서 핸들 주소가 호출 스레드 스택 범위 안이면 `InvalidArgument`로 거부한다. Policy `cvar-registration`은 함수 본문 안의 핸들 정의, 비정적 멤버 핸들, `thread_local` 핸들, `const`·`constexpr` 핸들(내부 링크라 헤더에 두면 TU마다 별개 핸들이 된다), 핸들 타입 별칭(`using`·`typedef` — 정의를 lexical하게 따라갈 수 없다)을 거부한다.
+- **정의 텍스트 규칙**(컴파일 때 검사): 이름은 소문자 점 경로이고 `MaxVarNameBytes`(128) 이하, 도움말·분류·String 기본값은 NUL 없는 유효 UTF-8이고 각 한도(`MaxVarHelpBytes` 1024·`MaxVarCategoryBytes` 64·`MaxVarDefaultTextBytes` 4096) 이하다. Name 기본값은 출력 가능한 ASCII(0x20–0x7E)이고 1,023 byte 이하다. NFC 판정(consteval에서 할 수 없다)을 ASCII 한정으로 대신한다 — 이름과 Name 기본값은 ASCII라 늘 NFC다. 위반은 `CVarError_TextTooLong`·`CVarError_InvalidUtf8`·`CVarError_NameDefaultNotAscii`다.
 - `&&` 체인과 복사·이동 삭제는 `auto b = cvar::Var(...).Help(...)`를 막는다. 진입점 하나만 받는 `auto b = cvar::Var(...)`는 prvalue 생략으로 컴파일되지만, 빌더에는 `Get`·`Set`이 없고 `Register`는 핸들만 받으므로 쓰는 순간 오류다.
 - `GroupBuilder`·`CommandBuilder`는 11절·13절이다.
 
@@ -354,7 +355,7 @@ Config 5.3·5.4의 sync 지점(엔진 `RunFrame` 2단계 뒤, 3단계 전)에서
 - 바뀐 값이 부팅 변수면 9절 표의 파일 층 행(재시작 대기)이다. 출시 규칙에서는 감시하지 않는다(`Start`가 `Unsupported`).
 - CVR2에서 쓰기 큐(6.2절)가 생기면 hook은 그 큐에 넣는다. 감시 이벤트를 받는 스레드가 직접 큐에 넣지 않고 hook을 거치는 까닭은, 파일 읽기와 검사를 게임 lane의 sync 지점에 모아 한 Sync에 한 파일의 입력이 통째로 들어가게 하기 위해서다.
 
-- 게임 lane 전용 API(`Sync`·`CompleteStartup`·`Register`·`CreateScope`·`DestroyScope`·`Explain`·`DumpOverrides`·`ReportUnresolved`)는 Debug·Development 빌드에서 소유 스레드를 assert한다.
+- 게임 lane 전용 API(`Sync`·`CompleteStartup`·`Register`·`CreateScope`·`DestroyScope`·`Explain`·`DumpOverrides`·`ReportUnresolved`)는 모든 구성에서 소유 스레드를 검사해 다른 스레드의 호출을 `WrongThread`로 돌려준다(Config 관례 — Debug assert가 아니다).
 - 같은 Sync에서 바뀐 값은 같은 snapshot에 함께 들어간다. 다른 스레드는 그 snapshot 전체를 보거나 이전 snapshot 전체를 본다.
 
 ### 10.1 스레드 안전성
@@ -639,6 +640,23 @@ public:
 - CVR1–CVR7은 Core 단독(Config 모듈)이고 World 연결만 Engine이다. CVR8은 함수 리플렉션 뒤다.
 - 검증은 단계마다 Debug·format·policy·바뀐 부분 시험이다. TSan은 macOS CI다.
 
+**CVR1 구현(2026-11-18, `feature/cvar`)**
+- 헤더: `Config/CVar.h`(공개 진입점) → `CVarBuilder.h`(빌더·진입점) · `CVarHandle.h`(`CVar<T>`·`BootCVar<T>`) · `CVarEnum.h`(4.4절) · `CVarDefinition.h`(타입을 지운 상수 정의·번호·검사 함수). 등록은 `ConfigContext::Register`(템플릿) → `RegisterHandles`(`Private/CVarRegistration.cpp`).
+- 저장: CVR2 조각 snapshot 전까지 등록한 핸들은 CF2 독립 콘솔 설정과 같은 저장소(`ConsoleSettingState`)에 들고 핸들 정의를 가리킨다. 그래서 대기 값·층·출처·콘솔 입력·dump가 그대로 붙고, 값 검사(범위·`Clamp` 보정·`Validate`)는 컴파일 때 기본값 검사와 같은 함수(`CheckValue<T>`)를 쓴다. 성질은 CF2 플래그로 옮긴다: `BootCVar` → `StartupOnly`, `Cheat()` → `DevelopmentOnly`, `UserSetting()` → `UserConfig`, `ConsoleReadOnly()` → `ConsoleReadOnly`, 모든 핸들 → `RenderRead`(VD6). `Replicated()`는 정의에만 남는다(검사는 CVR6).
+- `Get()`은 CVR1에 두지 않았다. 7.1절의 읽기는 스레드에 묶인 snapshot의 번호 칸이고(VD7 — 묶음 없는 `Get()`은 Fatal), 묶음·조각 snapshot이 CVR2이므로 그 전의 임시 경로(이름 조회·전역 문맥)는 VD7과 다른 동작을 만들고 버려질 코드다. 등록된 값은 `FindConsoleSetting`·`ConsoleValue`로 본다. 19절 "등록 안 된 핸들 `Get()` Fatal" 사망 시험은 CVR2로 넘긴다.
+- 지역 핸들 거부(4.2절)를 위해 PlatformBase에 `platform::CurrentThreadStackRange()`를 더했다(Windows `GetCurrentThreadStackLimits`, macOS `pthread_get_stackaddr_np`, Android `pthread_getattr_np`).
+- 진단 코드 `Clamped`(Note)·`ValidationFailed`를 더했다(12절). 기본 영역 표에 `cvar`·`cheat`·`obj`를 더했다(15절 — Config 5.1 표와 같다).
+- 스펙과 다른 점: `Clamp()`를 수가 아닌 타입에 부르면 메시지가 `Clamp() is only available for numeric CVars (...)`다(4.3절 표는 `Range()` 문구 하나). `BootVarBuilder`에 `ConsoleReadOnly`도 없다(4.2절 목록 그대로). enum `Count` 검사는 ADL 표에만 건다(리플렉션 enum의 이름은 생성 메타데이터가 정한다). 수 입력과 `3 (High)` 표시는 ReflectionText 단일 값 표기가 enum 이름만 받으므로 CVR6 콘솔 도구에서 정한다.
+- 19절 컴파일 실패 목록 중 프리셋 항목(타입 불일치·`BootCVar` 항목·같은 등급 두 번)은 CVR5, `ScopedOverride`에 `BootCVar`는 CVR2에서 그 타입과 함께 더한다.
+- `Register`는 VD17의 즉시 게시 대신 문맥을 dirty로 표시하고 다음 `Sync`가 snapshot에 반영한다(이름 조회 `FindConsoleSetting`·`ConsoleValue`에는 바로 보인다). CVR2에서 조각 snapshot과 함께 VD17대로 즉시 게시한다.
+- `Register`의 소유 스레드 위반은 Debug assert가 아니라 모든 구성에서 `WrongThread`다(Config 관례 — 10절 문장을 이에 맞췄다).
+- 리뷰 반영(2026-11-18): 핸들 힙 생성 금지(`operator new` 삭제), Policy가 직접·중괄호 초기화·쉼표 뒤 선언자·비정적 멤버·`thread_local`·`const`·`constexpr`·핸들 타입 별칭을 잡고 `Templates`도 본다. `Register`는 모든 검사·기본값 해석(Name intern 포함)을 끝낸 뒤 대기 값을 넘기고, 넘기다 실패하면 이번 호출의 진단을 되돌린다(`ConfigDiagnostics::Mark`·`Rewind` — 실패한 등록은 진단을 남기지 않는다). Release `Cheat()` 정의는 enum 스키마도 버린다.
+
+**CVR1 이후 결정·후속 항목**
+- `Register`는 타입을 지운 `const cvar::detail::VarDefinition*`만 받는다. CVR5 `CVarGroup`·CVR6 `ConsoleCommand`가 같은 경로로 오려면 종류(`HandleKind`)를 가진 공통 정의 머리가 필요하다(지금 `VarDefinition`을 머리로 쓰고 종류별 꼬리를 덧붙이는 모양).
+- 플러그인(모듈)을 내릴 때의 처리가 스펙에 없다: 문맥이 핸들 정의 포인터를 쥐므로, 모듈 코드가 내려가면 포인터가 dangling이 된다. `Unregister` 또는 모듈 언로드 때 그 모듈 핸들을 문맥에서 빼는 규칙을 정해야 한다(결정 필요).
+- 핸들의 `Name()` 멤버가 클래스 범위에서 타입 `Name`을 가린다. CVR2 `Get()`의 Name 반환 타입은 `rocks::Name`으로 쓴다.
+
 ## 21. 기존 콘솔 설정에서 이전
 
 | 지금(Config CF2) | 이전 뒤 |
@@ -672,6 +690,8 @@ public:
 
 ## 23. 개정 이력
 
+- 개정 5(2026-11-18): CVR1 리뷰 반영. 4.2절에 힙 생성 금지·Policy 거부 형태·정의 텍스트 규칙(Name 기본값 ASCII 한정으로 NFC 판정 대신)을, 10절에 `Register` 등 게임 lane API의 소유 스레드 위반은 모든 구성에서 `WrongThread`임을, 20절에 `Register`의 dirty 반영(즉시 게시는 CVR2)·리뷰 반영 내용·후속 항목(공통 정의 머리, 모듈 언로드, `rocks::Name`)을 적었다.
+- 개정 4(2026-11-18): CVR1 구현 결과를 20절에 적었다(헤더 구성, CVR2 전 저장소, `Get()`을 CVR2로 둔 까닭, 스택 범위 platform API, 진단 코드 둘, 스펙과 다른 점, 다음 단계로 넘긴 컴파일 실패 사례).
 - 개정 3(2026-11-18): Config CF3·CF4 병합(78d69a5d, Config 개정 5–8)에 맞췄다. 10절 Sync 순서에 sync hook(`AddSyncHook`, 큐 적용 전 0단계)을 넣고 hot reload 경로(`ConfigFileReloader` → hook → `ReplaceLayerText`·`Unset`)를 적었다. 10.1절 표에 sync hook 목록을 더했다. 9절 봉인 뒤 처리를 Config의 부팅 값 규칙과 같게 바꿨다: 직접 쓰기는 `BootSealed` 거부, 파일 층 변경은 재시작 대기(`GetPendingRestarts`, `RestartRequired`), 파생·휘발 층 변경은 지금 값 유지와 `BootValueIgnored`. 앞의 "봉인 뒤 모든 쓰기 거부"는 시작 뒤 기기 프로필 재적용마다 오류를 내고 hot reload한 파일의 다음 실행 효력을 보이지 못했다. 1·12·19절을 함께 고쳤다. 로깅 세션의 검사 함수 병합(c5fe9289)에 맞춰 CVR7 행에 `log.*` 대응(실행 중 셋, 나머지 `BootCVar`, 검사 함수 셋, enum 둘)을 적었다.
 - 개정 2(2026-11-18): VD2(소문자 점 경로 이름, `r.X` 안 씀)를 사용자가 권장안으로 확정했다. 로깅 세션 조율로 CVR7 `log.*` 이관 규칙을 적고, `String`·`Name` 변수의 `Validate` 인자를 `StringView`로 정했다(`ValidateArg<T>` — 4.2절). 22절의 다른 문서 개정을 모두 반영했다(Config 개정 4, RenderBase 개정 13, UiToolkit CU2 행, UnrealCoreFeatureAudit UE-C21·UE-C29 행). 구현 착수는 다른 세션 작업 뒤 사용자가 정한다.
 - 개정 1(2026-11-18): 초안. 사용자 제공 요구(타입 있는 CVar·부팅 고정·enum·레이어 스택·컨텍스트·프레임 snapshot·프리셋·지연 바인딩·치트·복제·도구)를 Config 개정 3과 엔진 원칙(전역 생성자 금지·JSON·소문자 점 이름·결정적 시험)에 맞춰 옮기고, 객체 시스템 연결(14절)을 더했다. UE 5.8.4 `IConsoleManager.h`(SetBy 순서·`ECVF_Cheat`·`TAutoConsoleVariable`)·`CheatManager`(exec 함수·확장·권한 경로)·`CheatManagerDefines.h`를 조사했다. 같은 날 리뷰어 1명의 교차 검증(clang으로 consteval 빌더·상수 초기화·Release 문자열 제거·다른 TU 주소 항목 시험)을 반영했다: Sync 순서(묶음 해결을 유효값 계산과 한 반복으로), 등록 즉시 게시, 치트 허용 상태를 CVar 하나로, Scoped < 콘솔 < Server, `RequiresRestart`를 BootCVar로 흡수, 범위 값 하나, 문자열·Name 기본값 overload, 지역 핸들 거부, `Get` overload 축소, UE 인용 정정. 사용자 요구(스레드 문제 없음)로 10.1절 스레드 안전성을 더하고 worker가 snapshot 참조를 쥐게 했다.
