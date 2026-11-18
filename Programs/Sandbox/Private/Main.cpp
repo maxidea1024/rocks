@@ -10,7 +10,7 @@
 // Sandbox 진입점이다.
 //   Sandbox [--self-test]          창 없이 그래픽 backend·엔진 호스트 검사(종료 코드 0 = 통과)
 //   Sandbox --engine [--frames N] [--config <Engine.json>] [--set=<target>=<value>]...
-//                  [--trace=<목록>]...
+//                  [--trace=<목록>]... [--trace-file <path>]
 //                                  헤드리스 엔진을 N 프레임(기본 60) 돌린다. 엔진 층 설정
 //                                  파일(Engine/Config) 다음 설정 파일(Project 층 — "Settings"
 //                                  섹션의 log.* 등), 그다음 --set(Session 층) 순으로 합친다.
@@ -23,7 +23,8 @@ namespace {
 
 int Usage() noexcept {
     fprintf(stderr, "usage: Sandbox [--self-test] | --engine [--frames N] [--config <file>] "
-                    "[--set=<target>=<value>]... [--trace=<channels>]...\n");
+                    "[--set=<target>=<value>]... [--trace=<channels>]... "
+                    "[--trace-file <path>]\n");
     return 2;
 }
 
@@ -88,6 +89,9 @@ int main(int argc, char** argv) {
             ++index;
         } else if (rocks::platform::CStringEquals(argv[index], "--config") && index + 1 < argc) {
             options.configPath = argv[++index];
+        } else if (rocks::platform::CStringEquals(argv[index], "--trace-file") &&
+                   index + 1 < argc) {
+            options.traceFile = argv[++index];
         } else if ((rocks::StringView(argv[index])
                         .StartsWith("--set=", rocks::StringComparison::CaseSensitive) ||
                     rocks::StringView(argv[index])

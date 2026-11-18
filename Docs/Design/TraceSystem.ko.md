@@ -267,7 +267,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론)의 현재 기본 경로다. 경�
 - **재귀 차단:** 스레드별 재진입 표시, 카테고리 `Trace`·`Trace.*` 기록 제외(TraceWriter의 `Log::Warning(LogTrace, ...)`가 다시 trace로 돌지 않게), 세션이 없으면 보내지 않는다.
 - **손실:** 다른 기록과 같은 비대기 규칙이다. 버퍼가 없으면 버리고 채널 손실과 sink `Lost()`로 센다.
 - **분석:** TraceAnalysis 모델 `Logs()`·`LogSpecs()`(spec id 순, 이진 탐색)·`LogCategoryOf`, `trace-report` 판 4의 `logs`(레벨별 수와 Warning 이상 목록, 시각은 정수 ns, 로그가 없으면 키 없음).
-- **호스트 순서:** trace 시작 → `AddSink` … 엔진 정리 → `LogSystem::Flush` → `RemoveSink` → trace 정지(Sandbox `--engine` 연결은 예정, `--trace-file <path>`로 파일 출력).
+- **호스트 순서:** trace 시작 → `AddSink` … 엔진 정리 → `LogSystem::Flush` → `RemoveSink` → trace 정지(Sandbox `--engine`, `--trace-file <path>`로 파일 출력. Sandbox 자체 검사가 trace 파일의 로그 기록을 확인한다).
 
 ## 7. task 연동
 

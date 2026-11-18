@@ -24,7 +24,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론)의 현재 기본 경로다. 경�
 
 UE의 매크로 중심 API(`UE_LOG`, `DECLARE_LOG_CATEGORY_*`)는 따르지 않는다. 일반 로그는 함수 호출로 쓴다. 메시지 템플릿과 출력 레이아웃은 Serilog·log4j의 개념을 Rocks 이름으로 가져온다. UE 이름은 대응표(4절)에만 둔다.
 
-상태: LG0–LG15·LG17–LG19 **구현 완료**(LG15·LG18의 Sandbox 엔진 호스트 연결은 예정. 결정 L1–L27, 구현과 다르게 정한 점은 14.2절). LG16(`{@Obj}`)은 GC 세션의 MetaCompiler·ObjectRuntime 변경 병합 뒤로 미뤘다. 단계는 14절, 다른 세션과의 순서는 15절, 결정은 17절이다.
+상태: LG0–LG15·LG17–LG19 **구현 완료**(결정 L1–L27, 구현과 다르게 정한 점은 14.2절). LG16(`{@Obj}`)은 GC 세션의 MetaCompiler·ObjectRuntime 변경 병합 뒤로 미뤘다. 단계는 14절, 다른 세션과의 순서는 15절, 결정은 17절이다.
 
 ## 1. 결정 요약
 
@@ -400,7 +400,7 @@ public:
   - 설정 단계: 등록(`RegisterLogSettings` → `trace.*` → 호스트) → 층 파일 → `--config` → `--set` → Sync → `CompleteStartup`(`log.mode`·`log.file.*` 고정).
   - 실행 단계: `LogHost::Start(preset, &context, hostName)` → 설치 → `Watch` → trace 세션 → 엔진 루프(프레임마다 Config Sync가 `log.level`·`log.levels` 변경을 적용).
   - 종료 단계: 엔진 정리 → `LogSystem::Flush` → trace sink(`TraceLogSink`) 제거 → trace 정지 → 설치 해제 → `LogHost::Stop`(`WriterAbandoned()`면 정리 없이 종료). trace sink는 trace 시작 직후 더한다(14.1.5).
-  - 크래시 처리기: 엔진 호스트는 시작 때 `platform::InstallCrashHandler()`, 끝에 `RemoveCrashHandler()`(14.1.8). Sandbox 연결은 예정.
+  - 크래시 처리기: 엔진 호스트는 시작 때 `platform::InstallCrashHandler()`, 끝에 `RemoveCrashHandler()`(14.1.8). Sandbox `--engine`이 이렇게 한다.
   - 설치 전 설정 오류는 비상 경로(stderr)로 한 번 남는다. `HostSettings`는 LogHost보다 오래 산다.
 
 ## 10. 장애 격리
@@ -717,7 +717,7 @@ LG11–LG19의 검증도 같다: Debug 빌드, format, policy, 바뀐 부분 시
 - **LG12:** `LogLayoutParseError`에 영어 리터럴 이유 `reason`을 더했다. 레이아웃 오류 Error는 `LogHost::Start`(설치 전)에서 나므로 stderr 비상 경로로만 나간다(파일에는 남지 않는다). 문법 검사는 `LogLayout::Parse`와 같은 상수 평가 함수(`detail::ScanLogLayout`)를 쓰고, `CheckLogLayoutSyntax`·`CheckLogLevelsSyntax`(LogHost)를 공개했다(CVR7 `Validate`용).
 - **LG13:** API는 `LogSystem::SetRateLimit(prefix, perSecond)`·`ClearRateLimits()`, 통계는 `LogSystemStats::rateLimited`다. 시계 주입은 `LogSystemConfig::clock`(tick)·`clockFrequency`이고 `LogEvent`에 `monotonicTicks`를 더했다. `CheckLogRateLimitsSyntax`를 공개했다.
 - **LG14:** 확장 칸 규칙을 정했다. `ext[0]`(`CorrelationCarriedExtension`)은 사본에 실려 다니고, `ext[1]`(`CorrelationPushExtension`)은 쌓기마다 Core가 0으로 시작한다(사본에 실린 쌓기 serial이 짝 없는 `ContextPop`을 만들지 않게). `CorrelationDepth()`는 인라인 TLS 읽기다. 상관 id 칸 이름·순서(`CorrelationFieldNames`)는 Correlation.h 하나에 둔다. 관찰자는 `TraceSession::Start`마다 다시 걸고(같으면 무동작) 떼지 않으며, 걸지 못하면 Warning을 남기고 센다. WorkerScheduler는 추적 여부와 상관없이 `TraceTaskScope`를 만들어 상관 id를 복원한다. `DedicatedLane::Post`는 사본을 잠금 밖에서 만든다.
-- **LG15:** 기록 이름은 trace 표기 `Trace.LogMessageSpec`·`Trace.LogMessage`다. spec 키를 EventId에서 호출 지점(EventId·카테고리·위치)으로 바꿨고, 표가 찬 뒤에는 정의를 쓰지 않고 기록에 싣는다(14.1.5). `trace-report`는 판 4이고 `logs`의 시각은 정수 ns다. Sandbox에 `--trace-file <path>`를 더할 예정이다(자체 검사가 trace 파일의 로그 기록을 확인한다). spec id의 위치는 파일·함수 문자열의 내용 해시다. 정의 기록 상한(16 KiB)을 넘는 spec은 쓰기 전에 가려 바로 동봉하고, 동봉한 템플릿은 1024 byte에서 자른다(잘림 비트 2). 동봉 실패는 sink만 센다(TraceSystem 6.6절).
+- **LG15:** 기록 이름은 trace 표기 `Trace.LogMessageSpec`·`Trace.LogMessage`다. spec 키를 EventId에서 호출 지점(EventId·카테고리·위치)으로 바꿨고, 표가 찬 뒤에는 정의를 쓰지 않고 기록에 싣는다(14.1.5). `trace-report`는 판 4이고 `logs`의 시각은 정수 ns다. Sandbox에 `--trace-file <path>`를 더했다. 엔진 호스트는 trace가 돌 때 `TraceLogSink`를 더하고 끝낼 때 Flush → `RemoveSink` → trace 정지 순서로 뺀다. 자체 검사는 `--engine --trace=default --trace-file`로 자식을 돌려 trace 파일에 로그 기록("Engine run finished")이 있는지 확인한다(TraceAnalysis가 링크되지 않는 Release에서는 NOT RUN). spec id의 위치는 파일·함수 문자열의 내용 해시다. 정의 기록 상한(16 KiB)을 넘는 spec은 쓰기 전에 가려 바로 동봉하고, 동봉한 템플릿은 1024 byte에서 자른다(잘림 비트 2). 동봉 실패는 sink만 센다(TraceSystem 6.6절).
 - **LG17:** 압축은 범용 `FixedWorkspaceCompressor`(Compression, zstd 고정 작업 공간·만든 뒤 무할당)를 쓰고, Core 인터페이스 `LogBatchCompressor`는 `LogFileCipher.h`에 있다. 봉인 파일 머리의 예약 1 byte를 `flags`로 쓴다(`LogFileFlagCompressedBatches`). 시간 회전 설정은 `FileLogSinkConfig::maxAgeNanoseconds`다.
 - **LG18:** 종료 hook 이름은 `platform::SetTerminationHook`, 처리기 API는 `platform::InstallCrashHandler`·`RemoveCrashHandler`·`PrepareThreadForCrashHandling`(`Platform/CrashHandler.h`)이다. `SetThreadStackGuarantee`·`sigaltstack`은 엔진 스레드만이 아니라 `platform::Thread`로 만든 모든 스레드가 시작 때 확보한다. POSIX 처리기는 이 환경에서 컴파일을 확인하지 못했다(Windows만 빌드·시험).
 - **LG19:** `--json` 출력 선택은 두지 않았다(입력 JSON lines 줄을 그대로 낸다). 폴더는 `*.log`·`*.log.zst`를 읽는다. 봉인 여부는 magic(`RKLOGENC`)으로 정하고 키 없는 봉인 파일은 경고 뒤 건너뛴다. 압축 파일은 스트림으로 풀어(파일당 1 GiB 상한) 잘린 frame 앞까지 보여 준다. `--event`는 16진 숫자로 비교한다. 기본 레이아웃 기록의 이어진 줄은 앞 기록의 판정을 따른다. 시험용으로 `log pack`(묶음별 zstd frame)과 `log seal --compress`를 더했다.

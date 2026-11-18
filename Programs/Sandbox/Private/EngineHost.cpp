@@ -6,8 +6,14 @@
 #include <Engine/Engine.h>
 #include <HostConfig/HostSettings.h>
 #include <LogHost/LogHost.h>
+#include <Platform/CrashHandler.h>
 #include <Platform/File.h>
 #include <Platform/Process.h>
+#include <Core/Memory/SystemAllocator.h>
+#if SANDBOX_TRACE_ANALYSIS
+#include <TraceAnalysis/TraceModel.h>
+#endif
+#include <TraceCapture/TraceLogSink.h>
 #include <TraceCapture/TraceSession.h>
 #include <TraceControl/TraceController.h>
 #include <TraceControl/TraceSettings.generated.h>
@@ -19,6 +25,9 @@ namespace sandbox {
 namespace {
 
 using namespace rocks;
+
+// 엔진을 멈춘 뒤 trace sink를 빼기 전에 로그 출력 스레드를 기다리는 상한이다.
+constexpr uint32 TraceLogFlushTimeoutMilliseconds = 2000;
 
 // Sandbox 엔진 호스트의 로그 카테고리다.
 inline constexpr LogCategory LogSandboxHost{"Sandbox"};
@@ -109,6 +118,65 @@ bool FindFirstFile(const platform::DirectoryEntry& entry, void* raw) noexcept {
     first.found = true;
     return false;
 }
+
+#if SANDBOX_TRACE_ANALYSIS
+// trace 파일에 로그 기록(Trace.LogMessage)이 남는지 확인한다(`--engine --trace=default
+// --trace-file <path>`, 로깅 LG15).
+bool CheckTraceLogRecords() noexcept {
+    char directory[128];
+    FixedStringBuilder directoryText{Span<char>(directory)};
+    (void)directoryText.TryAppendFormat("rocks-sandbox-trace-{}", platform::CurrentProcessId());
+    platform::FileSystem& files = platform::PhysicalFileSystem();
+    (void)platform::DeleteDirectoryTree(files, directory, directoryText.ByteCount());
+    if (!platform::MakeDirectoryTree(files, directory, directoryText.ByteCount())) {
+        return false;
+    }
+
+    char tracePath[192];
+    FixedStringBuilder traceText{Span<char>(tracePath)};
+    (void)traceText.TryAppendFormat("{}/run.rtrace", directoryText.View());
+    const platform::ProcessArgument arguments[] = {
+        {"--engine", 8},         {"--frames", 8},      {"2", 1},
+        {"--trace=default", 15}, {"--trace-file", 12}, {tracePath, traceText.ByteCount()}};
+    static char errorText[SelfTestOutputBytes];
+    const ChildRun child = RunChild(arguments, errorText, sizeof(errorText));
+    SystemAllocator allocator;
+    Array<uint8> bytes(allocator);
+    bool passed = child.exited && child.code == 0;
+    {
+        platform::File trace;
+        uint64 size = 0;
+        passed = passed && trace.Open(tracePath, platform::FileOpenMode::ReadExisting) &&
+                 trace.Size(size) && bytes.TryResize(static_cast<usize>(size)) &&
+                 trace.ReadExact(bytes.Data(), bytes.Size()).status;
+    }
+
+    usize logs = 0;
+    bool finished = false;
+    if (passed) {
+        TraceModel model(allocator);
+        passed = static_cast<bool>(model.Build(bytes.View()));
+        if (passed) {
+            logs = model.Logs().Size();
+            for (const TraceModelLog& log : model.Logs()) {
+                finished = finished || log.message.Contains("Engine run finished",
+                                                            StringComparison::CaseSensitive);
+            }
+        }
+    }
+
+    passed = passed && logs != 0 && finished;
+    if (!passed) {
+        printf("    exit %u, trace bytes %llu, log records %llu, stderr:\n%.*s\n", child.code,
+               static_cast<unsigned long long>(bytes.Size()), static_cast<unsigned long long>(logs),
+               static_cast<int>(child.stderrText.ByteCount()), child.stderrText.Data());
+    }
+
+    (void)platform::DeleteDirectoryTree(files, directory, directoryText.ByteCount());
+    return passed;
+}
+
+#endif
 
 // 설정 파일로 Sync 모드와 파일 기록을 켠 자식이 로그 파일에 종료 줄을 남기는지 본다.
 bool CheckConfiguredFileLogging() noexcept {
@@ -204,7 +272,9 @@ int RunEngineHost(Allocator& allocator, const EngineHostOptions& options) noexce
         return 2;
     }
 
-    // 6) 로그. log.mode·log.file.* 는 5)에서 고정됐다.
+    // 6) 로그. log.mode·log.file.* 는 5)에서 고정됐다. 접근 위반·치명 신호 때도 마지막 로그를
+    // flush하도록 최소 크래시 처리기를 둔다(앞 처리기로 연쇄한다).
+    const bool crashHandler = platform::InstallCrashHandler();
     LogHost host(allocator);
     if (!host.Start(LogSystemConfig::ForEngineHost(), &settings.Context(), "Sandbox")) {
         Log::Error(LogSandboxHost, "The log system could not start");
@@ -225,15 +295,27 @@ int RunEngineHost(Allocator& allocator, const EngineHostOptions& options) noexce
                          ErrorCodeName(started.Error()));
         }
 
+        // 로그를 trace 채널 "log"로도 보낸다(채널이 꺼져 있으면 sink 비용은 분기 하나). 순서: trace
+        // 시작 → AddSink … 엔진 정리 → LogSystem::Flush → RemoveSink → trace 정지.
+        TraceLogSink traceLog;
+        const bool traceLogAdded = trace.IsRunning() && host.System().AddSink(traceLog);
         {
             trace_control::TraceController control(allocator, trace, settings.Context());
             if (trace.IsRunning()) {
                 (void)control.RegisterConsoleCommands();
                 (void)control.ApplyCommandLine(options.arguments);
+                if (options.traceFile != nullptr) {
+                    (void)control.OpenFile(StringView(options.traceFile));
+                }
             }
 
             // 8) 엔진 루프(프레임마다 sync 지점).
             exitCode = RunEngine(allocator, options.frames, settings.Context());
+            // 출력 스레드에 남은 기록이 trace에 닿게 한 뒤 sink를 뺀다(trace 출력이 닫히기 전에).
+            if (traceLogAdded) {
+                (void)host.System().Flush(TraceLogFlushTimeoutMilliseconds);
+                (void)host.System().RemoveSink(traceLog);
+            }
         }
 
         trace.Stop();
@@ -244,6 +326,10 @@ int RunEngineHost(Allocator& allocator, const EngineHostOptions& options) noexce
         // 멈춘 sink에 걸린 출력 스레드가 남았다. 설정 문맥·전역 소멸자·CRT 종료 처리를 돌리면 그
         // 스레드와 겹칠 수 있으므로 정리 없이 끝낸다(LogHost::Stop 설명).
         _Exit(exitCode);
+    }
+
+    if (crashHandler) {
+        platform::RemoveCrashHandler();
     }
 
     return exitCode;
@@ -278,7 +364,17 @@ uint32 RunEngineHostSelfTest() noexcept {
     const bool configured = CheckConfiguredFileLogging();
     printf("  [%s] engine host: --config switches to sync and writes the log file\n",
            configured ? "PASS" : "FAIL");
-    return (passed ? 0u : 1u) + (configured ? 0u : 1u);
+#if SANDBOX_TRACE_ANALYSIS
+    const bool traced = CheckTraceLogRecords();
+    printf("  [%s] engine host: --trace=default writes log records into the trace file\n",
+           traced ? "PASS" : "FAIL");
+#else
+    // Release는 Developer 모듈(TraceAnalysis)을 링크하지 않으므로 trace 파일을 읽지 않는다.
+    const bool traced = true;
+    printf("  [NOT RUN] engine host: trace file log records (TraceAnalysis is not linked in "
+           "Release)\n");
+#endif
+    return (passed ? 0u : 1u) + (configured ? 0u : 1u) + (traced ? 0u : 1u);
 }
 
 } // namespace sandbox
