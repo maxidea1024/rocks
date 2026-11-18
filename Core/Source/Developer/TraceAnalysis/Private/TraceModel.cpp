@@ -455,7 +455,9 @@ Result<void> TraceModel::ReadThread(uint16 stream, Array<OrderedEvent>& ordered)
 
             log.flags = ReadFixed<uint32>(record, Format::LogMessageFlagsOffset);
             log.level = ReadFixedByte(record, Format::LogMessageLevelOffset);
-            log.truncated = ReadFixedByte(record, Format::LogMessageTruncatedOffset) != 0;
+            const uint8 truncated = ReadFixedByte(record, Format::LogMessageTruncatedOffset);
+            log.truncated = (truncated & Format::LogMessageTruncatedMessage) != 0;
+            log.templateTruncated = (truncated & Format::LogMessageTruncatedTemplate) != 0;
             log.message = TextOf(record.variable[0]);
             log.inlineCategory = TextOf(record.variable[1]);
             log.inlineTemplate = TextOf(record.variable[2]);

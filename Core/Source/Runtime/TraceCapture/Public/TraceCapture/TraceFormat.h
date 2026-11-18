@@ -316,9 +316,10 @@ struct TraceStandardFormat {
     static constexpr usize MaxContextDepth = 16;
 
     // ---- 로그(로깅 LG15, 채널 "log") ----
-    // LogMessageSpec(정의): u64 spec id(호출 지점: EventId·카테고리·위치) | u64 EventId | u32 줄 |
-    // u8 레벨, 가변: 카테고리(String) | 템플릿(String) | 파일(String) | 함수(String). 세션마다 호출
-    // 지점당 한 번이다.
+    // LogMessageSpec(정의): u64 spec id(호출 지점: EventId·카테고리·위치 문자열의 해시) | u64
+    // EventId | u32 줄 | u8 레벨, 가변: 카테고리(String) | 템플릿(String) | 파일(String) |
+    // 함수(String). 세션마다 호출 지점당 한 번이다. 정의 기록 상한(MaxDefinitionRecordBytes)을
+    // 넘는 spec은 쓰지 않는다(기록에 동봉한다).
     static constexpr const char* LogMessageSpecType = "Trace.LogMessageSpec";
     static constexpr usize LogSpecIdOffset = 0;
     static constexpr usize LogSpecEventIdOffset = 8;
@@ -327,10 +328,12 @@ struct TraceStandardFormat {
     static constexpr usize LogSpecFixedBytes = 21;
     // LogMessage(스레드 스트림, 순서 번호): u64 캡처 tick | u64 생산자 OS 스레드 id | u64 프레임 |
     // u64 spec id | u64 EventId | u64 × 5 상관 id(세션·task·에셋·entity·요청, 없으면 0) | u32
-    // LogEventFlags | u8 레벨 | u8 상관 id 마스크(0이 아닌 칸) | u8 trace 쪽 잘림(1이면 메시지를
-    // 잘랐다), 가변: 렌더된 메시지(String) | 카테고리(String) | 템플릿(String). 카테고리·템플릿은
-    // spec 정의를 쓰지 못했을 때(중복 표가 참·정의 버퍼 부족)만 채우고 평소에는 비어 있다. tick은
-    // 로그 캡처 tick 그대로다(같은 원천, 변환 없음).
+    // LogEventFlags | u8 레벨 | u8 상관 id 마스크(0이 아닌 칸) | u8 trace 쪽 잘림 비트
+    // (LogMessageTruncatedMessage·LogMessageTruncatedTemplate), 가변: 렌더된 메시지(String) |
+    // 카테고리(String) | 템플릿(String). 카테고리·템플릿은 spec 정의를 쓰지 못했을 때(중복 표가
+    // 참·정의 상한 초과·정의 버퍼 부족)만 채우고 평소에는 비어 있다. 이때 위치(파일·줄·함수)는
+    // 남지 않는다. 메시지와 동봉 템플릿은 각각 MaxTraceLogMessageBytes까지다. tick은 로그 캡처
+    // tick 그대로다(같은 원천, 변환 없음).
     static constexpr const char* LogMessageType = "Trace.LogMessage";
     static constexpr usize LogMessageTickOffset = 0;
     static constexpr usize LogMessageThreadOffset = 8;
@@ -344,6 +347,9 @@ struct TraceStandardFormat {
     static constexpr usize LogMessageCorrelationMaskOffset = LogMessageLevelOffset + 1;
     static constexpr usize LogMessageTruncatedOffset = LogMessageCorrelationMaskOffset + 1;
     static constexpr usize LogMessageFixedBytes = LogMessageTruncatedOffset + 1;
+    // 잘림 비트다. 메시지를 잘랐다 / 기록에 동봉한 템플릿을 잘랐다.
+    static constexpr uint8 LogMessageTruncatedMessage = 1;
+    static constexpr uint8 LogMessageTruncatedTemplate = 2;
 
     // ---- task(TR3) ----
     // Task(스레드 스트림, 순서 번호): u64 tick | u64 task id | u64 관련 task id | u8 사건 종류,

@@ -12,6 +12,7 @@
 #include <TraceCapture/TraceContext.h>
 #include <TraceCapture/TraceCpuScope.h>
 #include <TraceCapture/TraceLogSink.h>
+#include <TraceCapture/TraceTask.h>
 
 // TR4 분석 시험이다(Docs/Design/TraceSystem.ko.md 10절). 입력은 tick·순서·형 id를 정한 writer로
 // 만들어 golden report와 byte 단위로 비교하고, 실제 세션 capture로 결정성과 손상 입력(OB03)을
@@ -780,6 +781,11 @@ namespace {
 constexpr usize TruncationProbeBytes = MaxTraceLogMessageBytes + 64;
 constexpr uint32 SpecFloodCount = TraceLogSpecTableLimit + 64;
 constexpr uint64 SpecFloodBaseId = 0x1000;
+// 넘침 시험이 펌프하는 간격(기록 수)이다(블록이 쌓여 기록을 잃지 않게).
+constexpr uint32 SpecFloodPumpInterval = 256;
+// 정의 기록 상한을 넘는 템플릿 크기다.
+constexpr usize OversizedTemplateBytes = TraceFormat::MaxDefinitionRecordBytes + 64;
+char oversizedTemplate[OversizedTemplateBytes];
 
 // sink에 바로 넣는 기록이다(LogSystem 없이 EventId·위치를 정해 넣는다).
 LogEvent DirectEvent(StringView message, uint64 eventId, uint32 line) noexcept {
@@ -846,7 +852,7 @@ TEST(TraceLogSinkSpecsTruncationAndSessions) {
         // 중복 표 넘침: 서로 다른 호출 지점을 상한보다 많이 넣는다.
         for (uint32 index = 0; index < SpecFloodCount; ++index) {
             REQUIRE(sink.Write(DirectEvent("flood", SpecFloodBaseId + index, index)));
-            if (index % 256 == 255) {
+            if ((index + 1) % SpecFloodPumpInterval == 0) {
                 CHECK(live.session.Pump());
             }
         }
@@ -891,15 +897,128 @@ TEST(TraceLogSinkSpecsTruncationAndSessions) {
 TEST(TraceLogSinkCountsLostRecords) {
     SystemAllocator allocator;
     TraceLogSink sink;
-    constexpr usize TinyPoolBytes = 64 * 1024;
     constexpr uint32 FloodRecords = 20000;
-    LiveSession live(allocator, TinyPoolBytes);
+    // 풀 상한의 최소 단위(한 페이지)다.
+    LiveSession live(allocator, TraceBlockLayout::PageBytes);
     for (uint32 index = 0; index < FloodRecords && sink.Lost() == 0; ++index) {
         REQUIRE(sink.Write(DirectEvent("lost probe message with some padding text", 9, 40)));
     }
 
     CHECK(sink.Lost() != 0);
     live.session.Stop();
+}
+
+// 재진입 표시가 켜진 스레드(Write 안)에서 sink를 직접 불러도 기록하지 않는다. trace 자신의
+// 카테고리도 남기지 않는다. 표시를 벗어난 뒤의 직접 호출은 기록한다.
+TEST(TraceLogSinkBlocksReentrantDirectWrite) {
+    SystemAllocator allocator;
+    TraceLogSink sink;
+    LiveSession live(allocator);
+    {
+        detail::TraceLogWriteScope inside;
+        REQUIRE(sink.Write(DirectEvent("reentrant", 11, 50)));
+        {
+            detail::TraceLogWriteScope nested;
+        }
+
+        CHECK(detail::inTraceLogWrite);
+    }
+
+    CHECK(!detail::inTraceLogWrite);
+    LogEvent own = DirectEvent("trace own", 12, 51);
+    own.category = "Trace.Writer";
+    REQUIRE(sink.Write(own));
+    REQUIRE(sink.Write(DirectEvent("outside", 11, 52)));
+    live.session.Stop();
+    TraceModel model(allocator);
+    REQUIRE(model.Build(live.output.bytes.View()));
+    REQUIRE(model.Logs().Size() == 1);
+    CHECK(model.Logs()[0].message == StringView("outside"));
+}
+
+// spec id는 위치 문자열의 내용으로 정한다. 같은 내용의 파일·함수 문자열이 다른 주소에 있어도(여러
+// TU의 inline 인스턴스) 같은 spec이다.
+TEST(TraceLogSinkSpecIdUsesLocationText) {
+    SystemAllocator allocator;
+    TraceLogSink sink;
+    LiveSession live(allocator);
+    char fileA[] = "Shared.h";
+    char fileB[] = "Shared.h";
+    char functionA[] = "SharedInline";
+    char functionB[] = "SharedInline";
+    LogEvent first = DirectEvent("copy a", 13, 60);
+    first.location.file = fileA;
+    first.location.function = functionA;
+    LogEvent second = DirectEvent("copy b", 13, 60);
+    second.location.file = fileB;
+    second.location.function = functionB;
+    REQUIRE(sink.Write(first));
+    REQUIRE(sink.Write(second));
+    live.session.Stop();
+    TraceModel model(allocator);
+    REQUIRE(model.Build(live.output.bytes.View()));
+    REQUIRE(model.Logs().Size() == 2);
+    CHECK(model.Logs()[0].specId == model.Logs()[1].specId);
+    CHECK(model.LogSpecs().Size() == 1);
+}
+
+// 정의 기록 상한을 넘는 spec은 정의를 시도하지 않고 기록에 동봉한다. 동봉한 템플릿은
+// MaxTraceLogMessageBytes에서 잘리고 잘림 비트가 켜진다. 세션의 "버린 정의" 수는 늘지 않고 sink만
+// 센다. 동봉한 기록에는 위치가 없다(spec 정의 없음).
+TEST(TraceLogSinkInlinesOversizedSpec) {
+    SystemAllocator allocator;
+    TraceLogSink sink;
+    LiveSession live(allocator);
+    for (usize index = 0; index < OversizedTemplateBytes; ++index) {
+        oversizedTemplate[index] = 't';
+    }
+
+    LogEvent event = DirectEvent("oversized", 14, 70);
+    event.messageTemplate = StringView(oversizedTemplate, OversizedTemplateBytes);
+    constexpr uint32 Writes = 3;
+    for (uint32 index = 0; index < Writes; ++index) {
+        REQUIRE(sink.Write(event));
+    }
+
+    CHECK(sink.SpecWriteFailures() == Writes);
+    CHECK(live.session.Stats().definitionRecordsDropped == 0);
+    live.session.Stop();
+    TraceModel model(allocator);
+    REQUIRE(model.Build(live.output.bytes.View()));
+    REQUIRE(model.Logs().Size() == Writes);
+    for (const TraceModelLog& log : model.Logs()) {
+        CHECK(log.templateTruncated && !log.truncated);
+        CHECK(log.inlineTemplate.ByteCount() == MaxTraceLogMessageBytes);
+        CHECK(model.FindLogSpec(log.specId) == nullptr);
+        CHECK(model.LogCategoryOf(log) == StringView("Tests.Analysis"));
+    }
+}
+
+// task 실행 구간은 trace 없이도 저장한 상관 id를 복원하고 내린다. 빈 정보는 아무것도 쌓지 않는다.
+TEST(TraceTaskScopeRestoresCorrelationWithoutTrace) {
+    {
+        const TraceTaskInfo empty;
+        TraceTaskScope scope(empty);
+        CHECK(CorrelationDepth() == 0);
+    }
+
+    TraceTaskInfo info;
+    {
+        CorrelationScope request(CorrelationIds{0, 0, 0, 0, 77});
+        info = TraceCreateTask();
+    }
+
+    REQUIRE(info.context.valid);
+    CHECK(!info.id.IsTraced());
+    CHECK(CorrelationDepth() == 0);
+    {
+        TraceTaskScope scope(info);
+        CorrelationIds ids;
+        CHECK(CurrentCorrelation(ids) && ids.request == 77);
+        CHECK(CorrelationDepth() == 1);
+    }
+
+    CHECK(CorrelationDepth() == 0);
 }
 
 // 공개 CorrelationScope로 쌓은 값이 trace 문맥 정의 기록에 같게 나간다(관찰자 경로).

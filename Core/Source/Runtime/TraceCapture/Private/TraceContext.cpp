@@ -22,6 +22,8 @@ constexpr LogCategory LogTraceContext{"Trace.Context"};
 
 namespace {
 
+static_assert(Format::ContextValueCount == CorrelationFieldCount,
+              "trace context values must match the Core correlation fields");
 static_assert(Format::MaxContextDepth == MaxCorrelationDepth,
               "trace context depth must match the correlation stack depth");
 
@@ -49,9 +51,9 @@ uint32 DefineContext(TraceSessionState& session, CorrelationEntry& entry, uint64
         platform::AtomicFetchAdd<MemoryOrder::Relaxed>(&session.nextContextId, 1u) + 1;
     uint8 fixed[Format::ContextDefinitionFixedBytes];
     StoreLittleEndian<uint32>(fixed + Format::ContextDefinitionIdOffset, id);
-    const uint64 values[Format::ContextValueCount] = {
-        entry.ids.session, entry.ids.task, entry.ids.asset, entry.ids.entity, entry.ids.request};
-    for (usize index = 0; index < Format::ContextValueCount; ++index) {
+    uint64 values[CorrelationFieldCount];
+    CorrelationFieldValues(entry.ids, values);
+    for (usize index = 0; index < CorrelationFieldCount; ++index) {
         StoreLittleEndian<uint64>(fixed + Format::ContextDefinitionValuesOffset + index * 8,
                                   values[index]);
     }

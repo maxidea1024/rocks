@@ -127,9 +127,12 @@ struct TraceModelLog {
     uint64 correlation[TraceStandardFormat::ContextValueCount]{};
     uint32 flags = 0;
     uint8 level = 0;
+    // trace 쪽에서 메시지를 잘랐다 / 동봉한 템플릿을 잘랐다.
     bool truncated = false;
+    bool templateTruncated = false;
     StringView message;
-    // spec 정의 대신 기록에 실린 카테고리·템플릿이다(중복 표가 찼을 때만, 평소에는 빈 값).
+    // spec 정의 대신 기록에 실린 카테고리·템플릿이다(중복 표가 참·정의 상한 초과·정의 버퍼
+    // 부족일 때만, 평소에는 빈 값). 이때 위치(파일·줄·함수)는 없다.
     StringView inlineCategory;
     StringView inlineTemplate;
 };

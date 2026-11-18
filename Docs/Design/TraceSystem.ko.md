@@ -258,15 +258,16 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론)의 현재 기본 경로다. 경�
 ### 6.6 로그(로깅 LG15, 개정 7)
 
 - 채널 `log`. 기록은 `TraceLogSink`(TraceCapture, `RuntimeLogSink` 구현)가 쓴다. 엔진 호스트가 trace 세션을 시작한 뒤 LogSystem에 더하고, 정지 전에 뺀다. 채널이 꺼져 있으면 sink 비용은 분기 하나다.
-- `Trace.LogMessageSpec`(정의): u64 spec id(호출 지점 = EventId·카테고리·위치) | u64 EventId | u32 줄 | u8 레벨, 가변 카테고리 | 템플릿 | 파일 | 함수. 세션마다 호출 지점당 한 번이다(sink의 고정 중복 표 4096칸, 3/4까지). 정의 쓰기가 성공한 뒤에만 표에 넣는다. 표가 차거나 쓰기가 실패하면 정의를 더 쓰지 않고 기록에 카테고리·템플릿을 싣는다.
-- `Trace.LogMessage`(스레드 스트림, 순서 번호): u64 캡처 tick | u64 생산자 OS 스레드 id | u64 프레임 | u64 spec id | u64 EventId | u64 × 5 상관 id | u32 LogEventFlags | u8 레벨 | u8 상관 id 마스크 | u8 trace 쪽 잘림, 가변 렌더된 메시지(최대 1024 byte, UTF-8 경계에서 자름) | 카테고리 | 템플릿(뒤 둘은 spec 정의를 쓰지 못했을 때만).
+- `Trace.LogMessageSpec`(정의): u64 spec id(호출 지점 = EventId·카테고리·위치) | u64 EventId | u32 줄 | u8 레벨, 가변 카테고리 | 템플릿 | 파일 | 함수. 위치는 파일·함수 문자열의 내용 해시다(포인터가 아니므로 inline 함수·템플릿이 여러 TU에서 인스턴스화되어도 같은 지점은 같은 spec이다). 세션마다 호출 지점당 한 번이다(sink의 고정 중복 표 4096칸, 3/4까지). 정의 쓰기가 성공한 뒤에만 표에 넣는다.
+- **동봉:** 표가 찼거나, spec이 정의 기록 상한(`MaxDefinitionRecordBytes`, 16 KiB)을 넘거나(쓰기 전에 검사해 바로 동봉), 정의 버퍼가 차서 쓰기가 실패하면 정의 대신 그 기록에 카테고리·템플릿을 싣는다. 동봉한 템플릿도 1024 byte에서 UTF-8 경계로 자르고 잘림 비트를 켠다. **동봉한 기록은 위치(파일·줄·함수)를 잃는다.** 동봉 실패는 sink 계수(`SpecTableOverflows`·`SpecWriteFailures`)로만 세고 세션의 "버린 정의" 수(`definitionRecordsDropped`)에는 넣지 않는다(정보가 기록에 남는다). 버퍼 부족은 다음 기록에서 다시 시도한다.
+- `Trace.LogMessage`(스레드 스트림, 순서 번호): u64 캡처 tick | u64 생산자 OS 스레드 id | u64 프레임 | u64 spec id | u64 EventId | u64 × 5 상관 id | u32 LogEventFlags | u8 레벨 | u8 상관 id 마스크 | u8 trace 쪽 잘림 비트(1 메시지, 2 동봉 템플릿), 가변 렌더된 메시지(최대 1024 byte, UTF-8 경계에서 자름) | 카테고리 | 템플릿(뒤 둘은 동봉할 때만).
   - tick은 로그 캡처 tick 그대로다(로그가 `MonotonicTicks`로 캡처한다, 변환 오차 없음).
   - sink는 로그 출력 스레드에서 불리므로 생산자 스레드·시각·상관 id를 기록에 명시한다. 스레드는 `Trace.ThreadInfo`의 OS id로 대응한다.
   - 속성·문맥은 보내지 않는다(메시지에 렌더되어 있다).
 - **재귀 차단:** 스레드별 재진입 표시, 카테고리 `Trace`·`Trace.*` 기록 제외(TraceWriter의 `Log::Warning(LogTrace, ...)`가 다시 trace로 돌지 않게), 세션이 없으면 보내지 않는다.
 - **손실:** 다른 기록과 같은 비대기 규칙이다. 버퍼가 없으면 버리고 채널 손실과 sink `Lost()`로 센다.
 - **분석:** TraceAnalysis 모델 `Logs()`·`LogSpecs()`(spec id 순, 이진 탐색)·`LogCategoryOf`, `trace-report` 판 4의 `logs`(레벨별 수와 Warning 이상 목록, 시각은 정수 ns, 로그가 없으면 키 없음).
-- **호스트 순서:** trace 시작 → `AddSink` … 엔진 정리 → `LogSystem::Flush` → `RemoveSink` → trace 정지(Sandbox `--engine`, `--trace-file <path>`로 파일 출력).
+- **호스트 순서:** trace 시작 → `AddSink` … 엔진 정리 → `LogSystem::Flush` → `RemoveSink` → trace 정지(Sandbox `--engine` 연결은 예정, `--trace-file <path>`로 파일 출력).
 
 ## 7. task 연동
 
@@ -410,7 +411,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론)의 현재 기본 경로다. 경�
 
 ## 13. 개정 이력
 
-- 개정 7(2026-11-18, 로깅 세션 작성·rocks-95 합의): 상관 id 스택을 Core `CorrelationScope`로 옮기고 trace는 확장 칸·관찰자로 기록을 유지한다(6.4절). 문맥 전파는 task 채널과 무관하게 늘 하고 `DedicatedLane::Post`도 전파한다(7절). 표준 채널 `log`와 `Trace.LogMessageSpec`·`Trace.LogMessage`, 분석 `Logs()`·report `logs`를 더했다(5절·6.6절, 로깅 LG15).
+- 개정 7(2026-11-18, 로깅 세션 작성·rocks-95 합의): 상관 id 스택을 Core `CorrelationScope`로 옮기고 trace는 확장 칸·관찰자로 기록을 유지한다(6.4절). 문맥 전파는 task 채널과 무관하게 늘 하고 `DedicatedLane::Post`도 전파한다(7절). 표준 채널 `log`와 `Trace.LogMessageSpec`·`Trace.LogMessage`, 분석 `Logs()`·report `logs`를 더했다(5절·6.6절, 로깅 LG15). 재리뷰 반영: spec id 위치는 문자열 내용 해시, 정의 상한 초과 spec은 바로 동봉, 동봉 템플릿 1024 byte 상한과 잘림 비트 2, 동봉 실패는 sink만 센다(6.6절).
 - 개정 6(2026-11-18): TR5 구현 반영(5절 구현, 8절 구현). 스펙과 다르게 정한 것: 고리의 덩어리에 기록 경계 표시를 두고 경계를 잃은 덩어리는 스냅샷에서 뺀다, 동기 표지를 세션 내부 형 기록(`Trace.SnapshotSync`)으로 둔다, 수집 통계를 표준 채널 `stats`의 기록으로 펌프 수 간격에 낸다(기본 묶음에 넣지 않음), 설정 계층 연결을 새 모듈 `TraceControl`에 둔다, 묶음은 Map이 아니라 설정 struct의 필드다, 콘솔 설정 이름은 밑줄 표기다, `trace.stop`은 세션이 아니라 `trace.file`의 출력만 끝낸다.
 - 개정 5(2026-11-17): RB7 GPU 기록 형 구현 반영(9절). 형 4개와 배치, 변환 식, 기록 스트림, 세션별 정의 재기록, 분석 모델과 report 판 2의 `gpu` 절을 적었다. 스펙과 다르게 정한 것: 구간 하나를 두 tick 기록 하나로, "GPU 시간 없음"을 queue 정의 칸으로, 작업·fence 사건은 뒤로. 채널 설명 문자열은 영어로 바꿨다(로그·추적 메시지 영어 규칙).
 - 개정 4(2026-11-17): TR3·TR4 구현 반영. task 사건을 종류 칸이 있는 형 하나로 둔 것, 실행 가능 시점, 실행 구간 순서, task 채널이 켜졌을 때만 문맥을 전파하는 것(7절), TraceAnalysis 모듈·이름으로 찾는 스키마·스트림 해석 상태·순서 번호 병합·손실을 사이에 둔 보수적 짝짓기·report 형식·임계 경로 정의(7.2절)를 적었다.

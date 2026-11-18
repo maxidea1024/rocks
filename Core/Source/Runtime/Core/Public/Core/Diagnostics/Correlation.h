@@ -78,29 +78,53 @@ struct CorrelationObserver {
     void (*onPop)(const CorrelationEntry& entry) noexcept = nullptr;
 };
 
+// 쌓기 결과다(CorrelationScope와, 쌓기를 조건부로 하는 상위 계층 scope가 쓴다).
+enum class CorrelationPushState : uint8 {
+    // 쌓지 않음(빈 사본)
+    None,
+    // 스택에 쌓음
+    Pushed,
+    // 깊이 상한으로 세기만 함
+    Counted
+};
+
+namespace detail {
+
+// 칸 하나를 쌓는다(쌓기 칸 확장을 0으로 하고 관찰자를 부른다). restored는 사본 복원인지다.
+// CorrelationScope의 느린 경로이고, 쌓기 여부를 직접 정하는 scope(TraceTaskScope)도 쓴다. 결과가
+// None이 아니면 같은 스레드에서 LIFO 순서로 PopCorrelation을 불러야 한다.
+CorrelationPushState PushCorrelation(const CorrelationEntry& entry, bool restored) noexcept;
+
+// PushCorrelation이 쌓은 칸을 내린다(state는 None이 아니어야 한다). 순서가 어긋나면 Fatal이다.
+void PopCorrelation(CorrelationPushState state) noexcept;
+
+} // namespace detail
+
 // 이 스레드의 스택에 상관 id를 쌓고 소멸 때 내린다. 만든 스레드에서 LIFO 순서로 소멸해야 한다(스택
-// 객체로 쓴다). 순서가 어긋나면 Fatal이다.
+// 객체로 쓴다). 순서가 어긋나면 Fatal이다. 사본 복원의 빈 경로(스택이 비어 있던 사본)는 인라인
+// 분기 하나다(task·lane이 실행마다 거친다).
 class CorrelationScope {
 public:
-    // 쌓기 결과다.
-    enum class PushState : uint8 {
-        // 쌓지 않음(빈 사본)
-        None,
-        // 스택에 쌓음
-        Pushed,
-        // 깊이 상한으로 세기만 함
-        Counted
-    };
+    explicit CorrelationScope(const CorrelationIds& ids) noexcept
+        : pushed_(detail::PushCorrelation(CorrelationEntry{ids, {}}, false)) {
+    }
 
-    explicit CorrelationScope(const CorrelationIds& ids) noexcept;
-    explicit CorrelationScope(const CorrelationToken& token) noexcept;
-    ~CorrelationScope() noexcept;
+    explicit CorrelationScope(const CorrelationToken& token) noexcept
+        : pushed_(token.valid ? detail::PushCorrelation(token.entry, true)
+                              : CorrelationPushState::None) {
+    }
+
+    ~CorrelationScope() noexcept {
+        if (pushed_ != CorrelationPushState::None) {
+            detail::PopCorrelation(pushed_);
+        }
+    }
 
     CorrelationScope(const CorrelationScope&) = delete;
     CorrelationScope& operator=(const CorrelationScope&) = delete;
 
 private:
-    PushState pushed_ = PushState::None;
+    CorrelationPushState pushed_ = CorrelationPushState::None;
 };
 
 // 이 스레드 스택 맨 위 칸의 사본이다. 비어 있으면 valid가 false다.

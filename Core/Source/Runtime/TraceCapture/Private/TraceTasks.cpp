@@ -87,3 +87,37 @@ void EndTraceTaskExecution(const TraceTaskId& task, uint64 previousTask) noexcep
 }
 
 } // namespace rocks::detail
+
+namespace rocks {
+
+void TraceTaskScope::Begin(const TraceTaskInfo& info) noexcept {
+    active_ = true;
+    id_ = info.id;
+    // 문맥을 먼저 복원한다(실행 사건과 CPU 구간이 복원한 문맥 안에 놓인다).
+    if (info.context.valid) {
+        context_ = detail::PushCorrelation(info.context.entry, true);
+    }
+
+    if (id_.IsTraced()) {
+        detail::BeginTraceTaskExecution(id_, previousTask_);
+        if (TraceCpuChannel.IsEnabled()) {
+            run_ = detail::BeginCpuScope(detail::TraceTaskRunName());
+        }
+    }
+}
+
+void TraceTaskScope::End() noexcept {
+    if (id_.IsTraced()) {
+        if (run_ != 0) {
+            detail::EndCpuScope(run_);
+        }
+
+        detail::EndTraceTaskExecution(id_, previousTask_);
+    }
+
+    if (context_ != CorrelationPushState::None) {
+        detail::PopCorrelation(context_);
+    }
+}
+
+} // namespace rocks

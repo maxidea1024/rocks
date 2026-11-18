@@ -14,24 +14,9 @@ using detail::TraceSessionState;
 using platform::MemoryOrder;
 using Format = TraceStandardFormat;
 
-// 이 스레드가 TraceLogSink::Write 안에 있는지다. LogSystem을 거친 호출은 LogSystem의 sink 표시
-// (inSink)가 이미 재귀를 막지만, sink를 직접 부르는 호스트·시험 경로와 trace 쓰기 안에서 남는
-// 로그를 다시 받지 않도록 sink 자신도 막는다(두 표시는 지키는 범위가 다르다).
-thread_local constinit bool inTraceLogWrite = false;
-
-class TraceLogWriteScope {
-public:
-    TraceLogWriteScope() noexcept {
-        inTraceLogWrite = true;
-    }
-
-    ~TraceLogWriteScope() noexcept {
-        inTraceLogWrite = false;
-    }
-
-    TraceLogWriteScope(const TraceLogWriteScope&) = delete;
-    TraceLogWriteScope& operator=(const TraceLogWriteScope&) = delete;
-};
+// 기록의 상관 id 칸은 Core 상관 id 칸과 1:1이다(다르면 고정부 밖에 쓴다).
+static_assert(CorrelationFieldCount == Format::ContextValueCount,
+              "trace log correlation slots must match the Core correlation fields");
 
 // trace 자신의 카테고리("Trace"와 "Trace.*")인지다. 대소문자는 카테고리 일치 규칙대로 무시한다.
 bool IsTraceCategory(StringView category) noexcept {
@@ -64,17 +49,28 @@ constexpr uint64 Mix(uint64 value) noexcept {
     return value ^ (value >> ShiftC);
 }
 
+StringView LocationText(const char* text) noexcept {
+    return StringView(text != nullptr ? text : "");
+}
+
 // 호출 지점 spec id다: (EventId, 카테고리, 위치). 같은 템플릿을 다른 카테고리·위치에서 쓰면 다른
-// spec이다(UE의 로그 지점 주소 키와 같은 구별). 0은 빈 칸 표지라 쓰지 않는다.
+// spec이다(UE의 로그 지점 주소 키와 같은 구별). 위치는 파일·함수 문자열의 해시다(포인터가 아니다.
+// inline 함수·템플릿이 여러 TU에서 인스턴스화되어 문자열 사본이 여러 개여도 같은 지점은 같은
+// spec이다). 0은 빈 칸 표지라 쓰지 않는다.
 uint64 SpecIdOf(const LogEvent& event) noexcept {
     uint64 id = Mix(event.eventId ^ HashStringBytes(event.category));
-    id = Mix(id ^ static_cast<uint64>(reinterpret_cast<usize>(event.location.file)));
-    id = Mix(id ^ static_cast<uint64>(reinterpret_cast<usize>(event.location.function)) ^
-             event.location.line);
+    id = Mix(id ^ HashStringBytes(LocationText(event.location.file)));
+    id = Mix(id ^ HashStringBytes(LocationText(event.location.function)) ^ event.location.line);
     return id != 0 ? id : 1;
 }
 
 } // namespace
+
+namespace detail {
+
+thread_local constinit bool inTraceLogWrite = false;
+
+} // namespace detail
 
 TraceLogSink::SpecState TraceLogSink::FindSpec(uint64 serial, uint64 specId) noexcept {
     // 세션이 바뀌면 표를 비운다(정의는 세션마다 다시 쓴다).
@@ -112,11 +108,12 @@ void TraceLogSink::RememberSpec(uint64 specId) noexcept {
 
 Result<void> TraceLogSink::Write(const LogEvent& event) noexcept {
     // 채널이 꺼져 있으면 분기 하나다.
-    if (!TraceLogChannel.IsEnabled() || inTraceLogWrite || IsTraceCategory(event.category)) {
+    if (!TraceLogChannel.IsEnabled() || detail::inTraceLogWrite ||
+        IsTraceCategory(event.category)) {
         return Result<void>::Success();
     }
 
-    TraceLogWriteScope scope;
+    detail::TraceLogWriteScope scope;
     const uint64 serial = platform::AtomicLoad<MemoryOrder::Acquire>(&detail::currentSessionSerial);
     if (serial == 0) {
         return Result<void>::Success();
@@ -128,8 +125,10 @@ Result<void> TraceLogSink::Write(const LogEvent& event) noexcept {
         return Result<void>::Success();
     }
 
-    // spec: 처음 보는 호출 지점이면 정의를 쓰고, 쓰기가 성공한 뒤에만 표에 넣는다(실패하면 다음
-    // 기록에서 다시 쓴다). 표가 차면 정의 스트림을 더 쓰지 않고 이 기록에 카테고리·템플릿을 싣는다.
+    // spec: 처음 보는 호출 지점이면 정의를 쓰고, 쓰기가 성공한 뒤에만 표에 넣는다(정의 버퍼가 차서
+    // 실패하면 다음 기록에서 다시 쓴다). 표가 차거나, spec이 정의 기록 상한을 넘거나, 쓰기가
+    // 실패하면 이 기록에 카테고리·템플릿을 싣는다(위치는 잃는다). 실패는 sink만 센다(정보는 기록에
+    // 남으므로 세션의 "버린 정의"로 세지 않는다).
     const uint64 specId = SpecIdOf(event);
     bool inlineSpec = false;
     const SpecState state = FindSpec(serial, specId);
@@ -145,12 +144,11 @@ Result<void> TraceLogSink::Write(const LogEvent& event) noexcept {
         const TraceVariablePart parts[] = {
             TraceVariablePart::FromString(event.category),
             TraceVariablePart::FromString(event.messageTemplate),
-            TraceVariablePart::FromString(
-                StringView(event.location.file != nullptr ? event.location.file : "")),
-            TraceVariablePart::FromString(
-                StringView(event.location.function != nullptr ? event.location.function : ""))};
-        if (detail::WriteStandardDefinition(*session, detail::TraceLogMessageSpecType, fixed,
-                                            sizeof(fixed), parts)) {
+            TraceVariablePart::FromString(LocationText(event.location.file)),
+            TraceVariablePart::FromString(LocationText(event.location.function))};
+        if (detail::TryWriteStandardDefinition(*session, detail::TraceLogMessageSpecType, fixed,
+                                               sizeof(fixed),
+                                               parts) == detail::TraceDefinitionWrite::Written) {
             RememberSpec(specId);
         } else {
             inlineSpec = true;
@@ -181,18 +179,29 @@ Result<void> TraceLogSink::Write(const LogEvent& event) noexcept {
         mask = static_cast<uint8>(mask | (values[index] != 0 ? 1u << index : 0u));
     }
 
-    // 메시지는 MaxTraceLogMessageBytes까지, UTF-8 문자 경계에서 자른다.
+    // 메시지와 동봉 템플릿은 각각 MaxTraceLogMessageBytes까지, UTF-8 문자 경계에서 자른다.
     const StringView message = event.message.LeftBytesAtCodePoint(MaxTraceLogMessageBytes);
-    const bool truncated = message.ByteCount() != event.message.ByteCount();
+    const StringView inlineTemplate =
+        inlineSpec ? event.messageTemplate.LeftBytesAtCodePoint(MaxTraceLogMessageBytes)
+                   : StringView();
+    uint8 truncated = 0;
+    if (message.ByteCount() != event.message.ByteCount()) {
+        truncated = static_cast<uint8>(truncated | Format::LogMessageTruncatedMessage);
+    }
+
+    if (inlineSpec && inlineTemplate.ByteCount() != event.messageTemplate.ByteCount()) {
+        truncated = static_cast<uint8>(truncated | Format::LogMessageTruncatedTemplate);
+    }
+
     StoreLittleEndian<uint32>(fixed + Format::LogMessageFlagsOffset,
                               static_cast<uint32>(event.flags));
     fixed[Format::LogMessageLevelOffset] = static_cast<uint8>(event.level);
     fixed[Format::LogMessageCorrelationMaskOffset] = mask;
-    fixed[Format::LogMessageTruncatedOffset] = truncated ? 1 : 0;
+    fixed[Format::LogMessageTruncatedOffset] = truncated;
     const TraceVariablePart parts[] = {
         TraceVariablePart::FromString(message),
         TraceVariablePart::FromString(inlineSpec ? event.category : StringView()),
-        TraceVariablePart::FromString(inlineSpec ? event.messageTemplate : StringView())};
+        TraceVariablePart::FromString(inlineTemplate)};
     if (detail::WriteSessionRecord(*session, guard.Slot(), detail::TraceLogMessageType, typeId,
                                    fixed, sizeof(fixed), parts) == TraceWriteResult::Lost) {
         AddCounter(lost_);

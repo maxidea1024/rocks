@@ -508,6 +508,7 @@ void WriteLogs(JsonWriter& json, const TraceModel& model) noexcept {
         json.KeyString("category", model.LogCategoryOf(log));
         json.KeyString("message", log.message);
         json.KeyBool("truncated", log.truncated);
+        json.KeyBool("templateTruncated", log.templateTruncated);
         json.Close('}');
     }
 

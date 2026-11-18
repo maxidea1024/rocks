@@ -32,11 +32,15 @@ const CorrelationObserver* CurrentObserver() noexcept {
     return platform::AtomicLoad<MemoryOrder::Acquire>(&observer);
 }
 
-CorrelationScope::PushState Push(const CorrelationEntry& source, bool restored) noexcept {
-    uint32& depth = detail::correlationDepth;
+} // namespace
+
+namespace detail {
+
+CorrelationPushState PushCorrelation(const CorrelationEntry& source, bool restored) noexcept {
+    uint32& depth = correlationDepth;
     if (depth == MaxCorrelationDepth) {
         ++stack.overflow;
-        return CorrelationScope::PushState::Counted;
+        return CorrelationPushState::Counted;
     }
 
     CorrelationEntry& entry = stack.entries[depth++];
@@ -48,32 +52,18 @@ CorrelationScope::PushState Push(const CorrelationEntry& source, bool restored) 
         current->onPush(entry, restored);
     }
 
-    return CorrelationScope::PushState::Pushed;
+    return CorrelationPushState::Pushed;
 }
 
-} // namespace
-
-CorrelationScope::CorrelationScope(const CorrelationIds& ids) noexcept
-    : pushed_(Push(CorrelationEntry{ids, {}}, false)) {
-}
-
-CorrelationScope::CorrelationScope(const CorrelationToken& token) noexcept
-    : pushed_(token.valid ? Push(token.entry, true) : PushState::None) {
-}
-
-CorrelationScope::~CorrelationScope() noexcept {
-    if (pushed_ == PushState::None) {
-        return;
-    }
-
-    if (pushed_ == PushState::Counted) {
+void PopCorrelation(CorrelationPushState state) noexcept {
+    if (state == CorrelationPushState::Counted) {
         --stack.overflow;
         return;
     }
 
     // 상한을 넘겨 세기만 한 쌓기가 남아 있으면 LIFO 순서가 깨진 것이다.
-    uint32& depth = detail::correlationDepth;
-    if (depth == 0 || stack.overflow != 0) {
+    uint32& depth = correlationDepth;
+    if (state != CorrelationPushState::Pushed || depth == 0 || stack.overflow != 0) {
         platform::Fatal("CorrelationScope destroyed out of order");
     }
 
@@ -85,6 +75,8 @@ CorrelationScope::~CorrelationScope() noexcept {
 
     --depth;
 }
+
+} // namespace detail
 
 CorrelationToken CaptureCorrelation() noexcept {
     const uint32 depth = detail::correlationDepth;

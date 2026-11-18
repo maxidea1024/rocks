@@ -2,8 +2,11 @@
 #include <Core/Diagnostics/Correlation.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/Diagnostics/LogSystem.h>
+#include <Core/Function.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Platform/Clock.h>
+#include <Task/WorkerScheduler.h>
+#include <TraceCapture/TraceTask.h>
 
 #include <stdio.h>
 
@@ -17,6 +20,9 @@
 // - async enabled: Async 모드에서 Log::Info(int, double). 출력 스레드는 빈 sink로 보낸다.
 // - sync enabled: Sync 모드에서 같은 호출(렌더·sink까지 호출 스레드가 한다. 참고값)
 // 큐가 차서 버리는 경우가 섞이지 않도록 묶음마다 Flush한다(Flush 시간은 재지 않는다).
+// - 상관 id 전파(14.1.4절): 빈 사본 복원(TraceTaskScope·CorrelationScope 인라인 빈 경로), 사본 +
+//   복원, 그리고 실제 WorkerScheduler Submit → 실행 → Wait 왕복을 스택이 빈 경우와 상관 id가 있는
+//   경우로 나눠 잰다(왕복 차이가 task 하나의 전파 비용이다. trace 세션은 없다).
 //
 // 사용: LogBench [건수]. Release로 빌드해 같은 기기에서 비교한다.
 //
@@ -34,6 +40,8 @@ constexpr uint32 DefaultSamples = 200000;
 // 건수는 BatchSize의 배수로 받는다(묶음 평균).
 constexpr uint32 BatchSize = 1000;
 constexpr uint32 MaxSamples = 2000000;
+// task 왕복 측정 건수는 기록 측정 건수를 이 값으로 나눈 것이다.
+constexpr uint32 TaskSampleDivisor = 10;
 
 uint64 samples[MaxSamples];
 
@@ -129,6 +137,12 @@ void Run(LogMode mode, const char* enabledName, uint32 count) {
             }
         });
         Report("propagate empty", count, emptyPropagation);
+        // scheduler가 task마다 거치는 실행 구간(기록하지 않는 task, 빈 사본)이다.
+        const uint64 emptyTaskScope = Measure(logs, count, [](uint32) noexcept {
+            const TraceTaskInfo info = TraceCreateTask();
+            TraceTaskScope traced(info);
+        });
+        Report("task scope empty", count, emptyTaskScope);
         CorrelationScope request(CorrelationIds{0, 0, 0, 0, 42});
         const uint64 correlated = Measure(logs, count, [](uint32 index) noexcept {
             Log::Info(LogBench, "correlated {Index} {Ratio}", index, 0.5);
@@ -147,6 +161,54 @@ void Run(LogMode mode, const char* enabledName, uint32 count) {
     printf("%-16s written %llu, dropped Info %llu\n", "",
            static_cast<unsigned long long>(stats.written),
            static_cast<unsigned long long>(stats.dropped[static_cast<usize>(LogLevel::Info)]));
+}
+
+// 실제 WorkerScheduler 경로(Submit → worker 실행 → Wait 왕복)를 한 건씩 잰다. worker 하나라 task가
+// 차례로 돈다. 스택이 빈 경우와 상관 id가 있는 경우의 차이가 task 하나의 전파 비용이다(사본 +
+// 복원·내림). 왕복은 깨우기를 포함하므로 차이보다 훨씬 크고 흔들린다(참고값).
+void RunTaskRoundTrip(const char* name, uint32 count) {
+    SystemAllocator allocator;
+    WorkerScheduler scheduler(allocator);
+    WorkerSchedulerConfig config;
+    config.workerCount = 1;
+    if (!scheduler.Start(config)) {
+        printf("Worker scheduler did not start\n");
+        return;
+    }
+
+    uint64 total = 0;
+    uint32 measured = 0;
+    for (uint32 index = 0; index < count; ++index) {
+        const uint64 start = platform::MonotonicTicks();
+        auto body = Function<void(WorkerTaskContext&)>::TryCreate(
+            allocator, [](WorkerTaskContext&) noexcept {});
+        if (!body) {
+            break;
+        }
+
+        auto handle = scheduler.Submit(Move(body.Value()));
+        if (!handle || !handle.Value().Wait()) {
+            break;
+        }
+
+        samples[measured] = platform::MonotonicTicks() - start;
+        total += samples[measured];
+        ++measured;
+    }
+
+    (void)scheduler.Shutdown();
+    if (measured != count) {
+        printf("%-16s stopped after %u of %u tasks\n", name, measured, count);
+        return;
+    }
+
+    Report(name, count, total);
+}
+
+void RunTaskPropagation(uint32 count) {
+    RunTaskRoundTrip("task empty", count);
+    CorrelationScope request(CorrelationIds{0, 0, 0, 0, 42});
+    RunTaskRoundTrip("task correlated", count);
 }
 
 } // namespace
@@ -172,5 +234,7 @@ int main(int argc, char** argv) {
 
     Run(LogMode::Async, "async enabled", count);
     Run(LogMode::Sync, "sync enabled", count);
+    // 왕복은 기록 한 건보다 훨씬 느려 건수를 줄인다.
+    RunTaskPropagation(count / TaskSampleDivisor);
     return 0;
 }

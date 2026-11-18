@@ -330,9 +330,9 @@ Log::Info(LogNet, "Request accepted");
 
 ## trace로 보내기
 
-- `TraceLogSink`(TraceCapture)를 trace 세션 시작 뒤 `LogSystem::AddSink`로 더한다. 끝낼 때는 `LogSystem::Flush` → `RemoveSink` → `TraceSession::Stop` 순서다(Sandbox `--engine`이 이렇게 하고, `--trace-file <path>`로 trace 파일을 쓴다). 채널 `log`(기본 묶음 `default`에 있다)가 켜져 있을 때만 `Trace.LogMessageSpec`·`Trace.LogMessage`를 쓴다.
+- `TraceLogSink`(TraceCapture)를 trace 세션 시작 뒤 `LogSystem::AddSink`로 더한다. 끝낼 때는 `LogSystem::Flush` → `RemoveSink` → `TraceSession::Stop` 순서다(Sandbox `--engine` 연결은 예정이다. `--trace-file <path>`로 trace 파일을 쓰게 한다). 채널 `log`(기본 묶음 `default`에 있다)가 켜져 있을 때만 `Trace.LogMessageSpec`·`Trace.LogMessage`를 쓴다.
 - 카테고리 `Trace`·`Trace.*` 기록과 세션이 없을 때의 기록은 보내지 않는다. 메시지는 1024 byte까지다(UTF-8 경계).
-- spec(카테고리·템플릿·위치)은 호출 지점마다 세션에 한 번 쓴다. 중복 표가 차면 그 뒤 기록에 카테고리·템플릿을 싣는다.
+- spec(카테고리·템플릿·위치)은 호출 지점마다 세션에 한 번 쓴다. 호출 지점은 파일·함수 문자열의 내용으로 가린다. 중복 표가 차거나, spec이 정의 기록 상한(16 KiB)을 넘거나, 정의 버퍼가 차면 그 기록에 카테고리·템플릿(1024 byte까지)을 싣는다. 이 기록에는 위치가 없다. 실린 횟수는 `SpecTableOverflows()`·`SpecWriteFailures()`로 본다.
 - `trace-report`에 `logs`(레벨별 수, Warning 이상 목록)가 나온다.
 
 ## 비정상 종료 때 마지막 로그

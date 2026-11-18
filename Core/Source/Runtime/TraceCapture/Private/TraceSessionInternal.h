@@ -738,6 +738,23 @@ bool WriteStandardDefinition(TraceSessionState& session, const TraceEventType& t
                              const void* fixed, usize fixedBytes,
                              Span<const TraceVariablePart> variable) noexcept;
 
+// TryWriteStandardDefinition의 결과다.
+enum class TraceDefinitionWrite : uint8 {
+    // 썼다
+    Written,
+    // 정의 기록 상한(TraceFormat::MaxDefinitionRecordBytes)을 넘는다(다시 해도 실패한다)
+    TooLarge,
+    // 형이 없거나 정의 버퍼가 차 있다
+    Failed
+};
+
+// WriteStandardDefinition과 같지만 실패를 버린 정의로 세지 않는다. 실패하면 정보를 다른 길(기록에
+// 동봉)로 남기고 따로 세는 호출자(TraceLogSink)가 쓴다. 크기 초과는 버퍼를 건드리기 전에 가린다.
+TraceDefinitionWrite TryWriteStandardDefinition(TraceSessionState& session,
+                                                const TraceEventType& type, const void* fixed,
+                                                usize fixedBytes,
+                                                Span<const TraceVariablePart> variable) noexcept;
+
 // 이 스레드의 스레드 정보(Trace.ThreadInfo)를 정의 기록으로 쓴다.
 void WriteThreadInfo(TraceSessionState& session, const TraceThreadState& state,
                      const TraceThreadSlot& slot) noexcept;
