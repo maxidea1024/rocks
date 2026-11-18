@@ -441,7 +441,7 @@ void RunCapsMatchCreation(Device& device, PixelFormat format, Allocator& allocat
     PipelineDesc pipelineDesc;
     pipelineDesc.vertex = {hlsl, Text(ColorVertexGlsl)};
     pipelineDesc.pixel = {hlsl, glsl};
-    pipelineDesc.colorFormat = format;
+    pipelineDesc.colorFormats[0] = format;
     auto pipeline = device.CreatePipeline(pipelineDesc);
     const bool expected = HasPixelFormatCaps(caps, PixelFormatCaps::RenderTarget);
     ExpectCreation(pipeline.IsOk(), pipeline.IsOk() ? ErrorCode::None : pipeline.Error(), expected,
@@ -634,7 +634,7 @@ void RunViewChecks(Device& device, Allocator& allocator) noexcept {
     PipelineDesc pipelineDesc;
     pipelineDesc.vertex = {Text(LoadFloatHlsl), Text(ColorVertexGlsl)};
     pipelineDesc.pixel = {Text(LoadFloatHlsl), Text(LoadFloatGlsl)};
-    pipelineDesc.colorFormat = PixelFormat::RGBA8Unorm;
+    pipelineDesc.colorFormats[0] = PixelFormat::RGBA8Unorm;
     auto floatLoad = device.CreatePipeline(pipelineDesc);
     pipelineDesc.vertex.hlsl = Text(LoadStencilHlsl);
     pipelineDesc.pixel = {Text(LoadStencilHlsl), Text(LoadStencilGlsl)};

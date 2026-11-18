@@ -159,6 +159,14 @@ Engine/Source/Runtime/OpenGLGraphics/
 
 `CreateOpenGLDevice(allocator, desc, [options,] report)`의 `DeviceCreateReport`([로깅](LoggingSystem.ko.md) 13절 모양)에 실패 단계(호출 이름), 원본 오류(GL error, EGL error, Win32 `GetLastError`, 버전 비교면 major×10+minor), 설명을 적는다. 장치 안 실패는 `LastError`에 직전 GL 오류 이름·값을 덧붙인다. 로그(LG3 API, 13절 표): 장치 생성 성공 Info(`Created {Backend} device on {Adapter} (validation {Validation})`), 검증 계층 메시지 Warning(`Graphics.OpenGL.Validation`, 원문, 메시지 ID마다 1회, 할당 없이 ID 64개까지 기억), present 실패 Error(연속 실패는 1회), 장치 손실 전이 Error(1회). 생성 실패·셰이더 컴파일 실패 로그는 결정하는 호출자가 남긴다(report·`LastError`).
 
+### 5.8 파이프라인·패스·명령 기록 확장(GX3·GX4, 2026-11-18)
+
+- 파이프라인 상태는 프로그램과 함께 기억했다가 `SetPipeline`이 건다: 타깃별 `glEnablei`·`glBlendFuncSeparatei`·`glBlendEquationSeparatei`·`glColorMaski`(ES 3.2 core), `GL_SAMPLE_ALPHA_TO_COVERAGE`, 컬, `glPolygonOffset`(상한은 `GL_EXT_polygon_offset_clamp`의 `glPolygonOffsetClampEXT`, 없으면 `depthBiasClamp` 거짓), 깊이 clamp(`GL_EXT_depth_clamp`), 깊이 시험·쓰기(쓰기만 켜면 `GL_ALWAYS` 시험), `glStencilFuncSeparate`·`glStencilOpSeparate`·`glStencilMaskSeparate`(기준 값은 `SetStencilReference`가 다시 건다), 기본도형.
+- `BeginPass`: 색 하나·깊이 없음은 텍스처의 framebuffer, 그 밖은 장치 framebuffer 하나에 attachment를 붙이고(`glDrawBuffers`, 완전하지 않으면 `Unsupported`) EndFrame이 뗀다. load 동작은 쓰기 mask·scissor를 기본값으로 돌린 뒤 `glClearBuffer{f,i,ui}v`·`glClearBufferfi`다. 패스 동안 scissor를 늘 켜고 대상 전체에서 시작한다(`GL_UPPER_LEFT` 클립 공간이라 창 좌표 y 0이 이미지 위쪽이므로 viewport·scissor 원점을 그대로 쓴다. Android `flip_vert_y` 경로는 SH6에서 다시 본다). present·패스 복사 blit 동안 scissor를 끈다.
+- compute: `#version 320 es` compute 셰이더, 상수 `cu_h[5]`, 읽기 typed는 텍스처 유닛 1 + slot(`samplerBuffer`), 구조화·raw 읽기는 storage binding slot, 쓰기 typed는 image unit slot(`imageBuffer`, `glBindImageTexture`), 구조화·raw 쓰기는 storage binding 4 + slot(이름 접두사 `type_RWByteAddressBuffer`가 raw). 그래픽 단계 image uniform은 거부한다. dispatch 뒤 `glMemoryBarrier(GL_ALL_BARRIER_BITS)`(UE도 dispatch 앞뒤 전체 bit).
+- 간접 명령은 `GL_DRAW_INDIRECT_BUFFER`·`GL_DISPATCH_INDIRECT_BUFFER`를 묶어 `glDrawArraysIndirect`·`glDrawElementsIndirect`·`glDispatchComputeIndirect`다. GL index 간접 인자의 `firstIndex`는 index 버퍼 처음부터 세므로 index 버퍼 offset이 0이 아닌 `DrawIndexedIndirect`는 무시한다. 복사는 `glCopyBufferSubData`·`glCopyImageSubData`, UAV clear는 ES에 `glClearBufferSubData`가 없어 같은 값 묶음을 `glBufferSubData`로 덮어 쓴다.
+- 제약: ES 3.1 최소 보장 `GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS`는 4라 storage binding 4–7(compute 쓰기)을 못 쓰는 기기가 있을 수 있다(그때는 셰이더 링크가 실패한다, 기기 측정은 SH6).
+
 ## 6. 공개 제약
 
 | 제약 | 공개 방법 |
@@ -223,3 +231,4 @@ Engine/Source/Runtime/OpenGLGraphics/
 
 - 개정 1(2026-11-17): 초안·P11 구현.
 - 개정 2(2026-11-18): RenderBase GX1·GX2 버퍼 1단계(5.1절 버퍼 view·장치 능력). texel buffer 형식 능력은 PixelFormat.ko.md 14.3절(RQ9).
+- 개정 3(2026-11-18): GX1·GX2 리뷰 반영(A8 texel buffer 능력 제외, 그래픽 단계 image uniform·유닛 0 밖 sampler 거부, 구조화 stride 대조, viewport 수 1)과 RenderBase GX3·GX4(5.8절).

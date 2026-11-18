@@ -182,8 +182,8 @@ struct Bench {
         desc.vertex = {sample::BuiltinShaderHlsl(), sample::BuiltinVertexGlsl()};
         desc.pixel = {sample::BuiltinShaderHlsl(), sample::BuiltinPixelGlsl()};
         desc.layout = {attributes, streams};
-        desc.colorFormat = PixelFormat::RGBA8UnormSrgb;
-        desc.cullMode = cull;
+        desc.colorFormats[0] = PixelFormat::RGBA8UnormSrgb;
+        desc.raster.cullMode = cull;
         return device->CreatePipeline(desc);
     }
 };
@@ -276,7 +276,7 @@ void RunFacingChecks(Bench& bench, bool window, Array<uint8>& pixels) noexcept {
     desc.vertex = {hlsl, StringView(FacingVertexGlsl, sizeof(FacingVertexGlsl) - 1)};
     desc.pixel = {hlsl, StringView(FacingPixelGlsl, sizeof(FacingPixelGlsl) - 1)};
     desc.layout = {attributes, streams};
-    desc.colorFormat = PixelFormat::RGBA8UnormSrgb;
+    desc.colorFormats[0] = PixelFormat::RGBA8UnormSrgb;
     auto pipeline = bench.device->CreatePipeline(desc);
     Check(pipeline.IsOk(), "facing pipeline creation");
     if (!pipeline) {

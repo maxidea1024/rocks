@@ -141,9 +141,9 @@ Result<void> Renderer::Initialize(graphics::Device& device,
     pipeline.vertex = {BuiltinShaderHlsl(), BuiltinVertexGlsl()};
     pipeline.pixel = {BuiltinShaderHlsl(), BuiltinPixelGlsl()};
     pipeline.layout = {attributes, streams};
-    pipeline.colorFormat = colorFormat;
-    pipeline.alphaBlend = true;
-    pipeline.cullMode = graphics::CullMode::Back;
+    pipeline.colorFormats[0] = colorFormat;
+    pipeline.blend[0] = graphics::AlphaBlend();
+    pipeline.raster.cullMode = graphics::CullMode::Back;
     // 파이프라인(셰이더 컴파일 포함)의 실패를 결정하는 곳이 여기다. 장치는 원인을 LastError에만
     // 남긴다(셰이더 컴파일 실패면 "Shader <entry> (<target>) failed to compile ...").
     const auto logPipelineFailure = [&device](const char* variant, ErrorCode error) noexcept {
@@ -158,7 +158,7 @@ Result<void> Renderer::Initialize(graphics::Device& device,
         logPipelineFailure("back-face culling", createdPipeline.Error());
         return Result<void>::Failure(createdPipeline.Error());
     }
-    pipeline.cullMode = graphics::CullMode::Front;
+    pipeline.raster.cullMode = graphics::CullMode::Front;
     auto reversedPipeline = device.CreatePipeline(pipeline);
     if (!reversedPipeline) {
         logPipelineFailure("front-face culling", reversedPipeline.Error());

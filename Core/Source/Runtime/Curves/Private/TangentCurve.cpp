@@ -37,7 +37,7 @@ Result<void> TangentCurve::TryCopyFrom(const TangentCurve& other) noexcept {
 
 float TangentCurve::Evaluate(float time, float fallback) const noexcept {
     return curves_detail::EvaluateCurve(
-        *this, keys_.View(), time, fallback, false,
+        defaultValue, preExtrapolation, postExtrapolation, keys_.View(), time, fallback, false,
         [](const TangentCurveKey& first, const TangentCurveKey& second, float at) noexcept {
             return math::EvalCurveSegment(first, second, at);
         });

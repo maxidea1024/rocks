@@ -45,6 +45,34 @@
     },
     {
       "kind": "field",
+      "name": "rocks::curves_fixture::PackedCurveHolder::list",
+      "id": "47076bb176ee4f01b0fb59b6e19986e0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::curves_fixture::PackedCurveHolder::maybe",
+      "id": "417ed261253247018735ce01b684e334",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::curves_fixture::PackedCurveHolder::packed",
+      "id": "34218cb757b340408d39787bcf2c3cf0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::curves_fixture::StepCurveHolder::anyNames",
+      "id": "bffeac8fa83e420bb36aa574a23a1815",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::curves_fixture::StepCurveHolder::byKey",
       "id": "c78b09b70a684d999a5acac6fd944229",
       "aliases": [],
@@ -89,6 +117,13 @@
       "kind": "type",
       "name": "rocks::curves_fixture::CurveHolder",
       "id": "0fdcfeb56d3448c4b0e3df6855d9b19c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::curves_fixture::PackedCurveHolder",
+      "id": "5801f02af08f47dc8a42a7d880b62f5f",
       "aliases": [],
       "retired": false
     },

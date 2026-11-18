@@ -87,6 +87,7 @@ Result<ResolvedBufferView> ResolveBufferView(const BufferDesc& buffer,
 
         elementBytes = buffer.stride;
         break;
+
     case BufferViewKind::Raw:
         if (!HasAnyBufferUsage(buffer.usage, BufferUsage::Raw) ||
             view.format != PixelFormat::Unknown || view.offset % RawViewOffsetAlignment != 0) {
@@ -151,6 +152,30 @@ Result<void> CheckBufferViewLimits(const DeviceLimits& limits, PixelFormatCaps f
     return Result<void>::Success();
 }
 
+bool AddDrawBufferSlot(DrawBufferSlots& slots, uint32 slot, BufferViewKind kind,
+                       PixelShaderType type, uint32 stride) noexcept {
+    if (slot >= MaxDrawBufferViews) {
+        return false;
+    }
+
+    const uint32 bit = 1u << slot;
+    if ((slots.usedMask & bit) != 0) {
+        const uint32 known = slots.structureStrides[slot];
+        if (known == 0) {
+            slots.structureStrides[slot] = stride;
+        }
+
+        return slots.kinds[slot] == kind && slots.typedShaderTypes[slot] == type &&
+               (known == 0 || stride == 0 || known == stride);
+    }
+
+    slots.usedMask |= bit;
+    slots.kinds[slot] = kind;
+    slots.typedShaderTypes[slot] = type;
+    slots.structureStrides[slot] = kind == BufferViewKind::Structured ? stride : 0u;
+    return true;
+}
+
 bool DrawBufferSlotsSatisfied(const DrawBufferSlots& slots,
                               const BoundBufferViewInfo (&bound)[MaxDrawBufferViews]) noexcept {
     for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
@@ -159,9 +184,11 @@ bool DrawBufferSlotsSatisfied(const DrawBufferSlots& slots,
         }
 
         const BoundBufferViewInfo& view = bound[slot];
+        const uint32 declared = slots.structureStrides[slot];
         if (!view.bound || view.kind != slots.kinds[slot] ||
             (view.kind == BufferViewKind::Typed &&
-             view.shaderType != slots.typedShaderTypes[slot])) {
+             view.shaderType != slots.typedShaderTypes[slot]) ||
+            (view.kind == BufferViewKind::Structured && declared != 0 && view.stride != declared)) {
             return false;
         }
     }

@@ -72,8 +72,10 @@ constexpr NameEntry<ShaderHost> HostNames[] = {{"windows-x64", ShaderHost::Windo
 constexpr NameEntry<uint32> StageNames[] = {
     {"vertex", ShaderStageVertex}, {"pixel", ShaderStagePixel}, {"compute", ShaderStageCompute}};
 
-constexpr NameEntry<uint32> FeatureNames[] = {{"compute", ShaderFeatureCompute},
-                                              {"waveOperations", ShaderFeatureWaveOperations}};
+constexpr NameEntry<uint32> FeatureNames[] = {
+    {"compute", ShaderFeatureCompute},
+    {"waveOperations", ShaderFeatureWaveOperations},
+    {"vertexViewportLayerOutput", ShaderFeatureVertexViewportLayerOutput}};
 
 constexpr NameEntry<uint32> DeviceRequirementNames[] = {
     {"D3D_FEATURE_LEVEL_11_0", DeviceRequiresD3DFeatureLevel11_0},
@@ -1163,34 +1165,6 @@ ShaderFormatStatus LoadEngineCompileProfile(const char* directory, StringView pr
     }
 
     return ResolveEngineCompileProfile(desc, definitions.View(), out);
-}
-
-ShaderFormatLimits CommonLimits(Span<const ShaderFormatDefinition> formats) noexcept {
-    ShaderFormatLimits common;
-    if (formats.Size() == 0) {
-        return common;
-    }
-
-    common = formats[0].limits;
-    auto lower = [](uint32& target, uint32 value) { target = value < target ? value : target; };
-    for (usize index = 1; index < formats.Size(); ++index) {
-        const ShaderFormatLimits& limits = formats[index].limits;
-        lower(common.constantBuffers, limits.constantBuffers);
-        lower(common.sampledTextures, limits.sampledTextures);
-        lower(common.storageBuffers, limits.storageBuffers);
-        lower(common.storageImages, limits.storageImages);
-        lower(common.samplers, limits.samplers);
-        lower(common.uavTotal, limits.uavTotal);
-        common.uavStages &= limits.uavStages;
-        lower(common.renderTargets, limits.renderTargets);
-        lower(common.interStageVectors, limits.interStageVectors);
-        lower(common.rootConstantBytes, limits.rootConstantBytes);
-        for (usize stage = 0; stage < 3; ++stage) {
-            lower(common.uniformVectors[stage], limits.uniformVectors[stage]);
-        }
-    }
-
-    return common;
 }
 
 } // namespace rocks::shader

@@ -7,7 +7,7 @@ public sealed class D3D11Graphics : EngineModuleRules
 {
     protected override string ModuleName => "D3D11Graphics";
 
-    protected override string[] RequiredModules => ["Graphics"];
+    protected override string[] RequiredModules => ["Graphics", "DxgiGraphics"];
 
     public override NativeModuleInput Configure(BuildContext context)
     {

@@ -239,18 +239,24 @@ Result<VulkanDevice::UploadSpace> VulkanDevice::StageUpload(uint64 size) noexcep
 
 void VulkanDevice::RecordBufferCopy(VkBuffer source, uint64 sourceOffset, VkBuffer target,
                                     uint64 targetOffset, uint64 size) noexcept {
-    // 같은 묶음에서 겹치는 구간을 두 번 쓰면 두 복사 사이에 순서가 없으므로 barrier를 둔다.
-    bool overlaps = bufferWriteCount_ == MaxTrackedBufferWrites;
-    for (uint32 index = 0; index < bufferWriteCount_ && !overlaps; ++index) {
-        const BufferWrite& write = bufferWrites_[index];
-        overlaps =
-            write.buffer == target && targetOffset < write.end && write.begin < targetOffset + size;
-    }
+    // 같은 묶음의 복사끼리는 순서가 없다. 앞 복사가 쓴 구간을 다시 쓰거나(WAW) 원본으로 읽으면(RAW,
+    // 초기 데이터를 올린 직후의 ReadBuffer 등) 그 사이에 barrier를 둔다.
+    const auto overlapping = [this](VkBuffer buffer, uint64 begin, uint64 end) noexcept {
+        for (uint32 index = 0; index < bufferWriteCount_; ++index) {
+            const BufferWrite& write = bufferWrites_[index];
+            if (write.buffer == buffer && begin < write.end && write.begin < end) {
+                return true;
+            }
+        }
 
-    if (overlaps) {
+        return false;
+    };
+    if (bufferWriteCount_ == MaxTrackedBufferWrites ||
+        overlapping(target, targetOffset, targetOffset + size) ||
+        overlapping(source, sourceOffset, sourceOffset + size)) {
         GlobalBarrier(functions_, upload_, VK_PIPELINE_STAGE_TRANSFER_BIT,
                       VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                      VK_ACCESS_TRANSFER_WRITE_BIT);
+                      VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT);
         bufferWriteCount_ = 0;
     }
 

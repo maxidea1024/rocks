@@ -363,9 +363,9 @@ Result<CommandContext*> RecordingDevice::BeginFrame(SwapChainHandle swapChain,
     return Result<CommandContext*>::Success(this);
 }
 
-Result<CommandContext*> RecordingDevice::BeginOffscreen(TextureHandle target,
-                                                        const ClearColor& clear) noexcept {
-    (void)clear;
+// 기록 장치는 색 attachment 하나(첫 색)만 기록한다(렌더 그래프 시험 범위).
+Result<CommandContext*> RecordingDevice::BeginPass(const PassDesc& pass) noexcept {
+    const TextureHandle target = pass.colorCount != 0 ? pass.colors[0].texture : TextureHandle{};
     auto owner = ownership_.Check();
     if (!owner) {
         return Result<CommandContext*>::Failure(owner.Error());
@@ -479,6 +479,77 @@ void RecordingDevice::Retire(BufferViewHandle view) noexcept {
 void RecordingDevice::SetBufferView(uint32 slot, BufferViewHandle view) noexcept {
     (void)slot;
     (void)view;
+}
+
+// 아래 GX3·GX4 명령은 기록 장치가 쓰지 않는다(렌더 그래프 시험 범위 밖).
+Result<PipelineHandle>
+RecordingDevice::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
+    (void)desc;
+    return Result<PipelineHandle>::Failure(ErrorCode::Unsupported);
+}
+
+void RecordingDevice::SetWritableBufferView(uint32 slot, BufferViewHandle view) noexcept {
+    (void)slot;
+    (void)view;
+}
+
+void RecordingDevice::DrawIndirect(BufferHandle arguments, uint64 offset) noexcept {
+    (void)arguments;
+    (void)offset;
+}
+
+void RecordingDevice::DrawIndexedIndirect(BufferHandle arguments, uint64 offset) noexcept {
+    (void)arguments;
+    (void)offset;
+}
+
+void RecordingDevice::Dispatch(uint32 groupCountX, uint32 groupCountY,
+                               uint32 groupCountZ) noexcept {
+    (void)groupCountX;
+    (void)groupCountY;
+    (void)groupCountZ;
+}
+
+void RecordingDevice::DispatchIndirect(BufferHandle arguments, uint64 offset) noexcept {
+    (void)arguments;
+    (void)offset;
+}
+
+void RecordingDevice::SetViewport(const Viewport& viewport) noexcept {
+    (void)viewport;
+}
+
+void RecordingDevice::SetScissor(const ScissorRect& scissor) noexcept {
+    (void)scissor;
+}
+
+void RecordingDevice::SetStencilReference(uint32 reference) noexcept {
+    (void)reference;
+}
+
+Result<void> RecordingDevice::CopyBuffer(BufferHandle destination, uint64 destinationOffset,
+                                         BufferHandle source, uint64 sourceOffset,
+                                         uint64 size) noexcept {
+    (void)destination;
+    (void)destinationOffset;
+    (void)source;
+    (void)sourceOffset;
+    (void)size;
+    return Result<void>::Failure(ErrorCode::Unsupported);
+}
+
+Result<void> RecordingDevice::CopyTexture(TextureHandle destination,
+                                          TextureHandle source) noexcept {
+    (void)destination;
+    (void)source;
+    return Result<void>::Failure(ErrorCode::Unsupported);
+}
+
+Result<void> RecordingDevice::ClearWritableBufferView(BufferViewHandle view,
+                                                      uint32 value) noexcept {
+    (void)view;
+    (void)value;
+    return Result<void>::Failure(ErrorCode::Unsupported);
 }
 
 void RecordingDevice::Retire(BufferHandle buffer) noexcept {

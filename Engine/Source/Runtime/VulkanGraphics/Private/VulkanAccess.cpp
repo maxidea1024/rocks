@@ -194,15 +194,14 @@ void VulkanDevice::ResumeRenderPass() noexcept {
         return;
     }
 
-    // 패스 대상 자신이 전이로 렌더 타깃 상태를 떠났으면 다시 열지 않는다(그 사이 그리기는
-    // 무시된다). 닫힌 표시는 남겨 대상이 렌더 타깃으로 돌아오는 전이에서 다시 연다.
-    const TextureRecord* target = textures_.Find(target_.texture.slot);
-    if (target != nullptr && target->current[0] != ResourceAccess::RenderTarget) {
+    // 패스 attachment가 전이로 attachment 상태를 떠났으면 다시 열지 않는다(그 사이 그리기는
+    // 무시된다). 닫힌 표시는 남겨 attachment가 돌아오는 다음 전이에서 다시 연다.
+    if (!AttachmentsReady()) {
         return;
     }
 
     renderPassSuspended_ = false;
-    BeginRenderPass(true, nullptr);
+    BeginRenderPass(true);
 }
 
 void VulkanDevice::TrackTransition(TextureRecord& record, SlotHandle slot, uint32 first,
@@ -338,10 +337,10 @@ void VulkanDevice::Transition(Span<const ResourceTransition> transitions) noexce
         }
 
         // 이미지 usage에 없는 layout으로는 바꿀 수 없다. 렌더 타깃이 아닌 텍스처의 렌더 타깃 상태와
-        // 깊이 상태(깊이 텍스처는 GX4)는 무시로 센다.
+        // 깊이 타깃이 아닌 텍스처의 깊이 상태는 무시로 센다.
         if ((HasAnyAccess(transition.after, ResourceAccess::RenderTarget) &&
              !record->renderTarget) ||
-            HasAnyAccess(transition.after, DepthAccessMask)) {
+            (HasAnyAccess(transition.after, DepthAccessMask) && !record->depthTarget)) {
             ++ignoredDraws_;
             continue;
         }

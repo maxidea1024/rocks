@@ -9,6 +9,7 @@
 #include <Graphics/DeviceOwnership.h>
 #include <Graphics/FenceTimeline.h>
 #include <Graphics/GraphicsLog.h>
+#include <Graphics/ShaderSourceCompiler.h>
 #include <Graphics/StagingPool.h>
 #include <Graphics/TimestampRing.h>
 #include <Graphics/UploadRing.h>
@@ -21,6 +22,7 @@
 // - D3D11Device.cpp: 생성·장치 정보·fence·소유권·회수·검증 집계
 // - D3D11Resources.cpp: 스왑체인·버퍼·텍스처·파이프라인·샘플러·Retire
 // - D3D11Frame.cpp: 프레임 시작·제출과 기록(CommandContext)
+// - D3D11Commands.cpp: 파이프라인 상태·compute·패스 attachment·간접 명령·복사·UAV clear(GX3·GX4)
 // - D3D11Upload.cpp: 업로드 기록·ring·staging·readback·WaitIdle
 // - D3D11Timing.cpp: timestamp·calibration·marker
 namespace rocks::graphics::d3d11 {
@@ -36,9 +38,12 @@ struct BufferRecord {
 struct BufferViewRecord {
     ComRef<ID3D11ShaderResourceView> srv;
     ComRef<ID3D11UnorderedAccessView> uav;
+    PixelFormat format = PixelFormat::Unknown;
     BufferViewKind kind = BufferViewKind::Typed;
     ViewAccess access = ViewAccess::Read;
     PixelShaderType shaderType = PixelShaderType::None;
+    // 구조화 view의 원소 byte다(셰이더 선언 stride와 대조한다).
+    uint32 stride = 0;
 };
 
 struct TextureRecord {
@@ -47,8 +52,10 @@ struct TextureRecord {
     ComRef<ID3D11ShaderResourceView> srv;
     // RenderTarget만 있다.
     ComRef<ID3D11RenderTargetView> rtv;
-    // DepthStencil만 있다.
+    // DepthStencil만 있다. readOnlyDsv는 읽기 전용 깊이
+    // attachment(DepthAttachment::readOnly)용이다.
     ComRef<ID3D11DepthStencilView> dsv;
+    ComRef<ID3D11DepthStencilView> readOnlyDsv;
     uint32 width = 0;
     uint32 height = 0;
     uint32 mipLevels = 1;
@@ -68,14 +75,22 @@ struct PipelineRecord {
     ComRef<ID3D11PixelShader> pixelShader;
     // 정점 입력이 없는 배치면 비어 있다.
     ComRef<ID3D11InputLayout> inputLayout;
-    bool alphaBlend = false;
-    // 버릴 면이다(장치의 모드별 래스터 상태를 고른다).
-    CullMode cullMode = CullMode::None;
+    // 고정 기능 상태다(GX3, 파이프라인마다 만든다).
+    ComRef<ID3D11BlendState> blend;
+    ComRef<ID3D11RasterizerState> raster;
+    ComRef<ID3D11DepthStencilState> depthStencil;
+    // compute 파이프라인이면 이것만 있다.
+    ComRef<ID3D11ComputeShader> computeShader;
+    D3D11_PRIMITIVE_TOPOLOGY topology = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
     // stream별 stride와 배치가 선언한 stream mask다(그리기 때 묶인 정점 버퍼를 확인한다).
     uint32 strides[MaxVertexStreams] = {};
     uint32 streamMask = 0;
-    // VS·PS가 읽는 버퍼 view slot이다(리플렉션).
+    // VS·PS(compute면 CS)가 읽는 버퍼 view slot과 CS가 쓰는 slot이다(리플렉션).
     DrawBufferSlots bufferSlots;
+    DrawBufferSlots writeSlots;
+    bool compute = false;
+    // 깊이·스텐실을 쓴다(읽기 전용 깊이 attachment에서 그리기를 거른다).
+    bool writesDepthStencil = false;
 };
 
 // flip model 스왑체인이다. D3D11 runtime이 버퍼를 돌리므로 버퍼 0과 그 RTV만 쥔다.
@@ -204,6 +219,7 @@ public:
     Result<TextureHandle> CreateTexture(const TextureDesc& desc,
                                         Span<const uint8> pixels) noexcept override;
     Result<PipelineHandle> CreatePipeline(const PipelineDesc& desc) noexcept override;
+    Result<PipelineHandle> CreateComputePipeline(const ComputePipelineDesc& desc) noexcept override;
     // 장치 생성 때 CheckFormatSupport로 채운 능력이다(PixelFormat.ko.md PF4).
     PixelFormatCaps GetPixelFormatCaps(PixelFormat format) const noexcept override;
     Result<TextureHandle> CreateTextureView(TextureHandle texture,
@@ -212,8 +228,7 @@ public:
                              Span<uint8> out) noexcept override;
     Result<CommandContext*> BeginFrame(SwapChainHandle swapChain,
                                        const ClearColor& clear) noexcept override;
-    Result<CommandContext*> BeginOffscreen(TextureHandle target,
-                                           const ClearColor& clear) noexcept override;
+    Result<CommandContext*> BeginPass(const PassDesc& pass) noexcept override;
     Result<GpuFencePoint> EndFrame() noexcept override;
     Result<void> ReadPixels(TextureHandle target, Span<uint8> out) noexcept override;
     void Retire(BufferHandle buffer) noexcept override;
@@ -258,7 +273,8 @@ public:
     usize PendingRetireCount() const noexcept override;
 
 private:
-    // 기록 대상(백버퍼 또는 RenderTarget 텍스처)이다.
+    // 기록 대상(백버퍼 또는 BeginPass attachment)이다. 색 0(rtv·resource·format·texture)은
+    // CopyPassTarget이 쓴다.
     struct Target {
         ID3D11RenderTargetView* rtv = nullptr;
         // 패스 대상 자원이다(CopyPassTarget의 원본).
@@ -269,6 +285,13 @@ private:
         PixelFormat format = PixelFormat::Unknown;
         // offscreen 패스의 대상 텍스처다(스왑체인 패스는 null).
         TextureHandle texture;
+        // 모든 attachment다(스왑체인 패스는 색 1개).
+        uint32 colorCount = 0;
+        ID3D11RenderTargetView* rtvs[MaxColorTargets] = {};
+        TextureHandle colors[MaxColorTargets];
+        ID3D11DepthStencilView* dsv = nullptr;
+        TextureHandle depth;
+        bool depthReadOnly = false;
     };
 
     // 기록 중 묶인 정점·index 버퍼다(파이프라인을 바꾸면 그 stride로 다시 묶는다).
@@ -309,6 +332,32 @@ private:
     Result<uint64> WriteTimestamp() noexcept override;
     void PushMarker(StringView name) noexcept override;
     void PopMarker() noexcept override;
+
+    // --- GX3·GX4(D3D11Commands.cpp) ---
+
+    void SetWritableBufferView(uint32 slot, BufferViewHandle view) noexcept override;
+    void DrawIndirect(BufferHandle arguments, uint64 offset) noexcept override;
+    void DrawIndexedIndirect(BufferHandle arguments, uint64 offset) noexcept override;
+    void Dispatch(uint32 groupCountX, uint32 groupCountY, uint32 groupCountZ) noexcept override;
+    void DispatchIndirect(BufferHandle arguments, uint64 offset) noexcept override;
+    void SetViewport(const Viewport& viewport) noexcept override;
+    void SetScissor(const ScissorRect& scissor) noexcept override;
+    void SetStencilReference(uint32 reference) noexcept override;
+    Result<void> CopyBuffer(BufferHandle destination, uint64 destinationOffset, BufferHandle source,
+                            uint64 sourceOffset, uint64 size) noexcept override;
+    Result<void> CopyTexture(TextureHandle destination, TextureHandle source) noexcept override;
+    Result<void> ClearWritableBufferView(BufferViewHandle view, uint32 value) noexcept override;
+    // 파이프라인 고정 기능 상태 객체(blend·raster·depth-stencil)를 만든다(잠금 안).
+    Result<void> CreatePipelineStates(const PipelineDesc& desc, PipelineRecord& record) noexcept;
+    // 그리기 직전 조건을 보고 VS·PS 버퍼 view와(dispatch 뒤면) 정점·index 버퍼를 다시 묶는다.
+    // 그릴 수 없으면 거짓이다.
+    bool PrepareDraw(bool indexed) noexcept;
+    // dispatch 직전 조건을 보고 CS 상수·읽기 view·쓰기 view를 묶는다.
+    bool PrepareDispatch() noexcept;
+    // dispatch 뒤 CS view를 풀어 다음 그리기가 같은 버퍼를 읽을 수 있게 한다.
+    void FinishDispatch() noexcept;
+    // 간접 인자 버퍼(Indirect 용도, offset 4 byte 배수, 범위 안)다. 아니면 null이다.
+    ID3D11Buffer* IndirectArguments(BufferHandle arguments, uint64 offset, uint64 bytes) noexcept;
 
     // --- 생성(D3D11Device.cpp) ---
 
@@ -373,15 +422,14 @@ private:
     // 객체들을 회수 대기로 넘긴다(잠금 안).
     void RetireObjects(ComRef<IUnknown> (&objects)[MaxRetiredObjects]) noexcept;
 
-    template <class A, class B = IUnknown, class C = IUnknown>
-    void Defer(ComRef<A>&& first, ComRef<B>&& second = ComRef<B>(),
-               ComRef<C>&& third = ComRef<C>()) noexcept {
+    template <class... T>
+    void Defer(ComRef<T>&&... objects) noexcept {
+        static_assert(sizeof...(T) <= MaxRetiredObjects, "too many objects for one retire entry");
         // 모든 D3D 인터페이스는 IUnknown을 단일 상속하므로 포인터 변환이 안전하다.
-        ComRef<IUnknown> objects[MaxRetiredObjects];
-        objects[0].Attach(first.Detach());
-        objects[1].Attach(second.Detach());
-        objects[2].Attach(third.Detach());
-        RetireObjects(objects);
+        ComRef<IUnknown> list[MaxRetiredObjects];
+        usize index = 0;
+        ((list[index++].Attach(objects.Detach())), ...);
+        RetireObjects(list);
     }
 
     // 소멸 때까지 놓지 않는다(완료를 알 수 없는 제출이 쓰던 객체).
@@ -399,8 +447,10 @@ private:
                          ComRef<ID3DBlob>& code) noexcept;
     Result<void> MatchVertexInputs(ID3DBlob* code, const VertexLayout& layout) noexcept;
     // --- 버퍼 view(D3D11Buffers.cpp) ---
-    // 셰이더 자원이 고정 배치(PipelineDesc) 안인지 보고 버퍼 view slot 배치를 slots에 더한다.
-    Result<void> ReflectBindings(ID3DBlob* code, bool pixel, DrawBufferSlots& slots) noexcept;
+    // 셰이더 자원이 고정 배치(PipelineDesc·ComputePipelineDesc) 안인지 보고 버퍼 view slot 배치를
+    // slots에, CS 쓰기 slot을 writeSlots에 더한다.
+    Result<void> ReflectBindings(ID3DBlob* code, ShaderStage stage, DrawBufferSlots& slots,
+                                 DrawBufferSlots* writeSlots) noexcept;
     // 지금 파이프라인이 읽는 버퍼 view slot이 모두 맞는 view로 채워졌는지다(잠금 안).
     bool BufferViewsBound() const noexcept;
     Result<void> CheckVertexFormats(const VertexLayout& layout) noexcept;
@@ -412,7 +462,7 @@ private:
 
     // --- 기록(D3D11Frame.cpp) ---
 
-    void BeginRecording(const Target& target, const ClearColor& clear) noexcept;
+    void BeginRecording(const Target& target, const PassDesc& pass) noexcept;
     void WriteConstants(const DrawConstants& constants) noexcept;
     void ApplyVertexBuffer(uint32 stream) noexcept;
     bool StreamsBound() const noexcept;
@@ -482,12 +532,6 @@ private:
     HANDLE watcherEvent_ = nullptr;
     // 마지막으로 신호한 fence 값이다.
     uint64 fenceValue_ = 0;
-    // 파이프라인끼리 공유하는 고정 상태다.
-    // 컬 모드(CullMode 값 순서)별 래스터 상태다.
-    ComRef<ID3D11RasterizerState> rasterizers_[CullModeCount];
-    ComRef<ID3D11DepthStencilState> depthDisabled_;
-    ComRef<ID3D11BlendState> opaqueBlend_;
-    ComRef<ID3D11BlendState> alphaBlend_;
     // 그리기 상수(DrawConstants, b0) 동적 상수 버퍼다.
     ComRef<ID3D11Buffer> constants_;
     Target target_;
@@ -498,6 +542,12 @@ private:
     BoundIndexBuffer boundIndex_;
     // 그리기 slot에 묶인 버퍼 view다(GX2).
     BufferViewHandle boundViews_[MaxDrawBufferViews];
+    // compute 쓰기 slot에 묶인 view(GX4)와 스텐실 기준 값이다.
+    BufferViewHandle boundWriteViews_[MaxDrawBufferViews];
+    uint32 stencilReference_ = 0;
+    // dispatch가 UAV를 묶어 런타임이 입력 binding(정점·index·SRV)을 풀었을 수 있다. 다음 그리기가
+    // 정점·index 버퍼를 다시 묶는다.
+    bool inputsDirty_ = false;
     uint64 ignoredDraws_ = 0;
     // 검증 메시지는 읽을 때마다 비우고 여기에 누적한다(저장 한도로 오래된 오류가 밀려나지 않게).
     mutable uint64 validationErrors_ = 0;

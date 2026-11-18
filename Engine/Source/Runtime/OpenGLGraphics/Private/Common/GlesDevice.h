@@ -15,7 +15,8 @@
 // OpenGL ES 3.2 장치의 공통 구현이다(설계: Docs/Design/OpenGLESGraphics.ko.md). 플랫폼 층
 // (GlesPlatform)이 만든 context 위에서 ES 3.2 core API만 쓴다. 구현은 기능별로 나눈다:
 // GlesDevice.cpp(생성·자원·회수), GlesDeviceFrame.cpp(프레임·기록·present), GlesDeviceTransfer.cpp
-// (업로드·readback·계측·소유권).
+// (업로드·readback·계측·소유권), GlesDeviceBuffers.cpp(장치 능력·버퍼 view), GlesDeviceCommands.cpp
+// (파이프라인 고정 기능 상태·compute·패스 attachment·간접 명령·복사·UAV clear, GX3·GX4).
 namespace rocks::graphics::gles {
 
 // 텍스처 유닛 배정이다(ShaderSystem 7.2절 4항): PS·CS 0부터, VS 16부터. 업로드는 그리기 유닛과
@@ -30,14 +31,19 @@ inline constexpr GLuint PixelBufferViewUnitBase = PixelTextureUnit + 1;
 inline constexpr GLuint VertexBufferViewUnitBase = VertexTextureUnitBase + 1;
 // 조회 수단이 없는 버퍼 최대 크기의 보수적 값이다(D3D 보장식의 하한 128 MiB, DeviceLimits).
 inline constexpr uint64 ConservativeBufferBytes = uint64{128} << 20;
-// raw view로 읽는 storage block 이름의 접두사다(SPIRV-Cross가 ByteAddressBuffer에 붙이는 이름).
-// 그 밖의 storage block은 구조화 view다.
+// raw view로 읽는 storage block 이름의 접두사다(SPIRV-Cross가
+// ByteAddressBuffer·RWByteAddressBuffer에 붙이는 이름). 그 밖의 storage block은 구조화 view다.
 inline constexpr char RawStorageBlockPrefix[] = "type_ByteAddressBuffer";
+inline constexpr char RawWritableStorageBlockPrefix[] = "type_RWByteAddressBuffer";
+// compute 쓰기 view slot n의 구조화·raw storage block binding은 WritableStorageBindingBase + n이고
+// typed는 image unit n이다(ComputePipelineDesc 고정 배치).
+inline constexpr GLuint WritableStorageBindingBase = MaxDrawBufferViews;
 
 // 그리기 상수(DrawConstants)를 담는 루트 상수 에뮬레이션 배열의 이름과 vec4 수다(ShaderSystem
 // 7.2절 4항: `<단계>u_<타입>`, UE `$Globals`의 pu_h 자리).
 inline constexpr char VertexRootConstantsName[] = "vu_h";
 inline constexpr char PixelRootConstantsName[] = "pu_h";
+inline constexpr char ComputeRootConstantsName[] = "cu_h";
 inline constexpr GLsizei RootConstantVectors = sizeof(DrawConstants) / (4 * sizeof(float));
 static_assert(sizeof(DrawConstants) == RootConstantVectors * 4 * sizeof(float),
               "DrawConstants must be a whole number of vec4 slots");
@@ -82,6 +88,9 @@ struct BufferViewRecord {
     SlotHandle source;
     uint64 offset = 0;
     uint64 size = 0;
+    // 구조화 view의 원소 byte다(셰이더 선언 stride와 대조한다).
+    uint32 stride = 0;
+    PixelFormat format = PixelFormat::Unknown;
     BufferViewKind kind = BufferViewKind::Typed;
     ViewAccess access = ViewAccess::Read;
     PixelShaderType shaderType = PixelShaderType::None;
@@ -125,13 +134,24 @@ struct PipelineRecord {
     // 루트 상수 에뮬레이션 배열 위치다(셰이더가 쓰지 않으면 -1).
     GLint vertexConstants = -1;
     GLint pixelConstants = -1;
+    GLint computeConstants = -1;
     // stream별 stride와 배치가 선언한 stream mask다.
     uint32 strides[MaxVertexStreams] = {};
     uint32 streamMask = 0;
-    bool alphaBlend = false;
-    CullMode cullMode = CullMode::None;
-    // VS·PS가 읽는 버퍼 view slot이다(program introspection).
+    // 고정 기능 상태다(GX3). SetPipeline이 GL 상태로 건다.
+    GLenum topology = GL_TRIANGLES;
+    uint32 colorTargetCount = 1;
+    ColorTargetBlend blend[MaxColorTargets];
+    bool alphaToCoverage = false;
+    DepthStencilState depthStencil;
+    RasterState raster;
+    // 깊이·스텐실을 쓴다(읽기 전용 깊이 attachment에서 그리기를 거른다).
+    bool writesDepthStencil = false;
+    // compute 프로그램이다(Dispatch만 쓴다).
+    bool compute = false;
+    // VS·PS(compute면 CS)가 읽는 버퍼 view slot과 CS가 쓰는 slot이다(program introspection).
     DrawBufferSlots bufferSlots;
+    DrawBufferSlots writeSlots;
 };
 
 struct SwapChainRecord {
@@ -225,6 +245,7 @@ public:
     Result<TextureHandle> CreateTexture(const TextureDesc& desc,
                                         Span<const uint8> pixels) noexcept override;
     Result<PipelineHandle> CreatePipeline(const PipelineDesc& desc) noexcept override;
+    Result<PipelineHandle> CreateComputePipeline(const ComputePipelineDesc& desc) noexcept override;
     PixelFormatCaps GetPixelFormatCaps(PixelFormat format) const noexcept override;
     Result<TextureHandle> CreateTextureView(TextureHandle texture,
                                             const TextureViewDesc& desc) noexcept override;
@@ -232,8 +253,7 @@ public:
                              Span<uint8> out) noexcept override;
     Result<CommandContext*> BeginFrame(SwapChainHandle handle,
                                        const ClearColor& clear) noexcept override;
-    Result<CommandContext*> BeginOffscreen(TextureHandle handle,
-                                           const ClearColor& clear) noexcept override;
+    Result<CommandContext*> BeginPass(const PassDesc& pass) noexcept override;
     Result<GpuFencePoint> EndFrame() noexcept override;
     Result<void> ReadPixels(TextureHandle handle, Span<uint8> out) noexcept override;
     void Retire(BufferHandle handle) noexcept override;
@@ -293,6 +313,33 @@ private:
     Result<uint64> WriteTimestamp() noexcept override;
     void PushMarker(StringView name) noexcept override;
     void PopMarker() noexcept override;
+    // --- GX3·GX4(GlesDeviceCommands.cpp) ---
+    void SetWritableBufferView(uint32 slot, BufferViewHandle view) noexcept override;
+    void DrawIndirect(BufferHandle arguments, uint64 offset) noexcept override;
+    void DrawIndexedIndirect(BufferHandle arguments, uint64 offset) noexcept override;
+    void Dispatch(uint32 groupCountX, uint32 groupCountY, uint32 groupCountZ) noexcept override;
+    void DispatchIndirect(BufferHandle arguments, uint64 offset) noexcept override;
+    void SetViewport(const Viewport& viewport) noexcept override;
+    void SetScissor(const ScissorRect& scissor) noexcept override;
+    void SetStencilReference(uint32 reference) noexcept override;
+    Result<void> CopyBuffer(BufferHandle destination, uint64 destinationOffset, BufferHandle source,
+                            uint64 sourceOffset, uint64 size) noexcept override;
+    Result<void> CopyTexture(TextureHandle destination, TextureHandle source) noexcept override;
+    Result<void> ClearWritableBufferView(BufferViewHandle view, uint32 value) noexcept override;
+
+    // 그래픽 파이프라인의 고정 기능 상태를 GL 상태로 건다(SetPipeline).
+    void ApplyPipelineState(const PipelineRecord& pipeline) noexcept;
+    // 스텐실 비교 함수·기준 값을 건다(파이프라인과 SetStencilReference).
+    void ApplyStencilFunction(const PipelineRecord& pipeline) noexcept;
+    // 패스가 바꾼 GL 상태를 기본값으로 되돌린다(EndFrame, present blit·readback 전).
+    void ResetPassState() noexcept;
+    // 그리기 직전 조건(파이프라인 종류·attachment·stream·view·읽기 전용 깊이·index)을 보고
+    // 상수·view를 건다. 그릴 수 없으면 null이다.
+    const PipelineRecord* PrepareDraw(bool indexed) noexcept;
+    // dispatch 직전 조건을 보고 상수·읽기·쓰기 view를 건다.
+    const PipelineRecord* PrepareDispatch() noexcept;
+    // 간접 인자 버퍼(Indirect 용도, offset 4 byte 배수, 범위 안)의 GL 이름이다. 아니면 0이다.
+    GLuint IndirectArguments(BufferHandle arguments, uint64 offset, uint64 bytes) const noexcept;
 
     // 검증 메시지 id를 처음 보면 기억하고 true다(이미 남겼거나 기억 칸이 차면 false).
     bool FirstValidationMessage(GLuint id) noexcept;
@@ -363,9 +410,14 @@ private:
     // --- 장치 능력·버퍼 view(GlesDeviceBuffers.cpp) ---
     // 장치 한도·기능과 형식별 MSAA 표본 수를 채운다(생성 때 한 번, debug output을 켜기 전).
     void QueryDeviceCaps(bool desktopContext) noexcept;
-    // 링크한 프로그램의 samplerBuffer uniform·storage block을 고정 배치와 대조해 slot 배치를
-    // 만든다. 배치 밖이면 InvalidArgument다.
-    Result<void> ReflectBufferSlots(GLuint program, DrawBufferSlots& slots) noexcept;
+    // 링크한 프로그램의 sampler·image uniform·storage block을 고정 배치와 대조해 slot 배치를
+    // 만든다. writeSlots가 null이면(그래픽) 쓰기 자원(image uniform, binding 4–7 storage block)은
+    // 배치 밖이다. 배치 밖(유닛 0이 아닌 텍스처 sampler, 허용 유닛 밖 samplerBuffer·image, binding
+    // 밖 storage block)이면 InvalidArgument다. GL introspection은 storage block의 readonly 여부를
+    // 알려 주지 않으므로 그래픽 단계의 binding 0–3 storage block 쓰기는 거부하지 못한다(셰이더는
+    // readonly로 선언해야 하고, 쿠킹 경로는 SPIR-V 리플렉션이 거른다).
+    Result<void> ReflectBufferSlots(GLuint program, DrawBufferSlots& slots,
+                                    DrawBufferSlots* writeSlots) noexcept;
     bool BufferViewsBound(const PipelineRecord& pipeline) const noexcept;
     // 파이프라인이 읽는 slot의 view를 유닛·binding에 묶는다(그리기 직전).
     void ApplyBufferViews(const PipelineRecord& pipeline) noexcept;
@@ -374,8 +426,8 @@ private:
     void StoreLog(GLuint object, bool shader) noexcept;
 
     void InitializeTimestamps() noexcept;
-    void StartPass(GLuint framebuffer, uint32 width, uint32 height,
-                   const ClearColor& clear) noexcept;
+    // 기록을 시작하고 pass_의 framebuffer에 load 동작(clear)을 한다(pass_는 호출자가 채운다).
+    void StartPass(const PassDesc& pass) noexcept;
     void BindPassTexture(const TextureRecord& record) noexcept;
     void ApplyVertexBuffer(uint32 stream) noexcept;
     void ApplyIndexBuffer() noexcept;
@@ -436,6 +488,12 @@ private:
         PixelFormat format = PixelFormat::Unknown;
         TextureHandle texture;
         SwapChainHandle swapChain;
+        // BeginPass의 attachment들이다(GX4). 색 1개·깊이 없음이면 텍스처의 framebuffer, 아니면
+        // 장치의 패스 framebuffer(passFramebuffer_)에 붙인다.
+        uint32 colorCount = 0;
+        TextureHandle colors[MaxColorTargets];
+        TextureHandle depth;
+        bool depthReadOnly = false;
     };
     PassTarget pass_;
     TextureHandle white_;
@@ -454,6 +512,13 @@ private:
     BoundVertexBuffer boundVertex_[MaxVertexStreams];
     BoundIndexBuffer boundIndex_;
     BufferViewHandle boundViews_[MaxDrawBufferViews];
+    // compute 쓰기 slot에 묶인 view와 스텐실 기준 값이다(GX4).
+    BufferViewHandle boundWriteViews_[MaxDrawBufferViews];
+    uint32 stencilReference_ = 0;
+    // MRT·깊이 패스가 attachment를 붙이는 framebuffer다(처음 쓸 때 만든다).
+    GLuint passFramebuffer_ = 0;
+    // glPolygonOffsetClampEXT다(GL_EXT_polygon_offset_clamp가 없으면 null).
+    void (*polygonOffsetClamp_)(GLfloat, GLfloat, GLfloat) = nullptr;
     DrawConstants constants_;
     uint64 ignoredDraws_ = 0;
     uint64 validationErrors_ = 0;

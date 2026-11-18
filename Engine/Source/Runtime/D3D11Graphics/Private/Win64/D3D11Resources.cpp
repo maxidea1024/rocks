@@ -285,6 +285,17 @@ Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
         if (FAILED(result)) {
             return FailWith<TextureHandle>("CreateDepthStencilView", result);
         }
+
+        view.Flags = D3D11_DSV_READ_ONLY_DEPTH;
+        if (GetPixelFormatInfo(desc.format).stencilBits != 0) {
+            view.Flags |= D3D11_DSV_READ_ONLY_STENCIL;
+        }
+
+        result =
+            device_->CreateDepthStencilView(record.texture.Get(), &view, record.readOnlyDsv.Out());
+        if (FAILED(result)) {
+            return FailWith<TextureHandle>("CreateDepthStencilView (read-only)", result);
+        }
     }
 
     auto reserved = ReserveRetireCapacity(1);
@@ -412,15 +423,31 @@ Result<TextureHandle> D3D11Device::CreateTextureView(TextureHandle texture,
 Result<PipelineHandle> D3D11Device::CreatePipeline(const PipelineDesc& desc) noexcept {
     platform::LockGuard lock(gate_);
     if (desc.vertex.hlsl.ByteCount() == 0 || desc.pixel.hlsl.ByteCount() == 0 ||
-        !IsValidPixelFormat(desc.colorFormat)) {
+        !ValidatePipelineDesc(desc)) {
+        auto failed = Fail("pipeline description breaks the pipeline rules");
+        (void)failed;
         return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
-    const PixelFormatCaps required =
-        desc.alphaBlend ? PixelFormatCaps::RenderTarget | PixelFormatCaps::Blendable
-                        : PixelFormatCaps::RenderTarget;
-    if (!HasPixelFormatCaps(FormatCaps(desc.colorFormat), required)) {
-        return UnsupportedFormat<PipelineHandle>(desc.colorFormat);
+    for (uint32 index = 0; index < desc.colorTargetCount; ++index) {
+        const PixelFormatCaps required =
+            desc.blend[index].enable ? PixelFormatCaps::RenderTarget | PixelFormatCaps::Blendable
+                                     : PixelFormatCaps::RenderTarget;
+        if (!HasPixelFormatCaps(FormatCaps(desc.colorFormats[index]), required)) {
+            return UnsupportedFormat<PipelineHandle>(desc.colorFormats[index]);
+        }
+    }
+
+    if (desc.depthFormat != PixelFormat::Unknown &&
+        !HasPixelFormatCaps(FormatCaps(desc.depthFormat), PixelFormatCaps::DepthStencil)) {
+        return UnsupportedFormat<PipelineHandle>(desc.depthFormat);
+    }
+
+    if (!CheckPipelineFeatures(caps_, desc)) {
+        auto failed = Fail("pipeline needs more color targets or a raster feature than the "
+                           "device supports");
+        (void)failed;
+        return Result<PipelineHandle>::Failure(ErrorCode::Unsupported);
     }
 
     auto layoutChecked = ValidateVertexLayout(desc.layout);
@@ -453,19 +480,19 @@ Result<PipelineHandle> D3D11Device::CreatePipeline(const PipelineDesc& desc) noe
     }
 
     PipelineRecord record;
-    auto vertexBindings = ReflectBindings(vertexCode.Get(), false, record.bufferSlots);
-    auto pixelBindings = vertexBindings ? ReflectBindings(pixelCode.Get(), true, record.bufferSlots)
+    auto vertexBindings =
+        ReflectBindings(vertexCode.Get(), ShaderStage::Vertex, record.bufferSlots, nullptr);
+    auto pixelBindings = vertexBindings ? ReflectBindings(pixelCode.Get(), ShaderStage::Pixel,
+                                                          record.bufferSlots, nullptr)
                                         : Move(vertexBindings);
     if (!pixelBindings) {
         return Result<PipelineHandle>::Failure(pixelBindings.Error());
     }
 
-    record.alphaBlend = desc.alphaBlend;
-    if (static_cast<usize>(desc.cullMode) >= CullModeCount) {
-        return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
+    auto states = CreatePipelineStates(desc, record);
+    if (!states) {
+        return Result<PipelineHandle>::Failure(states.Error());
     }
-
-    record.cullMode = desc.cullMode;
     HRESULT result =
         device_->CreateVertexShader(vertexCode->GetBufferPointer(), vertexCode->GetBufferSize(),
                                     nullptr, record.vertexShader.Out());
@@ -716,11 +743,8 @@ void D3D11Device::Retire(TextureHandle handle) noexcept {
         return;
     }
 
-    if (record->depthTarget) {
-        Defer(Move(record->texture), Move(record->srv), Move(record->dsv));
-    } else {
-        Defer(Move(record->texture), Move(record->srv), Move(record->rtv));
-    }
+    Defer(Move(record->texture), Move(record->srv), Move(record->rtv), Move(record->dsv),
+          Move(record->readOnlyDsv));
     auto removed = textures_.TryRemove(handle.slot);
     (void)removed;
 }
@@ -736,7 +760,9 @@ void D3D11Device::Retire(PipelineHandle handle) noexcept {
         return;
     }
 
-    Defer(Move(record->vertexShader), Move(record->pixelShader), Move(record->inputLayout));
+    Defer(Move(record->vertexShader), Move(record->pixelShader), Move(record->inputLayout),
+          Move(record->blend), Move(record->raster), Move(record->depthStencil),
+          Move(record->computeShader));
     auto removed = pipelines_.TryRemove(handle.slot);
     (void)removed;
 }

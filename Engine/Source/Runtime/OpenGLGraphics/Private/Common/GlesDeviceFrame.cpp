@@ -35,44 +35,17 @@ Result<CommandContext*> GlesDevice::BeginFrame(SwapChainHandle handle,
     // 스왑체인은 offscreen 색 텍스처(첫 행 = 이미지 위쪽)에 그리고 EndFrame의 present가 창에
     // 옮긴다(ShaderSystem 7.2절 8항). 그래서 창·RenderTarget 패스의 규약이 같다.
     presentTarget_ = handle;
-    pass_ = {record->framebuffer,
-             record->width,
-             record->height,
-             PixelFormat::RGBA8UnormSrgb,
-             {},
-             handle};
-    StartPass(record->framebuffer, record->width, record->height, clear);
-    return Result<CommandContext*>::Success(this);
-}
-
-Result<CommandContext*> GlesDevice::BeginOffscreen(TextureHandle handle,
-                                                   const ClearColor& clear) noexcept {
-    auto owner = ownership_.Check();
-    if (!owner) {
-        return Result<CommandContext*>::Failure(owner.Error());
-    }
-
-    const TextureRecord* record = textures_.Find(handle.slot);
-    if (record == nullptr || record->framebuffer == 0) {
-        return Result<CommandContext*>::Failure(record == nullptr ? ErrorCode::StaleHandle
-                                                                  : ErrorCode::InvalidArgument);
-    }
-
-    if (recording_) {
-        return Result<CommandContext*>::Failure(ErrorCode::Busy);
-    }
-
-    if (timeline_.IsLost()) {
-        return Result<CommandContext*>::Failure(ErrorCode::Destroyed);
-    }
-
-    if (!MakeCurrentForResources()) {
-        return FailWith<CommandContext*>("cannot make the OpenGL context current");
-    }
-
-    presentTarget_ = {};
-    pass_ = {record->framebuffer, record->width, record->height, record->format, handle, {}};
-    StartPass(record->framebuffer, record->width, record->height, clear);
+    pass_ = {};
+    pass_.framebuffer = record->framebuffer;
+    pass_.width = record->width;
+    pass_.height = record->height;
+    pass_.format = PixelFormat::RGBA8UnormSrgb;
+    pass_.swapChain = handle;
+    pass_.colorCount = 1;
+    PassDesc pass;
+    pass.colorCount = 1;
+    pass.colors[0].clear = clear;
+    StartPass(pass);
     return Result<CommandContext*>::Success(this);
 }
 
@@ -87,6 +60,18 @@ Result<GpuFencePoint> GlesDevice::EndFrame() noexcept {
     }
 
     recording_ = false;
+    ResetPassState();
+    // 패스 framebuffer의 attachment를 뗀다(놓인 텍스처 이름을 붙들지 않는다).
+    if (pass_.framebuffer != 0 && pass_.framebuffer == passFramebuffer_) {
+        gl_.BindFramebuffer(GL_FRAMEBUFFER, passFramebuffer_);
+        for (GLenum index = 0; index < MaxColorTargets; ++index) {
+            gl_.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + index, GL_TEXTURE_2D, 0,
+                                     0);
+        }
+
+        gl_.FramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
+    }
+
     gl_.BindVertexArray(0);
     gl_.UseProgram(0);
     for (; markerDepth_ != 0; --markerDepth_) {
@@ -160,8 +145,7 @@ Result<void> GlesDevice::ReadPixels(TextureHandle handle, Span<uint8> out) noexc
     return ReadColorLevel(copy, 0, out);
 }
 
-void GlesDevice::StartPass(GLuint framebuffer, uint32 width, uint32 height,
-                           const ClearColor& clear) noexcept {
+void GlesDevice::StartPass(const PassDesc& pass) noexcept {
     recording_ = true;
     markerDepth_ = 0;
     boundPipeline_ = {};
@@ -174,14 +158,62 @@ void GlesDevice::StartPass(GLuint framebuffer, uint32 width, uint32 height,
         view = {};
     }
 
+    for (BufferViewHandle& view : boundWriteViews_) {
+        view = {};
+    }
+
+    stencilReference_ = 0;
     constantsDirty_ = true;
     constants_ = DrawConstants{};
-    gl_.BindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-    gl_.Viewport(0, 0, static_cast<GLsizei>(width), static_cast<GLsizei>(height));
-    gl_.Disable(GL_BLEND);
-    gl_.Disable(GL_CULL_FACE);
-    gl_.ClearColor(clear.r, clear.g, clear.b, clear.a);
-    gl_.Clear(GL_COLOR_BUFFER_BIT);
+    gl_.BindFramebuffer(GL_FRAMEBUFFER, pass_.framebuffer);
+    gl_.Viewport(0, 0, static_cast<GLsizei>(pass_.width), static_cast<GLsizei>(pass_.height));
+    gl_.DepthRangef(0.0f, 1.0f);
+    // load 동작이다. clear는 쓰기 mask·scissor를 따르므로 앞 패스·파이프라인 상태를 먼저 기본값으로
+    // 돌린다(ResetPassState).
+    ResetPassState();
+    for (uint32 index = 0; index < pass_.colorCount; ++index) {
+        if (pass.colors[index].load != LoadAction::Clear) {
+            continue;
+        }
+
+        const ClearColor& clear = pass.colors[index].clear;
+        const PixelFormat format = pass_.swapChain.IsNull()
+                                       ? textures_.Find(pass_.colors[index].slot)->format
+                                       : pass_.format;
+        const PixelShaderType type = GetPixelFormatInfo(format).shaderType;
+        const GLint drawBuffer = static_cast<GLint>(index);
+        if (type == PixelShaderType::Uint) {
+            const GLuint values[4] = {static_cast<GLuint>(clear.r), static_cast<GLuint>(clear.g),
+                                      static_cast<GLuint>(clear.b), static_cast<GLuint>(clear.a)};
+            gl_.ClearBufferuiv(GL_COLOR, drawBuffer, values);
+        } else if (type == PixelShaderType::Int) {
+            const GLint values[4] = {static_cast<GLint>(clear.r), static_cast<GLint>(clear.g),
+                                     static_cast<GLint>(clear.b), static_cast<GLint>(clear.a)};
+            gl_.ClearBufferiv(GL_COLOR, drawBuffer, values);
+        } else {
+            const GLfloat values[4] = {clear.r, clear.g, clear.b, clear.a};
+            gl_.ClearBufferfv(GL_COLOR, drawBuffer, values);
+        }
+    }
+
+    const TextureRecord* depth = textures_.Find(pass_.depth.slot);
+    if (depth != nullptr && !pass_.depthReadOnly) {
+        const bool stencil = GetPixelFormatInfo(depth->format).stencilBits != 0;
+        const bool clearDepth = pass.depth.depthLoad == LoadAction::Clear;
+        const bool clearStencil = stencil && pass.depth.stencilLoad == LoadAction::Clear;
+        const GLint stencilValue = static_cast<GLint>(pass.depth.clearStencil);
+        if (clearDepth && clearStencil) {
+            gl_.ClearBufferfi(GL_DEPTH_STENCIL, 0, pass.depth.clearDepth, stencilValue);
+        } else if (clearDepth) {
+            gl_.ClearBufferfv(GL_DEPTH, 0, &pass.depth.clearDepth);
+        } else if (clearStencil) {
+            gl_.ClearBufferiv(GL_STENCIL, 0, &stencilValue);
+        }
+    }
+
+    // 패스 동안 scissor는 늘 켜고 대상 전체에서 시작한다(SetScissor).
+    gl_.Enable(GL_SCISSOR_TEST);
+    gl_.Scissor(0, 0, static_cast<GLsizei>(pass_.width), static_cast<GLsizei>(pass_.height));
     const TextureRecord* white = textures_.Find(white_.slot);
     if (white != nullptr) {
         BindPassTexture(*white);
@@ -266,24 +298,15 @@ void GlesDevice::SetPipeline(PipelineHandle handle) noexcept {
     }
 
     gl_.UseProgram(pipeline->program);
-    gl_.BindVertexArray(pipeline->vertexArray);
-    if (pipeline->alphaBlend) {
-        gl_.Enable(GL_BLEND);
-        gl_.BlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-    } else {
-        gl_.Disable(GL_BLEND);
-    }
-
-    // 앞면 감김(glFrontFace)은 장치가 클립 공간 규약에 맞춰 한 번 정했다.
-    if (pipeline->cullMode == CullMode::None) {
-        gl_.Disable(GL_CULL_FACE);
-    } else {
-        gl_.Enable(GL_CULL_FACE);
-        gl_.CullFace(pipeline->cullMode == CullMode::Back ? GL_BACK : GL_FRONT);
-    }
-
     // 프로그램마다 uniform 값이 따로이므로 새 프로그램에 상수를 다시 올린다.
     constantsDirty_ = true;
+    if (pipeline->compute) {
+        // 그래픽 상태·정점 배열은 그대로 둔다(같은 패스의 다음 그리기가 SetPipeline으로 다시 건다).
+        return;
+    }
+
+    gl_.BindVertexArray(pipeline->vertexArray);
+    ApplyPipelineState(*pipeline);
     // 앞서 묶은 정점·index 버퍼를 새 파이프라인의 정점 배열·간격으로 다시 묶는다.
     for (uint32 stream = 0; stream < MaxVertexStreams; ++stream) {
         if (!boundVertex_[stream].buffer.IsNull()) {
@@ -387,13 +410,16 @@ void GlesDevice::ApplyConstants(const PipelineRecord& pipeline) noexcept {
         gl_.Uniform4fv(pipeline.pixelConstants, RootConstantVectors, vectors);
     }
 
+    if (pipeline.computeConstants >= 0) {
+        gl_.Uniform4fv(pipeline.computeConstants, RootConstantVectors, vectors);
+    }
+
     constantsDirty_ = false;
 }
 
 // OpenGL ES는 드라이버가 자원 상태를 암묵으로 관리하므로 명시 전이를 낮출 곳이 없다(RenderBase GX5,
-// UE OpenGL RHI도 전이 함수가 비어 있다). UAV(image·storage buffer) 쓰기 뒤 읽기에 필요한
-// glMemoryBarrier는 그런 자원이 아직 없어 넣지 않았다. GX2에서 storage 자원이 들어오면 after의
-// 접근 비트(SrvGraphics → GL_TEXTURE_FETCH_BARRIER_BIT 등)로 bit를 골라 여기서 부른다.
+// UE OpenGL RHI도 전이 함수가 비어 있다). compute의 image·storage buffer 쓰기 뒤 읽기에 필요한
+// glMemoryBarrier는 dispatch마다 모든 bit로 낸다(GlesDeviceCommands.cpp).
 void GlesDevice::Transition(Span<const ResourceTransition> transitions) noexcept {
     (void)transitions;
 }
@@ -408,11 +434,14 @@ Result<void> GlesDevice::CopyPassTarget(TextureHandle destination) noexcept {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (record->framebuffer == 0 || destination == pass_.texture || record->width != pass_.width ||
-        record->height != pass_.height || record->format != pass_.format) {
+    if (pass_.colorCount == 0 || record->framebuffer == 0 || destination == pass_.texture ||
+        record->width != pass_.width || record->height != pass_.height ||
+        record->format != pass_.format) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // blit은 scissor를 따르므로 복사 동안 끈다(패스 scissor 사각형은 그대로 남는다).
+    gl_.Disable(GL_SCISSOR_TEST);
     const GLint width = static_cast<GLint>(pass_.width);
     const GLint height = static_cast<GLint>(pass_.height);
     GLint sourceWidth = width;
@@ -460,6 +489,7 @@ Result<void> GlesDevice::CopyPassTarget(TextureHandle destination) noexcept {
 
     gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, 0);
     gl_.BindFramebuffer(GL_DRAW_FRAMEBUFFER, pass_.framebuffer);
+    gl_.Enable(GL_SCISSOR_TEST);
     return Result<void>::Success();
 }
 
@@ -504,33 +534,28 @@ void GlesDevice::PopMarker() noexcept {
 }
 
 void GlesDevice::Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept {
-    const PipelineRecord* pipeline = DrawablePipeline();
+    const PipelineRecord* pipeline = PrepareDraw(false);
     if (pipeline == nullptr) {
         ++ignoredDraws_;
         return;
     }
 
-    ApplyConstants(*pipeline);
-    ApplyBufferViews(*pipeline);
     // base instance는 0으로 고정한다(RenderBase 10.4절).
-    gl_.DrawArraysInstanced(GL_TRIANGLES, static_cast<GLint>(firstVertex),
+    gl_.DrawArraysInstanced(pipeline->topology, static_cast<GLint>(firstVertex),
                             static_cast<GLsizei>(vertexCount), static_cast<GLsizei>(instanceCount));
 }
 
 void GlesDevice::DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept {
-    const PipelineRecord* pipeline = DrawablePipeline();
-    const BufferRecord* index = buffers_.Find(boundIndex_.buffer.slot);
-    if (pipeline == nullptr || index == nullptr || boundIndex_.offset >= index->size) {
+    const PipelineRecord* pipeline = PrepareDraw(true);
+    if (pipeline == nullptr) {
         ++ignoredDraws_;
         return;
     }
 
-    ApplyConstants(*pipeline);
-    ApplyBufferViews(*pipeline);
     const uint64 start =
         boundIndex_.offset + static_cast<uint64>(firstIndex) * IndexFormatSize(boundIndex_.format);
     // base vertex·base instance는 0으로 고정한다.
-    gl_.DrawElementsInstanced(GL_TRIANGLES, static_cast<GLsizei>(indexCount),
+    gl_.DrawElementsInstanced(pipeline->topology, static_cast<GLsizei>(indexCount),
                               boundIndex_.format == IndexFormat::UInt16 ? GL_UNSIGNED_SHORT
                                                                         : GL_UNSIGNED_INT,
                               reinterpret_cast<const void*>(static_cast<uptr>(start)),

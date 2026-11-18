@@ -107,6 +107,7 @@ namespace rocks::graphics::vulkan {
     X(vkCreatePipelineCache)                                                                       \
     X(vkDestroyPipelineCache)                                                                      \
     X(vkCreateGraphicsPipelines)                                                                   \
+    X(vkCreateComputePipelines)                                                                    \
     X(vkDestroyPipeline)                                                                           \
     X(vkCreateQueryPool)                                                                           \
     X(vkDestroyQueryPool)                                                                          \
@@ -123,8 +124,14 @@ namespace rocks::graphics::vulkan {
     X(vkCmdPushConstants)                                                                          \
     X(vkCmdSetViewport)                                                                            \
     X(vkCmdSetScissor)                                                                             \
+    X(vkCmdSetStencilReference)                                                                    \
     X(vkCmdDraw)                                                                                   \
     X(vkCmdDrawIndexed)                                                                            \
+    X(vkCmdDrawIndirect)                                                                           \
+    X(vkCmdDrawIndexedIndirect)                                                                    \
+    X(vkCmdDispatch)                                                                               \
+    X(vkCmdDispatchIndirect)                                                                       \
+    X(vkCmdFillBuffer)                                                                             \
     X(vkCmdCopyBuffer)                                                                             \
     X(vkCmdCopyBufferToImage)                                                                      \
     X(vkCmdCopyImageToBuffer)                                                                      \
