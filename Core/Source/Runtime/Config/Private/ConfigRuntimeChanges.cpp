@@ -430,23 +430,17 @@ Result<void> ConfigContext::ReplaceLayerText(ConfigLayer layer, StringView tag, 
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    // 새 입력을 먼저 검사해 넣고, 받았으면 그 앞에 Unset을 끼운다(큐의 Unset은 그보다 먼저 넣은
-    // 입력만 빼므로 새 입력은 남는다).
-    const usize before = state->queue.Size();
-    if (auto added = AddLayerText(layer, tag, branch, sourceName, text); !added) {
-        return added;
+    if (!IsConfigLayer(layer) || layer == ConfigLayer::CodeDefault) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    if (auto unset = Unset(layer, tag); !unset) {
-        // 새 입력만 남기면 옛 입력과 겹치므로 둘 다 되돌린다.
-        static_cast<void>(state->queue.TryResize(before)); // 줄이기는 할당하지 않는다
-        return unset;
+    if (platform::CurrentThreadId() != state->owner) {
+        return Result<void>::Failure(ErrorCode::WrongThread);
     }
 
-    UniquePtr<detail::QueuedChange> removal = Move(state->queue[before + 1]);
-    state->queue[before + 1] = Move(state->queue[before]);
-    state->queue[before] = Move(removal);
-    return Result<void>::Success();
+    // 새 입력을 검사하고, 받으면 (층, 태그) 빼기와 새 입력을 한꺼번에 큐에 넣는다(빼기는 그보다
+    // 먼저 넣은 입력만 빼므로 새 입력은 남는다). 거부하면 아무것도 넣지 않는다.
+    return detail::QueueLayerText(*state, layer, tag, branch, sourceName, text, true);
 }
 
 Result<void> ConfigContext::AddSyncHook(ConfigSyncHook hook, void* context) noexcept {

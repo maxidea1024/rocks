@@ -43,8 +43,8 @@ Result<void> ValidatePipelineDesc(const PipelineDesc& desc) noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     };
     if (!IsValidDrawConstantBytes(desc.drawConstantBytes) ||
-        desc.colorTargetCount > MaxColorTargets || desc.topology > PrimitiveTopology::PointList ||
-        desc.raster.cullMode > CullMode::Front) {
+        !IsValidSampleCount(desc.sampleCount) || desc.colorTargetCount > MaxColorTargets ||
+        desc.topology > PrimitiveTopology::PointList || desc.raster.cullMode > CullMode::Front) {
         return invalid();
     }
 

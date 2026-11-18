@@ -33,14 +33,24 @@ enum class ConfigLayer : uint8 {
     DeviceProfile,
     // <UserData>/<Project>/Config/<Branch>.json — 사용자 설정 가능(UserConfig) 필드만
     User,
+    // 라이브 운영 핫픽스(태그 = 핫픽스 묶음 — Docs/Design/CVarSystem.ko.md 6.1절, UE
+    // ECVF_SetByHotfix)
+    Hotfix,
     // 명령줄 `--set=`·시험 픽스처
     Session,
-    // 실행 중 콘솔 입력·코드의 범위 임시 변경
-    Console
+    // 코드의 `CVar::Set`(출처 = 호출 위치 — UE ECVF_SetByCode)
+    Code,
+    // 범위 임시 변경(`cvar::ScopedOverride`·시험 — 태그마다 하나, 콘솔보다 약하다 — UE
+    // ECVF_SetByTemp)
+    Scoped,
+    // 실행 중 콘솔 입력
+    Console,
+    // 서버가 복제한 값(가장 강하다 — 클라이언트의 콘솔·코드·임시 변경이 이기지 못한다, CVar 13.2절)
+    Server
 };
 
-// 층 수다(ConfigLayer::Console + 1).
-inline constexpr uint32 ConfigLayerCount = static_cast<uint32>(ConfigLayer::Console) + 1;
+// 층 수다(ConfigLayer::Server + 1).
+inline constexpr uint32 ConfigLayerCount = static_cast<uint32>(ConfigLayer::Server) + 1;
 
 // 정의된 층 값인지다.
 constexpr bool IsConfigLayer(ConfigLayer layer) noexcept {
@@ -161,6 +171,17 @@ enum class ConfigDiagnosticCode : uint8 {
     InvalidDeviceProfile,
     // 정보: `Clamp()` CVar의 범위 밖 값을 범위 끝으로 보정해 받았다(CVar 6.2·12절).
     Clamped,
+    // enum CVar 값이 이름 표에 없다(CVar 4.4·12절).
+    InvalidEnum,
+    // 봉인(CompleteStartup) 뒤 부팅 변수(BootCVar·StartupOnly·RestartRequired 독립 콘솔 설정)에
+    // 바로 쓰려 했다(콘솔·코드·범위 임시 변경 층 — CVar 9절). 메시지는 콘솔 안내 문구다("is a boot
+    // variable; set it in a config file or with --set and restart" — 이름 뒤에 붙인다).
+    BootSealed,
+    // 정보: 등록 전에 들어온 값(대기 값)이 등록 때 적용됐다(CVar 12절).
+    LateBound,
+    // 경고: 시작이 끝났는데 등록되지 않은 콘솔 이름의 값이 남았다(ReportUnresolved — 가까운 이름이
+    // 있으면 메시지에 `did you mean '...'?`를 붙인다, CVar 12절).
+    UnresolvedName,
     // CVar의 `Validate` 검사 함수가 값을 거부했다(메시지는 검사 함수가 돌려준 이유 —
     // CVar 4.2·12절).
     ValidationFailed
@@ -245,6 +266,12 @@ public:
     // Error 심각도 진단 수다(넘친 것 제외).
     usize ErrorCount() const noexcept {
         return errors_;
+    }
+
+    // 저장하지 못하고 넘친 진단 수를 count만큼 더한다(다른 모음의 진단을 옮길 때 그 모음의 넘친
+    // 수도 함께 넘긴다 — ConfigContext::TakeDiagnostics).
+    void AddOmitted(uint64 count) noexcept {
+        omitted_ += count;
     }
 
     // 모든 진단을 지운다(한도는 그대로).

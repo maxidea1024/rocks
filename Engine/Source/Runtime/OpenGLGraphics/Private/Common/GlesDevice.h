@@ -122,6 +122,15 @@ struct TextureRecord {
     ChannelSwizzle swizzle;
     // TextureUsage::DepthStencil로 만들었다(초기 데이터 없음).
     bool depthTarget = false;
+    // 만든 용도다(view는 원 텍스처의 용도, ResolveTextureViewRange).
+    TextureUsage usage = TextureUsage::Sampled;
+    // MSAA 표본 수다(TextureDesc::sampleCount). 2 이상이면 target이 TEXTURE_2D_MULTISAMPLE이다.
+    uint32 sampleCount = 1;
+    // view의 mip·slice 범위다(view가 아니면 전체). texture view가 없어 읽기 view는 텍스처 전체를
+    // 묶고(셰이더가 TextureViewBaseMip을 쓴다), 쓰기 view는 이 범위의 level을 image로 묶는다.
+    ResolvedSubresourceRange viewRange;
+    // 쓰기 view(ViewAccess::ReadWrite)다. SetWritableTexture로만 묶는다(glBindImageTexture).
+    bool writable = false;
     // 깊이·스텐실 텍스처를 묶을 때 읽는 plane이다(GL_DEPTH_STENCIL_TEXTURE_MODE, 1이면 스텐실).
     // 이 값은 텍스처 객체 상태라 묶을 때마다 다시 정한다.
     uint32 plane = 0;
@@ -179,6 +188,8 @@ struct PipelineRecord {
     // VS·PS(compute면 CS)가 읽는 버퍼 view slot과 CS가 쓰는 slot이다(program introspection).
     DrawBufferSlots bufferSlots;
     DrawBufferSlots writeSlots;
+    // compute가 텍스처 image로 쓰는 쓰기 slot 비트다(SetWritableTexture가 묶여야 한다).
+    uint32 writeTextures = 0;
 };
 
 struct SwapChainRecord {
@@ -348,6 +359,7 @@ private:
     void PopMarker() noexcept override;
     // --- GX3·GX4(GlesDeviceCommands.cpp) ---
     void SetWritableBufferView(uint32 slot, BufferViewHandle view) noexcept override;
+    void SetWritableTexture(uint32 slot, TextureHandle view) noexcept override;
     void DrawIndirect(BufferHandle arguments, uint64 offset) noexcept override;
     void DrawIndexedIndirect(BufferHandle arguments, uint64 offset) noexcept override;
     void Dispatch(uint32 groupCountX, uint32 groupCountY, uint32 groupCountZ) noexcept override;
@@ -392,6 +404,8 @@ private:
 
     // message를 LastError에 두고 error로 실패한다.
     Result<void> Reject(const Diagnostic& message, ErrorCode error) noexcept;
+    // 패스 끝 MSAA resolve다(EndFrame).
+    void ResolveAttachments() noexcept;
     // SetDrawConstants 거부(묶인 파이프라인 없음, 크기가 선언과 다름)의 InvalidArgument다.
     Result<void> RejectDrawConstantSize(bool pipelineBound, usize bytes,
                                         uint32 drawConstantBytes) noexcept;
@@ -417,7 +431,7 @@ private:
     bool CreateBackBuffer(SwapChainRecord& record, uint32 width, uint32 height) noexcept;
 
     // 색 attachment 하나의 framebuffer를 만든다. 완전하지 않으면 0이다.
-    GLuint CreateColorFramebuffer(GLuint texture) noexcept;
+    GLuint CreateColorFramebuffer(GLuint texture, GLenum target = GL_TEXTURE_2D) noexcept;
 
     // 텍스처 하나의 샘플러 객체를 만든다. filterable이 false면(정수·깊이 형식) 최근접 필터다.
     // filterable은 형식이 선형 필터를 받는지다(비교 샘플러의 깊이 형식은 선형 필터를 받는다).
@@ -458,8 +472,11 @@ private:
     // 밖 storage block)이면 InvalidArgument다. GL introspection은 storage block의 readonly 여부를
     // 알려 주지 않으므로 그래픽 단계의 binding 0–3 storage block 쓰기는 거부하지 못한다(셰이더는
     // readonly로 선언해야 하고, 쿠킹 경로는 SPIR-V 리플렉션이 거른다).
+    // compute의 image2D·image2DArray·image3D(SetWritableTexture slot = image unit)는
+    // writeTextures에 더한다.
     Result<void> ReflectBufferSlots(GLuint program, DrawBufferSlots& slots,
-                                    DrawBufferSlots* writeSlots) noexcept;
+                                    DrawBufferSlots* writeSlots,
+                                    uint32* writeTextures = nullptr) noexcept;
     // 링크한 프로그램의 루트 상수 에뮬레이션 배열(vu_h·pu_h·cu_h) 위치와 active vec4 수를 record에
     // 채운다. vec4 배열이 아니거나 active 크기 × 16이 record.drawConstantBytes보다 크면
     // InvalidArgument다.
@@ -540,6 +557,10 @@ private:
         TextureHandle colors[MaxColorTargets];
         TextureHandle depth;
         bool depthReadOnly = false;
+        // 색 attachment마다 패스 끝에 resolve할 대상이다(ColorAttachment::resolveTarget).
+        TextureHandle resolves[MaxColorTargets];
+        // attachment 표본 수다(1이면 MSAA가 아니다).
+        uint32 sampleCount = 1;
     };
     PassTarget pass_;
     TextureHandle white_;
@@ -560,6 +581,8 @@ private:
     BufferViewHandle boundViews_[MaxDrawBufferViews];
     // compute 쓰기 slot에 묶인 view와 스텐실 기준 값이다(GX4).
     BufferViewHandle boundWriteViews_[MaxDrawBufferViews];
+    // compute 쓰기 slot에 묶인 텍스처 쓰기 view다(버퍼 view와 같은 slot 공간, 하나만 남는다).
+    TextureHandle boundWriteTextures_[MaxDrawBufferViews];
     uint32 stencilReference_ = 0;
     // MRT·깊이 패스가 attachment를 붙이는 framebuffer다(처음 쓸 때 만든다).
     GLuint passFramebuffer_ = 0;

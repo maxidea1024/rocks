@@ -71,6 +71,8 @@ Result<GpuFencePoint> D3D12Device::EndFrame() noexcept {
         (void)failed;
     }
 
+    ResolveAttachments();
+
     // 스왑체인 백버퍼만 present 상태로 돌린다. offscreen 대상은 RenderTarget 그대로 둔다(GX5:
     // 다음 사용이 명시 전이나 암묵 전이로 바꾼다).
     if (!presentTarget_.IsNull()) {
@@ -216,6 +218,12 @@ Result<void> D3D12Device::BeginRecording() noexcept {
         view = {};
     }
 
+    for (TextureHandle& view : boundWriteTextures_) {
+        view = {};
+    }
+
+    boundTexture_ = white_.slot;
+
     bufferStates_.Clear();
     platform::MemoryZero(constants_, sizeof(constants_));
     stencilReference_ = 0;
@@ -358,7 +366,7 @@ void D3D12Device::SetTexture(TextureHandle handle) noexcept {
     platform::LockGuard lock(gate_);
     TextureRecord* record = textures_.Find(handle.slot);
     SlotHandle slot = handle.slot;
-    if (record == nullptr || !record->hasSrv) {
+    if (record == nullptr || !record->hasSrv || record->writable) {
         record = textures_.Find(white_.slot);
         slot = white_.slot;
     }
@@ -374,19 +382,22 @@ void D3D12Device::SetTexture(TextureHandle handle) noexcept {
         }
 
         // 명시 전이 없이 셰이더 읽기 상태가 아닌 텍스처를 읽으면 암묵 전이로 메운다(GX5. 렌더
-        // 그래프를 거치지 않는 그리기용이다).
+        // 그래프를 거치지 않는 그리기용이다). view는 자기 mip·slice 범위만 본다(텍스처 GX2 A부).
+        const ResolvedSubresourceRange& range = record->viewRange;
         bool readable = true;
-        for (uint32 index = 0; owner != nullptr && index < owner->current.Count(); ++index) {
-            readable = readable &&
-                       (owner->current[index] & D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE) != 0;
+        for (uint32 slice = range.firstSlice;
+             owner != nullptr && slice < range.firstSlice + range.sliceCount; ++slice) {
+            for (uint32 mip = range.firstMip; mip < range.firstMip + range.mipCount; ++mip) {
+                readable = readable && (owner->current.At(mip, slice) &
+                                        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE) != 0;
+            }
         }
 
         if (owner != nullptr && !readable && recording_) {
-            TrackTransition(*owner, ownerSlot,
-                            ResolveSubresourceRange({}, owner->mipLevels, owner->slices),
-                            ShaderReadStates);
+            TrackTransition(*owner, ownerSlot, range, ShaderReadStates);
         }
 
+        boundTexture_ = slot;
         list_->SetGraphicsRootDescriptorTable(RootTexture, srvs_.Gpu(record->srv));
         list_->SetGraphicsRootDescriptorTable(RootSampler, samplers_.Gpu(record->sampler));
     }
@@ -477,7 +488,8 @@ Result<void> D3D12Device::CopyPassTarget(TextureHandle destination) noexcept {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (target_.resource == nullptr || !record->renderTarget || destination == target_.texture ||
+    if (target_.resource == nullptr || !record->renderTarget || record->sampleCount > 1 ||
+        target_.sampleCount > 1 || destination == target_.texture ||
         record->width != target_.width || record->height != target_.height ||
         record->format != target_.format) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -635,6 +647,32 @@ void D3D12Device::LowerBufferTransition(const ResourceTransition& transition) no
 // subresource만 barrier를 내고, 전체 범위가 같은 상태에서 바뀌면 한 barrier(ALL_SUBRESOURCES)로
 // 낸다. uavOrder면 이미 같은 UAV 상태인 범위에 UAV barrier를 낸다. barrier는 묶음 칸이 차면 나눠
 // 낸다(배열 slice 수에 상한이 없다).
+// 패스 끝에 MSAA 색 attachment를 resolve 대상에 박스 평균으로 resolve한다(ColorAttachment::
+// resolveTarget, 결정 R17). 원본은 RESOLVE_SOURCE, 대상은 RESOLVE_DEST로 바꿔 resolve하고 대상은
+// 셰이더 읽기 상태로 둔다(잠금 안).
+void D3D12Device::ResolveAttachments() noexcept {
+    for (uint32 index = 0; index < target_.colorCount; ++index) {
+        if (target_.resolves[index].IsNull()) {
+            continue;
+        }
+
+        TextureRecord* source = textures_.Find(target_.colors[index].slot);
+        TextureRecord* target = textures_.Find(target_.resolves[index].slot);
+        if (source == nullptr || target == nullptr) {
+            continue;
+        }
+
+        const ResolvedSubresourceRange whole = {0, 1, 0, 1};
+        TrackTransition(*source, target_.colors[index].slot, whole,
+                        D3D12_RESOURCE_STATE_RESOLVE_SOURCE);
+        TrackTransition(*target, target_.resolves[index].slot, whole,
+                        D3D12_RESOURCE_STATE_RESOLVE_DEST);
+        list_->ResolveSubresource(target->resource.Get(), 0, source->resource.Get(), 0,
+                                  d3d12::MappingOf(source->format).rtv);
+        TrackTransition(*target, target_.resolves[index].slot, whole, ShaderReadStates);
+    }
+}
+
 void D3D12Device::TrackTransition(TextureRecord& record, SlotHandle slot,
                                   const ResolvedSubresourceRange& range,
                                   D3D12_RESOURCE_STATES after, bool uavOrder) noexcept {

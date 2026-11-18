@@ -9,6 +9,31 @@
 // 전체에서 한 번 정해진다(조각 snapshot의 칸 번호 — CVR2).
 namespace rocks::config {
 
+namespace detail {
+
+uint32 ConsoleFlagsOfDefinition(const cvar::detail::VarDefinition& definition) noexcept {
+    uint32 flags = 0;
+    if (definition.kind == cvar::HandleKind::Boot) {
+        flags |= static_cast<uint32>(ConsoleSettingFlags::StartupOnly);
+    }
+
+    if (cvar::HasFlag(definition.flags, cvar::VarFlags::Cheat)) {
+        flags |= static_cast<uint32>(ConsoleSettingFlags::DevelopmentOnly);
+    }
+
+    if (cvar::HasFlag(definition.flags, cvar::VarFlags::UserSetting)) {
+        flags |= static_cast<uint32>(ConsoleSettingFlags::UserConfig);
+    }
+
+    if (cvar::HasFlag(definition.flags, cvar::VarFlags::ConsoleReadOnly)) {
+        flags |= static_cast<uint32>(ConsoleSettingFlags::ConsoleReadOnly);
+    }
+
+    return flags;
+}
+
+} // namespace detail
+
 namespace {
 
 using cvar::HandleKind;
@@ -39,29 +64,6 @@ void AssignIndex(const VarDefinition& definition) noexcept {
     static_cast<void>(platform::AtomicCompareExchangeStrong<platform::MemoryOrder::Relaxed,
                                                             platform::MemoryOrder::Relaxed>(
         slot, expected, fresh));
-}
-
-// 정의의 성질을 콘솔 설정 플래그로 옮긴다. 부팅 변수는 StartupOnly(CompleteStartup 뒤 고정 — 9절),
-// Cheat는 DevelopmentOnly(VD5 — 출시 규칙 시험에서 숨김·고정)다. 모든 CVar는 snapshot에 든다(VD6).
-uint32 ConsoleFlagsOf(const VarDefinition& definition) noexcept {
-    uint32 flags = static_cast<uint32>(ConsoleSettingFlags::RenderRead);
-    if (definition.kind == HandleKind::Boot) {
-        flags |= static_cast<uint32>(ConsoleSettingFlags::StartupOnly);
-    }
-
-    if (cvar::HasFlag(definition.flags, VarFlags::Cheat)) {
-        flags |= static_cast<uint32>(ConsoleSettingFlags::DevelopmentOnly);
-    }
-
-    if (cvar::HasFlag(definition.flags, VarFlags::UserSetting)) {
-        flags |= static_cast<uint32>(ConsoleSettingFlags::UserConfig);
-    }
-
-    if (cvar::HasFlag(definition.flags, VarFlags::ConsoleReadOnly)) {
-        flags |= static_cast<uint32>(ConsoleSettingFlags::ConsoleReadOnly);
-    }
-
-    return flags;
 }
 
 // 이름의 첫 마디가 등록된 영역인지다.
@@ -137,7 +139,7 @@ Result<void> FillDefault(ConfigState& state, const VarDefinition& definition,
     ConfigDiagnosticCode code = ConfigDiagnosticCode::InvalidSetting;
     FieldValue parsed(state.allocator);
     auto checked = detail::CheckConsoleValue(state, setting, ConfigLayer::CodeDefault,
-                                             definition.defaultValue.text, parsed, code);
+                                             definition.defaultValue.text, parsed, code, false);
     if (!checked) {
         return Result<void>::Failure(checked.Error());
     }
@@ -164,7 +166,7 @@ Result<void> MakeSetting(ConfigState& state, const VarDefinition& definition,
     setting.definition = &definition;
     setting.type = definition.type;
     setting.kind = ConsoleValueKind(definition.type);
-    setting.flags = ConsoleFlagsOf(definition);
+    setting.flags = detail::ConsoleFlagsOfDefinition(definition);
     if (definition.type == ConsoleValueType::Enum) {
         setting.enumSchema = &definition.enumSchema();
     }
@@ -289,16 +291,46 @@ Result<void> ConfigContext::RegisterHandles(Span<const VarDefinition* const> def
         }
     }
 
-    // 3단계: 넣는다(자리를 확보했으므로 실패하지 않는다).
+    // 3단계: 번호를 주고(첫 등록 — 프로세스 전체) 새 칸만 더한 snapshot을 바로 게시한다(VD17 — 기존
+    // 칸은 그대로다. 게시가 실패하면 등록하지 않는다 — 받은 번호는 핸들에 남는다).
+    // 봉인 뒤에 등록한 부팅 변수는 등록 때 값으로 부팅 블록에 굳힌다(9절).
+    Array<detail::SlotWrite> writes(*allocator_);
+    Array<detail::SlotWrite> bootWrites(*allocator_);
+    if (auto reserved = writes.TryReserve(made.Size()); !reserved) {
+        state->diagnostics.Rewind(mark);
+        return reserved;
+    }
+
+    if (auto reserved = bootWrites.TryReserve(made.Size()); !reserved) {
+        state->diagnostics.Rewind(mark);
+        return reserved;
+    }
+
     for (UniquePtr<ConsoleSettingState>& setting : made) {
         AssignIndex(*setting->definition);
+        detail::SlotWrite write;
+        write.index =
+            platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&setting->definition->index);
+        write.value = &setting->value;
+        static_cast<void>(writes.TryPushBack(write)); // 예약했다
+        if (state->startupComplete && setting->definition->kind == HandleKind::Boot) {
+            static_cast<void>(bootWrites.TryPushBack(write)); // 예약했다
+        }
+    }
+
+    if (auto published = detail::PublishSnapshot(*state, nullptr, writes.View(), bootWrites.View());
+        !published) {
+        state->diagnostics.Rewind(mark);
+        return published;
+    }
+
+    // 4단계: 넣는다(자리를 확보했으므로 실패하지 않는다).
+    for (UniquePtr<ConsoleSettingState>& setting : made) {
         if (auto pushed = state->settings.TryPushBack(Move(setting)); !pushed) {
             platform::Fatal("CVar registration lost its reserved capacity");
         }
     }
 
-    // snapshot·콜백 판정이 새 설정을 보도록 다음 Sync가 다시 합친다(즉시 게시는 CVR2 — VD17).
-    state->dirty = true;
     return Result<void>::Success();
 }
 

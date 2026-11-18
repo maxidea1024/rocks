@@ -284,9 +284,13 @@ TEST(CVar_FlagsFollowConsoleSettingRules) {
     REQUIRE(context.Sync());
     CHECK(ValueOf(fixture, "game.threads").signedInteger == 8);
     REQUIRE(context.CompleteStartup());
-    REQUIRE(context.AddAssignment(ConfigLayer::Console, "console", "game.threads", "16"));
+    // 봉인 뒤 콘솔 쓰기는 넣을 때 거부한다(BootSealed — 9절). 휘발 층(세션)은 받되 값은 그대로다.
+    auto sealed = context.AddAssignment(ConfigLayer::Console, "console", "game.threads", "16");
+    CHECK(!sealed && fixture.HasDiagnostic(ConfigDiagnosticCode::BootSealed));
+    REQUIRE(context.AddAssignment(ConfigLayer::Session, "--set", "game.threads", "16"));
     REQUIRE(context.Sync());
     CHECK(ValueOf(fixture, "game.threads").signedInteger == 8);
+    CHECK(WorkerThreads.Get() == 8);
     CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::BootValueIgnored));
 
     context.Diagnostics().Clear();

@@ -318,6 +318,16 @@ template <class T>
 constexpr ValueCheck CheckValue(const VarDefinition& definition, ScalarValue& value,
                                 StringView& reason) noexcept {
     ValueCheck result = ValueCheck::Accepted;
+    if constexpr (IsSameV<T, float> || IsSameV<T, double>) {
+        // NaN·무한대는 늘 거부한다(범위·Clamp와 무관 — 4.2절). 상수 평가에서 NaN을 만들지 않도록
+        // 무한대는 비교로 가린다.
+        constexpr double Largest = NumericLimits<double>::Max();
+        if (value.real != value.real || value.real > Largest || value.real < -Largest) {
+            reason = "the value is not a finite number";
+            return ValueCheck::OutOfRange;
+        }
+    }
+
     if constexpr (IsNumericVarType<T>) {
         if (HasFlag(definition.flags, VarFlags::HasRange)) {
             result = CheckRange<T>(definition, value);

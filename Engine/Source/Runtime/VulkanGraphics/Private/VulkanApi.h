@@ -137,6 +137,7 @@ namespace rocks::graphics::vulkan {
     X(vkCmdCopyImageToBuffer)                                                                      \
     X(vkCmdCopyImage)                                                                              \
     X(vkCmdBlitImage)                                                                              \
+    X(vkCmdResolveImage)                                                                           \
     X(vkCreateEvent)                                                                               \
     X(vkDestroyEvent)
 

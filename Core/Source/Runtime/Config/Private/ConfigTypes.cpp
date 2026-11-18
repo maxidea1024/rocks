@@ -25,10 +25,18 @@ StringView ConfigLayerName(ConfigLayer layer) noexcept {
         return "DeviceProfile";
     case ConfigLayer::User:
         return "User";
+    case ConfigLayer::Hotfix:
+        return "Hotfix";
     case ConfigLayer::Session:
         return "Session";
+    case ConfigLayer::Code:
+        return "Code";
+    case ConfigLayer::Scoped:
+        return "Scoped";
     case ConfigLayer::Console:
         return "Console";
+    case ConfigLayer::Server:
+        return "Server";
     }
 
     return {};
@@ -80,6 +88,14 @@ StringView ConfigDiagnosticCodeName(ConfigDiagnosticCode code) noexcept {
         return "InvalidDeviceProfile";
     case ConfigDiagnosticCode::Clamped:
         return "Clamped";
+    case ConfigDiagnosticCode::InvalidEnum:
+        return "InvalidEnum";
+    case ConfigDiagnosticCode::BootSealed:
+        return "BootSealed";
+    case ConfigDiagnosticCode::LateBound:
+        return "LateBound";
+    case ConfigDiagnosticCode::UnresolvedName:
+        return "UnresolvedName";
     case ConfigDiagnosticCode::ValidationFailed:
         return "ValidationFailed";
     }

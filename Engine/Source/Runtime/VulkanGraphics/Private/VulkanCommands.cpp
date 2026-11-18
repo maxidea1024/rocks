@@ -127,6 +127,10 @@ Result<void> VulkanDevice::BeginRecording() noexcept {
         view = {};
     }
 
+    for (TextureHandle& view : boundWriteTextures_) {
+        view = {};
+    }
+
     descriptorsDirty_ = true;
     ResetTimestampSlots();
     return Result<void>::Success();
@@ -188,6 +192,37 @@ Result<CommandContext*> VulkanDevice::BeginFrame(SwapChainHandle handle,
     return Result<CommandContext*>::Success(this);
 }
 
+// 패스 끝에 MSAA 색 attachment를 resolve 대상에 박스 평균으로 resolve한다(ColorAttachment::
+// resolveTarget, 결정 R17). render pass를 닫은 뒤 원본은 CopySource(TRANSFER_SRC), 대상은
+// CopyDestination(TRANSFER_DST)으로 바꿔 vkCmdResolveImage를 기록한다. subpass resolve attachment는
+// render pass 호환 조건이라 쓰지 않는다(RenderBase 4.4절 텍스처 GX2 B부).
+void VulkanDevice::ResolveAttachments() noexcept {
+    for (uint32 index = 0; index < target_.colorCount; ++index) {
+        if (target_.resolves[index].IsNull()) {
+            continue;
+        }
+
+        TextureRecord* source = textures_.Find(target_.colors[index].slot);
+        TextureRecord* resolved = textures_.Find(target_.resolves[index].slot);
+        if (source == nullptr || resolved == nullptr) {
+            continue;
+        }
+
+        const ResolvedSubresourceRange whole = {0, 1, 0, 1};
+        TrackTransition(*source, target_.colors[index].slot, whole, ResourceAccess::CopySource,
+                        false);
+        TrackTransition(*resolved, target_.resolves[index].slot, whole,
+                        ResourceAccess::CopyDestination, false);
+        VkImageResolve region = {};
+        region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        region.extent = {source->width, source->height, 1};
+        functions_.vkCmdResolveImage(frame_, source->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                     resolved->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                                     &region);
+    }
+}
+
 Result<GpuFencePoint> VulkanDevice::EndFrame() noexcept {
     auto owner = ownership_.Check();
     if (!owner) {
@@ -204,6 +239,8 @@ Result<GpuFencePoint> VulkanDevice::EndFrame() noexcept {
         functions_.vkCmdEndRenderPass(frame_);
         insideRenderPass_ = false;
     }
+
+    ResolveAttachments();
 
     CloseSplitTransitions();
 
@@ -395,7 +432,7 @@ void VulkanDevice::SetTexture(TextureHandle handle) noexcept {
 
     TextureRecord* record = textures_.Find(handle.slot);
     SlotHandle slot = handle.slot;
-    if (record == nullptr || record->view == VK_NULL_HANDLE) {
+    if (record == nullptr || record->view == VK_NULL_HANDLE || record->writable) {
         record = textures_.Find(white_.slot);
         slot = white_.slot;
     }
@@ -408,6 +445,8 @@ void VulkanDevice::SetTexture(TextureHandle handle) noexcept {
     // 그리기가 쓴다(PrepareDescriptors).
     boundTexture_ = TextureHandle{slot};
     descriptorsDirty_ = true;
+    // view는 자기 mip·slice 범위만 전이한다(텍스처 GX2 A부).
+    const ResolvedSubresourceRange range = record->viewRange;
     if (record->isView) {
         slot = record->source;
         record = textures_.Find(slot);
@@ -421,15 +460,16 @@ void VulkanDevice::SetTexture(TextureHandle handle) noexcept {
     // (descriptor를 그 layout으로 썼다. D3D12는 PIXEL_SHADER_RESOURCE 비트만 본다). 패스 대상
     // 자신은 attachment라 바꾸지 않는다(샘플링할 수 없다).
     bool readable = true;
-    for (uint32 index = 0; index < record->current.Count(); ++index) {
-        readable = readable && HasAnyAccess(record->current[index], ResourceAccess::SrvGraphics) &&
-                   (record->current[index] & ~SrvAccessMask) == ResourceAccess::Unknown;
+    for (uint32 layer = range.firstSlice; layer < range.firstSlice + range.sliceCount; ++layer) {
+        for (uint32 mip = range.firstMip; mip < range.firstMip + range.mipCount; ++mip) {
+            const ResourceAccess state = record->current.At(mip, layer);
+            readable = readable && HasAnyAccess(state, ResourceAccess::SrvGraphics) &&
+                       (state & ~SrvAccessMask) == ResourceAccess::Unknown;
+        }
     }
 
     if (!readable && !IsPassAttachment(slot)) {
-        TrackTransition(*record, slot,
-                        ResolveSubresourceRange({}, record->mipLevels, record->slices),
-                        ResourceAccess::SrvGraphics, false);
+        TrackTransition(*record, slot, range, ResourceAccess::SrvGraphics, false);
         ResumeRenderPass();
     }
 }
@@ -487,9 +527,10 @@ Result<void> VulkanDevice::CopyPassTarget(TextureHandle destination) noexcept {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (target_.image == VK_NULL_HANDLE || !record->renderTarget ||
-        destination == target_.texture || record->width != target_.width ||
-        record->height != target_.height || record->format != target_.format) {
+    if (target_.image == VK_NULL_HANDLE || !record->renderTarget || record->sampleCount > 1 ||
+        target_.sampleCount > 1 || destination == target_.texture ||
+        record->width != target_.width || record->height != target_.height ||
+        record->format != target_.format) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

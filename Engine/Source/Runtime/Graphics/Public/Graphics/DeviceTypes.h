@@ -341,7 +341,11 @@ enum class TextureUsage : uint8 {
     // 깊이·스텐실 타깃이다(초기 픽셀 없음, mip 1). 형식 능력 DepthStencil이 필요하고, 형식이
     // Sampled면 깊이 plane을 샘플할 수 있다. 깊이 그리기 경로는 GX2·GX3에서 연다(PixelFormat.ko.md
     // 개정 3).
-    DepthStencil
+    DepthStencil,
+    // 셰이더가 읽고(SRV) 쓰는(UAV, 쓰기 view) 텍스처다(초기 픽셀 없음, mip 여러 개 가능, 처음
+    // 내용은 정해지지 않는다). 차원은 2D·2D 배열·3D다. 형식 능력 Sampled·StorageWrite가 필요하고
+    // mip이 2개 이상이면 Mipmaps도 필요하다(RenderBase 4.4절 텍스처 GX2 A부, HZB·compute 후처리).
+    Storage
 };
 
 // 텍스처 설정이다(AssetSystem A0-G 차원·swizzle·샘플러).
@@ -381,14 +385,23 @@ struct TextureDesc {
     uint32 arraySize = 1;
     PixelFormat format = PixelFormat::RGBA8UnormSrgb;
     TextureUsage usage = TextureUsage::Sampled;
-    // 1–TextureFullMipCount(desc)다. RenderTarget·DepthStencil은 1이어야 한다.
+    // 1–TextureFullMipCount(desc)다. RenderTarget·DepthStencil은 1이어야 한다(Storage는 여럿 가능).
     uint32 mipLevels = 1;
     // 이 텍스처를 묶을 때(SetTexture) 셰이더가 읽는 성분 대응이다(view swizzle). 항등이 아니면
     // D3D11은 Unsupported다(view swizzle이 없다). attachment·복사·ReadTexture에는 적용하지 않는다.
     ChannelSwizzle swizzle;
     // 이 텍스처를 묶을 때 쓰는 기본 샘플러다(결정 R12: 바인딩 때 다른 샘플러를 고르는 것은 GX6).
     SamplerDesc sampler;
+    // MSAA 표본 수다(1, 2의 거듭제곱, 최대 MaxSampleCount). 2 이상이면 RenderTarget·DepthStencil의
+    // Texture2D, mip 1만이고 장치가 그 수를 지원해야 한다(GetPixelFormatSampleCounts). 묶으면 표본
+    // 번호로 읽는다(HLSL Texture2DMS, GLSL ES sampler2DMS). 색은 패스의 ColorAttachment::
+    // resolveTarget으로 1표본 텍스처에 resolve한 뒤 읽거나 복사한다(RenderBase 4.4절 텍스처 GX2
+    // B부).
+    uint32 sampleCount = 1;
 };
+
+// sampleCount가 1 이상 MaxSampleCount 이하의 2의 거듭제곱인지다(텍스처·파이프라인 공용).
+bool IsValidSampleCount(uint32 sampleCount) noexcept;
 
 // 텍스처의 subresource slice 수다(2D·3D 1, 2DArray arraySize, Cube 6, CubeArray 6 × arraySize).
 // 무효 차원은 0이다.
@@ -417,10 +430,15 @@ uint64 TextureDataBytes(const TextureDesc& desc) noexcept;
 // - 3D가 아닌데 depth ≠ 1, 배열 차원이 아닌데 arraySize ≠ 1, depth·arraySize 0
 // - Cube·CubeArray인데 width ≠ height
 // - mipLevels가 0이거나 TextureFullMipCount 초과, RenderTarget·DepthStencil인데 mipLevels ≠ 1
+// - Storage인데 깊이·다중 plane 형식
+// - sampleCount가 2의 거듭제곱이 아니거나 범위 밖, 2 이상인데 RenderTarget·DepthStencil의
+// Texture2D가
+//   아님
 // - DepthStencil인데 깊이 형식이 아님
 // - 비교 샘플러(SamplerDesc::comparison)인데 깊이 형식(Depth·DepthStencil)이 아님
 // Unsupported(이 단계의 계약 밖):
-// - RenderTarget·DepthStencil인데 Texture2D가 아님(slice attachment는 렌더 세션 GX2 몫)
+// - RenderTarget·DepthStencil인데 Texture2D가 아님(slice attachment는 텍스처 GX2 C부)
+// - Storage인데 cube·cube 배열
 // - 다중 plane 형식(깊이·스텐실 D24S8·D32S8, 비디오)인데 Texture2D가 아님
 Result<void> ValidateTextureDesc(const TextureDesc& desc) noexcept;
 
@@ -438,23 +456,52 @@ struct TextureSubresources {
 Result<void> CheckTextureLimits(const DeviceCaps& caps, const TextureDesc& desc) noexcept;
 
 // 텍스처 view 설정이다(Device::CreateTextureView). 원 텍스처의 자원을 공유하고 형식·plane·성분
-// 대응만 다르게 읽는다(PixelFormat.ko.md 9·10·11절). 차원·mip·slice는 원 텍스처 전체다(mip·slice
-// 범위 view는 렌더 세션 GX2 몫).
+// 대응·mip·slice 범위를 골라 읽거나(Read, SetTexture) 쓴다(ReadWrite, SetWritableTexture)
+// (PixelFormat.ko.md 9·10·11절, RenderBase 4.4절 텍스처 GX2 A부). 차원은 원 텍스처와 같다.
 // - format: Unknown이면 그 plane의 기본 형식이다. 색·압축 형식은 자기 형식이나 sRGB 짝,
 //   깊이·스텐실과 비디오는 plane 형식(PixelFormatInfo::planes)만 받는다.
 // - plane: 단일 plane 형식은 0, 깊이·스텐실은 0(깊이)·1(스텐실, uint으로 읽고 값은 G 채널),
 //   비디오는 0(휘도 Y)·1(색차 CbCr)이다.
 // - swizzle: view 형식의 성분 기준 대응이다(원 텍스처의 TextureDesc::swizzle은 이어받지 않는다).
 //   스텐실 plane의 "값은 G" 규칙 위에 합성된다. 항등이 아니면 D3D11은 Unsupported다.
+// - firstMip·mipCount, firstSlice·sliceCount: 범위다(개수 0 = 끝까지, ResolveTextureViewRange).
+//   범위 view를 지원하지 않는 장치(DeviceFeatures::textureViewRanges 거짓, OpenGL ES)의 Read view는
+//   텍스처 전체를 묶으므로 셰이더는 TextureViewBaseMip을 기준 mip으로 받아 명시 LOD로 읽는다.
+// - access: Read는 SetTexture로 읽는 SRV, ReadWrite는 SetWritableTexture로 쓰는 UAV다(Storage
+//   텍스처만, mip 하나, plane 0, swizzle 항등, 형식 능력 StorageWrite).
 //
 // 사용 예(NV12의 색차 plane을 RG8로 샘플):
-//   auto uv = device.CreateTextureView(video, {PixelFormat::Unknown, 1, {}});
+//   TextureViewDesc chroma;
+//   chroma.plane = 1;
+//   auto uv = device.CreateTextureView(video, chroma);
 //   commands.SetTexture(uv.Value());
+//
+// 사용 예(HZB 한 단계: mip k를 읽고 mip k + 1에 쓴다):
+//   TextureViewDesc source;
+//   source.firstMip = k;
+//   source.mipCount = 1;
+//   TextureViewDesc target;
+//   target.firstMip = k + 1;
+//   target.mipCount = 1;
+//   target.access = ViewAccess::ReadWrite;
+//   commands.SetTexture(device.CreateTextureView(hzb, source).Value());
+//   commands.SetWritableTexture(0, device.CreateTextureView(hzb, target).Value());
 struct TextureViewDesc {
     PixelFormat format = PixelFormat::Unknown;
     uint32 plane = 0;
     ChannelSwizzle swizzle;
+    uint32 firstMip = 0;
+    uint32 mipCount = 0;
+    uint32 firstSlice = 0;
+    uint32 sliceCount = 0;
+    ViewAccess access = ViewAccess::Read;
 };
+
+// view를 읽는 셰이더가 명시 LOD의 기준으로 쓰는 mip이다(RenderBase 7.5절 view 기준 mip). 범위
+// view를 지원하는 장치(DeviceFeatures::textureViewRanges)는 0, 아니면(텍스처 전체가 묶인다)
+// desc.firstMip이다. 셰이더는 SampleLevel(s, uv, baseMip + lod)·Load(int3(p, baseMip + lod))처럼
+// 쓰고 기준 mip을 그리기별 상수로 받는다.
+uint32 TextureViewBaseMip(const DeviceFeatures& features, const TextureViewDesc& desc) noexcept;
 
 // texture 형식에 desc가 맞는지 확인하고 view가 읽는 픽셀 형식(plane 형식 또는 sRGB 짝)을 돌려준다.
 // 장치와 무관한 규칙이며 backend가 생성 전에 부른다. 실패: 무효 형식·plane 범위 밖·plane에 맞지
@@ -468,7 +515,8 @@ Result<PixelFormat> ResolveTextureViewFormat(PixelFormat texture, const TextureV
                                              bool comparisonSampler) noexcept;
 
 // desc의 텍스처를 만들 때 형식에 필요한 능력이다(TextureUsage 주석, 3D는 Texture3D, Cube·
-// CubeArray는 TextureCube를 더한다).
+// CubeArray는 TextureCube, 표본 수 2 이상은 Multisample을 더한다. 표본 수 자체는 장치가
+// GetPixelFormatSampleCounts로 따로 본다).
 PixelFormatCaps RequiredPixelFormatCaps(const TextureDesc& desc) noexcept;
 
 // 정점 배치 한계다(RenderBase 10.4절). 장치 최소 보장 쪽 값이다: 속성 16(Vulkan
@@ -634,10 +682,14 @@ struct PipelineDesc {
     RasterState raster;
     // 그리기별 상수 byte 수다(0 = 없음, IsValidDrawConstantBytes).
     uint32 drawConstantBytes = 0;
+    // 래스터 표본 수다(IsValidSampleCount). 그릴 패스 attachment의 표본 수와 같아야 한다(다르면
+    // 검증 계층 오류이며 장치는 검사하지 않는다).
+    uint32 sampleCount = 1;
 };
 
 // 장치와 무관한 파이프라인 상태 규칙이다(backend가 생성 전에 부른다). 위반은 InvalidArgument다:
-// drawConstantBytes가 규칙 밖(IsValidDrawConstantBytes), colorTargetCount가 MaxColorTargets 초과,
+// drawConstantBytes가 규칙 밖(IsValidDrawConstantBytes), sampleCount가 규칙 밖(IsValidSampleCount),
+// colorTargetCount가 MaxColorTargets 초과,
 // 무효한 형식 번호, 색 attachment도 깊이도 없음, 깊이 attachment 없이 깊이·스텐실 시험, 스텐실
 // plane 없는 깊이 형식에 스텐실 시험, 모르는 enum 값(기본도형·비교·스텐실 연산·블렌드 계수·식·쓰기
 // mask·컬). 형식이 렌더 타깃·깊이 타깃이 될 수 있는지는 장치 능력이라 backend가 Unsupported로
@@ -660,6 +712,10 @@ bool PipelineWritesDepthStencil(const PipelineDesc& desc) noexcept;
 //   16). 규칙은 PipelineDesc와 같다.
 // - 읽기 버퍼 view slot 0–3(SetBufferView): HLSL t1–t4, GLSL ES typed는 텍스처 유닛 1 + slot
 //   (samplerBuffer), 구조화·raw는 storage block binding slot
+// - 텍스처 하나(SetTexture): HLSL t0·s0, GLSL ES 텍스처 유닛 0(layout(binding = 0) sampler*)
+// - 쓰기 텍스처 slot 0–3(SetWritableTexture, 쓰기 버퍼 view와 같은 번호 공간): HLSL u0–u3의
+//   RWTexture2D·RWTexture2DArray·RWTexture3D, GLSL ES image unit slot의 image2D·image2DArray·
+//   image3D(형식 한정자 필요)
 // - 쓰기 버퍼 view slot 0–3(SetWritableBufferView): HLSL u0–u3(RWBuffer<T>·RWStructuredBuffer<T>·
 //   RWByteAddressBuffer), GLSL ES typed는 image unit slot(layout(binding = slot, <형식>)
 //   imageBuffer), 구조화·raw는 storage block binding 4 + slot
@@ -683,11 +739,23 @@ struct ClearColor {
 
 // 패스의 색 attachment 하나다(RenderTarget 텍스처, mip 0). 정수 형식의 clear는 값을 그 형식으로
 // 바꿔 쓴다.
+//
+// resolveTarget이 null이 아니면 패스 끝(EndFrame)에 이 MSAA attachment를 표본 박스 평균으로 그
+// 텍스처에 resolve한다(결정 R17의 attachment resolve). 대상은 1표본 RenderTarget이고 형식·크기가
+// 같으며 view가 아니고 같은 패스의 다른 attachment·resolve 대상과 겹치지 않아야 한다(위반
+// InvalidArgument). store가 DontCare여도 resolve한다.
+//
+// 사용 예(4x MSAA 색을 그려 1표본으로 resolve):
+//   PassDesc pass;
+//   pass.colorCount = 1;
+//   pass.colors[0] = {msaaColor, LoadAction::Clear, StoreAction::DontCare};
+//   pass.colors[0].resolveTarget = sceneColor;
 struct ColorAttachment {
     TextureHandle texture;
     LoadAction load = LoadAction::Clear;
     StoreAction store = StoreAction::Store;
     ClearColor clear;
+    TextureHandle resolveTarget;
 };
 
 // 패스의 깊이·스텐실 attachment다(DepthStencil 텍스처). readOnly면 깊이·스텐실을 읽기 전용으로
@@ -705,8 +773,8 @@ struct DepthAttachment {
 };
 
 // 패스 시작 설정이다(Device::BeginPass, GX4). 색 attachment는 앞에서부터 colorCount개를 쓴다. 모든
-// attachment의 크기가 같아야 한다. 색도 깊이도 없는 패스는 compute·복사 전용이고 그 안의 그리기는
-// 무시된다.
+// attachment의 크기와 표본 수(TextureDesc::sampleCount)가 같아야 한다. 색도 깊이도 없는 패스는
+// compute·복사 전용이고 그 안의 그리기는 무시된다.
 //
 // 사용 예(MRT 2장 + 깊이):
 //   PassDesc pass;

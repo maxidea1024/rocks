@@ -1,4 +1,5 @@
 #include "ConfigState.h"
+#include "ConfigText.h"
 
 #include <Core/Text/StringBuilder.h>
 #include <Object/PropertyPath.h>
@@ -38,20 +39,6 @@ bool IsRegionName(StringView text) noexcept {
     return !first;
 }
 
-// byte 순서 비교(사전식)다.
-bool LessBytes(StringView left, StringView right) noexcept {
-    const usize count = left.ByteCount() < right.ByteCount() ? left.ByteCount() : right.ByteCount();
-    for (usize index = 0; index < count; ++index) {
-        const auto a = static_cast<uint8>(left.Data()[index]);
-        const auto b = static_cast<uint8>(right.Data()[index]);
-        if (a != b) {
-            return a < b;
-        }
-    }
-
-    return left.ByteCount() < right.ByteCount();
-}
-
 Result<void> Write(ConsoleOutput& output, StringView text) noexcept {
     if (output.write == nullptr) {
         return Result<void>::Success();
@@ -85,72 +72,7 @@ ValueKind ConsoleValueKind(ConsoleValueType type) noexcept {
     return ValueKind::Opaque;
 }
 
-ConfigSnapshot::ConfigSnapshot(Allocator& allocator) noexcept : entries_(allocator) {
-}
-
-StringView ConfigSnapshot::NameAt(usize index) const noexcept {
-    if (index >= entries_.Size()) {
-        platform::Fatal("ConfigSnapshot::NameAt index out of range");
-    }
-
-    return entries_[index]->name.View();
-}
-
-const FieldValue& ConfigSnapshot::ValueAt(usize index) const noexcept {
-    if (index >= entries_.Size()) {
-        platform::Fatal("ConfigSnapshot::ValueAt index out of range");
-    }
-
-    return entries_[index]->value;
-}
-
-const FieldValue* ConfigSnapshot::Find(StringView name) const noexcept {
-    usize low = 0;
-    usize high = entries_.Size();
-    while (low < high) {
-        const usize middle = low + (high - low) / 2;
-        if (LessBytes(entries_[middle]->name.View(), name)) {
-            low = middle + 1;
-        } else {
-            high = middle;
-        }
-    }
-
-    return low < entries_.Size() && entries_[low]->name.View() == name ? &entries_[low]->value
-                                                                       : nullptr;
-}
-
 namespace detail {
-
-// 설정 snapshot을 만드는 쪽의 접근이다(ConfigSnapshot의 friend).
-struct SnapshotAccess {
-    static Result<void> Add(ConfigSnapshot& snapshot, StringView name,
-                            const FieldValue& value) noexcept {
-        Allocator& allocator = snapshot.entries_.GetAllocator();
-        auto made = UniquePtr<ConfigSnapshot::Entry>::TryMake(allocator, allocator);
-        if (!made) {
-            return Result<void>::Failure(made.Error());
-        }
-
-        if (auto assigned = made.Value()->name.TryAssign(name); !assigned) {
-            return assigned;
-        }
-
-        if (auto copied = CopyFieldValue(value, made.Value()->value); !copied) {
-            return copied;
-        }
-
-        return snapshot.entries_.TryPushBack(Move(made.Value()));
-    }
-
-    static void Finish(ConfigSnapshot& snapshot, uint64 generation) noexcept {
-        snapshot.generation_ = generation;
-        snapshot.entries_.Sort([](const UniquePtr<ConfigSnapshot::Entry>& left,
-                                  const UniquePtr<ConfigSnapshot::Entry>& right) noexcept {
-            return LessBytes(left->name.View(), right->name.View());
-        });
-    }
-};
 
 ConfigState::~ConfigState() {
     for (PendingCommand& pending : pendingCommands) {
@@ -205,12 +127,21 @@ uint32 ConsoleFlagsOfField(uint32 settingsFlags) noexcept {
     return flags;
 }
 
-StringView CheckConsoleLayer(const ConfigState& state, ConfigLayer layer, uint32 consoleFlags,
-                             ConfigDiagnosticCode& code) noexcept {
+StringView CheckConsoleLayer(bool releaseRules, ConfigLayer layer, uint32 consoleFlags,
+                             ConfigDiagnosticCode& code, bool sealedWrite) noexcept {
+    // 출시 규칙의 개발 전용 판정이 먼저다(출시 빌드에서는 그 설정이 없는 것과 같다).
     code = ConfigDiagnosticCode::LayerNotAllowed;
-    if (state.releaseRules && HasFlag(consoleFlags, ConsoleSettingFlags::DevelopmentOnly) &&
+    if (releaseRules && HasFlag(consoleFlags, ConsoleSettingFlags::DevelopmentOnly) &&
         layer != ConfigLayer::CodeDefault) {
         return "a DevelopmentOnly value keeps its code default under release rules";
+    }
+
+    // 봉인 뒤 부팅 변수에 바로 쓰는 층(콘솔·코드·범위 임시 변경)은 쓰기 때 거부한다(CVar 9절 — 부른
+    // 쪽이 바로 효력을 기대하므로 결과로 알린다). 파일 층·파생 층·휘발 층은 받고 Sync가 지금 값을
+    // 지킨다.
+    if (sealedWrite && HasBootFlags(consoleFlags) && IsDirectWriteLayer(layer)) {
+        code = ConfigDiagnosticCode::BootSealed;
+        return BootSealedMessage;
     }
 
     if (layer == ConfigLayer::Console &&
@@ -457,8 +388,9 @@ Result<void> FormatConsoleValue(ConfigState& state, const ConsoleSettingState& s
 
 Result<StringView> CheckConsoleValue(ConfigState& state, const ConsoleSettingState& setting,
                                      ConfigLayer layer, StringView text, FieldValue& out,
-                                     ConfigDiagnosticCode& code) noexcept {
-    const StringView problem = CheckConsoleLayer(state, layer, setting.flags, code);
+                                     ConfigDiagnosticCode& code, bool writing) noexcept {
+    const StringView problem = CheckConsoleLayer(state.releaseRules, layer, setting.flags, code,
+                                                 writing && state.startupComplete);
     if (!problem.IsEmpty()) {
         return Result<StringView>::Success(problem);
     }
@@ -557,8 +489,23 @@ Result<void> AdoptPendingValues(ConfigState& state, ConsoleSettingState& setting
         return left->layer != right->layer ? left->layer < right->layer
                                            : left->sequence < right->sequence;
     });
-    return RecomputeConsoleSetting(state, setting, order.View(), true, setting.value, setting.text,
-                                   setting.sources);
+    if (auto computed = RecomputeConsoleSetting(state, setting, order.View(), true, setting.value,
+                                                setting.text, setting.sources);
+        !computed) {
+        return computed;
+    }
+
+    // 등록 전에 들어온 값이 적용됐으면 알린다(정보 LateBound — CVar 12절). 출처는 가장 강한
+    // 입력이다.
+    if (setting.sources.IsEmpty()) {
+        return Result<void>::Success();
+    }
+
+    const ConfigEntry* top = state.FindEntry(setting.sources[setting.sources.Size() - 1]);
+    return Report(state, ConfigDiagnosticCode::LateBound, ConfigSeverity::Note,
+                  top != nullptr ? top->layer : ConfigLayer::CodeDefault,
+                  top != nullptr ? top->sourceName.View() : StringView{}, nullptr,
+                  setting.name.View(), "values set before registration were applied");
 }
 
 Result<void> RecomputeConsoleSetting(ConfigState& state, const ConsoleSettingState& setting,
@@ -611,9 +558,25 @@ Result<void> RecomputeConsoleSetting(ConfigState& state, const ConsoleSettingSta
             continue;
         }
 
+        // 봉인 뒤 바로 쓰는 층으로 들어온 입력은 그 뒤에 등록한 부팅 값에 닿지 않는다(쓰기 때
+        // 이름을 몰라 거부하지 못한 늦은 등록 — CVar 9절). 등록 때(report) 한 번 알린다.
+        if (entry->sealedDirectWrite && HasBootFlags(setting.flags)) {
+            if (report) {
+                if (auto reported =
+                        Report(state, ConfigDiagnosticCode::BootSealed, ConfigSeverity::Error,
+                               entry->layer, entry->sourceName.View(), position,
+                               setting.name.View(), BootSealedMessage);
+                    !reported) {
+                    return reported;
+                }
+            }
+
+            continue;
+        }
+
         ConfigDiagnosticCode code = ConfigDiagnosticCode::InvalidSetting;
         auto checked =
-            CheckConsoleValue(state, setting, entry->layer, contribution, candidate, code);
+            CheckConsoleValue(state, setting, entry->layer, contribution, candidate, code, false);
         if (!checked) {
             return Result<void>::Failure(checked.Error());
         }
@@ -773,24 +736,43 @@ Result<void> ComputeSettingResults(ConfigState& state, Span<ConfigEntry* const> 
     return Result<void>::Success();
 }
 
-Result<void> PrepareSnapshot(ConfigState& state, Span<const UniquePtr<SettingResult>> settings,
-                             Span<void* const> sectionValues, SharedPtr<ConfigSnapshot>& out,
-                             String& signature) noexcept {
-    auto made = SharedPtr<ConfigSnapshot>::TryMake(state.allocator, state.allocator);
+// 이름 블록에 값 하나를 더한다.
+Result<void> AddNamed(NamedBlock& block, StringView name, const FieldValue& value) noexcept {
+    Allocator& allocator = block.entries.GetAllocator();
+    auto made = UniquePtr<NamedBlock::Entry>::TryMake(allocator, allocator);
     if (!made) {
         return Result<void>::Failure(made.Error());
     }
 
-    ConfigSnapshot& snapshot = *made.Value();
-    // 콘솔 설정(독립·필드)의 RenderRead 값.
+    if (auto assigned = made.Value()->name.TryAssign(name); !assigned) {
+        return assigned;
+    }
+
+    if (auto copied = CopyFieldValue(value, made.Value()->value); !copied) {
+        return copied;
+    }
+
+    return block.entries.TryPushBack(Move(made.Value()));
+}
+
+Result<void> PrepareNamedBlock(ConfigState& state, Span<const UniquePtr<SettingResult>> settings,
+                               Span<void* const> sectionValues, SharedPtr<const NamedBlock>& out,
+                               String& signature) noexcept {
+    auto made = SharedPtr<NamedBlock>::TryMake(state.allocator, state.allocator);
+    if (!made) {
+        return Result<void>::Failure(made.Error());
+    }
+
+    NamedBlock& block = *made.Value();
+    // 콘솔 설정(독립·필드)의 RenderRead 값(CVar 핸들은 CVar 칸에 있다).
     for (usize index = 0; index < settings.Size(); ++index) {
         const ConsoleSettingState& setting = *state.settings[index];
-        if (!HasFlag(setting.flags, ConsoleSettingFlags::RenderRead)) {
+        if (!HasFlag(setting.flags, ConsoleSettingFlags::RenderRead) ||
+            setting.definition != nullptr) {
             continue;
         }
 
-        if (auto added = SnapshotAccess::Add(snapshot, setting.name.View(), settings[index]->value);
-            !added) {
+        if (auto added = AddNamed(block, setting.name.View(), settings[index]->value); !added) {
             return added;
         }
     }
@@ -819,18 +801,20 @@ Result<void> PrepareSnapshot(ConfigState& state, Span<const UniquePtr<SettingRes
                 return status;
             }
 
-            if (auto added = SnapshotAccess::Add(snapshot, name.View(), value); !added) {
+            if (auto added = AddNamed(block, name.View(), value); !added) {
                 return added;
             }
         }
     }
 
-    SnapshotAccess::Finish(snapshot, 0);
-    // 서명은 이름 순서의 `이름=표기` 줄이다. 이전 서명과 같으면 이전 snapshot을 쓴다.
-    for (usize index = 0; index < snapshot.Count(); ++index) {
-        const StringView name = snapshot.NameAt(index);
+    block.entries.Sort([](const UniquePtr<NamedBlock::Entry>& left,
+                          const UniquePtr<NamedBlock::Entry>& right) noexcept {
+        return detail::LessBytes(left->name.View(), right->name.View());
+    });
+    // 서명은 이름 순서의 `이름=표기` 줄이다. 이전 서명과 같으면 이전 블록을 쓴다(out은 null).
+    for (const UniquePtr<NamedBlock::Entry>& entry : block.entries) {
         String text(state.allocator);
-        const FieldValue& value = snapshot.ValueAt(index);
+        const FieldValue& value = entry->value;
         TextScalarType type;
         type.type.kind = value.kind;
         type.type.type = value.type;
@@ -849,7 +833,7 @@ Result<void> PrepareSnapshot(ConfigState& state, Span<const UniquePtr<SettingRes
             return formatted;
         }
 
-        Result<void> appended = signature.TryAppend(name);
+        Result<void> appended = signature.TryAppend(entry->name.View());
         if (appended) {
             appended = signature.TryAppend("=");
         }
@@ -868,11 +852,10 @@ Result<void> PrepareSnapshot(ConfigState& state, Span<const UniquePtr<SettingRes
     }
 
     if (state.snapshot.Get() != nullptr && signature.View() == state.renderSignature.View()) {
-        out = SharedPtr<ConfigSnapshot>();
+        out = SharedPtr<const NamedBlock>();
         return Result<void>::Success();
     }
 
-    SnapshotAccess::Finish(snapshot, state.snapshotGeneration + 1);
     out = Move(made.Value());
     return Result<void>::Success();
 }
@@ -1073,7 +1056,7 @@ ConfigContext::RegisterConsoleSetting(const ConsoleSettingDefinition& definition
         ConfigDiagnosticCode code = ConfigDiagnosticCode::InvalidSetting;
         FieldValue parsed(*allocator_);
         auto checked = detail::CheckConsoleValue(*state, setting, ConfigLayer::CodeDefault,
-                                                 definition.defaultValue, parsed, code);
+                                                 definition.defaultValue, parsed, code, false);
         if (!checked) {
             return Result<ConsoleSettingId>::Failure(checked.Error());
         }
@@ -1478,7 +1461,8 @@ Result<void> ConfigContext::CompleteConsoleName(StringView prefix,
         }
     }
 
-    out.Sort([](StringView left, StringView right) noexcept { return LessBytes(left, right); });
+    out.Sort(
+        [](StringView left, StringView right) noexcept { return detail::LessBytes(left, right); });
     return Result<void>::Success();
 }
 
@@ -1583,21 +1567,39 @@ Result<void> ConfigContext::CompleteStartup() noexcept {
         return Result<void>::Failure(ErrorCode::WrongThread);
     }
 
+    if (state->startupComplete) {
+        return Result<void>::Success();
+    }
+
+    // 큐에 남은 쓰기는 마지막 Sync 값에 들어 있지 않으므로 그대로 봉인하면 빠진다. 먼저 Sync한다.
+    if (HasPendingChanges()) {
+        return Result<void>::Failure(ErrorCode::Busy);
+    }
+
+    // 봉인: 부팅 변수(BootCVar)의 지금 값을 불변 부팅 블록으로 굳혀 게시한다(CVar 9절 — 봉인 뒤
+    // snapshot의 부팅 값은 모두 같다). 게시가 실패하면 봉인하지 않는다.
+    Array<detail::SlotWrite> boot(*allocator_);
+    for (const UniquePtr<ConsoleSettingState>& setting : state->settings) {
+        if (setting->definition == nullptr || setting->definition->kind != cvar::HandleKind::Boot) {
+            continue;
+        }
+
+        detail::SlotWrite write;
+        write.index =
+            platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&setting->definition->index);
+        write.value = &setting->value;
+        if (auto pushed = boot.TryPushBack(write); !pushed) {
+            return pushed;
+        }
+    }
+
     state->startupComplete = true;
+    if (auto published = detail::PublishSnapshot(*state, nullptr, {}, boot.View()); !published) {
+        state->startupComplete = false;
+        return published;
+    }
+
     return Result<void>::Success();
-}
-
-SharedPtr<ConfigSnapshot> ConfigContext::Snapshot() const noexcept {
-    const ConfigState* state = state_.Get();
-    if (state == nullptr) {
-        return SharedPtr<ConfigSnapshot>();
-    }
-
-    if (platform::CurrentThreadId() != state->owner) {
-        platform::Fatal("ConfigContext used from a thread other than its owner");
-    }
-
-    return state->snapshot;
 }
 
 } // namespace rocks::config

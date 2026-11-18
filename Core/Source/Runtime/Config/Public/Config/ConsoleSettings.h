@@ -1,23 +1,17 @@
 #pragma once
 
 #include <Base/NumericLimits.h>
+#include <Config/ConfigSnapshot.h>
 #include <Config/ConfigTypes.h>
 #include <Core/Containers/Span.h>
 #include <Core/Memory/SharedPtr.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Object/RuntimeTypeOps.h>
 
-// 콘솔 설정·콘솔 명령의 정의와 설정 snapshot이다(Docs/Design/ConfigSystem.ko.md 5절 — 설정 CF2).
-// 등록과 조회는 ConfigContext가 한다(ConfigContext.h). UE 대응: 콘솔 설정은 console
-// variable(IConsoleVariable), 콘솔 명령은 console command, 설정 snapshot은 렌더 스레드 사본(이
-// 문서는 주소 전파 대신 불변 블록을 쓴다).
+// 콘솔 설정·콘솔 명령의 정의다(Docs/Design/ConfigSystem.ko.md 5절 — 설정 CF2, 설정 snapshot은
+// Config/ConfigSnapshot.h). 등록과 조회는 ConfigContext가 한다(ConfigContext.h). UE 대응: 콘솔
+// 설정은 console variable(IConsoleVariable), 콘솔 명령은 console command다.
 namespace rocks::config {
-
-namespace detail {
-
-struct SnapshotAccess;
-
-} // namespace detail
 
 // 콘솔 설정 값 종류다(5.1절). 값은 리플렉션 FieldValue로 담는다(ValueKind는 ConsoleValueKind).
 enum class ConsoleValueType : uint8 {
@@ -40,10 +34,13 @@ enum class ConsoleSettingFlags : uint32 {
     DevelopmentOnly = 2,
     // 설정 snapshot에 넣는다(UE ECVF_RenderThreadSafe).
     RenderRead = 4,
-    // 바뀐 값이 다음 시작 때 효력을 갖는다(시작 뒤에는 지금 값을 유지 — CompleteStartup 참고).
+    // 바뀐 값이 다음 시작 때 효력을 갖는다(시작 뒤에는 지금 값을 유지 — StartupOnly와 같은 규칙,
+    // CompleteStartup 참고).
     RestartRequired = 8,
     // 시작(ConfigContext::CompleteStartup) 뒤에는 이번 실행 값이 바뀌지 않는다(RestartRequired와
-    // 같은 규칙 — 파일 층 변경은 재시작 대기, 그 밖은 BootValueIgnored).
+    // 같은 규칙): 독립 콘솔 설정에 바로 쓰는 층(콘솔·코드·범위 임시 변경)의 쓰기는 넣을 때 Error
+    // BootSealed로 거부하고, 파일 층 변경은 재시작 대기, 파생·휘발 층 변경은 Warning
+    // BootValueIgnored다. 설정 struct 필드는 콘솔 이름으로 써도 BootValueIgnored다(Config 8절).
     StartupOnly = 16,
     // 사용자 층이 쓸 수 있다.
     UserConfig = 32,
@@ -124,6 +121,25 @@ struct ConsoleSettingId {
     }
 };
 
+// 콘솔 설정 하나의 설명이다(ConfigContext::DescribeConsoleSetting — 콘솔 Explain·dump가 쓴다, CVar
+// 9·15절). view는 다음 Sync·등록까지 유효하다.
+struct ConsoleSettingInfo {
+    StringView name;
+    StringView help;
+    // 값 종류(ConsoleValueKind — Enum은 Enum).
+    ValueKind kind = ValueKind::Opaque;
+    // ConsoleSettingFlags 비트.
+    uint32 flags = 0;
+    // 지금 값의 콘솔 표기.
+    StringView value;
+    // 이번 실행 동안 고정인 부팅 변수인지다(BootCVar·StartupOnly·RestartRequired — Explain·dump의
+    // `[boot]`).
+    bool boot = false;
+    // 재시작 대기 값이 있는지와 그 표기다(Explain의 `pending restart: <값>` — 9절).
+    bool hasPendingRestart = false;
+    StringView pendingRestart;
+};
+
 // 콘솔 출력 sink다(콘솔 입력의 응답·명령 출력). write는 호출 동안만 text를 빌린다.
 struct ConsoleOutput {
     using WriteFn = Result<void> (*)(void* context, StringView text) noexcept;
@@ -178,53 +194,6 @@ using ConfigChangeCallback = void (*)(void* context, const ConfigChange& change)
 // 구독 핸들이다(Unsubscribe에 쓴다).
 struct ConfigSubscriptionId {
     uint64 value = 0;
-};
-
-// 설정 snapshot이다(5.3절): sync 지점에서 만든 "렌더 읽기" 값의 불변 블록과 세대 번호. 프레임
-// packet이 SharedPtr로 참조하고, 그 프레임 slot이 끝나 마지막 참조가 놓이면 사라진다. 만든 뒤
-// 바뀌지 않으므로 어느 스레드에서 읽어도 된다(참조 계수만 원자적이다 — 렌더 lane은 registry를 읽지
-// 않는다). 값은 이름(byte 순서)으로 정렬돼 있다. 이름은 콘솔 설정 이름이거나, 콘솔 이름이 없는
-// RenderRead 설정 struct 필드면 `<Branch>.<Section>.<필드>`다. Name 값의 토큰은 문맥 Registry의
-// NamePool 것이다.
-//
-// 사용 예(렌더 lane):
-//   const FieldValue* immediate = snapshot->Find("render.graph.immediate");
-//   const bool value = immediate != nullptr && immediate->boolean;
-class ConfigSnapshot {
-public:
-    explicit ConfigSnapshot(Allocator& allocator) noexcept;
-    ConfigSnapshot(const ConfigSnapshot&) = delete;
-    ConfigSnapshot& operator=(const ConfigSnapshot&) = delete;
-
-    // 1부터 늘어나는 세대 번호다(값이 바뀐 sync 지점마다 하나씩).
-    uint64 Generation() const noexcept {
-        return generation_;
-    }
-
-    usize Count() const noexcept {
-        return entries_.Size();
-    }
-
-    // index번째(이름 순서) 이름·값이다. 전제: index < Count() — 아니면 Fatal.
-    StringView NameAt(usize index) const noexcept;
-    const FieldValue& ValueAt(usize index) const noexcept;
-
-    // 이름의 값이다(없으면 null).
-    const FieldValue* Find(StringView name) const noexcept;
-
-private:
-    friend struct detail::SnapshotAccess;
-
-    struct Entry {
-        explicit Entry(Allocator& allocator) noexcept : name(allocator), value(allocator) {
-        }
-
-        String name;
-        FieldValue value;
-    };
-
-    uint64 generation_ = 0;
-    Array<UniquePtr<Entry>> entries_;
 };
 
 } // namespace rocks::config
