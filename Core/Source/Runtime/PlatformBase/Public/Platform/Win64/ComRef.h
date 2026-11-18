@@ -113,17 +113,22 @@ public:
     }
 
     // 같은 객체의 다른 interface U를 QueryInterface로 얻어 out에 담는다(UE
-    // TComPtr::FromQueryInterface 대응). out의 기존 참조는 먼저 놓는다.
+    // TComPtr::FromQueryInterface 대응). 결과는 지역 ComRef에 받은 뒤 out으로 옮기고, 이때 out의
+    // 기존 참조를 놓는다. out이 이 ComRef 자신이어도(x.TryQueryAs(x)) 조회가 끝난 뒤에 바꾸므로
+    // 안전하다.
     // 반환: QueryInterface의 HRESULT 그대로다. 성공이면 out이 새 참조를 쥔다. 지원하지 않으면
-    // E_NOINTERFACE이고 out은 비어 있다. 이 ComRef가 비어 있으면 E_POINTER다.
+    // E_NOINTERFACE이고 out은 비어 있다. 이 ComRef가 비어 있으면 E_POINTER다. (Core의 Move는
+    // PlatformBase 위 계층이라 static_cast로 옮긴다.)
     template <class U>
     HRESULT TryQueryAs(ComRef<U>& out) const noexcept {
-        out.Reset();
-        if (pointer_ == nullptr) {
-            return E_POINTER;
+        ComRef<U> result;
+        HRESULT queried = E_POINTER;
+        if (pointer_ != nullptr) {
+            queried = pointer_->QueryInterface(__uuidof(U), reinterpret_cast<void**>(result.Out()));
         }
 
-        return pointer_->QueryInterface(__uuidof(U), reinterpret_cast<void**>(out.Out()));
+        out = static_cast<ComRef<U>&&>(result);
+        return queried;
     }
 
 private:

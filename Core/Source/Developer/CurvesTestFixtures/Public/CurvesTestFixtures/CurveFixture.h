@@ -2,6 +2,7 @@
 
 #include <Core/Containers/Array.h>
 #include <Core/Containers/OrderedMap.h>
+#include <Core/Math/InterpCurve.h>
 #include <Core/Optional.h>
 #include <Curves/PackedTangentCurve.h>
 #include <Curves/PlainCurve.h>
@@ -60,6 +61,25 @@ public:
     ROCKS_PROPERTY() PackedTangentCurve packed;
     ROCKS_PROPERTY() Array<PackedTangentCurve> list;
     ROCKS_PROPERTY() Optional<PackedTangentCurve> maybe;
+};
+
+// InterpCurve 미러(CoreTypeBindings — CV9) 다섯 형식을 필드에, float 커브를 Array 원소에, Vec3d
+// 커브를 Optional 내부에 담는다(리플렉션 왕복·hook 시험).
+ROCKS_CLASS()
+class InterpCurveHolder : public Object {
+public:
+    explicit InterpCurveHolder(Allocator& allocator) noexcept
+        : floats(allocator), vectors2(allocator), vectors(allocator), rotations(allocator),
+          colors(allocator), list(allocator) {
+    }
+
+    ROCKS_PROPERTY() InterpCurve<float> floats;
+    ROCKS_PROPERTY() InterpCurve<Vec2d> vectors2;
+    ROCKS_PROPERTY() InterpCurve<Vec3d> vectors;
+    ROCKS_PROPERTY() InterpCurve<Quatd> rotations;
+    ROCKS_PROPERTY() InterpCurve<LinearColor> colors;
+    ROCKS_PROPERTY() Array<InterpCurve<float>> list;
+    ROCKS_PROPERTY() Optional<InterpCurve<Vec3d>> maybe;
 };
 
 } // namespace rocks::curves_fixture

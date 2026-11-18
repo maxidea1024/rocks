@@ -17,6 +17,23 @@ TEST(PlatformWindow_ZeroSizeIsRejectedBeforeCreatingWindow) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
+// 잘못된 UTF-8 제목(잘린 sequence·overlong)은 창을 만들기 전에 InvalidArgument다. SetTitle의 같은
+// 규칙은 실제 창이 필요해 여기서는 시험하지 않는다(변환 자체는 WindowsWideStringTests가 본다).
+TEST(PlatformWindow_InvalidUtf8TitleIsRejectedBeforeCreatingWindow) {
+    SystemAllocator allocator;
+    const char* invalid[] = {"\xEA\xB0", "\xC0\xAF", "ok\xFF"};
+    for (const char* title : invalid) {
+        platform::WindowDesc desc;
+        desc.title = StringView(title);
+        platform::WindowCreateReport report;
+        CHECK(platform::Window::Create(allocator, desc, &report).Error() ==
+              ErrorCode::InvalidArgument);
+        CHECK(report.code == ErrorCode::InvalidArgument && report.call[0] == '\0');
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
 // report는 입력 오류에도 결과 코드를 채우고, OS 호출 전이라 호출 이름·OS 오류는 비어 있다.
 TEST(PlatformWindow_CreateReportCarriesInputFailure) {
     SystemAllocator allocator;

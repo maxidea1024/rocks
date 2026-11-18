@@ -55,6 +55,30 @@ usize Utf8BytesOf(const wchar_t* text, usize& units) noexcept {
     return 3;
 }
 
+bool IsLowSurrogate(wchar_t unit) noexcept {
+    return unit >= 0xDC00 && unit <= 0xDFFF;
+}
+
+// UTF-16 text[0, units)를 검사하고 UTF-8 길이를 usize로 센다. WideCharToMultiByte는 결과 길이를
+// int로 돌려주므로 2^31 byte 이상인 결과(UTF-16 약 7억 단위부터)를 잘못된 입력과 구분하지 못한다.
+// 짝 없는 surrogate면 거짓이다.
+bool MeasureUtf8(const wchar_t* text, usize units, usize& bytes) noexcept {
+    bytes = 0;
+    for (usize index = 0; index < units;) {
+        const wchar_t unit = text[index];
+        if (IsLowSurrogate(unit) ||
+            (IsHighSurrogate(unit) && (index + 1 >= units || !IsLowSurrogate(text[index + 1])))) {
+            return false;
+        }
+
+        usize characterUnits = 0;
+        bytes += Utf8BytesOf(text + index, characterUnits);
+        index += characterUnits;
+    }
+
+    return true;
+}
+
 TextConversion Failed(FileCode code, uint32 nativeError) noexcept {
     TextConversion result;
     result.status = {code, nativeError};
@@ -212,26 +236,21 @@ FileStatus Utf8String::AssignWide(const wchar_t* text, usize units) noexcept {
         return {FileCode::InvalidArgument, 0};
     }
 
-    if (units > MaxConvertibleLength) {
+    usize required = 0;
+    if (!MeasureUtf8(text, units, required)) {
+        return {FileCode::InvalidArgument, ERROR_NO_UNICODE_TRANSLATION};
+    }
+
+    if (required > MaxConvertibleLength) {
         return {FileCode::Overflow, 0};
     }
 
-    int required = 0;
-    if (units != 0) {
-        required = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text, static_cast<int>(units),
-                                       nullptr, 0, nullptr, nullptr);
-        if (required == 0) {
-            return {FileCode::InvalidArgument, GetLastError()};
-        }
-    }
-
-    const usize bytes = static_cast<usize>(required) + 1u;
-    auto* value = static_cast<char*>(AlignedAllocate(bytes, alignof(char)));
+    auto* value = static_cast<char*>(AlignedAllocate(required + 1u, alignof(char)));
     if (value == nullptr) {
         return {FileCode::OutOfMemory, 0};
     }
 
-    if (!WriteUtf8(text, units, value, static_cast<usize>(required))) {
+    if (!WriteUtf8(text, units, value, required)) {
         const DWORD error = GetLastError();
         AlignedFree(value);
         return {FileCode::InvalidArgument, error};
@@ -239,7 +258,7 @@ FileStatus Utf8String::AssignWide(const wchar_t* text, usize units) noexcept {
 
     value[required] = '\0';
     value_ = value;
-    bytes_ = static_cast<usize>(required);
+    bytes_ = required;
     return {};
 }
 
@@ -322,30 +341,26 @@ TextConversion ConvertWideToUtf8(const wchar_t* text, usize units, char* buffer,
         return Failed(FileCode::InvalidArgument, 0);
     }
 
-    if (units > MaxConvertibleLength) {
-        return Failed(FileCode::Overflow, 0);
-    }
-
     // 전체를 먼저 검사하고 필요한 길이를 얻는다.
-    int required = 0;
-    if (units != 0) {
-        required = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text, static_cast<int>(units),
-                                       nullptr, 0, nullptr, nullptr);
-        if (required == 0) {
-            return Failed(FileCode::InvalidArgument, GetLastError());
-        }
+    usize required = 0;
+    if (!MeasureUtf8(text, units, required)) {
+        return Failed(FileCode::InvalidArgument, ERROR_NO_UNICODE_TRANSLATION);
     }
 
+    // 한 번에 쓸 수 있는 길이는 int 범위다. Exact는 그보다 긴 결과를 Overflow로, Truncate는 그
+    // 안에서 자른다.
     TextConversion result;
     usize used = units;
-    usize bytes = static_cast<usize>(required);
-    if (buffer == nullptr || capacity == 0 || (bytes > capacity - 1u && fit == TextFit::Exact)) {
+    usize bytes = required;
+    const bool fits = buffer != nullptr && capacity != 0 && bytes <= capacity - 1u &&
+                      bytes <= MaxConvertibleLength;
+    if (buffer == nullptr || capacity == 0 || (!fits && fit == TextFit::Exact)) {
         result = Failed(FileCode::Overflow, 0);
         result.required = bytes;
         return result;
     }
 
-    const usize room = capacity - 1u;
+    const usize room = capacity - 1u < MaxConvertibleLength ? capacity - 1u : MaxConvertibleLength;
     if (bytes > room) {
         // 들어가는 가장 긴 앞부분을 글자 단위로 찾는다(surrogate 쌍은 4 byte 한 글자).
         used = 0;

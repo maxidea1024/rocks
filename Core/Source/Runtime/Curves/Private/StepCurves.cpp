@@ -254,10 +254,14 @@ Result<void> NameStepCurve::TryShiftKeyTimes(Span<const usize> indices, float de
 
 namespace {
 
-// Name 중복 제거의 같음이다: Name 규칙(대소문자 무시)에 표시 철자(displayId)까지 같아야 한다 —
-// 철자만 다른 키를 지우면 평가 결과의 표시 철자가 바뀐다(키 핸들 표의 Name 비교와 같은 판단).
+// Name 중복 제거의 같음이다: 토큰의 모든 칸(domain·id·displayId·number·kind)이 같아야 한다 — 키
+// 핸들 표 H2의 Name 비교(SameKeyBits)와 같은 판단이다. 대소문자만 다른 이름(표시 철자가 다르다)을
+// 지우면 평가 결과의 표시 철자가 바뀌고, None 계열은 Name ==가 domain을 보지 않으므로 칸을 직접
+// 비교한다.
 bool SameNameSpelling(Name left, Name right) noexcept {
-    return left == right && left.displayId == right.displayId;
+    return left.domain == right.domain && left.id == right.id &&
+           left.displayId == right.displayId && left.number == right.number &&
+           left.kind == right.kind;
 }
 
 } // namespace

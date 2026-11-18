@@ -585,6 +585,17 @@ inline Result<Interval<float>> FiniteRange(float minimum, float maximum) noexcep
     return Interval<float>::TryMake(minimum, maximum);
 }
 
+// 키 목록의 index 키 시간이다. 목록이 시간만 읽는 TimeAt(index)를 주면(PackedTangentCurve의 키 보기
+// — 키 전체를 풀지 않는다) 그것을 쓰고, 아니면 keys[index].time이다.
+template <class Keys>
+float KeyTimeAt(const Keys& keys, usize index) noexcept {
+    if constexpr (requires { keys.TimeAt(index); }) {
+        return keys.TimeAt(index);
+    } else {
+        return keys[index].time;
+    }
+}
+
 // 스칼라 커브의 공통 평가 틀이다(UE FRichCurve::Eval·FSimpleCurve::Eval, RemapTimeValue — 설계
 // 5절). keys는 Size()와 operator[](키 — 참조나 값)를 가진 시간 오름차순 키 목록이다(Span, 또는
 // PackedTangentCurve가 풀어 내는 키 보기). plainBounds면 PlainCurve 경계(첫 키 이하는 앞 갈래,
@@ -653,7 +664,7 @@ float EvaluateCurve(const Optional<float>& defaultValue, CurveExtrapolation preE
         while (remaining > 0) {
             const usize step = remaining / 2;
             const usize middle = first + step;
-            if (time >= keys[middle].time) {
+            if (time >= KeyTimeAt(keys, middle)) {
                 first = middle + 1;
                 remaining -= step + 1;
             } else {

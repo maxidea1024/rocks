@@ -118,7 +118,7 @@
 | `WorldOnly` | CLASS | `TypeFlags::WorldOnly`(2). **상속된다**(UE의 상속 클래스 플래그처럼 base가 WorldOnly면 파생도 자동으로 WorldOnly, 파생에 다시 쓰지 않아도 된다). 에셋 객체 Registry가 생성을 거부한다(정책은 A0-O — [ObjectFoundations](ObjectFoundations.ko.md) 1.3절). TypeRegistry는 WorldOnly base의 파생이 플래그를 갖는지 검사한다(수동 등록 대비) |
 | `Flags` | ENUM | 플래그 enum(3.4절) |
 | `ToolPrefix="…"` | ENUM | 도구 이름의 선택 접두(예 `TC_`) |
-| `Binds="…"` | STRUCT | 미러 선언이 결합하는 실제 타입 철자(4.5절) |
+| `Binds="…"` | STRUCT·ENUM | 미러 선언이 결합하는 실제 타입 철자(4.5절 — ENUM은 CurveData CV9, [RX](ReflectionExtensions.ko.md) 25절) |
 
 리플렉션 B9가 STRUCT `Atomic`(통째 단위, struct base에서 상속), CLASS `Transient`·`Deprecated`(상속, 저장 불가 객체)·`Within="…"`, CLASS·STRUCT `Name="…"`(B9d2에서 구현 — 타입 도구 이름, 기본은 한정하지 않은 C++ 이름, 모듈과 import 범위에서 대소문자 무시로 유일 RMC2203)를 더한다(RX 3.1·5.2·9.2절).
 
@@ -271,6 +271,7 @@ struct BulkDataRef {
 - 색·벡터 설정(`PaddingColor`·`ChromaKeyColor`는 UE FColor(8비트), `AlphaCoverageThresholds`는 FVector4(LWC double), 12.4절)은 Core 수학 타입을 쓴다. Core는 MetaSchema·ObjectRuntime에 의존하지 않으므로 Core 헤더에 annotation을 달 수 없다.
 - 별도 Metadata 모듈 **`CoreTypeBindings`**(Core/Source/Runtime, 소스 없음, ObjectRuntime 의존)에 미러 선언 헤더 `CoreTypeBindings/CoreValueTypes.h`를 두고 `ROCKS_STRUCT(Binds = "<실제 타입 철자>", Version = 1)`로 같은 공개 멤버를 가진 미러 선언을 리플렉션한다(UE NoExportTypes 방식). ObjectRuntime을 Metadata 모듈로 만들지 않는다(그것에 닿는 모든 타깃에 meta 단계가 붙지 않게) — Core 값 타입 필드를 쓰는 모듈만 의존한다. 생성 코드는 미러가 아니라 실제 타입의 멤버 포인터를 쓰고, 미러와 실제 타입의 멤버 이름·형식·개수·순서가 같은지 static_assert로 확인한다(어긋나면 컴파일 실패, 4.6절).
 - 대상(Core 헤더 확인 결과): `rocks::Vector2<float|double>`·`Vector3<float|double>`·`Vector4<float|double>`, `Quaternion<float|double>`, `Rotator<float|double>`(pitch·yaw·roll 도 — 2026-11-17 UE FRotator와 같게 바꿨다. 이전은 yaw·pitch·roll 라디안), `Color`(uint8 RGBA), `LinearColor`(float RGBA), `IntVec2`·`IntVec3`(int32), `Transform`(비템플릿 — `Quatd rotation`·`Vec3d translation`·`Vec3d scale`, UE FTransform과 같은 순서·정밀도, 다른 Binds struct에 의존). ID는 `CoreTypeBindings` 명세에 등록한다.
+- 확장(CurveData CV9 — [RX](ReflectionExtensions.ko.md) 25절): Core enum 미러(`ROCKS_ENUM(Binds = …)` — `InterpCurveMode`), 실제 타입이 `GeneratedType` friend를 선언하면 private 멤버를 나열하는 미러(`InterpCurve<T>`), 미러의 검증 hook(`static Validate(const 실제 타입&)`). 미러 헤더는 `CoreTypeBindings/InterpCurveTypes.h`가 더해졌다.
 
 ### 4.6 B4 구현 API(확정안)
 

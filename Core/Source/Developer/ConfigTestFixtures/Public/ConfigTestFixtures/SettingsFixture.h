@@ -105,6 +105,21 @@ struct GameplaySettings {
     ROCKS_PROPERTY() int32 lives = 3;
 };
 
+// 사용자 층 저장·재시작 대기 시험의 섹션이다(Docs/Design/ConfigSystem.ko.md 8절 — 설정 CF3, 기본
+// fixture에 등록하지 않는다 — 그 시험이 따로 등록한다). textureBudget은 사용자 설정이면서 재시작
+// 필요, recentMaps는 사용자 배열, gamma는 콘솔 이름이 있는 사용자 설정, frameCap은 사용자 층이 쓸
+// 수 없는 필드다.
+ROCKS_STRUCT(Settings(Branch = "Game", Section = "Display"))
+struct DisplaySettings {
+    explicit DisplaySettings(Allocator& allocator) noexcept : recentMaps(allocator) {
+    }
+
+    ROCKS_PROPERTY(UserConfig, RestartRequired) int32 textureBudget = 512;
+    ROCKS_PROPERTY(UserConfig) Array<String> recentMaps;
+    ROCKS_PROPERTY(UserConfig, ConsoleName = "game.display.gamma") float gamma = 2.2f;
+    ROCKS_PROPERTY() int32 frameCap = 60;
+};
+
 // 콘솔 명령 인자 struct다(`render.reload count=2 target=all`).
 ROCKS_STRUCT()
 struct ReloadArgs {

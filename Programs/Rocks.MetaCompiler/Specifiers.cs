@@ -77,7 +77,8 @@ internal sealed record PropertySpec(bool Transient, bool ReadOnly, string Catego
 
 // ENUM 지정자 결과다. ToolPrefix는 도구 이름 조회가 앞에 붙어 있어도 받는 접두([A-Za-z0-9_]+, 없으면 "")이고,
 // Flags는 비트 플래그 enum(값은 선언 값의 OR)이다.
-internal sealed record EnumSpec(string ToolPrefix, bool Flags);
+// Binds는 Core enum 미러가 결합하는 실제 enum의 C++ 철자다(CoreTypeBindings만 — 없으면 "", CurveData CV9).
+internal sealed record EnumSpec(string ToolPrefix, bool Flags, string Binds = "");
 
 // ENUMERATOR 지정자 결과다. ToolName은 Name="…"의 값이고 C++ 이름과 같거나 없으면 ""다. Hidden은 저장 값으로는
 // 유효하지만 도구 설정이 받지 않는 열거자다.
@@ -273,7 +274,7 @@ internal static class Specifiers
         foreach ((string key, Value? value) in values)
         {
             bool flag = key is "Flags";
-            bool label = key is "ToolPrefix";
+            bool label = key is "ToolPrefix" or "Binds";
             if ((!flag && !label) || (flag && value is not null) || (label && value?.Text is null))
             {
                 throw new MetadataException($"{symbol}: unsupported ENUM specifier/value {key}");
@@ -287,7 +288,14 @@ internal static class Specifiers
                 "Use letters, digits and underscores for the tool name prefix, or omit ToolPrefix.");
         }
 
-        return new(prefix, values.ContainsKey("Flags"));
+        string binds = values.GetValueOrDefault("Binds")?.Text ?? "";
+        if (values.ContainsKey("Binds") && !StructRules.IsBindsSpelling(binds))
+        {
+            throw new MetadataException($"{symbol}: Binds must be a C++ type spelling (qualified names and template arguments only): \"{binds}\"",
+                hint: "Write the real enum fully qualified from the global scope, e.g. Binds = \"rocks::InterpCurveMode\".");
+        }
+
+        return new(prefix, values.ContainsKey("Flags"), binds);
     }
 
     public static EnumeratorSpec Enumerator(string text, string symbol, string name)
