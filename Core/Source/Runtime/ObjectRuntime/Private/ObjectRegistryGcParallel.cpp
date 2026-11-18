@@ -13,8 +13,10 @@ namespace rocks {
 
 using namespace registry_detail;
 
-// 병렬 표식 참여자 하나(worker task 또는 소유 스레드)의 지역 상태다.
-struct ObjectRegistry::MarkParticipant {
+// 병렬 표식 참여자 하나(worker task 또는 소유 스레드)의 지역 상태다. 참여자마다 다른 스레드가 매
+// 객체 고치므로 캐시 줄 경계에 맞춰 이웃 참여자와 줄을 나누지 않는다(GC 설계 16.1절 — 배열로 놓인
+// 참여자의 고리 칸과 다음 참여자의 계수가 한 줄에 들던 false sharing).
+struct alignas(CacheLineSize) ObjectRegistry::MarkParticipant {
     ParallelMark* shared = nullptr;
     // 지역 큐: 블록 더미의 맨 위 블록에서 넣고 뺀다. 맨 위 아래의 블록은 언제나 가득 차 있다.
     GcBlock* stack = nullptr;
@@ -526,6 +528,9 @@ uint32 ObjectRegistry::MarkParallel(Array<uint32>& work, usize& cursor, MarkStat
     shared.budgetInterval = maxObjects < shared.budgetInterval ? maxObjects : shared.budgetInterval;
     shared.freeBlocks = gcFreeBlocks_;
     gcFreeBlocks_ = nullptr;
+    static_assert(alignof(MarkParticipant) >= CacheLineSize &&
+                      sizeof(MarkParticipant) % CacheLineSize == 0,
+                  "Mark participants must not share cache lines");
     MarkParticipant participants[MaxWorkers + 1];
     for (uint32 index = 0; index <= workers; ++index) {
         participants[index].shared = &shared;

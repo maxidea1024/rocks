@@ -24,6 +24,9 @@ constexpr usize ArrayPrefetchDistance = 4;
 // 읽기 거리와 같다. GC 설계 16.1절: 8칸은 덜 줄고 24칸은 16칸과 같다).
 constexpr uint32 MarkRingSlots = 16;
 static_assert((MarkRingSlots & (MarkRingSlots - 1)) == 0, "Mark ring size must be a power of two");
+static_assert(
+    MarkRingSlots == HotPrefetchDistance,
+    "The mark ring prefetches hot records on entry, so its size is the hot prefetch distance");
 static_assert(MarkRingSlots > ObjectPrefetchDistance &&
                   ObjectPrefetchDistance > ArrayPrefetchDistance,
               "Mark ring stages must run hot -> object -> array");

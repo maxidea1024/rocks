@@ -1792,6 +1792,16 @@ bool Parse(int argc, char** argv, Options& options) noexcept {
 }
 
 int Run(const Options& options) noexcept {
+    // --mark-only는 일반 그래프 시나리오(--objects)의 정지형 표식 시간만 잰다. 다른 시나리오에서는
+    // 무시되고, 작업 계수(--count-work)는 간선마다 읽기를 더해 시간을 바꾸므로 함께 쓰지 않는다.
+    if (options.markOnly && (options.objects == 0 || options.countWork || options.soakTicks != 0 ||
+                             options.clusterSoakTicks != 0 || options.allocators ||
+                             options.clusters || options.packageProfileSet)) {
+        printf("--mark-only needs --objects N (general graph) and cannot be combined with "
+               "--count-work or another scenario\n");
+        return 1;
+    }
+
     if (options.soakTicks != 0) {
         return RunSoak(options);
     }
