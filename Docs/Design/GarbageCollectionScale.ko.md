@@ -1,6 +1,6 @@
 # Rocks GC 대규모 처리 보강 설계
 
-기준일: 2026-11-16, 개정 1(초안). 개정 4(2026-11-18): Slot hot·cold 분리(6절 GC-S3 "Slot hot·cold 분리", 4절 gate, 11절 결정 5). 개정 2(2026-11-17): 클러스터·영구 영역 상세 설계(13절), 열린 결정 4 확정, 열린 결정 6 해소, UE 클러스터 사실 정정. 개정 3(2026-11-18): 장부 배치·클러스터 표식 경로를 측정에 맞춰 바꾸고 패키지 클러스터의 경계 비율 안전장치를 더함(13.4·13.5·13.9절).
+기준일: 2026-11-16, 개정 1(초안). 개정 4(2026-11-18): Registry 규모 점검 반영(14절), Slot hot·cold 분리(6절 GC-S3 "Slot hot·cold 분리", 4절 gate, 11절 결정 5). 개정 2(2026-11-17): 클러스터·영구 영역 상세 설계(13절), 열린 결정 4 확정, 열린 결정 6 해소, UE 클러스터 사실 정정. 개정 3(2026-11-18): 장부 배치·클러스터 표식 경로를 측정에 맞춰 바꾸고 패키지 클러스터의 경계 비율 안전장치를 더함(13.4·13.5·13.9절).
 
 **이 문서의 작업은 반드시 해야 하는 작업이다.** 현재 `ObjectRegistry` GC는 AAA급 규모(살아 있는 객체 100만 개 이상)의 게임에서 쓸 수 없는 상태다(2026-11-16 사용자 판단). 이 문서의 GC-S 단계는 선택 최적화가 아니며 성능 미달을 "측정 결과로 관리"하는 대상도 아니다. 단계를 모두 마치고 4절의 성능 gate를 통과해야 GC를 대규모 콘텐츠에 쓸 수 있다고 본다.
 
@@ -471,6 +471,8 @@ outer 간선(생성 때 고정)도 같은 규칙으로 센다. 패키지 고리 
 - oracle(`Collect`, 소속 간선 포함)과 결과 집합이 같아야 한다. 무작위 그래프와 soak 모두에서 확인한다.
 - 음성 대조: 이탈 때 `inCount` 이동을 빼거나, 이탈 shade를 빼거나, `outCount` 갱신 하나를 빼거나, 처리 전 해체에서 경계 항목 넣기를 빼거나, 비우기 경로의 장부 갱신을 빼면 검출되어야 한다.
 - soak 시나리오: 패키지 생성·부분 Discard·전체 Discard, 패키지 사이 간선 편집, Level·Actor·Component 생성·파괴, 같은 Level 안 Actor 사이 참조, 증분 cycle 도중의 모든 변경. 특히 장벽으로 shade만 된 클러스터를 같은 slice 사이에 해체하는 경우, slice 예산 중간에 끊긴 클러스터, 처리된 클러스터에 가입하면서 밖의 outer를 가진 새 소속, World API 밖 Actor 파괴를 넣는다.
+- (개정 4) 소속 소유자의 `StructRefArray` 원소 제거·비우기, 패키지 객체의 간선, 기존 패키지 아래 새 객체를 soak에 넣는다. 경계 비율 안전장치(13.5절)는 모델이 따로 예측한다: 모델은 장부와 같은 규칙(간선·outer·원소 참조, 대상이 같은 클러스터 소속이거나 그 클러스터의 detached면 안쪽)으로 패키지 클러스터마다 경계 소속 수를 세고, cycle 끝(cutoff 직후·정지형 수집 뒤)에 도달한 클러스터 가운데 문턱을 넘는 것을 해체 대상으로 고른다. 그 집합을 Registry 답(`InspectClusterMembership`)과, 그 수를 `GcReport::flattenedClusters`와 대조한다(어긋나면 실패). 처음 구현은 Registry 답을 그대로 따라갔다(리뷰 지적).
+- (개정 4) 삽입 장벽 결정적 시험은 keeper를 먼저 trace한 뒤 keeper → 소속 간선을 건다(장벽을 끄면 실패해야 한다).
 
 리뷰 기록: 개정 2 초안(b293feb)을 독립 리뷰 1회로 검토했다(2026-11-17). 차단 1건(처리 전 해체), 중요 4건(처리된 클러스터 가입의 outer, 관찰자와 다른 장부 기준, World 우회 파괴의 고아 소속, slice 중단·재개), 참고 2건을 이 절에 반영했다.
 
@@ -491,3 +493,28 @@ outer 간선(생성 때 고정)도 같은 규칙으로 센다. 패키지 고리 
 | 멤버 이탈 | 루트나 참조 대상이 Garbage가 되면 해체 | 개별 이탈 O(그 객체의 간선), 해체 불필요 |
 | 생성 시점 | 로딩 PostLoad 뒤, Level Finalize | 생성 Commit |
 | 영구 객체 → 일반 객체 | 따라가지 않고 검증 경고 | 쓰기 때 거부 |
+
+## 14. Registry 규모 점검 반영 (개정 4, 2026-11-18)
+
+연산·cycle마다 객체·Actor·타입 수에 비례하던 곳을 고친 구조다(측정과 그대로 둔 곳의 판단은 [실험 결과](../Implementation/GcScaleExperiment.ko.md) 16절, World·틱 쪽 계약은 [엔진 런타임](EngineRuntime.ko.md) 4.5·7.2·7.4·8절).
+
+### 14.1 파괴 요청 목록 (`TakeDestroyRequests`)
+
+- `RequestDestroy`·`Object::Destroy`·Discard가 객체를 DestroyRequested로 바꿀 때 그 슬롯을 Registry의 파괴 요청 목록(이중 연결 — cold의 `nextInList`·`prevInList`, `destroyListed`)에 넣는다. Retire가 목록에서 뺀다. 세 슬롯 목록(빈 슬롯·회수 대기·파괴 요청)은 상태로 배타적이라 같은 고리를 쓴다.
+- `TakeDestroyRequests(access, Span<ObjectHandle> out)`가 지난 호출 뒤의 요청을 꺼낸다(할당 없음, 순서 정하지 않음, 0이 나올 때까지 되풀이). 소유 계층(World)이 자기 API 밖 파괴를 객체 수에 비례하는 훑기 없이 찾는다.
+- 버린 대안: World가 cycle마다 Actor를 모두 `InspectLifecycle`로 조회(Actor 수에 비례), 파괴 콜백(잠금 안 사용자 코드).
+- 한계: 꺼내지 않으면 목록은 회수 때까지 남는다(메모리 증가 없음 — 슬롯 안 고리).
+
+### 14.2 GC 타입 색인
+
+- `AcquireGcType`(객체 생성마다)은 타입 키(`RuntimeTypeOps` 주소) → GC 타입 번호를 개방 주소 색인으로 찾는다(용량은 타입 표의 두 배 — 적재율 ≤ 1/2, 표가 커질 때 다시 만든다). 처음 구현은 타입 표를 처음부터 훑었다(생성마다 타입 수에 비례).
+
+### 14.3 클러스터 소속 진단 조회 (`InspectClusterMembership`)
+
+- 객체가 지금 클러스터 소속인지 돌려준다(진단·시험용, 접근 규칙은 `InspectLifecycle`과 같다). 클러스터 smoke 모델이 경계 비율 안전장치(13.5절)의 해체를 Registry 답과 대조하는 데 쓴다.
+
+### 14.4 그대로 둔 선형 비용
+
+- 클러스터 레코드 표 훑기(cutoff·정지형 sweep의 표식되지 않은 클러스터 해체와 안전장치): 100K 클러스터에서 약 0.1ms, cutoff slice 최댓값은 10K·100K 모두 1.04–1.10ms로 같았다. slice로 나누는 판(Sweeping의 레코드 커서와 클러스터 epoch로 cutoff 판정)을 만들어 쟀으나 차이가 없어 넣지 않았다.
+- ProcessCluster·해체의 고리 순회(그 클러스터의 경계·소속 수에 비례 — 표식·해체할 양), `ObjectRefArray::IndexOf`·`RemoveReference(handle)`(API 의미), 이름 색인 rehash(분할 상환), 관찰자 `TakeChanges`(키 수), Debug 검증 재계산.
+- 할당자(SystemAllocator·BinnedAllocator·PoolAllocator)의 살아 있는 할당 수에 비례하는 해제·할당은 GC-S6에서 다룬다.
