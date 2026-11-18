@@ -100,26 +100,19 @@ private:
     usize peakBytes_ = 0;
 };
 
-// 변경 함수 하나의 범위다(6.9절 위반 검출). writer 표시를 세운 뒤 reader 수를 읽고,
-// SpatialReadScope는 reader 수를 올린 뒤 writer 표시를 읽는다. 두 쪽 모두 쓰기 뒤 읽기를 seq_cst로
-// 하므로 겹치면 적어도 한쪽이 상대를 본다.
+// 변경 함수 하나의 범위다(6.9절 위반 검출). Core AccessOverlapChecker의 변경 범위를 열어 읽기
+// 범위·다른 변경과의 겹침을 Fatal로 잡고(겹친 두 쪽 중 적어도 하나가 진입이나 종료 때 검출한다),
+// 노드 묶음 세대를 새로 받는다.
 class LooseOctree::WriterGuard {
 public:
-    explicit WriterGuard(LooseOctree& tree) noexcept : tree_(tree) {
-        if (platform::AtomicExchange(&tree.writer_, 1u) != 0) {
-            platform::Fatal("LooseOctree mutation overlaps another mutation");
-        }
-        if (platform::AtomicLoad(&tree.readers_) != 0) {
-            platform::Fatal("LooseOctree mutation while a read scope is open");
-        }
+    explicit WriterGuard(LooseOctree& tree) noexcept : tree_(tree), access_(tree.access_) {
         // 이전 읽기 단계에서 모은 노드 묶음을 낡은 것으로 만든다.
         tree.mutationEpoch_ = NextMutationEpoch();
     }
 
-    // 변경이 끝날 때마다 배열별 예약 용량 피크를 갱신한다.
+    // 변경이 끝날 때마다 배열별 예약 용량 피크를 갱신한다. 변경 범위는 그 뒤 멤버 소멸에서 닫힌다.
     ~WriterGuard() noexcept {
         tree_.NotePeaks();
-        platform::AtomicStore(&tree_.writer_, 0u);
     }
 
     WriterGuard(const WriterGuard&) = delete;
@@ -127,6 +120,7 @@ public:
 
 private:
     LooseOctree& tree_;
+    WriteAccessScope access_;
 };
 
 // 삽입 위치 계획이다. 트리를 바꾸지 않고 계산한다(6.5절 수용 판정).
