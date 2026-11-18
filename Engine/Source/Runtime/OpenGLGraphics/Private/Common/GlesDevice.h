@@ -82,6 +82,8 @@ struct BufferViewRecord {
     SlotHandle source;
     uint64 offset = 0;
     uint64 size = 0;
+    // 구조화 view의 원소 byte다(셰이더 선언 stride와 대조한다).
+    uint32 stride = 0;
     BufferViewKind kind = BufferViewKind::Typed;
     ViewAccess access = ViewAccess::Read;
     PixelShaderType shaderType = PixelShaderType::None;
@@ -363,8 +365,11 @@ private:
     // --- 장치 능력·버퍼 view(GlesDeviceBuffers.cpp) ---
     // 장치 한도·기능과 형식별 MSAA 표본 수를 채운다(생성 때 한 번, debug output을 켜기 전).
     void QueryDeviceCaps(bool desktopContext) noexcept;
-    // 링크한 프로그램의 samplerBuffer uniform·storage block을 고정 배치와 대조해 slot 배치를
-    // 만든다. 배치 밖이면 InvalidArgument다.
+    // 링크한 프로그램의 sampler·image uniform·storage block을 고정 배치와 대조해 slot 배치를
+    // 만든다. 배치 밖(image uniform, 유닛 0이 아닌 텍스처 sampler, 허용 유닛 밖 samplerBuffer,
+    // binding 0–3 밖 storage block)이면 InvalidArgument다. GL introspection은 storage block의
+    // readonly 여부를 알려 주지 않으므로 그래픽 단계 storage block 쓰기는 거부하지 못한다(셰이더는
+    // readonly로 선언해야 하고, 쿠킹 경로는 SPIR-V 리플렉션이 거른다).
     Result<void> ReflectBufferSlots(GLuint program, DrawBufferSlots& slots) noexcept;
     bool BufferViewsBound(const PipelineRecord& pipeline) const noexcept;
     // 파이프라인이 읽는 slot의 view를 유닛·binding에 묶는다(그리기 직전).

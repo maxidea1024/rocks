@@ -66,6 +66,8 @@ Result<void> D3D12Device::ReadBuffer(BufferHandle handle, uint64 offset, Span<ui
     readback.fenceValue = flushed.Value();
     auto added = readbacks_.TryAdd(Move(readback));
     if (!added) {
+        // 제출한 복사가 아직 쓰는 자원이다. 완료를 기다리지 않고 놓지 않도록 소멸 때까지 둔다.
+        KeepUntilDestruction(Move(readback.resource));
         return Result<void>::Failure(added.Error());
     }
 
@@ -635,6 +637,8 @@ Result<ReadbackRequest> D3D12Device::RequestReadbackLocked(TextureHandle target,
     const uint64 bytes = readback.rowBytes * readback.rows;
     auto added = readbacks_.TryAdd(Move(readback));
     if (!added) {
+        // 제출한 복사가 아직 쓰는 자원이다. 완료를 기다리지 않고 놓지 않도록 소멸 때까지 둔다.
+        KeepUntilDestruction(Move(readback.resource));
         return Result<ReadbackRequest>::Failure(added.Error());
     }
     ReadbackRequest request;

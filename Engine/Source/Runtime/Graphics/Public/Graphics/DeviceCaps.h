@@ -21,7 +21,9 @@ namespace rocks::graphics {
 
 // 셰이더 단계 하나가 동시에 묶을 수 있는 자원 수다. 종류는 ShaderSystem 7.2절 3항의 구분이다.
 struct StageResourceLimits {
-    // 상수 버퍼(cbuffer·uniform block) 수다. 루트 상수(그리기별 상수)는 들지 않는다.
+    // 상수 버퍼(cbuffer·uniform block) 수다. 루트 상수(그리기별 상수)는 들지 않는다: D3D11은 루트
+    // 상수 에뮬레이션이 상수 버퍼 slot 하나를 쓰므로 14 - 1 = 13, D3D12 Tier 1·2는 루트 상수가
+    // descriptor table 밖이라 table CBV 한도 14 그대로다.
     uint32 constantBuffers = 0;
     // SRV 텍스처와 typed buffer SRV 수다. OpenGL ES는 typed buffer SRV(samplerBuffer)도 텍스처
     // 유닛을 차지하므로 둘의 합이 이 한도 안이다(ShaderSystem 7.2절 4항, RQ10).
@@ -39,6 +41,11 @@ struct StageResourceLimits {
 // 해당 backend에서 의미가 없는 한도 값이다(그 한도로 판단하지 않는다).
 inline constexpr uint32 NotApplicableLimit = 0;
 
+// Rocks 루트 상수 계약 크기다(ShaderSystem 7.2절 2항: 32 DWORD = 128 byte, Vulkan
+// maxPushConstantsSize 최소 보장과 같다). 루트 상수를 에뮬레이션하는 backend(D3D11·OpenGL ES)와
+// D3D12가 DeviceLimits::rootConstantBytes로 낸다.
+inline constexpr uint32 RootConstantContractBytes = 128;
+
 // 장치 전역 한도다.
 struct DeviceLimits {
     // 단계별 자원 한도다.
@@ -46,9 +53,10 @@ struct DeviceLimits {
     StageResourceLimits pixel;
     StageResourceLimits compute;
     // 파이프라인(모든 단계 합) 한도다. Vulkan
-    // maxDescriptorSetSampledImages·Samplers·StorageBuffers· StorageImages, D3D12 binding tier의
-    // heap 한도, OpenGL ES GL_MAX_COMBINED_*. D3D11은 단계별 한도의 합이 곧 한도라 단계 값 × 단계
-    // 수(VS·PS·CS 3)다.
+    // maxDescriptorSetSampledImages·Samplers·StorageBuffers·StorageImages, D3D12 binding tier의
+    // heap 한도, OpenGL ES GL_MAX_COMBINED_*. D3D11·D3D12 Tier 1–2는 단계마다 slot이 따로라 그래픽
+    // 파이프라인(VS·PS) 기준 단계 값 × 2다(compute 파이프라인은 CS 하나라 단계 값). UAV는 모든
+    // 단계가 함께 쓰는 slot이라 단계 값 그대로다.
     uint32 pipelineSampledTextures = 0;
     uint32 pipelineSamplers = 0;
     uint32 pipelineStorageBuffers = 0;
@@ -65,6 +73,9 @@ struct DeviceLimits {
     // color attachment(MRT) 수다(D3D 8, Vulkan maxColorAttachments, OpenGL ES GL_MAX_DRAW_BUFFERS와
     // GL_MAX_COLOR_ATTACHMENTS의 작은 값).
     uint32 colorAttachments = 0;
+    // 한 그리기가 고를 수 있는 viewport 수다(D3D 16, Vulkan은 multiViewport를 켰으면 maxViewports·
+    // 아니면 1, OpenGL ES 1). SV_ViewportArrayIndex 출력은 이 안의 번호만 쓴다.
+    uint32 viewports = 0;
     // 상수 버퍼 하나의 최대 byte다(D3D 65536, Vulkan maxUniformBufferRange, OpenGL ES
     // GL_MAX_UNIFORM_BLOCK_SIZE).
     uint32 constantBufferBytes = 0;
@@ -116,10 +127,15 @@ struct DeviceFeatures {
     // 깊이 clamp(깊이 clip 끄기)를 쓸 수 있다(D3D 늘 참, Vulkan depthClamp, OpenGL ES
     // GL_EXT_depth_clamp).
     bool depthClamp = false;
-    // VS가 렌더 타깃 array 층(SV_RenderTargetArrayIndex)을 낼 수 있다(D3D12 OPTIONS
-    // VPAndRTArrayIndexFromAnyShaderFeedingRasterizerSupportedWithoutGSEmulation, D3D11 OPTIONS3,
-    // Vulkan VK_EXT_shader_viewport_index_layer). OpenGL ES는 ES 확장이 없어 거짓이다.
-    bool vertexShaderLayerOutput = false;
+    // VS가 렌더 타깃 array 층(SV_RenderTargetArrayIndex)과 viewport 번호(SV_ViewportArrayIndex)를
+    // 낼 수 있다(ShaderSystem 7.2절 7항 vertexViewportLayerOutput, Renderer RQ14). 셰이더 형식
+    // 선택이 거르지 않는 런타임 확인 기능이다. D3D12는 늘 참이다(UE와 같다, OPTIONS의
+    // ...WithoutGSEmulation은 드라이버의 GS 에뮬레이션 여부일 뿐이다). D3D11은 OPTIONS3
+    // VPAndRTArrayIndexFromAnyShaderFeedingRasterizer, Vulkan은
+    // VK_EXT_shader_viewport_index_layer와 multiViewport 기능(viewport 여럿, Vulkan 1.2의
+    // shaderOutputLayer·shaderOutputViewportIndex에 해당)이다. OpenGL ES는 ES core에 없어
+    // 거짓이다(GL_NV_viewport_array2는 쓰지 않는다).
+    bool vertexViewportLayerOutput = false;
     // 64 bit atomic(typed 자원·버퍼)을 쓸 수 있다(D3D12 OPTIONS9
     // AtomicInt64OnTypedResourceSupported, Vulkan VK_KHR_shader_atomic_int64 +
     // VK_EXT_shader_image_atomic_int64. UE와 같은 조건). D3D11 SM 5.0·OpenGL ES는 거짓이다(UE의
@@ -136,8 +152,8 @@ struct DeviceFeatures {
     // sRGB 짝 형식 view(PixelFormat.ko.md 9절). OpenGL ES는 형식을 재해석하는 view가 없어 거짓이다.
     bool srgbPairView = false;
     // VS·PS가 storage 자원에 쓸 수 있다(Vulkan vertexPipelineStoresAndAtomics·
-    // fragmentStoresAndAtomics, D3D11.1 이상 VS·PS UAV, D3D12 늘 참, OpenGL ES는 단계별 storage
-    // 한도가 0보다 클 때). 형식 정의는 UAV를 CS만 쓰므로 판단용으로만 공개한다.
+    // fragmentStoresAndAtomics, D3D11·D3D12는 PS 늘 참·VS는 FL 11.1 이상, OpenGL ES는 단계별
+    // storage 한도가 0보다 클 때). 형식 정의는 UAV를 CS만 쓰므로 판단용으로만 공개한다.
     bool vertexStores = false;
     bool pixelStores = false;
     // HDR10(ST.2084·BT.2020) 출력 중인 디스플레이가 이 어댑터에 있다(DXGI IDXGIOutput6 색 공간, UE
@@ -146,6 +162,15 @@ struct DeviceFeatures {
     bool hdrOutput = false;
     // D3D12 resource binding tier(1–3)다. 다른 backend는 0이다.
     uint8 resourceBindingTier = 0;
+    // 하드웨어 ray tracing이다(Renderer RQ4). rayTracingTier는 D3D12 OPTIONS5 RaytracingTier(major
+    // × 10 + minor: 0 없음, 10 = 1.0, 11 = 1.1)이고 다른 backend는 0이다. rayTracingPipeline은 RT
+    // 파이프라인(D3D12 Tier 1.0 이상, Vulkan VK_KHR_ray_tracing_pipeline +
+    // VK_KHR_acceleration_structure), rayQuery는 셰이더 안 ray query(D3D12 Tier 1.1 이상, Vulkan
+    // VK_KHR_ray_query + VK_KHR_acceleration_structure)다. Vulkan은 장치가 확장을 공개하는지이며
+    // 확장을 켜는 일은 RT 단계가 한다. D3D11·OpenGL ES는 모두 거짓이다.
+    uint8 rayTracingTier = 0;
+    bool rayTracingPipeline = false;
+    bool rayQuery = false;
     // 장치가 받는 최고 셰이더 모델(major × 10 + minor, 예: 66)이다. D3D12는
     // D3D12_FEATURE_SHADER_MODEL, D3D11은 FL 11.0의 50이다. Vulkan·OpenGL ES는 0이다(SPIR-V·ESSL
     // 버전은 형식 정의가 정한다).

@@ -227,6 +227,8 @@ struct BufferViewRecord {
     BufferViewKind kind = BufferViewKind::Typed;
     ViewAccess access = ViewAccess::Read;
     PixelShaderType shaderType = PixelShaderType::None;
+    // 구조화 view의 원소 byte다(셰이더 선언 stride와 대조한다).
+    uint32 stride = 0;
 };
 
 struct TextureRecord {
@@ -748,10 +750,6 @@ private:
     // 더한다. b0 상수, PS t0 텍스처·s0 샘플러, t1–t4 버퍼 SRV만 받는다. 두 단계가 같은 slot을 다른
     // 종류로 읽거나 배치 밖 자원(UAV 포함)이면 InvalidArgument다.
     Result<void> ReflectBindings(ID3DBlob* code, bool pixel, DrawBufferSlots& slots) noexcept;
-
-    // slot을 배치에 더한다. 이미 다른 종류·값 계열로 쓰는 slot이면 거짓이다.
-    static bool AddBufferSlot(DrawBufferSlots& slots, uint32 slot, BufferViewKind kind,
-                              PixelShaderType type) noexcept;
 
     Result<void> Reject(const Diagnostic& message) noexcept;
 

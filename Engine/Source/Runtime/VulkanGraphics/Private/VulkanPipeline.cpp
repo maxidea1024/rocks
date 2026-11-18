@@ -262,15 +262,7 @@ bool MapBinding(const ShaderBinding& binding, ShaderStage stage, PipelineBinding
     out.slot = slot;
     const PixelShaderType type =
         kind == BufferViewKind::Typed ? binding.sampledType : PixelShaderType::None;
-    const uint32 bit = 1u << slot;
-    if ((slots.usedMask & bit) != 0) {
-        return slots.kinds[slot] == kind && slots.typedShaderTypes[slot] == type;
-    }
-
-    slots.usedMask |= bit;
-    slots.kinds[slot] = kind;
-    slots.typedShaderTypes[slot] = type;
-    return true;
+    return AddDrawBufferSlot(slots, slot, kind, type, binding.structureStride);
 }
 
 } // namespace

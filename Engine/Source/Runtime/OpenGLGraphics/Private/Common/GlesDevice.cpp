@@ -711,11 +711,13 @@ void GlesDevice::Retire(BufferHandle handle) noexcept {
     // view가 남아 있으면 버퍼 이름을 orphan으로 옮겨 마지막 view가 놓일 때 지운다.
     if (record->viewCount != 0) {
         auto kept = orphanBuffers_.TryPushBack(OrphanBuffer{record->buffer, record->viewCount});
-        if (kept) {
-            auto removed = buffers_.TryRemove(handle.slot);
-            (void)removed;
-            return;
-        }
+        (void)kept;
+        // 기록할 자리가 없어도 이름을 지우지 않는다. view가 아직 이 이름을 쓰므로 지우면 GPU가 쓰는
+        // 동안 이름이 다른 버퍼에 다시 쓰일 수 있다. 그때는 소멸 때까지 남기고 context 삭제가
+        // 회수한다(Vulkan의 KeepUntilDestruction과 같은 선택).
+        auto removed = buffers_.TryRemove(handle.slot);
+        (void)removed;
+        return;
     }
 
     RetiredObject entry;

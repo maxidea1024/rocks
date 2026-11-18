@@ -966,7 +966,7 @@ D3D12의 능력 없음 26개는 DXGI 형식이 없는 ETC2·EAC 6, ASTC 15, `R8U
 **texel buffer 능력(RQ9).** OpenGL ES의 `TexelBufferRead`는 ES 3.2 버퍼 텍스처 내부 형식 표(Table 8.18, Khronos glTexBuffer ES3 refpage로 대조)에 있는 형식이다: R8·R8I·R8UI·RG8·RG8UI·RGBA8·RGBA8UI·R16I·R16UI·R16F·RG16I·RG16UI·RG16F·RGBA16I·RGBA16UI·RGBA16F·R32I·R32UI·R32F·RG32UI·RG32F·RGB32I·RGB32UI·RGB32F·RGBA32UI·RGBA32F(Rocks 형식이 있는 것). 표의 R16·RG16·RGBA16 UNORM은 ES core 내부 형식이 아니고 `GL_EXT_texture_norm16`의 버퍼 텍스처 조건을 대조하지 않아 공개하지 않는다. `TexelBufferWrite`는 그 가운데 image 형식(Table 8.26), atomic은 R32UI·R32I다. Renderer가 고른 `R32Uint`·`RGBA32Float`는 읽기·쓰기 모두 된다(RQ9 해결).
 - Vulkan: 버퍼 view 형식은 버퍼의 모든 texel usage(읽기 용도면 UNIFORM, 쓰기 용도면 STORAGE)를 지원해야 하므로(VUID-VkBufferViewCreateInfo-format-08778) 쓰기·atomic 능력은 읽기도 되는 형식만 공개하고, 읽기·쓰기 버퍼의 view는 두 능력을 모두 요구한다(아니면 `Unsupported`).
 - D3D11: WARP가 `RGB9E5Ufloat`에 `SUPPORT_BUFFER`를 알리고도 버퍼 SRV 생성 안에서 멈추므로 D3D11은 그 형식의 texel buffer 능력을 공개하지 않는다.
-- 측정(typed view 생성 ⇔ 능력, 47개 비압축 단일 plane 색 형식): D3D12·D3D11 GTX 1060 읽기 36·쓰기 33, D3D12 WARP 39·36, D3D11 WARP 38·35, Vulkan GTX 1060 42·33, lavapipe 44·34, GLES(두 context) 27·10. 모두 "능력 ⇔ 생성" 실패 0이다.
+- 측정(typed view 생성 ⇔ 능력, 47개 비압축 단일 plane 색 형식): D3D12·D3D11 GTX 1060 읽기 36·쓰기 33, D3D12 WARP 39·36, D3D11 WARP 38·35, Vulkan GTX 1060 42·33, lavapipe 44·34, GLES(두 context) 26·10(성분 대응으로 흉내 내는 A8Unorm은 버퍼 텍스처에 대응을 걸 수 없어 GX1·GX2 리뷰 반영에서 뺐다). 모두 "능력 ⇔ 생성" 실패 0이다.
 
 ## 15. A0-G와의 분담
 

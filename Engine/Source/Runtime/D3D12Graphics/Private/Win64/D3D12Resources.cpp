@@ -248,6 +248,7 @@ Result<BufferViewHandle> D3D12Device::CreateBufferView(BufferHandle handle,
     record.descriptor = descriptor.Value();
     record.kind = desc.kind;
     record.access = desc.access;
+    record.stride = desc.kind == BufferViewKind::Structured ? range.elementBytes : 0u;
     record.shaderType = desc.kind == BufferViewKind::Typed
                             ? GetPixelFormatInfo(desc.format).shaderType
                             : PixelShaderType::None;

@@ -131,7 +131,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - 파이프라인 layout은 파이프라인마다 만든다(개정 6). 개발 컴파일 훅의 리플렉션(set·binding·종류에 더해 원문 register·space, 자원 모양(이미지·texel buffer·구조화·raw·상수·샘플러), 원소 타입, 쓰기 여부)을 PipelineDesc 고정 배치와 대조해 set 0(VS)·set 1(PS) layout을 만든다(ShaderSystem 7.2절 4항: set = 단계, binding = 종류 순서). binding이 없는 단계는 장치 공용 빈 layout이다.
   - PS t0 이미지 → `SAMPLED_IMAGE`(SetTexture), PS s0 → `SAMPLER`(그 텍스처의 샘플러), 단계 모두의 t1–t4 → typed는 `UNIFORM_TEXEL_BUFFER`, 구조화·raw는 `STORAGE_BUFFER`(SetBufferView slot 0–3). 그 밖(다른 register·space, 상수 버퍼, 쓰기 자원)은 생성이 `InvalidArgument`다.
   - push constant 80 byte(`DrawConstants`, VS·PS, 7.2절 2항)는 모든 파이프라인 layout과 공용 layout(두 set이 빈 layout)이 같은 범위라 공용 layout으로 올린다(사양 "Pipeline Layout Compatibility").
-- 그리기 descriptor set은 그리기 직전(바뀐 것이 있을 때만) 지금 명령 버퍼 기록의 pool에서 받아 쓰고 파이프라인 layout으로 묶는다. pool은 기록마다 최대 8개(set 1024개씩)이고, 그 기록을 다시 쓸 때(앞 제출의 fence가 끝났다) `vkResetDescriptorPool`로 통째로 비운다. UE 비-bindless의 프레임 단위 pool과 같은 방식이다(`P/VulkanPendingState.cpp:30–319`). 텍스처마다 고정 set을 두던 개정 5 방식은 파이프라인마다 layout이 달라지면서 없앴다. 한 프레임에 descriptor를 바꾸는 그리기가 8192번을 넘으면 그 뒤 그리기는 무시된다(`IgnoredDraws`, LastError).
+- 그리기 descriptor set은 그리기 직전(바뀐 것이 있을 때만) 지금 명령 버퍼 기록의 pool에서 받아 쓰고 파이프라인 layout으로 묶는다. pool은 기록마다 최대 8개이고 첫 pool이 set 1024개, 다음 pool은 앞 pool의 두 배다. 그 기록을 다시 쓸 때(앞 제출의 fence가 끝났다) `vkResetDescriptorPool`로 통째로 비운다. UE 비-bindless의 프레임 단위 pool과 같은 방식이다(`P/VulkanPendingState.cpp:30–319`). 텍스처마다 고정 set을 두던 개정 5 방식은 파이프라인마다 layout이 달라지면서 없앴다. 한 프레임에 descriptor를 바꾸는 그리기가 1024 × (2^8 − 1) = 261120번을 넘으면 그 뒤 그리기는 무시되고(`IgnoredDraws`, LastError) 처음 한 번 Warning 로그를 남긴다(GX1·GX2 리뷰 반영).
 
 ## 7. 파이프라인·render pass
 
@@ -162,7 +162,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
   - 검증 층을 켠 장치에서 `before`가 추적 상태와 다르면 `ValidationErrorCount`를 올리고 `LastError`에 남긴다(GPU에는 추적 상태를 쓴다).
 - barrier API는 1.1 core `vkCmdPipelineBarrier`다(sync2는 1.3).
 - 업로드 묶음 명령 버퍼는 시작에 "앞 제출의 읽기 → 전송 쓰기"(WAR) 실행 의존, 끝에 "전송 쓰기 → 정점·index·셰이더 읽기" 메모리 의존을 둔다. 같은 queue의 제출 순서가 뒤 프레임까지 의존을 잇는다(사양 "Execution and Memory Dependencies"의 submission order 범위).
-- 한 묶음 안에서 같은 버퍼 구간을 두 번 쓰면(초기 데이터 + 갱신, 갱신 두 번) 두 복사는 순서가 없다. 그래서 묶음 안 버퍼 쓰기 구간을 기록하고 겹치는 복사 앞에 TRANSFER_WRITE → TRANSFER_WRITE barrier를 둔다. 이미지는 복사마다 layout 전이 barrier가 있어 해당 없다.
+- 한 묶음 안에서 같은 버퍼 구간을 두 번 쓰거나(초기 데이터 + 갱신, 갱신 두 번) 앞 복사가 쓴 구간을 원본으로 읽으면(초기 데이터 직후의 `ReadBuffer`) 두 복사는 순서가 없다. 그래서 묶음 안 버퍼 쓰기 구간을 기록하고 대상이나 원본이 겹치는 복사 앞에 TRANSFER_WRITE → TRANSFER_READ·WRITE barrier를 둔다(WAW·RAW, synchronization validation으로 RAW 경고가 사라지는 것을 확인했다). 이미지는 복사마다 layout 전이 barrier가 있어 해당 없다.
 
 ## 9. 창 출력(swapchain)
 

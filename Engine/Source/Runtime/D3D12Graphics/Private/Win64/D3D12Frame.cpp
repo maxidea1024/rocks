@@ -198,11 +198,13 @@ Result<void> D3D12Device::BeginRecording() noexcept {
     if (!picked) {
         return Result<void>::Failure(picked.Error());
     }
+
     AllocatorRecord& record = allocators_[picked.Value()];
     if (FAILED(record.allocator->Reset()) ||
         FAILED(list_->Reset(record.allocator.Get(), nullptr))) {
         return Fail("command list reset failed");
     }
+
     recordingAllocator_ = picked.Value();
     record.inUse = true;
     recording_ = true;
@@ -211,10 +213,12 @@ Result<void> D3D12Device::BeginRecording() noexcept {
     for (BoundVertexBuffer& bound : boundVertex_) {
         bound = {};
     }
+
     boundIndex_ = {};
     for (BufferViewHandle& view : boundViews_) {
         view = {};
     }
+
     return Result<void>::Success();
 }
 
@@ -230,6 +234,7 @@ void D3D12Device::StartPass(const ClearColor& clear) noexcept {
             target_.resource, target_.restState, D3D12_RESOURCE_STATE_RENDER_TARGET);
         list_->ResourceBarrier(1, &toTarget);
     }
+
     list_->OMSetRenderTargets(1, &target_.rtv, FALSE, nullptr);
     const float color[4] = {clear.r, clear.g, clear.b, clear.a};
     list_->ClearRenderTargetView(target_.rtv, color, 0, nullptr);
@@ -250,9 +255,11 @@ void D3D12Device::StartPass(const ClearColor& clear) noexcept {
         list_->SetGraphicsRootDescriptorTable(RootTexture, srvs_.Gpu(white->srv));
         list_->SetGraphicsRootDescriptorTable(RootSampler, samplers_.Gpu(white->sampler));
     }
+
     for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
         list_->SetGraphicsRootDescriptorTable(RootBufferViews + slot, srvs_.Gpu(nullBufferSrv_));
     }
+
     const DrawConstants identity;
     list_->SetGraphicsRoot32BitConstants(RootConstants, ConstantCount, &identity, 0);
 }
@@ -362,7 +369,7 @@ bool D3D12Device::BufferViewsBound() const noexcept {
     for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
         const BufferViewRecord* view = bufferViews_.Find(boundViews_[slot].slot);
         if (view != nullptr) {
-            bound[slot] = {true, view->kind, view->shaderType};
+            bound[slot] = {true, view->kind, view->shaderType, view->stride};
         }
     }
 

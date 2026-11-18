@@ -270,7 +270,8 @@ Result<ResolvedBufferView> ResolveBufferView(const BufferDesc& buffer,
 // 이 장치 능력이다(Typed만 본다). 실패: 시작 byte가 장치 정렬(texelBufferOffsetAlignment·
 // storageBufferOffsetAlignment) 배수가 아니면 InvalidArgument, Typed 형식에 TexelBufferRead(Read)·
 // TexelBufferWrite(ReadWrite) 능력이 없거나 원소 수가 texelBufferElements를 넘거나 구조화·raw
-// 범위가 storageBufferBytes를 넘으면 Unsupported(다른 형식·범위로 바꾸지 않는다).
+// 범위가 storageBufferBytes를 넘으면 Unsupported(다른 형식·범위로 바꾸지 않는다). Vulkan backend는
+// 여기에 더해 버퍼의 모든 texel 용도 능력을 요구한다(Device::CreateBufferView 주석).
 Result<void> CheckBufferViewLimits(const DeviceLimits& limits, PixelFormatCaps formatCaps,
                                    const BufferViewDesc& view,
                                    const ResolvedBufferView& resolved) noexcept;
@@ -290,18 +291,29 @@ struct DrawBufferSlots {
     BufferViewKind kinds[MaxDrawBufferViews] = {};
     // Typed slot이 돌려주는 값 계열이다(view 형식의 PixelFormatInfo::shaderType과 같아야 한다).
     PixelShaderType typedShaderTypes[MaxDrawBufferViews] = {};
+    // Structured slot의 셰이더 선언 원소 byte다(리플렉션이 알려 주지 않으면 0, 그때는 대조하지
+    // 않는다).
+    uint32 structureStrides[MaxDrawBufferViews] = {};
 };
 
+// 리플렉션한 slot 하나를 배치에 더한다(backend 공용). 같은 slot을 다른 단계가 이미 쓰면 종류·값
+// 계열·구조화 stride(둘 다 알 때)가 같아야 하고, 다르면 거짓이다(backend는 InvalidArgument로
+// 거부한다). stride는 Structured slot의 셰이더 선언 원소 byte이고 모르면 0이다.
+bool AddDrawBufferSlot(DrawBufferSlots& slots, uint32 slot, BufferViewKind kind,
+                       PixelShaderType type, uint32 stride = 0) noexcept;
+
 // 그리기에 묶인 view 하나의 요약이다(backend가 view 기록에서 만든다). bound가 거짓이면 묶인 것이
-// 없다.
+// 없다. stride는 Structured view의 원소 byte(BufferDesc::stride)다.
 struct BoundBufferViewInfo {
     bool bound = false;
     BufferViewKind kind = BufferViewKind::Typed;
     PixelShaderType shaderType = PixelShaderType::None;
+    uint32 stride = 0;
 };
 
-// slots가 읽는 모든 slot에 같은 종류(Typed는 같은 값 계열)의 view가 묶였는지다. 아니면 backend는
-// 그 그리기를 무시하고 IgnoredDraws를 올린다.
+// slots가 읽는 모든 slot에 같은 종류(Typed는 같은 값 계열, Structured는 셰이더가 선언한 stride를
+// 알 때 같은 원소 byte)의 view가 묶였는지다. 아니면 backend는 그 그리기를 무시하고 IgnoredDraws를
+// 올린다.
 bool DrawBufferSlotsSatisfied(const DrawBufferSlots& slots,
                               const BoundBufferViewInfo (&bound)[MaxDrawBufferViews]) noexcept;
 

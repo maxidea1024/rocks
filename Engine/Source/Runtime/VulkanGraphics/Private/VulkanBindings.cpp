@@ -39,6 +39,7 @@ void VulkanDevice::QueryDeviceCaps() noexcept {
     limits.pipelineUavs = NotApplicableLimit;
     limits.boundDescriptorSets = device.maxBoundDescriptorSets;
     limits.colorAttachments = device.maxColorAttachments;
+    limits.viewports = enabledFeatures_.multiViewport == VK_TRUE ? device.maxViewports : 1u;
     limits.constantBufferBytes = device.maxUniformBufferRange;
     limits.rootConstantBytes = device.maxPushConstantsSize;
     limits.constantBufferOffsetAlignment =
@@ -68,8 +69,11 @@ void VulkanDevice::QueryDeviceCaps() noexcept {
     DeviceFeatures& features = caps_.features;
     features.computeShaders = true;
     features.depthClamp = enabledFeatures_.depthClamp == VK_TRUE;
-    features.vertexShaderLayerOutput = viewportLayer_;
+    const bool multiViewport = enabledFeatures_.multiViewport == VK_TRUE;
+    features.vertexViewportLayerOutput = viewportLayer_ && multiViewport;
     features.atomic64 = atomic64_;
+    features.rayTracingPipeline = rayTracingPipeline_;
+    features.rayQuery = rayQuery_;
     features.indirectFirstInstance = enabledFeatures_.drawIndirectFirstInstance == VK_TRUE;
     features.multiDrawIndirect = enabledFeatures_.multiDrawIndirect == VK_TRUE;
     features.textureCubeArray = enabledFeatures_.imageCubeArray == VK_TRUE;
@@ -151,6 +155,7 @@ Result<BufferViewHandle> VulkanDevice::CreateBufferView(BufferHandle handle,
     record.range = range.Bytes();
     record.kind = desc.kind;
     record.access = desc.access;
+    record.stride = desc.kind == BufferViewKind::Structured ? range.elementBytes : 0u;
     record.shaderType = desc.kind == BufferViewKind::Typed
                             ? GetPixelFormatInfo(desc.format).shaderType
                             : PixelShaderType::None;
@@ -321,14 +326,17 @@ Result<VkDescriptorSet> VulkanDevice::AllocateFrameSet(VkDescriptorSetLayout lay
     allocate.pSetLayouts = &layout;
     while (record.poolCursor < MaxDescriptorPoolsPerRecord) {
         if (record.poolCursor == record.poolCount) {
+            // 새 pool은 앞 pool의 두 배다(한 프레임이 많이 그리면 pool 수가 아니라 크기로
+            // 늘어난다).
+            const uint32 sets = DescriptorSetsPerPool << record.poolCount;
             const VkDescriptorPoolSize sizes[] = {
-                {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, DescriptorSetsPerPool},
-                {VK_DESCRIPTOR_TYPE_SAMPLER, DescriptorSetsPerPool},
-                {VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, DescriptorSetsPerPool * 2},
-                {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, DescriptorSetsPerPool * 2}};
+                {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, sets},
+                {VK_DESCRIPTOR_TYPE_SAMPLER, sets},
+                {VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, sets * 2},
+                {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, sets * 2}};
             VkDescriptorPoolCreateInfo info = {};
             info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-            info.maxSets = DescriptorSetsPerPool;
+            info.maxSets = sets;
             info.poolSizeCount = static_cast<uint32>(sizeof(sizes) / sizeof(sizes[0]));
             info.pPoolSizes = sizes;
             VkDescriptorPool created = VK_NULL_HANDLE;
@@ -353,6 +361,14 @@ Result<VkDescriptorSet> VulkanDevice::AllocateFrameSet(VkDescriptorSetLayout lay
         }
 
         ++record.poolCursor;
+    }
+
+    // 상한(DescriptorSetsPerPool × (2^MaxDescriptorPoolsPerRecord - 1))을 넘은 그리기는 무시된다.
+    // 조용히 지나가지 않게 처음 한 번 경고를 남기고 횟수를 센다.
+    if (descriptorExhaustions_++ == 0) {
+        Log::Warning(LogGraphicsVulkan,
+                     "Vulkan draw descriptor pools of a frame are exhausted; further draws in the "
+                     "frame are ignored");
     }
 
     auto failed = FailCode("AllocateFrameSet", ErrorCode::CapacityExceeded,
@@ -391,7 +407,7 @@ bool VulkanDevice::PrepareDescriptors() noexcept {
     for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
         views[slot] = bufferViews_.Find(boundViews_[slot].slot);
         if (views[slot] != nullptr) {
-            bound[slot] = {true, views[slot]->kind, views[slot]->shaderType};
+            bound[slot] = {true, views[slot]->kind, views[slot]->shaderType, views[slot]->stride};
         }
     }
 

@@ -368,8 +368,9 @@ PixelFormatCaps TextureFormatCaps(const GlesTextureFormat& format,
     // glTexBuffer ES3 refpage와 대조)에 있는 형식만이다. R16·RG16·RGBA16 UNORM은 표에 있지만 ES
     // core 내부 형식이 아니고(GL_EXT_texture_norm16) 그 확장의 버퍼 텍스처 조건을 대조하지 않아
     // 공개하지 않는다. 쓰기(imageBuffer)는 image 형식(Table 8.26)이면서 버퍼 텍스처 형식인 것,
-    // atomic은 R32UI·R32I다(RQ9).
-    if (IsBufferTextureFormat(format.internalFormat)) {
+    // atomic은 R32UI·R32I다(RQ9). 성분 대응(swizzle)으로 흉내 내는 형식(A8)은 버퍼 텍스처에 대응을
+    // 걸 수 없어 (R, 0, 0, 1)을 돌려주므로 공개하지 않는다(Vulkan의 항등 대응 규칙과 같다).
+    if (IsBufferTextureFormat(format.internalFormat) && !format.Is(GlesAlphaSwizzle)) {
         caps = caps | PixelFormatCaps::TexelBufferRead;
         if (format.Is(GlesStorage)) {
             caps = caps | PixelFormatCaps::TexelBufferWrite;

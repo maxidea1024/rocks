@@ -427,7 +427,7 @@ Result<void> VulkanDevice::CreateInstance(const DeviceDesc& desc) noexcept {
     application.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     application.pApplicationName = "Rocks";
     application.pEngineName = "Rocks";
-    application.apiVersion = VK_API_VERSION_1_1;
+    application.apiVersion = RequestedApiVersion;
     // instance 생성·파괴 중 메시지도 센다(VK_EXT_debug_utils "pNext of VkInstanceCreateInfo").
     VkDebugUtilsMessengerCreateInfoEXT messenger = {};
     messenger.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
@@ -592,8 +592,18 @@ Result<void> VulkanDevice::CreateLogicalDevice() noexcept {
         enabled[enabledCount++] = VK_EXT_TEXTURE_COMPRESSION_ASTC_HDR_EXTENSION_NAME;
     }
 
-    atomic64_ = atomicQuery && atomicSupported.shaderBufferInt64Atomics == VK_TRUE &&
+    // 64 bit atomic은 64 bit 정수 타입(shaderInt64)이 있어야 셰이더에 쓸 수 있다.
+    atomic64_ = atomicQuery && supported.shaderInt64 == VK_TRUE &&
+                atomicSupported.shaderBufferInt64Atomics == VK_TRUE &&
                 imageAtomicSupported.shaderImageInt64Atomics == VK_TRUE;
+    // ray tracing 확장 공개 여부다(DeviceFeatures 계약: 켜는 일은 RT 단계가 한다).
+    const bool accelerationStructure =
+        HasExtension(extensions, extensionCount, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+    rayTracingPipeline_ =
+        accelerationStructure &&
+        HasExtension(extensions, extensionCount, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+    rayQuery_ = accelerationStructure &&
+                HasExtension(extensions, extensionCount, VK_KHR_RAY_QUERY_EXTENSION_NAME);
     if (atomic64_) {
         enabled[enabledCount++] = VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME;
         enabled[enabledCount++] = VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME;
@@ -627,6 +637,8 @@ Result<void> VulkanDevice::CreateLogicalDevice() noexcept {
     features.textureCompressionASTC_LDR = supported.textureCompressionASTC_LDR;
     // 장치 능력(GX1)으로 공개하는 기능은 지원하면 켠다(UE도 지원하는 core 기능을 켠다).
     features.depthClamp = supported.depthClamp;
+    // viewport 여럿(VS viewport 출력, DeviceLimits::viewports)이다.
+    features.multiViewport = supported.multiViewport;
     features.multiDrawIndirect = supported.multiDrawIndirect;
     features.drawIndirectFirstInstance = supported.drawIndirectFirstInstance;
     features.imageCubeArray = supported.imageCubeArray;
@@ -754,7 +766,9 @@ DeviceInfo VulkanDevice::Info() const noexcept {
     info.clockCalibration = info.timestamps && getCalibratedTimestamps_ != nullptr;
     info.debugMarkers = debugUtils_ && functions_.vkCmdBeginDebugUtilsLabelEXT != nullptr &&
                         functions_.vkCmdEndDebugUtilsLabelEXT != nullptr;
-    info.apiVersion = properties_.apiVersion;
+    // 실효 판은 instance가 요청한 판과 장치 판 중 작은 쪽이다(1.1 위 기능은 확장으로만 쓴다).
+    info.apiVersion =
+        properties_.apiVersion < RequestedApiVersion ? properties_.apiVersion : RequestedApiVersion;
     return info;
 }
 

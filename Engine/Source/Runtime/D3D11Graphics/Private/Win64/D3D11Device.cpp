@@ -216,7 +216,7 @@ Result<void> D3D11Device::Initialize(const DeviceDesc& desc) noexcept {
     caps_ = QueryDeviceCaps(device_.Get(), adapter.Get());
     for (uint32 number = 0; number <= MaxPixelFormatNumber; ++number) {
         const PixelFormat format = static_cast<PixelFormat>(number);
-        PixelFormatCaps formatCaps = QueryFormatCaps(device_.Get(), format);
+        PixelFormatCaps formatCaps = QueryFormatCaps(device_.Get(), format, software_);
         sampleCounts_[number] = QuerySampleCounts(device_.Get(), format, formatCaps);
         if (sampleCounts_[number] > SampleCountBit(1)) {
             formatCaps = formatCaps | PixelFormatCaps::Multisample;

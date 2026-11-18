@@ -25,20 +25,6 @@ uint32 Smaller(uint32 left, uint32 right) noexcept {
     return left < right ? left : right;
 }
 
-// slot을 배치에 더한다. 이미 다른 종류·값 계열로 쓰는 slot이면 거짓이다.
-bool AddBufferSlot(DrawBufferSlots& slots, uint32 slot, BufferViewKind kind,
-                   PixelShaderType type) noexcept {
-    const uint32 bit = 1u << slot;
-    if ((slots.usedMask & bit) != 0) {
-        return slots.kinds[slot] == kind && slots.typedShaderTypes[slot] == type;
-    }
-
-    slots.usedMask |= bit;
-    slots.kinds[slot] = kind;
-    slots.typedShaderTypes[slot] = type;
-    return true;
-}
-
 bool StartsWith(const char* text, const char* prefix) noexcept {
     while (*prefix != '\0') {
         if (*text++ != *prefix++) {
@@ -47,6 +33,40 @@ bool StartsWith(const char* text, const char* prefix) noexcept {
     }
 
     return true;
+}
+
+// 버퍼가 아닌 텍스처 sampler 타입인지다.
+bool IsTextureSampler(GLenum type) noexcept {
+    switch (type) {
+    case GL_SAMPLER_2D:
+    case GL_SAMPLER_3D:
+    case GL_SAMPLER_CUBE:
+    case GL_SAMPLER_2D_SHADOW:
+    case GL_SAMPLER_2D_ARRAY:
+    case GL_SAMPLER_2D_ARRAY_SHADOW:
+    case GL_SAMPLER_CUBE_SHADOW:
+    case GL_INT_SAMPLER_2D:
+    case GL_INT_SAMPLER_3D:
+    case GL_INT_SAMPLER_CUBE:
+    case GL_INT_SAMPLER_2D_ARRAY:
+    case GL_UNSIGNED_INT_SAMPLER_2D:
+    case GL_UNSIGNED_INT_SAMPLER_3D:
+    case GL_UNSIGNED_INT_SAMPLER_CUBE:
+    case GL_UNSIGNED_INT_SAMPLER_2D_ARRAY:
+    case GL_SAMPLER_CUBE_MAP_ARRAY:
+    case GL_SAMPLER_CUBE_MAP_ARRAY_SHADOW:
+    case GL_INT_SAMPLER_CUBE_MAP_ARRAY:
+    case GL_UNSIGNED_INT_SAMPLER_CUBE_MAP_ARRAY:
+    case GL_SAMPLER_2D_MULTISAMPLE:
+    case GL_INT_SAMPLER_2D_MULTISAMPLE:
+    case GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE:
+    case GL_SAMPLER_2D_MULTISAMPLE_ARRAY:
+    case GL_INT_SAMPLER_2D_MULTISAMPLE_ARRAY:
+    case GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE_ARRAY:
+        return true;
+    default:
+        return false;
+    }
 }
 
 } // namespace
@@ -79,6 +99,8 @@ void GlesDevice::QueryDeviceCaps(bool desktopContext) noexcept {
     limits.perStageResources = NotApplicableLimit;
     limits.pipelineUavs = NotApplicableLimit;
     limits.boundDescriptorSets = NotApplicableLimit;
+    // viewport array는 ES core가 아니다(GL_NV_viewport_array는 쓰지 않는다).
+    limits.viewports = 1;
     limits.colorAttachments =
         Smaller(Query(gl_, GL_MAX_DRAW_BUFFERS), Query(gl_, GL_MAX_COLOR_ATTACHMENTS));
     const uint64 uniformBlock = Query64(gl_, GL_MAX_UNIFORM_BLOCK_SIZE);
@@ -86,7 +108,7 @@ void GlesDevice::QueryDeviceCaps(bool desktopContext) noexcept {
                                      ? NumericLimits<uint32>::Max()
                                      : static_cast<uint32>(uniformBlock);
     // 그리기 상수는 uniform 에뮬레이션이라 Rocks 루트 상수 계약(128 byte)이다.
-    limits.rootConstantBytes = 128;
+    limits.rootConstantBytes = RootConstantContractBytes;
     limits.constantBufferOffsetAlignment = Query(gl_, GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT);
     limits.storageBufferOffsetAlignment = Query(gl_, GL_SHADER_STORAGE_BUFFER_OFFSET_ALIGNMENT);
     limits.texelBufferOffsetAlignment = Query(gl_, GL_TEXTURE_BUFFER_OFFSET_ALIGNMENT);
@@ -119,7 +141,7 @@ void GlesDevice::QueryDeviceCaps(bool desktopContext) noexcept {
     features.computeShaders = true;
     features.depthClamp = features_.depthClamp;
     // ES에는 VS 층 출력 확장이 없다(데스크톱 context의 ARB 확장은 ES 판정에 쓰지 않는다).
-    features.vertexShaderLayerOutput = false;
+    features.vertexViewportLayerOutput = false;
     features.atomic64 = false;
     // ES 3.2 간접 그리기 인자의 base instance는 0이어야 하고 multi draw indirect는 core가 아니다.
     features.indirectFirstInstance = false;
@@ -230,6 +252,7 @@ Result<BufferViewHandle> GlesDevice::CreateBufferView(BufferHandle handle,
     record.size = range.Bytes();
     record.kind = desc.kind;
     record.access = desc.access;
+    record.stride = desc.kind == BufferViewKind::Structured ? range.elementBytes : 0u;
     record.shaderType = desc.kind == BufferViewKind::Typed
                             ? GetPixelFormatInfo(desc.format).shaderType
                             : PixelShaderType::None;
@@ -357,7 +380,7 @@ bool GlesDevice::BufferViewsBound(const PipelineRecord& pipeline) const noexcept
     for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
         const BufferViewRecord* view = bufferViews_.Find(boundViews_[slot].slot);
         if (view != nullptr) {
-            bound[slot] = {true, view->kind, view->shaderType};
+            bound[slot] = {true, view->kind, view->shaderType, view->stride};
         }
     }
 
@@ -399,6 +422,30 @@ Result<void> GlesDevice::ReflectBufferSlots(GLuint program, DrawBufferSlots& slo
         GLenum type = 0;
         gl_.GetActiveUniform(program, static_cast<GLuint>(index), sizeof(name), &length, &size,
                              &type, name);
+        // 그래픽 단계에는 쓰기 자원이 없다(image uniform 거부). 텍스처 sampler는 PS 텍스처 유닛
+        // 0(ps0)만 받는다.
+        if (type >= GL_FIRST_IMAGE_TYPE && type <= GL_LAST_IMAGE_TYPE) {
+            Diagnostic message;
+            message.Text("image uniform ")
+                .Text(name)
+                .Text(" is outside the fixed layout (no UAVs in graphics stages)");
+            return Reject(message, ErrorCode::InvalidArgument);
+        }
+
+        GLint unit = -1;
+        if (IsTextureSampler(type)) {
+            gl_.GetUniformiv(program, gl_.GetUniformLocation(program, name), &unit);
+            if (size != 1 || unit != static_cast<GLint>(PixelTextureUnit)) {
+                Diagnostic message;
+                message.Text("texture sampler ")
+                    .Text(name)
+                    .Text(" is outside the fixed layout (pixel texture unit 0)");
+                return Reject(message, ErrorCode::InvalidArgument);
+            }
+
+            continue;
+        }
+
         PixelShaderType shaderType = PixelShaderType::None;
         if (type == GL_SAMPLER_BUFFER) {
             shaderType = PixelShaderType::Float;
@@ -410,7 +457,6 @@ Result<void> GlesDevice::ReflectBufferSlots(GLuint program, DrawBufferSlots& slo
             continue;
         }
 
-        GLint unit = -1;
         gl_.GetUniformiv(program, gl_.GetUniformLocation(program, name), &unit);
         const GLuint value = unit >= 0 ? static_cast<GLuint>(unit) : 0u;
         uint32 slot = MaxDrawBufferViews;
@@ -423,7 +469,7 @@ Result<void> GlesDevice::ReflectBufferSlots(GLuint program, DrawBufferSlots& slo
         }
 
         if (size != 1 || slot == MaxDrawBufferViews ||
-            !AddBufferSlot(slots, slot, BufferViewKind::Typed, shaderType)) {
+            !AddDrawBufferSlot(slots, slot, BufferViewKind::Typed, shaderType)) {
             Diagnostic message;
             message.Text("buffer sampler ")
                 .Text(name)
@@ -445,8 +491,30 @@ Result<void> GlesDevice::ReflectBufferSlots(GLuint program, DrawBufferSlots& slo
         const BufferViewKind kind = StartsWith(name, RawStorageBlockPrefix)
                                         ? BufferViewKind::Raw
                                         : BufferViewKind::Structured;
+        // 구조화 block의 원소 byte는 첫 buffer 변수의 최상위 배열 stride다(모르면 0).
+        uint32 stride = 0;
+        const GLenum countProperty = GL_NUM_ACTIVE_VARIABLES;
+        GLint variables = 0;
+        gl_.GetProgramResourceiv(program, GL_SHADER_STORAGE_BLOCK, static_cast<GLuint>(index), 1,
+                                 &countProperty, 1, nullptr, &variables);
+        if (kind == BufferViewKind::Structured && variables > 0) {
+            const GLenum listProperty = GL_ACTIVE_VARIABLES;
+            GLint variable = -1;
+            gl_.GetProgramResourceiv(program, GL_SHADER_STORAGE_BLOCK, static_cast<GLuint>(index),
+                                     1, &listProperty, 1, nullptr, &variable);
+            const GLenum strideProperty = GL_TOP_LEVEL_ARRAY_STRIDE;
+            GLint arrayStride = 0;
+            if (variable >= 0) {
+                gl_.GetProgramResourceiv(program, GL_BUFFER_VARIABLE, static_cast<GLuint>(variable),
+                                         1, &strideProperty, 1, nullptr, &arrayStride);
+            }
+
+            stride = arrayStride > 0 ? static_cast<uint32>(arrayStride) : 0u;
+        }
+
         if (binding < 0 || static_cast<uint32>(binding) >= MaxDrawBufferViews ||
-            !AddBufferSlot(slots, static_cast<uint32>(binding), kind, PixelShaderType::None)) {
+            !AddDrawBufferSlot(slots, static_cast<uint32>(binding), kind, PixelShaderType::None,
+                               stride)) {
             Diagnostic message;
             message.Text("storage block ")
                 .Text(name)

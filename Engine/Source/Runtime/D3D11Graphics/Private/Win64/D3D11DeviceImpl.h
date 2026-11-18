@@ -39,6 +39,8 @@ struct BufferViewRecord {
     BufferViewKind kind = BufferViewKind::Typed;
     ViewAccess access = ViewAccess::Read;
     PixelShaderType shaderType = PixelShaderType::None;
+    // 구조화 view의 원소 byte다(셰이더 선언 stride와 대조한다).
+    uint32 stride = 0;
 };
 
 struct TextureRecord {

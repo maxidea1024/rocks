@@ -34,8 +34,9 @@ S4·S5는 S2·S3과 독립이다. 이번 범위에서 macOS는 창·Metal 구현
 | `PlatformWindow` | Input | 창 생성·이벤트 펌프·네이티브 핸들 노출, 입력 backend(Win32 메시지 키보드·마우스, XInput 게임패드) | Graphics·World 참조 |
 | `GraphicsTypes` | Core | 그래픽 값 타입: 픽셀 형식·mip 크기 계산(`PixelFormat.h`), 필터·주소 모드·테두리 색·`SamplerDesc`(`Sampler.h`). 장치 계약·에셋·도구가 함께 쓴다 | 장치·창·World 참조 |
 | `Graphics` | GraphicsTypes | 장치·스왑체인·버퍼·텍스처(mip·텍스처별 샘플러)·파이프라인·명령 기록 계약, backend 열거 | World·Object·창 모듈 참조 |
-| `D3D12Graphics` | Graphics | D3D12 구현(Windows) | 다른 backend 참조 |
-| `D3D11Graphics` | Graphics | D3D11 구현(Windows, feature level 11_0 이상, 10.2절) | 〃 |
+| `DxgiGraphics` | Core | D3D11·D3D12가 함께 쓰는 DXGI 어댑터 도우미(HDR 출력 판정·D3D 보장 자원 크기, GX1). 어댑터 질의는 Windows 빌드에만 있다 | Graphics·backend 참조 |
+| `D3D12Graphics` | Graphics, DxgiGraphics | D3D12 구현(Windows) | 다른 backend 참조 |
+| `D3D11Graphics` | Graphics, DxgiGraphics | D3D11 구현(Windows, feature level 11_0 이상, 10.2절) | 〃 |
 | `OpenGLGraphics` | Graphics | OpenGL ES 3.2 구현(Windows `GLES31_PC` 미리보기 WGL, Android EGL, [OpenGL ES backend](OpenGLESGraphics.ko.md)) | 〃 |
 | `VulkanGraphics` | Graphics | Vulkan 1.1 구현(Windows·Android, 10.3절·[VulkanGraphics](VulkanGraphics.ko.md)) | 다른 backend 참조 |
 | `MetalGraphics` | Graphics | 자리만 둔다. 장치 생성은 `Unsupported`를 반환한다 | 동작하는 척하는 가짜 구현 |

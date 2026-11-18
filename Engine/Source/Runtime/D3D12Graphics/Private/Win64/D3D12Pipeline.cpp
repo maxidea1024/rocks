@@ -215,7 +215,7 @@ Result<void> D3D12Device::ReflectBindings(ID3DBlob* code, bool pixel,
                    : resource.ReturnType == D3D_RETURN_TYPE_UINT ? PixelShaderType::Uint
                                                                  : PixelShaderType::Float;
             if (fits) {
-                fits = AddBufferSlot(slots, slot, BufferViewKind::Typed, type);
+                fits = AddDrawBufferSlot(slots, slot, BufferViewKind::Typed, type);
             }
 
             break;
@@ -223,7 +223,10 @@ Result<void> D3D12Device::ReflectBindings(ID3DBlob* code, bool pixel,
         case D3D_SIT_BYTEADDRESS:
             kind = resource.Type == D3D_SIT_STRUCTURED ? BufferViewKind::Structured
                                                        : BufferViewKind::Raw;
-            fits = single && viewSlot && AddBufferSlot(slots, slot, kind, type);
+            // 구조화 버퍼의 NumSamples는 원소 stride다(D3D12_SHADER_INPUT_BIND_DESC).
+            fits = single && viewSlot &&
+                   AddDrawBufferSlot(slots, slot, kind, type,
+                                     kind == BufferViewKind::Structured ? resource.NumSamples : 0u);
             break;
         default:
             break;
@@ -241,20 +244,6 @@ Result<void> D3D12Device::ReflectBindings(ID3DBlob* code, bool pixel,
     }
 
     return Result<void>::Success();
-}
-
-// slot을 배치에 더한다. 이미 다른 종류·값 계열로 쓰는 slot이면 거짓이다.
-bool D3D12Device::AddBufferSlot(DrawBufferSlots& slots, uint32 slot, BufferViewKind kind,
-                                PixelShaderType type) noexcept {
-    const uint32 bit = 1u << slot;
-    if ((slots.usedMask & bit) != 0) {
-        return slots.kinds[slot] == kind && slots.typedShaderTypes[slot] == type;
-    }
-
-    slots.usedMask |= bit;
-    slots.kinds[slot] = kind;
-    slots.typedShaderTypes[slot] = type;
-    return true;
 }
 
 Result<void> D3D12Device::Reject(const Diagnostic& message) noexcept {

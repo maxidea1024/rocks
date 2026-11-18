@@ -59,6 +59,8 @@ struct ShaderBinding {
     PixelShaderType sampledType = PixelShaderType::None;
     // 셰이더가 쓰기도 한다(UAV·storage). 읽기 전용 storage buffer·이미지는 거짓이다.
     bool writable = false;
+    // 구조화 버퍼의 원소 byte(런타임 배열의 ArrayStride)다. 그 밖이나 알 수 없으면 0이다.
+    uint32 structureStride = 0;
 };
 
 // 정점 셰이더가 읽는 입력 하나다. location은 시맨틱 ATTRIBUTEn의 n이다.

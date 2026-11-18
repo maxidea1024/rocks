@@ -188,6 +188,17 @@ void main() {
 }
 )";
 
+// PS가 image buffer에 쓴다(그래픽 단계 UAV 거부, 음성 대조).
+constexpr char PixelUavGlsl[] = BUFFER_TEST_GLSL_HEAD R"(
+layout(binding = 0, rgba32f) uniform highp writeonly imageBuffer outputs;
+layout(location = 0) in vec4 in_var_COLOR0;
+layout(location = 0) out vec4 out_var_SV_Target0;
+void main() {
+    imageStore(outputs, 0, in_var_COLOR0);
+    out_var_SV_Target0 = in_var_COLOR0;
+}
+)";
+
 constexpr char OutsidePixelGlsl[] = BUFFER_TEST_GLSL_HEAD R"(
 layout(binding = 6) uniform highp samplerBuffer outside;
 layout(location = 0) in vec4 in_var_COLOR0;
@@ -679,12 +690,9 @@ void RunDraws(Device& device, Bench& bench) noexcept {
     auto outside = bench.Pipeline(Text(OutsideHlsl), Text(BlackVertexGlsl), Text(OutsidePixelGlsl));
     Check(outside.Error() == ErrorCode::InvalidArgument && device.LastError().ByteCount() != 0,
           "shader resources outside the fixed layout are rejected");
-    if (!openGl) {
-        auto pixelUav =
-            bench.Pipeline(Text(PixelUavHlsl), Text(BlackVertexGlsl), Text(ColorPixelGlsl));
-        Check(pixelUav.Error() == ErrorCode::InvalidArgument,
-              "pixel shader UAVs are rejected (UAVs are compute only)");
-    }
+    auto pixelUav = bench.Pipeline(Text(PixelUavHlsl), Text(BlackVertexGlsl), Text(PixelUavGlsl));
+    Check(pixelUav.Error() == ErrorCode::InvalidArgument,
+          "pixel shader UAVs are rejected (UAVs are compute only)");
 
     device.Retire(lightView.Value());
     device.Retire(codeView.Value());
@@ -719,6 +727,87 @@ void SampleCountText(uint32 counts, char (&out)[32]) noexcept {
 }
 
 } // namespace
+
+// backend 사양이 정한 고정값을 단언한다(질의를 잘못 읽으면 잡는다). 값은 d3d11.h·d3d12.h 상수를
+// 쓰지 않고 사양 문서의 수를 직접 둔다(D3D11 FL 11.x 사양, D3D12 "Hardware tiers" 표).
+void RunKnownCaps(Device& device) noexcept {
+    // D3D 공통(FL 11.x): SRV 128, 샘플러 16, 상수 버퍼 slot 14, RTV 8, 정점 원소 32, compute 그룹
+    // 65535, 그룹 크기 1024 × 1024 × 64, 그룹 1024 스레드, TGSM 32 KiB, 2D 16384.
+    constexpr uint32 SrvSlots = 128;
+    constexpr uint32 SamplerSlots = 16;
+    constexpr uint32 ConstantBufferSlots = 14;
+    constexpr uint32 RenderTargets = 8;
+    constexpr uint32 InputElements = 32;
+    constexpr uint32 DispatchGroups = 65535;
+    constexpr uint32 GroupThreads = 1024;
+    constexpr uint32 SharedMemoryBytes = 32768;
+    constexpr uint32 Texture2D = 16384;
+    constexpr uint32 UavSlotsLevel11_0 = 8;
+    constexpr uint32 UavSlotsLevel11_1 = 64;
+    constexpr uint32 HeapDescriptors = 1000000;
+    constexpr uint32 HeapSamplers = 2048;
+    constexpr uint32 Viewports = 16;
+    const DeviceCaps& caps = device.Caps();
+    const DeviceLimits& limits = caps.limits;
+    const Backend backend = device.Info().backend;
+    if (backend != Backend::D3D11 && backend != Backend::D3D12) {
+        // Vulkan·OpenGL ES는 장치 질의값이라 고정값이 없다. 계약 상수만 본다.
+        Check(backend != Backend::OpenGL ||
+                  (limits.rootConstantBytes == RootConstantContractBytes && limits.viewports == 1 &&
+                   !caps.features.vertexViewportLayerOutput),
+              "OpenGL ES root constants, one viewport and no VS viewport or layer output");
+        Check(backend != Backend::Vulkan || limits.viewports >= 1,
+              "Vulkan exposes at least one viewport");
+        return;
+    }
+
+    const bool common =
+        limits.pixel.samplers >= SamplerSlots && limits.colorAttachments == RenderTargets &&
+        limits.vertexAttributes == InputElements && limits.computeGroupCount[0] == DispatchGroups &&
+        limits.computeGroupCount[1] == DispatchGroups &&
+        limits.computeGroupCount[2] == DispatchGroups && limits.computeGroupSize[0] == 1024 &&
+        limits.computeGroupSize[1] == 1024 && limits.computeGroupSize[2] == 64 &&
+        limits.computeGroupInvocations == GroupThreads &&
+        limits.computeSharedMemoryBytes == SharedMemoryBytes && limits.textureSize2D == Texture2D &&
+        limits.rootConstantBytes == RootConstantContractBytes;
+    Check(common, "D3D limits match the feature level 11 specification");
+    if (backend == Backend::D3D11) {
+        const uint32 uavs = limits.pixel.storageImages;
+        Check(limits.pixel.sampledTextures == SrvSlots && limits.pixel.samplers == SamplerSlots &&
+                  limits.pixel.constantBuffers == ConstantBufferSlots - 1 &&
+                  (uavs == UavSlotsLevel11_0 || uavs == UavSlotsLevel11_1) &&
+                  limits.vertex.storageImages == (uavs == UavSlotsLevel11_1 ? uavs : 0u) &&
+                  caps.features.resourceBindingTier == 0 && caps.features.rayTracingTier == 0 &&
+                  limits.viewports == Viewports && !caps.features.rayQuery,
+              "D3D11 stage limits match the specification (constant buffers exclude the root "
+              "constants slot)");
+        return;
+    }
+
+    // D3D12 tier 표: Tier 1 SRV 128·샘플러 16·CBV 14, Tier 2 SRV heap·샘플러 heap·CBV 14, Tier 3
+    // 모두 heap.
+    const uint32 tier = caps.features.resourceBindingTier;
+    const StageResourceLimits& pixel = limits.pixel;
+    bool tiered = false;
+    if (tier == 1) {
+        tiered = pixel.sampledTextures == SrvSlots && pixel.samplers == SamplerSlots &&
+                 pixel.constantBuffers == ConstantBufferSlots;
+    } else if (tier == 2) {
+        tiered = pixel.sampledTextures == HeapDescriptors && pixel.samplers == HeapSamplers &&
+                 pixel.constantBuffers == ConstantBufferSlots;
+    } else if (tier == 3) {
+        tiered = pixel.sampledTextures == HeapDescriptors && pixel.samplers == HeapSamplers &&
+                 pixel.constantBuffers == HeapDescriptors;
+    }
+
+    const uint8 rtTier = caps.features.rayTracingTier;
+    Check(tiered && (rtTier == 0 || rtTier == 10 || rtTier == 11) &&
+              caps.features.rayTracingPipeline == (rtTier >= 10) &&
+              caps.features.rayQuery == (rtTier >= 11) &&
+              (caps.features.vertexStores || limits.vertex.storageImages == 0) &&
+              caps.features.vertexViewportLayerOutput && limits.viewports == Viewports,
+          "D3D12 stage limits match the resource binding tier table");
+}
 
 uint32 RunCapsChecks(const char* name, Device& device) noexcept {
     failures = 0;
@@ -766,17 +855,23 @@ uint32 RunCapsChecks(const char* name, Device& device) noexcept {
               limits.computeSharedMemoryBytes, limits.textureSize2D, limits.textureSize3D,
               limits.textureSizeCube, limits.textureArrayLayers, limits.samplerAnisotropy);
     Log::Info(LogGraphics,
-              "{Backend} features: compute {Compute}, depth clamp {DepthClamp}, VS layer "
+              "{Backend} features: compute {Compute}, depth clamp {DepthClamp}, VS viewport/layer "
               "{Layer}, atomic64 {Atomic64}, indirect first instance {FirstInstance}, multi draw "
               "indirect {MultiDraw}, cube array {CubeArray}, sRGB pair view {SrgbView}, VS stores "
               "{VertexStores}, PS stores {PixelStores}, HDR output {Hdr}, binding tier {Tier}, "
               "shader model {ShaderModel}, API version {Api}",
-              name, features.computeShaders, features.depthClamp, features.vertexShaderLayerOutput,
-              features.atomic64, features.indirectFirstInstance, features.multiDrawIndirect,
-              features.textureCubeArray, features.srgbPairView, features.vertexStores,
-              features.pixelStores, features.hdrOutput,
+              name, features.computeShaders, features.depthClamp,
+              features.vertexViewportLayerOutput, features.atomic64, features.indirectFirstInstance,
+              features.multiDrawIndirect, features.textureCubeArray, features.srgbPairView,
+              features.vertexStores, features.pixelStores, features.hdrOutput,
               static_cast<uint32>(features.resourceBindingTier),
               static_cast<uint32>(features.shaderModel), device.Info().apiVersion);
+    Log::Info(LogGraphics,
+              "{Backend} features: ray tracing tier {RtTier}, ray tracing pipeline {RtPipeline}, "
+              "ray query {RayQuery}; viewports {Viewports}",
+              name, static_cast<uint32>(features.rayTracingTier), features.rayTracingPipeline,
+              features.rayQuery, limits.viewports);
+    RunKnownCaps(device);
 
     // 대표 형식의 MSAA 표본 수와 typed UAV load·texel buffer 능력이다(Renderer RQ4).
     const PixelFormat msaaFormats[] = {PixelFormat::RGBA8Unorm,    PixelFormat::RGBA16Float,

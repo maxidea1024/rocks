@@ -5,24 +5,6 @@
 // 장치 능력 조회와 버퍼 view(RenderBase 4.4절 GX1·GX2)다.
 namespace rocks::graphics::d3d11 {
 
-namespace {
-
-// slot을 배치에 더한다. 이미 다른 종류·값 계열로 쓰는 slot이면 거짓이다.
-bool AddBufferSlot(DrawBufferSlots& slots, uint32 slot, BufferViewKind kind,
-                   PixelShaderType type) noexcept {
-    const uint32 bit = 1u << slot;
-    if ((slots.usedMask & bit) != 0) {
-        return slots.kinds[slot] == kind && slots.typedShaderTypes[slot] == type;
-    }
-
-    slots.usedMask |= bit;
-    slots.kinds[slot] = kind;
-    slots.typedShaderTypes[slot] = type;
-    return true;
-}
-
-} // namespace
-
 const DeviceCaps& D3D11Device::Caps() const noexcept {
     return caps_;
 }
@@ -70,6 +52,7 @@ Result<BufferViewHandle> D3D11Device::CreateBufferView(BufferHandle handle,
     BufferViewRecord record;
     record.kind = desc.kind;
     record.access = desc.access;
+    record.stride = desc.kind == BufferViewKind::Structured ? range.elementBytes : 0u;
     record.shaderType = desc.kind == BufferViewKind::Typed
                             ? GetPixelFormatInfo(desc.format).shaderType
                             : PixelShaderType::None;
@@ -251,18 +234,21 @@ Result<void> D3D11Device::ReflectBindings(ID3DBlob* code, bool pixel,
                     resource.ReturnType == D3D_RETURN_TYPE_SINT   ? PixelShaderType::Int
                     : resource.ReturnType == D3D_RETURN_TYPE_UINT ? PixelShaderType::Uint
                                                                   : PixelShaderType::Float;
-                fits =
-                    single && viewSlot && AddBufferSlot(slots, slot, BufferViewKind::Typed, type);
+                fits = single && viewSlot &&
+                       AddDrawBufferSlot(slots, slot, BufferViewKind::Typed, type);
             }
 
             break;
         case D3D_SIT_STRUCTURED:
         case D3D_SIT_BYTEADDRESS:
-            fits = single && viewSlot &&
-                   AddBufferSlot(slots, slot,
-                                 resource.Type == D3D_SIT_STRUCTURED ? BufferViewKind::Structured
-                                                                     : BufferViewKind::Raw,
-                                 PixelShaderType::None);
+            // 구조화 버퍼의 NumSamples는 원소 stride다(D3D11_SHADER_INPUT_BIND_DESC).
+            fits =
+                single && viewSlot &&
+                AddDrawBufferSlot(slots, slot,
+                                  resource.Type == D3D_SIT_STRUCTURED ? BufferViewKind::Structured
+                                                                      : BufferViewKind::Raw,
+                                  PixelShaderType::None,
+                                  resource.Type == D3D_SIT_STRUCTURED ? resource.NumSamples : 0u);
             break;
         default:
             break;
@@ -292,7 +278,7 @@ bool D3D11Device::BufferViewsBound() const noexcept {
     for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
         const BufferViewRecord* view = bufferViews_.Find(boundViews_[slot].slot);
         if (view != nullptr) {
-            bound[slot] = {true, view->kind, view->shaderType};
+            bound[slot] = {true, view->kind, view->shaderType, view->stride};
         }
     }
 

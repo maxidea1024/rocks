@@ -32,15 +32,18 @@ namespace rocks::graphics::vulkan {
 // 명령 버퍼 기록 수 상한이다. 끝난 제출의 것을 다시 쓰고, 모두 GPU가 쓰는 중이면 이 수까지 새로
 // 만든다(D3D12 기록 저장소와 같은 상한). 상한이면 소유 스레드는 가장 오래된 제출을 기다린다.
 inline constexpr uint32 MaxCommandBuffers = 8;
+// instance가 요청하는 Vulkan 판이다(Docs/Design/VulkanGraphics.ko.md 1절, 기준 1.1).
+inline constexpr uint32 RequestedApiVersion = VK_API_VERSION_1_1;
 // 제출 fence 칸 수다. 비행 중 제출(명령 버퍼 상한 + 빈 신호)과 관찰 스레드가 붙잡은 것을 덮는다.
 inline constexpr uint32 MaxSubmissionFences = 64;
 inline constexpr uint32 MaxMipLevels = 16;
 inline constexpr uint32 MaxTextureExtent = 16384;
 // 서로 다른 SamplerDesc 조합 수의 상한이다(D3D12와 같다).
 inline constexpr uint32 SamplerCapacity = 256;
-// 그리기 descriptor set pool 하나의 set 수와 기록(명령 버퍼) 하나가 쓰는 pool 수 상한이다. 한
-// 프레임에서 descriptor를 바꾸는 그리기가 DescriptorSetsPerPool × MaxDescriptorPoolsPerRecord를
-// 넘으면 그 뒤 그리기는 무시된다(IgnoredDraws).
+// 그리기 descriptor set 첫 pool의 set 수와 기록(명령 버퍼) 하나가 쓰는 pool 수 상한이다. 다음
+// pool은 앞 pool의 두 배라 한 프레임의 상한은 DescriptorSetsPerPool ×
+// (2^MaxDescriptorPoolsPerRecord
+// - 1)이다. 넘으면 그 뒤 그리기는 무시되고(IgnoredDraws) 처음 한 번 경고 로그를 남긴다.
 inline constexpr uint32 DescriptorSetsPerPool = 1024;
 inline constexpr uint32 MaxDescriptorPoolsPerRecord = 8;
 // 파이프라인 하나의 descriptor binding 수 상한이다(PS 텍스처·샘플러 2 + 단계마다 버퍼 view 4).
@@ -91,6 +94,8 @@ struct BufferViewRecord {
     BufferViewKind kind = BufferViewKind::Typed;
     ViewAccess access = ViewAccess::Read;
     PixelShaderType shaderType = PixelShaderType::None;
+    // 구조화 view의 원소 byte다(셰이더 선언 stride와 대조한다).
+    uint32 stride = 0;
 };
 
 struct TextureRecord {
@@ -645,6 +650,8 @@ private:
     VkPhysicalDeviceFeatures enabledFeatures_ = {};
     bool viewportLayer_ = false;
     bool atomic64_ = false;
+    bool rayTracingPipeline_ = false;
+    bool rayQuery_ = false;
     // maxMemoryAllocationSize(1.1 maintenance3)다.
     uint64 maxAllocationBytes_ = 0;
     DeviceCaps caps_;
@@ -707,6 +714,8 @@ private:
     TextureHandle boundTexture_;
     BufferViewHandle boundViews_[MaxDrawBufferViews];
     bool descriptorsDirty_ = true;
+    // 프레임 descriptor pool이 바닥난 횟수다(첫 번째만 경고 로그).
+    uint64 descriptorExhaustions_ = 0;
     uint64 ignoredDraws_ = 0;
     uint32 markerDepth_ = 0;
     // GX5: 기록 중 프레임이 상태를 바꾼 텍스처와, 전이를 위해 닫은 render pass다.

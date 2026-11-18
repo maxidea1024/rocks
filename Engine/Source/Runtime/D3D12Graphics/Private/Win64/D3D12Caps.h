@@ -16,12 +16,4 @@ namespace rocks::graphics::d3d12 {
 DeviceCaps QueryDeviceCaps(ID3D12Device* device, IDXGIAdapter1* adapter,
                            uint32& featureLevel) noexcept;
 
-// adapter에 연결된 디스플레이 가운데 HDR10(ST.2084·BT.2020) 색 공간으로 출력 중인 것이 있는지다
-// (IDXGIOutput6::GetDesc1, UE WindowsD3D12Device.cpp:573–602와 같은 판정).
-bool AdapterHasHdrOutput(IDXGIAdapter* adapter) noexcept;
-
-// D3D 보장 최대 자원 크기(byte)다: min(max(128, 전용 VRAM MiB × 0.25), 2048) MiB(d3d12.h
-// D3D12_REQ_RESOURCE_SIZE_IN_MEGABYTES_EXPRESSION_A·B·C_TERM).
-uint64 GuaranteedResourceBytes(uint64 dedicatedVideoMemory) noexcept;
-
 } // namespace rocks::graphics::d3d12

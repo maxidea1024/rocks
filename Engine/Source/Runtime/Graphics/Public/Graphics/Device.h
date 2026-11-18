@@ -230,6 +230,12 @@ public:
     //
     // 실패: stale handle StaleHandle, 규칙 위반(ResolveBufferView)·장치 정렬 위반 InvalidArgument,
     // 형식 능력·범위 한도 밖(CheckBufferViewLimits) Unsupported. 다른 형식·종류로 대체하지 않는다.
+    //
+    // Vulkan은 typed view 형식이 view 접근만이 아니라 버퍼의 모든 texel 용도를 받아야 한다
+    // (VUID-VkBufferViewCreateInfo-format-08778): ShaderRead | ShaderWrite 버퍼의 Read view도
+    // 형식에 TexelBufferWrite가 있어야 하고 없으면 Unsupported다. 읽기만 하는 형식은 ShaderRead만
+    // 준 버퍼에 만든다(VK_KHR_maintenance5의 view별 usage로 풀 수 있으나 기준 1.1에는 없어 쓰지
+    // 않는다).
     virtual Result<BufferViewHandle> CreateBufferView(BufferHandle buffer,
                                                       const BufferViewDesc& desc) noexcept = 0;
 

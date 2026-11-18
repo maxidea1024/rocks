@@ -322,9 +322,43 @@ inline constexpr GLenum GL_ACTIVE_UNIFORMS = 0x8B86;
 inline constexpr GLenum GL_SAMPLER_BUFFER = 0x8DC2;
 inline constexpr GLenum GL_INT_SAMPLER_BUFFER = 0x8DD0;
 inline constexpr GLenum GL_UNSIGNED_INT_SAMPLER_BUFFER = 0x8DD8;
+// 그 밖의 sampler 타입(배치 대조용, ES 3.2 Table 7.3)이다.
+inline constexpr GLenum GL_SAMPLER_2D = 0x8B5E;
+inline constexpr GLenum GL_SAMPLER_3D = 0x8B5F;
+inline constexpr GLenum GL_SAMPLER_CUBE = 0x8B60;
+inline constexpr GLenum GL_SAMPLER_2D_SHADOW = 0x8B62;
+inline constexpr GLenum GL_SAMPLER_2D_ARRAY = 0x8DC1;
+inline constexpr GLenum GL_SAMPLER_2D_ARRAY_SHADOW = 0x8DC4;
+inline constexpr GLenum GL_SAMPLER_CUBE_SHADOW = 0x8DC5;
+inline constexpr GLenum GL_INT_SAMPLER_2D = 0x8DCA;
+inline constexpr GLenum GL_INT_SAMPLER_3D = 0x8DCB;
+inline constexpr GLenum GL_INT_SAMPLER_CUBE = 0x8DCC;
+inline constexpr GLenum GL_INT_SAMPLER_2D_ARRAY = 0x8DCF;
+inline constexpr GLenum GL_UNSIGNED_INT_SAMPLER_2D = 0x8DD2;
+inline constexpr GLenum GL_UNSIGNED_INT_SAMPLER_3D = 0x8DD3;
+inline constexpr GLenum GL_UNSIGNED_INT_SAMPLER_CUBE = 0x8DD4;
+inline constexpr GLenum GL_UNSIGNED_INT_SAMPLER_2D_ARRAY = 0x8DD7;
+inline constexpr GLenum GL_SAMPLER_CUBE_MAP_ARRAY = 0x900C;
+inline constexpr GLenum GL_SAMPLER_CUBE_MAP_ARRAY_SHADOW = 0x900D;
+inline constexpr GLenum GL_INT_SAMPLER_CUBE_MAP_ARRAY = 0x900E;
+inline constexpr GLenum GL_UNSIGNED_INT_SAMPLER_CUBE_MAP_ARRAY = 0x900F;
+inline constexpr GLenum GL_SAMPLER_2D_MULTISAMPLE = 0x9108;
+inline constexpr GLenum GL_INT_SAMPLER_2D_MULTISAMPLE = 0x9109;
+inline constexpr GLenum GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE = 0x910A;
+inline constexpr GLenum GL_SAMPLER_2D_MULTISAMPLE_ARRAY = 0x910B;
+inline constexpr GLenum GL_INT_SAMPLER_2D_MULTISAMPLE_ARRAY = 0x910C;
+inline constexpr GLenum GL_UNSIGNED_INT_SAMPLER_2D_MULTISAMPLE_ARRAY = 0x910D;
+// image uniform 타입 범위다(GL_IMAGE_1D 0x904C부터 GL_UNSIGNED_INT_IMAGE_2D_MULTISAMPLE_ARRAY
+// 0x906C까지, ES 타입은 이 안에 있다).
+inline constexpr GLenum GL_FIRST_IMAGE_TYPE = 0x904C;
+inline constexpr GLenum GL_LAST_IMAGE_TYPE = 0x906C;
 inline constexpr GLenum GL_SHADER_STORAGE_BLOCK = 0x92E6;
 inline constexpr GLenum GL_ACTIVE_RESOURCES = 0x92F5;
 inline constexpr GLenum GL_BUFFER_BINDING = 0x9302;
+inline constexpr GLenum GL_BUFFER_VARIABLE = 0x92E5;
+inline constexpr GLenum GL_NUM_ACTIVE_VARIABLES = 0x9304;
+inline constexpr GLenum GL_ACTIVE_VARIABLES = 0x9305;
+inline constexpr GLenum GL_TOP_LEVEL_ARRAY_STRIDE = 0x930D;
 // --- debug(KHR_debug, ES 3.2 core) ---
 inline constexpr GLenum GL_DEBUG_SOURCE_APPLICATION = 0x824A;
 inline constexpr GLenum GL_DEBUG_TYPE_ERROR = 0x824C;
