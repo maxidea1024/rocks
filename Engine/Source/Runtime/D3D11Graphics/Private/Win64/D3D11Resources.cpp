@@ -198,6 +198,15 @@ Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
         return Result<TextureHandle>::Failure(valid.Error());
     }
 
+    if (desc.sampleCount > 1 &&
+        (GetPixelFormatSampleCounts(desc.format) & SampleCountBit(desc.sampleCount)) == 0) {
+        platform::LockGuard lock(gate_);
+        auto failed = Fail("MSAA sample count is not supported for this format by the D3D11 "
+                           "device");
+        (void)failed;
+        return Result<TextureHandle>::Failure(ErrorCode::Unsupported);
+    }
+
     // view swizzle은 D3D11에 없다(셰이더 쪽 대체 같은 우회는 하지 않는다, AssetSystem A0-G).
     if (!desc.swizzle.IsIdentity() || !CheckTextureLimits(caps_, desc)) {
         platform::LockGuard lock(gate_);
@@ -245,6 +254,7 @@ Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
     record.renderTarget = renderTarget;
     record.depthTarget = depthTarget;
     record.usage = desc.usage;
+    record.sampleCount = desc.sampleCount;
     record.sampler = sampler.Value();
     record.comparison = desc.sampler.comparison;
     // 깊이 형식은 늘 DEPTH_STENCIL bind로 만든다(typeless 깊이 자원의 DSV 조건).
@@ -303,7 +313,7 @@ Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
         textureDesc.MipLevels = desc.mipLevels;
         textureDesc.ArraySize = record.slices;
         textureDesc.Format = mapping.resource;
-        textureDesc.SampleDesc.Count = 1;
+        textureDesc.SampleDesc.Count = desc.sampleCount;
         textureDesc.Usage = D3D11_USAGE_DEFAULT;
         textureDesc.BindFlags = bindFlags;
         textureDesc.MiscFlags = IsCubeDimension(desc.dimension)
@@ -333,7 +343,8 @@ Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
     if (renderTarget) {
         D3D11_RENDER_TARGET_VIEW_DESC view = {};
         view.Format = mapping.rtv;
-        view.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+        view.ViewDimension = record.sampleCount > 1 ? D3D11_RTV_DIMENSION_TEXTURE2DMS
+                                                    : D3D11_RTV_DIMENSION_TEXTURE2D;
         result = device_->CreateRenderTargetView(record.texture.Get(), &view, record.rtv.Out());
         if (FAILED(result)) {
             return FailWith<TextureHandle>("CreateRenderTargetView", result);
@@ -343,7 +354,8 @@ Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
     if (depthTarget) {
         D3D11_DEPTH_STENCIL_VIEW_DESC view = {};
         view.Format = mapping.dsv;
-        view.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+        view.ViewDimension = record.sampleCount > 1 ? D3D11_DSV_DIMENSION_TEXTURE2DMS
+                                                    : D3D11_DSV_DIMENSION_TEXTURE2D;
         result = device_->CreateDepthStencilView(record.texture.Get(), &view, record.dsv.Out());
         if (FAILED(result)) {
             return FailWith<TextureHandle>("CreateDepthStencilView", result);
@@ -412,6 +424,12 @@ HRESULT D3D11Device::CreatePlaneView(const TextureRecord& record, DXGI_FORMAT fo
     view.Format = format;
     switch (record.dimension) {
     case TextureDimension::Texture2D:
+        if (record.sampleCount > 1) {
+            // MSAA는 표본 번호 읽기(Texture2DMS)다.
+            view.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DMS;
+            break;
+        }
+
         view.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
         view.Texture2D.MostDetailedMip = range.firstMip;
         view.Texture2D.MipLevels = mipLevels;
@@ -515,6 +533,7 @@ Result<TextureHandle> D3D11Device::CreateTextureView(TextureHandle texture,
     record.slices = source->slices;
     record.format = resolved.Value();
     record.usage = source->usage;
+    record.sampleCount = source->sampleCount;
     record.view = true;
     record.sampler = source->sampler;
     record.comparison = source->comparison;

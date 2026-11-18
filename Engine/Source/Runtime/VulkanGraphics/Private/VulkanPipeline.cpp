@@ -171,7 +171,7 @@ bool SameRenderPassKey(const RenderPassKey& left, const RenderPassKey& right) no
     if (left.colorCount != right.colorCount || left.depth != right.depth ||
         left.depthLoad != right.depthLoad || left.depthStore != right.depthStore ||
         left.stencilLoad != right.stencilLoad || left.stencilStore != right.stencilStore ||
-        left.depthReadOnly != right.depthReadOnly) {
+        left.depthReadOnly != right.depthReadOnly || left.samples != right.samples) {
         return false;
     }
 
@@ -253,7 +253,7 @@ Result<VkRenderPass> VulkanDevice::RenderPassFor(const RenderPassKey& key) noexc
     for (uint32 index = 0; index < key.colorCount; ++index) {
         VkAttachmentDescription& attachment = attachments[index];
         attachment.format = key.colors[index];
-        attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        attachment.samples = key.samples;
         attachment.loadOp = key.colorLoad[index];
         attachment.storeOp = key.colorStore[index];
         attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
@@ -271,7 +271,7 @@ Result<VkRenderPass> VulkanDevice::RenderPassFor(const RenderPassKey& key) noexc
     if (hasDepth) {
         VkAttachmentDescription& attachment = attachments[key.colorCount];
         attachment.format = key.depth;
-        attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        attachment.samples = key.samples;
         attachment.loadOp = key.depthLoad;
         attachment.storeOp = key.depthStore;
         attachment.stencilLoadOp = key.stencilLoad;
@@ -602,6 +602,7 @@ Result<PipelineHandle> VulkanDevice::CreatePipeline(const PipelineDesc& desc) no
     // 호환 render pass 열쇠다(형식만 맞으면 load·store·layout이 다른 패스에서도 쓸 수 있다).
     RenderPassKey passKey;
     passKey.colorCount = desc.colorTargetCount;
+    passKey.samples = static_cast<VkSampleCountFlagBits>(desc.sampleCount);
     for (uint32 index = 0; index < desc.colorTargetCount; ++index) {
         const PixelFormat format = desc.colorFormats[index];
         const PixelFormatCaps required =
@@ -769,7 +770,7 @@ Result<PipelineHandle> VulkanDevice::CreatePipeline(const PipelineDesc& desc) no
     raster.lineWidth = 1.0f;
     VkPipelineMultisampleStateCreateInfo multisample = {};
     multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    multisample.rasterizationSamples = static_cast<VkSampleCountFlagBits>(desc.sampleCount);
     multisample.alphaToCoverageEnable = desc.alphaToCoverage ? VK_TRUE : VK_FALSE;
     const DepthStencilState& state = desc.depthStencil;
     VkPipelineDepthStencilStateCreateInfo depth = {};

@@ -512,6 +512,7 @@ inline constexpr GLenum GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR = 0x824E;
     X(void, ActiveTexture, (GLenum))                                                               \
     X(void, BindTexture, (GLenum, GLuint))                                                         \
     X(void, TexStorage2D, (GLenum, GLsizei, GLenum, GLsizei, GLsizei))                             \
+    X(void, TexStorage2DMultisample, (GLenum, GLsizei, GLenum, GLsizei, GLsizei, GLboolean))       \
     X(void, TexStorage3D, (GLenum, GLsizei, GLenum, GLsizei, GLsizei, GLsizei))                    \
     X(void, TexSubImage3D,                                                                         \
       (GLenum, GLint, GLint, GLint, GLint, GLsizei, GLsizei, GLsizei, GLenum, GLenum,              \

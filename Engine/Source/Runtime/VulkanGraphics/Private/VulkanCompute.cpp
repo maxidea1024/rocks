@@ -333,6 +333,7 @@ Result<void> VulkanDevice::CopyTexture(TextureHandle destination, TextureHandle 
     const PixelFormatInfo& info = GetPixelFormatInfo(from->format);
     if (destination == source || to->isView || from->isView || to->width != from->width ||
         to->height != from->height || to->format != from->format || info.planeCount > 1 ||
+        to->sampleCount > 1 || from->sampleCount > 1 ||
         to->dimension != TextureDimension::Texture2D ||
         from->dimension != TextureDimension::Texture2D || IsPassAttachment(destination.slot) ||
         IsPassAttachment(source.slot)) {

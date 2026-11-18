@@ -151,7 +151,7 @@ Result<void> D3D12Device::ReadPixels(TextureHandle handle, Span<uint8> out) noex
     }
     const usize size =
         static_cast<usize>(PixelFormatImageBytes(record->format, record->width, record->height));
-    if (!record->renderTarget || out.Size() != size || recording_) {
+    if (!record->renderTarget || record->sampleCount > 1 || out.Size() != size || recording_) {
         return Result<void>::Failure(recording_ ? ErrorCode::Busy : ErrorCode::InvalidArgument);
     }
     // 비동기 readback과 같은 경로로 복사를 제출하고 그 fence를 기다린다(시험·캡처용 동기 경로).
@@ -594,7 +594,8 @@ Result<ReadbackRequest> D3D12Device::RequestReadbackLocked(TextureHandle target,
     if (record == nullptr) {
         return Result<ReadbackRequest>::Failure(ErrorCode::StaleHandle);
     }
-    if ((requireRenderTarget && !record->renderTarget) || record->view ||
+    // MSAA는 resolve한 뒤 읽는다(텍스처 GX2 B부).
+    if ((requireRenderTarget && !record->renderTarget) || record->view || record->sampleCount > 1 ||
         mipLevel >= record->mipLevels || plane >= PixelFormatPlaneCount(record->format) ||
         slice >= record->slices) {
         return Result<ReadbackRequest>::Failure(ErrorCode::InvalidArgument);

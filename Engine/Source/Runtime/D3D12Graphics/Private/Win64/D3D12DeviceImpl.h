@@ -197,6 +197,8 @@ struct TextureRecord {
     bool depthTarget = false;
     // 만든 용도다(view는 원 텍스처의 용도, ResolveTextureViewRange).
     TextureUsage usage = TextureUsage::Sampled;
+    // MSAA 표본 수다(TextureDesc::sampleCount, view는 원 텍스처의 값).
+    uint32 sampleCount = 1;
     // 다른 텍스처의 자원을 공유하는 view다. 업로드·readback·그리기 대상이 될 수 없다. 자원 상태는
     // 원 텍스처 기록(source)이 추적한다.
     bool view = false;
@@ -503,6 +505,8 @@ public:
     void ReleaseTextureViews(const TextureRecord& record) noexcept;
 
     // 2D texture SRV를 쓴다. plane은 깊이·스텐실·비디오 plane 선택이다.
+    // 패스 끝 MSAA resolve다(EndFrame, 잠금 안).
+    void ResolveAttachments() noexcept;
     Result<TextureHandle> CreateWritableTextureView(TextureHandle texture, TextureRecord& source,
                                                     PixelFormat format,
                                                     const ResolvedSubresourceRange& range) noexcept;
@@ -648,6 +652,10 @@ private:
         TextureHandle depth;
         D3D12_CPU_DESCRIPTOR_HANDLE dsv = {};
         bool depthReadOnly = false;
+        // 색 attachment마다 패스 끝에 resolve할 대상이다(ColorAttachment::resolveTarget).
+        TextureHandle resolves[MaxColorTargets];
+        // attachment 표본 수다(1이면 MSAA가 아니다).
+        uint32 sampleCount = 1;
     };
 
     // 기록 중 버퍼 자원의 상태다. 버퍼는 제출 끝에 COMMON으로 돌아가므로 기록마다 비우고, 처음 쓰면

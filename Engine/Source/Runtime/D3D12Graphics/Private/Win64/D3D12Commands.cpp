@@ -201,9 +201,10 @@ Result<CommandContext*> D3D12Device::BeginPass(const PassDesc& pass) noexcept {
             ErrorCode::Unsupported, "pass has more color attachments than the device supports");
     }
 
-    // attachment 확인: 살아 있는 텍스처, view 아님, 용도, 같은 크기, 중복 없음.
+    // attachment 확인: 살아 있는 텍스처, view 아님, 용도, 같은 크기·표본 수, 중복 없음.
     uint32 width = 0;
     uint32 height = 0;
+    uint32 samples = 1;
     bool sized = false;
     const auto check = [&](TextureHandle handle, bool depth) noexcept -> ErrorCode {
         const TextureRecord* record = textures_.Find(handle.slot);
@@ -212,12 +213,14 @@ Result<CommandContext*> D3D12Device::BeginPass(const PassDesc& pass) noexcept {
         }
 
         if (record->view || (depth ? !record->depthTarget : !record->renderTarget) ||
-            (sized && (record->width != width || record->height != height))) {
+            (sized && (record->width != width || record->height != height ||
+                       record->sampleCount != samples))) {
             return ErrorCode::InvalidArgument;
         }
 
         width = record->width;
         height = record->height;
+        samples = record->sampleCount;
         sized = true;
         return ErrorCode::None;
     };
@@ -245,6 +248,35 @@ Result<CommandContext*> D3D12Device::BeginPass(const PassDesc& pass) noexcept {
         }
     }
 
+    // resolve 대상: MSAA attachment의 1표본 RenderTarget, 같은 형식·크기, view 아님, 겹침 없음.
+    for (uint32 index = 0; index < pass.colorCount; ++index) {
+        const TextureHandle resolve = pass.colors[index].resolveTarget;
+        if (resolve.IsNull()) {
+            continue;
+        }
+
+        const TextureRecord* source = textures_.Find(pass.colors[index].texture.slot);
+        const TextureRecord* target = textures_.Find(resolve.slot);
+        if (target == nullptr) {
+            return Result<CommandContext*>::Failure(ErrorCode::StaleHandle);
+        }
+
+        bool overlaps = resolve == pass.depth.texture;
+        for (uint32 other = 0; other < pass.colorCount; ++other) {
+            overlaps = overlaps || pass.colors[other].texture == resolve ||
+                       (other != index && pass.colors[other].resolveTarget == resolve);
+        }
+
+        if (source->sampleCount < 2 || target->view || !target->renderTarget ||
+            target->sampleCount != 1 || target->format != source->format ||
+            target->width != source->width || target->height != source->height || overlaps) {
+            return FailCode<CommandContext*>(
+                ErrorCode::InvalidArgument,
+                "resolve target needs an MSAA color attachment and a distinct single-sample "
+                "render target of the same format and size");
+        }
+    }
+
     if (recording_) {
         return Result<CommandContext*>::Failure(ErrorCode::Busy);
     }
@@ -261,10 +293,12 @@ Result<CommandContext*> D3D12Device::BeginPass(const PassDesc& pass) noexcept {
     target_ = {};
     target_.width = width;
     target_.height = height;
+    target_.sampleCount = samples;
     target_.colorCount = pass.colorCount;
     for (uint32 index = 0; index < pass.colorCount; ++index) {
         const TextureRecord* record = textures_.Find(pass.colors[index].texture.slot);
         target_.colors[index] = pass.colors[index].texture;
+        target_.resolves[index] = pass.colors[index].resolveTarget;
         target_.rtvs[index] = rtvs_.Cpu(record->rtv);
     }
 
@@ -286,7 +320,8 @@ Result<CommandContext*> D3D12Device::BeginPass(const PassDesc& pass) noexcept {
             const d3d12::FormatMapping mapping = d3d12::MappingOf(depth->format);
             D3D12_DEPTH_STENCIL_VIEW_DESC view = {};
             view.Format = mapping.dsv;
-            view.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+            view.ViewDimension = depth->sampleCount > 1 ? D3D12_DSV_DIMENSION_TEXTURE2DMS
+                                                        : D3D12_DSV_DIMENSION_TEXTURE2D;
             view.Flags = D3D12_DSV_FLAG_READ_ONLY_DEPTH;
             if (GetPixelFormatInfo(depth->format).stencilBits != 0) {
                 view.Flags |= D3D12_DSV_FLAG_READ_ONLY_STENCIL;
@@ -653,6 +688,7 @@ Result<void> D3D12Device::CopyTexture(TextureHandle destination, TextureHandle s
     };
     if (destination == source || to->view || from->view || to->width != from->width ||
         to->height != from->height || to->format != from->format || to->devicePlanes != 1 ||
+        to->sampleCount > 1 || from->sampleCount > 1 ||
         to->dimension != TextureDimension::Texture2D ||
         from->dimension != TextureDimension::Texture2D || attached(destination) ||
         attached(source)) {

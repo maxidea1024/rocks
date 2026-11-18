@@ -248,7 +248,8 @@ Result<PipelineHandle> D3D12Device::CreatePipeline(const PipelineDesc& desc) noe
                          static_cast<UINT>(desc.layout.attributes.Size())};
     state.PrimitiveTopologyType = TopologyTypeOf(desc.topology);
     state.NumRenderTargets = desc.colorTargetCount;
-    state.SampleDesc.Count = 1;
+    state.SampleDesc.Count = desc.sampleCount;
+    state.RasterizerState.MultisampleEnable = desc.sampleCount > 1 ? TRUE : FALSE;
 
     PipelineRecord record;
     record.bufferSlots = bufferSlots;

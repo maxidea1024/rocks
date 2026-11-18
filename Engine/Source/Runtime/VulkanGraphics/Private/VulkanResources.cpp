@@ -529,6 +529,15 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
         return Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
+    if (desc.sampleCount > 1 &&
+        (GetPixelFormatSampleCounts(desc.format) & SampleCountBit(desc.sampleCount)) == 0) {
+        platform::LockGuard lock(gate_);
+        return Result<TextureHandle>::Failure(
+            FailCode("CreateTexture", ErrorCode::Unsupported,
+                     "MSAA sample count is not supported for this format by the Vulkan device")
+                .Error());
+    }
+
     platform::LockGuard lock(gate_);
     auto reserved = ReserveRetireCapacity(1);
     if (!reserved) {
@@ -551,7 +560,8 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
     // cube·배열은 layer 배열이다(cube 면은 UE·D3D 순서대로 layer 0–5, Vulkan cube 면 순서와
     // 같다).
     info.arrayLayers = slices;
-    info.samples = VK_SAMPLE_COUNT_1_BIT;
+    // VkSampleCountFlagBits 값은 표본 수와 같다(1·2·4·8·16·32).
+    info.samples = static_cast<VkSampleCountFlagBits>(desc.sampleCount);
     info.tiling = VK_IMAGE_TILING_OPTIMAL;
     info.usage = ImageUsageFor(desc.format, renderTarget, storage);
     info.flags = ImageFlagsFor(desc.format) |
@@ -570,6 +580,7 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
     record.renderTarget = renderTarget;
     record.depthTarget = depthTarget;
     record.usage = desc.usage;
+    record.sampleCount = desc.sampleCount;
     record.viewRange = {0, desc.mipLevels, 0, slices};
     record.aspect = format.aspect;
     record.sampler = sampler.Value();
@@ -758,6 +769,7 @@ Result<TextureHandle> VulkanDevice::CreateTextureView(TextureHandle texture,
     record.slices = source->slices;
     record.format = resolved.Value();
     record.usage = source->usage;
+    record.sampleCount = source->sampleCount;
     record.viewRange = range.Value();
     record.writable = writable;
     record.aspect = source->aspect;

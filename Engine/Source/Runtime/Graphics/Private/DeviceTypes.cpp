@@ -184,6 +184,10 @@ PixelFormatCaps RequiredPixelFormatCaps(const TextureDesc& desc) noexcept {
                                   : PixelFormatCaps::Sampled | PixelFormatCaps::StorageWrite;
         break;
     }
+    if (desc.sampleCount > 1) {
+        caps = caps | PixelFormatCaps::Multisample;
+    }
+
     if (desc.dimension == TextureDimension::Texture3D) {
         caps = caps | PixelFormatCaps::Texture3D;
     } else if (IsCubeDimension(desc.dimension)) {
@@ -264,6 +268,11 @@ uint64 TextureDataBytes(const TextureDesc& desc) noexcept {
     return total;
 }
 
+bool IsValidSampleCount(uint32 sampleCount) noexcept {
+    return sampleCount != 0 && sampleCount <= MaxSampleCount &&
+           (sampleCount & (sampleCount - 1)) == 0;
+}
+
 Result<void> ValidateTextureDesc(const TextureDesc& desc) noexcept {
     const bool usageKnown =
         desc.usage == TextureUsage::Sampled || desc.usage == TextureUsage::RenderTarget ||
@@ -296,6 +305,13 @@ Result<void> ValidateTextureDesc(const TextureDesc& desc) noexcept {
     }
 
     if (desc.usage == TextureUsage::Storage && (depth || info.planeCount > 1)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // MSAA는 렌더 타깃·깊이의 2D, mip 1만이다(초기 픽셀·UAV·mip 사슬이 없다).
+    if (!IsValidSampleCount(desc.sampleCount) ||
+        (desc.sampleCount > 1 &&
+         (!attachment || desc.dimension != TextureDimension::Texture2D || desc.mipLevels != 1))) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

@@ -246,7 +246,7 @@ Result<CommandContext*> VulkanDevice::BeginPass(const PassDesc& pass) noexcept {
                     "pass has more color attachments than the device supports");
     }
 
-    // attachment 확인: 살아 있는 텍스처, view 아님, 용도, 같은 크기, 중복 없음.
+    // attachment 확인: 살아 있는 텍스처, view 아님, 용도, 같은 크기·표본 수, 중복 없음.
     Target target;
     bool sized = false;
     const auto check = [&](TextureHandle handle, bool depth) noexcept -> ErrorCode {
@@ -256,12 +256,14 @@ Result<CommandContext*> VulkanDevice::BeginPass(const PassDesc& pass) noexcept {
         }
 
         if (record->isView || (depth ? !record->depthTarget : !record->renderTarget) ||
-            (sized && (record->width != target.width || record->height != target.height))) {
+            (sized && (record->width != target.width || record->height != target.height ||
+                       record->sampleCount != target.sampleCount))) {
             return ErrorCode::InvalidArgument;
         }
 
         target.width = record->width;
         target.height = record->height;
+        target.sampleCount = record->sampleCount;
         sized = true;
         return ErrorCode::None;
     };
@@ -289,6 +291,36 @@ Result<CommandContext*> VulkanDevice::BeginPass(const PassDesc& pass) noexcept {
         }
     }
 
+    // resolve 대상: MSAA attachment의 1표본 RenderTarget, 같은 형식·크기, view 아님, 겹침 없음.
+    for (uint32 index = 0; index < pass.colorCount; ++index) {
+        const TextureHandle resolve = pass.colors[index].resolveTarget;
+        if (resolve.IsNull()) {
+            continue;
+        }
+
+        const TextureRecord* source = textures_.Find(pass.colors[index].texture.slot);
+        const TextureRecord* resolved = textures_.Find(resolve.slot);
+        if (resolved == nullptr) {
+            return Result<CommandContext*>::Failure(ErrorCode::StaleHandle);
+        }
+
+        bool overlaps = resolve == pass.depth.texture;
+        for (uint32 other = 0; other < pass.colorCount; ++other) {
+            overlaps = overlaps || pass.colors[other].texture == resolve ||
+                       (other != index && pass.colors[other].resolveTarget == resolve);
+        }
+
+        if (source->sampleCount < 2 || resolved->isView || !resolved->renderTarget ||
+            resolved->sampleCount != 1 || resolved->format != source->format ||
+            resolved->width != source->width || resolved->height != source->height || overlaps) {
+            return fail(ErrorCode::InvalidArgument,
+                        "resolve target needs an MSAA color attachment and a distinct "
+                        "single-sample render target of the same format and size");
+        }
+
+        target.resolves[index] = resolve;
+    }
+
     if (recording_) {
         return Result<CommandContext*>::Failure(ErrorCode::Busy);
     }
@@ -301,6 +333,7 @@ Result<CommandContext*> VulkanDevice::BeginPass(const PassDesc& pass) noexcept {
     VkImageView views[MaxPassAttachments] = {};
     target.colorCount = pass.colorCount;
     target.key.colorCount = pass.colorCount;
+    target.key.samples = static_cast<VkSampleCountFlagBits>(target.sampleCount);
     for (uint32 index = 0; index < pass.colorCount; ++index) {
         const ColorAttachment& color = pass.colors[index];
         const TextureRecord* record = textures_.Find(color.texture.slot);

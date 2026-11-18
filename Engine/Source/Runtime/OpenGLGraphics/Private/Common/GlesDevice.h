@@ -124,6 +124,8 @@ struct TextureRecord {
     bool depthTarget = false;
     // 만든 용도다(view는 원 텍스처의 용도, ResolveTextureViewRange).
     TextureUsage usage = TextureUsage::Sampled;
+    // MSAA 표본 수다(TextureDesc::sampleCount). 2 이상이면 target이 TEXTURE_2D_MULTISAMPLE이다.
+    uint32 sampleCount = 1;
     // view의 mip·slice 범위다(view가 아니면 전체). texture view가 없어 읽기 view는 텍스처 전체를
     // 묶고(셰이더가 TextureViewBaseMip을 쓴다), 쓰기 view는 이 범위의 level을 image로 묶는다.
     ResolvedSubresourceRange viewRange;
@@ -402,6 +404,8 @@ private:
 
     // message를 LastError에 두고 error로 실패한다.
     Result<void> Reject(const Diagnostic& message, ErrorCode error) noexcept;
+    // 패스 끝 MSAA resolve다(EndFrame).
+    void ResolveAttachments() noexcept;
     // SetDrawConstants 거부(묶인 파이프라인 없음, 크기가 선언과 다름)의 InvalidArgument다.
     Result<void> RejectDrawConstantSize(bool pipelineBound, usize bytes,
                                         uint32 drawConstantBytes) noexcept;
@@ -427,7 +431,7 @@ private:
     bool CreateBackBuffer(SwapChainRecord& record, uint32 width, uint32 height) noexcept;
 
     // 색 attachment 하나의 framebuffer를 만든다. 완전하지 않으면 0이다.
-    GLuint CreateColorFramebuffer(GLuint texture) noexcept;
+    GLuint CreateColorFramebuffer(GLuint texture, GLenum target = GL_TEXTURE_2D) noexcept;
 
     // 텍스처 하나의 샘플러 객체를 만든다. filterable이 false면(정수·깊이 형식) 최근접 필터다.
     // filterable은 형식이 선형 필터를 받는지다(비교 샘플러의 깊이 형식은 선형 필터를 받는다).
@@ -553,6 +557,10 @@ private:
         TextureHandle colors[MaxColorTargets];
         TextureHandle depth;
         bool depthReadOnly = false;
+        // 색 attachment마다 패스 끝에 resolve할 대상이다(ColorAttachment::resolveTarget).
+        TextureHandle resolves[MaxColorTargets];
+        // attachment 표본 수다(1이면 MSAA가 아니다).
+        uint32 sampleCount = 1;
     };
     PassTarget pass_;
     TextureHandle white_;

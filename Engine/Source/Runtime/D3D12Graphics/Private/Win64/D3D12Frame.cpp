@@ -71,6 +71,8 @@ Result<GpuFencePoint> D3D12Device::EndFrame() noexcept {
         (void)failed;
     }
 
+    ResolveAttachments();
+
     // 스왑체인 백버퍼만 present 상태로 돌린다. offscreen 대상은 RenderTarget 그대로 둔다(GX5:
     // 다음 사용이 명시 전이나 암묵 전이로 바꾼다).
     if (!presentTarget_.IsNull()) {
@@ -486,7 +488,8 @@ Result<void> D3D12Device::CopyPassTarget(TextureHandle destination) noexcept {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (target_.resource == nullptr || !record->renderTarget || destination == target_.texture ||
+    if (target_.resource == nullptr || !record->renderTarget || record->sampleCount > 1 ||
+        target_.sampleCount > 1 || destination == target_.texture ||
         record->width != target_.width || record->height != target_.height ||
         record->format != target_.format) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -644,6 +647,32 @@ void D3D12Device::LowerBufferTransition(const ResourceTransition& transition) no
 // subresource만 barrier를 내고, 전체 범위가 같은 상태에서 바뀌면 한 barrier(ALL_SUBRESOURCES)로
 // 낸다. uavOrder면 이미 같은 UAV 상태인 범위에 UAV barrier를 낸다. barrier는 묶음 칸이 차면 나눠
 // 낸다(배열 slice 수에 상한이 없다).
+// 패스 끝에 MSAA 색 attachment를 resolve 대상에 박스 평균으로 resolve한다(ColorAttachment::
+// resolveTarget, 결정 R17). 원본은 RESOLVE_SOURCE, 대상은 RESOLVE_DEST로 바꿔 resolve하고 대상은
+// 셰이더 읽기 상태로 둔다(잠금 안).
+void D3D12Device::ResolveAttachments() noexcept {
+    for (uint32 index = 0; index < target_.colorCount; ++index) {
+        if (target_.resolves[index].IsNull()) {
+            continue;
+        }
+
+        TextureRecord* source = textures_.Find(target_.colors[index].slot);
+        TextureRecord* target = textures_.Find(target_.resolves[index].slot);
+        if (source == nullptr || target == nullptr) {
+            continue;
+        }
+
+        const ResolvedSubresourceRange whole = {0, 1, 0, 1};
+        TrackTransition(*source, target_.colors[index].slot, whole,
+                        D3D12_RESOURCE_STATE_RESOLVE_SOURCE);
+        TrackTransition(*target, target_.resolves[index].slot, whole,
+                        D3D12_RESOURCE_STATE_RESOLVE_DEST);
+        list_->ResolveSubresource(target->resource.Get(), 0, source->resource.Get(), 0,
+                                  d3d12::MappingOf(source->format).rtv);
+        TrackTransition(*target, target_.resolves[index].slot, whole, ShaderReadStates);
+    }
+}
+
 void D3D12Device::TrackTransition(TextureRecord& record, SlotHandle slot,
                                   const ResolvedSubresourceRange& range,
                                   D3D12_RESOURCE_STATES after, bool uavOrder) noexcept {

@@ -8,6 +8,7 @@
 #include "UploadSelfTest.h"
 #include "FormatSelfTest.h"
 #include "TextureSelfTest.h"
+#include "MsaaSelfTest.h"
 #include "TextureViewSelfTest.h"
 #include "VertexSelfTest.h"
 
@@ -690,6 +691,8 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     failures += RunTextureChecks(name, device, result.triangle.GetAllocator());
     // 텍스처 view 범위·쓰기 텍스처·compute 텍스처 묶기(텍스처 GX2 A부): HZB 줄이기·mip·slice view.
     failures += RunTextureViewChecks(name, device, result.triangle.GetAllocator());
+    // MSAA 텍스처·attachment resolve(텍스처 GX2 B부, 결정 R17).
+    failures += RunMsaaChecks(name, device, result.triangle.GetAllocator());
     // 장치 능력(GX1): 한도·기능 로그, MSAA 표본 수와 Multisample 능력 일관성.
     failures += RunCapsChecks(name, device);
     // 버퍼 용도·view(GX2): 생성·업로드·readback, typed view 능력 ⇔ 생성, VS·PS의 view 읽기.

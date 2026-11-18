@@ -44,6 +44,28 @@ Result<CommandContext*> GlesDevice::BeginFrame(SwapChainHandle handle,
     return Result<CommandContext*>::Success(this);
 }
 
+// 패스 끝에 MSAA 색 attachment를 resolve 대상에 glBlitFramebuffer로 resolve한다(ColorAttachment::
+// resolveTarget, 결정 R17). 패스 상태(scissor 등)를 되돌린 뒤 부른다(blit은 scissor를 따른다).
+void GlesDevice::ResolveAttachments() noexcept {
+    for (uint32 index = 0; index < pass_.colorCount; ++index) {
+        const TextureRecord* resolved = textures_.Find(pass_.resolves[index].slot);
+        if (resolved == nullptr) {
+            continue;
+        }
+
+        const auto width = static_cast<GLint>(pass_.width);
+        const auto height = static_cast<GLint>(pass_.height);
+        gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, pass_.framebuffer);
+        gl_.ReadBuffer(GL_COLOR_ATTACHMENT0 + index);
+        gl_.BindFramebuffer(GL_DRAW_FRAMEBUFFER, resolved->framebuffer);
+        gl_.BlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT,
+                            GL_NEAREST);
+    }
+
+    gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    gl_.BindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+}
+
 Result<GpuFencePoint> GlesDevice::EndFrame() noexcept {
     auto owner = ownership_.Check();
     if (!owner) {
@@ -62,6 +84,7 @@ Result<GpuFencePoint> GlesDevice::EndFrame() noexcept {
 
     recording_ = false;
     ResetPassState();
+    ResolveAttachments();
     // 패스 framebuffer의 attachment를 뗀다(놓인 텍스처 이름을 붙들지 않는다).
     if (pass_.framebuffer != 0 && pass_.framebuffer == passFramebuffer_) {
         gl_.BindFramebuffer(GL_FRAMEBUFFER, passFramebuffer_);
@@ -132,7 +155,8 @@ Result<void> GlesDevice::ReadPixels(TextureHandle handle, Span<uint8> out) noexc
     }
 
     const usize rowBytes = static_cast<usize>(PixelFormatRowBytes(record->format, record->width));
-    if (record->framebuffer == 0 || out.Size() != rowBytes * record->height || recording_) {
+    if (record->framebuffer == 0 || record->sampleCount > 1 ||
+        out.Size() != rowBytes * record->height || recording_) {
         return Result<void>::Failure(recording_ ? ErrorCode::Busy : ErrorCode::InvalidArgument);
     }
 
@@ -484,9 +508,9 @@ Result<void> GlesDevice::CopyPassTarget(TextureHandle destination) noexcept {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (pass_.colorCount == 0 || record->framebuffer == 0 || destination == pass_.texture ||
-        record->width != pass_.width || record->height != pass_.height ||
-        record->format != pass_.format) {
+    if (pass_.colorCount == 0 || record->framebuffer == 0 || record->sampleCount > 1 ||
+        pass_.sampleCount > 1 || destination == pass_.texture || record->width != pass_.width ||
+        record->height != pass_.height || record->format != pass_.format) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

@@ -730,7 +730,7 @@ Result<void> VulkanDevice::ReadPixels(TextureHandle handle, Span<uint8> out) noe
 
     const usize size =
         static_cast<usize>(PixelFormatImageBytes(record->format, record->width, record->height));
-    if (!record->renderTarget || out.Size() != size || recording_) {
+    if (!record->renderTarget || record->sampleCount > 1 || out.Size() != size || recording_) {
         return Result<void>::Failure(recording_ ? ErrorCode::Busy : ErrorCode::InvalidArgument);
     }
 
@@ -774,6 +774,11 @@ Result<void> VulkanDevice::ReadTexture(TextureHandle handle, uint32 mipLevel, ui
 
     if (recording_) {
         return Result<void>::Failure(ErrorCode::Busy);
+    }
+
+    // MSAA는 resolve한 뒤 읽는다(텍스처 GX2 B부).
+    if (found->sampleCount > 1) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     const TextureRecord& texture = *found;

@@ -364,6 +364,11 @@ Result<void> D3D11Device::ReadTexture(TextureHandle handle, uint32 mipLevel, uin
         return Result<void>::Failure(ErrorCode::Busy);
     }
 
+    // MSAA는 resolve한 뒤 읽는다(텍스처 GX2 B부).
+    if (record->sampleCount > 1) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
     const uint32 width = MipExtent(record->width, mipLevel);
     const uint32 height = MipExtent(record->height, mipLevel);
     const uint64 image = PixelFormatPlaneImageBytes(record->format, plane, width, height);
@@ -558,7 +563,7 @@ Result<void> D3D11Device::ReadPixels(TextureHandle handle, Span<uint8> out) noex
 
     const usize size =
         static_cast<usize>(PixelFormatImageBytes(record->format, record->width, record->height));
-    if (!record->renderTarget || out.Size() != size || recording_) {
+    if (!record->renderTarget || record->sampleCount > 1 || out.Size() != size || recording_) {
         return Result<void>::Failure(recording_ ? ErrorCode::Busy : ErrorCode::InvalidArgument);
     }
 
@@ -626,7 +631,7 @@ Result<ReadbackRequest> D3D11Device::RequestReadbackLocked(TextureHandle target)
         return Result<ReadbackRequest>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (!record->renderTarget) {
+    if (!record->renderTarget || record->sampleCount > 1) {
         return Result<ReadbackRequest>::Failure(ErrorCode::InvalidArgument);
     }
 

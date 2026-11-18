@@ -136,6 +136,8 @@ struct TextureRecord {
     bool depthTarget = false;
     // 만든 용도다(view는 원 텍스처의 용도, ResolveTextureViewRange).
     TextureUsage usage = TextureUsage::Sampled;
+    // MSAA 표본 수다(TextureDesc::sampleCount, view는 원 텍스처의 값).
+    uint32 sampleCount = 1;
     // view가 가리키는 mip·slice 범위다(view가 아니면 전체). 묶기 전이는 이 범위만 바꾼다.
     ResolvedSubresourceRange viewRange;
     // 쓰기 view(ViewAccess::ReadWrite)다. SetWritableTexture로만 묶는다(storage image, GENERAL).
@@ -237,6 +239,8 @@ struct RenderPassKey {
     VkAttachmentLoadOp stencilLoad = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     VkAttachmentStoreOp stencilStore = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     bool depthReadOnly = false;
+    // 모든 attachment의 표본 수다(render pass 호환 조건).
+    VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
 };
 
 bool SameRenderPassKey(const RenderPassKey& left, const RenderPassKey& right) noexcept;
@@ -542,6 +546,10 @@ private:
         bool depthReadOnly = false;
         RenderPassKey key;
         VkClearValue clears[MaxPassAttachments] = {};
+        // 색 attachment마다 패스 끝에 resolve할 대상이다(ColorAttachment::resolveTarget).
+        TextureHandle resolves[MaxColorTargets];
+        // attachment 표본 수다(1이면 MSAA가 아니다).
+        uint32 sampleCount = 1;
     };
 
     struct BoundVertexBuffer {
@@ -668,6 +676,8 @@ private:
                                      bool compute, PipelineRecord& record) noexcept;
     void DestroyPipelineLayout(PipelineRecord& record) noexcept;
     Result<void> Reject(const char* message) noexcept;
+    // 패스 끝 MSAA resolve다(EndFrame, render pass를 닫은 뒤, 잠금 안).
+    void ResolveAttachments() noexcept;
     // SetDrawConstants 거부(묶인 파이프라인 없음, 크기가 선언과 다름)의 InvalidArgument다.
     Result<void> RejectDrawConstantSize(bool pipelineBound, usize bytes,
                                         uint32 drawConstantBytes) noexcept;

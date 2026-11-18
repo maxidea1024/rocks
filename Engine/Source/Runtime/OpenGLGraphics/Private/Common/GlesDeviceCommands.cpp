@@ -300,12 +300,14 @@ Result<CommandContext*> GlesDevice::BeginPass(const PassDesc& pass) noexcept {
         }
 
         if (record->isView || (depth ? !record->depthTarget : record->framebuffer == 0) ||
-            (sized && (record->width != target.width || record->height != target.height))) {
+            (sized && (record->width != target.width || record->height != target.height ||
+                       record->sampleCount != target.sampleCount))) {
             return ErrorCode::InvalidArgument;
         }
 
         target.width = record->width;
         target.height = record->height;
+        target.sampleCount = record->sampleCount;
         sized = true;
         return ErrorCode::None;
     };
@@ -331,6 +333,36 @@ Result<CommandContext*> GlesDevice::BeginPass(const PassDesc& pass) noexcept {
             return fail(checked, "depth attachment is stale, not a depth target, a view or of a "
                                  "different size");
         }
+    }
+
+    // resolve 대상: MSAA attachment의 1표본 RenderTarget, 같은 형식·크기, view 아님, 겹침 없음.
+    for (uint32 index = 0; index < pass.colorCount; ++index) {
+        const TextureHandle resolve = pass.colors[index].resolveTarget;
+        if (resolve.IsNull()) {
+            continue;
+        }
+
+        const TextureRecord* source = textures_.Find(pass.colors[index].texture.slot);
+        const TextureRecord* resolved = textures_.Find(resolve.slot);
+        if (resolved == nullptr) {
+            return Result<CommandContext*>::Failure(ErrorCode::StaleHandle);
+        }
+
+        bool overlaps = resolve == pass.depth.texture;
+        for (uint32 other = 0; other < pass.colorCount; ++other) {
+            overlaps = overlaps || pass.colors[other].texture == resolve ||
+                       (other != index && pass.colors[other].resolveTarget == resolve);
+        }
+
+        if (source->sampleCount < 2 || resolved->isView || resolved->framebuffer == 0 ||
+            resolved->sampleCount != 1 || resolved->format != source->format ||
+            resolved->width != source->width || resolved->height != source->height || overlaps) {
+            return fail(ErrorCode::InvalidArgument,
+                        "resolve target needs an MSAA color attachment and a distinct "
+                        "single-sample render target of the same format and size");
+        }
+
+        target.resolves[index] = resolve;
     }
 
     if (recording_) {
@@ -372,7 +404,8 @@ Result<CommandContext*> GlesDevice::BeginPass(const PassDesc& pass) noexcept {
         for (uint32 index = 0; index < MaxColorTargets; ++index) {
             const TextureRecord* color =
                 index < pass.colorCount ? textures_.Find(pass.colors[index].texture.slot) : nullptr;
-            gl_.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + index, GL_TEXTURE_2D,
+            gl_.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + index,
+                                     color != nullptr ? color->target : GL_TEXTURE_2D,
                                      color != nullptr ? color->texture : 0u, 0);
             drawBuffers[index] = index < pass.colorCount ? GL_COLOR_ATTACHMENT0 + index : GL_NONE;
         }
@@ -383,7 +416,7 @@ Result<CommandContext*> GlesDevice::BeginPass(const PassDesc& pass) noexcept {
         if (depth != nullptr) {
             gl_.FramebufferTexture2D(GL_FRAMEBUFFER,
                                      stencil ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT,
-                                     GL_TEXTURE_2D, depth->texture, 0);
+                                     depth->target, depth->texture, 0);
         }
 
         gl_.DrawBuffers(pass.colorCount != 0 ? static_cast<GLsizei>(pass.colorCount) : 1,
@@ -677,6 +710,7 @@ Result<void> GlesDevice::CopyTexture(TextureHandle destination, TextureHandle so
     const PixelFormatInfo& info = GetPixelFormatInfo(from->format);
     if (destination == source || to->isView || from->isView || to->width != from->width ||
         to->height != from->height || to->format != from->format || info.planeCount > 1 ||
+        to->sampleCount > 1 || from->sampleCount > 1 ||
         to->dimension != TextureDimension::Texture2D ||
         from->dimension != TextureDimension::Texture2D || attached(destination) ||
         attached(source)) {

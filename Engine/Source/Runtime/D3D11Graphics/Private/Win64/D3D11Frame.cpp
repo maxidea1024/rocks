@@ -148,6 +148,16 @@ Result<GpuFencePoint> D3D11Device::EndFrame() noexcept {
         validationErrors_ += unended;
     }
 
+    // 패스 끝 MSAA resolve다(ColorAttachment::resolveTarget, 박스 평균, 결정 R17).
+    for (uint32 index = 0; index < target_.colorCount; ++index) {
+        const TextureRecord* source = textures_.Find(target_.colors[index].slot);
+        const TextureRecord* resolved = textures_.Find(target_.resolves[index].slot);
+        if (source != nullptr && resolved != nullptr) {
+            deferred_->ResolveSubresource(resolved->texture.Get(), 0, source->texture.Get(), 0,
+                                          MappingOf(source->format).rtv);
+        }
+    }
+
     CloseMarkers();
     const TimestampRange stamps = timestamps_.OpenRange();
     recording_ = false;
@@ -387,7 +397,8 @@ Result<void> D3D11Device::CopyPassTarget(TextureHandle destination) noexcept {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (target_.resource == nullptr || !record->renderTarget || destination == target_.texture ||
+    if (target_.resource == nullptr || !record->renderTarget || record->sampleCount > 1 ||
+        target_.sampleCount > 1 || destination == target_.texture ||
         record->width != target_.width || record->height != target_.height ||
         record->format != target_.format) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);

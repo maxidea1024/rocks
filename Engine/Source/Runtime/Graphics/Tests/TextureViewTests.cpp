@@ -407,3 +407,45 @@ TEST(TextureView_BaseMipFollowsViewRangeSupport) {
     DeviceFeatures whole;
     CHECK(TextureViewBaseMip(whole, desc) == 3u);
 }
+
+TEST(TextureDesc_SampleCountRules) {
+    // 표본 수는 1 이상 MaxSampleCount 이하의 2의 거듭제곱이다.
+    CHECK(IsValidSampleCount(1) && IsValidSampleCount(4) && IsValidSampleCount(MaxSampleCount));
+    CHECK(!IsValidSampleCount(0) && !IsValidSampleCount(3) &&
+          !IsValidSampleCount(MaxSampleCount * 2));
+    // MSAA는 RenderTarget·DepthStencil의 Texture2D, mip 1이고 Multisample 능력을 요구한다.
+    TextureDesc desc;
+    desc.width = 8;
+    desc.height = 8;
+    desc.format = PixelFormat::RGBA8Unorm;
+    desc.usage = TextureUsage::RenderTarget;
+    desc.sampleCount = 4;
+    CHECK(ValidateTextureDesc(desc).IsOk());
+    CHECK(HasPixelFormatCaps(RequiredPixelFormatCaps(desc), PixelFormatCaps::Multisample));
+    desc.usage = TextureUsage::DepthStencil;
+    desc.format = PixelFormat::D32Float;
+    CHECK(ValidateTextureDesc(desc).IsOk());
+    desc.sampleCount = 3;
+    CHECK(ValidateTextureDesc(desc).Error() == ErrorCode::InvalidArgument);
+    desc.sampleCount = 4;
+    desc.usage = TextureUsage::Sampled;
+    desc.format = PixelFormat::RGBA8Unorm;
+    CHECK(ValidateTextureDesc(desc).Error() == ErrorCode::InvalidArgument);
+    desc.usage = TextureUsage::Storage;
+    CHECK(ValidateTextureDesc(desc).Error() == ErrorCode::InvalidArgument);
+    desc.usage = TextureUsage::RenderTarget;
+    desc.dimension = TextureDimension::Texture2DArray;
+    desc.arraySize = 2;
+    CHECK(ValidateTextureDesc(desc).Error() == ErrorCode::InvalidArgument);
+    // 1표본은 Multisample 능력을 요구하지 않는다.
+    desc.dimension = TextureDimension::Texture2D;
+    desc.arraySize = 1;
+    desc.sampleCount = 1;
+    CHECK(!HasPixelFormatCaps(RequiredPixelFormatCaps(desc), PixelFormatCaps::Multisample));
+    // 파이프라인 표본 수도 같은 규칙이다.
+    PipelineDesc pipeline;
+    pipeline.sampleCount = 8;
+    CHECK(ValidatePipelineDesc(pipeline).IsOk());
+    pipeline.sampleCount = 6;
+    CHECK(ValidatePipelineDesc(pipeline).Error() == ErrorCode::InvalidArgument);
+}

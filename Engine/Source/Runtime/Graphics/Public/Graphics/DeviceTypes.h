@@ -392,7 +392,16 @@ struct TextureDesc {
     ChannelSwizzle swizzle;
     // 이 텍스처를 묶을 때 쓰는 기본 샘플러다(결정 R12: 바인딩 때 다른 샘플러를 고르는 것은 GX6).
     SamplerDesc sampler;
+    // MSAA 표본 수다(1, 2의 거듭제곱, 최대 MaxSampleCount). 2 이상이면 RenderTarget·DepthStencil의
+    // Texture2D, mip 1만이고 장치가 그 수를 지원해야 한다(GetPixelFormatSampleCounts). 묶으면 표본
+    // 번호로 읽는다(HLSL Texture2DMS, GLSL ES sampler2DMS). 색은 패스의 ColorAttachment::
+    // resolveTarget으로 1표본 텍스처에 resolve한 뒤 읽거나 복사한다(RenderBase 4.4절 텍스처 GX2
+    // B부).
+    uint32 sampleCount = 1;
 };
+
+// sampleCount가 1 이상 MaxSampleCount 이하의 2의 거듭제곱인지다(텍스처·파이프라인 공용).
+bool IsValidSampleCount(uint32 sampleCount) noexcept;
 
 // 텍스처의 subresource slice 수다(2D·3D 1, 2DArray arraySize, Cube 6, CubeArray 6 × arraySize).
 // 무효 차원은 0이다.
@@ -422,6 +431,9 @@ uint64 TextureDataBytes(const TextureDesc& desc) noexcept;
 // - Cube·CubeArray인데 width ≠ height
 // - mipLevels가 0이거나 TextureFullMipCount 초과, RenderTarget·DepthStencil인데 mipLevels ≠ 1
 // - Storage인데 깊이·다중 plane 형식
+// - sampleCount가 2의 거듭제곱이 아니거나 범위 밖, 2 이상인데 RenderTarget·DepthStencil의
+// Texture2D가
+//   아님
 // - DepthStencil인데 깊이 형식이 아님
 // - 비교 샘플러(SamplerDesc::comparison)인데 깊이 형식(Depth·DepthStencil)이 아님
 // Unsupported(이 단계의 계약 밖):
@@ -503,7 +515,8 @@ Result<PixelFormat> ResolveTextureViewFormat(PixelFormat texture, const TextureV
                                              bool comparisonSampler) noexcept;
 
 // desc의 텍스처를 만들 때 형식에 필요한 능력이다(TextureUsage 주석, 3D는 Texture3D, Cube·
-// CubeArray는 TextureCube를 더한다).
+// CubeArray는 TextureCube, 표본 수 2 이상은 Multisample을 더한다. 표본 수 자체는 장치가
+// GetPixelFormatSampleCounts로 따로 본다).
 PixelFormatCaps RequiredPixelFormatCaps(const TextureDesc& desc) noexcept;
 
 // 정점 배치 한계다(RenderBase 10.4절). 장치 최소 보장 쪽 값이다: 속성 16(Vulkan
@@ -669,10 +682,14 @@ struct PipelineDesc {
     RasterState raster;
     // 그리기별 상수 byte 수다(0 = 없음, IsValidDrawConstantBytes).
     uint32 drawConstantBytes = 0;
+    // 래스터 표본 수다(IsValidSampleCount). 그릴 패스 attachment의 표본 수와 같아야 한다(다르면
+    // 검증 계층 오류이며 장치는 검사하지 않는다).
+    uint32 sampleCount = 1;
 };
 
 // 장치와 무관한 파이프라인 상태 규칙이다(backend가 생성 전에 부른다). 위반은 InvalidArgument다:
-// drawConstantBytes가 규칙 밖(IsValidDrawConstantBytes), colorTargetCount가 MaxColorTargets 초과,
+// drawConstantBytes가 규칙 밖(IsValidDrawConstantBytes), sampleCount가 규칙 밖(IsValidSampleCount),
+// colorTargetCount가 MaxColorTargets 초과,
 // 무효한 형식 번호, 색 attachment도 깊이도 없음, 깊이 attachment 없이 깊이·스텐실 시험, 스텐실
 // plane 없는 깊이 형식에 스텐실 시험, 모르는 enum 값(기본도형·비교·스텐실 연산·블렌드 계수·식·쓰기
 // mask·컬). 형식이 렌더 타깃·깊이 타깃이 될 수 있는지는 장치 능력이라 backend가 Unsupported로
@@ -722,11 +739,23 @@ struct ClearColor {
 
 // 패스의 색 attachment 하나다(RenderTarget 텍스처, mip 0). 정수 형식의 clear는 값을 그 형식으로
 // 바꿔 쓴다.
+//
+// resolveTarget이 null이 아니면 패스 끝(EndFrame)에 이 MSAA attachment를 표본 박스 평균으로 그
+// 텍스처에 resolve한다(결정 R17의 attachment resolve). 대상은 1표본 RenderTarget이고 형식·크기가
+// 같으며 view가 아니고 같은 패스의 다른 attachment·resolve 대상과 겹치지 않아야 한다(위반
+// InvalidArgument). store가 DontCare여도 resolve한다.
+//
+// 사용 예(4x MSAA 색을 그려 1표본으로 resolve):
+//   PassDesc pass;
+//   pass.colorCount = 1;
+//   pass.colors[0] = {msaaColor, LoadAction::Clear, StoreAction::DontCare};
+//   pass.colors[0].resolveTarget = sceneColor;
 struct ColorAttachment {
     TextureHandle texture;
     LoadAction load = LoadAction::Clear;
     StoreAction store = StoreAction::Store;
     ClearColor clear;
+    TextureHandle resolveTarget;
 };
 
 // 패스의 깊이·스텐실 attachment다(DepthStencil 텍스처). readOnly면 깊이·스텐실을 읽기 전용으로
@@ -744,8 +773,8 @@ struct DepthAttachment {
 };
 
 // 패스 시작 설정이다(Device::BeginPass, GX4). 색 attachment는 앞에서부터 colorCount개를 쓴다. 모든
-// attachment의 크기가 같아야 한다. 색도 깊이도 없는 패스는 compute·복사 전용이고 그 안의 그리기는
-// 무시된다.
+// attachment의 크기와 표본 수(TextureDesc::sampleCount)가 같아야 한다. 색도 깊이도 없는 패스는
+// compute·복사 전용이고 그 안의 그리기는 무시된다.
 //
 // 사용 예(MRT 2장 + 깊이):
 //   PassDesc pass;

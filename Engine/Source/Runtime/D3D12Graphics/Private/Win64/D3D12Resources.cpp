@@ -301,6 +301,13 @@ Result<TextureHandle> D3D12Device::CreateTexture(const TextureDesc& desc,
     if (!valid) {
         return Result<TextureHandle>::Failure(valid.Error());
     }
+    if (desc.sampleCount > 1 &&
+        (GetPixelFormatSampleCounts(desc.format) & SampleCountBit(desc.sampleCount)) == 0) {
+        platform::LockGuard lock(gate_);
+        return FailCode<TextureHandle>(ErrorCode::Unsupported,
+                                       "MSAA sample count is not supported for this format by the "
+                                       "D3D12 device");
+    }
     if (!CheckTextureLimits(caps_, desc)) {
         platform::LockGuard lock(gate_);
         return FailCode<TextureHandle>(ErrorCode::Unsupported,
@@ -339,6 +346,7 @@ Result<TextureHandle> D3D12Device::CreateTexture(const TextureDesc& desc,
     record.renderTarget = renderTarget;
     record.depthTarget = depthTarget;
     record.usage = desc.usage;
+    record.sampleCount = desc.sampleCount;
     record.viewRange = {0, record.mipLevels, 0, record.slices};
     record.sampler = sampler.Value();
     record.comparison = desc.sampler.comparison;
@@ -352,7 +360,7 @@ Result<TextureHandle> D3D12Device::CreateTexture(const TextureDesc& desc,
     resource.DepthOrArraySize = static_cast<UINT16>(volume ? desc.depth : record.slices);
     resource.MipLevels = static_cast<UINT16>(desc.mipLevels);
     resource.Format = mapping.resource;
-    resource.SampleDesc.Count = 1;
+    resource.SampleDesc.Count = desc.sampleCount;
     // 깊이 형식은 늘 DEPTH_STENCIL 플래그로 만든다(typeless 깊이 자원의 DSV·복사 조건).
     resource.Flags = D3D12_RESOURCE_FLAG_NONE;
     if (renderTarget) {
@@ -441,7 +449,8 @@ Result<void> D3D12Device::CreateTextureViews(TextureRecord& record,
         record.rtv = rtv.Value();
         D3D12_RENDER_TARGET_VIEW_DESC view = {};
         view.Format = mapping.rtv;
-        view.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+        view.ViewDimension = record.sampleCount > 1 ? D3D12_RTV_DIMENSION_TEXTURE2DMS
+                                                    : D3D12_RTV_DIMENSION_TEXTURE2D;
         device_->CreateRenderTargetView(record.resource.Get(), &view, rtvs_.Cpu(record.rtv));
     }
     if (record.depthTarget) {
@@ -456,7 +465,8 @@ Result<void> D3D12Device::CreateTextureViews(TextureRecord& record,
         record.dsv = dsv.Value();
         D3D12_DEPTH_STENCIL_VIEW_DESC view = {};
         view.Format = mapping.dsv;
-        view.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+        view.ViewDimension = record.sampleCount > 1 ? D3D12_DSV_DIMENSION_TEXTURE2DMS
+                                                    : D3D12_DSV_DIMENSION_TEXTURE2D;
         device_->CreateDepthStencilView(record.resource.Get(), &view, dsvs_.Cpu(record.dsv));
     }
 
@@ -494,6 +504,12 @@ void D3D12Device::WriteShaderResourceView(const TextureRecord& record, DXGI_FORM
     const ResolvedSubresourceRange& range = record.viewRange;
     switch (record.dimension) {
     case TextureDimension::Texture2D:
+        if (record.sampleCount > 1) {
+            // MSAA는 표본 번호 읽기(Texture2DMS)다. mip·plane 지정이 없다.
+            view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DMS;
+            break;
+        }
+
         view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
         view.Texture2D.MostDetailedMip = range.firstMip;
         view.Texture2D.MipLevels = range.mipCount;
@@ -608,6 +624,7 @@ Result<TextureHandle> D3D12Device::CreateTextureView(TextureHandle texture,
     record.slices = source->slices;
     record.format = resolved.Value();
     record.usage = source->usage;
+    record.sampleCount = source->sampleCount;
     record.view = true;
     record.source = texture.slot;
     record.viewRange = range.Value();

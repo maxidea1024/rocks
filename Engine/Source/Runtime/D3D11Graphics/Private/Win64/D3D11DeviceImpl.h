@@ -74,6 +74,8 @@ struct TextureRecord {
     bool depthTarget = false;
     // 만든 용도다(view는 원 텍스처의 용도, ResolveTextureViewRange).
     TextureUsage usage = TextureUsage::Sampled;
+    // MSAA 표본 수다(TextureDesc::sampleCount, view는 원 텍스처의 값).
+    uint32 sampleCount = 1;
     // 다른 텍스처의 자원을 공유하는 view다(SRV와 texture 참조가 자원을 붙든다). 업로드·readback·
     // 그리기 대상이 될 수 없다.
     bool view = false;
@@ -323,6 +325,10 @@ private:
         ID3D11DepthStencilView* dsv = nullptr;
         TextureHandle depth;
         bool depthReadOnly = false;
+        // 색 attachment마다 패스 끝에 resolve할 대상이다(ColorAttachment::resolveTarget).
+        TextureHandle resolves[MaxColorTargets];
+        // attachment 표본 수다(1이면 MSAA가 아니다).
+        uint32 sampleCount = 1;
     };
 
     // 기록 중 묶인 정점·index 버퍼다(파이프라인을 바꾸면 그 stride로 다시 묶는다).
