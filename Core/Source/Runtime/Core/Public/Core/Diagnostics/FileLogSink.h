@@ -50,6 +50,12 @@ struct FileLogSinkConfig {
     usize batchBytes = DefaultBatchBytes;
     // 묶음 봉인(암호화)이다. null이면 평문이다. sink보다 오래 살아야 한다.
     LogFileCipher* cipher = nullptr;
+    // 묶음 압축이다(묶음마다 독립 frame). null이면 압축하지 않는다. cipher가 없으면 파일 확장자가
+    // ".log.zst"이고, 있으면 압축한 frame을 봉인한다(확장자 ".log"). sink보다 오래 살아야 한다.
+    LogBatchCompressor* compressor = nullptr;
+    // 시간 기준 회전이다(0은 끔). 묶음 첫 기록의 단조 시각이 그 파일 첫 기록의 단조 시각 + 이 값을
+    // 넘으면 새 파일로 회전한다(벽시계가 아니라 경과 시간, 크기 회전과 같은 자리에서 판정).
+    uint64 maxAgeNanoseconds = 0;
     // null이면 platform::PhysicalFileSystem이다. sink보다 오래 살아야 한다.
     platform::FileSystem* fileSystem = nullptr;
 };
@@ -146,6 +152,13 @@ private:
     usize batchUsed_ = 0;
     uint8* sealed_ = nullptr;
     usize sealedCapacity_ = 0;
+    // 압축 출력이다(compressor가 있을 때 Open에서 확보).
+    uint8* compressed_ = nullptr;
+    usize compressedCapacity_ = 0;
+    // 시간 회전: 지금 묶음과 지금 파일의 첫 기록 단조 시각(ns)이다.
+    uint64 batchFirstNanoseconds_ = 0;
+    uint64 fileFirstNanoseconds_ = 0;
+    bool fileHasRecords_ = false;
     // 보관 목록: 오래된 것부터 retention칸의 경로 고리다(Open에서 확보).
     char* kept_ = nullptr;
     uint32 keptFirst_ = 0;

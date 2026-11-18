@@ -1,5 +1,6 @@
 #include <LogHost/LogHost.h>
 
+#include <Compression/FixedWorkspaceCompressor.h>
 #include <Core/Diagnostics/Log.h>
 #include <Crypto/Bytes.h>
 #include <Platform/Fatal.h>
@@ -108,7 +109,31 @@ struct LogHost::AbandonedOutputs {
     UniquePtr<StderrLogSink> console;
     UniquePtr<FileLogSink> file;
     UniquePtr<crypto::LogFileSealer> sealer;
+    UniquePtr<LogBatchCompressor> compressor;
 };
+
+namespace {
+
+// 파일 묶음을 독립 zstd frame으로 압축한다(Compression 고정 작업 공간 문맥, 만든 뒤 무할당).
+class ZstdLogBatchCompressor final : public LogBatchCompressor {
+public:
+    explicit ZstdLogBatchCompressor(FixedWorkspaceCompressor&& compressor) noexcept
+        : compressor_(Move(compressor)) {
+    }
+
+    usize Bound(usize batchBytes) const noexcept override {
+        return FixedWorkspaceCompressor::Bound(batchBytes);
+    }
+
+    Result<usize> TryCompress(Span<const uint8> batch, Span<uint8> out) noexcept override {
+        return compressor_.TryCompress(batch, out);
+    }
+
+private:
+    FixedWorkspaceCompressor compressor_;
+};
+
+} // namespace
 
 bool TryParseLogLevel(StringView text, LogLevel& level) noexcept {
     for (usize index = 0; index < LogLevelCount; ++index) {
@@ -177,6 +202,21 @@ Result<void> RegisterLogSettings(config::ConfigContext& context) noexcept {
     maxBytes.hasRange = true;
     maxBytes.minimum = MinLogFileMaxBytes;
     maxBytes.maximum = MaxLogFileMaxBytes;
+    config::ConsoleSettingDefinition maxAge = Define(
+        LogFileMaxAgeSetting,
+        "Start a new log file when a batch's first record is this many minutes after the file's "
+        "first record (elapsed monotonic time, not wall-clock days). 0 turns it off. Fixed after "
+        "startup.",
+        ConsoleValueType::Int32, "0", startup);
+    maxAge.hasRange = true;
+    maxAge.minimum = 0;
+    maxAge.maximum = MaxLogFileAgeMinutes;
+    const config::ConsoleSettingDefinition compressFiles = Define(
+        LogFileCompressSetting,
+        "Compress each flushed batch of the log file as an independent zstd frame (*.log.zst, "
+        "readable with zstd -d; with log.file.encrypt the frames are sealed after compression). "
+        "Fixed after startup.",
+        ConsoleValueType::Bool, "false", startup);
     config::ConsoleSettingDefinition retention =
         Define(LogFileRetentionSetting,
                "Number of this host's log files kept in the folder, including the current one; "
@@ -211,8 +251,9 @@ Result<void> RegisterLogSettings(config::ConfigContext& context) noexcept {
         "default. Fixed after startup.",
         ConsoleValueType::String, "", startup);
     const config::ConsoleSettingDefinition* definitions[] = {
-        &mode,     &level,     &levels,  &rateLimits, &enabled,       &directory, &format,
-        &maxBytes, &retention, &encrypt, &recipient,  &consoleLayout, &fileLayout};
+        &mode,      &level,         &levels,     &rateLimits, &enabled,
+        &directory, &format,        &maxBytes,   &retention,  &encrypt,
+        &recipient, &consoleLayout, &fileLayout, &maxAge,     &compressFiles};
     for (const config::ConsoleSettingDefinition* definition : definitions) {
         auto registered = context.RegisterConsoleSetting(*definition);
         if (!registered) {
@@ -324,6 +365,32 @@ void LogHost::PrepareFileSink(const config::ConfigContext& settings, StringView 
         file.retention = static_cast<uint32>(retention->signedInteger);
     }
 
+    if (const FieldValue* age = ValueOf(settings, LogFileMaxAgeSetting)) {
+        constexpr uint64 NanosecondsPerMinute = 60ull * 1000 * 1000 * 1000;
+        file.maxAgeNanoseconds = static_cast<uint64>(age->signedInteger) * NanosecondsPerMinute;
+    }
+
+    // 압축: 묶음마다 독립 zstd frame. 작업 공간은 여기서 한 번 잡는다(Open 뒤 무할당).
+    const FieldValue* compress = ValueOf(settings, LogFileCompressSetting);
+    if (compress != nullptr && compress->boolean) {
+        auto zstdSettings =
+            CompressionSettings::TryMake(CompressionFormat::Zstd, LogFileCompressionLevel);
+        auto fixed = zstdSettings ? FixedWorkspaceCompressor::TryCreate(zstdSettings.Value(),
+                                                                        file.batchBytes, allocator_)
+                                  : Result<FixedWorkspaceCompressor>::Failure(zstdSettings.Error());
+        auto made =
+            fixed ? UniquePtr<ZstdLogBatchCompressor>::TryMake(allocator_, Move(fixed.Value()))
+                  : Result<UniquePtr<ZstdLogBatchCompressor>>::Failure(fixed.Error());
+        if (!made) {
+            Log::Error(LogHostCategory,
+                       "Log file compression could not start: {Error}; writing uncompressed",
+                       ErrorCodeName(made.Error()));
+        } else {
+            compressor_ = Move(made.Value());
+            file.compressor = compressor_.Get();
+        }
+    }
+
     const FieldValue* encrypt = ValueOf(settings, LogFileEncryptSetting);
     if (encrypt != nullptr && encrypt->boolean) {
         // 공개키가 없거나 올바르지 않으면 파일을 만들지 않는다(평문으로 내려가지 않는다).
@@ -342,8 +409,10 @@ void LogHost::PrepareFileSink(const config::ConfigContext& settings, StringView 
             return;
         }
 
+        // 압축한 묶음을 봉인하면 머리에 표시한다(읽는 쪽이 묶음마다 푼다).
         auto sealer = UniquePtr<crypto::LogFileSealer>::TryMake(
-            allocator_, Span<const uint8>(key, crypto::LogFilePublicKeyBytes));
+            allocator_, Span<const uint8>(key, crypto::LogFilePublicKeyBytes),
+            file.compressor != nullptr ? crypto::LogFileFlagCompressedBatches : uint8{0});
         if (!sealer) {
             fileError_ = sealer.Error();
             Log::Error(LogHostCategory, "Log file sealer could not be created: {Error}",
@@ -424,8 +493,8 @@ void LogHost::Stop() noexcept {
             // 끝나지 않을 수 있으므로 프로세스 끝까지 놓아 둔다(헤더의 Stop 설명).
             writerAbandoned_ = true;
             (void)ConstructAt<AbandonedOutputs>(
-                abandonedStorage_,
-                AbandonedOutputs{Move(logs_), Move(stderr_), Move(file_), Move(sealer_)});
+                abandonedStorage_, AbandonedOutputs{Move(logs_), Move(stderr_), Move(file_),
+                                                    Move(sealer_), Move(compressor_)});
             abandonedStorage_ = nullptr;
             return;
         }
@@ -439,6 +508,7 @@ void LogHost::Stop() noexcept {
     }
 
     sealer_.Reset();
+    compressor_.Reset();
     stderr_.Reset();
     if (abandonedStorage_ != nullptr) {
         if (!allocator_.Deallocate(abandonedStorage_)) {

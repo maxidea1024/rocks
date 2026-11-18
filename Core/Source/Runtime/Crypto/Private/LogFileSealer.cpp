@@ -36,7 +36,8 @@ Result<SecretStreamKey> DeriveFileKey(const KdfKey& shared) noexcept {
 
 } // namespace
 
-LogFileSealer::LogFileSealer(Span<const uint8> recipientPublicKey) noexcept {
+LogFileSealer::LogFileSealer(Span<const uint8> recipientPublicKey, uint8 flags) noexcept
+    : flags_(flags) {
     auto key = KemPublicKey::TryFromBytes(KemAlgorithm::XWing, recipientPublicKey);
     if (key) {
         recipient_ = key.Value();
@@ -76,7 +77,7 @@ Result<usize> LogFileSealer::TryWriteHeader(Span<uint8> out) noexcept {
     platform::MemoryCopy(out.Data(), LogFileMagic, sizeof(LogFileMagic));
     out[VersionOffset] = LogFileFormatVersion;
     out[KemOffset] = static_cast<uint8>(KemAlgorithm::XWing);
-    out[KemOffset + 1] = 0;
+    out[KemOffset + 1] = flags_;
     out[KemOffset + 2] = 0;
     return Result<usize>::Success(LogFileHeaderBytes);
 }
@@ -98,6 +99,12 @@ Result<usize> LogFileSealer::TrySeal(Span<const uint8> batch, bool last, Span<ui
     return Result<usize>::Success(LogFileRecordLengthBytes + sealed.Value());
 }
 
+bool LogFileHasCompressedBatches(Span<const uint8> file) noexcept {
+    return file.Size() >= LogFileHeaderBytes &&
+           platform::MemoryEquals(file.Data(), LogFileMagic, sizeof(LogFileMagic)) &&
+           (file[KemOffset + 1] & LogFileFlagCompressedBatches) != 0;
+}
+
 Result<LogFileDecodeSummary> TryDecodeLogFile(const KemKeyPair& recipient, Span<const uint8> file,
                                               Allocator& allocator, LogFileDecodeOutput output,
                                               void* context) noexcept {
@@ -108,8 +115,9 @@ Result<LogFileDecodeSummary> TryDecodeLogFile(const KemKeyPair& recipient, Span<
     }
 
     if (file[VersionOffset] != LogFileFormatVersion ||
-        file[KemOffset] != static_cast<uint8>(KemAlgorithm::XWing) || file[KemOffset + 1] != 0 ||
-        file[KemOffset + 2] != 0 || recipient.Algorithm() != KemAlgorithm::XWing) {
+        file[KemOffset] != static_cast<uint8>(KemAlgorithm::XWing) ||
+        (file[KemOffset + 1] & ~LogFileFlagCompressedBatches) != 0 || file[KemOffset + 2] != 0 ||
+        recipient.Algorithm() != KemAlgorithm::XWing) {
         return Summary::Failure(ErrorCode::Unsupported);
     }
 
@@ -131,6 +139,7 @@ Result<LogFileDecodeSummary> TryDecodeLogFile(const KemKeyPair& recipient, Span<
     }
 
     LogFileDecodeSummary summary;
+    summary.compressedBatches = (file[KemOffset + 1] & LogFileFlagCompressedBatches) != 0;
     uint8* plain = nullptr;
     usize plainCapacity = 0;
     Result<LogFileDecodeSummary> outcome = Summary::Success(summary);

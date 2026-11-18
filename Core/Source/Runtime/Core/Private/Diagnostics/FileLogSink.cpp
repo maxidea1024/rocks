@@ -19,6 +19,8 @@ constexpr uint32 MaxLogFileParts = 100000;
 constexpr usize MaxLogFilePartBytes = 6;
 
 constexpr StringView LogFileExtension = ".log";
+// 봉인하지 않은 압축 파일의 확장자다(zstd CLI로 풀린다).
+constexpr StringView CompressedLogFileExtension = ".log.zst";
 
 bool IsDigit(char value) noexcept {
     return value >= '0' && value <= '9';
@@ -43,14 +45,18 @@ bool IsLogFileStamp(StringView text) noexcept {
 // name이 정확히 `<prefix><시각>[-<숫자>].log`인지다. 호스트 이름에 '-'가 있을 수 있으므로
 // 접두만으로 고르지 않는다(Sandbox와 Sandbox-Server의 파일을 섞지 않는다).
 bool IsHostLogFileName(StringView name, StringView prefix) noexcept {
+    const StringView extension =
+        name.EndsWith(CompressedLogFileExtension, StringComparison::CaseSensitive)
+            ? CompressedLogFileExtension
+            : LogFileExtension;
     if (!name.StartsWith(prefix, StringComparison::CaseSensitive) ||
-        !name.EndsWith(LogFileExtension, StringComparison::CaseSensitive) ||
-        name.ByteCount() < prefix.ByteCount() + LogFileStampBytes + LogFileExtension.ByteCount()) {
+        !name.EndsWith(extension, StringComparison::CaseSensitive) ||
+        name.ByteCount() < prefix.ByteCount() + LogFileStampBytes + extension.ByteCount()) {
         return false;
     }
 
     const StringView body(name.Data() + prefix.ByteCount(),
-                          name.ByteCount() - prefix.ByteCount() - LogFileExtension.ByteCount());
+                          name.ByteCount() - prefix.ByteCount() - extension.ByteCount());
     if (!IsLogFileStamp(StringView(body.Data(), LogFileStampBytes))) {
         return false;
     }
@@ -155,8 +161,8 @@ Result<void> FileLogSink::Open() noexcept {
 
     // 파일 이름: 호스트 + "-" + 시각(LogFileStampBytes) + "-N"(최대 MaxLogFilePartBytes) + ".log".
     // 폴더와 구분자를 더해도 남아야 한다.
-    const usize nameLimit =
-        hostBytes_ + 1 + LogFileStampBytes + MaxLogFilePartBytes + LogFileExtension.ByteCount();
+    const usize nameLimit = hostBytes_ + 1 + LogFileStampBytes + MaxLogFilePartBytes +
+                            CompressedLogFileExtension.ByteCount();
     if (!hostValid || directoryBytes_ == 0 || directoryBytes_ >= sizeof(directory_) ||
         directoryBytes_ + 1 + nameLimit >= MaxLogFilePathBytes || config_.maxBytes == 0 ||
         config_.batchBytes == 0 || config_.retention == 0 ||
@@ -177,9 +183,22 @@ Result<void> FileLogSink::Open() noexcept {
     }
 
     batch_ = static_cast<uint8*>(batch.Value());
+    // 압축하면 봉인 입력이 압축 출력이므로 그 최악 크기로 봉인 버퍼를 잡는다.
+    usize sealInput = config_.batchBytes;
+    if (config_.compressor != nullptr) {
+        compressedCapacity_ = config_.compressor->Bound(config_.batchBytes);
+        auto compressed = allocator_.Allocate(compressedCapacity_, alignof(uint64));
+        if (!compressed) {
+            ReleaseBuffers();
+            return Result<void>::Failure(compressed.Error());
+        }
+
+        compressed_ = static_cast<uint8*>(compressed.Value());
+        sealInput = compressedCapacity_;
+    }
+
     if (config_.cipher != nullptr) {
-        sealedCapacity_ =
-            (config_.batchBytes + overhead > header ? config_.batchBytes + overhead : header);
+        sealedCapacity_ = (sealInput + overhead > header ? sealInput + overhead : header);
         auto sealed = allocator_.Allocate(sealedCapacity_, alignof(uint64));
         if (!sealed) {
             ReleaseBuffers();
@@ -294,6 +313,10 @@ Result<void> FileLogSink::Write(const LogEvent& event) noexcept {
         return Result<void>::Failure(disabled_ ? ErrorCode::Unsupported : ErrorCode::NotFound);
     }
 
+    if (batchUsed_ == 0) {
+        batchFirstNanoseconds_ = event.monotonicNanoseconds;
+    }
+
     outputFailed_ = false;
     auto written = config_.format == LogFileFormat::Text ? text_.Write(event) : json_.Write(event);
     if (!written) {
@@ -353,8 +376,26 @@ Result<void> FileLogSink::WriteBatch() noexcept {
 
     // 회전은 봉인 전에 판정한다(봉인 상태는 파일마다 새로 만든다).
     const usize overhead = config_.cipher != nullptr ? config_.cipher->SealOverhead() : 0;
-    if (fileOpen_ && fileBytes_ > headerBytes_ &&
-        fileBytes_ + batchUsed_ + overhead > config_.maxBytes) {
+    // 압축은 회전 판정 전에 한다(크기 판정이 실제로 쓸 byte 수를 보게).
+    const uint8* bytes = batch_;
+    usize count = batchUsed_;
+    if (config_.compressor != nullptr) {
+        auto compressed = config_.compressor->TryCompress(
+            Span<const uint8>(batch_, batchUsed_), Span<uint8>(compressed_, compressedCapacity_));
+        if (!compressed) {
+            return Result<void>::Failure(compressed.Error());
+        }
+
+        bytes = compressed_;
+        count = compressed.Value();
+    }
+
+    const bool tooLarge = fileBytes_ + count + overhead > config_.maxBytes;
+    // 시간 회전: 단조 시각의 차이라 벽시계 조정에 흔들리지 않는다.
+    const bool tooOld = config_.maxAgeNanoseconds != 0 && fileHasRecords_ &&
+                        batchFirstNanoseconds_ >= fileFirstNanoseconds_ &&
+                        batchFirstNanoseconds_ - fileFirstNanoseconds_ >= config_.maxAgeNanoseconds;
+    if (fileOpen_ && fileBytes_ > headerBytes_ && (tooLarge || tooOld)) {
         (void)FinishFile();
         ++rotations_;
     }
@@ -365,10 +406,13 @@ Result<void> FileLogSink::WriteBatch() noexcept {
         }
     }
 
-    const uint8* bytes = batch_;
-    usize count = batchUsed_;
+    if (!fileHasRecords_) {
+        fileFirstNanoseconds_ = batchFirstNanoseconds_;
+        fileHasRecords_ = true;
+    }
+
     if (config_.cipher != nullptr) {
-        auto sealed = config_.cipher->TrySeal(Span<const uint8>(batch_, batchUsed_), false,
+        auto sealed = config_.cipher->TrySeal(Span<const uint8>(bytes, count), false,
                                               Span<uint8>(sealed_, sealedCapacity_));
         if (!sealed) {
             return Result<void>::Failure(sealed.Error());
@@ -449,7 +493,9 @@ Result<void> FileLogSink::OpenNextFile() noexcept {
             (void)built.TryAppendFormat("-{}", nextPart_);
         }
 
-        (void)built.TryAppend(LogFileExtension);
+        (void)built.TryAppend(config_.compressor != nullptr && config_.cipher == nullptr
+                                  ? CompressedLogFileExtension
+                                  : LogFileExtension);
         pathBytes_ = built.ByteCount();
         const platform::FileStatus opened =
             file_.Open(*fileSystem_, path_, pathBytes_, platform::FileOpenMode::CreateNew);
@@ -465,6 +511,7 @@ Result<void> FileLogSink::OpenNextFile() noexcept {
         ++nextPart_;
         fileOpen_ = true;
         fileBytes_ = 0;
+        fileHasRecords_ = false;
         headerBytes_ = header;
         Remember(StringView(path_, pathBytes_));
         if (header != 0) {
@@ -520,7 +567,7 @@ void FileLogSink::ReleaseBuffers() noexcept {
         fileOpen_ = false;
     }
 
-    void* buffers[] = {batch_, sealed_, kept_};
+    void* buffers[] = {batch_, sealed_, compressed_, kept_};
     for (void* memory : buffers) {
         if (memory != nullptr) {
             (void)allocator_.Deallocate(memory);
@@ -529,8 +576,10 @@ void FileLogSink::ReleaseBuffers() noexcept {
 
     batch_ = nullptr;
     sealed_ = nullptr;
+    compressed_ = nullptr;
     kept_ = nullptr;
     sealedCapacity_ = 0;
+    compressedCapacity_ = 0;
     batchUsed_ = 0;
     keptCount_ = 0;
     keptFirst_ = 0;

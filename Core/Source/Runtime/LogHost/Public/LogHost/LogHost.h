@@ -54,6 +54,14 @@ inline constexpr StringView LogFileRecipientKeySetting = "log.file.recipient_key
 inline constexpr StringView LogConsoleLayoutSetting = "log.console.layout";
 inline constexpr StringView LogFileLayoutSetting = "log.file.layout";
 inline constexpr StringView LogRateLimitsSetting = "log.rate_limits";
+inline constexpr StringView LogFileMaxAgeSetting = "log.file.max_age_minutes";
+inline constexpr StringView LogFileCompressSetting = "log.file.compress";
+
+// log.file.max_age_minutes의 상한(7일)이다.
+inline constexpr int32 MaxLogFileAgeMinutes = 10080;
+
+// log.file.compress가 쓰는 zstd 수준이다.
+inline constexpr int32 LogFileCompressionLevel = 3;
 
 // log.levels 문자열의 최대 byte 수다.
 inline constexpr usize MaxLogLevelsBytes = 1024;
@@ -309,6 +317,8 @@ private:
     // 출력 스레드를 남겨 둔 Stop이 LogSystem과 함께 놓을 수 있게 힙에 둔다.
     UniquePtr<StderrLogSink> stderr_;
     UniquePtr<crypto::LogFileSealer> sealer_;
+    // log.file.compress의 묶음 압축기(고정 작업 공간 zstd)다.
+    UniquePtr<LogBatchCompressor> compressor_;
     UniquePtr<FileLogSink> file_;
     config::ConfigContext* watched_ = nullptr;
     config::ConfigSubscriptionId subscriptions_[3]{};

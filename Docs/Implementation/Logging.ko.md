@@ -302,10 +302,13 @@ host.Stop();                                           // WriterAbandoned()면 �
 | `log.file.retention` | int32 | `8` (1–256) | 시작 뒤 고정 |
 | `log.file.encrypt` | bool | `false` | 시작 뒤 고정 |
 | `log.file.recipient_key` | string | `""` — X-Wing 공개키 base64(`log keygen`이 출력) | 시작 뒤 고정 |
+| `log.file.max_age_minutes` | int32 | `0`(끔) — 0–10080. 파일 첫 기록 뒤 경과 시간(단조)으로 회전 | 시작 뒤 고정 |
+| `log.file.compress` | bool | `false` — 묶음마다 독립 zstd frame(`.log.zst`, `zstd -d`로 풀림). 봉인과 함께면 압축 뒤 봉인 | 시작 뒤 고정 |
 | `log.console.layout` | string | `""`(기본 콘솔 레이아웃) — 예: `"[{Level:u3}] {Message}{NewLine}"` | 시작 뒤 고정 |
 | `log.file.layout` | string | `""`(기본 콘솔 레이아웃). `log.file.format = jsonlines`이면 쓰이지 않는다(Warning 한 번) | 시작 뒤 고정 |
 
 - 레벨 이름과 `log.levels`의 접두사는 대소문자를 가리지 않는다(`"log.level": "Warning"`도 된다). `log.level`에 모르는 이름을 넣으면 설정 단계에서 거부되고(Config 진단) 앞 값이 남는다. `log.levels`의 잘못된 항목은 Warning을 남기고 건너뛴다.
+- **압축·시간 회전:** 압축은 Compression의 `FixedWorkspaceCompressor`(작업 공간을 만들 때 한 번 잡는 zstd 문맥)로 하므로 파일을 연 뒤 할당이 없다. `log decode`·`log view`가 압축·봉인+압축 파일을 푼다. 보관 정리는 `.log`·`.log.zst`를 함께 센다.
 - **rate limit:** `log.rate_limits`(또는 `LogSystem::SetRateLimit`)는 접두사별 1초 창마다 정확히 상한만 통과시킨다. Trace–Warning에만 적용하고 Error·Fatal은 세지 않는다. 버린 수는 접두사마다 1초에 한 번까지 `Rate limit dropped {Dropped} records for {Prefix} (limit {Limit}/s)` Info로 알리고 `Stats().rateLimited`에 쌓인다. 잘못된 항목은 적용 때 Warning 후 건너뛴다(`CheckLogRateLimitsSyntax`가 CVR7의 `Validate`).
 - 기록 시각은 `MonotonicTicks`로 캡처하고 출력 때 ns로 바꾼다(`LogEvent::monotonicTicks`·`monotonicNanoseconds`). 시험은 `LogSystemConfig::clock`·`clockFrequency`로 시계를 주입한다.
 - 레이아웃 패턴이 잘못되면 `LogHost::Start`가 위치와 이유를 담은 Error를 한 번 남기고 기본 레이아웃으로 계속한다(예: `log.file.layout is not a valid layout at byte 8: unknown layout token; using the default layout`). 설정 단계에서 거부하는 일은 CVar 이관(CVR7) 뒤다. 문법만 보는 상수 평가 함수 `CheckLogLayoutSyntax`·`CheckLogLevelsSyntax`(통과면 빈 view, 아니면 영어 이유)가 그때 `Validate`로 쓰인다.
@@ -344,7 +347,7 @@ RocksCommandlet log view Saved/Logs --level warning --category Graphics
 RocksCommandlet log view game.log --key dev.key --correlation request=55
 ```
 
-- 파일 하나나 폴더(`*.log`, 시작 시각·번호 순)를 읽는다. `--key`면 봉인 파일을 푼다.
+- 파일 하나나 폴더(`*.log`·`*.log.zst`, 시작 시각·번호 순)를 읽는다. `.log.zst`는 풀고, `--key`면 봉인 파일(압축 묶음 포함)을 푼다.
 - 거르기: `--level`(최소), `--category`(점 접두사, 대소문자 무시), `--event`(16진), `--since`·`--until`(UTC ISO 8601 사전순), `--grep`, `--correlation <칸>=<id>`.
 - JSON lines 파일은 모든 필드로 거른다. 기본 레이아웃 텍스트는 시각·레벨·카테고리로, 다른 레이아웃 텍스트는 `--grep`만 된다. 분석이 목적이면 `log.file.format = jsonlines`를 권한다.
 

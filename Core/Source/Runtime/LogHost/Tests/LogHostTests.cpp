@@ -4,6 +4,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/NamePool.h>
 #include <Core/Text/StringBuilder.h>
+#include <Compression/Compression.h>
 #include <Crypto/Bytes.h>
 #include <LogHost/LogHost.h>
 #include <Object/ObjectRegistry.h>
@@ -459,4 +460,80 @@ TEST(LogHostStopLeavesTheLogSystemWhenTheWriterIsStuck) {
     CHECK(!restarted && restarted.Error() == ErrorCode::Busy);
     host.Stop();
     sink.release.Signal();
+}
+
+namespace {
+
+// 봉인한 묶음 평문(zstd frame)을 풀어 모은다.
+Result<void> CollectInflated(void* raw, Span<const uint8> frame) noexcept {
+    if (frame.Size() == 0) {
+        return Result<void>::Success();
+    }
+
+    constexpr usize MaxInflatedBytes = 1u << 20;
+    auto inflated = TryDecompressAppend(CompressionFormat::Zstd, frame, MaxInflatedBytes,
+                                        *static_cast<Array<uint8>*>(raw));
+    return inflated ? Result<void>::Success() : Result<void>::Failure(inflated.Error());
+}
+
+} // namespace
+
+// log.file.compress: 묶음마다 독립 zstd frame(.log.zst)이고 Compression으로 풀린다. 봉인과 함께면
+// 압축한 뒤 봉인하고(머리에 표시) 묶음마다 풀어 원문이 나온다.
+TEST(LogHostWritesCompressedFiles) {
+    for (const bool sealed : {false, true}) {
+        ScratchDirectory directory;
+        auto pair = crypto::KemKeyPair::TryGenerate(crypto::KemAlgorithm::XWing);
+        REQUIRE(pair);
+        char base64[2048];
+        auto encoded = crypto::TryToBase64(pair.Value().PublicKey().View(),
+                                           crypto::Base64Variant::Standard, Span<char>(base64));
+        REQUIRE(encoded);
+        LogSettingsFixture fixture;
+        char settings[4096];
+        FixedStringBuilder text{Span<char>(settings)};
+        (void)text.TryAppendFormat(
+            R"({{"log.mode": "sync", "log.file.enabled": true, "log.file.directory": "{}",
+                 "log.file.compress": true, "log.file.encrypt": {},
+                 "log.file.recipient_key": "{}"}})",
+            directory.View(), sealed ? "true" : "false", StringView(base64, encoded.Value()));
+        fixture.Apply(text.View());
+        Array<char> path(fixture.system);
+        {
+            LogHost host(fixture.system);
+            REQUIRE(host.Start(LogSystemConfig::ForEngineHost(), fixture.context.Get(), "Test"));
+            REQUIRE(host.IsFileLogging());
+            REQUIRE(path.TryAppend(
+                Span<const char>(host.FilePath().Data(), host.FilePath().ByteCount())));
+            {
+                LogInstallScope installed(host.System());
+                for (uint32 index = 0; index < 3; ++index) {
+                    Log::Warning(LogHostTests, "compressed value {Value}", index);
+                }
+            }
+
+            host.Stop();
+        }
+
+        const StringView name(path.Data(), path.Size());
+        CHECK(name.EndsWith(sealed ? ".log" : ".log.zst", StringComparison::CaseSensitive));
+        Array<uint8> file(fixture.system);
+        REQUIRE(ReadAll(name, file));
+        CHECK(!Contains(file, "compressed value"));
+        Array<uint8> plain(fixture.system);
+        if (sealed) {
+            CHECK(crypto::LogFileHasCompressedBatches(file.View()));
+            auto summary = crypto::TryDecodeLogFile(pair.Value(), file.View(), fixture.system,
+                                                    &CollectInflated, &plain);
+            REQUIRE(summary);
+            CHECK(summary.Value().compressedBatches && summary.Value().endMarker);
+        } else {
+            constexpr usize MaxInflatedBytes = 1u << 20;
+            REQUIRE(
+                TryDecompressAppend(CompressionFormat::Zstd, file.View(), MaxInflatedBytes, plain));
+        }
+
+        CHECK(Contains(plain, "[Warning][Tests.Host] compressed value 0"));
+        CHECK(Contains(plain, "[Warning][Tests.Host] compressed value 2"));
+    }
 }
