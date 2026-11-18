@@ -161,11 +161,14 @@ TEST(TextureDesc_ValidationRules) {
     desc.sampler = {};
     desc.dimension = static_cast<TextureDimension>(5);
     CHECK(ValidateTextureDesc(desc).Error() == ErrorCode::InvalidArgument);
-    // 2D가 아닌 attachment와 다중 plane 형식은 이 단계의 계약 밖이다.
+    // 2D가 아닌 렌더 타깃·mip 사슬 렌더 타깃은 받는다(텍스처 GX2 C부). 다중 plane 형식의 2D 밖
+    // 차원은 계약 밖이다.
     desc.dimension = TextureDimension::TextureCube;
-    desc.mipLevels = 1;
+    desc.mipLevels = 3;
     desc.usage = TextureUsage::RenderTarget;
-    CHECK(ValidateTextureDesc(desc).Error() == ErrorCode::Unsupported);
+    CHECK(ValidateTextureDesc(desc).IsOk());
+    CHECK(HasPixelFormatCaps(RequiredPixelFormatCaps(desc), PixelFormatCaps::Mipmaps));
+    desc.mipLevels = 1;
     desc.usage = TextureUsage::Sampled;
     desc.format = PixelFormat::D24UnormS8Uint;
     CHECK(ValidateTextureDesc(desc).Error() == ErrorCode::Unsupported);
@@ -448,4 +451,47 @@ TEST(TextureDesc_SampleCountRules) {
     CHECK(ValidatePipelineDesc(pipeline).IsOk());
     pipeline.sampleCount = 6;
     CHECK(ValidatePipelineDesc(pipeline).Error() == ErrorCode::InvalidArgument);
+}
+
+TEST(TextureDesc_AttachmentDimensionsAndRanges) {
+    // 렌더 타깃은 모든 차원, 깊이는 3D를 뺀 차원이다(텍스처 GX2 C부).
+    TextureDesc desc;
+    desc.width = 8;
+    desc.height = 8;
+    desc.format = PixelFormat::RGBA8Unorm;
+    desc.usage = TextureUsage::RenderTarget;
+    desc.dimension = TextureDimension::Texture3D;
+    desc.depth = 4;
+    desc.mipLevels = 2;
+    CHECK(ValidateTextureDesc(desc).IsOk());
+    desc.dimension = TextureDimension::Texture2DArray;
+    desc.depth = 1;
+    desc.arraySize = 3;
+    CHECK(ValidateTextureDesc(desc).IsOk());
+    desc.usage = TextureUsage::DepthStencil;
+    desc.format = PixelFormat::D32Float;
+    CHECK(ValidateTextureDesc(desc).IsOk());
+    desc.dimension = TextureDimension::Texture3D;
+    desc.arraySize = 1;
+    desc.depth = 4;
+    CHECK(ValidateTextureDesc(desc).Error() == ErrorCode::InvalidArgument);
+    desc.dimension = TextureDimension::Texture2DArray;
+    desc.depth = 1;
+    desc.arraySize = 2;
+    desc.format = PixelFormat::D24UnormS8Uint;
+    CHECK(ValidateTextureDesc(desc).Error() == ErrorCode::Unsupported);
+    // attachment 범위: mip 수·slice 수, 3D는 그 mip의 깊이다.
+    CHECK(IsAttachmentInRange(TextureDimension::Texture2DArray, 1, 2, 3, 1, 2));
+    CHECK(!IsAttachmentInRange(TextureDimension::Texture2DArray, 1, 2, 3, 2, 0));
+    CHECK(!IsAttachmentInRange(TextureDimension::Texture2DArray, 1, 2, 3, 0, 3));
+    CHECK(IsAttachmentInRange(TextureDimension::Texture3D, 4, 2, 1, 0, 3));
+    CHECK(IsAttachmentInRange(TextureDimension::Texture3D, 4, 2, 1, 1, 1));
+    CHECK(!IsAttachmentInRange(TextureDimension::Texture3D, 4, 2, 1, 1, 2));
+    // 상태 subresource: 3D는 mip 전체(slice 0), 그 밖은 (mip, slice) 하나다.
+    const ResolvedSubresourceRange layer =
+        AttachmentSubresource(TextureDimension::TextureCubeArray, 1, 7);
+    CHECK(layer.firstMip == 1 && layer.mipCount == 1 && layer.firstSlice == 7 &&
+          layer.sliceCount == 1);
+    const ResolvedSubresourceRange plane = AttachmentSubresource(TextureDimension::Texture3D, 1, 3);
+    CHECK(plane.firstMip == 1 && plane.firstSlice == 0 && plane.sliceCount == 1);
 }

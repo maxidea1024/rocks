@@ -329,6 +329,9 @@ private:
         TextureHandle resolves[MaxColorTargets];
         // attachment 표본 수다(1이면 MSAA가 아니다).
         uint32 sampleCount = 1;
+        // resolve 대상의 mip·slice다(텍스처 GX2 C부).
+        uint32 resolveMips[MaxColorTargets] = {};
+        uint32 resolveSlices[MaxColorTargets] = {};
     };
 
     // 기록 중 묶인 정점·index 버퍼다(파이프라인을 바꾸면 그 stride로 다시 묶는다).
@@ -516,6 +519,12 @@ private:
     void BeginRecording(const Target& target, const PassDesc& pass) noexcept;
     // CPU 사본 constantValues_ 전체를 상수 버퍼에 WRITE_DISCARD로 쓴다.
     void WriteConstants() noexcept;
+    // attachment (mip, slice)의 RTV·DSV를 만든다(배열·cube는 2D 배열 view의 층 하나, 3D RTV는 깊이
+    // 면 하나, 텍스처 GX2 C부).
+    HRESULT CreateAttachmentView(const TextureRecord& record, uint32 mipLevel, uint32 slice,
+                                 ComRef<ID3D11RenderTargetView>& out) noexcept;
+    HRESULT CreateAttachmentView(const TextureRecord& record, uint32 mipLevel, uint32 slice,
+                                 bool readOnly, ComRef<ID3D11DepthStencilView>& out) noexcept;
     void ApplyVertexBuffer(uint32 stream) noexcept;
     bool StreamsBound() const noexcept;
 
@@ -609,6 +618,10 @@ private:
     BufferViewHandle boundViews_[MaxDrawBufferViews];
     // compute 쓰기 slot에 묶인 view(GX4)와 스텐실 기준 값이다.
     BufferViewHandle boundWriteViews_[MaxDrawBufferViews];
+    // 지금 패스의 attachment view다(패스마다 그 mip·slice로 만들고 다음 패스까지 붙든다. deferred
+    // context와 command list가 기록 동안 참조를 잡는다).
+    ComRef<ID3D11RenderTargetView> passRtvs_[MaxColorTargets];
+    ComRef<ID3D11DepthStencilView> passDsv_;
     // compute 쓰기 slot에 묶인 텍스처 쓰기 view(버퍼 view와 같은 slot 공간)와 SetTexture로 묶은
     // 텍스처 기록이다(dispatch가 CS t0·s0에 걸고, 그리기가 PS t0을 다시 건다).
     TextureHandle boundWriteTextures_[MaxDrawBufferViews];

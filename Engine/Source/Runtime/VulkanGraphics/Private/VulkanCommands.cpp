@@ -208,14 +208,18 @@ void VulkanDevice::ResolveAttachments() noexcept {
             continue;
         }
 
+        // MSAA 원본은 2D mip 1이라 subresource 0이고, 대상은 resolve mip·slice 하나다.
         const ResolvedSubresourceRange whole = {0, 1, 0, 1};
+        const ResolvedSubresourceRange destination = AttachmentSubresource(
+            resolved->dimension, target_.resolveMips[index], target_.resolveSlices[index]);
         TrackTransition(*source, target_.colors[index].slot, whole, ResourceAccess::CopySource,
                         false);
-        TrackTransition(*resolved, target_.resolves[index].slot, whole,
+        TrackTransition(*resolved, target_.resolves[index].slot, destination,
                         ResourceAccess::CopyDestination, false);
         VkImageResolve region = {};
         region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, destination.firstMip,
+                                 destination.firstSlice, 1};
         region.extent = {source->width, source->height, 1};
         functions_.vkCmdResolveImage(frame_, source->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                                      resolved->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
@@ -468,7 +472,7 @@ void VulkanDevice::SetTexture(TextureHandle handle) noexcept {
         }
     }
 
-    if (!readable && !IsPassAttachment(slot)) {
+    if (!readable && !OverlapsPassAttachment(slot, range)) {
         TrackTransition(*record, slot, range, ResourceAccess::SrvGraphics, false);
         ResumeRenderPass();
     }
@@ -527,8 +531,14 @@ Result<void> VulkanDevice::CopyPassTarget(TextureHandle destination) noexcept {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
+    // 패스 대상은 2D mip 0 attachment여야 한다(이미지 mip 0 복사, 텍스처 GX2 C부).
+    const TextureRecord* passTexture = textures_.Find(target_.texture.slot);
+    const bool wholeTarget =
+        passTexture == nullptr ||
+        (passTexture->dimension == TextureDimension::Texture2D && target_.colorMips[0] == 0);
     if (target_.image == VK_NULL_HANDLE || !record->renderTarget || record->sampleCount > 1 ||
-        target_.sampleCount > 1 || destination == target_.texture ||
+        target_.sampleCount > 1 || !wholeTarget || record->mipLevels != 1 ||
+        record->dimension != TextureDimension::Texture2D || destination == target_.texture ||
         record->width != target_.width || record->height != target_.height ||
         record->format != target_.format) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);

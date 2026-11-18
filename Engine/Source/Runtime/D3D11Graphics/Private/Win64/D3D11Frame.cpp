@@ -153,8 +153,12 @@ Result<GpuFencePoint> D3D11Device::EndFrame() noexcept {
         const TextureRecord* source = textures_.Find(target_.colors[index].slot);
         const TextureRecord* resolved = textures_.Find(target_.resolves[index].slot);
         if (source != nullptr && resolved != nullptr) {
-            deferred_->ResolveSubresource(resolved->texture.Get(), 0, source->texture.Get(), 0,
-                                          MappingOf(source->format).rtv);
+            // 대상은 resolve mip·slice의 subresource다(텍스처 GX2 C부).
+            deferred_->ResolveSubresource(resolved->texture.Get(),
+                                          D3D11CalcSubresource(target_.resolveMips[index],
+                                                               target_.resolveSlices[index],
+                                                               resolved->mipLevels),
+                                          source->texture.Get(), 0, MappingOf(source->format).rtv);
         }
     }
 
@@ -397,8 +401,14 @@ Result<void> D3D11Device::CopyPassTarget(TextureHandle destination) noexcept {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
+    // 패스 대상은 2D mip 0 attachment여야 한다(자원 전체 복사, 텍스처 GX2 C부).
+    const TextureRecord* passTexture = textures_.Find(target_.texture.slot);
+    const bool wholeTarget =
+        passTexture == nullptr ||
+        (passTexture->dimension == TextureDimension::Texture2D && passTexture->mipLevels == 1);
     if (target_.resource == nullptr || !record->renderTarget || record->sampleCount > 1 ||
-        target_.sampleCount > 1 || destination == target_.texture ||
+        target_.sampleCount > 1 || !wholeTarget || record->mipLevels != 1 ||
+        record->dimension != TextureDimension::Texture2D || destination == target_.texture ||
         record->width != target_.width || record->height != target_.height ||
         record->format != target_.format) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);

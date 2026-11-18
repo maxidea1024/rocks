@@ -128,6 +128,15 @@ Result<void> D3D12Device::CreateComputeObjects() noexcept {
     }
 
     scratchDsv_ = scratch.Value();
+    for (uint32& rtv : scratchRtvs_) {
+        auto allocated = rtvs_.Allocate();
+        if (!allocated) {
+            return Fail("pass RTV descriptor allocation failed");
+        }
+
+        rtv = allocated.Value();
+    }
+
     return Result<void>::Success();
 }
 
@@ -206,33 +215,44 @@ Result<CommandContext*> D3D12Device::BeginPass(const PassDesc& pass) noexcept {
     uint32 height = 0;
     uint32 samples = 1;
     bool sized = false;
-    const auto check = [&](TextureHandle handle, bool depth) noexcept -> ErrorCode {
+    const auto check = [&](TextureHandle handle, bool depth, uint32 mip,
+                           uint32 slice) noexcept -> ErrorCode {
         const TextureRecord* record = textures_.Find(handle.slot);
         if (record == nullptr) {
             return ErrorCode::StaleHandle;
         }
 
+        // 크기는 attachment mip의 크기다(텍스처 GX2 C부).
         if (record->view || (depth ? !record->depthTarget : !record->renderTarget) ||
-            (sized && (record->width != width || record->height != height ||
-                       record->sampleCount != samples))) {
+            !IsAttachmentInRange(record->dimension, record->depth, record->mipLevels,
+                                 record->slices, mip, slice)) {
             return ErrorCode::InvalidArgument;
         }
 
-        width = record->width;
-        height = record->height;
+        const uint32 mipWidth = MipExtent(record->width, mip);
+        const uint32 mipHeight = MipExtent(record->height, mip);
+        if (sized && (mipWidth != width || mipHeight != height || record->sampleCount != samples)) {
+            return ErrorCode::InvalidArgument;
+        }
+
+        width = mipWidth;
+        height = mipHeight;
         samples = record->sampleCount;
         sized = true;
         return ErrorCode::None;
     };
     for (uint32 index = 0; index < pass.colorCount; ++index) {
-        const ErrorCode checked = check(pass.colors[index].texture, false);
+        const ErrorCode checked = check(pass.colors[index].texture, false,
+                                        pass.colors[index].mipLevel, pass.colors[index].slice);
         if (checked != ErrorCode::None) {
             return FailCode<CommandContext*>(checked, "color attachment is stale, not a render "
                                                       "target, a view or of a different size");
         }
 
         for (uint32 other = 0; other < index; ++other) {
-            if (pass.colors[other].texture == pass.colors[index].texture) {
+            if (pass.colors[other].texture == pass.colors[index].texture &&
+                pass.colors[other].mipLevel == pass.colors[index].mipLevel &&
+                pass.colors[other].slice == pass.colors[index].slice) {
                 return FailCode<CommandContext*>(ErrorCode::InvalidArgument,
                                                  "color attachment appears twice in the pass");
             }
@@ -241,7 +261,8 @@ Result<CommandContext*> D3D12Device::BeginPass(const PassDesc& pass) noexcept {
 
     const bool hasDepth = !pass.depth.texture.IsNull();
     if (hasDepth) {
-        const ErrorCode checked = check(pass.depth.texture, true);
+        const ErrorCode checked =
+            check(pass.depth.texture, true, pass.depth.mipLevel, pass.depth.slice);
         if (checked != ErrorCode::None) {
             return FailCode<CommandContext*>(checked, "depth attachment is stale, not a depth "
                                                       "target, a view or of a different size");
@@ -267,9 +288,16 @@ Result<CommandContext*> D3D12Device::BeginPass(const PassDesc& pass) noexcept {
                        (other != index && pass.colors[other].resolveTarget == resolve);
         }
 
+        // 대상은 그 mip·slice가 원본과 같은 크기다. 3D 대상(깊이 면 resolve)은 받지 않는다.
+        const uint32 resolveMip = pass.colors[index].resolveMipLevel;
+        const uint32 resolveSlice = pass.colors[index].resolveSlice;
         if (source->sampleCount < 2 || target->view || !target->renderTarget ||
             target->sampleCount != 1 || target->format != source->format ||
-            target->width != source->width || target->height != source->height || overlaps) {
+            target->dimension == TextureDimension::Texture3D ||
+            !IsAttachmentInRange(target->dimension, target->depth, target->mipLevels,
+                                 target->slices, resolveMip, resolveSlice) ||
+            MipExtent(target->width, resolveMip) != source->width ||
+            MipExtent(target->height, resolveMip) != source->height || overlaps) {
             return FailCode<CommandContext*>(
                 ErrorCode::InvalidArgument,
                 "resolve target needs an MSAA color attachment and a distinct single-sample "
@@ -299,7 +327,14 @@ Result<CommandContext*> D3D12Device::BeginPass(const PassDesc& pass) noexcept {
         const TextureRecord* record = textures_.Find(pass.colors[index].texture.slot);
         target_.colors[index] = pass.colors[index].texture;
         target_.resolves[index] = pass.colors[index].resolveTarget;
-        target_.rtvs[index] = rtvs_.Cpu(record->rtv);
+        target_.colorMips[index] = pass.colors[index].mipLevel;
+        target_.colorSlices[index] = pass.colors[index].slice;
+        target_.resolveMips[index] = pass.colors[index].resolveMipLevel;
+        target_.resolveSlices[index] = pass.colors[index].resolveSlice;
+        // RTV는 패스마다 그 mip·slice로 scratch 칸에 쓴다.
+        WriteRenderTargetView(*record, pass.colors[index].mipLevel, pass.colors[index].slice,
+                              rtvs_.Cpu(scratchRtvs_[index]));
+        target_.rtvs[index] = rtvs_.Cpu(scratchRtvs_[index]);
     }
 
     if (pass.colorCount != 0) {
@@ -314,24 +349,13 @@ Result<CommandContext*> D3D12Device::BeginPass(const PassDesc& pass) noexcept {
         const TextureRecord* depth = textures_.Find(pass.depth.texture.slot);
         target_.depth = pass.depth.texture;
         target_.depthReadOnly = pass.depth.readOnly;
-        if (pass.depth.readOnly) {
-            // 읽기 전용 DSV는 칸 하나를 다시 쓴다(OMSetRenderTargets가 기록 때 descriptor를
-            // 읽는다).
-            const d3d12::FormatMapping mapping = d3d12::MappingOf(depth->format);
-            D3D12_DEPTH_STENCIL_VIEW_DESC view = {};
-            view.Format = mapping.dsv;
-            view.ViewDimension = depth->sampleCount > 1 ? D3D12_DSV_DIMENSION_TEXTURE2DMS
-                                                        : D3D12_DSV_DIMENSION_TEXTURE2D;
-            view.Flags = D3D12_DSV_FLAG_READ_ONLY_DEPTH;
-            if (GetPixelFormatInfo(depth->format).stencilBits != 0) {
-                view.Flags |= D3D12_DSV_FLAG_READ_ONLY_STENCIL;
-            }
-
-            device_->CreateDepthStencilView(depth->resource.Get(), &view, dsvs_.Cpu(scratchDsv_));
-            target_.dsv = dsvs_.Cpu(scratchDsv_);
-        } else {
-            target_.dsv = dsvs_.Cpu(depth->dsv);
-        }
+        target_.depthMip = pass.depth.mipLevel;
+        target_.depthSlice = pass.depth.slice;
+        // DSV는 칸 하나를 패스마다 그 mip·slice·읽기 전용 여부로 다시 쓴다(OMSetRenderTargets가
+        // 기록 때 descriptor를 읽는다).
+        WriteDepthStencilView(*depth, pass.depth.mipLevel, pass.depth.slice, pass.depth.readOnly,
+                              dsvs_.Cpu(scratchDsv_));
+        target_.dsv = dsvs_.Cpu(scratchDsv_);
     }
 
     presentTarget_ = {};

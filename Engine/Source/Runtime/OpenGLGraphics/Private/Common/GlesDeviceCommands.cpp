@@ -293,33 +293,45 @@ Result<CommandContext*> GlesDevice::BeginPass(const PassDesc& pass) noexcept {
     // 같은 크기, 중복 없음.
     PassTarget target;
     bool sized = false;
-    const auto check = [&](TextureHandle handle, bool depth) noexcept -> ErrorCode {
+    const auto check = [&](TextureHandle handle, bool depth, uint32 mip,
+                           uint32 slice) noexcept -> ErrorCode {
         const TextureRecord* record = textures_.Find(handle.slot);
         if (record == nullptr) {
             return ErrorCode::StaleHandle;
         }
 
-        if (record->isView || (depth ? !record->depthTarget : record->framebuffer == 0) ||
-            (sized && (record->width != target.width || record->height != target.height ||
-                       record->sampleCount != target.sampleCount))) {
+        // 크기는 attachment mip의 크기다(텍스처 GX2 C부).
+        if (record->isView || (depth ? !record->depthTarget : !record->renderTarget) ||
+            !IsAttachmentInRange(record->dimension, record->depth, record->mipLevels,
+                                 record->slices, mip, slice)) {
             return ErrorCode::InvalidArgument;
         }
 
-        target.width = record->width;
-        target.height = record->height;
+        const uint32 mipWidth = MipExtent(record->width, mip);
+        const uint32 mipHeight = MipExtent(record->height, mip);
+        if (sized && (mipWidth != target.width || mipHeight != target.height ||
+                      record->sampleCount != target.sampleCount)) {
+            return ErrorCode::InvalidArgument;
+        }
+
+        target.width = mipWidth;
+        target.height = mipHeight;
         target.sampleCount = record->sampleCount;
         sized = true;
         return ErrorCode::None;
     };
     for (uint32 index = 0; index < pass.colorCount; ++index) {
-        const ErrorCode checked = check(pass.colors[index].texture, false);
+        const ErrorCode checked = check(pass.colors[index].texture, false,
+                                        pass.colors[index].mipLevel, pass.colors[index].slice);
         if (checked != ErrorCode::None) {
             return fail(checked, "color attachment is stale, not a render target, a view or of a "
                                  "different size");
         }
 
         for (uint32 other = 0; other < index; ++other) {
-            if (pass.colors[other].texture == pass.colors[index].texture) {
+            if (pass.colors[other].texture == pass.colors[index].texture &&
+                pass.colors[other].mipLevel == pass.colors[index].mipLevel &&
+                pass.colors[other].slice == pass.colors[index].slice) {
                 return fail(ErrorCode::InvalidArgument,
                             "color attachment appears twice in the pass");
             }
@@ -328,7 +340,8 @@ Result<CommandContext*> GlesDevice::BeginPass(const PassDesc& pass) noexcept {
 
     const bool hasDepth = !pass.depth.texture.IsNull();
     if (hasDepth) {
-        const ErrorCode checked = check(pass.depth.texture, true);
+        const ErrorCode checked =
+            check(pass.depth.texture, true, pass.depth.mipLevel, pass.depth.slice);
         if (checked != ErrorCode::None) {
             return fail(checked, "depth attachment is stale, not a depth target, a view or of a "
                                  "different size");
@@ -354,15 +367,24 @@ Result<CommandContext*> GlesDevice::BeginPass(const PassDesc& pass) noexcept {
                        (other != index && pass.colors[other].resolveTarget == resolve);
         }
 
-        if (source->sampleCount < 2 || resolved->isView || resolved->framebuffer == 0 ||
+        // 대상은 그 mip·slice가 원본과 같은 크기다. 3D 대상(깊이 면 resolve)은 받지 않는다.
+        const uint32 resolveMip = pass.colors[index].resolveMipLevel;
+        const uint32 resolveSlice = pass.colors[index].resolveSlice;
+        if (source->sampleCount < 2 || resolved->isView || !resolved->renderTarget ||
             resolved->sampleCount != 1 || resolved->format != source->format ||
-            resolved->width != source->width || resolved->height != source->height || overlaps) {
+            resolved->dimension == TextureDimension::Texture3D ||
+            !IsAttachmentInRange(resolved->dimension, resolved->depth, resolved->mipLevels,
+                                 resolved->slices, resolveMip, resolveSlice) ||
+            MipExtent(resolved->width, resolveMip) != source->width ||
+            MipExtent(resolved->height, resolveMip) != source->height || overlaps) {
             return fail(ErrorCode::InvalidArgument,
                         "resolve target needs an MSAA color attachment and a distinct "
                         "single-sample render target of the same format and size");
         }
 
         target.resolves[index] = resolve;
+        target.resolveMips[index] = resolveMip;
+        target.resolveSlices[index] = resolveSlice;
     }
 
     if (recording_) {
@@ -390,8 +412,12 @@ Result<CommandContext*> GlesDevice::BeginPass(const PassDesc& pass) noexcept {
 
     target.depth = pass.depth.texture;
     target.depthReadOnly = hasDepth && pass.depth.readOnly;
-    if (pass.colorCount == 1 && !hasDepth) {
-        // 색 하나는 텍스처의 framebuffer를 그대로 쓴다.
+    target.firstColorMip = pass.colorCount != 0 ? pass.colors[0].mipLevel : 0u;
+    const TextureRecord* single =
+        pass.colorCount == 1 ? textures_.Find(pass.colors[0].texture.slot) : nullptr;
+    if (single != nullptr && !hasDepth && single->framebuffer != 0 &&
+        pass.colors[0].mipLevel == 0) {
+        // 색 하나(2D mip 0)는 텍스처의 framebuffer를 그대로 쓴다.
         target.framebuffer = textures_.Find(pass.colors[0].texture.slot)->framebuffer;
     } else {
         // 그 밖은 장치의 패스 framebuffer에 attachment를 붙인다(EndFrame이 뗀다).
@@ -404,9 +430,13 @@ Result<CommandContext*> GlesDevice::BeginPass(const PassDesc& pass) noexcept {
         for (uint32 index = 0; index < MaxColorTargets; ++index) {
             const TextureRecord* color =
                 index < pass.colorCount ? textures_.Find(pass.colors[index].texture.slot) : nullptr;
-            gl_.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + index,
-                                     color != nullptr ? color->target : GL_TEXTURE_2D,
-                                     color != nullptr ? color->texture : 0u, 0);
+            if (color != nullptr) {
+                AttachTextureLevel(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + index, *color,
+                                   pass.colors[index].mipLevel, pass.colors[index].slice);
+            } else {
+                gl_.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + index,
+                                         GL_TEXTURE_2D, 0u, 0);
+            }
             drawBuffers[index] = index < pass.colorCount ? GL_COLOR_ATTACHMENT0 + index : GL_NONE;
         }
 
@@ -414,9 +444,9 @@ Result<CommandContext*> GlesDevice::BeginPass(const PassDesc& pass) noexcept {
         const bool stencil = depth != nullptr && GetPixelFormatInfo(depth->format).stencilBits != 0;
         gl_.FramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
         if (depth != nullptr) {
-            gl_.FramebufferTexture2D(GL_FRAMEBUFFER,
-                                     stencil ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT,
-                                     depth->target, depth->texture, 0);
+            AttachTextureLevel(GL_FRAMEBUFFER,
+                               stencil ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT, *depth,
+                               pass.depth.mipLevel, pass.depth.slice);
         }
 
         gl_.DrawBuffers(pass.colorCount != 0 ? static_cast<GLsizei>(pass.colorCount) : 1,
@@ -437,6 +467,23 @@ Result<CommandContext*> GlesDevice::BeginPass(const PassDesc& pass) noexcept {
     pass_ = target;
     StartPass(pass);
     return Result<CommandContext*>::Success(this);
+}
+
+void GlesDevice::AttachTextureLevel(GLenum target, GLenum attachment, const TextureRecord& record,
+                                    uint32 mipLevel, uint32 slice) noexcept {
+    if (record.target == GL_TEXTURE_2D || record.target == GL_TEXTURE_2D_MULTISAMPLE ||
+        record.target == GL_TEXTURE_CUBE_MAP) {
+        const GLenum face = record.target == GL_TEXTURE_CUBE_MAP
+                                ? GL_TEXTURE_CUBE_MAP_POSITIVE_X + slice
+                                : record.target;
+        gl_.FramebufferTexture2D(target, attachment, face, record.texture,
+                                 static_cast<GLint>(mipLevel));
+        return;
+    }
+
+    // 2D 배열·cube 배열(layer = cube × 6 + 면)·3D(깊이 면)다(ES 3.2 9.2.8절).
+    gl_.FramebufferTextureLayer(target, attachment, record.texture, static_cast<GLint>(mipLevel),
+                                static_cast<GLint>(slice));
 }
 
 void GlesDevice::SetWritableBufferView(uint32 slot, BufferViewHandle view) noexcept {

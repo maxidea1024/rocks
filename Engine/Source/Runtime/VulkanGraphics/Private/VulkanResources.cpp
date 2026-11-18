@@ -564,7 +564,10 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
     info.samples = static_cast<VkSampleCountFlagBits>(desc.sampleCount);
     info.tiling = VK_IMAGE_TILING_OPTIMAL;
     info.usage = ImageUsageFor(desc.format, renderTarget, storage);
+    // 3D 렌더 타깃은 깊이 면을 2D attachment view로 붙인다(2D_ARRAY_COMPATIBLE, Vulkan 1.1
+    // core, 텍스처 GX2 C부).
     info.flags = ImageFlagsFor(desc.format) |
+                 (volume && renderTarget ? VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT : 0u) |
                  (IsCubeDimension(desc.dimension) ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0u);
 
     info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -649,6 +652,12 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
     }
 
     const TextureRecord& stored = *textures_.Find(added.Value());
+    if (volume && renderTarget) {
+        // 표에 넣지 못하면 barrier layer 수가 1로 남는다(maintenance9 전에는 같은 뜻이다).
+        auto tracked = volumeAttachmentImages_.TryPushBack(stored.image);
+        (void)tracked;
+    }
+
     Result<void> uploaded = Result<void>::Success();
     if (attachment) {
         // 셰이더 읽기 상태(SHADER_READ_ONLY)로 바꿔 둔다. 다음 제출보다 먼저 실행된다.
@@ -664,6 +673,13 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
 
     if (!uploaded) {
         // 업로드 기록이 이미 참조했을 수 있으므로 회수 경로로 놓는다.
+        if (volume && renderTarget && !volumeAttachmentImages_.IsEmpty() &&
+            volumeAttachmentImages_[volumeAttachmentImages_.Size() - 1] == cleanup.image) {
+            auto removed =
+                volumeAttachmentImages_.TryRemoveAtSwap(volumeAttachmentImages_.Size() - 1);
+            (void)removed;
+        }
+
         RetireEntry(Move(cleanup));
         auto removed = textures_.TryRemove(added.Value());
         (void)removed;
@@ -845,6 +861,16 @@ void VulkanDevice::RetireTextureRecord(SlotHandle slot, TextureRecord& record) n
     // 이 view를 attachment로 쓴 framebuffer를 먼저 회수한다(같은 fence 뒤에 파괴된다).
     RetireFramebuffers(record.view);
     RetireFramebuffers(record.attachmentView);
+    if (!record.isView) {
+        RetireAttachmentViews(record.image);
+        for (usize index = 0; index < volumeAttachmentImages_.Size(); ++index) {
+            if (volumeAttachmentImages_[index] == record.image) {
+                auto removed = volumeAttachmentImages_.TryRemoveAtSwap(index);
+                (void)removed;
+                break;
+            }
+        }
+    }
     entry.view = record.view;
     entry.attachmentView = record.attachmentView;
     RetireEntry(Move(entry));

@@ -161,6 +161,23 @@ Result<ResolvedSubresourceRange> ResolveTextureViewRange(TextureDimension dimens
     return Result<ResolvedSubresourceRange>::Success(range);
 }
 
+bool IsAttachmentInRange(TextureDimension dimension, uint32 depth, uint32 mipLevels, uint32 slices,
+                         uint32 mipLevel, uint32 slice) noexcept {
+    if (mipLevel >= mipLevels) {
+        return false;
+    }
+
+    const uint32 limit =
+        dimension == TextureDimension::Texture3D ? MipExtent(depth, mipLevel) : slices;
+    return slice < limit;
+}
+
+ResolvedSubresourceRange AttachmentSubresource(TextureDimension dimension, uint32 mipLevel,
+                                               uint32 slice) noexcept {
+    // 3D는 mip 하나가 subresource 하나다(깊이 면은 subresource가 아니다).
+    return {mipLevel, 1, dimension == TextureDimension::Texture3D ? 0u : slice, 1};
+}
+
 uint32 TextureViewBaseMip(const DeviceFeatures& features, const TextureViewDesc& desc) noexcept {
     return features.textureViewRanges ? 0u : desc.firstMip;
 }
@@ -179,11 +196,15 @@ PixelFormatCaps RequiredPixelFormatCaps(const TextureDesc& desc) noexcept {
         caps = PixelFormatCaps::DepthStencil;
         break;
     case TextureUsage::Storage:
-        caps = desc.mipLevels > 1 ? PixelFormatCaps::Sampled | PixelFormatCaps::StorageWrite |
-                                        PixelFormatCaps::Mipmaps
-                                  : PixelFormatCaps::Sampled | PixelFormatCaps::StorageWrite;
+        caps = PixelFormatCaps::Sampled | PixelFormatCaps::StorageWrite;
         break;
     }
+
+    // Sampled 밖 용도의 mip 사슬(Storage, 텍스처 GX2 C부의 렌더 타깃·깊이)도 Mipmaps가 필요하다.
+    if (desc.usage != TextureUsage::Sampled && desc.mipLevels > 1) {
+        caps = caps | PixelFormatCaps::Mipmaps;
+    }
+
     if (desc.sampleCount > 1) {
         caps = caps | PixelFormatCaps::Multisample;
     }
@@ -292,8 +313,12 @@ Result<void> ValidateTextureDesc(const TextureDesc& desc) noexcept {
 
     const bool attachment =
         desc.usage == TextureUsage::RenderTarget || desc.usage == TextureUsage::DepthStencil;
-    if (desc.mipLevels == 0 || desc.mipLevels > TextureFullMipCount(desc) ||
-        (attachment && desc.mipLevels != 1)) {
+    if (desc.mipLevels == 0 || desc.mipLevels > TextureFullMipCount(desc)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 3D 깊이 attachment는 없다(D3D에 3D DSV가 없다).
+    if (desc.usage == TextureUsage::DepthStencil && desc.dimension == TextureDimension::Texture3D) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -319,7 +344,8 @@ Result<void> ValidateTextureDesc(const TextureDesc& desc) noexcept {
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
-    if (desc.dimension != TextureDimension::Texture2D && (attachment || info.planeCount > 1)) {
+    // 다중 plane 형식(D24S8·D32S8·비디오)의 2D 밖 차원은 이 단계의 계약 밖이다.
+    if (desc.dimension != TextureDimension::Texture2D && info.planeCount > 1) {
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
 

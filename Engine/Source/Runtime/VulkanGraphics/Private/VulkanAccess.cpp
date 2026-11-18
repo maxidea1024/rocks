@@ -179,6 +179,16 @@ bool VulkanDevice::AccessBarrier(VkCommandBuffer buffer, VkImage image, uint32 f
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.image = image;
     barrier.subresourceRange = {aspect, firstMip, mipCount, firstLayer, layerCount};
+    // 2D_ARRAY_COMPATIBLE 3D 이미지는 layer 수를 REMAINING으로 둔다(maintenance9를 켜면 1이 깊이
+    // 면 하나가 되므로 앞으로도 같은 뜻이 되게 한다. 3D의 상태는 mip 전체다).
+    for (VkImage volume : volumeAttachmentImages_) {
+        if (volume == image) {
+            barrier.subresourceRange.baseArrayLayer = 0;
+            barrier.subresourceRange.layerCount = VK_REMAINING_ARRAY_LAYERS;
+            break;
+        }
+    }
+
     functions_.vkCmdPipelineBarrier(buffer, source.stage, destination.stage, 0, 0, nullptr, 0,
                                     nullptr, 1, &barrier);
     return true;
