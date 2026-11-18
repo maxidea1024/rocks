@@ -101,10 +101,16 @@ internal static class CVarCompilerTests
                 "constinit CVar<Tier> TierLevel = cvar::Var(\"game.tier\", Tier::High).Help(\"Tier\");",
                 "constinit CVar<bool> Shared = cvar::Var(\"net.shared\", true).Help(\"Shared\").Replicated();",
                 "constinit BootCVar<int32> Threads = cvar::Boot(\"game.threads\", 4).Help(\"Threads\").Range(1, 64).UserSetting();",
+                "constinit CVarGroup ShadowGroup = cvar::Group(\"quality.shadow\", 1).Help(\"Shadow scalability\")",
+                "    .Level(0, {{ShadowQualityLevel, ShadowQuality::Off}, {ShadowDistance, 1000}})",
+                "    .Level(1, {{ShadowQualityLevel, ShadowQuality::High}, {ShadowDistance, 15000}});",
+                "constinit CVarGroup OverallGroup = cvar::Group(\"quality.overall\", 0).Help(\"Overall\")",
+                "    .Level(0, {{ShadowGroup, 0}, {Style, \"plain\"}}).Level(1);",
                 "Result<void> RegisterProbeVars(config::ConfigContext& config) noexcept {",
                 "    return config.Register(ShadowDistance, ShadowQualityLevel, GraphicsBackend, GodMode, Samples, Budget, Scale,",
-                "                           Profile, Style, TierLevel, Shared, Threads);",
+                "                           Profile, Style, TierLevel, Shared, Threads, ShadowGroup, OverallGroup);",
                 "}",
+                "int32 LevelOf() noexcept { return ShadowGroup.Get(); }",
                 "cvar::Index IndexOf() noexcept { return ShadowDistance.Index(); }");
 
             (string Name, string Source, string Diagnostic)[] rejected =
@@ -175,8 +181,23 @@ internal static class CVarCompilerTests
                     "CVarError_DefaultOutOfRange"),
                 ("scoped_override_boot", "void F() noexcept { cvar::ScopedOverride scoped{GraphicsBackend, \"metal\"}; }",
                     "BootCVar is fixed at boot; set it in a config file or with --set and restart"),
+                ("preset_type_mismatch", "CVarGroup G = cvar::Group(\"quality.g\", 0).Help(\"g\").Level(0, {{ShadowDistance, ShadowQuality::Low}});",
+                    "Preset entry value type must match the CVar type"),
+                ("preset_boot", "CVarGroup G = cvar::Group(\"quality.g\", 0).Help(\"g\").Level(0, {{GraphicsBackend, \"metal\"}});",
+                    "BootCVar is fixed at boot; set it in a config file or with --set and restart"),
+                ("preset_duplicate_level", ("CVarGroup G = cvar::Group(\"quality.g\", 0).Help(\"g\")" +
+                    ".Level(0, {{ShadowDistance, 1000}}).Level(0, {{ShadowDistance, 2000}});"), "CVarError_DuplicateLevel"),
+                ("preset_duplicate_entry", ("CVarGroup G = cvar::Group(\"quality.g\", 0).Help(\"g\")" +
+                    ".Level(0, {{ShadowDistance, 1000}, {ShadowDistance, 2000}});"), "CVarError_DuplicateEntry"),
+                ("preset_default_undefined", "CVarGroup G = cvar::Group(\"quality.g\", 5).Help(\"g\").Level(0).Level(1);",
+                    "CVarError_DefaultLevelUndefined"),
+                ("preset_too_many_levels", ("CVarGroup G = cvar::Group(\"quality.g\", 0).Help(\"g\")" +
+                    ".Level(0).Level(1).Level(2).Level(3).Level(4).Level(5).Level(6).Level(7).Level(8);"), "CVarError_TooManyLevels"),
+                ("preset_missing_help", "CVarGroup G = cvar::Group(\"quality.g\", 0).Level(0);", "CVarError_MissingHelp"),
+                ("preset_auto_builder", "void F() noexcept { auto builder = cvar::Group(\"quality.g\", 0).Help(\"g\"); (void)builder; }",
+                    "deleted"),
                 ("register_non_handle", "Result<void> F(config::ConfigContext& config) noexcept { int32 value = 1; return config.Register(value); }",
-                    "ConfigContext::Register takes CVar or BootCVar handles (Config/CVar.h)"),
+                    "ConfigContext::Register takes CVar, BootCVar or CVarGroup handles (Config/CVar.h)"),
             ];
 
             // 서로 독립인 컴파일이라 함께 돌린다.

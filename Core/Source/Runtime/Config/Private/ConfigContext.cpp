@@ -41,7 +41,8 @@ ConfigState::ConfigState(Allocator& allocator, ObjectRegistry& objects) noexcept
       queue(allocator), diagnostics(allocator), regions(allocator), settings(allocator),
       commands(allocator), pendingCommands(allocator), subscriptions(allocator),
       renderSignature(allocator), pendingRestarts(allocator), ignoredBootWrites(allocator),
-      reportedUnresolved(allocator), syncHooks(allocator), onSynced(allocator) {
+      reportedUnresolved(allocator), groups(allocator), unmetQualityBudgets(allocator),
+      reportedQualityProblems(allocator), syncHooks(allocator), onSynced(allocator) {
 }
 
 reflection_text::TextCodecOptions ConfigState::CodecOptions() const noexcept {
@@ -237,6 +238,11 @@ Result<bool> ValidateConsoleValue(ConfigState& state, const ConfigEntry& entry, 
 // 입력 하나를 검사한다(큐에 넣기 전): Document의 모양(섹션 키·`Settings` 섹션), 닿는 섹션마다 코드
 // 기본값 위 적용, 독립 콘솔 설정 값. 반환: true면 문제없음.
 Result<bool> ValidateEntry(ConfigState& state, const ConfigEntry& entry) noexcept {
+    // `Quality.json`은 설정 struct 섹션이 아니라 묶음 → 등급 → 항목 값이다(CVar 11절).
+    if (IsQualityDocument(state, entry)) {
+        return ValidateQualityDocument(state, entry);
+    }
+
     bool valid = true;
     if (entry.kind == EntryKind::Document) {
         const JsonValue root = entry.document->Root();
@@ -737,6 +743,9 @@ Result<void> QueueLayerText(ConfigState& owner, ConfigLayer layer, StringView ta
                             bool replace) noexcept {
     ConfigState* state = &owner;
     Allocator* allocator_ = &owner.allocator;
+    if (auto rejected = RejectQualityLayerWrite(*state, layer, sourceName); !rejected) {
+        return rejected;
+    }
 
     const usize branchIndex = state->FindBranch(branch);
     if (branchIndex == IndexNone) {
@@ -864,6 +873,10 @@ Result<void> PrepareAssignment(ConfigState& owner, ConfigLayer layer, StringView
     static_cast<void>(source.TryAppendFormat("{}={}", target, value));
     if (auto status = source.Status(); !status) {
         return status;
+    }
+
+    if (auto rejected = RejectQualityLayerWrite(*state, layer, source.View()); !rejected) {
+        return rejected;
     }
 
     // 콘솔 설정 이름(소문자 점 경로)이면 콘솔 이름 대입이다. 등록되지 않은 이름이면 대기 값으로
@@ -1015,7 +1028,9 @@ Result<void> ConfigContext::AddAssignment(ConfigLayer layer, StringView tag, Str
 
 Result<void> ConfigContext::Unset(ConfigLayer layer, StringView tag) noexcept {
     ConfigState* state = state_.Get();
-    if (state == nullptr || !IsConfigLayer(layer) || layer == ConfigLayer::CodeDefault) {
+    // 품질 묶음 층은 묶음 펼침만 쓰고 지운다(CVar 11절).
+    if (state == nullptr || !IsConfigLayer(layer) || layer == ConfigLayer::CodeDefault ||
+        layer == ConfigLayer::Quality) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -1131,6 +1146,18 @@ Result<void> ConfigContext::Sync() noexcept {
         }
     }
 
+    // 앞 Sync의 묶음 펼침은 빼고 2단계 묶음 해결이 다시 만든다(CVar 10·11절).
+    {
+        usize kept = 0;
+        for (usize index = 0; index < plan.Size(); ++index) {
+            if (!plan[index]->groupExpansion) {
+                plan[kept++] = plan[index];
+            }
+        }
+
+        static_cast<void>(plan.TryResize(kept)); // 줄이기는 할당하지 않는다
+    }
+
     // 2. 적용 순서(층, 넣은 순서)로 정렬하고 섹션마다 다시 합친다. 실패하면 만든 값을 버린다.
     Array<ConfigEntry*> order(*allocator_);
     if (auto appended = order.TryAppend(plan.View()); !appended) {
@@ -1232,15 +1259,22 @@ Result<void> ConfigContext::Sync() noexcept {
         return held;
     }
 
+    // 묶음 해결(CVar 10절 2단계): 묶음 등급을 품질 묶음 층에 펼치고 다시 계산하기를 펼친 등급이
+    // 멈출 때까지 되풀이한다. 콘솔 설정의 새 값은 펼침을 합친 적용 순서(settingOrder)로 계산한다.
+    Array<UniquePtr<ConfigEntry>> generated(*allocator_);
+    Array<ConfigEntry*> settingOrder(*allocator_);
     Array<UniquePtr<SettingResult>> settingResults(*allocator_);
-    if (auto computed =
-            detail::ComputeSettingResults(*state, order.View(), values.View(), settingResults);
-        !computed) {
-        return computed;
+    QualityResolutionSet resolutions(*allocator_);
+    Array<int32> expandedLevels(*allocator_);
+    if (auto resolved =
+            detail::ResolveGroups(*state, order.View(), values.View(), generated, settingOrder,
+                                  settingResults, resolutions, expandedLevels);
+        !resolved) {
+        return resolved;
     }
 
-    if (auto held =
-            detail::HoldBootSettings(*state, order.View(), settingResults.View(), pendingRestarts);
+    if (auto held = detail::HoldBootSettings(*state, settingOrder.View(), settingResults.View(),
+                                             pendingRestarts);
         !held) {
         return held;
     }
@@ -1329,7 +1363,7 @@ Result<void> ConfigContext::Sync() noexcept {
     // 5. 입력 소유권을 새 목록으로 옮길 자리를 먼저 잡고, 바뀐 조각만 새로 만든 snapshot을 게시한다
     // (게시가 실패하면 값은 Sync 전 그대로다). 이 뒤로는 실패하지 않는다.
     Array<UniquePtr<ConfigEntry>> next(*allocator_);
-    if (auto reserved = next.TryReserve(plan.Size()); !reserved) {
+    if (auto reserved = next.TryReserve(plan.Size() + generated.Size()); !reserved) {
         return reserved;
     }
 
@@ -1361,6 +1395,7 @@ Result<void> ConfigContext::Sync() noexcept {
     }
 
     state->pendingRestarts = Move(pendingRestarts);
+    detail::CommitGroups(*state, resolutions, expandedLevels.View());
 
     for (ConfigEntry* kept : plan) {
         for (UniquePtr<ConfigEntry>& owned : state->entries) {
@@ -1376,6 +1411,10 @@ Result<void> ConfigContext::Sync() noexcept {
                 break;
             }
         }
+    }
+
+    for (UniquePtr<ConfigEntry>& expansion : generated) {
+        static_cast<void>(next.TryPushBack(Move(expansion))); // 예약했다
     }
 
     state->entries = Move(next);

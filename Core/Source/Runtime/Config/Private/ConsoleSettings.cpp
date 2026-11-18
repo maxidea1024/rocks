@@ -150,12 +150,6 @@ StringView CheckConsoleLayer(bool releaseRules, ConfigLayer layer, uint32 consol
         return "the console cannot change a ConsoleReadOnly setting";
     }
 
-    if (layer == ConfigLayer::Quality &&
-        !HasFlag(consoleFlags, ConsoleSettingFlags::QualityMember)) {
-        code = ConfigDiagnosticCode::NotQualityMember;
-        return "the quality layer can change QualityMember settings only";
-    }
-
     if (layer == ConfigLayer::User && !HasFlag(consoleFlags, ConsoleSettingFlags::UserConfig)) {
         return "the user layer can write UserConfig settings only";
     }
@@ -470,6 +464,9 @@ Result<StringView> CheckConsoleValue(ConfigState& state, const ConsoleSettingSta
             return Result<StringView>::Success(reason);
         case cvar::detail::ValueCheck::ValidationFailed:
             code = ConfigDiagnosticCode::ValidationFailed;
+            return Result<StringView>::Success(reason);
+        case cvar::detail::ValueCheck::UndefinedLevel:
+            code = ConfigDiagnosticCode::UndefinedLevel;
             return Result<StringView>::Success(reason);
         }
     }

@@ -70,8 +70,6 @@ StringView ConfigDiagnosticCodeName(ConfigDiagnosticCode code) noexcept {
         return "UnknownTarget";
     case ConfigDiagnosticCode::ConsoleReadOnly:
         return "ConsoleReadOnly";
-    case ConfigDiagnosticCode::NotQualityMember:
-        return "NotQualityMember";
     case ConfigDiagnosticCode::ValueOutOfRange:
         return "ValueOutOfRange";
     case ConfigDiagnosticCode::WeakWrite:
@@ -98,6 +96,12 @@ StringView ConfigDiagnosticCodeName(ConfigDiagnosticCode code) noexcept {
         return "UnresolvedName";
     case ConfigDiagnosticCode::ValidationFailed:
         return "ValidationFailed";
+    case ConfigDiagnosticCode::UndefinedLevel:
+        return "UndefinedLevel";
+    case ConfigDiagnosticCode::GroupNoConverge:
+        return "GroupNoConverge";
+    case ConfigDiagnosticCode::QualityLowered:
+        return "QualityLowered";
     }
 
     return {};

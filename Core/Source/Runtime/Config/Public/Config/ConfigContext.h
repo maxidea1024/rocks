@@ -4,6 +4,7 @@
 #include <Config/CVarDefinition.h>
 #include <Config/ConfigTypes.h>
 #include <Config/ConsoleSettings.h>
+#include <Config/QualityValidation.h>
 #include <Core/Delegate.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Meta/GeneratedType.h>
@@ -309,6 +310,29 @@ public:
     // WrongThread, 할당 실패.
     Result<void> GetPendingRestarts(Array<ConfigPendingRestart>& out) const noexcept;
 
+    // 품질 조합 검증 입력을 정한다(Config 6.1 — Config/QualityValidation.h). Sync가 프리셋
+    // 묶음(CVarGroup)을 펼치기 전에 묶음 변수의 등급(사용자가 고른 등급)을 이 규칙으로 낮춘 등급을
+    // 펼친다. 묶음 변수 자체는 바꾸지 않는다(장치가 바뀌면 원래 선택이 살아난다 — CVar 11절).
+    // 규칙의 levels는 무시하고 등록된 묶음 정의의 등급을 쓴다. 등록되지 않은 묶음의 규칙은
+    // 건너뛴다. traits가 null이면 검증하지 않는다. groups·budgets·traits는 빌린다: 다음 호출이나
+    // 문맥 파괴까지 살아 있어야 한다. 다음 Sync가 묶음을 다시 해결한다. 오류: 초기화 전
+    // InvalidArgument, 다른 스레드 WrongThread.
+    //
+    // 사용 예(호스트 — 규칙은 문맥보다 오래 사는 저장소에 둔다):
+    //   QualityLevelRule shadowRules[] = {{3, epicNeeds, {}}};   // 등급 3은 epicNeeds 기기 조건
+    //   QualityGroupRule rules[] = {{"quality.shadow", {}, 0, shadowRules}};
+    //   REQUIRE(config.SetQualityValidation(rules, {}, &traits));
+    Result<void> SetQualityValidation(Span<const QualityGroupRule> groups,
+                                      Span<const QualityBudgetRule> budgets,
+                                      const DeviceTraits* traits) noexcept;
+
+    // 마지막 Sync가 펼친 묶음별 결과다(등록 순서 — 한 번도 펼치지 않은 묶음은 없다): 요청 등급(묶음
+    // 변수 값), 펼친 등급, 낮춘 사유, 가장 낮은 등급도 맞지 않음, 넘친 예산 사유. 콘솔 Explain의
+    // `quality.shadow@1 (requested 3, lowered: <사유>)`(FormatQualityResolution)가 쓴다(CVR6).
+    // out은 먼저 비운다. 오류: 초기화 전 InvalidArgument, 다른 스레드 WrongThread, 할당 실패(out은
+    // 빈다).
+    Result<void> GetQualityLevels(QualityResolutionSet& out) const noexcept;
+
     // 섹션(branch, section)의 필드 경로(도구 이름 — `Inner.x`, 컨테이너는 그 필드)의 출처 스택을
     // out에 쓴다(약한 것부터 — 마지막이 현재 값의 출처). 경로는 대입이 닿은 override
     // 단위다(컨테이너 필드는 그 필드 경로). 기본값뿐이면 빈 목록이다. 오류: 모르는 섹션 NotFound,
@@ -376,7 +400,8 @@ public:
     // `Cheat()` 변수는 건너뛴다(13.1절 — 번호도 받지 않는다).
     //
     // 넘긴 핸들을 모두 검사한 뒤에 등록한다(하나라도 거부하면 아무것도 등록하지 않고 진단도 남기지
-    // 않는다). 같은 핸들을 다시 넘기면(같은 호출 안 포함) 성공이다(멱등).
+    // 않는다). 같은 핸들을 다시 넘기면(같은 호출 안 포함) 성공이다(멱등). 프리셋 묶음(CVarGroup)은
+    // int32 등급 변수로 등록되고, 등급 항목은 다음 Sync가 품질 묶음 층에 펼친다(CVar 11절).
     //
     // 사용 예:
     //   Result<void> RegisterRenderVars(ConfigContext& config) noexcept {
@@ -394,8 +419,9 @@ public:
     Result<void> Register(const Handles&... handles) noexcept {
         static_assert(sizeof...(Handles) != 0, "ConfigContext::Register needs at least one handle");
         constexpr bool handlesOnly = (cvar::detail::IsHandle<Handles> && ...);
-        static_assert(handlesOnly,
-                      "ConfigContext::Register takes CVar or BootCVar handles (Config/CVar.h)");
+        static_assert(
+            handlesOnly,
+            "ConfigContext::Register takes CVar, BootCVar or CVarGroup handles (Config/CVar.h)");
         if constexpr (handlesOnly) {
             const cvar::detail::VarDefinition* const definitions[] = {
                 &cvar::detail::HandleAccess::Definition(handles)...};

@@ -1,6 +1,6 @@
 # CVar·치트 명령 설계
 
-기준일: 2026-11-19, 개정 9(결정 확정, CVR1·CVR2·CVR4 구현). 실행 중 이름으로 읽고 바꾸는 타입 있는 설정 변수 **CVar**와, 개발 빌드에서 게임 상태를 직접 바꾸는 **치트 명령**을 정한다.
+기준일: 2026-11-19, 개정 10(결정 확정, CVR1·CVR2·CVR4·CVR5 구현). 실행 중 이름으로 읽고 바꾸는 타입 있는 설정 변수 **CVar**와, 개발 빌드에서 게임 상태를 직접 바꾸는 **치트 명령**을 정한다.
 
 이 문서는 [설정 계층과 콘솔 설정](ConfigSystem.ko.md)(이하 Config)의 5절 "콘솔 설정과 명령"을 대체하는 상세 스펙이다. 값 저장소·층·출처 스택·sync 지점·JSON 파일·`--set`·설정 struct는 Config를 그대로 쓰고, 이 문서는 그 위에 다음을 더한다.
 - 한 문장으로 정의하고 `.Get()`으로 읽는 타입 있는 핸들(`CVar<T>`·`BootCVar<T>`·`CVarGroup`·`ConsoleCommand`)
@@ -408,11 +408,11 @@ CVarGroup ShadowGroup = cvar::Group("quality.shadow", 2)
 ```
 
 - 묶음 자체가 int32 변수다(`ShadowGroup.Get()`은 등급). 허용 값은 정의된 등급뿐이다. 정의되지 않은 등급은 사이에 있어도 거부한다(`UndefinedLevel`).
-- 항목 `cvar::PresetEntry`는 `template <class T> constexpr PresetEntry(const CVar<T>&, TypeIdentityT<T>)` 생성자 하나다. `1000` → float 같은 암시 변환은 되고, 타입이 다르면 컴파일 오류다. `BootCVar`·`CVarGroup` 자신은 삭제된 overload + `static_assert`로 거부한다. 묶음이 다른 묶음을 항목으로 가지려면(전체 품질 `quality.overall`) `{ShadowGroup, 2}` 형태의 묶음 항목 overload를 쓴다.
+- 항목 `cvar::PresetEntry`는 `template <class T> constexpr PresetEntry(const CVar<T>&, TypeIdentityT<SetArg<T>>)` 생성자다(String·Name 변수의 값은 `StringView` — 상수로 만들 수 있는 타입이어야 하므로 `Set`의 인자 타입을 쓴다). `1000` → float 같은 암시 변환은 되고(목록 초기화라 좁히는 변환은 컴파일 오류), 타입이 다르면 컴파일 오류다(`Preset entry value type must match the CVar type`). `BootCVar`·`CVarGroup` 자신은 삭제된 overload + `static_assert`로 거부한다. 묶음이 다른 묶음을 항목으로 가지려면(전체 품질 `quality.overall`) `{ShadowGroup, 2}` 형태의 묶음 항목 overload를 쓴다.
 - 항목은 핸들 **주소**만 담고, 번호는 Sync에서 읽는다. 다른 .cpp에 정의된 변수를 가리켜도 정적 초기화 순서와 무관하다(주소는 상수다). 가리키는 변수가 아직 등록되지 않았으면 그 항목은 등록될 때까지 보류된다.
 - 등급을 바꾸면 Quality 층의 그 묶음 태그를 `Unset`하고 새 등급 항목을 쓴다. 출처는 `quality.shadow@2`다.
-- 구성원 표시는 자동이다: 어떤 묶음의 항목인 변수만 Quality 층 쓰기를 받는다(Config의 `QualityMember` 플래그를 없앤다).
-- 같은 등급에 같은 변수 두 번, 같은 등급 두 번 정의, 기본 등급 미정의는 컴파일 오류다. 크기 한도는 이름 있는 상수 `MaxGroupLevels`(8)·`MaxEntriesPerLevel`(32)이다. consteval 안에서는 할당할 수 없으므로 `CVarGroup`은 이 고정 용량을 품는다(항목 24 byte 기준 묶음 하나에 약 6 KiB의 정적 데이터). 묶음은 수십 개 이하라 받아들인다.
+- 구성원 표시는 자동이다: 어떤 묶음의 항목인 변수만 Quality 층 쓰기를 받는다(Config의 `QualityMember` 플래그를 없앤다). 구현은 Quality 층을 묶음 펼침 전용으로 둔다: 그 층에 직접 쓰는 입력(`AddLayerText`·`AddAssignment`·`Set`·`Unset`·`ClearLayer`)은 모두 거부하고(`LayerNotAllowed`), 펼침은 항목에만 쓰므로 항목이 아닌 변수는 Quality 층 값을 받을 길이 없다.
+- 같은 등급에 같은 변수 두 번, 같은 등급 두 번 정의, 기본 등급 미정의는 컴파일 오류다. 크기 한도는 이름 있는 상수 `MaxGroupLevels`(8)·`MaxEntriesPerLevel`(32)이다. consteval 안에서는 할당할 수 없으므로 `CVarGroup`은 이 고정 용량을 품는다(항목은 정의 주소 + `ScalarValue` 48 byte라 묶음 하나에 약 12 KiB의 정적 데이터). 묶음은 수십 개 이하라 받아들인다.
 - 프로젝트는 `Quality.json`(Config 6.1)에서 코드가 정의한 항목의 **값만** 바꿀 수 있다. 항목 추가는 코드에서 한다.
 - Config 6.1의 나머지 규칙은 그대로다: 사용자가 고른 등급은 사용자 층에 저장한다(묶음 변수는 늘 `UserSetting()`). 등급 조합이 장치 능력(`DeviceCaps`)으로 불가능하면 정해진 순서로 낮추고 사유를 진단에 남긴다.
 - 낮춘 등급은 묶음 변수에 쓰지 않는다. 묶음 변수(`ShadowGroup.Get()`)는 사용자가 고른 등급 그대로이고, 낮춤은 펼칠 때 쓰는 등급에만 적용된다. 그래서 Quality 층 항목 값이 낮춘 등급의 것이 된다. 사용자 층보다 약한 Quality 층에 등급을 써서는 효력이 없고, 고른 값을 덮어쓰면 장치가 바뀐 뒤 원래 선택을 잃기 때문이다. 펼친 등급은 Explain·진단에 `quality.shadow@1 (requested 3, lowered: <사유>)`로 보인다.
@@ -432,6 +432,7 @@ CVarGroup ShadowGroup = cvar::Group("quality.shadow", 2)
 | `BootSealed`·`ScopeNotAllowed` | 9절·8절 |
 | `UndefinedLevel`·`GroupNoConverge` | 11절·10절 |
 | `LateBound`·`UnresolvedName` | 이 절 |
+| `QualityLowered` | 정보: 조합 검증이 펼칠 등급을 낮췄다(11절 — 같은 결과는 다시 내지 않는다) |
 | `RestartRequired` | 봉인 뒤 파일 층(사용자 층 포함)이 부팅 변수를 바꿨다 — 재시작 대기(9절) |
 | `BootValueIgnored` | 봉인 뒤 파생·휘발 층이 부팅 변수를 바꾸려 했다 — 지금 값 유지(9절) |
 
@@ -694,6 +695,17 @@ public:
 - CVR6 후속: 콘솔 안내 문구의 형식 — 지금 진단은 `error BootSealed render.backend: is a boot variable…`이고 스펙(9절)은 `render.backend is a boot variable…`이다. CVR6 콘솔이 스펙 형식으로 출력한다.
 - CVR6 결정 항목: 설정 struct 필드의 콘솔 이름에 대한 콘솔 입력은 지금 `BootValueIgnored`(경고)이고 독립 설정은 `BootSealed`(거부)라 콘솔 경험이 갈린다. 필드 콘솔 이름에도 콘솔 직접 쓰기 거부를 걸지(`ConfigApply.cpp`의 필드 층 검사) CVR6에서 정한다.
 
+**CVR5 구현(2026-11-19, `feature/cvar`)**
+- `Config/CVarGroup.h`: `cvar::Group(name, 기본 등급)` → `GroupBuilder`(`Help`·`Category`·`Level(등급, {항목…})`·항목 없는 `Level(등급)`) → `CVarGroup`(`Get`·`Set`·`Clear`·`LevelCount`·`LevelAt`). 묶음 변수는 int32이고 늘 `UserSetting`, 허용 값은 정의된 등급뿐이다(검사 함수 `CheckGroupLevel` → `UndefinedLevel`). 정의는 `GroupDefinition`(공통 머리 `VarDefinition`의 `HandleKind::Group` 위에 등급 표)이라 `Register`가 `const VarDefinition*`를 받는 길 그대로 묶음을 받는다(CVR1 리뷰 L5 — 공통 머리는 종류 칸이다).
+- 컴파일 오류: 항목 타입 불일치(`static_assert`), `BootCVar` 항목(4.3절 문구), 같은 등급 두 번(`CVarError_DuplicateLevel`), 한 등급에 같은 변수 두 번(`CVarError_DuplicateEntry`), 기본 등급 미정의(`CVarError_DefaultLevelUndefined`), 등급 9개 이상(`CVarError_TooManyLevels`), 항목 33개 이상(`static_assert`). 항목 변수 값의 범위·`Validate`는 항목이 다른 .cpp 변수를 가리킬 수 있어(상수로 읽을 수 없다) 컴파일 때 보지 않고 펼칠 때 검사한다. 묶음 자신을 항목으로 넣는 것은 막지 않는다(순환은 `GroupNoConverge`).
+- 등록: 묶음 변수는 다른 변수처럼 칸·대기 값을 받고, 등급 표(항목 코드 값의 콘솔 표기)를 묶음 상태로 둔다. 펼침은 다음 Sync다(값은 sync 지점에서만 바뀐다 — 등록은 `dirty`만 켠다).
+- Sync 2단계(`ResolveGroups`): 앞 Sync의 펼침을 빼고, 펼칠 등급(처음은 앞 Sync가 펼친 등급, 처음 펼치면 묶음 변수 값)으로 묶음마다 Quality 층 입력(Console 종류, 태그 = 묶음 이름, 출처 `quality.shadow@2`)을 만든 뒤 콘솔 설정 값을 다시 계산한다. 묶음 변수의 새 유효 등급을 조합 검증(`ResolveQualityLevels`)으로 펼칠 등급으로 바꿔 펼친 등급과 같으면 멈추고, 다르면 다시 펼친다. `MaxGroupPasses`(8)번 안에 멈추지 않으면 마지막 결과와 Warning `GroupNoConverge`다. 세대는 Sync 전 값과 비교하므로 반복 중 갔다 돌아온 칸은 오르지 않는다. 항목 변수가 아직 등록되지 않았으면 펼침이 그 이름의 대기 값이 된다(등록 때 받는다 — 보류).
+- `Quality.json`(branch `Quality`, `{"<묶음>": {"<등급>": {"<항목>": 값}}}`): 엔진·엔진 플랫폼·프로젝트·프로젝트 플랫폼 파일 층만 받고(그 밖은 `LayerNotAllowed`), 넣을 때는 모양만 본다(묶음은 늦게 등록될 수 있다). 펼칠 때 가장 강한 파일의 값이 코드 값을 바꾼다. 항목 변수에 맞지 않는 값은 같은 (입력, 묶음, 등급, 항목)에 Error 한 번 뒤 코드 값이다. 모르는 묶음(`UnresolvedName`)·정의되지 않은 등급(`UndefinedLevel`)·그 등급의 코드 항목이 아닌 이름(`InvalidSetting`)은 `ReportUnresolved`가 Warning으로 한 번씩 알린다.
+- 조합 검증 연결: `ConfigContext::SetQualityValidation(규칙, 예산, 기기 특성)`(빌린다 — 규칙의 levels는 묶음 정의 등급으로 바꿔 쓴다), `HostSettingsOptions::qualityRules`·`qualityBudgets`(호스트가 코드로 정한다 — `HostSettings`가 기기 특성과 함께 넘기고 `ApplyDeviceTraits` 때 다시 넘긴다). 낮춘 등급은 묶음 변수에 쓰지 않고 펼칠 등급에만 쓴다. 결과는 `GetQualityLevels`(`QualityResolutionSet` — 요청·펼친 등급·사유·unmet·넘친 예산)와 낮춘 결과가 바뀔 때 Note `QualityLowered`(`quality.shadow@1 (requested 3, lowered: <사유>)`)다. Explain 표시는 CVR6이다.
+- 대체: Config `ConsoleSettingFlags::QualityMember`·`NotQualityMember`를 없앴다(하위 호환 경로 없음). CF2 독립 콘솔 설정은 묶음 항목이 될 수 없다(항목은 CVar 핸들) — CVR7에서 CVar로 옮기면 항목이 될 수 있다. 기기 프로필은 묶음 변수(`quality.shadow`)를 그대로 콘솔 이름으로 쓴다(층 7 > 6 — VD4 순서 그대로).
+- 등급 요구·비용을 어디서 정하는지(Config 6.1 CVR5 항목): 코드(호스트가 `QualityGroupRule`을 넘긴다)로 정했다. 기기 조건·예산은 기기 특성에 기대는 플랫폼별 조정이라 묶음 정의(consteval — 할당 없는 상수)에 넣기 어렵고, 데이터 파일 형식은 기기 프로필 조건과 함께 정할 일이라 미룬다(아래 후속).
+- 후속: 규칙의 데이터 파일 형식(`Quality.json`이나 기기 프로필에 둘지), `ScopedOverride`의 묶음 판(CVR3 범위와 함께), 묶음 Explain·`cvar.find` 표시(CVR6).
+
 **CVR1 이후 결정·후속 항목**
 - `Register`는 타입을 지운 `const cvar::detail::VarDefinition*`만 받는다. CVR5 `CVarGroup`·CVR6 `ConsoleCommand`가 같은 경로로 오려면 종류(`HandleKind`)를 가진 공통 정의 머리가 필요하다(지금 `VarDefinition`을 머리로 쓰고 종류별 꼬리를 덧붙이는 모양).
 - 플러그인(모듈)을 내릴 때의 처리가 스펙에 없다: 문맥이 핸들 정의 포인터를 쥐므로, 모듈 코드가 내려가면 포인터가 dangling이 된다. `Unregister` 또는 모듈 언로드 때 그 모듈 핸들을 문맥에서 빼는 규칙을 정해야 한다(결정 필요).
@@ -732,6 +744,7 @@ public:
 
 ## 23. 개정 이력
 
+- 개정 10(2026-11-19): CVR5 구현 결과를 20절에 적었다(`CVarGroup`·묶음 해결 반복·`Quality.json` 값 덮어쓰기·조합 검증 연결·`QualityMember` 대체). 11절의 항목 생성자(`SetArg<T>`)·정적 데이터 크기·Quality 층 직접 쓰기 거부, 12절 `QualityLowered`를 고쳤다.
 - 개정 9(2026-11-19): CVR4 리뷰 반영. 9절(봉인 Busy, 늦은 등록의 `BootSealed`, 문서 입력 전체 거부, 서버 층 분류, 봉인 전 snapshot assert 범위, 부팅 값 "같다"), 10.1절 부팅 블록 행(봉인 뒤 등록의 copy-on-write), 12절(`Register`가 바로 적용, 편집 거리 OSA), 20절 리뷰 반영 메모·CVR6 후속(콘솔 문구 형식, 설정 struct 필드 콘솔 쓰기 결정 항목).
 - 개정 8(2026-11-19): CVR4 구현 결과를 20절에 적었다(봉인과 부팅 블록, 직접 쓰기 `BootSealed`의 범위 — CF2 독립 콘솔 설정 포함·설정 struct 필드는 Config 규칙, `DescribeConsoleSetting`, `LateBound`, `ReportUnresolved`·Core 편집 거리, 진단 코드, `TakeDiagnostics`). 9절 CF3 비고를 고쳤다.
 - 개정 7(2026-11-19): CVR2 리뷰 반영. 4.2절에 float·double의 NaN·무한대 거부를, 6.2절에 `Set`의 반환(`ErrorCode`)과 거부 이유 출력(`SetOptions::reason`)·큐 한도는 다른 스레드 쓰기에만을, 6.3절에 `ScopedOverride`의 지우기가 값을 쓴 문맥으로 가고 소멸에 실패 경로가 없음을, 7.1절에 다른 문맥에만 등록된 핸들은 기본값임을, 10.1절에 한 스레드 여러 문맥의 묶음 규칙·묶음 깊이 확인·소유 스레드만 파괴·allocator 수명을 적었다.
