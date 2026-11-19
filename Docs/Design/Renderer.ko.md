@@ -1,6 +1,6 @@
 # 렌더러(Renderer) 설계
 
-기준일: 2026-11-20, 개정 10(초안). UE 5.8 Renderer 모듈이 맡는 일 가운데 **렌더 경로**(Forward+·Deferred)와 그 위에 올라가는 그림자·투명·하늘·안개·후처리의 구조, GI 두 축과 PathTracing 모드의 연결점을 Rocks에 세우는 설계 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-20, 개정 11(초안). UE 5.8 Renderer 모듈이 맡는 일 가운데 **렌더 경로**(Forward+·Deferred)와 그 위에 올라가는 그림자·투명·하늘·안개·후처리의 구조, GI 두 축과 PathTracing 모드의 연결점을 Rocks에 세우는 설계 스펙이다. 범위는 다음과 같다.
 - 장면 표현과 게임 → 렌더 전달, view와 가시성
 - 공통 frame graph, Forward+와 Deferred가 갈라지는 곳
 - GBuffer layout, light grid, 조명 평가, 그림자, 투명·하늘·안개, 후처리·업스케일 연결
@@ -854,7 +854,7 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 | RS9 | 고급 shading model(GBufferD), rect light·IES·광원 함수 atlas | RS2·RS3, 머티리얼 MS8(SF3) | 계획 14.2절 고급 직접 조명 검증, 모델별 Deferred 인코딩·Forward 평가 대조 |
 | RS10 | screen-space: SSR·contact shadow, Forward+ 보조 출력, 간접광 합성(F12) | RS2·RS6 | 순환 graph 거부(음성 대조), 두 경로 screen-space 영상 대조 |
 | RS11 | GI·RT 연결점: `IndirectLightingInputs`, `RayScene` 자리, `RenderMode::PathTracing` 골격(누적·리셋·후처리 연결) | RS10, 각 방식 스펙 | 방식 없음 view와 방식 있는 view의 직접광 동일, PathTracing 리셋 조건 시험, 미지원 장치 `Unsupported` |
-| RS12 | skinned 메시: 정점 입력 타입, 현재·이전 pose(velocity), 두 경로·그림자·투명. 섹션 본 palette 한도를 정해 메시 빌드에 준다, morph 희소 목록 적용(compute 또는 CPU)(MeshAnimationAssets MR2) | RS3·RS6, 애니메이션 skinning(계획 15절), MeshAnimationAssets MA5 | 계획 15절 "Deferred·Forward·shadow·picking에서 동일 pose", CPU skinning 기준 결과 대조, 계획 12.1절 U1 skinned motion(velocity) 시험 |
+| RS12 | skinned 메시: 정점 입력 타입, 현재·이전 pose(velocity), 두 경로·그림자·투명. 본 행렬은 LOD 통합 bone map 기준으로 `RGBA32Float` typed buffer에 현재·이전 pose를 쓴다(섹션 분할 없음 — RenderBase 결정 R18), morph 희소 목록 적용(compute 또는 CPU)(MeshAnimationAssets MR2) | RS3·RS6, 애니메이션 skinning(계획 15절), MeshAnimationAssets MA5 | 계획 15절 "Deferred·Forward·shadow·picking에서 동일 pose", CPU skinning 기준 결과 대조, 계획 12.1절 U1 skinned motion(velocity) 시험 |
 
 - 모든 GPU 시험은 검증 계층 오류 0(RenderBase 8절)과 렌더 lane·인라인 모드 결과 동일을 함께 요구한다.
 - 기준 영상은 계획 29.2절대로 장면 manifest·카메라 경로·seed·build hash를 고정한다. Vulkan·GLES가 CI에서 NOT RUN이면 로컬 결과를 기록한다(RenderBase 18.1절과 같다).
@@ -978,3 +978,4 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 - 개정 8(2026-11-18): RenderBase 개정 16·셰이더 시스템 개정 17(교차 검증 반영)에 맞췄다. 8.1절 원소 상한과 셀 좌표 clamp, 8.2절 MSAA resolve 범위(결정 R17), 8.3절 반사 capture 알파, 9.2절과 결정 RN10의 point 한 번 그리기를 layer가 아니라 viewport 출력으로 바로잡음, 13.1절 지원표 행, 15.2절 `PrecomputedLighting` 그리기별 바인딩·`ForwardLight` local 광원 수·`Scene`의 `ViewSet` 단위·상수 버퍼 예산, 결정 RN9 재검토 조건, 19.2절 측정 두 건, 18.1절 RQ4·7·8·14–17 행.
 - 개정 9(2026-11-18): Graphics GX1–GX4 구현(98b6e524)을 18절 RQ1·RQ3·RQ4·RQ5에 적었다.
 - 개정 10(2026-11-20): 메시 에셋 스펙(MeshAnimationAssets 개정 2)을 18절 RQ19에 연결했다. RS12에 섹션 본 palette 한도·morph 적용 책임(MR2)을 적었다.
+- 개정 11(2026-11-20): RenderBase 결정 R18(섹션 분할 없음·LOD 통합 bone map·typed buffer 본 행렬)에 맞춰 RS12 내용을 고쳤다.
