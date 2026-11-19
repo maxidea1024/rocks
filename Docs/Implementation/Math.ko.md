@@ -127,21 +127,25 @@ UE와 의도적으로 다른 점(오류·정확도 정책, 요구 3절 "규약�
 
 ## 2.1 기본 도형과 충돌 판정
 
-`Shapes.h`는 `Plane`, `Ray`, `Segment`, `Sphere`, `Box`(AABB), `Triangle`, `Capsule`, `OrientedBox`를 float/double 템플릿으로 제공하고, `Intersection.h`는 순수 함수 판정을 제공한다.
+`Shapes.h`는 `Plane`, `Ray`, `Segment`, `Sphere`, `Box`(AABB), `Triangle`, `Capsule`, `Cylinder`, `OrientedBox`를 float/double 템플릿으로 제공하고, `Intersection.h`는 순수 함수 판정을 제공한다. `Cylinder`는 설계 [Cylinder 형상](../Design/CylinderShape.ko.md) CY1의 구현이다(2026-11-19).
 
 | 분류 | 함수 | 지원 조합 |
 |---|---|---|
-| 광선 | `Raycast(ray, shape, maxDistance)` → `RayHit`(결과·거리·점·법선·`startedInside`) | Plane, Sphere, Box, Triangle(양면 기본, `FrontOnly` 선택), Capsule, OrientedBox |
-| 선분 | `SegmentCast(segment, shape)` → `SegmentHit`(t ∈ [0,1]) | Plane, Sphere, Box, Triangle |
-| 겹침 | `Overlap(a, b)` → `QueryResult{Miss, Hit, InvalidInput}` | Sphere–Sphere, Sphere–Box, Box–Box, Box–Plane, Sphere–Plane, Capsule–Sphere, Capsule–Capsule, Sphere–Triangle, OrientedBox–OrientedBox(분리축 15개), 양방향 |
-| 평면 분류 | `ClassifyPlaneSide` → `Front/Back/Intersecting/InvalidInput` | Box, Sphere |
-| 포함·최근접 | `ContainsPoint`, `TryClosestPoint`, `TryDistanceSquared`, `TrySignedDistance`, `TryClosestPoints(segment, segment)` | Box·Sphere·Capsule·OrientedBox 포함, Plane·Segment·Box·Triangle·OrientedBox 최근접 |
+| 광선 | `Raycast(ray, shape, maxDistance)` → `RayHit`(결과·거리·점·법선·`startedInside`) | Plane, Sphere, Box, Triangle(양면 기본, `FrontOnly` 선택), Capsule, Cylinder, OrientedBox |
+| 선분 | `SegmentCast(segment, shape)` → `SegmentHit`(t ∈ [0,1]) | Plane, Sphere, Box, Triangle, Cylinder |
+| 겹침 | `Overlap(a, b)` → `QueryResult{Miss, Hit, InvalidInput}` | Sphere–Sphere, Sphere–Box, Box–Box, Box–Plane, Sphere–Plane, Capsule–Sphere, Capsule–Capsule, Capsule–Plane, Cylinder–Sphere, Cylinder–Plane, Segment–Cylinder, Sphere–Triangle, OrientedBox–OrientedBox(분리축 15개), ConvexVolume–Box/Sphere/Capsule/Cylinder, 양방향 |
+| 평면 분류 | `ClassifyPlaneSide` → `Front/Back/Intersecting/InvalidInput` | Box, Sphere, Capsule, Cylinder |
+| 볼록 영역 | `ClassifyContainment(volume, shape)` → `Outside/Inside/Intersecting/InvalidInput`, `Overlap(volume, shape)` | Box, Sphere, Capsule, Cylinder(구 대 Box 포함은 `ClassifyContainment(sphere, box)`) |
+| 경계 | `TryBounds(shape)` → `Result<Box>` | Cylinder(반올림을 거쳐도 형상 전체를 포함) |
+| 포함·최근접 | `ContainsPoint`, `TryClosestPoint`, `TryDistanceSquared`, `TrySignedDistance`, `TryClosestPoints(segment, segment)` | Box·Sphere·Capsule·Cylinder·OrientedBox 포함, Plane·Segment·Box·Triangle·Cylinder·OrientedBox 최근접 |
 
 계약: 모든 도형은 닫힌 집합이며 경계 접촉은 Hit이다. `OrientedBox`는 `IsValid`가 회전 길이 오차(`ShapeUnitTolerance`)를 허용하므로 축·좌표 변환과 모든 판정이 `UnitRotation()`(정규화한 회전)을 쓴다. 평면 광선 판정은 거의 평행해 거리가 overflow하면 Miss다. 광선·선분의 시작점이 삼각형 위(평면 위 정확 판정)면 방향과 무관하게 거리 0 Hit(공면 포함, FrontOnly는 앞면 진입일 때만)이고, 시작점이 삼각형 밖인 공면 광선·선분은 Miss다. 선분 끝점이 삼각형 위면 계산된 t가 1을 넘어도 t = 1 Hit(들어오는 면은 시작점 쪽), capsule 옆면 위에서 출발한 광선은 거리 0 Hit다. OBB 판정은 매 호출 회전을 정규화하므로 `ContainsPoint(OBB)`가 약 9 ns → 16 ns(x64 /O2)로 느려졌다(정확성 우선). 시작 접촉 거리는 +0이다. `maxDistance`는 T로 변환된 뒤 검사한다(float 도형에 double을 넘기면 −1e-50은 −0으로, float 범위 밖은 +Inf로 바뀜). 겹침 판정에 숨은 epsilon이 없고, 유일한 허용치는 OrientedBox 분리축의 평행 축 보정 `ObbParallelEpsilon`(float 1e-6, double 1e-12, 인자로 변경 가능)이다. 비유한 값·음수 반지름·뒤집힌 box·비단위 방향/회전·NaN 또는 음수 `maxDistance`는 Miss/Hit로 숨기지 않고 `InvalidInput`이다. 광선 방향은 단위 벡터가 전제(`Ray::TryMake`가 정규화)이며 거리는 실제 거리다. 고체 안에서 시작한 광선은 거리 0, `startedInside=true`, 법선 0 벡터다. 퇴화 삼각형은 mesh에 흔하므로 광선·선분에서 Miss로 처리하고 최근접·구 겹침에서는 선분·점으로 다룬다. 공유 변을 가진 삼각형 집합의 watertight 판정은 보장하지 않는다.
 
+Cylinder(CY1): `{start, end, radius}`(Capsule과 같은 표현)이며 선분 × 원판의 닫힌 곱집합이다. `TryMake`·`IsValid`는 같은 규칙으로 radius > 0이면 `end − start`의 `TryNormalize` 성공을 요구한다(start == end인 원판과 차이 overflow 거부, `TryNormalize`가 가장 큰 성분으로 먼저 나누므로 성분 1e−200 같은 아주 작은 축은 유효). radius 0은 선분·점이며 모든 판정이 Capsule radius 0과 같은 선분 경로다. 점 포함·거리는 끝점별 축 좌표 (p − start)·a ≥ 0, (p − end)·a ≤ 0과 수직 성분 v = (p − start) − t·a로 계산해(|p − s|² − t² 꼴은 긴 축에서 소거) p == start·end가 정확히 Hit이고, 거리²는 축 방향·수직 방향 초과분의 제곱합이다. 광선·선분은 축 slab 구간과 옆면 2차식 구간의 교집합이며(모서리 동률은 끝면 법선, 축 평행·끝면 평면 안 스침은 Hit, 선분 끝점이 안이면 t = 1 보정), 평면·볼록 영역 분류는 두 끝면 중심의 부호 거리와 원판 support r·|n × a|를 비교한다(√(1 − (n·a)²) 꼴 없음, 비단위 normal에도 정확). `TryBounds`는 반폭 r·√(d_j² + d_k²)/|d|를 가장 큰 성분으로 나눠 계산하고 상대 여유 1 + 8ε(`detail::CylinderBoundsRelativeMargin`), 축 비율 하한(정규 최소값의 2배, 비정규 절대 오차 증폭 방지), 반폭 한 ulp와 끝점 ± 반폭의 `NextDown`·`NextUp` 한 ulp 바깥 보정으로 포함을 계산으로 보장한다. Capsule 보강: `ClassifyPlaneSide(plane, capsule)`·`Overlap(capsule, plane)`·`ClassifyContainment(volume, capsule)`·`Overlap(volume, capsule)`(support (H/2)|n·a| + r를 끝점 거리 ± r로 계산, start == end이면 Sphere 판정과 비트 단위로 같음).
+
 UE 5.8 원본과의 차이(원본 확인 — `Math/Sphere.h`·`CapsuleShape.h`·`Box.h`·`Plane.h`·`Ray.h`·`OrientedBox.h`·`Private/Math/UnrealMath.cpp`, 5.6과 견줘 인라인 지시어·로그 매크로만 바뀌었다): `TSphere::Intersects/IsInside`와 `FCapsuleShape::IsInside`는 기본 1e-4 허용치를, `LineBoxIntersection`·`LineExtentBoxIntersection`은 `BOX_SIDE_THRESHOLD=0.1`을, `SegmentPlaneIntersection`은 ±1e-4 t 허용치를, `SegmentDistToSegment*`는 절대 1e-4 임계값을 쓴다. UE `TPlane(A,B,C)`는 일직선 점에서 영 법선 평면을 만들지만 Rocks `TryFromPoints`는 실패한다. `Ray` 기본 방향은 UE `TRay`와 같은 +Z다(3단계 전에는 +X였다). UE `FOrientedBox`에는 교차 함수가 없다.
 
-검증: 13개 도형 테스트와 33개 판정 테스트(리뷰 회귀 5개 포함)가 고정 seed 무작위 사례를 독립 double oracle(축별 최소화·황금분할 탐색·조밀 표본·해석해·SDF 근 찾기·독립 15축 분리축)과 비교하고 모든 겹침 쌍의 대칭을 확인한다. 미구현: frustum, swept shape, 접촉 깊이·manifold, Segment–Capsule/OBB, OBB–Sphere/Box, Capsule–Box/Triangle.
+검증: 13개 도형 테스트와 33개 판정 테스트(리뷰 회귀 5개 포함)가 고정 seed 무작위 사례를 독립 double oracle(축별 최소화·황금분할 탐색·조밀 표본·해석해·SDF 근 찾기·독립 15축 분리축)과 비교하고 모든 겹침 쌍의 대칭을 확인한다. Cylinder·Capsule 보강은 `IntersectionCylinderTests.cpp`의 12개 테스트(float·double)가 확인한다: 경계 포함은 표본 점이 아니라 정확 산술 oracle(모든 double을 공통 2의 거듭제곱으로 정수화해 간격 g ≥ 0, g²·|D|² ≥ r²·(D_j² + D_k²)를 큰 정수로 판정)로 고정 사례(리뷰 반례 start (0, 0, 0)·end (1000, 1e−6, 0)·r 1e4, 원점 10⁹ cm, 큰 반경, 축 비율이 비정규인 (1, 1e−310, 0)·r 1e30, 최소 비정규 반경)와 무작위 dyadic 1,500건×2를 판정하고 꽉 맞는 경계보다 상대 32ε와 몇 ulp 이상 넓지 않음도 본다. 점 포함·최근접·거리·구 겹침은 외적 기반 독립 SDF oracle과 3,000건×2, 광선·선분은 SDF 근 찾기 oracle과 2,000건×2, 평면·볼록 영역 분류는 중심 ± √ 꼴 support oracle과 3,000건×2를 대조하며, 고정 사례로 거의 평행한 normal(support 1e−5)·비단위 normal·긴 축(H 1e9, r 1)의 수직 거리·축 평행·끝면 평면 안 스침·시작점 안/경계·maxDistance가 정확히 진입 거리·모서리 동률 끝면 법선·radius 0·퇴화 거부·모든 겹침 쌍 대칭을 고정한다. 미구현: frustum, swept shape, 접촉 깊이·manifold, Segment–Capsule/OBB, OBB–Sphere/Box, Capsule–Box/Triangle, Cylinder 대 Box·OrientedBox·Capsule·Cylinder·Triangle 겹침·구 sweep·선분 거리(설계 결정 1).
 
 ## 3. 색
 
