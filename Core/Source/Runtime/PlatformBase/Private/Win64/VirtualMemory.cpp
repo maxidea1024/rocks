@@ -5,7 +5,7 @@
 namespace rocks::platform {
 namespace {
 
-VirtualMemoryResult Success() noexcept {
+VirtualMemoryResult VirtualMemorySuccess() noexcept {
     return {VirtualMemoryCode::Success, 0};
 }
 VirtualMemoryResult OsFailure() noexcept {
@@ -22,7 +22,7 @@ VirtualMemoryResult QueryVirtualMemoryInfo(VirtualMemoryInfo& info) noexcept {
     }
     info = {static_cast<usize>(native.dwPageSize),
             static_cast<usize>(native.dwAllocationGranularity)};
-    return Success();
+    return VirtualMemorySuccess();
 }
 
 VirtualMemoryResult QueryPhysicalMemory(uint64& totalBytes) noexcept {
@@ -33,7 +33,7 @@ VirtualMemoryResult QueryPhysicalMemory(uint64& totalBytes) noexcept {
     }
 
     totalBytes = static_cast<uint64>(status.ullTotalPhys);
-    return Success();
+    return VirtualMemorySuccess();
 }
 
 namespace detail {
@@ -44,21 +44,21 @@ VirtualMemoryResult ReserveVirtualMemory(usize bytes, void*& address) noexcept {
         return OsFailure();
     }
     address = result;
-    return Success();
+    return VirtualMemorySuccess();
 }
 
 VirtualMemoryResult CommitVirtualMemory(void* address, usize bytes) noexcept {
     if (VirtualAlloc(address, bytes, MEM_COMMIT, PAGE_READWRITE) == nullptr) {
         return OsFailure();
     }
-    return Success();
+    return VirtualMemorySuccess();
 }
 
 VirtualMemoryResult DecommitVirtualMemory(void* address, usize bytes) noexcept {
     if (!VirtualFree(address, bytes, MEM_DECOMMIT)) {
         return OsFailure();
     }
-    return Success();
+    return VirtualMemorySuccess();
 }
 
 VirtualMemoryResult ReleaseVirtualMemory(void* address, usize bytes) noexcept {
@@ -67,7 +67,7 @@ VirtualMemoryResult ReleaseVirtualMemory(void* address, usize bytes) noexcept {
     if (!VirtualFree(address, 0, MEM_RELEASE)) {
         return OsFailure();
     }
-    return Success();
+    return VirtualMemorySuccess();
 }
 
 } // namespace detail

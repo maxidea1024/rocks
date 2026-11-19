@@ -8,7 +8,7 @@ namespace {
 VirtualMemoryResult Success() noexcept {
     return {VirtualMemoryCode::Success, 0};
 }
-VirtualMemoryResult Error(VirtualMemoryCode code) noexcept {
+VirtualMemoryResult VirtualMemoryError(VirtualMemoryCode code) noexcept {
     return {code, 0};
 }
 
@@ -23,7 +23,7 @@ VirtualMemoryRegion::~VirtualMemoryRegion() noexcept {
 VirtualMemoryResult VirtualMemoryRegion::Reserve(usize bytes) noexcept {
     LockGuard lock(mutex_);
     if (address_ != nullptr) {
-        return Error(VirtualMemoryCode::AlreadyReserved);
+        return VirtualMemoryError(VirtualMemoryCode::AlreadyReserved);
     }
 
     VirtualMemoryInfo info{};
@@ -32,7 +32,7 @@ VirtualMemoryResult VirtualMemoryRegion::Reserve(usize bytes) noexcept {
         return queried;
     }
     if (info.pageSize == 0 || bytes == 0 || bytes % info.pageSize != 0) {
-        return Error(VirtualMemoryCode::InvalidArgument);
+        return VirtualMemoryError(VirtualMemoryCode::InvalidArgument);
     }
 
     void* address = nullptr;
@@ -59,15 +59,15 @@ VirtualMemoryResult VirtualMemoryRegion::Decommit(usize offset, usize bytes) noe
 VirtualMemoryResult VirtualMemoryRegion::Change(usize offset, usize bytes, bool commit) noexcept {
     LockGuard lock(mutex_);
     if (address_ == nullptr) {
-        return Error(VirtualMemoryCode::NotReserved);
+        return VirtualMemoryError(VirtualMemoryCode::NotReserved);
     }
     if (poisoned_) {
-        return Error(VirtualMemoryCode::Poisoned);
+        return VirtualMemoryError(VirtualMemoryCode::Poisoned);
     }
     // 뺄셈으로 먼저 범위를 검사해 offset + bytes가 overflow하지 않도록 한다.
     if (bytes == 0 || offset % pageSize_ != 0 || bytes % pageSize_ != 0 || offset > size_ ||
         bytes > size_ - offset) {
-        return Error(VirtualMemoryCode::InvalidArgument);
+        return VirtualMemoryError(VirtualMemoryCode::InvalidArgument);
     }
 
     auto* start = static_cast<uint8*>(address_) + offset;
