@@ -587,6 +587,9 @@ internal static partial class SelfTests
                     "struct CaseA { int Same; static int Count(); };\nconstexpr int LimitA = 4;\n}\nint Public() { int Local = 1; return HelperA(Local); }\n}\n"),
                 ("B.cpp", "#include <a.h>\nnamespace rocks {\nnamespace {\nint HelperB(int value) { return value; }\nstruct CaseB { int Same; };\n}\n" +
                     "int Other() { int Local = 2; return HelperB(Local); }\n}\nnamespace rocks::detail {\nnamespace {\nint HelperA(int value) { return value; }\n}\n}\n"),
+                // 같은 별칭과 같은 using 선언을 두 파일이 똑같이 적는 것은 충돌이 아니다.
+                ("E.cpp", "#include <a.h>\nnamespace rocks {\nnamespace {\nusing Wide = unsigned long long;\nusing detail::Shared;\n}\n}\n"),
+                ("F.cpp", "#include <a.h>\nnamespace rocks {\nnamespace {\nusing Wide = unsigned long long;\nusing detail::Shared;\n}\n}\n"),
                 ("C.c", "static int HelperA(int value) { return value; }\n"),
                 ("D.cpp", "#define SETTING 1\n#include <a.h>\nnamespace rocks {\nnamespace {\nint HelperA(int value) { return value; }\n}\n}\n")).Count == 0,
                 "distinct file-local names were rejected");
@@ -594,11 +597,12 @@ internal static partial class SelfTests
             var collisions = Check(
                 ("A.cpp", "#include <a.h>\nnamespace rocks {\nnamespace {\nint Helper(int value) { return value; }\nstruct Case { int x; };\n" +
                     "int counter = 0;\ntemplate <class T> T Clamp(T value) { return value; }\nusing Alias = int;\nenum class Kind : int { A };\n}\n" +
-                    "static int Free() { return 1; }\nconstexpr int Limit = 4;\nconst int Size = 2;\n}\n"),
+                    "static int Free() { return 1; }\nconstexpr int Limit = 4;\nconst int Size = 2;\nnamespace {\nusing detail::Imported;\n}\n}\n"),
                 ("B.cpp", "#include <a.h>\nnamespace rocks {\nnamespace {\n\nint Helper(long value) { return 2; }\nstruct Case final : Base { int y; };\n" +
                     "int counter{1};\ntemplate <class T> T Clamp(T value, T low) { return value; }\nusing Alias = long;\nenum class Kind : int { B };\n}\n" +
-                    "static int Free() { return 2; }\nconstexpr int Limit = 5;\nconst int Size = 3;\n}\n"));
-            var expected = Enumerable.Range(5, 6).Concat(Enumerable.Range(12, 3)).Select(line => (module + "B.cpp", line, "unity-file-local-name")).ToHashSet();
+                    "static int Free() { return 2; }\nconstexpr int Limit = 5;\nconst int Size = 3;\nnamespace {\nconstexpr int Imported = 1;\n}\n}\n"));
+            // B.cpp의 5–10줄(익명 namespace), 12–14줄(static·constexpr·const), 16줄(A의 using 선언이 들인 이름과 같은 변수)이다.
+            var expected = Enumerable.Range(5, 6).Concat(Enumerable.Range(12, 3)).Append(16).Select(line => (module + "B.cpp", line, "unity-file-local-name")).ToHashSet();
             Verify.That(collisions.SetEquals(expected), "file-local name collisions: " + string.Join("; ", collisions.Order()));
 
             // 파일 범위 using: rocks와 그 하위만 통과한다. namespace·함수 안의 지시문은 대상이 아니다.

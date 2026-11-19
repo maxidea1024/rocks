@@ -76,7 +76,7 @@ public static partial class PolicyChecks
     public static IReadOnlyList<CheckFailure> UnityModuleCollisions(string root, string module, IReadOnlyList<string> sources)
     {
         var failures = new List<CheckFailure>();
-        var names = new Dictionary<string, (string Path, int Line)>(StringComparer.Ordinal);
+        var names = new Dictionary<string, (string Path, int Line, string? Same)>(StringComparer.Ordinal);
         foreach (string source in sources.Order(StringComparer.Ordinal))
         {
             if (!UnitySourceExtensions.Contains(Path.GetExtension(source)) || !File.Exists(source))
@@ -93,11 +93,12 @@ public static partial class PolicyChecks
             string relative = Relative(root, source);
             List<UnityToken> tokens = UnityTokens(text);
             UnityDirectiveChecks(relative, tokens, failures);
-            foreach ((string name, int line) in UnityFileLocalNames(relative, tokens, failures))
+            foreach ((string name, int line, string? same) in UnityFileLocalNames(relative, tokens, failures))
             {
                 if (names.TryGetValue(name, out var first))
                 {
-                    if (first.Path != relative)
+                    // 같은 별칭·using 선언을 두 파일이 똑같이 적은 것은 충돌이 아니다(같은 대상의 재선언은 한 번역 단위에서도 적법하다).
+                    if (first.Path != relative && (same is null || same != first.Same))
                     {
                         failures.Add(new(relative, line, "unity-file-local-name",
                             $"module {module}: file-local name '{name}' is also declared in {first.Path}:{first.Line}; in a unity batch the two " +
@@ -106,7 +107,7 @@ public static partial class PolicyChecks
                 }
                 else
                 {
-                    names.Add(name, (relative, line));
+                    names.Add(name, (relative, line, same));
                 }
             }
         }
@@ -357,10 +358,12 @@ public static partial class PolicyChecks
     };
 
     // namespace 범위의 파일 지역 선언 이름(이름공간 경로 포함)과 줄이다. 전역 using namespace 위반도 여기서 낸다.
-    private static List<(string Name, int Line)> UnityFileLocalNames(string relative, List<UnityToken> all, List<CheckFailure> failures)
+    // Same은 별칭(using 이름 = …)과 using 선언(using A::B)의 선언문 전체다 — 두 파일의 선언문이 같으면 충돌로 보지 않는다. 그 밖의
+    // 선언은 null이다.
+    private static List<(string Name, int Line, string? Same)> UnityFileLocalNames(string relative, List<UnityToken> all, List<CheckFailure> failures)
     {
         List<UnityToken> tokens = all.Where(token => token.Kind != UnityTokenKind.Directive).ToList();
-        var result = new List<(string Name, int Line)>();
+        var result = new List<(string Name, int Line, string? Same)>();
         // 범위 스택: namespace면 이름(익명은 빈 문자열, extern "C" 블록은 null이 아닌 투명 표지 "\"C\""), 그 밖(클래스·함수 본문)은 null이다.
         var scopes = new List<string?>();
         const string Transparent = "\"";
@@ -514,20 +517,34 @@ public static partial class PolicyChecks
                 continue;
             }
 
+            bool anonymous = scopes.Any(scope => scope is { Length: 0 });
+            string path = string.Join("::", scopes.Where(scope => scope is { Length: > 0 } && scope != Transparent));
+            // using 선언(using A::B;)은 그 이름을 이 namespace에 들인다. 익명 namespace 안이면 다른 파일의 같은 이름 선언과 부딪힌다.
+            if (head[0].Text == "using" && head.Count >= 4 && head[^1].Kind == UnityTokenKind.Identifier && head[^2].Text == "::" &&
+                !head.Any(part => part.Text == "="))
+            {
+                if (anonymous)
+                {
+                    result.Add((path.Length == 0 ? head[^1].Text : path + "::" + head[^1].Text, head[0].Line,
+                        string.Concat(head.Select(part => part.Text))));
+                }
+
+                continue;
+            }
+
             if (UnityDeclaredName(head) is not (string declared, bool variable, int line))
             {
                 continue;
             }
 
-            bool anonymous = scopes.Any(scope => scope is { Length: 0 });
             var specifiers = head.TakeWhile(part => part.Kind != UnityTokenKind.Punctuation || part.Text is "[" or "]" or "<" or ">" or "," or "::")
                 .Select(part => part.Text).ToHashSet(StringComparer.Ordinal);
             bool local = anonymous || specifiers.Contains("static") || specifiers.Contains("constexpr") ||
                 (variable && specifiers.Contains("const") && !specifiers.Contains("extern") && !specifiers.Contains("inline"));
             if (local)
             {
-                string path = string.Join("::", scopes.Where(scope => scope is { Length: > 0 } && scope != Transparent));
-                result.Add((path.Length == 0 ? declared : path + "::" + declared, line));
+                bool alias = head[0].Text == "using";
+                result.Add((path.Length == 0 ? declared : path + "::" + declared, line, alias ? string.Concat(head.Select(part => part.Text)) : null));
             }
         }
 
