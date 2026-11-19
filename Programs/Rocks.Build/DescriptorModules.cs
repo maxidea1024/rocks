@@ -173,6 +173,7 @@ public sealed class DescriptorModuleSet
             }
         }
 
-        return included;
+        // 기술자의 loadingPhase를 모듈 표 행으로 넘긴다(Docs/Design/ModuleLoader.ko.md 3.2절).
+        return included.Select(rule => rule with { LoadingPhase = modules[rule.Name].Descriptor.LoadingPhase }).ToList();
     }
 }

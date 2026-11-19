@@ -46,6 +46,14 @@ FileStatus Adopt(DynamicLibrary::State*& state, uptr handle) noexcept {
     return {};
 }
 
+// 호출 시작에 문구 칸을 비운다(앞 실패의 문구가 남지 않게).
+void ClearError(DynamicLibraryError* error) noexcept {
+    if (error != nullptr) {
+        error->text[0] = '\0';
+        error->truncated = false;
+    }
+}
+
 bool IsSeparator(char value) noexcept {
     return value == '/' || value == '\\';
 }
@@ -90,7 +98,9 @@ DynamicLibrary::~DynamicLibrary() noexcept {
     Release(state_);
 }
 
-FileStatus DynamicLibrary::Open(const char* absolutePath, usize pathBytes) noexcept {
+FileStatus DynamicLibrary::Open(const char* absolutePath, usize pathBytes,
+                                DynamicLibraryError* error) noexcept {
+    ClearError(error);
     if (state_ != nullptr) {
         return {FileCode::AlreadyOpen, 0};
     }
@@ -100,7 +110,7 @@ FileStatus DynamicLibrary::Open(const char* absolutePath, usize pathBytes) noexc
     }
 
     uptr handle = 0;
-    FileStatus status = detail::DynamicLibraryOpenPath(absolutePath, pathBytes, handle);
+    FileStatus status = detail::DynamicLibraryOpenPath(absolutePath, pathBytes, handle, error);
     if (!status) {
         return status;
     }
@@ -116,7 +126,9 @@ FileStatus DynamicLibrary::Open(const char* absolutePath) noexcept {
     return Open(absolutePath, strlen(absolutePath));
 }
 
-FileStatus DynamicLibrary::OpenSystem(const char* name, usize nameBytes) noexcept {
+FileStatus DynamicLibrary::OpenSystem(const char* name, usize nameBytes,
+                                      DynamicLibraryError* error) noexcept {
+    ClearError(error);
     if (state_ != nullptr) {
         return {FileCode::AlreadyOpen, 0};
     }
@@ -126,7 +138,7 @@ FileStatus DynamicLibrary::OpenSystem(const char* name, usize nameBytes) noexcep
     }
 
     uptr handle = 0;
-    FileStatus status = detail::DynamicLibraryOpenSystem(name, nameBytes, handle);
+    FileStatus status = detail::DynamicLibraryOpenSystem(name, nameBytes, handle, error);
     if (!status) {
         return status;
     }
@@ -233,6 +245,32 @@ FileStatus DynamicLibrary::Close() noexcept {
     state->~State();
     AlignedFree(state);
     return status;
+}
+
+void detail::CopyDynamicLibraryErrorText(const char* text, DynamicLibraryError* error) noexcept {
+    if (error == nullptr) {
+        return;
+    }
+
+    const usize length = text == nullptr ? 0 : strlen(text);
+    usize count = length;
+    constexpr usize capacity = DynamicLibraryError::MaxTextBytes - 1u;
+    if (count > capacity) {
+        // 잘린 자리가 UTF-8 문자 중간이면(다음 byte가 이어짐 byte 10xxxxxx) 그 문자 시작까지
+        // 물린다.
+        count = capacity;
+        while (count > 0 && (static_cast<unsigned char>(text[count]) & 0xC0u) == 0x80u) {
+            --count;
+        }
+
+        error->truncated = true;
+    }
+
+    if (count != 0) {
+        MemoryCopy(error->text, text, count);
+    }
+
+    error->text[count] = '\0';
 }
 
 DynamicLibraryLease& DynamicLibraryLease::operator=(DynamicLibraryLease&& other) noexcept {

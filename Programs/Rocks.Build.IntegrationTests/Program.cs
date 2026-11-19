@@ -72,12 +72,18 @@ try
         Require(bindingsEntry.GetProperty("Descriptor").GetString() == "Metadata/CoreTypeBindings/CoreTypeBindings.rocksmeta.json" &&
             bindingsEntry.GetProperty("IdentityManifest").GetString() == "Metadata/CoreTypeBindings/CoreTypeBindings.rocksids.json",
             "Engine SDK manifest does not name the CoreTypeBindings descriptor and identity manifest");
-        // manifest 버전 5는 Build/Build.version 값을 EngineVersion {Major, Minor, Patch}로 담고, 그 파일 자체는 SDK에 없다.
+        // manifest 버전 6: 5는 Build/Build.version 값을 EngineVersion {Major, Minor, Patch}로 담고(그 파일 자체는 SDK에 없다), 6은 모듈 표
+        // 표지를 담는다(Core가 ProvidesModuleTable, 서드파티 모듈이 ThirdParty — Docs/Design/ModuleLoader.ko.md 3.9절).
+        var sdkModules = engineManifest.RootElement.GetProperty("Modules").EnumerateArray().ToArray();
+        Require(sdkModules.Single(module => module.GetProperty("Name").GetString() == "Core").GetProperty("ProvidesModuleTable").GetBoolean() &&
+            sdkModules.Single(module => module.GetProperty("Name").GetString() == "Zstd").GetProperty("ThirdParty").GetBoolean() &&
+            !sdkModules.Single(module => module.GetProperty("Name").GetString() == "Core").GetProperty("ThirdParty").GetBoolean(),
+            "Engine SDK manifest does not carry the module table markers");
         var sdkEngine = engineManifest.RootElement.GetProperty("EngineVersion");
-        Require(engineManifest.RootElement.GetProperty("Version").GetInt32() == 5 &&
+        Require(engineManifest.RootElement.GetProperty("Version").GetInt32() == 6 &&
             sdkEngine.GetProperty("Major").GetInt32() == engineVersion.Major && sdkEngine.GetProperty("Minor").GetInt32() == engineVersion.Minor &&
             sdkEngine.GetProperty("Patch").GetInt32() == engineVersion.Patch && sdkEngine.EnumerateObject().Count() == 3,
-            "Engine SDK manifest version 5 does not carry the Build/Build.version engine version: " + sdkEngine.GetRawText());
+            "Engine SDK manifest version 6 does not carry the Build/Build.version engine version: " + sdkEngine.GetRawText());
     }
 
     Require(!Directory.GetFiles(sdk, "Build.version", SearchOption.AllDirectories).Any(), "Installed SDK copied Build/Build.version");
@@ -128,6 +134,13 @@ try
         "Game build compiled an engine module or failed");
     var run = await ProcessRunner.RunAsync(new(initial.ModuleOutputs["SampleGame"], [], game, toolchain.Environment));
     Require(run.ExitCode == 0, "External game's generated CLASS/PROPERTY runtime failed");
+    // 모듈 표(Docs/Design/ModuleLoader.ko.md 3.2절): SDK Core(ProvidesModuleTable)에 닿는 게임 실행 파일은 모듈 표 TU를 가진다. 표는 SDK 모듈의
+    // 진입점과 게임 모듈 자신(템플릿의 SampleGameModule.cpp)을 참조하고 서드파티 모듈은 싣지 않는다. 링크가 성공했으므로 모든 진입점이 있다.
+    var gameTable = File.ReadAllText(Path.Combine(output, "GeneratedSources/SampleGame/SampleGame.ModuleTable.cpp"));
+    Require(gameTable.Contains("{\"Core\", &RocksModuleEntry_Core, nullptr, 0,", StringComparison.Ordinal) &&
+        gameTable.Contains("{\"SampleGame\", &RocksModuleEntry_SampleGame,", StringComparison.Ordinal) &&
+        !gameTable.Contains("Zstd", StringComparison.Ordinal) && !gameTable.Contains(sdk, StringComparison.OrdinalIgnoreCase),
+        "Game module table does not list the SDK modules and the game module:\n" + gameTable);
     Pass("read-only-sdk-external-game-reflection", timer.Elapsed);
 
     // 빌드 주입 상수(B7): SDK의 Core(ProvidesBuildInfo)에 닿는 게임 실행 파일에 BuildInfo TU가 들어가고, manifest는 SDK 경로를
@@ -770,20 +783,20 @@ try
         "Incompatible SDK configuration was silently accepted");
     Pass("sdk-configuration-mismatch", timer.Elapsed);
 
-    // 엔진 버전 이전 SDK(manifest 버전 4 — 생성 TU의 CurrentEngineVersion 값이 없다)는 버전 불일치로 거부하고, 버전 5인데
+    // 이전 SDK(manifest 버전 5 — 모듈 표 표지 ProvidesModuleTable·ThirdParty가 없다)는 버전 불일치로 거부하고, 버전 6인데
     // EngineVersion이 없거나 칸이 빠진 manifest는 다른 값(저장소 Build/Build.version 등)으로 대신하지 않고 다시 내보내라고 거부한다.
     timer.Restart();
     var sdkManifestPath = Path.Combine(sdk, "rocks-sdk.json");
     var sdkManifestBytes = File.ReadAllBytes(sdkManifestPath);
     var sdkManifestText = File.ReadAllText(sdkManifestPath);
-    Require(sdkManifestText.Contains("\"Version\": 5,", StringComparison.Ordinal), "SDK manifest is not version 5:\n" + sdkManifestText);
+    Require(sdkManifestText.Contains("\"Version\": 6,", StringComparison.Ordinal), "SDK manifest is not version 6:\n" + sdkManifestText);
     SetReadOnly(sdkManifestPath, false);
     try
     {
-        File.WriteAllText(sdkManifestPath, sdkManifestText.Replace("\"Version\": 5,", "\"Version\": 4,", StringComparison.Ordinal));
+        File.WriteAllText(sdkManifestPath, sdkManifestText.Replace("\"Version\": 6,", "\"Version\": 5,", StringComparison.Ordinal));
         var previous = await Game();
-        Require(previous.ExitCode != 0 && previous.StdErr.Contains("SDK manifest version mismatch: 4", StringComparison.Ordinal),
-            "A version 4 SDK manifest was not rejected: " + previous.StdErr);
+        Require(previous.ExitCode != 0 && previous.StdErr.Contains("SDK manifest version mismatch: 5", StringComparison.Ordinal),
+            "A version 5 SDK manifest was not rejected: " + previous.StdErr);
         foreach ((string name, Action<System.Text.Json.Nodes.JsonObject> edit) in new (string, Action<System.Text.Json.Nodes.JsonObject>)[]
                  {
                      ("missing EngineVersion", manifestJson => manifestJson.Remove("EngineVersion")),
