@@ -131,7 +131,7 @@
 | 지정자 | 플래그 | 의미·검증 |
 |---|---|---|
 | `Transient`·`ReadOnly`·`Category`·`DisplayName` | 1·2·— | 지금과 같다 |
-| `EditorOnly` | 4 | 항상 컴파일되고 플래그만 단다. graph v2(A0-O)가 쿠킹 데이터에서 뺀다. 중첩 struct·배열 안의 값에도 효력이 전파된다(6.1절 유효 플래그). 쿠킹 데이터 로드에서 EditorOnly 필드 누락은 `NotFound`가 아니고(누락 = 기준), EditorOnly 필드·멤버·원소가 있으면 InvalidArgument다(로드 정책 `excludedFlags` — A0-O, ObjectFoundations 4절). A0-B의 graph v1은 보통 필드처럼 저장한다 |
+| `EditorOnly` | 4 | 항상 컴파일되고 플래그만 단다. graph v2(A0-O)가 쿠킹 데이터에서 뺀다. 중첩 struct·배열 안의 값에도 효력이 전파된다(6.1절 유효 플래그). 쿠킹 데이터 로드에서 EditorOnly 필드 누락은 `NotFound`가 아니고(누락 = 기준), EditorOnly 필드·멤버·원소가 있으면 InvalidArgument다(로드 정책 `excludedFlags` — A0-O, ObjectFoundations 4절). A0-B의 graph v1은 보통 필드처럼 저장한다. **[빌드 타깃](BuildTargets.ko.md) BD6 구현 뒤에는** `#if ROCKS_WITH_EDITOR_DATA` 블록 안에 선언하고(블록 안 필드와 `EditorOnly`는 양방향 일치), `ROCKS_WITH_EDITOR_DATA=0` 빌드에서는 메모리 배치에서 빠진다 |
 | `Required` | 8 | ObjectRef·SoftObjectRef 필드와 그 배열(`ObjectRefArray`·`Array<SoftObjectRef>` — 원소마다 non-null, 5.6절)에만 쓸 수 있다(그 밖은 RMC2202). **패키지 저장·쿠킹에서** null이면 거부한다 — graph 저장 옵션 `rejectMissingRequired`(패키지 저장·쿠킹이 켠다, 스냅샷·복제 같은 다른 저장은 끈다)이 켜져 있으면 InvalidArgument, Soft 대상의 존재 확인은 패키지 저장·쿠킹(A1). **로드는 거부하지 않고** 진단(`RequiredMissing`)만 낸다 — 기존 필드에 `Required`를 붙여도 null을 가진 에셋을 열어 고칠 수 있어야 한다 |
 | `Name="…"` | — | 도구·명령행 이름(`toolName`). ASCII 식별자(`[A-Za-z_][A-Za-z0-9_]*`), 없으면 C++ 필드 이름. 상속 포함 대소문자 무시로 유일해야 한다(RMC2203). 직렬화는 필드 ID라 이름과 무관하다 |
 | `MaxElements=N` | — | 배열 길이 상한(5.5절 — 쓰기·저장에서 건다). 1..1,048,576(밖은 RMC2000), 없으면 65,536. 배열이 아닌 필드는 RMC2202 |

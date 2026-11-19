@@ -1,6 +1,6 @@
 # prefab(원형 기반 재사용 객체 묶음) 설계
 
-기준일: 2026-11-17, 개정 3(결정 D1–D21 확정 — 4절). 개정 1은 사용자 지시("설계문서만 작성해놔")로 쓴 첫 초안이고, 개정 2는 교차검증 1차(치명 1·중요 14·사소 13·추가 2) 결과를 반영했다(9절). 구현하지 않는다. 착수 시점은 고정 구현 순서(리플렉션 B9j–B9m → Curve 데이터 계층 → A0-G → A1–A6 → 화면 마일스톤)를 따르며 이 문서는 그 순서를 바꾸지 않는다.
+기준일: 2026-11-19, 개정 4(결정 D1–D21 확정 — 4절, 편집 위치 규칙 반영 — 9절). 개정 1은 사용자 지시("설계문서만 작성해놔")로 쓴 첫 초안이고, 개정 2는 교차검증 1차(치명 1·중요 14·사소 13·추가 2) 결과를 반영했다(9절). 구현하지 않는다. 착수 시점은 고정 구현 순서(리플렉션 B9j–B9m → Curve 데이터 계층 → A0-G → A1–A6 → 화면 마일스톤)를 따르며 이 문서는 그 순서를 바꾸지 않는다.
 
 근거: [엔진 구현 계획](EngineImplementationPlan.ko.md)(이하 EIP) 5.3절(클래스 기본값·서브오브젝트·공통 instancing)·20.3절(프리팹·중첩·변형·인스턴스 오버라이드)·20.5절(프리팹 식별자), [런타임 클래스 메타데이터](RuntimeClassMetadata.ko.md)(이하 RCM) '클래스 기본값 결정', [리플렉션 B9](ReflectionExtensions.ko.md)(이하 RX), [리플렉션·빌드 보강](ReflectionFoundations.ko.md)(이하 RF), [객체·그래프 보강](ObjectFoundations.ko.md)(이하 OF), [에셋 시스템](AssetSystem.ko.md)(이하 AS), [엔진 런타임](EngineRuntime.ko.md)(이하 ER), [GC 대규모 처리](GarbageCollectionScale.ko.md)(이하 GCS — 13절 클러스터는 개정 2, `experiment/gc-scale` 브랜치 `b293feb`), [Sparks 언어](SparksLanguage.ko.md)(이하 SL), 현재 코드(`Core/Source/Runtime/ObjectRuntime`·`ObjectSerialization`, `Engine/Source/Runtime/World`). UE 대조는 UE 5.8(5.8.4, `Engine/Build/Build.version` 5.8.4) 원본을 파일:행으로 확인했다(2절). 레거시·deprecated 코드는 대조에서 뺐다(2.0절).
 
@@ -323,7 +323,7 @@ Result<PrefabSpawnResult> World::SpawnPrefab(const AssetLease& prefab, const Spa
 | 새 원형이 순환·깊이 한도를 만든다 | 원형 저장 자체를 거부 | `PrefabCycle`·`PrefabDepthExceeded` |
 
 - cooked 빌드에는 충돌이 없어야 한다 — 쿡은 고아 override가 남은 레벨·prefab을 오류로 거부한다.
-- **Apply to source**(인스턴스 override를 원형에 올리기): 원형 편집 transaction으로 처리하고 영향 인스턴스 목록을 만든다(EIP 20.3절). 올린 항목은 인스턴스 집합에서 지운다. 같은 인스턴스를 연쇄로 다시 적용하지 않는다.
+- **Apply to source**(인스턴스 override를 원형에 올리기): 원형 편집 transaction으로 처리하고 영향 인스턴스 목록을 만든다(EIP 20.3절). 올린 항목은 인스턴스 집합에서 지운다. `EditScope = "Instance"` 필드의 override는 올리지 않고 인스턴스 집합에 남긴다(UE `SkipInstanceOnlyProperties` — [UI 툴킷](UiToolkit.ko.md) 7.3절 (a)). 같은 인스턴스를 연쇄로 다시 적용하지 않는다.
 - **클래스 기본값 변경**(코드 수정·Sparks reload): 원형 본문이 클래스 레코드 대비 차이이므로 원형이 override하지 않은 값은 새 클래스 기본값을 따른다. 타입 지문이 `resolvedRevision`에 들어 있으므로 편집기 배치 인스턴스는 다음 로드 때 전파를 거치고, 살아 있는 인스턴스는 RCM 71행 reload 규칙을 노드마다 적용하되 "기준"을 해석된 원형 값으로 본다.
 
 ### 3.8 중첩과 variant
@@ -399,7 +399,8 @@ Result<PrefabSpawnResult> World::SpawnPrefab(const AssetLease& prefab, const Spa
 | `PrefabUnsaveableNode` | Unsupported | Transient·Deprecated 클래스, native 파생, Runtime 출처 노드 |
 | `PrefabExternalReference` | InvalidArgument | 원형 밖 World 객체 참조 저장(3.5절) |
 | `PrefabOverrideOrphaned`·`PrefabOverrideTypeMismatch`·`PrefabOverrideNeedsReview`·`PrefabAddedNodeParentMissing` | 편집기: 진단만, cooked: InvalidArgument | 3.7절 충돌 |
-| `PrefabOverridePathInvalid` | InvalidArgument | 경로 해석 실패, ReadOnly 위반, 소유 컨테이너 대상 |
+| `PrefabOverridePathInvalid` | InvalidArgument | 경로 해석 실패, ReadOnly 위반, 소유 컨테이너 대상, 편집 위치 위반(편집기 쓰기 경로 — [UI 툴킷](UiToolkit.ko.md) 7.3절 (a)) |
+| `PrefabEditScopeViolation` | 편집기: 진단만(값은 적용), cooked: InvalidArgument | 저장물의 편집 위치 위반: 원형 저장물(`PrefabAsset`의 본문·variant `overrides`·중첩 노드 override)에 `EditScope = "Instance"` 필드가 클래스 레코드와 다른 값, 배치 저장물(`PrefabPlacement.overrides`·레벨 직접 배치 Record)에 `"Archetype"` 필드가 원형과 다른 값(UI 툴킷 7.3절 (a)) |
 | `PrefabRemoveNotAllowed` | InvalidArgument | 클래스 subobject·유일 루트 삭제 |
 | `PrefabTransformShear` | Unsupported | 3.10절 구움 경로 |
 | `PrefabRevisionMismatch` | 편집기: 진단 후 전파, cooked: UnsupportedVersion | 배치 기록의 `baseRevision` 불일치 |
@@ -429,7 +430,7 @@ Result<PrefabSpawnResult> World::SpawnPrefab(const AssetLease& prefab, const Spa
 - **편집기 명령**(EIP 20.3절)은 이 문서의 API로 구현한다.
   - Revert = override 집합에서 지우고 원형 값 쓰기.
   - Unpack = 펼친 객체를 레벨에 직접 배치한 객체로 바꾸고 배치 기록을 지운다. 파생 ID를 그 시점 값으로 굳혀 각 Actor에 저장해야 하므로 **Actor의 영속 Entity Guid 필드가 선행 조건**이다(지금 ER 4.6절 Actor 필드에 없다 — 7절).
-  - Make variant = 인스턴스의 override 집합으로 새 prefab의 `overrides`를 만들고 인스턴스는 새 variant를 가리킨다. 인스턴스가 추가했던 노드는 **NodeGuid를 그대로 새 variant로 옮긴다**(Apply와 같은 이동 의미 — 인스턴스 쪽 항목은 지워져 같은 NodeGuid가 두 곳에 남지 않는다). 그래서 파생 ID가 바뀌지 않는다.
+  - Make variant = 인스턴스의 override 집합으로 새 prefab의 `overrides`를 만들고 인스턴스는 새 variant를 가리킨다. `EditScope = "Instance"` 필드의 override는 옮기지 않고 인스턴스 집합에 남긴다(UI 툴킷 7.3절 (a)). 인스턴스가 추가했던 노드는 **NodeGuid를 그대로 새 variant로 옮긴다**(Apply와 같은 이동 의미 — 인스턴스 쪽 항목은 지워져 같은 NodeGuid가 두 곳에 남지 않는다). 그래서 파생 ID가 바뀌지 않는다.
   - Apply to source는 3.7절.
 - 네트워크 spawn: 원형 AssetId·`resolvedRevision`·인스턴스 Guid·spawn 인자·권한 override를 보내고 받는 쪽이 같은 revision을 검증한 뒤 spawn한다(EIP 20.3절). 파생 ID가 결정적이므로 하위 객체 ID를 따로 보내지 않는다.
 
@@ -605,3 +606,4 @@ PF1은 A5와 RCM 개정 뒤 언제든 할 수 있고, PF2 이후는 World 단계
   - 추가: 부착 부모 있는 spawn 합성, 장부 지연 생성.
   - UE 이름 짓기 근거는 리뷰가 든 `MakeUniqueObjectName`이 아니라 `FindFirstFreeName`(ActorConstruction.cpp:1126)으로 확인해 적었다.
 - 개정 3(2026-11-17): 사용자 결정 — D1–D21 모두 추천안으로 확정(4절 머리).
+- 개정 4(2026-11-19): [UI 툴킷](UiToolkit.ko.md) 7.3절 (a) 편집 위치(`EditScope`) 규칙 반영 — 3.7절 Apply to source와 3.13절 Make variant는 `"Instance"` 필드 override를 옮기지 않는다, 3.11절에 편집 위치 위반 원인과 `PrefabEditScopeViolation`을 더했다. 편집 문맥은 저장 위치로 정한다(`PrefabAsset` = 원형, `PrefabPlacement` = 배치 인스턴스).
