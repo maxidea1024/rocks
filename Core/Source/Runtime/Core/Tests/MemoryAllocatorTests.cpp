@@ -10,6 +10,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace memory_allocator_tests_file {
 
 namespace {
 
@@ -408,6 +409,7 @@ TEST(CorePoolAndBudgetSupportConcurrentCallers) {
     CHECK(system.Stats().liveAllocations == 0);
     CHECK(system.Stats().liveBytes == 0);
 }
+} // namespace memory_allocator_tests_file
 
 namespace rocks::test {
 

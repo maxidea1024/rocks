@@ -6,6 +6,8 @@
 // Name·enum·digest·값 struct — struct 안 Optional 멤버·원소 struct 포함)과 다시 저장한 byte 같음,
 // wire 형식 오류, 2단계 할당 실패 rollback.
 using namespace rocks;
+namespace optional_graph_tests_file {
+
 using namespace rocks::test::optional;
 
 namespace {
@@ -345,3 +347,4 @@ TEST(OptionalGraph_ApplyAllocationFailureRollsBack) {
 
     CHECK(types.Shutdown());
 }
+} // namespace optional_graph_tests_file

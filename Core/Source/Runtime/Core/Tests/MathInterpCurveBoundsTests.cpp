@@ -158,6 +158,8 @@ void CalcBounds(const Point<S, N>* Points, int32 NumPoints, bool bIsLooped, floa
 
 } // namespace ue58bounds
 
+namespace math_interp_curve_bounds_tests_file {
+
 namespace {
 
 template <typename S>
@@ -393,10 +395,12 @@ TEST(InterpCurveBounds_HandVectors) {
     CHECK(SameBits(withNaN.Value().minimum, nanMin[0]) &&
           SameBits(withNaN.Value().maximum, nanMax[0]));
 }
+} // namespace math_interp_curve_bounds_tests_file
 
 } // namespace rocks::test
 
 namespace rocks::test {
+namespace math_interp_curve_bounds_tests_file {
 
 // 묶음 리뷰 3: 닫는 구간의 길이는 Eval처럼 루프 offset 그대로다(마지막 키 1000 + offset 0.1은 float
 // 반올림으로 길이 0.09997559가 된다). 키 하나의 곡선 루프에서 범위 최대가 offset 그대로의 Hermite
@@ -438,5 +442,6 @@ concept CurveHasBounds = requires(const InterpCurve<T>& curve) { curve.TryCalcBo
 
 static_assert(!CurveHasBounds<Quat> && !CurveHasBounds<Quatd> && !CurveHasBounds<Vec4>);
 static_assert(CurveHasBounds<Vec3d> && CurveHasBounds<LinearColor> && CurveHasBounds<double>);
+} // namespace math_interp_curve_bounds_tests_file
 
 } // namespace rocks::test

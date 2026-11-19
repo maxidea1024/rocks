@@ -35,6 +35,8 @@ Result<void> RegisterHostVars(config::ConfigContext& config) noexcept {
 
 } // namespace host_settings_test
 
+namespace host_settings_tests_file {
+
 namespace {
 
 // 작업 디렉터리 아래 시험 전용 엔진 폴더(<root>/Engine/Config)다. 소멸 때 지운다.
@@ -293,6 +295,7 @@ TEST(HostSettings_ProjectDirectoryAndUserData) {
     CHECK(!user.IsEmpty() && !user.View().Contains("\\", StringComparison::CaseSensitive));
     CHECK(!HostPlatformName().IsEmpty());
 }
+} // namespace host_settings_tests_file
 
 // Config 모듈의 진입점이다(모듈 표 시험이 실제 기기 프로필 설정 등록을 함께 싣는다).
 const rocks::ModuleEntry& RocksModuleEntry_Config() noexcept;
@@ -325,6 +328,8 @@ constexpr ModuleTableRow LateRows[] = {
 };
 
 } // namespace host_settings_test
+
+namespace host_settings_tests_file {
 
 // 설정 등록 시점(Docs/Design/ModuleLoader.ko.md 3.5·3.10절 MD22): HostSettings는 설정 파일을 읽기
 // 전에 로더의 모듈 표에 있는 모든 모듈의 RegisterSettings를 부른다. 그래서 아직 시작하지 않은 늦은
@@ -368,3 +373,5 @@ TEST(HostSettings_LateModuleSettingsResolveBeforeStartup) {
     CHECK(modules->LeaseCount("LateSettings") == 0);
     CHECK(modules->LeaseCount("Config") == 0);
 }
+
+} // namespace host_settings_tests_file

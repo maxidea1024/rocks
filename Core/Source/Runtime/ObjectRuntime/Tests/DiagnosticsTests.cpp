@@ -4,6 +4,8 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Object/ObjectRegistry.h>
 
+namespace diagnostics_tests_file {
+
 namespace {
 
 using namespace rocks;
@@ -113,3 +115,4 @@ TEST(ObjectDiagnosticsCapacityFailurePreservesCallerStorage) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace diagnostics_tests_file

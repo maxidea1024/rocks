@@ -9,6 +9,8 @@
 // - FixtureAsset_CombinationRequired: Required 칸 하나씩 null로 두면 저장이 거부하고, 모두 채우면
 //   왕복한다.
 using namespace rocks;
+namespace combination_round_trip_tests_file {
+
 using namespace rocks::asset_test;
 
 namespace {
@@ -334,3 +336,4 @@ TEST(FixtureAsset_CombinationRequired) {
         }
     }
 }
+} // namespace combination_round_trip_tests_file

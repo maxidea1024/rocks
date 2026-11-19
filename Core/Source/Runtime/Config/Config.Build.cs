@@ -1,3 +1,4 @@
+using Rocks.Build;
 using Rocks.Build.Rules;
 
 // Config layers and console settings (Docs/Design/ConfigSystem.ko.md, config CF1 to CF4). Merges values from the engine, project, platform, user,
@@ -11,6 +12,9 @@ using Rocks.Build.Rules;
 public sealed class Config : CoreModuleRules
 {
     protected override string ModuleName => "Config";
+
+    // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
+    protected override UnityMode Unity => UnityMode.On;
 
     protected override string[] RequiredModules => ["ReflectionText", "ObjectRuntime", "Core"];
 

@@ -45,7 +45,7 @@ internal static partial class MetaTests
             Verify.Equal("Struct", leaf.GetProperty("kind").GetString(), "optional struct");
             Verify.Equal(Type("probe::Leaf").GetProperty("id").GetString(), leaf.GetProperty("type").GetString(), "optional struct target");
             Verify.Equal("UInt32", Field("probe::Leaf", "weight").GetProperty("element").GetProperty("kind").GetString(), "optional struct member");
-            string generated = Compact(File.ReadAllText(probe.Output));
+            string generated = Compact(probe.GeneratedText());
             Verify.Contains("{ValueKind::Optional,Guid{}}", generated, "generated optional schema");
             Verify.Contains("PathStructMember<::probe::Leaf,&::probe::Leaf::weight,ValueKind::UInt32>", generated, "optional member path thunk targets the inner kind");
             Verify.Contains("PathClassField<::probe::Value,::rocks::ValueKind::Struct>(cursor,&::probe::Value::leaf)", generated,
@@ -128,7 +128,7 @@ internal static partial class MetaTests
             static string OptionalChain(int depth) => OptionalPreamble + "ROCKS_STRUCT()\nstruct Chain1 {\nROCKS_PROPERTY() rocks::int32 value = 0;\n};\n" +
                 string.Concat(Enumerable.Range(2, depth - 1).Select(level => $"ROCKS_STRUCT()\nstruct Chain{level} {{\nROCKS_PROPERTY() rocks::Optional<Chain{level - 1}> inner;\n}};\n")) + "}\n";
             await probe.GenerateAsync(OptionalChain(16));
-            Verify.Contains("staticconstexpruint32Depth=16u;", Compact(File.ReadAllText(probe.Output)), "optional chain depth");
+            Verify.Contains("staticconstexpruint32Depth=16u;", Compact(probe.GeneratedText()), "optional chain depth");
             await probe.RejectAsync(OptionalChain(17), "RMC2303", "nesting depth 17");
         });
         // 원소 위치의 Optional은 컨테이너 쪽 코드다(Array 원소 RMC2304 — Docs/Design/ReflectionExtensions.ko.md 15절).

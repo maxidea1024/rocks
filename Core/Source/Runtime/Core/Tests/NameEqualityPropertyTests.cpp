@@ -3,6 +3,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace name_equality_property_tests_file {
 
 TEST(NameEqualityAndHashFormConsistentEquivalenceClasses) {
     // 정상 None·표시별 None·번호·일반 이름과 잘못된 토큰을 함께 다룬다.
@@ -48,3 +49,4 @@ TEST(NameEqualityAndHashFormConsistentEquivalenceClasses) {
     CHECK(!values[13].IsValid() && values[13] != values[5]);
     CHECK(!values[12].IsValid() && values[12] != values[1]);
 }
+} // namespace name_equality_property_tests_file

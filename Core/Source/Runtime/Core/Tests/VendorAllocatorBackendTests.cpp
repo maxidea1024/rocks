@@ -3,6 +3,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace vendor_allocator_backend_tests_file {
 
 namespace {
 
@@ -185,3 +186,4 @@ TEST(CoreVendorBindingRetainsModuleAndExternalOwnership) {
     }
     CHECK(counts.release == 2);
 }
+} // namespace vendor_allocator_backend_tests_file

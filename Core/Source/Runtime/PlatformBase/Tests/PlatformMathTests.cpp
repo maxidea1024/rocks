@@ -6,6 +6,8 @@
 // CPU별 PlatformMath·simd 구현이 Generic/scalar 기준 구현과 같은 계약을 지키는지 차등 검사한다.
 // 정확 함수는 bit 단위(NaN은 NaN끼리) 일치, 근사 함수는 문서화한 상대 오차 이내를 요구한다.
 namespace rocks::test {
+namespace platform_math_tests_file {
+
 namespace {
 
 using platform::GenericPlatformMath;
@@ -629,5 +631,6 @@ TEST(VectorRegister_CompareMaskEdgeCases) {
     CHECK(simd::Get<0>(selected) == 9.0f && simd::Get<1>(selected) == 2.0f);
     CHECK(simd::Get<2>(selected) == 9.0f && simd::Get<3>(selected) == 4.0f);
 }
+} // namespace platform_math_tests_file
 
 } // namespace rocks::test

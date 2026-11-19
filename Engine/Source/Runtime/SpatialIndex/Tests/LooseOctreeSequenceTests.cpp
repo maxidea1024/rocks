@@ -4,6 +4,8 @@
 #include <Platform/Fatal.h>
 
 using namespace rocks;
+namespace loose_octree_sequence_tests_file {
+
 using namespace rocks::spatial;
 using namespace rocks::spatial::oracle;
 
@@ -205,3 +207,4 @@ TEST(LooseOctree_LO05_FixedSeedSequenceMatchesOracle) {
 TEST(LooseOctree_LO05_LargeProxyListSequenceMatchesOracle) {
     RunSequence(LargeProxySession(), SequenceOperations / 3);
 }
+} // namespace loose_octree_sequence_tests_file

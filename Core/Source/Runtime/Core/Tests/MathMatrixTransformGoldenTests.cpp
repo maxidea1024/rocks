@@ -21,6 +21,8 @@
 // Gram-Schmidt를 더한 LookFrom, 법선 정규화를 하는 Mirror, overflow를 피하는 Reversed 깊이
 // offset)에 반올림 수준으로 둔다.
 namespace rocks::test {
+namespace math_matrix_transform_golden_tests_file {
+
 namespace {
 
 struct Row4 {
@@ -290,5 +292,6 @@ TEST(ViewGolden_LookFromAndMirrorMatchUnreal) {
     // 이동 행 2dn(크기 8)은 정규화한 법선·거리의 반올림이 몇 ulp(8 근처 1 ulp = 1.8e-15) 남는다.
     CHECK(mirror.Value().Row(3).Equals(unrealMirror.Row(3), 1.0e-14));
 }
+} // namespace math_matrix_transform_golden_tests_file
 
 } // namespace rocks::test

@@ -189,12 +189,18 @@ internal static class ResponseFileTests
         File.WriteAllText(main, mainText);
         var forced = request with
         {
+            // 모듈 정의는 정의 헤더로 가므로(Docs/Design/UnityBuildPch.ko.md 8.2절) 인용이 까다로운 값(공백·큰따옴표·역슬래시·한글)은 툴체인
+            // compile 인자로 명령줄에 둔다.
+            Toolchain = request.Toolchain with
+            {
+                CompileArguments = [.. request.Toolchain.CompileArguments,
+                    (request.Toolchain.Platform == NativePlatform.Windows ? "/D" : "-D") + "ROCKS_RSP_TEXT=\"a b\\\\c 한\""]
+            },
             OutputDirectory = Path.Combine(root, "rsp out 한글"),
             Modules =
             [
                 new() { Name = "RspLib", Sources = [library] },
-                new() { Name = "RspGame", Kind = NativeModuleKind.Executable, Sources = [main], Dependencies = ["RspLib"],
-                    PrivateDefines = ["ROCKS_RSP_TEXT=\"a b\\\\c 한\""] }
+                new() { Name = "RspGame", Kind = NativeModuleKind.Executable, Sources = [main], Dependencies = ["RspLib"] }
             ],
             Targets = ["RspGame"],
             ResponseFiles = ResponseFileMode.Always
@@ -246,7 +252,8 @@ internal static class ResponseFileTests
                 string file = spec.Arguments[0][1..];
                 byte[] bytes = File.ReadAllBytes(file);
                 string staged = Path.GetDirectoryName(file)!;
-                string[] expanded = action.ResolveArguments(action.Outputs.Select(output => Path.Combine(staged, Path.GetFileName(output))).ToArray());
+                string[] expanded = action.ResolveArguments(action.Outputs.Select(output => Path.Combine(staged, Path.GetFileName(output))).ToArray(),
+                    Path.Combine(staged, Executor.DepfileName));
                 Check(bytes.AsSpan().SequenceEqual(ResponseFile.Encode(expanded, quoting.Value)), action.Id + " response file is not the expanded arguments");
                 string text = quoting == ResponseFileQuoting.Windows ? Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2) : Encoding.UTF8.GetString(bytes);
                 Check((quoting == ResponseFileQuoting.Windows ? TokenizeWindows(text) : TokenizeGnu(text)).SequenceEqual(expanded, StringComparer.Ordinal),
@@ -300,13 +307,13 @@ internal static class ResponseFileTests
             "int main() { return RspAnswer() == 7 ? 0 : 3; }\n");
         var forced = request with
         {
-            Toolchain = android,
+            Toolchain = android with { CompileArguments = [.. android.CompileArguments, "-D" + "ROCKS_RSP_TEXT=\"a b\\\\c 한\""] },
             OutputDirectory = Path.Combine(root, "rsp android out 한글"),
             Modules =
             [
                 new() { Name = "RspLib", Sources = [Path.Combine(source, "lib.cpp")] },
                 new() { Name = "RspGame", Kind = NativeModuleKind.Executable, Sources = [Path.Combine(source, "main.cpp")],
-                    Dependencies = ["RspLib"], PrivateDefines = ["ROCKS_RSP_TEXT=\"a b\\\\c 한\""] }
+                    Dependencies = ["RspLib"] }
             ],
             Targets = ["RspGame"],
             ResponseFiles = ResponseFileMode.Always

@@ -8,6 +8,7 @@
 #include <Platform/Thread.h>
 
 using namespace rocks;
+namespace name_tests_file {
 
 namespace {
 
@@ -583,3 +584,4 @@ TEST(NameAllAllocationFailuresAndRepeatedSessionsLeaveNoLeaks) {
         CHECK(allocator.Stats().liveBytes == 0);
     }
 }
+} // namespace name_tests_file

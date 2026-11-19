@@ -6,6 +6,8 @@
 // 안 지우기와 섞인 index 이동, 할당 실패 주입의 원자성, staged 대상의 원소 추가, 컨테이너 게시가
 // 그대로 남는 원소(Discard된 대상)를 다시 확인하지 않는 것(B9i 리뷰 L1).
 using namespace rocks;
+namespace text_assign_append_tests_file {
+
 using namespace rocks::reflection_text;
 using namespace rocks::test::assign;
 using reflection_fixture::AssignHolder;
@@ -349,3 +351,4 @@ TEST(TextAssign_AddedElementNestedReferenceStructReset) {
     CHECK(value.Value()->nests[0].n == 4);
     CHECK(value.Value()->nests[0].mixed.weight == 9);
 }
+} // namespace text_assign_append_tests_file

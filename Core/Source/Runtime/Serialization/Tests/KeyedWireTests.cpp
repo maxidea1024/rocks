@@ -9,6 +9,7 @@
 #include <Platform/Memory.h>
 
 using namespace rocks;
+namespace keyed_wire_tests_file {
 
 // 키 집합(WireType::Set = 15)·맵(WireType::Map = 16)의 형식·header 검사 순서·count 사전 검사·키
 // 자리 tag 제한·예산·writer 한도 시험이다(Docs/Design/ReflectionExtensions.ko.md 1.2절 — 리플렉션
@@ -753,3 +754,4 @@ TEST(KeyedWire_ArgumentErrorsKeepPayloadAndShrunkOutputIsRejected) {
     CHECK(array.Value().Check().Error() == ErrorCode::InvalidArgument);
     CHECK(array.Value().End().Error() == ErrorCode::InvalidArgument);
 }
+} // namespace keyed_wire_tests_file

@@ -27,7 +27,14 @@
     <PlatformArgument Condition="'$(AndroidApi)' != ''">$(PlatformArgument) --android-api $(AndroidApi)</PlatformArgument>
     <PlatformArgument Condition="'$(AndroidNdk)' != ''">$(PlatformArgument) --android-ndk &quot;$(AndroidNdkText)&quot;</PlatformArgument>
     <PlatformArgument Condition="'$(Adb)' != ''">$(PlatformArgument) --adb &quot;$(Adb)&quot;</PlatformArgument>
-    <CommonArguments>--root &quot;$(RocksRoot).&quot; --configuration $(Configuration) --jobs $(Jobs) $(CompilerArgument) $(OutputArgument) $(PlatformArgument)</CommonArguments>
+    <!-- Build mode (Docs/Design/UnityBuildPch.ko.md section 11): -p:Unity=on|off -p:Pch=on|off -p:Adaptive=on|off. The defaults are on.
+         CI passes -p:Adaptive=off (no working file separation); the verification variant is -p:Unity=off -p:Pch=off. -->
+    <BuildModeArguments Condition="'$(Unity)' != ''">--unity $(Unity)</BuildModeArguments>
+    <BuildModeArguments Condition="'$(Pch)' != ''">$(BuildModeArguments) --pch $(Pch)</BuildModeArguments>
+    <BuildModeArguments Condition="'$(Adaptive)' != ''">$(BuildModeArguments) --adaptive $(Adaptive)</BuildModeArguments>
+    <!-- -p:Timing=on adds clang -ftime-trace to compile and PCH actions and writes out/<...>/Timing/<target>.timing.json (section 12). -->
+    <BuildModeArguments Condition="'$(Timing)' != ''">$(BuildModeArguments) --timing $(Timing)</BuildModeArguments>
+    <CommonArguments>--root &quot;$(RocksRoot).&quot; --configuration $(Configuration) --jobs $(Jobs) $(CompilerArgument) $(OutputArgument) $(PlatformArgument) $(BuildModeArguments)</CommonArguments>
   </PropertyGroup>
   <!-- MSBuild orchestrates the host tools, rules and stages. Rocks.Build decides C++ up-to-dateness on every invocation. -->
   <Target Name="BootstrapTools">
@@ -49,6 +56,6 @@
   </Target>
   <Target Name="Game" DependsOnTargets="BootstrapTools">
     <Error Condition="'$(SdkDirectory)' == '' Or '$(GameDirectory)' == ''" Text="SdkDirectory and GameDirectory are required." />
-    <Exec Command="$(Tool) game --target $(GameTarget) --sdk &quot;$(SdkDirectoryText)&quot; --project &quot;$(GameDirectoryText)&quot; --configuration $(Configuration) --jobs $(Jobs) $(CompilerArgument) $(OutputArgument)" />
+    <Exec Command="$(Tool) game --target $(GameTarget) --sdk &quot;$(SdkDirectoryText)&quot; --project &quot;$(GameDirectoryText)&quot; --configuration $(Configuration) --jobs $(Jobs) $(CompilerArgument) $(OutputArgument) $(BuildModeArguments)" />
   </Target>
 </Project>

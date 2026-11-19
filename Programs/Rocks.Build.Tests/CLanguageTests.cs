@@ -63,13 +63,17 @@ internal static class CLanguageTests
         NativeModuleInput engine = request.Modules.Single(module => module.Name == "Engine");
         string engineSource = Path.GetFullPath(engine.Sources.Single(), root);
         string headerInclude = Path.GetFullPath(request.Modules.Single(module => module.Name == "Headers").PublicIncludeDirectories.Single(), root);
-        string[] tail = windows
+        // 물리 action은 include 뒤, 번역 단위 인자 앞에 depfile 인자를 둔다(의존 기록의 원천 — Docs/Design/UnityBuildPch.ko.md 4.1절).
+        // 논리 명령(compile_commands.json·BuildInfo)에는 없다.
+        string[] depfile = windows ? ["/clang:-MD", "/clang:-MF{DEPFILE}"] : ["-MD", "-MF", "{DEPFILE}"];
+        string[] logicalTail = windows
             ? ["/I" + headerInclude, "/c", "/TP", engineSource, "/Fo{OUTPUT0}"]
             : ["-I" + headerInclude, "-c", engineSource, "-o", "{OUTPUT0}"];
+        string[] tail = [logicalTail[0], .. depfile, .. logicalTail[1..]];
         foreach ((NativeConfiguration configuration, string[] profile) in new[] { (NativeConfiguration.Debug, cppGolden), (NativeConfiguration.Release, releaseProfile) })
         {
-            NativeAction action = ActionGraph.Create(request with { Configuration = configuration }).Actions
-                .Single(candidate => candidate.Kind == "Compile" && candidate.Module == "Engine");
+            NativePlan plan = ActionGraph.Create(request with { Configuration = configuration });
+            NativeAction action = plan.Actions.Single(candidate => candidate.Kind == "Compile" && candidate.Module == "Engine");
             // 타깃 단위 인자(로그 컴파일 하한·소스 경로 접두 매핑)는 프로필 뒤, 모듈 정의 앞이다.
             string prefixMap = (windows ? "/clang:" : "") + "-fmacro-prefix-map=" +
                 Path.TrimEndingDirectorySeparator(Path.GetFullPath(request.RootDirectory)) + Path.DirectorySeparatorChar + "=";
@@ -77,6 +81,11 @@ internal static class CLanguageTests
             string[] expected = [.. toolchain.CompileArguments, .. profile, logMinimum, prefixMap, .. tail];
             Check(action.Arguments.SequenceEqual(expected),
                 $"{configuration} C++ compile action changed:\n{string.Join(' ', action.Arguments)}\nexpected:\n{string.Join(' ', expected)}");
+            string[] logical = [.. toolchain.CompileArguments, .. profile, logMinimum, prefixMap, .. logicalTail];
+            LogicalCompile logicalCompile = plan.LogicalCompiles.Single(candidate => candidate.Module == "Engine");
+            Check(logicalCompile.Arguments.SequenceEqual(logical) && logicalCompile.Source == engineSource && logicalCompile.Action == action.Id &&
+                logicalCompile.Object == action.Outputs[0],
+                $"{configuration} C++ logical compile command changed:\n{string.Join(' ', logicalCompile.Arguments)}\nexpected:\n{string.Join(' ', logical)}");
         }
 
         // 번역 단위 언어·표준은 빌드 도구가 확장자로 정한다. 모듈 인자로 바꾸지 못한다.

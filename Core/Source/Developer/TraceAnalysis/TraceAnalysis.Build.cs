@@ -1,3 +1,4 @@
+using Rocks.Build;
 using Rocks.Build.Rules;
 
 // Trace analysis (UE TraceAnalysis and TraceServices counterpart, Docs/Design/TraceSystem.ko.md sections 3 and 10, TR4): stream reading, thread merge,
@@ -8,6 +9,9 @@ public sealed class TraceAnalysis : CoreModuleRules
     protected override string Group => "Developer";
 
     protected override string ModuleName => "TraceAnalysis";
+
+    // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
+    protected override UnityMode Unity => UnityMode.On;
 
     protected override string[] RequiredModules => ["Core", "Compression", "TraceCapture"];
 }

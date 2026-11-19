@@ -30,7 +30,10 @@ private:
 
 // 살아 있는 할당의 주소 → 크기 원장이다. 주소를 역참조하지 않고 값으로만 찾으므로, 남의 주소나 이미
 // 반환한 주소를 물어도 안전하다. 찾기·넣기·지우기는 상환 O(1)이다(Core HashMap — 지운 칸은 표가
-// 스스로 정리한다). 동기화는 호출자가 한다(한 번에 한 스레드).
+// 스스로 정리한다). hash는 주소를 통째로 섞는 기본 hash다: 주소의 모양(정렬, 이어지는 주소, 블록
+// 간격)이 군집을 만들지 않는다. 페이지 번호만 섞어 지역성을 살리는 hash는 이어지는 주소에서 탐사가
+// 수백–수천 칸이 되어 버렸다(Docs/Design/GarbageCollectionScale.ko.md 18.6절).
+// 동기화는 호출자가 한다(한 번에 한 스레드).
 //
 // 사용 예(할당자의 잠금 안에서):
 //   if (auto inserted = ledger_.Insert(address, bytes); !inserted) { /* 블록을 반환하고 실패 */ }
@@ -53,6 +56,9 @@ public:
 
     // 적힌 주소 수다.
     usize Count() const noexcept;
+
+    // 진단용: 가장 멀리 밀려난 주소를 찾으며 보는 칸 수다(HashMap::LongestProbe). 모든 칸을 본다.
+    usize LongestProbe() const noexcept;
 
 private:
     HashMap<uptr, usize> entries_;

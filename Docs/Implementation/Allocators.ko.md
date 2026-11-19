@@ -10,13 +10,13 @@
 | `ArenaAllocator` | 수명이 비슷한 임시 작업의 청크 재사용 | 생성한 스레드 전용이다. 개별 반환은 논리적 반환이며 공간은 `Reset()` 후 재사용한다. |
 | `StackAllocator` | 역순 반환이 확실한 단일 스레드 작업 | 생성 스레드 전용이며 표시는 일괄 해제가 아닌 반환 경계 확인에 사용한다. |
 | `PoolAllocator` | 크기·정렬이 정해진 블록의 반복 재사용 | 일반 호출을 동기화한다. 상위 할당기의 스레드 제약은 그대로 적용된다. |
-| `BinnedAllocator` | 범용 할당기: 작은 요청은 예약한 주소 범위의 64KB slab에서 크기 등급별 블록으로, 큰 요청은 상위 할당기로 | 모든 호출을 여러 스레드에서 동시에 부를 수 있다(등급별 잠금). 미반환 할당이 있으면 파괴 시 Fatal이다. |
+| `BinnedAllocator` | 범용 할당기: 작은 요청은 예약한 주소 범위의 64KB slab에서 크기 등급별 블록으로, 큰 요청은 상위 할당기로 | 모든 호출을 여러 스레드에서 동시에 부를 수 있다(스레드 캐시 + 등급별 잠금). 미반환 할당이 있으면 파괴 시 Fatal이다. |
 | `BudgetAllocator` | 상위 할당기로부터 얻는 payload의 사용량 제한 | 일반 변경 호출을 직렬화한다. 통계는 게시 완료된 상태의 스냅샷이다. |
 | `DebugAllocator` | 인접 guard와 제한된 quarantine을 이용한 메모리 손상 진단 | 일반 호출을 동기화한다. 검사는 호출 시점에 수행하며 payload 접근은 별도 동기화가 필요하다. |
 | `ExternalAllocator` | 외부 backend callback을 공통 인터페이스에 연결 | callback을 잠금 밖에서 병렬 호출한다. 실제 공급자와 모듈 수명은 별도 연결이 필요하다. |
 | `FrameArena` | 프레임·렌더 그래프 수명 객체(소멸자 등록·일괄 비움) | `Allocator`가 아니다. 여러 스레드가 동시에 할당하고(스레드별 `FrameArenaWriter`), `Reset`·`Trim`은 다른 호출과 겹치지 않아야 한다. |
 
-가상 메모리와 Stack·Binned는 초기 구현이며, 자동 일괄 해제 stack, 스레드별 cache, page guard 기반 진단과 실제 jemalloc·TCMalloc·mimalloc의 제품 공급자 통합은 아직 제공하지 않는다. `DebugAllocator`의 바이트 guard와 제한된 poison·quarantine은 진단의 일부다. 현재 구현의 성능·단편화·최대 지연과 UE5 대비 성능은 측정하지 않았다.
+가상 메모리와 Stack은 초기 구현이며, 자동 일괄 해제 stack, page guard 기반 진단과 실제 jemalloc·TCMalloc·mimalloc의 제품 공급자 통합은 아직 제공하지 않는다. `DebugAllocator`의 바이트 guard와 제한된 poison·quarantine은 진단의 일부다. 현재 구현의 성능·단편화·최대 지연과 UE5 대비 성능은 측정하지 않았다.
 
 ## 공통 계약
 
@@ -132,13 +132,16 @@ if (block) {
 ```
 
 - 크기 등급은 32개다: 16–128은 16 단계, 그 위는 2배 구간마다 넷(160·192·224·256, …, 8192)이다. 블록은 16바이트 이상으로 정렬되고, 정렬 32·64는 블록 크기가 그 배수인 등급으로 올린다. 128을 넘는 요청의 등급 올림 낭비는 블록의 20% 이하다.
-- 주소 범위: 생성 때 `config.reserveBytes`(0이면 Windows·Mac 16 GiB, Android 4 GiB)를 예약만 하고 slab을 쓸 때 commit한다. OS가 예약을 거부해도 생성은 실패하지 않는다. 절반씩 줄여 64 MiB까지 다시 시도하고(설정이 그보다 작으면 그 값 한 번만), 끝내 못 하면 모든 요청이 backing으로 간다. 실제 크기는 `ReservedBytes()`다. 범위가 다 찼거나 slab commit이 실패한 작은 요청도 backing으로 간다(`Usage().fallbackAllocations` — 0이 아니면 예약 크기를 늘릴지 본다).
-- 빈 slab은 `config.retainedEmptySlabs`개(기본 64 = 4 MiB)까지 commit한 채 보관하고 넘으면 decommit한다. `Trim()`은 보관분을 모두 decommit한다. 살아 있는 할당이 있어도 부를 수 있고 값을 돌려주지 않는다.
+- 주소 범위: 생성 때 `config.reserveBytes`(0이면 Windows·Mac 16 GiB, Android 4 GiB)를 접근을 열어 둔 예약(`VirtualMemoryAccess::Open`)으로 잡고 slab을 쓸 때 commit한다. OS가 예약을 거부해도 생성은 실패하지 않는다. 절반씩 줄여 64 MiB까지 다시 시도하고(설정이 그보다 작으면 그 값 한 번만), 끝내 못 하면 모든 요청이 backing으로 간다. 실제 크기는 `ReservedBytes()`다. 범위가 다 찼거나 slab commit이 실패한 작은 요청도 backing으로 간다(`Usage().fallbackAllocations` — 0이 아니면 예약 크기를 늘릴지 본다). commit 실패는 일시적인 것으로 다뤄 다음 요청이 다시 시도한다.
+- 빈 slab은 `config.retainedEmptySlabs`개(기본 64 = 4 MiB)까지 commit한 채 보관하고 넘으면 decommit한다. `Trim()`은 보관분을 모두 decommit한다. 살아 있는 할당이 있어도 부를 수 있고 값을 돌려주지 않는다. decommit이 실패한 slab은 commit된 채 보관해 다시 쓰고 다음 `Trim()`이 다시 푼다.
 - 반환의 소유 판정: 미소유·중복·중간 주소의 `Deallocate`는 `NotFound`이고 상태를 바꾸지 않는다. 예약 범위 밖 주소, 쓰지 않는 slab의 주소, 블록 경계가 아닌 주소는 그 주소를 읽지 않고 판정한다. 쓰는 slab의 블록 경계는 slab 머리의 "뗀 블록 수"와 블록 안 반환 표지(둘째 word = 주소 XOR 인스턴스 비밀값)를 읽어 판정한다. 한계: 살아 있는 블록의 offset 8에 사용자가 그 블록의 표지 값(최상위 비트가 선 64비트 값)을 써 두면 정상 반환이 `NotFound`가 된다(2^-63). 잘못된 반환이 그 slab의 decommit·재사용과 같은 순간에 겹치면 검출이 보장되지 않는다(설계 18.4절 한계 2).
 - 통계: `Stats()`의 `liveBytes`는 요청 크기가 아니라 내준 블록 크기의 합이다(반환 때 요청 크기를 알 수 없다 — 큰 할당은 요청 크기 그대로다). `Usage()`는 예약 크기, commit한 slab 바이트, 보관 중인 빈 slab 수, 살아 있는 큰 할당 수, backing으로 간 작은 요청의 누적 수를 낸다.
 - backing: 이 객체와 모든 할당보다 오래 살고 어느 스레드에서나 부를 수 있어야 한다. backing 호출은 잠금 밖에서 한다(backing이 같은 allocator를 다시 불러도 된다 — 전의 재진입 `Busy` 규칙은 없다). 성공과 함께 null·정렬이 틀린 주소·주소 넘침·예약 범위와 겹치는 주소·이미 내준 주소를 돌려주면 Fatal이다. 큰 블록끼리의 부분 겹침은 검사하지 않는다(backing의 책임이다). backing이 큰 블록의 반환을 거부하면 그 오류를 돌려주고 할당은 살아 있는 채로 남는다.
-- 스레드: 모든 메서드를 여러 스레드에서 동시에 부를 수 있다. 파괴는 모든 호출이 끝난 뒤에 하고, 반환하지 않은 할당이 남아 있으면 Fatal이다. `Shutdown()`은 없다(수명은 객체 파괴로 끝난다).
-- 큰 할당의 주소 원장과 내부 상태는 플랫폼 할당을 쓰므로 backing의 예산에 들지 않는다. 원장 늘리기 실패(`OutOfMemory`)와 예약·commit·decommit 실패는 시험 접근(`Core/Private/Memory/BinnedAllocatorTestAccess.h`)으로 주입한다.
+- 스레드 캐시: 스레드마다·인스턴스마다 등급별 묶음 둘(부분·가득 — 묶음 한도는 64개 또는 64KB 가운데 작은 쪽)을 두어 대부분의 할당·반환이 잠금 없이 끝난다. 가득 찬 묶음은 등급마다 8칸인 이전 칸으로 스레드 사이를 오가고, 모자라거나 넘치면 등급 잠금 아래 slab과 묶음 단위로 주고받는다. 다른 스레드가 반환한 블록은 반환한 스레드의 캐시로 간다. 캐시는 그 스레드가 처음 쓸 때 생기고 스레드가 끝날 때(`platform::ThreadExitSlot` — 엔진 밖에서 만든 스레드 포함) 인스턴스로 돌아간다. 캐시에 든 블록은 slab이 "쓰는 블록"으로 세므로 그 slab은 풀리지 않는다.
+- `Trim()`은 호출 스레드의 캐시와 이전 칸을 slab으로 돌려준 뒤에 빈 slab을 decommit한다. 다른 스레드의 캐시는 건드리지 않는다.
+- `config.threadCaches = false`면 모든 작은 요청이 등급 잠금 경로로 간다. 느리지만 반환한 블록이 곧바로 slab으로 돌아가 slab 수준 동작이 결정적이다(시험·작은 도구). 캐시를 얻지 못한 호출(플랫폼 할당 실패, OS의 스레드 종료 칸 소진)과 종료 정리가 지나간 스레드도 이 경로를 쓴다.
+- 스레드: 모든 메서드를 여러 스레드에서 동시에 부를 수 있다. 같은 주소를 두 스레드가 함께 반환하면 한쪽만 성공한다. 파괴는 모든 호출이 끝난 뒤에 하고(다른 스레드가 살아 있어도 된다 — 파괴가 그 스레드의 캐시까지 해제한다), 반환하지 않은 할당이 남아 있으면 Fatal이다. `Shutdown()`은 없다(수명은 객체 파괴로 끝난다). 다른 스레드가 쓰는 중의 `Stats()`는 그 순간의 근사다.
+- 큰 할당의 주소 원장과 내부 상태는 플랫폼 할당을 쓰므로 backing의 예산에 들지 않는다. 원장 늘리기 실패(`OutOfMemory`)와 예약 실패는 시험 접근(`Core/Private/Memory/BinnedAllocatorTestAccess.h`)으로, slab commit·decommit 실패는 `VirtualMemoryRegion`의 시험 통로로 주입한다.
 
 ## 플랫폼 가상 메모리
 
@@ -146,7 +149,9 @@ if (block) {
 
 메서드 간 호출은 직렬화되지만 `Address()`로 얻은 주소의 접근은 보호하지 않는다. 반환된 주소의 모든 사용과 다른 호출을 끝낸 뒤 `Decommit()`·`Release()` 및 파괴를 수행한다. 데이터는 실행 권한이 없다. macOS의 commit은 Windows commit charge와 같은 보장을 제공하지 않는다. decommit 후 즉시 물리 메모리가 반환되거나 재commit 시 내용이 0으로 초기화된다고 가정하지 않는다.
 
-reserve 실패는 예약을 남기지 않는다. commit/decommit OS 실패 시 부분 변경 가능성이 있어 영역이 poisoned 상태가 되고 주소 조회는 null을 반환하며 `Release()`만 허용된다. release 실패도 소유권을 보존하고 poisoned 상태가 되므로 재시도해야 한다. 소멸 시 release 실패는 Fatal이다. 페이지 보호 fault probe와 일반 경계·동시 호출 테스트 코드는 존재하지만, OS 오류 및 부분 변경에 대한 fault injection은 아직 부족하며 Windows Core Debug에서는 일반 테스트와 보호 fault probe가 통과하였다. macOS 빌드·실행은 아직 검증되지 않았다.
+예약 종류는 둘이다(`Reserve(bytes, access)`). 기본 `VirtualMemoryAccess::Guarded`는 commit하지 않은 범위와 decommit한 범위의 접근이 fault다(guard 페이지로 쓸 수 있다 — `SecretArena`). `VirtualMemoryAccess::Open`은 접근을 열어 둔 예약으로, 큰 주소 범위를 작은 조각으로 commit·decommit하는 할당자(`BinnedAllocator`)가 쓴다: POSIX에서 예약이 읽기·쓰기 매핑 하나이고 commit은 보호를 바꾸지 않으며 decommit은 페이지만 OS에 돌려주므로 매핑(VMA)이 조각마다 쪼개지지 않는다(Linux·Android의 프로세스당 매핑 수 한도 `vm.max_map_count`를 피한다 — UE 5.8 `FPlatformVirtualMemoryBlock`과 같다). 대신 그 종류의 POSIX에서는 commit하지 않았거나 decommit한 범위의 접근이 fault라는 보장이 없다. Windows는 두 종류가 같다.
+
+reserve 실패는 예약을 남기지 않는다. commit·decommit 실패는 영역을 닫지 않는다: commit이 실패한 범위는 commit되지 않은 것으로 다루고 다시 commit하거나 decommit할 수 있다. decommit 실패는 `Open` 예약과 Windows에서 그 범위를 그대로 두고(접근·내용 유지), POSIX의 `Guarded`에서는 일부 페이지의 접근이 막혔을 수 있어 commit되지 않은 것으로 다룬다. release 실패만 소유권을 보존한 채 poisoned 상태를 만들고(주소 조회는 null, `Release()`만 다시 시도) 소멸 시 release 실패는 Fatal이다. 시험은 `PlatformBase/Private/Common/VirtualMemoryTestAccess.h`로 이 스레드의 n번째 commit·decommit을 OS를 부르지 않고 실패시킨다. 페이지 보호 fault probe와 일반 경계·동시 호출 시험이 있고 Windows Core Debug에서 통과한다. macOS는 CI에서 돈다.
 
 ## BudgetAllocator
 

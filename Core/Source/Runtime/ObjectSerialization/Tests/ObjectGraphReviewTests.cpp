@@ -6,6 +6,8 @@
 #include "GraphTestSupport.h"
 
 using namespace rocks;
+namespace object_graph_review_tests_file {
+
 using reflection_fixture::Base;
 using reflection_fixture::Node;
 using test::graph::SameBytes;
@@ -326,3 +328,4 @@ TEST(ObjectGraphReferenceToNativeAliasTypePreservesAliasSchemaOnResave) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace object_graph_review_tests_file

@@ -9,6 +9,8 @@ platform::PathStyle ExpectedHostPathStyle() noexcept;
 char ExpectedHostNativePathSeparator() noexcept;
 } // namespace rocks::test
 
+namespace path_tests_file {
+
 TEST(PlatformPathSyntaxMatchesHost) {
     // 프로세스 전역 상태와 무관하게 여러 번 조회해도 같은 문법을 사용해야 한다.
     const auto expected = rocks::test::ExpectedHostPathStyle();
@@ -26,3 +28,4 @@ TEST(PlatformPathGenericAndOverridesAreExplicit) {
     CHECK(WindowsPlatformPath::HostStyle() == PathStyle::Windows);
     CHECK(WindowsPlatformPath::NativeSeparator() == '\\');
 }
+} // namespace path_tests_file

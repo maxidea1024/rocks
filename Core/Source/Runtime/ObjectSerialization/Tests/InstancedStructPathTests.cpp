@@ -6,6 +6,8 @@
 // `fixed[1].x`·`host.value.x`)의 읽기·쓰기, 객체 문맥 판 문자열 경로 해석·출력, 형 바꾸기의 거부
 // (미등록·담을 수 없는 struct·깊이 합·ReadOnly·InstancedStruct가 아닌 끝), 통째 읽기 거부.
 using namespace rocks;
+namespace instanced_struct_path_tests_file {
+
 using namespace rocks::test::instanced;
 
 namespace {
@@ -277,3 +279,4 @@ TEST(InstancedStructPath_RegistryContainerAndWorldOnlyContentRejected) {
 
     CHECK(types.Shutdown());
 }
+} // namespace instanced_struct_path_tests_file

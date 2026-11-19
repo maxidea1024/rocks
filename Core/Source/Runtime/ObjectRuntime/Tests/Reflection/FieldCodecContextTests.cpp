@@ -45,6 +45,8 @@ struct GeneratedType<codec_fixture::Shade> {
 
 } // namespace rocks
 
+namespace field_codec_context_tests_file {
+
 namespace {
 
 constexpr uint32 Wire(WireType type) noexcept {
@@ -500,3 +502,4 @@ TEST(FieldCodec_EnumValueSetMatchesSchemaRules) {
         CHECK(same);
     }
 }
+} // namespace field_codec_context_tests_file

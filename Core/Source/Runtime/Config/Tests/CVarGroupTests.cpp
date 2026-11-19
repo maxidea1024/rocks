@@ -10,8 +10,11 @@
 // 변수는 그대로(장치가 바뀌면 원래 선택 복귀), Sync 안에서 갔다 돌아온 칸은 세대가 그대로다. 등록
 // 규칙(순환· 겹침·코드 값 검사)과 묶음 해결의 결정성은 CVarGroupRuleTests.cpp다.
 using namespace rocks;
+namespace c_var_group_tests_file {
+
 using namespace rocks::config;
 using namespace rocks::test::config;
+} // namespace c_var_group_tests_file
 
 namespace cvar_group_test {
 
@@ -55,6 +58,8 @@ constinit CVarGroup GroupWithLate = cvar::Group("quality.grp.late", 1)
                                         .Level(1, {{GroupLateMember, 20}});
 
 } // namespace cvar_group_test
+
+namespace c_var_group_tests_file {
 
 namespace {
 
@@ -246,3 +251,4 @@ TEST(CVar_GroupRoundTripKeepsGeneration) {
     REQUIRE(after != nullptr);
     CHECK(after->generation == generation && GroupShadowDistance.Get() == 6000.f);
 }
+} // namespace c_var_group_tests_file

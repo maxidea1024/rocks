@@ -6,6 +6,8 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace sampler_tests_file {
+
 using namespace rocks::graphics;
 
 namespace {
@@ -126,3 +128,4 @@ TEST(ChannelSwizzle_IdentityValidationAndComposition) {
     }
     CHECK(ParseSwizzleSource(Text("X")).Error() == ErrorCode::InvalidArgument);
 }
+} // namespace sampler_tests_file

@@ -123,7 +123,8 @@ public:
     // 거듭제곱), DeletedSlotCount()는 정리 전까지 남은 삭제 칸 수다. 늘
     // (Count() + DeletedSlotCount()) <= SlotCount() × 3/4이다 — 삭제는 점유 칸을 삭제 칸으로 바꿀
     // 뿐이라 합이 그대로이고, 합을 넘길 삽입은 그 앞에서 삭제 칸을 정리한다(같은 크기 재해시 또는
-    // 성장, 상환 O(1)).
+    // 성장, 상환 O(1)). 원소가 0개인 Map에도 삭제 칸이 남아 있을 수 있다(칸 수의
+    // 1/EmptyClearDivisor 미만 — 아래 Erase).
     //
     // 사용 예:
     //   CHECK((map.Count() + map.DeletedSlotCount()) * 4 <= map.SlotCount() * 3);
@@ -133,6 +134,28 @@ public:
 
     usize DeletedSlotCount() const noexcept {
         return deleted_;
+    }
+
+    // 진단용: 산 원소 가운데 제자리(hash가 가리키는 칸)에서 가장 멀리 밀려난 원소를 조회가 찾으며
+    // 보는 칸 수다(제자리에 있으면 1, 빈 Map은 0). hash가 만드는 군집을 시험·측정에서 볼 때 쓴다.
+    // 모든 칸을 본다(O(SlotCount())).
+    //
+    // 사용 예:
+    //   CHECK(map.LongestProbe() <= 16);
+    usize LongestProbe() const noexcept {
+        usize longest = 0;
+        for (usize index = 0; index < slotCount_; ++index) {
+            const Slot& slot = slots_[index];
+            if (slot.state != State::Occupied) {
+                continue;
+            }
+
+            const usize home = static_cast<usize>(slot.hash) & (slotCount_ - 1);
+            const usize visited = ((index - home) & (slotCount_ - 1)) + 1;
+            longest = visited > longest ? visited : longest;
+        }
+
+        return longest;
     }
 
     bool IsEmpty() const noexcept {
@@ -309,6 +332,10 @@ public:
 
     // 키가 존재하면 삭제 후 true, 없으면 false다. 삭제한 원소의 빌린 포인터는 무효다.
     // 동일 컨테이너 순회 중 구조 변경은 Fatal이다. 다른 스레드 접근도 외부 동기화가 필요하다.
+    // 삭제는 그 칸을 삭제 칸으로 바꾼다(상환 O(1)). 원소가 0개가 되면 삭제 칸을 한꺼번에 비우되,
+    // 삭제 칸이 칸 수의 1/EmptyClearDivisor 이상 쌓였을 때만 한다 — 그보다 적으면 그대로 두고
+    // 삽입의 정리(SettleDeletedSlots)에 맡긴다. 그래서 빈 Map도 삭제 칸을 가질 수
+    // 있다(DeletedSlotCount).
     template <typename Q>
     bool Erase(const Q& key) noexcept {
         CheckNotIterating();
@@ -329,7 +356,7 @@ public:
         --size_;
         ++revision_;
         ++deleted_;
-        if (size_ == 0) {
+        if (size_ == 0 && deleted_ >= slotCount_ / EmptyClearDivisor) {
             ClearSlots();
         }
         return true;
@@ -373,6 +400,7 @@ public:
             }
         }
         --iterationDepth_;
+        // 이미 모든 칸을 봤으므로(O(칸 수)) 0개가 되면 문턱과 무관하게 비운다.
         if (removed != 0 && size_ == 0) {
             ClearSlots();
         }
@@ -772,6 +800,22 @@ private:
 
         return Rehash(slotCount_);
     }
+
+    // Erase로 원소가 0개가 됐을 때 모든 칸을 비우는 문턱의 분모다: 삭제 칸이 칸 수의 1/4 이상일
+    // 때만 비운다(ClearSlots — 모든 칸을 쓴다).
+    //
+    // 상환 O(1) 근거: 삭제 칸은 Erase 한 번에 하나씩만 생기고(삭제 칸을 재사용하는 삽입은 줄인다)
+    // 비우기·재해시가 0으로 되돌린다. 그래서 비우기 앞에는 지난 비우기·재해시 뒤로 칸 수/4번 이상의
+    // Erase가 있고, 비우기 한 번의 O(칸 수)는 그 Erase들에 나뉘어 Erase당 칸 넷이다. 문턱 없이
+    // 0개가 될 때마다 비우면, 큰 고점 뒤에 원소 수가 0과 1 사이를 오가는 쓰임에서 쌍마다 O(칸 수)가
+    // 든다 (고점이 100만이면 쌍마다 수십 MB를 쓴다).
+    //
+    // 문턱 아래의 삭제 칸은 그대로 남는다. 위 불변식 (점유 + 삭제) <= 칸 수 × 3/4는
+    // 그대로이고(Erase는 합을 바꾸지 않는다) 남은 삭제 칸은 삽입의 SettleDeletedSlots가 정리한다.
+    // 빈 Map에 남는 삭제 칸이 칸 수의 1/4 미만이라 없는 키 조회의 탐사는 짧다. 분모를 키우면(1/8)
+    // 남는 삭제 칸이 줄지만 비우기가 잦아지고, 줄이면(1/2) 비우기는 드물지만 빈 Map의 탐사가
+    // 길어진다.
+    static constexpr usize EmptyClearDivisor = 4;
 
     // 삽입 뒤 (점유 + 삭제) 칸 수의 상한(칸 수의 3/4)이다. 칸 수는 0 또는 8 이상의 2의
     // 거듭제곱이다.

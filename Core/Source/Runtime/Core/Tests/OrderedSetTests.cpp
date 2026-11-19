@@ -7,6 +7,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace ordered_set_tests_file {
 
 namespace {
 
@@ -202,6 +203,7 @@ TEST(OrderedSet_EqualityIncludesOrderAndMove) {
     CHECK(first.Stats().liveAllocations == 0);
     CHECK(second.Stats().liveAllocations == 0);
 }
+} // namespace ordered_set_tests_file
 
 namespace rocks::test {
 

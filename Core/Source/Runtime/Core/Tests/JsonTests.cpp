@@ -11,6 +11,7 @@
 #include <string.h>
 
 using namespace rocks;
+namespace json_tests_file {
 
 // RFC 8259 JSON 읽기·쓰기 시험이다(CoreDataFoundations.ko.md 3.5). JSONTestSuite(데이터 전용
 // ThirdParty)의 y_·n_ 사례 전체와 i_ 사례의 결정 표, 왕복·고정점, 중복 키, 한도, 오류 위치, 쓰기
@@ -882,3 +883,4 @@ TEST(Json_MemberIndexSeededAcrossObjects) {
     REQUIRE(twice.BeginObject() && twice.Key("k") && twice.Null());
     CHECK(twice.Key("k").Error() == ErrorCode::InvalidArgument);
 }
+} // namespace json_tests_file

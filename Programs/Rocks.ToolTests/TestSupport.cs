@@ -117,12 +117,28 @@ internal sealed class TestSuite
 
     // parallelism은 동시에 실행할 시험 수다(1이면 이름 순서대로 하나씩). 병렬이면 [PASS]/[FAIL] 줄은 끝난
     // 순서로 찍히지만 JSON 보고서는 언제나 이름 순서다. 시험마다 자기 임시 디렉터리만 써야 한다.
-    public async Task<int> RunAsync(string? jsonPath, ulong seed, int parallelism = 1)
+    // only를 주면 그 이름의 시험만 돌린다(--only — 고친 시험만 다시 돌릴 때 쓴다). 등록되지 않은 이름은 오류다(오타로 0건이 통과로
+    // 보이지 않게). 전체 보고가 아니므로 검증 체인은 쓰지 않는다.
+    public async Task<int> RunAsync(string? jsonPath, ulong seed, int parallelism = 1, IReadOnlyCollection<string>? only = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(parallelism, 1);
         if (tests.Count == 0)
         {
             throw new InvalidOperationException("No test cases registered");
+        }
+
+        if (only is not null)
+        {
+            string[] unknown = only.Where(name => !tests.ContainsKey(name)).Order(StringComparer.Ordinal).ToArray();
+            if (only.Count == 0 || unknown.Length != 0)
+            {
+                throw new ArgumentException("--only names no registered test case: " + string.Join(", ", unknown));
+            }
+
+            foreach (string name in tests.Keys.Where(name => !only.Contains(name)).ToArray())
+            {
+                tests.Remove(name);
+            }
         }
 
         if (jsonPath is not null)
@@ -270,6 +286,11 @@ internal sealed class Options
         return jobs;
     }
 
+    // --only <이름>[,<이름>…]: 그 시험만 돌린다(TestSuite.RunAsync). 없으면 null(전부)이다.
+    public IReadOnlyCollection<string>? Only => values.TryGetValue("only", out string? value)
+        ? value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.Ordinal)
+        : null;
+
     public string Required(string key) => values.TryGetValue(key, out string? value) && value.Length != 0 ? value :
         throw new ArgumentException("Missing --" + key);
 
@@ -279,7 +300,7 @@ internal sealed class Options
     {
         Options result = new();
         HashSet<string> allowed = new(StringComparer.Ordinal) { "root", "json", "seed", "native-executable",
-            "compiler", "metacompiler", "formatter", "dotnet", "compile-commands", "jobs" };
+            "compiler", "metacompiler", "formatter", "dotnet", "compile-commands", "jobs", "only" };
         for (int index = 0; index < arguments.Length; ++index)
         {
             string argument = arguments[index];

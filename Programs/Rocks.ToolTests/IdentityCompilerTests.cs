@@ -24,17 +24,20 @@ internal static class IdentityCompilerTests
             byte[] manifestBefore = File.ReadAllBytes(probe.ManifestPath);
             probe.Source(Source("ROCKS_CLASS()", "ROCKS_PROPERTY(ReadOnly, Category = \"Game\")"));
             await probe.Success("--identity-manifest", probe.ManifestPath);
+            // 타입 ID는 생성 헤더(Id)에, 필드 ID와 클래스 버전은 생성 소스(Schema 본문)에 있다.
             byte[] generated = File.ReadAllBytes(probe.Output);
-            string text = Encoding.UTF8.GetString(generated);
-            Verify.Contains("0xb100000000000000ull, 0x0000000000000001ull", text, "type ID");
+            byte[] generatedSource = File.ReadAllBytes(probe.GeneratedSource);
+            string text = Encoding.UTF8.GetString(generatedSource);
+            Verify.Contains("0xb100000000000000ull, 0x0000000000000001ull", Encoding.UTF8.GetString(generated), "type ID");
             Verify.Contains("0xb100000000000000ull, 0x0000000000000011ull", text, "field ID");
             Verify.Contains("Id(),   1,", text, "internal class version");
             await probe.Success("--identity-manifest", probe.ManifestPath);
             Verify.That(generated.AsSpan().SequenceEqual(File.ReadAllBytes(probe.Output)), "unchanged metadata output changed");
+            Verify.That(generatedSource.AsSpan().SequenceEqual(File.ReadAllBytes(probe.GeneratedSource)), "unchanged metadata source output changed");
             Verify.That(manifestBefore.AsSpan().SequenceEqual(File.ReadAllBytes(probe.ManifestPath)), "build mutated identity manifest");
             probe.Source(Source("ROCKS_CLASS(Abstract)", "ROCKS_PROPERTY()"));
             await probe.Success("--identity-manifest", probe.ManifestPath);
-            Verify.Contains("Id(),   1,", File.ReadAllText(probe.Output), "abstract class internal version");
+            Verify.Contains("Id(),   1,", File.ReadAllText(probe.GeneratedSource), "abstract class internal version");
         });
         suite.Add("Meta.IdentityMissingOrUnsupportedSyntaxDoesNotPublish", async () =>
         {
@@ -134,6 +137,9 @@ internal static class IdentityCompilerTests
         public string Input => temporary.FilePath("Probe.h");
 
         public string Output => MetaCompilerArguments.GeneratedPath(temporary.Root, "Probe.h");
+
+        // 타입별 생성 소스(본문)의 경로다.
+        public string GeneratedSource => MetaCompilerArguments.GeneratedSourcePath(temporary.Root, "Probe.h");
 
         // 실패한 실행이 덮어쓰지 않아야 하는 이전 출력을 만든다.
         public void WritePrevious(string text)

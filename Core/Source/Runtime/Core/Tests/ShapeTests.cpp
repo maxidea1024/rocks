@@ -4,6 +4,7 @@
 #include <Platform/PlatformMath.h>
 
 using namespace rocks;
+namespace shape_tests_file {
 
 namespace {
 
@@ -650,3 +651,4 @@ TEST(MathDirectedFloatRoundingIgnoresFlushToZero) {
     platform::detail::WriteFloatingPointControl(original);
     CHECK(same);
 }
+} // namespace shape_tests_file

@@ -6,6 +6,8 @@
 // 목록 escape 표·원소 수, Set·Map 중복 키와 첫 `:` 분해, struct·Optional·원소 자리, 오류 모두
 // 모으기.
 using namespace rocks;
+namespace text_value_tests_file {
+
 using namespace rocks::test::text;
 
 namespace {
@@ -485,3 +487,4 @@ TEST(TextValue_StructOptionalAndElementSlots) {
     CHECK(member.part == TextSlotPart::SetElement);
     CHECK(Rejects(context, member, "1", TextDiagnosticCode::Unsupported));
 }
+} // namespace text_value_tests_file

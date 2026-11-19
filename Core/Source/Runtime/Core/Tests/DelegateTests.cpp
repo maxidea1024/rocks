@@ -5,6 +5,8 @@
 #include <Core/Memory/SystemAllocator.h>
 
 namespace rocks::test {
+namespace delegate_tests_file {
+
 namespace {
 
 int staticCalls = 0;
@@ -374,5 +376,6 @@ TEST(MulticastDelegate_TargetDestructorMayReenter) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace delegate_tests_file
 
 } // namespace rocks::test

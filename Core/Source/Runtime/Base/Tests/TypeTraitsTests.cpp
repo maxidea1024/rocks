@@ -12,10 +12,15 @@ struct NonCallable {};
 int InvokeExpression(NonCallable) noexcept;
 } // namespace rocks::test::traits_adl_collision
 
+namespace type_traits_tests_file {
+
 static_assert(!rocks::IsInvocableV<rocks::test::traits_adl_collision::NonCallable>);
 static_assert(!rocks::IsNothrowInvocableV<rocks::test::traits_adl_collision::NonCallable>);
+} // namespace type_traits_tests_file
 
 namespace rocks::test {
+namespace type_traits_tests_file {
+
 namespace {
 
 struct TraitBase {};
@@ -383,5 +388,6 @@ TEST(Base_TypeTraitsContracts) {
     CHECK((IsSameV<decltype(MakeIndexSequence<4>::Size), const usize>));
     CHECK((IsBaseOf<TraitBase, TraitDerived>::Value));
 }
+} // namespace type_traits_tests_file
 
 } // namespace rocks::test

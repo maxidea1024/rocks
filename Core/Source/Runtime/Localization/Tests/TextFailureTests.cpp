@@ -4,6 +4,7 @@
 #include <Localization/Text.h>
 
 using namespace rocks;
+namespace text_failure_tests_file {
 
 namespace {
 // 입력/중간 결과/게시/clone/최종 문자열을 한 수명 범위에 두고 모든 할당 지점을 주입한다.
@@ -153,3 +154,4 @@ TEST(TextFormatAllocationFailureLeavesExistingArgumentsUsable) {
     }
     CHECK(backing.Stats().liveAllocations == 0);
 }
+} // namespace text_failure_tests_file

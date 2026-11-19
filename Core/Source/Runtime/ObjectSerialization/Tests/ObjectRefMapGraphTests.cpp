@@ -18,6 +18,8 @@
 // 거부·로드 진단 — 경로 [f[i]]), MaxElements 저장 거부, 손상 입력(같은 키 둘·대상 타입 불일치·범위
 // 밖 local ID).
 using namespace rocks;
+namespace object_ref_map_graph_tests_file {
+
 using reflection_fixture::RefMapBundle;
 using reflection_fixture::RefMapDerived;
 using reflection_fixture::RefMapHolder;
@@ -538,3 +540,4 @@ TEST(ObjectRefMapGraph_DuplicateKeysAndBadTargetsAreRejected) {
 
     CHECK(types.Shutdown());
 }
+} // namespace object_ref_map_graph_tests_file

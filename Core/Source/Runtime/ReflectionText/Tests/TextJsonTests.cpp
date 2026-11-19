@@ -10,6 +10,8 @@
 // float 단정도 표기, staged 대상), import 의미(struct 병합·컨테이너 교체·mapMerge), 엄격성과 JSON
 // 위치, 용도별 제외, 한도, struct 값 대상, PathReadKeys.
 using namespace rocks;
+namespace text_json_tests_file {
+
 using namespace rocks::reflection_text;
 using namespace rocks::test::assign;
 using reflection_fixture::AssignHolder;
@@ -449,3 +451,4 @@ TEST(TextJson_LimitsTargetsAndReadKeys) {
                                &failure)) == ErrorCode::TypeMismatch);
     CHECK(failure.reason == PropertyPathError::NotKeyed && keys.Size() == 2);
 }
+} // namespace text_json_tests_file

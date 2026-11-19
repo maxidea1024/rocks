@@ -4,6 +4,8 @@
 
 #include <Windows.h>
 
+namespace windows_com_ref_tests_file {
+
 // Platform/Win64/ComRef.h 시험이다. 가짜 COM 객체로 AddRef·Release 수를 직접 세어 소유 규칙을
 // 단언한다(Windows 전용 시험이라 TestSupport/Private/Win64에 둔다).
 using rocks::Move;
@@ -223,3 +225,4 @@ TEST(PlatformWindowsComRefTryQueryAsIntoItselfKeepsObjectAlive) {
     ref.Reset();
     CHECK(object.references == 0);
 }
+} // namespace windows_com_ref_tests_file

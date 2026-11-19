@@ -62,7 +62,7 @@ internal static partial class MetaTests
                 Field("probe::Value", "kinds").GetProperty("key").GetProperty("type").GetString(), "class key base");
             Verify.Equal(System.Text.Json.JsonValueKind.Null, Field("probe::Leaf", "label").GetProperty("key").ValueKind, "non-map field key is null");
             Verify.Equal("Set", Field("probe::Leaf", "tags").GetProperty("value").GetProperty("kind").GetString(), "set struct member");
-            string generated = Compact(File.ReadAllText(probe.Output));
+            string generated = Compact(probe.GeneratedText());
             Verify.Contains("{ValueKind::Map,Guid{}}", generated, "generated map schema");
             Verify.Contains("{ValueKind::Set,Guid{}}", generated, "generated set schema");
             Verify.Contains("NativeTypeKey<::probe::Mode>()}", generated, "map enum key native key");

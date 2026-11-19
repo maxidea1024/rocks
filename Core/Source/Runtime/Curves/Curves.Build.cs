@@ -1,3 +1,4 @@
+using Rocks.Build;
 using Rocks.Build.Rules;
 
 // Curve value types (Docs/Design/CurveData.ko.md sections 3 and 4, CV5 and CV6): ScalarCurveBase, TangentCurve and PlainCurve with their
@@ -9,6 +10,9 @@ using Rocks.Build.Rules;
 public sealed class Curves : CoreModuleRules
 {
     protected override string ModuleName => "Curves";
+
+    // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
+    protected override UnityMode Unity => UnityMode.On;
 
     protected override string[] RequiredModules => ["ObjectRuntime"];
 

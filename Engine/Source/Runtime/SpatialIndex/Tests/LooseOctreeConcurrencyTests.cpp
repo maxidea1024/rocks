@@ -7,7 +7,10 @@
 #include <string.h>
 
 using namespace rocks;
+namespace loose_octree_concurrency_tests_file {
+
 using namespace rocks::spatial;
+} // namespace loose_octree_concurrency_tests_file
 
 // LO11(일부): 읽기·변경 단계가 겹치면 platform::Fatal인지 자식 프로세스에서 확인한다(Docs/Design/
 // SpatialIndex.ko.md 6.9절). 자식은 이 실행 파일을 "--process-probe spatial-index <시나리오>"로
@@ -16,6 +19,8 @@ using namespace rocks::spatial;
 namespace rocks::test {
 bool RegisterProcessProbe(const char* mode, int (*function)(int, char**) noexcept) noexcept;
 } // namespace rocks::test
+
+namespace loose_octree_concurrency_tests_file {
 
 namespace {
 
@@ -251,3 +256,4 @@ TEST(LooseOctree_LO11_NestedScopesThenMutation) {
     SpatialReadScope read(octree);
     CHECK(read.Reader().Count() == 2);
 }
+} // namespace loose_octree_concurrency_tests_file

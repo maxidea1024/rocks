@@ -7,8 +7,10 @@ namespace Rocks.Build.Cli;
 /// 모듈 소유 메타데이터를 생성한다(Docs/Design/ReflectionFoundations.ko.md 1.3–1.7절). 타깃에서 도달하는 메타데이터
 /// 모듈을 의존 순서로 모듈마다 한 번 MetaCompiler로 실행하고, 모든 모듈의 inventory와 명세 집합을 검증한 뒤 생성
 /// 헤더·생성 소스·descriptor를 한 번에 게시한다. 실행 중 산출물은 stage에 두며 의존 모듈은 stage의 descriptor와 생성
-/// 루트를 본다(이전 빌드의 게시본을 보지 않는다). 생성 소스(&lt;stage&gt;/&lt;모듈&gt;/Source)는 include 루트가 아니고 MetaCompiler가
-/// 컴파일하지 않는다 — 게시한 뒤 빌드가 그 모듈의 번역 단위로 컴파일한다(Docs/Design/ReflectionGeneratedSources.ko.md 6–7절).
+/// 루트를 본다(이전 빌드의 게시본을 보지 않는다). 생성 소스(&lt;stage&gt;/&lt;모듈&gt;/Source — 타입별 본문과 등록 함수 정의)는 include
+/// 루트가 아니고 MetaCompiler가 컴파일하지 않는다 — 게시한 뒤 빌드가 그 모듈의 번역 단위로 컴파일한다. 그래서 여기의 게시 전 검증은
+/// 생성 헤더까지다. verifySources를 켜면 MetaCompiler가 생성 소스도 게시 전에 컴파일해 본문 계약 위반을 원본 위치와 함께 알린다
+/// (Docs/Design/ReflectionGeneratedSources.ko.md 6–7절).
 /// </summary>
 public static class MetadataRunner
 {
@@ -17,10 +19,13 @@ public static class MetadataRunner
 
     /// <summary>
     /// roots는 native 빌드와 같은 root 모듈 집합이다(게임 빌드는 켠 플러그인 모듈을 더한다). null이면 타깃 모듈이다.
-    /// 반환값은 0(성공 또는 메타데이터 모듈 없음) 또는 1(진단을 출력함)이다.
+    /// 반환값은 0(성공 또는 메타데이터 모듈 없음) 또는 1(진단을 출력함)이다. jobs는 MetaCompiler 한 실행이 함께 돌리는 검증 컴파일
+    /// 수다(빌드의 --jobs, null이면 MetaCompiler 기본값). verifySources는 게시 전에 생성 소스도 컴파일하게 한다
+    /// (명령 옵션 --verify-metadata-sources on).
     /// </summary>
     public static async Task<int> GenerateAsync(BuildContext context, NativeToolchain toolchain, MetadataPlan plan,
-        TargetRules target, string compilerTool, CancellationToken cancellationToken, IReadOnlyList<string>? roots = null)
+        TargetRules target, string compilerTool, CancellationToken cancellationToken, IReadOnlyList<string>? roots = null,
+        int? jobs = null, bool verifySources = false)
     {
         // ActionGraph와 같이 모듈 이름은 대소문자를 무시해 비교한다.
         var byName = plan.Modules.ToDictionary(module => module.Name, StringComparer.OrdinalIgnoreCase);
@@ -60,6 +65,7 @@ public static class MetadataRunner
         }
 
         var metadata = plan.Generated.ToDictionary(module => module.Name, StringComparer.OrdinalIgnoreCase);
+        HashSet<string> entryModules = ModuleDefinitions.EntryModules(plan.Modules);
         List<MetadataModule> runs = order.Where(metadata.ContainsKey).Select(name => metadata[name]).ToList();
         List<NativeModuleInput> imported = order.Select(name => byName[name]).Where(module => module.ImportedMetadata is not null).ToList();
         if (runs.Count == 0)
@@ -130,14 +136,29 @@ public static class MetadataRunner
                     arguments.Add("--clang-arg=" + argument);
                 }
 
-                foreach (string define in owner.PublicDefines.Concat(owner.PrivateDefines).Concat(dependencies.SelectMany(module => module.PublicDefines)).Distinct())
+                // 모듈 정의는 native compile과 같은 정의 헤더로 넘긴다(Docs/Design/UnityBuildPch.ko.md 8.2절 — AST와 compile의 정의가
+                // 갈라지지 않는다). 헤더는 여기서 쓰고, 빌드가 같은 내용을 다시 계산해 그대로 둔다.
+                string[] defines = ModuleDefinitions.Of(owner, dependencies, entryModules.Contains(owner.Name));
+                if (defines.Length != 0)
                 {
-                    arguments.Add("--clang-arg=" + (toolchain.Platform == NativePlatform.Windows ? "/D" : "-D") + define);
+                    string definitions = ModuleDefinitions.PathOf(context.OutputDirectory, owner.Name);
+                    AtomicFile.WriteIfChanged(definitions, new System.Text.UTF8Encoding(false).GetBytes(ModuleDefinitions.Content(defines)));
+                    arguments.AddRange(["--definitions-header", definitions]);
                 }
 
                 foreach (string directory in MetadataLayout.IncludeOrder(owner, byName))
                 {
                     arguments.AddRange(["--include-dir", rootMap.TryGetValue(directory, out string? staged) ? staged : directory]);
+                }
+
+                if (jobs is int verifyJobs)
+                {
+                    arguments.AddRange(["--jobs", verifyJobs.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
+                }
+
+                if (verifySources)
+                {
+                    arguments.Add("--verify-sources");
                 }
 
                 var generated = await ProcessRunner.RunAsync(new("dotnet", arguments, context.RootDirectory,
@@ -152,11 +173,14 @@ public static class MetadataRunner
 
                 // 배치(MetadataLayout)가 모듈의 리플렉션 생성 소스로 넣은 파일을 MetaCompiler가 실제로 냈는지 확인한다. 이름 규칙이
                 // 어긋난 도구 조합이면 여기서 멈춘다(게시 뒤 액션 그래프의 "Source does not exist"보다 원인이 분명하다).
-                string stagedModuleSource = Path.Combine(StageRoot(run.Name), MetadataModule.SourceDirectoryName, MetadataModule.ModuleSourceName(run.Name));
-                if (!File.Exists(stagedModuleSource))
+                string stagedSources = Path.Combine(StageRoot(run.Name), MetadataModule.SourceDirectoryName);
+                foreach (string relative in run.Headers.Select(MetadataModule.TypeSourceRelative).Append(MetadataModule.ModuleSourceName(run.Name)))
                 {
-                    throw new InvalidOperationException($"Module '{run.Name}': Rocks.MetaCompiler did not produce the module generated source " +
-                        $"'{MetadataModule.ModuleSourceName(run.Name)}'. Rebuild the host tools so that Rocks.Build.Cli and Rocks.MetaCompiler match.");
+                    if (!File.Exists(Path.Combine(stagedSources, relative)))
+                    {
+                        throw new InvalidOperationException($"Module '{run.Name}': Rocks.MetaCompiler did not produce the generated source " +
+                            $"'{relative.Replace('\\', '/')}'. Rebuild the host tools so that Rocks.Build.Cli and Rocks.MetaCompiler match.");
+                    }
                 }
             }
 

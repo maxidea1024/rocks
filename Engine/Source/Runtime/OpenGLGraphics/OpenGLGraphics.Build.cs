@@ -9,6 +9,9 @@ public sealed class OpenGLGraphics : EngineModuleRules
 {
     protected override string ModuleName => "OpenGLGraphics";
 
+    // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
+    protected override UnityMode Unity => UnityMode.On;
+
     protected override string[] RequiredModules => ["Graphics"];
 
     public override NativeModuleInput Configure(BuildContext context)
@@ -17,6 +20,10 @@ public sealed class OpenGLGraphics : EngineModuleRules
         return new()
         {
             Name = ModuleName,
+            // The unity batch of this module is verified on Windows only (the Android sources are built by no target whose compile
+            // database the development host can produce yet).
+            Unity = context.Platform == NativePlatform.Windows ? UnityFor(context) : UnityMode.Off,
+            UnityExclude = UnityExclude(context),
             // The entry point (Private/OpenGLGraphicsModule.cpp) is built on every platform.
             Sources =
             [

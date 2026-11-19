@@ -9,6 +9,14 @@ public sealed class CryptoModule : CoreModuleRules
 {
     protected override string ModuleName => "Crypto";
 
+    // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
+    protected override UnityMode Unity => UnityMode.On;
+
+    // The AES kernels stay standalone translation units: each is derived third-party code for one architecture (Derivation.json) with
+    // per-function target attributes, and both declare the same file-local kernel names.
+    protected override IReadOnlyList<string> UnityExclude(BuildContext context) =>
+        [context.PathInRoot($"{ModuleDirectory}/Private/Aes/AesX64.cpp"), context.PathInRoot($"{ModuleDirectory}/Private/Aes/AesArm64.cpp")];
+
     protected override string[] RequiredModules => ["Core", "Task", "Sodium"];
 
     protected override IReadOnlyList<string> PrivateIncludeDirectories(BuildContext context) =>

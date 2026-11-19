@@ -336,6 +336,8 @@ struct GeneratedType<path_parse::DeepHolder> {
 
 } // namespace rocks
 
+namespace property_path_parse_tests_file {
+
 namespace {
 
 using namespace path_parse;
@@ -667,3 +669,4 @@ TEST(PropertyPathParse_SeventeenStepsAndTooDeep) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace property_path_parse_tests_file

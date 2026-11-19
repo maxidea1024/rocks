@@ -11,6 +11,7 @@
 #include <string.h>
 
 using namespace rocks;
+namespace json5_tests_file {
 
 // JSON5 읽기(JsonSyntax::Json5) 시험이다(CoreDataFoundations.ko.md 3절). json5-tests(데이터 전용
 // ThirdParty) 전체를 확장자 규칙으로 판정하고, 받은 문서의 값을 C#과 공용인 기대 표
@@ -594,3 +595,4 @@ TEST(Json5_OptionsLimitsAndStrictUnchanged) {
     CHECK(ParseJson5(document, "[1,]", options).Succeeded());
     CHECK(ParseJson5(document, "[11,]", options).code == JsonErrorCode::InputTooLarge);
 }
+} // namespace json5_tests_file

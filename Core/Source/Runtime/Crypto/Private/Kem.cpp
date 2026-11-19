@@ -31,18 +31,18 @@ static_assert(KemSharedSecretBytes == crypto_kem_xwing_SHAREDSECRETBYTES &&
 static_assert(crypto_kem_xwing_SECRETKEYBYTES == crypto_kem_xwing_SEEDBYTES);
 static_assert(crypto_kem_mlkem768_SECRETKEYBYTES <= detail::SecretSlotMaxBytes);
 
-struct Traits {
+struct KemTraits {
     usize publicKeyBytes;
     usize ciphertextBytes;
     usize seedBytes;
 };
 
-bool IsDefined(KemAlgorithm algorithm) noexcept {
+bool KemIsDefined(KemAlgorithm algorithm) noexcept {
     return algorithm == KemAlgorithm::XWing || algorithm == KemAlgorithm::MlKem768;
 }
 
 // 정의된 알고리즘만 넘긴다.
-Traits TraitsOf(KemAlgorithm algorithm) noexcept {
+KemTraits KemTraitsOf(KemAlgorithm algorithm) noexcept {
     if (algorithm == KemAlgorithm::XWing) {
         return {crypto_kem_xwing_PUBLICKEYBYTES, crypto_kem_xwing_CIPHERTEXTBYTES,
                 crypto_kem_xwing_SEEDBYTES};
@@ -67,7 +67,7 @@ Result<SecretBytes> TryExpandMlKem(Span<const uint8> seed, uint8* publicKey) noe
 
 // seed에서 키 쌍을 만든다. 알고리즘과 seed 길이는 호출자가 검사했다.
 Result<KemKeyPair> TryMakeFromSeed(KemAlgorithm algorithm, Span<const uint8> seed) noexcept {
-    const Traits traits = TraitsOf(algorithm);
+    const KemTraits traits = KemTraitsOf(algorithm);
     auto seedCopy = SecretBytes::TryCopyFrom(seed);
     if (!seedCopy) {
         return Result<KemKeyPair>::Failure(seedCopy.Error());
@@ -107,11 +107,11 @@ Result<SecretBytes> TryCreateSharedSecret() noexcept {
 } // namespace
 
 Result<KemInfo> TryGetKemInfo(KemAlgorithm algorithm) noexcept {
-    if (!IsDefined(algorithm)) {
+    if (!KemIsDefined(algorithm)) {
         return Result<KemInfo>::Failure(ErrorCode::InvalidArgument);
     }
 
-    const Traits traits = TraitsOf(algorithm);
+    const KemTraits traits = KemTraitsOf(algorithm);
     KemInfo info;
     info.publicKeyBytes = traits.publicKeyBytes;
     info.ciphertextBytes = traits.ciphertextBytes;
@@ -127,7 +127,7 @@ KemAlgorithm GetPreferredKem() noexcept {
 
 Result<KemPublicKey> KemPublicKey::TryFromBytes(KemAlgorithm algorithm,
                                                 Span<const uint8> bytes) noexcept {
-    if (!IsDefined(algorithm) || bytes.Size() != TraitsOf(algorithm).publicKeyBytes) {
+    if (!KemIsDefined(algorithm) || bytes.Size() != KemTraitsOf(algorithm).publicKeyBytes) {
         return Result<KemPublicKey>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -144,12 +144,12 @@ KemKeyPair::KemKeyPair(SecretBytes&& seed, const KemPublicKey& publicKey) noexce
 
 Result<KemKeyPair> KemKeyPair::TryGenerate(KemAlgorithm algorithm) noexcept {
     platform::DataIndependentTimingScope dit;
-    if (!IsDefined(algorithm)) {
+    if (!KemIsDefined(algorithm)) {
         return Result<KemKeyPair>::Failure(ErrorCode::InvalidArgument);
     }
 
     uint8 seed[KemMaxSeedBytes];
-    const Span<uint8> seedView = Span<uint8>(seed).Left(TraitsOf(algorithm).seedBytes);
+    const Span<uint8> seedView = Span<uint8>(seed).Left(KemTraitsOf(algorithm).seedBytes);
     if (auto filled = TryFillRandom(seedView); !filled) {
         return Result<KemKeyPair>::Failure(filled.Error());
     }
@@ -162,7 +162,7 @@ Result<KemKeyPair> KemKeyPair::TryGenerate(KemAlgorithm algorithm) noexcept {
 Result<KemKeyPair> KemKeyPair::TryFromSeed(KemAlgorithm algorithm,
                                            Span<const uint8> seed) noexcept {
     platform::DataIndependentTimingScope dit;
-    if (!IsDefined(algorithm) || seed.Size() != TraitsOf(algorithm).seedBytes) {
+    if (!KemIsDefined(algorithm) || seed.Size() != KemTraitsOf(algorithm).seedBytes) {
         return Result<KemKeyPair>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -189,7 +189,7 @@ Result<void> hazmat::TryExportSeed(const KemKeyPair& key, Span<uint8> output) no
 Result<KdfKey> TryEncapsulate(const KemPublicKey& recipient, Span<uint8> ciphertext) noexcept {
     platform::DataIndependentTimingScope dit;
     if (recipient.IsEmpty() ||
-        ciphertext.Size() != TraitsOf(recipient.Algorithm()).ciphertextBytes) {
+        ciphertext.Size() != KemTraitsOf(recipient.Algorithm()).ciphertextBytes) {
         return Result<KdfKey>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -223,7 +223,7 @@ Result<KdfKey> TryDecapsulate(const KemKeyPair& recipient, Span<const uint8> cip
 
     const KemAlgorithm algorithm = recipient.Algorithm();
     // 암호문 길이는 메시지에서 온 값이다(결정 D5).
-    if (ciphertext.Size() != TraitsOf(algorithm).ciphertextBytes) {
+    if (ciphertext.Size() != KemTraitsOf(algorithm).ciphertextBytes) {
         return Result<KdfKey>::Failure(ErrorCode::AuthenticationFailed);
     }
 

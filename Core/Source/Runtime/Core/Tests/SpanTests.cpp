@@ -2,6 +2,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace span_tests_file {
 
 namespace {
 
@@ -127,3 +128,4 @@ TEST(SpanOverlapsComparesByteRanges) {
     CHECK(Overlaps(wordView.Right(1), lastByte));
     CHECK(!Overlaps(wordView.Left(3), lastByte));
 }
+} // namespace span_tests_file

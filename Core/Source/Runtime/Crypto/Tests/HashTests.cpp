@@ -7,6 +7,8 @@
 #include <string.h>
 
 using namespace rocks;
+namespace hash_tests_file {
+
 using namespace rocks::crypto;
 
 // 알려진 답의 출처: BLAKE2b·SHA-512·SHA3·SHAKE는 Python hashlib(OpenSSL)로 계산하고 libsodium
@@ -409,3 +411,4 @@ TEST(CryptoHashRejectsMisuse) {
     XofState emptyXof;
     CHECK(emptyXof.TrySqueeze(whole.Left(4)).Error() == ErrorCode::StaleHandle);
 }
+} // namespace hash_tests_file

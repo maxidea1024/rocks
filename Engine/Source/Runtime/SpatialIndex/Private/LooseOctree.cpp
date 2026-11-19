@@ -27,7 +27,7 @@ bool IsPowerOfTwo(double value) noexcept {
     return exponent != 0 && mantissa == 0;
 }
 
-bool IsIntegral(double value) noexcept {
+bool LooseOctreeIsIntegral(double value) noexcept {
     return math::IsFinite(value) && math::Floor(value) == value;
 }
 
@@ -55,7 +55,7 @@ Result<LooseOctree> LooseOctree::TryCreate(const LooseOctreeConfig& config,
     }
     const double scaledLooseness = config.looseness * 64.0;
     if (!math::IsFinite(config.looseness) || config.looseness < 1.0 || config.looseness > 2.0 ||
-        !IsIntegral(scaledLooseness)) {
+        !LooseOctreeIsIntegral(scaledLooseness)) {
         return invalid();
     }
     if (config.splitThreshold < 4 || config.mergeThreshold > config.splitThreshold / 2) {
@@ -81,7 +81,7 @@ Result<LooseOctree> LooseOctree::TryCreate(const LooseOctreeConfig& config,
     const double exactLimit = cell * 0x1.0p52;
     for (uint32 axis = 0; axis < 3; ++axis) {
         const double anchor = config.anchor[axis];
-        if (!IsIntegral(anchor / cell) || math::Abs(anchor) + rootSpan >= exactLimit) {
+        if (!LooseOctreeIsIntegral(anchor / cell) || math::Abs(anchor) + rootSpan >= exactLimit) {
             return invalid();
         }
     }

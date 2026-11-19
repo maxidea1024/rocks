@@ -3,6 +3,8 @@
 #include <TestSupport/Test.h>
 #include <string.h>
 
+namespace windows_path_guard_tests_file {
+
 using namespace rocks::platform::detail;
 
 TEST(PlatformFileWindowsDevicePathsAreRejectedBeforeOsAccess) {
@@ -39,3 +41,4 @@ TEST(PlatformFileWindowsReservedNameRejectedAcrossEntryPoints) {
           rocks::platform::FileCode::Unsupported);
     CHECK(!file.IsOpen());
 }
+} // namespace windows_path_guard_tests_file

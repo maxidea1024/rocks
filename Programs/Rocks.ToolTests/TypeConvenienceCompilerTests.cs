@@ -46,18 +46,24 @@ internal static class TypeConvenienceCompilerTests
                 Timeout: TimeSpan.FromSeconds(60)));
             Verify.Equal(0, generated.ExitCode, "metadata generation: " + generated.StdOut + generated.StdErr);
 
+            // 생성 헤더는 inline 부분(Id·형질)만 정의한다: 두 번역 단위가 그 헤더만으로 링크되고 같은 ID를 본다. 스키마 본문은 타입별 생성
+            // 소스가 한 번 정의하므로(Docs/Design/ReflectionGeneratedSources.ko.md 5.1절 — 주소가 프로그램에 하나다) TypeOf를 쓰는 번역 단위는
+            // 컴파일은 되지만 그 생성 소스 없이는 링크되지 않는다. 생성 소스 자체는 런타임 라이브러리에 기대므로 여기서는 컴파일만 하고,
+            // 실제 링크는 빌드의 네이티브 시험이 한다.
             temporary.Write("first.cpp", "#include <Probe.generated.h>\n" +
-                "const rocks::TypeSchema* FirstSchema() noexcept { return &rocks::TypeOf<probe::Value>(); }\n" +
                 "rocks::TypeId FirstId() noexcept { return rocks::TypeIdOf<probe::Value>(); }\n");
             temporary.Write("second.cpp", "#include <Probe.generated.h>\n" +
-                "const rocks::TypeSchema* FirstSchema() noexcept; rocks::TypeId FirstId() noexcept;\n" +
-                "int main() { const auto* left = FirstSchema(); const auto* right = &rocks::TypeOf<probe::Value>(); " +
-                "const auto id = rocks::TypeIdOf<probe::Value>(); " +
-                "return left == right && FirstId() == id && right->id == id ? 0 : 1; }\n");
+                "rocks::TypeId FirstId() noexcept;\n" +
+                "int main() { const auto id = rocks::TypeIdOf<probe::Value>(); " +
+                "return FirstId() == id && id == rocks::GeneratedType<probe::Value>::Id() ? 0 : 1; }\n");
+            temporary.Write("schema.cpp", "#include <Probe.generated.h>\n" +
+                "const rocks::TypeSchema* SchemaOf() noexcept;\n" +
+                "const rocks::TypeSchema* SchemaOf() noexcept { return &rocks::TypeOf<probe::Value>(); }\n");
 
-            async Task<string> Compile(string name)
+            // sourcePath를 주면 그 파일을 컴파일한다(타입별 생성 소스 — 본문 정의가 든 번역 단위).
+            async Task<string> Compile(string name, string? sourcePath = null)
             {
-                string source = temporary.FilePath(name + ".cpp");
+                string source = sourcePath ?? temporary.FilePath(name + ".cpp");
                 string output = temporary.FilePath(name + (clangCl ? ".obj" : ".o"));
                 List<string> arguments = clangCl
                     ? ["/nologo", "/std:c++latest", "/W4", "/WX", "/c", source, "/Fo" + output]
@@ -76,14 +82,23 @@ internal static class TypeConvenienceCompilerTests
 
             string first = await Compile("first");
             string second = await Compile("second");
+            string schema = await Compile("schema");
+            await Compile("generated", MetaCompilerArguments.GeneratedSourcePath(temporary.Root, "Probe.h"));
             string program = temporary.FilePath(clangCl ? "type_odr.exe" : "type_odr");
-            List<string> link = clangCl ? ["/nologo", first, second, "/Fe" + program] : [first, second, "-o", program];
-            link.AddRange(options.ClangArguments);
-            var linked = await ProcessRunner.RunAsync(new(compiler, link, options.Root, environment,
-                Timeout: TimeSpan.FromSeconds(60)));
+            async Task<ProcessResult> Link(params string[] objects)
+            {
+                List<string> link = clangCl ? ["/nologo", .. objects, "/Fe" + program] : [.. objects, "-o", program];
+                link.AddRange(options.ClangArguments);
+                return await ProcessRunner.RunAsync(new(compiler, link, options.Root, environment, Timeout: TimeSpan.FromSeconds(60)));
+            }
+
+            var unresolved = await Link(first, second, schema);
+            Verify.That(unresolved.ExitCode != 0 && (unresolved.StdOut + unresolved.StdErr).Contains("Schema", StringComparison.Ordinal),
+                "the generated header must only declare Schema (its definition is in the generated source): " + unresolved.StdOut + unresolved.StdErr);
+            var linked = await Link(first, second);
             Verify.Equal(0, linked.ExitCode, "two translation-unit link: " + linked.StdOut + linked.StdErr);
             var ran = await ProcessRunner.RunAsync(new(program, [], options.Root, environment, Timeout: TimeSpan.FromSeconds(20)));
-            Verify.Equal(0, ran.ExitCode, "generated schema/ID mismatch across translation units: " + ran.StdOut + ran.StdErr);
+            Verify.Equal(0, ran.ExitCode, "generated ID mismatch across translation units: " + ran.StdOut + ran.StdErr);
         });
 
         suite.Add("Meta.TypeConvenienceMissingGeneratedHeaderIsDiagnosed", async () =>

@@ -4,6 +4,7 @@
 #include <Serialization/Record.h>
 
 using namespace rocks;
+namespace serialization_review_tests_file {
 
 namespace {
 // 공개 wire 명세로 고정한 1-field record다. writer 출력에서 기대값을 생성하지 않는다.
@@ -170,3 +171,4 @@ TEST(ArchiveUtf8SelfStringGrowthAndFailedGrowthPreserveExactBytes) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace serialization_review_tests_file

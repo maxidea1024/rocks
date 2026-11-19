@@ -5,6 +5,8 @@
 #include <Platform/PlatformMath.h>
 
 namespace rocks::test {
+namespace math_quaternion_transform_tests_file {
+
 namespace {
 
 Quatd RandomRotation(MathRandom& random) {
@@ -340,5 +342,6 @@ TEST(Quaternion_AngularDistanceStaysWithinPi) {
     CHECK(math::IsNaN(
         AngularDistance(Quat(platform::PlatformMath::QuietNaN<float>(), 0.0f, 0.0f, 1.0f), a)));
 }
+} // namespace math_quaternion_transform_tests_file
 
 } // namespace rocks::test

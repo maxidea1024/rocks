@@ -3,6 +3,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace window_tests_file {
 
 // 창을 실제로 띄우는 시험은 데스크톱 세션이 필요하므로 Sandbox --self-test에서 한다. 여기서는 창을
 // 만들지 않는 입력 검증만 확인한다.
@@ -55,3 +56,4 @@ TEST(PlatformWindow_DesktopSessionStateIsOneOfTheKnownValues) {
           state == platform::DesktopSessionState::Disconnected ||
           state == platform::DesktopSessionState::Unknown);
 }
+} // namespace window_tests_file

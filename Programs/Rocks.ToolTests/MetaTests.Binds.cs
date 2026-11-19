@@ -37,7 +37,7 @@ internal static partial class MetaTests
             Verify.Equal(Type("probe::Vec3Binding").GetProperty("id").GetString(), Target("probe::Value", "position"), "alias field resolves to the mirror");
             Verify.Equal(Type("probe::PairBinding").GetProperty("id").GetString(), Target("probe::Value", "pair"), "real type field resolves to the mirror");
             Verify.Equal(Type("probe::Vec3dBinding").GetProperty("id").GetString(), Target("probe::PairBinding", "b"), "mirror member resolves to another mirror");
-            string generated = Compact(File.ReadAllText(probe.Output));
+            string generated = Compact(probe.GeneratedText());
             foreach ((string expected, string reason) in new[]
             {
                 ("struct GeneratedType<::rocks::Vector3<float>>", "specialization of the real type"),
@@ -83,7 +83,7 @@ internal static partial class MetaTests
             Verify.Equal("probe::Mode", Type("probe::ModeBinding").GetProperty("binds").GetString(), "enum Binds in the descriptor");
             Verify.Equal(Type("probe::ModeBinding").GetProperty("id").GetString(), Target("probe::Value", "mode"), "real enum field resolves to the enum mirror");
             Verify.Equal(Type("probe::ModeBinding").GetProperty("id").GetString(), Target("probe::KeeperBinding", "mode_"), "mirror member enum resolves to the enum mirror");
-            string generated = Compact(File.ReadAllText(probe.Output));
+            string generated = Compact(probe.GeneratedText());
             foreach ((string expected, string reason) in new[]
             {
                 ("struct GeneratedType<::probe::Mode>", "enum specialization of the real enum"),

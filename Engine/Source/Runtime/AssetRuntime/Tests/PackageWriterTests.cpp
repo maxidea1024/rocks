@@ -8,6 +8,8 @@
 // 참조· 패키지에 속하지 않은 객체 — UnpackagedReference), bulk 원본 오류, 출력(sink) 실패 전파,
 // 할당 실패 주입(쓰기·읽기·Prepare·Instantiate의 모든 할당 지점).
 using namespace rocks;
+namespace package_writer_tests_file {
+
 using namespace rocks::asset_test;
 
 namespace {
@@ -912,3 +914,4 @@ TEST(AssetPackage_AllocationFailuresLargeScenario) {
         roots[index].Reset();
     }
 }
+} // namespace package_writer_tests_file

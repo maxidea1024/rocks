@@ -16,7 +16,7 @@ internal static partial class MetaTests
         {
             using Probe probe = new(options, actualEnvironment, generator, compiler);
             await probe.GenerateAsync(ArraySource);
-            string generated = Compact(File.ReadAllText(probe.Output));
+            string generated = Compact(probe.GeneratedText());
             const string lambda = "+[](const ::rocks::RuntimeFieldOps&, ::rocks::detail::PathCursor& cursor) noexcept -> ::rocks::Result<void> { return ::rocks::detail::PathClassField<";
             foreach ((string expected, string reason) in new[]
             {
@@ -56,7 +56,7 @@ internal static partial class MetaTests
             // 단일 값 클래스 필드(plain)도 valueNativeType(nullptr) 뒤에 path thunk를 싣고(리플렉션 B9i3c0 — staged·Detach·Attach용)
             // private 멤버·enum·String·EditorOnly 멤버에도 thunk가 나온다.
             await probe.GenerateAsync(StructSource);
-            string structs = Compact(File.ReadAllText(probe.Output));
+            string structs = Compact(probe.GeneratedText());
             foreach ((string expected, string reason) in new[]
             {
                 ("&::probe::Value::plain, field, context); }, nullptr, " + lambda + "::probe::Value, ::rocks::ValueKind::UInt32>(cursor, &::probe::Value::plain); } }",
@@ -90,7 +90,7 @@ internal static partial class MetaTests
                 "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nexplicit Value(rocks::Allocator& allocator) noexcept : points(allocator) {}\n" +
                 "ROCKS_PROPERTY() rocks::Vec3 position;\nROCKS_PROPERTY() Pair pair;\nROCKS_PROPERTY() rocks::Array<rocks::Vec3> points;\n};\n}\n";
             await probe.GenerateAsync(source);
-            string generated = Compact(File.ReadAllText(probe.Output));
+            string generated = Compact(probe.GeneratedText());
             foreach ((string expected, string reason) in new[]
             {
                 ("&detail::PathStructMember<::rocks::Vector3<float>, &::rocks::Vector3<float>::x, ValueKind::Float32>)", "mirror member of the real type"),
@@ -110,15 +110,16 @@ internal static partial class MetaTests
             Verify.That(!generated.Contains("&::probe::Vec3Binding::", StringComparison.Ordinal) && !generated.Contains("&::probe::Vec3dBinding::", StringComparison.Ordinal) &&
                 !generated.Contains("&::probe::PairBinding::", StringComparison.Ordinal), "no member pointer of a mirror declaration");
         });
-        // 대상 종류가 C++ 멤버 형식과 다르면(오래된 생성 헤더·잘못된 descriptor) TargetValueCheck static_assert가 컴파일을 실패시킨다:
-        // 생성 헤더의 대상 종류를 바꾸면 클래스 배열·enum 원소 배열·struct 필드·ObjectRefArray·struct 멤버 모두 거부된다.
+        // 대상 종류가 C++ 멤버 형식과 다르면(오래된 생성물·잘못된 descriptor) TargetValueCheck static_assert가 컴파일을 실패시킨다:
+        // 생성 소스(경로 thunk는 Ops 본문에 있다)의 대상 종류를 바꾸면 클래스 배열·enum 원소 배열·struct 필드·ObjectRefArray·struct 멤버
+        // 모두 거부된다.
         suite.Add("Meta.PathThunkTargetMismatchFailsToCompile", async () =>
         {
             using Probe probe = new(options, actualEnvironment, generator, compiler);
             await probe.GenerateAsync(ArraySource);
-            string original = File.ReadAllText(probe.Output);
+            string original = File.ReadAllText(probe.Source);
             ProcessResult control = await probe.CompileGeneratedAsync();
-            Verify.Equal(0, control.ExitCode, "generated header compiles: " + control.StdOut + control.StdErr);
+            Verify.Equal(0, control.ExitCode, "generated header and source compile: " + control.StdOut + control.StdErr);
             foreach ((string anchor, bool before, string from, string to) in new[]
             {
                 ("&::probe::Value::ints);", true, "ValueKind::Int32>", "ValueKind::UInt32>"),
@@ -133,7 +134,7 @@ internal static partial class MetaTests
                 Verify.That(site >= 0, "generated path thunk missing: " + anchor);
                 int at = before ? original.LastIndexOf(from, site, StringComparison.Ordinal) : original.IndexOf(from, site, StringComparison.Ordinal);
                 Verify.That(at >= 0 && Math.Abs(at - site) < 200, "path thunk target kind missing near " + anchor);
-                File.WriteAllText(probe.Output, original[..at] + to + original[(at + from.Length)..]);
+                File.WriteAllText(probe.Source, original[..at] + to + original[(at + from.Length)..]);
                 ProcessResult rejected = await probe.CompileGeneratedAsync();
                 Verify.That(rejected.ExitCode != 0, "path thunk with a mismatched target kind compiled: " + anchor + " " + to);
                 Verify.Contains("path thunk target kind does not match the C++ member type", rejected.StdOut + rejected.StdErr, "target kind static_assert diagnostic");

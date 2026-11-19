@@ -130,4 +130,75 @@ struct ThreadStackRange {
 //   if (platform::CurrentThreadStackRange().Contains(&handle)) { return InvalidArgument; }
 ThreadStackRange CurrentThreadStackRange() noexcept;
 
+// ThreadExitSlot을 프로세스에서 만들 수 있는 수의 상한이다(넘으면 유효하지 않은 칸이 된다).
+inline constexpr uint32 MaxThreadExitSlots = 8;
+
+// 스레드별 포인터 칸 하나와, 그 값이 null이 아닌 스레드가 끝날 때 **그 스레드에서** 불리는 정리
+// 함수다(UE 5.8 FWindowsPlatformTLS의 FlsAlloc(&OnThreadExit) 대응 — Windows FlsAlloc의 callback,
+// POSIX pthread_key_create의 소멸자). platform::Thread로 만들지 않은 스레드(OS 스레드 풀, 외부
+// 라이브러리의 스레드)가 끝날 때도 불린다. 스레드별 캐시처럼 스레드가 끝날 때 돌려줘야 하는 자원에
+// 쓴다 (Docs/Design/GarbageCollectionScale.ko.md 18.4절).
+//
+// 사용 예:
+//   void ReleaseCache(void* value) noexcept { DestroyCache(static_cast<Cache*>(value)); }
+//
+//   platform::ThreadExitSlot& CacheSlot() noexcept {
+//       static platform::ThreadExitSlot slot(&ReleaseCache);   // 프로세스 수명 동안 하나
+//       return slot;
+//   }
+//
+//   Cache* cache = static_cast<Cache*>(CacheSlot().Get());
+//   if (cache == nullptr) {
+//       cache = CreateCache();
+//       if (!CacheSlot().Set(cache)) { /* 종료 정리를 받지 못한다 — 캐시 없이 간다 */ }
+//   }
+//
+// 계약:
+// - 칸은 프로세스 수명 동안 유지한다. 소멸자는 OS 칸을 풀지 않는다(Windows FlsFree는 값이 남은
+//   스레드마다 callback을 부른다). 그래서 정적 저장 기간 객체로 몇 개만 만든다(MaxThreadExitSlots).
+// - callback은 값을 둔 스레드가 끝날 때 한 번, 그 값을 인자로 불린다. 부르기 전에 그 스레드의 값은
+//   null로 지워져 있다(callback 안의 Get은 nullptr이다). 값이 null인 스레드에서는 불리지 않는다.
+//   Thread::Join은 이 호출이 끝난 뒤에 돌아온다.
+// - callback은 짧은 정리(잠금, 메모리 반환)만 한다. 스레드 생성·모듈 로드·다른 스레드 대기를 하지
+//   않고, 같은 칸에 다시 Set하지 않는다. trivial한 thread_local 변수는 callback 안에서 읽고 쓸 수
+//   있다.
+// - 다른 스레드 종료 정리(thread_local 소멸자, 다른 칸의 callback)와의 순서는 정해져 있지 않다.
+// - 프로세스가 끝날 때는 부르지 않는다: POSIX는 main 반환·exit에서 소멸자를 부르지 않고, Windows는
+//   종료를 부른 스레드에서 callback을 부르지만(다른 스레드는 이미 강제 종료돼 잠금을 쥔 채일 수
+//   있다) 이 구현이 걸러 낸다. 프로세스 수명과 같은 자원은 OS가 거둔다.
+// - OS가 칸을 주지 않거나 MaxThreadExitSlots를 넘으면 IsValid가 거짓이고 Get은 nullptr, Set은
+//   거짓이다.
+// - 스레드: Get·Set은 아무 스레드에서나 부르고 그 스레드의 값을 읽고 쓴다. 생성은 다른 스레드의
+// 생성과
+//   겹쳐도 된다.
+class ThreadExitSlot final {
+public:
+    using Callback = void (*)(void* value) noexcept;
+
+    // callback은 프로세스 수명 동안 유효한 함수다. nullptr이면 유효하지 않은 칸이 된다.
+    explicit ThreadExitSlot(Callback callback) noexcept;
+    ~ThreadExitSlot() noexcept = default;
+
+    ThreadExitSlot(const ThreadExitSlot&) = delete;
+    ThreadExitSlot& operator=(const ThreadExitSlot&) = delete;
+    ThreadExitSlot(ThreadExitSlot&&) = delete;
+    ThreadExitSlot& operator=(ThreadExitSlot&&) = delete;
+
+    // OS 칸을 얻었는지다.
+    bool IsValid() const noexcept {
+        return valid_;
+    }
+
+    // 현재 스레드의 값이다(둔 적이 없으면 nullptr).
+    void* Get() const noexcept;
+    // 현재 스레드의 값을 바꾼다. nullptr로 바꾸면 이 스레드가 끝날 때 callback이 불리지 않는다.
+    // 유효하지 않은 칸이거나 OS가 거부하면 거짓이다(값은 그대로다).
+    bool Set(void* value) noexcept;
+
+private:
+    // OS 칸 번호다(Windows FLS index, POSIX pthread_key_t).
+    uint64 native_ = 0;
+    bool valid_ = false;
+};
+
 } // namespace rocks::platform

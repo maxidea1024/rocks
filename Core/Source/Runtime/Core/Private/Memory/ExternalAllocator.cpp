@@ -9,7 +9,7 @@ namespace rocks {
 namespace {
 
 // 덧셈이나 서로 다른 포인터의 대소 비교 없이 요청된 저장 범위의 겹침을 확인한다.
-bool Overlaps(uptr left, usize leftSize, uptr right, usize rightSize) noexcept {
+bool ExternalAllocatorOverlaps(uptr left, usize leftSize, uptr right, usize rightSize) noexcept {
     return left <= right ? right - left < leftSize : left - right < rightSize;
 }
 
@@ -184,7 +184,8 @@ Result<void*> ExternalAllocator::Allocate(usize bytes, usize alignment, uint32 t
     if (bytes > MaxSize - addressValue) {
         platform::Fatal("ExternalAllocator backend returned overflowing address range");
     }
-    if (Overlaps(addressValue, bytes, reinterpret_cast<uptr>(storage), sizeof(Record))) {
+    if (ExternalAllocatorOverlaps(addressValue, bytes, reinterpret_cast<uptr>(storage),
+                                  sizeof(Record))) {
         platform::Fatal("ExternalAllocator backend overlaps allocation metadata");
     }
 
@@ -200,11 +201,12 @@ Result<void*> ExternalAllocator::Allocate(usize bytes, usize alignment, uint32 t
             Record* collision = nullptr;
             for (Record* item = records_; item != nullptr; item = item->next) {
                 // 내부 기록의 수명까지 덮어쓰면 소유권 추적이 깨지므로 발급을 중단한다.
-                if (Overlaps(addressValue, bytes, reinterpret_cast<uptr>(item), sizeof(Record))) {
+                if (ExternalAllocatorOverlaps(addressValue, bytes, reinterpret_cast<uptr>(item),
+                                              sizeof(Record))) {
                     platform::Fatal("ExternalAllocator backend overlaps allocation metadata");
                 }
-                if (Overlaps(addressValue, bytes, reinterpret_cast<uptr>(item->address),
-                             item->bytes)) {
+                if (ExternalAllocatorOverlaps(addressValue, bytes,
+                                              reinterpret_cast<uptr>(item->address), item->bytes)) {
                     collision = item;
                     break;
                 }

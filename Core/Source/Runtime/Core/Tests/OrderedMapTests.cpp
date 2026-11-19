@@ -8,6 +8,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace ordered_map_tests_file {
 
 namespace {
 
@@ -819,6 +820,7 @@ TEST(OrderedMap_MatchesReferenceModel) {
     RunReferenceModel<ModuloHash>(2);
     RunReferenceModel<CollisionHash>(3);
 }
+} // namespace ordered_map_tests_file
 
 namespace rocks::test {
 

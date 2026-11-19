@@ -88,6 +88,7 @@ void observer_fixture::ObservedNode::Trace(TraceVisitor& visitor) const noexcept
 }
 
 using namespace rocks;
+namespace reference_observer_tests_file {
 
 namespace {
 
@@ -1340,3 +1341,4 @@ TEST(ReferenceObserver_RetryAfterReservationRejectsChangedContainers) {
 
     CHECK(system.Stats().liveAllocations == 0);
 }
+} // namespace reference_observer_tests_file

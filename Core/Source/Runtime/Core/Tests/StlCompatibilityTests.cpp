@@ -32,6 +32,7 @@
 #include <span>
 
 namespace rocks::test {
+namespace stl_compatibility_tests_file {
 
 // C++20 iterator concept을 컴파일 시점에 고정한다. std 태그 없이도 연산만으로 성립해야 한다.
 static_assert(std::contiguous_iterator<Array<int>::iterator>);
@@ -274,5 +275,6 @@ TEST(StlCompatibility_SparseAndSlotArraysWithAlgorithms) {
     REQUIRE(largest != slots.end());
     CHECK(*largest == 5 && largest.Handle() == (SlotHandle{4, 1}));
 }
+} // namespace stl_compatibility_tests_file
 
 } // namespace rocks::test

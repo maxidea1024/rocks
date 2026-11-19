@@ -9,6 +9,8 @@
 #include <stdio.h>
 
 namespace rocks::test {
+namespace compression_tests_file {
+
 namespace {
 
 using namespace compression;
@@ -588,5 +590,6 @@ TEST(Compression_DecompressionBombsStayBounded) {
     }
     CHECK(counting.Current() == 0);
 }
+} // namespace compression_tests_file
 
 } // namespace rocks::test

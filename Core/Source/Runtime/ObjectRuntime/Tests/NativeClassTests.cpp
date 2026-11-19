@@ -4,6 +4,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace native_class_tests_file {
 
 namespace {
 
@@ -704,3 +705,4 @@ TEST(NativeClass_TraceChainVisitsBaseEdgesWithoutSuperCall) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace native_class_tests_file

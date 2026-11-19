@@ -18,12 +18,15 @@
 #include <string.h>
 
 using namespace rocks;
+namespace async_crypto_tests_file {
+
 using namespace rocks::crypto;
 
 // 비동기 세그먼트 처리(Crypto/AsyncCrypto.h)의 시험이다(Docs/Design/Crypto.ko.md 9.7·12절).
-// - byte 일치: 고정 salt(모듈 내부 경로 detail::TrySubmitSegmentEncryptWithSalt)로 만든 비동기
-//   암호문이 동기 순차 암호기(detail::SegmentStreamFactory, 같은 salt)와 같다. 작업 수 1·3·8·기본,
-//   세그먼트 경계 크기, --seed 무작위 크기. 비동기 복호가 원문을 되찾는다.
+// - byte 일치: 고정 salt(모듈 내부 경로 crypto::detail::TrySubmitSegmentEncryptWithSalt)로 만든
+// 비동기
+//   암호문이 동기 순차 암호기(crypto::detail::SegmentStreamFactory, 같은 salt)와 같다. 작업 수
+//   1·3·8·기본, 세그먼트 경계 크기, --seed 무작위 크기. 비동기 복호가 원문을 되찾는다.
 // - 오류 일치: 변조·다른 키·AD·절단·버전·짧은 입력·작은 출력에서 동기 경로(Peek → 크기 배치 →
 //   TryOpen → TryOpenSegment)와 같은 오류이고 실패하면 출력 전체가 0이다. 제출 오류는 task·출력을
 //   바꾸지 않는다.
@@ -673,3 +676,4 @@ TEST(CryptoAsyncSegmentLifetime) {
         CHECK(AllEqual(View(opened), 0));
     }
 }
+} // namespace async_crypto_tests_file

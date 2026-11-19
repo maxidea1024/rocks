@@ -22,11 +22,11 @@ namespace {
 // `Settings`에 저장한다.
 constexpr StringView UserConsoleSettingsBranch = "Engine";
 
-Span<const char> ToSpan(StringView text) noexcept {
+Span<const char> UserConfigToSpan(StringView text) noexcept {
     return Span<const char>(text.Data(), text.ByteCount());
 }
 
-StringView ToView(Span<const char> text) noexcept {
+StringView UserConfigToView(Span<const char> text) noexcept {
     return StringView(text.Data(), text.Size());
 }
 
@@ -150,7 +150,8 @@ public:
             const JsonValue value = root.ValueAt(member);
             bool duplicate = false;
             for (usize other = 0; other < member && !duplicate; ++other) {
-                duplicate = EqualsIgnoringAsciiCase(ToSpan(root.KeyAt(other)), ToSpan(key));
+                duplicate = EqualsIgnoringAsciiCase(UserConfigToSpan(root.KeyAt(other)),
+                                                    UserConfigToSpan(key));
             }
 
             Result<void> step = Result<void>::Success();
@@ -170,7 +171,8 @@ public:
             } else if (!value.IsObject()) {
                 step = Drop(ConfigDiagnosticCode::InvalidSection, value, key,
                             "a section value is a JSON object; dropped");
-            } else if (EqualsIgnoringAsciiCase(ToSpan(key), ToSpan(ConsoleSettingsSection))) {
+            } else if (EqualsIgnoringAsciiCase(UserConfigToSpan(key),
+                                               UserConfigToSpan(ConsoleSettingsSection))) {
                 auto read = ReadSettings(key, value, out);
                 step = read ? Result<void>::Success() : Result<void>::Failure(read.Error());
                 kept += read ? read.Value() : 0;
@@ -341,7 +343,7 @@ Result<uint32> WriteSectionDifference(ConfigState& state, usize sectionIndex,
             continue;
         }
 
-        const StringView tool = ToView(EffectiveToolName(schema));
+        const StringView tool = UserConfigToView(EffectiveToolName(schema));
         const JsonValue before = lowerDocument.Root().Find(tool);
         const JsonValue after = userDocument.Root().Find(tool);
         if (!after.IsValid() || (before.IsValid() && JsonEquals(before, after))) {

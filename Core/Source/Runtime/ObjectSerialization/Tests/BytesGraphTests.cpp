@@ -16,6 +16,8 @@
 // `uint8 x[4]`은 원소마다(ValueArray) 그대로인지, 경로 원소 읽기·쓰기(`payload[3]`), 2단계 할당
 // 실패의 그래프 rollback.
 using namespace rocks;
+namespace bytes_graph_tests_file {
+
 using reflection_fixture::BytesBlob;
 using reflection_fixture::BytesHolder;
 
@@ -529,3 +531,4 @@ TEST(BytesGraph_LoadLimits) {
         REQUIRE(target.Shutdown(target.OwnerAccess()));
     }
 }
+} // namespace bytes_graph_tests_file

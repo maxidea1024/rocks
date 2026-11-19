@@ -4,6 +4,8 @@
 #include <stdio.h>
 
 using namespace rocks;
+namespace vulkan_shader_compiler_tests_file {
+
 using namespace rocks::graphics;
 
 // 개발용 Vulkan 셰이더 경로(Docs/Design/VulkanGraphics.ko.md 13절)를 실제 DXC·SPIRV-Tools로
@@ -151,3 +153,4 @@ TEST(VulkanShaderCompiler_RejectsInputsWithoutAttributeSemantic) {
               .Error() == ErrorCode::DependencyFailed);
     CHECK(diagnostics.ByteCount() != 0);
 }
+} // namespace vulkan_shader_compiler_tests_file

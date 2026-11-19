@@ -14,6 +14,8 @@
 #include <stdio.h>
 
 namespace rocks::test {
+namespace compressed_blocks_tests_file {
+
 namespace {
 
 using namespace compression;
@@ -1120,5 +1122,6 @@ TEST(CompressedBlocks_WriterEdges) {
     }
     CHECK(system.Stats().liveAllocations == 0);
 }
+} // namespace compressed_blocks_tests_file
 
 } // namespace rocks::test

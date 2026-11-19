@@ -10,6 +10,8 @@
 // 순서·Outer 사슬·거부 조건(결정 17), NodeTable의 Outer·이름 왕복과 Outer 순서·기준 Outer 규칙,
 // 도달 검사(inner → outer, 패키지 정책의 기준 Outer 아래 보존), prepare.
 using namespace rocks;
+namespace graph_set_tests_file {
+
 using test::graph::SameBytes;
 
 namespace {
@@ -1106,3 +1108,4 @@ TEST(GraphSet_EveryAllocationFailureWithOuterChainRestoresState) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace graph_set_tests_file

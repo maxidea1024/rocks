@@ -9,6 +9,7 @@
 // TypeRegistry 등록이 숫자 범위가 아니라 표로 종류를 판정한다(Array 원소·struct 멤버·클래스 필드).
 // MetaCompiler C# 표와의 대조는 ToolTests의 Meta.ValueKindTable* 시험이 맡는다.
 using namespace rocks;
+namespace value_kind_property_tests_file {
 
 namespace {
 
@@ -564,3 +565,4 @@ TEST(ValueKindProperties_OptionalInnerStructMustBeValueStruct) {
 
     CHECK(types.Shutdown());
 }
+} // namespace value_kind_property_tests_file

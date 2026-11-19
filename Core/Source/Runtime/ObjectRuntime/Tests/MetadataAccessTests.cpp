@@ -4,6 +4,7 @@
 #include <Platform/Thread.h>
 
 using namespace rocks;
+namespace metadata_access_tests_file {
 
 namespace {
 
@@ -89,3 +90,4 @@ TEST(ObjectMetadataQueriesCheckAccessAndRetainOnlyTypeLifetime) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace metadata_access_tests_file

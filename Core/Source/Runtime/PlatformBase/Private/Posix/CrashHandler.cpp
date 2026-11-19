@@ -25,7 +25,7 @@ constexpr usize CrashSignalCount = sizeof(CrashSignals) / sizeof(CrashSignals[0]
 constexpr usize CrashMessageBytes = 32;
 constexpr int DecimalBase = 10;
 constexpr int64 NanosecondsPerMillisecond = 1000000;
-constexpr int64 NanosecondsPerSecond = 1000000000;
+constexpr int64 CrashHandlerNanosecondsPerSecond = 1000000000;
 
 constinit uint32 installed = 0;
 constinit uint32 crashing = 0;
@@ -76,7 +76,7 @@ void FormatCrashMessage(int signal) noexcept {
 int64 MonotonicNow() noexcept {
     timespec now{};
     clock_gettime(CLOCK_MONOTONIC, &now); // async-signal-safe
-    return static_cast<int64>(now.tv_sec) * NanosecondsPerSecond + now.tv_nsec;
+    return static_cast<int64>(now.tv_sec) * CrashHandlerNanosecondsPerSecond + now.tv_nsec;
 }
 
 // flush 스레드를 깨운다. 처리기에서 부르므로 async-signal-safe 호출만 쓴다. pipe가 차 있으면

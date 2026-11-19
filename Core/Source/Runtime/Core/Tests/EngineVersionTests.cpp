@@ -3,6 +3,7 @@
 #include <string.h>
 
 using namespace rocks;
+namespace engine_version_tests_file {
 
 namespace {
 
@@ -66,3 +67,4 @@ TEST(EngineVersion_PackageLoadRejectsOnlyNewerMajorMinor) {
     CHECK(!current.CanLoadPackageCompatibleWith({2, 1, 0}));
     static_assert(EngineVersion{0, 1, 0}.CanLoadPackageCompatibleWith({0, 1, 0}));
 }
+} // namespace engine_version_tests_file

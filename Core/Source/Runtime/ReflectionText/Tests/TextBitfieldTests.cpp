@@ -8,6 +8,8 @@
 // 텍스트는 bool과 같다, fixture ReflectionTestFixtures/BitfieldFixture.h): 명령행 대입(클래스 필드·
 // 상속·private 필드·struct 멤버 — 값 단위 Detach·Attach를 거친다)과 이웃 비트 보존, JSON 왕복.
 using namespace rocks;
+namespace text_bitfield_tests_file {
+
 using namespace rocks::reflection_text;
 using namespace rocks::test::assign;
 using reflection_fixture::BitfieldChild;
@@ -151,3 +153,4 @@ TEST(TextBitfield_JsonRoundTrips) {
                    fixture.options, again));
     CHECK(again.View() == text.View());
 }
+} // namespace text_bitfield_tests_file

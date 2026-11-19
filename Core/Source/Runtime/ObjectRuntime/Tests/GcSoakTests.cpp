@@ -6,6 +6,8 @@
 
 #include <stdio.h>
 
+namespace gc_soak_tests_file {
+
 // 장기 GC smoke 시뮬레이터(GcSoak)의 짧은 실행이다(Docs/Design/GarbageCollectionScale.ko.md 9절).
 // 긴 실행은 GcBench --soak으로 한다. 실패하면 첫 위반의 설명·tick·모델 객체를 stderr에 적는다.
 namespace {
@@ -160,3 +162,4 @@ TEST(GcSoak_ClusterWorldStaysWithinModelLimit) {
     CHECK(report.created <= options.maxObjects);
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace gc_soak_tests_file

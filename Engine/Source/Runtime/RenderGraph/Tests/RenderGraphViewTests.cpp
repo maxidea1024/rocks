@@ -6,6 +6,8 @@
 // 자원): 장치 view로 낮추기, mip k 읽기 + mip k + 1 쓰기 한 pass 통과, 범위가 겹치는 pass와 view
 // 규칙 위반 거부, view 기준 mip.
 using namespace rocks;
+namespace render_graph_view_tests_file {
+
 using namespace rocks::render;
 using namespace rocks::render::testing;
 using graphics::ResourceAccess;
@@ -201,3 +203,4 @@ TEST(RenderGraph_ViewBaseMipFollowsDeviceFeatures) {
     CHECK(graphics::TextureViewBaseMip(noRanges, desc) == 2);
     CHECK(graphics::TextureViewBaseMip(ranges, desc) == 0);
 }
+} // namespace render_graph_view_tests_file

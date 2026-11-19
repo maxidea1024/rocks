@@ -17,6 +17,8 @@
 #include <Compression/Private/CompressionInternal.h>
 
 namespace rocks::test {
+namespace async_compression_tests_file {
+
 namespace {
 
 using namespace compression;
@@ -500,5 +502,6 @@ TEST(Compression_AsyncDecompressAfterAsyncFileRead) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace async_compression_tests_file
 
 } // namespace rocks::test

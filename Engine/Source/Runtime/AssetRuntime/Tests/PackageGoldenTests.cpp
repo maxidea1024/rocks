@@ -10,6 +10,8 @@
 // 포맷(또는 의존 라이브러리 출력)이 바뀐 것이다 — 의도한 변경이면 포맷 버전 규칙(5.3절)을 따르고
 // 여기 값을 함께 고친다.
 using namespace rocks;
+namespace package_golden_tests_file {
+
 using namespace rocks::asset_test;
 
 namespace {
@@ -558,3 +560,4 @@ TEST(AssetPackage_GoldenV1Resaves) {
         bothRoots[index].Reset();
     }
 }
+} // namespace package_golden_tests_file

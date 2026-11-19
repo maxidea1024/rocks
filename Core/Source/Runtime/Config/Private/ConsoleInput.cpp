@@ -25,7 +25,7 @@ namespace detail {
 
 namespace {
 
-StringView ToView(Span<const char> text) noexcept {
+StringView ConsoleInputToView(Span<const char> text) noexcept {
     return StringView(text.Data(), text.Size());
 }
 
@@ -92,8 +92,9 @@ StringView KindName(const ConsoleSettingState& setting) noexcept {
         return "name";
     case ValueKind::Enum:
         // 이름 없는 schema(CVar enum)는 "enum"으로 쓴다.
-        if (setting.enumSchema != nullptr && !ToView(setting.enumSchema->name).IsEmpty()) {
-            return ToView(setting.enumSchema->name);
+        if (setting.enumSchema != nullptr &&
+            !ConsoleInputToView(setting.enumSchema->name).IsEmpty()) {
+            return ConsoleInputToView(setting.enumSchema->name);
         }
 
         return "enum";
@@ -147,7 +148,7 @@ Span<const uint64> SourcesOf(const ConfigState& state,
 
     const SectionState& section = *state.sections[setting.section];
     const StringView field =
-        ToView(EffectiveToolName(section.lease.Schema().fields[setting.field]));
+        ConsoleInputToView(EffectiveToolName(section.lease.Schema().fields[setting.field]));
     for (const UniquePtr<SourceStack>& stack : section.sources) {
         if (stack->path.View() == field) {
             return stack->entries.View();

@@ -8,6 +8,7 @@
 // 함수표 1:1, trace와 강한 참조의 일치, 깊이 MaxStructDepth, native 대조, 의존 Busy, WorldOnly 형질
 // 전파, 클래스 struct 필드의 접근기 규칙과 write Unsupported, StructView.
 using namespace rocks;
+namespace struct_registry_tests_file {
 
 namespace {
 
@@ -531,3 +532,4 @@ TEST(StructRegistry_CrossValidatedRules) {
     // 클래스 → struct → enum 사슬이 살아 있는 채로 Shutdown한다(의존자부터 파괴).
     CHECK(types.Shutdown());
 }
+} // namespace struct_registry_tests_file

@@ -10,6 +10,7 @@
 #include <Platform/Thread.h>
 
 using namespace rocks;
+namespace correlation_tests_file {
 
 namespace {
 
@@ -266,3 +267,4 @@ TEST(CorrelationCaptureDoesNotAllocate) {
     CHECK(sink.correlated == 1);
     logs.Stop();
 }
+} // namespace correlation_tests_file

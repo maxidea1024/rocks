@@ -5,6 +5,8 @@
 #include <TestSupport/NFailAllocator.h>
 
 using namespace rocks;
+namespace loose_octree_structure_tests_file {
+
 using namespace rocks::spatial;
 using namespace rocks::spatial::oracle;
 
@@ -1032,3 +1034,4 @@ TEST(LooseOctree_LargeProxyListPlacementAndMoves) {
     invalid.largeProxyHalfExtent = -1.0;
     CHECK(LooseOctree::TryCreate(invalid, allocator).Error() == ErrorCode::InvalidArgument);
 }
+} // namespace loose_octree_structure_tests_file

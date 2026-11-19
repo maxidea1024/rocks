@@ -6,6 +6,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace name_none_tests_file {
 
 namespace {
 
@@ -328,3 +329,4 @@ TEST(NameNoneCaseCandidateCannotOutlivePoolShutdown) {
     }
     CHECK(system.Stats().liveAllocations == 0);
 }
+} // namespace name_none_tests_file

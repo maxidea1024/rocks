@@ -8,7 +8,7 @@ namespace rocks {
 
 namespace {
 
-bool IsDigit(char c) noexcept {
+bool ValueTextIsDigit(char c) noexcept {
     return c >= '0' && c <= '9';
 }
 
@@ -27,7 +27,7 @@ bool IsCanonicalDecimal(StringView text, bool signedKind) noexcept {
     }
 
     for (usize index = start; index < size; ++index) {
-        if (!IsDigit(data[index])) {
+        if (!ValueTextIsDigit(data[index])) {
             return false;
         }
     }

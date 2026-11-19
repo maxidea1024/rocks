@@ -4,6 +4,8 @@
 #include <Core/Tuple.h>
 
 namespace rocks::test {
+namespace tuple_tests_file {
+
 namespace {
 
 struct Tracked {
@@ -251,5 +253,6 @@ TEST(Tuple_ConvertingConstruction) {
     Tuple<const int&> fromRvalue = Tuple<int&>(value);
     CHECK(&Get<0>(fromRvalue) == &value);
 }
+} // namespace tuple_tests_file
 
 } // namespace rocks::test

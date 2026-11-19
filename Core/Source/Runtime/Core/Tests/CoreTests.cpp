@@ -7,6 +7,7 @@
 #include <Core/Memory/SystemAllocator.h>
 
 using namespace rocks;
+namespace core_tests_file {
 
 namespace {
 
@@ -400,3 +401,4 @@ TEST(CoreArrayOverAlignmentAndClearKeepsCapacity) {
     REQUIRE(values.TryEmplaceBack());
     CHECK(values[0].value == 7);
 }
+} // namespace core_tests_file

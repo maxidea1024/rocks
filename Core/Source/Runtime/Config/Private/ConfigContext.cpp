@@ -13,7 +13,7 @@ namespace detail {
 
 namespace {
 
-Span<const char> ToSpan(StringView text) noexcept {
+Span<const char> ConfigContextToSpan(StringView text) noexcept {
     return Span<const char>(text.Data(), text.ByteCount());
 }
 
@@ -66,7 +66,8 @@ usize ConfigState::FindBranch(StringView name) const noexcept {
 usize ConfigState::FindSection(usize branch, StringView section) const noexcept {
     for (usize index = 0; index < sections.Size(); ++index) {
         if (sections[index]->branch == branch &&
-            EqualsIgnoringAsciiCase(ToSpan(sections[index]->section.View()), ToSpan(section))) {
+            EqualsIgnoringAsciiCase(ConfigContextToSpan(sections[index]->section.View()),
+                                    ConfigContextToSpan(section))) {
             return index;
         }
     }
@@ -267,14 +268,16 @@ Result<bool> ValidateEntry(ConfigState& state, const ConfigEntry& entry) noexcep
             // 섹션 키는 대소문자를 무시하므로 대소문자만 다른 두 키는 같은 섹션을 두 번 쓴다.
             bool duplicate = false;
             for (usize other = 0; other < member && !duplicate; ++other) {
-                duplicate = EqualsIgnoringAsciiCase(ToSpan(root.KeyAt(other)), ToSpan(key));
+                duplicate = EqualsIgnoringAsciiCase(ConfigContextToSpan(root.KeyAt(other)),
+                                                    ConfigContextToSpan(key));
             }
 
             StringView problem;
             ConfigDiagnosticCode code = ConfigDiagnosticCode::InvalidSection;
             if (duplicate) {
                 problem = "the section appears twice (section keys ignore ASCII case)";
-            } else if (EqualsIgnoringAsciiCase(ToSpan(key), ToSpan(ConsoleSettingsSection))) {
+            } else if (EqualsIgnoringAsciiCase(ConfigContextToSpan(key),
+                                               ConfigContextToSpan(ConsoleSettingsSection))) {
                 auto checked = CheckSettingsSection(state, entry, value);
                 if (!checked) {
                     return checked;

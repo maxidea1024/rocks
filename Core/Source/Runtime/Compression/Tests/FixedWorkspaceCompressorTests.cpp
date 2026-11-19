@@ -5,6 +5,8 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace fixed_workspace_compressor_tests_file {
+
 using namespace rocks::test::compression;
 
 namespace {
@@ -82,3 +84,4 @@ TEST(FixedWorkspaceCompressorRejectsOtherFormats) {
     CHECK(FixedWorkspaceCompressor::TryCreate(zstd.Value(), 0, system).Error() ==
           ErrorCode::InvalidArgument);
 }
+} // namespace fixed_workspace_compressor_tests_file

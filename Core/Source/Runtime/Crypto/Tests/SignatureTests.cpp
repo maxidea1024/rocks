@@ -8,6 +8,8 @@
 #include <string.h>
 
 using namespace rocks;
+namespace signature_tests_file {
+
 using namespace rocks::crypto;
 
 // 알려진 답의 출처: RFC 8032 7.1 TEST 1–3(Ed25519, Python cryptography·pycryptodome으로 재계산)과
@@ -466,3 +468,4 @@ TEST(CryptoEd25519phBoundaries) {
     CHECK(verifier.Value().TryFinish(identity.Value(), forged.View()).Error() ==
           ErrorCode::AuthenticationFailed);
 }
+} // namespace signature_tests_file

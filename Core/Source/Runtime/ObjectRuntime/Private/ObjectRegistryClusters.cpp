@@ -25,15 +25,15 @@ constexpr uint32 ClusterTableTag = 0x4743434cu; // 'GCCL'
 // 레코드 표의 첫 용량이다.
 constexpr uint32 MinimumClusterCapacity = 16;
 
-uint64 BitOf(uint32 index) noexcept {
+uint64 ClusterBitOf(uint32 index) noexcept {
     return uint64(1) << (index % SlotsPerChunk);
 }
 
-uint64 LoadMark(const uint64& word) noexcept {
+uint64 ClusterLoadMark(const uint64& word) noexcept {
     return platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&word);
 }
 
-void StoreMark(uint64& word, uint64 value) noexcept {
+void ClusterStoreMark(uint64& word, uint64 value) noexcept {
     platform::AtomicStore<platform::MemoryOrder::Relaxed>(&word, value);
 }
 
@@ -54,7 +54,7 @@ bool ObjectRegistry::IsClusterMarkedLocked(uint32 id) const noexcept {
 bool ObjectRegistry::IsClusterMemberLocked(const Slot& owner) const noexcept {
     // clustered 비트는 장부 상태의 ClusterMember와 같다(가입·이탈·해체가 함께 바꾼다 — Debug 장부
     // 검증이 대조한다). 참조 쓰기마다 부르므로 장부 칸 대신 비트 묶음을 읽는다.
-    return clustersEnabled_ && (BitsOf(owner.index).clustered & BitOf(owner.index)) != 0;
+    return clustersEnabled_ && (BitsOf(owner.index).clustered & ClusterBitOf(owner.index)) != 0;
 }
 
 void ObjectRegistry::LinkCellLocked(uint32& head, uint32 slot, bool boundary) noexcept {
@@ -95,7 +95,7 @@ void ObjectRegistry::LedgerEdgeLocked(uint32 owner, uint32 target, bool add) noe
     // 분류는 소속이면 chunk 클러스터 표로 끝낸다(장부 칸은 바꿀 계수가 든 칸 하나만 읽는다). 소속이
     // 아닌 대상만 detached인지 대상 칸의 상태를 본다.
     const uint32 id = MemberClusterOf(owner);
-    const bool member = (BitsOf(target).clustered & BitOf(target)) != 0;
+    const bool member = (BitsOf(target).clustered & ClusterBitOf(target)) != 0;
     const bool inside =
         member ? MemberClusterOf(target) == id : ClusterStateOf(target) == (ClusterDetached | id);
     if (inside) {
@@ -257,7 +257,7 @@ void ObjectRegistry::FinishLeaveLocked(Slot& slot) noexcept {
     UnlinkCellLocked(record.memberHead, index, false);
     --record.members;
     --tally_.clusterMembers;
-    BitsOf(index).clustered &= ~BitOf(index);
+    BitsOf(index).clustered &= ~ClusterBitOf(index);
     const uint32 incoming = ClusterInCountOf(index);
     ClearClusterSlotLocked(index);
     if (incoming != 0) {
@@ -275,7 +275,7 @@ void ObjectRegistry::FinishLeaveLocked(Slot& slot) noexcept {
         }
     } else if (gcPhase_ == GcPhase::Sweeping) {
         GcBits& bits = BitsOf(index);
-        StoreMark(bits.mark, LoadMark(bits.mark) | BitOf(index));
+        ClusterStoreMark(bits.mark, ClusterLoadMark(bits.mark) | ClusterBitOf(index));
     }
 }
 
@@ -290,9 +290,9 @@ void ObjectRegistry::DissolveClusterLocked(uint32 id) noexcept {
     if (gcPhase_ == GcPhase::Marking && marked && LoadEpoch(record.processedEpoch) != gcEpoch_) {
         for (uint32 at = record.boundaryHead; at != NoSlot; at = CellOf(at).boundaryNext) {
             GcBits& bits = BitsOf(at);
-            const uint64 mark = LoadMark(bits.mark);
-            if ((mark & BitOf(at)) == 0) {
-                StoreMark(bits.mark, mark | BitOf(at));
+            const uint64 mark = ClusterLoadMark(bits.mark);
+            if ((mark & ClusterBitOf(at)) == 0) {
+                ClusterStoreMark(bits.mark, mark | ClusterBitOf(at));
                 if (!gcShade_.TryPushBack(at)) {
                     platform::Fatal("Preallocated cluster dissolve queue exhausted");
                 }
@@ -311,9 +311,9 @@ void ObjectRegistry::DissolveClusterLocked(uint32 id) noexcept {
         const uint32 next = CellOf(at).listNext;
         ClearClusterSlotLocked(at);
         GcBits& bits = BitsOf(at);
-        bits.clustered &= ~BitOf(at);
+        bits.clustered &= ~ClusterBitOf(at);
         if (marked) {
-            StoreMark(bits.mark, LoadMark(bits.mark) | BitOf(at));
+            ClusterStoreMark(bits.mark, ClusterLoadMark(bits.mark) | ClusterBitOf(at));
         }
 
         at = next;
@@ -496,7 +496,7 @@ void ObjectRegistry::JoinClusterLocked(uint32 id, uint32 slot) noexcept {
     ++record.members;
     ++tally_.clusterMembers;
     GcBits& bits = BitsOf(slot);
-    const uint64 bit = BitOf(slot);
+    const uint64 bit = ClusterBitOf(slot);
     SetChunkClusterLocked(slot, id, bits.clustered & ~bit);
     bits.clustered |= bit;
 }
@@ -719,9 +719,9 @@ void ObjectRegistry::ProcessCluster(uint32 id, MarkState& state) noexcept {
     // 같다). 고리 안에 커서를 두고 slice를 넘기지 않는다(처리는 한 번에 끝난다).
     for (uint32 at = record.boundaryHead; at != NoSlot; at = CellOf(at).boundaryNext) {
         GcBits& bits = BitsOf(at);
-        const uint64 mark = LoadMark(bits.mark);
-        if ((mark & BitOf(at)) == 0) {
-            StoreMark(bits.mark, mark | BitOf(at));
+        const uint64 mark = ClusterLoadMark(bits.mark);
+        if ((mark & ClusterBitOf(at)) == 0) {
+            ClusterStoreMark(bits.mark, mark | ClusterBitOf(at));
             if (!state.work->TryPushBack(at)) {
                 state.error = ErrorCode::CapacityExceeded;
                 return;
@@ -875,8 +875,8 @@ Result<void> ObjectRegistry::VerifyClusterLedger() noexcept {
             for (uint32 at = record.memberHead; at != NoSlot; at = CellOf(at).listNext) {
                 const Slot* slot = SlotAt(at);
                 if (ClusterStateOf(at) != (ClusterMember | id) ||
-                    (BitsOf(at).clustered & BitOf(at)) == 0 || slot->state != SlotState::Alive ||
-                    ++counted > slots) {
+                    (BitsOf(at).clustered & ClusterBitOf(at)) == 0 ||
+                    slot->state != SlotState::Alive || ++counted > slots) {
                     platform::Fatal("Cluster member list diverged from its ledger cells");
                 }
 
@@ -902,7 +902,7 @@ Result<void> ObjectRegistry::VerifyClusterLedger() noexcept {
 
             for (uint32 at = record.detachedHead; at != NoSlot; at = CellOf(at).listNext) {
                 if (ClusterStateOf(at) != (ClusterDetached | id) || ClusterInCountOf(at) == 0 ||
-                    (BitsOf(at).clustered & BitOf(at)) != 0) {
+                    (BitsOf(at).clustered & ClusterBitOf(at)) != 0) {
                     platform::Fatal("Cluster detached list holds a non-detached object");
                 }
             }
@@ -936,7 +936,7 @@ Result<void> ObjectRegistry::VerifyClusterLedger() noexcept {
         };
         for (uint32 index = 0; index < slots; ++index) {
             const uint32 state = ClusterStateOf(index);
-            const bool clustered = (BitsOf(index).clustered & BitOf(index)) != 0;
+            const bool clustered = (BitsOf(index).clustered & ClusterBitOf(index)) != 0;
             if (clustered != ((state & ClusterMember) != 0)) {
                 platform::Fatal("Cluster bit diverged from its ledger cell");
             }

@@ -14,6 +14,8 @@
 #include <string.h>
 
 using namespace rocks;
+namespace dynamic_library_tests_file {
+
 using namespace rocks::platform;
 using namespace rocks::test;
 
@@ -667,3 +669,4 @@ TEST(DynamicLibraryIgnoresWorkingDirectoryAndPath) {
     REQUIRE(pair.WriteB(besideA));
     CHECK(RunDynamicLibraryProbe("rocks", pathA, elsewhere.path, nullptr) == 0);
 }
+} // namespace dynamic_library_tests_file

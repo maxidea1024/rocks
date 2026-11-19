@@ -6,6 +6,7 @@
 // 플래그 마스크, Required는 참조 필드만, WorldOnly 상속, 도구 이름 문법·대소문자 무시 유일성·깊은
 // 복사, 상속 필드 도구 이름 일치.
 using namespace rocks;
+namespace type_flag_tests_file {
 
 namespace {
 
@@ -185,3 +186,4 @@ TEST(TypeFlags_InheritedFieldToolNamesUseEffectiveNames) {
     REQUIRE(types.Unregister(base.Value()));
     CHECK(types.Shutdown());
 }
+} // namespace type_flag_tests_file

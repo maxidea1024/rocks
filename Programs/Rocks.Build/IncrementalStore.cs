@@ -6,10 +6,30 @@ using Rocks.Tooling.Common;
 
 namespace Rocks.Build;
 
-internal sealed record CachedAction(string Key, Dictionary<string, string> Outputs);
+// 출력 하나의 기록이다: 내용 해시와, 그 해시를 잰 때의 (크기, 수정 시각, 파일 ID)다(Docs/Design/UnityBuildPch.ko.md 4.3절). FileId가 빈
+// 문자열이면 파일 ID를 얻지 못한 것이고 그 출력은 검사 때마다 다시 해시한다.
+internal sealed record CachedOutput(string Hash, long Size, long ModifiedTicks, string FileId);
 
+internal sealed record CachedAction(string Key, Dictionary<string, CachedOutput> Outputs);
+
+// native-cache.json의 형식이다. Format이 다르거나 읽지 못하면 전부 miss다(검증하지 않은 출력은 재사용하지 않는다).
+internal sealed record CachedIndex(int Format, Dictionary<string, CachedAction> Actions);
+
+/// <summary>
+/// action의 증분 기록이다. hit는 두 단으로 판정한다(Docs/Design/UnityBuildPch.ko.md 4.1절).
+/// <list type="number">
+/// <item>선언 입력 key(<see cref="NativeAction.Key(string, BuildInputs)"/>)가 기록과 같고 모든 출력이 기록대로 있다. 출력은 (크기, 수정
+/// 시각, 파일 ID)가 모두 기록과 같으면 기록된 해시를 믿고, 하나라도 다르면 내용을 다시 해시해 대조한다(4.3절 — 수십 MB의 PCH·실행
+/// 파일을 무변경 빌드마다 다시 읽지 않는다. 시각만으로 hit를 판정하지 않는다).</item>
+/// <item>의존 기록이 있는 action은 지난 실행에서 컴파일러가 연 파일의 내용 해시가 지금과 모두 같다. 하나라도 다르거나 없거나 기록이
+/// 깨졌으면 miss다.</item>
+/// </list>
+/// </summary>
 internal sealed class IncrementalStore
 {
+    // 2: 출력 기록에 (크기, 수정 시각, 파일 ID)를 더했고 compile action의 출력에 의존 기록이 들었다(key 구성도 2단으로 바뀌었다).
+    private const int Format = 2;
+
     private readonly string path;
     private readonly ConcurrentDictionary<string, CachedAction> actions;
 
@@ -21,39 +41,104 @@ internal sealed class IncrementalStore
         {
             if (File.Exists(path))
             {
-                loaded = JsonSerializer.Deserialize<Dictionary<string, CachedAction>>(File.ReadAllText(path));
+                CachedIndex? index = JsonSerializer.Deserialize<CachedIndex>(File.ReadAllText(path));
+                if (index is { Format: Format, Actions: not null } && index.Actions.Values.All(action => action?.Key is not null &&
+                        action.Outputs is not null && action.Outputs.Values.All(output => output?.Hash is not null && output.FileId is not null)))
+                {
+                    loaded = index.Actions;
+                }
             }
         }
-        catch (JsonException) { /* 손상된 index는 miss이며, 검증하지 않은 출력은 재사용하지 않는다. */ }
+        catch (JsonException) { /* 손상되었거나 이전 형식인 index는 miss이며, 검증하지 않은 출력은 재사용하지 않는다. */ }
 
         actions = new(loaded ?? new Dictionary<string, CachedAction>(), StringComparer.Ordinal);
     }
 
-    public bool IsCurrent(NativeAction action, string key)
+    /// <summary>inputs가 null이면(action 하나만 보는 시험) 메모 없이 파일을 직접 읽는다.</summary>
+    public bool IsCurrent(NativeAction action, string key, BuildInputs? inputs = null)
     {
         if (!actions.TryGetValue(action.Id, out var cached) || cached.Key != key || cached.Outputs.Count != action.Outputs.Count)
         {
             return false;
         }
 
+        var verified = new Dictionary<string, CachedOutput>(StringComparer.Ordinal);
+        bool refreshed = false;
         foreach (string output in action.Outputs)
         {
-            if (!cached.Outputs.TryGetValue(output, out string? digest) || !File.Exists(output) || Fingerprints.FileHash(output) != digest)
+            if (!cached.Outputs.TryGetValue(output, out CachedOutput? record) || !File.Exists(output))
             {
                 return false;
             }
+
+            bool identified = FileIdentity.TryGet(output, out FileIdentity identity);
+            if (identified && record.FileId.Length != 0 && identity == new FileIdentity(record.Size, record.ModifiedTicks, record.FileId))
+            {
+                verified.Add(output, record);
+                continue;
+            }
+
+            if (Fingerprints.FileHash(output) != record.Hash)
+            {
+                return false;
+            }
+
+            // 내용은 같고 메타데이터만 바뀌었다(복사·복원 등). 다음 검사가 다시 읽지 않게 기록을 고친다.
+            verified.Add(output, identified ? new(record.Hash, identity.Size, identity.ModifiedTicks, identity.FileId) : record with { FileId = "" });
+            refreshed = true;
+        }
+
+        if (action.DependencyRecord is string dependencyRecord)
+        {
+            IReadOnlyList<DependencyEntry>? dependencies = DependencyRecord.Read(dependencyRecord);
+            if (dependencies is null)
+            {
+                return false;
+            }
+
+            foreach (DependencyEntry dependency in dependencies)
+            {
+                if (!File.Exists(dependency.Path) ||
+                    (inputs is null ? Fingerprints.FileHash(dependency.Path) : inputs.Content(dependency.Path)) != dependency.Hash)
+                {
+                    return false;
+                }
+            }
+        }
+
+        if (refreshed)
+        {
+            actions[action.Id] = new CachedAction(key, verified);
+        }
+
+        foreach ((string output, CachedOutput record) in verified)
+        {
+            inputs?.RecordProduced(output, record.Hash);
         }
 
         return true;
     }
 
-    public void Publish(NativeAction action, string key) => actions[action.Id] =
-        new CachedAction(key, action.Outputs.ToDictionary(value => value, Fingerprints.FileHash, StringComparer.Ordinal));
+    public void Publish(NativeAction action, string key, BuildInputs? inputs = null)
+    {
+        var outputs = new Dictionary<string, CachedOutput>(StringComparer.Ordinal);
+        foreach (string output in action.Outputs)
+        {
+            // 해시를 먼저 재고 그 뒤의 메타데이터를 적는다. 사이에 파일이 바뀌면 다음 검사에서 메타데이터가 같아도 해시는 낡은 값이지만,
+            // 출력은 이 빌드의 잠금 아래에서 이 action만 쓴다.
+            string hash = Fingerprints.FileHash(output);
+            outputs.Add(output, FileIdentity.TryGet(output, out FileIdentity identity)
+                ? new(hash, identity.Size, identity.ModifiedTicks, identity.FileId) : new(hash, 0, 0, ""));
+            inputs?.RecordProduced(output, hash);
+        }
+
+        actions[action.Id] = new CachedAction(key, outputs);
+    }
 
     public void Forget(string id) => actions.TryRemove(id, out _);
 
-    public void Save() => AtomicFiles.Write(path, JsonSerializer.Serialize(actions.OrderBy(pair => pair.Key, StringComparer.Ordinal)
-        .ToDictionary(pair => pair.Key, pair => pair.Value), new JsonSerializerOptions { WriteIndented = true }));
+    public void Save() => AtomicFiles.Write(path, JsonSerializer.Serialize(new CachedIndex(Format, actions.OrderBy(pair => pair.Key, StringComparer.Ordinal)
+        .ToDictionary(pair => pair.Key, pair => pair.Value)), new JsonSerializerOptions { WriteIndented = true }));
 }
 
 internal static class AtomicFiles

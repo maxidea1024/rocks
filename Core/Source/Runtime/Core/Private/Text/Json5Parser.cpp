@@ -26,7 +26,7 @@ constexpr uint64 PositiveInfinityBits = 0x7FF0000000000000ull;
 constexpr uint64 NegativeInfinityBits = 0xFFF0000000000000ull;
 constexpr uint64 QuietNanBits = 0x7FF8000000000000ull;
 
-bool IsDigit(uint8 byte) noexcept {
+bool Json5ParserIsDigit(uint8 byte) noexcept {
     return byte >= '0' && byte <= '9';
 }
 
@@ -213,7 +213,8 @@ bool JsonParser::ParseJson5Value(uint32& node) noexcept {
         return ParseJson5String(value.first, value.count) && AddNode(value, node, start);
     }
 
-    if (byte == '+' || byte == '-' || byte == '.' || IsDigit(byte) || byte == 'I' || byte == 'N') {
+    if (byte == '+' || byte == '-' || byte == '.' || Json5ParserIsDigit(byte) || byte == 'I' ||
+        byte == 'N') {
         return ParseJson5Number(node);
     }
 
@@ -327,7 +328,7 @@ bool JsonParser::ParseJson5Escape(usize stringStart, usize textStart) noexcept {
         break;
     case '0':
         // \0 뒤에 10진 숫자가 오면 8진 이스케이프라 받지 않는다.
-        if (position_ < size_ && IsDigit(data_[position_])) {
+        if (position_ < size_ && Json5ParserIsDigit(data_[position_])) {
             return Fail(JsonErrorCode::InvalidEscape, escape);
         }
 
@@ -587,11 +588,11 @@ bool JsonParser::ParseJson5Number(uint32& node) noexcept {
     const usize integerStart = index;
     if (lead == '0') {
         ++index;
-        if (index < size_ && IsDigit(data_[index])) {
+        if (index < size_ && Json5ParserIsDigit(data_[index])) {
             return Fail(JsonErrorCode::InvalidNumber, index); // 앞자리 0(8진 꼴)
         }
     } else {
-        while (index < size_ && IsDigit(data_[index])) {
+        while (index < size_ && Json5ParserIsDigit(data_[index])) {
             ++index;
         }
     }
@@ -606,7 +607,7 @@ bool JsonParser::ParseJson5Number(uint32& node) noexcept {
         point = true;
         ++index;
         fractionStart = index;
-        while (index < size_ && IsDigit(data_[index])) {
+        while (index < size_ && Json5ParserIsDigit(data_[index])) {
             ++index;
         }
 
@@ -627,13 +628,13 @@ bool JsonParser::ParseJson5Number(uint32& node) noexcept {
             ++index;
         }
 
-        if (index >= size_ || !IsDigit(data_[index])) {
+        if (index >= size_ || !Json5ParserIsDigit(data_[index])) {
             return Fail(index >= size_ ? JsonErrorCode::UnexpectedEnd
                                        : JsonErrorCode::InvalidNumber,
                         index);
         }
 
-        while (index < size_ && IsDigit(data_[index])) {
+        while (index < size_ && Json5ParserIsDigit(data_[index])) {
             ++index;
         }
     }

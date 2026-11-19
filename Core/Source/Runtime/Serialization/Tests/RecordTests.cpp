@@ -4,6 +4,7 @@
 #include <Serialization/Record.h>
 
 using namespace rocks;
+namespace record_tests_file {
 
 namespace {
 
@@ -884,3 +885,4 @@ TEST(RecordOpenNestedRecordRequiresContainedRangeAndSharesBudget) {
           ErrorCode::InvalidArgument);
     CHECK(moved.OpenNestedRecord(allocator, nested, Inner, 1, 1, 16));
 }
+} // namespace record_tests_file

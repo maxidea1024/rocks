@@ -6,6 +6,8 @@
 // ResolveDestination 접근, 장치가 낸 전이, 다음 읽기의 before)와 그래프 구간 GraphScope(중첩,
 // culled 구간 생략, 기록 경계의 marker 재push, 짝 검증).
 using namespace rocks;
+namespace render_graph_resolve_scope_tests_file {
+
 using namespace rocks::render;
 using namespace rocks::render::testing;
 using graphics::ResourceAccess;
@@ -268,3 +270,4 @@ TEST(RenderGraph_ImmediateModeOpensScopesAtAddPass) {
     CHECK(bench.Count(RecordingDevice::Op::PushMarker) ==
           bench.Count(RecordingDevice::Op::PopMarker));
 }
+} // namespace render_graph_resolve_scope_tests_file

@@ -15,7 +15,7 @@ bool ValidDirection(StringSearchDirection direction) noexcept {
            direction == StringSearchDirection::FromEnd;
 }
 
-char FoldAscii(char value) noexcept {
+char StringOperationsFoldAscii(char value) noexcept {
     if (value >= 'A' && value <= 'Z') {
         return static_cast<char>(value + ('a' - 'A'));
     }
@@ -29,8 +29,8 @@ bool MatchesAt(StringView text, usize offset, StringView needle,
         char left = text.Data()[offset + index];
         char right = needle.Data()[index];
         if (comparison == StringComparison::IgnoreAsciiCase) {
-            left = FoldAscii(left);
-            right = FoldAscii(right);
+            left = StringOperationsFoldAscii(left);
+            right = StringOperationsFoldAscii(right);
         }
         if (left != right) {
             return false;
@@ -44,7 +44,7 @@ bool IsAsciiWhitespace(char value) noexcept {
     return value == ' ' || (value >= '\t' && value <= '\r');
 }
 
-StringView Slice(StringView input, usize start, usize count) noexcept {
+StringView StringOperationsSlice(StringView input, usize start, usize count) noexcept {
     return input.Data() ? StringView(input.Data() + start, count) : StringView();
 }
 
@@ -151,9 +151,9 @@ bool StringView::Split(StringView delimiter, StringView& left, StringView& right
     }
 
     // 출력이 원본 view 객체일 수 있으므로 두 view를 먼저 만들어 일괄 게시한다.
-    const StringView before = Slice(*this, 0, position);
+    const StringView before = StringOperationsSlice(*this, 0, position);
     const usize suffix = position + delimiter.ByteCount();
-    const StringView after = Slice(*this, suffix, ByteCount() - suffix);
+    const StringView after = StringOperationsSlice(*this, suffix, ByteCount() - suffix);
     left = before;
     right = after;
     return true;
@@ -164,7 +164,7 @@ StringView StringView::TrimAsciiStart() const noexcept {
     while (begin < ByteCount() && IsAsciiWhitespace(Data()[begin])) {
         ++begin;
     }
-    return Slice(*this, begin, ByteCount() - begin);
+    return StringOperationsSlice(*this, begin, ByteCount() - begin);
 }
 
 StringView StringView::TrimAsciiEnd() const noexcept {
@@ -172,7 +172,7 @@ StringView StringView::TrimAsciiEnd() const noexcept {
     while (end != 0 && IsAsciiWhitespace(Data()[end - 1])) {
         --end;
     }
-    return Slice(*this, 0, end);
+    return StringOperationsSlice(*this, 0, end);
 }
 
 StringView StringView::TrimAscii() const noexcept {
@@ -218,7 +218,7 @@ void String::ToUpperAscii() noexcept {
 
 void String::ToLowerAscii() noexcept {
     for (usize index = 0; index < bytes_; ++index) {
-        data_[index] = FoldAscii(data_[index]);
+        data_[index] = StringOperationsFoldAscii(data_[index]);
     }
 }
 
@@ -271,7 +271,8 @@ Result<usize> String::TryReplace(StringView from, StringView to,
     for (usize index = 0; index < count; ++index) {
         const usize match =
             original.Find(from, comparison, StringSearchDirection::FromStart, position);
-        auto prefix = replacement.TryAppend(Slice(original, position, match - position));
+        auto prefix =
+            replacement.TryAppend(StringOperationsSlice(original, position, match - position));
         if (!prefix) {
             return Result<usize>::Failure(prefix.Error());
         }
@@ -281,7 +282,8 @@ Result<usize> String::TryReplace(StringView from, StringView to,
         }
         position = match + from.ByteCount();
     }
-    auto suffix = replacement.TryAppend(Slice(original, position, original.ByteCount() - position));
+    auto suffix = replacement.TryAppend(
+        StringOperationsSlice(original, position, original.ByteCount() - position));
     if (!suffix) {
         return Result<usize>::Failure(suffix.Error());
     }

@@ -6,6 +6,8 @@
 // 해석), 1단계의 importTypes·값 범위 검사, 2b imports 확인(개수·생존·선언 타입·기록한 기대 형식 —
 // 쓰기 전, 실패는 트랜잭션 고정), 편의 복원의 imports, 65536 경계.
 using namespace rocks;
+namespace graph_external_load_tests_file {
+
 using namespace rocks::test::external;
 
 namespace {
@@ -504,3 +506,4 @@ TEST(GraphExternalLoad_ExternalCountBoundary) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace graph_external_load_tests_file

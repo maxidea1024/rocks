@@ -8,6 +8,8 @@
 // 쓰기·저장이 토큰의 pool·내용을 검사함을 본다. 복원 단계(1단계·2a)의 시험은
 // NameGraphLoadTests.cpp다.
 using namespace rocks;
+namespace name_graph_tests_file {
+
 using namespace rocks::test::names;
 
 // 표시 문자열 wire로 왕복한다: 번호 접미(Socket_7·Weapon_0·None_3)와 대소문자 표시(SOCKET·weapon)가
@@ -412,3 +414,4 @@ TEST(NameGraph_FieldWriteOperationChecksTokens) {
     CHECK(foreign.Shutdown());
     CHECK(types.Shutdown());
 }
+} // namespace name_graph_tests_file

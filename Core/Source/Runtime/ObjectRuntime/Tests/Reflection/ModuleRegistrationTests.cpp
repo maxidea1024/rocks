@@ -10,6 +10,7 @@
 // 모듈 집계 헤더의 RegisterModuleTypes와 ModuleRegistration
 // 시험이다(Docs/Design/ReflectionFoundations.ko.md 3.5절).
 using namespace rocks;
+namespace module_registration_tests_file {
 
 namespace {
 
@@ -226,3 +227,4 @@ TEST(ModuleRegistration_EveryAllocationFailureRollsBackOnlyTheFailedCall) {
         CHECK(backing.Stats().liveAllocations == 0);
     }
 }
+} // namespace module_registration_tests_file

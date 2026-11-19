@@ -3,6 +3,8 @@
 #include <Core/ScopeExit.h>
 
 namespace rocks::test {
+namespace optional_scope_exit_tests_file {
+
 namespace {
 
 // 생성·이동·소멸 횟수로 수명 계약을 확인하는 이동 전용 타입이다.
@@ -173,5 +175,8 @@ TEST(ScopeExit_MultipleGuardsFromOneMacroExpansion) {
     }
     CHECK(counter == 3);
 }
+} // namespace optional_scope_exit_tests_file
 
 } // namespace rocks::test
+
+#undef ROCKS_TEST_TWO_GUARDS

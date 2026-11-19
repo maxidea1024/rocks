@@ -3,6 +3,8 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace vertex_format_tests_file {
+
 using namespace rocks::graphics;
 
 namespace {
@@ -76,3 +78,4 @@ TEST(VertexFormat_RejectsUnknownNumbersAndNames) {
     CHECK(ParseVertexFormatName(StringView("", 0)).Error() == ErrorCode::NotFound);
     CHECK(platform::CStringCompare(VertexShaderTypeName(VertexShaderType::Int), "int") == 0);
 }
+} // namespace vertex_format_tests_file

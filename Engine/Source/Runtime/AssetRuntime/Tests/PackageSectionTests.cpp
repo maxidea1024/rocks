@@ -9,6 +9,8 @@
 // 배치의 모든 칸과 표 사이 규칙, bulk 해제. 변조마다 섹션을 writer 규칙대로 다시
 // 배치(EditablePackage)해 CRC·배치가 아니라 그 내용 규칙에 걸리게 한다.
 using namespace rocks;
+namespace package_section_tests_file {
+
 using namespace rocks::asset_test;
 using namespace rocks::package_detail;
 
@@ -925,3 +927,4 @@ TEST(AssetPackage_TruncatedSections) {
         CHECK(failures == file.Size());
     }
 }
+} // namespace package_section_tests_file

@@ -7,6 +7,8 @@
 // 조립한 byte(최상위 필드·배열 원소·struct 멤버·둘째 노드·NodeTable), 번호 재배정(역순·임의
 // 순열·outer import·되돌리기·잘못된 표의 불변), 위치 표 메모리의 바이트·작업량 청구.
 using namespace rocks;
+namespace graph_external_tests_file {
+
 using namespace rocks::test::external;
 
 namespace {
@@ -789,3 +791,4 @@ TEST(GraphExternal_PositionTableChargesBytesAndWork) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace graph_external_tests_file
