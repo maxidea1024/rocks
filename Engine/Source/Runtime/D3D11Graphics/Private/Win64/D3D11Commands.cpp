@@ -333,6 +333,7 @@ Result<CommandContext*> D3D11Device::BeginPass(const PassDesc& pass) noexcept {
         target.resolves[index] = resolve;
         target.resolveMips[index] = resolveMip;
         target.resolveSlices[index] = resolveSlice;
+        target.colorSlices[index] = pass.colors[index].slice;
     }
 
     if (recording_) {

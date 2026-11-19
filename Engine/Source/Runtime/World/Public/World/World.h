@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Base/TypeTraits.h>
-#include <Config/CVar.h>
+#include <Config/CVarDefinition.h>
 #include <Core/Containers/HashMap.h>
 #include <Core/Text/String.h>
 #include <Core/Time/GameClock.h>
@@ -13,6 +13,12 @@
 #include <World/Component.h>
 #include <World/Level.h>
 #include <World/Subsystem.h>
+
+namespace rocks::config {
+
+class ConfigContext;
+
+} // namespace rocks::config
 
 namespace rocks {
 
@@ -124,7 +130,7 @@ struct WorldDesc {
     bool levelClusters = true;
     // 설정 문맥이다(선택 — Docs/Design/CVarSystem.ko.md 14.2절). 있으면 Initialize가 Global의 자식
     // CVar 범위를 만들고 Shutdown이 파괴한다(CVarScope). World와 같은 게임 lane이 소유하고
-    // World보다 오래 살아야 한다.
+    // World보다 오래 살아야 한다(범위가 남은 채 문맥을 파괴하면 문맥이 Fatal로 잡는다).
     config::ConfigContext* settings = nullptr;
 };
 

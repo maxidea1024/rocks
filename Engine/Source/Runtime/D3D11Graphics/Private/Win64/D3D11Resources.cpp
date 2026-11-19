@@ -389,7 +389,12 @@ HRESULT D3D11Device::CreateAttachmentView(const TextureRecord& record, uint32 mi
                                           ComRef<ID3D11RenderTargetView>& out) noexcept {
     D3D11_RENDER_TARGET_VIEW_DESC view = {};
     view.Format = MappingOf(record.format).rtv;
-    if (record.sampleCount > 1) {
+    if (record.sampleCount > 1 && record.dimension == TextureDimension::Texture2DArray) {
+        // MSAA 배열의 층 하나다(텍스처 GX2 나머지 C부).
+        view.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DMSARRAY;
+        view.Texture2DMSArray.FirstArraySlice = slice;
+        view.Texture2DMSArray.ArraySize = 1;
+    } else if (record.sampleCount > 1) {
         view.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DMS;
     } else if (record.dimension == TextureDimension::Texture3D) {
         view.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE3D;
@@ -414,7 +419,11 @@ HRESULT D3D11Device::CreateAttachmentView(const TextureRecord& record, uint32 mi
                                           ComRef<ID3D11DepthStencilView>& out) noexcept {
     D3D11_DEPTH_STENCIL_VIEW_DESC view = {};
     view.Format = MappingOf(record.format).dsv;
-    if (record.sampleCount > 1) {
+    if (record.sampleCount > 1 && record.dimension == TextureDimension::Texture2DArray) {
+        view.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2DMSARRAY;
+        view.Texture2DMSArray.FirstArraySlice = slice;
+        view.Texture2DMSArray.ArraySize = 1;
+    } else if (record.sampleCount > 1) {
         view.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2DMS;
     } else if (record.dimension == TextureDimension::Texture2D) {
         view.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
@@ -473,6 +482,14 @@ HRESULT D3D11Device::CreatePlaneView(const TextureRecord& record, DXGI_FORMAT fo
         view.Texture2D.MipLevels = mipLevels;
         break;
     case TextureDimension::Texture2DArray:
+        if (record.sampleCount > 1) {
+            // MSAA 배열은 표본 번호 읽기(Texture2DMSArray)다.
+            view.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DMSARRAY;
+            view.Texture2DMSArray.FirstArraySlice = range.firstSlice;
+            view.Texture2DMSArray.ArraySize = range.sliceCount;
+            break;
+        }
+
         view.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
         view.Texture2DArray.MostDetailedMip = range.firstMip;
         view.Texture2DArray.MipLevels = mipLevels;

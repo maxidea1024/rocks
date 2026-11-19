@@ -209,7 +209,9 @@ void VulkanDevice::ResolveAttachments() noexcept {
         }
 
         // MSAA 원본은 2D mip 1이라 subresource 0이고, 대상은 resolve mip·slice 하나다.
-        const ResolvedSubresourceRange whole = {0, 1, 0, 1};
+        // MSAA 원본은 mip 1이라 그 attachment 층(2D는 0)이다(텍스처 GX2 나머지 C부).
+        const uint32 sourceSlice = target_.colorSlices[index];
+        const ResolvedSubresourceRange whole = {0, 1, sourceSlice, 1};
         const ResolvedSubresourceRange destination = AttachmentSubresource(
             resolved->dimension, target_.resolveMips[index], target_.resolveSlices[index]);
         TrackTransition(*source, target_.colors[index].slot, whole, ResourceAccess::CopySource,
@@ -217,7 +219,7 @@ void VulkanDevice::ResolveAttachments() noexcept {
         TrackTransition(*resolved, target_.resolves[index].slot, destination,
                         ResourceAccess::CopyDestination, false);
         VkImageResolve region = {};
-        region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, sourceSlice, 1};
         region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, destination.firstMip,
                                  destination.firstSlice, 1};
         region.extent = {source->width, source->height, 1};

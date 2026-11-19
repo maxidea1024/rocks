@@ -15,11 +15,6 @@
 // (VarDefinition::index) 하나이고 첫 Register가 원자적 CAS로 한 번만 쓴다(10.1절 표).
 namespace rocks::cvar {
 
-// 핸들 번호다(5절). 처음 등록될 때 프로세스 전체에서 한 번 정해지고 바뀌지 않는다. 문맥이
-// 여럿이어도 같은 핸들은 같은 번호다. 번호는 실행 중에만 쓰고 출력·wire에는 이름을 쓴다.
-//
-// 사용 예:
-//   if (ShadowDistance.Index().IsValid()) { ... }   // 등록된 적이 있다
 // CVar 범위 id다(8절 — ConfigContext::CreateScope가 준다). 값 0은 Global(문맥의 뿌리)이다. id는
 // 프로세스 원자 카운터에서 받고 다시 쓰지 않는다(다른 문맥의 범위 id와도 겹치지 않는다).
 struct CVarScopeId {
@@ -32,6 +27,11 @@ struct CVarScopeId {
     friend constexpr bool operator==(CVarScopeId left, CVarScopeId right) noexcept = default;
 };
 
+// 핸들 번호다(5절). 처음 등록될 때 프로세스 전체에서 한 번 정해지고 바뀌지 않는다. 문맥이
+// 여럿이어도 같은 핸들은 같은 번호다. 번호는 실행 중에만 쓰고 출력·wire에는 이름을 쓴다.
+//
+// 사용 예:
+//   if (ShadowDistance.Index().IsValid()) { ... }   // 등록된 적이 있다
 struct Index {
     // 번호 없음(아직 등록되지 않음) 표지다.
     static constexpr uint32 None = NumericLimits<uint32>::Max();
