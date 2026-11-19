@@ -218,9 +218,9 @@ Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
         return Result<TextureHandle>::Failure(ErrorCode::Unsupported);
     }
 
-    const bool renderTarget = desc.usage == TextureUsage::RenderTarget;
-    const bool depthTarget = desc.usage == TextureUsage::DepthStencil;
-    const bool storage = desc.usage == TextureUsage::Storage;
+    const bool renderTarget = HasTextureUsage(desc.usage, TextureUsage::RenderTarget);
+    const bool depthTarget = HasTextureUsage(desc.usage, TextureUsage::DepthStencil);
+    const bool storage = HasTextureUsage(desc.usage, TextureUsage::Storage);
     // 렌더 타깃·깊이·Storage는 초기 픽셀이 없다(업로드하지 않는다).
     const bool attachment = renderTarget || depthTarget || storage;
     const PixelFormatInfo& info = GetPixelFormatInfo(desc.format);
@@ -615,7 +615,10 @@ D3D11Device::CreateWritableTextureView(const TextureRecord& source, PixelFormat 
         view.Texture3D.FirstWSlice = 0;
         view.Texture3D.WSize = MipExtent(source.depth, range.firstMip);
         break;
+    // cube 계열의 쓰기 view는 면 단위 2D 배열이다(cube UAV가 없다, 텍스처 GX2 나머지 A부).
     case TextureDimension::Texture2DArray:
+    case TextureDimension::TextureCube:
+    case TextureDimension::TextureCubeArray:
         view.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2DARRAY;
         view.Texture2DArray.MipSlice = range.firstMip;
         view.Texture2DArray.FirstArraySlice = range.firstSlice;

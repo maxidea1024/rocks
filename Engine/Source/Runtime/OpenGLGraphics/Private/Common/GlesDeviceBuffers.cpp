@@ -488,12 +488,15 @@ Result<void> GlesDevice::ReflectBufferSlots(GLuint program, DrawBufferSlots& slo
         // 텍스처 sampler는 PS 텍스처 유닛 0(ps0)만 받는다.
         const bool imageBuffer = type == GL_IMAGE_BUFFER || type == GL_INT_IMAGE_BUFFER ||
                                  type == GL_UNSIGNED_INT_IMAGE_BUFFER;
-        // compute의 텍스처 image(SetWritableTexture, 텍스처 GX2 A부)다.
+        // compute의 텍스처 image(SetWritableTexture, 텍스처 GX2 A부)다. cube 계열 Storage의 layered
+        // 쓰기 view는 imageCube·imageCubeArray다(텍스처 GX2 나머지 A부).
         const bool imageTexture =
             type == GL_IMAGE_2D || type == GL_IMAGE_3D || type == GL_IMAGE_2D_ARRAY ||
-            type == GL_INT_IMAGE_2D || type == GL_INT_IMAGE_3D || type == GL_INT_IMAGE_2D_ARRAY ||
-            type == GL_UNSIGNED_INT_IMAGE_2D || type == GL_UNSIGNED_INT_IMAGE_3D ||
-            type == GL_UNSIGNED_INT_IMAGE_2D_ARRAY;
+            type == GL_IMAGE_CUBE || type == GL_IMAGE_CUBE_MAP_ARRAY || type == GL_INT_IMAGE_2D ||
+            type == GL_INT_IMAGE_3D || type == GL_INT_IMAGE_2D_ARRAY || type == GL_INT_IMAGE_CUBE ||
+            type == GL_INT_IMAGE_CUBE_MAP_ARRAY || type == GL_UNSIGNED_INT_IMAGE_2D ||
+            type == GL_UNSIGNED_INT_IMAGE_3D || type == GL_UNSIGNED_INT_IMAGE_2D_ARRAY ||
+            type == GL_UNSIGNED_INT_IMAGE_CUBE || type == GL_UNSIGNED_INT_IMAGE_CUBE_MAP_ARRAY;
         GLint unit = -1;
         if (imageTexture && writeTextures != nullptr) {
             gl_.GetUniformiv(program, gl_.GetUniformLocation(program, name), &unit);

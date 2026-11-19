@@ -312,13 +312,82 @@ TEST(TextureDesc_StorageUsageRules) {
     desc.arraySize = 1;
     desc.depth = 4;
     CHECK(ValidateTextureDesc(desc).IsOk());
-    // cube Storage는 이 단계 밖(Unsupported), 깊이 형식은 규칙 위반이다.
+    // cube·cube 배열 Storage도 받는다(텍스처 GX2 나머지 A부). 깊이 형식은 규칙 위반이다.
     desc.dimension = TextureDimension::TextureCube;
     desc.depth = 1;
-    CHECK(ValidateTextureDesc(desc).Error() == ErrorCode::Unsupported);
+    CHECK(ValidateTextureDesc(desc).IsOk());
+    desc.dimension = TextureDimension::TextureCubeArray;
+    desc.arraySize = 2;
+    CHECK(ValidateTextureDesc(desc).IsOk());
     desc.dimension = TextureDimension::Texture2D;
+    desc.arraySize = 1;
     desc.format = PixelFormat::D32Float;
     CHECK(ValidateTextureDesc(desc).Error() == ErrorCode::InvalidArgument);
+}
+
+// 용도 비트 묶음: 다섯 조합만 받고, 능력은 비트마다의 합이다. MSAA는 Storage와 묶지 않는다.
+TEST(TextureDesc_UsageCombinations) {
+    TextureDesc desc;
+    desc.width = 8;
+    desc.height = 8;
+    desc.format = PixelFormat::RGBA8Unorm;
+    const TextureUsage accepted[] = {TextureUsage::Sampled, TextureUsage::RenderTarget,
+                                     TextureUsage::Storage,
+                                     TextureUsage::RenderTarget | TextureUsage::Storage};
+    for (TextureUsage usage : accepted) {
+        desc.usage = usage;
+        CHECK(ValidateTextureDesc(desc).IsOk());
+    }
+
+    const TextureUsage rejected[] = {TextureUsage::None,
+                                     TextureUsage::Sampled | TextureUsage::RenderTarget,
+                                     TextureUsage::Sampled | TextureUsage::Storage,
+                                     TextureUsage::DepthStencil | TextureUsage::Storage,
+                                     TextureUsage::DepthStencil | TextureUsage::RenderTarget};
+    for (TextureUsage usage : rejected) {
+        desc.usage = usage;
+        CHECK(ValidateTextureDesc(desc).Error() == ErrorCode::InvalidArgument);
+    }
+
+    desc.usage = TextureUsage::RenderTarget | TextureUsage::Storage;
+    desc.mipLevels = 2;
+    CHECK(RequiredPixelFormatCaps(desc) ==
+          (PixelFormatCaps::RenderTarget | PixelFormatCaps::Sampled |
+           PixelFormatCaps::StorageWrite | PixelFormatCaps::Mipmaps));
+    CHECK(HasTextureUsage(desc.usage, TextureUsage::RenderTarget));
+    CHECK(HasTextureUsage(desc.usage, TextureUsage::Storage));
+    CHECK(!HasTextureUsage(desc.usage, TextureUsage::Sampled));
+    desc.mipLevels = 1;
+    desc.sampleCount = 4;
+    CHECK(ValidateTextureDesc(desc).Error() == ErrorCode::InvalidArgument);
+    desc.usage = TextureUsage::RenderTarget;
+    CHECK(ValidateTextureDesc(desc).IsOk());
+}
+
+// cube 계열의 쓰기 view는 면 단위 2D 배열이라 아무 면 범위를 받는다(읽기 view는 cube 정렬).
+TEST(TextureView_CubeWritableViewsAreFaceArrays) {
+    const TextureSubresources cubeArray{1, 12};
+    TextureViewDesc face;
+    face.firstSlice = 3;
+    face.sliceCount = 1;
+    face.access = ViewAccess::ReadWrite;
+    auto written = ResolveTextureViewRange(TextureDimension::TextureCubeArray,
+                                           TextureUsage::Storage, cubeArray, face);
+    REQUIRE(written);
+    CHECK(written.Value().firstSlice == 3 && written.Value().sliceCount == 1);
+    CHECK(ResolveTextureViewRange(TextureDimension::TextureCube,
+                                  TextureUsage::RenderTarget | TextureUsage::Storage,
+                                  TextureSubresources{1, 6}, face)
+              .IsOk());
+    face.access = ViewAccess::Read;
+    CHECK(ResolveTextureViewRange(TextureDimension::TextureCubeArray, TextureUsage::Storage,
+                                  cubeArray, face)
+              .Error() == ErrorCode::InvalidArgument);
+    // 렌더 타깃만인 텍스처의 쓰기 view는 규칙 위반이다.
+    face.access = ViewAccess::ReadWrite;
+    CHECK(ResolveTextureViewRange(TextureDimension::TextureCube, TextureUsage::RenderTarget,
+                                  TextureSubresources{1, 6}, face)
+              .Error() == ErrorCode::InvalidArgument);
 }
 
 TEST(TextureView_RangeRules) {

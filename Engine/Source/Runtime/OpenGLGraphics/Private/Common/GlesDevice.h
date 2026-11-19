@@ -479,8 +479,8 @@ private:
     // 밖 storage block)이면 InvalidArgument다. GL introspection은 storage block의 readonly 여부를
     // 알려 주지 않으므로 그래픽 단계의 binding 0–3 storage block 쓰기는 거부하지 못한다(셰이더는
     // readonly로 선언해야 하고, 쿠킹 경로는 SPIR-V 리플렉션이 거른다).
-    // compute의 image2D·image2DArray·image3D(SetWritableTexture slot = image unit)는
-    // writeTextures에 더한다.
+    // compute의 image2D·image2DArray·image3D·imageCube·imageCubeArray(SetWritableTexture slot =
+    // image unit)는 writeTextures에 더한다.
     Result<void> ReflectBufferSlots(GLuint program, DrawBufferSlots& slots,
                                     DrawBufferSlots* writeSlots,
                                     uint32* writeTextures = nullptr) noexcept;

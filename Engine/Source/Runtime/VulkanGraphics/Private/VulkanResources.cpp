@@ -509,9 +509,9 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
                 .Error());
     }
 
-    const bool renderTarget = desc.usage == TextureUsage::RenderTarget;
-    const bool depthTarget = desc.usage == TextureUsage::DepthStencil;
-    const bool storage = desc.usage == TextureUsage::Storage;
+    const bool renderTarget = HasTextureUsage(desc.usage, TextureUsage::RenderTarget);
+    const bool depthTarget = HasTextureUsage(desc.usage, TextureUsage::DepthStencil);
+    const bool storage = HasTextureUsage(desc.usage, TextureUsage::Storage);
     // 렌더 타깃·깊이·Storage는 초기 픽셀이 없다(업로드하지 않는다).
     const bool attachment = renderTarget || depthTarget || storage;
     const PixelFormatInfo& pixelInfo = GetPixelFormatInfo(desc.format);
@@ -796,7 +796,10 @@ Result<TextureHandle> VulkanDevice::CreateTextureView(TextureHandle texture,
     VkImageViewCreateInfo viewInfo = {};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     viewInfo.image = source->image;
-    viewInfo.viewType = ViewTypeOf(record.dimension);
+    // cube 계열의 쓰기 view는 면 단위 2D 배열 storage image다(텍스처 GX2 나머지 A부).
+    viewInfo.viewType = writable && IsCubeDimension(record.dimension)
+                            ? VK_IMAGE_VIEW_TYPE_2D_ARRAY
+                            : ViewTypeOf(record.dimension);
     viewInfo.format = view.format;
     // view swizzle은 스텐실 plane(R → G)·형식 흉내 대응 위에 합성한다(TextureViewDesc::swizzle).
     // storage image view는 성분 대응이 항등이어야

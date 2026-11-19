@@ -287,9 +287,9 @@ Result<BufferViewHandle> D3D12Device::CreateBufferView(BufferHandle handle,
 // 형식·용도 지원은 장치 능력(GetPixelFormatCaps)으로 판정한다(PixelFormat.ko.md 8.3절).
 Result<TextureHandle> D3D12Device::CreateTexture(const TextureDesc& desc,
                                                  Span<const uint8> pixels) noexcept {
-    const bool renderTarget = desc.usage == TextureUsage::RenderTarget;
-    const bool depthTarget = desc.usage == TextureUsage::DepthStencil;
-    const bool storage = desc.usage == TextureUsage::Storage;
+    const bool renderTarget = HasTextureUsage(desc.usage, TextureUsage::RenderTarget);
+    const bool depthTarget = HasTextureUsage(desc.usage, TextureUsage::DepthStencil);
+    const bool storage = HasTextureUsage(desc.usage, TextureUsage::Storage);
     const PixelFormatInfo& info = GetPixelFormatInfo(desc.format);
     // 형식·용도·차원 능력을 먼저 본다(능력 밖은 다른 인자 검사보다 앞서 Unsupported다).
     if (IsValidPixelFormat(desc.format) && IsValidTextureDimension(desc.dimension) &&
@@ -362,13 +362,16 @@ Result<TextureHandle> D3D12Device::CreateTexture(const TextureDesc& desc,
     resource.Format = mapping.resource;
     resource.SampleDesc.Count = desc.sampleCount;
     // 깊이 형식은 늘 DEPTH_STENCIL 플래그로 만든다(typeless 깊이 자원의 DSV·복사 조건).
+    // 렌더 타깃 + Storage는 두 flag를 함께 둔다(용도 비트 묶음, 텍스처 GX2 나머지 A부).
     resource.Flags = D3D12_RESOURCE_FLAG_NONE;
     if (renderTarget) {
-        resource.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+        resource.Flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
     } else if (depth) {
-        resource.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
-    } else if (storage) {
-        resource.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+        resource.Flags |= D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+    }
+
+    if (storage) {
+        resource.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
     }
     const D3D12_HEAP_PROPERTIES heap = HeapProperties(D3D12_HEAP_TYPE_DEFAULT);
     // 최적화 clear 값은 두지 않는다. 패스마다 clear 색이 다르므로 값을 두면 매번 불일치 경고가
@@ -717,7 +720,10 @@ D3D12Device::CreateWritableTextureView(TextureHandle texture, TextureRecord& sou
         view.Texture3D.FirstWSlice = 0;
         view.Texture3D.WSize = MipExtent(source.depth, range.firstMip);
         break;
+    // cube 계열의 쓰기 view는 면 단위 2D 배열이다(cube UAV가 없다, 텍스처 GX2 나머지 A부).
     case TextureDimension::Texture2DArray:
+    case TextureDimension::TextureCube:
+    case TextureDimension::TextureCubeArray:
         view.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
         view.Texture2DArray.MipSlice = range.firstMip;
         view.Texture2DArray.FirstArraySlice = range.firstSlice;

@@ -409,10 +409,10 @@ Result<TextureHandle> GlesDevice::CreateTexture(const TextureDesc& desc,
 
     // 계약상 올바른 형식이지만 이 장치(ES 3.2 core + 확장)에서 그 용도로 쓸 수 없으면 다른 형식으로
     // 대신하지 않고 Unsupported다(PixelFormat.ko.md 8.3절). 다른 인자 검사보다 먼저 한다.
-    const bool renderTarget = desc.usage == TextureUsage::RenderTarget;
-    const bool depthTarget = desc.usage == TextureUsage::DepthStencil;
-    // 렌더 타깃·깊이·Storage는 초기 픽셀이 없다(업로드하지 않는다).
-    const bool attachment = renderTarget || depthTarget || desc.usage == TextureUsage::Storage;
+    const bool renderTarget = HasTextureUsage(desc.usage, TextureUsage::RenderTarget);
+    const bool depthTarget = HasTextureUsage(desc.usage, TextureUsage::DepthStencil);
+    // 렌더 타깃·깊이·Storage 비트는 초기 픽셀이 없다(업로드하지 않는다).
+    const bool attachment = desc.usage != TextureUsage::Sampled;
     const GlesTextureFormat* format = FindTextureFormat(desc.format);
     if (IsValidPixelFormat(desc.format) && IsValidTextureDimension(desc.dimension) &&
         !HasPixelFormatCaps(GetPixelFormatCaps(desc.format), RequiredPixelFormatCaps(desc))) {
@@ -595,10 +595,11 @@ Result<TextureHandle> GlesDevice::CreateTextureView(TextureHandle texture,
 
     // texture view가 없어 읽기 view는 텍스처 전체를 묶는다(mip은 셰이더가 TextureViewBaseMip으로
     // 고른다). slice 범위를 고를 수단은 없으므로 일부 slice view는 Unsupported다. 쓰기 view는
-    // level 하나를 묶고, 배열은 layered(모든 층)로만 묶는다(셰이더 image2DArray의 층 번호가 view
-    // 기준이 되도록).
+    // level 하나를 묶고, 배열·cube는 layered(모든 층, 셰이더 image2DArray·imageCube의 층 번호가
+    // view 기준)이거나 층 하나(layered 아님, 셰이더 image2D)다.
     const bool writable = desc.access == ViewAccess::ReadWrite;
-    if (range.Value().sliceCount != source->slices) {
+    if (range.Value().sliceCount != source->slices &&
+        !(writable && range.Value().sliceCount == 1)) {
         Diagnostic message;
         message.Text("texture view over part of the slices is not supported by OpenGL ES (no "
                      "texture views in ES core)");

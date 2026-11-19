@@ -331,22 +331,49 @@ constexpr uint32 IndexFormatSize(IndexFormat format) noexcept {
     return format == IndexFormat::UInt16 ? 2u : 4u;
 }
 
+// 텍스처 용도 비트 묶음이다(UE ETextureCreateFlags의 ShaderResource·RenderTargetable·
+// DepthStencilTargetable·UAV 대응, RenderBase 4.4절 텍스처 GX2 나머지 A부). 받는 조합은 다섯이다:
+// Sampled, RenderTarget, DepthStencil, Storage, RenderTarget | Storage. 그 밖은 InvalidArgument다
+// (ValidateTextureDesc). GPU가 쓰는 텍스처(RenderTarget·DepthStencil·Storage 비트)는 초기 픽셀이
+// 없고 처음 내용은 정해지지 않으며 늘 샘플할 수 있다. 판정은 HasTextureUsage로 비트를 본다.
+//
+// 사용 예(후처리 compute가 쓰는 렌더 타깃):
+//   desc.usage = TextureUsage::RenderTarget | TextureUsage::Storage;
 enum class TextureUsage : uint8 {
-    // 셰이더에서 샘플링한다(초기 픽셀 필요). 형식 능력 Sampled가 필요하고 mip이 2개 이상이면
-    // Mipmaps도 필요하다.
-    Sampled,
-    // 렌더 타깃으로 그리고 ReadPixels로 읽거나 샘플링한다(초기 픽셀 없음, mip 1). 형식 능력
-    // RenderTarget·Sampled가 필요하다.
-    RenderTarget,
-    // 깊이·스텐실 타깃이다(초기 픽셀 없음, mip 1). 형식 능력 DepthStencil이 필요하고, 형식이
-    // Sampled면 깊이 plane을 샘플할 수 있다. 깊이 그리기 경로는 GX2·GX3에서 연다(PixelFormat.ko.md
-    // 개정 3).
-    DepthStencil,
-    // 셰이더가 읽고(SRV) 쓰는(UAV, 쓰기 view) 텍스처다(초기 픽셀 없음, mip 여러 개 가능, 처음
-    // 내용은 정해지지 않는다). 차원은 2D·2D 배열·3D다. 형식 능력 Sampled·StorageWrite가 필요하고
-    // mip이 2개 이상이면 Mipmaps도 필요하다(RenderBase 4.4절 텍스처 GX2 A부, HZB·compute 후처리).
-    Storage
+    None = 0,
+    // 셰이더에서 샘플링만 한다(초기 픽셀 필요, 다른 비트와 묶지 않는다). 형식 능력 Sampled가
+    // 필요하고 mip이 2개 이상이면 Mipmaps도 필요하다.
+    Sampled = 1u << 0,
+    // 색 attachment로 그린다. 형식 능력 RenderTarget·Sampled가 필요하다.
+    RenderTarget = 1u << 1,
+    // 깊이·스텐실 attachment다(다른 비트와 묶지 않는다). 형식 능력 DepthStencil이 필요하고, 형식이
+    // Sampled면 깊이 plane을 샘플할 수 있다. 3D는 없다.
+    DepthStencil = 1u << 2,
+    // 셰이더가 읽고(SRV) 쓰는(UAV, 쓰기 view) 텍스처다. 차원은 2D·2D 배열·3D·cube·cube 배열이고
+    // cube 계열의 쓰기 view는 면 단위 2D 배열이다. 형식 능력 Sampled·StorageWrite가 필요하다
+    // (RenderBase 4.4절 텍스처 GX2 A부, HZB·compute 후처리). MSAA와 묶지 않는다.
+    Storage = 1u << 3
 };
+
+constexpr TextureUsage operator|(TextureUsage left, TextureUsage right) noexcept {
+    return static_cast<TextureUsage>(static_cast<uint8>(left) | static_cast<uint8>(right));
+}
+
+constexpr TextureUsage operator&(TextureUsage left, TextureUsage right) noexcept {
+    return static_cast<TextureUsage>(static_cast<uint8>(left) & static_cast<uint8>(right));
+}
+
+// usage에 flags 비트가 하나라도 있는지다.
+constexpr bool HasTextureUsage(TextureUsage usage, TextureUsage flags) noexcept {
+    return (usage & flags) != TextureUsage::None;
+}
+
+// 받는 용도 조합인지다(위 다섯).
+constexpr bool IsValidTextureUsage(TextureUsage usage) noexcept {
+    return usage == TextureUsage::Sampled || usage == TextureUsage::RenderTarget ||
+           usage == TextureUsage::DepthStencil || usage == TextureUsage::Storage ||
+           usage == (TextureUsage::RenderTarget | TextureUsage::Storage);
+}
 
 // 텍스처 설정이다(AssetSystem A0-G 차원·swizzle·샘플러).
 //
