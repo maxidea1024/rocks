@@ -278,9 +278,17 @@ struct Options {
     // 패키지 시나리오 하나에서 Collect 반복 전에 간선 쓰기를 이만큼 되풀이해 잰다(--write-rounds —
     // 부하가 있는 기계에서 최솟값을 보려고).
     uint32 writeRounds = 0;
+    // --write-rounds의 쓰기마다 시간을 재 p50·p99·p99.9·max와 가장 느린 연산을
+    // 낸다(--write-latency).
+    bool writeLatency = false;
     // 패키지 시나리오 하나에서 Collect 반복 뒤 기본 예산 증분 cycle을 이만큼 돌려 가장 긴 slice를
     // 잰다(--incremental-reps — cutoff·정리 slice가 클러스터 수에 비례하는지 본다).
     uint32 incrementalReps = 0;
+    // World형 그래프에서 Level 소속(Actor·Component)의 이 비율(%)이 다른 Level의 Actor를 하나 더
+    // 가리킨다(--world-boundary P — 경계 소속 비율이 대략 P%가 된다. World 시나리오만 켬·끔으로
+    // 돈다).
+    uint32 worldBoundary = 0;
+    bool worldBoundarySet = false;
     // 패키지형 그래프의 패키지 크기다(--package-size).
     uint32 packageSize = DefaultPackageSize;
     uint64 clusterSoakTicks = 0;
@@ -912,11 +920,18 @@ bool AddEdge(ObjectRegistry& registry, ObjectHandle owner, ObjectHandle target) 
 // 간선 쓰기 비용: 무작위 노드에 간선 count개를 더한 뒤(AddReference) 끝에서 지운다
 // (RemoveReferenceAt). pick이 (소유자, 대상)을 고른다. 객체 Borrow 비용이 함께 들어간다.
 template <class Pick>
-bool MeasureEdgeWrites(ObjectRegistry& registry, uint32 count, Pick&& pick,
-                       Allocator& memory) noexcept {
+bool MeasureEdgeWrites(ObjectRegistry& registry, uint32 count, Pick&& pick, Allocator& memory,
+                       bool latency = false) noexcept {
     const auto access = registry.OwnerAccess();
     Array<ObjectHandle> owners(memory);
     if (!owners.TryReserve(count)) {
+        return false;
+    }
+
+    // --write-latency: 연산마다 시간을 재 분포를 낸다(시계 읽기 비용이 연산마다 더해진다).
+    Array<uint64> addTimes(memory);
+    Array<uint64> removeTimes(memory);
+    if (latency && (!addTimes.TryReserve(count) || !removeTimes.TryReserve(count))) {
         return false;
     }
 
@@ -925,13 +940,19 @@ bool MeasureEdgeWrites(ObjectRegistry& registry, uint32 count, Pick&& pick,
         ObjectHandle owner;
         ObjectHandle target;
         pick(owner, target);
+        const uint64 opStarted = latency ? platform::MonotonicNanoseconds() : 0;
         if (!AddEdge(registry, owner, target) || !owners.TryPushBack(owner)) {
+            return false;
+        }
+
+        if (latency && !addTimes.TryPushBack(platform::MonotonicNanoseconds() - opStarted)) {
             return false;
         }
     }
 
     const uint64 added = platform::MonotonicNanoseconds();
     for (usize index = owners.Size(); index-- != 0;) {
+        const uint64 opStarted = latency ? platform::MonotonicNanoseconds() : 0;
         auto borrowed = registry.Resolve<BenchNode>(access, owners[index]);
         if (!borrowed) {
             return false;
@@ -942,12 +963,38 @@ bool MeasureEdgeWrites(ObjectRegistry& registry, uint32 count, Pick&& pick,
                                                     pointer.Value()->refs.Size() - 1)) {
             return false;
         }
+
+        if (latency && !removeTimes.TryPushBack(platform::MonotonicNanoseconds() - opStarted)) {
+            return false;
+        }
     }
 
     const uint64 removed = platform::MonotonicNanoseconds();
     printf("  edge writes x%u: add %.1f ns/op, remove %.1f ns/op\n", count,
            static_cast<double>(added - started) / count,
            static_cast<double>(removed - added) / count);
+    if (latency) {
+        auto print = [&](const char* label, Array<uint64>& times) noexcept {
+            times.Sort();
+            const usize size = times.Size();
+            auto at = [&](usize permille) noexcept {
+                const usize index = size * permille / 1000;
+                return static_cast<double>(times[index < size ? index : size - 1]);
+            };
+            // 가장 느린 연산 열두 개다(기록이 찰 때의 적용이 여기 든다).
+            printf("    %s ns: p50 %.0f p99 %.0f p99.9 %.0f max %.0f | slowest", label, at(500),
+                   at(990), at(999), static_cast<double>(times[size - 1]));
+            constexpr usize Slowest = 12;
+            for (usize index = size > Slowest ? size - Slowest : 0; index < size; ++index) {
+                printf(" %llu", static_cast<unsigned long long>(times[index]));
+            }
+
+            printf("\n");
+        };
+        print("add", addTimes);
+        print("remove", removeTimes);
+    }
+
     return true;
 }
 
@@ -1047,7 +1094,8 @@ int RunPackageScenario(uint32 crossPercent, bool clusters, const Options& option
             PrintMemory(memory, all.Size(), stats);
             if (options.packageProfileSet) {
                 for (uint32 round = 0; round < options.writeRounds; ++round) {
-                    if (!MeasureEdgeWrites(registry, ProfileWrites, pick, memory)) {
+                    if (!MeasureEdgeWrites(registry, ProfileWrites, pick, memory,
+                                           options.writeLatency)) {
                         return 5;
                     }
                 }
@@ -1162,8 +1210,8 @@ constexpr uint32 OutsideObjects = 200000;
 // clusters가 참이면 Level마다 클러스터를 지정한다(World와 같은 방식).
 int RunWorldScenario(bool clusters, const Options& options) noexcept {
     printf("\n== world graph: %u levels x %u actors x (actor + 2 components), outside %u, "
-           "clusters %s ==\n",
-           Levels, ActorsPerLevel, OutsideObjects, clusters ? "on" : "off");
+           "cross-level members %u%%, clusters %s ==\n",
+           Levels, ActorsPerLevel, OutsideObjects, options.worldBoundary, clusters ? "on" : "off");
     fflush(stdout);
     BenchAllocator memory;
     int status = 0;
@@ -1250,6 +1298,22 @@ int RunWorldScenario(bool clusters, const Options& options) noexcept {
                 if (!AddEdge(registry, actors[index],
                              actors[level * ActorsPerLevel + rng.Below(ActorsPerLevel)])) {
                     return 3;
+                }
+            }
+
+            // 경계 소속(--world-boundary): 소속의 worldBoundary%가 다른 Level의 Actor를 가리킨다.
+            if (options.worldBoundary != 0 && Levels > 1) {
+                for (usize index = 0; index < members.Size(); ++index) {
+                    if (rng.Below(100) >= options.worldBoundary) {
+                        continue;
+                    }
+
+                    const uint32 level = static_cast<uint32>(index / (ActorsPerLevel * 3));
+                    const uint32 other = (level + 1 + rng.Below(Levels - 1)) % Levels;
+                    if (!AddEdge(registry, members[index],
+                                 actors[other * ActorsPerLevel + rng.Below(ActorsPerLevel)])) {
+                        return 3;
+                    }
                 }
             }
 
@@ -1736,6 +1800,8 @@ bool Parse(int argc, char** argv, Options& options) noexcept {
             options.countWork = true;
         } else if (platform::CStringEquals(argv[index], "--mark-only")) {
             options.markOnly = true;
+        } else if (platform::CStringEquals(argv[index], "--write-latency")) {
+            options.writeLatency = true;
         } else if (platform::CStringEquals(argv[index], "--soak-workers")) {
             options.soakWorkers = true;
         } else if (platform::CStringEquals(argv[index], "--soak-time-budget")) {
@@ -1773,6 +1839,10 @@ bool Parse(int argc, char** argv, Options& options) noexcept {
         } else if (platform::CStringEquals(argv[index], "--package-profile")) {
             options.packageProfile = static_cast<uint32>(value > 100 ? 100 : value);
             options.packageProfileSet = true;
+            ++index;
+        } else if (platform::CStringEquals(argv[index], "--world-boundary")) {
+            options.worldBoundary = static_cast<uint32>(value > 100 ? 100 : value);
+            options.worldBoundarySet = true;
             ++index;
         } else if (platform::CStringEquals(argv[index], "--cluster-soak")) {
             options.clusterSoakTicks = value;
@@ -1816,6 +1886,16 @@ int Run(const Options& options) noexcept {
 
     if (options.clusters) {
         return RunClusterScenarios(options);
+    }
+
+    if (options.worldBoundarySet) {
+        for (uint32 on = 0; on < 2; ++on) {
+            if (const int status = RunWorldScenario(on == 0, options); status != 0) {
+                return status;
+            }
+        }
+
+        return 0;
     }
 
     if (options.packageProfileSet) {
