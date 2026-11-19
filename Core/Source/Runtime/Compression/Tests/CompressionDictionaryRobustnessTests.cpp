@@ -20,6 +20,7 @@
 // 사전과 무관하게 여러 reader에 쓰이는 동안 해제된 사전을 가리키지 않는지, 여러 스레드가 한 사전을
 // 함께 쓰는지, 실패 분류와 누수를 본다.
 namespace rocks::test {
+namespace compression_dictionary_robustness_tests_file {
 
 using namespace dictionary_test;
 
@@ -685,5 +686,6 @@ TEST(CompressionDictionary_FrameIdOversizedWindow) {
     static constexpr uint8 Widest[] = {0x28, 0xB5, 0x2F, 0xFD, 0x00, 0xA8};
     CHECK(TryGetZstdFrameDictionaryId(Bytes(Widest)).Value() == 0);
 }
+} // namespace compression_dictionary_robustness_tests_file
 
 } // namespace rocks::test

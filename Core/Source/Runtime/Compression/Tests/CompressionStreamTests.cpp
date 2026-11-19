@@ -10,6 +10,8 @@
 #include <stdio.h>
 
 namespace rocks::test {
+namespace compression_stream_tests_file {
+
 namespace {
 
 using namespace compression;
@@ -988,5 +990,6 @@ TEST(CompressionStream_ZstdUltraLevelsRoundTrip) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace compression_stream_tests_file
 
 } // namespace rocks::test

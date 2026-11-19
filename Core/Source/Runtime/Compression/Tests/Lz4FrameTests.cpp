@@ -42,6 +42,8 @@
 // - Lying*·HugeDeclared: frame의 원본 크기 필드(6–13 byte)를 바꾸고 헤더 checksum(14 byte) =
 //   (XXH32(frame + 4, 10, 0) >> 8) & 0xFF로 다시 맞췄다.
 namespace rocks::test {
+namespace lz4_frame_tests_file {
+
 namespace {
 
 using namespace compression;
@@ -1860,5 +1862,6 @@ TEST(Lz4Frame_StreamWindowOutcomeAndHandleContracts) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace lz4_frame_tests_file
 
 } // namespace rocks::test
