@@ -142,6 +142,8 @@ Watcher(const CVar<T>&) -> Watcher<T>;
 //
 // 수명: 쓰기가 실패했으면(Status) 소멸 때 할 일이 없다. 스레드: 만들 때 이 스레드에 묶인 문맥에
 // 쓴다.
+class CVarGroup;
+
 template <class T>
 class ScopedOverride {
 public:
@@ -151,6 +153,23 @@ public:
         auto written =
             detail::BeginScopedOverride(detail::HandleAccess::Definition(handle),
                                         detail::ScalarOfArg<T>(value), tag, where, removal_);
+        error_ = written ? ErrorCode::None : written.Error();
+    }
+
+    // 프리셋 묶음의 등급을 범위 임시 변경한다(6.3절 — 묶음 변수는 int32 등급이다, CVR3). 그 동안
+    // 묶음의 유효 등급이 바뀌고 다음 Sync가 그 등급을 펼친다. 정의되지 않은 등급은 InvalidArgument
+    // (이유 UndefinedLevel)다.
+    //
+    // 사용 예:
+    //   cvar::ScopedOverride low{ShadowQuality, 1};
+    template <class Group>
+        requires(IsSameV<T, int32> && IsSameV<Group, CVarGroup>)
+    ScopedOverride(const Group& group, int32 level,
+                   SourceLocation where = SourceLocation::Current()) noexcept {
+        const StringView tag = detail::MakeScopedTag(tag_);
+        auto written =
+            detail::BeginScopedOverride(detail::HandleAccess::Definition(group),
+                                        detail::ScalarOf<int32>(level), tag, where, removal_);
         error_ = written ? ErrorCode::None : written.Error();
     }
 
@@ -186,5 +205,8 @@ ScopedOverride(const CVar<T>&, V) -> ScopedOverride<T>;
 
 template <class T, class V>
 ScopedOverride(const BootCVar<T>&, V) -> ScopedOverride<T>;
+
+template <class V>
+ScopedOverride(const CVarGroup&, V) -> ScopedOverride<int32>;
 
 } // namespace rocks::cvar

@@ -52,6 +52,21 @@ inline bool MemoryEquals(const void* left, const void* right, usize bytes) noexc
     return MemoryCompare(left, right, bytes) == 0;
 }
 
+// ---- 캐시 힌트 ----
+
+// address를 담은 cache line을 읽기용으로 가까운 캐시에 미리 올리도록 요청한다(UE
+// FPlatformMisc::Prefetch 대응). 힌트일 뿐이라 결과에 영향이 없고 잘못된 주소·null도 오류가 나지
+// 않는다(역참조하지 않는다). 다음 몇 개 항목의 주소를 미리 아는 순회(GC marker의 작업 큐 등)에서
+// 미스 지연을 겹치게 할 때 쓴다. 측정 없이 넣지 않는다.
+//
+// 사용 예:
+//   if (cursor + 8 < size) {
+//       platform::PrefetchRead(items[cursor + 8]);
+//   }
+inline void PrefetchRead(const void* address) noexcept {
+    __builtin_prefetch(address, 0, 3);
+}
+
 // ---- 객체 표현 ----
 
 // value의 byte 표현을 To로 다시 읽는다(표준 라이브러리 bit_cast 대응, constexpr). 크기가 같고 둘 다

@@ -37,7 +37,7 @@ Unreal Core의 개별 기능에 대해 Rocks에서도 가능한지 묻는다면 
 
 예측 가능한 이름과 동작이 드러나는 최소 절차를 우선한다. 겉모양을 위한 추상화, 무분별한 설계 패턴과 타입 분류 접두사를 추가하지 않는다. 내부 Registry·scope를 매번 조합하는 상용구는 기본 경로에서 최소화하되 안전성 검사와 오류 원인은 숨기지 않는다. API는 사용자가 해결할 작업을 기준으로 설계한다. 대표 사용 예제에서 내부 Registry·scope·식별자 조립이 반복되면 기본 경로의 책임 배치를 재검토한다. 타입·상태·생명주기·컨테이너·할당기 조회 및 변경은 일관된 이름과 최소 단계로 제공하고, 정적 선언 정보와 객체의 동적 등록 정보를 혼동하지 않도록 구분한다. 코드 주석은 호출법, 소유권, 실패와 사용 시 주의사항을 중심으로 작성한다.
 
-실행 문맥을 자동으로 알아낼 수 없는 호출에서는 World를 추정하지 않는다. 다중 World·PIE와 독립 Registry를 지원하고, 객체는 유효한 Borrow를 유지하며 메타데이터는 Registry·모듈 수명을 보호하는 lease를 사용한다. 편의 API는 기존 수명·스레드·문맥 검증을 우회하지 않는다. 복구 가능한 오류와 불변식 위반을 구분하며, `Result<bool>`의 성공 여부를 실제 상태처럼 해석할 수 있는 API는 사용하지 않는다. 제시한 편의 명칭은 컴파일·실행 테스트 전까지 구현 완료를 뜻하지 않는다.
+실행 문맥을 자동으로 알아낼 수 없는 호출에서는 World를 추정하지 않는다. 다중 World·Tryout과 독립 Registry를 지원하고, 객체는 유효한 Borrow를 유지하며 메타데이터는 Registry·모듈 수명을 보호하는 lease를 사용한다. 편의 API는 기존 수명·스레드·문맥 검증을 우회하지 않는다. 복구 가능한 오류와 불변식 위반을 구분하며, `Result<bool>`의 성공 여부를 실제 상태처럼 해석할 수 있는 API는 사용하지 않는다. 제시한 편의 명칭은 컴파일·실행 테스트 전까지 구현 완료를 뜻하지 않는다.
 
 ### 1.2 구현 수준의 구분
 
@@ -369,7 +369,7 @@ MX01–08은 API/의존·수치 예외·규약 왕복·큰 좌표·ISA/플랫폼
 
 ### 7.5 Core 시간·가변/고정 step
 
-Core/Time의 ClockService.h/.cpp와 StepPlanner.h/.cpp를 정확히 4개 계획 파일로 추가한다. Platform clock을 주입하고 Monotonic/Frame/Game/Fixed/UI clock을 명시 ID·epoch로 구분한다. monotonic timeout·IO·trace·UI pump는 game pause/dilation과 독립이다. World·PIE·physics 연결은 상위 모듈이며 Core가 해당 header를 include하지 않는다.
+Core/Time의 ClockService.h/.cpp와 StepPlanner.h/.cpp를 정확히 4개 계획 파일로 추가한다. Platform clock을 주입하고 Monotonic/Frame/Game/Fixed/UI clock을 명시 ID·epoch로 구분한다. monotonic timeout·IO·trace·UI pump는 game pause/dilation과 독립이다. World·Tryout·physics 연결은 상위 모듈이며 Core가 해당 header를 include하지 않는다.
 
 가변 Update는 frame당 1회 delta를, 고정 Update는 scaled accumulator에 realDelta×scale을 더한 뒤 고정 h를 소비한 StepPlan을 받는다. time dilation은 h를 매번 변경하지 않고 step 실행 빈도에 적용한다. scale은 finite·0 이상, 0은 pause다. 음수는 역재생이 아닌 오류이며 seek/replay는 별도 경로다. scale을 delta와 accumulator에 중복 적용하지 않는다. fixed/variable 양쪽 등록은 명시 선택이고 같은 동작의 중복 실행을 방지한다.
 
@@ -466,7 +466,7 @@ RegisterObjectType은 TypeSchema와 중첩 field/name/attribute 배열·문자�
 
 클래스를 데이터로 선택·보관하고 인스턴스를 만들 수 있는 런타임 메타클래스는 필수 후속 범위다. Core 선행 설계에서는 `TypeSchema`의 불변 선언 데이터, Registry별 등록 레코드와 lease, 영속 `TypeId`, ABI/module revision을 구분한다. 타입 제한 클래스 참조, 안전한 인스턴스 생성, 클래스 기본값·서브오브젝트와 반영 필드·함수는 상위 기능의 요구를 충족하도록 확장한다. 구체 이름 및 공개 API는 생성기·World 통합과 교차 검증 후 확정한다.
 
-등록된 `TypeId`에 대한 `ObjectRegistry::NewObject<Object>(access, typeId)`의 현재 낮은 수준 생성 경로와 편의 클래스 참조·클래스 기본값 기능을 구분한다. 생성 경로는 등록된 타입의 생성 가능성·context·트랜잭션을 검사해야 하며, 생성 실패는 부분 객체·등록 참조를 남기지 않는다. 직렬화된 타입 참조는 이름이나 원시 주소가 아니라 안정 식별자를 사용하고, 모듈 reload·PIE 종료 뒤의 오래된 revision은 명시적으로 거부한다. 상세 정책과 단계는 [런타임 클래스 메타데이터 설계](RuntimeClassMetadata.ko.md)를 따른다.
+등록된 `TypeId`에 대한 `ObjectRegistry::NewObject<Object>(access, typeId)`의 현재 낮은 수준 생성 경로와 편의 클래스 참조·클래스 기본값 기능을 구분한다. 생성 경로는 등록된 타입의 생성 가능성·context·트랜잭션을 검사해야 하며, 생성 실패는 부분 객체·등록 참조를 남기지 않는다. 직렬화된 타입 참조는 이름이나 원시 주소가 아니라 안정 식별자를 사용하고, 모듈 reload·Tryout 종료 뒤의 오래된 revision은 명시적으로 거부한다. 상세 정책과 단계는 [런타임 클래스 메타데이터 설계](RuntimeClassMetadata.ko.md)를 따른다.
 
 UI·에디터가 의존하는 리플렉션 확장(편집 메타데이터 어휘·함수·이벤트·속성 경로·변경 통지·동적 속성·텍스트 위치 변환·필드 형식 확장)은 [UI 툴킷 설계](UiToolkit.ko.md) §7의 CU1–CU9로 정의한다. 구현 시점은 항목별로 조정할 수 있으나 형식은 Foundation Gate 전에 Object·Archive 계약과 함께 확정한다. 필드 형식 확장(CU8)은 enum·구조체·배열 필드를 다루므로 9.3절의 초기 지원 범위와 함께 검토한다.
 
@@ -767,7 +767,7 @@ CF 항목은 이번 상세안의 검증 묶음이다. 전체 계획의 Core Gate
 
 #### API 사용성 검증
 
-CF02·CF06·CF10의 실사용 fixture는 클래스 정적 타입, 객체 실제 타입, 객체의 생성·파괴·상태, 컨테이너 및 할당기 기본 경로를 공개 API만으로 작성한다. 동일한 작업에서 내부 Registry나 문맥 설정이 반복되면 API 설계를 재검토한다. 정상 코드와 함께 생성 선언 누락·상속 오류, 다른 World·PIE·스레드, 만료된 객체, Registry 종료·모듈 해제, 생성기 오류와 `Result` 성공/상태 혼동을 검사한다.
+CF02·CF06·CF10의 실사용 fixture는 클래스 정적 타입, 객체 실제 타입, 객체의 생성·파괴·상태, 컨테이너 및 할당기 기본 경로를 공개 API만으로 작성한다. 동일한 작업에서 내부 Registry나 문맥 설정이 반복되면 API 설계를 재검토한다. 정상 코드와 함께 생성 선언 누락·상속 오류, 다른 World·Tryout·스레드, 만료된 객체, Registry 종료·모듈 해제, 생성기 오류와 `Result` 성공/상태 혼동을 검사한다.
 
 각 fixture에는 실제 컴파일·실행 및 실패 원인에 대한 독립 oracle을 둔다. 주석·문서의 사용법과 실제 선언, 수명·오류 규약의 일치 여부를 담당 외 검토자가 교차 확인한다. 구현되지 않은 편의 API나 미실행 플랫폼 테스트는 완료로 표시하지 않는다.
 
@@ -819,7 +819,7 @@ C00/C06부터 TestClock·DeterministicExecutor·NFailAllocator·GoldenFixture를
 | OB03–04 | queue loss·partial trace·metadata unload·중간 capture baseline; allocator/임계 구간 재귀·대기 없음 |
 | OB05–06 | shutdown/hang/crash bounded flush·truncated 표시; headless/live/offline schema/clock·두 capture 비교 |
 
-NL04의 PIE/streaming·NL05의 GPU device loss와 GPU 관측은 26절의 상위 시스템 최초 Gate에서 실제 backend로 확장한다. CPU fake 통과로 그 항목을 완료 처리하지 않는다. PR은 작은 deterministic suite, 야간은 seed/fault/stress/sanitizer, release는 두 필수 OS와 지원 장치 matrix를 실행한다. flaky 재시도 통과로 원인을 숨기지 않으며 quarantine된 필수 검사는 미완료로 집계한다. 영향 suite 선택·병렬 실행으로 시간을 줄이되 오류 경로를 삭제하지 않는다.
+NL04의 Tryout/streaming·NL05의 GPU device loss와 GPU 관측은 26절의 상위 시스템 최초 Gate에서 실제 backend로 확장한다. CPU fake 통과로 그 항목을 완료 처리하지 않는다. PR은 작은 deterministic suite, 야간은 seed/fault/stress/sanitizer, release는 두 필수 OS와 지원 장치 matrix를 실행한다. flaky 재시도 통과로 원인을 숨기지 않으며 quarantine된 필수 검사는 미완료로 집계한다. 영향 suite 선택·병렬 실행으로 시간을 줄이되 오류 경로를 삭제하지 않는다.
 
 ## 17. 입력 시스템 경계와 확장 계약
 
@@ -933,7 +933,7 @@ InputTimestamp에는 정규화된 monotonic 값, source clock domain, quality(So
 
 문자열·touch 배열은 bounded payload block lease로 소유한다. SDK event pointer나 stack buffer를 저장하지 않는다. Input lane이 queue를 drain하여 state/action snapshot을 publish하고 소비자는 immutable frame/tick snapshot을 읽는다. snapshot 교체와 storage 재사용에는 reader epoch 또는 복사 소유권을 사용한다.
 
-Host가 routing admission 때 opaque InputRouteToken(routeId/generation)과 user/session epoch를 기록하고 focus 전환을 같은 route stream의 경계로 선형화한다. 아직 route를 정하지 않은 raw 수집 event에는 미지정 상태를 사용하며, 과거 event를 새 route에 재해석하지 않는다. 구 route의 key-up은 physical state 정리에만 사용할 수 있다. TextEvent에는 TextSessionId/generation과 composition/commit sequence를 추가하고 종료된 session의 늦은 commit을 거부한다. IT19는 같은 WindowEpoch의 text A/B 전환·PIE 재생성·지연 callback을 검사한다.
+Host가 routing admission 때 opaque InputRouteToken(routeId/generation)과 user/session epoch를 기록하고 focus 전환을 같은 route stream의 경계로 선형화한다. 아직 route를 정하지 않은 raw 수집 event에는 미지정 상태를 사용하며, 과거 event를 새 route에 재해석하지 않는다. 구 route의 key-up은 physical state 정리에만 사용할 수 있다. TextEvent에는 TextSessionId/generation과 composition/commit sequence를 추가하고 종료된 session의 늦은 commit을 거부한다. IT19는 같은 WindowEpoch의 text A/B 전환·Tryout 재생성·지연 callback을 검사한다.
 
 공유 물리 DeviceHub와 action 소비 scope를 분리한다. Host는 opaque InputConsumerScope를 session·route generation에 연결하고 종료 시 admission을 닫는다. InputCore에는 World/Widget 타입을 도입하지 않는다. AdvanceInput과 QueryAction/CopyActionEvents는 InputReadKey의 scope/generation·user·update domain·clock epoch·tick을 같은 history key로 사용한다. UIRealTime·gameplay fixed/frame·replay 영역의 같은 숫자 tick을 합치지 않는다. route 전환·재시작에는 새 scope generation 또는 clock epoch를 사용하고 기존 key를 재해석하지 않는다. 종료 scope에는 ScopeExpired, 보존 구간 밖에는 HistoryExpired를 반환하며 다른 scope의 최신 결과를 대체 반환하지 않는다. 종료 시 cancel batch의 소비·명시 폐기까지 기록한 뒤 scope를 회수하며, 지연 조회자가 소멸 scope의 terminal event를 받지 못하는 경우에도 expired 오류를 명시한다.
 
@@ -979,7 +979,7 @@ macOS는 AppKit window event의 keyboard/mouse와 GameController의 검증된 co
 
 텍스트를 key code→문자로 직접 변환하지 않는다. Windows text service는 PlatformWindow의 TSF adapter로 분리하고 composition start/update/end, commit, selection, caret rectangle을 계약으로 둔다. 한국어·일본어·중국어 조합, dead key, surrogate/emoji, 조합 취소를 검증한다. OS API의 UTF-16 위치와 엔진 UTF-8 byte 위치를 명시 변환하며 UI cursor는 grapheme 경계를 사용한다. grapheme·BiDi·shaping은 별도 text library adapter 책임이다. [D8](https://learn.microsoft.com/en-us/windows/win32/tsf/text-services-framework)
 
-macOS text service는 NSTextInputClient를 구현한 native view adapter로 composition/marked text·선택 범위·replacement·commit·caret rectangle을 연결한다. Windows TSF와 같은 TextSessionId/route generation·정확히 한 번 commit·취소 계약을 따르되 vendor API를 통합 enum으로 흉내 내지 않는다. UTF-16 range와 UTF-8 byte/grapheme 위치를 명시 변환한다. 한 route에는 text owner(UI 툴킷에서 focus를 가진 편집 widget) 하나만 두고, IME 조합 중 focus/PIE 교체·늦은 commit·dead key·한국어/일본어/중국어·emoji를 두 OS에서 실물 시험한다. [D15](https://developer.apple.com/documentation/appkit/nstextinputclient)
+macOS text service는 NSTextInputClient를 구현한 native view adapter로 composition/marked text·선택 범위·replacement·commit·caret rectangle을 연결한다. Windows TSF와 같은 TextSessionId/route generation·정확히 한 번 commit·취소 계약을 따르되 vendor API를 통합 enum으로 흉내 내지 않는다. UTF-16 range와 UTF-8 byte/grapheme 위치를 명시 변환한다. 한 route에는 text owner(UI 툴킷에서 focus를 가진 편집 widget) 하나만 두고, IME 조합 중 focus/Tryout 교체·늦은 commit·dead key·한국어/일본어/중국어·emoji를 두 OS에서 실물 시험한다. [D15](https://developer.apple.com/documentation/appkit/nstextinputclient)
 
 ### 19.3 마우스와 pointer
 
@@ -1103,7 +1103,7 @@ RebindSession은 대상 user/action, 허용 device class, axis threshold, modifi
 
 Platform system reserved 동작 → 활성 window/사용자 → text/IME와 modal UI → 일반 UI → native viewport → gameplay context 순으로 전달 자격을 판정한다. 실제 소비 우선순위는 route policy로 설정하되 하나의 event를 UI와 gameplay 양쪽에서 독립 소비하지 않게 한다. UI와 gameplay 모두 필요한 action은 Shared로 명시한다.
 
-에디터와 게임 UI는 같은 UI 툴킷의 focus 하나로 text focus를 관리한다. TSF·NSTextInputClient의 composition/commit은 focus를 가진 텍스트 편집 Element에 한 번만 전달한다. viewport(viewport Element)와 UI Element의 focus는 같은 사용자 focus 경로(UI 툴킷 설계 3.9절)의 token으로 Host가 관리하며, focus 요청에는 WindowEpoch·PIE session·LocalPlayer를 포함한다. viewport 첫 클릭은 기본적으로 focus 획득만 수행하고 gameplay 전달 여부는 명시 옵션이다.
+에디터와 게임 UI는 같은 UI 툴킷의 focus 하나로 text focus를 관리한다. TSF·NSTextInputClient의 composition/commit은 focus를 가진 텍스트 편집 Element에 한 번만 전달한다. viewport(viewport Element)와 UI Element의 focus는 같은 사용자 focus 경로(UI 툴킷 설계 3.9절)의 token으로 Host가 관리하며, focus 요청에는 WindowEpoch·Tryout session·LocalPlayer를 포함한다. viewport 첫 클릭은 기본적으로 focus 획득만 수행하고 gameplay 전달 여부는 명시 옵션이다.
 
 modal을 열면 기존 gameplay action을 취소한다. 닫은 후에는 require-release 규칙을 적용한다. split-screen의 UI focus는 LocalUser별로 관리하며 OS의 foreground window 상태와 분리한다. gamepad navigation은 focusable tree·direction policy·repeat 설정을 사용하고 pointer 좌표가 없다는 이유로 임의 mouse 위치를 생성하지 않는다.
 
@@ -1166,7 +1166,7 @@ I00의 계약 검토와 schema 초안은 R1 중 병행 가능하다. InputCore�
 |---|---|---|
 | IT01 | Synthetic backend 두 종류 등록·해제·재등록 | InputCore 수정 없이 등록, late callback 안전, lease 0 |
 | IT02 | 한 frame 안 down/up/down; timestamp 동일·역순 수신 | 결정된 순서와 edge 수 보존, 최종 상태 일치 |
-| IT03 | 30/60/144 FPS·catch-up·동일 user/tick의 UI/PIE A/B scope | 동일 command, delta 중복 0, scope/clock 혼합 0 또는 명시 expired |
+| IT03 | 30/60/144 FPS·catch-up·동일 user/tick의 UI/Tryout A/B scope | 동일 command, delta 중복 0, scope/clock 혼합 0 또는 명시 expired |
 | IT04 | event queue/payload 강제 포화 | InputGap 기록, Cancelled/neutral/resync, stuck key 0 |
 | IT05 | 장치 slot 재사용·USB 제거·재연결 | stale generation 거부, require-release, 사용자 오배정 0 |
 | IT06 | Win Alt-Tab/Mac 앱 전환·focus·modal·suspend/resume | gameplay 취소, 복귀 순간 발사/이동 edge 0 |
@@ -1182,7 +1182,7 @@ I00의 계약 검토와 schema 초안은 R1 중 병행 가능하다. InputCore�
 | IT16 | profile 교체 중 held key·schema migration 실패 | tick 경계 원자 적용, require-release, rollback |
 | IT17 | haptic queue full·owner destroy·disconnect·stop | stop 누락 0, finite TTL, ticket terminal 1회 |
 | IT18 | raw/semantic 두 provider의 같은 source | 선언한 owner만 전달, Steam action 이중 평가 0 |
-| IT19 | web/native·PIE A pause/B 진행·재시작·hotplug·지연 query | 중복/타 scope 반환 0, 구 epoch 무효, terminal cancel 소비·폐기 추적 |
+| IT19 | web/native·Tryout A pause/B 진행·재시작·hotplug·지연 query | 중복/타 scope 반환 0, 구 epoch 무효, terminal cancel 소비·폐기 추적 |
 | IT20 | 컷씬 중첩·skip·abort·seek·owner destroy | 재생 유지 seek는 token 유지, 종료 시 반환·skip context 정합 |
 | IT21 | record→replay·seek·잘못된 길이/버전 | command hash 일치 또는 명시 decode 오류 |
 | IT22 | server CPU-only·prediction resim·fake output | SDK/GPU 링크 없음, haptic/UI side effect 중복 0 |
@@ -1198,7 +1198,7 @@ callback 수신→Input lane drain→action publish→simulation 소비의 p50/p
 초기 성능 예산은 4 local user·16 device·1,000 compiled binding에서 action 평가 0.2 ms p95, InputCore heap의 frame 중 allocation 0회를 탐색 목표로 둔다. 기준 CPU·build·tick·profile을 고정한 뒤 실측하여 확정한다. 목표 미달이면 profiler 기반으로 최적화하며 입력 손실이나 critical section 생략으로 개선하지 않는다.
 
 
-I13은 standalone composition/route-token 시험과 실제 Studio/PIE 시험을 분리한다. standalone 성공 시 실제 IT19는 NOT RUN으로 남길 수 있으며 I13 전체 완료를 뜻하지 않는다. 실제 subset에는 양OS Studio(UI 툴킷)·viewport·UI/text focus·PIE fixture가 필요하다. I15/I16은 이 외부 조건에 World/VM/cutscene 조건을 누적한다. Foundation/I0의 시작을 상위 Studio 완료에 의존시키지 않는다.
+I13은 standalone composition/route-token 시험과 실제 Studio/Tryout 시험을 분리한다. standalone 성공 시 실제 IT19는 NOT RUN으로 남길 수 있으며 I13 전체 완료를 뜻하지 않는다. 실제 subset에는 양OS Studio(UI 툴킷)·viewport·UI/text focus·Tryout fixture가 필요하다. I15/I16은 이 외부 조건에 World/VM/cutscene 조건을 누적한다. Foundation/I0의 시작을 상위 Studio 완료에 의존시키지 않는다.
 
 
 ### 24.4 입력 작업별 선행 관계
@@ -1293,13 +1293,13 @@ Core 단계에서는 stable Guid·versioned schema·Archive·Task 취소/termina
 | 전체 요구 | Core/Input의 선행 계약 | 필수 후속·검증 시점 |
 |---|---|---|
 | 제작 템플릿·사용자 카탈로그 | C00 최소 scaffold·stable ID·transaction·무변경 출력 유지 | M3 project/module/test·M4 asset/UI/input·M5 사용자 저장/Linked 갱신; TT02–08 |
-| PIE Play/Pause/Resume/SingleStep/Stop | context epoch·clone/remap·Core clock·input route·cancel/lease·누수 ledger | M3 기본·M4 정식, 2개 이상 session 격리·1,000회 종료·PI01–06/NL04 |
-| variable/fixed tick·time dilation·병렬 tick | C15 ClockService/StepPlanner·C17 DAG/owner commit | M3/M4 World/physics/PIE 연결, TK01–06 |
+| Tryout Play/Pause/Resume/SingleStep/Stop | context epoch·clone/remap·Core clock·input route·cancel/lease·누수 ledger | M3 기본·M4 정식, 2개 이상 session 격리·1,000회 종료·PI01–06/NL04 |
+| variable/fixed tick·time dilation·병렬 tick | C15 ClockService/StepPlanner·C17 DAG/owner commit | M3/M4 World/physics/Tryout 연결, TK01–06 |
 | 필수 로그·프로파일러·상태 조회 | C06 최소·R1 ledger·C18 analyzer/viewer·C26 report | Rocks Lens 편집기 통합과 GPU/network/audio/animation별 최초 Gate; OB/NL |
 | material·lightmap bake·probe 조명 | schema/Task/IO·math adapter·revision·cancel/publish | material M3/M4, lightmap/probe M4 이후; CPU 기준/실제 renderer 검증 |
 | texture streaming·기본 콘텐츠 | allocation budget·lease·IO/decode·stable ID | 최소 mip residency/손상·취소, built-in lifetime/baseline을 실제 asset/renderer Gate에서 검증 |
 | 5개 graphics API·Deferred/Forward·upscale·고급 post | immutable snapshot·backend completion·capability·시간 history ID | D3D11/D3D12/Vulkan/OpenGL/Metal 각각 지원표·실장비 conformance; 기능별 일정은 전체 계획 |
-| UI 툴킷 Studio·viewport·인게임 UI 편집·컷씬 | Win/Mac focus/IME·transaction·schema·CU1–CU9·clock·PIE scope | 단일 UI 툴킷의 designer/runtime·UE 5.8 근거 기준값 UV1–UV9·sequence authoring/capture 필수; 자체 언어 이벤트 |
+| UI 툴킷 Studio·viewport·인게임 UI 편집·컷씬 | Win/Mac focus/IME·transaction·schema·CU1–CU9·clock·Tryout scope | 단일 UI 툴킷의 designer/runtime·UE 5.8 근거 기준값 UV1–UV9·sequence authoring/capture 필수; 자체 언어 이벤트 |
 | Build/Cook/에셋 너겟·분산/반복 최적화 | C00 manifest·C20 내용 동일 유지·C31 action/cache 계약 | Rocks Build·분산 executor·로컬 fallback·compile/link/cook 측정; headless 필수 |
 | 전체 gameplay/AI/VFX/network/audio/nav/physics | Object/Schema/Task/context·ownership·테스트 하네스 | 각 subsystem 최초 구현부터 unit/contract/fault/concurrency·관측·누수 Gate |
 

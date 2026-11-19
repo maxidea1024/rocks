@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ObjectRegistryInternal.h"
+
 #include <Object/ObjectRegistry.h>
 
 namespace rocks::detail {
@@ -16,6 +18,19 @@ struct ObjectRegistryAccess {
     static RegistryWorkCounters WorkCounters(const ObjectRegistry& registry) noexcept {
         platform::LockGuard lock(registry.gate_);
         return {registry.freeSlotProbes_, registry.reclaimProbes_};
+    }
+
+    // 소유자 범위 검사가 hot의 object와 타입 기반 위치(TypeLease::ObjectOffset)로 유도하는 저장소
+    // 시작이다. handle은 생성된 객체여야 한다.
+    static uptr DerivedStorageStart(const ObjectRegistry& registry, ObjectHandle handle) noexcept {
+        platform::LockGuard lock(registry.gate_);
+        return ObjectRegistry::StorageStartOf(*registry.FindSlot(handle));
+    }
+
+    // 생성이 cold에 기록한 실제 저장소 시작이다.
+    static uptr RecordedStorageStart(const ObjectRegistry& registry, ObjectHandle handle) noexcept {
+        platform::LockGuard lock(registry.gate_);
+        return reinterpret_cast<uptr>(registry.ColdOf(*registry.FindSlot(handle)).storage);
     }
 };
 

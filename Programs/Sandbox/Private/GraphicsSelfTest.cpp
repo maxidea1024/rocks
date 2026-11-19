@@ -10,6 +10,8 @@
 #include "TextureSelfTest.h"
 #include "MsaaSelfTest.h"
 #include "SliceAttachmentSelfTest.h"
+#include "StorageTargetSelfTest.h"
+#include "ViewDimensionSelfTest.h"
 #include "TextureViewSelfTest.h"
 #include "VertexSelfTest.h"
 
@@ -696,6 +698,10 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     failures += RunMsaaChecks(name, device, result.triangle.GetAllocator());
     // slice·mip attachment(텍스처 GX2 C부): mip 사슬·배열 층·cube 면·3D 면·깊이 층·resolve slice.
     failures += RunSliceAttachmentChecks(name, device, result.triangle.GetAllocator());
+    // 용도 비트 묶음·cube Storage(텍스처 GX2 나머지 A부): 렌더 타깃 + UAV, cube 면 쓰기 view.
+    failures += RunStorageTargetChecks(name, device, result.triangle.GetAllocator());
+    // view 차원 바꾸기·OpenGL ES 범위 view(텍스처 GX2 나머지 B부).
+    failures += RunViewDimensionChecks(name, device, result.triangle.GetAllocator());
     // 장치 능력(GX1): 한도·기능 로그, MSAA 표본 수와 Multisample 능력 일관성.
     failures += RunCapsChecks(name, device);
     // 버퍼 용도·view(GX2): 생성·업로드·readback, typed view 능력 ⇔ 생성, VS·PS의 view 읽기.

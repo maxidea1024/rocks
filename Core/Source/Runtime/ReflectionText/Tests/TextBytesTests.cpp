@@ -272,11 +272,13 @@ private:
 } // namespace
 
 // 원소 수 한도는 풀기·할당 전에 길이와 패딩으로 본다(CV4 리뷰 5): MaxElements 8인 small에 300,000자
-// Base64(225,000 byte)를 주면, 대상 allocator가 64 KiB 넘는 할당을 거부해도 OutOfMemory가 아니라
+// Base64(225,000 byte)를 주면, 대상 allocator가 128 KiB 넘는 할당을 거부해도 OutOfMemory가 아니라
 // OutOfRange 진단이다. 길이가 4의 배수가 아닌 입력은 할당 없이 InvalidValue다.
 TEST(TextBytes_LengthIsCheckedBeforeDecoding) {
     SystemAllocator system;
-    CappedAllocator capped(system, 64 * 1024);
+    // 한도는 풀 결과(225,000 byte)보다 작고 Registry의 가장 큰 할당(GC 페이지 약 68 KiB — GC 설계
+    // 6절)보다 크다.
+    CappedAllocator capped(system, 128 * 1024);
     TypeRegistry types(system);
     ModuleRegistration registration(types, system);
     REQUIRE(generated::ReflectionTestFixtures::RegisterModuleTypes(registration));

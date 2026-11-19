@@ -279,7 +279,7 @@ UE `FSlateApplication`의 라우팅 정책 4종(직접·최하위·tunnel(루트
 
 - **창(`ui::Window`, UE `SWindow`, `SlateCore/Public/Widgets/SWindow.h`):** 창 종류(일반·메뉴·tooltip·알림·커서 장식), OS 테두리 사용 또는 자체 제목 표시줄, 최상위, 처음 표시 시 focus, 종횡비 유지. 창마다 native 창과 hit grid를 가진다. 가상 창(`VirtualWindow`, UE `SVirtualWindow`)은 render target에 그리는 창이며 OS capture 경로를 건너뛴다.
 - **DPI:** 모니터별 DPI(Windows는 per-monitor aware, `GetDpiForMonitor` 유효 DPI, `WM_DPICHANGED`)와 앱 전체 배율을 곱한다(`ApplicationCore/Private/Windows/WindowsPlatformApplicationMisc.cpp:306-410`). 초기 창 크기·위치를 DPI로 조정한다.
-- **viewport Element(`ViewportElement` + `ViewportSource`, UE `SViewport` + `ISlateViewport`):** 3D 화면을 Element 트리 안에 배치한다. 에디터와 PIE는 별도 render target에 그린 뒤 viewport 그리기 요소로 합성하고, standalone game은 창 back buffer에 직접 그린다(UE `SViewport.cpp:165-169`, `SceneViewport.cpp:76`, `GameEngine.cpp:215-222`). UE 5.8의 그리기 범위 객체(`ISlateViewport::Paint`, 자식 그리기 후 소멸, `RenderingCommon.h:476-508`) 형태를 따른다. 입력은 viewport Element가 bubble 경로에서 받아 source에 전달한다.
+- **viewport Element(`ViewportElement` + `ViewportSource`, UE `SViewport` + `ISlateViewport`):** 3D 화면을 Element 트리 안에 배치한다. 에디터와 Tryout은 별도 render target에 그린 뒤 viewport 그리기 요소로 합성하고, standalone game은 창 back buffer에 직접 그린다(UE `SViewport.cpp:165-169`, `SceneViewport.cpp:76`, `GameEngine.cpp:215-222`). UE 5.8의 그리기 범위 객체(`ISlateViewport::Paint`, 자식 그리기 후 소멸, `RenderingCommon.h:476-508`) 형태를 따른다. 입력은 viewport Element가 bubble 경로에서 받아 source에 전달한다.
 - **에디터 배치:** 독 창은 OS 창, 게임의 팝업은 현재 창 overlay가 기본이다(UD4).
 
 ### 3.12 텍스트
@@ -451,7 +451,7 @@ UE `UWidgetComponent`는 화면 공간(매 프레임 투영한 game layer)과 �
 | 메뉴 | `MenuRegistry` · 메뉴 · section · 항목 | `UToolMenus`(5.8 현행, `Developer/ToolMenus/Public/ToolMenus.h:100-531`). `FMenuBuilder`/`FExtender`는 UToolMenus가 내부에서 사용하며 공개 런타임 API로도 남음 | EditorFramework 소속. 점으로 구분한 계층 이름, 부모 메뉴 상속, 확장 지점, 동적 section·항목, 삽입 위치, 소유자 단위 해제, 명령 목록·문맥 객체 전달. 에디터 밖 도구는 UiFramework의 메뉴 구성 Element와 `CommandList`로 메뉴를 만든다 |
 | Inspector | `Inspector` · 클래스별 배치 사용자 정의 · 형식별 편집기 · `FieldHandle` | `IDetailsView` · `IDetailCustomization` · `IPropertyTypeCustomization` · `IPropertyHandle`(`Editor/PropertyEditor/Public`) | 다중 객체 편집(다른 값 표시), 범주·고급 표시, 행 생성기(헤드리스), 단일 속성 view, 구조체 view. 편집 메타데이터(CU1)를 소비 |
 | 변경·Undo | Transaction · 변경 전후 통지 · 변경 종류 | `FScopedTransaction` · `PreEditChange`·`PostEditChangeChainProperty` · `EPropertyChangeType`(`CoreUObject/Public/UObject/UnrealType.h:6944-6975`) | 변경 종류는 비트 플래그다: 미지정·배열 추가·제거·비우기·값 설정·복제·대화형(drag 중)·이름 변경 후 재지정·편집 가능 전환·배열 이동·기본값 복원. slider drag는 시작 시 Transaction 시작 → drag 중 대화형·비기록 설정 → 끝에 값 설정 후 Transaction 종료로 Undo 1개(`SPropertyEditorNumeric.h:492-596`) |
-| viewport | `EditorViewport` · viewport client | `SEditorViewport` · `FEditorViewportClient` · `FSceneViewport` | 에디터 viewport는 별도 render target 합성, PIE는 viewport 교체 또는 새 창. 마우스 capture 모드(없음·영구·누름 중 등)와 capture 해제 명령(UE 기본 Shift+F1) |
+| viewport | `EditorViewport` · viewport client | `SEditorViewport` · `FEditorViewportClient` · `FSceneViewport` | 에디터 viewport는 별도 render target 합성, Tryout은 viewport 교체 또는 새 창. 마우스 capture 모드(없음·영구·누름 중 등)와 capture 해제 명령(UE 기본 Shift+F1) |
 | 에디터 스타일 | 에디터 `StyleSet` · 테마 · 앱 배율 | `FStarshipEditorStyle` · `USlateThemeManager` · `UEditorStyleSettings::ApplicationScale` | 4.2절 기본값 |
 | 자산 선택 | asset picker · path picker | `IContentBrowserSingleton::CreateAssetPicker` | 필터·선택 모드 |
 | 그래프 편집 | `GraphView` · node·pin 시각 등록 | `SGraphEditor` · `SGraphPanel` · `SGraphNode` · `UEdGraph`/`UEdGraphSchema` | 머티리얼(전체 계획 14.5절)·애니메이션 그래프의 공통 Element. 그래프 데이터와 schema는 각 도구 소유 |
@@ -638,7 +638,7 @@ Sparks는 엔진 기반 타입의 재정의 가능 함수를 `override fn`으로
 | `FDataTableRowHandle`(테이블 + 행 이름) | Rocks `Row<T>`는 행 이름만 저장한다(RX 1417행). 같은 행 타입의 테이블이 여럿일 때 테이블을 지정하는 형식을 정해야 한다 | DataTable 설계(전체 계획 2101행 부근) |
 | C++ 지역화 리터럴 `LOCTEXT`와 소스 수집 | `Text`·`Catalog`·Sparks `Loc()`는 있다. C++ 리터럴 매크로와 수집 도구는 없다 | Localization 단계 |
 | `AllowPrivateAccess`(69회) | 두지 않는다. Rocks의 스크립트·편집 노출은 지정자(`Edit`·`ScriptWritable` 등)로 정하고, C++ 접근 수준과 무관하다(생성 코드가 private 멤버에 닿는다) | — |
-| `MinimalAPI`·`*_API` export 매크로 | 정적 링크라 지금은 필요 없다. Editor 모듈식 링크를 고르면 필요하다 | [빌드 타깃](BuildTargets.ko.md) BD17 |
+| `MinimalAPI`·`*_API` export 매크로 | Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17). 모듈 API 매크로는 `ROCKS_<MODULE>_API`이고, 리플렉션 타입 정보는 생성 코드가 항상 export하므로 `MinimalAPI` 지정자는 두지 않는다 | [빌드 타깃](BuildTargets.ko.md) 3.8절 BD27·BD28 |
 
 **선행·단계.** (a)–(e)는 CU1과 같이 UT0에서 구현한다. (a)의 편집기 쓰기 경로 거부·저장 검증·원형 적용 제외는 Prefab 구현 단계(PF)와 Inspector(UT4)에서 넣는다. (b)·(c)의 함수 항목과 (f)는 CU2·CU9와 같이 넣는다.
 

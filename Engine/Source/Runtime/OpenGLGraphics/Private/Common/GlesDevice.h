@@ -145,6 +145,8 @@ struct TextureRecord {
     // 다른 텍스처의 GL 텍스처 객체를 공유하는 view다(CreateTextureView). 텍스처 객체는 원 기록이
     // 놓는다. 업로드·readback·그리기 대상이 될 수 없다.
     bool isView = false;
+    // 확장 texture view로 만든 자기 텍스처 이름을 가진 view다(Retire가 그 이름을 지운다).
+    bool ownsTexture = false;
     SlotHandle source;
     // 이 텍스처를 가리키는 살아 있는 view 수다. 0이 아니면 Retire는 기록을 남겨 두고
     // (retirePending) 마지막 view를 놓을 때 함께 놓는다(텍스처 객체 이름을 view보다 먼저 지우지
@@ -479,8 +481,8 @@ private:
     // 밖 storage block)이면 InvalidArgument다. GL introspection은 storage block의 readonly 여부를
     // 알려 주지 않으므로 그래픽 단계의 binding 0–3 storage block 쓰기는 거부하지 못한다(셰이더는
     // readonly로 선언해야 하고, 쿠킹 경로는 SPIR-V 리플렉션이 거른다).
-    // compute의 image2D·image2DArray·image3D(SetWritableTexture slot = image unit)는
-    // writeTextures에 더한다.
+    // compute의 image2D·image2DArray·image3D·imageCube·imageCubeArray(SetWritableTexture slot =
+    // image unit)는 writeTextures에 더한다.
     Result<void> ReflectBufferSlots(GLuint program, DrawBufferSlots& slots,
                                     DrawBufferSlots* writeSlots,
                                     uint32* writeTextures = nullptr) noexcept;
@@ -601,6 +603,9 @@ private:
     GLuint resolveFramebuffer_ = 0;
     // glPolygonOffsetClampEXT다(GL_EXT_polygon_offset_clamp가 없으면 null).
     void (*polygonOffsetClamp_)(GLfloat, GLfloat, GLfloat) = nullptr;
+    // glTextureViewOES·glTextureViewEXT다(GL_OES_texture_view·GL_EXT_texture_view가 없으면 null,
+    // RenderBase 4.4절 텍스처 GX2 나머지 B부). 있으면 읽기 view를 진짜 view 텍스처로 만든다.
+    void (*textureView_)(GLuint, GLenum, GLuint, GLenum, GLuint, GLuint, GLuint, GLuint) = nullptr;
     // 기록의 그리기별 상수 값이다(기록 시작 때 0, 그리기·dispatch 때 program에 올린다).
     alignas(16) uint8 constants_[MaxDrawConstantBytes] = {};
     uint64 ignoredDraws_ = 0;

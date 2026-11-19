@@ -95,8 +95,9 @@ struct WorldStats {
     uint64 tickNanoseconds = 0;
     // 대상이 이미 파괴되어 건너뛴 Tick 실행 수(마지막 Tick 기준)다.
     uint32 skippedTicks = 0;
-    // Registry를 직접 조작해 우회 파괴된 객체를 Tick이 발견해 정리한 누적 수다.
-    uint32 repairedTicks = 0;
+    // Registry를 직접 조작해 우회 파괴된 Actor·Component·Level을 World가 발견해(Tick 실행·파괴
+    // 요청 목록) 정리로 돌린 누적 수다.
+    uint32 repairedBypasses = 0;
     // 지금 살아 있는 Borrow 수다. Tick 밖에서 0이 아니면 외부 코드가 Borrow를 쥐고 있어 GC가
     // 미뤄진다.
     uint32 externalBorrows = 0;

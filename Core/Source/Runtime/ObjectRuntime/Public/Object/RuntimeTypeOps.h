@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Object/ReferenceLayout.h>
 #include <Base/TypeTraits.h>
 #include <Core/Containers/Array.h>
 #include <Core/Encoding/Sha256.h>
@@ -447,15 +448,50 @@ using StructMigration = Result<Array<uint8>> (*)(Allocator&, TypeId type, uint32
 // 객체가 가진 모든 강한 ObjectRef를 빠짐없이 Visit해야 한다. WeakObjectRef는 방문하지
 // 않는다(WeakObjectRef PROPERTY 포함 — 생성 Trace는 weak 필드·원소를 방문하지 않는다,
 // Docs/Design/ReflectionExtensions.ko.md 5.1절).
+//
+// 방문자는 두 방식이다(Trace 코드는 어느 쪽인지 모르고 Visit만 부른다).
+// - 간선마다: VisitFn을 간선마다 그대로 부른다(null 포함). 간선마다 상태를 바꾸는 소비자(Commit
+//   검증·관찰자 집계·시험의 기록)가 쓴다.
+// - 배치: null이 아닌 handle을 방문 순서대로 내부 버퍼(BatchCapacity개)에 쌓고, 가득 차면 FlushFn에
+//   한꺼번에 넘긴다. Trace가 끝나면 visitor를 만든 쪽이 Flush()로 남은 간선을 넘긴다(넘기지 않으면
+//   간선이 빠진다). 간선당 간접 호출이 없어 GC marker가
+//   쓴다(Docs/Design/GarbageCollectionScale.ko.md GC-S1). FlushFn은 handle 배열과 개수를 받으며
+//   배열은 그 호출 동안만 유효하다.
+//
+// 사용 예(배치):
+//   TraceVisitor visitor(&state, &MarkBatch);
+//   ops.trace(object, visitor);
+//   visitor.Flush();
 class TraceVisitor {
 public:
     using VisitFn = void (*)(void*, ObjectHandle) noexcept;
+    using FlushFn = void (*)(void*, const ObjectHandle*, uint32) noexcept;
+
+    static constexpr uint32 BatchCapacity = 256;
 
     TraceVisitor(void* state, VisitFn visit) noexcept : state_(state), visit_(visit) {
     }
 
+    TraceVisitor(void* state, FlushFn flush) noexcept : state_(state), flush_(flush) {
+    }
+
+    TraceVisitor(const TraceVisitor&) = delete;
+    TraceVisitor& operator=(const TraceVisitor&) = delete;
+
     void Visit(ObjectHandle handle) noexcept {
-        visit_(state_, handle);
+        if (flush_ == nullptr) {
+            visit_(state_, handle);
+            return;
+        }
+
+        if (handle.IsNull()) {
+            return;
+        }
+
+        batch_[count_++] = handle;
+        if (count_ == BatchCapacity) {
+            Flush();
+        }
     }
 
     template <class Ref>
@@ -463,9 +499,21 @@ public:
         Visit(reference.Handle());
     }
 
+    // 배치 방식에서 쌓인 간선을 FlushFn에 넘기고 버퍼를 비운다(비었거나 간선마다 방식이면 무동작).
+    void Flush() noexcept {
+        if (count_ != 0) {
+            const uint32 count = count_;
+            count_ = 0;
+            flush_(state_, batch_, count);
+        }
+    }
+
 private:
     void* state_;
-    VisitFn visit_;
+    VisitFn visit_ = nullptr;
+    FlushFn flush_ = nullptr;
+    uint32 count_ = 0;
+    ObjectHandle batch_[BatchCapacity];
 };
 
 // 리플렉션 struct 등록의 실행 정보다(TypeRegistry::RegisterStruct, 4.6절). construct·destroy는
@@ -572,6 +620,13 @@ struct RuntimeTypeOps {
     const void* nativeBaseType = nullptr;
     // 기본 수동 Trace는 owner 전용이다. side effect 없는 generated Trace만 명시 opt-in한다.
     bool parallelTraceSafe = false;
+    // trace가 강한 간선을 방문할 수 있는지다. false(잎 타입)면 GC marker가 이 타입 객체를 표식만
+    // 하고 trace를 부르지 않는다(Outer 간선은 Registry가 따로 따라간다 — Docs/Design/
+    // GarbageCollectionScale.ko.md M2). 기본값 true가 안전하다. 메타 생성 코드(참조·struct·배열·맵
+    // 필드가 없는 클래스)와 RegisterNativeClass(사슬에 Trace가 없고 리플렉션 조상도 잎)만 false로
+    // 둔다. 함수표를 직접 만드는 쪽은 trace가 아무것도 방문하지 않을 때만 false로 한다. Debug는
+    // Commit 검증에서 잎 타입이 간선을 방문하면 Fatal로 멈춘다.
+    bool hasStrongReferences = true;
     // 모든 영속 필드와 모든 강한 간선이 typed metadata에 포함된 경우만 true다. ROCKS_NATIVE 멤버는
     // 영속 필드가 아니고 강한 참조를 담을 수 없으므로(MetaCompiler RMC2205·생성 static_assert) 생성
     // 타입은 계속 true다. graph serializer는 이 선언 없는 수동/부분 metadata를 완전한 객체로
@@ -579,6 +634,13 @@ struct RuntimeTypeOps {
     // 방문해야 한다 — 패키지 정책 ObjectRegistry는 이 선언이 있는 타입만 만든다(관찰자 계수가
     // 편집은 Registry API로, Commit·Discard는 trace로 센다).
     bool completeFieldLayout = false;
+    // 참조 위치 표(M3, Docs/Design/GarbageCollectionScale.ko.md 3.4절)를 만드는 함수다(선택). 객체
+    // 하나를 받아 강한 간선 칸(ObjectRef·ObjectRefArray 멤버)의 위치를 builder에 알린다. 있으면
+    // Registry가 타입마다 첫 객체에서 표를 한 번 만들고 GC 표식이 trace 대신 표의 위치에서 handle을
+    // 읽는다. 표는 trace와 같은 간선을 같은 순서로 방문해야 한다(Debug 표식이 대조한다). 생성
+    // 코드가 만들고(리플렉션 클래스), 표로 나타낼 수 없는 필드가 있으면 builder.Unsupported()로
+    // trace에 남는다.
+    void (*referenceLayout)(const Object&, detail::ReferenceLayoutBuilder&) noexcept = nullptr;
 };
 
 // noexcept T(Allocator&)가 있으면 registry allocator를 주입하고, 없으면 noexcept T()를 사용한다.

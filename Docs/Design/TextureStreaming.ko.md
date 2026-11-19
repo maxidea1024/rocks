@@ -146,7 +146,7 @@ UE가 하위 호환으로 남긴 옛 지표 경로와 deprecated 경로는 보�
 - 보임 신호 기록이 들어오기 전에는 모든 기록을 보임으로 본다.
 
 **여러 World.**
-- 한 장치에는 풀이 하나다. EditorWorld·PIE·게임 World(계획 11.1절)의 관찰 지점을 모두 합친다.
+- 한 장치에는 풀이 하나다. EditorWorld·Tryout·게임 World(계획 11.1절)의 관찰 지점을 모두 합친다.
 - 관찰 지점에 World별 가중치를 둔다(예: 포커스 없는 편집기 viewport는 boost 0.5). 사용 기록은 소속 World의 관찰 지점에만 대응한다.
 - 가중 규칙의 세부는 TS4다.
 
@@ -443,7 +443,7 @@ UE가 하위 호환으로 남긴 옛 지표 경로와 deprecated 경로는 보�
     - 장치 손실 복구를 정했다.
     - 전이(GX5)와 제출 순서, 게시 전후 그래프 lease를 정했다.
     - 주기 snapshot·확정 보임 신호·정렬 전순서로 결정성 계약을 한정했다.
-    - 여러 World(editor·PIE) 수요를 넣었다.
+    - 여러 World(editor·Tryout) 수요를 넣었다.
   - 사소:
     - 표본 해상도(T1 UpscaleMode 조건).
     - `ceil(log2)`를 지수 비트로 계산한다.

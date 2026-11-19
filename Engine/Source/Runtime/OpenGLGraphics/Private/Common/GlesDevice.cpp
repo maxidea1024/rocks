@@ -214,6 +214,22 @@ Result<void> GlesDevice::Initialize(const DeviceDesc& desc, const OpenGLDeviceOp
         validation_ = true;
     }
 
+    // texture view 확장 함수다(텍스처 GX2 나머지 B부). 있으면 범위·차원 view가 진짜 view가 되므로
+    // textureViewRanges를 참으로 공개한다(TextureViewBaseMip은 0). 데스크톱 context의 ARB 확장은 ES
+    // 판정에 쓰지 않는다.
+    const char* textureViewName = HasGlExtension(gl_, "GL_OES_texture_view")   ? "glTextureViewOES"
+                                  : HasGlExtension(gl_, "GL_EXT_texture_view") ? "glTextureViewEXT"
+                                                                               : nullptr;
+    if (textureViewName != nullptr) {
+        textureView_ =
+            reinterpret_cast<void (*)(GLuint, GLenum, GLuint, GLenum, GLuint, GLuint, GLuint,
+                                      GLuint)>(platform_->ProcAddress(textureViewName));
+    }
+
+    caps_.features.textureViewRanges = textureView_ != nullptr;
+    Log::Info(gles::LogGraphicsOpenGL, "OpenGL ES texture views: {Function}",
+              StringView(textureView_ != nullptr ? textureViewName : "none (whole texture views)"));
+
     // 깊이 bias 상한 확장 함수다(없으면 depthBiasClamp를 공개하지 않는다).
     if (features_.polygonOffsetClamp) {
         polygonOffsetClamp_ = reinterpret_cast<void (*)(GLfloat, GLfloat, GLfloat)>(
@@ -409,10 +425,10 @@ Result<TextureHandle> GlesDevice::CreateTexture(const TextureDesc& desc,
 
     // 계약상 올바른 형식이지만 이 장치(ES 3.2 core + 확장)에서 그 용도로 쓸 수 없으면 다른 형식으로
     // 대신하지 않고 Unsupported다(PixelFormat.ko.md 8.3절). 다른 인자 검사보다 먼저 한다.
-    const bool renderTarget = desc.usage == TextureUsage::RenderTarget;
-    const bool depthTarget = desc.usage == TextureUsage::DepthStencil;
-    // 렌더 타깃·깊이·Storage는 초기 픽셀이 없다(업로드하지 않는다).
-    const bool attachment = renderTarget || depthTarget || desc.usage == TextureUsage::Storage;
+    const bool renderTarget = HasTextureUsage(desc.usage, TextureUsage::RenderTarget);
+    const bool depthTarget = HasTextureUsage(desc.usage, TextureUsage::DepthStencil);
+    // 렌더 타깃·깊이·Storage 비트는 초기 픽셀이 없다(업로드하지 않는다).
+    const bool attachment = desc.usage != TextureUsage::Sampled;
     const GlesTextureFormat* format = FindTextureFormat(desc.format);
     if (IsValidPixelFormat(desc.format) && IsValidTextureDimension(desc.dimension) &&
         !HasPixelFormatCaps(GetPixelFormatCaps(desc.format), RequiredPixelFormatCaps(desc))) {
@@ -593,12 +609,24 @@ Result<TextureHandle> GlesDevice::CreateTextureView(TextureHandle texture,
         return Result<TextureHandle>::Failure(range.Error());
     }
 
-    // texture view가 없어 읽기 view는 텍스처 전체를 묶는다(mip은 셰이더가 TextureViewBaseMip으로
-    // 고른다). slice 범위를 고를 수단은 없으므로 일부 slice view는 Unsupported다. 쓰기 view는
-    // level 하나를 묶고, 배열은 layered(모든 층)로만 묶는다(셰이더 image2DArray의 층 번호가 view
-    // 기준이 되도록).
+    // 읽기 view: texture view 확장이 있으면 범위·차원을 가진 진짜 view 텍스처를 만든다(MSAA는
+    // 텍스처를 공유한다). 확장이 없으면 텍스처 전체를 묶는다(mip은 셰이더가 TextureViewBaseMip으로
+    // 고른다). 그때 slice 범위·차원을 고를 수단은 없으므로 일부 slice view와 차원 바꾸기는
+    // Unsupported다. 쓰기 view는 level 하나를 묶고, 배열·cube는 layered(모든 층, 셰이더
+    // image2DArray·imageCube의 층 번호가 view 기준)이거나 층 하나(layered 아님, 셰이더 image2D)다.
     const bool writable = desc.access == ViewAccess::ReadWrite;
-    if (range.Value().sliceCount != source->slices) {
+    const TextureDimension viewDimension = TextureViewDimensionOf(source->dimension, desc);
+    const bool ownView = !writable && textureView_ != nullptr && source->sampleCount == 1;
+    if (!writable && !ownView && viewDimension != source->dimension) {
+        Diagnostic message;
+        message.Text("texture view dimension changes need GL_OES_texture_view or "
+                     "GL_EXT_texture_view on OpenGL ES");
+        auto rejected = Reject(message, ErrorCode::Unsupported);
+        return Result<TextureHandle>::Failure(rejected.Error());
+    }
+
+    if (!ownView && range.Value().sliceCount != source->slices &&
+        !(writable && range.Value().sliceCount == 1)) {
         Diagnostic message;
         message.Text("texture view over part of the slices is not supported by OpenGL ES (no "
                      "texture views in ES core)");
@@ -638,6 +666,20 @@ Result<TextureHandle> GlesDevice::CreateTextureView(TextureHandle texture,
     record.texture = source->texture;
     record.dimension = source->dimension;
     record.target = source->target;
+    if (ownView) {
+        // 원 텍스처는 TexStorage(immutable)로 만들었다. view 텍스처의 level 0이 firstMip이다.
+        const ResolvedSubresourceRange& viewRange = range.Value();
+        const GlesTextureFormat* sourceFormat = FindTextureFormat(source->format);
+        GLuint name = 0;
+        gl_.GenTextures(1, &name);
+        textureView_(name, TextureTarget(viewDimension), source->texture,
+                     sourceFormat->internalFormat, viewRange.firstMip, viewRange.mipCount,
+                     viewRange.firstSlice, viewRange.sliceCount);
+        record.texture = name;
+        record.dimension = viewDimension;
+        record.target = TextureTarget(viewDimension);
+        record.ownsTexture = true;
+    }
     record.width = source->width;
     record.height = source->height;
     record.depth = source->depth;
@@ -661,6 +703,10 @@ Result<TextureHandle> GlesDevice::CreateTextureView(TextureHandle texture,
     auto added = textures_.TryAdd(record);
     if (!added) {
         gl_.DeleteSamplers(1, &record.sampler);
+        if (record.ownsTexture) {
+            gl_.DeleteTextures(1, &record.texture);
+        }
+
         return Result<TextureHandle>::Failure(added.Error());
     }
 
@@ -910,7 +956,8 @@ void GlesDevice::RetireTextureRecord(SlotHandle slot, const TextureRecord& recor
     RetiredObject entry;
     entry.kind = RetiredKind::Texture;
     // view는 텍스처 객체를 원 기록과 공유하므로 자기 샘플러만 놓는다(이름 0은 지우지 않는다).
-    entry.objects[0] = record.isView ? 0u : record.texture;
+    // 확장 texture view는 자기 텍스처 이름을 가진다.
+    entry.objects[0] = record.isView && !record.ownsTexture ? 0u : record.texture;
     entry.objects[1] = record.sampler;
     entry.objects[2] = record.framebuffer;
     Defer(entry);
@@ -1200,7 +1247,7 @@ void GlesDevice::ReleaseTexture(const TextureRecord& record) noexcept {
         gl_.DeleteSamplers(1, &record.sampler);
     }
 
-    if (!record.isView) {
+    if (!record.isView || record.ownsTexture) {
         gl_.DeleteTextures(1, &record.texture);
     }
 }

@@ -204,10 +204,11 @@ public:
 
     // 그래프 수명 텍스처를 선언한다. 장치 자원은 첫 사용 pass 직전에 받는다(같은 그래프 안 재사용
     // 자리 또는 풀). desc는 graphics::ValidateTextureDesc 규칙을 따르며(모든 차원·mip 사슬·
-    // sampleCount) usage는 넷 가운데 하나다:
+    // sampleCount) usage는 다섯 조합 가운데 하나다(graphics::TextureUsage 비트 묶음):
     // - RenderTarget: GPU가 색 attachment로 채운다. 형식은 비압축 PixelFormat이다.
     // - DepthStencil: 깊이 attachment(GraphPassAccesses::DepthTarget)다.
     // - Storage: compute UAV(TextureViewDesc::access ReadWrite)로 채운다.
+    // - RenderTarget | Storage: 색 attachment와 compute UAV 둘 다로 채운다.
     // - Sampled: 내용을 UploadTexture로만 받는다(모든 mip, pass는 읽기만). 압축 형식도 된다.
     // GPU가 채우는 셋은 처음 내용이 정해지지 않는다(생산 전 읽기는 검증 오류다).
     // name은 정적 수명 문자열(진단)이다. 실패: 잘못된 desc InvalidArgument, arena 할당 실패는 그

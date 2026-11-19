@@ -4,6 +4,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Object/ConstructionContext.h>
 #include <Object/ObjectRegistry.h>
+#include <Platform/Clock.h>
 #include <Platform/Fatal.h>
 #include <Platform/Thread.h>
 #include <Task/WorkerScheduler.h>
@@ -28,6 +29,8 @@ ErrorCode traceStatus = ErrorCode::None;
 bool callbackStatusOutputPreserved = true;
 uint32 destructions = 0;
 bool inspectTrace = false;
+// 마지막 trace가 실행된 스레드다(병렬 표식은 소유 스레드도 참여한다).
+uint64 traceThread = 0;
 
 struct ResetCallbacks {
     ~ResetCallbacks() noexcept {
@@ -68,6 +71,7 @@ struct LifecycleProbe final : Object {
     }
     void Trace(TraceVisitor&) const noexcept {
         if (callbackRegistry && inspectTrace) {
+            traceThread = platform::CurrentThreadId();
             traceQuery = InspectLifecycle().Error();
             bool requested = true;
             traceStatus = TryIsDestroyRequested(requested).Error();
@@ -560,8 +564,14 @@ TEST(ObjectLifecycleParallelTraceRejectsForeignThreadBeforeReentry) {
         REQUIRE(root);
         REQUIRE(registry.BeginCollection(access));
         REQUIRE(registry.StepCollection(access, {1, 0}, &scheduler));
-        CHECK(traceQuery == ErrorCode::WrongThread);
-        CHECK(traceStatus == ErrorCode::WrongThread);
+        // 병렬 표식(GC-S4)은 소유 스레드도 참여하므로 어느 스레드가 trace했는지는 실행마다 다르다.
+        // worker면 다른 스레드 호출이라 WrongThread, 소유 스레드면 slice(처리 표시) 중 재진입이라
+        // Busy다. 둘 다 변경 없이 거부된다.
+        const ErrorCode expected =
+            traceThread == platform::CurrentThreadId() ? ErrorCode::Busy : ErrorCode::WrongThread;
+        CHECK(traceThread != 0);
+        CHECK(traceQuery == expected);
+        CHECK(traceStatus == expected);
         CHECK(callbackStatusOutputPreserved);
         inspectTrace = false;
         REQUIRE(FinishCollection(registry, access));

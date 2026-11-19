@@ -622,6 +622,25 @@ public:
     // 설정 제외). view는 다음 등록까지 유효하다. 오류: 다른 스레드 WrongThread, 할당 실패.
     Result<void> CompleteConsoleName(StringView prefix, Array<StringView>& out) const noexcept;
 
+    // CVar 범위를 만든다(CVar 8절 — parent의 자식, 기본은 Global). id는 프로세스에서 다시 쓰지
+    // 않는다. 새 범위는 다음 Sync가 게시하는 snapshot부터 보인다(그 전의 `Get(scope)`는 Global
+    // 값이다). 범위는 객체가 소유한다(World·플레이어·Viewport — 14.2절). 게임 lane 전용이다. 오류:
+    // 초기화 전 InvalidArgument, parent가 없음(파괴됐거나 다른 문맥) NotFound, 다른 스레드
+    // WrongThread, 할당 실패.
+    //
+    // 사용 예:
+    //   auto scope = config.CreateScope();             // World 범위(Global의 자식)
+    //   ShadowDistance.Set(1200.f, {.scope = scope.Value()});
+    //   config.Sync();
+    //   const float distance = ShadowDistance.Get(scope.Value());
+    //   config.DestroyScope(scope.Value());
+    Result<cvar::CVarScopeId> CreateScope(cvar::CVarScopeId parent = {}) noexcept;
+
+    // CVar 범위를 파괴한다(그 범위의 값은 버리고 자식은 조부모에 다시 붙는다 — 다음 Sync가
+    // 게시한다). 그 범위에 큐로 들어온 쓰기는 적용 때 버린다. 게임 lane 전용이다. 오류: 초기화 전·
+    // Global InvalidArgument, 없는 범위 NotFound, 다른 스레드 WrongThread.
+    Result<void> DestroyScope(cvar::CVarScopeId scope) noexcept;
+
     // 이 문맥을 프로세스 기본 문맥으로 정한다(CVar 6.2절 — 묶음 없는 스레드의 `Set`·`Clear`·
     // `ScopedOverride`가 이 문맥의 쓰기 큐에 간다. 읽기 `Get`은 늘 묶음이다). 프로세스에 하나이고,
     // 문맥이 없어질 때 풀린다. 호스트(HostSettings::Initialize)가 부른다. 같은 문맥이 다시 부르면

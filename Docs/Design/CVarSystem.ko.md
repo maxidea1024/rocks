@@ -1,6 +1,6 @@
 # CVar·치트 명령 설계
 
-기준일: 2026-11-19, 개정 15(결정 확정, CVR1·CVR2·CVR4·CVR5·CVR6·CVR7 구현). 실행 중 이름으로 읽고 바꾸는 타입 있는 설정 변수 **CVar**와, 개발 빌드에서 게임 상태를 직접 바꾸는 **치트 명령**을 정한다.
+기준일: 2026-11-19, 개정 16(결정 확정, CVR1–CVR7 구현). 실행 중 이름으로 읽고 바꾸는 타입 있는 설정 변수 **CVar**와, 개발 빌드에서 게임 상태를 직접 바꾸는 **치트 명령**을 정한다.
 
 이 문서는 [설정 계층과 콘솔 설정](ConfigSystem.ko.md)(이하 Config)의 5절 "콘솔 설정과 명령"을 대체하는 상세 스펙이다. 값 저장소·층·출처 스택·sync 지점·JSON 파일·`--set`·설정 struct는 Config를 그대로 쓰고, 이 문서는 그 위에 다음을 더한다.
 - 한 문장으로 정의하고 `.Get()`으로 읽는 타입 있는 핸들(`CVar<T>`·`BootCVar<T>`·`CVarGroup`·`ConsoleCommand`)
@@ -255,7 +255,7 @@ config.ClearLayer(ConfigLayer::Hotfix);
 - `Set(value, SetOptions = {}, SourceLocation = SourceLocation::Current())`, `Clear(SetOptions = {})`. `SetOptions`는 `layer`(기본 Code)·`scope`(기본 Global)·`tag`다.
 - 어느 스레드에서나 부를 수 있다. 범위·enum·`Validate`·층 권한(13절)을 바로 검사해 `Result`로 돌려주고, 통과한 쓰기는 문맥의 쓰기 큐(MPSC)에 넣는다. `Clamp()` 변수는 범위 밖 값을 보정해 받고 적용 때 `Clamped` 진단을 남긴다.
 - 반환은 `Result<void>`의 `ErrorCode`다: 이 스레드에 묶인 문맥이 없으면 `NotFound`, 검사 위반은 `InvalidArgument`, 다른 스레드의 쓰기가 큐 한도(`MaxQueuedChanges`)를 넘으면 `Busy`(버리지 않는다 — 소유 스레드 입력은 한도와 무관하다), 문맥이 없어졌으면 `ShuttingDown`. 거부 이유는 `SetOptions::reason`(`ConfigDiagnosticCode*`)으로 받는다(`ValueOutOfRange`·`InvalidEnum`·`ValidationFailed`·`ConsoleReadOnly`·`LayerNotAllowed`, 뒤 단계의 `CheatsDisabled`·`ReplicatedOnClient`·`BootSealed`). 통과·보정이면 그대로 둔다. 콘솔 도구(CVR6)가 이것으로 메시지를 만든다.
-- `scope`를 주면 그 범위의 값 하나를 바꾼다(`layer`는 무시 — 8절).
+- `scope`를 주면 그 범위의 값 하나를 바꾼다(8절). 층 스택에는 들어가지 않으므로 `layer`는 우선순위에 쓰이지 않고, 그 범위 값의 **출처 층**(권한 판정·Explain 표시)으로만 남는다. 층 권한(콘솔 읽기 전용·사용자 층 등)은 Global 쓰기와 같이 그 출처 층으로 본다. 범위 값을 받지 않는 변수(`Replicated()` — `cheat.enabled`는 예외, `CVarGroup` 묶음 변수)는 넣을 때 `ScopeNotAllowed`로 거부한다(`BootCVar`는 `Set`이 없다). 범위가 없거나(파괴됐거나 다른 문맥의 범위) 이름이 그 문맥에 등록되지 않았으면 Sync 적용 때 그 쓰기를 버린다(넣을 때는 범위 표를 보지 않는다 — 다른 스레드는 게임 lane의 범위 표를 읽지 않는다, 10.1절). `Clear({.scope = scope})`는 그 범위의 그 변수 값을 지운다.
 - 권한(치트·복제·부팅 봉인)은 지금 한 번 검사해 바로 알려 주고, Sync가 적용할 때 다시 검사한다. 그 사이 상태가 바뀌었으면 적용 때의 판정이 이기고 진단을 남긴다.
 - 어느 문맥에 쓰는지: 이 스레드에 묶인 문맥(7.1절), 없으면 프로세스 기본 문맥이다. 기본 문맥은 `ConfigContext::MakeProcessDefault()`(게임 lane)로 정하고 문맥이 없어질 때 풀린다. 프로세스에 하나이고, 다른 문맥이 이미 기본이면 `AlreadyExists`다(같은 문맥의 재호출은 성공). `HostSettings::Initialize`가 자기 문맥을 기본으로 정한다(CVR7). 기본 문맥을 거치는 쓰기는 기본 문맥 잠금 안에서 통로 참조를 얻으며 그 통로의 원자 계수(`defaultWriters`)를 하나 올리고, 큐에 넣은 뒤 참조를 놓고 계수를 내린다. 문맥 파괴는 통로를 닫고(`open = false`) 기본 문맥을 푼 다음 이 계수가 0이 될 때까지 통로 잠금의 조건 변수로 기다린다(sleep 없음). 그래서 통로의 마지막 해제는 소유 스레드에서 일어나고(문맥 allocator를 다른 스레드가 해제하지 않는다), 결과는 정해진다: 파괴와 겹친 쓰기(통로를 얻은 뒤 닫힘)는 `ShuttingDown`, 기본 문맥이 없을 때(정한 적이 없거나 풀린 뒤) 들어온 묶음 없는 쓰기는 `NotFound`다. 풀린 뒤를 `ShuttingDown`으로 나누지 않는 까닭: 그러려면 "한 번 정한 적 있음"을 프로세스 전역에 끝까지 남겨야 하는데, 그러면 같은 프로세스의 뒤 문맥(시험·도구가 문맥을 다시 만드는 경우)의 결과가 앞에 무엇이 있었는지에 따라 달라진다(리뷰 결정과 다른 점 — 20절 CVR7 리뷰 반영). `ScopedOverride`는 끝낼 때 지우기를 넣으려고 통로 참조를 범위 동안 쥐므로, 기본 문맥을 거친 범위도 `ConsoleInputPort`와 같이 문맥 allocator보다 먼저 끝나야 한다. 기본 문맥은 쓰기(`Set`·`Clear`·`ScopedOverride`)에만 쓰고 읽기(`Get`)는 늘 묶음이다(7.1절 — 묶음 없는 `Get`은 Fatal). 시험은 문맥을 스레드에 묶는다.
 - `ConsoleReadOnly()`는 콘솔 층만 거부한다. `UserSetting()`이 아닌 변수는 사용자 층을 거부한다(Config와 같다).
@@ -273,6 +273,7 @@ config.ClearLayer(ConfigLayer::Hotfix);
 - Scoped 층에 고유 태그로 쓰고 소멸 때 그 태그만 지운다. 중첩하면 나중 것이 이기고, 어떤 순서로 풀어도 남은 것 중 가장 나중 것이 이긴다(태그 스택).
 - 값은 만들 때 이 스레드에 묶인 문맥에 쓰고, 지우기는 그 문맥(쓰기 통로)에 간다 — 소멸 때 묶인 문맥이나 스레드와 무관하다. 지우기 쓰기는 만들 때 미리 만들고 큐 자리도 잡아 두므로 소멸에 실패 경로가 없다. 그 문맥이 먼저 없어졌으면 소멸은 할 일이 없다.
 - 적용은 다른 쓰기와 같이 Sync에서 한다(값은 sync 지점에서만 바뀐다). `BootCVar`는 받지 않는다(컴파일 오류).
+- 프리셋 묶음(`CVarGroup`)도 받는다(CVR3 — `cvar::ScopedOverride levels{ShadowQuality, 1}`): 묶음 변수(int32 등급)의 Scoped 층에 쓰므로 그 동안 묶음의 유효 등급이 바뀌고 다음 Sync의 묶음 펼침이 그 등급을 펼친다. 정의되지 않은 등급은 `InvalidArgument`(`UndefinedLevel`)다.
 
 ## 7. 읽기와 snapshot
 
@@ -285,6 +286,7 @@ cvar::Index Index() const noexcept;
 ```
 
 - 다른 snapshot을 읽어야 하면 `cvar::SnapshotBinding`으로 묶은 뒤 `Get()`을 부른다(overload를 늘리지 않는다).
+- `Get(scope)`(CVR3)은 묶인 snapshot의 범위 표에서 범위 사슬(자식 → 부모)을 따라 처음 만난 범위 값을 돌려주고, 없으면 `Get()`(Global 유효값)이다. Global 범위(`CVarScopeId{}`)면 `Get()`과 같다. 그 snapshot에 없는 범위(아직 게시되지 않았거나 파괴된 범위, 다른 문맥의 범위)도 Global 값이다(assert 없음 — 렌더 lane이 이전 프레임을 처리하는 것은 정상이다). 어느 스레드에서나 부른다(묶음 규칙은 `Get()`과 같다). `BootCVar`에는 없다.
 - 읽기 경로: thread_local 묶음 → snapshot의 조각 표 → 조각 → 칸(의존 load 4개). 번호는 핸들에 있으므로 이름 탐색이 없다. 잠금·할당·문자열 연산이 없다. 분기는 "묶음 없음(Fatal)", "번호 없음 또는 이 snapshot에 칸 없음(5절)" 둘이고 모두 거의 늘 같은 쪽으로 간다.
 - **스레드 묶음.** 게임 lane은 Sync가 새 snapshot을 게시할 때 스스로 다시 묶는다. 렌더 lane은 프레임 packet을 처리하기 시작할 때 packet의 snapshot을 묶는다(RenderBase 5.3·12절). worker 작업은 Task 시스템의 범용 작업 문맥 슬롯(Task는 Config에 의존하지 않는다 — 슬롯은 참조 계수 있는 불투명 객체 하나)으로, 만든 lane의 snapshot **참조를 하나 쥐고** 넘겨받는다. 작업이 프레임보다 오래 살아도 snapshot이 먼저 사라지지 않는다(작업 생성마다 원자 증감 한 쌍 — 작업은 그 정도로 굵다). 그 밖의 스레드는 `cvar::SnapshotBinding bind{config.Acquire()};`로 직접 묶는다. 묶음 없이 `Get()`을 부르면 Fatal이다(조용히 최신 값을 읽지 않는다 — 프레임 일관성이 깨지기 때문이다).
 - 번호는 프로세스 전체이므로 다른 문맥에만 등록된 핸들은 게임 lane에서도 Fatal이 아니라 기본값이다(이 문맥 snapshot에 칸이 없다). Fatal은 어느 문맥에도 등록된 적 없는 핸들(번호 없음)이다.
@@ -311,11 +313,16 @@ cvar::Index Index() const noexcept;
 
 ## 8. 범위 계층
 
-- 범위는 Global(문맥이 가진 뿌리) 아래의 나무다. `CreateScope(parent)`·`DestroyScope(scope)`는 게임 lane에서 부르고 다음 Sync에 snapshot에 반영된다.
-- 범위는 변수마다 **값 하나**(값·출처)만 가진다. 층 스택은 Global에만 있다. 자식 범위에 값이 있으면 부모보다 이긴다. `Get(scope)`는 자식 → 부모로 찾고, 어디에도 없으면 Global 유효값이다. 범위 값은 `Clear({.scope = scope})`로 지운다.
-- 범위를 파괴하면 그 자식은 조부모에 다시 붙는다.
-- 빠른 길: snapshot은 "범위 값이 하나라도 있는 변수" 비트 집합을 가진다. 비트가 없으면 `Get(scope)`는 `Get()`과 같은 비용이다. 비트가 있으면 범위 표의 (번호, 값) 정렬 배열을 사슬 깊이만큼 이진 탐색한다.
-- `BootCVar`·`Replicated()` 변수는 범위 값을 받지 않는다(Global만, 쓰기 거부 `ScopeNotAllowed`).
+- 범위는 Global(문맥이 가진 뿌리 — `CVarScopeId{}`, 값 0) 아래의 나무다. `ConfigContext::CreateScope(parent = Global)`·`DestroyScope(scope)`는 게임 lane에서 부르고(다른 스레드는 `WrongThread`) 다음 Sync가 게시하는 snapshot에 반영된다(그래서 그 Sync 전에는 다른 스레드의 `Get(scope)`가 새 범위를 모른다 — Global 값이다).
+- 범위 id(`cvar::CVarScopeId` — `uint64`)는 프로세스 원자 카운터에서 받고 다시 쓰지 않는다. 문맥이 여럿이어도 겹치지 않으므로 다른 문맥의 범위 id는 어느 표에도 없는 id다(Global 값). 오류: `CreateScope`의 부모가 없으면(파괴됐거나 다른 문맥) `NotFound`, `DestroyScope(Global)`은 `InvalidArgument`, 없는 범위는 `NotFound`.
+- 범위는 변수마다 **값 하나**(값·출처 층·출처)만 가진다. 층 스택은 Global에만 있다. 자식 범위에 값이 있으면 부모보다 이긴다. 범위 값은 층과 무관하게 Global 유효값보다 강하다(Global은 사슬의 끝이다). 범위 값은 `Clear({.scope = scope})`로 지운다.
+- 범위를 파괴하면 그 범위의 값은 버리고, 그 자식은 조부모(파괴한 범위의 부모)에 다시 붙는다. 파괴한 범위에 큐로 들어온 쓰기는 적용 때 버린다(6.2절).
+- 값의 검사(범위·`Clamp`·`Validate`·enum)는 Global 쓰기와 같은 함수다. `Clamp()` 변수는 보정해 받고 `Clamped` 진단을 남긴다.
+- **snapshot의 범위 표**(불변): 범위마다 (id, 부모 id, (번호, 칸, 텍스트 블록)을 번호 순서로 정렬한 배열)이고 범위는 id 순서다. 표에는 "범위 값이 하나라도 있는 번호" 비트 집합이 함께 있다. 범위 상태(생성·파괴·값)가 바뀐 Sync만 새 표를 만들고, 아니면 앞 snapshot의 표를 공유한다.
+- 빠른 길: 비트가 없으면 `Get(scope)`는 `Get()`과 같은 비용이다(비트 하나 읽기 더). 비트가 있으면 사슬 깊이만큼 범위를 id로 이진 탐색하고 그 범위의 값 배열을 번호로 이진 탐색한다.
+- 범위 값의 변경은 Global 칸의 세대를 바꾸지 않는다(`Watcher`·`OnSynced`의 번호 목록은 Global 유효값의 변경이다). 범위 값을 따르는 쪽은 프레임마다 `Get(scope)`를 읽는다.
+- `BootCVar`·`Replicated()` 변수와 `CVarGroup` 묶음 변수는 범위 값을 받지 않는다(Global만, 쓰기 거부 `ScopeNotAllowed`). 예외는 치트 허용 상태 `cheat.enabled`다(플레이어별 치트 허용 — 13.1절).
+- 범위 값은 dump(`DumpConsoleValues`)에 넣지 않는다(범위는 실행 중 객체다). 콘솔 `<이름>`·`<이름> ?`는 그 변수의 범위 값을 `scope <id> <출처 층> <값> <출처>` 줄로 보인다(15절).
 - 범위는 객체가 소유한다(14.2절): World가 Global의 자식 범위를, 플레이어·Viewport가 World 범위의 자식 범위를 만든다.
 
 ## 9. 부팅 고정 변수
@@ -379,7 +386,9 @@ Config 5.3·5.4의 sync 지점(엔진 `RunFrame` 2단계 뒤, 3단계 전)에서
 | 현재 snapshot 포인터 | 게임 lane(Sync·`Register`) | `Acquire()` | 짧은 잠금 안에서 바꾸고 참조 계수를 올려 돌려준다. 잠금은 게시·`Acquire`만 잡고 `Get()`은 잡지 않는다 | 참조 계수 |
 | snapshot·조각·문자열 블록 | 만들 때 한 번(게임 lane) | 묶인 모든 스레드 | 불변 + 원자 참조 계수. 바뀐 조각은 새로 만들고 옛 조각은 마지막 참조가 놓일 때 해제한다 | 마지막 참조까지 |
 | 스레드 묶음 | 그 스레드만 | 그 스레드만 | thread_local. 묶음이 참조 하나를 쥔다(게임 lane은 현재 snapshot, 렌더 lane은 packet, worker는 작업 문맥) | 묶음 범위 |
-| 범위 생성·파괴 | 게임 lane | 다른 스레드는 snapshot 안의 범위 표 사본만 본다 | 범위 id는 세대를 붙여 다시 쓰지 않는다. 파괴된 범위 id로 `Get(scope)`하면 그 snapshot의 사슬로 답하고, 그 범위가 없는 snapshot에서는 Global 값이다(Debug assert 없음 — 렌더 lane이 이전 프레임을 처리하는 것은 정상이다) | snapshot |
+| 범위 표(생성·파괴·부모 — 게임 lane 상태) | 게임 lane(`CreateScope`·`DestroyScope`·Sync 적용) | 게임 lane만 | 소유 스레드 검사(`WrongThread`). 다른 스레드는 snapshot 안의 범위 표만 본다 | 문맥 |
+| 범위 값(게임 lane 상태) | 쓰기 큐(아무 스레드의 `Set`·`Clear`의 `scope`) → Sync 1단계 | 게임 lane(Sync·콘솔 표시) | 쓰기 큐 하나로 들어온다. 적용은 큐 순서이고 Sync 실패 때는 사본을 버린다(값이 반쯤 바뀌지 않는다) | 문맥 |
+| snapshot의 범위 표(id·부모·값) | 범위 상태가 바뀐 Sync의 게시(게임 lane) | 묶인 모든 스레드의 `Get(scope)` | 불변 + 참조 계수(바뀌지 않은 Sync는 앞 표를 공유한다). 범위 id는 프로세스 원자 카운터로 다시 쓰지 않는다. 파괴된 범위 id로 `Get(scope)`하면 그 범위가 든 snapshot에서는 그 사슬로 답하고, 그 범위가 없는 snapshot에서는 Global 값이다(Debug assert 없음 — 렌더 lane이 이전 프레임을 처리하는 것은 정상이다) | snapshot |
 | 권한 상태(`cheat.enabled`·네트워크 역할) | 게임 lane(Sync) | `Set` 즉시 검사(호출 스레드의 묶음 또는 `Acquire`) | snapshot 값이므로 불변. 최종 판정은 Sync 적용 때 게임 lane이 다시 한다 | snapshot |
 | 부팅 블록 | `CompleteStartup` 한 번, 봉인 뒤 부팅 변수 등록(조각 copy-on-write로 칸을 더한다 — 게임 lane) | 모두 | 게시한 조각은 불변, 봉인 뒤 snapshot의 부팅 값은 모두 같다. 렌더 lane·worker는 봉인 뒤에 시작한다(Config 5.4) | 문맥 |
 | 진단 목록·`OnSynced`·명령 실행 | 게임 lane | 게임 lane | 소유 스레드 assert | 문맥 |
@@ -456,7 +465,8 @@ CVarGroup ShadowGroup = cvar::Group("quality.shadow", 2)
   - 기본값 true(단독 실행). 게임 규칙 객체(UE `AGameModeBase::AllowCheats`)가 Code 층에 쓰고, `--set=cheat.enabled=false`·서버(Server 층)로도 바꾼다. 콘솔 층으로는 바꿀 수 없다(개정 13 — 콘솔 층은 Code 층보다 강하므로 콘솔로 켜면 게임 규칙의 false를 이겨 치트 규칙이 뚫린다).
   - 복제 변수이므로 클라이언트는 서버가 준 값(Server 층)을 따르고 콘솔에서 켤 수 없다.
   - 플레이어마다 다르게 하려면 그 플레이어 범위에 값을 둔다(14.3절). 판정은 쓰기를 낸 범위의 값이다(`CheatsEnabled.Get(scope)` — 핸들 이름 `CheatsEnabled`).
-  - 판정은 쓰기를 받을 때 한 번, Sync 적용 때 한 번 한다(6.2절). 받을 때는 그 스레드가 보는 snapshot의 값이다. 적용 때는 **큐 순서**로 판정한다: Sync가 큐를 꺼내며 `cheat.enabled`를 바꾸는 입력(Code·`--set`·Server import 등)을 따라 그 시점의 실효값을 갱신하므로, 큐에서 치트를 끄는 변경 뒤에 놓인 치트 쓰기는 거부되고 앞에 놓인 것은 받는다(개정 13). 콘솔 층의 `Settings` 문서 입력(`AddLayerText(Console, …)`)도 같은 판정을 받는다. 네트워크 역할은 큐에 들지 않는 즉시 상태라 적용 때의 역할로 판정한다. 범위 값 판정은 CVR3 범위와 함께 더한다.
+  - 판정은 쓰기를 받을 때 한 번, Sync 적용 때 한 번 한다(6.2절). 받을 때는 그 스레드가 보는 snapshot의 값이다. 적용 때는 **큐 순서**로 판정한다: Sync가 큐를 꺼내며 `cheat.enabled`를 바꾸는 입력(Code·`--set`·Server import 등)을 따라 그 시점의 실효값을 갱신하므로, 큐에서 치트를 끄는 변경 뒤에 놓인 치트 쓰기는 거부되고 앞에 놓인 것은 받는다(개정 13). 콘솔 층의 `Settings` 문서 입력(`AddLayerText(Console, …)`)도 같은 판정을 받는다. 네트워크 역할은 큐에 들지 않는 즉시 상태라 적용 때의 역할로 판정한다.
+  - 범위 값(CVR3): 출처 층이 콘솔인 범위 쓰기의 치트 판정은 그 범위의 치트 허용 상태(`CheatsEnabled.Get(scope)` — 범위 사슬에서 처음 만난 `cheat.enabled` 범위 값, 없으면 Global 실효값)로 한다. 받을 때는 그 스레드가 보는 snapshot의 범위 표로, 적용 때는 큐 순서로 본다: 같은 큐에서 앞에 놓인 `cheat.enabled` 범위 쓰기·지우기와 Global 실효값(위 큐 순서 규칙)을 따라간다.
 
 ### 13.2 복제
 
@@ -479,6 +489,7 @@ CVar를 리플렉션·객체 수명과 묶어, 따로 만들 것을 줄이고 �
 ### 14.2 범위는 객체가 소유한다
 
 - `World`는 `Initialize`에서 Global의 자식 범위를 만들고 `Shutdown`에서 파괴한다(`World::CVarScope()`). World 안 객체(Actor·Component)는 `GetWorld().CVarScope()`로 읽는다.
+  - 구현(CVR3): `WorldDesc::settings`(설정 문맥 — 엔진의 `EngineConfig::settings`를 `Engine::CreateWorld`가 넘긴다)가 있으면 `Initialize`가 범위를 만들고(실패하면 `Initialize` 실패), Subsystem 초기화가 실패해 되돌릴 때와 `Shutdown`(Actor·Subsystem·Level 정리 뒤)이 파괴한다. 설정 문맥이 없으면 `CVarScope()`는 Global이다. World는 설정 문맥과 같은 게임 lane에서 만들고 끝낸다(다른 스레드면 범위 API가 `WrongThread`). World는 문맥보다 먼저 끝나야 한다.
 - 로컬 플레이어·Viewport(입력 계획의 플레이어 단계)는 World 범위의 자식 범위를 만든다. 분할 화면에서 플레이어마다 다른 값(시야 거리·디버그 표시)을 두는 데 쓴다.
 - 범위 수명이 객체 수명과 같으므로 범위 id를 따로 관리할 일이 없다. 파괴 순서가 바뀌어도 8절의 재연결 규칙이 남은 자식을 살린다.
 
@@ -754,10 +765,17 @@ public:
 - 프로세스 기본 문맥: 기본 문맥 경유 쓰기 계수와 파괴 쪽 대기(6.2절), 10.1절 표 행. **리뷰 결정과 다른 점**: 결정은 "해제 뒤 들어온 묶음 없는 쓰기는 `ShuttingDown`"이었지만, 파괴와 겹친 쓰기만 `ShuttingDown`이고 기본 문맥이 풀린 뒤 들어온 쓰기는 `NotFound`로 정했다(6.2절의 까닭 — 프로세스 전역 이력이 뒤 문맥의 결과를 바꾸지 않게). 파괴와 겹친 쓰기를 시험으로 결정적으로 만들려고 `config::detail::DefaultWriteProbe`(기본 문맥 경로의 관찰 지점 — 통로를 얻은 뒤·파괴가 기본 문맥을 푼 뒤, null이면 부르지 않는다)를 두었다.
 - LogHost `Watch` 기준점: `Watcher` 기준은 `Start`가 읽은 snapshot이다. `Watch`는 그 뒤 바뀐 값을 바로 한 번 적용하고(Start와 Watch 사이 Sync의 변경을 잃지 않는다) `OnSynced`를 단다. 적용이 일시적으로 실패하면(LogSystem의 `Busy` — 출력 스레드 안 호출) 그 값의 `Watcher`를 잊어(`Watcher::Reset`) 다음 Sync에 다시 시도한다. 용량 같은 지속 실패는 Warning 한 번이고 다시 시도하지 않는다.
 
+**CVR3 구현(2026-11-19, `feature/cvar`)**
+- API: `cvar::CVarScopeId`(`rocks`에도 using), `SetOptions::scope`, `CVar<T>::Get(CVarScopeId)`, `ConfigContext::CreateScope`·`DestroyScope`, 진단 코드 `ScopeNotAllowed`, `ScopedOverride`의 `CVarGroup` 판. 범위 상태·snapshot 범위 표·사슬 탐색·재연결·스레드 규칙은 8절·10.1절 그대로다.
+- Sync 1단계는 범위 쓰기를 층 입력 목록에 넣지 않고, 범위 값의 사본에 큐 순서로 적용해 게시가 성공하면 맞바꾼다(값은 sync 지점에서만, 실패 때는 그대로). 범위 생성·파괴만 있어도 다음 Sync가 새 표를 게시한다.
+- 치트 판정(13.1절 — CVR6가 넘긴 것): 출처 층이 콘솔인 범위 쓰기는 그 범위의 치트 허용 상태로 받을 때·적용 때(큐 순서) 판정한다.
+- World 연결(14.2절): `WorldDesc::settings`·`World::CVarScope()`, `Engine::CreateWorld`가 엔진 설정 문맥을 넘긴다. World 모듈이 Config 모듈에 의존한다.
+- 넘긴 것: 로컬 플레이어·Viewport 범위의 엔진 연결(그 객체가 아직 없다 — API와 코드에서 만든 자식 범위 시험까지만 했다, 자리표시 객체는 만들지 않았다), 범위 값을 실행 중 콘솔 입력으로 쓰는 문법(지금은 코드의 `Set({.scope})`만 — 콘솔은 범위 값을 보이기만 한다), 범위 값의 복제(범위 값은 지역 값이다).
+
 **CVR1 이후 결정·후속 항목**
 - `Register`는 타입을 지운 `const cvar::detail::VarDefinition*`만 받는다. CVR5 `CVarGroup`·CVR6 `ConsoleCommand`가 같은 경로로 오려면 종류(`HandleKind`)를 가진 공통 정의 머리가 필요하다(지금 `VarDefinition`을 머리로 쓰고 종류별 꼬리를 덧붙이는 모양).
 - 플러그인(모듈)을 내릴 때의 처리가 스펙에 없다: 문맥이 핸들 정의 포인터를 쥐므로, 모듈 코드가 내려가면 포인터가 dangling이 된다. `Unregister` 또는 모듈 언로드 때 그 모듈 핸들을 문맥에서 빼는 규칙을 정해야 한다(결정 필요).
-  - 같은 결정에 묶인 한계: 동적 변수(`RegisterDynamic`)의 번호는 문맥이 정의를 소유해도 프로세스 카운터에서 받고 다시 쓰지 않는다. 문맥을 되풀이해 만드는 경우(에디터의 PIE 세션처럼 실행 중 문맥을 여러 번 만들고 없앤다)에는 번호가 단조로 늘고, snapshot의 조각 표가 그만큼 길어진다(빈 조각은 공유되지 않고 포인터 칸만 는다). 번호 재사용은 `Unregister`와 함께 정한다(지금 코드는 바꾸지 않는다).
+  - 같은 결정에 묶인 한계: 동적 변수(`RegisterDynamic`)의 번호는 문맥이 정의를 소유해도 프로세스 카운터에서 받고 다시 쓰지 않는다. 문맥을 되풀이해 만드는 경우(에디터의 Tryout 세션처럼 실행 중 문맥을 여러 번 만들고 없앤다)에는 번호가 단조로 늘고, snapshot의 조각 표가 그만큼 길어진다(빈 조각은 공유되지 않고 포인터 칸만 는다). 번호 재사용은 `Unregister`와 함께 정한다(지금 코드는 바꾸지 않는다).
 - 핸들의 `Name()` 멤버가 클래스 범위에서 타입 `Name`을 가린다. CVR2 `Get()`의 Name 반환 타입은 `rocks::Name`으로 쓴다.
 
 ## 21. 기존 콘솔 설정에서 이전
@@ -803,6 +821,7 @@ public:
 
 ## 23. 개정 이력
 
+- 개정 16(2026-11-19): CVR3. 6.2절 범위 쓰기(출처 층·`ScopeNotAllowed`·없는 범위의 쓰기), 6.3절 `ScopedOverride`의 묶음 판, 7.1절 `Get(scope)`, 8절 범위 계층(id·API·오류·snapshot 범위 표·빠른 길·재연결·세대), 10.1절 범위 표·범위 값 행, 13.1절 범위 값의 치트 판정, 14.2절 World 연결 구현, 20절 CVR3 메모.
 - 개정 15(2026-11-19): CVR7 리뷰 반영. 5절 동적 변수 읽기의 종류 확인(`ValueKind` 칸·`DynamicKind`)·정수 범위 규칙, 6.2절 기본 문맥 경유 쓰기 계수·파괴 대기·오류 코드(`ShuttingDown`·`NotFound`), 10.1절 표 행, 20절 CVR7 행 정정·리뷰 반영 메모·번호 재사용 한계, 22절 TraceSystem 행.
 - 개정 14(2026-11-19): CVR7. 5절 `RegisterDynamic`(정의·번호·읽기·오류), 6.2절 프로세스 기본 문맥(`MakeProcessDefault`, `HostSettings`), 7.3절 구독 없앰, 9절 필드 지정자 문장, 21절 이전 뒤 규칙 변화, 22절 Config·Logging 행, 20절 CVR7 메모(`log.*`·`trace.*` 핸들 종류, LogHost 읽기·`Watch`, 카테고리 목록이 닫혀 있지 않다는 정정).
 - 개정 13(2026-11-19): CVR6 리뷰 반영. 13.1절(`cheat.enabled` 콘솔 읽기 전용, 적용 때 판정의 큐 순서·콘솔 층 문서), 13.2절(Export는 복제 변수 전부, `GetNetworkRole` 어느 스레드나), 15절 구현 규칙(다른 스레드 입구 `ConsoleInputPort`·참조 계수 sink·스레드 안전 요건, 공백·탭 구분·따옴표 없음, `cvar.explain` 이름 하나), 20절 CVR6 리뷰 반영 메모(명령 대상 묶음 규칙·수명, NaN·무한대, 덤프 주석 escape).

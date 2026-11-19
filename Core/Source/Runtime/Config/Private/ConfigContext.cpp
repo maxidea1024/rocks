@@ -39,7 +39,7 @@ ConfigState::ConfigState(Allocator& allocator, ObjectRegistry& objects) noexcept
       directories{String(allocator), String(allocator), String(allocator), String(allocator)},
       projectName(allocator), branches(allocator), sections(allocator), entries(allocator),
       queue(allocator), diagnostics(allocator), regions(allocator), settings(allocator),
-      commands(allocator), pendingCommands(allocator), dynamicVars(allocator),
+      commands(allocator), pendingCommands(allocator), dynamicVars(allocator), scopes(allocator),
       renderSignature(allocator), pendingRestarts(allocator), ignoredBootWrites(allocator),
       reportedUnresolved(allocator), groups(allocator), unmetQualityBudgets(allocator),
       reportedQualityProblems(allocator), reportedPresetProblems(allocator),
@@ -774,6 +774,11 @@ const void* ConfigContext::FindSettings(TypeId type) const noexcept {
 namespace detail {
 
 Result<void> ApplyQueuedChange(Array<ConfigEntry*>& plan, const QueuedChange& change) noexcept {
+    // 범위 쓰기는 층 입력 목록에 들지 않는다(Sync가 범위 값에 적용한다 — CVar 8절).
+    if (change.scope != 0) {
+        return Result<void>::Success();
+    }
+
     // 빼기(Unset·Clear·ClearLayer)와 바꾸기(Set — 같은 자리의 이전 쓰기를 뺀다)다.
     if (change.entry.Get() == nullptr || change.replace) {
         usize kept = 0;
@@ -1408,6 +1413,31 @@ Result<void> ConfigContext::Sync() noexcept {
         }
     }
 
+    // 범위 쓰기를 범위 상태의 사본에 큐 순서로 적용한다(CVar 8절 — 게시가 성공하면 맞바꾼다).
+    // 범위 생성·파괴만 있어도 새 범위 표를 게시한다.
+    bool scopeWrites = false;
+    for (const SharedPtr<QueuedChange>& change : state->queue) {
+        scopeWrites = scopeWrites || (change->scope != 0 && change->line.IsEmpty());
+    }
+
+    Array<UniquePtr<detail::ScopeState>> nextScopes(*allocator_);
+    const bool scopesChanged = scopeWrites || state->scopesChanged;
+    if (scopesChanged) {
+        if (auto copied = detail::CopyScopes(*allocator_, state->scopes, nextScopes); !copied) {
+            return copied;
+        }
+
+        for (const SharedPtr<QueuedChange>& change : state->queue) {
+            if (change->scope == 0 || !change->line.IsEmpty()) {
+                continue;
+            }
+
+            if (auto applied = detail::ApplyScopeChange(*state, nextScopes, *change); !applied) {
+                return applied;
+            }
+        }
+    }
+
     // 5. 입력 소유권을 새 목록으로 옮길 자리를 먼저 잡고, 바뀐 조각만 새로 만든 snapshot을 게시한다
     // (게시가 실패하면 값은 Sync 전 그대로다). 이 뒤로는 실패하지 않는다.
     Array<UniquePtr<ConfigEntry>> next(*allocator_);
@@ -1416,10 +1446,12 @@ Result<void> ConfigContext::Sync() noexcept {
     }
 
     // 등록이 바뀌었으면 값이 그대로여도 게시한다(콘솔 이름 색인 — 다른 스레드의 콘솔 입력).
-    if (named.Get() != nullptr || !writes.IsEmpty() || state->namesChanged) {
-        if (auto published = detail::PublishSnapshot(
-                *state, named.Get() != nullptr ? &named : nullptr, writes.View());
-            !published) {
+    if (named.Get() != nullptr || !writes.IsEmpty() || state->namesChanged || scopesChanged) {
+        state->publishingScopes = scopesChanged ? &nextScopes : nullptr;
+        auto published = detail::PublishSnapshot(*state, named.Get() != nullptr ? &named : nullptr,
+                                                 writes.View());
+        state->publishingScopes = nullptr;
+        if (!published) {
             return published;
         }
 
@@ -1445,6 +1477,10 @@ Result<void> ConfigContext::Sync() noexcept {
 
     state->pendingRestarts = Move(pendingRestarts);
     detail::CommitGroups(*state, resolutions, expandedLevels.View());
+    if (scopesChanged) {
+        state->scopes = Move(nextScopes);
+        state->scopesChanged = false;
+    }
 
     for (ConfigEntry* kept : plan) {
         for (UniquePtr<ConfigEntry>& owned : state->entries) {
