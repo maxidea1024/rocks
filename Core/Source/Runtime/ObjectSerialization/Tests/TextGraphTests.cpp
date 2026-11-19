@@ -17,6 +17,8 @@
 // 한도, 2단계 할당 실패 rollback, FieldValue 읽기·Registry 사이 복사의 DeepClone(원래 allocator
 // 해제 뒤에도 유효), 경로 쓰기.
 using namespace rocks;
+namespace text_graph_tests_file {
+
 using reflection_fixture::TextFieldCaption;
 using reflection_fixture::TextFieldHolder;
 
@@ -548,3 +550,4 @@ TEST(TextGraph_PathWritesEveryPosition) {
 
     CHECK(types.Shutdown());
 }
+} // namespace text_graph_tests_file

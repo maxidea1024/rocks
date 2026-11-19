@@ -10,6 +10,8 @@
 #include <string.h>
 
 using namespace rocks;
+namespace aes_modes_tests_file {
+
 using namespace rocks::crypto;
 
 // 저수준 AES 모드(Crypto/AesModes.h)의 공개 계약 시험이다(Docs/Design/Crypto.ko.md 9.1·9.3·12절).
@@ -528,3 +530,4 @@ TEST(CryptoAesGcmOneShotAssociatedDataLimit) {
                                             Span<const uint8>(tag), Span<uint8>(opened));
     CHECK(!detached && rejected(detached.Error(), Span<const uint8>(opened)));
 }
+} // namespace aes_modes_tests_file

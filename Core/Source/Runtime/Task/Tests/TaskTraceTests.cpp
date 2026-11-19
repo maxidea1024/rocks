@@ -11,6 +11,8 @@
 // 실행하고 기록에서 의존 간선·실행 집합·완료 상태를 복원해 직렬 oracle과 비교한다. 순서는 gate로만
 // 맞춘다.
 using namespace rocks;
+namespace task_trace_tests_file {
+
 using namespace rocks::tracetest;
 
 namespace {
@@ -483,3 +485,4 @@ TEST(TaskPropagatesCorrelationWithoutTraceSession) {
     CHECK(depthAfter == 0);
     REQUIRE(scheduler.Shutdown());
 }
+} // namespace task_trace_tests_file

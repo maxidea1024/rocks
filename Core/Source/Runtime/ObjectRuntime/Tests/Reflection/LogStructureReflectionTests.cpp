@@ -36,6 +36,8 @@ namespace rocks::test {
 uint64 OperatorNewCalls() noexcept;
 } // namespace rocks::test
 
+namespace log_structure_reflection_tests_file {
+
 // 생성 헤더와 Object/LogStructure.h를 함께 본 리플렉션 타입은 모두 LogStructure를 가진다(클래스·
 // struct·bitfield struct). 생성 헤더는 그 헤더를 include하지 않으므로 여기서
 // include한다(설계 14.2절 LG16의 include 규칙).
@@ -351,3 +353,4 @@ TEST(LogStructureGeneratedStructThroughLogSystem) {
         logs.Stop();
     }
 }
+} // namespace log_structure_reflection_tests_file

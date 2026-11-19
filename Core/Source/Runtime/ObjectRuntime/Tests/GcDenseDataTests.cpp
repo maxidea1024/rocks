@@ -5,6 +5,8 @@
 #include <Object/ObjectRegistry.h>
 #include <Object/TypeRegistry.h>
 
+namespace gc_dense_data_tests_file {
+
 // GC 밀집 자료(GC-S3)와 잎 타입(M2) 시험이다(Docs/Design/GarbageCollectionScale.ko.md).
 // - 잎 타입(RuntimeTypeOps::hasStrongReferences == false)은 표식만 하고 trace하지 않지만 그 Outer
 //   사슬은 살린다(정지형·증분 모두).
@@ -202,3 +204,4 @@ TEST(ObjectGc_RootListFollowsRootTransitions) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace gc_dense_data_tests_file

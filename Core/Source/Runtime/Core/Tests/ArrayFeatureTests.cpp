@@ -4,6 +4,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace array_feature_tests_file {
 
 namespace {
 
@@ -377,3 +378,4 @@ TEST(ArrayAppendUninitializedGrowsWithoutConstructing) {
     }
     CHECK(backing.Stats().liveAllocations == 0);
 }
+} // namespace array_feature_tests_file

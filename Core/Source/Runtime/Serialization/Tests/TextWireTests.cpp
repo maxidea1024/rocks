@@ -5,6 +5,7 @@
 #include <Platform/Memory.h>
 
 using namespace rocks;
+namespace text_wire_tests_file {
 
 // Text 값(WireType::Text = 18)의 세 형태 형식, 손상 입력 거부와 cursor 불변, writer의 칸 검사·실패
 // 시 byte 불변·자기 View 원문 시험이다(Docs/Design/ReflectionExtensions.ko.md 1.2·13절 — 리플렉션
@@ -267,3 +268,4 @@ TEST(TextWire_SourceMayAliasTheWriterBuffer) {
     auto read = ReadTextWire(reader.Value());
     CHECK(read && read.Value().source == StringView("2345"));
 }
+} // namespace text_wire_tests_file

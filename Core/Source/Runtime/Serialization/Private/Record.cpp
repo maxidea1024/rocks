@@ -8,12 +8,13 @@ namespace rocks {
 namespace {
 
 constexpr uint8 Magic[] = {'R', 'O', 'C', 'K', 'S', 'R', 'E', 'C'};
-constexpr usize HeaderBytes = detail::RecordHeaderBytes;
+constexpr usize RecordLocalHeaderBytes = detail::RecordHeaderBytes;
 constexpr usize FieldHeaderBytes = 28;
 
 ArchiveLimits PayloadLimits(ArchiveLimits limits) noexcept {
-    limits.maxTotalBytes =
-        limits.maxTotalBytes < HeaderBytes ? 0 : limits.maxTotalBytes - HeaderBytes;
+    limits.maxTotalBytes = limits.maxTotalBytes < RecordLocalHeaderBytes
+                               ? 0
+                               : limits.maxTotalBytes - RecordLocalHeaderBytes;
     return limits;
 }
 
@@ -39,7 +40,7 @@ uint64 BitWidth(uint64 value) noexcept {
 } // namespace
 
 Result<RecordHeader> ReadRecordHeader(Span<const uint8> record) noexcept {
-    if (record.Size() < HeaderBytes) {
+    if (record.Size() < RecordLocalHeaderBytes) {
         return Result<RecordHeader>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -61,7 +62,7 @@ Result<RecordHeader> ReadRecordHeader(Span<const uint8> record) noexcept {
     header.fieldCount = LoadLittleEndian<uint32>(bytes + 32);
     const uint64 payloadBytes = LoadLittleEndian<uint64>(bytes + 36);
     if (IsZero(header.schema) || header.schemaVersion == 0 ||
-        payloadBytes != static_cast<uint64>(record.Size() - HeaderBytes) ||
+        payloadBytes != static_cast<uint64>(record.Size() - RecordLocalHeaderBytes) ||
         static_cast<uint64>(header.fieldCount) * FieldHeaderBytes > payloadBytes) {
         return Result<RecordHeader>::Failure(ErrorCode::InvalidArgument);
     }
@@ -97,7 +98,8 @@ Result<void> RecordBuilder::AddField(Guid id, uint32 type, Span<const uint8> enc
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    if (limits_.archive.maxTotalBytes < HeaderBytes || required > payload_.limits_.maxTotalBytes ||
+    if (limits_.archive.maxTotalBytes < RecordLocalHeaderBytes ||
+        required > payload_.limits_.maxTotalBytes ||
         encoded.Size() > limits_.archive.maxValueBytes || ids_.Size() >= limits_.maxFields) {
         return Result<void>::Failure(ErrorCode::CapacityExceeded);
     }
@@ -137,7 +139,7 @@ Result<void> RecordBuilder::AddField(Guid id, uint32 type, Span<const uint8> enc
 
     // 방금 붙인 TLV의 payload는 payload_ 끝에서 encoded 길이만큼 앞이고, Build가 그 앞에 header를
     // 붙인다.
-    lastPayload_ = HeaderBytes + payload_.ByteCount() - encoded.Size();
+    lastPayload_ = RecordLocalHeaderBytes + payload_.ByteCount() - encoded.Size();
     return Result<void>::Success();
 }
 
@@ -163,7 +165,7 @@ void StoreHeader(uint8* header, Guid schema, uint32 version, uint32 fieldCount,
 Result<Array<uint8>> RecordBuilder::Build() noexcept {
     usize total = 0;
     usize work = 0;
-    if (!TryAdd(HeaderBytes, payload_.ByteCount(), total) || !TryAdd(total, 1, work)) {
+    if (!TryAdd(RecordLocalHeaderBytes, payload_.ByteCount(), total) || !TryAdd(total, 1, work)) {
         auto charged = payload_.Charge(1);
         return Result<Array<uint8>>::Failure(charged ? ErrorCode::Overflow : charged.Error());
     }
@@ -181,7 +183,7 @@ Result<Array<uint8>> RecordBuilder::Build() noexcept {
         return Result<Array<uint8>>::Failure(ErrorCode::CapacityExceeded);
     }
 
-    uint8 header[HeaderBytes];
+    uint8 header[RecordLocalHeaderBytes];
     StoreHeader(header, schema_, schemaVersion_, static_cast<uint32>(ids_.Size()),
                 static_cast<uint64>(payload_.ByteCount()));
 
@@ -213,12 +215,12 @@ Result<RecordWriter> RecordWriter::Begin(ArchiveWriter& out, Guid schema, uint32
         return Result<RecordWriter>::Failure(ErrorCode::InvalidArgument);
     }
 
-    if (limits.archive.maxTotalBytes < HeaderBytes) {
+    if (limits.archive.maxTotalBytes < RecordLocalHeaderBytes) {
         return Result<RecordWriter>::Failure(ErrorCode::CapacityExceeded);
     }
 
     const usize start = out.ByteCount();
-    uint8 header[HeaderBytes];
+    uint8 header[RecordLocalHeaderBytes];
     StoreHeader(header, schema, schemaVersion, 0, 0);
     if (auto written = out.WriteRaw(header); !written) {
         return Result<RecordWriter>::Failure(written.Error());
@@ -282,7 +284,7 @@ Result<void> RecordWriter::End() noexcept {
 
     uint8 counts[12];
     StoreLittleEndian<uint32>(counts, count_);
-    StoreLittleEndian<uint64>(counts + 4, static_cast<uint64>(total - HeaderBytes));
+    StoreLittleEndian<uint64>(counts + 4, static_cast<uint64>(total - RecordLocalHeaderBytes));
     return out_->Patch(start_ + 32, counts);
 }
 

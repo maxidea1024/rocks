@@ -1,33 +1,105 @@
 namespace Rocks.Build;
 
+// Inputs는 내용이 key에 들어가는 파일(번역 단위의 소스, archive·link의 object·라이브러리)이고, HeaderDirectories는 헤더 이름 목록이 key에
+// 들어가는 디렉터리(include 디렉터리와 소스 디렉터리)다. DependencyRecord는 이 action의 의존 기록 파일이다(compile action — Outputs의
+// 하나이고, 컴파일러가 연 헤더의 내용은 key가 아니라 이 기록으로 검증한다). Arguments의 {DEPFILE}은 실행 때 임시 depfile 경로가 된다.
 internal sealed record NativeAction(string Id, string Module, string Kind, string Tool,
     IReadOnlyList<string> Arguments, IReadOnlyList<string> Outputs, IReadOnlyList<string> Inputs,
     IReadOnlyList<string> HeaderDirectories, IReadOnlyList<string> DeclaredInputs,
-    IReadOnlyList<string> Dependencies, IReadOnlyList<string> Identity, string? Source = null)
+    IReadOnlyList<string> Dependencies, IReadOnlyList<string> Identity, string? Source = null, string? FailureNote = null,
+    string? DependencyRecord = null, IReadOnlyList<string>? Members = null, Lazy<string?>? PreRun = null)
 {
-    public string Key(string toolchain, string outputRoot, string root) => Fingerprints.Strings(new[]
-    {
-        toolchain, Id, Tool, Fingerprints.Paths(Inputs), Fingerprints.Paths(HeaderDirectories, true, outputRoot, root),
-        Fingerprints.Paths(DeclaredInputs)
-    }.Concat(Identity).Concat(Arguments));
+    // PreRun은 실행 직전에 한 번 평가하는 검사다(공유 PCH 사용 검사 — 선행 action의 산출물이 있어야 계산할 수 있다). 오류 문구를 돌려주면
+    // 이 action은 도구를 실행하지 않고 실패한다. cache hit인 action은 평가하지 않는다(입력이 통과한 실행과 같다).
+    // Source는 compile action이 컴파일러에 넘기는 파일이다(단독 번역 단위면 그 소스, 묶음이면 묶음 파일). Members는 이 번역 단위를
+    // 이루는 원본 소스다(단독이면 null — Source 하나).
+    public IReadOnlyList<string> SourceMembers => Members ?? (Source is null ? [] : [Source]);
 
-    public string[] ResolveArguments(IReadOnlyList<string> outputs)
+    // 실행 때 컴파일러가 depfile을 쓸 경로로 바뀌는 인자 자리 표시다(Executor — action 임시 디렉터리 안이라 key에 들지 않는다).
+    public const string DepfilePlaceholder = "{DEPFILE}";
+
+    /// <summary>
+    /// 선언 입력 key다(Docs/Design/UnityBuildPch.ko.md 4.1절 2단 key의 첫 단). 이전 실행 결과에 의존하지 않는다: 툴체인 key, action 인자,
+    /// TU 구성(Identity), 입력 파일 내용, 선언 추가 입력 내용, include·소스 디렉터리의 헤더 이름 목록을 담는다. 헤더 내용은 담지 않는다 —
+    /// 컴파일러가 실제로 연 헤더는 의존 기록(<see cref="DependencyRecord"/>)이 검증한다(IncrementalStore.IsCurrent). FailureNote는 표시
+    /// 전용이라 넣지 않는다.
+    /// </summary>
+    public string Key(string toolchain, BuildInputs inputs)
     {
-        return Arguments.Select(argument =>
+        var tokens = new List<string> { toolchain, Id, Tool };
+        foreach (string input in Inputs)
+        {
+            if (!File.Exists(input))
+            {
+                throw new FileNotFoundException("Declared build input does not exist.", input);
+            }
+
+            tokens.Add(input);
+            tokens.Add(inputs.Content(input));
+        }
+
+        tokens.Add("header-directories");
+        foreach (string directory in HeaderDirectories.Distinct(NativeToolchains.PathComparer))
+        {
+            tokens.Add(directory);
+            tokens.Add(inputs.Listing(directory));
+        }
+
+        tokens.Add("declared-inputs");
+        foreach (string declared in DeclaredInputs.Distinct(NativeToolchains.PathComparer))
+        {
+            tokens.Add(declared);
+            tokens.Add(inputs.Declared(declared));
+        }
+
+        tokens.Add("identity");
+        tokens.AddRange(Identity);
+        tokens.Add("arguments");
+        tokens.AddRange(Arguments);
+        return Fingerprints.Strings(tokens);
+    }
+
+    /// <summary>메모 없이 계산한 선언 입력 key다(action 하나만 보는 시험용 — 빌드는 <see cref="Key(string, BuildInputs)"/>를 쓴다).</summary>
+    public string Key(string toolchain, string outputRoot, string root) => Key(toolchain, new BuildInputs(root, outputRoot, null));
+
+    public string[] ResolveArguments(IReadOnlyList<string> outputs, string? depfile = null) =>
+        Resolve(Arguments, outputs, depfile);
+
+    internal static string[] Resolve(IReadOnlyList<string> arguments, IReadOnlyList<string> outputs, string? depfile = null)
+    {
+        return arguments.Select(argument =>
         {
             for (int index = 0; index < outputs.Count; ++index)
             {
                 argument = argument.Replace($"{{OUTPUT{index}}}", outputs[index], StringComparison.Ordinal);
             }
 
-            return argument;
+            return depfile is null ? argument : argument.Replace(DepfilePlaceholder, depfile, StringComparison.Ordinal);
         }).ToArray();
     }
 }
 
+/// <summary>
+/// 원본 소스 하나의 논리 compile 명령이다(Docs/Design/UnityBuildPch.ko.md 8.6절). compile_commands.json과 BuildInfo manifest는 물리
+/// action이 아니라 이것으로 만든다 — depfile 인자 같은 실행 전용 인자가 없고, 소스 하나에 명령 하나다. Arguments의 {OUTPUT0}은
+/// <see cref="Object"/>다. Action은 이 소스를 실제로 컴파일하는 물리 action의 Id다.
+/// </summary>
+/// ForcedIncludes는 이 명령이 강제 include하는 생성 헤더(정의 헤더)와 PCH 헤더다 — 도구 빌드 ID의 입력이다.
+internal sealed record LogicalCompile(string Module, string Source, string Tool, IReadOnlyList<string> Arguments, string Object, string Action,
+    IReadOnlyList<string> ForcedIncludes);
+
+/// <summary>엔진이 action을 돌리기 전에 쓰는 생성 파일이다(정의 헤더, PCH stub 소스). 내용이 같으면 다시 쓰지 않는다.</summary>
+internal sealed record PlannedFile(string Path, string Content);
+
 // Closures: 계획에 든 모듈마다 도달 집합(자기 자신, 그다음 의존 순서)이다. BuildInfo가 실행 파일의 액션을 고를 때 쓴다.
+// LogicalCompiles: 원본 소스마다의 논리 compile 명령이다(계획의 compile action 순서).
+// UnityBatches: 이 계획의 묶음 파일이다(엔진이 action을 돌리기 전에 쓴다). UnityDefineExcluded: 첫 #include 앞의 #define 때문에 묶음에서
+// 뺀 소스다. ObjectDirectories: 모듈마다 이번 변형의 object 디렉터리다(빌드 뒤 이 계획이 만들지 않은 파일을 지운다).
 internal sealed record NativePlan(IReadOnlyList<NativeAction> Actions,
-    IReadOnlyDictionary<string, string> ModuleOutputs, IReadOnlyDictionary<string, IReadOnlyList<string>> Closures);
+    IReadOnlyDictionary<string, string> ModuleOutputs, IReadOnlyDictionary<string, IReadOnlyList<string>> Closures,
+    IReadOnlyList<LogicalCompile> LogicalCompiles, IReadOnlyList<UnityBatch> UnityBatches, IReadOnlyList<string> UnityDefineExcluded,
+    IReadOnlyDictionary<string, string> ObjectDirectories, IReadOnlyList<PlannedFile> GeneratedFiles, IReadOnlyList<string> PchDirectories,
+    int AdaptiveSeparated, IReadOnlyList<string> Notices);
 
 internal static class ActionGraph
 {
@@ -104,6 +176,20 @@ internal static class ActionGraph
 
         string Absolute(string path) => Path.GetFullPath(path, root);
         var actions = new List<NativeAction>();
+        var logicalCompiles = new List<LogicalCompile>();
+        var unityBatches = new List<UnityBatch>();
+        var unityDefineExcluded = new List<string>();
+        var generatedFiles = new List<PlannedFile>();
+        var pchDirectories = new List<string>();
+        var notices = new List<string>();
+        int adaptiveSeparated = 0;
+        IReadOnlySet<string>? working = request.Unity && request.WorkingSet is { Count: > 0 } ? request.WorkingSet : null;
+        var objectDirectories = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        // object 변형이다(Docs/Design/UnityBuildPch.ko.md 6.4절): 유니티·PCH 모드 조합마다 다른 디렉터리를 써서 일반 빌드와 검증 빌드가
+        // 서로의 object를 덮어쓰지 않는다.
+        string variant = "u" + (request.Unity ? "1" : "0") + "p" + (request.Pch ? "1" : "0");
+        // 규칙 생성 TU·모듈 표 TU가 있는 디렉터리다(BuildInfo TU의 디렉터리는 아래 buildInfo). 이 아래 소스는 묶지 않는다.
+        string generatedSources = Path.TrimEndingDirectorySeparator(Path.Combine(output, GeneratedSources.DirectoryName));
         var outputs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var terminalActions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var closures = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
@@ -142,24 +228,15 @@ internal static class ActionGraph
             string[] includes = module.PublicIncludeDirectories.Concat(module.PrivateIncludeDirectories)
                 .Concat(dependencies.SelectMany(value => value.PublicIncludeDirectories)).Select(Absolute)
                 .Distinct(NativeToolchains.PathComparer).ToArray();
-            string[] defines = module.PublicDefines.Concat(module.PrivateDefines)
-                .Concat(dependencies.SelectMany(value => value.PublicDefines)).Distinct(StringComparer.Ordinal).ToArray();
-            foreach (var define in defines.GroupBy(value => value.Split('=')[0], StringComparer.Ordinal))
-            {
-                if (define.Count() != 1)
-                {
-                    throw new ArgumentException($"Module {module.Name}: conflicting propagated definition {define.Key} ({string.Join(", ", define)}).");
-                }
-            }
-
-            if (entryModules.Contains(module.Name))
-            {
-                defines = [.. defines, ModuleTables.ModuleNameMacro + "=" + module.Name];
-            }
+            // 모듈 정의: 모듈 public·private 정의와 의존 모듈의 public 정의, 진입점 모듈이면 ROCKS_MODULE_NAME(ModuleDefinitions — 리플렉션 AST
+            // 생성도 같은 함수로 같은 정의를 받는다).
+            string[] defines = ModuleDefinitions.Of(module, dependencies, entryModules.Contains(module.Name));
 
             // 리플렉션 생성 소스는 모듈 소스와 같은 인자로 컴파일해 같은 archive·실행 파일에 넣는다(목록만 따로다 —
             // NativeModuleInput.ReflectionSources).
             string[] reflectionSources = module.ReflectionSources.Select(Absolute).ToArray();
+            var reflectionSet = new HashSet<string>(reflectionSources, NativeToolchains.PathComparer);
+            string? reflectionNote = module.ReflectionSourceFailureNote.Length == 0 ? null : module.ReflectionSourceFailureNote;
             string[] sources = module.Sources.Select(Absolute).Concat(reflectionSources).Order(StringComparer.Ordinal).ToArray();
             if (sources.Distinct(NativeToolchains.PathComparer).Count() != sources.Length)
             {
@@ -191,12 +268,23 @@ internal static class ActionGraph
                 .Select(Absolute).Distinct(NativeToolchains.PathComparer).ToArray();
             var objectPaths = new List<string>();
             var compileIds = new List<string>();
-            foreach (string source in sources)
+            string objectDirectory = Path.Combine(output, "obj", module.Name, variant);
+            objectDirectories[module.Name] = objectDirectory;
+            // 모듈 정의(전파된 dependency public define과 모듈 public/private define)는 명령줄이 아니라 생성 정의 헤더로 넘긴다
+            // (Docs/Design/UnityBuildPch.ko.md 8.2절). 구성·플랫폼·타깃 매크로는 프로필과 타깃 인자로 명령줄에 남는다 — 타깃의 모든 번역
+            // 단위에 같다. 정의가 같은 번역 단위끼리만 PCH를 공유할 수 있다.
+            string? definitionsHeader = null;
+            string definitionsContent = "";
+            if (defines.Length != 0 && sources.Length != 0)
             {
-                string identity = Fingerprints.Strings([source])[..20];
-                string objectPath = Path.Combine(output, "obj", module.Name, identity + (windows ? ".obj" : ".o"));
-                string id = module.Name + ":compile:" + identity;
-                NativeLanguage language = LanguageOf(source);
+                definitionsHeader = ModuleDefinitions.PathOf(output, module.Name);
+                definitionsContent = ModuleDefinitions.Content(defines);
+                generatedFiles.Add(new(definitionsHeader, definitionsContent));
+            }
+
+            // 번역 단위 인자의 공통 부분이다(모듈 인자·프로필·타깃 인자·include). 언어마다 프로필이 다르다.
+            List<string> Common(NativeLanguage language)
+            {
                 var arguments = new List<string>();
                 arguments.AddRange(module.AdditionalCompileArguments);
                 // 계측을 끈 모듈은 sanitizer 인자만 빠진다(프레임 포인터 등 나머지 Asan 프로필은 같다).
@@ -217,33 +305,175 @@ internal static class ActionGraph
 
                 // 타깃 단위 인자: 로그 컴파일 하한과 소스 경로 접두 매핑은 모든 모듈·번역 단위에 같다(모듈 인자로 바꾸지 못한다).
                 arguments.AddRange(targetArguments);
-                arguments.AddRange(defines.Select(value => (windows ? "/D" : "-D") + value));
                 foreach (string include in includes)
                 {
                     arguments.Add((windows ? "/I" : "-I") + include);
                 }
-                // C++ 번역 단위의 인자는 C 지원 이전과 byte 단위로 같아야 한다(action key가 인자를 포함하므로
-                // 바뀌면 모든 증분 빌드가 무효화된다). macOS·Android의 compiler는 clang++ driver라서 C 소스에는
-                // 언어를 명시한다(없으면 C++로 처리하며 -Werror에서 경고가 오류가 된다).
-                if (windows)
+
+                return arguments;
+            }
+
+            // 강제 include 인자다(clang-cl /FI<파일>, clang++ -include <파일>).
+            string[] Forced(string? file) => file is null ? [] : windows ? ["/FI" + file] : ["-include", file];
+            // macOS·Android의 compiler는 clang++ driver라서 C 소스에는 언어를 명시한다(없으면 C++로 처리하며 -Werror에서 경고가 오류가
+            // 된다).
+            string[] TranslationUnit(string file, NativeLanguage language) =>
+                windows ? ["/c", language == NativeLanguage.C ? "/TC" : "/TP", file, "/Fo{OUTPUT0}"]
+                : language == NativeLanguage.C ? ["-c", "-x", "c", file, "-o", "{OUTPUT0}"]
+                : ["-c", file, "-o", "{OUTPUT0}"];
+            // 물리 action은 depfile을 쓰게 한다(의존 기록의 원천 — Docs/Design/UnityBuildPch.ko.md 4.1절). 논리 명령(compile DB·
+            // BuildInfo)에는 넣지 않는다. clang-cl은 -MD·-MF를 /clang:로만 받는다(실측).
+            string[] depfile = windows ? ["/clang:-MD", "/clang:-MF" + NativeAction.DepfilePlaceholder]
+                : ["-MD", "-MF", NativeAction.DepfilePlaceholder];
+            string ObjectOf(string file) => Path.Combine(objectDirectory, Fingerprints.Strings([file])[..20] + (windows ? ".obj" : ".o"));
+
+            // 묶음 구성(6절). 손으로 쓴 C++ 소스와 리플렉션 생성 소스는 따로 묶는다(생성 소스는 파일 지역 이름 없이 나오므로 모듈의
+            // 충돌 정리와 무관하게 묶을 수 있다 — GSD9). 묶지 않는 소스는 모두 단독 번역 단위다.
+            var excluded = new HashSet<string>(module.UnityExclude.Select(Absolute), NativeToolchains.PathComparer);
+            var candidates = new List<string>();
+            var reflectionCandidates = new List<string>();
+            var singles = new List<string>();
+            // PCH를 쓰지 않는 번역 단위다: 첫 #include 앞에서 #define하는 파일(설정이 PCH에 든 헤더에 닿지 않는다), 생성 TU.
+            var withoutPch = new HashSet<string>(NativeToolchains.PathComparer);
+            bool unity = UnityBuild.Enabled(request, module);
+            bool pchWanted = request.Pch && !module.ThirdParty && module.PchUsage != PchUsage.Off;
+            foreach (string source in sources)
+            {
+                bool generatedUnit = Fingerprints.IsUnder(source, buildInfo) || Fingerprints.IsUnder(source, generatedSources);
+                if (generatedUnit)
                 {
-                    arguments.AddRange(["/c", language == NativeLanguage.C ? "/TC" : "/TP", source, "/Fo{OUTPUT0}"]);
+                    withoutPch.Add(source);
                 }
-                else if (language == NativeLanguage.C)
+
+                if (reflectionSet.Contains(source))
                 {
-                    arguments.AddRange(["-c", "-x", "c", source, "-o", "{OUTPUT0}"]);
+                    (request.Unity && module.ReflectionUnity ? reflectionCandidates : singles).Add(source);
+                }
+                else if (LanguageOf(source) != NativeLanguage.Cpp || generatedUnit || (!unity && !pchWanted))
+                {
+                    singles.Add(source);
+                }
+                else if (UnityBuild.DefinesBeforeFirstInclude(File.ReadAllText(source)))
+                {
+                    if (unity)
+                    {
+                        unityDefineExcluded.Add(source);
+                    }
+
+                    withoutPch.Add(source);
+                    singles.Add(source);
+                }
+                else if (!unity || excluded.Contains(source))
+                {
+                    singles.Add(source);
                 }
                 else
                 {
-                    arguments.AddRange(["-c", source, "-o", "{OUTPUT0}"]);
+                    candidates.Add(source);
+                }
+            }
+
+            // 작업 파일 분리(7.2절): 자신이 작업 파일인 소스와, 짝 헤더(첫 include)가 작업 파일이고 그 헤더 이름이 모듈 안에서 유일한
+            // 소스를 묶음에서 뺀다. 경계는 분리 전 전체 목록으로 정하므로 그 파일이 속한 묶음 하나만 바뀐다.
+            HashSet<string>? separated = null;
+            if (working is not null && candidates.Count != 0)
+            {
+                separated = AdaptiveUnity.Separated(candidates, working, module.PublicIncludeDirectories.Concat(module.PrivateIncludeDirectories).Select(Absolute)
+                    .Concat(sources.Select(value => Path.GetDirectoryName(value)!)), output, root);
+                adaptiveSeparated += separated.Count;
+            }
+
+            var batches = new List<UnityBatch>();
+            foreach (List<string> group in new[] { candidates, reflectionCandidates })
+            {
+                if (group.Count == 0)
+                {
+                    continue;
                 }
 
-                actions.Add(new(id, module.Name, "Compile", request.Toolchain.CompilerPath, arguments,
-                    [objectPath], [source], headers, extraInputs, [],
-                    new[] { request.ContextFingerprint, request.Configuration.ToString(), module.Optimization.ToString() }.Concat(sources).ToArray(), source));
+                UnityGroupPlan grouped = UnityBuild.Plan(module.Name, group, root, output, module.UnityAnchorFiles, module.UnityBatchBytes,
+                    source => new FileInfo(source).Length, ReferenceEquals(group, candidates) ? separated : null);
+                batches.AddRange(grouped.Batches);
+                singles.AddRange(grouped.Singles);
+            }
+
+            unityBatches.AddRange(batches);
+            // 번역 단위: 컴파일러에 넘기는 파일, 구성원, 묶음 TU 전용 include 루트. object 순서가 구성과 무관하게 정해지도록 첫 구성원
+            // 경로 순으로 둔다.
+            var units = singles.Select(source => (File: source, Members: new[] { source }, Roots: Array.Empty<string>()))
+                .Concat(batches.Select(batch => (batch.File, Members: batch.Members.ToArray(), Roots: batch.IncludeRoots.ToArray())))
+                .OrderBy(unit => unit.Members[0], StringComparer.Ordinal).ToArray();
+            bool UsesPch((string File, string[] Members, string[] Roots) unit) =>
+                LanguageOf(unit.File) == NativeLanguage.Cpp && !unit.Members.Any(withoutPch.Contains) &&
+                (module.AdaptivePch || separated is null || !unit.Members.Any(separated.Contains));
+
+            // PCH(8절): 모듈 PCH가 있으면 그것을, 없으면 쓸 수 있는 공유 PCH를 쓴다. 소스는 PCH 헤더를 include하지 않는다 — 빌드가 강제
+            // include한다. 강제 include 순서는 [PCH 앞부분: 정의 헤더] → [PCH 헤더] → [소비 모듈 추가 정의 헤더]이고 PCH 앞부분은
+            // 생성과 사용에서 같은 파일이다(clang-cl /Yu는 through header 앞의 /FI를 검증 없이 건너뛴다).
+            PchPlan? pch = null;
+            int pchUsers = units.Count(UsesPch);
+            if (pchWanted && pchUsers != 0)
+            {
+                pch = PchBuild.Plan(request, module, dependencies, includes, defines, Common(NativeLanguage.Cpp), definitionsHeader, definitionsContent,
+                    pchUsers, depfile, headers, extraInputs, Absolute, output, notices, name => closures[name], name => modules[name]);
+            }
+
+            if (pch is not null)
+            {
+                // 공유 정의 헤더와 stub 소스는 같은 PCH를 쓰는 모듈들이 함께 낸다(한 번만 싣는다).
+                generatedFiles.AddRange(pch.Files.Where(file => !generatedFiles.Any(existing => NativeToolchains.PathComparer.Equals(existing.Path, file.Path))));
+                pchDirectories.Add(pch.Directory);
+                if (!actions.Any(action => action.Id == pch.Action.Id))
+                {
+                    actions.Add(pch.Action);
+                }
+            }
+
+            foreach (var unit in units)
+            {
+                bool batch = unit.Members.Length != 1 || !NativeToolchains.PathComparer.Equals(unit.File, unit.Members[0]);
+                NativeLanguage language = LanguageOf(unit.File);
+                List<string> arguments = Common(language);
+                string objectPath = ObjectOf(unit.File);
+                // Id에 변형을 넣는다: 증분 기록은 Id로 찾으므로, 넣지 않으면 일반 빌드와 검증 빌드를 번갈아 돌릴 때 서로의 기록을 덮어써
+                // 매번 전부 다시 컴파일한다.
+                string id = module.Name + ":compile:" + variant + ":" + Path.GetFileNameWithoutExtension(objectPath);
+                string recordPath = objectPath + DependencyRecord.Extension;
+                // 묶음 TU에만 구성원 철자(루트 기준 경로)를 푸는 include 루트를 맨 뒤에 붙인다(6.3절). 구성원 안의 include는 기존
+                // 목록에서 먼저 풀리고, 맨 뒤 루트는 다른 곳에서 못 찾는 철자에만 걸린다.
+                string[] roots = unit.Roots.Select(directory => (windows ? "/I" : "-I") + directory).ToArray();
+                bool usesPch = pch is not null && UsesPch(unit);
+                // 물리 인자: PCH를 쓰면 PCH 바이너리를, 아니면 정의 헤더를 강제 include한다. 논리 인자: PCH 바이너리 대신 PCH 앞부분·PCH
+                // 헤더·추가 정의 헤더를 같은 순서로 강제 include한다(8.6절 — clangd와 정책 감사가 실제 컴파일과 같은 매크로·include를 본다).
+                string[] forced = usesPch ? pch!.UseArguments : Forced(definitionsHeader);
+                string[] logicalForced = usesPch ? pch!.LogicalArguments : Forced(definitionsHeader);
+                string[] forcedFiles = usesPch ? pch!.LogicalFiles : definitionsHeader is null ? [] : [definitionsHeader];
+                string[] unitInputs = [.. batch ? [unit.File, .. unit.Members] : new[] { unit.File },
+                    .. usesPch ? pch!.ConsumerInputs : definitionsHeader is null ? [] : [definitionsHeader]];
+                // identity는 이 번역 단위의 구성(단독 TU면 소스 하나, 묶음이면 구성원 목록)이다. 모듈의 전체 소스 목록은 넣지 않는다 —
+                // 소스 하나를 더하거나 지워도 다른 번역 단위는 다시 컴파일하지 않는다(4.2절. 소스 옆 header가 생기거나 사라지는 변화는
+                // 소스 디렉터리의 헤더 이름 목록이 잡는다).
+                string? note = unit.Members.Any(reflectionSet.Contains) ? reflectionNote : null;
+                // --timing: clang -ftime-trace 결과를 출력으로 받아 빌드 끝에 집계한다(12절).
+                string[] timing = request.Timing ? [(windows ? "/clang:" : "") + "-ftime-trace={OUTPUT2}"] : [];
+                actions.Add(new(id, module.Name, "Compile", request.Toolchain.CompilerPath,
+                    [.. arguments, .. roots, .. forced, .. timing, .. depfile, .. TranslationUnit(unit.File, language)],
+                    request.Timing ? [objectPath, recordPath, objectPath + TimingReport.TraceExtension] : [objectPath, recordPath],
+                    unitInputs, headers, extraInputs, usesPch ? [pch!.Action.Id] : [],
+                    [request.ContextFingerprint, request.Configuration.ToString(), module.Optimization.ToString(), .. unit.Members], unit.File,
+                    FailureNote: note, DependencyRecord: recordPath, Members: batch ? unit.Members : null, PreRun: usesPch ? pch!.Check : null));
+                foreach (string member in unit.Members)
+                {
+                    // 논리 명령은 묶음과 무관하게 원본 소스 하나의 단독 컴파일이다(8.6절). 출력은 그 소스가 단독 TU일 때의 object 경로다.
+                    logicalCompiles.Add(new(module.Name, member, request.Toolchain.CompilerPath,
+                        [.. batch ? Common(LanguageOf(member)) : arguments, .. logicalForced, .. TranslationUnit(member, LanguageOf(member))],
+                        batch ? ObjectOf(member) : objectPath, id, forcedFiles));
+                }
+
                 objectPaths.Add(objectPath);
                 compileIds.Add(id);
             }
+
             // Base/MetaSchema 같은 header-only 모듈은 설정만 전파하고 가짜 빈 archive를 만들지 않는다. 리플렉션 생성 소스만 있는
             // 모듈은 그 object로 archive를 만든다.
             if (sources.Length == 0)
@@ -390,7 +620,9 @@ internal static class ActionGraph
             }
         }
 
-        return new(actions, outputs, closures);
+        unityDefineExcluded.Sort(StringComparer.Ordinal);
+        return new(actions, outputs, closures, logicalCompiles, unityBatches, unityDefineExcluded, objectDirectories, generatedFiles, pchDirectories,
+            adaptiveSeparated, notices);
     }
 
     /// <summary>

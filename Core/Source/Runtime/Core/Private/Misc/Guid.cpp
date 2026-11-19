@@ -5,7 +5,7 @@
 namespace rocks {
 namespace {
 
-int HexValue(char character) noexcept {
+int GuidHexValue(char character) noexcept {
     if (character >= '0' && character <= '9') {
         return character - '0';
     }
@@ -58,7 +58,7 @@ Result<Guid> TryParseGuid(StringView text) noexcept {
             continue;
         }
 
-        const int value = HexValue(character);
+        const int value = GuidHexValue(character);
         if (value < 0) {
             return Result<Guid>::Failure(ErrorCode::InvalidArgument);
         }

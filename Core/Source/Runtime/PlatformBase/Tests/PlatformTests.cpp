@@ -7,6 +7,7 @@
 #include <Platform/Thread.h>
 
 using namespace rocks;
+namespace platform_tests_file {
 
 namespace {
 
@@ -166,3 +167,4 @@ TEST(PlatformMutexPublicationAndCrossThreadFree) {
     CHECK(allocator.Stats().liveAllocations == 0);
     CHECK(allocator.Stats().liveBytes == 0);
 }
+} // namespace platform_tests_file

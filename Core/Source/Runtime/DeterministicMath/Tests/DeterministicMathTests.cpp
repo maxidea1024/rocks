@@ -8,6 +8,8 @@
 #include <stdio.h>
 
 using namespace rocks;
+namespace deterministic_math_tests_file {
+
 using namespace rocks::deterministic;
 using platform::BitCast;
 
@@ -189,8 +191,8 @@ TEST(DeterministicMath_SrgbByteTablesAreExact) {
     // 경계 t_k와 그 바로 아래 float: 부호화 값이 k + 0.5 이상/미만이고 byte가 k + 1/k다. 정확한 값
     // 기준 최소 여유(약 2e-9)가 double 오차보다 훨씬 커서 double 구간 함수로 판정할 수 있다.
     for (int k = 0; k < 255; ++k) {
-        const float threshold = BitCast<float>(detail::SrgbEncodeThresholdBits[k]);
-        const float below = BitCast<float>(detail::SrgbEncodeThresholdBits[k] - 1u);
+        const float threshold = BitCast<float>(deterministic::detail::SrgbEncodeThresholdBits[k]);
+        const float below = BitCast<float>(deterministic::detail::SrgbEncodeThresholdBits[k] - 1u);
         CHECK(LinearToSrgb(threshold) * 255.0 >= k + 0.5);
         CHECK(LinearToSrgb(below) * 255.0 < k + 0.5);
         CHECK(LinearToSrgbByte(threshold) == k + 1 && LinearToSrgbByte(below) == k);
@@ -270,3 +272,4 @@ TEST(DeterministicMath_EnvironmentRunRestoresResultsUnderFlushToZero) {
     CHECK(deterministic == expected);
     CHECK(platform::IsDeterministicFloatingPointEnvironment());
 }
+} // namespace deterministic_math_tests_file

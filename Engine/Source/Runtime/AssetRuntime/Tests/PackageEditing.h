@@ -282,6 +282,9 @@ enum class SummaryFault {
     VersionNotRecord,
     CompatPatch,
     CompatNewer,
+    // compatibleWith가 savedBy 기준선보다 낮다(부 −1 → 1.1.0, 주 −1 → 0.9.0 — AS 5.7절 15).
+    CompatOlderMinor,
+    CompatOlderMajor,
     NoProfile,
     NoSettings,
     NoCooker,
@@ -444,6 +447,16 @@ inline Array<uint8> SummaryBytes(Allocator& allocator, const SummaryInput& input
             compatible.minorVersion = static_cast<uint16>(saved.minorVersion + 1);
         }
 
+        if (fault == SummaryFault::CompatOlderMinor) {
+            compatible.minorVersion = static_cast<uint16>(saved.minorVersion - 1);
+        }
+
+        if (fault == SummaryFault::CompatOlderMajor) {
+            constexpr uint16 OlderMinor = 9;
+            compatible.majorVersion = static_cast<uint16>(saved.majorVersion - 1);
+            compatible.minorVersion = OlderMinor;
+        }
+
         ok = ok && AddEngine(allocator, summary,
                              fault == SummaryFault::NoSavedBy ? Guid{13, 13}
                                                               : package_detail::SummarySavedByField,
@@ -518,7 +531,7 @@ inline Array<uint8> SummaryBytes(Allocator& allocator, const SummaryInput& input
 }
 
 inline bool EditorFault(SummaryFault fault) noexcept {
-    return fault >= SummaryFault::NoSavedBy && fault <= SummaryFault::CompatNewer;
+    return fault >= SummaryFault::NoSavedBy && fault <= SummaryFault::CompatOlderMajor;
 }
 
 inline bool CookedFault(SummaryFault fault) noexcept {

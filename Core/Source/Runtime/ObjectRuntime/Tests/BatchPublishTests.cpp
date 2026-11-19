@@ -73,6 +73,7 @@ void batch_fixture::BatchNode::Trace(TraceVisitor& visitor) const noexcept {
 }
 
 using namespace rocks;
+namespace batch_publish_tests_file {
 
 namespace {
 
@@ -675,3 +676,4 @@ TEST(BatchPublish_ShadesNewTargetsDuringMarking) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace batch_publish_tests_file

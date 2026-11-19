@@ -10,6 +10,8 @@
 // import 왕복), MergeByKey가 준비 상태를 보는지, 같은 경로 검사의 선형 작업량과 JSON 대입 청구,
 // 버린 단위의 고정이 게시 검사에서 빠지는지.
 using namespace rocks;
+namespace text_assign_whole_tests_file {
+
 using namespace rocks::reflection_text;
 using namespace rocks::test::assign;
 using reflection_fixture::AssignKindBase;
@@ -393,3 +395,4 @@ TEST(TextAssign_DiscardedUnitPinsLeaveChecks) {
     Peek holder(fixture, object);
     CHECK(holder->count == 1 && holder->bundle.crew.Size() == 0);
 }
+} // namespace text_assign_whole_tests_file

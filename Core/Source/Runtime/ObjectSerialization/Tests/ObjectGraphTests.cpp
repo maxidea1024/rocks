@@ -7,6 +7,8 @@
 #include "GraphTestSupport.h"
 
 using namespace rocks;
+namespace object_graph_tests_file {
+
 using test::graph::SameBytes;
 
 namespace {
@@ -592,3 +594,4 @@ TEST(ObjectGraphDeterministicMutationHarnessHasNoPartialPublicationOrLeaks) {
         CHECK(LiveNodes == 2);
     }
 }
+} // namespace object_graph_tests_file

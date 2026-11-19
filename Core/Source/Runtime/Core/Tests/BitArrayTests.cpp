@@ -5,6 +5,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace bit_array_tests_file {
 
 namespace {
 
@@ -365,3 +366,4 @@ TEST(BitArrayDeterministicMixedOperationsMatchReferenceModel) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace bit_array_tests_file

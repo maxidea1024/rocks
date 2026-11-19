@@ -4,6 +4,8 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Object/TypeRegistry.h>
 
+namespace metadata_tests_file {
+
 namespace {
 
 using namespace rocks;
@@ -216,3 +218,4 @@ TEST(ObjectMetadataRetainsCodeUntilLastReaderAndUnregisterCompletes) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace metadata_tests_file

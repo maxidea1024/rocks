@@ -18,6 +18,8 @@
 #include <string.h>
 
 using namespace rocks;
+namespace aes_layer_tests_file {
+
 using namespace rocks::crypto;
 
 // AES 경량 계층(Docs/Design/Crypto.ko.md 5.2·5.3·12절)의 시험이다.
@@ -1247,3 +1249,4 @@ TEST(CryptoAesCtrCapacity) {
         }
     }
 }
+} // namespace aes_layer_tests_file

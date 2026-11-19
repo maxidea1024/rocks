@@ -34,7 +34,7 @@ internal static partial class MetaTests
             Verify.Equal("Text", Field("probe::Value", "fixed").GetProperty("element").GetProperty("kind").GetString(), "static array element");
             Verify.Equal("Text", Field("probe::Value", "byKey").GetProperty("element").GetProperty("kind").GetString(), "map value");
             Verify.Equal("Text", Field("probe::Leaf", "label").GetProperty("value").GetProperty("kind").GetString(), "struct member");
-            string generated = Compact(File.ReadAllText(probe.Output));
+            string generated = Compact(probe.GeneratedText());
             Verify.Contains("{ValueKind::Text,Guid{}}", generated, "generated text schema");
             Verify.Contains("PathStructMember<::probe::Leaf,&::probe::Leaf::label,ValueKind::Text>", generated, "struct member path thunk");
             ProcessResult compiled = await probe.CompileGeneratedAsync();

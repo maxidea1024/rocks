@@ -3,6 +3,8 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace file_atomic_tests_file {
+
 using namespace rocks::platform;
 
 namespace {
@@ -223,3 +225,4 @@ TEST(PlatformFileAtomicFixtureDetectsEarlyBackendAccess) {
         CHECK(worker.passed);
     }
 }
+} // namespace file_atomic_tests_file

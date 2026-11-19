@@ -7,6 +7,8 @@
 // InvalidArgument, 트랜잭션에 객체를 넣은 뒤의 실패는 트랜잭션을 고정한다. worker Validate·hook
 // 스레드·Required 검사 중 FindObject도 본다.
 using namespace rocks;
+namespace graph_stage_state_tests_file {
+
 using namespace rocks::test::stage;
 
 // 상태 기계: 순서 위반·다른 트랜잭션·문맥 오류 같은 호출 검사 실패는 상태를 바꾸지 않아 같은
@@ -496,3 +498,4 @@ TEST(GraphStage_FinishedTransactionIsRejectedFirst) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace graph_stage_state_tests_file

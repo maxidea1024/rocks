@@ -5,6 +5,8 @@
 
 #include <Platform/Thread.h>
 
+namespace thread_ownership_tests_file {
+
 namespace {
 
 using namespace rocks;
@@ -96,3 +98,4 @@ TEST(ObjectOwnerThreadChecksDoNotForbidForeignLeaseRelease) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace thread_ownership_tests_file

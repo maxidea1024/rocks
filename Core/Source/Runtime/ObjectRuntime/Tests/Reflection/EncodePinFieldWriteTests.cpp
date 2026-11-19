@@ -8,6 +8,8 @@
 // owner의 생성 필드 쓰기(WriteGeneratedField·FieldWriteOperation)는 값·String·Soft·참조 모두
 // Busy다.
 using namespace rocks;
+namespace encode_pin_field_write_tests_file {
+
 using reflection_fixture::AssetFields;
 using reflection_fixture::Base;
 using reflection_fixture::Node;
@@ -111,3 +113,4 @@ TEST(EncodePin_RegisteredFieldWritesAreBusy) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace encode_pin_field_write_tests_file

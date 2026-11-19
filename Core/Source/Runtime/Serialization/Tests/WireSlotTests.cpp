@@ -4,6 +4,7 @@
 #include <Platform/Memory.h>
 
 using namespace rocks;
+namespace wire_slot_tests_file {
 
 // 컨테이너 안 자리의 wire 규칙(WireSlot)과 원소 자리 길이 prefix Record 시험이다
 // (Docs/Design/ReflectionExtensions.ko.md 1.2절 — 리플렉션 B9a3).
@@ -264,3 +265,4 @@ TEST(WireSlot_PrefixedContentIsChargedOnceInRecordTree) {
     REQUIRE(charged);
     CHECK(alone.Value().WorkUsed() >= innerBytes.Value().Size());
 }
+} // namespace wire_slot_tests_file

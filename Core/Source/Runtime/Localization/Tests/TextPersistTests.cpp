@@ -7,6 +7,7 @@
 // TryGetPersistentForm의 세 형태와 Format·Integer Unsupported, DeepClone의 형태 보존·원래
 // allocator와 독립인 수명·깊이·작업 한도·할당 실패 정리.
 using namespace rocks;
+namespace text_persist_tests_file {
 
 namespace {
 
@@ -164,3 +165,4 @@ TEST(TextPersist_DeepCloneLimitsAndAllocationFailure) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace text_persist_tests_file

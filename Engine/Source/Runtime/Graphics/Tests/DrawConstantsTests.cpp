@@ -4,6 +4,8 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace draw_constants_tests_file {
+
 using namespace rocks::graphics;
 
 namespace {
@@ -69,3 +71,4 @@ TEST(DrawConstants_BytesViewTheStructureInPlace) {
     platform::MemoryCopy(&alpha, objectBytes.Data() + 76, sizeof(alpha));
     CHECK(alpha == 1.0f);
 }
+} // namespace draw_constants_tests_file

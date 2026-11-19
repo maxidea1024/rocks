@@ -8,6 +8,8 @@
 #include <Task/DedicatedLane.h>
 
 using namespace rocks;
+namespace dedicated_lane_tests_file {
+
 using namespace rocks::platform;
 
 namespace {
@@ -683,3 +685,4 @@ TEST(DedicatedLane_LauncherFailureLeavesLaneUnchanged) {
     CHECK(seen == TaskLane::Render);
     REQUIRE(lane.Shutdown());
 }
+} // namespace dedicated_lane_tests_file

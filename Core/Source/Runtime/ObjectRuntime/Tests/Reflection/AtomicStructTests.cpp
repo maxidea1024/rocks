@@ -10,6 +10,8 @@
 // 비전파, Core 값 타입 미러 17종 중 Transform을 뺀 16종의 Atomic, Transform3f·Transform3d·Rotator
 // 미러와 Core 타입의 멤버 대조. 차이 쓰기·override 단위(A5)는 여기서 다루지 않는다.
 using namespace rocks;
+namespace atomic_struct_tests_file {
+
 using core_type_bindings::Transform3dBinding;
 using core_type_bindings::Transform3fBinding;
 
@@ -450,3 +452,4 @@ TEST(AtomicStruct_Transform3MirrorsMatchCoreTypes) {
 
     CHECK(types.Shutdown());
 }
+} // namespace atomic_struct_tests_file

@@ -1,3 +1,5 @@
+#include "AllocatorMicroBench.h"
+
 #include <Core/Memory/BinnedAllocator.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <GcSoak/GcSoak.h>
@@ -29,7 +31,13 @@
 // 사용:
 //   GcBench                          기본 표(100K·1M × 간선 4·8, 1M 잎 50%)
 //   GcBench --objects 100000 --refs 4 [--leaf 50] [--reps 5] [--workers 8]
-//   GcBench --allocators             할당자 비교(작은 그래프의 churn 회수, platform·System·Binned)
+//   GcBench --allocators [--objects N] [--allocator-kind K]
+//                                    할당자 비교(그래프 생성·churn 회수·종료 —
+//                                    bump·platform·System· Binned, K는 0–3으로 하나만 고른다.
+//                                    할당자 몫은 bump를 뺀 값이다)
+//   GcBench --allocator-micro [--allocator-kind K]
+//                                    할당자 작은 벤치(쌍·묶음·스레드 사이·동시 —
+//                                    AllocatorMicroBench.h)
 //   GcBench --soak 200000 [--seed 7] [--soak-objects 4000] [--soak-workers --workers 4]
 //                  [--soak-time-budget]
 //                                    장기 tick 시뮬레이터(GcSoak)를 돌리고 불변식 위반을 보고한다
@@ -166,6 +174,105 @@ private:
     uint64 allocations_ = 0;
 };
 
+// 반환이 무동작인 벤치 전용 할당자다(Docs/Design/GarbageCollectionScale.ko.md 18.2절 — 할당자 몫을
+// 재는 바닥). 플랫폼에서 큰 조각을 받아 주소만 올리고 파괴 때 조각을 모두 반환한다. 한 스레드
+// 전용이다(잠금 없음 — 병렬 표식처럼 여러 스레드가 할당하는 시나리오에는 쓰지 않는다).
+class BumpAllocator final : public Allocator {
+public:
+    BumpAllocator() noexcept = default;
+    BumpAllocator(const BumpAllocator&) = delete;
+    BumpAllocator& operator=(const BumpAllocator&) = delete;
+
+    ~BumpAllocator() noexcept override {
+        while (chunks_ != nullptr) {
+            Chunk* next = chunks_->next;
+            platform::AlignedFree(chunks_);
+            chunks_ = next;
+        }
+    }
+
+    Result<void*> Allocate(usize bytes, usize alignment, uint32) noexcept override {
+        if (bytes == 0) {
+            return Result<void*>::Success(nullptr);
+        }
+
+        uptr start = AlignUp(cursor_, alignment);
+        if (chunks_ == nullptr || start + bytes > limit_) {
+            // 새 조각을 받는다. 조각보다 큰 요청은 그 크기에 맞춘 조각을 따로 받는다(남은 자리는
+            // 버린다).
+            const usize wanted = bytes + alignment;
+            const usize payload = wanted > ChunkPayloadBytes ? wanted : ChunkPayloadBytes;
+            void* memory = platform::AlignedAllocate(payload + sizeof(Chunk), ChunkAlignment);
+            if (memory == nullptr) {
+                return Result<void*>::Failure(ErrorCode::OutOfMemory);
+            }
+
+            auto* chunk = static_cast<Chunk*>(memory);
+            chunk->next = chunks_;
+            chunks_ = chunk;
+            cursor_ = reinterpret_cast<uptr>(memory) + sizeof(Chunk);
+            limit_ = cursor_ + payload;
+            start = AlignUp(cursor_, alignment);
+        }
+
+        cursor_ = start + bytes;
+        return Result<void*>::Success(reinterpret_cast<void*>(start));
+    }
+
+    Result<void> Deallocate(void*) noexcept override {
+        return Result<void>::Success();
+    }
+
+private:
+    struct Chunk {
+        Chunk* next;
+    };
+
+    static constexpr usize ChunkAlignment = 64;
+    static constexpr usize ChunkPayloadBytes = (usize{64} << 20) - sizeof(Chunk);
+
+    static uptr AlignUp(uptr value, usize alignment) noexcept {
+        return (value + alignment - 1) & ~(static_cast<uptr>(alignment) - 1);
+    }
+
+    Chunk* chunks_ = nullptr;
+    uptr cursor_ = 0;
+    uptr limit_ = 0;
+};
+
+// 플랫폼 할당을 그대로 부르는 벤치 전용 할당자다(계수·머리 없음 — 작은 벤치의 기준).
+class RawPlatformAllocator final : public Allocator {
+public:
+    Result<void*> Allocate(usize bytes, usize alignment, uint32) noexcept override {
+        if (bytes == 0) {
+            return Result<void*>::Success(nullptr);
+        }
+
+        void* memory = platform::AlignedAllocate(bytes, alignment);
+        return memory != nullptr ? Result<void*>::Success(memory)
+                                 : Result<void*>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    Result<void> Deallocate(void* address) noexcept override {
+        platform::AlignedFree(address);
+        return Result<void>::Success();
+    }
+};
+
+// 할당자 비교·작은 벤치의 할당자 종류다(--allocator-kind의 값).
+enum class AllocatorKind : uint32 {
+    Bump,
+    Platform,
+    System,
+    Binned,
+    Count
+};
+
+constexpr const char* AllocatorKindNames[] = {"bump", "platform", "SystemAllocator", "Binned"};
+static_assert(sizeof(AllocatorKindNames) / sizeof(AllocatorKindNames[0]) ==
+                  static_cast<usize>(AllocatorKind::Count),
+              "AllocatorKindNames must match AllocatorKind");
+
 // 간선을 가진 노드다. Trace는 부수 효과가 없어 병렬 trace를 허용한다(parallelTraceSafe).
 class BenchNode final : public Object {
 public:
@@ -261,6 +368,10 @@ struct Options {
     uint32 reps = 0;
     uint32 workers = 8;
     bool allocators = false;
+    // 할당자 작은 벤치(--allocator-micro)와 할당자 고르기(--allocator-kind K — 없으면 모두)다.
+    bool allocatorMicro = false;
+    uint32 allocatorKind = 0;
+    bool allocatorKindSet = false;
     bool clusters = false;
     bool packages = false;
     // 참조 위치 표(M3)를 끈다(RegistryOptions::referenceTables — 비교 측정).
@@ -1589,25 +1700,32 @@ int RunClusterScenarios(const Options& options) noexcept {
     return 0;
 }
 
-// 할당자별 churn 회수 비교다. SystemAllocator·BinnedAllocator는 해제 때 원장을 선형 검색하므로 큰
-// 그래프에서는 끝나지 않는다(Docs/Design/GarbageCollectionScale.ko.md 3.2절 8번). 작은 그래프에서
-// 잰다.
+// 할당자 비교다(Docs/Design/GarbageCollectionScale.ko.md 18.2절). 같은 그래프의 생성·연결, churn
+// 생성과 회수, 종료 회수를 할당자마다 객체당 시간으로 낸다. bump(반환이 무동작)가 바닥이고, 다른
+// 할당자의 값에서 bump의 값을 뺀 것이 그 할당자의 몫이다. --objects로 규모를 정한다(기본 20K).
+constexpr uint32 DefaultAllocatorObjects = 20000;
+constexpr uint32 AllocatorChurnRounds = 5;
+
 int RunAllocatorComparison(const Options& options) noexcept {
-    constexpr uint32 LiveObjects = 20000;
-    constexpr uint32 Rounds = 5;
-    printf("\n== allocator comparison: live %u, refs avg %u, churn 10%% x %u ==\n", LiveObjects,
-           options.refs, Rounds);
-    for (uint32 kind = 0; kind < 3; ++kind) {
+    const uint32 liveObjects = options.objects != 0 ? options.objects : DefaultAllocatorObjects;
+    printf("\n== allocator comparison: live %u, refs avg %u, churn 10%% x %u ==\n", liveObjects,
+           options.refs, AllocatorChurnRounds);
+    for (uint32 kind = 0; kind < static_cast<uint32>(AllocatorKind::Count); ++kind) {
+        if (options.allocatorKindSet && options.allocatorKind != kind) {
+            continue;
+        }
+
+        BumpAllocator bump;
         BenchAllocator platformMemory;
         SystemAllocator system;
         BinnedAllocator binned(system);
-        Allocator* memory = kind == 0   ? static_cast<Allocator*>(&platformMemory)
-                            : kind == 1 ? static_cast<Allocator*>(&system)
-                                        : static_cast<Allocator*>(&binned);
-        const char* name = kind == 0 ? "platform" : kind == 1 ? "SystemAllocator" : "Binned";
+        Allocator* const choices[] = {&bump, &platformMemory, &system, &binned};
+        Allocator* memory = choices[kind];
+        uint64 buildTime = 0;
         uint64 createTotal = 0;
         uint64 reclaimTotal = 0;
         uint64 teardownTime = 0;
+        uint32 liveBeforeTeardown = 0;
         {
             TypeRegistry types(*memory);
             TypeTokens tokens;
@@ -1623,17 +1741,19 @@ int RunAllocatorComparison(const Options& options) noexcept {
                 Array<ObjectHandle> all(*memory);
                 Array<ObjectHandle> nodes(*memory);
                 Array<RootRef<Object>> roots(*memory);
-                if (!builder.CreateGroups(LiveObjects, all, nodes, roots) ||
+                const uint64 buildStarted = platform::MonotonicNanoseconds();
+                if (!builder.CreateGroups(liveObjects, all, nodes, roots) ||
                     !builder.Link(nodes, all, options.refs)) {
                     return 3;
                 }
 
-                for (uint32 round = 0; round < Rounds; ++round) {
+                buildTime = platform::MonotonicNanoseconds() - buildStarted;
+                for (uint32 round = 0; round < AllocatorChurnRounds; ++round) {
                     Array<ObjectHandle> garbage(*memory);
                     Array<ObjectHandle> garbageNodes(*memory);
                     Array<RootRef<Object>> garbagePins(*memory);
                     const uint64 before = platform::MonotonicNanoseconds();
-                    if (!builder.CreateGroups(LiveObjects / 10, garbage, garbageNodes,
+                    if (!builder.CreateGroups(liveObjects / 10, garbage, garbageNodes,
                                               garbagePins) ||
                         !builder.Link(garbageNodes, all, options.refs)) {
                         return 3;
@@ -1649,6 +1769,7 @@ int RunAllocatorComparison(const Options& options) noexcept {
                     reclaimTotal += collected.Value().reclaimNanoseconds;
                 }
 
+                liveBeforeTeardown = registry.Stats().liveObjects;
                 roots.Clear();
                 const uint64 teardown = platform::MonotonicNanoseconds();
                 if (!registry.Shutdown(access)) {
@@ -1664,15 +1785,40 @@ int RunAllocatorComparison(const Options& options) noexcept {
             }
         }
 
-        if (!binned.Shutdown()) {
-            return 7;
+        const double churned = static_cast<double>(liveObjects / 10) * AllocatorChurnRounds;
+        printf("  %-16s build %8.1f ns/object, churn create+link %8.1f ns/object, reclaim %8.1f "
+               "ns/object, teardown %8.1f ms (%.1f ns/object)\n",
+               AllocatorKindNames[kind],
+               static_cast<double>(buildTime) / static_cast<double>(liveObjects),
+               static_cast<double>(createTotal) / churned,
+               static_cast<double>(reclaimTotal) / churned, Milliseconds(teardownTime),
+               static_cast<double>(teardownTime) /
+                   static_cast<double>(liveBeforeTeardown == 0 ? 1 : liveBeforeTeardown));
+        fflush(stdout);
+    }
+
+    return 0;
+}
+
+// 할당자 작은 벤치다(AllocatorMicroBench.h). bump는 반환이 무동작이라 넣지 않고, platform은 계수
+// 없는 플랫폼 할당이다.
+int RunAllocatorMicro(const Options& options) noexcept {
+    printf("\n== allocator micro bench ==\n");
+    for (uint32 kind = static_cast<uint32>(AllocatorKind::Platform);
+         kind < static_cast<uint32>(AllocatorKind::Count); ++kind) {
+        if (options.allocatorKindSet && options.allocatorKind != kind) {
+            continue;
         }
 
-        const double churned = static_cast<double>(LiveObjects / 10) * Rounds;
-        printf("  %-16s create+link %8.1f ns/object, reclaim %8.1f ns/object, teardown %8.1f ms\n",
-               name, static_cast<double>(createTotal) / churned,
-               static_cast<double>(reclaimTotal) / churned, Milliseconds(teardownTime));
-        fflush(stdout);
+        RawPlatformAllocator platformMemory;
+        SystemAllocator system;
+        BinnedAllocator binned(system);
+        Allocator* const choices[] = {nullptr, &platformMemory, &system, &binned};
+        if (const int status =
+                gc_bench::RunAllocatorMicroBench(*choices[kind], AllocatorKindNames[kind]);
+            status != 0) {
+            return status;
+        }
     }
 
     return 0;
@@ -1835,6 +1981,8 @@ bool Parse(int argc, char** argv, Options& options) noexcept {
         uint64 value = 0;
         if (platform::CStringEquals(argv[index], "--allocators")) {
             options.allocators = true;
+        } else if (platform::CStringEquals(argv[index], "--allocator-micro")) {
+            options.allocatorMicro = true;
         } else if (platform::CStringEquals(argv[index], "--clusters")) {
             options.clusters = true;
         } else if (platform::CStringEquals(argv[index], "--packages")) {
@@ -1889,6 +2037,14 @@ bool Parse(int argc, char** argv, Options& options) noexcept {
             options.packageProfile = static_cast<uint32>(value > 100 ? 100 : value);
             options.packageProfileSet = true;
             ++index;
+        } else if (platform::CStringEquals(argv[index], "--allocator-kind")) {
+            if (value >= static_cast<uint64>(AllocatorKind::Count)) {
+                return false;
+            }
+
+            options.allocatorKind = static_cast<uint32>(value);
+            options.allocatorKindSet = true;
+            ++index;
         } else if (platform::CStringEquals(argv[index], "--world-boundary")) {
             options.worldBoundary = static_cast<uint32>(value > 100 ? 100 : value);
             options.worldBoundarySet = true;
@@ -1927,6 +2083,10 @@ int Run(const Options& options) noexcept {
 
     if (options.clusterSoakTicks != 0) {
         return RunClusterSoak(options);
+    }
+
+    if (options.allocatorMicro) {
+        return RunAllocatorMicro(options);
     }
 
     if (options.allocators) {
@@ -1982,7 +2142,8 @@ int main(int argc, char** argv) {
     Options options;
     if (!Parse(argc, argv, options)) {
         printf("usage: GcBench [--objects N] [--refs K] [--leaf P] [--reps R] [--workers W] "
-               "[--allocators] [--clusters] [--soak TICKS [--seed S] [--soak-objects N] "
+               "[--allocators [--allocator-kind K]] [--allocator-micro] [--clusters] "
+               "[--soak TICKS [--seed S] [--soak-objects N] "
                "[--soak-workers] [--soak-time-budget]] [--cluster-soak TICKS [--packages]] "
                "[--no-tables]\n");
         return 1;

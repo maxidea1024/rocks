@@ -8,8 +8,11 @@
 // enum), 성질 플래그(부팅 고정·치트·콘솔 읽기 전용·사용자 설정). 컴파일 실패 사례는 Rocks.ToolTests
 // native(CVarCompilerTests)가 실제 컴파일러로 확인한다.
 using namespace rocks;
+namespace c_var_tests_file {
+
 using namespace rocks::config;
 using namespace rocks::test::config;
+} // namespace c_var_tests_file
 
 namespace cvar_test {
 
@@ -111,6 +114,8 @@ constinit CVar<int32> WeatherRain = cvar::Var("weather.rain", 1).Help("Rain amou
 constinit CVar<int32> NeverRegistered = cvar::Var("game.never", 1).Help("Never registered");
 
 } // namespace cvar_test
+
+namespace c_var_tests_file {
 
 namespace {
 
@@ -325,3 +330,4 @@ TEST(CVar_CheatVarsAreHiddenUnderReleaseRules) {
         CHECK(!ValueOf(development, "game.god").boolean);
     }
 }
+} // namespace c_var_tests_file

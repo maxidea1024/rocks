@@ -8,8 +8,11 @@
 // 순서 (Hotfix·Session·Code·Scoped·Console·Server), `Set`·`Clear`·`ClearLayer`, `ScopedOverride`
 // 중첩, `Watcher`·`OnSynced`. 여러 스레드 시험은 CVarThreadTests.cpp다.
 using namespace rocks;
+namespace c_var_snapshot_tests_file {
+
 using namespace rocks::config;
 using namespace rocks::test::config;
+} // namespace c_var_snapshot_tests_file
 
 namespace cvar_snapshot_test {
 
@@ -45,6 +48,8 @@ constinit BootCVar<int32> SnapThreads = cvar::Boot("render.snap.threads", 2).Hel
 constinit CVar<int32> SnapLate = cvar::Var("render.snap.late", 7).Help("Registered later");
 
 } // namespace cvar_snapshot_test
+
+namespace c_var_snapshot_tests_file {
 
 namespace {
 
@@ -413,3 +418,4 @@ TEST(CVar_ScopedOverrideRemovesFromItsOwnContext) {
     REQUIRE(context.Sync());
     CHECK(SnapCount.Get() == 4);
 }
+} // namespace c_var_snapshot_tests_file

@@ -9,6 +9,7 @@
 // 허용오차·지우기·시간 옮기기·SetKeys 검증·FindKey·IsConstant·시간 범위·Shift·Scale·선택 키 이동·
 // Bake·중복 키 제거·Reset·복사, 그리고 모든 실패(잘못된 인자·할당 실패)에서 커브가 그대로인지.
 using namespace rocks;
+namespace curve_edit_tests_file {
 
 namespace {
 
@@ -531,3 +532,4 @@ TEST(CurveEdit_PlainCurveOperations) {
     CHECK(ErrorOf(curve.TrySetKeys(unsorted)) == ErrorCode::InvalidArgument);
     CHECK(curve.KeyCount() == 3);
 }
+} // namespace curve_edit_tests_file

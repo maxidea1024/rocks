@@ -9,6 +9,8 @@
 // 제외 플래그 표, 생성 스키마 필드(fixture ReflectionTestFixtures/FieldFlagFixture.h)의 용도별
 // 판정, 입력 판정의 제외·ReadOnly 순서와 유효 플래그 전파, codec 옵션 범위 검사.
 using namespace rocks;
+namespace text_use_tests_file {
+
 using namespace rocks::reflection_text;
 using reflection_fixture::FlagHolder;
 
@@ -205,3 +207,4 @@ TEST(TextCodecOptions_ValidateRanges) {
     bad.maxElements = MaxArrayElements + 1;
     CHECK(rejects(bad));
 }
+} // namespace text_use_tests_file

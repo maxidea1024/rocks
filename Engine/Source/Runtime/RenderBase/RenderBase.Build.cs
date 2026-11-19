@@ -1,3 +1,4 @@
+using Rocks.Build;
 using Rocks.Build.Rules;
 
 // Device-bound render base (Docs/Design/RenderBase.ko.md, part of UE RenderCore): render lane, frame
@@ -9,6 +10,9 @@ using Rocks.Build.Rules;
 public sealed class RenderBase : EngineModuleRules
 {
     protected override string ModuleName => "RenderBase";
+
+    // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
+    protected override UnityMode Unity => UnityMode.On;
 
     protected override string[] RequiredModules => ["Graphics", "Task", "MetaSchema", "TraceCapture"];
 }

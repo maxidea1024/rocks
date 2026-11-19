@@ -4,6 +4,7 @@
 #include <Platform/Memory.h>
 
 using namespace rocks;
+namespace instanced_struct_wire_tests_file {
 
 // InstancedStruct 값(WireType::InstancedStruct = 17)의 필드 자리·원소 자리 형식, 내용 Record header
 // 검사, cursor 불변, 예산 시험이다(Docs/Design/ReflectionExtensions.ko.md 1.2절 — 리플렉션 B9a3).
@@ -201,3 +202,4 @@ TEST(InstancedStructWire_FieldContentIsChargedOnceInRecordTree) {
     REQUIRE(ReadInstancedStructField(alone.Value()));
     CHECK(alone.Value().WorkUsed() >= innerBytes.Value().Size());
 }
+} // namespace instanced_struct_wire_tests_file

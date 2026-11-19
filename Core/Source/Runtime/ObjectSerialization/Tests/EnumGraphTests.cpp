@@ -11,6 +11,8 @@
 // wire 왕복과 재저장 byte 동일성, C++에서 직접 넣은 선언되지 않은 값의 저장 거부, 저장된 선언되지
 // 않은 값·잘못된 wire의 복원 거부(객체를 공개하지 않는다).
 using namespace rocks;
+namespace enum_graph_tests_file {
+
 using reflection_fixture::Bias;
 using reflection_fixture::Channels;
 using reflection_fixture::EnumFields;
@@ -221,3 +223,4 @@ TEST(EnumGraph_LoadRejectsUndeclaredValuesAndWrongWire) {
 
     CHECK(types.Shutdown());
 }
+} // namespace enum_graph_tests_file

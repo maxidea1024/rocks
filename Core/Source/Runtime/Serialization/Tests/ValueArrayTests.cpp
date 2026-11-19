@@ -7,6 +7,7 @@
 #include <Platform/Memory.h>
 
 using namespace rocks;
+namespace value_array_tests_file {
 
 // 단일 값 원소 배열(WireType::ValueArray)의 형식·header 검사 순서·원소 내용·예산 공유·writer 한도
 // 시험이다(Docs/Design/ReflectionFoundations.ko.md 5.4·5.6절).
@@ -840,3 +841,4 @@ TEST(ValueArray_InstancedStructAndTextElements) {
     // 원소 tag끼리 다르면 TypeMismatch다.
     CHECK(OpenError(enoughStructs.View(), Wire(WireType::Text), 10) == ErrorCode::TypeMismatch);
 }
+} // namespace value_array_tests_file

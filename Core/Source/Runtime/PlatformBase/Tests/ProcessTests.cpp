@@ -15,6 +15,8 @@ platform::PathStyle ExpectedHostPathStyle() noexcept;
 } // namespace rocks::test
 
 using namespace rocks;
+namespace process_tests_file {
+
 using namespace rocks::platform;
 using namespace rocks::test;
 
@@ -998,3 +1000,4 @@ TEST(Process_ProcessIdentityHelpers) {
     REQUIRE(run.status);
     CHECK(run.exit.kind == ProcessExitKind::Exited && run.exit.code == 0);
 }
+} // namespace process_tests_file

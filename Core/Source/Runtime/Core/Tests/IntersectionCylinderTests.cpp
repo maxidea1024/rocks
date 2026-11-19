@@ -6,6 +6,7 @@
 #include <Platform/PlatformMath.h>
 
 using namespace rocks;
+namespace intersection_cylinder_tests_file {
 
 // Cylinder 형상(CY1)과 Capsule 평면·볼록 영역 판정 보강 시험이다(Docs/Design/CylinderShape.ko.md
 // 3.6절). 경계 포함은 표본 점이 아니라 정확 산술(정수) oracle로 판정한다.
@@ -1347,3 +1348,4 @@ TEST(CylinderReviewSegmentStartMatchesContains) {
 TEST(CylinderReviewUnderflowEntryIsSurfaceContact) {
     CheckUnderflowEntryIsSurfaceContact();
 }
+} // namespace intersection_cylinder_tests_file

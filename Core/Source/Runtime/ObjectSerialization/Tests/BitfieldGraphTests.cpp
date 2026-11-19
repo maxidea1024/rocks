@@ -12,6 +12,8 @@
 // 읽기·쓰기와 이웃 비트 보존(같은 바이트의 NATIVE bitfield·다른 PROPERTY bitfield·일반 멤버),
 // ReadOnly 쓰기 거부.
 using namespace rocks;
+namespace bitfield_graph_tests_file {
+
 using reflection_fixture::BitfieldChild;
 using reflection_fixture::BitfieldFlags;
 using reflection_fixture::BitfieldHolder;
@@ -216,3 +218,4 @@ TEST(BitfieldSchema_IsBoolAndInherited) {
     CHECK(FieldOf<BitfieldChild>("on") == FieldOf<BitfieldHolder>("on"));
     CHECK(FieldOf<BitfieldChild>("hidden") == FieldOf<BitfieldHolder>("hidden"));
 }
+} // namespace bitfield_graph_tests_file

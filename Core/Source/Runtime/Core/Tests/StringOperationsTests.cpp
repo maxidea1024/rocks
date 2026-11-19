@@ -4,6 +4,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace string_operations_tests_file {
 
 namespace {
 
@@ -283,3 +284,4 @@ TEST(StringReplaceSameSensitiveDoesNotAllocateOrInvalidate) {
     }
     CHECK(system.Stats().liveAllocations == 0);
 }
+} // namespace string_operations_tests_file

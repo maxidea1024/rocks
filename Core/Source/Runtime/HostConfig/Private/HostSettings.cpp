@@ -310,17 +310,12 @@ Result<void> HostSettings::Initialize(const HostSettingsOptions& options) noexce
         step = context_->MakeProcessDefault();
     }
 
+    // 모든 모듈의 설정 등록(log.*·trace.*·기기 프로필 등 — 각 모듈 수명 객체의 static
+    // RegisterSettings)을 모듈 표 순서로 부른다(Docs/Design/ModuleLoader.ko.md 3.10절 MD22). 늦게
+    // 시작하는 모듈의 이름도 파일·CompleteStartup 전에 등록되어 오타 경고가 나지 않는다.
     if (step) {
         stage = "settings registration";
-        step = RegisterLogSettings(*context_);
-    }
-
-    if (step) {
-        step = trace_control::RegisterTraceSettings(*context_);
-    }
-
-    if (step) {
-        step = config::RegisterDeviceProfileSettings(*context_);
+        step = RegisterModuleSettings(options.modules);
     }
 
     if (step && options.registerSettings != nullptr) {
@@ -357,6 +352,38 @@ Result<void> HostSettings::Initialize(const HostSettingsOptions& options) noexce
     }
 
     return step;
+}
+
+Result<void> HostSettings::RegisterModuleSettings(ModuleLoader* modules) noexcept {
+    const ModuleTable table = modules != nullptr ? modules->Table() : GeneratedModuleTable();
+    for (const ModuleTableRow& row : table) {
+        const ModuleEntry& entry = row.entry();
+        if (entry.registerSettings == nullptr) {
+            continue;
+        }
+
+        // 등록한 CVar 핸들·설정 struct가 모듈 코드를 가리키는 동안 그 모듈 코드를 붙잡는다(로더가
+        // 없으면 정적 링크 코드라 lease가 없다).
+        if (modules != nullptr) {
+            auto lease = modules->AcquireLease(row.name);
+            if (!lease) {
+                return Result<void>::Failure(lease.Error());
+            }
+
+            if (auto retained = context_->RetainModule(Move(lease.Value())); !retained) {
+                return retained;
+            }
+        }
+
+        if (auto registered = entry.registerSettings(*context_); !registered) {
+            Log::Error(LogHostConfig,
+                       "Settings of module {Module} could not be registered: {Error}",
+                       StringView(row.name), ErrorCodeName(registered.Error()));
+            return registered;
+        }
+    }
+
+    return Result<void>::Success();
 }
 
 config::DeviceTraits& HostSettings::DeviceTraits() noexcept {

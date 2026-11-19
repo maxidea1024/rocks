@@ -5,7 +5,7 @@
 namespace rocks {
 namespace {
 
-constexpr usize HeaderBytes = detail::WireSequenceHeaderBytes(1); // u32 원소 tag + u32 count
+constexpr usize SetWireHeaderBytes = detail::WireSequenceHeaderBytes(1); // u32 원소 tag + u32 count
 
 } // namespace
 
@@ -87,7 +87,7 @@ Result<void> SetWireWriter::Check() const noexcept {
 }
 
 Result<void> SetWireWriter::End() const noexcept {
-    return detail::EndWireSequence(*out_, start_, HeaderBytes, count_, shape_, maxBytes_);
+    return detail::EndWireSequence(*out_, start_, SetWireHeaderBytes, count_, shape_, maxBytes_);
 }
 
 } // namespace rocks

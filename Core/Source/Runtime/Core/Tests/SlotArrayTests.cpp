@@ -5,6 +5,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace slot_array_tests_file {
 
 namespace {
 
@@ -441,3 +442,4 @@ TEST(SlotArray_EnsureCapacityMakesNextAddAllocationFree) {
     allocator.DisableFailure();
     CHECK(slots.TryEnsureCapacity(SlotArray<int>::MaxSlots + 1).Error() == ErrorCode::Overflow);
 }
+} // namespace slot_array_tests_file

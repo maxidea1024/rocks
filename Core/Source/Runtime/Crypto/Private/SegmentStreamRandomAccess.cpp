@@ -26,7 +26,7 @@ uint64 SegmentCiphertextBytes(const SegmentLayout& layout, uint64 index) noexcep
     return index + 1 == layout.segmentCount ? layout.lastSegmentBytes : layout.segmentBytes;
 }
 
-bool BadOverlap(Span<const uint8> input, Span<uint8> output) noexcept {
+bool SegmentStreamRandomAccessBadOverlap(Span<const uint8> input, Span<uint8> output) noexcept {
     return Overlaps(input, output) && input.Data() != output.Data();
 }
 
@@ -114,7 +114,8 @@ Result<usize> SegmentStreamRandomAccess::TryOpenSegment(uint64 index,
         return Result<usize>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (index >= layout_.segmentCount || BadOverlap(ciphertextSegment, plaintext)) {
+    if (index >= layout_.segmentCount ||
+        SegmentStreamRandomAccessBadOverlap(ciphertextSegment, plaintext)) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -262,7 +263,8 @@ Result<usize> SegmentStreamParallelWriter::TrySealSegment(uint64 index, Span<con
 
     const usize sealedBytes = static_cast<usize>(SegmentCiphertextBytes(layout_, index));
     const usize plaintextBytes = sealedBytes - SegmentTagBytes;
-    if (plaintext.Size() != plaintextBytes || BadOverlap(plaintext, sealed)) {
+    if (plaintext.Size() != plaintextBytes ||
+        SegmentStreamRandomAccessBadOverlap(plaintext, sealed)) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
 

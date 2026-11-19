@@ -148,7 +148,7 @@ enum class Status : uint8 {
     Stale
 };
 
-struct Entry {
+struct GcSoakEntry {
     ObjectHandle handle;
     uint32 outer = None;
     uint32 first = None;
@@ -184,7 +184,7 @@ struct PinHold {
     EncodePin pin;
 };
 
-struct Rng {
+struct GcSoakRng {
     uint64 state;
 
     uint64 Next() noexcept {
@@ -408,13 +408,13 @@ private:
     }
 
     void FreeEntry(uint32 index) noexcept {
-        Entry& entry = entries_[index];
+        GcSoakEntry& entry = entries_[index];
         const uint32 position = entry.position;
         const uint32 last = live_[live_.Size() - 1];
         live_[position] = last;
         entries_[last].position = position;
         (void)live_.TryPopBack();
-        entry = Entry{};
+        entry = GcSoakEntry{};
     }
 
     // target에서 모델 간선으로 닿는 객체들의 쓰레기 관찰을 지운다. 장벽 shade·루트·새 Outer 자식이
@@ -442,7 +442,7 @@ private:
 
     template <class Visitor>
     void VisitEdges(uint32 index, Visitor&& visit) const noexcept {
-        const Entry& entry = entries_[index];
+        const GcSoakEntry& entry = entries_[index];
         if (entry.outer != None) {
             visit(entry.outer);
         }
@@ -524,8 +524,8 @@ private:
             return Fail("commit failed", None, root.Error());
         }
 
-        Entry& entry = entries_[index];
-        entry = Entry{};
+        GcSoakEntry& entry = entries_[index];
+        entry = GcSoakEntry{};
         entry.used = true;
         entry.handle = created.Value();
         entry.kind = kind;
@@ -696,7 +696,7 @@ private:
             return;
         }
 
-        Entry& entry = entries_[owner];
+        GcSoakEntry& entry = entries_[owner];
         if (node->items.Size() != entry.itemCount) {
             Fail("ObjectRefArray size differs from the model", owner, ErrorCode::None);
             return;
@@ -1186,7 +1186,7 @@ private:
 
         // helper가 반환을 마쳤다(slice 안 또는 방금). 이제 모델 계수를 줄인다.
         if (pendingEntry_ != None) {
-            Entry& entry = entries_[pendingEntry_];
+            GcSoakEntry& entry = entries_[pendingEntry_];
             if (kind == ReleaseKind::Root) {
                 --entry.roots;
             } else if (kind == ReleaseKind::Backend) {
@@ -1211,7 +1211,7 @@ private:
         uint64 holds = 0;
         uint64 pins = 0;
         for (uint32 position = 0; position < live_.Size(); ++position) {
-            const Entry& entry = entries_[live_[position]];
+            const GcSoakEntry& entry = entries_[live_[position]];
             roots += entry.roots;
             holds += entry.holds;
             pins += entry.pins;
@@ -1247,7 +1247,7 @@ private:
         uint64 present = 0;
         for (uint32 position = 0; position < live_.Size() && !Failed(); ++position) {
             const uint32 index = live_[position];
-            Entry& entry = entries_[index];
+            GcSoakEntry& entry = entries_[index];
             const Status status = StatusOf(index);
             status_[index] = static_cast<uint8>(status);
             present += status == Status::Stale ? 0u : 1u;
@@ -1333,7 +1333,7 @@ private:
         }
 
         for (uint32 position = 0; position < live_.Size(); ++position) {
-            Entry& entry = entries_[live_[position]];
+            GcSoakEntry& entry = entries_[live_[position]];
             auto clear = [&](uint32& edge) noexcept {
                 if (edge != None && !entries_[edge].used) {
                     edge = None;
@@ -1354,7 +1354,7 @@ private:
     }
 
     void VerifyFields(uint32 index) noexcept {
-        const Entry& entry = entries_[index];
+        const GcSoakEntry& entry = entries_[index];
         auto borrowed = registry_.Resolve<SoakNode>(access_, entry.handle);
         if (!borrowed) {
             Fail("Resolve of an alive node failed during verification", index, borrowed.Error());
@@ -1384,7 +1384,7 @@ private:
     GcSoakReport& report_;
     ObjectRegistry& registry_;
     ObjectAccessContext access_;
-    Array<Entry> entries_;
+    Array<GcSoakEntry> entries_;
     Array<uint32> live_;
     Array<RootHold> roots_;
     Array<LeaseHold> leases_;
@@ -1393,7 +1393,7 @@ private:
     Array<uint32> queue_;
     Array<uint8> status_;
     ReleaseChannel channel_;
-    Rng rng_;
+    GcSoakRng rng_;
     uint64 tick_ = 0;
     uint64 nameSerial_ = 0;
     uint64 cyclesBegun_ = 0;

@@ -6,6 +6,7 @@
 #include <Platform/Clock.h>
 
 using namespace rocks;
+namespace incremental_gc_tests_file {
 
 namespace {
 
@@ -451,3 +452,4 @@ TEST(ObjectIncrementalGcReclaimBudgetAndBackendHoldCompleteWithoutEarlyFree) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace incremental_gc_tests_file

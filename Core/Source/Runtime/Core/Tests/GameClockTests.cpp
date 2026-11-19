@@ -2,6 +2,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace game_clock_tests_file {
 
 namespace {
 
@@ -237,3 +238,4 @@ TEST(GameClock_ChangingFixedStepResetsAccumulator) {
     CHECK(plan.Value().fixedSteps == 0);
     CHECK(Near(plan.Value().interpolationAlpha, 0.5));
 }
+} // namespace game_clock_tests_file

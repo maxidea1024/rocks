@@ -4,6 +4,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace name_key_tests_file {
 
 namespace {
 
@@ -162,3 +163,4 @@ TEST(NameKey_RandomizedCaseVariantsShareKey) {
     // 허용).
     CHECK(collisions <= 2);
 }
+} // namespace name_key_tests_file

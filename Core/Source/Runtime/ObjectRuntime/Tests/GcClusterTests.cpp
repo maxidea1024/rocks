@@ -8,6 +8,8 @@
 #include <Object/TypeRegistry.h>
 #include <Task/WorkerScheduler.h>
 
+namespace gc_cluster_tests_file {
+
 // 클러스터(GC-S7) 시험이다(Docs/Design/GarbageCollectionScale.ko.md 13절).
 // - 루트가 살면 소속이 모두 살고(루트 → 소속 암묵 간선), 경계 소속의 밖 간선·detached·outer는 따로
 //   산다. 루트의 RequestDestroy는 해체, 소속의 RequestDestroy는 이탈이다.
@@ -1702,6 +1704,7 @@ TEST(ObjectGcCluster_ModelMatchesOracleParallel) {
     RunClusterModel(0x2545f4914f6cdd1dULL, 2);
     RunClusterModel(0x6a09e667f3bcc909ULL, 4);
 }
+} // namespace gc_cluster_tests_file
 
 // ---- 소속 소유자의 StructRefArray 원소 제거·비우기 ----
 
@@ -1746,6 +1749,7 @@ struct GeneratedType<cluster_struct_fixture::ClusterSlot> {
 void cluster_struct_fixture::SlotNode::Trace(TraceVisitor& visitor) const noexcept {
     slots.Trace(visitor);
 }
+namespace gc_cluster_tests_file {
 
 namespace {
 
@@ -1873,3 +1877,4 @@ TEST(ObjectGcCluster_MemberStructElementRemovalKeepsLedger) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace gc_cluster_tests_file

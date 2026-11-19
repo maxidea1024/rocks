@@ -4,6 +4,8 @@
 #include <ObjectSerialization/ObjectGraph.h>
 
 using namespace rocks;
+namespace class_property_tests_file {
+
 using reflection_fixture::AbstractBase;
 using reflection_fixture::AbstractByPolicy;
 using reflection_fixture::PropertyNode;
@@ -337,3 +339,4 @@ TEST(ReflectionPolymorphicDerivedResolvesThroughAbstractBase) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace class_property_tests_file

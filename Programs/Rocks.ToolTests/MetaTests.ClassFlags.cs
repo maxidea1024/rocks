@@ -27,7 +27,7 @@ internal static partial class MetaTests
             Verify.Equal(Type("probe::Holder").GetProperty("id").GetString(), Type("probe::Parent").GetProperty("within").GetProperty("id").GetString(),
                 "within id");
             Verify.Equal(System.Text.Json.JsonValueKind.Null, Type("probe::Holder").GetProperty("within").ValueKind, "no within");
-            string generated = Compact(File.ReadAllText(probe.Output));
+            string generated = Compact(probe.GeneratedText());
             Verify.Contains(",12u,", generated, "Transient | Deprecated bits");
             ProcessResult compiled = await probe.CompileGeneratedAsync();
             Verify.Equal(0, compiled.ExitCode, "generated class flag header compiles: " + compiled.StdOut + compiled.StdErr);

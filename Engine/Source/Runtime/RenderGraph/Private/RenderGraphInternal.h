@@ -240,6 +240,8 @@ struct ViewRecord {
     SlotHandle device;
 };
 
+class GraphCommandList;
+
 // 그래프 구간 하나다(PushScope). parent는 바깥 구간이다(없으면 None).
 struct ScopeRecord {
     TraceScopeName* name = nullptr;
@@ -278,6 +280,13 @@ struct PassRecord {
     uint32 viewCount = 0;
     // 이 pass가 속한 가장 안쪽 그래프 구간이다(없으면 None).
     uint32 scope = GraphIndexNone;
+    // 자원 할당·장치 view 생성을 마쳤다(병렬 기록은 재생 전에 모두 마친다).
+    bool prepared = false;
+    // 병렬 기록의 기록 목록이다(직렬이면 null, 실행 때 기록 함수 대신 재생한다).
+    GraphCommandList* recorded = nullptr;
+    // 이 pass가 새 장치 기록을 연다(Raster pass, 또는 앞 Raster pass의 attachment에 접근해 그
+    // 기록을 닫는 Compute·Copy pass). Deferred 컴파일이 정한다(분리 전이·재사용 자리의 기록 경계).
+    bool opensRecording = false;
     // 이 pass가 기대는 생산자 pass다(GraphState::producers의 연결 목록 머리).
     uint32 firstProducer = GraphIndexNone;
     // 부수 효과·외부 출력 pass다(culling 뿌리).
@@ -352,10 +361,16 @@ struct GraphState {
     ArenaArray<SplitGroup> splitGroups;
     // 분리 전이를 쓴다(Deferred이고 RenderGraphDesc::splitTransitions).
     bool splitEnabled = false;
+    // 병렬 기록 설정이다(RenderGraphDesc).
+    WorkerScheduler* scheduler = nullptr;
+    Allocator* scratch = nullptr;
+    bool parallelRecording = false;
 
     // 실행 상태다.
     graphics::CommandContext* commands = nullptr;
     bool traceFrameOpen = false;
+    // 지금 장치 기록을 연 Raster pass다(attachment 없는 기록·기록 없음이면 None).
+    uint32 recordingPass = GraphIndexNone;
     // Deferred 실행에서 다음에 낼 전이 기록 번호다.
     usize nextTransition = 0;
 
@@ -386,6 +401,10 @@ bool IsTransitionRequired(graphics::ResourceAccess previous, GraphAccessFlags pr
 void FormatAccess(graphics::ResourceAccess access, char* out, usize capacity) noexcept;
 
 // --- 공용 helper(RenderGraph.cpp) ---
+
+// pass가 Raster pass rasterPass의 attachment subresource를 복사 원본·대상으로 쓰는지다(그 기록을
+// 닫아야 하는지, 장치 CopyTexture는 패스 attachment를 받지 않는다).
+bool UsesAttachmentsOf(const GraphState& state, uint32 pass, uint32 rasterPass) noexcept;
 
 // 그래프 로그 카테고리다.
 inline constexpr LogCategory LogRenderGraph{"RenderGraph"};
@@ -447,6 +466,14 @@ Result<void> ExecuteUploads(FrameArena& arena, GraphState& state) noexcept;
 void LeaveScopes(GraphState& state, uint32 scope) noexcept;
 // scope 사슬 가운데 아직 열지 않은 구간을 바깥부터 연다(열린 장치 기록이 있어야 한다).
 void EnterScopes(FrameArena& arena, GraphState& state, uint32 scope) noexcept;
+
+// pass의 자원 할당과 장치 view 생성이다(ExecutePass가 부르거나 병렬 기록이 미리 부른다).
+Result<void> PreparePass(FrameArena& arena, GraphState& state, uint32 pass) noexcept;
+
+// 병렬 기록(Deferred): 남은 pass를 선언 순서로 준비하고 ParallelFor로 기록 함수를 기록 목록에
+// 기록한다. 기록할 pass가 둘 미만이면 아무것도 하지 않는다(직렬 실행).
+Result<void> RecordPassesInParallel(RenderGraph& graph, FrameArena& arena,
+                                    GraphState& state) noexcept;
 
 // pass 하나를 실행한다(자원 할당 → 기록 열기 → prologue 전이(분리 전이 end 포함) → 기록 함수 →
 // epilogue 분리 전이 begin).

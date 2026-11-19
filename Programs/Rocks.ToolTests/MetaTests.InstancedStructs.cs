@@ -39,7 +39,7 @@ internal static partial class MetaTests
             Verify.Equal("InstancedStruct", Field("probe::Value", "fixed").GetProperty("element").GetProperty("kind").GetString(), "static array element");
             Verify.Equal("InstancedStruct", Field("probe::Value", "table").GetProperty("element").GetProperty("kind").GetString(), "map value");
             Verify.Equal("InstancedStruct", Field("probe::Host", "row").GetProperty("value").GetProperty("kind").GetString(), "struct member");
-            string generated = Compact(File.ReadAllText(probe.Output));
+            string generated = Compact(probe.GeneratedText());
             Verify.Contains("{ValueKind::InstancedStruct,Guid{}}", generated, "generated instanced schema");
             Verify.Contains("PathClassField<::probe::Value,::rocks::ValueKind::InstancedStruct>(cursor,&::probe::Value::row)", generated,
                 "an InstancedStruct field has a path thunk");

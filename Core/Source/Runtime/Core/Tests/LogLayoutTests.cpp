@@ -18,6 +18,8 @@ namespace rocks::test {
 uint64 OperatorNewCalls() noexcept;
 } // namespace rocks::test
 
+namespace log_layout_tests_file {
+
 namespace {
 
 constexpr LogCategory LogLayoutTests{"Tests.Layout"};
@@ -618,3 +620,4 @@ TEST(LogSinksDoNotAllocate) {
     CHECK(detail::FixedStringBuilderAllocationAttempts() == attempts);
     CHECK(text.View().Contains("World=Main", StringComparison::CaseSensitive));
 }
+} // namespace log_layout_tests_file

@@ -6,6 +6,8 @@
 // 같고, 분리를 켜고 끈 결과(장치 최종 상태·전이를 뺀 호출 열)가 같으며, 나누지 않는 경우(바로 다음
 // pass, 사이의 Raster pass, Immediate 모드)를 확인한다.
 using namespace rocks;
+namespace render_graph_split_tests_file {
+
 using namespace rocks::render;
 using namespace rocks::render::testing;
 using graphics::ResourceAccess;
@@ -312,3 +314,4 @@ TEST(RenderGraph_RecordingDeviceChecksSplitTransitionPairs) {
     bench.device.Retire(created.Value());
     bench.device.Retire(target.Value());
 }
+} // namespace render_graph_split_tests_file

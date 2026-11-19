@@ -29,7 +29,7 @@ constexpr usize PhStateBytes = sizeof(crypto_sign_ed25519ph_state);
 constexpr usize PhStateAlignment = 64;
 static_assert(alignof(crypto_sign_ed25519ph_state) <= PhStateAlignment);
 
-Result<Ed25519SigningKey> TryMakeFromSeed(Span<const uint8> seed) noexcept {
+Result<Ed25519SigningKey> SignatureTryMakeFromSeed(Span<const uint8> seed) noexcept {
     auto secret = SecretBytes::TryCreate(SecretKeyBytes);
     if (!secret) {
         return Result<Ed25519SigningKey>::Failure(secret.Error());
@@ -134,7 +134,7 @@ Result<Ed25519SigningKey> Ed25519SigningKey::TryGenerate() noexcept {
     }
 
     detail::EnsureSodium();
-    auto key = TryMakeFromSeed(Span<const uint8>(seed));
+    auto key = SignatureTryMakeFromSeed(Span<const uint8>(seed));
     SecureZero(Span<uint8>(seed));
     return key;
 }
@@ -146,7 +146,7 @@ Result<Ed25519SigningKey> Ed25519SigningKey::TryFromSeed(Span<const uint8> seed)
     }
 
     detail::EnsureSodium();
-    return TryMakeFromSeed(seed);
+    return SignatureTryMakeFromSeed(seed);
 }
 
 Ed25519PublicKey Ed25519SigningKey::PublicKey() const noexcept {

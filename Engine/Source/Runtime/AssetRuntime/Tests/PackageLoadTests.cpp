@@ -4,6 +4,8 @@
 // 타입· 저장 버전·BulkDataRef ↔ BulkIndex·Dependencies ↔ 디코딩 결과·읽기 전용 부분집합·import
 // 의존), InstantiatePackages의 인자·resolver 오류, 로드 hook의 진단 분류.
 using namespace rocks;
+namespace package_load_tests_file {
+
 using namespace rocks::asset_test;
 
 namespace {
@@ -433,3 +435,4 @@ TEST(AssetPackage_DiagnosticNames) {
     CHECK(StringView(AssetDiagnosticName(AssetDiagnosticCode::CorruptPackage)) ==
           StringView("CorruptPackage"));
 }
+} // namespace package_load_tests_file

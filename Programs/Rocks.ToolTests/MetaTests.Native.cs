@@ -96,7 +96,7 @@ internal static partial class MetaTests
             await probe.GenerateAsync(ProbeSource("Sel<false>* sel = nullptr;\nROCKS_NATIVE() void* (*factory)(rocks::usize) = nullptr;\n" +
                 "ROCKS_NATIVE() const char* (*label)() = nullptr;\nROCKS_NATIVE() rocks::int32 Plain::* member = nullptr;\n" +
                 "ROCKS_NATIVE() Plain* const* plain = nullptr;\nROCKS_NATIVE() Fwd* forward = nullptr;"));
-            Verify.Contains("::probe::Value::forward", File.ReadAllText(probe.Output), "accepted NATIVE members keep the generated static_assert");
+            Verify.Contains("::probe::Value::forward", probe.GeneratedText(), "accepted NATIVE members keep the generated static_assert");
         });
         // 첫 탐침에서 불완전한 대상은 모듈 public 헤더를 더한 두 번째 탐침이 다시 판정한다: 정의가 비Object면(World) 받고 Object
         // 파생이면(Spy) 거부한다.
@@ -209,7 +209,7 @@ internal static partial class MetaTests
                 "ROCKS_PROPERTY() rocks::int32 count = 0;\nROCKS_NATIVE() rocks::int32 cache[2] = {};\n" +
                 "public: rocks::int32 Read() const noexcept { return count + cache[0]; }\n};\n}\n";
             await probe.GenerateAsync(source);
-            Verify.Contains("::probe::Value::cache", File.ReadAllText(probe.Output), "private NATIVE static_assert");
+            Verify.Contains("::probe::Value::cache", probe.GeneratedText(), "private NATIVE static_assert");
         });
         AddRejectGroup(context, "Meta.UnknownDuplicateAndWrongValueSpecifiers", new[] { "UnknownFlag", "ReadOnly, ReadOnly", "ReadOnly=\"yes\"", "Category=12", "DisplayName" }
             .Select(spec => Declaration($"ROCKS_PROPERTY({spec}) rocks::int32 count=0;")), "RMC2000", "specifier");

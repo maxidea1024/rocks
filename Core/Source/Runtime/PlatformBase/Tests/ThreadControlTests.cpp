@@ -3,6 +3,8 @@
 #include <Platform/Thread.h>
 
 using namespace rocks;
+namespace thread_control_tests_file {
+
 using namespace rocks::platform;
 
 namespace {
@@ -199,3 +201,4 @@ TEST(PlatformCurrentThreadStackRangeContainsLocalsOnly) {
     CHECK(!range.Contains(probe.local));
     CHECK(!probe.range.Contains(&local));
 }
+} // namespace thread_control_tests_file

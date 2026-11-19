@@ -1,3 +1,4 @@
+using Rocks.Build;
 using Rocks.Build.Rules;
 
 // Asset runtime (Docs/Design/AssetSystem.ko.md sections 5, 6, 10 and 11, stage A1): package format v1 (PackageWriter and PackageReader),
@@ -10,6 +11,9 @@ using Rocks.Build.Rules;
 public sealed class AssetRuntime : EngineModuleRules
 {
     protected override string ModuleName => "AssetRuntime";
+
+    // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
+    protected override UnityMode Unity => UnityMode.On;
 
     protected override string[] RequiredModules => ["ObjectSerialization", "ObjectRuntime", "Serialization", "Task", "Compression"];
 

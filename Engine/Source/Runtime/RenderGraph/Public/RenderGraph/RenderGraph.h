@@ -9,6 +9,7 @@
 #include <RenderGraph/GraphResourcePool.h>
 #include <RenderGraph/GraphSharedData.h>
 #include <RenderGraph/GraphTypes.h>
+#include <Task/WorkerScheduler.h>
 #include <TraceCapture/TraceCpuScope.h>
 
 // 렌더 그래프다(Docs/Design/RenderBase.ko.md 7·8절 RG1·RG2, UE FRDGBuilder 대응).
@@ -116,6 +117,16 @@ struct RenderGraphDesc {
     // 분리 전이(begin·end)를 쓴다(Deferred만, GraphTransitionRecord::beginPass). 끄면 모든 전이를
     // 소비 pass prologue에서 한 번에 낸다(분리 켬·끔 대조 시험·디버그).
     bool splitTransitions = true;
+    // 병렬 기록(RG3, RenderBase 8절 "RG3 병렬 기록 설계")이다. scheduler와 scratch가 있고
+    // parallelRecording이 켜져 있으면 Deferred 실행이 pass 기록 함수를 worker에서 기록 목록에
+    // 기록하고 소유 스레드가 선언 순서로 재생한다(장치 호출 열은 직렬과 같다). scratch는
+    // ParallelFor helper 작업을 할당하는 스레드 안전 Allocator다. 즉시 실행 모드는 늘 직렬이다.
+    // 병렬 기록 중 pass 기록 함수는 장치 생성·제출을 부르지 않고(소유 스레드 전용), 장치 호출의
+    // 결과로 다른 명령을 고르지 않는다(값을 돌려주는 호출은 기록 때 성공, 재생 때 실패하면 그
+    // pass의 실행 오류). WriteTimestamp·BeginTransitions·EndTransitions는 쓸 수 없다.
+    WorkerScheduler* scheduler = nullptr;
+    Allocator* scratch = nullptr;
+    bool parallelRecording = true;
 };
 
 // 렌더 lane 프레임 작업에서 그래프 설정을 만든다: 장치·handle 표·그 slot의 프레임 arena·프레임

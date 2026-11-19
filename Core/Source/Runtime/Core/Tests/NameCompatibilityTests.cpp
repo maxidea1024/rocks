@@ -6,6 +6,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace name_compatibility_tests_file {
 
 namespace {
 
@@ -225,3 +226,4 @@ TEST(NameConcurrentCaseVariantsShareComparisonAndKeepDisplay) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace name_compatibility_tests_file

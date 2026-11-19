@@ -10,6 +10,8 @@
 // 검증기, 도구 이름 조회, TypeRegistry 종류·enum 의존 계수·native 키 대조, 수동 RegisterEnum 검증과
 // 깊은 복사, 모듈 등록, enum 필드의 읽기·쓰기·staged 쓰기 검증.
 using namespace rocks;
+namespace enum_field_tests_file {
+
 using reflection_fixture::Bias;
 using reflection_fixture::Channels;
 using reflection_fixture::EnumFields;
@@ -499,3 +501,4 @@ TEST(Enums_FieldWritesValidateTypeAndDeclaredValues) {
 
     CHECK(types.Shutdown());
 }
+} // namespace enum_field_tests_file

@@ -8,6 +8,8 @@
 // 종류(대입 순번·JSON 위치)와 텍스트 복사, 한도 안에서 모두 모으고 넘친 수 세기, 할당 실패의
 // 무변경, 정의되지 않은 값 거부, 비우기.
 using namespace rocks;
+namespace text_diagnostics_tests_file {
+
 using namespace rocks::reflection_text;
 
 namespace {
@@ -180,3 +182,4 @@ TEST(TextDiagnostics_FailuresLeaveCollectionUnchanged) {
     CHECK(badKind.Error() == ErrorCode::InvalidArgument);
     CHECK(diagnostics.Count() == 1);
 }
+} // namespace text_diagnostics_tests_file

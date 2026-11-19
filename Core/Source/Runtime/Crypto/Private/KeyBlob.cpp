@@ -26,10 +26,10 @@ constexpr usize VersionedPrefixBytes = 5; // magic ‖ version
 constexpr usize FixedHeaderBytes = 26;
 constexpr usize KeyParamsBytes = 16;      // wrapKeyId
 constexpr usize PasswordParamsBytes = 24; // ops LE32 ‖ memKiB LE32 ‖ salt 16
-constexpr usize NonceBytes = 24;
+constexpr usize KeyBlobNonceBytes = 24;
 constexpr usize CommitmentBytes = 32;
 constexpr usize TagBytes = 16;
-constexpr usize OverheadBytes = FixedHeaderBytes + NonceBytes + CommitmentBytes + TagBytes;
+constexpr usize OverheadBytes = FixedHeaderBytes + KeyBlobNonceBytes + CommitmentBytes + TagBytes;
 constexpr usize MaxHeaderBytes = FixedHeaderBytes + PasswordParamsBytes; // Peek이 읽는 최대 길이
 constexpr usize MaxSecretBytes = MaxHmacKeyBytes;
 static_assert(KeyBlobMaxBytes == OverheadBytes + PasswordParamsBytes + MaxSecretBytes);
@@ -235,53 +235,54 @@ Span<const uint8> SecretOf(const Ed25519SigningKey& key) noexcept {
     return detail::KeyAccess::Bytes(key).Left(Ed25519SeedBytes);
 }
 
-Result<AeadKey> TryMakeKey(TypeTag<AeadKey>, uint8 algorithm, KeyId,
-                           Span<const uint8> secret) noexcept {
+Result<AeadKey> KeyBlobTryMakeKey(TypeTag<AeadKey>, uint8 algorithm, KeyId,
+                                  Span<const uint8> secret) noexcept {
     return AeadKey::TryImport(static_cast<AeadAlgorithm>(algorithm), secret);
 }
 
-Result<MacKey> TryMakeKey(TypeTag<MacKey>, uint8 algorithm, KeyId,
-                          Span<const uint8> secret) noexcept {
+Result<MacKey> KeyBlobTryMakeKey(TypeTag<MacKey>, uint8 algorithm, KeyId,
+                                 Span<const uint8> secret) noexcept {
     return MacKey::TryImport(static_cast<MacAlgorithm>(algorithm), secret);
 }
 
-Result<KdfKey> TryMakeKey(TypeTag<KdfKey>, uint8, KeyId, Span<const uint8> secret) noexcept {
+Result<KdfKey> KeyBlobTryMakeKey(TypeTag<KdfKey>, uint8, KeyId, Span<const uint8> secret) noexcept {
     return KdfKey::TryImport(secret);
 }
 
-Result<Ed25519SigningKey> TryMakeKey(TypeTag<Ed25519SigningKey>, uint8, KeyId,
-                                     Span<const uint8> secret) noexcept {
+Result<Ed25519SigningKey> KeyBlobTryMakeKey(TypeTag<Ed25519SigningKey>, uint8, KeyId,
+                                            Span<const uint8> secret) noexcept {
     return Ed25519SigningKey::TryFromSeed(secret);
 }
 
-Result<KxKeyPair> TryMakeKey(TypeTag<KxKeyPair>, uint8, KeyId, Span<const uint8> secret) noexcept {
+Result<KxKeyPair> KeyBlobTryMakeKey(TypeTag<KxKeyPair>, uint8, KeyId,
+                                    Span<const uint8> secret) noexcept {
     return KxKeyPair::TryImport(secret);
 }
 
-Result<BoxKeyPair> TryMakeKey(TypeTag<BoxKeyPair>, uint8, KeyId,
-                              Span<const uint8> secret) noexcept {
+Result<BoxKeyPair> KeyBlobTryMakeKey(TypeTag<BoxKeyPair>, uint8, KeyId,
+                                     Span<const uint8> secret) noexcept {
     return BoxKeyPair::TryImport(secret);
 }
 
-Result<KemKeyPair> TryMakeKey(TypeTag<KemKeyPair>, uint8 algorithm, KeyId,
-                              Span<const uint8> secret) noexcept {
+Result<KemKeyPair> KeyBlobTryMakeKey(TypeTag<KemKeyPair>, uint8 algorithm, KeyId,
+                                     Span<const uint8> secret) noexcept {
     return KemKeyPair::TryFromSeed(static_cast<KemAlgorithm>(algorithm), secret);
 }
 
-Result<SecretStreamKey> TryMakeKey(TypeTag<SecretStreamKey>, uint8, KeyId,
-                                   Span<const uint8> secret) noexcept {
+Result<SecretStreamKey> KeyBlobTryMakeKey(TypeTag<SecretStreamKey>, uint8, KeyId,
+                                          Span<const uint8> secret) noexcept {
     return SecretStreamKey::TryImport(secret);
 }
 
 // 세그먼트 스트림 키는 Id()를 품으므로 blob의 keyId로 만든다(헤더 keyId와 어긋날 수 없다).
-Result<SegmentStreamKey> TryMakeKey(TypeTag<SegmentStreamKey>, uint8, KeyId keyId,
-                                    Span<const uint8> secret) noexcept {
+Result<SegmentStreamKey> KeyBlobTryMakeKey(TypeTag<SegmentStreamKey>, uint8, KeyId keyId,
+                                           Span<const uint8> secret) noexcept {
     return SegmentStreamKey::TryImport(keyId, secret);
 }
 
 // 서버 정적 키도 Id()를 품으므로 blob의 keyId로 만든다.
-Result<ChannelServerKey> TryMakeKey(TypeTag<ChannelServerKey>, uint8, KeyId keyId,
-                                    Span<const uint8> secret) noexcept {
+Result<ChannelServerKey> KeyBlobTryMakeKey(TypeTag<ChannelServerKey>, uint8, KeyId keyId,
+                                           Span<const uint8> secret) noexcept {
     return ChannelServerKey::TryImport(keyId, secret);
 }
 
@@ -392,7 +393,7 @@ Result<usize> TryWrapSecret(const WrapInput& input, KeyBlobType type, uint8 algo
         return Result<usize>::Failure(error);
     };
 
-    const Span<uint8> nonce = out.Mid(FixedHeaderBytes + params, NonceBytes);
+    const Span<uint8> nonce = out.Mid(FixedHeaderBytes + params, KeyBlobNonceBytes);
     if (auto filled = TryFillRandom(nonce); !filled) {
         return fail(filled.Error());
     }
@@ -418,17 +419,17 @@ Result<usize> TryWrapSecret(const WrapInput& input, KeyBlobType type, uint8 algo
         master = &passwordKey.Value();
     }
 
-    const Span<const uint8> transcript = out.Left(FixedHeaderBytes + params + NonceBytes);
+    const Span<const uint8> transcript = out.Left(FixedHeaderBytes + params + KeyBlobNonceBytes);
     auto keys = TryDeriveWrapKeys(*master, transcript);
     if (!keys) {
         return fail(keys.Error());
     }
 
-    platform::MemoryCopy(bytes + FixedHeaderBytes + params + NonceBytes,
+    platform::MemoryCopy(bytes + FixedHeaderBytes + params + KeyBlobNonceBytes,
                          keys.Value().commitment.View().Data(), CommitmentBytes);
     auto sealed = hazmat::TrySealWithNonce(
         keys.Value().key, nonce, transcript, secret,
-        out.RightChop(FixedHeaderBytes + params + NonceBytes + CommitmentBytes));
+        out.RightChop(FixedHeaderBytes + params + KeyBlobNonceBytes + CommitmentBytes));
     if (!sealed) {
         return fail(sealed.Error());
     }
@@ -503,15 +504,16 @@ Result<UnwrappedKey<TKey>> TryUnwrapSecret(KeyBlobWrapMethod method, const KdfKe
         master = &passwordKey.Value();
     }
 
-    const Span<const uint8> transcript = blob.Left(FixedHeaderBytes + params + NonceBytes);
+    const Span<const uint8> transcript = blob.Left(FixedHeaderBytes + params + KeyBlobNonceBytes);
     auto keys = TryDeriveWrapKeys(*master, transcript);
     if (!keys) {
         return Result<Unwrapped>::Failure(keys.Error());
     }
 
     // 다른 KEK·비밀번호와 헤더 변조는 AEAD 전에 commitment에서 걸린다.
-    if (!ConstantTimeEquals(keys.Value().commitment.View(),
-                            blob.Mid(FixedHeaderBytes + params + NonceBytes, CommitmentBytes))) {
+    if (!ConstantTimeEquals(
+            keys.Value().commitment.View(),
+            blob.Mid(FixedHeaderBytes + params + KeyBlobNonceBytes, CommitmentBytes))) {
         return Result<Unwrapped>::Failure(ErrorCode::AuthenticationFailed);
     }
 
@@ -521,14 +523,15 @@ Result<UnwrappedKey<TKey>> TryUnwrapSecret(KeyBlobWrapMethod method, const KdfKe
     }
 
     auto opened = hazmat::TryOpenWithNonce(
-        keys.Value().key, blob.Mid(FixedHeaderBytes + params, NonceBytes), transcript,
-        blob.RightChop(FixedHeaderBytes + params + NonceBytes + CommitmentBytes),
+        keys.Value().key, blob.Mid(FixedHeaderBytes + params, KeyBlobNonceBytes), transcript,
+        blob.RightChop(FixedHeaderBytes + params + KeyBlobNonceBytes + CommitmentBytes),
         secret.Value().MutableView());
     if (!opened) {
         return Result<Unwrapped>::Failure(opened.Error());
     }
 
-    auto key = TryMakeKey(TypeTag<TKey>{}, info.algorithm, info.keyId, secret.Value().View());
+    auto key =
+        KeyBlobTryMakeKey(TypeTag<TKey>{}, info.algorithm, info.keyId, secret.Value().View());
     if (!key) {
         return Result<Unwrapped>::Failure(key.Error());
     }

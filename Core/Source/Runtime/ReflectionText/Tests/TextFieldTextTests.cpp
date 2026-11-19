@@ -9,6 +9,8 @@
 // 있음, Localized 출력은 Unsupported), JSON은 문자열 = Invariant·객체 {"id","revision","source"} =
 // Localized·null = 비어 있음의 export·import 왕복과 거부 진단.
 using namespace rocks;
+namespace text_field_text_tests_file {
+
 using namespace rocks::reflection_text;
 using namespace rocks::test::assign;
 using reflection_fixture::TextFieldHolder;
@@ -193,3 +195,4 @@ TEST(TextFieldText_RejectionsAndLocalizedCommandLineOutput) {
         context, TextScalarType{ValueType{ValueKind::Text, {}}, nullptr}, localized, out);
     CHECK(!formatted && formatted.Error() == ErrorCode::Unsupported);
 }
+} // namespace text_field_text_tests_file

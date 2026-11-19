@@ -7,6 +7,7 @@
 // A0-Oa Outer·이름·정책·다중 root Commit 시험이다(Docs/Design/ObjectFoundations.ko.md 1절·9절 Oa).
 // GC·색인·할당 실패·재진입은 ObjectIdentityGcTests.cpp가 본다.
 using namespace rocks;
+namespace object_identity_tests_file {
 
 namespace {
 
@@ -961,3 +962,4 @@ TEST(ObjectIdentity_TransactionStateRuleIsSharedByCreateCommitAndDescribeOuter) 
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace object_identity_tests_file

@@ -18,6 +18,8 @@ namespace rocks::test {
 bool RegisterProcessProbe(const char* mode, int (*function)(int, char**) noexcept) noexcept;
 } // namespace rocks::test
 
+namespace access_overlap_checker_tests_file {
+
 namespace {
 
 constexpr AccessOverlapMessages ProbeMessages{.writeDuringRead = "probe: write during read",
@@ -245,3 +247,4 @@ TEST(AccessOverlap_ViolationsAreFatal) {
         CHECK(strstr(run.error, entry.message) != nullptr);
     }
 }
+} // namespace access_overlap_checker_tests_file

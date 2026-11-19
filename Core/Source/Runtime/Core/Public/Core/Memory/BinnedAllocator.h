@@ -1,28 +1,97 @@
 #pragma once
 
-#include <Core/Memory/PoolAllocator.h>
+#include <Base/Compiler.h>
+#include <Core/Memory/Allocator.h>
 
 namespace rocks {
 
-// 여러 고정 크기 pool과 상위 allocator를 함께 사용하는 범용 저장소다.
-// 사용 예: BinnedAllocator memory(system); auto p = memory.Allocate(48, 16);
-// 객체는 직접 소멸하고, 반환받은 정확한 주소를 이 allocator에 Deallocate해야 한다.
-// backing은 이 객체 및 모든 allocation보다 오래 살고 호출 스레드에서 사용 가능해야 한다.
+namespace detail {
+struct BinnedAllocatorTestAccess;
+} // namespace detail
+
+// BinnedAllocator 생성 설정이다(기본값이면 플랫폼 기본 예약 크기).
 //
-// 16~4096 byte의 9개 크기 구간은 16 byte 이하 정렬에 사용한다. 더 큰 크기나 정렬은
-// backing에 직접 요청한다. pool과 소유권 원장의 잠금 및 선형 검색이 있으므로 성능 보장은
-// 없다. 사용자와 상위 chunk의 원장은 플랫폼 할당을 사용하며 backing의 예산에 포함되지 않는다.
-// 이 원장의 플랫폼 할당 실패는 현재 테스트에서 직접 주입할 수 없다. 상위 allocator가 성공과
-// 함께 null, 잘못된 정렬 또는 이 allocator가 보유한 상위 저장소·원장과 겹친 범위를
-// 반환하면 Fatal이다. 다른 고객의 저장소와 겹치지 않는 것은 backing의 책임이다.
-// 동시 호출은 직렬화되고 상위 호출도 잠금 안에서 수행된다. 같은 스레드에서 재진입하면
-// Result API는 Busy, Stats와 파괴는 Fatal이다. 상위 콜백은 다른 스레드의 이 allocator
-// 작업을 기다리거나 allocator 사이에 역순 잠금 순환을 만들면 안 된다.
-// 파괴와 사용자 memory 접근은 호출자가 동기화해야 한다. 반환하지 않은 allocation이 있으면
-// 파괴 시 Fatal이다. raw 주소가 재사용된 뒤에는 오래된 포인터를 새 포인터와 구분할 수 없다.
+// 사용 예:
+//   BinnedAllocatorConfig config;
+//   config.reserveBytes = usize{256} << 20;   // 도구처럼 작게 쓰는 인스턴스
+//   BinnedAllocator memory(backing, config);
+struct BinnedAllocatorConfig {
+    // 작은 블록용으로 예약할 주소 범위(byte)다. slab 크기(BinnedAllocator::SlabBytes) 단위로
+    // 올린다. 0이면 플랫폼 기본값(BinnedAllocator::DefaultReserveBytes)이다. 예약은 주소만 잡고
+    // 메모리를 commit하지 않는다. OS가 예약을 거부하면 절반씩 줄여 다시 시도한다(BinnedAllocator
+    // 주석).
+    usize reserveBytes = 0;
+    // 비어서 돌려받은 slab을 commit한 채 보관하는 한도(개수)다. 넘는 slab은 decommit한다. 0이면
+    // 비는 즉시 decommit한다.
+    uint32 retainedEmptySlabs = 64;
+    // 스레드 캐시를 쓸지다. 거짓이면 모든 작은 요청이 등급 잠금 경로로 간다: 느리지만 반환한 블록이
+    // 곧바로 slab으로 돌아가 slab 수준 동작이 결정적이다(시험·도구용).
+    bool threadCaches = true;
+};
+
+// 주소 범위와 느린 경로의 사용량이다(할당 수·byte는 Stats가 낸다). 한 시점의 snapshot이다.
+struct BinnedAllocatorUsage {
+    // 실제로 예약한 주소 범위(byte)다. 설정보다 작으면 OS가 예약을 거부해 줄인 것이고, 0이면
+    // 예약하지 못해 모든 요청이 상위 allocator로 간다.
+    usize reservedBytes = 0;
+    // commit한 slab(쓰는 slab과 보관 중인 빈 slab)의 byte다.
+    usize committedBytes = 0;
+    // 보관 중인 빈 slab 수다.
+    uint32 retainedSlabs = 0;
+    // 살아 있는 큰 할당 수다(상위 allocator가 준 블록).
+    uint64 largeAllocations = 0;
+    // 작은 요청인데 상위 allocator로 간 누적 횟수다(예약 범위가 없거나 다 찼거나 slab을 commit하지
+    // 못했을 때). 0이 아니면 예약 크기를 늘릴지 본다.
+    uint64 fallbackAllocations = 0;
+};
+
+// 범용 할당자다(Docs/Design/GarbageCollectionScale.ko.md 18절 — UE 5.8 FMallocBinned3 대응).
+// 작은 요청(MaxSmallBytes 이하, 정렬 MaxSmallAlignment 이하)은 인스턴스가 예약한 주소 범위 안의
+// 64KB slab에서 크기 등급별 블록으로 내주고, 그보다 큰 요청은 상위 allocator(backing)로 넘긴다.
+//
+// 사용 예:
+//   SystemAllocator system;
+//   BinnedAllocator memory(system);
+//   auto block = memory.Allocate(48, 16);
+//   if (block) { /* 사용 */ (void)memory.Deallocate(block.Value()); }
+//
+// 계약:
+// - 0 byte는 성공한 nullptr, 0이거나 2의 거듭제곱이 아닌 정렬은 InvalidArgument다.
+// - 작은 요청의 블록은 16 byte 이상으로 정렬된다(큰 경로로 가도 같다). 정렬 32·64는 블록 크기가 그
+//   배수인 등급으로 올린다. 큰 요청은 요청한 정렬 그대로 상위 allocator에 넘긴다.
+// - Deallocate: 이 인스턴스가 내주지 않은 주소, 이미 반환한 주소, 블록 가운데 주소는 NotFound이고
+//   상태를 바꾸지 않는다. 예약 범위 밖 주소·쓰지 않는 slab의 주소·블록 경계가 아닌 주소는 그 주소를
+//   읽지 않고 판정한다. 그 밖(쓰는 slab의 블록 경계)은 slab 머리와 블록 안 반환 표지를 읽는다.
+//   한계: 반환 표지는 값 일치다 — 살아 있는 블록의 둘째 word(offset 8)에 사용자가 그 블록의 표지
+//   값(인스턴스마다 무작위, 최상위 비트가 선 64비트 값)을 써 두면 정상 반환이 NotFound가 된다.
+//   주소가 재사용된 뒤의 옛 포인터는 새 포인터와 구분하지 못한다(Allocator.h).
+// - Stats의 liveBytes는 요청 크기가 아니라 내준 블록 크기의 합이다(반환 때 요청 크기를 알 수 없다
+//   — 큰 할당은 요청 크기 그대로다). Allocator.h의 "요청 크기"와 다르다.
+// - OS가 주소 범위 예약을 거부해도 생성은 실패하지 않는다: 크기를 절반씩 줄여 MinReserveBytes까지
+//   (설정이 그보다 작으면 설정값 한 번만) 다시 시도하고, 끝내 못 하면 모든 요청이 상위
+//   allocator로 간다(느리지만 맞다). 실제 크기는 ReservedBytes()로 본다. 예약 범위가 다 찼거나
+//   slab commit이 실패한 작은 요청도 상위 allocator로 간다(Usage().fallbackAllocations).
+// - 상위 allocator: 이 객체와 모든 할당보다 오래 살고, 어느 스레드에서나 부를 수 있어야 한다. 상위
+//   호출은 이 allocator의 잠금 밖에서 한다. 성공과 함께 null·정렬이 틀린 주소·주소 넘침·예약
+//   범위와 겹치는 주소·이미 내준 주소를 돌려주면 Fatal이다. 상위가 큰 블록의 반환을 거부하면 그
+//   오류를 돌려주고 할당은 살아 있는 채로 남는다.
+// - 스레드: 모든 메서드를 여러 스레드에서 동시에 부를 수 있다. 파괴는 모든 호출이 끝난 뒤에 하고,
+//   반환하지 않은 할당이 남아 있으면 Fatal이다.
 class BinnedAllocator final : public Allocator {
 public:
-    explicit BinnedAllocator(Allocator& backing) noexcept;
+    // slab 하나의 크기(byte)다. 예약 크기의 단위다.
+    static constexpr usize SlabBytes = usize{64} << 10;
+    // 작은 블록 경로가 받는 가장 큰 요청(byte)과 정렬이다. 넘으면 상위 allocator로 간다.
+    static constexpr usize MaxSmallBytes = 8192;
+    static constexpr usize MaxSmallAlignment = 64;
+    // 예약 크기의 플랫폼 기본값이다(Windows·Mac 16 GiB, Android 4 GiB — 39비트 주소 기기).
+    static constexpr usize DefaultReserveBytes = IsAndroid ? usize{4} << 30 : usize{16} << 30;
+    // 예약이 거부될 때 줄여 가며 다시 시도하는 하한이다.
+    static constexpr usize MinReserveBytes = usize{64} << 20;
+
+    // backing은 큰 할당의 상위 allocator다. 생성은 실패하지 않는다(위 계약).
+    explicit BinnedAllocator(Allocator& backing, const BinnedAllocatorConfig& config = {}) noexcept;
+    // 반환하지 않은 할당이 남아 있으면 Fatal이다. 예약한 주소 범위와 내부 저장소를 모두 푼다.
     ~BinnedAllocator() noexcept override;
 
     BinnedAllocator(const BinnedAllocator&) = delete;
@@ -30,43 +99,37 @@ public:
     BinnedAllocator(BinnedAllocator&&) = delete;
     BinnedAllocator& operator=(BinnedAllocator&&) = delete;
 
+    // 실패: 잘못된 정렬 InvalidArgument, 큰 경로의 상위 allocator 오류(그대로 전달), 큰 할당
+    // 원장을 늘리지 못하면 OutOfMemory. 실패는 통계를 바꾸지 않는다. tag는 상위 allocator로만 간다.
     Result<void*> Allocate(usize bytes, usize alignment, uint32 tag = 0) noexcept override;
-    // 미소유·중복·중간 주소는 역참조하지 않고 NotFound다. 상위 반환 실패 시 기록을 보존한다.
+    // nullptr는 성공한 무동작이다. 미소유·중복·중간 주소는 NotFound다(위 계약).
     Result<void> Deallocate(void* address) noexcept override;
 
-    // 모든 allocation이 반환된 경우에만 pool storage를 회수한다. Busy이면 상태를 유지한다.
-    // 상위 allocator가 pool의 소유 storage 반환을 거부하면 PoolAllocator 계약에 따라 Fatal이다.
-    Result<void> Trim() noexcept;
-    // 사용 중이면 Busy이고 열린 상태를 유지한다. 성공 후 재호출은 성공한다.
-    Result<void> Shutdown() noexcept;
+    // 보관 중인 빈 slab을 모두 decommit한다. 살아 있는 할당은 건드리지 않는다. 메모리 압박 때나
+    // 큰 작업이 끝난 뒤에 부른다.
+    void Trim() noexcept;
+
+    // 살아 있는 할당 수·byte와 누적 할당 수다(작은 블록 + 큰 할당). 다른 스레드가 쓰는 중이면 그
+    // 순간의 근사다.
     AllocationStats Stats() const noexcept;
+    // 주소 범위와 느린 경로의 사용량이다.
+    BinnedAllocatorUsage Usage() const noexcept;
+    // 실제로 예약한 주소 범위(byte)다. 0이면 예약하지 못했다.
+    usize ReservedBytes() const noexcept;
 
 private:
-    struct Record;
-    struct EntryScope;
-    class CheckedBacking final : public Allocator {
-    public:
-        CheckedBacking(BinnedAllocator& owner, Allocator& backing) noexcept;
-        ~CheckedBacking() noexcept override;
-        Result<void*> Allocate(usize bytes, usize alignment, uint32 tag = 0) noexcept override;
-        Result<void> Deallocate(void* address) noexcept override;
+    friend struct detail::BinnedAllocatorTestAccess;
+    // 내부 상태다(등급별 잠금·slab 목록·주소 범위·큰 할당 원장). 타입은 구현 파일에만 둔다.
+    struct State;
+    // 시험 통로(detail::BinnedAllocatorTestAccess)가 부르는 실패 주입·내부 조회 진입점이다. 선언은
+    // Core/Private/Memory/BinnedAllocatorTestHooks.h, 구현은 내부 상태를 아는 구현 파일에 있다.
+    // 제품 코드는 부르지 않는다.
+    struct TestHooks;
 
-    private:
-        struct BackingRecord;
-        BinnedAllocator& owner_;
-        Allocator& backing_;
-        BackingRecord* records_ = nullptr;
-    };
-    static thread_local EntryScope* activeEntry_;
-    static constexpr usize BinCount = 9;
-
-    CheckedBacking backing_;
-    PoolAllocator pools_[BinCount];
-    mutable platform::Mutex mutex_;
-    Record* records_ = nullptr;
-    void* pendingRecord_ = nullptr;
-    AllocationStats stats_{};
-    bool closed_ = false;
+    State* state_ = nullptr;
+    // 스레드 캐시 조회에 쓰는 인스턴스 번호다(프로세스에서 재사용하지 않는다 — 같은 주소에 다시
+    // 만든 인스턴스와 구분한다). 0이면 스레드 캐시를 쓰지 않는다.
+    uint64 cacheId_ = 0;
 };
 
 } // namespace rocks

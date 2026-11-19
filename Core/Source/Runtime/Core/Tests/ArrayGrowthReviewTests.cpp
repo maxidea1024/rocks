@@ -4,6 +4,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace array_growth_review_tests_file {
 
 namespace {
 
@@ -255,3 +256,4 @@ TEST(ArrayEnsureCapacityIsAbsoluteAndPreservesStateOnFailure) {
 
     CHECK(backing.Stats().liveAllocations == 0);
 }
+} // namespace array_growth_review_tests_file

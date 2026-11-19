@@ -32,13 +32,13 @@ static_assert(detail::SegmentCommitmentOffset + detail::SegmentCommitmentBytes =
 static_assert(detail::SegmentSaltOffset + detail::SegmentSaltBytes ==
               detail::SegmentCommitmentOffset);
 
-constexpr uint8 Magic[4] = {'R', 'S', 'E', 'G'};
-constexpr usize VersionOffset = 4;
+constexpr uint8 SegmentFormatMagic[4] = {'R', 'S', 'E', 'G'};
+constexpr usize SegmentFormatVersionOffset = 4;
 constexpr usize AlgorithmOffset = 5;
 constexpr usize SizeLog2Offset = 6;
 constexpr usize FlagsOffset = 7;
 constexpr usize KeyIdOffset = 8;
-constexpr usize PrefixCheckBytes = VersionOffset + 1;
+constexpr usize PrefixCheckBytes = SegmentFormatVersionOffset + 1;
 
 // HKDF info의 앞 16 byte다. 형식 버전이 바뀌면 이 label도 바꾼다.
 constexpr uint8 DerivationLabel[16] = {'r', 'o', 'c', 'k', 's', '.', 's', 'e',
@@ -53,17 +53,17 @@ constexpr usize DerivedBytes = SegmentStreamKeyBytes + detail::SegmentCommitment
 constexpr uint64 AesMaxBlocks = SegmentStreamAesMaxBodyBytes / SegmentTagBytes;
 static_assert(AesMaxBlocks == (uint64{1} << 36) - 1);
 
-bool IsDefined(SegmentStreamAlgorithm algorithm) noexcept {
+bool SegmentFormatIsDefined(SegmentStreamAlgorithm algorithm) noexcept {
     return algorithm == SegmentStreamAlgorithm::ChaCha20Poly1305 ||
            algorithm == SegmentStreamAlgorithm::Aes256Gcm;
 }
 
-void StoreKeyId(uint8* out, KeyId id) noexcept {
+void SegmentFormatStoreKeyId(uint8* out, KeyId id) noexcept {
     StoreBigEndian<uint64>(out, id.value.high);
     StoreBigEndian<uint64>(out + 8, id.value.low);
 }
 
-KeyId LoadKeyId(const uint8* in) noexcept {
+KeyId SegmentFormatLoadKeyId(const uint8* in) noexcept {
     KeyId id;
     id.value.high = LoadBigEndian<uint64>(in);
     id.value.low = LoadBigEndian<uint64>(in + 8);
@@ -73,11 +73,11 @@ KeyId LoadKeyId(const uint8* in) noexcept {
 // 헤더를 byte 순서대로 판정한다(TryPeekSegmentHeader 규칙).
 Result<SegmentHeaderInfo> ParseHeader(Span<const uint8> header) noexcept {
     if (header.Size() < PrefixCheckBytes ||
-        !platform::MemoryEquals(header.Data(), Magic, sizeof(Magic))) {
+        !platform::MemoryEquals(header.Data(), SegmentFormatMagic, sizeof(SegmentFormatMagic))) {
         return Result<SegmentHeaderInfo>::Failure(ErrorCode::AuthenticationFailed);
     }
 
-    if (header[VersionOffset] != detail::SegmentFormatVersion) {
+    if (header[SegmentFormatVersionOffset] != detail::SegmentFormatVersion) {
         return Result<SegmentHeaderInfo>::Failure(ErrorCode::Unsupported);
     }
 
@@ -86,12 +86,12 @@ Result<SegmentHeaderInfo> ParseHeader(Span<const uint8> header) noexcept {
     }
 
     const auto algorithm = static_cast<SegmentStreamAlgorithm>(header[AlgorithmOffset]);
-    if (!IsDefined(algorithm)) {
+    if (!SegmentFormatIsDefined(algorithm)) {
         return Result<SegmentHeaderInfo>::Failure(ErrorCode::Unsupported);
     }
 
     const uint8 sizeLog2 = header[SizeLog2Offset];
-    const KeyId keyId = LoadKeyId(header.Data() + KeyIdOffset);
+    const KeyId keyId = SegmentFormatLoadKeyId(header.Data() + KeyIdOffset);
     if (sizeLog2 < SegmentSizeLog2Min || sizeLog2 > SegmentSizeLog2Max ||
         header[FlagsOffset] != 0 || keyId.IsNil()) {
         return Result<SegmentHeaderInfo>::Failure(ErrorCode::AuthenticationFailed);
@@ -144,7 +144,8 @@ Result<AeadKey> TryDeriveSegmentKey(Span<const uint8> master, Span<const uint8> 
 }
 
 // 세그먼트 nonce = 0x00 × 3 ‖ BE64(index) ‖ last다.
-void MakeNonce(uint64 index, bool last, uint8 (&nonce)[detail::SegmentNonceBytes]) noexcept {
+void SegmentFormatMakeNonce(uint64 index, bool last,
+                            uint8 (&nonce)[detail::SegmentNonceBytes]) noexcept {
     nonce[0] = 0;
     nonce[1] = 0;
     nonce[2] = 0;
@@ -164,7 +165,7 @@ bool OpenRaw(const AeadKey& key, uint64 index, bool last, Span<const uint8> seal
     }
 
     uint8 nonce[detail::SegmentNonceBytes];
-    MakeNonce(index, last, nonce);
+    SegmentFormatMakeNonce(index, last, nonce);
     const usize bytes = sealed.Size() - SegmentTagBytes;
     const uint8* c = detail::InputPointer(sealed.Left(bytes));
     const uint8* tag = sealed.Data() + bytes;
@@ -188,7 +189,8 @@ bool OpenRaw(const AeadKey& key, uint64 index, bool last, Span<const uint8> seal
 // ---- 형식 도우미 ----
 
 bool detail::IsValidSegmentParams(const SegmentStreamParams& params) noexcept {
-    return IsDefined(params.algorithm) && params.segmentSizeLog2 >= SegmentSizeLog2Min &&
+    return SegmentFormatIsDefined(params.algorithm) &&
+           params.segmentSizeLog2 >= SegmentSizeLog2Min &&
            params.segmentSizeLog2 <= SegmentSizeLog2Max;
 }
 
@@ -253,12 +255,12 @@ Result<AeadKey> detail::TryStartSegmentStream(const SegmentStreamKey& key,
     }
 
     uint8* bytes = header.Data();
-    platform::MemoryCopy(bytes, Magic, sizeof(Magic));
-    bytes[VersionOffset] = SegmentFormatVersion;
+    platform::MemoryCopy(bytes, SegmentFormatMagic, sizeof(SegmentFormatMagic));
+    bytes[SegmentFormatVersionOffset] = SegmentFormatVersion;
     bytes[AlgorithmOffset] = static_cast<uint8>(params.algorithm);
     bytes[SizeLog2Offset] = params.segmentSizeLog2;
     bytes[FlagsOffset] = 0;
-    StoreKeyId(bytes + KeyIdOffset, key.Id());
+    SegmentFormatStoreKeyId(bytes + KeyIdOffset, key.Id());
     platform::MemoryCopy(bytes + SegmentSaltOffset, salt.Data(), SegmentSaltBytes);
 
     uint8 associatedHash[SegmentAssociatedHashBytes];
@@ -311,7 +313,7 @@ void detail::SealSegment(const AeadKey& key, uint64 index, bool last, Span<const
     }
 
     uint8 nonce[SegmentNonceBytes];
-    MakeNonce(index, last, nonce);
+    SegmentFormatMakeNonce(index, last, nonce);
     uint8 scratch = 0;
     uint8* c = OutputPointer(sealed.Left(bytes), &scratch);
     uint8* tag = sealed.Data() + bytes;

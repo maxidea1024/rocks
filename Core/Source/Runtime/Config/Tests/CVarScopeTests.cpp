@@ -10,8 +10,11 @@
 // lane의 범위 파괴 겹침, 콘솔 표시, ScopedOverride의 묶음 판. 순서는 Join·gate로 정한다(sleep
 // 없음).
 using namespace rocks;
+namespace c_var_scope_tests_file {
+
 using namespace rocks::config;
 using namespace rocks::test::config;
+} // namespace c_var_scope_tests_file
 
 namespace cvar_scope_test {
 
@@ -38,6 +41,8 @@ constinit CVarGroup ScopeQuality = cvar::Group("quality.scope.level", 1)
                                        .Level(1, {{ScopeMember, 20}});
 
 } // namespace cvar_scope_test
+
+namespace c_var_scope_tests_file {
 
 namespace {
 
@@ -482,3 +487,4 @@ TEST(CVar_ScopedOverrideOfGroup) {
     REQUIRE(context.Sync());
     CHECK(ScopeQuality.Get() == 1 && ScopeMember.Get() == 20);
 }
+} // namespace c_var_scope_tests_file

@@ -1,3 +1,4 @@
+using Rocks.Build;
 using Rocks.Build.Rules;
 
 // Host-side config boot (Docs/Design/ConfigSystem.ko.md section 5.3): the one config context of a process (game, editor, Sandbox,
@@ -8,5 +9,9 @@ public sealed class HostConfig : CoreModuleRules
 {
     protected override string ModuleName => "HostConfig";
 
-    protected override string[] RequiredModules => ["LogHost", "TraceControl", "Config"];
+    // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
+    protected override UnityMode Unity => UnityMode.On;
+
+    // ModuleLoader: settings registration walks the module table (Docs/Design/ModuleLoader.ko.md section 3.10).
+    protected override string[] RequiredModules => ["LogHost", "TraceControl", "Config", "ModuleLoader"];
 }

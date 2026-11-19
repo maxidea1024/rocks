@@ -6,7 +6,7 @@ namespace Rocks.ToolTests;
 internal static partial class MetaTests
 {
     // struct·클래스마다 GeneratedType<T>::VisitFields를 낸다: 선언 순서(가장 먼 base 필드부터, 선언 타입 안에서는 소스 순서)대로 visitor.Field("이름", 값)이고, 값은
-    // 멤버 포인터 직접 읽기(클래스는 선언 클래스의 멤버 포인터, private 포함), bitfield는 생성 접근자 Get_의 값이다. 필드가 없으면
+    // 멤버 포인터 직접 읽기(클래스는 선언 클래스의 멤버 포인터, private 포함), 자기 bitfield는 헤더 안의 직접 읽기(Get_ 정의는 생성 소스에 있다), 상속한 bitfield는 base의 Get_이다. 필드가 없으면
     // 매개변수 이름 없는 빈 본문이다. 생성 헤더를 ObjectRuntime 일반 특수화(Object/LogStructure.h)와 함께 컴파일해 템플릿을
     // 인스턴스화한다.
     private static void RegisterLogFieldVisitors(MetaContext context)
@@ -26,8 +26,8 @@ internal static partial class MetaTests
             foreach ((string expected, string reason) in new[]
             {
                 ("template <class Visitor> static constexpr void VisitFields(const ::probe::Leaf& value, Visitor& visitor) noexcept { " +
-                    "visitor.Field(\"value\", value.*(&::probe::Leaf::value)); visitor.Field(\"bit\", GeneratedType<::probe::Leaf>::Get_bit(value)); }",
-                    "struct visitor with a bitfield accessor"),
+                    "visitor.Field(\"value\", value.*(&::probe::Leaf::value)); visitor.Field(\"bit\", static_cast<bool>(value.bit != 0)); }",
+                    "struct visitor reads its own bitfield inline"),
                 ("template <class Visitor> static constexpr void VisitFields(const ::probe::Hollow&, Visitor&) noexcept {}",
                     "struct without fields has an unnamed empty visitor"),
                 ("template <class Visitor> static constexpr void VisitFields(const ::probe::Base& value, Visitor& visitor) noexcept { " +

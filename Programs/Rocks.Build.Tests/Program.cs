@@ -93,6 +93,31 @@ try
         Console.WriteLine("PASS " + name);
     }
 
+    // --group <이름>: 고친 묶음 하나만 돌린다(반복 확인용이다 — 전체 실행은 옵션 없이 한다). 요청과 임시 루트만 쓰는 독립 묶음만 고를
+    // 수 있다. 예: dotnet run --project Programs/Rocks.Build.Tests -- --root . --group pch
+    if (args.Contains("--group"))
+    {
+        string group = args[Array.IndexOf(args, "--group") + 1];
+        switch (group)
+        {
+            case "dependency":
+                await DependencyTests.RunAsync(request, root, Pass);
+                break;
+            case "unity":
+                await UnityTests.RunAsync(request, root, Pass);
+                break;
+            case "pch":
+                await PchTests.RunAsync(request, root, Pass);
+                break;
+            default:
+                throw new ArgumentException($"Unknown test group '{group}'. Groups: dependency, unity, pch.");
+        }
+
+        Console.WriteLine($"Native build regression groups ({group} only): {passed}, failed: 0");
+        allPassed = true;
+        return 0;
+    }
+
     await PlatformSelectionTests.RunAsync(request, root);
     Pass("platform routing rejects unknown and mismatched targets");
 
@@ -287,8 +312,17 @@ try
     await ModuleTableTests.RunAsync(request, root);
     Pass("module table: rows in dependency order without exempt modules, ROCKS_MODULE_NAME, missing entry link error, case collisions, reserved macro");
 
+    // 정밀 헤더 의존(UB0): depfile 파서, 2단 key, 의존 기록, compile identity, 출력 검증 memo. 하위 묶음마다 PASS를 센다.
+    await DependencyTests.RunAsync(request, root, Pass);
+
+    // 유니티 묶기(UB1): 구성 결정성, include 앞 #define 판정, 실제 빌드(__FILE__·제외·논리 명령·변형 디렉터리·정리), 리플렉션 생성 소스 묶기.
+    await UnityTests.RunAsync(request, root, Pass);
+
+    // 정의 헤더·모듈 PCH·작업 파일 분리(UB4). 하위 묶음마다 PASS를 센다.
+    await PchTests.RunAsync(request, root, Pass);
+
     await ReflectionSourceTests.RunAsync(request, root);
-    Pass("reflection generated sources: source-less module archive, registration through the declaration, entry point exemption, incremental, validation");
+    Pass("reflection generated sources: source-less module archive, registration through the declaration, entry module and module types marker, incremental, validation");
 
     // 빌드 주입 상수(B7): 툴체인 지문·도구 빌드 ID·환경 위생·FP 인자 거부·입력 열거 정리. 하위 묶음마다 PASS를 센다.
     await BuildInfoTests.RunAsync(request, root, Pass);

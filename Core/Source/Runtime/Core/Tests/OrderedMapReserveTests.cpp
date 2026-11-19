@@ -12,6 +12,7 @@
 // CommitReserve는 할당·해제·실패 없이 적용한다(옛 저장소는 예약이 소멸할 때 반환 — 리플렉션 B9f4).
 // IsIterating은 ForEach 중에만 참이다. EraseAndTake는 지운 항목의 키·값을 소멸 전에 넘긴다.
 using namespace rocks;
+namespace ordered_map_reserve_tests_file {
 
 namespace {
 
@@ -279,3 +280,4 @@ TEST(OrderedMap_EraseAndTakeHandsOverTheErasedEntry) {
     taken.Reset();
     CHECK(allocator.deallocations == before + 4);
 }
+} // namespace ordered_map_reserve_tests_file

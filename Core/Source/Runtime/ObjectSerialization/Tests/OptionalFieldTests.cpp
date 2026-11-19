@@ -5,6 +5,8 @@
 // Optional<값 struct>의 aggregate 규칙, 경로 Emplace·Reset·unset 멤버 NotFound(OptionalUnset),
 // Optional 멤버의 경로 쓰기와 옛 값, staged 쓰기, 새 값의 객체 allocator(ObjectAllocator).
 using namespace rocks;
+namespace optional_field_tests_file {
+
 using namespace rocks::test::optional;
 
 namespace {
@@ -566,3 +568,4 @@ TEST(OptionalField_ManualFunctionTableRoundTrip) {
 
     CHECK(types.Shutdown());
 }
+} // namespace optional_field_tests_file

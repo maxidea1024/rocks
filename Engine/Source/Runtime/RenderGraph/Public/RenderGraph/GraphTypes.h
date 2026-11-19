@@ -223,6 +223,8 @@ struct GraphStats {
     // 장치에 낸 업로드 수다(버퍼 업로드 하나, 텍스처 mip 하나가 1).
     uint32 uploads = 0;
     uint32 validationErrors = 0;
+    // worker에서 기록 목록으로 기록한 pass 수다(RG3 병렬 기록, 직렬이면 0).
+    uint32 parallelPasses = 0;
 };
 
 } // namespace rocks::render

@@ -6,6 +6,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace hash_collection_operations_tests_file {
 
 namespace {
 
@@ -824,6 +825,7 @@ TEST(CoreHashSetTryUnionEveryAllocationFailureRollsBack) {
     CHECK(backing.Stats().liveAllocations == 0);
     CHECK(backing.Stats().liveBytes == 0);
 }
+} // namespace hash_collection_operations_tests_file
 
 namespace rocks::test {
 
@@ -876,6 +878,8 @@ int RunHashOperationsNegativeControl(uint32 operation) noexcept {
 }
 
 } // namespace rocks::test
+
+namespace hash_collection_operations_tests_file {
 
 namespace {
 
@@ -1010,3 +1014,4 @@ TEST(HashStringBytesIgnoringAsciiCaseIsFoldedFnv1a) {
     CHECK(HashStringBytesIgnoringAsciiCase(StringView("\xC3\x89")) !=
           HashStringBytesIgnoringAsciiCase(StringView("\xC3\xA9")));
 }
+} // namespace hash_collection_operations_tests_file

@@ -49,6 +49,15 @@ void PosixSetCurrentThreadPriority(ThreadPriority priority) noexcept;
 // decommit한 페이지를 OS에 돌려주는 madvise 값이다(Apple MADV_FREE, Linux 계열 MADV_DONTNEED).
 int PosixDecommitAdvice() noexcept;
 
+// 접근을 열어 둔 예약(VirtualMemoryAccess::Open)의 commit·decommit이다. 보호는 바꾸지 않는다(UE 5.8
+// FPlatformVirtualMemoryBlock과 같다).
+// - PosixOpenCommit: Apple은 madvise(MADV_FREE_REUSE)로 다시 쓴다고 알리고(통계용 힌트 — 실패는
+//   무시한다), Android는 할 일이 없다.
+// - PosixOpenDecommit: 페이지를 OS에 돌려준다(Apple MADV_FREE_REUSABLE, Android MADV_DONTNEED).
+//   성공하면 0, 실패하면 -1과 errno다. 실패하면 범위는 그대로다.
+void PosixOpenCommit(void* address, usize bytes) noexcept;
+int PosixOpenDecommit(void* address, usize bytes) noexcept;
+
 // 이 프로세스가 쓸 수 있는 논리 프로세서 수다(1 이상 — Android는 sched_getaffinity의 affinity 수,
 // Apple은 affinity API가 없어 sysconf의 online 수). 알 수 없으면 1이다.
 uint32 PosixLogicalProcessorCount() noexcept;

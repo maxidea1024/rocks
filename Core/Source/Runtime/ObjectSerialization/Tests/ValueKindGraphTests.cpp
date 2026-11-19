@@ -12,6 +12,8 @@
 // 저장값 거부 시험이다(Docs/Design/ReflectionFoundations.ko.md 3.1–3.3절). 필드 접근의 원자성과
 // SoftObjectRef 자체 의미는 ObjectRuntime의 AssetValueFieldTests가 본다.
 using namespace rocks;
+namespace value_kind_graph_tests_file {
+
 using reflection_fixture::AssetFields;
 using reflection_fixture::Node;
 
@@ -474,3 +476,4 @@ TEST(ValueKinds_EverySaveAndLoadAllocationFailureRollsBack) {
     REQUIRE(types.Unregister(registered.Value()));
     CHECK(types.Shutdown());
 }
+} // namespace value_kind_graph_tests_file

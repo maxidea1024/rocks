@@ -18,6 +18,7 @@
 
 // 압축 사전(Docs/Design/Compression.ko.md 11절) 시험이다.
 namespace rocks::test {
+namespace compression_dictionary_tests_file {
 
 using namespace compression;
 using namespace dictionary_test;
@@ -638,5 +639,6 @@ TEST(CompressionDictionary_BlockContainers) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace compression_dictionary_tests_file
 
 } // namespace rocks::test

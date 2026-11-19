@@ -8,6 +8,8 @@
 #include <string.h>
 
 using namespace rocks;
+namespace mac_tests_file {
+
 using namespace rocks::crypto;
 
 // 알려진 답의 출처: HMAC은 RFC 4231 시험 사례 1·2·3·4·6·7(5는 잘린 출력이라 뺀다)이고, BLAKE2b
@@ -625,3 +627,4 @@ TEST(CryptoMacAesCmacChunking) {
         }
     }
 }
+} // namespace mac_tests_file

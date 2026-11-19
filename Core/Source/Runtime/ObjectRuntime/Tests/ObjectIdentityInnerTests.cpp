@@ -9,6 +9,7 @@
 // A0-Oa CollectInners 순서·제외·실패, 조회의 비교 키 할당 실패, out allocator 콜백 재진입 시험이다
 // (Docs/Design/ObjectFoundations.ko.md 1.2절·9절 Oa).
 using namespace rocks;
+namespace object_identity_inner_tests_file {
 
 namespace {
 
@@ -463,3 +464,4 @@ TEST(ObjectIdentityInner_TenThousandChildrenAcrossManyChunks) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace object_identity_inner_tests_file

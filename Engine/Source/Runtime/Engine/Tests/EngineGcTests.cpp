@@ -7,6 +7,7 @@
 // 엔진이 소유하는 GC scheduler와 전체 수집 요청의 시험이다(GC 설계 17.4절 —
 // Docs/Design/GarbageCollectionScale.ko.md).
 using namespace rocks;
+namespace engine_gc_tests_file {
 
 // 엔진이 GC scheduler를 만들어 World에 빌려주고, 종료 때 World를 모두 파괴한 뒤 끝낸다. 엔진의
 // 전체 수집 요청은 World의 요청이 된다(주기 간격이 아주 긴 FullCollection World도 요청으로는
@@ -81,3 +82,4 @@ TEST(Engine_GcWorkersZeroMeansSerialMarking) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace engine_gc_tests_file

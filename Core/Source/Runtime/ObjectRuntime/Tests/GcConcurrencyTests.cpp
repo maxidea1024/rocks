@@ -8,6 +8,8 @@
 #include <Platform/Thread.h>
 #include <Task/WorkerScheduler.h>
 
+namespace gc_concurrency_tests_file {
+
 // GC-S1(잠금 없는 직렬 marker)의 전제 시험이다(Docs/Design/GarbageCollectionScale.ko.md 7.1·7.2절).
 // - 표식 slice 안에서 다른 스레드가 RootRef·BackendLease·EncodePin을 반환해도 결과가 정의대로다.
 //   순서는 탐침 객체의 Trace가 helper 스레드를 깨우고 끝날 때까지 기다리는 명시 hand-off로
@@ -311,3 +313,4 @@ TEST(ObjectGc_WideTraceLargerThanVisitorBatchMarksEveryEdge) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace gc_concurrency_tests_file

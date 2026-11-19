@@ -6,6 +6,8 @@
 // hook), 용도별 입력·출력 제외(경로 단계 전체), 대입 분해(`[...]`·따옴표 밖 첫 `=`), 입력 byte·진단
 // 한도.
 using namespace rocks;
+namespace text_path_tests_file {
+
 using namespace rocks::test::text;
 
 namespace {
@@ -220,3 +222,4 @@ TEST(TextPath_InputAndDiagnosticLimits) {
     REQUIRE(!start);
     CHECK(start.Error() == ErrorCode::InvalidArgument);
 }
+} // namespace text_path_tests_file

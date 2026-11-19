@@ -4,6 +4,7 @@
 #include <Platform/Memory.h>
 
 using namespace rocks;
+namespace color_tests_file {
 
 namespace {
 
@@ -748,3 +749,4 @@ TEST(ColorArithmeticKeepsHdrAndAlpha) {
     CHECK(LinearColor(1.0f, 1.0f, 1.0f, 1.0f) / 3.0f ==
           LinearColor(1.0f / 3.0f, 1.0f / 3.0f, 1.0f / 3.0f, 1.0f / 3.0f));
 }
+} // namespace color_tests_file

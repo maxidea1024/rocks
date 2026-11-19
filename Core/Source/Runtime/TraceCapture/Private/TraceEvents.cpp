@@ -33,7 +33,7 @@ TraceWriteResult WriteStandard(TraceSessionGuard& guard, TraceSessionState& sess
                                       variable);
 }
 
-uint64 CurrentSerial() noexcept {
+uint64 TraceEventsCurrentSerial() noexcept {
     return AtomicLoad<MemoryOrder::Acquire>(&detail::currentSessionSerial);
 }
 
@@ -152,7 +152,7 @@ double TraceCounter::FloatValue() const noexcept {
 }
 
 void detail::EmitTraceCounter(TraceCounter& counter, uint64 bits) noexcept {
-    const uint64 serial = CurrentSerial();
+    const uint64 serial = TraceEventsCurrentSerial();
     if (serial == 0) {
         return;
     }
@@ -234,7 +234,7 @@ void TraceMarkArguments::AddString(StringView value) noexcept {
 }
 
 void detail::EmitTraceMark(TraceMarkSite& site, const TraceMarkArguments& arguments) noexcept {
-    const uint64 serial = CurrentSerial();
+    const uint64 serial = TraceEventsCurrentSerial();
     if (serial == 0) {
         return;
     }
@@ -265,7 +265,7 @@ void detail::EmitTraceMark(TraceMarkSite& site, const TraceMarkArguments& argume
 // ---- 시간 띠 ----
 
 TraceSpanId detail::BeginTraceSpan(StringView name) noexcept {
-    const uint64 serial = CurrentSerial();
+    const uint64 serial = TraceEventsCurrentSerial();
     if (serial == 0) {
         return {};
     }

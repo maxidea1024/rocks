@@ -263,16 +263,17 @@ public sealed record NativeModuleInput
     // 규칙이 직접 채우지 않는다. 파일은 메타 생성이 게시한 뒤, 액션 그래프를 세우기 전에 있어야 한다. 액션 그래프는 Sources와 같은
     // include·정의·프로필로 컴파일해 모듈의 archive(실행 파일 모듈이면 그 실행 파일)에 넣는다. 그래서 손으로 쓴 소스가 없는 리플렉션
     // 모듈도 정적 라이브러리가 되어 ModuleOutputs에 실린다.
-    // Sources와 따로 두는 이유: 모듈 진입점 판정(ModuleTables.EntryModules)에 넣지 않는다 — 리플렉션 생성 소스만 있는 모듈은 지금처럼
-    // ROCKS_IMPLEMENT_MODULE이 없어도 된다(GSD14, 진입점 모듈로 바꾸는 일은 모듈 로더 ML2). 설치 SDK 모듈은 이 목록이 비어 있다(object가
-    // SDK 라이브러리에 들어 있다 — ReflectionOnlyLibrary).
+    // Sources와 따로 두는 이유: 진입점 모듈의 자기 타입 표지(ROCKS_MODULE_TYPES=1 — 모듈 생성 소스가 RegisterModuleOwnTypes를 정의한다)를
+    // 이 목록으로 정한다(Docs/Design/ModuleLoader.ko.md 3.10절). 모듈 진입점 판정(ModuleTables.EntryModules)에서는 모듈 코드로 센다 —
+    // 손으로 쓴 소스가 없는 메타데이터 모듈은 MetadataLayout이 진입점 TU를 GeneratedSources로 더한다. 설치 SDK 모듈은 이 목록이 비어
+    // 있다(object가 SDK 라이브러리에 들어 있다).
     public IReadOnlyList<string> ReflectionSources { get; init; } = [];
 
-    // 설치 SDK 모듈 전용 표지: PrebuiltLibraries가 리플렉션 생성 소스의 object만 담는다(SDK를 만들 때 손으로 쓴 소스와 규칙 생성 소스가
-    // 없던 리플렉션 모듈 — CoreTypeBindings 등). 모듈 진입점이 없으므로 ModuleTables.EntryModules가 이 모듈의 미리 빌드한 라이브러리를
-    // 모듈 코드로 세지 않는다(소스 빌드에서 ReflectionSources를 세지 않는 것과 같은 판정이 SDK를 거쳐도 유지된다). 자기 소스
-    // (Sources·GeneratedSources·ReflectionSources)가 있는 모듈에 켜면 입력 오류다.
-    public bool ReflectionOnlyLibrary { get; init; }
+    // 리플렉션 생성 소스의 compile action이 실패했을 때 컴파일러 출력 뒤에 붙이는 안내문이다(비어 있으면 붙이지 않는다). 본문 계약 위반
+    // (생성·소멸 noexcept, 접근 권한, 정적 검사)은 메타 단계가 아니라 이 compile action이 잡으므로 사용자가 생성 코드의 오류를 원본
+    // 선언으로 되짚을 길을 알려 준다(Docs/Design/ReflectionGeneratedSources.ko.md 7절). 표시 전용이다 — action key에 넣지 않으므로 문구를
+    // 바꿔도 다시 컴파일하지 않는다. Rocks.Build.Cli의 MetadataLayout이 채운다.
+    public string ReflectionSourceFailureNote { get; init; } = "";
 
     // 이 모듈이 Core/Build/BuildInfo.h(rocks::build::ToolchainFingerprint·ToolBuildId·CurrentEngineVersion 선언)를 제공한다는 표지다. 이 모듈에
     // 닿는 실행 파일마다 빌드가 정의 TU(<out>/BuildInfo/<실행 파일>.BuildInfo.cpp)를 만들어 그 실행 파일 소스에 더한다
@@ -293,6 +294,45 @@ public sealed record NativeModuleInput
     // 모듈 표 행에 싣는 로딩 단계다(Docs/Design/ModuleLoader.ko.md 3.3절). 기술자 모듈(게임·플러그인)은 기술자의 loadingPhase를
     // DescriptorModuleSet.Apply가 넣고, 엔진 모듈은 기본 Default다(엔진 모듈 규칙의 단계는 ML1).
     public Descriptors.LoadingPhase LoadingPhase { get; init; } = Descriptors.LoadingPhase.Default;
+
+    // 유니티 빌드 설정이다(Docs/Design/UnityBuildPch.ko.md 6.1절). 켜면 이 모듈의 손으로 쓴 C++ 소스를 묶음 번역 단위로 컴파일한다.
+    // C 소스, BuildInfo·규칙 생성 TU, UnityExclude, 첫 #include 앞에서 #define하는 파일, UnityBatchBytes보다 큰 파일은 언제나 단독
+    // 번역 단위다. 켠 모듈은 묶음 충돌 정책 검사(파일 지역 이름·using·매크로·pragma)의 대상이다. dependency로 전파하지 않는다.
+    public UnityMode Unity { get; init; } = UnityMode.Default;
+
+    // 묶음 하나의 구성원 바이트 합 상한이다(실제 파일 크기). 구간이 이 값을 넘으면 파일 수로 균등 분할한다.
+    public int UnityBatchBytes { get; init; } = UnityBuild.DefaultBatchBytes;
+
+    // 구간의 기대 파일 수다(경로 해시를 이 값으로 나눈 나머지가 0인 파일이 새 구간을 연다).
+    public int UnityAnchorFiles { get; init; } = UnityBuild.DefaultAnchorFiles;
+
+    // 묶지 않고 단독 번역 단위로 컴파일할 소스다(Sources의 항목과 같은 경로 — 큰 파일, 특수한 설정이 필요한 파일, object 단위로 검사하는
+    // 파일).
+    public IReadOnlyList<string> UnityExclude { get; init; } = [];
+
+    // 리플렉션 생성 소스(ReflectionSources)를 자기들끼리 묶는가. 생성 소스는 파일 지역 이름·매크로 없이 나오므로 기본으로 묶는다
+    // (Docs/Design/ReflectionGeneratedSources.ko.md GSD9). 손으로 쓴 소스의 Unity 설정과 따로이고, 요청이 유니티를 끄면 묶지 않는다.
+    public bool ReflectionUnity { get; init; } = true;
+
+    // 모듈 PCH 헤더의 경로다(Docs/Design/UnityBuildPch.ko.md 8.1절 — 루트 기준 또는 절대 경로). 있으면 이 모듈의 C++ 번역 단위가 이 헤더를
+    // 미리 컴파일한 PCH를 쓴다. 소스는 이 헤더를 include하지 않는다 — 빌드가 강제 include하고, PCH 없이도(--pch off) 컴파일되어야 한다.
+    // PCH를 쓸 번역 단위가 PrivatePchMinTus보다 적으면 만들지 않는다.
+    public string? PrivatePchHeader { get; init; }
+
+    // PCH 사용 방식이다(8.1절). 외부 라이브러리 모듈은 설정과 무관하게 쓰지 않는다.
+    public PchUsage PchUsage { get; init; } = PchUsage.Auto;
+
+    // 모듈 PCH를 만드는 번역 단위 수의 하한이다(묶음 + 단독, PCH를 쓰지 않는 번역 단위 제외). 이보다 적으면 PCH를 만드는 비용이
+    // 절약분보다 크다.
+    public int PrivatePchMinTus { get; init; } = PchBuild.DefaultMinimumTranslationUnits;
+
+    // 공유 PCH 헤더의 철자다(이 모듈의 public include 디렉터리 기준, 8.4절). 있으면 이 모듈이 공유 PCH를 제공한다: 모듈 PCH가 없는
+    // 소비 모듈이 자기 인자로 이 헤더의 PCH를 만들어 쓴다(변형마다 하나). 헤더는 이 모듈과 그 의존 모듈의 public 헤더만 include해야
+    // 한다.
+    public string? SharedPchHeader { get; init; }
+
+    // 작업 파일 분리(7.2절)로 묶음에서 빠진 번역 단위도 PCH를 쓰는가(기본 참).
+    public bool AdaptivePch { get; init; } = true;
 
     // 규칙이 저장소 입력(예: Engine 루트 ThirdParty manifest)에서 만든 생성 번역 단위다(Docs/Design/ShaderSystem.ko.md 9절 도구 표).
     // 빌드가 출력 잠금 아래에서 <out>/GeneratedSources/<모듈>/<FileName>에 내용이 바뀔 때만 쓰고(BuildInfo 생성 TU와 같은 방식) 이
@@ -343,6 +383,34 @@ public sealed record NativeBuildRequest
     // 쓰지 않는다.
     public EngineVersion? EngineVersion { get; init; }
 
+    // 유니티 묶기를 쓰는가(명령 옵션 --unity on|off, Docs/Design/UnityBuildPch.ko.md 11절). false면 모든 소스가 단독 번역 단위다(검증
+    // 변형). object 변형 디렉터리 이름(obj/<모듈>/<변형>)에 반영되어 일반 빌드와 검증 빌드가 서로의 object를 덮어쓰지 않는다. 도구 빌드
+    // ID와 compile_commands.json에는 반영되지 않는다.
+    public bool Unity { get; init; } = true;
+
+    // PCH를 쓰는가(명령 옵션 --pch on|off). Unity와 같이 object 변형 디렉터리 이름에 반영된다.
+    public bool Pch { get; init; } = true;
+
+    // 작업 파일 분리를 쓰는가(명령 옵션 --adaptive on|off, 7절). true면 엔진이 git으로 작업 파일 집합을 구해(SourceWorkingSet) 그
+    // 소스를 유니티 묶음에서 빼 단독 번역 단위로 돌린다. 라이브러리 기본은 false이고 명령줄 도구의 기본은 on이다(CI는 off를 명시한다).
+    // 도구 빌드 ID와 compile_commands.json에는 반영되지 않는다.
+    public bool Adaptive { get; init; }
+
+    // 작업 파일 집합(정규 절대 경로)이다. null이면 Adaptive에 따라 엔진이 구한다. 시험이 git 없이 집합을 주입할 때 쓴다.
+    internal IReadOnlySet<string>? WorkingSet { get; init; }
+
+    // compile·PCH action에 clang -ftime-trace를 붙이고 빌드가 끝나면 집계하는가(명령 옵션 --timing on, Docs/Design/UnityBuildPch.ko.md
+    // 12절). 집계는 <out>/Timing/<TimingLabel>.timing.json(번역 단위별 시간, 헤더별 누적 파싱 시간·템플릿 인스턴스화 상위 목록)이다. 인자가
+    // 달라지므로 켜고 끌 때 번역 단위가 다시 컴파일된다(측정용이다).
+    public bool Timing { get; init; }
+
+    // 집계 파일 이름에 쓰는 이름이다(보통 타깃 이름). null이면 "Build"다.
+    public string? TimingLabel { get; init; }
+
+    // 계획만 세우는가(명령 옵션 --plan-only on). true면 생성 TU·묶음 파일·compile_commands.json까지 쓰고 action은 하나도 실행하지 않는다
+    // (증분 기록도 건드리지 않는다). clangd 입력이나 묶음 구성을 빌드 없이 얻을 때 쓴다. 결과의 Actions는 비어 있고 PlanOnly가 참이다.
+    public bool PlanOnly { get; init; }
+
     // response file 사용 방식이다(NativeCommandLine). 기본 Auto이며 시험만 Always·Never로 경로를 강제한다. key에 들어가지 않는다.
     internal ResponseFileMode ResponseFiles { get; init; } = ResponseFileMode.Auto;
 }
@@ -369,6 +437,25 @@ public sealed record NativeBuildResult
     public required IReadOnlyList<NativeActionResult> Actions { get; init; }
 
     public required string CompilationDatabasePath { get; init; }
+
+    // 유니티 묶기에서 자동으로 뺀 소스다: 첫 #include 앞에서 #define하는 파일(Docs/Design/UnityBuildPch.ko.md 6.1절 — 단독 번역 단위로
+    // 컴파일하고 PCH도 쓰지 않는다). 경로 ordinal 순이다.
+    public IReadOnlyList<string> UnityDefineExcluded { get; init; } = [];
+
+    // 이 빌드의 묶음 번역 단위 수다.
+    public int UnityBatches { get; init; }
+
+    // 이 빌드의 PCH action 수다(모듈 PCH와 공유 PCH 변형).
+    public int PchActions { get; init; }
+
+    // 작업 파일 분리로 묶음에서 빠진 소스 수다.
+    public int AdaptiveSeparated { get; init; }
+
+    // 빌드가 남기는 알림이다(공유 PCH를 쓰지 못한 이유 등). 실패가 아니다.
+    public IReadOnlyList<string> Notices { get; init; } = [];
+
+    // 계획만 세운 결과인가(NativeBuildRequest.PlanOnly). 참이면 아무 action도 실행하지 않았고 산출물은 확인되지 않았다.
+    public bool PlanOnly { get; init; }
 
     public string? Failure { get; init; }
 

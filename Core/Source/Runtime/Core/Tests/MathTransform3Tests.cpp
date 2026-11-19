@@ -9,6 +9,8 @@
 // 자체의 시험은 MathQuaternionTransformTests.cpp에, UE golden은
 // MathMatrixTransformGoldenTests.cpp에 있다.
 namespace rocks::test {
+namespace math_transform3_tests_file {
+
 namespace {
 
 template <typename T>
@@ -584,5 +586,6 @@ TEST(Transform3_DecompositionAgreesAcrossPrecisions) {
 
     CHECK(successes > 0 && shears > 0);
 }
+} // namespace math_transform3_tests_file
 
 } // namespace rocks::test

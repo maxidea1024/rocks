@@ -14,6 +14,7 @@
 // (keyNativeType)와 키 대상 조회(TypeLease::FieldKeyEnum), ObjectRuntime 키 형식의 seed 해시와
 // 같음의 일치.
 using namespace rocks;
+namespace map_field_registry_tests_file {
 
 namespace {
 
@@ -356,3 +357,4 @@ TEST(MapKeyHash_ObjectRuntimeKeysAgreeWithEquality) {
     CHECK(SeededHash<ClassRef<Object>>(seed)(first) == SeededHash<Guid>(seed)(first.Id()));
     CHECK(!(first == ClassRef<Object>(TypeId{0x4d4b48, 4})));
 }
+} // namespace map_field_registry_tests_file

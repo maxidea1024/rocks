@@ -5,6 +5,8 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace fence_timeline_tests_file {
+
 using namespace rocks::graphics;
 
 namespace {
@@ -258,3 +260,4 @@ TEST(FenceTimeline_WatcherReportsLoss) {
     timeline.StopWatcher();
     CHECK(timeline.IsLost());
 }
+} // namespace fence_timeline_tests_file
