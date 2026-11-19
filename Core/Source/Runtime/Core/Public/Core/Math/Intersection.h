@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/NumericLimits.h>
 #include <Core/Math/Shapes.h>
 
 namespace rocks {
@@ -21,11 +22,11 @@ namespace rocks {
 // - Ray 질의: direction은 단위 벡터여야 하고 distance는 origin에서 잰 실제 거리로
 //   [0, maxDistance]에 있다. maxDistance는 +Inf일 수 있으며 maxDistance와 같은 거리의 접촉도 Hit다.
 //   -0은 0으로 취급한다.
-// - 시작점 내부: origin(segment는 start)이 solid(Sphere, Box, Capsule, OrientedBox)의 내부나 경계
-//   위면 거리 0, point = origin, normal = 영벡터, startedInside = true인 Hit다. 표면에서 바깥으로
-//   쏘는 ray도 경계 위이므로 거리 0 Hit가 된다. UE LineExtentBoxIntersection은 같은 상황에서 normal
-//   (0,0,1)을 돌려주고 LineBoxIntersection은 bool만 돌려준다. Rocks는 의미 없는 방향 대신 영벡터로
-//   표시한다.
+// - 시작점 내부: origin(segment는 start)이 solid(Sphere, Box, Capsule, Cylinder, OrientedBox)의
+//   내부나 경계 위면 거리 0, point = origin, normal = 영벡터, startedInside = true인 Hit다.
+//   표면에서 바깥으로 쏘는 ray도 경계 위이므로 거리 0 Hit가 된다. UE LineExtentBoxIntersection은
+//   같은 상황에서 normal (0,0,1)을 돌려주고 LineBoxIntersection은 bool만 돌려준다. Rocks는 의미
+//   없는 방향 대신 영벡터로 표시한다.
 // - normal: solid 표면 hit은 바깥 방향 단위 normal(반올림 수준)이다. Plane·Triangle hit은 진행
 //   방향의 반대쪽, 즉 ray가 출발한 쪽을 향한다. Plane·Triangle은 두께가 없으므로 startedInside는
 //   항상 false다.
@@ -33,9 +34,9 @@ namespace rocks {
 //   start + (end - start) * t로 계산하므로 end - start가 반올림되면 t = 1의 점이 end와 1 ulp
 //   수준으로 달라질 수 있다(예: start=-5, end=-1-ulp이면 차이가 정확히 4로 반올림되어 표면 -1에
 //   닿는다). Plane은 끝점별 거리로 계산해 끝점이 평면 위면 t를 정확히 0/1로 낸다. 0 길이 segment는
-//   점 판정이다. Plane, Sphere, Box, Triangle만 지원한다.
-// - 볼록 영역(프러스텀 포함, ConvexVolume)은 Box·Sphere와의 3분류(ClassifyContainment)와 보수적
-//   겹침(Overlap)만 지원한다. ray·segment와 볼록 영역의 교차는 없다.
+//   점 판정이다. Plane, Sphere, Box, Triangle, Cylinder만 지원한다.
+// - 볼록 영역(프러스텀 포함, ConvexVolume)은 Box·Sphere·Capsule·Cylinder와의 3분류
+//   (ClassifyContainment)와 보수적 겹침(Overlap)만 지원한다. ray·segment와 볼록 영역의 교차는 없다.
 // - 지원하지 않는 범위: swept shape(sweep), 접촉 깊이·다중 접촉점, mesh 가속 구조. 물리 응답은 별도
 //   계층에서 다룬다.
 
@@ -738,6 +739,257 @@ CastResult<T> CastOrientedBox(const Vector3<T>& origin, const Vector3<T>& delta,
     return cast;
 }
 
+// ---- cylinder ----
+// 성분 제곱이 underflow·overflow하는 벡터도 가장 큰 성분으로 먼저 나눠 길이를 구한다
+// (Vector3::TryNormalize와 같은 방식). 영벡터는 0이다.
+template <typename T>
+T StableLength(const Vector3<T>& vector) noexcept {
+    const T largest = vector.MaxAbsComponent();
+    if (!(largest > static_cast<T>(0))) {
+        return static_cast<T>(0);
+    }
+    return largest * (vector / largest).Length();
+}
+
+// radius > 0인 유효 cylinder의 단위 축이다. IsValid가 정규화 성공을 보장하므로 대체값은 쓰이지
+// 않는다. 한 판정 안에서는 이 값 하나를 모든 계산에 쓴다.
+template <typename T>
+Vector3<T> CylinderUnitAxis(const Cylinder<T>& cylinder) noexcept {
+    return (cylinder.end - cylinder.start).NormalizedOr(Vector3<T>::Zero());
+}
+
+// 점의 cylinder 좌표다. fromStart = (p - start)·a, fromEnd = (p - end)·a이고 radial은 축에 수직인
+// 성분 (p - start) - fromStart·a다. 끝면 판정을 높이 H와의 비교 대신 각 끝점 기준 내적의 부호로
+// 하므로 p == start, p == end에서 축 방향 값이 정확히 0이다. 수직 성분은 |p - start|² -
+// fromStart² 꼴(긴 축에서 소거로 망가진다) 대신 벡터 차로 구한다.
+template <typename T>
+struct CylinderCoordinates {
+    T fromStart;
+    T fromEnd;
+    Vector3<T> radial;
+};
+
+template <typename T>
+constexpr CylinderCoordinates<T> ToCylinderCoordinates(const Cylinder<T>& cylinder,
+                                                       const Vector3<T>& axis,
+                                                       const Vector3<T>& point) noexcept {
+    const Vector3<T> offset = point - cylinder.start;
+    const T fromStart = Dot(offset, axis);
+    return CylinderCoordinates<T>{fromStart, Dot(point - cylinder.end, axis),
+                                  offset - axis * fromStart};
+}
+
+// 점 포함 식이다. ContainsPoint, cast의 시작점 판정, 거리·최근접점이 모두 이 식을 써서 한 점에
+// 대한 안·밖 판단이 판정마다 엇갈리지 않는다.
+template <typename T>
+constexpr bool CylinderCoordinatesInside(const CylinderCoordinates<T>& coordinates,
+                                         T radius) noexcept {
+    const T zero = static_cast<T>(0);
+    return coordinates.fromStart >= zero && coordinates.fromEnd <= zero &&
+           Dot(coordinates.radial, coordinates.radial) <= radius * radius;
+}
+
+// 곱집합의 성분별 투영이다. 축 방향은 끝면 밖으로 나간 거리, 수직 방향은 반지름 밖으로 나간
+// 거리이며 둘의 제곱합이 거리²다(끝면 모서리 영역에서도 정확하다).
+template <typename T>
+T CylinderDistanceSquared(const Cylinder<T>& cylinder, const Vector3<T>& point) noexcept {
+    const T zero = static_cast<T>(0);
+    if (!(cylinder.radius > zero)) {
+        return SegmentDistanceSquared(point, cylinder.start, cylinder.end);
+    }
+
+    const CylinderCoordinates<T> coordinates =
+        ToCylinderCoordinates(cylinder, CylinderUnitAxis(cylinder), point);
+    if (CylinderCoordinatesInside(coordinates, cylinder.radius)) {
+        return zero;
+    }
+
+    T axialGap = zero;
+    if (coordinates.fromStart < zero) {
+        axialGap = -coordinates.fromStart;
+    } else if (coordinates.fromEnd > zero) {
+        axialGap = coordinates.fromEnd;
+    }
+    const T radialGap = math::Max(StableLength(coordinates.radial) - cylinder.radius, zero);
+    return axialGap * axialGap + radialGap * radialGap;
+}
+
+// 축 성분은 끝면으로, 수직 성분은 반지름으로 자른다. 안의 점은 그 점 자체를 정확히 돌려준다.
+template <typename T>
+Vector3<T> ClosestOnCylinder(const Cylinder<T>& cylinder, const Vector3<T>& point) noexcept {
+    const T zero = static_cast<T>(0);
+    if (!(cylinder.radius > zero)) {
+        return ClosestOnSegment(point, cylinder.start, cylinder.end);
+    }
+
+    const CylinderCoordinates<T> coordinates =
+        ToCylinderCoordinates(cylinder, CylinderUnitAxis(cylinder), point);
+    if (CylinderCoordinatesInside(coordinates, cylinder.radius)) {
+        return point;
+    }
+
+    const T radialLength = StableLength(coordinates.radial);
+    const Vector3<T> radial = radialLength > cylinder.radius
+                                  ? coordinates.radial * (cylinder.radius / radialLength)
+                                  : coordinates.radial;
+    if (coordinates.fromStart < zero) {
+        return cylinder.start + radial;
+    }
+    if (coordinates.fromEnd > zero) {
+        return cylinder.end + radial;
+    }
+    return (point - coordinates.radial) + radial;
+}
+
+// 안(경계 포함)의 점에서 가장 가까운 경계 부분의 바깥 normal이다. 끝면과 옆면까지의 여유가 같으면
+// 끝면을 고른다. 선분 끝점 접촉 보정에 쓴다.
+template <typename T>
+Vector3<T> CylinderNearestBoundaryNormal(const Cylinder<T>& cylinder, const Vector3<T>& axis,
+                                         const CylinderCoordinates<T>& coordinates,
+                                         const Vector3<T>& delta) noexcept {
+    const T toStartCap = coordinates.fromStart;
+    const T toEndCap = -coordinates.fromEnd;
+    const T toSide = cylinder.radius - StableLength(coordinates.radial);
+    if (toStartCap <= toEndCap && toStartCap <= toSide) {
+        return -axis;
+    }
+    if (toEndCap <= toSide) {
+        return axis;
+    }
+    return coordinates.radial.NormalizedOr(OpposingDirection(delta));
+}
+
+// 구간 교집합 판정이다(Docs/Design/CylinderShape.ko.md 3.5절, CastBox의 slab과 같은 방식).
+// 1. 축 slab: 두 끝면 평면 사이에 있는 t 구간. 축 방향 속도가 정확히 0이면 slab 안일 때만
+//    전체 구간.
+// 2. 옆면: 수직 성분 |radial + t·deltaRadial|² <= r²의 2차식 구간. 근은 CastSphere와 같이 수직
+//    벡터로 판별식을 구하고 소거 없는 근 공식으로 계산한다. 수직 속도가 정확히 0이면 무한 원기둥
+//    안일 때만 전체 구간.
+// 3. 진입 = 두 하한 중 큰 것(시작점 쪽 0 포함), 이탈 = min(두 상한, tMax). 진입 <= 이탈이면 Hit.
+// 진입을 정한 경계의 바깥 normal을 쓰며 끝면과 옆면 진입 시각이 같으면(모서리) 끝면 normal이다.
+// 시작점 안·밖은 CylinderCoordinatesInside와 같은 값으로 판단하고, 밖인데 진입 시각이 반올림으로
+// 0이 되면 시작 접촉(CastInside)으로 본다. radius 0은 Capsule radius 0과 같은 선분 경로다.
+template <typename T>
+CastResult<T> CastCylinder(const Vector3<T>& origin, const Vector3<T>& delta, T tMax,
+                           const Cylinder<T>& cylinder) noexcept {
+    const T zero = static_cast<T>(0);
+    if (!(cylinder.radius > zero)) {
+        return CastCapsule(origin, delta, tMax, Capsule<T>(cylinder.start, cylinder.end, zero));
+    }
+
+    const Vector3<T> axis = CylinderUnitAxis(cylinder);
+    const CylinderCoordinates<T> at = ToCylinderCoordinates(cylinder, axis, origin);
+    const T radiusSquared = cylinder.radius * cylinder.radius;
+    const T radialGap = Dot(at.radial, at.radial) - radiusSquared;
+    const bool beforeStart = at.fromStart < zero;
+    const bool afterEnd = at.fromEnd > zero;
+    if (!beforeStart && !afterEnd && radialGap <= zero) {
+        return CastInside(origin);
+    }
+
+    // 시작점이 밖이면 slab 밖이거나(축 속도 0이면 위에서 Miss) 무한 원기둥 밖이므로(수직 속도 0이면
+    // 아래에서 Miss) 진입 후보가 적어도 하나 정해진다.
+    T enter = zero;
+    T leave = tMax;
+    bool enterThroughCap = false;
+    bool hasEnter = false;
+
+    const T axialRate = Dot(delta, axis);
+    if (axialRate == zero) {
+        if (beforeStart || afterEnd) {
+            return {};
+        }
+    } else {
+        if ((beforeStart && axialRate < zero) || (afterEnd && axialRate > zero)) {
+            return {};
+        }
+        const T toStart = -at.fromStart / axialRate;
+        const T toEnd = -at.fromEnd / axialRate;
+        const bool positive = axialRate > zero;
+        if (beforeStart || afterEnd) {
+            enter = positive ? toStart : toEnd;
+            enterThroughCap = true;
+            hasEnter = true;
+        }
+        leave = math::Min(leave, positive ? toEnd : toStart);
+    }
+
+    const Vector3<T> deltaRadial = delta - axis * axialRate;
+    const T a = Dot(deltaRadial, deltaRadial);
+    if (!(a > zero)) {
+        if (radialGap > zero) {
+            return {};
+        }
+    } else {
+        const T b = Dot(at.radial, deltaRadial);
+        if (radialGap > zero && b >= zero) {
+            // 무한 원기둥 밖에서 축에서 멀어지거나(또는 수직으로 지나는) 중이다.
+            return {};
+        }
+
+        const Vector3<T> closest = at.radial - deltaRadial * (b / a);
+        T inner = radiusSquared - Dot(closest, closest);
+        if (inner < zero) {
+            if (radialGap > zero) {
+                return {};
+            }
+            // 무한 원기둥 안에서 출발하면 직선은 반드시 원 안을 지난다. 반올림으로 음수가 된 값은
+            // 0으로 본다.
+            inner = zero;
+        }
+
+        const T root = math::Sqrt(a * inner);
+        if (radialGap > zero) {
+            const T sideEnter = radialGap / (-b + root);
+            if (!hasEnter || sideEnter > enter) {
+                enter = sideEnter;
+                enterThroughCap = false;
+                hasEnter = true;
+            }
+            leave = math::Min(leave, (-b + root) / a);
+        } else {
+            const T sideLeave = b <= zero ? (-b + root) / a : -radialGap / (b + root);
+            leave = math::Min(leave, sideLeave);
+        }
+    }
+
+    if (!hasEnter || enter > leave) {
+        return {};
+    }
+    if (!(enter > zero)) {
+        return CastInside(origin);
+    }
+
+    const Vector3<T> point = origin + delta * enter;
+    if (enterThroughCap) {
+        return CastHit(enter, point, axialRate > zero ? -axis : axis);
+    }
+    const Vector3<T> radialAtHit = at.radial + deltaRadial * enter;
+    return CastHit(enter, point, radialAtHit.NormalizedOr(OpposingDirection(delta)));
+}
+
+// TryBounds 반폭에 곱하는 상대 여유의 크기(machine epsilon 배수)다. 반폭 계산(차분·나눗셈·제곱·
+// 합·sqrt·곱)의 상대 반올림 오차는 모두 합쳐 약 6ε이므로 8ε면 남는다(근거는 TryBounds 주석).
+inline constexpr uint32 CylinderBoundsMarginEpsilons = 8;
+
+template <typename T>
+inline constexpr T CylinderBoundsRelativeMargin =
+    static_cast<T>(1) + static_cast<T>(CylinderBoundsMarginEpsilons) * math::MachineEpsilon<T>;
+
+static_assert(CylinderBoundsRelativeMargin<float> > 1.0f &&
+                  CylinderBoundsRelativeMargin<double> > 1.0,
+              "Cylinder bounds margin must be representable above one");
+
+// TryBounds의 축 비율 ρ(축에 수직인 두 성분 중 큰 것 / 가장 큰 성분)의 하한이다(가장 작은 양의
+// 정규 값의 배수). ρ에 곱하는 나머지 인수가 1/√3 이상이므로 2배면 곱이 정규 범위에 남아, 비정규
+// 값의 절대 오차가 radius배로 커지지 않는다. 하한은 실제 ρ보다 크거나 같으므로 경계를 넓히기만
+// 한다.
+inline constexpr uint32 CylinderBoundsRatioFloorNormals = 2;
+
+template <typename T>
+inline constexpr T CylinderBoundsRatioFloor =
+    static_cast<T>(CylinderBoundsRatioFloorNormals) * NumericLimits<T>::Min();
+
 // ---- 평면 분류 ----
 // normal 방향으로 SignedDistance가 가장 작은/큰 꼭짓점만 평가한다. center·extent를 거치지 않으므로
 // 꼭짓점이 평면 위에 정확히 있으면 정확히 Intersecting이다.
@@ -770,6 +1022,50 @@ constexpr PlaneSide ClassifySphereUnchecked(const Plane<T>& plane,
         return PlaneSide::Back;
     }
     return PlaneSide::Intersecting;
+}
+
+// 축 선분 두 끝점의 SignedDistance 중 작은 값과 큰 값이다. Capsule·Cylinder의 평면 support를
+// 중심 ± (H/2)|n·a| 대신 끝점 거리로 구한다(같은 값이며 중심 계산의 반올림이 없고, 끝점이 평면
+// 위면 그 거리가 정확히 0이다).
+template <typename T>
+struct PlaneSegmentDistances {
+    T lowest;
+    T highest;
+};
+
+template <typename T>
+constexpr PlaneSegmentDistances<T> PlaneSegmentRange(const Plane<T>& plane, const Vector3<T>& start,
+                                                     const Vector3<T>& end) noexcept {
+    const T startDistance = plane.SignedDistance(start);
+    const T endDistance = plane.SignedDistance(end);
+    return PlaneSegmentDistances<T>{math::Min(startDistance, endDistance),
+                                    math::Max(startDistance, endDistance)};
+}
+
+// 축 선분을 따라 쓴 원판·구(support 반폭 discSupport)의 평면 분류다. 거리에서 반폭을 빼지 않고
+// 반폭과 비교하므로 0 길이 capsule은 sphere 분류와 비트 단위로 같다.
+template <typename T>
+constexpr PlaneSide ClassifySweptUnchecked(const Plane<T>& plane, const Vector3<T>& start,
+                                           const Vector3<T>& end, T discSupport) noexcept {
+    const PlaneSegmentDistances<T> range = PlaneSegmentRange(plane, start, end);
+    if (range.lowest > discSupport) {
+        return PlaneSide::Front;
+    }
+    if (range.highest < -discSupport) {
+        return PlaneSide::Back;
+    }
+    return PlaneSide::Intersecting;
+}
+
+// cylinder 원판의 normal 방향 support 반폭 r·|n × a|다. 비단위 normal에도 정확한 support이며
+// (선형 함수 n·x의 원판 위 최대 변화), √(1 - (n·a)²) 꼴과 달리 n과 a가 거의 평행해도 소거가 없다.
+// radius 0은 정규화 없이 0이다.
+template <typename T>
+T CylinderDiscSupport(const Vector3<T>& normal, const Cylinder<T>& cylinder) noexcept {
+    if (!(cylinder.radius > static_cast<T>(0))) {
+        return static_cast<T>(0);
+    }
+    return cylinder.radius * StableLength(Cross(normal, CylinderUnitAxis(cylinder)));
 }
 
 // ---- OrientedBox 분리축 ----
@@ -964,6 +1260,30 @@ RayHit<T> Raycast(const Ray<T>& ray, const OrientedBox<T>& box,
     return detail::ToRayHit(detail::CastOrientedBox(ray.origin, ray.direction, maxDistance, box));
 }
 
+// cylinder ray 판정이다. 축 slab 구간과 옆면 2차식 구간의 교집합으로 계산한다.
+// - 축과 평행한 ray와 끝면 평면 안을 스치는 ray도 닫힌 집합이므로 Hit다.
+// - 시작점이 안(경계 포함)이면 거리 0, startedInside = true, normal 영벡터다. 시작점 판정은
+//   ContainsPoint와 같은 식이며, 밖으로 판정했는데 진입 거리가 반올림으로 0이 되면 시작 접촉으로
+//   본다.
+// - normal은 진입한 경계의 바깥 방향이다(끝면은 ±축, 옆면은 축에서 hit point로 향하는 수직
+//   방향). 끝면과 옆면 진입 거리가 같은 모서리는 끝면 normal이다.
+// - radius 0(선분)은 Capsule radius 0과 같다: 선분을 정확히 지나는 ray만 Hit이고 normal은
+//   -direction이다.
+// 접촉 = Hit은 반올림 한계 안에서 성립한다: 축 정규화·내적·2차식 근을 T로 반올림하므로 경계를
+// 정확히 스치는 ray가 어느 쪽으로든 바뀔 수 있다(좌표축과 평행한 축의 끝면·옆면 접선은 정확하다).
+//
+// 사용 예:
+//   const RayHit<double> hit = Raycast(ray, pillar, 1000.0);
+//   if (hit.IsHit() && !hit.startedInside) { Use(hit.point, hit.normal); }
+template <typename T>
+RayHit<T> Raycast(const Ray<T>& ray, const Cylinder<T>& cylinder,
+                  detail::GeometryScalar<T> maxDistance = detail::GeometryInfinity<T>()) noexcept {
+    if (!ray.IsValid() || !cylinder.IsValid() || !detail::IsValidMaxDistance(maxDistance)) {
+        return detail::InvalidRayHit<T>();
+    }
+    return detail::ToRayHit(detail::CastCylinder(ray.origin, ray.direction, maxDistance, cylinder));
+}
+
 // ===== Segment 질의 =====
 // segment.IsValid()와 shape.IsValid()를 요구한다. t ∈ [0,1]이며 끝점 접촉(t = 1)도 Hit다.
 
@@ -1081,6 +1401,43 @@ SegmentHit<T> SegmentCast(const Segment<T>& segment, const Triangle<T>& triangle
     return detail::ToSegmentHit(detail::CastHit(one, segment.end, normal));
 }
 
+// Raycast(cylinder)와 같은 구간 교집합을 segment 매개변수 t ∈ [0, 1]로 계산한다. start가 안이면
+// t = 0 시작 접촉이고 0 길이 segment는 점 포함 판정과 같다. end가 안(ContainsPoint와 같은 식)인데
+// 반올림으로 계산된 진입 t가 1을 넘어 놓치면 t = 1 Hit로 보정한다(끝점 접촉 보존). 이때 normal은
+// end에서 가장 가까운 경계(끝면·옆면, 같으면 끝면)의 바깥 방향이다. radius 0은 선분과 선분이 정확히
+// 만날 때만 Hit이며 normal은 진행 방향의 반대다. 접촉 정밀도 한계는 Raycast(cylinder)와 같다.
+template <typename T>
+SegmentHit<T> SegmentCast(const Segment<T>& segment, const Cylinder<T>& cylinder) noexcept {
+    if (!segment.IsValid() || !cylinder.IsValid()) {
+        return detail::InvalidSegmentHit<T>();
+    }
+
+    const T one = static_cast<T>(1);
+    const Vector3<T> delta = segment.Delta();
+    const detail::CastResult<T> cast = detail::CastCylinder(segment.start, delta, one, cylinder);
+    if (cast.result == QueryResult::Hit) {
+        return detail::ToSegmentHit(cast);
+    }
+
+    if (!(cylinder.radius > static_cast<T>(0))) {
+        if (detail::SegmentDistanceSquared(segment.end, cylinder.start, cylinder.end) >
+            static_cast<T>(0)) {
+            return {};
+        }
+        return detail::ToSegmentHit(
+            detail::CastHit(one, segment.end, detail::OpposingDirection(delta)));
+    }
+
+    const Vector3<T> axis = detail::CylinderUnitAxis(cylinder);
+    const detail::CylinderCoordinates<T> atEnd =
+        detail::ToCylinderCoordinates(cylinder, axis, segment.end);
+    if (!detail::CylinderCoordinatesInside(atEnd, cylinder.radius)) {
+        return {};
+    }
+    const Vector3<T> normal = detail::CylinderNearestBoundaryNormal(cylinder, axis, atEnd, delta);
+    return detail::ToSegmentHit(detail::CastHit(one, segment.end, normal));
+}
+
 // ===== 점 포함 =====
 // 경계 위의 점은 포함(Hit)이다. 유한하지 않은 point나 잘못된 shape는 InvalidInput이다.
 
@@ -1119,6 +1476,24 @@ QueryResult ContainsPoint(const OrientedBox<T>& box, const Vector3<T>& point) no
     }
     const Vector3<T> local = box.ToLocal(point);
     return detail::ToQueryResult(detail::BoxContains(-box.halfExtents, box.halfExtents, local));
+}
+
+// t = (p - start)·a >= 0, (p - end)·a <= 0(두 끝면 사이)이고 수직 성분 v = (p - start) - t·a가
+// |v|² <= r²이면 Hit다. p == start, p == end는 정확히 Hit다. 접촉 = Hit은 반올림 한계 안에서
+// 성립한다(좌표축과 평행하지 않은 축은 정규화·내적 반올림으로 경계 위 점이 어느 쪽으로든 바뀔 수
+// 있다). radius 0은 선분 위(최근접 거리 정확히 0)일 때만 Hit다(Capsule radius 0과 같다).
+template <typename T>
+QueryResult ContainsPoint(const Cylinder<T>& cylinder, const Vector3<T>& point) noexcept {
+    if (!cylinder.IsValid() || !point.IsFinite()) {
+        return QueryResult::InvalidInput;
+    }
+    if (!(cylinder.radius > static_cast<T>(0))) {
+        return detail::ToQueryResult(detail::SegmentDistanceSquared(
+                                         point, cylinder.start, cylinder.end) <= static_cast<T>(0));
+    }
+    const detail::CylinderCoordinates<T> coordinates =
+        detail::ToCylinderCoordinates(cylinder, detail::CylinderUnitAxis(cylinder), point);
+    return detail::ToQueryResult(detail::CylinderCoordinatesInside(coordinates, cylinder.radius));
 }
 
 // ===== 겹침 =====
@@ -1230,6 +1605,93 @@ QueryResult Overlap(const Capsule<T>& capsule, const Sphere<T>& sphere) noexcept
 template <typename T>
 QueryResult Overlap(const Sphere<T>& sphere, const Capsule<T>& capsule) noexcept {
     return Overlap(capsule, sphere);
+}
+
+// capsule의 평면 기준 위치다. 두 끝점의 SignedDistance 중 작은 값 > r이면 Front, 큰 값 < -r이면
+// Back, 그 밖(평면에 닿음 포함)은 Intersecting이다. support 반폭 (H/2)|n·a| + r(H = 0이면 r)을
+// 중심 거리와 비교하는 것과 같은 값이며, start == end이면 ClassifyPlaneSide(plane, sphere)와 비트
+// 단위로 같다. 평면 normal이 길이 오차(ShapeUnitTolerance) 안의 비단위 벡터이면 sphere와 같이
+// 반지름의 약 1e-5 비율만큼 경계가 달라질 수 있다.
+template <typename T>
+PlaneSide ClassifyPlaneSide(const Plane<T>& plane, const Capsule<T>& capsule) noexcept {
+    if (!plane.IsValid() || !capsule.IsValid()) {
+        return PlaneSide::InvalidInput;
+    }
+    return detail::ClassifySweptUnchecked(plane, capsule.start, capsule.end, capsule.radius);
+}
+
+// capsule이 평면에 닿거나 걸치면 Hit다(ClassifyPlaneSide가 Intersecting).
+template <typename T>
+QueryResult Overlap(const Capsule<T>& capsule, const Plane<T>& plane) noexcept {
+    const PlaneSide side = ClassifyPlaneSide(plane, capsule);
+    if (side == PlaneSide::InvalidInput) {
+        return QueryResult::InvalidInput;
+    }
+    return detail::ToQueryResult(side == PlaneSide::Intersecting);
+}
+
+template <typename T>
+QueryResult Overlap(const Plane<T>& plane, const Capsule<T>& capsule) noexcept {
+    return Overlap(capsule, plane);
+}
+
+// cylinder의 평면 기준 위치다. 원판 support 반폭 h = r·|n × a|에 대해 두 끝면 중심의
+// SignedDistance 중 작은 값 > h이면 Front, 큰 값 < -h이면 Back, 그 밖(평면에 닿음 포함)은
+// Intersecting이다. 중심 거리와 support 반폭 (H/2)|n·a| + r|n × a|를 비교하는 것과 같은 값이다.
+// |n × a|는 √(1 - (n·a)²) 꼴과 달리 평면 normal과 축이 거의 평행해도 소거가 없고, 비단위
+// normal에도 정확한 support다. radius 0은 선분 분류(h = 0)다. 접촉 = Intersecting은 반올림 한계
+// 안에서 성립한다(정규화한 축과 외적·내적 반올림).
+template <typename T>
+PlaneSide ClassifyPlaneSide(const Plane<T>& plane, const Cylinder<T>& cylinder) noexcept {
+    if (!plane.IsValid() || !cylinder.IsValid()) {
+        return PlaneSide::InvalidInput;
+    }
+    return detail::ClassifySweptUnchecked(plane, cylinder.start, cylinder.end,
+                                          detail::CylinderDiscSupport(plane.normal, cylinder));
+}
+
+// cylinder가 평면에 닿거나 걸치면 Hit다(ClassifyPlaneSide가 Intersecting).
+template <typename T>
+QueryResult Overlap(const Cylinder<T>& cylinder, const Plane<T>& plane) noexcept {
+    const PlaneSide side = ClassifyPlaneSide(plane, cylinder);
+    if (side == PlaneSide::InvalidInput) {
+        return QueryResult::InvalidInput;
+    }
+    return detail::ToQueryResult(side == PlaneSide::Intersecting);
+}
+
+template <typename T>
+QueryResult Overlap(const Plane<T>& plane, const Cylinder<T>& cylinder) noexcept {
+    return Overlap(cylinder, plane);
+}
+
+// sphere 중심에서 cylinder까지 제곱 거리 <= r_sphere²다. 거리는 축 방향(끝면 밖)과 수직
+// 방향(반지름 밖) 초과분의 제곱합이다(TryDistanceSquared(cylinder)와 같은 식). radius 0 cylinder는
+// Capsule radius 0과 같은 선분 거리다. 접촉 = Hit은 반올림 한계 안에서 성립한다.
+template <typename T>
+QueryResult Overlap(const Cylinder<T>& cylinder, const Sphere<T>& sphere) noexcept {
+    if (!cylinder.IsValid() || !sphere.IsValid()) {
+        return QueryResult::InvalidInput;
+    }
+    const T distanceSquared = detail::CylinderDistanceSquared(cylinder, sphere.center);
+    return detail::ToQueryResult(distanceSquared <= sphere.radius * sphere.radius);
+}
+
+template <typename T>
+QueryResult Overlap(const Sphere<T>& sphere, const Cylinder<T>& cylinder) noexcept {
+    return Overlap(cylinder, sphere);
+}
+
+// segment가 cylinder에 닿으면 Hit다(SegmentCast(segment, cylinder)가 Hit, 끝점 접촉 보정 포함).
+template <typename T>
+QueryResult Overlap(const Segment<T>& segment, const Cylinder<T>& cylinder) noexcept {
+    const SegmentHit<T> hit = SegmentCast(segment, cylinder);
+    return hit.result;
+}
+
+template <typename T>
+QueryResult Overlap(const Cylinder<T>& cylinder, const Segment<T>& segment) noexcept {
+    return Overlap(segment, cylinder);
 }
 
 // 두 축 segment의 최근접 제곱 거리 <= (r1 + r2)²다. 인자 순서와 무관하게 같은 순서로 계산한다.
@@ -1378,6 +1840,104 @@ Result<T> TryDistanceSquared(const OrientedBox<T>& box, const Vector3<T>& point)
     return Result<T>::Success(detail::BoxDistanceSquared(-box.halfExtents, box.halfExtents, local));
 }
 
+// cylinder 위(경계 포함)의 최근접점이다. 축 성분을 두 끝면 사이로, 축에 수직인 성분을 반지름으로
+// 자른다(곱집합의 성분별 투영이라 끝면 모서리 영역에서도 정확하다). 안(ContainsPoint와 같은 식)의
+// 점은 그 점 자체를 정확히 돌려준다. radius 0은 선분 위 최근접점이다.
+// 실패(InvalidArgument): 잘못된 cylinder, 유한하지 않은 point.
+template <typename T>
+Result<Vector3<T>> TryClosestPoint(const Cylinder<T>& cylinder, const Vector3<T>& point) noexcept {
+    if (!cylinder.IsValid() || !point.IsFinite()) {
+        return Result<Vector3<T>>::Failure(ErrorCode::InvalidArgument);
+    }
+    return Result<Vector3<T>>::Success(detail::ClosestOnCylinder(cylinder, point));
+}
+
+// cylinder까지의 제곱 거리다. 최근접점까지 거리를 다시 재지 않고 축 방향(끝면 밖)과 수직
+// 방향(반지름 밖) 초과분의 제곱합으로 계산한다. 안의 점은 정확히 0이다. radius 0은 선분까지의 제곱
+// 거리다. 실패(InvalidArgument): 잘못된 cylinder, 유한하지 않은 point.
+template <typename T>
+Result<T> TryDistanceSquared(const Cylinder<T>& cylinder, const Vector3<T>& point) noexcept {
+    if (!cylinder.IsValid() || !point.IsFinite()) {
+        return Result<T>::Failure(ErrorCode::InvalidArgument);
+    }
+    return Result<T>::Success(detail::CylinderDistanceSquared(cylinder, point));
+}
+
+// ===== 경계 =====
+
+// cylinder를 덮는 축 정렬 box다. 반올림을 거쳐도 cylinder 전체(수학적 점 집합)를 항상 포함하며,
+// 공간 인덱스 등록 경계로 쓰여 컬링 누락을 막는다.
+//
+// 계산: 축 d = end - start, 축별 반폭 e_i = r·√(d_j² + d_k²) / |d|(i, j, k는 서로 다른 축)이고
+// 결과는 [min(start_i, end_i) - e_i, max(start_i, end_i) + e_i]다. √(1 - a_i²) 꼴은 축이 좌표축과
+// 거의 평행할 때 a_i가 1로 반올림되어 반폭이 0이 되므로 쓰지 않는다(예: start (0, 0, 0), end
+// (1000, 1e-6, 0), r 1e4이면 실제 x 반폭은 1e-5다). 포함 보장:
+// - √(d_j² + d_k²)와 |d|는 가장 큰 성분으로 먼저 나눠 계산해 성분 제곱의 underflow·overflow가 없다.
+//   d 성분의 뺄셈 오차는 각 성분의 상대 ε/2라 큰 좌표에서도 비율 오차가 ε 규모다.
+// - 비율 계산의 상대 반올림 오차(합 약 6ε)는 반폭에 1 + 8ε(detail::CylinderBoundsRelativeMargin)를
+//   곱해 덮는다. 축 비율이 비정규 범위로 작아지면 하한(detail::CylinderBoundsRatioFloor)으로
+//   올려 비정규 절대 오차가 radius배로 커지지 않게 한다.
+// - 반폭에 한 ulp(math::NextUp)를 더해 마지막 곱의 비정규 절대 오차를 덮고, 끝점 ± 반폭은
+//   math::NextDown·NextUp으로 한 ulp 바깥쪽으로 보정해 덧셈의 반 ulp를 덮는다(원점에서 1e9 cm면
+//   덧셈의 반 ulp만 약 6e-8 cm다).
+// 반폭이 정확히 0인 축(축이 그 좌표축과 평행)은 끝점 좌표를 그대로 쓴다. radius 0은 두 끝점의
+// box(정확)다. 결과는 꽉 맞는 경계보다 축마다 상대 약 10ε와 몇 ulp만큼 넓다.
+//
+// 실패(InvalidArgument): 잘못된 cylinder, 경계 좌표 overflow(계약 범위 밖의 큰 좌표·반지름).
+//
+// 사용 예:
+//   Result<Box<double>> bounds = TryBounds(pillar);
+//   if (bounds) { index.Insert(id, bounds.Value()); }
+template <typename T>
+Result<Box<T>> TryBounds(const Cylinder<T>& cylinder) noexcept {
+    if (!cylinder.IsValid()) {
+        return Result<Box<T>>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const T zero = static_cast<T>(0);
+    const T startValues[3] = {cylinder.start.x, cylinder.start.y, cylinder.start.z};
+    const T endValues[3] = {cylinder.end.x, cylinder.end.y, cylinder.end.z};
+    T low[3];
+    T high[3];
+    for (int axis = 0; axis < 3; ++axis) {
+        low[axis] = math::Min(startValues[axis], endValues[axis]);
+        high[axis] = math::Max(startValues[axis], endValues[axis]);
+    }
+
+    if (cylinder.radius > zero) {
+        // IsValid가 축 정규화 성공을 보장하므로 delta는 유한한 영 아닌 벡터다.
+        const Vector3<T> delta = cylinder.end - cylinder.start;
+        const T deltaValues[3] = {math::Abs(delta.x), math::Abs(delta.y), math::Abs(delta.z)};
+        const T largest = delta.MaxAbsComponent();
+        const T scaledLength = (delta / largest).Length();
+        for (int axis = 0; axis < 3; ++axis) {
+            const T across0 = deltaValues[(axis + 1) % 3];
+            const T across1 = deltaValues[(axis + 2) % 3];
+            const T across = math::Max(across0, across1);
+            if (!(across > zero)) {
+                continue;
+            }
+
+            // 반폭 = r · ρ · √(w0² + w1²) / |delta / largest|
+            // (ρ = across / largest, w = 성분 / across).
+            const T w0 = across0 / across;
+            const T w1 = across1 / across;
+            const T ratio = math::Max(across / largest, detail::CylinderBoundsRatioFloor<T>);
+            const T unitHalfExtent = math::Sqrt(w0 * w0 + w1 * w1) / scaledLength * ratio *
+                                     detail::CylinderBoundsRelativeMargin<T>;
+            const T halfExtent = math::NextUp(cylinder.radius * unitHalfExtent);
+            low[axis] = math::NextDown(low[axis] - halfExtent);
+            high[axis] = math::NextUp(high[axis] + halfExtent);
+        }
+    }
+
+    const Box<T> bounds(Vector3<T>(low[0], low[1], low[2]), Vector3<T>(high[0], high[1], high[2]));
+    if (!bounds.IsValid()) {
+        return Result<Box<T>>::Failure(ErrorCode::InvalidArgument);
+    }
+    return Result<Box<T>>::Success(bounds);
+}
+
 // 두 segment의 최근접점이다. 평행·0 길이 segment도 처리하며 인자 순서를 바꾸면 s/t와 점만 바뀌고
 // 거리는 비트 단위로 같다. UE SegmentDistToSegmentSafe의 절대 허용 오차(1e-4) 대신 정확한 0 판정을
 // 쓴다.
@@ -1490,6 +2050,25 @@ constexpr Containment ClassifySphereBoxUnchecked(const Sphere<T>& sphere,
                : Containment::Intersecting;
 }
 
+// 평면마다 축 선분 끝점 거리 범위와 support 반폭을 비교한다(ClassifySweptUnchecked와 같은 식).
+// cylinder는 평면 normal마다 반폭 r·|n × a|가 달라 SupportFunction으로 받는다.
+template <typename T, typename SupportFunction>
+constexpr Containment ClassifyVolumeSweptUnchecked(const ConvexVolume<T>& volume,
+                                                   const Vector3<T>& start, const Vector3<T>& end,
+                                                   SupportFunction support) noexcept {
+    bool inside = true;
+    for (uint32 index = 0; index < volume.planeCount; ++index) {
+        const Plane<T>& plane = volume.planes[index];
+        const T discSupport = support(plane);
+        const PlaneSegmentDistances<T> range = PlaneSegmentRange(plane, start, end);
+        if (range.highest < -discSupport) {
+            return Containment::Outside;
+        }
+        inside = inside && range.lowest >= discSupport;
+    }
+    return inside ? Containment::Inside : Containment::Intersecting;
+}
+
 } // namespace detail
 
 // box가 볼록 영역 밖·안·걸침인지다. 어느 평면에서든 가장 앞 꼭짓점이 엄격히 뒤(SignedDistance <
@@ -1555,6 +2134,71 @@ QueryResult Overlap(const ConvexVolume<T>& volume, const Sphere<T>& sphere) noex
 template <typename T>
 QueryResult Overlap(const Sphere<T>& sphere, const ConvexVolume<T>& volume) noexcept {
     return Overlap(volume, sphere);
+}
+
+// capsule이 볼록 영역 밖·안·걸침인지다. 평면마다 두 축 끝점의 SignedDistance를 보고, 어느
+// 평면에서든 큰 값 < -radius면 Outside, 모든 평면에서 작은 값 >= radius면 Inside다(밖은 엄격,
+// 접촉은 교차, 안은 경계 포함). start == end이면 ClassifyContainment(volume, sphere)와 같다. 평면별
+// 판정이라 모서리 근처에서 실제로 겹치지 않는 capsule도 Intersecting일 수 있다(Box와 같은 보수적
+// 술어).
+template <typename T>
+Containment ClassifyContainment(const ConvexVolume<T>& volume, const Capsule<T>& capsule) noexcept {
+    if (!volume.IsValid() || !capsule.IsValid()) {
+        return Containment::InvalidInput;
+    }
+    const T radius = capsule.radius;
+    return detail::ClassifyVolumeSweptUnchecked(
+        volume, capsule.start, capsule.end, [radius](const Plane<T>&) noexcept { return radius; });
+}
+
+// 볼록 영역과 capsule의 보수적 겹침이다(어느 평면에서도 엄격히 바깥이 아님).
+template <typename T>
+QueryResult Overlap(const ConvexVolume<T>& volume, const Capsule<T>& capsule) noexcept {
+    const Containment containment = ClassifyContainment(volume, capsule);
+    if (containment == Containment::InvalidInput) {
+        return QueryResult::InvalidInput;
+    }
+    return detail::ToQueryResult(containment != Containment::Outside);
+}
+
+template <typename T>
+QueryResult Overlap(const Capsule<T>& capsule, const ConvexVolume<T>& volume) noexcept {
+    return Overlap(volume, capsule);
+}
+
+// cylinder가 볼록 영역 밖·안·걸침인지다. 평면마다 원판 support 반폭 h = r·|n × a|와 두 끝면 중심의
+// SignedDistance를 보고, 어느 평면에서든 큰 값 < -h면 Outside, 모든 평면에서 작은 값 >= h면
+// Inside다(밖은 엄격, 접촉은 교차, 안은 경계 포함 — Box·Sphere와 같은 규칙). 평면별 판정이라 모서리
+// 근처의 초과 Intersecting은 Box와 같다. 접촉 정밀도 한계는 ClassifyPlaneSide(plane, cylinder)와
+// 같다.
+//
+// 사용 예(프러스텀 컬링):
+//   if (ClassifyContainment(frustum, pillar) != Containment::Outside) { Draw(pillar); }
+template <typename T>
+Containment ClassifyContainment(const ConvexVolume<T>& volume,
+                                const Cylinder<T>& cylinder) noexcept {
+    if (!volume.IsValid() || !cylinder.IsValid()) {
+        return Containment::InvalidInput;
+    }
+    return detail::ClassifyVolumeSweptUnchecked(
+        volume, cylinder.start, cylinder.end, [&cylinder](const Plane<T>& plane) noexcept {
+            return detail::CylinderDiscSupport(plane.normal, cylinder);
+        });
+}
+
+// 볼록 영역과 cylinder의 보수적 겹침이다(어느 평면에서도 엄격히 바깥이 아님).
+template <typename T>
+QueryResult Overlap(const ConvexVolume<T>& volume, const Cylinder<T>& cylinder) noexcept {
+    const Containment containment = ClassifyContainment(volume, cylinder);
+    if (containment == Containment::InvalidInput) {
+        return QueryResult::InvalidInput;
+    }
+    return detail::ToQueryResult(containment != Containment::Outside);
+}
+
+template <typename T>
+QueryResult Overlap(const Cylinder<T>& cylinder, const ConvexVolume<T>& volume) noexcept {
+    return Overlap(volume, cylinder);
 }
 
 } // namespace rocks
