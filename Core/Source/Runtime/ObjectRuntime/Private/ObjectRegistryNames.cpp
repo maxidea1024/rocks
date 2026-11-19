@@ -60,7 +60,8 @@ Result<ObjectRegistry::Slot*> ObjectRegistry::FindVisibleLocked(ObjectHandle han
     if (transaction != 0) {
         Slot* slot = FindSlot(handle);
         if (slot != nullptr && slot->state == SlotState::Reserved &&
-            slot->transaction == transaction && slot->object != nullptr && !IsCutoff(slot)) {
+            ColdOf(*slot).transaction == transaction && slot->object != nullptr &&
+            !IsCutoff(slot)) {
             return Result<Slot*>::Success(slot);
         }
     }
@@ -71,9 +72,9 @@ Result<ObjectRegistry::Slot*> ObjectRegistry::FindVisibleLocked(ObjectHandle han
 OuterSummary ObjectRegistry::DescribeSlotLocked(const Slot& slot,
                                                 bool scanNamedInners) const noexcept {
     OuterSummary summary;
-    const Slot& outermost = *slot.outermost;
+    const Slot& outermost = *ColdOf(slot).outermost;
     summary.outermost = HandleOf(outermost);
-    summary.isOutermost = slot.outer.IsNull();
+    summary.isOutermost = ColdOf(slot).outer.IsNull();
     summary.outermostIsPackage = options_.policy.packageNativeType != nullptr &&
                                  outermost.type.IsNativeA(options_.policy.packageNativeType);
     // Inner 유무는 이름 점유와 같은 기준이다(다른 트랜잭션의 Reserved는 세고 cutoff white는 세지
@@ -81,15 +82,16 @@ OuterSummary ObjectRegistry::DescribeSlotLocked(const Slot& slot,
     // 본다.
     const ObjectHandle self = HandleOf(slot);
     summary.hasRepresentative = FindNamedLocked(self, NameKeyHash(self, {}), {}, false) != nullptr;
-    for (const Slot* child = scanNamedInners ? slot.firstChild : nullptr; child;
-         child = child->nextSibling) {
-        if (!IsCutoff(child) && child->name != nullptr && child->name->nameBytes != 0) {
+    for (const Slot* child = scanNamedInners ? ColdOf(slot).firstChild : nullptr; child;
+         child = ColdOf(*child).nextSibling) {
+        if (!IsCutoff(child) && ColdOf(*child).name != nullptr &&
+            ColdOf(*child).name->nameBytes != 0) {
             summary.hasNamedInners = true;
             break;
         }
     }
 
-    summary.pathBytes = slot.pathBytes;
+    summary.pathBytes = ColdOf(slot).pathBytes;
     // Within 판정의 Outer 타입이다(slot이 사는 동안 유효 — 리플렉션 B9h2).
     summary.type = &slot.type;
     return summary;
@@ -115,7 +117,8 @@ ObjectRegistry::Slot* ObjectRegistry::FindNamedLocked(ObjectHandle outer, uint64
         }
 
         Slot* slot = entry.slot;
-        if (entry.keyHash != hash || !(slot->outer == outer) || !(slot->name->Key() == key)) {
+        if (entry.keyHash != hash || !(ColdOf(*slot).outer == outer) ||
+            !(ColdOf(*slot).name->Key() == key)) {
             continue;
         }
 
@@ -135,7 +138,7 @@ ObjectRegistry::Slot* ObjectRegistry::FindVisibleNamedLocked(ObjectHandle outer,
     // (outer, 키)는 점유 기준으로 유일하므로 점유 항목 하나를 찾아 보이는지만 가린다.
     Slot* slot = FindNamedLocked(outer, hash, key, transaction == 0);
     if (slot != nullptr && slot->state == SlotState::Reserved &&
-        (slot->transaction != transaction || slot->object == nullptr)) {
+        (ColdOf(*slot).transaction != transaction || slot->object == nullptr)) {
         return nullptr;
     }
 
@@ -207,8 +210,8 @@ void ObjectRegistry::InsertNameLocked(Slot& slot, uint64 hash, StringView key) n
 
         // 같은 키의 cutoff white 항목은 이름을 점유하지 않으므로 이 자리에서 뺀다(그 객체의
         // Retire는 indexed가 꺼져 있어 색인을 다시 보지 않는다).
-        if (entry.keyHash == hash && entry.slot->outer == slot.outer &&
-            entry.slot->name->Key() == key && IsCutoff(entry.slot)) {
+        if (entry.keyHash == hash && ColdOf(*entry.slot).outer == ColdOf(slot).outer &&
+            ColdOf(*entry.slot).name->Key() == key && IsCutoff(entry.slot)) {
             entry.slot->indexed = false;
             entry.slot = nullptr;
             entry.keyHash = 1;
@@ -233,7 +236,7 @@ void ObjectRegistry::InsertNameLocked(Slot& slot, uint64 hash, StringView key) n
 
 void ObjectRegistry::RemoveNameLocked(Slot& slot) noexcept {
     const uint32 mask = nameCapacity_ - 1;
-    for (uint32 index = static_cast<uint32>(slot.name->keyHash) & mask;;
+    for (uint32 index = static_cast<uint32>(ColdOf(slot).name->keyHash) & mask;;
          index = (index + 1) & mask) {
         NameEntry& entry = names_[index];
         if (entry.slot == &slot) {
@@ -252,37 +255,37 @@ void ObjectRegistry::RemoveNameLocked(Slot& slot) noexcept {
 }
 
 void ObjectRegistry::LinkChildLocked(Slot& parent, Slot& child) noexcept {
-    child.prevSibling = parent.lastChild;
-    child.nextSibling = nullptr;
-    if (parent.lastChild != nullptr) {
-        parent.lastChild->nextSibling = &child;
+    ColdOf(child).prevSibling = ColdOf(parent).lastChild;
+    ColdOf(child).nextSibling = nullptr;
+    if (ColdOf(parent).lastChild != nullptr) {
+        ColdOf(*ColdOf(parent).lastChild).nextSibling = &child;
     } else {
-        parent.firstChild = &child;
+        ColdOf(parent).firstChild = &child;
     }
 
-    parent.lastChild = &child;
+    ColdOf(parent).lastChild = &child;
     child.linked = true;
 }
 
 void ObjectRegistry::UnlinkChildLocked(Slot& child) noexcept {
-    Slot& parent = *child.parent;
-    if (child.prevSibling != nullptr) {
-        child.prevSibling->nextSibling = child.nextSibling;
+    Slot& parent = *ColdOf(child).parent;
+    if (ColdOf(child).prevSibling != nullptr) {
+        ColdOf(*ColdOf(child).prevSibling).nextSibling = ColdOf(child).nextSibling;
     } else {
-        parent.firstChild = child.nextSibling;
+        ColdOf(parent).firstChild = ColdOf(child).nextSibling;
     }
 
-    if (child.nextSibling != nullptr) {
-        child.nextSibling->prevSibling = child.prevSibling;
+    if (ColdOf(child).nextSibling != nullptr) {
+        ColdOf(*ColdOf(child).nextSibling).prevSibling = ColdOf(child).prevSibling;
     } else {
-        parent.lastChild = child.prevSibling;
+        ColdOf(parent).lastChild = ColdOf(child).prevSibling;
     }
 
-    child.prevSibling = nullptr;
-    child.nextSibling = nullptr;
+    ColdOf(child).prevSibling = nullptr;
+    ColdOf(child).nextSibling = nullptr;
     child.linked = false;
     // 마지막 자식이 떨어진 Retired 부모는 회수 가능해졌을 수 있다(지연 목록이면 풀린 목록으로).
-    if (parent.firstChild == nullptr) {
+    if (ColdOf(parent).firstChild == nullptr) {
         WakeDeferredLocked(parent);
     }
 }
@@ -372,7 +375,7 @@ Result<ObjectHandle> ObjectRegistry::GetOuter(const ObjectAccessContext& access,
         return Result<ObjectHandle>::Failure(found.Error());
     }
 
-    return Result<ObjectHandle>::Success(found.Value()->outer);
+    return Result<ObjectHandle>::Success(ColdOf(*found.Value()).outer);
 }
 
 Result<ObjectHandle> ObjectRegistry::GetOutermost(const ObjectAccessContext& access,
@@ -394,7 +397,7 @@ Result<ObjectHandle> ObjectRegistry::GetOutermost(const ObjectAccessContext& acc
 
     // 공개된 객체의 Outer 사슬은 모두 회수 전이다(살아 있는 Inner가 inner → outer로 Outer를
     // 표식하고, cutoff white 객체는 위에서 거부했다).
-    return Result<ObjectHandle>::Success(HandleOf(*found.Value()->outermost));
+    return Result<ObjectHandle>::Success(HandleOf(*ColdOf(*found.Value()).outermost));
 }
 
 Result<void> ObjectRegistry::GetName(const ObjectAccessContext& access, ObjectHandle handle,
@@ -419,7 +422,7 @@ Result<void> ObjectRegistry::GetName(const ObjectAccessContext& access, ObjectHa
             return Result<void>::Failure(found.Error());
         }
 
-        if (const NameRecord* record = found.Value()->name) {
+        if (const NameRecord* record = ColdOf(*found.Value()).name) {
             bytes = record->nameBytes;
             platform::MemoryCopy(buffer, record->Data(), bytes);
         }
@@ -451,10 +454,11 @@ Result<void> ObjectRegistry::GetObjectPath(const ObjectAccessContext& access, Ob
         // 경로 길이를 생성 때 계산해 두었으므로 끝에서부터 채운다. 대표 자식의 빈 이름은 건너뛰고,
         // 앞쪽 경로가 남아 있을 때만 '.'을 넣는다.
         const Slot* slot = found.Value();
-        bytes = slot->pathBytes;
+        bytes = ColdOf(*slot).pathBytes;
         usize position = bytes;
-        for (const Slot* current = slot; !current->outer.IsNull(); current = current->parent) {
-            const NameRecord& record = *current->name;
+        for (const Slot* current = slot; !ColdOf(*current).outer.IsNull();
+             current = ColdOf(*current).parent) {
+            const NameRecord& record = *ColdOf(*current).name;
             if (record.nameBytes == 0) {
                 continue;
             }
@@ -563,7 +567,7 @@ Result<ObjectHandle> ObjectRegistry::FindObjectChecked(const ObjectAccessContext
             return Result<ObjectHandle>::Failure(found.Error());
         }
 
-        if (!found.Value()->outer.IsNull()) {
+        if (!ColdOf(*found.Value()).outer.IsNull()) {
             return Result<ObjectHandle>::Failure(ErrorCode::InvalidArgument);
         }
 
@@ -797,7 +801,7 @@ Result<OuterSummary> ObjectRegistry::DescribeOuterChecked(const ObjectAccessCont
     if (!slot || IsCutoff(slot) ||
         !(slot->state == SlotState::Alive ||
           (transaction != 0 && slot->state == SlotState::Reserved &&
-           slot->transaction == transaction && slot->object != nullptr))) {
+           ColdOf(*slot).transaction == transaction && slot->object != nullptr))) {
         return Result<OuterSummary>::Failure(ErrorCode::StaleHandle);
     }
 
@@ -832,23 +836,23 @@ Result<void> ObjectRegistry::CollectInners(const ObjectAccessContext& access, Ob
 
         root = found.Value();
         // (1) 개수를 센다. 스택 없이 부모 포인터로 되돌아 오르는 전위 순회다.
-        const Slot* node = root->firstChild;
+        const Slot* node = ColdOf(*root).firstChild;
         while (node != nullptr) {
             const bool take = collectable(node);
             if (take) {
                 ++count;
             }
 
-            if (take && depthFirst && node->firstChild != nullptr) {
-                node = node->firstChild;
+            if (take && depthFirst && ColdOf(*node).firstChild != nullptr) {
+                node = ColdOf(*node).firstChild;
                 continue;
             }
 
-            while (node != root && node->nextSibling == nullptr) {
-                node = node->parent;
+            while (node != root && ColdOf(*node).nextSibling == nullptr) {
+                node = ColdOf(*node).parent;
             }
 
-            node = node == root ? nullptr : node->nextSibling;
+            node = node == root ? nullptr : ColdOf(*node).nextSibling;
         }
 
         // (2) 처리 표시 아래 잠금 밖에서 할당한다(그 사이 재진입 변경은 Busy라 트리가 바뀌지
@@ -885,7 +889,8 @@ Result<void> ObjectRegistry::CollectInners(const ObjectAccessContext& access, Ob
     {
         platform::LockGuard lock(gate_);
         auto appendChildren = [&](const Slot& parent, uint32 parentPosition) noexcept {
-            for (Slot* child = parent.firstChild; child != nullptr; child = child->nextSibling) {
+            for (Slot* child = ColdOf(parent).firstChild; child != nullptr;
+                 child = ColdOf(*child).nextSibling) {
                 if (!collectable(child)) {
                     continue;
                 }
@@ -923,8 +928,8 @@ Result<void> ObjectRegistry::CollectInners(const ObjectAccessContext& access, Ob
     // (4) 잠금 밖에서 같은 Outer 구간마다 이름 순으로 제자리 정렬한다. 이 구간에는 할당·사용자
     // 콜백이 없고 회수는 소유 스레드의 명시 호출뿐이라 NameRecord가 사라지지 않는다. 같은 Outer 안
     // 이름은 서로 달라 순서가 결정적이다.
-    auto byName = [](const InnerEntry& left, const InnerEntry& right) noexcept {
-        return NameLess(left.slot->name->Name(), right.slot->name->Name());
+    auto byName = [this](const InnerEntry& left, const InnerEntry& right) noexcept {
+        return NameLess(ColdOf(*left.slot).name->Name(), ColdOf(*right.slot).name->Name());
     };
     algo::Sort(Span<InnerEntry>(entries.Data(), direct), byName);
     if (depthFirst) {

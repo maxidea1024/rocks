@@ -129,7 +129,8 @@ TEST(ObjectIncrementalGcCutoffBlocksUnclassifiedWhiteAndProtectsLaterBirths) {
         auto cutoff = registry.StepCollection(access, {1, 0});
         REQUIRE(cutoff);
         CHECK(cutoff.Value().phase == GcPhase::Sweeping);
-        CHECK(registry.Stats().retiredObjects == 1);
+        // cutoff를 게시한 slice는 분류하지 않고 끝난다(white는 아직 Retire 전이다).
+        CHECK(registry.Stats().retiredObjects == 0);
         CHECK(!registry.Resolve<IncrementalNode>(access, white));
         CHECK(!registry.TryPin<IncrementalNode>(access, white));
         CHECK(!registry.AcquireBackendLease(access, white));
@@ -324,7 +325,10 @@ TEST(ObjectIncrementalGcMatchesIndependentGraphOracleWithParallelMarking) {
         REQUIRE(registry.BeginCollection(access));
         REQUIRE(Finish(registry, 7, &scheduler));
         observeWorkers = false;
-        CHECK(workerTraces != 0);
+        // worker가 실제로 trace했는지(workerTraces)는 단언하지 않는다. slice 예산이 작아 소유
+        // 스레드가 모든 객체를 먼저 가져갈 수 있다(경쟁 운). 병렬 표식의 결과는 아래 oracle 대조가
+        // 본다.
+        (void)workerTraces;
         uint32 expectedCount = 0;
         for (uint32 index = 0; index < count; ++index) {
             expectedCount += reachable[index] ? 1u : 0u;
@@ -346,7 +350,9 @@ TEST(ObjectIncrementalGcMatchesIndependentGraphOracleWithParallelMarking) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
-TEST(ObjectIncrementalGcRejectedMarkerSubmissionAbortsWithoutSweep) {
+// worker가 없는(시작하지 않은) scheduler를 주면 병렬 표식은 소유 스레드 혼자 참여해 끝낸다(GC-S4 —
+// task를 제출하지 않는다). 제출 실패로 cycle을 버리는 경로는 IncrementalGcReviewTests가 본다.
+TEST(ObjectIncrementalGcSchedulerWithoutWorkersMarksOnOwnerThread) {
     SystemAllocator allocator;
     {
         TypeRegistry types(allocator);
@@ -359,10 +365,13 @@ TEST(ObjectIncrementalGcRejectedMarkerSubmissionAbortsWithoutSweep) {
         REQUIRE(root && garbage);
         garbage.Value().Reset();
         REQUIRE(registry.BeginCollection(access));
-        CHECK(!registry.StepCollection(access, {10, 0}, &stopped));
+        for (uint32 guard = 0; guard < 8 && registry.CollectionPhase() != GcPhase::Idle; ++guard) {
+            REQUIRE(registry.StepCollection(access, {10, 0}, &stopped));
+        }
+
         CHECK(registry.CollectionPhase() == GcPhase::Idle);
-        CHECK(registry.Stats().liveObjects == 2);
-        CHECK(registry.Stats().retiredObjects == 0);
+        CHECK(registry.Stats().liveObjects == 1);
+        CHECK(registry.LastGcReport().reclaimed == 1);
         root.Value().Reset();
         REQUIRE(registry.Shutdown(access));
         REQUIRE(types.Shutdown());

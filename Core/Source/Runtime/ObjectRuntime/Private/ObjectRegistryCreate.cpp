@@ -1,5 +1,7 @@
 #include "ObjectRegistryInternal.h"
 
+#include <Base/Compiler.h>
+
 #include <Core/Text/NameComponent.h>
 #include <Core/Text/StringBuilder.h>
 #include <Object/ObjectRegistry.h>
@@ -75,10 +77,12 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
     NameRecord* record = nullptr;
     NameEntry* grown = nullptr;
     ChunkTable* grownChunks = nullptr;
+    GcGrowth gcGrowth;
     void* storage = nullptr;
     auto fail = [&](ErrorCode error) noexcept -> Result<ObjectHandle> {
         ReleaseRegistryMemory(allocator_, storage);
         ReleaseRegistryMemory(allocator_, grownChunks);
+        ReleaseGcGrowth(gcGrowth);
         ReleaseRegistryMemory(allocator_, grown);
         ReleaseRegistryMemory(allocator_, record);
         platform::LockGuard lock(gate_);
@@ -123,8 +127,8 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
         parent = FindSlot(outer);
         outerValid = parent != nullptr && !IsCutoff(parent) &&
                      (parent->state == SlotState::Alive ||
-                      (parent->state == SlotState::Reserved && parent->transaction == transaction &&
-                       parent->object != nullptr));
+                      (parent->state == SlotState::Reserved &&
+                       ColdOf(*parent).transaction == transaction && parent->object != nullptr));
         if (outerValid) {
             // hasNamedInners는 대표 자식(빈 이름) 생성에만 쓰인다. 이름 있는 생성은 고리를 훑지
             // 않는다 (Sweeping 중 cutoff white 형제가 많아도 잠금 시간이 늘지 않게).
@@ -214,26 +218,18 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
         // mutator가 새 객체를 만드는 지점에서만 작업 큐를 확장한다. gate/Trace 안의 barrier는
         // 할당하지 않는다. Marking 동안 공개된 객체는 회수하지 않아 슬롯 수가 큐 상한이 된다.
         // 모자랄 때만 두 배(상한 maxSlots)로 늘려 새 chunk마다 큐 전체를 다시 할당·복사하지 않는다.
-        uint64 needed = (uint64(chunkCount_) + 1) * SlotsPerChunk;
-        if (needed > options_.maxSlots) {
-            needed = options_.maxSlots;
+        // 표식 큐와 장벽 큐 둘 다다(장벽은 gcShade_에 넣고 slice 시작에 gcWork_로 옮긴다). 클러스터
+        // 항목 몫(레코드 수)도 담는다.
+        const uint64 needed = GcQueueBound((uint64(chunkCount_) + 1) * SlotsPerChunk);
+        if (auto reserve = ReserveGcQueues(needed, GcQueueBound(options_.maxSlots)); !reserve) {
+            return fail(reserve.Error());
         }
+    }
 
-        if (needed > gcWork_.Capacity()) {
-            uint64 capacity = uint64(gcWork_.Capacity()) * 2;
-            if (capacity > options_.maxSlots) {
-                capacity = options_.maxSlots;
-            }
-
-            if (capacity < needed) {
-                capacity = needed;
-            }
-
-            auto reserve = gcWork_.TryReserve(static_cast<usize>(capacity));
-            if (!reserve) {
-                return fail(reserve.Error());
-            }
-        }
+    // GC 타입 표 번호(hot 레코드에 둔다 — GC-S3). 표는 처리 표시 아래에서만 자란다.
+    auto gcType = AcquireGcType(ops);
+    if (!gcType) {
+        return fail(gcType.Error());
     }
 
     auto memory = allocator_.Allocate(ops.size, ops.alignment, 0x4f424a45u);
@@ -274,6 +270,12 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
             grownChunkCapacity = static_cast<uint32>(capacity);
         }
 
+        // 새 chunk의 슬롯을 담을 GC 페이지·루트 목록 용량(GC-S3)도 잠금 밖에서 준비한다.
+        if (auto prepared = PrepareGcGrowth((uint64(chunkCount_) + 1) * SlotsPerChunk, gcGrowth);
+            !prepared) {
+            return fail(prepared.Error());
+        }
+
         auto block = allocator_.Allocate(sizeof(Chunk), alignof(Chunk), ChunkTag);
         if (!block) {
             return fail(block.Error());
@@ -303,18 +305,21 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
                 chunkCapacity_ = grownChunkCapacity;
             }
 
+            GrowGcLocked(gcGrowth);
             chunks_[chunkCount_++] = chunk;
             // 낮은 번호부터 쓰도록 거꾸로 넣는다. 상한 밖(Exhausted) 슬롯은 넣지 않는다.
             for (uint32 index = SlotsPerChunk; index-- != 0;) {
                 Slot& slot = chunk->slots[index];
                 if (slot.state == SlotState::Free) {
-                    slot.nextInList = freeSlots_;
+                    ColdOf(slot).nextInList = freeSlots_;
                     freeSlots_ = &slot;
                 }
             }
         }
 
         grownChunks = nullptr;
+        // GrowGcLocked가 넘겨준 옛 페이지 표·루트 목록을 잠금 밖에서 반환한다.
+        ReleaseGcGrowth(gcGrowth);
     }
 
     Slot* freeSlot = nullptr;
@@ -324,20 +329,43 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
         // 상태·이름 색인·부모 고리를 한 잠금 안에서 게시한다(공개 전 객체도 이름을 점유한다).
         platform::LockGuard lock(gate_);
         freeSlot = freeSlots_;
-        freeSlots_ = freeSlot->nextInList;
-        freeSlot->nextInList = nullptr;
+        freeSlots_ = ColdOf(*freeSlot).nextInList;
+        ColdOf(*freeSlot).nextInList = nullptr;
+        if constexpr (IsDebugBuild) {
+            // 회수(FinishReclaim)는 cold 레코드를 빈 상태로 되돌린다. 재사용 생성이 칸 몇 개를
+            // 덮어써 결과가 같아 보여도 계약이 깨졌으면 여기서 멈춘다(GC 설계 6절 Slot hot·cold
+            // 분리).
+            const SlotCold& cold = ColdOf(*freeSlot);
+            if (cold.prevInList != nullptr || cold.storage != nullptr ||
+                !(cold.stableType == TypeId{}) || cold.transaction != 0 || !cold.outer.IsNull() ||
+                cold.outermost != nullptr || cold.parent != nullptr || cold.firstChild != nullptr ||
+                cold.lastChild != nullptr || cold.nextSibling != nullptr ||
+                cold.prevSibling != nullptr || cold.name != nullptr || cold.backendHolds != 0 ||
+                cold.pathBytes != 0 || cold.discarded || cold.destroyListed) {
+                platform::Fatal("Reused slot kept cold state from its previous object");
+            }
+        }
+
         ++freeSlotProbes_;
         handle = HandleOf(*freeSlot);
         freeSlot->SetState(tally_, SlotState::Reserved);
-        freeSlot->storage = memory.Value();
-        freeSlot->transaction = transaction;
-        freeSlot->stableType = type;
+        ColdOf(*freeSlot).storage = memory.Value();
+        ColdOf(*freeSlot).transaction = transaction;
+        ColdOf(*freeSlot).stableType = type;
         freeSlot->type = Move(typeLease.Value());
-        freeSlot->outer = outerKey;
-        freeSlot->parent = parent;
-        freeSlot->outermost = parent != nullptr ? parent->outermost : freeSlot;
-        freeSlot->pathBytes = static_cast<uint16>(pathBytes);
-        freeSlot->name = record;
+        ColdOf(*freeSlot).outer = outerKey;
+        // hot 레코드와 잎 비트(GC-S3·M2). object는 생성자 실행 뒤 채운다.
+        GcHot& hot = HotOf(freeSlot->index);
+        hot.object = nullptr;
+        hot.outer = hasOuter ? outerKey.slot : NoSlot;
+        hot.type = gcType.Value();
+        if (gcTypes_[hot.type].leaf) {
+            BitsOf(freeSlot->index).leaf |= uint64(1) << (freeSlot->index % SlotsPerChunk);
+        }
+        ColdOf(*freeSlot).parent = parent;
+        ColdOf(*freeSlot).outermost = parent != nullptr ? ColdOf(*parent).outermost : freeSlot;
+        ColdOf(*freeSlot).pathBytes = static_cast<uint16>(pathBytes);
+        ColdOf(*freeSlot).name = record;
         if (named) {
             if (grown != nullptr) {
                 previousTable = RehashNamesLocked(grown, grownCapacity);
@@ -360,11 +388,22 @@ Result<ObjectHandle> ObjectRegistry::CreatePending(const ObjectAccessContext& ac
         platform::Fatal("A noexcept object constructor must return its object");
     }
 
+    // 소유자 범위 검사가 hot의 object에서 저장소 시작을 유도할 수 있게 타입의 기반 위치를 기록한다.
+    const uptr base = reinterpret_cast<uptr>(object);
+    const uptr start = reinterpret_cast<uptr>(memory.Value());
+    if (base < start || base - start >= freeSlot->type.Ops().size ||
+        !freeSlot->type.RecordObjectOffset(base - start)) {
+        platform::Fatal("Object base offset differs between objects of one type");
+    }
+
     object->registry_ = this;
     object->handle_ = handle;
+    // 그 타입의 첫 객체면 참조 위치 표를 정한다(M3 — 처리 표시 아래라 marker와 겹치지 않는다).
+    PrepareReferenceLayout(gcType.Value(), *object);
     {
         platform::LockGuard lock(gate_);
         freeSlot->object = object;
+        HotOf(freeSlot->index).object = object;
         processing_ = false;
     }
 
@@ -381,7 +420,7 @@ Result<void*> ObjectRegistry::GetPending(const ObjectAccessContext& access, Obje
     platform::LockGuard lock(gate_);
     Slot* slot = FindSlot(handle);
     if (processing_ || !slot || slot->state != SlotState::Reserved ||
-        slot->transaction != transaction || !slot->object) {
+        ColdOf(*slot).transaction != transaction || !slot->object) {
         return Result<void*>::Failure(ErrorCode::StaleHandle);
     }
 
@@ -410,7 +449,7 @@ Result<TypeLease> ObjectRegistry::AcquireTypeChecked(const ObjectAccessContext& 
     if (!slot || IsCutoff(slot) ||
         !(slot->state == SlotState::Alive ||
           (transaction != 0 && slot->state == SlotState::Reserved &&
-           slot->transaction == transaction && slot->object != nullptr))) {
+           ColdOf(*slot).transaction == transaction && slot->object != nullptr))) {
         return Result<TypeLease>::Failure(ErrorCode::StaleHandle);
     }
 
@@ -423,22 +462,50 @@ void ObjectRegistry::ValidateStagedEdge(void* pointer, ObjectHandle handle) noex
         return;
     }
 
+    if constexpr (IsDebugBuild) {
+        // 잎 타입(RuntimeTypeOps::hasStrongReferences == false)은 GC가 trace하지 않으므로 간선을
+        // 방문하면 그 간선이 GC에 보이지 않는다.
+        if (state.leafOwner) {
+            platform::Fatal("A type declared without strong references visited a reference");
+        }
+    }
+
     ObjectHandle package;
     {
         platform::LockGuard lock(state.registry->gate_);
         Slot* slot = state.registry->FindSlot(handle);
         if (!slot || state.registry->IsCutoff(slot) ||
             !(slot->state == SlotState::Alive ||
-              (slot->state == SlotState::Reserved && slot->transaction == state.transaction))) {
+              (slot->state == SlotState::Reserved &&
+               state.registry->ColdOf(*slot).transaction == state.transaction))) {
             state.error = ErrorCode::StaleHandle;
             return;
         }
 
-        if (!state.observe) {
+        // 영구 창의 staged 간선(outer 포함)은 같은 트랜잭션 객체나 영구 객체만 가리킨다(13.7절).
+        if (state.permanent && slot->state != SlotState::Reserved &&
+            !state.registry->IsPermanentLocked(slot->index)) {
+            state.error = ErrorCode::Unsupported;
             return;
         }
 
-        package = state.registry->HandleOf(*slot->outermost);
+        if (state.observe) {
+            package = state.registry->HandleOf(*state.registry->ColdOf(*slot).outermost);
+        }
+    }
+
+    // 클러스터 장부: 가입할 소유자의 간선을 (소유자, 대상) 쌍으로 모은다(잠금 밖 할당 — 소속을
+    // 모두 정한 뒤 공개 잠금 안에서 센다).
+    if (state.ledger != nullptr && state.ledgerOwner != NoSlot) {
+        if (!state.ledger->TryPushBack(state.ledgerOwner) ||
+            !state.ledger->TryPushBack(handle.slot)) {
+            state.error = ErrorCode::OutOfMemory;
+            return;
+        }
+    }
+
+    if (!state.observe) {
+        return;
     }
 
     // 관찰자 쌍 집계(staged 저널 순 × trace 순). 집계 표 삽입은 잠금 밖이다.
@@ -457,16 +524,21 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
         return valid;
     }
 
+    uint32 newClusters = 0;
+    const bool packageClusters = clustersEnabled_ && options_.policy.packageNativeType != nullptr;
+    bool permanent = false;
     {
         platform::LockGuard lock(gate_);
         if (auto open = OpenState(closed_, processing_); !open) {
             return open;
         }
 
+        permanent = permanentOpen_;
+
         for (usize index = 0; index < staged.Size(); ++index) {
             Slot* slot = FindSlot(staged[index]);
-            if (!slot || slot->state != SlotState::Reserved || slot->transaction != transaction ||
-                !slot->object) {
+            if (!slot || slot->state != SlotState::Reserved ||
+                ColdOf(*slot).transaction != transaction || !slot->object) {
                 return Result<void>::Failure(ErrorCode::StaleHandle);
             }
         }
@@ -475,14 +547,58 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
         // 수 없다) 중복 root도 roots 크기가 uint32 안이면 넘치지 않는다.
         for (usize index = 0; index < roots.Size(); ++index) {
             Slot* slot = FindSlot(roots[index]);
-            if (!slot || slot->state != SlotState::Reserved || slot->transaction != transaction ||
-                !slot->object) {
+            if (!slot || slot->state != SlotState::Reserved ||
+                ColdOf(*slot).transaction != transaction || !slot->object) {
                 return Result<void>::Failure(ErrorCode::StaleHandle);
             }
         }
 
         if (roots.Size() > NumericLimits<uint32>::Max()) {
             return Result<void>::Failure(ErrorCode::Overflow);
+        }
+
+        // 클러스터 가입 지정(DesignateCluster)을 다시 본다: 기존 루트가 그 사이 해체·파괴됐으면
+        // StaleHandle이다. 새 루트 수만큼 레코드를 잠금 밖에서 확보한다.
+        // 영구 창: 모든 객체가 완전한 필드 배치여야 하고 영구 클러스터에 들어간다(13.7절).
+        if (permanent) {
+            for (usize index = 0; index < staged.Size(); ++index) {
+                if (!FindSlot(staged[index])->type.Ops().completeFieldLayout) {
+                    return Result<void>::Failure(ErrorCode::Unsupported);
+                }
+            }
+
+            newClusters = permanentCluster_ == NoSlot ? 1u : 0u;
+        }
+
+        if (clustersEnabled_ && !permanent) {
+            for (usize index = 0; index < staged.Size(); ++index) {
+                uint32& state = ClusterStateOf(staged[index].slot);
+                uint32& pendingRoot = ClusterInCountOf(staged[index].slot);
+                // 패키지 정책: 패키지 객체는 새 클러스터 루트이고 나머지는 outermost 패키지의
+                // 클러스터에 가입한다(13.3절 — 모든 객체가 완전한 필드 배치다).
+                if (packageClusters && state == 0) {
+                    const Slot* slot = FindSlot(staged[index]);
+                    // 경계 비율 안전장치가 클러스터를 해체한 패키지의 새 객체는 일반 객체다.
+                    if (!ColdOf(*slot).outer.IsNull() &&
+                        IsFlattenedPackageLocked(*ColdOf(*slot).outermost)) {
+                        continue;
+                    }
+
+                    state = ClusterPending;
+                    pendingRoot =
+                        ColdOf(*slot).outer.IsNull() ? NoSlot : ColdOf(*slot).outermost->index;
+                }
+
+                if (state != ClusterPending) {
+                    continue;
+                }
+
+                if (pendingRoot == NoSlot) {
+                    ++newClusters;
+                } else if (!IsJoinableRootLocked(pendingRoot, transaction)) {
+                    return Result<void>::Failure(ErrorCode::StaleHandle);
+                }
+            }
         }
 
         processing_ = true;
@@ -496,16 +612,35 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
     MarkState state{this, nullptr, transaction};
     state.tally = &tally;
     state.delta = 1;
+    state.permanent = permanent;
+    // 가입할 소유자의 Trace 간선(소유자, 대상) 쌍이다(outer는 공개 잠금 안에서 hot 레코드로 센다).
+    Array<uint32> ledger(allocator_);
+    if (newClusters != 0) {
+        if (auto reserved = ReserveClusters(newClusters); !reserved) {
+            state.error = reserved.Error();
+        }
+    }
+
     TraceVisitor visitor(&state, &ObjectRegistry::ValidateStagedEdge);
     for (usize index = 0; index < staged.Size() && state.error == ErrorCode::None; ++index) {
         Slot* slot = FindSlot(staged[index]);
-        state.observe = options_.referenceObserver != nullptr && !slot->outer.IsNull();
+        state.observe = options_.referenceObserver != nullptr && !ColdOf(*slot).outer.IsNull();
+        state.leafOwner = !slot->type.Ops().hasStrongReferences;
         if (state.observe) {
-            state.ownerPackage = HandleOf(*slot->outermost);
+            state.ownerPackage = HandleOf(*ColdOf(*slot).outermost);
+        }
+
+        // 처리 표시 아래라 가입 지정 칸이 바뀌지 않는다.
+        if (permanent || (clustersEnabled_ && ClusterStateOf(slot->index) == ClusterPending)) {
+            state.ledger = &ledger;
+            state.ledgerOwner = slot->index;
         }
 
         slot->type.Ops().trace(*slot->object, visitor);
         state.observe = false;
+        state.leafOwner = false;
+        state.ledger = nullptr;
+        state.ledgerOwner = NoSlot;
         VisitIdentityEdges(*slot, visitor);
     }
 
@@ -534,24 +669,90 @@ Result<void> ObjectRegistry::Commit(const ObjectAccessContext& access, uint64 tr
         for (usize index = 0; index < staged.Size(); ++index) {
             Slot* slot = FindSlot(staged[index]);
             slot->SetState(tally_, SlotState::Alive);
-            slot->transaction = 0;
+            ColdOf(*slot).transaction = 0;
+            BitsOf(slot->index).live |= uint64(1) << (slot->index % SlotsPerChunk);
+        }
+
+        // 클러스터 가입(13.4절): 새 루트의 클러스터를 먼저 만들고 가입 객체를 넣은 뒤, 소속을 모두
+        // 정한 상태에서 staged 간선과 outer를 센다. 공개 전 객체는 같은 트랜잭션의 staged 간선만
+        // 받으므로 가입 때문에 분류가 바뀌는 기존 간선이 없다.
+        if (permanent) {
+            if (permanentCluster_ == NoSlot) {
+                permanentCluster_ = CreateClusterLocked(NoSlot, false);
+                clusters_[permanentCluster_].permanent = true;
+                // 영구 영역은 언제나 표식된 클러스터다(AdvanceGcEpochLocked가 cycle마다 맞춘다).
+                clusterEpochs_[permanentCluster_] = gcEpoch_;
+            }
+
+            for (usize index = 0; index < staged.Size(); ++index) {
+                JoinClusterLocked(permanentCluster_, staged[index].slot);
+            }
+        }
+
+        if (clustersEnabled_) {
+            for (usize index = 0; index < staged.Size(); ++index) {
+                const uint32 slot = staged[index].slot;
+                if (ClusterStateOf(slot) == ClusterPending && ClusterInCountOf(slot) == NoSlot) {
+                    // 패키지 클러스터는 고리가 소유라 소속 불변식 검증 대상이 아니다(13.8절).
+                    (void)CreateClusterLocked(slot, !packageClusters);
+                }
+            }
+
+            for (usize index = 0; index < staged.Size(); ++index) {
+                const uint32 slot = staged[index].slot;
+                if (ClusterStateOf(slot) == ClusterPending) {
+                    const uint32 root = ClusterInCountOf(slot);
+                    JoinClusterLocked(ClusterStateOf(root) & ClusterIdMask, slot);
+                }
+            }
+
+            for (usize at = 0; at + 1 < ledger.Size(); at += 2) {
+                LedgerEdgeLocked(ledger[at], ledger[at + 1], true);
+            }
+
+            for (usize index = 0; index < staged.Size(); ++index) {
+                const uint32 slot = staged[index].slot;
+                const uint32 outer = HotOf(slot).outer;
+                if ((ClusterStateOf(slot) & ClusterMember) != 0 && outer != NoSlot) {
+                    LedgerEdgeLocked(slot, outer, true);
+                }
+            }
+        }
+
+        for (usize index = 0; index < staged.Size(); ++index) {
+            Slot* slot = FindSlot(staged[index]);
+            const uint64 bit = uint64(1) << (slot->index % SlotsPerChunk);
+            GcBits& bits = BitsOf(slot->index);
+            const bool member = (bits.clustered & bit) != 0;
             if (gcPhase_ == GcPhase::Marking) {
                 if (ShadeLocked(staged[index]) != ErrorCode::None) {
                     platform::Fatal("Preallocated newborn mark queue exhausted");
                 }
 
+                // 13.6절: 이미 처리된 클러스터에 가입한 소속은 shade가 클러스터에 닿아 끝나므로
+                // trace되지 않는다. staged 간선의 생존 대상은 쓸 때 shade됐고, 생존 outer는 여기서
+                // shade한다(같은 트랜잭션의 outer도 이 루프가 shade한다).
+                if (member && !ColdOf(*slot).outer.IsNull() &&
+                    ShadeLocked(ColdOf(*slot).outer) != ErrorCode::None) {
+                    platform::Fatal("Preallocated newborn mark queue exhausted");
+                }
+
                 ++cycleGc_.examined;
-            } else if (gcPhase_ == GcPhase::Sweeping) {
+            } else if (gcPhase_ == GcPhase::Sweeping && !member) {
                 // cutoff 이후 태어난 객체는 이전 cohort의 white 후보가 아니다. Commit 검증이
                 // 기존 white 대상·Outer 연결을 거부하므로 새 객체를 이번 cycle에서 trace할 필요가
-                // 없다.
-                slot->mark = markEpoch_;
+                // 없다. 소속은 clustered 비트로 sweep에서 빠진다(그 클러스터는 표식됐다).
+                bits.mark |= bit;
             }
         }
 
         // root 증가와 관찰자 기록(transaction = 이 트랜잭션)은 공개와 같은 잠금 안이다.
         for (usize index = 0; index < roots.Size(); ++index) {
-            ++FindSlot(roots[index])->roots;
+            Slot* slot = FindSlot(roots[index]);
+            if (slot->roots++ == 0) {
+                AddRootListLocked(*slot);
+            }
+
             ++tally_.roots;
         }
 
@@ -591,8 +792,14 @@ void ObjectRegistry::Rollback(uint64 transaction, Span<const ObjectHandle> stage
         {
             platform::LockGuard lock(gate_);
             Slot* slot = FindSlot(staged[remaining - 1]);
-            if (!slot || slot->state != SlotState::Reserved || slot->transaction != transaction) {
+            if (!slot || slot->state != SlotState::Reserved ||
+                ColdOf(*slot).transaction != transaction) {
                 platform::Fatal("Corrupt construction journal");
+            }
+
+            // 클러스터 가입 지정을 지운다(공개 전 객체만 가진다).
+            if (clustersEnabled_) {
+                ClearClusterSlotLocked(slot->index);
             }
 
             // 역순이라 같은 트랜잭션 자식이 먼저 떨어지므로 부모는 자식이 없을 때 회수된다.

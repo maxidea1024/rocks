@@ -172,7 +172,7 @@ Result<void> WriteSlot(Allocator& allocator, const FieldValue& value, CVarSlot& 
 } // namespace
 
 Result<SharedPtr<const ScopeTable>>
-BuildScopeTable(ConfigState& state, const Array<UniquePtr<ScopeState>>& scopes) noexcept {
+BuildScopeTable(ConfigState& state, const Array<SharedPtr<ScopeState>>& scopes) noexcept {
     using Built = Result<SharedPtr<const ScopeTable>>;
     if (scopes.IsEmpty()) {
         return Built::Success(SharedPtr<const ScopeTable>());
@@ -184,29 +184,42 @@ BuildScopeTable(ConfigState& state, const Array<UniquePtr<ScopeState>>& scopes) 
     }
 
     ScopeTable& table = *made.Value();
+    if (auto reserved = table.nodes.TryReserve(scopes.Size()); !reserved) {
+        return Built::Failure(reserved.Error());
+    }
+
     constexpr uint32 WordBits = 64;
-    for (const UniquePtr<ScopeState>& scope : scopes) {
-        auto node = UniquePtr<ScopeNode>::TryMake(state.allocator, state.allocator);
-        if (!node) {
-            return Built::Failure(node.Error());
-        }
-
-        node.Value()->id = scope->id;
-        node.Value()->parent = scope->parent;
-        if (auto reserved = node.Value()->slots.TryReserve(scope->values.Size()); !reserved) {
-            return Built::Failure(reserved.Error());
-        }
-
-        for (const UniquePtr<ScopeValue>& value : scope->values) {
-            ScopeSlot slot;
-            slot.index = value->index;
-            slot.slot.generation = 1;
-            if (auto written = WriteSlot(state.allocator, value->value, slot.slot, slot.text);
-                !written) {
-                return Built::Failure(written.Error());
+    for (const SharedPtr<ScopeState>& scope : scopes) {
+        // 캐시된 노드(값·부모가 바뀌지 않은 범위)는 그대로 쓴다.
+        if (scope->node.Get() == nullptr) {
+            auto node = SharedPtr<ScopeNode>::TryMake(state.allocator, state.allocator);
+            if (!node) {
+                return Built::Failure(node.Error());
             }
 
-            const usize word = value->index / WordBits;
+            node.Value()->id = scope->id;
+            node.Value()->parent = scope->parent;
+            if (auto reserved = node.Value()->slots.TryReserve(scope->values.Size()); !reserved) {
+                return Built::Failure(reserved.Error());
+            }
+
+            for (const SharedPtr<const ScopeValue>& value : scope->values) {
+                ScopeSlot slot;
+                slot.index = value->index;
+                slot.slot.generation = 1;
+                if (auto written = WriteSlot(state.allocator, value->value, slot.slot, slot.text);
+                    !written) {
+                    return Built::Failure(written.Error());
+                }
+
+                static_cast<void>(node.Value()->slots.TryPushBack(Move(slot))); // 예약했다
+            }
+
+            scope->node = SharedPtr<const ScopeNode>(Move(node.Value()));
+        }
+
+        for (const ScopeSlot& slot : scope->node->slots) {
+            const usize word = slot.index / WordBits;
             if (word >= table.scoped.Size()) {
                 const usize old = table.scoped.Size();
                 if (auto grown = table.scoped.TryResize(word + 1); !grown) {
@@ -218,13 +231,10 @@ BuildScopeTable(ConfigState& state, const Array<UniquePtr<ScopeState>>& scopes) 
                 }
             }
 
-            table.scoped[word] |= uint64{1} << (value->index % WordBits);
-            static_cast<void>(node.Value()->slots.TryPushBack(Move(slot))); // 예약했다
+            table.scoped[word] |= uint64{1} << (slot.index % WordBits);
         }
 
-        if (auto pushed = table.nodes.TryPushBack(Move(node.Value())); !pushed) {
-            return Built::Failure(pushed.Error());
-        }
+        static_cast<void>(table.nodes.TryPushBack(scope->node)); // 예약했다
     }
 
     return Built::Success(SharedPtr<const ScopeTable>(Move(made.Value())));

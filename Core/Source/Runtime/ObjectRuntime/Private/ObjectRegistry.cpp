@@ -11,8 +11,8 @@
 // 통계·진단을 둔다. 생성 트랜잭션은 ObjectRegistryCreate.cpp, Outer·이름은
 // ObjectRegistryNames.cpp, 참조 간선 쓰기는 ObjectRegistryEdges.cpp(단일 참조·검증)·
 // ObjectRegistryArrayEdges.cpp(ObjectRefArray)·ObjectRegistryStructElements.cpp(StructRefArray),
-// GC는 ObjectRegistryGc.cpp, 관찰자 기록과 Discard는 ObjectRegistryObserver.cpp, 공용 내부 정의는
-// ObjectRegistryInternal.h다.
+// GC는 ObjectRegistryGc*.cpp(GC 설계 15절), 관찰자 기록과 Discard는 ObjectRegistryObserver.cpp,
+// 공용 내부 정의는 ObjectRegistryInternal.h다.
 namespace rocks {
 
 using namespace registry_detail;
@@ -21,7 +21,19 @@ ObjectRegistry::ObjectRegistry(Allocator& allocator, TypeRegistry& types, Contex
                                RegistryOptions options) noexcept
     : allocator_(allocator), types_(types), context_(context), options_(options),
       domain_(detail::NextRegistryDomain()), ownerThread_(platform::CurrentThreadId()),
-      gcWork_(allocator) {
+      gcWork_(allocator), gcShade_(allocator),
+      clustersEnabled_(options.clusters || options.permanentRegion ||
+                       (options.policy.packageNativeType != nullptr && options.packageClusters)),
+      permanentOpen_(options.permanentRegion) {
+    if (options_.permanentRegion && options_.policy.packageNativeType != nullptr) {
+        platform::Fatal("A package-policy ObjectRegistry cannot open a permanent region");
+    }
+
+    // 클러스터 장부 칸·작업 큐 항목이 클러스터 번호와 표지 비트를 같은 32비트에 담는다.
+    if (clustersEnabled_ && options_.maxSlots > RegistryOptions::ClusterSlotLimit) {
+        platform::Fatal("A cluster-enabled ObjectRegistry allows at most ClusterSlotLimit slots");
+    }
+
     // 관찰자는 패키지 정책 Registry 하나에만 붙는다(생성자는 실패를 돌려줄 수 없다).
     if (ReferenceObserver* observer = options_.referenceObserver) {
         if (options_.policy.packageNativeType == nullptr) {
@@ -71,6 +83,37 @@ ObjectRegistry::~ObjectRegistry() {
 
     chunkTables_ = nullptr;
     chunks_ = nullptr;
+    for (uint32 index = 0; index < gcPageCount_; ++index) {
+        ReleaseRegistryMemory(allocator_, gcPages_[index]->cells);
+        ReleaseRegistryMemory(allocator_, gcPages_[index]->clusterChunks);
+        gcPages_[index]->~GcPage();
+        ReleaseRegistryMemory(allocator_, gcPages_[index]);
+    }
+
+    ReleaseGrayBlocks();
+    while (GcBlock* block = gcFreeBlocks_) {
+        gcFreeBlocks_ = block->next;
+        block->~GcBlock();
+        ReleaseRegistryMemory(allocator_, block);
+    }
+
+    ReleaseRegistryMemory(allocator_, gcPages_);
+    for (uint32 index = 1; index < gcTypeCount_; ++index) {
+        ReleaseRegistryMemory(allocator_, gcTypes_[index].slots);
+    }
+
+    ReleaseRegistryMemory(allocator_, gcTypes_);
+    ReleaseRegistryMemory(allocator_, gcTypeIndex_);
+    gcTypeIndex_ = nullptr;
+    ReleaseRegistryMemory(allocator_, rootList_);
+    ReleaseRegistryMemory(allocator_, clusters_);
+    ReleaseRegistryMemory(allocator_, clusterEpochs_);
+    ReleaseRegistryMemory(allocator_, ledgerRemovals_);
+    clusterEpochs_ = nullptr;
+    clusters_ = nullptr;
+    gcPages_ = nullptr;
+    gcTypes_ = nullptr;
+    rootList_ = nullptr;
     chunkCount_ = 0;
     chunkCapacity_ = 0;
     freeSlots_ = nullptr;
@@ -86,24 +129,6 @@ Result<void> ObjectRegistry::CheckAccess(const ObjectAccessContext& access) cons
     }
 
     return Result<void>::Success();
-}
-
-// chunk 표 색인이라 O(1)이다. 다른 스레드의 계수 반환도 잠금 안에서 부르므로 표 교체(잠금 안)와
-// 겹치지 않고, 처리 표시 아래 잠금 없이 부를 때(소유 스레드와 병렬 trace worker)는 표가 바뀌지
-// 않는다(교체는 생성의 처리 표시 아래에서만 한다). 옛 표는 소멸 때까지 보관하므로 이 규칙 밖의 잠금
-// 없는 조회가 생겨도 해제된 표를 읽지는 않는다.
-ObjectRegistry::Slot* ObjectRegistry::SlotAt(uint32 index) const noexcept {
-    const uint32 chunk = index / SlotsPerChunk;
-    return chunk < chunkCount_ ? &chunks_[chunk]->slots[index % SlotsPerChunk] : nullptr;
-}
-
-ObjectRegistry::Slot* ObjectRegistry::FindSlot(ObjectHandle handle) const noexcept {
-    if (handle.registry != domain_ || handle.generation == 0 || handle.slot >= options_.maxSlots) {
-        return nullptr;
-    }
-
-    Slot* slot = SlotAt(handle.slot);
-    return slot && slot->generation == handle.generation ? slot : nullptr;
 }
 
 Result<void> ObjectRegistry::CheckLive(Slot* slot, const void* nativeType) const noexcept {
@@ -155,7 +180,10 @@ Result<void> ObjectRegistry::AddRoot(const ObjectAccessContext& access, ObjectHa
         return Result<void>::Failure(shaded);
     }
 
-    ++slot->roots;
+    if (slot->roots++ == 0) {
+        AddRootListLocked(*slot);
+    }
+
     ++tally_.roots;
     return Result<void>::Success();
 }
@@ -237,7 +265,12 @@ void ReleaseRoot(ObjectRegistry* registry, ObjectHandle handle) noexcept {
         platform::Fatal("RootRef release after lifetime closure");
     }
 
-    --slot->roots;
+    if (--slot->roots == 0) {
+        // 루트 목록에서 즉시 뺀다(GC-S3 결정 — 목록은 Begin·Collect의 잠금 구간만 읽으므로 slice
+        // 중 반환도 안전하다. 이미 표식된 객체는 이번 cycle에 남는다).
+        registry->RemoveRootListLocked(*slot);
+    }
+
     --registry->tally_.roots;
     registry->WakeDeferredLocked(*slot);
 }
@@ -303,11 +336,11 @@ void ReleaseBorrow(ObjectRegistry* registry, ObjectHandle handle) noexcept {
 void ReleaseBackend(ObjectRegistry* registry, ObjectHandle handle) noexcept {
     platform::LockGuard lock(registry->gate_);
     auto* slot = registry->FindSlot(handle);
-    if (!slot || slot->backendHolds == 0) {
+    if (!slot || registry->ColdOf(*slot).backendHolds == 0) {
         platform::Fatal("Backend lease release after lifetime closure");
     }
 
-    --slot->backendHolds;
+    --registry->ColdOf(*slot).backendHolds;
     --registry->tally_.backendHolds;
     registry->WakeDeferredLocked(*slot);
 }
@@ -400,7 +433,26 @@ Result<void> ObjectRegistry::RequestDestroyChecked(const ObjectAccessContext& ac
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
+    Slot* slot = nullptr;
+    {
+        platform::LockGuard lock(gate_);
+        auto requested = RequestDestroyLocked(handle, object, requireBorrow, slot);
+        if (!requested || slot == nullptr) {
+            return requested;
+        }
+    }
+
+    // 클러스터 소속의 이탈(13.4절): 처리 표시 아래 잠금 밖에서 Trace로 장부 몫을 뺀 뒤 잠가 뺀다.
+    LeaveTrace(*slot);
     platform::LockGuard lock(gate_);
+    FinishLeaveLocked(*slot);
+    processing_ = false;
+    return Result<void>::Success();
+}
+
+Result<void> ObjectRegistry::RequestDestroyLocked(ObjectHandle handle, const Object* object,
+                                                  bool requireBorrow, Slot*& leaving) noexcept {
+    leaving = nullptr;
     if (closed_ || processing_) {
         return Result<void>::Failure(closed_ ? ErrorCode::ShuttingDown : ErrorCode::Busy);
     }
@@ -426,7 +478,26 @@ Result<void> ObjectRegistry::RequestDestroyChecked(const ObjectAccessContext& ac
         return live;
     }
 
+    // 영구 객체는 Shutdown 때만 해체한다(13.7절).
+    if (IsPermanentLocked(slot->index)) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
     slot->SetState(tally_, SlotState::DestroyRequested);
+    LinkDestroyRequestLocked(*slot);
+    if (IsClusterMemberLocked(*slot)) {
+        const uint32 id = ClusterStateOf(slot->index) & ClusterIdMask;
+        if (clusters_[id].root == slot->index) {
+            // 루트의 파괴 요청은 클러스터를 해체한다(13.2절).
+            DissolveClusterLocked(id);
+        } else {
+            // 소속은 이탈한다. Trace는 잠금 밖에서 하므로 처리 표시를 세운다(그동안 재진입은
+            // Busy).
+            processing_ = true;
+            leaving = slot;
+        }
+    }
+
     return Result<void>::Success();
 }
 
@@ -509,11 +580,11 @@ Result<BackendLease> ObjectRegistry::AcquireBackendLease(const ObjectAccessConte
         return Result<BackendLease>::Failure(live.Error());
     }
 
-    if (slot->backendHolds == NumericLimits<uint32>::Max()) {
+    if (ColdOf(*slot).backendHolds == NumericLimits<uint32>::Max()) {
         return Result<BackendLease>::Failure(ErrorCode::Overflow);
     }
 
-    ++slot->backendHolds;
+    ++ColdOf(*slot).backendHolds;
     ++tally_.backendHolds;
     return Result<BackendLease>::Success(BackendLease(this, handle));
 }
@@ -612,6 +683,13 @@ Result<void> ObjectRegistry::Shutdown(const ObjectAccessContext& access) noexcep
         }
     }
 
+    // 종료는 모든 클러스터를 해체한다(영구 영역 포함 — 13.2·13.7절). 소속은 실제 간선으로 닿지
+    // 않으면 아래 수집이 회수한다.
+    if (clustersEnabled_) {
+        platform::LockGuard lock(gate_);
+        DissolveAllClustersLocked();
+    }
+
     auto collected = Collect(access);
     if (!collected) {
         return Result<void>::Failure(collected.Error());
@@ -647,10 +725,21 @@ ObjectStats ObjectRegistry::Stats() const noexcept {
                 }
 
                 freeCount += slot.state == SlotState::Free ? 1u : 0u;
+                // GC 밀집 자료(GC-S3): live 비트와 루트 목록 위치가 슬롯과 맞는다.
+                const bool live =
+                    slot.state == SlotState::Alive || slot.state == SlotState::DestroyRequested;
+                const uint64 bit = uint64(1) << (slot.index % SlotsPerChunk);
+                if (((BitsOf(slot.index).live & bit) != 0) != live ||
+                    (slot.roots != 0) != (slot.rootPosition != NoSlot) ||
+                    (slot.rootPosition != NoSlot && (slot.rootPosition >= rootCount_ ||
+                                                     rootList_[slot.rootPosition] != slot.index))) {
+                    platform::Fatal("Object registry GC bits or root list diverged from its slots");
+                }
+
                 retiredCount += slot.state == SlotState::Retired ? 1u : 0u;
                 counted.roots += slot.roots;
                 counted.borrows += slot.borrows;
-                counted.backendHolds += slot.backendHolds;
+                counted.backendHolds += ColdOf(slot).backendHolds;
                 counted.encodePins += slot.encodePins;
             }
         }
@@ -666,7 +755,7 @@ ObjectStats ObjectRegistry::Stats() const noexcept {
 
         const uint64 limit = uint64(chunkCount_) * SlotsPerChunk;
         uint64 listed = 0;
-        for (const Slot* slot = freeSlots_; slot != nullptr; slot = slot->nextInList) {
+        for (const Slot* slot = freeSlots_; slot != nullptr; slot = ColdOf(*slot).nextInList) {
             if (slot->state != SlotState::Free || slot->queue != RetiredQueue::None ||
                 ++listed > limit) {
                 platform::Fatal("Object registry free list is corrupt");
@@ -683,9 +772,10 @@ ObjectStats ObjectRegistry::Stats() const noexcept {
                                        RetiredQueue::Ready};
         for (uint32 at = 0; at < 3; ++at) {
             const Slot* previous = nullptr;
-            for (const Slot* slot = lists[at]->head; slot != nullptr; slot = slot->nextInList) {
+            for (const Slot* slot = lists[at]->head; slot != nullptr;
+                 slot = ColdOf(*slot).nextInList) {
                 if (slot->state != SlotState::Retired || slot->queue != queues[at] ||
-                    slot->prevInList != previous || ++listed > limit ||
+                    ColdOf(*slot).prevInList != previous || ++listed > limit ||
                     (queues[at] == RetiredQueue::Deferred && IsReclaimable(*slot))) {
                     platform::Fatal("Object registry retired queue is corrupt");
                 }
@@ -742,11 +832,11 @@ ObjectRegistry::CaptureDiagnostics(Span<ObjectDiagnosticRecord> output) const no
 
             output[written++] = {{domain_, slot.index, slot.generation},
                                  context_,
-                                 slot.stableType,
+                                 ColdOf(slot).stableType,
                                  phase,
                                  slot.roots,
                                  slot.borrows,
-                                 slot.backendHolds,
+                                 ColdOf(slot).backendHolds,
                                  slot.encodePins};
         }
     }

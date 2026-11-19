@@ -17,6 +17,9 @@ public abstract class TestsModule : ModuleRules
     // Tests of Core layer development tool modules (Core/Source/Developer) (included in every test executable).
     private static readonly string[] DeveloperTestModules = ["CompressionTraining", "TraceAnalysis"];
 
+    // Development tool modules the Object family tests use (FoundationTests and EngineTests link them). GcSoak: long-running GC smoke simulator.
+    private static readonly string[] ObjectDeveloperModules = ["GcSoak"];
+
     // Tests of Object family modules (included in FoundationTests and EngineTests).
     private static readonly string[] ObjectTestModules = ["ObjectRuntime", "ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Curves"];
 
@@ -61,8 +64,8 @@ public abstract class TestsModule : ModuleRules
         string[] dependencies = Layer switch
         {
             TestLayer.Core => ["Task", "Localization", "Serialization", "Compression", "AsyncCompression", "Crypto", "TraceCapture", .. DeveloperTestModules],
-            TestLayer.Foundation => ["ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Localization", "Compression", "AsyncCompression", "Crypto", "TraceCapture", .. DeveloperTestModules],
-            _ => ["ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Localization", "Compression", "AsyncCompression", "Crypto", "TraceCapture", .. DeveloperTestModules,
+            TestLayer.Foundation => ["ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Localization", "Compression", "AsyncCompression", "Crypto", "TraceCapture", .. DeveloperTestModules, .. ObjectDeveloperModules],
+            _ => ["ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Localization", "Compression", "AsyncCompression", "Crypto", "TraceCapture", .. DeveloperTestModules, .. ObjectDeveloperModules,
                 .. EngineTestDependencies]
         };
 
@@ -80,9 +83,11 @@ public abstract class TestsModule : ModuleRules
             Name = ExecutableName,
             Kind = NativeModuleKind.Executable,
             Sources = sources,
-            // Core/Source/Runtime: tests include module Private headers with the <Module/Private/...> spelling. The repository root is not included
-            // (so headers of gitignored outputs, user directories and nested working copies do not enter the include inventory).
+            // Core/Source/Runtime (and Engine/Source/Runtime for the engine layer): tests include module Private headers with the
+            // <Module/Private/...> spelling. The repository root is not included (so headers of gitignored outputs, user directories and
+            // nested working copies do not enter the include inventory).
             PrivateIncludeDirectories = [context.PathInRoot("Core/Source/Runtime"), context.PathInRoot($"{support}/Public"),
+                .. (Layer == TestLayer.Engine ? [context.PathInRoot("Engine/Source/Runtime")] : Array.Empty<string>()),
                 .. (Layer == TestLayer.Engine ? ThirdPartyModuleRules.ConsumerIncludeDirectories(context, EngineThirdPartyHeaders) : [])],
             PrivateDefines = ["ROCKS_TESTING=1",
                 .. (Layer == TestLayer.Engine ? ThirdPartyModuleRules.ConsumerDefines(context, EngineThirdPartyHeaders) : [])],

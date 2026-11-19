@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Object/ReferenceLayout.h>
 #include <Core/Containers/Span.h>
 #include <Core/Memory/Allocator.h>
 #include <Object/RuntimeTypeOps.h>
@@ -121,6 +122,12 @@ public:
 
     bool Contains(ObjectHandle handle) const noexcept {
         return IndexOf(handle) != storage_.size;
+    }
+
+    // 참조 위치 표(M3 — Object/ReferenceLayout.h)에 이 배열의 저장소 칸을 알린다. 생성 코드의 참조
+    // 위치 함수가 부른다(GC marker가 저장소의 data·size를 바로 읽는다).
+    void ReportLayout(detail::ReferenceLayoutBuilder& layout) const noexcept {
+        layout.Array(&storage_);
     }
 
     // 소유자의 Trace에서 호출해 모든 원소를 강한 간선으로 방문한다.

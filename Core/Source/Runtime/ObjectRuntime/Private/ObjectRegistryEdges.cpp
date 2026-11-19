@@ -5,7 +5,7 @@
 // ObjectRegistry 참조 간선 쓰기다. 단일 참조(SetEdge)와 컨테이너 편집이 함께 쓰는 owner·대상
 // 검증(CheckContainerOwnerLocked·CheckTargetLocked)을 둔다. ObjectRefArray 편집은
 // ObjectRegistryArrayEdges.cpp, StructRefArray 원소 편집은 ObjectRegistryStructElements.cpp다.
-// 쓰기는 삽입 장벽(ShadeLocked — ObjectRegistryGc.cpp)과 관찰자 기록 계획·예약
+// 쓰기는 삽입 장벽(ShadeLocked — ObjectRegistryGcMark.cpp)과 관찰자 기록 계획·예약
 // (ObjectRegistryObserver.cpp)을 거친다.
 namespace rocks {
 
@@ -21,7 +21,7 @@ Result<void> ObjectRegistry::CheckContainerOwnerLocked(ObjectHandle owner, const
 
     if (transaction != 0) {
         // staged: 같은 생성 트랜잭션의 Reserved 객체다(Reserved는 Borrow를 얻을 수 없다).
-        if (source->state != SlotState::Reserved || source->transaction != transaction) {
+        if (source->state != SlotState::Reserved || ColdOf(*source).transaction != transaction) {
             return Result<void>::Failure(ErrorCode::StaleHandle);
         }
     } else {
@@ -39,7 +39,8 @@ Result<void> ObjectRegistry::CheckContainerOwnerLocked(ObjectHandle owner, const
     }
 
     // 컨테이너 객체는 owner 저장소 안에 직접 포함되어야 한다(SetEdge의 필드 위치 검사와 같다).
-    const uptr start = reinterpret_cast<uptr>(source->storage);
+    // 저장소 시작은 hot의 object에서 유도한다(StorageStartOf — cold를 읽지 않는다).
+    const uptr start = StorageStartOf(*source);
     const uptr location = reinterpret_cast<uptr>(storage);
     const usize size = source->type.Ops().size;
     if (size < storageBytes || location < start || location - start > size - storageBytes) {
@@ -66,7 +67,7 @@ Result<void> ObjectRegistry::CheckTargetLocked(ObjectHandle target, uint64 trans
     if (!destination || IsCutoff(destination) ||
         !(destination->state == SlotState::Alive ||
           (transaction && destination->state == SlotState::Reserved &&
-           destination->transaction == transaction))) {
+           ColdOf(*destination).transaction == transaction))) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
@@ -133,12 +134,12 @@ Result<void> ObjectRegistry::SetEdge(const ObjectAccessContext& access, ObjectHa
                 Slot* source = FindSlot(owner);
                 if (!source || !source->object || IsCutoff(source) ||
                     (transaction ? source->state != SlotState::Reserved ||
-                                       source->transaction != transaction
+                                       ColdOf(*source).transaction != transaction
                                  : source->state != SlotState::Alive)) {
                     return Result<void>::Failure(ErrorCode::StaleHandle);
                 }
 
-                const uptr start = reinterpret_cast<uptr>(source->storage);
+                const uptr start = StorageStartOf(*source);
                 const usize size = source->type.Ops().size;
                 if (location < start || location - start > size - sizeof(ObjectHandle)) {
                     return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -155,6 +156,13 @@ Result<void> ObjectRegistry::SetEdge(const ObjectAccessContext& access, ObjectHa
                 if (!targetChecked) {
                     return targetChecked;
                 }
+
+                if (transaction == 0) {
+                    targetChecked = CheckPermanentEdgeLocked(*FindSlot(owner), target);
+                    if (!targetChecked) {
+                        return targetChecked;
+                    }
+                }
             }
 
             // staged 쓰기는 기록하지 않는다(Commit이 한꺼번에 보고한다).
@@ -162,6 +170,9 @@ Result<void> ObjectRegistry::SetEdge(const ObjectAccessContext& access, ObjectHa
                 transaction == 0 ? PlanEditLocked(*FindSlot(owner), field, target) : EdgePlan{};
             const usize missing = plan.count != 0 ? MissingKeysLocked(plan) : 0;
             if (missing <= ObserverFreeLocked()) {
+                // 클러스터 장부(13.4절 — live 쓰기만, staged는 Commit이 센다). shade 실패는
+                // 아래에서 반환하므로 장부는 게시가 확정된 뒤에 고친다.
+                const ObjectHandle previous = field;
                 if (target.IsNull()) {
                     // 비교·Required 검사·encode가 정규 null만 보게 한다.
                     field = ObjectHandle{};
@@ -176,6 +187,10 @@ Result<void> ObjectRegistry::SetEdge(const ObjectAccessContext& access, ObjectHa
                     }
 
                     field = target;
+                }
+
+                if (transaction == 0) {
+                    LedgerEditLocked(*FindSlot(owner), previous, target);
                 }
 
                 ApplyPlanLocked(plan);
