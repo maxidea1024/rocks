@@ -1014,26 +1014,33 @@ A1a 상태(2026-11-20): **구현**. 완료 조건 넷을 모두 갖췄다. 빈�
 
 측정(2026-11-20, 14.1.2와 같은 명령에 filter `CookedManifest`를 더함 — `-Filter AssetPackage,FixtureAsset,CookedManifest`, AssetPackage 71개·FixtureAsset 8개·CookedManifest 16개 시험 모두 통과): 매니페스트 파일 `Private/CookedManifest.cpp` 줄 100%(540/540)·분기 100%(296/296)·함수 100%(24/24), `Public/AssetRuntime/CookedManifest.h` 줄 100%(6/6)·함수 100%(4/4)(분기 없음). 닿지 않은 분기가 없다. AssetRuntime 전체(A1a 파일 포함)는 줄 99.91%(3170/3173)·분기 97.56%(1842/1888)·함수 100%(150/150)이고 닿지 않은 분기는 14.1.2의 A1a 항목 그대로다.
 
-`ROCKS_ASSERT`는 쓰지 않지만, 결과를 확인하지 않는 불변식이 10곳 있다(`Result::Value()`는 실패 결과면 `platform::Fatal`로 멈추고, `(void)`로 버린 결과는 실패하면 조용히 빠진다 — 그래서 각각 입력으로 실패에 닿을 수 없음을 근거로 둔다). 줄 번호는 이 측정의 `Private/CookedManifest.cpp` 기준이다.
+`ROCKS_ASSERT`는 쓰지 않지만, 결과를 확인하지 않는 불변식이 10곳 있다(`Result::Value()`는 실패 결과면 `platform::Fatal`로 멈추고, `(void)`로 버린 결과는 실패하면 조용히 빠진다 — 그래서 각각 입력으로 실패에 닿을 수 없음을 근거로 둔다). 위치는 `Private/CookedManifest.cpp`의 함수 이름으로 적는다(줄 번호는 병합·개명으로 밀린다).
 
-| 줄 | 불변식 | 근거 |
+| 위치 | 불변식 | 근거 |
 |---|---|---|
-| 170 | bundle 비교 키 `keys.TryEmplaceBack(scratch).Value()` | 바로 앞에서 bundle 수만큼 `TryReserve`했고, 빈 `String` 추가는 할당하지 않는다 |
-| 286 | 경로 비교 키 `keys.TryEmplaceBack(scratch).Value()` | 항목 수만큼 예약했다(같은 이유) |
-| 291 | `(void)order.TryPushBack(...)` | 항목 수만큼 예약했다 — 예약 안 추가는 실패하지 않는다 |
-| 425–427 | `ArchiveReader::Create(...).Value()` | 넘기는 span 길이 ≤ `limits.maxTotalBytes`(= body)라 Create의 유일한 실패(`CapacityExceeded`)가 없다 |
-| 430–431 | 항목 수 칸 `in.ReadU32()` 결과의 `Value()` | 길이 ≥ `MinFileBytes`(magic·version·개수·crc)를 먼저 보아 개수 칸 4 byte가 있다 |
-| 485–487 | 항목 `manifest.entries.TryEmplaceBack(allocator)` 결과의 `Value()` | 개수 칸 값만큼 예약했다(항목 생성자는 할당하지 않는다) |
-| 552 | bundle `entry.bundles.TryEmplaceBack(allocator).Value()` | bundle 개수만큼 예약했다 |
-| 570 | 의존 대상 `in.ReadGuid().Value()` | 의존 개수 ≤ 남은 byte / 20을 먼저 보았다 — 의존 칸은 잘리지 않는다 |
-| 571 | 의존 kind `in.ReadU32().Value()` | 같은 개수 검사 |
-| 572 | `(void)entry.dependencies.TryPushBack(...)` | 의존 개수만큼 예약했다 |
+| `ValidateBundles` | bundle 비교 키 `keys.TryEmplaceBack(scratch).Value()` | 바로 앞에서 bundle 수만큼 `TryReserve`했고, 빈 `String` 추가는 할당하지 않는다 |
+| `ValidateCookedManifest` | 경로 비교 키 `keys.TryEmplaceBack(scratch).Value()` | 항목 수만큼 예약했다(같은 이유) |
+| `ValidateCookedManifest` | `(void)order.TryPushBack(...)` | 항목 수만큼 예약했다 — 예약 안 추가는 실패하지 않는다 |
+| `ReadCookedManifest` | `ArchiveReader::Create(...).Value()` | 넘기는 span 길이 ≤ `limits.maxTotalBytes`(= body)라 Create의 유일한 실패(`CapacityExceeded`)가 없다 |
+| `ReadCookedManifest` | 항목 수 칸 `in.ReadU32()` 결과의 `Value()` | 길이 ≥ `MinFileBytes`(magic·version·개수·crc)를 먼저 보아 개수 칸 4 byte가 있다 |
+| `ReadCookedManifest` | 항목 `manifest.entries.TryEmplaceBack(allocator)` 결과의 `Value()` | 개수 칸 값만큼 예약했다(항목 생성자는 할당하지 않는다) |
+| `ReadCookedManifest` | bundle `entry.bundles.TryEmplaceBack(allocator).Value()` | bundle 개수만큼 예약했다 |
+| `ReadCookedManifest` | 의존 대상 `in.ReadGuid().Value()` | 의존 개수 ≤ 남은 byte / 20을 먼저 보았다 — 의존 칸은 잘리지 않는다 |
+| `ReadCookedManifest` | 의존 kind `in.ReadU32().Value()` | 같은 개수 검사 |
+| `ReadCookedManifest` | `(void)entry.dependencies.TryPushBack(...)` | 의존 개수만큼 예약했다 |
 
 닿게 한 방법과 그 과정에서 바꾼 것:
 - 입력 변조: 시험 인코더(검증하지 않음)로 칸마다 위반 모델을 reader에 넣고, 원시 칸 덮어쓰기(개수·길이·엔진 버전·kind·magic·formatVersion·남는 byte)와 CRC를 다시 맞춘 자르기(항목이 있는 매니페스트는 개수 칸 판정에서, 빈 매니페스트는 헤더 칸마다, 항목 둘인 매니페스트는 항목 1의 칸마다 — `CookedManifest_EntryTruncation`)로 구조 판정에 닿는다. 잘못된 UTF-8은 모델 `String`이 담을 수 없어 인코딩한 byte를 고쳐 넣는다. 파일 상한 초과 시험은 길이만 큰 span을 넘기므로 읽기 전에 길이로 거부하는 순서에 기댄다(순서가 바뀌면 경계 밖 읽기가 된다).
 - 실패 주입: 쓰기·읽기·검증의 모든 할당 지점(NFailAllocator sweep). 비교 키 builder는 내장 용량을 작게 두어(7 byte) 구성 요소 키와 구분자 양쪽에서 자라고, sweep 장면의 경로 길이(첫 구성 요소 6·13·27 byte — 용량을 꼭 채운다)로 두 성장 지점에 닿는다. 장면의 경로·bundle 하나씩은 NFC quick check가 MAYBE인 문자열(U+1EA1 U+0301)이라 `ValidateNameComponent`의 NFC 확인 scratch 할당(bundle 쪽 실패 → 진단 None 경로 포함)과 비ASCII caseless 키 할당에도 닿는다.
 - writer 상한: 상한을 인자로 받는 내부 함수(`package_detail::WriteCookedManifestWithLimit`)로 `CapacityExceeded`에 닿는다(1 GiB 모델 없이). 처음 구현은 상한에서 CRC 4 byte를 한 번 더 빼 1 GiB − 4까지만 썼다(리뷰 지적 — 고침).
 - 처음 구현에서 없앤 죽은 분기(입력으로 닿을 수 없음을 확인): 예약한 배열에 빈 String을 더하는 실패, 최소 길이가 보장한 개수 칸 읽기 실패, 모델 `String`의 UTF-8 재검사(Core 불변식), CRC 칸 쓰기 실패(자리를 본문과 함께 쓰고 다 쓴 뒤 채운다). 이번 라운드: bulk raw 합 넘침 검사를 `overflow || ...` 누적에서 넘치면 멈추는 반복으로 바꿨다(넘친 뒤 항목이 없으면 누적의 단락 쪽은 닿을 수 없었다 — 동작은 같다).
+
+
+A1b 상태(2026-11-20): **구현**. 완료 조건 넷을 모두 갖췄다. 빠진 시험 리뷰(미충족 — 판정 순서·진단 값·조합 축·경계·writer 상한·bulk 합 넘침 등 12개)를 반영했고, 재판정은 충족(3794978d 기준)이다.
+- 요구 대조표(14.1.3): 시험 없는 항목 0, 정의된 시험 16개를 모두 인용
+- 조합 384개 전부와 일대일 빠짐 검사, 금지 조합은 칸 규칙(14.1.3 조합 행)
+- coverage: 매니페스트 파일 줄·분기·함수 100%, 결과 불변식 10곳의 근거(14.1.4)
+- 빠진 시험 관점 리뷰어 판정: 충족. 남은 참고 하나: 할당 실패 sweep이 비ASCII 할당 지점에 닿는지는 코드로 확인했고 시험이 직접 단언하지는 않는다.
 
 ## 15. PNG 디코더 범위
 
