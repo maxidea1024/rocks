@@ -1,5 +1,6 @@
 #include <Crypto/LogFileSealer.h>
 
+#include <Base/Endian.h>
 #include <Core/Move.h>
 #include <Crypto/Labels.h>
 #include <Platform/Memory.h>
@@ -17,16 +18,15 @@ constexpr usize StreamHeaderOffset = CiphertextOffset + LogFileKemCiphertextByte
 // 파일 키의 subkey 번호다(파일마다 공유 비밀이 다르므로 하나만 쓴다).
 constexpr uint64 LogFileSubkeyId = 1;
 
+// 푼 묶음 버퍼의 정렬이다(복호화 루틴이 SIMD 폭 단위로 읽고 쓴다).
+constexpr usize PlainBufferAlignment = 16;
+
 void StoreLength(uint8* out, uint32 value) noexcept {
-    out[0] = static_cast<uint8>(value);
-    out[1] = static_cast<uint8>(value >> 8);
-    out[2] = static_cast<uint8>(value >> 16);
-    out[3] = static_cast<uint8>(value >> 24);
+    StoreLittleEndian<uint32>(out, value);
 }
 
 uint32 LoadLength(const uint8* in) noexcept {
-    return static_cast<uint32>(in[0]) | (static_cast<uint32>(in[1]) << 8) |
-           (static_cast<uint32>(in[2]) << 16) | (static_cast<uint32>(in[3]) << 24);
+    return LoadLittleEndian<uint32>(in);
 }
 
 // 공유 비밀에서 이 파일의 스트림 키를 뽑는다.
@@ -176,7 +176,8 @@ Result<LogFileDecodeSummary> TryDecodeLogFile(const KemKeyPair& recipient, Span<
                 plainCapacity = 0;
             }
 
-            auto allocated = allocator.Allocate(plainBytes == 0 ? 1 : plainBytes, 16);
+            auto allocated =
+                allocator.Allocate(plainBytes == 0 ? 1 : plainBytes, PlainBufferAlignment);
             if (!allocated) {
                 outcome = Summary::Failure(allocated.Error());
                 break;

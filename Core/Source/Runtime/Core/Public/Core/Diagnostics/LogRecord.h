@@ -61,8 +61,10 @@ enum class DiagnosticKind : uint8 {
 };
 
 // 메시지는 외부 문자열을 참조하지 않고 레코드 안에 복사한다. 시간 값의 단위는 ns이며
-// timestamp는 단조 시계 값이다. text는 최대 119바이트로 잘릴 수 있어 UTF-8 문자 경계는 보장하지
-// 않는다.
+// timestamp는 단조 시계 값이다. text는 최대 LogRecordTextBytes - 1바이트로 잘릴 수 있어 UTF-8 문자
+// 경계는 보장하지 않는다.
+inline constexpr usize LogRecordTextBytes = 120;
+
 struct LogRecord {
     uint64 timestamp = 0;
     uint64 thread = 0;
@@ -71,6 +73,6 @@ struct LogRecord {
     LogLevel level = LogLevel::Info;
     DiagnosticKind kind = DiagnosticKind::Message;
     bool truncated = false;
-    char text[120]{};
+    char text[LogRecordTextBytes]{};
 };
 } // namespace rocks
