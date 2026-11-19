@@ -8,5 +8,5 @@ public sealed class RenderGraph : EngineModuleRules
 {
     protected override string ModuleName => "RenderGraph";
 
-    protected override string[] RequiredModules => ["RenderBase", "Graphics", "TraceCapture"];
+    protected override string[] RequiredModules => ["RenderBase", "Graphics", "TraceCapture", "Task"];
 }
