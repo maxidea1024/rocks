@@ -15,6 +15,8 @@ public sealed class D3D12Graphics : EngineModuleRules
         return new()
         {
             Name = ModuleName,
+            Unity = UnityFor(context),
+            UnityExclude = UnityExclude(context),
             // The entry point (Private/<Module>Module.cpp) is built on every platform.
             Sources = [ModuleEntrySource(context), .. context.Sources(windows ? $"{backend}/Win64" : $"{backend}/Unsupported")],
             PublicIncludeDirectories = [context.PathInRoot($"{ModuleDirectory}/Public")],
