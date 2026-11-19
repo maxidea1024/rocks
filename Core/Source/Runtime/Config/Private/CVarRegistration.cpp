@@ -261,6 +261,12 @@ Result<void> ConfigContext::RegisterHandles(Span<const VarDefinition* const> def
         return Result<void>::Success();
     }
 
+    // 프리셋 묶음끼리의 규칙(항목 겹침 금지·묶음의 묶음 DAG)이다. 이 거부만 진단을 남긴다(순환
+    // 경로·두 묶음 이름 — CVar 11절).
+    if (auto checked = detail::CheckGroupGraph(*state, added.View()); !checked) {
+        return checked;
+    }
+
     Array<UniquePtr<ConsoleSettingState>> made(*allocator_);
     if (auto reserved = made.TryReserve(added.Size()); !reserved) {
         return reserved;
@@ -363,6 +369,10 @@ Result<void> ConfigContext::RegisterHandles(Span<const VarDefinition* const> def
 
         state->dirty = true;
     }
+
+    // 묶음과 항목 변수가 둘 다 등록된 코드 프리셋 값을 검사한다(진단만 — 등록은 이미 끝났으므로
+    // 진단을 남기지 못해도 등록은 성공이다).
+    static_cast<void>(detail::CheckPresetValues(*state, added.View()));
 
     return Result<void>::Success();
 }

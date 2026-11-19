@@ -1,6 +1,6 @@
 # CVar·치트 명령 설계
 
-기준일: 2026-11-19, 개정 10(결정 확정, CVR1·CVR2·CVR4·CVR5 구현). 실행 중 이름으로 읽고 바꾸는 타입 있는 설정 변수 **CVar**와, 개발 빌드에서 게임 상태를 직접 바꾸는 **치트 명령**을 정한다.
+기준일: 2026-11-19, 개정 11(결정 확정, CVR1·CVR2·CVR4·CVR5 구현). 실행 중 이름으로 읽고 바꾸는 타입 있는 설정 변수 **CVar**와, 개발 빌드에서 게임 상태를 직접 바꾸는 **치트 명령**을 정한다.
 
 이 문서는 [설정 계층과 콘솔 설정](ConfigSystem.ko.md)(이하 Config)의 5절 "콘솔 설정과 명령"을 대체하는 상세 스펙이다. 값 저장소·층·출처 스택·sync 지점·JSON 파일·`--set`·설정 struct는 Config를 그대로 쓰고, 이 문서는 그 위에 다음을 더한다.
 - 한 문장으로 정의하고 `.Get()`으로 읽는 타입 있는 핸들(`CVar<T>`·`BootCVar<T>`·`CVarGroup`·`ConsoleCommand`)
@@ -345,7 +345,7 @@ Config 5.3·5.4의 sync 지점(엔진 `RunFrame` 2단계 뒤, 3단계 전)에서
 
 0. sync hook을 등록 순서대로 부른다(`ConfigContext::AddSyncHook`·`RemoveSyncHook` — Config CF3 구현). hook은 게임 lane에서 큐를 보기 전에 불리고, 층 입력·`Unset`·`ReplaceLayerText`로 쓰기 큐에 넣을 수 있다. 넣은 것은 이번 Sync의 1단계가 적용한다. hook 안에서 `Sync`를 부르거나 hook을 빼면 `Busy`다. hot reload가 이 단계를 쓴다(아래).
 1. 쓰기 큐를 넣은 순서대로 층 스택·범위 값에 적용한다(권한 재검사 — 6.2절).
-2. 묶음 해결 반복: 건드린 변수의 유효값을 계산한다 → 유효값이 바뀐 `CVarGroup`의 등급을 Quality 층에 펼친다 → 펼친 결과로 다시 계산한다. 바뀐 묶음이 없으면 멈춘다. 8번(`MaxGroupPasses`) 안에 멈추지 않으면 마지막 결과를 쓰고 `GroupNoConverge` 진단을 남긴다. 봉인 뒤 부팅 변수는 이 계산에서 지금 값을 유지하고 9절 표대로 대기 목록·진단을 남긴다.
+2. 묶음 해결: 앞 Sync의 펼침을 모두 빼고, 묶음을 위상 순서(부모 묶음 → 자식 묶음 — 묶음의 묶음은 DAG다, 11절)로 펼친다. 묶음마다 그때까지의 펼침을 합친 입력으로 묶음 변수의 유효 등급(요청 등급)을 계산하고, 그 등급의 항목을 Quality 층에 쓴다. 다 펼친 뒤 조합 검증(Config 6.1)이 요청 등급을 낮추면, 낮춘 등급으로 처음부터 다시 펼친다(앞 차례의 낮춘 결과는 요청 등급이 같은 묶음에만 쓴다). 매 Sync는 같은 시작점(묶음 변수의 유효 등급)에서 출발하므로 같은 입력이면 같은 결과다(앞 Sync의 펼친 등급에 기대지 않는다). 조합 검증이 없거나 낮추지 않으면 한 번에 끝난다. 다시 펼치기는 `MaxGroupPasses`(8)번까지이고, 넘으면 마지막 결과를 쓰고 Warning `GroupNoConverge`를 같은 상태에 한 번 남긴다(검증 규칙끼리의 상호작용에 대한 안전장치). 봉인 뒤 부팅 변수는 이 계산에서 지금 값을 유지하고 9절 표대로 대기 목록·진단을 남긴다.
 3. 이번 Sync 전체에서 유효값이 바뀐 칸의 세대를 올린다(반복 중 값이 갔다가 되돌아온 칸은 올리지 않는다).
 4. 바뀐 조각만 복사한 새 snapshot을 게시하고 게임 lane을 다시 묶는다.
 5. 큐에 든 콘솔 명령을 실행한다(Config 5.2와 같다).
@@ -408,8 +408,11 @@ CVarGroup ShadowGroup = cvar::Group("quality.shadow", 2)
 ```
 
 - 묶음 자체가 int32 변수다(`ShadowGroup.Get()`은 등급). 허용 값은 정의된 등급뿐이다. 정의되지 않은 등급은 사이에 있어도 거부한다(`UndefinedLevel`).
-- 항목 `cvar::PresetEntry`는 `template <class T> constexpr PresetEntry(const CVar<T>&, TypeIdentityT<SetArg<T>>)` 생성자다(String·Name 변수의 값은 `StringView` — 상수로 만들 수 있는 타입이어야 하므로 `Set`의 인자 타입을 쓴다). `1000` → float 같은 암시 변환은 되고(목록 초기화라 좁히는 변환은 컴파일 오류), 타입이 다르면 컴파일 오류다(`Preset entry value type must match the CVar type`). `BootCVar`·`CVarGroup` 자신은 삭제된 overload + `static_assert`로 거부한다. 묶음이 다른 묶음을 항목으로 가지려면(전체 품질 `quality.overall`) `{ShadowGroup, 2}` 형태의 묶음 항목 overload를 쓴다.
+- 항목 `cvar::PresetEntry`는 `template <class T> constexpr PresetEntry(const CVar<T>&, TypeIdentityT<SetArg<T>>)` 생성자다(String·Name 변수의 값은 `StringView` — 상수로 만들 수 있는 타입이어야 하므로 `Set`의 인자 타입을 쓴다). `1000` → float 같은 암시 변환은 되고(목록 초기화라 좁히는 변환은 컴파일 오류), 타입이 다르면 컴파일 오류다(`Preset entry value type must match the CVar type`). `BootCVar`는 `static_assert` overload로 거부한다(4.3절 문구). 묶음이 다른 묶음을 항목으로 가지려면(전체 품질 `quality.overall`) `{ShadowGroup, 2}` 형태의 묶음 항목 overload를 쓴다.
+- 묶음의 묶음은 DAG만 허용한다. 자기 자신을 항목으로 넣거나 순환(A의 항목이 B, B의 항목이 A)이 생기면 `Register`가 거부한다(`InvalidArgument`, Error `GroupConflict` — 메시지에 순환 경로 `a -> b -> a`). 항목이 다른 .cpp의 묶음을 주소로 가리키므로 컴파일 때는 막을 수 없다.
+- 한 변수(묶음 변수 포함)는 한 묶음의 항목만 될 수 있다. 같은 변수를 항목으로 가진 두 묶음은 묶음의 묶음 관계가 아니어도 `Register`가 거부한다(`InvalidArgument`, `GroupConflict` — 두 묶음 이름). 두 묶음이 같은 칸을 쓰면 등록 순서가 결과를 정하기 때문이다. 묶음의 묶음은 부모가 자식 묶음의 등급만 정하므로 겹침이 필요 없다.
 - 항목은 핸들 **주소**만 담고, 번호는 Sync에서 읽는다. 다른 .cpp에 정의된 변수를 가리켜도 정적 초기화 순서와 무관하다(주소는 상수다). 가리키는 변수가 아직 등록되지 않았으면 그 항목은 등록될 때까지 보류된다.
+- 항목 값의 범위·`Validate`·enum 표·출시 규칙(개발 전용 변수), 묶음 항목의 등급은 항목 변수가 다른 .cpp에 있을 수 있어 컴파일 때 볼 수 없다. 묶음과 항목 변수가 둘 다 등록되는 때(묶음 등록 때 이미 등록된 항목, 항목이 나중에 등록될 때)에 검사해 맞지 않으면 (묶음, 등급, 항목)마다 Error 한 번을 남기고 그 항목을 펼치지 않는다. 펼칠 때도 같은 검사를 하고 같은 키로 다시 내지 않는다.
 - 등급을 바꾸면 Quality 층의 그 묶음 태그를 `Unset`하고 새 등급 항목을 쓴다. 출처는 `quality.shadow@2`다.
 - 구성원 표시는 자동이다: 어떤 묶음의 항목인 변수만 Quality 층 쓰기를 받는다(Config의 `QualityMember` 플래그를 없앤다). 구현은 Quality 층을 묶음 펼침 전용으로 둔다: 그 층에 직접 쓰는 입력(`AddLayerText`·`AddAssignment`·`Set`·`Unset`·`ClearLayer`)은 모두 거부하고(`LayerNotAllowed`), 펼침은 항목에만 쓰므로 항목이 아닌 변수는 Quality 층 값을 받을 길이 없다.
 - 같은 등급에 같은 변수 두 번, 같은 등급 두 번 정의, 기본 등급 미정의는 컴파일 오류다. 크기 한도는 이름 있는 상수 `MaxGroupLevels`(8)·`MaxEntriesPerLevel`(32)이다. consteval 안에서는 할당할 수 없으므로 `CVarGroup`은 이 고정 용량을 품는다(항목은 정의 주소 + `ScalarValue` 48 byte라 묶음 하나에 약 12 KiB의 정적 데이터). 묶음은 수십 개 이하라 받아들인다.
@@ -432,6 +435,7 @@ CVarGroup ShadowGroup = cvar::Group("quality.shadow", 2)
 | `BootSealed`·`ScopeNotAllowed` | 9절·8절 |
 | `UndefinedLevel`·`GroupNoConverge` | 11절·10절 |
 | `LateBound`·`UnresolvedName` | 이 절 |
+| `GroupConflict` | 묶음의 묶음 순환·자기 참조, 두 묶음이 같은 항목(11절 — `Register` 거부) |
 | `QualityLowered` | 정보: 조합 검증이 펼칠 등급을 낮췄다(11절 — 같은 결과는 다시 내지 않는다) |
 | `RestartRequired` | 봉인 뒤 파일 층(사용자 층 포함)이 부팅 변수를 바꿨다 — 재시작 대기(9절) |
 | `BootValueIgnored` | 봉인 뒤 파생·휘발 층이 부팅 변수를 바꾸려 했다 — 지금 값 유지(9절) |
@@ -624,7 +628,7 @@ public:
 - 권한: 치트 꺼짐에서 콘솔 쓰기 거부, 클라이언트에서 `Replicated()` 콘솔 쓰기 거부, Server 층 값이 클라이언트 콘솔 값을 이긴다.
 - 부팅: 봉인 전 파일·`--set` 값 적용, 봉인 뒤 콘솔·`Set` 거부 + `BootSealed`, 봉인 뒤 파일 층(hot reload·사용자 층) 변경은 대기 목록에 오르고 `Get()` 불변·되돌리면 대기 없어짐, 기기 프로필 재적용은 `BootValueIgnored` 한 번·대기 없음, 봉인 전 `Get()` assert(사망 시험).
 - 범위: global=90, world=100, player1=110, player2(상속)=100. world 파괴 뒤 player2=90.
-- 프리셋: 묶음을 0으로 바꾸면 구성원이 Quality 층 값이 되고 프로젝트 값을 이긴다. 정의되지 않은 등급 거부. 순환 묶음은 8회 뒤 `GroupNoConverge`.
+- 프리셋: 묶음을 0으로 바꾸면 구성원이 Quality 층 값이 되고 프로젝트 값을 이긴다. 정의되지 않은 등급 거부. 순환·자기 참조 묶음과 항목이 겹치는 두 묶음은 `Register` 거부. 같은 입력의 새 문맥은 같은 결과. 조합 검증 상호작용이 멈추지 않으면 8회 뒤 `GroupNoConverge` 한 번.
 - Watcher: 첫 호출 true, 변경 없으면 false, 변경 뒤 true.
 - ScopedOverride: 중첩 후 어떤 순서로 풀어도 원래 값.
 - Dump 왕복: `DumpOverrides` 출력을 빈 문맥에 다시 읽으면 유효값이 같다.
@@ -697,11 +701,11 @@ public:
 
 **CVR5 구현(2026-11-19, `feature/cvar`)**
 - `Config/CVarGroup.h`: `cvar::Group(name, 기본 등급)` → `GroupBuilder`(`Help`·`Category`·`Level(등급, {항목…})`·항목 없는 `Level(등급)`) → `CVarGroup`(`Get`·`Set`·`Clear`·`LevelCount`·`LevelAt`). 묶음 변수는 int32이고 늘 `UserSetting`, 허용 값은 정의된 등급뿐이다(검사 함수 `CheckGroupLevel` → `UndefinedLevel`). 정의는 `GroupDefinition`(공통 머리 `VarDefinition`의 `HandleKind::Group` 위에 등급 표)이라 `Register`가 `const VarDefinition*`를 받는 길 그대로 묶음을 받는다(CVR1 리뷰 L5 — 공통 머리는 종류 칸이다).
-- 컴파일 오류: 항목 타입 불일치(`static_assert`), `BootCVar` 항목(4.3절 문구), 같은 등급 두 번(`CVarError_DuplicateLevel`), 한 등급에 같은 변수 두 번(`CVarError_DuplicateEntry`), 기본 등급 미정의(`CVarError_DefaultLevelUndefined`), 등급 9개 이상(`CVarError_TooManyLevels`), 항목 33개 이상(`static_assert`). 항목 변수 값의 범위·`Validate`는 항목이 다른 .cpp 변수를 가리킬 수 있어(상수로 읽을 수 없다) 컴파일 때 보지 않고 펼칠 때 검사한다. 묶음 자신을 항목으로 넣는 것은 막지 않는다(순환은 `GroupNoConverge`).
-- 등록: 묶음 변수는 다른 변수처럼 칸·대기 값을 받고, 등급 표(항목 코드 값의 콘솔 표기)를 묶음 상태로 둔다. 펼침은 다음 Sync다(값은 sync 지점에서만 바뀐다 — 등록은 `dirty`만 켠다).
-- Sync 2단계(`ResolveGroups`): 앞 Sync의 펼침을 빼고, 펼칠 등급(처음은 앞 Sync가 펼친 등급, 처음 펼치면 묶음 변수 값)으로 묶음마다 Quality 층 입력(Console 종류, 태그 = 묶음 이름, 출처 `quality.shadow@2`)을 만든 뒤 콘솔 설정 값을 다시 계산한다. 묶음 변수의 새 유효 등급을 조합 검증(`ResolveQualityLevels`)으로 펼칠 등급으로 바꿔 펼친 등급과 같으면 멈추고, 다르면 다시 펼친다. `MaxGroupPasses`(8)번 안에 멈추지 않으면 마지막 결과와 Warning `GroupNoConverge`다. 세대는 Sync 전 값과 비교하므로 반복 중 갔다 돌아온 칸은 오르지 않는다. 항목 변수가 아직 등록되지 않았으면 펼침이 그 이름의 대기 값이 된다(등록 때 받는다 — 보류).
-- `Quality.json`(branch `Quality`, `{"<묶음>": {"<등급>": {"<항목>": 값}}}`): 엔진·엔진 플랫폼·프로젝트·프로젝트 플랫폼 파일 층만 받고(그 밖은 `LayerNotAllowed`), 넣을 때는 모양만 본다(묶음은 늦게 등록될 수 있다). 펼칠 때 가장 강한 파일의 값이 코드 값을 바꾼다. 항목 변수에 맞지 않는 값은 같은 (입력, 묶음, 등급, 항목)에 Error 한 번 뒤 코드 값이다. 모르는 묶음(`UnresolvedName`)·정의되지 않은 등급(`UndefinedLevel`)·그 등급의 코드 항목이 아닌 이름(`InvalidSetting`)은 `ReportUnresolved`가 Warning으로 한 번씩 알린다.
-- 조합 검증 연결: `ConfigContext::SetQualityValidation(규칙, 예산, 기기 특성)`(빌린다 — 규칙의 levels는 묶음 정의 등급으로 바꿔 쓴다), `HostSettingsOptions::qualityRules`·`qualityBudgets`(호스트가 코드로 정한다 — `HostSettings`가 기기 특성과 함께 넘기고 `ApplyDeviceTraits` 때 다시 넘긴다). 낮춘 등급은 묶음 변수에 쓰지 않고 펼칠 등급에만 쓴다. 결과는 `GetQualityLevels`(`QualityResolutionSet` — 요청·펼친 등급·사유·unmet·넘친 예산)와 낮춘 결과가 바뀔 때 Note `QualityLowered`(`quality.shadow@1 (requested 3, lowered: <사유>)`)다. Explain 표시는 CVR6이다.
+- 컴파일 오류: 항목 타입 불일치(`static_assert`), `BootCVar` 항목(4.3절 문구), 같은 등급 두 번(`CVarError_DuplicateLevel`), 한 등급에 같은 변수 두 번(`CVarError_DuplicateEntry`), 기본 등급 미정의(`CVarError_DefaultLevelUndefined`), 등급 9개 이상(`CVarError_TooManyLevels`), 항목 33개 이상(`static_assert`). 항목 변수 값의 범위·`Validate`는 항목이 다른 .cpp 변수를 가리킬 수 있어(상수로 읽을 수 없다) 컴파일 때 보지 않는다(아래 등록 검사). 자기 참조·순환·항목 겹침도 컴파일 때 보지 않고 `Register`가 거부한다(리뷰 반영).
+- 등록: 묶음 변수는 다른 변수처럼 칸·대기 값을 받고, 등급 표(항목 코드 값의 콘솔 표기)를 묶음 상태로 둔다. 펼침은 다음 Sync다(값은 sync 지점에서만 바뀐다 — 등록은 `dirty`만 켠다. 그래서 묶음 등록 직후 다음 Sync 전까지는 묶음 등급 칸과 항목 값이 어긋나 보인다). 묶음의 묶음 순환·자기 참조·항목 겹침은 거부하고 Error `GroupConflict`를 남긴다(이 거부만 진단을 남긴다). 묶음과 항목 변수가 둘 다 등록되면 코드 프리셋 값을 항목 변수의 규칙으로 검사한다(맞지 않으면 (묶음, 등급, 항목)마다 Error 한 번 — 펼치지 않는다).
+- Sync 2단계(`ResolveGroups` — 리뷰 반영으로 10절 2단계 그대로): 앞 Sync의 펼침을 빼고, 묶음을 위상 순서(부모 → 자식)로 펼친다. 묶음마다 그때까지의 펼침을 합친 입력으로 묶음 변수의 유효 등급(요청 등급)을 계산해 Quality 층 입력(Console 종류, 태그 = 묶음 이름, 출처 `quality.shadow@2`)을 만든다. 다 펼친 뒤 조합 검증(`ResolveQualityLevels`)이 낮추면 낮춘 등급으로 처음부터 다시 펼친다(앞 차례의 결과는 요청 등급이 같은 묶음에만 쓴다). 시작점은 늘 묶음 변수의 유효 등급이라 이력에 기대지 않는다. 규칙이 없으면 펼친 등급 = 요청 등급이고 한 번에 끝난다. `MaxGroupPasses`(8)번을 넘으면 마지막 결과와 Warning `GroupNoConverge`(같은 상태에 한 번 — 요청·펼친 등급의 서명으로 판정)다. 세대는 Sync 전 값과 비교하므로 반복 중 갔다 돌아온 칸은 오르지 않는다. 항목 변수가 아직 등록되지 않았으면 펼침이 그 이름의 대기 값이 된다(등록 때 받는다 — 보류). 펼침 입력은 등록 때 검사하지 않고(대기 값 이관의 일반 진단은 내지 않는다) 묶음 검사가 같은 키로 한 번 알린다.
+- `Quality.json`(branch `Quality`, `{"<묶음>": {"<등급>": {"<항목>": 값}}}`): 엔진·엔진 플랫폼·프로젝트·프로젝트 플랫폼 파일 층만 받고(그 밖은 `LayerNotAllowed`), 넣을 때는 모양만 본다(묶음은 늦게 등록될 수 있다). 등급 키는 정규 10진 표기만 받는다(`"+0"`·`"00"`은 넣을 때 `InvalidSetting`). 펼칠 때 가장 강한 파일의 값이 코드 값을 바꾼다. 항목 변수에 맞지 않는 값은 같은 (입력, 묶음, 등급, 항목)에 Error 한 번을 남기고 그 값만 건너뛴다(다음으로 강한 파일의 유효한 값, 없으면 코드 값 — 일반 층 규칙과 같다). 이 기록은 Sync가 살아 있는 입력의 것만 남긴다. 모르는 묶음(`UnresolvedName`)·정의되지 않은 등급(`UndefinedLevel`)·그 등급의 코드 항목이 아닌 이름(`InvalidSetting`)은 `ReportUnresolved`가 Warning으로 한 번씩 알린다.
+- 조합 검증 연결: `ConfigContext::SetQualityValidation(규칙, 예산, 기기 특성)`(빌린다), `HostSettingsOptions::qualityRules`·`qualityBudgets`(호스트가 코드로 정한다 — `HostSettings`가 기기 특성과 함께 넘기고 `ApplyDeviceTraits` 때 프로필 적용과 무관하게 먼저 다시 넘긴다). 정의된 등급은 묶음 정의에서 오므로 `QualityGroupRule::levels`를 없애고 `QualityRequest::levels`(묶음 정의의 등급)로 옮겼다. 등록되지 않은 묶음의 규칙(`UnresolvedName`)·정의되지 않은 등급의 규칙(`UndefinedLevel`)은 `ReportUnresolved`가 Warning 한 번으로 알린다. 낮춘 등급은 묶음 변수에 쓰지 않고 펼칠 등급에만 쓴다. 결과는 `GetQualityLevels`(`QualityResolutionSet` — 요청·펼친 등급·사유·unmet·넘친 예산)와 낮춘 결과가 바뀔 때 Note `QualityLowered`(`quality.shadow@1 (requested 3, lowered: <사유>)`)다. Explain 표시는 CVR6이다.
 - 대체: Config `ConsoleSettingFlags::QualityMember`·`NotQualityMember`를 없앴다(하위 호환 경로 없음). CF2 독립 콘솔 설정은 묶음 항목이 될 수 없다(항목은 CVar 핸들) — CVR7에서 CVar로 옮기면 항목이 될 수 있다. 기기 프로필은 묶음 변수(`quality.shadow`)를 그대로 콘솔 이름으로 쓴다(층 7 > 6 — VD4 순서 그대로).
 - 등급 요구·비용을 어디서 정하는지(Config 6.1 CVR5 항목): 코드(호스트가 `QualityGroupRule`을 넘긴다)로 정했다. 기기 조건·예산은 기기 특성에 기대는 플랫폼별 조정이라 묶음 정의(consteval — 할당 없는 상수)에 넣기 어렵고, 데이터 파일 형식은 기기 프로필 조건과 함께 정할 일이라 미룬다(아래 후속).
 - 후속: 규칙의 데이터 파일 형식(`Quality.json`이나 기기 프로필에 둘지), `ScopedOverride`의 묶음 판(CVR3 범위와 함께), 묶음 Explain·`cvar.find` 표시(CVR6).
@@ -744,6 +748,7 @@ public:
 
 ## 23. 개정 이력
 
+- 개정 11(2026-11-19): CVR5 리뷰 반영. 묶음의 묶음은 DAG(순환·자기 참조 `Register` 거부), 항목 겹침 금지(11절), 10절 2단계를 위상 순서 펼침·검증 낮춤 때만 다시 펼치기·같은 상태에 한 번 `GroupNoConverge`로, 코드 프리셋 값의 등록 검사, `Quality.json` 정규 등급 키·잘못된 값만 건너뛰기, `QualityRequest::levels`(`QualityGroupRule::levels` 없앰), 19절 프리셋 시험, 20절 CVR5 메모를 고쳤다.
 - 개정 10(2026-11-19): CVR5 구현 결과를 20절에 적었다(`CVarGroup`·묶음 해결 반복·`Quality.json` 값 덮어쓰기·조합 검증 연결·`QualityMember` 대체). 11절의 항목 생성자(`SetArg<T>`)·정적 데이터 크기·Quality 층 직접 쓰기 거부, 12절 `QualityLowered`를 고쳤다.
 - 개정 9(2026-11-19): CVR4 리뷰 반영. 9절(봉인 Busy, 늦은 등록의 `BootSealed`, 문서 입력 전체 거부, 서버 층 분류, 봉인 전 snapshot assert 범위, 부팅 값 "같다"), 10.1절 부팅 블록 행(봉인 뒤 등록의 copy-on-write), 12절(`Register`가 바로 적용, 편집 거리 OSA), 20절 리뷰 반영 메모·CVR6 후속(콘솔 문구 형식, 설정 struct 필드 콘솔 쓰기 결정 항목).
 - 개정 8(2026-11-19): CVR4 구현 결과를 20절에 적었다(봉인과 부팅 블록, 직접 쓰기 `BootSealed`의 범위 — CF2 독립 콘솔 설정 포함·설정 struct 필드는 Config 규칙, `DescribeConsoleSetting`, `LateBound`, `ReportUnresolved`·Core 편집 거리, 진단 코드, `TakeDiagnostics`). 9절 CF3 비고를 고쳤다.

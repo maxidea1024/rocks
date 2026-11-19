@@ -578,8 +578,10 @@ Result<void> RecomputeConsoleSetting(ConfigState& state, const ConsoleSettingSta
             return Result<void>::Failure(checked.Error());
         }
 
+        // 묶음 펼침 입력은 여기서 알리지 않는다(묶음 검사가 (묶음, 등급, 항목)마다 한 번 알린다 —
+        // CVar 11절).
         if (!checked.Value().IsEmpty()) {
-            if (report) {
+            if (report && !entry->groupExpansion) {
                 if (auto reported = Report(state, code, ConfigSeverity::Error, entry->layer,
                                            entry->sourceName.View(), position, setting.name.View(),
                                            checked.Value());

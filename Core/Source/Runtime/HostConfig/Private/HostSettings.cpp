@@ -362,19 +362,19 @@ config::DeviceTraits& HostSettings::DeviceTraits() noexcept {
 
 Result<void> HostSettings::ApplyDeviceTraits() noexcept {
     config::ConfigContext& context = Context();
-    auto applied = config::ApplyDeviceProfile(context, profileArgument_.View(), traits_, profile_);
-    if (!applied) {
-        Log::Error(LogHostConfig, "Device profile could not be applied: {Error}",
-                   ErrorCodeName(applied.Error()));
-        return applied;
-    }
-
-    // 특성이 바뀌었으므로 다음 Sync가 품질 묶음의 펼칠 등급을 다시 정한다.
+    // 특성이 바뀌었으므로 다음 Sync가 품질 묶음의 펼칠 등급을 다시 정한다(프로필 적용 결과와
+    // 무관하게 먼저 한다).
     if (auto validated = context.SetQualityValidation(qualityRules_, qualityBudgets_, &traits_);
         !validated) {
         Log::Error(LogHostConfig, "Quality validation could not be updated: {Error}",
                    ErrorCodeName(validated.Error()));
         return validated;
+    }
+
+    auto applied = config::ApplyDeviceProfile(context, profileArgument_.View(), traits_, profile_);
+    if (!applied) {
+        Log::Error(LogHostConfig, "Device profile could not be applied: {Error}",
+                   ErrorCodeName(applied.Error()));
     }
 
     return applied;

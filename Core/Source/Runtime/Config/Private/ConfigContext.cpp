@@ -42,7 +42,8 @@ ConfigState::ConfigState(Allocator& allocator, ObjectRegistry& objects) noexcept
       commands(allocator), pendingCommands(allocator), subscriptions(allocator),
       renderSignature(allocator), pendingRestarts(allocator), ignoredBootWrites(allocator),
       reportedUnresolved(allocator), groups(allocator), unmetQualityBudgets(allocator),
-      reportedQualityProblems(allocator), syncHooks(allocator), onSynced(allocator) {
+      reportedQualityProblems(allocator), reportedPresetProblems(allocator),
+      groupNoConverge(allocator), syncHooks(allocator), onSynced(allocator) {
 }
 
 reflection_text::TextCodecOptions ConfigState::CodecOptions() const noexcept {
@@ -1418,6 +1419,7 @@ Result<void> ConfigContext::Sync() noexcept {
     }
 
     state->entries = Move(next);
+    detail::PruneQualityProblems(*state);
     state->queue.Clear();
     state->dirty = false;
     // 7. 값이 다 바뀐 뒤 명령을 실행하고 변경 콜백을 부른 다음 OnSynced를 부른다(콜백은 새 값을

@@ -6,9 +6,9 @@
 // 품질 묶음 층에 펼쳐져 프로젝트 값을 이기고 더 강한 층(세션)에는 진다, 등급을 바꾸면 앞 펼침이
 // 빠진다, 정의되지 않은 등급 거부(UndefinedLevel), 늦게 등록한 항목 변수는 등록 때 펼친 값을
 // 받는다, `Quality.json`은 코드 항목의 값만 바꾼다(잘못된 값은 진단 한 번 뒤 코드 값, 파일 층만,
-// ReportUnresolved의 모르는 묶음·등급·항목), 묶음의 묶음, 순환 묶음은 MaxGroupPasses 번 뒤
-// GroupNoConverge, 조합 검증은 펼칠 등급만 낮추고 묶음 변수는 그대로(장치가 바뀌면 원래 선택 복귀),
-// Sync 안에서 갔다 돌아온 칸은 세대가 그대로다.
+// ReportUnresolved의 모르는 묶음·등급·항목), 묶음의 묶음, 조합 검증은 펼칠 등급만 낮추고 묶음
+// 변수는 그대로(장치가 바뀌면 원래 선택 복귀), Sync 안에서 갔다 돌아온 칸은 세대가 그대로다. 등록
+// 규칙(순환· 겹침·코드 값 검사)과 묶음 해결의 결정성은 CVarGroupRuleTests.cpp다.
 using namespace rocks;
 using namespace rocks::config;
 using namespace rocks::test::config;
@@ -53,19 +53,6 @@ constinit CVarGroup GroupWithLate = cvar::Group("quality.grp.late", 1)
                                         .Help("Late member group")
                                         .Level(0, {{GroupLateMember, 10}})
                                         .Level(1, {{GroupLateMember, 20}});
-
-extern CVarGroup GroupCycleB;
-
-// A가 B를, B가 A를 서로 다른 등급으로 바꾼다(주기 4 — 멈추지 않는다).
-constinit CVarGroup GroupCycleA = cvar::Group("quality.grp.cycle_a", 0)
-                                      .Help("Cycle A")
-                                      .Level(0, {{GroupCycleB, 1}})
-                                      .Level(1, {{GroupCycleB, 0}});
-
-constinit CVarGroup GroupCycleB = cvar::Group("quality.grp.cycle_b", 0)
-                                      .Help("Cycle B")
-                                      .Level(0, {{GroupCycleA, 0}})
-                                      .Level(1, {{GroupCycleA, 1}});
 
 } // namespace cvar_group_test
 
@@ -146,20 +133,9 @@ TEST(CVar_GroupLateMembersAndNestedGroups) {
     CHECK(GroupShadow.Get() == 2 && GroupShadowDistance.Get() == 6000.f);
 }
 
-// 서로 바꾸는 묶음은 MaxGroupPasses 번 뒤 마지막 결과를 쓰고 GroupNoConverge를 남긴다.
-TEST(CVar_GroupCycleStopsAfterMaxPasses) {
-    ConfigFixture fixture;
-    ConfigContext& context = fixture.Context();
-    REQUIRE(context.Register(GroupCycleA, GroupCycleB));
-    context.Diagnostics().Clear();
-    REQUIRE(context.Sync());
-    CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::GroupNoConverge));
-    CHECK(CountCode(context, ConfigDiagnosticCode::GroupNoConverge) == 1);
-}
-
 // `Quality.json`은 코드 항목의 값만 바꾼다(가장 강한 파일이 이긴다). 항목 변수에 맞지 않는 값은
-// 진단을 한 번 남기고 코드 값을 쓴다. 파일 층이 아니면 거부한다. ReportUnresolved가 모르는 묶음·
-// 정의되지 않은 등급·코드 항목이 아닌 이름을 알린다.
+// 진단을 한 번 남기고 그 값만 건너뛴다(다음으로 강한 파일의 값). 파일 층이 아니면 거부한다.
+// ReportUnresolved가 모르는 묶음· 정의되지 않은 등급·코드 항목이 아닌 이름을 알린다.
 TEST(CVar_GroupQualityFileChangesValuesOnly) {
     ConfigFixture fixture;
     ConfigContext& context = fixture.Context();
@@ -174,13 +150,13 @@ TEST(CVar_GroupQualityFileChangesValuesOnly) {
     REQUIRE(context.Sync());
     CHECK(GroupShadowDistance.Get() == 7500.f && GroupShadowTier.Get() == ShadowTier::Low);
 
-    // 범위 밖 값은 진단 한 번 뒤 코드 값이다(다음 Sync에 다시 내지 않는다).
+    // 범위 밖 값은 진단 한 번 뒤 건너뛰고 엔진 파일 값이다(다음 Sync에 다시 내지 않는다).
     context.Diagnostics().Clear();
     REQUIRE(context.ReplaceLayerText(
         ConfigLayer::Project, "Quality.json", "Quality", "project",
         R"({"quality.grp.shadow": {"2": {"render.grp.shadow_distance": 90000}}})"));
     REQUIRE(context.Sync());
-    CHECK(GroupShadowDistance.Get() == 6000.f && GroupShadowTier.Get() == ShadowTier::Medium);
+    CHECK(GroupShadowDistance.Get() == 7000.f && GroupShadowTier.Get() == ShadowTier::Medium);
     CHECK(CountCode(context, ConfigDiagnosticCode::ValueOutOfRange) == 1);
     REQUIRE(GroupShadow.Set(2, {.layer = ConfigLayer::Console}));
     REQUIRE(context.Sync());
@@ -221,7 +197,7 @@ TEST(CVar_GroupQualityValidationLowersExpandedLevelOnly) {
     REQUIRE(bigMemory.trait.TryAssign(DeviceTraitNames::GpuMemoryMiB));
     bigMemory.atLeast = 8192.0;
     const QualityLevelRule shadowRules[] = {{3, Span<const DeviceCondition>(&bigMemory, 1), {}}};
-    const QualityGroupRule rules[] = {{"quality.grp.shadow", {}, 0, shadowRules}};
+    const QualityGroupRule rules[] = {{"quality.grp.shadow", 0, shadowRules}};
     DeviceTraits traits(fixture.system);
     REQUIRE(traits.SetNumber(DeviceTraitNames::GpuMemoryMiB, 4096));
     REQUIRE(context.SetQualityValidation(rules, {}, &traits));

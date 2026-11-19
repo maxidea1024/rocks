@@ -320,7 +320,12 @@ struct ConfigState {
     const DeviceTraits* qualityTraits = nullptr;
     Array<String> unmetQualityBudgets;
     // 진단을 이미 낸 `Quality.json` 값 문제(입력 순번·묶음·등급·항목 키) — 같은 것에 한 번만 낸다.
+    // Sync가 살아 있는 입력의 것만 남긴다(PruneQualityProblems).
     Array<String> reportedQualityProblems;
+    // 진단을 이미 낸 코드 프리셋 값 문제(묶음·등급·항목 키 — 정의에 묶여 있어 늘지 않는다).
+    Array<String> reportedPresetProblems;
+    // 마지막으로 GroupNoConverge를 낸 상태의 서명(요청·펼친 등급 — 같은 상태에 한 번만 낸다).
+    String groupNoConverge;
     // sync 지점 앞 hook(등록 순서).
     Array<SyncHook> syncHooks;
     // Sync마다 한 번 부르는 변경 알림(7.3절).
@@ -649,15 +654,32 @@ bool IsQualityDocument(const ConfigState& state, const ConfigEntry& entry) noexc
 // 값 하나, 파일 층만 — 등록 여부는 보지 않는다: 묶음은 늦게 등록될 수 있다). 반환: true면 문제없음.
 Result<bool> ValidateQualityDocument(ConfigState& state, const ConfigEntry& entry) noexcept;
 
+// 등록할 묶음(added 안의 Group 정의)을 이미 등록한 묶음과 함께 검사한다: 한 변수는 한 묶음의
+// 항목만(두 묶음 이름), 묶음의 묶음은 DAG(자기 참조·순환 경로). 위반이면 Error GroupConflict를
+// 남기고 InvalidArgument다(CVar 11절). 오류: 할당 실패.
+Result<void> CheckGroupGraph(ConfigState& state,
+                             Span<const cvar::detail::VarDefinition* const> added) noexcept;
+
+// 등록한 정의(added — 묶음 또는 항목 변수)가 닿는 코드 프리셋 값을 항목 변수의 규칙으로 검사한다
+// (묶음과 항목이 둘 다 등록된 것만 — (묶음, 등급, 항목)마다 Error 한 번). 새 항목 변수가 있으면
+// 다음 Sync가 다시 펼친다(dirty). 오류: 할당 실패.
+Result<void> CheckPresetValues(ConfigState& state,
+                               Span<const cvar::detail::VarDefinition* const> added) noexcept;
+
+// reportedQualityProblems에서 이미 빠진 입력의 키를 버린다(Sync가 입력 목록을 바꾼 뒤 — 할당 없음).
+void PruneQualityProblems(ConfigState& state) noexcept;
+
 // 묶음 정의의 등록 상태(등급별 항목의 코드 값 표기)를 만든다. 오류: 할당 실패.
 Result<void> MakeGroupState(ConfigState& state, const cvar::detail::GroupDefinition& definition,
                             UniquePtr<GroupState>& out) noexcept;
 
-// Sync 2단계 묶음 해결이다: 펼침을 만들어(generated) order(적용 순서 — 펼침 제외)와 합친 것으로
-// 콘솔 설정 값을 계산하고(settingOrder·settingResults), 묶음 변수의 유효 등급을 조합 검증으로 펼칠
-// 등급으로 바꾼 결과(resolutions — state.groups 순서)가 펼친 등급(expanded)과 같아질 때까지
-// 되풀이한다(MaxGroupPasses 번 — 넘으면 마지막 결과와 Warning GroupNoConverge). 상태는 바꾸지
-// 않는다 (CommitGroups가 맞바꾼다). 오류: 할당 실패, 조합 검증의 호출 오류.
+// Sync 2단계 묶음 해결이다(CVar 10절): 묶음을 위상 순서(부모 → 자식)로, 묶음마다 그때까지의 펼침을
+// 합친 입력으로 계산한 유효 등급(요청 등급)으로 펼친다(generated). 조합 검증 결과(resolutions —
+// state.groups 순서)가 펼친 등급(expanded)과 다르면 낮춘 등급으로 처음부터 다시 펼친다(앞 차례의
+// 결과는 요청 등급이 같은 묶음에만 — MaxGroupPasses 번, 넘으면 마지막 결과와 같은 상태에 한 번
+// Warning GroupNoConverge). 마지막 펼침을 order(펼침 제외)와 합친 적용 순서가 settingOrder,
+// 그것으로 계산한 콘솔 설정 값이 settingResults다. 묶음 상태는 바꾸지 않는다(CommitGroups가
+// 맞바꾼다). 오류: 할당 실패, 조합 검증의 호출 오류.
 Result<void> ResolveGroups(ConfigState& state, Span<ConfigEntry* const> order,
                            Span<void* const> sectionValues,
                            Array<UniquePtr<ConfigEntry>>& generated,

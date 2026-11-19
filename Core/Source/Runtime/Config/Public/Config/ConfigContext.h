@@ -313,14 +313,14 @@ public:
     // 품질 조합 검증 입력을 정한다(Config 6.1 — Config/QualityValidation.h). Sync가 프리셋
     // 묶음(CVarGroup)을 펼치기 전에 묶음 변수의 등급(사용자가 고른 등급)을 이 규칙으로 낮춘 등급을
     // 펼친다. 묶음 변수 자체는 바꾸지 않는다(장치가 바뀌면 원래 선택이 살아난다 — CVar 11절).
-    // 규칙의 levels는 무시하고 등록된 묶음 정의의 등급을 쓴다. 등록되지 않은 묶음의 규칙은
-    // 건너뛴다. traits가 null이면 검증하지 않는다. groups·budgets·traits는 빌린다: 다음 호출이나
-    // 문맥 파괴까지 살아 있어야 한다. 다음 Sync가 묶음을 다시 해결한다. 오류: 초기화 전
-    // InvalidArgument, 다른 스레드 WrongThread.
+    // 정의된 등급은 등록된 묶음 정의에서 온다. 등록되지 않은 묶음의 규칙은 건너뛰고
+    // ReportUnresolved가 알린다(정의되지 않은 등급의 규칙도). traits가 null이면 검증하지 않는다.
+    // groups·budgets·traits는 빌린다: 다음 호출이나 문맥 파괴까지 살아 있어야 한다. 다음 Sync가
+    // 묶음을 다시 해결한다. 오류: 초기화 전 InvalidArgument, 다른 스레드 WrongThread.
     //
     // 사용 예(호스트 — 규칙은 문맥보다 오래 사는 저장소에 둔다):
     //   QualityLevelRule shadowRules[] = {{3, epicNeeds, {}}};   // 등급 3은 epicNeeds 기기 조건
-    //   QualityGroupRule rules[] = {{"quality.shadow", {}, 0, shadowRules}};
+    //   QualityGroupRule rules[] = {{"quality.shadow", 0, shadowRules}};
     //   REQUIRE(config.SetQualityValidation(rules, {}, &traits));
     Result<void> SetQualityValidation(Span<const QualityGroupRule> groups,
                                       Span<const QualityBudgetRule> budgets,
@@ -401,7 +401,12 @@ public:
     //
     // 넘긴 핸들을 모두 검사한 뒤에 등록한다(하나라도 거부하면 아무것도 등록하지 않고 진단도 남기지
     // 않는다). 같은 핸들을 다시 넘기면(같은 호출 안 포함) 성공이다(멱등). 프리셋 묶음(CVarGroup)은
-    // int32 등급 변수로 등록되고, 등급 항목은 다음 Sync가 품질 묶음 층에 펼친다(CVar 11절).
+    // int32 등급 변수로 등록되고, 등급 항목은 다음 Sync가 품질 묶음 층에 펼친다(CVar 11절) — 그래서
+    // 묶음 등록 직후 다음 Sync 전까지는 묶음 등급 칸과 항목 값이 어긋나 보인다. 묶음의 묶음
+    // 순환·자기 참조와 같은 변수를 항목으로 가진 두 묶음은 거부한다(InvalidArgument — 이 거부만
+    // Error GroupConflict 진단을 남긴다). 묶음과 항목 변수가 둘 다 등록되면 코드 프리셋 값을 항목
+    // 변수의 규칙으로 검사해 맞지 않는 것마다 Error를 한 번 남긴다(등록은 성공하고 그 항목은 펼치지
+    // 않는다).
     //
     // 사용 예:
     //   Result<void> RegisterRenderVars(ConfigContext& config) noexcept {

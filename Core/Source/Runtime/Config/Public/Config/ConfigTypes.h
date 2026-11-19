@@ -193,6 +193,9 @@ enum class ConfigDiagnosticCode : uint8 {
     // 경고: 묶음 펼침이 MaxGroupPasses 번 안에 멈추지 않았다(묶음끼리 서로 바꾸는 순환 — 마지막
     // 결과를 쓴다, CVar 10절).
     GroupNoConverge,
+    // 프리셋 묶음 정의끼리 맞지 않는다: 묶음의 묶음 순환·자기 참조(메시지에 순환 경로), 두 묶음이
+    // 같은 변수를 항목으로 가짐(두 묶음 이름) — ConfigContext::Register가 거부한다(CVar 11절).
+    GroupConflict,
     // 정보: 품질 조합 검증이 묶음의 펼칠 등급을 낮췄거나 가장 낮은 등급도 기기 조건에 맞지 않는다
     // (메시지는 `quality.shadow@1 (requested 3, lowered: <사유>)` — Config 6.1, CVar 11절).
     QualityLowered

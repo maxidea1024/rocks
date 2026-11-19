@@ -1,6 +1,6 @@
 # 설정 계층과 콘솔 설정 설계
 
-기준일: 2026-11-19, 개정 11(품질 묶음 CVarGroup — QualityMember 대체, 6.1절 CVR5 연결). 엔진·프로젝트·플랫폼·기기·사용자·세션·콘솔에서 오는 설정 값을 하나의 우선순위로 합치는 **설정 계층**과, 실행 중 이름으로 읽고 바꾸는 **콘솔 설정**(변수·명령)을 정한다.
+기준일: 2026-11-19, 개정 12(품질 묶음 CVarGroup — QualityMember 대체, 6.1절 CVR5 연결·리뷰 반영). 엔진·프로젝트·플랫폼·기기·사용자·세션·콘솔에서 오는 설정 값을 하나의 우선순위로 합치는 **설정 계층**과, 실행 중 이름으로 읽고 바꾸는 **콘솔 설정**(변수·명령)을 정한다.
 
 [렌더 기반](RenderBase.ko.md)의 선행 작업 CP8(Config 계층)·CP4(콘솔 설정)이며, [엔진 구현 계획](EngineImplementationPlan.ko.md)의 다음 요구를 구현 스펙으로 옮긴다.
 - 24.1절 표의 "Device Profile / Scalability / CVar" 행
@@ -199,8 +199,8 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - 등급을 바꾸면 그 묶음 태그의 품질 묶음 층 값을 `Unset`하고 새 등급 값을 쓴다.
 - 사용자가 고른 등급은 사용자 층에 저장한다.
 - 품질 조합 검증(계획 24.2절): 등급 조합이 장치 능력(`DeviceCaps`)으로 불가능하면 정해진 순서로 낮추고, 낮춘 결과와 사유를 진단에 남긴다.
-- 구현 메모(CF4, `Config/QualityValidation.h`): 묶음 정의와 Quality 층 펼침은 CVR5(`CVarGroup`)의 일이고, CF4는 그 앞의 **순수 함수** `ResolveQualityLevels`만 둔다. 입력은 "묶음 이름 → 요청 등급(묶음 변수 = `CVar<int32>`의 값)"·묶음 규칙(정의된 등급·우선순위·등급별 기기 조건 `requirements`와 예산 비용)·예산(한도 = 수 특성 × `fraction`)·기기 특성이고, 출력은 "묶음 이름 → 펼칠 등급 + 사유"다. 층에 아무것도 쓰지 않는다. 낮춤 순서: ① 등급 요구가 거짓이면 정의된 바로 아래 등급으로(가장 낮은 등급도 거짓이면 그대로 두고 unmet) ② 예산을 넘으면 우선순위가 낮은 묶음부터(같으면 이름 byte 순서) 그 예산 비용을 줄이는 한 칸씩(더 낮출 수 없으면 사유를 남기고 멈춘다). 낮춘 등급은 묶음 변수에 쓰지 않고 펼칠 때만 쓴다(CVar 11절). 표기는 `FormatQualityResolution` — `quality.shadow@1 (requested 3, lowered: <사유>)`.
-- CVR5 연결(개정 11 — CVar 20절 "CVR5 구현"): Sync의 묶음 해결이 펼치기 전에 이 함수를 부른다. 등급 요구·비용은 코드(호스트의 `HostSettingsOptions::qualityRules`·`qualityBudgets` → `ConfigContext::SetQualityValidation`, 기기 특성은 `HostSettings::DeviceTraits`)로 정한다. 낮춤은 `GetQualityLevels`·Note `QualityLowered`로 남고 Explain 표시는 CVR6이다. `Quality.json`(branch `Quality`)은 `{"<묶음>": {"<등급>": {"<항목>": 값}}}`이고 파일 층(엔진·엔진 플랫폼·프로젝트·프로젝트 플랫폼)만 받는다. 시험은 `CVarGroupTests.cpp`(등급 변경 `Unset`, 낮춘 등급의 펼침, 장치 변경 뒤 원래 선택 복귀). 규칙의 데이터 파일 형식은 후속이다.
+- 구현 메모(CF4, `Config/QualityValidation.h`): 묶음 정의와 Quality 층 펼침은 CVR5(`CVarGroup`)의 일이고, CF4는 그 앞의 **순수 함수** `ResolveQualityLevels`만 둔다. 입력은 "묶음 이름 → 요청 등급(묶음 변수의 값)과 정의된 등급(`QualityRequest::levels` — 묶음 정의에서 온다, 개정 12)"·묶음 규칙(우선순위·등급별 기기 조건 `requirements`와 예산 비용)·예산(한도 = 수 특성 × `fraction`)·기기 특성이고, 출력은 "묶음 이름 → 펼칠 등급 + 사유"다. 층에 아무것도 쓰지 않는다. 낮춤 순서: ① 등급 요구가 거짓이면 정의된 바로 아래 등급으로(가장 낮은 등급도 거짓이면 그대로 두고 unmet) ② 예산을 넘으면 우선순위가 낮은 묶음부터(같으면 이름 byte 순서) 그 예산 비용을 줄이는 한 칸씩(더 낮출 수 없으면 사유를 남기고 멈춘다). 낮춘 등급은 묶음 변수에 쓰지 않고 펼칠 때만 쓴다(CVar 11절). 표기는 `FormatQualityResolution` — `quality.shadow@1 (requested 3, lowered: <사유>)`.
+- CVR5 연결(개정 11 — CVar 20절 "CVR5 구현"): Sync의 묶음 해결이 펼치기 전에 이 함수를 부른다. 등급 요구·비용은 코드(호스트의 `HostSettingsOptions::qualityRules`·`qualityBudgets` → `ConfigContext::SetQualityValidation`, 기기 특성은 `HostSettings::DeviceTraits`)로 정한다. 낮춤은 `GetQualityLevels`·Note `QualityLowered`로 남고 Explain 표시는 CVR6이다. `Quality.json`(branch `Quality`)은 `{"<묶음>": {"<등급>": {"<항목>": 값}}}`이고 파일 층(엔진·엔진 플랫폼·프로젝트·프로젝트 플랫폼)만 받는다. 등급 키는 정규 10진 표기만이다. 잘못된 값은 그 값만 건너뛴다(다음으로 강한 파일, 없으면 코드 값). 시험은 `CVarGroupTests.cpp`(등급 변경 `Unset`, 낮춘 등급의 펼침, 장치 변경 뒤 원래 선택 복귀). 규칙의 데이터 파일 형식은 후속이다.
 
 ### 6.2 기기 프로필
 
@@ -311,6 +311,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 
 ## 12. 개정 이력
 
+- 개정 12(2026-11-19): CVar CVR5 리뷰 반영. 6.1절: 정의된 등급을 `QualityRequest::levels`로 옮기고 `QualityGroupRule::levels`를 없앴다, `Quality.json` 정규 등급 키·잘못된 값만 건너뛰기.
 - 개정 11(2026-11-19): CVar CVR5. 품질 묶음은 `CVarGroup`(코드 정의)이고 품질 묶음 층은 묶음 펼침 전용이다(`QualityMember`·`NotQualityMember` 없앰 — 5.1절). 6.1절 CVR5 연결(조합 검증 입력·`Quality.json` 모양·파일 층만), 9절 CF4 진척.
 - 개정 10(2026-11-19): CVar CVR4 리뷰 반영. 5.1절 플래그 동작 문장을 개정 9 규칙으로 고쳤다(쓰기 거부 없음 → 바로 쓰는 층은 `BootSealed`, 늦은 등록도 같다). 8절 개정 8 문장을 파생·휘발 층으로 한정했다.
 - 개정 9(2026-11-19): CVar CVR4. 봉인 뒤 독립 콘솔 설정(`BootCVar` 포함)의 부팅 값에 콘솔·코드·범위 임시 변경 층으로 바로 쓰면 넣을 때 `BootSealed`로 거부한다(CVar 9절). 파생·휘발·파일 층 규칙과 설정 struct 필드는 그대로다. 8절.

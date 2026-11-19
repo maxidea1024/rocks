@@ -58,10 +58,11 @@ TEST(Config_QualityValidationLowersByRequirementsThenBudget) {
         {1, {}, rules.shadowMid},
         {3, Span<const DeviceCondition>(&rules.bigTexture, 1), rules.shadowHigh}};
     const QualityLevelRule effectsRules[] = {{0, {}, rules.effectsLow}, {1, {}, rules.effectsHigh}};
-    const QualityGroupRule groups[] = {{"quality.shadow", rules.shadowLevels, 10, shadowRules},
-                                       {"quality.effects", rules.twoLevels, 0, effectsRules}};
+    const QualityGroupRule groups[] = {{"quality.shadow", 10, shadowRules},
+                                       {"quality.effects", 0, effectsRules}};
     const QualityBudgetRule budgets[] = {{"gpu_memory", DeviceTraitNames::GpuMemoryMiB, 0.5}};
-    const QualityRequest requests[] = {{"quality.shadow", 3}, {"quality.effects", 1}};
+    const QualityRequest requests[] = {{"quality.shadow", 3, rules.shadowLevels},
+                                       {"quality.effects", 1, rules.twoLevels}};
     DeviceTraits traits(allocator);
     REQUIRE(traits.SetNumber(DeviceTraitNames::GpuTextureSize2D, 4096));
     REQUIRE(traits.SetNumber(DeviceTraitNames::GpuMemoryMiB, 1000));
@@ -97,11 +98,12 @@ TEST(Config_QualityValidationBudgetOrderAndUnmet) {
     const QualityLevelRule textureRules[] = {
         {0, Span<const DeviceCondition>(&rules.lowestNeedsCompute, 1), rules.textureLow},
         {1, {}, rules.textureHigh}};
-    const QualityGroupRule groups[] = {{"quality.texture", rules.twoLevels, 0, textureRules},
-                                       {"quality.effects", rules.twoLevels, 0, effectsRules}};
+    const QualityGroupRule groups[] = {{"quality.texture", 0, textureRules},
+                                       {"quality.effects", 0, effectsRules}};
     const QualityBudgetRule budgets[] = {{"gpu_memory", DeviceTraitNames::GpuMemoryMiB, 1.0},
                                          {"bandwidth", "gpu.bandwidth", 1.0}};
-    const QualityRequest requests[] = {{"quality.texture", 1}, {"quality.effects", 1}};
+    const QualityRequest requests[] = {{"quality.texture", 1, rules.twoLevels},
+                                       {"quality.effects", 1, rules.twoLevels}};
     DeviceTraits traits(allocator);
     REQUIRE(traits.SetNumber(DeviceTraitNames::GpuMemoryMiB, 460));
     REQUIRE(traits.SetNumber(DeviceTraitNames::GpuComputeShaders, 0));
@@ -124,7 +126,7 @@ TEST(Config_QualityValidationBudgetOrderAndUnmet) {
                                                    StringComparison::CaseSensitive));
 
     // 요청이 이미 가장 낮은 등급이고 그 요구가 거짓이면 unmet 표기다.
-    const QualityRequest lowest[] = {{"quality.texture", 0}};
+    const QualityRequest lowest[] = {{"quality.texture", 0, rules.twoLevels}};
     REQUIRE(ResolveQualityLevels(groups, {}, lowest, &traits, resolved));
     CHECK(resolved.groups[0]->applied == 0 && resolved.groups[0]->unmet);
     String text(allocator);
@@ -137,17 +139,18 @@ TEST(Config_QualityValidationBudgetOrderAndUnmet) {
 TEST(Config_QualityValidationRejectsBadRequests) {
     SystemAllocator allocator;
     Rules rules(allocator);
-    const QualityGroupRule groups[] = {{"quality.shadow", rules.shadowLevels, 0, {}}};
+    const QualityGroupRule groups[] = {{"quality.shadow", 0, {}}};
     DeviceTraits traits(allocator);
     QualityResolutionSet resolved(allocator);
     const QualityRequest unruled[] = {{"quality.unruled", 7}};
     REQUIRE(ResolveQualityLevels(groups, {}, unruled, &traits, resolved));
     CHECK(resolved.groups.Size() == 1 && resolved.groups[0]->applied == 7);
 
-    const QualityRequest undefined[] = {{"quality.shadow", 2}};
+    const QualityRequest undefined[] = {{"quality.shadow", 2, rules.shadowLevels}};
     auto rejected = ResolveQualityLevels(groups, {}, undefined, &traits, resolved);
     CHECK(!rejected && rejected.Error() == ErrorCode::InvalidArgument && resolved.groups.IsEmpty());
-    const QualityRequest twice[] = {{"quality.shadow", 1}, {"quality.shadow", 3}};
+    const QualityRequest twice[] = {{"quality.shadow", 1, rules.shadowLevels},
+                                    {"quality.shadow", 3, rules.shadowLevels}};
     rejected = ResolveQualityLevels(groups, {}, twice, &traits, resolved);
     CHECK(!rejected && rejected.Error() == ErrorCode::InvalidArgument);
 }

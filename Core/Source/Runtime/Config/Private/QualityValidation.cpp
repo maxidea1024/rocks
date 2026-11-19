@@ -8,10 +8,11 @@ namespace rocks::config {
 
 namespace {
 
-// 요청 하나의 계산 상태다. rule이 null이면 규칙 없는 묶음이다. position은 rule->levels 안의 펼칠
-// 등급 위치다.
+// 요청 하나의 계산 상태다(규칙 있는 묶음만). position은 levels(요청의 정의된 등급) 안의 펼칠 등급
+// 위치다.
 struct Plan {
     const QualityGroupRule* rule = nullptr;
+    Span<const int32> levels{};
     usize request = 0;
     usize position = 0;
 };
@@ -26,8 +27,8 @@ const QualityLevelRule* LevelRule(const QualityGroupRule& rule, int32 level) noe
     return nullptr;
 }
 
-double CostOf(const QualityGroupRule& rule, usize position, StringView budget) noexcept {
-    const QualityLevelRule* level = LevelRule(rule, rule.levels[position]);
+double CostOf(const Plan& plan, usize position, StringView budget) noexcept {
+    const QualityLevelRule* level = LevelRule(*plan.rule, plan.levels[position]);
     if (level == nullptr) {
         return 0;
     }
@@ -98,10 +99,11 @@ Result<void> ResolveQualityLevels(Span<const QualityGroupRule> groups,
 
         Plan plan;
         plan.rule = rule;
+        plan.levels = request.levels;
         plan.request = index;
         plan.position = IndexNone;
-        for (usize position = 0; position < rule->levels.Size(); ++position) {
-            plan.position = rule->levels[position] == request.level ? position : plan.position;
+        for (usize position = 0; position < plan.levels.Size(); ++position) {
+            plan.position = plan.levels[position] == request.level ? position : plan.position;
         }
 
         if (plan.position == IndexNone) {
@@ -128,14 +130,14 @@ Result<void> ResolveQualityLevels(Span<const QualityGroupRule> groups,
     auto lower = [&](Plan& plan, StringView because) noexcept -> Result<void> {
         QualityResolution& resolution = *out.groups[plan.request];
         --plan.position;
-        resolution.applied = plan.rule->levels[plan.position];
+        resolution.applied = plan.levels[plan.position];
         return AppendReason(resolution.reason, because);
     };
 
     // 2. 등급 요구.
     for (Plan& plan : plans) {
         for (;;) {
-            const QualityLevelRule* level = LevelRule(*plan.rule, plan.rule->levels[plan.position]);
+            const QualityLevelRule* level = LevelRule(*plan.rule, plan.levels[plan.position]);
             if (level == nullptr) {
                 break;
             }
@@ -176,7 +178,7 @@ Result<void> ResolveQualityLevels(Span<const QualityGroupRule> groups,
         for (;;) {
             double total = 0;
             for (const Plan& plan : plans) {
-                total += CostOf(*plan.rule, plan.position, budget.name);
+                total += CostOf(plan, plan.position, budget.name);
             }
 
             if (total <= limit) {
@@ -193,8 +195,8 @@ Result<void> ResolveQualityLevels(Span<const QualityGroupRule> groups,
             Plan* victim = nullptr;
             for (Plan& plan : plans) {
                 if (victim == nullptr && plan.position != 0 &&
-                    CostOf(*plan.rule, plan.position - 1, budget.name) <
-                        CostOf(*plan.rule, plan.position, budget.name)) {
+                    CostOf(plan, plan.position - 1, budget.name) <
+                        CostOf(plan, plan.position, budget.name)) {
                     victim = &plan;
                 }
             }

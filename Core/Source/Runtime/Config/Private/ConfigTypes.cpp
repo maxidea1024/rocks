@@ -100,6 +100,8 @@ StringView ConfigDiagnosticCodeName(ConfigDiagnosticCode code) noexcept {
         return "UndefinedLevel";
     case ConfigDiagnosticCode::GroupNoConverge:
         return "GroupNoConverge";
+    case ConfigDiagnosticCode::GroupConflict:
+        return "GroupConflict";
     case ConfigDiagnosticCode::QualityLowered:
         return "QualityLowered";
     }

@@ -193,6 +193,9 @@ internal static class CVarCompilerTests
                     "CVarError_DefaultLevelUndefined"),
                 ("preset_too_many_levels", ("CVarGroup G = cvar::Group(\"quality.g\", 0).Help(\"g\")" +
                     ".Level(0).Level(1).Level(2).Level(3).Level(4).Level(5).Level(6).Level(7).Level(8);"), "CVarError_TooManyLevels"),
+                ("preset_too_many_entries", ("CVarGroup G = cvar::Group(\"quality.g\", 0).Help(\"g\").Level(0, {" +
+                    string.Join(", ", Enumerable.Range(0, 33).Select(index => "{ShadowDistance, " + (1000 + index) + "}")) + "});"),
+                    "A preset level holds at most MaxEntriesPerLevel entries"),
                 ("preset_missing_help", "CVarGroup G = cvar::Group(\"quality.g\", 0).Level(0);", "CVarError_MissingHelp"),
                 ("preset_auto_builder", "void F() noexcept { auto builder = cvar::Group(\"quality.g\", 0).Help(\"g\"); (void)builder; }",
                     "deleted"),
