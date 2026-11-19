@@ -42,6 +42,8 @@ repository root를 include해도 `out`과 현재 output의 임시 산출물은 �
 
 cache hit은 key와 모든 출력 파일의 실제 SHA-256이 일치할 때만 인정한다. 입력이나 출력이 없거나 변조되면 재실행한다. compiler 실패 시 기존 출력은 유지하고 임시 산출물을 제거한다. dependency는 모든 출력 게시 이후에만 실행되며, crash 중 부분 교체가 남아도 다음 cache 검증은 그 상태를 성공으로 재사용하지 않는다. 게시 중 일반 파일 오류는 이전 출력을 복구한다.
 
+`NativeActionResult.DurationMilliseconds`(`action-report.json`의 action마다)는 그 action을 실행한 벽시계 시간(ms)이다. cache 검사 뒤부터 출력 게시·임시 디렉터리 정리까지를 재며 실행 슬롯을 기다린 시간은 넣지 않는다(병렬 action끼리는 겹친다). cache hit이나 선행 action 실패로 실행하지 않은 action은 0이다. 측정값이라 action key·`compile_commands.json`·도구 빌드 ID에는 들어가지 않는다([리플렉션 생성 소스](../../Docs/Design/ReflectionGeneratedSources.ko.md) GSD12 — 모듈별 compile 시간 합과 느린 번역 단위를 여기서 읽는다).
+
 한 output directory의 writer는 프로세스 간 파일 잠금으로 직렬화한다. 다른 directory는 독립 실행한다. 실행 슬롯을 얻기 전에 dependency를 기다리므로 작은 worker 예산에서도 DAG가 진척한다. 취소는 공통 ProcessRunner로 compiler/linker 자식 트리를 종료하고 join한 뒤 임시 출력과 잠금을 반환한다. source/toolchain 변경을 실행 전후에 검출한 결과는 성공이 아니며 이번 action cache를 폐기한다.
 
 ## 긴 명령줄(response file)

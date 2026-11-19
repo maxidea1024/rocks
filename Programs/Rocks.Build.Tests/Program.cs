@@ -118,6 +118,9 @@ try
     await ExecutorCleanupTests.RunAsync(request, root);
     Pass("cleanup failures preserve diagnostics, cancellation, and cache safety");
 
+    await ActionDurationTests.RunAsync(request, root);
+    Pass("action durations are recorded for executed actions, zero for cached ones, and stay out of action keys");
+
     foreach (int invalidJobs in new[] { 0, ProcessRunner.MaximumConcurrentProcesses + 1 })
     {
         string invalidOutput = Path.Combine(root, "invalid-jobs-" + invalidJobs);
@@ -143,6 +146,8 @@ try
 
     var warm = await Build();
     Check(warm.ExecutedActions == 0 && warm.SkippedActions == 4, "No-op must execute zero actions");
+    Check(cold.Actions.All(action => action.DurationMilliseconds >= 0) && warm.Actions.All(action => action.DurationMilliseconds == 0),
+        "Cached actions must report zero duration");
     Pass("no-op output validation");
 
     using var compileCommands = JsonDocument.Parse(File.ReadAllText(cold.CompilationDatabasePath));

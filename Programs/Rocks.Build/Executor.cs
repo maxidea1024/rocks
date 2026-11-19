@@ -10,7 +10,7 @@ internal static class Executor
     public static async Task<NativeActionResult> RunAsync(NativeBuildRequest request, NativeAction action,
         string outputRoot, string toolchainKey, IncrementalStore store, CancellationToken cancellationToken,
         Func<ProcessSpec, CancellationToken, Task<ProcessResult>>? runProcess = null,
-        Action<string>? deleteTemporaryRoot = null)
+        Action<string>? deleteTemporaryRoot = null, TimeProvider? clock = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         string key = action.Key(toolchainKey, outputRoot, request.RootDirectory);
@@ -19,6 +19,10 @@ internal static class Executor
             return Result(action, false, true, 0, "", "");
         }
 
+        // 소요 시간은 실제로 실행하는 action만 잰다(cache hit은 0 — NativeActionResult.DurationMilliseconds). clock은 시험이 시간을
+        // 결정적으로 주입하는 자리이고 기본은 시스템 단조 시계다.
+        TimeProvider time = clock ?? TimeProvider.System;
+        long started = time.GetTimestamp();
         string temporaryRoot = Path.Combine(outputRoot, ".native-tmp", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(temporaryRoot);
         string[] stagedOutputs = action.Outputs.Select(path => Path.Combine(temporaryRoot, Path.GetFileName(path))).ToArray();
@@ -146,7 +150,7 @@ internal static class Executor
             System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(pending).Throw();
         }
 
-        return result!;
+        return result! with { DurationMilliseconds = (long)time.GetElapsedTime(started).TotalMilliseconds };
     }
 
     private static void PublishOutputs(IReadOnlyList<string> outputs, IReadOnlyList<string> staged,

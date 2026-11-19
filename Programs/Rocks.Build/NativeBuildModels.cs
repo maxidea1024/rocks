@@ -332,7 +332,13 @@ public sealed record NativeBuildRequest
 }
 
 public sealed record NativeActionResult(string Id, string Module, string Kind, bool Executed,
-    bool Succeeded, int ExitCode, string StdOut, string StdErr, string OutputPath);
+    bool Succeeded, int ExitCode, string StdOut, string StdErr, string OutputPath)
+{
+    // 이 action을 실행하는 데 걸린 벽시계 시간(ms)이다(Docs/Design/ReflectionGeneratedSources.ko.md GSD12). cache 검사 뒤부터 출력 게시와
+    // 임시 디렉터리 정리까지를 잰다(실행 슬롯을 기다린 시간은 빼고, 병렬 action끼리는 겹친다). 실행하지 않은 action(cache hit, 선행 action
+    // 실패)은 0이다. 측정값이라 action key·도구 빌드 ID·compile_commands.json에는 들어가지 않고 action-report.json에만 실린다.
+    public long DurationMilliseconds { get; init; }
+}
 
 public sealed record NativeBuildResult
 {
