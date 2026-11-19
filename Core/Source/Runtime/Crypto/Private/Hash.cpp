@@ -37,12 +37,12 @@ bool IsValidTurboShakeDomain(uint8 domain) noexcept {
 
 // ---- 증분 상태 공통 ----
 
-bool IsDefined(HashAlgorithm algorithm) noexcept {
+bool HashIsDefined(HashAlgorithm algorithm) noexcept {
     return algorithm == HashAlgorithm::Blake2b || algorithm == HashAlgorithm::Sha512 ||
            algorithm == HashAlgorithm::Sha3_256 || algorithm == HashAlgorithm::Sha3_512;
 }
 
-bool IsDefined(XofAlgorithm algorithm) noexcept {
+bool HashIsDefined(XofAlgorithm algorithm) noexcept {
     return algorithm == XofAlgorithm::Shake128 || algorithm == XofAlgorithm::Shake256 ||
            algorithm == XofAlgorithm::TurboShake128 || algorithm == XofAlgorithm::TurboShake256;
 }
@@ -460,7 +460,7 @@ HashState& HashState::operator=(HashState&& other) noexcept {
 Result<HashState> HashState::TryCreate(HashAlgorithm algorithm, usize digestBytes,
                                        Allocator& allocator) noexcept {
     platform::DataIndependentTimingScope dit;
-    if (!IsDefined(algorithm)) {
+    if (!HashIsDefined(algorithm)) {
         return Result<HashState>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -584,7 +584,7 @@ Result<XofState> XofState::TryCreate(XofAlgorithm algorithm, uint8 domain,
     platform::DataIndependentTimingScope dit;
     const bool turbo =
         algorithm == XofAlgorithm::TurboShake128 || algorithm == XofAlgorithm::TurboShake256;
-    if (!IsDefined(algorithm) || (turbo && !IsValidTurboShakeDomain(domain)) ||
+    if (!HashIsDefined(algorithm) || (turbo && !IsValidTurboShakeDomain(domain)) ||
         (!turbo && domain != TurboShakeStandardDomain)) {
         return Result<XofState>::Failure(ErrorCode::InvalidArgument);
     }

@@ -51,7 +51,7 @@ void FreeBuffer(Allocator& allocator, uint8*& buffer, usize bytes) noexcept {
 }
 
 template <typename T>
-void FreeState(T* state) noexcept {
+void SegmentStreamSequentialFreeState(T* state) noexcept {
     Allocator* allocator = state->allocator;
     DestroyAt(state);
     if (!allocator->Deallocate(state)) {
@@ -96,7 +96,7 @@ void DestroyEncryptor(void*& memory) noexcept {
 
     auto* state = static_cast<EncryptorState*>(memory);
     FreeBuffer(*state->allocator, state->buffer, EncryptorBufferBytes(state->segmentBytes));
-    FreeState(state);
+    SegmentStreamSequentialFreeState(state);
     memory = nullptr;
 }
 
@@ -107,7 +107,7 @@ void DestroyDecryptor(void*& memory) noexcept {
 
     auto* state = static_cast<DecryptorState*>(memory);
     FreeBuffer(*state->allocator, state->buffer, state->segmentBytes);
-    FreeState(state);
+    SegmentStreamSequentialFreeState(state);
     memory = nullptr;
 }
 
@@ -176,7 +176,7 @@ Result<SegmentStreamEncryptor> detail::SegmentStreamFactory::TryCreateEncryptor(
     created.allocator = &bufferAllocator;
     auto buffer = bufferAllocator.Allocate(EncryptorBufferBytes(segmentBytes), BufferAlignment);
     if (!buffer) {
-        FreeState(state.Value());
+        SegmentStreamSequentialFreeState(state.Value());
         return Result<SegmentStreamEncryptor>::Failure(buffer.Error());
     }
 

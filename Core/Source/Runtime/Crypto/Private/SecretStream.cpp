@@ -46,13 +46,13 @@ static_assert(ROCKS_OFFSET_OF(SodiumState, nonce) == detail::SecretStreamStateCo
 static_assert(detail::SecretStreamStateInonceOffset ==
               detail::SecretStreamStateCounterOffset + detail::SecretStreamStateCounterBytes);
 
-constexpr usize StateAlignment = 64;
+constexpr usize SecretStreamStateAlignment = 64;
 
-bool IsDefined(SecretStreamTag tag) noexcept {
+bool SecretStreamIsDefined(SecretStreamTag tag) noexcept {
     return static_cast<uint8>(tag) <= static_cast<uint8>(SecretStreamTag::Final);
 }
 
-SodiumState* StateOf(void* state) noexcept {
+SodiumState* SecretStreamStateOf(void* state) noexcept {
     return static_cast<SodiumState*>(state);
 }
 
@@ -61,20 +61,20 @@ SodiumState* StateOf(void* state) noexcept {
 // 카운터를 1로 둔다. init_push도 무작위 header를 만든 뒤 같은 계산을 하므로, 보내는 쪽도 header를
 // TryFillRandom으로 만들고 이 함수를 쓴다(OS 난수 실패를 Fatal 대신 DependencyFailed로 돌려준다).
 Result<void*> TryStartState(const SecretStreamKey& key, Span<const uint8> header) noexcept {
-    auto slot = detail::TryAllocateSecretSlot(sizeof(SodiumState), StateAlignment);
+    auto slot = detail::TryAllocateSecretSlot(sizeof(SodiumState), SecretStreamStateAlignment);
     if (!slot) {
         return slot;
     }
 
     detail::EnsureSodium();
     detail::RequireSodium(
-        crypto_secretstream_xchacha20poly1305_init_pull(StateOf(slot.Value()), header.Data(),
-                                                        detail::KeyAccess::Bytes(key).Data()),
+        crypto_secretstream_xchacha20poly1305_init_pull(
+            SecretStreamStateOf(slot.Value()), header.Data(), detail::KeyAccess::Bytes(key).Data()),
         "Crypto: crypto_secretstream_xchacha20poly1305_init_pull failed");
     return slot;
 }
 
-void FreeState(void*& state) noexcept {
+void SecretStreamFreeState(void*& state) noexcept {
     if (state != nullptr) {
         detail::FreeSecretSlot(state);
         state = nullptr;
@@ -162,7 +162,7 @@ SecretStreamWriter& SecretStreamWriter::operator=(SecretStreamWriter&& other) no
 }
 
 void SecretStreamWriter::Reset() noexcept {
-    FreeState(state_);
+    SecretStreamFreeState(state_);
     finished_ = false;
 }
 
@@ -201,7 +201,7 @@ Result<usize> SecretStreamWriter::TryPush(Span<const uint8> message,
         return Result<usize>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (finished_ || !IsDefined(tag) || Overlaps(output, message) ||
+    if (finished_ || !SecretStreamIsDefined(tag) || Overlaps(output, message) ||
         Overlaps(output, associatedData)) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
@@ -213,11 +213,12 @@ Result<usize> SecretStreamWriter::TryPush(Span<const uint8> message,
         return Result<usize>::Failure(ErrorCode::CapacityExceeded);
     }
 
-    detail::RequireSodium(
-        crypto_secretstream_xchacha20poly1305_push(
-            StateOf(state_), output.Data(), nullptr, detail::InputPointer(message), message.Size(),
-            detail::InputPointer(associatedData), associatedData.Size(), static_cast<uint8>(tag)),
-        "Crypto: crypto_secretstream_xchacha20poly1305_push failed");
+    detail::RequireSodium(crypto_secretstream_xchacha20poly1305_push(
+                              SecretStreamStateOf(state_), output.Data(), nullptr,
+                              detail::InputPointer(message), message.Size(),
+                              detail::InputPointer(associatedData), associatedData.Size(),
+                              static_cast<uint8>(tag)),
+                          "Crypto: crypto_secretstream_xchacha20poly1305_push failed");
     if (tag == SecretStreamTag::Final) {
         finished_ = true;
     }
@@ -228,7 +229,7 @@ Result<usize> SecretStreamWriter::TryPush(Span<const uint8> message,
 void SecretStreamWriter::Rekey() noexcept {
     platform::DataIndependentTimingScope dit;
     if (state_ != nullptr) {
-        crypto_secretstream_xchacha20poly1305_rekey(StateOf(state_));
+        crypto_secretstream_xchacha20poly1305_rekey(SecretStreamStateOf(state_));
     }
 }
 
@@ -260,7 +261,7 @@ SecretStreamReader& SecretStreamReader::operator=(SecretStreamReader&& other) no
 }
 
 void SecretStreamReader::Reset() noexcept {
-    FreeState(state_);
+    SecretStreamFreeState(state_);
     finished_ = false;
     failed_ = false;
 }
@@ -325,8 +326,8 @@ Result<SecretStreamMessage> SecretStreamReader::TryPull(Span<const uint8> sealed
     unsigned long long written = 0;
     uint8 tag = 0;
     const int status = crypto_secretstream_xchacha20poly1305_pull(
-        StateOf(state_), detail::OutputPointer(output, &scratch), &written, &tag, sealed.Data(),
-        sealed.Size(), detail::InputPointer(associatedData), associatedData.Size());
+        SecretStreamStateOf(state_), detail::OutputPointer(output, &scratch), &written, &tag,
+        sealed.Data(), sealed.Size(), detail::InputPointer(associatedData), associatedData.Size());
     if (status != 0 || tag > static_cast<uint8>(SecretStreamTag::Final)) {
         return Fail(output);
     }
@@ -344,7 +345,7 @@ Result<SecretStreamMessage> SecretStreamReader::TryPull(Span<const uint8> sealed
 void SecretStreamReader::Rekey() noexcept {
     platform::DataIndependentTimingScope dit;
     if (state_ != nullptr && !failed_) {
-        crypto_secretstream_xchacha20poly1305_rekey(StateOf(state_));
+        crypto_secretstream_xchacha20poly1305_rekey(SecretStreamStateOf(state_));
     }
 }
 
