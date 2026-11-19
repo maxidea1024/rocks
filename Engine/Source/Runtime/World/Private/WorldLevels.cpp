@@ -2,8 +2,8 @@
 
 #include <Object/ConstructionContext.h>
 #include <Platform/Fatal.h>
+#include <World/Level.generated.h>
 #include <World/World.h>
-#include <World/World.module.generated.h>
 
 namespace rocks {
 

@@ -1,4 +1,8 @@
+#include <CoreTypeBindings/CoreValueTypes.generated.h>
+#include <ReflectionTestFixtures/AutoIdentityFixture.generated.h>
+#include <ReflectionTestFixtures/ReflectionFixture.generated.h>
 #include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
+#include <ReflectionTestFixtures/StructFixture.generated.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>

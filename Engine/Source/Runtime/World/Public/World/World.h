@@ -64,7 +64,7 @@ using WorldSubsystemType = SubsystemType<WorldSubsystem>;
 //   TypeRegistry types(allocator);
 //   ModuleRegistration modules(types, allocator);       // types 뒤에 선언해 먼저 파괴한다
 //   if (auto registered = RegisterWorldTypes(modules); !registered) { ... }
-//   auto spinner = RegisterNativeClass<Spinner>(types);  // World.module.generated.h를 include한 TU
+//   auto spinner = RegisterNativeClass<Spinner>(types);  // Actor.generated.h를 include한 TU
 Result<void> RegisterWorldTypes(ModuleRegistration& registration) noexcept;
 
 // World GC 일정 방식이다(Docs/Design/GarbageCollectionScale.ko.md 17.3절).
@@ -219,8 +219,9 @@ inline constexpr bool IsSpanV<Span<R>> = true;
 // 생성 헤더 규약: 이 헤더는 리플렉션 생성 헤더를 include하지 않는다(Engine.h 소비자 전체로 컴파일
 // 비용이 번지지 않게). native 파생 T의 SpawnActor<T>·AddComponent<T>는 T::StaticTypeId만 쓰지만,
 // 리플렉션 World 타입(Actor·SceneComponent 등)을 템플릿 인자로 쓰는 TU와 RegisterNativeClass<T>를
-// 부르는 TU는 <World/World.module.generated.h>(또는 그 타입의 <World/<Type>.generated.h>)를
-// include한다 — 없으면 ObjectTypeIdOf·RegisterNativeClass의 static_assert가 안내한다.
+// 부르는 TU는 그 타입의 생성 헤더 <World/<Type>.generated.h>를 include한다 — 없으면
+// ObjectTypeIdOf·RegisterNativeClass의 static_assert가 안내한다(모듈 생성 헤더
+// <World/World.module.generated.h>는 등록 함수의 선언만 담는다).
 //
 // 스레드: 생성한 게임 스레드에서만 사용한다.
 class World final : private TickExecutor {

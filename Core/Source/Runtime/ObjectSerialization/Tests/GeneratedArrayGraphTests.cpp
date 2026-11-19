@@ -1,3 +1,5 @@
+#include <ReflectionTestFixtures/ArrayFixture.generated.h>
+#include <ReflectionTestFixtures/ReflectionFixture.generated.h>
 #include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Object/ConstructionContext.h>

@@ -123,7 +123,7 @@ internal static partial class MetaTests
             int Position(string name) => generated.IndexOf($"structGeneratedType<::probe::{name}>", StringComparison.Ordinal);
             Verify.That(Position("Leaf") >= 0 && Position("Holder") < Position("Bundle") && Position("Bundle") < Position("Value"),
                 "element structs are specialized before their users (StructRefArray<S>::Trace needs GeneratedType<S>)");
-            string aggregate = Compact(File.ReadAllText(probe.Aggregate));
+            string aggregate = Compact(File.ReadAllText(probe.ModuleSource));
             int Registered(string name) => aggregate.IndexOf($"GeneratedType<::probe::{name}>::Schema()", StringComparison.Ordinal);
             Verify.That(Registered("Mode") < Registered("Holder") && Registered("Holder") < Registered("Bundle") && Registered("Bundle") < Registered("Value"),
                 "element structs are registered first:\n" + aggregate);

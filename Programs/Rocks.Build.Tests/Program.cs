@@ -287,6 +287,9 @@ try
     await ModuleTableTests.RunAsync(request, root);
     Pass("module table: rows in dependency order without exempt modules, ROCKS_MODULE_NAME, missing entry link error, case collisions, reserved macro");
 
+    await ReflectionSourceTests.RunAsync(request, root);
+    Pass("reflection generated sources: source-less module archive, registration through the declaration, entry point exemption, incremental, validation");
+
     // 빌드 주입 상수(B7): 툴체인 지문·도구 빌드 ID·환경 위생·FP 인자 거부·입력 열거 정리. 하위 묶음마다 PASS를 센다.
     await BuildInfoTests.RunAsync(request, root, Pass);
 

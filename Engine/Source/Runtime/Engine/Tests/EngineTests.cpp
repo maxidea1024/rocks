@@ -7,7 +7,9 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 #include <World/SceneComponent.h>
-#include <World/World.module.generated.h>
+#include <World/Actor.generated.h>
+#include <World/SceneComponent.generated.h>
+#include <WorldTestFixtures/SaveFixture.generated.h>
 #include <WorldTestFixtures/WorldTestFixtures.module.generated.h>
 #include <stdio.h>
 #include <string.h>

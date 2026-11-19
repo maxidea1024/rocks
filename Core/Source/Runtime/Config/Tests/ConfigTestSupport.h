@@ -1,7 +1,5 @@
 #pragma once
 
-#include <Config/Config.module.generated.h>
-#include <ConfigTestFixtures/ConfigTestFixtures.module.generated.h>
 #include <ConfigTestFixtures/SettingsFixture.generated.h>
 #include <Config/ConfigContext.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -155,20 +153,10 @@ struct ScratchTree {
 // 둘(GraphSettings·GameplaySettings)을 등록해 둔다. 소멸 순서: 문맥(TypeLease) → Registry → 등록 →
 // pool → 타입.
 struct ConfigFixture {
-    explicit ConfigFixture(const ConfigContextOptions& options = {}) noexcept
-        : types(system), registration(types, system), names(system),
-          objects(system, types, {0x434f4e46, 1}, MakeOptions(names)) {
-        REQUIRE(generated::Config::RegisterModuleTypes(registration));
-        REQUIRE(generated::ConfigTestFixtures::RegisterModuleTypes(registration));
-        REQUIRE(names.Initialize());
-        auto made = UniquePtr<ConfigContext>::TryMake(system, system, objects, options);
-        REQUIRE(made);
-        context = Move(made.Value());
-        REQUIRE(context->Initialize());
-        REQUIRE(context->RegisterSettings<GraphSettings>());
-        REQUIRE(context->RegisterSettings<GameplaySettings>());
-        REQUIRE(context->Sync());
-    }
+    // Config와 fixture 모듈(ConfigTestFixtures)의 타입을 등록하고 설정 문맥을 만든다. 등록 함수는
+    // 모듈 생성 헤더에 선언되어 있고 손으로 쓴 헤더는 그 헤더를 include하지 않으므로 정의는
+    // ConfigTestSupport.cpp에 있다.
+    explicit ConfigFixture(const ConfigContextOptions& options = {}) noexcept;
 
     ~ConfigFixture() noexcept {
         context = nullptr;

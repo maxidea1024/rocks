@@ -6,7 +6,9 @@
 #include <World/Private/WorldInternal.h>
 #include <World/SceneComponent.h>
 #include <World/World.h>
-#include <World/World.module.generated.h>
+#include <World/Actor.generated.h>
+#include <World/Component.generated.h>
+#include <World/SceneComponent.generated.h>
 #include <stdio.h>
 #include <string.h>
 

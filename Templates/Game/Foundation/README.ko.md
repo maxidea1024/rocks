@@ -10,7 +10,7 @@
 - `SampleGame.rocksids.json`(모듈 이름 + `.rocksids.json`, `ModuleDirectory` = 프로젝트 루트)은 이 모듈의 타입·필드 식별자를 보관한다. 소스의 매크로에는 식별자를 적지 않는다.
 - `Source/GameObject.h`는 자체 `rocks::Object` 기반 클래스와 `ROCKS_CLASS`, 읽기 전용 `ROCKS_PROPERTY`를 선언한다.
 - `Source/SampleGameModule.cpp`는 모듈 진입점 `ROCKS_IMPLEMENT_MODULE(rocks::DefaultModuleImplementation, SampleGame)`을 정의한다. 모든 C++ 모듈은 진입점이 하나 있어야 하며, 빌드가 실행 파일마다 만드는 모듈 표가 이를 참조하므로 빠지면 링크 오류다([모듈 로더](../../../Docs/Design/ModuleLoader.ko.md) 3.2절). 시작·종료 때 할 일이 생기면 `rocks::ModuleImplementation` 파생 클래스로 바꾼다.
-- `Source/Main.cpp`는 모듈 집계 헤더 `<SampleGame/SampleGame.module.generated.h>`의 `rocks::generated::SampleGame::RegisterModuleTypes`로 이 모듈(과 리플렉션 타입을 가진 SDK 의존 모듈)의 타입을 등록하고, 객체를 만든 뒤 핸들로 조회하여 기본 체력 값이 100인지 검사한다. 성공 시 종료 코드는 0이다.
+- `Source/Main.cpp`는 모듈 생성 헤더 `<SampleGame/SampleGame.module.generated.h>`에 선언된 `rocks::generated::SampleGame::RegisterModuleTypes`로 이 모듈(과 리플렉션 타입을 가진 SDK 의존 모듈)의 타입을 등록하고, 객체를 만든 뒤 핸들로 조회하여 기본 체력 값이 100인지 검사한다. 성공 시 종료 코드는 0이다. 등록 함수의 정의는 빌드가 만드는 모듈 생성 소스(`<출력>/Generated/SampleGame/Source/SampleGame.module.generated.cpp`)에 있고 실행 파일에 함께 컴파일된다. 모듈 생성 헤더는 선언만 담으므로 `rocks::GeneratedType<sample::GameObject>`를 쓰는 코드는 그 타입의 생성 헤더 `<GameObject.generated.h>`를 include한다.
 - SDK 모듈의 리플렉션 타입(예: SDK가 담은 모듈의 `ROCKS_CLASS`)을 상속·참조하려면 그 모듈에 의존하고 헤더를 include한다. 게임 빌드는 SDK의 descriptor(`Metadata/<모듈>/<모듈>.rocksmeta.json`)를 import하므로 SDK 모듈을 다시 생성하지 않는다.
 
 템플릿 디렉터리를 SDK 외부의 새 게임 디렉터리로 복사한 뒤, 엔진 저장소에서 다음 명령을 실행한다. SDK는 게임 빌드에 사용할 플랫폼과 구성에 맞춰 미리 생성해야 한다. `SDK_경로`와 `게임_경로`는 실제 절대 경로로 바꾼다.

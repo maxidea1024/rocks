@@ -6,21 +6,23 @@ namespace Rocks.ToolTests;
 // 모듈 모드 시험 중 모듈 생성·import·가시성·도구 이름과 모듈 descriptor 시험이다.
 internal static partial class ModuleMetaTests
 {
-    // 모듈 생성·집계·import 오류·철자 충돌·포함 순서·상속 형질·타입 도구 이름·에셋 값 종류 왕복 시험이다.
+    // 모듈 생성·모듈 생성 헤더와 소스·import 오류·철자 충돌·포함 순서·상속 형질·타입 도구 이름·에셋 값 종류 왕복 시험이다.
     private static void RegisterModules(TestSuite suite, Options options, IReadOnlyDictionary<string, string?> environment)
     {
         suite.Add("Meta.ModuleNameMayEqualAReflectedClassName", async () =>
         {
-            // 집계 함수 이름공간 rocks::generated::Lower와 클래스 rocks::Lower가 서로 가리지 않는다(생성 코드는 이름을 ::rocks::로 한정한다 —
-            // 검증 컴파일이 생성 헤더와 집계 헤더를 함께 컴파일한다). World 모듈과 rocks::World의 관계와 같다.
+            // 등록 함수 이름공간 rocks::generated::Lower와 클래스 rocks::Lower가 서로 가리지 않는다(생성 코드는 이름을 ::rocks::로 한정한다 —
+            // --verify-sources 검증 컴파일이 생성 헤더와 모듈 생성 소스를 컴파일한다). World 모듈과 rocks::World의 관계와 같다.
             using Layout layout = new(options, environment);
             layout.Write("Lower/Public/Lower/Parent.h", SameNameParent);
             layout.Manifest("Lower", ["rocks::Lower"], ["rocks::Lower::value"]);
             ProcessResult lower = await layout.RunLowerAsync();
             Verify.Equal(0, lower.ExitCode, "module named like its reflected class: " + lower.StdErr);
             string aggregate = File.ReadAllText(layout.Generated("Lower", "Public/Lower/Lower.module.generated.h"));
-            Verify.Contains("namespace rocks::generated::Lower", aggregate, "aggregate namespace");
-            Verify.Contains("GeneratedType<::rocks::Lower>", aggregate, "aggregate registers the same-named class");
+            Verify.Contains("namespace rocks::generated::Lower", aggregate, "module header namespace");
+            string moduleSource = File.ReadAllText(layout.ModuleSource("Lower"));
+            Verify.Contains("namespace rocks::generated::Lower", moduleSource, "module source namespace");
+            Verify.Contains("GeneratedType<::rocks::Lower>", moduleSource, "module source registers the same-named class");
             string generated = File.ReadAllText(layout.Generated("Lower", "Public/Lower/Parent.generated.h"));
             Verify.Contains("struct GeneratedType<::rocks::Lower>", generated, "generated specialization is fully qualified");
         });
@@ -31,10 +33,27 @@ internal static partial class ModuleMetaTests
             ProcessResult lower = await layout.RunLowerAsync();
             Verify.Equal(0, lower.ExitCode, "lower module: " + lower.StdErr);
             Verify.That(File.Exists(layout.Generated("Lower", "Public/Lower/Parent.generated.h")), "lower generated header");
+            // 모듈 생성 헤더는 등록 함수의 선언만 담는다: include는 Object/ModuleRegistration.h 하나이고 타입별 생성 헤더·GeneratedType을
+            // 끌어오지 않는다(등록만 하는 번역 단위가 모듈의 생성 코드를 모두 컴파일하지 않게 — ReflectionGeneratedSources 5.5절).
             string lowerAggregate = File.ReadAllText(layout.Generated("Lower", "Public/Lower/Lower.module.generated.h"));
-            Verify.Contains("namespace rocks::generated::Lower", lowerAggregate, "lower aggregate namespace");
-            Verify.Contains("GeneratedType<::probe::Parent>", lowerAggregate, "lower aggregate registers its type");
-            Verify.That(!Directory.Exists(layout.Generated("Lower", "Private/Lower")), "public-only module emitted a private aggregate");
+            Verify.Contains("namespace rocks::generated::Lower", lowerAggregate, "lower module header namespace");
+            Verify.That(Compact(lowerAggregate).Contains(Compact("::rocks::Result<void> RegisterModuleTypes(::rocks::ModuleRegistration& registration, " +
+                "const ::rocks::ModuleLease& module = {}) noexcept;"), StringComparison.Ordinal), "lower module header declares the registration function:\n" + lowerAggregate);
+            Verify.Equal(1, lowerAggregate.Split("#include").Length - 1, "module header include count");
+            Verify.Contains("#include <Object/ModuleRegistration.h>", lowerAggregate, "module header include");
+            Verify.That(!lowerAggregate.Contains("GeneratedType<", StringComparison.Ordinal) && !lowerAggregate.Contains("inline", StringComparison.Ordinal) &&
+                !lowerAggregate.Contains("moduleKey", StringComparison.Ordinal), "module header must hold only the declaration:\n" + lowerAggregate);
+            // 모듈 생성 소스가 자기 모듈 생성 헤더와 타입별 생성 헤더를 include하고 등록 함수를 한 번 정의한다.
+            string lowerSource = File.ReadAllText(layout.ModuleSource("Lower"));
+            Verify.Contains("#include <Lower/Lower.module.generated.h>", lowerSource, "module source includes its module header");
+            Verify.Contains("#include <Lower/Parent.generated.h>", lowerSource, "module source includes the per-type generated header");
+            Verify.Contains("GeneratedType<::probe::Parent>", lowerSource, "lower module source registers its type");
+            Verify.That(Compact(lowerSource).Contains(Compact("::rocks::Result<void> RegisterModuleTypes(::rocks::ModuleRegistration& registration, " +
+                "const ::rocks::ModuleLease& module) noexcept {"), StringComparison.Ordinal) && !lowerSource.Contains("inline", StringComparison.Ordinal) &&
+                !lowerSource.Contains("RegisterPrivateModuleTypes", StringComparison.Ordinal),
+                "lower module source defines only the public registration function, out of line and without a default argument:\n" + lowerSource);
+            Verify.That(!Directory.Exists(layout.Generated("Lower", "Private/Lower")), "public-only module emitted a private module header");
+            Verify.Equal(1, Directory.GetFiles(layout.Generated("Lower", "Source"), "*", SearchOption.AllDirectories).Length, "generated source count");
             Verify.That(!File.ReadAllBytes(layout.Descriptor("Lower")).Contains((byte)'\r'), "descriptor must use LF on every platform");
 
             ProcessResult upper = await layout.RunUpperAsync();
@@ -44,19 +63,49 @@ internal static partial class ModuleMetaTests
                 Verify.That(File.Exists(layout.Generated("Upper", relative)), "missing generated header " + relative);
             }
 
-            // public 집계는 import한 모듈을 먼저 등록하고, 이 모듈 타입을 base 먼저(헤더를 건너) 등록한다.
+            // 모듈 생성 헤더 둘(public·private)은 선언만 담고 의존 모듈의 헤더도 include하지 않는다.
             string aggregate = File.ReadAllText(layout.Generated("Upper", "Public/Upper/Upper.module.generated.h"));
-            Verify.Contains("#include <Lower/Lower.module.generated.h>", aggregate, "dependency aggregate include");
-            Verify.Contains("registration.EnterModule(&moduleKey)", aggregate, "aggregate registers each module once per registration");
-            int dependency = aggregate.IndexOf("::rocks::generated::Lower::RegisterModuleTypes", StringComparison.Ordinal);
-            int value = aggregate.IndexOf("GeneratedType<::probe::Value>::Schema()", StringComparison.Ordinal);
-            int leaf = aggregate.IndexOf("GeneratedType<::probe::Leaf>::Schema()", StringComparison.Ordinal);
-            Verify.That(dependency >= 0 && value > dependency && leaf > value, "aggregate registration order:\n" + aggregate);
-            Verify.That(!aggregate.Contains("probe::Detail", StringComparison.Ordinal), "public aggregate registers a private type");
             string privateAggregate = File.ReadAllText(layout.Generated("Upper", "Private/Upper/Upper.private.module.generated.h"));
-            Verify.Contains("#include <Upper/Upper.module.generated.h>", privateAggregate, "private aggregate includes public aggregate");
-            Verify.Contains("RegisterPrivateModuleTypes", privateAggregate, "private aggregate function");
-            Verify.Contains("GeneratedType<::probe::Detail>", privateAggregate, "private aggregate registers private type");
+            foreach ((string header, string function, string other) in new[] { (aggregate, "RegisterModuleTypes", "RegisterPrivateModuleTypes"),
+                         (privateAggregate, "RegisterPrivateModuleTypes", "RegisterModuleTypes(") })
+            {
+                Verify.That(Compact(header).Contains(Compact($"::rocks::Result<void> {function}(::rocks::ModuleRegistration& registration, " +
+                    "const ::rocks::ModuleLease& module = {}) noexcept;"), StringComparison.Ordinal), $"module header declares {function}:\n" + header);
+                Verify.That(header.Split("#include").Length - 1 == 1 && header.Contains("#include <Object/ModuleRegistration.h>", StringComparison.Ordinal) &&
+                    !header.Contains("GeneratedType<", StringComparison.Ordinal) && !header.Contains(other, StringComparison.Ordinal),
+                    "module header must hold only its declaration:\n" + header);
+            }
+
+            // 모듈 생성 소스는 두 등록 함수를 정의한다. public 함수는 import한 모듈을 먼저 등록하고 이 모듈 타입을 base 먼저(헤더를 건너)
+            // 등록한다. private 함수는 public 함수를 먼저 부른 뒤 private 타입만 등록한다. 함수마다 자기 모듈 키를 가진다.
+            string source = File.ReadAllText(layout.ModuleSource("Upper"));
+            foreach (string include in new[] { "Upper/Upper.module.generated.h", "Upper/Upper.private.module.generated.h", "Lower/Lower.module.generated.h",
+                         "Upper/Value.generated.h", "Upper/Leaf.generated.h", "Upper/Detail.generated.h" })
+            {
+                Verify.Contains($"#include <{include}>", source, "module source include");
+            }
+
+            string compactSource = Compact(source);
+            int privateDefinition = compactSource.IndexOf("::rocks::Result<void>RegisterPrivateModuleTypes(", StringComparison.Ordinal);
+            Verify.That(privateDefinition > 0, "module source defines the private registration function after the public one:\n" + source);
+            string publicBody = compactSource[..privateDefinition];
+            string privateBody = compactSource[privateDefinition..];
+            Verify.That(publicBody.Contains("registration.EnterModule(&moduleKey)", StringComparison.Ordinal) &&
+                privateBody.Contains("registration.EnterModule(&moduleKey)", StringComparison.Ordinal) &&
+                compactSource.Split("staticconstexprcharmoduleKey=0;").Length - 1 == 2, "each registration function enters the module once per registration with its own key");
+            int dependency = publicBody.IndexOf("::rocks::generated::Lower::RegisterModuleTypes", StringComparison.Ordinal);
+            int value = publicBody.IndexOf("GeneratedType<::probe::Value>::Schema()", StringComparison.Ordinal);
+            int leaf = publicBody.IndexOf("GeneratedType<::probe::Leaf>::Schema()", StringComparison.Ordinal);
+            Verify.That(dependency >= 0 && value > dependency && leaf > value, "public registration order:\n" + source);
+            Verify.That(!publicBody.Contains("probe::Detail", StringComparison.Ordinal), "public registration function registers a private type");
+            int viaPublic = privateBody.IndexOf("::rocks::generated::Upper::RegisterModuleTypes(registration,module)", StringComparison.Ordinal);
+            int detail = privateBody.IndexOf("GeneratedType<::probe::Detail>::Schema()", StringComparison.Ordinal);
+            Verify.That(viaPublic >= 0 && detail > viaPublic && !privateBody.Contains("::rocks::generated::Lower::", StringComparison.Ordinal) &&
+                !privateBody.Contains("probe::Value>::Schema()", StringComparison.Ordinal),
+                "private registration function calls the public one first and registers only private types:\n" + source);
+            Verify.That(!source.Contains("inline", StringComparison.Ordinal) && !source.Contains("= {}", StringComparison.Ordinal) &&
+                !source.Contains("namespace {", StringComparison.Ordinal) && !source.Contains("#define", StringComparison.Ordinal),
+                "module source definitions are out of line, without default arguments, file-local names or macros:\n" + source);
 
             // descriptor는 상속 필드를 펼치고, import한 타입을 가리키는 참조의 대상 ID를 담는다.
             using JsonDocument lowerDescriptor = JsonDocument.Parse(File.ReadAllBytes(layout.Descriptor("Lower")));
@@ -79,6 +128,23 @@ internal static partial class ModuleMetaTests
             // 남은 생성물을 지우지 않는다(지우기는 빌드의 게시 트랜잭션이 맡는다).
             ProcessResult check = await layout.RunUpperAsync(extra: ["--check"]);
             Verify.Equal(0, check.ExitCode, "up-to-date check: " + check.StdErr);
+            // 생성 소스 루트(Source)도 같은 검사를 받는다: 내용이 바뀐 모듈 생성 소스와 남은 잉여 파일을 찾는다.
+            string upperSource = layout.ModuleSource("Upper");
+            string upperSourceText = File.ReadAllText(upperSource);
+            File.WriteAllText(upperSource, upperSourceText + "// edited\n");
+            ProcessResult staleSource = await layout.RunUpperAsync(extra: ["--check"]);
+            Verify.That(staleSource.ExitCode != 0, "check accepted an edited module generated source");
+            Verify.Contains("RMC4000", staleSource.StdErr, "stale module source code");
+            Verify.Contains("Upper.module.generated.cpp", staleSource.StdErr, "stale module source path");
+            File.WriteAllText(upperSource, upperSourceText);
+            string leftoverSource = layout.Generated("Upper", Path.Combine("Source", "Removed.generated.cpp"));
+            File.WriteAllText(leftoverSource, "// leftover\n");
+            ProcessResult extraSource = await layout.RunUpperAsync(extra: ["--check"]);
+            Verify.That(extraSource.ExitCode != 0, "check accepted a leftover file in the generated source root");
+            Verify.Contains("RMC4000", extraSource.StdErr, "leftover source code");
+            Verify.Contains("Removed.generated.cpp", extraSource.StdErr, "leftover source path");
+            File.Delete(leftoverSource);
+            Verify.Equal(0, (await layout.RunUpperAsync(extra: ["--check"])).ExitCode, "check after restoring the generated source root");
             ProcessResult withoutLeaf = await layout.RunUpperAsync(withLeaf: false);
             Verify.Equal(0, withoutLeaf.ExitCode, "upper module without Leaf: " + withoutLeaf.StdErr);
             ProcessResult stale = await layout.RunUpperAsync(withLeaf: false, extra: ["--check"]);
@@ -121,7 +187,8 @@ internal static partial class ModuleMetaTests
             await Reject(layout.RunLowerAsync(extra: ["--identity-inventory", layout.Generated("Lower", "inventory.json")]), "RMC1000", "outside the output root");
         });
 
-        // 집계 헤더는 이름을 ::rocks::로 한정하므로 rocks 타입과 같은 이름(Result)의 모듈도 그 모듈과 의존 모듈이 컴파일된다.
+        // 등록 함수는 이름을 ::rocks::로 한정하므로 rocks 타입과 같은 이름(Result)의 모듈도 그 모듈과 의존 모듈의 모듈 생성 소스가
+        // 컴파일된다(--verify-sources).
         suite.Add("Meta.ModuleNamedLikeRocksTypesCompiles", async () =>
         {
             using Layout layout = new(options, environment);
@@ -132,8 +199,35 @@ internal static partial class ModuleMetaTests
             ProcessResult upper = await layout.RunUpperInputsAsync([(layout.Source("Upper/Public/Upper/Value.h"), "Upper/Value.h", false)],
                 imports: [layout.Descriptor("Result")], dependencyModule: "Result");
             Verify.Equal(0, upper.ExitCode, "module importing Result: " + upper.StdErr);
-            Verify.Contains("::rocks::generated::Result::RegisterModuleTypes", File.ReadAllText(layout.Generated("Upper", "Public/Upper/Upper.module.generated.h")),
+            Verify.Contains("::rocks::generated::Result::RegisterModuleTypes", File.ReadAllText(layout.ModuleSource("Upper")),
                 "dependency call");
+        });
+
+        // --verify-sources는 모듈 생성 소스(등록 함수 정의)도 게시 전에 컴파일한다(Docs/Design/ReflectionGeneratedSources.ko.md 7절). 의존
+        // 모듈의 생성 public 루트(모듈 생성 헤더가 있는 곳)를 include 검색 순서에서 빼면 타입별 생성 헤더는 그대로 컴파일되지만 모듈 생성
+        // 소스는 의존 모듈의 모듈 생성 헤더를 열지 못한다. 옵션이 있으면 RMC3000으로 거부하고 아무것도 게시하지 않는다. 옵션이 없으면
+        // (빌드가 그 모듈의 compile action으로 컴파일하므로) 생성 헤더 검증만으로 게시한다.
+        suite.Add("Meta.VerifySourcesCompilesTheModuleGeneratedSource", async () =>
+        {
+            using Layout layout = new(options, environment);
+            Verify.Equal(0, (await layout.RunLowerAsync()).ExitCode, "lower module");
+            Directory.CreateDirectory(layout.Generated("Absent", "Public"));
+            (string Path, string Include, bool Private)[] inputs = [(layout.Source("Upper/Public/Upper/Value.h"), "Upper/Value.h", false)];
+            ProcessResult rejected = await layout.RunUpperInputsAsync(inputs, dependencyModule: "Absent");
+            Verify.That(rejected.ExitCode != 0, "--verify-sources accepted a module generated source that does not compile");
+            Verify.Contains("RMC3000", rejected.StdErr, "module source verification code");
+            Verify.Contains("Source/Upper.module.generated.cpp", rejected.StdErr, "module source verification names the generated source");
+            Verify.That(!File.Exists(layout.ModuleSource("Upper")) && !File.Exists(layout.Generated("Upper", "Public/Upper/Value.generated.h")) &&
+                !File.Exists(layout.Generated("Upper", "Public/Upper/Upper.module.generated.h")) && !File.Exists(layout.Descriptor("Upper")),
+                "a rejected module generated source published output");
+
+            ProcessResult accepted = await layout.RunUpperInputsAsync(inputs, dependencyModule: "Absent", verifySources: false);
+            Verify.Equal(0, accepted.ExitCode, "without --verify-sources the generated source is left to the build: " + accepted.StdErr);
+            Verify.That(File.Exists(layout.ModuleSource("Upper")) && File.Exists(layout.Generated("Upper", "Public/Upper/Upper.module.generated.h")),
+                "the module generated header and source were not published");
+
+            // 옵션은 한 번만 준다(--check와 같다).
+            await Reject(layout.RunUpperAsync(extra: [MetaCompilerArguments.VerifySources]), "RMC1000", "duplicate option --verify-sources");
         });
 
         // 생성물 검증 컴파일은 소비자와 같은 include 순서를 쓴다. 작성자 디렉터리의 낡은 .generated.h가 생성 헤더보다 먼저
@@ -334,19 +428,26 @@ internal static partial class ModuleMetaTests
     // private 전용 모듈 등록·모듈 재선언·자기 import와 모듈 descriptor 엄격 읽기 시험이다(enum 시험 뒤에 등록한다).
     private static void RegisterModuleDescriptors(TestSuite suite, Options options, IReadOnlyDictionary<string, string?> environment)
     {
-        // private 헤더만 있는 모듈도 private 집계가 import한 모듈을 먼저 등록한다(base가 등록되어 있어야 한다).
+        // private 헤더만 있는 모듈도 private 등록 함수가 import한 모듈을 먼저 등록한다(base가 등록되어 있어야 한다).
         suite.Add("Meta.PrivateOnlyModuleRegistersImportedModules", async () =>
         {
             using Layout layout = new(options, environment);
             Verify.Equal(0, (await layout.RunLowerAsync()).ExitCode, "lower module");
             ProcessResult hidden = await layout.RunUpperInputsAsync([(layout.Source("Upper/Private/Upper/Hidden.h"), "Upper/Hidden.h", true)]);
             Verify.Equal(0, hidden.ExitCode, "private-only module: " + hidden.StdErr);
-            Verify.That(!File.Exists(layout.Generated("Upper", "Public/Upper/Upper.module.generated.h")), "private-only module emitted a public aggregate");
-            string aggregate = File.ReadAllText(layout.Generated("Upper", "Private/Upper/Upper.private.module.generated.h"));
-            Verify.Contains("#include <Lower/Lower.module.generated.h>", aggregate, "private-only aggregate includes the dependency aggregate");
+            Verify.That(!File.Exists(layout.Generated("Upper", "Public/Upper/Upper.module.generated.h")), "private-only module emitted a public module header");
+            string privateHeader = File.ReadAllText(layout.Generated("Upper", "Private/Upper/Upper.private.module.generated.h"));
+            Verify.That(privateHeader.Contains("RegisterPrivateModuleTypes", StringComparison.Ordinal) && !privateHeader.Contains("Lower", StringComparison.Ordinal),
+                "private-only module header declares only the private registration function:\n" + privateHeader);
+            string aggregate = File.ReadAllText(layout.ModuleSource("Upper"));
+            Verify.Contains("#include <Upper/Upper.private.module.generated.h>", aggregate, "private-only module source includes its module header");
+            Verify.Contains("#include <Lower/Lower.module.generated.h>", aggregate, "private-only module source includes the dependency module header");
+            Verify.That(!aggregate.Contains("#include <Upper/Upper.module.generated.h>", StringComparison.Ordinal) &&
+                !Compact(aggregate).Contains("::rocks::Result<void>RegisterModuleTypes(", StringComparison.Ordinal),
+                "private-only module source must not include or define the public registration function:\n" + aggregate);
             int dependency = aggregate.IndexOf("::rocks::generated::Lower::RegisterModuleTypes", StringComparison.Ordinal);
             int own = aggregate.IndexOf("GeneratedType<::probe::Hidden>::Schema()", StringComparison.Ordinal);
-            Verify.That(dependency >= 0 && own > dependency, "private-only aggregate must register the imported base first:\n" + aggregate);
+            Verify.That(dependency >= 0 && own > dependency, "private-only registration must register the imported base first:\n" + aggregate);
         });
 
         // 모듈은 자기 descriptor를 import할 수 없고, import한 타입을 다시 정의하거나 같은 이름을 다른 파일에서 선언할 수 없다.

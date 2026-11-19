@@ -3,9 +3,10 @@ using Rocks.Build.Rules;
 // Asset runtime (Docs/Design/AssetSystem.ko.md sections 5, 6, 10 and 11, stage A1): package format v1 (PackageWriter and PackageReader),
 // Package and Asset reflection classes, bulk data references, the cooked manifest reader and the runtime loader with AssetManager.
 // Knows nothing about Engine, World or graphics (EngineAssets connects AssetManager to the engine frame). Package, Asset and
-// BulkDataRef are reflection types; generated headers are <AssetRuntime/<Type>.generated.h>, aggregate registration is
-// rocks::generated::AssetRuntime::RegisterModuleTypes in <AssetRuntime/AssetRuntime.module.generated.h> (called by
-// RegisterAssetRuntimeTypes), and the identity spec is AssetRuntime.rocksids.json.
+// BulkDataRef are reflection types; generated headers are <AssetRuntime/<Type>.generated.h>, module registration is
+// rocks::generated::AssetRuntime::RegisterModuleTypes, declared in <AssetRuntime/AssetRuntime.module.generated.h> and defined in
+// the module generated source that the build compiles into this module (called by RegisterAssetRuntimeTypes), and the identity
+// spec is AssetRuntime.rocksids.json.
 public sealed class AssetRuntime : EngineModuleRules
 {
     protected override string ModuleName => "AssetRuntime";
