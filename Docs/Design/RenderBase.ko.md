@@ -1,6 +1,6 @@
 # 렌더 기반(RenderBase) 설계
 
-기준일: 2026-11-19, 개정 24(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-19, 개정 25(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
 - 렌더 lane과 프레임 전달, 장치 스레드 모델, 장치 자원 수명, 렌더 그래프
 - 셰이더 런타임 객체(셰이더 집합·파라미터 바인딩·상수 블록·파이프라인 캐시)
 - 정점 입력 타입, 공용 자원·그리기 유틸리티, GPU 계측
@@ -628,6 +628,16 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
   - GPU 계측: 그래프의 장치 기록 전체를 GPU 프레임 하나로 묶는다(첫 기록에서 `GpuTrace::BeginFrame`, 마지막 기록에서 `EndFrame`). pass마다 `CpuScope`와 `GpuScope`(pass 이름은 정적 `TraceScopeName`)를 둔다(13.3절 스펙과 다른 점 (4) 해소).
   - 렌더 lane 연결: `RenderFrameContext::Arena()`(그 slot의 FrameArena)를 더했다. 그래프 수명 표는 그 arena에 두고, pass 함수(람다)는 그래프 파괴 때 렌더 lane에서 부순다(arena Reset은 게임 lane에서 일어나기 때문이다).
 - 남은 것(RG1): 파라미터 구조체 수집기(RB4·SH2·P7), `GraphSharedData`, attachment load·MRT·깊이·렌더 타깃 없는 기록(GX4는 구현됐고 그래프 쪽 연결이 남음: 지금 그래프는 `BeginOffscreen`(색 하나·clear)만 쓰고 열린 기록이 없는 Compute·Copy pass는 `Unsupported`), 버퍼 용도·텍스처 차원·형식 확장(GX2·픽셀 형식), 그래프 설정 변수(CP4), 캡처 도구 수동 확인 기록(13.3절). 렌더러 사용 요구(7.5절: `GraphSharedData`·`SceneTextureTable` 규칙, mip view와 view 기준 mip, 그래프 구간 `GraphScope`)도 RG1에 넣는다. export 성공 조건(검증 실패 그래프의 export handle은 Failed)은 RG1에 이미 있다. export한 풀 자원의 fence 뒤 풀 반납(결정 R15)과 Vulkan 픽셀 대조는 끝났다(아래 RG2 구현, 4.4절 GX5 Vulkan).
+
+**RG1 남은 것 설계(개정 25).** SH2·RB4·P7·CP4에 기대지 않는 부분을 세 부분으로 나눠 넣는다. 파라미터 구조체 수집기(RB4·SH2·P7)·그래프 설정 변수(CP4)·캡처 도구 수동 기록은 그대로 남는다.
+- **A부: attachment 기록과 풀 desc 확장.**
+  - 그래프 Raster pass는 장치 `BeginPass`로 연다(`BeginOffscreen` 대신). `GraphRenderTarget`이 색 attachment 0–8(`GraphColorTarget`: 텍스처·load·clear·mip·slice)과 깊이 attachment 하나(`GraphDepthTarget`: 텍스처·깊이·스텐실 load와 clear 값·`readOnly`·mip·slice)를 갖는다. builder는 `RenderTarget`(색 하나를 덧붙임, 기존 호출과 같은 뜻)·`ColorTarget`·`DepthTarget`이다. load `Load`는 attachment를 읽는 것으로도 세어 생산 전 읽기 검사를 받는다(RG1의 `Unsupported`를 없앤다). store는 늘 `Store`다(뒤 pass가 쓰지 않는 attachment의 `DontCare`는 후속 최적화). 깊이 접근은 `DepthWrite`, `readOnly`면 `DepthRead`다.
+  - attachment는 그 subresource(`AttachmentSubresource`) 하나의 접근이고 전이는 장치 `BeginPass`가 낸다(접근 기록에 attachment 표시를 두어 그래프는 그 전이를 내지 않는다, RG1의 "렌더 타깃 mip 0" 규칙의 일반화). 같은 (텍스처, mip, slice)를 두 attachment로 붙이면 검증 오류다.
+  - 렌더 타깃이 없는 Compute·Copy pass는 열린 기록이 없으면 attachment 없는 `BeginPass`로 기록을 연다(RG1의 `Unsupported`를 없앤다).
+  - 풀·그래프 텍스처 desc: 렌더 타깃은 모든 차원과 mip 사슬, 깊이(`DepthStencil`)·`Storage` 그래프 텍스처, MSAA(`sampleCount`)를 받는다. 풀 키에 `sampleCount`를 더한다(차원·깊이·층·mip은 이미 키에 있다). 깊이·Storage는 초기 픽셀이 없다.
+  - attachment resolve(`ColorAttachment::resolveTarget`)는 그래프에 아직 넣지 않는다. resolve 뒤 원본·대상의 장치 상태가 backend마다 다르므로(D3D12 RESOLVE_SOURCE·셰이더 읽기, Vulkan TRANSFER_SRC·DST) 그래프가 상태를 추적하려면 장치 계약을 먼저 맞춰야 한다. 장치 쪽 resolve 뒤 상태를 정하는 작업과 함께 넣는다.
+- **B부: `GraphTextureView`.** (텍스처, mip 범위, slice 범위, SRV·UAV) 그래프 view를 장치 텍스처 view로 낮추고 접근은 그 범위의 subresource만이다. 겹치는 범위의 SRV·UAV는 한 pass 안 상충이다. GLES는 `TextureViewBaseMip`을 pass 문맥에서 준다.
+- **C부: `GraphSharedData`·`SceneTextureTable`과 history export 확인.** 7.5절 규칙대로 넣고, history export 규칙(결정 R15)은 RG2에서 들어간 것을 시험으로 확인한다.
 
 **구현(2026-11-18, RG2 A부).** 프레임 안 풀 재사용, export 자원의 풀 반납(결정 R15), 그래프 안 업로드다. begin·end 분리 전이(B부)는 Graphics `ResourceAccess`·`Transition`과 D3D12·Vulkan backend를 고쳐야 하므로 다른 세션의 D3D11·D3D12 공용 코드 정리 병합 뒤에 한다. 계약은 [렌더 기반 구현](../Implementation/RenderBase.ko.md) 9절이다.
 - **프레임 안 재사용.** Deferred 컴파일이 culling·수명 뒤 남은 pass를 실행 순서로 훑어 장치 객체 자리(`PhysicalResource`)를 정한다: pass p에서 처음 쓰는 자원은 p 앞에서 놓인 같은 풀 키의 자리를 받고(없으면 새 자리), p에서 마지막으로 쓰는 자원은 p 뒤에 자리를 놓는다. 같은 pass에서 쓰는 두 자원은 자리를 나누지 않는다. export 자원은 그래프 끝까지 놓지 않고, 업로드 대상은 그래프 시작에 자리를 받는다(업로드가 첫 pass 앞에서 실행되므로 앞 자원의 객체를 덮지 않기 위해서다). 자리는 첫 자원의 첫 pass 직전에 풀에서 받고 그래프 끝에 한 번 돌려준다. UE도 마지막 사용 pass에서 풀 자원을 놓고 뒤 pass의 할당이 같은 desc를 다시 받는다(`RC/Private/RenderGraphBuilder.cpp:3128–3175, 3632–3646`).
@@ -1265,6 +1275,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
   - 10.5절: typed buffer 원소 용량과 넘침(결정 R16), 행렬식 부호의 인스턴스 단위 분할과 재분류.
   - 11.1절: 빈 light grid의 셀 좌표 clamp, 검은 cube array 알파 0(UE와 같은 반사 합성 의미). 11.2절: MSAA resolve 범위(깊이 늘, velocity는 temporal 때, 색은 결정 R17), 스텐실 0, UE 줄 인용 정정.
   - 2절 용어(`SharedResourceStruct`·`DrawResourceStruct`·`GraphScope`), GX1 기능 이름 "VS layer 출력".
+- 개정 25(2026-11-19): RG1 남은 것 설계(8절 "RG1 남은 것 설계": A부 attachment 기록·풀 desc 확장, B부 `GraphTextureView`, C부 `GraphSharedData`·`SceneTextureTable`·history export 확인, 그래프 resolve는 장치 resolve 뒤 상태 계약과 함께로 미룸).
 - 개정 24(2026-11-19): 텍스처 GX2 C부(slice·mip attachment) 설계와 구현(4.4절 "구현(2026-11-19, C부)"·시험 결과·"텍스처 GX2 뒤에 남은 것", 4.2절 GX2 행, A부 Vulkan descriptor pool 결함 수정)을 적었다: 2D 밖 차원·mip 사슬 렌더 타깃·깊이(3D 깊이 제외, 다중 plane 깊이는 그대로 `Unsupported`), attachment `mipLevel`·`slice`, resolve 대상 mip·slice, subresource 단위 attachment 전이, 그래프 쪽은 RG1 남은 것으로.
 - 개정 23(2026-11-19): 텍스처 GX2 B부(MSAA 텍스처·attachment resolve) 설계와 구현(4.4절 "구현(2026-11-19, B부)"·시험 결과, 4.2절 GX2 행)을 4.4절에 적었다: `TextureDesc`·`PipelineDesc::sampleCount`, `ColorAttachment::resolveTarget`(결정 R17의 attachment resolve, 박스 평균), `Texture2DMS` 읽기, MSAA 텍스처의 readback·복사 거부, Vulkan은 render pass 밖 `vkCmdResolveImage`(subpass resolve는 RG3·GX13).
 - 개정 22(2026-11-19): 텍스처 GX2 A부 구현(4.4절 "구현(2026-11-19, A부)" 메모·backend 표·시험, GLES 일부 slice view `Unsupported`)과 텍스처 GX2 설계(4.4절 GX2 "텍스처 GX2 설계": A부 view 범위·`TextureUsage::Storage`·compute 텍스처 묶기·`textureViewRanges`, B부 MSAA·resolve, C부 slice attachment)를 적었다. 4.2절 GX2 행 상태를 고쳤다.
