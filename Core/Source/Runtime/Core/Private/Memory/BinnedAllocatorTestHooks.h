@@ -43,6 +43,17 @@ struct BinnedAllocator::TestHooks {
     static void RunCurrentThreadExitHook() noexcept;
     // 호출 스레드가 "종료한 스레드"로 표시됐는지다.
     static bool IsCurrentThreadExited() noexcept;
+    // 호출 스레드의 thread_local 포인터만 지운다(기록과 종료 칸의 값은 그대로다). 스레드가 끝나는
+    // 동안 thread_local 저장소가 먼저 해제되는 플랫폼(macOS)의 상태를 만든다: 그 뒤의 호출은 칸의
+    // 값에서 기록을 다시 찾아야 한다. 기록이 종료 칸에 걸려 있는 스레드에서 부른다.
+    static void ForgetCurrentThreadRecord() noexcept;
+    // 호출 스레드의 thread_local 포인터 값이다(칸을 보지 않는다 — 비교에만 쓴다).
+    static const void* CurrentThreadRecordPointer() noexcept;
+    // 이 스레드의 기록을 스레드 종료 칸에 거는 일을 실패시킨다(아직 기록이 없는 스레드에서 부른다).
+    // 그 스레드는 그 뒤로 캐시를 만들지 않으므로 곧 끝날 worker 스레드에서만 부른다.
+    static void FailNextThreadExitHook() noexcept;
+    // 호출 스레드가 "종료 칸에 걸지 못한 스레드"로 표시됐는지다.
+    static bool IsCurrentThreadUnhooked() noexcept;
     // 호출 스레드의 기록에 든 항목(인스턴스 → 캐시) 수다. 파괴된 인스턴스의 항목은 다음 캐시를 만들
     // 때 버려진다.
     static uint32 CurrentThreadRecordEntries() noexcept;
