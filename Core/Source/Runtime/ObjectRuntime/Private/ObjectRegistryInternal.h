@@ -503,7 +503,9 @@ inline uint32& ObjectRegistry::ClusterStateOf(uint32 index) const noexcept {
 }
 
 // 미룬 장부 감소 기록의 칸 수와 적용 때 미리 읽는 거리다(GC 설계 13.4절).
-inline constexpr uint32 LedgerRemovalCapacity = 4096;
+// 칸 수는 꼬리 지연으로 정했다: 적용은 gate_ 아래 칸마다 무작위 대상 줄 하나라 256칸이 1M 무작위
+// 대상에서 13–25µs다(4096칸은 140–350µs).
+inline constexpr uint32 LedgerRemovalCapacity = 256;
 inline constexpr uint32 LedgerApplyPrefetchDistance = 8;
 
 inline uint32& ObjectRegistry::ClusterInCountOf(uint32 index) const noexcept {

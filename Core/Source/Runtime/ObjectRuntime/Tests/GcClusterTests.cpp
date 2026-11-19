@@ -191,9 +191,6 @@ TEST(ObjectGcCluster_BoundaryMemberKeepsOutsideTargetAndLeaveDetaches) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
-// 클러스터 소속 owner의 바꿔 떼기(RemoveReferenceAtSwap)는 지운 간선만 장부에서 뺀다. 옮긴 끝
-// 원소가 이탈한(파괴 요청된) 소속이어도 그 간선의 계수는 그대로라 detached로 살고, 그 간선을 마저
-// 지우면 회수된다. 매 Collect가 장부를 다시 세어 대조한다(verifyClusterLedger).
 // 간선 제거의 장부 감소는 미뤄 기록한다(GC 설계 13.4절). 이탈은 먼저 기록을 적용해야 한다:
 // 경계 간선을 지운 소속이 이탈하면 그 소속의 outCount가 0이어야 한다(적용하지 않으면 "outgoing
 // ledger edges" Fatal). 이탈한 소속과 밖 객체는 다음 Collect에서 회수된다.
@@ -362,6 +359,207 @@ TEST(ObjectGcCluster_DeferredRemovalsOverflowTheLog) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
+// 끝까지 증분 cycle을 돈다(slice마다 객체 하나). reclaiming이 있으면 Reclaiming을 지났는지 적는다.
+void StepToIdle(ObjectRegistry& objects, bool* reclaiming = nullptr) noexcept {
+    GcBudget budget;
+    budget.maxObjects = 1;
+    budget.maxNanoseconds = 0;
+    for (uint32 guard = 0; guard < 4096 && objects.CollectionPhase() != GcPhase::Idle; ++guard) {
+        REQUIRE(objects.StepCollection(objects.OwnerAccess(), budget));
+        if (reclaiming != nullptr && objects.CollectionPhase() == GcPhase::Reclaiming) {
+            *reclaiming = true;
+        }
+    }
+
+    REQUIRE(objects.CollectionPhase() == GcPhase::Idle);
+}
+
+// Sweeping 중에 지운 경계 간선의 감소는 Reclaiming·Idle을 지나 다음 Begin에서 적용된다. 대상은 그
+// cycle에 표식됐으므로 그사이 회수되지 않는다(적용의 대상 검사가 통과한다). 다음 Collect가 기록을
+// 적용하고 Debug 장부 검증이 계수를 대조한 뒤 밖 객체를 회수한다(기록을 잃으면 장부 검증 Fatal).
+TEST(ObjectGcCluster_DeferredRemovalDuringSweepingAppliesAtNextBegin) {
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterClusterTypes(types));
+        ObjectRegistry objects(allocator, types, Guid{0x4743, 25}, ClusterOptions());
+        const auto access = objects.OwnerAccess();
+        SmallCluster cluster;
+        REQUIRE(MakeCluster(objects, 3, cluster));
+        auto outside = objects.NewObject<ClusterNode>(access, PlainNodeType);
+        REQUIRE(outside);
+        const ObjectHandle outsideHandle = outside.Value().Handle();
+        REQUIRE(Link(objects, cluster.members[0], outsideHandle));
+        outside.Value().Reset();
+        REQUIRE(objects.Collect(access));
+        // 이 cycle에 회수될 쓰레기(Reclaiming을 지나게 한다).
+        for (uint32 index = 0; index < 4; ++index) {
+            auto garbage = objects.NewObject<ClusterNode>(access, PlainNodeType);
+            REQUIRE(garbage);
+        }
+
+        REQUIRE(objects.BeginCollection(access));
+        GcBudget budget;
+        budget.maxObjects = 1;
+        budget.maxNanoseconds = 0;
+        for (uint32 guard = 0; guard < 64 && objects.CollectionPhase() == GcPhase::Marking;
+             ++guard) {
+            REQUIRE(objects.StepCollection(access, budget));
+        }
+
+        REQUIRE(objects.CollectionPhase() == GcPhase::Sweeping);
+        REQUIRE(Unlink(objects, cluster.members[0], outsideHandle));
+        bool reclaiming = false;
+        StepToIdle(objects, &reclaiming);
+        CHECK(reclaiming);
+        CHECK(Exists(objects, outsideHandle));
+        REQUIRE(objects.Collect(access));
+        CHECK(!Exists(objects, outsideHandle));
+        CHECK(Exists(objects, cluster.members[0]));
+        // 다음 검증이 적용 뒤의 계수를 대조한다(기록을 적용하지 않고 버리면 불일치 Fatal).
+        REQUIRE(objects.Collect(access));
+        cluster.root.Reset();
+        REQUIRE(objects.Shutdown(access));
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// 취소(CancelCollection)는 기록을 적용하지 않는다. Marking 중에 지운 경계 간선의 감소는 다음 cycle
+// 시작에 적용되고(Debug 장부 검증이 대조한다), 밖 객체는 그 cycle에 회수된다.
+TEST(ObjectGcCluster_DeferredRemovalSurvivesCancel) {
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterClusterTypes(types));
+        ObjectRegistry objects(allocator, types, Guid{0x4743, 26}, ClusterOptions());
+        const auto access = objects.OwnerAccess();
+        SmallCluster cluster;
+        REQUIRE(MakeCluster(objects, 3, cluster));
+        auto outside = objects.NewObject<ClusterNode>(access, PlainNodeType);
+        REQUIRE(outside);
+        const ObjectHandle outsideHandle = outside.Value().Handle();
+        REQUIRE(Link(objects, cluster.members[0], outsideHandle));
+        outside.Value().Reset();
+        REQUIRE(objects.Collect(access));
+        REQUIRE(objects.BeginCollection(access));
+        REQUIRE(Unlink(objects, cluster.members[0], outsideHandle));
+        REQUIRE(objects.CancelCollection(access));
+        REQUIRE(objects.CollectionPhase() == GcPhase::Idle);
+        CHECK(Exists(objects, outsideHandle));
+        REQUIRE(objects.Collect(access));
+        CHECK(!Exists(objects, outsideHandle));
+        CHECK(Exists(objects, cluster.members[0]));
+        // 다음 검증이 적용 뒤의 계수를 대조한다(기록을 적용하지 않고 버리면 불일치 Fatal).
+        REQUIRE(objects.Collect(access));
+        cluster.root.Reset();
+        REQUIRE(objects.Shutdown(access));
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// cycle 밖(Idle)에서 지운 detached의 마지막 안쪽 간선은 다음 Begin(Collect)이 표식 전에 적용한다 —
+// 정지형 Collect는 그 detached를 회수한다(적용이 cycle 시작에 없으면 처리가 detached를 shade해 한
+// cycle 더 남는다).
+TEST(ObjectGcCluster_IdleRemovalAppliesBeforeCollectMarks) {
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterClusterTypes(types));
+        ObjectRegistry objects(allocator, types, Guid{0x4743, 29}, ClusterOptions());
+        const auto access = objects.OwnerAccess();
+        SmallCluster cluster;
+        REQUIRE(MakeCluster(objects, 3, cluster));
+        REQUIRE(Link(objects, cluster.members[1], cluster.members[0]));
+        REQUIRE(objects.Collect(access));
+        REQUIRE(objects.RequestDestroy(access, cluster.members[0]));
+        REQUIRE(objects.Collect(access));
+        REQUIRE(Exists(objects, cluster.members[0]));
+        REQUIRE(Unlink(objects, cluster.members[1], cluster.members[0]));
+        REQUIRE(objects.Collect(access));
+        CHECK(!Exists(objects, cluster.members[0]));
+        CHECK(Exists(objects, cluster.members[1]));
+        cluster.root.Reset();
+        REQUIRE(objects.Shutdown(access));
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// 미룬 감소의 상한(GC 설계 13.4절 "늦는 쪽이 안전한 근거"): Marking 중 클러스터 처리 전에
+// detached의 마지막 안쪽 간선을 지우면 감소가 미뤄져 처리가 detached를 shade한다 — 그 cycle은 산다.
+// 감소는 그 cycle의 cutoff(경계 비율 판정 전)에 적용되어 클러스터 없음이 되고, 다음 cycle에
+// 회수된다.
+TEST(ObjectGcCluster_DetachedLivesOneMoreCycleAfterMarkingRemoval) {
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterClusterTypes(types));
+        ObjectRegistry objects(allocator, types, Guid{0x4743, 27}, ClusterOptions());
+        const auto access = objects.OwnerAccess();
+        SmallCluster cluster;
+        REQUIRE(MakeCluster(objects, 3, cluster));
+        REQUIRE(Link(objects, cluster.members[1], cluster.members[0]));
+        REQUIRE(objects.Collect(access));
+        // m0은 이탈해 detached가 된다(m1이 가리킨다).
+        REQUIRE(objects.RequestDestroy(access, cluster.members[0]));
+        CHECK(objects.Stats().clusterMembers == 3);
+        REQUIRE(objects.Collect(access));
+        REQUIRE(Exists(objects, cluster.members[0]));
+        // cycle을 시작한 뒤 처리 전에(Step 전) 마지막 안쪽 간선을 지운다.
+        REQUIRE(objects.BeginCollection(access));
+        REQUIRE(Unlink(objects, cluster.members[1], cluster.members[0]));
+        StepToIdle(objects);
+        CHECK(Exists(objects, cluster.members[0]));
+        REQUIRE(objects.Collect(access));
+        CHECK(!Exists(objects, cluster.members[0]));
+        CHECK(Exists(objects, cluster.members[1]));
+        cluster.root.Reset();
+        REQUIRE(objects.Shutdown(access));
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// 적용의 대상 검사는 세대에 더해 상태도 본다(GC 설계 13.4절): 세대가 다 찬 슬롯(maxGeneration)은
+// 회수 뒤에도 세대가 그대로 Exhausted다. Marking 중 지운 경계 간선의 대상이 그 cycle에 회수되어
+// Exhausted가 되는 정상 경로다(기록은 cutoff에서 적용된다). cutoff 적용이 빠지면 다음 Begin의
+// 적용이 세대로는 회수를 보지 못하고 상태 검사로 Fatal이다.
+TEST(ObjectGcCluster_DeferredRemovalTargetCheckSeesExhaustedSlot) {
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterClusterTypes(types));
+        RegistryOptions options = ClusterOptions();
+        options.maxGeneration = 1;
+        ObjectRegistry objects(allocator, types, Guid{0x4743, 28}, options);
+        const auto access = objects.OwnerAccess();
+        SmallCluster cluster;
+        REQUIRE(MakeCluster(objects, 3, cluster));
+        auto outside = objects.NewObject<ClusterNode>(access, PlainNodeType);
+        REQUIRE(outside);
+        const ObjectHandle outsideHandle = outside.Value().Handle();
+        REQUIRE(Link(objects, cluster.members[0], outsideHandle));
+        outside.Value().Reset();
+        REQUIRE(objects.Collect(access));
+        REQUIRE(objects.BeginCollection(access));
+        REQUIRE(Unlink(objects, cluster.members[0], outsideHandle));
+        StepToIdle(objects);
+        REQUIRE(objects.DrainRetired(access));
+        CHECK(!Exists(objects, outsideHandle));
+        REQUIRE(objects.Collect(access));
+        CHECK(Exists(objects, cluster.members[0]));
+        cluster.root.Reset();
+        REQUIRE(objects.Shutdown(access));
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// 클러스터 소속 owner의 바꿔 떼기(RemoveReferenceAtSwap)는 지운 간선만 장부에서 뺀다. 옮긴 끝
+// 원소가 이탈한(파괴 요청된) 소속이어도 그 간선의 계수는 그대로라 detached로 살고, 그 간선을 마저
+// 지우면 회수된다. 매 Collect가 장부를 다시 세어 대조한다(verifyClusterLedger).
 TEST(ObjectGcCluster_SwapRemoveKeepsLedgerForMovedDetachedMember) {
     SystemAllocator allocator;
     {
@@ -1384,6 +1582,70 @@ TEST(ObjectGcCluster_BoundaryValveSeesDeferredRemovals) {
             REQUIRE(objects.Discard(access, t));
             wide.Value().Reset();
             target.Value().Reset();
+            REQUIRE(objects.Shutdown(access));
+        }
+
+        REQUIRE(types.Shutdown());
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// 패키지의 부분 트리 Discard(루트가 아닌 A와 자식 B)는 소속이 하나씩 이탈한다(이탈 루프). 이탈마다
+// 미룬 감소를 먼저 적용하므로 직전에 지운 간선이 이탈 판정에 반영된다: B의 경계 간선(B → X)을 지운
+// 뒤라 B의 outCount가 0이고(적용하지 않으면 "outgoing ledger edges" Fatal), 안쪽 간선(C → B)도
+// 지웠으므로 B는 detached가 아니라 클러스터 없음이 되어 다음 cycle에 회수된다.
+TEST(ObjectGcCluster_PackageSubtreeDiscardAppliesDeferredRemovals) {
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterPackageTypes(types));
+        {
+            ObjectRegistry objects(allocator, types, Guid{0x4747, 10}, PackageClusterOptions());
+            const auto access = objects.OwnerAccess();
+            auto first = objects.NewObject<PackageNode>(access, PackageNodeType);
+            auto second = objects.NewObject<PackageNode>(access, PackageNodeType);
+            REQUIRE(first && second);
+            const ObjectHandle p = first.Value().Handle();
+            const ObjectHandle q = second.Value().Handle();
+            auto a = objects.NewObject<ClusterNode>(access, ClusterNodeType, p, "A");
+            REQUIRE(a);
+            auto b =
+                objects.NewObject<ClusterNode>(access, ClusterNodeType, a.Value().Handle(), "B");
+            auto c = objects.NewObject<ClusterNode>(access, ClusterNodeType, p, "C");
+            auto d = objects.NewObject<ClusterNode>(access, ClusterNodeType, p, "D");
+            auto x = objects.NewObject<ClusterNode>(access, ClusterNodeType, q, "X");
+            REQUIRE(b && c && d && x);
+            const ObjectHandle ah = a.Value().Handle();
+            const ObjectHandle bh = b.Value().Handle();
+            const ObjectHandle ch = c.Value().Handle();
+            const ObjectHandle dh = d.Value().Handle();
+            const ObjectHandle xh = x.Value().Handle();
+            a.Value().Reset();
+            b.Value().Reset();
+            c.Value().Reset();
+            d.Value().Reset();
+            x.Value().Reset();
+            REQUIRE(objects.Stats().clusterMembers == 7);
+            REQUIRE(Link(objects, ch, bh));
+            REQUIRE(Link(objects, bh, dh));
+            REQUIRE(Link(objects, bh, xh));
+            REQUIRE(objects.Collect(access));
+            // 경계 간선과 안쪽 간선을 지우고(미뤄진 감소) 바로 부분 트리를 Discard한다.
+            REQUIRE(Unlink(objects, bh, xh));
+            REQUIRE(Unlink(objects, ch, bh));
+            REQUIRE(objects.Discard(access, ah));
+            CHECK(objects.Stats().clusterMembers == 5);
+            REQUIRE(objects.Collect(access));
+            CHECK(!Exists(objects, ah));
+            CHECK(!Exists(objects, bh));
+            CHECK(Exists(objects, ch));
+            CHECK(Exists(objects, dh));
+            CHECK(Exists(objects, xh));
+            REQUIRE(objects.Discard(access, p));
+            REQUIRE(objects.Discard(access, q));
+            first.Value().Reset();
+            second.Value().Reset();
             REQUIRE(objects.Shutdown(access));
         }
 

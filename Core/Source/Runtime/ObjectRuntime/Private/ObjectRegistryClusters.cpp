@@ -174,10 +174,12 @@ void ObjectRegistry::DeferLedgerRemovalLocked(uint32 owner, ObjectHandle target)
 
 void ObjectRegistry::ApplyLedgerRemovalsLocked() noexcept {
     // 기록 때와 같은 분류로 줄인다 — 기록과 적용 사이에 대상·소유자의 클러스터 관계를 바꾸는 이탈·
-    // 해체는 먼저 이 함수를 부른다. 대상은 적용 전에 회수될 수 없다: Marking 중의 기록은
-    // cutoff(경계 비율 판정 전)에 적용되고, Sweeping 중의 기록이 가리키는 대상은 이 cycle에
-    // 표식됐다. 세대가 다르면 그 불변식이 깨진 것이다(Debug Fatal). Release는 회수된 대상을
-    // 클러스터 밖으로 보고 소유자 outCount만 줄인다(안쪽 대상은 이탈·해체 없이 회수되지 않는다).
+    // 해체는 먼저 이 함수를 부른다. 대상은 적용 전에 회수될 수 없다: 기록은 live 쓰기에서만 하고
+    // (대상은 그때 Alive), Marking 중의 기록은 cutoff(경계 비율 판정 전)에 적용되고, Sweeping 중의
+    // 기록이 가리키는 대상은 이 cycle에 표식됐다. 세대가 다르거나 상태가 Alive·DestroyRequested가
+    // 아니면(세대가 다 찬 슬롯은 회수 뒤에도 세대가 그대로 Exhausted다) 그 불변식이 깨진 것이라
+    // 모든 빌드에서 Fatal이다 — 이어 가면 안쪽 대상을 밖으로 잘못 세어 표식이 덜 될 수
+    // 있다(13.4절).
     const uint32 count = ledgerRemovalCount_;
     ledgerRemovalCount_ = 0;
     for (uint32 at = 0; at < count; ++at) {
@@ -190,15 +192,13 @@ void ObjectRegistry::ApplyLedgerRemovalsLocked() noexcept {
         }
 
         const LedgerRemoval& entry = ledgerRemovals_[at];
-        if (SlotAt(entry.target)->generation == entry.targetGeneration) {
-            LedgerEdgeLocked(entry.owner, entry.target, false);
-        } else {
-            if constexpr (IsDebugBuild) {
-                platform::Fatal("Deferred cluster ledger removal outlived its target");
-            }
-
-            LedgerOutsideRemoveLocked(entry.owner);
+        const Slot* target = SlotAt(entry.target);
+        if (target->generation != entry.targetGeneration ||
+            (target->state != SlotState::Alive && target->state != SlotState::DestroyRequested)) {
+            platform::Fatal("Deferred cluster ledger removal outlived its target");
         }
+
+        LedgerEdgeLocked(entry.owner, entry.target, false);
     }
 }
 
@@ -843,12 +843,6 @@ Result<void> ObjectRegistry::VerifyClusterLedger() noexcept {
             return Result<void>::Success();
         }
 
-        // 미룬 장부 감소를 먼저 적용한다(계수를 다시 세어 대조한다).
-        {
-            platform::LockGuard lock(gate_);
-            ApplyLedgerRemovalsLocked();
-        }
-
         // 처리 표시 아래라 장부·간선이 바뀌지 않는다(다른 스레드는 루트·Borrow 계수만 바꾼다).
         const uint32 slots = chunkCount_ * SlotsPerChunk;
         Array<uint32> incoming(allocator_);
@@ -961,6 +955,28 @@ Result<void> ObjectRegistry::VerifyClusterLedger() noexcept {
             gcTypes_[hot.type].trace(*hot.object, visitor);
             if (hot.outer != NoSlot) {
                 visit(&recount, HandleOf(*SlotAt(hot.outer)));
+            }
+        }
+
+        // (2b) 미룬 장부 감소는 적용하지 않고 기대 계수에 더한다(장부는 실제 간선 수 + 미적용
+        // 감소다 — 13.4절). 적용하면 Debug만 적용 시점이 하나 더 생겨 Release의 적용
+        // 경로(이탈·해체·Begin· 경계 비율 판정)를 가린다. 기록은 적용 때와 같은 조건(대상
+        // 세대·상태, 소유자가 소속)을 본다.
+        {
+            platform::LockGuard lock(gate_);
+            for (uint32 at = 0; at < ledgerRemovalCount_; ++at) {
+                const LedgerRemoval& entry = ledgerRemovals_[at];
+                const Slot* target = SlotAt(entry.target);
+                if (target->generation != entry.targetGeneration ||
+                    (target->state != SlotState::Alive &&
+                     target->state != SlotState::DestroyRequested) ||
+                    (ClusterStateOf(entry.owner) & ClusterMember) == 0) {
+                    platform::Fatal("Deferred cluster ledger removal outlived its target");
+                }
+
+                Recount recount{this, entry.owner, ClusterStateOf(entry.owner) & ClusterIdMask,
+                                &incoming, &outgoing};
+                visit(&recount, HandleOf(*target));
             }
         }
 

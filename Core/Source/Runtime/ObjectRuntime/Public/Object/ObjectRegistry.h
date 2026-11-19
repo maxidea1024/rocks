@@ -803,8 +803,8 @@ private:
     // 간선 제거의 장부 감소를 미뤄 기록한다(GC 설계 13.4절 — 대상 줄을 건드리지 않는다). 기록이
     // 차면 먼저 적용한다.
     void DeferLedgerRemovalLocked(uint32 owner, ObjectHandle target) noexcept;
-    // 미룬 장부 감소를 모두 적용한다. 장부 계수를 읽거나 클러스터 상태를 바꾸기 전(이탈·해체·
-    // Begin·Collect·검증)에 부른다.
+    // 미룬 장부 감소를 모두 적용한다. 장부 계수로 판단하거나 클러스터 상태를 바꾸기 전(이탈·해체·
+    // 경계 비율 판정·Begin·Collect)에 부른다. Debug 장부 검증은 적용하지 않고 기대 계수에 더한다.
     void ApplyLedgerRemovalsLocked() noexcept;
     // 클러스터 밖 대상으로 가던 간선 하나를 소유자 outCount에서 뺀다(경계 고리 출입 포함).
     void LedgerOutsideRemoveLocked(uint32 owner) noexcept;
