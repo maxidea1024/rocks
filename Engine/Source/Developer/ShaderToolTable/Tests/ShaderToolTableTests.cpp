@@ -4,6 +4,8 @@
 #include <string.h>
 
 using namespace rocks;
+namespace shader_tool_table_tests_file {
+
 using namespace rocks::shader;
 
 // 생성 도구 표(Engine 루트 binary manifest → GeneratedSources/ShaderToolTable)의 내용과 불변식을
@@ -116,3 +118,4 @@ TEST(ShaderToolTable_WindowsHostMatchesManifest) {
     // Apple 도구는 macOS 전용이라 Windows 표에는 파일이 없다.
     CHECK(FindShaderTool(MetalToolName)->fileCount == 0u);
 }
+} // namespace shader_tool_table_tests_file
