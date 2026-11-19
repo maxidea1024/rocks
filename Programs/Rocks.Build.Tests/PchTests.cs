@@ -28,6 +28,9 @@ internal static class PchTests
         await SharedPchAsync(request, root);
         pass("shared PCH: provider selection, shared and extra definitions, variants, shadow and extra-definition checks, timing report");
 
+        TimingAggregation();
+        pass("time trace aggregation: Source begin/end pairs and durations, member sources excluded, template instantiations");
+
         // NDK가 있으면 clang++(GNU 드라이버) 경로를 같은 fixture로 교차 빌드한다: PCH를 -x c++-header로 만들고 -include-pch로 쓴다(macOS도
         // 이 경로다). 실행 파일은 호스트에서 돌리지 않는다.
         NativeToolchain android;
@@ -47,6 +50,36 @@ internal static class PchTests
         await ModulePchAsync(cross, crossRoot);
         await SharedPchAsync(cross, crossRoot);
         pass("PCH with the Android NDK clang++ (GNU driver): definitions header, module PCH and shared PCH fixtures cross-built");
+    }
+
+    // --timing 집계(12절)의 trace 해석이다. clang은 Source(파일 하나의 파싱)를 시작·끝 쌍으로 연달아 쓰고, 길이를 직접 싣는 형태도 있다.
+    // 실제 trace는 세밀도(500 µs)보다 짧은 항목을 빼므로 작은 fixture 빌드로는 헤더 목록을 보장하지 못한다 — 손으로 만든 trace로 본다.
+    private static void TimingAggregation()
+    {
+        const string trace = """
+            {"traceEvents":[
+            {"pid":1,"tid":7,"ts":100,"ph":"b","cat":"Source","id":0,"name":"Source","args":{"detail":"C:\\inc\\a.h"}},
+            {"pid":1,"tid":7,"ts":350,"ph":"e","cat":"Source","id":0,"name":"Source"},
+            {"pid":1,"tid":7,"ts":50,"ph":"b","cat":"Source","id":0,"name":"Source","args":{"detail":"C:\\src\\member.cpp"}},
+            {"pid":1,"tid":7,"ts":900,"ph":"e","cat":"Source","id":0,"name":"Source"},
+            {"pid":1,"tid":7,"ts":1000,"ph":"b","cat":"Source","id":0,"name":"Source","args":{"detail":"C:\\inc\\a.h"}},
+            {"pid":1,"tid":7,"ts":1040,"ph":"e","cat":"Source","id":0,"name":"Source"},
+            {"pid":1,"tid":7,"ts":10,"ph":"X","dur":70,"name":"Source","args":{"detail":"/inc/b.h"}},
+            {"pid":1,"tid":7,"ts":10,"ph":"X","dur":30,"name":"InstantiateClass","args":{"detail":"Box<int>"}},
+            {"pid":1,"tid":7,"ts":60,"ph":"X","dur":12,"name":"InstantiateFunction","args":{"detail":"Box<int>"}},
+            {"pid":1,"tid":7,"ts":0,"ph":"X","dur":5000,"name":"Total ExecuteCompiler","args":{"count":1}},
+            {"pid":1,"tid":7,"ts":0,"ph":"X","dur":290,"name":"Total Source","args":{"count":3}},
+            {"pid":1,"tid":7,"ts":0,"ph":"M","name":"process_name","args":{"name":"clang"}}
+            ]}
+            """;
+        using System.Text.Json.JsonDocument document = System.Text.Json.JsonDocument.Parse(trace);
+        var headers = new Dictionary<string, (long Total, int Count)>(StringComparer.Ordinal);
+        var templates = new Dictionary<string, (long Total, int Count)>(StringComparer.Ordinal);
+        long total = TimingReport.Accumulate(document.RootElement.GetProperty("traceEvents"), headers, templates);
+        // a.h는 두 번(250 + 40), b.h는 길이 형태로 한 번, member.cpp(묶음 구성원)는 헤더 목록에 없다. 같은 템플릿의 클래스·함수 인스턴스화는 합친다.
+        Check(total == 5000 && headers.Count == 2 && headers["C:\\inc\\a.h"] == (290, 2) && headers["/inc/b.h"] == (70, 1) &&
+            templates.Count == 1 && templates["Box<int>"] == (42, 2),
+            "time trace aggregation: total " + total + ", headers " + string.Join(", ", headers) + ", templates " + string.Join(", ", templates));
     }
 
     // 교차 빌드 fixture의 Android API 수준이다(엔진의 최소 지원 수준).
