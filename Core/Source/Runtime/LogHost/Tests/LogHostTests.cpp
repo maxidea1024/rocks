@@ -381,7 +381,6 @@ static_assert(CheckLogRateLimitsSyntax("A=1,B=1,C=1,D=1,E=1,F=1,G=1,H=1,I=1,J=1,
                                        "O=1,P=1,Q=1") ==
               "log.rate_limits has more than MaxLogRateLimits entries");
 
-// 설정 log.rate_limits가 LogSystem에 적용되고, 잘못된 항목은 건너뛴다.
 namespace {
 
 // 늘 같은 시각을 돌려주는 시계다(rate limit 창을 결정적으로).
@@ -391,6 +390,69 @@ uint64 FixedClock() noexcept {
 }
 
 } // namespace
+
+namespace {
+
+// Write 안에서(sink 콜백 — LogSystem이 Busy를 돌려주는 자리) 설정 문맥을 한 번 Sync하는 sink다.
+class SyncingSink final : public RuntimeLogSink {
+public:
+    Result<void> Write(const LogEvent&) noexcept override {
+        if (context != nullptr) {
+            config::ConfigContext* syncing = context;
+            context = nullptr;
+            synced = syncing->Sync().IsOk();
+        }
+
+        return Result<void>::Success();
+    }
+
+    // 다음 Write에서 Sync할 문맥이다(한 번 쓰면 비운다).
+    config::ConfigContext* context = nullptr;
+    bool synced = false;
+};
+
+} // namespace
+
+// Watch의 기준점은 Start가 읽은 snapshot이다: Start와 Watch 사이 Sync의 변경은 Watch가 바로
+// 적용한다. 적용이 일시적으로 실패하면(sink 안의 sync 지점 — LogSystem Busy) 다음 Sync에 다시
+// 시도한다(Docs/Design/CVarSystem.ko.md 20절 CVR7 리뷰 반영).
+TEST(LogHostWatchCatchesUpAndRetriesBusyApplies) {
+    LogSettingsFixture fixture;
+    fixture.Apply(R"({"log.mode": "sync"})");
+    LogHost host(fixture.system);
+    REQUIRE(fixture.StartHost(host, LogSystemConfig::ForEngineHost()));
+    LogSystem& logs = host.System();
+    constexpr LogCategory audio{"Audio"};
+    constexpr LogCategory physics{"Physics"};
+    config::ConfigContext& context = *fixture.context;
+    // Start 뒤·Watch 전의 변경.
+    REQUIRE(context.AddAssignment(config::ConfigLayer::Console, "console", LogLevelVar.Name(),
+                                  "warning"));
+    REQUIRE(context.Sync());
+    CHECK(logs.IsEnabled(LogLevel::Info, audio));
+    REQUIRE(host.Watch(context));
+    CHECK(!logs.IsEnabled(LogLevel::Info, audio) && logs.IsEnabled(LogLevel::Warning, audio));
+
+    // sink 안에서 Sync하면 적용이 Busy로 실패한다. 값은 그대로이고 다음 Sync가 다시 적용한다.
+    SyncingSink sink;
+    REQUIRE(logs.AddSink(sink));
+    REQUIRE(context.AddAssignment(config::ConfigLayer::Console, "console", LogLevelVar.Name(),
+                                  "error"));
+    REQUIRE(context.AddAssignment(config::ConfigLayer::Console, "console", LogLevelsVar.Name(),
+                                  "Audio=trace"));
+    sink.context = &context;
+    {
+        LogInstallScope installed(logs);
+        Log::Error(LogHostTests, "sync inside a sink");
+    }
+
+    CHECK(sink.synced);
+    CHECK(logs.IsEnabled(LogLevel::Warning, physics) && !logs.IsEnabled(LogLevel::Trace, audio));
+    REQUIRE(context.Sync());
+    CHECK(!logs.IsEnabled(LogLevel::Warning, physics) && logs.IsEnabled(LogLevel::Trace, audio));
+    REQUIRE(logs.RemoveSink(sink));
+    host.Stop();
+}
 
 // 설정 log.rate_limits가 LogSystem에 적용되고, 문법이 틀린 값은 설정 단계에서 거부한다(Validate —
 // L18). 다른 값만 바뀐 sync 지점은 창을 초기화하지 않는다(바뀐 값만 다시 적용한다).

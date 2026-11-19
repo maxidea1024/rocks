@@ -292,9 +292,23 @@ Result<void> LogHost::StartWith(const LogSystemConfig& preset, bool settings,
     }
 
     if (settings) {
-        ApplyGlobalLevel();
-        ApplyRateLimits();
-        ApplyLevelOverrides();
+        // Watch의 기준점은 Start가 읽은 이 snapshot이다(Start와 Watch 사이 Sync의 변경을 잃지
+        // 않는다). 일시적으로 적용하지 못한 값은 본 것으로 두지 않는다(다음 sync 지점에 다시
+        // 시도한다).
+        static_cast<void>(levelWatcher_.Changed());
+        static_cast<void>(rateLimitsWatcher_.Changed());
+        static_cast<void>(levelsWatcher_.Changed());
+        if (!ApplyGlobalLevel()) {
+            levelWatcher_.Reset();
+        }
+
+        if (!ApplyRateLimits()) {
+            rateLimitsWatcher_.Reset();
+        }
+
+        if (!ApplyLevelOverrides()) {
+            levelsWatcher_.Reset();
+        }
     }
 
     return Result<void>::Success();
@@ -407,15 +421,6 @@ Result<void> LogHost::Watch(config::ConfigContext& settings) noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    // Start가 적용한 값의 세대를 본 것으로 맞춘다(다음 Sync부터 바뀐 것만 적용한다).
-    const SharedPtr<const config::ConfigSnapshot> snapshot = settings.Acquire();
-    if (snapshot.Get() == nullptr) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
-    }
-
-    static_cast<void>(levelWatcher_.Changed(*snapshot));
-    static_cast<void>(levelsWatcher_.Changed(*snapshot));
-    static_cast<void>(rateLimitsWatcher_.Changed(*snapshot));
     auto added = settings.OnSynced().TryAddLambda(
         [this](const config::SyncChanges&) noexcept { OnSynced(); });
     if (!added) {
@@ -424,6 +429,8 @@ Result<void> LogHost::Watch(config::ConfigContext& settings) noexcept {
 
     synced_ = added.Value();
     watched_ = &settings;
+    // Start가 읽은 snapshot 뒤에 바뀐 값(그 사이의 Sync)을 지금 적용한다.
+    OnSynced();
     return Result<void>::Success();
 }
 
@@ -493,37 +500,41 @@ void LogHost::OnSynced() noexcept {
         return;
     }
 
+    // 바뀐 값만 다시 적용한다. 일시적으로 실패한 값(LogSystem Busy — 출력 스레드·sink 안에서 불린
+    // sync 지점)은 본 세대를 잊어 다음 sync 지점에 다시 시도한다.
     const bool level = levelWatcher_.Changed(*snapshot);
     const bool rateLimits = rateLimitsWatcher_.Changed(*snapshot);
     const bool levels = levelsWatcher_.Changed(*snapshot);
     cvar::SnapshotBinding bound(snapshot);
-    if (level) {
-        ApplyGlobalLevel();
+    if (level && !ApplyGlobalLevel()) {
+        levelWatcher_.Reset();
     }
 
-    if (rateLimits) {
-        ApplyRateLimits();
+    if (rateLimits && !ApplyRateLimits()) {
+        rateLimitsWatcher_.Reset();
     }
 
-    if (levels) {
-        ApplyLevelOverrides();
+    if (levels && !ApplyLevelOverrides()) {
+        levelsWatcher_.Reset();
     }
 }
 
-void LogHost::ApplyGlobalLevel() noexcept {
-    static_cast<void>(logs_->SetGlobalMinimum(LogLevelVar.Get()));
+bool LogHost::ApplyGlobalLevel() noexcept {
+    auto set = logs_->SetGlobalMinimum(LogLevelVar.Get());
+    return set || set.Error() != ErrorCode::Busy;
 }
 
-void LogHost::ApplyRateLimits() noexcept {
+bool LogHost::ApplyRateLimits() noexcept {
     // 내용이 그대로면 아무것도 하지 않는다(창이 초기화되지 않게). 바뀌면 빠진 접두사만 지우고, 남은
     // 접두사는 상한만 바꾼다(창·수 유지). 문법은 설정 단계에서 Validate(CheckLogRateLimitsSyntax)가
     // 거부하므로 여기서 남기는 Warning은 적용 실패(표 용량)다. 문법 실패 항목의 Warning은 방어다.
     const StringView list = LogRateLimitsVar.Get();
     const StringView applied(appliedRateLimits_, appliedRateLimitsBytes_);
     if (list == applied) {
-        return;
+        return true;
     }
 
+    bool busy = false;
     ForEachEntry(applied, [&](StringView old) {
         StringView prefix;
         StringView count;
@@ -539,7 +550,8 @@ void LogHost::ApplyRateLimits() noexcept {
                             EqualsIgnoringAsciiCase(newPrefix, prefix));
         });
         if (!kept) {
-            (void)logs_->ClearRateLimit(prefix);
+            auto cleared = logs_->ClearRateLimit(prefix);
+            busy = busy || (!cleared && cleared.Error() == ErrorCode::Busy);
         }
     });
     appliedRateLimitsBytes_ = 0;
@@ -548,7 +560,7 @@ void LogHost::ApplyRateLimits() noexcept {
         Log::Warning(LogHostCategory,
                      "log.rate_limits is longer than {Limit} bytes; rate limits are not applied",
                      MaxLogRateLimitsBytes);
-        return;
+        return true;
     }
 
     platform::MemoryCopy(appliedRateLimits_, list.Data(), list.ByteCount());
@@ -568,32 +580,50 @@ void LogHost::ApplyRateLimits() noexcept {
         }
 
         if (auto set = logs_->SetRateLimit(prefix, perSecond); !set) {
+            if (set.Error() == ErrorCode::Busy) {
+                busy = true;
+                return;
+            }
+
             Log::Warning(LogHostCategory,
                          "log.rate_limits entry '{Entry}' was not applied: {Error}", entry,
                          ErrorCodeName(set.Error()));
         }
     });
+    if (busy) {
+        // 다음 적용이 모든 항목을 다시 넣게 한다(적용한 목록으로 남기지 않는다).
+        appliedRateLimitsBytes_ = 0;
+    }
+
+    return !busy;
 }
 
-void LogHost::ApplyLevelOverrides() noexcept {
+bool LogHost::ApplyLevelOverrides() noexcept {
     // 앞서 적용한 재정의를 지우고 새 목록을 적용한다. 문법은 설정 단계에서
     // Validate(CheckLogLevelsSyntax)가 거부하므로 여기서 남기는 Warning은 적용 실패(재정의 표
     // 용량·해시 충돌)다. 카테고리 목록은 닫혀 있지 않으므로(상수 객체 — 등록 표가 없다) 모르는
-    // 접두사는 판정하지 않는다.
+    // 접두사는 판정하지 않는다. 반환: 일시적 실패(Busy) 없이 끝났는지다.
+    bool busy = false;
     ForEachEntry(StringView(appliedLevels_, appliedLevelsBytes_), [&](StringView entry) {
         StringView prefix;
         LogLevel ignored = LogLevel::Info;
         if (SplitEntry(entry, prefix, ignored)) {
-            (void)logs_->ClearLevel(prefix);
+            auto cleared = logs_->ClearLevel(prefix);
+            busy = busy || (!cleared && cleared.Error() == ErrorCode::Busy);
         }
     });
+    if (busy) {
+        // 앞 재정의를 지우지 못했다(적용한 목록을 그대로 두고 다음 sync 지점에 다시 시도한다).
+        return false;
+    }
+
     appliedLevelsBytes_ = 0;
     const StringView list = LogLevelsVar.Get();
     if (list.ByteCount() > sizeof(appliedLevels_)) {
         Log::Warning(LogHostCategory,
                      "log.levels is longer than {Limit} bytes; per-category levels are not applied",
                      MaxLogLevelsBytes);
-        return;
+        return true;
     }
 
     platform::MemoryCopy(appliedLevels_, list.Data(), list.ByteCount());
@@ -609,10 +639,16 @@ void LogHost::ApplyLevelOverrides() noexcept {
         }
 
         if (auto set = logs_->SetLevel(prefix, entryLevel); !set) {
+            if (set.Error() == ErrorCode::Busy) {
+                busy = true;
+                return;
+            }
+
             Log::Warning(LogHostCategory, "log.levels entry '{Entry}' was not applied: {Error}",
                          entry, ErrorCodeName(set.Error()));
         }
     });
+    return !busy;
 }
 
 } // namespace rocks

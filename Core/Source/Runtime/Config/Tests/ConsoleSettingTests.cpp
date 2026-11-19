@@ -263,6 +263,20 @@ TEST(Config_ConsoleSettingTypesAndRegistration) {
     CHECK(cvar::ReadDynamic<int64>(*snapshot, presetIndex.Value(), 0) ==
           static_cast<int64>(FixtureQuality::High));
     CHECK(cvar::ReadDynamic<int32>(*snapshot, cvar::Index{}, 5) == 5);
+    // 칸의 값 종류가 T와 다르면 fallback이다(텍스트 ↔ 수, float ↔ int — 모든 빌드에서 확인한다).
+    // 실행 중 타입으로 등록한 쪽은 DynamicKind로 종류를 묻는다.
+    CHECK(cvar::DynamicKind(*snapshot, gravity.Value()) == ValueKind::Float64);
+    CHECK(cvar::DynamicKind(*snapshot, channel.Value()) == ValueKind::Utf8String);
+    CHECK(cvar::DynamicKind(*snapshot, presetIndex.Value()) == ValueKind::Enum);
+    CHECK(cvar::DynamicKind(*snapshot, cvar::Index{}) == ValueKind::Opaque);
+    CHECK(cvar::ReadDynamic<int32>(*snapshot, channel.Value(), 11) == 11);
+    CHECK(cvar::ReadDynamic<String>(*snapshot, gravity.Value(), "none") == "none");
+    CHECK(cvar::ReadDynamic<rocks::Name>(*snapshot, gravity.Value(), rocks::Name{}) ==
+          rocks::Name{});
+    CHECK(cvar::ReadDynamic<int64>(*snapshot, gravity.Value(), 12) == 12);
+    CHECK(cvar::ReadDynamic<float>(*snapshot, gravity.Value(), 1.5f) == 1.5f);
+    CHECK(cvar::ReadDynamic<double>(*snapshot, presetIndex.Value(), 2.5) == 2.5);
+    CHECK(cvar::ReadDynamic<int32>(*snapshot, presetIndex.Value(), 13) == 13);
     auto level = fixture.names.Acquire(ValueOf(fixture, "game.level").name);
     CHECK(level && level.Value().View() == "Arena");
 
@@ -291,6 +305,23 @@ TEST(Config_ConsoleSettingTypesAndRegistration) {
     inverted.minimum = 5;
     inverted.maximum = 1;
     CHECK(rejects(inverted, ErrorCode::InvalidArgument));
+    // 정수 타입의 범위 끝은 정수이고 그 타입의 표현 범위 안이어야 한다(검사 값과 설명 값이 같다).
+    auto integerRange = [&](ConsoleValueType type, double minimum, double maximum) noexcept {
+        DynamicVarDefinition ranged = Define("render.int_range", type, "0");
+        ranged.hasRange = true;
+        ranged.minimum = minimum;
+        ranged.maximum = maximum;
+        return ranged;
+    };
+    CHECK(rejects(integerRange(ConsoleValueType::Int32, 0.5, 10), ErrorCode::InvalidArgument));
+    CHECK(rejects(integerRange(ConsoleValueType::Int32, 0, 3000000000.0),
+                  ErrorCode::InvalidArgument));
+    CHECK(rejects(integerRange(ConsoleValueType::Int64, 0, 1e19), ErrorCode::InvalidArgument));
+    CHECK(rejects(integerRange(ConsoleValueType::Int64, 0, 9223372036854775807.0),
+                  ErrorCode::InvalidArgument));
+    CHECK(rejects(integerRange(ConsoleValueType::Int64, -1e19, 0), ErrorCode::InvalidArgument));
+    REQUIRE(context.RegisterDynamic(
+        integerRange(ConsoleValueType::Int64, -9223372036854775808.0, 4611686018427387904.0)));
     CHECK(
         rejects(Define("render.clamped", ConsoleValueType::Int32, "", Flags(cvar::VarFlags::Clamp)),
                 ErrorCode::InvalidArgument));

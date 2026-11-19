@@ -1,6 +1,6 @@
 # CVar·치트 명령 설계
 
-기준일: 2026-11-19, 개정 14(결정 확정, CVR1·CVR2·CVR4·CVR5·CVR6·CVR7 구현). 실행 중 이름으로 읽고 바꾸는 타입 있는 설정 변수 **CVar**와, 개발 빌드에서 게임 상태를 직접 바꾸는 **치트 명령**을 정한다.
+기준일: 2026-11-19, 개정 15(결정 확정, CVR1·CVR2·CVR4·CVR5·CVR6·CVR7 구현). 실행 중 이름으로 읽고 바꾸는 타입 있는 설정 변수 **CVar**와, 개발 빌드에서 게임 상태를 직접 바꾸는 **치트 명령**을 정한다.
 
 이 문서는 [설정 계층과 콘솔 설정](ConfigSystem.ko.md)(이하 Config)의 5절 "콘솔 설정과 명령"을 대체하는 상세 스펙이다. 값 저장소·층·출처 스택·sync 지점·JSON 파일·`--set`·설정 struct는 Config를 그대로 쓰고, 이 문서는 그 위에 다음을 더한다.
 - 한 문장으로 정의하고 `.Get()`으로 읽는 타입 있는 핸들(`CVar<T>`·`BootCVar<T>`·`CVarGroup`·`ConsoleCommand`)
@@ -214,7 +214,7 @@ constexpr Span<const cvar::EnumEntry> CVarEnumNames(Tier) noexcept {
   - 다른 스레드에서는 기본값이다. 등록이 그 스레드의 snapshot보다 나중이면 번호가 이미 보이든 안 보이든 그 snapshot에는 칸이 없으므로, 어느 쪽을 읽어도 같은 결과(기본값)가 나온다. 경쟁의 결과가 값에 드러나지 않는다.
   - 등록 누락은 Policy가 빌드에서 먼저 잡는다.
 - **Policy `cvar-registration`**: 모듈 소스의 namespace 범위 `CVar<`·`BootCVar<`·`CVarGroup`·`ConsoleCommand` 정의 이름이 같은 모듈의 `Register(` 인자에 나오는지 lexical하게 검사한다. 빠뜨린 등록은 빌드(policy)에서 실패한다.
-- 이름이 런타임에 정해지는 변수(Sparks 스크립트·플러그인 데이터)는 `RegisterDynamic(definition)`으로 등록한다(CVR7). 정의는 `DynamicVarDefinition`(이름·도움말·분류·타입·enum 타입 ID·기본값 표기·`cvar::VarFlags` 성질 비트·부팅 여부·닫힌 범위)이고, 문맥이 정의를 복사해 핸들 정의와 같은 모양(`VarDefinition`)으로 쥔다. 번호는 핸들과 같은 프로세스 카운터에서 받고 값은 같은 조각 칸에 든다(층·대기 값·콘솔·dump·권한이 핸들과 같다). 정의는 문맥이 소유하므로 번호는 등록한 문맥 안에서만 뜻이 있다. 반환은 `cvar::Index`이고, 읽기는 `cvar::ReadDynamic<T>(snapshot, index, fallback)`이다(T는 핸들과 같은 타입, enum은 `int64` — 칸이 없으면 fallback(등록 전 snapshot), 봉인 뒤 snapshot의 부팅 변수는 부팅 블록). 게임 lane의 도구용 이름 조회는 `FindConsoleSetting`·`ConsoleValue`다. 닫힌 값 집합은 Enum 타입(리플렉션 enum)이고, CF2의 문자열 허용 값 목록(`allowedValues`·`allowedValuesIgnoreCase`)은 없앴다. 규칙 위반(이름 문법·영역·빈 도움말·모르는 성질 비트·`Clamp`·수가 아닌 범위·enum 타입 불일치·기본값 거부)은 `InvalidArgument`, 이름 중복은 핸들과 같다(같은 타입 `AlreadyExists`·다른 타입 `TypeMismatch`). 출시 빌드의 `Cheat` 동적 변수는 등록하지 않고 `Unsupported`다.
+- 이름이 런타임에 정해지는 변수(Sparks 스크립트·플러그인 데이터)는 `RegisterDynamic(definition)`으로 등록한다(CVR7). 정의는 `DynamicVarDefinition`(이름·도움말·분류·타입·enum 타입 ID·기본값 표기·`cvar::VarFlags` 성질 비트·부팅 여부·닫힌 범위)이고, 문맥이 정의를 복사해 핸들 정의와 같은 모양(`VarDefinition`)으로 쥔다. 번호는 핸들과 같은 프로세스 카운터에서 받고 값은 같은 조각 칸에 든다(층·대기 값·콘솔·dump·권한이 핸들과 같다). 정의는 문맥이 소유하므로 번호는 등록한 문맥 안에서만 뜻이 있다. 반환은 `cvar::Index`이고, 읽기는 `cvar::ReadDynamic<T>(snapshot, index, fallback)`이다(T는 핸들과 같은 타입, enum은 `int64` — 칸이 없으면 fallback(등록 전 snapshot), 봉인 뒤 snapshot의 부팅 변수는 부팅 블록). 칸은 값 종류(`ValueKind` 1 byte)를 함께 담고, `ReadDynamic`은 모든 빌드에서 T와 칸의 종류가 맞는지 보고 다르면 fallback을 돌려준다(텍스트 칸을 수로 읽거나 float 칸을 int로 읽어도 null 역참조·쓰기 값 해석이 없다). 실행 중 타입으로 등록하는 쪽(Sparks)은 `cvar::DynamicKind(snapshot, index)`로 칸의 종류를 먼저 묻는다(칸이 없으면 `ValueKind::Opaque`). 게임 lane의 도구용 이름 조회는 `FindConsoleSetting`·`ConsoleValue`다. 닫힌 값 집합은 Enum 타입(리플렉션 enum)이고, CF2의 문자열 허용 값 목록(`allowedValues`·`allowedValuesIgnoreCase`)은 없앴다. 규칙 위반(이름 문법·영역·빈 도움말·모르는 성질 비트·`Clamp`·수가 아닌 범위·유한하지 않은 범위·정수 타입의 정수가 아닌 범위 끝 또는 그 타입의 표현 범위를 넘는 범위 끝·enum 타입 불일치·기본값 거부)은 `InvalidArgument`, 이름 중복은 핸들과 같다(같은 타입 `AlreadyExists`·다른 타입 `TypeMismatch`). 출시 빌드의 `Cheat` 동적 변수는 등록하지 않고 `Unsupported`다.
 
 ## 6. 층과 쓰기
 
@@ -257,7 +257,7 @@ config.ClearLayer(ConfigLayer::Hotfix);
 - 반환은 `Result<void>`의 `ErrorCode`다: 이 스레드에 묶인 문맥이 없으면 `NotFound`, 검사 위반은 `InvalidArgument`, 다른 스레드의 쓰기가 큐 한도(`MaxQueuedChanges`)를 넘으면 `Busy`(버리지 않는다 — 소유 스레드 입력은 한도와 무관하다), 문맥이 없어졌으면 `ShuttingDown`. 거부 이유는 `SetOptions::reason`(`ConfigDiagnosticCode*`)으로 받는다(`ValueOutOfRange`·`InvalidEnum`·`ValidationFailed`·`ConsoleReadOnly`·`LayerNotAllowed`, 뒤 단계의 `CheatsDisabled`·`ReplicatedOnClient`·`BootSealed`). 통과·보정이면 그대로 둔다. 콘솔 도구(CVR6)가 이것으로 메시지를 만든다.
 - `scope`를 주면 그 범위의 값 하나를 바꾼다(`layer`는 무시 — 8절).
 - 권한(치트·복제·부팅 봉인)은 지금 한 번 검사해 바로 알려 주고, Sync가 적용할 때 다시 검사한다. 그 사이 상태가 바뀌었으면 적용 때의 판정이 이기고 진단을 남긴다.
-- 어느 문맥에 쓰는지: 이 스레드에 묶인 문맥(7.1절), 없으면 프로세스 기본 문맥이다. 기본 문맥은 `ConfigContext::MakeProcessDefault()`(게임 lane)로 정하고 문맥이 없어질 때 풀린다. 프로세스에 하나이고, 다른 문맥이 이미 기본이면 `AlreadyExists`다. `HostSettings::Initialize`가 자기 문맥을 기본으로 정한다(CVR7). 둘 다 없으면 `NotFound`다. 기본 문맥은 쓰기(`Set`·`Clear`·`ScopedOverride`)에만 쓰고 읽기(`Get`)는 늘 묶음이다(7.1절 — 묶음 없는 `Get`은 Fatal). 시험은 문맥을 스레드에 묶는다.
+- 어느 문맥에 쓰는지: 이 스레드에 묶인 문맥(7.1절), 없으면 프로세스 기본 문맥이다. 기본 문맥은 `ConfigContext::MakeProcessDefault()`(게임 lane)로 정하고 문맥이 없어질 때 풀린다. 프로세스에 하나이고, 다른 문맥이 이미 기본이면 `AlreadyExists`다(같은 문맥의 재호출은 성공). `HostSettings::Initialize`가 자기 문맥을 기본으로 정한다(CVR7). 기본 문맥을 거치는 쓰기는 기본 문맥 잠금 안에서 통로 참조를 얻으며 그 통로의 원자 계수(`defaultWriters`)를 하나 올리고, 큐에 넣은 뒤 참조를 놓고 계수를 내린다. 문맥 파괴는 통로를 닫고(`open = false`) 기본 문맥을 푼 다음 이 계수가 0이 될 때까지 통로 잠금의 조건 변수로 기다린다(sleep 없음). 그래서 통로의 마지막 해제는 소유 스레드에서 일어나고(문맥 allocator를 다른 스레드가 해제하지 않는다), 결과는 정해진다: 파괴와 겹친 쓰기(통로를 얻은 뒤 닫힘)는 `ShuttingDown`, 기본 문맥이 없을 때(정한 적이 없거나 풀린 뒤) 들어온 묶음 없는 쓰기는 `NotFound`다. 풀린 뒤를 `ShuttingDown`으로 나누지 않는 까닭: 그러려면 "한 번 정한 적 있음"을 프로세스 전역에 끝까지 남겨야 하는데, 그러면 같은 프로세스의 뒤 문맥(시험·도구가 문맥을 다시 만드는 경우)의 결과가 앞에 무엇이 있었는지에 따라 달라진다(리뷰 결정과 다른 점 — 20절 CVR7 리뷰 반영). `ScopedOverride`는 끝낼 때 지우기를 넣으려고 통로 참조를 범위 동안 쥐므로, 기본 문맥을 거친 범위도 `ConsoleInputPort`와 같이 문맥 allocator보다 먼저 끝나야 한다. 기본 문맥은 쓰기(`Set`·`Clear`·`ScopedOverride`)에만 쓰고 읽기(`Get`)는 늘 묶음이다(7.1절 — 묶음 없는 `Get`은 Fatal). 시험은 문맥을 스레드에 묶는다.
 - `ConsoleReadOnly()`는 콘솔 층만 거부한다. `UserSetting()`이 아닌 변수는 사용자 층을 거부한다(Config와 같다).
 
 ### 6.3 범위 임시 변경
@@ -383,6 +383,7 @@ Config 5.3·5.4의 sync 지점(엔진 `RunFrame` 2단계 뒤, 3단계 전)에서
 | 권한 상태(`cheat.enabled`·네트워크 역할) | 게임 lane(Sync) | `Set` 즉시 검사(호출 스레드의 묶음 또는 `Acquire`) | snapshot 값이므로 불변. 최종 판정은 Sync 적용 때 게임 lane이 다시 한다 | snapshot |
 | 부팅 블록 | `CompleteStartup` 한 번, 봉인 뒤 부팅 변수 등록(조각 copy-on-write로 칸을 더한다 — 게임 lane) | 모두 | 게시한 조각은 불변, 봉인 뒤 snapshot의 부팅 값은 모두 같다. 렌더 lane·worker는 봉인 뒤에 시작한다(Config 5.4) | 문맥 |
 | 진단 목록·`OnSynced`·명령 실행 | 게임 lane | 게임 lane | 소유 스레드 assert | 문맥 |
+| 프로세스 기본 문맥(`DefaultChannel` — 기본 문맥 상태의 통로 참조를 가리키는 포인터, 6.2절) | 게임 lane(`MakeProcessDefault`·문맥 파괴의 `ReleaseProcessDefault`) | 묶음 없는 스레드의 `Set`·`Clear`·`ScopedOverride` | 원자 깃발 잠금(상수 초기화 — 전역 생성자 없음). 잠금 안에서는 포인터 비교·통로 참조 복사·통로의 `defaultWriters` 증가만 한다. 감소와 파괴 쪽 대기는 통로 잠금 + 조건 변수 | 기본 문맥이 없어지기 전에 풀린다. 통로는 `defaultWriters`가 0이 된 뒤 소유 스레드가 놓는다 |
 
 **규칙**
 - 다른 스레드에서 온 쓰기 사이의 순서는 큐에 들어간 순서다. 같은 변수·같은 층을 두 스레드가 같은 프레임에 쓰면 나중에 큐에 든 것이 이긴다. 서로 다른 스레드의 쓰기 순서를 바라는 코드는 호출 쪽이 순서를 정한다(시스템이 순서를 지어내지 않는다).
@@ -657,7 +658,7 @@ public:
 | CVR4 | `BootCVar`·봉인·대기 값 늦은 적용·`ReportUnresolved`(Core 편집 거리)·진단 코드 | CVR2 | 부팅·미해결 시험 |
 | CVR5 | `CVarGroup`·Quality 층 펼침·되풀이 한도 | CVR2 | 프리셋 시험. Config CF4는 이 묶음을 쓴다 |
 | CVR6 | 콘솔 도구(Explain·find·dump·reset·enum 표시)·`cvar::Command`·치트 허용 상태·네트워크 역할·Export/Import | CVR4 | 권한·dump 왕복 시험 |
-| CVR7 | 이관: `log.*`(LogHost)·`trace.*`(TraceControl)·호스트 설정을 핸들로, `RegisterConsoleSetting` 공개 경로를 `RegisterDynamic`으로. `log.*`는 로깅 문서 L18·9.2절 표와 맞춘다: 실행 중 값은 `log.level`(enum 핸들, 대소문자 무시 입력)·`log.levels`(`.Validate(CheckLogLevelsSyntax)`)·`log.rate_limits`(`.Validate(CheckLogRateLimitsSyntax)`)이고, 나머지 `log.mode`·`log.console.layout`·`log.file.*`(`layout`·`max_age_minutes`·`compress` 포함)는 `BootCVar`다. 레이아웃 둘은 `.Validate(CheckLogLayoutSyntax)`, 닫힌 값 집합인 `log.mode`·`log.file.format`은 enum 핸들이다. 검사 함수(c5fe9289 — `LogHost.h`·`LogLayout.h`)는 `constexpr StringView (StringView) noexcept`이고 문법만 본다(순수 함수라 런타임 카테고리 목록은 못 본다 — 모르는 카테고리는 LogHost가 적용 때 진단) | CVR6 | 기존 Config·LogHost·Trace 시험 통과 |
+| CVR7 | 이관: `log.*`(LogHost)·`trace.*`(TraceControl)·호스트 설정을 핸들로, `RegisterConsoleSetting` 공개 경로를 `RegisterDynamic`으로. `log.*`는 로깅 문서 L18·9.2절 표와 맞춘다: 실행 중 값은 `log.level`(enum 핸들, 대소문자 무시 입력)·`log.levels`(`.Validate(CheckLogLevelsSyntax)`)·`log.rate_limits`(`.Validate(CheckLogRateLimitsSyntax)`)이고, 나머지 `log.mode`·`log.console.layout`·`log.file.*`(`layout`·`max_age_minutes`·`compress` 포함)는 `BootCVar`다. 레이아웃 둘은 `.Validate(CheckLogLayoutSyntax)`, 닫힌 값 집합인 `log.mode`·`log.file.format`은 enum 핸들이다. 검사 함수(c5fe9289 — `LogHost.h`·`LogLayout.h`)는 `constexpr StringView (StringView) noexcept`이고 문법만 본다(순수 함수라 런타임 카테고리 목록은 못 본다. 카테고리 목록은 실행 중에도 닫혀 있지 않으므로 모르는 접두사는 판정하지 않고, LogHost는 적용 실패(표 용량·해시 충돌)만 적용 때 진단한다 — 아래 CVR7 메모) | CVR6 | 기존 Config·LogHost·Trace 시험 통과 |
 | CVR8 | `CheatSet`·`ROCKS_FUNCTION(Cheat)`·객체 콘솔(14.3·14.4) | CVR6, CU2 | 치트 집합 등록·실행·출시 규칙 시험 |
 
 - CVR1–CVR7은 Core 단독(Config 모듈)이고 World 연결만 Engine이다. CVR8은 함수 리플렉션 뒤다.
@@ -685,7 +686,7 @@ public:
 - Sync 순서(10절): hook → 큐 꺼내기·재검사 → 적용·유효값 계산(묶음 펼침 반복은 CVR5) → 바뀐 칸 세대 → 게시·다시 묶기 → 명령·CF2 구독 콜백 → `OnSynced`. `OnSynced`는 바뀐 것이 없는 Sync에도 빈 목록으로 부른다. hot reload hook은 `ReplaceLayerText`로 새 큐에 (빼기, 새 입력)을 한꺼번에 넣는다.
 - `Set`의 오류는 `Result`의 `ErrorCode`이고 거부 이유는 `SetOptions::reason`이다(6.2절 — 개정 7).
 - CF2 이관(21절): `Snapshot()`은 `Acquire()`로 바꿨다(snapshot 구조가 바뀌어 같은 API를 둘 수 없다 — RenderBase와 시험을 함께 바꿨다). 변수별 `Subscribe`는 남겼다: 21절대로 쓰는 곳(LogHost)을 CVR7에서 핸들·`OnSynced`·`Watcher`로 한꺼번에 옮긴다(LogHost의 `log.*`는 아직 핸들이 없는 CF2 독립 설정이라 지금 옮기면 CVR7에서 한 번 더 바꾼다).
-- 넘긴 것: `Get(scope)`·`SetOptions::scope`(CVR3), 봉인 뒤 `BootSealed`·불변 부팅 블록(CVR4), 묶음 펼침 반복(CVR5), 권한(치트 허용·복제) 적용 때 재판정(CVR6 — 지금 적용 때 다시 보는 권한은 층 권한뿐이다), 렌더 lane이 프레임 packet snapshot을 묶는 연결(RenderBase RB1 — RenderBase는 Config를 모른다, 16절 엔진 연결)·Task 작업 문맥 슬롯으로 worker에 묶음 넘기기(16절), 묶음 없는 `Set`의 프로세스 기본 문맥(6.2절 — `HostSettings`가 정하는 것으로 CVR7 호스트 설정 이관 때 넣는다. 지금은 `NotFound`), macOS TSan(CI).
+- 넘긴 것: `Get(scope)`·`SetOptions::scope`(CVR3), 봉인 뒤 `BootSealed`·불변 부팅 블록(CVR4), 묶음 펼침 반복(CVR5), 권한(치트 허용·복제) 적용 때 재판정(CVR6 — 지금 적용 때 다시 보는 권한은 층 권한뿐이다), 렌더 lane이 프레임 packet snapshot을 묶는 연결(RenderBase RB1 — RenderBase는 Config를 모른다, 16절 엔진 연결)·Task 작업 문맥 슬롯으로 worker에 묶음 넘기기(16절), 묶음 없는 `Set`의 프로세스 기본 문맥(6.2절 — CVR7에서 `MakeProcessDefault`로 넣었다, `HostSettings`가 정한다), macOS TSan(CI).
 
 **CVR4 구현(2026-11-19, `feature/cvar`)**
 - 봉인(`ConfigContext::CompleteStartup`)은 `BootCVar`의 지금 값을 부팅 블록(조각 표 — `ConfigSnapshot::FindBootSlot`)으로 굳혀 게시한다. 봉인 뒤 snapshot은 모두 같은 부팅 블록 조각을 공유하고(`IsSealed()`), `BootCVar::Get()`은 부팅 블록 칸을 읽는다. 봉인 전 `Get()`은 Debug·Development에서 Fatal이다(출시 빌드는 지금 칸을 읽는다). 봉인 뒤에 등록한 부팅 변수는 등록 때 값(대기 값 포함)으로 부팅 블록에 굳는다. 두 번째 `CompleteStartup`은 무동작이다.
@@ -747,9 +748,16 @@ public:
 - `Subscribe`·`SubscribeSettings`·`Unsubscribe`·`ConfigChange`·`ConfigChangeCallback`·`ConfigSubscriptionId`를 없앴다(7.3절).
 - 21절 끝의 규칙 변화를 함께 적었다.
 
+**CVR7 리뷰 반영(개정 15)**
+- 동적 변수 읽기의 타입 확인: snapshot 칸에 값 종류(`ValueKind`)를 두고 `ReadDynamic`이 모든 빌드에서 확인한다(다르면 fallback). `DynamicKind`로 종류를 묻는다(5절). 핸들의 `Get()`은 타입이 컴파일 때 정해지므로 확인하지 않는다(읽기 경로 비용 그대로).
+- 동적 정의의 정수 범위: 정수가 아닌 범위 끝, 그 타입의 표현 범위(int32 `[-2^31, 2^31-1]`, int64 `[-2^63, 2^63)`)를 넘는 범위 끝은 `InvalidArgument`다(double → 정수 변환의 미정의 동작과 검사 값·설명 값 불일치를 없앤다).
+- 프로세스 기본 문맥: 기본 문맥 경유 쓰기 계수와 파괴 쪽 대기(6.2절), 10.1절 표 행. **리뷰 결정과 다른 점**: 결정은 "해제 뒤 들어온 묶음 없는 쓰기는 `ShuttingDown`"이었지만, 파괴와 겹친 쓰기만 `ShuttingDown`이고 기본 문맥이 풀린 뒤 들어온 쓰기는 `NotFound`로 정했다(6.2절의 까닭 — 프로세스 전역 이력이 뒤 문맥의 결과를 바꾸지 않게). 파괴와 겹친 쓰기를 시험으로 결정적으로 만들려고 `config::detail::DefaultWriteProbe`(기본 문맥 경로의 관찰 지점 — 통로를 얻은 뒤·파괴가 기본 문맥을 푼 뒤, null이면 부르지 않는다)를 두었다.
+- LogHost `Watch` 기준점: `Watcher` 기준은 `Start`가 읽은 snapshot이다. `Watch`는 그 뒤 바뀐 값을 바로 한 번 적용하고(Start와 Watch 사이 Sync의 변경을 잃지 않는다) `OnSynced`를 단다. 적용이 일시적으로 실패하면(LogSystem의 `Busy` — 출력 스레드 안 호출) 그 값의 `Watcher`를 잊어(`Watcher::Reset`) 다음 Sync에 다시 시도한다. 용량 같은 지속 실패는 Warning 한 번이고 다시 시도하지 않는다.
+
 **CVR1 이후 결정·후속 항목**
 - `Register`는 타입을 지운 `const cvar::detail::VarDefinition*`만 받는다. CVR5 `CVarGroup`·CVR6 `ConsoleCommand`가 같은 경로로 오려면 종류(`HandleKind`)를 가진 공통 정의 머리가 필요하다(지금 `VarDefinition`을 머리로 쓰고 종류별 꼬리를 덧붙이는 모양).
 - 플러그인(모듈)을 내릴 때의 처리가 스펙에 없다: 문맥이 핸들 정의 포인터를 쥐므로, 모듈 코드가 내려가면 포인터가 dangling이 된다. `Unregister` 또는 모듈 언로드 때 그 모듈 핸들을 문맥에서 빼는 규칙을 정해야 한다(결정 필요).
+  - 같은 결정에 묶인 한계: 동적 변수(`RegisterDynamic`)의 번호는 문맥이 정의를 소유해도 프로세스 카운터에서 받고 다시 쓰지 않는다. 문맥을 되풀이해 만드는 경우(에디터의 PIE 세션처럼 실행 중 문맥을 여러 번 만들고 없앤다)에는 번호가 단조로 늘고, snapshot의 조각 표가 그만큼 길어진다(빈 조각은 공유되지 않고 포인터 칸만 는다). 번호 재사용은 `Unregister`와 함께 정한다(지금 코드는 바꾸지 않는다).
 - 핸들의 `Name()` 멤버가 클래스 범위에서 타입 `Name`을 가린다. CVR2 `Get()`의 Name 반환 타입은 `rocks::Name`으로 쓴다.
 
 ## 21. 기존 콘솔 설정에서 이전
@@ -790,10 +798,12 @@ public:
 | RenderBase | RB1 | 프레임 packet이 든 snapshot을 렌더 lane에 묶는 지점 | 반영(RenderBase 개정 13, 12절) |
 | UnrealCoreFeatureAudit | 콘솔 변수·치트 행 | 이 문서 단계(CVR1–CVR8) | 반영(UE-C21·UE-C29) |
 | ConfigSystem | 5절·5.1·5.3·5.4절 | CF2 구현 서술을 CVR7 뒤 동작으로(독립 설정 = CVar, `RegisterDynamic`, 구독 없앰, 호스트 등록 순서) | 반영(Config 개정 15) |
+| TraceSystem | 5절 TraceControl 세션 설정 | 설정 struct `TraceCaptureSettings`(섹션 `Trace`) → `trace.*` 핸들(`BootCVar` 다섯·`CVar` 하나), 엔진 층 파일의 `"Trace"` 섹션은 이제 모르는 섹션으로 거부된다, 콘솔 명령 인자 표기(CVR6) | 반영(Trace 개정 8) |
 | LoggingSystem | 9.2절 표·실행 중 변경, L17·L18, 15.1절 CVR7 행 | `log.*` 핸들 종류(enum·`BootCVar`·`Validate`), `Watch`는 `OnSynced` + `Watcher`, 설정 단계 거부 | 반영(Logging 개정 12) |
 
 ## 23. 개정 이력
 
+- 개정 15(2026-11-19): CVR7 리뷰 반영. 5절 동적 변수 읽기의 종류 확인(`ValueKind` 칸·`DynamicKind`)·정수 범위 규칙, 6.2절 기본 문맥 경유 쓰기 계수·파괴 대기·오류 코드(`ShuttingDown`·`NotFound`), 10.1절 표 행, 20절 CVR7 행 정정·리뷰 반영 메모·번호 재사용 한계, 22절 TraceSystem 행.
 - 개정 14(2026-11-19): CVR7. 5절 `RegisterDynamic`(정의·번호·읽기·오류), 6.2절 프로세스 기본 문맥(`MakeProcessDefault`, `HostSettings`), 7.3절 구독 없앰, 9절 필드 지정자 문장, 21절 이전 뒤 규칙 변화, 22절 Config·Logging 행, 20절 CVR7 메모(`log.*`·`trace.*` 핸들 종류, LogHost 읽기·`Watch`, 카테고리 목록이 닫혀 있지 않다는 정정).
 - 개정 13(2026-11-19): CVR6 리뷰 반영. 13.1절(`cheat.enabled` 콘솔 읽기 전용, 적용 때 판정의 큐 순서·콘솔 층 문서), 13.2절(Export는 복제 변수 전부, `GetNetworkRole` 어느 스레드나), 15절 구현 규칙(다른 스레드 입구 `ConsoleInputPort`·참조 계수 sink·스레드 안전 요건, 공백·탭 구분·따옴표 없음, `cvar.explain` 이름 하나), 20절 CVR6 리뷰 반영 메모(명령 대상 묶음 규칙·수명, NaN·무한대, 덤프 주석 escape).
 - 개정 12(2026-11-19): CVR6. 명령 정의를 `cvar::Command<&Function>(name)`으로(4.2절 — 까닭), `BindCommand`·`CommandContext::Target`, 콘솔 구현 규칙(15절 — enum 수 입력은 Config 값 검사, 내장 `cvar.*` 명령, 다른 스레드 입력의 이름 색인, 오류 문구 형식), 치트 허용 상태의 정의 위치·판정 시점(13.1절), 네트워크 역할·복제 목록 경계(13.2절), 덤프 구현(15절), 20절 CVR6 메모(설정 struct 필드의 봉인 뒤 직접 쓰기 `BootSealed` 결정 포함).

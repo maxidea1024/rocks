@@ -301,9 +301,11 @@ public:
                        StringView hostName) noexcept;
 
     // log.level·log.levels·log.rate_limits의 실행 중 변경을 따른다: settings의 OnSynced에 알림
-    // 하나를 더하고, Sync마다 그 snapshot에서 값이 바뀐 것(Watcher — 세대 비교)만 다시
-    // 적용한다(전역 최소·카테고리 재정의·속도 제한). settings는 Stop까지 살아 있어야 한다. 소유
-    // 스레드(게임 lane)에서 부른다. 오류: 시작 전·이미 따르는 중 InvalidArgument, 알림 추가 오류.
+    // 하나를 더하고, Sync마다 그 snapshot에서 값이 바뀐 것(Watcher — 세대 비교, 기준은 Start가 읽은
+    // snapshot이고 Watch가 그 뒤의 변경을 바로 한 번 적용한다)만 다시 적용한다(일시적으로 실패한
+    // 값은 다음 Sync에 다시 시도한다 — 전역 최소·카테고리 재정의·속도 제한). settings는 Stop까지
+    // 살아 있어야 한다. 소유 스레드(게임 lane)에서 부른다. 오류: 시작 전·이미 따르는 중
+    // InvalidArgument, 알림 추가 오류.
     Result<void> Watch(config::ConfigContext& settings) noexcept;
 
     // 변경 알림을 빼고 LogSystem을 멈추고 파일을 닫는다. 설치 범위가 끝난 뒤 부른다. 두 번 불러도
@@ -342,10 +344,11 @@ private:
     Result<void> StartWith(const LogSystemConfig& preset, bool settings,
                            StringView hostName) noexcept;
     // 아래 셋과 PrepareFileSink는 settings의 snapshot이 이 스레드에 묶여 있을 때 부른다(핸들로
-    // 읽는다).
-    void ApplyGlobalLevel() noexcept;
-    void ApplyLevelOverrides() noexcept;
-    void ApplyRateLimits() noexcept;
+    // 읽는다). 셋의 반환은 일시적 실패(LogSystem Busy) 없이 끝났는지다(false면 다음 sync 지점에
+    // 다시 시도한다 — 용량 같은 지속 실패는 Warning 뒤 true).
+    bool ApplyGlobalLevel() noexcept;
+    bool ApplyLevelOverrides() noexcept;
+    bool ApplyRateLimits() noexcept;
     void PrepareFileSink(StringView hostName) noexcept;
     void OnSynced() noexcept;
 
@@ -363,7 +366,7 @@ private:
     config::ConfigContext* watched_ = nullptr;
     // watched_의 OnSynced에 더한 알림이다.
     DelegateHandle synced_{};
-    // 실행 중 값 셋의 마지막으로 적용한 세대다(Watch가 지금 세대로 맞춘다).
+    // 실행 중 값 셋의 마지막으로 적용한 세대다(Start가 읽은 snapshot이 기준이다).
     cvar::Watcher<LogLevel> levelWatcher_{LogLevelVar};
     cvar::Watcher<String> levelsWatcher_{LogLevelsVar};
     cvar::Watcher<String> rateLimitsWatcher_{LogRateLimitsVar};

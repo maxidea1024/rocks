@@ -214,20 +214,58 @@ constexpr uint32 DynamicVarFlags =
 // 부팅 동적 변수가 받는 성질 비트다(BootVarBuilder와 같다).
 constexpr uint32 DynamicBootFlags = static_cast<uint32>(VarFlags::UserSetting);
 
+// int32 범위 끝으로 받는 double 값의 경계다(정확히 표현된다).
+constexpr double Int32RangeMinimum = -2147483648.0;
+constexpr double Int32RangeMaximum = 2147483647.0;
+
+// int64 범위 끝으로 받는 double 값의 경계다: [-2^63, 2^63). 2^63은 int64로 표현되지 않으므로 상한은
+// 그보다 작아야 한다(double → int64 변환의 미정의 동작을 막는다).
+constexpr double Int64RangeMinimum = -9223372036854775808.0;
+constexpr double Int64RangeLimit = 9223372036854775808.0;
+
+// value가 정수 타입 type의 범위 끝으로 쓸 수 있는 값(정수이고 그 타입의 표현 범위 안)인지다.
+bool IsIntegerBound(ConsoleValueType type, double value) noexcept {
+    const bool inRange = type == ConsoleValueType::Int32
+                             ? value >= Int32RangeMinimum && value <= Int32RangeMaximum
+                             : value >= Int64RangeMinimum && value < Int64RangeLimit;
+    // 범위 안의 값만 정수로 바꿔 본다(바꾼 값이 같아야 정수다).
+    return inRange && static_cast<double>(static_cast<int64>(value)) == value;
+}
+
+// 동적 정의의 범위 칸이 그 타입에 맞는지다: 수 타입이고, 끝이 유한하며 minimum <= maximum이고,
+// 정수 타입이면 두 끝이 정수이고 그 타입의 표현 범위 안이다(검사 값과 설명 값이 같다).
+bool IsValidDynamicRange(const DynamicVarDefinition& definition) noexcept {
+    if (!definition.hasRange) {
+        return true;
+    }
+
+    constexpr double Largest = NumericLimits<double>::Max();
+    const bool finite = definition.minimum >= -Largest && definition.minimum <= Largest &&
+                        definition.maximum >= -Largest && definition.maximum <= Largest;
+    if (!finite || !(definition.minimum <= definition.maximum)) {
+        return false;
+    }
+
+    switch (definition.type) {
+    case ConsoleValueType::Float:
+    case ConsoleValueType::Double:
+        return true;
+    case ConsoleValueType::Int32:
+    case ConsoleValueType::Int64:
+        return IsIntegerBound(definition.type, definition.minimum) &&
+               IsIntegerBound(definition.type, definition.maximum);
+    default:
+        return false;
+    }
+}
+
 // 동적 정의의 규칙(이름·도움말·성질·범위·enum 타입)을 본다.
 bool IsValidDynamic(const ConfigState& state, const DynamicVarDefinition& definition) noexcept {
     const ValueKind kind = ConsoleValueKind(definition.type);
-    const bool numeric = kind == ValueKind::Int32 || kind == ValueKind::Int64 ||
-                         kind == ValueKind::Float32 || kind == ValueKind::Float64;
-    constexpr double Largest = NumericLimits<double>::Max();
-    const bool finiteRange = definition.minimum >= -Largest && definition.minimum <= Largest &&
-                             definition.maximum >= -Largest && definition.maximum <= Largest;
     const uint32 allowed = definition.boot ? DynamicBootFlags : DynamicVarFlags;
     return IsConsoleSettingName(definition.name) && HasKnownRegion(state, definition.name) &&
            !definition.help.IsEmpty() && kind != ValueKind::Opaque &&
-           (definition.flags & ~allowed) == 0 &&
-           (!definition.hasRange ||
-            (numeric && finiteRange && definition.minimum <= definition.maximum)) &&
+           (definition.flags & ~allowed) == 0 && IsValidDynamicRange(definition) &&
            (definition.enumType != TypeId{}) == (kind == ValueKind::Enum);
 }
 

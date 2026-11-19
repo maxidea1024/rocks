@@ -223,7 +223,9 @@ struct DynamicVarDefinition {
     uint32 flags = 0;
     // 이번 실행 동안 고정인 부팅 변수(BootCVar와 같은 규칙 — CVar 9절)인지다.
     bool boot = false;
-    // 수 타입(Int32·Int64·Float·Double)의 닫힌 범위다(hasRange일 때). 밖의 값은 거부한다.
+    // 수 타입(Int32·Int64·Float·Double)의 닫힌 범위다(hasRange일 때). 밖의 값은 거부한다. 끝은
+    // 유한해야 하고, 정수 타입이면 정수이고 그 타입의 표현 범위(int32 [-2^31, 2^31-1], int64
+    // [-2^63, 2^63)) 안이어야 한다.
     bool hasRange = false;
     double minimum = 0;
     double maximum = 0;
@@ -260,6 +262,24 @@ private:
 
     SharedPtr<detail::WriteChannel> channel_;
 };
+
+namespace detail {
+
+// 프로세스 기본 문맥 경로의 관찰 지점이다(CVar 20절 CVR7 리뷰 반영 — 시험이 묶음 없는 쓰기와 문맥
+// 파괴가 겹치는 순서를 gate로 결정적으로 만든다). acquired는 묶음 없는 쓰기가 기본 문맥의 통로를
+// 얻은 뒤(잠금 밖, 큐에 넣기 전), released는 문맥 파괴가 기본 문맥을 푼 뒤(그 쓰기를 기다리기 전)
+// 부른다. 함수는 null이어도 된다. 소유 스레드에서 쓰기 스레드를 시작하기 전에 정하고, 그 스레드를
+// Join한 뒤 null로 되돌린다(그래서 경쟁이 없다).
+struct DefaultWriteProbe {
+    void (*acquired)(void* context) noexcept = nullptr;
+    void (*released)(void* context) noexcept = nullptr;
+    void* context = nullptr;
+};
+
+// 지금 관찰 지점이다(null이면 부르지 않는다 — 상수 초기화).
+inline constinit DefaultWriteProbe* ActiveDefaultWriteProbe = nullptr;
+
+} // namespace detail
 
 class ConfigContext {
 public:
@@ -459,7 +479,8 @@ public:
     // 이 문맥에서만 뜻이 있다. 읽기는 cvar::ReadDynamic(snapshot, 번호, fallback)이고, 게임 lane
     // 도구는 FindConsoleSetting·ConsoleValue로 이름으로 본다.
     // 오류: 초기화 전, 이름 문법·영역 표에 없음, 빈 help, 모르는 성질 비트(부팅 변수의 Cheat·
-    // Replicated 포함), 수가 아닌 타입의 범위·minimum > maximum·유한하지 않은 범위, Enum과 enumType
+    // Replicated 포함), 수가 아닌 타입의 범위·minimum > maximum·유한하지 않은 범위·정수 타입의
+    // 정수가 아니거나 표현 범위를 넘는 범위 끝, Enum과 enumType
     // 불일치, 기본값 거부 InvalidArgument, enumType이 TypeRegistry에 없으면 그 조회 오류, 같은
     // 이름이 이미 있으면 같은 타입 AlreadyExists·다른 타입 TypeMismatch(콘솔 명령이면
     // AlreadyExists), 출시 빌드의 Cheat 변수 Unsupported, 다른 스레드 WrongThread, 할당 실패.
@@ -604,8 +625,11 @@ public:
     // 이 문맥을 프로세스 기본 문맥으로 정한다(CVar 6.2절 — 묶음 없는 스레드의 `Set`·`Clear`·
     // `ScopedOverride`가 이 문맥의 쓰기 큐에 간다. 읽기 `Get`은 늘 묶음이다). 프로세스에 하나이고,
     // 문맥이 없어질 때 풀린다. 호스트(HostSettings::Initialize)가 부른다. 같은 문맥이 다시 부르면
-    // 성공이다. 오류: 초기화 전 InvalidArgument, 다른 문맥이 이미 기본 AlreadyExists, 다른 스레드
-    // WrongThread.
+    // 성공이다. 문맥 파괴는 기본 문맥을 거쳐 통로를 얻은 쓰기가 끝날 때까지 기다린다(그 쓰기는
+    // ShuttingDown — 통로의 마지막 해제가 소유 스레드에서 일어난다). 기본 문맥이 없을 때의 묶음
+    // 없는 쓰기는 NotFound다. 기본 문맥을 거친 ScopedOverride는 문맥 allocator보다 먼저 끝나야
+    // 한다(ConsoleInputPort와 같다). 오류: 초기화 전 InvalidArgument, 다른 문맥이 이미 기본
+    // AlreadyExists, 다른 스레드 WrongThread.
     Result<void> MakeProcessDefault() noexcept;
 
     // 시작이 끝났음을 알리고 부팅 값을 봉인한다(CVar 9절). 부팅 변수(BootCVar)의 지금 값을 불변

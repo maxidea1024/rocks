@@ -64,9 +64,11 @@ Result<SharedPtr<ConfigSnapshot>> SnapshotAccess::Make(Allocator& allocator) noe
 
 namespace {
 
-// 설정 값(value — 콘솔 설정 종류)을 칸에 쓴다. String·Name은 새 텍스트 블록을 만든다.
+// 설정 값(value — 콘솔 설정 종류)을 칸에 쓴다(값 종류도 적는다). String·Name은 새 텍스트 블록을
+// 만든다.
 Result<void> WriteSlot(Allocator& allocator, const FieldValue& value, CVarSlot& slot,
                        SharedPtr<const CVarText>& text) noexcept {
+    slot.kind = value.kind;
     switch (value.kind) {
     case ValueKind::Bool:
         slot.bits = value.boolean ? 1 : 0;

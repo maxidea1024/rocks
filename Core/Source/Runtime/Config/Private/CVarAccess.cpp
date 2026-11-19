@@ -272,16 +272,49 @@ public:
     DefaultChannelGuard& operator=(const DefaultChannelGuard&) = delete;
 };
 
-// 쓰기가 갈 통로다: 이 스레드에 묶인 문맥, 없으면 프로세스 기본 문맥(6.2절). 둘 다 없으면 null이다.
-SharedPtr<WriteChannel> WriteTarget() noexcept {
-    const ConfigSnapshot* snapshot = CurrentBinding.snapshot;
-    if (snapshot != nullptr) {
-        return SnapshotAccess::Channel(*snapshot);
+} // namespace
+
+WriteRoute::~WriteRoute() noexcept {
+    if (!viaDefault) {
+        return;
     }
 
-    DefaultChannelGuard guard;
-    return DefaultChannel != nullptr ? *DefaultChannel : SharedPtr<WriteChannel>();
+    // 통로 참조를 먼저 놓고(소유 문맥이 아직 쥐고 있으므로 마지막 해제가 아니다) 계수를 내린다.
+    // 계수가 0이 되기 전에는 문맥 파괴가 기다리므로 raw는 살아 있다.
+    WriteChannel* raw = channel.Get();
+    channel = SharedPtr<WriteChannel>();
+    platform::LockGuard lock(raw->mutex);
+    if (--raw->defaultWriters == 0) {
+        raw->defaultIdle.NotifyAll();
+    }
 }
+
+void WriteTarget(WriteRoute& route) noexcept {
+    const ConfigSnapshot* snapshot = CurrentBinding.snapshot;
+    if (snapshot != nullptr) {
+        route.channel = SnapshotAccess::Channel(*snapshot);
+        return;
+    }
+
+    {
+        DefaultChannelGuard guard;
+        if (DefaultChannel == nullptr) {
+            return;
+        }
+
+        route.channel = *DefaultChannel;
+        route.viaDefault = true;
+        platform::LockGuard lock(route.channel->mutex);
+        ++route.channel->defaultWriters;
+    }
+
+    if (DefaultWriteProbe* probe = ActiveDefaultWriteProbe;
+        probe != nullptr && probe->acquired != nullptr) {
+        probe->acquired(probe->context);
+    }
+}
+
+namespace {
 
 // 거부 이유를 알린다(SetOptions::reason — 6.2절).
 Result<void> Reject(const cvar::SetOptions& options, ConfigDiagnosticCode code) noexcept {
@@ -439,10 +472,25 @@ bool IsLimited(const WriteChannel& channel) noexcept {
 
 } // namespace
 
-void ReleaseProcessDefault(const WriteChannel& channel) noexcept {
-    DefaultChannelGuard guard;
-    if (DefaultChannel != nullptr && DefaultChannel->Get() == &channel) {
+void ReleaseProcessDefault(WriteChannel& channel) noexcept {
+    {
+        DefaultChannelGuard guard;
+        if (DefaultChannel == nullptr || DefaultChannel->Get() != &channel) {
+            return;
+        }
+
         DefaultChannel = nullptr;
+    }
+
+    if (DefaultWriteProbe* probe = ActiveDefaultWriteProbe;
+        probe != nullptr && probe->released != nullptr) {
+        probe->released(probe->context);
+    }
+
+    // 기본 문맥을 거쳐 통로를 얻은 쓰기가 참조를 놓을 때까지 기다린다(sleep 없음 — 조건 변수).
+    platform::LockGuard lock(channel.mutex);
+    while (channel.defaultWriters != 0) {
+        static_cast<void>(channel.defaultIdle.Wait(channel.mutex));
     }
 }
 
@@ -603,20 +651,22 @@ Result<void> SubmitSet(const VarDefinition& definition, ScalarValue value,
         return checked;
     }
 
-    const SharedPtr<WriteChannel> channel = config::detail::WriteTarget();
-    if (channel.Get() == nullptr) {
+    config::detail::WriteRoute route;
+    config::detail::WriteTarget(route);
+    if (route.channel.Get() == nullptr) {
         return Result<void>::Failure(ErrorCode::NotFound);
     }
 
+    WriteChannel& channel = *route.channel;
     SharedPtr<config::detail::QueuedChange> change;
-    if (auto made = config::detail::MakeSet(*channel, definition, value, options, where, change);
+    if (auto made = config::detail::MakeSet(channel, definition, value, options, where, change);
         !made) {
         return made;
     }
 
     SharedPtr<config::detail::QueuedChange> one[] = {Move(change)};
-    return config::detail::Enqueue(*channel, Span<SharedPtr<config::detail::QueuedChange>>(one),
-                                   config::detail::IsLimited(*channel));
+    return config::detail::Enqueue(channel, Span<SharedPtr<config::detail::QueuedChange>>(one),
+                                   config::detail::IsLimited(channel));
 }
 
 Result<void> SubmitClear(const VarDefinition& definition, const SetOptions& options) noexcept {
@@ -624,20 +674,22 @@ Result<void> SubmitClear(const VarDefinition& definition, const SetOptions& opti
         return checked;
     }
 
-    const SharedPtr<WriteChannel> channel = config::detail::WriteTarget();
-    if (channel.Get() == nullptr) {
+    config::detail::WriteRoute route;
+    config::detail::WriteTarget(route);
+    if (route.channel.Get() == nullptr) {
         return Result<void>::Failure(ErrorCode::NotFound);
     }
 
+    WriteChannel& channel = *route.channel;
     SharedPtr<config::detail::QueuedChange> change;
-    if (auto made = config::detail::MakeChange(channel->allocator, definition, options, change);
+    if (auto made = config::detail::MakeChange(channel.allocator, definition, options, change);
         !made) {
         return made;
     }
 
     SharedPtr<config::detail::QueuedChange> one[] = {Move(change)};
-    return config::detail::Enqueue(*channel, Span<SharedPtr<config::detail::QueuedChange>>(one),
-                                   config::detail::IsLimited(*channel));
+    return config::detail::Enqueue(channel, Span<SharedPtr<config::detail::QueuedChange>>(one),
+                                   config::detail::IsLimited(channel));
 }
 
 StringView MakeScopedTag(char (&tag)[ScopedTagBytes]) noexcept {
@@ -672,10 +724,15 @@ Result<void> BeginScopedOverride(const VarDefinition& definition, const ScalarVa
 
     // 끝낼 때 넣을 지우기를 지금 만들고 그 자리를 큐에 잡아 둔다(소멸에 실패 경로가 없다). 지우기는
     // 묶음과 무관하게 이 통로(쓴 문맥)에 간다.
-    SharedPtr<WriteChannel> channel = config::detail::WriteTarget();
-    if (channel.Get() == nullptr) {
+    config::detail::WriteRoute route;
+    config::detail::WriteTarget(route);
+    if (route.channel.Get() == nullptr) {
         return Result<void>::Failure(ErrorCode::NotFound);
     }
+
+    // 범위가 끝날 때 지우기를 넣으려고 통로 참조를 범위 동안 쥔다(6.2절 — 문맥 allocator보다 먼저
+    // 끝나야 한다). route의 계수는 이 함수가 끝날 때 내린다.
+    SharedPtr<WriteChannel> channel = route.channel;
 
     SharedPtr<config::detail::QueuedChange> set;
     SharedPtr<config::detail::QueuedChange> clear;

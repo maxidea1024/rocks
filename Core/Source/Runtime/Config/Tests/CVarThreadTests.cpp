@@ -13,6 +13,8 @@
 // - 묶음 수명: 작업 스레드가 묶은 snapshot은 그 사이 여러 Sync가 지나도 살아 있고 값이 그대로다.
 // - 동시 실행: 다른 스레드의 Set과 게임 lane의 Register·Sync를 엇갈려 돌린다. 이전 snapshot에서 새
 //   변수는 기본값이다.
+// - 프로세스 기본 문맥: 묶음 없는 스레드의 Set·Clear·ScopedOverride, 묶음 없는 Set과 문맥 파괴의
+//   겹침(관찰 지점 DefaultWriteProbe의 gate로 순서를 정한다).
 // - 사망 시험(자식 프로세스): 게임 lane의 등록 안 된 핸들 Get, 묶음 없는 Get, 묶음이 남은 채 문맥
 // 파괴.
 using namespace rocks;
@@ -474,6 +476,166 @@ DeathRun RunDeathProbe(const char* scenario) noexcept {
 }
 
 } // namespace
+
+namespace {
+
+// 묶음 없는 스레드에서 할 쓰기다(프로세스 기본 문맥으로 간다 — CVar 6.2절).
+enum class UnboundAction : uint8 {
+    Set,
+    Clear,
+    Scoped
+};
+
+struct UnboundWriter {
+    UnboundAction action = UnboundAction::Set;
+    int32 value = 0;
+    ErrorCode result = ErrorCode::Cancelled;
+    // Scoped: 범위 임시 변경을 건 뒤 이 gate를 기다렸다가 범위를 끝낸다.
+    platform::Semaphore* applied = nullptr;
+    platform::Semaphore* release = nullptr;
+};
+
+void RunUnboundWriter(void* raw) noexcept {
+    auto& writer = *static_cast<UnboundWriter*>(raw);
+    if (writer.action == UnboundAction::Scoped) {
+        cvar::ScopedOverride<int32> scoped(Written, writer.value);
+        writer.result = scoped.Status() ? ErrorCode::None : scoped.Status().Error();
+        static_cast<void>(writer.applied->Release(1));
+        static_cast<void>(writer.release->Wait());
+        return;
+    }
+
+    auto written =
+        writer.action == UnboundAction::Set ? Written.Set(writer.value) : Written.Clear();
+    writer.result = written ? ErrorCode::None : written.Error();
+}
+
+ErrorCode RunUnbound(UnboundAction action, int32 value) noexcept {
+    UnboundWriter writer;
+    writer.action = action;
+    writer.value = value;
+    platform::Thread thread;
+    const bool started =
+        thread.Start(&RunUnboundWriter, &writer) == platform::ThreadStatus::Success;
+    CHECK(started && thread.Join() == platform::ThreadStatus::Success);
+    return writer.result;
+}
+
+struct DefaultCall {
+    ConfigContext* context = nullptr;
+    ErrorCode result = ErrorCode::Cancelled;
+};
+
+void MakeDefaultFromOtherThread(void* raw) noexcept {
+    auto& call = *static_cast<DefaultCall*>(raw);
+    auto made = call.context->MakeProcessDefault();
+    call.result = made ? ErrorCode::None : made.Error();
+}
+
+} // namespace
+
+// 프로세스 기본 문맥: 묶음 없는 스레드의 Set·Clear·ScopedOverride가 그 문맥의 큐에 들고 다음 Sync에
+// 적용된다. 재호출은 성공, 다른 문맥은 AlreadyExists, 다른 스레드는 WrongThread다. 문맥이 없어지면
+// 묶음 없는 쓰기는 NotFound다(Join·gate가 순서를 정한다).
+TEST(CVar_ProcessDefaultContextRoutesUnboundWrites) {
+    {
+        ConfigFixture fixture;
+        ConfigContext& context = fixture.Context();
+        REQUIRE(context.Register(Written));
+        REQUIRE(context.MakeProcessDefault());
+        REQUIRE(context.MakeProcessDefault());
+        DefaultCall foreign;
+        foreign.context = &context;
+        platform::Thread thread;
+        REQUIRE(thread.Start(&MakeDefaultFromOtherThread, &foreign) ==
+                platform::ThreadStatus::Success);
+        REQUIRE(thread.Join() == platform::ThreadStatus::Success);
+        CHECK(foreign.result == ErrorCode::WrongThread);
+        {
+            ConfigFixture other;
+            CHECK(other.Context().MakeProcessDefault().Error() == ErrorCode::AlreadyExists);
+        }
+
+        REQUIRE(context.Sync());
+        CHECK(RunUnbound(UnboundAction::Set, 7) == ErrorCode::None);
+        REQUIRE(context.Sync());
+        CHECK(Written.Get() == 7);
+        CHECK(RunUnbound(UnboundAction::Clear, 0) == ErrorCode::None);
+        REQUIRE(context.Sync());
+        CHECK(Written.Get() == 0);
+
+        // 범위 임시 변경: 걸린 동안 적용되고, 다른 스레드에서 끝나면 다음 Sync에 빠진다.
+        platform::Semaphore applied(0, 1);
+        platform::Semaphore release(0, 1);
+        UnboundWriter scoped;
+        scoped.action = UnboundAction::Scoped;
+        scoped.value = 9;
+        scoped.applied = &applied;
+        scoped.release = &release;
+        platform::Thread scopedThread;
+        REQUIRE(scopedThread.Start(&RunUnboundWriter, &scoped) == platform::ThreadStatus::Success);
+        REQUIRE(applied.Wait() == platform::WaitResult::Signaled);
+        CHECK(scoped.result == ErrorCode::None);
+        REQUIRE(context.Sync());
+        CHECK(Written.Get() == 9);
+        REQUIRE(release.Release(1));
+        REQUIRE(scopedThread.Join() == platform::ThreadStatus::Success);
+        REQUIRE(context.Sync());
+        CHECK(Written.Get() == 0);
+    }
+
+    CHECK(RunUnbound(UnboundAction::Set, 3) == ErrorCode::NotFound);
+}
+
+namespace {
+
+// 묶음 없는 Set이 기본 문맥 통로를 얻은 순간과 문맥 파괴가 기본 문맥을 푼 순간을 gate로 잇는다.
+struct OverlapGates {
+    platform::Semaphore acquired{0, 1};
+    platform::Semaphore released{0, 1};
+};
+
+void OnDefaultAcquired(void* raw) noexcept {
+    auto& gates = *static_cast<OverlapGates*>(raw);
+    // 통로를 얻었다고 알리고, 파괴가 기본 문맥을 풀 때까지 기다린다(그 뒤 닫힌 통로에 넣는다).
+    static_cast<void>(gates.acquired.Release(1));
+    static_cast<void>(gates.released.Wait());
+}
+
+void OnDefaultReleased(void* raw) noexcept {
+    static_cast<void>(static_cast<OverlapGates*>(raw)->released.Release(1));
+}
+
+} // namespace
+
+// 묶음 없는 Set과 문맥 파괴가 겹치면: Set은 통로를 얻은 채 기다리고, 파괴는 통로를 닫고 기본 문맥을
+// 푼 뒤 그 Set이 통로 참조를 놓을 때까지 기다린다. Set은 ShuttingDown으로 끝나고(파괴와 겹친 쓰기),
+// 파괴는 그 뒤에 끝난다(통로의 마지막 해제가 소유 스레드). 그 뒤의 묶음 없는 Set은 NotFound다.
+TEST(CVar_UnboundSetOverlapsContextDestruction) {
+    OverlapGates gates;
+    config::detail::DefaultWriteProbe probe;
+    probe.acquired = &OnDefaultAcquired;
+    probe.released = &OnDefaultReleased;
+    probe.context = &gates;
+    UnboundWriter writer;
+    writer.value = 5;
+    platform::Thread thread;
+    {
+        ConfigFixture fixture;
+        REQUIRE(fixture.Context().Register(Written));
+        REQUIRE(fixture.Context().MakeProcessDefault());
+        config::detail::ActiveDefaultWriteProbe = &probe;
+        REQUIRE(thread.Start(&RunUnboundWriter, &writer) == platform::ThreadStatus::Success);
+        REQUIRE(gates.acquired.Wait() == platform::WaitResult::Signaled);
+        // 범위가 끝나며 문맥을 없앤다: 통로를 닫고 기본 문맥을 풀고(released gate) 그 쓰기가
+        // 끝날 때까지 기다린다.
+    }
+
+    REQUIRE(thread.Join() == platform::ThreadStatus::Success);
+    config::detail::ActiveDefaultWriteProbe = nullptr;
+    CHECK(writer.result == ErrorCode::ShuttingDown);
+    CHECK(RunUnbound(UnboundAction::Set, 6) == ErrorCode::NotFound);
+}
 
 // 게임 lane의 등록 안 된 핸들 Get, 묶음 없는 스레드의 Get, 묶음이 남은 채 문맥 파괴는 Fatal이다.
 TEST(CVar_MisuseIsFatal) {

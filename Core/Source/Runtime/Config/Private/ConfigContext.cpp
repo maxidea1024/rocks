@@ -537,14 +537,16 @@ ConfigContext::~ConfigContext() {
         detail::CurrentBinding = detail::ThreadBinding{};
     }
 
-    // 프로세스 기본 문맥이면 푼다(그 뒤 묶음 없는 쓰기는 NotFound — CVar 6.2절).
-    detail::ReleaseProcessDefault(channel);
     {
         platform::LockGuard lock(channel.mutex);
         channel.open = false;
         channel.queue.Clear();
         channel.current = SharedPtr<const ConfigSnapshot>();
     }
+
+    // 프로세스 기본 문맥이면 풀고(그 뒤 묶음 없는 쓰기는 NotFound), 기본 문맥을 거쳐 통로를 얻은
+    // 쓰기(닫힌 통로라 ShuttingDown으로 끝난다)가 통로 참조를 놓을 때까지 기다린다(CVar 6.2절).
+    detail::ReleaseProcessDefault(channel);
 
     for (UniquePtr<SectionState>& section : state->sections) {
         if (section->value != nullptr) {

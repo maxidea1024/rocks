@@ -54,6 +54,9 @@ struct CVarSlot {
     uint64 bits = 0;
     // 유효값의 세대다(처음 값이 1, 바뀔 때마다 1 늘어난다). 0이면 이 snapshot에 칸이 없다.
     uint32 generation = 0;
+    // 값 종류다(Bool·Int32·Int64·Float32·Float64·Utf8String·Name·Enum — 동적 변수 읽기가
+    // 확인한다, cvar::ReadDynamic). 칸이 없으면 Opaque다.
+    ValueKind kind = ValueKind::Opaque;
 };
 
 // CVar 값 조각이다(번호 [k·ChunkSlotCount, (k+1)·ChunkSlotCount)의 칸).

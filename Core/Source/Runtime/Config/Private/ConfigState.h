@@ -131,6 +131,11 @@ struct WriteChannel {
     uint8 networkRole = 0;
     // 살아 있는 cvar::SnapshotBinding 수(원자 — 문맥 파괴 때 0이어야 한다).
     uint64 bindings = 0;
+    // 프로세스 기본 문맥을 거쳐 이 통로를 쓰는 중인 묶음 없는 쓰기 수다(mutex가 지킨다 — CVar
+    // 6.2절). 문맥 파괴는 기본 문맥을 푼 뒤 이 수가 0이 될 때까지 defaultIdle로 기다린다(그래서
+    // 통로의 마지막 해제가 소유 스레드에서 일어난다).
+    usize defaultWriters = 0;
+    platform::ConditionVariable defaultIdle;
 };
 
 // 이름 블록이다(snapshot의 RenderRead 이름 값 — 만든 뒤 바뀌지 않는다).
@@ -676,8 +681,25 @@ Result<void> DrainQueue(ConfigState& state) noexcept;
 // 맞바꾼 뒤의 일이다: 큐에 든 콘솔 일(명령·표시)을 넣은 순서대로 실행한다(10절 5단계).
 void RunPendingCommands(ConfigState& state) noexcept;
 
-// 프로세스 기본 문맥이 이 통로면 푼다(문맥 파괴 — CVar 6.2절).
-void ReleaseProcessDefault(const WriteChannel& channel) noexcept;
+// 쓰기가 갈 통로다(WriteTarget이 채운다). 프로세스 기본 문맥을 거쳤으면(viaDefault) 소멸 때 통로
+// 참조를 먼저 놓고 그 통로의 defaultWriters를 내린다(CVar 6.2절). 쓰기를 마칠 때까지 쥔다.
+struct WriteRoute {
+    WriteRoute() noexcept = default;
+    ~WriteRoute() noexcept;
+    WriteRoute(const WriteRoute&) = delete;
+    WriteRoute& operator=(const WriteRoute&) = delete;
+
+    SharedPtr<WriteChannel> channel;
+    bool viaDefault = false;
+};
+
+// 쓰기가 갈 통로를 route에 채운다: 이 스레드에 묶인 문맥, 없으면 프로세스 기본 문맥(6.2절 — 기본
+// 문맥이면 그 통로의 defaultWriters를 올린다). 둘 다 없으면 route.channel은 null이다.
+void WriteTarget(WriteRoute& route) noexcept;
+
+// 프로세스 기본 문맥이 이 통로면 풀고, 기본 문맥을 거친 쓰기가 모두 끝날 때까지 기다린다(문맥
+// 파괴 — CVar 6.2절). 통로는 이미 닫혀 있어야 한다(겹친 쓰기는 ShuttingDown으로 끝난다).
+void ReleaseProcessDefault(WriteChannel& channel) noexcept;
 
 // ---- 콘솔 입력·명령(CVar 13·15절 — ConsoleInput.cpp) ----
 
