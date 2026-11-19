@@ -154,11 +154,12 @@ Result<GpuFencePoint> D3D11Device::EndFrame() noexcept {
         const TextureRecord* resolved = textures_.Find(target_.resolves[index].slot);
         if (source != nullptr && resolved != nullptr) {
             // 대상은 resolve mip·slice의 subresource다(텍스처 GX2 C부).
-            deferred_->ResolveSubresource(resolved->texture.Get(),
-                                          D3D11CalcSubresource(target_.resolveMips[index],
-                                                               target_.resolveSlices[index],
-                                                               resolved->mipLevels),
-                                          source->texture.Get(), 0, MappingOf(source->format).rtv);
+            deferred_->ResolveSubresource(
+                resolved->texture.Get(),
+                D3D11CalcSubresource(target_.resolveMips[index], target_.resolveSlices[index],
+                                     resolved->mipLevels),
+                source->texture.Get(), D3D11CalcSubresource(0, target_.colorSlices[index], 1),
+                MappingOf(source->format).rtv);
         }
     }
 

@@ -88,6 +88,17 @@ layout(location = 0) out vec4 out_var_SV_Target0;
 void main() { out_var_SV_Target0 = texelFetch(ps0, ivec2(0, 0), int(pu_h[0].x)) * 0.5; }
 )";
 
+// MSAA 2D 배열 층 1의 표본 0을 낸다(텍스처 GX2 나머지 C부).
+constexpr char MsaaLayerHlsl[] =
+    "Texture2DMSArray<float4> source : register(t0);\n" SLICE_FULL_SCREEN_HLSL
+    "float4 PSMain() : SV_Target { return source.Load(int3(0, 0, 1), 0); }\n";
+
+constexpr char MsaaLayerPixelGlsl[] = SLICE_GLSL_HEAD R"(
+layout(binding = 0) uniform highp sampler2DMSArray ps0;
+layout(location = 0) out vec4 out_var_SV_Target0;
+void main() { out_var_SV_Target0 = texelFetch(ps0, ivec3(0, 0, 1), 0); }
+)";
+
 #undef SLICE_GLSL_HEAD
 #undef SLICE_FULL_SCREEN_HLSL
 
@@ -283,14 +294,23 @@ void RunSlices(Device& device, Allocator& allocator, PipelineHandle white) noexc
 }
 
 // 깊이 배열 층마다 다른 깊이로 clear하고 깊이 시험으로 고른 층을 확인한다.
-void RunDepthLayers(Device& device, PipelineHandle depthWhite) noexcept {
+// 깊이 텍스처의 near 층(1로 clear)과 far 층(0으로 clear)이 따로인지 깊이 시험으로 본다. 다중 plane
+// 깊이(D24S8)의 2D 배열·cube도 같다(텍스처 GX2 나머지 C부).
+void RunDepthLayers(Device& device, PipelineHandle depthWhite, PixelFormat format,
+                    TextureDimension dimension, uint32 nearLayer, uint32 farLayer,
+                    const char* what) noexcept {
     TextureDesc depthDesc;
-    depthDesc.dimension = TextureDimension::Texture2DArray;
+    depthDesc.dimension = dimension;
     depthDesc.width = 2;
     depthDesc.height = 2;
-    depthDesc.arraySize = 2;
-    depthDesc.format = PixelFormat::D32Float;
+    depthDesc.arraySize = dimension == TextureDimension::Texture2DArray ? 2u : 1u;
+    depthDesc.format = format;
     depthDesc.usage = TextureUsage::DepthStencil;
+    if (!HasPixelFormatCaps(device.GetPixelFormatCaps(format),
+                            RequiredPixelFormatCaps(depthDesc))) {
+        return;
+    }
+
     auto depth = device.CreateTexture(depthDesc, {});
     auto color = device.CreateTexture(ColorDesc(TextureDimension::Texture2D, 2, 1, 1, 1), {});
     Check(depth && color, "depth array and color target");
@@ -299,7 +319,7 @@ void RunDepthLayers(Device& device, PipelineHandle depthWhite) noexcept {
         return;
     }
 
-    // 층 1은 1(가까움), 층 0은 0(먼 평면)으로 clear한다.
+    // near 층은 1(가까움), far 층은 0(먼 평면)으로 clear한다.
     const auto clearLayer = [&](uint32 layer, float value) noexcept {
         PassDesc pass;
         pass.depth.texture = depth.Value();
@@ -328,9 +348,8 @@ void RunDepthLayers(Device& device, PipelineHandle depthWhite) noexcept {
                device.ReadPixels(color.Value(), Span<uint8>(pixels, sizeof(pixels))).IsOk() &&
                pixels[0] == 255;
     };
-    const bool cleared = clearLayer(1, 1.0f) && clearLayer(0, 0.0f);
-    Check(cleared && !drawOver(1) && drawOver(0),
-          "depth array layer attachments keep separate depth per layer");
+    const bool cleared = clearLayer(nearLayer, 1.0f) && clearLayer(farLayer, 0.0f);
+    Check(cleared && !drawOver(nearLayer) && drawOver(farLayer), what);
     device.Retire(depth.Value());
     device.Retire(color.Value());
 }
@@ -376,6 +395,81 @@ void RunResolveSlice(Device& device, Allocator& allocator) noexcept {
     }
 }
 
+// 4x MSAA 2D 배열: 층 0은 빨강, 층 1은 초록으로 clear하고 층 1을 1표본 배열 층 1에 resolve한다
+// (층 0 그대로). PS가 Texture2DMSArray 층 1의 표본 0을 읽는다(텍스처 GX2 나머지 C부).
+void RunMsaaArray(Device& device, Allocator& allocator) noexcept {
+    TextureDesc msaaDesc = ColorDesc(TextureDimension::Texture2DArray, 2, 2, 1, 1);
+    msaaDesc.sampleCount = 4;
+    if ((device.GetPixelFormatSampleCounts(msaaDesc.format) & SampleCountBit(4)) == 0) {
+        return;
+    }
+
+    const TextureDesc arrayDesc = ColorDesc(TextureDimension::Texture2DArray, 2, 2, 1, 1);
+    auto msaa = device.CreateTexture(msaaDesc, {});
+    auto layers = device.CreateTexture(arrayDesc, {});
+    auto color = device.CreateTexture(ColorDesc(TextureDimension::Texture2D, 2, 1, 1, 1), {});
+    auto read = MakePipeline(device, Text(MsaaLayerHlsl), Text(MsaaLayerPixelGlsl), 0,
+                             PixelFormat::Unknown);
+    Check(msaa && layers && color && read, "MSAA 2D array, resolve target and reader");
+    if (msaa && layers && color && read) {
+        const bool cleared =
+            ClearSlice(device, layers.Value(), 0, 0, {0.0f, 0.0f, 1.0f, 1.0f}, {}) &&
+            ClearSlice(device, layers.Value(), 0, 1, {0.0f, 0.0f, 1.0f, 1.0f}, {}) &&
+            ClearSlice(device, msaa.Value(), 0, 0, {1.0f, 0.0f, 0.0f, 1.0f}, {});
+        PassDesc pass;
+        pass.colorCount = 1;
+        pass.colors[0].texture = msaa.Value();
+        pass.colors[0].slice = 1;
+        pass.colors[0].clear = {0.0f, 1.0f, 0.0f, 1.0f};
+        pass.colors[0].resolveTarget = layers.Value();
+        pass.colors[0].resolveSlice = 1;
+        auto frame = device.BeginPass(pass);
+        Check(cleared && frame && device.EndFrame() &&
+                  SliceIs(device, allocator, layers.Value(), arrayDesc, 0, 1, {0, 255, 0, 255}) &&
+                  SliceIs(device, allocator, layers.Value(), arrayDesc, 0, 0, {0, 0, 255, 255}),
+              "MSAA array layer 1 resolves into array layer 1 only");
+        PassDesc draw;
+        draw.colorCount = 1;
+        draw.colors[0].texture = color.Value();
+        auto drawn = device.BeginPass(draw);
+        if (drawn) {
+            drawn.Value()->SetPipeline(read.Value());
+            drawn.Value()->SetTexture(msaa.Value());
+            drawn.Value()->Draw(3);
+        }
+
+        uint8 pixels[2 * 2 * PixelBytes] = {};
+        Check(drawn && device.EndFrame() &&
+                  device.ReadPixels(color.Value(), Span<uint8>(pixels, sizeof(pixels))).IsOk() &&
+                  pixels[0] == 0 && pixels[1] == 255 && pixels[2] == 0,
+              "a pixel shader reads sample 0 of MSAA array layer 1");
+    } else {
+        PrintLastError(device);
+    }
+
+    if (read) {
+        device.Retire(read.Value());
+    }
+
+    if (msaa) {
+        device.Retire(msaa.Value());
+    }
+
+    if (layers) {
+        device.Retire(layers.Value());
+    }
+
+    if (color) {
+        device.Retire(color.Value());
+    }
+
+    // MSAA cube는 없다.
+    TextureDesc msaaCube = ColorDesc(TextureDimension::TextureCube, 2, 1, 1, 1);
+    msaaCube.sampleCount = 4;
+    Check(device.CreateTexture(msaaCube, {}).Error() == ErrorCode::InvalidArgument,
+          "an MSAA cube is rejected");
+}
+
 } // namespace
 
 uint32 RunSliceAttachmentChecks(const char* name, Device& device, Allocator& allocator) noexcept {
@@ -388,12 +482,31 @@ uint32 RunSliceAttachmentChecks(const char* name, Device& device, Allocator& all
                              PixelFormat::Unknown);
     auto depthWhite =
         MakePipeline(device, Text(WhiteHlsl), Text(WhitePixelGlsl), 0, PixelFormat::D32Float);
-    Check(white && half && depthWhite, "slice attachment pipelines");
+    // 다중 plane 깊이(D24S8) 파이프라인은 그 형식이 깊이 attachment일 때만 만든다.
+    const bool stencilDepth = HasPixelFormatCaps(
+        device.GetPixelFormatCaps(PixelFormat::D24UnormS8Uint), PixelFormatCaps::DepthStencil);
+    auto stencilWhite = stencilDepth ? MakePipeline(device, Text(WhiteHlsl), Text(WhitePixelGlsl),
+                                                    0, PixelFormat::D24UnormS8Uint)
+                                     : Result<PipelineHandle>::Failure(ErrorCode::Unsupported);
+    Check(white && half && depthWhite && (!stencilDepth || stencilWhite),
+          "slice attachment pipelines");
     if (white && half && depthWhite) {
         RunMipChain(device, allocator, half.Value());
         RunSlices(device, allocator, white.Value());
-        RunDepthLayers(device, depthWhite.Value());
+        RunDepthLayers(device, depthWhite.Value(), PixelFormat::D32Float,
+                       TextureDimension::Texture2DArray, 1, 0,
+                       "depth array layer attachments keep separate depth per layer");
+        if (stencilWhite) {
+            RunDepthLayers(device, stencilWhite.Value(), PixelFormat::D24UnormS8Uint,
+                           TextureDimension::Texture2DArray, 1, 0,
+                           "D24S8 array layer attachments keep separate depth per layer");
+            RunDepthLayers(device, stencilWhite.Value(), PixelFormat::D24UnormS8Uint,
+                           TextureDimension::TextureCube, 3, 0,
+                           "D24S8 cube face attachments keep separate depth per face");
+        }
+
         RunResolveSlice(device, allocator);
+        RunMsaaArray(device, allocator);
     } else {
         PrintLastError(device);
     }
@@ -411,7 +524,7 @@ uint32 RunSliceAttachmentChecks(const char* name, Device& device, Allocator& all
     Check(volumeDepthError == ErrorCode::InvalidArgument ||
               volumeDepthError == ErrorCode::Unsupported,
           "a 3D depth stencil texture is rejected");
-    Result<PipelineHandle>* pipelines[] = {&white, &half, &depthWhite};
+    Result<PipelineHandle>* pipelines[] = {&white, &half, &depthWhite, &stencilWhite};
     for (Result<PipelineHandle>* pipeline : pipelines) {
         if (*pipeline) {
             device.Retire(pipeline->Value());
@@ -421,7 +534,12 @@ uint32 RunSliceAttachmentChecks(const char* name, Device& device, Allocator& all
     auto idle = device.WaitIdle();
     Check(idle.IsOk(), "wait idle");
     Check(device.ValidationErrorCount() == validationBefore, "no validation errors");
-    printf("  %s slice attachments: %u failures\n", name, failures);
+    printf("  %s slice attachments: D24S8 array and cube %s, MSAA array %s, %u failures\n", name,
+           stencilWhite ? "yes" : "no",
+           (device.GetPixelFormatSampleCounts(PixelFormat::RGBA8Unorm) & SampleCountBit(4)) != 0
+               ? "yes"
+               : "no",
+           failures);
     return failures;
 }
 
