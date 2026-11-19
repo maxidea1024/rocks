@@ -17,6 +17,8 @@ public sealed class OpenGLGraphics : EngineModuleRules
         return new()
         {
             Name = ModuleName,
+            Unity = UnityFor(context),
+            UnityExclude = UnityExclude(context),
             // The entry point (Private/OpenGLGraphicsModule.cpp) is built on every platform.
             Sources =
             [
