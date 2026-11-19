@@ -14,7 +14,8 @@ namespace rocks::cvar {
 
 constinit CVar<bool> CheatsEnabled = cvar::Var("cheat.enabled", true)
                                          .Help("Allow cheat console writes and cheat commands")
-                                         .Replicated();
+                                         .Replicated()
+                                         .ConsoleReadOnly();
 
 } // namespace rocks::cvar
 
@@ -34,13 +35,25 @@ constexpr StringView ConsoleTag = "console";
 // 서버 층 복제 목록의 태그다.
 constexpr StringView ServerTag = "server";
 
-Result<void> Write(ConsoleOutput& output, StringView text) noexcept {
-    return output.write == nullptr ? Result<void>::Success() : output.write(output.context, text);
+Result<void> Write(ConsoleSink* output, StringView text) noexcept {
+    return output == nullptr ? Result<void>::Success() : output->Write(text);
+}
+
+// text의 첫 토큰(공백·탭으로 나눈다)과 나머지(앞뒤 공백을 뗀다)다. 따옴표 묶음은 없다(15절).
+void SplitToken(StringView text, StringView& first, StringView& rest) noexcept {
+    const StringView trimmed = text.TrimAscii();
+    usize at = 0;
+    while (at < trimmed.ByteCount() && trimmed.Data()[at] != ' ' && trimmed.Data()[at] != '\t') {
+        ++at;
+    }
+
+    first = StringView(trimmed.Data(), at);
+    rest = StringView(trimmed.Data() + at, trimmed.ByteCount() - at).TrimAscii();
 }
 
 // 서식 한 줄을 output에 쓴다(끝에 줄바꿈).
 template <class... Args>
-Result<void> WriteLine(ConfigState& state, ConsoleOutput& output, const char* format,
+Result<void> WriteLine(ConfigState& state, ConsoleSink* output, const char* format,
                        const Args&... args) noexcept {
     StringBuilder<192> line(state.allocator);
     static_cast<void>(line.TryAppendFormat(format, args...));
@@ -78,7 +91,12 @@ StringView KindName(const ConsoleSettingState& setting) noexcept {
     case ValueKind::Name:
         return "name";
     case ValueKind::Enum:
-        return setting.enumSchema != nullptr ? ToView(setting.enumSchema->name) : "enum";
+        // 이름 없는 schema(CVar enum)는 "enum"으로 쓴다.
+        if (setting.enumSchema != nullptr && !ToView(setting.enumSchema->name).IsEmpty()) {
+            return ToView(setting.enumSchema->name);
+        }
+
+        return "enum";
     default:
         return "value";
     }
@@ -141,7 +159,7 @@ Span<const uint64> SourcesOf(const ConfigState& state,
 
 // 값·출처 스택을 쓴다(`<이름>`, explain이면 종류·범위·도움말도 — 15절).
 Result<void> ShowSetting(ConfigState& state, const ConsoleSettingState& setting, bool explain,
-                         ConsoleOutput& output) noexcept {
+                         ConsoleSink* output) noexcept {
     StringBuilder<256> head(state.allocator);
     static_cast<void>(head.TryAppendFormat("{} = ", setting.name.View()));
     if (auto appended = AppendValue(setting, setting.value, setting.text.View(), head); !appended) {
@@ -246,7 +264,7 @@ Result<void> ShowSetting(ConfigState& state, const ConsoleSettingState& setting,
 
 // 명령의 도움말과 매개변수다(`<명령> ?`).
 Result<void> ShowCommand(ConfigState& state, const ConsoleCommandState& command,
-                         ConsoleOutput& output) noexcept {
+                         ConsoleSink* output) noexcept {
     StringBuilder<256> line(state.allocator);
     static_cast<void>(line.TryAppendFormat("{} (command", command.name.View()));
     const cvar::detail::CommandDefinition& definition = *command.definition;
@@ -288,13 +306,10 @@ Result<StringView> SplitArguments(const cvar::detail::CommandDefinition& definit
             return Result<StringView>::Success("needs more arguments");
         }
 
-        StringView token = remaining;
+        StringView token;
         StringView after;
-        if (StringView left; remaining.Split(" ", left, after, StringComparison::CaseSensitive)) {
-            token = left;
-        }
-
-        remaining = after.TrimAscii();
+        SplitToken(remaining, token, after);
+        remaining = after;
         if (auto pushed = out.TryPushBack(token); !pushed) {
             return Result<StringView>::Failure(pushed.Error());
         }
@@ -408,8 +423,22 @@ Result<void> AddNameEntry(ConfigState& state, ConsoleNameIndex& index, StringVie
 // 게임 lane의 콘솔 입력 한 줄이다(runCommands면 명령을 큐에 넣지 않고 바로 실행한다 — 다른 스레드가
 // 넣은 줄을 Sync 5단계에 처리할 때).
 Result<ConsoleLineResult> ExecuteOnOwner(ConfigContext& context, ConfigState& state,
-                                         StringView line, ConsoleOutput output,
+                                         StringView line, const SharedPtr<ConsoleSink>& sink,
                                          bool runCommands) noexcept;
+
+// 명령 문맥을 sink로 쓰는 어댑터다(내장 명령이 표시 함수에 넘긴다).
+class CommandSink final : public ConsoleSink {
+public:
+    explicit CommandSink(const cvar::CommandContext& context) noexcept : context_(context) {
+    }
+
+    Result<void> Write(StringView text) noexcept override {
+        return context_.Write(text);
+    }
+
+private:
+    const cvar::CommandContext& context_;
+};
 
 // 내장 명령 함수다(cvar.find·cvar.explain·cvar.dump — 15절).
 Result<void> RunFind(cvar::CommandContext& context, StringView text) noexcept {
@@ -469,23 +498,26 @@ Result<void> RunFind(cvar::CommandContext& context, StringView text) noexcept {
 
 Result<void> RunExplain(cvar::CommandContext& context, StringView name) noexcept {
     ConfigState& state = *context.Config().State();
-    const StringView trimmed = name.TrimAscii();
-    StringBuilder<192> line(state.allocator);
-    static_cast<void>(line.TryAppendFormat("{} ?", trimmed));
-    if (auto status = line.Status(); !status) {
-        return status;
+    StringView first;
+    StringView rest;
+    SplitToken(name, first, rest);
+    CommandSink output(context);
+    if (first.IsEmpty() || !rest.IsEmpty()) {
+        return Write(&output, "cvar.explain takes one name\n");
     }
 
-    // 출력은 명령의 sink다(같은 sink를 쓰는 콘솔 입력 처리로 넘긴다).
-    struct Forward {
-        static Result<void> WriteText(void* raw, StringView text) noexcept {
-            return static_cast<const cvar::CommandContext*>(raw)->Write(text);
-        }
-    };
+    // 이름 하나의 설명만 쓴다(값 쓰기·명령 실행으로 넘기지 않는다).
+    const usize setting = state.FindSetting(first);
+    if (setting != IndexNone && !IsHidden(state, state.settings[setting]->flags)) {
+        return ShowSetting(state, *state.settings[setting], true, &output);
+    }
 
-    ConsoleOutput output{&Forward::WriteText, &context};
-    auto executed = ExecuteOnOwner(context.Config(), state, line.View(), output, true);
-    return executed ? Result<void>::Success() : Result<void>::Failure(executed.Error());
+    const usize command = state.FindCommand(first);
+    if (command != IndexNone) {
+        return ShowCommand(state, *state.commands[command], &output);
+    }
+
+    return WriteLine(state, &output, "{} is not a console variable or command", first);
 }
 
 Result<void> RunDump(cvar::CommandContext& context, StringView mode) noexcept {
@@ -598,38 +630,100 @@ Result<SharedPtr<const ConsoleNameIndex>> BuildConsoleNameIndex(ConfigState& sta
     return Result<SharedPtr<const ConsoleNameIndex>>::Success(Move(made.Value()));
 }
 
-Result<bool> RecheckConsolePermission(ConfigState& state, const QueuedChange& change) noexcept {
-    const ConfigEntry& entry = *change.entry;
-    if (entry.kind != EntryKind::Console) {
-        return Result<bool>::Success(true);
+Result<bool> CheckEntryPermission(ConfigState& state, const ConfigEntry& entry, bool cheats,
+                                  ConsoleSink* sink) noexcept {
+    auto check = [&](StringView name) noexcept -> Result<bool> {
+        const usize index = state.FindSetting(name);
+        if (index == IndexNone) {
+            return Result<bool>::Success(true);
+        }
+
+        ConfigDiagnosticCode code = ConfigDiagnosticCode::LayerNotAllowed;
+        const StringView problem = CheckConsolePermission(VarFlagsOf(*state.settings[index]),
+                                                          cheats, state.networkRole, code);
+        if (problem.IsEmpty()) {
+            return Result<bool>::Success(true);
+        }
+
+        if (auto reported = Report(state, code, ConfigSeverity::Error, entry.layer,
+                                   entry.sourceName.View(), nullptr, name, problem);
+            !reported) {
+            return Result<bool>::Failure(reported.Error());
+        }
+
+        static_cast<void>(WriteLine(state, sink, "{} {}", name, problem));
+        return Result<bool>::Success(false);
+    };
+
+    if (entry.kind == EntryKind::Console) {
+        return check(entry.path.View());
     }
 
-    const usize index = state.FindSetting(entry.path.View());
+    // 콘솔 층 `Settings` 문서는 멤버 하나라도 거부되면 문서 전체를 거부한다(9절 문서 입력과 같다).
+    bool allowed = true;
+    const JsonValue settings = SettingsSectionOf(entry);
+    for (usize member = 0; settings.IsObject() && member < settings.Size(); ++member) {
+        auto checked = check(settings.KeyAt(member));
+        if (!checked) {
+            return checked;
+        }
+
+        allowed = allowed && checked.Value();
+    }
+
+    return Result<bool>::Success(allowed);
+}
+
+Result<bool> RecheckConsolePermission(ConfigState& state, const QueuedChange& change,
+                                      bool cheats) noexcept {
+    return CheckEntryPermission(state, *change.entry, cheats, change.sink.Get());
+}
+
+bool ChangeTouchesCheats(const QueuedChange& change) noexcept {
+    // 빼기는 그 자리의 값을 지우므로 늘 다시 계산한다.
+    if (change.entry.Get() == nullptr || change.replace) {
+        return true;
+    }
+
+    const ConfigEntry& entry = *change.entry;
+    if (entry.kind == EntryKind::Console) {
+        return entry.path.View() == cvar::CheatsEnabled.Name();
+    }
+
+    const JsonValue settings = SettingsSectionOf(entry);
+    return settings.IsObject() && settings.Find(cvar::CheatsEnabled.Name()).IsValid();
+}
+
+Result<bool> CheatsOfPlan(ConfigState& state, Span<ConfigEntry* const> plan) noexcept {
+    const usize index = state.FindSetting(cvar::CheatsEnabled.Name());
     if (index == IndexNone) {
         return Result<bool>::Success(true);
     }
 
-    ConfigDiagnosticCode code = ConfigDiagnosticCode::LayerNotAllowed;
-    const StringView problem = CheckConsolePermission(
-        VarFlagsOf(*state.settings[index]), CheatsAllowed(state), state.networkRole, code);
-    if (problem.IsEmpty()) {
-        return Result<bool>::Success(true);
+    Array<ConfigEntry*> order(state.allocator);
+    if (auto appended = order.TryAppend(plan); !appended) {
+        return Result<bool>::Failure(appended.Error());
     }
 
-    if (auto reported = Report(state, code, ConfigSeverity::Error, entry.layer,
-                               entry.sourceName.View(), nullptr, entry.path.View(), problem);
-        !reported) {
-        return Result<bool>::Failure(reported.Error());
+    order.Sort([](const ConfigEntry* left, const ConfigEntry* right) noexcept {
+        return left->layer != right->layer ? left->layer < right->layer
+                                           : left->sequence < right->sequence;
+    });
+    FieldValue value(state.allocator);
+    String text(state.allocator);
+    Array<uint64> sources(state.allocator);
+    if (auto computed = RecomputeConsoleSetting(state, *state.settings[index], order.View(), false,
+                                                value, text, sources);
+        !computed) {
+        return Result<bool>::Failure(computed.Error());
     }
 
-    ConsoleOutput output = change.output;
-    static_cast<void>(WriteLine(state, output, "{} {}", entry.path.View(), problem));
-    return Result<bool>::Success(false);
+    return Result<bool>::Success(value.boolean);
 }
 
 Result<void> QueueConsoleLine(ConfigState& state, QueuedChange& change) noexcept {
     PendingCommand pending(state.allocator);
-    pending.output = change.output;
+    pending.sink = change.sink;
     pending.arguments = Move(change.line);
     return state.pendingCommands.TryPushBack(Move(pending));
 }
@@ -639,7 +733,7 @@ void RunPendingCommand(ConfigContext& context, ConfigState& state,
     // 다른 스레드가 낸 콘솔 입력 한 줄이다(게임 lane에서 처리하고 명령이면 바로 실행한다).
     if (pending.command == IndexNone) {
         static_cast<void>(
-            ExecuteOnOwner(context, state, pending.arguments.View(), pending.output, true));
+            ExecuteOnOwner(context, state, pending.arguments.View(), pending.sink, true));
         return;
     }
 
@@ -648,24 +742,26 @@ void RunPendingCommand(ConfigContext& context, ConfigState& state,
     const StringView problem = CheckConsolePermission(
         command.definition->flags, CheatsAllowed(state), state.networkRole, code);
     if (!problem.IsEmpty()) {
-        static_cast<void>(WriteLine(state, pending.output, "{} {}", command.name.View(), problem));
+        static_cast<void>(
+            WriteLine(state, pending.sink.Get(), "{} {}", command.name.View(), problem));
         return;
     }
 
     Array<FieldValue> arguments(state.allocator);
     auto parsed = ParseArguments(state, *command.definition, pending.arguments.View(), arguments);
     if (!parsed || !parsed.Value().IsEmpty()) {
-        static_cast<void>(WriteLine(state, pending.output, "{} {}", command.name.View(),
+        static_cast<void>(WriteLine(state, pending.sink.Get(), "{} {}", command.name.View(),
                                     parsed ? parsed.Value() : ErrorCodeName(parsed.Error())));
         return;
     }
 
-    cvar::CommandContext invocation(context, pending.output, command.target, state.allocator);
+    cvar::CommandContext invocation(context, pending.sink.Get(), command.target, command.targetType,
+                                    command.name.View(), state.allocator);
     if (auto executed = command.definition->invoke(invocation, arguments.Data()); !executed) {
         // 명령 실패는 그 명령의 콘솔 출력과 로그 양쪽에 남긴다.
         Log::Warning(LogConfig, "Console command {Command} failed ({Error})", command.name.View(),
                      ErrorCodeName(executed.Error()));
-        static_cast<void>(WriteLine(state, pending.output, "{}: command failed ({})",
+        static_cast<void>(WriteLine(state, pending.sink.Get(), "{}: command failed ({})",
                                     command.name.View(), ErrorCodeName(executed.Error())));
     }
 }
@@ -673,8 +769,9 @@ void RunPendingCommand(ConfigContext& context, ConfigState& state,
 namespace {
 
 Result<ConsoleLineResult> ExecuteOnOwner(ConfigContext& context, ConfigState& state,
-                                         StringView line, ConsoleOutput output,
+                                         StringView line, const SharedPtr<ConsoleSink>& sink,
                                          bool runCommands) noexcept {
+    ConsoleSink* output = sink.Get();
     auto succeed = [](ConsoleLineResult result) noexcept {
         return Result<ConsoleLineResult>::Success(result);
     };
@@ -684,14 +781,9 @@ Result<ConsoleLineResult> ExecuteOnOwner(ConfigContext& context, ConfigState& st
         return written ? succeed(ConsoleLineResult::Rejected) : fail(written.Error());
     };
 
-    const StringView trimmed = line.TrimAscii();
-    StringView name = trimmed;
+    StringView name;
     StringView rest;
-    if (StringView left; trimmed.Split(" ", left, rest, StringComparison::CaseSensitive)) {
-        name = left;
-        rest = rest.TrimAscii();
-    }
-
+    SplitToken(line, name, rest);
     const usize setting = state.FindSetting(name);
     if (setting != IndexNone && !IsHidden(state, state.settings[setting]->flags)) {
         const ConsoleSettingState& found = *state.settings[setting];
@@ -724,7 +816,7 @@ Result<ConsoleLineResult> ExecuteOnOwner(ConfigContext& context, ConfigState& st
 
             const usize before = state.diagnostics.Count();
             if (auto made = MakeConsoleWrite(state, found.name.View(), rest, change); made) {
-                change->output = output;
+                change->sink = sink;
             } else {
                 if (made.Error() != ErrorCode::InvalidArgument) {
                     return fail(made.Error());
@@ -784,7 +876,7 @@ Result<ConsoleLineResult> ExecuteOnOwner(ConfigContext& context, ConfigState& st
 
     PendingCommand pending(state.allocator);
     pending.command = command;
-    pending.output = output;
+    pending.sink = sink;
     if (auto assigned = pending.arguments.TryAssign(rest); !assigned) {
         return fail(assigned.Error());
     }
@@ -803,7 +895,8 @@ Result<ConsoleLineResult> ExecuteOnOwner(ConfigContext& context, ConfigState& st
 
 // 다른 스레드의 콘솔 입력이다(snapshot 이름 색인으로 해석하고 쓰기 큐에 넣는다 — 10.1·15절).
 Result<ConsoleLineResult> ExecuteOffOwner(WriteChannel& channel, StringView line,
-                                          ConsoleOutput output) noexcept {
+                                          const SharedPtr<ConsoleSink>& sink) noexcept {
+    ConsoleSink* output = sink.Get();
     Allocator& allocator = channel.allocator;
     auto succeed = [](ConsoleLineResult result) noexcept {
         return Result<ConsoleLineResult>::Success(result);
@@ -821,19 +914,21 @@ Result<ConsoleLineResult> ExecuteOffOwner(WriteChannel& channel, StringView line
         return written ? succeed(result) : fail(written.Error());
     };
 
+    // 문맥이 없어졌으면 정의된 오류다(통로는 이 입구가 쥐고 있어 살아 있다).
     SharedPtr<const ConfigSnapshot> snapshot;
     {
         platform::LockGuard lock(channel.mutex);
+        if (!channel.open) {
+            return fail(ErrorCode::ShuttingDown);
+        }
+
         snapshot = channel.current;
     }
 
     const StringView trimmed = line.TrimAscii();
-    StringView name = trimmed;
+    StringView name;
     StringView rest;
-    if (StringView left; trimmed.Split(" ", left, rest, StringComparison::CaseSensitive)) {
-        name = left;
-        rest = rest.TrimAscii();
-    }
+    SplitToken(trimmed, name, rest);
 
     const ConsoleNameIndex* names = snapshot.Get() != nullptr ? snapshot->ConsoleNames() : nullptr;
     const ConsoleNameEntry* entry = names != nullptr ? names->Find(name) : nullptr;
@@ -847,13 +942,14 @@ Result<ConsoleLineResult> ExecuteOffOwner(WriteChannel& channel, StringView line
     }
 
     QueuedChange& queued = *change.Value();
-    queued.output = output;
+    queued.sink = sink;
     ConsoleLineResult result = ConsoleLineResult::CommandQueued;
     const auto role = static_cast<NetworkRole>(
         platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&channel.networkRole));
     if (entry->command || rest.IsEmpty() || rest == "?") {
         // 표시·Explain·명령은 게임 lane이 다음 Sync 5단계에 처리한다.
-        if (entry->command) {
+        // 명령 도움말(`<명령> ?`)은 치트가 꺼져 있어도 받는다(게임 lane과 같다).
+        if (entry->command && rest != "?") {
             ConfigDiagnosticCode code = ConfigDiagnosticCode::LayerNotAllowed;
             const StringView problem = CheckConsolePermission(
                 entry->varFlags, SnapshotCheatsAllowed(snapshot.Get()), role, code);
@@ -987,6 +1083,20 @@ void AppendJsonString(StringBuilderBase& out, StringView text) noexcept {
     static_cast<void>(out.TryAppend("\""));
 }
 
+// 줄 주석에 넣을 텍스트를 붙인다(제어 문자는 escape — 줄바꿈이 주석을 끝내지 않게).
+void AppendCommentText(StringBuilderBase& out, StringView text) noexcept {
+    for (const char c : text) {
+        if (static_cast<unsigned char>(c) < 0x20 || c == 0x7F) {
+            constexpr char Digits[] = "0123456789abcdef";
+            const char escaped[] = {'\\', 'x', Digits[(c >> 4) & 0xF], Digits[c & 0xF]};
+            static_cast<void>(out.TryAppend(StringView(escaped, 4)));
+        } else {
+            const char single[] = {c};
+            static_cast<void>(out.TryAppend(StringView(single, 1)));
+        }
+    }
+}
+
 } // namespace
 
 const ConsoleNameEntry* ConsoleNameIndex::Find(StringView name) const noexcept {
@@ -1014,7 +1124,7 @@ const ConsoleNameEntry* ConsoleNameIndex::Find(StringView name) const noexcept {
 using detail::ConfigState;
 
 Result<ConsoleLineResult> ConfigContext::ExecuteConsoleLine(StringView line,
-                                                            ConsoleOutput output) noexcept {
+                                                            SharedPtr<ConsoleSink> sink) noexcept {
     ConfigState* state = state_.Get();
     if (state == nullptr || line.TrimAscii().IsEmpty()) {
         return Result<ConsoleLineResult>::Failure(ErrorCode::InvalidArgument);
@@ -1025,11 +1135,34 @@ Result<ConsoleLineResult> ConfigContext::ExecuteConsoleLine(StringView line,
         return Result<ConsoleLineResult>::Failure(ErrorCode::Unsupported);
     }
 
+    // 다른 스레드는 ConsoleInputPort로 들어온다(10.1절 — 문맥 상태를 건드리지 않는다).
     if (platform::CurrentThreadId() != state->owner) {
-        return detail::ExecuteOffOwner(*state->channel, line, output);
+        return Result<ConsoleLineResult>::Failure(ErrorCode::WrongThread);
     }
 
-    return detail::ExecuteOnOwner(*this, *state, line, output, false);
+    return detail::ExecuteOnOwner(*this, *state, line, sink, false);
+}
+
+ConsoleInputPort ConfigContext::MakeConsoleInputPort() const noexcept {
+    const ConfigState* state = state_.Get();
+    return state != nullptr ? ConsoleInputPort(state->channel) : ConsoleInputPort();
+}
+
+Result<ConsoleLineResult> ConsoleInputPort::Execute(StringView line,
+                                                    SharedPtr<ConsoleSink> sink) const noexcept {
+    if (channel_.Get() == nullptr) {
+        return Result<ConsoleLineResult>::Failure(ErrorCode::ShuttingDown);
+    }
+
+    if (line.TrimAscii().IsEmpty()) {
+        return Result<ConsoleLineResult>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (channel_->releaseRules) {
+        return Result<ConsoleLineResult>::Failure(ErrorCode::Unsupported);
+    }
+
+    return detail::ExecuteOffOwner(*channel_, line, sink);
 }
 
 Result<void> ConfigContext::CompleteConsoleName(StringView prefix,
@@ -1067,21 +1200,41 @@ Result<void> ConfigContext::CompleteConsoleName(StringView prefix,
 }
 
 Result<void> ConfigContext::BindCommandTarget(const cvar::detail::VarDefinition& command,
-                                              void* target) noexcept {
+                                              void* target, const void* targetType,
+                                              const void* expected) noexcept {
+    // 출시 빌드의 치트 명령은 등록되지 않는다(성공하는 무동작 — 호출하는 쪽이 빌드마다 갈리지
+    // 않게).
+    if constexpr (IsReleaseBuild) {
+        if (cvar::HasFlag(command.flags, cvar::VarFlags::Cheat)) {
+            return Result<void>::Success();
+        }
+    }
+
     ConfigState* state = state_.Get();
     if (state == nullptr) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // 묶기·풀기는 게임 lane 전용이다(대상의 파괴도 게임 lane에서 한다 — 명령은 게임 lane에서 대상을
+    // 쓴다).
     if (platform::CurrentThreadId() != state->owner) {
-        return Result<void>::Failure(ErrorCode::WrongThread);
+        platform::Fatal(
+            "ConfigContext::BindCommand/UnbindCommand called from a thread other than the "
+            "context owner");
     }
 
     for (const UniquePtr<detail::ConsoleCommandState>& registered : state->commands) {
-        if (registered->definition == &command) {
-            registered->target = target;
-            return Result<void>::Success();
+        if (registered->definition != &command) {
+            continue;
         }
+
+        if (target == nullptr && registered->target != expected) {
+            return Result<void>::Success(); // 다른 대상이 묶여 있다(그대로 둔다).
+        }
+
+        registered->target = target;
+        registered->targetType = target != nullptr ? targetType : nullptr;
+        return Result<void>::Success();
     }
 
     return Result<void>::Failure(ErrorCode::NotFound);
@@ -1104,8 +1257,12 @@ Result<void> ConfigContext::SetNetworkRole(NetworkRole role) noexcept {
 }
 
 NetworkRole ConfigContext::GetNetworkRole() const noexcept {
+    // 원자 사본을 읽는다(어느 스레드에서나 — 13.2절).
     const ConfigState* state = state_.Get();
-    return state != nullptr ? state->networkRole : NetworkRole::Standalone;
+    return state != nullptr
+               ? static_cast<NetworkRole>(platform::AtomicLoad<platform::MemoryOrder::Relaxed>(
+                     &state->channel->networkRole))
+               : NetworkRole::Standalone;
 }
 
 Result<void> ConfigContext::ExportReplicated(Array<ReplicatedValue>& out) const noexcept {
@@ -1119,19 +1276,8 @@ Result<void> ConfigContext::ExportReplicated(Array<ReplicatedValue>& out) const 
     }
 
     Array<ReplicatedValue> values(*allocator_);
-    String defaultText(*allocator_);
     for (const UniquePtr<detail::ConsoleSettingState>& setting : state->settings) {
         if (!cvar::HasFlag(detail::VarFlagsOf(*setting), cvar::VarFlags::Replicated)) {
-            continue;
-        }
-
-        if (auto formatted =
-                detail::FormatConsoleValue(*state, *setting, setting->defaultValue, defaultText);
-            !formatted) {
-            return formatted;
-        }
-
-        if (defaultText.View() == setting->text.View()) {
             continue;
         }
 
@@ -1257,9 +1403,11 @@ Result<void> ConfigContext::DumpConsoleValues(String& out, bool overridesOnly) c
         const detail::ConfigEntry* top =
             sources.IsEmpty() ? nullptr : state->FindEntry(sources[sources.Size() - 1]);
         static_cast<void>(text.TryAppendFormat(
-            "    // {}{} {}\n", detail::HasBootFlags(setting.flags) ? "[boot] " : "",
-            top != nullptr ? ConfigLayerName(top->layer) : StringView("Default"),
-            top != nullptr ? top->sourceName.View() : StringView("code")));
+            "    // {}{} ", detail::HasBootFlags(setting.flags) ? "[boot] " : "",
+            top != nullptr ? ConfigLayerName(top->layer) : StringView("Default")));
+        detail::AppendCommentText(text,
+                                  top != nullptr ? top->sourceName.View() : StringView("code"));
+        static_cast<void>(text.TryAppend("\n"));
         static_cast<void>(text.TryAppend("    "));
         detail::AppendJsonString(text, setting.name.View());
         static_cast<void>(text.TryAppend(": "));
@@ -1288,3 +1436,12 @@ Result<void> ConfigContext::DumpConsoleValues(String& out, bool overridesOnly) c
 }
 
 } // namespace rocks::config
+
+namespace rocks::cvar::detail {
+
+void FatalTargetType(StringView command) noexcept {
+    Log::Fatal(config::detail::LogConfig,
+               "Console command '{Command}' read its bound target as a different type", command);
+}
+
+} // namespace rocks::cvar::detail

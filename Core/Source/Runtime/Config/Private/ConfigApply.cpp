@@ -1090,6 +1090,28 @@ Result<bool> SectionApplier::ApplyConsoleValue(usize field, StringView text, Jso
         text = converted.View();
     }
 
+    // 실수 필드의 NaN·무한대는 독립 설정·CVar와 같은 판정으로 거부한다(CVar 4.2절 — 모든 입력
+    // 경로).
+    if (schema.value.kind == ValueKind::Float32 || schema.value.kind == ValueKind::Float64) {
+        ConsoleSettingState shape(allocator_);
+        shape.kind = schema.value.kind;
+        FieldValue scratch(allocator_);
+        ConfigDiagnosticCode code = ConfigDiagnosticCode::InvalidSetting;
+        auto checked =
+            CheckConsoleValue(state_, shape, ConfigLayer::CodeDefault, text, scratch, code, false);
+        if (!checked) {
+            return Result<bool>::Failure(checked.Error());
+        }
+
+        if (!checked.Value().IsEmpty()) {
+            if (auto reported = Diagnose(code, position, checked.Value()); !reported) {
+                return Result<bool>::Failure(reported.Error());
+            }
+
+            return Result<bool>::Success(false);
+        }
+    }
+
     return ApplyText(ToView(EffectiveToolName(schema)), text, position, paths);
 }
 

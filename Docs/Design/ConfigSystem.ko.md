@@ -1,6 +1,6 @@
 # 설정 계층과 콘솔 설정 설계
 
-기준일: 2026-11-19, 개정 13(CVar CVR6 — 콘솔 명령·도구, 설정 struct 필드 봉인 뒤 직접 쓰기 BootSealed). 엔진·프로젝트·플랫폼·기기·사용자·세션·콘솔에서 오는 설정 값을 하나의 우선순위로 합치는 **설정 계층**과, 실행 중 이름으로 읽고 바꾸는 **콘솔 설정**(변수·명령)을 정한다.
+기준일: 2026-11-19, 개정 14(CVar CVR6 리뷰 반영 — 다른 스레드 콘솔 입구·명령 대상 수명). 엔진·프로젝트·플랫폼·기기·사용자·세션·콘솔에서 오는 설정 값을 하나의 우선순위로 합치는 **설정 계층**과, 실행 중 이름으로 읽고 바꾸는 **콘솔 설정**(변수·명령)을 정한다.
 
 [렌더 기반](RenderBase.ko.md)의 선행 작업 CP8(Config 계층)·CP4(콘솔 설정)이며, [엔진 구현 계획](EngineImplementationPlan.ko.md)의 다음 요구를 구현 스펙으로 옮긴다.
 - 24.1절 표의 "Device Profile / Scalability / CVar" 행
@@ -156,6 +156,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - 콘솔 명령은 실행 중 엔진 안의 동작이다. Commandlet(`Core/Public/Core/Commandlet/Commandlet.h:36–57`)은 프로세스 단위 일괄 작업이라 registry를 합치지 않는다. 같은 이름 문법만 공유한다(D9).
 - 콘솔 입력 문법은 CVar 15절 표다: `<이름>`(값·출처), `<이름> ?`(Explain), `<이름> <값>`(콘솔 층 쓰기), `<이름> reset`(콘솔 층 값 지우기), `cvar.find`·`cvar.explain`·`cvar.dump`, `<명령> <인자…>`. 자동완성은 이름 접두로 찾는다.
 - 명령 인자는 명령 함수 매개변수를 ReflectionText 표기로 읽는다(CVar 14.1절 — `cvar::Command<&Function>(name)`, 대상 객체는 `ConfigContext::BindCommand`). CF2의 `ConsoleCommandDefinition`·인자 struct `<경로>=<값>` 방식은 CVR6에서 없앴다(개정 13). 큐에 든 명령은 Sync의 값 적용·snapshot 게시 뒤, `OnSynced` 전에 실행하고 출력은 입력 때 받은 sink로 쓴다.
+- 다른 스레드의 콘솔 입력은 `ConsoleInputPort`로 넣는다(쓰기 통로를 쥔 입구 — 문맥이 없어진 뒤는 `ShuttingDown`, 마지막 입구는 문맥의 allocator보다 먼저 없어진다). 출력 sink는 참조 계수 `ConsoleSink`이고 큐에 든 일의 출력은 게임 lane이 쓴다(입력한 스레드와 동시에 쓰면 sink가 스레드 안전해야 한다). 명령 대상(`BindCommand`)은 타입을 확인하고, 문맥은 묶인 대상보다 오래 살아야 한다(CVar 20절 CVR6 리뷰 반영, 개정 14).
 - 출시 빌드에는 콘솔 입력이 없다(UE `ALLOW_CONSOLE_IN_SHIPPING` 기본 0, `Core/Public/Misc/Build.h:214–215`).
 
 ### 5.3 sync 지점과 설정 snapshot
@@ -311,6 +312,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 
 ## 12. 개정 이력
 
+- 개정 14(2026-11-19): CVar CVR6 리뷰 반영. 5.2절: 다른 스레드 콘솔 입력은 `ConsoleInputPort`(쓰기 통로를 쥔 입구 — 문맥이 없어진 뒤는 `ShuttingDown`), 출력은 참조 계수 `ConsoleSink`, 명령 대상 묶음의 타입 확인·수명(문맥이 묶인 대상보다 오래 산다).
 - 개정 13(2026-11-19): CVar CVR6. 5.2절 명령 정의(`cvar::Command<&Function>`·`BindCommand`, CF2 인자 struct 방식 없앰). 5.1·8절: 설정 struct 필드의 봉인 뒤 바로 쓰는 층 쓰기도 `BootSealed`.
 - 개정 12(2026-11-19): CVar CVR5 리뷰 반영. 6.1절: 정의된 등급을 `QualityRequest::levels`로 옮기고 `QualityGroupRule::levels`를 없앴다, `Quality.json` 정규 등급 키·잘못된 값만 건너뛰기.
 - 개정 11(2026-11-19): CVar CVR5. 품질 묶음은 `CVarGroup`(코드 정의)이고 품질 묶음 층은 묶음 펼침 전용이다(`QualityMember`·`NotQualityMember` 없앰 — 5.1절). 6.1절 CVR5 연결(조합 검증 입력·`Quality.json` 모양·파일 층만), 9절 CF4 진척.

@@ -126,7 +126,7 @@ TraceController::~TraceController() noexcept {
                                                     &TraceFileCommand, &TraceStopCommand,
                                                     &TraceSnapshotCommand};
     for (const cvar::ConsoleCommand* command : commands) {
-        static_cast<void>(config_.UnbindCommand(*command));
+        static_cast<void>(config_.UnbindCommand(*command, *this));
     }
 
     if (file_.value != 0 && session_.IsRunning()) {

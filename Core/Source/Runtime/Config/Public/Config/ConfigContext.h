@@ -190,6 +190,38 @@ struct SyncChanges {
     Span<const TypeId> settings;
 };
 
+// 다른 스레드의 콘솔 입구다(CVar 10.1·15절 — ConfigContext::MakeConsoleInputPort가 만든다). 문맥의
+// 쓰기 통로를 참조 계수로 쥐고, 문맥 상태는 건드리지 않는다(다른 스레드가 들어오는 길은 쓰기 큐
+// 하나다). 복사할 수 있고 문맥보다 오래 살아도 된다. 단 통로는 문맥의 allocator에서 왔으므로
+// 마지막 입구는 그 allocator보다 먼저 없어져야 한다.
+//
+// 사용 예(입력 스레드):
+//   ConsoleInputPort port = config.MakeConsoleInputPort();   // 게임 lane에서 만들어 넘긴다
+//   auto result = port.Execute("render.shadow.distance 3000", sink);
+class ConsoleInputPort {
+public:
+    ConsoleInputPort() noexcept = default;
+
+    // 콘솔 입력 한 줄을 넣는다(어느 스레드에서나 — 문법은 ConfigContext::ExecuteConsoleLine과
+    // 같다). 이름은 통로가 마지막으로 게시한 snapshot의 콘솔 이름 색인으로 해석하고 권한(콘솔 읽기
+    // 전용·치트·복제·부팅 봉인)을 그 snapshot으로 본다. 쓰기·`reset`은 쓰기 큐에 넣고(값 형식은
+    // Sync가 꺼낼 때 검사해 거부하면 sink에 알린다), `<이름>`·`<이름> ?`·명령은 다음 Sync 5단계에
+    // 게임 lane이 처리한다(출력은 sink — 그때 게임 lane이 쓰므로 sink는 스레드 안전해야 한다).
+    // 모르는 이름·권한 거부는 이 스레드에서 sink에 바로 쓴다. 오류: 빈 줄 InvalidArgument, 문맥이
+    // 없어졌거나 빈 입구 ShuttingDown, 출시 규칙 Unsupported, 큐가 가득 차면 Busy(버리지 않는다),
+    // sink 쓰기 오류, 할당 실패.
+    Result<ConsoleLineResult> Execute(StringView line, SharedPtr<ConsoleSink> sink) const noexcept;
+
+private:
+    friend class ConfigContext;
+
+    explicit ConsoleInputPort(SharedPtr<detail::WriteChannel> channel) noexcept
+        : channel_(Move(channel)) {
+    }
+
+    SharedPtr<detail::WriteChannel> channel_;
+};
+
 class ConfigContext {
 public:
     ConfigContext(Allocator& allocator, ObjectRegistry& objects,
@@ -448,29 +480,42 @@ public:
     const FieldValue& ConsoleValue(ConsoleSettingId id) const noexcept;
 
     // 등록한 콘솔 명령(Register)에 실행 대상을 묶는다(명령 함수가 CommandContext::Target<T>()로
-    // 받는다 — CVar 13·15절). target은 묶음을 바꾸거나 문맥을 없앨 때까지 살아 있어야 한다. 묶지
-    // 않은 명령의 Target은 null이다. 오류: 등록하지 않은 명령 NotFound, 다른 스레드 WrongThread.
+    // 받는다 — 다른 타입으로 꺼내면 Fatal, CVar 13·15절). 앞 대상이 있으면 바꾼다. 수명: 문맥은
+    // 묶인 대상보다 오래 살아야 하고, 대상은 없어지기 전에 UnbindCommand로 풀어야 한다(묶인 대상이
+    // 남은 채 문맥을 없애면 Fatal). 묶기·풀기는 게임 lane 전용이다(다른 스레드면 Fatal — 대상의
+    // 파괴도 게임 lane에서 한다). 출시 빌드의 `Cheat()` 명령은 등록되지 않으므로 성공하는
+    // 무동작이다. 오류: 등록하지 않은 명령 NotFound.
     //
     // 사용 예:
     //   REQUIRE(config.Register(TraceEnableCommand));
     //   REQUIRE(config.BindCommand(TraceEnableCommand, controller));
+    //   ... 소멸 때: config.UnbindCommand(TraceEnableCommand, controller);
     template <class T>
     Result<void> BindCommand(const cvar::ConsoleCommand& command, T& target) noexcept {
-        return BindCommandTarget(cvar::detail::HandleAccess::Definition(command), &target);
+        return BindCommandTarget(cvar::detail::HandleAccess::Definition(command), &target,
+                                 &cvar::detail::TargetTypeTag<T>, nullptr);
     }
 
-    // BindCommand로 묶은 대상을 푼다(그 뒤 Target은 null — 대상이 없어질 때 부른다). 오류:
+    // BindCommand로 묶은 대상이 expected면 푼다(그 뒤 Target은 null). 다른 대상이 묶여 있으면
+    // 그대로 둔다(같은 문맥의 두 제어기 — 뒤에 묶은 것이 앞의 것 소멸에 풀리지 않는다). 규칙·오류는
     // BindCommand와 같다.
-    Result<void> UnbindCommand(const cvar::ConsoleCommand& command) noexcept {
-        return BindCommandTarget(cvar::detail::HandleAccess::Definition(command), nullptr);
+    template <class T>
+    Result<void> UnbindCommand(const cvar::ConsoleCommand& command, T& expected) noexcept {
+        return BindCommandTarget(cvar::detail::HandleAccess::Definition(command), nullptr, nullptr,
+                                 &expected);
     }
+
+    // 다른 스레드의 콘솔 입구를 만든다(CVar 10.1·15절 — 쓰기 통로를 참조 계수로 쥔다). 입구는
+    // 문맥보다 오래 살아도 되고, 문맥이 없어진 뒤의 입력은 ShuttingDown이다. 초기화 전이면 빈
+    // 입구(모든 입력이 ShuttingDown)다.
+    ConsoleInputPort MakeConsoleInputPort() const noexcept;
 
     // 문맥의 네트워크 역할을 정한다(CVar 13.2절 — 권한 판정에만 쓴다: 클라이언트는 `Replicated()`
     // 변수의 콘솔 쓰기를 ReplicatedOnClient로 거부한다). 넷 모듈이 접속 상태에 따라 부른다. 오류:
     // 초기화 전·정의되지 않은 역할 InvalidArgument, 다른 스레드 WrongThread.
     Result<void> SetNetworkRole(NetworkRole role) noexcept;
 
-    // 지금 네트워크 역할이다(초기화 전이면 Standalone).
+    // 지금 네트워크 역할이다(원자 사본 — 어느 스레드에서나 부른다, 초기화 전이면 Standalone).
     NetworkRole GetNetworkRole() const noexcept;
 
     // 서버가 복제할 값 목록이다(CVar 13.2절): `Replicated()` 변수 중 지금 값이 기본값과 다른 것을
@@ -493,21 +538,20 @@ public:
     // WrongThread, 할당 실패.
     Result<void> DumpConsoleValues(String& out, bool overridesOnly) const noexcept;
 
-    // 콘솔 입력 한 줄을 처리한다(CVar 15절 문법). 어느 스레드에서나 부를 수 있다.
+    // 콘솔 입력 한 줄을 처리한다(CVar 15절 문법). 게임 lane 전용이다(다른 스레드는
+    // ConsoleInputPort).
     // - `<이름>`: 값(enum은 `3 (High)`, 부팅 변수 `[boot]`, 재시작 대기·품질 묶음 펼침)과 출처
     //   스택을 쓴다. `<이름> ?`: Explain(종류·범위·도움말·출처 스택)을 쓴다.
     // - `<이름> <값>`: 콘솔 층(태그 `console`) 쓰기, `<이름> reset`: 콘솔 층 값 지우기를 큐에
     //   넣는다(다음 Sync에 적용). 권한(콘솔 읽기 전용·치트·복제·부팅 봉인)과 값을 지금 검사한다.
     // - `<명령> <인자…>`(`cvar.find <텍스트>`·`cvar.explain <이름>`·`cvar.dump [overrides]` 포함):
     //   인자를 검사해 큐에 넣고 다음 Sync 5단계에 실행한다.
-    // 게임 lane이 아니면 그 스레드가 Acquire한 snapshot의 이름 색인으로 해석하고, 쓰기는 쓰기 큐에,
-    // `<이름>`·`<이름> ?`·명령은 다음 Sync에 게임 lane이 실행하게 넣는다(값 형식은 Sync가 꺼낼 때
-    // 검사해 거부하면 output에 알린다). 거부한 입력은 사유를 output에 쓰고 Rejected다(`<이름>
-    // <사유>` 한 줄). output은 큐에 넣은 일이 끝나는 다음 Sync까지 살아 있어야 한다. 오류: 초기화
-    // 전· 빈 줄 InvalidArgument, 출시 규칙(출시 빌드에는 콘솔 입력이 없다) Unsupported, 다른
-    // 스레드에서 문맥이 없어졌으면 ShuttingDown, 다른 스레드의 큐가 가득 차면 Busy, output 쓰기
-    // 오류, 할당 실패.
-    Result<ConsoleLineResult> ExecuteConsoleLine(StringView line, ConsoleOutput output) noexcept;
+    // 거부한 입력은 사유를 sink에 쓰고 Rejected다(`<이름> <사유>` 한 줄). 큐에 넣은 일은 sink를
+    // 쥐고 있다(ConsoleSink). 인자와 값의 구분은 공백·탭이고 따옴표 묶음은 없다. 오류: 초기화 전·빈
+    // 줄 InvalidArgument, 출시 규칙(출시 빌드에는 콘솔 입력이 없다) Unsupported, 다른 스레드
+    // WrongThread, sink 쓰기 오류, 할당 실패.
+    Result<ConsoleLineResult> ExecuteConsoleLine(StringView line,
+                                                 SharedPtr<ConsoleSink> sink) noexcept;
 
     // prefix로 시작하는 콘솔 설정·명령 이름을 이름 순서로 out에 쓴다(자동완성 — 출시 규칙에서 숨긴
     // 설정 제외). view는 다음 등록까지 유효하다. 오류: 다른 스레드 WrongThread, 할당 실패.
@@ -580,8 +624,8 @@ private:
     Result<void> RegisterSettingsType(const detail::SettingsTypeOps& ops) noexcept;
     Result<void>
     RegisterHandles(Span<const cvar::detail::VarDefinition* const> definitions) noexcept;
-    Result<void> BindCommandTarget(const cvar::detail::VarDefinition& command,
-                                   void* target) noexcept;
+    Result<void> BindCommandTarget(const cvar::detail::VarDefinition& command, void* target,
+                                   const void* targetType, const void* expected) noexcept;
     Result<ConfigSubscriptionId> SubscribeSection(TypeId settings, ConfigChangeCallback callback,
                                                   void* context) noexcept;
 

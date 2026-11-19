@@ -34,13 +34,25 @@ namespace rocks::cvar {
 // 명령 하나가 받을 수 있는 매개변수 수다.
 inline constexpr usize MaxCommandArguments = 8;
 
+namespace detail {
+
+// 명령 대상 타입의 표지다(타입마다 주소가 하나 — BindCommand가 기록하고 Target<T>가 확인한다).
+template <class T>
+inline constexpr char TargetTypeTag = 0;
+
+// 명령 대상을 묶을 때와 다른 타입으로 꺼냈다(Fatal).
+[[noreturn]] void FatalTargetType(StringView command) noexcept;
+
+} // namespace detail
+
 // 명령 함수가 받는 실행 문맥이다(게임 lane — Sync 5단계). 출력 sink·문맥·묶인 대상을 준다. 호출
 // 동안만 유효하다.
 class CommandContext {
 public:
-    CommandContext(config::ConfigContext& config, config::ConsoleOutput& output, void* target,
-                   Allocator& allocator) noexcept
-        : config_(&config), output_(&output), target_(target), allocator_(&allocator) {
+    CommandContext(config::ConfigContext& config, config::ConsoleSink* sink, void* target,
+                   const void* targetType, StringView command, Allocator& allocator) noexcept
+        : config_(&config), sink_(sink), target_(target), targetType_(targetType),
+          command_(command), allocator_(&allocator) {
     }
 
     // 명령을 실행하는 설정 문맥이다(게임 lane — 값 읽기·쓰기 큐에 넣기).
@@ -50,14 +62,17 @@ public:
 
     // 입력 때 받은 sink에 text를 그대로 쓴다(sink가 없으면 무동작). 오류: sink의 오류.
     Result<void> Write(StringView text) const noexcept {
-        return output_->write == nullptr ? Result<void>::Success()
-                                         : output_->write(output_->context, text);
+        return sink_ == nullptr ? Result<void>::Success() : sink_->Write(text);
     }
 
-    // ConfigContext::BindCommand로 묶은 대상이다(묶지 않았으면 null). T는 묶을 때의 타입이어야
-    // 한다.
+    // ConfigContext::BindCommand로 묶은 대상이다(묶지 않았으면 null). T가 묶을 때의 타입과 다르면
+    // Fatal이다(잘못된 형 변환을 조용히 넘기지 않는다).
     template <class T>
     T* Target() const noexcept {
+        if (target_ != nullptr && targetType_ != &detail::TargetTypeTag<T>) {
+            detail::FatalTargetType(command_);
+        }
+
         return static_cast<T*>(target_);
     }
 
@@ -68,8 +83,10 @@ public:
 
 private:
     config::ConfigContext* config_;
-    config::ConsoleOutput* output_;
+    config::ConsoleSink* sink_;
     void* target_;
+    const void* targetType_;
+    StringView command_;
     Allocator* allocator_;
 };
 

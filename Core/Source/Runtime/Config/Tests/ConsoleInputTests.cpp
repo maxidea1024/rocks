@@ -14,16 +14,34 @@ using namespace rocks::test::config;
 
 namespace {
 
+// 콘솔 출력을 모으는 sink다(참조 계수 — 큐에 든 일이 쥔다). text는 sink의 버퍼를 가리킨다.
 struct Transcript {
-    explicit Transcript(Allocator& allocator) noexcept : text(allocator) {
+    struct Buffer final : ConsoleSink {
+        explicit Buffer(Allocator& allocator) noexcept : text(allocator) {
+        }
+
+        Result<void> Write(StringView value) noexcept override {
+            return text.TryAppend(value);
+        }
+
+        String text;
+    };
+
+    explicit Transcript(Allocator& allocator) noexcept
+        : buffer(MakeBuffer(allocator)), text(buffer->text) {
     }
 
-    static Result<void> Write(void* context, StringView text) noexcept {
-        return static_cast<Transcript*>(context)->text.TryAppend(text);
+    static SharedPtr<Buffer> MakeBuffer(Allocator& allocator) noexcept {
+        auto made = SharedPtr<Buffer>::TryMake(allocator, allocator);
+        if (!made) {
+            platform::Fatal("Transcript buffer allocation failed");
+        }
+
+        return Move(made.Value());
     }
 
-    ConsoleOutput Output() noexcept {
-        return ConsoleOutput{&Transcript::Write, this};
+    SharedPtr<ConsoleSink> Output() const noexcept {
+        return buffer;
     }
 
     bool Contains(StringView needle) const noexcept {
@@ -36,7 +54,8 @@ struct Transcript {
         return found;
     }
 
-    String text;
+    SharedPtr<Buffer> buffer;
+    String& text;
 };
 
 struct ReloadLog {
@@ -172,6 +191,16 @@ TEST(Config_ConsoleCommandsRunAtSync) {
     REQUIRE(context.ExecuteConsoleLine("render.reload 1", transcript.Output()));
     REQUIRE(context.Sync());
     CHECK(flushed == 1 && log.calls == 2 && log.count == 1 && !log.targetAll);
+
+    // 인자는 공백과 탭으로 나눈다. int32 범위를 넘는 인자는 넣을 때 거부한다.
+    auto tabbed = context.ExecuteConsoleLine("render.reload	5	all", transcript.Output());
+    CHECK(tabbed && tabbed.Value() == ConsoleLineResult::CommandQueued);
+    auto overflow = context.ExecuteConsoleLine("render.reload 99999999999 x", transcript.Output());
+    CHECK(overflow && overflow.Value() == ConsoleLineResult::Rejected);
+    REQUIRE(context.Sync());
+    CHECK(log.calls == 3 && log.count == 5 && log.targetAll);
+    REQUIRE(context.UnbindCommand(ReloadCommand, log));
+    REQUIRE(context.UnbindCommand(FlushCommand, flushed));
 }
 
 namespace {

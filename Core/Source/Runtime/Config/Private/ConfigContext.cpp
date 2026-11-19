@@ -517,6 +517,15 @@ ConfigContext::~ConfigContext() {
         platform::Fatal("ConfigContext destroyed on a thread other than its owner");
     }
 
+    // 묶인 명령 대상이 남았으면 대상보다 문맥이 먼저 없어지는 것이다(대상이 소멸 때 풀어야 한다 —
+    // CVar 20절 CVR6 리뷰 반영).
+    for (const UniquePtr<detail::ConsoleCommandState>& command : state->commands) {
+        if (command->target != nullptr) {
+            platform::Fatal("ConfigContext destroyed while a console command is still bound to a "
+                            "target; unbind it before the context goes away");
+        }
+    }
+
     detail::WriteChannel& channel = *state->channel;
     if (platform::AtomicLoad<platform::MemoryOrder::Acquire>(&channel.bindings) != 0) {
         platform::Fatal(
@@ -760,6 +769,32 @@ const void* ConfigContext::FindSettings(TypeId type) const noexcept {
 
 namespace detail {
 
+Result<void> ApplyQueuedChange(Array<ConfigEntry*>& plan, const QueuedChange& change) noexcept {
+    // 빼기(Unset·Clear·ClearLayer)와 바꾸기(Set — 같은 자리의 이전 쓰기를 뺀다)다.
+    if (change.entry.Get() == nullptr || change.replace) {
+        usize kept = 0;
+        for (usize index = 0; index < plan.Size(); ++index) {
+            const ConfigEntry& entry = *plan[index];
+            const bool removed =
+                entry.layer == change.layer &&
+                (change.allTags || entry.tag.View() == change.tag.View()) &&
+                (change.path.IsEmpty() ||
+                 (entry.kind == EntryKind::Console && entry.path.View() == change.path.View()));
+            if (!removed) {
+                plan[kept++] = plan[index];
+            }
+        }
+
+        static_cast<void>(plan.TryResize(kept)); // 줄이기는 할당하지 않는다
+    }
+
+    if (change.entry.Get() != nullptr) {
+        return plan.TryPushBack(change.entry.Get());
+    }
+
+    return Result<void>::Success();
+}
+
 Result<void> QueueLayerText(ConfigState& owner, ConfigLayer layer, StringView tag,
                             StringView branch, StringView sourceName, StringView text,
                             bool replace) noexcept {
@@ -839,6 +874,18 @@ Result<void> QueueLayerText(ConfigState& owner, ConfigLayer layer, StringView ta
 
     if (!valid.Value()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 콘솔 층 문서도 치트·복제 권한을 넣을 때 본다(적용 때 다시 본다 — CVar 13절).
+    if (layer == ConfigLayer::Console) {
+        auto allowed = CheckEntryPermission(*state, added, CheatsAllowed(*state), nullptr);
+        if (!allowed) {
+            return Result<void>::Failure(allowed.Error());
+        }
+
+        if (!allowed.Value()) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
     }
 
     queued.Value()->entry = Move(entry.Value());
@@ -937,6 +984,17 @@ Result<void> PrepareAssignment(ConfigState& owner, ConfigLayer layer, StringView
 
         if (!valid.Value()) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (layer == ConfigLayer::Console) {
+            auto allowed = CheckEntryPermission(*state, added, CheatsAllowed(*state), nullptr);
+            if (!allowed) {
+                return Result<void>::Failure(allowed.Error());
+            }
+
+            if (!allowed.Value()) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
         }
 
         queued.Value()->entry = Move(entry.Value());
@@ -1142,29 +1200,12 @@ Result<void> ConfigContext::Sync() noexcept {
 
     uint64 firstNew = state->nextSequence;
     for (SharedPtr<QueuedChange>& change : state->queue) {
-        // 빼기(Unset·Clear·ClearLayer)와 바꾸기(Set — 같은 자리의 이전 쓰기를 뺀다)다.
-        if (change->entry.Get() == nullptr || change->replace) {
-            usize kept = 0;
-            for (usize index = 0; index < plan.Size(); ++index) {
-                const ConfigEntry& entry = *plan[index];
-                const bool removed =
-                    entry.layer == change->layer &&
-                    (change->allTags || entry.tag.View() == change->tag.View()) &&
-                    (change->path.IsEmpty() || (entry.kind == EntryKind::Console &&
-                                                entry.path.View() == change->path.View()));
-                if (!removed) {
-                    plan[kept++] = plan[index];
-                }
-            }
-
-            static_cast<void>(plan.TryResize(kept)); // 줄이기는 할당하지 않는다
-        }
-
         if (change->entry.Get() != nullptr) {
             firstNew = firstNew < change->entry->sequence ? firstNew : change->entry->sequence;
-            if (auto pushed = plan.TryPushBack(change->entry.Get()); !pushed) {
-                return pushed;
-            }
+        }
+
+        if (auto applied = detail::ApplyQueuedChange(plan, *change); !applied) {
+            return applied;
         }
     }
 

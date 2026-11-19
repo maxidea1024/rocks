@@ -98,6 +98,17 @@ Result<void> DrainQueue(ConfigState& state) noexcept {
     // 넣은 순서대로 입력 순번을 매기고, 다른 스레드에서 넣은 쓰기를 소유 스레드에서 다시 검사한다
     // (진단을 남긴다 — 거부되면 버린다). 검사가 할당 실패로 끝나면 남은 것은 다음 Sync가 이어서
     // 본다.
+    // 치트 허용 상태는 큐 순서로 따라간다(CVar 13.1절 — 앞에서 치트를 끈 변경 뒤의 치트 쓰기는
+    // 거부한다). 적용 입력 목록을 큐 순서로 흉내 내며 `cheat.enabled`를 바꿀 수 있는 항목 뒤에 다시
+    // 계산한다.
+    Array<ConfigEntry*> plan(state.allocator);
+    for (UniquePtr<ConfigEntry>& entry : state.entries) {
+        if (auto pushed = plan.TryPushBack(entry.Get()); !pushed) {
+            return pushed;
+        }
+    }
+
+    bool cheats = CheatsAllowed(state);
     usize kept = 0;
     Result<void> status = Result<void>::Success();
     for (usize index = 0; index < state.queue.Size(); ++index) {
@@ -119,19 +130,19 @@ Result<void> DrainQueue(ConfigState& state) noexcept {
                 for (usize at = before; !keep && at < state.diagnostics.Count(); ++at) {
                     const ConfigDiagnostic item = state.diagnostics.Get(at);
                     StringBuilder<192> line(state.allocator);
-                    static_cast<void>(line.TryAppendFormat("{} {}\n", item.path, item.message));
-                    if (change->output.write != nullptr && line.Status()) {
-                        static_cast<void>(
-                            change->output.write(change->output.context, line.View()));
+                    static_cast<void>(
+                        line.TryAppendFormat("{} {}\n", change->path.View(), item.message));
+                    if (change->sink.Get() != nullptr && line.Status()) {
+                        static_cast<void>(change->sink->Write(line.View()));
                     }
                 }
             }
         }
 
-        // 콘솔 층 쓰기의 권한(치트·복제)은 적용 때 다시 본다(6.2절).
+        // 콘솔 층 쓰기의 권한(치트·복제)은 적용 때 큐 순서의 치트 상태로 다시 본다(6.2·13.1절).
         if (status && keep && change->entry.Get() != nullptr &&
             change->entry->layer == ConfigLayer::Console) {
-            auto allowed = RecheckConsolePermission(state, *change);
+            auto allowed = RecheckConsolePermission(state, *change, cheats);
             if (!allowed) {
                 status = Result<void>::Failure(allowed.Error());
             } else {
@@ -149,6 +160,18 @@ Result<void> DrainQueue(ConfigState& state) noexcept {
             // 봉인 상태가 넣은 때의 상태다.
             change->entry->sealedDirectWrite =
                 state.startupComplete && IsDirectWriteLayer(change->entry->layer);
+        }
+
+        if (status && change->line.IsEmpty()) {
+            status = ApplyQueuedChange(plan, *change);
+            if (status && ChangeTouchesCheats(*change)) {
+                auto recomputed = CheatsOfPlan(state, plan.View());
+                if (recomputed) {
+                    cheats = recomputed.Value();
+                } else {
+                    status = Result<void>::Failure(recomputed.Error());
+                }
+            }
         }
 
         if (kept != index) {

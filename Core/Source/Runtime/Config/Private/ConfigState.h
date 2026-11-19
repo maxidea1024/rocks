@@ -99,7 +99,7 @@ struct QueuedChange {
     bool replace = false;
     bool allTags = false;
     bool validateAtApply = false;
-    ConsoleOutput output;
+    SharedPtr<ConsoleSink> sink;
     String line;
 };
 
@@ -193,6 +193,8 @@ struct ConsoleCommandState {
     String help;
     const cvar::detail::CommandDefinition* definition = nullptr;
     void* target = nullptr;
+    // 묶은 대상의 타입 표지(cvar::detail::TargetTypeTag<T>의 주소)다.
+    const void* targetType = nullptr;
 };
 
 // 다음 Sync 5단계에 게임 lane이 할 콘솔 일 하나다: 명령 실행(command — 인자는 arguments 텍스트를
@@ -204,7 +206,7 @@ struct PendingCommand {
 
     usize command = IndexNone;
     String arguments;
-    ConsoleOutput output;
+    SharedPtr<ConsoleSink> sink;
 };
 
 // 재시작 대기 값 하나다(시작 뒤 RestartRequired 값이 바뀐 것 — 8절). name은 콘솔 설정 이름이거나
@@ -695,7 +697,25 @@ Result<void> RegisterBuiltinConsoleHandles(ConfigContext& context) noexcept;
 
 // 꺼낸 쓰기 하나의 콘솔 권한을 적용 때 다시 본다(콘솔 층만 — 6.2절 "적용 때 판정"). 거부하면 진단을
 // 남기고 그 입력의 sink에 알린다. 반환: 받는지. 오류: 할당 실패.
-Result<bool> RecheckConsolePermission(ConfigState& state, const QueuedChange& change) noexcept;
+Result<bool> RecheckConsolePermission(ConfigState& state, const QueuedChange& change,
+                                      bool cheats) noexcept;
+
+// 콘솔 층 입력 하나(콘솔 이름 대입·`Settings` 문서)의 권한(치트·복제)이다. cheats는 판정에 쓸
+// `cheat.enabled` 값이다. 거부하면 진단을 남기고 sink에 `<이름> <사유>`를 쓴다. 반환: 받는지.
+// 오류: 할당 실패.
+Result<bool> CheckEntryPermission(ConfigState& state, const ConfigEntry& entry, bool cheats,
+                                  ConsoleSink* sink) noexcept;
+
+// 큐 항목 하나를 적용 입력 목록(plan)에 반영한다(빼기·바꾸기 뒤 더하기 — Sync 1단계와 드레인의 치트
+// 추적이 같이 쓴다). 오류: 할당 실패.
+Result<void> ApplyQueuedChange(Array<ConfigEntry*>& plan, const QueuedChange& change) noexcept;
+
+// 입력이 `cheat.enabled` 값을 바꿀 수 있는지다(그 이름의 대입·`Settings` 멤버, 빼기).
+bool ChangeTouchesCheats(const QueuedChange& change) noexcept;
+
+// plan(적용 입력, 순서 무관)으로 계산한 `cheat.enabled` 값이다(등록되지 않았으면 true). 오류: 할당
+// 실패.
+Result<bool> CheatsOfPlan(ConfigState& state, Span<ConfigEntry* const> plan) noexcept;
 
 // 꺼낸 콘솔 입력 한 줄(다른 스레드 — QueuedChange::line)을 다음 명령 실행 차례에 게임 lane이
 // 처리하게 pendingCommands에 넣는다. 오류: 할당 실패.

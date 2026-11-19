@@ -92,7 +92,7 @@ TEST(CVar_BootValuesSealIntoASharedBootBlock) {
     REQUIRE(context.Diagnostics().Count() >= 1);
     CHECK(context.Diagnostics().Get(0).message ==
           "is a boot variable; set it in a config file or with --set and restart");
-    auto line = context.ExecuteConsoleLine("game.boot.workers 9", ConsoleOutput{});
+    auto line = context.ExecuteConsoleLine("game.boot.workers 9", SharedPtr<ConsoleSink>());
     REQUIRE(line);
     CHECK(line.Value() == ConsoleLineResult::Rejected);
 

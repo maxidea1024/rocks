@@ -186,7 +186,7 @@ TEST(Config_DevelopmentOnlyIsFixedUnderReleaseRules) {
         CHECK(name != "render.debug_view" && name != "render.graph.debug_draw");
     }
 
-    auto console = context.ExecuteConsoleLine("render.graph.immediate", ConsoleOutput{});
+    auto console = context.ExecuteConsoleLine("render.graph.immediate", SharedPtr<ConsoleSink>());
     CHECK(!console && console.Error() == ErrorCode::Unsupported);
 }
 

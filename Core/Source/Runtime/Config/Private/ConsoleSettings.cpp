@@ -389,6 +389,18 @@ Result<StringView> CheckConsoleValue(ConfigState& state, const ConsoleSettingSta
         return Result<StringView>::Success("the value does not parse as the setting type");
     }
 
+    // NaN·무한대는 범위·Clamp와 무관하게 늘 거부한다(CVar 4.2절 — CVar 검사 함수와 같은 판정을
+    // 독립 설정·필드·명령 인자에도 건다).
+    if (setting.kind == ValueKind::Float32 || setting.kind == ValueKind::Float64) {
+        constexpr double Largest = NumericLimits<double>::Max();
+        const double number =
+            setting.kind == ValueKind::Float32 ? static_cast<double>(out.float32) : out.float64;
+        if (number != number || number > Largest || number < -Largest) {
+            code = ConfigDiagnosticCode::ValueOutOfRange;
+            return Result<StringView>::Success("the value is not a finite number");
+        }
+    }
+
     if (setting.hasRange) {
         double number = 0;
         switch (setting.kind) {

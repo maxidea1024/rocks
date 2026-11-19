@@ -139,12 +139,22 @@ struct ConsoleSettingInfo {
     StringView pendingRestart;
 };
 
-// 콘솔 출력 sink다(콘솔 입력의 응답·명령 출력). write는 호출 동안만 text를 빌린다.
-struct ConsoleOutput {
-    using WriteFn = Result<void> (*)(void* context, StringView text) noexcept;
+// 콘솔 출력 sink다(콘솔 입력의 응답·명령 출력 — CVar 15절). 참조 계수(SharedPtr<ConsoleSink>)로
+// 넘기고, 큐에 든 일(다음 Sync의 명령·표시, 다른 스레드 입력의 거부 알림)은 sink를 쥐고 있어 입력한
+// 쪽이 먼저 놓아도 산다. 큐에 든 일의 출력은 게임 lane(Sync)이 쓰므로, 입력한 스레드와 동시에
+// sink를 쓰는 경우 Write는 스레드 안전해야 한다.
+//
+// 사용 예:
+//   struct Transcript final : ConsoleSink {
+//       Result<void> Write(StringView text) noexcept override { return text_.TryAppend(text); }
+//       String text_;
+//   };
+class ConsoleSink {
+public:
+    virtual ~ConsoleSink() = default;
 
-    WriteFn write = nullptr;
-    void* context = nullptr;
+    // text를 쓴다(호출 동안만 빌린다). 오류: 그 sink의 오류(콘솔 처리는 결과로 돌려준다).
+    virtual Result<void> Write(StringView text) noexcept = 0;
 };
 
 // 콘솔 입력 한 줄의 처리 결과다(ConfigContext::ExecuteConsoleLine — CVar 15절).
