@@ -188,10 +188,8 @@ Result<void> TrackPassTransitions(FrameArena& arena, GraphState& state, uint32 p
         entry.after = use.access;
         entry.beforeFlags = track.flags;
         entry.afterFlags = use.flags;
-        // 렌더 타깃 mip 0의 전이는 장치 BeginOffscreen이 낸다(attachment).
-        entry.attachment = record.kind == GraphPassKind::Raster &&
-                           record.target.kind == GraphTargetKind::Texture &&
-                           record.target.texture.index == use.resource && use.subresource == 0;
+        // attachment subresource의 전이는 장치 BeginPass가 낸다.
+        entry.attachment = use.attachment;
         auto pushed = state.chains.TryPushBack(arena, entry);
         if (!pushed) {
             return pushed;

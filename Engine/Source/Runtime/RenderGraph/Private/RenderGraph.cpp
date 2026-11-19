@@ -162,11 +162,38 @@ GraphPassAccesses& GraphPassAccesses::Buffer(GraphBuffer buffer, ResourceAccess 
 
 GraphPassAccesses& GraphPassAccesses::RenderTarget(GraphTexture texture, GraphLoadAction load,
                                                    const graphics::ClearColor& clear) noexcept {
-    target_ = {};
+    GraphColorTarget color;
+    color.texture = texture;
+    color.load = load;
+    color.clear = clear;
+    return ColorTarget(color);
+}
+
+GraphPassAccesses& GraphPassAccesses::ColorTarget(const GraphColorTarget& target) noexcept {
+    if (target_.kind == GraphTargetKind::SwapChain) {
+        target_ = {};
+    }
+
     target_.kind = GraphTargetKind::Texture;
-    target_.texture = texture;
-    target_.load = load;
-    target_.clear = clear;
+    // 넘친 색 attachment는 담지 않고 개수만 MaxColorTargets + 1로 남긴다(AddPass가 검증 오류로
+    // 거부한다).
+    if (target_.colorCount >= graphics::MaxColorTargets) {
+        target_.colorCount = graphics::MaxColorTargets + 1;
+        return *this;
+    }
+
+    target_.colors[target_.colorCount++] = target;
+    return *this;
+}
+
+GraphPassAccesses& GraphPassAccesses::DepthTarget(const GraphDepthTarget& target) noexcept {
+    if (target_.kind == GraphTargetKind::SwapChain) {
+        target_ = {};
+    }
+
+    target_.kind = GraphTargetKind::Texture;
+    target_.depth = target;
+    target_.hasDepth = true;
     return *this;
 }
 
@@ -287,27 +314,19 @@ Result<GraphTexture> RenderGraph::CreateTexture(const graphics::TextureDesc& des
         return Result<GraphTexture>::Failure(ErrorCode::Busy);
     }
 
-    // 렌더 타깃 그래프 텍스처는 GPU가 채우므로 번호표 안의 비압축 형식이어야 한다(블록 압축 형식은
-    // 렌더 타깃이 될 수 없다, PixelFormatInfo). Sampled 그래프 텍스처는 내용을 업로드로만 받으므로
-    // (UploadTexture) 압축 형식도 된다. 장치가 그 형식을 지원하는지는 풀 할당 때 장치 생성이
-    // 판단한다(Unsupported).
+    // GPU가 채우는 그래프 텍스처(렌더 타깃·깊이·Storage)는 번호표 안의 비압축 형식이어야 한다(블록
+    // 압축 형식은 렌더 타깃·UAV가 될 수 없다, PixelFormatInfo). Sampled 그래프 텍스처는 내용을
+    // 업로드로만 받으므로(UploadTexture) 압축 형식도 된다. 장치가 그 형식·차원·표본 수를
+    // 지원하는지는 풀 할당 때 장치 생성이 판단한다(Unsupported).
     const graphics::PixelFormatInfo& format = graphics::GetPixelFormatInfo(desc.format);
-    const bool renderTarget = desc.usage == graphics::TextureUsage::RenderTarget;
     const bool sampled = desc.usage == graphics::TextureUsage::Sampled;
-    // 차원 모양은 장치 규칙(ValidateTextureDesc)과 같다. 렌더 타깃은 2D만이다(slice attachment는
-    // 렌더 세션 GX2 몫).
-    const bool shaped =
-        graphics::IsValidTextureDimension(desc.dimension) && desc.depth != 0 &&
-        desc.arraySize != 0 &&
-        (desc.dimension == graphics::TextureDimension::Texture3D || desc.depth == 1) &&
-        (graphics::IsArrayDimension(desc.dimension) || desc.arraySize == 1) &&
-        (!graphics::IsCubeDimension(desc.dimension) || desc.width == desc.height) &&
-        (!renderTarget || desc.dimension == graphics::TextureDimension::Texture2D);
+    // 차원·mip·표본 수 모양은 장치 규칙(ValidateTextureDesc)과 같다(RG1 남은 것 A부: 2D 밖 렌더
+    // 타깃·mip 사슬·깊이·Storage·MSAA).
+    const bool shaped = graphics::ValidateTextureDesc(desc).IsOk();
     if (desc.width == 0 || desc.height == 0 || desc.mipLevels == 0 ||
-        desc.mipLevels > MaxGraphTextureMips || (!renderTarget && !sampled) || !shaped ||
+        desc.mipLevels > MaxGraphTextureMips || !shaped ||
         !graphics::IsValidPixelFormat(desc.format) ||
-        (renderTarget && format.compression != graphics::PixelCompression::None) ||
-        (sampled && desc.mipLevels > graphics::TextureFullMipCount(desc)) ||
+        (!sampled && format.compression != graphics::PixelCompression::None) ||
         // 업로드 자리(초기 데이터 byte)가 uint64·usize를 넘치는 Sampled desc는 받지 않는다.
         (sampled && (graphics::TextureDataBytes(desc) == 0 ||
                      graphics::TextureDataBytes(desc) > NumericLimits<usize>::Max())) ||
@@ -315,7 +334,8 @@ Result<GraphTexture> RenderGraph::CreateTexture(const graphics::TextureDesc& des
         return Result<GraphTexture>::Failure(RecordGraphError(
             state, ErrorCode::InvalidArgument, true,
             "texture '{}' has an invalid description (graph textures are uncompressed render "
-            "targets or uploaded sampled textures, format {})",
+            "targets, depth stencils or storage textures, or uploaded sampled textures, format "
+            "{})",
             name != nullptr ? name : "", graphics::PixelFormatName(desc.format)));
     }
 
@@ -571,7 +591,7 @@ namespace {
 // 한 pass의 subresource 접근 하나를 더한다(같은 subresource의 앞 선언과 합치고 상충을 검사한다).
 Result<void> AddUse(FrameArena& arena, GraphState& state, const char* passName, usize firstUse,
                     uint32 resource, uint32 subresource, ResourceAccess access,
-                    GraphAccessFlags flags) noexcept {
+                    GraphAccessFlags flags, bool attachment = false) noexcept {
     for (usize index = firstUse; index < state.uses.Size(); ++index) {
         SubresourceUse& use = state.uses[index];
         if (use.resource != resource || use.subresource != subresource) {
@@ -592,6 +612,7 @@ Result<void> AddUse(FrameArena& arena, GraphState& state, const char* passName, 
 
         use.access |= access;
         use.flags = CombineFlags(use.flags, flags);
+        use.attachment = use.attachment || attachment;
         return Result<void>::Success();
     }
 
@@ -600,6 +621,7 @@ Result<void> AddUse(FrameArena& arena, GraphState& state, const char* passName, 
     use.subresource = subresource;
     use.access = access;
     use.flags = flags;
+    use.attachment = attachment;
     return state.uses.TryPushBack(arena, use);
 }
 
@@ -675,18 +697,27 @@ Result<GraphPass> RenderGraph::AddPassWithAccesses(TraceScopeName& name, GraphPa
     }
 
     if (target.kind == GraphTargetKind::Texture) {
-        if (target.texture.graph != state.serial ||
-            target.texture.index >= state.resources.Size() ||
-            state.resources[target.texture.index].kind != GraphResourceKind::Texture) {
+        if (target.colorCount > graphics::MaxColorTargets ||
+            (target.colorCount == 0 && !target.hasDepth)) {
+            return reject(RecordGraphError(state, ErrorCode::InvalidArgument, true,
+                                           "pass '{}' has no attachments or more than {} color "
+                                           "attachments",
+                                           passName, graphics::MaxColorTargets));
+        }
+
+        const auto foreign = [&state](GraphTexture texture) noexcept {
+            return texture.graph != state.serial || texture.index >= state.resources.Size() ||
+                   state.resources[texture.index].kind != GraphResourceKind::Texture;
+        };
+        bool anyForeign = target.hasDepth && foreign(target.depth.texture);
+        for (uint32 index = 0; index < target.colorCount; ++index) {
+            anyForeign = anyForeign || foreign(target.colors[index].texture);
+        }
+
+        if (anyForeign) {
             return reject(RecordGraphError(state, ErrorCode::InvalidArgument, true,
                                            "pass '{}' renders to a texture from another graph",
                                            passName));
-        }
-
-        if (target.load == GraphLoadAction::Load) {
-            return reject(RecordGraphError(
-                state, ErrorCode::Unsupported, false,
-                "pass '{}' loads its render target; attachment load arrives with GX4", passName));
         }
     }
 
@@ -773,22 +804,78 @@ Result<GraphPass> RenderGraph::AddPassWithAccesses(TraceScopeName& name, GraphPa
         }
     }
 
-    // 렌더 타깃 접근이다(attachment).
+    // attachment 접근이다(그 mip·slice의 subresource 하나, 전이는 장치 BeginPass가 낸다).
     if (target.kind == GraphTargetKind::Texture) {
-        const ResourceRecord& resource = state.resources[target.texture.index];
-        if (!resource.imported &&
-            resource.textureDesc.usage != graphics::TextureUsage::RenderTarget) {
-            return rollback(RecordGraphError(state, ErrorCode::InvalidArgument, true,
-                                             "pass '{}' renders to '{}', which is not a render "
-                                             "target graph texture",
-                                             passName, resource.name));
+        const auto attach = [&](GraphTexture texture, uint32 mip, uint32 slice, bool depth,
+                                ResourceAccess access, bool load) noexcept -> Result<void> {
+            ResourceRecord& resource = state.resources[texture.index];
+            const graphics::TextureUsage usage =
+                depth ? graphics::TextureUsage::DepthStencil : graphics::TextureUsage::RenderTarget;
+            if (!resource.imported && resource.textureDesc.usage != usage) {
+                return Result<void>::Failure(RecordGraphError(
+                    state, ErrorCode::InvalidArgument, true,
+                    "pass '{}' attaches '{}', which is not a {} graph texture", passName,
+                    resource.name, depth ? "depth stencil" : "render target"));
+            }
+
+            // 3D는 mip 하나가 subresource 하나다(slice는 깊이 면).
+            const graphics::TextureDimension dimension = resource.imported
+                                                             ? graphics::TextureDimension::Texture2D
+                                                             : resource.textureDesc.dimension;
+            if (!graphics::IsAttachmentInRange(dimension, resource.textureDesc.depth,
+                                               resource.mipLevels, resource.slices, mip, slice)) {
+                return Result<void>::Failure(
+                    RecordGraphError(state, ErrorCode::InvalidArgument, true,
+                                     "pass '{}' attaches mip {} slice {} outside '{}'", passName,
+                                     mip, slice, resource.name));
+            }
+
+            const graphics::ResolvedSubresourceRange used =
+                graphics::AttachmentSubresource(dimension, mip, slice);
+            const uint32 subresource = SubresourceIndex(resource, used.firstMip, used.firstSlice);
+            // load는 이전 내용을 읽는다(생산 전 읽기 검사).
+            const SubresourceTrack& track = state.tracks[resource.firstTrack + subresource];
+            if (load && !resource.imported && track.lastProducer == GraphIndexNone &&
+                !track.uploaded) {
+                return Result<void>::Failure(
+                    RecordGraphError(state, ErrorCode::InvalidArgument, true,
+                                     "pass '{}' loads '{}' mip {} before any pass produced it",
+                                     passName, resource.name, mip));
+            }
+
+            resource.renderTarget = true;
+            return AddUse(arena_, state, passName, firstUse, texture.index, subresource, access,
+                          GraphAccessFlags::None, true);
+        };
+        for (uint32 index = 0; index < target.colorCount; ++index) {
+            const GraphColorTarget& color = target.colors[index];
+            for (uint32 other = 0; other < index; ++other) {
+                const GraphColorTarget& previous = target.colors[other];
+                if (previous.texture.index == color.texture.index &&
+                    previous.mipLevel == color.mipLevel && previous.slice == color.slice) {
+                    return rollback(RecordGraphError(state, ErrorCode::InvalidArgument, true,
+                                                     "pass '{}' attaches '{}' twice", passName,
+                                                     state.resources[color.texture.index].name));
+                }
+            }
+
+            auto added = attach(color.texture, color.mipLevel, color.slice, false,
+                                ResourceAccess::RenderTarget, color.load == GraphLoadAction::Load);
+            if (!added) {
+                return rollback(added.Error());
+            }
         }
 
-        auto added = AddUse(arena_, state, passName, firstUse, target.texture.index, 0,
-                            ResourceAccess::RenderTarget, GraphAccessFlags::None);
-        state.resources[target.texture.index].renderTarget = true;
-        if (!added) {
-            return rollback(added.Error());
+        if (target.hasDepth) {
+            const GraphDepthTarget& depth = target.depth;
+            const bool load = depth.readOnly || depth.depthLoad == GraphLoadAction::Load ||
+                              depth.stencilLoad == GraphLoadAction::Load;
+            auto added = attach(
+                depth.texture, depth.mipLevel, depth.slice, true,
+                depth.readOnly ? ResourceAccess::DepthRead : ResourceAccess::DepthWrite, load);
+            if (!added) {
+                return rollback(added.Error());
+            }
         }
     }
 

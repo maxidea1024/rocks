@@ -169,10 +169,10 @@ RenderGraphDesc MakeRenderGraphDesc(RenderFrameContext& frame, GraphResourcePool
 //   없고 UAV → UAV는 생략 표시가 없을 때만 UAV barrier다. 전이는 그 pass 기록 함수 앞에 낸다.
 //   Deferred는 같은 장치 기록 안에서 생산 pass와 소비 pass 사이에 다른 pass가 있으면 생산 pass
 //   끝에 begin하고 소비 pass 앞에서 end한다(분리 전이, CommandContext::BeginTransitions). Raster
-//   pass의 렌더 타깃 전이는 장치 BeginOffscreen이 낸다(attachment).
-// - 실행: Raster pass마다 장치 기록(BeginOffscreen·BeginFrame … EndFrame)을 하나 연다. Compute·Copy
-//   pass는 열린 기록에 이어 쓴다(기록 없는 그래프 앞부분의 Compute·Copy pass는 GX4 전까지
-//   Unsupported). pass마다 CPU 구간과(trace가 있으면) GpuScope 구간을 둔다.
+//   pass의 attachment subresource 전이는 장치 BeginPass가 낸다.
+// - 실행: Raster pass마다 장치 기록(BeginPass·BeginFrame … EndFrame)을 하나 연다. Compute·Copy
+//   pass는 열린 기록에 이어 쓰고, 열린 기록이 없으면 attachment 없는 BeginPass로 연다. pass마다 CPU
+//   구간과(trace가 있으면) GpuScope 구간을 둔다.
 // - 검증(항상): 생산 전 읽기, 한 pass 안 같은 subresource의 상충 접근, Raster pass의 UAV, pass
 // 종류에
 //   맞지 않는 접근, Retire된 자원 import, 생산 전 export, 다른 그래프의 handle. 실패한 호출은
@@ -193,9 +193,13 @@ public:
     // --- 자원 ---
 
     // 그래프 수명 텍스처를 선언한다. 장치 자원은 첫 사용 pass 직전에 받는다(같은 그래프 안 재사용
-    // 자리 또는 풀). usage는 둘 가운데 하나다:
-    // - RenderTarget: GPU가 채운다. 형식은 번호표 안의 비압축 PixelFormat이다.
+    // 자리 또는 풀). desc는 graphics::ValidateTextureDesc 규칙을 따르며(모든 차원·mip 사슬·
+    // sampleCount) usage는 넷 가운데 하나다:
+    // - RenderTarget: GPU가 색 attachment로 채운다. 형식은 비압축 PixelFormat이다.
+    // - DepthStencil: 깊이 attachment(GraphPassAccesses::DepthTarget)다.
+    // - Storage: compute UAV(TextureViewDesc::access ReadWrite)로 채운다.
     // - Sampled: 내용을 UploadTexture로만 받는다(모든 mip, pass는 읽기만). 압축 형식도 된다.
+    // GPU가 채우는 셋은 처음 내용이 정해지지 않는다(생산 전 읽기는 검증 오류다).
     // name은 정적 수명 문자열(진단)이다. 실패: 잘못된 desc InvalidArgument, arena 할당 실패는 그
     // 오류다. 장치가 지원하지 않는 형식은 풀 할당 때 장치 오류(Unsupported)로 Execute가 실패한다.
     Result<GraphTexture> CreateTexture(const graphics::TextureDesc& desc,
@@ -257,8 +261,7 @@ public:
 
     // pass를 넣는다. execute는 void(GraphPassContext&) noexcept 람다이며 프레임 arena에 옮겨
     // 담는다. Immediate 모드면 이 안에서 실행까지 한다. 실패: 검증 오류 InvalidArgument, 아직
-    // 지원하지 않는 형태(AsyncCompute, Load, 기록 없는 Compute·Copy) Unsupported, 장치·풀 실패는 그
-    // 오류다.
+    // 지원하지 않는 형태(AsyncCompute) Unsupported, 장치·풀 실패는 그 오류다.
     template <class Execute>
     Result<GraphPass> AddPass(TraceScopeName& name, GraphPassKind kind, GraphPassFlags flags,
                               const GraphPassAccesses& accesses, Execute&& execute) noexcept;

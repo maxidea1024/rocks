@@ -132,7 +132,8 @@ public:
     // 짝(EndFrame)·열린 짝의 subresource를 건드리는 Transition·begin은 검증 오류다.
     //
     // 추적 규칙(D3D12 backend와 같다): 만든 텍스처는 SrvGraphics, 만든 버퍼는 VertexOrIndex에서
-    // 시작한다. BeginOffscreen은 대상 mip 0을 RenderTarget으로 바꾼다(attachment 전이). EndFrame은
+    // 시작한다. BeginPass(BeginOffscreen 포함)는 attachment subresource를 RenderTarget·
+    // DepthWrite·DepthRead로 바꾼다(attachment 전이, 기록은 Op::BeginOffscreen). EndFrame은
     // 상태를 바꾸지 않는다. Transition은 before가 Unknown이 아니면 추적 상태와 같은지
     // 검사하고(다르면 검증 오류) after로 바꾼다. SetTexture는 SrvGraphics가 아닌 텍스처를 묶으면
     // 검증 오류다(이 장치는 암묵 전이를 하지 않는다).
@@ -269,6 +270,8 @@ private:
     // subresource(mip × slice)마다 추적한 상태다.
     struct TextureState {
         graphics::SubresourceStates<graphics::ResourceAccess> states;
+        // attachment subresource 계산용 차원이다(3D는 mip 하나가 subresource 하나).
+        graphics::TextureDimension dimension = graphics::TextureDimension::Texture2D;
     };
 
     // CPU 메모리 staging이다.

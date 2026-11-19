@@ -157,6 +157,8 @@ struct SubresourceUse {
     uint32 subresource = 0;
     graphics::ResourceAccess access = graphics::ResourceAccess::Unknown;
     GraphAccessFlags flags = GraphAccessFlags::None;
+    // pass attachment다. 그 전이는 장치 BeginPass가 내므로 그래프는 내지 않는다.
+    bool attachment = false;
 };
 
 // 그래프 자원 하나다(텍스처·버퍼).

@@ -41,7 +41,8 @@ bool GraphResourcePool::SameTextureKey(const graphics::TextureDesc& left,
            left.height == right.height && left.depth == right.depth &&
            left.arraySize == right.arraySize && left.format == right.format &&
            left.usage == right.usage && left.mipLevels == right.mipLevels &&
-           left.swizzle == right.swizzle && left.sampler == right.sampler;
+           left.sampleCount == right.sampleCount && left.swizzle == right.swizzle &&
+           left.sampler == right.sampler;
 }
 
 bool GraphResourcePool::SameBufferKey(const graphics::BufferDesc& left,
@@ -163,7 +164,10 @@ GraphResourcePool::AcquireTexture(const graphics::TextureDesc& desc,
     }
 
     switch (desc.usage) {
+    // GPU가 채우는 텍스처(렌더 타깃·깊이·Storage)는 초기 픽셀이 없다.
     case graphics::TextureUsage::RenderTarget:
+    case graphics::TextureUsage::DepthStencil:
+    case graphics::TextureUsage::Storage:
         if (!pixels.IsEmpty()) {
             return Result<Acquired>::Failure(ErrorCode::InvalidArgument);
         }
@@ -175,11 +179,6 @@ GraphResourcePool::AcquireTexture(const graphics::TextureDesc& desc,
         }
 
         break;
-    case graphics::TextureUsage::DepthStencil:
-    // Storage 그래프 텍스처(UAV)는 그래프의 텍스처 view(GraphTextureView, RenderBase 7.5절)와 함께
-    // 들인다.
-    case graphics::TextureUsage::Storage:
-        return Result<Acquired>::Failure(ErrorCode::Unsupported);
     }
 
     Key key;

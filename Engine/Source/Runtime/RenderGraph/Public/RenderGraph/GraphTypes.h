@@ -54,11 +54,13 @@ struct GraphPass {
 };
 
 // pass 종류다(UE ERDGPassFlags의 Raster·Compute·AsyncCompute·Copy). 종류가 허용하는 접근이 다르다:
-// - Raster: 렌더 타깃 하나(GraphPassAccesses::RenderTarget·SwapChainTarget)가 있어야 한다. 셰이더
+// - Raster: attachment(GraphPassAccesses::RenderTarget·ColorTarget·DepthTarget) 또는 스왑체인
+//   타깃(SwapChainTarget)이 있어야 한다. 셰이더
 //   읽기는 SrvGraphics·Constant·VertexOrIndex·IndirectArgs. UAV는 검증 오류다(셰이더 시스템 7.2절
 //   4항: UAV는 compute만).
-// - Compute: SRV·UAV·Constant·IndirectArgs. 렌더 타깃 없음.
-// - Copy: CopySource·CopyDestination만(그래픽 pipe).
+// - Compute: SRV·UAV·Constant·IndirectArgs. 렌더 타깃 없음(열린 기록이 없으면 attachment 없는
+//   기록을 연다).
+// - Copy: CopySource·CopyDestination만(그래픽 pipe, 기록은 Compute와 같다).
 // - AsyncCompute: RG4에서 연다. 지금은 Unsupported다.
 enum class GraphPassKind : uint8 {
     Raster,
@@ -102,8 +104,8 @@ enum class GraphMode : uint8 {
     Immediate
 };
 
-// 렌더 타깃 시작 동작이다(GX4 attachment load). RG1 장치 계약(BeginOffscreen)은 clear만 하므로
-// Load는 Unsupported다. DontCare는 clear로 낮춘다(내용이 정해지지 않아도 되므로 clear도 맞다).
+// attachment 시작 동작이다(graphics::LoadAction에 대응). Load는 이전 내용을 읽으므로 생산 전
+// 읽기 검사를 받는다. DontCare는 이전 내용을 버린다(다 덮어 그리는 pass).
 enum class GraphLoadAction : uint8 {
     Clear,
     DontCare,
@@ -140,8 +142,9 @@ struct GraphImportOptions {
 };
 
 // 계산한 전이 하나다(진단·시험). pass는 이 전이를 prologue에서 내는(분리 전이면 end하는) pass
-// 번호이며 GraphIndexNone이면 그래프 끝(export·import 마지막 상태)이다. attachment면 그 pass의 렌더
-// 타깃 전이라 장치의 BeginOffscreen이 낸다(CommandContext::Transition으로 내지 않는다).
+// 번호이며 GraphIndexNone이면 그래프 끝(export·import 마지막 상태)이다. attachment면 그 pass의
+// attachment subresource 전이라 장치의 BeginPass가 낸다(CommandContext::Transition으로 내지
+// 않는다).
 //
 // beginPass가 GraphIndexNone이 아니면 분리 전이다(RG2): 그 subresource를 마지막으로 쓴 pass
 // beginPass의 epilogue에서 begin하고 pass의 prologue에서 end한다(UE와 같이 같은 pipe에서 생산 pass
@@ -194,7 +197,7 @@ struct GraphStats {
     // 그 가운데 begin·end로 나눠 낸 전이 수다.
     uint32 splitTransitions = 0;
     uint32 attachmentTransitions = 0;
-    // 연 장치 기록(BeginOffscreen·BeginFrame) 수다.
+    // 연 장치 기록(BeginPass·BeginFrame) 수다.
     uint32 recordings = 0;
     // 풀에서 새로 만든·재사용한 자원 수다(풀에서 받은 장치 객체 기준).
     uint32 createdResources = 0;

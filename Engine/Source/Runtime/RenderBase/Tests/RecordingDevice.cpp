@@ -316,6 +316,7 @@ Result<TextureHandle> RecordingDevice::CreateTexture(const TextureDesc& desc,
     const uint32 mipLevels =
         desc.mipLevels == 0 || desc.mipLevels > MaxTrackedMips ? 1u : desc.mipLevels;
     const uint32 slices = TextureSliceCount(desc) == 0 ? 1u : TextureSliceCount(desc);
+    state.dimension = desc.dimension;
     auto reset = state.states.Reset(allocator_, mipLevels, slices, ResourceAccess::SrvGraphics);
     if (!reset) {
         return Result<TextureHandle>::Failure(reset.Error());
@@ -374,7 +375,6 @@ Result<CommandContext*> RecordingDevice::BeginFrame(SwapChainHandle swapChain,
 
 // 기록 장치는 색 attachment 하나(첫 색)만 기록한다(렌더 그래프 시험 범위).
 Result<CommandContext*> RecordingDevice::BeginPass(const PassDesc& pass) noexcept {
-    const TextureHandle target = pass.colorCount != 0 ? pass.colors[0].texture : TextureHandle{};
     auto owner = ownership_.Check();
     if (!owner) {
         return Result<CommandContext*>::Failure(owner.Error());
@@ -384,13 +384,40 @@ Result<CommandContext*> RecordingDevice::BeginPass(const PassDesc& pass) noexcep
         return Result<CommandContext*>::Failure(ErrorCode::Destroyed);
     }
 
-    if (recording_ || !textures_.IsValid(target.slot)) {
-        return Result<CommandContext*>::Failure(recording_ ? ErrorCode::Busy
-                                                           : ErrorCode::StaleHandle);
+    if (recording_) {
+        return Result<CommandContext*>::Failure(ErrorCode::Busy);
     }
 
-    // attachment 전이다(Device.h Transition 주석).
-    textures_.Find(target.slot)->states.At(0, 0) = ResourceAccess::RenderTarget;
+    // attachment는 살아 있는 텍스처여야 한다(attachment 없는 패스는 compute·복사 기록이다).
+    for (uint32 index = 0; index < pass.colorCount; ++index) {
+        if (!textures_.IsValid(pass.colors[index].texture.slot)) {
+            return Result<CommandContext*>::Failure(ErrorCode::StaleHandle);
+        }
+    }
+
+    if (!pass.depth.texture.IsNull() && !textures_.IsValid(pass.depth.texture.slot)) {
+        return Result<CommandContext*>::Failure(ErrorCode::StaleHandle);
+    }
+
+    // attachment 전이다(Device.h Transition 주석): 그 mip·slice의 subresource 하나만 바꾼다.
+    const auto attach = [this](TextureHandle texture, uint32 mip, uint32 slice,
+                               ResourceAccess access) noexcept {
+        TextureState* state = textures_.Find(texture.slot);
+        const ResolvedSubresourceRange used = AttachmentSubresource(state->dimension, mip, slice);
+        if (used.firstMip < state->states.MipLevels() && used.firstSlice < state->states.Slices()) {
+            state->states.At(used.firstMip, used.firstSlice) = access;
+        }
+    };
+    for (uint32 index = 0; index < pass.colorCount; ++index) {
+        attach(pass.colors[index].texture, pass.colors[index].mipLevel, pass.colors[index].slice,
+               ResourceAccess::RenderTarget);
+    }
+
+    if (!pass.depth.texture.IsNull()) {
+        attach(pass.depth.texture, pass.depth.mipLevel, pass.depth.slice,
+               pass.depth.readOnly ? ResourceAccess::DepthRead : ResourceAccess::DepthWrite);
+    }
+
     recording_ = true;
     Record(Op::BeginOffscreen);
     return Result<CommandContext*>::Success(this);
