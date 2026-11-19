@@ -8,6 +8,8 @@
 // writer 잠금 제한 시간 초과의 "불완전" 표시, 풀 사용률 경고, 수집 통계 기록. 모두 Manual writer와
 // 명시 gate로 순서를 정한다.
 using namespace rocks;
+namespace trace_recent_tests_file {
+
 using namespace rocks::tracetest;
 
 namespace {
@@ -419,3 +421,4 @@ TEST(TraceStats_RecordsAreWrittenEveryInterval) {
 
     CHECK(records == Pumps / 2);
 }
+} // namespace trace_recent_tests_file

@@ -3,6 +3,8 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace trace_loss_tests_file {
+
 using namespace rocks::tracetest;
 
 namespace {
@@ -505,3 +507,4 @@ TEST(TraceStopWaitsForInFlightWriteThenFlushesAndCloses) {
         CHECK(ReadFixedByte(records[0], 0) == 42);
     }
 }
+} // namespace trace_loss_tests_file
