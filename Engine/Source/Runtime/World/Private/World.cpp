@@ -1,3 +1,5 @@
+#include "WorldInternal.h"
+
 #include <Config/ConfigContext.h>
 #include <Core/Assert.h>
 #include <Core/Diagnostics/Log.h>
@@ -327,9 +329,11 @@ Result<void> World::Shutdown() noexcept {
         (void)cancelled;
     }
 
-    for (uint32 attempt = 0; attempt < 64 && objects_.CollectionPhase() != GcPhase::Idle;
+    for (uint32 attempt = 0;
+         attempt < detail::FullCollectionFinishSteps && objects_.CollectionPhase() != GcPhase::Idle;
          ++attempt) {
-        auto stepped = objects_.StepCollection(Access(), GcBudget{1u << 20, 0}, gcScheduler_);
+        auto stepped =
+            objects_.StepCollection(Access(), detail::UnboundedFinishBudget, gcScheduler_);
         if (!stepped) {
             return Result<void>::Failure(stepped.Error());
         }

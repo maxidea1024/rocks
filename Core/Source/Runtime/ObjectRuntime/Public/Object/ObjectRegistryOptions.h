@@ -23,8 +23,7 @@ enum class GcPhase : uint8 {
 // GarbageCollectionScale.ko.md 17.2절).
 // - Immediately: 반환 전에 모두 회수한다(소멸자·저장소 반환 포함).
 // - Deferred: 분류만 하고 회수 대상 목록에 남긴다. DrainRetired(access, GcBudget)로 프레임마다
-// 예산만큼
-//   회수한다(STW 병렬 수집 뒤 소멸자를 여러 프레임에 나눌 때).
+//   예산만큼 회수한다(STW 병렬 수집 뒤 소멸자를 여러 프레임에 나눌 때).
 enum class GcReclaim : uint8 {
     Immediately,
     Deferred

@@ -4,8 +4,8 @@
 #include <Engine/Engine.h>
 #include <World/World.module.generated.h>
 
-// 엔진이 소유하는 GC scheduler와 전체 수집
-// 요청이다(Docs/Design/GarbageCollectionScale.ko.md 17.4절).
+// 엔진이 소유하는 GC scheduler와 전체 수집 요청의 시험이다(GC 설계 17.4절 —
+// Docs/Design/GarbageCollectionScale.ko.md).
 using namespace rocks;
 
 // 엔진이 GC scheduler를 만들어 World에 빌려주고, 종료 때 World를 모두 파괴한 뒤 끝낸다. 엔진의
@@ -24,6 +24,8 @@ TEST(Engine_OwnsGcSchedulerAndLendsItToWorlds) {
         desc.name = "Gc";
         desc.gcSchedule.mode = WorldGcMode::FullCollection;
         desc.gcSchedule.fullCollectionIntervalSeconds = 1.0e9;
+        // 회수 예산은 객체 수로 둔다(시간 예산은 선점에 따라 프레임 수가 달라진다).
+        desc.gcSchedule.reclaimBudget = GcBudget{GcBudget::DefaultMaxObjects, 0};
         auto created = engine.CreateWorld(desc);
         REQUIRE(created);
         World& world = *created.Value();
@@ -41,6 +43,19 @@ TEST(Engine_OwnsGcSchedulerAndLendsItToWorlds) {
         CHECK(!world.Objects().InspectLifecycle(world.Access(), actor.Value()));
         REQUIRE(engine.Shutdown());
         CHECK(engine.GcScheduler() == nullptr);
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// gcWorkers가 상한(64)을 넘으면 초기화가 InvalidArgument로 실패한다(조용히 자르지 않는다).
+TEST(Engine_GcWorkersAboveLimitFailsInitialize) {
+    SystemAllocator allocator;
+    {
+        EngineConfig config;
+        config.gcWorkers = EngineConfig::MaxGcWorkers + 1;
+        Engine engine(allocator);
+        CHECK(engine.Initialize(config).Error() == ErrorCode::InvalidArgument);
     }
 
     CHECK(allocator.Stats().liveAllocations == 0);
