@@ -34,6 +34,8 @@ Result<void> RegisterHostVars(config::ConfigContext& config) noexcept {
 
 } // namespace host_settings_test
 
+namespace host_settings_tests_file {
+
 namespace {
 
 // 작업 디렉터리 아래 시험 전용 엔진 폴더(<root>/Engine/Config)다. 소멸 때 지운다.
@@ -292,3 +294,4 @@ TEST(HostSettings_ProjectDirectoryAndUserData) {
     CHECK(!user.IsEmpty() && !user.View().Contains("\\", StringComparison::CaseSensitive));
     CHECK(!HostPlatformName().IsEmpty());
 }
+} // namespace host_settings_tests_file
