@@ -3,6 +3,7 @@
 #include <Platform/Thread.h>
 
 using namespace rocks;
+namespace commandlet_tests_file {
 
 namespace {
 
@@ -253,3 +254,4 @@ TEST(CommandletOutputReentryAndInputBoundaries) {
     auto oversized = registry.Run({args, 1}, output);
     CHECK(!oversized && oversized.Error() == ErrorCode::InvalidArgument);
 }
+} // namespace commandlet_tests_file

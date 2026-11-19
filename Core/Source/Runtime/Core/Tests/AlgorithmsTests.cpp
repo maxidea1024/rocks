@@ -4,6 +4,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace algorithms_tests_file {
 
 namespace {
 
@@ -240,3 +241,4 @@ TEST(AlgorithmsSortWorstCaseComparisonBound) {
         CHECK(comparisons < 32 * count);
     }
 }
+} // namespace algorithms_tests_file

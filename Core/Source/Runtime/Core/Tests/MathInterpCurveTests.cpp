@@ -9,6 +9,7 @@
 // InterpCurve의 의미 결정(Docs/Implementation/InterpCurve.ko.md 3절) 경계 시험이다. UE 식 대조와
 // double reference는 MathInterpCurveGoldenTests.cpp에 있다.
 namespace rocks::test {
+namespace math_interp_curve_tests_file {
 
 namespace {
 
@@ -696,5 +697,6 @@ TEST(PolynomialRoots_FindsRootsInsideOpenRange) {
     CHECK(math::EvaluatePolynomial<3>(cubic, 0.25) == 0.0);
     CHECK(math::EvaluatePolynomial<3>(cubic, 1.0) == 0.0);
 }
+} // namespace math_interp_curve_tests_file
 
 } // namespace rocks::test

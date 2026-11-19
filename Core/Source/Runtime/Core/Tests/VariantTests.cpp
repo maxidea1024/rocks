@@ -4,6 +4,8 @@
 #include <Core/Variant.h>
 
 namespace rocks::test {
+namespace variant_tests_file {
+
 namespace {
 
 struct Tracked {
@@ -214,5 +216,6 @@ TEST(Variant_VisitAndEquality) {
     CHECK(!(WithTracked(InPlaceType<Tracked>{}, 1) == WithTracked(InPlaceType<Tracked>{}, 2)));
     CHECK(Tracked::alive == 0);
 }
+} // namespace variant_tests_file
 
 } // namespace rocks::test

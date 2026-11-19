@@ -6,6 +6,7 @@
 // SystemAllocator만 쓰므로 ASan·UBSan 하네스가 같은 소스를 그대로 컴파일해 재사용한다.
 
 using namespace rocks;
+namespace bit_array_word_tests_file {
 
 namespace {
 
@@ -255,3 +256,4 @@ TEST(BitArrayWordGrowthUsesWordSlack) {
     REQUIRE(exact.TryReserve(129));
     CHECK(exact.Capacity() == WordsToBits(3));
 }
+} // namespace bit_array_word_tests_file

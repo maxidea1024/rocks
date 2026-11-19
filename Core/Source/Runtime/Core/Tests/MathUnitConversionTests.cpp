@@ -2,6 +2,7 @@
 #include <Core/Math/UnitConversion.h>
 
 namespace rocks::test {
+namespace math_unit_conversion_tests_file {
 
 // 단위 경계 변환 golden이다. 기대값은 UE 5.8.4 계수(UnrealMathUtility.h:177-183,
 // UnitConversion.cpp:723·:752-753·:775·:818·:828, PrimitiveComponent.h:2863)와 UE 기본값
@@ -91,5 +92,6 @@ TEST(MathUnitConversion_NonFiniteIsPreserved) {
     // 범위를 넘으면 검사 없이 ±Inf다.
     CHECK(math::MetersToCentimeters(3.0e38f) == platform::PlatformMath::Infinity<float>());
 }
+} // namespace math_unit_conversion_tests_file
 
 } // namespace rocks::test

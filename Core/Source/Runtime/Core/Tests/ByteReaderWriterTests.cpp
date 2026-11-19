@@ -7,6 +7,8 @@
 
 // 외부 형식용 ByteReader·ByteWriter의 byte 순서 golden 값, 이어지는 실패, 경계, 할당 실패 시험이다.
 namespace rocks::test {
+namespace byte_reader_writer_tests_file {
+
 namespace {
 
 constexpr uint8 Golden[] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
@@ -321,5 +323,6 @@ TEST(ByteWriter_EveryAllocationFailureKeepsSuccessfulPrefix) {
     failing.DisableFailure();
     CHECK(failures > 0);
 }
+} // namespace byte_reader_writer_tests_file
 
 } // namespace rocks::test

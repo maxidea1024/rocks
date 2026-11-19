@@ -4,6 +4,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace path_tests_file {
 
 namespace {
 
@@ -727,3 +728,4 @@ TEST(PathUe58CollapseRelativeDirectoriesAndFailurePreserveInput) {
     CHECK(!unknown && unknown.Error() == ErrorCode::InvalidArgument);
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace path_tests_file

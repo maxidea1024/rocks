@@ -8,6 +8,8 @@
 #include <stdio.h>
 
 using namespace rocks;
+namespace decimal_conversion_tests_file {
+
 namespace decimal = rocks::detail::decimal;
 using platform::BitCast;
 
@@ -608,3 +610,4 @@ TEST(DecimalConversion_IndependentOfFlushToZeroAndDenormalsAreZero) {
     platform::detail::WriteFloatingPointControl(original);
     CHECK(same);
 }
+} // namespace decimal_conversion_tests_file

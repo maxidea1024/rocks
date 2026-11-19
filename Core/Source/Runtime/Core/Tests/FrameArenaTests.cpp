@@ -8,6 +8,8 @@
 #include <Platform/Thread.h>
 
 using namespace rocks;
+namespace frame_arena_tests_file {
+
 using namespace rocks::platform;
 
 namespace {
@@ -358,3 +360,4 @@ TEST(FrameArena_ResetRejectsOpenWritersAndReentry) {
     failing.DisableFailure();
     CHECK(limited.TryAllocate(4000, 8));
 }
+} // namespace frame_arena_tests_file

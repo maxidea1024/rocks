@@ -2,6 +2,8 @@
 #include <Core/Text/Uri.h>
 
 namespace rocks::test {
+namespace uri_tests_file {
+
 namespace {
 
 bool Is(StringView view, const char* expected) {
@@ -339,5 +341,6 @@ TEST(Uri_NormalizeRfc3986Equivalence) {
     REQUIRE(bound);
     CHECK(bound.Value() == 10);
 }
+} // namespace uri_tests_file
 
 } // namespace rocks::test

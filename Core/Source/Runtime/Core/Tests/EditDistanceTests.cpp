@@ -5,6 +5,7 @@
 // 맞바꾸기, ASCII 대소문자 무시, 한도를 넘으면 한도 + 1, 한도가 최댓값보다 크면 줄여 계산, 전체
 // 행렬 기준과의 전수 대조.
 using namespace rocks;
+namespace edit_distance_tests_file {
 
 namespace {
 
@@ -154,3 +155,4 @@ TEST(EditDistance_MatchesFullMatrixOnSmallAlphabet) {
 
     CHECK(mismatches == 0);
 }
+} // namespace edit_distance_tests_file

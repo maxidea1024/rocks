@@ -5,6 +5,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace binned_allocator_tests_file {
 
 namespace {
 
@@ -325,3 +326,4 @@ TEST(CoreBinnedCrossThreadAndConcurrentDuplicateReturn) {
     }
     CHECK(system.Stats().liveAllocations == 0);
 }
+} // namespace binned_allocator_tests_file

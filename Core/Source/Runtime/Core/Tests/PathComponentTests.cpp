@@ -4,6 +4,7 @@
 #include <string.h>
 
 using namespace rocks;
+namespace path_component_tests_file {
 
 namespace {
 
@@ -126,3 +127,4 @@ TEST(Path_MakePlatformFilename) {
           ErrorCode::InvalidArgument);
     CHECK(allocator.Stats().liveAllocations == 3);
 }
+} // namespace path_component_tests_file

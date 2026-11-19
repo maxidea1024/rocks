@@ -5,6 +5,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace external_allocator_race_tests_file {
 
 namespace {
 
@@ -166,3 +167,4 @@ TEST(CoreExternalAllocatorWaitsForSameAddressReuse) {
 TEST(CoreExternalAllocatorWaitsForPartiallyOverlappingReuse) {
     CheckReuse(true);
 }
+} // namespace external_allocator_race_tests_file

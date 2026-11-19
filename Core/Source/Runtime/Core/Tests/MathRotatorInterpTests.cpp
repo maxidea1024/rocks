@@ -4,6 +4,7 @@
 #include <Platform/PlatformMath.h>
 
 namespace rocks::test {
+namespace math_rotator_interp_tests_file {
 
 // Rotator golden은 UE 5.8.4 원본 식(UnrealMath.cpp:518-535 Rotator→Quat, :691-719 Quat→Rotator,
 // :640-677 float Quat→Rotator, :371-402 Vector, Rotator.h:688-716 ClampAxis·NormalizeAxis,
@@ -405,5 +406,6 @@ TEST(GridSnap_TieDirectionIgnoresGridSign) {
     CHECK(math::GridSnap(-7.5, 5.0) == -5.0);
     CHECK(math::GridSnap(3.2, 0.0) == 3.2);
 }
+} // namespace math_rotator_interp_tests_file
 
 } // namespace rocks::test

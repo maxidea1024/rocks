@@ -52,6 +52,8 @@ constexpr float FloatInfinity = platform::PlatformMath::Infinity<float>();
 
 } // namespace key_curve_vectors
 
+namespace math_key_curve_tests_file {
+
 using namespace key_curve_vectors;
 
 TEST(KeyCurveMath_LinearAndConstantSegments) {
@@ -411,5 +413,6 @@ TEST(KeyCurveMath_AutoTangentHandValues) {
     // 줄이면 1이다.
     CHECK(math::ComputeCurveTangent(0.0f, 0.0f, 1.0e8f, 1.0f, 1.0f, 0.0f) == 0.0f);
 }
+} // namespace math_key_curve_tests_file
 
 } // namespace rocks::test

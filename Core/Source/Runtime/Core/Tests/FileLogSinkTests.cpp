@@ -15,6 +15,8 @@ namespace rocks::test {
 uint64 OperatorNewCalls() noexcept;
 } // namespace rocks::test
 
+namespace file_log_sink_tests_file {
+
 namespace {
 
 constexpr LogCategory LogFileTests{"Tests.File"};
@@ -491,3 +493,4 @@ TEST(FileLogSinkCompressesBatches) {
     REQUIRE(bytes.Size() > 1);
     CHECK(bytes[0] == 'Z');
 }
+} // namespace file_log_sink_tests_file

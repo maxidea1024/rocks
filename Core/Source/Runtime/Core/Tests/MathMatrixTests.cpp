@@ -5,6 +5,8 @@
 #include <Platform/PlatformMath.h>
 
 namespace rocks::test {
+namespace math_matrix_tests_file {
+
 namespace {
 
 // 부분 피벗 Gauss-Jordan 소거로 만든 독립 역행렬 oracle이다(Laplace 전개 구현과 다른 방법).
@@ -538,5 +540,6 @@ TEST(MathBatch_TransformPointsMatchesPerElement) {
         CHECK(same);
     }
 }
+} // namespace math_matrix_tests_file
 
 } // namespace rocks::test

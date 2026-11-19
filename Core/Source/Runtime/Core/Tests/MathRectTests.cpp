@@ -4,6 +4,7 @@
 #include <Platform/PlatformMath.h>
 
 namespace rocks::test {
+namespace math_rect_tests_file {
 
 TEST(Box2_ClosedBoundaryContracts) {
     const Box2<double> box(Vec2d(0.0, 0.0), Vec2d(4.0, 2.0));
@@ -114,5 +115,6 @@ TEST(Rect_ReviewRegressions) {
           wide.Interpolate(1.0f) == wide.max);
     CHECK(wide.Interpolate(0.5f) == 0.0f && math::IsFinite(wide.Interpolate(0.25f)));
 }
+} // namespace math_rect_tests_file
 
 } // namespace rocks::test

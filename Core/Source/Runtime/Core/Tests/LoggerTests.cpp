@@ -15,6 +15,8 @@ using namespace rocks;
 #error "Rocks.Build must define ROCKS_LOG_COMPILED_MINIMUM for every module of the target"
 #endif
 
+namespace logger_tests_file {
+
 static_assert(LogCompiledMinimum == (IsDebugBuild         ? LogLevel::Trace
                                      : IsDevelopmentBuild ? LogLevel::Debug
                                                           : LogLevel::Info),
@@ -612,3 +614,4 @@ TEST(LogLevelRoundTripsThroughSinkFilterAndBuffer) {
     Log::Error(LogTests, "m");
     CHECK(capture.lastLevel == LogLevel::Error);
 }
+} // namespace logger_tests_file

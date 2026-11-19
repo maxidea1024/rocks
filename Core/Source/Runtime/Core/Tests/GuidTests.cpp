@@ -4,6 +4,7 @@
 #include <string.h>
 
 using namespace rocks;
+namespace guid_tests_file {
 
 namespace {
 
@@ -62,3 +63,4 @@ TEST(Guid_NewGuidIsRandomVersion4) {
         CHECK(TryParseGuid(text.View()).Value() == value);
     }
 }
+} // namespace guid_tests_file

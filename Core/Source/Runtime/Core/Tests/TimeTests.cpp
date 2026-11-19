@@ -8,6 +8,7 @@
 #include <Platform/PlatformMath.h>
 
 using namespace rocks;
+namespace time_tests_file {
 
 namespace {
 
@@ -323,3 +324,4 @@ TEST(DateTime_Iso8601FormatAndParse) {
         CHECK(parsed.Value() == value);
     }
 }
+} // namespace time_tests_file

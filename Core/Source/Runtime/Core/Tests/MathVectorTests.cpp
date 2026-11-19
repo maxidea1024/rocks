@@ -9,6 +9,8 @@
 #include <Platform/PlatformMath.h>
 
 namespace rocks::test {
+namespace math_vector_tests_file {
+
 namespace {
 
 constexpr float InfinityF = platform::PlatformMath::Infinity<float>();
@@ -337,5 +339,6 @@ TEST(MathUtility_NamedTolerancesAndUlpComparison) {
     CHECK(math::IsNearlyEqualByUlps(d, dNext, 2) && !math::IsNearlyEqualByUlps(d, dNext, 1));
     CHECK(math::IsNearlyEqualByUlps(-0.0, 0.0, 0));
 }
+} // namespace math_vector_tests_file
 
 } // namespace rocks::test

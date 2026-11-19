@@ -6,6 +6,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace budget_concurrency_tests_file {
 
 namespace {
 
@@ -313,3 +314,4 @@ TEST(CoreBudgetBackingCallbackCanReadSnapshotAndNoop) {
     CHECK(system.Stats().liveAllocations == 0);
     CHECK(system.Stats().liveBytes == 0);
 }
+} // namespace budget_concurrency_tests_file

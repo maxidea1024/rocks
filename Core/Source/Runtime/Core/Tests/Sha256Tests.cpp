@@ -3,6 +3,7 @@
 #include <string.h>
 
 using namespace rocks;
+namespace sha256_tests_file {
 
 // FIPS 180-4 / NIST CSRC 예제 벡터와 분할 입력 동치성을 확인한다.
 namespace {
@@ -82,3 +83,4 @@ TEST(Sha256_HexRoundTripAndRejectsInvalidText) {
     CHECK(Sha256Digest::ParseHex("zz7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
               .Error() == ErrorCode::InvalidArgument);
 }
+} // namespace sha256_tests_file

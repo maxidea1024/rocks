@@ -5,6 +5,7 @@
 #include <Core/Text/String.h>
 
 using namespace rocks;
+namespace string_tests_file {
 
 namespace {
 
@@ -428,3 +429,4 @@ TEST(StringRepeatedLifecycleLeavesNoAllocations) {
         CHECK(allocator.Stats().liveBytes == 0);
     }
 }
+} // namespace string_tests_file
