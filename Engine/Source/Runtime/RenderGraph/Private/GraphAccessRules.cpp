@@ -69,6 +69,7 @@ void FormatAccess(ResourceAccess access, char* out, usize capacity) noexcept {
                                       {ResourceAccess::RenderTarget, "RenderTarget"},
                                       {ResourceAccess::DepthWrite, "DepthWrite"},
                                       {ResourceAccess::CopyDestination, "CopyDestination"},
+                                      {ResourceAccess::ResolveDestination, "ResolveDestination"},
                                       {ResourceAccess::Discard, "Discard"}};
 
     if (capacity == 0) {

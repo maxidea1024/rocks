@@ -70,6 +70,10 @@ void YieldThread() noexcept {
     sched_yield();
 }
 
+uint32 LogicalProcessorCount() noexcept {
+    return detail::PosixLogicalProcessorCount();
+}
+
 ThreadStackRange CurrentThreadStackRange() noexcept {
     ThreadStackRange range;
     detail::PosixCurrentThreadStack(range.low, range.high);

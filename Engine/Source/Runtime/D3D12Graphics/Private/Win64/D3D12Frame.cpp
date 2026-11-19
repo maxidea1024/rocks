@@ -678,20 +678,26 @@ void D3D12Device::ResolveAttachments() noexcept {
             continue;
         }
 
-        // MSAA 원본은 2D mip 1이라 subresource 0이고, 대상은 resolve mip·slice 하나다.
-        const ResolvedSubresourceRange whole = {0, 1, 0, 1};
+        // MSAA 원본은 mip 1이라 그 attachment 층(2D는 0)이 subresource이고, 대상은 resolve
+        // mip·slice 하나다.
+        const uint32 sourceSlice = target_.colorSlices[index];
+        const ResolvedSubresourceRange whole = {0, 1, sourceSlice, 1};
         const ResolvedSubresourceRange destination = AttachmentSubresource(
             target->dimension, target_.resolveMips[index], target_.resolveSlices[index]);
         TrackTransition(*source, target_.colors[index].slot, whole,
                         D3D12_RESOURCE_STATE_RESOLVE_SOURCE);
         TrackTransition(*target, target_.resolves[index].slot, destination,
                         D3D12_RESOURCE_STATE_RESOLVE_DEST);
-        list_->ResolveSubresource(target->resource.Get(),
-                                  d3d12::SubresourceIndex(destination.firstMip,
-                                                          destination.firstSlice, 0,
-                                                          target->mipLevels, target->slices),
-                                  source->resource.Get(), 0, d3d12::MappingOf(source->format).rtv);
-        TrackTransition(*target, target_.resolves[index].slot, destination, ShaderReadStates);
+        list_->ResolveSubresource(
+            target->resource.Get(),
+            d3d12::SubresourceIndex(destination.firstMip, destination.firstSlice, 0,
+                                    target->mipLevels, target->slices),
+            source->resource.Get(), d3d12::SubresourceIndex(0, sourceSlice, 0, 1, source->slices),
+            d3d12::MappingOf(source->format).rtv);
+        // 패스 뒤 상태 계약: 원본은 attachment 상태로 되돌리고 대상은
+        // RESOLVE_DEST(ResolveDestination)로 둔다(RenderBase 8절 RG1 남은 것 설계 2).
+        TrackTransition(*source, target_.colors[index].slot, whole,
+                        D3D12_RESOURCE_STATE_RENDER_TARGET);
     }
 }
 

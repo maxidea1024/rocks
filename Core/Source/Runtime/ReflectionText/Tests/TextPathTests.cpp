@@ -84,11 +84,11 @@ TEST(TextPath_StrictnessDiagnostics) {
     CHECK(context.Diagnostics().Get(0).source.sourceIndex == 3);
 }
 
-// 용도별 제외를 경로 전체에 적용한다: Edit 입력은 Transient만 빼고(NonPIE·TextExport 필드는 받는다)
-// ReadOnly는 판정하지 않는다(대입 묶음 몫). Copy 입력은 DuplicateTransient struct의 멤버(조상
-// 단계)와 TextExport·NonPIE를 뺀다. PieCopy는 NonPIE를 받는다. Report는 입력에 쓸 수
-// 없다(InvalidArgument). 출력(FormatTextPath)은 용도의 출력 제외가 경로 어느 단계에 있으면 쓰지
-// 않고 false다.
+// 용도별 제외를 경로 전체에 적용한다: Edit 입력은 Transient만 빼고(NonTryout·TextExport 필드는
+// 받는다) ReadOnly는 판정하지 않는다(대입 묶음 몫). Copy 입력은 DuplicateTransient struct의
+// 멤버(조상 단계)와 TextExport·NonTryout을 뺀다. TryoutCopy는 NonTryout을 받는다. Report는 입력에
+// 쓸 수 없다(InvalidArgument). 출력(FormatTextPath)은 용도의 출력 제외가 경로 어느 단계에 있으면
+// 쓰지 않고 false다.
 TEST(TextPath_UseExclusionCoversWholePath) {
     SystemAllocator allocator;
     TextSetup setup(allocator);
@@ -112,7 +112,7 @@ TEST(TextPath_UseExclusionCoversWholePath) {
         SlotOf(context, holder, "origin.x");
     }
 
-    setup.options.use = TextUse::PieCopy;
+    setup.options.use = TextUse::TryoutCopy;
     {
         TextCodecContext context(setup.types, setup.options, setup.diagnostics, allocator);
         SlotOf(context, holder, "instance");

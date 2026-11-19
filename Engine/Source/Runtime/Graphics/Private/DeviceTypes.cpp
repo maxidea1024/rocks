@@ -170,6 +170,12 @@ Result<ResolvedSubresourceRange> ResolveTextureViewRange(TextureDimension dimens
         return invalid();
     }
 
+    // 스텐실 plane(1) view는 cube 차원이 없다(D3D TEXTURECUBE view에 PlaneSlice가 없다, 텍스처 GX2
+    // 나머지 C부). cube 텍스처의 스텐실은 2D 배열 view로 읽는다.
+    if (desc.plane != 0 && IsCubeDimension(view)) {
+        return invalid();
+    }
+
     if (write && (!HasTextureUsage(usage, TextureUsage::Storage) || range.mipCount != 1 ||
                   desc.plane != 0 || !desc.swizzle.IsIdentity())) {
         return invalid();
@@ -375,16 +381,21 @@ Result<void> ValidateTextureDesc(const TextureDesc& desc) noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    // MSAA는 렌더 타깃·깊이의 2D, mip 1만이다(초기 픽셀·UAV·mip 사슬이 없다).
+    // MSAA는 렌더 타깃·깊이의 2D·2D 배열, mip 1만이다(초기 픽셀·UAV·mip 사슬이 없다. cube·3D MSAA는
+    // D3D·Vulkan에 없다, 텍스처 GX2 나머지 C부).
+    const bool msaaDimension = desc.dimension == TextureDimension::Texture2D ||
+                               desc.dimension == TextureDimension::Texture2DArray;
     if (!IsValidSampleCount(desc.sampleCount) ||
         (desc.sampleCount > 1 &&
-         (!attachment || storage || desc.dimension != TextureDimension::Texture2D ||
-          desc.mipLevels != 1))) {
+         (!attachment || storage || !msaaDimension || desc.mipLevels != 1))) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    // 다중 plane 형식(D24S8·D32S8·비디오)의 2D 밖 차원은 이 단계의 계약 밖이다.
-    if (desc.dimension != TextureDimension::Texture2D && info.planeCount > 1) {
+    // 다중 plane 깊이(D24S8·D32S8)는 깊이 attachment면 2D 배열·cube·cube 배열도 받는다(텍스처 GX2
+    // 나머지 C부, 3D 깊이는 위에서 거부). 초기 픽셀이 있는 다중 plane 깊이와 비디오 형식의 2D 밖
+    // 차원은 용도가 없어 Unsupported다.
+    if (desc.dimension != TextureDimension::Texture2D && info.planeCount > 1 &&
+        !(depth && depthTarget)) {
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
 

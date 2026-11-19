@@ -84,7 +84,10 @@ FileStatus ClassifyLoadFailure(const wchar_t* path, DWORD error) noexcept {
 
 } // namespace
 
-FileStatus DynamicLibraryOpenPath(const char* path, usize pathBytes, uptr& handle) noexcept {
+// Windows는 nativeError에 원래 OS 코드를 담으므로 문구는 비워 둔다(지금 동작 유지).
+FileStatus DynamicLibraryOpenPath(const char* path, usize pathBytes, uptr& handle,
+                                  DynamicLibraryError* loaderText) noexcept {
+    (void)loaderText;
     if (!IsAbsolute(path, pathBytes)) {
         return {FileCode::InvalidArgument, 0};
     }
@@ -114,7 +117,9 @@ FileStatus DynamicLibraryOpenPath(const char* path, usize pathBytes, uptr& handl
     return {};
 }
 
-FileStatus DynamicLibraryOpenSystem(const char* name, usize nameBytes, uptr& handle) noexcept {
+FileStatus DynamicLibraryOpenSystem(const char* name, usize nameBytes, uptr& handle,
+                                    DynamicLibraryError* loaderText) noexcept {
+    (void)loaderText;
     windows::WideString wide;
     FileStatus status = wide.AssignUtf8(name, nameBytes);
     if (!status) {

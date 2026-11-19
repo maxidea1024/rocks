@@ -222,7 +222,7 @@ internal static class DescriptorTests
         string plugins = Path.Combine(root, "Game", "Plugins");
         Write(plugins, "Water/Water.rocksplugin", """
             { "fileVersion": 1, "version": 1, "versionName": "1.0", "friendlyName": "Water",
-              "modules": [ { "name": "Water", "type": "Runtime" } ] }
+              "modules": [ { "name": "Water", "type": "Runtime", "loadingPhase": "PostConfigInit" } ] }
             """);
         Write(plugins, "Weather/Weather.rocksplugin", """
             { "fileVersion": 1, "version": 1, "versionName": "1.0", "friendlyName": "Weather",
@@ -244,6 +244,9 @@ internal static class DescriptorTests
         Check(Names(development.Apply(rules, ["Game", "GameTools"])).SequenceEqual(["Game", "GameTools", "Water"]),
             "Windows Development module selection");
         Check(development.EnabledPlugins.Select(plugin => plugin.Name).SequenceEqual(["Water"]), "enabled plugins");
+        // 기술자의 loadingPhase가 모듈 표 행의 단계로 넘어간다(Docs/Design/ModuleLoader.ko.md 3.2절). 적지 않으면 Default다.
+        Check(development.Apply(rules, ["Game"]).Select(module => module.LoadingPhase)
+            .SequenceEqual([LoadingPhase.Default, LoadingPhase.Default, LoadingPhase.PostConfigInit]), "descriptor loading phases");
         // 켠 플러그인의 모듈은 타깃이 참조하지 않아도 빌드 대상에 더한다. 프로젝트 모듈은 더하지 않는다.
         Check(development.IncludedPluginModules.SequenceEqual(["Water"]), "included plugin modules");
         Check(development.Modules.Single(module => module.Name == "Weather").ExcludedReason!.Contains("not enabled", StringComparison.Ordinal),

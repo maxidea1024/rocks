@@ -3,7 +3,9 @@
 #include <Core/Diagnostics/LogContext.h>
 #include <Engine/Engine.h>
 #include <Engine/EngineLog.h>
+#include <Platform/Atomics.h>
 #include <Platform/Clock.h>
+#include <Platform/Thread.h>
 
 namespace rocks {
 
@@ -32,6 +34,7 @@ enum class InitStage : uint8 {
     ModuleRegistration,
     RegisterTypes,
     ObjectRegistry,
+    GcScheduler,
     Subsystems,
     PermanentRegion,
     ClientStart,
@@ -39,8 +42,8 @@ enum class InitStage : uint8 {
 };
 
 constexpr const char* InitStageNames[] = {
-    "TypeRegistry", "ModuleRegistration", "RegisterTypes", "ObjectRegistry",
-    "Subsystems",   "PermanentRegion",    "ClientStart",
+    "TypeRegistry", "ModuleRegistration", "RegisterTypes",   "ObjectRegistry",
+    "GcScheduler",  "Subsystems",         "PermanentRegion", "ClientStart",
 };
 
 static_assert(sizeof(InitStageNames) / sizeof(InitStageNames[0]) ==
@@ -200,6 +203,38 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
     }
 
     {
+        // World GC 표식 scheduler다(GC 설계 17.4절). World를 만들기 전에 시작하고 World를 모두
+        // 파괴한 뒤 끝낸다.
+        InitStageContext stage(InitStage::GcScheduler);
+        uint32 workers = config_.gcWorkers;
+        if (workers != EngineConfig::GcWorkersAuto && workers > EngineConfig::MaxGcWorkers) {
+            return fail(InitStage::GcScheduler, ErrorCode::InvalidArgument);
+        }
+
+        if (workers == EngineConfig::GcWorkersAuto) {
+            const uint32 processors = platform::LogicalProcessorCount();
+            workers = processors > 1 ? processors - 1 : 0;
+            workers =
+                workers < EngineConfig::MaxAutoGcWorkers ? workers : EngineConfig::MaxAutoGcWorkers;
+        }
+
+        if (workers != 0) {
+            auto scheduler = UniquePtr<WorkerScheduler>::TryMake(allocator_, allocator_);
+            if (!scheduler) {
+                return fail(InitStage::GcScheduler, scheduler.Error());
+            }
+
+            WorkerSchedulerConfig schedulerConfig;
+            schedulerConfig.workerCount = workers;
+            if (auto started = scheduler.Value()->Start(schedulerConfig); !started) {
+                return fail(InitStage::GcScheduler, started.Error());
+            }
+
+            gcScheduler_ = Move(scheduler.Value());
+        }
+    }
+
+    {
         InitStageContext stage(InitStage::Subsystems);
         Result<void> subsystems = Result<void>::Success();
         {
@@ -256,6 +291,15 @@ void Engine::Teardown(uint32 completedSteps, const char* stage) noexcept {
         subsystems_.Deinitialize(*this);
     }
 
+    // World는 아직 없다(초기화 실패 경로). scheduler를 끝내지 못하는 것은 worker가 남은 작업을
+    // 돌려주지 않는 불변식 위반이다.
+    if (auto stopped = StopGcScheduler(); !stopped) {
+        Log::Fatal(LogEngine,
+                   "Engine GC scheduler could not shut down after initialization failure at "
+                   "{Stage}: {Error}",
+                   stage, ErrorCodeName(stopped.Error()));
+    }
+
     if (completedSteps >= StepObjects && objects_) {
         auto collected = objects_->Collect(objects_->OwnerAccess());
         (void)collected;
@@ -304,7 +348,8 @@ Result<World*> Engine::CreateWorld(const WorldCreateDesc& desc) noexcept {
     worldDesc.timeStep = desc.timeStep;
     worldDesc.objects = desc.objects;
     worldDesc.gcBudget = desc.gcBudget;
-    worldDesc.gcScheduler = desc.gcScheduler;
+    worldDesc.gcSchedule = desc.gcSchedule;
+    worldDesc.gcScheduler = desc.gcScheduler != nullptr ? desc.gcScheduler : gcScheduler_.Get();
     worldDesc.subsystems = desc.subsystems;
     // World가 엔진 설정 문맥에 자기 CVar 범위를 만든다(CVarSystem 14.2절).
     worldDesc.settings = config_.settings;
@@ -513,6 +558,17 @@ Result<void> Engine::RunFrame() noexcept {
         }
     }
 
+    // 다른 스레드가 건 전체 수집 요청을 살아 있는 World에 나눠 준다(GC 설계 17.4절 — World 배열은
+    // 게임 스레드만 돈다).
+    if (platform::AtomicExchange<platform::MemoryOrder::AcquireRelease>(&fullCollectionRequested_,
+                                                                        uint32{0}) != 0) {
+        for (WorldContext& context : worlds_) {
+            if (!context.pendingDestroy && context.world) {
+                context.world->RequestFullCollection();
+            }
+        }
+    }
+
     // 4) World Tick. hook이 World를 추가·파괴 요청해도 index로 다시 읽는다.
     Result<void> outcome = Move(synced);
     const uint64 worldStart = platform::MonotonicNanoseconds();
@@ -627,6 +683,12 @@ Result<void> Engine::Shutdown() noexcept {
         }
     }
 
+    // World가 모두 없어졌으므로 빌려준 GC scheduler를 끝낸다(GC 설계 17.4절).
+    if (auto stopped = StopGcScheduler(); !stopped) {
+        LogShutdownFailure("GcScheduler", stopped.Error());
+        return stopped;
+    }
+
     // 진행 중인 GPU 프레임·비동기 작업 완료(계획 3.2절 "GPU fence·audio epoch·physics step 완료").
     if (shutdownProgress_ < ShutdownWorkCompleted) {
         if (initializedSteps_ >= StepSubsystems) {
@@ -691,6 +753,24 @@ Result<void> Engine::Shutdown() noexcept {
 
     Log::Info(LogEngine, "Engine shut down");
     return outcome;
+}
+
+Result<void> Engine::StopGcScheduler() noexcept {
+    if (!gcScheduler_) {
+        return Result<void>::Success();
+    }
+
+    auto stopped = gcScheduler_->Shutdown();
+    if (!stopped) {
+        return stopped;
+    }
+
+    gcScheduler_.Reset();
+    return Result<void>::Success();
+}
+
+void Engine::RequestFullCollection() noexcept {
+    platform::AtomicStore<platform::MemoryOrder::Release>(&fullCollectionRequested_, uint32{1});
 }
 
 Result<void> Engine::RunShutdownHooksBeforeWorlds() noexcept {

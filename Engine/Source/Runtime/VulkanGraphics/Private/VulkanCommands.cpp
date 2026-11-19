@@ -208,22 +208,27 @@ void VulkanDevice::ResolveAttachments() noexcept {
             continue;
         }
 
-        // MSAA 원본은 2D mip 1이라 subresource 0이고, 대상은 resolve mip·slice 하나다.
-        const ResolvedSubresourceRange whole = {0, 1, 0, 1};
+        // MSAA 원본은 mip 1이라 그 attachment 층(2D는 0)이고, 대상은 resolve mip·slice 하나다.
+        const uint32 sourceSlice = target_.colorSlices[index];
+        const ResolvedSubresourceRange whole = {0, 1, sourceSlice, 1};
         const ResolvedSubresourceRange destination = AttachmentSubresource(
             resolved->dimension, target_.resolveMips[index], target_.resolveSlices[index]);
         TrackTransition(*source, target_.colors[index].slot, whole, ResourceAccess::CopySource,
                         false);
         TrackTransition(*resolved, target_.resolves[index].slot, destination,
-                        ResourceAccess::CopyDestination, false);
+                        ResourceAccess::ResolveDestination, false);
         VkImageResolve region = {};
-        region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, sourceSlice, 1};
         region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, destination.firstMip,
                                  destination.firstSlice, 1};
         region.extent = {source->width, source->height, 1};
         functions_.vkCmdResolveImage(frame_, source->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                                      resolved->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
                                      &region);
+        // 패스 뒤 상태 계약: 원본은 attachment 상태로 되돌리고 대상은 ResolveDestination으로 둔다
+        // (RenderBase 8절 RG1 남은 것 설계 2).
+        TrackTransition(*source, target_.colors[index].slot, whole, ResourceAccess::RenderTarget,
+                        false);
     }
 }
 

@@ -26,6 +26,14 @@
 - 증분: 생성 TU의 key는 cpp 내용이고 `<out>/BuildInfo`는 header 디렉터리가 아니다. ID가 같으면 생성 파일을 다시 쓰지 않아 no-op이 0 액션이고, Core에 닿는 실행 파일은 입력 byte가 하나만 바뀌어도(주석 포함) 생성 TU와 link가 다시 돈다. 첫 InputSnapshot은 Prepare가 읽은 digest·열거의 메모로 만들어 마지막 비교가 Prepare 읽기부터 빌드 끝까지를 덮는다.
 - `NativeBuildResult.ToolchainFingerprint`(대상이 없으면 null)·`ToolBuildIds`(link가 성공한 실행 파일만)는 action-report.json에 실린다.
 
+## 모듈 표(ModuleTables)
+
+`NativeModuleInput.ProvidesModuleTable` 표지 모듈(엔진 Core — `Core/Module/ModuleEntry.h`)에 닿는 `Executable` 모듈마다 `ModuleTables.Add`가 `<실행 파일>.ModuleTable.cpp`를 그 모듈의 생성 소스로 더한다(`<out>/GeneratedSources/<실행 파일>/`, 규칙 생성 TU와 같은 경로·증분 — [모듈 로더](../../Docs/Design/ModuleLoader.ko.md) 3.2절). 이름 "Core"로 판정하지 않는다.
+
+- 진입점 모듈(`ModuleTables.EntryModules`): `ThirdParty`가 아니고, 소스·생성 소스·prebuilt 라이브러리가 있으며, 도달 집합에 표지 모듈이 있는 모듈이다. header-only 모듈과 표지 모듈 아래 모듈은 빠진다. 액션 그래프는 이 모듈들의 compile에만 `ROCKS_MODULE_NAME=<이름>`을 더한다(규칙은 정의할 수 없다 — `InputValidation`).
+- 표: 실행 파일에서 의존 우선 깊이 탐색의 후위 순서로 진입점 모듈만 나열하고(실행 파일이 마지막), 행마다 직접 의존 가운데 진입점 모듈(면제 모듈을 거치면 그 너머의 진입점 모듈)과 `LoadingPhase`(기술자 모듈은 `DescriptorModuleSet.Apply`가 채운다)를 싣는다. 모든 `RocksModuleEntry_<이름>()`을 참조하므로 매크로가 빠진 모듈은 링크 오류다. 진입점 모듈 이름은 C 식별자여야 한다(ArgumentException).
+- `InputValidation`은 대소문자만 다른 두 모듈 이름과 모듈 이름과 대소문자가 다른 의존 철자를 거부한다(MD17).
+
 ## 입력과 증분 계약
 
 source list/content, 유효 compile/link 옵션, 의존 artifact, public/private header inventory와 내용, 명시 AdditionalInputs, toolchain과 ContextFingerprint를 key에 포함한다. 확장자가 `.h/.hh/.hpp/.hxx/.inl/.inc/.ipp/.tpp`인 header와 source 옆 local header를 보수적으로 추적한다. 다른 확장자의 include/추가 생성 입력은 AdditionalInputs로 선언해야 한다. 실제 depfile 기반 정밀 의존 축소는 후속 작업이다.

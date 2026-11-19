@@ -35,6 +35,7 @@ int RunVariantWrongAlternativeControl() noexcept;
 int RunDelegateRebindDuringTargetDestructionControl() noexcept;
 int RunUniquePtrNullDeleterControl() noexcept;
 int RunDelegateExecuteUnboundControl() noexcept;
+int RunModuleLoaderShutdownDuringLoadControl() noexcept;
 int RunDelegateRebindDuringExecutionControl() noexcept;
 int RunSpanSliceOutOfBoundsControl() noexcept;
 int RunRandomStreamPreconditionControl(uint32 operation) noexcept;
@@ -329,6 +330,8 @@ int main(int argc, char** argv) {
                 return test::RunUniquePtrNullDeleterControl();
             } else if (strcmp(control, "delegate-execute-unbound") == 0) {
                 return test::RunDelegateExecuteUnboundControl();
+            } else if (strcmp(control, "module-loader-shutdown-during-load") == 0) {
+                return test::RunModuleLoaderShutdownDuringLoadControl();
             } else if (strcmp(control, "delegate-rebind-during-execution") == 0) {
                 return test::RunDelegateRebindDuringExecutionControl();
             } else if (strcmp(control, "span-slice-out-of-bounds") == 0) {

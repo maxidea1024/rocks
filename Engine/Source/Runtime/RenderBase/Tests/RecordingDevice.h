@@ -404,6 +404,14 @@ private:
     uint64 failedResizes_ = 0;
     bool hold_ = false;
     bool recording_ = false;
+    // 지금 패스의 resolve 대상이다(EndFrame이 그 subresource를 ResolveDestination으로 바꾼다).
+    struct PendingResolve {
+        SlotHandle texture;
+        uint32 mipLevel = 0;
+        uint32 slice = 0;
+    };
+    PendingResolve resolves_[graphics::MaxColorTargets];
+    uint32 resolveCount_ = 0;
 };
 
 } // namespace rocks::render::testing

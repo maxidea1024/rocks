@@ -56,8 +56,11 @@ bool BuildScene(ObjectRegistry& registry, Scene& scene) noexcept {
     scene.body = Make<TestPart>(registry, TestPartType(), scene.aAsset, "Body");
     scene.socket = Make<TestPart>(registry, TestPartType(), scene.body, "Socket");
     const ObjectHandle temp = Make<TestScratch>(registry, TestScratchType(), scene.aAsset, "Temp");
+    // 저장 불가 객체 아래의 저장 가능한 자식도 부분 트리째 빠진다(writer export 집합).
+    const ObjectHandle tempChild = Make<TestPart>(registry, TestPartType(), temp, "Inner");
     if (scene.bAsset.IsNull() || scene.gear.IsNull() || scene.dAsset.IsNull() ||
-        scene.aAsset.IsNull() || scene.body.IsNull() || scene.socket.IsNull() || temp.IsNull()) {
+        scene.aAsset.IsNull() || scene.body.IsNull() || scene.socket.IsNull() || temp.IsNull() ||
+        tempChild.IsNull()) {
         return false;
     }
 
@@ -150,7 +153,7 @@ TEST(AssetPackage_CookedRoundTrip) {
     CHECK(contents.Value().header.bulkAlignment == PackageDefaultCookedBulkAlignment);
     CHECK(contents.Value().summary.profileId.View() == StringView("Windows"));
     CHECK(contents.Value().summary.cookerVersion == 7);
-    // export: 대표 에셋, Body, Body.Socket(Temp는 저장 불가라 없다).
+    // export: 대표 에셋, Body, Body.Socket(Temp는 저장 불가라 그 자식 Temp.Inner와 함께 없다).
     REQUIRE(contents.Value().exports.Size() == 3);
     CHECK(contents.Value().exports[1].name == StringView("Body"));
     CHECK(contents.Value().exports[2].name == StringView("Socket"));
@@ -213,6 +216,7 @@ TEST(AssetPackage_CookedRoundTrip) {
     CHECK(asset->hardList[1].IsNull());
     CHECK(asset->hardList[2] == body.Value());
     CHECK(!target.FindObject(access, handles[0], "Temp"));
+    CHECK(!target.FindObject(access, handles[0], "Temp.Inner"));
     TestPart* bodyPart = Pointer<TestPart>(target, body.Value());
     TestPart* socketPart = Pointer<TestPart>(target, socket.Value());
     REQUIRE(bodyPart != nullptr && socketPart != nullptr);

@@ -40,68 +40,6 @@ void RunOnWorker(Fn& fn) noexcept {
     REQUIRE(thread.Join() == platform::ThreadStatus::Success);
 }
 
-// type(클래스 또는 struct) 스키마의 필드 name의 ID다.
-Guid FieldIdOf(TypeRegistry& types, TypeId type, StringView name) noexcept {
-    auto lease = types.Acquire(type);
-    if (!lease) {
-        lease = types.AcquireValueType(type, TypeKind::Struct);
-    }
-
-    if (!lease) {
-        return Guid{};
-    }
-
-    for (const FieldSchema& field : lease.Value().Schema().fields) {
-        if (StringView(field.name.Data(), field.name.Size()) == name) {
-            return field.id;
-        }
-    }
-
-    return Guid{};
-}
-
-// Objects 섹션에서 필드 id의 첫 TLV를 찾아 payload offset(섹션 기준)을 돌려준다. TLV는
-// fieldGuid16(high·low LE)·type4·byteLength8·payload다(Serialization Record).
-constexpr usize RecordFieldIdBytes = 16;
-// TLV에서 payload가 시작하는 위치다(id 16 + type 4 + byteLength 8).
-constexpr usize RecordFieldPayloadOffset = RecordFieldIdBytes + sizeof(uint32) + sizeof(uint64);
-
-usize FieldPayload(Span<const uint8> objects, Guid id) noexcept {
-    uint8 pattern[RecordFieldIdBytes];
-    StoreLittleEndian<uint64>(pattern, id.high);
-    StoreLittleEndian<uint64>(pattern + sizeof(uint64), id.low);
-    for (usize offset = 0; offset + RecordFieldPayloadOffset <= objects.Size(); ++offset) {
-        bool same = true;
-        for (usize index = 0; same && index < RecordFieldIdBytes; ++index) {
-            same = objects[offset + index] == pattern[index];
-        }
-
-        if (same) {
-            return offset + RecordFieldPayloadOffset;
-        }
-    }
-
-    return IndexNone;
-}
-
-// Objects 섹션의 필드 id 첫 payload에 u32 value를 쓴 패키지다(섹션 CRC는 다시 맞춘다).
-Array<uint8> WithObjectsU32(Allocator& allocator, const Array<uint8>& file, Guid id,
-                            uint32 value) noexcept {
-    EditablePackage edit(allocator);
-    if (!edit.Parse(file.View())) {
-        return Array<uint8>(allocator);
-    }
-
-    EditableSection* objects = edit.Find(PackageSectionKind::Objects);
-    const usize payload = objects != nullptr ? FieldPayload(objects->bytes.View(), id) : IndexNone;
-    if (payload == IndexNone) {
-        return Array<uint8>(allocator);
-    }
-
-    StoreLittleEndian<uint32>(objects->bytes.Data() + payload, value);
-    return edit.Build();
-}
-
 // state 하나를 transaction에 올린 결과와 진단이다.
 Result<void> InstantiateOne(ConstructionContext& transaction, PackageLoadState& state,
                             AssetDiagnostic* failure = nullptr,

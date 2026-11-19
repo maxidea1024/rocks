@@ -17,7 +17,7 @@
 | 5 | 루트 수집·sweep의 전체 Slot 순회 | 루트 목록·비트 sweep | Phase 2 |
 | 6 | 병렬 경로가 객체마다 task, World는 직렬 | 블록 단위 병렬 표식, World scheduler | Phase 3 |
 | 7 | 객체 수 기준 예산(Step당 64개) | 시간 기준 예산 | Phase 1 |
-| 8 | 회수의 객체당 잠금 두 번, 할당자 선형 검색 | 바뀌지 않음 | GC-S5·S6 남음 |
+| 8 | 회수의 객체당 잠금 두 번, 할당자 선형 검색 | 회수 잠금은 64개 묶음마다 두 번(24절), 할당자는 그대로 | GC-S5 끝, GC-S6 남음 |
 | — | (대상 수 자체) | 패키지·World Level 클러스터, 영구 영역 | Phase 4(GC-S7) |
 
 ### 0.2 4절 gate: 처음 → 현재
@@ -31,7 +31,7 @@
 | 증분 cycle | ≤ 60프레임 | 기본 예산 30,941 Step(60fps 약 8.6분) | 직렬 49–51, 병렬 ×8 기본 28·2ms 14 Step(20절) | 3–5 Step | 충족 |
 | 증분 Step p99 | ≤ 2ms | 2ms 예산 2.02ms(cycle 669ms) | p95 2.1ms, p99는 부하 아래 판정 불가 | — | 재측정 필요 |
 | Slot 정보 | ≤ 64B | 192B | hot 64B(슬롯 전체 192.3B) + 20.8B | 장부 + 24B | hot 충족(17절), 슬롯 전체는 192B |
-| churn 회수(약 98K) | — | 17.8ms | 15–28ms | — | 변화 없음(GC-S5) |
+| churn 회수(약 98K) | — | 17.8ms | 묶음 회수로 같은 round 5–9% 감소(22.3–24.1ms), 회수를 미루면 프레임 2ms 예산으로 12–16프레임(24절) | — | 회수 예산 충족, 객체당 비용은 GC-S6 |
 | 1M 생성·회수(System·Binned 할당자) | — | 측정 불가 | 측정 불가 | — | GC-S6 남음 |
 
 처음에는 1M에서 표식 0.8초, 증분 cycle 8.6분, 병렬이 직렬보다 6배 느려 사실상 쓸 수 없었다. 지금은 cycle이 1초 안에 끝나고 Begin·sweep 판정이 1ms 아래이며, 클러스터가 맞는 그래프는 표식 gate를 모두 충족한다. Phase 4 측정은 부하 100% 아래라 병렬·p99 수치는 판정용이 아니다.
@@ -1199,3 +1199,94 @@ a1916228(Slot hot·cold 분리)·a43ca91e(1차 리뷰 반영)의 2차 리뷰 지
 
 - 시험: 안전장치 시험 세 방식(`PackageBoundaryValveCollect`·`Incremental`·`Parallel`)에 다시 읽은 패키지 확인을 더했다(새 패키지 객체 → 클러스터 3개, 소속 14). 음성 대조(`step5/ctl3.txt`): "해체가 한 번이라도 있었으면 새 패키지도 클러스터를 만들지 않음"(Registry 전체에 남는 표지)으로 바꾸면 새 확인이 먼저 실패한다(클러스터 3 ↔ 2). 더 넓은 대조(모든 살아 있는 패키지를 해체된 것으로 봄)는 시험 앞부분부터 실패했다(`step5/ctl.txt`).
 - Debug Foundation 전체 2,079개·클러스터 29개 × 5, Debug EngineTests 전체 2,216개, Development WorldBench 실행, format·policy 통과(`step5/ctl.txt`). 이 단계의 Core 변경은 시험뿐이고 GcBench·WorldBench는 측정 도구다.
+
+## 24. 수집 일정과 파괴 예산 (GC-S5, 7단계, 2026-11-19)
+
+설계는 ce760705(GC 설계 개정 6, 17절), 구현은 fe1b2109, 측정 도구는 b64c7104(`GcBench --churn-only`)다.
+
+### 24.1 묶음 회수
+
+`GcBench --objects 1000000 --refs 4 --reps 5 --churn-only`(살아 있는 1M의 10% — 98,020개를 쓰레기로 만든 뒤 직렬 Collect, 다섯 번의 중앙값), 높은 우선순위로 같은 시점 번갈아 쟀다.
+
+묶음 크기(시제품, `step7/churn.txt`, 회수 ms · 객체당 ns):
+
+| round | 전(객체마다 잠금 둘) | 묶음 16 | 묶음 64 | 묶음 256 |
+|---|---|---|---|---|
+| 1 | 26.1 · 265.9 | 24.4 · 248.8 | 24.4 · 249.3 | 23.9 · 243.7 |
+| 2 | 27.0 · 275.1 | 24.5 · 249.6 | 24.2 · 246.8 | 24.4 · 249.4 |
+| 3 | 25.9 · 264.4 | 24.5 · 249.8 | 24.4 · 248.7 | 24.2 · 246.9 |
+
+최종 구현 ↔ 전(`step7/churn2.txt`): 회수 24.2 · 25.5 · 25.7 → 22.3 · 24.1 · 23.3ms(객체당 247–262 → 228–246ns, 같은 round 5–9% 감소).
+
+- 묶음 크기 16·64·256은 차이가 없다. 경합 없는 잠금은 싸고, 남은 몫은 소멸자·저장소 반환·슬롯 되돌리기의 메모리 접근이다. 묶음 64는 같은 round의 묶음 전보다 6–10% 적다(24.2–24.4 ↔ 25.9–27.0ms, 객체당 246.8–249.3 ↔ 264.4–275.1ns).
+- 처음 구현은 시간 한도를 묶음마다 보아 넘침이 소멸자 64개까지였다(아래 24.2절의 30–44µs). 리뷰 반영(24.7절)에서 소멸자 사이마다 보게 고쳤다.
+
+### 24.2 회수를 미루는 수집과 프레임 예산 회수
+
+같은 churn을 `Collect(…, GcReclaim::Deferred)`로 분류만 하고 `DrainRetired(2ms)`를 회수할 것이 없을 때까지 불렀다(`step7/churn2.txt`, 세 round):
+
+| round | 수집(표식 · sweep) | 회수 프레임 수 | 가장 긴 회수 호출 |
+|---|---|---|---|
+| 1 | 111.1ms(100.1 · 10.8) | 12 | 2.030ms |
+| 2 | 100.7ms(90.6 · 10.0) | 16 | 2.044ms |
+| 3 | 93.1ms(82.1 · 10.9) | 13 | 2.039ms |
+
+- 98K 회수(한 번에 하면 약 23ms)가 프레임마다 2ms 안쪽으로 나뉜다. 이 표는 처음 구현(시간 한도를 묶음마다 봄)이고 넘침 30–44µs는 한도가 지난 뒤 끝까지 회수한 묶음의 나머지다. 이 측정의 표식은 직렬이다(병렬 ×8이면 1M 표식 약 17ms — 21절).
+- 리뷰 반영 뒤(소멸자 사이마다 시간 한도, 최소 진척 — 862538db, 한 번 측정 `review7/churn.txt`): 직렬 Collect의 회수 23.1ms(객체당 235.5ns — 한도 없는 회수는 시계를 읽지 않는다), 미룬 회수는 2ms 예산으로 14프레임, 가장 긴 회수 호출 2.003ms(넘침 3µs — 소멸자 하나와 슬롯 되돌리기).
+
+### 24.3 World 일정과 엔진 scheduler
+
+- World 기본 일정은 증분이고(17.3절 — 근거는 20·21절의 ×8 STW 표식 약 17ms ↔ 증분 ×8 slice 약 1ms × 21번), 전체 수집 요청·`FullCollection` 주기 일정은 STW 병렬 전체 수집 뒤 회수를 `reclaimBudget`으로 나눈다.
+- 엔진은 `EngineConfig::gcWorkers`(기본: 논리 프로세서 수 − 1, 8로 자름)로 `WorkerScheduler`를 만들어 World에 빌려주고, World를 모두 파괴한 뒤 끝낸다. 측정 기계(논리 20)에서는 worker 8이다.
+
+### 24.4 시험
+
+- Foundation `ObjectGcReclaim_*` 셋: Deferred 수집 뒤 예산 회수 70 · 70 · 60 · 0(묶음 64 경계 안에서 객체 수 한도), Deferred 뒤 남은 것을 다음 즉시 수집이 회수, 쓰레기 A의 소멸자가 쓰레기 B의 backend 보유를 놓으면 같은 회수 호출의 다음 묶음에서 B를 회수.
+- EngineTests `WorldGc_*` 셋: FullCollection 간격(0.5초) 전에는 남고 지난 뒤 수집·회수, 요청 수집 뒤 회수를 프레임마다 2개씩(5 → 3 → 1 → 0), 기본 증분 모드. `Engine_*Gc*` 둘: 엔진 scheduler를 World에 빌려주고 종료 때 끝내며 엔진 요청이 간격이 아주 긴 World도 수집하게 한다, `gcWorkers` 0이면 scheduler가 없다.
+
+음성 대조(`step7/negctl11.txt`):
+
+| 대조 | 바꾼 것 | 잡은 시험 |
+|---|---|---|
+| N1 | 회수가 묶음 하나만 하고 멈춤 | `ObjectGcReclaim_*` 셋 모두 실패 |
+| N2 | 묶음 안에서 객체 수 한도를 무시 | 예산 회수·남은 것 회수 시험 실패(10 대신 64) |
+| N3 | Deferred를 무시하고 즉시 회수 | 셋 모두 실패 |
+| N4 | World가 전체 수집 뒤 회수를 하지 않음 | `WorldGc_` 둘·엔진 시험 실패 |
+| N5 | FullCollection 간격 무시 | 간격 시험·엔진 시험 실패(바로 수집) |
+| N6 | 엔진이 scheduler를 빌려주지 않음 | 엔진 시험 실패 |
+| N7 | 엔진 전체 수집 요청이 아무것도 안 함 | 엔진 시험 실패 |
+
+### 24.5 검증
+
+Debug Foundation 전체 2,527개, Debug EngineTests 전체 2,899개, 클러스터 smoke Debug 6종, format·policy 통과(`step7/verify.txt`). 반복 중에는 바뀐 시험만(`ObjectGcReclaim`, EngineTests `Gc` 필터 97개) 돌리고 넓은 시험은 단계 끝에 한 번 돌렸다.
+
+### 24.6 남은 것
+
+- 회수 객체당 약 230–250ns는 GC-S6(할당자)에서 줄인다.
+- 메모리 압박 신호를 내는 플랫폼 계층은 아직 없다(엔진 요청 API까지).
+
+### 24.7 7단계 리뷰·메인 세션 검증 반영 (2026-11-19)
+
+리뷰(ce760705..26524906)와 메인 세션의 직접 검증(b9ff1d00)을 반영했다. 설계는 66191386·2b4171ed·b8ea724f(17절), 구현은 862538db·fee35fff다.
+
+| 항목 | 내용 | 반영 | 시험 |
+|---|---|---|---|
+| D1 | 회수가 진척 없이 0을 돌려주면 World가 회수를 멈춤 | 시간 한도는 첫 객체 뒤부터(최소 진척), World는 `HasPendingReclaim` 질의로 매 프레임 판정 | `ObjectGcReclaim_TimeBudgetStopsBetweenDestructorsWithProgress`, 모델 시험(대기가 없으면 0), World 시험은 객체 수 예산으로 결정적 |
+| D2 | 묶음 때문에 시간 넘침이 소멸자 64개까지 | 소멸자 사이마다 한도를 보고 남은 work는 Retired로 되돌림(`ReturnUnreclaimedLocked`) | 같은 시험(소멸자가 시계를 넘기면 호출마다 정확히 하나, 나머지는 회수 대기로 남음) |
+| R1 | Reclaiming 중 요청이 회수를 예산 없이 한 프레임에 | `FinishCollectionDeferringReclaim`(남은 분류만, 회수는 대기) | `ObjectGcReclaim_FinishCollectionDeferringReclaimLeavesRetired`, `WorldGc_RequestDuringReclaimingKeepsReclaimBudgeted` |
+| R2 | 보유로 늦어진 Retired가 보유 해제 뒤 회수되지 않음 | D1의 질의 판정 | `WorldGc_HeldObjectIsReclaimedAfterRelease` |
+| R3 | 주기 간격이 World 게임 시간 | Tick의 실제 경과 시간(UE `FApp::GetDeltaTime`) | `WorldGc_FullCollectionIntervalCountsRealTimeWhilePaused` |
+| R4 | 프로세서 수가 시스템 전체 | 프로세스 affinity(Windows mask와 활성 수의 작은 값, Android `sched_getaffinity` hook, Apple `sysconf`) | POSIX 쪽은 이 기계에서 컴파일되지 않아 CI(`[ci]`)로 확인 |
+| R5 | 요청 분기 시험 부족 | Marking 취소·Reclaiming·Busy 재시도·scheduler 공유 시험, 모델 시험과 GcSoak에 Deferred 수집·예산 회수를 섞음 | `WorldGc_RequestDuringMarkingCancelsAndCollects`·`…BusyFullCollectionRetriesNextFrame`·`…WorldsShareOneScheduler`, `ObjectRegistryModel`·`GcSoak` |
+| R6 | 요청의 스레드 계약 | World·Engine 요청 표지를 atomic으로, Engine은 프레임이 World에 나눠 줌. Initialize·Shutdown·소멸은 같은 스레드(주석·설계) | `Engine_OwnsGcSchedulerAndLendsItToWorlds`(요청이 다음 프레임에 World로) |
+| R7 | gcWorkers 상한·프레임 합산 예산·Tick 안 요청 시점 | 64 초과는 InvalidArgument, 설계 17.3절에 합산 예산·요청 소비 시점 | `Engine_GcWorkersAboveLimitFailsInitialize` |
+| N1 | 회수가 남은 채 다시 수집하면 회수가 멈춤(push된 결함) | D1의 질의 판정으로 해소 | 회귀 시험 `WorldGc_RepeatedRequestKeepsDrainingEarlierReclaim`(5 → 3 → 1 → 0) |
+| N2 | `FinishCollectionDeferringReclaim`에 safepoint 조건 없음 | Borrow·활성 생성이면 Busy(Step과 같음) | `ObjectGcReclaim_FinishCollectionDeferringReclaimNeedsSafepoint`, `WorldGc_RequestDuringSweepingWithBorrowStaysBusy` |
+| N3 | FullCollection이 World 파괴가 있을 때만 발동 | 간격만 본다(UE와 같음), 0 이하는 주기 수집 없음. Incremental의 같은 한계는 설계 17.5절에 기록 | `WorldGc_FullCollectionModeCollectsWithoutWorldDestroys` |
+| N4 | `__builtin_popcountll` | `PlatformMath::PopCount64` | — |
+| N5 | POSIX 분기 미컴파일 | OS hook(`PosixLogicalProcessorCount`)으로 옮기고 head 커밋에 `[ci]` | CI |
+| S1–S8 | 수치·주석·상수·로그 | 17.1절 수치(묶음 64 기준), 3.2절 8번, 버린 대안(17.4절), 주석 줄바꿈·경로, 종료의 cycle 끝내기 상수 공유, Teardown Fatal 문구, Deferred 회수를 `LastGcReport`에 더하고 World가 회수 끝을 한 번 기록 | `LastGcReport().reclaimed` 확인(시간 한도 시험) |
+
+- 모델 시험의 Idle 불변식을 고쳤다: Retired는 회수 대기(`HasPendingReclaim`)가 있을 때만 남고 통계의 `retiredObjects`가 모델과 같다.
+- 검증(바뀐 범위 1회 — 다른 세션의 빌드 작업과 겹치지 않게 넓은 시험은 하지 않았다): Debug Foundation `ObjectRegistryModel` 6·`ObjectGcReclaim` 6·`GcSoak` 6·`ObjectGc` 56·`Gc` 93·`World` 11, Debug EngineTests `World` 79·`Engine` 32·`Tick` 30·`Gc` 110(새 `WorldGc_` 12개·엔진 GC 3개 포함), format·policy 통과(`review7/test2.txt`).
+- 음성 대조는 준비만 했다(`review7/negctl12.py` — 최소 진척 제거, 소멸자 사이 한도 제거, 되돌린 work 미연결, safepoint 조건 제거, 보고서 누적 제거, 옛 표지 판정, 파괴 조건 재도입, 예산 없는 cycle 끝내기, 게임 시간 간격, 취소 분기 제거, Busy 재시도 제거, 엔진 요청 미전달, 간격 0 주기). 빌드 14회가 필요해 다른 세션의 빌드 시간 작업이 병합된 뒤 돌리고 결과를 이 절에 더한다.

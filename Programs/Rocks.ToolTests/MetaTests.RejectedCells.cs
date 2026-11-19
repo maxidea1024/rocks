@@ -17,8 +17,8 @@ namespace Rocks.ToolTests;
 // OrderedMap<K, ObjectRef> 철자의 거부는 기존 시험(Meta.MapValuesHoldNoStrongReferences 등)이 본다.
 internal static partial class MetaTests
 {
-    // 멤버 선언 하나와 Holder 생성자의 그 멤버 초기화식이다.
-    private readonly record struct Member(string Declaration, string Initializer);
+    // 멤버 선언 하나와 Holder 생성자의 그 멤버 초기화식, ROCKS_PROPERTY 지정자다.
+    private readonly record struct Member(string Declaration, string Initializer, string Specifiers = "");
 
     // 단일 값(정적 배열 아님) 멤버다. 초기화는 probe::Make가 Allocator를 받는 형식이면 allocator로, 아니면 기본값으로 만든다.
     private static Member Single(string declaration, string field) => new(declaration, $"{field}(probe::Make<decltype({field})>(allocator))");
@@ -97,7 +97,7 @@ internal static partial class MetaTests
     private static string HolderSource(IReadOnlyList<Member> members) =>
         CellPreamble + "ROCKS_CLASS()\nstruct Holder : public rocks::Object {\n" +
         "    explicit Holder([[maybe_unused]] rocks::Allocator& allocator) noexcept : " + string.Join(", ", members.Select(member => member.Initializer)) + " {}\n" +
-        string.Concat(members.Select(member => "    ROCKS_PROPERTY() " + member.Declaration + "\n")) + "};\n}\n";
+        string.Concat(members.Select(member => $"    ROCKS_PROPERTY({member.Specifiers}) " + member.Declaration + "\n")) + "};\n}\n";
 
     // 클래스 필드 자리의 멤버다(정적 배열 철자는 int32 cell[2]).
     private static Member FieldMember(string spelling) => spelling.EndsWith(']')

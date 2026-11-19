@@ -240,6 +240,21 @@ struct ViewRecord {
     SlotHandle device;
 };
 
+// 그래프 구간 하나다(PushScope). parent는 바깥 구간이다(없으면 None).
+struct ScopeRecord {
+    TraceScopeName* name = nullptr;
+    uint32 parent = GraphIndexNone;
+    uint32 index = 0;
+    bool hasIndex = false;
+};
+
+// 실행 중 열린 구간 하나다(바깥부터 쌓인다).
+struct OpenScopeEntry {
+    uint32 scope = GraphIndexNone;
+    uint64 gpuSpan = 0;
+    uint64 cpuSerial = 0;
+};
+
 // 버퍼 업로드 하나다(데이터는 프레임 arena에 복사해 둔다).
 struct BufferUpload {
     uint32 resource = GraphIndexNone;
@@ -261,6 +276,8 @@ struct PassRecord {
     // 이 pass가 선언한 view 번호다(GraphState::passViews의 [firstView, firstView + viewCount)).
     uint32 firstView = 0;
     uint32 viewCount = 0;
+    // 이 pass가 속한 가장 안쪽 그래프 구간이다(없으면 None).
+    uint32 scope = GraphIndexNone;
     // 이 pass가 기대는 생산자 pass다(GraphState::producers의 연결 목록 머리).
     uint32 firstProducer = GraphIndexNone;
     // 부수 효과·외부 출력 pass다(culling 뿌리).
@@ -320,6 +337,12 @@ struct GraphState {
     ArenaArray<PhysicalResource> physicals;
     ArenaArray<BufferUpload> bufferUploads;
     ArenaArray<ViewRecord> views;
+    ArenaArray<ScopeRecord> scopes;
+    // 선언 중 지금 열린 가장 안쪽 구간이다.
+    uint32 currentScope = GraphIndexNone;
+    // 실행 중 열린 구간 사슬과 지금 장치 기록에 push한 구간 marker 수다.
+    ArenaArray<OpenScopeEntry> openScopes;
+    uint32 scopeMarkers = 0;
     // pass마다 선언한 view 번호다(PassRecord::firstView).
     ArenaArray<uint32> passViews;
     // culling DFS 작업 스택이다.
@@ -418,6 +441,12 @@ Result<void> AllocateResource(FrameArena& arena, GraphState& state, uint32 index
 
 // Deferred 실행 앞부분: 남은 업로드 대상을 할당하고 올린다(UE SubmitBufferUploads와 같은 자리).
 Result<void> ExecuteUploads(FrameArena& arena, GraphState& state) noexcept;
+
+// 실행 중 열린 그래프 구간을 scope의 사슬에 맞춘다: 사슬 밖 구간을 닫는다(EnterScopes 전).
+// commands가 없으면 GPU 구간·marker 없이 닫는다.
+void LeaveScopes(GraphState& state, uint32 scope) noexcept;
+// scope 사슬 가운데 아직 열지 않은 구간을 바깥부터 연다(열린 장치 기록이 있어야 한다).
+void EnterScopes(FrameArena& arena, GraphState& state, uint32 scope) noexcept;
 
 // pass 하나를 실행한다(자원 할당 → 기록 열기 → prologue 전이(분리 전이 end 포함) → 기록 함수 →
 // epilogue 분리 전이 begin).

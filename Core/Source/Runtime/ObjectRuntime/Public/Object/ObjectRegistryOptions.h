@@ -19,6 +19,16 @@ enum class GcPhase : uint8 {
     Reclaiming
 };
 
+// 정지형 수집(ObjectRegistry::Collect)이 분류한 객체를 언제 회수하는지다(Docs/Design/
+// GarbageCollectionScale.ko.md 17.2절).
+// - Immediately: 반환 전에 모두 회수한다(소멸자·저장소 반환 포함).
+// - Deferred: 분류만 하고 회수 대상 목록에 남긴다. DrainRetired(access, GcBudget)로 프레임마다
+//   예산만큼 회수한다(STW 병렬 수집 뒤 소멸자를 여러 프레임에 나눌 때).
+enum class GcReclaim : uint8 {
+    Immediately,
+    Deferred
+};
+
 // 증분 수집 slice 하나의 예산이다(Docs/Design/GarbageCollectionScale.ko.md GC-S2). 기본은 시간
 // 한도(1ms)이고 maxObjects는 상한 장치일 뿐이다.
 // - 시간 예산은 soft deadline이다. Trace·소멸자 한 번을 중간에 중단하지 않고, 표식은 객체
@@ -43,7 +53,7 @@ struct RegistryOptions {
     // GarbageCollectionScale.ko.md 4절). 슬롯 저장소는 쓰는 만큼만 chunk·GC 페이지 단위로 늘어난다.
     uint32 maxSlots = 2097152;
     uint32 maxGeneration = NumericLimits<uint32>::Max();
-    // 기본값은 scope 없는 객체 자체 호출에 Registry의 문맥을 사용한다. World/PIE dispatcher가
+    // 기본값은 scope 없는 객체 자체 호출에 Registry의 문맥을 사용한다. World/Tryout dispatcher가
     // 실행 문맥을 설정하는 구성은 true로 하여 무인자 생명주기·타입 조회 API의 scope 누락을
     // 거부한다. 명시적 ObjectAccessContext를 받는 Registry API의 검증에는 영향을 주지 않는다.
     bool requireLifecycleScope = false;

@@ -7,11 +7,19 @@
 namespace rocks::platform::detail {
 
 // path는 공통 검사(null·빈 값·NUL·잘못된 UTF-8)를 통과한 UTF-8이다(NUL 종료 아님). 절대 경로
-// 판정과 OS 열기·실패 분류를 한다. 성공하면 handle에 OS handle을 둔다.
-FileStatus DynamicLibraryOpenPath(const char* path, usize pathBytes, uptr& handle) noexcept;
+// 판정과 OS 열기·실패 분류를 한다. 성공하면 handle에 OS handle을 둔다. error가 null이 아니면(공통
+// 코드가 이미 비웠다) OS 로더가 거부한 문구를 CopyDynamicLibraryErrorText로 담는다.
+FileStatus DynamicLibraryOpenPath(const char* path, usize pathBytes, uptr& handle,
+                                  DynamicLibraryError* error) noexcept;
 
-// name은 공통 검사(길이, 구분자·':'·"."·".." 없음, UTF-8)를 통과한 파일 이름이다.
-FileStatus DynamicLibraryOpenSystem(const char* name, usize nameBytes, uptr& handle) noexcept;
+// name은 공통 검사(길이, 구분자·':'·"."·".." 없음, UTF-8)를 통과한 파일 이름이다. error는 위와
+// 같다.
+FileStatus DynamicLibraryOpenSystem(const char* name, usize nameBytes, uptr& handle,
+                                    DynamicLibraryError* error) noexcept;
+
+// NUL 종료 text(null이면 빈 문구)를 error에 복사한다. 넘치면 UTF-8 문자 경계에서 자르고 truncated를
+// 켠다. error가 null이면 아무것도 하지 않는다.
+void CopyDynamicLibraryErrorText(const char* text, DynamicLibraryError* error) noexcept;
 
 // handle에서 symbol(NUL 종료, 비어 있지 않음)의 주소를 찾는다. 없으면 null이다.
 void* DynamicLibraryFindSymbol(uptr handle, const char* symbol) noexcept;

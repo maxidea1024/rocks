@@ -133,8 +133,15 @@ public:
                 DoDiscard();
             } else if (kind < 72) {
                 if (phase == GcPhase::Idle) {
-                    MODEL_EXPECT(registry_.Collect(access_).IsOk());
-                    VerifyExactAfterCollect();
+                    // 절반은 회수를 미루는 수집이다(GC 설계 17.2절 — 도달하지 못한 객체는 공개되지
+                    // 않은 채 회수 대상으로 남고, 아래 예산 회수가 나눠 회수한다).
+                    const bool deferred = Below(2) == 0;
+                    MODEL_EXPECT(
+                        registry_
+                            .Collect(access_, nullptr,
+                                     deferred ? GcReclaim::Deferred : GcReclaim::Immediately)
+                            .IsOk());
+                    VerifyExactAfterCollect(deferred);
                 }
             } else if (kind < 80) {
                 if (phase == GcPhase::Idle) {
@@ -145,8 +152,16 @@ public:
                     const uint32 budget = 1 + Below(4);
                     MODEL_EXPECT(registry_.StepCollection(access_, {budget, 0}).IsOk());
                 }
-            } else {
+            } else if (Below(2) == 0) {
                 MODEL_EXPECT(registry_.DrainRetired(access_).IsOk());
+            } else {
+                // 예산 회수: 회수할 것이 있으면 하나 이상 회수한다(최소 진척 — 17.1절).
+                const bool pending = registry_.HasPendingReclaim();
+                auto drained = registry_.DrainRetired(access_, {1 + Below(8), 0});
+                MODEL_EXPECT(drained.IsOk());
+                if (drained.IsOk() && !pending) {
+                    MODEL_EXPECT(drained.Value() == 0);
+                }
             }
 
             Verify(false);
@@ -719,13 +734,17 @@ private:
             return;
         }
 
-        // Idle에서는 cutoff·Retired가 남지 않고(BackendLease가 없다) 통계가 모델과 같다.
+        // Idle에서는 cutoff가 남지 않고 통계가 모델과 같다. Retired는 회수를 미룬 수집(GcReclaim::
+        // Deferred)의 회수 대기가 있을 때만 남는다(BackendLease가 없다 — 자식을 기다리는 부모도
+        // 자식이 회수 대기에 있다).
+        const bool pending = registry_.HasPendingReclaim();
         ObjectStats expected;
         for (uint32 index = 0; index < Count(); ++index) {
             const ModelObject& object = objects_[index];
             const Phase phase = phases_[index];
-            MODEL_EXPECT(phase != Phase::Retired && phase != Phase::Cutoff, index,
+            MODEL_EXPECT(phase != Phase::Cutoff && (pending || phase != Phase::Retired), index,
                          static_cast<int64>(phase));
+            expected.retiredObjects += phase == Phase::Retired ? 1u : 0u;
             if ((object.outer >= 0 || object.key >= 0) && Published(phase) && !object.discarded) {
                 ++expected.namedObjects;
             }
@@ -744,12 +763,14 @@ private:
                      expected.destroyRequested);
         MODEL_EXPECT(stats.roots == expected.roots, stats.roots, expected.roots);
         MODEL_EXPECT(stats.reservedObjects == 0, stats.reservedObjects);
-        MODEL_EXPECT(stats.retiredObjects == 0, stats.retiredObjects);
+        MODEL_EXPECT(stats.retiredObjects == expected.retiredObjects, stats.retiredObjects,
+                     expected.retiredObjects);
         MODEL_EXPECT(stats.borrows == 0 && stats.backendHolds == 0 && stats.encodePins == 0);
     }
 
     // 전체 Collect 뒤 생존 집합은 rooted 객체와 그 Outer 사슬(inner → outer 강한 간선)이다.
-    void VerifyExactAfterCollect() noexcept {
+    // deferred면 도달하지 못한 객체는 회수 대상으로 남아도 된다(공개되지 않기만 하면 된다).
+    void VerifyExactAfterCollect(bool deferred = false) noexcept {
         Array<bool> keep(allocator_);
         if (!keep.TryResize(Count())) {
             MODEL_EXPECT(false);
@@ -778,6 +799,8 @@ private:
             const Phase phase = PhaseOf(static_cast<int32>(index));
             if (keep[index]) {
                 MODEL_EXPECT(Published(phase), index, static_cast<int64>(phase));
+            } else if (deferred) {
+                MODEL_EXPECT(!Published(phase), index, static_cast<int64>(phase));
             } else {
                 MODEL_EXPECT(phase == Phase::Gone, index, static_cast<int64>(phase));
             }

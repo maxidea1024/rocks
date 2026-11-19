@@ -332,6 +332,8 @@ private:
         // resolve 대상의 mip·slice다(텍스처 GX2 C부).
         uint32 resolveMips[MaxColorTargets] = {};
         uint32 resolveSlices[MaxColorTargets] = {};
+        // 색 attachment의 층이다(MSAA 배열 resolve 원본 subresource).
+        uint32 colorSlices[MaxColorTargets] = {};
     };
 
     // 기록 중 묶인 정점·index 버퍼다(파이프라인을 바꾸면 그 stride로 다시 묶는다).

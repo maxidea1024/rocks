@@ -1,3 +1,5 @@
+#include "WorldInternal.h"
+
 #include <Config/ConfigContext.h>
 #include <Core/Assert.h>
 #include <Core/Diagnostics/Log.h>
@@ -76,7 +78,8 @@ World::World(Allocator& allocator, TypeRegistry& types, const WorldDesc& desc) n
       timeStep_(desc.timeStep), actors_(allocator), actorIndex_(allocator), levels_(allocator),
       levelSlots_(allocator), componentRecords_(allocator), pendingStart_(allocator),
       pendingComponentStart_(allocator), destroyActors_(allocator), destroyComponents_(allocator),
-      gcBudget_(desc.gcBudget), gcScheduler_(desc.gcScheduler), settings_(desc.settings) {
+      gcBudget_(desc.gcBudget), gcScheduler_(desc.gcScheduler), settings_(desc.settings),
+      gcSchedule_(desc.gcSchedule) {
     // 이름은 진단용이다. 복사에 실패하면 빈 이름으로 둔다.
     auto named = name_.TryAssign(desc.name);
     (void)named;
@@ -326,9 +329,11 @@ Result<void> World::Shutdown() noexcept {
         (void)cancelled;
     }
 
-    for (uint32 attempt = 0; attempt < 64 && objects_.CollectionPhase() != GcPhase::Idle;
+    for (uint32 attempt = 0;
+         attempt < detail::FullCollectionFinishSteps && objects_.CollectionPhase() != GcPhase::Idle;
          ++attempt) {
-        auto stepped = objects_.StepCollection(Access(), GcBudget{1u << 20, 0}, gcScheduler_);
+        auto stepped =
+            objects_.StepCollection(Access(), detail::UnboundedFinishBudget, gcScheduler_);
         if (!stepped) {
             return Result<void>::Failure(stepped.Error());
         }
