@@ -66,7 +66,7 @@ UE가 하위 호환으로 남긴 옛 지표 경로와 deprecated 경로는 보�
 - 숨은 것은 크기 × 0.5로 한 mip 낮춘다. Terrain·강제 상주·LooksLowRes는 낮추지 않는다(`ES/StreamingTexture.cpp:364–372`).
 
 **허용 범위.**
-- 최대 = 쿠킹 mip 수 − 런타임 bias. 쿠킹은 LOD bias를 계산할 때 cinematic mip 수를 0으로 넣으므로 쿠킹 결과의 상위 mip이 곧 cinematic mip이다. 시네마틱이 아니면 런타임 bias로 `NumCinematicMipLevels`만큼 뺀다(`EP/TextureDerivedData.cpp:2969`, `E/TextureLODSettings.cpp:262–275`, `ES/StreamingTexture.cpp:187–193`).
+- 최대 = 쿠킹 mip 수 − 런타임 bias. 쿠킹은 LOD bias를 계산할 때 cinematic mip 수를 0으로 넣으므로 쿠킹 결과의 상위 mip이 곧 cinematic mip이다. 시네마틱이 아니면 런타임 bias로 `NumCinematicMipLevels`만큼 뺀다(`EP/TextureDerivedData.cpp:2969`, `EP/TextureLODSettings.cpp:262–275`, `ES/StreamingTexture.cpp:187–193`).
 - 최소 = 상주 꼬리 mip 수와 그룹 스트리밍 mip 수에서 정한 값(`ES/StreamingTexture.cpp:223–246`).
   - 상주 꼬리 = max(1, 형식 mip tail, 최소 상주 수 7). 블록 압축은 4×4 규칙을 따른다(`Developer/TextureFormat/Public/Interfaces/ITextureFormat.h:157–189`, `Engine/Config/BaseEngine.ini:2037`).
 - 비스트리밍: NeverStream, UI 그룹, mip 1개, 2의 거듭제곱 아님, NoMipmaps, Cube(`EP/Texture.cpp:1833–1890`).
