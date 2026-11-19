@@ -5,6 +5,10 @@ using Rocks.Tooling.Common;
 
 namespace Rocks.MetaCompiler;
 
+// 생성물이 놓이는 출력 루트 아래 자리다. Public·Private은 모듈의 생성 include 루트이고 Source는 생성 소스 디렉터리다(include 루트가
+// 아니다 — Docs/Design/ReflectionGeneratedSources.ko.md 6.1절).
+internal enum GeneratedRoot { Public, Private, Source }
+
 internal static class CompilerDriver
 {
     // 테스트 주입점은 명세 변경 시점을 결정적으로 검증하기 위한 내부 경계다.
@@ -199,22 +203,25 @@ internal static class CompilerDriver
         await NativeMemberProbe.VerifyAsync(schema.Ordered, options.Inputs.Count, () => ModulePublicHeaders(options),
             extra => ProcessRunner.RunAsync(new(compiler, probeArguments, root, environment, ValidateGeneratedCode(unit + extra), TimeSpan.FromMinutes(2))));
 
-        // 생성물: 입력 헤더마다 하나, public·private 집계 헤더, descriptor.
-        List<(string Path, string Text, bool Private)> outputs = [];
+        // 생성물: 입력 헤더마다 생성 헤더 하나, public·private 모듈 생성 헤더(등록 함수 선언), 모듈 생성 소스(등록 함수 정의 — 출력 루트의
+        // Source 아래, include 루트가 아니다), descriptor(Docs/Design/ReflectionGeneratedSources.ko.md 5.5·6.1절).
+        List<(string Path, string Text, GeneratedRoot Root)> outputs = [];
         foreach (ModuleInput input in options.Inputs)
         {
-            outputs.Add((options.OutputPath(input), CppEmitter.Emit(schema, input), input.Private));
+            outputs.Add((options.OutputPath(input), CppEmitter.Emit(schema, input), input.Private ? GeneratedRoot.Private : GeneratedRoot.Public));
         }
 
         if (options.Inputs.Any(input => !input.Private))
         {
-            outputs.Add((options.AggregatePath(false), CppEmitter.EmitAggregate(options.Module, schema, options.Inputs, importedModules, false), false));
+            outputs.Add((options.AggregatePath(false), CppEmitter.EmitModuleHeader(options.Module, false), GeneratedRoot.Public));
         }
 
         if (options.Inputs.Any(input => input.Private))
         {
-            outputs.Add((options.AggregatePath(true), CppEmitter.EmitAggregate(options.Module, schema, options.Inputs, importedModules, true), true));
+            outputs.Add((options.AggregatePath(true), CppEmitter.EmitModuleHeader(options.Module, true), GeneratedRoot.Private));
         }
+
+        outputs.Add((options.ModuleSourcePath, CppEmitter.EmitModuleSource(options.Module, schema, options.Inputs, importedModules), GeneratedRoot.Source));
 
         string formatter = NativeEnvironment.FindExecutable(Environment.GetEnvironmentVariable("ROCKS_CLANG_FORMAT") ?? "clang-format", environment);
         ProcessResult version = await ProcessRunner.RunAsync(new(formatter, ["--version"], root, environment, Timeout: TimeSpan.FromSeconds(20)));
@@ -224,24 +231,29 @@ internal static class CompilerDriver
         }
 
         UTF8Encoding utf8 = new(false, true);
-        List<(string Path, byte[] Bytes, bool Private)> formattedOutputs = [];
-        foreach ((string path, string text, bool isPrivate) in outputs)
+        List<(string Path, byte[] Bytes, GeneratedRoot Root)> formattedOutputs = [];
+        foreach ((string path, string text, GeneratedRoot outputRoot) in outputs)
         {
             ValidateGeneratedCode(text);
+            // 서식 도구가 언어를 파일 이름으로 정하므로 생성 소스는 .cpp 이름으로 넘긴다.
+            string assumed = outputRoot == GeneratedRoot.Source ? "Metadata.cpp" : "Metadata.h";
             ProcessResult formatted = await ProcessRunner.RunAsync(new(formatter,
-                ["--style=file:" + Path.Combine(AppContext.BaseDirectory, ".clang-format"), "--assume-filename=Metadata.h"], root, environment, text, TimeSpan.FromSeconds(30)));
+                ["--style=file:" + Path.Combine(AppContext.BaseDirectory, ".clang-format"), "--assume-filename=" + assumed], root, environment, text, TimeSpan.FromSeconds(30)));
             if (formatted.ExitCode != 0 || formatted.StdErr.Contains("warning:", StringComparison.OrdinalIgnoreCase))
             {
                 throw new MetadataException("clang-format failed: " + formatted.StdErr, "RMC3100", "Fix the formatter/style error without suppressing diagnostics.");
             }
 
-            formattedOutputs.Add((path, utf8.GetBytes(formatted.StdOut.Replace("\r\n", "\n", StringComparison.Ordinal)), isPrivate));
+            formattedOutputs.Add((path, utf8.GetBytes(formatted.StdOut.Replace("\r\n", "\n", StringComparison.Ordinal)), outputRoot));
         }
 
         // C++ 생성/소멸·noexcept·private friend·typed accessor의 실제 제약을 출력 게시 전에 검사한다. 소비자가
         // 생성 헤더를 하나씩 include하므로 헤더마다 따로 컴파일한다. 생성물은 임시 루트에 두고, include 검색 순서에서
         // 출력 루트(Public·Private)가 있던 자리를 그 임시 루트로 바꾼다 — 소비자와 같은 순서로 풀리고 이전 실행의 낡은
         // 게시본을 보지 않는다. 검색 순서에 출력 루트가 없으면(단독 실행) 맨 앞에 둔다.
+        // 생성 소스(등록 함수 정의)는 여기서 컴파일하지 않는다 — 빌드가 그 모듈의 compile action으로 컴파일해 검증한다(병렬이고 내용
+        // key로 캐시된다, Docs/Design/ReflectionGeneratedSources.ko.md 7절). --verify-sources를 주면 빌드 없이 쓰는 호출자(단독 실행·도구
+        // 시험)를 위해 생성 소스도 같은 인자로 구문 검사한다.
         string validationRoot = Path.Combine(Path.GetDirectoryName(options.OutputRoot)!, ".rocks-meta-validation-" + Guid.NewGuid().ToString("N"));
         string outputPublic = Path.Combine(options.OutputRoot, "Public");
         string outputPrivate = Path.Combine(options.OutputRoot, "Private");
@@ -261,7 +273,7 @@ internal static class CompilerDriver
         validationArguments.AddRange(options.ClangArguments);
         try
         {
-            foreach ((string path, byte[] bytes, bool isPrivate) in formattedOutputs)
+            foreach ((string path, byte[] bytes, GeneratedRoot _) in formattedOutputs)
             {
                 string relative = Path.GetRelativePath(options.OutputRoot, path);
                 string staged = Path.Combine(validationRoot, relative);
@@ -271,11 +283,28 @@ internal static class CompilerDriver
 
             Directory.CreateDirectory(Path.Combine(validationRoot, "Public"));
             Directory.CreateDirectory(Path.Combine(validationRoot, "Private"));
-            foreach ((string path, byte[] _, bool isPrivate) in formattedOutputs)
+            foreach ((string path, byte[] _, GeneratedRoot outputRoot) in formattedOutputs)
             {
-                string relative = Path.GetRelativePath(Path.Combine(options.OutputRoot, isPrivate ? "Private" : "Public"), path).Replace('\\', '/');
-                string source = Path.Combine(validationRoot, "check-" + Hashing.Sha256Text(relative)[..16] + ".cpp");
-                File.WriteAllText(source, $"#include <{relative}>\n", new UTF8Encoding(false, true));
+                string relative;
+                string source;
+                if (outputRoot == GeneratedRoot.Source)
+                {
+                    if (!options.VerifySources)
+                    {
+                        continue;
+                    }
+
+                    // 생성 소스는 임시 루트에 둔 파일을 그대로 컴파일한다(include 루트가 아니라 include로 열 수 없다).
+                    relative = Path.GetRelativePath(options.OutputRoot, path).Replace('\\', '/');
+                    source = Path.Combine(validationRoot, Path.GetRelativePath(options.OutputRoot, path));
+                }
+                else
+                {
+                    relative = Path.GetRelativePath(Path.Combine(options.OutputRoot, outputRoot == GeneratedRoot.Private ? "Private" : "Public"), path).Replace('\\', '/');
+                    source = Path.Combine(validationRoot, "check-" + Hashing.Sha256Text(relative)[..16] + ".cpp");
+                    File.WriteAllText(source, $"#include <{relative}>\n", new UTF8Encoding(false, true));
+                }
+
                 List<string> command = [.. validationArguments, source];
                 ProcessResult validated = await ProcessRunner.RunAsync(new(compiler, command, root, environment, Timeout: TimeSpan.FromMinutes(2)));
                 if (validated.ExitCode != 0 || validated.StdErr.Contains("warning:", StringComparison.OrdinalIgnoreCase))
@@ -300,7 +329,7 @@ internal static class CompilerDriver
         VerifyIdentitySnapshot(options.IdentityManifest, identitySnapshot);
         if (options.Check)
         {
-            foreach ((string path, byte[] bytes, bool _) in formattedOutputs)
+            foreach ((string path, byte[] bytes, GeneratedRoot _) in formattedOutputs)
             {
                 if (!File.Exists(path) || !File.ReadAllBytes(path).AsSpan().SequenceEqual(bytes))
                 {
@@ -354,7 +383,7 @@ internal static class CompilerDriver
 
         if (!options.Check)
         {
-            foreach ((string path, byte[] bytes, bool _) in formattedOutputs)
+            foreach ((string path, byte[] bytes, GeneratedRoot _) in formattedOutputs)
             {
                 AtomicFile.WriteIfChanged(path, bytes);
             }

@@ -64,21 +64,21 @@ using WorldSubsystemType = SubsystemType<WorldSubsystem>;
 //   TypeRegistry types(allocator);
 //   ModuleRegistration modules(types, allocator);       // types 뒤에 선언해 먼저 파괴한다
 //   if (auto registered = RegisterWorldTypes(modules); !registered) { ... }
-//   auto spinner = RegisterNativeClass<Spinner>(types);  // World.module.generated.h를 include한 TU
+//   auto spinner = RegisterNativeClass<Spinner>(types);  // Actor.generated.h를 include한 TU
 Result<void> RegisterWorldTypes(ModuleRegistration& registration) noexcept;
 
 // World GC 일정 방식이다(Docs/Design/GarbageCollectionScale.ko.md 17.3절).
 // - Incremental: World 파괴가 있으면 프레임 끝마다 WorldDesc::gcBudget만큼 증분 slice를 진행한다.
-// - FullCollection: World 파괴가 있고 마지막 전체 수집 뒤
-// WorldGcSchedule::fullCollectionIntervalSeconds
-//   (World 게임 시간)가 지나면 프레임 끝에 STW 병렬 전체 수집을 한다(UE의 주기 수집 방식).
+// - FullCollection: 마지막 전체 수집 뒤 실제 경과 시간(Tick에 넘긴 unscaled delta의 합)이
+//   WorldGcSchedule::fullCollectionIntervalSeconds를 지나면 프레임 끝에 STW 병렬 전체 수집을
+//   한다(UE의 주기 수집 방식 — World 파괴가 있었는지는 보지 않는다).
 enum class WorldGcMode : uint8 {
     Incremental,
     FullCollection
 };
 
-// World GC 일정이다. 어느 방식이든 World::RequestFullCollection은 다음 프레임 끝에 STW 병렬 전체
-// 수집을 하고, 전체 수집의 회수(소멸자·저장소 반환)는 다음 프레임들에 reclaimBudget씩 나눈다.
+// World GC 일정이다. 어느 방식이든 World::RequestFullCollection은 다음 GC 단계(Tick 끝)에 STW 병렬
+// 전체 수집을 하고, 회수(소멸자·저장소 반환)는 그 뒤 프레임마다 reclaimBudget씩 나눈다.
 //
 // 사용 예(주기 수집, 간격 30초):
 //   WorldDesc desc;
@@ -91,10 +91,10 @@ struct WorldGcSchedule {
     static constexpr uint64 DefaultReclaimNanoseconds = 2000000;
 
     WorldGcMode mode = WorldGcMode::Incremental;
-    // FullCollection에서 전체 수집 사이의 최소 World 게임 시간(초)이다. 0이면 파괴가 있은 다음
-    // 프레임마다 수집한다.
+    // FullCollection에서 전체 수집 사이의 실제 경과 시간(초, 일시정지·시간 배율과 무관)이다. 0
+    // 이하면 주기 수집을 하지 않는다(요청만).
     double fullCollectionIntervalSeconds = DefaultFullCollectionIntervalSeconds;
-    // 전체 수집 뒤 프레임마다 회수에 쓰는 예산이다(ObjectRegistry::DrainRetired).
+    // 회수 대기가 있을 때 프레임마다 회수에 쓰는 예산이다(ObjectRegistry::DrainRetired).
     GcBudget reclaimBudget{GcBudget::DefaultMaxObjects, DefaultReclaimNanoseconds};
 };
 
@@ -117,10 +117,10 @@ struct WorldDesc {
     GcBudget gcBudget;
     // GC 일정(증분·주기 전체 수집, 전체 수집 뒤 회수 예산)이다.
     WorldGcSchedule gcSchedule;
-    // 주면 World의 GC 표식(프레임 끝 증분 slice와 종료 수집)을 이 scheduler로 병렬로
-    // 한다(Docs/Design/ GarbageCollectionScale.ko.md GC-S4 — ObjectRegistry::StepCollection의
-    // scheduler 규칙). 빌림이며 시작된 scheduler여야 하고 World보다 오래 살아야 한다. World를 그
-    // worker 스레드에서 tick하지 않는다. 없으면 직렬 표식이다.
+    // 주면 World의 GC 표식(증분 slice, 전체 수집, 종료 수집)을 이 scheduler로 병렬로 한다(GC 설계
+    // GC-S4 — ObjectRegistry::StepCollection의 scheduler 규칙). 빌림이며 시작된 scheduler여야 하고
+    // World보다 오래 살아야 한다. World를 그 worker 스레드에서 tick하지 않는다. 없으면 직렬
+    // 표식이다.
     WorkerScheduler* gcScheduler = nullptr;
     // 초기화할 WorldSubsystem 종류다. 배열은 Initialize가 끝날 때까지 살아 있어야 한다.
     Span<const WorldSubsystemType> subsystems;
@@ -219,8 +219,9 @@ inline constexpr bool IsSpanV<Span<R>> = true;
 // 생성 헤더 규약: 이 헤더는 리플렉션 생성 헤더를 include하지 않는다(Engine.h 소비자 전체로 컴파일
 // 비용이 번지지 않게). native 파생 T의 SpawnActor<T>·AddComponent<T>는 T::StaticTypeId만 쓰지만,
 // 리플렉션 World 타입(Actor·SceneComponent 등)을 템플릿 인자로 쓰는 TU와 RegisterNativeClass<T>를
-// 부르는 TU는 <World/World.module.generated.h>(또는 그 타입의 <World/<Type>.generated.h>)를
-// include한다 — 없으면 ObjectTypeIdOf·RegisterNativeClass의 static_assert가 안내한다.
+// 부르는 TU는 그 타입의 생성 헤더 <World/<Type>.generated.h>를 include한다 — 없으면
+// ObjectTypeIdOf·RegisterNativeClass의 static_assert가 안내한다(모듈 생성 헤더
+// <World/World.module.generated.h>는 등록 함수의 선언만 담는다).
 //
 // 스레드: 생성한 게임 스레드에서만 사용한다.
 class World final : private TickExecutor {
@@ -250,17 +251,17 @@ public:
     // TearingDown에 머문다(반환 후 다시 호출).
     Result<void> Shutdown() noexcept;
 
-    // 다음 프레임 끝(Tick의 GC 단계)에 STW 병렬 전체 수집을 한다(일정 방식과 무관 — 레벨 전환·로딩
-    // 화면·메모리 압박). 증분 cycle이 Marking이면 취소하고, sweep·회수 중이면 끝낸 뒤 수집한다.
-    // 회수는 다음 프레임들에 gcSchedule.reclaimBudget씩 나눈다. 외부가 Borrow를 보유해 수집할 수
-    // 없으면 다음 프레임에 다시 시도한다.
+    // STW 병렬 전체 수집을 요청한다(일정 방식과 무관 — 레벨 전환·로딩 화면·메모리 압박). 요청은
+    // 다음 GC 단계(Tick 끝)에서 소비된다: Tick 밖에서 부르면 다음 Tick 끝, Tick 안(hook)에서 부르면
+    // 그 Tick 끝이다. 증분 cycle이 Marking이면 취소하고, sweep·회수 중이면 회수 없이 끝낸 뒤
+    // 수집한다. 회수는 그 뒤 프레임마다 gcSchedule.reclaimBudget씩 나눈다. 외부가 Borrow를 보유해
+    // 수집할 수 없으면 요청을 남겨 다음 GC 단계에서 다시 한다. 어느 스레드에서나 부를 수 있다(요청
+    // 표지는 atomic이고 게임 스레드의 Tick이 소비한다 — 메모리 압박 신호용).
     //
     // 사용 예(레벨을 내린 뒤):
     //   world.DestroyLevel(level);
     //   world.RequestFullCollection();
-    void RequestFullCollection() noexcept {
-        fullCollectionRequested_ = true;
-    }
+    void RequestFullCollection() noexcept;
 
     // GC 표식에 쓰는 병렬 scheduler다(WorldDesc::gcScheduler — 없으면 nullptr, 직렬).
     WorkerScheduler* GcScheduler() const noexcept {
@@ -643,9 +644,11 @@ private:
                              bool ownerDestroyed) noexcept;
     void DestroyActorNow(ObjectHandle actor) noexcept;
     void StepGarbageCollection() noexcept;
-    // STW 병렬 전체 수집(회수는 미룸)을 한다. 진행 중인 증분 cycle을 먼저 끝내거나 취소한다.
-    // 수집하지 못했으면(Busy) 거짓이다.
+    // STW 병렬 전체 수집(회수는 미룸)을 한다. 진행 중인 증분 cycle은 Marking이면 취소하고, 그
+    // 뒤면 회수 없이 끝낸다. 수집하지 못했으면(Busy) 거짓이다.
     bool RunFullCollection() noexcept;
+    // Registry가 Idle이고 회수 대기가 있으면 reclaimBudget만큼 회수한다(GC 설계 17.3절).
+    void DrainDeferredReclaim() noexcept;
     // World가 소유한 객체의 RequestDestroy다. 결과를 확인한다(클러스터 이탈이 실패하면 고아 소속이
     // 남는다 — 13.3절). 이미 파괴됐거나 종료 중이면 무시하고, 그 밖의 실패는 불변식 위반으로
     // Fatal이다.
@@ -702,11 +705,14 @@ private:
     bool gcPending_ = false;
     bool destroyedDuringCycle_ = false;
     WorldGcSchedule gcSchedule_;
-    // 마지막 전체 수집 뒤 World 게임 시간(초)이다(FullCollection 간격).
+    // 마지막 전체 수집 뒤 실제 경과 시간(초)이다(FullCollection 간격 — Tick의 unscaled delta 합).
     double secondsSinceFullCollection_ = 0.0;
-    bool fullCollectionRequested_ = false;
-    // 전체 수집이 남긴 회수가 있다(프레임마다 DrainRetired).
-    bool reclaimPending_ = false;
+    // 이번 Tick에 넘긴 실제 경과 시간(초)이다.
+    double lastRealDeltaSeconds_ = 0.0;
+    // 전체 수집 요청 표지다(0·1, platform atomic — 다른 스레드가 세우고 게임 스레드가 소비한다).
+    uint32 fullCollectionRequested_ = 0;
+    // 회수 대기를 프레임마다 나눠 회수하는 중이다(끝날 때 한 번 기록한다).
+    bool drainingDeferred_ = false;
     uint32 componentCount_ = 0;
     uint64 spawnedTotal_ = 0;
     uint64 destroyedTotal_ = 0;

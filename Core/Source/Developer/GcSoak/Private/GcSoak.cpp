@@ -1072,6 +1072,24 @@ private:
 
     void CollectStep() noexcept {
         const GcPhase phase = registry_.CollectionPhase();
+        if (phase == GcPhase::Idle && drainingDeferred_) {
+            // 회수를 미룬 수집(GC 설계 17.2절)의 회수를 작은 예산으로 나눈다. 회수 대기가 비어야 그
+            // 수집을 완료한 cycle로 센다(모델의 "완료된 cycle 뒤 남은 쓰레기" 검사).
+            auto drained = registry_.DrainRetired(access_, GcBudget{1 + rng_.Below(16), 0});
+            if (!drained) {
+                Fail("budgeted DrainRetired failed", None, drained.Error());
+                return;
+            }
+
+            ++report_.drains;
+            if (!registry_.HasPendingReclaim()) {
+                drainingDeferred_ = false;
+                CycleCompleted();
+            }
+
+            return;
+        }
+
         if (phase == GcPhase::Idle) {
             const uint32 roll = rng_.Below(100);
             if (roll < 12) {
@@ -1094,7 +1112,19 @@ private:
 
                 ++report_.collects;
                 CycleCompleted();
-            } else if (roll < 17) {
+            } else if (roll < 16) {
+                currentBegin_ = ++cyclesBegun_;
+                report_.cyclesBegun = cyclesBegun_;
+                auto collected =
+                    registry_.Collect(access_, options_.scheduler, GcReclaim::Deferred);
+                if (!collected) {
+                    Fail("deferred Collect failed", None, collected.Error());
+                    return;
+                }
+
+                ++report_.collects;
+                drainingDeferred_ = true;
+            } else if (roll < 19) {
                 auto drained = registry_.DrainRetired(access_);
                 if (!drained) {
                     Fail("DrainRetired failed", None, drained.Error());
@@ -1375,6 +1405,8 @@ private:
     ReleaseKind pendingKind_ = ReleaseKind::None;
     uint32 visitMark_ = 0;
     bool verifyNow_ = false;
+    // 회수를 미룬 수집의 회수를 나눠 하는 중이다(끝나면 그 수집을 완료한 cycle로 센다).
+    bool drainingDeferred_ = false;
     bool threadStarted_ = false;
 };
 

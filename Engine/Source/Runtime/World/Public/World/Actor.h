@@ -14,8 +14,8 @@ class SceneComponent;
 // World에 배치되는 게임플레이 객체의 기반이다. World가 생성하고 Level이 소유하며, Actor는 자기
 // Component를 소유한다.
 //
-// 사용 예(리플렉션 base(Actor)·SceneComponent를 쓰는 TU는 생성 헤더를 먼저 include한다):
-//   #include <World/World.module.generated.h>
+// 사용 예(리플렉션 base(Actor)·SceneComponent를 쓰는 TU는 그 타입의 생성 헤더를 먼저 include한다):
+//   #include <World/Actor.generated.h>
 //
 //   class Spinner final : public Actor {
 //       ROCKS_NATIVE_TYPE(Spinner, Actor, 0x...ull, 0x...ull)

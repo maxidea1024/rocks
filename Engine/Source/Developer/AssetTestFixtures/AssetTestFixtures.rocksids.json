@@ -2628,6 +2628,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::asset_fixture::TestAsset::typed",
+      "id": "3675b13f6c754661ab93c945f5a0d4db",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::asset_fixture::TestAsset::value",
       "id": "3c3ff1a0c986485ba63b945352dc44cd",
       "aliases": [],

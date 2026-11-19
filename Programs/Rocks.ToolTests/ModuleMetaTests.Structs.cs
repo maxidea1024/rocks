@@ -11,7 +11,7 @@ internal static partial class ModuleMetaTests
     // import struct 필드·가시성·descriptor·Atomic·형질·Binds 실제 타입·깊이·순환 시험이다.
     private static void RegisterStructs(TestSuite suite, Options options, IReadOnlyDictionary<string, string?> environment)
     {
-        // B4b: 의존 모듈의 ROCKS_STRUCT를 descriptor로 import해 클래스·struct 필드로 쓴다. Lower 집계는 enum -> struct ->
+        // B4b: 의존 모듈의 ROCKS_STRUCT를 descriptor로 import해 클래스·struct 필드로 쓴다. Lower 등록 함수(모듈 생성 소스)는 enum -> struct ->
         // 클래스로 등록하고, Upper 생성 헤더는 import struct(상속 필드 포함)와 같은 모듈 다른 헤더 struct의 생성 헤더를
         // include하며, 참조 형질이 import struct에서 전파된다(Docs/Design/ReflectionFoundations.ko.md 4.6절).
         suite.Add("Meta.ImportedStructsResolveAsFieldTypes", async () =>
@@ -20,7 +20,7 @@ internal static partial class ModuleMetaTests
             layout.WriteStructModules();
             ProcessResult lower = await layout.RunLowerAsync();
             Verify.Equal(0, lower.ExitCode, "lower module: " + lower.StdErr);
-            string lowerAggregate = Compact(File.ReadAllText(layout.Generated("Lower", "Public/Lower/Lower.module.generated.h")));
+            string lowerAggregate = Compact(File.ReadAllText(layout.ModuleSource("Lower")));
             int point = lowerAggregate.IndexOf("RegisterStructIfAbsent(::rocks::GeneratedType<::probe::Point>::Schema()", StringComparison.Ordinal);
             int link = lowerAggregate.IndexOf("RegisterStructIfAbsent(::rocks::GeneratedType<::probe::Link>::Schema()", StringComparison.Ordinal);
             int parent = lowerAggregate.IndexOf("RegisterIfAbsent(::rocks::GeneratedType<::probe::Parent>::Schema()", StringComparison.Ordinal);
@@ -53,7 +53,7 @@ internal static partial class ModuleMetaTests
             string shape = Compact(File.ReadAllText(layout.Generated("Upper", "Public/Upper/Shape.generated.h")));
             Verify.That(shape.Contains("#include<Lower/Parent.generated.h>", StringComparison.Ordinal), "struct header includes imported member struct header");
             Verify.That(shape.Contains(Compact("GeneratedType<::probe::Link>::Trace(value.*(&::probe::Shape::link), visitor);"), StringComparison.Ordinal), "struct traces imported reference struct");
-            string aggregate = Compact(File.ReadAllText(layout.Generated("Upper", "Public/Upper/Upper.module.generated.h")));
+            string aggregate = Compact(File.ReadAllText(layout.ModuleSource("Upper")));
             int dependency = aggregate.IndexOf("::rocks::generated::Lower::RegisterModuleTypes", StringComparison.Ordinal);
             int own = aggregate.IndexOf("RegisterStructIfAbsent(::rocks::GeneratedType<::probe::Shape>::Schema()", StringComparison.Ordinal);
             int owner = aggregate.IndexOf("RegisterIfAbsent(::rocks::GeneratedType<::probe::Value>::Schema()", StringComparison.Ordinal);
@@ -253,7 +253,7 @@ internal static partial class ModuleMetaTests
             Verify.That(generated.Contains(Compact("NativeTypeKey<::rocks::Vector3<float>>()"), StringComparison.Ordinal), "real type native key");
             Verify.That(generated.Contains(Compact("static_assert(!GeneratedType<::rocks::Vector3<float>>::ContainsStrongReference"), StringComparison.Ordinal),
                 "NATIVE member of a bound real type is checked by its generated trait");
-            Verify.That(Compact(File.ReadAllText(layout.Generated("Upper", "Public/Upper/Upper.module.generated.h")))
+            Verify.That(Compact(File.ReadAllText(layout.ModuleSource("Upper")))
                 .Contains("::rocks::generated::CoreTypeBindings::RegisterModuleTypes", StringComparison.Ordinal), "bindings module is registered first");
 
             string original = File.ReadAllText(layout.Descriptor(BindingsModule));

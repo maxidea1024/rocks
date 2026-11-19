@@ -1,3 +1,4 @@
+#include <Base/Compiler.h>
 #include <Platform/Atomics.h>
 #include <Platform/Clock.h>
 #include <Platform/DynamicLibrary.h>

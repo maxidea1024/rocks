@@ -1,5 +1,6 @@
 #include "TextAssignTestSupport.h"
 
+#include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
 #include <ReflectionTestFixtures/TextFixture.generated.h>
 #include <Core/Text/NamePool.h>
 #include <ReflectionText/TextJson.h>
@@ -312,7 +313,7 @@ TEST(TextJson_UseExclusionAndHiddenEnumerators) {
 
     const Case cases[] = {{TextUse::Edit, false, false, true, true},
                           {TextUse::Copy, false, false, false, false},
-                          {TextUse::PieCopy, false, true, false, false},
+                          {TextUse::TryoutCopy, false, true, false, false},
                           {TextUse::Report, false, true, true, true}};
     StringBuilder<> text(fixture.system);
     for (const Case& item : cases) {

@@ -1,6 +1,6 @@
 # Rocks GC 대규모 처리 보강 설계
 
-기준일: 2026-11-16, 개정 1(초안). 개정 6(2026-11-19): GC-S5 수집 일정과 파괴 예산(17절 — 묶음 회수, 회수를 미루는 STW 수집과 예산 회수, World 수집 일정, 엔진이 소유하는 GC scheduler), 6절 GC-S5·11절 결정 3 갱신. 개정 5(2026-11-19): 병렬 marker의 FIFO 미리 읽기 고리와 일반 그래프 표식 gate의 남은 차이(16절), 간선 제거의 장부 감소를 미루는 기록(13.4절 — 리뷰 반영: 기록 256칸(꼬리 지연), 적용 대상 검사를 모든 빌드 Fatal로, 세대에 더해 상태 검사), 5단계 판단: 지정 클러스터를 경계 비율 안전장치 밖에 두는 근거·해체된 패키지를 다시 묶지 않는 근거(13.5절), 장부 고리 칸 16비트 번호안 기각(13.9절). 개정 4(2026-11-18): Registry 규모 점검 반영(14절), 소스 파일 구성(15절), Slot hot·cold 분리(6절 GC-S3 "Slot hot·cold 분리", 4절 gate, 11절 결정 5). 개정 2(2026-11-17): 클러스터·영구 영역 상세 설계(13절), 열린 결정 4 확정, 열린 결정 6 해소, UE 클러스터 사실 정정. 개정 3(2026-11-18): 장부 배치·클러스터 표식 경로를 측정에 맞춰 바꾸고 패키지 클러스터의 경계 비율 안전장치를 더함(13.4·13.5·13.9절).
+기준일: 2026-11-16, 개정 1(초안). 개정 8(2026-11-20): 18절 보강(메인 세션 검토 F1–F7) — 반환 표지 불변식(떼어 묶음에 넣을 때 세움), 오용 검출의 동시성 한계와 완전한 대안, 스레드 종료 hook(`platform::ThreadExitSlot`), 예약 실패 때의 축소·큰 경로, ASan에서의 내부 접근, 주소 원장을 공용 내부 구현 하나로(Core `HashMap`), 이전 칸은 가득 묶음만. 개정 7(2026-11-20): GC-S6 공용 할당자 설계(18절 — `SystemAllocator` 원장을 주소 hash로, `BinnedAllocator`를 예약 주소 범위·크기 등급 slab·스레드 캐시 구조로 다시 만듦, UE 5.8 Binned2·3·4 대조, gate·시험 계획). 설계만이며 구현은 다른 세션의 빌드 작업 병합 뒤 시작한다. 개정 6(2026-11-19): GC-S5 수집 일정과 파괴 예산(17절 — 묶음 회수, 회수를 미루는 STW 수집과 예산 회수, World 수집 일정, 엔진이 소유하는 GC scheduler), 6절 GC-S5·11절 결정 3 갱신. 리뷰 반영(17절): 회수의 최소 진척과 묶음 안 시간 한도, 회수 대기 질의, 회수 없이 cycle 끝내기, 실시간 간격, 프로세스가 쓸 수 있는 프로세서 수, 요청의 스레드 계약, worker 상한. 개정 5(2026-11-19): 병렬 marker의 FIFO 미리 읽기 고리와 일반 그래프 표식 gate의 남은 차이(16절), 간선 제거의 장부 감소를 미루는 기록(13.4절 — 리뷰 반영: 기록 256칸(꼬리 지연), 적용 대상 검사를 모든 빌드 Fatal로, 세대에 더해 상태 검사), 5단계 판단: 지정 클러스터를 경계 비율 안전장치 밖에 두는 근거·해체된 패키지를 다시 묶지 않는 근거(13.5절), 장부 고리 칸 16비트 번호안 기각(13.9절). 개정 4(2026-11-18): Registry 규모 점검 반영(14절), 소스 파일 구성(15절), Slot hot·cold 분리(6절 GC-S3 "Slot hot·cold 분리", 4절 gate, 11절 결정 5). 개정 2(2026-11-17): 클러스터·영구 영역 상세 설계(13절), 열린 결정 4 확정, 열린 결정 6 해소, UE 클러스터 사실 정정. 개정 3(2026-11-18): 장부 배치·클러스터 표식 경로를 측정에 맞춰 바꾸고 패키지 클러스터의 경계 비율 안전장치를 더함(13.4·13.5·13.9절).
 
 **이 문서의 작업은 반드시 해야 하는 작업이다.** 현재 `ObjectRegistry` GC는 AAA급 규모(살아 있는 객체 100만 개 이상)의 게임에서 쓸 수 없는 상태다(2026-11-16 사용자 판단). 이 문서의 GC-S 단계는 선택 최적화가 아니며 성능 미달을 "측정 결과로 관리"하는 대상도 아니다. 단계를 모두 마치고 4절의 성능 gate를 통과해야 GC를 대규모 콘텐츠에 쓸 수 있다고 본다.
 
@@ -70,7 +70,7 @@ UE 소스는 설계 사실의 대조에만 쓰고 코드를 옮기지 않는다.
 5. **루트 수집과 sweep의 전체 Slot 순회.** `BeginCollection`은 루트를 찾으려고 모든 Slot을 훑는다(140–150행). 이 순회는 Step 예산 밖이다. `Collect`의 루트 수집과 sweep도 전체 Slot을 훑는다(507–519, 541–549행).
 6. **병렬 경로의 구조.** 객체 하나마다 `Function`을 할당·제출하고 64개마다 모두 기다린다(355–413행). `World::StepGarbageCollection`은 scheduler를 넘기지 않으므로 게임 경로는 언제나 직렬이다(`Engine/Source/Runtime/World/Private/World.cpp` 1651행).
 7. **객체 수 기준 예산.** 기본 `GcBudget`은 Step당 작업 64개, soft 1ms다(`Public/Object/ObjectRegistryOptions.h` 26–29행). 1M 객체에서는 표식 약 15,600 Step과 sweep 약 16,400 Step이 필요하다. 60fps에서 cycle 하나가 약 9분 걸리고, 그동안 쓰레기가 회수되지 않는다.
-8. **회수와 할당자.** `ReclaimEligible`은 객체마다 잠금을 두 번 잡는다(624–647행). 샘플 프로그램의 `SystemAllocator`는 `Deallocate`에서 살아 있는 할당의 연결 목록을 잠금 아래에서 선형 탐색한다(`Core/Source/Runtime/Core/Private/Memory/SystemAllocator.cpp` 76–78행). `BinnedAllocator`도 전역 잠금과 원장 선형 검색을 쓰며 "성능 보장 없음"이라고 명시한다(`BinnedAllocator.h`).
+8. **회수와 할당자.** `ReclaimEligible`은 객체마다 잠금을 두 번 잡는다(624–647행 — GC-S5에서 묶음으로, 17.1절). 샘플 프로그램의 `SystemAllocator`는 `Deallocate`에서 살아 있는 할당의 연결 목록을 잠금 아래에서 선형 탐색한다(`Core/Source/Runtime/Core/Private/Memory/SystemAllocator.cpp` 76–78행). `BinnedAllocator`도 전역 잠금과 원장 선형 검색을 쓰며 "성능 보장 없음"이라고 명시한다(`BinnedAllocator.h`).
 
 ### 3.3 계획과의 차이
 
@@ -260,6 +260,7 @@ UE가 1M을 감당하는 이유는 세 가지가 함께 작동하기 때문이�
 - 위치는 Core Memory 공용 모듈이다. ObjectRuntime 전용 할당자는 두지 않는다. 계획 C28의 slab/thread cache를 이 단계의 필수 항목으로 끌어올린다.
 - 먼저 기존 `ExternalAllocator`와 jemalloc·TCMalloc 바인딩(`VendorAllocatorBackend.h`)으로 할당자 몫을 GC-S0에서 분리해 잰다.
 - 완료 기준: 1M 생성·회수 시간이 GC-S0 기준에서 할당자 원인 비중을 제거한 수준이 된다. 수치는 GC-S0이 정한다.
+- (개정 7) 상세 설계와 gate는 18절이다. 정한 것: 새 클래스를 더하지 않고 `SystemAllocator`·`BinnedAllocator`를 다시 만든다(같은 역할의 범용 할당자를 둘 두지 않는다). 할당자 몫은 외부 라이브러리 대신 반환이 무동작인 bump 할당자를 바닥으로 삼아 잰다(18.2절).
 
 ### GC-S7 · 표식 대상 줄이기와 큰 Trace 분할
 
@@ -575,42 +576,196 @@ GC 구현(`Core/Source/Runtime/ObjectRuntime/Private/`)을 기능별 파일로 �
 
 ## 17. 수집 일정과 파괴 예산 (GC-S5, 7단계, 개정 6, 2026-11-19)
 
-6절 GC-S5의 구현 설계다. 측정은 [실험 결과](../Implementation/GcScaleExperiment.ko.md) 24절이다.
+6절 GC-S5의 구현 설계다. 측정은 [실험 결과](../Implementation/GcScaleExperiment.ko.md) 24절이다. 7단계 리뷰(ce760705..26524906)의 지적을 반영했다.
 
 ### 17.1 묶음 회수
 
-- 회수(`ReclaimEligible`)는 `ReclaimBatchSize`(64)개씩 한 번의 잠금으로 회수 대상 목록에서 떼어 내고(Reclaiming 상태), 소멸자·저장소 반환·이름 기록 반환을 잠금 밖에서 묶어 부른 뒤, 슬롯 되돌리기(밀집 자료 비우기·세대 올리기·빈 슬롯 목록)를 다시 한 번의 잠금으로 한다. 객체마다 잠금 두 번이던 것이 묶음마다 두 번이 된다.
-- 시간 한도는 묶음마다 본다. 떼어 낸 묶음은 끝까지 회수하므로 넘침은 묶음 하나(1M churn에서 객체당 약 250ns — 약 16µs)다. 객체 수 한도는 묶음 크기를 줄여 정확히 지킨다.
+- 회수(`ReclaimEligible`)는 `ReclaimBatchSize`(64)개씩 한 번의 잠금으로 회수 대상 목록에서 떼어 내고(Reclaiming 상태), 소멸자·저장소 반환·이름 기록 반환을 잠금 밖에서 차례로 부른 뒤, 슬롯 되돌리기(밀집 자료 비우기·세대 올리기·빈 슬롯 목록)를 다시 한 번의 잠금으로 한다. 객체마다 잠금 두 번이던 것이 묶음마다 두 번이 된다.
+- 시간 한도는 소멸자 사이마다 본다. 한도가 지나면 아직 소멸하지 않은 work는 두 번째 잠금에서 Retired(풀린 목록)로 되돌린다(타입 lease·이름 기록을 슬롯에 되돌린다). 그래서 넘침은 묶음이 아니라 소멸자 하나다 — 묶음 전과 같다. 처음 리뷰 전 구현은 묶음마다만 보아 넘침이 소멸자 64개까지였다(리뷰 지적).
+- 최소 진척: 시간 한도는 첫 객체를 회수한 뒤부터 본다. 회수할 수 있는 객체가 있으면 한 번의 호출이 적어도 하나를 회수한다 — 호출 직전에 선점되어 한도가 이미 지났어도 0으로 끝나지 않는다(리뷰 지적: 0을 "남은 것 없음"으로 읽는 쪽이 회수를 멈췄다). 객체 수 한도는 묶음 크기를 줄여 정확히 지킨다.
 - 묶음 안 순서는 전과 같다(소멸자는 떼어 낸 순서). 차이는 앞 객체의 슬롯이 묶음 끝까지 Reclaiming으로 남는 것뿐이다 — 뒤 객체의 소멸자가 앞 객체 handle을 조회해도 전처럼 살아 있지 않은 객체(StaleHandle)다. 묶음 사이에는 잠금을 풀므로, 소멸자(또는 다른 스레드)가 지연 슬롯의 보유 계수를 반환하면 그 슬롯이 풀린 목록으로 옮겨져 다음 묶음에 회수된다.
-- 측정(1M · 간선 4, churn 약 98K, 같은 시점 번갈아 세 round): 회수 25.9–27.0 → 23.9–24.5ms(객체당 264–275 → 244–250ns, 약 6–9%). 묶음 16·64·256은 차이가 없었다 — 경합 없는 잠금은 싸고, 남은 몫은 소멸자·반환·슬롯 되돌리기의 메모리 접근이다(GC-S6 할당자 몫 포함). 다른 스레드가 `gate_`를 함께 쓸 때(루트 놓기·쓰기) 잠금 횟수가 64분의 1로 주는 것이 더 크다.
-- 버린 대안: 목록 전체를 한 번에 떼어 내기 — 시간 한도를 지킬 수 없고(떼어 낸 것은 끝까지 회수해야 한다) 묶음 배열이 객체 수에 비례한다. 소멸자를 잠금 안에서 부르기 — 사용자 코드를 잠금 아래서 부르지 않는다는 규칙(7.1절)을 깬다.
+- 측정(1M · 간선 4, churn 약 98K, 같은 시점 번갈아 세 round): 묶음 64의 회수는 24.2–24.4ms(객체당 246.8–249.3ns)로 같은 round 묶음 전 25.9–27.0ms보다 6–10% 적다. 묶음 16·256도 차이가 없었다 — 경합 없는 잠금은 싸고, 남은 몫은 소멸자·반환·슬롯 되돌리기의 메모리 접근이다(GC-S6 할당자 몫 포함). 다른 스레드가 `gate_`를 함께 쓸 때(루트 놓기·쓰기) 잠금 횟수가 64분의 1로 주는 것이 더 크다.
+- 버린 대안: 목록 전체를 한 번에 떼어 내기 — 묶음 배열이 객체 수에 비례하고 되돌릴 work가 많아진다. 소멸자를 잠금 안에서 부르기 — 사용자 코드를 잠금 아래서 부르지 않는다는 규칙(7.1절)을 깬다. 묶음마다만 시간 보기(처음 구현) — 넘침이 묶음 크기만큼 커진다.
 
 ### 17.2 회수를 미루는 STW 수집과 예산 회수
 
-- `Collect(access, scheduler, GcReclaim::Deferred)`는 표식·sweep 분류까지 하고 회수하지 않는다. 분류된 객체(Retired)는 회수 대상 목록에 남는다(이미 도달 불가이고 조회·간선 대상이 될 수 없다). 보고서의 `reclaimed`는 0, `retired`는 분류 수다.
-- `DrainRetired(access, GcBudget)`이 예산(객체 수·시간)만큼 회수하고 회수한 수를 돌려준다. 예산 없는 `DrainRetired(access)`는 전과 같이 모두 회수한다. 남은 회수 대상이 있어도 다음 `Collect`·`BeginCollection`은 할 수 있다(회수 대상 목록은 cycle과 무관하게 남고, 증분 cycle의 Reclaiming 단계·정지형 Collect의 회수가 함께 처리한다).
+- `Collect(access, scheduler, GcReclaim::Deferred)`는 표식·sweep 분류까지 하고 회수하지 않는다. 분류된 객체(Retired)는 회수 대상 목록에 남는다(이미 도달 불가이고 조회·간선 대상이 될 수 없다). 반환한 보고서의 `reclaimed`는 0, `retired`는 분류 수다. 이후 `DrainRetired`가 회수한 수와 시간은 마지막 보고서(`LastGcReport`)의 `reclaimed`·`reclaimNanoseconds`에 더한다 — 회수가 끝나면 마지막 보고서가 그 수집의 회수까지 보여 준다(리뷰 지적: 0으로만 남았다). 더하는 규칙: 예산 없는 `DrainRetired`도 더한다. 증분 cycle이 진행 중일 때(slice 사이) 부른 `DrainRetired`는 진행 중인 cycle이 아니라 앞 cycle의 보고서에 더해진다(진행 중인 cycle은 끝날 때 자기 보고서로 바꾼다). `durationNanoseconds`(수집 자체의 시간)는 바꾸지 않는다.
+- `DrainRetired(access, GcBudget)`이 예산(객체 수·시간)만큼 회수하고 회수한 수를 돌려준다(17.1절의 최소 진척·소멸자 하나 넘침). 예산 없는 `DrainRetired(access)`는 전과 같이 모두 회수한다. 남은 회수 대상이 있어도 다음 `Collect`·`BeginCollection`은 할 수 있다(회수 대상 목록은 cycle과 무관하게 남고, 증분 cycle의 Reclaiming 단계·정지형 Collect의 회수가 함께 처리한다).
+- `HasPendingReclaim()`은 회수할 수 있을지 모르는 객체가 남았는지를 O(1)로 답한다(풀린 목록·분류 전 목록이 비지 않았다 — 보유 중이라 지연된 목록은 세지 않는다. 보유가 풀리면 풀린 목록으로 옮겨지므로 다시 참이 된다). 반환값 0 대신 이 질의로 "회수가 남았는가"를 판정한다.
+- `FinishCollectionDeferringReclaim(access)`는 Sweeping·Reclaiming 단계의 증분 cycle을 회수 없이 끝낸다 — 남은 sweep 분류는 모두 하고(분류는 chunk 비트 판정이라 1M에서 약 11ms — 실험 24.1절 churn의 sweep), 분류된 객체는 회수 대상 목록에 남긴 채 Idle로 둔다. Marking이면 InvalidArgument다(취소하거나 진행한다). safepoint 조건은 `StepCollection`과 같다: 처리 중이거나 Borrow·활성 생성 트랜잭션이 있으면 Busy다(Sweeping의 남은 분류가 Borrow가 걸린 white를 Retire하지 않게 — "Begin/Step은 Borrow=0·활성 생성=0 safepoint에서만" 계약, 메인 세션 검증 지적 N2). 전체 수집 요청이 진행 중인 cycle의 회수를 예산 없이 한 프레임에 하지 않게 한다(리뷰 지적 R1).
 - 목적: STW 병렬 전체 수집에서 표식·sweep은 한 프레임에 끝내고(1M ×8 약 17ms + sweep), 소멸자·반환은 프레임마다 시간 예산으로 나눈다(UE `gc.IncrementalGCTimePerFrame` 2ms에 대응 — 5절 표). 1M churn 98K의 회수는 약 24ms라 한 프레임에 넣으면 표식과 합쳐 40ms를 넘는다.
-- 버린 대안: STW 수집을 Begin + 무제한 Step 하나로 흉내 내기 — 증분 경로의 장벽·slice 비용(회색 객체 이월 등)을 치르고, 표식과 회수의 예산을 나눌 수 없다.
+- 버린 대안: STW 수집을 Begin + 무제한 Step 하나로 흉내 내기 — 증분 경로의 장벽·slice 비용(회색 객체 이월 등)을 치르고, 표식과 회수의 예산을 나눌 수 없다. 반환값 0으로 회수 끝을 판정하기(처음 구현) — 선점·보유 때문에 회수가 남았는데 멈춘다.
 
 ### 17.3 World 수집 일정
 
 - `WorldDesc::gcSchedule`(`WorldGcSchedule`)이 정한다.
-  - `mode`: `WorldGcMode::Incremental`(기본) — 지금처럼 World 파괴가 있으면 프레임 끝마다 `gcBudget`만큼 증분 slice를 진행한다. `WorldGcMode::FullCollection` — World 파괴가 있고 마지막 전체 수집 뒤 `fullCollectionIntervalSeconds`(기본 60초 — UE `gc.TimeBetweenPurgingPendingKillObjects` 61.1초에 대응)가 지나면 프레임 끝에 STW 병렬 전체 수집을 한다. 간격은 World 게임 시간(Tick delta 합)으로 센다(결정적).
-  - `reclaimBudget`: 전체 수집 뒤 프레임마다 회수에 쓰는 예산이다(기본 시간 2ms).
-- `World::RequestFullCollection()`은 모드와 무관하게 다음 프레임 끝에 STW 병렬 전체 수집을 한다(레벨 전환·로딩 화면·메모리 압박). 증분 cycle이 Marking이면 취소하고, Sweeping·Reclaiming이면 끝까지 진행한 뒤 수집한다. 회수는 `reclaimBudget`으로 다음 프레임들에 나눈다.
-- 전체 수집은 `GcReclaim::Deferred`로 하고, 남은 회수가 있으면 프레임마다 다른 GC 진행보다 먼저 `DrainRetired(reclaimBudget)`을 부른다. 회수가 남은 동안에도 새 증분 cycle·전체 수집을 시작할 수 있다(17.2절).
+  - `mode`: `WorldGcMode::Incremental`(기본) — 지금처럼 World 파괴가 있으면 프레임 끝마다 `gcBudget`만큼 증분 slice를 진행한다. `WorldGcMode::FullCollection` — 마지막 전체 수집 뒤 `fullCollectionIntervalSeconds`(기본 60초 — UE `gc.TimeBetweenPurgingPendingKillObjects` 61.1초에 대응)가 지나면 프레임 끝에 STW 병렬 전체 수집을 한다.
+  - `FullCollection`은 간격만 본다(World 파괴가 있었는지 보지 않는다). UE도 시간만 본다(`Runtime/Engine/Private/UnrealEngine.cpp` 2263–2289: 플레이를 시작한 World가 있으면 `TimeSinceLastPendingKillPurge`를 더하고 간격을 넘으면 수집 — 파괴 여부 조건이 없다). World 파괴 없이 생긴 쓰레기(참조를 지운 일반 객체, 루트 없이 만든 객체)도 다음 주기에 회수된다. 처음 구현은 World 파괴가 있을 때만 주기 수집을 해 그런 쓰레기가 다음 World 파괴나 요청까지 남았다(메인 세션 검증 지적 N3). 간격이 0 이하면 주기 수집을 하지 않는다(요청만 — UE의 `TimeBetweenPurgingPendingKillObjects > 0` 조건과 같다).
+  - 간격은 `Tick`에 넘긴 실제 경과 시간(일시정지·시간 배율과 무관한 unscaled delta)의 합으로 센다. UE도 주기 수집 간격을 `FApp::GetDeltaTime()`으로 센다(`Runtime/Engine/Private/UnrealEngine.cpp` 2265). 처음 구현은 World 고정 스텝의 게임 시간이라 일시정지 중에는 수집이 멈췄다(리뷰 지적 R3).
+  - `reclaimBudget`: 회수 대기가 있을 때 프레임마다 회수에 쓰는 예산이다(기본 시간 2ms).
+- `World::RequestFullCollection()`은 모드와 무관하게 STW 병렬 전체 수집을 요청한다(레벨 전환·로딩 화면·메모리 압박). 요청은 다음 GC 단계(Tick 끝)에서 소비된다 — Tick 밖에서 부르면 다음 Tick 끝, Tick 안(hook)에서 부르면 그 Tick 끝이다. 진행 중인 증분 cycle이 Marking이면 취소하고, Sweeping·Reclaiming이면 `FinishCollectionDeferringReclaim`으로 회수 없이 끝낸 뒤 수집한다. 수집이 Busy(외부 Borrow — 진행 중인 cycle을 끝내는 단계의 Busy 포함)면 요청을 남겨 다음 GC 단계에서 다시 한다. 회수가 남은 채 전체 수집을 다시 해도(메모리 압박으로 요청이 연달아 올 때) 남은 회수는 이어진다 — 회수 대기는 표지가 아니라 질의로 판정한다(처음 구현은 새로 분류된 객체가 0이면 표지를 내려 남은 회수가 멈췄다, 메인 세션 검증 지적 N1).
+- 회수: GC 단계마다 Registry가 Idle이고 `HasPendingReclaim()`이면 다른 GC 진행보다 먼저 `DrainRetired(reclaimBudget)`을 부른다. 반환값이 아니라 질의로 판정하므로, 선점으로 짧게 끝난 프레임이나 보유(BackendLease 등) 때문에 늦어진 객체도 보유가 풀린 뒤의 프레임에 회수된다(리뷰 지적 D1·R2). 증분 cycle이 진행 중이면 그 Reclaiming 단계가 함께 회수하므로 따로 부르지 않는다.
+- 프레임당 GC 비용(전체 수집 뒤): 회수 `reclaimBudget`(기본 2ms) + 증분 일정이면 그 프레임에 새 cycle의 slice 하나(`gcBudget`, 기본 1ms)까지다. 전체 수집을 하는 프레임은 STW 수집(1M ×8 약 17ms + sweep)이 든다.
+- 스레드 계약: `World::RequestFullCollection`은 어느 스레드에서나 부를 수 있다(메모리 압박 신호 등 — 요청 표지는 atomic이고 게임 스레드의 Tick이 소비한다). 그 밖의 World API는 지금처럼 소유(게임) 스레드 전용이다.
 - 기본을 증분으로 둔 근거(측정, 실험 20·21절): 1M에서 병렬 ×8 STW 표식은 약 17ms로 한 프레임(16.7ms)을 넘고, 증분 ×8 기본 예산은 slice 약 1ms × 21번이다. 그래서 프레임마다 도는 일정은 증분이 기본이고, 멈춤을 감출 수 있는 순간(전환·로딩)과 메모리 압박에는 STW 병렬 수집을 쓴다. 주기 일정(UE 방식)은 `FullCollection` 모드로 고른다.
-- 종료(`Shutdown`)는 지금처럼 진행 중인 cycle을 끝내고 전체 수집으로 모두 회수한다(회수를 미루지 않는다).
+- 종료(`Shutdown`)는 지금처럼 진행 중인 cycle을 끝내고 전체 수집으로 모두 회수한다(회수를 미루지 않는다). 끝내는 Step 상한과 예산은 전체 수집 요청과 같은 상수(`FullCollectionFinishSteps`·`UnboundedFinishBudget`)다.
 
 ### 17.4 엔진이 소유하는 GC scheduler
 
-- `Engine`이 GC 표식용 `WorkerScheduler`를 만든다(초기화 단계 `GcScheduler` — 엔진 Registry 뒤, 서브시스템 앞). worker 수는 `EngineConfig::gcWorkers`이고, 기본(`GcWorkersAuto`)은 `platform::LogicalProcessorCount() − 1`을 8로 자른 값이다(gate를 ×8로 판정 — 4절, 실험 21절에서 ×16의 추가 이득이 작다). 0이면 만들지 않는다(직렬 표식).
-- `CreateWorld`는 `WorldCreateDesc::gcScheduler`가 없으면 엔진 scheduler를 넘긴다. World는 빌리고, 엔진은 World를 모두 파괴한 뒤 scheduler를 끝낸다(종료 순서).
-- `Engine::RequestFullCollection()`이 모든 World에 `RequestFullCollection`을 건다(레벨 전환·메모리 압박을 아는 쪽이 부른다).
-- `platform::LogicalProcessorCount()`를 Platform(Thread.h)에 더한다(Windows `GetActiveProcessorCount(ALL_PROCESSOR_GROUPS)`, POSIX `sysconf(_SC_NPROCESSORS_ONLN)`).
+- `Engine`이 GC 표식용 `WorkerScheduler`를 만든다(초기화 단계 `GcScheduler` — 엔진 Registry 뒤, 서브시스템 앞). worker 수는 `EngineConfig::gcWorkers`이고, 기본(`GcWorkersAuto`)은 `platform::LogicalProcessorCount() − 1`을 8(`MaxAutoGcWorkers`)로 자른 값이다(gate를 ×8로 판정 — 4절, 실험 21절에서 ×16의 추가 이득이 작다). 0이면 만들지 않는다(직렬 표식). `MaxGcWorkers`(64 — `WorkerScheduler`의 상한)를 넘으면 초기화가 InvalidArgument로 실패한다(설정 실수를 조용히 자르지 않는다).
+- `CreateWorld`는 `WorldCreateDesc::gcScheduler`가 없으면 엔진 scheduler를 넘긴다. 여러 World가 한 scheduler를 빌린다 — World Tick은 한 게임 스레드에서 차례로 돌므로 표식 slice가 겹치지 않는다. 엔진은 World를 모두 파괴한 뒤 scheduler를 끝낸다(종료 순서).
+- `Engine::RequestFullCollection()`은 어느 스레드에서나 부를 수 있다. 엔진의 atomic 요청 표지만 세우고, 게임 스레드의 프레임(World Tick 전)이 그것을 소비해 살아 있는 World마다 `RequestFullCollection`을 건다(다른 스레드에서 World 배열을 돌지 않는다 — 리뷰 지적 R6).
+- `Engine`의 `Initialize`·`Shutdown`·소멸은 같은 스레드(게임 스레드)에서 부른다(scheduler·World 수명이 그 스레드의 순서에 기댄다).
+- `platform::LogicalProcessorCount()`(Thread.h)는 이 프로세스가 쓸 수 있는 논리 프로세서 수다. Android(Linux 커널)는 `sched_getaffinity` + `CPU_COUNT`(UE `Runtime/Core/Private/Unix/UnixPlatformMisc.cpp` 729–735와 같은 방식 — cpuset·`taskset`의 제한을 따른다. POSIX 공통 코드는 OS hook `PosixLogicalProcessorCount`를 부르고 구현은 OS별 파일에 둔다), Apple은 `sysconf(_SC_NPROCESSORS_ONLN)`(affinity API가 없다), Windows는 `GetActiveProcessorCount(ALL_PROCESSOR_GROUPS)`와 `GetProcessAffinityMask`의 비트 수 가운데 작은 값이다(64개를 넘는 프로세서 그룹 기계에서는 mask가 한 그룹만 보이므로 그룹 수 쪽으로 기울지 않게 작은 값). 버린 대안: 시스템 전체 수(`sysconf`·`GetActiveProcessorCount`만) — affinity로 제한된 프로세스가 쓸 수 없는 코어 수만큼 worker를 만들어 과다 구독한다(처음 구현, 리뷰 지적 R4).
+- 버린 대안: World마다 scheduler — World 수만큼 worker가 늘어 과다 구독하고, Tick이 차례로 돌아 동시에 쓰지도 않는다. 엔진 범용 작업 scheduler 공유(UE는 GC 병렬 표식에 TaskGraph worker를 쓴다) — 지금 엔진에는 범용 작업 scheduler가 없고, 생기면 GC 표식 slice(수 ms)가 다른 작업을 막지 않도록 우선순위·lane을 정한 뒤 옮긴다. 전용 스레드는 그때까지의 선택이며, 다른 작업 스레드와 합쳐 코어 수를 넘는 과다 구독 위험이 남는다(17.5절).
 
-### 17.5 남은 것
+### 17.5 남은 것과 결정
 
 - 회수 객체당 약 250ns는 소멸자·저장소 반환·슬롯 되돌리기의 메모리 접근이다. 반환 몫은 GC-S6(할당자)에서 줄인다.
-- 메모리 압박 신호를 내는 플랫폼 계층은 아직 없다. 엔진 요청 API까지 두었다.
+- 메모리 압박 신호를 내는 플랫폼 계층은 아직 없다. 엔진 요청 API(다른 스레드에서 불러도 된다)까지 두었다.
 - 엔진 Registry(영구 영역·GameInstance 등)는 아직 GC 일정이 없다(엔진 Registry 객체가 생기면 같은 일정을 단다).
+- `Incremental` 모드는 World 파괴가 있을 때만 cycle을 시작한다(기존 엔진 런타임 설계). World 파괴 없이 생긴 쓰레기는 다음 World 파괴나 전체 수집 요청까지 남는다 — `FullCollection` 모드는 간격으로 회수한다(17.3절). 후속: 파괴 없이 생긴 쓰레기의 증분 발동 조건(예: 쓰기·생성 수 임계, 최대 간격).
+- 진행 중인 cycle의 sweep 나머지는 전체 수집 요청 프레임에 한꺼번에 한다(R1 결정 — 분류는 chunk 비트 판정이라 회수보다 훨씬 싸다. 회수만 예산으로 나눈다).
+- 보유로 늦어진 회수(R2 결정)는 보유가 풀린 뒤 첫 GC 단계에서 회수한다. 보유가 풀리지 않으면 계속 남는다(보유자의 책임).
+- 주기 간격의 실시간 기준(R3 결정)은 일시정지 중에도 수집을 멈추지 않는다. 일시정지 중 수집을 막아야 하는 앱은 `Incremental` 모드나 요청만 쓴다.
+- GC 전용 scheduler와 다른 작업 스레드의 코어 공유(17.4절)는 엔진 범용 작업 scheduler가 생길 때 정한다.
+
+## 18. 공용 할당자 (GC-S6, 8단계, 개정 7, 2026-11-20 — 설계)
+
+6절 GC-S6의 상세 설계다. 코드는 Core(`Core/Source/Runtime/Core` Memory)이고 ObjectRuntime 전용 할당자는 두지 않는다. 다른 세션이 할당자를 맡고 있지 않음을 확인했다(2026-11-19: 원격·로컬 브랜치와 worktree, Core/Memory의 최근 변경은 FrameArena와 개명뿐). 이 절은 설계만이고 구현·측정은 뒤따른다(18.9절 단계).
+
+### 18.1 지금 상태와 문제
+
+- `SystemAllocator`: 할당마다 OS 할당 둘(사용자 블록 + 원장 레코드)을 하고 살아 있는 할당을 연결 목록에 둔다. `Deallocate`는 그 목록을 주소로 선형 검색한다(O(살아 있는 할당 수)). 샘플·시험의 기본 할당자다.
+- `BinnedAllocator`: 16–4096 byte 9개 구간의 `PoolAllocator`와 상위 allocator를 묶고, 모든 호출을 잠금 하나로 직렬화하며 소유권 원장을 선형 검색한다. `PoolAllocator`의 반환은 chunk 목록을 검색한다.
+- 측정(실험 3.5절, 살아 있는 객체 20K): 회수가 플랫폼 할당(121ns/객체)의 30–35배(3.7–4.2µs)이고 Binned의 생성은 객체당 0.7ms다. 100K 이상은 끝나지 않아 1M을 잴 수 없었다(실험 0.2절 gate "1M 생성·회수" 행).
+- 두 할당자의 계약은 지킬 가치가 있다: 미소유·중복·중간 주소의 `Deallocate`는 그 주소를 역참조하지 않고 `NotFound`이고, 남은 할당이 있으면 파괴가 Fatal이다. 새 구조도 이 계약을 지킨다(18.4절).
+
+### 18.2 할당자 몫을 재는 법
+
+- 6절은 jemalloc·TCMalloc 바인딩으로 할당자 몫을 떼어 재자고 했다. 그 라이브러리는 저장소에 없고 C++ 쪽 외부 편의 라이브러리를 들이지 않는다는 원칙이 있다. 대신 **bump 할당자**(반환이 무동작, 주소만 올리는 벤치 전용 할당자)를 바닥으로 쓴다: 같은 시나리오의 시간에서 bump의 시간을 뺀 것이 그 할당자의 몫이다.
+- `GcBench --allocators`를 1M까지 늘리고 할당자를 고르게 한다(bump · 플랫폼(`BenchAllocator`) · `SystemAllocator` · `BinnedAllocator`). 생성+연결, churn 회수, 종료 회수를 객체당 ns로 낸다.
+- 작은 벤치(`GcBench --allocator-micro`): 크기 16–8192의 할당·반환 쌍(단일 스레드), 한 스레드가 할당하고 다른 스레드가 반환하는 흐름(명시 handoff — 시간에 기대지 않는다), 8 스레드 동시 할당·반환 처리량.
+
+### 18.3 UE 5.8과의 대조
+
+UE 5.8.4의 작은 블록 할당자(`Runtime/Core` — `Public/HAL/MallocBinned2.h`·`MallocBinned3.h`·`MallocBinned4.h`·`MallocBinnedCommon.h`와 `Private/HAL`의 구현)를 읽었다. Windows·Android·Mac의 기본은 Binned3이고(`UEBuildWindows.cs` 1492–1495, `UEBuildAndroid.cs` 231–234, `UEBuildMac.cs` 294–297), Linux·iOS는 Binned2다.
+
+| 항목 | UE 5.8 | Rocks(이 설계) |
+|---|---|---|
+| 크기 등급 | Binned2: 51개(16–32752, 표 — `MallocBinned2.cpp` 50–94), Binned3: 52개(8–28672)와 그 위 4KB 단계(`MallocBinnedCommon.cpp` 30–102·142–166) | 32개(16–8192): 128까지 16 단계, 그 위는 2배 구간마다 넷(18.5절) |
+| 크기 → 등급 | `(Size+7)>>3`으로 색인하는 uint8 표(`MallocBinnedCommon.h` 858–865) | `(bytes+15)>>4`로 색인하는 uint8 표(513칸) |
+| 반환 때 소유 판정 | Binned2: 64KB 정렬로 페이지 머리를 읽음(`MallocBinned2.h` 242–254 — 남의 주소도 읽는다). Binned3: 등급마다 1GB 예약 주소 범위와 주소 산술(`MallocBinned3.h` 30–34·182–215). Binned4: 주소 2단 표(`MallocBinned4.h` 223–235) | 인스턴스마다 예약 주소 범위 하나 + slab 번호별 1 byte 표. 범위 밖 주소는 읽지 않는다(18.4절) |
+| 작은 블록 단위 | Binned2·4: 64KB 페이지, 머리(`FPoolHeader`)가 페이지 앞에. Binned3: 등급별 블록(4KB의 배수)과 비트 트리 | 64KB slab, 머리 64 B가 slab 앞에 |
+| 큰 할당 | OS 직접 + 페이지 캐시(`TCachedOSPageAllocator<64, 64MB>` — `MallocBinned2.h` 21–22·232–240) | 상위 allocator로 넘기고 주소 hash 원장으로 크기를 안다 |
+| 스레드 캐시 | 등급마다 묶음 둘(부분·가득), 묶음 한도 64개 또는 64KB(`MallocBinnedCommon.h` 45–54·266–406) | 같다(등급마다 묶음 둘, 64개 또는 64KB) |
+| 스레드 사이 이동 | 등급마다 8칸 lock-free 재활용기(CAS — `MallocBinnedCommonUtils.h` 47–95). 가득 차면 등급 잠금 아래 페이지로 돌려줌 | 같다(등급마다 8칸 atomic 포인터) |
+| 다른 스레드가 반환 | 반환한 스레드의 캐시에 넣는다(소유 스레드·원격 목록 없음 — `MallocBinned2.cpp` 886–893) | 같다 |
+| 캐시 없는 스레드 | TLS 캐시를 켠 스레드만 캐시(`SetupTLSCachesOnCurrentThread`), 나머지는 등급 잠금 | 모든 스레드가 처음 쓸 때 캐시를 받는다(인스턴스별) |
+| 스레드 종료 | 자동 hook이 없다. 캐시를 켠 엔진 스레드가 실행 루프 끝에서 `FMemory::ClearAndDisableTLSCachesOnCurrentThread`를 직접 부른다(`Private/Async/Fundamental/Scheduler.cpp` 869, `Private/Async/TaskGraph.cpp` 636 — 캐시를 비우고 등록을 풀고 해제: `MallocBinnedCommon.h` 553–569·786–796) | 모든 스레드가 캐시를 받으므로 스레드 종료 hook이 필요하다(`platform::ThreadExitSlot` — 18.4절) |
+| 주소 공간이 좁은 기기 | iOS는 Binned2(`UEBuildIOS.cs` 709–710: "Prefer MB2 as MB3 requires extended virtual address space entitlement") | 예약을 줄여 다시 시도하고, 끝내 못 하면 모두 큰 경로(18.4절) |
+| 잠금 | 등급별 재귀 mutex + 전역 `ExternalAllocMutex`(`MallocBinned2.h` 216, `MallocBinnedCommon.h` 411) | 등급별 mutex + 큰 할당 원장 mutex + slab 범위 mutex |
+| 빈 페이지 | Binned2: 즉시 페이지 캐시로(`MallocBinned2.cpp` 318–328), Binned3: 즉시 decommit(`MallocBinned3.cpp` 360–372) | 빈 slab은 한도까지 보관, 넘으면 decommit. `Trim`이 모두 decommit |
+| 무결성 검사 | 머리 canary(반환마다 — `MallocBinned2.h` 51–60·329–340), 중복 반환 검출은 선택(기본 꺼짐 — `MallocBinned2.h` 41–46, 블록 안 표지) | 범위·slab 표·블록 경계 검사와 블록 안 반환 표지(모든 빌드 — 18.4절) |
+| 인스턴스 | 프로세스 전역 하나 | `Allocator&`로 넘기는 인스턴스(여러 개 가능 — 시험마다 하나) |
+
+이름은 Rocks 것을 쓴다(slab·묶음·이전 칸). UE 이름은 이 표에만 둔다.
+
+### 18.4 `BinnedAllocator` 구조와 계약
+
+같은 클래스 이름으로 다시 만든다(같은 역할의 범용 할당자를 둘 두지 않는다. 지금 쓰는 곳은 자기 시험과 GcBench뿐이다).
+
+- **주소 범위.** 생성 때 `VirtualMemoryRegion`으로 `BinnedAllocatorConfig::reserveBytes`(64KB의 배수)를 예약한다(commit하지 않는다). slab은 그 범위의 64KB 조각이고 쓸 때 commit한다. slab 번호별 1 byte 표(등급 + 1, 0은 안 쓰는 slab — 16 GiB에 256 KB)를 따로 둔다.
+  - 기본값: Windows·Mac 16 GiB, Android 4 GiB(39비트 주소 기기에서 인스턴스 여러 개를 감안). iOS는 지원 대상이 아니다 — 더할 때는 UE가 iOS에서 Binned2를 쓰는 이유(큰 주소 공간 예약에 extended virtual addressing entitlement가 필요 — 18.3절 표)를 따라 작은 기본값으로 시작한다.
+  - 예약 실패: 생성은 실패하지 않는다. 예약이 실패하면 크기를 절반씩 줄여 `MinReserveBytes`(64 MiB)까지 다시 시도하고, 끝내 못 하면 예약 없이 연다 — 모든 요청이 큰 경로(상위 allocator)로 간다. 실제 예약 크기(`ReservedBytes()`)와 큰 경로로 간 작은 요청 수(`fallbackAllocations`)를 통계로 낸다. slab 표의 플랫폼 할당이 실패해도 같은 처리다.
+- **반환의 소유 판정.** 1–3은 주소를 읽지 않고 끝낸다. 4–5는 표로 "쓰는 slab"임을 확인한 뒤 그 slab 안을 읽는다.
+  1. `address − base`가 예약 크기 밖이면 큰 할당 원장을 본다(없으면 `NotFound`).
+  2. slab 표가 0이면 `NotFound`(쓰지 않는 slab — commit되지 않았을 수 있어 읽지 않는다).
+  3. slab 안 offset에서 머리 크기를 뺀 값이 그 등급 블록 크기의 배수가 아니면 `NotFound`(중간 주소). 나눗셈은 등급별 역수 상수로 한다.
+  4. 블록 번호가 slab 머리의 "뗀 블록 수" 이상이면 `NotFound`(아직 뗀 적 없는 블록). slab 머리 한 줄을 읽는다(UE Binned2도 반환마다 머리 canary를 읽는다 — slab 수천 개의 머리는 L2 캐시에 든다).
+  5. 블록의 반환 표지(둘째 word가 `address XOR 인스턴스 비밀값`)가 서 있으면 `NotFound`(중복 반환, 또는 떼었지만 내준 적 없는 블록).
+- **반환 표지의 불변식: 표지가 없는 블록은 지금 사용자에게 나가 있는 블록뿐이다.**
+  - 표지를 세우는 때: 사용자가 반환할 때, 그리고 **slab에서 떼어 묶음에 넣을 때**(bump로 새로 뗀 블록 포함 — 연결 word를 쓰는 같은 줄이라 추가 캐시 줄이 없다). 떼기만 하고 표지를 세우지 않으면, 새로 commit한 slab의 블록은 둘째 word가 0이라 4·5단계를 모두 통과해 한 번도 내준 적 없는 주소의 반환이 성공하고 같은 블록이 자유 목록에 두 번 들어간다(메인 세션 검토 F1).
+  - 표지를 지우는 때: 사용자에게 내주는 순간뿐이다(스레드 캐시에서 꺼낼 때, 캐시 없는 경로에서 slab이 바로 내줄 때). 스레드 캐시·이전 칸·slab 자유 목록 사이를 옮길 때는 표지가 그대로다.
+  - 다시 쓰는 slab(보관소에서 꺼낸 slab)에는 옛 표지가 남아 있지만 "뗀 블록 수"가 0에서 다시 시작하므로 4단계가 막고, 떼는 순간 새 표지를 쓴다.
+  - 표지는 UE의 선택 기능(`UE_MB2_DOUBLE_FREE_DETECTION`, 기본 꺼짐)과 같은 방식을 모든 빌드에서 켠 것이다. 캐시에 든 블록은 slab이 "쓰는 블록"으로 세므로 그 slab은 풀리지 않는다 — 올바른 반환이 읽는 주소는 언제나 commit돼 있다.
+  - 한계 1(값 일치): 표지는 64비트 값 일치라 살아 있는 블록의 둘째 word에 사용자가 우연히 같은 값을 써 두면 정상 반환이 `NotFound`가 된다(비밀값은 인스턴스마다 무작위 — 2^-64). 슬롯별 할당 비트(추가 캐시 줄 하나)를 두지 않는 대신 받아들인다.
+  - 한계 2(동시성 — 메인 세션 검토 F2): 오용(미소유·옛·중복 주소) 검출은 그 주소가 든 slab이 **같은 시점에 다른 스레드에 의해 풀리거나 다시 쓰이는 중이 아닐 때** 성립한다. 잘못된 반환이 slab 표를 읽은 직후 다른 스레드가 그 slab을 decommit하면(보관소 넘침·`Trim`) 머리나 표지를 읽다가 fault가 나고, 그 slab이 다른 등급으로 다시 쓰이면 옛 등급의 경계로 새 내용을 읽어 미검출일 수 있다. 올바른 반환은 그 블록이 "쓰는 블록"이라 slab이 풀리지 않으므로 영향이 없다. 주소 재사용 뒤의 옛 포인터를 구분하지 못한다는 `Allocator.h`의 기존 한계와 같은 부류다. 오용 시험은 decommit·재사용과 경쟁하지 않게 만든다(단일 스레드, 또는 그 slab에 살아 있는 블록을 남겨 둔다).
+- **slab.** 머리 64 B(등급, 쓰는 블록 수, 뗀 블록 수(bump), 돌려받은 블록의 자유 목록, 등급의 부분 slab 목록 연결)가 slab 앞에 있고 블록이 뒤를 채운다. 새 slab은 자유 목록을 미리 만들지 않고 bump로 떼어 준다. 쓰는 블록 수가 0이 되면 등급 목록에서 빠져 빈 slab 보관소(인스턴스 공용, 한도 64개 = 4 MiB)로 가고, 넘으면 표를 0으로 한 뒤 decommit한다.
+- **스레드 캐시.** 스레드마다·인스턴스마다 등급별 묶음 둘(부분·가득)을 둔다. 묶음 한도는 64개 또는 64KB 가운데 작은 쪽이고 **등급으로 정해진다**(8192 등급은 8개).
+  - 할당: 부분 묶음에서 꺼낸다. 비면 가득 묶음과 바꾸고, 그것도 비면 이전 칸에서 묶음 하나를 받고, 없으면 등급 잠금 아래 부분 slab(없으면 새 slab)에서 한 묶음을 채운다(표지를 세운다).
+  - 반환: 부분 묶음에 넣는다. 차면 가득 묶음과 바꾸고, 가득 묶음도 차 있으면 그것을 이전 칸에 넣고, 칸이 없으면 등급 잠금 아래 블록마다 자기 slab으로 돌려준다.
+  - 이전 칸: 등급마다 atomic 포인터 8칸(한 캐시 줄)이다. 넣기는 빈 칸에 비교 교환, 꺼내기는 찬 칸을 null과 교환이다(묶음 통째로 주고받으므로 ABA가 없다). **이전 칸의 묶음은 언제나 가득 찬 묶음이고 개수는 등급의 한도다** — 개수를 블록에 적지 않는다(16 byte 블록은 word가 둘뿐이고 첫째는 연결, 둘째는 표지다). 부분 묶음은 이전 칸에 가지 않는다: 스레드 종료·`Trim`·인스턴스 파괴 때의 부분 묶음은 등급 잠금 아래 slab으로 바로 돌려준다.
+  - 스레드 쪽 조회: 번역 단위 안의 `thread_local` 포인터(소멸자 없는 단순 값)가 그 스레드의 기록(인스턴스 번호 → 캐시의 작은 표)을 가리키고, "마지막에 쓴 인스턴스" 한 칸을 먼저 본다. 인스턴스 번호는 프로세스 전역에서 재사용하지 않는다(같은 주소에 다시 만든 인스턴스와 구분).
+- **스레드 종료와 수명**(메인 세션 검토 F3). PlatformBase에는 스레드 종료를 알리는 기능이 없다(FLS·pthread key 소멸자를 쓰는 코드가 없음). `platform::Thread`로 만들지 않은 스레드(OS 스레드 풀, 외부 라이브러리)도 캐시를 받으므로 OS의 스레드별 소멸 hook이 필요하다.
+  - PlatformBase에 `platform::ThreadExitSlot`을 더한다(`Platform/Thread.h`): 스레드별 포인터 칸 하나와, 값이 null이 아닌 스레드가 끝날 때 **그 스레드에서** 불리는 정리 함수다. Windows는 `FlsAlloc`의 callback, POSIX는 `pthread_key_create`의 소멸자다. API는 `Create(callback)`·`Get()`·`Set(value)`이고 프로세스 수명 동안 유지한다(칸을 해제하지 않는다 — Windows `FlsFree`는 남은 값마다 callback을 부른다).
+  - 계약: callback은 짧은 정리(잠금, 메모리 반환)만 하고 스레드 생성·모듈 로드·다른 스레드 대기를 하지 않는다. 다른 TLS 소멸과의 순서는 정하지 않는다. 프로세스 종료 때 주 스레드의 호출에는 기대지 않는다(POSIX는 `main` 반환·`exit`에서 key 소멸자를 부르지 않고, Windows는 종료를 부른 스레드에서 부를 수 있다) — 불려도 안 불려도 맞아야 한다.
+  - 할당자 쪽: 캐시는 인스턴스가 소유하고 등록 목록에 둔다. 스레드가 끝나면 hook이 그 스레드의 기록을 돌며, 프로세스 전역 인스턴스 등록부(mutex)에서 번호가 살아 있는 인스턴스에만 캐시를 돌려준다 — 블록을 slab으로(가득 묶음은 이전 칸에 자리가 있으면 그리로), 계수를 인스턴스 합계로, 캐시 레코드 반납. 인스턴스가 먼저 파괴된 경우: 인스턴스 파괴가 같은 등록부 잠금 아래 자기 번호를 지우고 남은 캐시를 모두 비워 해제했으므로, hook은 그 항목을 건너뛴다(죽은 캐시를 만지지 않는다). 프로세스 종료 때 주 스레드: 인스턴스 파괴가 주 스레드의 캐시까지 비우므로 hook이 불리지 않아도 누수가 없고, 뒤늦게 불리면 모든 항목이 죽은 번호라 기록만 반납한다.
+- **큰 할당**(8192 byte 초과, 정렬 64 초과, 예약 범위가 다 찼거나 예약하지 못했을 때의 작은 요청): 상위 allocator로 넘기고 주소 → 크기 원장(18.6절의 공용 내부 구현)에 적는다. 예약 범위가 다 찬 것은 실패가 아니라 느린 경로다(통계에 센다).
+- **정렬.** 블록은 16 byte 정렬이다. 16 초과 64 이하 정렬은 블록 크기가 그 정렬의 배수인 첫 등급으로 올린다(머리 64 B와 블록 크기가 모두 배수라 블록 주소가 정렬된다 — UE `PromoteToLargerBin`과 같다).
+- **통계.** `liveAllocations`·`totalAllocations`는 스레드 캐시의 계수(소유 스레드만 쓰는 relaxed atomic)와 인스턴스 합계를 더한 값이다. `liveBytes`는 요청 크기가 아니라 **블록 크기의 합**이다(반환 때 요청 크기를 알 수 없다 — `Allocator.h`의 "요청 크기"와 다른 점을 클래스 주석에 적는다). 다른 스레드가 쓰는 중의 `Stats`는 그 순간의 근사다.
+- **ASan**(메인 세션 검토 F5). ASan 구성에서는 반환한 블록 전체를 `AsanPoisonMemory`로 닫고 할당 때 요청 크기만 연다(기존 `AddressSanitizer.h` 규칙). 할당자 자신은 닫힌 블록의 연결 word·표지를 읽고 쓰므로, 그 접근은 계측에서 뺀 내부 함수 둘(word 읽기·쓰기)로만 한다 — `Base/Compiler.h`에 `ROCKS_NO_SANITIZE_ADDRESS`(clang `no_sanitize("address")`)를 더한다. slab 머리는 닫지 않는다. 버린 대안: 앞 16 byte를 열어 두기(가장 작은 등급은 검사가 없어지고 모든 블록의 첫 두 word가 빠진다), 내부 접근마다 열고 닫기(느리고, 열린 사이의 사용자 오용을 놓친다).
+- **계약.** 0 byte는 성공한 nullptr, 잘못된 정렬은 `InvalidArgument`, 미소유·중복·중간 주소 반환은 `NotFound`(범위 밖·안 쓰는 slab·중간 주소는 역참조 없이, 그 밖은 위 한계 2 안에서), 남은 할당이 있으면 파괴 Fatal, `Trim`은 호출 스레드 캐시·이전 칸·빈 slab 보관소를 비워 decommit한다(다른 스레드의 캐시는 건드리지 않는다). 지금의 "같은 스레드 재진입은 Busy" 규칙은 없앤다(작은 경로는 상위 allocator를 부르지 않고, 큰 경로는 잠금 밖에서 부른다).
+
+### 18.5 크기 등급
+
+- 16, 32, …, 128(16 단계 8개), 그 위는 2배 구간 (128, 256], …, (4096, 8192]마다 넷(160·192·224·256, 320·384·448·512, …, 5120·6144·7168·8192)으로 32개다. 모두 16의 배수다. 128을 넘는 요청의 등급 올림 낭비는 최대 20%(2배 구간의 첫 단계 — 129 → 160)이고 구간 끝으로 갈수록 준다(225 → 256은 12%). 128 이하는 16 byte 단위 올림이다(최소 블록 16).
+- 상한 8192의 근거: slab이 64KB 고정이면 8192 블록이 slab당 7개(꼬리 낭비 12.4%)다. 16384는 3개(25%)라 고정 slab으로는 낭비가 크다. 그 위는 큰 할당이다. 엔진의 객체 저장소·작은 배열은 이 안이고, GC 페이지(약 68KB)·Slot chunk(약 12KB)는 큰 할당이다(드물다).
+- 버린 대안: UE Binned2 표(64KB의 약수에 맞춘 51개 — 32752까지) — 큰 등급은 slab당 1–2개라 slab 머리·잠금 비용이 블록마다 든다. 등급별 여러 조각 slab(큰 등급은 128–256KB) — slab 번호 → slab 시작을 찾는 표가 더 필요하다. 실제 엔진의 크기 분포를 잰 뒤 상한을 올릴 때 다시 본다(18.8절).
+
+### 18.6 주소 원장과 `SystemAllocator`
+
+- **공용 내부 구현 하나**(메인 세션 검토 F6): 주소 → 크기 원장을 `Core/Private/Memory`의 내부 클래스 하나(`detail::AddressLedger`)로 두고 `SystemAllocator`와 `BinnedAllocator` 큰 경로가 함께 쓴다(각자 구현하지 않는다). 구현은 Core `HashMap<uptr, usize>`다 — 같은 모듈(Core)이라 층 의존 문제가 없고, 할당 재귀는 원장 전용 내부 allocator(플랫폼 할당을 그대로 부르는 추적 없는 `Allocator` 구현)로 끊는다(지금 `SystemAllocator`의 원장 레코드가 플랫폼 할당을 쓰는 것과 같다). `HashMap`은 지운 칸(tombstone)을 rehash로 정리하며 상환 O(1)이다.
+- `SystemAllocator`: 살아 있는 할당의 연결 목록을 이 원장으로 바꾼다. 할당마다의 원장 레코드 OS 할당이 없어진다(OS 할당 둘 → 하나). `Deallocate`는 O(1) 기대(상환)다. 계약은 그대로다(잠금 하나, 미소유·중복은 역참조 없이 `NotFound`, 파괴 때 남은 할당 Fatal). 원장 넣기가 실패하면(표 늘리기 실패) 그 `Allocate`가 `OutOfMemory`다(사용자 블록을 먼저 반환한다).
+- 버린 대안: 원장 전용 열린 주소 표를 새로 만들기(칸 16 B, 묘비 없는 삭제) — `HashMap`(칸 32 B)보다 작지만 같은 기능의 중복 구현이다. gate A1 측정에서 원장이 병목이면 다시 본다. 블록 앞 머리로 원장을 대신하기 — 미소유 주소를 읽지 않는다는 계약을 깬다. `SystemAllocator`를 스레드 캐시 구조로 바꾸기 — 기준 구현(단순·정확)이라는 역할이 사라진다. 빠른 경로는 `BinnedAllocator`다.
+
+### 18.7 버린 대안 (구조)
+
+- 새 클래스(`SlabAllocator` 등)를 더하고 `BinnedAllocator`를 남기기: 같은 역할이 둘이 된다. 초기 단계라 하위호환을 두지 않는다.
+- UE Binned3처럼 등급마다 주소 범위 예약(1GB × 등급 수): 인스턴스가 여러 개일 수 있어(시험·도구) 인스턴스당 수십 GB 예약은 39비트 주소 기기(Android)에서 부담이고, 한 등급이 범위를 다 쓰면 다른 등급으로 넘기는 처리가 따로 든다. 범위 하나를 slab 단위로 나눠 쓰면 등급 사이에 주소가 자유롭게 간다.
+- UE Binned2처럼 64KB 정렬로 머리 읽기: 미소유 주소를 읽는다(계약 위반).
+- UE Binned4처럼 주소 2단 표: 예약 범위가 없어도 되지만 표 두 줄을 읽는다. 인스턴스가 범위를 예약할 수 있으면 범위 비교 하나가 더 싸다.
+- slab마다 소유 스레드와 원격 반환 목록(mimalloc 방식): 다른 스레드의 반환이 많을 때 유리하지만 slab 머리에 atomic 목록과 소유 이전 규칙이 든다. GC 회수는 소유 스레드가 반환하고, 스레드 사이 흐름은 이전 칸으로 충분한지 먼저 잰다(18.8절 gate A4).
+- 오용 검출을 동시성 아래에서도 완전하게(18.4절 한계 2의 대안): (1) 반환마다 잠금·참조 계수·"반환 중" 표시(저장 뒤 읽기 순서를 보장하는 fence) — 빠른 경로에 잠금 접두 명령 하나(x64에서 20 cycle 안팎으로 추정 — 재지 않았다)가 든다. (2) slab을 풀 때 decommit 대신 접근 권한을 둔 채 내용만 버리고(Windows `DiscardVirtualMemory`, POSIX `madvise`), slab 표 칸에 세대 번호를 더해 머리·표지를 읽은 뒤 칸을 다시 대조한다(낙관적 읽기) — 빠른 경로 비용은 같은 줄의 비교 하나라 싸지만, Windows에서 commit charge가 최고 사용량에 머물고(물리 메모리만 돌아간다), slab 표가 slab당 4 byte가 되며, PlatformBase에 내용 버리기 연산이 더 필요하다. 오용 반환과 slab 풀기가 같은 순간에 겹치는 것은 이미 결함인 프로그램의 드문 경쟁이고 fault는 그 자리에서 드러나므로, 지금은 한계로 적고 넣지 않는다. commit charge가 문제되지 않는 것이 확인되거나 오용 검출을 동시성 아래에서도 보장해야 하면 (2)를 넣는다.
+- 이전 칸 대신 등급 잠금만: 묶음 단위라 잠금 빈도는 낮지만(64번에 한 번) 병렬 표식의 큐 블록처럼 여러 스레드가 같은 등급을 주고받을 때 잠금이 겹친다. 8칸 비교 교환은 단순하고 UE가 쓰는 구조다.
+
+### 18.8 gate (제안 — 측정으로 확정)
+
+부하가 큰 기계라 같은 round의 상대값으로 본다(높은 우선순위, 번갈아).
+
+| 번호 | 항목 | 목표 |
+|---|---|---|
+| A1 | 1M · 간선 4 생성+연결, churn 회수, 종료 회수(`SystemAllocator`) | 끝난다. 객체당 시간이 플랫폼 할당(`BenchAllocator`)의 2배 이내 |
+| A2 | 같은 측정(`BinnedAllocator`) | 객체당 시간이 플랫폼 할당 이하. 할당자 몫(bump를 뺀 값)이 플랫폼의 절반 이하 |
+| A3 | 단일 스레드 할당·반환 쌍(16–256 B) | 중앙 40ns 이하 |
+| A4 | 한 스레드가 할당하고 다른 스레드가 반환(64 B) | 쌍당 시간이 단일 스레드의 3배 이내(잠금 붕괴 없음) |
+| A5 | 8 스레드 동시 할당·반환 처리량 | 1 스레드의 4배 이상 |
+| A6 | 1M 객체 저장소의 메모리 | 요청 byte 대비 추가 20% 이하(등급 올림 + slab 머리·꼬리 — 벤치 객체 크기에서의 값을 함께 적는다) |
+| A7 | GC churn 회수(실험 24절 — 객체당 약 235–250ns) | `BinnedAllocator`에서 플랫폼 할당보다 줄어든다(목표값은 A2 측정 뒤 적는다) |
+
+한계로 남길 것: 실제 엔진의 크기 분포 미측정(상한 8192·등급 표), `PoolAllocator` 반환의 chunk 검색(그대로 — 이 할당자는 더는 쓰지 않는다), 다른 스레드 캐시의 Trim(UE는 epoch로 잠들 때 비운다 — 후속), 오용 검출의 동시성 한계(18.4절 한계 2 — 그 slab의 decommit·재사용과 겹치면 fault 또는 미검출), 반환 표지의 값 일치(2^-64), 예약하지 못한 기기에서는 모든 요청이 큰 경로(느리지만 맞다).
+
+### 18.9 단계와 시험 계획
+
+| 단계 | 내용 |
+|---|---|
+| AL0 | `GcBench --allocators`를 1M·할당자 선택·bump 바닥으로 넓히고 지금 상태를 잰다(System·Binned는 끝나는 규모까지) |
+| AL1 | 공용 주소 원장 `detail::AddressLedger`(Core `HashMap` + 추적 없는 내부 allocator)와 `SystemAllocator`의 원장 교체 |
+| AL2 | `BinnedAllocator` 다시 만들기 1: 예약 범위(실패 때 축소·예약 없음)·slab 표·등급·소유 판정 다섯 단계와 표지 불변식·큰 할당(스레드 캐시 없이 등급 잠금) |
+| AL3 | `platform::ThreadExitSlot`(Windows FLS callback, POSIX pthread key 소멸자)과 그 시험, 스레드 캐시·이전 칸(가득 묶음만)·스레드 종료 hook·인스턴스 파괴 |
+| AL4 | `Trim`·통계(`ReservedBytes`·`fallbackAllocations`)·ASan(`ROCKS_NO_SANITIZE_ADDRESS` 내부 접근)·범위 소진 경로 |
+| AL5 | 측정(18.8절)·GC churn 재측정·문서(실험 25절, 0절 갱신) |
+
+시험(단계마다 음성 대조와 함께):
+
+- 계약: 0 byte, 잘못된 정렬, 등급 경계 크기(16·128·129·8192·8193), 정렬 32·64의 등급 올림과 128의 큰 경로, 미소유(다른 인스턴스·스택·범위 안의 안 쓰는 slab)·중간 주소·중복 반환이 `NotFound`이고 상태가 그대로인 것, 남은 할당 파괴 Fatal(음성 대조 프로그램 — 지금의 `allocator-binned-invalid-N`을 새 계약으로).
+- 표지 불변식(F1): 새 인스턴스에서 한 블록을 할당하고 `주소 + 블록 크기`(떼어 캐시에 든, 내준 적 없는 블록)를 반환하면 `NotFound`이고, 이어지는 할당들이 서로 다른 주소를 받는다. 뗀 적 없는 블록(bump 뒤)의 반환도 `NotFound`다. 보관소에서 다시 꺼낸 slab(옛 표지가 남은 slab)에서도 같다.
+- 오용 시험은 그 slab의 decommit·재사용과 경쟁하지 않게 만든다(F2 — 단일 스레드, 또는 그 slab에 살아 있는 블록을 남겨 둔다).
+- 예약 실패(F4): 예약 크기를 주입해(시험용 설정) 축소 재시도와 "예약 없음" 상태를 만든다 — 모든 요청이 큰 경로로 가고 통계가 맞는다.
+- `platform::ThreadExitSlot`(F3): 값을 둔 스레드가 끝나면 그 스레드에서 정리 함수가 한 번 불린다(명시 gate로 순서를 만든다), 값이 null인 스레드는 불리지 않는다, `platform::Thread`가 아닌 OS 스레드에서도 불린다(Windows `CreateThread`·POSIX `pthread_create`로 만든 스레드).
+- 이전 칸(F7): 이전 칸에서 받은 묶음의 블록 수가 등급 한도와 같다, 부분 묶음은 스레드 종료·`Trim` 때 이전 칸이 아니라 slab으로 간다(이전 칸 8칸이 빈 채 남는다).
+- 모델: 무작위 할당·반환을 그림자 표(주소 → 크기·내용 무늬)와 대조한다 — 겹침 없음, 내용 보존, 통계 일치, 끝에 `Trim` 뒤 commit된 slab 0.
+- 스레드: 한 스레드가 할당하고 다른 스레드가 반환(명시 gate로 순서를 만든다), 스레드 끝에 캐시가 비워지는 것(끝난 뒤 통계·`Trim`), 인스턴스 파괴 뒤에도 살아 있는 스레드가 다른 인스턴스를 쓰는 것, 이전 칸이 찬 경로·빈 경로를 결정적으로 지나게 하는 크기.
+- 실패 주입: slab commit 실패(범위를 작게 잡아 소진 → 큰 경로), 상위 allocator 실패(`NFailAllocator`), hash 원장 늘리기 실패.
+- 장기: `GcSoak`·클러스터 smoke를 `BinnedAllocator` 위에서 돌린다(지금은 `SystemAllocator`·벤치 할당자).
+- 음성 대조 후보: refill에서 뗀 블록에 표지를 세우지 않음(F1), 반환 표지를 할당 때 지우지 않음, 뗀 블록 수 검사 생략, 부분 묶음을 이전 칸에 넣음(F7), 스레드 종료 hook이 죽은 인스턴스의 캐시를 건너뛰지 않음, 예약 실패 때 축소하지 않음, slab 표를 0으로 돌리지 않음, 이전 칸 넣기의 비교 교환을 단순 대입으로, 스레드 끝 비우기 생략, 등급 올림에서 정렬 배수 검사 생략, 원장 지울 때 뒤 칸 당기기 생략.

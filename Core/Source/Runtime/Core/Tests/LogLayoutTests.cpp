@@ -538,8 +538,8 @@ TEST(TextLogSinkSyncAndManualProduceIdenticalLines) {
     TextOutput syncOutput;
     TextOutput manualOutput;
     {
-        LogSystem logs(allocator, LogSystemConfig::ForTool());
         TextLogSink sink(syncOutput.Output(), layout.Value());
+        LogSystem logs(allocator, LogSystemConfig::ForTool());
         REQUIRE(logs.AddSink(sink).IsOk());
         REQUIRE(logs.Start().IsOk());
         LogInstallScope installed(logs);
@@ -551,8 +551,8 @@ TEST(TextLogSinkSyncAndManualProduceIdenticalLines) {
     {
         LogSystemConfig config;
         config.mode = LogMode::Manual;
-        LogSystem logs(allocator, config);
         TextLogSink sink(manualOutput.Output(), layout.Value());
+        LogSystem logs(allocator, config);
         REQUIRE(logs.AddSink(sink).IsOk());
         REQUIRE(logs.Start().IsOk());
         LogInstallScope installed(logs);
@@ -594,11 +594,11 @@ TEST(LogSinksDoNotAllocate) {
     CountingAllocator allocator;
     LogSystemConfig config;
     config.mode = LogMode::Manual;
-    LogSystem logs(allocator, config);
     TextOutput text;
     TextOutput json;
     TextLogSink textSink(text.Output());
     JsonLinesLogSink jsonSink(json.Output());
+    LogSystem logs(allocator, config);
     REQUIRE(logs.AddSink(textSink).IsOk());
     REQUIRE(logs.AddSink(jsonSink).IsOk());
     REQUIRE(logs.Start().IsOk());

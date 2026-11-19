@@ -1,4 +1,5 @@
 #include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
+#include <ReflectionTestFixtures/StaticArrayFixture.generated.h>
 #include "MapTestSupport.h"
 
 // 리플렉션 B9g 정적 배열(T x[N]) 경로 연산 시험이다(Docs/Design/ReflectionExtensions.ko.md 8절,

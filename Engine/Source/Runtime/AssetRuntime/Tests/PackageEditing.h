@@ -266,6 +266,9 @@ enum class SummaryFault {
     ItemNoVersion,
     ItemIdWire,
     ItemVersionWire,
+    // wire 종류는 맞고 payload 크기만 틀리다(Record reader는 크기를 wire 종류와 대조하지 않는다).
+    ItemIdSize,
+    ItemVersionSize,
     TypesUnsorted,
     TypesDuplicate,
     CustomsUnsorted,
@@ -289,6 +292,7 @@ enum class SummaryFault {
     SettingsWire,
     SettingsSize,
     CookerWire,
+    CookerSize,
     Count
 };
 
@@ -311,6 +315,9 @@ inline Result<void> AddVersionItem(Allocator& allocator, RecordListBuilder& list
     Result<void> added = Result<void>::Success();
     if (fault == SummaryFault::ItemIdWire) {
         added = item.AddField(package_detail::VersionItemIdField, WireType::U32, value);
+    } else if (fault == SummaryFault::ItemIdSize) {
+        added = item.AddField(package_detail::VersionItemIdField, WireType::Guid,
+                              Span<const uint8>(guid, sizeof(guid) - 1));
     } else if (fault != SummaryFault::ItemNoId) {
         added = item.AddField(package_detail::VersionItemIdField, WireType::Guid, guid);
     } else {
@@ -323,9 +330,12 @@ inline Result<void> AddVersionItem(Allocator& allocator, RecordListBuilder& list
     }
 
     if (added && fault != SummaryFault::ItemNoVersion) {
+        const usize versionBytes =
+            fault == SummaryFault::ItemVersionSize ? sizeof(value) - 1 : sizeof(value);
         added = fault == SummaryFault::ItemVersionWire
                     ? item.AddField(package_detail::VersionItemVersionField, WireType::Guid, guid)
-                    : item.AddField(package_detail::VersionItemVersionField, WireType::U32, value);
+                    : item.AddField(package_detail::VersionItemVersionField, WireType::U32,
+                                    Span<const uint8>(value, versionBytes));
     } else if (added) {
         added = item.AddField(Guid{8, 8}, WireType::U32, value);
     }
@@ -488,7 +498,9 @@ inline Array<uint8> SummaryBytes(Allocator& allocator, const SummaryInput& input
                                      ? Guid{17, 17}
                                      : package_detail::SummaryCookerVersionField,
                                  fault == SummaryFault::CookerWire ? WireType::U64 : WireType::U32,
-                                 Span<const uint8>(cooker, 4))
+                                 Span<const uint8>(cooker, fault == SummaryFault::CookerSize
+                                                               ? sizeof(cooker) - 1
+                                                               : sizeof(cooker)))
                        .IsOk();
     }
 
@@ -510,7 +522,72 @@ inline bool EditorFault(SummaryFault fault) noexcept {
 }
 
 inline bool CookedFault(SummaryFault fault) noexcept {
-    return fault >= SummaryFault::NoProfile && fault <= SummaryFault::CookerWire;
+    return fault >= SummaryFault::NoProfile && fault <= SummaryFault::CookerSize;
+}
+
+// ---- Objects 섹션의 Record 필드 고치기 ----
+
+// type(클래스 또는 struct) 스키마의 필드 name의 ID다.
+inline Guid FieldIdOf(TypeRegistry& types, TypeId type, StringView name) noexcept {
+    auto lease = types.Acquire(type);
+    if (!lease) {
+        lease = types.AcquireValueType(type, TypeKind::Struct);
+    }
+
+    if (!lease) {
+        return Guid{};
+    }
+
+    for (const FieldSchema& field : lease.Value().Schema().fields) {
+        if (StringView(field.name.Data(), field.name.Size()) == name) {
+            return field.id;
+        }
+    }
+
+    return Guid{};
+}
+
+// Objects 섹션에서 필드 id의 첫 TLV를 찾아 payload offset(섹션 기준)을 돌려준다. TLV는
+// fieldGuid16(high·low LE)·type4·byteLength8·payload다(Serialization Record).
+inline constexpr usize RecordFieldIdBytes = 16;
+// TLV에서 payload가 시작하는 위치다(id 16 + type 4 + byteLength 8).
+inline constexpr usize RecordFieldPayloadOffset =
+    RecordFieldIdBytes + sizeof(uint32) + sizeof(uint64);
+
+inline usize FieldPayload(Span<const uint8> objects, Guid id) noexcept {
+    uint8 pattern[RecordFieldIdBytes];
+    StoreLittleEndian<uint64>(pattern, id.high);
+    StoreLittleEndian<uint64>(pattern + sizeof(uint64), id.low);
+    for (usize offset = 0; offset + RecordFieldPayloadOffset <= objects.Size(); ++offset) {
+        bool same = true;
+        for (usize index = 0; same && index < RecordFieldIdBytes; ++index) {
+            same = objects[offset + index] == pattern[index];
+        }
+
+        if (same) {
+            return offset + RecordFieldPayloadOffset;
+        }
+    }
+
+    return IndexNone;
+}
+
+// Objects 섹션의 필드 id 첫 payload에 u32 value를 쓴 패키지다(섹션 CRC는 다시 맞춘다).
+inline Array<uint8> WithObjectsU32(Allocator& allocator, const Array<uint8>& file, Guid id,
+                                   uint32 value) noexcept {
+    EditablePackage edit(allocator);
+    if (!edit.Parse(file.View())) {
+        return Array<uint8>(allocator);
+    }
+
+    EditableSection* objects = edit.Find(PackageSectionKind::Objects);
+    const usize payload = objects != nullptr ? FieldPayload(objects->bytes.View(), id) : IndexNone;
+    if (payload == IndexNone) {
+        return Array<uint8>(allocator);
+    }
+
+    StoreLittleEndian<uint32>(objects->bytes.Data() + payload, value);
+    return edit.Build();
 }
 
 } // namespace rocks::asset_test

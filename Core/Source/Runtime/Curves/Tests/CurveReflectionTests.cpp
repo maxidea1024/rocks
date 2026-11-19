@@ -1,4 +1,7 @@
 #include <CurvesTestFixtures/CurveFixture.generated.h>
+#include <Curves/CurveTypes.generated.h>
+#include <Curves/PlainCurve.generated.h>
+#include <Curves/TangentCurve.generated.h>
 #include <CurvesTestFixtures/CurvesTestFixtures.module.generated.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/StringBuilder.h>

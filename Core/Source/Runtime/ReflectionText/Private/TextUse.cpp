@@ -12,14 +12,15 @@ constexpr uint32 Bit(FieldFlags flag) noexcept {
 
 // 용도별 출력 제외(10.1절 표). Copy = Edit 출력 + DuplicateTransient · TextExportTransient.
 constexpr uint32 EditOutput =
-    Bit(FieldFlags::Transient) | Bit(FieldFlags::NonPIEDuplicateTransient);
+    Bit(FieldFlags::Transient) | Bit(FieldFlags::NonTryoutDuplicateTransient);
 constexpr uint32 CopyOutput =
     EditOutput | Bit(FieldFlags::DuplicateTransient) | Bit(FieldFlags::TextExportTransient);
-constexpr uint32 PieCopyOutput = Bit(FieldFlags::Transient) | Bit(FieldFlags::DuplicateTransient) |
-                                 Bit(FieldFlags::TextExportTransient);
+constexpr uint32 TryoutCopyOutput = Bit(FieldFlags::Transient) |
+                                    Bit(FieldFlags::DuplicateTransient) |
+                                    Bit(FieldFlags::TextExportTransient);
 constexpr uint32 ReportOutput = Bit(FieldFlags::Transient);
 
-// Edit 입력은 Transient만 뺀다(NonPIEDuplicateTransient·TextExportTransient 필드는 받는다).
+// Edit 입력은 Transient만 뺀다(NonTryoutDuplicateTransient·TextExportTransient 필드는 받는다).
 constexpr uint32 EditInput = Bit(FieldFlags::Transient);
 
 } // namespace
@@ -28,7 +29,7 @@ bool IsValidTextUse(TextUse use) noexcept {
     switch (use) {
     case TextUse::Edit:
     case TextUse::Copy:
-    case TextUse::PieCopy:
+    case TextUse::TryoutCopy:
     case TextUse::Report:
         return true;
     }
@@ -42,8 +43,8 @@ uint32 TextOutputExcludedFlags(TextUse use) noexcept {
         return EditOutput;
     case TextUse::Copy:
         return CopyOutput;
-    case TextUse::PieCopy:
-        return PieCopyOutput;
+    case TextUse::TryoutCopy:
+        return TryoutCopyOutput;
     case TextUse::Report:
         return ReportOutput;
     }
@@ -57,8 +58,8 @@ Result<uint32> TextInputExcludedFlags(TextUse use) noexcept {
         return Result<uint32>::Success(EditInput);
     case TextUse::Copy:
         return Result<uint32>::Success(CopyOutput);
-    case TextUse::PieCopy:
-        return Result<uint32>::Success(PieCopyOutput);
+    case TextUse::TryoutCopy:
+        return Result<uint32>::Success(TryoutCopyOutput);
     case TextUse::Report:
         break;
     }

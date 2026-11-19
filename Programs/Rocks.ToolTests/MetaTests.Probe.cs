@@ -38,7 +38,11 @@ internal static partial class MetaTests
 
         public string Descriptor => MetaCompilerArguments.Descriptor(temporary.Root);
 
+        // 모듈 생성 헤더(등록 함수 선언)의 경로다.
         public string Aggregate => MetaCompilerArguments.AggregatePath(temporary.Root);
+
+        // 모듈 생성 소스(등록 함수 정의 — 등록 순서를 보는 시험이 읽는다)의 경로다.
+        public string ModuleSource => MetaCompilerArguments.ModuleSourcePath(temporary.Root);
 
         private string IdentityPath => temporary.FilePath("probe.rocksids.json");
 
@@ -208,7 +212,7 @@ internal static partial class MetaTests
                 }
 
                 arguments.AddRange(["--module", MetaCompilerArguments.Module, "--input", input, "--include", "Probe.h", "--output-root", outputRoot,
-                    "--descriptor", MetaCompilerArguments.Descriptor(temporary.Root), "--compiler", compiler]);
+                    "--descriptor", MetaCompilerArguments.Descriptor(temporary.Root), MetaCompilerArguments.VerifySources, "--compiler", compiler]);
                 foreach (string include in includeDirs.Concat(Directory.GetDirectories(Path.Combine(options.Root, "Core", "Source", "Runtime"))
                     .Select(module => Path.Combine(module, "Public")).Where(Directory.Exists)))
                 {

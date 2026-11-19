@@ -853,17 +853,13 @@ int RunScenario(const Scenario& scenario, const Options& options) noexcept {
                     uint32 frames = 0;
                     uint32 reclaimed = 0;
                     uint64 longest = 0;
-                    for (;;) {
+                    while (registry.HasPendingReclaim()) {
                         const uint64 frameStarted = platform::MonotonicNanoseconds();
                         auto drained = registry.DrainRetired(
                             access, GcBudget{GcBudget::DefaultMaxObjects, FrameReclaimNanoseconds});
                         const uint64 took = platform::MonotonicNanoseconds() - frameStarted;
                         if (!drained) {
                             return 6;
-                        }
-
-                        if (drained.Value() == 0) {
-                            break;
                         }
 
                         ++frames;

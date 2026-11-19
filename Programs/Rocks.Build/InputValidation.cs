@@ -124,6 +124,7 @@ internal static class InputValidation
 
             bool posix = request.Toolchain.Platform != NativePlatform.Windows;
             GeneratedSources.Validate(module);
+            ValidateReflectionSources(module);
             foreach (string argument in module.AdditionalCompileArguments)
             {
                 ValidateArgument(module.Name, "AdditionalCompileArguments", argument, true, posix);
@@ -186,6 +187,27 @@ internal static class InputValidation
                         "declare external files as inputs (include directories, AdditionalInputs, PrebuiltLibraries) instead.");
                 }
             }
+        }
+    }
+
+    // 리플렉션 생성 소스 목록(NativeModuleInput.ReflectionSources)은 MetaCompiler가 낸 C++ 번역 단위의 경로다. 빈 경로·NUL·.cpp가 아닌
+    // 확장자를 거부한다(C로 컴파일되는 .c나 header가 들어오지 않게). 설치 SDK 표지 ReflectionOnlyLibrary는 미리 빌드한 라이브러리만 가진
+    // 모듈에만 켠다 — 자기 소스가 있는 모듈은 그 소스로 진입점 판정을 받는다.
+    private static void ValidateReflectionSources(NativeModuleInput module)
+    {
+        foreach (string source in module.ReflectionSources)
+        {
+            if (string.IsNullOrWhiteSpace(source) || source.Contains('\0') || !source.EndsWith(".cpp", StringComparison.Ordinal))
+            {
+                throw new ArgumentException($"Module {module.Name}, ReflectionSources: '{source}' must be the path of a generated .cpp translation unit.");
+            }
+        }
+
+        if (module.ReflectionOnlyLibrary &&
+            (module.Sources.Count != 0 || module.GeneratedSources.Count != 0 || module.ReflectionSources.Count != 0 || module.PrebuiltLibraries.Count == 0))
+        {
+            throw new ArgumentException($"Module {module.Name}: ReflectionOnlyLibrary marks an installed SDK module whose prebuilt library holds " +
+                "only reflection generated code; it cannot be combined with the module's own sources and requires PrebuiltLibraries.");
         }
     }
 

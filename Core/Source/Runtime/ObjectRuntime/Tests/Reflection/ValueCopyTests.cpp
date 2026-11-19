@@ -1,5 +1,6 @@
 #include <Base/TypeTraits.h>
 #include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
+#include <ReflectionTestFixtures/StructFixture.generated.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Object/ValueCopy.h>
 #include <TestSupport/NFailAllocator.h>

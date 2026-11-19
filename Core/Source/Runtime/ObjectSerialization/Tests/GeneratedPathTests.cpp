@@ -1,4 +1,9 @@
+#include <ReflectionTestFixtures/ArrayFixture.generated.h>
+#include <ReflectionTestFixtures/CoreValueFixture.generated.h>
+#include <ReflectionTestFixtures/PathFixture.generated.h>
+#include <ReflectionTestFixtures/ReflectionFixture.generated.h>
 #include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
+#include <ReflectionTestFixtures/StructFixture.generated.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Object/PropertyPath.h>
 #include <ObjectSerialization/ObjectGraph.h>

@@ -250,15 +250,31 @@ void ObjectRegistry::ResetReclaimedLocked(ReclaimWork& work) noexcept {
     }
 }
 
+void ObjectRegistry::ReturnUnreclaimedLocked(ReclaimWork& work) noexcept {
+    // TakeForReclaimLocked를 되돌린다: 타입 lease와 이름 기록을 슬롯에 돌려주고 Retired로 풀린
+    // 목록에 넣는다(회수 가능 조건은 그대로다 — 떼어 낼 때 확인했고, Reclaiming 동안 보유를 얻을 수
+    // 없다).
+    Slot& slot = *work.slot;
+    slot.type = Move(work.type);
+    ColdOf(slot).name = work.record;
+    slot.SetState(tally_, SlotState::Retired);
+    LinkRetiredLocked(slot, RetiredQueue::Ready);
+}
+
 uint32 ObjectRegistry::ReclaimEligible(uint32 maximum, uint64 deadline) noexcept {
-    // 회수는 ReclaimBatchSize개씩 한 번의 잠금으로 떼어 내고, 소멸자·해제는 잠금 밖에서 묶어 부른
+    // 회수는 ReclaimBatchSize개씩 한 번의 잠금으로 떼어 내고, 소멸자·해제는 잠금 밖에서 차례로 부른
     // 뒤, 슬롯 되돌리기를 다시 한 번의 잠금으로 한다(GC 설계 17.1절 — 객체마다 잠금 둘이던 것을
     // 묶음마다 둘로). 묶음 사이에 잠금을 풀므로 소멸자(또는 다른 스레드)가 지연 슬롯의 보유 계수를
     // 반환하면 그 슬롯이 풀린 목록으로 옮겨져 다음 묶음에 회수된다(목록을 처음부터 다시 걷지
-    // 않는다). 시간 한도는 묶음마다 본다 — 떼어 낸 묶음은 끝까지 회수하므로 넘침은 묶음 하나다.
+    // 않는다). 시간 한도는 첫 객체를 회수한 뒤부터 소멸자 사이마다 본다 — 넘침은 소멸자 하나이고,
+    // 회수할 수 있는 객체가 있으면 적어도 하나는 회수한다(최소 진척). 한도가 지나 소멸하지 못한
+    // work는 두 번째 잠금에서 Retired로 되돌린다.
     ReclaimWork batch[ReclaimBatchSize];
     uint32 reclaimed = 0;
-    while (reclaimed < maximum && (deadline == 0 || platform::MonotonicNanoseconds() < deadline)) {
+    auto expired = [&](uint32 done) noexcept {
+        return deadline != 0 && done != 0 && platform::MonotonicNanoseconds() >= deadline;
+    };
+    while (reclaimed < maximum && !expired(reclaimed)) {
         const uint32 limit =
             maximum - reclaimed < ReclaimBatchSize ? maximum - reclaimed : ReclaimBatchSize;
         uint32 count = 0;
@@ -279,22 +295,31 @@ uint32 ObjectRegistry::ReclaimEligible(uint32 maximum, uint64 deadline) noexcept
             break;
         }
 
-        for (uint32 index = 0; index < count; ++index) {
-            DestroyReclaimed(batch[index]);
+        uint32 destroyed = 0;
+        while (destroyed < count && !expired(reclaimed + destroyed)) {
+            DestroyReclaimed(batch[destroyed]);
+            ++destroyed;
         }
 
         {
             platform::LockGuard lock(gate_);
-            for (uint32 index = 0; index < count; ++index) {
+            for (uint32 index = 0; index < destroyed; ++index) {
                 ResetReclaimedLocked(batch[index]);
+            }
+
+            for (uint32 index = destroyed; index < count; ++index) {
+                ReturnUnreclaimedLocked(batch[index]);
             }
         }
 
-        for (uint32 index = 0; index < count; ++index) {
+        for (uint32 index = 0; index < destroyed; ++index) {
             batch[index].type.Reset();
         }
 
-        reclaimed += count;
+        reclaimed += destroyed;
+        if (destroyed < count) {
+            break;
+        }
     }
 
     return reclaimed;
@@ -324,15 +349,24 @@ Result<uint32> ObjectRegistry::DrainRetired(const ObjectAccessContext& access,
         processing_ = true;
     }
 
-    const uint64 deadline =
-        budget.maxNanoseconds == 0 ? 0 : platform::MonotonicNanoseconds() + budget.maxNanoseconds;
+    const uint64 started = platform::MonotonicNanoseconds();
+    const uint64 deadline = budget.maxNanoseconds == 0 ? 0 : started + budget.maxNanoseconds;
     uint32 count = ReclaimEligible(budget.maxObjects, deadline);
+    const uint64 finished = platform::MonotonicNanoseconds();
     {
         platform::LockGuard lock(gate_);
         processing_ = false;
+        // 회수를 미룬 수집(GcReclaim::Deferred)의 보고서가 이후 회수까지 보여 주게 더한다(17.2절).
+        lastGc_.reclaimed += count;
+        lastGc_.reclaimNanoseconds += finished - started;
     }
 
     return Result<uint32>::Success(count);
+}
+
+bool ObjectRegistry::HasPendingReclaim() const noexcept {
+    platform::LockGuard lock(gate_);
+    return retiredReady_.head != nullptr || retiredPending_.head != nullptr;
 }
 
 } // namespace rocks

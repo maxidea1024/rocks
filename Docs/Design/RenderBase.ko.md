@@ -1,6 +1,6 @@
 # 렌더 기반(RenderBase) 설계
 
-기준일: 2026-11-19, 개정 29(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-20, 개정 31(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
 - 렌더 lane과 프레임 전달, 장치 스레드 모델, 장치 자원 수명, 렌더 그래프
 - 셰이더 런타임 객체(셰이더 집합·파라미터 바인딩·상수 블록·파이프라인 캐시)
 - 정점 입력 타입, 공용 자원·그리기 유틸리티, GPU 계측
@@ -689,7 +689,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 - **구현(2026-11-19, 설계 2).** 위 설계 그대로다. Graphics: `ResourceAccess::ResolveDestination`(쓰기 전용 배타 mask에 넣음). D3D12는 `RESOLVE_DEST`로 낮추고 resolve 뒤 원본을 `RENDER_TARGET`으로 되돌리며 대상은 `RESOLVE_DEST`로 둔다(셰이더 읽기 되돌림을 없앴다). Vulkan은 `ResolveDestination`을 `TRANSFER_DST_OPTIMAL`·transfer 쓰기로 낮추고 resolve 뒤 원본을 `RenderTarget`으로 되돌린다. 기록 장치는 `BeginPass`의 resolve 대상을 기억했다가 `EndFrame`에서 그 subresource를 `ResolveDestination`으로 둔다. RenderBase: `GpuTrace::BeginSpan`·`EndSpan`·`DropSpan`(기록 실패 뒤 무효로 닫음)·`MarkersEnabled`. RenderGraph: `GraphColorTarget::resolveTarget`·`resolveMipLevel`·`resolveSlice`(대상 접근 `ResolveDestination`, attachment 표시, 선언 접근으로는 거부), `RenderGraph::PushScope`·`PopScope`와 `GraphScope`, pass마다 가장 안쪽 구간 번호, 실행 중 열린 구간 사슬(`LeaveScopes`·`EnterScopes`, 기록을 닫을 때 marker pop·열 때 재push), 번호 구간의 `ROCKS_TRACE_MARK("Graph scope {} {}")`.
 - 시험 결과: EngineTests `RenderGraphResolveScopeTests`(`RenderGraph_ResolveTargetsAreDeviceTransitions`·`RejectsInvalidResolveTargets`·`ScopesFollowRecordingsAndSkipCulledPasses`·`ScopeImbalanceIsAValidationError`·`ImmediateModeOpensScopesAtAddPass`). Sandbox `--self-test`의 `RunResolveGraph`(Programs/Sandbox/Private/RenderGraphSelfTest.cpp): 4x MSAA 그래프 텍스처를 마젠타로 clear해 1표본 그래프 텍스처로 resolve하고 다음 pass가 합성한 출력 중심이 마젠타, 두 pass는 marker를 켠 그래프 구간 안, 기존 MSAA·slice resolve 시험도 새 상태 계약으로 통과, 검증 오류 0 — D3D12·D3D12 WARP·D3D11·D3D11 WARP·GLES·GLES on GL core·Vulkan(GTX 1060·lavapipe).
 
-**RG3 병렬 기록 설계(개정 29).** RG3의 두 일 가운데 병렬 기록만 먼저 넣는다. render pass 병합(tiled GPU의 load·store 생략)은 GX13(subpass·framebuffer fetch) 뒤로 남는다.
+**RG3 병렬 기록 설계(개정 31).** RG3의 두 일 가운데 병렬 기록만 먼저 넣는다. render pass 병합(tiled GPU의 load·store 생략)은 GX13(subpass·framebuffer fetch) 뒤로 남는다.
 - **UE 방식.** RDG는 pass 묶음마다 `FRHICommandList`를 task에서 기록하고(`RenderCore/Private/RenderGraphBuilder.cpp:2093, 2995`), RHI가 그 목록들을 제출 순서대로 번역한다(`RHI/Public/RHICommandList.h:4440–4458`). 기록(pass 람다 실행)과 번역(장치 명령)이 나뉘어 있어 기록만 병렬이어도 결과 순서가 정해진다.
 - **Rocks 구조.** 같은 두 단계로 나눈다.
   - 기록 목록 `GraphCommandList`(RenderGraph 내부): `graphics::CommandContext`를 구현해 pass 기록 함수의 호출을 프레임 arena의 명령 열(종류 표지 + 인자, Span 인자는 복사)로 쌓는다. worker마다 `FrameArenaWriter`로 잠금 없이 할당한다.
@@ -887,7 +887,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 ### 10.2 Rocks 규칙
 
 - **등록.** 이름, `.rsh` 가상 경로, 기능 표시, 거르기 함수, 정적 정점 배치(인스턴스 데이터와 무관), 소유 파라미터 구조체를 가진다. 정적 등록 표이고, 셰이더 타입 등록(셰이더 시스템 12.2절)과 같은 시점에 닫힌다. 늦게 로드되는 모듈의 등록은 거부한다.
-- **세 가지 정점 입력.** (1) **정점 입력 없음**: 전체화면·compute·유틸리티 셰이더(속성 없는 파이프라인, 11.2절). (2) **엔진 기본 정점 입력 타입**: 내장 메시와 fallback 메시 셰이더(계획 9.6절)가 쓰는 고정 배치(위치·UV·색, 지금 Sandbox 샘플 렌더러의 "Rocks 정점 형식", `Programs/Sandbox/Private/SampleRenderer.h` `BuiltinShaderHlsl` 주석). (3) **메시 정점 입력 타입**: 메시 렌더링 단계에서 정의한다.
+- **세 가지 정점 입력.** (1) **정점 입력 없음**: 전체화면·compute·유틸리티 셰이더(속성 없는 파이프라인, 11.2절). (2) **엔진 기본 정점 입력 타입**: 내장 메시와 fallback 메시 셰이더(계획 9.6절)가 쓰는 고정 배치(위치·UV·색, 지금 Sandbox 샘플 렌더러의 "Rocks 정점 형식", `Programs/Sandbox/Private/SampleRenderer.h` `BuiltinShaderHlsl` 주석). (3) **메시 정점 입력 타입**: 메시 렌더링 단계에서 정의한다. 메시 에셋 쪽 stream 집합은 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md) 5.3·6.3절이 정했다(10.4절 끝 "메시 에셋 요구").
 - **셰이더 키 축.** 셰이더 시스템 키에 정점 입력 타입을 더한다(SX4, 결정 R9 권장안 (a) 키 필드). 거르기는 셰이더 타입 조건 AND 정점 입력 타입 조건이다. 완결성 검사(9.2절)는 타입 × 정점 입력 타입 × 퍼뮤테이션을 열거한다.
 - **include 연결.** 메시 셰이더는 고정 가상 경로 `/Engine/Generated/VertexInput.rsh`를 include한다. 워커 입력을 만드는 메인 프로세스 전처리기가 이 경로를 그 정점 입력 타입의 `.rsh`로 잇는다(셰이더 시스템 결정 6). 그래서 셰이더 맵 키에 정점 입력 타입이 들어가야 한다(SX4). `.rsh`가 구현할 함수 인터페이스(입력 구조체, 월드 위치, 단계 사이 변수 채우기)는 첫 메시 셰이더 착수 전에 정한다.
 - **정점 배치.** 속성마다 (location, 형식, stream 번호, offset), stream마다 (stride, 정점/인스턴스, 인스턴스 step 1). Metal 정점 buffer 상한(셰이더 시스템 7.2절 4항: 정점 stream 8개)과 맞춰 stream ≤ 8이다. 같은 버퍼·stride·용도의 stream 합치기는 UE와 같다.
@@ -1003,6 +1003,31 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 - "UnsupportedCapability"는 Core 오류 코드에 없어 `ErrorCode::Unsupported`로 공개한다.
 - index 값 범위 검사는 하지 않는다. 장치가 index 버퍼 내용을 CPU에 남기지 않기 때문이다(메시 쿠커·RB5에서 내용을 아는 쪽이 검사한다). 묶이지 않은 stream은 그리기를 무시하고 `IgnoredDraws`를 올린다.
 - 정규화 패킹 반올림은 가장 가까운 정수(가운데는 0에서 먼 쪽)이며 double로 곱해 호스트와 무관한 결과를 낸다.
+
+**메시 에셋 요구(MeshAnimationAssets MR1·MR2·MR7, 2026-11-20 반영).** 메시 에셋 쿠킹 데이터가 내는 stream 집합이다. 메시 정점 입력 타입(10.2절 (3))은 이 집합을 받는다. 정점 입력 타입 이름·`.rsh` 인터페이스는 RB5 메시 단계에서 정한다. 아래 결정 R18–R20은 2026-11-20 권장안으로 확정했다(사용자 지시 "MA2 전 결정 사항들도 권장안대로").
+
+| 입력 | stream | 형식 |
+|---|---|---|
+| 정적 메시 | 위치 | `Float3` |
+| 〃 | tangent 기저(tangent, 법선 w = 쌍법선 부호) | `Byte4Snorm` × 2, 고정밀 설정이면 `Short4Snorm` × 2 |
+| 〃 | UV(두 채널을 한 속성에 묶음, 1–4 속성) | `Half4`, 전체 정밀도 설정이면 `Float4`. 홀수 채널의 마지막은 `Half2`·`Float2` |
+| 〃 | 색(선택 — 모두 흰색이면 없음) | 쿠킹 프로필별: D3D·Vulkan `Bgra8Unorm`, OpenGL ES `UByte4Unorm`(이 절 위 GL 규칙) |
+| skinned 메시 | 위 전부 + 영향 번호(LOD 통합 bone map의 번호 — 결정 R18) | `UByte4`(통합 본 256개 이하) 또는 `UShort4`(초과), 영향 4개면 1속성·8개면 2속성 |
+| 〃 | 영향 가중치 | `UByte4Unorm` 또는 `UShort4Unorm`(고정밀 가중치 설정), 번호와 같은 수 |
+| 〃 | morph 변화량 | 정점 stream이 아니다. 희소 목록(렌더 정점 번호, 위치·법선 변화량 `Half4`)을 렌더러가 compute 또는 CPU로 적용한다(RS12) |
+
+- **속성 수.** 정적 메시 최대 위치 1 + tangent 기저 2 + UV 4 + 색 1 = 8, skinned 최대 + 영향 4 = 12다. 속성 상한 16 안에 인스턴스 stream 자리가 남는다. UV를 쌍으로 묶은 이유가 이것이다(UE도 UV를 쌍으로 묶는다).
+- **결정 R18 — skinned 본 행렬과 섹션(확정 2026-11-20).**
+  - **섹션을 본 수로 나누지 않는다.** UE 5.8도 섹션 분할을 없앴다. 섹션당 최대 본 설정 `MaxSkinBones`는 "Sections are no longer split based on bone count"로 deprecated다(`Engine/Classes/Engine/RendererSettings.h:1520–1527`). 모든 플랫폼이 16비트 본 번호를 지원한다는 이유로 CPU skinning 강제도 없앴다(`Engine/Public/Rendering/SkeletalMeshRenderData.h:95–98`).
+  - **LOD 통합 bone map.** LOD 하나의 모든 섹션이 bone map 하나를 같이 쓴다. bone map은 그 LOD가 쓰는 메시 본 번호의 정렬 목록이고, 정점의 영향 번호는 이 목록의 위치다. UE의 통합 bone map(`bUnifiedBoneMap`·`UnifiedBoneMap` — `Engine/Public/Rendering/SkeletalMeshLODRenderData.h:47, 173`)과 같다. 섹션별 bone map은 두지 않는다.
+  - **번호 폭.** 통합 본이 256개 이하이면 `UByte4`, 넘으면 `UShort4`다. UE와 같은 조건이다(`Engine/Private/SkeletalMeshLODRenderData.cpp:496` `GetNumUnifiedBones() > 256`). 메시 본 상한은 `MeshMaxBones`(= 65535)다.
+  - **본 행렬 전달.** 인스턴스 데이터와 같은 경로다(10.5절). `RGBA32Float` typed buffer이고 VS가 typed buffer SRV로 읽는다. 본 하나는 `float4` 3개다. 행 벡터 규약(`p·M`)의 4×3 affine 행렬을 열 3개로 담고, 셰이더는 `dot(float4(p, 1), c_i)`로 성분 i를 계산한다. 현재·이전 pose(velocity, Renderer RS12)는 같은 버퍼의 다른 구간이다. 그리기의 시작 위치는 루트 상수 `MeshDrawConstants`의 예약 padding 자리에 둔다.
+  - **용량.** 원소 상한은 `texelBufferElements`다(10.5절 용량). 최소 보장 기기(65536)에서 view 하나에 본 행렬 약 21,845개가 들어간다. 프레임의 모든 skinned 인스턴스(현재 + 이전 pose)가 이를 넘으면 10.5절 넘침 규칙(결정 R16)처럼 조각 view로 나누고, 그래도 안 되면 `Unsupported` + `RenderNotices`다. 조용히 빼지 않는다.
+- **결정 R19 — 고정밀 형식(확정 2026-11-20).** tangent·UV·가중치의 고정밀 여부와 영향 번호 8·16비트는 퍼뮤테이션 축이 아니라 stream 형식 차이로 처리한다. `Byte4Snorm`·`Short4Snorm`·`Half`·`Float`·`UByte4Unorm`·`UShort4Unorm`은 모두 float 계열이고 `UByte4`·`UShort4`는 uint 계열이라, VS 입력 변수의 기본 타입이 같아 같은 셰이더를 쓴다(10.4절 "셰이더 타입" 계열 규칙). 정점 배치(파이프라인 상태)만 다르다. UE도 정밀도별로 셰이더를 나누지 않고 정점 선언으로 처리한다.
+- **결정 R20 — `IndexFormat` 이동(확정 2026-11-20, MR7).** `IndexFormat`은 지금 Graphics `DeviceTypes.h:324`에 0부터 번호가 매겨져 있다(`UInt16`, `UInt32`). 메시 에셋이 index 폭을 직렬화하므로 정점 원소 형식과 같이 GraphicsTypes(`GraphicsTypes/IndexFormat.h`)로 옮긴다.
+  - 고정 번호표는 1부터다(`UInt16` = 1, `UInt32` = 2). 0은 값 없음이다(`VertexFormat`과 같은 규칙). 안정 이름은 `UInt16`·`UInt32`이고 `IndexFormatSize`도 함께 옮긴다.
+  - Graphics 쪽 별칭·호환 계층은 두지 않는다. 쓰는 곳(현재 약 20곳)을 모두 바꾼다(하위호환 없음 원칙).
+  - 이동은 메시 에셋 단계(MA2) 착수 전에 렌더 쪽이 한다. 메시 에셋은 이 번호를 `uint32`로 저장하고 로드 때 검증한다. 자체 열거 `MeshIndexWidth`는 두지 않는다(MeshAnimationAssets 결정 MA-D10 개정).
 
 ### 10.5 인스턴스 데이터 읽기(Renderer RQ8)
 
@@ -1150,7 +1175,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 | 문서 | 위치 | 현재 | 개정 |
 |---|---|---|---|
 | AssetSystem | 1절 A0-G(샘플러 확장) | 샘플러 확장 범위 | **A0-G 착수 전**: 비교 함수(SX13), 텍스처 desc 샘플러는 기본값이고 바인딩 때 지정 가능(결정 R12) |
-| 〃 | 메시 에셋 단계(정해지면) | 정점 형식 Float만 | 패킹 법선·half·정규화 색 형식(10.2절) |
+| 〃 | 메시 에셋 단계(정해지면) | 정점 형식 Float만 | 패킹 법선·half·정규화 색 형식(10.2절). **메시 에셋 스펙 [MeshAnimationAssets](MeshAnimationAssets.ko.md)이 stream 집합을 정했고 이 문서 10.4절 끝 "메시 에셋 요구"로 받았다(개정 29)** |
 | 〃 | A5 텍스처 플랫폼 데이터(`TexturePlatformData`) | 형식·swizzle·mip 배치 서술 | **A5 착수 전**: 6.5절 입력 계약(mip-major 배치, 상주 꼬리·스트리밍 덩어리, 4 KiB 정렬, 고정 번호표 직렬화). 에셋 세션이 반영한다 |
 | ShaderSystem | 9.9절 SX1–SX14 | — | 표대로. SX3·SX4·SX5·SX6은 P14 전, SX13은 A0-G 전, SX14는 SH1 전 |
 | 〃 | 3절 구조 | ShaderCore에 "라이브러리 로드" | ShaderCore는 장치 없는 메타데이터·라이브러리 형식 읽기, 장치 셰이더 객체는 RenderBase |
@@ -1194,6 +1219,9 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 | R15 | export한 history의 수명 | **결정됨(2026-11-18, 권장안)**: (가) export는 풀 자원의 사용권만 넘기고, 소유자의 `Retire`는 마지막 사용 fence 뒤 `GraphResourcePool` 반납이다(7.4·7.5절). UE history도 풀 render target 참조이고 참조가 풀 하나만 남으면 다시 쓴다(`Renderer/Private/SceneRendering.h:943–950`, `RC/Private/RenderTargetPool.cpp:202, 754–760`). (나) `ViewHistory`가 두 장을 소유하고 번갈아 import·쓰기(풀 밖 고정 자원, 크기 변경 때 따로 재생성) | RG1 남은 것 |
 | R16 | typed buffer 원소 상한 넘침 | **결정됨(2026-11-18, 권장안)**: (가) 용량은 `DeviceCaps.limits.texelBufferElements`로 계산하고, 인스턴스 데이터는 넘는 추가를 `Unsupported`로 실패·통지, `InstanceIndices`는 조각으로 나눠 그리기별로 묶고, light grid는 기존 넘침 보수 대체(10.5절). 최소 보장 기기가 대상에 있으면 Renderer RN9을 다시 연다. (나) 인스턴스 데이터를 typed buffer 여럿으로 나눔(셰이더가 버퍼를 골라야 하고 SRV 수가 는다, 최소 보장 장치에서 버퍼 수가 16을 넘는다). (다) 2D 텍스처 대체(GLES 한 경로 추가, RN9 개정이 필요해 이 결정 범위 밖) | Renderer RS0 전 |
 | R17 | MSAA 색 resolve 수단 | **결정됨(2026-11-18, 권장안)**: (가) temporal이 있으면 셰이더 휘도 가중 고정, temporal이 없으면 데스크톱은 같은 셰이더·tiled GPU는 attachment resolve 허용(11.2절, UE desktop·모바일과 같은 나눔). 깊이·velocity는 늘 셰이더. (나) 모든 경우 셰이더(tiled GPU 대역폭 손해). (다) 모든 경우 하드웨어 resolve(HDR 가장자리 품질, upscaler 입력이 backend마다 다름) | Renderer RS8 전 |
+| R18 | skinned 본 행렬과 섹션 | **결정됨(2026-11-20, 권장안 — UE 5.8과 같다)**: 섹션을 본 수로 나누지 않고 LOD 통합 bone map, 번호는 통합 본 256개 이하 8비트·초과 16비트, 본 행렬은 `RGBA32Float` typed buffer(본당 `float4` 3개, 현재·이전 pose), 넘침은 R16 규칙(10.4절 끝) | MA5·RS12 전 |
+| R19 | 정점 stream 고정밀 형식 | **결정됨(2026-11-20, 권장안)**: 퍼뮤테이션 축이 아니라 stream 형식 차이(정점 배치만 다름, 같은 셰이더) | RB5 |
+| R20 | `IndexFormat` 위치 | **결정됨(2026-11-20, 권장안)**: GraphicsTypes로 옮기고 고정 번호표(`UInt16` = 1, `UInt32` = 2, 0 = 값 없음), 호환 별칭 없음 | MA2 전 |
 
 ## 17. 측정
 
@@ -1336,7 +1364,9 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
   - 10.5절: typed buffer 원소 용량과 넘침(결정 R16), 행렬식 부호의 인스턴스 단위 분할과 재분류.
   - 11.1절: 빈 light grid의 셀 좌표 clamp, 검은 cube array 알파 0(UE와 같은 반사 합성 의미). 11.2절: MSAA resolve 범위(깊이 늘, velocity는 temporal 때, 색은 결정 R17), 스텐실 0, UE 줄 인용 정정.
   - 2절 용어(`SharedResourceStruct`·`DrawResourceStruct`·`GraphScope`), GX1 기능 이름 "VS layer 출력".
-- 개정 29(2026-11-19): RG3 병렬 기록 설계(8절 "RG3 병렬 기록 설계"): 기록 목록 `GraphCommandList`에 pass 기록 함수를 worker에서 기록하고 소유 스레드가 선언 순서로 재생(장치 호출 열이 직렬과 같음), 장치 쪽 스레드별 기록 객체는 버림, render pass 병합은 GX13 뒤로.
+- 개정 31(2026-11-20): RG3 병렬 기록 설계(8절 "RG3 병렬 기록 설계"): 기록 목록 `GraphCommandList`에 pass 기록 함수를 worker에서 기록하고 소유 스레드가 선언 순서로 재생(장치 호출 열이 직렬과 같음), 장치 쪽 스레드별 기록 객체는 버림, render pass 병합은 GX13 뒤로.
+- 개정 30(2026-11-20): 메시 에셋 단계(MA2) 전 결정을 권장안으로 확정했다(사용자 지시 "MA2 전 결정 사항들도 권장안대로"). R18 skinned 본 행렬과 섹션(UE 5.8처럼 섹션 분할 없음·LOD 통합 bone map·256 기준 번호 폭·typed buffer 본 행렬), R19 고정밀 형식은 stream 형식 차이, R20 `IndexFormat`을 GraphicsTypes로 옮기고 고정 번호표. 10.4절 끝과 16절 결정 표에 적었다.
+- 개정 29(2026-11-20): 메시 에셋 스펙(MeshAnimationAssets 개정 2)의 요구 MR1·MR2·MR7을 10.4절 끝 "메시 에셋 요구"로 받았다. 정적·skinned 메시 stream 집합과 형식, 속성 수, 고정밀 형식은 stream 형식 차이로(기본안), 섹션 본 palette 한도는 RB5·RS12에서, `IndexFormat`을 GraphicsTypes로 옮김(MA2 착수 전). 10.2절 (3)과 15절 메시 에셋 행에 연결을 더했다.
 - 개정 28(2026-11-19): RG1 남은 것 설계 2(8절): 장치 resolve 뒤 상태 계약(`ResolveDestination`, 원본은 `RenderTarget` 그대로, 4.4절 GX2 B부 resolve 규칙 대체), 그래프 attachment resolve, 그래프 구간 `GraphScope`(CPU·GPU 구간·debug marker·trace 표지, 기록 경계의 marker 재push).
 - 개정 27(2026-11-19): 텍스처 GX2 나머지 설계와 구현(4.4절 "텍스처 GX2 나머지 설계"·부분별 구현 메모, 4.2절 GX2 행. 구현 중 정한 것: 2D view는 첫 slice만·cube view는 첫 cube만(D3D 제약), 초기 픽셀이 있는 다중 plane 깊이의 2D 밖 차원은 그대로 `Unsupported`, NVIDIA ES context의 `GL_OES_texture_view` 확인): A부 용도 비트 묶음(`RenderTarget | Storage`)·cube Storage(면 2D 배열 쓰기 view), B부 view 차원 바꾸기(UE `SetDimension` 규칙)·OpenGL ES `OES_texture_view`·`EXT_texture_view` 범위 view(없으면 `Unsupported`, 셰이더 slice 기준은 버림), C부 다중 plane 깊이의 2D 배열·cube와 MSAA 2D 배열, 3D 깊이 면 resolve는 계속 거부.
 - 개정 26(2026-11-19): RG1 남은 것 설계와 구현(8절 "RG1 남은 것 설계"·"구현(2026-11-19, RG1 남은 것 A–C부)", 4.2절 RG1 행, 8절 "남은 것(RG1)", 4.4절 GX2 메모의 그래프 쪽 항목): A부 attachment 기록(`BeginPass`·MRT·깊이·load·mip·slice)·렌더 타깃 없는 Compute·Copy 기록·풀 desc 확장(깊이·Storage·MSAA 키), B부 `GraphTextureView`(장치 view 낮추기·subresource 상충·view 기준 mip, 모든 backend HZB 픽셀 대조), C부 `GraphSharedData`·`GraphViewTable`(`SceneTextureTable`)·검증 실패 그래프의 history export 시험. 그래프 resolve는 장치 resolve 뒤 상태 계약과 함께로 미룬다.

@@ -1,11 +1,14 @@
+#include <GameObject.generated.h>
 #include <SampleGame/SampleGame.module.generated.h>
 #include <Core/Memory/SystemAllocator.h>
 
 int main() {
     rocks::SystemAllocator allocator;
     rocks::TypeRegistry types(allocator);
-    // The module aggregate header registers the reflection types of this module and its
-    // dependencies, bases first.
+    // RegisterModuleTypes (declared in the module generated header, defined in the module generated
+    // source that the build compiles into this executable) registers the reflection types of this
+    // module and its dependencies, bases first. GeneratedType<sample::GameObject> comes from the
+    // generated header of that type, <GameObject.generated.h>.
     rocks::ModuleRegistration registration(types, allocator);
     if (!rocks::generated::SampleGame::RegisterModuleTypes(registration)) {
         return 1;

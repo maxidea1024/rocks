@@ -1,6 +1,6 @@
 # 빌드 타깃·모듈 의존·플러그인 조건 설계
 
-기준일: 2026-11-19, 개정 2. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
+기준일: 2026-11-20, 개정 3. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
 - **타깃 종류 확장**: Editor·Client·Server 타깃과, 타깃 종류에 따라 코드·데이터를 컴파일에서 빼는 매크로.
 - **모듈 의존 공개 범위**: 의존마다 Public(소비자에게 include·정의를 넘김)과 Private(이 모듈 안에서만 씀)을 나눈다.
 - **플러그인 활성 조건**: 프로젝트가 플러그인을 특정 타깃·플랫폼·구성에서만 켠다.
@@ -220,6 +220,11 @@ type 값은 `{ Runtime, Developer, Editor, ServerOnly, ClientOnly }`다(BD4). �
 - 조건은 `enabled: true`에만 붙일 수 있다.
 - 빈 목록, 중복 값, 모르는 값은 오류다.
 - 프로젝트 `targetPlatforms` 밖의 플랫폼을 적어도 오류다.
+
+**첫 엔진 플러그인**(Unreal 교환 UXR7, 2026-11-20 — 설계, 구현은 UnrealExchange UX1). `Engine/Plugins/Importers/UnrealExchange/`([Unreal 교환 형식](UnrealExchange.ko.md) 10.1절)가 엔진 저장소의 첫 플러그인이 된다. 엔진 규칙 프로젝트가 이미 `Engine/Plugins/**`의 규칙을 모으고(Build/Rules/Rocks.Engine.Rules.csproj:15) PluginCatalog가 그 경로를 찾는다.
+- 모듈은 `UnrealExchange` 하나이고 종류는 Developer다. 그래서 3.1절 표대로 Release 구성의 Game·Client·Server에 들어가지 않고 Program(commandlet)·Editor에만 들어간다. 이 문단의 활성 조건 필드를 쓰지 않아도 Shipping에서 빠진다.
+- 기본 비활성이다. 명령행 도구(`Programs/Commandlet`)가 이 플러그인을 켜서 `asset-import-unreal` 명령을 등록한다. 플러그인 모듈이 Commandlet 명령을 더하는 확장점은 UX1에서 Commandlet 쪽과 함께 정한다.
+- 플러그인 콘텐츠(엔진 `/Engine` 마운트가 생기기 전까지 둘 "구운 표면" 머티리얼 — MaterialSystem 11.3절)의 마운트 규칙도 UX1에서 정한다.
 - 없는 플러그인을 참조하면 문맥과 무관하게 오류다(지금과 같다).
 - Asan·Coverage 구성은 Debug로 본다(`ROCKS_BUILD_DEBUG`와 같다).
 
@@ -291,6 +296,7 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
   - `Modular`에서는 이 객체들이 공유 라이브러리마다 따로 생겨 같은 타입이 모듈마다 다른 키를 갖는다. `ObjectCast`·`IsNativeA`·등록 중복 판정이 깨진다.
 - UE는 모듈마다 생성 `.gen.cpp`를 두고, 타입 정보(`StaticClass` 등)를 그 안의 inline이 아닌 함수로 정의한다. 다른 모듈은 export된 그 함수를 부른다. Rocks도 같이 한다.
   - 메타 컴파일러는 모듈마다 생성 `.cpp`를 더 낸다. 타입마다 타입 키 저장소, 타입 정보·스키마 객체, 모듈 등록 함수를 여기에 정의하고 모듈 API 매크로로 export한다. 생성 헤더에는 선언과 inline 접근 함수만 남는다.
+  - 생성 코드를 헤더에서 소스로 옮기는 부분의 구현 스펙은 [리플렉션 생성 소스](ReflectionGeneratedSources.ko.md)다. 컴파일 시간 때문에 BS8보다 먼저 한다. 생성 소스는 리플렉션 헤더마다 하나, 모듈마다 등록용 하나다(GSD2). 모듈 API 매크로 주입과 `NativeTypeKey` 교체는 BS8에 남는다.
   - `NativeTypeKey<T>()`는 생성 `.cpp`가 정의한 그 타입의 키 저장소 주소를 돌려준다. 리플렉션하지 않는 타입에는 키가 없다(지금도 키는 등록 타입 조회에만 쓴다). 키 저장소는 ICF로 합쳐지지 않게 const가 아닌 객체로 둔다(지금 주석과 같은 이유).
   - 이 구조는 `Monolithic`에서도 같다. 링크 방식에 따라 생성 코드가 달라지지 않는다.
 - 그래서 모든 리플렉션 타입을 다른 모듈에서 조회·생성·`ObjectCast`([UI 툴킷](UiToolkit.ko.md) 7.3절 (f))할 수 있다. UE는 클래스를 export하지 않을 때 `UCLASS(MinimalAPI)`로 타입 정보만 export한다(지정자가 없으면 다른 모듈에서 `StaticClass`를 참조할 수 없다). Rocks는 타입 정보 export가 기본이라 이 지정자를 두지 않는다(7절).
@@ -369,7 +375,7 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 | BD25 | 모듈 A는 들어갈 수 있는 (타깃 종류, 구성) 집합이 자기 집합을 포함하는 모듈에만 의존한다(3.3절 표). 위반은 규칙 로드 때 오류다 | 권장안 |
 | BD26 | `ROCKS_WITH_EDITOR_DATA=0` 빌드는 에디터 패키지(쿠킹하지 않은 패키지)를 저장하지 않는다(Unsupported). 건너뛴 `EditorOnly` 값을 잃지 않기 위해서다 | 권장안 |
 | BD27 | 빌드가 모듈마다 `ROCKS_<MODULE>_API`를 정의한다. `Monolithic`이면 빈 값, `Modular`이면 자기 모듈은 export·다른 모듈은 import다(UE `<MODULE>_API`). 가시성·rpath 옵션은 UE와 같다. 규칙 파일은 이 매크로를 정의할 수 없고, 다른 모듈의 API 매크로를 붙이면 정책 오류다. 다른 모듈이 상속하는 클래스는 클래스 단위 export가 필요하다(메타 컴파일러 진단) | 권장안 |
-| BD28 | 메타 컴파일러는 모듈마다 생성 `.cpp`(UE `.gen.cpp`)를 내고, 타입 키·타입 정보·등록 함수를 거기 정의해 항상 export한다. `NativeTypeKey`는 그 키 저장소 주소다. UE `MinimalAPI` 지정자는 두지 않는다 | 권장안 |
+| BD28 | 메타 컴파일러는 생성 `.cpp`(UE `.gen.cpp` — 리플렉션 헤더마다 하나, 모듈마다 등록용 하나: [리플렉션 생성 소스](ReflectionGeneratedSources.ko.md) GSD2)를 내고, 타입 키·타입 정보·등록 함수를 거기 정의해 항상 export한다. `NativeTypeKey`는 그 키 저장소 주소다. UE `MinimalAPI` 지정자는 두지 않는다 | 권장안 |
 | BD29 | 공개 헤더에 쓰기 가능한 정적 저장소(const 아닌 inline 변수·inline/템플릿 함수의 static 지역 변수·헤더 정의 정적 데이터 멤버), `thread_local` 변수, 주소를 식별자로 쓰는 정적 객체를 두지 않는다(정책 `public-header-static-storage`, 링크 방식과 무관하게 검사). 서드파티는 UE와 같이 소비 모듈마다 링크하고, `HasGlobalState` 서드파티만 직접 소비 모듈을 하나로 제한한다 | 권장안 |
 | BD30 | 모듈 수명 객체·로더는 별도 스펙 [모듈 로더](ModuleLoader.ko.md)로 정한다(ML0–ML4는 BS5 전, ML5는 BS5와 함께). Modular 실행 파일은 부트 모듈만 import한다(MD21). 요구 계약은 3.8절 네 항목이다. 게임의 Editor 타깃은 설치 SDK의 엔진 모듈 공유 라이브러리를 공유하며 엔진 컴파일 환경을 바꿀 수 없다 | 권장안 |
 | BD31 | Editor보다 먼저 `Modular` Program 시험 빌드(FoundationTests)를 검사 체인에 넣어 export 누락과 공유 상태 위반을 잡는다(Windows·macOS). 대상 모듈의 `Private/`를 받는 시험 묶음(BD22)은 `Modular`에서 그 모듈의 공유 라이브러리에 함께 링크한다(UE도 모듈의 `Private/Tests` 시험을 모듈 바이너리에 컴파일한다 — 예 `Runtime/Core/Private/Tests`). 시험 등록 표는 Core가 한 벌 가진다 | 권장안 |
@@ -468,3 +474,4 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 |---|---|---|
 | 1 | 2026-11-19 | 첫 초안. UE 5.8 Templates 대조에서 나온 빌드 공백(타깃 종류, 의존 공개 범위, 플러그인 활성 조건)을 정리했다. 전용 서버 필수 요구(사용자 지시 — 네트워크 구성 뒤, 서버 플랫폼 Windows·macOS·Linux)로 3.7절·BD18·BS6·BS7을 더했다. 서브에이전트 3개(이 문서 UE·Rocks 코드 대조, UI 툴킷 7.3절 대조, Templates 독립 재대조)로 교차 검증해 반영했다: 플러그인 조건 해석을 UE 의미론으로 바꿈(치명), `bCompileAgainstEditor` 인용, 템플릿 사실, 에디터 데이터의 생성 코드·descriptor·로드 계약, UHT식 선언 규칙, 엔진 모듈 type, Release 배제 확장, 매크로 주입 위치, SDK 변형 key와 Program 기본 조합, 플러그인 처리 순서, 의존 소비처 전부, 서드파티 우회 제거, 시험 실행 파일 규칙, UnityBuildPch 제공 모듈 선택, depfile 선행, 9.1 표 보강. 반영본을 서브에이전트 1개로 다시 검증해 반영했다: 대리 클래스·interface 다중 상속(UI 툴킷 7.3절 (f)), 블록 안 허용 선언의 범위(BD6), 어휘 스캔 판정 수단, 에디터 패키지 저장 거부(BD26), `SourceGroups`(BD22), 타깃 종류별 Release 평가 플랫폼, type 사이 의존 규칙(BD25), 7절 표 보강, 인용 행 정정 |
 | 2 | 2026-11-19 | BD17을 사용자 결정("언리얼 방식대로")으로 확정했다. 3.8절 링크 방식을 더했다: `LinkType`(Editor 기본 `Modular`), `ROCKS_MONOLITHIC`, 모듈 API 매크로(BD27), 리플렉션 타입 정보 항상 export(BD28), 공개 헤더 정적 저장소·`thread_local` 금지와 서드파티 단일 소비(BD29), 모듈 로더 별도 스펙과 공유 빌드 환경(BD30), `Modular` 시험 빌드(BD31), 단계 BS8. BD5에 Editor 변형을 더하고 BS5·7절·9절을 고쳤다. 서브에이전트 1개로 교차 검증해 반영했다: 생성 코드가 모두 inline이고 타입 키가 주소라 `Modular`에서 갈라짐(BD28을 생성 `.cpp`로), 비공개 심볼을 쓰는 시험의 `Modular` 링크(BD31), `CompileWithEditor` Program의 SDK 변형 key, 서드파티 다중 소비 현황(UE와 같이 허용하고 전역 상태만 제한), 가시성 옵션을 UE와 같게(`-fvisibility-ms-compat`), rpath·install name·`-fPIC`, 상속 export, export 수 상한, 위반 목록 보강, 인용 행 정정. 같은 날 [모듈 로더](ModuleLoader.ko.md) 개정 1을 쓰며 BD30(단계 관계·실행 파일 import 범위), 3.8절 Linux `-soname`, BS8 빌드 정보 정의 위치를 고쳤다 |
+| 3 | 2026-11-20 | 3.6절에 첫 엔진 플러그인 `Engine/Plugins/Importers/UnrealExchange`(Unreal 교환 스펙 UXR7)를 적었다: Developer 모듈 하나라 Release 게임에서 빠짐, 기본 비활성·Commandlet이 켬, 명령 확장점과 플러그인 콘텐츠 마운트는 UX1에서 정함 |

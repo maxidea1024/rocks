@@ -282,7 +282,7 @@ Result<void> PathRunner::ResolveInstancedStep(PathCursor& cursor, PropertyPath p
     // InstancedStruct 멤버 단계는 없다).
     PropertyPathFailure failure;
     TypeLease type;
-    PathCursor query(cursor.registry_, cursor.access_, *cursor.target_,
+    PathCursor query(cursor.registry_, cursor.access_, cursor.target_,
                      PathOperation::QueryInstanced, nullptr, nullptr, &failure);
     query.instancedOut_ = &type;
     const PropertyPath prefix{Span<const PathStep>(path.steps.Data(), index + 1), path.keys};

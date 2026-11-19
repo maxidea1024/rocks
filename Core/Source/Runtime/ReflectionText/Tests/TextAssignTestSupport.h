@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ReflectionTestFixtures/AssignFixture.generated.h>
-#include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Meta/GeneratedType.h>
 #include <Object/ConstructionContext.h>
@@ -92,23 +91,11 @@ inline RegistryOptions AssignOptions(ReferenceObserver& observer, bool observed)
 // observed면 AssignHolder는 패키지(AssignTarget) package 아래에 만들고, AssignTarget 대상은 각자
 // 패키지다.
 struct Fixture {
+    // fixture 모듈(ReflectionTestFixtures)의 타입을 등록하고 AssignHolder lease를 잡는다. 등록
+    // 함수는 모듈 생성 헤더에 선언되어 있고 손으로 쓴 헤더는 그 헤더를 include하지 않으므로 정의는
+    // TextAssignTestSupport.cpp에 있다.
     explicit Fixture(Allocator& objectAllocator, bool observed_ = false,
-                     Allocator* observerAllocator = nullptr) noexcept
-        : observed(observed_), observerMemory(observerAllocator ? *observerAllocator : system),
-          types(system), observer(observerMemory, ReferenceObserver::DefaultMaxKeys),
-          registration(types, system),
-          objects(objectAllocator, types, {0x4153, 1}, AssignOptions(observer, observed_)),
-          access(objects.OwnerAccess()), diagnostics(system), roots(system) {
-        REQUIRE(generated::ReflectionTestFixtures::RegisterModuleTypes(registration));
-        auto acquired = types.Acquire(GeneratedType<AssignHolder>::Schema().id);
-        REQUIRE(acquired);
-        holder = Move(acquired.Value());
-        if (observed) {
-            auto created = MakeTarget();
-            package = created.Handle();
-            REQUIRE(roots.TryPushBack(Move(created)));
-        }
-    }
+                     Allocator* observerAllocator = nullptr) noexcept;
 
     ~Fixture() noexcept {
         holder = TypeLease{};

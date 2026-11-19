@@ -98,6 +98,53 @@ public static partial class PolicyChecks
         return failures;
     }
 
+    // 모듈 생성 헤더(<모듈>/<모듈>.module.generated.h·<모듈>/<모듈>.private.module.generated.h)의 include 지시문이다. 주석을 지운 한
+    // 줄에 맞춘다(문자열 리터럴 안의 철자는 줄 머리의 # 가 아니라 맞지 않는다).
+    private static readonly Regex ModuleGeneratedHeaderInclude = Pattern(
+        "^[ \\t]*#[ \\t]*include[ \\t]*[<\"][^<>\"]*\\.module\\.generated\\.h[>\"]");
+
+    /// <summary>
+    /// 손으로 쓴 헤더가 모듈 생성 헤더(<c>*.module.generated.h</c>)를 include하면 거부한다(Docs/Design/ReflectionGeneratedSources.ko.md 8절
+    /// GSD6, 규칙 <c>module-generated-header-include</c>). 모듈 생성 헤더는 타입 등록 함수의 선언만 담는다. 등록은 번역 단위(.cpp)가
+    /// 하는 일이므로 헤더가 끌어올 이유가 없고, 헤더가 include하면 그 헤더를 쓰는 모든 번역 단위가 등록 함수 선언에 묶인다. 헤더가
+    /// <c>GeneratedType&lt;T&gt;</c>를 써야 하면 그 타입의 생성 헤더(<c>&lt;모듈/타입.generated.h&gt;</c>)를 include하고, 등록 함수는
+    /// 모듈 생성 헤더를 include한 .cpp에서 부른다.
+    /// <list type="bullet">
+    /// <item>대상: 엔진 저장소(템플릿 포함)의 소유 <c>.h</c> 전부 — 모듈의 Public·Private, 시험(Tests), 프로그램, 템플릿.</item>
+    /// <item>제외: 이름에 <c>.generated.</c>가 든 파일(생성물), 외부 라이브러리 원본, <c>.cpp</c>·<c>.c</c>·<c>.mm</c>.</item>
+    /// <item>주석 안의 예시(사용 예의 #include 줄)와 문자열 리터럴 안의 철자는 보지 않는다.</item>
+    /// </list>
+    /// 알려진 lexical 한계: 매크로로 만든 include 철자, <c>.hpp</c>·<c>.inl</c> 같은 다른 헤더 확장자(소유 소스는 쓰지 않는다)는 검사하지
+    /// 않는다. 다른 헤더를 거친 간접 include는 그 헤더에서 보고한다.
+    /// </summary>
+    public static IReadOnlyList<CheckFailure> ModuleGeneratedHeaderIncludes(string root)
+    {
+        List<CheckFailure> failures = [];
+        foreach (string path in NativeSources(root, OwnedSourceRoots))
+        {
+            if (!Path.GetExtension(path).Equals(".h", StringComparison.OrdinalIgnoreCase) ||
+                Path.GetFileName(path).Contains(".generated.", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            string relative = Relative(root, path);
+            int line = 0;
+            foreach (string text in WithoutComments(File.ReadAllText(path, StrictUtf8)).Split('\n'))
+            {
+                ++line;
+                if (ModuleGeneratedHeaderInclude.IsMatch(text))
+                {
+                    failures.Add(new(relative, line, "module-generated-header-include",
+                        "a hand-written header must not include a module generated header (*.module.generated.h); include the generated " +
+                        "header of each type it uses (<Module/Type.generated.h>) and call the registration function from a .cpp"));
+                }
+            }
+        }
+
+        return failures;
+    }
+
     // 모듈 규칙들의 Metadata 목록이다: (저장소 상대 모듈 폴더, 철자) 항목, 리터럴 목록이 아니라 읽지 못한 모듈 폴더, 그 위치의
     // 실패.
     private sealed record MetadataListing(List<(string Directory, string Spelling)> Entries, HashSet<string> Unknown, List<CheckFailure> Failures);

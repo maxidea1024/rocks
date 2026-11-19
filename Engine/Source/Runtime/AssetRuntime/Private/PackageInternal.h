@@ -91,6 +91,12 @@ inline bool IsMalformedEmptyBulkRef(uint64 rawBytes, const Sha256Digest& sha256)
     return false;
 }
 
+// Tags Record를 검증한다(AS 5.2절 — 키 정렬): envelope·TLV 구조(RecordReader), 필드 ID(태그 키)가
+// 기록 순서로 엄격 오름차순(Guid (high, low) 순 — 중복 없음). 값 스키마는 A2가 정한다. 위반은
+// InvalidArgument, 할당 실패는 OutOfMemory다. writer 옵션 검증과 reader가 같이 쓴다(정의는
+// PackageReader.cpp).
+Result<void> ValidateTagsRecord(Allocator& scratch, Span<const uint8> bytes) noexcept;
+
 // (assetId, kind) 정렬 비교다.
 inline bool DependencyLess(const PackageDependencyEntry& left,
                            const PackageDependencyEntry& right) noexcept {

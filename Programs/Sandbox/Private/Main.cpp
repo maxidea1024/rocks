@@ -48,8 +48,8 @@ bool ParseFrames(const char* text, rocks::uint64& frames) noexcept {
 }
 
 int RunSelfTest(rocks::Allocator& allocator) noexcept {
-    rocks::LogSystem logs(allocator, rocks::LogSystemConfig::ForTool());
     rocks::StderrLogSink stderrSink;
+    rocks::LogSystem logs(allocator, rocks::LogSystemConfig::ForTool());
     if (!logs.AddSink(stderrSink) || !logs.Start()) {
         fprintf(stderr, "Sandbox: the log system could not start\n");
         return 1;

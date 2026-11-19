@@ -5,7 +5,8 @@ using Rocks.Tooling.Common;
 namespace Rocks.ToolTests;
 
 // MetaCompiler 모듈 모드 시험이다(Docs/Design/ReflectionFoundations.ko.md 1.3–1.5절): 여러 헤더를 한 번에 생성하고,
-// 의존 모듈 descriptor를 import해 base·참조를 풀고, private 헤더를 Private 생성 루트와 private 집계로 나눈다.
+// 의존 모듈 descriptor를 import해 base·참조를 풀고, private 헤더를 Private 생성 루트로 나누고, 등록 함수를 모듈 생성 헤더(선언)와
+// 모듈 생성 소스(정의 — Docs/Design/ReflectionGeneratedSources.ko.md 5.5절)로 낸다.
 internal static partial class ModuleMetaTests
 {
     private const string Parent = "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\nnamespace probe {\n" +
@@ -159,6 +160,9 @@ internal static partial class ModuleMetaTests
 
         public string Generated(string module, string relative) => Path.Combine(temporary.Root, "out", module, relative);
 
+        // 모듈 생성 소스(등록 함수 정의)의 경로다. 출력 루트의 Source 아래이고 include 루트가 아니다.
+        public string ModuleSource(string module) => Generated(module, Path.Combine("Source", module + ".module.generated.cpp"));
+
         public string Descriptor(string module) => Path.Combine(temporary.Root, "out", module + ".rocksmeta.json");
 
         public void Write(string relative, string text) => temporary.Write(relative, text);
@@ -253,9 +257,10 @@ internal static partial class ModuleMetaTests
             return RunAsync("Upper", arguments, [Source("Upper/Public")], [Source("Upper/Private")], [Source("Lower/Public"), Generated("Lower", "Public")]);
         }
 
-        // 임의 입력 집합으로 Upper를 생성한다(Lower descriptor import).
+        // 임의 입력 집합으로 Upper를 생성한다(Lower descriptor import). dependencyModule은 include 검색 순서에 넣을 의존 모듈의 생성
+        // public 루트다. verifySources가 false면 빌드처럼 생성 소스를 MetaCompiler 안에서 컴파일하지 않는다.
         public Task<ProcessResult> RunUpperInputsAsync(IReadOnlyList<(string Path, string Include, bool Private)> inputs, IReadOnlyList<string>? imports = null,
-            string dependencyModule = "Lower")
+            string dependencyModule = "Lower", bool verifySources = true)
         {
             List<string> arguments = ["--module", "Upper"];
             foreach ((string path, string include, bool isPrivate) in inputs)
@@ -272,7 +277,8 @@ internal static partial class ModuleMetaTests
                 arguments.AddRange(["--import", import]);
             }
 
-            return RunAsync("Upper", arguments, [Source("Upper/Public")], [Source("Upper/Private")], [Source("Lower/Public"), Generated(dependencyModule, "Public")]);
+            return RunAsync("Upper", arguments, [Source("Upper/Public")], [Source("Upper/Private")], [Source("Lower/Public"), Generated(dependencyModule, "Public")],
+                verifySources: verifySources);
         }
 
         public string Source(string relative) => temporary.FilePath(relative);
@@ -296,9 +302,11 @@ internal static partial class ModuleMetaTests
         }
 
         // include 검색 순서는 빌드(MetadataLayout.IncludeOrder)와 같다: 자기 public 원본·생성 Public, 자기 private 원본·생성
-        // Private, 의존 모듈의 public 원본·생성 루트, Core.
+        // Private, 의존 모듈의 public 원본·생성 루트, Core. 기본으로 --verify-sources를 넘겨 생성 소스(등록 함수 정의)도 게시 전에
+        // 컴파일하게 한다(빌드는 그 모듈의 compile action이 한다 — 시험은 MetaCompiler만 실행한다).
         private async Task<ProcessResult> RunAsync(string module, List<string> moduleArguments, IReadOnlyList<string> ownPublic,
-            IReadOnlyList<string> ownPrivate, IReadOnlyList<string> dependencies, string? descriptor = null, string? manifestModule = null)
+            IReadOnlyList<string> ownPrivate, IReadOnlyList<string> dependencies, string? descriptor = null, string? manifestModule = null,
+            bool verifySources = true)
         {
             string generator = Path.GetFullPath(options.Required("metacompiler"));
             string executable = generator;
@@ -310,6 +318,11 @@ internal static partial class ModuleMetaTests
             }
 
             arguments.AddRange(moduleArguments);
+            if (verifySources)
+            {
+                arguments.Add(MetaCompilerArguments.VerifySources);
+            }
+
             arguments.AddRange(["--output-root", Path.Combine(temporary.Root, "out", module), "--descriptor", descriptor ?? Descriptor(module),
                 "--compiler", options.Required("compiler"), "--identity-manifest", Source((manifestModule ?? module) + "/" + (manifestModule ?? module) + ".rocksids.json")]);
             IEnumerable<string> includes = ownPublic.Append(Generated(module, "Public"))

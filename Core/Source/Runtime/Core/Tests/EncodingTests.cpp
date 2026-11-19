@@ -43,6 +43,25 @@ TEST(Crc32_StandardCheckValues) {
     CHECK(Crc32(Span<const uint8>(all.Data() + 4, 5), first) == 0xcbf43926u);
 }
 
+// Crc32Combine: 이어 붙인 입력의 CRC가 두 조각의 CRC로 만든 값과 같다(빈 뒤 조각, 1 byte, 홀수·
+// 짝수·2의 거듭제곱 길이, 큰 길이). zlib crc32_combine과 같은 값이다.
+TEST(Crc32_CombineMatchesConcatenation) {
+    uint8 bytes[4099];
+    for (usize index = 0; index < sizeof(bytes); ++index) {
+        bytes[index] = static_cast<uint8>(index * 131u + 7u);
+    }
+
+    const usize splits[] = {0, 1, 2, 3, 64, 1000, 2048, 4098, 4099};
+    for (usize split : splits) {
+        const Span<const uint8> first(bytes, split);
+        const Span<const uint8> second(bytes + split, sizeof(bytes) - split);
+        CHECK(Crc32Combine(Crc32(first), Crc32(second), second.Size()) ==
+              Crc32(Span<const uint8>(bytes, sizeof(bytes))));
+    }
+
+    static_assert(Crc32Combine(0x12345678u, 0, 0) == 0x12345678u, "empty second part keeps first");
+}
+
 TEST(Crc32_LookupTableMatchesPolynomial) {
     // 헤더의 상수 표를 다항식 0xEDB88320의 bit 단위 계산으로 독립 생성한 값과 전부 대조한다.
     int mismatches = 0;
