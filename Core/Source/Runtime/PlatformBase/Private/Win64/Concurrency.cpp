@@ -1,5 +1,6 @@
 #include <Platform/CrashHandler.h>
 #include <Platform/Thread.h>
+#include <Platform/Atomics.h>
 #include <Platform/Fatal.h>
 #include <Platform/PlatformMath.h>
 #include "../Common/ThreadInternal.h"
@@ -7,6 +8,11 @@
 #include <Windows.h>
 #include <process.h>
 #include <new>
+
+// ntdll: 프로세스가 종료 절차(LdrShutdownProcess)에 들어갔는지다. SDK 헤더에 선언이 없어 직접
+// 선언한다.
+extern "C" NTSYSAPI BOOLEAN NTAPI RtlDllShutdownInProgress(VOID);
+#pragma comment(lib, "ntdll")
 
 namespace rocks::platform {
 
@@ -95,6 +101,67 @@ usize CopyCurrentThreadName(char* buffer, usize capacity) noexcept {
     LocalFree(description);
     // 실패하면 buffer는 이미 빈 문자열이다.
     return converted ? converted.length : 0;
+}
+
+namespace {
+
+struct ExitSlotEntry {
+    ThreadExitSlot::Callback callback = nullptr;
+    DWORD index = FLS_OUT_OF_INDEXES;
+};
+
+ExitSlotEntry exitSlots[MaxThreadExitSlots];
+uint32 exitSlotCount = 0;
+
+// FLS callback은 값만 받으므로 칸마다 다른 함수를 건다(어느 칸인지 알아야 값을 지울 수 있다).
+template <uint32 Slot>
+void WINAPI ExitSlotTrampoline(void* value) noexcept {
+    const ExitSlotEntry& entry = exitSlots[Slot];
+    // 값을 먼저 지운다: 남아 있으면 Windows가 callback을 다시 부를 수 있다(UE 5.8
+    // WindowsPlatformTLS.cpp OnThreadExit도 같다).
+    FlsSetValue(entry.index, nullptr);
+    // 프로세스 종료 중에는 부르지 않는다. 다른 스레드는 이미 강제 종료돼 잠금을 쥔 채일 수 있다.
+    if (RtlDllShutdownInProgress() != FALSE) {
+        return;
+    }
+
+    entry.callback(value);
+}
+
+constexpr PFLS_CALLBACK_FUNCTION ExitSlotTrampolines[MaxThreadExitSlots] = {
+    &ExitSlotTrampoline<0>, &ExitSlotTrampoline<1>, &ExitSlotTrampoline<2>, &ExitSlotTrampoline<3>,
+    &ExitSlotTrampoline<4>, &ExitSlotTrampoline<5>, &ExitSlotTrampoline<6>, &ExitSlotTrampoline<7>};
+
+} // namespace
+
+ThreadExitSlot::ThreadExitSlot(Callback callback) noexcept {
+    if (callback == nullptr) {
+        return;
+    }
+
+    const uint32 slot = AtomicFetchAdd<MemoryOrder::AcquireRelease>(&exitSlotCount, 1);
+    if (slot >= MaxThreadExitSlots) {
+        return;
+    }
+
+    exitSlots[slot].callback = callback;
+    const DWORD index = FlsAlloc(ExitSlotTrampolines[slot]);
+    if (index == FLS_OUT_OF_INDEXES) {
+        return;
+    }
+
+    // 값은 이 생성자가 끝난 뒤에만 둘 수 있으므로, trampoline이 불리기 전에 번호가 적혀 있다.
+    exitSlots[slot].index = index;
+    native_ = index;
+    valid_ = true;
+}
+
+void* ThreadExitSlot::Get() const noexcept {
+    return valid_ ? FlsGetValue(static_cast<DWORD>(native_)) : nullptr;
+}
+
+bool ThreadExitSlot::Set(void* value) noexcept {
+    return valid_ && FlsSetValue(static_cast<DWORD>(native_), value) != 0;
 }
 
 namespace detail {

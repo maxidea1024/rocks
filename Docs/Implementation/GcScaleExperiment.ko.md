@@ -1503,3 +1503,76 @@ AL2의 주소 범위에서 두 가지를 고쳤다(설계 18.4절 개정 10).
 
 - 이 기계(Windows)에서 볼 수 없는 것: POSIX에서 매핑이 쪼개지지 않는다는 것 자체(Windows는 두 예약 종류가 같다). POSIX 쪽 변경(`Posix/VirtualMemory.cpp`, `Android/AndroidPosix.cpp`, 공통 구현, `BinnedAllocator.cpp`, 시험)은 NDK `-fsyntax-only`로 확인했고, macOS는 push의 `[ci]`로 새 종류의 시험(`PlatformVirtualMemoryOpenReservationLifecycle` — 접근을 열어 둔 예약에서 쓰기)이 돈다.
 - 검증(AL1b와 묶어 한 번): Debug Foundation 2,570개, Debug EngineTests 2,976개 통과. Fatal 대조 프로그램(`allocator-binned-invalid-0..6`) 문구 그대로. format·policy 통과.
+
+### 25.5 AL3: 스레드 캐시·이전 칸·스레드 종료 정리
+
+`platform::ThreadExitSlot`(PlatformBase):
+
+- 스레드별 포인터 칸 하나와, 값이 null이 아닌 스레드가 끝날 때 그 스레드에서 불리는 정리 함수다. Windows는 `FlsAlloc`의 callback, POSIX는 `pthread_key_create`의 소멸자다(UE 5.8 `WindowsPlatformTLS.cpp`의 `FlsAlloc(&OnThreadExit)`와 같은 장치).
+- Windows의 FLS callback은 값만 받으므로 칸마다 다른 trampoline을 건다(상한 `MaxThreadExitSlots` 8). trampoline은 값을 먼저 지우고(UE도 같다 — 남아 있으면 다시 불릴 수 있다), 프로세스 종료 절차 중이면(`RtlDllShutdownInProgress`) 부르지 않는다: 그때 다른 스레드는 이미 강제 종료돼 잠금을 쥔 채일 수 있다. POSIX도 값을 지운 뒤에 부르고 `exit`에서는 부르지 않으므로 계약이 같다.
+- 시험(`ThreadExitSlotTests.cpp` 4개): 값을 둔 스레드가 끝나면 그 스레드에서 한 번 불리고 `Join`이 그 뒤에 돌아오는 것, 값이 스레드마다 따로인 것, 정리 함수 안에서 그 칸은 이미 null이고 그 스레드의 `thread_local`을 읽고 쓸 수 있는 것, 값을 두지 않았거나 null로 되돌린 스레드는 불리지 않는 것, `platform::Thread`가 아닌 OS 스레드(시험 지원 `test::RunOnOsThread` — Windows `CreateThread`, POSIX `pthread_create`)에서도 불리는 것, callback 없는 칸은 값을 받지 않는 것.
+
+`BinnedAllocator`의 스레드 캐시:
+
+- 스레드마다·인스턴스마다 등급별 묶음 둘(부분·가득). 묶음 한도는 64개 또는 64KB 가운데 작은 쪽이다(8192 등급은 8개). 할당은 부분 묶음 → 가득 묶음 → 이전 칸 → 등급 잠금 아래 slab(한 묶음을 뗀다) 순서, 반환은 부분 묶음 → 가득 묶음과 교체 → 밀려난 가득 묶음은 이전 칸(등급마다 8칸, 비교 교환) → 칸이 없으면 slab이다. 이전 칸에는 가득 찬 묶음만 간다(개수를 블록에 적지 않는다).
+- 캐시 경로의 반환은 잠금 없이 slab 머리의 뗀 블록 수(acquire)와 블록 안 표지를 보고, 표지를 비교 교환으로 세운다(같은 블록의 동시 반환은 한쪽만 성공). 묶음으로 뗄 때 표지를 세운 뒤에 뗀 블록 수를 게시한다.
+- 스레드 쪽: `thread_local` 포인터가 그 스레드의 기록(인스턴스 번호 → 캐시)을 가리키고 "마지막에 쓴 인스턴스" 한 칸을 먼저 본다. 인스턴스 번호는 프로세스에서 재사용하지 않는다. 기록은 `ThreadExitSlot`에 걸려 스레드가 끝날 때 캐시를 인스턴스로 돌려주고(가득 묶음은 이전 칸 먼저, 부분 묶음은 slab으로), 계수를 인스턴스 합계로 옮긴다. 종료 정리가 지나간 스레드는 "종료한 스레드"로 표시돼 캐시를 다시 만들지 않는다.
+- 인스턴스 등록부(잠금·살아 있는 인스턴스 목록·다음 번호·종료 칸)는 처음 쓸 때 만들고 파괴하지 않는다. 인스턴스 파괴는 등록부에서 번호를 지우고 남은 캐시(다른 스레드 것 포함)를 모두 비워 해제한 뒤, 이전 칸을 비우고 "쓰는 slab이 없음"을 확인한다(어긋나면 Fatal `slab accounting diverged`).
+- `BinnedAllocatorConfig::threadCaches`(기본 켬)를 끄면 모든 작은 요청이 등급 잠금 경로다. 캐시를 만들지 못한 호출과 종료한 스레드도 이 경로를 쓴다.
+- `Trim`은 호출 스레드의 캐시와 이전 칸을 slab으로 돌려준 뒤 빈 slab을 decommit한다(다른 스레드의 캐시는 건드리지 않는다). `Stats`는 캐시의 계수와 인스턴스 합계를 더한다.
+
+시험:
+
+- AL2의 `CoreBinned` 시험 가운데 계약 시험 7개를 캐시 끔·켬 두 구성으로 돌린다(slab 수준 동작을 보는 시험은 캐시를 끈다).
+- `BinnedAllocatorThreadCacheTests.cpp` 10개: 묶음 단위 refill(떼었지만 내준 적 없는 블록과 뗀 적 없는 블록 127개가 모두 `NotFound`), 이전 칸에는 가득 찬 묶음만(세 등급 — 12 묶음을 반환하면 캐시 2·이전 칸 8·slab 2, 묶음 길이 = 등급 한도, 다시 할당하면 이전 칸을 slab보다 먼저), 부분 묶음은 스레드 종료·`Trim` 때 slab으로(F7), 스레드가 끝나면 캐시와 계수가 인스턴스로 돌아가고 남긴 블록은 다른 스레드가 반환, `Trim`은 다른 스레드의 캐시를 건드리지 않음, OS 스레드의 캐시도 돌아감, 인스턴스가 스레드보다 먼저 파괴돼도 되고 같은 주소에 다시 만든 인스턴스와 섞이지 않으며 죽은 인스턴스의 기록 항목은 다음 캐시를 만들 때 버려짐, 캐시 만들기 실패는 등급 잠금 경로로, 종료 정리가 지나간 스레드는 등급 잠금 경로로, 한 스레드가 할당하고 다른 스레드가 반환(명시 인계 40 round × 96개), 같은 주소의 동시 반환 4,096 round × 2 구성에서 round마다 정확히 한쪽만 성공.
+- 스레드 시험의 순서는 모두 명시 gate(단계 번호, 시작 문, 인계 칸)와 `Join`으로 만든다. sleep이나 시간 대기는 없다.
+
+음성 대조 14종 모두 잡혔다(Debug `Core` 대상 `CoreBinned`·`ThreadExitSlot`, 대조마다 다시 빌드):
+
+| 대조 | 바꾼 것 | 잡은 시험 |
+|---|---|---|
+| C1 | 묶음으로 뗀 블록에 표지를 세우지 않음(F1) | `CoreBinnedCacheRefillsByBundle`(내준 적 없는 블록의 반환이 성공) |
+| C2 | 스레드 종료 때 부분 묶음을 이전 칸에 넣음(F7) | `…PartialBundlesReturnToSlabsAtThreadExitAndTrim` |
+| C3 | 인스턴스 파괴가 등록부에서 번호를 지우지 않음 | 프로세스가 Fatal로 끝남(종료 코드 3) |
+| C4 | 이전 칸 넣기가 찬 칸을 덮어씀(비교 교환 대신 대입) | commit된 slab이 남음(`committedBytes == 0` 실패) 뒤 Fatal |
+| C5 | 스레드 종료 hook이 캐시를 비우지 않음 | 여덟 시험(`…ThreadExitReturnsCacheAndKeepsLiveBlocks`·`…RawOsThreadCacheIsReturned` 등) |
+| C6 | 반환 표지를 비교 교환 대신 대입으로 세움 | 시험이 멈춤 — 같은 블록이 두 캐시에 들어 목록이 고리가 된다(실행기가 끊음. 지금 실행기는 300 s 제한 시간으로 끊는다) |
+| C7 | `Trim`이 이전 칸을 비우지 않음 | 아홉 시험(`Trim` 뒤 commit된 slab이 남음) |
+| C8 | 할당의 빠른 경로가 인스턴스 번호를 보지 않고 마지막 캐시를 씀 | `…CacheCreationFailureUsesLockedPath` 뒤 Fatal(다른 인스턴스의 캐시에서 받음) |
+| C9 | 파괴가 이전 칸을 비우지 않음 | Fatal `slab accounting diverged`(파괴의 자체 검사) |
+| C10 | 끝난 스레드의 계수를 인스턴스로 옮기지 않음 | `…ConcurrentAllocationStress`(누적 할당 수) 뒤 Fatal |
+| C11 | 이전 칸이 찼을 때 밀려난 가득 묶음을 버림 | `…TransferSlotsHoldOnlyFullBundles`(`Trim` 뒤 slab이 남음) 뒤 Fatal |
+| C12 | 종료 hook이 스레드를 "종료한 스레드"로 표시하지 않음 | 접근 위반으로 끝남(`…ExitedThreadUsesLockedPath` — 해제한 기록을 다시 봄) |
+| C13 | 캐시 경로의 반환이 뗀 블록 수를 보지 않음(4단계) | `…CacheRefillsByBundle`, `…CacheCreationFailureUsesLockedPath` |
+| C14 | 캐시를 만들 때 죽은 인스턴스의 항목을 버리지 않음 | `…InstanceDestroyedBeforeItsThreadsExit`(기록 항목 수) |
+
+측정(25.1절과 같은 방법, 3 round 최솟값). 작은 벤치:
+
+| 할당자 | 쌍(16–8192 B) | 묶음 4096×64 B | 인계: 다른 스레드 / 같은 스레드 | 동시 1 스레드 | 동시 8 스레드 |
+|---|---|---|---|---|---|
+| platform | 24.7–25.3 ns | 28.2 ns/op | 92.1 / 30.5 ns/쌍(×3.0) | 38.1 M쌍/s | 160.7 M쌍/s(×4.0–4.2) |
+| `BinnedAllocator` 전(25.1절) | 73.9–155.6 ns | 5,382 ns/op | 541 / 444 ns/쌍 | 3.0 M쌍/s | 0.11 M쌍/s(×0.04) |
+| `BinnedAllocator` 후 | 9.0–9.2 ns | 7.0 ns/op | 21.6 / 11.1 ns/쌍(×1.95) | 103.8 M쌍/s | 462.9 M쌍/s(×4.2–4.6) |
+
+객체 생성·회수(객체당 ns):
+
+| 살아 있는 객체 | 할당자 | 생성+연결 | churn 생성+연결 | churn 회수 | 종료 회수 |
+|---|---|---|---|---|---|
+| 20K | bump | 565.9 | 572.6 | 32.0 | 55.1 |
+| 20K | platform | 747.0 | 669.7 | 89.5 | 153.2 |
+| 20K | `BinnedAllocator` | 627.6 | 510.4 | 51.8 | 77.4 |
+| 200K | bump | 856.8 | 1,043 | 36.6 | 93.5 |
+| 200K | platform | 1,151 | 1,154 | 103.0 | 199.8 |
+| 200K | `BinnedAllocator` | 975.7 | 988.8 | 60.2 | 131.2 |
+| 1M | bump | 1,187 | 1,239 | 39.0 | 100.7 |
+| 1M | platform | 1,422 | 1,349 | 109.5 | 214.2 |
+| 1M | `BinnedAllocator` | 1,265 | 1,232 | 76.6 | 140.9 |
+
+- 1M이 끝난다(전에는 생성부터 객체당 0.3 ms라 20K를 넘기지 못했다). 모든 항목에서 플랫폼 할당보다 빠르다.
+- 할당자 몫(bump를 뺀 값, 1M): 생성 78 ns(플랫폼 235의 33%), churn 생성은 bump와 같은 수준(−8 — 반환한 블록을 다시 써서 새 메모리만 쓰는 bump보다 캐시에 유리하다. 플랫폼 110), churn 회수 37.6 ns(플랫폼 70.5의 53%), 종료 회수 40.2 ns(플랫폼 113.5의 35%).
+- gate(설계 18.8절 제안) 대비: A3 쌍 9.1 ns(목표 40 이하), A4 다른 스레드 반환이 같은 스레드의 1.95배(목표 3배 이내), A5 8 스레드가 1 스레드의 4.2–4.6배(목표 4배 이상)는 채운다. A2는 "플랫폼 이하"는 채우고 "몫이 플랫폼의 절반 이하"는 생성·종료가 채우며 churn 회수가 53%로 조금 넘는다 — 반환마다의 표지 비교 교환(잠금 접두 명령) 몫을 AL5에서 따로 재서 gate를 확정한다. A6(메모리)·A7(GC churn 회수 시나리오)은 AL5에서 잰다.
+
+검증:
+
+- Debug `Core` 대상: `ThreadExitSlot` 4개, `CoreBinned` 23개(AL2의 13개 + 캐시 10개), `Thread` 38개 통과. POSIX 쪽(`Posix/Concurrency.cpp`, 시험 지원 `Posix/OsThread.cpp`, 시험, `BinnedAllocator.cpp`)은 NDK `-fsyntax-only` 통과, macOS는 push의 `[ci]`로 돈다.
+- Debug Foundation·EngineTests 빌드 뒤 범위 시험: Foundation `CoreBinned` 23·`ThreadExitSlot` 4·`Thread` 57·`Allocator` 37, EngineTests `CoreBinned` 23·`ThreadExitSlot` 4·`Thread` 60·`Gc` 110 통과. format·policy 통과.
