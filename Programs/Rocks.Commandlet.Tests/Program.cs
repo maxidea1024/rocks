@@ -36,6 +36,11 @@ await Check("invalid check argument", ["core-check", "한글🎮"], 2, "", "acce
 await Check("empty command", [""], 2, "", "Unknown command");
 await Check("oversized argument", [new string('a', 4097)], 2, "", "argument");
 
+// config-dump: 엔진 호스트와 같은 설정 부트를 거친 값과 출처(엔진 층 Engine.json의 TracePresets 포함).
+await Check("config dump", ["config-dump"], 0, "\"section\": \"TracePresets\"", "");
+await Check("config dump engine file", ["config-dump"], 0, "\"tag\": \"Engine.json\"", "");
+await Check("config dump usage", ["config-dump", "extra"], 2, "", "usage: config-dump");
+
 // trace-report: 사용법·파일 오류(원본 오류 코드 포함)·trace가 아닌 입력·머리만 있는 trace(표준 출력과 파일 출력).
 string traceDirectory = Path.Combine(Path.GetTempPath(), $"rocks-trace-report-{Environment.ProcessId}");
 Directory.CreateDirectory(traceDirectory);
@@ -68,6 +73,137 @@ try
 finally
 {
     Directory.Delete(traceDirectory, true);
+}
+
+// log keygen·seal·decode: 왕복, 끝 표시 없음(비정상 종료), 변조, 잘못된 키, 덮어쓰기 거부.
+string logDirectory = Path.Combine(Path.GetTempPath(), $"rocks-log-commandlet-{Environment.ProcessId}");
+Directory.CreateDirectory(logDirectory);
+try
+{
+    string publicKey = Path.Combine(logDirectory, "log.pub");
+    string privateKey = Path.Combine(logDirectory, "log.key");
+    string plain = Path.Combine(logDirectory, "plain.log");
+    string sealedLog = Path.Combine(logDirectory, "sealed.log");
+    string truncated = Path.Combine(logDirectory, "truncated.log");
+    string tampered = Path.Combine(logDirectory, "tampered.log");
+    string text = string.Concat(Enumerable.Range(0, 300).Select(index => $"[Info][Game] line {index}\n"));
+    File.WriteAllText(plain, text);
+    await Check("log usage", ["log"], 2, "", "log keygen");
+    await Check("log keygen", ["log", "keygen", publicKey, privateKey], 0, "log.file.recipient_key = ", "");
+    await Check("log keygen refuses to overwrite", ["log", "keygen", publicKey, privateKey], 1, "", "cannot create");
+    // 한쪽 경로만 이미 있으면 아무 키도 남기지 않는다(짝이 맞지 않는 키 쌍 금지).
+    string lonePublic = Path.Combine(logDirectory, "lone.pub");
+    string lonePrivate = Path.Combine(logDirectory, "lone.key");
+    File.WriteAllBytes(lonePrivate, [1, 2, 3]);
+    await Check("log keygen with an existing private path", ["log", "keygen", lonePublic, lonePrivate], 1, "", "cannot create");
+    bool loneClean = !File.Exists(lonePublic) && File.ReadAllBytes(lonePrivate).Length == 3;
+    Console.WriteLine($"log keygen leaves no half pair: {(loneClean ? "PASS" : "FAIL")}");
+    if (!loneClean)
+    {
+        ++failures;
+    }
+
+    await Check("log seal", ["log", "seal", plain, sealedLog, "--public", publicKey], 0, "", "");
+    await Check("log decode", ["log", "decode", sealedLog, "--key", privateKey], 0, "line 299\n", "");
+    await Check("log decode json status", ["log", "decode", sealedLog, "--key", privateKey, "--json"], 0, "line 0\n",
+        "\"endMarker\": true");
+    byte[] sealedBytes = File.ReadAllBytes(sealedLog);
+    // 마지막 기록(길이 4 + 빈 평문의 봉인 17)이 끝 표시다. 떼면 비정상 종료한 파일이다.
+    File.WriteAllBytes(truncated, sealedBytes[..^21]);
+    await Check("log decode without end marker", ["log", "decode", truncated, "--key", privateKey], 0, "line 299\n",
+        "no end marker (abnormal termination)");
+    byte[] changed = (byte[])sealedBytes.Clone();
+    changed[1200] ^= 0x01;
+    File.WriteAllBytes(tampered, changed);
+    await Check("log decode tampered", ["log", "decode", tampered, "--key", privateKey], 1, "", "authentication failed");
+    await Check("log decode wrong key file", ["log", "decode", sealedLog, "--key", publicKey], 1, "", "not a log private key");
+    await Check("log decode not a log", ["log", "decode", plain, "--key", privateKey], 1, "", "not an encrypted Rocks log file");
+    bool noPlaintext = !System.Text.Encoding.UTF8.GetString(sealedBytes).Contains("line 1", StringComparison.Ordinal);
+    Console.WriteLine($"log seal hides plaintext: {(noPlaintext ? "PASS" : "FAIL")}");
+    if (!noPlaintext)
+    {
+        ++failures;
+    }
+
+    // log view: 폴더는 시작 시각·번호 순, JSON lines는 모든 필드, 기본 레이아웃 텍스트는 시각·레벨·
+    // 카테고리로 거른다. 봉인 파일은 --key로 읽는다.
+    string viewDirectory = Path.Combine(logDirectory, "view");
+    Directory.CreateDirectory(viewDirectory);
+    const string JsonWarning = "{\"t\":\"2026-11-18T00:00:01.000Z\",\"lvl\":\"Warning\",\"cat\":\"Net\"," +
+        "\"event\":\"00000000000000ab\",\"msg\":\"slow request\",\"corr\":{\"request\":55}}";
+    const string JsonInfo = "{\"t\":\"2026-11-18T00:00:02.000Z\",\"lvl\":\"Info\",\"cat\":\"Net\"," +
+        "\"event\":\"00000000000000cd\",\"msg\":\"ok\"}";
+    const string TextInfo = "[2026-11-18T01:02:03.004Z][Info][Engine] engine started";
+    const string TextWarning = "[2026-11-18T01:02:04.000Z][Warning][Graphics.D3D12] device slow";
+    const string TextError = "[2026-11-18T01:02:05.000Z][Error][Graphics] device lost";
+    File.WriteAllText(Path.Combine(viewDirectory, "Host-20261118T010203004Z-2.log"), TextError + "\n");
+    File.WriteAllText(Path.Combine(viewDirectory, "Host-20261118T010203004Z.log"), TextInfo + "\n" + TextWarning + "\n");
+    File.WriteAllText(Path.Combine(viewDirectory, "Host-20261118T000000000Z.log"), JsonWarning + "\n" + JsonInfo + "\n");
+    File.WriteAllText(Path.Combine(viewDirectory, "notes.txt"), "not a log\n");
+    async Task CheckView(string label, string[] filters, params string[] lines)
+    {
+        string[] arguments = ["log", "view", viewDirectory, .. filters];
+        ProcessResult result = await ProcessRunner.RunAsync(new(executable, arguments, workingDirectory,
+            Timeout: TimeSpan.FromSeconds(15)));
+        string expected = string.Concat(lines.Select(line => line + "\n"));
+        bool passed = result.ExitCode == 0 && result.StdOut == expected && result.StdErr.Length == 0;
+        Console.WriteLine($"{label}: {(passed ? "PASS" : "FAIL")}");
+        if (!passed)
+        {
+            ++failures;
+            Console.Error.WriteLine($"  exit={result.ExitCode}; stdout={result.StdOut}; stderr={result.StdErr}");
+        }
+    }
+
+    await CheckView("log view folder order", [], JsonWarning, JsonInfo, TextInfo, TextWarning, TextError);
+    await CheckView("log view level", ["--level", "warning"], JsonWarning, TextWarning, TextError);
+    await CheckView("log view category", ["--category", "graphics"], TextWarning, TextError);
+    await CheckView("log view correlation", ["--correlation", "request=55"], JsonWarning);
+    await CheckView("log view event", ["--event", "00000000000000AB"], JsonWarning);
+    await CheckView("log view since and until", ["--since", "2026-11-18T01:02:04", "--until", "2026-11-18T01:02:04.999Z"],
+        TextWarning);
+    await CheckView("log view grep", ["--grep", "device"], TextWarning, TextError);
+    await Check("log view sealed", ["log", "view", sealedLog, "--key", privateKey, "--grep", "line 29"], 0,
+        "] line 29\n[Info][Game] line 290\n", "");
+    await Check("log view bad level", ["log", "view", viewDirectory, "--level", "loud"], 2, "", "log view");
+
+    // 압축(.log.zst)·봉인+압축 읽기, 잘린 frame은 앞 frame까지 보여 주고 경고, 키 없는 봉인 파일은
+    // 건너뛴다(섞인 폴더).
+    string packDirectory = Path.Combine(logDirectory, "pack");
+    Directory.CreateDirectory(packDirectory);
+    string packSource = Path.Combine(logDirectory, "pack-source.txt");
+    File.WriteAllText(packSource, string.Concat(Enumerable.Range(0, 400).Select(index =>
+        $"[2026-11-18T02:00:00.000Z][{(index % 2 == 0 ? "Info" : "Warning")}][Pack] packed {index}\n")));
+    string packed = Path.Combine(packDirectory, "Host-20261118T020000000Z.log.zst");
+    await Check("log pack", ["log", "pack", packSource, packed], 0, "", "");
+    await Check("log view compressed", ["log", "view", packed, "--grep", "packed 399"], 0, "packed 399\n", "");
+    await Check("log view compressed level", ["log", "view", packed, "--level", "error"], 0, "", "");
+    byte[] packedBytes = File.ReadAllBytes(packed);
+    string truncatedPack = Path.Combine(logDirectory, "truncated.log.zst");
+    File.WriteAllBytes(truncatedPack, packedBytes[..^10]);
+    await Check("log view truncated frame", ["log", "view", truncatedPack, "--grep", "packed 0\n"], 0, "",
+        "truncated or damaged");
+    ProcessResult truncatedView = await ProcessRunner.RunAsync(new(executable, ["log", "view", truncatedPack],
+        workingDirectory, Timeout: TimeSpan.FromSeconds(15)));
+    bool keptFrames = truncatedView.StdOut.Contains("packed 0\n", StringComparison.Ordinal) &&
+                      !truncatedView.StdOut.Contains("packed 399", StringComparison.Ordinal);
+    Console.WriteLine($"log view truncated keeps earlier frames: {(keptFrames ? "PASS" : "FAIL")}");
+    if (!keptFrames)
+    {
+        ++failures;
+    }
+
+    string sealedPacked = Path.Combine(packDirectory, "Host-20261118T030000000Z.log");
+    await Check("log seal compress", ["log", "seal", packSource, sealedPacked, "--public", publicKey, "--compress"], 0, "", "");
+    await Check("log view sealed compressed", ["log", "view", sealedPacked, "--key", privateKey, "--grep", "packed 398"], 0,
+        "packed 398\n", "");
+    await Check("log decode sealed compressed", ["log", "decode", sealedPacked, "--key", privateKey], 0, "packed 397\n", "");
+    await Check("log view mixed folder without key", ["log", "view", packDirectory, "--grep", "packed 5\n"], 0, "",
+        "needs --key");
+}
+finally
+{
+    Directory.Delete(logDirectory, true);
 }
 
 if (OperatingSystem.IsWindows())

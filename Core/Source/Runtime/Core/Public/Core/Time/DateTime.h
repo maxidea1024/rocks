@@ -246,6 +246,10 @@ template <>
 struct Formatter<DateTime> {
     static Result<void> Format(StringBuilderBase& out, const DateTime& time,
                                StringView spec) noexcept;
+
+    static constexpr bool IsValidSpec(StringView spec) noexcept {
+        return spec.IsEmpty() || spec == "ms";
+    }
 };
 
 } // namespace rocks

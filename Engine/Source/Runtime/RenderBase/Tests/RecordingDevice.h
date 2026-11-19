@@ -4,6 +4,8 @@
 #include <Graphics/Device.h>
 #include <Graphics/DeviceOwnership.h>
 #include <Graphics/FenceTimeline.h>
+#include <Graphics/SplitTransitionTracker.h>
+#include <Graphics/SubresourceStates.h>
 #include <Graphics/StagingPool.h>
 #include <Graphics/TimestampRing.h>
 
@@ -30,7 +32,9 @@ public:
         SetVertexBuffers,
         SetIndexBuffer,
         SetTexture,
-        SetConstants,
+        // value는 받은 byte 수(위 32 bit)와 첫 float × 255(아래 32 bit)다. 거부된 호출은 넣지
+        // 않는다.
+        SetDrawConstants,
         Draw,
         DrawIndexed,
         CopyPassTarget,
@@ -46,8 +50,38 @@ public:
         RequestReadback,
         WriteTimestamp,
         PushMarker,
-        PopMarker
+        PopMarker,
+        // value는 TransitionLog의 순번이다.
+        Transition,
+        // 분리 전이 begin·end다. value는 짝 번호다(전이마다의 내용은 TransitionLog).
+        BeginTransitions,
+        EndTransitions
     };
+
+    // 기록한 전이의 단계다. Full은 Transition, Begin·End는 분리 전이의 두 끝이다.
+    enum class TransitionPhase : uint8 {
+        Full,
+        Begin,
+        End
+    };
+
+    // 기록한 명시 전이 하나다(Op::Transition). texture가 false면 버퍼다. index는 handle의 slot
+    // 번호다.
+    struct TransitionCall {
+        bool texture = true;
+        uint32 index = 0;
+        graphics::SubresourceRange range;
+        graphics::ResourceAccess before = graphics::ResourceAccess::Unknown;
+        graphics::ResourceAccess after = graphics::ResourceAccess::Unknown;
+        TransitionPhase phase = TransitionPhase::Full;
+        // 분리 전이의 짝 번호다(Full은 0).
+        uint32 split = 0;
+
+        bool operator==(const TransitionCall&) const noexcept = default;
+    };
+
+    // 기록 장치가 추적하는 텍스처 mip 수 상한이다(Graphics 텍스처 mip 상한과 같다).
+    static constexpr uint32 MaxTrackedMips = 16;
 
     struct Call {
         Op op = Op::WaitIdle;
@@ -84,6 +118,27 @@ public:
     Span<const Call> Calls() const noexcept {
         return Span<const Call>(calls_, callCount_);
     }
+
+    // 명시 전이 기록이다(GX5). 전이마다 하나다.
+    Span<const TransitionCall> TransitionLog() const noexcept {
+        return transitions_.View();
+    }
+
+    // 장치가 추적한 텍스처 mip의 접근 상태다(시험이 최종 상태를 단언한다). 모르는 handle은
+    // Unknown이다.
+    //
+    // 분리 전이(D3D12와 같은 규칙): begin은 짝만 열고, end가 before 대조와 상태 변경을 한다. 짝
+    // 검사: 모르는·이미 끝난 짝의 end는 IgnoredDraws, begin과 다른 목록의 end·끝나지 않은
+    // 짝(EndFrame)·열린 짝의 subresource를 건드리는 Transition·begin은 검증 오류다.
+    //
+    // 추적 규칙(D3D12 backend와 같다): 만든 텍스처는 SrvGraphics, 만든 버퍼는 VertexOrIndex에서
+    // 시작한다. BeginOffscreen은 대상 mip 0을 RenderTarget으로 바꾼다(attachment 전이). EndFrame은
+    // 상태를 바꾸지 않는다. Transition은 before가 Unknown이 아니면 추적 상태와 같은지
+    // 검사하고(다르면 검증 오류) after로 바꾼다. SetTexture는 SrvGraphics가 아닌 텍스처를 묶으면
+    // 검증 오류다(이 장치는 암묵 전이를 하지 않는다).
+    graphics::ResourceAccess TextureAccess(graphics::TextureHandle texture, uint32 mip = 0,
+                                           uint32 slice = 0) const noexcept;
+    graphics::ResourceAccess BufferAccess(graphics::BufferHandle buffer) const noexcept;
 
     uint64 Reclaimed() const noexcept {
         return reclaimed_;
@@ -124,12 +179,23 @@ public:
 
     // --- Device ---
     graphics::DeviceInfo Info() const noexcept override;
+    const graphics::DeviceCaps& Caps() const noexcept override;
+    uint32 GetPixelFormatSampleCounts(graphics::PixelFormat format) const noexcept override;
+    Result<graphics::PipelineHandle>
+    CreateComputePipeline(const graphics::ComputePipelineDesc& desc) noexcept override;
+    Result<graphics::BufferViewHandle>
+    CreateBufferView(graphics::BufferHandle buffer,
+                     const graphics::BufferViewDesc& desc) noexcept override;
+    Result<void> ReadBuffer(graphics::BufferHandle buffer, uint64 offset,
+                            Span<uint8> out) noexcept override;
     Result<graphics::SwapChainHandle>
     CreateSwapChain(const graphics::SwapChainDesc& desc) noexcept override;
     Result<void> ResizeSwapChain(graphics::SwapChainHandle swapChain, uint32 width,
                                  uint32 height) noexcept override;
     Result<graphics::BufferHandle> CreateBuffer(const graphics::BufferDesc& desc,
                                                 Span<const uint8> initial) noexcept override;
+    Result<graphics::TextureSubresources>
+    GetTextureSubresources(graphics::TextureHandle texture) const noexcept override;
     Result<graphics::TextureHandle> CreateTexture(const graphics::TextureDesc& desc,
                                                   Span<const uint8> pixels) noexcept override;
     Result<graphics::PipelineHandle>
@@ -137,12 +203,11 @@ public:
     Result<graphics::CommandContext*>
     BeginFrame(graphics::SwapChainHandle swapChain,
                const graphics::ClearColor& clear) noexcept override;
-    Result<graphics::CommandContext*>
-    BeginOffscreen(graphics::TextureHandle target,
-                   const graphics::ClearColor& clear) noexcept override;
+    Result<graphics::CommandContext*> BeginPass(const graphics::PassDesc& pass) noexcept override;
     Result<graphics::GpuFencePoint> EndFrame() noexcept override;
     Result<void> ReadPixels(graphics::TextureHandle target, Span<uint8> out) noexcept override;
     void Retire(graphics::BufferHandle buffer) noexcept override;
+    void Retire(graphics::BufferViewHandle view) noexcept override;
     void Retire(graphics::TextureHandle texture) noexcept override;
     void Retire(graphics::PipelineHandle pipeline) noexcept override;
     void Retire(graphics::SwapChainHandle swapChain) noexcept override;
@@ -201,6 +266,11 @@ private:
         uint64 bytes = 0;
     };
 
+    // subresource(mip × slice)마다 추적한 상태다.
+    struct TextureState {
+        graphics::SubresourceStates<graphics::ResourceAccess> states;
+    };
+
     // CPU 메모리 staging이다.
     class CpuStaging final : public graphics::StagingSource {
     public:
@@ -228,22 +298,65 @@ private:
     void SetIndexBuffer(graphics::BufferHandle buffer, graphics::IndexFormat format,
                         uint64 offset) noexcept override;
     void SetTexture(graphics::TextureHandle texture) noexcept override;
-    void SetConstants(const graphics::DrawConstants& constants) noexcept override;
+    void SetBufferView(uint32 slot, graphics::BufferViewHandle view) noexcept override;
+    void SetWritableBufferView(uint32 slot, graphics::BufferViewHandle view) noexcept override;
+    void SetWritableTexture(uint32 slot, graphics::TextureHandle view) noexcept override;
+    void DrawIndirect(graphics::BufferHandle arguments, uint64 offset) noexcept override;
+    void DrawIndexedIndirect(graphics::BufferHandle arguments, uint64 offset) noexcept override;
+    void Dispatch(uint32 groupCountX, uint32 groupCountY, uint32 groupCountZ) noexcept override;
+    void DispatchIndirect(graphics::BufferHandle arguments, uint64 offset) noexcept override;
+    void SetViewport(const graphics::Viewport& viewport) noexcept override;
+    void SetScissor(const graphics::ScissorRect& scissor) noexcept override;
+    void SetStencilReference(uint32 reference) noexcept override;
+    Result<void> CopyBuffer(graphics::BufferHandle destination, uint64 destinationOffset,
+                            graphics::BufferHandle source, uint64 sourceOffset,
+                            uint64 size) noexcept override;
+    Result<void> CopyTexture(graphics::TextureHandle destination,
+                             graphics::TextureHandle source) noexcept override;
+    Result<void> ClearWritableBufferView(graphics::BufferViewHandle view,
+                                         uint32 value) noexcept override;
+    Result<void> SetDrawConstants(Span<const uint8> bytes) noexcept override;
     void Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept override;
     void DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept override;
     Result<void> CopyPassTarget(graphics::TextureHandle destination) noexcept override;
     Result<uint64> WriteTimestamp() noexcept override;
     void PushMarker(StringView name) noexcept override;
     void PopMarker() noexcept override;
+    void Transition(Span<const graphics::ResourceTransition> transitions) noexcept override;
+    graphics::SplitTransition
+    BeginTransitions(Span<const graphics::ResourceTransition> transitions) noexcept override;
+    void EndTransitions(graphics::SplitTransition split,
+                        Span<const graphics::ResourceTransition> transitions) noexcept override;
+    // 전이를 추적 상태에 적용하고 기록한다(Transition·EndTransitions 공용).
+    void ApplyTransitions(Span<const graphics::ResourceTransition> transitions,
+                          TransitionPhase phase, uint32 split) noexcept;
+    // 열린 분리 전이의 subresource와 겹치면 검증 오류를 센다.
+    void CheckPendingOverlap(Span<const graphics::ResourceTransition> transitions) noexcept;
 
     void Record(Op op, uint64 value = 0) noexcept;
+    void CheckDeclared(graphics::ResourceAccess tracked,
+                       graphics::ResourceAccess declared) noexcept;
     void Defer() noexcept;
 
     graphics::FenceTimeline timeline_;
     graphics::DeviceOwnership ownership_;
-    SlotArray<uint8> buffers_;
-    SlotArray<uint8> textures_;
-    SlotArray<uint8> pipelines_;
+    SlotArray<graphics::ResourceAccess> buffers_;
+    Allocator& allocator_;
+    SlotArray<TextureState> textures_;
+    Array<TransitionCall> transitions_;
+    // 열린 분리 전이 짝과 그 전이다.
+    graphics::SplitTransitionTracker splits_;
+    struct PendingTransition {
+        uint32 split = 0;
+        graphics::ResourceTransition transition;
+    };
+    Array<PendingTransition> pendingSplits_;
+    uint64 validationErrors_ = 0;
+    uint64 ignoredDraws_ = 0;
+    // 파이프라인마다 선언한 그리기별 상수 byte 수다(SetDrawConstants 크기 검사).
+    SlotArray<uint32> pipelines_;
+    // 묶인 파이프라인이다(stale·null이면 SetDrawConstants가 거부한다).
+    graphics::PipelineHandle boundPipeline_;
     SlotArray<uint8> swapChains_;
     Array<Retired> retired_;
     SlotArray<Readback> readbacks_;

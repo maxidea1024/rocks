@@ -6,6 +6,9 @@
 // WIN32_LEAN_AND_MEAN을 정의하므로 IUnknown·IStream 헤더를 직접 더한다(ShaderToolLoaderWin64.cpp와
 // 같다). d3d12shader.h·d3dcompiler.h는 Windows SDK 헤더이며 형식·상수만 쓴다(링크하지 않고 도구
 // 표가 연 함수를 부른다).
+#include <Platform/Win64/ComRef.h>
+#include <Platform/Win64/WideString.h>
+
 #include <Windows.h>
 #include <Unknwn.h>
 #include <objidl.h>
@@ -15,55 +18,19 @@
 
 namespace rocks::spike {
 
+using platform::windows::ComRef;
+
 namespace {
 
 // DXC 인자 개수 상한이다(진입점·프로필·SPIR-V 옵션·strip 옵션).
 constexpr usize MaxDxcArguments = 12;
-// 진입점·프로필 이름의 UTF-16 버퍼 크기다(ASCII 이름만 받는다).
+// 진입점·프로필 이름의 UTF-16 버퍼 크기다(NUL 포함).
 constexpr usize MaxWideName = 64;
 
-// COM 참조를 범위 끝에서 놓는다.
-template <typename Interface>
-class ComRef final {
-public:
-    ComRef() noexcept = default;
-    ComRef(const ComRef&) = delete;
-    ComRef& operator=(const ComRef&) = delete;
-
-    ~ComRef() noexcept {
-        if (pointer_ != nullptr) {
-            pointer_->Release();
-        }
-    }
-
-    Interface* operator->() const noexcept {
-        return pointer_;
-    }
-
-    Interface* Get() const noexcept {
-        return pointer_;
-    }
-
-    void** Out() noexcept {
-        return reinterpret_cast<void**>(&pointer_);
-    }
-
-private:
-    Interface* pointer_ = nullptr;
-};
-
+// 진입점·프로필 이름(UTF-8)을 UTF-16으로 바꾼다. 넘치거나 잘못된 UTF-8이면 거짓이다.
 bool Widen(const char* text, wchar_t (&out)[MaxWideName]) noexcept {
-    usize index = 0;
-    for (; text[index] != '\0'; ++index) {
-        if (index + 1 >= MaxWideName || static_cast<unsigned char>(text[index]) >= 0x80) {
-            return false;
-        }
-
-        out[index] = static_cast<wchar_t>(text[index]);
-    }
-
-    out[index] = L'\0';
-    return true;
+    return static_cast<bool>(platform::windows::ConvertUtf8ToWide(
+        text, strlen(text), out, MaxWideName, platform::windows::TextFit::Exact));
 }
 
 bool CopyBlob(IDxcBlob* blob, ByteArray& out) noexcept {
@@ -139,8 +106,7 @@ bool CompileWithDxc(const shader::DxcFunctions& dxc, const ShaderInput& input, D
     const auto create =
         reinterpret_cast<DxcCreateInstanceProc>(dxc.address[shader::DxcFunctions::CreateInstance]);
     ComRef<IDxcCompiler3> compiler;
-    if (create == nullptr ||
-        FAILED(create(CLSID_DxcCompiler, __uuidof(IDxcCompiler3), compiler.Out()))) {
+    if (create == nullptr || FAILED(create(CLSID_DxcCompiler, IID_PPV_ARGS(compiler.Out())))) {
         output.diagnostics.Append(StringView("DxcCreateInstance(IDxcCompiler3) failed"));
         return false;
     }
@@ -158,7 +124,7 @@ bool CompileWithDxc(const shader::DxcFunctions& dxc, const ShaderInput& input, D
     wchar_t entry[MaxWideName];
     wchar_t profile[MaxWideName];
     if (!Widen(input.entry, entry) || !Widen(profileText, profile)) {
-        output.diagnostics.Append(StringView("entry or profile is not a short ASCII name"));
+        output.diagnostics.Append(StringView("entry or profile is not a short valid UTF-8 name"));
         return false;
     }
 
@@ -185,14 +151,13 @@ bool CompileWithDxc(const shader::DxcFunctions& dxc, const ShaderInput& input, D
     buffer.Encoding = DXC_CP_UTF8;
     ComRef<IDxcResult> result;
     if (FAILED(compiler->Compile(&buffer, arguments, static_cast<UINT32>(count), nullptr,
-                                 __uuidof(IDxcResult), result.Out()))) {
+                                 IID_PPV_ARGS(result.Out())))) {
         output.diagnostics.Append(StringView("IDxcCompiler3::Compile failed"));
         return false;
     }
 
     ComRef<IDxcBlobUtf8> errors;
-    if (SUCCEEDED(
-            result->GetOutput(DXC_OUT_ERRORS, __uuidof(IDxcBlobUtf8), errors.Out(), nullptr)) &&
+    if (SUCCEEDED(result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(errors.Out()), nullptr)) &&
         errors.Get() != nullptr && errors->GetStringLength() > 0) {
         output.diagnostics.Append(
             StringView(errors->GetStringPointer(), errors->GetStringLength()));
@@ -204,7 +169,7 @@ bool CompileWithDxc(const shader::DxcFunctions& dxc, const ShaderInput& input, D
     }
 
     ComRef<IDxcBlob> object;
-    if (FAILED(result->GetOutput(DXC_OUT_OBJECT, __uuidof(IDxcBlob), object.Out(), nullptr)) ||
+    if (FAILED(result->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(object.Out()), nullptr)) ||
         !CopyBlob(object.Get(), output.code)) {
         output.diagnostics.Append(StringView("no DXC object output"));
         return false;
@@ -212,8 +177,8 @@ bool CompileWithDxc(const shader::DxcFunctions& dxc, const ShaderInput& input, D
 
     if (target == DxcTarget::Dxil) {
         ComRef<IDxcBlob> reflection;
-        if (FAILED(result->GetOutput(DXC_OUT_REFLECTION, __uuidof(IDxcBlob), reflection.Out(),
-                                     nullptr)) ||
+        if (FAILED(
+                result->GetOutput(DXC_OUT_REFLECTION, IID_PPV_ARGS(reflection.Out()), nullptr)) ||
             !CopyBlob(reflection.Get(), output.reflection)) {
             output.diagnostics.Append(StringView("no DXC reflection output"));
             return false;
@@ -228,7 +193,7 @@ bool DumpDxilReflection(const shader::DxcFunctions& dxc, Span<const uint8> refle
     const auto create =
         reinterpret_cast<DxcCreateInstanceProc>(dxc.address[shader::DxcFunctions::CreateInstance]);
     ComRef<IDxcUtils> utils;
-    if (create == nullptr || FAILED(create(CLSID_DxcUtils, __uuidof(IDxcUtils), utils.Out()))) {
+    if (create == nullptr || FAILED(create(CLSID_DxcUtils, IID_PPV_ARGS(utils.Out())))) {
         return false;
     }
 
@@ -236,8 +201,7 @@ bool DumpDxilReflection(const shader::DxcFunctions& dxc, Span<const uint8> refle
     buffer.Ptr = reflectionPart.Data();
     buffer.Size = reflectionPart.Size();
     ComRef<ID3D12ShaderReflection> reflection;
-    if (FAILED(
-            utils->CreateReflection(&buffer, __uuidof(ID3D12ShaderReflection), reflection.Out()))) {
+    if (FAILED(utils->CreateReflection(&buffer, IID_PPV_ARGS(reflection.Out())))) {
         return false;
     }
 
@@ -310,12 +274,13 @@ bool CompileWithFxc(const shader::FxcFunctions& fxc, StringView source, const ch
         return false;
     }
 
-    ID3DBlob* object = nullptr;
-    ID3DBlob* errors = nullptr;
-    const HRESULT compiled = compile(
-        source.Data(), source.ByteCount(), name, nullptr, nullptr, entry, profile,
-        D3DCOMPILE_OPTIMIZATION_LEVEL3 | D3DCOMPILE_PACK_MATRIX_ROW_MAJOR, 0, &object, &errors);
-    if (errors != nullptr) {
+    ComRef<ID3DBlob> object;
+    ComRef<ID3DBlob> errors;
+    const HRESULT compiled =
+        compile(source.Data(), source.ByteCount(), name, nullptr, nullptr, entry, profile,
+                D3DCOMPILE_OPTIMIZATION_LEVEL3 | D3DCOMPILE_PACK_MATRIX_ROW_MAJOR, 0, object.Out(),
+                errors.Out());
+    if (errors) {
         // FXC 문구 blob은 끝 NUL을 크기에 넣는다.
         const char* text = static_cast<const char*>(errors->GetBufferPointer());
         usize bytes = errors->GetBufferSize();
@@ -324,19 +289,14 @@ bool CompileWithFxc(const shader::FxcFunctions& fxc, StringView source, const ch
         }
 
         diagnostics.Append(StringView(text, bytes));
-        errors->Release();
     }
 
-    bool ok = SUCCEEDED(compiled) && object != nullptr;
+    bool ok = SUCCEEDED(compiled) && object;
     if (ok) {
         ok = static_cast<bool>(code.TryResize(object->GetBufferSize()));
         if (ok) {
             memcpy(code.Data(), object->GetBufferPointer(), code.Size());
         }
-    }
-
-    if (object != nullptr) {
-        object->Release();
     }
 
     return ok;

@@ -2,7 +2,9 @@
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
 #include <Platform/Sync.h>
+#include <Platform/Thread.h>
 #include <Base/Checked.h>
+#include "../Common/TerminationInternal.h"
 #include "PosixPlatform.h"
 #include <pthread.h>
 #include <errno.h>
@@ -49,6 +51,19 @@ void Mutex::Lock() noexcept {
     if (pthread_mutex_lock(reinterpret_cast<pthread_mutex_t*>(storage_)) != 0) {
         Fatal("pthread_mutex_lock failed");
     }
+}
+
+bool Mutex::TryLock() noexcept {
+    const int result = pthread_mutex_trylock(reinterpret_cast<pthread_mutex_t*>(storage_));
+    if (result == 0) {
+        return true;
+    }
+
+    if (result != EBUSY) {
+        Fatal("pthread_mutex_trylock failed");
+    }
+
+    return false;
 }
 
 void Mutex::Unlock() noexcept {
@@ -132,6 +147,8 @@ void WriteDiagnostic(const char* bytes, usize count) noexcept {
     const auto ignoredNewline = write(STDERR_FILENO, "\n", 1);
     (void)ignoredText;
     (void)ignoredNewline;
+    detail::RecordTerminatingThread(CurrentThreadId());
+    detail::RunTerminationHook(text, length);
     abort();
 }
 

@@ -2,7 +2,7 @@
 
 #include <Object/OptionalFieldCodec.h>
 
-// 필드 codec 사슬의 여섯째 조각으로 Map·Set 필드 codec이다(리플렉션 B9f2 — Docs/Design/
+// 필드 codec 사슬의 일곱째 조각으로 Map·Set 필드 codec이다(리플렉션 B9f2 — Docs/Design/
 // ReflectionExtensions.ko.md 1.2·7.2절). 쓰기(EncodeMapField — OrderedMap<K, V>·OrderedSet<T>·
 // ObjectRefMap<K, T>)와 읽기(DecodeMapField), 1단계 키 중복 판정의 비소유 키(KeyProbe — 입력 byte를
 // 빌린다), 생성 Trace 도우미(TraceMapField)가 있다. ObjectRefMap(리플렉션 B9f4 — 7.4절)은 값이 강한
@@ -149,6 +149,9 @@ Result<E> MakeParsedValue(Allocator& allocator, const ParsedValue& parsed) noexc
         }
 
         return Result<E>::Success(Move(value));
+    } else if constexpr (IsSameV<E, Text>) {
+        // Text 값(리플렉션 B9l)은 allocator로 노드를 만든다.
+        return MakeParsedText(allocator, parsed);
     } else {
         return Result<E>::Success(ParsedScalarValue<E>(parsed));
     }
@@ -173,6 +176,7 @@ Result<uint32> EncodeMapField(const Container& source, ArchiveWriter& out,
     using Value = typename Traits::Value;
     constexpr bool set = Traits::IsSet;
     constexpr bool structValue = !set && ReflectedStructField<Value>::Supported;
+    constexpr bool instancedValue = !set && InstancedStructField<Value>::Supported;
     constexpr bool registry = Traits::Registry;
     static_assert(Traits::Supported);
     static_assert(set ? ValueKindCanBeSetElement(FieldValueKind<Key>())
@@ -216,7 +220,7 @@ Result<uint32> EncodeMapField(const Container& source, ArchiveWriter& out,
     constexpr bool variable = IsSameV<Key, String> || IsSameV<Key, Name> ||
                               SoftReferenceField<Key>::Supported || IsSameV<Value, String> ||
                               IsSameV<Value, Name> || SoftReferenceField<Value>::Supported ||
-                              structValue;
+                              structValue || instancedValue || IsSameV<Value, Text>;
 
     // 키 enum·값 enum은 비어 있지 않은 컨테이너마다 판정 집합을 한 번 만들고 원소 수만큼의 조회
     // 작업을 먼저 청구한다(로드 두 단계와 같은 조건).
@@ -326,6 +330,17 @@ Result<uint32> EncodeMapField(const Container& source, ArchiveWriter& out,
                     !written) {
                     return Result<uint32>::Failure(written.Error());
                 }
+            } else if constexpr (instancedValue) {
+                // InstancedStruct 값(리플렉션 B9j)은 u64 길이 + 내용이다.
+                if (auto written = EncodeInstancedStructElement(entry.value, out, context);
+                    !written) {
+                    return Result<uint32>::Failure(written.Error());
+                }
+            } else if constexpr (IsSameV<Value, Text>) {
+                // Text 값(리플렉션 B9l)은 노드를 복사하지 않고 영속 형태를 쓴다.
+                if (auto written = WriteTextValue(out, entry.value); !written) {
+                    return Result<uint32>::Failure(written.Error());
+                }
             } else if constexpr (structValue) {
                 auto record = PrefixedRecordWriter::Begin(out, WireType::Record);
                 if (!record) {
@@ -387,9 +402,17 @@ Result<void> DecodeMapEntries(ConstructionContext* construction, ObjectHandle ow
     constexpr bool set = Traits::IsSet;
     constexpr bool registry = Traits::Registry;
     constexpr bool structValue = !set && ReflectedStructField<Value>::Supported;
+    constexpr bool instancedValue = !set && InstancedStructField<Value>::Supported;
     const FieldSchema& schema = context.Field();
     const ValueType& keyType = set ? schema.element : schema.key;
     const EnumSchema* keyEnum = set ? context.FieldEnum() : context.FieldKeyEnum();
+    // InstancedStruct 값은 관찰 자리에 오지 않는다(관찰 struct는 InstancedStruct를 담지 않는다).
+    if constexpr (instancedValue) {
+        if (target && !construction) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
     if (auto counted = context.AddElements(count); !counted) {
         return counted;
     }
@@ -519,6 +542,34 @@ Result<void> DecodeMapEntries(ConstructionContext* construction, ObjectHandle ow
                 if (added.Value() == InsertOutcome::AlreadyPresent) {
                     return Result<void>::Failure(ErrorCode::InvalidArgument);
                 }
+            }
+        } else if constexpr (instancedValue) {
+            // InstancedStruct 값(리플렉션 B9j): 적용 자리면 키와 빈 값을 먼저 넣고(Reserve했으므로
+            // 주소가 고정된다) 그 자리에 해석한다.
+            Value* value = nullptr;
+            if (target) {
+                auto made = MakeParsedValue<Key>(target->GetAllocator(), key);
+                if (!made) {
+                    return Result<void>::Failure(made.Error());
+                }
+
+                auto added = target->FindOrAddWith(
+                    Move(made.Value()), []() noexcept { return Result<Value>::Success(Value()); });
+                if (!added) {
+                    return Result<void>::Failure(added.Error());
+                }
+
+                if (added.Value().outcome == InsertOutcome::AlreadyPresent) {
+                    return Result<void>::Failure(ErrorCode::InvalidArgument);
+                }
+
+                value = added.Value().value;
+            }
+
+            if (auto decoded =
+                    DecodeInstancedStructElement(construction, owner, value, entries, context);
+                !decoded) {
+                return decoded;
             }
         } else if constexpr (structValue) {
             auto record = ReadPrefixedRecord(entries);

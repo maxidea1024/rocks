@@ -100,8 +100,18 @@ inline TextSlot PartSlot(const TextSlot& slot, TextSlotPart part) noexcept {
     return copy;
 }
 
-// JSON 표기가 없는 필드 종류인지다(접근기 없는 Opaque — InstancedStruct·Text는 그 종류를 더하는
-// B9j·B9l이 표기를 더한다).
+// InstancedStruct JSON 객체의 타입 키다(리플렉션 B9j — UE JsonObjectConverter와 같은 이름, 값은
+// 타입 도구 이름).
+inline constexpr StringView InstancedTypeKey = "_structType";
+
+// Localized Text JSON 객체의 키다(리플렉션 B9l — Docs/Design/ReflectionExtensions.ko.md 10.4절:
+// `{"id": "<36자 TextId>", "revision": <sourceRevision>, "source": "<fallback 원문>"}`).
+inline constexpr StringView TextIdKey = "id";
+inline constexpr StringView TextRevisionKey = "revision";
+inline constexpr StringView TextSourceKey = "source";
+
+// JSON 표기가 없는 필드 종류인지다(접근기 없는 Opaque — Text는 그 종류를 더하는 B9l이 표기를
+// 더한다).
 inline bool HasNoJsonForm(const FieldSchema& field) noexcept {
     return field.value.kind == ValueKind::Opaque;
 }

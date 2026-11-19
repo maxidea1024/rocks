@@ -1,4 +1,5 @@
 #include "LocalizationInternal.h"
+#include <Core/ScopeExit.h>
 
 namespace rocks::detail {
 
@@ -78,7 +79,7 @@ Result<detail::TextNode*> NewNode(Allocator& allocator, detail::TextKind kind) n
         platform::Fatal("Allocator returned null Text node");
     }
     return Result<detail::TextNode*>::Success(
-        ConstructAt<detail::TextNode>(memory.Value(), allocator, kind));
+        InitializeAt<detail::TextNode>(memory.Value(), allocator, kind));
 }
 
 Result<void> CheckSource(StringView source, TextCreateLimits limits) noexcept {
@@ -179,7 +180,15 @@ Result<Text> Text::Integer(Allocator& allocator, int64 value) noexcept {
     if (value < 0) {
         buffer[--offset] = '-';
     }
-    return Invariant(allocator, StringView(buffer + offset, sizeof(buffer) - offset));
+    auto created = Invariant(allocator, StringView(buffer + offset, sizeof(buffer) - offset));
+    if (!created) {
+        return created;
+    }
+
+    // 아직 외부에 게시하지 않은 단독 소유 노드다. 해석은 Invariant와 같고 저장할 수 있는 형태만
+    // 아니다(TryGetPersistentForm).
+    created.Value().node_->kind = detail::TextKind::Integer;
+    return created;
 }
 
 Result<Text> Text::Format(Allocator& allocator, const Text& pattern,
@@ -235,6 +244,129 @@ Result<Text> Text::Format(Allocator& allocator, const Text& pattern,
         added.Value()->value = arguments[index].value->node_;
     }
     return Result<Text>::Success(Move(owned));
+}
+
+Result<void> Text::TryGetPersistentForm(TextPersistentView& out) const noexcept {
+    if (!node_) {
+        out = TextPersistentView{};
+        return Result<void>::Success();
+    }
+
+    // 게시된 노드는 불변이므로 잠그지 않고 읽는다.
+    switch (node_->kind) {
+    case detail::TextKind::Invariant:
+        out = TextPersistentView{TextPersistentForm::Invariant, node_->source.View(), TextId{}, 0};
+        return Result<void>::Success();
+    case detail::TextKind::Localized:
+        out = TextPersistentView{TextPersistentForm::Localized, node_->source.View(), node_->id,
+                                 node_->sourceRevision};
+        return Result<void>::Success();
+    case detail::TextKind::Format:
+    case detail::TextKind::Integer:
+        break;
+    }
+
+    return Result<void>::Failure(ErrorCode::Unsupported);
+}
+
+namespace {
+
+// DeepClone의 예산이다(노드 방문 + 복사 byte — ResolveText의 work와 같은 단위).
+struct DeepCloneBudget {
+    uint32 maxDepth = 0;
+    uint64 remaining = 0;
+
+    bool Spend(uint64 amount) noexcept {
+        if (amount > remaining) {
+            return false;
+        }
+
+        remaining -= amount;
+        return true;
+    }
+};
+
+// node의 깊은 사본을 allocator로 만든다(돌려준 노드의 reference 하나를 호출자가 소유한다). 깊이는
+// maxDepth(64 이하)로 막히므로 재귀 깊이도 그만큼이다. 실패하면 만든 노드를 모두 반환한다.
+Result<detail::TextNode*> CloneNode(Allocator& allocator, const detail::TextNode& node,
+                                    uint32 depth, DeepCloneBudget& budget) noexcept {
+    if (depth > budget.maxDepth || !budget.Spend(1) ||
+        !budget.Spend(node.source.View().ByteCount())) {
+        return Result<detail::TextNode*>::Failure(ErrorCode::CapacityExceeded);
+    }
+
+    auto allocation = NewNode(allocator, node.kind);
+    if (!allocation) {
+        return allocation;
+    }
+
+    detail::TextNode* copy = allocation.Value();
+    auto release = MakeScopeExit([&copy]() noexcept { detail::ReleaseText(copy); });
+    copy->id = node.id;
+    copy->sourceRevision = node.sourceRevision;
+    if (auto copied = copy->source.TryAssign(node.source.View()); !copied) {
+        return Result<detail::TextNode*>::Failure(copied.Error());
+    }
+
+    if (node.pattern) {
+        auto pattern = CloneNode(allocator, *node.pattern, depth + 1, budget);
+        if (!pattern) {
+            return pattern;
+        }
+
+        copy->pattern = pattern.Value();
+    }
+
+    if (auto reserved = copy->arguments.TryReserve(node.arguments.Size()); !reserved) {
+        return Result<detail::TextNode*>::Failure(reserved.Error());
+    }
+
+    for (usize index = 0; index < node.arguments.Size(); ++index) {
+        const detail::TextArgumentData& argument = node.arguments[index];
+        if (!budget.Spend(argument.name.View().ByteCount())) {
+            return Result<detail::TextNode*>::Failure(ErrorCode::CapacityExceeded);
+        }
+
+        auto added = copy->arguments.TryEmplaceBack(allocator);
+        if (!added) {
+            return Result<detail::TextNode*>::Failure(added.Error());
+        }
+
+        if (auto named = added.Value()->name.TryAssign(argument.name.View()); !named) {
+            return Result<detail::TextNode*>::Failure(named.Error());
+        }
+
+        auto value = CloneNode(allocator, *argument.value, depth + 1, budget);
+        if (!value) {
+            return value;
+        }
+
+        added.Value()->value = value.Value();
+    }
+
+    detail::TextNode* result = copy;
+    copy = nullptr;
+    return Result<detail::TextNode*>::Success(result);
+}
+
+} // namespace
+
+Result<Text> Text::DeepClone(Allocator& allocator, TextResolveLimits limits) const noexcept {
+    if (limits.maxDepth > 64) {
+        return Result<Text>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (!node_) {
+        return Result<Text>::Success(Text());
+    }
+
+    DeepCloneBudget budget{limits.maxDepth, limits.maxWork};
+    auto cloned = CloneNode(allocator, *node_, 1, budget);
+    if (!cloned) {
+        return Result<Text>::Failure(cloned.Error());
+    }
+
+    return Result<Text>::Success(Text(cloned.Value()));
 }
 
 } // namespace rocks

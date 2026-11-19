@@ -264,7 +264,8 @@ internal static class NativeMemberProbe
         List<Member> members = [];
         foreach (ClassModel type in types)
         {
-            foreach (NativeMemberModel native in type.NativeMembers)
+            // bitfield 멤버(정수·bool만 받는다 — 리플렉션 B9m)는 강한 참조를 담을 수 없으므로 탐침하지 않는다.
+            foreach (NativeMemberModel native in type.NativeMembers.Where(native => !native.Bitfield))
             {
                 members.Add(new(members.Count, type.NativeName, native));
             }
@@ -302,7 +303,7 @@ internal static class NativeMemberProbe
             {
                 string path = verdict.Code == ObjectTarget ? "raw pointer to Object-derived " + verdict.Target : verdict.Target;
                 throw new MetadataException($"{member.Symbol}: ROCKS_NATIVE member holds a strong object reference ({path})", "RMC2205",
-                    "Native members are not traced; store ObjectRef/RootRef/Object pointers in ROCKS_PROPERTY fields or use WeakRef/ObjectHandle.").At(member.Native.Site);
+                    "Native members are not traced; store ObjectRef/RootRef/Object pointers in ROCKS_PROPERTY fields or use WeakObjectRef/ObjectHandle.").At(member.Native.Site);
             }
         }
 

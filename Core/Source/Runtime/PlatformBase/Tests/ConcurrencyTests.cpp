@@ -140,7 +140,41 @@ void Consume(void* raw) noexcept {
         CHECK(context.free.Release());
     }
 }
+
+struct TryLockContext {
+    Mutex* mutex = nullptr;
+    bool acquired = false;
+};
+
+void TryLockFromOtherThread(void* raw) noexcept {
+    auto& context = *static_cast<TryLockContext*>(raw);
+    context.acquired = context.mutex->TryLock();
+    if (context.acquired) {
+        context.mutex->Unlock();
+    }
+}
 } // namespace
+
+// TryLock은 다른 thread가 쥐고 있으면 기다리지 않고 false, 비어 있으면 잠근다.
+TEST(PlatformMutexTryLockFailsWhileHeldAndSucceedsWhenFree) {
+    Mutex mutex;
+    TryLockContext context;
+    context.mutex = &mutex;
+    {
+        LockGuard held(mutex);
+        Thread thread;
+        REQUIRE(thread.Start(TryLockFromOtherThread, &context) == ThreadStatus::Success);
+        CompleteAndJoin(thread);
+        CHECK(!context.acquired);
+    }
+
+    Thread thread;
+    REQUIRE(thread.Start(TryLockFromOtherThread, &context) == ThreadStatus::Success);
+    CompleteAndJoin(thread);
+    CHECK(context.acquired);
+    REQUIRE(mutex.TryLock());
+    mutex.Unlock();
+}
 
 TEST(PlatformThreadStartCompletionTimeoutJoinAndRestart) {
     Thread thread;

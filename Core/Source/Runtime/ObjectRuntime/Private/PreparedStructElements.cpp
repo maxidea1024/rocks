@@ -108,6 +108,7 @@ Result<uint32> PreparedStructElements::Append() noexcept {
 
     // 기본 원소의 참조는 null이다(간선·장벽이 없다).
     element_->construct(memory.Value(), *elementAllocator_);
+    addedValidated_ = false;
     (void)added_.TryPushBack(memory.Value());
     (void)kept_.TryPushBack(static_cast<uint32>(next));
     ++addedKept_;
@@ -119,15 +120,51 @@ Result<PathTarget> PreparedStructElements::AddedTarget(uint32 id) noexcept {
         return Result<PathTarget>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // 돌려주는 시작 위치로 블록을 바꿀 수 있으므로 검증을 다시 하게 한다.
+    addedValidated_ = false;
     const PathTarget start = PathTarget::Value(elementType_, elementType_.Struct(),
                                                added_[id - original_], *elementAllocator_);
     return Result<PathTarget>::Success(
         start.WithAddedElement(*this, kind_ == PathTarget::Kind::Staged ? transaction_ : nullptr));
 }
 
+Result<void> PreparedStructElements::ValidateAdded(usize& rejected) noexcept {
+    if (!IsReady()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const RuntimeStructOps& ops = elementType_.StructOps();
+    if (addedKept_ == 0 || !ops.validateTree) {
+        addedValidated_ = true;
+        return Result<void>::Success();
+    }
+
+    for (usize index = 0; index < kept_.Size(); ++index) {
+        const uint32 original = kept_[index];
+        if (!IsAdded(original)) {
+            continue;
+        }
+
+        if (!ops.validateTree(added_[original - original_])) {
+            rejected = index;
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
+    addedValidated_ = true;
+    return Result<void>::Success();
+}
+
 Result<void> PreparedStructElements::PreparePublish() noexcept {
     if (!IsReady()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (!addedValidated_) {
+        usize rejected = 0;
+        if (auto checked = ValidateAdded(rejected); !checked) {
+            return checked;
+        }
     }
 
     const usize removedCount = original_ + added_.Size() - kept_.Size();
@@ -317,6 +354,13 @@ Result<void> PreparedStructElements::Publish() noexcept {
         return Result<void>::Success();
     }
 
+    if (!addedValidated_) {
+        usize rejected = 0;
+        if (auto checked = ValidateAdded(rejected); !checked) {
+            return checked;
+        }
+    }
+
     ConstructionContext& transaction = *transaction_;
     if (auto writable = transaction.CheckStagedWrite(); !writable) {
         return writable;
@@ -376,6 +420,7 @@ void PreparedStructElements::ReleaseRemoved() noexcept {
 }
 
 void PreparedStructElements::Reset() noexcept {
+    addedValidated_ = false;
     ReleaseRemoved();
     // 게시하지 않은 추가 원소는 이 준비물의 것이다.
     for (usize remaining = added_.Size(); remaining != 0; --remaining) {

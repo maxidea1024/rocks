@@ -15,7 +15,10 @@ struct AllocatorDeleter {
 
     template <typename T>
     void operator()(T* object) noexcept {
-        DestroyAt(object);
+        if constexpr (!IsTriviallyDestructibleV<T>) {
+            DestroyAt(object);
+        }
+
         if (!allocator->Deallocate(allocation)) {
             platform::Fatal("UniquePtr storage deallocation failed");
         }
@@ -45,7 +48,7 @@ struct AllocatorDeleter {
 // - Reset은 deleter를 지역으로 옮긴 뒤 호출하므로 소멸자가 같은 UniquePtr에 재진입해 새 객체를
 //   넣어도 안전하다.
 // - 같은 UniquePtr을 여러 스레드가 동시에 변경하지 않는다. 객체 자체의 스레드 안전성과 무관하다.
-// - GC 객체 참조(RootRef/WeakRef)가 아니다. Object 시스템 객체에는 사용하지 않는다.
+// - GC 객체 참조(RootRef/WeakObjectRef)가 아니다. Object 시스템 객체에는 사용하지 않는다.
 template <typename T, typename Deleter = AllocatorDeleter>
 class UniquePtr {
     static_assert(IsNothrowMoveConstructibleV<Deleter>, "UniquePtr deleter needs noexcept move");
@@ -87,7 +90,7 @@ public:
         if (!storage) {
             return Result<UniquePtr>::Failure(storage.Error());
         }
-        T* object = ConstructAt<T>(storage.Value(), Forward<Args>(args)...);
+        T* object = InitializeAt<T>(storage.Value(), Forward<Args>(args)...);
         return Result<UniquePtr>::Success(
             UniquePtr(object, AllocatorDeleter{storage.Value(), &allocator}, AdoptTag{}));
     }
@@ -112,8 +115,11 @@ public:
             // 기존 객체 소멸이 other에 접근해도 안전하도록 소유권을 먼저 옮겨 둔다.
             UniquePtr previous(Move(*this));
             object_ = other.object_;
-            DestroyAt(&deleter_);
-            ConstructAt<Deleter>(&deleter_, Move(other.deleter_));
+            if constexpr (!IsTriviallyDestructibleV<Deleter>) {
+                DestroyAt(&deleter_);
+            }
+
+            InitializeAt<Deleter>(&deleter_, Move(other.deleter_));
             other.object_ = nullptr;
         }
         return *this;

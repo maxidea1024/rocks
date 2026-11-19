@@ -503,6 +503,28 @@ bool WriteStandardDefinition(TraceSessionState& session, const TraceEventType& t
     return true;
 }
 
+TraceDefinitionWrite TryWriteStandardDefinition(TraceSessionState& session,
+                                                const TraceEventType& type, const void* fixed,
+                                                usize fixedBytes,
+                                                Span<const TraceVariablePart> variable) noexcept {
+    TraceRecordShape shape;
+    shape.typeId = type.Id();
+    shape.fixed = fixed;
+    shape.fixedBytes = fixedBytes;
+    shape.variable = variable;
+    if (shape.typeId == TraceEventType::NoId) {
+        return TraceDefinitionWrite::Failed;
+    }
+
+    const usize bytes = TraceRecordBytes(shape);
+    if (bytes == MaxSize || bytes > TraceFormat::MaxDefinitionRecordBytes) {
+        return TraceDefinitionWrite::TooLarge;
+    }
+
+    return session.WriteDefinition(shape) ? TraceDefinitionWrite::Written
+                                          : TraceDefinitionWrite::Failed;
+}
+
 TraceWriteResult TraceWriteRecord(const TraceEventType& type, const void* fixed, usize fixedBytes,
                                   Span<const TraceVariablePart> variable) noexcept {
     TraceSessionGuard guard;

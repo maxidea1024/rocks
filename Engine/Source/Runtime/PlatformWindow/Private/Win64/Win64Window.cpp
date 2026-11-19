@@ -1,8 +1,10 @@
 #include <Platform/Clock.h>
 #include <Platform/DynamicLibrary.h>
+#include <Platform/Win64/WideString.h>
 #include <PlatformWindow/Window.h>
 
 #include <Windows.h>
+#include <WtsApi32.h>
 #include <Xinput.h>
 
 namespace rocks::platform {
@@ -234,22 +236,10 @@ Key KeyFromMessage(LPARAM lParam) noexcept {
     return extended ? ExtendedKey(scanCode) : BaseKey(scanCode);
 }
 
-// UTF-8 → UTF-16(널 종료). 넘치면 자른다. 변환할 수 없는 입력은 빈 문자열이다.
-void ToWide(StringView text, wchar_t (&buffer)[MaxTitleCharacters]) noexcept {
-    buffer[0] = L'\0';
-    if (text.ByteCount() == 0) {
-        return;
-    }
-    constexpr int MaxBytes = NumericLimits<int>::Max();
-    const int bytes = text.ByteCount() > static_cast<usize>(MaxBytes)
-                          ? MaxBytes
-                          : static_cast<int>(text.ByteCount());
-    int written = MultiByteToWideChar(CP_UTF8, 0, text.Data(), bytes, buffer,
-                                      static_cast<int>(MaxTitleCharacters - 1));
-    if (written <= 0) {
-        written = 0;
-    }
-    buffer[written] = L'\0';
+// 창 제목 UTF-8 → UTF-16(널 종료). 넘치면 글자 경계에서 자른다. 잘못된 UTF-8이면 거짓이다.
+bool ToWide(StringView text, wchar_t (&buffer)[MaxTitleCharacters]) noexcept {
+    return static_cast<bool>(windows::ConvertUtf8ToWide(
+        text.Data(), text.ByteCount(), buffer, MaxTitleCharacters, windows::TextFit::Truncate));
 }
 
 class Win64Window final : public Window {
@@ -264,6 +254,12 @@ public:
     }
 
     Result<void> Create(const WindowDesc& desc) noexcept {
+        // 제목은 OS 호출 전에 바꿔 둔다. 잘못된 UTF-8은 입력 오류다(Window::Create가 먼저 거른다).
+        wchar_t title[MaxTitleCharacters];
+        if (!ToWide(desc.title, title)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
         instance_ = GetModuleHandleW(nullptr);
         WNDCLASSEXW windowClass = {};
         windowClass.cbSize = sizeof(windowClass);
@@ -273,8 +269,11 @@ public:
         windowClass.hCursor = LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(IDC_ARROW));
         windowClass.lpszClassName = WindowClassName;
         // 같은 프로세스의 두 번째 창은 이미 등록된 클래스를 쓴다.
-        if (RegisterClassExW(&windowClass) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
-            return Result<void>::Failure(ErrorCode::DependencyFailed);
+        if (RegisterClassExW(&windowClass) == 0) {
+            const DWORD error = GetLastError();
+            if (error != ERROR_CLASS_ALREADY_EXISTS) {
+                return Fail("RegisterClassExW", error);
+            }
         }
 
         const DWORD style = desc.resizable
@@ -282,14 +281,12 @@ public:
                                 : (WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX);
         RECT rectangle = {0, 0, static_cast<LONG>(desc.width), static_cast<LONG>(desc.height)};
         AdjustWindowRectEx(&rectangle, style, FALSE, 0);
-        wchar_t title[MaxTitleCharacters];
-        ToWide(desc.title, title);
         window_ =
             CreateWindowExW(0, WindowClassName, title, style, CW_USEDEFAULT, CW_USEDEFAULT,
                             rectangle.right - rectangle.left, rectangle.bottom - rectangle.top,
                             nullptr, nullptr, instance_, this);
         if (window_ == nullptr) {
-            return Result<void>::Failure(ErrorCode::DependencyFailed);
+            return Fail("CreateWindowExW", GetLastError());
         }
 
         width_ = desc.width;
@@ -300,6 +297,10 @@ public:
         }
         return Result<void>::Success();
     }
+
+    // 생성 실패의 OS 호출과 GetLastError다(WindowCreateReport).
+    const char* failedCall = nullptr;
+    DWORD failedError = 0;
 
     void PumpEvents(input::InputQueue& queue) noexcept override {
         queue_ = &queue;
@@ -355,12 +356,23 @@ public:
 
     Result<void> SetTitle(StringView text) noexcept override {
         wchar_t title[MaxTitleCharacters];
-        ToWide(text, title);
+        if (!ToWide(text, title)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
         return SetWindowTextW(window_, title) ? Result<void>::Success()
                                               : Result<void>::Failure(ErrorCode::DependencyFailed);
     }
 
 private:
+    // 실패한 OS 호출과 오류를 기억하고 DependencyFailed를 돌려준다(Window::Create가 report로
+    // 옮긴다).
+    Result<void> Fail(const char* call, DWORD error) noexcept {
+        failedCall = call;
+        failedError = error;
+        return Result<void>::Failure(ErrorCode::DependencyFailed);
+    }
+
     void Push(const input::InputEvent& event) noexcept {
         // 펌프 밖(예: 창 생성 중)에 온 메시지의 입력은 버린다.
         if (queue_ != nullptr) {
@@ -626,19 +638,41 @@ private:
 
 } // namespace
 
-Result<UniquePtr<Window>> Window::Create(Allocator& allocator, const WindowDesc& desc) noexcept {
-    if (desc.width == 0 || desc.height == 0) {
-        return Result<UniquePtr<Window>>::Failure(ErrorCode::InvalidArgument);
+Result<UniquePtr<Window>> Window::Create(Allocator& allocator, const WindowDesc& desc,
+                                         WindowCreateReport* report) noexcept {
+    auto fail = [report](ErrorCode error, const char* call, DWORD osError) noexcept {
+        if (report != nullptr) {
+            *report = WindowCreateReport{};
+            report->code = error;
+            report->osError = static_cast<int64>(osError);
+            usize length = 0;
+            while (call != nullptr && call[length] != '\0' && length + 1 < sizeof(report->call)) {
+                report->call[length] = call[length];
+                ++length;
+            }
+
+            report->truncated = call != nullptr && call[length] != '\0';
+        }
+
+        return Result<UniquePtr<Window>>::Failure(error);
+    };
+
+    if (desc.width == 0 || desc.height == 0 || !desc.title.IsValidUtf8()) {
+        return fail(ErrorCode::InvalidArgument, nullptr, 0);
     }
 
     auto created = UniquePtr<Win64Window>::TryMake(allocator);
     if (!created) {
-        return Result<UniquePtr<Window>>::Failure(created.Error());
+        return fail(created.Error(), nullptr, 0);
     }
 
     auto opened = created.Value()->Create(desc);
     if (!opened) {
-        return Result<UniquePtr<Window>>::Failure(opened.Error());
+        return fail(opened.Error(), created.Value()->failedCall, created.Value()->failedError);
+    }
+
+    if (report != nullptr) {
+        *report = WindowCreateReport{};
     }
 
     return Result<UniquePtr<Window>>::Success(UniquePtr<Window>(Move(created.Value())));
@@ -657,6 +691,29 @@ Result<UniquePtr<GamepadBackend>> GamepadBackend::Create(Allocator& allocator) n
 
     return Result<UniquePtr<GamepadBackend>>::Success(
         UniquePtr<GamepadBackend>(Move(created.Value())));
+}
+
+DesktopSessionState QueryDesktopSessionState() noexcept {
+    LPWSTR buffer = nullptr;
+    DWORD bytes = 0;
+    if (!WTSQuerySessionInformationW(WTS_CURRENT_SERVER_HANDLE, WTS_CURRENT_SESSION,
+                                     WTSConnectState, &buffer, &bytes) ||
+        buffer == nullptr) {
+        return DesktopSessionState::Unknown;
+    }
+
+    DesktopSessionState state = DesktopSessionState::Unknown;
+    if (bytes >= sizeof(WTS_CONNECTSTATE_CLASS)) {
+        const auto connect = *reinterpret_cast<const WTS_CONNECTSTATE_CLASS*>(buffer);
+        if (connect == WTSActive) {
+            state = DesktopSessionState::Connected;
+        } else if (connect == WTSDisconnected) {
+            state = DesktopSessionState::Disconnected;
+        }
+    }
+
+    WTSFreeMemory(buffer);
+    return state;
 }
 
 } // namespace rocks::platform

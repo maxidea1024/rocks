@@ -507,4 +507,127 @@ TEST(VectorRegister_GetAndSplatLanes) {
     CHECK(simd::Get<1>(simd::Zero()) == 0.0f);
 }
 
+// ---- 비교·mask·선택(SIP3): simd와 scalar 기준 구현의 bit 단위 차등 검사 ----
+namespace {
+
+// lane의 bit 패턴을 모은다(mask는 NaN bit 패턴이므로 SameFloat가 아니라 bit로 비교한다).
+template <typename Register, typename StoreFunction>
+void LaneBits(Register value, StoreFunction store, uint32 (&bits)[4]) {
+    float lanes[4];
+    store(lanes, value);
+    for (int lane = 0; lane < 4; ++lane) {
+        bits[lane] = platform::BitCast<uint32>(lanes[lane]);
+    }
+}
+
+bool SameBits(platform::simd::Register4f simdValue, platform::scalar::Register4f scalarValue) {
+    uint32 left[4];
+    uint32 right[4];
+    LaneBits(
+        simdValue, [](float* out, platform::simd::Register4f v) { platform::simd::Store(out, v); },
+        left);
+    LaneBits(
+        scalarValue,
+        [](float* out, platform::scalar::Register4f v) { platform::scalar::Store(out, v); }, right);
+    for (int lane = 0; lane < 4; ++lane) {
+        if (left[lane] != right[lane]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// 비교 mask가 C++ 비교 연산자의 lane별 결과와 같은지 본다.
+template <typename Compare>
+bool MaskMatches(platform::scalar::Register4f mask, const float (&a)[4], const float (&b)[4],
+                 Compare compare) {
+    for (int lane = 0; lane < 4; ++lane) {
+        const uint32 expected = compare(a[lane], b[lane]) ? 0xffffffffu : 0u;
+        if (platform::BitCast<uint32>(mask.lane[lane]) != expected) {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
+TEST(VectorRegister_CompareMaskSelectMatchScalar) {
+    namespace simd = platform::simd;
+    namespace scalar = platform::scalar;
+    TestRandom random{0x1618033988749895ull ^ CurrentSeed()};
+    for (int iteration = 0; iteration < 50000; ++iteration) {
+        float a[4];
+        float b[4];
+        float c[4];
+        for (int lane = 0; lane < 4; ++lane) {
+            a[lane] = RandomLane(random);
+            // 같은 값·부호만 다른 0 비교가 자주 나오도록 일부 lane은 a를 그대로 또는 부호를 뒤집어
+            // 쓴다.
+            const uint32 pick = random.Next32() % 8u;
+            b[lane] = pick == 0 ? a[lane] : (pick == 1 ? -a[lane] : RandomLane(random));
+            // bit 연산·Select는 mask가 아닌 임의 bit 패턴에도 정의된다.
+            c[lane] = FloatBits(random.Next32());
+        }
+        const auto sa = simd::Load(a);
+        const auto sb = simd::Load(b);
+        const auto sc = simd::Load(c);
+        const auto ra = scalar::Load(a);
+        const auto rb = scalar::Load(b);
+        const auto rc = scalar::Load(c);
+
+        const auto equal = scalar::CompareEqual(ra, rb);
+        const auto less = scalar::CompareLess(ra, rb);
+        const auto lessEqual = scalar::CompareLessEqual(ra, rb);
+        const auto greater = scalar::CompareGreater(ra, rb);
+        const auto greaterEqual = scalar::CompareGreaterEqual(ra, rb);
+        CHECK(MaskMatches(equal, a, b, [](float x, float y) { return x == y; }));
+        CHECK(MaskMatches(less, a, b, [](float x, float y) { return x < y; }));
+        CHECK(MaskMatches(lessEqual, a, b, [](float x, float y) { return x <= y; }));
+        CHECK(MaskMatches(greater, a, b, [](float x, float y) { return x > y; }));
+        CHECK(MaskMatches(greaterEqual, a, b, [](float x, float y) { return x >= y; }));
+
+        CHECK(SameBits(simd::CompareEqual(sa, sb), equal));
+        CHECK(SameBits(simd::CompareLess(sa, sb), less));
+        CHECK(SameBits(simd::CompareLessEqual(sa, sb), lessEqual));
+        CHECK(SameBits(simd::CompareGreater(sa, sb), greater));
+        CHECK(SameBits(simd::CompareGreaterEqual(sa, sb), greaterEqual));
+
+        CHECK(SameBits(simd::BitAnd(sa, sc), scalar::BitAnd(ra, rc)));
+        CHECK(SameBits(simd::BitOr(sa, sc), scalar::BitOr(ra, rc)));
+        CHECK(SameBits(simd::BitXor(sa, sc), scalar::BitXor(ra, rc)));
+        CHECK(SameBits(simd::BitAndNot(sa, sc), scalar::BitAndNot(ra, rc)));
+        CHECK(SameBits(simd::Select(simd::CompareLess(sa, sb), sa, sc),
+                       scalar::Select(less, ra, rc)));
+        // 임의 bit 패턴 mask의 Select는 bit 단위 섞기다.
+        CHECK(SameBits(simd::Select(sc, sa, sb), scalar::Select(rc, ra, rb)));
+
+        CHECK(simd::MoveMask(sa) == scalar::MoveMask(ra));
+        CHECK(simd::MoveMask(sc) == scalar::MoveMask(rc));
+        CHECK(simd::MoveMask(simd::CompareLessEqual(sa, sb)) == scalar::MoveMask(lessEqual));
+    }
+}
+
+TEST(VectorRegister_CompareMaskEdgeCases) {
+    namespace simd = platform::simd;
+    const auto nan = simd::Splat(QuietNaN);
+    const auto one = simd::Splat(1.0f);
+    // NaN이 끼면 모든 순서 비교가 거짓이다.
+    CHECK(simd::MoveMask(simd::CompareEqual(nan, nan)) == 0u);
+    CHECK(simd::MoveMask(simd::CompareLessEqual(nan, one)) == 0u);
+    CHECK(simd::MoveMask(simd::CompareGreaterEqual(one, nan)) == 0u);
+    // -0과 +0은 같다.
+    CHECK(simd::MoveMask(simd::CompareEqual(simd::Splat(-0.0f), simd::Zero())) == 0xfu);
+    CHECK(simd::MoveMask(simd::CompareLess(simd::Splat(-0.0f), simd::Zero())) == 0u);
+    // MoveMask는 lane 순서대로 bit를 모은다.
+    const auto values = simd::Set(-1.0f, 2.0f, -3.0f, 4.0f);
+    CHECK(simd::MoveMask(values) == 0x5u);
+    CHECK(simd::MoveMask(simd::CompareGreater(values, simd::Zero())) == 0xau);
+    // Select는 참인 lane에서 첫 값, 거짓인 lane에서 둘째 값을 고른다.
+    const auto selected =
+        simd::Select(simd::CompareGreater(values, simd::Zero()), values, simd::Splat(9.0f));
+    CHECK(simd::Get<0>(selected) == 9.0f && simd::Get<1>(selected) == 2.0f);
+    CHECK(simd::Get<2>(selected) == 9.0f && simd::Get<3>(selected) == 4.0f);
+}
+
 } // namespace rocks::test

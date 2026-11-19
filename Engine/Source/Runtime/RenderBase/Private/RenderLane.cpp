@@ -93,6 +93,10 @@ FrameTicket& FrameTicket::operator=(FrameTicket&& other) noexcept {
     return *this;
 }
 
+FrameArena& RenderFrameContext::Arena() const noexcept {
+    return *lane_.arenas_[slot_];
+}
+
 graphics::Device& RenderLaneContext::Device() const noexcept {
     return lane_.device_;
 }
@@ -560,6 +564,8 @@ void RenderLane::PushInbox(const InboxItem& item) noexcept {
 }
 
 void RenderLane::ProcessInbox() noexcept {
+    // 상관 id: 이 lane 작업은 처음 Post한 쪽의 상관 id로 돈다(DedicatedLane 전파). 한 번에 처리하는
+    // 여러 통지는 각자 올린 쪽의 상관 id를 따로 갖지 않는다.
     // 장치를 가진 실행 흐름에서만 처리한다(소유권 반납 뒤의 lane 작업은 건너뛴다).
     if (!laneOwnsDevice_) {
         return;
@@ -667,24 +673,32 @@ void RenderLane::RunRetire(RenderHandle handle) noexcept {
         return; // 이미 Retire한 handle의 중복 요청이다.
     }
 
-    const SlotHandle device = retired.Value().device;
-    if (!device.IsNull()) {
-        switch (retired.Value().kind) {
-        case RenderResourceKind::Buffer:
-            device_.Retire(graphics::BufferHandle{device});
-            break;
-        case RenderResourceKind::Texture:
-            device_.Retire(graphics::TextureHandle{device});
-            break;
-        case RenderResourceKind::Pipeline:
-            device_.Retire(graphics::PipelineHandle{device});
-            break;
-        }
-    }
-
     {
         platform::LockGuard lock(gate_);
         ++stats_.retiresPending;
+    }
+
+    // lease가 남아 있으면 장치 Retire는 마지막 lease가 풀린 lane 작업 끝으로 미룬다(7.4절).
+    if (!retired.Value().deferred) {
+        RetireOnDevice(handle, retired.Value());
+    }
+}
+
+void RenderLane::FinishDeferredRetires() noexcept {
+    RenderHandle handle;
+    RenderHandleTable::RetiredResource retired;
+    while (handles_.TakeReleasedRetire(handle, retired)) {
+        RetireOnDevice(handle, retired);
+    }
+}
+
+void RenderLane::RetireOnDevice(RenderHandle handle,
+                                const RenderHandleTable::RetiredResource& retired) noexcept {
+    // 장치 Retire 또는 Retire 대행자(풀 반납, 결정 R15)로 넘긴다.
+    ReleaseRetiredResource(device_, handle, retired);
+
+    {
+        platform::LockGuard lock(gate_);
         ++outstandingNotifies_;
     }
 
@@ -722,7 +736,7 @@ void RenderLane::OnRetireFence(ErrorCode result, void* context) noexcept {
     item.kind = InboxKind::RetireCompleted;
     item.error = result;
     item.handle = wait->handle;
-    DestroyAt(wait);
+    static_assert(IsTriviallyDestructibleV<RemovePointerT<decltype(wait)>>);
     (void)lane.allocator_.Deallocate(wait);
     lane.PushInbox(item);
     platform::LockGuard lock(lane.gate_);
@@ -846,7 +860,7 @@ void RenderLane::OnReadbackFence(ErrorCode result, void* context) noexcept {
     item.kind = InboxKind::ReadbackCompleted;
     item.error = result;
     item.frame = wait->id;
-    DestroyAt(wait);
+    static_assert(IsTriviallyDestructibleV<RemovePointerT<decltype(wait)>>);
     (void)lane.allocator_.Deallocate(wait);
     lane.PushInbox(item);
     platform::LockGuard lock(lane.gate_);

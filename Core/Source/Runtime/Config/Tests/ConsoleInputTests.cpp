@@ -226,9 +226,9 @@ TEST(Config_ChangeCallbacksRunAtSyncInOrder) {
 TEST(Config_SnapshotGenerationsAndReuse) {
     ConfigFixture fixture;
     ConfigContext& context = fixture.Context();
-    SharedPtr<ConfigSnapshot> first = context.Snapshot();
+    SharedPtr<const ConfigSnapshot> first = context.Acquire();
     REQUIRE(first.Get() != nullptr);
-    CHECK(first->Generation() == 1);
+    CHECK(first->Generation() == 2); // Initialize가 빈 snapshot(세대 1)을 게시한다
     REQUIRE(first->Count() == 3);
     CHECK(first->NameAt(0) == "Render.RenderGraph.lodBias" &&
           first->NameAt(1) == "render.graph.immediate" &&
@@ -242,7 +242,7 @@ TEST(Config_SnapshotGenerationsAndReuse) {
     REQUIRE(
         context.AddAssignment(ConfigLayer::Session, "cli", "Render.RenderGraph.maxPasses", "3"));
     REQUIRE(context.Sync());
-    CHECK(context.Snapshot().Get() == first.Get());
+    CHECK(context.Acquire().Get() == first.Get());
 
     // RenderRead 값의 변경은 새 세대다. 이전 snapshot은 그대로다. Sync 전에는 snapshot이 바뀌지
     // 않는다.
@@ -250,11 +250,11 @@ TEST(Config_SnapshotGenerationsAndReuse) {
         context.AddAssignment(ConfigLayer::Console, "console", "render.graph.immediate", "true"));
     REQUIRE(
         context.AddAssignment(ConfigLayer::Session, "cli", "Render.RenderGraph.lodBias", "0.5"));
-    CHECK(context.Snapshot().Get() == first.Get());
+    CHECK(context.Acquire().Get() == first.Get());
     REQUIRE(context.Sync());
-    SharedPtr<ConfigSnapshot> second = context.Snapshot();
+    SharedPtr<const ConfigSnapshot> second = context.Acquire();
     REQUIRE(second.Get() != nullptr && second.Get() != first.Get());
-    CHECK(second->Generation() == 2);
+    CHECK(second->Generation() == 3);
     CHECK(second->Find("render.graph.immediate")->boolean &&
           second->Find("Render.RenderGraph.lodBias")->float32 == 0.5f);
     CHECK(!first->Find("render.graph.immediate")->boolean);
@@ -268,8 +268,8 @@ TEST(Config_SnapshotGenerationsAndReuse) {
     pool.flags = static_cast<uint32>(ConsoleSettingFlags::RenderRead);
     REQUIRE(context.RegisterConsoleSetting(pool));
     REQUIRE(context.Sync());
-    SharedPtr<ConfigSnapshot> third = context.Snapshot();
-    CHECK(third->Generation() == 3 && third->Find("stream.pool_mb")->signedInteger == 256);
+    SharedPtr<const ConfigSnapshot> third = context.Acquire();
+    CHECK(third->Generation() == 4 && third->Find("stream.pool_mb")->signedInteger == 256);
     REQUIRE(context.Sync());
-    CHECK(context.Snapshot().Get() == third.Get());
+    CHECK(context.Acquire().Get() == third.Get());
 }

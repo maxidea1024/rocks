@@ -434,6 +434,15 @@ Result<void> JsonWriter::String(StringView value) noexcept {
 
 Result<void> JsonWriter::WriteNumber(JsonValue value) noexcept {
     if (mode_ == JsonNumberMode::Preserve) {
+        // Json5로 읽은 ±Infinity·NaN의 원문("Infinity"·"NaN")은 JSON 숫자가 아니다. Double처럼
+        // 거부한다(유한한 수의 원문은 파서가 RFC 8259 꼴로 바꿔 두었다).
+        if (value.Type() == JsonType::Double) {
+            const uint64 bits = platform::BitCast<uint64>(value.TryGetDouble().Value());
+            if ((bits & 0x7FF0000000000000ull) == 0x7FF0000000000000ull) {
+                return Fail(ErrorCode::InvalidArgument);
+            }
+        }
+
         if (auto before = BeforeValue(); !before) {
             return before;
         }

@@ -33,14 +33,24 @@ enum class ConfigLayer : uint8 {
     DeviceProfile,
     // <UserData>/<Project>/Config/<Branch>.json — 사용자 설정 가능(UserConfig) 필드만
     User,
+    // 라이브 운영 핫픽스(태그 = 핫픽스 묶음 — Docs/Design/CVarSystem.ko.md 6.1절, UE
+    // ECVF_SetByHotfix)
+    Hotfix,
     // 명령줄 `--set=`·시험 픽스처
     Session,
-    // 실행 중 콘솔 입력·코드의 범위 임시 변경
-    Console
+    // 코드의 `CVar::Set`(출처 = 호출 위치 — UE ECVF_SetByCode)
+    Code,
+    // 범위 임시 변경(`cvar::ScopedOverride`·시험 — 태그마다 하나, 콘솔보다 약하다 — UE
+    // ECVF_SetByTemp)
+    Scoped,
+    // 실행 중 콘솔 입력
+    Console,
+    // 서버가 복제한 값(가장 강하다 — 클라이언트의 콘솔·코드·임시 변경이 이기지 못한다, CVar 13.2절)
+    Server
 };
 
-// 층 수다(ConfigLayer::Console + 1).
-inline constexpr uint32 ConfigLayerCount = static_cast<uint32>(ConfigLayer::Console) + 1;
+// 층 수다(ConfigLayer::Server + 1).
+inline constexpr uint32 ConfigLayerCount = static_cast<uint32>(ConfigLayer::Server) + 1;
 
 // 정의된 층 값인지다.
 constexpr bool IsConfigLayer(ConfigLayer layer) noexcept {
@@ -55,6 +65,10 @@ StringView ConfigLayerName(ConfigLayer layer) noexcept;
 inline constexpr StringView DefaultConfigBranches[] = {
     "Engine", "Game", "Input", "Render", "Quality", "DeviceProfiles", "Editor"};
 
+// 프리셋 묶음 값 파일(`Quality.json` — 묶음 → 등급 → 항목 → 값, 6.1절)의 branch 이름이다. 이 branch
+// 문서는 설정 struct 섹션이 아니라 코드가 정의한 묶음 항목의 값만 담는다(CVar 11절).
+inline constexpr StringView QualityBranch = "Quality";
+
 // branch 파일 안에서 콘솔 설정 이름 → 값 섹션의 예약 키다(3.2절 — `"Settings": {"a.b": 1}`).
 // 설정 struct의 Section으로 쓸 수 없다(MetaCompiler RMC2210).
 inline constexpr StringView ConsoleSettingsSection = "Settings";
@@ -66,7 +80,37 @@ inline constexpr StringView ConsoleSettingsSection = "Settings";
 // 사용 예:
 //   IsConsoleSettingName("render.graph.immediate");  // true
 //   IsConsoleSettingName("Render.Graph");            // false(대문자)
-bool IsConsoleSettingName(StringView name) noexcept;
+//
+// constexpr이라 CVar 빌더가 컴파일 때 같은 함수로 이름을 검사한다(Docs/Design/CVarSystem.ko.md
+// 4.3절).
+constexpr bool IsConsoleSettingName(StringView name) noexcept {
+    usize segments = 0;
+    bool start = true;
+    for (const char c : name) {
+        if (c == '.') {
+            if (start) {
+                return false;
+            }
+
+            start = true;
+            continue;
+        }
+
+        const bool lower = c >= 'a' && c <= 'z';
+        const bool digit = c >= '0' && c <= '9';
+        if (start ? !lower : !(lower || digit || c == '_')) {
+            return false;
+        }
+
+        if (start) {
+            ++segments;
+        }
+
+        start = false;
+    }
+
+    return !start && segments >= 2;
+}
 
 // 문자열 필드 값에서 읽을 때 펼치는 경로 이름 표다(4.3절 — UE `%GAMEDIR%` 등 대응). 값은
 // ConfigContextOptions의 같은 이름 디렉터리다. 표에 없는 `{이름}`과 값이 비어 있는 이름은 오류다.
@@ -101,7 +145,7 @@ enum class ConfigDiagnosticCode : uint8 {
     // 표에 없거나 값이 비어 있는 경로 이름 `{...}`이다(4.3절).
     InvalidPathToken,
     // 이 층이 쓸 수 없는 필드다(사용자 층의 UserConfig 아닌 필드, 출시 규칙의 DevelopmentOnly
-    // 필드).
+    // 필드, 프리셋 묶음 펼침만 쓰는 품질 묶음 층에 직접 쓰기 — CVar 11절).
     LayerNotAllowed,
     // `Settings` 섹션의 콘솔 설정 이름·값 모양이 잘못됐다.
     InvalidSetting,
@@ -109,12 +153,52 @@ enum class ConfigDiagnosticCode : uint8 {
     UnknownTarget,
     // 콘솔 층이 ConsoleReadOnly 콘솔 설정을 쓰려 했다(5.1절).
     ConsoleReadOnly,
-    // 품질 묶음 층이 QualityMember가 아닌 콘솔 설정을 쓰려 했다(5.1절).
-    NotQualityMember,
     // 콘솔 설정 값이 범위·허용 값 밖이다.
     ValueOutOfRange,
     // 정보: 더 강한 출처가 이미 있어 값이 바뀌지 않은 쓰기다(출처 스택에는 남았다 — 3.1절).
-    WeakWrite
+    WeakWrite,
+    // 경고: 사용자 파일의 스키마 버전(`$version`)이 없거나 지금 버전과 다르다(8절 — 파일은 관대하게
+    // 읽는다).
+    UserFileVersion,
+    // 경고: 사용자 파일의 `Settings`에 등록되지 않은 콘솔 설정 이름이 있다(버렸다).
+    UnknownSetting,
+    // 정보: 시작 뒤 RestartRequired 값이 바뀌어 다음 실행 때 적용된다(지금 값은 그대로 — 8절, CVar
+    // VD15의 `RestartRequired` 진단).
+    RestartRequired,
+    // 경고: 시작 뒤 파일 층이 아닌 층(기기 프로필·품질 같은 파생 층, 세션·콘솔 같은 휘발 층)이
+    // 부팅 값(RestartRequired·StartupOnly)을 바꾸려 했다. 다음 실행에 같은 입력이 다시 오지
+    // 않으므로 대기로 두지 않고 지금 값을 유지한다(같은 이름·출처에 한 번만 — 8절).
+    BootValueIgnored,
+    // 기기 프로필 정의·선택 오류(모르는 프로필·부모, 부모 순환, 모르는 메모리 등급 — 6.2절).
+    InvalidDeviceProfile,
+    // 정보: `Clamp()` CVar의 범위 밖 값을 범위 끝으로 보정해 받았다(CVar 6.2·12절).
+    Clamped,
+    // enum CVar 값이 이름 표에 없다(CVar 4.4·12절).
+    InvalidEnum,
+    // 봉인(CompleteStartup) 뒤 부팅 변수(BootCVar·StartupOnly·RestartRequired 독립 콘솔 설정)에
+    // 바로 쓰려 했다(콘솔·코드·범위 임시 변경 층 — CVar 9절). 메시지는 콘솔 안내 문구다("is a boot
+    // variable; set it in a config file or with --set and restart" — 이름 뒤에 붙인다).
+    BootSealed,
+    // 정보: 등록 전에 들어온 값(대기 값)이 등록 때 적용됐다(CVar 12절).
+    LateBound,
+    // 경고: 시작이 끝났는데 등록되지 않은 콘솔 이름의 값이 남았다(ReportUnresolved — 가까운 이름이
+    // 있으면 메시지에 `did you mean '...'?`를 붙인다, CVar 12절).
+    UnresolvedName,
+    // CVar의 `Validate` 검사 함수가 값을 거부했다(메시지는 검사 함수가 돌려준 이유 —
+    // CVar 4.2·12절).
+    ValidationFailed,
+    // 프리셋 묶음이 정의하지 않은 등급이다(묶음 변수 쓰기, `Quality.json`의 등급 키 — CVar
+    // 11·12절).
+    UndefinedLevel,
+    // 경고: 묶음 펼침이 MaxGroupPasses 번 안에 멈추지 않았다(묶음끼리 서로 바꾸는 순환 — 마지막
+    // 결과를 쓴다, CVar 10절).
+    GroupNoConverge,
+    // 프리셋 묶음 정의끼리 맞지 않는다: 묶음의 묶음 순환·자기 참조(메시지에 순환 경로), 두 묶음이
+    // 같은 변수를 항목으로 가짐(두 묶음 이름) — ConfigContext::Register가 거부한다(CVar 11절).
+    GroupConflict,
+    // 정보: 품질 조합 검증이 묶음의 펼칠 등급을 낮췄거나 가장 낮은 등급도 기기 조건에 맞지 않는다
+    // (메시지는 `quality.shadow@1 (requested 3, lowered: <사유>)` — Config 6.1, CVar 11절).
+    QualityLowered
 };
 
 // 진단 이름(열거자 철자)이다. 정의되지 않은 값이면 빈 view다.
@@ -123,8 +207,19 @@ StringView ConfigDiagnosticCodeName(ConfigDiagnosticCode code) noexcept;
 // 진단 심각도다. Error가 하나라도 있으면 그 입력(층 추가·대입)은 받지 않는다.
 enum class ConfigSeverity : uint8 {
     Error,
+    // 경고 — 입력의 그 조각만 버리거나(오래된 사용자 파일의 모르는 키 — 8절) 값을 바꿔(품질 등급
+    // 낮춤) 계속했다. ErrorCount에 들지 않는다.
+    Warning,
     // 정보(WeakWrite 등) — 입력은 받았다.
     Note
+};
+
+// 진단 모음의 한 시점이다(ConfigDiagnostics::Mark — Rewind로 그 뒤 진단을 버린다).
+struct ConfigDiagnosticsMark {
+    usize count = 0;
+    usize errors = 0;
+    uint64 omitted = 0;
+    usize textBytes = 0;
 };
 
 // 진단 하나의 읽기 view다. source(층 출처 이름 — 파일 경로·`<memory>` 등)·path(섹션 안 필드 경로
@@ -187,8 +282,22 @@ public:
         return errors_;
     }
 
+    // 저장하지 못하고 넘친 진단 수를 count만큼 더한다(다른 모음의 진단을 옮길 때 그 모음의 넘친
+    // 수도 함께 넘긴다 — ConfigContext::TakeDiagnostics).
+    void AddOmitted(uint64 count) noexcept {
+        omitted_ += count;
+    }
+
     // 모든 진단을 지운다(한도는 그대로).
     void Clear() noexcept;
+
+    // 지금 시점이다. 시험 적용처럼 진단을 남기지 않을 검사를 하기 전에 잡고, 끝나면 Rewind로 그 뒤
+    // 진단을 버린다(관대한 사용자 파일 읽기가 조각마다 쓴다).
+    ConfigDiagnosticsMark Mark() const noexcept;
+
+    // mark 뒤에 더한 진단(넘친 개수 포함)을 버린다. 전제: mark는 이 모음의 Mark가 돌려준 것이고 그
+    // 뒤 Clear하지 않았다 — 아니면 Fatal.
+    void Rewind(const ConfigDiagnosticsMark& mark) noexcept;
 
 private:
     struct Entry {

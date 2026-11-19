@@ -35,7 +35,10 @@ enum class TextDiagnosticCode : uint8 {
     // 참조 resolver가 텍스트를 풀지 못했다.
     Unresolved,
     // resolver 없이 non-null Hard·Weak 참조를 주는 등 이 설정으로 할 수 없는 입력이다.
-    Unsupported
+    Unsupported,
+    // 바뀐 값을 담은 struct의 검증 hook이 게시 전에 거부했다(Docs/Design/CurveData.ko.md 9.1절 —
+    // 예: 커브 키 시간이 정렬되지 않았다). 경로는 검증한 단위(그 struct를 담은 필드·멤버)다.
+    InvalidStructValue
 };
 
 // 진단 위치의 종류다.

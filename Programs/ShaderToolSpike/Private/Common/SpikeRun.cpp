@@ -3,6 +3,7 @@
 #include "SpikeShaders.h"
 #include "SpikeTools.h"
 
+#include <Core/Diagnostics/Log.h>
 #include <Core/Text/NumberText.h>
 #include <Platform/Clock.h>
 #include <locale.h>
@@ -186,8 +187,13 @@ void Spike::WriteText(const char* name, const char* extension, StringView text) 
 bool Spike::OpenTools() noexcept {
     char root[shader::MaxShaderToolPathBytes];
     usize rootBytes = 0;
-    if (!shader::GetShaderToolStoreRoot(root, sizeof(root), rootBytes)) {
-        fprintf(stderr, "no shader tool store on this platform\n");
+    const platform::FileStatus store =
+        shader::GetShaderToolStoreRoot(root, sizeof(root), rootBytes);
+    if (!store) {
+        Log::Error(shader::LogShaderTool,
+                   "Shader tool store root is unavailable on this host (OS error {OsError}); the "
+                   "spike cannot open its required tools",
+                   store.nativeError);
         return false;
     }
 
@@ -196,9 +202,14 @@ bool Spike::OpenTools() noexcept {
     const shader::ShaderToolLoadStatus opened = tools_.Open(root, rootBytes);
     const double openMicroseconds = MicrosecondsSince(openStart);
     if (!opened) {
-        fprintf(stderr, "%s: %s (%s)\n", opened.tool != nullptr ? opened.tool : "tool",
-                shader::ShaderToolLoadMessage(opened.code),
-                shader::ShaderToolLoadCodeName(opened.code));
+        // 스파이크는 네 도구가 모두 필요하다(필수 도구 실패는 Error).
+        Log::Error(shader::LogShaderTool,
+                   "Required shader tool {Tool} could not be opened: {Code} (OS error {OsError}, "
+                   "symbol {Symbol}). {Message}",
+                   opened.tool != nullptr ? opened.tool : "unknown",
+                   shader::ShaderToolLoadCodeName(opened.code), opened.file.nativeError,
+                   opened.symbol != nullptr ? opened.symbol : "none",
+                   shader::ShaderToolLoadMessage(opened.code));
         report_.EndObject();
         return false;
     }
@@ -304,10 +315,17 @@ void Spike::ReportVersions() noexcept {
     report_.BeginObject("tools");
     uint32 major = 0;
     uint32 minor = 0;
-    if (shader::QueryDxcVersion(tools_.Dxc(), major, minor)) {
+    const shader::ShaderToolLoadStatus versioned =
+        shader::QueryDxcVersion(tools_.Dxc(), major, minor);
+    if (versioned) {
         char version[32];
         snprintf(version, sizeof(version), "%u.%u", major, minor);
         report_.String("dxc", StringView(version));
+    } else {
+        // 버전 표시는 없어도 되는 선택 정보다(Debug).
+        Log::Debug(shader::LogShaderTool,
+                   "DXC version query is unavailable: {Code}; the report omits it",
+                   shader::ShaderToolLoadCodeName(versioned.code));
     }
 
     const auto spirvToolsVersion = reinterpret_cast<decltype(&spvSoftwareVersionString)>(

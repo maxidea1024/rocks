@@ -1,0 +1,640 @@
+{
+  "tool": "OT6 confirmation (RunBench.ps1 Measure-Load and Invoke-Bench)",
+  "startedUtc": "2026-11-18T16:17:32.6907524Z",
+  "machine": {
+    "cpu": "13th Gen Intel(R) Core(TM) i5-13600KF",
+    "logicalProcessors": 20,
+    "os": "Microsoft Windows 11 Pro 10.0.26200",
+    "powerPlan": "381b4222-f694-41f0-9685-ff5bb260df2e (Balanced)",
+    "coreAffinity": "none (not pinned)"
+  },
+  "gitHead": "91ed7296313c11101d7bd024cfdd73764e471f13",
+  "gitDirty": "?? Docs/Benchmarks/SpatialIndex/2026-11-19/",
+  "runs": [
+    {
+      "name": "combo-k3_2-l0-r8-c1",
+      "command": "SpatialIndexBench.exe --group Dx --profile combo --looseness 3/2 --large-half 0 --root-level 8 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-19\\ot6\\combo-k3_2-l0-r8-c1.json",
+      "exitCode": 0,
+      "seconds": 35.66,
+      "loadBefore": {
+        "utc": "2026-11-18T16:17:39.3651950Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 12.03
+          },
+          {
+            "name": "clang-cl",
+            "id": 54104,
+            "cpuPercentOfMachine": 8.46
+          },
+          {
+            "name": "clang-cl",
+            "id": 57736,
+            "cpuPercentOfMachine": 8.39
+          },
+          {
+            "name": "clang-cl",
+            "id": 29336,
+            "cpuPercentOfMachine": 8.31
+          },
+          {
+            "name": "clang-cl",
+            "id": 17000,
+            "cpuPercentOfMachine": 7.97
+          },
+          {
+            "name": "clang-cl",
+            "id": 4248,
+            "cpuPercentOfMachine": 7.76
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T16:18:18.1195636Z",
+        "totalCpuPercent": 99.97,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 5.91
+          },
+          {
+            "name": "clang-cl",
+            "id": 23432,
+            "cpuPercentOfMachine": 4.74
+          },
+          {
+            "name": "clang-cl",
+            "id": 26660,
+            "cpuPercentOfMachine": 4.66
+          },
+          {
+            "name": "clang-cl",
+            "id": 57856,
+            "cpuPercentOfMachine": 4.66
+          },
+          {
+            "name": "clang-cl",
+            "id": 35776,
+            "cpuPercentOfMachine": 4.64
+          },
+          {
+            "name": "clang-cl",
+            "id": 58220,
+            "cpuPercentOfMachine": 4.58
+          }
+        ]
+      }
+    },
+    {
+      "name": "combo-k2-l0-r10-c1",
+      "command": "SpatialIndexBench.exe --group Dx --profile combo --looseness 2 --large-half 0 --root-level 10 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-19\\ot6\\combo-k2-l0-r10-c1.json",
+      "exitCode": 0,
+      "seconds": 49.25,
+      "loadBefore": {
+        "utc": "2026-11-18T16:18:21.1970988Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "clang-cl",
+            "id": 57856,
+            "cpuPercentOfMachine": 4.97
+          },
+          {
+            "name": "clang-cl",
+            "id": 18024,
+            "cpuPercentOfMachine": 4.92
+          },
+          {
+            "name": "clang-cl",
+            "id": 35776,
+            "cpuPercentOfMachine": 4.82
+          },
+          {
+            "name": "clang-cl",
+            "id": 15284,
+            "cpuPercentOfMachine": 4.74
+          },
+          {
+            "name": "clang-cl",
+            "id": 57304,
+            "cpuPercentOfMachine": 4.71
+          },
+          {
+            "name": "clang-cl",
+            "id": 26660,
+            "cpuPercentOfMachine": 4.64
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T16:19:13.5082199Z",
+        "totalCpuPercent": 99.97,
+        "busiest": [
+          {
+            "name": "Code",
+            "id": 28136,
+            "cpuPercentOfMachine": 8.33
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 6.98
+          },
+          {
+            "name": "dotnet",
+            "id": 56476,
+            "cpuPercentOfMachine": 3.72
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.57
+          },
+          {
+            "name": "dotnet",
+            "id": 46688,
+            "cpuPercentOfMachine": 3.44
+          },
+          {
+            "name": "dotnet",
+            "id": 48908,
+            "cpuPercentOfMachine": 3.05
+          }
+        ]
+      }
+    },
+    {
+      "name": "combo-k5_4-l0-r8-c1",
+      "command": "SpatialIndexBench.exe --group Dx --profile combo --looseness 5/4 --large-half 0 --root-level 8 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-19\\ot6\\combo-k5_4-l0-r8-c1.json",
+      "exitCode": 0,
+      "seconds": 33.1,
+      "loadBefore": {
+        "utc": "2026-11-18T16:19:16.5961898Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 7.37
+          },
+          {
+            "name": "Code",
+            "id": 28136,
+            "cpuPercentOfMachine": 4.4
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.75
+          },
+          {
+            "name": "dotnet",
+            "id": 47128,
+            "cpuPercentOfMachine": 3.75
+          },
+          {
+            "name": "dotnet",
+            "id": 54092,
+            "cpuPercentOfMachine": 3.49
+          },
+          {
+            "name": "dotnet",
+            "id": 32084,
+            "cpuPercentOfMachine": 3.23
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T16:19:52.7640249Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 7.92
+          },
+          {
+            "name": "dotnet",
+            "id": 1848,
+            "cpuPercentOfMachine": 6.15
+          },
+          {
+            "name": "Code",
+            "id": 28136,
+            "cpuPercentOfMachine": 4.11
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.91
+          },
+          {
+            "name": "dotnet",
+            "id": 29836,
+            "cpuPercentOfMachine": 3.75
+          },
+          {
+            "name": "dotnet",
+            "id": 40072,
+            "cpuPercentOfMachine": 3.15
+          }
+        ]
+      }
+    },
+    {
+      "name": "combo-k2-l0-r8-c1",
+      "command": "SpatialIndexBench.exe --group Dx --profile combo --looseness 2 --large-half 0 --root-level 8 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-19\\ot6\\combo-k2-l0-r8-c1.json",
+      "exitCode": 0,
+      "seconds": 51.42,
+      "loadBefore": {
+        "utc": "2026-11-18T16:19:55.8802916Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "Code",
+            "id": 28136,
+            "cpuPercentOfMachine": 8.52
+          },
+          {
+            "name": "dotnet",
+            "id": 1848,
+            "cpuPercentOfMachine": 3.62
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.44
+          },
+          {
+            "name": "dotnet",
+            "id": 53132,
+            "cpuPercentOfMachine": 3.39
+          },
+          {
+            "name": "dotnet",
+            "id": 15948,
+            "cpuPercentOfMachine": 2.89
+          },
+          {
+            "name": "clang-cl",
+            "id": 46504,
+            "cpuPercentOfMachine": 2.63
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T16:20:50.3630318Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "Code",
+            "id": 28136,
+            "cpuPercentOfMachine": 4.79
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.98
+          },
+          {
+            "name": "dotnet",
+            "id": 39712,
+            "cpuPercentOfMachine": 3.52
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 3.46
+          },
+          {
+            "name": "dotnet",
+            "id": 39496,
+            "cpuPercentOfMachine": 3.44
+          },
+          {
+            "name": "dotnet",
+            "id": 40316,
+            "cpuPercentOfMachine": 3.28
+          }
+        ]
+      }
+    },
+    {
+      "name": "combo-k3_2-l0-r8-c2",
+      "command": "SpatialIndexBench.exe --group Dx --profile combo --looseness 3/2 --large-half 0 --root-level 8 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-19\\ot6\\combo-k3_2-l0-r8-c2.json",
+      "exitCode": 0,
+      "seconds": 32.51,
+      "loadBefore": {
+        "utc": "2026-11-18T16:20:53.4336024Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "Code",
+            "id": 28136,
+            "cpuPercentOfMachine": 4.3
+          },
+          {
+            "name": "dotnet",
+            "id": 31020,
+            "cpuPercentOfMachine": 3.62
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.62
+          },
+          {
+            "name": "dotnet",
+            "id": 44064,
+            "cpuPercentOfMachine": 3.46
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 3.41
+          },
+          {
+            "name": "dotnet",
+            "id": 56996,
+            "cpuPercentOfMachine": 3.33
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T16:21:29.0303589Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 6.51
+          },
+          {
+            "name": "Code",
+            "id": 28136,
+            "cpuPercentOfMachine": 4.32
+          },
+          {
+            "name": "dotnet",
+            "id": 2380,
+            "cpuPercentOfMachine": 4.3
+          },
+          {
+            "name": "dotnet",
+            "id": 52212,
+            "cpuPercentOfMachine": 3.46
+          },
+          {
+            "name": "dotnet",
+            "id": 53608,
+            "cpuPercentOfMachine": 3.39
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.2
+          }
+        ]
+      }
+    },
+    {
+      "name": "combo-k2-l0-r10-c2",
+      "command": "SpatialIndexBench.exe --group Dx --profile combo --looseness 2 --large-half 0 --root-level 10 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-19\\ot6\\combo-k2-l0-r10-c2.json",
+      "exitCode": 0,
+      "seconds": 46.47,
+      "loadBefore": {
+        "utc": "2026-11-18T16:21:32.2007366Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "Code",
+            "id": 28136,
+            "cpuPercentOfMachine": 4.97
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.88
+          },
+          {
+            "name": "dotnet",
+            "id": 34652,
+            "cpuPercentOfMachine": 3.33
+          },
+          {
+            "name": "dotnet",
+            "id": 30712,
+            "cpuPercentOfMachine": 3.31
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 3.28
+          },
+          {
+            "name": "dotnet",
+            "id": 53648,
+            "cpuPercentOfMachine": 3.07
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T16:22:21.9545579Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "Code",
+            "id": 28136,
+            "cpuPercentOfMachine": 9.4
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.85
+          },
+          {
+            "name": "FoundationTests",
+            "id": 17740,
+            "cpuPercentOfMachine": 2.97
+          },
+          {
+            "name": "Code",
+            "id": 35940,
+            "cpuPercentOfMachine": 2.6
+          },
+          {
+            "name": "dotnet",
+            "id": 25988,
+            "cpuPercentOfMachine": 2.58
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 2.42
+          }
+        ]
+      }
+    },
+    {
+      "name": "combo-k5_4-l0-r8-c2",
+      "command": "SpatialIndexBench.exe --group Dx --profile combo --looseness 5/4 --large-half 0 --root-level 8 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-19\\ot6\\combo-k5_4-l0-r8-c2.json",
+      "exitCode": 0,
+      "seconds": 33.88,
+      "loadBefore": {
+        "utc": "2026-11-18T16:22:25.5147248Z",
+        "totalCpuPercent": 99.98,
+        "busiest": [
+          {
+            "name": "FoundationTests",
+            "id": 17740,
+            "cpuPercentOfMachine": 18.57
+          },
+          {
+            "name": "Code",
+            "id": 28136,
+            "cpuPercentOfMachine": 5.86
+          },
+          {
+            "name": "dotnet",
+            "id": 38976,
+            "cpuPercentOfMachine": 4.32
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 3.72
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.72
+          },
+          {
+            "name": "dotnet",
+            "id": 54640,
+            "cpuPercentOfMachine": 3.36
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T16:23:02.5255194Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "Code",
+            "id": 28136,
+            "cpuPercentOfMachine": 6.17
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.96
+          },
+          {
+            "name": "dotnet",
+            "id": 20032,
+            "cpuPercentOfMachine": 3.65
+          },
+          {
+            "name": "FoundationTests",
+            "id": 17740,
+            "cpuPercentOfMachine": 3.59
+          },
+          {
+            "name": "dotnet",
+            "id": 25656,
+            "cpuPercentOfMachine": 3.49
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 3.44
+          }
+        ]
+      }
+    },
+    {
+      "name": "combo-k2-l0-r8-c2",
+      "command": "SpatialIndexBench.exe --group Dx --profile combo --looseness 2 --large-half 0 --root-level 8 --out Docs\\Benchmarks\\SpatialIndex\\2026-11-19\\ot6\\combo-k2-l0-r8-c2.json",
+      "exitCode": 0,
+      "seconds": 48.6,
+      "loadBefore": {
+        "utc": "2026-11-18T16:23:05.6732540Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "Code",
+            "id": 28136,
+            "cpuPercentOfMachine": 3.98
+          },
+          {
+            "name": "dotnet",
+            "id": 37960,
+            "cpuPercentOfMachine": 3.67
+          },
+          {
+            "name": "dotnet",
+            "id": 21908,
+            "cpuPercentOfMachine": 3.52
+          },
+          {
+            "name": "dotnet",
+            "id": 6216,
+            "cpuPercentOfMachine": 3.36
+          },
+          {
+            "name": "dotnet",
+            "id": 12612,
+            "cpuPercentOfMachine": 3.33
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.05
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T16:23:57.4489894Z",
+        "totalCpuPercent": 99.97,
+        "busiest": [
+          {
+            "name": "cpptools",
+            "id": 26872,
+            "cpuPercentOfMachine": 5.26
+          },
+          {
+            "name": "Code",
+            "id": 28136,
+            "cpuPercentOfMachine": 4.38
+          },
+          {
+            "name": "FoundationTests",
+            "id": 17740,
+            "cpuPercentOfMachine": 4.09
+          },
+          {
+            "name": "dotnet",
+            "id": 8100,
+            "cpuPercentOfMachine": 3.8
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 3.44
+          },
+          {
+            "name": "dotnet",
+            "id": 43660,
+            "cpuPercentOfMachine": 3.36
+          }
+        ]
+      }
+    }
+  ],
+  "finishedUtc": "2026-11-18T16:23:57.4495167Z"
+}

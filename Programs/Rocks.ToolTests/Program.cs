@@ -59,7 +59,7 @@ internal static class Program
                     var failures = PolicyChecks.Runtime(root).Concat(PolicyChecks.ReflectionAnnotations(root)).Concat(PolicyChecks.PlatformBoundary(root)).Concat(PolicyChecks.TargetMacros(root))
                         .Concat(PolicyChecks.TargetIntrinsics(root)).Concat(PolicyChecks.TestAccess(root))
                         .Concat(PolicyChecks.SourceWarnings(root)).Concat(PolicyChecks.OptimizationOverrides(root))
-                        .Concat(PolicyChecks.CompilerBuiltins(root)).Concat(PolicyChecks.RawLimitLiterals(root)).Concat(PolicyChecks.InitializerListDeductions(root)).Concat(PolicyChecks.CompileTimeMessages(root)).Concat(PolicyChecks.EnglishSourceLiterals(root)).Concat(PolicyChecks.EnglishBuildFiles(root)).Concat(PolicyChecks.DeterministicMathSources(root)).Concat(PolicyChecks.CrtNumberConversions(root)).Concat(UnicodeTables.Check(root)).Concat(MathTables.Check(root)).Concat(NumberTables.Check(root))
+                        .Concat(PolicyChecks.CompilerBuiltins(root)).Concat(PolicyChecks.RawLimitLiterals(root)).Concat(PolicyChecks.InitializerListDeductions(root)).Concat(PolicyChecks.CVarRegistrations(root)).Concat(PolicyChecks.CompileTimeMessages(root)).Concat(PolicyChecks.EnglishSourceLiterals(root)).Concat(PolicyChecks.EnglishBuildFiles(root)).Concat(PolicyChecks.DeterministicMathSources(root)).Concat(PolicyChecks.CrtNumberConversions(root)).Concat(UnicodeTables.Check(root)).Concat(Json5UnicodeTablesGenerator.Check(root)).Concat(MathTables.Check(root)).Concat(NumberTables.Check(root))
                         .Concat(PolicyChecks.PythonFreeMainPath(root)).Concat(PolicyChecks.ThirdParty(root)).Concat(PolicyChecks.DerivedSources(root))
                         .Concat(PolicyChecks.ShaderToolReferences(root)).ToList();
                     // Release 배제(셰이더 시스템 9절)는 규칙 어셈블리를 평가한다. 알려진 예외는 실패가 아니지만 조용히 넘기지 않고 출력한다.
@@ -103,6 +103,17 @@ internal static class Program
                     }
 
                     return writeTables || !tablesChanged ? 0 : 1;
+                case "json5-unicode-tables":
+                    // UCD 원본에서 C# JSON5 reader의 General_Category 구간 표(Json5UnicodeTablesGenerator.OutputPath)를 다시 만든다(기본은
+                    // 차이만 보고, --write면 고친다).
+                    bool writeJson5 = options.Write;
+                    bool json5Changed = Json5UnicodeTablesGenerator.Run(root, writeJson5);
+                    if (json5Changed)
+                    {
+                        Console.WriteLine((writeJson5 ? "updated " : "stale ") + Json5UnicodeTablesGenerator.OutputPath);
+                    }
+
+                    return writeJson5 || !json5Changed ? 0 : 1;
                 case "math-tables":
                     // 결정적 수학 모듈의 8비트 sRGB 표와 정확도 기준값 표를 정확한 정수 계산으로 다시 만든다(기본은
                     // 차이만 보고, --write면 고친다).

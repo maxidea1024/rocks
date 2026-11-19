@@ -34,10 +34,12 @@ S4·S5는 S2·S3과 독립이다. 이번 범위에서 macOS는 창·Metal 구현
 | `PlatformWindow` | Input | 창 생성·이벤트 펌프·네이티브 핸들 노출, 입력 backend(Win32 메시지 키보드·마우스, XInput 게임패드) | Graphics·World 참조 |
 | `GraphicsTypes` | Core | 그래픽 값 타입: 픽셀 형식·mip 크기 계산(`PixelFormat.h`), 필터·주소 모드·테두리 색·`SamplerDesc`(`Sampler.h`). 장치 계약·에셋·도구가 함께 쓴다 | 장치·창·World 참조 |
 | `Graphics` | GraphicsTypes | 장치·스왑체인·버퍼·텍스처(mip·텍스처별 샘플러)·파이프라인·명령 기록 계약, backend 열거 | World·Object·창 모듈 참조 |
-| `D3D12Graphics` | Graphics | D3D12 구현(Windows) | 다른 backend 참조 |
-| `D3D11Graphics` | Graphics | D3D11 구현(Windows, feature level 11_0 이상, 10.2절) | 〃 |
-| `OpenGLGraphics` | Graphics | OpenGL 4.5 core 구현(Windows WGL) | 〃 |
-| `VulkanGraphics`·`MetalGraphics` | Graphics | 자리만 둔다. 장치 생성은 `Unsupported`를 반환한다 | 동작하는 척하는 가짜 구현 |
+| `DxgiGraphics` | Core | D3D11·D3D12가 함께 쓰는 DXGI 어댑터 도우미(HDR 출력 판정·D3D 보장 자원 크기, GX1). 어댑터 질의는 Windows 빌드에만 있다 | Graphics·backend 참조 |
+| `D3D12Graphics` | Graphics, DxgiGraphics | D3D12 구현(Windows) | 다른 backend 참조 |
+| `D3D11Graphics` | Graphics, DxgiGraphics | D3D11 구현(Windows, feature level 11_0 이상, 10.2절) | 〃 |
+| `OpenGLGraphics` | Graphics | OpenGL ES 3.2 구현(Windows `GLES31_PC` 미리보기 WGL, Android EGL, [OpenGL ES backend](OpenGLESGraphics.ko.md)) | 〃 |
+| `VulkanGraphics` | Graphics | Vulkan 1.1 구현(Windows·Android, 10.3절·[VulkanGraphics](VulkanGraphics.ko.md)) | 다른 backend 참조 |
+| `MetalGraphics` | Graphics | 자리만 둔다. 장치 생성은 `Unsupported`를 반환한다 | 동작하는 척하는 가짜 구현 |
 | `Engine` | ObjectRuntime, World | 엔진 상태 기계·메인 루프·WorldContext·EngineSubsystem | Gameplay·Graphics·창 참조 |
 | `World` | ObjectRuntime, CoreTypeBindings | World·Actor·Component·SceneComponent(WorldOnly 리플렉션 클래스 — 4.6절)·TickScheduler·WorldSubsystem | Engine·Graphics·Asset 참조 |
 | `WorldTestFixtures`(Developer) | World | World 타입을 상속한 리플렉션 시험 타입(SaveActor·SaveComponent)과 그 identity 명세. EngineTests만 의존 | 제품 링크 |
@@ -135,7 +137,7 @@ registry.RemoveReference(access, actor, actorPointer->components_, component);
 
 - **ReadOnly**: 경로·리플렉션 쓰기가 World 장부(ActorRecord·hook·MarkDirty·Tick 등록)를 우회하지 않게 World 필드는 모두 ReadOnly다(로드의 staged 쓰기는 허용). 값은 World API(`SetEnabled`·`SetRootComponent`·`SetRelativeTransform` 등)로 바꾼다. 그래서 CU5 setter hook 전에는 에디터에서 `relativeTransform`을 경로로 편집할 수 없다(UE `EditAnywhere`와 다른 제약).
 - **Tick 설정은 NATIVE**다(UE `PrimaryActorTick`은 archetype 차분 직렬화 — Rocks에는 아직 클래스 기본값 레코드와 차이 저장이 없어 인스턴스 저장값이 클래스 기본값 변경을 가린다). 레코드와 struct 멤버 단위 비교가 생기는 A5에서 리플렉션 struct·enum으로 옮기며, 그래서 `TickSettings`를 단순 값 구조로 둔다([RuntimeClassMetadata](RuntimeClassMetadata.ko.md) '클래스 기본값 결정').
-- **부착 계층은 NATIVE**다(parent는 다른 Actor의 Component에 붙을 수 있어 강한 참조로 두면 좀비와 그래프 끌어오기가 생긴다 — UE는 Outer·레벨 패키지·garbage elimination으로 푼다). 추적하지 않는 참조 `WeakObjectRef<T>`가 생긴 뒤 레벨·prefab 저장 전에 영속한다. 리플렉션 B9가 `WeakRef<T>` PROPERTY(같은 그래프 안 대상만 보존)를 가능하게 하며, 부착 계층을 리플렉션으로 옮길지는 World 단계가 정한다([리플렉션 B9](ReflectionExtensions.ko.md) 5.1절).
+- **부착 계층은 NATIVE**다(parent는 다른 Actor의 Component에 붙을 수 있어 강한 참조로 두면 좀비와 그래프 끌어오기가 생긴다 — UE는 Outer·레벨 패키지·garbage elimination으로 푼다). 추적하지 않는 참조 `WeakObjectRef<T>`가 생긴 뒤 레벨·prefab 저장 전에 영속한다. 리플렉션 B9가 `WeakObjectRef<T>` PROPERTY(같은 그래프 안 대상만 보존)를 가능하게 하며, 부착 계층을 리플렉션으로 옮길지는 World 단계가 정한다([리플렉션 B9](ReflectionExtensions.ko.md) 5.1절).
 - **Level 그래프 저장은 구조 시험용이다**: graph v2 편의 API `SaveObjectGraph(root)`로 Level 루트를 저장할 수 있다(A0-Od1부터 — [ObjectFoundations](ObjectFoundations.ko.md) 5.2절, 그 전에는 graph v1)(그래프의 모든 타입이 생성 타입일 때 — native 파생 Actor·Component가 하나라도 있으면 Unsupported, Actor별 저장 제외는 레벨 패키지 단계). 부착 계층은 저장되지 않는다(root는 저장된다). 저장 안전 지점은 Tick 밖·파괴 대기 정리(FlushDestroys) 뒤다 — 정리 전에는 파괴 대기 Actor가 `actors`에 남아 함께 저장된다.
 - **장부 밖 객체**: World API(SpawnActor·AddComponent·CreateLevel) 밖에서 만든 Actor·Component(그래프 로드, World registry에 직접 `NewObject`)는 `World*`가 없고 World에 수명 기록이 없다. 그 객체의 계층·World API는 Fatal 대신 `InvalidArgument`다(`SetRootComponent`·`Destroy`·`AttachTo`(그 객체를 부모로 쓰는 경우 포함)·`Detach`, `World::DestroyComponent`). 수명 기록이 필요한 World API(`DestroyActor`·`AddComponent`·`GetComponents`)는 `StaleHandle`이다. 상대 Transform 설정과 월드 행렬 계산은 부모가 없으므로 된다. `GetWorld()`는 참조를 돌려주므로 여전히 Fatal이며 `HasWorld()`로 먼저 확인한다.
 - **레벨 편입 계약(레벨 패키지 단계 — 자리)**: 로드한 Level 그래프를 World에 넣는 단계는 (1) Actor마다 `ActorRecord`를 만들고 Level 레코드의 Actor 수를 맞추며 Actor의 `actors` 배열 위치를 레코드(`levelPosition` — 7.4절 바꿔 떼기의 근거)에 기록하고(아래 (4)의 null 정리·압축 뒤 다시 매긴다), Component마다 World의 Component 색인(소유 Actor·Tick handle — 7.4절 우회 파괴 복구)에 넣으며, (2) Level·Actor·Component의 `World*`·Actor의 소속 Level·Component의 소유 Actor를 `actors`·`components` 포함 관계에서 연결하고, (3) 부착 계층이 영속된 뒤에는 parent에서 children을 다시 만들며, (4) `actors`·`components`의 null 원소를 정리하고 root가 `components` 밖이면 비우며, (5) `relativeTransform`을 `SetRelativeTransform`과 같은 규칙(유한·단위 quaternion)으로 검증한 뒤, (6) World 수명 단계(FinishSpawning과 같은 hook 순서)로 진행한다. 이 단계 전의 로드 객체는 별도 ObjectRegistry(같은 TypeRegistry)에 두고 World registry에 넣지 않는다.
@@ -281,9 +283,9 @@ class Device {
 - 자원은 slot+generation 핸들이다. `Retire`는 마지막으로 사용한 제출의 fence(`GpuFencePoint`: device epoch·queue·value)가 끝난 뒤 자원과 descriptor를 해제한다. OpenGL도 `glFenceSync`로 같은 규칙을 따른다(즉시 삭제하지 않는다). fence 완료는 다른 스레드에서 기다리거나 통지·작업 이벤트(`Graphics/GpuFenceEvent.h`)로 받는다. 장치 손실은 기다리는 쪽을 `Destroyed`로 깨운다([렌더 기반](RenderBase.ko.md) GX7).
 - 장치 스레드 모델([렌더 기반](RenderBase.ko.md) 5.4절 GX11·GX10): 소유 스레드 하나가 제출·present·상태 변경·생성(지금은 생성도 — `DeviceInfo::concurrentResourceCreation` false)을 하고, 소유권은 `ReleaseOwnership`·`AcquireOwnership`으로 넘긴다. 소유 스레드 밖 호출은 Debug·Development에서 `WrongThread`다. 엔진 실행 때는 렌더 lane(RenderBase)이 장치를 소유한다.
 - 정점 배치([렌더 기반](RenderBase.ko.md) 10.4절 GX3a): 정점 원소 형식 20종(`GraphicsTypes/VertexFormat.h`), 속성(location·형식·stream·offset)·stream(stride·정점/인스턴스), index 버퍼(UInt16·UInt32), `Draw`·`DrawIndexed`(인스턴스 수), 정점 버퍼 없는 그리기. 셰이더 정점 입력 시맨틱은 `ATTRIBUTEn`이다.
-- 셰이더는 backend별 원문을 `PipelineDesc`에 담는다(D3D12: HLSL을 런타임 `D3DCompile` SM 5.1, D3D11: 같은 HLSL을 SM 5.0, OpenGL: GLSL 4.50). 오프라인 셰이더 쿠킹과 DXC는 후속이다.
-- 그리기 상수는 64바이트 행렬 + 16바이트 색으로 제한한다(D3D12 root constants, OpenGL uniform).
-- 좌표 규약: 2026-11-17 사용자 결정으로 좌표계·단위·행렬 규약을 UE 5.8과 같게 바꾼다(행 벡터 `p·M`·행 우선 저장, 셰이더 `mul(v, M)`·행 우선 packing, 앞면은 화면 반시계, [셰이더 시스템](ShaderSystem.ko.md) 7.2절 6·8항). 메모리 배치는 전과 같아 GPU로 가는 바이트는 바뀌지 않는다. 렌더 코드는 C7에서 반영했다(2026-11-17): `DrawConstants::transform`은 행 우선, 샘플 렌더러 셰이더는 `mul(float4(position, 1), transform)`(GLSL `vec4(position, 1) * uTransform`), D3D12는 `D3DCOMPILE_PACK_MATRIX_ROW_MAJOR`로 컴파일하고 OpenGL은 `glProgramUniformMatrix4fv(transpose = GL_TRUE)`로 올린다. `PipelineDesc::cullMode`(None·Back·Front, 기본 None)가 컬을 정하고 앞면은 화면 반시계다(D3D12 `FrontCounterClockwise = TRUE`, OpenGL은 clip 원점별 `glFrontFace`를 장치가 맞춘다). 샘플 렌더러는 뒤면을 컬하고, 물체 world·view 행렬식 가운데 하나만 음수면 앞면 컬 파이프라인으로 바꾼다. OpenGL은 `glClipControl`의 `GL_ZERO_TO_ONE`으로 D3D와 같은 [0,1] 깊이를 쓰고, 원점은 창에 그릴 때 `GL_LOWER_LEFT`, RenderTarget 텍스처에 그릴 때 `GL_UPPER_LEFT`로 바꿔 RenderTarget의 첫 행이 이미지 위쪽이 되게 한다(샘플링·readback 모두 D3D12와 같은 배치). 텍스처는 첫 행이 위인 배치로 올리고 UV (0,0)이 좌상단이다.
+- 셰이더는 backend별 원문을 `PipelineDesc`에 담는다(D3D12: HLSL을 런타임 `D3DCompile` SM 5.1, D3D11: 같은 HLSL을 SM 5.0, OpenGL ES: GLSL ES 3.20, 쿠킹된 `GLES31_PC` 출력과 같은 모양, Vulkan: 같은 HLSL을 개발용 컴파일 훅 `DeviceDesc::shaderCompiler`가 DXC로 SPIR-V로, 10.3절). 오프라인 셰이더 쿠킹은 후속이다.
+- 그리기 상수는 64바이트 행렬 + 16바이트 색으로 제한한다(D3D12 root constants, OpenGL ES 루트 상수 에뮬레이션 배열 `vu_h`·`pu_h`, Vulkan push constant).
+- 좌표 규약: 2026-11-17 사용자 결정으로 좌표계·단위·행렬 규약을 UE 5.8과 같게 바꾼다(행 벡터 `p·M`·행 우선 저장, 셰이더 `mul(v, M)`·행 우선 packing, 앞면은 화면 반시계, [셰이더 시스템](ShaderSystem.ko.md) 7.2절 6·8항). 메모리 배치는 전과 같아 GPU로 가는 바이트는 바뀌지 않는다. 렌더 코드는 C7에서 반영했다(2026-11-17): `DrawConstants::transform`은 행 우선, 샘플 렌더러 셰이더는 `mul(float4(position, 1), transform)`, D3D12는 `D3DCOMPILE_PACK_MATRIX_ROW_MAJOR`로 컴파일하고 OpenGL ES는 행 우선 byte를 vec4 배열로 그대로 올려 GLSL ES가 `mat4(vu_h[0..3]) * v`로 쓴다(P11). `PipelineDesc::cullMode`(None·Back·Front, 기본 None)가 컬을 정하고 앞면은 화면 반시계다(D3D12 `FrontCounterClockwise = TRUE`, OpenGL ES는 클립 공간 규약에 맞춘 `glFrontFace`를 장치가 정한다). 샘플 렌더러는 뒤면을 컬하고, 물체 world·view 행렬식 가운데 하나만 음수면 앞면 컬 파이프라인으로 바꾼다. OpenGL ES Windows 미리보기는 모든 패스를 `glClipControl(GL_UPPER_LEFT, GL_ZERO_TO_ONE)`으로 그리고 스왑체인도 offscreen 텍스처에 그린 뒤 present가 Y를 뒤집어 창에 blit한다(P11, 2026-11-17). 그래서 RenderTarget·스왑체인 모두 첫 행이 이미지 위쪽이다(샘플링·readback 모두 D3D12와 같은 배치). Android는 셰이더가 클립 공간을 보정하고 앞면이 `GL_CW`다([OpenGL ES backend](OpenGLESGraphics.ko.md) 5.3절). 텍스처는 첫 행이 위인 배치로 올리고 UV (0,0)이 좌상단이다.
 - 동시에 진행하는 프레임 수는 렌더 lane 프레임 slot(2–3개)이 정하고, slot 재사용은 그 프레임의 모든 제출 fence 완료로 판정한다. D3D12는 끝난 제출의 기록 저장소를 다시 쓴다. 디버그 구성은 디버그 레이어를 켠다.
 
 ### 10.2 D3D11Graphics(P15 D3D11 부분)
@@ -319,7 +321,18 @@ D3D11은 필수 backend다(2026-11-13 사용자 결정). D3D12의 SM 6.6 기준�
 - 생성 초기 데이터는 `D3D11_SUBRESOURCE_DATA`로 생성 호출 안에서 올린다(장치 호출이라 스레드 안전, 생성 즉시 내용이 정해진다).
 - staging에서 올리는 경로는 행 정렬 요구가 없어 언제나 그대로 올린다. D3D12처럼 ring으로 다시 옮기는 경로가 없다.
 - readback: `D3D11_USAGE_STAGING` 텍스처로 `CopyResource`하고 fence가 끝난 뒤에만 `Map(READ)`으로 읽는다(UE `Private/D3D11RenderTarget.cpp:520–563`과 같은 staging 경로). `D3D11_MAP_FLAG_DO_NOT_WAIT`은 쓰지 않는다. 하드웨어 드라이버(GTX 1060)에서 runtime의 자원 사용 추적이 fence보다 늦게 풀려, 끝난 복사에도 `DXGI_ERROR_WAS_STILL_DRAWING`을 돌려주는 것을 확인했다. fence 뒤의 map은 GPU를 기다리지 않는다.
-- 그리기 상수(D3D12 루트 상수 20개 대응)는 80 byte 동적 상수 버퍼(b0, VS·PS)다. `SetConstants`마다 deferred context에서 `Map(WRITE_DISCARD)`한다(UE uniform buffer와 같다, `Private/D3D11UniformBuffer.cpp:161`). `NO_OVERWRITE`는 deferred context의 상수 버퍼에 11.1 기능(`MapNoOverwriteOnDynamicConstantBuffer`)이 필요해 쓰지 않는다. SH2·P2의 b13 그리기 상수(셰이더 시스템 7.2절 4항)로 옮기는 것은 SH5다.
+- 그리기별 상수(D3D12 루트 상수 대응, RenderBase 결정 R7·SX2)는 128 byte 동적 상수 버퍼(b0, VS·PS·CS) 하나다. 파이프라인이 선언한 크기(`drawConstantBytes`)만 셰이더가 읽고, `SetDrawConstants`마다 CPU 사본 전체를 deferred context에서 `Map(WRITE_DISCARD)`한다(UE uniform buffer와 같다, `Private/D3D11UniformBuffer.cpp:161`). `NO_OVERWRITE`는 deferred context의 상수 버퍼에 11.1 기능(`MapNoOverwriteOnDynamicConstantBuffer`)이 필요해 쓰지 않는다. SH2·P2의 b13 그리기 상수(셰이더 시스템 7.2절 4항)로 옮기는 것은 SH5다.
+
+**장치 능력·버퍼(GX1·GX2, 2026-11-18).**
+- `DeviceCaps`는 d3d11.h 상수와 feature level(FL 11.0은 UAV 8·VS UAV 없음, 11.1 이상은 UAV 64·모든 단계 UAV), `D3D11_FEATURE_D3D11_OPTIONS3`(VS 층 출력), DXGI 출력 HDR 색 공간이다. 64 bit atomic·multi draw indirect는 거짓이다. MSAA 표본 수는 `CheckMultisampleQualityLevels`다.
+- 버퍼 용도는 bind·misc flag로 옮긴다(UE `Private/D3D11Buffer.cpp:38–83`). raw SRV는 `D3D11_SRV_DIMENSION_BUFFEREX` + RAW다. 버퍼 view slot n은 VS·PS `t(n + 1)`(`VSSetShaderResources`·`PSSetShaderResources`).
+- 상수 버퍼는 `UpdateSubresource`에 대상 구간을 줄 수 없어(debug layer 288) 전체 갱신만 받고 부분 갱신은 `Unsupported`다. WARP가 `RGB9E5Ufloat` 버퍼 SRV 생성에서 멈추므로 WARP에서만 그 형식의 texel buffer 능력을 공개하지 않는다.
+- `ReadBuffer`는 staging 버퍼로 구간 `CopySubresourceRegion`(원본 box) 뒤 fence를 기다려 `Map(READ)`이다.
+
+**파이프라인·명령 기록 확장(GX3·GX4, 2026-11-18).**
+- 파이프라인마다 blend(타깃별, `IndependentBlendEnable`, alpha-to-coverage)·래스터(컬·깊이 bias·clamp, scissor는 늘 켬)·깊이·스텐실 상태 객체와 기본도형을 만든다. compute는 `cs_5_0`이고 CS 상수는 그리기 상수 버퍼 slot 0을 같이 쓴다.
+- `BeginPass`는 RTV 0–8과 DSV(읽기 전용 깊이는 깊이 텍스처마다 만든 `D3D11_DSV_READ_ONLY_*` view)를 묶고 load 동작을 `ClearRenderTargetView`·`ClearDepthStencilView`로 한다. 스텐실 기준은 깊이·스텐실 상태와 함께 건다.
+- dispatch는 CS에 읽기 SRV(t1–t4)·UAV(u0–u3)를 묶고 끝나면 풀며, 그래픽 SRV는 그리기 직전에 묶는다(같은 버퍼의 SRV·UAV가 겹쳐 런타임이 binding을 풀지 않게). dispatch 뒤 첫 그리기는 정점·index 버퍼를 다시 묶는다. 간접 명령은 `DrawInstancedIndirect`·`DrawIndexedInstancedIndirect`·`DispatchIndirect`, 복사는 `CopySubresourceRegion`, UAV clear는 `ClearUnorderedAccessViewUint`다.
 
 **GPU 계측(GX9).**
 - timestamp: query 객체(slot 4 × 256개)를 deferred context에서 `End`로 기록한다. 프레임 실행(`ExecuteCommandList`) 앞뒤를 slot별 `D3D11_QUERY_TIMESTAMP_DISJOINT`로 감싼다.
@@ -357,9 +370,19 @@ D3D11은 필수 backend다(2026-11-13 사용자 결정). D3D12의 SM 6.6 기준�
 | `CalibrateClocks` | `FD3D11DynamicRHI::CalibrateTimers` |
 | `PushMarker`·`PopMarker` | `Direct3DDeviceIMAnnotation->BeginEvent`·`EndEvent` |
 
-### 10.3 범위 밖
+### 10.3 VulkanGraphics(P9)
 
-RenderGraph·Deferred/Forward 경로·깊이 버퍼·MSAA·멀티 큐·bindless·Vulkan·Metal backend 구현은 이번 범위가 아니다.
+Vulkan은 모바일 주력이자 필수 backend다. ShaderSystem P9의 산출물로 SH2 전에 구현했다(2026-11-17 사용자 지시 "Vulkan까지는 작업을 미리하자"). 설계와 UE 5.8 VulkanRHI 조사, 계약별 대응은 [VulkanGraphics](VulkanGraphics.ko.md)에 있고 여기에는 요지만 둔다.
+- 기준은 Vulkan 1.1(Android)이다. 로더는 시스템 `vulkan-1.dll`·`libvulkan.so`를 P10 `OpenSystem`으로 연다. 선택 확장은 swapchain·calibrated timestamps·debug utils뿐이고 없으면 `Unsupported`·false로 공개한다.
+- 완료 추적은 제출마다 `VkFence`이고, render pass는 `VkRenderPass`, 메모리는 자체 페이지 할당기(Graphics `GpuPageAllocator`)다.
+- 창 출력은 중간 RGBA8 이미지에 그리고 `EndFrame`에서 swapchain 이미지에 blit한다(UE 기본 경로와 같다).
+- 앞면은 음수 viewport 높이 + `VK_FRONT_FACE_COUNTER_CLOCKWISE`·`Back → BACK_BIT`다. UE 매핑(`CLOCKWISE`·`CM_CW → FRONT_BIT`)은 `SV_IsFrontFace`가 D3D12와 반대라 따르지 않는다.
+- 셰이더는 실행 중 컴파일러가 없으므로 개발 프로그램이 Developer `ShaderFormatVulkan`(DXC `VULKAN_SM5` 옵션과 SPIR-V 재작성)을 `DeviceDesc::shaderCompiler`로 넘긴다. Release 실행 파일에는 컴파일러가 없다(SH2 전에는 Vulkan 파이프라인이 `Unsupported`).
+- 확인: Sandbox self-test 전체가 GTX 1060과 lavapipe(소프트웨어 ICD, 측정 S4)에서 통과하고 D3D12와 픽셀 대조가 차이 0이다(VulkanGraphics 17절).
+
+### 10.4 범위 밖
+
+RenderGraph·Deferred/Forward 경로·깊이 버퍼·MSAA·멀티 큐·bindless·Metal backend 구현은 이번 범위가 아니다.
 
 ## 11. 에셋
 
@@ -388,7 +411,7 @@ RenderGraph·Deferred/Forward 경로·깊이 버퍼·MSAA·멀티 큐·bindless�
 
 ## 14. 알려진 제한
 
-- World 타입의 Level 그래프 저장은 구조 시험용이다: 부착 계층은 저장되지 않고(리플렉션 B9의 WeakRef PROPERTY와 World 단계의 결정 뒤), native 파생이 든 그래프는 저장할 수 없으며, 로드한 객체는 레벨 편입 단계 전까지 World 장부 밖이다(4.6절). World 필드는 ReadOnly라 CU5 setter hook 전에는 경로로 편집할 수 없다.
+- World 타입의 Level 그래프 저장은 구조 시험용이다: 부착 계층은 저장되지 않고(리플렉션 B9의 WeakObjectRef PROPERTY와 World 단계의 결정 뒤), native 파생이 든 그래프는 저장할 수 없으며, 로드한 객체는 레벨 편입 단계 전까지 World 장부 밖이다(4.6절). World 필드는 ReadOnly라 CU5 setter hook 전에는 경로로 편집할 수 없다.
 - Tick마다 Borrow를 얻는 잠금 비용이 있다. 일괄 접근은 측정 후 도입한다.
 - 렌더 lane(RB1)과 프레임 slot은 구현했다. 렌더 설정 snapshot(CP4), 대체 자원(RB2), 장치 재생성은 후속이다. 지금 Sandbox의 엔진 루프 경로는 self-test(`--self-test`)의 헤드리스 장면이며, World 추출(WorldIntegration)과 창 실행 경로는 화면 마일스톤에서 잇는다.
-- macOS·Vulkan·Metal은 미구현이며 해당 경로는 `Unsupported`를 반환한다.
+- macOS·Metal은 미구현이며 해당 경로는 `Unsupported`를 반환한다. Vulkan은 SH2 전까지 개발용 컴파일 훅이 있어야 파이프라인을 만든다(10.3절).

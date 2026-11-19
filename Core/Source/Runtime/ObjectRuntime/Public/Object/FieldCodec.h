@@ -206,7 +206,7 @@ public:
     //       return Result<void>::Failure(decoded.Error());
     //   }
     //
-    //   out.reference = decoded.Value();   // 2단계면 handle로 WeakRef<T>를 만든다
+    //   out.reference = decoded.Value();   // 2단계면 handle로 WeakObjectRef<T>를 만든다
     virtual Result<DecodedReference>
     ReadWeakReference(ArchiveReader& reader, const ReferenceExpectation& expectation) noexcept {
         (void)reader;
@@ -252,6 +252,35 @@ public:
     virtual Result<TypeId> TakeClassReference(TypeId stored) noexcept {
         (void)stored;
         return Result<TypeId>::Failure(ErrorCode::Unsupported);
+    }
+
+    // 복원 1단계가 InstancedStruct 값(리플렉션 B9j — Docs/Design/ReflectionExtensions.ko.md 11절)의
+    // 담긴 struct type을 대상 TypeRegistry에서 연다(AcquireValueType(type, TypeKind::Struct) —
+    // 잠금으로 보호되어 ObjectRegistry에 닿지 않는다). 반환: 그 struct의 lease. 실패: 미등록
+    // NotFound, struct가 아닌 레코드 TypeMismatch, 종료 ShuttingDown. 기본은
+    // Unsupported다(InstancedStruct 복원을 지원하지 않는 문맥).
+    virtual Result<TypeLease> AcquireInstancedStructType(TypeId type) noexcept {
+        (void)type;
+        return Result<TypeLease>::Failure(ErrorCode::Unsupported);
+    }
+
+    // 복원 1단계가 비어 있지 않은 저장 InstancedStruct 값 하나(stored = 담긴 struct ID)의 판정을
+    // 방문 순서대로 기록한다: type은 판정한 struct의 lease이고, 빈 lease면 미등록 struct를 decode
+    // 정책 ReportAndClear로 비웠다는 뜻이다. 2단계는 TypeRegistry를 다시 조회하지 않고 이 기록의
+    // lease를 값으로 옮기므로(TakeInstancedStruct) 두 단계 사이에 등록이 바뀌어도 결과는 1단계
+    // 판정과 같다. 기록 몫은 구현이 1단계에 청구한다. 기본은 Unsupported다.
+    virtual Result<void> CollectInstancedStruct(TypeId stored, TypeLease type) noexcept {
+        (void)stored;
+        (void)type;
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    // 복원 2단계가 1단계와 같은 방문 순서로 InstancedStruct 판정 하나를 받는다(기록의 lease를
+    // 넘겨받는다 — 빈 lease면 비운다). stored가 기록과 다르거나 기록이 남지 않았으면 두 단계의 방문
+    // 순서가 어긋난 계약 위반이라 InvalidArgument다. 기본은 Unsupported다.
+    virtual Result<TypeLease> TakeInstancedStruct(TypeId stored) noexcept {
+        (void)stored;
+        return Result<TypeLease>::Failure(ErrorCode::Unsupported);
     }
 
 protected:

@@ -116,7 +116,7 @@ TEST(MapGraph_TopLevelStructValuesArePrechargedTwice) {
                     MapPoint point(objects.ObjectAllocator());
                     REQUIRE(point.label.TryAssign(StringView(label, labelBytes)));
                     if (topLevel) {
-                        Put(value.points, Text(objects.ObjectAllocator(), "k"), Move(point));
+                        Put(value.points, MakeString(objects.ObjectAllocator(), "k"), Move(point));
                     } else {
                         Put(value.bag.points, uint32{1}, Move(point));
                     }
@@ -203,8 +203,8 @@ TEST(MapGraph_ObservedStructsSeeMapMembers) {
                 MapPoint point(objects.ObjectAllocator());
                 point.x = 13;
                 Put(value.bag.points, uint32{2}, Move(point));
-                REQUIRE(value.bag.words.Add(Text(objects.ObjectAllocator(), "w")));
-                REQUIRE(value.bag.words.Add(Text(objects.ObjectAllocator(), "v")));
+                REQUIRE(value.bag.words.Add(MakeString(objects.ObjectAllocator(), "w")));
+                REQUIRE(value.bag.words.Add(MakeString(objects.ObjectAllocator(), "v")));
             });
             auto saved =
                 SaveObjectGraph(allocator, objects, objects.OwnerAccess(), holder.Handle());
@@ -350,12 +350,12 @@ TEST(MapGraph_ApplyAllocationFailureRollsBack) {
         RootRef<MapHolder> holder = New(source);
         Allocator& objects = source.ObjectAllocator();
         With(source, holder.Handle(), [&](MapHolder& value) noexcept {
-            Put(value.ratios, Text(objects, "allocated key"), 1.0f);
-            Put(value.colorNames, MapColor::Green, Text(objects, "allocated value"));
+            Put(value.ratios, MakeString(objects, "allocated key"), 1.0f);
+            Put(value.colorNames, MapColor::Green, MakeString(objects, "allocated value"));
             MapPoint point(objects);
             REQUIRE(point.label.TryAssign("allocated label"));
-            Put(value.points, Text(objects, "point"), Move(point));
-            REQUIRE(value.words.Add(Text(objects, "allocated element")));
+            Put(value.points, MakeString(objects, "point"), Move(point));
+            REQUIRE(value.words.Add(MakeString(objects, "allocated element")));
         });
 
         auto saved = SaveObjectGraph(allocator, source, source.OwnerAccess(), holder.Handle());

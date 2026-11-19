@@ -17,16 +17,16 @@
   "stages": ["vertex", "pixel", "compute"],
   "limits": {
     "constantBuffers": 12,
-    "sampledTextures": 16,
+    "sampledTextures": 128,
     "storageBuffers": 4,
     "storageImages": 4,
     "samplers": 16,
     "uavStages": ["compute"],
-    "renderTargets": 4,
+    "renderTargets": 8,
     "interStageVectors": 16,
     "rootConstantBytes": 128
   },
-  "features": ["compute"],
+  "features": ["compute", "vertexViewportLayerOutput"],
   "deviceRequirements": ["VULKAN_1_1"],
   "producers": [{ "host": "windows-x64" }, { "host": "macos-arm64" }]
 }

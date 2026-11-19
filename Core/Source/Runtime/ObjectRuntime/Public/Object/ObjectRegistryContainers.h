@@ -7,7 +7,7 @@
 // SetReference, ObjectRefArray 변경(AddReference…ClearReferences), ObjectRefMap 변경
 // (SetMapReference…ClearMapReferences), StructRefArray 변경(AddElement…SetElementReference),
 // ConstructionContext가 거치는 staged 지점과 경로 접근의 원소 참조 쓰기(private),
-// WeakRef<T>::TryPin 순서다.
+// WeakObjectRef<T>::TryPin 순서다.
 namespace rocks {
 
 template <class T>
@@ -173,8 +173,8 @@ ObjectRegistry::SetElementReference(const ObjectAccessContext& access, ObjectHan
 }
 
 template <class T>
-Result<RootRef<T>> WeakRef<T>::TryPin(ObjectRegistry& registry,
-                                      const ObjectAccessContext& access) const noexcept {
+Result<RootRef<T>> WeakObjectRef<T>::TryPin(ObjectRegistry& registry,
+                                            const ObjectAccessContext& access) const noexcept {
     return registry.TryPin<T>(access, handle_);
 }
 

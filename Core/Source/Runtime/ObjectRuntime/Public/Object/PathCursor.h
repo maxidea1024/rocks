@@ -42,7 +42,13 @@ enum class PathOperation : uint8 {
     Detach,
     Attach,
     // Map·Set 필드의 키를 삽입 순서대로 모두 읽기다(PathReadKeys — 리플렉션 B9i4).
-    ReadKeys
+    ReadKeys,
+    // InstancedStruct 값의 형 바꾸기(그 struct 기본 값)·비우기·담긴 타입 조회다(리플렉션 B9j —
+    // PathSetInstancedType·PathClearInstanced·PathReadInstancedType). 조회는 경로 실행기가
+    // InstancedStruct 뒤 멤버 단계를 해석할 때도 앞 경로로 먼저 돌린다.
+    SetInstancedType,
+    ClearInstanced,
+    QueryInstanced
 };
 
 // 해석한 경로 단계 하나다: 필드(스키마 안 위치), 바깥 필드에서 누적한 유효 플래그, 대상
@@ -131,6 +137,11 @@ public:
         return added_ != nullptr;
     }
 
+    // 게시 전 원소 블록을 바꾸는 연산이 시작됐음을 준비물에 알린다(추가 원소 검증 표시를 내린다 —
+    // ValidateAdded 뒤에 AddedTarget으로 쓴 변경도 게시 전에 다시 검증된다). 블록이 아니면 아무것도
+    // 하지 않는다.
+    void MarkAddedElementWritten() noexcept;
+
     // 게시 전 원소 블록 안의 강한 참조 멤버 field에 쓰기 입력(Input()의 reference)을 직접
     // 쓴다(리플렉션 B9i5). 대상의 생존·스키마 기대 타입은 검증 지점이 이미 봤고 여기서는 C++ 대상
     // 타입을 대조한다 (CheckWeakTarget). field가 시작 위치 블록 밖이면 InvalidArgument다. 간선은
@@ -148,12 +159,30 @@ public:
     // Unsupported(NoPathAccess)를 기록한다.
     Result<void> RequireLive() noexcept;
 
-    // 지금 연산이 대상을 바꾸지 않는 읽기(Read·Length·QueryOptional·Contains·ReadKeys)인지다.
+    // 지금 연산이 대상을 바꾸지 않는 읽기(Read·Length·QueryOptional·Contains·ReadKeys·
+    // QueryInstanced)인지다.
     bool IsReading() const noexcept {
         return operation_ == PathOperation::Read || operation_ == PathOperation::Length ||
                operation_ == PathOperation::QueryOptional ||
-               operation_ == PathOperation::Contains || operation_ == PathOperation::ReadKeys;
+               operation_ == PathOperation::Contains || operation_ == PathOperation::ReadKeys ||
+               operation_ == PathOperation::QueryInstanced;
     }
+
+    // 지금 단계(InstancedStruct 값 — 리플렉션 B9j)의 담긴 값 value(type struct)로 내려간다. 경로
+    // 실행기는 이 단계 뒤 멤버를 같은 연산 안에서 먼저 조회한 담긴 타입으로 해석했으므로 type이 그
+    // 해석과 같아야 한다(아니면 TypeMismatch(StaticTypeMismatch)). 비어 있으면(type이 빈 lease)
+    // NotFound(InstancedEmpty)다. 그 밖은 Descend와 같다.
+    Result<void> DescendInstanced(const TypeLease& type, void* value) noexcept;
+
+    // PathSetInstancedType의 새 타입 lease를 넘겨받는다(경로 실행기가 등록·담기 조건·깊이 합을
+    // 검사해 쥐었다 — 한 번만 부른다, 두 번째는 빈 lease).
+    TypeLease TakeInstancedInput() noexcept {
+        return Move(instancedInput_);
+    }
+
+    // QueryInstanced의 결과로 type(빈 lease면 비어 있음)을 복제해 출력에 둔다(lease 복제의 오류 —
+    // ShuttingDown·Overflow는 그대로 실패로 기록한다).
+    Result<void> PublishInstancedType(const TypeLease& type) noexcept;
 
     // Detach 끝 지점이다: value(ops 형식의 지금 값)를 출력 상자에 깊게 복사하고 상자를
     // 채운다(enter는 상자에서 경로를 시작하는 생성 함수). 게시된 객체면 고정 아래 복사하고 owner를
@@ -345,6 +374,14 @@ public:
     Result<void> ReadText(const String& text, const AssetId* asset) noexcept;
     Result<void> WriteText(String& text, AssetId* asset) noexcept;
 
+    // Text 끝 지점(리플렉션 B9l)의 읽기·쓰기다. Read는 처음부터 쥔 고정 아래 out의 allocator로
+    // DeepClone한다. Write는 고정을 쥔 뒤 새 값을 값의 allocator(ValueAllocator)로, 옛
+    // 값(previous를 받을 때)을 out의 allocator로 DeepClone하고 owner를 다시 확인한 다음 노드를
+    // 맞바꾸고 고정을 푼다 — 옛 노드는 고정 밖에서 반환한다(할당·반환 콜백의 재진입 쓰기가 Busy가
+    // 되어 live 값을 바꾸지 못한다).
+    Result<void> ReadTextValue(const Text& text) noexcept;
+    Result<void> WriteTextValue(Text& text) noexcept;
+
     // 삭제할 String·Soft 원소의 값을 captured(Output()의 allocator)에 담을 준비를 한다: allocator가
     // 같으면 moveText = true(게시 뒤 버퍼를 옮긴다), 다르면 고정 아래 복사하고 owner를 다시
     // 확인한다.
@@ -392,6 +429,8 @@ private:
     // Detach의 출력 상자·Attach의 입력 상자와 Attach의 출력 자리다.
     DetachedValue* box_ = nullptr;
     PreparedAttach* attach_ = nullptr;
+    // Attach가 상자 값 트리의 검증 hook을 부르는지다(PathPrepareAttach의 validateHooks).
+    bool validateHooks_ = true;
     // PathPrepareReference의 출력 자리다(리플렉션 B9i3c2).
     PreparedReference* reference_ = nullptr;
     // 시작 위치에 건 Registry 컨테이너 준비 사본이다(리플렉션 B9i3c3).
@@ -404,11 +443,22 @@ private:
     const FieldValue* input_;
     FieldValue* output_;
     Array<FieldValue>* keys_ = nullptr;
+    // QueryInstanced의 출력 lease다(리플렉션 B9j).
+    TypeLease* instancedOut_ = nullptr;
     PropertyPathFailure* failure_;
     TypeLease ownerType_;
     TypeLease expectedType_;
     TypeLease referencedType_;
     TypeLease keyClass_;
+    // InstancedStruct 뒤 멤버 단계를 해석한 담긴 struct lease(경로에 하나 — 담긴 struct는
+    // InstancedStruct를 담지 않는다)와 그 단계 index, PathSetInstancedType의 새 타입
+    // lease다(리플렉션 B9j).
+    TypeLease instancedType_;
+    usize instancedStep_ = IndexNone;
+    TypeLease instancedInput_;
+    TypeId instancedRequest_{};
+    // 시작 위치다(InstancedStruct 단계의 담긴 타입 조회가 같은 시작 위치로 하위 연산을 돌린다).
+    const PathTarget* target_;
     Borrow<Object> borrow_;
     EncodePin pin_;
     Object* object_ = nullptr;
@@ -420,6 +470,15 @@ private:
     StructElementLocation element_{};
     bool inElement_ = false;
     bool failed_ = false;
+    // 객체(게시·staged) 시작 위치의 변경 연산이 struct 검증 hook 안을 바꾸면 연산하지 않고 그 가장
+    // 바깥 hook struct의 단계를 hookStep_에 남기고 돌아온다(redirectHooks_ — 공개 경로 연산
+    // 진입점만 켠다, Docs/Design/CurveData.ko.md 9.1절). 진입점이 그 자리를 상자로 분리해 상자
+    // 위에서 연산하고 검증한 뒤 게시한다.
+    bool redirectHooks_ = false;
+    usize hookStep_ = IndexNone;
+    // 끝 단계가 Set 원소(키 단계)인지다. 상자 경로가 InsertKey의 "바뀐 것 없음"(이미 있는 Set
+    // 원소)과 Map 값 초기화(이미 있는 키를 기본 값으로)를 가른다.
+    bool setElement_ = false;
 };
 
 } // namespace rocks::detail

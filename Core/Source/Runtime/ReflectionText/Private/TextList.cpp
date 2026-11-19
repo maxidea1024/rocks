@@ -2,7 +2,9 @@
 
 #include <Core/Containers/OrderedSet.h>
 #include <Core/Guid.h>
+#include <Core/Encoding/Base64.h>
 #include <Core/Text/StringSplit.h>
+#include <Object/FieldValueWire.h>
 #include <Object/ValueText.h>
 
 // 자리 하나의 값 텍스트(단일 값·`{}`·쉼표 목록·Map `k:v` 목록)다(리플렉션 B9i3b — Docs/Design/
@@ -323,6 +325,46 @@ bool IsStructSlot(const TextSlot& slot) noexcept {
     return SlotValueType(slot).type.kind == ValueKind::Struct;
 }
 
+// InstancedStruct 값 자리(필드·원소·Map 값 — 리플렉션 B9j)인지다.
+bool IsInstancedSlot(const TextSlot& slot) noexcept {
+    return SlotValueType(slot).type.kind == ValueKind::InstancedStruct;
+}
+
+// InstancedStruct 자리의 값 텍스트다(리플렉션 B9j — Docs/Design/ReflectionExtensions.ko.md 10.4절):
+// `none`(ASCII 대소문자 무시)은 비우기, 그 밖은 타입 도구 이름(TypeRegistry::AcquireByToolName —
+// 대소문자 무시)이어야 하고 struct여야 한다(아니면 InvalidValue 진단). 담기 조건·깊이 합은 형
+// 바꾸기 경로 연산이 본다.
+Result<bool> ParseInstancedType(TextCodecContext& context, StringView text, TextSource source,
+                                StringView pathText, TextValue& out) noexcept {
+    out.shape = TextValueShape::InstancedType;
+    out.single.kind = ValueKind::InstancedStruct;
+    out.single.guid = Guid{};
+    if (EqualsIgnoringAsciiCase(Span<const char>(text.Data(), text.ByteCount()),
+                                Span<const char>("none", 4))) {
+        return Result<bool>::Success(true);
+    }
+
+    auto lease = context.Types().AcquireByToolName(Span<const char>(text.Data(), text.ByteCount()));
+    if (!lease) {
+        if (lease.Error() != ErrorCode::NotFound && lease.Error() != ErrorCode::InvalidArgument) {
+            return Result<bool>::Failure(lease.Error());
+        }
+
+        out.Reset();
+        return detail::Report(context, TextDiagnosticCode::InvalidValue, source, pathText,
+                              "unknown struct type tool name");
+    }
+
+    if (lease.Value().Kind() != TypeKind::Struct) {
+        out.Reset();
+        return detail::Report(context, TextDiagnosticCode::InvalidValue, source, pathText,
+                              "type is not a reflected struct");
+    }
+
+    out.single.guid = lease.Value().Id();
+    return Result<bool>::Success(true);
+}
+
 } // namespace
 
 namespace detail {
@@ -394,6 +436,85 @@ Result<bool> CheckElementCount(TextCodecContext& context, const FieldSchema& fie
 
 } // namespace detail
 
+namespace detail {
+
+Result<bool> ParseByteList(TextCodecContext& context, const FieldSchema& field, StringView text,
+                           TextSource source, StringView pathText, TextValue& out) noexcept {
+    // Base64 4글자가 3 byte다. 풀기·할당 전에 길이와 패딩으로 byte 수를 구해 원소 수 한도를 본다(긴
+    // 입력이 한도와 무관한 큰 버퍼를 먼저 잡지 않게). 길이가 4의 배수가 아니면 Base64가 아니다.
+    const usize length = text.ByteCount();
+    if (length % 4 != 0) {
+        return Report(context, TextDiagnosticCode::InvalidValue, source, pathText,
+                      "expected Base64 bytes (RFC 4648, padded, no whitespace)");
+    }
+
+    usize padding = 0;
+    if (length != 0 && text.Data()[length - 1] == '=') {
+        ++padding;
+        if (text.Data()[length - 2] == '=') {
+            ++padding;
+        }
+    }
+
+    const usize count = length / 4 * 3 - padding;
+    auto fits = CheckElementCount(context, field, count, source, pathText);
+    if (!fits || !fits.Value()) {
+        return fits;
+    }
+
+    Array<uint8> bytes(context.GetAllocator());
+    if (auto sized = bytes.TryResize(count); !sized) {
+        return Result<bool>::Failure(sized.Error());
+    }
+
+    auto decoded = TryBase64Decode(text, bytes.View());
+    if (!decoded || decoded.Value() != count) {
+        if (!decoded && decoded.Error() != ErrorCode::InvalidArgument) {
+            return Result<bool>::Failure(decoded.Error());
+        }
+
+        return Report(context, TextDiagnosticCode::InvalidValue, source, pathText,
+                      "expected Base64 bytes (RFC 4648, padded, no whitespace)");
+    }
+
+    if (auto reserved = out.elements.TryReserve(count); !reserved) {
+        return Result<bool>::Failure(reserved.Error());
+    }
+
+    for (usize index = 0; index < count; ++index) {
+        FieldValue element(context.GetAllocator());
+        element.kind = ValueKind::UInt8;
+        element.unsignedInteger = bytes[index];
+        if (auto pushed = out.elements.TryPushBack(Move(element)); !pushed) {
+            return Result<bool>::Failure(pushed.Error());
+        }
+    }
+
+    out.shape = TextValueShape::List;
+    return Result<bool>::Success(true);
+}
+
+Result<void> AppendByteText(Allocator& allocator, Span<const uint8> bytes, String& out) noexcept {
+    auto size = Base64EncodedSize(bytes.Size());
+    if (!size) {
+        return Result<void>::Failure(size.Error());
+    }
+
+    Array<char> text(allocator);
+    if (auto sized = text.TryResize(size.Value()); !sized) {
+        return sized;
+    }
+
+    auto written = TryBase64Encode(bytes, text.View());
+    if (!written) {
+        return Result<void>::Failure(written.Error());
+    }
+
+    return out.TryAppend(StringView(text.Data(), written.Value()));
+}
+
+} // namespace detail
+
 Result<bool> ParseTextValue(TextCodecContext& context, const TextSlot& slot, StringView text,
                             TextSource source, StringView pathText, TextValue& out) noexcept {
     out.Reset();
@@ -420,6 +541,10 @@ Result<bool> ParseTextValue(TextCodecContext& context, const TextSlot& slot, Str
             return ParseStructDefault(context, text, source, pathText, out);
         }
 
+        if (IsInstancedSlot(slot)) {
+            return ParseInstancedType(context, text, source, pathText, out);
+        }
+
         return ParseSingle(context, SlotValueType(slot), text, source, pathText, out);
     case TextSlotPart::Field:
         break;
@@ -428,6 +553,8 @@ Result<bool> ParseTextValue(TextCodecContext& context, const TextSlot& slot, Str
     switch (field.value.kind) {
     case ValueKind::Struct:
         return ParseStructDefault(context, text, source, pathText, out);
+    case ValueKind::InstancedStruct:
+        return ParseInstancedType(context, text, source, pathText, out);
     case ValueKind::Optional:
         if (field.element.kind == ValueKind::Struct) {
             return ParseStructDefault(context, text, source, pathText, out);
@@ -437,7 +564,8 @@ Result<bool> ParseTextValue(TextCodecContext& context, const TextSlot& slot, Str
     case ValueKind::Array:
     case ValueKind::StaticArray:
     case ValueKind::Set:
-        if (field.element.kind == ValueKind::Struct) {
+        if (field.element.kind == ValueKind::Struct ||
+            field.element.kind == ValueKind::InstancedStruct) {
             if (field.value.kind == ValueKind::Array && text.IsEmpty()) {
                 out.shape = TextValueShape::List;
                 return Result<bool>::Success(true);
@@ -448,9 +576,16 @@ Result<bool> ParseTextValue(TextCodecContext& context, const TextSlot& slot, Str
                 "struct element arrays take an empty value; set elements by path");
         }
 
+        // 바이트 배열은 Base64 문자열 하나다(Docs/Design/CurveData.ko.md D18 — 원소는 경로
+        // `a[i]=v`로).
+        if (::rocks::detail::IsByteArrayField(field)) {
+            return detail::ParseByteList(context, field, text, source, pathText, out);
+        }
+
         return ParseList(context, slot, text, source, pathText, out);
     case ValueKind::Map:
-        if (field.element.kind == ValueKind::Struct) {
+        if (field.element.kind == ValueKind::Struct ||
+            field.element.kind == ValueKind::InstancedStruct) {
             if (text.IsEmpty()) {
                 out.shape = TextValueShape::Entries;
                 return Result<bool>::Success(true);
@@ -478,7 +613,29 @@ Result<void> FormatTextValue(TextCodecContext& context, const TextSlot& slot,
                                 kind == ValueKind::Set);
     const bool entries = whole && kind == ValueKind::Map;
     const bool structured = IsStructSlot(slot) && !list && !entries;
+    const bool instanced = IsInstancedSlot(slot) && !list && !entries;
     switch (value.shape) {
+    case TextValueShape::InstancedType: {
+        if (!instanced) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (value.single.guid == Guid{}) {
+            return out.TryAppend("none");
+        }
+
+        auto lease = context.Types().AcquireValueType(value.single.guid, TypeKind::Struct);
+        if (!lease) {
+            return Result<void>::Failure(lease.Error());
+        }
+
+        const Span<const char> name = lease.Value().Schema().toolName;
+        if (name.Size() == 0) {
+            return Result<void>::Failure(ErrorCode::Unsupported);
+        }
+
+        return out.TryAppend(StringView(name.Data(), name.Size()));
+    }
     case TextValueShape::Single: {
         if (list || entries || structured || slot.part == TextSlotPart::SetElement) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -501,6 +658,26 @@ Result<void> FormatTextValue(TextCodecContext& context, const TextSlot& slot,
     case TextValueShape::List: {
         if (!list) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (::rocks::detail::IsByteArrayField(*slot.field)) {
+            Array<uint8> bytes(context.GetAllocator());
+            if (auto reserved = bytes.TryReserve(value.elements.Size()); !reserved) {
+                return reserved;
+            }
+
+            for (const FieldValue& element : value.elements) {
+                if (element.kind != ValueKind::UInt8 || element.unsignedInteger > 255u) {
+                    return Result<void>::Failure(ErrorCode::InvalidArgument);
+                }
+
+                if (auto pushed = bytes.TryPushBack(static_cast<uint8>(element.unsignedInteger));
+                    !pushed) {
+                    return pushed;
+                }
+            }
+
+            return detail::AppendByteText(context.GetAllocator(), bytes.View(), out);
         }
 
         const TextScalarType type =

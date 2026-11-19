@@ -144,6 +144,11 @@ public:
         return map_.Compact();
     }
 
+    // 삭제는 용량을 유지한다. 여유가 UE 5.8 축소 임계값을 넘을 때만 줄인다(HashMap::ShrinkSlack).
+    Result<void> ShrinkSlack() noexcept {
+        return map_.ShrinkSlack();
+    }
+
     usize Count() const noexcept {
         return map_.Count();
     }

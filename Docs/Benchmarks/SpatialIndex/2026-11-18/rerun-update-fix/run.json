@@ -1,0 +1,1420 @@
+{
+  "tool": "rerun-update-fix (RunBench.ps1 Measure-Load and Invoke-Bench)",
+  "startedUtc": "2026-11-18T14:47:49.3844328Z",
+  "machine": {
+    "cpu": "13th Gen Intel(R) Core(TM) i5-13600KF",
+    "logicalProcessors": 20,
+    "os": "Microsoft Windows 11 Pro 10.0.26200",
+    "powerPlan": "381b4222-f694-41f0-9685-ff5bb260df2e (Balanced)",
+    "coreAffinity": "none (not pinned)"
+  },
+  "gitHead": "cc448cc9b7074feaea0c5e1be3debe3c4b8b7678",
+  "gitDirty": "",
+  "runs": [
+    {
+      "name": "states10k-r0-D",
+      "command": "SpatialIndexBench.exe --group D --dists uniform,terrain --sizes 10000 --no-scenarios --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\rerun-update-fix\\states10k-r0-D.json",
+      "exitCode": 0,
+      "seconds": 0.56,
+      "loadBefore": {
+        "utc": "2026-11-18T14:47:53.4758496Z",
+        "totalCpuPercent": 82.2,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 24.22
+          },
+          {
+            "name": "GcBench-after",
+            "id": 33904,
+            "cpuPercentOfMachine": 9.19
+          },
+          {
+            "name": "bash",
+            "id": 40380,
+            "cpuPercentOfMachine": 6.48
+          },
+          {
+            "name": "clang-cl",
+            "id": 32404,
+            "cpuPercentOfMachine": 6.43
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 6.35
+          },
+          {
+            "name": "EngineTests",
+            "id": 40520,
+            "cpuPercentOfMachine": 6.33
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T14:47:57.0798836Z",
+        "totalCpuPercent": 69.04,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 15.03
+          },
+          {
+            "name": "GcBench-after",
+            "id": 33904,
+            "cpuPercentOfMachine": 8.83
+          },
+          {
+            "name": "bash",
+            "id": 40380,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "dotnet",
+            "id": 43784,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 4.95
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.35
+          }
+        ]
+      }
+    },
+    {
+      "name": "states100k-r0-D",
+      "command": "SpatialIndexBench.exe --group D --dists uniform,separable-dense --sizes 100000 --no-scenarios --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\rerun-update-fix\\states100k-r0-D.json",
+      "exitCode": 0,
+      "seconds": 3.26,
+      "loadBefore": {
+        "utc": "2026-11-18T14:48:00.1087670Z",
+        "totalCpuPercent": 68.27,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 13.65
+          },
+          {
+            "name": "GcBench-after",
+            "id": 33904,
+            "cpuPercentOfMachine": 5.86
+          },
+          {
+            "name": "EngineTests",
+            "id": 40520,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "bash",
+            "id": 40380,
+            "cpuPercentOfMachine": 4.97
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 4.97
+          },
+          {
+            "name": "dotnet",
+            "id": 43784,
+            "cpuPercentOfMachine": 4.97
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T14:48:06.4181376Z",
+        "totalCpuPercent": 75.75,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 16.3
+          },
+          {
+            "name": "GcBench-after",
+            "id": 33904,
+            "cpuPercentOfMachine": 7.01
+          },
+          {
+            "name": "EngineTests",
+            "id": 560,
+            "cpuPercentOfMachine": 5.39
+          },
+          {
+            "name": "EngineTests",
+            "id": 40520,
+            "cpuPercentOfMachine": 4.84
+          },
+          {
+            "name": "bash",
+            "id": 40380,
+            "cpuPercentOfMachine": 4.77
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 4.77
+          }
+        ]
+      }
+    },
+    {
+      "name": "variant10k-r0-D",
+      "command": "SpatialIndexBench.exe --group D --profile variant --sizes 10000 --dists uniform,clustered,size-varied,overlap-dense --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\rerun-update-fix\\variant10k-r0-D.json",
+      "exitCode": 0,
+      "seconds": 1.82,
+      "loadBefore": {
+        "utc": "2026-11-18T14:48:09.4641946Z",
+        "totalCpuPercent": 78.5,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 13.62
+          },
+          {
+            "name": "GcBench-after",
+            "id": 33904,
+            "cpuPercentOfMachine": 8.93
+          },
+          {
+            "name": "EngineTests",
+            "id": 560,
+            "cpuPercentOfMachine": 5.34
+          },
+          {
+            "name": "bash",
+            "id": 40380,
+            "cpuPercentOfMachine": 4.97
+          },
+          {
+            "name": "dotnet",
+            "id": 43784,
+            "cpuPercentOfMachine": 4.95
+          },
+          {
+            "name": "EngineTests",
+            "id": 40520,
+            "cpuPercentOfMachine": 4.95
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T14:48:14.3110443Z",
+        "totalCpuPercent": 87.93,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 11.9
+          },
+          {
+            "name": "EngineTests",
+            "id": 40520,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 4.92
+          },
+          {
+            "name": "EngineTests",
+            "id": 560,
+            "cpuPercentOfMachine": 4.92
+          },
+          {
+            "name": "dotnet",
+            "id": 43784,
+            "cpuPercentOfMachine": 4.87
+          },
+          {
+            "name": "bash",
+            "id": 40380,
+            "cpuPercentOfMachine": 4.84
+          }
+        ]
+      }
+    },
+    {
+      "name": "states10k-r0-D-noinplace",
+      "command": "SpatialIndexBench.exe --group D-noinplace --dists uniform,terrain --sizes 10000 --no-scenarios --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\rerun-update-fix\\states10k-r0-D-noinplace.json",
+      "exitCode": 0,
+      "seconds": 0.77,
+      "loadBefore": {
+        "utc": "2026-11-18T14:48:17.3577142Z",
+        "totalCpuPercent": 96.8,
+        "busiest": [
+          {
+            "name": "GcBench-before",
+            "id": 51824,
+            "cpuPercentOfMachine": 7.32
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 7.27
+          },
+          {
+            "name": "EngineTests",
+            "id": 560,
+            "cpuPercentOfMachine": 4.84
+          },
+          {
+            "name": "EngineTests",
+            "id": 40520,
+            "cpuPercentOfMachine": 4.79
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 4.69
+          },
+          {
+            "name": "dotnet",
+            "id": 43784,
+            "cpuPercentOfMachine": 4.66
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T14:48:21.2382964Z",
+        "totalCpuPercent": 99.51,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 7.71
+          },
+          {
+            "name": "GcBench-before",
+            "id": 51824,
+            "cpuPercentOfMachine": 5.78
+          },
+          {
+            "name": "bash",
+            "id": 40380,
+            "cpuPercentOfMachine": 4.9
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 4.82
+          },
+          {
+            "name": "EngineTests",
+            "id": 560,
+            "cpuPercentOfMachine": 4.79
+          },
+          {
+            "name": "EngineTests",
+            "id": 40520,
+            "cpuPercentOfMachine": 4.79
+          }
+        ]
+      }
+    },
+    {
+      "name": "states100k-r0-D-noinplace",
+      "command": "SpatialIndexBench.exe --group D-noinplace --dists uniform,separable-dense --sizes 100000 --no-scenarios --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\rerun-update-fix\\states100k-r0-D-noinplace.json",
+      "exitCode": 0,
+      "seconds": 7.61,
+      "loadBefore": {
+        "utc": "2026-11-18T14:48:24.3230815Z",
+        "totalCpuPercent": 92.69,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 9.87
+          },
+          {
+            "name": "GcBench-before",
+            "id": 51824,
+            "cpuPercentOfMachine": 8.2
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 4.53
+          },
+          {
+            "name": "EngineTests",
+            "id": 560,
+            "cpuPercentOfMachine": 4.48
+          },
+          {
+            "name": "bash",
+            "id": 40380,
+            "cpuPercentOfMachine": 4.17
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.04
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T14:48:35.0003353Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "GcBench-before",
+            "id": 51824,
+            "cpuPercentOfMachine": 7.08
+          },
+          {
+            "name": "EngineTests",
+            "id": 560,
+            "cpuPercentOfMachine": 4.27
+          },
+          {
+            "name": "dotnet",
+            "id": 10612,
+            "cpuPercentOfMachine": 4.14
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 4.11
+          },
+          {
+            "name": "dotnet",
+            "id": 4500,
+            "cpuPercentOfMachine": 4.01
+          },
+          {
+            "name": "dotnet",
+            "id": 6776,
+            "cpuPercentOfMachine": 3.75
+          }
+        ]
+      }
+    },
+    {
+      "name": "variant10k-r0-D-noinplace",
+      "command": "SpatialIndexBench.exe --group D-noinplace --profile variant --sizes 10000 --dists uniform,clustered,size-varied,overlap-dense --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\rerun-update-fix\\variant10k-r0-D-noinplace.json",
+      "exitCode": 0,
+      "seconds": 4.38,
+      "loadBefore": {
+        "utc": "2026-11-18T14:48:38.1301112Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "GcBench-before",
+            "id": 51824,
+            "cpuPercentOfMachine": 7.68
+          },
+          {
+            "name": "dotnet",
+            "id": 57068,
+            "cpuPercentOfMachine": 4.74
+          },
+          {
+            "name": "dotnet",
+            "id": 41880,
+            "cpuPercentOfMachine": 4.58
+          },
+          {
+            "name": "bash",
+            "id": 40380,
+            "cpuPercentOfMachine": 4.11
+          },
+          {
+            "name": "dotnet",
+            "id": 27432,
+            "cpuPercentOfMachine": 4.04
+          },
+          {
+            "name": "dotnet",
+            "id": 27336,
+            "cpuPercentOfMachine": 3.85
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T14:48:45.6582156Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 4.38
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.24
+          },
+          {
+            "name": "bash",
+            "id": 40380,
+            "cpuPercentOfMachine": 3.96
+          },
+          {
+            "name": "dotnet",
+            "id": 46236,
+            "cpuPercentOfMachine": 3.88
+          },
+          {
+            "name": "EngineTests",
+            "id": 560,
+            "cpuPercentOfMachine": 3.59
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 3.54
+          }
+        ]
+      }
+    },
+    {
+      "name": "states10k-r1-D-noinplace",
+      "command": "SpatialIndexBench.exe --group D-noinplace --dists uniform,terrain --sizes 10000 --no-scenarios --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\rerun-update-fix\\states10k-r1-D-noinplace.json",
+      "exitCode": 0,
+      "seconds": 1.26,
+      "loadBefore": {
+        "utc": "2026-11-18T14:48:48.7135751Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "GcBench-after",
+            "id": 14908,
+            "cpuPercentOfMachine": 5.23
+          },
+          {
+            "name": "dotnet",
+            "id": 21892,
+            "cpuPercentOfMachine": 4.17
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 4.04
+          },
+          {
+            "name": "dotnet",
+            "id": 24456,
+            "cpuPercentOfMachine": 4.01
+          },
+          {
+            "name": "dotnet",
+            "id": 29660,
+            "cpuPercentOfMachine": 3.93
+          },
+          {
+            "name": "dotnet",
+            "id": 34176,
+            "cpuPercentOfMachine": 3.85
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T14:48:53.1064523Z",
+        "totalCpuPercent": 99.97,
+        "busiest": [
+          {
+            "name": "GcBench-after",
+            "id": 14908,
+            "cpuPercentOfMachine": 5.57
+          },
+          {
+            "name": "dotnet",
+            "id": 54400,
+            "cpuPercentOfMachine": 4.71
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 4.69
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 4.56
+          },
+          {
+            "name": "dotnet",
+            "id": 52420,
+            "cpuPercentOfMachine": 4.53
+          },
+          {
+            "name": "EngineTests",
+            "id": 560,
+            "cpuPercentOfMachine": 4.32
+          }
+        ]
+      }
+    },
+    {
+      "name": "states100k-r1-D-noinplace",
+      "command": "SpatialIndexBench.exe --group D-noinplace --dists uniform,separable-dense --sizes 100000 --no-scenarios --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\rerun-update-fix\\states100k-r1-D-noinplace.json",
+      "exitCode": 0,
+      "seconds": 6.66,
+      "loadBefore": {
+        "utc": "2026-11-18T14:48:56.2433154Z",
+        "totalCpuPercent": 99.97,
+        "busiest": [
+          {
+            "name": "GcBench-after",
+            "id": 14908,
+            "cpuPercentOfMachine": 7.94
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 4.95
+          },
+          {
+            "name": "dotnet",
+            "id": 36364,
+            "cpuPercentOfMachine": 4.35
+          },
+          {
+            "name": "dotnet",
+            "id": 47676,
+            "cpuPercentOfMachine": 3.93
+          },
+          {
+            "name": "dotnet",
+            "id": 21260,
+            "cpuPercentOfMachine": 3.83
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 3.75
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T14:49:05.9884689Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "GcBench-after",
+            "id": 14908,
+            "cpuPercentOfMachine": 8.2
+          },
+          {
+            "name": "dotnet",
+            "id": 34292,
+            "cpuPercentOfMachine": 4.22
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 4.19
+          },
+          {
+            "name": "dotnet",
+            "id": 54400,
+            "cpuPercentOfMachine": 4.14
+          },
+          {
+            "name": "bash",
+            "id": 40380,
+            "cpuPercentOfMachine": 3.83
+          },
+          {
+            "name": "EngineTests",
+            "id": 40520,
+            "cpuPercentOfMachine": 3.67
+          }
+        ]
+      }
+    },
+    {
+      "name": "variant10k-r1-D-noinplace",
+      "command": "SpatialIndexBench.exe --group D-noinplace --profile variant --sizes 10000 --dists uniform,clustered,size-varied,overlap-dense --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\rerun-update-fix\\variant10k-r1-D-noinplace.json",
+      "exitCode": 0,
+      "seconds": 2.7,
+      "loadBefore": {
+        "utc": "2026-11-18T14:49:09.0487572Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "GcBench-after",
+            "id": 14908,
+            "cpuPercentOfMachine": 5.05
+          },
+          {
+            "name": "bash",
+            "id": 40380,
+            "cpuPercentOfMachine": 4.48
+          },
+          {
+            "name": "dotnet",
+            "id": 54400,
+            "cpuPercentOfMachine": 4.48
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 4.17
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 3.98
+          },
+          {
+            "name": "dotnet",
+            "id": 33156,
+            "cpuPercentOfMachine": 3.75
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T14:49:14.8040299Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 5.68
+          },
+          {
+            "name": "EngineTests",
+            "id": 560,
+            "cpuPercentOfMachine": 4.45
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 4.17
+          },
+          {
+            "name": "dotnet",
+            "id": 54400,
+            "cpuPercentOfMachine": 4.17
+          },
+          {
+            "name": "bash",
+            "id": 40380,
+            "cpuPercentOfMachine": 4.09
+          },
+          {
+            "name": "EngineTests",
+            "id": 40520,
+            "cpuPercentOfMachine": 4.06
+          }
+        ]
+      }
+    },
+    {
+      "name": "states10k-r1-D",
+      "command": "SpatialIndexBench.exe --group D --dists uniform,terrain --sizes 10000 --no-scenarios --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\rerun-update-fix\\states10k-r1-D.json",
+      "exitCode": 0,
+      "seconds": 1.11,
+      "loadBefore": {
+        "utc": "2026-11-18T14:49:17.8951687Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 5.23
+          },
+          {
+            "name": "bash",
+            "id": 40380,
+            "cpuPercentOfMachine": 4.77
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 4.56
+          },
+          {
+            "name": "EngineTests",
+            "id": 560,
+            "cpuPercentOfMachine": 4.56
+          },
+          {
+            "name": "dotnet",
+            "id": 54400,
+            "cpuPercentOfMachine": 4.53
+          },
+          {
+            "name": "EngineTests",
+            "id": 40520,
+            "cpuPercentOfMachine": 4.48
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T14:49:22.1348982Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "GcBench-before",
+            "id": 57308,
+            "cpuPercentOfMachine": 5.21
+          },
+          {
+            "name": "dotnet",
+            "id": 54400,
+            "cpuPercentOfMachine": 4.58
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 4.35
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 4.17
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.04
+          },
+          {
+            "name": "bash",
+            "id": 40380,
+            "cpuPercentOfMachine": 3.96
+          }
+        ]
+      }
+    },
+    {
+      "name": "states100k-r1-D",
+      "command": "SpatialIndexBench.exe --group D --dists uniform,separable-dense --sizes 100000 --no-scenarios --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\rerun-update-fix\\states100k-r1-D.json",
+      "exitCode": 0,
+      "seconds": 5.78,
+      "loadBefore": {
+        "utc": "2026-11-18T14:49:25.2105677Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "GcBench-before",
+            "id": 57308,
+            "cpuPercentOfMachine": 7.08
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 4.17
+          },
+          {
+            "name": "dotnet",
+            "id": 54400,
+            "cpuPercentOfMachine": 4.17
+          },
+          {
+            "name": "bash",
+            "id": 40380,
+            "cpuPercentOfMachine": 4.06
+          },
+          {
+            "name": "EngineTests",
+            "id": 560,
+            "cpuPercentOfMachine": 4.04
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.78
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T14:49:34.0611218Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "GcBench-before",
+            "id": 57308,
+            "cpuPercentOfMachine": 6.09
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 5.6
+          },
+          {
+            "name": "dotnet",
+            "id": 30008,
+            "cpuPercentOfMachine": 4.01
+          },
+          {
+            "name": "dotnet",
+            "id": 54400,
+            "cpuPercentOfMachine": 4.01
+          },
+          {
+            "name": "dotnet",
+            "id": 54376,
+            "cpuPercentOfMachine": 3.72
+          },
+          {
+            "name": "bash",
+            "id": 40380,
+            "cpuPercentOfMachine": 3.65
+          }
+        ]
+      }
+    },
+    {
+      "name": "variant10k-r1-D",
+      "command": "SpatialIndexBench.exe --group D --profile variant --sizes 10000 --dists uniform,clustered,size-varied,overlap-dense --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\rerun-update-fix\\variant10k-r1-D.json",
+      "exitCode": 0,
+      "seconds": 3.04,
+      "loadBefore": {
+        "utc": "2026-11-18T14:49:37.1517752Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "GcBench-before",
+            "id": 57308,
+            "cpuPercentOfMachine": 9.27
+          },
+          {
+            "name": "dotnet",
+            "id": 54400,
+            "cpuPercentOfMachine": 4.24
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 3.8
+          },
+          {
+            "name": "bash",
+            "id": 40380,
+            "cpuPercentOfMachine": 3.31
+          },
+          {
+            "name": "EngineTests",
+            "id": 560,
+            "cpuPercentOfMachine": 3.2
+          },
+          {
+            "name": "dotnet",
+            "id": 11740,
+            "cpuPercentOfMachine": 3.18
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T14:49:43.2504692Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "GcBench-before",
+            "id": 57308,
+            "cpuPercentOfMachine": 7.58
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 5.13
+          },
+          {
+            "name": "bash",
+            "id": 40380,
+            "cpuPercentOfMachine": 4.61
+          },
+          {
+            "name": "dotnet",
+            "id": 54400,
+            "cpuPercentOfMachine": 4.4
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 4.27
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.06
+          }
+        ]
+      }
+    },
+    {
+      "name": "states10k-r2-D",
+      "command": "SpatialIndexBench.exe --group D --dists uniform,terrain --sizes 10000 --no-scenarios --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\rerun-update-fix\\states10k-r2-D.json",
+      "exitCode": 0,
+      "seconds": 1.12,
+      "loadBefore": {
+        "utc": "2026-11-18T14:49:46.3113921Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "GcBench-before",
+            "id": 57308,
+            "cpuPercentOfMachine": 6.48
+          },
+          {
+            "name": "bash",
+            "id": 40380,
+            "cpuPercentOfMachine": 4.3
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 4.3
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.14
+          },
+          {
+            "name": "EngineTests",
+            "id": 560,
+            "cpuPercentOfMachine": 4.09
+          },
+          {
+            "name": "dotnet",
+            "id": 40848,
+            "cpuPercentOfMachine": 4.04
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T14:49:50.5766759Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "dotnet",
+            "id": 27444,
+            "cpuPercentOfMachine": 4.14
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 4.04
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.72
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 3.57
+          },
+          {
+            "name": "bash",
+            "id": 40380,
+            "cpuPercentOfMachine": 3.46
+          },
+          {
+            "name": "dotnet",
+            "id": 35568,
+            "cpuPercentOfMachine": 3.36
+          }
+        ]
+      }
+    },
+    {
+      "name": "states100k-r2-D",
+      "command": "SpatialIndexBench.exe --group D --dists uniform,separable-dense --sizes 100000 --no-scenarios --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\rerun-update-fix\\states100k-r2-D.json",
+      "exitCode": 0,
+      "seconds": 5.92,
+      "loadBefore": {
+        "utc": "2026-11-18T14:49:53.6296440Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "bash",
+            "id": 40380,
+            "cpuPercentOfMachine": 4.4
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 4.4
+          },
+          {
+            "name": "dotnet",
+            "id": 34184,
+            "cpuPercentOfMachine": 3.7
+          },
+          {
+            "name": "dotnet",
+            "id": 17956,
+            "cpuPercentOfMachine": 3.65
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.59
+          },
+          {
+            "name": "dotnet",
+            "id": 54472,
+            "cpuPercentOfMachine": 3.41
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T14:50:02.6577583Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "GcBench-after",
+            "id": 45628,
+            "cpuPercentOfMachine": 8.12
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 4.01
+          },
+          {
+            "name": "bash",
+            "id": 40380,
+            "cpuPercentOfMachine": 3.96
+          },
+          {
+            "name": "dotnet",
+            "id": 17368,
+            "cpuPercentOfMachine": 3.8
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.75
+          }
+        ]
+      }
+    },
+    {
+      "name": "variant10k-r2-D",
+      "command": "SpatialIndexBench.exe --group D --profile variant --sizes 10000 --dists uniform,clustered,size-varied,overlap-dense --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\rerun-update-fix\\variant10k-r2-D.json",
+      "exitCode": 0,
+      "seconds": 2.69,
+      "loadBefore": {
+        "utc": "2026-11-18T14:50:05.9092227Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "GcBench-after",
+            "id": 45628,
+            "cpuPercentOfMachine": 6.43
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 4.56
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 4.43
+          },
+          {
+            "name": "bash",
+            "id": 40380,
+            "cpuPercentOfMachine": 4.17
+          },
+          {
+            "name": "dotnet",
+            "id": 50032,
+            "cpuPercentOfMachine": 4.14
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.36
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T14:50:11.7320626Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "GcBench-after",
+            "id": 45628,
+            "cpuPercentOfMachine": 8.05
+          },
+          {
+            "name": "dotnet",
+            "id": 34504,
+            "cpuPercentOfMachine": 4.32
+          },
+          {
+            "name": "dotnet",
+            "id": 51456,
+            "cpuPercentOfMachine": 4.04
+          },
+          {
+            "name": "dotnet",
+            "id": 56564,
+            "cpuPercentOfMachine": 3.8
+          },
+          {
+            "name": "dotnet",
+            "id": 33996,
+            "cpuPercentOfMachine": 3.62
+          },
+          {
+            "name": "bash",
+            "id": 40380,
+            "cpuPercentOfMachine": 3.57
+          }
+        ]
+      }
+    },
+    {
+      "name": "states10k-r2-D-noinplace",
+      "command": "SpatialIndexBench.exe --group D-noinplace --dists uniform,terrain --sizes 10000 --no-scenarios --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\rerun-update-fix\\states10k-r2-D-noinplace.json",
+      "exitCode": 0,
+      "seconds": 1.44,
+      "loadBefore": {
+        "utc": "2026-11-18T14:50:15.3111979Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "GcBench-after",
+            "id": 45628,
+            "cpuPercentOfMachine": 7.73
+          },
+          {
+            "name": "EngineTests",
+            "id": 560,
+            "cpuPercentOfMachine": 4.74
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 4.69
+          },
+          {
+            "name": "bash",
+            "id": 40380,
+            "cpuPercentOfMachine": 4.3
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 4.04
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 3.62
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T14:50:19.8448441Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "dotnet",
+            "id": 24836,
+            "cpuPercentOfMachine": 4.45
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 4.38
+          },
+          {
+            "name": "EngineTests",
+            "id": 560,
+            "cpuPercentOfMachine": 4.38
+          },
+          {
+            "name": "bash",
+            "id": 40380,
+            "cpuPercentOfMachine": 4.32
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.67
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 3.65
+          }
+        ]
+      }
+    },
+    {
+      "name": "states100k-r2-D-noinplace",
+      "command": "SpatialIndexBench.exe --group D-noinplace --dists uniform,separable-dense --sizes 100000 --no-scenarios --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\rerun-update-fix\\states100k-r2-D-noinplace.json",
+      "exitCode": 0,
+      "seconds": 6.25,
+      "loadBefore": {
+        "utc": "2026-11-18T14:50:22.9694497Z",
+        "totalCpuPercent": 99.97,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 4.48
+          },
+          {
+            "name": "bash",
+            "id": 40380,
+            "cpuPercentOfMachine": 4.43
+          },
+          {
+            "name": "dotnet",
+            "id": 23016,
+            "cpuPercentOfMachine": 3.98
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 3.78
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.65
+          },
+          {
+            "name": "dotnet",
+            "id": 52516,
+            "cpuPercentOfMachine": 3.54
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T14:50:32.2856071Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 6.25
+          },
+          {
+            "name": "Code",
+            "id": 28136,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 4.14
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.75
+          },
+          {
+            "name": "dotnet",
+            "id": 34556,
+            "cpuPercentOfMachine": 3.49
+          },
+          {
+            "name": "dotnet",
+            "id": 39060,
+            "cpuPercentOfMachine": 3.44
+          }
+        ]
+      }
+    },
+    {
+      "name": "variant10k-r2-D-noinplace",
+      "command": "SpatialIndexBench.exe --group D-noinplace --profile variant --sizes 10000 --dists uniform,clustered,size-varied,overlap-dense --out Docs\\Benchmarks\\SpatialIndex\\2026-11-18\\rerun-update-fix\\variant10k-r2-D-noinplace.json",
+      "exitCode": 0,
+      "seconds": 2.77,
+      "loadBefore": {
+        "utc": "2026-11-18T14:50:35.3635573Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "Code",
+            "id": 28136,
+            "cpuPercentOfMachine": 4.4
+          },
+          {
+            "name": "bash",
+            "id": 43276,
+            "cpuPercentOfMachine": 4.22
+          },
+          {
+            "name": "dotnet",
+            "id": 27036,
+            "cpuPercentOfMachine": 4.01
+          },
+          {
+            "name": "dotnet",
+            "id": 33256,
+            "cpuPercentOfMachine": 3.75
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.54
+          },
+          {
+            "name": "dotnet",
+            "id": 43324,
+            "cpuPercentOfMachine": 3.36
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-18T14:50:41.1923223Z",
+        "totalCpuPercent": 94.67,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 12.29
+          },
+          {
+            "name": "Code",
+            "id": 28136,
+            "cpuPercentOfMachine": 5.26
+          },
+          {
+            "name": "dotnet",
+            "id": 38952,
+            "cpuPercentOfMachine": 4.66
+          },
+          {
+            "name": "bash",
+            "id": 47640,
+            "cpuPercentOfMachine": 4.58
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.65
+          },
+          {
+            "name": "ChatGPT",
+            "id": 30068,
+            "cpuPercentOfMachine": 2.29
+          }
+        ]
+      }
+    }
+  ],
+  "finishedUtc": "2026-11-18T14:50:41.1926493Z"
+}

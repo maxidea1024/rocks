@@ -17,7 +17,7 @@
 // 사용 예:
 //   // 게임 lane(Sync 뒤)
 //   auto ticket = lane.BeginFrame();
-//   lane.AttachSettings(ticket.Value(), RenderSettingsRef::Share(config.Snapshot()));
+//   lane.AttachSettings(ticket.Value(), RenderSettingsRef::Share(config.Acquire()));
 //   lane.SubmitFrame(Move(ticket.Value()), packet, &DrawScene);
 //   // 렌더 lane(DrawScene 안)
 //   const auto* settings = context.Settings().Get<config::ConfigSnapshot>();

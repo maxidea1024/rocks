@@ -227,7 +227,7 @@ void ObjectRegistry::FinishReclaim(ReclaimWork& work) noexcept {
         ColdOf(slot).lastChild = nullptr;
         ColdOf(slot).pathBytes = 0;
         ColdOf(slot).discarded = false;
-        // 세대를 0/과거 값으로 순환시키면 오래된 WeakRef가 새 객체를 가리킬 수 있다.
+        // 세대를 0/과거 값으로 순환시키면 오래된 WeakObjectRef가 새 객체를 가리킬 수 있다.
         // 한도에 도달한 슬롯은 재사용하지 않고 Exhausted로 남긴다.
         if (slot.generation >= options_.maxGeneration) {
             slot.SetState(tally_, SlotState::Exhausted);

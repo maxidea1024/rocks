@@ -225,8 +225,9 @@ ExactInteger IntegerOf(JsonType type, uint64 bits) noexcept {
                      : ExactInteger{true, false, bits};
 }
 
-// 두 숫자 노드의 수치 비교(정수 연산만). double끼리는 비트가 같거나 둘 다 ±0이면 같다(NaN·Inf는
-// 없다).
+// 두 숫자 노드의 수치 비교(정수 연산만). double끼리는 비트가 같거나 둘 다 ±0이면 같다. Json5의
+// ±Infinity·NaN도 비트로 비교한다(NaN은 파서가 한 비트 패턴으로 저장한다). DoubleAsInteger는 이들을
+// 정수가 아니라고 보므로 정수 종류와는 같지 않다.
 bool SameNumber(JsonType leftType, uint64 leftBits, JsonType rightType, uint64 rightBits) noexcept {
     const bool leftDouble = leftType == JsonType::Double;
     const bool rightDouble = rightType == JsonType::Double;

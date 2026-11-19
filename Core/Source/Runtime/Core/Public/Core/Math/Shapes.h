@@ -406,6 +406,63 @@ struct Box {
             Vector3<T>(math::MaxPropagateNaN(max.x, point.x), math::MaxPropagateNaN(max.y, point.y),
                        math::MaxPropagateNaN(max.z, point.z)));
     }
+
+    // 경계 포함 판정이다(Box2::Contains, UE FBox::IsInsideOrOn과 같다). NaN 성분이 있는 점은
+    // false다. 입력 오류를 결과와 구분해야 하면 Intersection.h의 ContainsPoint를 쓴다.
+    constexpr bool Contains(const Vector3<T>& point) const noexcept {
+        return point.x >= min.x && point.x <= max.x && point.y >= min.y && point.y <= max.y &&
+               point.z >= min.z && point.z <= max.z;
+    }
+
+    // other 전체가 이 box 안(닫힌 경계 포함)이면 true다(Box2::Contains(Box2)와 같은 규칙). other가
+    // 유효하지 않으면(역전·NaN·무한대) false다. 이 box가 NaN을 가지면 비교가 거짓이라 false다.
+    // 크기 0 box(점·면)도 경계 위에 있으면 포함이다.
+    //
+    // 사용 예(느슨한 노드 경계에 프록시가 들어가는지):
+    //   if (looseBounds.Contains(proxyBounds)) { ... }
+    constexpr bool Contains(const Box& other) const noexcept {
+        return other.IsValid() && other.min.x >= min.x && other.max.x <= max.x &&
+               other.min.y >= min.y && other.max.y <= max.y && other.min.z >= min.z &&
+               other.max.z <= max.z;
+    }
+
+    // 두 box를 모두 포함하는 가장 작은 box다(Box2::Union과 같은 규칙). NaN 성분은 결과에 그대로
+    // 남아 IsValid가 false다. Empty()와의 합집합은 다른 쪽 그대로다.
+    constexpr Box Union(const Box& other) const noexcept {
+        return Box(Vector3<T>(math::MinPropagateNaN(min.x, other.min.x),
+                              math::MinPropagateNaN(min.y, other.min.y),
+                              math::MinPropagateNaN(min.z, other.min.z)),
+                   Vector3<T>(math::MaxPropagateNaN(max.x, other.max.x),
+                              math::MaxPropagateNaN(max.y, other.max.y),
+                              math::MaxPropagateNaN(max.z, other.max.z)));
+    }
+
+    // 각 면을 축별 amount만큼 바깥으로 옮긴 box다(Box2::ExpandedBy, UE FBox::ExpandBy와 같다).
+    // 음수는 줄이며 결과가 역전되면 IsValid가 false다. 계산은 T 반올림을 거치므로 결과가 수학적
+    // 값보다 1 ULP 안쪽일 수 있다. 반올림까지 바깥쪽이어야 하면
+    // ToFloatOutward·math::NextDown/NextUp으로 보정한다.
+    constexpr Box ExpandedBy(const Vector3<T>& amount) const noexcept {
+        return Box(min - amount, max + amount);
+    }
+
+    // double box를 덮는 float box다. min은 아래쪽(math::ToFloatRoundedDown), max는 위쪽
+    // (math::ToFloatRoundedUp)으로 방향 반올림하므로 결과는 원래 box를 항상 포함한다(수학적으로,
+    // 비트 단위 비교로도). float 범위를 넘는 성분은 무한대 또는 float 최대값이 되어 포함 관계는
+    // 유지하지만 IsValid는 false일 수 있다. NaN 성분은 NaN으로 남는다.
+    //
+    // 사용 예(노드 중심 기준 상대 좌표를 float로 저장, 한 ULP 더 바깥쪽):
+    //   const Box<float> relative = Box<double>(bounds.min - center, bounds.max - center)
+    //                                   .ToFloatOutward();
+    //   const float storedMin = math::NextDown(relative.min.x);
+    constexpr Box<float> ToFloatOutward() const noexcept
+        requires IsSameV<T, double>
+    {
+        return Box<float>(
+            Vector3<float>(math::ToFloatRoundedDown(min.x), math::ToFloatRoundedDown(min.y),
+                           math::ToFloatRoundedDown(min.z)),
+            Vector3<float>(math::ToFloatRoundedUp(max.x), math::ToFloatRoundedUp(max.y),
+                           math::ToFloatRoundedUp(max.z)));
+    }
 };
 
 // 꼭짓점 a, b, c로 이루어진 닫힌 삼각형(두께 없는 면)이다. 기하 앞면 normal은 Cross(b - a, c - a)
@@ -600,6 +657,82 @@ struct OrientedBox {
                                (index & 2u) != 0 ? halfExtents.y : -halfExtents.y,
                                (index & 4u) != 0 ? halfExtents.z : -halfExtents.z);
         return ToWorld(local);
+    }
+};
+
+// ConvexVolume이 담을 수 있는 평면 수의 상한이다. 뷰 프러스텀(6)과 그림자 caster volume(광원
+// 프러스텀에 돌출 면을 더해도 십여 개)을 넉넉히 덮는다. 고정 용량이라 heap을 쓰지 않는다.
+inline constexpr uint32 ConvexVolumeMaxPlanes = 32;
+
+// 평면들의 교집합인 닫힌 볼록 영역이다(UE FConvexVolume 대응). 각 평면의 normal은 영역 **안쪽**을
+// 향한다: 점 p는 모든 평면에서 SignedDistance(p) >= 0일 때 영역 안이다(경계 포함). 평면 수는
+// [1, ConvexVolumeMaxPlanes]이며 평면 사이의 관계(실제로 닫힌 영역인지, 비어 있는지)는 검사하지
+// 않는다. 열린 영역(평면 하나 등)도 유효하다. 판정은 Intersection.h의
+// ClassifyContainment·Overlap이다. 평면 normal은 길이 오차 ShapeUnitTolerance(1e-5)까지 단위로
+// 받아들이므로 SignedDistance는 정확한 거리가 아니라 normal 길이 비율만큼 다른 근사 거리다. 영역
+// 자체(SignedDistance >= 0인 반공간들의 교집합)는 그대로 정의되므로 안·밖 판정에는 영향이 없고,
+// sphere 판정처럼 거리를 반지름과 비교하는 곳에서는 반지름의 약 1e-5 비율만큼 경계가 달라질 수
+// 있다. 정확한 거리가 필요하면 Plane::TryMake로 정규화한 평면을 쓴다.
+//
+// 좌표계와 무관하다. 안쪽 normal 규약만 지키면 왼손(UE)·오른손 어느 좌표에서 만든 평면이든 같은
+// 뜻이다. 프러스텀을 만들 때 평면을 바깥쪽 normal로 얻었다면 Plane::Flipped()로 뒤집어 넣는다.
+//
+// 사용 예:
+//   const Plane<double> planes[] = {near, far, left, right, top, bottom};   // 안쪽 normal
+//   Result<ConvexVolume<double>> frustum = ConvexVolume<double>::TryMake(planes);
+//   if (frustum && Overlap(frustum.Value(), bounds) == QueryResult::Hit) { ... }
+template <typename T>
+struct ConvexVolume {
+    static_assert(math::IsFloatingPointV<T>, "ConvexVolume supports float and double");
+
+    Plane<T> planes[ConvexVolumeMaxPlanes];
+    // 유효한 평면 수다. 기본값 0은 평면이 없는 잘못된 값이다(IsValid false).
+    uint32 planeCount = 0;
+
+    constexpr ConvexVolume() noexcept = default;
+
+    template <typename U>
+        requires(math::IsFloatingPointV<U> && !IsSameV<U, T>)
+    explicit constexpr ConvexVolume(const ConvexVolume<U>& other) noexcept
+        : planeCount(other.planeCount) {
+        for (uint32 index = 0; index < ConvexVolumeMaxPlanes; ++index) {
+            planes[index] = Plane<T>(other.planes[index]);
+        }
+    }
+
+    // 평면들을 복사해 만든다. 실패(InvalidArgument): 평면이 없거나 ConvexVolumeMaxPlanes보다 많음,
+    // 어느 평면이든 IsValid가 아님(비유한 값, 단위가 아닌 normal).
+    static Result<ConvexVolume> TryMake(Span<const Plane<T>> source) noexcept {
+        if (source.Size() == 0 || source.Size() > ConvexVolumeMaxPlanes) {
+            return Result<ConvexVolume>::Failure(ErrorCode::InvalidArgument);
+        }
+        ConvexVolume volume;
+        for (usize index = 0; index < source.Size(); ++index) {
+            if (!source[index].IsValid()) {
+                return Result<ConvexVolume>::Failure(ErrorCode::InvalidArgument);
+            }
+            volume.planes[index] = source[index];
+        }
+        volume.planeCount = static_cast<uint32>(source.Size());
+        return Result<ConvexVolume>::Success(volume);
+    }
+
+    // 평면 수가 [1, ConvexVolumeMaxPlanes]이고 모든 평면이 유효하면 true다.
+    constexpr bool IsValid() const noexcept {
+        if (planeCount == 0 || planeCount > ConvexVolumeMaxPlanes) {
+            return false;
+        }
+        for (uint32 index = 0; index < planeCount; ++index) {
+            if (!planes[index].IsValid()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // 유효한 평면들이다. 이 값보다 오래 쓰지 않는다.
+    Span<const Plane<T>> Planes() const noexcept {
+        return Span<const Plane<T>>(planes, planeCount > ConvexVolumeMaxPlanes ? 0 : planeCount);
     }
 };
 

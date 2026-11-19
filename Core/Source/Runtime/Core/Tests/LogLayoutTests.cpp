@@ -15,7 +15,7 @@
 using namespace rocks;
 
 namespace rocks::test {
-uint64 OperatorNewCallsOnThisThread() noexcept;
+uint64 OperatorNewCalls() noexcept;
 } // namespace rocks::test
 
 namespace {
@@ -234,6 +234,29 @@ TEST(LogLayoutOmitsEmptyTokensWithSeparators) {
     CHECK(Render("{Level}{Category}", fixed.event, out) == "Error Engine.Core");
 }
 
+// 문법 검사는 상수 평가로 쓸 수 있다(설정 검증의 기본값 검사). 이유는 영어 리터럴이다.
+static_assert(CheckLogLayoutSyntax(DefaultConsoleLogLayout).IsEmpty());
+static_assert(CheckLogLayoutSyntax("[{Level:u3}] {Message}{NewLine}").IsEmpty());
+static_assert(CheckLogLayoutSyntax("").IsEmpty());
+static_assert(CheckLogLayoutSyntax("{Unknown}") == "unknown layout token");
+static_assert(CheckLogLayoutSyntax("{Level:u4}") == "unsupported format for this layout token");
+static_assert(CheckLogLayoutSyntax("{0}") == "positional holes are not layout tokens");
+static_assert(!CheckLogLayoutSyntax("{Level").IsEmpty());
+
+// Parse의 오류 출력은 위치(토큰의 '{')와 이유를 준다.
+TEST(LogLayoutParseReportsErrorOffset) {
+    LogLayoutParseError error;
+    CHECK(LogLayout::Parse("[{Level}] {Mesage}", {}, &error).Error() == ErrorCode::InvalidArgument);
+    CHECK(error.offset == 10);
+    CHECK(error.code == ErrorCode::InvalidArgument);
+    CHECK(error.reason == "unknown layout token");
+    CHECK(LogLayout::Parse("ab {Timestamp:s}", {}, &error).Error() == ErrorCode::InvalidArgument);
+    CHECK(error.offset == 3);
+    CHECK(error.reason == "unsupported format for this layout token");
+    CHECK(LogLayout::Parse("abc}", {}, &error).Error() == ErrorCode::InvalidArgument);
+    CHECK(error.offset == 3);
+}
+
 TEST(LogLayoutRejectsBadPatterns) {
     const char* const invalid[] = {"{Unknown}", "{Level:u4}", "{Timestamp:xx}", "{Message:x}",
                                    "{}",        "{0}",        "{Level",         "Level}"};
@@ -274,7 +297,7 @@ TEST(DateTimeMillisecondFormatIsFixedWidth) {
 // compact·고정 frame·중복 키 확인 끔: 한 줄 출력, 고정 깊이, 할당 없음.
 TEST(JsonWriterCompactFixedFramesWithoutAllocation) {
     const uint64 attempts = detail::FixedStringBuilderAllocationAttempts();
-    const uint64 news = test::OperatorNewCallsOnThisThread();
+    const uint64 news = test::OperatorNewCalls();
     char storage[512];
     FixedStringBuilder text{Span<char>(storage)};
     JsonWriterOptions options;
@@ -295,7 +318,7 @@ TEST(JsonWriterCompactFixedFramesWithoutAllocation) {
 
     CHECK(text.View() == "{\"a\":1,\"b\":[true,null,0.5],\"a\":\"x\"}\n");
     CHECK(detail::FixedStringBuilderAllocationAttempts() == attempts);
-    CHECK(test::OperatorNewCallsOnThisThread() == news);
+    CHECK(test::OperatorNewCalls() == news);
 
     // 고정 frame은 FixedFrameCapacity 깊이까지다.
     text.Clear();
@@ -550,7 +573,7 @@ TEST(TextLogSinkSyncAndManualProduceIdenticalLines) {
 TEST(LogSinksDoNotAllocate) {
     ResetUninstalledDrops();
     const uint64 attempts = detail::FixedStringBuilderAllocationAttempts();
-    const uint64 news = test::OperatorNewCallsOnThisThread();
+    const uint64 news = test::OperatorNewCalls();
     FixedEvent fixed;
     {
         TextOutput text;
@@ -566,7 +589,7 @@ TEST(LogSinksDoNotAllocate) {
     }
 
     CHECK(detail::FixedStringBuilderAllocationAttempts() == attempts);
-    CHECK(test::OperatorNewCallsOnThisThread() == news);
+    CHECK(test::OperatorNewCalls() == news);
 
     CountingAllocator allocator;
     LogSystemConfig config;
@@ -591,7 +614,7 @@ TEST(LogSinksDoNotAllocate) {
     }
 
     CHECK(allocator.Allocations() == afterStart);
-    CHECK(test::OperatorNewCallsOnThisThread() == news);
+    CHECK(test::OperatorNewCalls() == news);
     CHECK(detail::FixedStringBuilderAllocationAttempts() == attempts);
     CHECK(text.View().Contains("World=Main", StringComparison::CaseSensitive));
 }

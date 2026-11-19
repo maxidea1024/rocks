@@ -22,20 +22,26 @@ internal static partial class SchemaValidator
         ["rocks::String"] = "Utf8String",
         ["rocks::Name"] = "Name",
         ["rocks::AssetId"] = "AssetId",
-        ["rocks::Sha256Digest"] = "Digest256"
+        ["rocks::Sha256Digest"] = "Digest256",
+        // InstancedStruct<>(리플렉션 B9j — Docs/Design/ReflectionExtensions.ko.md 11절)는 대상 없는 값 종류로 푼다(Clang은 기본 인자를
+        // 생략한 `<>`로 내고, 명시한 void는 `<void>`로 낸다). InstancedStruct<Base>는 리플렉션 B9k가 연다.
+        ["rocks::InstancedStruct<>"] = "InstancedStruct",
+        ["rocks::InstancedStruct<void>"] = "InstancedStruct",
+        // rocks::Text(리플렉션 B9l — Docs/Design/ReflectionExtensions.ko.md 13절)는 대상 없는 값 종류다.
+        ["rocks::Text"] = "Text"
     };
 
     private static readonly string[] TargetKinds = ["Enum", "Struct", "ObjectReference", "WeakObjectReference", "SoftObjectReference", "ClassReference"];
 
     // 원본 선언의 철자 해석(ResolveValue·ResolveArray)이 만들 수 있는 단일 값 종류다: 스칼라 철자(Name 포함), 리플렉션 enum·struct,
     // 강한·weak·소프트 참조, 클래스 참조(ClassRef). ToolTests가 이 집합과 성질 표(ValueKindTable)의 Array 원소 열이 같은지 본다(새 종류는 철자 해석과 표에 함께 더한다).
-    internal static IReadOnlyList<string> SourceValueKinds { get; } = [.. Scalars.Values, .. TargetKinds];
+    internal static IReadOnlyList<string> SourceValueKinds { get; } = [.. Scalars.Values.Distinct(StringComparer.Ordinal), .. TargetKinds];
 
     // "prefix<T>" 철자의 T를 돌려준다(아니면 null).
     private static string? TemplateTarget(string spelling, string prefix) =>
         spelling.StartsWith(prefix, StringComparison.Ordinal) && spelling.EndsWith('>') ? spelling[prefix.Length..^1].Trim() : null;
 
-    // 강한 참조(ObjectRef<T>)·weak 참조(WeakRef<T> — 리플렉션 B9d1, Docs/Design/ReflectionExtensions.ko.md 5.1절)·소프트 참조
+    // 강한 참조(ObjectRef<T>)·weak 참조(WeakObjectRef<T> — 리플렉션 B9d1, Docs/Design/ReflectionExtensions.ko.md 5.1절)·소프트 참조
     // (SoftObjectRef<T>)·클래스 참조(ClassRef<Base> — 리플렉션 B9d2, 같은 문서 5.2절) 철자면 대상 T와 값 종류를 돌려준다(아니면 null).
     private static (string Target, string Kind)? ReferenceSpelling(string spelling)
     {
@@ -44,7 +50,7 @@ internal static partial class SchemaValidator
             return (strong, "ObjectReference");
         }
 
-        if (TemplateTarget(spelling, "rocks::WeakRef<") is string weak)
+        if (TemplateTarget(spelling, "rocks::WeakObjectRef<") is string weak)
         {
             return (weak, "WeakObjectReference");
         }
@@ -104,6 +110,12 @@ internal static partial class SchemaValidator
 
             // 미러의 멤버는 실제 타입의 공개 데이터 멤버와 1:1이다(생성 static_assert가 이름·형식·개수·순서를 대조한다).
             // NATIVE 멤버·Migrate는 실제 타입에 둘 수 없으므로 받지 않는다(그 멤버 위치로 보고한다).
+            // enum 미러(CurveData CV9)는 열거자를 실제 enum의 같은 이름·값으로 나열한다(생성 static_assert가 대조한다).
+            if (mirror.IsEnum)
+            {
+                continue;
+            }
+
             (string? invalid, SourceSite site) = mirror.NativeMembers.Count != 0
                 ? ("a Binds mirror lists only persistent members (ROCKS_NATIVE is not allowed)", mirror.NativeMembers[0].Site)
                 : mirror.HasMigrate ? ("a Binds mirror cannot declare Migrate (the real type owns its layout)", mirror.MigrateSite ?? mirror.Site)
@@ -121,13 +133,15 @@ internal static partial class SchemaValidator
         ClassModel? ValueType(string spelling, bool structs, string owner, SourceSite site)
         {
             string name = spelling.StartsWith("::", StringComparison.Ordinal) ? spelling[2..] : spelling;
-            if (structs && ((classes.TryGetValue(name, out ClassModel? named) || imported.TryGetValue(name, out named)) && named.Binds.Length != 0))
+            if ((classes.TryGetValue(name, out ClassModel? named) || imported.TryGetValue(name, out named)) && named.Binds.Length != 0 &&
+                named.IsEnum == !structs)
             {
                 throw new MetadataException($"{owner}: '{name}' is a Binds mirror declaration; use the real type {named.Binds}", "RMC2000",
                     $"Declare the field with the real type ({named.Binds}); the mirror only describes it to the metadata compiler.").At(site);
             }
 
-            if (structs && !classes.ContainsKey(name) && !imported.ContainsKey(name) && mirrors.TryGetValue(name, out ClassModel? mirror))
+            if (!classes.ContainsKey(name) && !imported.ContainsKey(name) && mirrors.TryGetValue(name, out ClassModel? mirror) &&
+                mirror.IsEnum == !structs)
             {
                 name = mirror.Name;
             }
@@ -225,7 +239,7 @@ internal static partial class SchemaValidator
                 return $"Core value types are reflected by the {StructRules.BindingModule} module: depend on {StructRules.BindingModule} (add it to the module's RequiredModules) so its descriptor is imported.";
             }
 
-            return "Use a supported scalar, Guid, String, Name, AssetId, Sha256Digest, ROCKS_ENUM enum, ROCKS_STRUCT struct, ObjectRef, WeakRef, SoftObjectRef, ClassRef, rocks::Optional, rocks::OrderedMap/OrderedSet or rocks::Array/ObjectRefArray/StructRefArray field; raw pointers/other containers/cv-qualified fields need an explicit codec extension.";
+            return "Use a supported scalar, Guid, String, Name, AssetId, Sha256Digest, ROCKS_ENUM enum, ROCKS_STRUCT struct, ObjectRef, WeakObjectRef, SoftObjectRef, ClassRef, rocks::InstancedStruct<>, rocks::Optional, rocks::OrderedMap/OrderedSet or rocks::Array/ObjectRefArray/StructRefArray field; raw pointers/other containers/cv-qualified fields need an explicit codec extension.";
         }
 
         // 단일 값 형식 철자 하나를 (값 종류, 대상 정규 이름, 대상 ID)로 푼다(필드와 Array<T> 원소가 같은 해석을 쓴다).
@@ -259,6 +273,19 @@ internal static partial class SchemaValidator
                 }
 
                 return (reference.Kind, target, target == "rocks::Object" ? null : Find(target).Id);
+            }
+
+            // InstancedStruct<Base>(리플렉션 B9k): Base는 리플렉션 struct여야 한다(RMC2308 — 담을 수 있는 struct인지는 형질 계산
+            // 뒤 CheckInstanced가 본다). InstancedStruct<>·<void>는 Scalars가 먼저 받는다.
+            if (TemplateTarget(spelling, "rocks::InstancedStruct<") is string instancedBase)
+            {
+                if (ValueType(instancedBase, true, owner, site) is not ClassModel baseStruct)
+                {
+                    throw new MetadataException($"{owner}: InstancedStruct base '{instancedBase}' is not a reflected ROCKS_STRUCT", "RMC2308",
+                        "Use rocks::InstancedStruct<> or name a reflected ROCKS_STRUCT as the base (rocks::InstancedStruct<RowBase>).").At(site);
+                }
+
+                return ("InstancedStruct", baseStruct.Name, baseStruct.Id);
             }
 
             return null;
@@ -491,11 +518,78 @@ internal static partial class SchemaValidator
             field.ReferenceId = valueReferenceId;
         }
 
+        // struct base 철자를 리플렉션 struct(이 모듈·import — 둘러싼 이름공간 순으로 찾는다) 하나와 필드 없는 비리플렉션 base로
+        // 나눈다(리플렉션 B9k). 리플렉션 base가 둘 이상이거나 Binds 미러면 RMC2301이다.
+        ClassModel? StructBase(string spelling, string owner, SourceSite site)
+        {
+            string name = spelling.StartsWith("::", StringComparison.Ordinal) ? spelling[2..] : spelling;
+            if (ValueType(name, true, owner, site) is ClassModel direct)
+            {
+                return direct;
+            }
+
+            string[] scope = owner.Split("::");
+            for (int count = scope.Length - 1; count > 0; --count)
+            {
+                if (ValueType(string.Join("::", scope.Take(count)) + "::" + name, true, owner, site) is ClassModel found)
+                {
+                    return found;
+                }
+            }
+
+            return null;
+        }
+
         foreach (ClassModel model in classes.Values.Where(model => !model.IsEnum))
         {
             if (!model.IsStruct)
             {
                 model.Base = Resolve(model.Base, model.Name, model.Site);
+            }
+            else
+            {
+                foreach (string spelling in model.StructBaseSpellings)
+                {
+                    ClassModel? reflected;
+                    try
+                    {
+                        reflected = StructBase(spelling, model.Name, model.Site);
+                    }
+                    catch (MetadataException) when (spelling.Length != 0)
+                    {
+                        throw new MetadataException($"{model.Name}: base {spelling} is a Binds mirror", "RMC2301",
+                            "A Binds mirror cannot be a base; derive from a reflected ROCKS_STRUCT or hold the bound value as a field.").At(model.Site);
+                    }
+
+                    if (reflected is null)
+                    {
+                        // 리플렉션 클래스(Object 파생)는 struct의 base가 될 수 없다.
+                        string bare = spelling.StartsWith("::", StringComparison.Ordinal) ? spelling[2..] : spelling;
+                        if (bare == "rocks::Object" || classes.GetValueOrDefault(bare) is { IsStruct: false, IsEnum: false } ||
+                            imported.GetValueOrDefault(bare) is { IsStruct: false, IsEnum: false })
+                        {
+                            throw new MetadataException($"{model.Name}: a ROCKS_STRUCT cannot derive from reflected class {bare}", "RMC2301",
+                                "Structs are plain values; derive from a reflected ROCKS_STRUCT or hold an ObjectRef to the class instead.").At(model.Site);
+                        }
+
+                        model.EmptyBases.Add(spelling);
+                        continue;
+                    }
+
+                    if (reflected.Binds.Length != 0)
+                    {
+                        throw new MetadataException($"{model.Name}: base {reflected.Name} is a Binds mirror", "RMC2301",
+                            "A Binds mirror cannot be a base; derive from a reflected ROCKS_STRUCT or hold the bound value as a field.").At(model.Site);
+                    }
+
+                    if (model.Base.Length != 0)
+                    {
+                        throw new MetadataException($"{model.Name}: a ROCKS_STRUCT can have only one reflected base ({model.Base}, {reflected.Name})", "RMC2301",
+                            "Derive from one reflected ROCKS_STRUCT and hold the other as a nested field.").At(model.Site);
+                    }
+
+                    model.Base = reflected.Name;
+                }
             }
 
             foreach (FieldModel field in model.OwnFields)
@@ -562,10 +656,10 @@ internal static partial class SchemaValidator
 
                 if (field.Spec.Required && !field.AcceptsRequired)
                 {
-                    // WeakRef는 대상이 죽으면 저절로 null이 되므로 Required를 지킬 수 없다(Docs/Design/ReflectionExtensions.ko.md 5.1절). Map은 값마다,
+                    // WeakObjectRef는 대상이 죽으면 저절로 null이 되므로 Required를 지킬 수 없다(Docs/Design/ReflectionExtensions.ko.md 5.1절). Map은 값마다,
                     // Set은 원소마다 non-null이다(키에는 Required가 없다 — 리플렉션 B9f2).
                     throw new MetadataException($"{field.Owner}::{field.Name}: Required applies only to object, soft object and class reference fields, arrays, static arrays and sets of them and maps with such values", "RMC2202",
-                        "Remove Required or change the field to ObjectRef, SoftObjectRef, ClassRef, ObjectRefArray, ObjectRefMap, Array<SoftObjectRef>, Array<ClassRef>, a static array of ObjectRef/SoftObjectRef/ClassRef, OrderedSet<SoftObjectRef/ClassRef> or OrderedMap<K, SoftObjectRef/ClassRef>; a WeakRef becomes null when its target dies, so it cannot be Required.").At(field.Site);
+                        "Remove Required or change the field to ObjectRef, SoftObjectRef, ClassRef, ObjectRefArray, ObjectRefMap, Array<SoftObjectRef>, Array<ClassRef>, a static array of ObjectRef/SoftObjectRef/ClassRef, OrderedSet<SoftObjectRef/ClassRef> or OrderedMap<K, SoftObjectRef/ClassRef>; a WeakObjectRef becomes null when its target dies, so it cannot be Required.").At(field.Site);
                 }
 
                 // Required와 복제 제외 플래그는 함께 쓸 수 없다(리플렉션 B9h1 — 복제본이 늘 null을 가져 패키지 저장의 rejectMissingRequired가
@@ -686,6 +780,31 @@ internal static partial class SchemaValidator
             }
         }
 
+        // InstancedStruct<Base>의 Base(리플렉션 B9k)는 담을 수 있는 struct여야 하고(강한 참조·Registry 컨테이너·InstancedStruct·Required·
+        // WorldOnly 소유자 요구 없음 — RMC2308) struct 멤버 자리면 1 + Base 깊이가 MaxStructDepth 이하여야 한다(RMC2303 — 그 struct가 최상위
+        // 필드일 때의 위치 깊이 합, 더 깊은 자리는 런타임 깊이 합 규칙이 본다). Base의 형질을 계산한 뒤에 본다.
+        void CheckInstanced(ClassModel owner, FieldModel field)
+        {
+            if (field.TargetKind != "InstancedStruct" || field.Reference is null)
+            {
+                return;
+            }
+
+            ClassModel baseStruct = Find(field.Reference);
+            if (baseStruct.ContainsStrongReference || baseStruct.ContainsReferenceArray || ContainsInstancedStructTrait(baseStruct, Find) ||
+                ContainsRequiredTrait(baseStruct, Find) || baseStruct.RequiresWorldOnlyOwner)
+            {
+                throw new MetadataException($"{field.Owner}::{field.Name}: InstancedStruct base {baseStruct.Name} cannot be held (strong references, reference containers, InstancedStruct or Required members)", "RMC2308",
+                    "Use a plain value ROCKS_STRUCT as the InstancedStruct base.").At(field.Site);
+            }
+
+            if (owner.IsStruct && 1 + baseStruct.Depth > StructRules.MaxDepth)
+            {
+                throw new MetadataException($"{field.Owner}::{field.Name}: InstancedStruct base {baseStruct.Name} nesting depth {1 + baseStruct.Depth} exceeds {StructRules.MaxDepth}", "RMC2303",
+                    "Flatten the base struct or hold the InstancedStruct in a class field.").At(field.Site);
+            }
+        }
+
         // Map 값 struct는 값 struct다(강한 참조를 담는 struct는 ObjectRefMap·인라인 struct 멤버로 둔다 — RMC2305, 런타임 등록도 거부한다).
         // 값 struct의 형질을 계산한 뒤에 본다.
         void CheckMap(FieldModel field)
@@ -700,9 +819,43 @@ internal static partial class SchemaValidator
         // struct: 필드 목록 → 순환·깊이(DFS, Order·생성 전 — PROPERTY struct 멤버·struct 원소 배열 멤버·Optional<struct> 멤버) → 순위
         // (PROPERTY·NATIVE struct 멤버와 원소·내부 struct) → 형질(쓰는 struct가 먼저 계산되도록 순위 순)·컨테이너 대조.
         ClassModel[] structs = classes.Values.Where(model => model.IsStruct).OrderBy(model => model.Name, StringComparer.Ordinal).ToArray();
+        // struct 상속(리플렉션 B9k)은 base 필드를 펼친다: base(이 모듈이면 먼저 만든다, import면 descriptor의 상속 포함 전체 필드)
+        // 필드 + 자기 필드이고 Atomic은 base에서 상속된다.
+        HashSet<string> builtStructs = new(StringComparer.Ordinal);
+        HashSet<string> buildingStructs = new(StringComparer.Ordinal);
+        void BuildStruct(ClassModel model)
+        {
+            if (builtStructs.Contains(model.Name))
+            {
+                return;
+            }
+
+            if (!buildingStructs.Add(model.Name))
+            {
+                throw new MetadataException($"{model.Name}: struct inheritance cycle", "RMC2301").At(model.Site);
+            }
+
+            List<FieldModel> inherited = [];
+            if (model.Base.Length != 0)
+            {
+                ClassModel baseModel = classes.TryGetValue(model.Base, out ClassModel? ownBase) ? ownBase : imported[model.Base];
+                if (ownBase is not null)
+                {
+                    BuildStruct(ownBase);
+                }
+
+                inherited.AddRange(baseModel.Fields);
+                model.Atomic |= baseModel.Atomic;
+            }
+
+            model.Fields = BuildFields(model, inherited);
+            buildingStructs.Remove(model.Name);
+            builtStructs.Add(model.Name);
+        }
+
         foreach (ClassModel model in structs)
         {
-            model.Fields = BuildFields(model, []);
+            BuildStruct(model);
         }
 
         ComputeDepths(structs, Find);
@@ -717,7 +870,8 @@ internal static partial class SchemaValidator
             // ReflectionFoundations.ko.md 2.4절). 원소 struct의 형질도 전파된다.
             model.RequiresWorldOnlyOwner = model.WorldOnlyNatives.Count != 0 ||
                 model.Fields.Any(field => field.StructTarget && Find(field.Reference!).RequiresWorldOnlyOwner) ||
-                model.NativeMembers.Any(native => native.Struct is not null && Find(native.Struct).RequiresWorldOnlyOwner);
+                model.NativeMembers.Any(native => native.Struct is not null && Find(native.Struct).RequiresWorldOnlyOwner) ||
+                (model.Base.Length != 0 && Find(model.Base).RequiresWorldOnlyOwner); // base의 NATIVE 멤버 형질도 상속된다(리플렉션 B9k)
             model.ContainsReferenceArray = ContainsReferenceArray(model, Find);
             // 설정 struct는 값이다(설정 계층이 리플렉션 struct 값 대상으로 읽는다 — Docs/Design/ConfigSystem.ko.md 7절). 강한 참조를 담으면
             // 값 대상이 될 수 없다.
@@ -727,12 +881,21 @@ internal static partial class SchemaValidator
                     "Settings structs are plain values read from config files; refer to assets by SoftObjectRef or AssetId instead.").At(model.Site);
             }
 
+            // 검증 hook(Docs/Design/CurveData.ko.md 9.1절)은 순수 함수라 Registry를 읽지 못하고, 리플렉션 쓰기는 hook struct를 통째로
+            // 복사해 검증한 뒤 게시한다. 그래서 hook struct는 참조 없는 값이어야 한다.
+            if (model.HasValidate && (model.ContainsStrongReference || model.ContainsReferenceArray))
+            {
+                throw new MetadataException($"{model.Name}: a struct with a Validate hook cannot hold strong object references or reference arrays", "RMC2309",
+                    "Keep validated structs plain values; validate reference-holding data where it is used instead.").At(model.ValidateSite ?? model.Site);
+            }
+
             foreach (FieldModel field in model.OwnFields)
             {
                 CheckOptional(field);
                 CheckMap(field);
                 CheckStaticArray(field);
                 CheckContainer(field);
+                CheckInstanced(model, field);
             }
         }
 
@@ -744,6 +907,7 @@ internal static partial class SchemaValidator
                 CheckMap(field);
                 CheckStaticArray(field);
                 CheckContainer(field);
+                CheckInstanced(model, field);
             }
         }
 

@@ -262,6 +262,18 @@ public:
         }
     }
 
+    // dependent Actor의 주 Tick(OnTick)이 prerequisite Actor의 OnTick 뒤에 실행되게 한다(UE
+    // AActor::AddTickPrerequisiteActor 대응, 주 Tick만). 두 Actor 모두 시작해 OnTick을 등록한
+    // 상태여야 한다(등록 전이면 InvalidArgument). 순서는 다음 단계 경계부터 반영된다.
+    // - 오류: 이 World의 Actor가 아니면 StaleHandle, 자기 자신·다른 Tick 단계는 InvalidArgument,
+    //   순환이 생기면 CycleDetected다. 순환은 상태를 바꾸지 않고 Warning을 한 번 남긴다(World.Tick
+    //   카테고리, 두 Actor를 "타입#slot"으로). 이미 있는 의존은 성공이다.
+    //
+    // 사용 예:
+    //   world.AddActorTickPrerequisite(turret, vehicle);   // vehicle이 먼저 Tick
+    Result<void> AddActorTickPrerequisite(ObjectHandle dependent,
+                                          ObjectHandle prerequisite) noexcept;
+
     // actor가 속한 Level이다. 이 World의 Actor가 아니면 StaleHandle이다.
     Result<ObjectHandle> GetActorLevel(ObjectHandle actor) const noexcept;
 

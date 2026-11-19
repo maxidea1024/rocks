@@ -16,11 +16,11 @@ struct FixedOwner;
 
 // 리플렉션 B9g 정적 배열 PROPERTY fixture다(Docs/Design/ReflectionExtensions.ko.md 8절).
 // FixedOwner는 성질 표의 정적 배열 원소 종류마다 필드 하나(정수 8종·Bool·실수 둘·Guid·String·
-// Name·ObjectRef·WeakRef·ClassRef·enum·값 struct·참조 struct·AssetId·SoftObjectRef·Sha256Digest)를
-// 담고 그래프 왕복·Trace(ObjectRef 원소·참조 struct 원소로만 닿는 객체)·순환·경로 연산으로
-// 시험한다(StaticArrayGraphTests·StaticArrayPathTests). FixedPoint는 정적 배열 멤버를 담은 값
-// struct, FixedLink는 참조 struct 원소, FixedRequired는 Required 원소(원소마다 non-null)와 Required
-// 멤버 struct(FixedNeed) 원소다.
+// Name·ObjectRef·WeakObjectRef·ClassRef·enum·값 struct·참조
+// struct·AssetId·SoftObjectRef·Sha256Digest)를 담고 그래프 왕복·Trace(ObjectRef 원소·참조 struct
+// 원소로만 닿는 객체)·순환·경로 연산으로 시험한다(StaticArrayGraphTests·StaticArrayPathTests).
+// FixedPoint는 정적 배열 멤버를 담은 값 struct, FixedLink는 참조 struct 원소, FixedRequired는
+// Required 원소(원소마다 non-null)와 Required 멤버 struct(FixedNeed) 원소다.
 ROCKS_ENUM()
 enum class FixedMode : uint8 {
     First = 1,
@@ -64,7 +64,7 @@ struct FixedOwner final : Object {
     ROCKS_PROPERTY() String labels[2];
     ROCKS_PROPERTY() Name names[2];
     ROCKS_PROPERTY() ObjectRef<FixedOwner> refs[3];
-    ROCKS_PROPERTY() WeakRef<FixedOwner> watchers[2];
+    ROCKS_PROPERTY() WeakObjectRef<FixedOwner> watchers[2];
     ROCKS_PROPERTY() ClassRef<FixedOwner> kinds[2];
     ROCKS_PROPERTY() FixedMode modes[2];
     ROCKS_PROPERTY() FixedPoint points[2];

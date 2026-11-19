@@ -3,6 +3,7 @@
 #include <Core/Algorithms.h>
 #include <Core/ScopeExit.h>
 #include <Core/Text/StringBuilder.h>
+#include <Object/FieldValueWire.h>
 #include <Object/PropertyPath.h>
 #include <ReflectionText/TextJson.h>
 
@@ -112,10 +113,9 @@ Result<void> PushOrigins(Allocator& allocator, JsonValue value, const JsonPositi
 class SectionApplier {
 public:
     SectionApplier(ConfigState& state, SectionState& section, void* storage,
-                   const ConfigEntry& entry, bool incoming) noexcept
+                   const ConfigEntry& entry) noexcept
         : state_(state), section_(section), storage_(storage), entry_(entry),
-          allocator_(state.allocator), keep_(state.allocator), path_(state.allocator),
-          incoming_(incoming) {
+          allocator_(state.allocator), keep_(state.allocator), path_(state.allocator) {
     }
 
     Result<bool> ApplyDocument(JsonValue object, Array<String>& paths) noexcept;
@@ -148,8 +148,11 @@ private:
     Result<JsonValue> Navigate(JsonValue root, Span<const ChainStep> chain) noexcept;
     Result<JsonValue> ExportValue(void* storage) noexcept;
 
+    // validateHooks가 거짓이면 struct 검증 hook을 부르지 않는다(CanonicalList의 정규화용 import —
+    // 최종 값은 따로 hook을 거친다).
     Result<bool> ImportMapped(void* storage, JsonValue root, const WriteSession* session,
-                              JsonValue original, Array<String>* paths) noexcept;
+                              JsonValue original, Array<String>* paths,
+                              bool validateHooks = true) noexcept;
     Result<bool> FinishPrepared(Result<PreparedAssignments> prepared, TextDiagnostics& diagnostics,
                                 const Array<OffsetOrigin>* map, JsonValue original,
                                 const JsonPosition* fallback, Array<String>* paths) noexcept;
@@ -169,8 +172,6 @@ private:
     JsonValue current_{};
     // 진단 경로 텍스트(섹션 안 도구 이름 경로)다.
     Array<char> path_;
-    // 새로 들어오는 입력의 검사인지다(시작 뒤 StartupOnly 거부).
-    bool incoming_ = false;
     bool failed_ = false;
 };
 
@@ -291,6 +292,19 @@ Result<void> SectionApplier::WriteField(WriteSession& session, JsonValue value, 
     case ValueKind::Array:
     case ValueKind::Set:
         if (value.IsObject()) {
+            // byte 배열(`Array<uint8>`)의 값은 Base64 문자열 하나라 원소 단위 배열 연산이 없다
+            // (Docs/Design/CurveData.ko.md 17.3절 B5).
+            if (::rocks::detail::IsByteArrayField(field)) {
+                if (auto reported =
+                        Diagnose(ConfigDiagnosticCode::InvalidArrayOperation, &at,
+                                 "byte arrays take a Base64 string; array operations do not apply");
+                    !reported) {
+                    return reported;
+                }
+
+                return WriteCopy(session, value);
+            }
+
             if (nested) {
                 if (auto reported =
                         Diagnose(ConfigDiagnosticCode::UnsupportedOperation, &at,
@@ -639,7 +653,9 @@ Result<JsonValue> SectionApplier::CanonicalList(Span<const ChainStep> chain,
         return Result<JsonValue>::Failure(ErrorCode::InvalidArgument);
     }
 
-    auto imported = ImportMapped(scratch, document.Root(), &session, list, nullptr);
+    // 정규 표기만 얻는 중간 import라 hook을 부르지 않는다(연산 목록만으로는 struct 불변식 — 예:
+    // InterpCurve 키 정렬 — 이 성립하지 않을 수 있다. 최종 적용 값이 hook을 거친다).
+    auto imported = ImportMapped(scratch, document.Root(), &session, list, nullptr, false);
     if (!imported) {
         return Result<JsonValue>::Failure(imported.Error());
     }
@@ -821,7 +837,7 @@ Result<void> SectionApplier::WriteOperation(WriteSession& session, JsonValue ope
 // 텍스트를 더한다.
 Result<bool> SectionApplier::ImportMapped(void* storage, JsonValue root,
                                           const WriteSession* session, JsonValue original,
-                                          Array<String>* paths) noexcept {
+                                          Array<String>* paths, bool validateHooks) noexcept {
     Array<OffsetOrigin> map(allocator_);
     if (session != nullptr) {
         usize next = 0;
@@ -843,7 +859,8 @@ Result<bool> SectionApplier::ImportMapped(void* storage, JsonValue root,
     }
 
     TextDiagnostics diagnostics(allocator_);
-    const TextCodecOptions options = state_.CodecOptions();
+    TextCodecOptions options = state_.CodecOptions();
+    options.validateStructHooks = validateHooks;
     const AssignmentTarget target =
         AssignmentTarget::Value(state_.objects, state_.access, section_.lease, storage, allocator_);
     return FinishPrepared(ImportJson(root, target, options, diagnostics), diagnostics,
@@ -855,13 +872,10 @@ Result<bool> SectionApplier::FinishPrepared(Result<PreparedAssignments> prepared
                                             const Array<OffsetOrigin>* map, JsonValue original,
                                             const JsonPosition* fallback,
                                             Array<String>* paths) noexcept {
-    if (!prepared) {
-        if (!diagnostics.HasErrors()) {
-            return Result<bool>::Failure(prepared.Error());
-        }
-
+    // 묶음 진단(준비 실패·게시 전 struct 검증 hook 거부 — Docs/Design/CurveData.ko.md 17.2절)을
+    // 설정 진단으로 옮긴다.
+    const auto reportText = [&]() noexcept -> Result<bool> {
         failed_ = true;
-
         for (usize index = 0; index < diagnostics.Count(); ++index) {
             const TextDiagnostic item = diagnostics.Get(index);
             ConfigDiagnostic diagnostic;
@@ -892,6 +906,14 @@ Result<bool> SectionApplier::FinishPrepared(Result<PreparedAssignments> prepared
         }
 
         return Result<bool>::Success(false);
+    };
+
+    if (!prepared) {
+        if (!diagnostics.HasErrors()) {
+            return Result<bool>::Failure(prepared.Error());
+        }
+
+        return reportText();
     }
 
     // 층 허용(사용자 층의 UserConfig, 출시 규칙의 DevelopmentOnly)은 override 단위의 최상위 필드로
@@ -903,7 +925,7 @@ Result<bool> SectionApplier::FinishPrepared(Result<PreparedAssignments> prepared
         }
 
         const StringView reason = CheckLayerAllowed(
-            state_, entry_.layer, SettingsFlagsOf(section_, path.steps[0].fieldId), incoming_);
+            state_, entry_.layer, SettingsFlagsOf(section_, path.steps[0].fieldId));
         if (reason.IsEmpty()) {
             continue;
         }
@@ -935,6 +957,10 @@ Result<bool> SectionApplier::FinishPrepared(Result<PreparedAssignments> prepared
 
     auto published = prepared.Value().Publish();
     if (!published) {
+        if (diagnostics.HasErrors()) {
+            return reportText();
+        }
+
         return Result<bool>::Failure(published.Error());
     }
 
@@ -1031,9 +1057,9 @@ Result<bool> SectionApplier::ApplyConsoleValue(usize field, StringView text, Jso
     }
 
     ConfigDiagnosticCode code = ConfigDiagnosticCode::LayerNotAllowed;
-    const StringView problem = CheckConsoleLayer(
-        state_, entry_.layer, ConsoleFlagsOfField(SettingsFlagsOf(section_, schema.id)), incoming_,
-        code);
+    const StringView problem =
+        CheckConsoleLayer(state_.releaseRules, entry_.layer,
+                          ConsoleFlagsOfField(SettingsFlagsOf(section_, schema.id)), code, false);
     if (!problem.IsEmpty()) {
         if (auto reported = Diagnose(code, position, problem); !reported) {
             return Result<bool>::Failure(reported.Error());
@@ -1090,10 +1116,9 @@ JsonValue SettingsSectionOf(const ConfigEntry& entry) noexcept {
 }
 
 Result<bool> ApplyEntryToSection(ConfigState& state, SectionState& section, void* storage,
-                                 const ConfigEntry& entry, bool incoming,
-                                 Array<String>& paths) noexcept {
+                                 const ConfigEntry& entry, Array<String>& paths) noexcept {
     if (entry.kind == EntryKind::Assignment) {
-        SectionApplier applier(state, section, storage, entry, incoming);
+        SectionApplier applier(state, section, storage, entry);
         return applier.ApplyAssignment(paths);
     }
 
@@ -1103,7 +1128,7 @@ Result<bool> ApplyEntryToSection(ConfigState& state, SectionState& section, void
             return Result<bool>::Success(true);
         }
 
-        SectionApplier applier(state, section, storage, entry, incoming);
+        SectionApplier applier(state, section, storage, entry);
         return applier.ApplyConsoleValue(field, entry.value.View(), JsonValue{}, paths);
     }
 
@@ -1111,7 +1136,7 @@ Result<bool> ApplyEntryToSection(ConfigState& state, SectionState& section, void
     // 적용한다(같은 입력 안에서는 콘솔 이름 값이 이긴다).
     const JsonValue object = FindMemberIgnoringCase(entry.document->Root(), section.section.View());
     if (object.IsValid()) {
-        SectionApplier applier(state, section, storage, entry, incoming);
+        SectionApplier applier(state, section, storage, entry);
         auto applied = applier.ApplyDocument(object, paths);
         if (!applied || !applied.Value()) {
             return applied;
@@ -1125,7 +1150,7 @@ Result<bool> ApplyEntryToSection(ConfigState& state, SectionState& section, void
             continue;
         }
 
-        SectionApplier applier(state, section, storage, entry, incoming);
+        SectionApplier applier(state, section, storage, entry);
         auto applied = applier.ApplyConsoleValue(field, {}, settings.ValueAt(member), paths);
         if (!applied || !applied.Value()) {
             return applied;

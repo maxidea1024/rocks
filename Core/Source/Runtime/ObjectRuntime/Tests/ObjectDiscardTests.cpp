@@ -307,7 +307,8 @@ TEST(ObjectDiscard_SubtreeLeavesTheNameIndexImmediately) {
         CHECK(registry.DescribeOuter(access, a.Value()).Error() == ErrorCode::StaleHandle);
         CHECK(NewNode(registry, a.Value(), "E").Error() == ErrorCode::StaleHandle);
         CHECK(registry.Resolve(access, b.Value()).Error() == ErrorCode::Destroyed);
-        CHECK(WeakRef<Object>(b.Value()).TryPin(registry, access).Error() == ErrorCode::Destroyed);
+        CHECK(WeakObjectRef<Object>(b.Value()).TryPin(registry, access).Error() ==
+              ErrorCode::Destroyed);
 
         // GC 전에도 같은 이름을 바로 만든다.
         auto again = NewNode(registry, outer.Value(), "a", &roots[4]);

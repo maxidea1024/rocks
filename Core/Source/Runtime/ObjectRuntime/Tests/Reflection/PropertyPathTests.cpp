@@ -9,8 +9,8 @@
 // 경로 연산(B6a) 레지스트리 단위 시험이다(Docs/Design/ReflectionFoundations.ko.md 7.1절 "시험").
 // 생성 코드(B6b) 전이라 GeneratedType 특수화를 MetaCompiler가 낼 모양으로 손으로 썼다: 클래스
 // Struct·Array 필드 함수표의 path 칸에 PathClassField를 부르는 람다(valueNativeType은 없으면
-// nullptr), struct 멤버는 StructFieldOps<&S::m>(id, &PathStructMember<&S::m, Target>), 단일 값
-// 필드에는 path가 없다.
+// nullptr), struct 멤버는 StructFieldOps<S, &S::m>(id, &PathStructMember<S, &S::m, Target>), 단일
+// 값 필드에는 path가 없다.
 using namespace rocks;
 using reflection_fixture::Bias;
 using reflection_fixture::Channels;
@@ -154,7 +154,7 @@ constexpr Guid I64Id{0x504d4c, 7};
 constexpr Guid F32Id{0x504d4c, 8};
 constexpr Guid F64Id{0x504d4c, 9};
 constexpr Guid GuidId{0x504d4c, 10};
-constexpr Guid TextId{0x504d4c, 11};
+constexpr Guid TextFieldId{0x504d4c, 11};
 constexpr Guid AssetFieldId{0x504d4c, 12};
 constexpr Guid SoftId{0x504d4c, 13};
 constexpr Guid DigestId{0x504d4c, 14};
@@ -194,7 +194,7 @@ constexpr uint32 ReadOnly = static_cast<uint32>(FieldFlags::ReadOnly);
 constexpr uint32 Transient = static_cast<uint32>(FieldFlags::Transient);
 constexpr uint32 EditorOnly = static_cast<uint32>(FieldFlags::EditorOnly);
 
-Span<const char> Text(const char* text) noexcept {
+Span<const char> Chars(const char* text) noexcept {
     usize bytes = 0;
     while (text[bytes] != '\0') {
         ++bytes;
@@ -209,7 +209,7 @@ FieldSchema Scalar(Guid id, const char* name, ValueKind kind, TypeId type = {},
     field.id = id;
     field.kind = kind == ValueKind::ObjectReference ? FieldKind::ObjectReference : FieldKind::Value;
     field.flags = flags;
-    field.name = Text(name);
+    field.name = Chars(name);
     field.value = ValueType{kind, type};
     return field;
 }
@@ -221,7 +221,7 @@ FieldSchema ArrayOf(Guid id, const char* name, ValueKind element, TypeId type = 
     field.kind =
         element == ValueKind::ObjectReference ? FieldKind::ObjectReference : FieldKind::Value;
     field.flags = flags;
-    field.name = Text(name);
+    field.name = Chars(name);
     field.value = ValueType{ValueKind::Array, {}};
     field.element = ValueType{element, type};
     field.maxElements = maxElements;
@@ -307,7 +307,9 @@ RuntimeFieldOps PathField(Guid id, const void* valueNative = nullptr, bool path 
 // struct 멤버 함수표(B6b 생성 코드와 같은 모양)다.
 template <auto Member, ValueKind Target>
 RuntimeStructFieldOps MemberOps(Guid id) noexcept {
-    return detail::StructFieldOps<Member>(id, &detail::PathStructMember<Member, Target>);
+    using Owner = typename detail::StructMemberPointer<decltype(Member)>::Owner;
+    return detail::StructFieldOps<Owner, Member>(id,
+                                                 &detail::PathStructMember<Owner, Member, Target>);
 }
 
 } // namespace path_fixture
@@ -368,7 +370,7 @@ struct GeneratedType<path_fixture::Point> {
         using namespace path_fixture;
         // x는 경로 thunk 없이 등록한다(null path thunk 시험).
         static const RuntimeStructFieldOps fields[] = {
-            detail::StructFieldOps<&Point::x>(XId),
+            detail::StructFieldOps<Point, &Point::x>(XId),
             MemberOps<&Point::inner, ValueKind::Struct>(PointInnerId)};
         return MakeStructOps<Point>(fields);
     }
@@ -392,7 +394,8 @@ struct GeneratedType<path_fixture::Leaf> {
             Scalar(I64Id, "i64", ValueKind::Int64), Scalar(F32Id, "f32", ValueKind::Float32),
             // EditorOnly·Transient는 경로 접근을 막지 않는다.
             Scalar(F64Id, "f64", ValueKind::Float64, {}, EditorOnly | Transient),
-            Scalar(GuidId, "guid", ValueKind::Guid), Scalar(TextId, "text", ValueKind::Utf8String),
+            Scalar(GuidId, "guid", ValueKind::Guid),
+            Scalar(TextFieldId, "text", ValueKind::Utf8String),
             Scalar(AssetFieldId, "asset", ValueKind::AssetId),
             Scalar(SoftId, "soft", ValueKind::SoftObjectReference, NodeId),
             Scalar(DigestId, "digest", ValueKind::Digest256),
@@ -421,7 +424,7 @@ struct GeneratedType<path_fixture::Leaf> {
             MemberOps<&Leaf::f32, ValueKind::Float32>(F32Id),
             MemberOps<&Leaf::f64, ValueKind::Float64>(F64Id),
             MemberOps<&Leaf::guid, ValueKind::Guid>(GuidId),
-            MemberOps<&Leaf::text, ValueKind::Utf8String>(TextId),
+            MemberOps<&Leaf::text, ValueKind::Utf8String>(TextFieldId),
             MemberOps<&Leaf::asset, ValueKind::AssetId>(AssetFieldId),
             MemberOps<&Leaf::soft, ValueKind::SoftObjectReference>(SoftId),
             MemberOps<&Leaf::digest, ValueKind::Digest256>(DigestId),
@@ -754,22 +757,23 @@ TEST(PropertyPath_ReadWriteEveryKindWithPrevious) {
         FieldValue asset(allocator);
         asset.kind = ValueKind::AssetId;
         asset.guid = Guid{9, 10};
-        Case cases[] = {{FlagId, Move(boolean)},
-                        {U8Id, Unsigned(allocator, ValueKind::UInt8, 200)},
-                        {U16Id, Unsigned(allocator, ValueKind::UInt16, 60000)},
-                        {U32Id, Unsigned(allocator, ValueKind::UInt32, 4000000000u)},
-                        {U64Id, Unsigned(allocator, ValueKind::UInt64, 1ull << 40)},
-                        {I32Id, Signed(allocator, ValueKind::Int32, -7)},
-                        {I64Id, Signed(allocator, ValueKind::Int64, -(1ll << 40))},
-                        {F32Id, Move(f32)},
-                        {F64Id, Move(f64)},
-                        {GuidId, Move(guid)},
-                        {TextId, TextValue(allocator, "a fairly long text value for the leaf")},
-                        {AssetFieldId, Move(asset)},
-                        {SoftId, Soft(allocator, Guid{1, 2}, "Body.Mesh")},
-                        {DigestId, Move(digest)},
-                        {GroupId, EnumValue(allocator, groupType, 7)},
-                        {ChannelsId, EnumValue(allocator, channelType, 5)}};
+        Case cases[] = {
+            {FlagId, Move(boolean)},
+            {U8Id, Unsigned(allocator, ValueKind::UInt8, 200)},
+            {U16Id, Unsigned(allocator, ValueKind::UInt16, 60000)},
+            {U32Id, Unsigned(allocator, ValueKind::UInt32, 4000000000u)},
+            {U64Id, Unsigned(allocator, ValueKind::UInt64, 1ull << 40)},
+            {I32Id, Signed(allocator, ValueKind::Int32, -7)},
+            {I64Id, Signed(allocator, ValueKind::Int64, -(1ll << 40))},
+            {F32Id, Move(f32)},
+            {F64Id, Move(f64)},
+            {GuidId, Move(guid)},
+            {TextFieldId, TextValue(allocator, "a fairly long text value for the leaf")},
+            {AssetFieldId, Move(asset)},
+            {SoftId, Soft(allocator, Guid{1, 2}, "Body.Mesh")},
+            {DigestId, Move(digest)},
+            {GroupId, EnumValue(allocator, groupType, 7)},
+            {ChannelsId, EnumValue(allocator, channelType, 5)}};
         for (Case& entry : cases) {
             const PathStep steps[] = {{LeafFieldId}, {entry.member}};
             FieldValue previous(allocator);
@@ -794,7 +798,7 @@ TEST(PropertyPath_ReadWriteEveryKindWithPrevious) {
             // 옛 값: 두 번째 쓰기의 previous는 첫 값이다(String — 같은 allocator면 옮기고 다르면
             // previous의 allocator로 복사한다).
             SystemAllocator separate;
-            const PathStep text[] = {{LeafFieldId}, {TextId}};
+            const PathStep text[] = {{LeafFieldId}, {TextFieldId}};
             FieldValue second = TextValue(allocator, "second");
             FieldValue sameAllocator(allocator);
             REQUIRE(PathWrite(objects, access, handle, PathOf(text), second, &sameAllocator));
@@ -1612,7 +1616,7 @@ TEST(PropertyPath_EncodePinMakesEveryWriteBusy) {
         REQUIRE(pin);
         const PathStep count[] = {{CountId}};
         const PathStep leafU32[] = {{LeafFieldId}, {U32Id}};
-        const PathStep leafText[] = {{LeafFieldId}, {TextId}};
+        const PathStep leafText[] = {{LeafFieldId}, {TextFieldId}};
         const PathStep material[] = {At(SlotsId, 0), {MaterialId}};
         const PathStep target[] = {{HolderFieldId}, {TargetId}};
         const PathStep numbers[] = {{NumbersId}};
@@ -1679,7 +1683,7 @@ TEST(PropertyPath_RegistryIndexesAndPathRegistrationRule) {
         CHECK(lease.Value().FieldIndex(Guid{0x777, 7}) == TypeLease::NoField);
         auto leaf = world.types.AcquireValueType(LeafId, TypeKind::Struct);
         REQUIRE(leaf);
-        CHECK(leaf.Value().FieldIndex(TextId) == 10);
+        CHECK(leaf.Value().FieldIndex(TextFieldId) == 10);
         lease.Value().Reset();
         leaf.Value().Reset();
         // 클래스 단일 값 필드의 path는 이제 등록이 받는다(리플렉션 B9i3c0 — staged·Detach·Attach용,

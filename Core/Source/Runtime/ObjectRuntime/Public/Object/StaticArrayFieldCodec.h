@@ -2,7 +2,7 @@
 
 #include <Object/MapFieldCodec.h>
 
-// 필드 codec 사슬의 일곱째 조각으로 정적 배열(T x[N]) 필드 codec이다(리플렉션 B9g —
+// 필드 codec 사슬의 여덟째 조각으로 정적 배열(T x[N]) 필드 codec이다(리플렉션 B9g —
 // Docs/Design/ReflectionExtensions.ko.md 8절). wire는 배열과 같다: 단일 값 원소(참조 포함)는
 // ValueArray, struct 원소는 RecordList이고 encode는 늘 N개를 쓴다. decode는 count가 N이 아니면
 // InvalidArgument다(차원은 배치다 — N을 바꾸면 Version을 올리고 migrate한다, 조용히 자르거나 채우지
@@ -49,13 +49,23 @@ Result<uint32> EncodeStaticArrayField(const Member& array, ArchiveWriter& out,
 
 // 해석한 단일 값 하나를 원소 자리 element에 쓴다(정적 배열 decode의 관찰·적용 — ObjectRef 원소는
 // 호출자가 SetStructMemberReference로 쓴다). String·SoftObjectRef는 원소의 allocator로
-// TryAssign하고(실패하면 그 오류 — 2단계면 그래프 rollback) 그 밖은 ParsedScalarValue다.
+// TryAssign하고(실패하면 그 오류 — 2단계면 그래프 rollback) Text(리플렉션 B9l)는 allocator로 새
+// 노드를 만들며 그 밖은 ParsedScalarValue다.
 template <class Element>
-Result<void> AssignParsedElement(Element& element, const ParsedValue& parsed) noexcept {
+Result<void> AssignParsedElement(Element& element, const ParsedValue& parsed,
+                                 Allocator& allocator) noexcept {
     if constexpr (IsSameV<Element, String>) {
         return element.TryAssign(parsed.text);
     } else if constexpr (SoftReferenceField<Element>::Supported) {
         return element.TryAssign(AssetId{parsed.guid}, parsed.text);
+    } else if constexpr (IsSameV<Element, Text>) {
+        auto made = MakeParsedText(allocator, parsed);
+        if (!made) {
+            return Result<void>::Failure(made.Error());
+        }
+
+        element = Move(made.Value());
+        return Result<void>::Success();
     } else {
         element = ParsedScalarValue<Element>(parsed);
         return Result<void>::Success();
@@ -161,7 +171,11 @@ Result<void> DecodeStaticValueArray(ConstructionContext* construction, ObjectHan
                 !written) {
                 return written;
             }
-        } else if (auto assigned = AssignParsedElement((*target)[index], parsed); !assigned) {
+        } else if (auto assigned =
+                       AssignParsedElement((*target)[index], parsed,
+                                           construction ? construction->ObjectAllocator()
+                                                        : context.ObservationScratch());
+                   !assigned) {
             return assigned;
         }
     }
@@ -224,6 +238,52 @@ Result<void> DecodeStaticStructArray(ConstructionContext* construction, ObjectHa
     return Result<void>::Success();
 }
 
+// InstancedStruct 원소 정적 배열(InstancedStruct<> x[N] — 리플렉션 B9j)의 decode다(원소 tag
+// InstancedStruct, u64 길이 + 내용). count ≠ N은 원소를 읽기 전에 InvalidArgument다. 원소는 소유
+// 저장소 안이라 2단계는 원소 자리에 제자리로 DecodeInstancedStructElement를 한다(관찰 자리는 오지
+// 않는다 — InvalidArgument). 2단계 몫은 원소 자리 쓰기 N이다(값 블록·멤버는 원소의 1과 멤버 codec이
+// 덮는다).
+template <class Element, usize N>
+Result<void> DecodeStaticInstancedArray(ConstructionContext* construction, ObjectHandle owner,
+                                        Element (*target)[N], const FieldView& field,
+                                        FieldDecodeContext& context) noexcept {
+    if (target && !construction) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto opened = context.OpenValueArray(field, static_cast<uint32>(WireType::InstancedStruct),
+                                         MaxArrayElements);
+    if (!opened) {
+        return Result<void>::Failure(opened.Error());
+    }
+
+    ValueArrayReader& reader = opened.Value();
+    if (reader.Count() != N) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (auto counted = context.AddElements(N); !counted) {
+        return counted;
+    }
+
+    ElementIndexScope element(context);
+    for (usize index = 0; index < N; ++index) {
+        element.Set(static_cast<uint32>(index));
+        if (auto decoded = DecodeInstancedStructElement(construction, owner,
+                                                        target ? &(*target)[index] : nullptr,
+                                                        reader.Elements(), context);
+            !decoded) {
+            return decoded;
+        }
+    }
+
+    if (auto finished = reader.Finish(); !finished) {
+        return finished;
+    }
+
+    return context.ReserveApply(N);
+}
+
 // 지금 위치(정적 배열 필드)의 저장값 field를 해석한다. 세 방식(검증·관찰·적용)과 두 단계의 reader
 // 호출 순서는 배열과 같다: wire 확인(TypeMismatch) → MatchesSchema(TypeMismatch) → OpenValueArray·
 // OpenRecordList → count = N 확인(아니면 InvalidArgument) → AddElements(N) → 원소 → Finish(trailing
@@ -264,6 +324,8 @@ Result<void> DecodeStaticArrayField(ConstructionContext* construction, ObjectHan
         }
 
         return DecodeStaticStructArray(construction, owner, target, field, context);
+    } else if constexpr (InstancedStructField<Element>::Supported) {
+        return DecodeStaticInstancedArray(construction, owner, target, field, context);
     } else {
         return DecodeStaticValueArray(construction, owner, target, field, context);
     }

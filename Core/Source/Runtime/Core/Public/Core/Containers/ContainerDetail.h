@@ -12,19 +12,36 @@ inline bool AddressRangesOverlap(uptr a, usize aSize, uptr b, usize bSize) noexc
     return a <= b ? b - a < aSize : a - b < bSize;
 }
 
-// 연속 저장소 컨테이너(Array·SparseArray)가 버퍼를 늘릴 때 고르는 새 용량이다. 지금 용량
-// capacity에서 required개를 담아야 할 때, 빈 저장소는 4(required가 더 크면 required), 그 밖은
-// capacity의 1.5배 + 1(required가 더 크면 required)이며 maximum에서 포화한다. maximum은 그
-// 컨테이너가 담을 수 있는 원소 수 상한이고, required <= maximum은 caller가 보장한다(넘는 required는
-// 그대로 돌려주므로 caller의 할당 크기 검사가 Overflow로 거른다).
+// UE 5.8의 기본 slack 정책을 Rocks의 checked 크기로 구현한다(allocator quantization 없음).
+// 최초는 max(4, required), 이후는 required + floor(required * 3/8) + 16이다.
+// maximum에서 포화한다. required 자체가 한도를 넘으면 caller의 할당 검사가 걸러야 한다.
 constexpr usize GrowthCapacityWithin(usize capacity, usize required, usize maximum) noexcept {
+    if (required > maximum) {
+        return required;
+    }
+
     if (capacity == 0) {
         return maximum < 4 || required > 4 ? required : 4;
     }
+    const usize slack = (required / 8) * 3 + ((required % 8) * 3) / 8;
+    if (slack > maximum - required || maximum - required - slack < 16) {
+        return maximum;
+    }
 
-    const usize growth = capacity / 2 + 1;
-    const usize candidate = growth > maximum - capacity ? maximum : capacity + growth;
-    return candidate < required ? required : candidate;
+    return required + slack + 16;
+}
+
+// UE의 축소 hysteresis: 16KiB 이상 낭비 또는 사용률 2/3 미만이고, 여유가 64개 초과일 때만
+// 줄인다(빈 컨테이너는 반환). 곱셈 overflow 없이 동일한 경계를 판정한다.
+constexpr usize ShrinkCapacity(usize capacity, usize required, usize elementSize) noexcept {
+    if (required >= capacity) {
+        return capacity;
+    }
+
+    const usize slack = capacity - required;
+    const bool tooManyBytes = elementSize != 0 && slack > (16384 - 1) / elementSize;
+    const bool tooManyElements = required / 2 < slack;
+    return (tooManyBytes || tooManyElements) && (slack > 64 || required == 0) ? required : capacity;
 }
 
 } // namespace rocks::detail

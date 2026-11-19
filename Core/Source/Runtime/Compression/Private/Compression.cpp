@@ -184,7 +184,7 @@ CreateCompressorState(CompressionFormat format, int32 level, Allocator& allocato
         if (memory == nullptr) {
             return Result<CompressorState*>::Failure(ErrorCode::OutOfMemory);
         }
-        return Result<CompressorState*>::Success(ConstructAt<CompressorState>(
+        return Result<CompressorState*>::Success(InitializeAt<CompressorState>(
             memory, CompressorState{format, level, &allocator, nullptr, {}, Move(plugin.Value())}));
     }
     const ErrorCode formatError = CompressFormatError(format);
@@ -223,7 +223,7 @@ CreateCompressorState(CompressionFormat format, int32 level, Allocator& allocato
         return Result<CompressorState*>::Failure(ErrorCode::OutOfMemory);
     }
 
-    return Result<CompressorState*>::Success(ConstructAt<CompressorState>(
+    return Result<CompressorState*>::Success(InitializeAt<CompressorState>(
         memory, CompressorState{format, level, &allocator, codec.Value(), dictionary, {}}));
 }
 
@@ -255,7 +255,7 @@ CreateDecompressorState(CompressionFormat format, Allocator& allocator,
         if (memory == nullptr) {
             return Result<DecompressorState*>::Failure(ErrorCode::OutOfMemory);
         }
-        return Result<DecompressorState*>::Success(ConstructAt<DecompressorState>(
+        return Result<DecompressorState*>::Success(InitializeAt<DecompressorState>(
             memory,
             DecompressorState{format, &allocator, nullptr, {}, nullptr, Move(plugin.Value())}));
     }
@@ -281,7 +281,7 @@ CreateDecompressorState(CompressionFormat format, Allocator& allocator,
         return Result<DecompressorState*>::Failure(ErrorCode::OutOfMemory);
     }
 
-    return Result<DecompressorState*>::Success(ConstructAt<DecompressorState>(
+    return Result<DecompressorState*>::Success(InitializeAt<DecompressorState>(
         memory,
         DecompressorState{format, &allocator, codec.Value(), dictionary, dictionary.Get(), {}}));
 }

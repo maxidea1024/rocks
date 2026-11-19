@@ -3,7 +3,9 @@
 #include <Core/Containers/Array.h>
 #include <Core/Containers/OrderedMap.h>
 #include <Core/Containers/OrderedSet.h>
+#include <Core/Math/InterpCurve.h>
 #include <Core/Text/Name.h>
+#include <Core/Result.h>
 #include <Core/Text/String.h>
 #include <Meta/Annotations.h>
 
@@ -25,6 +27,45 @@ ROCKS_STRUCT()
 struct FixturePoint {
     ROCKS_PROPERTY() int32 x = 0;
     ROCKS_PROPERTY() int32 y = 0;
+};
+
+// struct 검증 hook이 있는 값이다(low ≤ high — 설정 층 적용이 게시 전에 거부하는지, Docs/Design/
+// CurveData.ko.md 9.1·17.2절).
+ROCKS_STRUCT()
+struct FixtureSpan {
+    ROCKS_PROPERTY() int32 low = 0;
+    ROCKS_PROPERTY() int32 high = 0;
+
+    static Result<void> Validate(const FixtureSpan& value) noexcept {
+        return value.low <= value.high ? Result<void>::Success()
+                                       : Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+};
+
+// hook 멤버를 담은 설정 섹션이다(기본 fixture에 등록하지 않는다 — 그 시험이 따로 등록한다).
+ROCKS_STRUCT(Settings(Branch = "Render", Section = "SpanCheck"))
+struct SpanSettings {
+    ROCKS_PROPERTY() FixtureSpan span;
+};
+
+// InterpCurve 설정 섹션이다(CoreTypeBindings 미러 — 검증 hook이 키 정렬을 본다. 기본 fixture에
+// 등록하지 않는다 — 그 시험이 따로 등록한다. Docs/Design/CurveData.ko.md 17.8절).
+ROCKS_STRUCT(Settings(Branch = "Render", Section = "CurveCheck"))
+struct CurveSettings {
+    explicit CurveSettings(Allocator& allocator) noexcept : curve(allocator) {
+    }
+
+    ROCKS_PROPERTY() InterpCurve<float> curve;
+};
+
+// byte 배열 설정 섹션이다(기본 fixture에 등록하지 않는다 — 그 시험이 따로 등록한다). 값은 Base64
+// 문자열이고 배열 연산 객체는 InvalidArrayOperation이다(Docs/Design/CurveData.ko.md 17.3절 B5).
+ROCKS_STRUCT(Settings(Branch = "Render", Section = "BlobCheck"))
+struct BlobSettings {
+    explicit BlobSettings(Allocator& allocator) noexcept : blob(allocator) {
+    }
+
+    ROCKS_PROPERTY() Array<uint8> blob;
 };
 
 // 배열 원소 struct다(원소 안의 배열 연산은 지원하지 않는다 — UnsupportedOperation 시험).
@@ -73,6 +114,21 @@ struct GameplaySettings {
     ROCKS_PROPERTY(ConsoleName = "game.rules.map") Name map;
     ROCKS_PROPERTY(StartupOnly, ConsoleName = "game.rules.seed") int32 seed = 7;
     ROCKS_PROPERTY() int32 lives = 3;
+};
+
+// 사용자 층 저장·재시작 대기 시험의 섹션이다(Docs/Design/ConfigSystem.ko.md 8절 — 설정 CF3, 기본
+// fixture에 등록하지 않는다 — 그 시험이 따로 등록한다). textureBudget은 사용자 설정이면서 재시작
+// 필요, recentMaps는 사용자 배열, gamma는 콘솔 이름이 있는 사용자 설정, frameCap은 사용자 층이 쓸
+// 수 없는 필드다.
+ROCKS_STRUCT(Settings(Branch = "Game", Section = "Display"))
+struct DisplaySettings {
+    explicit DisplaySettings(Allocator& allocator) noexcept : recentMaps(allocator) {
+    }
+
+    ROCKS_PROPERTY(UserConfig, RestartRequired) int32 textureBudget = 512;
+    ROCKS_PROPERTY(UserConfig) Array<String> recentMaps;
+    ROCKS_PROPERTY(UserConfig, ConsoleName = "game.display.gamma") float gamma = 2.2f;
+    ROCKS_PROPERTY() int32 frameCap = 60;
 };
 
 // 콘솔 명령 인자 struct다(`render.reload count=2 target=all`).

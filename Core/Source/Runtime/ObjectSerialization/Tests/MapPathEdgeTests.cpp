@@ -431,9 +431,10 @@ TEST(MapPath_FullContainerAllocationFailureLeavesContainerUnchanged) {
                 Allocator& objectsAllocator = objects.ObjectAllocator();
                 uint64 index = 0;
                 for (const char* name : names) {
-                    Put(value.ratios, Text(objectsAllocator, name), 1.0f);
-                    REQUIRE(value.words.Add(Text(objectsAllocator, name)));
-                    Put(value.points, Text(objectsAllocator, name), MapPoint(objectsAllocator));
+                    Put(value.ratios, MakeString(objectsAllocator, name), 1.0f);
+                    REQUIRE(value.words.Add(MakeString(objectsAllocator, name)));
+                    Put(value.points, MakeString(objectsAllocator, name),
+                        MapPoint(objectsAllocator));
                     SoftObjectRef<> key(objectsAllocator);
                     REQUIRE(key.TryAssign(AssetId{Guid{0x4d5045, 1}}, name));
                     Put(value.softKeys, Move(key), index++);

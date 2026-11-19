@@ -94,6 +94,54 @@ internal static class LoggerOutputTests
             });
         }
 
+        // 비정상 종료(platform::Fatal·접근 위반·stack overflow) 직전의 Async 기록이 종료 hook으로 파일에
+        // 남는다(설계 14.1.8, L24·L25). 판정은 비정상 종료, 파일 내용, stderr다. 멈춘 sink 안의 Fatal은
+        // flush 제한 시간 뒤에 끝난다(파일 없음). 시험 쪽 제한 시간(60초)은 flush 상한(2초)보다 넉넉하다.
+        foreach ((string control, int mode, bool expectsFile, string stderrText) in new[] {
+            ("log-crash-platform-fatal", 0, true, "log crash probe: platform fatal"),
+            ("log-crash-access-violation", 1, true, ""),
+            ("log-crash-stack-overflow", 2, true, ""),
+            ("log-crash-stuck-sink", 3, false, "log crash probe: fatal inside a stuck sink") })
+        {
+            suite.Add("Native.Logger.Crash." + control, async () =>
+            {
+                string directory = Path.Combine(Path.GetTempPath(), "rocks-log-crash-" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(directory);
+                var start = StartInfo();
+                start.ArgumentList.Add("--negative-control");
+                start.ArgumentList.Add(control);
+                start.ArgumentList.Add(directory);
+                using var process = Process.Start(start) ?? throw new InvalidOperationException("Cannot start crash probe");
+                try
+                {
+                    process.StandardInput.Close();
+                    using var errors = new MemoryStream();
+                    Task copy = process.StandardError.BaseStream.CopyToAsync(errors);
+                    await Task.WhenAll(copy, process.WaitForExitAsync()).WaitAsync(TimeSpan.FromSeconds(60));
+                    // 20–23은 probe 준비 실패·크래시 없음이다(LoggerProcessProbe.cpp RunLogCrashProbe).
+                    Verify.That(process.ExitCode != 0 && (process.ExitCode < 20 || process.ExitCode > 23),
+                        control + " did not crash as intended: " + process.ExitCode);
+                    string expected = "last record before crash mode " + mode;
+                    bool found = Directory.GetFiles(directory, "Probe-*.log")
+                        .Any(path => File.ReadAllText(path).Contains(expected, StringComparison.Ordinal));
+                    Verify.That(found == expectsFile, control + " log file record: " + found);
+                    string errorText = Encoding.UTF8.GetString(errors.ToArray());
+                    Verify.That(stderrText.Length == 0 || errorText.Contains(stderrText, StringComparison.Ordinal),
+                        control + " stderr: " + errorText);
+                }
+                finally
+                {
+                    if (!process.HasExited)
+                    {
+                        process.Kill(entireProcessTree: true);
+                        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                    }
+
+                    Directory.Delete(directory, recursive: true);
+                }
+            });
+        }
+
         suite.Add("Native.Logger.StderrFailure", async () =>
         {
             var start = StartInfo();

@@ -282,12 +282,12 @@ Result<void> PoolAllocator::AddChunk() noexcept {
     }
 
     auto* bytes = static_cast<unsigned char*>(storage);
-    auto* chunk = ConstructAt<Chunk>(storage);
+    auto* chunk = InitializeAt<Chunk>(storage);
     chunk->slots = reinterpret_cast<Slot*>(bytes + slotOffset_);
     chunk->data = bytes + dataOffset_;
     chunk->dataBytes = stride_ * blocksPerChunk_;
     for (usize index = 0; index < blocksPerChunk_; ++index) {
-        Slot* slot = ConstructAt<Slot>(chunk->slots + index);
+        Slot* slot = InitializeAt<Slot>(chunk->slots + index);
         slot->address = chunk->data + index * stride_;
         slot->nextFree = free_;
         free_ = slot;
@@ -305,10 +305,8 @@ void PoolAllocator::ReleaseChunks() noexcept {
     Chunk* chunk = chunks_;
     while (chunk != nullptr) {
         Chunk* next = chunk->next;
-        for (usize index = 0; index < blocksPerChunk_; ++index) {
-            DestroyAt(chunk->slots + index);
-        }
-        DestroyAt(chunk);
+        static_assert(IsTriviallyDestructibleV<Slot>);
+        static_assert(IsTriviallyDestructibleV<RemovePointerT<decltype(chunk)>>);
         if (!backing_.Deallocate(chunk)) {
             platform::Fatal("PoolAllocator backing rejected owned chunk");
         }

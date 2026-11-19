@@ -47,7 +47,7 @@ Result<void> SubmitWithEvent(WorkerTaskEvent&& event, usize bytes, Allocator& al
     if (!memory) {
         return Result<void>::Failure(memory.Error()); // 이벤트는 호출자에게 남는다.
     }
-    auto* completion = ConstructAt<IoCompletion>(memory.Value(), allocator, Move(event), bytes);
+    auto* completion = InitializeAt<IoCompletion>(memory.Value(), allocator, Move(event), bytes);
     const platform::FileStatus status = submit(&OnComplete, completion);
     if (!status) {
         const ErrorCode error = FileErrorCode(status);

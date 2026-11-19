@@ -3,6 +3,7 @@
 #include <Core/Text/Name.h>
 #include <Object/ConstructionContext.h>
 #include <Object/ObjectBatchPublish.h>
+#include <Object/ValueCopy.h>
 
 // 대입 묶음의 수명·단위·override 경로·게시다(리플렉션 B9i3c1 — ReflectionText/TextAssignments.h).
 // 대입 하나를 사본에 적용하는 일은 TextAssignApply.cpp다.
@@ -222,6 +223,11 @@ Result<void> ReportPathFailure(AssignmentState& state, ErrorCode code,
     case PropertyPathError::OptionalUnset:
         message = "optional value is unset";
         break;
+    case PropertyPathError::InstancedEmpty:
+        message = "instanced struct is empty";
+        break;
+    case PropertyPathError::NotInstanced:
+        break;
     case PropertyPathError::InvalidValue:
     case PropertyPathError::InvalidKey:
     case PropertyPathError::NotOptional:
@@ -393,7 +399,7 @@ Result<void> AddOverride(AssignmentState& state, PropertyPath path) noexcept {
     for (usize index = 0; index < path.steps.Size(); ++index) {
         TextSlot slot;
         const PropertyPath prefix{Span<const PathStep>(path.steps.Data(), index + 1), path.keys};
-        if (auto described = DescribeTextPath(state.lease, prefix, slot); !described) {
+        if (auto described = DescribeAssignmentPath(state, prefix, slot); !described) {
             return described;
         }
 
@@ -401,7 +407,9 @@ Result<void> AddOverride(AssignmentState& state, PropertyPath path) noexcept {
         const bool atomic =
             field.value.kind == ValueKind::Struct && !slot.structView.IsEmpty() &&
             (slot.structView.Schema().flags & static_cast<uint32>(TypeFlags::Atomic)) != 0;
-        if (ValueKindIsContainer(field.value.kind) || atomic) {
+        // InstancedStruct는 통째 단위다(리플렉션 B9j — 담긴 struct의 멤버로 내려가지 않는다).
+        const bool instanced = field.value.kind == ValueKind::InstancedStruct;
+        if (ValueKindIsContainer(field.value.kind) || atomic || instanced) {
             count = index + 1;
             break;
         }
@@ -678,18 +686,101 @@ Result<PublishedAssignments> PreparedAssignments::Publish() noexcept {
         (void)state.elements.TryRemoveAt(kept, state.elements.Size() - kept);
     }
 
+    // 0. struct 검증 hook(Docs/Design/CurveData.ko.md 9.1절 — 게시 전 1회): 추가 StructRefArray
+    // 원소는 여기서, 값 단위 상자는 아래 PathPrepareAttach가 상자 값 트리를 검증한다. 거부는 진단
+    // InvalidStructValue(단위 경로)와 InvalidArgument이고 아무것도 게시하지 않는다.
+    const auto rejectStruct = [&state](PropertyPath path, StringView message) noexcept {
+        String text(state.allocator);
+        if (auto formatted = detail::FormatAssignmentPath(state, path, text); !formatted) {
+            return PublishResult::Failure(formatted.Error());
+        }
+
+        if (auto reported = detail::Diagnose(state, TextDiagnosticCode::InvalidStructValue,
+                                             TextSource{}, text.View(), message);
+            !reported) {
+            return PublishResult::Failure(reported.Error());
+        }
+
+        return PublishResult::Failure(ErrorCode::InvalidArgument);
+    };
+    const bool validateHooks = state.options.validateStructHooks;
+    for (usize index = 0; validateHooks && index < state.elements.Size(); ++index) {
+        detail::ElementsUnit& unit = *state.elements[index];
+        usize rejected = 0;
+        if (auto checked = unit.stage.ValidateAdded(rejected); !checked) {
+            // 진단 경로는 거부한 원소의 지금 index다(`items[2]`).
+            const PropertyPath arrayPath = unit.Path();
+            PathStep steps[MaxPropertyPathSteps];
+            for (usize step = 0; step < arrayPath.steps.Size(); ++step) {
+                steps[step] = arrayPath.steps[step];
+            }
+
+            const usize last = arrayPath.steps.Size() - 1;
+            steps[last].selector = PathSelector::Index;
+            steps[last].index = static_cast<uint32>(rejected);
+            return rejectStruct(PropertyPath{Span<const PathStep>(steps, last + 1), arrayPath.keys},
+                                "an added element failed its struct validation hook");
+        }
+    }
+
     // 1. 게시 자리(읽기 Borrow — 변경 표지를 올리지 않는다). 죽은 owner(Discard·파괴 요청 — 경로
     // 연산은 Destroyed)는 BeginBatchPublish와 같이 StaleHandle로 알린다.
     const bool live = state.target.GetKind() == AssignmentTarget::Kind::Live;
     const auto ownerError = [live](ErrorCode code) noexcept {
         return live && code == ErrorCode::Destroyed ? ErrorCode::StaleHandle : code;
     };
-    const PathTarget root = state.Root();
+    // struct 값 대상(설정·콘솔 — AssignmentTarget::Value)의 루트 struct에 hook이 있으면 단위를
+    // 루트의 깊은 사본에 놓고 사본 트리를 검증한 뒤 루트와 통째로
+    // 맞바꾼다(Docs/Design/CurveData.ko.md 17.2절 — 루트 자신의 hook은 상자 검증이 볼 수 없다).
+    // 사본은 대상 값의 allocator로 만든다.
+    struct RootCopy {
+        const RuntimeStructOps* ops = nullptr;
+        Allocator* allocator = nullptr;
+        void* storage = nullptr;
+
+        ~RootCopy() {
+            if (storage) {
+                ops->destroy(storage);
+                (void)allocator->Deallocate(storage);
+            }
+        }
+    } rootCopy;
+    const bool valueTarget = state.target.GetKind() == AssignmentTarget::Kind::Value;
+    const TypeLease* rootType = valueTarget ? state.target.StructType() : nullptr;
+    const bool rootHook =
+        validateHooks && rootType && rootType->StructOps().validate && state.units.Size() != 0;
+    if (rootHook) {
+        const RuntimeStructOps& ops = rootType->StructOps();
+        Allocator& valueAllocator = state.target.ValueAllocator();
+        auto memory = valueAllocator.Allocate(ops.size, ops.alignment, 0x52435059u);
+        if (!memory) {
+            return PublishResult::Failure(memory.Error());
+        }
+
+        ops.construct(memory.Value(), valueAllocator);
+        rootCopy.ops = &ops;
+        rootCopy.allocator = &valueAllocator;
+        rootCopy.storage = memory.Value();
+        if (auto copied = ops.copy(rootCopy.storage, state.target.Storage(), valueAllocator);
+            !copied) {
+            return PublishResult::Failure(copied.Error());
+        }
+    }
+
+    const PathTarget root = rootHook
+                                ? PathTarget::Value(*rootType, rootType->Struct(), rootCopy.storage,
+                                                    state.target.ValueAllocator())
+                                : state.Root();
     for (usize index = 0; index < state.units.Size(); ++index) {
         detail::AssignmentUnit& unit = *state.units[index];
-        if (auto located =
-                PathPrepareAttach(registry, access, root, unit.Path(), unit.box, unit.prepared);
+        PropertyPathFailure failure;
+        if (auto located = PathPrepareAttach(registry, access, root, unit.Path(), unit.box,
+                                             unit.prepared, &failure, validateHooks);
             !located) {
+            if (failure.reason == PropertyPathError::StructValidation) {
+                return rejectStruct(unit.Path(), "the value failed its struct validation hook");
+            }
+
             return PublishResult::Failure(ownerError(located.Error()));
         }
     }
@@ -789,6 +880,26 @@ Result<PublishedAssignments> PreparedAssignments::Publish() noexcept {
             if (auto published = state.units[index]->prepared.Publish(); !published) {
                 return PublishResult::Failure(published.Error());
             }
+        }
+
+        // 루트 사본에 놓았으면 사본 트리(루트 자신의 hook 포함)를 검증하고 루트와 맞바꾼다(옛 값은
+        // 사본 쪽으로 가 함께 소멸한다). 거부하면 대상은 그대로다.
+        if (rootHook) {
+            const RuntimeStructOps& ops = rootType->StructOps();
+            if (auto checked =
+                    ::rocks::detail::StructValidationResult(ops.validateTree(rootCopy.storage));
+                !checked) {
+                if (auto reported = detail::Diagnose(state, TextDiagnosticCode::InvalidStructValue,
+                                                     TextSource{}, StringView(),
+                                                     "the value failed its struct validation hook");
+                    !reported) {
+                    return PublishResult::Failure(reported.Error());
+                }
+
+                return PublishResult::Failure(ErrorCode::InvalidArgument);
+            }
+
+            ops.swap(state.target.Storage(), rootCopy.storage);
         }
 
         // staged 객체의 참조는 트랜잭션의 staged 간선 쓰기다(실패는 호출자의 rollback이 받는다).

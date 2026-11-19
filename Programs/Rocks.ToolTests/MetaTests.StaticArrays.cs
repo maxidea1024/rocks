@@ -16,7 +16,7 @@ internal static partial class MetaTests
 
     // 정적 배열 클래스 필드와 struct 멤버가 descriptor(value {StaticArray}·element 원소 형식·maxElements = N·ObjectRef 원소의 fieldKind)와
     // 생성 코드(스키마 {StaticArray, 0} + 원소 형식 + N, 원소 종류의 경로 thunk, TraceArrayField)에 닿고 생성 헤더가 컴파일된다. 원소
-    // 종류는 B9g가 정적 배열 원소로 여는 Name·WeakRef·ClassRef·Int8·Int16을 포함한다.
+    // 종류는 B9g가 정적 배열 원소로 여는 Name·WeakObjectRef·ClassRef·Int8·Int16을 포함한다.
     private static void RegisterStaticArrays(MetaContext context)
     {
         var (suite, options, actualEnvironment, generator, compiler) = context;
@@ -33,7 +33,7 @@ internal static partial class MetaTests
                 "ROCKS_PROPERTY() Mode modes[2] = {Mode::First, Mode::First};\n" +
                 "ROCKS_PROPERTY() Slot slots[2];\n" +
                 "ROCKS_PROPERTY() rocks::Name names[2];\n" +
-                "ROCKS_PROPERTY() rocks::WeakRef<Value> watchers[2];\n" +
+                "ROCKS_PROPERTY() rocks::WeakObjectRef<Value> watchers[2];\n" +
                 "ROCKS_PROPERTY() rocks::ClassRef<Value> kinds[2];\n" +
                 "ROCKS_PROPERTY() rocks::int8 smalls[2] = {};\n" +
                 "ROCKS_PROPERTY() rocks::int16 shorts[2] = {};\n};\n}\n";
@@ -69,7 +69,7 @@ internal static partial class MetaTests
             Verify.Contains("detail::TraceArrayField(value.*(&::probe::Value::slots),visitor);", generated, "class trace visits reference struct elements");
             Verify.Contains("PathClassField<::probe::Value,::rocks::ValueKind::ObjectReference>(cursor,&::probe::Value::refs)", generated,
                 "static array path thunk targets the element kind");
-            Verify.Contains("PathStructMember<&::probe::Slot::codes,ValueKind::UInt16>", generated, "struct member static array path thunk");
+            Verify.Contains("PathStructMember<::probe::Slot,&::probe::Slot::codes,ValueKind::UInt16>", generated, "struct member static array path thunk");
             ProcessResult compiled = await probe.CompileGeneratedAsync();
             Verify.Equal(0, compiled.ExitCode, "generated static array header compiles: " + compiled.StdOut + compiled.StdErr);
         });
@@ -110,7 +110,7 @@ internal static partial class MetaTests
         AddRejectGroup(context, "Meta.StaticArraySpecifiersFollowElementKind", [
             StaticArrayDeclaration("ROCKS_PROPERTY(MaxElements = 2) rocks::int32 values[2] = {};"),
             StaticArrayDeclaration("ROCKS_PROPERTY(Required) rocks::int32 values[2] = {};"),
-            StaticArrayDeclaration("ROCKS_PROPERTY(Required) rocks::WeakRef<Value> watchers[2];")],
+            StaticArrayDeclaration("ROCKS_PROPERTY(Required) rocks::WeakObjectRef<Value> watchers[2];")],
             "RMC2202", "applies only to");
     }
 }

@@ -14,20 +14,21 @@ internal static class ModuleDescriptor
     private static readonly string[] TypeKeys =
         ["kind", "name", "id", "version", "flags", "within", "base", "header", "visibility", "toolName", "fields"];
 
-    // struct 항목: base 대신 flags(선언 플래그 Atomic 다음 생성 형질 — 쓰기 순서 Atomic → ContainsStrongReference →
-    // RequiresWorldOnlyOwner → ContainsReferenceArray)와 binds(Binds 실제 타입의 Clang 정규 철자, 미러가 아니면 "")다
+    // struct 항목: base(리플렉션 base struct의 정규 이름, 없으면 "" — 리플렉션 B9k, ReflectionExtensions.ko.md 12절), flags(선언
+    // 플래그 Atomic(base에서 상속된 것 포함) 다음 생성 형질 — 쓰기 순서 Atomic → ContainsStrongReference → RequiresWorldOnlyOwner →
+    // ContainsReferenceArray)와 binds(Binds 실제 타입의 Clang 정규 철자, 미러가 아니면 "")다. fields는 상속 필드를 포함한 전체다
     // (Docs/Design/ReflectionFoundations.ko.md 1.4·4.6·5.6절, Atomic은 ReflectionExtensions.ko.md 1.8·3.1절).
     private static readonly string[] StructKeys =
-        ["kind", "name", "id", "version", "header", "visibility", "flags", "binds", "toolName", "fields"];
+        ["kind", "name", "id", "version", "base", "header", "visibility", "flags", "binds", "toolName", "fields"];
 
     // enum 항목: 필드·base 대신 underlying·열거자다(Docs/Design/ReflectionFoundations.ko.md 3.4절).
     private static readonly string[] EnumKeys =
-        ["kind", "name", "id", "header", "visibility", "underlying", "flags", "toolPrefix", "values"];
+        ["kind", "name", "id", "header", "visibility", "underlying", "flags", "toolPrefix", "binds", "values"];
 
     private static readonly string[] EnumeratorKeys = ["name", "toolName", "displayName", "value", "flags"];
 
     private static readonly string[] FieldKeys =
-        ["owner", "name", "id", "fieldKind", "value", "element", "key", "flags", "toolName", "category", "displayName", "maxElements"];
+        ["owner", "name", "id", "fieldKind", "value", "element", "key", "flags", "toolName", "category", "displayName", "maxElements", "bitfield"];
 
     public static byte[] Write(string module, IEnumerable<ClassModel> types)
     {
@@ -116,6 +117,8 @@ internal static class ModuleDescriptor
         json.WriteString("name", type.Name);
         json.WriteString("id", type.Id);
         json.WriteNumber("version", type.Version);
+        // 리플렉션 base struct의 정규 이름이다(없으면 "" — 리플렉션 B9k, 비리플렉션 빈 base는 쓰지 않는다).
+        json.WriteString("base", type.Base);
         json.WriteString("header", type.Header);
         json.WriteString("visibility", type.Private ? "private" : "public");
         json.WriteStartArray("flags");
@@ -240,6 +243,8 @@ internal static class ModuleDescriptor
             json.WriteString("category", field.Spec.Category);
             json.WriteString("displayName", field.Spec.DisplayName);
             json.WriteNumber("maxElements", field.IsCounted || field.IsStaticArray ? field.MaxElements : 0);
+            // 폭 1 bitfield bool(리플렉션 B9m)이면 참이다: 의존 모듈이 상속 필드 함수표에 base의 생성 접근자를 쓴다.
+            json.WriteBoolean("bitfield", field.Bitfield);
             json.WriteEndObject();
         }
 
@@ -263,6 +268,8 @@ internal static class ModuleDescriptor
 
         json.WriteEndArray();
         json.WriteString("toolPrefix", type.ToolPrefix);
+        // Binds 미러 enum(CurveData CV9)의 실제 enum 정규 철자다(미러가 아니면 "").
+        json.WriteString("binds", type.Binds);
         json.WriteStartArray("values");
         foreach (EnumeratorModel value in type.Enumerators)
         {
@@ -414,7 +421,7 @@ internal static class ModuleDescriptor
                 Id = id,
                 Site = new(descriptorPath, 1),
                 Version = version,
-                Base = isStruct ? "" : Name(type.GetProperty("base"), QualifiedName, "base of " + name),
+                Base = isStruct && type.GetProperty("base").GetString() is "" ? "" : Name(type.GetProperty("base"), QualifiedName, "base of " + name),
                 Abstract = flags.Contains("Abstract"),
                 WorldOnly = flags.Contains("WorldOnly"),
                 Transient = flags.Contains("Transient"),
@@ -653,8 +660,8 @@ internal static class ModuleDescriptor
                 // toolName은 실효 도구 이름이다(지정하지 않았으면 필드 이름).
                 string toolName = Name(field.GetProperty("toolName"), Identifier, "toolName of " + fieldName);
                 string owner = Name(field.GetProperty("owner"), QualifiedName, "field owner");
-                // struct는 상속이 없으므로 모든 필드의 owner가 그 struct다.
-                if (isStruct && owner != name)
+                // base 없는 struct는 모든 필드의 owner가 그 struct다(상속 struct의 owner는 base 사슬 — 리플렉션 B9k).
+                if (isStruct && owner != name && type.GetProperty("base").GetString() is "")
                 {
                     throw Invalid($"owner of struct field {name}::{fieldName}");
                 }
@@ -666,6 +673,7 @@ internal static class ModuleDescriptor
                     Name = fieldName,
                     Owner = owner,
                     NativeSpelling = "",
+                    Bitfield = ReadBitfield(field, kind, Invalid),
                     Spec = new(fieldFlags.Contains("Transient"), fieldFlags.Contains("ReadOnly"),
                         field.GetProperty("category").GetString() ?? throw Invalid("category"),
                         field.GetProperty("displayName").GetString() ?? throw Invalid("displayName"))
@@ -696,6 +704,23 @@ internal static class ModuleDescriptor
         return (module, types);
     }
 
+    // 필드의 bitfield 표시다(리플렉션 B9m): bool이어야 하고, 참이면 값 종류가 Bool이어야 한다(아니면 InvalidDescriptor).
+    private static bool ReadBitfield(JsonElement field, string kind, Func<string, Exception> invalid)
+    {
+        JsonElement bitfield = field.GetProperty("bitfield");
+        if (bitfield.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+        {
+            throw invalid("bitfield");
+        }
+
+        if (bitfield.GetBoolean() && kind != "Bool")
+        {
+            throw invalid("bitfield of a non-Bool field");
+        }
+
+        return bitfield.GetBoolean();
+    }
+
     // enum 항목 하나를 읽는다. 런타임 RegisterEnum과 같은 규칙(underlying 범위·별칭·Flags의 음수·도구 이름 문자 집합과
     // 접두 유무를 합친 유일성)을 검사하고 어기면 RMC1000이다.
     private static ClassModel ParseEnum(JsonElement type, string name, string id, string header, bool isPrivate, string module,
@@ -714,6 +739,13 @@ internal static class ModuleDescriptor
         if (prefix.Length != 0 && !Specifiers.IsEnumToolName(prefix))
         {
             throw Invalid("toolPrefix of " + name);
+        }
+
+        // binds는 struct와 같은 문법의 실제 enum 정규 철자이거나 ""다(생성 C++에 그대로 들어간다).
+        string binds = type.GetProperty("binds").GetString() ?? throw Invalid("binds of " + name);
+        if (binds.Length != 0 && (!StructRules.IsBindsSpelling(binds) || binds.StartsWith("::", StringComparison.Ordinal)))
+        {
+            throw Invalid("binds of " + name + ": " + binds);
         }
 
         List<EnumeratorModel> values = [];
@@ -767,7 +799,8 @@ internal static class ModuleDescriptor
             Underlying = underlying,
             FlagsEnum = flagsEnum,
             ToolPrefix = prefix,
-            Enumerators = values
+            Enumerators = values,
+            Binds = binds
         };
     }
 

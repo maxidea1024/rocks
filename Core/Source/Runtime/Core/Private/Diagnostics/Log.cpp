@@ -76,10 +76,9 @@ void WriteLogEmergencyText(LogLevel level, StringView category, StringView messa
 void WriteLogEmergency(LogLevel level, const LogCategory& category, const LogCaptureTemplate& text,
                        const FormatArg* args, usize count) noexcept {
     uint8 capture[LogSlotBytes];
-    const auto captured =
-        WriteLogCapture({Span<uint8>(capture), nullptr, platform::MonotonicNanoseconds(),
-                         platform::CurrentThreadId(), 0},
-                        level, category, text, args, count);
+    const auto captured = WriteLogCapture(
+        {Span<uint8>(capture), nullptr, platform::MonotonicTicks(), platform::CurrentThreadId(), 0},
+        level, category, text, args, count);
     if (!captured) {
         WriteLogEmergencyText(level, category.Name(), text.text);
         return;
@@ -161,10 +160,9 @@ void LogAppendLine(FixedStringBuilder& out, const LogCaptureTemplate& text, cons
 
     fatalInProgress = true;
     uint8 capture[LogSlotBytes];
-    const auto captured =
-        WriteLogCapture({Span<uint8>(capture), nullptr, platform::MonotonicNanoseconds(),
-                         platform::CurrentThreadId(), 0},
-                        LogLevel::Fatal, category, text, args, count);
+    const auto captured = WriteLogCapture(
+        {Span<uint8>(capture), nullptr, platform::MonotonicTicks(), platform::CurrentThreadId(), 0},
+        LogLevel::Fatal, category, text, args, count);
     if (captured) {
         const Span<const uint8> record(capture, captured.Value());
         // 1) 비상 출력 2) 설치된 LogSystem에 전달(조건부, 제한 시간) 3) 종료
@@ -190,10 +188,9 @@ void LogAppendLine(FixedStringBuilder& out, const LogCaptureTemplate& text, cons
     WriteLogEmergencyText(LogLevel::Fatal, LogAssert.Name(), text);
     uint8 capture[LogSlotBytes];
     const FormatArg arg = MakeFormatArg(text);
-    const auto captured =
-        WriteLogCapture({Span<uint8>(capture), nullptr, platform::MonotonicNanoseconds(),
-                         platform::CurrentThreadId(), 0},
-                        LogLevel::Fatal, LogAssert, LazyTemplate(SourceLocation()), &arg, 1);
+    const auto captured = WriteLogCapture(
+        {Span<uint8>(capture), nullptr, platform::MonotonicTicks(), platform::CurrentThreadId(), 0},
+        LogLevel::Fatal, LogAssert, LazyTemplate(SourceLocation()), &arg, 1);
     if (captured) {
         LogReadScope scope;
         if (scope.System() != nullptr) {
@@ -205,3 +202,44 @@ void LogAppendLine(FixedStringBuilder& out, const LogCaptureTemplate& text, cons
 }
 
 } // namespace rocks::detail
+
+namespace rocks {
+
+void Log::SetFrame(uint64 frame) noexcept {
+    detail::LogReadScope scope;
+    if (LogSystem* system = scope.System(); system != nullptr) {
+        system->SetFrame(frame);
+    }
+}
+
+namespace detail {
+
+namespace {
+
+// 로그 hook을 걸기 전의 hook이다(flush 뒤 연쇄한다).
+constinit platform::TerminationHook chainedTerminationHook = nullptr;
+
+} // namespace
+
+void SetChainedTerminationHook(platform::TerminationHook hook) noexcept {
+    platform::AtomicStore<platform::MemoryOrder::Release>(&chainedTerminationHook, hook);
+}
+
+void LogTerminationHook(const char* message, usize bytes) noexcept {
+    // Log::Fatal·assert가 이 스레드에서 이미 flush했으면(그 뒤 platform::Fatal이 hook을 부른다)
+    // 다시 하지 않는다.
+    if (!fatalInProgress) {
+        fatalInProgress = true;
+        FlushInstalledLogForTermination();
+        fatalInProgress = false;
+    }
+
+    if (const platform::TerminationHook chained =
+            platform::AtomicLoad<platform::MemoryOrder::Acquire>(&chainedTerminationHook)) {
+        chained(message, bytes);
+    }
+}
+
+} // namespace detail
+
+} // namespace rocks

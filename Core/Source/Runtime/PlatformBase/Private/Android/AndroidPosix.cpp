@@ -57,6 +57,26 @@ uint64 PosixThreadId() noexcept {
     return static_cast<uint64>(gettid());
 }
 
+// bionic은 main thread도 pthread_getattr_np로 스택 범위를 준다(/proc/self/maps와 rlimit에서
+// 구한다).
+void PosixCurrentThreadStack(uptr& low, uptr& high) noexcept {
+    pthread_attr_t attributes;
+    if (pthread_getattr_np(pthread_self(), &attributes) != 0) {
+        Fatal("pthread_getattr_np failed");
+    }
+
+    void* address = nullptr;
+    size_t size = 0;
+    const int queried = pthread_attr_getstack(&attributes, &address, &size);
+    pthread_attr_destroy(&attributes);
+    if (queried != 0) {
+        Fatal("pthread_attr_getstack failed");
+    }
+
+    low = reinterpret_cast<uptr>(address);
+    high = low + static_cast<uptr>(size);
+}
+
 // CLOCK_MONOTONIC의 ns를 그대로 tick으로 쓴다(주파수 10^9). 초를 ns로 바꾸기 전에 상한을 검사해
 // wrap된 값을 반환하지 않는다.
 uint64 PosixMonotonicTicks() noexcept {

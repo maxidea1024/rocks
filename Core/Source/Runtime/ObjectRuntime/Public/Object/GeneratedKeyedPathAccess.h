@@ -168,7 +168,7 @@ Result<void> InsertMapValue(PathCursor& cursor, Map& map) noexcept {
     }
 
     Value value = MakeAllocatedValue<Value>(allocator);
-    if (auto written = WriteTargetValue<Target>(value, *cursor.Input()); !written) {
+    if (auto written = WriteTargetValue<Target>(value, *cursor.Input(), &allocator); !written) {
         return cursor.FailValue(written.Error());
     }
 
@@ -215,7 +215,8 @@ Result<void> InsertPathKey(PathCursor& cursor, Container& container, const Looku
             return Result<void>::Success();
         }
     } else {
-        static_assert(Target == ValueKind::Struct, "only struct-valued maps insert default values");
+        static_assert(Target == ValueKind::Struct || Target == ValueKind::InstancedStruct,
+                      "only struct- and InstancedStruct-valued maps insert default values");
         static_assert(IsNothrowAssignableV<Value&, Value&&>,
                       "map struct values must be nothrow move assignable");
         if (Value* existing = known ? container.Find(lookup) : nullptr) {
@@ -327,7 +328,7 @@ Result<void> ErasePathKey(PathCursor& cursor, Container& container, const Lookup
             return pinned;
         }
 
-        if constexpr (Target == ValueKind::Struct) {
+        if constexpr (Target == ValueKind::Struct || Target == ValueKind::InstancedStruct) {
             // 소멸을 게시(와 고정 해제) 뒤로 미루려고 붙잡는다.
             [[maybe_unused]] Value previous(Move(*value));
             if (!container.Erase(lookup)) {
@@ -619,6 +620,8 @@ Result<void> PathKeyedValueContainer(PathCursor& cursor, Container& container) n
     using Value = typename Traits::Value;
     constexpr bool set = Traits::IsSet;
     constexpr bool structValue = !set && Target == ValueKind::Struct;
+    // InstancedStruct 값 Map(리플렉션 B9j)은 값 struct Map처럼 넣고 지우며 값으로 내려간다.
+    constexpr bool instancedValue = !set && Target == ValueKind::InstancedStruct;
     const PathFrame& frame = cursor.Frame();
     const PathOperation operation = cursor.Operation();
     if (frame.selector == PathSelector::None) {
@@ -666,6 +669,13 @@ Result<void> PathKeyedValueContainer(PathCursor& cursor, Container& container) n
             }
 
             return cursor.Descend(value);
+        } else if constexpr (instancedValue) {
+            Value* value = known ? container.Find(lookup) : nullptr;
+            if (!value) {
+                return cursor.FailMissingKey();
+            }
+
+            return PathInstanced(cursor, *value);
         } else {
             return cursor.Fail(ErrorCode::TypeMismatch, PropertyPathError::NotStruct);
         }
@@ -683,18 +693,31 @@ Result<void> PathKeyedValueContainer(PathCursor& cursor, Container& container) n
         cursor.SetLength(known && container.Contains(lookup) ? 1 : 0);
         return Result<void>::Success();
     case PathOperation::InsertKey:
-        if constexpr (set || structValue) {
+        if constexpr (set || structValue || instancedValue) {
             return InsertPathKey<Target>(cursor, container, lookup, known);
         } else {
             return cursor.Fail(ErrorCode::InvalidArgument, PropertyPathError::InvalidValue);
         }
     case PathOperation::EraseKey:
         return ErasePathKey<Target>(cursor, container, lookup, known);
+    case PathOperation::SetInstancedType:
+    case PathOperation::ClearInstanced:
+    case PathOperation::QueryInstanced:
+        if constexpr (instancedValue) {
+            Value* value = known ? container.Find(lookup) : nullptr;
+            if (!value) {
+                return cursor.FailMissingKey();
+            }
+
+            return PathInstanced(cursor, *value);
+        } else {
+            return cursor.Fail(ErrorCode::TypeMismatch, PropertyPathError::NotInstanced);
+        }
     case PathOperation::Read:
     case PathOperation::Write:
         if constexpr (set) {
             return cursor.Fail(ErrorCode::TypeMismatch, PropertyPathError::NotMap);
-        } else if constexpr (structValue) {
+        } else if constexpr (structValue || instancedValue) {
             return cursor.Fail(ErrorCode::Unsupported, PropertyPathError::AggregateValue);
         } else {
             Value* value = known ? container.Find(lookup) : nullptr;

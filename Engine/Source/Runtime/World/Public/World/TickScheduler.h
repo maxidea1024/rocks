@@ -120,7 +120,7 @@ struct TickSchedulerTestAccess;
 //   이번에 실행된다), 새 등록과 의존 변경은 다음 단계 경계(Physics는 다음 고정 스텝)부터다.
 // - 실행 중 해제는 할당하지 않는다(표시만 하고 단계 경계에서 지운다).
 // - 선행 의존은 같은 단계의 등록 사이에만 둘 수 있다(다른 단계 간 순서는 단계 순서로 보장된다).
-//   사이클을 만드는 의존 추가는 추가 시점에 InvalidArgument로 거부하며 상태를 바꾸지 않는다. 해제된
+//   사이클을 만드는 의존 추가는 추가 시점에 CycleDetected로 거부하며 상태를 바꾸지 않는다. 해제된
 //   등록에 걸린 의존은 다음 순서 재계산 때 지운다.
 // - 순서: 선행 의존을 지키는 범위에서 준비된 항목 중 (priority, 등록 순서)가 가장 작은 것부터
 // 실행한다
@@ -142,8 +142,9 @@ public:
 
     Result<void> SetEnabled(TickHandle handle, bool enabled) noexcept;
 
-    // dependent가 prerequisite보다 나중에 실행되게 한다. 다른 단계, 자기 자신, 사이클은
-    // InvalidArgument, 이미 있는 의존은 성공(중복 추가 없음)이다.
+    // dependent가 prerequisite보다 나중에 실행되게 한다. 다른 단계·자기 자신은 InvalidArgument,
+    // 사이클을 만들면 CycleDetected(상태 불변), 이미 있는 의존은 성공(중복 추가 없음)이다. 해제된
+    // 핸들은 StaleHandle이다.
     Result<void> AddPrerequisite(TickHandle dependent, TickHandle prerequisite) noexcept;
     Result<void> RemovePrerequisite(TickHandle dependent, TickHandle prerequisite) noexcept;
 

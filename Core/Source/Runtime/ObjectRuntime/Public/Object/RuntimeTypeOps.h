@@ -8,6 +8,7 @@
 #include <Core/Move.h>
 #include <Core/Text/Name.h>
 #include <Core/Text/String.h>
+#include <Localization/Text.h>
 #include <Meta/PropertyPathSchema.h>
 #include <Object/ObjectAccessContext.h>
 #include <Object/Object.h>
@@ -94,6 +95,12 @@ struct FieldValue {
     // Unsupported) 표시 문자열의 내용 규칙(Object/NameField.h)을 본다. 읽기는 토큰을 복사할 뿐
     // 할당하지 않는다(원문은 그 pool의 Acquire로 읽는다).
     Name name{};
+    // Text 값이다(리플렉션 B9l — Docs/Design/ReflectionExtensions.ko.md 13절). 노드는 이
+    // FieldValue의 allocator(GetAllocator)로 만든다: 읽기는 멤버를 DeepClone하고, 쓰기는 대상
+    // Registry의 객체 allocator로 다시 DeepClone하므로 한 Registry의 노드를 다른 수명의 소유자가
+    // 쥐지 않는다. 비어 있음(IsValid 거짓)도 값이다. 저장은 비어 있음·Invariant·Localized만 받는다
+    // (Format·Integer 이력은 encode Unsupported).
+    Text text;
     // Enum 값의 enum 스키마 ID다(B3b).
     TypeId type{};
     // 값이 있는지다(리플렉션 B9e — Docs/Design/ReflectionExtensions.ko.md 6절). Optional<T>
@@ -207,6 +214,20 @@ Result<void> ValidateArrayEdit(const FieldWriteTarget& target, ArrayEdit edit) n
 //   target.effectiveFlags = effectiveFlags;
 //   if (auto valid = detail::ValidateOptionalEdit(target); !valid) { ... }
 Result<void> ValidateOptionalEdit(const FieldWriteTarget& target) noexcept;
+
+// InstancedStruct 값의 형 바꾸기(SetInstancedType)·비우기(ClearInstanced)의 검증 한 곳이다(리플렉션
+// B9j — Docs/Design/ReflectionExtensions.ko.md 11절). target.actual이 없거나 그 자리(원소 모드면
+// element — Array·정적 배열 원소·Map 값, 아니면 value)가 InstancedStruct가 아니면 TypeMismatch,
+// 유효 플래그(target.effectiveFlags — 바깥 struct·배열 필드에서 전파된다)가 ReadOnly면
+// Unsupported다. lease를 얻지 않는 순수 검사다(새 타입의 등록·담기 조건·깊이 합은 경로 실행기가
+// 본다).
+//
+// 사용 예:
+//   detail::FieldWriteTarget target;
+//   target.actual = &field;
+//   target.effectiveFlags = effectiveFlags;
+//   if (auto valid = detail::ValidateInstancedEdit(target); !valid) { ... }
+Result<void> ValidateInstancedEdit(const FieldWriteTarget& target) noexcept;
 
 // weak 참조 값(WeakObjectReference — 리플렉션 B9d1)의 대상을 검사한다(Docs/Design/
 // ReflectionExtensions.ko.md 5.1절 쓰기 검증). target이 null(IsNull — 비정규 null 포함)이면 성공,
@@ -424,8 +445,8 @@ using StructMigration = Result<Array<uint8>> (*)(Allocator&, TypeId type, uint32
                                                  Span<const uint8> sourceRecord) noexcept;
 
 // Trace 호출 동안만 유효한 방문자다. 보관하거나 다른 스레드에 전달하지 않는다.
-// 객체가 가진 모든 강한 ObjectRef를 빠짐없이 Visit해야 한다. WeakRef는 방문하지 않는다(WeakRef
-// PROPERTY 포함 — 생성 Trace는 weak 필드·원소를 방문하지 않는다,
+// 객체가 가진 모든 강한 ObjectRef를 빠짐없이 Visit해야 한다. WeakObjectRef는 방문하지
+// 않는다(WeakObjectRef PROPERTY 포함 — 생성 Trace는 weak 필드·원소를 방문하지 않는다,
 // Docs/Design/ReflectionExtensions.ko.md 5.1절).
 //
 // 방문자는 두 방식이다(Trace 코드는 어느 쪽인지 모르고 Visit만 부른다).
@@ -529,6 +550,20 @@ struct RuntimeStructOps {
     // 두 S 값의 내용을 무할당·무실패로 맞바꾼다(MakeRuntimeStructOps — S가 nothrow 이동 생성·대입을
     // 가지면 채운다, 아니면 null). 버퍼는 각자의 allocator와 함께 옮겨 간다.
     void (*swap)(void* first, void* second) noexcept = nullptr;
+    // struct 검증 hook이다(Docs/Design/CurveData.ko.md 9.1절 — `static Result<void> Validate(const
+    // S&) noexcept`를 선언한 struct만 채운다, MetaCompiler 감지). 리플렉션 경로(graph decode·대입
+    // 묶음·JSON import·경로 쓰기)가 바뀐 값을 게시하기 전에 S 값 하나를 검증한다. 계약: 할당하지
+    // 않고 전역 상태·Registry를 읽지 않는 순수 함수이고 아무 스레드에서나 불린다. 값을 고치지
+    // 않는다. 결과는 Success 또는 InvalidArgument다(생성 thunk가 다른 오류를 InvalidArgument로
+    // 바꾼다). 강한 참조를 담은 struct는 hook을 가질 수 없다(등록이 InvalidArgument로 거부한다 —
+    // hook struct는 언제나 통째로 복사해 검증할 수 있는 값이다).
+    Result<void> (*validate)(const void* value) noexcept = nullptr;
+    // S 값 트리 전체의 검증이다: 멤버(base 하위 객체 먼저, 그다음 PROPERTY 멤버 순서 — Array·정적
+    // 배열 원소·Optional 내부·Map 키와 값·InstancedStruct 내용 포함) 안의 hook 있는 struct를
+    // 안쪽부터 검증하고 마지막에 S 자신의 validate를 부른다. 트리 어디에도 hook이 없으면
+    // null이다(InstancedStruct 멤버가 있으면 담긴 타입이 정해지지 않으므로 채운다). 같은 계약이고
+    // 첫 거부에서 멈춘다.
+    Result<void> (*validateTree)(const void* value) noexcept = nullptr;
 };
 
 // 필드·멤버 값 하나의 타입 무관 연산 표다(리플렉션 B9i3c0 — Docs/Design/ReflectionExtensions.ko.md
@@ -558,6 +593,9 @@ struct RuntimeValueOps {
                          Allocator& allocator) noexcept = nullptr;
     // 무할당 교환이다. 교환할 수 없는 타입은 null이다.
     void (*swap)(void* first, void* second) noexcept = nullptr;
+    // 값 트리 안의 hook 있는 struct를 안쪽부터 검증한다(RuntimeStructOps::validateTree와 같은 계약
+    // — Docs/Design/CurveData.ko.md 9.1절). 트리에 hook이 없는 타입은 null이다.
+    Result<void> (*validateTree)(const void* value) noexcept = nullptr;
 };
 
 // 생성·추적·소멸 콜백은 noexcept이며 Registry 잠금 밖에서 실행된다.

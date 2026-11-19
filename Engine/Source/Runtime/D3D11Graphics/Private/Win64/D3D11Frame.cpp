@@ -29,48 +29,24 @@ Result<CommandContext*> D3D11Device::BeginFrame(SwapChainHandle handle,
         return FailWith<CommandContext*>("swap chain has no buffers after a failed resize");
     }
 
-    BeginRecording({record->rtv.Get(),
-                    record->buffer.Get(),
-                    record->width,
-                    record->height,
-                    Format::RGBA8UnormSrgb,
-                    {}},
-                   clear);
+    Target target;
+    target.rtv = record->rtv.Get();
+    target.resource = record->buffer.Get();
+    target.width = record->width;
+    target.height = record->height;
+    target.format = PixelFormat::RGBA8UnormSrgb;
+    target.colorCount = 1;
+    target.rtvs[0] = target.rtv;
+    PassDesc pass;
+    pass.colorCount = 1;
+    pass.colors[0].clear = clear;
+    BeginRecording(target, pass);
     presentTarget_ = handle;
     return Result<CommandContext*>::Success(this);
 }
 
-Result<CommandContext*> D3D11Device::BeginOffscreen(TextureHandle handle,
-                                                    const ClearColor& clear) noexcept {
-    auto owner = ownership_.Check();
-    if (!owner) {
-        return Result<CommandContext*>::Failure(owner.Error());
-    }
-
-    platform::LockGuard lock(gate_);
-    TextureRecord* record = textures_.Find(handle.slot);
-    if (record == nullptr || !record->renderTarget) {
-        return Result<CommandContext*>::Failure(record == nullptr ? ErrorCode::StaleHandle
-                                                                  : ErrorCode::InvalidArgument);
-    }
-
-    if (recording_) {
-        return Result<CommandContext*>::Failure(ErrorCode::Busy);
-    }
-
-    if (timeline_.IsLost()) {
-        return Result<CommandContext*>::Failure(ErrorCode::Destroyed);
-    }
-
-    BeginRecording({record->rtv.Get(), record->texture.Get(), record->width, record->height,
-                    record->format, handle},
-                   clear);
-    presentTarget_ = {};
-    return Result<CommandContext*>::Success(this);
-}
-
 // deferred context는 FinishCommandList(FALSE) 뒤 기본 상태다. 패스 상태를 처음부터 묶는다.
-void D3D11Device::BeginRecording(const Target& target, const ClearColor& clear) noexcept {
+void D3D11Device::BeginRecording(const Target& target, const PassDesc& pass) noexcept {
     target_ = target;
     recording_ = true;
     markerDepth_ = 0;
@@ -80,22 +56,68 @@ void D3D11Device::BeginRecording(const Target& target, const ClearColor& clear) 
     }
 
     boundIndex_ = {};
+    for (BufferViewHandle& view : boundViews_) {
+        view = {};
+    }
+
+    for (BufferViewHandle& view : boundWriteViews_) {
+        view = {};
+    }
+
+    for (TextureHandle& view : boundWriteTextures_) {
+        view = {};
+    }
+
+    boundTexture_ = white_.slot;
+
+    stencilReference_ = 0;
+    inputsDirty_ = false;
     ID3D11DeviceContext* context = deferred_.Get();
-    context->OMSetRenderTargets(1, &target_.rtv, nullptr);
-    const float color[4] = {clear.r, clear.g, clear.b, clear.a};
-    context->ClearRenderTargetView(target_.rtv, color);
-    D3D11_VIEWPORT viewport = {};
-    viewport.Width = static_cast<float>(target_.width);
-    viewport.Height = static_cast<float>(target_.height);
-    viewport.MaxDepth = 1.0f;
-    context->RSSetViewports(1, &viewport);
-    context->RSSetState(rasterizers_[static_cast<usize>(CullMode::None)].Get());
-    context->OMSetDepthStencilState(depthDisabled_.Get(), 0);
-    context->OMSetBlendState(opaqueBlend_.Get(), nullptr, D3D11_DEFAULT_SAMPLE_MASK);
+    context->OMSetRenderTargets(target_.colorCount, target_.rtvs, target_.dsv);
+    for (uint32 index = 0; index < target_.colorCount; ++index) {
+        if (pass.colors[index].load == LoadAction::Clear) {
+            const ClearColor& clear = pass.colors[index].clear;
+            const float color[4] = {clear.r, clear.g, clear.b, clear.a};
+            context->ClearRenderTargetView(target_.rtvs[index], color);
+        }
+    }
+
+    const TextureRecord* depth = textures_.Find(target_.depth.slot);
+    if (depth != nullptr && !target_.depthReadOnly) {
+        UINT flags = 0;
+        if (pass.depth.depthLoad == LoadAction::Clear) {
+            flags |= D3D11_CLEAR_DEPTH;
+        }
+
+        if (pass.depth.stencilLoad == LoadAction::Clear &&
+            GetPixelFormatInfo(depth->format).stencilBits != 0) {
+            flags |= D3D11_CLEAR_STENCIL;
+        }
+
+        if (flags != 0) {
+            context->ClearDepthStencilView(target_.dsv, flags, pass.depth.clearDepth,
+                                           pass.depth.clearStencil);
+        }
+    }
+
+    // viewport·scissor는 대상 전체다(래스터 상태는 늘 scissor를 켠다). attachment 없는 패스는
+    // 그리지 않으므로 두지 않는다.
+    if (target_.width != 0) {
+        D3D11_VIEWPORT viewport = {};
+        viewport.Width = static_cast<float>(target_.width);
+        viewport.Height = static_cast<float>(target_.height);
+        viewport.MaxDepth = 1.0f;
+        context->RSSetViewports(1, &viewport);
+        const D3D11_RECT scissor = {0, 0, static_cast<LONG>(target_.width),
+                                    static_cast<LONG>(target_.height)};
+        context->RSSetScissorRects(1, &scissor);
+    }
+
     context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     ID3D11Buffer* constants = constants_.Get();
     context->VSSetConstantBuffers(0, 1, &constants);
     context->PSSetConstantBuffers(0, 1, &constants);
+    context->CSSetConstantBuffers(0, 1, &constants);
     const TextureRecord* white = textures_.Find(white_.slot);
     if (white != nullptr) {
         ID3D11ShaderResourceView* view = white->srv.Get();
@@ -104,8 +126,9 @@ void D3D11Device::BeginRecording(const Target& target, const ClearColor& clear) 
     }
 
     // deferred context의 동적 버퍼 내용은 그 기록 안에서 DISCARD로 쓰기 전까지 정해지지 않는다.
-    const DrawConstants identity;
-    WriteConstants(identity);
+    // 그리기별 상수는 기록마다 0으로 시작한다(CommandContext::SetDrawConstants).
+    platform::MemoryZero(constantValues_, sizeof(constantValues_));
+    WriteConstants();
 }
 
 Result<GpuFencePoint> D3D11Device::EndFrame() noexcept {
@@ -117,6 +140,26 @@ Result<GpuFencePoint> D3D11Device::EndFrame() noexcept {
     platform::LockGuard lock(gate_);
     if (!recording_) {
         return Result<GpuFencePoint>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 끝나지 않은 분리 전이는 계약 위반이다(검증 장치는 오류로 센다).
+    const usize unended = splits_.Close();
+    if (validation_) {
+        validationErrors_ += unended;
+    }
+
+    // 패스 끝 MSAA resolve다(ColorAttachment::resolveTarget, 박스 평균, 결정 R17).
+    for (uint32 index = 0; index < target_.colorCount; ++index) {
+        const TextureRecord* source = textures_.Find(target_.colors[index].slot);
+        const TextureRecord* resolved = textures_.Find(target_.resolves[index].slot);
+        if (source != nullptr && resolved != nullptr) {
+            // 대상은 resolve mip·slice의 subresource다(텍스처 GX2 C부).
+            deferred_->ResolveSubresource(resolved->texture.Get(),
+                                          D3D11CalcSubresource(target_.resolveMips[index],
+                                                               target_.resolveSlices[index],
+                                                               resolved->mipLevels),
+                                          source->texture.Get(), 0, MappingOf(source->format).rtv);
+        }
     }
 
     CloseMarkers();
@@ -197,13 +240,20 @@ void D3D11Device::SetPipeline(PipelineHandle handle) noexcept {
     }
 
     ID3D11DeviceContext* context = deferred_.Get();
+    boundPipeline_ = handle.slot;
+    if (record->compute) {
+        // 그래픽 상태는 건드리지 않는다(같은 패스의 다음 그리기가 그대로 쓴다).
+        context->CSSetShader(record->computeShader.Get(), nullptr, 0);
+        return;
+    }
+
     context->VSSetShader(record->vertexShader.Get(), nullptr, 0);
     context->PSSetShader(record->pixelShader.Get(), nullptr, 0);
     context->IASetInputLayout(record->inputLayout.Get());
-    context->RSSetState(rasterizers_[static_cast<usize>(record->cullMode)].Get());
-    context->OMSetBlendState(record->alphaBlend ? alphaBlend_.Get() : opaqueBlend_.Get(), nullptr,
-                             D3D11_DEFAULT_SAMPLE_MASK);
-    boundPipeline_ = handle.slot;
+    context->IASetPrimitiveTopology(record->topology);
+    context->RSSetState(record->raster.Get());
+    context->OMSetBlendState(record->blend.Get(), nullptr, D3D11_DEFAULT_SAMPLE_MASK);
+    context->OMSetDepthStencilState(record->depthStencil.Get(), stencilReference_);
     // 이미 묶인 정점 버퍼를 새 파이프라인의 stride로 다시 묶는다.
     for (uint32 stream = 0; stream < MaxVertexStreams; ++stream) {
         if (!boundVertex_[stream].buffer.IsNull()) {
@@ -243,25 +293,40 @@ void D3D11Device::SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64
 void D3D11Device::SetTexture(TextureHandle handle) noexcept {
     platform::LockGuard lock(gate_);
     const TextureRecord* record = textures_.Find(handle.slot);
-    if (record == nullptr) {
+    SlotHandle slot = handle.slot;
+    if (record == nullptr || !record->srv) {
         record = textures_.Find(white_.slot);
+        slot = white_.slot;
     }
 
     if (record != nullptr) {
+        // compute는 dispatch 때 같은 텍스처를 CS t0·s0에 건다.
+        boundTexture_ = slot;
         ID3D11ShaderResourceView* view = record->srv.Get();
         deferred_->PSSetShaderResources(0, 1, &view);
         deferred_->PSSetSamplers(0, 1, &record->sampler);
     }
 }
 
-void D3D11Device::SetConstants(const DrawConstants& constants) noexcept {
-    // 기록 context는 소유 스레드만 쓰므로 장치 잠금이 필요 없다(D3D12 루트 상수와 같다).
-    WriteConstants(constants);
+Result<void> D3D11Device::SetDrawConstants(Span<const uint8> bytes) noexcept {
+    platform::LockGuard lock(gate_);
+    const PipelineRecord* pipeline = recording_ ? pipelines_.Find(boundPipeline_) : nullptr;
+    if (pipeline == nullptr || bytes.Size() != pipeline->drawConstantBytes) {
+        return RejectDrawConstantSize(pipeline != nullptr, bytes.Size(),
+                                      pipeline != nullptr ? pipeline->drawConstantBytes : 0u);
+    }
+
+    if (bytes.Size() != 0) {
+        platform::MemoryCopy(constantValues_, bytes.Data(), bytes.Size());
+        WriteConstants();
+    }
+
+    return Result<void>::Success();
 }
 
-// 그리기 상수 버퍼를 갈아 끼운다(UE uniform buffer와 같은 WRITE_DISCARD). 앞 그리기는 앞 내용을
-// 그대로 본다.
-void D3D11Device::WriteConstants(const DrawConstants& constants) noexcept {
+// 그리기별 상수 버퍼를 사본 전체로 갈아 끼운다(UE uniform buffer와 같은 WRITE_DISCARD). 앞
+// 그리기는 앞 내용을 그대로 본다.
+void D3D11Device::WriteConstants() noexcept {
     D3D11_MAPPED_SUBRESOURCE mapped = {};
     const HRESULT result = deferred_->Map(constants_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
     if (FAILED(result)) {
@@ -269,13 +334,13 @@ void D3D11Device::WriteConstants(const DrawConstants& constants) noexcept {
         return;
     }
 
-    platform::MemoryCopy(mapped.pData, &constants, sizeof(constants));
+    platform::MemoryCopy(mapped.pData, constantValues_, sizeof(constantValues_));
     deferred_->Unmap(constants_.Get(), 0);
 }
 
 void D3D11Device::Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept {
     platform::LockGuard lock(gate_);
-    if (!StreamsBound()) {
+    if (!PrepareDraw(false)) {
         ++ignoredDraws_;
         return;
     }
@@ -286,14 +351,43 @@ void D3D11Device::Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVer
 
 void D3D11Device::DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept {
     platform::LockGuard lock(gate_);
-    const BufferRecord* index = buffers_.Find(boundIndex_.buffer.slot);
-    if (!StreamsBound() || index == nullptr || boundIndex_.offset >= index->size) {
+    if (!PrepareDraw(true)) {
         ++ignoredDraws_;
         return;
     }
 
     // base vertex·base instance는 0으로 고정한다.
     deferred_->DrawIndexedInstanced(indexCount, instanceCount, firstIndex, 0, 0);
+}
+
+// D3D11은 드라이버가 자원 상태와 UAV hazard를 암묵으로 관리하므로 명시 전이를 낮출 곳이
+// 없다(RenderBase GX5, UE D3D11 RHI도 전이가 빈 함수다).
+void D3D11Device::Transition(Span<const ResourceTransition> transitions) noexcept {
+    (void)transitions;
+}
+
+SplitTransition D3D11Device::BeginTransitions(Span<const ResourceTransition> transitions) noexcept {
+    platform::LockGuard lock(gate_);
+    if (!recording_) {
+        return {};
+    }
+
+    return splits_.Begin(transitions);
+}
+
+void D3D11Device::EndTransitions(SplitTransition split,
+                                 Span<const ResourceTransition> transitions) noexcept {
+    platform::LockGuard lock(gate_);
+    if (!recording_) {
+        return;
+    }
+
+    const SplitEndResult ended = splits_.End(split, transitions);
+    if (ended == SplitEndResult::Unknown) {
+        ++ignoredDraws_;
+    } else if (ended == SplitEndResult::Mismatch && validation_) {
+        ++validationErrors_;
+    }
 }
 
 Result<void> D3D11Device::CopyPassTarget(TextureHandle destination) noexcept {
@@ -307,8 +401,16 @@ Result<void> D3D11Device::CopyPassTarget(TextureHandle destination) noexcept {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (!record->renderTarget || destination == target_.texture || record->width != target_.width ||
-        record->height != target_.height || record->format != target_.format) {
+    // 패스 대상은 2D mip 0 attachment여야 한다(자원 전체 복사, 텍스처 GX2 C부).
+    const TextureRecord* passTexture = textures_.Find(target_.texture.slot);
+    const bool wholeTarget =
+        passTexture == nullptr ||
+        (passTexture->dimension == TextureDimension::Texture2D && passTexture->mipLevels == 1);
+    if (target_.resource == nullptr || !record->renderTarget || record->sampleCount > 1 ||
+        target_.sampleCount > 1 || !wholeTarget || record->mipLevels != 1 ||
+        record->dimension != TextureDimension::Texture2D || destination == target_.texture ||
+        record->width != target_.width || record->height != target_.height ||
+        record->format != target_.format) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

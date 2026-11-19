@@ -13,9 +13,12 @@
 // 않는다) 게시 때 무할당으로 옮긴다(SwapValues).
 //
 // 복사 규칙(ValueCopy<T>):
-//   - trivially copyable(단일 값·Guid·AssetId·Digest·Name 토큰·WeakRef·ClassRef·enum)은 대입이다.
+//   - trivially copyable(단일 값·Guid·AssetId·Digest·Name 토큰·WeakObjectRef·ClassRef·enum)은
+//   대입이다.
 //   - String·SoftObjectRef는 TryClone이다.
 //   - Array·OrderedMap·OrderedSet·Optional·정적 배열(E[N])은 원소·키·값마다 복사한다.
+//   - InstancedStruct는 TryClone이다(리플렉션 B9j).
+//   - Text는 DeepClone이다(리플렉션 B9l — 노드를 allocator로 새로 만든다).
 //   - 생성 struct는 MetaCompiler가 내는 특수화가 GeneratedType<S>::CopyValue(PROPERTY·NATIVE 멤버
 //     모두)로 잇는다.
 //   - 그 밖의 C++ 타입은 noexcept 복사 생성·대입이 있으면 C++ 복사, 없으면 지원하지 않는다
@@ -231,6 +234,40 @@ struct ValueCopy<Optional<T>> {
     }
 };
 
+// InstancedStruct<Base>(리플렉션 B9j)는 TryClone(새 lease·새 값 블록·담긴 struct의 깊은 복사 —
+// RuntimeStructOps::copy가 없는 struct는 Unsupported)이다.
+template <class Base>
+struct ValueCopy<InstancedStruct<Base>> {
+    static constexpr bool Supported = true;
+
+    static Result<void> Copy(InstancedStruct<Base>& destination,
+                             const InstancedStruct<Base>& source, Allocator& allocator) noexcept {
+        auto cloned = source.TryClone(allocator);
+        if (!cloned) {
+            return Result<void>::Failure(cloned.Error());
+        }
+
+        destination = Move(cloned.Value());
+        return Result<void>::Success();
+    }
+};
+
+// Text(리플렉션 B9l)는 DeepClone(allocator로 노드를 새로 만든다 — 원래 노드를 공유하지 않는다)이다.
+template <>
+struct ValueCopy<Text> {
+    static constexpr bool Supported = true;
+
+    static Result<void> Copy(Text& destination, const Text& source, Allocator& allocator) noexcept {
+        auto cloned = source.DeepClone(allocator);
+        if (!cloned) {
+            return Result<void>::Failure(cloned.Error());
+        }
+
+        destination = Move(cloned.Value());
+        return Result<void>::Success();
+    }
+};
+
 template <class E, usize N>
 struct ValueCopy<E[N]> {
     static constexpr bool Supported =
@@ -291,6 +328,131 @@ struct ValueSwap<E[N]> {
         }
     }
 };
+
+// struct 검증 hook(RuntimeStructOps::validate — Docs/Design/CurveData.ko.md 9.1절)의 결과를 계약
+// 값으로 맞춘다: 성공은 그대로, 그 밖의 모든 오류는 InvalidArgument다.
+inline Result<void> StructValidationResult(const Result<void>& result) noexcept {
+    return result ? Result<void>::Success() : Result<void>::Failure(ErrorCode::InvalidArgument);
+}
+
+// T 값 트리 안의 검증 hook 방식이다(Docs/Design/CurveData.ko.md 9.1절). HasHook은 트리 어딘가에
+// hook 있는 struct가 있을 수 있는지(InstancedStruct는 담긴 타입이 정해지지 않으므로 늘 참)이고,
+// 거짓이면 Run을 부르지 않는다. Run은 안쪽부터 검증하고 첫 거부(InvalidArgument)에서 멈춘다. 생성
+// struct는 MetaCompiler가 내는 특수화가 GeneratedType<S>::ValidateTree로 잇는다. 그 밖의 타입은
+// hook이 없다.
+template <class T>
+struct ValueValidate {
+    static constexpr bool HasHook = false;
+
+    static Result<void> Run(const T&) noexcept {
+        return Result<void>::Success();
+    }
+};
+
+template <class E>
+struct ValueValidate<Array<E>> {
+    static constexpr bool HasHook = ValueValidate<E>::HasHook;
+
+    static Result<void> Run(const Array<E>& value) noexcept {
+        for (usize index = 0; index < value.Size(); ++index) {
+            if (auto checked = ValueValidate<E>::Run(value[index]); !checked) {
+                return checked;
+            }
+        }
+
+        return Result<void>::Success();
+    }
+};
+
+template <class K, class V, class Hasher, class KeyEqual>
+struct ValueValidate<OrderedMap<K, V, Hasher, KeyEqual>> {
+    static constexpr bool HasHook = ValueValidate<K>::HasHook || ValueValidate<V>::HasHook;
+
+    static Result<void> Run(const OrderedMap<K, V, Hasher, KeyEqual>& value) noexcept {
+        // ForEach는 멈출 수 없으므로 첫 거부 뒤의 항목은 건너뛴다.
+        bool rejected = false;
+        value.ForEach([&](const K& key, const V& mapped) noexcept {
+            if (rejected) {
+                return;
+            }
+
+            rejected = !ValueValidate<K>::Run(key) || !ValueValidate<V>::Run(mapped);
+        });
+        return rejected ? Result<void>::Failure(ErrorCode::InvalidArgument)
+                        : Result<void>::Success();
+    }
+};
+
+template <class K, class Hasher, class KeyEqual>
+struct ValueValidate<OrderedSet<K, Hasher, KeyEqual>> {
+    static constexpr bool HasHook = ValueValidate<K>::HasHook;
+
+    static Result<void> Run(const OrderedSet<K, Hasher, KeyEqual>& value) noexcept {
+        bool rejected = false;
+        value.ForEach([&](const K& key) noexcept {
+            if (!rejected) {
+                rejected = !ValueValidate<K>::Run(key);
+            }
+        });
+        return rejected ? Result<void>::Failure(ErrorCode::InvalidArgument)
+                        : Result<void>::Success();
+    }
+};
+
+template <class T>
+struct ValueValidate<Optional<T>> {
+    static constexpr bool HasHook = ValueValidate<T>::HasHook;
+
+    static Result<void> Run(const Optional<T>& value) noexcept {
+        return value.HasValue() ? ValueValidate<T>::Run(value.Value()) : Result<void>::Success();
+    }
+};
+
+template <class E, usize N>
+struct ValueValidate<E[N]> {
+    static constexpr bool HasHook = ValueValidate<E>::HasHook;
+
+    static Result<void> Run(const E (&value)[N]) noexcept {
+        for (usize index = 0; index < N; ++index) {
+            if (auto checked = ValueValidate<E>::Run(value[index]); !checked) {
+                return checked;
+            }
+        }
+
+        return Result<void>::Success();
+    }
+};
+
+// InstancedStruct(리플렉션 B9j)는 담긴 struct의 등록 validateTree다(비어 있거나 트리에 hook이
+// 없으면 통과).
+template <class Base>
+struct ValueValidate<InstancedStruct<Base>> {
+    static constexpr bool HasHook = true;
+
+    static Result<void> Run(const InstancedStruct<Base>& value) noexcept {
+        if (value.IsEmpty()) {
+            return Result<void>::Success();
+        }
+
+        const RuntimeStructOps& ops = value.Type().StructOps();
+        if (!ops.validateTree) {
+            return Result<void>::Success();
+        }
+
+        return StructValidationResult(ops.validateTree(InstancedStructAccess::Value(value)));
+    }
+};
+
+// value(T 값) 트리 안의 hook 있는 struct를 안쪽부터 검증한다(hook이 없으면 아무것도 하지 않는다).
+template <class T>
+Result<void> ValidateValueTree(const T& value) noexcept {
+    if constexpr (ValueValidate<T>::HasHook) {
+        return ValueValidate<T>::Run(value);
+    } else {
+        (void)value;
+        return Result<void>::Success();
+    }
+}
 
 // 두 값을 무할당·무실패로 맞바꾼다(버퍼는 각자의 allocator와 함께 옮겨 간다). 교환할 수 없는
 // 타입은 컴파일 오류다(ValueSwap<T>::Supported).
@@ -363,6 +525,12 @@ const RuntimeValueOps& ValueOpsOf() noexcept {
         if constexpr (ValueSwap<T>::Supported) {
             made.swap = [](void* first, void* second) noexcept {
                 ValueSwap<T>::Swap(*static_cast<T*>(first), *static_cast<T*>(second));
+            };
+        }
+
+        if constexpr (ValueValidate<T>::HasHook) {
+            made.validateTree = [](const void* value) noexcept -> Result<void> {
+                return ValueValidate<T>::Run(*static_cast<const T*>(value));
             };
         }
 

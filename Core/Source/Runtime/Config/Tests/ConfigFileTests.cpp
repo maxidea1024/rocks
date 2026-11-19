@@ -3,8 +3,6 @@
 #include <Config/ConfigDump.h>
 #include <Config/ConfigLoader.h>
 #include <Core/Text/StringBuilder.h>
-#include <Platform/Atomics.h>
-#include <Platform/Clock.h>
 #include <Platform/File.h>
 #include <string.h>
 
@@ -17,66 +15,6 @@ using namespace rocks::platform;
 using namespace rocks::test::config;
 
 namespace {
-
-// 작업 디렉터리 아래 시험 전용 폴더다(소멸 때 지운다). 이름은 실행·시험마다 다르다(시간은 이름에만
-// 쓴다).
-struct ScratchTree {
-    char root[200]{};
-    usize length = 0;
-
-    bool Make() noexcept {
-        static int32 counter = 0;
-        const int count = snprintf(root, sizeof(root), "rocks-config-%llu-%d",
-                                   static_cast<unsigned long long>(MonotonicNanoseconds()),
-                                   AtomicFetchAdd<MemoryOrder::Relaxed>(&counter, 1) + 1);
-        if (count <= 0 || static_cast<usize>(count) >= sizeof(root)) {
-            return false;
-        }
-
-        length = static_cast<usize>(count);
-        return static_cast<bool>(PhysicalFileSystem().MakeDirectory(root, length));
-    }
-
-    // root/relative 파일을 content로 만든다(중간 디렉터리 포함).
-    bool Write(const char* relative, const char* content) noexcept {
-        char path[400];
-        const int count = snprintf(path, sizeof(path), "%s/%s", root, relative);
-        if (count <= 0 || static_cast<usize>(count) >= sizeof(path)) {
-            return false;
-        }
-
-        const char* slash = strrchr(path, '/');
-        if (slash == nullptr ||
-            !MakeDirectoryTree(PhysicalFileSystem(), path, static_cast<usize>(slash - path))) {
-            return false;
-        }
-
-        File file;
-        if (!file.Open(PhysicalFileSystem(), path, static_cast<usize>(count),
-                       FileOpenMode::CreateAlways)) {
-            return false;
-        }
-
-        const bool written = static_cast<bool>(file.WriteAll(content, strlen(content)).status);
-        const bool closed = static_cast<bool>(file.Close());
-        return written && closed;
-    }
-
-    // root/relative 경로 텍스트다.
-    String Path(Allocator& allocator, const char* relative) const noexcept {
-        String text(allocator);
-        CHECK(text.TryAppend(StringView(root, length)));
-        CHECK(text.TryAppend("/"));
-        CHECK(text.TryAppend(relative));
-        return text;
-    }
-
-    ~ScratchTree() noexcept {
-        if (length != 0) {
-            static_cast<void>(DeleteDirectoryTree(PhysicalFileSystem(), root, length));
-        }
-    }
-};
 
 struct CapturedOutput {
     explicit CapturedOutput(Allocator& allocator) noexcept : output(allocator), error(allocator) {
@@ -320,4 +258,29 @@ TEST(Config_DumpIsDeterministicGolden) {
     auto usage = registry.Run(extra, output);
     REQUIRE(usage);
     CHECK(usage.Value() == 2 && !captured.error.IsEmpty());
+}
+
+// 명령줄 `--set=<target>=<value>`는 나온 순서대로 세션 층 대입이 된다(값은 첫 `=` 뒤 전부). `=`가
+// 없는 인자는 거부하되 나머지는 끝까지 넣는다.
+TEST(Config_CommandLineAssignments) {
+    ConfigFixture fixture;
+    ConfigContext& context = fixture.Context();
+    const StringView arguments[] = {"--frames=3", "--set=render.graph.immediate=true",
+                                    "--set=Render.RenderGraph.passes=a,b", "--set=missing",
+                                    "--set=Render.RenderGraph.maxPasses=7"};
+    auto added = AddCommandLineAssignments(context, Span<const StringView>(arguments, 5));
+    CHECK(!added && added.Error() == ErrorCode::InvalidArgument);
+    REQUIRE(context.Sync());
+    CHECK(fixture.Graph().immediate);
+    CHECK(fixture.Graph().maxPasses == 7);
+    CHECK(JoinedEquals(fixture.Graph().passes, "a,b"));
+    const ConfigLayer session[] = {ConfigLayer::Session};
+    CHECK(fixture.SourcesAre("Render", "RenderGraph", "maxPasses", session));
+
+    const StringView valid[] = {"--set=Render.RenderGraph.maxPasses=9"};
+    auto again = AddCommandLineAssignments(context, Span<const StringView>(valid, 1));
+    REQUIRE(again);
+    CHECK(again.Value() == 1);
+    REQUIRE(context.Sync());
+    CHECK(fixture.Graph().maxPasses == 9);
 }

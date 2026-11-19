@@ -541,10 +541,10 @@ public:
     // 고리에서 즉시 뺀다. 이후 FindChild·FindObject·CollectInners·IsNameTaken은 이 객체들을 보지
     // 못하고 같은 이름의 새 객체를 바로 만들 수 있다. 패키지 정책이면 고리에서 빠졌으므로 패키지가
     // 더 붙잡지 않는다. 저장소는 남은 RootRef·Borrow·간선이 풀린 뒤 GC가 회수한다(Resolve와
-    // WeakRef::TryPin은 Destroyed다. GetName·GetObjectPath·GetOuter는 GC cutoff white·Retired가
-    // 되기 전까지 되고 그 뒤는 Destroyed다). 남은 참조가 Discard된 객체를 붙잡으면 inner → outer
-    // 간선으로 그 Outer 사슬도 남지만 형제는 고리에서 빠져 남지 않는다. 관찰자가 있으면 부분
-    // 트리에서 다른 패키지로 나가는 강한 간선 다중도를 Discard 원인의 음수 변화로 한 번
+    // WeakObjectRef::TryPin은 Destroyed다. GetName·GetObjectPath·GetOuter는 GC cutoff
+    // white·Retired가 되기 전까지 되고 그 뒤는 Destroyed다). 남은 참조가 Discard된 객체를 붙잡으면
+    // inner → outer 간선으로 그 Outer 사슬도 남지만 형제는 고리에서 빠져 남지 않는다. 관찰자가
+    // 있으면 부분 트리에서 다른 패키지로 나가는 강한 간선 다중도를 Discard 원인의 음수 변화로 한 번
     // 기록한다(Outer가 있는 Alive 소유자만). 이미 Discard된 객체는 성공(무동작)이고,
     // RequestDestroy만 받은 객체도 받는다(이름을 이때 뗀다). 되돌릴 수 없다(handle은 다시 살지
     // 않는다). GC 단계와 무관하게 부를 수 있다.
@@ -595,8 +595,8 @@ public:
 
     // handle이 이 Registry가 발급한 것인지다(domain 비교만 — 생존·세대·접근 문맥은 보지 않는다).
     // 조회 API는 다른 Registry의 handle을 회수된 handle과 같은 StaleHandle로 알리므로, 둘을
-    // 구별해야 하는 쪽이 먼저 부른다 — weak 참조(WeakRef PROPERTY)는 죽은 대상이면 null로 쓰지만
-    // 다른 Registry를 가리키면 WrongContext로
+    // 구별해야 하는 쪽이 먼저 부른다 — weak 참조(WeakObjectRef PROPERTY)는 죽은 대상이면 null로
+    // 쓰지만 다른 Registry를 가리키면 WrongContext로
     // 실패한다(Docs/Design/ReflectionExtensions.ko.md 5.1절). null handle(registry 0)은 거짓이다.
     // 잠금·스레드 검사 없이 어느 스레드에서나 부를 수 있다.
     //

@@ -82,7 +82,7 @@ struct TextHolder final : Object {
     ROCKS_PROPERTY() TextQuality quality = TextQuality::Low;
     ROCKS_PROPERTY() TextChannels channels = TextChannels::None;
     ROCKS_PROPERTY() ObjectRef<TextHolder> next;
-    ROCKS_PROPERTY() WeakRef<TextHolder> peer;
+    ROCKS_PROPERTY() WeakObjectRef<TextHolder> peer;
     ROCKS_PROPERTY() SoftObjectRef<TextHolder> source;
     ROCKS_PROPERTY() ClassRef<TextKindBase> kind;
     ROCKS_PROPERTY() Array<int32> numbers;

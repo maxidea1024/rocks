@@ -33,6 +33,16 @@ struct VirtualMemoryInfo {
 // 실패 시 info는 갱신하지 않는다. reserveGranularity는 예약 주소의 정렬 단위다.
 [[nodiscard]] VirtualMemoryResult QueryVirtualMemoryInfo(VirtualMemoryInfo& info) noexcept;
 
+// 기기의 물리 메모리 총량(byte)이다(UE FPlatformMemory::GetConstants().TotalPhysical 대응). 설정
+// 계층의 기기 프로필 메모리 등급 판정 입력이다(Docs/Design/ConfigSystem.ko.md 6.2절). Windows는
+// GlobalMemoryStatusEx의 ullTotalPhys, macOS는 sysctl hw.memsize, 그 밖의 POSIX(Android)는
+// sysconf(_SC_PHYS_PAGES) × 페이지 크기다. 실패 시 totalBytes는 갱신하지 않는다(OsFailure).
+//
+// 사용 예:
+//   uint64 bytes = 0;
+//   if (platform::QueryPhysicalMemory(bytes)) { /* bytes / (1024 * 1024) MiB */ }
+[[nodiscard]] VirtualMemoryResult QueryPhysicalMemory(uint64& totalBytes) noexcept;
+
 // OS 주소 공간의 단일 예약을 소유한다. 일반 Allocator와 달리 개별 할당은 관리하지 않는다.
 // Reserve 크기와 Commit/Decommit 범위는 페이지 크기의 양수 배수여야 한다.
 // Commit은 접근 권한을 부여하며, macOS는 Windows와 같은 commit charge를 보장하지 않는다.

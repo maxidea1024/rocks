@@ -1,4 +1,9 @@
+#include "D3D11Caps.h"
 #include "D3D11DeviceImpl.h"
+
+#include <Core/Diagnostics/Log.h>
+#include <DxgiGraphics/DxgiAdapter.h>
+#include <Platform/Atomics.h>
 
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
@@ -37,9 +42,9 @@ bool FenceEventSource::WaitSubmission(uint64 value, void* token) noexcept {
 D3D11Device::D3D11Device(Allocator& allocator) noexcept
     : allocator_(allocator), adapterName_(allocator), lastError_(allocator), buffers_(allocator),
       textures_(allocator), pipelines_(allocator), swapChains_(allocator), readbacks_(allocator),
-      retired_(allocator), dedicated_(allocator), uploadOps_(allocator), messageScratch_(allocator),
-      timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics), ring_(allocator),
-      timestamps_(allocator) {
+      bufferViews_(allocator), retired_(allocator), dedicated_(allocator), uploadOps_(allocator),
+      messageScratch_(allocator), timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics),
+      ring_(allocator), timestamps_(allocator), splits_(allocator) {
 }
 
 D3D11Device::~D3D11Device() {
@@ -71,6 +76,7 @@ D3D11Device::~D3D11Device() {
     swapChains_.Clear();
     textures_.Clear();
     pipelines_.Clear();
+    bufferViews_.Clear();
     buffers_.Clear();
     if (ringData_ != nullptr) {
         (void)allocator_.Deallocate(ringData_);
@@ -111,7 +117,7 @@ Result<void> D3D11Device::Initialize(const DeviceDesc& desc) noexcept {
     ComRef<IDXGIAdapter1> adapter;
     if (!desc.preferSoftware) {
         ComRef<IDXGIFactory6> factory6;
-        if (SUCCEEDED(factory_->QueryInterface(IID_PPV_ARGS(factory6.Out())))) {
+        if (SUCCEEDED(factory_.TryQueryAs(factory6))) {
             for (UINT index = 0;; ++index) {
                 ComRef<IDXGIAdapter1> candidate;
                 if (FAILED(factory6->EnumAdapterByGpuPreference(
@@ -163,16 +169,9 @@ Result<void> D3D11Device::Initialize(const DeviceDesc& desc) noexcept {
         }
     }
 
-    DXGI_ADAPTER_DESC1 info = {};
-    adapter->GetDesc1(&info);
-    // UTF-16 128자(Description 크기)는 UTF-8로 최대 384 byte다.
-    char name[512] = {};
-    const int written = WideCharToMultiByte(CP_UTF8, 0, info.Description, -1, name,
-                                            static_cast<int>(sizeof(name)), nullptr, nullptr);
-    if (written > 1) {
-        auto assigned = adapterName_.TryAssign(StringView(name, static_cast<usize>(written - 1)));
-        (void)assigned;
-    }
+    // 이름은 진단용이라 읽지 못해도(빈 이름) 장치 생성은 계속한다.
+    auto named = dxgi::AssignAdapterName(adapter.Get(), adapterName_);
+    (void)named;
 
     if (validation_) {
         ConfigureValidationQueues();
@@ -184,7 +183,7 @@ Result<void> D3D11Device::Initialize(const DeviceDesc& desc) noexcept {
     }
 
     // marker는 기록 context(deferred)에서 얻는다. 없으면 debugMarkers를 거짓으로 공개한다.
-    if (FAILED(deferred_->QueryInterface(IID_PPV_ARGS(annotation_.Out())))) {
+    if (FAILED(deferred_.TryQueryAs(annotation_))) {
         annotation_.Reset();
     }
 
@@ -204,6 +203,20 @@ Result<void> D3D11Device::Initialize(const DeviceDesc& desc) noexcept {
     auto states = CreateSharedStates();
     if (!states) {
         return states;
+    }
+
+    // 장치 능력(GX1)과 형식 능력은 장치 수명 동안 바뀌지 않으므로 한 번 질의해
+    // 둔다(PixelFormat.ko.md PF4). MSAA 표본 수가 2 이상이면 Multisample 능력이다.
+    caps_ = QueryDeviceCaps(device_.Get(), adapter.Get());
+    for (uint32 number = 0; number <= MaxPixelFormatNumber; ++number) {
+        const PixelFormat format = static_cast<PixelFormat>(number);
+        PixelFormatCaps formatCaps = QueryFormatCaps(device_.Get(), format, software_);
+        sampleCounts_[number] = QuerySampleCounts(device_.Get(), format, formatCaps);
+        if (sampleCounts_[number] > SampleCountBit(1)) {
+            formatCaps = formatCaps | PixelFormatCaps::Multisample;
+        }
+
+        formatCaps_[number] = formatCaps;
     }
 
     // 업로드 ring(GX8): 시스템 메모리 하나를 나눠 쓴다.
@@ -237,7 +250,7 @@ Result<void> D3D11Device::Initialize(const DeviceDesc& desc) noexcept {
     TextureDesc whiteDesc;
     whiteDesc.width = 1;
     whiteDesc.height = 1;
-    whiteDesc.format = Format::RGBA8Unorm;
+    whiteDesc.format = PixelFormat::RGBA8Unorm;
     auto whiteTexture = CreateTexture(whiteDesc, Span<const uint8>(white, 4));
     if (!whiteTexture) {
         return Result<void>::Failure(whiteTexture.Error());
@@ -276,13 +289,13 @@ Result<void> D3D11Device::CreateOnAdapter(IDXGIAdapter1* adapter, bool requestDe
 
     // GX7(다른 스레드의 GPU 완료 대기)에는 ID3D11Fence가 필요하다.
     // 아래 셋이 없으면 계약을 지킬 수 없으므로 이 어댑터는 미지원이다(featureMissing_).
-    result = device->QueryInterface(IID_PPV_ARGS(device_.Out()));
+    result = device.TryQueryAs(device_);
     if (FAILED(result)) {
         featureMissing_ = true;
         return Fail("ID3D11Device5 (Windows 10 1703 or later)", result);
     }
 
-    result = context->QueryInterface(IID_PPV_ARGS(immediate_.Out()));
+    result = context.TryQueryAs(immediate_);
     if (FAILED(result)) {
         device_.Reset();
         featureMissing_ = true;
@@ -303,67 +316,14 @@ Result<void> D3D11Device::CreateOnAdapter(IDXGIAdapter1* adapter, bool requestDe
 }
 
 Result<void> D3D11Device::CreateSharedStates() noexcept {
-    // 앞면은 화면 반시계다(UE D3D11State.cpp:211, ShaderSystem 7.2절 8항, D3D12와 같다). 컬
-    // 모드마다 상태 하나를 만든다. 깊이는 아직 PipelineDesc에 없다(쓰지 않는다).
-    constexpr CullMode Modes[CullModeCount] = {CullMode::None, CullMode::Back, CullMode::Front};
-    HRESULT result = S_OK;
-    for (CullMode mode : Modes) {
-        D3D11_RASTERIZER_DESC raster = {};
-        raster.FillMode = D3D11_FILL_SOLID;
-        raster.CullMode = RasterCullMode(mode);
-        raster.FrontCounterClockwise = TRUE;
-        raster.DepthClipEnable = TRUE;
-        result =
-            device_->CreateRasterizerState(&raster, rasterizers_[static_cast<usize>(mode)].Out());
-        if (FAILED(result)) {
-            return Fail("CreateRasterizerState", result);
-        }
-    }
-
-    D3D11_DEPTH_STENCIL_DESC depth = {};
-    depth.DepthEnable = FALSE;
-    depth.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
-    depth.DepthFunc = D3D11_COMPARISON_ALWAYS;
-    depth.StencilEnable = FALSE;
-    result = device_->CreateDepthStencilState(&depth, depthDisabled_.Out());
-    if (FAILED(result)) {
-        return Fail("CreateDepthStencilState", result);
-    }
-
-    D3D11_BLEND_DESC blend = {};
-    D3D11_RENDER_TARGET_BLEND_DESC& target = blend.RenderTarget[0];
-    target.BlendEnable = FALSE;
-    target.SrcBlend = D3D11_BLEND_ONE;
-    target.DestBlend = D3D11_BLEND_ZERO;
-    target.BlendOp = D3D11_BLEND_OP_ADD;
-    target.SrcBlendAlpha = D3D11_BLEND_ONE;
-    target.DestBlendAlpha = D3D11_BLEND_ZERO;
-    target.BlendOpAlpha = D3D11_BLEND_OP_ADD;
-    target.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
-    result = device_->CreateBlendState(&blend, opaqueBlend_.Out());
-    if (FAILED(result)) {
-        return Fail("CreateBlendState", result);
-    }
-
-    // 소스 알파로 섞는다(D3D12 파이프라인과 같은 식).
-    target.BlendEnable = TRUE;
-    target.SrcBlend = D3D11_BLEND_SRC_ALPHA;
-    target.DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
-    target.SrcBlendAlpha = D3D11_BLEND_ONE;
-    target.DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
-    result = device_->CreateBlendState(&blend, alphaBlend_.Out());
-    if (FAILED(result)) {
-        return Fail("CreateBlendState", result);
-    }
-
-    // 그리기 상수(D3D12 루트 상수 20개 대응)다. SetConstants마다 WRITE_DISCARD로 갈아 끼운다.
-    static_assert(sizeof(DrawConstants) % 16 == 0, "DrawConstants must be a multiple of 16 bytes");
+    // 그리기별 상수(D3D12 루트 상수 대응)다. 파이프라인 크기와 무관하게 계약 최대 크기 하나를 두고
+    // SetDrawConstants마다 WRITE_DISCARD로 갈아 끼운다(셰이더 cbuffer는 이보다 작아도 된다).
     D3D11_BUFFER_DESC constants = {};
-    constants.ByteWidth = sizeof(DrawConstants);
+    constants.ByteWidth = MaxDrawConstantBytes;
     constants.Usage = D3D11_USAGE_DYNAMIC;
     constants.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     constants.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-    result = device_->CreateBuffer(&constants, nullptr, constants_.Out());
+    const HRESULT result = device_->CreateBuffer(&constants, nullptr, constants_.Out());
     if (FAILED(result)) {
         return Fail("CreateBuffer (draw constants)", result);
     }
@@ -374,7 +334,7 @@ Result<void> D3D11Device::CreateSharedStates() noexcept {
 void D3D11Device::FillReport(ErrorCode code, DeviceCreateReport& report) const noexcept {
     report = DeviceCreateReport{};
     report.code = code;
-    report.nativeCode = static_cast<int64>(failureResult_);
+    report.nativeCode = static_cast<int64>(static_cast<uint32>(failureResult_));
     const bool stageCut = CopyTruncated(report.stage, sizeof(report.stage), failureStage_);
     const bool detailCut = CopyTruncated(report.detail, sizeof(report.detail), lastError_.CStr());
     report.truncated = failureTruncated_ || stageCut || detailCut;
@@ -397,6 +357,7 @@ DeviceInfo D3D11Device::Info() const noexcept {
     info.timestampDisjointDetection = info.timestamps;
     info.clockCalibration = info.timestamps;
     info.debugMarkers = annotation_.Get() != nullptr;
+    info.apiVersion = device_ ? static_cast<uint32>(device_->GetFeatureLevel()) : 0;
     return info;
 }
 
@@ -481,7 +442,8 @@ Result<void> D3D11Device::Fail(const char* stage, HRESULT result) noexcept {
     (void)assigned;
     failureTruncated_ = CopyTruncated(failureStage_, sizeof(failureStage_), stage);
     failureResult_ = result;
-    // TODO(log): Graphics.D3D11 Error "{Stage} failed (HRESULT {HResult:#x})" — LG7.
+    // 실패는 호출자가 결과·LastError로 받아 결정하는 쪽이 기록한다(LoggingSystem 13절). 장치는 손실
+    // 전이(DetectLost)만 직접 남긴다.
     return Result<void>::Failure(timeline_.IsLost() ? ErrorCode::Destroyed
                                                     : ErrorCode::DependencyFailed);
 }
@@ -501,14 +463,41 @@ Result<void> D3D11Device::Reject(const Diagnostic& message) noexcept {
     return Result<void>::Failure(ErrorCode::InvalidArgument);
 }
 
+Result<void> D3D11Device::RejectDrawConstantSize(bool pipelineBound, usize bytes,
+                                                 uint32 drawConstantBytes) noexcept {
+    Diagnostic message;
+    if (!pipelineBound) {
+        message.Text("SetDrawConstants needs a pipeline bound while recording");
+    } else {
+        message.Text("SetDrawConstants got ")
+            .Number(bytes > NumericLimits<uint32>::Max() ? NumericLimits<uint32>::Max()
+                                                         : static_cast<uint32>(bytes))
+            .Text(" bytes but the bound pipeline declares drawConstantBytes ")
+            .Number(drawConstantBytes);
+    }
+
+    return Reject(message);
+}
+
 void D3D11Device::DetectLost(HRESULT failure) noexcept {
     if (!device_) {
         return;
     }
 
-    if (IsDeviceRemovedResult(failure) || device_->GetDeviceRemovedReason() != S_OK) {
-        // TODO(log): Graphics.D3D11 Error "Device removed: {Reason} (HRESULT {HResult:#x})" — LG7.
+    const HRESULT reason = device_->GetDeviceRemovedReason();
+    if (IsDeviceRemovedResult(failure) || reason != S_OK) {
         timeline_.MarkLost();
+        // 손실 전이 때 한 번 남긴다(여러 스레드가 같은 손실을 보아도 한 번).
+        if (platform::AtomicExchange<platform::MemoryOrder::AcquireRelease>(&lossLogged_, 1u) ==
+            0) {
+            Log::Error(
+                LogGraphicsD3D11,
+                "D3D11 device removed on {Adapter}: {Reason} (removed reason HRESULT "
+                "{ReasonCode:#x}, failing call HRESULT {HResult:#x}); the device is lost and "
+                "every later call fails",
+                adapterName_.View(), DeviceRemovedReasonName(reason), static_cast<uint32>(reason),
+                static_cast<uint32>(failure));
+        }
     }
 }
 
@@ -591,8 +580,8 @@ void D3D11Device::KeepUntilDestruction(ComRef<IUnknown>&& object) noexcept {
 }
 
 Result<void> D3D11Device::ReserveRetireCapacity(usize extra) noexcept {
-    const usize live = buffers_.Size() + textures_.Size() + pipelines_.Size() + readbacks_.Size() +
-                       swapChains_.Size();
+    const usize live = buffers_.Size() + bufferViews_.Size() + textures_.Size() +
+                       pipelines_.Size() + readbacks_.Size() + swapChains_.Size();
     return retired_.TryEnsureCapacity(retired_.Size() + live + extra);
 }
 
@@ -648,7 +637,7 @@ void D3D11Device::ProcessRetired() noexcept {
 }
 
 void D3D11Device::ConfigureValidationQueues() noexcept {
-    if (SUCCEEDED(device_->QueryInterface(IID_PPV_ARGS(infoQueue_.Out())))) {
+    if (SUCCEEDED(device_.TryQueryAs(infoQueue_))) {
         // 오류만 저장해 저장 한도를 경고가 채우지 않게 한다.
         D3D11_MESSAGE_SEVERITY severities[] = {D3D11_MESSAGE_SEVERITY_CORRUPTION,
                                                D3D11_MESSAGE_SEVERITY_ERROR};
@@ -683,8 +672,18 @@ void D3D11Device::DrainValidationMessages() const noexcept {
                 message->Severity == D3D11_MESSAGE_SEVERITY_ERROR ||
                 message->Severity == D3D11_MESSAGE_SEVERITY_CORRUPTION) {
                 // 읽지 못한 메시지도 오류로 센다(필터가 오류만 저장한다).
-                // TODO(log): Graphics.D3D11.Validation Warning — 원문, 메시지 ID마다 1회(LG7).
                 ++validationErrors_;
+            }
+
+            // 원문을 메시지 ID마다 한 번 남긴다(세기는 위와 같다).
+            if (message != nullptr && message->pDescription != nullptr &&
+                validationFilter_.First(static_cast<uint32>(message->ID))) {
+                Log::Warning(
+                    LogGraphicsD3D11Validation, "D3D11 debug layer message {Id}: {Message}",
+                    static_cast<uint32>(message->ID),
+                    StringView(message->pDescription, message->DescriptionByteLength > 0
+                                                          ? message->DescriptionByteLength - 1
+                                                          : 0));
             }
         }
 
@@ -771,8 +770,10 @@ Result<UniquePtr<Device>> CreateD3D11Device(Allocator& allocator, const DeviceDe
         *report = DeviceCreateReport{};
     }
 
-    // TODO(log): Graphics.D3D11 Info "Created {Backend} device on {Adapter} (validation
-    // {Validation})" — LG7.
+    // 생성 실패 로그는 backend를 고르는 호출자가 report로 남긴다(LoggingSystem 13절).
+    const DeviceInfo info = created.Value()->Info();
+    Log::Info(LogGraphicsD3D11, "Created {Backend} device on {Adapter} (validation {Validation})",
+              BackendName(info.backend), info.adapterName, info.validationEnabled);
     return Result<UniquePtr<Device>>::Success(UniquePtr<Device>(Move(created.Value())));
 }
 

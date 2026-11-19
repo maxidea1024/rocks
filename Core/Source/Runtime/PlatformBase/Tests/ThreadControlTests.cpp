@@ -161,3 +161,41 @@ TEST(PlatformConcurrentCompletionReadersAndJoinLeaveNoPreviousRunOwnership) {
     CompleteAndJoin(fixture.target);
     CHECK(!fixture.target.IsJoinable());
 }
+
+namespace {
+
+// 정적 저장 기간 객체다(스택 범위 밖이어야 한다).
+int32 StackRangeStaticProbe = 0;
+
+struct StackRangeProbe {
+    ThreadStackRange range;
+    const void* local = nullptr;
+    bool containsLocal = false;
+};
+
+void ProbeStackRange(void* context) noexcept {
+    auto& probe = *static_cast<StackRangeProbe*>(context);
+    int32 local = 0;
+    probe.range = CurrentThreadStackRange();
+    probe.local = &local;
+    probe.containsLocal = probe.range.Contains(&local);
+}
+
+} // namespace
+
+// 지역 변수는 그 스레드의 스택 범위 안이고, 정적 변수·다른 스레드의 지역 변수는 밖이다.
+TEST(PlatformCurrentThreadStackRangeContainsLocalsOnly) {
+    int32 local = 0;
+    const ThreadStackRange range = CurrentThreadStackRange();
+    CHECK(range.low < range.high);
+    CHECK(range.Contains(&local));
+    CHECK(!range.Contains(&StackRangeStaticProbe));
+
+    StackRangeProbe probe;
+    Thread thread;
+    REQUIRE(thread.Start(ProbeStackRange, &probe) == ThreadStatus::Success);
+    REQUIRE(thread.Join() == ThreadStatus::Success);
+    CHECK(probe.containsLocal);
+    CHECK(!range.Contains(probe.local));
+    CHECK(!probe.range.Contains(&local));
+}

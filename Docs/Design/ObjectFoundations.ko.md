@@ -276,7 +276,7 @@ public:
     // handle과 Outer 사슬이 handle을 지나는 모든 객체(부분 트리)를 논리 파괴(DestroyRequested)하고
     // 이름 색인·자식 고리에서 즉시 뺀다. 이후 FindChild·FindObject·CollectInners는 이 객체들을 보지
     // 못하고 같은 이름의 새 객체를 바로 만들 수 있다. 패키지 정책이면 고리에서 빠졌으므로 패키지가 더
-    // 붙잡지 않는다. 저장소는 남은 RootRef·Borrow·간선이 풀린 뒤 GC가 회수한다(Resolve·WeakRef::TryPin은
+    // 붙잡지 않는다. 저장소는 남은 RootRef·Borrow·간선이 풀린 뒤 GC가 회수한다(Resolve·WeakObjectRef::TryPin은
     // Destroyed). 관찰자가 있으면 부분 트리에서 다른 패키지로 나가는 강한 간선 다중도를 Discard 원인의
     // 음수 변화로 한 번 기록한다(3절). 이미 Discard된 객체는 성공(무동작). RequestDestroy만 받은 객체도
     // 받는다(이름을 이때 뗀다). 되돌릴 수 없다(같은 객체를 다시 공개하는 경로가 없다 — 11절 N5).
@@ -544,7 +544,7 @@ struct ExternalReferenceInfo {
     Span<const PathStep> path{};   // 호출 동안만 유효
     uint32 slot = 0;               // Import를 고르면 받을 외부 번호(1부터, 첫 출현 순 — 결정 전에 묻는다.
                                    // Null·Reject면 쓰이지 않고 다음 대상이 같은 번호를 받는다. weak면 0)
-    bool weak = false;             // WeakRef PROPERTY 위치(리플렉션 B9d1) — Import·Null 모두 null + 진단 값 2
+    bool weak = false;             // WeakObjectRef PROPERTY 위치(리플렉션 B9d1) — Import·Null 모두 null + 진단 값 2
 };
 
 enum class ExternalAdmission : uint8 {
@@ -577,7 +577,7 @@ virtual Result<ExternalAdmission> AdmitExternalReference(const ExternalReference
 - 한도: 서로 다른 외부 대상 수 ≤ `maxExternalReferences`(65536), 아니면 CapacityExceeded.
 - Oe 구현의 세부(Null의 Required 규칙·필드 writer 계약·재배정 반복·한도 옵션)는 5.7절 뒤 "구현에서 정한 점(A0-Oe)"에 적었다.
 
-리플렉션 B9 연결(B9d1 구현): WeakRef 필드는 같은 그래프 안만 보존한다. `ExternalReferenceInfo::weak`를 더했고(weak면 slot 0·required 거짓), Admit에서 weak는 slot 캐시 없이 출현마다 hook에 묻고 Import·Null 응답 모두 null + 진단(값 2), Reject는 진단(값 0) 뒤 InvalidArgument다. Reject 정책은 weak 집합 밖 대상을 null + 진단(값 2)으로 쓰고 저장은 성공한다. 예시 hook에 `info.weak` 분기를 두었다. Include는 weak 위치를 기록했다가 모든 노드 encode 뒤 최종 집합 기준으로 제자리 덮어쓴다(지연 항목 = 값 위치·대상·objectIndex·경로 사본, 그 메모리를 위치 표와 같이 그래프 바이트·작업량에 청구, 진단은 기록 순서대로 — 덮어쓰기는 출력 조립 전에 노드 Record에 하므로 위치는 Record offset까지만 바꾼다). 죽었거나 stale인 weak 대상은 어느 정책이든 진단·질의 없이 null이고, 다른 Registry의 handle은 정책·질의 전에 WrongContext다. hook이 없거나 기본(Reject)인 Admit은 집합 밖 weak 하나로 저장이 실패하므로 Admit hook은 `info.weak` 분기를 둔다. 정책별 처리 표는 ReflectionExtensions 5.1절이다.
+리플렉션 B9 연결(B9d1 구현): WeakObjectRef 필드는 같은 그래프 안만 보존한다. `ExternalReferenceInfo::weak`를 더했고(weak면 slot 0·required 거짓), Admit에서 weak는 slot 캐시 없이 출현마다 hook에 묻고 Import·Null 응답 모두 null + 진단(값 2), Reject는 진단(값 0) 뒤 InvalidArgument다. Reject 정책은 weak 집합 밖 대상을 null + 진단(값 2)으로 쓰고 저장은 성공한다. 예시 hook에 `info.weak` 분기를 두었다. Include는 weak 위치를 기록했다가 모든 노드 encode 뒤 최종 집합 기준으로 제자리 덮어쓴다(지연 항목 = 값 위치·대상·objectIndex·경로 사본, 그 메모리를 위치 표와 같이 그래프 바이트·작업량에 청구, 진단은 기록 순서대로 — 덮어쓰기는 출력 조립 전에 노드 Record에 하므로 위치는 Record offset까지만 바꾼다). 죽었거나 stale인 weak 대상은 어느 정책이든 진단·질의 없이 null이고, 다른 Registry의 handle은 정책·질의 전에 WrongContext다. hook이 없거나 기본(Reject)인 Admit은 집합 밖 weak 하나로 저장이 실패하므로 Admit hook은 `info.weak` 분기를 둔다. 정책별 처리 표는 ReflectionExtensions 5.1절이다.
 
 ### 5.4 복원 API — 단계형 (A0-Od2, 외부 참조는 A0-Oe)
 
@@ -855,7 +855,7 @@ MetaCompiler·생성 헤더 형식·TypeRegistry 등록 규칙은 바꾸지 않�
 
 **Ob — Discard·관찰자·소속 보존**
 
-- Discard: 부분 트리 전체 DestroyRequested·조회 NotFound·즉시 같은 이름 재생성(GC 전), RootRef가 남은 객체 Discard 뒤 Resolve Destroyed·WeakRef TryPin Destroyed·GC 뒤 회수, 남은 참조가 Outer 사슬만 남기고 형제는 회수, 재Discard 무동작, (정책 없는 Registry에서) RequestDestroy 뒤 Discard, Reserved 자식 Busy, cutoff Destroyed, Marking·Sweeping 중 Discard, 할당 실패 스윕(목록·집계·예약) 뒤 상태·색인·고리 불변, 재진입(`GetName` 콜백의 Discard) ASan 무결.
+- Discard: 부분 트리 전체 DestroyRequested·조회 NotFound·즉시 같은 이름 재생성(GC 전), RootRef가 남은 객체 Discard 뒤 Resolve Destroyed·WeakObjectRef TryPin Destroyed·GC 뒤 회수, 남은 참조가 Outer 사슬만 남기고 형제는 회수, 재Discard 무동작, (정책 없는 Registry에서) RequestDestroy 뒤 Discard, Reserved 자식 Busy, cutoff Destroyed, Marking·Sweeping 중 Discard, 할당 실패 스윕(목록·집계·예약) 뒤 상태·색인·고리 불변, 재진입(`GetName` 콜백의 Discard) ASan 무결.
 - 소속 보존(결정 8): 패키지 RootRef만 있어도 export 목록 없이 모든 소속 객체 생존(Collect·증분·병렬), 부분 Discard한 객체만 회수, 패키지 Discard 뒤 전체 회수, 슬라이스 사이 생성·Discard, 패키지 정책 Registry에서 RootRef를 Discard 없이 놓으면 `retiredWithoutDiscard` 증가(`assertRetiredWithoutDiscard = false` Registry로), 종료 뒤 회수는 세지 않음, 정책 없는 Registry는 outer → inner를 방문하지 않음, 패키지 정책 Registry의 RequestDestroy·Object::Destroy Unsupported(관찰자 없어도), 정책 없는 Registry에 관찰자를 주면 Fatal(사망 시험).
 - 관찰자: SetReference(null→A, A→B, B→null, 같은 패키지 무기록), 배열 삽입·교체·삭제·비우기(쌍별 합침), StructRefArray 원소 제거·비우기(원소만 trace — 소유자 Trace 호출 수 0), 경로 쓰기(B6)로 바꾼 참조, 패키지 소유 간선 무기록, staged 쓰기 무기록·Commit 합계와 `transaction` = `TransactionId()`, Discard 음수 합계(transaction 0), DestroyRequested 소유자 제거 무기록, 합산(+1·−1이 0이 되어 꺼낼 때 빠짐, 키 처음 생긴 순서), 예약 실패 OutOfMemory 시 변경 없음, 예약 중 재진입(할당 콜백이 다른 SetReference) 재검증, 중첩 예약 Busy, TakeChanges 맞바꿈·allocator 불일치 InvalidArgument·예약 중 Busy·다른 스레드 WrongThread, 같은 패키지 안 대상 교체 무기록·무예약, `maxKeys` 초과 CapacityExceeded·불변(0이 된 키도 셈), 다중 간선 지점의 할당 실패 불변·`processing_` 동안 재진입 Busy, 묶음 순서(Edit −1 키가 Commit +1 키보다 먼저 생겨도 묶음 합으로 판정 — 소비자 시험), `AcquireStructByNative` 실패 시 Unsupported. "Discard Busy면 RootRef 유지"(2절 순서)는 AssetManager 시험(A1)으로 기록한다.
 - 무작위 편집 대조: 임의 순서의 편집·Commit·Discard 뒤 관찰자 누계 = 전체 Trace로 다시 센 패키지 쌍 다중도(속성 시험, 시드 고정).

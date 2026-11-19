@@ -14,10 +14,11 @@
 //   bool on·off·true·false(출력 true·false) / 정수 정규 10진 / 실수 10진·nan·inf·-inf(출력 최단
 //   왕복) / enum 도구 이름(대소문자 무시·접두) / Flags `A+B`(입력 `A|B`도, 0은 빈 값) /
 //   Guid·AssetId 36자 소문자 / Digest256 64자 소문자 / String 그대로 / Name 그대로(NFC 정규화 후
-//   intern, None 출력 `None`) / ObjectRef·WeakRef·Soft resolver(null `none`) / ClassRef 타입 도구
-//   이름·TypeId(null `none`) / Array·StaticArray·Set 쉼표 목록(빈 값 = 빈 컨테이너) / Map `k:v`
-//   쉼표 목록 / Optional 내부 표기(struct 내부는 `{}` — unset은 대입 종류 Unset) / struct
-//   `{}`(기본값).
+//   intern, None 출력 `None`) / ObjectRef·WeakObjectRef·Soft resolver(null `none`) / ClassRef 타입
+//   도구 이름·TypeId(null `none`) / Array·StaticArray·Set 쉼표 목록(빈 값 = 빈 컨테이너) / Map
+//   `k:v` 쉼표 목록 / Optional 내부 표기(struct 내부는 `{}` — unset은 대입 종류 Unset) / struct
+//   `{}`(기본값) / InstancedStruct 타입 도구 이름(그 struct 기본 값으로 형 바꾸기 — 멤버는 경로
+//   `<f>.<m>=v`), 비우기 `none`(리플렉션 B9j).
 //
 // 목록 escape 표(codec 전체에 하나 — TextListEscapeCharacters): 목록 원소 안의 `,`·`;`는 `\,`·`\;`,
 // Map 항목은 처음 나오는 escape되지 않은 `:`에서 나누고 키 안의 `:`만 `\:`로 쓴다(값 안의 `C:\x`는
@@ -83,7 +84,10 @@ enum class TextValueShape : uint8 {
     // 목록(elements) — Array·StaticArray·Set 필드.
     List,
     // Map 항목 목록(elements = 키, values = 값 — 같은 순서·같은 수).
-    Entries
+    Entries,
+    // InstancedStruct 자리의 형 바꾸기(리플렉션 B9j — 텍스트는 타입 도구 이름, single.guid = 그
+    // struct ID로 그 struct 기본 값을 만든다) 또는 비우기(텍스트 `none`, single.guid = 0).
+    InstancedType
 };
 
 // 값 텍스트 하나를 읽은 값, 또는 텍스트로 쓸 값이다. FieldValue는 allocator를 빌린다(값보다 오래
@@ -189,6 +193,18 @@ public:
     // ResolveTextPath가 key 오류를 보고할 때 쓴다.
     TextDiagnosticCode TakeKeyFailure() noexcept;
 
+    // InstancedStruct 뒤 멤버 단계(`row.damage` — 리플렉션 B9j)를 풀 때 그 자리의 지금 담긴
+    // struct를 주는 resolver다(없으면 nullptr — 그런 경로는 ResolveTextPath가 InvalidValue 진단).
+    // 대입 묶음은 준비 상태(같은 묶음의 앞 대입이 바꾼 상자)를 보는 resolver를 대입마다 건다.
+    // resolver는 이 문맥이 쓰는 동안 살아 있어야 한다.
+    PathInstancedTypeResolver* InstancedTypes() const noexcept {
+        return instancedTypes_;
+    }
+
+    void SetInstancedTypes(PathInstancedTypeResolver* resolver) noexcept {
+        instancedTypes_ = resolver;
+    }
+
 private:
     class KeyTextHook final : public PathKeyTextHook {
     public:
@@ -212,6 +228,7 @@ private:
     uint64 consumed_ = 0;
     bool started_ = false;
     KeyTextHook keyHook_;
+    PathInstancedTypeResolver* instancedTypes_ = nullptr;
 };
 
 // 해석한 경로와 그 자리다(약 7 KB — PropertyPathBuffer).
@@ -222,8 +239,11 @@ struct TextPath {
 
 // path(type 스키마로 해석한 경로 — 정규형)가 가리키는 자리를 out에 쓴다. 할당하지 않는다.
 // 오류: 빈 path·정규형이 아닌 단계·없는 필드·모양 불일치(ParsePropertyPath가 만들지 않는 경로)는
+// InvalidArgument다. instanced가 있으면 InstancedStruct 뒤 멤버 단계를 그 자리의 지금 담긴 struct로
+// 푼다(리플렉션 B9j — 대입 묶음은 준비 상태를 보는 resolver를 넘긴다). 없으면 그런 단계는
 // InvalidArgument다.
-Result<void> DescribeTextPath(const TypeLease& type, PropertyPath path, TextSlot& out) noexcept;
+Result<void> DescribeTextPath(const TypeLease& type, PropertyPath path, TextSlot& out,
+                              PathInstancedTypeResolver* instanced = nullptr) noexcept;
 
 // 경로 텍스트를 type(클래스·struct lease)의 스키마로 풀어 out에 쓴다(ParsePropertyPath + KeyHook +
 // DescribeTextPath). 텍스트 byte를 입력 누계에 더하고, 입력 용도의 판정을 경로 전체에 한다.

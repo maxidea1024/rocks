@@ -70,11 +70,13 @@ public:
 // - buffer: 기록 한 건을 담을 고정 영역(준비 버퍼·큐 슬롯)
 //   최소 크기는 LogCaptureMinimumBytes(인자 수)다.
 // - blocks: 큰 값용 블록 provider. 없으면(null) 넘치는 값은 잘린다.
-// - monotonicNanoseconds·threadId·frame: 렌더한 LogEvent에 그대로 실린다.
+// - monotonicTicks: 기록 시각, 단조 tick(platform::MonotonicTicks와 같은 원천). 렌더가 ns로도
+//   바꾼다(LogRenderTarget::tickFrequency). 생산자는 나눗셈 없이 tick만 읽는다.
+// - threadId·frame: 렌더한 LogEvent에 그대로 실린다.
 struct LogCaptureTarget {
     Span<uint8> buffer;
     LogBlockProvider* blocks = nullptr;
-    uint64 monotonicNanoseconds = 0;
+    uint64 monotonicTicks = 0;
     uint64 threadId = 0;
     uint64 frame = 0;
 };
@@ -86,11 +88,14 @@ struct LogCaptureTarget {
 // - context: 캡처한 문맥 항목마다 하나(MaxLogContextDepth칸이면 충분하다). 비우면 문맥을 채우지
 // 않는다. 메시지·속성이 모자라면 잘리고 LogEventFlags::MessageTruncated가 선다. 문맥 칸이 모자라면
 // ContextTruncated다.
+// tickFrequency는 캡처 tick의 초당 수다(0이면 platform::MonotonicTickFrequency). LogEvent의
+// monotonicNanoseconds를 이것으로 환산한다.
 struct LogRenderTarget {
     Span<char> message;
     Span<char> propertyText;
     Span<LogProperty> properties;
     Span<LogProperty> context;
+    uint64 tickFrequency = 0;
 };
 
 namespace detail {
@@ -121,7 +126,7 @@ struct LogCaptureHeader {
     const char* literalTemplate = nullptr;
     uint64 eventId = 0;
     SourceLocation location;
-    uint64 monotonicNanoseconds = 0;
+    uint64 monotonicTicks = 0;
     uint64 threadId = 0;
     uint64 frame = 0;
     LogCaptureValue runtimeTemplate;
@@ -147,6 +152,9 @@ struct LogCaptureTemplate {
     SourceLocation location;
     bool runtime = false;
     const LogArgumentSpec* specs = nullptr;
+    // runtime일 때 인자별 사용자 Formatter spec 검사 함수다(CaptureWithArgs가 채운다, 없으면
+    // nullptr). 리터럴 템플릿은 컴파일 타임에 검사했으므로 쓰지 않는다.
+    const LogSpecCheck* checks = nullptr;
 };
 
 // 타입을 지운 인자 배열로 캡처한다. 공개 진입점은 CaptureLog다.
@@ -175,6 +183,24 @@ FormatArg MakeLogArg(const T& value) noexcept {
     }
 }
 
+// 런타임 템플릿이면 인자별 사용자 Formatter spec 검사 함수 배열을 붙인다(공용 FormatArg를 늘리지
+// 않으려고 로그 캡처 전용 배열로 넘긴다). 리터럴 템플릿은 컴파일 타임에 검사했으므로 그대로다.
+// 모든 런타임 템플릿 진입점(CaptureLog, Log::Write)이 이 함수를 거친다.
+template <typename... Args>
+LogCaptureTemplate WithRuntimeSpecChecks(const LogCaptureTemplate& text) noexcept {
+    if constexpr (sizeof...(Args) == 0) {
+        return text;
+    } else {
+        static constexpr LogSpecCheck checks[] = {LogSpecCheckOf<Args>()...};
+        LogCaptureTemplate checked = text;
+        if (checked.runtime) {
+            checked.checks = checks;
+        }
+
+        return checked;
+    }
+}
+
 template <typename... Args>
 Result<usize> CaptureWithArgs(const LogCaptureTarget& target, LogLevel level,
                               const LogCategory& category, const LogCaptureTemplate& text,
@@ -185,7 +211,8 @@ Result<usize> CaptureWithArgs(const LogCaptureTarget& target, LogLevel level,
         return WriteLogCapture(target, level, category, text, nullptr, 0);
     } else {
         const FormatArg list[] = {MakeLogArg(args)...};
-        return WriteLogCapture(target, level, category, text, list, sizeof...(Args));
+        return WriteLogCapture(target, level, category, WithRuntimeSpecChecks<Args...>(text), list,
+                               sizeof...(Args));
     }
 }
 
@@ -198,6 +225,18 @@ LogCaptureTemplate ToCaptureTemplate(const LogTemplate<Args...>& text) noexcept 
 
 inline LogCaptureTemplate ToCaptureTemplate(const RuntimeTemplate& text) noexcept {
     return {text.Text(), text.EventId(), text.Location(), true, nullptr};
+}
+
+} // namespace detail
+
+namespace detail {
+
+// tick을 ns로 바꾼다(소수 버림, platform::MonotonicNanoseconds와 같은 관계). 곱셈 넘침을 피하려고
+// 몫과 나머지를 따로 바꾼다.
+constexpr uint64 LogTicksToNanoseconds(uint64 ticks, uint64 frequency) noexcept {
+    constexpr uint64 NanosecondsPerSecond = 1000000000;
+    return ticks / frequency * NanosecondsPerSecond +
+           ticks % frequency * NanosecondsPerSecond / frequency;
 }
 
 } // namespace detail
@@ -242,7 +281,7 @@ Result<usize> CaptureLog(const LogCaptureTarget& target, LogLevel level,
 // 캡처 한 건을 렌더하고 event를 채운다.
 //
 // 채우는 칸: level, category, messageTemplate, eventId, message, properties, location, threadId,
-// frame, monotonicNanoseconds, flags. context·threadName·utcTicks는 건드리지 않는다.
+// frame, monotonicTicks·monotonicNanoseconds, flags. context·threadName·utcTicks는 건드리지 않는다.
 //
 // 결과:
 // - 런타임 템플릿 오류: message는 원본 템플릿 + " [template error: <code>]"이고 TemplateError다.

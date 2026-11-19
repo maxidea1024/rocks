@@ -1,5 +1,7 @@
 #include "TraceSessionInternal.h"
 
+#include <TraceCapture/TraceLogSink.h>
+
 // 세션이 Start 때 등록하는 표준 채널과 형이다(Docs/Design/TraceSystem.ko.md 6절). 모두 상수
 // 초기화되는 정적 객체이고, 채널은 꺼진 상태로 등록한다(묶음·명령줄로 켜는 것은 TR5).
 namespace rocks {
@@ -11,6 +13,8 @@ TraceChannel TraceSpanChannel{"span", "Thread-independent time spans"};
 TraceChannel TraceFrameChannel{"frame", "Game and render frame boundaries"};
 TraceChannel TraceContextChannel{"context", "Correlation id context push and restore"};
 TraceChannel TraceTaskChannel{"task", "Task lifetime, dependencies and waits"};
+TraceChannel TraceStatsChannel{"stats", "Trace capture statistics (pool, output, losses)"};
+TraceChannel TraceLogChannel{"log", "Log records (Trace.LogMessageSpec, Trace.LogMessage)"};
 
 namespace detail {
 
@@ -22,6 +26,37 @@ constexpr TraceField ScopeNameFields[] = {
     {"id", TraceFieldType::UInt32, Format::ScopeNameIdOffset},
     {"truncated", TraceFieldType::Bool, Format::ScopeNameTruncatedOffset},
     {"name", TraceFieldType::String, TraceField::Variable},
+};
+
+constexpr TraceField LogMessageSpecFields[] = {
+    {"specId", TraceFieldType::UInt64, Format::LogSpecIdOffset},
+    {"eventId", TraceFieldType::UInt64, Format::LogSpecEventIdOffset},
+    {"line", TraceFieldType::UInt32, Format::LogSpecLineOffset},
+    {"level", TraceFieldType::UInt8, Format::LogSpecLevelOffset},
+    {"category", TraceFieldType::String, TraceField::Variable},
+    {"template", TraceFieldType::String, TraceField::Variable},
+    {"file", TraceFieldType::String, TraceField::Variable},
+    {"function", TraceFieldType::String, TraceField::Variable},
+};
+
+constexpr TraceField LogMessageFields[] = {
+    {"tick", TraceFieldType::UInt64, Format::LogMessageTickOffset},
+    {"thread", TraceFieldType::UInt64, Format::LogMessageThreadOffset},
+    {"frame", TraceFieldType::UInt64, Format::LogMessageFrameOffset},
+    {"specId", TraceFieldType::UInt64, Format::LogMessageSpecIdOffset},
+    {"eventId", TraceFieldType::UInt64, Format::LogMessageEventIdOffset},
+    {"session", TraceFieldType::UInt64, Format::LogMessageCorrelationOffset},
+    {"task", TraceFieldType::UInt64, Format::LogMessageCorrelationOffset + 1 * sizeof(uint64)},
+    {"asset", TraceFieldType::UInt64, Format::LogMessageCorrelationOffset + 2 * sizeof(uint64)},
+    {"entity", TraceFieldType::UInt64, Format::LogMessageCorrelationOffset + 3 * sizeof(uint64)},
+    {"request", TraceFieldType::UInt64, Format::LogMessageCorrelationOffset + 4 * sizeof(uint64)},
+    {"flags", TraceFieldType::UInt32, Format::LogMessageFlagsOffset},
+    {"level", TraceFieldType::UInt8, Format::LogMessageLevelOffset},
+    {"correlationMask", TraceFieldType::UInt8, Format::LogMessageCorrelationMaskOffset},
+    {"truncated", TraceFieldType::Bool, Format::LogMessageTruncatedOffset},
+    {"message", TraceFieldType::String, TraceField::Variable},
+    {"category", TraceFieldType::String, TraceField::Variable},
+    {"template", TraceFieldType::String, TraceField::Variable},
 };
 
 constexpr TraceField CpuScopeBatchFields[] = {
@@ -100,6 +135,19 @@ constexpr TraceField TaskFields[] = {
     {"error", TraceFieldType::String, TraceField::Variable},
 };
 
+constexpr TraceField StatsFields[] = {
+    {"tick", TraceFieldType::UInt64, Format::StatsTickOffset},
+    {"poolInUse", TraceFieldType::UInt64, Format::StatsPoolInUseOffset},
+    {"poolPeak", TraceFieldType::UInt64, Format::StatsPoolPeakOffset},
+    {"poolLimit", TraceFieldType::UInt64, Format::StatsPoolLimitOffset},
+    {"outputBytes", TraceFieldType::UInt64, Format::StatsOutputBytesOffset},
+    {"definitionStore", TraceFieldType::UInt64, Format::StatsDefinitionStoreOffset},
+    {"lostRecords", TraceFieldType::UInt64, Format::StatsLostRecordsOffset},
+    {"definitionsDropped", TraceFieldType::UInt64, Format::StatsDefinitionsDroppedOffset},
+    {"recentBytes", TraceFieldType::UInt64, Format::StatsRecentBytesOffset},
+    {"recentDropped", TraceFieldType::UInt64, Format::StatsRecentDroppedOffset},
+};
+
 constexpr TraceField ContextPopFields[] = {
     {"tick", TraceFieldType::UInt64, Format::ContextPushTickOffset},
 };
@@ -141,11 +189,19 @@ TraceEventType TraceContextPopType{Format::ContextPopType, TraceContextChannel,
                                    Format::ContextPopFixedBytes, ContextPopFields};
 TraceEventType TraceTaskEventType{Format::TaskType, TraceTaskChannel, Format::TaskFixedBytes,
                                   TaskFields, TraceEventFlags::Ordered};
+TraceEventType TraceStatsType{Format::StatsType, TraceStatsChannel, Format::StatsFixedBytes,
+                              StatsFields};
+TraceEventType TraceLogMessageSpecType{Format::LogMessageSpecType, TraceLogChannel,
+                                       Format::LogSpecFixedBytes, LogMessageSpecFields,
+                                       TraceEventFlags::Definition};
+TraceEventType TraceLogMessageType{Format::LogMessageType, TraceLogChannel,
+                                   Format::LogMessageFixedBytes, LogMessageFields,
+                                   TraceEventFlags::Ordered};
 
 Result<void> RegisterStandardTraceTypes(TraceSession& session) noexcept {
     TraceChannel* const channels[] = {&TraceCpuChannel,  &TraceCounterChannel, &TraceMarkChannel,
                                       &TraceSpanChannel, &TraceFrameChannel,   &TraceContextChannel,
-                                      &TraceTaskChannel};
+                                      &TraceTaskChannel, &TraceStatsChannel,   &TraceLogChannel};
     for (TraceChannel* channel : channels) {
         if (auto registered = session.RegisterChannel(*channel, false); !registered) {
             return registered;
@@ -153,11 +209,12 @@ Result<void> RegisterStandardTraceTypes(TraceSession& session) noexcept {
     }
 
     TraceEventType* const types[] = {
-        &TraceScopeNameType,      &TraceCpuScopeBatchType, &TraceCounterDefinitionType,
-        &TraceCounterIntegerType, &TraceCounterFloatType,  &TraceMarkSiteType,
-        &TraceMarkEventType,      &TraceSpanBeginType,     &TraceSpanEndType,
-        &TraceFrameBeginType,     &TraceFrameEndType,      &TraceContextDefinitionType,
-        &TraceContextPushType,    &TraceContextPopType,    &TraceTaskEventType};
+        &TraceScopeNameType,      &TraceCpuScopeBatchType,  &TraceCounterDefinitionType,
+        &TraceCounterIntegerType, &TraceCounterFloatType,   &TraceMarkSiteType,
+        &TraceMarkEventType,      &TraceSpanBeginType,      &TraceSpanEndType,
+        &TraceFrameBeginType,     &TraceFrameEndType,       &TraceContextDefinitionType,
+        &TraceContextPushType,    &TraceContextPopType,     &TraceTaskEventType,
+        &TraceStatsType,          &TraceLogMessageSpecType, &TraceLogMessageType};
     for (TraceEventType* type : types) {
         if (auto registered = session.RegisterEventType(*type); !registered) {
             return registered;

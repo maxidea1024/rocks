@@ -73,13 +73,13 @@ public static partial class PolicyChecks
                relative.StartsWith("Programs/FoundationTests/", StringComparison.Ordinal);
     }
 
-    // 리플렉션 필드 템플릿(rocks::Array·ObjectRefArray·StructRefArray·ObjectRefMap·ObjectRef·WeakRef·SoftObjectRef·ClassRef)의 명시적 인스턴스화·extern
+    // 리플렉션 필드 템플릿(rocks::Array·ObjectRefArray·StructRefArray·ObjectRefMap·ObjectRef·WeakObjectRef·SoftObjectRef·ClassRef)의 명시적 인스턴스화·extern
     // template 선언이다. 그런 선언이 보이면 Clang이 필드 타입을 desugar 정규 철자가 아니라 작성 철자로 출력할 수 있어
     // MetaCompiler의 원소·대상 해석(Binds 미러 조회 등)이 어긋난다(Docs/Design/ReflectionFoundations.ko.md 5.6절). 명시적
     // 특수화(template <>)와 부분 특수화는 대상이 아니다. 주석·문자열을 지운 텍스트 전체에 맞추므로 여러 줄에 걸친 선언도 찾고
     // 주석 안 예시는 잡지 않는다.
     private static readonly Regex ReflectionTemplateInstantiation = Pattern(
-        "\\btemplate\\s+(?:class|struct)\\s+(?:::\\s*)?(?:rocks\\s*::\\s*)?(?:Array|ObjectRefArray|StructRefArray|ObjectRefMap|ObjectRef|WeakRef|SoftObjectRef|ClassRef)\\s*<");
+        "\\btemplate\\s+(?:class|struct)\\s+(?:::\\s*)?(?:rocks\\s*::\\s*)?(?:Array|ObjectRefArray|StructRefArray|ObjectRefMap|ObjectRef|WeakObjectRef|SoftObjectRef|ClassRef)\\s*<");
 
     public static IReadOnlyList<CheckFailure> Runtime(string root)
     {
@@ -92,7 +92,7 @@ public static partial class PolicyChecks
             {
                 int line = 1 + code.AsSpan(0, match.Index).Count('\n');
                 failures.Add(new(Relative(root, path), line, "reflection-container-instantiation",
-                    "explicit instantiation or extern template of a reflected field template (rocks::Array/ObjectRefArray/StructRefArray/ObjectRefMap/ObjectRef/WeakRef/SoftObjectRef/ClassRef)"));
+                    "explicit instantiation or extern template of a reflected field template (rocks::Array/ObjectRefArray/StructRefArray/ObjectRefMap/ObjectRef/WeakObjectRef/SoftObjectRef/ClassRef)"));
             }
         }
 
@@ -184,6 +184,27 @@ public static partial class PolicyChecks
         foreach (string path in NativeSources(root, OwnedSourceRoots))
         {
             string relative = Relative(root, path);
+            if (IsUnderWindowsPublicHeaders(relative))
+            {
+                if (!IsWindowsPublicHeader(relative))
+                {
+                    failures.Add(new(relative, 1, "platform-boundary",
+                        "Platform/Win64 holds only headers directly in the directory (no subdirectories or sources)"));
+                }
+                else if (!HasWindowsOnlyGuard(File.ReadAllText(path, StrictUtf8)))
+                {
+                    failures.Add(new(relative, 1, "platform-boundary",
+                        "Platform/Win64 header must wrap its content in #if ROCKS_PLATFORM_WINDOWS after #include <Base/Compiler.h>"));
+                }
+            }
+
+            // Windows 전용 공개 헤더는 Windows native backend 소스만 포함한다(다른 플랫폼에서는 빈 헤더라 쓰면 선언이 없다).
+            if (!IsWindowsNativeBackend(relative))
+            {
+                ScanFile(path, relative, WindowsPublicHeaderInclude, "platform-boundary",
+                    "Platform/Win64 header included outside a Windows native backend", failures);
+            }
+
             if (IsNativeBackend(relative))
             {
                 continue;
@@ -203,6 +224,9 @@ public static partial class PolicyChecks
     /// <list type="bullet">
     /// <item>Core/Source/Runtime/PlatformBase/Private/{Win64,Mac,Posix,Apple,Android}/</item>
     /// <item>Core/Source/Developer/TestSupport/Private/{Win64,Mac,Posix,Apple,Android}/</item>
+    /// <item>Core/Source/Runtime/PlatformBase/Public/Platform/Win64/*.h(바로 아래 헤더만): Windows 전용 공개 헤더(ComRef·WideString).
+    /// 내용 전체를 <c>#if ROCKS_PLATFORM_WINDOWS</c>로 감싸 다른 플랫폼에서는 비고(공개 헤더 단독 컴파일 검사), native backend 소스만
+    /// 포함한다. PlatformBoundary가 감쌈·위치·포함 범위를 검사한다.</item>
     /// <item>Programs/Commandlet/Private/Win64/</item>
     /// <item>Programs/ShaderToolSpike/Private/Win64/: SH0 도구 스파이크의 DXC COM·D3D12·WGL 측정 코드.</item>
     /// <item>Engine/Source/{Runtime,Developer}/&lt;Module&gt;/Private/{Win64,Mac,Posix,Apple,Android}/: 창·그래픽
@@ -223,6 +247,12 @@ public static partial class PolicyChecks
             return parts[5] is "Win64" or "Mac" or "Posix" or "Apple" or "Android";
         }
 
+        // Windows 전용 공개 헤더(COM 참조·UTF-16 변환)다. 바로 아래 .h만이며 다른 모듈의 Private/Win64 구현만 포함한다.
+        if (IsUnderWindowsPublicHeaders(relative))
+        {
+            return IsWindowsPublicHeader(relative);
+        }
+
         if (parts.Length < 7 || parts[0] != "Core" || parts[1] != "Source" || parts[4] != "Private")
         {
             return false;
@@ -231,6 +261,41 @@ public static partial class PolicyChecks
         bool platform = parts[5] is "Win64" or "Mac" or "Posix" or "Apple" or "Android";
         return (parts[2] == "Runtime" && parts[3] == "PlatformBase" && platform) ||
                (parts[2] == "Developer" && parts[3] == "TestSupport" && platform);
+    }
+
+    private const string WindowsPublicHeaderDirectory = "Core/Source/Runtime/PlatformBase/Public/Platform/Win64/";
+
+    // Windows 전용 공개 헤더를 포함하는 줄이다(<Platform/Win64/...>, "Platform/Win64/...").
+    private static readonly Regex WindowsPublicHeaderInclude = Pattern("^\\s*#\\s*include\\s*[<\"]Platform/Win64/");
+
+    // Windows 전용 공개 헤더의 틀이다. 주석을 뺀 비지 않은 줄이 #pragma once, #include <Base/Compiler.h>,
+    // #if ROCKS_PLATFORM_WINDOWS로 시작하고 #endif로 끝나야 한다(다른 플랫폼에서는 아무 선언도 만들지 않는다).
+    private static readonly Regex PragmaOnceLine = Pattern("^#\\s*pragma\\s+once$");
+    private static readonly Regex CompilerIncludeLine = Pattern("^#\\s*include\\s*<Base/Compiler\\.h>$");
+    private static readonly Regex WindowsGuardLine = Pattern("^#\\s*if\\s+ROCKS_PLATFORM_WINDOWS$");
+    private static readonly Regex EndifLine = Pattern("^#\\s*endif$");
+
+    // Windows용 native backend(경로의 플랫폼 디렉터리가 Win64)인지다.
+    private static bool IsWindowsNativeBackend(string relative) =>
+        IsNativeBackend(relative) && relative.Replace('\\', '/').Split('/').Contains("Win64");
+
+    private static bool IsUnderWindowsPublicHeaders(string relative) =>
+        relative.Replace('\\', '/').StartsWith(WindowsPublicHeaderDirectory, StringComparison.Ordinal);
+
+    // 디렉터리 바로 아래의 .h만 Windows 전용 공개 헤더다(하위 디렉터리·소스 파일은 아니다).
+    private static bool IsWindowsPublicHeader(string relative)
+    {
+        string normalized = relative.Replace('\\', '/');
+        string name = normalized[WindowsPublicHeaderDirectory.Length..];
+        return IsUnderWindowsPublicHeaders(normalized) && name.Length > 2 && !name.Contains('/') &&
+            name.EndsWith(".h", StringComparison.Ordinal);
+    }
+
+    private static bool HasWindowsOnlyGuard(string text)
+    {
+        string[] lines = WithoutComments(text).Split('\n').Select(line => line.Trim()).Where(line => line.Length != 0).ToArray();
+        return lines.Length >= 4 && PragmaOnceLine.IsMatch(lines[0]) && CompilerIncludeLine.IsMatch(lines[1]) &&
+            WindowsGuardLine.IsMatch(lines[2]) && EndifLine.IsMatch(lines[^1]);
     }
 
     /// <summary>shell 문자열을 실행하지 않는다. flags 검증에는 가능한 한 실제 ArgumentList를 전달한다.</summary>

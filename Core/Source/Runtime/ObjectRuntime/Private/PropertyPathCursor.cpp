@@ -1,4 +1,5 @@
 #include <Object/PathCursor.h>
+#include <Object/PreparedStructElements.h>
 #include <Object/SoftObjectRef.h>
 
 // 경로 접근 cursor(detail::PathCursor — Object/PathCursor.h)의 멤버 구현이다. 실패 기록, 정적 대조,
@@ -13,9 +14,15 @@ PathCursor::PathCursor(ObjectRegistry& registry, const ObjectAccessContext& acce
       construction_(target.Transaction()), rootLease_(target.Lease()), rootView_(target.View()),
       rootValue_(target.Storage()), rootAllocator_(target.ValueAllocator()), rootBox_(target.Box()),
       stage_(target.References()), added_(target.AddedElements()), operation_(operation),
-      input_(input), output_(output), failure_(failure) {
+      input_(input), output_(output), failure_(failure), target_(&target) {
     if (failure_) {
         *failure_ = {};
+    }
+}
+
+void PathCursor::MarkAddedElementWritten() noexcept {
+    if (added_ != nullptr) {
+        added_->addedValidated_ = false;
     }
 }
 
@@ -217,6 +224,38 @@ Result<void> PathCursor::Descend(void* structValue) noexcept {
     return result;
 }
 
+Result<void> PathCursor::DescendInstanced(const TypeLease& type, void* value) noexcept {
+    if (!type.IsValid() || !value) {
+        return Fail(ErrorCode::NotFound, PropertyPathError::InstancedEmpty);
+    }
+
+    const StructView target = frames_[current_].target;
+    if (instancedStep_ != current_ || target.IsEmpty() || !(type.Id() == target.Schema().id)) {
+        return Fail(ErrorCode::TypeMismatch, PropertyPathError::StaticTypeMismatch);
+    }
+
+    return Descend(value);
+}
+
+Result<void> PathCursor::PublishInstancedType(const TypeLease& type) noexcept {
+    if (!instancedOut_) {
+        return Fail(ErrorCode::InvalidArgument);
+    }
+
+    if (!type.IsValid()) {
+        instancedOut_->Reset();
+        return Result<void>::Success();
+    }
+
+    auto cloned = type.Clone();
+    if (!cloned) {
+        return Fail(cloned.Error());
+    }
+
+    *instancedOut_ = Move(cloned.Value());
+    return Result<void>::Success();
+}
+
 Result<void> PathCursor::CheckIndex(usize size) noexcept {
     const PathFrame& frame = Frame();
     const bool insertion = operation_ == PathOperation::Insert && IsLast();
@@ -347,6 +386,56 @@ Result<void> PathCursor::CaptureText(const String& text, const AssetId* asset, F
     }
 
     return CheckOwner();
+}
+
+Result<void> PathCursor::ReadTextValue(const Text& text) noexcept {
+    FieldValue candidate(output_->GetAllocator());
+    candidate.kind = ValueKind::Text;
+    // Read는 처음부터 고정을 쥐므로 이 할당의 콜백이 text를 바꾸면 Busy다.
+    auto copied = text.DeepClone(candidate.GetAllocator());
+    if (!copied) {
+        return Fail(copied.Error());
+    }
+
+    candidate.text = Move(copied.Value());
+    return PublishRead(candidate);
+}
+
+Result<void> PathCursor::WriteTextValue(Text& text) noexcept {
+    if (auto pinned = Pin(); !pinned) {
+        return pinned;
+    }
+
+    auto replacement = input_->text.DeepClone(ValueAllocator());
+    if (!replacement) {
+        return Fail(replacement.Error());
+    }
+
+    FieldValue captured(output_ ? output_->GetAllocator() : ValueAllocator());
+    if (output_) {
+        captured.kind = ValueKind::Text;
+        auto previous = text.DeepClone(captured.GetAllocator());
+        if (!previous) {
+            return Fail(previous.Error());
+        }
+
+        captured.text = Move(previous.Value());
+    }
+
+    if (auto alive = CheckOwner(); !alive) {
+        return alive;
+    }
+
+    // 게시: 노드 포인터 교환(할당·반환 없음)이다. 옛 노드는 고정을 푼 뒤 반환한다.
+    Text old = Move(text);
+    text = Move(replacement.Value());
+    pin_.Reset();
+    old.Reset();
+    if (output_) {
+        *output_ = Move(captured);
+    }
+
+    return Result<void>::Success();
 }
 
 Result<void> PathCursor::WriteText(String& text, AssetId* asset) noexcept {

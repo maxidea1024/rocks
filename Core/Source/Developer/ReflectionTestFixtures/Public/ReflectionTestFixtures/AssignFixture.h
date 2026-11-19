@@ -100,7 +100,7 @@ struct AssignHolder final : Object {
     ROCKS_PROPERTY(ReadOnly) int32 locked = 0;
     ROCKS_PROPERTY(ReadOnly) AssignPoint sealed;
     ROCKS_PROPERTY() ClassRef<AssignKindBase> kind;
-    ROCKS_PROPERTY() WeakRef<AssignTarget> peer;
+    ROCKS_PROPERTY() WeakObjectRef<AssignTarget> peer;
     ROCKS_PROPERTY() AssignMixed mixed;
     ROCKS_PROPERTY() ObjectRef<AssignTarget> next;
     ROCKS_PROPERTY(ReadOnly) ObjectRef<AssignTarget> anchorLink;
@@ -109,6 +109,25 @@ struct AssignHolder final : Object {
     ROCKS_PROPERTY() ObjectRefArray<AssignTarget> group;
     ROCKS_PROPERTY() ObjectRefMap<String, AssignTarget> named;
     ROCKS_PROPERTY() AssignBundle bundle;
+};
+
+// 참조 struct 멤버(AssignMixed)를 담은 StructRefArray 원소다(추가된 원소 안 참조 중첩 struct `{}` —
+// B9j–B9m 묶음 리뷰의 B9i5 우려).
+ROCKS_STRUCT()
+struct AssignNest {
+    explicit AssignNest(Allocator& allocator) noexcept : mixed(allocator) {
+    }
+
+    ROCKS_PROPERTY() int32 n = 0;
+    ROCKS_PROPERTY() AssignMixed mixed;
+};
+
+ROCKS_CLASS()
+struct AssignNestHolder final : Object {
+    explicit AssignNestHolder(Allocator& allocator) noexcept : nests(allocator) {
+    }
+
+    ROCKS_PROPERTY() StructRefArray<AssignNest> nests;
 };
 
 // struct Map을 담은 struct다(JSON import MergeByKey가 준비 상태를 보는지 — 리플렉션 B9i 리뷰 반영).

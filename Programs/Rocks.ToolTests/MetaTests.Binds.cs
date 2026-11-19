@@ -48,7 +48,7 @@ internal static partial class MetaTests
                 ("static_assert(::rocks::IsStandardLayoutV<BoundType>", "standard layout for the order check"),
                 ("static_assert(ROCKS_OFFSET_OF(BoundType, x) < ROCKS_OFFSET_OF(BoundType, y)", "declaration order check"),
                 ("[[maybe_unused]] const auto& [m0, m1, m2] = value;", "structured binding count check"),
-                ("detail::StructFieldOps<&::probe::Pair::b>", "member thunk of the real type"),
+                ("detail::StructFieldOps<::probe::Pair,&::probe::Pair::b>", "member thunk of the real type"),
                 ("MakeRuntimeStructOps<::probe::Pair>", "construct and destroy the real type"),
                 ("NativeTypeKey<::rocks::Vector3<float>>()", "class field native key of the real type"),
                 ("GeneratedType<::rocks::Vector3<double>>::Depth < Depth", "mirror member uses the real type specialization")
@@ -61,6 +61,66 @@ internal static partial class MetaTests
             Verify.That(generated.IndexOf("structGeneratedType<::rocks::Vector3<double>>", StringComparison.Ordinal) <
                 generated.IndexOf("structGeneratedType<::probe::Pair>", StringComparison.Ordinal), "mirrors used by a mirror come first");
         });
+        // CurveData CV9: Core enum의 Binds 미러(ROCKS_ENUM(Binds = ...))는 실제 enum의 GeneratedType을 내고 열거자 값을 실제
+        // enum과 대조한다. 실제 타입 필드(enum)는 미러로 풀린다. 실제 타입이 GeneratedType friend를 선언하면 미러가 private
+        // 멤버를 나열할 수 있고, 미러의 static Validate(const 실제 타입&)가 검증 hook이 된다.
+        suite.Add("Meta.BindsEnumMirrorPrivateMembersAndValidate", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler, BindsModule);
+            string source = BindsPreamble +
+                "enum class Mode : rocks::uint8 {\nA = 0,\nB = 2,\n};\n" +
+                "ROCKS_ENUM(Binds = \"probe::Mode\")\nenum class ModeBinding : rocks::uint8 {\nA = 0,\nB = 2,\n};\n" +
+                "class Keeper {\npublic:\nrocks::int32 Count() const noexcept { return count_; }\nprivate:\ntemplate <class>\nfriend struct ::rocks::GeneratedType;\nrocks::int32 count_ = 0;\nMode mode_ = Mode::A;\n};\n" +
+                "ROCKS_STRUCT(Binds = \"probe::Keeper\")\nstruct KeeperBinding {\nROCKS_PROPERTY(Name = \"count\") rocks::int32 count_ = 0;\nROCKS_PROPERTY() Mode mode_ = Mode::A;\n" +
+                "static rocks::Result<void> Validate(const Keeper& value) noexcept { return value.Count() >= 0 ? rocks::Result<void>::Success() : rocks::Result<void>::Failure(rocks::ErrorCode::InvalidArgument); }\n};\n" +
+                "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() Mode mode = Mode::A;\nROCKS_PROPERTY() Keeper keeper;\n};\n}\n";
+            await probe.GenerateAsync(source);
+            using System.Text.Json.JsonDocument descriptor = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(probe.Descriptor));
+            System.Text.Json.JsonElement Type(string name) => descriptor.RootElement.GetProperty("types").EnumerateArray()
+                .Single(type => type.GetProperty("name").GetString() == name);
+            string Target(string type, string field) => Type(type).GetProperty("fields").EnumerateArray()
+                .Single(item => item.GetProperty("name").GetString() == field).GetProperty("value").GetProperty("type").GetString()!;
+            Verify.Equal("probe::Mode", Type("probe::ModeBinding").GetProperty("binds").GetString(), "enum Binds in the descriptor");
+            Verify.Equal(Type("probe::ModeBinding").GetProperty("id").GetString(), Target("probe::Value", "mode"), "real enum field resolves to the enum mirror");
+            Verify.Equal(Type("probe::ModeBinding").GetProperty("id").GetString(), Target("probe::KeeperBinding", "mode_"), "mirror member enum resolves to the enum mirror");
+            string generated = Compact(File.ReadAllText(probe.Output));
+            foreach ((string expected, string reason) in new[]
+            {
+                ("struct GeneratedType<::probe::Mode>", "enum specialization of the real enum"),
+                ("static_assert(static_cast<int64>(::probe::Mode::B) == 2ll", "enumerator value check against the real enum"),
+                ("Span<const char>(\"probe::ModeBinding\", 18)", "enum schema name is the mirror name"),
+                ("NativeTypeKey<::probe::Mode>()", "enum field native key of the real enum"),
+                ("detail::StructFieldOps<::probe::Keeper,&::probe::Keeper::count_>", "private member thunk through the friend"),
+                ("StructValidationResult(::probe::KeeperBinding::Validate(value))", "mirror Validate hook")
+            })
+            {
+                Verify.That(generated.Contains(Compact(expected), StringComparison.Ordinal), "generated code missing " + reason + ": " + expected);
+            }
+
+            Verify.That(!generated.Contains("GeneratedType<::probe::ModeBinding>", StringComparison.Ordinal), "no specialization of the enum mirror type");
+        });
+        // underlying이 다르면 생성 코드 검증 컴파일이 거부한다(열거자 이름·값 차이는 아래 RMC2401이 먼저 거부한다). enum 미러의
+        // 대상이 enum이 아니면 RMC3000, CoreTypeBindings 밖은 RMC2004다. friend가 없는 private 멤버는 여전히 컴파일 실패다(아래
+        // Hidden 사례).
+        AddRejectGroup(context, "Meta.BindsEnumMismatchFailsToCompile", new[]
+            {
+                "ROCKS_ENUM(Binds = \"probe::Mode\")\nenum class ModeBinding : rocks::uint16 {\nA = 0,\nB = 2,\n};\n"
+            }.Select(declaration => BindsPreamble + "enum class Mode : rocks::uint8 {\nA = 0,\nB = 2,\n};\n" + declaration + "}\n"),
+            "RMC3000", "generated metadata contract rejected", BindsModule);
+        // 실제 enum에만 있는 열거자(미러가 빠뜨린 것)·값이 다른 열거자·실제 enum에 없는 열거자는 MetaCompiler가 실제 enum의 AST
+        // 열거자 목록과 1:1로 대조해 RMC2401로 거부한다(묶음 리뷰 2 — 생성 static_assert는 미러 쪽 열거자만 본다).
+        AddRejectGroup(context, "Meta.BindsEnumMustListEveryRealEnumerator", [
+            BindsPreamble + "enum class Mode : rocks::uint8 {\nA = 0,\nB = 2,\nC = 3,\n};\nROCKS_ENUM(Binds = \"probe::Mode\")\nenum class ModeBinding : rocks::uint8 {\nA = 0,\nB = 2,\n};\n}\n",
+            BindsPreamble + "enum class Mode : rocks::uint8 {\nA,\nB,\nC,\n};\nROCKS_ENUM(Binds = \"probe::Mode\")\nenum class ModeBinding : rocks::uint8 {\nA = 0,\nB = 1,\n};\n}\n",
+            BindsPreamble + "enum class Mode : rocks::uint8 {\nA = 0,\nB = 2,\n};\nROCKS_ENUM(Binds = \"probe::Mode\")\nenum class ModeBinding : rocks::uint8 {\nA = 0,\nB = 3,\n};\n}\n",
+            BindsPreamble + "enum class Mode : rocks::uint8 {\nA = 0,\nB = 2,\n};\nROCKS_ENUM(Binds = \"probe::Mode\")\nenum class ModeBinding : rocks::uint8 {\nA = 0,\nC = 2,\n};\n}\n"],
+            "RMC2401", "every enumerator", BindsModule);
+        AddRejectGroup(context, "Meta.BindsEnumTargetMustBeAnEnum", [
+            BindsPreamble + "struct NotEnum {\nrocks::int32 a = 0;\n};\nROCKS_ENUM(Binds = \"probe::NotEnum\")\nenum class ModeBinding : rocks::uint8 {\nA = 0,\n};\n}\n"],
+            "RMC3000", "does not name an enum type", BindsModule);
+        AddRejectGroup(context, "Meta.BindsEnumIsAllowedOnlyInCoreTypeBindings", [
+            BindsPreamble + "enum class Mode : rocks::uint8 {\nA = 0,\n};\nROCKS_ENUM(Binds = \"probe::Mode\")\nenum class ModeBinding : rocks::uint8 {\nA = 0,\n};\n}\n"],
+            "RMC2004", "allowed only in module CoreTypeBindings");
         AddRejectGroup(context, "Meta.BindsIsAllowedOnlyInCoreTypeBindings", [BindsPreamble + BindsVec3 + "}\n"], "RMC2004", "allowed only in module CoreTypeBindings");
         // 별칭·앞의 ::·템플릿 인자 공백은 같은 정규 철자로 모이므로 같은 실제 타입의 두 번째 미러다.
         AddRejectGroup(context, "Meta.BindsConflictsAreRejected", [

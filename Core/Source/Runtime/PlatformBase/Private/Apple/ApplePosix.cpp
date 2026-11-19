@@ -50,6 +50,19 @@ uint64 PosixThreadId() noexcept {
     return static_cast<uint64>(identifier);
 }
 
+// pthread_get_stackaddr_np는 스택의 높은 끝(시작 주소)을 준다. 스택은 아래로 자란다.
+void PosixCurrentThreadStack(uptr& low, uptr& high) noexcept {
+    const pthread_t self = pthread_self();
+    const auto top = reinterpret_cast<uptr>(pthread_get_stackaddr_np(self));
+    const auto size = static_cast<uptr>(pthread_get_stacksize_np(self));
+    if (top == 0 || size == 0 || size > top) {
+        Fatal("pthread_get_stackaddr_np returned an invalid stack");
+    }
+
+    high = top;
+    low = top - size;
+}
+
 // mach_absolute_time은 절전 중 멈춘다(UE FPlatformTime::Cycles64와 같은 원천). 절전을 포함하는
 // mach_continuous_time은 쓰지 않는다.
 uint64 PosixMonotonicTicks() noexcept {

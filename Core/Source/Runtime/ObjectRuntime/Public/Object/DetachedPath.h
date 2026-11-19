@@ -100,6 +100,17 @@ public:
         acceptsReadOnly_ = true;
     }
 
+    // 담은 값 트리 안의 struct 검증 hook을 안쪽부터 부른다(Docs/Design/CurveData.ko.md 9.1절 —
+    // RuntimeValueOps::validateTree). 트리에 hook이 없거나 빈 상자면 성공이다. 거부는
+    // InvalidArgument다. 할당하지 않는다. PathPrepareAttach가 게시된 객체·staged 객체 자리에 놓기
+    // 전에 부르고, 대입 묶음은 진단을 남기려고 게시 전에 먼저 부른다.
+    //
+    // 사용 예:
+    //   if (auto checked = box.ValidateTree(); !checked) {
+    //       return checked;   // 상자 안 커브의 키 시간이 정렬되지 않았다 등
+    //   }
+    Result<void> ValidateTree() const noexcept;
+
 private:
     friend class detail::PathCursor;
     friend struct detail::PathRunner;
@@ -116,6 +127,9 @@ private:
     const EnumSchema* enumeration_ = nullptr;
     const EnumSchema* keyEnumeration_ = nullptr;
     StructView target_{};
+    // 상자 값이 원래 놓였던 자리의 위치 깊이(그 값을 감싼 struct 단계 수 — InstancedStruct 깊이 합
+    // 판정용, 리플렉션 B9j)다. 상자 위 경로의 위치 깊이는 이 값 + 상자 안 단계 수다.
+    uint32 position_ = 0;
 };
 
 // PathPrepareAttach가 찾아 둔 게시 자리 하나다: 대상 값의 주소, 그 형식의 무할당 교환, 상자. 게시는
@@ -257,7 +271,9 @@ Result<void> PathDetach(ObjectRegistry& registry, const ObjectAccessContext& acc
 // box의 필드가 끝 필드와 다르면(다른 스키마 레코드·다른 C++ 형식) TypeMismatch(StaticTypeMismatch),
 // 유효 플래그가 ReadOnly면 Unsupported(ReadOnly — staged 객체는 막지 않는다), 교환할 수 없는 값은
 // Unsupported(NotCopyable), box가 target 자신이면 InvalidArgument. 그 밖의 순서는 PathWrite와
-// 같다(값 검증은 없다 — 상자 안의 값은 경로 연산이 검증하며 넣었다).
+// 같다(값 검증은 없다 — 상자 안의 값은 경로 연산이 검증하며 넣었다). 객체·struct 값 자리에 놓는
+// 상자의 struct 검증 hook은 validateHooks가 참일 때 부른다(거짓은 게시하지 않을 중간 값 —
+// TextCodecOptions::validateStructHooks).
 //
 // 사용 예(게시된 객체):
 //   PreparedAttach prepared;
@@ -266,8 +282,8 @@ Result<void> PathDetach(ObjectRegistry& registry, const ObjectAccessContext& acc
 //   prepared.Publish(batch.Value());
 Result<void> PathPrepareAttach(ObjectRegistry& registry, const ObjectAccessContext& access,
                                const PathTarget& target, PropertyPath path, DetachedValue& box,
-                               PreparedAttach& out,
-                               PropertyPathFailure* failure = nullptr) noexcept;
+                               PreparedAttach& out, PropertyPathFailure* failure = nullptr,
+                               bool validateHooks = true) noexcept;
 
 // path의 끝(단일 강한 참조 위치 — ObjectRef 필드, 인라인 struct·StructRefArray 원소의 ObjectRef
 // 멤버, 정적 배열의 ObjectRef 원소)을 value(ObjectReference)로 바꿀 자리를 찾아 out에 둔다(리플렉션

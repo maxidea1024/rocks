@@ -8,6 +8,18 @@
 
 namespace rocks {
 
+// 리플렉션 생성 코드의 접근점이다(정의는 MetaSchema Meta/GeneratedType.h — Core는 앞 선언만 한다).
+// InterpCurve의 private 멤버를 CoreTypeBindings 미러(Binds)의 생성 코드가 읽고 쓴다.
+template <class>
+struct GeneratedType;
+
+// TryCalcBounds의 결과다: 성분마다 커브가 지나는 최소·최대 값(UE CalcBounds의 OutMin·OutMax).
+template <typename T>
+struct CurveBounds {
+    T minimum;
+    T maximum;
+};
+
 // 최근접 탐색 결과다.
 //   input            최근접 점의 커브 입력값(키 사이 비율을 입력 단위로 바꾼 값, 키와 같은 float).
 //   distanceSquared  찾는 위치와 최근접 점 사이 거리의 제곱.
@@ -47,6 +59,13 @@ template <typename T>
 class InterpCurve {
     static_assert(InterpCurveValue<T>, "InterpCurve supports float, double, Vector2/3/4, "
                                        "Quaternion and LinearColor values");
+
+    // 리플렉션 미러(CoreTypeBindings InterpCurve 미러 — Docs/Design/CurveData.ko.md 12.1절)의 생성
+    // 코드가 private 멤버(points_·looped_·loopKeyOffset_)에 닿는다. 생성 코드는 decode한 값을
+    // 게시하기 전에 미러의 Validate(정렬·유한 입력값·루프 정합)를 부르므로 불변식이 깨진 값을
+    // 게시하지 않는다.
+    template <class>
+    friend struct ::rocks::GeneratedType;
 
 public:
     using Traits = CurveValueTraits<T>;
@@ -427,6 +446,68 @@ public:
 
         return Result<Interval<float>>::Success(
             Interval<float>(points_[0].inValue, points_[points_.Size() - 1].inValue));
+    }
+
+    // 커브가 지나는 값의 성분별 최소·최대다(UE 5.8 FInterpCurve::CalcBounds — InterpCurve.h
+    // 746–772, 구간 식은 math::CurveSegmentBounds). 첫 키 값에서 시작해 Eval과 같은 구간마다 두
+    // 끝 값과 곡선 키 구간의 극값(Hermite 도함수의 근이 구간 안일 때)을 넣는다. 구간 모양은 시작
+    // 키의 모드로 정한다(곡선 모드가 아니면 끝 값만 — Constant 구간도 그렇다).
+    // - UE와 다른 점(설계 15절 22): 루프 커브의 닫는 구간(마지막 키 → 첫 키)의 끝 시간을
+    //   마지막 키 + 루프 offset, 길이를 루프 offset 그대로(Eval과 같다) 둔다 — UE는 첫 키의
+    //   입력값을 넘겨 구간 길이가 음수가 되고 접선 크기와 근 판정이 뒤집힌다. 키 하나의 루프 커브도
+    //   자기 자신으로 가는 닫는 구간을 본다 — UE는 키 하나면 구간을 보지 않지만 Eval은 그 구간을
+    //   Hermite로 평가한다.
+    // - 지원 형식은 Traits::HasBounds(float·double·Vector2/3·LinearColor)다 — quaternion·Vector4는
+    //   컴파일되지 않는다.
+    // 실패: 키가 없으면 NotFound다(UE는 인자로 받은 기본값). 할당하지 않는다.
+    //
+    // 사용 예:
+    //   auto bounds = curve.TryCalcBounds();
+    //   if (bounds) { const float lowest = bounds.Value().minimum; }
+    Result<CurveBounds<T>> TryCalcBounds() const noexcept
+        requires(Traits::HasBounds)
+    {
+        const usize count = points_.Size();
+        if (count == 0) {
+            return Result<CurveBounds<T>>::Failure(ErrorCode::NotFound);
+        }
+
+        constexpr usize Components = Traits::ComponentCount;
+        Scalar minimum[Components];
+        Scalar maximum[Components];
+        Traits::Store(points_[0].outValue, minimum);
+        Traits::Store(points_[0].outValue, maximum);
+        // 구간 수는 Eval과 같다(SegmentCount — 루프면 키 수, 키 하나의 루프도 닫는 구간 하나).
+        const usize segments = looped_ ? count : count - 1;
+        for (usize index = 0; index < segments; ++index) {
+            const bool closing = index == count - 1;
+            const Point& start = points_[index];
+            const Point& end = closing ? points_[0] : points_[index + 1];
+            // 닫는 구간의 길이는 Eval(MakeSegment)과 같은 루프 offset 그대로다.
+            const float endTime = closing ? start.inValue + loopKeyOffset_ : end.inValue;
+            const float duration = closing ? loopKeyOffset_ : end.inValue - start.inValue;
+            Scalar startValue[Components];
+            Scalar startLeave[Components];
+            Scalar endValue[Components];
+            Scalar endArrive[Components];
+            Traits::Store(start.outValue, startValue);
+            Traits::Store(start.leaveTangent, startLeave);
+            Traits::Store(end.outValue, endValue);
+            Traits::Store(end.arriveTangent, endArrive);
+            for (usize component = 0; component < Components; ++component) {
+                Scalar low;
+                Scalar high;
+                math::CurveSegmentBounds(low, high, startValue[component], startLeave[component],
+                                         start.inValue, endValue[component], endArrive[component],
+                                         endTime, duration, start.IsCurveKey());
+                // UE FMath::Min·Max(`A < B ? A : B`, `B < A ? A : B`)와 같은 선택이다.
+                minimum[component] = minimum[component] < low ? minimum[component] : low;
+                maximum[component] = high < maximum[component] ? maximum[component] : high;
+            }
+        }
+
+        return Result<CurveBounds<T>>::Success(
+            CurveBounds<T>{Traits::Load(minimum), Traits::Load(maximum)});
     }
 
     // ---- 자동 접선 ----

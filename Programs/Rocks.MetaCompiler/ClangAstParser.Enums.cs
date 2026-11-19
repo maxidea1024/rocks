@@ -188,7 +188,9 @@ internal sealed partial class ClangAstParser
             Underlying = underlying,
             FlagsEnum = spec.Flags,
             ToolPrefix = spec.ToolPrefix,
-            Enumerators = enumerators
+            Enumerators = enumerators,
+            BindsSpelling = spec.Binds,
+            BindsSite = spec.Binds.Length != 0 ? prefix.Site : null
         });
     }
 

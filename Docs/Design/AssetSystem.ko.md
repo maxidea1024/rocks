@@ -1,6 +1,6 @@
 # 에셋 시스템 설계
 
-기준일: 2026-11-12, 개정 7(개정 6 최종 검증 반영: 저장 쪽 값 치환·SCC 키 튜플·Commit 간선 보고·Windows 디렉터리 동기화·PreserveBorder 정의). 원본 파일 임포트부터 쿠킹된 런타임 데이터 로드까지 에셋의 전체 수명주기와 첫 수직 단면(PNG → Texture Asset → 설정 수정·재임포트 → 플랫폼별 쿠킹 → 런타임 로드)을 정한다. [엔진 구현 계획](EngineImplementationPlan.ko.md)의 결정을 따른다: §5.2(Outer·객체 경로), §5.3(instancing), §6.1(참조 종류), §7(직렬화·스키마 변경), §9(에셋 파이프라인·로딩·패키지·재임포트·텍스처 스트리밍), §24.2(PrimaryAsset·bundle). 계획을 바꾸는 곳은 17절에 모으고 계획 문서도 같이 고친다. 에디터 UI 연동은 범위 밖이며(사용자 결정) 서비스 API와 명령행 도구로 같은 기능을 제공한다.
+기준일: 2026-11-18, 개정 9(A0-G 구현 — 1절 A0-G 행에 범위·스펙 차이, 2절 그래픽 행). 개정 8(텍스처 기반 클래스 `StreamableRenderAsset` — 12.1절, 사용자 결정). 개정 7(개정 6 최종 검증 반영: 저장 쪽 값 치환·SCC 키 튜플·Commit 간선 보고·Windows 디렉터리 동기화·PreserveBorder 정의). 원본 파일 임포트부터 쿠킹된 런타임 데이터 로드까지 에셋의 전체 수명주기와 첫 수직 단면(PNG → Texture Asset → 설정 수정·재임포트 → 플랫폼별 쿠킹 → 런타임 로드)을 정한다. [엔진 구현 계획](EngineImplementationPlan.ko.md)의 결정을 따른다: §5.2(Outer·객체 경로), §5.3(instancing), §6.1(참조 종류), §7(직렬화·스키마 변경), §9(에셋 파이프라인·로딩·패키지·재임포트·텍스처 스트리밍), §24.2(PrimaryAsset·bundle). 계획을 바꾸는 곳은 17절에 모으고 계획 문서도 같이 고친다. 에디터 UI 연동은 범위 밖이며(사용자 결정) 서비스 API와 명령행 도구로 같은 기능을 제공한다.
 
 원칙: 기반이 부족하면 우회하지 않고 기반을 보강한다(사용자 지시). 동작하지 않는 기능을 완성처럼 표시하지 않는다. 상태 표기: **구현**(이번 범위에서 동작·시험), **계약**(API·스키마·포맷이 있고 호출하거나 기본값이 아닌 값을 주면 명시 오류 — `Unsupported`·`UnsupportedSetting`·`UnsupportedCapability` — 를 반환), **후속**(이번 범위에 API도 없음).
 
@@ -12,9 +12,9 @@
 | A0-C | Core: SHA-256(구현됨), Unicode(착수 시 최신 버전 — 2026-11 기준 18.0.0. NFC·NFD·simple case folding·General_Category, UCD 생성기), Default_Ignorable, 결정적 수학(기본 연산만 쓰는 exp2·log2·pow·SinPi·sin, 정확한 8비트 sRGB 표, 부동소수점 환경 guard), CRT 없는 숫자 변환(정확한 파서·최단 표기), JSON 읽기·쓰기(RFC 8259), `RecordList`(`WireType::RecordList`), 데이터 전용 ThirdParty 종류(C1) — 상세와 단계(C1–C6)는 [CoreDataFoundations](CoreDataFoundations.ko.md) | NIST·NormalizationTest·CaseFolding·JSONTestSuite·숫자 변환 대조·결정적 수학 기준값·RecordList 시험 |
 | A0-B | 빌드·MetaCompiler(5.6절, 상세 [ReflectionFoundations](ReflectionFoundations.ko.md) B1–B8): 모듈 소유 메타데이터·모듈별 identity 명세·단위 간 import, `ROCKS_ENUM`, `ROCKS_STRUCT`(값 구조체), 배열 필드(`Array<T>`·`ObjectRefArray<T>`), `SoftObjectRef<T>` 필드, `EditorOnly`·`Required`·`Version=N`·`Name="…"` 지정자, `Sha256Digest` 값 종류, `ROCKS_CLASS(WorldOnly)`(그 밖 클래스의 `AssetLease` 멤버 거부), `AssetId` 값 종류, `ROCKS_NATIVE` 비영속 멤버, 필드 codec thunk·문맥, 툴체인 지문·도구 빌드 ID 주입, World 타입 리플렉션 이전 | 기존 시험 + 새 fixture(단계별 완료 기준은 상세 설계 11절) |
 | A0-O | ObjectRuntime·ObjectSerialization(상세 [ObjectFoundations](ObjectFoundations.ko.md)): Outer·Name(생성 때 정하는 불변 값, 이름 색인·자식 고리·경로 조회), 부분 트리 `Discard`(논리 파괴 + 이름 색인·자식 고리에서 즉시 제거, 메모리는 GC), 패키지 사이 간선 관찰자 `ReferenceObserver`(순 다중도 합산 표), Registry 정책(패키지 없는 객체·이름 있는 패키지·WorldOnly 타입 거부, 패키지 정책 Registry는 outer → inner도 GC 강한 간선이라 소속 객체는 Discard로만 죽는다), 다중 root `Commit`, graph v2(호출자가 준 저장 집합·순서 = localId, 집합 밖 참조는 외부 참조 허락 hook(Import·Null·Reject) 또는 거부, 참조 값 표기(5.1절), 노드 타입은 export 표 기준, EditorOnly 제외, 누락 = 기준 형식 규칙(빠진 필드·멤버는 정책이 아니라 형식 규칙으로 허용되며 기준 값을 뜻한다)과 기준 적용 뒤 실효 값의 Required 진단([RuntimeClassMetadata](RuntimeClassMetadata.ko.md) '클래스 기본값 결정'), 단계형 복원(호출자 Commit)과 `prepare`(로드), 저장 쪽 값 치환은 B4가 구현한 `SubstituteStruct`(bulkId 재매핑 등), Commit 때 패키지 사이 간선 다중도 보고, 외부 참조 목록·번호 재배정), 한도(객체 4096 = export 상한, 외부 참조 65536, 필드 누계 1,048,576, 배열 원소 누계 4,194,304, 객체 경로·Soft 경로 4 KiB, 필드 값·그래프 바이트 64 MiB, 작업량 8 × (필드 + 원소 + 바이트)) | 그래프 왕복·외부 참조·마이그레이션·Discard·관찰자·소속 보존 시험(ObjectFoundations 9절) |
-| 리플렉션 B9 | MetaSchema·ObjectRuntime·ObjectSerialization·MetaCompiler·Core(상세 [리플렉션 B9](ReflectionExtensions.ko.md)): 정수 폭·enum underlying 8종, struct `Atomic`·Core `Transform3f`·`Transform3d`, `Name`, `WeakRef` PROPERTY·`ClassRef<Base>`·타입 도구 이름, `Optional`, Core `OrderedMap`·`OrderedSet`·`ObjectRefMap`·경로 key 단계, 정적 배열, 필드 플래그(DuplicateTransient·NonPIEDuplicateTransient·SaveGame·TextExportTransient)·클래스 Transient·Deprecated·Within, 텍스트·JSON codec `ReflectionText`(대입 묶음 Prepare → Publish), `InstancedStruct`, struct 상속, `Text`, bitfield bool | 하위 단계별 시험(ReflectionExtensions 17절) |
-| Curve | Core 수학·리플렉션(설계는 착수 때 — 2026-11-15 사용자 결정 "B9 직후, A0-G 앞"): UE 5.8 `FInterpCurve<T>`·`FInterpCurvePoint`(Core/Public/Math — 키별 보간 모드·접선 자동 계산·값·미분 평가·루프·최근접 탐색, 스플라인 기반) 대응 Core 수학 층(**구현됨** 2026-11-16 — `InterpCurve<T>`, [키 커브](../Implementation/InterpCurve.ko.md))과 `FRichCurve`·`FSimpleCurve`·`FRealCurve`·`FIndexedCurve`·`FKeyHandle`·`FIntegralCurve`·`FNameCurve`·`FStringCurve`(Engine/Classes/Curves — 가중 접선·외삽·압축) 대응 값 타입과 리플렉션 미러. 에셋 층(`UCurveFloat`·`UCurveVector`·`UCurveLinearColor`·`UCurveTable`·`FRuntimeFloatCurve`·`FCurveTableRowHandle`)은 A1 에셋 시스템 뒤 A 단계 에셋 타입 | 수학 층: `MathInterpCurveTests`·`MathInterpCurveGoldenTests`(경계·UE 5.8 식 비트 대조·double reference). 값 타입·미러는 설계·교차검증 뒤 정한다 |
-| A0-G | GraphicsTypes·Graphics: 차원(2D·Cube·3D·2DArray·CubeArray)·형식(R8·RG8·RGBA8·R16·RG16·RGBA16·R16F·RG16F·RGBA16F·R32F·RG32F·RGBA32F·BGRA8, sRGB 변형)·view swizzle(D3D12 `Shader4ComponentMapping`, OpenGL 채널별 `TEXTURE_SWIZZLE_R/G/B/A` — `TEXTURE_SWIZZLE_RGBA`는 OpenGL ES에 없다)·샘플러 W축 주소·필터 5종(Point·Bilinear·Trilinear·AnisotropicPoint·AnisotropicLinear — 기존 `Nearest`·`Anisotropic`의 이름 변경 포함)·**깊이 비교 샘플러**(비교 함수, 그림자용 — [렌더 기반](RenderBase.ko.md) SX13), 쿠킹 데이터 샘플러 D3D12·OpenGL. 착수 전 반영할 셰이더·렌더 요구: [셰이더 시스템](ShaderSystem.ko.md) 5.2절 G1(backend 중립 정의, Vulkan·Metal·GLES로 옮길 수 있을 것, 지원 표와 `UnsupportedCapability`)·G2(OpenGL 구현은 OpenGL ES 3.2 공통 API, 데스크톱 전용 DSA를 늘리지 않음, ES 확장 의존 형식·필터 조건)·G3(VulkanGraphics가 A0-G 범위를 받음, SH2), 텍스처 desc의 샘플러는 기본값이고 바인딩 때 다른 샘플러를 지정할 수 있게 둔다(렌더 기반 결정 R12, 바인딩 쪽은 GX2) | self-test 확장 |
+| 리플렉션 B9 | MetaSchema·ObjectRuntime·ObjectSerialization·MetaCompiler·Core(상세 [리플렉션 B9](ReflectionExtensions.ko.md)): 정수 폭·enum underlying 8종, struct `Atomic`·Core `Transform3f`·`Transform3d`, `Name`, `WeakObjectRef` PROPERTY·`ClassRef<Base>`·타입 도구 이름, `Optional`, Core `OrderedMap`·`OrderedSet`·`ObjectRefMap`·경로 key 단계, 정적 배열, 필드 플래그(DuplicateTransient·NonPIEDuplicateTransient·SaveGame·TextExportTransient)·클래스 Transient·Deprecated·Within, 텍스트·JSON codec `ReflectionText`(대입 묶음 Prepare → Publish), `InstancedStruct`, struct 상속, `Text`, bitfield bool | 하위 단계별 시험(ReflectionExtensions 17절) |
+| Curve | Core 수학·리플렉션(설계는 착수 때 — 2026-11-15 사용자 결정 "B9 직후, A0-G 앞"): UE 5.8 `FInterpCurve<T>`·`FInterpCurvePoint`(Core/Public/Math — 키별 보간 모드·접선 자동 계산·값·미분 평가·루프·최근접 탐색, 스플라인 기반) 대응 Core 수학 층(**구현됨** 2026-11-16 — `InterpCurve<T>`, [키 커브](../Implementation/InterpCurve.ko.md))과 `FRichCurve`·`FSimpleCurve`·`FRealCurve`·`FIndexedCurve`·`FKeyHandle`·`FIntegralCurve`·`FNameCurve`·`FStringCurve`·`FCompressedRichCurve`(Engine/Classes/Curves — 가중 접선·외삽·압축) 대응 값 타입과 리플렉션 미러 — **Curve 단계 CV1–CV10 완료**(2026-11-18, [커브 데이터](CurveData.ko.md) 17절): Core `KeyCurveMath`·`FrameRate`, `Curves` 모듈(`TangentCurve`·`PlainCurve`·계단 커브 셋·`CurveKeyHandleTable`·`PackedTangentCurve`), 리플렉션 struct 검증 hook·`Array<uint8>` Bytes wire·Core enum Binds, CoreTypeBindings `InterpCurve` 미러 다섯 형식·`TryCalcBounds`. 에셋 층(`UCurveFloat`·`UCurveVector`·`UCurveLinearColor`·`UCurveTable`·`FRuntimeFloatCurve`·`FCurveTableRowHandle`)은 A1 에셋 시스템 뒤 A 단계 에셋 타입이고 경계는 커브 데이터 14절이다 | 수학 층: `MathInterpCurveTests`·`MathInterpCurveGoldenTests`·`MathInterpCurveBoundsTests`·`MathKeyCurve*Tests`·`FrameRateTests`. 값 타입: `Curves/Tests`(UE 5.8 식 참조 golden·독립 고정 벡터·편집·핸들 표·압축 byte 대조·리플렉션 왕복·hook 거부 — 커브 데이터 16절) |
+| A0-G | GraphicsTypes·Graphics: 차원(2D·Cube·3D·2DArray·CubeArray)·형식(R8·RG8·RGBA8·R16·RG16·RGBA16·R16F·RG16F·RGBA16F·R32F·RG32F·RGBA32F·BGRA8, sRGB 변형)·view swizzle(D3D12 `Shader4ComponentMapping`, OpenGL 채널별 `TEXTURE_SWIZZLE_R/G/B/A` — `TEXTURE_SWIZZLE_RGBA`는 OpenGL ES에 없다)·샘플러 W축 주소·필터 5종(Point·Bilinear·Trilinear·AnisotropicPoint·AnisotropicLinear — 기존 `Nearest`·`Anisotropic`의 이름 변경 포함)·**깊이 비교 샘플러**(비교 함수, 그림자용 — [렌더 기반](RenderBase.ko.md) SX13), 쿠킹 데이터 샘플러 D3D12·OpenGL. 착수 전 반영할 셰이더·렌더 요구: [셰이더 시스템](ShaderSystem.ko.md) 5.2절 G1(backend 중립 정의, Vulkan·Metal·GLES로 옮길 수 있을 것, 지원 표와 `UnsupportedCapability`)·G2(OpenGL 구현은 OpenGL ES 3.2 공통 API, 데스크톱 전용 DSA를 늘리지 않음, ES 확장 의존 형식·필터 조건)·G3(VulkanGraphics가 A0-G 범위를 받음, SH2), 텍스처 desc의 샘플러는 기본값이고 바인딩 때 다른 샘플러를 지정할 수 있게 둔다(렌더 기반 결정 R12, 바인딩 쪽은 GX2). **구현**(2026-11-18, 렌더 세션과 범위 확정 — 형식 목록은 [픽셀 형식](PixelFormat.ko.md) PF1–PF3에서 이미 끝났고, MSAA 텍스처·resolve, mip·slice 개별 view와 attachment, 바인딩 샘플러(GX6·SH2)는 렌더 세션 몫): GraphicsTypes `TextureDimension`(UE `ETextureDimension` 순서)·`CubeFace`(+X·−X·+Y·−Y·+Z·−Z, UE `ECubeFace`·D3D 면 순서와 방향)·`SwizzleSource`·`ChannelSwizzle`(`ComposeSwizzle`)·`CompareFunction`(Graphics `PipelineState.h`에서 옮겨 깊이 상태와 샘플러가 함께 쓴다)·`SamplerDesc`(`Filter` 5종 UE `ESamplerFilter` 순서, `addressW`, `comparison`·`compare`). Graphics `TextureDesc{dimension, depth, arraySize, swizzle}`·`TextureViewDesc::swizzle`·`ValidateTextureDesc`·`CheckTextureLimits`·`TextureSliceCount`·`TextureMipBytes`·`TextureDataBytes`, subresource = mip × slice(`SubresourceRange` slice 범위, `SubresourceStates`, 분리 전이 목록 지문은 slice 범위를 포함하고, begin·end 사이 접근 검사는 기록 장치(RenderBase 시험용 `RecordingDevice`)만 slice까지 본다 — 실제 backend는 이 검사를 하지 않고 D3D12 end·Vulkan begin 때 before 상태를 대조한다), 네 backend(D3D12·D3D11·Vulkan·OpenGL ES)의 차원별 생성·업로드·SRV·`ReadTexture`·전이, RenderGraph 풀 키(차원·깊이·층·swizzle)와 slice 단위 전이 기록. 지원 표는 [렌더 기반](RenderBase.ko.md) 4.4절 GX2 "구현(A0-G)"이다. 스펙과 다르게 정한 것: (1) 지원하지 않는 조합의 오류는 `UnsupportedCapability`가 아니라 Graphics의 기존 장치 능력 오류 `Unsupported`다(`UnsupportedCapability`는 A1에서 Core에 더하며, 그때 Graphics 계약을 함께 바꿀지 정한다). (2) 초기 픽셀·`UpdateTexture`·`ReadTexture`의 배치는 mip 우선(mip 하나 = 그 mip의 모든 slice·깊이 면)이다(mip별 스트리밍과 같은 단위). (3) view swizzle은 원 텍스처의 `TextureDesc::swizzle`을 이어받지 않는 view 형식 기준 대응이다. (4) D3D11은 view swizzle이 없어 항등이 아니면 `Unsupported`(셰이더 대체 없음). `AnisotropicPoint`는 하드웨어 대응이 없는 backend(D3D11, OPTIONS19 `AnisoFilterWithPointMipSupported`가 없는 D3D12)에서 UE처럼 `AnisotropicLinear`로 만든다(2026-11-18 사용자 결정 — 바꾼 사실은 `DeviceFeatures::anisotropicPointFilter` 거짓과 처음 한 번의 Debug 로그로 드러나고, 쿠킹 프로필은 UE 기본값(World 그룹 aniso + point)을 그대로 쓴다). 비교 샘플러는 깊이 형식(Depth·DepthStencil)에만 붙고(아니면 `InvalidArgument`), 그 텍스처의 view는 깊이 plane만 읽는다. (5) 비교 샘플러는 UE의 `SCF_Never`·`SCF_Less`가 아니라 `comparison` 표시 + `CompareFunction` 전체다. (6) 2D가 아닌 RenderTarget·DepthStencil과 다중 plane 형식(D24S8·D32S8·비디오)의 2D 아닌 차원은 `Unsupported`, OpenGL ES의 2D 아닌 깊이 텍스처 `ReadTexture`는 `Unsupported`다. (7) "쿠킹 데이터 샘플러 D3D12·OpenGL"은 AssetRuntime(A1)이 아직 없어 장치 계약 쪽만 했다: `TextureDesc::sampler`의 모든 값(필터·이방성·U·V·W 주소·border 색·비교)을 네 backend가 그대로 쓴다. `TexturePlatformData` → `TextureDesc` 연결은 A1·A5다 | self-test 확장(Sandbox `--self-test` RunTextureChecks: 차원별 왕복·셰이더 읽기·cube 면 방향·slice 전이, staging 업로드(배열·cube·3D, offset 0·512), BC1 배열·cube·3D 왕복, swizzle·A8 합성·view 독립, swizzle은 attachment·ReadTexture에 적용되지 않음, W축 주소, 비교 샘플러(점·선형 PCF), 필터 5종) |
 | A1 | AssetRuntime: 패키지 포맷 v1, `Package`·`Asset`, 에셋 객체 Registry, 쿠킹 매니페스트(`CookedManifest.rman`), 로더(worker IO·압축 해제, Game 스레드 객체 생성, SCC), `AssetManager`(scope·PrimaryAsset·bundle), `CancelToken`·`TaskLane`·`LoadPriority`, Core ErrorCode 추가(`UnsupportedCapability`·`AlreadyRegistered`·`ScopeClosed`), EngineAssets 모듈 | 포맷·SCC·수명·scope 시험 |
 | A2 | AssetDatabase: `ProjectLayout`, 경로 정책, 인덱스(검색·의존·별칭·진단·캐시·감시), 저장·dirty, 이동·복제·삭제, 임포트 프레임워크 | 인덱스·이동·동시 쓰기 시험 |
 | A3 | AssetNugget | 적중·무효화·손상·동시 기록·GC 시험 |
@@ -26,14 +26,14 @@
 
 | 영역 | 있는 것 | 부족한 것 → 보강 |
 |---|---|---|
-| 객체 | `ObjectRegistry`(ContextId 문맥)·`RootRef`·`ObjectRef`(같은 Registry 안에서만)·`WeakRef`·`Borrow`(다른 문맥 Registry는 WrongContext), `ConstructionContext`(스테이징한 객체를 한 번에 공개, RootRef는 첫 객체에만), `TypeId = Guid` | Outer·Name, 다중 root Commit(root마다 RootRef) → A0-O([ObjectFoundations](ObjectFoundations.ko.md)) |
+| 객체 | `ObjectRegistry`(ContextId 문맥)·`RootRef`·`ObjectRef`(같은 Registry 안에서만)·`WeakObjectRef`·`Borrow`(다른 문맥 Registry는 WrongContext), `ConstructionContext`(스테이징한 객체를 한 번에 공개, RootRef는 첫 객체에만), `TypeId = Guid` | Outer·Name, 다중 root Commit(root마다 RootRef) → A0-O([ObjectFoundations](ObjectFoundations.ko.md)) |
 | 리플렉션 | MetaCompiler: 스칼라·Guid·String·`ObjectRef`, 모든 비정적 필드 리플렉션 필수, 상속 base·참조 대상은 같은 생성 단위, 스키마 버전 1 고정, 타깃 소유 메타데이터·명세 | → A0-B([ReflectionFoundations](ReflectionFoundations.ko.md)) |
 | 직렬화 | Archive·Record(TLV, 반복 필드 없음), `SaveObjectGraph/LoadObjectGraph`(단일 root, 내부 Commit, 마이그레이션 콜백, maxObjects 1024) | → A0-O graph v2(호출자 저장 집합, 단계형 복원·호출자 Commit, 외부 참조 — ObjectFoundations 5절), `RecordList` → A0-C |
 | 비동기 | `WorkerScheduler`(DAG·취소), `AsyncReadFile/AsyncWriteFile`(IOCP, `Flush`) | 로더가 사용(11절) |
 | 파일 | `FileSystem`, `CreateNew`, no-replace Move, `Path`, Win64는 `FILE_SHARE_DELETE` 열기 | → A0-P, VFS(APK) → 후속 |
 | 해시·텍스트 | CRC32, `NameKey`, UTF-8 검증·`CodePointRange` | SHA-256·Unicode·JSON → A0-C |
 | 프로세스 | 없음 | 임포트 worker process는 17절 |
-| 그래픽 | Format RGBA8 2종, 2D·mip·샘플러 | → A0-G |
+| 그래픽 | `PixelFormat` 전체(PF1–PF3), 차원 5종·view swizzle·샘플러 W축·필터 5종·비교 샘플러(A0-G 구현) | 바인딩 샘플러 → GX6 |
 | 도구 | `CommandletRegistry`, `Programs/Commandlet` | `asset-*` → A6 |
 | 기존 에셋 코드(미커밋) | AssetRuntime(단일 `.rasset`), AssetTools(BMP·TGA·PSD·PNG 디코더 — PNG는 zlib 대기, 설정·mip 빌드) | 대체. 디코더 → ImageCore, mip → TextureTools |
 | 외부 라이브러리 | Core/ThirdParty(zlib·LZ4·Zstd), Core `Compression` 모듈 | PNG zlib·bulk Zstd에 사용. 이미지 디코더는 자체 구현 |
@@ -151,7 +151,7 @@ offset size 필드
   - export 집합은 Outer 체인이 이 패키지에 닿는 모든 객체다(Outer 표에서 정한다 — 참조 순회로 정하지 않는다). 저장 불가 객체(클래스가 Transient·Deprecated인 객체와 그 부분 트리)는 `IsUnsaveableObject`로 걸러 빼고, 그 객체를 가리키는 참조는 null + 진단으로 저장한다(graph 저장 정책 Exclude — [리플렉션 B9](ReflectionExtensions.ko.md) 9.2절). 패키지 정책 Registry의 자식 고리가 소속 객체를 붙잡으므로 이 집합은 GC 시점과 무관하다([ObjectFoundations](ObjectFoundations.ko.md) 1.7절). export index는 1부터(0 = 패키지 자신). 저장 순서는 대표 에셋, 이후 Outer 깊이 우선이며 같은 Outer 안은 이름 순(4.2절 정렬)이다. writer가 이 순서를 정해(`CollectInners(DepthFirst)`) graph v2에 넘기고 graph v2의 localId k = export k다. graph v2 노드 표의 outer 0은 Exports outerIndex 0과 같이 패키지(기준 Outer)다(A0-O — ObjectFoundations 5.1절).
   - export 표의 유일성: export 1이 대표 에셋이고 그것만 Primary 표시·빈 이름·outerIndex 0을 가진다. 나머지 export는 outerIndex ≥ 1(자기 index보다 작다)이고 같은 Outer 안에서 이름이 유일하다. 위반은 `CorruptPackage`.
   - object import 표의 유일성: outerImportIndex가 0이 아니면 자기 index보다 작고 같은 assetId의 항목을 가리켜야 하며, (assetId, 객체 경로)는 중복되지 않는다. 위반은 `CorruptPackage`.
-  - WeakRef 필드는 같은 패키지(그래프) 안 대상만 보존하고 밖 대상은 null + 진단으로 저장한다(weak import 없음 — ReflectionExtensions 5.1절).
+  - WeakObjectRef 필드는 같은 패키지(그래프) 안 대상만 보존하고 밖 대상은 null + 진단으로 저장한다(weak import 없음 — ReflectionExtensions 5.1절).
   - 패키지 밖 객체로의 참조는 object import다. 다른 패키지에 속하면 import, 어떤 패키지에도 속하지 않으면 저장을 `UnpackagedReference`로 거부한다.
   - Objects 섹션의 참조 값(u32): 0 = null, 1–0x7FFFFFFF = export index, 0x80000000 | i = object import index i(1부터). export 수·import 수를 넘는 값과 0x80000000(i = 0)은 `CorruptPackage`. Exports의 outerIndex도 export index다(0 = 패키지).
   - 객체 타입의 원천은 Exports.typeId 하나다. graph v2 노드는 타입을 따로 쓰지 않고 export를 가리키며, 모든 export의 typeId는 Summary의 타입 버전 표에 있어야 한다(없으면 `CorruptPackage`).
@@ -222,6 +222,23 @@ ImportRecord (스키마 Guid, 버전 1)
 - 부동소수점: 빌드 전체가 이미 `-ffp-contract=off`이고 fast-math를 쓰지 않으므로 모듈별 모델은 두지 않는다(clang-cl의 `/fp:precise`는 contract=on을 뜻하고 `/WX`에서 옵션 충돌 경고가 오류가 되므로 쓰지 않는다). 결정적 수학 모듈의 fmadd·`long double`·외부 심볼(`llvm-nm`) 검사는 C3에서 모든 구성에 구현되었다([CoreDataFoundations](CoreDataFoundations.ko.md) 2절). `-fno-math-errno`는 clang-cl이 그 형태를 받지 않아 쓰지 않는다.
 - 빌드가 주입하는 상수: 툴체인 지문(너겟 키, 구성·호스트 경로 제외)과 도구 빌드 ID(진단·캐시 무효화용, 입력 내용 해시 기반 — 패키지 Summary에는 넣지 않고 쿠킹 보고서·AssetIndex 캐시 header에 기록)를 Rocks.Build가 실행 파일마다 생성 번역 단위로 넣는다([ReflectionFoundations](ReflectionFoundations.ko.md) 8.1절·결정 17).
 - 엔진 World 타입(Level·Actor·Component)은 `ROCKS_CLASS(WorldOnly)`로 옮긴다(B8).
+### 5.7 구현에서 정한 점(A1a — 패키지 포맷 v1)
+
+A1a 구현(`Engine/Source/Runtime/AssetRuntime` — `PackageFormat.h`·`PackageWriter.h`·`PackageReader.h`·`PackageLoad.h`)이 위 절에서 비어 있던 것을 다음과 같이 정했다.
+
+1. **표 섹션의 바이트 배치**: Exports·ObjectImports·Dependencies·BulkIndex는 Record가 아니라 고정 배치다(`u32 count` + 항목, 정수 little-endian, Guid high·low, 문자열은 `u64 길이 + UTF-8`). Exports 항목 = `{name, typeId, outerIndex u32, flags u32}`, ObjectImports = `{assetId, outerImportIndex u32, name, typeId}`, Dependencies = `{assetId, kind u32, expectedTypeId, flags u32(bit 0 required)}`, BulkIndex = `{bulkId u32, flags u32, offset u64, storedBytes u64, rawBytes u64, codec u32, crc32 u32, sha256 32B}`. Summary만 Record다(스키마·필드 Guid는 `Private/PackageInternal.h`, 버전 표는 RecordList `{id, version}`, 엔진 버전은 중첩 Record `{주, 부, 패치}`, 프로파일 id는 String·설정 SHA-256은 Bytes 32). 섹션 schemaVersion은 모두 1이다.
+2. **패딩·빈 섹션**: 섹션 offset은 정확히 앞 섹션 끝을 정렬한 값이어야 하고(사이 byte는 0), 섹션 표 offset도 마지막 섹션 끝을 8 정렬한 값이다. bytes 0인 섹션은 거부한다 — Bulk만 예외(entry가 모두 0 byte일 때). 존재하는 표 섹션의 count 0도 거부한다.
+3. **Exports 순서 검증**: reader가 깊이 우선 순서(outer는 바로 앞 export 또는 그 조상)와 같은 Outer 안 이름 byte 오름차순(같은 byte 이름 중복 포함)을 검사한다. 대소문자·정규화만 다른 중복은 그래프 1단계(형제 유일성)가 잡는다.
+4. **객체 단위 EditorOnly**: Exports flags의 EditorOnly(2)는 v1에서 예약이다. 객체를 EditorOnly로 표시하는 클래스 지정자가 없으므로 writer는 0을 쓰고 reader는 켜진 비트를 `CorruptPackage`로 거부한다(지정자가 생기면 schemaVersion을 올린다).
+5. **Dependencies 합성 규칙**(writer와 로드 대조가 같은 함수 `MergeDependencyUses`): 에셋마다 hard 계열(외부 참조 대상 객체)은 EditorOnly가 아닌 쓰임이 하나라도 있으면 Hard, EditorOnly 쓰임만 있으면 EditorOnly, soft 계열도 같다(Soft·EditorOnly). 두 계열이 모두 EditorOnly면 EditorOnly 항목 하나다. required는 그 종류를 정한 쓰임들의 OR다. expectedTypeId는 Hard만 저장 때 대상 패키지 대표 에셋의 타입이고 나머지는 0이다(Soft 대상의 타입은 `RequestAsset`의 expectedType이 판정한다). 로드 대조는 (assetId, kind, required)의 정확한 일치(에디터 읽기 전용은 (assetId, kind) 부분집합)이며 모든 import의 에셋은 Hard 또는 EditorOnly 의존이어야 한다.
+6. **bulk**: writer는 저장 그래프의 struct 치환 hook(`SubstituteStruct`)으로 `BulkDataRef`를 첫 출현 순 1부터 다시 매기고 (옛 id → 새 id) 표를 돌려준다. raw byte는 `PackageBulkSource`에서 얻어 크기·SHA-256을 대조한다(다르면 `CorruptPackage`). entry의 EditorOnly 표시는 그 entry의 모든 참조 위치가 EditorOnly일 때다. Zstd 압축이 크기를 줄이지 못하면 그 entry는 None으로 저장한다(결정적). 쿠킹 패키지 v1은 로더가 패키지 전체를 읽으므로(SHA-256 확인) 압축을 푼 raw를 `Package`가 소유하고 `Package::BulkBytes(ref)`로 준다(mip 부분 읽기는 TextureStreaming 단계).
+7. **Package**: 하드 의존 패키지 목록(`ObjectRefArray<Package>`)은 두지 않는다 — AssetManager의 상주 단위 표가 의존과 간선 다중도를 가진다. `Package`의 id(Transient·ReadOnly)·종류·bulk는 로드가 Commit 전에 설정하고, 대표 `Asset`의 `assetId`(Transient·ReadOnly)도 같이 설정한다. 로드가 아닌 생성은 `NewPackage(registry, access, id, kind)`다.
+8. **진단 모델**: API는 `Result`의 `ErrorCode`, 분류는 `AssetDiagnostic{code, error, asset, related, section, detail}` out 인자다(4.6절 이름표 `AssetDiagnosticCode`). 손상은 `InvalidArgument` + `CorruptPackage`, 버전 축은 `Unsupported` + `UnsupportedVersion`·`NewerVersion`, 할당 실패는 진단 코드 None + 원래 오류다. 그래프 단계 오류는 할당·스레드·종료 오류를 그대로, 미등록 타입(NotFound)·버전(Unsupported)은 `UnsupportedVersion`, 나머지는 `CorruptPackage`로 분류하고 원래 오류를 `error`에 남긴다.
+9. **종류 불일치·버전 판정 보강**: 쿠킹을 기대하는 reader가 에디터 패키지를 받으면 `UnsupportedVersion`(다시 쿠킹), 에디터를 기대하는 reader가 쿠킹 패키지를 받으면 `CorruptPackage`다. 쿠킹 패키지의 미등록 export 타입은 `UnsupportedVersion`, 에디터는 읽기 전용이다. 커스텀 버전 표는 쿠킹이면 현재 표와 전체가 같아야 하고 에디터는 높거나 모르는 id면 읽기 전용이다. 쿠킹 로드에서 Required 실효 값 누락은 `CorruptPackage`다(writer가 Required null을 거부하므로).
+10. **로드 단계 나눔**: `PackageLoadState`(소유 스레드에서 생성 → `Prepare`는 어느 스레드: 헤더·표·섹션 검증, bulk 해제·SHA-256, graph 1단계, 저장 버전·BulkDataRef·Dependencies 대조) → `InstantiatePackages`(소유 스레드, SCC 묶음 한 트랜잭션: Package·노드 생성 → import 해석 → 적용 → Required → id·bulk 설정) → 호출자 Commit. 묶음 밖 import는 `PackageImportResolver`가 찾는다.
+11. **bulk 해제 메모리 상한(설계 메모)**: `DecodePackageBulk`는 BulkIndex의 rawBytes 합만큼 출력 버퍼를 먼저 잡은 뒤 entry마다 풀고 SHA-256을 대조한다. codec None은 stored = raw이고 stored가 파일 안에 있어야 하므로 raw가 파일 크기를 넘지 못한다. Zstd entry는 손상된 rawBytes가 작은 stored로 큰 할당을 요구할 수 있으므로 합의 상한 `PackageLoadOptions::maxBulkRawBytes`(넘으면 `CapacityExceeded` — 자원 한도라 손상이 아니다)가 그 할당을 묶는다. 기본값 16 GiB는 시험·도구용 상한이고, 런타임 로더(A1c)는 매니페스트의 패키지 크기와 11.5절 1번의 임시 버퍼 예산으로 로드 작업마다 이 값을 정한다(예산을 넘는 패키지는 대기 — 같은 절). Zstd frame header의 내용 크기와 rawBytes를 할당 전에 대조하는 검사는 Compression 모듈에 frame 크기 조회 API가 생기면 더한다(지금은 해제 뒤 크기·SHA-256 대조가 잡는다).
+12. **할당 실패 분류**: reader·writer·Prepare·InstantiatePackages의 모든 할당 실패는 `OutOfMemory`이고 진단 코드는 None이다(손상으로 분류하지 않는다 — 다시 시도하면 열릴 수 있다). 처음 구현은 Summary 타입 표와 export 타입 집합의 대조에서 할당 실패를 `CorruptPackage`로 돌려줬고 할당 실패 주입 시험(`AssetPackage_AllocationFailures`)이 잡아 고쳤다.
+
 ## 6. 에셋 타입·객체 통합·참조
 
 ### 6.1 객체 통합
@@ -348,7 +365,7 @@ Requested → ResolveManifest(`CookedManifest.rman`, 하드 의존 SCC 계산) �
 
 - 상주 단위는 하드 참조 SCC다(순환이 없으면 패키지 하나). 로드 시점의 SCC는 쿠킹 매니페스트의 Hard 의존(런타임) 또는 AssetIndex의 Hard 의존(에디터 패키지를 여는 도구)으로 계산하고, 실행 중 생긴 순환은 6.1절 규칙으로 단위를 합친다. 단위 U의 보유 수 = U에 속한 패키지들에 대한 요청 관심 + lease + 로드 작업의 내부 보유 + 다른 단위의 패키지에서 U의 패키지로 오는 하드 간선 다중도의 합이다(U 내부 간선은 세지 않는다 — 순환이 서로를 붙잡아 영구 상주하지 않는다).
 - 의존 보유는 로드 중에도 쥔다: 로드 작업은 ResolveManifest에서 찾은 하드 의존 단위마다 내부 보유를 1 걸고, 완료 시 Fixup이 만든 실제 간선 다중도로 바꾸며 실패·취소 시 놓는다(의존 단위가 Fixup 도중 닫히지 않는다).
-- 보유 수가 0이 되면 단위는 Closing 대기 목록에 오른다(Resident의 하위 상태). 다음 `AssetLoader::Pump`(어떤 `With` 범위도 열려 있지 않은 시점)가 처리하기 전에 보유 수가 다시 1 이상이 되면 — 같은 ID 요청이든, 다른 로드 작업의 의존 보유든, 새 간선이든 — 목록에서 빼고 되살린다(revive). 이미 Discard된 단위가 필요해지면 새 로드 작업으로 시작한다. Pump가 처리하면 단위의 패키지마다 `Discard`(부분 트리 — 소속 객체 전부)하고, 모두 성공한 뒤에 RootRef를 놓는다(A0-O: 논리 파괴 + 이름 색인·자식 고리에서 즉시 제거. 이후 이름 조회는 실패하고 WeakRef `TryPin`은 `Destroyed`를 반환한다). Discard가 Busy면 RootRef를 쥔 채 다음 Pump에서 다시 한다(이미 Discard한 패키지는 무동작) — RootRef를 먼저 놓으면 그 사이 GC 조각이 Discard 없이 소속 객체를 회수해 관찰자 계수가 샌다([ObjectFoundations](ObjectFoundations.ko.md) 1.7·2절). Discard가 끝나면 Closing이 완료되고 AssetManager의 ID 표에서 빠지므로 같은 ID의 새 요청은 기다리지 않고 새 로드 작업으로 시작한다(패키지는 이름이 없고 하위 이름은 새 패키지 handle 아래라 충돌하지 않는다). 메모리는 이후 GC가 수거한다. Closing 전이와 Discard는 한 Pump 호출 안에서 Game 스레드가 이어서 하므로 그 사이에 발급이 끼지 않는다(계획 §9.2의 "발급이 먼저면 unload 대기, Closing이 먼저면 그 기록의 발급 실패"와 같다 — 새 요청은 새 로드 작업이다).
+- 보유 수가 0이 되면 단위는 Closing 대기 목록에 오른다(Resident의 하위 상태). 다음 `AssetLoader::Pump`(어떤 `With` 범위도 열려 있지 않은 시점)가 처리하기 전에 보유 수가 다시 1 이상이 되면 — 같은 ID 요청이든, 다른 로드 작업의 의존 보유든, 새 간선이든 — 목록에서 빼고 되살린다(revive). 이미 Discard된 단위가 필요해지면 새 로드 작업으로 시작한다. Pump가 처리하면 단위의 패키지마다 `Discard`(부분 트리 — 소속 객체 전부)하고, 모두 성공한 뒤에 RootRef를 놓는다(A0-O: 논리 파괴 + 이름 색인·자식 고리에서 즉시 제거. 이후 이름 조회는 실패하고 WeakObjectRef `TryPin`은 `Destroyed`를 반환한다). Discard가 Busy면 RootRef를 쥔 채 다음 Pump에서 다시 한다(이미 Discard한 패키지는 무동작) — RootRef를 먼저 놓으면 그 사이 GC 조각이 Discard 없이 소속 객체를 회수해 관찰자 계수가 샌다([ObjectFoundations](ObjectFoundations.ko.md) 1.7·2절). Discard가 끝나면 Closing이 완료되고 AssetManager의 ID 표에서 빠지므로 같은 ID의 새 요청은 기다리지 않고 새 로드 작업으로 시작한다(패키지는 이름이 없고 하위 이름은 새 패키지 handle 아래라 충돌하지 않는다). 메모리는 이후 GC가 수거한다. Closing 전이와 Discard는 한 Pump 호출 안에서 Game 스레드가 이어서 하므로 그 사이에 발급이 끼지 않는다(계획 §9.2의 "발급이 먼저면 unload 대기, Closing이 먼저면 그 기록의 발급 실패"와 같다 — 새 요청은 새 로드 작업이다).
 - "살아 있는 다른 에셋이 Discard된 객체를 가리키지 않는다"는 불변식의 근거: 에셋 객체 Registry의 모든 객체는 패키지에 속하고(6.1절 — 패키지가 소속 객체를 붙잡으므로 Discard 없이는 회수되지 않는다) 패키지 사이 하드 간선은 모두 다중도로 세어지며(동적 변경 포함) 단위의 보유 수가 0일 때만 Discard한다. Discard는 그 단위에서 나가는 간선 계수를 관찰자 보고로 한 번만 반납한다. 패키지에 들어갈 수 있는 클래스는 `AssetLease`를 멤버로 가질 수 없어(`WorldOnly` 규칙, 5.6절) Soft 순환이 lease로 서로를 붙잡는 누수도 없다.
 - 정책: 즉시 해제(기본), PrimaryAsset bundle 로드는 bundle lease를 쥔다. 예산 LRU 해제는 후속. 텍스처 mip residency는 Object 수명과 별도(계획 §9.5), 이번에는 전체 mip 상주.
 
@@ -365,7 +382,11 @@ Requested → ResolveManifest(`CookedManifest.rman`, 하드 의존 SCC 계산) �
 
 ### 12.1 타입 구성
 
-- `Texture : Asset`(공통 설정, 12.4.1절), 차원별 `Texture2D`·`TextureCube`·`Texture2DArray`·`TextureCubeArray`·`VolumeTexture`(UE 5.8과 같은 다섯 클래스, 고유 설정은 12.4.2절).
+- 계층은 UE 5.8과 같다: `Asset` → `StreamableRenderAsset`(추상) → `Texture`(공통 설정, 12.4.1절) → 차원별 `Texture2D`·`TextureCube`·`Texture2DArray`·`TextureCubeArray`·`VolumeTexture`(UE 5.8과 같은 다섯 클래스, 고유 설정은 12.4.2절).
+- `StreamableRenderAsset`(UE `UStreamableRenderAsset`, Engine/Classes/Engine/StreamableRenderAsset.h:38): 텍스처와 뒤에 올 메시(UE `UStaticMesh`·`USkinnedAsset` — StaticMesh.h:602, SkinnedAsset.h:46)가 함께 쓰는 LOD·mip 스트리밍 기반이다. 메시가 나중에 같은 기반을 쓸 때 필드를 옮기지 않도록(필드 ID·직렬화가 바뀐다) 텍스처 단계에서 미리 나눈다(2026-11-17 사용자 결정).
+  - 위치: AssetRuntime. 그래픽 의존 없는 데이터 기반이라 AssetRuntime의 의존 방향(3절)을 바꾸지 않는다.
+  - 저장 설정: `NeverStream`, `bGlobalForceMipLevelsToBeResident`, `NumCinematicMipLevels`(UE StreamableRenderAsset.h:342–374, 상태는 12.4.1절 표). UE는 앞의 둘을 `uint8 : 1` bitfield로 두며, Rocks는 리플렉션 B9m(bitfield bool) 뒤라 같은 모양으로 둘 수 있다.
+  - 실행 중 상태(UE는 모두 이 객체의 transient 멤버 — 상주·요청 LOD 수 `CachedSRRState`, `StreamingIndex`(duplicatetransient), 강제 상주 표시·시각, 시네마틱 mip 사용, 갱신 대기 표시, mip 변경 콜백, StreamableRenderAsset.h:300–402): 객체에는 게임 lane만 읽고 쓰는 transient **스트리밍 표 handle** 하나만 둔다(UE `StreamingIndex`). 나머지(상주 mip 수, 진행 중 전송·요청 세대, 갱신 대기, 강제 상주·시네마틱 mip 사용 판정, mip 변경 통지 구독)는 TextureStreaming 모듈의 표에 둔다([TextureStreaming](TextureStreaming.ko.md) 9절, 개정 3). 렌더 lane이 바꾸는 값을 게임 lane 객체에 쓰지 않기 위해서다(RenderBase 5절 lane 소유). 게임 쪽이 상주 mip 수를 읽을 때는 sync 지점에서 복사한 snapshot을 읽는다. 저장 설정 세 개는 상주 계획이 메타로 읽는다. Graphics 타입은 이 클래스에 들이지 않는다.
 - 에디터 데이터 `TextureSource`(`ROCKS_STRUCT`, `ROCKS_PROPERTY(EditorOnly)` 필드): 형식·크기·slice 수·mip 수·layer 수·블록 목록·`BulkDataRef`(Zstd, raw SHA-256). 리플렉션으로 저장하므로 네이티브 직렬화 경로가 없다(5.6절). **원본 저장 형식은 디코딩한 정규 픽셀**이다(원본 파일 바이트는 저장하지 않는다 — UE는 PNG·JPEG 바이트를 그대로 둘 수 있다, 12.4.4절). 근거: 재임포트 없이 재빌드, 디코더 버전과 무관한 동일 입력, 빌드 경로에 원본 포맷 코드가 없음. 원본 파일 SHA-256은 ImportRecord에 있다.
 - 플랫폼 데이터 `TexturePlatformData`(`ROCKS_STRUCT`, 쿠킹 데이터): dimension·format·sRGB·**swizzle**(출력 R·G·B·A 각각이 형식의 R·G·B·A·0·1 중 무엇인지 — 렌더러가 view swizzle로 적용, A0-G)·크기·mip 수·slice 수·mip(·slice)별 `{ 크기, BulkDataRef }`·resident tail mip 수(계획 §9.5)·**샘플러**(텍스처·LOD 그룹에서 정한 Filter·MaxAniso·축별 주소·Border 색 — 렌더러가 그대로 쓴다).
 - Texture2DArray·TextureCubeArray·VolumeTexture는 다른 에셋을 원본으로 묶을 수 있다(UE 5.8 `SourceTextures`·`Source2DTexture` — Build 의존, 16.2절). 원본 파일 여러 개로 직접 임포트하는 경로도 있다(12.3절).
@@ -429,6 +450,8 @@ Requested → ResolveManifest(`CookedManifest.rman`, 하드 의존 SCC 계산) �
 대조 근거: UE 5.8(5.8.4, commit `f45729c0b6f0`) 원본의 헤더 — `Engine/Source/Runtime/Engine/Classes/Engine/`의 `Texture.h`(`UTexture`·`FTextureSource`·`FTextureSourceColorSettings`), `StreamableRenderAsset.h`(기반 `UStreamableRenderAsset`의 스트리밍 멤버), `Texture2D.h`·`TextureCube.h`·`Texture2DArray.h`·`TextureCubeArray.h`·`VolumeTexture.h`, `TextureDefines.h`(관련 enum), `TextureLODSettings.h`(`FTextureLODGroup`). 처음에는 UE 5.6 공식 API 문서(C++ `UTexture` 멤버 75개, `FTextureLODGroup` 멤버 29개, Python `unreal.Texture`·`Texture2D`·`TextureCube`·`Texture2DArray`·`TextureCubeArray`·`VolumeTexture` 편집 속성 — 2026-11-12 확인)로 작성했고, 2026-11-15에 5.8 원본으로 다시 확인했다. `UTexture`·`FTextureSource`·차원별 클래스의 데이터 멤버는 5.6과 같다(추가·삭제 없음). 5.8에서 바뀐 점은 해당 행에 "5.8에서 바뀜"으로 적는다: TextureGroup 82종, `ETextureSourceEncoding`의 `HLG` 추가, `FTextureLODGroup`의 품질 등급별 상한 4개 추가(33개). 속성 이름은 UE C++ 이름이며 Rocks 필드는 `ROCKS_PROPERTY(Name="…")`로 그 이름을 노출한다(5.6절, 명령행 이름). enum 값 이름은 UE 접두사(`TC_`·`TMGS_`·`TEXTUREGROUP_`·`TF_`·`TA_` 등)를 뗀 나머지 그대로다(예: `TC_HDR_Compressed` → `HDR_Compressed`). **계약** 설정은 스키마에 있고 기본값이 아니면 `UnsupportedSetting`이며, 사용자가 정한 순서(기반 → 화면 → 압축·보정·스트리밍)의 뒤 단계에서 구현한다.
 
 #### 12.4.1 공통 설정(UTexture·UStreamableRenderAsset)
+
+"(UStreamableRenderAsset)"이 붙은 멤버는 Rocks에서도 `Texture`가 아니라 기반 `StreamableRenderAsset`(12.1절)의 필드다. 나머지는 `Texture` 필드다.
 
 | UE 5.8 멤버 | 상태 |
 |---|---|
@@ -635,6 +658,210 @@ nugget-gc --max-bytes=<n> --unused-days=<n>
 27. 매니페스트 대조: 프로파일 불일치 `IncompatibleCook`, 크기·SHA·의존 불일치 `CorruptPackage`, 손상된 게시 파일의 재게시
 28. 순환 키: 하드 순환 A↔B·3-node 순환의 cookKey와 Build 순환의 너겟 키가 정의되고, 구성원 하나를 바꾸면 SCC 전체의 키가 바뀐다. 동적 간선으로 생긴 순환의 단위 병합과 해제, 간선 다중도(필드 둘 중 하나 제거)
 29. 저장: 이전 파일의 손상 bulk entry 복사 거부, bulkId 재매핑 후 지연 읽기, 저장 중 편집 시 재연결 생략, 대체 경로(FAT 등)에서 자기 핸들 때문에 실패하지 않음
+
+### 14.1 시험 fixture 에셋(A1부터)
+
+에셋 시스템 시험은 실제 에셋 타입(A5의 Texture 계열 등)이 생기기 전에도 직렬화·로드 경로를 그대로 타도록 시험 전용 리플렉션 에셋 클래스를 쓴다. 위치는 `Engine/Source/Developer/AssetTestFixtures`(EngineTests 전용 header-only fixture 모듈, identity 명세 `AssetTestFixtures.rocksids.json`), 결정적 값 생성기·필드 비교 함수는 `Engine/Source/Runtime/AssetRuntime/Tests/AssetFixtureValues.h`다. 새 에셋 타입(A5 Texture 등)도 같은 방식으로 "Fill(seed) → 저장 → 다른 Registry에 로드 → Check(seed) 필드 비교 → 다시 저장해 byte 동일"을 붙인다(`FixtureAssetTests.cpp`의 `RunRoundTrip`).
+
+| fixture | 단계 | 담는 것 | 시험 |
+|---|---|---|---|
+| `SimpleAsset` | 단순 | int32·int8·uint64·float·double·bool·Name·String·enum·Guid | `FixtureAsset_SimpleRoundTrip` |
+| `ValueAsset`(+`FixturePoint`·`FixtureGroup`·`FixturePayload`) | 값 묶음 | 중첩 struct·struct 배열·Optional 멤버, 정적 배열, Array, OrderedMap·OrderedSet, Optional(String·struct), Text, Bytes(`Array<uint8>`), InstancedStruct, TangentCurve, `InterpCurve<float>`, Transform·Vec3·Rotator(UE 단위: cm·도) | `FixtureAsset_ValueRoundTrip` |
+| `BulkAsset` | 큰 데이터 | 4 MiB 압축되는 무늬·2 MiB 압축되지 않는 무늬·0 byte bulk·bulk 배열(같은 ref 두 번) | `FixtureAsset_BulkRoundTrip`(None·Zstd × 에디터·쿠킹) |
+| `BaseGameAsset`·`DerivedGameAsset` | 상속 | 기반 필드·파생 필드 | `FixtureAsset_InheritanceRoundTrip` |
+| `ValidatedAsset`(+`FixtureRange` Validate hook) | 검증 hook | 필드 struct·struct 배열 원소의 hook | `FixtureAsset_ValidateHook`(유효 왕복, 거부 값은 로드가 CorruptPackage) |
+| `TestAsset`·`TestPart`·`TestScratch`·`TestRequiredAsset` | 참조·구조 | 다른 패키지 Hard(단일·`ObjectRefArray<Object>`)·Soft·EditorOnly Hard·EditorOnly 값·bulk, 하위 객체 사슬(`Body.Socket`)·같은 패키지 안 참조, 저장 불가(Transient) 하위 객체, Required Hard | `AssetPackage_*`(PackageFormatTests·PackageFuzzTests) |
+| `GameDataAsset`·`GameComponent`·`FixtureEntry` | 복합 | 하위 객체 여러 개(순환 사슬)·다른 에셋 Hard 배열과 하위 객체의 다른 패키지 참조·Soft·weak·커브·bulk·struct 배열·Map·hook struct | `AssetPackage_CompositeGameDataRoundTrip` |
+| `ComboAsset`·`ComboEditorAsset`·`ComboRequiredAsset`·`ComboPart`·`ComboPartDerived`(+종류별 `Combo*` struct) | 모든 조합 | 아래 "지원하는 모든 조합" | `FixtureAsset_CombinationsCoverPropertyTable`·`FixtureAsset_CombinationRoundTrip`·`FixtureAsset_CombinationRequired` |
+
+**지원하는 모든 조합**(`AssetTestFixtures/CombinationAssets.h`, 생성기·비교기 `Tests/AssetCombination.h`): 리플렉션 성질 표(ReflectionExtensions 1.3절, `Meta/TypeSchema.h` `ValueKindProperties`)의 값 종류마다 struct 하나(`ComboBool`…`ComboText`)가 그 종류를 표가 허용하는 모든 원소 자리에 둔다 — `value`(struct 멤버), `array`(Array 원소), `fixed`(정적 배열 원소), `keyed`(Map 키), `mapped`(Map 값), `set`(Set 원소), `maybe`(Optional 내부). 멤버 이름이 종류마다 같아 생성기·비교기 템플릿 하나가 모든 종류를 채우고 비교한다. 클래스 필드 자리는 `ComboAsset`의 `f*` 필드(종류마다 하나, 클래스 필드 자리의 컨테이너 다섯, ObjectRef 자리 — `ObjectRefArray`·정적 배열·`ObjectRefMap`·참조 struct·`StructRefArray`), EditorOnly 실효 플래그는 같은 이름·모양의 `ComboEditorAsset`(모든 필드 EditorOnly — 쿠킹에서는 기본값, 에디터에서는 왕복)이 덮는다. 표 밖 축:
+- 참조 종류: ObjectRef·WeakObjectRef 값은 대상 표 7칸(null, 같은 패키지 대표·하위·깊은 하위, 다른 패키지 대표·하위·깊은 하위)을 돌아가며 가리키고(weak의 다른 패키지 대상은 저장이 null로 바꾼다), Soft는 null·다른 패키지 대표·하위·깊은 하위·없는 패키지·자기 패키지 하위, ClassRef는 null과 Asset 파생 클래스 다섯이다.
+- 지정자: Required는 그것을 받는 종류(ObjectRef·ClassRef·SoftObjectRef) × 그 종류의 모든 자리(필드·struct 멤버·Array·정적 배열·Map 값·Set)에 `ComboRequiredAsset`이 두고, 칸 하나씩 null이면 쿠킹·에디터 저장이 거부한다. bitfield(클래스 필드·struct 멤버, uint8·16·32 폭), 검증 hook(`ComboChecked` — 필드·멤버·Array·정적 배열·Map 값·Optional·InstancedStruct 내용).
+- 참조 struct(`ComboRefLink` — 필드·멤버·`StructRefArray`·정적 배열)와 Registry 컨테이너 struct(`ComboObjectRefs`), Flags enum(`ComboMask`, 모든 enum 자리).
+- 중첩 깊이: `ComboTop` → `ComboMiddle` → `ComboLeaf`(Array·Map·Optional 안 struct 안 Array·Set).
+- 클래스 구조: Asset이 아닌 하위 객체(`ComboPart`)와 그 파생(`ComboPartDerived` — 기반 필드 + 파생 필드), 하위 객체에서 같은·다른 패키지 참조.
+- 왕복 축: 쿠킹·에디터 × 홀수·짝수 seed(Optional 있음·없음, bulk None·Zstd, InstancedStruct·Text 세 형태) × 두 클래스, 같은 상태 두 번 쓰기 byte 동일, 로드 → 필드 비교(다른 seed의 기대값과는 달라야 한다) → 재저장 byte 동일.
+
+빠짐 검사 `FixtureAsset_CombinationsCoverPropertyTable`은 왕복 시험이 쓰는 fixture 클래스의 스키마(기반 클래스·struct 멤버 재귀)를 순회해 (값 종류, 자리, EditorOnly 실효) 칸, Required 칸, 검증 hook·참조 struct·Flags enum 자리, 중첩 깊이 3 이상을 모으고 성질 표의 허용 칸과 하나라도 다르면 빠진 칸 이름으로 실패한다(표에 행·열이 생기면 fixture를 고치라는 신호). InstancedStruct 내용 열(Struct만 ○)은 실행 중 값이라 스키마에 없으므로 그 열의 모양(Struct만)과 InstancedStruct 칸의 존재를 확인하고, 실제 내용(`ComboPayload`·hook `ComboChecked`)은 왕복 비교가 본다. 표가 막는 칸은 ToolTests `Meta.EveryRejectedValueKindCellIsRejected`가 C# 표(`ValueKindTable.Rows`)를 순회해 원소 자리 × 종류의 모든 × 칸을 원본 선언으로 만들어 MetaCompiler가 RMC 진단(RMC2xxx, C 배열을 템플릿 원소로 쓰는 칸은 Clang 단계 RMC3000)으로 거부하는지 보고, `Meta.EveryRejectedValueKindCellHasASpelling`이 새 종류 행에 시험 철자가 빠지지 않게 한다(필드·멤버 자리는 Opaque 말고 모두 ○라 거부 칸이 없다).
+
+#### 14.1.1 요구 대조표(A1a — 패키지 포맷 v1)
+
+항목마다 그것을 확인하는 시험이다(EngineTests, `Engine/Source/Runtime/AssetRuntime/Tests` — 시험 49개). "범위 밖"은 A1a가 만들지 않는 것(다른 단계가 맡는다), "시험 불가"는 이유를 적은 것이다. 시험이 없는 항목은 0개다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 헤더(5.1) | 크기 < 64(헤더 byte·Stat 크기·빈 입력) | `AssetPackage_HeaderFields` |
+| | magic 네 byte 각각 | `AssetPackage_HeaderFields`, `AssetPackage_CorruptionAndVersionChecks` |
+| | headerCrc(칸 자체·덮는 범위 0–59) | `AssetPackage_HeaderFields` |
+| | flags(0·둘 다·정의되지 않은 비트, 버전보다 먼저 판정) | `AssetPackage_HeaderFields` |
+| | formatVersion(더 새 것: 쿠킹 UnsupportedVersion·에디터 NewerVersion, 최댓값, 더 옛 것 UnsupportedVersion) | `AssetPackage_HeaderFields` |
+| | headerBytes ≠ 64 | `AssetPackage_HeaderFields` |
+| | sectionCount(0·33·실제와 다름) | `AssetPackage_HeaderFields` |
+| | sectionTableOffset(헤더 안·8 정렬 아님·64 GiB 초과·실제와 다름) | `AssetPackage_HeaderFields` |
+| | fileBytes(식·Stat 크기·덧붙음·잘림·64 GiB 초과) | `AssetPackage_HeaderFields` |
+| | assetId(null 거부, 다른 id는 그 id로 읽힘) | `AssetPackage_HeaderFields` |
+| | bulkAlignment(0·2의 거듭제곱 아님·8 미만·65536 초과, 경계 8·65536·기본값) | `AssetPackage_HeaderFields`, `AssetPackage_BulkAlignmentBounds` |
+| | reserved 8 byte 각각 | `AssetPackage_HeaderFields` |
+| | 기대 종류(쿠킹 기대 + 에디터 = UnsupportedVersion, 반대 = CorruptPackage) | `AssetPackage_HeaderFields`, `AssetPackage_EditorRoundTripKeepsEditorOnly` |
+| 섹션 표(5.1) | tableCrc | `AssetPackage_SectionTableFields` |
+| | kind 순서·중복 | `AssetPackage_SectionTableFields`, `AssetPackage_CorruptionAndVersionChecks` |
+| | flags 정의되지 않은 비트 | `AssetPackage_SectionTableFields` |
+| | offset(헤더 안·표 너머·정렬·빈 틈) | `AssetPackage_SectionTableFields` |
+| | bytes(표 너머·0·겹침) | `AssetPackage_SectionTableFields`, `AssetPackage_CorruptionAndVersionChecks` |
+| | 섹션 사이·표 앞 패딩(0만) | `AssetPackage_SectionTableFields`, `AssetPackage_CorruptionAndVersionChecks` |
+| | PerEntryChecksum 섹션의 crc32 칸 = 0 | `AssetPackage_SectionTableFields` |
+| | 필수 섹션(Summary·Exports·Objects), Bulk·BulkIndex 짝, 쿠킹의 ImportRecord·Tags 금지 | `AssetPackage_SectionTableFields` |
+| | 모르는 kind(Required × 쿠킹·에디터, 비-Required 에디터 읽기 전용) | `AssetPackage_SectionTableFields` |
+| | 아는 kind의 flags = 5.2절 표 | `AssetPackage_SectionTableFields` |
+| | schemaVersion(쿠킹 높낮이, 에디터 낮음·높음 × Required) | `AssetPackage_SectionTableFields` |
+| | 섹션 crc32(비-Bulk 섹션마다) | `AssetPackage_SectionTableFields` |
+| 상한(5.1) | 파일 64 GiB | `AssetPackage_HeaderFields`(fileBytes·표 offset) |
+| | 비-Bulk 섹션 64 MiB(초과 거부·상한 정확히 받음) | `AssetPackage_SectionSizeLimit` |
+| | export 4096(정확히 4096 쓰기·읽기·로드, 4097 쓰기 CapacityExceeded, 표 count 4097 거부) | `AssetPackage_WriterBoundaries`, `AssetPackage_ExportsFields` |
+| | object import 65536(표 count 65537 거부) | `AssetPackage_ObjectImportsFields`. 쓰기 쪽 65537개는 그래프 외부 참조 한도(`ObjectGraphLimits::maxExternalReferences` = 65536, ObjectSerialization 시험)가 먼저 막는다 |
+| | 문자열 4 KiB(export 이름·프로파일 id), 객체 경로 4 KiB(import 경로) | `AssetPackage_ExportsFields`, `AssetPackage_SummaryFields`, `AssetPackage_WriterOptionValidation`, `AssetPackage_ObjectImportsFields` |
+| Summary(5.2·5.7-1) | 스키마 GUID·버전, 필드 수(에디터 4·쿠킹 5), 잘림(모든 길이) | `AssetPackage_SummaryFields`, `AssetPackage_TruncatedSections` |
+| | 버전 표 모양(RecordList·항목 필드 수 1·3·id·version 없음·wire)·정렬·중복 — 타입 표·커스텀 버전 표 각각 | `AssetPackage_SummaryFields` |
+| | 엔진 버전 Record(필드 수·없는 칸·u16 범위·wire)·compatibleWith(패치 0·savedBy 기준선 이하) | `AssetPackage_SummaryFields` |
+| | 프로파일 id(wire·빈 값·4 KiB·UTF-8)·설정 SHA-256(wire·32 byte)·쿠커 버전(wire) | `AssetPackage_SummaryFields` |
+| | 타입 표 = export 타입 집합(빠짐·남음) | `AssetPackage_TypeAndCustomVersionAxes` |
+| | 고장 없는 재구성 = writer byte | `AssetPackage_SummaryFields` |
+| Exports(5.1·5.2·5.7-1·3·4) | count(0·4097·실제와 다름)·잘림(모든 길이)·남는 byte·이름 길이 | `AssetPackage_ExportsFields`, `AssetPackage_TruncatedSections` |
+| | flags(정의되지 않은 비트·예약 EditorOnly·Primary 위치) | `AssetPackage_ExportsFields`, `AssetPackage_CorruptionAndVersionChecks` |
+| | 타입 0, 대표(빈 이름·outer 0·Primary), 하위(이름·outer 범위) | `AssetPackage_ExportsFields` |
+| | 깊이 우선 순서·같은 Outer 안 이름 순서·중복 | `AssetPackage_ExportsFields`, `AssetPackage_WriterBoundaries`(역순 생성 → 정렬) |
+| ObjectImports(5.1·5.2) | count(0·65537·실제와 다름)·잘림(모든 길이)·남는 byte | `AssetPackage_ObjectImportsFields`, `AssetPackage_TruncatedSections` |
+| | 에셋 null·자기 에셋·타입 0 | `AssetPackage_ObjectImportsFields` |
+| | outer import(앞·같은 에셋·이름 있음)·outer 있는 항목의 이름 | `AssetPackage_ObjectImportsFields` |
+| | (assetId, 객체 경로) 엄격 오름차순·깊은 경로 | `AssetPackage_ObjectImportsFields` |
+| Dependencies(5.2·5.7-5) | count(0·크기 상한·실제와 다름)·잘림(모든 길이)·남는 byte | `AssetPackage_DependenciesFields`, `AssetPackage_TruncatedSections` |
+| | kind 범위(0·6·최댓값)·flags 정의되지 않은 비트 | `AssetPackage_DependenciesFields` |
+| | 에셋 null·자기, 쿠킹의 EditorOnly·Build·ImportOwner, Hard 밖 expectedType, 정렬·중복 | `AssetPackage_DependenciesFields` |
+| | 합성 규칙(Hard·Soft·EditorOnly·required, expectedType = 대표 타입, 자기·null 제외) | `AssetPackage_MergeDependencyUsesRules`, `AssetPackage_CookedRoundTrip`, `AssetPackage_EditorRoundTripKeepsEditorOnly`, `AssetPackage_DiamondDependencies`, `AssetPackage_CompositeGameDataRoundTrip`, `FixtureAsset_CombinationRoundTrip` |
+| | 로드 대조(누락·남음·종류·required, Build·ImportOwner는 대조 안 함(`AssetPackage_ImportOwnerDependencyIsNotCrossChecked`), 읽기 전용 부분집합, import의 Hard·EditorOnly 의존) | `AssetPackage_PrepareCrossChecks`, `AssetPackage_ImportTypeMismatchAndDependencyCrossCheck`, `AssetPackage_WriterRejections` |
+| | 자기 참조는 의존·import 없음 | `AssetPackage_SelfReferencesMakeNoDependency` |
+| Objects(5.1 참조 표기) | graph v2 byte, 참조 값(0·export·import), 노드 저장 버전 = Summary | `AssetPackage_CookedRoundTrip`, `FixtureAsset_CombinationRoundTrip`, `AssetPackage_PrepareCrossChecks`, `AssetPackage_FixedSeedMutationFuzz`(값 표기의 변조는 그래프 1단계 — ObjectSerialization 시험이 칸별로 본다) |
+| ImportRecord·Tags(5.2) | 에디터만, Record envelope, 생략 | `AssetPackage_SectionTableFields`, `AssetPackage_WriterOptionValidation` |
+| Bulk·BulkIndex(5.2·5.7-6) | count·잘림(모든 길이)·남는 byte·codec 범위 | `AssetPackage_BulkIndexFields`, `AssetPackage_TruncatedSections` |
+| | bulkId 연속·offset = 정렬 값·flags·쿠킹 EditorOnly·None의 stored = raw·범위·패딩·entry CRC·끝 = 섹션 크기 | `AssetPackage_BulkIndexFields`, `AssetPackage_CorruptionAndVersionChecks` |
+| | 해제: raw 합 상한·Zstd 실패·크기·SHA-256, 실패 시 출력 길이 복원 | `AssetPackage_DecodeBulk` |
+| | BulkDataRef ↔ BulkIndex(id 범위·크기·SHA-256) | `AssetPackage_PrepareCrossChecks` |
+| | 첫 출현 순 재번호·같은 옛 id = 같은 새 id·재매핑 표·EditorOnly 표시(EditorOnly·일반 위치에 함께 쓰이면 표시 없음 — `AssetPackage_SharedBulkEditorOnlyFlag`)·Zstd 못 줄이면 None·0 byte entry(Bulk 0 byte) | `AssetPackage_DeterministicBytesAndFingerprint`, `FixtureAsset_BulkRoundTrip`, `AssetPackage_EditorRoundTripKeepsEditorOnly`, `AssetPackage_WriterBoundaries` |
+| | bulk 원본 크기·SHA-256 불일치 CorruptPackage, 원본 오류 전파, 같은 옛 id 다른 값 거부 | `AssetPackage_WriterRejections`, `AssetPackage_WriterGraphRejections` |
+| 버전 축(5.3) | 컨테이너 | `AssetPackage_HeaderFields` |
+| | 섹션 | `AssetPackage_SectionTableFields` |
+| | 타입(쿠킹 정확히·미등록, 에디터 낮음·높음·미등록) | `AssetPackage_TypeAndCustomVersionAxes` |
+| | 커스텀 버전(쿠킹 전체 일치, 에디터 높음·모름 읽기 전용, 낮음·같음) | `AssetPackage_TypeAndCustomVersionAxes`, `AssetPackage_CorruptionAndVersionChecks` |
+| | 엔진(compatibleWith 더 새 NewerVersion, 쿠킹은 기록 없음) | `AssetPackage_EditorRoundTripKeepsEditorOnly`, `AssetPackage_SummaryFields` |
+| | 쿠킹의 Required 실효 누락 = CorruptPackage, 에디터는 계속 | `AssetPackage_LoadHooksClassifyDiagnostics` |
+| 저장(5.5) | Objects 먼저 → 물리 순서 → 헤더 patch, 결정적 byte·지문 | `AssetPackage_DeterministicBytesAndFingerprint`, `FixtureAsset_CombinationRoundTrip` |
+| | 쓰기 실패 전파(Append 매 지점·헤더 WriteAt) | `AssetPackage_WriterSinkFailures` |
+| | 임시 파일·Replace·잠금·외부 변경·재매핑 적용 | 범위 밖(A2 AssetDatabase — 파일 저장) |
+| 옵션(PackageWriteOptions) | 종류·정렬·codec·엔진 버전·프로파일·ImportRecord·Tags·extraDependencies·커스텀 버전 | `AssetPackage_WriterOptionValidation`, `AssetPackage_WriterRejections` |
+| 대표 에셋(4.1·5.1) | 패키지 아님·없음·이름 있음·Asset 아님·저장 불가뿐 | `AssetPackage_WriterRepresentativeRules`, `AssetPackage_WriterRejections` |
+| 저장 그래프(5.1·6.2) | 자기 Package 참조 거부, UnpackagedReference, Required null 거부(종류 × 자리), 저장 불가 객체 제외, weak 밖 대상 null | `AssetPackage_WriterGraphRejections`, `FixtureAsset_CombinationRequired`, `AssetPackage_CookedRoundTrip`, `FixtureAsset_CombinationRoundTrip` |
+| 로드(5.7-10·11.2·11.3) | Prepare 한 번, 대표 에셋 타입, 그래프 1단계 분류(할당·스레드 그대로, 미등록·버전 UnsupportedVersion, 그 밖 CorruptPackage) | `AssetPackage_ImportTypeMismatchAndDependencyCrossCheck`, `AssetPackage_PrepareCrossChecks`, `AssetPackage_FixedSeedMutationFuzz`, `FixtureAsset_ValidateHook` |
+| | InstantiatePackages 인자(빈 묶음·크기·null·준비 안 됨·다른 Registry·같은 id) | `AssetPackage_InstantiateArgumentsAndResolver` |
+| | import 해석(묶음 안·resolver·NotFound MissingDependency·그 밖 오류·경로 없음·TypeMismatch) | `AssetPackage_InstantiateArgumentsAndResolver`, `AssetPackage_HardCycleLoadsInOneTransaction`, `AssetPackage_ImportTypeMismatchAndDependencyCrossCheck` |
+| | SCC 한 트랜잭션(2노드·3노드 모든 순서·다이아몬드·자기 참조), 실패 전파(부분 공개 없음) | `AssetPackage_HardCycleLoadsInOneTransaction`, `AssetPackage_ThreeNodeCycleLoadsInAnyOrder`, `AssetPackage_DiamondDependencies`, `AssetPackage_SelfReferencesMakeNoDependency`, `AssetPackage_FailurePropagatesThroughBatch` |
+| | 스레드(Prepare 다른 스레드, 쓰기 소유 스레드 — WrongThread) | `AssetPackage_ThreadRules` |
+| | 취소 지점 | 범위 밖(A1c 로더 — `CancelToken`) |
+| Package·Asset(6.1·5.7-7) | id·종류·bulk·대표 assetId 설정, `BulkBytes` 오류(빈 ref·없는 id·다른 크기·같은 크기 다른 SHA-256), `NewPackage` null id·정의되지 않은 종류 | `AssetPackage_CookedRoundTrip`, `AssetPackage_WriterRepresentativeRules`, `AssetPackage_PackageArgumentErrors` |
+| 진단(4.6·5.7-8) | A1a가 내는 코드(CorruptPackage·UnsupportedVersion·NewerVersion·MissingDependency·TypeMismatch·UnpackagedReference), 원래 오류 보존, 이름표 | 위 시험들, `AssetPackage_DiagnosticNames` |
+| 자원 실패 | 할당 실패(쓰기·읽기·Prepare·Registry 객체·bulk 저장소 — 모든 지점, 진단 None) | `AssetPackage_AllocationFailures`, `AssetPackage_RegistryAllocationFailures` |
+| 변조·퍼징 | 고정 seed 4000회(정해진 오류 코드만, 객체 남지 않음) | `AssetPackage_FixedSeedMutationFuzz` |
+| 모든 조합(14.1) | 성질 표 허용 칸 × EditorOnly 실효, Required 칸, hook·참조 struct·Flags enum 자리, 깊이 | `FixtureAsset_CombinationsCoverPropertyTable` |
+| | 허용 칸 왕복(필드 비교·재저장 byte 동일, 쿠킹·에디터, Optional 두 상태, 참조 대상 7종) | `FixtureAsset_CombinationRoundTrip` |
+| | 거부 칸(원소 자리 × 종류의 모든 ×) | ToolTests `Meta.EveryRejectedValueKindCellIsRejected`, `Meta.EveryRejectedValueKindCellHasASpelling` |
+
+#### 14.1.2 Coverage(A1a)
+
+측정은 clang source-based coverage다. Rocks.Build `Coverage` 구성으로 한다.
+- 계측: Debug 코드 생성에 compile 인자 `-fprofile-instr-generate -fcoverage-mapping`을 더한다. 코드 생성 옵션이라 MetaCompiler AST 프로필에는 넣지 않는다.
+- 링크: compiler resource 디렉터리에서 찾은 `clang_rt.profile`을 넣는다. Swift 툴체인은 triple 디렉터리 이름이 driver의 추정과 달라서 경로를 직접 넘긴다.
+- CRT: 릴리스 CRT를 쓴다. Asan과 같다.
+
+측정 명령은 하나이며 재현할 수 있다.
+
+```
+pwsh Build/MeasureCoverage.ps1 -Target EngineTests -Filter AssetPackage,FixtureAsset -Sources Engine/Source/Runtime/AssetRuntime/Private,Engine/Source/Runtime/AssetRuntime/Public
+```
+
+이 명령이 하는 일은 다음과 같다.
+1. Coverage 구성으로 빌드한다.
+2. 시험을 filter마다 한 프로세스로 실행한다. `LLVM_PROFILE_FILE`에 프로세스마다 다른 파일 이름을 준다.
+3. `llvm-profdata merge`로 결과를 합친다.
+4. `llvm-cov export·show`로 보고한다. 도구는 compiler와 같은 Swift 툴체인 `usr/bin`의 것을 쓴다.
+
+결과는 `out/coverage/enginetests/`에 남는다.
+- `report.txt`: 파일별 줄·분기·함수와 합계
+- `uncovered.txt`: 줄·분기 실행 횟수
+- `summary.json`
+
+결과(2026-11-19, AssetRuntime Private·Public 13개 파일, 시험 49개 모두 통과): 줄 95.13%(2305/2423), 분기 93.15%(1373/1474), 함수 100%(113/113).
+
+| 파일 | 줄 | 분기 |
+|---|---|---|
+| Package.cpp | 33/42 | 18/22 |
+| PackageAccess.h | 13/13 | - |
+| PackageInternal.h | 48/52 | 25/28 |
+| PackageLoad.cpp | 333/369 | 188/214 |
+| PackageReader.cpp | 880/894 | 612/635 |
+| PackageWriter.cpp | 913/967 | 501/544 |
+| Public 7개(AssetDiagnostic.h·BulkData.h·Package.h·PackageFormat.h·PackageLoad.h·PackageReader.h·PackageWriter.h) | 85/86 | 29/31 |
+
+닿지 않은 분기는 다음 묶음뿐이다. 모두 시험 입력이나 실패 주입으로 만들 수 없거나, 다른 층이 먼저 막는 방어선이다. 줄 번호는 `uncovered.txt`에서 확인하며, 새 분기가 이 묶음 밖에서 생기면 시험을 더한다.
+
+1. **Registry·TypeRegistry 조회의 실패**
+   - 해당 코드:
+     - writer: `GetOuter`·`GetOutermost`·`AcquireType`·`GetName`·`GetObjectPath`·대표 에셋 `FindObject`·`Resolve<Package>`
+     - load: `transaction.AcquireType`·`GetForWrite`, 묶음 안 `FindObject`의 NotFound가 아닌 오류
+     - `NewPackage`: `ConstructionContext::Create`·`GetForWrite`·`Commit`·`TryPin`
+   - 닿지 않는 이유:
+     - 바로 앞 단계가 같은 객체를 같은 소유 스레드에서 이미 검증했다(`CollectInners`·그래프 저장이 생존·타입을 확인했다).
+     - 그래서 이 조회는 실패할 수 없다. Registry 자체의 실패는 ObjectRuntime 시험이 본다.
+   - `NewPackage`는 typed root를 얻지 못하면 Discard해 패키지를 남기지 않게 고쳤다. 이 경로는 위 조회 실패와 같은 이유로 닿지 않는다.
+2. **Archive·Record 형식이 먼저 막는 칸**
+   - `ArchiveReader::Create` 실패: 섹션이 64 MiB 이하라는 것을 표 검증이 먼저 확인한다.
+   - 표 섹션 항목의 앞 칸 읽기 실패: count 상한(섹션 크기 ÷ 항목 크기)이 먼저 막는다. 마지막 칸 읽기 실패는 `AssetPackage_TruncatedSections`가 닿는다.
+   - Record 필드 payload 크기 불일치: wire 종류별 크기를 Record reader가 먼저 검증한다.
+   - fileBytes가 64 GiB를 넘는 경우: fileBytes가 Stat 크기와 같아야 하므로 64 GiB 넘는 파일이 필요하다.
+   - BulkIndex offset이 섹션을 넘는 경우: offset이 앞 entry 끝의 정렬 값과 같아야 하므로 먼저 걸린다.
+3. **그래프 1단계가 먼저 막는 Prepare 대조**
+   - 대표 에셋 타입이 Asset 파생이 아닌 경우·노드 저장 버전 조회 실패: 노드 Record와 타입이 다르면 그래프가 거부한다(`AssetPackage_PrepareCrossChecks`가 이 거부를 확인한다).
+   - 쓰이지 않은 import의 의존 검사·`occurrences == 0`: 그래프가 모든 외부 참조 칸이 쓰이기를 요구한다.
+   - 쿠킹의 읽기 전용 판정: 쿠킹 정책이 모르는 필드·더 새 버전을 진단 대신 실패로 처리한다.
+   - ApplyFields의 TypeMismatch: import 타입 대조(`IsA`)가 먼저 잡는다.
+   - 쿠킹 CheckRequired 실패: writer가 Required null을 거부하므로 저장 byte로 만들 수 없다. hook의 분류는 `AssetPackage_LoadHooksClassifyDiagnostics`가 본다.
+   - 그래프 오류 분류 중 ShuttingDown·WrongThread·WrongContext·Busy 항목: Prepare가 Registry를 쓰지 않으므로 나오지 않는다.
+4. **할당이 일어나지 않는 할당 실패 지점**
+   - `AssetPackage_AllocationFailures`·`AssetPackage_RegistryAllocationFailures`는 실제 할당 시도를 하나씩 모두 실패시킨다.
+   - 그런데 아래 호출은 앞 단계가 남긴 용량 안이라 그 시나리오들에서 할당하지 않는다:
+     - 예약한 배열의 `TryPushBack`
+     - 짧은 문자열의 `TryAppend`
+     - 같은 크기 버퍼의 `TryAssign`
+     - 커스텀 버전 id 배열
+   - Zstd 해제 scratch의 할당 실패와 타입 lease 조회의 OutOfMemory도 이 묶음이다.
+5. **실제로 닿을 수 없는 크기 상한**
+   - bulk entry 수 2³²−1: 메모리에 만들 수 없다.
+   - writer의 비-Bulk 섹션 64 MiB 초과·object import 65537개: 그래프 저장 한도 maxBytes·maxExternalReferences가 먼저 막는다.
+6. **컴파일 시간 상수로 접힌 코드**: `PackageFormat.h`의 `PackageSectionRequiredFlags` switch 밖 `return 0`과 그 분기는 constexpr 호출이 컴파일 시간에 접혀 계측되지 않는다(실행 시간 호출은 `AssetPackage_PackageArgumentErrors`가 모르는 kind로 확인한다).
+7. **단락 평가·고정 순회의 한쪽**
+   - 해당 코드:
+     - `found ||` 누적
+     - `ImportPath`의 범위 밖
+     - writer import 사슬의 앞 항목 탐색(정렬되어 있어 언제나 찾는다)
+     - 첫 export의 `parent.exportIndex != 0`(제외된 부모의 자식은 함께 제외된다)
+     - 같은 Outer 경로 pop 루프
+     - 비교 `same` 누적
+   - 닿지 않는 이유: 입력 불변식상 다른 쪽 값이 나올 수 없다.
+
+A1a 상태(2026-11-19): 완료 조건 넷 가운데 세 가지를 갖췄다.
+- 요구 대조표(14.1.1): 시험 없는 항목 0
+- 모든 조합 fixture·빠짐 검사·거부 칸 시험(14.1)
+- coverage 측정과 닿지 않은 분기의 이유(14.1.2)
+
+남은 하나는 빠진 시험 관점의 리뷰다. 그 리뷰가 끝나면 A1a는 "구현"이다.
 
 ## 15. PNG 디코더 범위
 

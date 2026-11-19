@@ -50,7 +50,7 @@ internal static partial class MetaTests
             Verify.Equal("Leaf", Type("probe::Leaf").GetProperty("toolName").GetString(), "default struct tool name");
             Verify.Equal("Weapons.Other", Type("probe::Other").GetProperty("toolName").GetString(), "Name specifier tool name");
             string generated = Compact(File.ReadAllText(probe.Output));
-            Verify.Contains("PathStructMember<&::probe::Leaf::kind,ValueKind::ClassReference>", generated, "class reference member path thunk");
+            Verify.Contains("PathStructMember<::probe::Leaf,&::probe::Leaf::kind,ValueKind::ClassReference>", generated, "class reference member path thunk");
             Verify.Contains("\"Weapons.Other\",13)", generated, "generated schema tool name");
             Verify.Contains("0u,Span<constchar>(\"Leaf\",4)", generated, "struct schema tool name after flags");
             ProcessResult compiled = await probe.CompileGeneratedAsync();

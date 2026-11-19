@@ -5,6 +5,7 @@
 #include <PlatformWindow/Window.h>
 #include <RenderBase/RenderLane.h>
 #include "SampleRenderer.h"
+#include "SelfTestEnvironment.h"
 #include <stdio.h>
 
 namespace sandbox {
@@ -89,7 +90,7 @@ public:
         }
 
         swapChain = createdSwapChain.Value();
-        auto initialized = renderer.Initialize(device, graphics::Format::RGBA8UnormSrgb);
+        auto initialized = renderer.Initialize(device, graphics::PixelFormat::RGBA8UnormSrgb);
         if (!initialized) {
             return initialized;
         }
@@ -171,7 +172,7 @@ void CreateChecker(render::RenderLaneContext& context, CheckerUpload& upload) no
     graphics::TextureDesc desc;
     desc.width = 2;
     desc.height = 2;
-    desc.sampler.filter = graphics::Filter::Nearest;
+    desc.sampler.filter = graphics::Filter::Point;
     desc.sampler.addressU = graphics::AddressMode::Clamp;
     desc.sampler.addressV = graphics::AddressMode::Clamp;
     auto created = context.Device().CreateTexture(desc, upload.pixels.View());
@@ -325,6 +326,11 @@ void LaneCheck(bool condition, const char* name, const char* mode, const char* w
 void RunMode(const char* name, render::RenderLaneMode mode, graphics::Device& device,
              Allocator& allocator) noexcept {
     const char* modeName = mode == render::RenderLaneMode::Thread ? "thread" : "inline";
+    if (const char* reason = WindowPresentUnavailableReason(device)) {
+        printf("  [NOT RUN] %s render lane (%s): %s\n", name, modeName, reason);
+        return;
+    }
+
     platform::WindowDesc windowDesc;
     windowDesc.title = "Rocks render lane self-test";
     windowDesc.width = 96;

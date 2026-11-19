@@ -195,6 +195,13 @@ internal static class ActionGraph
                     arguments.Add("-flto=thin");
                 }
 
+                // clang source-based coverage 계측(Docs/Design/AssetSystem.ko.md 14.1절 — 줄·분기 coverage를 llvm-cov로 잰다)도
+                // 코드 생성 옵션이라 AST 프로필에 넣지 않는다(MetaCompiler는 프로필 밖 옵션을 거부한다).
+                if (request.Configuration == NativeConfiguration.Coverage)
+                {
+                    arguments.AddRange(["-fprofile-instr-generate", "-fcoverage-mapping"]);
+                }
+
                 // 타깃 단위 인자: 로그 컴파일 하한과 소스 경로 접두 매핑은 모든 모듈·번역 단위에 같다(모듈 인자로 바꾸지 못한다).
                 arguments.AddRange(targetArguments);
                 arguments.AddRange(defines.Select(value => (windows ? "/D" : "-D") + value));
@@ -307,6 +314,16 @@ internal static class ActionGraph
                         finalInputs.AddRange([asanLibrary, asanThunk]);
                     }
 
+                    if (request.Configuration == NativeConfiguration.Coverage)
+                    {
+                        // driver가 고르는 triple 디렉터리(x86_64-pc-windows-msvc)와 배포판의 디렉터리 이름(Swift 툴체인은
+                        // x86_64-unknown-windows-msvc)이 달라 driver의 자동 링크를 믿지 않고 compiler의 resource 디렉터리에서
+                        // profile 런타임을 찾아 넘긴다(Asan import·thunk와 같은 방식).
+                        string profileLibrary = CoverageRuntimeLibrary(request.Toolchain.CompilerPath, module.Name);
+                        finalArguments.Add(profileLibrary);
+                        finalInputs.Add(profileLibrary);
+                    }
+
                     finalArguments.AddRange(["/Fe{OUTPUT0}", "/link", "/INCREMENTAL:NO", "/SUBSYSTEM:CONSOLE", "/MANIFEST:EMBED"]);
                     if (asanThunk != null)
                     {
@@ -361,7 +378,27 @@ internal static class ActionGraph
         return new(actions, outputs, closures);
     }
 
-    /// <summary>구성과 모듈 재정의로 최적화 여부를 정한다. Debug·Asan은 끄고 Development·Release는 켠다.</summary>
+    /// <summary>
+    /// Windows Coverage 링크에 넣을 clang profile 런타임(<c>clang_rt.profile*.lib</c>, x86_64)을 compiler의 resource 디렉터리
+    /// (<c>&lt;bin&gt;/../lib/clang/&lt;version&gt;/lib/&lt;triple&gt;</c>)에서 찾는다. 하나가 아니면 FileNotFoundException이다.
+    /// </summary>
+    internal static string CoverageRuntimeLibrary(string compilerPath, string module)
+    {
+        string resource = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(compilerPath)!, "..", "lib", "clang"));
+        string[] candidates = Directory.Exists(resource)
+            ? Directory.EnumerateFiles(resource, "clang_rt.profile*.lib", SearchOption.AllDirectories)
+                .Where(path => path.Contains("x86_64", StringComparison.OrdinalIgnoreCase) && !path.Contains("i686", StringComparison.OrdinalIgnoreCase))
+                .Order(StringComparer.Ordinal).ToArray()
+            : [];
+        if (candidates.Length != 1)
+        {
+            throw new FileNotFoundException($"Module {module}: expected exactly one x86_64 clang_rt.profile library under {resource}, found {candidates.Length}.");
+        }
+
+        return candidates[0];
+    }
+
+    /// <summary>구성과 모듈 재정의로 최적화 여부를 정한다. Debug·Asan·Coverage는 끄고 Development·Release는 켠다.</summary>
     internal static bool Optimizes(NativeConfiguration configuration, CodeOptimization optimization) => optimization switch
     {
         CodeOptimization.Always => true,
@@ -512,6 +549,11 @@ internal static class ActionGraph
             }
             // Windows ASan runtime 위치는 배포판별로 다르므로 위에서 검증한 import/thunk를 넘긴다.
             // /fsanitize=address는 compile에만 사용해 driver의 잘못된 triple 경로 추정을 피한다.
+            // Coverage의 clang_rt.profile은 위에서 찾은 파일을 넘긴다(driver의 triple 경로 추정을 피한다).
+        }
+        else if (request.Configuration == NativeConfiguration.Coverage)
+        {
+            yield return "-fprofile-instr-generate";
         }
         else if (request.Configuration == NativeConfiguration.Asan)
         {

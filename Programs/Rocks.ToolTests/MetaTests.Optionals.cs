@@ -47,7 +47,7 @@ internal static partial class MetaTests
             Verify.Equal("UInt32", Field("probe::Leaf", "weight").GetProperty("element").GetProperty("kind").GetString(), "optional struct member");
             string generated = Compact(File.ReadAllText(probe.Output));
             Verify.Contains("{ValueKind::Optional,Guid{}}", generated, "generated optional schema");
-            Verify.Contains("PathStructMember<&::probe::Leaf::weight,ValueKind::UInt32>", generated, "optional member path thunk targets the inner kind");
+            Verify.Contains("PathStructMember<::probe::Leaf,&::probe::Leaf::weight,ValueKind::UInt32>", generated, "optional member path thunk targets the inner kind");
             Verify.Contains("PathClassField<::probe::Value,::rocks::ValueKind::Struct>(cursor,&::probe::Value::leaf)", generated,
                 "an Optional<struct> field has a path thunk");
             Verify.Contains("ReadGeneratedField<::probe::Value>(registry,access,object,&::probe::Value::count,out)", generated,
@@ -79,7 +79,7 @@ internal static partial class MetaTests
         AddRejectGroup(context, "Meta.OptionalInnerTypeRules", [
             Declaration("ROCKS_PROPERTY() rocks::Optional<rocks::Optional<rocks::int32>> nested;").Replace(Preamble, OptionalPreamble, StringComparison.Ordinal),
             Declaration("ROCKS_PROPERTY() rocks::Optional<rocks::Array<rocks::int32>> list;").Replace(Preamble, OptionalPreamble, StringComparison.Ordinal),
-            Declaration("ROCKS_PROPERTY() rocks::Optional<rocks::WeakRef<Value>> target;").Replace(Preamble, OptionalPreamble, StringComparison.Ordinal),
+            Declaration("ROCKS_PROPERTY() rocks::Optional<rocks::WeakObjectRef<Value>> target;").Replace(Preamble, OptionalPreamble, StringComparison.Ordinal),
             Declaration("ROCKS_PROPERTY() rocks::Optional<rocks::SoftObjectRef<>> target;")
                 .Replace(Preamble, "#include <Object/SoftObjectRef.h>\n" + OptionalPreamble, StringComparison.Ordinal),
             Declaration("ROCKS_PROPERTY() rocks::Optional<rocks::ClassRef<Value>> kind;")

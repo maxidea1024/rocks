@@ -215,6 +215,52 @@ Result<void> Apply::RunSet(TextValue& value) noexcept {
         }
 
         return Changed();
+    case TextValueShape::InstancedType: {
+        // InstancedStruct 형 바꾸기·비우기(리플렉션 B9j). Map 값 자리는 항목이 없으면 빈 값을 먼저
+        // 넣고, Array 원소 자리는 index가 길이면 끝에 빈 원소를 더한다.
+        if (slot.part == TextSlotPart::MapValue) {
+            auto present = PathContains(Registry(), Access(), Start(), relative, &failure);
+            if (!present) {
+                return Failed(present.Error());
+            }
+
+            if (!present.Value()) {
+                auto inserted = PathInsertKey(Registry(), Access(), Start(), relative, &failure);
+                if (!inserted) {
+                    return Failed(inserted.Error());
+                }
+            }
+        } else if (slot.part == TextSlotPart::Element && fieldKind == ValueKind::Array) {
+            PathStep arraySteps[MaxPropertyPathSteps];
+            const usize last = relative.steps.Size() - 1;
+            for (usize index = 0; index <= last; ++index) {
+                arraySteps[index] = relative.steps[index];
+            }
+
+            arraySteps[last].selector = PathSelector::None;
+            arraySteps[last].index = 0;
+            auto count = PathCount(
+                Registry(), Access(), Start(),
+                PropertyPath{Span<const PathStep>(arraySteps, last + 1), relative.keys}, &failure);
+            if (!count) {
+                return Failed(count.Error());
+            }
+
+            if (relative.steps[last].index == count.Value()) {
+                if (auto inserted = PathInsertElement(Registry(), Access(), Start(), relative,
+                                                      nullptr, &failure);
+                    !inserted) {
+                    return Failed(inserted.Error());
+                }
+            }
+        }
+
+        auto done = value.single.guid == Guid{}
+                        ? PathClearInstanced(Registry(), Access(), Start(), relative, &failure)
+                        : PathSetInstancedType(Registry(), Access(), Start(), relative,
+                                               value.single.guid, &failure);
+        return done ? Changed() : Failed(done.Error());
+    }
     case TextValueShape::List:
     case TextValueShape::Entries:
     case TextValueShape::Empty:
@@ -247,7 +293,76 @@ Result<void> Apply::ResetStruct() noexcept {
         return Result<void>::Success();
     }
 
+    // 더한 원소 블록 안의 참조 struct는 떼어 낼 수 없으므로(강한 참조는 복사할 수 없다) 멤버마다
+    // 되돌린다.
+    if (!box && added && !slot.structView.IsEmpty() && slot.structView.ContainsStrongReference()) {
+        return ResetReferenceMembers(slot.structView, relative);
+    }
+
     return ResetAt(relative);
+}
+
+Result<void> Apply::ResetReferenceMembers(StructView view, PropertyPath at) noexcept {
+    const usize count = at.steps.Size();
+    if (count >= MaxPropertyPathSteps) {
+        return Diagnostic(TextDiagnosticCode::Unsupported, "this element cannot be reset");
+    }
+
+    PathStep steps[MaxPropertyPathSteps];
+    for (usize index = 0; index < count; ++index) {
+        steps[index] = at.steps[index];
+    }
+
+    FieldValue none(state.allocator);
+    none.kind = ValueKind::ObjectReference;
+    FreshFailure fresh(state);
+    const auto& members = view.Schema().fields;
+    for (usize index = 0; index < members.Size(); ++index) {
+        const FieldSchema& member = members[index];
+        steps[count] = PathStep{};
+        steps[count].fieldId = member.id;
+        const PropertyPath memberPath{Span<const PathStep>(steps, count + 1), at.keys};
+        if (member.value.kind == ValueKind::ObjectReference) {
+            if (auto written =
+                    PathWrite(Registry(), Access(), Start(), memberPath, none, nullptr, &failure);
+                !written) {
+                return Failed(written.Error());
+            }
+
+            continue;
+        }
+
+        if (member.value.kind == ValueKind::StaticArray &&
+            member.element.kind == ValueKind::ObjectReference) {
+            steps[count].selector = PathSelector::Index;
+            for (uint32 element = 0; element < member.maxElements; ++element) {
+                steps[count].index = element;
+                if (auto written = PathWrite(Registry(), Access(), Start(), memberPath, none,
+                                             nullptr, &failure);
+                    !written) {
+                    return Failed(written.Error());
+                }
+            }
+
+            continue;
+        }
+
+        const StructView nested = view.FieldStruct(index);
+        if (member.value.kind == ValueKind::Struct && !nested.IsEmpty() &&
+            nested.ContainsStrongReference()) {
+            if (auto reset = ResetReferenceMembers(nested, memberPath); !reset || state.failed) {
+                return reset;
+            }
+
+            continue;
+        }
+
+        if (auto reset = ResetAt(memberPath); !reset || state.failed) {
+            return reset;
+        }
+    }
+
+    return Result<void>::Success();
 }
 
 Result<void> Apply::ResetAt(PropertyPath at) noexcept {

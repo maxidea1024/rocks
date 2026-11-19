@@ -24,7 +24,7 @@ namespace detail {
 
 TraceSessionState::TraceSessionState(Allocator& owner) noexcept
     : allocator(&owner), types(owner), schemaBytes(owner), definitionStore(owner), staging(owner),
-      outputBuffer(owner), definitionBatch(owner), compressed(owner) {
+      outputBuffer(owner), definitionBatch(owner), compressed(owner), recent(owner) {
 }
 
 namespace {
@@ -64,6 +64,15 @@ constexpr TraceField DefinitionLossFields[] = {
     {"dropped", TraceFieldType::UInt64, TraceFormat::DefinitionLossCountOffset},
 };
 
+constexpr TraceField SnapshotSyncFields[] = {
+    {"tick", TraceFieldType::UInt64, TraceFormat::SnapshotSyncTickOffset},
+    {"order", TraceFieldType::UInt64, TraceFormat::SnapshotSyncOrderOffset},
+    {"droppedChunks", TraceFieldType::UInt64, TraceFormat::SnapshotSyncDroppedChunksOffset},
+    {"droppedBytes", TraceFieldType::UInt64, TraceFormat::SnapshotSyncDroppedBytesOffset},
+    {"skippedChunks", TraceFieldType::UInt64, TraceFormat::SnapshotSyncSkippedChunksOffset},
+    {"complete", TraceFieldType::Bool, TraceFormat::SnapshotSyncCompleteOffset},
+};
+
 struct BuiltinType {
     uint16 id;
     const char* name;
@@ -88,6 +97,9 @@ constexpr BuiltinType BuiltinTypes[] = {
     {TraceFormat::DefinitionLossTypeId, "Trace.DefinitionLoss", TraceFormat::TypeFlagDefinition,
      TraceFormat::DefinitionLossFixedBytes, DefinitionLossFields,
      sizeof(DefinitionLossFields) / sizeof(TraceField)},
+    {TraceFormat::SnapshotSyncTypeId, "Trace.SnapshotSync", TraceFormat::TypeFlagDefinition,
+     TraceFormat::SnapshotSyncFixedBytes, SnapshotSyncFields,
+     sizeof(SnapshotSyncFields) / sizeof(TraceField)},
 };
 
 } // namespace
@@ -298,6 +310,7 @@ void DestroyState(TraceSessionState* state) noexcept {
     state->pool.Release();
     state->definitions.Release();
     state->names.Release();
+    state->recent.Release();
     state->~TraceSessionState();
     auto freed = allocator.Deallocate(state);
     (void)freed;
@@ -332,6 +345,11 @@ Result<void> InitializeState(TraceSessionState& state) noexcept {
 
     if (auto writer = state.InitializeWriter(); !writer) {
         return writer;
+    }
+
+    if (auto recent = state.recent.Initialize(*state.allocator, state.settings.recentBytes);
+        !recent) {
+        return recent;
     }
 
     // 세션 내부 형(id 1 … FirstUserTypeId - 1)의 자리를 만들고 스키마를 넣는다.
@@ -371,7 +389,10 @@ Result<void> TraceSession::Start(const TraceSessionSettings& settings) noexcept 
     if (settings.allocator == nullptr || settings.poolMaxBytes < TraceBlockLayout::PageBytes ||
         settings.nameTableCapacity < MinimumNameTableCapacity ||
         (settings.nameTableCapacity & (settings.nameTableCapacity - 1)) != 0 ||
-        (settings.writerMode == TraceWriterMode::Thread && settings.writerPeriodMs == 0)) {
+        (settings.writerMode == TraceWriterMode::Thread && settings.writerPeriodMs == 0) ||
+        (settings.recentBytes != 0 &&
+         settings.recentBytes < TraceSessionSettings::MinRecentBytes) ||
+        settings.poolWarningPercent > 100 || settings.statsIntervalPumps == 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -412,6 +433,7 @@ Result<void> TraceSession::Start(const TraceSessionSettings& settings) noexcept 
 
     state_ = state;
     // 표준 채널(cpu·counter·mark·span·frame·context, 꺼진 상태)과 표준 형을 등록한다.
+    detail::InstallTraceContextObserver();
     if (auto standard = detail::RegisterStandardTraceTypes(*this); !standard) {
         Stop();
         return standard;
@@ -817,6 +839,13 @@ TraceSessionStats TraceSession::Stats() const noexcept {
     stats.writerDroppedChunks = state.writerDroppedChunks;
     stats.lastOutputFileStatus = state.lastOutputFileStatus;
     stats.lastOutputCallbackError = state.lastOutputCallbackError;
+    stats.recentCapacity = state.recent.Capacity();
+    stats.recentBytes = state.recent.UsedBytes();
+    stats.recentChunks = state.recent.Chunks();
+    stats.recentDroppedChunks = state.recent.DroppedChunks();
+    stats.recentDroppedBytes = state.recent.DroppedBytes();
+    stats.poolWarnings = state.poolWarnings;
+    stats.statsRecords = state.statsRecords;
     return stats;
 }
 

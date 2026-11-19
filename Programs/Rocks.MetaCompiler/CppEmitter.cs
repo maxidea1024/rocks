@@ -111,7 +111,7 @@ internal static class CppEmitter
         {
             if (type.IsEnum)
             {
-                Line($"if (auto added = registration.RegisterEnumIfAbsent(::rocks::GeneratedType<::{type.Name}>::Schema(), ::rocks::RuntimeEnumOps{{::rocks::NativeTypeKey<::{type.Name}>(), module}}); !added) return fail(added.Error());");
+                Line($"if (auto added = registration.RegisterEnumIfAbsent(::rocks::GeneratedType<::{type.NativeName}>::Schema(), ::rocks::RuntimeEnumOps{{::rocks::NativeTypeKey<::{type.NativeName}>(), module}}); !added) return fail(added.Error());");
                 continue;
             }
 
@@ -166,11 +166,14 @@ internal static class CppEmitter
         // NativeTypeKey만 쓰므로 include하지 않는다(ClassRef<Self>·파생 클래스를 Base로 두어도 include 순환이 생기지 않는다).
         ClassModel[] own = schema.Ordered.Where(type => type.Header == include).ToArray();
         IEnumerable<string> valueHeaders = own.SelectMany(type => type.Fields)
-            .Where(field => field.TargetKind is "Enum" or "Struct" && field.Reference is not null)
+            .Where(field => field.TargetKind is "Enum" or "Struct" or "InstancedStruct" && field.Reference is not null)
             .Select(field => field.Reference!)
             .Concat(own.SelectMany(type => type.Fields).Where(field => field.KeyKind == "Enum" && field.KeyReference is not null)
                 .Select(field => field.KeyReference!))
             .Concat(own.SelectMany(type => type.NativeMembers).Where(native => native.Struct is not null).Select(native => native.Struct!))
+            .Concat(own.Where(type => type.IsStruct && type.Base.Length != 0).Select(type => type.Base))
+            // 상속 bitfield bool 필드(리플렉션 B9m)는 선언 타입의 생성 접근자를 쓴다.
+            .Concat(own.SelectMany(type => type.Fields).Where(field => field.Bitfield).Select(field => field.Owner))
             .Select(name => schema.Find(name).Header)
             .Where(header => header != include)
             .Distinct(StringComparer.Ordinal)
@@ -178,6 +181,12 @@ internal static class CppEmitter
         foreach (string header in valueHeaders)
         {
             Line($"#include <{CompilerOptions.GeneratedSpelling(header)}>");
+        }
+
+        // bitfield bool 필드(리플렉션 B9m)의 접근자 판 함수표 템플릿이다.
+        if (own.Any(type => type.Fields.Any(field => field.Bitfield)))
+        {
+            Line("#include <Object/GeneratedBitfieldAccess.h>");
         }
 
         // 설정 struct의 GeneratedType<S>::Settings()가 쓴다(Docs/Design/ConfigSystem.ko.md 7절).
@@ -212,6 +221,7 @@ internal static class CppEmitter
             string native = "::" + type.NativeName;
             string? baseId = type.Base == "rocks::Object" ? null : schema.Find(type.Base).Id;
             Line($"template <> struct GeneratedType<{native}> {{");
+            EmitBitfieldAccessors(type, native, Line);
             // ROCKS_NATIVE 멤버는 스키마에 넣지 않는다. 생성 static_assert는 직접 타입의 강한 참조 래퍼(ObjectRef·RootRef·
             // ObjectRefArray·StructRefArray와 그것을 가리키는 포인터·참조 — RMC2205)와 WorldOnly 소유자 형질(RMC2206)만 컴파일러가
             // 한 번 더 확인한다. Object 파생 타입을 가리키는 raw 포인터·참조는 대상의 완전성이 TU마다 달라 형질로 보지 않고
@@ -299,6 +309,13 @@ internal static class CppEmitter
                 Line("static const RuntimeFieldOps fields[] = {");
                 foreach (FieldModel field in type.Fields)
                 {
+                    if (field.Bitfield)
+                    {
+                        // bitfield bool(리플렉션 B9m)은 멤버 포인터 대신 생성 접근자로 read·write·writeStaged·codec·경로를 낸다.
+                        Line($"detail::BitfieldFieldOps<{native}, {BitfieldAccessors(schema, field)}, {(field.Spec.ReadOnly ? "true" : "false")}>({GuidValue(field.Id)}),");
+                        continue;
+                    }
+
                     string member = $"&::{field.Owner}::{field.Name}";
                     Line($"{{{GuidValue(field.Id)},");
                     if (field.IsMap || field.IsSet)
@@ -308,7 +325,7 @@ internal static class CppEmitter
                         // native 키를 싣는다(Docs/Design/ReflectionExtensions.ko.md 7.2·7.3절).
                         Line("nullptr, {}, nullptr,");
                         string mapValueNative = ValueNativeType(schema, field);
-                        string keyNative = field.KeyKind == "Enum" ? $", nullptr, NativeTypeKey<::{field.KeyReference}>()" : "";
+                        string keyNative = field.KeyKind == "Enum" ? $", nullptr, NativeTypeKey<::{schema.Find(field.KeyReference!).NativeName}>()" : "";
                         EmitClassCodec(native, member, (mapValueNative.Length == 0 ? ", nullptr" : mapValueNative) + ClassPathThunk(native, member, field) + keyNative, Line);
                         continue;
                     }
@@ -348,7 +365,7 @@ internal static class CppEmitter
                     // Enum 필드(Optional<enum> 포함)는 정적 thunk의 enum native 키를 싣는다(등록이 대상 enum 레코드와 대조한다). 단일 값
                     // 필드도 경로 접근 thunk를 싣는다(리플렉션 B9i3c0 — staged 객체의 경로 연산과 Detach·Attach가 쓴다. 게시된 객체의
                     // 최상위 단일 값 읽기·쓰기는 그래도 read·write 한 경로다).
-                    string scalarNative = field.TargetKind == "Enum" ? $", NativeTypeKey<::{field.Reference}>()" : ", nullptr";
+                    string scalarNative = field.TargetKind == "Enum" ? $", NativeTypeKey<::{schema.Find(field.Reference!).NativeName}>()" : ", nullptr";
                     EmitClassCodec(native, member, scalarNative + ClassPathThunk(native, member, field), Line);
                 }
 
@@ -386,12 +403,31 @@ internal static class CppEmitter
         return output.ToString();
     }
 
+    // 자기 bitfield bool 필드(리플렉션 B9m — Docs/Design/ReflectionExtensions.ko.md 14절)의 생성 접근자다. bitfield는 멤버
+    // 포인터·참조를 만들 수 없으므로 함수표 템플릿(detail::BitfieldFieldOps·BitfieldStructFieldOps)이 이 정적 함수를 받는다.
+    // GeneratedType은 ROCKS_GENERATED_BODY의 friend라 private 멤버도 읽고 쓴다. 파생 타입은 base의 접근자를 그대로 쓴다.
+    private static void EmitBitfieldAccessors(ClassModel type, string native, Action<string> Line)
+    {
+        foreach (FieldModel field in type.OwnFields.Where(field => field.Bitfield))
+        {
+            Line($"static bool Get_{field.Name}(const {native}& value) noexcept {{ return value.{field.Name} != 0; }}");
+            Line($"static void Set_{field.Name}({native}& value, bool bit) noexcept {{ if (bit) {{ value.{field.Name} = 1; }} else {{ value.{field.Name} = 0; }} }}");
+        }
+    }
+
+    // bitfield bool 필드의 접근자 인자 둘이다(선언 타입 — 상속 필드면 base — 의 GeneratedType 정적 함수).
+    private static string BitfieldAccessors(SchemaModel schema, FieldModel field)
+    {
+        string owner = $"GeneratedType<::{schema.Find(field.Owner).NativeName}>";
+        return $"&{owner}::Get_{field.Name}, &{owner}::Set_{field.Name}";
+    }
+
     // struct 필드·배열 필드 함수표의 valueNativeType 인자다: struct 필드는 그 struct, 배열은 원소가 Enum·Struct면 그
     // 원소의 native 키(Binds 미러는 실제 타입), 그 밖은 ""다(뒤에 path 칸이 오므로 호출하는 쪽이 ", nullptr"을 명시한다).
     private static string ValueNativeType(SchemaModel schema, FieldModel field) => field.TargetKind switch
     {
         "Struct" => $", NativeTypeKey<::{schema.Find(field.Reference!).NativeName}>()",
-        "Enum" => $", NativeTypeKey<::{field.Reference}>()",
+        "Enum" => $", NativeTypeKey<::{schema.Find(field.Reference!).NativeName}>()",
         _ => ""
     };
 
@@ -411,7 +447,8 @@ internal static class CppEmitter
         string member = $"&{native}::{field.Name}";
         // Map·Set 멤버(리플렉션 B9f2)의 대상 종류는 값·원소 종류다(key 단계 경로 연산 — 리플렉션 B9f3). 값·키 native 키는
         // StructFieldOps가 멤버 형식으로 채운다.
-        return $"detail::StructFieldOps<{member}>({GuidValue(field.Id)}, &detail::PathStructMember<{member}, ValueKind::{field.TargetKind}>),";
+        // 소유 struct를 명시한다(리플렉션 B9k — base 멤버의 멤버 포인터도 파생 값으로 캐스트한 뒤 쓴다).
+        return $"detail::StructFieldOps<{native}, {member}>({GuidValue(field.Id)}, &detail::PathStructMember<{native}, {member}, ValueKind::{field.TargetKind}>),";
     }
 
     // 클래스·참조 struct Trace의 필드 한 줄이다(owner는 Trace 매개변수 value, ownerType은 멤버 포인터의 클래스 철자). ObjectRef는
@@ -569,16 +606,44 @@ internal static class CppEmitter
     // Migrate가 있으면 migrate), Register. 형질과 깊이는 모델 값을 내되 직접 멤버의 생성 값을 포함하는지
     // static_assert로 대조한다(import descriptor의 flags를 믿지 않는다). Binds 미러는 실제 타입(NativeName)의
     // 특수화를 내고 멤버 thunk·Trace·생성·소멸이 모두 실제 타입을 쓰며, 스키마 이름만 미러 이름이다.
+    // struct가 InstancedStruct 값(단일·원소 배열·정적 배열·Map 값)을 (중첩 struct·원소·Optional·Map 값 struct까지) 담는지다(리플렉션
+    // B9j — 런타임 등록 형질 StructView::ContainsInstancedStruct와 같은 규칙, Transient 멤버도 센다).
+    private static bool ContainsInstancedStruct(SchemaModel schema, ClassModel type) =>
+        type.Fields.Any(field => field.TargetKind == "InstancedStruct" ||
+            (field.StructTarget && ContainsInstancedStruct(schema, schema.Find(field.Reference!))));
+
+    // struct가 Required 멤버를 (중첩 struct·원소 struct까지, Transient 멤버 아래는 빼고) 담는지다(리플렉션 B9j — 런타임 등록 형질
+    // StructView::ContainsRequired와 같은 규칙).
+    private static bool ContainsRequired(SchemaModel schema, ClassModel type) =>
+        type.Fields.Any(field => !field.Spec.Transient &&
+            (field.Spec.Required || (field.StructTarget && ContainsRequired(schema, schema.Find(field.Reference!)))));
+
     private static void EmitStruct(SchemaModel schema, ClassModel type, Action<string> Line)
     {
         string native = "::" + type.NativeName;
         string True(bool value) => value ? "true" : "false";
         Line($"template <> struct GeneratedType<{native}> {{");
+        EmitBitfieldAccessors(type, native, Line);
         Line($"static constexpr bool ContainsStrongReference = {True(type.ContainsStrongReference)};");
         Line($"static constexpr bool RequiresWorldOnlyOwner = {True(type.RequiresWorldOnlyOwner)};");
         Line($"static constexpr bool ContainsReferenceArray = {True(type.ContainsReferenceArray)};");
+        // InstancedStruct 담기 조건의 생성 형질이다(리플렉션 B9j — InstancedStruct::Emplace<S>의 static_assert가 쓴다).
+        Line($"static constexpr bool ContainsInstancedStruct = {True(ContainsInstancedStruct(schema, type))};");
+        Line($"static constexpr bool ContainsRequired = {True(ContainsRequired(schema, type))};");
         Line($"static constexpr uint32 Depth = {type.Depth}u;");
         Line($"static_assert(Depth <= ::rocks::MaxStructDepth, \"ROCKS_STRUCT {type.Name} nesting depth exceeds MaxStructDepth (RMC2303)\");");
+        // struct 상속(리플렉션 B9k): 리플렉션 base는 C++ base여야 하고, 비리플렉션 base는 필드가 없고 다형적이지 않아야 한다.
+        if (type.Base.Length != 0)
+        {
+            Line($"static_assert(::rocks::IsBaseOfV<::{type.Base}, {native}>, \"ROCKS_STRUCT {type.Name}: reflected base {type.Base} must be a C++ base (RMC2301)\");");
+        }
+
+        foreach (string empty in type.EmptyBases)
+        {
+            string emptyType = "::" + empty.TrimStart(':');
+            Line($"static_assert(::rocks::IsEmptyV<{emptyType}> && !::rocks::IsPolymorphicV<{emptyType}>, \"ROCKS_STRUCT {type.Name}: non-reflected base {empty} must have no fields and no virtual functions (RMC2301)\");");
+        }
+
         if (type.Binds.Length != 0)
         {
             EmitBindsChecks(type, native, Line);
@@ -629,7 +694,8 @@ internal static class CppEmitter
         Line("static const TypeSchema& Schema() noexcept {");
         EmitFieldSchemas(type, Line);
         string fieldSpan = type.Fields.Count == 0 ? "Span<const FieldSchema>{}" : $"Span<const FieldSchema>(fields, {type.Fields.Count})";
-        Line($"static const TypeSchema schema{{Id(), {type.Version}, {fieldSpan}, {View(type.Name)}, Guid{{}}, {type.Flags}u, {View(type.EffectiveToolName)}}};");
+        string? structBaseId = type.Base.Length == 0 ? null : schema.Find(type.Base).Id;
+        Line($"static const TypeSchema schema{{Id(), {type.Version}, {fieldSpan}, {View(type.Name)}, {GuidValue(structBaseId)}, {type.Flags}u, {View(type.EffectiveToolName)}}};");
         Line("return schema;");
         Line("}");
         if (type.IsSettings)
@@ -656,7 +722,8 @@ internal static class CppEmitter
             Line("}");
         }
 
-        EmitValueCopy(type, native, Line);
+        EmitValueCopy(type, native, type.Base.Length == 0 ? null : "::" + schema.Find(type.Base).NativeName, Line);
+        EmitValidateTree(type, native, type.Base.Length == 0 ? null : "::" + schema.Find(type.Base).NativeName, Line);
         Line("static RuntimeStructOps Ops(ModuleLease module = {}) noexcept {");
         Line($"auto ops = MakeRuntimeStructOps<{native}>(Move(module));");
         Line("if constexpr (ValueCopyable) {");
@@ -667,7 +734,9 @@ internal static class CppEmitter
             Line("static const RuntimeStructFieldOps fields[] = {");
             foreach (FieldModel field in type.Fields)
             {
-                Line(StructMemberOps(native, field));
+                Line(field.Bitfield
+                    ? $"detail::BitfieldStructFieldOps<{native}, {BitfieldAccessors(schema, field)}>({GuidValue(field.Id)}),"
+                    : StructMemberOps(native, field));
             }
 
             Line("};");
@@ -686,6 +755,14 @@ internal static class CppEmitter
             Line($"ops.migrate = &{native}::Migrate;");
         }
 
+        // 검증 hook(Docs/Design/CurveData.ko.md 9.1절): 트리에 hook이 있으면 validateTree, 자기 Validate가 있으면 validate.
+        Line("if constexpr (HasValidateTree) {");
+        Line($"ops.validateTree = +[](const void* value) noexcept -> Result<void> {{ return ValidateTree(*static_cast<const {native}*>(value)); }};");
+        Line("}");
+        Line("if constexpr (HasValidateSelf) {");
+        Line($"ops.validate = +[](const void* value) noexcept -> Result<void> {{ return ValidateSelf(*static_cast<const {native}*>(value)); }};");
+        Line("}");
+
         Line("ops.requiresWorldOnlyOwner = RequiresWorldOnlyOwner;");
         Line("return ops;");
         Line("}");
@@ -698,6 +775,70 @@ internal static class CppEmitter
         Line($"static constexpr bool Supported = GeneratedType<{native}>::ValueCopyable;");
         Line($"static Result<void> Copy({native}& destination, const {native}& source, Allocator& allocator) noexcept {{ return GeneratedType<{native}>::CopyValue(destination, source, allocator); }}");
         Line("};");
+        // 다른 값(Array<S>·Map 값·Optional<S>·멤버 S·InstancedStruct 내용)의 검증이 이 struct의 ValidateTree를 쓰게 잇는다(Object/ValueCopy.h).
+        Line($"template <> struct detail::ValueValidate<{native}> {{");
+        Line($"static constexpr bool HasHook = GeneratedType<{native}>::HasValidateTree;");
+        Line($"static Result<void> Run(const {native}& value) noexcept {{ return GeneratedType<{native}>::ValidateTree(value); }}");
+        Line("};");
+    }
+
+    // struct 값 트리의 검증이다(Docs/Design/CurveData.ko.md 9.1절 — RuntimeStructOps::validateTree). HasValidateTree는 자기 Validate·base·
+    // PROPERTY 멤버 형식(detail::ValueValidate<멤버>::HasHook) 중 하나라도 hook을 담을 수 있는지다. ValidateTree는 base 하위 객체, PROPERTY
+    // 멤버 순서(bitfield bool 제외 — hook이 없다), 마지막에 자기 Validate 순으로 안쪽부터 검증하고 첫 거부에서 멈춘다. NATIVE 멤버는
+    // 리플렉션 경로가 바꾸지 않으므로 보지 않는다. 자기 Validate는 시그니처를 static_assert로 대조하고, hook struct는 통째로 복사할 수
+    // 있어야 한다(리플렉션 쓰기가 사본에 적용해 검증한 뒤 게시한다 — ValueCopyable).
+    private static void EmitValidateTree(ClassModel type, string native, string? baseNative, Action<string> Line)
+    {
+        IEnumerable<FieldModel> ownFields = baseNative is null ? type.Fields : type.OwnFields;
+        string[] members = ownFields.Where(field => !field.Bitfield).Select(field => field.Name).ToArray();
+        string hasHook = (type.HasValidate ? "true" : "false") +
+            (baseNative is null ? "" : $" || GeneratedType<{baseNative}>::HasValidateTree") +
+            string.Concat(members.Select(member => $" || ::rocks::detail::ValueValidate<decltype({native}::{member})>::HasHook"));
+        Line($"static constexpr bool HasValidateTree = {hasHook};");
+        // 자기 수준의 hook(RuntimeStructOps::validate — decode가 값을 다 채운 뒤 부른다)은 base 사슬의 Validate 다음 자기 Validate다. base의
+        // hook을 물려받은 struct도 참조 없는 값이어야 한다(가져온 base는 C# 모델이 모르므로 static_assert로 본다).
+        string selfHook = (type.HasValidate ? "true" : "false") + (baseNative is null ? "" : $" || GeneratedType<{baseNative}>::HasValidateSelf");
+        Line($"static constexpr bool HasValidateSelf = {selfHook};");
+        Line($"static_assert(!HasValidateSelf || (!ContainsStrongReference && ValueCopyable), \"{type.Name} has a Validate hook (its own or a base's) and must be a deep-copyable value without strong references: reflected writes validate a copy before publishing it\");");
+        // Binds 미러(CurveData CV9)의 hook은 미러 struct의 static Validate(const 실제 타입&)다(실제 Core 타입에는 hook을 둘 수 없다).
+        string hookOwner = type.Binds.Length != 0 ? "::" + type.Name : native;
+        if (type.HasValidate)
+        {
+            Line($"static_assert(::rocks::IsSameV<decltype(&{hookOwner}::Validate), ::rocks::Result<void> (*)(const {native}&) noexcept>, \"{type.Name}::Validate must be declared as static rocks::Result<void> Validate(const {(type.Binds.Length != 0 ? type.Binds : type.Name)}&) noexcept\");");
+        }
+
+        Line($"static Result<void> ValidateSelf([[maybe_unused]] const {native}& value) noexcept {{");
+        if (baseNative is not null)
+        {
+            Line($"if constexpr (GeneratedType<{baseNative}>::HasValidateSelf) {{");
+            Line($"if (auto checked = GeneratedType<{baseNative}>::ValidateSelf(static_cast<const {baseNative}&>(value)); !checked) {{ return checked; }}");
+            Line("}");
+        }
+
+        Line(type.HasValidate
+            ? $"return ::rocks::detail::StructValidationResult({hookOwner}::Validate(value));"
+            : "return Result<void>::Success();");
+        Line("}");
+
+        Line($"static Result<void> ValidateTree([[maybe_unused]] const {native}& value) noexcept {{");
+        if (baseNative is not null)
+        {
+            Line($"if constexpr (GeneratedType<{baseNative}>::HasValidateTree) {{");
+            Line($"if (auto checked = GeneratedType<{baseNative}>::ValidateTree(static_cast<const {baseNative}&>(value)); !checked) {{ return checked; }}");
+            Line("}");
+        }
+
+        foreach (string member in members)
+        {
+            Line($"if constexpr (::rocks::detail::ValueValidate<decltype({native}::{member})>::HasHook) {{");
+            Line($"if (auto checked = ::rocks::detail::ValueValidate<decltype({native}::{member})>::Run(value.{member}); !checked) {{ return checked; }}");
+            Line("}");
+        }
+
+        Line(type.HasValidate
+            ? $"return ::rocks::detail::StructValidationResult({hookOwner}::Validate(value));"
+            : "return Result<void>::Success();");
+        Line("}");
     }
 
     // 설정 struct의 설정 메타데이터다(Docs/Design/ConfigSystem.ko.md 7절 — Meta/SettingsSchema.h): branch·섹션 이름과 설정 지정자가 있는 직접
@@ -728,10 +869,14 @@ internal static class CppEmitter
     // detail::TryCopyValue로 새 값을 다 만든 뒤 이동 대입 한 번으로 넣는다(실패하면 destination 그대로). 한 멤버라도 복사할 수
     // 없으면(ObjectRef·Registry 컨테이너·복사 의미가 없는 NATIVE 타입) ValueCopyable이 거짓이고 CopyValue는 Unsupported다 — 멤버를
     // 조용히 빠뜨리지 않는다. trivially copyable struct는 대입 한 번이다. 복사할 수 없는 분기가 컴파일되지 않게 템플릿이다.
-    private static void EmitValueCopy(ClassModel type, string native, Action<string> Line)
+    // 리플렉션 base가 있는 struct(리플렉션 B9k)는 base 하위 객체를 base의 CopyValue로 먼저 복사하고 자기 멤버만 복사한다 — base의
+    // NATIVE 멤버(파생 모델·import descriptor에 없다)와 상속 필드를 base가 책임진다.
+    private static void EmitValueCopy(ClassModel type, string native, string? baseNative, Action<string> Line)
     {
-        string[] members = type.Fields.Select(field => field.Name).Concat(type.NativeMembers.Select(member => member.Name)).ToArray();
-        string supported = string.Concat(members.Select(member => $" && ::rocks::detail::ValueCopy<decltype({native}::{member})>::Supported"));
+        IEnumerable<FieldModel> ownFields = baseNative is null ? type.Fields : type.OwnFields;
+        string[] members = ownFields.Select(field => field.Name).Concat(type.NativeMembers.Select(member => member.Name)).ToArray();
+        string supported = (baseNative is null ? "" : $" && GeneratedType<{baseNative}>::ValueCopyable") +
+            string.Concat(members.Select(member => $" && ::rocks::detail::ValueCopy<decltype({native}::{member})>::Supported"));
         Line($"static constexpr bool ValueCopyable = ::rocks::detail::IsPlainCopyV<{native}> || (::rocks::IsNothrowMoveAssignableV<{native}>{supported});");
         Line($"template <class Self = {native}>");
         Line("static Result<void> CopyValue(Self& destination, const Self& source, Allocator& allocator) noexcept {");
@@ -741,9 +886,19 @@ internal static class CppEmitter
         Line("return Result<void>::Success();");
         Line("} else if constexpr (ValueCopyable) {");
         Line("Self copy = ::rocks::detail::MakeAllocatedValue<Self>(allocator);");
+        if (baseNative is not null)
+        {
+            Line($"if (auto copied = GeneratedType<{baseNative}>::CopyValue(static_cast<{baseNative}&>(copy), static_cast<const {baseNative}&>(source), allocator); !copied) {{ return copied; }}");
+        }
+
+        // bitfield(PROPERTY bitfield bool·NATIVE 정수 bitfield — 리플렉션 B9m)는 참조를 만들 수 없으므로 대입한다(정수라 깊은 복사다).
+        HashSet<string> bitfields = type.Fields.Where(field => field.Bitfield).Select(field => field.Name)
+            .Concat(type.NativeMembers.Where(member => member.Bitfield).Select(member => member.Name)).ToHashSet(StringComparer.Ordinal);
         foreach (string member in members)
         {
-            Line($"if (auto copied = ::rocks::detail::TryCopyValue(copy.{member}, source.{member}, allocator); !copied) {{ return copied; }}");
+            Line(bitfields.Contains(member)
+                ? $"copy.{member} = source.{member};"
+                : $"if (auto copied = ::rocks::detail::TryCopyValue(copy.{member}, source.{member}, allocator); !copied) {{ return copied; }}");
         }
 
         Line("destination = Move(copy);");
@@ -788,9 +943,12 @@ internal static class CppEmitter
 
     // 리플렉션 enum의 GeneratedType 특수화다: Id, Schema(EnumSchema), constexpr IsDeclared(쓰기·복원 검증),
     // Register. C++ underlying이 스키마와 같은지 컴파일 시 확인한다.
+    // Binds 미러 enum(CurveData CV9 — Core enum)은 실제 enum(NativeName)의 특수화를 내고 열거자 이름·값을 실제 enum과
+    // 대조한다(미러가 나열한 열거자만 선언 값이다 — 실제 enum의 다른 열거자는 저장·쓰기에서 거부된다). 스키마 이름은
+    // 미러 이름이다.
     private static void EmitEnum(ClassModel type, Action<string> Line)
     {
-        string native = "::" + type.Name;
+        string native = "::" + type.NativeName;
         Line($"template <> struct GeneratedType<{native}> {{");
         Line($"static_assert(::rocks::IsSameV<::rocks::UnderlyingTypeT<{native}>, {EnumRules.NativeType(type.Underlying)}>, \"ROCKS_ENUM {type.Name} underlying type changed; regenerate metadata\");");
         // 스키마의 값이 C++ 값과 같은지 컴파일 시 대조한다(MetaCompiler가 AST에서 읽은 값을 믿지 않는다).

@@ -1,0 +1,404 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::IntegerStepCurve::defaultValue",
+      "id": "bca3b969e3824c10a92768e869168815",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::IntegerStepCurve::keys_",
+      "id": "82a566f0737e495d9d7cba1a87a6ee57",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::IntegerStepCurve::useDefaultBeforeFirstKey",
+      "id": "6b6d89f69f164359af7d11d881ad4852",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::IntegerStepKey::time",
+      "id": "56d2c0fe659a4415a0d772b8d3d47232",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::IntegerStepKey::value",
+      "id": "85e8678fcb5a4e9da7785af4148a86d5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::NameStepCurve::defaultValue",
+      "id": "cfc08f25a0fc4380961b0fb5ac7a64ea",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::NameStepCurve::keys_",
+      "id": "40301e65d58447f2a0c37c41ce2ab8ff",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::NameStepKey::time",
+      "id": "050b9372faf5489fb694a91b7dea0c1b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::NameStepKey::value",
+      "id": "fba55189461d4a55b079cfbfd32237e0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PackedTangentCurve::constantValue_",
+      "id": "eb3065e363624abeb9e9b130995dcacb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PackedTangentCurve::emptyDefault_",
+      "id": "a3a9d3ca170f4e8682521ee58926ce92",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PackedTangentCurve::format_",
+      "id": "2ec14c5e49524719a7e6cf0f40918f57",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PackedTangentCurve::keyCount_",
+      "id": "a3aacdbee8b64f0aa891b3382f2b3e6f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PackedTangentCurve::keyTimeFormat_",
+      "id": "1f25aed803c141f6b40f2f65e7b7f08b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PackedTangentCurve::packed_",
+      "id": "a5f809782ec54d57920cddd8dd21d840",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PackedTangentCurve::postExtrapolation_",
+      "id": "1003024568fa4eacb16cac85a85dba48",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PackedTangentCurve::preExtrapolation_",
+      "id": "e0e43f6244854de3ac1f34c695539119",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PlainCurve::interp",
+      "id": "da0b3005f8284c9c893b360e106b960d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PlainCurve::keys_",
+      "id": "d441f211bda44be7a3f7fc63157aead4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PlainCurveKey::time",
+      "id": "16e93e4885eb4f91b827644e158b8cfe",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PlainCurveKey::value",
+      "id": "18a6accf35ed4062bd64740b661ab8ab",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ScalarCurveBase::defaultValue",
+      "id": "5256e69ef31a487fbddce405be1d8e05",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ScalarCurveBase::postExtrapolation",
+      "id": "58f7dff873744feab564bb7459e54809",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ScalarCurveBase::preExtrapolation",
+      "id": "c99b2de187334c118fd35921862b3abd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StringStepCurve::defaultValue",
+      "id": "dc740e4f620047c4b72a2c80f03c6ac0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StringStepCurve::keys_",
+      "id": "f89936b5cd8f481ea0b41c5beafe65a6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StringStepKey::time",
+      "id": "0fe3bad6f7c8488db5e1edb69370c5d3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::StringStepKey::value",
+      "id": "65ff2e0a7ad34fa4a5c0643b6ba358b0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TangentCurve::keys_",
+      "id": "53b72b78dc3b4695a1c1ae5527fb89ce",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TangentCurveKey::arriveTangent",
+      "id": "b88dcaa7bf6149938ec2373a3ad7d6b3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TangentCurveKey::arriveTangentWeight",
+      "id": "9ea5e18eee1340e6a00e5e12eb09ce5b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TangentCurveKey::interp",
+      "id": "791741599d174ad7b6753f78f7f2c9dc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TangentCurveKey::leaveTangent",
+      "id": "0be2f77cef134cc5923cd352b12398e6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TangentCurveKey::leaveTangentWeight",
+      "id": "53a0d6dbf466417dbe7e45cc6c33cf00",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TangentCurveKey::tangentMode",
+      "id": "7ae703f009b143aaade6e94c064d1dbc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TangentCurveKey::tangentWeight",
+      "id": "64f6105cfc204cad86cd3b45cac3dfcf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TangentCurveKey::time",
+      "id": "9a79f559e6bc4241b268d912ae71119c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::TangentCurveKey::value",
+      "id": "344ad857eeac4f0ca4e87906371a8674",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CurveExtrapolation",
+      "id": "aa529e69713d4e99982879b9b76fee9b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CurveInterp",
+      "id": "cbd2b3d4dd314f94b022c54219f3f5f7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CurveTangentMode",
+      "id": "5d3b532f16f441048257c212ee150fb1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CurveTangentWeight",
+      "id": "b17b01bdbd2f4e49aaa2cfd19bbbd9fe",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::IntegerStepCurve",
+      "id": "f6344a331bfa48898dd418ecdbd979d0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::IntegerStepKey",
+      "id": "9c7dab7f84da40aba26e5e419877caf3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::NameStepCurve",
+      "id": "b61b3d49180f4e188dd10dc854583b50",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::NameStepKey",
+      "id": "fec5dbb4af374209acba3f589e3a5e56",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PackedCurveFormat",
+      "id": "22dd16b5e9dd451ebd28d4a59d252c72",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PackedKeyTimeFormat",
+      "id": "35de780725674d85895e8a63a207a188",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PackedTangentCurve",
+      "id": "1452ceac79714adf92c6ee7ede028f9e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PlainCurve",
+      "id": "8acc5aa887f345dc8aa35d98d68d74cb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PlainCurveInterp",
+      "id": "b014f57ba9d54e85acedb68012c2596d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PlainCurveKey",
+      "id": "37108588e1e6416183aacabad0633259",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ScalarCurveBase",
+      "id": "8545ad31a7dc469883c629dd541b34d7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::StringStepCurve",
+      "id": "4392568d911e416caeb7166ba14a7a12",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::StringStepKey",
+      "id": "28e352badf4442e88e9eb84279bf9561",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TangentCurve",
+      "id": "0bee0973674d493abb11b1c59618fdfb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::TangentCurveKey",
+      "id": "4e8eee14f1e14ffcb6c4125176d8da1a",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 #include <TestSupport/Test.h>
 #include <TestSupport/NFailAllocator.h>
+#include <Core/Diagnostics/Correlation.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
@@ -264,6 +265,53 @@ TEST(DedicatedLane_ShutdownDrainsQueueAndContinuations) {
         CHECK(static_cast<bool>(late.Value()));
         CHECK(lane.Flush().Error() == ErrorCode::ShuttingDown);
         CHECK(lane.Shutdown());
+    }
+}
+
+// 올린 스레드의 상관 id가 lane 작업에 전파되고, 작업이 끝나면 lane 스레드의 스택은 원래 깊이로
+// 돌아온다(다음 작업·다음 프레임으로 새지 않는다). 직렬 체인처럼 이어 올린 작업과 Inline 모드도
+// 같다.
+TEST(DedicatedLane_PropagatesCorrelationWithoutLeakingAcrossTasks) {
+    const DedicatedLaneMode modes[] = {DedicatedLaneMode::Thread, DedicatedLaneMode::Inline};
+    for (DedicatedLaneMode mode : modes) {
+        SystemAllocator allocator;
+        DedicatedLane lane(allocator);
+        DedicatedLaneConfig config;
+        config.mode = mode;
+        REQUIRE(lane.Start(config));
+        uint64 seenRequest = 0;
+        usize depthInside = 0;
+        usize depthAfter = MaxCorrelationDepth;
+        bool emptyInNext = false;
+        const usize outerDepth = CorrelationDepth();
+        {
+            CorrelationScope request(CorrelationIds{0, 0, 0, 0, 77});
+            REQUIRE(PostCallable(lane, allocator, [&]() noexcept {
+                CorrelationIds ids;
+                if (CurrentCorrelation(ids)) {
+                    seenRequest = ids.request;
+                }
+
+                depthInside = CorrelationDepth();
+            }));
+        }
+
+        // 상관 id 없이 올린 다음 작업(다음 프레임 slot에 해당)은 빈 스택을 본다.
+        REQUIRE(PostCallable(lane, allocator, [&]() noexcept {
+            CorrelationIds ids;
+            emptyInNext = !CurrentCorrelation(ids);
+            depthAfter = CorrelationDepth();
+        }));
+        REQUIRE(lane.Flush());
+        CHECK(seenRequest == 77);
+        // Thread는 lane 스레드 기준(빈 스택 위에 복원 칸 하나), Inline은 올린 스레드에서 바로
+        // 돌므로 올린 쪽 범위 위에 복원 칸이 하나 더 쌓인다.
+        const bool inlineMode = mode == DedicatedLaneMode::Inline;
+        CHECK(depthInside == (inlineMode ? outerDepth + 2 : 1u));
+        CHECK(emptyInNext);
+        CHECK(depthAfter == (inlineMode ? outerDepth : 0u));
+        CHECK(CorrelationDepth() == outerDepth);
+        REQUIRE(lane.Shutdown());
     }
 }
 

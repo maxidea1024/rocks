@@ -25,10 +25,18 @@ StringView ConfigLayerName(ConfigLayer layer) noexcept {
         return "DeviceProfile";
     case ConfigLayer::User:
         return "User";
+    case ConfigLayer::Hotfix:
+        return "Hotfix";
     case ConfigLayer::Session:
         return "Session";
+    case ConfigLayer::Code:
+        return "Code";
+    case ConfigLayer::Scoped:
+        return "Scoped";
     case ConfigLayer::Console:
         return "Console";
+    case ConfigLayer::Server:
+        return "Server";
     }
 
     return {};
@@ -62,44 +70,43 @@ StringView ConfigDiagnosticCodeName(ConfigDiagnosticCode code) noexcept {
         return "UnknownTarget";
     case ConfigDiagnosticCode::ConsoleReadOnly:
         return "ConsoleReadOnly";
-    case ConfigDiagnosticCode::NotQualityMember:
-        return "NotQualityMember";
     case ConfigDiagnosticCode::ValueOutOfRange:
         return "ValueOutOfRange";
     case ConfigDiagnosticCode::WeakWrite:
         return "WeakWrite";
+    case ConfigDiagnosticCode::UserFileVersion:
+        return "UserFileVersion";
+    case ConfigDiagnosticCode::UnknownSetting:
+        return "UnknownSetting";
+    case ConfigDiagnosticCode::RestartRequired:
+        return "RestartRequired";
+    case ConfigDiagnosticCode::BootValueIgnored:
+        return "BootValueIgnored";
+    case ConfigDiagnosticCode::InvalidDeviceProfile:
+        return "InvalidDeviceProfile";
+    case ConfigDiagnosticCode::Clamped:
+        return "Clamped";
+    case ConfigDiagnosticCode::InvalidEnum:
+        return "InvalidEnum";
+    case ConfigDiagnosticCode::BootSealed:
+        return "BootSealed";
+    case ConfigDiagnosticCode::LateBound:
+        return "LateBound";
+    case ConfigDiagnosticCode::UnresolvedName:
+        return "UnresolvedName";
+    case ConfigDiagnosticCode::ValidationFailed:
+        return "ValidationFailed";
+    case ConfigDiagnosticCode::UndefinedLevel:
+        return "UndefinedLevel";
+    case ConfigDiagnosticCode::GroupNoConverge:
+        return "GroupNoConverge";
+    case ConfigDiagnosticCode::GroupConflict:
+        return "GroupConflict";
+    case ConfigDiagnosticCode::QualityLowered:
+        return "QualityLowered";
     }
 
     return {};
-}
-
-bool IsConsoleSettingName(StringView name) noexcept {
-    usize segments = 0;
-    bool start = true;
-    for (const char c : name) {
-        if (c == '.') {
-            if (start) {
-                return false;
-            }
-
-            start = true;
-            continue;
-        }
-
-        const bool lower = c >= 'a' && c <= 'z';
-        const bool digit = c >= '0' && c <= '9';
-        if (start ? !lower : !(lower || digit || c == '_')) {
-            return false;
-        }
-
-        if (start) {
-            ++segments;
-        }
-
-        start = false;
-    }
-
-    return !start && segments >= 2;
 }
 
 ConfigDiagnostics::ConfigDiagnostics(Allocator& allocator) noexcept
@@ -117,6 +124,7 @@ void ConfigDiagnostics::SetLimit(uint32 maxDiagnostics) noexcept {
 Result<void> ConfigDiagnostics::Add(const ConfigDiagnostic& diagnostic) noexcept {
     const bool known = !ConfigDiagnosticCodeName(diagnostic.code).IsEmpty() &&
                        (diagnostic.severity == ConfigSeverity::Error ||
+                        diagnostic.severity == ConfigSeverity::Warning ||
                         diagnostic.severity == ConfigSeverity::Note) &&
                        IsConfigLayer(diagnostic.layer);
     if (!known) {
@@ -187,6 +195,23 @@ void ConfigDiagnostics::Clear() noexcept {
     entries_.Clear();
     omitted_ = 0;
     errors_ = 0;
+}
+
+ConfigDiagnosticsMark ConfigDiagnostics::Mark() const noexcept {
+    return ConfigDiagnosticsMark{entries_.Size(), errors_, omitted_, text_.Size()};
+}
+
+void ConfigDiagnostics::Rewind(const ConfigDiagnosticsMark& mark) noexcept {
+    if (mark.count > entries_.Size() || mark.textBytes > text_.Size() || mark.errors > errors_ ||
+        mark.omitted > omitted_) {
+        platform::Fatal("ConfigDiagnostics::Rewind with a mark from after the current state");
+    }
+
+    // 줄이기는 할당하지 않는다.
+    static_cast<void>(entries_.TryResize(mark.count));
+    static_cast<void>(text_.TryResize(mark.textBytes));
+    errors_ = mark.errors;
+    omitted_ = mark.omitted;
 }
 
 } // namespace rocks::config

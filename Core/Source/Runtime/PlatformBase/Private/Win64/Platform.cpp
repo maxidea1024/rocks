@@ -2,7 +2,9 @@
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
 #include <Platform/Sync.h>
+#include <Platform/Thread.h>
 #include <Base/Checked.h>
+#include "../Common/TerminationInternal.h"
 
 #include <Windows.h>
 #include <malloc.h>
@@ -38,6 +40,10 @@ Mutex::~Mutex() noexcept = default;
 
 void Mutex::Lock() noexcept {
     AcquireSRWLockExclusive(reinterpret_cast<SRWLOCK*>(storage_));
+}
+
+bool Mutex::TryLock() noexcept {
+    return TryAcquireSRWLockExclusive(reinterpret_cast<SRWLOCK*>(storage_)) != 0;
 }
 
 void Mutex::Unlock() noexcept {
@@ -125,6 +131,8 @@ void WriteDiagnostic(const char* bytes, usize count) noexcept {
     const HANDLE errorStream = GetStdHandle(STD_ERROR_HANDLE);
     WriteFile(errorStream, text, length, &written, nullptr);
     WriteFile(errorStream, "\n", 1, &written, nullptr);
+    detail::RecordTerminatingThread(CurrentThreadId());
+    detail::RunTerminationHook(text, length);
     abort();
 }
 

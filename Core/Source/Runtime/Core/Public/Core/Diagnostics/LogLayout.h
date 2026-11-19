@@ -4,6 +4,7 @@
 #include <Core/Diagnostics/LogEvent.h>
 #include <Core/Diagnostics/LogRecord.h>
 #include <Core/Result.h>
+#include <Core/Text/FormatParse.h>
 #include <Core/Text/StringView.h>
 
 // 로그 sink의 레이아웃 패턴이다(Docs/Design/LoggingSystem.ko.md 9절, log4j PatternLayout·Serilog
@@ -26,6 +27,7 @@
 //   {Location}           "파일:줄 함수". 기록 레벨이 options.locationMinimum(기본 Warning) 이상일
 //                        때만, 아니면 빈 값
 //   {NewLine}            줄바꿈("\n")
+//   {Correlation}        상관 id "session=3 task=1842"(0인 칸은 빼고, 모두 비면 빈 값)
 //
 // 빈 값 생략 규칙(정확한 정의):
 //   1. 토큰이 빈 값이고 바로 앞 리터럴이 '['로 끝나며 바로 뒤 리터럴이 ']'로 시작하면, 그 '['와
@@ -54,6 +56,114 @@ inline constexpr StringView DefaultConsoleLogLayout =
 inline constexpr usize MaxLogLayoutTokens = 32;
 inline constexpr usize MaxLogLayoutTextBytes = 256;
 
+// 레이아웃 패턴의 문법 오류다(LogLayout::Parse의 선택 출력).
+// - offset: 오류가 난 byte 위치(토큰이면 그 '{' 위치)
+// - code: InvalidArgument(문법·모르는 토큰·형식) 또는 CapacityExceeded(토큰·리터럴 상한)
+// - reason: 영어 리터럴 이유 문장(정적 저장소)
+struct LogLayoutParseError {
+    usize offset = 0;
+    ErrorCode code = ErrorCode::None;
+    StringView reason;
+};
+
+namespace detail {
+
+// 레이아웃 토큰 이름이다. 순서가 LogLayout의 토큰 번호다.
+inline constexpr StringView LogLayoutTokenNames[] = {
+    "Timestamp", "Elapsed",  "Level",      "Category", "EventId",  "Thread",  "Frame",
+    "Message",   "Template", "Properties", "Context",  "Location", "NewLine", "Correlation"};
+
+inline constexpr usize LogLayoutTokenCount =
+    sizeof(LogLayoutTokenNames) / sizeof(LogLayoutTokenNames[0]);
+inline constexpr usize LogLayoutTimestampToken = 0;
+inline constexpr usize LogLayoutLevelToken = 2;
+
+constexpr bool FailLogLayout(LogLayoutParseError& error, usize offset, ErrorCode code,
+                             StringView reason) noexcept {
+    error.offset = offset;
+    error.code = code;
+    error.reason = reason;
+    return false;
+}
+
+// pattern의 문법을 검사한다. Parse와 CheckLogLayoutSyntax가 같은 함수를 쓴다. 통과하면 true,
+// 아니면 error를 채우고 false다. 순수 함수이고 상수 평가할 수 있다.
+constexpr bool ScanLogLayout(StringView pattern, LogLayoutParseError& error) noexcept {
+    if (!pattern.IsValidUtf8()) {
+        return FailLogLayout(error, 0, ErrorCode::InvalidArgument,
+                             "layout pattern is not valid UTF-8");
+    }
+
+    usize textBytes = 0;
+    usize tokens = 0;
+    FormatParser parser(pattern, true);
+    FormatToken token;
+    usize start = parser.Position();
+    while (parser.Next(token)) {
+        if (token.kind == FormatTokenKind::Literal) {
+            textBytes += token.text.ByteCount();
+            if (textBytes > MaxLogLayoutTextBytes) {
+                return FailLogLayout(error, start, ErrorCode::CapacityExceeded,
+                                     "layout literal text is longer than MaxLogLayoutTextBytes");
+            }
+
+            start = parser.Position();
+            continue;
+        }
+
+        if (token.name.IsEmpty()) {
+            return FailLogLayout(error, start, ErrorCode::InvalidArgument,
+                                 "positional holes are not layout tokens");
+        }
+
+        if (tokens == MaxLogLayoutTokens) {
+            return FailLogLayout(error, start, ErrorCode::CapacityExceeded,
+                                 "layout has more than MaxLogLayoutTokens tokens");
+        }
+
+        usize found = LogLayoutTokenCount;
+        for (usize index = 0; index < LogLayoutTokenCount; ++index) {
+            if (LogLayoutTokenNames[index] == token.name) {
+                found = index;
+            }
+        }
+
+        if (found == LogLayoutTokenCount) {
+            return FailLogLayout(error, start, ErrorCode::InvalidArgument, "unknown layout token");
+        }
+
+        const bool formatOk = !token.hasSpec ||
+                              (found == LogLayoutTimestampToken && token.spec == "ms") ||
+                              (found == LogLayoutLevelToken && token.spec == "u3");
+        if (!formatOk) {
+            return FailLogLayout(error, start, ErrorCode::InvalidArgument,
+                                 "unsupported format for this layout token");
+        }
+
+        ++tokens;
+        start = parser.Position();
+    }
+
+    if (parser.Error() != FormatParseError::None) {
+        return FailLogLayout(error, parser.Position(), ErrorCode::InvalidArgument,
+                             "unbalanced brace or malformed token in layout pattern");
+    }
+
+    return true;
+}
+
+} // namespace detail
+
+// 레이아웃 패턴의 문법만 검사한다(설정 검증용, CVar Validate). 통과하면 빈 view, 아니면 영어
+// 리터럴 이유 문장이다. 순수 함수이고 상수 평가할 수 있다. 위치는 LogLayout::Parse의 오류 출력이
+// 준다.
+//
+//   static_assert(CheckLogLayoutSyntax("[{Level}] {Message}").IsEmpty());
+constexpr StringView CheckLogLayoutSyntax(StringView pattern) noexcept {
+    LogLayoutParseError error;
+    return detail::ScanLogLayout(pattern, error) ? StringView() : error.reason;
+}
+
 // 레이아웃 해석 옵션이다.
 // - locationMinimum: {Location}을 쓰는 최소 레벨
 // - startMonotonicNanoseconds: {Elapsed}의 기준 단조 시각(0이면 Parse를 부른 시각)
@@ -74,9 +184,9 @@ class LogLayout {
 public:
     // pattern을 해석한다. 실패: 모르는 토큰·형식, 위치 자리("{}"·"{0}"), 짝 없는 중괄호는
     // InvalidArgument, 토큰이 MaxLogLayoutTokens를 넘거나 리터럴이 MaxLogLayoutTextBytes를 넘으면
-    // CapacityExceeded다.
-    static Result<LogLayout> Parse(StringView pattern,
-                                   const LogLayoutOptions& options = {}) noexcept;
+    // CapacityExceeded다. error가 있으면 실패 때 위치·이유를 채운다.
+    static Result<LogLayout> Parse(StringView pattern, const LogLayoutOptions& options = {},
+                                   LogLayoutParseError* error = nullptr) noexcept;
 
     // DefaultConsoleLogLayout을 해석한 레이아웃이다(실패하지 않는다).
     static LogLayout DefaultConsole() noexcept;
@@ -102,7 +212,8 @@ private:
         Properties,
         Context,
         Location,
-        NewLine
+        NewLine,
+        Correlation
     };
 
     // 토큰 하나와 그 앞 리터럴(text_ 안의 위치)이다. variant는 형식(ms·u3)이다.

@@ -210,10 +210,11 @@ struct StructRecordSource {
 // UINT32_MAX)) 버전을 판정해 같으면 그대로, 낮으면 원본 Record byte(필드 payload·항목 ItemBytes·
 // Record 내용)로 MigrateStruct한 결과를 원본 scope를 닫은 뒤 현재 버전으로만 다시 열고, 높으면
 // newerVersion 정책(LoadNewerSkippingUnknown이면 지금 위치 경로의 NewerVersion 진단 — 배열 원소면
-// [f[i]])을 따른 뒤 DecodeStructRecord. 1단계에서 관찰 대상 struct면 검증과 같은 한 번의 해석으로
-// 값을 채워(value가 있으면 그 자리 — 관찰 중인 조상이나 관찰 배열의 원소, 없으면 ObservationScratch
-// 임시 값, 모든 경로에서 소멸) ObserveStruct를 부른다. 마이그레이션 보관과 2단계 커서는 방문
-// 순서다.
+// [f[i]])을 따른 뒤 DecodeStructRecord. 적용 단계(construction·value가 있다)면 끝에 struct 검증
+// hook(RuntimeStructOps::validate)을 부른다. 1단계에서 관찰 대상 struct면 검증과 같은 한 번의
+// 해석으로 값을 채워(value가 있으면 그 자리 — 관찰 중인 조상이나 관찰 배열의 원소, 없으면
+// ObservationScratch 임시 값, 모든 경로에서 소멸) ObserveStruct를 부른다. 마이그레이션 보관과 2단계
+// 커서는 방문 순서다.
 inline Result<void> DecodeStructValue(StructView view, ConstructionContext* construction,
                                       ObjectHandle owner, void* value, StructRecordSource source,
                                       FieldDecodeContext& context) noexcept {
@@ -320,6 +321,16 @@ inline Result<void> DecodeStructValue(StructView view, ConstructionContext* cons
 
     if (!decoded) {
         return decoded;
+    }
+
+    // 적용(2단계)이면 다 채운 값을 게시 전에 struct 검증 hook으로
+    // 확인한다(Docs/Design/CurveData.ko.md 9.1절 — 마이그레이션 뒤, 멤버 struct가 먼저 확인되므로
+    // 안쪽부터다). 거부는 InvalidArgument이고 복원 전체가 실패해 트랜잭션이 되돌린다(게시하지
+    // 않는다).
+    if (construction != nullptr && value != nullptr && structOps.validate) {
+        if (auto checked = structOps.validate(value); !checked) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
     }
 
     if (observe) {

@@ -135,7 +135,7 @@ Result<SegmentJob*> TryCreateJob() noexcept {
         return Result<SegmentJob*>::Failure(memory.Error());
     }
 
-    return Result<SegmentJob*>::Success(ConstructAt<SegmentJob>(memory.Value()));
+    return Result<SegmentJob*>::Success(InitializeAt<SegmentJob>(memory.Value()));
 }
 
 void DestroyJob(SegmentJob* job) noexcept {

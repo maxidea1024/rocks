@@ -1,6 +1,9 @@
 #include "SpikeRun.h"
 #include "SpikeTools.h"
 
+#include <Core/Diagnostics/LogSystem.h>
+#include <Core/Diagnostics/RuntimeLogSink.h>
+#include <Core/Memory/SystemAllocator.h>
 #include <Platform/Memory.h>
 #include <stdio.h>
 
@@ -48,5 +51,20 @@ int main(int argc, char** argv) {
         return UsageExitCode;
     }
 
-    return rocks::spike::RunSpike(options);
+    // 명령줄 도구라 Sync LogSystem과 stderr sink를 설치한다(도구 열기 실패 등 Log 호출).
+    rocks::SystemAllocator allocator;
+    rocks::LogSystem logs(allocator, rocks::LogSystemConfig::ForTool());
+    rocks::StderrLogSink stderrSink;
+    if (!logs.AddSink(stderrSink) || !logs.Start()) {
+        return rocks::spike::RunSpike(options);
+    }
+
+    int exitCode = 0;
+    {
+        rocks::LogInstallScope installed(logs);
+        exitCode = rocks::spike::RunSpike(options);
+    }
+
+    logs.Stop();
+    return exitCode;
 }

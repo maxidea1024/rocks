@@ -13,7 +13,10 @@ namespace rocks::crypto::labels {
 // KeyBlob wrap 키 파생(10.4절)이다.
 inline constexpr KdfContext KeyBlob("RkKeyBlb");
 
+// 로그 파일 키 파생(LogFileSealer, Docs/Design/LoggingSystem.ko.md 9.1절)이다.
+inline constexpr KdfContext LogFile("RkLogFil");
+
 // 등록된 context 전체다(시험이 훑는다).
-inline constexpr KdfContext All[] = {KeyBlob};
+inline constexpr KdfContext All[] = {KeyBlob, LogFile};
 
 } // namespace rocks::crypto::labels

@@ -112,6 +112,15 @@ public:
         return original >= original_ && original - original_ < added_.Size();
     }
 
+    // 남은 추가 원소마다 원소 struct 값 트리의 검증 hook을 안쪽부터
+    // 부른다(Docs/Design/CurveData.ko.md 9.1절 — 원소 struct는 참조를 담으므로 자기 hook은 없고
+    // 멤버 struct의 hook이다). 추가 원소 안 대입은 블록에 바로 적용되므로 대입 묶음이 게시 전에
+    // 부른다. 거부는 InvalidArgument이고 그 원소의 지금 index를 rejected에 둔다. 할당하지 않는다.
+    // 게시 전 1회 계약: PreparePublish·staged Publish()가 아직 검증하지 않았으면 부르고, 대입
+    // 묶음은 진단 위치를 얻으려고 먼저 부른다(통과하면 Append·AddedTarget·Reset·블록 쓰기 전까지
+    // 다시 부르지 않는다). 묶지 않았으면 InvalidArgument다.
+    Result<void> ValidateAdded(usize& rejected) noexcept;
+
     // 끝에 기본 원소 하나를 더한다(리플렉션 B9i5): 블록을 배열의 allocator로 할당해 기본 생성하고
     // 게시나 Reset까지 이 준비물이 소유한다. 새 원소의 지금 index는 Count() - 1이고 돌려주는 값은
     // 그 묶을 때 index(추가 원소 id)다. 묶지 않았으면 InvalidArgument, 원소 수가 uint32 상한에
@@ -156,6 +165,8 @@ public:
 
     // 게시를 준비한다(구간 밖): 지울 블록을 받을 목록과, 게시 뒤 원소 수가 배열 용량을 넘으면 배열
     // allocator의 새 색인을 할당한다. 묶지 않았으면 InvalidArgument, 할당 실패는 그 오류다.
+    // 추가 원소의 검증 hook(ValidateAdded)을 아직 부르지 않았으면 먼저 부른다(거부는
+    // InvalidArgument).
     Result<void> PreparePublish() noexcept;
 
     // batch(같은 owner의 열린 묶음 게시 구간) 안에서 지울 블록을 목록으로 옮기고 남은 블록과 추가
@@ -171,6 +182,8 @@ public:
     // 자리가 아니면 InvalidArgument, 트랜잭션이 끝났거나 오류 상태면 InvalidArgument, Required 검사
     // 중·Registry 처리 중이면 Busy, 배열이 묶을 때와 다르면 Busy, 할당 실패는 그 오류이고 그때
     // 배열은 그대로다. 변경이 없으면 무동작이다.
+    // 추가 원소의 검증 hook(ValidateAdded)을 아직 부르지 않았으면 바꾸기 전에 부른다(거부는
+    // InvalidArgument — 배열은 그대로).
     Result<void> Publish() noexcept;
 
     // 게시로 떼어 낸 원소를 역순으로 소멸하고 블록과 옛 색인을 반환한다(구간 밖 — 원소 소멸자·
@@ -220,6 +233,9 @@ private:
     uint32 revision_ = 0;
     // kept_ 안의 추가 원소 id 수다.
     usize addedKept_ = 0;
+    // 추가 원소를 ValidateAdded로 검증한 뒤 바꾸지 않았는지다(Append·AddedTarget·Reset과
+    // AddedTarget 시작 위치의 변경 연산이 내린다).
+    bool addedValidated_ = false;
     // 남은 원소의 묶을 때 index(오름차순 — 추가 원소 id가 뒤에 온다)다.
     Array<uint32> kept_;
     Array<ObjectHandle> references_;

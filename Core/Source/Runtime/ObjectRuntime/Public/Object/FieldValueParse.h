@@ -35,7 +35,26 @@ struct ParsedValue {
     // ClassRef 값의 클래스가 Deprecated다(리플렉션 B9h2 — 값은 그대로 읽고 ReportParsedValue가
     // DeprecatedType 진단을 낸다).
     bool deprecatedClass = false;
+    // Text 값(리플렉션 B9l)의 형태와 Localized sourceRevision이다(원문은 text, textId는 guid).
+    TextWireForm textForm = TextWireForm::Empty;
+    uint64 textRevision = 0;
 };
+
+// 해석한 Text 값(ReadValueWire의 Text 칸)으로 allocator에 Text를 만든다(리플렉션 B9l — 단일 값
+// 필드·배열·정적 배열 원소·Map 값 공용). 형태·원문 규칙은 1단계가 이미 검사했으므로 실패는 할당
+// 오류뿐이다(2단계면 그래프 rollback).
+inline Result<Text> MakeParsedText(Allocator& allocator, const ParsedValue& parsed) noexcept {
+    switch (parsed.textForm) {
+    case TextWireForm::Empty:
+        return Result<Text>::Success(Text());
+    case TextWireForm::Invariant:
+        return Text::Invariant(allocator, parsed.text);
+    case TextWireForm::Localized:
+        return Text::Localized(allocator, parsed.guid, parsed.textRevision, parsed.text);
+    }
+
+    return Result<Text>::Failure(ErrorCode::InvalidArgument);
+}
 
 // 읽은 ClassRef 값 하나(out.guid — 0이면 null)를 판정한다(리플렉션 B9d2 — Docs/Design/
 // ReflectionExtensions.ko.md 5.2절 표의 "decode 1단계"). base는 스키마의 Base 클래스 ID(type.type),
@@ -312,12 +331,31 @@ inline Result<void> ReadValueWire(ArchiveReader& reader, FieldDecodeContext& con
         out.reference = decoded.Value();
         return Result<void>::Success();
     }
+    case ValueKind::Text: {
+        // 형태·원문 UTF-8·Localized 정체성(0이 아님)·maxValueBytes는 ReadTextWire가 보고, 원문
+        // 한도(TextCreateLimits 기본 maxSourceBytes — 1 MiB)는 여기서 본다(리플렉션 B9l).
+        auto decoded = ReadTextWire(reader);
+        if (!decoded) {
+            return Result<void>::Failure(decoded.Error());
+        }
+
+        if (decoded.Value().source.ByteCount() > TextCreateLimits{}.maxSourceBytes) {
+            return Result<void>::Failure(ErrorCode::CapacityExceeded);
+        }
+
+        out.textForm = decoded.Value().form;
+        out.text = decoded.Value().source;
+        out.guid = decoded.Value().textId;
+        out.textRevision = decoded.Value().sourceRevision;
+        return Result<void>::Success();
+    }
     case ValueKind::Struct:
     case ValueKind::Array:
     case ValueKind::Optional:
     case ValueKind::Map:
     case ValueKind::Set:
     case ValueKind::StaticArray:
+    case ValueKind::InstancedStruct:
     case ValueKind::Opaque:
         break;
     }
@@ -486,6 +524,17 @@ inline Result<void> ParseValuePayload(ArchiveReader& reader, FieldDecodeContext&
         return apply->string.TryAssign(parsed.text);
     }
 
+    // Text(리플렉션 B9l)는 apply의 allocator로 만든다(게시 쓰기가 대상 객체 allocator로 다시
+    // DeepClone한다).
+    if (kind == ValueKind::Text) {
+        auto made = MakeParsedText(apply->GetAllocator(), parsed);
+        if (!made) {
+            return Result<void>::Failure(made.Error());
+        }
+
+        apply->text = Move(made.Value());
+    }
+
     return Result<void>::Success();
 }
 
@@ -618,6 +667,8 @@ bool MatchesSchema(const FieldSchema& field) noexcept {
         if constexpr (ReflectedEnumField<typename Traits::Value>::Supported ||
                       ReflectedStructField<typename Traits::Value>::Supported) {
             return field.element.type == GeneratedType<typename Traits::Value>::Id();
+        } else if constexpr (InstancedStructField<typename Traits::Value>::Supported) {
+            return field.element.type == InstancedStructField<typename Traits::Value>::BaseId();
         } else {
             return true;
         }
@@ -634,6 +685,8 @@ bool MatchesSchema(const FieldSchema& field) noexcept {
         if constexpr (ReflectedEnumField<Element>::Supported ||
                       ReflectedStructField<Element>::Supported) {
             return field.element.type == GeneratedType<Element>::Id();
+        } else if constexpr (InstancedStructField<Element>::Supported) {
+            return field.element.type == InstancedStructField<Element>::BaseId();
         } else {
             return true;
         }
@@ -646,12 +699,18 @@ bool MatchesSchema(const FieldSchema& field) noexcept {
         if constexpr (ReflectedEnumField<Element>::Supported ||
                       ReflectedStructField<Element>::Supported) {
             return field.element.type == GeneratedType<Element>::Id();
+        } else if constexpr (InstancedStructField<Element>::Supported) {
+            return field.element.type == InstancedStructField<Element>::BaseId();
         } else {
             return true;
         }
     } else if constexpr (ReflectedEnumField<Member>::Supported ||
                          ReflectedStructField<Member>::Supported) {
         return field.value.type == GeneratedType<Member>::Id();
+    } else if constexpr (InstancedStructField<Member>::Supported) {
+        // InstancedStruct<Base>(리플렉션 B9j·B9k)의 value.type은 Base struct ID다(Base = void는
+        // 0 — 제한 없음).
+        return field.value.type == InstancedStructField<Member>::BaseId();
     } else {
         return true;
     }

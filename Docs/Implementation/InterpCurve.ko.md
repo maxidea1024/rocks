@@ -1,6 +1,6 @@
 # 키 기반 보간 커브 — Core 수학 층(G09)
 
-기준일: 2026-11-16(리뷰 반영 개정 포함). 이 문서는 [Core 상세 명세](../Design/CoreDetailedSpec.ko.md) G09와 [에셋 시스템](../Design/AssetSystem.ko.md) 1절 Curve 행 중 **Core 수학 층**의 설계다. 대상은 UE 5.8 `FInterpCurve<T>`·`FInterpCurvePoint<T>`(5.8.4, `Engine/Source/Runtime/Core/Public/Math/InterpCurve.h`·`InterpCurvePoint.h`, 보조 식은 `Math/UnrealMathUtility.h`의 `CubicInterp*`, `Private/Math/UnrealMath.cpp`의 `ClampFloatTangent`·`TQuat::CalcTangents`·`Slerp_NotNormalized`·`Squad`·`Log`·`Exp`)다. `FRichCurve` 계열 값 타입, 리플렉션 미러, 에셋 타입은 이 단계 밖이다. 기본은 UE 5.8과 같은 의미이고, 다른 곳은 4절에 UE 코드 근거와 함께 적는다.
+기준일: 2026-11-16(리뷰 반영 개정 포함), 2026-11-18 Curve 단계 CV9 반영(값 범위 `TryCalcBounds`·리플렉션 미러 — 2절 표·4절 7·5절). 이 문서는 [Core 상세 명세](../Design/CoreDetailedSpec.ko.md) G09와 [에셋 시스템](../Design/AssetSystem.ko.md) 1절 Curve 행 중 **Core 수학 층**의 설계다. 대상은 UE 5.8 `FInterpCurve<T>`·`FInterpCurvePoint<T>`(5.8.4, `Engine/Source/Runtime/Core/Public/Math/InterpCurve.h`·`InterpCurvePoint.h`, 보조 식은 `Math/UnrealMathUtility.h`의 `CubicInterp*`, `Private/Math/UnrealMath.cpp`의 `ClampFloatTangent`·`TQuat::CalcTangents`·`Slerp_NotNormalized`·`Squad`·`Log`·`Exp`)다. `FRichCurve` 계열 값 타입과 리플렉션 미러는 [커브 데이터](../Design/CurveData.ko.md)(Curve 단계)가 맡고 에셋 타입은 A 단계다. 기본은 UE 5.8과 같은 의미이고, 다른 곳은 4절에 UE 코드 근거와 함께 적는다.
 
 ## 1. API
 
@@ -71,8 +71,8 @@ public:
 | `FindNearest`·`FindNearestOnSegment`(`Inaccurate*` 폐기 별칭) | `TryFindNearest`·`FindNearestOnSegment` | 구간 번호 usize |
 | `GetKeyInterval` | `TryGetKeyInterval` | 빈 커브는 NotFound |
 | `operator==`·`operator!=` | `operator==`(`!=`는 C++20 합성) | 루프가 꺼져 있으면 offset을 보지 않는 것까지 같음 |
-| `CalcBounds`·`Curve*FindIntervalBounds` | 후속 | 이번 범위 밖 |
-| `operator<<(FArchive&)` | 후속 | 리플렉션 미러·직렬화 단계 |
+| `CalcBounds`·`Curve*FindIntervalBounds`·`FindBounds` | `TryCalcBounds`(`CurveBounds<T>`)·`math::CurveSegmentBounds` | 빈 커브 NotFound(UE는 기본값), float·double·Vec2/3·LinearColor만(`CurveValueTraits::HasBounds` — quaternion·Vector4는 컴파일 거부), 4절 7 |
+| `operator<<(FArchive&)`·USTRUCT(`FInterpCurveFloat` 등, NoExportTypes.h) | CoreTypeBindings 미러(`CoreTypeBindings/InterpCurveTypes.h`) | 리플렉션 그래프·JSON·경로·대입 묶음. 다섯 형식(float·Vec2d·Vec3d·Quatd·LinearColor — UE 5 정밀도)과 각 키, `InterpCurveMode` enum Binds. private 멤버는 `GeneratedType` friend로, 도구 이름 `points`·`looped`·`loopKeyOffset`. 미러 `Validate`가 정렬·유한 입력값·루프 정합을 지킨다(커브 데이터 12.1·17.8절) |
 | `ClampFloatTangent`·`ComputeCurveTangent`·`AutoCalcTangent` | `math::ClampCurveTangent`·내부 접선 계산 | 4절 1·3 |
 | `FMath::CubicInterp`·`CubicInterpDerivative`·`CubicInterpSecondDerivative` | `math::CurveHermite*` | 기존 `math::CubicInterp`는 합산 순서가 달라 그대로 둔다 |
 | `TQuat::Slerp`(커브 Linear 구간) | `CurveSlerp` | 같은 식, 전환 기준 0.9999 |
@@ -105,6 +105,7 @@ public:
 4. **quaternion** — UE 결함 수정. (a) UE 일반 `ComputeCurveTangent`가 `TQuat::CalcTangents` 결과(제어점)를 `OutTangent /= PrevToNextTimeDiff`로 나누고(`InterpCurvePoint.h` 228–232) `Eval`이 구간 길이를 다시 곱해(`InterpCurve.h` 374) 길이가 약 0.5인 제어점이 `SlerpFullPath_NotNormalized`의 `Acos(Clamp(dot))`에 들어가 각도가 틀어진다(`UnrealMath.cpp` 1258–1276). (b) 고정 끝점·Constant 키의 접선은 `T(ForceInit)` = 항등 quaternion이라(`InterpCurve.h` 697–698, 738–739) 끝 키가 항등이 아니면 항등 쪽으로 휜다. (c) `CalcTangents`의 계수는 −1/2이고 tension을 쓰지 않는다(`UnrealMath.cpp` 1302–1311). `Log`의 규약이 반각 × 축(1454–1480)이므로 표준 SQUAD 계수는 −1/4다. (d) Linear 키 접선은 quaternion 뺄셈 값이다. 미분은 제어점을 성분별 다항식으로 미분해 의미가 없다. Rocks는 3절의 표준 SQUAD를 쓰고 미분·최근접 탐색을 컴파일 시점에 막는다. UE 스플라인 회전 곡선과 모양이 같지 않다. Linear 구간의 slerp는 UE와 같은 `CurveSlerp`(전환 기준 0.9999)다.
 5. **Linear 보간의 끝점** — UE 결함 수정. UE `FMath::Lerp(A, B, Alpha) = A + Alpha·(B − A)`(`UnrealMathUtility.h` 1123–1126)는 Alpha = 1에서 B를 정확히 내지 않는다(반올림으로 1ulp 오차 — 예: 키 −1000·1 사이 입력 1 바로 아래에서 비율이 1로 반올림된다). Rocks는 `math::Lerp`로 비율 0·1에서 끝 값을 그대로 내고, 비율 (0, 1) 안은 UE 식과 비트가 같다.
 6. **API 형태**: 공개 `Points` 배열 대신 접근자(정렬 불변식), `Try*` 결과, 구간 번호 usize, quaternion 새 키의 기본 접선(2절 생성자 행).
+7. **값 범위(`TryCalcBounds`)** — UE 결함 수정(2026-11-18, CV9). 구간 식은 UE `FindBounds`(`UnrealMath.cpp` 1512–1573)와 같은 식·연산 순서이고 Rocks 의미 참조와 비트가 같다. 다른 곳 둘: (a) 루프 닫는 구간의 끝 시간을 마지막 키 + offset으로 둔다 — UE `CalcBounds`(`InterpCurve.h` 746–772)는 첫 키의 입력값을 넘겨 구간 길이가 음수가 되고 극값을 놓친다. (b) 키 하나의 루프 커브도 자기 자신으로 가는 닫는 구간을 본다 — UE는 키 하나면 그 값만 내지만 `Eval`은 그 구간을 Hermite로 평가한다. 구간 수는 `Eval`과 같다(`SegmentCount`).
 
 빌드 결정성: UE의 `FVector`(double) SIMD `CubicInterp` 특수화(`Vector.h` 2795)는 항을 `(s0·P0 + s1·T0) + (s2·T1 + s3·P1)`로 묶고 FMA를 쓸 수 있어 비트를 맞출 수 없다. Rocks는 일반 템플릿의 왼쪽부터 합산하는 순서로 고정한다(`-ffp-contract=off`). 이 차이는 의미 결정이 아니라 UE 쪽 구현 변형이다. clamp 접선의 Min/Max는 UE `FMath::Min/Max`와 같은 선택 규칙을 써 ±0 부호까지 같다.
 
@@ -120,4 +121,6 @@ public:
 - **double reference**: 독립 double 구현(멱급수 계수 Horner 평가, 비율은 계약대로 float)과 값·1·2차 미분을 상대 오차로 대조한다. float 기저 때문에 double 형식도 1e-6 수준이다. 별도로 중앙 차분과 1·2차 미분을 대조한다.
 - **AutoClamped**: 단조 키에서 overshoot가 없음, 극점 키 접선 0, Vector3 clamp와 LinearColor·Vector4의 CurveAuto 동등.
 - **quaternion**: 키 통과, 단위 길이, 반구 뒤집기, 독립 double SQUAD 참조와의 각거리, tension 1 = 제어점이 키, Linear = `CurveSlerp`.
+- **값 범위**(`MathInterpCurveBoundsTests.cpp`): 일곱 형식 무작위 커브가 UE `FindBounds`·`CalcBounds` 참조(닫는 구간 수정을 켠 것)와 비트가 같고 UE 그대로와는 루프 커브에서만 다르다. 촘촘한 `Eval` 표본이 범위 안이다. 손 계산 벡터(곡선 두 키 극값 4/9, 루프 닫는 구간 −4/9, 키 하나 루프 7/3, NaN 값의 UE 선택 규칙).
+- **리플렉션 미러**(`Curves/Tests/InterpCurveReflectionTests.cpp`): 다섯 형식 그래프·JSON 왕복과 다시 저장 byte 같음, 도구 이름·Atomic·enum 미러, decode·JSON import·대입 묶음·경로 쓰기의 hook 거부, 미선언 enum 값 거부, 생성 깊은 복사의 할당 실패 원자성.
 - **최근접 탐색**: 조밀 표본 + 황금분할 double oracle보다 거리가 크지 않음, Constant·길이 0 Linear·키 하나·빈 커브·루프 구간, 다항식 근 찾기(중근·접하는 근·구간 끝 근 제외).

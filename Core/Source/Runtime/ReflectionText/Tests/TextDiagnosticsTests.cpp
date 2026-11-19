@@ -74,7 +74,9 @@ TEST(TextDiagnostics_CollectsInOrderWithSources) {
     CHECK(Same(TextDiagnosticCodeName(TextDiagnosticCode::UnknownType), "UnknownType"));
     CHECK(Same(TextDiagnosticCodeName(TextDiagnosticCode::Unresolved), "Unresolved"));
     CHECK(Same(TextDiagnosticCodeName(TextDiagnosticCode::Unsupported), "Unsupported"));
-    CHECK(TextDiagnosticCodeName(static_cast<TextDiagnosticCode>(11)).IsEmpty());
+    CHECK(
+        Same(TextDiagnosticCodeName(TextDiagnosticCode::InvalidStructValue), "InvalidStructValue"));
+    CHECK(TextDiagnosticCodeName(static_cast<TextDiagnosticCode>(12)).IsEmpty());
 }
 
 // 한도까지만 저장하고 넘친 진단은 Omitted로 센다(Add는 성공). 한도를 늘리면 다시 저장하고, 줄이면
@@ -168,7 +170,7 @@ TEST(TextDiagnostics_FailuresLeaveCollectionUnchanged) {
     CHECK(Same(diagnostics.Get(0).path, "locked"));
     CHECK(Same(diagnostics.Get(0).message, "read-only"));
 
-    auto badCode = diagnostics.Add(static_cast<TextDiagnosticCode>(11), TextSource{}, "p", "m");
+    auto badCode = diagnostics.Add(static_cast<TextDiagnosticCode>(12), TextSource{}, "p", "m");
     REQUIRE(!badCode);
     CHECK(badCode.Error() == ErrorCode::InvalidArgument);
     TextSource badSource;

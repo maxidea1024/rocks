@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/Diagnostics/LogCategory.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Text/StringView.h>
 #include <Input/InputEvent.h>
@@ -8,13 +9,38 @@ namespace rocks::platform {
 
 // 창 생성 설정이다.
 struct WindowDesc {
-    // UTF-8 제목이다. 창이 복사한다(255자를 넘으면 자른다).
+    // UTF-8 제목이다. 창이 복사한다(UTF-16 255단위를 넘으면 글자 경계에서 자른다). 잘못된 UTF-8은
+    // InvalidArgument다.
     StringView title = "Rocks";
     // client 영역 크기(픽셀)다. 0이면 InvalidArgument다.
     uint32 width = 1280;
     uint32 height = 720;
     bool resizable = true;
     bool visible = true;
+};
+
+// 창 계층의 로그 카테고리다(Docs/Design/LoggingSystem.ko.md 13절). 창 생성 실패는 창을 여는
+// 호출자가 WindowCreateReport로 이 카테고리에 남긴다.
+inline constexpr LogCategory LogPlatformWindow{"Platform.Window"};
+
+// 창 생성 실패의 원인 기록이다(DeviceCreateReport와 같은 모양). 호출자 스택에 두고 Create에 넘긴다.
+// 힙을 쓰지 않으며 call은 실패한 OS 호출 이름(영어)이고 넘치면 자른다(truncated).
+//
+// 사용 예:
+//   platform::WindowCreateReport report;
+//   auto window = platform::Window::Create(allocator, desc, &report);
+//   if (!window) {
+//       Log::Error(LogPlatformWindow, "Window creation failed at {Call}: {OsError}", report.call,
+//                  report.osError);
+//   }
+struct WindowCreateReport {
+    // Create가 돌려준 오류와 같다(성공이면 None).
+    ErrorCode code = ErrorCode::None;
+    // 원본 OS 오류다(Windows GetLastError). 없으면 0이다.
+    int64 osError = 0;
+    // 실패한 OS 호출 이름이다(예: "CreateWindowExW").
+    char call[48]{};
+    bool truncated = false;
 };
 
 // 그래픽 backend가 swapchain·context를 만들 때 쓰는 OS 핸들이다. Windows: window = HWND,
@@ -47,9 +73,11 @@ struct NativeWindowHandle {
 // - 키는 스캔코드(물리 위치) 기준 input::Key이고, 입력 문자는 Text 이벤트(UTF-32)로 따로 온다.
 class Window {
 public:
-    // 창을 만든다. 크기 0은 InvalidArgument, 창 backend가 없는 플랫폼은 Unsupported, OS 실패는
-    // DependencyFailed다.
-    static Result<UniquePtr<Window>> Create(Allocator& allocator, const WindowDesc& desc) noexcept;
+    // 창을 만든다. 크기 0·잘못된 UTF-8 제목은 InvalidArgument(창을 만들기 전에 거른다), 창
+    // backend가 없는 플랫폼은 Unsupported, OS 실패는 DependencyFailed다. report가 null이 아니면
+    // 결과를 채운다(OS 실패면 실패한 호출과 GetLastError). 실패 로그는 호출자가 남긴다.
+    static Result<UniquePtr<Window>> Create(Allocator& allocator, const WindowDesc& desc,
+                                            WindowCreateReport* report = nullptr) noexcept;
 
     virtual ~Window() = default;
 
@@ -74,7 +102,8 @@ public:
 
     virtual NativeWindowHandle NativeHandle() const noexcept = 0;
 
-    // 제목을 바꾼다(UTF-8). OS 실패는 DependencyFailed다.
+    // 제목을 바꾼다(UTF-8, WindowDesc::title과 같은 자름 규칙). 잘못된 UTF-8은 InvalidArgument이고
+    // 제목은 그대로다. OS 실패는 DependencyFailed다.
     virtual Result<void> SetTitle(StringView title) noexcept = 0;
 };
 
@@ -96,5 +125,30 @@ public:
     // 확인한다.
     virtual void Poll(input::InputQueue& queue) noexcept = 0;
 };
+
+// 이 프로세스가 도는 데스크톱 세션이 표시 장치에 연결되어 있는지다(QueryDesktopSessionState).
+enum class DesktopSessionState : uint8 {
+    // 사용자가 세션을 보고 있다(콘솔 또는 원격 연결이 붙어 있다).
+    Connected,
+    // 세션은 살아 있으나 표시 장치가 떨어졌다(원격 연결을 끊었거나 사용자를 전환했다).
+    Disconnected,
+    // 판정할 수 없다(조회 실패, 세션 개념이 없는 플랫폼).
+    Unknown
+};
+
+// 이 프로세스의 데스크톱 세션 연결 상태다. Windows는 WTSQuerySessionInformation(WTSConnectState)로
+// 묻는다: WTSActive는 Connected, WTSDisconnected는 Disconnected, 그 밖과 조회 실패는 Unknown이다.
+// 다른 플랫폼은 Unknown이다. 어느 스레드에서나 부를 수 있고, 상태는 언제든 바뀔 수 있으므로 쓰는
+// 지점에서 다시 묻는다.
+//
+// 끊긴 세션에서는 숨긴 창 DC로의 GDI 그리기(StretchBlt)가 실패한다. GDI로 창에 내보내는 소프트웨어
+// 경로(lavapipe의 Windows WSI)는 이 상태에서 창 출력을 할 수 없다. DXGI·WGL과 하드웨어 Vulkan
+// 드라이버의 present는 영향을 받지 않는다(Docs/Design/VulkanGraphics.ko.md 17절).
+//
+// 사용 예:
+//   if (platform::QueryDesktopSessionState() == platform::DesktopSessionState::Disconnected) {
+//       // GDI 기반 창 출력 검사는 근거를 남기고 건너뛴다
+//   }
+DesktopSessionState QueryDesktopSessionState() noexcept;
 
 } // namespace rocks::platform

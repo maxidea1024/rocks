@@ -87,7 +87,7 @@ void LogWrite(LogLevel level, const LogCategory& category, const LogCaptureTempl
         LogSubmit(level, category, text, nullptr, 0);
     } else {
         const FormatArg list[] = {MakeLogArg(args)...};
-        LogSubmit(level, category, text, list, sizeof...(Args));
+        LogSubmit(level, category, WithRuntimeSpecChecks<Args...>(text), list, sizeof...(Args));
     }
 }
 
@@ -210,6 +210,14 @@ public:
 
         return detail::LogIsEnabledSlow(level, category, false);
     }
+
+    // 설치된 LogSystem에 엔진 프레임 번호를 알린다(LogSystem::SetFrame). 이후 기록의
+    // LogEvent::frame에 실린다. 설치된 것이 없으면 아무것도 하지 않는다. 원자 저장 하나라 매 프레임
+    // 불러도 된다.
+    //
+    // 사용 예(엔진 루프):
+    //   Log::SetFrame(time.frameIndex);
+    static void SetFrame(uint64 frame) noexcept;
 
 private:
     template <LogLevel Level, typename... Args>

@@ -34,7 +34,7 @@ Result<void> ResetReferenceStruct(AssignmentState& state, PropertyPath path, Str
         steps[count].fieldId = field.id;
         const PropertyPath child{Span<const PathStep>(steps, count + 1), path.keys};
         TextSlot slot;
-        if (auto described = DescribeTextPath(state.lease, child, slot); !described) {
+        if (auto described = DescribeAssignmentPath(state, child, slot); !described) {
             return described;
         }
 

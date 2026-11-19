@@ -2,12 +2,15 @@
 
 #include <Base/NumericLimits.h>
 #include <Config/ConfigLoader.h>
+#include <Config/UserConfig.h>
 #include <Core/Text/StringBuilder.h>
 #include <Platform/Clock.h>
 
 namespace rocks::config {
 
 using detail::ConfigState;
+
+namespace detail {
 
 namespace {
 
@@ -28,7 +31,8 @@ ErrorCode ToErrorCode(platform::FileCode code) noexcept {
     }
 }
 
-// path 파일을 out에 통째로 읽는다. 반환: 없으면 false(out은 비운다).
+} // namespace
+
 Result<bool> ReadWholeFile(platform::FileSystem& files, StringView path,
                            Array<char>& out) noexcept {
     out.Clear();
@@ -75,6 +79,10 @@ Result<bool> ReadWholeFile(platform::FileSystem& files, StringView path,
     return Result<bool>::Success(true);
 }
 
+} // namespace detail
+
+namespace {
+
 // 파일 하나를 층으로 넣는다. 반환: 진단으로 거부됐으면 false.
 Result<bool> LoadOne(ConfigContext& context, platform::FileSystem& files, ConfigLayer layer,
                      StringView root, StringView folder, StringView branch,
@@ -100,7 +108,7 @@ Result<bool> LoadOne(ConfigContext& context, platform::FileSystem& files, Config
         return Result<bool>::Failure(status.Error());
     }
 
-    auto read = ReadWholeFile(files, path.View(), buffer);
+    auto read = detail::ReadWholeFile(files, path.View(), buffer);
     if (!read) {
         return read;
     }
@@ -110,8 +118,11 @@ Result<bool> LoadOne(ConfigContext& context, platform::FileSystem& files, Config
         return Result<bool>::Success(true);
     }
 
-    auto added = context.AddLayerText(layer, tag.View(), branch, path.View(),
-                                      StringView(buffer.Data(), buffer.Size()));
+    // 사용자 층은 오래된 파일을 위해 관대하게 읽는다(모르는 키는 경고 후 버린다 — 8절).
+    const StringView text(buffer.Data(), buffer.Size());
+    auto added = layer == ConfigLayer::User
+                     ? AddUserFileText(context, tag.View(), branch, path.View(), text)
+                     : context.AddLayerText(layer, tag.View(), branch, path.View(), text);
     if (!added) {
         if (added.Error() == ErrorCode::InvalidArgument) {
             return Result<bool>::Success(false);
@@ -217,6 +228,40 @@ Result<void> LoadConfigFiles(ConfigContext& context, platform::FileSystem& files
     }
 
     return rejected ? Result<void>::Failure(ErrorCode::InvalidArgument) : Result<void>::Success();
+}
+
+Result<uint32> AddCommandLineAssignments(ConfigContext& context,
+                                         Span<const StringView> arguments) noexcept {
+    uint32 added = 0;
+    ErrorCode first = ErrorCode::None;
+    for (const StringView argument : arguments) {
+        if (!argument.StartsWith(SetArgumentPrefix, StringComparison::CaseSensitive)) {
+            continue;
+        }
+
+        const StringView assignment =
+            argument.TryRightBytes(argument.ByteCount() - SetArgumentPrefix.ByteCount()).Value();
+        StringView target;
+        StringView value;
+        ErrorCode error = ErrorCode::None;
+        if (!assignment.Split("=", target, value, StringComparison::CaseSensitive) ||
+            target.IsEmpty()) {
+            error = ErrorCode::InvalidArgument;
+        } else if (auto queued =
+                       context.AddAssignment(ConfigLayer::Session, "--set", target, value);
+                   !queued) {
+            error = queued.Error();
+        } else {
+            ++added;
+        }
+
+        if (error != ErrorCode::None && first == ErrorCode::None) {
+            first = error;
+        }
+    }
+
+    return first == ErrorCode::None ? Result<uint32>::Success(added)
+                                    : Result<uint32>::Failure(first);
 }
 
 } // namespace rocks::config

@@ -19,6 +19,7 @@ namespace {
 using detail::AddBytes;
 using detail::CarriesKeyNativeType;
 using detail::CarriesValueNativeType;
+using detail::ContainsInheritedFields;
 using detail::CopyBytes;
 using detail::RecordTag;
 using detail::ValidateFieldList;
@@ -80,9 +81,40 @@ Result<void> TypeRegistry::ResolveValueTypes(Span<const FieldSchema> fields,
             }
         }
 
-        // 대상 형식(배열이면 원소)이 Enum·Struct인 필드만 레코드를 가리킨다.
+        // 대상 형식(배열이면 원소)이 Enum·Struct인 필드와 Base가 있는 InstancedStruct(리플렉션
+        // B9k — InstancedStruct<Base>)만 레코드를 가리킨다.
         const ValueType& value = FieldTargetType(field);
         const bool enumeration = value.kind == ValueKind::Enum;
+        if (value.kind == ValueKind::InstancedStruct) {
+            if (value.type == TypeId{}) {
+                continue;
+            }
+
+            // Base는 등록된 struct이고 담을 수 있는 struct여야 한다(detail::
+            // CheckInstancedStructContent와 같은 조건 — 파생도 같은 형질을 상속한다). Base 레코드는
+            // 의존으로 붙잡는다(실행 중 파생 판정이 그 레코드 사슬을 쓴다 — Unregister는 Busy).
+            Record* base = FindLocked(value.type);
+            if (!base) {
+                return Result<void>::Failure(ErrorCode::NotFound);
+            }
+
+            if (base->kind != TypeKind::Struct || base->containsStrongReference ||
+                base->containsReferenceArray || base->containsInstancedStruct ||
+                base->containsRequired || base->requiresWorldOnlyOwner) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+
+            if (base->dependents >= NumericLimits<uint32>::Max() - maximumDependents) {
+                return Result<void>::Failure(ErrorCode::Overflow);
+            }
+
+            if (targets) {
+                targets[index] = base;
+            }
+
+            continue;
+        }
+
         if (!enumeration && value.kind != ValueKind::Struct) {
             continue;
         }
@@ -145,7 +177,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
         return Result<TypeRegistrationToken>::Failure(ErrorCode::WrongThread);
     }
 
-    if (schema.id == Guid{} || schema.version == 0 || schema.baseType != TypeId{} ||
+    if (schema.id == Guid{} || schema.version == 0 || schema.baseType == schema.id ||
         schema.withinType != TypeId{} || (schema.flags & ~KnownStructFlags) != 0 || ops.size == 0 ||
         ops.alignment == 0 || (ops.alignment & (ops.alignment - 1)) != 0 || !ops.nativeType ||
         !ops.construct || !ops.destroy || ops.fields.Size() != schema.fields.Size() ||
@@ -170,6 +202,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     bool referenceArray = false;
     bool nameMember = false;
     bool weakMember = false;
+    bool instancedMember = false;
     for (const FieldSchema& field : schema.fields) {
         // 강한 참조 멤버: 단일 참조·ObjectRefArray·ObjectRef 원소 정적 배열·ObjectRefMap(대상
         // 형식이 ObjectReference).
@@ -178,8 +211,12 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
         // struct 제한이 쓴다).
         nameMember = nameMember || FieldTargetType(field).kind == ValueKind::Name ||
                      FieldKeyType(field).kind == ValueKind::Name;
-        // weak 참조 멤버: 단일 WeakRef와 Array<WeakRef>(Transient 포함 — 관찰 struct 제한이 쓴다).
+        // weak 참조 멤버: 단일 WeakObjectRef와 Array<WeakObjectRef>(Transient 포함 — 관찰 struct
+        // 제한이 쓴다).
         weakMember = weakMember || FieldTargetType(field).kind == ValueKind::WeakObjectReference;
+        // InstancedStruct 멤버: 단일·원소 배열·정적 배열·Map 값(리플렉션 B9j — Transient 포함).
+        instancedMember =
+            instancedMember || FieldTargetType(field).kind == ValueKind::InstancedStruct;
         strongReference = strongReference || referenceTarget;
         // Registry 컨테이너 멤버: ObjectRefArray와 ObjectRefMap(리플렉션 B9f4 — 원소 블록이 owner
         // 저장소 밖인 StructRefArray 원소 struct에는 둘 수 없다, RF 결정 15).
@@ -234,6 +271,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
 
     uint32 depth = 1;
     bool requiresWorldOnlyOwner = ops.requiresWorldOnlyOwner;
+    Record* base = nullptr;
     {
         platform::LockGuard lock(gate_);
         if (closed_ || mutating_ || nextGeneration_ == 0) {
@@ -247,6 +285,36 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
             FindNativeLocked(ops.nativeType, TypeKind::Struct) != nullptr ||
             FindToolNameLocked(schema.toolName) != nullptr) {
             return Result<TypeRegistrationToken>::Failure(ErrorCode::AlreadyExists);
+        }
+
+        // 리플렉션 base struct(리플렉션 B9k — Docs/Design/ReflectionExtensions.ko.md 12절)는 등록된
+        // struct이고, 파생 스키마가 base 필드를 같은 안정 ID·표현으로 펼쳐 담아야 한다(클래스와
+        // 같다 — 형질·깊이는 펼친 필드로 계산되므로 상속 필드까지 들어간다). Atomic은 base에서
+        // 상속되고 끌 수 없다. base 레코드는 의존으로 붙잡는다(base Unregister는 Busy).
+        if (schema.baseType != TypeId{}) {
+            base = FindLocked(schema.baseType);
+            if (!base) {
+                return Result<TypeRegistrationToken>::Failure(ErrorCode::NotFound);
+            }
+
+            if (base->kind != TypeKind::Struct ||
+                base->dependents == NumericLimits<uint32>::Max()) {
+                return Result<TypeRegistrationToken>::Failure(
+                    base->kind != TypeKind::Struct ? ErrorCode::TypeMismatch : ErrorCode::Overflow);
+            }
+
+            if (HasFlag(base->schema.flags, TypeFlags::Atomic) &&
+                !HasFlag(schema.flags, TypeFlags::Atomic)) {
+                return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
+            }
+
+            if (!ContainsInheritedFields(base->schema.fields, schema.fields)) {
+                return Result<TypeRegistrationToken>::Failure(ErrorCode::TypeMismatch);
+            }
+
+            // base의 NATIVE 멤버 WorldOnly 소유자 형질은 필드로 드러나지 않으므로 레코드에서
+            // 상속한다.
+            requiresWorldOnlyOwner = requiresWorldOnlyOwner || base->requiresWorldOnlyOwner;
         }
 
         // struct는 WorldOnly 형질을 거부하지 않고 전파한다(그것을 필드로 둔 클래스가 판정한다).
@@ -278,11 +346,19 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
                                                           : record->containsReferenceArray);
                 nameMember = nameMember || record->containsName;
                 weakMember = weakMember || record->containsWeakReference;
+                instancedMember = instancedMember || record->containsInstancedStruct;
             }
         }
 
         // 수동 등록의 깊이 방어(MetaCompiler RMC2303이 먼저 막는다)와 Trace 계약.
         if (depth > MaxStructDepth || (ops.trace != nullptr) != strongReference) {
+            return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        // 검증 hook(Docs/Design/CurveData.ko.md 9.1절)은 통째로 복사·교환할 수 있는 참조 없는 값
+        // struct에만 둔다(MetaCompiler RMC2309가 먼저 막는다). 자기 hook이 있으면 트리 검증도 있다.
+        if (ops.validate &&
+            (strongReference || referenceArray || !ops.validateTree || !ops.copy || !ops.swap)) {
             return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);
         }
 
@@ -332,6 +408,8 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     record->schema.id = schema.id;
     record->schema.version = schema.version;
     record->schema.flags = schema.flags;
+    record->schema.baseType = schema.baseType;
+    record->base = base;
     record->schema.name = CopyBytes(schema.name, cursor);
     record->schema.toolName = CopyBytes(schema.toolName, cursor);
     record->schema.fields = {fields, schema.fields.Size()};
@@ -367,6 +445,7 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     record->containsReferenceArray = referenceArray;
     record->containsName = nameMember;
     record->containsWeakReference = weakMember;
+    record->containsInstancedStruct = instancedMember;
     record->ops.size = ops.size;
     record->ops.alignment = ops.alignment;
     record->ops.nativeType = ops.nativeType;
@@ -380,11 +459,17 @@ Result<TypeRegistrationToken> TypeRegistry::RegisterStruct(const TypeSchema& sch
     record->structOps.migrate = ops.migrate;
     record->structOps.copy = ops.copy;
     record->structOps.swap = ops.swap;
+    record->structOps.validate = ops.validate;
+    record->structOps.validateTree = ops.validateTree;
     record->structOps.requiresWorldOnlyOwner = requiresWorldOnlyOwner;
     record->structOps.fields = {fieldOps, schema.fields.Size()};
 
     platform::LockGuard lock(gate_);
     PublishLocked(record, growth);
+    if (base) {
+        ++base->dependents;
+    }
+
     for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
         if (fieldTypes[fieldIndex]) {
             ++fieldTypes[fieldIndex]->dependents;

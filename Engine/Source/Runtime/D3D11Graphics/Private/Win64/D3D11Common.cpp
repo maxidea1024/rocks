@@ -2,32 +2,6 @@
 
 namespace rocks::graphics::d3d11 {
 
-namespace {
-
-// 텍스처 형식과 DXGI 형식의 대응 표다. 표에 없는 형식은 지원하지 않는다(다른 형식으로 대신하지
-// 않는다). 형식을 늘릴 때는 행만 더한다.
-struct FormatMapping {
-    Format format;
-    DXGI_FORMAT dxgi;
-};
-
-constexpr FormatMapping FormatTable[] = {
-    {Format::RGBA8Unorm, DXGI_FORMAT_R8G8B8A8_UNORM},
-    {Format::RGBA8UnormSrgb, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB},
-};
-
-} // namespace
-
-DXGI_FORMAT ResourceFormat(Format format) noexcept {
-    for (const FormatMapping& mapping : FormatTable) {
-        if (mapping.format == format) {
-            return mapping.dxgi;
-        }
-    }
-
-    return DXGI_FORMAT_UNKNOWN;
-}
-
 DXGI_FORMAT AttributeFormat(VertexFormat format) noexcept {
     switch (format) {
     case VertexFormat::Float1:
@@ -105,16 +79,20 @@ D3D11_CULL_MODE RasterCullMode(CullMode mode) noexcept {
     return D3D11_CULL_NONE;
 }
 
-D3D11_FILTER SamplerFilter(Filter filter) noexcept {
+D3D11_FILTER SamplerFilter(Filter filter, bool comparison) noexcept {
     switch (filter) {
-    case Filter::Nearest:
-        return D3D11_FILTER_MIN_MAG_MIP_POINT;
+    case Filter::Point:
+        return comparison ? D3D11_FILTER_COMPARISON_MIN_MAG_MIP_POINT
+                          : D3D11_FILTER_MIN_MAG_MIP_POINT;
     case Filter::Bilinear:
-        return D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT;
+        return comparison ? D3D11_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT
+                          : D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT;
     case Filter::Trilinear:
-        return D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-    case Filter::Anisotropic:
-        return D3D11_FILTER_ANISOTROPIC;
+        return comparison ? D3D11_FILTER_COMPARISON_MIN_MAG_MIP_LINEAR
+                          : D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    case Filter::AnisotropicPoint:
+    case Filter::AnisotropicLinear:
+        return comparison ? D3D11_FILTER_COMPARISON_ANISOTROPIC : D3D11_FILTER_ANISOTROPIC;
     }
 
     return D3D11_FILTER_MIN_MAG_MIP_LINEAR;
@@ -138,6 +116,25 @@ D3D11_TEXTURE_ADDRESS_MODE SamplerAddress(AddressMode mode) noexcept {
 bool IsDeviceRemovedResult(HRESULT result) noexcept {
     return result == DXGI_ERROR_DEVICE_REMOVED || result == DXGI_ERROR_DEVICE_RESET ||
            result == DXGI_ERROR_DEVICE_HUNG || result == DXGI_ERROR_DRIVER_INTERNAL_ERROR;
+}
+
+const char* DeviceRemovedReasonName(HRESULT reason) noexcept {
+    switch (reason) {
+    case S_OK:
+        return "not removed";
+    case DXGI_ERROR_DEVICE_HUNG:
+        return "DXGI_ERROR_DEVICE_HUNG";
+    case DXGI_ERROR_DEVICE_REMOVED:
+        return "DXGI_ERROR_DEVICE_REMOVED";
+    case DXGI_ERROR_DEVICE_RESET:
+        return "DXGI_ERROR_DEVICE_RESET";
+    case DXGI_ERROR_DRIVER_INTERNAL_ERROR:
+        return "DXGI_ERROR_DRIVER_INTERNAL_ERROR";
+    case DXGI_ERROR_INVALID_CALL:
+        return "DXGI_ERROR_INVALID_CALL";
+    default:
+        return "unknown reason";
+    }
 }
 
 bool CopyTruncated(char* out, usize capacity, const char* text) noexcept {

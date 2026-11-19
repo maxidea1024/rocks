@@ -21,7 +21,7 @@ public:
 
 private:
     TextResolver(Allocator& allocator, const CatalogData* catalog, TextResolveLimits limits,
-                 TextDiagnostics& diagnostics) noexcept
+                 TextResolveDiagnostics& diagnostics) noexcept
         : allocator_(allocator), catalog_(catalog), limits_(limits), remaining_(limits.maxWork),
           diagnostics_(diagnostics) {
     }
@@ -194,7 +194,7 @@ private:
     const CatalogData* catalog_;
     TextResolveLimits limits_;
     uint64 remaining_;
-    TextDiagnostics& diagnostics_;
+    TextResolveDiagnostics& diagnostics_;
 };
 
 } // namespace rocks::detail

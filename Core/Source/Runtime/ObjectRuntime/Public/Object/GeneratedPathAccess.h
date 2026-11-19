@@ -96,6 +96,9 @@ Result<void> PathValue(PathCursor& cursor, T& value) noexcept {
     } else if constexpr (Target == ValueKind::SoftObjectReference) {
         return read ? cursor.ReadText(value.objectPath, &value.asset)
                     : cursor.WriteText(value.objectPath, &value.asset);
+    } else if constexpr (Target == ValueKind::Text) {
+        // Text(리플렉션 B9l)는 고정 아래 새 노드를 만들고 고정 밖에서 옛 노드를 반환한다.
+        return read ? cursor.ReadTextValue(value) : cursor.WriteTextValue(value);
     } else {
         if (read) {
             FieldValue candidate(cursor.Output()->GetAllocator());
@@ -154,6 +157,50 @@ Result<void> PathValue(PathCursor& cursor, T& value) noexcept {
     }
 }
 
+// InstancedStruct 값(필드·멤버·Array·정적 배열 원소·Map 값 — 리플렉션 B9j) 단계다. 끝이 아니면 지금
+// 담긴 struct로 내려가고(비어 있으면 NotFound(InstancedEmpty) — 경로 실행기가 같은 연산 안에서 먼저
+// 조회한 타입과 대조한다), 끝이면 형 바꾸기(고정 아래 경로 실행기가 검사해 쥔 타입의 기본 값을 값의
+// allocator(객체면 객체 allocator)로 만들고 owner를 다시 확인한 뒤 옛 값을 지역으로 옮겨 무할당
+// 이동으로 게시 — 옛 값은 고정을 푼 뒤 소멸)·비우기(옛 값을 지역으로 옮겨 게시 뒤 소멸)·담긴 타입
+// 조회이고, 통째 읽기·쓰기는 AggregateValue다.
+template <class Base>
+Result<void> PathInstanced(PathCursor& cursor, InstancedStruct<Base>& value) noexcept {
+    if (!cursor.IsLast()) {
+        return cursor.DescendInstanced(value.Type(), InstancedStructAccess::Value(value));
+    }
+
+    switch (cursor.Operation()) {
+    case PathOperation::SetInstancedType: {
+        if (auto pinned = cursor.Pin(); !pinned) {
+            return pinned;
+        }
+
+        InstancedStruct<Base> created;
+        if (auto made = created.Emplace(cursor.TakeInstancedInput(), cursor.ValueAllocator());
+            !made) {
+            return cursor.Fail(made.Error());
+        }
+
+        if (auto alive = cursor.CheckOwner(); !alive) {
+            return alive;
+        }
+
+        InstancedStruct<Base> previous(Move(value));
+        value = Move(created);
+        cursor.ReleasePin();
+        return Result<void>::Success();
+    }
+    case PathOperation::ClearInstanced: {
+        InstancedStruct<Base> previous(Move(value));
+        return Result<void>::Success();
+    }
+    case PathOperation::QueryInstanced:
+        return cursor.PublishInstancedType(value.Type());
+    default:
+        return cursor.Fail(ErrorCode::Unsupported, PropertyPathError::AggregateValue);
+    }
+}
+
 // Array<E>의 원소 삽입이다(7.1절): (고정 아래) 원소를 배열의 allocator로 만들고, 용량이 충분하면
 // TryEmplaceAt의 용량 내 경로(무할당)로, 모자라면 같은 allocator의 임시 배열에 성장 규칙
 // (ArrayGrowthCapacity)대로 예약한 뒤 owner를 다시 확인하고 원소를 무할당으로 옮겨
@@ -198,8 +245,10 @@ Result<void> InsertArrayElement(PathCursor& cursor, Array<E>& array) noexcept {
 
     Allocator& allocator = array.GetAllocator();
     E element = MakePathElement<E>(allocator);
-    if constexpr (Target != ValueKind::Struct) {
-        if (auto written = WriteTargetValue<Target>(element, *cursor.Input()); !written) {
+    // struct 원소는 기본 값, InstancedStruct 원소는 빈 값이다.
+    if constexpr (Target != ValueKind::Struct && Target != ValueKind::InstancedStruct) {
+        if (auto written = WriteTargetValue<Target>(element, *cursor.Input(), &allocator);
+            !written) {
             return cursor.FailValue(written.Error());
         }
     }
@@ -258,7 +307,7 @@ Result<void> RemoveArrayElement(PathCursor& cursor, Array<E>& array) noexcept {
         return valid;
     }
 
-    if constexpr (Target == ValueKind::Struct) {
+    if constexpr (Target == ValueKind::Struct || Target == ValueKind::InstancedStruct) {
         // 소멸을 게시 뒤로 미루려고 붙잡는다(소멸자가 자명한 원소 — Binds Vec3 등 — 도
         // 경고 없이).
         [[maybe_unused]] E element(Move(array[index]));
@@ -347,6 +396,12 @@ Result<void> PathContainer(PathCursor& cursor, Array<E>& array) noexcept {
             }
 
             return cursor.Descend(&array[frame.index]);
+        } else if constexpr (Target == ValueKind::InstancedStruct) {
+            if (auto valid = cursor.CheckIndex(array.Size()); !valid) {
+                return valid;
+            }
+
+            return PathInstanced(cursor, array[frame.index]);
         } else {
             return cursor.Fail(ErrorCode::TypeMismatch, PropertyPathError::NotStruct);
         }
@@ -359,7 +414,7 @@ Result<void> PathContainer(PathCursor& cursor, Array<E>& array) noexcept {
         return RemoveArrayElement<Target>(cursor, array);
     case PathOperation::Read:
     case PathOperation::Write:
-        if constexpr (Target == ValueKind::Struct) {
+        if constexpr (Target == ValueKind::Struct || Target == ValueKind::InstancedStruct) {
             return cursor.Fail(ErrorCode::Unsupported, PropertyPathError::AggregateValue);
         } else {
             if (auto valid = cursor.CheckIndex(array.Size()); !valid) {
@@ -367,6 +422,18 @@ Result<void> PathContainer(PathCursor& cursor, Array<E>& array) noexcept {
             }
 
             return PathValue<Target>(cursor, array[frame.index]);
+        }
+    case PathOperation::SetInstancedType:
+    case PathOperation::ClearInstanced:
+    case PathOperation::QueryInstanced:
+        if constexpr (Target == ValueKind::InstancedStruct) {
+            if (auto valid = cursor.CheckIndex(array.Size()); !valid) {
+                return valid;
+            }
+
+            return PathInstanced(cursor, array[frame.index]);
+        } else {
+            return cursor.Fail(ErrorCode::TypeMismatch, PropertyPathError::NotInstanced);
         }
     default:
         return cursor.Fail(ErrorCode::InvalidArgument, PropertyPathError::IndexNotAllowed);
@@ -564,6 +631,12 @@ Result<void> PathStaticArray(PathCursor& cursor, E (&array)[N]) noexcept {
             }
 
             return cursor.Descend(&array[frame.index]);
+        } else if constexpr (Target == ValueKind::InstancedStruct) {
+            if (auto valid = cursor.CheckIndex(N); !valid) {
+                return valid;
+            }
+
+            return PathInstanced(cursor, array[frame.index]);
         } else {
             return cursor.Fail(ErrorCode::TypeMismatch, PropertyPathError::NotStruct);
         }
@@ -575,7 +648,7 @@ Result<void> PathStaticArray(PathCursor& cursor, E (&array)[N]) noexcept {
         return cursor.Fail(ErrorCode::Unsupported, PropertyPathError::FixedLength);
     case PathOperation::Read:
     case PathOperation::Write:
-        if constexpr (Target == ValueKind::Struct) {
+        if constexpr (Target == ValueKind::Struct || Target == ValueKind::InstancedStruct) {
             return cursor.Fail(ErrorCode::Unsupported, PropertyPathError::AggregateValue);
         } else {
             if (auto valid = cursor.CheckIndex(N); !valid) {
@@ -583,6 +656,18 @@ Result<void> PathStaticArray(PathCursor& cursor, E (&array)[N]) noexcept {
             }
 
             return PathValue<Target>(cursor, array[frame.index]);
+        }
+    case PathOperation::SetInstancedType:
+    case PathOperation::ClearInstanced:
+    case PathOperation::QueryInstanced:
+        if constexpr (Target == ValueKind::InstancedStruct) {
+            if (auto valid = cursor.CheckIndex(N); !valid) {
+                return valid;
+            }
+
+            return PathInstanced(cursor, array[frame.index]);
+        } else {
+            return cursor.Fail(ErrorCode::TypeMismatch, PropertyPathError::NotInstanced);
         }
     default:
         return cursor.Fail(ErrorCode::InvalidArgument, PropertyPathError::IndexNotAllowed);
@@ -756,6 +841,7 @@ Result<void> PathMember(PathCursor& cursor, Member& member) noexcept {
     constexpr bool container = ArrayField<Member>::Supported;
     constexpr bool optional = OptionalField<Member>::Supported;
     constexpr bool keyed = MapField<Member>::Supported;
+    constexpr bool instanced = InstancedStructField<Member>::Supported;
     constexpr ValueKind wrapper = fixed       ? ValueKind::StaticArray
                                   : container ? ValueKind::Array
                                   : optional  ? ValueKind::Optional
@@ -828,6 +914,8 @@ Result<void> PathMember(PathCursor& cursor, Member& member) noexcept {
         } else {
             return PathOptionalValue<Target>(cursor, member);
         }
+    } else if constexpr (instanced) {
+        return PathInstanced(cursor, member);
     } else if constexpr (Target == ValueKind::Struct) {
         if (cursor.IsLast()) {
             return cursor.Fail(ErrorCode::Unsupported, PropertyPathError::AggregateValue);
@@ -862,15 +950,18 @@ Result<void> PathClassField(PathCursor& cursor, Member MemberOwner::* member) no
 }
 
 // struct 멤버의 경로 thunk다(StructFieldPathFunction — StructFieldOps의 둘째 인자). structValue는
-// 바로 바깥 단계가 등록 struct와 대조한 S 값이다.
+// 바로 바깥 단계가 등록 struct와 대조한 Owner 값이다(Owner는 함수표를 내는 struct — 멤버 포인터가
+// base의 것이어도 Owner로 캐스트한 뒤 쓴다, 리플렉션 B9k).
 //
 // 생성 코드(B6b):
-//   detail::StructFieldOps<&::MaterialSlot::name>(
-//       NameId, &detail::PathStructMember<&::MaterialSlot::name, ValueKind::Utf8String>)
-template <auto MemberPointer, ValueKind Target>
+//   detail::StructFieldOps<::MaterialSlot, &::MaterialSlot::name>(
+//       NameId, &detail::PathStructMember<::MaterialSlot, &::MaterialSlot::name,
+//                                         ValueKind::Utf8String>)
+template <class Owner, auto MemberPointer, ValueKind Target>
 Result<void> PathStructMember(const RuntimeStructFieldOps&, PathCursor& cursor,
                               void* structValue) noexcept {
-    using S = typename StructMemberPointer<decltype(MemberPointer)>::Owner;
+    using S = Owner;
+    static_assert(IsBaseOfV<typename StructMemberPointer<decltype(MemberPointer)>::Owner, Owner>);
     if (auto checked = cursor.CheckMemberOwner(NativeTypeKey<S>()); !checked) {
         return checked;
     }

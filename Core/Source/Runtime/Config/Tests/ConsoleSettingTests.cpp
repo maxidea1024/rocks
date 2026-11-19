@@ -83,33 +83,32 @@ TEST(Config_PendingValuesMoveAtRegistration) {
     CHECK(!outside && fixture.HasDiagnostic(ConfigDiagnosticCode::ValueOutOfRange));
 }
 
-// 플래그가 층 쓰기를 거부한다: 콘솔 읽기 전용은 콘솔 층만, 품질 구성원이 아니면 품질 층을(설정
-// struct 필드의 콘솔 이름은 구성원이 아니다), 사용자 설정이 아니면 사용자 층을, 시작 뒤 고정은
-// CompleteStartup 뒤 새 쓰기를 거부한다. 다른 층은 받는다.
+// 플래그가 층 쓰기를 거부한다: 콘솔 읽기 전용은 콘솔 층만, 사용자 설정이 아니면 사용자 층을
+// 거부한다. 품질 묶음 층은 프리셋 묶음 펼침만 쓰므로 직접 쓰기를 모두 거부한다(LayerNotAllowed —
+// 묶음 동작은 CVarGroupTests.cpp). 시작 뒤
+// 고정은 CompleteStartup 뒤 콘솔 쓰기를 받되 값은 그대로이고 Warning BootValueIgnored를 한 번만
+// 낸다(대기가 아니다). 다른 층은 받는다.
 TEST(Config_ConsoleFlagsRejectLayers) {
     ConfigFixture fixture;
     ConfigContext& context = fixture.Context();
     REQUIRE(context.RegisterConsoleSetting(Define("render.lock", ConsoleValueType::Bool, "false",
                                                   Flags(ConsoleSettingFlags::ConsoleReadOnly))));
-    REQUIRE(context.RegisterConsoleSetting(Define("quality.shadow_bias", ConsoleValueType::Float,
-                                                  "1", Flags(ConsoleSettingFlags::QualityMember))));
     REQUIRE(context.RegisterConsoleSetting(Define("render.bias", ConsoleValueType::Float, "1")));
     REQUIRE(context.AddLayerText(ConfigLayer::Project, "Render.json", "Render", "project",
                                  R"({"Settings": {"render.lock": true}})"));
-    REQUIRE(context.AddLayerText(ConfigLayer::Quality, "shadow@High", "Render", "quality",
-                                 R"({"Settings": {"quality.shadow_bias": 0.5}})"));
     REQUIRE(context.Sync());
     CHECK(ValueOf(fixture, "render.lock").boolean);
-    CHECK(ValueOf(fixture, "quality.shadow_bias").float32 == 0.5f);
 
     context.Diagnostics().Clear();
     auto locked = context.AddAssignment(ConfigLayer::Console, "console", "render.lock", "false");
     CHECK(!locked && fixture.HasDiagnostic(ConfigDiagnosticCode::ConsoleReadOnly));
     CHECK(fixture.Rejects(ConfigLayer::Quality, "Render", R"({"Settings": {"render.bias": 2.0}})"));
-    CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::NotQualityMember, 1, 30));
-    CHECK(fixture.Rejects(ConfigLayer::Quality, "Render",
-                          R"({"Settings": {"render.graph.immediate": true}})"));
-    CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::NotQualityMember, 1, 41));
+    CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::LayerNotAllowed));
+    context.Diagnostics().Clear();
+    auto assigned = context.AddAssignment(ConfigLayer::Quality, "shadow", "render.bias", "2");
+    CHECK(!assigned && fixture.HasDiagnostic(ConfigDiagnosticCode::LayerNotAllowed));
+    CHECK(context.Unset(ConfigLayer::Quality, "shadow").Error() == ErrorCode::InvalidArgument);
+    CHECK(context.ClearLayer(ConfigLayer::Quality).Error() == ErrorCode::InvalidArgument);
     // 사용자 층: UserConfig 필드(game.input.sensitivity)는 받고 아닌 것은 거부한다.
     REQUIRE(context.AddLayerText(ConfigLayer::User, "Game.json", "Game", "user",
                                  R"({"Settings": {"game.input.sensitivity": 2.5}})"));
@@ -117,14 +116,42 @@ TEST(Config_ConsoleFlagsRejectLayers) {
     CHECK(fixture.Rejects(ConfigLayer::User, "Game",
                           R"({"Settings": {"game.rules.score_limit": 5}})"));
     CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::LayerNotAllowed, 1, 41));
-    // 시작 뒤 고정: CompleteStartup 전에는 받고, 뒤에는 새 쓰기를 거부하며 값은 그대로다.
+    // 시작 뒤 고정: CompleteStartup 전에는 바로 적용된다. 뒤의 콘솔 쓰기는 받지만 값은 그대로이고
+    // 대기도 아니다(콘솔 값은 다음 실행에 오지 않는다). 진단은 같은 이름·출처에 한 번이다.
     REQUIRE(context.AddAssignment(ConfigLayer::Project, "seed", "game.rules.seed", "11"));
     REQUIRE(context.Sync());
     REQUIRE(context.CompleteStartup());
     context.Diagnostics().Clear();
-    auto late = context.AddAssignment(ConfigLayer::Console, "console", "game.rules.seed", "12");
-    CHECK(!late && fixture.HasDiagnostic(ConfigDiagnosticCode::LayerNotAllowed));
+    REQUIRE(context.AddAssignment(ConfigLayer::Console, "console", "game.rules.seed", "12"));
+    REQUIRE(context.Sync());
+    REQUIRE(context.AddAssignment(ConfigLayer::Console, "console", "game.rules.title", "late"));
+    REQUIRE(context.Sync());
     CHECK(fixture.Gameplay().seed == 11 && fixture.Gameplay().sensitivity == 2.5f);
+    CHECK(fixture.Gameplay().title.View() == "late");
+    usize ignored = 0;
+    for (usize index = 0; index < context.Diagnostics().Count(); ++index) {
+        const ConfigDiagnostic item = context.Diagnostics().Get(index);
+        ignored += item.code == ConfigDiagnosticCode::BootValueIgnored &&
+                           item.severity == ConfigSeverity::Warning &&
+                           item.path == "Game.Gameplay.seed"
+                       ? 1
+                       : 0;
+    }
+
+    CHECK(ignored == 1);
+    Array<ConfigPendingRestart> pending(fixture.system);
+    REQUIRE(context.GetPendingRestarts(pending));
+    CHECK(pending.IsEmpty());
+
+    // 파일 층(프로젝트)에서 온 시작 뒤 변경은 재시작 대기다(RestartRequired와 같은 규칙).
+    REQUIRE(context.Unset(ConfigLayer::Console, "console"));
+    REQUIRE(context.AddAssignment(ConfigLayer::Project, "seed", "game.rules.seed", "13"));
+    REQUIRE(context.Sync());
+    CHECK(fixture.Gameplay().seed == 11);
+    REQUIRE(context.GetPendingRestarts(pending));
+    REQUIRE(pending.Size() == 1);
+    CHECK(pending[0].name == "Game.Gameplay.seed" && pending[0].pending == "13" &&
+          pending[0].current == "11");
 }
 
 // 출시 규칙에서 개발 전용 설정은 등록되지만 콘솔에 보이지 않고, 어느 층도 쓸 수 없어 기본값으로
@@ -203,6 +230,10 @@ TEST(Config_ConsoleSettingTypesAndRegistration) {
     ConsoleSettingDefinition channel = Define("log.channel", ConsoleValueType::String, "core");
     channel.allowedValues = channels;
     REQUIRE(context.RegisterConsoleSetting(channel));
+    ConsoleSettingDefinition folded = Define("log.folded", ConsoleValueType::String, "core");
+    folded.allowedValues = channels;
+    folded.allowedValuesIgnoreCase = true;
+    REQUIRE(context.RegisterConsoleSetting(folded));
     REQUIRE(context.RegisterConsoleSetting(Define("game.level", ConsoleValueType::Name, "Lobby")));
     ConsoleSettingDefinition preset = Define("quality.preset", ConsoleValueType::Enum, "");
     preset.enumType = TypeIdOf<FixtureQuality>();
@@ -215,12 +246,15 @@ TEST(Config_ConsoleSettingTypesAndRegistration) {
     REQUIRE(context.AddAssignment(ConfigLayer::Session, "cli", "net.max_bytes", "9000000000"));
     REQUIRE(context.AddAssignment(ConfigLayer::Session, "cli", "physics.gravity", "-9.81"));
     REQUIRE(context.AddAssignment(ConfigLayer::Session, "cli", "log.channel", "render"));
+    // 대소문자 무시 허용 값은 입력 표기를 그대로 남긴다.
+    REQUIRE(context.AddAssignment(ConfigLayer::Session, "cli", "log.folded", "Render"));
     REQUIRE(context.AddAssignment(ConfigLayer::Session, "cli", "game.level", "Arena"));
     REQUIRE(context.AddAssignment(ConfigLayer::Session, "cli", "quality.preset", "high"));
     REQUIRE(context.Sync());
     CHECK(ValueOf(fixture, "net.max_bytes").signedInteger == 9000000000ll);
     CHECK(ValueOf(fixture, "physics.gravity").float64 == -9.81);
     CHECK(ValueOf(fixture, "log.channel").string.View() == "render");
+    CHECK(ValueOf(fixture, "log.folded").string.View() == "Render");
     CHECK(ValueOf(fixture, "quality.preset").signedInteger ==
           static_cast<int64>(FixtureQuality::High));
     auto level = fixture.names.Acquire(ValueOf(fixture, "game.level").name);
@@ -228,6 +262,8 @@ TEST(Config_ConsoleSettingTypesAndRegistration) {
 
     context.Diagnostics().Clear();
     CHECK(!context.AddAssignment(ConfigLayer::Session, "cli", "log.channel", "audio"));
+    CHECK(!context.AddAssignment(ConfigLayer::Session, "cli", "log.channel", "Render"));
+    CHECK(!context.AddAssignment(ConfigLayer::Session, "cli", "log.folded", "Audio"));
     CHECK(!context.AddAssignment(ConfigLayer::Session, "cli", "quality.preset", "Medium"));
     CHECK(!context.AddAssignment(ConfigLayer::Session, "cli", "net.max_bytes", "lots"));
     CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::ValueOutOfRange) &&

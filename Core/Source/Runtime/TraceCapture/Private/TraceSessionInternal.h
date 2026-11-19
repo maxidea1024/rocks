@@ -326,14 +326,6 @@ struct TraceThreadState {
 
 // ---- 스레드 TLS 칸 ----
 
-// 문맥 스택 한 칸이다. cache는 정의를 쓴 세션의 (serial, 문맥 id)이고, recorded는 쌓기를 기록한
-// 세션 serial이다(0이면 기록하지 않았다).
-struct TraceContextEntry {
-    TraceContextValues values;
-    uint64 cache = 0;
-    uint64 recorded = 0;
-};
-
 // 스레드의 TLS 칸이다. 세션 메모리가 아니라 스레드 수명에 묶여 있어, Stop이 아직 세션에 등록하지
 // 않은 스레드의 진행 중 기록도 기다릴 수 있다.
 //
@@ -367,11 +359,6 @@ struct TraceThreadSlot {
     uint8 threadGroupBytes = 0;
     int32 threadSortOrder = 0;
 
-    // ---- 문맥 스택 ----
-    TraceContextEntry contexts[TraceStandardFormat::MaxContextDepth];
-    uint32 contextDepth = 0;
-    // 깊이 상한을 넘어 세기만 한 쌓기 수다.
-    uint32 contextOverflow = 0;
     // 이 스레드에서 실행 중인 task의 trace id다(task 밖이면 0, TraceTaskScope가 바꾼다).
     uint64 currentTask = 0;
 
@@ -538,6 +525,71 @@ struct TraceTypeEntry {
     bool present = false;
 };
 
+// 고리에서 스냅샷으로 옮긴 결과다.
+struct TraceRecentCopy {
+    uint64 chunks = 0;
+    uint64 bytes = 0;
+    uint64 skippedChunks = 0;
+};
+
+// 최근 기록 고리다(TraceRecent.cpp, 8절). 스레드 스트림 덩어리를 고정 크기 byte 고리에 담고 넘치면
+// 가장 오래된 덩어리부터 버린다. writer(writerMutex)만 쓴다.
+class TraceRecentRing {
+public:
+    explicit TraceRecentRing(Allocator& allocator) noexcept : allocator_(&allocator) {
+    }
+
+    // capacity가 0이면 고리가 없다(Push는 무동작).
+    Result<void> Initialize(Allocator& allocator, usize capacity) noexcept;
+    void Release() noexcept;
+
+    bool IsActive() const noexcept {
+        return capacity_ != 0;
+    }
+
+    // 덩어리 하나(머리 포함)를 담는다. recordBoundary는 그 스레드 스트림이 이 덩어리에서 기록
+    // 경계로 시작하는지다(펌프마다 스레드의 첫 덩어리).
+    void Push(Span<const uint8> chunk, bool recordBoundary) noexcept;
+
+    // 담긴 덩어리를 오래된 것부터 out 뒤에 붙인다. 스트림마다 기록 경계 덩어리 전의 덩어리는 뺀다.
+    Result<TraceRecentCopy> AppendTo(Array<uint8>& out) const noexcept;
+
+    usize Capacity() const noexcept {
+        return capacity_;
+    }
+
+    usize UsedBytes() const noexcept {
+        return used_;
+    }
+
+    uint64 Chunks() const noexcept {
+        return chunks_;
+    }
+
+    uint64 DroppedChunks() const noexcept {
+        return droppedChunks_;
+    }
+
+    uint64 DroppedBytes() const noexcept {
+        return droppedBytes_;
+    }
+
+private:
+    void CopyIn(usize position, const uint8* source, usize bytes) noexcept;
+    void CopyOut(usize position, uint8* destination, usize bytes) const noexcept;
+    // position 칸의 byte 수(표시 포함)와 표시·스트림 id다.
+    usize EntryBytesAt(usize position, uint8& flags, uint16& stream) const noexcept;
+
+    Allocator* allocator_;
+    uint8* data_ = nullptr;
+    usize capacity_ = 0;
+    usize start_ = 0;
+    usize used_ = 0;
+    uint64 chunks_ = 0;
+    uint64 droppedChunks_ = 0;
+    uint64 droppedBytes_ = 0;
+};
+
 struct TraceSessionState {
     // 동시에 붙일 수 있는 출력 수다.
     static constexpr usize MaxOutputs = 4;
@@ -608,6 +660,14 @@ struct TraceSessionState {
     ErrorCode lastOutputCallbackError = ErrorCode::None;
     // writer 버퍼를 늘리지 못해 버린 덩어리 수다.
     uint64 writerDroppedChunks = 0;
+    // 최근 기록 고리와, 지금 비우는 스레드 스트림의 다음 덩어리가 기록 경계로 시작하는지다.
+    TraceRecentRing recent;
+    bool recentBoundary = false;
+    // 풀 사용률 경고 상태(경고한 뒤 아래로 내려가기 전)와 경고 수, 펌프 수, 낸 통계 기록 수다.
+    bool poolWarned = false;
+    uint64 poolWarnings = 0;
+    uint64 pumpCount = 0;
+    uint64 statsRecords = 0;
 
     // ---- writer 스레드 ----
     platform::Thread writerThread;
@@ -632,10 +692,20 @@ struct TraceSessionState {
     void RecycleThread(TraceThreadState& thread) noexcept;
     void AppendStream(Array<uint8>& out, uint16 stream, Span<const uint8> bytes) noexcept;
     void FinishStream(Array<uint8>& out, uint16 stream) noexcept;
+    // 덩어리 하나를 out에 붙인다(필요하면 압축). 출력 버퍼에 붙이는 스레드 스트림 덩어리는 최근
+    // 기록 고리에도 담는다.
     void AppendChunk(Array<uint8>& out, uint16 stream, Span<const uint8> payload) noexcept;
+    void AppendChunkBytes(Array<uint8>& out, uint16 stream, Span<const uint8> payload) noexcept;
     void FlushOutputBuffer() noexcept;
     bool WriteOutput(TraceOutput& output, Span<const uint8> bytes) noexcept;
     void CloseOutput(TraceOutput& output, bool& closeFailed) noexcept;
+    // 파일 머리를 채운다(attachOrder는 머리의 순서 번호 칸, flags는 머리 플래그).
+    void BuildFileHeader(uint8 (&header)[TraceFormat::FileHeaderBytes], uint64 attachOrder,
+                         uint32 flags) const noexcept;
+    // 펌프 시작 때 풀 사용률을 보고 경고한다(poolWarningPercent).
+    void CheckPoolUsage() noexcept;
+    // statsIntervalPumps마다(채널 "stats"가 켜져 있으면) 수집 통계 기록을 낸다.
+    void WriteStatsRecord() noexcept;
 
     // ---- 동작(TraceThreadWrite.cpp) ----
     // 손실 상태로 남은 스레드의 손실 기록을 쓴다. 생산자가 모두 멈춘 뒤(Stop)에만 부른다.
@@ -668,6 +738,23 @@ bool WriteStandardDefinition(TraceSessionState& session, const TraceEventType& t
                              const void* fixed, usize fixedBytes,
                              Span<const TraceVariablePart> variable) noexcept;
 
+// TryWriteStandardDefinition의 결과다.
+enum class TraceDefinitionWrite : uint8 {
+    // 썼다
+    Written,
+    // 정의 기록 상한(TraceFormat::MaxDefinitionRecordBytes)을 넘는다(다시 해도 실패한다)
+    TooLarge,
+    // 형이 없거나 정의 버퍼가 차 있다
+    Failed
+};
+
+// WriteStandardDefinition과 같지만 실패를 버린 정의로 세지 않는다. 실패하면 정보를 다른 길(기록에
+// 동봉)로 남기고 따로 세는 호출자(TraceLogSink)가 쓴다. 크기 초과는 버퍼를 건드리기 전에 가린다.
+TraceDefinitionWrite TryWriteStandardDefinition(TraceSessionState& session,
+                                                const TraceEventType& type, const void* fixed,
+                                                usize fixedBytes,
+                                                Span<const TraceVariablePart> variable) noexcept;
+
 // 이 스레드의 스레드 정보(Trace.ThreadInfo)를 정의 기록으로 쓴다.
 void WriteThreadInfo(TraceSessionState& session, const TraceThreadState& state,
                      const TraceThreadSlot& slot) noexcept;
@@ -696,6 +783,9 @@ extern TraceEventType TraceContextDefinitionType;
 extern TraceEventType TraceContextPushType;
 extern TraceEventType TraceContextPopType;
 extern TraceEventType TraceTaskEventType;
+extern TraceEventType TraceStatsType;
+extern TraceEventType TraceLogMessageSpecType;
+extern TraceEventType TraceLogMessageType;
 
 // 표준 채널(꺼진 상태로)과 표준 형을 등록한다.
 Result<void> RegisterStandardTraceTypes(TraceSession& session) noexcept;

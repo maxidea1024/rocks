@@ -35,7 +35,7 @@ struct Registry {
 // 소멸된 mutex를 쓰지 않는다. 첫 호출에서 thread-safe하게 만든다(정적 초기화 순서와 무관하다).
 Registry& Codecs() noexcept {
     alignas(Registry) static unsigned char storage[sizeof(Registry)];
-    static Registry* registry = ConstructAt<Registry>(storage);
+    static Registry* registry = InitializeAt<Registry>(storage);
     return *registry;
 }
 
@@ -300,7 +300,7 @@ Result<usize> DecompressAppend(const CodecLease& plugin, Span<const uint8> sourc
 
     while (true) {
         // 재시도 전 길이는 base다(축소는 저장소를 유지한다). 늘린 구간은 0으로 채우지 않는다.
-        auto grown = output.TryAppendUninitialized(capacity);
+        auto grown = AppendDecodeStorage(output, capacity);
         if (!grown) {
             RestoreLength(output, base);
             return Result<usize>::Failure(grown.Error());

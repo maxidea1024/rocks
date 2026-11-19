@@ -58,7 +58,7 @@ struct RenderStats {
 //
 // 사용 예:
 //   sample::Renderer renderer;
-//   if (!renderer.Initialize(device, graphics::Format::RGBA8UnormSrgb)) { ... }
+//   if (!renderer.Initialize(device, graphics::PixelFormat::RGBA8UnormSrgb)) { ... }
 //   auto frame = device.BeginFrame(swapChain, view.clear);
 //   if (frame) {
 //       renderer.Draw(*frame.Value(), view, items);
@@ -79,7 +79,7 @@ public:
 
     // 내장 메시와 파이프라인을 만든다. 이미 초기화됐으면 AlreadyExists, 셰이더·자원 생성 실패는 그
     // 오류다 (장치 LastError에 진단 문자열).
-    Result<void> Initialize(graphics::Device& device, graphics::Format colorFormat) noexcept;
+    Result<void> Initialize(graphics::Device& device, graphics::PixelFormat colorFormat) noexcept;
 
     // 장치 자원을 해제한다. 여러 번 호출해도 안전하다.
     void Shutdown() noexcept;
@@ -107,6 +107,15 @@ private:
     graphics::BufferHandle triangle_;
     graphics::BufferHandle quad_;
     RenderStats stats_;
+};
+
+// 내장 셰이더(BuiltinShaderHlsl)의 그리기별 상수다(cbuffer DrawConstants의 float4x4 transform·
+// float4 color, 80 byte). 파이프라인은 drawConstantBytes = sizeof(ObjectConstants)로 만든다.
+// transform은 행 벡터 규약의 행렬을 행 우선으로 담고(Core Mat4 저장 순서 그대로), color는 선형
+// RGBA다. 기본값은 단위 행렬과 흰색이다.
+struct ObjectConstants {
+    float transform[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+    float color[4] = {1, 1, 1, 1};
 };
 
 // "Rocks 정점 형식"(위치 float3, UV float2, 색 float4)의 파이프라인 셰이더다. 사용자 파이프라인의

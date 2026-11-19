@@ -29,6 +29,10 @@ internal sealed class FieldModel
 
     public required string NativeSpelling { get; init; }
 
+    // 폭 1 부호 없는 정수 bitfield를 Bool로 받은 필드다(리플렉션 B9m — Docs/Design/ReflectionExtensions.ko.md 14절). 생성 코드는
+    // 멤버 포인터 대신 GeneratedType<Owner>::Get_·Set_ 접근자를 쓰고, descriptor는 `"bitfield": true`로 의존 모듈에 알린다.
+    public bool Bitfield { get; init; }
+
     // C 배열 PROPERTY의 정규 철자(`원소[N]` — 원소는 Clang 정규 형식)다. 첫 실행 철자는 원소를 쓰인 그대로(별칭·한정 없는 이름) 내므로
     // StaticArrayProbe가 두 번째 Clang 실행으로 채운다(리플렉션 B9g). 배열이 아니면 null이다.
     public string? CanonicalSpelling { get; set; }
@@ -108,7 +112,10 @@ internal sealed class FieldModel
 
     // FieldValue로 통째 읽고 쓰지 않는 필드다(런타임 FieldIsAggregate와 같은 규칙): struct 값, 배열, 값 struct 내부의 Optional,
     // Map·Set. 생성 함수표는 read·write·writeStaged 없이 codec과(Map·Set 말고) 경로 thunk를 싣는다.
-    public bool IsAggregate => IsStruct || IsArray || IsStaticArray || (IsOptional && ElementKind == "Struct") || IsMap || IsSet;
+    public bool IsAggregate => IsStruct || IsArray || IsStaticArray || (IsOptional && ElementKind == "Struct") || IsMap || IsSet || IsInstancedStruct;
+
+    // InstancedStruct<> 필드다(리플렉션 B9j — Docs/Design/ReflectionExtensions.ko.md 11절). 원소·Map 값 자리는 TargetKind로 본다.
+    public bool IsInstancedStruct => Kind == "InstancedStruct";
 
     // 필드 값의 대상 종류다: 배열이면 원소 종류, Optional이면 내부 종류, Map이면 값 종류, Set이면 원소 종류, 아니면 값 종류(런타임
     // FieldTargetType과 같은 규칙). Map 키는 KeyKind다.
@@ -320,7 +327,7 @@ internal static class StaticArrayRules
     // RMC2307 진단의 공통 안내다.
     public const string Hint =
         "A reflected static array T name[N] holds N (1..65535) scalars, Guid, String, Name, AssetId, Sha256Digest, ROCKS_ENUM enums, ROCKS_STRUCT structs or " +
-        "ObjectRef/WeakRef/SoftObjectRef/ClassRef elements; multi-dimensional arrays, containers, Optional and cv-qualified elements are not reflected " +
+        "ObjectRef/WeakObjectRef/SoftObjectRef/ClassRef elements; multi-dimensional arrays, containers, Optional and cv-qualified elements are not reflected " +
         "(wrap an inner array in a ROCKS_STRUCT element, or use rocks::Array<T> for a variable count).";
 }
 
@@ -547,6 +554,9 @@ internal sealed class NativeMemberModel
 {
     public required string Name { get; init; }
 
+    // 정수·bool bitfield 멤버다(리플렉션 B9m — 생성 struct 값 복사가 참조 대신 대입을 쓴다).
+    public bool Bitfield { get; init; }
+
     public required string Spelling { get; init; }
 
     public required SourceSite Site { get; init; }
@@ -632,7 +642,13 @@ internal sealed class ClassModel
 
     // TypeFlags::Atomic(struct 전용 — ROCKS_STRUCT(Atomic), import struct는 descriptor flags의 Atomic). 값이 통째
     // 단위다(Docs/Design/ReflectionExtensions.ko.md 3.1절). 형질과 달리 선언 값이라 멤버에서 계산하거나 대조하지 않는다.
-    public bool Atomic { get; init; }
+    public bool Atomic { get; set; }
+
+    // struct의 C++ base 철자(Clang — 리플렉션 B9k)다. SchemaValidator가 리플렉션 struct 하나를 Base로, 나머지를 필드 없는 비리플렉션
+    // base(EmptyBases — 생성 static_assert가 비었고 다형적이지 않은지 확인한다)로 나눈다. import struct는 비어 있다.
+    public List<string> StructBaseSpellings { get; } = [];
+
+    public List<string> EmptyBases { get; } = [];
 
     // 설정 struct(ROCKS_STRUCT(Settings(Branch="…", Section="…")) — Docs/Design/ConfigSystem.ko.md 7절)의 branch·섹션 이름이다(설정 struct가
     // 아니면 둘 다 ""). 이 모듈 struct만 채운다(descriptor에 싣지 않는다 — import struct의 생성 SettingsSchema는 그 모듈의 생성 헤더에 있다).
@@ -708,6 +724,14 @@ internal sealed class ClassModel
 
     // 첫 Migrate 선언 위치다(진단용).
     public SourceSite? MigrateSite { get; set; }
+
+    // struct가 검증 hook `static Result<void> Validate(const S&) noexcept`를 선언했다(Docs/Design/CurveData.ko.md 9.1절). 생성 Ops가
+    // RuntimeStructOps::validate·validateTree에 잇는다. 모양 규칙(정적·시그니처·단일 선언·접근)은 ClangAstParser가, 참조 struct·Binds
+    // 미러 금지는 SchemaValidator가 RMC2309로 본다.
+    public bool HasValidate { get; set; }
+
+    // 첫 Validate 선언 위치다(진단용).
+    public SourceSite? ValidateSite { get; set; }
 
     // Binds="…" 지정자의 원문 철자다(이 모듈 struct만, 없으면 ""). Clang 두 번째 실행이 정규 철자로 푼다.
     public string BindsSpelling { get; init; } = "";

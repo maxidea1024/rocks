@@ -1,5 +1,8 @@
 #include "SpikeTools.h"
 
+#include <Platform/Win64/ComRef.h>
+#include <Platform/Win64/WideString.h>
+
 #include <stdio.h>
 
 #include <Windows.h>
@@ -9,6 +12,8 @@
 // 측정 S2(Docs/Design/ShaderSystem.ko.md 5.4절): 이 기계의 하드웨어 어댑터와 WARP가 OS D3D12 런타임
 // (Agility SDK 없음)에서 지원하는 최대 셰이더 모델이다. 결정 3(D3D12 셰이더 모델)의 측정 근거다.
 namespace rocks::spike {
+
+using platform::windows::ComRef;
 
 namespace {
 
@@ -23,16 +28,9 @@ constexpr uint32 ShaderModelMajorShift = 4;
 constexpr unsigned FeatureLevelMajorShift = 12;
 constexpr unsigned FeatureLevelMinorShift = 8;
 constexpr unsigned FeatureLevelMinorMask = 0xf;
-// 어댑터 이름 UTF-8 버퍼 크기다(DXGI_ADAPTER_DESC1::Description은 128 UTF-16 code unit).
-constexpr int AdapterNameBytes = 512;
-
-template <typename Interface>
-void Release(Interface*& pointer) noexcept {
-    if (pointer != nullptr) {
-        pointer->Release();
-        pointer = nullptr;
-    }
-}
+// 어댑터 이름 UTF-8 버퍼 크기다(DXGI_ADAPTER_DESC1::Description은 128 UTF-16 code unit, UTF-8로
+// 최대 384 byte).
+constexpr usize AdapterNameBytes = 512;
 
 void WriteShaderModel(StringView key, uint32 model, Report& report) noexcept {
     char text[16];
@@ -48,7 +46,9 @@ void ProbeAdapter(IDXGIAdapter1* adapter, const char* kind, Report& report) noex
     }
 
     char name[AdapterNameBytes] = {};
-    WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, name, AdapterNameBytes, nullptr, nullptr);
+    (void)platform::windows::ConvertWideToUtf8(
+        desc.Description, platform::windows::WideLength(desc.Description), name, AdapterNameBytes,
+        platform::windows::TextFit::Truncate);
     report.BeginObject();
     report.String("kind", StringView(kind));
     report.String("name", StringView(name));
@@ -67,9 +67,9 @@ void ProbeAdapter(IDXGIAdapter1* adapter, const char* kind, Report& report) noex
         report.String("driverVersion", StringView(version));
     }
 
-    ID3D12Device* device = nullptr;
-    const HRESULT created = D3D12CreateDevice(
-        adapter, D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), reinterpret_cast<void**>(&device));
+    ComRef<ID3D12Device> device;
+    const HRESULT created =
+        D3D12CreateDevice(adapter, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(device.Out()));
     report.Bool("deviceCreated", SUCCEEDED(created));
     if (FAILED(created)) {
         report.UInt("deviceError", static_cast<uint32>(created));
@@ -112,7 +112,6 @@ void ProbeAdapter(IDXGIAdapter1* adapter, const char* kind, Report& report) noex
         report.UInt("resourceBindingTier", static_cast<uint64>(options.ResourceBindingTier));
     }
 
-    Release(device);
     report.EndObject();
 }
 
@@ -122,33 +121,28 @@ void ProbeD3D12ShaderModel(Report& report) noexcept {
     report.BeginObject("d3d12");
     // 실행 파일이 D3D12SDKVersion을 내보내지 않으므로 OS에 들어 있는 D3D12 런타임을 쓴다.
     report.Bool("agilitySdk", false);
-    IDXGIFactory4* factory = nullptr;
-    if (FAILED(
-            CreateDXGIFactory2(0, __uuidof(IDXGIFactory4), reinterpret_cast<void**>(&factory)))) {
+    ComRef<IDXGIFactory4> factory;
+    if (FAILED(CreateDXGIFactory2(0, IID_PPV_ARGS(factory.Out())))) {
         report.String("error", StringView("CreateDXGIFactory2 failed"));
         report.EndObject();
         return;
     }
 
     report.BeginArray("adapters");
-    IDXGIAdapter1* adapter = nullptr;
-    for (UINT index = 0; factory->EnumAdapters1(index, &adapter) != DXGI_ERROR_NOT_FOUND; ++index) {
+    ComRef<IDXGIAdapter1> adapter;
+    for (UINT index = 0; factory->EnumAdapters1(index, adapter.Out()) != DXGI_ERROR_NOT_FOUND;
+         ++index) {
         DXGI_ADAPTER_DESC1 desc = {};
         if (SUCCEEDED(adapter->GetDesc1(&desc)) && (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) == 0) {
-            ProbeAdapter(adapter, "hardware", report);
+            ProbeAdapter(adapter.Get(), "hardware", report);
         }
-
-        Release(adapter);
     }
 
-    if (SUCCEEDED(factory->EnumWarpAdapter(__uuidof(IDXGIAdapter1),
-                                           reinterpret_cast<void**>(&adapter)))) {
-        ProbeAdapter(adapter, "warp", report);
-        Release(adapter);
+    if (SUCCEEDED(factory->EnumWarpAdapter(IID_PPV_ARGS(adapter.Out())))) {
+        ProbeAdapter(adapter.Get(), "warp", report);
     }
 
     report.EndArray();
-    Release(factory);
     report.EndObject();
 }
 

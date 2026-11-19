@@ -2,6 +2,7 @@
 
 #include <Base/Types.h>
 #include <Core/Containers/Span.h>
+#include <Core/Diagnostics/LogCategory.h>
 #include <Platform/DynamicLibrary.h>
 #include <ShaderToolTable/ShaderToolTable.h>
 
@@ -43,6 +44,11 @@
 //   auto create = reinterpret_cast<DxcCreateInstanceProc>(
 //       tools.Dxc().address[shader::DxcFunctions::CreateInstance]);
 namespace rocks::shader {
+
+// 셰이더 도구 열기의 로그 카테고리다("Shader" 아래, Docs/Design/LoggingSystem.ko.md 13절). 로더는
+// 기록하지 않고 ShaderToolLoadStatus로 돌려준다. 호출자가 필수 도구 실패는 Error, 없어도 되는 선택
+// 도구가 없으면 Debug로 남긴다.
+inline constexpr LogCategory LogShaderTool{"Shader.Tool"};
 
 // 저장소 경로·도구 경로의 최대 byte 수(NUL 포함)다.
 inline constexpr usize MaxShaderToolPathBytes = 4096;

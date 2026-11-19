@@ -55,41 +55,49 @@ VSOutput VSMain(VSInput input) {
 float4 PSMain(VSOutput input) : SV_Target { return input.color; }
 )";
 
-constexpr char FloatVertexGlsl[] = R"(#version 450 core
-layout(location = 0) in vec2 aPosition;
-layout(location = 1) in vec4 aValue;
-layout(location = 0) out vec4 vColor;
+constexpr char FloatVertexGlsl[] = R"(#version 320 es
+precision highp float;
+precision highp int;
+layout(location = 0) in vec2 in_var_ATTRIBUTE0;
+layout(location = 1) in vec4 in_var_ATTRIBUTE1;
+layout(location = 0) out vec4 out_var_TEXCOORD0;
 void main() {
-    gl_Position = vec4(aPosition, 0.5, 1.0);
-    vColor = vec4(aValue.rgb, 1.0);
+    gl_Position = vec4(in_var_ATTRIBUTE0, 0.5, 1.0);
+    out_var_TEXCOORD0 = vec4(in_var_ATTRIBUTE1.rgb, 1.0);
 }
 )";
 
-constexpr char IntVertexGlsl[] = R"(#version 450 core
-layout(location = 0) in vec2 aPosition;
-layout(location = 1) in ivec4 aValue;
-layout(location = 0) out vec4 vColor;
+constexpr char IntVertexGlsl[] = R"(#version 320 es
+precision highp float;
+precision highp int;
+layout(location = 0) in vec2 in_var_ATTRIBUTE0;
+layout(location = 1) in ivec4 in_var_ATTRIBUTE1;
+layout(location = 0) out vec4 out_var_TEXCOORD0;
 void main() {
-    gl_Position = vec4(aPosition, 0.5, 1.0);
-    vColor = vec4(vec3(aValue.rgb) / 255.0, 1.0);
+    gl_Position = vec4(in_var_ATTRIBUTE0, 0.5, 1.0);
+    out_var_TEXCOORD0 = vec4(vec3(in_var_ATTRIBUTE1.rgb) / 255.0, 1.0);
 }
 )";
 
-constexpr char UintVertexGlsl[] = R"(#version 450 core
-layout(location = 0) in vec2 aPosition;
-layout(location = 1) in uvec4 aValue;
-layout(location = 0) out vec4 vColor;
+constexpr char UintVertexGlsl[] = R"(#version 320 es
+precision highp float;
+precision highp int;
+layout(location = 0) in vec2 in_var_ATTRIBUTE0;
+layout(location = 1) in uvec4 in_var_ATTRIBUTE1;
+layout(location = 0) out vec4 out_var_TEXCOORD0;
 void main() {
-    gl_Position = vec4(aPosition, 0.5, 1.0);
-    vColor = vec4(vec3(aValue.rgb) / 255.0, 1.0);
+    gl_Position = vec4(in_var_ATTRIBUTE0, 0.5, 1.0);
+    out_var_TEXCOORD0 = vec4(vec3(in_var_ATTRIBUTE1.rgb) / 255.0, 1.0);
 }
 )";
 
-constexpr char ColorPixelGlsl[] = R"(#version 450 core
-layout(location = 0) in vec4 vColor;
-layout(location = 0) out vec4 oColor;
+constexpr char ColorPixelGlsl[] = R"(#version 320 es
+precision highp float;
+precision highp int;
+layout(location = 0) in vec4 in_var_TEXCOORD0;
+layout(location = 0) out vec4 out_var_SV_Target0;
 void main() {
-    oColor = vColor;
+    out_var_SV_Target0 = in_var_TEXCOORD0;
 }
 )";
 
@@ -106,14 +114,16 @@ VSOutput VSMain(VSInput input) {
 float4 PSMain(VSOutput input) : SV_Target { return input.color; }
 )";
 
-constexpr char InstanceVertexGlsl[] = R"(#version 450 core
-layout(location = 0) in vec2 aPosition;
-layout(location = 1) in vec2 aOffset;
-layout(location = 2) in vec4 aColor;
-layout(location = 0) out vec4 vColor;
+constexpr char InstanceVertexGlsl[] = R"(#version 320 es
+precision highp float;
+precision highp int;
+layout(location = 0) in vec2 in_var_ATTRIBUTE0;
+layout(location = 1) in vec2 in_var_ATTRIBUTE1;
+layout(location = 2) in vec4 in_var_ATTRIBUTE2;
+layout(location = 0) out vec4 out_var_TEXCOORD0;
 void main() {
-    gl_Position = vec4(aPosition + aOffset, 0.5, 1.0);
-    vColor = vec4(aColor.rgb, 1.0);
+    gl_Position = vec4(in_var_ATTRIBUTE0 + in_var_ATTRIBUTE1, 0.5, 1.0);
+    out_var_TEXCOORD0 = vec4(in_var_ATTRIBUTE2.rgb, 1.0);
 }
 )";
 
@@ -130,12 +140,14 @@ VSOutput VSMain(uint id : SV_VertexID) {
 float4 PSMain(VSOutput input) : SV_Target { return input.color; }
 )";
 
-constexpr char NoInputVertexGlsl[] = R"(#version 450 core
-layout(location = 0) out vec4 vColor;
+constexpr char NoInputVertexGlsl[] = R"(#version 320 es
+precision highp float;
+precision highp int;
+layout(location = 0) out vec4 out_var_TEXCOORD0;
 void main() {
     vec2 uv = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
     gl_Position = vec4(uv * 2.0 - 1.0, 0.5, 1.0);
-    vColor = vec4(0.25, 0.5, 0.75, 1.0);
+    out_var_TEXCOORD0 = vec4(0.25, 0.5, 0.75, 1.0);
 }
 )";
 
@@ -351,7 +363,7 @@ struct Bench {
         desc.vertex = {hlsl, vertexGlsl};
         desc.pixel = {hlsl, Text(ColorPixelGlsl)};
         desc.layout = layout;
-        desc.colorFormat = Format::RGBA8Unorm;
+        desc.colorFormats[0] = PixelFormat::RGBA8Unorm;
         return device->CreatePipeline(desc);
     }
 
@@ -392,6 +404,14 @@ void RunFormat(Bench& bench, VertexFormat format, bool openGl) noexcept {
         // ES 공통 API에 BGRA 정점 배열이 없어 미지원이다(음성 대조).
         CheckFormat(pipeline.Error() == ErrorCode::Unsupported, format,
                     "OpenGL rejects the format as unsupported");
+        return;
+    }
+
+    if (pipeline.Error() == ErrorCode::Unsupported &&
+        bench.device->Info().backend == Backend::Vulkan) {
+        // Vulkan은 형식마다 VERTEX_BUFFER 기능이 선택이라(B8G8R8A8_UNORM 등) 장치가 주지 않으면
+        // 다른 형식으로 바꾸지 않고 Unsupported로 공개한다.
+        printf("    %s: not a vertex format on this Vulkan device\n", VertexFormatName(format));
         return;
     }
 
@@ -704,7 +724,7 @@ uint32 RunVertexChecks(const char* name, Device& device, Allocator& allocator) n
     TextureDesc targetDesc;
     targetDesc.width = TargetSize;
     targetDesc.height = TargetSize;
-    targetDesc.format = Format::RGBA8Unorm;
+    targetDesc.format = PixelFormat::RGBA8Unorm;
     targetDesc.usage = TextureUsage::RenderTarget;
     auto target = device.CreateTexture(targetDesc, {});
     Check(target.IsOk(), "render target creation");

@@ -47,6 +47,10 @@ constexpr bool IsCurveMode(InterpCurveMode mode) noexcept {
 //                   나눗셈.
 //   ClampsAutoTangents   true면 CurveAutoClamped 키의 자동 접선을 성분별로 clamp한다. false면
 //                   CurveAuto와 같게 계산한다(UE 일반 ComputeCurveTangent — FLinearColor·FVector4).
+//   HasBounds       true면 InterpCurve::TryCalcBounds(성분별 최소·최대 — UE CalcBounds)를 제공한다.
+//                   UE 범위 함수가 있는 형식은 float·FVector2D·FVector·FLinearColor 넷이고,
+//                   Vec2f·Vec3f·double은 같은 식을 넓혀 적용했다. quaternion·Vector4는 false다(UE
+//                   일반 형식은 아무것도 하지 않는다).
 //   DefaultValue()  빈 커브 평가의 기본 fallback(0, quaternion은 항등)이다.
 //   DefaultTangent  새 키의 접선 기본값(0). quaternion은 키 자신(제어점 = 키, 정지)이다.
 //   NaNValue()      모든 성분이 quiet NaN인 값(NaN 입력 평가 결과)이다.
@@ -63,6 +67,7 @@ struct CurveValueTraits<S> {
     static constexpr bool HasDistance = true;
     static constexpr bool DividesByReciprocal = false;
     static constexpr bool ClampsAutoTangents = true;
+    static constexpr bool HasBounds = true;
 
     static constexpr S DefaultValue() noexcept {
         return static_cast<S>(0);
@@ -93,6 +98,7 @@ struct CurveValueTraits<Vector2<S>> {
     static constexpr bool HasDistance = true;
     static constexpr bool DividesByReciprocal = true;
     static constexpr bool ClampsAutoTangents = true;
+    static constexpr bool HasBounds = true;
 
     static constexpr Vector2<S> DefaultValue() noexcept {
         return Vector2<S>();
@@ -124,6 +130,7 @@ struct CurveValueTraits<Vector3<S>> {
     static constexpr bool HasDistance = true;
     static constexpr bool DividesByReciprocal = true;
     static constexpr bool ClampsAutoTangents = true;
+    static constexpr bool HasBounds = true;
 
     static constexpr Vector3<S> DefaultValue() noexcept {
         return Vector3<S>();
@@ -156,6 +163,7 @@ struct CurveValueTraits<Vector4<S>> {
     static constexpr bool HasDistance = true;
     static constexpr bool DividesByReciprocal = true;
     static constexpr bool ClampsAutoTangents = false;
+    static constexpr bool HasBounds = false;
 
     static constexpr Vector4<S> DefaultValue() noexcept {
         return Vector4<S>();
@@ -191,6 +199,7 @@ struct CurveValueTraits<LinearColor> {
     static constexpr bool HasDistance = false;
     static constexpr bool DividesByReciprocal = true;
     static constexpr bool ClampsAutoTangents = false;
+    static constexpr bool HasBounds = true;
 
     static constexpr LinearColor DefaultValue() noexcept {
         return LinearColor();
@@ -229,6 +238,7 @@ struct CurveValueTraits<Quaternion<S>> {
     static constexpr bool HasDistance = false;
     static constexpr bool DividesByReciprocal = false;
     static constexpr bool ClampsAutoTangents = false;
+    static constexpr bool HasBounds = false;
 
     static constexpr Quaternion<S> DefaultValue() noexcept {
         return Quaternion<S>::Identity();

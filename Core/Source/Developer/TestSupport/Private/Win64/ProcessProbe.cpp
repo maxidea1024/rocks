@@ -1,7 +1,8 @@
 #include <TestSupport/ProcessProbe.h>
+#include <Platform/Memory.h>
 
-// UTF-8·UTF-16 변환은 PlatformBase Win64 backend의 것을 그대로 쓴다(시험 도구에 따로 두지 않는다).
-#include <PlatformBase/Private/Win64/WindowsString.h>
+// UTF-8·UTF-16 변환은 PlatformBase 공개 헤더의 것을 그대로 쓴다(시험 도구에 따로 두지 않는다).
+#include <Platform/Win64/WideString.h>
 
 #include <Windows.h>
 #include <shellapi.h>
@@ -23,15 +24,16 @@ usize ReadUtf8Arguments(int, char**, char* buffer, usize capacity, const char** 
 
     usize used = 0;
     for (int i = 0; i < count; ++i) {
-        usize written = 0;
-        if (!platform::detail::WideToUtf8(wide[i], lstrlenW(wide[i]), buffer + used,
-                                          capacity - used, written)) {
+        const platform::windows::TextConversion converted = platform::windows::ConvertWideToUtf8(
+            wide[i], static_cast<usize>(lstrlenW(wide[i])), buffer + used, capacity - used,
+            platform::windows::TextFit::Exact);
+        if (!converted) {
             LocalFree(wide);
             return 0;
         }
 
         arguments[i] = buffer + used;
-        used += written + 1u;
+        used += converted.length + 1u;
     }
 
     LocalFree(wide);
@@ -67,7 +69,7 @@ int64 ReadStandardInput(void* buffer, usize capacity) noexcept {
 }
 
 uint32 SpawnSleepingDescendant() noexcept {
-    platform::detail::WideString path;
+    platform::windows::WideString path;
     if (!path.AssignModuleFileName()) {
         return 0;
     }
@@ -127,8 +129,8 @@ bool ProcessWatch::WaitGone(uint32 milliseconds) noexcept {
 }
 
 bool MakeHardLink(const char* existing, const char* link) noexcept {
-    platform::detail::WideString from;
-    platform::detail::WideString to;
+    platform::windows::WideString from;
+    platform::windows::WideString to;
     usize existingBytes = 0;
     while (existing[existingBytes] != '\0') {
         ++existingBytes;
@@ -161,7 +163,7 @@ int32 CurrentPriorityRank() noexcept {
 }
 
 bool OpenInheritableFile(const char* path, uptr& handle, uint64& identity) noexcept {
-    platform::detail::WideString wide;
+    platform::windows::WideString wide;
     usize bytes = 0;
     while (path[bytes] != '\0') {
         ++bytes;

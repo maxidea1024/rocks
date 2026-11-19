@@ -139,9 +139,9 @@ enum class ValueKind : uint8 {
     Int16, // int16(short), wire I64(범위 검사)
     Name,  // rocks::Name(Core/Text/Name.h — 실행 중 pool 토큰), wire String(표시 문자열 — None은
            // 빈 문자열). 복원은 1단계 수집 → 2a intern(Object/NameField.h)
-    WeakObjectReference, // rocks::WeakRef<T>(Object/ObjectRefs.h — GC가 추적하지 않는다), wire는
-                         // 강한 참조와 같은 문맥 참조 wire(graph v2 U32 — 같은 그래프 안 노드만,
-                         // Docs/Design/ReflectionExtensions.ko.md 5.1절)
+    WeakObjectReference, // rocks::WeakObjectRef<T>(Object/ObjectRefs.h — GC가 추적하지 않는다),
+                         // wire는 강한 참조와 같은 문맥 참조 wire(graph v2 U32 — 같은 그래프 안
+                         // 노드만, Docs/Design/ReflectionExtensions.ko.md 5.1절)
     ClassReference,      // rocks::ClassRef<Base>(Object/ClassRef.h — 클래스 TypeId, 0 = null), wire
                          // Guid. value.type은 Base 클래스 ID(필수)다(같은 문서 5.2절)
     // rocks::Optional<T>(Core/Optional.h — 클래스 필드·struct 멤버만), wire Optional(present byte +
@@ -160,7 +160,18 @@ enum class ValueKind : uint8 {
     // 값이면 ValueArray(Array와 같다 — 늘 N개). value.type은 0이고 원소 형식은
     // FieldSchema::element, maxElements는 정확한 원소 수 N(1 이상 MaxStaticArrayElements 이하)이다.
     // aggregate이고 경로는 [i] 읽기·쓰기·멤버만 받는다(삽입·삭제·비우기는 Unsupported).
-    StaticArray
+    StaticArray,
+    // rocks::InstancedStruct<>(Object/InstancedStruct.h — 실행 중 정해지는 리플렉션 struct 값 하나
+    // 또는 비어 있음, 리플렉션 B9j — 같은 문서 11절), wire InstancedStruct(필드 값은 빈 payload
+    // 또는 담긴 struct의 Record, 원소·Map 값 자리는 u64 길이 + 같은 내용). value.type은 Base struct
+    // ID(0 = 제한 없음 — B9j는 0만 받고 Base는 B9k가 연다)다. aggregate이고 경로는 형
+    // 바꾸기·비우기와 지금 타입의 멤버 단계를 받는다.
+    InstancedStruct,
+    // rocks::Text(Localization/Text.h — 지역화 문구, 리플렉션 B9l — 같은 문서 13절), wire Text(형태
+    // byte + 형태별 내용 — 비어 있음·Invariant·Localized만 저장한다). FieldValue로 통째 읽고 쓰며
+    // (FieldValue::text — 읽기는 DeepClone), 키·Set 원소·Optional 내부가 아니고 Required를 받지
+    // 않는다.
+    Text
 };
 
 // 정적 배열 필드(ValueKind::StaticArray)의 원소 수 N의 상한이다(리플렉션 B9g —
@@ -172,7 +183,7 @@ inline constexpr uint32 MaxStaticArrayElements = NumericLimits<uint16>::Max();
 // 붙이고, 이 식의 마지막 열거자와 성질 표의 행을 함께 고친다. 아래 static_assert가 성질 표와,
 // MetaCompiler 대조 헤더가 C# 표의 종류 수와 이 값을 비교한다. 근거는
 // Docs/Design/ReflectionExtensions.ko.md 1.3절이다.
-inline constexpr uint32 ValueKindCount = static_cast<uint32>(ValueKind::StaticArray) + 1;
+inline constexpr uint32 ValueKindCount = static_cast<uint32>(ValueKind::Text) + 1;
 
 // 값 종류의 성질이다(종류 성질 표 — Docs/Design/ReflectionExtensions.ko.md 1.3절).
 // ValueKindProperties가 종류마다 이 비트의 OR를 돌려주고, 런타임의 등록 검증(TypeRegistry)·쓰기
@@ -206,9 +217,8 @@ inline constexpr uint32 ValueKindCount = static_cast<uint32>(ValueKind::StaticAr
 //   Container              — 원소 형식(FieldSchema::element)을 갖는 컨테이너다
 //   WholeFieldValue        — FieldValue로 통째 읽고 쓴다(아니면 aggregate — read·write가 없고 멤버·
 //                            원소 단위 경로 연산으로만 쓴다)
-// InstancedStruct 자리는 리플렉션 B9 뒤 단계(B9j)가 연다(Optional 내부는 B9e, Map 키·값·Set 원소는
-// B9f2, Map 값의 ObjectReference(ObjectRefMap)는 B9f4, 정적 배열 원소는 B9g가 열었다). 이 표는 그
-// 자리의 허용 여부를 미리 정해 두며, 그 단계 전에는 쓰는 곳이 없다.
+// Optional 내부는 B9e, Map 키·값·Set 원소는 B9f2, Map 값의 ObjectReference(ObjectRefMap)는 B9f4,
+// 정적 배열 원소는 B9g, InstancedStruct 내용과 InstancedStruct의 자리는 B9j가 열었다.
 enum class ValueKindProperty : uint32 {
     None = 0,
     Field = 1u << 0,
@@ -329,6 +339,19 @@ constexpr ValueKindEntry ValueKindTableEntry(ValueKind kind) noexcept {
         return {true, ValueKindBit(ValueKindProperty::Field) |
                           ValueKindBit(ValueKindProperty::StructMember) |
                           ValueKindBit(ValueKindProperty::Container)};
+    case ValueKind::InstancedStruct:
+        // 실행 중 정해지는 struct 값 하나다(리플렉션 B9j). 필드·멤버·Array·정적 배열 원소·Map 값
+        // 자리에 두고 FieldValue로 통째 읽고 쓰지 않는다(aggregate — 형 바꾸기·비우기·멤버 경로).
+        // 대상 type은 Base struct ID(0 = 제한 없음)다. 키·Set 원소·Optional 내부가 아니고(비어
+        // 있음이 이미 "없음"이다) Required를 받지 않는다. InstancedStruct 내용도 아니다(중첩 금지 —
+        // 담긴 struct가 InstancedStruct를 담지 않는다는 형질은 struct 형질로 따로 본다).
+        return {true, placed | ValueKindBit(ValueKindProperty::MapValue) |
+                          ValueKindBit(ValueKindProperty::HasTargetType)};
+    case ValueKind::Text:
+        // 지역화 문구 값이다(리플렉션 B9l). 같음이 문구 정체성이 아니라 wire byte라 키·Set 원소가
+        // 아니고, 비어 있음이 이미 "없음"이라 Optional 내부도 Required도 아니다.
+        return {true, placed | ValueKindBit(ValueKindProperty::MapValue) |
+                          ValueKindBit(ValueKindProperty::WholeFieldValue)};
     }
 
     return {};
@@ -456,10 +479,11 @@ constexpr bool ValueKindIsWholeFieldValue(ValueKind kind) noexcept {
 }
 
 // typed 필드 값 종류 가운데 FieldValue로 통째 읽고 쓰지 않는 aggregate(Struct·Array·Optional·
-// Map·Set)인지다(클래스 필드가 될 수 있고 WholeFieldValue가 아니다 — 표를 한 번 읽는다). aggregate
-// 필드는 read·write·writeStaged가 없고 멤버·원소 단위 경로 연산으로만 쓴다. Opaque와 열거자 밖의
-// 값은 aggregate가 아니다. 종류 단위 판정이라 Optional은 늘 참이다 — 필드는 내부에 따라 달라지므로
-// 필드 하나를 판정할 때는 FieldIsAggregate를 쓴다(Optional<단일 값>은 aggregate가 아니다).
+// Map·Set·StaticArray·InstancedStruct)인지다(클래스 필드가 될 수 있고 WholeFieldValue가 아니다 —
+// 표를 한 번 읽는다). aggregate 필드는 read·write·writeStaged가 없고 멤버·원소 단위 경로 연산으로만
+// 쓴다. Opaque와 열거자 밖의 값은 aggregate가 아니다. 종류 단위 판정이라 Optional은 늘 참이다 —
+// 필드는 내부에 따라 달라지므로 필드 하나를 판정할 때는 FieldIsAggregate를 쓴다(Optional<단일 값>은
+// aggregate가 아니다).
 constexpr bool ValueKindIsAggregate(ValueKind kind) noexcept {
     const uint32 properties = ValueKindProperties(kind);
     return (properties & detail::ValueKindBit(ValueKindProperty::Field)) != 0 &&
@@ -468,7 +492,8 @@ constexpr bool ValueKindIsAggregate(ValueKind kind) noexcept {
 
 // 필드 값 형식이다. type은 Enum·Struct 스키마 ID, ObjectReference·WeakObjectReference·
 // SoftObjectReference의 기대 대상 타입(0 = Object), ClassReference의 Base 클래스 ID(0이 아니어야
-// 한다)에만 쓰고 그 밖은 0이어야 한다(Array의 value.type도 0 — 원소 대상은 element.type).
+// 한다), InstancedStruct의 Base struct ID(0 = 제한 없음)에만 쓰고 그 밖은 0이어야 한다(Array의
+// value.type도 0 — 원소 대상은 element.type).
 struct ValueType {
     ValueKind kind = ValueKind::Opaque;
     TypeId type{};

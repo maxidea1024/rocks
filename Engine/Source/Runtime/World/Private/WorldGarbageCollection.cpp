@@ -1,5 +1,7 @@
+#include <Core/Diagnostics/Log.h>
 #include <Platform/Fatal.h>
 #include <World/World.h>
+#include <World/WorldLog.h>
 
 namespace rocks {
 
@@ -30,6 +32,13 @@ void World::StepGarbageCollection() noexcept {
 
     auto progress = objects_.StepCollection(Access(), gcBudget_, gcScheduler_);
     if (progress && progress.Value().IsComplete()) {
+        // cycle 하나에 한 번이다(매 프레임이 아니다).
+        const GcReport& report = progress.Value().report;
+        Log::Debug(LogWorld,
+                   "World {World} GC cycle reclaimed {Reclaimed} of {Examined} examined objects "
+                   "({Retired} retired) in {Microseconds} us",
+                   Name(), report.reclaimed, report.examined, report.retired,
+                   report.durationNanoseconds / 1000);
         // 이번 cycle 시작 뒤에 파괴된 객체가 있으면 다음 cycle이 필요하다.
         gcPending_ = destroyedDuringCycle_;
     }

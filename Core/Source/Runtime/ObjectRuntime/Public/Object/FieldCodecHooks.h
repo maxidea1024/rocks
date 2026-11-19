@@ -30,9 +30,9 @@ enum class FieldDiagnosticKind : uint8 {
     // ReflectionExtensions.ko.md 5.1·15절). 그래프 저장의 Reject 정책, Include 거부 조건(기준
     // Outer·노드 1의 조상·다른 패키지), Admit 정책에서 AdmitExternalReference가 Reject를 고른
     // 위치(weak 포함)가 value 0 뒤 InvalidArgument이고, 강한 참조에 Null을 고른 위치는 value 1을
-    // 남기고 그 위치를 null로 쓴다. weak 참조(WeakRef PROPERTY)의 대상이 저장 집합 밖이면 value 2를
-    // 남기고 null로 쓴다(저장은 실패하지 않는다): Reject 정책, Admit에서 Null·Import(weak import는
-    // 없다), Include에서 모든 노드를 encode한 뒤의 최종 집합 밖(그때 기록 순서대로 —
+    // 남기고 그 위치를 null로 쓴다. weak 참조(WeakObjectRef PROPERTY)의 대상이 저장 집합 밖이면
+    // value 2를 남기고 null로 쓴다(저장은 실패하지 않는다): Reject 정책, Admit에서 Null·Import(weak
+    // import는 없다), Include에서 모든 노드를 encode한 뒤의 최종 집합 밖(그때 기록 순서대로 —
     // objectIndex·path는 기록할 때의 위치다). 저장 정책 UnsaveablePolicy::Exclude에서 저장 불가
     // 객체(클래스 Transient·Deprecated — 리플렉션 B9h2)를 가리키는 강한·weak 참조는 value 3
     // (Transient 클래스)·4(Deprecated 클래스)를 남기고 null로 쓴다.
@@ -49,7 +49,13 @@ enum class FieldDiagnosticKind : uint8 {
     // 복원 1단계가 클래스 Deprecated인 노드(path 빈 것 — objectType = 노드 타입) 또는 Deprecated
     // 클래스를 가리키는 ClassRef 값(valueType = 그 클래스, path = 값 위치)을 읽었다(리플렉션 B9h2 —
     // 값·노드는 정상으로 읽는다).
-    DeprecatedType
+    DeprecatedType,
+    // 복원 1단계가 읽은 InstancedStruct 값(ValueKind::InstancedStruct — 리플렉션 B9j)의 담긴
+    // struct가 대상 TypeRegistry에 등록되어 있지 않아 decode 정책
+    // UnknownStructTypePolicy::ReportAndClear대로 비웠다(valueType = 저장된 struct ID, path = 그
+    // 값의 위치 — 배열·Map 값이면 [f[i]], Docs/Design/ReflectionExtensions.ko.md 11절). Reject
+    // 정책(기본)은 진단 없이 NotFound다.
+    UnknownStructType
 };
 
 // 진단 하나다. objectIndex는 그래프 안 노드 위치(0부터 — local ID − 1 = export index − 1), path는
@@ -92,11 +98,11 @@ struct ExternalReferenceInfo {
     // Import를 고르면 이 대상이 받을 외부 번호(slot — 1부터, 첫 출현 순)다. Null·Reject면 쓰이지
     // 않는다(다음 대상이 같은 번호를 받는다). weak면 0이다(weak import는 없다).
     uint32 slot = 0;
-    // weak 참조(WeakRef PROPERTY — 리플렉션 B9d1) 위치인지다. weak는 같은 그래프 안만 보존하므로
-    // Null·Import 모두 그 위치를 null로 쓰고 ExternalReference 진단(value 2)을 남기며 저장은
-    // 실패하지 않는다. Reject만 진단(value 0) 뒤 InvalidArgument다. weak 질의는 slot 캐시를 쓰지
-    // 않는다 — 같은 대상의 출현마다(강한 참조가 먼저 Import한 대상이어도) 다시 묻는다. required는
-    // 늘 거짓이다.
+    // weak 참조(WeakObjectRef PROPERTY — 리플렉션 B9d1) 위치인지다. weak는 같은 그래프 안만
+    // 보존하므로 Null·Import 모두 그 위치를 null로 쓰고 ExternalReference 진단(value 2)을 남기며
+    // 저장은 실패하지 않는다. Reject만 진단(value 0) 뒤 InvalidArgument다. weak 질의는 slot 캐시를
+    // 쓰지 않는다 — 같은 대상의 출현마다(강한 참조가 먼저 Import한 대상이어도) 다시 묻는다.
+    // required는 늘 거짓이다.
     bool weak = false;
 };
 
@@ -148,8 +154,9 @@ public:
 
     // 복원 1단계에서 관찰할 struct ID다(로드 시작 때 한 번 읽는다 — 미등록 ID는 NotFound, 참조
     // (강한·weak)나 Name을 담는 struct는 InvalidArgument — 1단계 임시 값에는 참조 대상도 Name
-    // 토큰도 만들 수 없다, StructView::ContainsStrongReference·ContainsWeakReference·ContainsName).
-    // 반환 span은 그 로드 동안 유효해야 한다.
+    // 토큰도 만들 수 없다, StructView::ContainsStrongReference·ContainsWeakReference·ContainsName —
+    // 리플렉션 B9j부터 InstancedStruct를 담은 struct도 거부한다, ContainsInstancedStruct). 반환
+    // span은 그 로드 동안 유효해야 한다.
     virtual Span<const TypeId> ObservedStructs() noexcept {
         return {};
     }

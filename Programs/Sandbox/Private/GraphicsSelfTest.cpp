@@ -1,19 +1,37 @@
 #include "GraphicsSelfTest.h"
+#include "BufferSelfTest.h"
+#include "CommandSelfTest.h"
 #include "CullingSelfTest.h"
+#include "RenderGraphSelfTest.h"
 #include "RenderLaneSelfTest.h"
 #include "TimingSelfTest.h"
 #include "UploadSelfTest.h"
+#include "FormatSelfTest.h"
+#include "TextureSelfTest.h"
+#include "MsaaSelfTest.h"
+#include "SliceAttachmentSelfTest.h"
+#include "TextureViewSelfTest.h"
 #include "VertexSelfTest.h"
 
 #include <Core/Containers/Array.h>
+#include <Core/Diagnostics/Log.h>
+#include <Core/Diagnostics/LogSystem.h>
+#include <Core/Diagnostics/RuntimeLogSink.h>
+#include <Core/Memory/SystemAllocator.h>
 #include <D3D11Graphics/D3D11Device.h>
 #include <D3D12Graphics/D3D12Device.h>
 #include <Graphics/GpuFenceEvent.h>
+#include <Graphics/GraphicsLog.h>
 #include <OpenGLGraphics/OpenGLDevice.h>
 #include <PlatformWindow/Window.h>
+#include <VulkanGraphics/VulkanDevice.h>
 #include "SampleRenderer.h"
+#include "SelfTestEnvironment.h"
 #include <stdio.h>
 #include <Platform/Memory.h>
+#if SANDBOX_SHADER_SOURCE_COMPILER
+#include <ShaderFormatVulkan/VulkanShaderCompiler.h>
+#endif
 
 namespace sandbox {
 
@@ -81,14 +99,29 @@ void Check(bool condition, const char* backend, const char* what) noexcept {
 // 숨김 창에 스왑체인을 만들어 프레임·크기 변경·기록 중 파괴를 확인한다(화면 픽셀은 읽지 않는다).
 void RunSwapChainChecks(const char* name, graphics::Device& device, sample::Renderer& renderer,
                         Allocator& allocator) noexcept {
+    if (const char* reason = WindowPresentUnavailableReason(device)) {
+        printf("  [NOT RUN] %s: swap chain checks (%s)\n", name, reason);
+        return;
+    }
+
     platform::WindowDesc windowDesc;
     windowDesc.title = "Rocks graphics self-test";
     windowDesc.width = 96;
     windowDesc.height = 64;
     windowDesc.visible = false;
-    auto window = platform::Window::Create(allocator, windowDesc);
+    platform::WindowCreateReport windowReport;
+    auto window = platform::Window::Create(allocator, windowDesc, &windowReport);
     input::InputQueue queue(allocator);
     if (!window || !queue.TryInitialize(64)) {
+        // 창을 여는 쪽이 원인을 남긴다. 시험은 이 검사를 건너뛰고 계속하므로 Warning이다.
+        if (!window) {
+            Log::Warning(platform::LogPlatformWindow,
+                         "Window creation failed at {Call}: {Error} (OS error {OsError}); skipping "
+                         "the {Backend} swap chain checks",
+                         windowReport.call, ErrorCodeName(windowReport.code), windowReport.osError,
+                         name);
+        }
+
         printf("  [NOT RUN] %s: swap chain checks (window unavailable)\n", name);
         return;
     }
@@ -306,7 +339,7 @@ struct OwnerThreadRun {
 // 확인한다.
 void RunOwnershipChecks(const char* name, graphics::Device& device, sample::Renderer& renderer,
                         graphics::TextureHandle target, Allocator& allocator) noexcept {
-    // D3D12·D3D11은 생성이 스레드 안전이고(GX8 업로드 경로), OpenGL은 소유 스레드 전용이다.
+    // D3D12·D3D11·Vulkan은 생성이 스레드 안전이고(GX8 업로드 경로), OpenGL은 소유 스레드 전용이다.
     const bool concurrent = device.Info().backend != graphics::Backend::OpenGL;
     Check(device.Info().concurrentResourceCreation == concurrent && device.IsOwnerThread(), name,
           "device starts owned by its creating thread");
@@ -354,11 +387,69 @@ void RunOwnershipChecks(const char* name, graphics::Device& device, sample::Rend
           "original thread takes the device back");
 }
 
+// 검증 계층 Warning(Graphics.*.Validation)의 수를 센다.
+// 메시지 ID(속성 Id)마다 몇 번 남았는지 센다.
+class ValidationWarningSink final : public RuntimeLogSink {
+public:
+    static constexpr uint32 MaxIds = 16;
+
+    Result<void> Write(const LogEvent& event) noexcept override {
+        if (event.level != LogLevel::Warning || !event.category.EndsWith(".Validation")) {
+            return Result<void>::Success();
+        }
+
+        uint64 id = NumericLimits<uint64>::Max();
+        for (const LogProperty& property : event.properties) {
+            if (property.name == "Id") {
+                id = property.unsignedValue;
+            }
+        }
+
+        for (uint32 index = 0; index < idCount; ++index) {
+            if (ids[index] == id) {
+                ++counts[index];
+                return Result<void>::Success();
+            }
+        }
+
+        if (idCount < MaxIds) {
+            ids[idCount] = id;
+            counts[idCount++] = 1;
+        }
+
+        return Result<void>::Success();
+    }
+
+    // 하나 이상 남았고, 모든 ID가 정확히 한 번씩인지다.
+    bool EachIdOnce() const noexcept {
+        bool once = idCount != 0;
+        for (uint32 index = 0; index < idCount; ++index) {
+            once = once && counts[index] == 1;
+        }
+
+        return once;
+    }
+
+    uint64 ids[MaxIds]{};
+    uint32 counts[MaxIds]{};
+    uint32 idCount = 0;
+};
+
+void RunD3D12CreateReportProbe(Allocator& allocator) noexcept;
+
 // 한 backend에서 삼각형·사각형을 그려 픽셀을 검사한다.
 void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
                 BackendResult& result,
                 const graphics::DeviceCreateReport* report = nullptr) noexcept {
     if (!created) {
+        // 이 backend를 건너뛰고 다른 후보로 계속한다(대체 후보가 있으니 Warning, 모두 실패하면
+        // RunGraphicsSelfTest가 Error를 남긴다).
+        const bool known = report != nullptr && report->stage[0] != '\0';
+        Log::Warning(graphics::LogGraphics,
+                     "{Backend} device creation failed at {Stage}: {Error} (native code "
+                     "{NativeCode:#x}); skipping this backend",
+                     name, known ? report->stage : "unknown stage", ErrorCodeName(created.Error()),
+                     static_cast<uint64>(known ? report->nativeCode : 0));
         printf("  [NOT RUN] %s: device unavailable (error %u)\n", name,
                static_cast<unsigned>(created.Error()));
         if (report != nullptr && report->stage[0] != '\0') {
@@ -377,7 +468,7 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
            info.software ? ", software" : "");
 
     sample::Renderer renderer;
-    auto initialized = renderer.Initialize(device, graphics::Format::RGBA8UnormSrgb);
+    auto initialized = renderer.Initialize(device, graphics::PixelFormat::RGBA8UnormSrgb);
     if (!initialized) {
         printf("    %.*s\n", static_cast<int>(device.LastError().ByteCount()),
                device.LastError().Data());
@@ -388,7 +479,7 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     graphics::TextureDesc targetDesc;
     targetDesc.width = Size;
     targetDesc.height = Size;
-    targetDesc.format = graphics::Format::RGBA8UnormSrgb;
+    targetDesc.format = graphics::PixelFormat::RGBA8UnormSrgb;
     targetDesc.usage = graphics::TextureUsage::RenderTarget;
     auto target = device.CreateTexture(targetDesc, {});
     // 2x2 텍스처: 좌상 빨강, 우상 초록, 좌하 파랑, 우하 흰색(행 위→아래).
@@ -502,7 +593,7 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
         return ok;
     };
     Pixel probe = {};
-    Check(samplerProbe(graphics::Filter::Nearest, graphics::AddressMode::Clamp, 31, 4, probe) &&
+    Check(samplerProbe(graphics::Filter::Point, graphics::AddressMode::Clamp, 31, 4, probe) &&
               probe.r > 250 && probe.g < 5 && probe.b < 5,
           name, "nearest filter keeps texel color up to the edge");
     Check(samplerProbe(graphics::Filter::Bilinear, graphics::AddressMode::Clamp, 0, 0, probe) &&
@@ -523,7 +614,7 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
         Array<uint8> chain(result.triangle.GetAllocator());
         bool built = chain
                          .TryResize(static_cast<usize>(graphics::MipChainBytes(
-                             MipSize, MipSize, levels, graphics::Format::RGBA8UnormSrgb)))
+                             graphics::PixelFormat::RGBA8UnormSrgb, MipSize, MipSize, 1, levels)))
                          .IsOk();
         usize offset = 0;
         for (uint32 level = 0; built && level < levels; ++level) {
@@ -595,16 +686,41 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     failures += RunVertexChecks(name, device, result.triangle.GetAllocator());
     // 업로드·readback(GX8): 내용 갱신·ring wrap·staging 회수·비동기 readback·다른 스레드 생성.
     failures += RunUploadChecks(name, device, renderer, result.triangle.GetAllocator());
+    // 픽셀 형식(PF2·PF3·PF6): 능력 ⇔ 생성, 업로드·readback 왕복, sRGB·깊이·스텐실·비디오 view.
+    failures += RunFormatChecks(name, device, result.triangle.GetAllocator());
+    // 텍스처 차원·view swizzle·샘플러 확장(AssetSystem A0-G).
+    failures += RunTextureChecks(name, device, result.triangle.GetAllocator());
+    // 텍스처 view 범위·쓰기 텍스처·compute 텍스처 묶기(텍스처 GX2 A부): HZB 줄이기·mip·slice view.
+    failures += RunTextureViewChecks(name, device, result.triangle.GetAllocator());
+    // MSAA 텍스처·attachment resolve(텍스처 GX2 B부, 결정 R17).
+    failures += RunMsaaChecks(name, device, result.triangle.GetAllocator());
+    // slice·mip attachment(텍스처 GX2 C부): mip 사슬·배열 층·cube 면·3D 면·깊이 층·resolve slice.
+    failures += RunSliceAttachmentChecks(name, device, result.triangle.GetAllocator());
+    // 장치 능력(GX1): 한도·기능 로그, MSAA 표본 수와 Multisample 능력 일관성.
+    failures += RunCapsChecks(name, device);
+    // 버퍼 용도·view(GX2): 생성·업로드·readback, typed view 능력 ⇔ 생성, VS·PS의 view 읽기.
+    failures += RunBufferChecks(name, device, result.triangle.GetAllocator());
+    // 파이프라인 완성·명령 기록 확장(GX3·GX4): compute·간접·MRT·깊이·스텐실·복사·UAV clear.
+    failures += RunCommandChecks(name, device, result.triangle.GetAllocator());
+    // 렌더 그래프(RG1): 그래프 텍스처·명시 전이·culling·history export/import.
+    failures += RunRenderGraphChecks(name, device, renderer, result.triangle.GetAllocator());
     // GPU 계측(GX9): timestamp 쌍·slot 재사용·calibration·debug marker.
     failures += RunTimingChecks(name, device, renderer, result.triangle.GetAllocator());
     Check(device.ValidationErrorCount() == 0, name, "no validation errors");
 
-    // 검증 오류 집계가 실제로 동작하는지 확인한다: D3D12는 파이프라인 RTV 형식과 다른 대상에
-    // 그리면 debug layer 오류다(OpenGL에는 대응 오류가 없다).
-    if (info.backend == graphics::Backend::D3D12 && info.validationEnabled) {
+    // 검증 오류 집계가 실제로 동작하는지 확인한다: 파이프라인 대상 형식과 다른 대상에 그리면
+    // D3D12는 debug layer(RTV 형식), Vulkan은 validation layer(render pass 호환성) 오류다.
+    // OpenGL에는 대응 오류가 없고, D3D11은 파이프라인에 RTV 형식이 없어 따로
+    // 확인한다(RunD3D11ValidationProbe).
+    if ((info.backend == graphics::Backend::D3D12 || info.backend == graphics::Backend::Vulkan) &&
+        info.validationEnabled) {
+        // 이 아래 검증 계층 메시지(D3D12 613, Vulkan render pass 호환성 VUID)는 의도한 것이다.
+        // 로그만 보고 실패로 오해하지 않도록 앞뒤를 표시한다.
+        printf("    -- begin intentional validation messages (RTV format mismatch probe) --\n");
+        fflush(stdout);
         const uint64 before = device.ValidationErrorCount();
         sample::Renderer mismatched;
-        if (mismatched.Initialize(device, graphics::Format::RGBA8Unorm)) {
+        if (mismatched.Initialize(device, graphics::PixelFormat::RGBA8Unorm)) {
             sample::RenderItem item;
             item.mesh = sample::MeshKind::Triangle;
             auto frame = device.BeginOffscreen(target.Value(), view.clear);
@@ -615,6 +731,8 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
             }
             mismatched.Shutdown();
         }
+        fflush(stderr);
+        printf("    -- end intentional validation messages --\n");
         Check(device.ValidationErrorCount() > before, name,
               "validation layer error is counted (intentional RTV format mismatch)");
     }
@@ -653,18 +771,56 @@ void RunD3D11ValidationProbe(const char* name,
     graphics::BufferDesc vertexDesc;
     vertexDesc.size = sizeof(bytes);
     auto vertexOnly = device.CreateBuffer(vertexDesc, Span<const uint8>(bytes, sizeof(bytes)));
+    // 같은 메시지 ID는 세기는 매번, Warning은 한 번이다. 이 검사 동안만 기록을 모으는 LogSystem을
+    // 설치한다(Sandbox 본체는 아직 설치하지 않는다, LG8).
+    ValidationWarningSink sink;
+    SystemAllocator logAllocator;
+    LogSystemConfig logConfig = LogSystemConfig::ForTool();
+    logConfig.globalMinimum = LogLevel::Warning;
+    LogSystem logs(logAllocator, logConfig);
+    const bool capturing = logs.AddSink(sink).IsOk() && logs.Start().IsOk();
     const uint64 before = device.ValidationErrorCount();
-    if (target && vertexOnly) {
-        auto frame = device.BeginOffscreen(target.Value(), {});
-        if (frame) {
-            frame.Value()->SetIndexBuffer(vertexOnly.Value(), graphics::IndexFormat::UInt16);
-            auto ended = device.EndFrame();
-            (void)ended;
+    {
+        LogInstallScope installed(logs);
+        for (uint32 attempt = 0; attempt < 2 && target && vertexOnly; ++attempt) {
+            auto frame = device.BeginOffscreen(target.Value(), {});
+            if (frame) {
+                frame.Value()->SetIndexBuffer(vertexOnly.Value(), graphics::IndexFormat::UInt16);
+                auto ended = device.EndFrame();
+                (void)ended;
+            }
+
+            (void)device.ValidationErrorCount();
         }
     }
 
+    logs.Stop();
     Check(device.ValidationErrorCount() > before, name,
-          "validation layer error is counted (intentional index buffer bind flag mismatch)");
+          "validation layer error is counted (intentional index buffer bind flag mismatch, "
+          "twice)");
+    Check(capturing && sink.EachIdOnce(), name,
+          "validation layer message is logged once per message ID (Graphics.D3D11.Validation)");
+}
+
+// D3D12 생성 실패가 report에 단계·원인을 남긴다. 업로드 ring을 장치가 만들 수 없을 만큼 크게 잡아
+// 생성 중간에 실패시킨다(WARP라 하드웨어와 무관하다).
+void RunD3D12CreateReportProbe(Allocator& allocator) noexcept {
+    graphics::DeviceDesc desc;
+    desc.preferSoftware = true;
+    desc.uploadRingBytes = uint64{1} << 46;
+    graphics::DeviceCreateReport report;
+    auto created = graphics::CreateD3D12Device(allocator, desc, &report);
+    if (created || created.Error() == ErrorCode::Unsupported) {
+        printf("  [NOT RUN] D3D12 create report probe (device %s)\n",
+               created ? "was created" : "unsupported");
+        return;
+    }
+
+    Check(report.code == created.Error() && report.stage[0] != '\0' && report.detail[0] != '\0' &&
+              report.nativeCode != 0,
+          "D3D12", "creation failure fills DeviceCreateReport (stage, HRESULT, detail, code)");
+    printf("    D3D12 forced creation failure: %s (native 0x%08llX): %s\n", report.stage,
+           static_cast<unsigned long long>(report.nativeCode), report.detail);
 }
 
 // 두 backend의 결과가 픽셀 단위로 거의 같은지 본다(래스터화·필터링 차이 허용 범위 안).
@@ -693,6 +849,48 @@ void Compare(const BackendResult& left, const BackendResult& right, const char* 
     printf("  [%s] %s (%u differing channels)\n", same ? "PASS" : "FAIL", name, different);
 }
 
+#if SANDBOX_SHADER_SOURCE_COMPILER
+// Vulkan 장치를 만들어 돌린다. 생성 실패는 다른 backend와 같이 report의 단계·원본 VkResult로
+// 경고하고 NOT RUN으로 알린다(RunBackend).
+void RunVulkanDevice(const char* name, Allocator& allocator, const graphics::DeviceDesc& desc,
+                     BackendResult& result) noexcept {
+    graphics::DeviceCreateReport report;
+    RunBackend(name, graphics::CreateVulkanDevice(allocator, desc, &report), result, &report);
+}
+#endif
+
+// Vulkan 하드웨어와 소프트웨어 ICD(lavapipe·SwiftShader, 측정 S4)를 돌린다. 실행 중 컴파일러가
+// 없으므로 개발용 컴파일 훅(ShaderFormatVulkan)이 있어야 한다(Release Sandbox는 NOT RUN).
+void RunVulkan(Allocator& allocator, const graphics::DeviceDesc& base, BackendResult& hardware,
+               BackendResult& software) noexcept {
+#if SANDBOX_SHADER_SOURCE_COMPILER
+    String diagnostics(allocator);
+    auto compiler = shader::VulkanShaderCompiler::Create(allocator, diagnostics);
+    if (!compiler) {
+        Log::Warning(graphics::LogGraphics,
+                     "Vulkan development shader compiler is unavailable: {Diagnostics}; skipping "
+                     "Vulkan",
+                     diagnostics.CStr());
+        printf("  [NOT RUN] Vulkan: development shader compiler unavailable: %s\n",
+               diagnostics.CStr());
+        return;
+    }
+
+    graphics::DeviceDesc desc = base;
+    desc.shaderCompiler = compiler.Value().Get();
+    RunVulkanDevice("Vulkan", allocator, desc, hardware);
+    desc.preferSoftware = true;
+    RunVulkanDevice("Vulkan software", allocator, desc, software);
+#else
+    (void)allocator;
+    (void)base;
+    (void)hardware;
+    (void)software;
+    printf("  [NOT RUN] Vulkan: Release builds carry no shader compiler (cooked SPIR-V is "
+           "ShaderSystem SH2)\n");
+#endif
+}
+
 } // namespace
 
 int RunGraphicsSelfTest(Allocator& allocator) noexcept {
@@ -706,24 +904,49 @@ int RunGraphicsSelfTest(Allocator& allocator) noexcept {
     BackendResult warp(allocator);
     BackendResult d3d11(allocator);
     BackendResult d3d11Warp(allocator);
-    BackendResult opengl(allocator);
-    RunBackend("D3D12", graphics::CreateD3D12Device(allocator, desc), d3d12);
+    BackendResult glesProfile(allocator);
+    BackendResult glesDesktop(allocator);
+    BackendResult vulkan(allocator);
+    BackendResult vulkanSoftware(allocator);
+    graphics::DeviceCreateReport report;
+    RunBackend("D3D12", graphics::CreateD3D12Device(allocator, desc, &report), d3d12, &report);
     graphics::DeviceDesc software = desc;
     software.preferSoftware = true;
-    RunBackend("D3D12 WARP", graphics::CreateD3D12Device(allocator, software), warp);
-    graphics::DeviceCreateReport report;
+    RunBackend("D3D12 WARP", graphics::CreateD3D12Device(allocator, software, &report), warp,
+               &report);
+    RunD3D12CreateReportProbe(allocator);
     RunBackend("D3D11", graphics::CreateD3D11Device(allocator, desc, &report), d3d11, &report);
     RunBackend("D3D11 WARP", graphics::CreateD3D11Device(allocator, software, &report), d3d11Warp,
                &report);
     RunD3D11ValidationProbe("D3D11", graphics::CreateD3D11Device(allocator, desc));
     RunD3D11ValidationProbe("D3D11 WARP", graphics::CreateD3D11Device(allocator, software));
-    RunBackend("OpenGL", graphics::CreateOpenGLDevice(allocator, desc), opengl);
-    Compare(d3d12, opengl, "D3D12 vs OpenGL");
+    // OpenGL ES 3.2 미리보기(GLES31_PC)를 두 context에서 돌린다: 진짜 ES 3.2 context(드라이버가 ES
+    // 밖 호출을 거부)와 UE 방식의 데스크톱 GL 4.3 core context.
+    graphics::OpenGLDeviceOptions esProfile;
+    esProfile.contextProfile = graphics::OpenGLContextProfile::EsProfile;
+    RunBackend("OpenGL ES", graphics::CreateOpenGLDevice(allocator, desc, esProfile, &report),
+               glesProfile, &report);
+    graphics::OpenGLDeviceOptions desktopCore;
+    desktopCore.contextProfile = graphics::OpenGLContextProfile::DesktopCore;
+    RunBackend("OpenGL ES on GL core",
+               graphics::CreateOpenGLDevice(allocator, desc, desktopCore, &report), glesDesktop,
+               &report);
+    RunVulkan(allocator, desc, vulkan, vulkanSoftware);
+    Compare(d3d12, glesProfile, "D3D12 vs OpenGL ES");
+    Compare(d3d12, glesDesktop, "D3D12 vs OpenGL ES on GL core");
     Compare(d3d12, warp, "D3D12 vs WARP");
     Compare(d3d12, d3d11, "D3D12 vs D3D11");
     Compare(d3d12, d3d11Warp, "D3D12 vs D3D11 WARP");
     Compare(warp, d3d11Warp, "D3D12 WARP vs D3D11 WARP");
-    const bool anyRan = d3d12.ran || warp.ran || d3d11.ran || d3d11Warp.ran || opengl.ran;
+    Compare(d3d12, vulkan, "D3D12 vs Vulkan");
+    Compare(d3d12, vulkanSoftware, "D3D12 vs Vulkan software");
+    const bool anyRan = d3d12.ran || warp.ran || d3d11.ran || d3d11Warp.ran || glesProfile.ran ||
+                        glesDesktop.ran || vulkan.ran || vulkanSoftware.ran;
+    if (!anyRan) {
+        Log::Error(graphics::LogGraphics,
+                   "No graphics backend could create a device (D3D12, D3D11, OpenGL ES, Vulkan and "
+                   "their software fallbacks all failed); see the warnings above for each stage");
+    }
     printf("Graphics self-test: %s (%u failure%s)\n",
            failures == 0 && anyRan ? "PASS" : (anyRan ? "FAIL" : "NOT RUN"), failures,
            failures == 1 ? "" : "s");

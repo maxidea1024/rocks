@@ -19,6 +19,7 @@ namespace {
 using detail::AddBytes;
 using detail::CarriesKeyNativeType;
 using detail::CarriesValueNativeType;
+using detail::ContainsInheritedFields;
 using detail::CopyBytes;
 using detail::RecordTag;
 using detail::ValidateFieldList;
@@ -212,6 +213,32 @@ bool CarriesValueNativeType(const FieldSchema& field) noexcept {
 
 bool CarriesKeyNativeType(const FieldSchema& field) noexcept {
     return field.value.kind == ValueKind::Map && FieldKeyType(field).kind == ValueKind::Enum;
+}
+
+bool ContainsInheritedFields(Span<const FieldSchema> base,
+                             Span<const FieldSchema> derived) noexcept {
+    for (const FieldSchema& inherited : base) {
+        bool matched = false;
+        for (const FieldSchema& field : derived) {
+            if (field.id == inherited.id && field.kind == inherited.kind &&
+                field.value.kind == inherited.value.kind &&
+                field.value.type == inherited.value.type &&
+                field.element.kind == inherited.element.kind &&
+                field.element.type == inherited.element.type &&
+                field.key.kind == inherited.key.kind && field.key.type == inherited.key.type &&
+                field.maxElements == inherited.maxElements && field.flags == inherited.flags &&
+                SameBytes(EffectiveToolName(field), EffectiveToolName(inherited))) {
+                matched = true;
+                break;
+            }
+        }
+
+        if (!matched) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 } // namespace detail
@@ -416,29 +443,8 @@ Result<TypeRegistrationToken> TypeRegistry::Register(const TypeSchema& schema,
 
             // 파생 스키마는 base field를 동일한 안정 ID/표현으로 포함한다. 그래서 기반 타입의 필드
             // 함수(Resolve<기반> 경유)를 파생 객체에 써도 같은 필드를 가리킨다.
-            for (usize baseIndex = 0; baseIndex < base->schema.fields.Size(); ++baseIndex) {
-                const auto& inherited = base->schema.fields[baseIndex];
-                bool matched = false;
-                for (usize fieldIndex = 0; fieldIndex < schema.fields.Size(); ++fieldIndex) {
-                    const auto& field = schema.fields[fieldIndex];
-                    if (field.id == inherited.id && field.kind == inherited.kind &&
-                        field.value.kind == inherited.value.kind &&
-                        field.value.type == inherited.value.type &&
-                        field.element.kind == inherited.element.kind &&
-                        field.element.type == inherited.element.type &&
-                        field.key.kind == inherited.key.kind &&
-                        field.key.type == inherited.key.type &&
-                        field.maxElements == inherited.maxElements &&
-                        field.flags == inherited.flags &&
-                        SameBytes(EffectiveToolName(field), EffectiveToolName(inherited))) {
-                        matched = true;
-                        break;
-                    }
-                }
-
-                if (!matched) {
-                    return Result<TypeRegistrationToken>::Failure(ErrorCode::TypeMismatch);
-                }
+            if (!ContainsInheritedFields(base->schema.fields, schema.fields)) {
+                return Result<TypeRegistrationToken>::Failure(ErrorCode::TypeMismatch);
             }
         } else if (ops.nativeBaseType != nullptr) {
             return Result<TypeRegistrationToken>::Failure(ErrorCode::InvalidArgument);

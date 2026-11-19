@@ -1,8 +1,8 @@
 #include <Platform/File.h>
 #include <TestSupport/DynamicLibraryFixture.h>
 
-// UTF-8·UTF-16 변환은 PlatformBase Win64 backend의 것을 그대로 쓴다(시험 도구에 따로 두지 않는다).
-#include <PlatformBase/Private/Win64/WindowsString.h>
+// UTF-8·UTF-16 변환은 PlatformBase 공개 헤더의 것을 그대로 쓴다(시험 도구에 따로 두지 않는다).
+#include <Platform/Win64/WideString.h>
 
 #include <Windows.h>
 #include <string.h>
@@ -275,10 +275,13 @@ bool SystemLibraryForTest(char* path, usize capacity, const char*& systemName,
         return false;
     }
 
-    usize bytes = 0;
-    if (!platform::detail::WideToUtf8(directory, static_cast<int>(units), path, capacity, bytes)) {
+    const platform::windows::TextConversion converted = platform::windows::ConvertWideToUtf8(
+        directory, units, path, capacity, platform::windows::TextFit::Exact);
+    if (!converted) {
         return false;
     }
+
+    const usize bytes = converted.length;
 
     constexpr const char* Name = "kernel32.dll";
     const usize nameBytes = strlen(Name);
@@ -294,12 +297,12 @@ bool SystemLibraryForTest(char* path, usize capacity, const char*& systemName,
 }
 
 bool LibraryIsLoaded(const char* fileName) noexcept {
-    platform::detail::WideString wide;
+    platform::windows::WideString wide;
     return wide.AssignUtf8(fileName, strlen(fileName)) && GetModuleHandleW(wide.Value()) != nullptr;
 }
 
 bool LoadWithDefaultSearch(const char* path) noexcept {
-    platform::detail::WideString wide;
+    platform::windows::WideString wide;
     if (!wide.AssignUtf8(path, strlen(path))) {
         return false;
     }
@@ -317,7 +320,7 @@ bool LoadWithDefaultSearch(const char* path) noexcept {
 }
 
 bool PrependSearchPath(const char* directory) noexcept {
-    platform::detail::WideString wide;
+    platform::windows::WideString wide;
     if (!wide.AssignUtf8(directory, strlen(directory))) {
         return false;
     }

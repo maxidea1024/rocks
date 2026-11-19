@@ -445,3 +445,41 @@ TEST(TaskTraceChannelOffKeepsBehaviorAndInlineExecutorIsTraced) {
         CHECK(events[4].error == StringView("Busy"));
     }
 }
+
+// trace 세션이 없고 채널이 꺼진 기본 상태에서도 Submit한 body가 올린 쪽 상관 id를 받는다(로깅
+// L15). 실행이 끝나면 worker 스레드의 스택은 비어 있다.
+TEST(TaskPropagatesCorrelationWithoutTraceSession) {
+    SystemAllocator allocator;
+    WorkerScheduler scheduler(allocator);
+    WorkerSchedulerConfig config;
+    config.workerCount = 1;
+    REQUIRE(scheduler.Start(config));
+    uint64 seen = 0;
+    usize depthAfter = MaxCorrelationDepth;
+    {
+        CorrelationScope request(CorrelationIds{0, 0, 0, 0, 91});
+        auto body = Function<void(WorkerTaskContext&)>::TryCreate(
+            allocator, [&seen](WorkerTaskContext&) noexcept {
+                CorrelationIds ids;
+                if (CurrentCorrelation(ids)) {
+                    seen = ids.request;
+                }
+            });
+        REQUIRE(body);
+        auto handle = scheduler.Submit(Move(body.Value()));
+        REQUIRE(handle);
+        auto waited = handle.Value().Wait(GateTimeoutMs);
+        REQUIRE(waited && waited.Value() == platform::WaitResult::Signaled);
+    }
+
+    auto probe = Function<void(WorkerTaskContext&)>::TryCreate(
+        allocator, [&depthAfter](WorkerTaskContext&) noexcept { depthAfter = CorrelationDepth(); });
+    REQUIRE(probe);
+    auto second = scheduler.Submit(Move(probe.Value()));
+    REQUIRE(second);
+    auto waited = second.Value().Wait(GateTimeoutMs);
+    REQUIRE(waited && waited.Value() == platform::WaitResult::Signaled);
+    CHECK(seen == 91);
+    CHECK(depthAfter == 0);
+    REQUIRE(scheduler.Shutdown());
+}

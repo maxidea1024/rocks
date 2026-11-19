@@ -2,6 +2,7 @@
 
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
+#include <Platform/Memory.h>
 
 namespace rocks::render::testing {
 
@@ -9,7 +10,8 @@ using namespace rocks::graphics;
 
 RecordingDevice::RecordingDevice(Allocator& allocator) noexcept
     : timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics), buffers_(allocator),
-      textures_(allocator), pipelines_(allocator), swapChains_(allocator), retired_(allocator),
+      allocator_(allocator), textures_(allocator), transitions_(allocator), splits_(allocator),
+      pendingSplits_(allocator), pipelines_(allocator), swapChains_(allocator), retired_(allocator),
       readbacks_(allocator),
       staging_(allocator, stagingSource_, graphics::DefaultStagingBudgetBytes),
       timestamps_(allocator), timestampPool_(allocator) {
@@ -293,7 +295,7 @@ Result<BufferHandle> RecordingDevice::CreateBuffer(const BufferDesc& desc,
         return Result<BufferHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
-    auto added = buffers_.TryAdd(uint8{0});
+    auto added = buffers_.TryAdd(ResourceAccess::VertexOrIndex);
     if (!added) {
         return Result<BufferHandle>::Failure(added.Error());
     }
@@ -310,7 +312,16 @@ Result<TextureHandle> RecordingDevice::CreateTexture(const TextureDesc& desc,
     }
 
     (void)pixels;
-    auto added = textures_.TryAdd(uint8{0});
+    TextureState state;
+    const uint32 mipLevels =
+        desc.mipLevels == 0 || desc.mipLevels > MaxTrackedMips ? 1u : desc.mipLevels;
+    const uint32 slices = TextureSliceCount(desc) == 0 ? 1u : TextureSliceCount(desc);
+    auto reset = state.states.Reset(allocator_, mipLevels, slices, ResourceAccess::SrvGraphics);
+    if (!reset) {
+        return Result<TextureHandle>::Failure(reset.Error());
+    }
+
+    auto added = textures_.TryAdd(Move(state));
     if (!added) {
         return Result<TextureHandle>::Failure(added.Error());
     }
@@ -325,7 +336,11 @@ Result<PipelineHandle> RecordingDevice::CreatePipeline(const PipelineDesc& desc)
         return Result<PipelineHandle>::Failure(owner.Error());
     }
 
-    auto added = pipelines_.TryAdd(uint8{0});
+    if (!graphics::IsValidDrawConstantBytes(desc.drawConstantBytes)) {
+        return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto added = pipelines_.TryAdd(desc.drawConstantBytes);
     if (!added) {
         return Result<PipelineHandle>::Failure(added.Error());
     }
@@ -357,9 +372,9 @@ Result<CommandContext*> RecordingDevice::BeginFrame(SwapChainHandle swapChain,
     return Result<CommandContext*>::Success(this);
 }
 
-Result<CommandContext*> RecordingDevice::BeginOffscreen(TextureHandle target,
-                                                        const ClearColor& clear) noexcept {
-    (void)clear;
+// 기록 장치는 색 attachment 하나(첫 색)만 기록한다(렌더 그래프 시험 범위).
+Result<CommandContext*> RecordingDevice::BeginPass(const PassDesc& pass) noexcept {
+    const TextureHandle target = pass.colorCount != 0 ? pass.colors[0].texture : TextureHandle{};
     auto owner = ownership_.Check();
     if (!owner) {
         return Result<CommandContext*>::Failure(owner.Error());
@@ -374,6 +389,8 @@ Result<CommandContext*> RecordingDevice::BeginOffscreen(TextureHandle target,
                                                            : ErrorCode::StaleHandle);
     }
 
+    // attachment 전이다(Device.h Transition 주석).
+    textures_.Find(target.slot)->states.At(0, 0) = ResourceAccess::RenderTarget;
     recording_ = true;
     Record(Op::BeginOffscreen);
     return Result<CommandContext*>::Success(this);
@@ -390,6 +407,9 @@ Result<GpuFencePoint> RecordingDevice::EndFrame() noexcept {
     }
 
     recording_ = false;
+    // 끝나지 않은 분리 전이는 계약 위반이다.
+    validationErrors_ += splits_.Close();
+    pendingSplits_.Clear();
     const uint64 value = ++fenceValue_;
     for (Retired& entry : retired_) {
         if (entry.pending) {
@@ -436,6 +456,117 @@ void RecordingDevice::Defer() noexcept {
     if (!pushed) {
         platform::Fatal("RecordingDevice retire list allocation failed");
     }
+}
+
+// 기록 장치는 능력 질의·버퍼 view를 쓰지 않는 시험용이다(빈 능력, view Unsupported).
+const DeviceCaps& RecordingDevice::Caps() const noexcept {
+    static const DeviceCaps none;
+    return none;
+}
+
+uint32 RecordingDevice::GetPixelFormatSampleCounts(PixelFormat format) const noexcept {
+    (void)format;
+    return 0;
+}
+
+Result<BufferViewHandle> RecordingDevice::CreateBufferView(BufferHandle buffer,
+                                                           const BufferViewDesc& desc) noexcept {
+    (void)buffer;
+    (void)desc;
+    return Result<BufferViewHandle>::Failure(ErrorCode::Unsupported);
+}
+
+Result<void> RecordingDevice::ReadBuffer(BufferHandle buffer, uint64 offset,
+                                         Span<uint8> out) noexcept {
+    (void)buffer;
+    (void)offset;
+    (void)out;
+    return Result<void>::Failure(ErrorCode::Unsupported);
+}
+
+void RecordingDevice::Retire(BufferViewHandle view) noexcept {
+    (void)view;
+}
+
+void RecordingDevice::SetBufferView(uint32 slot, BufferViewHandle view) noexcept {
+    (void)slot;
+    (void)view;
+}
+
+// 아래 GX3·GX4 명령은 기록 장치가 쓰지 않는다(렌더 그래프 시험 범위 밖).
+Result<PipelineHandle>
+RecordingDevice::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
+    (void)desc;
+    return Result<PipelineHandle>::Failure(ErrorCode::Unsupported);
+}
+
+void RecordingDevice::SetWritableBufferView(uint32 slot, BufferViewHandle view) noexcept {
+    (void)slot;
+    (void)view;
+}
+
+void RecordingDevice::SetWritableTexture(uint32 slot, TextureHandle view) noexcept {
+    (void)slot;
+    (void)view;
+}
+
+void RecordingDevice::DrawIndirect(BufferHandle arguments, uint64 offset) noexcept {
+    (void)arguments;
+    (void)offset;
+}
+
+void RecordingDevice::DrawIndexedIndirect(BufferHandle arguments, uint64 offset) noexcept {
+    (void)arguments;
+    (void)offset;
+}
+
+void RecordingDevice::Dispatch(uint32 groupCountX, uint32 groupCountY,
+                               uint32 groupCountZ) noexcept {
+    (void)groupCountX;
+    (void)groupCountY;
+    (void)groupCountZ;
+}
+
+void RecordingDevice::DispatchIndirect(BufferHandle arguments, uint64 offset) noexcept {
+    (void)arguments;
+    (void)offset;
+}
+
+void RecordingDevice::SetViewport(const Viewport& viewport) noexcept {
+    (void)viewport;
+}
+
+void RecordingDevice::SetScissor(const ScissorRect& scissor) noexcept {
+    (void)scissor;
+}
+
+void RecordingDevice::SetStencilReference(uint32 reference) noexcept {
+    (void)reference;
+}
+
+Result<void> RecordingDevice::CopyBuffer(BufferHandle destination, uint64 destinationOffset,
+                                         BufferHandle source, uint64 sourceOffset,
+                                         uint64 size) noexcept {
+    (void)destination;
+    (void)destinationOffset;
+    (void)source;
+    (void)sourceOffset;
+    (void)size;
+    return Result<void>::Failure(ErrorCode::Unsupported);
+}
+
+Result<void> RecordingDevice::CopyTexture(TextureHandle destination,
+                                          TextureHandle source) noexcept {
+    (void)destination;
+    (void)source;
+    return Result<void>::Failure(ErrorCode::Unsupported);
+}
+
+Result<void> RecordingDevice::ClearWritableBufferView(BufferViewHandle view,
+                                                      uint32 value) noexcept {
+    (void)view;
+    (void)value;
+    return Result<void>::Failure(ErrorCode::Unsupported);
 }
 
 void RecordingDevice::Retire(BufferHandle buffer) noexcept {
@@ -566,11 +697,213 @@ StringView RecordingDevice::LastError() const noexcept {
 }
 
 uint64 RecordingDevice::IgnoredDraws() const noexcept {
-    return 0;
+    return ignoredDraws_;
 }
 
 uint64 RecordingDevice::ValidationErrorCount() const noexcept {
-    return 0;
+    return validationErrors_;
+}
+
+Result<graphics::TextureSubresources>
+RecordingDevice::GetTextureSubresources(TextureHandle texture) const noexcept {
+    const TextureState* state = textures_.Find(texture.slot);
+    if (state == nullptr) {
+        return Result<graphics::TextureSubresources>::Failure(ErrorCode::StaleHandle);
+    }
+
+    return Result<graphics::TextureSubresources>::Success(
+        graphics::TextureSubresources{state->states.MipLevels(), state->states.Slices()});
+}
+
+ResourceAccess RecordingDevice::TextureAccess(TextureHandle texture, uint32 mip,
+                                              uint32 slice) const noexcept {
+    const TextureState* state = textures_.Find(texture.slot);
+    if (state == nullptr || mip >= state->states.MipLevels() || slice >= state->states.Slices()) {
+        return ResourceAccess::Unknown;
+    }
+
+    return state->states.At(mip, slice);
+}
+
+ResourceAccess RecordingDevice::BufferAccess(BufferHandle buffer) const noexcept {
+    const ResourceAccess* state = buffers_.Find(buffer.slot);
+    return state == nullptr ? ResourceAccess::Unknown : *state;
+}
+
+void RecordingDevice::CheckDeclared(ResourceAccess tracked, ResourceAccess declared) noexcept {
+    if (declared != ResourceAccess::Unknown && declared != ResourceAccess::Discard &&
+        declared != tracked) {
+        ++validationErrors_;
+    }
+}
+
+void RecordingDevice::Transition(Span<const ResourceTransition> transitions) noexcept {
+    if (!recording_) {
+        return;
+    }
+
+    CheckPendingOverlap(transitions);
+    ApplyTransitions(transitions, TransitionPhase::Full, 0);
+}
+
+namespace {
+
+// 두 전이가 같은 자원의 겹치는 subresource(mip·slice 모두)를 가리키는지다.
+bool Overlaps(const ResourceTransition& left, const ResourceTransition& right) noexcept {
+    if (!left.buffer.IsNull() || !right.buffer.IsNull()) {
+        return left.buffer == right.buffer && !left.buffer.IsNull();
+    }
+
+    if (!(left.texture == right.texture)) {
+        return false;
+    }
+
+    return SubresourceRangesOverlap(left.range, right.range);
+}
+
+} // namespace
+
+void RecordingDevice::CheckPendingOverlap(Span<const ResourceTransition> transitions) noexcept {
+    for (const PendingTransition& pending : pendingSplits_) {
+        for (const ResourceTransition& transition : transitions) {
+            if (Overlaps(pending.transition, transition)) {
+                ++validationErrors_;
+                return;
+            }
+        }
+    }
+}
+
+SplitTransition
+RecordingDevice::BeginTransitions(Span<const ResourceTransition> transitions) noexcept {
+    if (!recording_) {
+        return {};
+    }
+
+    CheckPendingOverlap(transitions);
+    const SplitTransition split = splits_.Begin(transitions);
+    if (split.IsNull()) {
+        return split;
+    }
+
+    for (const ResourceTransition& transition : transitions) {
+        PendingTransition pending;
+        pending.split = split.id;
+        pending.transition = transition;
+        if (!pendingSplits_.TryPushBack(pending)) {
+            platform::Fatal("RecordingDevice split transition list allocation failed");
+        }
+
+        TransitionCall call;
+        call.texture = transition.buffer.IsNull();
+        call.index = call.texture ? transition.texture.slot.index : transition.buffer.slot.index;
+        call.range = transition.range;
+        call.before = transition.before;
+        call.after = transition.after;
+        call.phase = TransitionPhase::Begin;
+        call.split = split.id;
+        if (!transitions_.TryPushBack(call)) {
+            platform::Fatal("RecordingDevice transition log allocation failed");
+        }
+    }
+
+    Record(Op::BeginTransitions, split.id);
+    return split;
+}
+
+void RecordingDevice::EndTransitions(SplitTransition split,
+                                     Span<const ResourceTransition> transitions) noexcept {
+    if (!recording_) {
+        return;
+    }
+
+    const SplitEndResult ended = splits_.End(split, transitions);
+    if (ended == SplitEndResult::Unknown) {
+        ++ignoredDraws_;
+    } else if (ended == SplitEndResult::Mismatch) {
+        ++validationErrors_;
+    }
+
+    for (usize index = 0; index < pendingSplits_.Size();) {
+        if (pendingSplits_[index].split == split.id && !split.IsNull()) {
+            pendingSplits_[index] = pendingSplits_[pendingSplits_.Size() - 1];
+            auto popped = pendingSplits_.TryPopBack();
+            (void)popped;
+            continue;
+        }
+
+        ++index;
+    }
+
+    if (ended == SplitEndResult::Null || ended == SplitEndResult::Unknown) {
+        CheckPendingOverlap(transitions);
+    }
+
+    Record(Op::EndTransitions, split.id);
+    ApplyTransitions(transitions, TransitionPhase::End, split.id);
+}
+
+void RecordingDevice::ApplyTransitions(Span<const ResourceTransition> transitions,
+                                       TransitionPhase phase, uint32 split) noexcept {
+    for (const ResourceTransition& transition : transitions) {
+        if (!CanCombineAccess(transition.after)) {
+            ++ignoredDraws_;
+            continue;
+        }
+
+        TransitionCall call;
+        call.range = transition.range;
+        call.before = transition.before;
+        call.after = transition.after;
+        call.phase = phase;
+        call.split = split;
+        if (!transition.buffer.IsNull()) {
+            ResourceAccess* state = buffers_.Find(transition.buffer.slot);
+            if (state == nullptr) {
+                ++ignoredDraws_;
+                continue;
+            }
+
+            CheckDeclared(*state, transition.before);
+            if (transition.after != ResourceAccess::Discard) {
+                *state = transition.after;
+            }
+
+            call.texture = false;
+            call.index = transition.buffer.slot.index;
+        } else {
+            TextureState* state = textures_.Find(transition.texture.slot);
+            const ResolvedSubresourceRange range =
+                state == nullptr
+                    ? ResolvedSubresourceRange{}
+                    : ResolveSubresourceRange(transition.range, state->states.MipLevels(),
+                                              state->states.Slices());
+            if (range.IsEmpty()) {
+                ++ignoredDraws_;
+                continue;
+            }
+
+            for (uint32 slice = range.firstSlice; slice < range.firstSlice + range.sliceCount;
+                 ++slice) {
+                for (uint32 mip = range.firstMip; mip < range.firstMip + range.mipCount; ++mip) {
+                    ResourceAccess& tracked = state->states.At(mip, slice);
+                    CheckDeclared(tracked, transition.before);
+                    if (transition.after != ResourceAccess::Discard) {
+                        tracked = transition.after;
+                    }
+                }
+            }
+
+            call.index = transition.texture.slot.index;
+        }
+
+        auto pushed = transitions_.TryPushBack(call);
+        if (!pushed) {
+            platform::Fatal("RecordingDevice transition log allocation failed");
+        }
+
+        Record(Op::Transition, transitions_.Size() - 1);
+    }
 }
 
 usize RecordingDevice::PendingRetireCount() const noexcept {
@@ -578,6 +911,7 @@ usize RecordingDevice::PendingRetireCount() const noexcept {
 }
 
 void RecordingDevice::SetPipeline(PipelineHandle pipeline) noexcept {
+    boundPipeline_ = pipelines_.IsValid(pipeline.slot) ? pipeline : PipelineHandle{};
     Record(Op::SetPipeline, pipelines_.IsValid(pipeline.slot) ? 1u : 0u);
 }
 
@@ -599,11 +933,34 @@ void RecordingDevice::SetIndexBuffer(BufferHandle buffer, IndexFormat format,
 }
 
 void RecordingDevice::SetTexture(TextureHandle texture) noexcept {
-    Record(Op::SetTexture, textures_.IsValid(texture.slot) ? 1u : 0u);
+    const TextureState* state = textures_.Find(texture.slot);
+    if (state != nullptr) {
+        for (uint32 index = 0; index < state->states.Count(); ++index) {
+            if (!HasAnyAccess(state->states[index], ResourceAccess::SrvGraphics)) {
+                ++validationErrors_;
+                break;
+            }
+        }
+    }
+
+    Record(Op::SetTexture, state != nullptr ? 1u : 0u);
 }
 
-void RecordingDevice::SetConstants(const DrawConstants& constants) noexcept {
-    Record(Op::SetConstants, static_cast<uint64>(constants.color[0] * 255.0f));
+Result<void> RecordingDevice::SetDrawConstants(Span<const uint8> bytes) noexcept {
+    // 실제 장치와 같은 계약이다: 묶인 파이프라인이 있고 크기가 그 선언과 같아야 한다.
+    const uint32* declared = recording_ ? pipelines_.Find(boundPipeline_.slot) : nullptr;
+    if (declared == nullptr || bytes.Size() != *declared) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    float first = 0.0f;
+    if (bytes.Size() >= sizeof(first)) {
+        platform::MemoryCopy(&first, bytes.Data(), sizeof(first));
+    }
+
+    Record(Op::SetDrawConstants,
+           (static_cast<uint64>(bytes.Size()) << 32) | static_cast<uint32>(first * 255.0f));
+    return Result<void>::Success();
 }
 
 void RecordingDevice::Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept {

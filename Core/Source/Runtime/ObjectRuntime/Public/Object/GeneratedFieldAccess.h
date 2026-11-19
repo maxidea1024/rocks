@@ -5,6 +5,7 @@
 #include <Object/AssetId.h>
 #include <Object/ClassRef.h>
 #include <Object/ConstructionContext.h>
+#include <Object/InstancedStruct.h>
 #include <Object/NameField.h>
 #include <Object/SoftObjectRef.h>
 #include <Core/Containers/OrderedMap.h>
@@ -25,15 +26,16 @@ struct ObjectReferenceField<ObjectRef<T>> {
     using Target = T;
 };
 
-// weak 참조 PROPERTY(WeakRef<T> — 리플렉션 B9d1, Docs/Design/ReflectionExtensions.ko.md 5.1절)다.
-// GC가 추적하지 않는 값 필드이고 Target은 정적 기대 대상 타입이다.
+// weak 참조 PROPERTY(WeakObjectRef<T> — 리플렉션 B9d1,
+// Docs/Design/ReflectionExtensions.ko.md 5.1절)다. GC가 추적하지 않는 값 필드이고 Target은 정적
+// 기대 대상 타입이다.
 template <class T>
 struct WeakReferenceField {
     static constexpr bool Supported = false;
 };
 
 template <class T>
-struct WeakReferenceField<WeakRef<T>> {
+struct WeakReferenceField<WeakObjectRef<T>> {
     static constexpr bool Supported = true;
     using Target = T;
 };
@@ -83,7 +85,7 @@ struct ReflectedStructField {
 
 // 리플렉션 배열 필드의 컨테이너다(Docs/Design/ReflectionFoundations.ko.md 5.6절). 부분 특수화로만
 // 고르며(requires 탐지 없음) Element는 원소의 C++ 형식이다: Array<E>는 E(스칼라·String·Name·Guid·
-// AssetId·Digest·enum·SoftObjectRef·WeakRef·ClassRef·참조 없는 struct), ObjectRefArray<T>는
+// AssetId·Digest·enum·SoftObjectRef·WeakObjectRef·ClassRef·참조 없는 struct), ObjectRefArray<T>는
 // ObjectRef<T>(원소 null 허용), StructRefArray<S>는 참조 struct S다. Registry는 원소를 Registry가
 // 관리하는 컨테이너(ObjectRefArray·StructRefArray)인지다.
 template <class T>
@@ -164,12 +166,12 @@ struct MapField<ObjectRefMap<K, T>> {
 };
 
 // 리플렉션 정적 배열 필드(T x[N] — 리플렉션 B9g, Docs/Design/ReflectionExtensions.ko.md 8절)다.
-// 부분 특수화로만 고르며 Element는 원소 C++ 형식(단일 값·ObjectRef·WeakRef·ClassRef·SoftObjectRef·
-// enum·struct — 참조 struct 포함), Count는 N이다. 원소가 소유 객체 저장소 안에 있으므로 Registry
-// 컨테이너가 아니다(ObjectRef 원소의 쓰기는 SetReference의 주소 범위 검사를 그대로 지난다).
-// 다차원 배열(T x[M][N])은 Element가 다시 배열이라 FieldValueKind가 StaticArray이고 성질 표의
-// 정적 배열 원소가 아니므로 생성 codec의 static_assert가 거부한다(MetaCompiler RMC2307이 먼저
-// 막는다).
+// 부분 특수화로만 고르며 Element는 원소 C++ 형식(단일
+// 값·ObjectRef·WeakObjectRef·ClassRef·SoftObjectRef· enum·struct — 참조 struct 포함), Count는
+// N이다. 원소가 소유 객체 저장소 안에 있으므로 Registry 컨테이너가 아니다(ObjectRef 원소의 쓰기는
+// SetReference의 주소 범위 검사를 그대로 지난다). 다차원 배열(T x[M][N])은 Element가 다시 배열이라
+// FieldValueKind가 StaticArray이고 성질 표의 정적 배열 원소가 아니므로 생성 codec의 static_assert가
+// 거부한다(MetaCompiler RMC2307이 먼저 막는다).
 template <class T>
 struct StaticArrayField {
     static constexpr bool Supported = false;
@@ -244,6 +246,8 @@ constexpr ValueKind ScalarValueKind() noexcept {
         return ValueKind::Utf8String;
     } else if constexpr (IsSameV<T, Name>) {
         return ValueKind::Name;
+    } else if constexpr (IsSameV<T, Text>) {
+        return ValueKind::Text;
     } else if constexpr (ObjectReferenceField<T>::Supported) {
         return ValueKind::ObjectReference;
     } else if constexpr (WeakReferenceField<T>::Supported) {
@@ -262,9 +266,9 @@ constexpr ValueKind ScalarValueKind() noexcept {
 }
 
 // C++ 멤버 형식의 필드 값 종류다: 정적 배열 T[N]은 StaticArray, 리플렉션 배열 컨테이너는 Array,
-// Optional<T>는 Optional,
-// OrderedMap<K, V>·OrderedSet<T>는 Map·Set, 단일 값은 ScalarValueKind, 리플렉션 enum·struct는
-// Enum·Struct, 그 밖은 Opaque다(단일 값 형식 대응은 ScalarValueKind 한 곳에 있다).
+// Optional<T>는 Optional, OrderedMap<K, V>·OrderedSet<T>는 Map·Set, InstancedStruct<Base>는
+// InstancedStruct(리플렉션 B9j), 단일 값은 ScalarValueKind, 리플렉션 enum·struct는 Enum·Struct, 그
+// 밖은 Opaque다(단일 값 형식 대응은 ScalarValueKind 한 곳에 있다).
 template <class T>
 constexpr ValueKind FieldValueKind() noexcept {
     if constexpr (StaticArrayField<T>::Supported) {
@@ -275,6 +279,8 @@ constexpr ValueKind FieldValueKind() noexcept {
         return ValueKind::Optional;
     } else if constexpr (MapField<T>::Supported) {
         return MapField<T>::IsSet ? ValueKind::Set : ValueKind::Map;
+    } else if constexpr (InstancedStructField<T>::Supported) {
+        return ValueKind::InstancedStruct;
     } else if constexpr (ScalarValueKind<T>() != ValueKind::Opaque) {
         return ScalarValueKind<T>();
     } else if constexpr (ReflectedEnumField<T>::Supported) {
@@ -303,13 +309,16 @@ constexpr ValueKind FieldAccessKind() noexcept {
 // FieldValueKind<T>()).
 template <ValueKind Target, class T>
 struct TargetValueCheck {
-    static constexpr bool Valid = Target == ValueKind::Enum ? IsEnumV<T>
-                                  : Target == ValueKind::Struct
-                                      ? IsClassV<T> && ScalarValueKind<T>() == ValueKind::Opaque &&
-                                            !ArrayField<T>::Supported &&
-                                            !OptionalField<T>::Supported && !MapField<T>::Supported
-                                      : Target != ValueKind::Opaque && Target != ValueKind::Array &&
-                                            ScalarValueKind<T>() == Target;
+    static constexpr bool Valid =
+        Target == ValueKind::Enum ? IsEnumV<T>
+        : Target == ValueKind::Struct
+            ? IsClassV<T> && ScalarValueKind<T>() == ValueKind::Opaque &&
+                  !ArrayField<T>::Supported && !OptionalField<T>::Supported &&
+                  !MapField<T>::Supported && !InstancedStructField<T>::Supported
+        : Target == ValueKind::InstancedStruct
+            ? InstancedStructField<T>::Supported
+            : Target != ValueKind::Opaque && Target != ValueKind::Array &&
+                  ScalarValueKind<T>() == Target;
     static_assert(Valid, "path thunk target kind does not match the C++ member type");
 };
 
@@ -330,6 +339,15 @@ Result<void> CopyTargetValue(const T& source, FieldValue& value) noexcept {
     value.present = true;
     if constexpr (Target == ValueKind::Utf8String) {
         return value.string.TryAssign(source.View());
+    } else if constexpr (Target == ValueKind::Text) {
+        // Text는 value의 allocator로 노드를 새로 만든다(리플렉션 B9l — 멤버 노드를 공유하지
+        // 않는다).
+        auto copied = source.DeepClone(value.GetAllocator());
+        if (!copied) {
+            return Result<void>::Failure(copied.Error());
+        }
+
+        value.text = Move(copied.Value());
     } else if constexpr (Target == ValueKind::SoftObjectReference) {
         value.guid = source.asset.value;
         return value.string.TryAssign(source.objectPath.View());
@@ -379,9 +397,13 @@ Result<void> CopyTargetValue(const T& source, FieldValue& value) noexcept {
 // WriteGeneratedStagedField·경로 쓰기)가 먼저 검사하고, 복원 2단계는 1단계가 검증한 노드 handle을
 // 쓴다. ClassRef는 클래스 TypeId를 그대로 대입한다 — 등록·클래스·Base 파생은 호출 경로
 // (FieldWriteOperation·WriteGeneratedField·WriteGeneratedStagedField·경로 쓰기 —
-// ValidateClassReference)가 먼저 검사하고, 복원 2단계는 1단계가 판정한 값을 쓴다.
+// ValidateClassReference)가 먼저 검사하고, 복원 2단계는 1단계가 판정한 값을 쓴다. Text(리플렉션
+// B9l)는 value.text를 valueAllocator(대상 객체의 allocator — ObjectRegistry·ConstructionContext::
+// ObjectAllocator, 경로 문맥의 ValueAllocator)로 DeepClone해 대입한다(valueAllocator가 없으면
+// Unsupported, 복사 실패는 그 오류 — target은 그대로다).
 template <ValueKind Target, class T>
-Result<void> WriteTargetValue(T& target, const FieldValue& value) noexcept {
+Result<void> WriteTargetValue(T& target, const FieldValue& value,
+                              Allocator* valueAllocator = nullptr) noexcept {
     static_assert(TargetValueCheck<Target, T>::Valid);
     static_assert(Target != ValueKind::Struct && Target != ValueKind::ObjectReference,
                   "struct values and references are not written through FieldValue");
@@ -397,6 +419,17 @@ Result<void> WriteTargetValue(T& target, const FieldValue& value) noexcept {
 
     if constexpr (Target == ValueKind::Utf8String) {
         return target.TryAssign(value.string.View());
+    } else if constexpr (Target == ValueKind::Text) {
+        if (!valueAllocator) {
+            return Result<void>::Failure(ErrorCode::Unsupported);
+        }
+
+        auto copied = value.text.DeepClone(*valueAllocator);
+        if (!copied) {
+            return Result<void>::Failure(copied.Error());
+        }
+
+        target = Move(copied.Value());
     } else if constexpr (Target == ValueKind::SoftObjectReference) {
         return target.TryAssign(AssetId{value.guid}, value.string.View());
     } else if constexpr (Target == ValueKind::AssetId) {
@@ -597,8 +630,9 @@ Result<void> WriteOptionalValue(Optional<T> MemberOwner::* member, const FieldVa
 // enum은 이 필드의 enum ID와 선언된 값(Flags는 선언 값의 OR)만 받는다 — staged 쓰기·복원도 이
 // 검사를 지난다(TypeRegistry를 거치지 않는다).
 template <class Member>
-Result<void> WriteScalarField(Member& target, const FieldValue& value) noexcept {
-    return WriteTargetValue<FieldValueKind<Member>()>(target, value);
+Result<void> WriteScalarField(Member& target, const FieldValue& value,
+                              Allocator* valueAllocator = nullptr) noexcept {
+    return WriteTargetValue<FieldValueKind<Member>()>(target, value, valueAllocator);
 }
 
 // Generated code가 typed member pointer를 전달한다. raw offset/레이아웃 추정은 사용하지 않는다.
@@ -650,9 +684,12 @@ Result<void> ReadGeneratedField(ObjectRegistry& registry, const ObjectAccessCont
 // 할당·반환 없는 Swap으로 게시한다. pin은 살아 있는 객체 쓰기가 할당 전에 쥔 encode
 // 고정이다(staged·struct 적용은 nullptr): 할당 콜백의 재진입 쓰기(ResolveForWrite)를 Busy로 막아
 // 갱신이 덮이지 않게 하고, 게시 또는 실패 직후 풀어 옛 버퍼·실패한 새 버퍼는 고정 밖에서 반환한다.
+// Text(리플렉션 B9l)는 valueAllocator(대상 객체 allocator — 없으면 Unsupported)로 DeepClone한 새
+// 값을 같은 규칙으로 게시한다(옛 노드는 고정 밖에서 반환한다).
 template <class Owner, class MemberOwner, class Member, class Getter>
 Result<void> WriteGeneratedValue(Member MemberOwner::* member, const FieldValue& value,
-                                 Getter&& get, EncodePin* pin = nullptr) noexcept {
+                                 Getter&& get, EncodePin* pin = nullptr,
+                                 Allocator* valueAllocator = nullptr) noexcept {
     static_assert(IsBaseOfV<MemberOwner, Owner>);
     static_assert(FieldValueKind<Member>() != ValueKind::Opaque);
     auto target = get();
@@ -681,6 +718,45 @@ Result<void> WriteGeneratedValue(Member MemberOwner::* member, const FieldValue&
         // 할당/해제 없는 Swap이 commit이다. 이후 old storage 반환 callback의 RequestDestroy는
         // 이미 완료한 성공을 되돌리지 않는다. 호출 측 Borrow는 이 정리까지 물리 수명을 유지한다.
         (target.Value()->*member).Swap(replacement);
+        return Result<void>::Success();
+    } else if constexpr (IsSameV<Member, Text>) {
+        if (!valueAllocator) {
+            return Result<void>::Failure(ErrorCode::Unsupported);
+        }
+
+        Text replacement;
+        // replacement보다 뒤에 선언하므로 모든 경로에서 replacement(옛 값) 반환보다 먼저 고정을
+        // 푼다.
+        auto release = MakeScopeExit([pin]() noexcept {
+            if (pin) {
+                pin->Reset();
+            }
+        });
+        if (value.kind != ValueKind::Text) {
+            return Result<void>::Failure(ErrorCode::TypeMismatch);
+        }
+
+        if (!value.present) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        auto copied = value.text.DeepClone(*valueAllocator);
+        if (!copied) {
+            return Result<void>::Failure(copied.Error());
+        }
+
+        replacement = Move(copied.Value());
+        target = get();
+        if (!target) {
+            return Result<void>::Failure(target.Error());
+        }
+
+        // 노드 포인터 교환(할당·반환 없음)이 commit이다. 옛 노드는 replacement가 고정 밖에서
+        // 반환한다.
+        Text& live = target.Value()->*member;
+        Text previous = Move(live);
+        live = Move(replacement);
+        replacement = Move(previous);
         return Result<void>::Success();
     } else if constexpr (SoftReferenceField<Member>::Supported) {
         // staged 쓰기·복원도 같은 null 규칙·경로 상한을 지킨다(등록된 write의 검증을 거치지
@@ -792,14 +868,17 @@ Result<void> WriteGeneratedField(ObjectRegistry& registry, const ObjectAccessCon
 
         return WriteGeneratedValue<Owner>(member, value,
                                           [&]() noexcept { return borrowed.Value().Get(); });
-    } else if constexpr (IsSameV<Member, String> || SoftReferenceField<Member>::Supported) {
+    } else if constexpr (IsSameV<Member, String> || SoftReferenceField<Member>::Supported ||
+                         IsSameV<Member, Text>) {
+        // Text(리플렉션 B9l)는 이 Registry의 객체 allocator로 새 노드를 만든다.
         auto pin = registry.PinForEncode(access, handle);
         if (!pin) {
             return Result<void>::Failure(pin.Error());
         }
 
         return WriteGeneratedValue<Owner>(
-            member, value, [&]() noexcept { return borrowed.Value().Get(); }, &pin.Value());
+            member, value, [&]() noexcept { return borrowed.Value().Get(); }, &pin.Value(),
+            &registry.ObjectAllocator());
     } else {
         return WriteGeneratedValue<Owner>(member, value,
                                           [&]() noexcept { return borrowed.Value().Get(); });
@@ -916,8 +995,10 @@ Result<void> WriteGeneratedStagedField(ConstructionContext& construction, Object
         return WriteGeneratedValue<Owner>(
             member, value, [&]() noexcept { return construction.GetForWrite<Owner>(handle); });
     } else {
+        // Text(리플렉션 B9l)는 트랜잭션 Registry의 객체 allocator로 새 노드를 만든다.
         return WriteGeneratedValue<Owner>(
-            member, value, [&]() noexcept { return construction.GetForWrite<Owner>(handle); });
+            member, value, [&]() noexcept { return construction.GetForWrite<Owner>(handle); },
+            nullptr, &construction.ObjectAllocator());
     }
 }
 

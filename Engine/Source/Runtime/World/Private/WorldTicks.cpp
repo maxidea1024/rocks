@@ -1,9 +1,16 @@
+#include <Core/Diagnostics/Log.h>
+#include <Core/Diagnostics/LogContext.h>
+#include <Core/Text/StringBuilder.h>
 #include <Platform/Clock.h>
 #include <World/World.h>
+#include <World/WorldLog.h>
 
 namespace rocks {
 
 namespace {
+
+// Tick 순환 경고에 싣는 Actor 표시("타입#slot")의 최대 byte 수다. 넘치면 잘린다.
+constexpr usize MaxTickActorLabelBytes = 128;
 
 // hook별 실행 단계다. OnTick은 설정한 단계, OnFixedTick은 Physics, OnLateTick은 LateUpdate다.
 TickPhase HookPhase(uint8 hook, const TickSettings& settings) noexcept {
@@ -131,6 +138,48 @@ void World::RegisterComponentTicks(ObjectHandle component) noexcept {
 }
 
 // --- 프레임 ---
+
+Result<void> World::AddActorTickPrerequisite(ObjectHandle dependent,
+                                             ObjectHandle prerequisite) noexcept {
+    const ActorRecord* after = FindActorRecord(dependent);
+    const ActorRecord* before = FindActorRecord(prerequisite);
+    if (after == nullptr || before == nullptr) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    const TickHandle afterTick = after->ticks[detail::TickHookUpdate];
+    const TickHandle beforeTick = before->ticks[detail::TickHookUpdate];
+    if (dependent == prerequisite || afterTick.IsNull() || beforeTick.IsNull()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto added = ticks_.AddPrerequisite(afterTick, beforeTick);
+    if (!added && added.Error() == ErrorCode::CycleDetected) {
+        // 이름이 있는 곳이 이 경계다. Actor에는 이름이 없어 "타입#slot"으로 알린다.
+        auto describe = [this](ObjectHandle actor, FixedStringBuilder& out) noexcept {
+            auto named = With<Actor>(actor, [&](Actor& value) noexcept {
+                const TypeLease type = value.GetType();
+                (void)out.TryAppendFormat("{}#{}", type.Name(), actor.slot);
+            });
+            if (!named) {
+                (void)out.TryAppendFormat("Actor#{}", actor.slot);
+            }
+        };
+
+        char beforeStorage[MaxTickActorLabelBytes];
+        char afterStorage[MaxTickActorLabelBytes];
+        FixedStringBuilder beforeLabel{Span<char>(beforeStorage)};
+        FixedStringBuilder afterLabel{Span<char>(afterStorage)};
+        describe(prerequisite, beforeLabel);
+        describe(dependent, afterLabel);
+        LogContextScope scope("World", Name());
+        Log::Warning(LogWorldTick,
+                     "Rejected tick prerequisite {Before} -> {After}: would create a cycle",
+                     beforeLabel.View(), afterLabel.View());
+    }
+
+    return added;
+}
 
 void World::ExecuteTick(const TickTarget& target, const TickContext& context) noexcept {
     if (target.kind == detail::TickKindActor) {

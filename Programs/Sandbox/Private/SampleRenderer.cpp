@@ -1,5 +1,8 @@
 #include "SampleRenderer.h"
 
+#include <Core/Diagnostics/Log.h>
+#include <Graphics/GraphicsLog.h>
+
 #include <Base/Compiler.h>
 
 namespace sandbox::sample {
@@ -46,28 +49,38 @@ float4 PSMain(VSOutput input) : SV_Target {
 }
 )";
 
-constexpr char VertexGlsl[] = R"(#version 450 core
-layout(location = 0) in vec3 aPosition;
-layout(location = 1) in vec2 aUv;
-layout(location = 2) in vec4 aColor;
-uniform mat4 uTransform;
-uniform vec4 uColor;
-layout(location = 0) out vec2 vUv;
-layout(location = 1) out vec4 vColor;
+// OpenGL ES 3.2 원문(GLSL ES 3.20)이다. SH2 전 런타임 경로이지만 쿠킹된 GLES31_PC 출력과 같은
+// 모양으로 쓴다(ShaderSystem 7.2절 4항): 정점 입력은 ATTRIBUTEn location, 단계 사이 변수는
+// TEXCOORDn location, 그리기별 상수는 루트 상수 에뮬레이션 배열 vu_h(ObjectConstants의 vec4 5개),
+// 텍스처는 combined sampler ps0(유닛 0). 행렬은 행 우선 byte를 그대로 받아 mat4(열 우선)로 읽으므로
+// Mᵀ * v = v·M이다(HLSL mul(v, transform)과 같다, 7.2절 6항).
+constexpr char VertexGlsl[] = R"(#version 320 es
+precision highp float;
+precision highp int;
+uniform highp vec4 vu_h[5];
+#define transform mat4(vu_h[0], vu_h[1], vu_h[2], vu_h[3])
+#define color vu_h[4]
+layout(location = 0) in vec3 in_var_ATTRIBUTE0;
+layout(location = 1) in vec2 in_var_ATTRIBUTE1;
+layout(location = 2) in vec4 in_var_ATTRIBUTE2;
+layout(location = 0) out vec2 out_var_TEXCOORD0;
+layout(location = 1) out vec4 out_var_TEXCOORD1;
 void main() {
-    gl_Position = vec4(aPosition, 1.0) * uTransform;
-    vUv = aUv;
-    vColor = aColor * uColor;
+    gl_Position = transform * vec4(in_var_ATTRIBUTE0, 1.0);
+    out_var_TEXCOORD0 = in_var_ATTRIBUTE1;
+    out_var_TEXCOORD1 = in_var_ATTRIBUTE2 * color;
 }
 )";
 
-constexpr char PixelGlsl[] = R"(#version 450 core
-layout(location = 0) in vec2 vUv;
-layout(location = 1) in vec4 vColor;
-layout(binding = 0) uniform sampler2D uTexture;
-layout(location = 0) out vec4 oColor;
+constexpr char PixelGlsl[] = R"(#version 320 es
+precision highp float;
+precision highp int;
+layout(binding = 0) uniform highp sampler2D ps0;
+layout(location = 0) in vec2 in_var_TEXCOORD0;
+layout(location = 1) in vec4 in_var_TEXCOORD1;
+layout(location = 0) out vec4 out_var_SV_Target0;
 void main() {
-    oColor = texture(uTexture, vUv) * vColor;
+    out_var_SV_Target0 = texture(ps0, in_var_TEXCOORD0) * in_var_TEXCOORD1;
 }
 )";
 
@@ -112,7 +125,8 @@ Renderer::~Renderer() {
     Shutdown();
 }
 
-Result<void> Renderer::Initialize(graphics::Device& device, graphics::Format colorFormat) noexcept {
+Result<void> Renderer::Initialize(graphics::Device& device,
+                                  graphics::PixelFormat colorFormat) noexcept {
     if (device_ != nullptr) {
         return Result<void>::Failure(ErrorCode::AlreadyExists);
     }
@@ -127,16 +141,28 @@ Result<void> Renderer::Initialize(graphics::Device& device, graphics::Format col
     pipeline.vertex = {BuiltinShaderHlsl(), BuiltinVertexGlsl()};
     pipeline.pixel = {BuiltinShaderHlsl(), BuiltinPixelGlsl()};
     pipeline.layout = {attributes, streams};
-    pipeline.colorFormat = colorFormat;
-    pipeline.alphaBlend = true;
-    pipeline.cullMode = graphics::CullMode::Back;
+    pipeline.drawConstantBytes = sizeof(ObjectConstants);
+    pipeline.colorFormats[0] = colorFormat;
+    pipeline.blend[0] = graphics::AlphaBlend();
+    pipeline.raster.cullMode = graphics::CullMode::Back;
+    // 파이프라인(셰이더 컴파일 포함)의 실패를 결정하는 곳이 여기다. 장치는 원인을 LastError에만
+    // 남긴다(셰이더 컴파일 실패면 "Shader <entry> (<target>) failed to compile ...").
+    const auto logPipelineFailure = [&device](const char* variant, ErrorCode error) noexcept {
+        Log::Error(graphics::LogShader,
+                   "Sample renderer {Variant} pipeline could not be built on {Backend}: {Error}: "
+                   "{Diagnostics}",
+                   variant, graphics::BackendName(device.Info().backend), ErrorCodeName(error),
+                   device.LastError().LeftBytesAtCodePoint(graphics::MaxShaderDiagnosticLogBytes));
+    };
     auto createdPipeline = device.CreatePipeline(pipeline);
     if (!createdPipeline) {
+        logPipelineFailure("back-face culling", createdPipeline.Error());
         return Result<void>::Failure(createdPipeline.Error());
     }
-    pipeline.cullMode = graphics::CullMode::Front;
+    pipeline.raster.cullMode = graphics::CullMode::Front;
     auto reversedPipeline = device.CreatePipeline(pipeline);
     if (!reversedPipeline) {
+        logPipelineFailure("front-face culling", reversedPipeline.Error());
         device.Retire(createdPipeline.Value());
         return Result<void>::Failure(reversedPipeline.Error());
     }
@@ -202,9 +228,9 @@ void Renderer::Draw(graphics::CommandContext& context, const RenderView& view,
         }
 
         // 행 벡터 규약(UE LocalToWorld * WorldToClip): 월드 변환 먼저, view·투영 나중. 행 우선
-        // 저장 그대로 올리고 셰이더가 mul(v, transform)으로 쓴다(DrawConstants).
+        // 저장 그대로 올리고 셰이더가 mul(v, transform)으로 쓴다(ObjectConstants).
         const Mat4 clip = item.world * view.viewProjection;
-        graphics::DrawConstants constants;
+        ObjectConstants constants;
         for (uint32 index = 0; index < 16; ++index) {
             constants.transform[index] = clip.m[index];
         }
@@ -212,7 +238,9 @@ void Renderer::Draw(graphics::CommandContext& context, const RenderView& view,
         constants.color[1] = item.color.g;
         constants.color[2] = item.color.b;
         constants.color[3] = item.color.a;
-        context.SetConstants(constants);
+        // 크기는 파이프라인 선언과 같으므로 실패하지 않는다.
+        auto set = context.SetDrawConstants(graphics::DrawConstantBytes(constants));
+        (void)set;
         context.SetTexture(item.texture);
         const bool triangle = item.mesh == MeshKind::Triangle;
         const graphics::VertexBufferBinding binding{triangle ? triangle_ : quad_, 0};

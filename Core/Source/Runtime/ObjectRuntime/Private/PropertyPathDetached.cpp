@@ -2,6 +2,7 @@
 
 #include <Object/ConstructionContext.h>
 #include <Object/ObjectBatchPublish.h>
+#include <Object/ValueCopy.h>
 #include <Platform/Fatal.h>
 
 // 분리된 값과 경로 연산 Detach·Attach(리플렉션 B9i3c0 — Object/DetachedPath.h)의 구현이다: 상자의
@@ -29,11 +30,20 @@ void DetachedValue::Reset() noexcept {
     enumeration_ = nullptr;
     keyEnumeration_ = nullptr;
     target_ = StructView{};
+    position_ = 0;
     // 값(옛 값일 수 있다)을 먼저 비운 상자 밖에서 소멸·반환하고 lease를 마지막에 놓는다(소멸 함수의
     // 코드 수명을 lease가 지킨다).
     ops->destroy(storage);
     (void)allocator_->Deallocate(storage);
     lease_.Reset();
+}
+
+Result<void> DetachedValue::ValidateTree() const noexcept {
+    if (!storage_ || !ops_->validateTree) {
+        return Result<void>::Success();
+    }
+
+    return detail::StructValidationResult(ops_->validateTree(storage_));
 }
 
 void DetachedValue::ResetToDefault() noexcept {
@@ -68,6 +78,11 @@ Result<void> PreparedAttach::Publish() noexcept {
     if (kind_ == PathTarget::Kind::Staged) {
         if (auto open = transaction_->CheckOpen(); !open) {
             return open;
+        }
+
+        // staged 쓰기와 같은 판정이다(Required 검사 중 표시 동안 Busy — 상태를 고정하지 않는다).
+        if (auto writable = transaction_->CheckStagedWrite(); !writable) {
+            return writable;
         }
     }
 
@@ -154,6 +169,9 @@ Result<void> PathCursor::DetachValue(const RuntimeValueOps& ops, const void* val
     box.enumeration_ = frame.enumeration;
     box.keyEnumeration_ = frame.keyEnumeration;
     box.target_ = frame.target;
+    // 원래 자리의 위치 깊이다(시작 위치가 struct 값이면 + 1, 상자면 그 상자의 깊이를 이어 받는다).
+    box.position_ = static_cast<uint32>(current_) + (root_ == PathTarget::Kind::Struct ? 1u : 0u) +
+                    (root_ == PathTarget::Kind::Detached ? rootBox_->position_ : 0u);
     return Result<void>::Success();
 }
 
@@ -194,10 +212,11 @@ Result<void> PathDetach(ObjectRegistry& registry, const ObjectAccessContext& acc
 
 Result<void> PathPrepareAttach(ObjectRegistry& registry, const ObjectAccessContext& access,
                                const PathTarget& target, PropertyPath path, DetachedValue& box,
-                               PreparedAttach& out, PropertyPathFailure* failure) noexcept {
+                               PreparedAttach& out, PropertyPathFailure* failure,
+                               bool validateHooks) noexcept {
     detail::PathCursor cursor = detail::PathRunner::Make(
         registry, access, target, detail::PathOperation::Attach, nullptr, nullptr, failure);
-    detail::PathRunner::BindBox(cursor, box, &out);
+    detail::PathRunner::BindBox(cursor, box, &out, validateHooks);
     return detail::PathRunner::Run(cursor, path);
 }
 

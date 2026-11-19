@@ -85,10 +85,12 @@ constexpr ExpectedRow Expected[] = {{ValueKind::Opaque, "00000000000000"},
                                     {ValueKind::Optional, "11000000000010"},
                                     {ValueKind::Map, "11000000000010"},
                                     {ValueKind::Set, "11000000000010"},
-                                    {ValueKind::StaticArray, "11000000000010"}};
+                                    {ValueKind::StaticArray, "11000000000010"},
+                                    {ValueKind::InstancedStruct, "11110100001000"},
+                                    {ValueKind::Text, "11110100000001"}};
 
 static_assert(sizeof(Expected) / sizeof(Expected[0]) == ValueKindCount);
-static_assert(ValueKindCount == 28);
+static_assert(ValueKindCount == 30);
 static_assert(ValueKindCanBeMapKey(ValueKind::Bool) && !ValueKindCanBeMapKey(ValueKind::Float32));
 
 usize CellCount(const char* cells) noexcept {
@@ -233,7 +235,8 @@ TEST(ValueKindProperties_OutOfRangeAggregateAndTarget) {
     for (const ExpectedRow& row : Expected) {
         const bool aggregate = row.kind == ValueKind::Struct || row.kind == ValueKind::Array ||
                                row.kind == ValueKind::Optional || row.kind == ValueKind::Map ||
-                               row.kind == ValueKind::Set || row.kind == ValueKind::StaticArray;
+                               row.kind == ValueKind::Set || row.kind == ValueKind::StaticArray ||
+                               row.kind == ValueKind::InstancedStruct;
         CHECK(ValueKindIsAggregate(row.kind) == aggregate);
     }
 
@@ -386,6 +389,30 @@ TEST(ValueKindProperties_TypeRegistryFollowsTable) {
         CHECK(RegistersAsClassField(types, fixed, true) ==
               (count >= 1 && count <= MaxStaticArrayElements));
     }
+
+    // InstancedStruct의 Base(value.type ≠ 0 — InstancedStruct<Base>, 리플렉션 B9k)는 등록된 담을 수
+    // 있는 struct여야 한다: 미등록 Base는 자리와 무관하게 거부한다(NotFound).
+    FieldSchema instanced;
+    instanced.id = Guid{0x564b46, 9};
+    instanced.name = Span<const char>("row", 3);
+    instanced.value = ValueType{ValueKind::InstancedStruct, {}};
+    CHECK(RegistersAsClassField(types, instanced, true));
+    CHECK(RegistersAsStructMember(types, instanced));
+    instanced.value.type = TypeId{0x564b53, 1};
+    CHECK(!RegistersAsClassField(types, instanced, true));
+    CHECK(!RegistersAsStructMember(types, instanced));
+    FieldSchema instancedElements;
+    instancedElements.id = Guid{0x564b46, 10};
+    instancedElements.name = Span<const char>("rows", 4);
+    instancedElements.value = ValueType{ValueKind::Array, {}};
+    instancedElements.element = ValueType{ValueKind::InstancedStruct, TypeId{0x564b53, 1}};
+    instancedElements.maxElements = DefaultMaxElements;
+    CHECK(!RegistersAsStructMember(types, instancedElements));
+    instancedElements.element.type = TypeId{};
+    CHECK(RegistersAsStructMember(types, instancedElements));
+    // Required는 InstancedStruct 자리(단일·원소)에 쓸 수 없다(성질 표 AcceptsRequired ×).
+    instancedElements.flags = static_cast<uint32>(FieldFlags::Required);
+    CHECK(!RegistersAsStructMember(types, instancedElements));
 
     CHECK(types.Shutdown());
 }

@@ -1,5 +1,6 @@
 #include <TraceAnalysis/TraceReport.h>
 
+#include <Core/Diagnostics/LogRecord.h>
 #include <Core/Memory/SystemAllocator.h>
 
 namespace rocks {
@@ -463,6 +464,77 @@ void WriteGpu(JsonWriter& json, const TraceModel& model, Allocator& scratch, cha
     json.Close(']');
 }
 
+// 로그 요약이다: 레벨별 수와 Warning 이상 기록(순서 번호 순). 로그가 없으면 키를 쓰지 않는다.
+void WriteLogs(JsonWriter& json, const TraceModel& model) noexcept {
+    constexpr usize LevelCount = LogLevelCount;
+    constexpr uint8 WarningLevel = static_cast<uint8>(LogLevel::Warning);
+    if (model.Logs().Size() == 0) {
+        return;
+    }
+
+    const uint64 frequency = model.Decoder().Header().tickFrequency;
+
+    uint64 counts[LevelCount]{};
+    for (const TraceModelLog& log : model.Logs()) {
+        if (log.level < LevelCount) {
+            ++counts[log.level];
+        }
+    }
+
+    json.Key("logs");
+    json.Open('{');
+    json.KeyUnsigned("records", model.Logs().Size());
+    json.Key("levels");
+    json.Open('{');
+    for (usize index = 0; index < LevelCount; ++index) {
+        json.KeyUnsigned(LogLevelName(static_cast<LogLevel>(index)), counts[index]);
+    }
+
+    json.Close('}');
+    json.Key("warnings");
+    json.Open('[');
+    for (const TraceModelLog& log : model.Logs()) {
+        if (log.level < WarningLevel || log.level >= LevelCount) {
+            continue;
+        }
+
+        json.Element();
+        json.Open('{');
+        json.KeyUnsigned("order", log.order);
+        json.KeyUnsigned("ns", TraceTicksToNanoseconds(log.tick, frequency));
+        json.KeyUnsigned("thread", log.thread);
+        json.KeyUnsigned("frame", log.frame);
+        json.KeyString("level", LogLevelName(static_cast<LogLevel>(log.level)));
+        json.KeyString("category", model.LogCategoryOf(log));
+        json.KeyString("message", log.message);
+        json.KeyBool("truncated", log.truncated);
+        json.KeyBool("templateTruncated", log.templateTruncated);
+        json.Close('}');
+    }
+
+    json.Close(']');
+    json.Close('}');
+}
+
+void WriteCapture(JsonWriter& json, const TraceModel& model) noexcept {
+    const TraceModelCaptureStats& stats = model.CaptureStats();
+    const uint64 frequency = model.Decoder().Header().tickFrequency;
+    json.Key("capture");
+    json.Open('{');
+    json.KeyUnsigned("samples", stats.samples);
+    json.KeyUnsigned("poolBytesPeak", stats.poolBytesPeak);
+    json.KeyUnsigned("poolBytesLimit", stats.poolBytesLimit);
+    json.KeyUnsigned("definitionStoreBytes", stats.definitionStoreBytes);
+    json.KeyUnsigned("lostRecords", stats.lostRecords);
+    json.KeyUnsigned("definitionRecordsDropped", stats.definitionRecordsDropped);
+    json.KeyUnsigned("recentDroppedBytes", stats.recentDroppedBytes);
+    json.KeyUnsigned("outputBytes", stats.lastOutputBytes >= stats.firstOutputBytes
+                                        ? stats.lastOutputBytes - stats.firstOutputBytes
+                                        : 0);
+    json.KeyUnsigned("spanNs", SpanNanoseconds(stats.firstTick, stats.lastTick, frequency));
+    json.Close('}');
+}
+
 } // namespace
 
 Result<void> WriteTraceReportJson(const TraceModel& model, Array<uint8>& out) noexcept {
@@ -502,6 +574,11 @@ Result<void> WriteTraceReportJson(const TraceModel& model, Array<uint8>& out) no
         json.KeyUnsigned("unendedScopes", summary.unendedScopes);
         json.KeyUnsigned("orderGaps", summary.orderGaps);
         json.KeyUnsigned("marks", summary.marks);
+        json.KeyBool("snapshot", summary.snapshot);
+        json.KeyBool("snapshotIncomplete", summary.snapshotIncomplete);
+        json.KeyUnsigned("recentDroppedChunks", summary.recentDroppedChunks);
+        json.KeyUnsigned("recentDroppedBytes", summary.recentDroppedBytes);
+        json.KeyUnsigned("snapshotSkippedChunks", summary.snapshotSkippedChunks);
         json.Key("channelLoss");
         json.Open('[');
         for (const TraceModelChannelLoss& loss : model.ChannelLosses()) {
@@ -541,6 +618,8 @@ Result<void> WriteTraceReportJson(const TraceModel& model, Array<uint8>& out) no
         WriteTasks(json, model, scratch);
         WriteCounters(json, model, scratch);
         WriteGpu(json, model, scratch, buffer, other);
+        WriteLogs(json, model);
+        WriteCapture(json, model);
         json.Close('}');
         json.Raw("\n");
     }

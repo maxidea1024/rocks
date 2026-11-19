@@ -18,7 +18,9 @@ internal static class MetaProbeIdentity
                 "probe::FixedBinding", "probe::SplitBinding", "probe::Bundle", "probe::WorldBundle", "probe::Movable", "probe::Node", "probe::MovableBundle",
                 "probe::Tiny", "probe::Signed", "probe::Short", "probe::Wide", "probe::Huge", "probe::Bits",
                 "probe::Point", "probe::Segment", "probe::Plain", "probe::Derived", "probe::Other", "probe::none",
-                "probe::Target", "probe::Slot" }
+                "probe::Target", "probe::Slot", "probe::Host", "probe::Flags", "probe::Base", "probe::Mid", "probe::Tagged", "probe::AtomicBase",
+                "probe::AtomicLeaf", "probe::A", "probe::B", "probe::RefBase", "probe::Range", "probe::Hidden", "probe::Child",
+                "probe::Range::Inner", "probe::ModeBinding", "probe::KeeperBinding" }
                 .Concat(Enumerable.Range(1, 17).Select(level => $"probe::Chain{level}")))
             {
                 manifest.Register("type", name);
@@ -34,6 +36,7 @@ internal static class MetaProbeIdentity
                 "probe::Zeta::v", "probe::Alpha::x", "probe::Value::alpha",
                 "probe::Vec3Binding::x", "probe::Vec3Binding::y", "probe::Vec3Binding::z", "probe::Vec3Binding::a", "probe::Vec3Binding::count",
                 "probe::Vec3dBinding::x", "probe::Vec3dBinding::y", "probe::Vec3dBinding::z", "probe::PairBinding::a", "probe::PairBinding::b",
+                "probe::KeeperBinding::count_", "probe::KeeperBinding::mode_", "probe::Value::keeper",
                 "probe::OtherBinding::x", "probe::OtherBinding::y", "probe::OtherBinding::z", "probe::RealBinding::inner", "probe::ABinding::inner",
                 "probe::BBinding::inner", "probe::MixedBinding::a", "probe::MixedBinding::b", "probe::HiddenBinding::a",
                 "probe::Value::position", "probe::Value::pair", "probe::FixedBinding::v", "probe::SplitBinding::x", "probe::SplitBinding::y",
@@ -61,7 +64,17 @@ internal static class MetaProbeIdentity
                 "probe::Bundle::byName", "probe::Value::bySlot", "probe::Value::anything", "probe::Value::required", "probe::Value::notClass",
                 "probe::Value::maps", "probe::Value::nestedRefs", "probe::Value::slots", "probe::Slot::material", "probe::Slot::byKey",
                 "probe::Slot::target", "probe::Slot::codes", "probe::Value::watchers", "probe::Value::smalls", "probe::Value::shorts",
-                "probe::Value::grid", "probe::Value::fixed", "probe::Leaf::target" }
+                "probe::Value::grid", "probe::Value::fixed", "probe::Leaf::target",
+                "probe::Value::row", "probe::Value::rows", "probe::Value::table", "probe::Value::host", "probe::Host::row",
+                "probe::Host::count", "probe::Plain::count", "probe::Base::a", "probe::Mid::b", "probe::Tagged::c", "probe::AtomicBase::x",
+                "probe::AtomicLeaf::z", "probe::A::a", "probe::B::b", "probe::Leaf::c", "probe::Leaf::A", "probe::RefBase::target",
+                "probe::Value::mid", "probe::Value::tagged", "probe::Value::atomic", "probe::Value::shape", "probe::Value::shapes",
+                "probe::Host::shape", "probe::RealBinding::a", "probe::Value::title", "probe::Value::lines",
+                "probe::Value::byKey", "probe::Value::titles", "probe::Flags::on", "probe::Flags::wide",
+                "probe::Flags::wider", "probe::Flags::widest", "probe::Flags::plain", "probe::Value::visible", "probe::Value::locked",
+                "probe::Value::flags", "probe::Value::hidden", "probe::Value::flag",
+                "probe::Range::low", "probe::Range::high", "probe::Range::owner", "probe::Range::Inner::n", "probe::Hidden::range", "probe::Child::extra",
+                "probe::Holder::range", "probe::Holder::plain", "probe::Value::range", "probe::Value::child" }
                 .Concat(Enumerable.Range(2, 16).Select(level => $"probe::Chain{level}::inner")))
             {
                 manifest.Register("field", name);
