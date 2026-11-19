@@ -72,6 +72,7 @@ cache hit은 key와 모든 출력 파일이 기록과 일치할 때만 인정한
 - 작업 파일 분리(`--adaptive on`, 기본): 빌드마다 `git status --porcelain`으로 작업 파일을 구해, 그 소스(와 짝 헤더가 작업 파일인 소스)를 유니티 묶음에서 빼 단독 번역 단위로 돌린다. 편집 중인 파일을 고치면 그 파일만 다시 컴파일된다. git이 실패하면 빌드 오류이고 작업 사본이 아니면 분리하지 않는다. CI는 `--adaptive off`다.
 - `compile_commands.json`의 논리 명령은 PCH 바이너리 대신 정의 헤더와 PCH 헤더를 같은 순서로 강제 include하고, 도구 빌드 ID는 PCH·작업 파일 집합과 무관하다(정의 헤더와 PCH 헤더는 내용 해시로 입력에 든다).
 - 공유 PCH(UB5): 규칙 `SharedPchHeader`(public include 기준 철자)가 있는 모듈이 공유 PCH를 제공한다. 모듈 PCH가 없는 모듈은 도달 집합의 제공 모듈 중 다른 제공 모듈을 가장 많이 포함하는 것의 헤더를 자기 인자로 미리 컴파일해 쓴다(변형 key가 같은 모듈끼리 action 하나를 함께 쓴다 — `<out>/Pch/<제공 모듈>/<변형>/`). 강제 include 순서는 [공유 정의 헤더] → [PCH 헤더] → [소비 모듈 추가 정의 헤더]다. 사용 검사(빌드 오류): 제공 모듈 include closure의 포함, PCH closure 헤더를 가리는 앞선 헤더(shadow), 추가 정의가 PCH closure 헤더의 전처리 조건에 쓰임(매크로 본문을 거친 간접 참조 포함). 설치 SDK manifest가 `SharedPchHeader`를 나른다.
+- 엔진의 제공 모듈은 Core(`Core/CoreSharedPch.h`)와 ObjectRuntime(`Object/ObjectSharedPch.h`)이다. 목록에 넣는 기준(소비 번역 단위의 30% 이상이 include, 최근 4주 12회 이하 변경, 소비 모듈 정의를 전처리 조건에 쓰지 않음)과 근거는 [스펙](../../Docs/Design/UnityBuildPch.ko.md) 8.4절에 있다. 소스와 헤더는 PCH 헤더를 include하지 않는다(정책 검사 `pch-header-include`). 공개 헤더 단독 컴파일 검사(`PublicHeaderChecks`)는 유니티와 PCH 없이 돈다.
 - `--timing on`: compile·PCH action에 clang `-ftime-trace`를 붙이고 `<out>/Timing/<타깃>.timing.json`(번역 단위별 시간, 헤더별 누적 파싱 시간·템플릿 인스턴스화 상위 목록)으로 집계한다. 공유 PCH 헤더 구성을 정하는 자료다. 인자가 달라지므로 켜고 끌 때 다시 컴파일된다.
 - `--plan-only on`(build 전용): 메타 생성과 계획까지만 하고 `compile_commands.json`·묶음 파일·정의 헤더를 쓴 뒤 끝낸다(아무것도 컴파일하지 않는다).
 

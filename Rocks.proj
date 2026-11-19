@@ -32,6 +32,8 @@
     <BuildModeArguments Condition="'$(Unity)' != ''">--unity $(Unity)</BuildModeArguments>
     <BuildModeArguments Condition="'$(Pch)' != ''">$(BuildModeArguments) --pch $(Pch)</BuildModeArguments>
     <BuildModeArguments Condition="'$(Adaptive)' != ''">$(BuildModeArguments) --adaptive $(Adaptive)</BuildModeArguments>
+    <!-- -p:Timing=on adds clang -ftime-trace to compile and PCH actions and writes out/<...>/Timing/<target>.timing.json (section 12). -->
+    <BuildModeArguments Condition="'$(Timing)' != ''">$(BuildModeArguments) --timing $(Timing)</BuildModeArguments>
     <CommonArguments>--root &quot;$(RocksRoot).&quot; --configuration $(Configuration) --jobs $(Jobs) $(CompilerArgument) $(OutputArgument) $(PlatformArgument) $(BuildModeArguments)</CommonArguments>
   </PropertyGroup>
   <!-- MSBuild orchestrates the host tools, rules and stages. Rocks.Build decides C++ up-to-dateness on every invocation. -->

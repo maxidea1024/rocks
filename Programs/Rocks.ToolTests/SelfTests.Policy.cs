@@ -625,6 +625,26 @@ internal static partial class SelfTests
                 [(module + "P.cpp", 2, "unity-pragma-balance"), (module + "P.cpp", 3, "unity-pragma-balance"), (module + "P.cpp", 4, "unity-pragma-balance")]),
                 "unbalanced pragmas");
         });
+        // PCH 헤더 직접 include 금지(같은 문서 8.1·10절): 공유 PCH 헤더의 철자와 모듈 PCH 헤더의 상대 경로를 include하면 위반이고,
+        // PCH 헤더끼리의 include, 주석 안의 예시, 문자열 안의 철자, 다른 헤더는 통과한다.
+        suite.Add("Policy.PchHeaderIncludesAreRejected", () =>
+        {
+            using TemporaryDirectory temporary = new();
+            const string module = "Engine/Source/Runtime/Probe/";
+            temporary.Write(module + "Public/Probe/ProbeSharedPch.h", "#pragma once\n#include <Base/BaseSharedPch.h>\n#include <Probe/Probe.h>\n");
+            temporary.Write(module + "Private/ProbePch.h", "#pragma once\n#include <Probe/ProbeSharedPch.h>\n");
+            temporary.Write(module + "Public/Probe/Probe.h", "#pragma once\n// #include <Probe/ProbeSharedPch.h>\n#include <Probe/Other.h>\n");
+            temporary.Write(module + "Private/Good.cpp", "#include <Probe/Probe.h>\nconst char* Text = \"#include <Probe/ProbeSharedPch.h>\";\n");
+            temporary.Write(module + "Private/Bad.cpp", "#include <Probe/Probe.h>\n#include <Probe/ProbeSharedPch.h>\n\n#  include \"ProbePch.h\"\n");
+            temporary.Write(module + "Public/Probe/Bad.h", "#pragma once\n#include \"Base/BaseSharedPch.h\"\n");
+            string[] files = new[] { "Public/Probe/ProbeSharedPch.h", "Private/ProbePch.h", "Public/Probe/Probe.h", "Private/Good.cpp", "Private/Bad.cpp", "Public/Probe/Bad.h" }
+                .Select(name => Path.GetFullPath(temporary.FilePath(module + name))).ToArray();
+            var failures = PolicyChecks.PchHeaderIncludeFailures(temporary.Root, files,
+                new HashSet<string>(StringComparer.Ordinal) { "Probe/ProbeSharedPch.h", "Base/BaseSharedPch.h" },
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase) { files[0], files[1] }).Select(failure => (failure.Path, failure.Line, failure.Rule)).ToHashSet();
+            Verify.That(failures.SetEquals([(module + "Private/Bad.cpp", 2, "pch-header-include"), (module + "Private/Bad.cpp", 4, "pch-header-include"),
+                (module + "Public/Probe/Bad.h", 2, "pch-header-include")]), "PCH header includes: " + string.Join("; ", failures.Order()));
+        });
         // MetaCompiler가 보지 않는 리플렉션 필드 annotation — ROCKS_NATIVE_TYPE 클래스 안, 어느 모듈 Metadata에도 없는 파일 — 은
         // attribute로만 남아 GC가 추적하지도 저장하지도 않으므로 거부하고, 읽을 수 없는(리터럴이 아닌) Metadata 목록은 규칙 파일
         // 위치에 보고한다(Docs/Design/ReflectionFoundations.ko.md 9.1절 B8a).

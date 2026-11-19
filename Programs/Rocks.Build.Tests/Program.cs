@@ -93,6 +93,31 @@ try
         Console.WriteLine("PASS " + name);
     }
 
+    // --group <이름>: 고친 묶음 하나만 돌린다(반복 확인용이다 — 전체 실행은 옵션 없이 한다). 요청과 임시 루트만 쓰는 독립 묶음만 고를
+    // 수 있다. 예: dotnet run --project Programs/Rocks.Build.Tests -- --root . --group pch
+    if (args.Contains("--group"))
+    {
+        string group = args[Array.IndexOf(args, "--group") + 1];
+        switch (group)
+        {
+            case "dependency":
+                await DependencyTests.RunAsync(request, root, Pass);
+                break;
+            case "unity":
+                await UnityTests.RunAsync(request, root, Pass);
+                break;
+            case "pch":
+                await PchTests.RunAsync(request, root, Pass);
+                break;
+            default:
+                throw new ArgumentException($"Unknown test group '{group}'. Groups: dependency, unity, pch.");
+        }
+
+        Console.WriteLine($"Native build regression groups ({group} only): {passed}, failed: 0");
+        allPassed = true;
+        return 0;
+    }
+
     await PlatformSelectionTests.RunAsync(request, root);
     Pass("platform routing rejects unknown and mismatched targets");
 

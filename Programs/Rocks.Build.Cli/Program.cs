@@ -214,6 +214,10 @@ namespace Rocks.Build.Cli
                     {
                         Name = "PublicHeaderChecks",
                         Sources = sources,
+                        // 헤더 하나가 스스로 컴파일되는지 보는 검사이므로 유니티와 PCH 없이 돈다(Docs/Design/UnityBuildPch.ko.md 10절).
+                        // 공유 PCH를 쓰면 PCH에 든 헤더가 빠진 include를 메워 검사가 무력해진다.
+                        Unity = UnityMode.Off,
+                        PchUsage = PchUsage.Off,
                         // 저장소 루트를 include하지 않는다: 검사 TU는 의존 모듈의 public include만으로 헤더를 연다.
                         Dependencies = reached.Where(name => modules.Single(module => module.Name == name).Kind == NativeModuleKind.StaticLibrary).Order(StringComparer.Ordinal).ToArray()
                     });

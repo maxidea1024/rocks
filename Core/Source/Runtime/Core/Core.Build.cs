@@ -9,6 +9,10 @@ public sealed class Core : CoreModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
+    // Shared PCH: modules that reach Core and have no module PCH precompile this header with their own arguments
+    // (Docs/Design/UnityBuildPch.ko.md section 8.4). The header lists widely included, rarely changed Base, PlatformBase and Core headers.
+    protected override string? SharedPchHeader => "Core/CoreSharedPch.h";
+
     protected override string[] RequiredModules => ["PlatformBase", "DeterministicMath"];
 
     // Provides Core/Build/BuildInfo.h (rocks::build::ToolchainFingerprint and ToolBuildId). For every executable that reaches this module the build

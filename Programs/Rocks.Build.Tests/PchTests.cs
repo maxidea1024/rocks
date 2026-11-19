@@ -27,7 +27,30 @@ internal static class PchTests
 
         await SharedPchAsync(request, root);
         pass("shared PCH: provider selection, shared and extra definitions, variants, shadow and extra-definition checks, timing report");
+
+        // NDK가 있으면 clang++(GNU 드라이버) 경로를 같은 fixture로 교차 빌드한다: PCH를 -x c++-header로 만들고 -include-pch로 쓴다(macOS도
+        // 이 경로다). 실행 파일은 호스트에서 돌리지 않는다.
+        NativeToolchain android;
+        try
+        {
+            android = await NativeToolchains.DiscoverAndroidAsync("arm64", AndroidApiLevel);
+        }
+        catch (FileNotFoundException)
+        {
+            pass("PCH with the Android NDK clang++ skipped (NDK not found)");
+            return;
+        }
+
+        NativeBuildRequest cross = request with { Toolchain = android };
+        string crossRoot = Fixture(root, "android pch");
+        await DefinitionsHeaderAsync(cross, crossRoot);
+        await ModulePchAsync(cross, crossRoot);
+        await SharedPchAsync(cross, crossRoot);
+        pass("PCH with the Android NDK clang++ (GNU driver): definitions header, module PCH and shared PCH fixtures cross-built");
     }
+
+    // 교차 빌드 fixture의 Android API 수준이다(엔진의 최소 지원 수준).
+    private const int AndroidApiLevel = 26;
 
     private static string Fixture(string root, string name) => Directory.CreateDirectory(Path.Combine(root, name)).FullName;
 
