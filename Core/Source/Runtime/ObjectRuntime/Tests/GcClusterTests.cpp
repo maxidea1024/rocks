@@ -1501,8 +1501,22 @@ void RunPackageBoundaryValve(uint32 mode) noexcept {
 
             CHECK(Exists(objects, y));
             CHECK(objects.Stats().retiredWithoutDiscard == 0);
+            // 다시 읽은 패키지(새 패키지 객체)는 새 클러스터를 만든다 — 해체는 옛 패키지의
+            // 수명에만 적용된다(GC 설계 13.5절).
+            auto again = objects.NewObject<PackageNode>(access, PackageNodeType);
+            REQUIRE(again);
+            const ObjectHandle a = again.Value().Handle();
+            auto reloaded = objects.NewObject<ClusterNode>(access, ClusterNodeType, a, "n0");
+            REQUIRE(reloaded);
+            reloaded.Value().Reset();
+            CHECK(objects.Stats().clusters == 3);
+            CHECK(objects.Stats().clusterMembers == 14);
+            CollectBy(objects, mode, scheduler);
+            CHECK(objects.Stats().clusters == 3);
+            REQUIRE(objects.Discard(access, a));
             REQUIRE(objects.Discard(access, n));
             REQUIRE(objects.Discard(access, t));
+            again.Value().Reset();
             narrow.Value().Reset();
             target.Value().Reset();
             REQUIRE(objects.Shutdown(access));

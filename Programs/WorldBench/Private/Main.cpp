@@ -13,6 +13,8 @@
 // World 규모 측정 도구다(Docs/Implementation/GcScaleExperiment.ko.md 15절 — 선형 검색 점검).
 // Actor 수 N을 바꿔 연산 하나의 비용이 N과 무관한지 본다.
 // - destroy: Actor 하나의 파괴(DestroyActor와 다음 프레임의 정리)
+// - bypass destroy: World API 밖 파괴(Registry RequestDestroy) 하나와 다음 프레임의 복구·정리
+//   (RepairBypassedObjects — Docs/Design/EngineRuntime.ko.md 7.4절)
 // - frame with GC start: Actor 하나를 파괴한 프레임(그 프레임이 GC cycle을 시작한다)의 Tick
 // - level destroy: Actor가 적은 Level 하나의 파괴(다른 Level의 Actor 수 N과 무관해야 한다)
 // - frame after one spawn: 틱 있는 Actor 하나를 만든 뒤의 프레임(틱 순서 재구성 포함)
@@ -177,6 +179,36 @@ int Measure(uint32 actors, bool ticking) noexcept {
                 }
             }
 
+            // World API 밖 파괴: DestroyBatch개를 Registry에서 바로 파괴 요청하고 한 프레임으로
+            // 복구·정리한다.
+            uint64 bypassBest = NumericLimits<uint64>::Max();
+            for (uint32 round = 0; round < Rounds; ++round) {
+                ObjectHandle victims[DestroyBatch];
+                uint32 count = 0;
+                world.ForEachActor([&](ObjectHandle actor) noexcept {
+                    if (count < DestroyBatch) {
+                        victims[count++] = actor;
+                    }
+                });
+                const uint64 started = platform::MonotonicNanoseconds();
+                for (uint32 index = 0; index < count; ++index) {
+                    if (!world.Objects().RequestDestroy(world.Access(), victims[index])) {
+                        return 24;
+                    }
+                }
+
+                if (!world.Tick(FrameSeconds)) {
+                    return 25;
+                }
+
+                bypassBest = Min(bypassBest, platform::MonotonicNanoseconds() - started);
+                for (uint32 index = 0; index < count; ++index) {
+                    if (!spawn({})) {
+                        return 26;
+                    }
+                }
+            }
+
             // 변화 없는 프레임(비교 기준 — 틱 있는 Actor면 모두 실행한다).
             uint64 idleBest = NumericLimits<uint64>::Max();
             for (uint32 round = 0; round < Rounds; ++round) {
@@ -260,12 +292,14 @@ int Measure(uint32 actors, bool ticking) noexcept {
                 }
             }
 
-            printf("actors %u%s: spawn %.2f us/actor, destroy %.2f us/actor, idle frame %.1f us, "
+            printf("actors %u%s: spawn %.2f us/actor, destroy %.2f us/actor, bypass destroy %.2f "
+                   "us/actor, idle frame %.1f us, "
                    "frame with GC start %.1f us, frame after one spawn %.1f us, small level "
                    "destroy %.1f us\n",
                    actors, ticking ? " (ticking)" : "",
                    Microseconds(spawned - spawnStarted) / actors,
-                   Microseconds(destroyBest) / DestroyBatch, Microseconds(idleBest),
+                   Microseconds(destroyBest) / DestroyBatch,
+                   Microseconds(bypassBest) / DestroyBatch, Microseconds(idleBest),
                    Microseconds(frameBest), Microseconds(spawnFrameBest), Microseconds(levelBest));
             fflush(stdout);
             if (!world.Shutdown()) {
