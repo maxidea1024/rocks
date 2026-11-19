@@ -1383,6 +1383,43 @@ Debug Foundation 전체 2,527개, Debug EngineTests 전체 2,899개, 클러스�
 - 잡을 시험이 없는 대조: `SystemAllocator`가 원장 넣기 실패 때 블록을 OS에 돌려주지 않음 — 플랫폼 할당에는 계수가 없어 관찰할 수 없다. 같은 경로의 `BinnedAllocator` 큰 할당은 상위 allocator의 계수로 본다(AL2).
 - `SystemAllocator`가 거의 모든 시험의 기본 할당자라 전체를 한 번 돌렸다: Debug Foundation 2,550개, Debug EngineTests 2,953개 통과.
 
+#### AL1b: `HashMap`의 0개 비우기 규칙과 원장의 지역성 hash (메인 세션 검토, 2026-11-20)
+
+AL1의 두 한계("0개가 되면 표 전체를 비움", "churn 회수 3.2배")를 한계로 두지 않고 고쳤다(설계 18.6절).
+
+`HashMap::Erase`의 비우기 규칙:
+
+- 전: 원소가 0개가 되면 삭제 칸이 하나뿐이어도 모든 칸을 비웠다(용량에 비례). 후: 삭제 칸이 칸 수의 1/4(`EmptyClearDivisor`) 이상일 때만 비우고, 그 밖에는 그대로 두어 삽입의 정리에 맡긴다. `EraseIf`·`Clear`는 어차피 모든 칸을 보므로 전처럼 비운다. `HashSet`은 `HashMap` 위라 같이 바뀐다. 빈 Map에도 삭제 칸이 남을 수 있다(`DeletedSlotCount()` — 칸 수의 1/4 미만).
+- 진단값을 더했다: `HashMap::LongestProbe()`, `HashSet::SlotCount()`·`DeletedSlotCount()`.
+- 시험(`HashMapEmptyClearTests.cpp` 4개): 1,000개 고점까지 넣고 모두 지운 뒤(이때는 문턱을 넘어 비운다) 넣기·지우기 쌍 1,031번 — 삭제 칸이 쌍마다 하나씩 늘다가 512(2,048칸의 1/4)에서 0이 되고, 그 사이 조회(있는 키, 빈 칸·삭제 칸에서 시작하는 없는 키)·순회·다시 넣기(삭제 칸 재사용)·대량 삽입이 맞다. 삭제 칸이 적을 때는 0개가 돼도 비우지 않고, 빈 Map의 `ShrinkSlack`·`Compact`는 저장소를 돌려주며, 8칸 표의 문턱은 2다. `EraseIf`·`Clear` 뒤에는 삭제 칸이 없다. `HashSet`도 같다.
+
+원장의 지역성 hash(`detail::AddressLedgerHash` — 페이지 번호만 섞고 페이지 안 위치를 더함). 같은 round에서 번갈아 3회, 최솟값(객체당 ns):
+
+| 살아 있는 객체 | hash | 생성+연결 | churn 생성+연결 | churn 회수 | 종료 회수 |
+|---|---|---|---|---|---|
+| 200K | 기본 | 1,555 | 1,467 | 276.6 | 340.6 |
+| 200K | 지역성 | 1,482 | 1,393 | 185.2 | 247.6 |
+| 1M | 기본 | 1,856 | 1,805 | 330.4 | 379.2 |
+| 1M | 지역성 | 1,731 | 1,596 | 213.7 | 277.0 |
+| 1M | platform | 1,412 | 1,359 | 109.8 | 222.8 |
+
+- 1M에서 churn 회수 −35%, 종료 회수 −27%, churn 생성 −12%, 생성 −7%. 플랫폼 대비 생성 1.23배·churn 회수 1.95배·종료 1.24배로 gate A1의 처음 제안(모두 2배)을 채운다(회수는 여유가 거의 없다). 20K와 작은 벤치(쌍 55 ns, 묶음 47–50 ns/op, 8 스레드 5 M쌍/s)는 차이가 없다 — 표가 캐시에 들 때는 hash의 지역성이 할 일이 없다.
+- 창 너비 비교(다른 round — 기계에 부하가 걸려 절대값이 크다, 1M churn 회수 3회 범위): 256칸(채택) 330–333, 512칸 343–350, 1,024칸 427–439, 기본 hash 589–618 ns. 종료 회수도 같은 순서다(403–441, 480–486, 558–576, 706–729 ns).
+- 군집(대가): 최악 탐사 길이(65,536개, 부하율 1/2, 실제 `HashMap`): 64KB 정렬 주소 17칸, 한 페이지를 꽉 채운 256개 1칸, 여러 페이지의 같은 offset 17칸, 이어지는 주소 16 B 간격 1,765 · 32 B 1,416 · 64 B 1,080 · 208 B 217칸. 시험 `CoreAddressLedgerProbeLengthByAddressPattern`이 상한(32·1·32·2,048·2,048·2,048·512)으로 고정한다. 선형 탐사를 흉내 낸 평균(작업 임시 폴더 `al1b/simulate.py`)은 64 B 간격에서 부하율 0.25·0.375·0.5에 1.8·3.6·12칸이고 기본 hash는 1.2–1.5칸이다. 간격이 좁을수록 길다(16 B: 26–89칸).
+
+음성 대조(Debug `Core` 대상 `CoreFoundationTests`, 대조마다 다시 빌드):
+
+| 대조 | 바꾼 것 | 잡은 시험 |
+|---|---|---|
+| H1 | 0개가 되면 무조건 비움(고치기 전 동작) | `CoreHashMapEmptyingKeepsTombstonesBelowThreshold`, `CoreHashMapEmptyWithFewTombstonesIsNotCleared`, `CoreHashSetEmptyingKeepsTombstonesBelowThreshold` |
+| H2 | 0개가 돼도 비우지 않음 | 같은 셋(고점 뒤와 문턱에서 0이어야 한다) |
+| H3 | 문턱에 닿아도 비우지 않음(이상 → 초과) | 같은 셋 |
+| H4 | `LongestProbe`가 제자리 원소를 0으로 셈 | `CoreAddressLedgerProbeLengthByAddressPattern` |
+| G1 | 원장 hash가 페이지 안 위치를 더하지 않음 | 같은 시험(한 페이지의 256개가 한 칸에서 시작해 상한 1을 넘는다) |
+| G2 | 원장 hash가 주소 전체를 섞음(기본 hash) | 같은 시험(꽉 찬 페이지의 탐사가 1을 넘는다) |
+
+- 공용 컨테이너를 바꿨으므로 전체를 한 번 돌렸다(AL2b와 묶어서): Debug Foundation 2,570개, Debug EngineTests 2,976개 통과. 기존 `HashMap`·`HashSet` 시험(Core 대상 `Hash` 67개)도 그대로 통과한다 — 빈 컨테이너에 삭제 칸이 없다고 가정한 시험은 없었다.
+
 ### 25.3 AL2: `BinnedAllocator` 다시 만들기 1 (주소 범위·slab·등급·소유 판정·큰 할당)
 
 같은 클래스 이름으로 다시 만들었다(설계 18.4절). 이 단계는 스레드 캐시 없이 등급 잠금 경로만이다(캐시는 AL3 — 이 경로는 캐시를 얻지 못한 스레드의 경로로 남는다).
@@ -1428,3 +1465,29 @@ Debug Foundation 전체 2,527개, Debug EngineTests 전체 2,899개, 클러스�
 
 - 처음 실행에서 B2는 대조 자체가 빌드되지 않았고(쓰지 않는 상수 경고) B5는 패턴이 소스와 달라 건너뛰어, 둘을 고쳐 다시 돌렸다.
 - 측정은 스레드 캐시(AL3) 뒤에 한다(이 단계의 작은 블록 경로는 등급 잠금 하나를 지난다).
+
+### 25.4 AL2b: 주소 범위의 commit 방식 (메인 세션 검토, 2026-11-20)
+
+AL2의 주소 범위에서 두 가지를 고쳤다(설계 18.4절 개정 10).
+
+- 접근을 열어 둔 예약: `VirtualMemoryRegion::Reserve(bytes, VirtualMemoryAccess::Open)`을 더하고 `BinnedAllocator`가 그 종류로 예약한다. POSIX의 기본 종류(`Guarded`)는 slab마다 `mprotect`로 보호를 바꿔 매핑(VMA)이 쪼개지고 Linux·Android의 매핑 수 한도(`vm.max_map_count` 65530)에 닿는다. `Open`은 UE 5.8과 같이 예약이 읽기·쓰기 매핑 하나(`MAP_NORESERVE`)이고 commit은 보호를 바꾸지 않으며(Apple은 `MADV_FREE_REUSE` 힌트) decommit은 `madvise`만 한다(Android `MADV_DONTNEED`, Apple `MADV_FREE_REUSABLE`). Windows는 두 종류가 같다. `SecretArena`는 guard 페이지 때문에 기본 종류 그대로다(파일을 바꾸지 않았다).
+- commit·decommit 실패가 영역을 닫지 않는다: 전에는 한 번 실패하면 `VirtualMemoryRegion`이 Poisoned가 되어 그 뒤로 새 slab을 얻지 못하고 `Trim`도 메모리를 돌려주지 못했다. 지금은 commit이 실패한 요청만 큰 경로로 가고 다음 요청이 같은 slab 번호를 다시 얻으며, decommit이 실패한 slab은 commit된 채 보관해 다시 쓰고 다음 `Trim`이 다시 푼다. Poisoned는 `Release` 실패에만 남는다. AL2의 "상태를 알 수 없어 다시 쓰지 않는 slab"(Lost)은 없어졌다.
+- 실패 주입을 `VirtualMemoryRegion`의 시험 통로 하나로 모았다(`VirtualMemoryTestAccess::FailCommitOnCall`·`FailDecommitOnCall` — 이 스레드의 n번째 호출을 OS를 부르지 않고 실패시킨다). `BinnedAllocator`의 자체 주입(`FailSlabCommitOnAttempt`·`SetSlabDecommitFault`)은 없앴다 — 실패가 실제 영역을 지나야 "닫히지 않음"을 시험이 본다.
+
+시험:
+
+- `VirtualMemoryTests`: 접근을 열어 둔 예약의 수명(예약 → commit → 쓰기 → 가운데 decommit → 다시 commit → Release, 64 MiB를 예약하고 끝 조각만 commit, 같은 객체를 다른 종류로 다시 예약), commit 실패 뒤 같은 범위의 decommit·재commit과 다른 범위의 commit(두 종류 모두, 인자 검사에서 걸린 호출은 주입 차례를 쓰지 않음), decommit 실패 뒤 내용 유지(`Open`·Windows)와 재commit·재decommit.
+- `CoreBinnedCommitAndDecommitFailuresAreTransient`(AL2의 `…DecommitFaultsKeepOrAbandonTheSlab`을 바꿈): decommit 실패한 slab을 보관해 다시 쓰는 것, slab 둘 가운데 하나만 실패하면 `Trim`이 나머지를 풀고 다음 `Trim`이 실패한 것을 다시 푸는 것, commit 실패한 요청은 큰 경로로 가고 다음 요청이 같은 slab 번호를 얻는 것, 그 뒤의 `Trim`이 보관분을 돌려주는 것. `…ExhaustedRangeAndCommitFailureFallBack`의 commit 실패는 영역 통로로 주입한다.
+
+음성 대조 5종 모두 잡혔다(Debug `Core` 대상, `PlatformVirtualMemory`·`CoreBinned`):
+
+| 대조 | 바꾼 것 | 잡은 시험 |
+|---|---|---|
+| V1 | commit·decommit 실패가 영역을 닫음(고치기 전 계약) | `PlatformVirtualMemoryCommitFailureIsTransient`, `…DecommitFailureKeepsRegionOpen`, `CoreBinnedCommitAndDecommitFailuresAreTransient`, `…ExhaustedRangeAndCommitFailureFallBack` |
+| V2 | decommit이 실패한 slab을 decommit된 것으로 침 | `CoreBinnedCommitAndDecommitFailuresAreTransient` |
+| V3 | commit이 실패한 slab 번호를 건너뜀 | 같은 시험(다음 요청이 같은 slab 번호를 얻어야 한다) |
+| V4 | `Trim`이 decommit 실패에서 멈추고 나머지를 버림 | 같은 시험 |
+| V5 | 주입 차례가 인자 검사에서 걸린 호출도 셈 | `PlatformVirtualMemoryCommitFailureIsTransient` |
+
+- 이 기계(Windows)에서 볼 수 없는 것: POSIX에서 매핑이 쪼개지지 않는다는 것 자체(Windows는 두 예약 종류가 같다). POSIX 쪽 변경(`Posix/VirtualMemory.cpp`, `Android/AndroidPosix.cpp`, 공통 구현, `BinnedAllocator.cpp`, 시험)은 NDK `-fsyntax-only`로 확인했고, macOS는 push의 `[ci]`로 새 종류의 시험(`PlatformVirtualMemoryOpenReservationLifecycle` — 접근을 열어 둔 예약에서 쓰기)이 돈다.
+- 검증(AL1b와 묶어 한 번): Debug Foundation 2,570개, Debug EngineTests 2,976개 통과. Fatal 대조 프로그램(`allocator-binned-invalid-0..6`) 문구 그대로. format·policy 통과.
