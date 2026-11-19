@@ -10,6 +10,7 @@
 // Constant·Linear·Cubic 구간, 가중 접선이 비가중과 같은 곡선이 되는 사례, PlainCurve 경계 차이,
 // NaN·±Inf, double 재배치로 가는 큰 순환 시간.
 using namespace rocks;
+namespace curve_evaluate_tests_file {
 
 namespace {
 
@@ -216,3 +217,4 @@ TEST(CurveEvaluate_AutoTangentVectors) {
     user.AutoSetTangents();
     CHECK(user.Keys()[1].arriveTangent == 0.0f && user.Keys()[1].leaveTangent == 0.0f);
 }
+} // namespace curve_evaluate_tests_file

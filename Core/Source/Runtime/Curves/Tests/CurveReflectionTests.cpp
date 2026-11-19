@@ -23,6 +23,8 @@
 // 쓰기에서 어기는 값을 거부하고 값이 그대로인지, PlainCurveInterp에 없는 Cubic의 거부, 저작 키 wire
 // 크기 실측(9.2절 — D8).
 using namespace rocks;
+namespace curve_reflection_tests_file {
+
 using namespace rocks::reflection_text;
 using curves_fixture::CurveHolder;
 
@@ -528,3 +530,4 @@ TEST(CurveReflection_AssignmentsMakeHandleTableStale) {
         CHECK(table.IsStale());
     });
 }
+} // namespace curve_reflection_tests_file
