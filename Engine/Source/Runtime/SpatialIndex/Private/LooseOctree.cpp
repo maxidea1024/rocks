@@ -105,11 +105,6 @@ Result<LooseOctree> LooseOctree::TryCreate(const LooseOctreeConfig& config,
     return Result<LooseOctree>::Success(LooseOctree(config, allocator, counting));
 }
 
-uint64 NextMutationEpoch() noexcept {
-    static uint64 counter = 0;
-    return platform::AtomicFetchAdd<platform::MemoryOrder::Relaxed>(&counter, uint64{1}) + 1;
-}
-
 LooseOctree::LooseOctree(const LooseOctreeConfig& config, Allocator& backing,
                          detail::CountingAllocator* counting) noexcept
     : config_(config), backing_(&backing), counting_(counting),
