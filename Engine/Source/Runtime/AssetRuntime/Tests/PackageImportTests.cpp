@@ -1,10 +1,14 @@
 #include "PackageEditing.h"
 
+#include <Base/Checked.h>
+#include <Platform/Memory.h>
+
 // import 표 시험이다(Docs/Design/AssetSystem.ko.md 5.2절 ObjectImports, 5.7절 13·14):
 // - 다른 패키지의 깊은 하위 객체만 참조하면 그 Outer는 outer 전용 import(slot 없음)가 되고, 쿠킹·
 //   에디터 모두 묶음 안·resolver로 로드되며, 중간 객체 타입이 다르면 TypeMismatch다.
 // - 다른 에셋의 outer 전용 import는 그래프가 받는다(쓰이지 않는 외부 번호) — 그 에셋이 Hard·
-//   EditorOnly 의존이 아니면 Prepare가 ObjectImports 손상으로 거부한다.
+//   EditorOnly 의존이 아니면 Prepare가 ObjectImports 손상, Hard 의존을 더하면 디코딩 결과에 없는
+//   남는 항목이라 Dependencies 손상으로 거부한다.
 // - Hard 의존 expectedType: reader는 0을, Prepare는 대표 에셋 import 타입과 다름을, 로드는 대상
 //   대표 에셋의 실제 타입이 파생이 아님(TypeMismatch)·대표 에셋 없음(MissingDependency)을 거부한다.
 // - 잘못된 import 이름은 로드(Prepare)가 CorruptPackage로 거부한다(진단 None이 아니다).
@@ -314,7 +318,8 @@ TEST(AssetPackage_OuterOnlyImportCrossChecks) {
     (void)PrepareFailure(env, WithImports(allocator, a, withOther, withHard), PackageKind::Cooked,
                          prepared);
     // 디코딩 결과에 C가 없으므로 Hard 의존을 더하면 Dependencies 대조가 남는 항목으로 거부한다.
-    CHECK(!prepared);
+    CHECK(CorruptOnPrepare(env, WithImports(allocator, a, withOther, withHard), PackageKind::Cooked,
+                           PackageSectionKind::Dependencies));
     // 외부 번호 수를 맞추지 않으면 그래프가 먼저 거부한다.
     {
         EditablePackage edit(allocator);
@@ -389,18 +394,80 @@ TEST(AssetPackage_InvalidImportNameIsCorruptOnLoad) {
     }
 }
 
+namespace {
+
+// 규모 시험의 Registry allocator다. SystemAllocator는 살아 있는 할당의 선형 원장이라(해제 O(n))
+// 객체 13만 개를 가진 Registry의 종료 회수가 제곱 시간이 된다(처음 구현은 시험 시간의 대부분이
+// Registry 종료였다). 이 allocator는 플랫폼 정렬 할당에 바로 맡기고 살아 있는 수만 센다 — 끝에서
+// 0인지 확인해 누수 판정은 같다(외부 주소·중복 해제 검증은 하지 않는다).
+class ScaleAllocator final : public Allocator {
+public:
+    ~ScaleAllocator() noexcept override {
+        CHECK(live_ == 0);
+    }
+
+    Result<void*> Allocate(usize bytes, usize alignment, uint32 = 0) noexcept override {
+        if (!IsPowerOfTwo(alignment)) {
+            return Result<void*>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (bytes == 0) {
+            return Result<void*>::Success(nullptr);
+        }
+
+        void* address = platform::AlignedAllocate(bytes, alignment);
+        if (address == nullptr) {
+            return Result<void*>::Failure(ErrorCode::OutOfMemory);
+        }
+
+        ++live_;
+        return Result<void*>::Success(address);
+    }
+
+    Result<void> Deallocate(void* address) noexcept override {
+        if (address != nullptr) {
+            platform::AlignedFree(address);
+            --live_;
+        }
+
+        return Result<void>::Success();
+    }
+
+private:
+    uint64 live_ = 0;
+};
+
+// 규모 시험의 패키지 정책 Registry다(AssetEnv와 같은 설정, allocator만 ScaleAllocator).
+UniquePtr<ObjectRegistry> MakeScaleRegistry(AssetEnv& env, Allocator& objects,
+                                            uint64 instance) noexcept {
+    RegistryOptions options;
+    options.names = &env.names;
+    options.policy.packageNativeType = NativeTypeKey<Package>();
+    options.policy.rejectWorldOnly = true;
+    auto made = UniquePtr<ObjectRegistry>::TryMake(env.allocator, objects, env.types,
+                                                   ContextId{0x4153534554ull, instance}, options);
+    return made ? Move(made.Value()) : UniquePtr<ObjectRegistry>();
+}
+
+} // namespace
+
 // 규모(AS 5.7절 13): B에 깊이 2040 사슬(이름 "a", 경로 4079 byte)과 맨 아래 잎을 두고 A가 잎만
 // 가리킨다. import = 사슬 2040(outer 전용) + 잎 63496 = 65536(상한)이고 쓰기·읽기·Prepare·
 // Instantiate(resolver — B는 export 상한을 넘어 패키지로 쓰지 않고 target에 같은 모양으로 만든다)를
 // 지나 모든 잎을 가리킨다. 잎 하나를 더 가리키면 import 65537개라 쓰기 CapacityExceeded다. 단언은
 // 결과(항목 수·경로·대상)로 한다 — 처음 구현은 import마다 경로를 처음부터 다시 만들어 이 규모에서
-// 수억 단계였다.
+// 수억 단계였다. 두 Registry는 ScaleAllocator를 쓴다(위 설명).
 TEST(AssetPackage_ImportScale) {
     constexpr usize Depth = 2040;
     constexpr usize Leaves = PackageMaxObjectImports - Depth;
     AssetEnv env;
     REQUIRE(env.Ready());
     Allocator& allocator = env.allocator;
+    // Registry가 RootRef·handle보다 오래 살도록 먼저 선언한다.
+    ScaleAllocator objects;
+    UniquePtr<ObjectRegistry> sourceRegistry = MakeScaleRegistry(env, objects, 21);
+    UniquePtr<ObjectRegistry> targetRegistry = MakeScaleRegistry(env, objects, 22);
+    REQUIRE(sourceRegistry.Get() != nullptr && targetRegistry.Get() != nullptr);
 
     // registry에 B(대표 에셋 + 사슬 + 잎 count개)를 만들고 잎 handle을 돌려준다.
     auto makeB = [&](ObjectRegistry& registry, RootRef<Package>& package,
@@ -441,7 +508,7 @@ TEST(AssetPackage_ImportScale) {
         return true;
     };
 
-    ObjectRegistry& source = *env.source;
+    ObjectRegistry& source = *sourceRegistry;
     RootRef<Package> sourceB;
     Array<ObjectHandle> sourceLeaves(allocator);
     REQUIRE(makeB(source, sourceB, sourceLeaves, Leaves + 1));
@@ -471,7 +538,7 @@ TEST(AssetPackage_ImportScale) {
     CHECK(imports[Depth].outerImportIndex == Depth && imports[Depth].name == StringView("Laaaa"));
     CHECK(imports[PackageMaxObjectImports - 1].outerImportIndex == Depth);
 
-    ObjectRegistry& target = *env.target;
+    ObjectRegistry& target = *targetRegistry;
     RootRef<Package> targetB;
     Array<ObjectHandle> targetLeaves(allocator);
     REQUIRE(makeB(target, targetB, targetLeaves, Leaves));

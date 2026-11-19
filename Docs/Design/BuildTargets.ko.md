@@ -370,7 +370,7 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 | BD25 | 모듈 A는 들어갈 수 있는 (타깃 종류, 구성) 집합이 자기 집합을 포함하는 모듈에만 의존한다(3.3절 표). 위반은 규칙 로드 때 오류다 | 권장안 |
 | BD26 | `ROCKS_WITH_EDITOR_DATA=0` 빌드는 에디터 패키지(쿠킹하지 않은 패키지)를 저장하지 않는다(Unsupported). 건너뛴 `EditorOnly` 값을 잃지 않기 위해서다 | 권장안 |
 | BD27 | 빌드가 모듈마다 `ROCKS_<MODULE>_API`를 정의한다. `Monolithic`이면 빈 값, `Modular`이면 자기 모듈은 export·다른 모듈은 import다(UE `<MODULE>_API`). 가시성·rpath 옵션은 UE와 같다. 규칙 파일은 이 매크로를 정의할 수 없고, 다른 모듈의 API 매크로를 붙이면 정책 오류다. 다른 모듈이 상속하는 클래스는 클래스 단위 export가 필요하다(메타 컴파일러 진단) | 권장안 |
-| BD28 | 메타 컴파일러는 모듈마다 생성 `.cpp`(UE `.gen.cpp`)를 내고, 타입 키·타입 정보·등록 함수를 거기 정의해 항상 export한다. `NativeTypeKey`는 그 키 저장소 주소다. UE `MinimalAPI` 지정자는 두지 않는다 | 권장안 |
+| BD28 | 메타 컴파일러는 생성 `.cpp`(UE `.gen.cpp` — 리플렉션 헤더마다 하나, 모듈마다 등록용 하나: [리플렉션 생성 소스](ReflectionGeneratedSources.ko.md) GSD2)를 내고, 타입 키·타입 정보·등록 함수를 거기 정의해 항상 export한다. `NativeTypeKey`는 그 키 저장소 주소다. UE `MinimalAPI` 지정자는 두지 않는다 | 권장안 |
 | BD29 | 공개 헤더에 쓰기 가능한 정적 저장소(const 아닌 inline 변수·inline/템플릿 함수의 static 지역 변수·헤더 정의 정적 데이터 멤버), `thread_local` 변수, 주소를 식별자로 쓰는 정적 객체를 두지 않는다(정책 `public-header-static-storage`, 링크 방식과 무관하게 검사). 서드파티는 UE와 같이 소비 모듈마다 링크하고, `HasGlobalState` 서드파티만 직접 소비 모듈을 하나로 제한한다 | 권장안 |
 | BD30 | 모듈 수명 객체·로더는 별도 스펙 [모듈 로더](ModuleLoader.ko.md)로 정한다(ML0–ML4는 BS5 전, ML5는 BS5와 함께). Modular 실행 파일은 부트 모듈만 import한다(MD21). 요구 계약은 3.8절 네 항목이다. 게임의 Editor 타깃은 설치 SDK의 엔진 모듈 공유 라이브러리를 공유하며 엔진 컴파일 환경을 바꿀 수 없다 | 권장안 |
 | BD31 | Editor보다 먼저 `Modular` Program 시험 빌드(FoundationTests)를 검사 체인에 넣어 export 누락과 공유 상태 위반을 잡는다(Windows·macOS). 대상 모듈의 `Private/`를 받는 시험 묶음(BD22)은 `Modular`에서 그 모듈의 공유 라이브러리에 함께 링크한다(UE도 모듈의 `Private/Tests` 시험을 모듈 바이너리에 컴파일한다 — 예 `Runtime/Core/Private/Tests`). 시험 등록 표는 Core가 한 벌 가진다 | 권장안 |

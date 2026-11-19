@@ -66,4 +66,82 @@ constexpr uint32 Crc32(Span<const uint8> data, uint32 previous = 0) noexcept {
     return ~crc;
 }
 
+namespace detail {
+
+// 반사 다항식과 CRC 상태 비트 수다.
+inline constexpr uint32 Crc32ReflectedPolynomial = 0xEDB88320u;
+inline constexpr usize Crc32StateBits = 32;
+
+// CRC 상태(32 bit)에 GF(2) 위 32 × 32 행렬 matrix를 곱한다(열 i = 비트 i의 상(像)).
+constexpr uint32 Crc32MatrixTimes(const uint32 (&matrix)[Crc32StateBits], uint32 vector) noexcept {
+    uint32 sum = 0;
+    for (usize index = 0; vector != 0; ++index, vector >>= 1) {
+        if ((vector & 1u) != 0) {
+            sum ^= matrix[index];
+        }
+    }
+
+    return sum;
+}
+
+constexpr void Crc32MatrixSquare(uint32 (&square)[Crc32StateBits],
+                                 const uint32 (&matrix)[Crc32StateBits]) noexcept {
+    for (usize index = 0; index < Crc32StateBits; ++index) {
+        square[index] = Crc32MatrixTimes(matrix, matrix[index]);
+    }
+}
+
+} // namespace detail
+
+// 앞 입력의 CRC first와 뒤 입력(길이 secondBytes)의 CRC second로 이어 붙인 입력의 CRC를 만든다(zlib
+// crc32_combine과 같은 값). 뒤 입력을 먼저 계산해야 할 때 쓴다 — 예: 앞에 둘 인덱스가 뒤 payload를
+// 다 쓴 다음에야 정해지는 컨테이너. 비용은 log2(secondBytes)에 비례한다.
+//
+// 사용 예:
+//   const uint32 whole = Crc32Combine(Crc32(index), Crc32(payload), payload.Size());
+//   // whole == Crc32(index ‖ payload)
+constexpr uint32 Crc32Combine(uint32 first, uint32 second, uint64 secondBytes) noexcept {
+    if (secondBytes == 0) {
+        return first;
+    }
+
+    // odd = 0 비트 한 칸 이동 연산자, even = 두 칸, 이후 제곱해 가며 2의 거듭제곱 byte 수만큼 민다.
+    uint32 odd[detail::Crc32StateBits] = {};
+    uint32 even[detail::Crc32StateBits] = {};
+    odd[0] = detail::Crc32ReflectedPolynomial;
+    uint32 row = 1;
+    for (usize index = 1; index < detail::Crc32StateBits; ++index) {
+        odd[index] = row;
+        row <<= 1;
+    }
+
+    detail::Crc32MatrixSquare(even, odd);
+    detail::Crc32MatrixSquare(odd, even);
+    uint32 crc = first;
+    uint64 remaining = secondBytes;
+    for (;;) {
+        detail::Crc32MatrixSquare(even, odd);
+        if ((remaining & 1u) != 0) {
+            crc = detail::Crc32MatrixTimes(even, crc);
+        }
+
+        remaining >>= 1;
+        if (remaining == 0) {
+            break;
+        }
+
+        detail::Crc32MatrixSquare(odd, even);
+        if ((remaining & 1u) != 0) {
+            crc = detail::Crc32MatrixTimes(odd, crc);
+        }
+
+        remaining >>= 1;
+        if (remaining == 0) {
+            break;
+        }
+    }
+
+    return crc ^ second;
+}
+
 } // namespace rocks

@@ -171,20 +171,43 @@ TEST(Config_DevelopmentOnlyIsFixedUnderReleaseRules) {
     ConfigContext& context = fixture.Context();
     auto debug = context.RegisterDynamic(
         Define("render.debug_view", ConsoleValueType::Bool, "false", Flags(cvar::VarFlags::Cheat)));
-    REQUIRE(debug);
+    // 출시 빌드는 Cheat 동적 변수를 등록하지 않는다(Unsupported — CVar 5·19절). 개발 빌드의 출시
+    // 규칙은 등록하되 숨긴다.
+    if constexpr (IsReleaseBuild) {
+        CHECK(!debug && debug.Error() == ErrorCode::Unsupported);
+    } else {
+        REQUIRE(debug);
+    }
+
     auto hidden = context.FindConsoleSetting("render.debug_view");
     CHECK(!hidden && hidden.Error() == ErrorCode::NotFound);
     CHECK(!context.FindConsoleSetting("render.graph.debug_draw"));
     REQUIRE(context.Sync());
-    CHECK(fixture.Rejects(ConfigLayer::Project, "Render",
-                          R"({"Settings": {"render.debug_view": true}})"));
-    CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::LayerNotAllowed, 1, 36));
-    CHECK(fixture.Rejects(ConfigLayer::Project, "Render",
-                          R"({"Settings": {"render.graph.debug_draw": true}})"));
-    CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::LayerNotAllowed));
+    if constexpr (IsReleaseBuild) {
+        // 출시 빌드에서는 Cheat 동적 변수가 등록되지 않으므로(Unsupported) 그 이름의 파일 값은
+        // 모르는 이름의 대기 값으로 받는다(아무 값에도 닿지 않는다). 개발 전용 필드는 개발 빌드의
+        // 출시 규칙과 같이 거부한다.
+        REQUIRE(context.AddLayerText(ConfigLayer::Project, "Render.json", "Render", "project",
+                                     R"({"Settings": {"render.debug_view": true}})"));
+        context.Diagnostics().Clear();
+        auto field = context.AddLayerText(ConfigLayer::Project, "field", "Render", "<test>",
+                                          R"({"Settings": {"render.graph.debug_draw": true}})");
+        CHECK(!field && field.Error() == ErrorCode::InvalidArgument);
+        CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::LayerNotAllowed));
+    } else {
+        CHECK(fixture.Rejects(ConfigLayer::Project, "Render",
+                              R"({"Settings": {"render.debug_view": true}})"));
+        CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::LayerNotAllowed, 1, 36));
+        CHECK(fixture.Rejects(ConfigLayer::Project, "Render",
+                              R"({"Settings": {"render.graph.debug_draw": true}})"));
+        CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::LayerNotAllowed));
+    }
+
     REQUIRE(context.Sync());
-    CHECK(!cvar::ReadDynamic<bool>(*context.Acquire(), debug.Value(), true) &&
-          !fixture.Graph().debugDraw);
+    CHECK(!fixture.Graph().debugDraw);
+    if (debug) {
+        CHECK(!cvar::ReadDynamic<bool>(*context.Acquire(), debug.Value(), true));
+    }
     Array<StringView> names(fixture.system);
     REQUIRE(context.CompleteConsoleName("render.", names));
     for (const StringView name : names) {
@@ -193,6 +216,10 @@ TEST(Config_DevelopmentOnlyIsFixedUnderReleaseRules) {
 
     auto console = context.ExecuteConsoleLine("render.graph.immediate", SharedPtr<ConsoleSink>());
     CHECK(!console && console.Error() == ErrorCode::Unsupported);
+    // 다른 스레드의 콘솔 입구도 출시 규칙에서는 Unsupported다.
+    ConsoleInputPort port = context.MakeConsoleInputPort();
+    auto ported = port.Execute("render.graph.immediate", SharedPtr<ConsoleSink>());
+    CHECK(!ported && ported.Error() == ErrorCode::Unsupported);
 }
 
 // 설정 struct 필드의 콘솔 이름(ConsoleName)은 그 필드와 값 저장소를 공유한다: `Settings` 섹션·콘솔
@@ -328,7 +355,13 @@ TEST(Config_ConsoleSettingTypesAndRegistration) {
     DynamicVarDefinition bootCheat =
         Define("render.boot_cheat", ConsoleValueType::Int32, "", Flags(cvar::VarFlags::Cheat));
     bootCheat.boot = true;
-    CHECK(rejects(bootCheat, ErrorCode::InvalidArgument));
+    // 출시 빌드는 Cheat 성질을 규칙 검사보다 먼저 본다(등록하지 않는다 — Unsupported).
+    CHECK(rejects(bootCheat, IsReleaseBuild ? ErrorCode::Unsupported : ErrorCode::InvalidArgument));
+    if constexpr (IsReleaseBuild) {
+        CHECK(rejects(
+            Define("render.cheat_only", ConsoleValueType::Bool, "", Flags(cvar::VarFlags::Cheat)),
+            ErrorCode::Unsupported));
+    }
     CHECK(
         rejects(Define("render.untyped", ConsoleValueType::Enum, ""), ErrorCode::InvalidArgument));
     CHECK(rejects(Define("render.typo", ConsoleValueType::Int32, "x"), ErrorCode::InvalidArgument));

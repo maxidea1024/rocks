@@ -151,6 +151,19 @@ struct ScratchTree {
     }
 };
 
+// 개발 규칙(콘솔 입력·hot reload·DevelopmentOnly 층 쓰기 — releaseRules = false)으로 만든 문맥
+// 옵션이다. releaseRules의 기본은 빌드 구성을 따르므로(Release 구성이면 출시 규칙) 개발 규칙 동작을
+// 보는 시험은 이것으로 fixture를 만든다(CVarSystem 19절 — 출시 규칙 시험이 releaseRules = true를
+// 명시하는 것과 대칭). 나머지 옵션은 options 그대로다.
+//
+// 사용 예:
+//   ConfigFixture fixture(DevelopmentRules());
+//   ConfigFixture withPaths(DevelopmentRules(paths.Options()));
+inline ConfigContextOptions DevelopmentRules(ConfigContextOptions options = {}) noexcept {
+    options.releaseRules = false;
+    return options;
+}
+
 // 타입 등록·Name pool·객체 Registry와 설정 문맥이다. 설정 struct
 // 둘(GraphSettings·GameplaySettings)을 등록해 둔다. 소멸 순서: 문맥(TypeLease) → Registry → 등록 →
 // pool → 타입.

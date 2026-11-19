@@ -63,6 +63,37 @@ usize CountCode(ConfigContext& context, ConfigDiagnosticCode code) noexcept {
     return count;
 }
 
+// 시험이 REQUIRE로 일찍 끝나도 만든 범위를 파괴한다(범위가 남은 채 문맥을 없애면 Fatal이라 시험
+// 하나의 실패가 전체 실행을 멈추지 않게 한다 — CVar 19절 시험 정리). 이미 파괴한 범위는 NotFound라
+// 무시한다.
+class ScopeCleanup {
+public:
+    explicit ScopeCleanup(ConfigContext& context) noexcept : context_(context) {
+    }
+
+    ~ScopeCleanup() {
+        for (usize index = 0; index < count_; ++index) {
+            static_cast<void>(context_.DestroyScope(scopes_[index]));
+        }
+    }
+
+    ScopeCleanup(const ScopeCleanup&) = delete;
+    ScopeCleanup& operator=(const ScopeCleanup&) = delete;
+
+    void Track(const Result<cvar::CVarScopeId>& scope) noexcept {
+        if (scope && count_ < MaxScopes) {
+            scopes_[count_++] = scope.Value();
+        }
+    }
+
+private:
+    static constexpr usize MaxScopes = 8;
+
+    ConfigContext& context_;
+    cvar::CVarScopeId scopes_[MaxScopes]{};
+    usize count_ = 0;
+};
+
 // 콘솔 출력을 모으는 sink다.
 struct ScopeText final : ConsoleSink {
     explicit ScopeText(Allocator& allocator) noexcept : text(allocator) {
@@ -81,12 +112,15 @@ struct ScopeText final : ConsoleSink {
 // Sync의 snapshot부터 보이고, 그 전과 없는 범위는 Global 값이다. 범위를 파괴하면 값은 버리고
 // 자식은 조부모에 다시 붙는다. 이전 snapshot은 그 때의 사슬로 답한다.
 TEST(CVar_ScopeChainAndReparenting) {
-    ConfigFixture fixture;
+    ConfigFixture fixture(DevelopmentRules());
     ConfigContext& context = fixture.Context();
+    ScopeCleanup cleanup(context);
     REQUIRE(RegisterScopeHandles(context));
     auto world = context.CreateScope();
+    cleanup.Track(world);
     REQUIRE(world);
     auto player = context.CreateScope(world.Value());
+    cleanup.Track(player);
     REQUIRE(player);
     CHECK(!world.Value().IsGlobal() && world.Value() != player.Value());
     REQUIRE(ScopeDistance.Set(300));
@@ -141,10 +175,12 @@ TEST(CVar_ScopeChainAndReparenting) {
 // 복제 변수·묶음 변수는 ScopeNotAllowed(cheat.enabled는 예외)다. 범위 값은 dump에 들지 않고 콘솔
 // 표시에 `scope <id> ...` 줄로 보인다.
 TEST(CVar_ScopeWriteRules) {
-    ConfigFixture fixture;
+    ConfigFixture fixture(DevelopmentRules());
     ConfigContext& context = fixture.Context();
+    ScopeCleanup cleanup(context);
     REQUIRE(RegisterScopeHandles(context));
     auto scope = context.CreateScope();
+    cleanup.Track(scope);
     REQUIRE(scope);
     ConfigDiagnosticCode reason = ConfigDiagnosticCode::InvalidSetting;
     auto replicated = ScopeShared.Set(2, {.scope = scope.Value(), .reason = &reason});
@@ -177,11 +213,25 @@ TEST(CVar_ScopeWriteRules) {
 // 사슬의 `cheat.enabled`로 받을 때와 적용 때(큐 순서) 판정한다. 범위는 치트를 좁히기만 한다(서버가
 // 끈 치트를 클라이언트 코드가 범위 값으로 켜지 못한다).
 TEST(CVar_ScopeCheatPermission) {
-    ConfigFixture fixture;
+    ConfigFixture fixture(DevelopmentRules());
     ConfigContext& context = fixture.Context();
+    ScopeCleanup cleanup(context);
     REQUIRE(RegisterScopeHandles(context));
+    // 출시 빌드는 치트 변수를 등록하지 않는다(범위 쓰기도 Unsupported, Get(scope)는 기본값 — 19절).
+    if constexpr (IsReleaseBuild) {
+        auto scope = context.CreateScope();
+        cleanup.Track(scope);
+        REQUIRE(scope);
+        CHECK(ScopeGod.Set(true, {.scope = scope.Value()}).Error() == ErrorCode::Unsupported);
+        REQUIRE(context.Sync());
+        CHECK(!ScopeGod.Get(scope.Value()));
+        return;
+    }
+
     auto player = context.CreateScope();
+    cleanup.Track(player);
     auto other = context.CreateScope();
+    cleanup.Track(other);
     REQUIRE(player && other);
     // 서버가 끈 치트: 범위 값으로 켜도 판정은 거부다(값 읽기는 범위 값이 이긴다).
     const ReplicatedValue off[] = {{"cheat.enabled", "false"}};
@@ -234,10 +284,12 @@ TEST(CVar_ScopeCheatPermission) {
 // 무시하고, 콘솔 지우기는 콘솔 읽기 전용을 받을 때 거부한다. 파괴된 범위의 지우기·쓰기는 진단 없이
 // 버린다.
 TEST(CVar_ScopeClearFollowsLayers) {
-    ConfigFixture fixture;
+    ConfigFixture fixture(DevelopmentRules());
     ConfigContext& context = fixture.Context();
+    ScopeCleanup cleanup(context);
     REQUIRE(RegisterScopeHandles(context));
     auto scope = context.CreateScope();
+    cleanup.Track(scope);
     REQUIRE(scope);
     REQUIRE(ScopeDistance.Set(400, {.layer = ConfigLayer::Console, .scope = scope.Value()}));
     REQUIRE(ScopeLocked.Set(true, {.scope = scope.Value()}));
@@ -269,12 +321,15 @@ TEST(CVar_ScopeClearFollowsLayers) {
 
 // String·Name 범위 값: 텍스트 블록을 범위 노드가 쥐고, Get(scope)는 범위 값·부모·Global 순서다.
 TEST(CVar_ScopeTextValues) {
-    ConfigFixture fixture;
+    ConfigFixture fixture(DevelopmentRules());
     ConfigContext& context = fixture.Context();
+    ScopeCleanup cleanup(context);
     REQUIRE(RegisterScopeHandles(context));
     auto world = context.CreateScope();
+    cleanup.Track(world);
     REQUIRE(world);
     auto player = context.CreateScope(world.Value());
+    cleanup.Track(player);
     REQUIRE(player);
     REQUIRE(ScopeTitle.Set("world title", {.scope = world.Value()}));
     REQUIRE(ScopeMap.Set("Arena", {.scope = player.Value()}));
@@ -319,10 +374,12 @@ void WriteScopeFromWorker(void* raw) noexcept {
 // 다른 스레드의 범위 쓰기는 쓰기 큐로 들어와 다음 Sync에 적용된다. 범위 생성은 게임 lane
 // 전용이다(WrongThread). Join이 순서를 정한다.
 TEST(CVar_ScopeWritesFromAnotherThread) {
-    ConfigFixture fixture;
+    ConfigFixture fixture(DevelopmentRules());
     ConfigContext& context = fixture.Context();
+    ScopeCleanup cleanup(context);
     REQUIRE(RegisterScopeHandles(context));
     auto scope = context.CreateScope();
+    cleanup.Track(scope);
     REQUIRE(scope);
     REQUIRE(context.Sync());
     ScopeWriter writer;
@@ -378,10 +435,12 @@ void ReadAcrossDestroy(void* raw) noexcept {
 // snapshot은 Global 값이다. 파괴된 범위로 들어온 쓰기는 적용 때 버린다(10.1절 — gate로 순서를
 // 정한다).
 TEST(CVar_ScopeReadsOverlapDestroy) {
-    ConfigFixture fixture;
+    ConfigFixture fixture(DevelopmentRules());
     ConfigContext& context = fixture.Context();
+    ScopeCleanup cleanup(context);
     REQUIRE(RegisterScopeHandles(context));
     auto scope = context.CreateScope();
+    cleanup.Track(scope);
     REQUIRE(scope);
     REQUIRE(ScopeDistance.Set(250, {.scope = scope.Value()}));
     REQUIRE(context.Sync());
@@ -404,8 +463,9 @@ TEST(CVar_ScopeReadsOverlapDestroy) {
 // ScopedOverride의 묶음 판: 묶음 등급을 범위 임시 변경하면 다음 Sync가 그 등급을 펼치고, 끝나면
 // 원래 등급이 돌아온다. 정의되지 않은 등급은 InvalidArgument다.
 TEST(CVar_ScopedOverrideOfGroup) {
-    ConfigFixture fixture;
+    ConfigFixture fixture(DevelopmentRules());
     ConfigContext& context = fixture.Context();
+    ScopeCleanup cleanup(context);
     REQUIRE(RegisterScopeHandles(context));
     REQUIRE(context.Sync());
     CHECK(ScopeQuality.Get() == 1 && ScopeMember.Get() == 20);
