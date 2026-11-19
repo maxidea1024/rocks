@@ -769,6 +769,14 @@ Result<TextureHandle> VulkanDevice::CreateTextureView(TextureHandle texture,
         return UnsupportedFormat<TextureHandle>(resolved.Value());
     }
 
+    // cube 텍스처의 cube 배열 view는 imageCubeArray 기능이 필요하다.
+    if (TextureViewDimensionOf(source->dimension, desc) == TextureDimension::TextureCubeArray &&
+        !caps_.features.textureCubeArray) {
+        auto failed = FailCode("texture view", ErrorCode::Unsupported,
+                               "cube array views need the imageCubeArray feature");
+        return Result<TextureHandle>::Failure(failed.Error());
+    }
+
     auto reserved = ReserveRetireCapacity(1);
     if (!reserved) {
         return Result<TextureHandle>::Failure(reserved.Error());
@@ -777,7 +785,8 @@ Result<TextureHandle> VulkanDevice::CreateTextureView(TextureHandle texture,
     const PixelFormatPlane& layout = GetPixelFormatInfo(source->format).planes[desc.plane];
     TextureRecord record;
     record.image = source->image;
-    record.dimension = source->dimension;
+    // 차원은 view 차원이다(image view type, cube 계열 쓰기 view는 2D 배열, 텍스처 GX2 나머지 B부).
+    record.dimension = TextureViewDimensionOf(source->dimension, desc);
     record.width = MipExtent(source->width, layout.widthShift);
     record.height = MipExtent(source->height, layout.heightShift);
     record.depth = source->depth;
@@ -796,10 +805,7 @@ Result<TextureHandle> VulkanDevice::CreateTextureView(TextureHandle texture,
     VkImageViewCreateInfo viewInfo = {};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     viewInfo.image = source->image;
-    // cube 계열의 쓰기 view는 면 단위 2D 배열 storage image다(텍스처 GX2 나머지 A부).
-    viewInfo.viewType = writable && IsCubeDimension(record.dimension)
-                            ? VK_IMAGE_VIEW_TYPE_2D_ARRAY
-                            : ViewTypeOf(record.dimension);
+    viewInfo.viewType = ViewTypeOf(record.dimension);
     viewInfo.format = view.format;
     // view swizzle은 스텐실 plane(R → G)·형식 흉내 대응 위에 합성한다(TextureViewDesc::swizzle).
     // storage image view는 성분 대응이 항등이어야

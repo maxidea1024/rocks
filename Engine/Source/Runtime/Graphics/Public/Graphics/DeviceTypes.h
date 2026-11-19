@@ -482,9 +482,20 @@ struct TextureSubresources {
 // 수가 textureArrayLayers를 넘음, textureCubeArray 기능 없이 CubeArray.
 Result<void> CheckTextureLimits(const DeviceCaps& caps, const TextureDesc& desc) noexcept;
 
+// view 차원이다(UE FRHIViewDesc::FTextureSRV::FInitializer::SetDimension 대응, RenderBase 4.4절
+// 텍스처 GX2 나머지 B부). Same은 원 텍스처 차원이다(cube 계열의 쓰기 view는 Texture2DArray).
+enum class TextureViewDimension : uint8 {
+    Same,
+    Texture2D,
+    Texture2DArray,
+    TextureCube,
+    TextureCubeArray,
+    Texture3D
+};
+
 // 텍스처 view 설정이다(Device::CreateTextureView). 원 텍스처의 자원을 공유하고 형식·plane·성분
-// 대응·mip·slice 범위를 골라 읽거나(Read, SetTexture) 쓴다(ReadWrite, SetWritableTexture)
-// (PixelFormat.ko.md 9·10·11절, RenderBase 4.4절 텍스처 GX2 A부). 차원은 원 텍스처와 같다.
+// 대응·mip·slice 범위·차원을 골라 읽거나(Read, SetTexture) 쓴다(ReadWrite, SetWritableTexture)
+// (PixelFormat.ko.md 9·10·11절, RenderBase 4.4절 텍스처 GX2 A부·나머지 B부).
 // - format: Unknown이면 그 plane의 기본 형식이다. 색·압축 형식은 자기 형식이나 sRGB 짝,
 //   깊이·스텐실과 비디오는 plane 형식(PixelFormatInfo::planes)만 받는다.
 // - plane: 단일 plane 형식은 0, 깊이·스텐실은 0(깊이)·1(스텐실, uint으로 읽고 값은 G 채널),
@@ -496,6 +507,15 @@ Result<void> CheckTextureLimits(const DeviceCaps& caps, const TextureDesc& desc)
 //   텍스처 전체를 묶으므로 셰이더는 TextureViewBaseMip을 기준 mip으로 받아 명시 LOD로 읽는다.
 // - access: Read는 SetTexture로 읽는 SRV, ReadWrite는 SetWritableTexture로 쓰는 UAV다(Storage
 //   텍스처만, mip 하나, plane 0, swizzle 항등, 형식 능력 StorageWrite).
+// - dimension: 셰이더 변수 형식과 같은 view 차원이다(TextureViewDimensionOf, 규칙은
+//   ResolveTextureViewRange). 3D는 3D끼리만, cube 계열 view는 cube 계열 텍스처만, 2D view는 첫
+//   slice 하나만(D3D TEXTURE2D view에 첫 층 필드가 없다), cube view는 첫 cube만이다. 쓰기 view는
+//   2D·2D 배열·3D만이다. 범위 view가 없는 장치(OpenGL ES, 확장 없음)는 차원 바꾸기가 Unsupported다.
+//
+// 사용 예(cube의 면을 2D 배열로 읽는다, 셰이더 Texture2DArray의 층 = 면):
+//   TextureViewDesc faces;
+//   faces.dimension = TextureViewDimension::Texture2DArray;
+//   auto view = device.CreateTextureView(cube, faces);
 //
 // 사용 예(NV12의 색차 plane을 RG8로 샘플):
 //   TextureViewDesc chroma;
@@ -522,7 +542,13 @@ struct TextureViewDesc {
     uint32 firstSlice = 0;
     uint32 sliceCount = 0;
     ViewAccess access = ViewAccess::Read;
+    TextureViewDimension dimension = TextureViewDimension::Same;
 };
+
+// view의 실제 차원이다(Same을 원 텍스처 차원으로 푼다. cube 계열의 쓰기 view는 Texture2DArray).
+// 규칙 검사는 하지 않는다(ResolveTextureViewRange).
+TextureDimension TextureViewDimensionOf(TextureDimension texture,
+                                        const TextureViewDesc& desc) noexcept;
 
 // view를 읽는 셰이더가 명시 LOD의 기준으로 쓰는 mip이다(RenderBase 7.5절 view 기준 mip). 범위
 // view를 지원하는 장치(DeviceFeatures::textureViewRanges)는 0, 아니면(텍스처 전체가 묶인다)

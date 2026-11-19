@@ -500,7 +500,8 @@ private:
     // slots에, CS 쓰기 slot을 writeSlots에 더한다.
     // b0 cbuffer가 drawConstantBytes보다 크면 InvalidArgument다(작은 것은 허용).
     Result<TextureHandle> CreateWritableTextureView(const TextureRecord& source, PixelFormat format,
-                                                    const ResolvedSubresourceRange& range) noexcept;
+                                                    const ResolvedSubresourceRange& range,
+                                                    TextureDimension dimension) noexcept;
     // compute의 텍스처 UAV(u0–u3의 RWTexture*) slot은 writeTextures에 더한다.
     Result<void> ReflectBindings(ID3DBlob* code, ShaderStage stage, uint32 drawConstantBytes,
                                  DrawBufferSlots& slots, DrawBufferSlots* writeSlots,

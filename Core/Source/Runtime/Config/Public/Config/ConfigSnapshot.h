@@ -85,6 +85,41 @@ struct ConsoleNameEntry {
     bool field = false;
 };
 
+// 범위 하나의 값 칸이다(번호·칸·String·Name 텍스트 블록 — CVar 8절).
+struct ScopeSlot {
+    uint32 index = 0;
+    CVarSlot slot;
+    SharedPtr<const CVarText> text;
+};
+
+// snapshot의 범위 하나다(id·부모 id, 번호 순서로 정렬한 값 칸). 만든 뒤 바뀌지 않는다.
+struct ScopeNode {
+    explicit ScopeNode(Allocator& allocator) noexcept : slots(allocator) {
+    }
+
+    uint64 id = 0;
+    // 부모 범위 id다(0이면 Global).
+    uint64 parent = 0;
+    Array<ScopeSlot> slots;
+};
+
+// snapshot의 범위 표다(CVar 8·10.1절): 범위를 id 순서로 두고, "범위 값이 하나라도 있는 번호" 비트
+// 집합(scoped — 64개씩 묶은 word)을 함께 둔다. 범위 상태가 바뀐 Sync만 새로 만들고 아니면 앞
+// snapshot의 표를 공유한다. 만든 뒤 바뀌지 않는다.
+struct ScopeTable {
+    explicit ScopeTable(Allocator& allocator) noexcept : nodes(allocator), scoped(allocator) {
+    }
+
+    // id의 범위다(없으면 null — 이진 탐색).
+    const ScopeNode* Find(uint64 id) const noexcept;
+
+    // 번호 index에 범위 값이 하나라도 있는지다.
+    bool HasScoped(uint32 index) const noexcept;
+
+    Array<UniquePtr<ScopeNode>> nodes;
+    Array<uint64> scoped;
+};
+
 // 콘솔 이름 색인이다(등록 뒤 다음 Sync가 게시하는 snapshot부터 새 색인 — 그 전 snapshot은 앞
 // 색인을 공유한다).
 struct ConsoleNameIndex {
@@ -146,6 +181,19 @@ public:
         return *chunks_.Data()[index / ChunkSlotCount]->texts[index % ChunkSlotCount];
     }
 
+    // ---- 범위 표(CVar 8절) ----
+
+    // 범위 scope의 사슬(자식 → 부모)에서 번호 index의 범위 값 칸을 찾는다. 처음 만난 범위 값이고,
+    // 없거나(Global·이 snapshot에 없는 범위·범위 값 없는 번호) 하면 null이다. text는 String·Name
+    // 칸의 텍스트 블록이다(그 밖은 null). 빠른 길: 범위 값이 없는 번호는 비트 하나만 본다.
+    const CVarSlot* FindScopedSlot(uint64 scope, uint32 index,
+                                   const CVarText*& text) const noexcept;
+
+    // 범위 표다(범위가 없으면 null — 어느 스레드에서나 읽는다, 불변).
+    const detail::ScopeTable* Scopes() const noexcept {
+        return scopes_.Get();
+    }
+
     // ---- 콘솔 이름 색인(10.1절) ----
 
     // 이 snapshot과 함께 게시된 콘솔 이름 색인이다(다른 스레드의 콘솔 입력이 쓴다 — 없으면 null).
@@ -194,6 +242,8 @@ private:
     bool sealed_ = false;
     // 콘솔 이름 색인(등록이 바뀌지 않으면 앞 snapshot과 공유한다).
     SharedPtr<const detail::ConsoleNameIndex> names_;
+    // 범위 표(범위 상태가 바뀌지 않으면 앞 snapshot과 공유한다 — 범위가 없으면 null).
+    SharedPtr<const detail::ScopeTable> scopes_;
     // 이 snapshot을 만든 문맥의 쓰기 통로다(묶음 계수·`CVar::Set`의 대상 — 문맥보다 오래 살 수
     // 있다).
     SharedPtr<detail::WriteChannel> channel_;

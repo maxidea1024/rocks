@@ -216,11 +216,13 @@ ResolveSubresourceRange(const SubresourceRange& range, uint32 mipLevels, uint32 
 ResolvedSubresourceRange AttachmentSubresource(TextureDimension dimension, uint32 mipLevel,
                                                uint32 slice) noexcept;
 
-// view의 mip·slice 범위를 원 텍스처(dimension·usage·shape)에 맞춰 정한다(개수 0은 끝까지). 장치와
-// 무관한 규칙이며 backend의 CreateTextureView가 부른다. InvalidArgument: 범위가 텍스처 밖이거나 빔,
-// 3D의 slice 범위가 전체가 아님, cube의 slice 범위가 6면 전체가 아님, cube 배열의 시작·개수가 6의
-// 배수가 아님, 모르는 access, ReadWrite인데 Storage 텍스처가 아니거나 mip이 하나가 아니거나 plane
-// 0이 아니거나 swizzle이 항등이 아님. 형식 능력(StorageWrite)은 backend가 Unsupported로 본다.
+// view의 mip·slice 범위를 원 텍스처(dimension·usage·shape)와 view 차원(TextureViewDimensionOf)에
+// 맞춰 정한다(개수 0은 끝까지). 장치와 무관한 규칙이며 backend의 CreateTextureView가 부른다.
+// InvalidArgument: 범위가 텍스처 밖이거나 빔, 모르는 access·view 차원, 차원 조합 위반(3D ↔ 3D만,
+// cube 계열 view는 cube 계열 텍스처만, 쓰기 view의 cube 차원), view 차원의 slice 규칙 위반(3D는
+// 전체, 2D는 첫 slice 하나, cube는 첫 cube 6면, cube 배열은 6의 배수 시작·개수), ReadWrite인데
+// Storage 비트가 없거나 mip이 하나가 아니거나 plane 0이 아니거나 swizzle이 항등이 아님. 형식
+// 능력(StorageWrite)·cube 배열 기능(textureCubeArray)은 backend가 Unsupported로 본다.
 Result<ResolvedSubresourceRange> ResolveTextureViewRange(TextureDimension dimension,
                                                          TextureUsage usage,
                                                          const TextureSubresources& shape,

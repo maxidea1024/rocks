@@ -564,3 +564,69 @@ TEST(TextureDesc_AttachmentDimensionsAndRanges) {
     const ResolvedSubresourceRange plane = AttachmentSubresource(TextureDimension::Texture3D, 1, 3);
     CHECK(plane.firstMip == 1 && plane.firstSlice == 0 && plane.sliceCount == 1);
 }
+
+namespace {
+
+TextureViewDesc DimensionView(TextureViewDimension dimension, uint32 firstSlice,
+                              uint32 sliceCount) noexcept {
+    TextureViewDesc desc;
+    desc.dimension = dimension;
+    desc.firstSlice = firstSlice;
+    desc.sliceCount = sliceCount;
+    return desc;
+}
+
+bool Accepts(TextureDimension texture, uint32 slices, const TextureViewDesc& desc,
+             TextureUsage usage = TextureUsage::Sampled) noexcept {
+    return ResolveTextureViewRange(texture, usage, TextureSubresources{1, slices}, desc).IsOk();
+}
+
+} // namespace
+
+// view 차원 바꾸기(텍스처 GX2 나머지 B부, UE GetViewInfo 규칙): 3D ↔ 3D만, cube 계열 view는 cube
+// 계열 텍스처만, 2D view는 첫 slice 하나, cube view는 첫 cube, 쓰기 view에 cube 차원은 없다.
+TEST(TextureView_DimensionRules) {
+    using View = TextureViewDimension;
+    // 2D 배열 4층.
+    CHECK(Accepts(TextureDimension::Texture2DArray, 4, DimensionView(View::Texture2D, 0, 1)));
+    CHECK(!Accepts(TextureDimension::Texture2DArray, 4, DimensionView(View::Texture2D, 1, 1)));
+    CHECK(Accepts(TextureDimension::Texture2DArray, 4, DimensionView(View::Texture2DArray, 1, 1)));
+    CHECK(!Accepts(TextureDimension::Texture2DArray, 4, DimensionView(View::TextureCube, 0, 0)));
+    // cube: 면 2D 배열·면 0의 2D·cube 배열 view.
+    CHECK(Accepts(TextureDimension::TextureCube, 6, DimensionView(View::Texture2DArray, 4, 1)));
+    CHECK(Accepts(TextureDimension::TextureCube, 6, DimensionView(View::Texture2D, 0, 1)));
+    CHECK(!Accepts(TextureDimension::TextureCube, 6, DimensionView(View::Texture2D, 3, 1)));
+    CHECK(Accepts(TextureDimension::TextureCube, 6, DimensionView(View::TextureCubeArray, 0, 0)));
+    // cube 배열 2개: cube view는 첫 cube만, 두 번째 cube는 cube 배열 view.
+    CHECK(Accepts(TextureDimension::TextureCubeArray, 12, DimensionView(View::TextureCube, 0, 6)));
+    CHECK(!Accepts(TextureDimension::TextureCubeArray, 12, DimensionView(View::TextureCube, 6, 6)));
+    CHECK(Accepts(TextureDimension::TextureCubeArray, 12,
+                  DimensionView(View::TextureCubeArray, 6, 6)));
+    CHECK(!Accepts(TextureDimension::TextureCubeArray, 12,
+                   DimensionView(View::TextureCubeArray, 3, 6)));
+    CHECK(
+        Accepts(TextureDimension::TextureCubeArray, 12, DimensionView(View::Texture2DArray, 3, 3)));
+    // 3D는 3D끼리.
+    CHECK(Accepts(TextureDimension::Texture3D, 1, DimensionView(View::Texture3D, 0, 0)));
+    CHECK(!Accepts(TextureDimension::Texture3D, 1, DimensionView(View::Texture2D, 0, 0)));
+    CHECK(!Accepts(TextureDimension::Texture2D, 1, DimensionView(View::Texture3D, 0, 0)));
+    // 모르는 값.
+    CHECK(!Accepts(
+        TextureDimension::Texture2D, 1,
+        DimensionView(static_cast<TextureViewDimension>(static_cast<uint8>(View::Texture3D) + 1), 0,
+                      0)));
+    // 쓰기 view: cube 차원은 없고, Same은 면 2D 배열이다.
+    TextureViewDesc write = DimensionView(View::TextureCube, 0, 6);
+    write.access = ViewAccess::ReadWrite;
+    write.mipCount = 1;
+    CHECK(!Accepts(TextureDimension::TextureCube, 6, write, TextureUsage::Storage));
+    write.dimension = View::Texture2D;
+    write.sliceCount = 1;
+    CHECK(Accepts(TextureDimension::TextureCube, 6, write, TextureUsage::Storage));
+    write.dimension = View::Same;
+    CHECK(TextureViewDimensionOf(TextureDimension::TextureCube, write) ==
+          TextureDimension::Texture2DArray);
+    write.access = ViewAccess::Read;
+    CHECK(TextureViewDimensionOf(TextureDimension::TextureCube, write) ==
+          TextureDimension::TextureCube);
+}

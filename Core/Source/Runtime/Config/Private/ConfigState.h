@@ -101,6 +101,12 @@ struct QueuedChange {
     bool validateAtApply = false;
     SharedPtr<ConsoleSink> sink;
     String line;
+    // 범위 쓰기면 그 범위 id다(0이면 층 쓰기 — CVar 8절). 범위 쓰기는 층 입력 목록에 들지 않고
+    // Sync가 범위 값에 적용한다(entry가 있으면 값 쓰기 — 값 텍스트·출처 층, 없으면 지우기).
+    uint64 scope = 0;
+    // 범위 쓰기가 큐에서 놓인 자리의 Global 치트 허용 상태다(DrainQueue가 큐 순서로 적는다 — 적용
+    // 때 범위 치트 판정의 바탕, 13.1절).
+    bool globalCheats = true;
 };
 
 // 문맥의 쓰기 통로다(10.1절 — 다른 스레드가 문맥에 들어오는 길은 이것 하나다). 문맥과 그 문맥이
@@ -271,6 +277,30 @@ struct SyncHook {
     void* context = nullptr;
 };
 
+// 범위 값 하나다(CVar 8절 — 변수 번호·값·콘솔 표기·출처 층·출처).
+struct ScopeValue {
+    explicit ScopeValue(Allocator& allocator) noexcept
+        : value(allocator), text(allocator), source(allocator) {
+    }
+
+    uint32 index = 0;
+    FieldValue value;
+    String text;
+    ConfigLayer layer = ConfigLayer::Code;
+    String source;
+};
+
+// 범위 하나다(게임 lane 상태 — id·부모 id·번호 순서의 범위 값).
+struct ScopeState {
+    explicit ScopeState(Allocator& allocator) noexcept : values(allocator) {
+    }
+
+    uint64 id = 0;
+    // 부모 범위 id다(0이면 Global).
+    uint64 parent = 0;
+    Array<UniquePtr<ScopeValue>> values;
+};
+
 // 동적 변수 하나의 정의다(ConfigContext::RegisterDynamic — CVar 5절). definition의 view는 이
 // 객체의 문자열을 가리키므로 객체는 힙에 두고 옮기지 않는다.
 struct DynamicVarState {
@@ -330,6 +360,12 @@ struct ConfigState {
     bool validatingWrite = false;
     // 동적 변수 정의(등록 순서 — 문맥이 소유한다).
     Array<UniquePtr<DynamicVarState>> dynamicVars;
+    // 범위(id 순서 — CVar 8절)다. 생성·파괴는 바로 바뀌고 다음 Sync가 게시한다(scopesChanged).
+    Array<UniquePtr<ScopeState>> scopes;
+    bool scopesChanged = false;
+    // 게시하는 snapshot의 범위 표를 만들 범위 상태다(Sync가 적용한 사본 — null이면 앞 snapshot의
+    // 표를 공유한다).
+    const Array<UniquePtr<ScopeState>>* publishingScopes = nullptr;
     // 쓰기 통로(문맥과 snapshot들이 공유)와 마지막으로 게시한 snapshot이다.
     SharedPtr<WriteChannel> channel;
     SharedPtr<const ConfigSnapshot> snapshot;
@@ -626,6 +662,14 @@ struct SnapshotAccess {
         return snapshot.names_;
     }
 
+    static SharedPtr<const ScopeTable>& Scopes(ConfigSnapshot& snapshot) noexcept {
+        return snapshot.scopes_;
+    }
+
+    static const SharedPtr<const ScopeTable>& Scopes(const ConfigSnapshot& snapshot) noexcept {
+        return snapshot.scopes_;
+    }
+
     static const SharedPtr<const ConsoleNameIndex>& Names(const ConfigSnapshot& snapshot) noexcept {
         return snapshot.names_;
     }
@@ -678,6 +722,30 @@ bool HasQueuedChanges(WriteChannel& channel) noexcept;
 // 순번(sequence)을 여기서 매긴다. 오류: 할당 실패(꺼낸 것은 state.queue에 남는다).
 Result<void> DrainQueue(ConfigState& state) noexcept;
 
+// ---- 범위(CVar 8절 — CVarScopes.cpp) ----
+
+// scopes에서 id의 범위다(없으면 null).
+ScopeState* FindScope(const Array<UniquePtr<ScopeState>>& scopes, uint64 id) noexcept;
+
+// 범위 상태를 깊게 복사한다(Sync가 범위 쓰기를 적용할 사본).
+Result<void> CopyScopes(Allocator& allocator, const Array<UniquePtr<ScopeState>>& from,
+                        Array<UniquePtr<ScopeState>>& to) noexcept;
+
+// 범위 쓰기 하나를 scopes(사본)에 적용한다(큐 순서). 범위가 없거나 이름이 등록되지 않았으면
+// 버린다. 값은 Global 쓰기와 같은 검사(CheckConsoleValue)이고 거부하면 진단을 남기고 버린다.
+// 출처 층이 콘솔인 Cheat 변수 쓰기는 그 범위의 치트 허용 상태(scopes의 사슬, 없으면
+// change.globalCheats)로 판정한다(13.1절).
+Result<void> ApplyScopeChange(ConfigState& state, Array<UniquePtr<ScopeState>>& scopes,
+                              const QueuedChange& change) noexcept;
+
+// scopes 사슬에서 scope의 치트 허용 상태다(`cheat.enabled` 범위 값, 없으면 global).
+bool ScopeCheatsAllowed(const ConfigState& state, const Array<UniquePtr<ScopeState>>& scopes,
+                        uint64 scope, bool global) noexcept;
+
+// 범위 상태로 snapshot의 범위 표를 만든다(범위가 없으면 null — ConfigSnapshot.cpp).
+Result<SharedPtr<const ScopeTable>>
+BuildScopeTable(ConfigState& state, const Array<UniquePtr<ScopeState>>& scopes) noexcept;
+
 // 맞바꾼 뒤의 일이다: 큐에 든 콘솔 일(명령·표시)을 넣은 순서대로 실행한다(10절 5단계).
 void RunPendingCommands(ConfigState& state) noexcept;
 
@@ -715,7 +783,8 @@ StringView CheckConsolePermission(uint32 varFlags, bool cheats, NetworkRole role
 bool CheatsAllowed(const ConfigState& state) noexcept;
 
 // snapshot의 `cheat.enabled` 값이다(칸이 없으면 기본값 true — 다른 스레드의 쓰기 검사가 쓴다).
-bool SnapshotCheatsAllowed(const ConfigSnapshot* snapshot) noexcept;
+// scope가 있으면 그 범위 사슬의 `cheat.enabled` 범위 값이 먼저다(CVar 13.1절).
+bool SnapshotCheatsAllowed(const ConfigSnapshot* snapshot, uint64 scope = 0) noexcept;
 
 // 문맥이 스스로 등록하는 핸들(`cheat.enabled`·`cvar.find`·`cvar.explain`·`cvar.dump`)을 등록한다
 // (Initialize). 오류: Register와 같다.

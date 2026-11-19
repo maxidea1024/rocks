@@ -20,6 +20,18 @@ namespace rocks::cvar {
 //
 // 사용 예:
 //   if (ShadowDistance.Index().IsValid()) { ... }   // 등록된 적이 있다
+// CVar 범위 id다(8절 — ConfigContext::CreateScope가 준다). 값 0은 Global(문맥의 뿌리)이다. id는
+// 프로세스 원자 카운터에서 받고 다시 쓰지 않는다(다른 문맥의 범위 id와도 겹치지 않는다).
+struct CVarScopeId {
+    uint64 value = 0;
+
+    constexpr bool IsGlobal() const noexcept {
+        return value == 0;
+    }
+
+    friend constexpr bool operator==(CVarScopeId left, CVarScopeId right) noexcept = default;
+};
+
 struct Index {
     // 번호 없음(아직 등록되지 않음) 표지다.
     static constexpr uint32 None = NumericLimits<uint32>::Max();

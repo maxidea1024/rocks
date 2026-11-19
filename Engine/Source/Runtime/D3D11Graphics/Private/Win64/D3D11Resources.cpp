@@ -542,7 +542,8 @@ Result<TextureHandle> D3D11Device::CreateTextureView(TextureHandle texture,
     }
 
     if (desc.access == ViewAccess::ReadWrite) {
-        return CreateWritableTextureView(*source, resolved.Value(), range.Value());
+        return CreateWritableTextureView(*source, resolved.Value(), range.Value(),
+                                         TextureViewDimensionOf(source->dimension, desc));
     }
 
     // sRGB 짝 view는 짝 형식이, plane view는 원 형식이 샘플 가능해야 한다.
@@ -561,9 +562,10 @@ Result<TextureHandle> D3D11Device::CreateTextureView(TextureHandle texture,
 
     const PixelFormatPlane& layout = GetPixelFormatInfo(source->format).planes[desc.plane];
     TextureRecord record;
-    // view는 원 텍스처에 참조를 하나 더 잡는다(원 텍스처를 먼저 Retire해도 자원이 산다).
+    // view는 원 텍스처에 참조를 하나 더 잡는다(원 텍스처를 먼저 Retire해도 자원이 산다). 차원은
+    // view 차원이다(SRV ViewDimension, 텍스처 GX2 나머지 B부).
     record.texture = source->texture.Share();
-    record.dimension = source->dimension;
+    record.dimension = TextureViewDimensionOf(source->dimension, desc);
     record.width = MipExtent(source->width, layout.widthShift);
     record.height = MipExtent(source->height, layout.heightShift);
     record.depth = source->depth;
@@ -592,9 +594,10 @@ Result<TextureHandle> D3D11Device::CreateTextureView(TextureHandle texture,
 
 // Storage 텍스처 mip 하나(slice 범위)의 UAV view다(잠금 안, SetWritableTexture로 묶는다). 형식이
 // StorageWrite가 아니면 Unsupported다.
-Result<TextureHandle>
-D3D11Device::CreateWritableTextureView(const TextureRecord& source, PixelFormat format,
-                                       const ResolvedSubresourceRange& range) noexcept {
+Result<TextureHandle> D3D11Device::CreateWritableTextureView(const TextureRecord& source,
+                                                             PixelFormat format,
+                                                             const ResolvedSubresourceRange& range,
+                                                             TextureDimension dimension) noexcept {
     const DXGI_FORMAT uavFormat = MappingOf(format).uav;
     if (!HasPixelFormatCaps(FormatCaps(format), PixelFormatCaps::StorageWrite) ||
         uavFormat == DXGI_FORMAT_UNKNOWN) {
@@ -608,7 +611,7 @@ D3D11Device::CreateWritableTextureView(const TextureRecord& source, PixelFormat 
 
     D3D11_UNORDERED_ACCESS_VIEW_DESC view = {};
     view.Format = uavFormat;
-    switch (source.dimension) {
+    switch (dimension) {
     case TextureDimension::Texture3D:
         view.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE3D;
         view.Texture3D.MipSlice = range.firstMip;
@@ -638,7 +641,7 @@ D3D11Device::CreateWritableTextureView(const TextureRecord& source, PixelFormat 
     }
 
     record.texture = source.texture.Share();
-    record.dimension = source.dimension;
+    record.dimension = dimension;
     record.width = source.width;
     record.height = source.height;
     record.depth = source.depth;
