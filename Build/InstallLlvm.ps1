@@ -1,14 +1,15 @@
 $ErrorActionPreference = 'Stop'
-# Installs a pinned LLVM for Windows hosts whose Visual Studio STL is newer than the preinstalled LLVM (for example the
-# windows-2025-vs2026 runner image: MSVC STL 14.52 rejects Clang older than 22 with STL1000, while the image ships LLVM 20).
+# Installs the pinned, verified LLVM on Windows hosts (CI runner images ship whatever LLVM they carry, e.g. 20.1.8). The MetaCompiler
+# reads Clang's JSON AST type spellings, which changed in Clang 22, so the verified version stays at 21.1.6 until the MetaCompiler
+# supports Clang 22. Pair it with an MSVC toolset whose STL accepts it (ROCKS_MSVC_TOOLSET=14.44; STL 14.52 requires Clang 22).
 # The official installer is unpacked with 7-Zip after the SHA-256 check; its install code is never run. The bin directory goes
 # first on PATH so Rocks.Build and the MetaCompiler discover this clang-cl, lld-link and llvm-lib together.
 if (-not $IsWindows) { throw 'Windows hosts only (macOS uses the Xcode toolchain).' }
 $architecture = [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()
 if ($architecture -ne 'X64') { throw "Unsupported LLVM host architecture: $architecture" }
-$version = '22.1.8'
+$version = '21.1.6'
 $url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-$version/LLVM-$version-win64.exe"
-$sha256 = '16e5709785fef73c854646241c4a92c5cd574318d1b33c63330dd7721903e55c'
+$sha256 = '11d721f66d46b216f69a4a9db75ac8b36933c50c59da83c67129a06740af22fc'
 $destination = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "../out/toolchains/llvm-$version"))
 $bin = Join-Path $destination 'bin'
 $compiler = Join-Path $bin 'clang-cl.exe'
