@@ -4,6 +4,8 @@
 
 근거: [Sparks 언어](SparksLanguage.ko.md)(이하 SL) 초안 1.4, [엔진 구현 계획](EngineImplementationPlan.ko.md)(이하 EIP) 20·22·23절, [엔진 런타임](EngineRuntime.ko.md)(이하 ER) 4.6·7절, [Prefab](Prefab.ko.md)(이하 PF) 개정 5, [UI 툴킷](UiToolkit.ko.md)(이하 UT) 7.3절 (e), [에셋 시스템](AssetSystem.ko.md)(이하 AS) 4.6절, [리플렉션 B9](ReflectionExtensions.ko.md)(이하 RX) 5.2절(클래스 참조). UE 대조는 UE 5.8(5.8.4) 원본을 파일:행으로 확인했다(2절).
 
+사용 흐름: 컴포넌트·액터·레벨 스크립트에 동작을 넣는 작업 순서를 Sparks와 C++로 나눠 [게임플레이 작업 안내](../Guides/GameplayWorkflowGuide.ko.md)에 둔다.
+
 원칙: Blueprint 제외 결정(EIP 20.4·23.1절)을 유지한다. 실행 체계는 C++와 Sparks 하나뿐이다. 구조는 UE 5.8 레벨 블루프린트를 따르고 이름은 Rocks식으로 짓는다. UE 이름은 9절 대응표와 근거 인용에만 둔다. UE보다 엄격하게 정한 곳은 그 자리에 적는다.
 
 약어:
