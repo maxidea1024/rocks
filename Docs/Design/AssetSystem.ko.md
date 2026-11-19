@@ -247,7 +247,7 @@ A1a 구현(`Engine/Source/Runtime/AssetRuntime` — `PackageFormat.h`·`PackageW
 8. **진단 모델**: API는 `Result`의 `ErrorCode`, 분류는 `AssetDiagnostic{code, error, asset, related, section, detail}` out 인자다(4.6절 이름표 `AssetDiagnosticCode`). 손상은 `InvalidArgument` + `CorruptPackage`, 버전 축은 `Unsupported` + `UnsupportedVersion`·`NewerVersion`, 할당 실패는 진단 코드 None + 원래 오류다. 그래프 단계 오류는 할당·스레드·종료 오류를 그대로, 미등록 타입(NotFound)·버전(Unsupported)은 `UnsupportedVersion`, 나머지는 `CorruptPackage`로 분류하고 원래 오류를 `error`에 남긴다.
 9. **종류 불일치·버전 판정 보강**: 쿠킹을 기대하는 reader가 에디터 패키지를 받으면 `UnsupportedVersion`(다시 쿠킹), 에디터를 기대하는 reader가 쿠킹 패키지를 받으면 `CorruptPackage`다. 쿠킹 패키지의 미등록 export 타입은 `UnsupportedVersion`, 에디터는 reader가 읽기 전용으로 표시한다(로드는 18). 커스텀 버전 표는 쿠킹이면 현재 표와 전체가 같아야 하고 에디터는 높거나 모르는 id면 읽기 전용이다. 쿠킹 로드에서 Required 실효 값 누락은 `CorruptPackage`다(writer가 Required null을 거부하므로).
 10. **로드 단계 나눔**: `PackageLoadState`(소유 스레드에서 생성 → `Prepare`는 어느 스레드: 헤더·표·섹션 검증, bulk 해제·SHA-256, graph 1단계, 저장 버전·BulkDataRef·Dependencies 대조) → `InstantiatePackages`(소유 스레드, SCC 묶음 한 트랜잭션: Package·노드 생성 → import 해석 → 적용 → Required → id·bulk 설정) → 호출자 Commit. 묶음 밖 import는 `PackageImportResolver`가 찾는다.
-11. **bulk 해제 메모리 상한(설계 메모)**: `DecodePackageBulk`는 BulkIndex의 rawBytes 합만큼 출력 버퍼를 먼저 잡은 뒤 entry마다 풀고 SHA-256을 대조한다. codec None은 stored = raw이고 stored가 파일 안에 있어야 하므로 raw가 파일 크기를 넘지 못한다. Zstd entry는 손상된 rawBytes가 작은 stored로 큰 할당을 요구할 수 있으므로 합의 상한 `PackageLoadOptions::maxBulkRawBytes`(넘으면 `CapacityExceeded` — 자원 한도라 손상이 아니다)가 그 할당을 묶는다. 기본값 16 GiB는 시험·도구용 상한이고, 런타임 로더(A1c)는 매니페스트의 패키지 크기와 11.5절 1번의 임시 버퍼 예산으로 로드 작업마다 이 값을 정한다(예산을 넘는 패키지는 대기 — 같은 절). Zstd entry는 블록 컨테이너 헤더의 rawSize를 BulkIndex rawBytes와 해제 전에 대조한다(다르면 `CorruptPackage`).
+11. **bulk 해제 메모리 상한(설계 메모)**: `DecodePackageBulk`는 BulkIndex의 rawBytes 합만큼 출력 버퍼를 먼저 잡은 뒤 entry마다 풀고 SHA-256을 대조한다. codec None은 stored = raw이고 stored가 파일 안에 있어야 하므로 raw가 파일 크기를 넘지 못한다. Zstd entry는 손상된 rawBytes가 작은 stored로 큰 할당을 요구할 수 있으므로 합의 상한 `PackageLoadOptions::maxBulkRawBytes`(넘으면 `CapacityExceeded` — 자원 한도라 손상이 아니다)가 그 할당을 묶는다. 기본값 16 GiB는 시험·도구용 상한이고, 런타임 로더(A1c)는 매니페스트 항목의 bulkRawBytes(10.1절 5 — 패키지 BulkIndex rawBytes 합)와 11.5절 1번의 임시 버퍼 예산으로 로드 작업마다 이 값을 정한다(예산을 넘는 패키지는 대기 — 같은 절). Zstd entry는 블록 컨테이너 헤더의 rawSize를 BulkIndex rawBytes와 해제 전에 대조한다(다르면 `CorruptPackage`).
 12. **할당 실패 분류**: reader·writer·Prepare·InstantiatePackages의 모든 할당 실패는 `OutOfMemory`이고 진단 코드는 None이다(손상으로 분류하지 않는다 — 다시 시도하면 열릴 수 있다). 처음 구현은 Summary 타입 표와 export 타입 집합의 대조에서 할당 실패를 `CorruptPackage`로 돌려줬고 할당 실패 주입 시험(`AssetPackage_AllocationFailures`)이 잡아 고쳤다.
 13. **import 표 순서·작업량 상한**(빈틈 리뷰 반영): 처음 구현은 import를 (assetId, 전체 객체 경로 byte) 순으로 정렬해 writer가 초안마다 전체 경로 문자열을 만들고(Outer 사슬마다 반복), reader·로드가 import마다 경로를 처음부터 다시 만들었다(깊이² — 깊이 2040 사슬 아래 잎 6만 개면 수억 단계, 경로 문자열 메모리 수백 MiB). 다음으로 바꿨다.
     - 순서는 5.2절 깊이 우선(같은 outer 아래 이름 byte 순)이다. 경로 byte 순은 '-'(0x2D)가 '.'보다 작아 부분 트리가 끊길 수 있어 한 번 훑기로 검증할 수 없다. 깊이 우선이면 reader가 export 표와 같은 경로 스택으로 항목 수에 비례해 검증하고, 경로 길이는 outer 길이 + 1 + 이름 길이로 이어 센다(문자열을 만들지 않는다).
@@ -366,7 +366,7 @@ World 객체는 에셋 객체 Registry 밖에 있어 `ObjectRef<에셋>`을 걸 
   3. 매니페스트를 임시 파일에 써서 Flush하고 `Replace`로 한 번에 바꾼다(POSIX는 쿠킹 루트도 동기화된다).
   매니페스트 교체가 유일한 전환점이므로 reader는 이전 매니페스트(이전 파일이 모두 있음) 또는 새 매니페스트(새 파일이 모두 있음)만 본다. 실패하면 매니페스트는 그대로이고 놓인 새 파일은 다음 전체 쿠킹이 지운다.
 - 전체 쿠킹(`asset-cook --profile=X`)은 매니페스트를 바꾼 뒤 새 매니페스트가 가리키지 않는 패키지 파일을 지운다(이전 매니페스트로 이미 실행 중인 게임은 그 파일을 `NotFound`로 받는다 — 개발용 쿠킹 디렉터리의 한계이며 배포본은 바뀌지 않는다). 부분 쿠킹은 대상만 다시 만들고 기존 매니페스트에 병합하며 패키지 파일은 지우지 않는다(사라진 에셋의 매니페스트 항목만 뺀다). 병합은 기존 매니페스트의 프로파일 id·프로파일 출력 설정 SHA-256·CookSettings SHA-256·쿠커 버전이 모두 같을 때만 하고, 다르면 `IncompatibleCook`(전체 쿠킹 필요)이다. 처리기·포맷·타입 스키마·툴체인 변화는 항목별 cookKey가 잡는다(위 지역 입력).
-- 매니페스트 v1(`CookedManifest.rman`): 헤더 `{ "RMAN", 버전 1, 항목 수, 프로파일 id, 프로파일 출력 설정 SHA-256, CookSettings SHA-256, 쿠커 버전, cookedByEngineVersion(주·부·패치 — 진단용, 병합·로드 판정에 쓰지 않음) }` + 항목 `{ assetId, typeId, 경로 힌트, 패키지 SHA-256, 패키지 크기, cookKey, PrimaryAsset 표시, bundle 목록, 런타임 의존 목록 { assetId, kind(Hard·Soft) } }`(AssetId 정렬) + 파일 전체 CRC32. 손상은 `CorruptPackage`, 버전 불일치는 `UnsupportedVersion`. 로더는 시작할 때 매니페스트 프로파일 id가 실행 플랫폼의 프로파일과 같은지 확인하고(다르면 `IncompatibleCook`), 패키지를 열 때 크기·SHA-256과 패키지 Dependencies(Hard·Soft)를 매니페스트와 대조한다(다르면 `CorruptPackage`). SCC 계산은 매니페스트의 Hard 의존으로 로드 전에 한다.
+- 매니페스트 v1(`CookedManifest.rman`): 헤더 `{ "RMAN", 버전 1, 항목 수, 프로파일 id, 프로파일 출력 설정 SHA-256, CookSettings SHA-256, 쿠커 버전, cookedByEngineVersion(주·부·패치 — 진단용, 병합·로드 판정에 쓰지 않음) }` + 항목 `{ assetId, typeId, 경로 힌트, 패키지 SHA-256, 패키지 크기, bulkRawBytes(BulkIndex rawBytes 합 — 10.1절 5), cookKey, PrimaryAsset 표시, bundle 목록, 런타임 의존 목록 { assetId, kind(Hard·Soft) } }`(AssetId 정렬) + 파일 전체 CRC32. 손상은 `CorruptPackage`, 버전 불일치는 `UnsupportedVersion`. 로더는 시작할 때 매니페스트 프로파일 id가 실행 플랫폼의 프로파일과 같은지 확인하고(다르면 `IncompatibleCook`), 패키지를 열 때 크기·SHA-256을 먼저 보고 그다음 패키지 종류·assetId·대표 에셋 타입·bulk raw 합·Summary 프로파일 칸·Dependencies(Hard·Soft)를 매니페스트와 대조한다(다르면 `CorruptPackage` — 10.1절 8 `CheckCookedPackage`). SCC 계산은 매니페스트의 Hard 의존으로 로드 전에 한다.
 - 도구 빌드 ID·엔진 버전: 빌드 시스템이 쿠커·에디터 도구 실행 파일마다 주입하는 값이며 진단·추적용이다(병합 조건이 아니다). 쿠킹 보고서(엔진 버전은 CookedManifest 헤더의 cookedByEngineVersion에도)에 기록하고 쿠킹 패키지 Summary·cookKey에는 넣지 않는다 — Summary에 있으면 구성 사이 쿠킹 byte 동일(시나리오 13·25)이 깨지고 쿠킹 패키지 이름(내용 주소)이 엔진 빌드마다 바뀐다.
 - 런타임 쿠킹 루트: 도구(`asset-load-cooked`)는 `<Project>/Saved/Cooked/<Profile>/`. 게임은 `EngineAssets`가 명령행 `-CookedRoot=<dir>`(없으면 실행 파일 디렉터리의 `Cooked/`)를 `AssetManager`에 넘긴다. 쿠킹 결과를 배포 위치로 옮기는 패키징 단계는 후속이다.
 - 쿠킹 bulk codec: 프로파일 설정(None·Zstd, 기본 None — 후속 스트리밍의 mip 단위 접근을 위해 entry 단위 압축).
@@ -390,24 +390,24 @@ World 객체는 에셋 객체 Registry 밖에 있어 `ObjectRef<에셋>`을 걸 
          | dependencyCount u32 | { assetId Guid, kind u32 } × m
    ```
    UE TOC처럼 고정 폭 표와 따로 둔 문자열 표로 나누지 않는다 — 항목 수가 패키지 수(수만)라 한 번 읽어 모델로 푸는 비용이 작고, 로더는 모델(정렬된 항목 배열)을 이진 탐색한다. 헤더 크기 칸도 없다(형식이 바뀌면 formatVersion을 올린다).
-2. **판정 순서와 진단**: 길이 ≥ 최소 크기(magic·version·entryCount·crc) → magic → formatVersion(1이 아니면 `UnsupportedVersion` / `Unsupported` — 더 새 것과 옛 것을 구분하지 않는다, 매니페스트는 같은 쿠커 빌드가 다시 만든다) → 파일 CRC32 → 헤더 → 항목 → 항목 사이 규칙 → 끝 위치 = crc 앞. 그 밖의 위반은 모두 `CorruptPackage` / `InvalidArgument`이고 `AssetDiagnostic::section`에 `CookedManifestField`(위반한 칸), `detail`에 항목 번호(헤더 칸이면 `CookedManifestNoEntry`), `asset`에 그 항목 AssetId(읽었으면), `related`에 의존 대상(의존 칸이면)을 둔다. 할당 실패는 진단 None과 그 오류다. CRC를 내용보다 먼저 보므로 우발 손상은 칸 판정 전에 잡힌다(의도적 변조는 서명 봉투 — ContentSigning — 가 막는다).
+2. **판정 순서와 진단**: reader는 두 단계다. (1) 구조: 길이(최소 크기 이상·파일 상한 이하) → magic → formatVersion(1이 아니면 `UnsupportedVersion` / `Unsupported` — 더 새 것과 옛 것을 구분하지 않는다, 매니페스트는 같은 쿠커 빌드가 다시 만든다) → 파일 CRC32 → 헤더 칸 읽기(개수 칸 상한·남은 byte, 문자열 길이·UTF-8, 엔진 버전 u16 범위) → 항목마다 칸 읽기(bundle·의존 개수 칸 상한·남은 byte, 문자열 길이·UTF-8) → 끝 위치 = crc 앞. (2) 칸 규칙: 다 읽은 모델을 `ValidateCookedManifest`가 헤더 → 항목(번호 순, 항목 안은 assetId 순서 → typeId → 경로 → 패키지 크기 → flags → bundle → 의존) → 항목 사이(경로 caseless 유일 → Hard 대상 존재) 순서로 본다. 검증·writer는 (2)만 본다. 그래서 위반이 여럿이면 reader와 검증·writer의 진단이 다를 수 있다 — 예: 항목 0의 정의되지 않은 flags와 항목 1의 bundle 개수 칸 상한 초과가 함께 있으면 reader는 (1)에서 항목 1 BundleCount, 검증·writer는 (2)에서 항목 0 Flags다(`CookedManifest_JudgementOrder`의 우선순위 표 — 길이·magic·버전·CRC·남는 byte·항목 사이·병합·패키지 대조의 겹친 위반). 위반이 하나면 세 경로의 진단이 같다. 그 밖의 위반은 모두 `CorruptPackage` / `InvalidArgument`이고 `AssetDiagnostic::section`에 `CookedManifestField`(위반한 칸), `detail`에 항목 번호(헤더 칸이면 `CookedManifestNoEntry`), `asset`에 그 항목 AssetId(읽었으면), `related`에 의존 대상(의존 칸이면)을 둔다. 할당 실패는 진단 None과 그 오류다. CRC를 내용보다 먼저 보므로 우발 손상은 칸 판정 전에 잡힌다(의도적 변조는 서명 봉투 — ContentSigning — 가 막는다).
 3. **상한**(이름 있는 상수): 파일 `CookedManifestMaxFileBytes` = 1 GiB, 항목 `CookedManifestMaxEntries` = 2²⁰, 항목당 bundle `CookedManifestMaxBundles` = 256, 항목당 의존 `CookedManifestMaxDependencies` = 65536, 프로파일 id·경로 힌트 길이는 각각 4 KiB(패키지 문자열 상한)·256 byte(4.2절). 개수 칸은 남은 byte로 담을 수 있는 최소 항목 수보다 크면 읽기 전에 거부한다(작은 파일이 큰 할당을 요구하지 못한다).
 4. **헤더 칸**: profileId는 비어 있지 않은 UTF-8(패키지 Summary profileId와 같은 규칙), cookedByEngineVersion은 u16 범위(진단용 — 병합·로드 판정에 쓰지 않는다, 10절). 문자열 칸(profileId·경로 힌트·bundle)의 잘못된 UTF-8은 reader의 문자열 읽기가 그 칸의 손상으로 거부한다. 모델의 `String`은 유효한 UTF-8만 담으므로(Core 불변식) 검증 함수는 UTF-8을 다시 보지 않는다.
 5. **항목 칸**:
    - assetId: null 아님, 항목 사이 엄격 오름차순(Guid (high, low) 부호 없는 순 — 중복 없음).
-   - typeId: null 아님(대표 에셋 export 타입 — 패키지 대조 6).
+   - typeId: null 아님(대표 에셋 export 타입 — 8항 `CheckCookedPackage`).
    - pathHint: 4.2절 논리 경로 — 앞 `/`, 구성 요소 둘 이상(마운트 + 이름), 구성 요소마다 Core `ValidateNameComponent`, 전체 ≤ 256 byte. 경로 힌트는 caseless 키(`TryMakeNameComponentKey`를 구성 요소마다 '/'로 이은 것)로 항목 사이 유일하다(`FindByPath`가 한 항목을 찾는다). 마운트 이름의 허용 목록(`/Game` 등)은 ProjectLayout(A2) 몫이라 보지 않는다.
    - packageBytes: 패키지 헤더 64 byte 이상, 패키지 상한 64 GiB 이하.
-   - bulkRawBytes: 패키지 BulkIndex rawBytes 합(10절 항목 표에 더한 칸). 로더(A1c)가 `PackageLoadOptions::maxBulkRawBytes`를 이 값으로 정한다(5.7절 11 — 패키지마다 정확한 해제 상한이라 손상된 rawBytes가 큰 할당을 요구하지 못한다). 패키지 대조 6이 같은지 본다. UE TOC의 청크 압축 해제 크기 표(`FIoOffsetAndLength`)에 대응한다.
+   - bulkRawBytes: 패키지 BulkIndex rawBytes 합(10절 항목 표에 더한 칸). 로더(A1c)가 `PackageLoadOptions::maxBulkRawBytes`를 이 값으로 정한다(5.7절 11 — 패키지마다 정확한 해제 상한이라 손상된 rawBytes가 큰 할당을 요구하지 못한다). 8항 `CheckCookedPackage`가 같은지 본다. UE TOC의 청크 압축 해제 크기 표(`FIoOffsetAndLength`)에 대응한다.
    - flags: bit0 = PrimaryAsset(`CookedManifestFlags::PrimaryAsset`), 그 밖의 비트는 0.
    - bundles: PrimaryAsset 항목만 가진다(PrimaryAsset이 아니면 0개 — UE에서 bundle은 PrimaryAsset 데이터다). 이름은 `ValidateNameComponent`, 항목 안에서 byte 엄격 오름차순이고 caseless 키로도 중복이 없다.
    - dependencies: 런타임 의존(Hard·Soft — kind 값은 패키지 `PackageDependencyKind`의 1·2), (assetId, kind) 엄격 오름차순, assetId null·자기 자신 금지. 같은 대상에 Hard와 Soft가 함께 있을 수 있다(패키지 Dependencies와 같다).
 6. **항목 사이 규칙**: Hard 의존 대상은 매니페스트에 있어야 한다(쿠킹은 Hard 전이 폐포다 — 없으면 `CorruptPackage`, related = 대상). Soft 대상은 없어도 된다(`CookSoftReferences`가 꺼져 있으면 쿠킹하지 않는다). 순환(SCC)은 허용한다 — 로드 단위 계산은 로더(A1c)가 이 Hard 간선으로 한다.
-7. **writer**(`WriteCookedManifest`): 모델을 6까지 같은 규칙으로 검증한 뒤(위반은 쓰지 않고 `InvalidArgument` + 같은 진단 — reader가 거부할 byte를 쓰지 않는다) 결정적으로 직렬화한다. 모델은 이미 정렬되어 있어야 한다(writer가 정렬하지 않는다 — 쿠커가 정렬해 넘기고, 순서 위반은 오류로 드러난다). 출력은 메모리 버퍼이고 게시(임시 파일·Flush·Replace)는 쿠커(A4) 몫이다(10절 게시 3).
+7. **writer**(`WriteCookedManifest`): 모델을 6까지 같은 규칙으로 검증한 뒤(위반은 쓰지 않고 `InvalidArgument` + 같은 진단 — reader가 거부할 byte를 쓰지 않는다) 결정적으로 직렬화한다. 출력이 `CookedManifestMaxFileBytes`(CRC 칸 포함 파일 전체)를 넘으면 `CapacityExceeded`(진단 None, out 그대로)다 — 처음 구현은 상한에서 CRC 4 byte를 한 번 더 빼 1 GiB − 4까지만 썼다. 상한을 인자로 받는 내부 함수(`package_detail::WriteCookedManifestWithLimit`)로 경계를 시험한다. 모델은 이미 정렬되어 있어야 한다(writer가 정렬하지 않는다 — 쿠커가 정렬해 넘기고, 순서 위반은 오류로 드러난다). 출력은 메모리 버퍼이고 게시(임시 파일·Flush·Replace)는 쿠커(A4) 몫이다(10절 게시 3).
 8. **대조 함수**:
    - `CheckCookedManifestProfile`(로더 시작): 매니페스트 profileId ≠ 실행 프로파일이면 `IncompatibleCook` / `Unsupported`.
    - `CheckCookedManifestMerge`(부분 쿠킹 병합): profileId·profileSettings·cookSettings·cookerVersion이 모두 같아야 하고, 아니면 `IncompatibleCook` / `Unsupported`(section = 다른 칸 — 처음 다른 칸 하나).
-   - `CheckCookedPackage`(로더가 패키지를 연 뒤): 파일 길이 = packageBytes, SHA-256 = packageSha256, 그다음 `ReadPackage` 결과와 — 헤더 종류 쿠킹, assetId, 대표 에셋 타입(export 1) = typeId, BulkIndex rawBytes 합 = bulkRawBytes, Summary profileId·profileSettings·cookerVersion = 매니페스트 헤더, 패키지 Dependencies의 (Hard·Soft) 집합 = 매니페스트 의존 집합(쿠킹 패키지에는 다른 종류가 없다). 다르면 `CorruptPackage` / `InvalidArgument`, section = `CookedManifestField`의 그 칸, asset = 그 에셋. 크기·SHA-256은 `ReadPackage` 전에 본다(바뀐 파일을 해석하지 않는다).
+   - `CheckCookedPackage`(로더가 패키지를 연 뒤): 파일 길이 = packageBytes, SHA-256 = packageSha256, 그다음 `ReadPackage` 결과와 — 헤더 종류 쿠킹, assetId, 대표 에셋 타입(export 1) = typeId, BulkIndex rawBytes 합 = bulkRawBytes(합이 u64를 넘으면 — 호출자가 손상된 내용을 넘긴 경우 — 2⁶⁴로 감은 값이 같아도 불일치), Summary profileId·profileSettings·cookerVersion = 매니페스트 헤더, 패키지 Dependencies(Hard·Soft, (asset, kind) 순서) = 매니페스트 의존 배열(같은 순서로 하나씩 — 쿠킹 패키지에는 다른 종류가 없다). 다르면 `CorruptPackage` / `InvalidArgument`, section = `CookedManifestField`의 그 칸, detail = `CookedManifestNoEntry`, asset = 그 에셋, 의존이면 related = 처음 다른 자리의 의존 대상(매니페스트 쪽이 있으면 그것, 없으면 패키지 쪽). 크기·SHA-256은 `ReadPackage` 전에 본다(바뀐 파일을 해석하지 않는다).
    - `AppendCookedPackagePath`: 4.2절 파일 이름 `Packages/<a>/<A>-<h>.rpkg`(쿠킹 루트 기준)을 만든다.
 9. **로더 API 염두**: 매니페스트 모델은 AssetId 오름차순 배열이고 `Find(AssetId)`(이진 탐색)를 둔다. 경로 힌트 조회 색인(`FindByPath`)과 Hard SCC 계산은 그것을 쓰는 로더·AssetManager(A1c)가 만든다(여기서는 그 입력 — 경로 힌트 caseless 유일성, Hard 대상 존재 — 만 보장한다). 서명 봉투(ContentSigning CS1)는 같은 버퍼를 검증한 뒤 이 reader에 그 매니페스트 byte span을 넘긴다(reader는 파일을 열지 않는다).
 
@@ -982,24 +982,28 @@ A1a 상태(2026-11-20): **구현**. 완료 조건 넷을 모두 갖췄다. 빈�
 
 #### 14.1.3 요구 대조표(A1b — 쿠킹 매니페스트 v1)
 
-항목마다 그것을 확인하는 시험이다(EngineTests, `Engine/Source/Runtime/AssetRuntime/Tests/ManifestTests.cpp`·`ManifestScaleTests.cpp` — 정의된 시험 12개를 모두 표가 인용한다). 시험 도구(`ManifestTestSupport.h`)의 시험 인코더는 검증하지 않고 10.1절 1 배치로 쓰며(규칙을 어긴 모델을 reader에 넣는다), writer 출력과 byte가 같음을 왕복 시험이 확인한다.
+항목마다 그것을 확인하는 시험이다(EngineTests, `Engine/Source/Runtime/AssetRuntime/Tests/ManifestTests.cpp`·`ManifestScaleTests.cpp` — 정의된 시험 16개를 모두 표가 인용한다). 시험 도구(`ManifestTestSupport.h`)의 시험 인코더는 검증하지 않고 10.1절 1 배치로 쓰며(규칙을 어긴 모델을 reader에 넣는다), writer 출력과 byte가 같음을 왕복 시험이 확인한다.
 
 | 요구(절) | 항목 | 시험 |
 |---|---|---|
-| 배치·결정성(10.1-1) | 쓰고 읽으면 같은 모델, 다시 쓰면 같은 byte, 시험 인코더 = writer byte, 빈 매니페스트, `Find`(있는 id 셋·없는 id 앞·사이·뒤) | `CookedManifest_RoundTrip` |
+| 배치·결정성(10.1-1) | 쓰고 읽으면 같은 모델, 다시 쓰면 같은 byte, 시험 인코더 = writer byte, 빈 매니페스트, 비ASCII NFC 경로·bundle(`/Game/Ärger`·`Äb`) 왕복, `Find`(기본 장면의 있는 id 셋, 10·12·14 장면에서 있는 id 셋·없는 id 앞 1·사이 11·13·뒤 15) | `CookedManifest_RoundTrip` |
 | | 고정 byte(고정 장면 출력 SHA-256, 체크인한 v1 byte와 같음, 그 byte를 읽고 다시 쓰면 같음) | `CookedManifest_GoldenBytes` |
-| 판정 순서·진단(10.1-2) | 최소 길이 미만(빈 입력·모든 길이), 파일 상한 초과(내용 읽기 전), magic 네 byte, formatVersion 0·2·최댓값(UnsupportedVersion / Unsupported), CRC(끝 칸·본문 bit), 남는 byte, 모든 길이 자르기(CRC 맞춤 — 언제나 손상, 빈 매니페스트는 헤더 칸 다섯 각각의 잘림에 닿음) | `CookedManifest_StructureTampering` |
-| 상한(10.1-3) | 항목 수(모델 2²⁰ + 1 — 검증·쓰기, 개수 칸 상한 + 1·남은 byte로 담을 수 없음·실제보다 큼·작음), bundle 256 받음·257 거부·개수 칸 초과, 의존 65536 받음·65537 거부·개수 칸 초과, 프로파일 4 KiB + 1·길이 칸이 남은 byte보다 큼, 경로 256 받음·257 거부 | `CookedManifest_FieldRules`, `CookedManifest_StructureTampering`, `CookedManifest_EntryCountLimit` |
-| 헤더 칸(10.1-4) | 프로파일 빈 값·잘못된 UTF-8(byte), 엔진 버전 세 칸 각각 u16 초과 | `CookedManifest_FieldRules`, `CookedManifest_StructureTampering` |
-| 항목 칸(10.1-5) | assetId null·중복·역순, typeId null, 경로(빈 값·상대·마운트만·빈 구성 요소·끝 '/'·공백·'.'·예약 이름·비 NFC·'\\'·길이·잘못된 UTF-8 byte), packageBytes 63 거부·64 받음·64 GiB 받음·+1 거부, bulkRawBytes 최댓값 받음, 정의되지 않은 flags 비트 | `CookedManifest_FieldRules`, `CookedManifest_StructureTampering` |
-| | bundle(PrimaryAsset이 아닌 항목·이름 규칙·역순·중복·caseless 중복·잘못된 UTF-8 byte), 의존(null·자기·kind 0·3·4·5·6·최댓값·역순·중복) | `CookedManifest_FieldRules`, `CookedManifest_StructureTampering` |
-| 항목 사이(10.1-6) | 경로 caseless 중복(둘·셋 — 진단 항목은 정렬 뒤 첫 짝의 뒤), 쿠킹되지 않은 Hard 대상(작은 장면·2만 항목 사슬 가운데 삭제), 쿠킹되지 않은 Soft 대상 받음, Hard 순환 받음 | `CookedManifest_FieldRules`, `CookedManifest_LargeManifest`, `CookedManifest_AllCombinations` |
-| writer(10.1-7) | 위반은 쓰지 않음(out 그대로·검증과 같은 진단 — 위반 목록 전부와 항목 수 상한) | `CookedManifest_FieldRules`, `CookedManifest_EntryCountLimit` |
+| 판정 순서·진단(10.1-2) | 최소 길이 미만(빈 입력·모든 길이), 파일 상한 초과(내용 읽기 전 — 길이만 큰 span이라 이 순서에 기댄다), magic 네 byte, formatVersion 0·2·최댓값(UnsupportedVersion / Unsupported, detail = NoEntry·asset null), CRC(끝 칸, 개수 칸 최상위 byte — CRC 미보정이면 Crc·보정하면 EntryCount라 CRC가 구조보다 먼저), 남는 byte, 모든 길이 자르기(CRC 맞춤 — 언제나 손상, 빈 매니페스트는 헤더 칸 다섯 각각의 잘림에 닿음) | `CookedManifest_StructureTampering` |
+| | 항목 칸 잘림: 항목 둘인 매니페스트를 항목 1 안의 모든 위치로 자름 → 칸 11개(assetId·typeId·경로·SHA-256·packageBytes·bulkRawBytes·cookKey·flags·bundle 개수·bundle·의존 개수) 범위표대로 그 칸·항목 1·asset(assetId 잘림은 null, 나머지 11) | `CookedManifest_EntryTruncation` |
+| | 겹친 위반의 우선순위 표 10줄: 길이 10 + magic → File, magic + 버전 → Magic, 버전 + CRC → UnsupportedVersion, 빈 프로파일 + CRC → Crc, 남는 byte + 빈 프로파일 → File, 항목 0 flags=2 + 항목 1 bundle 257개 → reader BundleCount/1·검증·writer Flags/0, 경로 중복 + 쿠킹되지 않은 Hard → PathHint/2(세 경로), 병합 profileId + cookerVersion → ProfileId, 패키지 대조 길이 다른 파일 + 다른 패키지 내용 → PackageBytes, SHA만 다른 파일 + 다른 패키지 내용 → PackageSha256(같은 파일이면 AssetId — 대조) | `CookedManifest_JudgementOrder` |
+| 상한(10.1-3) | 항목 수(모델 2²⁰ + 1 — 검증·쓰기, 항목 배열 약 226 MB를 한 번에 잡는 시험; 개수 칸 상한 + 1·남은 byte로 담을 수 없음·실제보다 큼·작음), bundle 256 받음·257 거부·개수 칸 초과, 의존 65536 받음·65537 거부·개수 칸 초과, 프로파일 4096 byte 받음(쓰기·읽기)·4 KiB + 1·길이 칸이 남은 byte보다 큼, 경로 256 받음·257 거부(정확히 상한 + 1)·265 거부 | `CookedManifest_FieldRules`, `CookedManifest_StructureTampering`, `CookedManifest_EntryCountLimit` |
+| | 할당 상한: 개수 칸이 큰 입력(항목 1000·bundle 100000·의존 50000)과 정상 입력에서 reader의 가장 큰 할당 요청 ≤ 입력 byte × 4(기록 allocator) | `CookedManifest_AllocationBound` |
+| 헤더 칸(10.1-4) | 프로파일 빈 값·잘못된 UTF-8(byte), 엔진 버전 세 칸 각각 u16 초과·세 칸 모두 0xFFFF 받음 | `CookedManifest_FieldRules`, `CookedManifest_StructureTampering` |
+| 항목 칸(10.1-5) | 위반마다 칸·항목과 asset·related를 검증·writer·reader 세 경로에서 단언(헤더 칸 asset null, 경로 중복은 그 항목 asset), assetId null·중복·역순, typeId null, 경로(빈 값·상대·마운트만·빈 구성 요소·끝 '/'·공백·'.'·예약 이름·비 NFC·'\\'·길이·잘못된 UTF-8 byte), packageBytes 63 거부·64 받음·64 GiB 받음·+1 거부, bulkRawBytes 최댓값 받음, 정의되지 않은 flags 비트 | `CookedManifest_FieldRules`, `CookedManifest_StructureTampering` |
+| | bundle(PrimaryAsset이 아닌 항목·이름 규칙·역순·중복·caseless 중복(ASCII·비ASCII `Äb`·`äb`)·잘못된 UTF-8 byte), 의존(null — related null·자기·kind 0·3·4·5·6·최댓값·역순 — related 5·중복, 의존 위반은 related = 그 의존 대상) | `CookedManifest_FieldRules`, `CookedManifest_StructureTampering` |
+| 항목 사이(10.1-6) | 경로 caseless 중복(둘·셋·비ASCII `/Game/Ärger`·`/game/ärger` — 진단 항목은 정렬 뒤 첫 짝의 뒤), 쿠킹되지 않은 Hard 대상은 related = 그 대상(99), 쿠킹되지 않은 Hard 대상(작은 장면·2만 항목 사슬 가운데 삭제), 쿠킹되지 않은 Soft 대상 받음, Hard 순환 받음 | `CookedManifest_FieldRules`, `CookedManifest_LargeManifest`, `CookedManifest_AllCombinations` |
+| writer(10.1-7) | 위반은 쓰지 않음(미리 채운 out `{0xAA, 0xBB}` 그대로·검증과 같은 진단 — 위반 목록 전부와 항목 수 상한) | `CookedManifest_FieldRules`, `CookedManifest_EntryCountLimit` |
+| | 파일 상한은 CRC 칸 포함 전체: `WriteCookedManifestWithLimit` 상한 = 출력 크기는 받음(공개 writer와 같은 byte), 출력 크기 − 1은 `CapacityExceeded`(진단 None, out 그대로) | `CookedManifest_WriteLimit` |
 | 대조(10.1-8) | 실행 프로파일 같음·다름·대소문자만 다름(IncompatibleCook), 병합 네 칸 각각 다름(그 칸)·엔진 버전만 다름은 받음 | `CookedManifest_ProfileAndMergeChecks` |
-| | 패키지 대조: A1a writer가 쓴 쿠킹 패키지(Hard·Soft 의존·Zstd bulk, EditorOnly bulk는 raw 합에서 빠짐)가 그 결과로 만든 항목과 맞음, 크기(파일 덧붙임·항목)·SHA-256(파일·항목)·종류(에디터 패키지)·assetId·대표 에셋 타입·export 없는 내용·bulk raw 합·프로파일(id·설정·쿠커 버전)·의존(빠짐·남음·종류·대상·전부 없음) | `CookedManifest_PackageCrossCheck` |
+| | 패키지 대조: A1a writer가 쓴 쿠킹 패키지(Hard·Soft 의존 — Soft 대상 1700이 Hard 대상 1801보다 앞인 (asset, kind) 순서, 같은 대상 Hard+Soft 패키지 — ·Zstd bulk, EditorOnly bulk는 raw 합에서 빠짐)가 그 결과로 만든 항목과 맞음, 크기(파일 덧붙임·항목)·SHA-256(파일·항목)·종류(에디터 패키지)·assetId·대표 에셋 타입·export 없는 내용·bulk raw 합(하나 작음·u64를 넘는 합 — 감으면 같은 값)·프로파일(id·설정·쿠커 버전)·의존(빠짐·남음·종류·대상·전부 없음·종류 먼저 순서·같은 대상의 Soft 빠짐·종류 뒤바뀜 — related는 처음 다른 의존 대상 1801·1900·1801·1899·1700) | `CookedManifest_PackageCrossCheck` |
 | 파일 경로(4.2) | `Packages/<a>/<A>-<h>.rpkg`(앞 내용 뒤에 붙임), 모든 할당 지점 실패 | `CookedManifest_PackagePath` |
-| 자원 실패 | 쓰기·읽기·검증의 모든 할당 지점(진단 None, 쓰기 out 그대로 — 비교 키 성장 포함) | `CookedManifest_AllocationFailures` |
-| 조합(14 완료 조건 2) | PrimaryAsset·bundle 없음·하나·여럿 × 의존 없음·Hard·Soft·같은 대상 Hard+Soft·쿠킹되지 않은 Soft·Hard 순환 × 경로 얕음·깊음의 모든 허용 조합(읽은 결과에서 다시 세어 빠진 조합 검사), 금지 조합(일반 항목의 bundle)은 칸 규칙 | `CookedManifest_AllCombinations`, `CookedManifest_FieldRules` |
+| 자원 실패 | 쓰기·읽기·검증의 모든 할당 지점(진단 None, 미리 채운 쓰기 out 그대로 — 비교 키 성장, NFC quick check가 MAYBE인 경로·bundle(U+1EA1 U+0301)의 NFC 확인 scratch와 비ASCII caseless 키 할당 포함) | `CookedManifest_AllocationFailures` |
+| 조합(14 완료 조건 2) | (PrimaryAsset × bundle 없음·하나·여럿 + 일반) 4 × 의존 특성 다섯(쿠킹된 Hard·Hard 순환·쿠킹된 Soft·쿠킹되지 않은 Soft·같은 대상 Hard+Soft)의 부분집합 32 × 경로(얕음·깊음·비ASCII NFC) 3 = 384 조합 전부(읽은 항목마다 조합 번호를 다시 계산해 만든 번호와 같음 — 일대일, 플래그가 늘면 `static_assert`가 막음), 금지 조합(일반 항목의 bundle)은 칸 규칙 | `CookedManifest_AllCombinations`, `CookedManifest_FieldRules` |
 | 규모 | 항목 2만(깊이 2만 Hard 사슬·8개 단위 순환·쿠킹되지 않은 Soft·PrimaryAsset bundle) 왕복·Find·같은 byte | `CookedManifest_LargeManifest` |
 | 변조·퍼징 | 고정 seed 4000회(byte 바꾸기·자르기·덧붙이기, 절반 CRC 맞춤 — 정해진 진단만, 거부·받아들임 모두, 받아들인 입력은 다시 쓰면 같은 byte) | `CookedManifest_FixedSeedMutationFuzz` |
 | | 게시(임시 파일·Flush·Replace)·부분 쿠킹 병합 실행·cookKey 계산 | 범위 밖(A4 쿠커 — 대조 함수는 여기) |
@@ -1008,12 +1012,28 @@ A1a 상태(2026-11-20): **구현**. 완료 조건 넷을 모두 갖췄다. 빈�
 
 #### 14.1.4 Coverage(A1b)
 
-측정(2026-11-20, 14.1.2와 같은 명령에 filter `CookedManifest`를 더함 — `-Filter AssetPackage,FixtureAsset,CookedManifest`, AssetPackage 71개·FixtureAsset 8개·CookedManifest 12개 시험 모두 통과): 매니페스트 파일 `Private/CookedManifest.cpp` 줄 100%(531/531)·분기 100%(292/292)·함수 100%(23/23), `Public/AssetRuntime/CookedManifest.h` 줄 100%(6/6)·함수 100%(4/4)(분기 없음). 닿지 않은 분기가 없고 불변식 검사(`ROCKS_ASSERT`)도 쓰지 않는다. AssetRuntime 전체(A1a 파일 포함)는 줄 99.91%(3161/3164)·분기 97.56%(1838/1884)·함수 100%(149/149)이고 닿지 않은 분기는 14.1.2의 A1a 항목 그대로다.
+측정(2026-11-20, 14.1.2와 같은 명령에 filter `CookedManifest`를 더함 — `-Filter AssetPackage,FixtureAsset,CookedManifest`, AssetPackage 71개·FixtureAsset 8개·CookedManifest 16개 시험 모두 통과): 매니페스트 파일 `Private/CookedManifest.cpp` 줄 100%(540/540)·분기 100%(296/296)·함수 100%(24/24), `Public/AssetRuntime/CookedManifest.h` 줄 100%(6/6)·함수 100%(4/4)(분기 없음). 닿지 않은 분기가 없다. AssetRuntime 전체(A1a 파일 포함)는 줄 99.91%(3170/3173)·분기 97.56%(1842/1888)·함수 100%(150/150)이고 닿지 않은 분기는 14.1.2의 A1a 항목 그대로다.
+
+`ROCKS_ASSERT`는 쓰지 않지만, 결과를 확인하지 않는 불변식이 10곳 있다(`Result::Value()`는 실패 결과면 `platform::Fatal`로 멈추고, `(void)`로 버린 결과는 실패하면 조용히 빠진다 — 그래서 각각 입력으로 실패에 닿을 수 없음을 근거로 둔다). 줄 번호는 이 측정의 `Private/CookedManifest.cpp` 기준이다.
+
+| 줄 | 불변식 | 근거 |
+|---|---|---|
+| 170 | bundle 비교 키 `keys.TryEmplaceBack(scratch).Value()` | 바로 앞에서 bundle 수만큼 `TryReserve`했고, 빈 `String` 추가는 할당하지 않는다 |
+| 286 | 경로 비교 키 `keys.TryEmplaceBack(scratch).Value()` | 항목 수만큼 예약했다(같은 이유) |
+| 291 | `(void)order.TryPushBack(...)` | 항목 수만큼 예약했다 — 예약 안 추가는 실패하지 않는다 |
+| 425–427 | `ArchiveReader::Create(...).Value()` | 넘기는 span 길이 ≤ `limits.maxTotalBytes`(= body)라 Create의 유일한 실패(`CapacityExceeded`)가 없다 |
+| 430–431 | 항목 수 칸 `in.ReadU32()` 결과의 `Value()` | 길이 ≥ `MinFileBytes`(magic·version·개수·crc)를 먼저 보아 개수 칸 4 byte가 있다 |
+| 485–487 | 항목 `manifest.entries.TryEmplaceBack(allocator)` 결과의 `Value()` | 개수 칸 값만큼 예약했다(항목 생성자는 할당하지 않는다) |
+| 552 | bundle `entry.bundles.TryEmplaceBack(allocator).Value()` | bundle 개수만큼 예약했다 |
+| 570 | 의존 대상 `in.ReadGuid().Value()` | 의존 개수 ≤ 남은 byte / 20을 먼저 보았다 — 의존 칸은 잘리지 않는다 |
+| 571 | 의존 kind `in.ReadU32().Value()` | 같은 개수 검사 |
+| 572 | `(void)entry.dependencies.TryPushBack(...)` | 의존 개수만큼 예약했다 |
 
 닿게 한 방법과 그 과정에서 바꾼 것:
-- 입력 변조: 시험 인코더(검증하지 않음)로 칸마다 위반 모델을 reader에 넣고, 원시 칸 덮어쓰기(개수·길이·엔진 버전·kind·magic·formatVersion·남는 byte)와 CRC를 다시 맞춘 자르기(항목이 있는 매니페스트는 개수 칸 판정에서, 빈 매니페스트는 헤더 칸마다)로 구조 판정에 닿는다. 잘못된 UTF-8은 모델 `String`이 담을 수 없어 인코딩한 byte를 고쳐 넣는다.
-- 실패 주입: 쓰기·읽기·검증의 모든 할당 지점(NFailAllocator sweep). 비교 키 builder는 내장 용량을 작게 두어(7 byte) 구성 요소 키와 구분자 양쪽에서 자라고, sweep 장면의 경로 길이(첫 구성 요소 6·13·27 byte — 용량을 꼭 채운다)로 두 성장 지점에 닿는다.
-- 처음 구현에서 없앤 죽은 분기(입력으로 닿을 수 없음을 확인): 예약한 배열에 빈 String을 더하는 실패(예약 뒤라 할당하지 않는다), 최소 길이가 보장한 개수 칸 읽기 실패, 모델 `String`의 UTF-8 재검사(Core 불변식), CRC 칸 쓰기 실패(자리를 본문과 함께 쓰고 다 쓴 뒤 채운다).
+- 입력 변조: 시험 인코더(검증하지 않음)로 칸마다 위반 모델을 reader에 넣고, 원시 칸 덮어쓰기(개수·길이·엔진 버전·kind·magic·formatVersion·남는 byte)와 CRC를 다시 맞춘 자르기(항목이 있는 매니페스트는 개수 칸 판정에서, 빈 매니페스트는 헤더 칸마다, 항목 둘인 매니페스트는 항목 1의 칸마다 — `CookedManifest_EntryTruncation`)로 구조 판정에 닿는다. 잘못된 UTF-8은 모델 `String`이 담을 수 없어 인코딩한 byte를 고쳐 넣는다. 파일 상한 초과 시험은 길이만 큰 span을 넘기므로 읽기 전에 길이로 거부하는 순서에 기댄다(순서가 바뀌면 경계 밖 읽기가 된다).
+- 실패 주입: 쓰기·읽기·검증의 모든 할당 지점(NFailAllocator sweep). 비교 키 builder는 내장 용량을 작게 두어(7 byte) 구성 요소 키와 구분자 양쪽에서 자라고, sweep 장면의 경로 길이(첫 구성 요소 6·13·27 byte — 용량을 꼭 채운다)로 두 성장 지점에 닿는다. 장면의 경로·bundle 하나씩은 NFC quick check가 MAYBE인 문자열(U+1EA1 U+0301)이라 `ValidateNameComponent`의 NFC 확인 scratch 할당(bundle 쪽 실패 → 진단 None 경로 포함)과 비ASCII caseless 키 할당에도 닿는다.
+- writer 상한: 상한을 인자로 받는 내부 함수(`package_detail::WriteCookedManifestWithLimit`)로 `CapacityExceeded`에 닿는다(1 GiB 모델 없이). 처음 구현은 상한에서 CRC 4 byte를 한 번 더 빼 1 GiB − 4까지만 썼다(리뷰 지적 — 고침).
+- 처음 구현에서 없앤 죽은 분기(입력으로 닿을 수 없음을 확인): 예약한 배열에 빈 String을 더하는 실패, 최소 길이가 보장한 개수 칸 읽기 실패, 모델 `String`의 UTF-8 재검사(Core 불변식), CRC 칸 쓰기 실패(자리를 본문과 함께 쓰고 다 쓴 뒤 채운다). 이번 라운드: bulk raw 합 넘침 검사를 `overflow || ...` 누적에서 넘치면 멈추는 반복으로 바꿨다(넘친 뒤 항목이 없으면 누적의 단락 쪽은 닿을 수 없었다 — 동작은 같다).
 
 ## 15. PNG 디코더 범위
 

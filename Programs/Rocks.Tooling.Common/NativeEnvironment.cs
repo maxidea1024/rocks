@@ -35,6 +35,12 @@ public static class NativeEnvironment
         "CPLUS_INCLUDE_PATH", "OBJC_INCLUDE_PATH", "LIBRARY_PATH"
     ];
 
+    /// <summary>
+    /// 고를 MSVC 도구 모음 버전을 담는 환경 변수 이름이다(예: <c>14.44</c>). Windows에서 Visual Studio 환경을 만들 때 VsDevCmd의
+    /// <c>-vcvars_ver</c>로 넘기고, 만든 환경의 <c>VCToolsVersion</c>이 그 버전인지 확인한다(아니면 예외). 비면 기본(최신) 도구 모음이다.
+    /// </summary>
+    public const string MsvcToolsetVariable = "ROCKS_MSVC_TOOLSET";
+
     /// <summary>Windows 대상의 Keyed 변수다(Visual Studio·Windows SDK 환경과 SOURCE_DATE_EPOCH).</summary>
     public static readonly IReadOnlyList<string> WindowsKeyedVariables =
     [
@@ -116,9 +122,25 @@ public static class NativeEnvironment
             {
                 throw new InvalidOperationException("Unsupported Visual Studio installation path.");
             }
+            // ROCKS_MSVC_TOOLSET(예: 14.44)은 같은 Visual Studio 안에 나란히 설치된 MSVC 도구 모음 중 하나를 고른다(VsDevCmd
+            // -vcvars_ver, UE의 선호 도구 모음 고정과 같은 목적). 비면 그 설치의 기본(최신) 도구 모음이다. MSVC STL은 받는 Clang
+            // 버전의 하한을 올리므로(14.52는 Clang 22 이상), 검증한 Clang과 짝이 맞는 도구 모음을 CI에서 고정할 때 쓴다.
+            List<string> developerArguments = ["/d", "/u", "/c", "call", script, "-no_logo", "-arch=x64", "-host_arch=x64"];
+            string? toolset = source.TryGetValue(MsvcToolsetVariable, out string? pinned) && !string.IsNullOrEmpty(pinned) ? pinned : null;
+            if (toolset is not null)
+            {
+                if (!System.Text.RegularExpressions.Regex.IsMatch(toolset, @"^[0-9]{2}\.[0-9]{1,2}(\.[0-9]{1,5})?$",
+                    System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)))
+                {
+                    throw new InvalidOperationException($"{MsvcToolsetVariable} must be an MSVC toolset version such as 14.44 or 14.44.35207: '{toolset}'.");
+                }
+
+                developerArguments.Add("-vcvars_ver=" + toolset);
+            }
+
+            developerArguments.AddRange([">nul", "&&", "set"]);
             // cmd는 MS 제공 환경 진입점에만 사용한다. 사용자 compiler/source 인자는 shell을 통과하지 않는다.
-            result = await ProcessRunner.RunAsync(new("cmd.exe",
-                ["/d", "/u", "/c", "call", script, "-no_logo", "-arch=x64", "-host_arch=x64", ">nul", "&&", "set"],
+            result = await ProcessRunner.RunAsync(new("cmd.exe", developerArguments,
                 Directory.GetCurrentDirectory(), source, StandardOutputEncoding: Encoding.Unicode, StandardErrorEncoding: Encoding.Unicode), cancellationToken);
             if (result.ExitCode != 0)
             {
@@ -133,6 +155,15 @@ public static class NativeEnvironment
                     source[line[..separator]] = line[(separator + 1)..].TrimEnd('\r');
                 }
             }
+        }
+
+        if (OperatingSystem.IsWindows() && source.TryGetValue(MsvcToolsetVariable, out string? wanted) && !string.IsNullOrEmpty(wanted) &&
+            !(source.TryGetValue("VCToolsVersion", out string? actual) && actual is not null &&
+              (actual.Trim() + ".").StartsWith(wanted + ".", StringComparison.Ordinal)))
+        {
+            // 이미 초기화된 환경(VCToolsInstallDir가 있는 셸)이나 VsDevCmd가 다른 도구 모음을 골랐으면 고정이 지켜지지 않은 것이다.
+            throw new InvalidOperationException($"{MsvcToolsetVariable}={wanted} is not the active MSVC toolset (VCToolsVersion={actual}); " +
+                "install that toolset or start from a shell without a Visual Studio environment.");
         }
 
         // Visual Studio 환경 스크립트의 출력까지 합친 뒤 고른다. 아래 probe도 고른 환경으로 실행한다.
