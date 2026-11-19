@@ -246,14 +246,9 @@ struct BinnedAllocator::State {
     // 등급 잠금을 쥔 채 부른다(잠금 순서: 등급 → 범위).
     SlabHeader* AcquireSlab(uint32 sizeClass) noexcept;
     void ReleaseSlab(SlabHeader* slab) noexcept;
-    // 범위 잠금 안에서 부른다.
+    // 범위 잠금 안에서 부른다. 실패는 일시적일 수 있다(다음 호출이 다시 시도한다).
     bool CommitSlab(usize slabIndex) noexcept;
-    enum class DecommitOutcome : uint8 {
-        Decommitted,
-        Untouched,
-        Lost
-    };
-    DecommitOutcome DecommitSlab(usize slabIndex) noexcept;
+    bool DecommitSlab(usize slabIndex) noexcept;
     void MarkReleased(usize slabIndex) noexcept;
     usize TakeReleased() noexcept;
 
@@ -298,10 +293,6 @@ struct BinnedAllocator::State {
     // releasedBits에서 선 비트가 있을 수 있는 가장 낮은 word다.
     usize releasedHint = 0;
     usize committedSlabs = 0;
-    // 시험 주입: commitAttempts가 이 값이 되는 commit을 실패시킨다(0이면 끈다).
-    uint64 commitAttempts = 0;
-    uint64 commitFailureAttempt = 0;
-    DecommitOutcome injectedDecommit = DecommitOutcome::Decommitted;
 
     ClassState classes[ClassCount];
 
@@ -341,7 +332,10 @@ void BinnedAllocator::State::ReserveRange(usize requestedBytes) noexcept {
             continue;
         }
 
-        if (region.Reserve(bytes)) {
+        // 접근을 열어 둔 예약이다: POSIX에서 slab마다 보호를 바꾸지 않아 매핑이 쪼개지지
+        // 않는다(설계 18.4절). 쓰지 않는 slab은 slab 표가 걸러 읽지 않으므로 접근 차단에 기대지
+        // 않는다.
+        if (region.Reserve(bytes, platform::VirtualMemoryAccess::Open)) {
             break;
         }
     }
@@ -386,31 +380,15 @@ void BinnedAllocator::State::ReleaseRange() noexcept {
 }
 
 bool BinnedAllocator::State::CommitSlab(usize slabIndex) noexcept {
-    ++commitAttempts;
-    if (commitFailureAttempt != 0 && commitAttempts == commitFailureAttempt) {
-        return false;
-    }
-
-    // 실패하면 region이 스스로 닫혀(Poisoned) 뒤의 commit도 실패한다 — 그때부터 새 slab은 없고
-    // 작은 요청은 큰 경로로 간다. 이미 commit한 slab은 그대로 쓴다.
+    // 실패(OS의 commit 한도 등)는 이 요청만 큰 경로로 보낸다. region은 닫히지 않으므로 다음 요청이
+    // 같은 slab 번호를 다시 시도한다.
     return static_cast<bool>(region.Commit(slabIndex << SlabShift, SlabBytes));
 }
 
-BinnedAllocator::State::DecommitOutcome
-BinnedAllocator::State::DecommitSlab(usize slabIndex) noexcept {
-    if (injectedDecommit != DecommitOutcome::Decommitted) {
-        return injectedDecommit;
-    }
-
-    const auto result = region.Decommit(slabIndex << SlabShift, SlabBytes);
-    if (result) {
-        return DecommitOutcome::Decommitted;
-    }
-
-    // Poisoned는 OS를 부르지 않고 거절한 것이라 slab이 commit된 그대로다. OS 실패는 그 slab의
-    // 상태를 알 수 없다(보호 변경과 페이지 반환이 여러 단계다).
-    return result.code == platform::VirtualMemoryCode::Poisoned ? DecommitOutcome::Untouched
-                                                                : DecommitOutcome::Lost;
+bool BinnedAllocator::State::DecommitSlab(usize slabIndex) noexcept {
+    // 실패하면 slab은 그대로다(접근을 열어 둔 예약 — 접근과 내용이 유지된다). 호출자가 commit된 채
+    // 보관해 다시 쓰고, 다음 Trim이 다시 시도한다.
+    return static_cast<bool>(region.Decommit(slabIndex << SlabShift, SlabBytes));
 }
 
 void BinnedAllocator::State::MarkReleased(usize slabIndex) noexcept {
@@ -478,13 +456,8 @@ void BinnedAllocator::State::ReleaseSlab(SlabHeader* slab) noexcept {
     const usize slabIndex = SlabIndexOf(slab);
     // 표를 먼저 0으로 돌린다: 이 slab의 주소로 오는 잘못된 반환이 decommit된 메모리를 읽지 않는다.
     platform::AtomicStore<MemoryOrder::Relaxed>(&slabTable[slabIndex], UnusedSlab);
-    DecommitOutcome outcome = DecommitOutcome::Untouched;
-    if (retainedCount >= retainedLimit) {
-        outcome = DecommitSlab(slabIndex);
-    }
-
-    if (outcome == DecommitOutcome::Untouched) {
-        // 한도 안이거나, 닫힌 region이 decommit을 거절했다(commit된 채 보관해 다시 쓴다).
+    if (retainedCount < retainedLimit || !DecommitSlab(slabIndex)) {
+        // 한도 안이거나 decommit이 실패했다(slab은 commit된 그대로다 — 보관해 다시 쓴다).
         slab->next = retained;
         retained = slab;
         ++retainedCount;
@@ -492,11 +465,7 @@ void BinnedAllocator::State::ReleaseSlab(SlabHeader* slab) noexcept {
     }
 
     --committedSlabs;
-    if (outcome == DecommitOutcome::Decommitted) {
-        MarkReleased(slabIndex);
-    }
-
-    // Lost: 상태를 알 수 없는 slab은 다시 쓰지 않는다(주소 64KB를 파괴 때까지 잃는다).
+    MarkReleased(slabIndex);
 }
 
 void BinnedAllocator::State::Trim() noexcept {
@@ -507,8 +476,8 @@ void BinnedAllocator::State::Trim() noexcept {
         SlabHeader* slab = retained;
         retained = slab->next;
         const usize slabIndex = SlabIndexOf(slab);
-        const DecommitOutcome outcome = DecommitSlab(slabIndex);
-        if (outcome == DecommitOutcome::Untouched) {
+        if (!DecommitSlab(slabIndex)) {
+            // 이번에는 풀지 못했다. 보관해 두고 나머지를 계속 푼다(다음 Trim이 다시 시도한다).
             slab->next = kept;
             kept = slab;
             ++keptCount;
@@ -516,9 +485,7 @@ void BinnedAllocator::State::Trim() noexcept {
         }
 
         --committedSlabs;
-        if (outcome == DecommitOutcome::Decommitted) {
-            MarkReleased(slabIndex);
-        }
+        MarkReleased(slabIndex);
     }
 
     retained = kept;
@@ -897,22 +864,6 @@ void BinnedAllocator::TestHooks::FailNextReserveAttempts(uint32 count) noexcept 
 
 void BinnedAllocator::TestHooks::FailNextSlabTableAllocation() noexcept {
     constructionFaults.tableAllocationFails = true;
-}
-
-void BinnedAllocator::TestHooks::FailSlabCommitOnAttempt(BinnedAllocator& allocator,
-                                                         uint64 oneBasedAttempt) noexcept {
-    platform::LockGuard lock(allocator.state_->rangeMutex);
-    allocator.state_->commitAttempts = 0;
-    allocator.state_->commitFailureAttempt = oneBasedAttempt;
-}
-
-void BinnedAllocator::TestHooks::SetSlabDecommitFault(BinnedAllocator& allocator,
-                                                      DecommitFault fault) noexcept {
-    using Outcome = BinnedAllocator::State::DecommitOutcome;
-    platform::LockGuard lock(allocator.state_->rangeMutex);
-    allocator.state_->injectedDecommit = fault == DecommitFault::None      ? Outcome::Decommitted
-                                         : fault == DecommitFault::Refused ? Outcome::Untouched
-                                                                           : Outcome::Lost;
 }
 
 void BinnedAllocator::TestHooks::FailLedgerStorageOnAttempt(BinnedAllocator& allocator,

@@ -12,7 +12,22 @@ VirtualMemoryResult Error(VirtualMemoryCode code) noexcept {
     return {code, 0};
 }
 
+// 이 스레드의 주입 계획에서 이번 호출이 실패할 차례인지 본다.
+bool TakeInjectedFault(bool commit) noexcept {
+    detail::VirtualMemoryFaults& faults = detail::virtualMemoryFaults;
+    uint64& calls = commit ? faults.commitCalls : faults.decommitCalls;
+    const uint64 failing = commit ? faults.failCommitCall : faults.failDecommitCall;
+    ++calls;
+    return failing != 0 && calls == failing;
+}
+
 } // namespace
+
+namespace detail {
+
+thread_local VirtualMemoryFaults virtualMemoryFaults;
+
+} // namespace detail
 
 VirtualMemoryRegion::~VirtualMemoryRegion() noexcept {
     if (!Release()) {
@@ -20,7 +35,7 @@ VirtualMemoryRegion::~VirtualMemoryRegion() noexcept {
     }
 }
 
-VirtualMemoryResult VirtualMemoryRegion::Reserve(usize bytes) noexcept {
+VirtualMemoryResult VirtualMemoryRegion::Reserve(usize bytes, VirtualMemoryAccess access) noexcept {
     LockGuard lock(mutex_);
     if (address_ != nullptr) {
         return Error(VirtualMemoryCode::AlreadyReserved);
@@ -36,7 +51,7 @@ VirtualMemoryResult VirtualMemoryRegion::Reserve(usize bytes) noexcept {
     }
 
     void* address = nullptr;
-    const auto result = detail::ReserveVirtualMemory(bytes, address);
+    const auto result = detail::ReserveVirtualMemory(bytes, access, address);
     if (!result) {
         return result;
     }
@@ -44,6 +59,7 @@ VirtualMemoryResult VirtualMemoryRegion::Reserve(usize bytes) noexcept {
     address_ = address;
     size_ = bytes;
     pageSize_ = info.pageSize;
+    access_ = access;
     poisoned_ = false;
     return Success();
 }
@@ -70,14 +86,16 @@ VirtualMemoryResult VirtualMemoryRegion::Change(usize offset, usize bytes, bool 
         return Error(VirtualMemoryCode::InvalidArgument);
     }
 
-    auto* start = static_cast<uint8*>(address_) + offset;
-    const auto result = commit ? detail::CommitVirtualMemory(start, bytes)
-                               : detail::DecommitVirtualMemory(start, bytes);
-    if (!result) {
-        // 보호 변경과 페이지 반환이 여러 단계일 수 있어 실패 후 이전 상태를 가정하지 않는다.
-        poisoned_ = true;
+    if (TakeInjectedFault(commit)) {
+        return {VirtualMemoryCode::OsFailure, detail::InjectedVirtualMemoryError};
     }
-    return result;
+
+    // 실패해도 영역을 닫지 않는다: commit과 decommit은 실패가 어떤 상태를 남기든 같은 범위에 다시
+    // 할 수 있고 다른 범위에는 영향이 없다. 실패한 범위를 어떻게 다룰지는 호출자가
+    // 계약(VirtualMemory.h)에 따라 정한다.
+    auto* start = static_cast<uint8*>(address_) + offset;
+    return commit ? detail::CommitVirtualMemory(start, bytes, access_)
+                  : detail::DecommitVirtualMemory(start, bytes, access_);
 }
 
 VirtualMemoryResult VirtualMemoryRegion::Release() noexcept {
@@ -95,6 +113,7 @@ VirtualMemoryResult VirtualMemoryRegion::Release() noexcept {
     address_ = nullptr;
     size_ = 0;
     pageSize_ = 0;
+    access_ = VirtualMemoryAccess::Guarded;
     poisoned_ = false;
     return Success();
 }

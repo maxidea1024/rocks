@@ -19,19 +19,8 @@ struct BinnedAllocator::TestHooks {
 
     // ---- 인스턴스의 실패 주입 ----
 
-    // 지금부터 oneBasedAttempt번째 slab commit을 실패시킨다(0이면 끈다). 그 작은 요청은 큰 경로로
-    // 간다.
-    static void FailSlabCommitOnAttempt(BinnedAllocator& allocator,
-                                        uint64 oneBasedAttempt) noexcept;
-
-    // slab decommit의 결과를 바꾼다. Refused: OS를 부르지 않고 거절(닫힌 region — slab은 commit된
-    // 채 보관된다), Lost: OS 실패(slab 상태를 알 수 없어 다시 쓰지 않는다).
-    enum class DecommitFault : uint8 {
-        None,
-        Refused,
-        Lost
-    };
-    static void SetSlabDecommitFault(BinnedAllocator& allocator, DecommitFault fault) noexcept;
+    // slab commit·decommit의 실패는 VirtualMemoryRegion의 시험 통로로 주입한다
+    // (<PlatformBase/Private/Common/VirtualMemoryTestAccess.h>).
 
     // 큰 할당 원장 저장소의 oneBasedAttempt번째 할당(표 늘리기)을 실패시킨다(0이면 끈다).
     static void FailLedgerStorageOnAttempt(BinnedAllocator& allocator,
