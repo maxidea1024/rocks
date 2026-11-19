@@ -6,6 +6,8 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace virtual_memory_tests_file {
+
 using namespace rocks::platform;
 
 namespace {
@@ -185,7 +187,7 @@ TEST(PlatformVirtualMemoryOpenReservationLifecycle) {
 // commit 실패는 영역을 닫지 않는다: 같은 범위를 다시 commit할 수 있고 다른 범위와 decommit도 된다.
 // 인자 검사에서 걸린 호출은 주입 차례를 쓰지 않는다. 두 예약 종류 모두 같다.
 TEST(PlatformVirtualMemoryCommitFailureIsTransient) {
-    using detail::VirtualMemoryTestAccess;
+    using platform::detail::VirtualMemoryTestAccess;
     VirtualMemoryInfo info{};
     REQUIRE(QueryVirtualMemoryInfo(info));
     const usize page = info.pageSize;
@@ -198,7 +200,7 @@ TEST(PlatformVirtualMemoryCommitFailureIsTransient) {
         CHECK(region.Commit(1, page).code == VirtualMemoryCode::InvalidArgument);
         const VirtualMemoryResult failed = region.Commit(0, page);
         CHECK(failed.code == VirtualMemoryCode::OsFailure);
-        CHECK(failed.nativeError == detail::InjectedVirtualMemoryError);
+        CHECK(failed.nativeError == platform::detail::InjectedVirtualMemoryError);
         CHECK(!region.IsPoisoned());
         CHECK(region.Address() != nullptr);
         // 실패한 범위를 decommit해도 되고(commit되지 않은 범위), 다시 commit하면 쓸 수 있다.
@@ -219,7 +221,7 @@ TEST(PlatformVirtualMemoryCommitFailureIsTransient) {
 // decommit 실패도 영역을 닫지 않는다. 접근을 열어 둔 예약(과 Windows)에서는 그 범위가 그대로라 계속
 // 쓸 수 있고, 어느 종류든 다시 commit·decommit할 수 있다.
 TEST(PlatformVirtualMemoryDecommitFailureKeepsRegionOpen) {
-    using detail::VirtualMemoryTestAccess;
+    using platform::detail::VirtualMemoryTestAccess;
     VirtualMemoryInfo info{};
     REQUIRE(QueryVirtualMemoryInfo(info));
     const usize page = info.pageSize;
@@ -235,7 +237,7 @@ TEST(PlatformVirtualMemoryDecommitFailureKeepsRegionOpen) {
         VirtualMemoryTestAccess::FailDecommitOnCall(1);
         const VirtualMemoryResult failed = region.Decommit(0, page);
         CHECK(failed.code == VirtualMemoryCode::OsFailure);
-        CHECK(failed.nativeError == detail::InjectedVirtualMemoryError);
+        CHECK(failed.nativeError == platform::detail::InjectedVirtualMemoryError);
         CHECK(!region.IsPoisoned());
         if (kind == VirtualMemoryAccess::Open || IsWindows) {
             CHECK(bytes[0] == 0x71);
@@ -252,3 +254,4 @@ TEST(PlatformVirtualMemoryDecommitFailureKeepsRegionOpen) {
         REQUIRE(region.Release());
     }
 }
+} // namespace virtual_memory_tests_file

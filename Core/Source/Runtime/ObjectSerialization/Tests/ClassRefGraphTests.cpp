@@ -7,6 +7,8 @@
 // — 진단 경로와 Required 진단), 클래스가 아니거나 Base의 파생이 아닌 값의 decode 거부, 저장의
 // 재검사(C++가 직접 넣은 값·Required null).
 using namespace rocks;
+namespace class_ref_graph_tests_file {
+
 using namespace rocks::test::classref;
 
 namespace {
@@ -437,3 +439,4 @@ TEST(ClassRefGraph_DecodeChecksStaticBase) {
 
     CHECK(types.Shutdown());
 }
+} // namespace class_ref_graph_tests_file

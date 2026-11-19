@@ -68,9 +68,10 @@ Result<bool> KeepKey(Span<const TangentCurveKey> keys, usize mostRecent, usize t
 
 // [start, end] 보존 키 사이의 키를 고른다(RC 966–1102). start < end다.
 // keptIndices가 있으면 남긴 키의 원래 index를 담는다(실패하면 그대로).
-Result<void> RemoveRedundant(Array<TangentCurveKey>& keys, float tolerance, usize start, usize end,
-                             const Optional<FrameRate>& sampleRate,
-                             Array<usize>* keptIndices) noexcept {
+Result<void> TangentCurveRedundantRemoveRedundant(Array<TangentCurveKey>& keys, float tolerance,
+                                                  usize start, usize end,
+                                                  const Optional<FrameRate>& sampleRate,
+                                                  Array<usize>* keptIndices) noexcept {
     const usize count = keys.Size();
     if (count < 3 || end - start < 2) {
         return curves_detail::FillIdentityIndices(keptIndices, count);
@@ -128,9 +129,9 @@ Result<void> RemoveRedundant(Array<TangentCurveKey>& keys, float tolerance, usiz
 }
 
 // 전체판·범위판의 공통 진입이다(keptIndices는 nullptr일 수 있다).
-Result<void> RemoveRedundantAll(Array<TangentCurveKey>& keys, float tolerance,
-                                const Optional<FrameRate>& sampleRate,
-                                Array<usize>* keptIndices) noexcept {
+Result<void> TangentCurveRedundantRemoveRedundantAll(Array<TangentCurveKey>& keys, float tolerance,
+                                                     const Optional<FrameRate>& sampleRate,
+                                                     Array<usize>* keptIndices) noexcept {
     if (!curves_detail::IsUsableTolerance(tolerance)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -139,12 +140,14 @@ Result<void> RemoveRedundantAll(Array<TangentCurveKey>& keys, float tolerance,
         return curves_detail::FillIdentityIndices(keptIndices, keys.Size());
     }
 
-    return RemoveRedundant(keys, tolerance, 0, keys.Size() - 1, sampleRate, keptIndices);
+    return TangentCurveRedundantRemoveRedundant(keys, tolerance, 0, keys.Size() - 1, sampleRate,
+                                                keptIndices);
 }
 
-Result<void> RemoveRedundantRange(Array<TangentCurveKey>& keys, float tolerance, float first,
-                                  float last, const Optional<FrameRate>& sampleRate,
-                                  Array<usize>* keptIndices) noexcept {
+Result<void> TangentCurveRedundantRemoveRedundantRange(Array<TangentCurveKey>& keys,
+                                                       float tolerance, float first, float last,
+                                                       const Optional<FrameRate>& sampleRate,
+                                                       Array<usize>* keptIndices) noexcept {
     if (!curves_detail::IsUsableTolerance(tolerance) || math::IsNaN(first) || math::IsNaN(last)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -155,30 +158,33 @@ Result<void> RemoveRedundantRange(Array<TangentCurveKey>& keys, float tolerance,
         return curves_detail::FillIdentityIndices(keptIndices, keys.Size());
     }
 
-    return RemoveRedundant(keys, tolerance, start, end, sampleRate, keptIndices);
+    return TangentCurveRedundantRemoveRedundant(keys, tolerance, start, end, sampleRate,
+                                                keptIndices);
 }
 
 } // namespace
 
 Result<void> TangentCurve::TryRemoveRedundantKeys(float tolerance,
                                                   Optional<FrameRate> sampleRate) noexcept {
-    return RemoveRedundantAll(keys_, tolerance, sampleRate, nullptr);
+    return TangentCurveRedundantRemoveRedundantAll(keys_, tolerance, sampleRate, nullptr);
 }
 
 Result<void> TangentCurve::TryRemoveRedundantKeys(float tolerance, float first, float last,
                                                   Optional<FrameRate> sampleRate) noexcept {
-    return RemoveRedundantRange(keys_, tolerance, first, last, sampleRate, nullptr);
+    return TangentCurveRedundantRemoveRedundantRange(keys_, tolerance, first, last, sampleRate,
+                                                     nullptr);
 }
 
 Result<void> TangentCurve::TryRemoveRedundantKeys(Array<usize>& keptIndices, float tolerance,
                                                   Optional<FrameRate> sampleRate) noexcept {
-    return RemoveRedundantAll(keys_, tolerance, sampleRate, &keptIndices);
+    return TangentCurveRedundantRemoveRedundantAll(keys_, tolerance, sampleRate, &keptIndices);
 }
 
 Result<void> TangentCurve::TryRemoveRedundantKeys(Array<usize>& keptIndices, float tolerance,
                                                   float first, float last,
                                                   Optional<FrameRate> sampleRate) noexcept {
-    return RemoveRedundantRange(keys_, tolerance, first, last, sampleRate, &keptIndices);
+    return TangentCurveRedundantRemoveRedundantRange(keys_, tolerance, first, last, sampleRate,
+                                                     &keptIndices);
 }
 
 } // namespace rocks

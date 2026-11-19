@@ -8,6 +8,8 @@
 // platform::ThreadExitSlot: 스레드별 값과 스레드 종료 정리 함수다(Docs/Design/
 // GarbageCollectionScale.ko.md 18.4절, 검토 F3).
 using namespace rocks;
+namespace thread_exit_slot_tests_file {
+
 using namespace rocks::platform;
 
 namespace {
@@ -156,3 +158,4 @@ TEST(ThreadExitSlot_InvalidSlotRejectsValues) {
     CHECK(!invalid.Set(&value));
     CHECK(invalid.Get() == nullptr);
 }
+} // namespace thread_exit_slot_tests_file

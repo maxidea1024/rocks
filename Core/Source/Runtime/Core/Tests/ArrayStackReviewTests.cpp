@@ -4,6 +4,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace array_stack_review_tests_file {
 
 namespace {
 
@@ -80,3 +81,4 @@ TEST(ArrayStackReservedSelfAppendDoesNotReallocate) {
     }
     CHECK(system.Stats().liveAllocations == 0);
 }
+} // namespace array_stack_review_tests_file

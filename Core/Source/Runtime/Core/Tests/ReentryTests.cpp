@@ -4,6 +4,7 @@
 #include <Core/Memory/SystemAllocator.h>
 
 using namespace rocks;
+namespace reentry_tests_file {
 
 namespace {
 struct ReentryCallable {
@@ -107,3 +108,4 @@ TEST(ModuleLease_ReentrantOldReleaseDoesNotLoseReplacement) {
     target.Reset();
     CHECK(preparedState.references == 0);
 }
+} // namespace reentry_tests_file

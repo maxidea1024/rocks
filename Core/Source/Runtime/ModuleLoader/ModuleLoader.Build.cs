@@ -1,3 +1,4 @@
+using Rocks.Build;
 using Rocks.Build.Rules;
 
 // Module loader (Docs/Design/ModuleLoader.ko.md, UE FModuleManager counterpart): starts modules from the build-generated module table in dependency
@@ -7,6 +8,9 @@ using Rocks.Build.Rules;
 public sealed class ModuleLoader : CoreModuleRules
 {
     protected override string ModuleName => "ModuleLoader";
+
+    // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
+    protected override UnityMode Unity => UnityMode.On;
 
     protected override string[] RequiredModules => ["Core", "PlatformBase"];
 }

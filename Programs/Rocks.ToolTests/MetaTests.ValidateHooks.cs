@@ -35,12 +35,14 @@ internal static partial class MetaTests
                 "ROCKS_PROPERTY() Child child;\n};\n}\n";
             await probe.GenerateAsync(source);
             string generated = Compact(File.ReadAllText(probe.Output));
+            string generatedSource = File.ReadAllText(probe.Source);
+            // 타입 하나의 생성 코드다: 생성 헤더의 특수화(형질·선언)와 생성 소스의 그 타입 구간(본문·정적 검사)을 잇는다.
             string Section(string name)
             {
                 int start = generated.IndexOf($"structGeneratedType<::probe::{name}>", StringComparison.Ordinal);
                 Verify.That(start >= 0, "specialization missing: " + name);
                 int end = generated.IndexOf("structGeneratedType<", start + 10, StringComparison.Ordinal);
-                return end < 0 ? generated[start..] : generated[start..end];
+                return (end < 0 ? generated[start..] : generated[start..end]) + Compact(SourceSection(generatedSource, "probe::" + name));
             }
 
             foreach ((string name, string expected, string reason) in new[]
@@ -92,7 +94,7 @@ internal static partial class MetaTests
             await probe.GenerateAsync(ValidateSource("using Self = Range;\n" +
                 "static ::rocks::Result<void> Validate(const Self& value) noexcept { return value.low <= value.high ? " +
                 "rocks::Result<void>::Success() : rocks::Result<void>::Failure(rocks::ErrorCode::InvalidArgument); }\n"));
-            string generated = Compact(File.ReadAllText(probe.Output));
+            string generated = Compact(probe.GeneratedText());
             Verify.That(generated.Contains("staticconstexprboolHasValidateSelf=true;", StringComparison.Ordinal), "alias spelling hook detected");
         });
         // consteval 판정은 주석을 걷어낸 원문으로 한다(CV4 리뷰 6): 바로 앞 줄·블록 주석의 낱말 `consteval`은 정상 hook을 거부하지 않는다(숫자 구분자 `1'000` 뒤의 주석도 — CV5 리뷰 10).
@@ -107,7 +109,7 @@ internal static partial class MetaTests
                 "// must not be consteval\n" +
                 "/* nor consteval */ static rocks::Result<void> Validate(const Self& value) noexcept { return value.low <= value.high ? " +
                 "rocks::Result<void>::Success() : rocks::Result<void>::Failure(rocks::ErrorCode::InvalidArgument); }\n"));
-            string generated = Compact(File.ReadAllText(probe.Output));
+            string generated = Compact(probe.GeneratedText());
             Verify.That(generated.Contains(Compact("static_assert(::rocks::IsSameV<decltype(&::probe::Range::Validate)"), StringComparison.Ordinal),
                 "outer hook detected after a comment naming consteval");
             Verify.That(generated.Contains(Compact("static_assert(::rocks::IsSameV<decltype(&::probe::Range::Inner::Validate)"), StringComparison.Ordinal),

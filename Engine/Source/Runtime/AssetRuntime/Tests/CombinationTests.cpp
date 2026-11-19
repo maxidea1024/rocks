@@ -15,6 +15,8 @@
 // - FixtureAsset_CombinationRequired: Required 칸 하나씩 null로 두면 저장이 거부하고, 모두 채우면
 //   왕복한다.
 using namespace rocks;
+namespace combination_tests_file {
+
 using namespace rocks::asset_test;
 
 namespace {
@@ -367,3 +369,4 @@ TEST(FixtureAsset_CombinationsCoverPropertyTable) {
     CHECK(coverage.cell[static_cast<uint32>(ValueKind::InstancedStruct)]
                        [SlotIndex(ValueKindProperty::StructMember)][0]);
 }
+} // namespace combination_tests_file

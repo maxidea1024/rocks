@@ -9,6 +9,8 @@
 // TR2 표준 기록(CPU 구간·이름 표·카운터·표지·시간 띠·프레임·스레드 정보·문맥)의 시험이다. 순서는
 // gate와 수동 펌프로만 맞춘다.
 using namespace rocks;
+namespace trace_standard_tests_file {
+
 using namespace rocks::tracetest;
 
 namespace {
@@ -755,3 +757,4 @@ TEST(TraceLongScopeNameIsTruncatedAndFlagged) {
         CHECK(names == 1);
     }
 }
+} // namespace trace_standard_tests_file

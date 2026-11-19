@@ -5,6 +5,8 @@
 #include <ObjectSerialization/ObjectGraph.h>
 
 using namespace rocks;
+namespace read_only_review_tests_file {
+
 using reflection_fixture::AbstractBase;
 using reflection_fixture::PropertyNode;
 
@@ -257,3 +259,4 @@ TEST(FieldWriteOperationAcceptsCapturelessNoexceptLambdaAggregate) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace read_only_review_tests_file

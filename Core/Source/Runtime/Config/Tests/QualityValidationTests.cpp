@@ -9,6 +9,8 @@
 // 사유로 남는다, 기기 특성이 없거나 규칙이 없는 묶음은 요청 등급 그대로, 잘못된 요청은 거부,
 // `quality.shadow@1 (requested 3, lowered: …)` 표기.
 using namespace rocks;
+namespace quality_validation_tests_file {
+
 using namespace rocks::config;
 
 namespace {
@@ -154,3 +156,4 @@ TEST(Config_QualityValidationRejectsBadRequests) {
     rejected = ResolveQualityLevels(groups, {}, twice, &traits, resolved);
     CHECK(!rejected && rejected.Error() == ErrorCode::InvalidArgument);
 }
+} // namespace quality_validation_tests_file

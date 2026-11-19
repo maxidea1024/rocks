@@ -15,6 +15,8 @@
 // 경로와 staged Attach, 최상위 단일 값(String·Soft·정수) 필드의 경로 thunk, 재진입(Detach 복사 중
 // 할당 콜백의 쓰기는 Busy, Attach 뒤 옛 값 해제 콜백은 게시된 새 값을 본다)을 본다.
 using namespace rocks;
+namespace detached_path_tests_file {
+
 using reflection_fixture::AssetFields;
 using reflection_fixture::PathOwner;
 using reflection_fixture::StructHolder;
@@ -566,3 +568,4 @@ TEST(DetachedPath_ReentryDuringDetachAndAfterAttach) {
 
     CHECK(true);
 }
+} // namespace detached_path_tests_file

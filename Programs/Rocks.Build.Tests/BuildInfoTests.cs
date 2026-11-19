@@ -629,7 +629,8 @@ internal static class BuildInfoTests
 
         // 엔진 버전만 바꾸면 생성 TU와 link만 실행되고 다른 compile·archive는 0이다(버전은 action key·ContextFingerprint·compile 정의에
         // 없다). 같은 값으로 다시 빌드하면 no-op이고, 원래 값으로 돌아가면 ID도 원래 값이다.
-        string generatedId = "Game:compile:" + Fingerprints.Strings([sourcePath])[..20];
+        // compile action의 Id는 <모듈>:compile:<object 변형>:<소스 경로 해시>다(기본 요청의 변형은 u1p1 — 유니티·PCH 켬).
+        string generatedId = "Game:compile:u1p1:" + Fingerprints.Strings([sourcePath])[..20];
         string[] GeneratedAndLink(NativeBuildResult result) => result.Actions
             .Where(action => action.Id == generatedId || action.Kind == "Link").Select(action => action.Id).Order(StringComparer.Ordinal).ToArray();
         string[] Executed(NativeBuildResult result) => result.Actions

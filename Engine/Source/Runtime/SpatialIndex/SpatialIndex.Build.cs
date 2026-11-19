@@ -1,3 +1,4 @@
+using Rocks.Build;
 using Rocks.Build.Rules;
 
 // General spatial query structures (Docs/Design/SpatialIndex.ko.md section 6 and Docs/Design/FlatBounds.ko.md): LooseOctree, a
@@ -8,6 +9,9 @@ using Rocks.Build.Rules;
 public sealed class SpatialIndex : EngineModuleRules
 {
     protected override string ModuleName => "SpatialIndex";
+
+    // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
+    protected override UnityMode Unity => UnityMode.On;
 
     protected override string[] RequiredModules => ["Core", "Task"];
 }

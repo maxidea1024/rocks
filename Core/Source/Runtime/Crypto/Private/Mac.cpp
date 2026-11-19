@@ -20,7 +20,7 @@
 namespace rocks::crypto {
 namespace {
 
-constexpr usize StateAlignment = 64;
+constexpr usize MacStateAlignment = 64;
 
 static_assert(HmacSha256TagBytes == crypto_auth_hmacsha256_BYTES);
 static_assert(HmacSha512TagBytes == crypto_auth_hmacsha512_BYTES);
@@ -48,22 +48,23 @@ struct CmacMacState {
     detail::AesCmacState cmac;
 };
 
-static_assert(alignof(AnyMacState) <= StateAlignment && alignof(CmacMacState) <= StateAlignment);
+static_assert(alignof(AnyMacState) <= MacStateAlignment &&
+              alignof(CmacMacState) <= MacStateAlignment);
 static_assert(sizeof(AnyMacState) <= detail::SecretSlotMaxBytes &&
               sizeof(CmacMacState) <= detail::SecretSlotMaxBytes);
 
-bool IsDefined(MacAlgorithm algorithm) noexcept {
+bool MacIsDefined(MacAlgorithm algorithm) noexcept {
     return algorithm == MacAlgorithm::HmacSha256 || algorithm == MacAlgorithm::HmacSha512 ||
            algorithm == MacAlgorithm::Blake2bKeyed || algorithm == MacAlgorithm::AesCmac;
 }
 
 // 증분 상태 슬롯 크기다.
-usize StateBytes(MacAlgorithm algorithm) noexcept {
+usize MacStateBytes(MacAlgorithm algorithm) noexcept {
     return algorithm == MacAlgorithm::AesCmac ? sizeof(CmacMacState) : sizeof(AnyMacState);
 }
 
-Result<void> CheckUsable(MacAlgorithm algorithm) noexcept {
-    if (!IsDefined(algorithm)) {
+Result<void> MacCheckUsable(MacAlgorithm algorithm) noexcept {
+    if (!MacIsDefined(algorithm)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -75,7 +76,7 @@ Result<void> CheckUsable(MacAlgorithm algorithm) noexcept {
     return Result<void>::Success();
 }
 
-usize TagBytes(MacAlgorithm algorithm) noexcept {
+usize AlgorithmTagBytes(MacAlgorithm algorithm) noexcept {
     switch (algorithm) {
     case MacAlgorithm::HmacSha256:
         return HmacSha256TagBytes;
@@ -124,7 +125,7 @@ bool IsValidKeyLength(MacAlgorithm algorithm, usize bytes, usize minimumHmacByte
 // 키를 만든다. 알고리즘(InvalidArgument·Unsupported) → 길이(InvalidArgument) → 키 저장소 순이다.
 Result<MacKey> TryImportKey(MacAlgorithm algorithm, Span<const uint8> keyBytes,
                             usize minimumHmacBytes) noexcept {
-    if (auto usable = CheckUsable(algorithm); !usable) {
+    if (auto usable = MacCheckUsable(algorithm); !usable) {
         return Result<MacKey>::Failure(usable.Error());
     }
 
@@ -149,7 +150,7 @@ const detail::AesSchedule& CmacScheduleOf(const MacKey& key) noexcept {
     return *static_cast<const detail::AesSchedule*>(state);
 }
 
-void InitState(MacAlgorithm algorithm, AnyMacState* state, Span<const uint8> key) noexcept {
+void MacInitState(MacAlgorithm algorithm, AnyMacState* state, Span<const uint8> key) noexcept {
     switch (algorithm) {
     case MacAlgorithm::HmacSha256:
         detail::RequireSodium(
@@ -173,7 +174,7 @@ void InitState(MacAlgorithm algorithm, AnyMacState* state, Span<const uint8> key
     platform::Fatal("Crypto: MAC init reached an algorithm without a libsodium state");
 }
 
-void UpdateState(MacAlgorithm algorithm, AnyMacState* state, Span<const uint8> input) noexcept {
+void MacUpdateState(MacAlgorithm algorithm, AnyMacState* state, Span<const uint8> input) noexcept {
     if (input.IsEmpty()) {
         return;
     }
@@ -201,8 +202,8 @@ void UpdateState(MacAlgorithm algorithm, AnyMacState* state, Span<const uint8> i
     platform::Fatal("Crypto: MAC update reached an algorithm without a libsodium state");
 }
 
-// tag.Size()는 TagBytes(algorithm)와 같아야 한다(호출자가 검사).
-void FinishState(MacAlgorithm algorithm, AnyMacState* state, Span<uint8> tag) noexcept {
+// tag.Size()는 AlgorithmTagBytes(algorithm)와 같아야 한다(호출자가 검사).
+void MacFinishState(MacAlgorithm algorithm, AnyMacState* state, Span<uint8> tag) noexcept {
     switch (algorithm) {
     case MacAlgorithm::HmacSha256:
         detail::RequireSodium(crypto_auth_hmacsha256_final(&state->hmacSha256, tag.Data()),
@@ -231,7 +232,7 @@ void UpdateSlot(MacAlgorithm algorithm, void* slot, Span<const uint8> input) noe
         return;
     }
 
-    UpdateState(algorithm, static_cast<AnyMacState*>(slot), input);
+    MacUpdateState(algorithm, static_cast<AnyMacState*>(slot), input);
 }
 
 // 증분 상태로 tag를 쓰고 슬롯 내용을 지운다(키에서 파생된 내부 상태가 남지 않게).
@@ -240,10 +241,10 @@ void FinishSlot(MacAlgorithm algorithm, void* slot, Span<uint8> tag) noexcept {
         auto* state = static_cast<CmacMacState*>(slot);
         detail::AesCmacFinish(detail::GetAesKernels(), state->schedule, state->cmac, tag);
     } else {
-        FinishState(algorithm, static_cast<AnyMacState*>(slot), tag);
+        MacFinishState(algorithm, static_cast<AnyMacState*>(slot), tag);
     }
 
-    sodium_memzero(slot, StateBytes(algorithm));
+    sodium_memzero(slot, MacStateBytes(algorithm));
 }
 
 // 스택 상태로 tag를 계산하고 상태를 지운다(키에서 파생된 비밀이다). AES-CMAC은 키의 스케줄을 그대로
@@ -263,23 +264,23 @@ void ComputeTag(const MacKey& key, Span<const Span<const uint8>> pieces, Span<ui
     }
 
     AnyMacState state;
-    InitState(key.Algorithm(), &state, detail::KeyAccess::Bytes(key));
+    MacInitState(key.Algorithm(), &state, detail::KeyAccess::Bytes(key));
     for (Span<const uint8> piece : pieces) {
-        UpdateState(key.Algorithm(), &state, piece);
+        MacUpdateState(key.Algorithm(), &state, piece);
     }
 
-    FinishState(key.Algorithm(), &state, tag);
+    MacFinishState(key.Algorithm(), &state, tag);
     sodium_memzero(&state, sizeof(state));
 }
 
 } // namespace
 
 Result<usize> TryGetMacTagBytes(MacAlgorithm algorithm) noexcept {
-    if (!IsDefined(algorithm)) {
+    if (!MacIsDefined(algorithm)) {
         return Result<usize>::Failure(ErrorCode::InvalidArgument);
     }
 
-    return Result<usize>::Success(TagBytes(algorithm));
+    return Result<usize>::Success(AlgorithmTagBytes(algorithm));
 }
 
 // ---- MacKey ----
@@ -314,7 +315,7 @@ void MacKey::Release() noexcept {
 
 Result<MacKey> MacKey::TryGenerate(MacAlgorithm algorithm) noexcept {
     platform::DataIndependentTimingScope dit;
-    if (auto usable = CheckUsable(algorithm); !usable) {
+    if (auto usable = MacCheckUsable(algorithm); !usable) {
         return Result<MacKey>::Failure(usable.Error());
     }
 
@@ -355,11 +356,11 @@ Result<void> hazmat::TryExportKey(const MacKey& key, Span<uint8> output) noexcep
 // ---- 모듈 내부(다른 키 파생 경로가 쓴다) ----
 
 bool detail::IsDefinedMacAlgorithm(MacAlgorithm algorithm) noexcept {
-    return IsDefined(algorithm);
+    return MacIsDefined(algorithm);
 }
 
 Result<void> detail::CheckMacUsable(MacAlgorithm algorithm) noexcept {
-    return CheckUsable(algorithm);
+    return MacCheckUsable(algorithm);
 }
 
 usize detail::DefaultMacKeyBytes(MacAlgorithm algorithm) noexcept {
@@ -374,7 +375,7 @@ Result<MacKey> detail::TryMakeMacKey(MacAlgorithm algorithm, SecretBytes&& key) 
     platform::DataIndependentTimingScope dit;
     // 다른 TU가 부르는 진입점이다. 전제(정의·사용 가능, 키 길이)가 깨지면 HW 없는 기기에서 AES
     // 명령으로 죽거나 길이 규칙이 우회되므로 결함으로 멈춘다. 짧은 HMAC 키(hazmat)는 1 byte부터다.
-    if (!IsDefined(algorithm) || !CheckUsable(algorithm) ||
+    if (!MacIsDefined(algorithm) || !MacCheckUsable(algorithm) ||
         !IsValidKeyLength(algorithm, key.Size(), 1)) {
         platform::Fatal("Crypto: TryMakeMacKey precondition violated");
     }
@@ -407,7 +408,7 @@ Result<void> TryMac(const MacKey& key, Span<const Span<const uint8>> pieces,
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (tag.Size() != TagBytes(key.Algorithm()) || detail::OutputOverlaps(pieces, tag)) {
+    if (tag.Size() != AlgorithmTagBytes(key.Algorithm()) || detail::OutputOverlaps(pieces, tag)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -429,7 +430,7 @@ Result<void> TryVerifyMac(const MacKey& key, Span<const Span<const uint8>> piece
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    const usize bytes = TagBytes(key.Algorithm());
+    const usize bytes = AlgorithmTagBytes(key.Algorithm());
     if (tag.Size() != bytes) {
         return Result<void>::Failure(ErrorCode::AuthenticationFailed);
     }
@@ -473,7 +474,7 @@ Result<MacState> MacState::TryCreate(const MacKey& key) noexcept {
     }
 
     detail::EnsureSodium();
-    auto slot = detail::TryAllocateSecretSlot(StateBytes(key.Algorithm()), StateAlignment);
+    auto slot = detail::TryAllocateSecretSlot(MacStateBytes(key.Algorithm()), MacStateAlignment);
     if (!slot) {
         return Result<MacState>::Failure(slot.Error());
     }
@@ -486,15 +487,15 @@ Result<MacState> MacState::TryCreate(const MacKey& key) noexcept {
         platform::MemoryZero(cmac, sizeof(CmacMacState));
         platform::MemoryCopy(&cmac->schedule, &CmacScheduleOf(key), sizeof(detail::AesSchedule));
     } else {
-        InitState(state.algorithm_, static_cast<AnyMacState*>(state.state_),
-                  detail::KeyAccess::Bytes(key));
+        MacInitState(state.algorithm_, static_cast<AnyMacState*>(state.state_),
+                     detail::KeyAccess::Bytes(key));
     }
 
     return Result<MacState>::Success(Move(state));
 }
 
 usize MacState::TagBytes() const noexcept {
-    return rocks::crypto::TagBytes(algorithm_);
+    return AlgorithmTagBytes(algorithm_);
 }
 
 // 쓸 수 있는 상태인가. 끝난 뒤에는 검증 실패를 sticky로 돌려준다(9.1절).

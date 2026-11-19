@@ -6,6 +6,8 @@
 // 사전 확인 실패면 intern하지 않으며, 노드·struct 마이그레이션 보관본의 Name이 순서대로 소비되고,
 // 1단계가 2a 몫을 미리 청구하며, Name을 담는 struct는 관찰 대상이 될 수 없음을 본다.
 using namespace rocks;
+namespace name_graph_load_tests_file {
+
 using namespace rocks::test::names;
 
 // 1단계가 손상 표시 문자열을 객체 공개 없이 거부한다: 3,072 byte 초과·NUL·분해형(NFC 아님)·잘못된
@@ -387,3 +389,4 @@ TEST(NameGraph_PreconditionFailureInternsNothing) {
     CHECK(targetNames.Shutdown());
     CHECK(types.Shutdown());
 }
+} // namespace name_graph_load_tests_file

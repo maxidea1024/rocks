@@ -36,6 +36,22 @@ UE5.8 Debug·Development·Shipping에 대응한다. 구성마다 `ROCKS_BUILD_DE
 - 후속: ThinLTO 캐시(`/lldltocache`·`--thinlto-cache-dir`)가 없어 Release relink는 backend를 모두 다시 생성한다. 병렬 link 수와 LTO thread 수 조정도 측정 후 정한다.
 - 강제 인라인(UE `FORCEINLINE` 대응)은 쓰지 않는다. 인라인 판단은 Clang 최적화(`-O2`, Release ThinLTO의 모듈 간 인라인)에 맡기고, 정책 검사(`forced-inline`)가 제품 소스의 `always_inline`·`__forceinline`을 거부한다. 성능 문제는 측정한 뒤 알고리즘·데이터 배치·모듈 최적화 설정으로 다룬다.
 
+### 유니티 빌드·PCH
+
+컴파일 시간을 줄이는 세 가지가 기본으로 켜져 있다([설계](../Docs/Design/UnityBuildPch.ko.md), 구현 설명은 [Rocks.Build](../Programs/Rocks.Build/README.ko.md)).
+
+- **유니티 빌드**: 규칙에서 `Unity => UnityMode.On`으로 켠 모듈의 C++ 소스를 묶음 번역 단위로 컴파일한다. 켠 모듈은 정책 검사(`unity-file-local-name` 등)가 묶여도 안전한지 확인한다. 리플렉션 생성 소스는 모든 모듈에서 자기들끼리 묶는다.
+- **PCH**: Core(`Core/CoreSharedPch.h`)와 ObjectRuntime(`Object/ObjectSharedPch.h`)이 공유 PCH를 제공하고, 그 모듈에 닿는 모듈이 자기 인자로 미리 컴파일해 쓴다. 소스와 헤더는 PCH 헤더를 include하지 않는다(빌드가 강제 include한다).
+- **작업 파일 분리**: `git status`가 수정·추가로 알리는 소스는 묶음에서 빼 단독으로 컴파일한다(고치는 파일의 반복 시간을 줄인다).
+
+```text
+dotnet msbuild Rocks.proj /t:Build /p:RocksTarget=Foundation /p:Unity=off /p:Pch=off    # 검증 변형: 소스마다 단독 번역 단위, PCH 없음
+dotnet msbuild Rocks.proj /t:Test /p:RocksTarget=Foundation /p:Adaptive=off             # CI: 작업 파일 분리 끔(작업 트리 상태와 무관한 구성)
+dotnet msbuild Rocks.proj /t:Build /p:RocksTarget=Foundation /p:Timing=on               # -ftime-trace 집계: out/<...>/Timing/Foundation.timing.json
+```
+
+CLI 옵션은 `--unity on|off`, `--pch on|off`, `--adaptive on|off`, `--timing on|off`다. object는 변형마다 다른 디렉터리(`obj/<모듈>/<변형>/`)에 두므로 옵션을 바꿔도 서로의 결과를 덮지 않는다. 묶인 소스는 PCH와 다른 소스의 include에 기대어 컴파일될 수 있으므로, include를 고친 뒤에는 검증 변형으로 한 번 빌드해 본다(CI가 Windows에서 돈다).
+
 ### 모듈 최적화 재정의
 
 모듈 규칙의 `Optimization`으로 구성의 최적화 여부만 바꾼다(UE `ModuleRules.OptimizeCode` 대응). CRT·디버그 정보·구성 매크로·NDEBUG는 구성을 따르므로 같은 실행 파일 안에서 ABI가 섞이지 않는다.
@@ -132,7 +148,7 @@ dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll id
 dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll ids move --from Old.rocksids.json --to New.rocksids.json --type sample::Character
 ```
 
-빌드는 리플렉션 헤더가 있는 모듈을 의존 순서로 하나씩 생성한다. 생성 헤더는 `<출력>/Generated/<모듈>/Public|Private/<원본 철자의 .h를 .generated.h로>`이며 그 모듈의 public·private include로 전파된다(`#include <Module/Type.generated.h>`). 모듈 생성 헤더 `<모듈>/<모듈>.module.generated.h`는 `rocks::generated::<모듈>::RegisterModuleTypes`(의존 모듈부터 public 타입을 등록한다)의 선언만 담고, private 헤더의 타입을 등록하는 `RegisterPrivateModuleTypes`는 `<모듈>/<모듈>.private.module.generated.h`가 선언한다. 두 함수와 모듈 로더가 부르는 자기 타입 함수 `RegisterModuleOwnTypes`(의존 모듈 없이 이 모듈 타입만)의 정의는 모듈 생성 소스 `<출력>/Generated/<모듈>/Source/<모듈>.module.generated.cpp`에 있고 빌드가 그 모듈의 번역 단위로 한 번 컴파일한다(손으로 쓴 소스가 없는 리플렉션 모듈도 그래서 정적 라이브러리가 된다). `GeneratedType<T>`를 쓰는 코드는 그 타입의 생성 헤더를 직접 include하고, 손으로 쓴 헤더는 모듈 생성 헤더를 include하지 않는다(정책 검사 `module-generated-header-include` — [리플렉션 생성 소스](../Docs/Design/ReflectionGeneratedSources.ko.md)). 다른 모듈의 타입은 그 모듈의 descriptor를 import해 상속·참조한다 — 빌드 중에는 이번 실행의 stage descriptor를 쓰고, 모두 성공하면 `<출력>/Metadata/<모듈>.rocksmeta.json`으로 게시한다. private 헤더의 타입은 그 모듈 안에서만 쓴다. 설치형 SDK는 리플렉션 모듈의 descriptor와 명세를 `Metadata/<모듈>/`에 담고(`rocks-sdk.json` 버전 8 — 4는 `ProvidesBuildInfo`를, 5는 `EngineVersion`을, 6은 모듈 표 표지 `ProvidesModuleTable`·`ThirdParty`를 더했고, 8은 메타데이터 모듈 라이브러리가 진입점을 담게 바뀌었다. 이전 버전 SDK는 거부한다), 게임 빌드는 SDK 모듈을 다시 생성하지 않고 그 descriptor를 import한다. SDK는 생성 헤더와 라이브러리만 싣고 생성 소스는 싣지 않는다 — SDK 모듈의 등록 함수는 SDK 라이브러리에서 링크된다. 사용 계약과 진단 코드는 [리플렉션 메타데이터](../Docs/Implementation/ReflectionMetadata.ko.md)를 따른다.
+빌드는 리플렉션 헤더가 있는 모듈을 의존 순서로 하나씩 생성한다. 생성 헤더는 `<출력>/Generated/<모듈>/Public|Private/<원본 철자의 .h를 .generated.h로>`이며 그 모듈의 public·private include로 전파된다(`#include <Module/Type.generated.h>`). 모듈 생성 헤더 `<모듈>/<모듈>.module.generated.h`는 `rocks::generated::<모듈>::RegisterModuleTypes`(의존 모듈부터 public 타입을 등록한다)의 선언만 담고, private 헤더의 타입을 등록하는 `RegisterPrivateModuleTypes`는 `<모듈>/<모듈>.private.module.generated.h`가 선언한다. 두 함수와 모듈 로더가 부르는 자기 타입 함수 `RegisterModuleOwnTypes`(의존 모듈 없이 이 모듈 타입만)의 정의는 모듈 생성 소스 `<출력>/Generated/<모듈>/Source/<모듈>.module.generated.cpp`에 있고 빌드가 그 모듈의 번역 단위로 한 번 컴파일한다(손으로 쓴 소스가 없는 리플렉션 모듈도 그래서 정적 라이브러리가 된다). 타입별 생성 헤더도 선언·컴파일 타임 형질·inline `Trace`만 담고, 스키마·연산 표·등록·복사·검증·정적 검사 같은 본문은 타입별 생성 소스 `<출력>/Generated/<모듈>/Source/Public|Private/<원본 철자의 .h를 .generated.cpp로>`에 있어 같은 방식으로 한 번 컴파일된다. 본문의 계약 위반(생성·소멸 noexcept, 접근 권한 등)은 이 compile action이 잡고 빌드가 컴파일러 출력 뒤에 `RMC3000` 안내를 붙인다. `--verify-metadata-sources on`을 주면 메타 단계가 생성 소스까지 게시 전에 컴파일해 원본 위치와 함께 거부한다. `GeneratedType<T>`를 쓰는 코드는 그 타입의 생성 헤더를 직접 include하고, 손으로 쓴 헤더는 모듈 생성 헤더를 include하지 않는다(정책 검사 `module-generated-header-include` — [리플렉션 생성 소스](../Docs/Design/ReflectionGeneratedSources.ko.md)). 다른 모듈의 타입은 그 모듈의 descriptor를 import해 상속·참조한다 — 빌드 중에는 이번 실행의 stage descriptor를 쓰고, 모두 성공하면 `<출력>/Metadata/<모듈>.rocksmeta.json`으로 게시한다. private 헤더의 타입은 그 모듈 안에서만 쓴다. 설치형 SDK는 리플렉션 모듈의 descriptor와 명세를 `Metadata/<모듈>/`에 담고(`rocks-sdk.json` 버전 9 — 4는 `ProvidesBuildInfo`를, 5는 `EngineVersion`을, 6은 모듈 표 표지 `ProvidesModuleTable`·`ThirdParty`를 더했고, 8은 메타데이터 모듈 라이브러리가 진입점을 담게 바뀌었고, 9는 타입별 생성 헤더의 본문을 SDK 라이브러리로 옮기고 공유 PCH 제공 모듈의 `SharedPchHeader`를 더했다. 이전 버전 SDK는 거부한다), 게임 빌드는 SDK 모듈을 다시 생성하지 않고 그 descriptor를 import한다. SDK는 생성 헤더와 라이브러리만 싣고 생성 소스는 싣지 않는다 — SDK 모듈의 타입 본문과 등록 함수는 SDK 라이브러리에서 링크된다. 사용 계약과 진단 코드는 [리플렉션 메타데이터](../Docs/Implementation/ReflectionMetadata.ko.md)를 따른다.
 
 명세와 코드 변경은 함께 버전 관리한다. CI PR 검사는 실제 공통 조상·양쪽 부모·병합 결과의 모든 명세를 ID 기준으로 합쳐 비교해 이름/ID 충돌, 이력 손실 및 서로 다른 이름 변경을 거부한다(명세를 옮겨도 ID가 사라진 것으로 보지 않는다). 직접 push, 강제 push 또는 이 검사가 필수로 설정되지 않은 저장소는 자동으로 보호되지 않는다. 동일 선언에 두 ID가 이미 발급된 경우 자동으로 하나를 선택하지 않으며 데이터 마이그레이션 도구도 아직 없다. 소스에서 빠진 메타 입력은 자동 탐색하지 않으므로 모든 리플렉션 헤더를 소유 모듈의 `Metadata`에 등록해야 한다.
 

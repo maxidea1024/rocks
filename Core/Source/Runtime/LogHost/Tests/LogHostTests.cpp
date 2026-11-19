@@ -16,6 +16,7 @@
 #include <Platform/Sync.h>
 
 using namespace rocks;
+namespace log_host_tests_file {
 
 namespace {
 
@@ -687,3 +688,4 @@ TEST(LogHostWritesCompressedFiles) {
         CHECK(Contains(plain, "[Warning][Tests.Host] compressed value 2"));
     }
 }
+} // namespace log_host_tests_file

@@ -4,6 +4,8 @@
 #include <stdio.h>
 
 using namespace rocks;
+namespace vulkan_device_tests_file {
+
 using namespace rocks::graphics;
 
 // Vulkan 로더 동적 로드와 검증 층 켜기(ShaderSystem P9 완료 기준)를 확인한다. 로더나 Vulkan 1.1
@@ -42,3 +44,4 @@ TEST(VulkanDevice_LoadsTheSystemLoaderAndCreatesADevice) {
     CHECK(device.PendingRetireCount() == 0);
     CHECK(device.ValidationErrorCount() == 0);
 }
+} // namespace vulkan_device_tests_file

@@ -65,6 +65,8 @@ bool SameDouble(double a, double b) noexcept {
 
 } // namespace frame_rate_tests
 
+namespace frame_rate_tests_file {
+
 using namespace frame_rate_tests;
 
 TEST(FrameRate_CreateRejectsNonPositive) {
@@ -207,5 +209,6 @@ TEST(FrameRate_FrameNumberAndOrdering) {
     moved.SetFrame(FrameNumber(10));
     CHECK(moved.Frame() == FrameNumber(10) && moved.SubFrame() == 0.25f);
 }
+} // namespace frame_rate_tests_file
 
 } // namespace rocks::test

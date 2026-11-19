@@ -7,13 +7,13 @@ namespace rocks::graphics::vulkan {
 
 namespace {
 
-struct StageAccess {
+struct VulkanCommandsStageAccess {
     VkPipelineStageFlags stage = 0;
     VkAccessFlags access = 0;
 };
 
 // layout을 떠날 때 기다릴 단계와 쓰기다(그 layout에서 일어났던 일).
-StageAccess SourceOf(VkImageLayout layout) noexcept {
+VulkanCommandsStageAccess SourceOf(VkImageLayout layout) noexcept {
     switch (layout) {
     case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
         return {VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0};
@@ -30,7 +30,7 @@ StageAccess SourceOf(VkImageLayout layout) noexcept {
 }
 
 // layout에 들어간 뒤 기다리게 할 단계와 접근이다.
-StageAccess DestinationOf(VkImageLayout layout) noexcept {
+VulkanCommandsStageAccess DestinationOf(VkImageLayout layout) noexcept {
     switch (layout) {
     case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
         return {VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
@@ -52,8 +52,8 @@ StageAccess DestinationOf(VkImageLayout layout) noexcept {
 void VulkanDevice::Barrier(VkCommandBuffer buffer, VkImage image, VkImageLayout from,
                            VkImageLayout to, uint32 baseMip, uint32 mipCount,
                            VkPipelineStageFlags extraSourceStages) const noexcept {
-    const StageAccess source = SourceOf(from);
-    const StageAccess destination = DestinationOf(to);
+    const VulkanCommandsStageAccess source = SourceOf(from);
+    const VulkanCommandsStageAccess destination = DestinationOf(to);
     VkImageMemoryBarrier barrier = {};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     barrier.srcAccessMask = source.access;

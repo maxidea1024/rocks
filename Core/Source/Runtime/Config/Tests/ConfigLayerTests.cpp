@@ -4,6 +4,8 @@
 // 약한 쓰기 기록, Unset 복귀, sync 지점 밖 값 불변, struct·Map 병합과 배열 교체, 모르는 키·섹션의
 // 줄·열 진단, 줄 주석, 사용자 층·출시 규칙의 층 허용, 대입 대상.
 using namespace rocks;
+namespace config_layer_tests_file {
+
 using namespace rocks::config;
 using namespace rocks::test::config;
 
@@ -314,3 +316,4 @@ TEST(Config_InterpCurveSettingsValidateFinalValue) {
     CHECK(settings.curve.GetPoint(0).inValue == 1.0f &&
           settings.curve.GetPoint(0).outValue == 2.0f);
 }
+} // namespace config_layer_tests_file

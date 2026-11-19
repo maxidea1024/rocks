@@ -12,6 +12,8 @@
 // BinnedAllocator의 스레드 캐시·이전 칸·스레드 종료 정리다(Docs/Design/GarbageCollectionScale.ko.md
 // 18.4절, 검토 F3·F7). 순서는 명시 gate로 만든다(시간에 기대지 않는다).
 using namespace rocks;
+namespace binned_allocator_thread_cache_tests_file {
+
 using rocks::detail::BinnedAllocatorTestAccess;
 
 namespace {
@@ -749,3 +751,4 @@ TEST(CoreBinnedConcurrentDuplicateReturnHasOneWinner) {
 
     CHECK(system.Stats().liveAllocations == 0);
 }
+} // namespace binned_allocator_thread_cache_tests_file

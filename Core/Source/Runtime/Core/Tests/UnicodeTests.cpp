@@ -8,6 +8,7 @@
 #include <stdio.h>
 
 using namespace rocks;
+namespace unicode_tests_file {
 
 // Unicode 정규화·case folding·속성 표를 UCD 18.0.0 원본 전체와 대조한다. 원본은 저장소의
 // Core/Source/ThirdParty/UnicodeData에서 읽는다(시험은 저장소 루트를 작업 디렉터리로 실행된다).
@@ -437,3 +438,4 @@ TEST(Unicode_InvalidInputLeavesOutputUnchanged) {
     REQUIRE(TryNormalize(NormalizationForm::NFC, "A\xCC\x8A", out));
     CHECK(out.View() == StringView("keep\xC3\x85"));
 }
+} // namespace unicode_tests_file

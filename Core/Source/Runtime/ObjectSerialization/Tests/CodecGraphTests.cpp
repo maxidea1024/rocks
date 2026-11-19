@@ -12,6 +12,8 @@
 // hook(한 번만, 실패 전파), Required의 저장 거부·복원 진단, 제외 플래그, 스키마와 정적 thunk의
 // 어긋남 거부.
 using namespace rocks;
+namespace codec_graph_tests_file {
+
 using reflection_fixture::AssetFields;
 using reflection_fixture::Base;
 using reflection_fixture::Bias;
@@ -1064,3 +1066,4 @@ TEST(Codec_WideRegisteredEnumIsCheckedAndCharged) {
     CHECK(narrowTypes.Shutdown());
     CHECK(wideTypes.Shutdown());
 }
+} // namespace codec_graph_tests_file

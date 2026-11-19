@@ -138,15 +138,19 @@ internal static class ReflectionSourceTests
             string[] arguments = record.GetProperty("arguments").EnumerateArray().Select(item => item.GetString()!).ToArray();
             Check(arguments.Any(argument => argument.EndsWith(generatedPublic, StringComparison.Ordinal)) &&
                 arguments.Any(argument => argument.EndsWith(coreInclude, StringComparison.Ordinal)) &&
-                arguments.Any(argument => argument.EndsWith(ModuleTables.ModuleNameMacro + "=Fixtures", StringComparison.Ordinal)) &&
-                arguments.Any(argument => argument.EndsWith(ModuleTables.ModuleTypesMacro + "=1", StringComparison.Ordinal)),
+                arguments.Any(argument => argument.EndsWith(ModuleDefinitions.PathOf(output, "Fixtures"), StringComparison.Ordinal)) &&
+                File.ReadAllText(ModuleDefinitions.PathOf(output, "Fixtures")).Contains("#define " + ModuleTables.ModuleNameMacro + " Fixtures\n", StringComparison.Ordinal) &&
+                File.ReadAllText(ModuleDefinitions.PathOf(output, "Fixtures")).Contains("#define " + ModuleTables.ModuleTypesMacro + " 1\n", StringComparison.Ordinal),
                 "the generated source must compile with the module's own and dependency includes and its entry module defines");
             JsonElement engineRecord = records.Single(item => NativeToolchains.PathComparer.Equals(item.GetProperty("file").GetString(), engineReflection));
-            Check(engineRecord.GetProperty("arguments").EnumerateArray().Any(item => item.GetString()!.EndsWith(ModuleTables.ModuleNameMacro + "=Engine", StringComparison.Ordinal)),
-                "the generated source of a module with hand-written sources must receive that module's defines");
+            // 모듈 정의(ROCKS_MODULE_NAME·ROCKS_MODULE_TYPES 포함)는 명령줄이 아니라 강제 include하는 정의 헤더로 간다
+            // (Docs/Design/UnityBuildPch.ko.md 8.2절).
+            string engineDefinitions = ModuleDefinitions.PathOf(output, "Engine");
+            Check(engineRecord.GetProperty("arguments").EnumerateArray().Any(item => item.GetString()!.EndsWith(engineDefinitions, StringComparison.Ordinal)) &&
+                File.ReadAllText(engineDefinitions).Contains("#define " + ModuleTables.ModuleNameMacro + " Engine\n", StringComparison.Ordinal),
+                "the generated source of a module with hand-written sources must receive that module's definitions header");
             // 리플렉션 생성 소스가 없는 진입점 모듈은 자기 타입 표지가 0이다.
-            JsonElement gameRecord = records.Single(item => NativeToolchains.PathComparer.Equals(item.GetProperty("file").GetString(), mainSource));
-            Check(gameRecord.GetProperty("arguments").EnumerateArray().Any(item => item.GetString()!.EndsWith(ModuleTables.ModuleTypesMacro + "=0", StringComparison.Ordinal)),
+            Check(File.ReadAllText(ModuleDefinitions.PathOf(output, "Game")).Contains("#define " + ModuleTables.ModuleTypesMacro + " 0\n", StringComparison.Ordinal),
                 "an entry module without reflection generated sources must receive ROCKS_MODULE_TYPES=0");
         }
 
@@ -185,6 +189,36 @@ internal static class ReflectionSourceTests
             OutputDirectory = Path.Combine(fixture, "out-" + name),
             Modules = modules.Select(module => module.Name == replacement.Name ? replacement : module).ToArray()
         };
+
+        // 실패 안내문(ReflectionSourceFailureNote): 리플렉션 생성 소스의 compile action이 실패하면 컴파일러 출력 뒤에 붙고, 같은 모듈의 손으로
+        // 쓴 소스가 실패할 때는 붙지 않는다. 표시 전용이라 문구를 바꿔도 action key가 그대로다(다시 컴파일하지 않는다).
+        const string note = "note: RMC3000: fixture note for a failing reflection generated source";
+        string brokenReflection = Write("out/Generated/Engine/Source/Public/Broken.generated.cpp", "#error broken generated body\n");
+        NativeModuleInput engine = modules.Single(module => module.Name == "Engine");
+        NativeBuildResult rejected = await builder.BuildAsync(With(engine with
+        {
+            ReflectionSources = [engineReflection, brokenReflection],
+            ReflectionSourceFailureNote = note
+        }, "note-reflection"));
+        NativeActionResult[] failedActions = rejected.Actions.Where(action => action.Executed && !action.Succeeded).ToArray();
+        Check(!rejected.Succeeded && failedActions.Length == 1 && failedActions[0].Kind == "Compile" && failedActions[0].Module == "Engine" &&
+            failedActions[0].StdErr.Contains("broken generated body", StringComparison.Ordinal) &&
+            failedActions[0].StdErr.TrimEnd().EndsWith(note, StringComparison.Ordinal),
+            "a failing reflection generated source must end its diagnostics with the module's failure note: " + Failure(rejected));
+        string brokenSource = Write("engine/broken.cpp", "#error broken hand-written source\n");
+        NativeBuildResult plain = await builder.BuildAsync(With(engine with
+        {
+            Sources = [engineSource, brokenSource],
+            ReflectionSourceFailureNote = note
+        }, "note-source"));
+        Check(!plain.Succeeded && plain.Actions.Where(action => action.Executed && !action.Succeeded)
+                .All(action => !action.StdErr.Contains(note, StringComparison.Ordinal)),
+            "a failing hand-written source must not carry the reflection source failure note: " + Failure(plain));
+        NativeBuildResult renoted = await builder.BuildAsync(game with
+        {
+            Modules = modules.Select(module => module.Name == "Engine" ? engine with { ReflectionSourceFailureNote = note } : module).ToArray()
+        });
+        Check(renoted.Succeeded && renoted.ExecutedActions == 0, "the failure note is display-only and must not be part of an action key: " + Failure(renoted));
         await Rejects<ArgumentException>(builder, With(fixtures with { ReflectionSources = [Path.ChangeExtension(moduleSource, ".h")] }, "header"),
             "ReflectionSources", "a reflection source that is not a .cpp file");
         await Rejects<ArgumentException>(builder, With(fixtures with { ReflectionSources = [""] }, "empty"), "ReflectionSources", "an empty reflection source path");

@@ -18,6 +18,8 @@ namespace rocks::test {
 uint64 OperatorNewCalls() noexcept;
 } // namespace rocks::test
 
+namespace log_file_sealer_tests_file {
+
 namespace {
 
 constexpr LogCategory LogSealTests{"Tests.Seal"};
@@ -412,3 +414,4 @@ TEST(LogFileSealerRotatedFilesDecodeIndependently) {
 
     CHECK(records == 12);
 }
+} // namespace log_file_sealer_tests_file

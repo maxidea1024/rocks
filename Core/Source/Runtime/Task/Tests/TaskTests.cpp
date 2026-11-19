@@ -3,6 +3,7 @@
 #include <Task/TaskScheduler.h>
 
 using namespace rocks;
+namespace task_tests_file {
 
 namespace {
 class RejectAllocator final : public Allocator {
@@ -126,3 +127,4 @@ TEST(Function_MoveOnlyAllocationFailureAndReset) {
     function.Reset();
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace task_tests_file

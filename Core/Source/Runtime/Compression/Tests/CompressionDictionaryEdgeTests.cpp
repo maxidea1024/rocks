@@ -16,6 +16,7 @@
 // frame, 사전 ID 필드가 0인 frame, 일회성 해제의 frame 순회, 비동기 Span 해제, 수준별 사전, 블록
 // 컨테이너의 쓰기 경로·부분 읽기·사전 불일치·이전 형식을 본다.
 namespace rocks::test {
+namespace compression_dictionary_edge_tests_file {
 
 using namespace compression;
 using namespace dictionary_test;
@@ -614,5 +615,6 @@ TEST(CompressionDictionary_BlockDictionaryMismatches) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace compression_dictionary_edge_tests_file
 
 } // namespace rocks::test

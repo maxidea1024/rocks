@@ -21,7 +21,7 @@ inline void FillManifestHeader(CookedManifest& manifest) noexcept {
 }
 
 // 값 v로 채운 digest다.
-inline Sha256Digest DigestOf(uint8 value) noexcept {
+inline Sha256Digest ManifestDigestOf(uint8 value) noexcept {
     Sha256Digest digest;
     for (uint8& byte : digest.bytes) {
         byte = value;
@@ -44,8 +44,8 @@ inline CookedManifestEntry* AddEntry(CookedManifest& manifest, uint64 low, Strin
     constexpr uint64 BaseBytes = 1000;
     entry.packageBytes = BaseBytes + low;
     entry.bulkRawBytes = low;
-    entry.packageSha256 = DigestOf(static_cast<uint8>(low));
-    entry.cookKey = DigestOf(static_cast<uint8>(low + 1));
+    entry.packageSha256 = ManifestDigestOf(static_cast<uint8>(low));
+    entry.cookKey = ManifestDigestOf(static_cast<uint8>(low + 1));
     entry.flags = flags;
     bool ok = entry.pathHint.TryAppend("/Game/").IsOk() && entry.pathHint.TryAppend(name).IsOk();
     return ok ? &entry : nullptr;

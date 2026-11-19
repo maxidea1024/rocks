@@ -7,6 +7,8 @@
 #include <string.h>
 
 using namespace rocks;
+namespace key_exchange_tests_file {
+
 using namespace rocks::crypto;
 
 // 알려진 답의 출처: X25519 키 쌍과 공유 비밀은 RFC 7748 6.1(Alice·Bob)이다. kx 세션 키는
@@ -504,3 +506,4 @@ TEST(CryptoSealedBoxInPlaceAndEdgeCases) {
     CHECK(AllZero(Span<const uint8>(keep).Left(32)));
     CHECK(ConstantTimeEquals(Span<const uint8>(keep).Mid(32, 7), Text("keep me")));
 }
+} // namespace key_exchange_tests_file

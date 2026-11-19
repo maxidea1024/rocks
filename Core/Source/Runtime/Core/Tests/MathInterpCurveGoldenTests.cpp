@@ -399,6 +399,8 @@ struct Curve {
 
 } // namespace ue58
 
+namespace math_interp_curve_golden_tests_file {
+
 namespace {
 
 template <typename S>
@@ -1134,5 +1136,6 @@ TEST(InterpCurveGolden_FindNearestMatchesDenseDoubleOracle) {
     CheckNearestAgainstOracle<Vec3>(0x5004, 1.0e-5);
     CheckNearestAgainstOracle<Vec4>(0x5005, 1.0e-5);
 }
+} // namespace math_interp_curve_golden_tests_file
 
 } // namespace rocks::test

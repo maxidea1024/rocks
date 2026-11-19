@@ -4,6 +4,8 @@
 // 왕복, EditorOnly 제외, bulk(None·Zstd)·재번호, 결정적 byte·지문, 손상·버전 판정, SCC 한 트랜잭션
 // 로드, 의존 누락·타입 불일치, Dependencies 대조, Required 저장 거부.
 using namespace rocks;
+namespace package_format_tests_file {
+
 using namespace rocks::asset_test;
 
 namespace {
@@ -699,3 +701,4 @@ TEST(AssetPackage_WriterRejections) {
     REQUIRE(state.Contents().dependencies.Size() == 1);
     CHECK(state.Contents().dependencies[0].kind == PackageDependencyKind::Build);
 }
+} // namespace package_format_tests_file

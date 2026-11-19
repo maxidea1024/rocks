@@ -8,6 +8,8 @@
 // 칸마다 규칙 위반(검증·writer·reader가 같은 진단), 구조 변조(CRC를 다시 맞춘 잘림·개수·길이·남는
 // byte), 버전, 대조 함수(프로파일·병합·패키지 — A1a writer가 쓴 쿠킹 패키지와), 파일 경로.
 using namespace rocks;
+namespace manifest_tests_file {
+
 using namespace rocks::asset_test;
 
 namespace {
@@ -828,7 +830,7 @@ TEST(CookedManifest_PackagePath) {
     StringBuilder<16> path(env.allocator);
     REQUIRE(path.TryAppend("root/"));
     const AssetId asset{Guid{0x0123456789ABCDEFull, 0xFEDCBA9876543210ull}};
-    REQUIRE(AppendCookedPackagePath(path, asset, DigestOf(0xAB)));
+    REQUIRE(AppendCookedPackagePath(path, asset, ManifestDigestOf(0xAB)));
     CHECK(path.View() == StringView("root/Packages/01/01234567-89ab-cdef-fedc-ba9876543210-"
                                     "abababababababab.rpkg"));
 
@@ -838,7 +840,7 @@ TEST(CookedManifest_PackagePath) {
     for (uint64 attempt = 1;; ++attempt) {
         failing.FailOnAttempt(attempt);
         StringBuilder<4> out(failing);
-        auto appended = AppendCookedPackagePath(out, asset, DigestOf(0xAB));
+        auto appended = AppendCookedPackagePath(out, asset, ManifestDigestOf(0xAB));
         if (failing.Attempts() < attempt) {
             REQUIRE(appended);
             break;
@@ -873,3 +875,4 @@ TEST(CookedManifest_EntryCountLimit) {
           ErrorCode::InvalidArgument);
     CHECK(out.IsEmpty() && CorruptAt(failure, F::EntryCount, Head));
 }
+} // namespace manifest_tests_file

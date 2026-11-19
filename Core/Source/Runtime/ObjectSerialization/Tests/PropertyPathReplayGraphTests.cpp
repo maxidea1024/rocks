@@ -224,6 +224,7 @@ void path_replay::Shelf::Trace(TraceVisitor& visitor) const noexcept {
     detail::TraceArrayField(tags, visitor);
     detail::TraceArrayField(sockets, visitor);
 }
+namespace property_path_replay_graph_tests_file {
 
 namespace {
 
@@ -389,3 +390,4 @@ TEST(PropertyPathReplay_StructElementRemovalReplaysToSameBytes) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace property_path_replay_graph_tests_file

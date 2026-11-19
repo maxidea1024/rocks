@@ -5,6 +5,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace path_alias_stack_review_tests_file {
 
 TEST(StringPathInPlaceKeepsOverlappingTailWithoutAllocation) {
     SystemAllocator system;
@@ -51,3 +52,4 @@ TEST(StringPathInPlaceMovesOverlappingTailBeforeTerminator) {
     }
     CHECK(system.Stats().liveAllocations == 0);
 }
+} // namespace path_alias_stack_review_tests_file

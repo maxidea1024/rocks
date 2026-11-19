@@ -21,6 +21,8 @@
 // 보존)과 다시 저장 byte 같음, 도구 이름 keys·키 Atomic, JSON 왕복, 검증 hook(정렬·유한 시간)이
 // graph decode·JSON import·대입 묶음·경로 쓰기에서 어기는 값을 거부하고 값이 그대로인지.
 using namespace rocks;
+namespace step_curve_reflection_tests_file {
+
 using namespace rocks::reflection_text;
 using curves_fixture::StepCurveHolder;
 
@@ -451,3 +453,4 @@ TEST(StepCurveReflection_PathWritesValidate) {
         CHECK(value.anyNames.Get<NameStepCurve>()->Keys()[1].time == 25.0f);
     });
 }
+} // namespace step_curve_reflection_tests_file

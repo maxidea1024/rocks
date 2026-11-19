@@ -10,7 +10,7 @@ namespace {
 
 namespace decimal = detail::decimal;
 
-bool IsDigit(char character) noexcept {
+bool NumberTextIsDigit(char character) noexcept {
     return character >= '0' && character <= '9';
 }
 
@@ -79,7 +79,7 @@ Result<uint64> ParseFloatingPoint(StringView view, bool single) noexcept {
 
     // 정수부: 첫 유효 숫자부터 소수점 앞 자리 수만큼 pointPosition이 커진다.
     usize integerDigits = 0;
-    while (index < bytes && IsDigit(text[index])) {
+    while (index < bytes && NumberTextIsDigit(text[index])) {
         const uint8 digit = static_cast<uint8>(text[index] - '0');
         if (number.count != 0 || digit != 0) {
             append(digit);
@@ -94,7 +94,7 @@ Result<uint64> ParseFloatingPoint(StringView view, bool single) noexcept {
     usize fractionDigits = 0;
     if (index < bytes && text[index] == '.') {
         ++index;
-        while (index < bytes && IsDigit(text[index])) {
+        while (index < bytes && NumberTextIsDigit(text[index])) {
             const uint8 digit = static_cast<uint8>(text[index] - '0');
             if (number.count == 0 && digit == 0) {
                 --number.pointPosition;
@@ -124,7 +124,7 @@ Result<uint64> ParseFloatingPoint(StringView view, bool single) noexcept {
 
         int64 exponent = 0;
         usize exponentDigits = 0;
-        while (index < bytes && IsDigit(text[index])) {
+        while (index < bytes && NumberTextIsDigit(text[index])) {
             if (exponent < 100000000000000000ll) {
                 exponent = exponent * 10 + (text[index] - '0');
             }

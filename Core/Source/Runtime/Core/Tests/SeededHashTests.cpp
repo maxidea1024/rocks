@@ -6,6 +6,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace seeded_hash_tests_file {
 
 namespace {
 
@@ -198,3 +199,4 @@ TEST(SeededHash_IgnoringAsciiCaseMatchesLoweredCopy) {
     same.bytes[0] = 1;
     CHECK(SeededHash<Sha256Digest>(seed)(digest) != SeededHash<Sha256Digest>(seed)(same));
 }
+} // namespace seeded_hash_tests_file

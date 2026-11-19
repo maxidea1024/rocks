@@ -23,6 +23,8 @@
 // import·대입 묶음·경로 쓰기에서 어기는 값을 거부하고 값이 그대로인지, 미러 enum의 미선언 값 거부,
 // 생성 깊은 복사의 할당 실패 원자성.
 using namespace rocks;
+namespace interp_curve_reflection_tests_file {
+
 using namespace rocks::reflection_text;
 using curves_fixture::InterpCurveHolder;
 
@@ -580,3 +582,4 @@ TEST(InterpCurveReflection_UndeclaredModeIsRejected) {
         REQUIRE(target.Shutdown(target.OwnerAccess()));
     }
 }
+} // namespace interp_curve_reflection_tests_file

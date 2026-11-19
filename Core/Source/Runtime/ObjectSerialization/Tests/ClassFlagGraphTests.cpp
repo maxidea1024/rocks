@@ -9,6 +9,8 @@
 // ClassRef 쓰기의 Deprecated 거부와 decode 진단·재저장, Within 생성 규칙(Registry 생성·그래프 1단계
 // 노드 Outer·기준 Outer).
 using namespace rocks;
+namespace class_flag_graph_tests_file {
+
 using namespace rocks::test::map;
 using reflection_fixture::ClassFlagHolder;
 using reflection_fixture::DeprecatedThing;
@@ -582,3 +584,4 @@ TEST(ClassFlagGraph_StageValidateDoesNotReadBaseOuterType) {
 
     REQUIRE(objects.Shutdown(objects.OwnerAccess()));
 }
+} // namespace class_flag_graph_tests_file

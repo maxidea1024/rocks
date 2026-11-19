@@ -4,6 +4,8 @@
 #include <Localization/Text.h>
 
 using namespace rocks;
+namespace text_concurrency_tests_file {
+
 using namespace rocks::test::localization;
 
 namespace {
@@ -132,3 +134,4 @@ TEST(TextNativeReadersKeepCoherentSnapshotsDuringLanguagePublicationAndClose) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace text_concurrency_tests_file

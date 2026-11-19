@@ -5,6 +5,8 @@
 #include <Platform/PlatformMath.h>
 
 using namespace rocks;
+namespace loose_octree_query_tests_file {
+
 using namespace rocks::spatial;
 using namespace rocks::spatial::oracle;
 
@@ -733,3 +735,4 @@ TEST(LooseOctree_ValidateAndQueriesUnderFlushToZero) {
     CHECK(valid && report.invariant == OctreeInvariantNone);
     CHECK(touching == 2);
 }
+} // namespace loose_octree_query_tests_file

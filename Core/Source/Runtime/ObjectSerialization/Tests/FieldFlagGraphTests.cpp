@@ -9,6 +9,8 @@
 // 저장·로드 대칭(필드·struct 멤버·원소 멤버마다 자기 플래그, Atomic struct는 통째), Required 실효
 // 값 검사의 포함 필터 밖 필드 제외.
 using namespace rocks;
+namespace field_flag_graph_tests_file {
+
 using namespace rocks::test::map;
 using reflection_fixture::FlagAtom;
 using reflection_fixture::FlagContainers;
@@ -342,3 +344,4 @@ TEST(FieldFlagGraph_IncludeFlagsReachContainerStructMembers) {
     REQUIRE(objects.Collect(objects.OwnerAccess()));
     REQUIRE(objects.Shutdown(objects.OwnerAccess()));
 }
+} // namespace field_flag_graph_tests_file

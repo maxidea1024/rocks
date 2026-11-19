@@ -9,6 +9,7 @@
 // STL 없이 범위 기반 for와 반복자 계약을 검사한다. STL 알고리즘과의 상호 운용은
 // StlCompatibilityTests.cpp가 실제 STL 헤더로 검사한다.
 namespace rocks::test {
+namespace container_iterator_tests_file {
 
 TEST(ContainerIterators_ArrayAndSpanRangeFor) {
     SystemAllocator allocator;
@@ -118,5 +119,6 @@ TEST(ContainerIterators_HashSetVisitsEachKeyOnce) {
     }
     CHECK(count == 50 && sum == 3 * 1225);
 }
+} // namespace container_iterator_tests_file
 
 } // namespace rocks::test

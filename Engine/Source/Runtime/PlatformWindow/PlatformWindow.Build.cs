@@ -7,6 +7,9 @@ public sealed class PlatformWindow : EngineModuleRules
 {
     protected override string ModuleName => "PlatformWindow";
 
+    // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
+    protected override UnityMode Unity => UnityMode.On;
+
     protected override string[] RequiredModules => ["Input"];
 
     public override NativeModuleInput Configure(BuildContext context)
@@ -16,6 +19,8 @@ public sealed class PlatformWindow : EngineModuleRules
         return new()
         {
             Name = ModuleName,
+            Unity = UnityFor(context),
+            UnityExclude = UnityExclude(context),
             // Windows uses Win32 windows and XInput; other platforms have no window backend yet and return Unsupported.
             // The entry point (Private/PlatformWindowModule.cpp) is built on every platform.
             Sources = [ModuleEntrySource(context), .. context.Sources(windows ? $"{backend}/Win64" : $"{backend}/Unsupported")],

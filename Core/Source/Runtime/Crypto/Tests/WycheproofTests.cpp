@@ -18,6 +18,8 @@
 #include <string.h>
 
 using namespace rocks;
+namespace wycheproof_tests_file {
+
 using namespace rocks::crypto;
 
 // Wycheproof(C2SP, Apache-2.0, 데이터 전용 ThirdParty) 시험 벡터를 사상표대로 돌린다
@@ -598,3 +600,4 @@ TEST(CryptoWycheproofSecretStream) {
     });
     CHECK(total == 7 && verified == 7);
 }
+} // namespace wycheproof_tests_file

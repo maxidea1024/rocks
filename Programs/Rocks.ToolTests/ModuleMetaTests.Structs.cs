@@ -44,13 +44,13 @@ internal static partial class ModuleMetaTests
             Verify.Equal(linkId, TargetOf(upperDescriptor, "probe::Shape", "link"), "struct member of an imported struct");
             Verify.Equal("ContainsStrongReference", Type(upperDescriptor, "probe::Shape").GetProperty("flags")[0].GetString(), "reference trait propagates from an imported struct");
 
-            string value = Compact(File.ReadAllText(layout.Generated("Upper", "Public/Upper/Value.generated.h")));
+            string value = Compact(layout.GeneratedText("Upper", "Public/Upper/Value.generated.h"));
             Verify.That(value.Contains("#include<Lower/Parent.generated.h>", StringComparison.Ordinal), "imported struct generated header include");
             Verify.That(value.Contains("#include<Upper/Shape.generated.h>", StringComparison.Ordinal), "same-module struct generated header include");
             Verify.That(value.Contains(Compact("GeneratedType<::probe::Point>::Trace(value.*(&::probe::Parent::origin), visitor);"), StringComparison.Ordinal), "inherited struct field Trace");
             Verify.That(value.Contains(Compact("NativeTypeKey<::probe::Shape>()"), StringComparison.Ordinal), "same-module struct field native key");
             Verify.That(!value.Contains("structGeneratedType<::probe::Shape>", StringComparison.Ordinal), "struct specialization is defined once (in its own header)");
-            string shape = Compact(File.ReadAllText(layout.Generated("Upper", "Public/Upper/Shape.generated.h")));
+            string shape = Compact(layout.GeneratedText("Upper", "Public/Upper/Shape.generated.h"));
             Verify.That(shape.Contains("#include<Lower/Parent.generated.h>", StringComparison.Ordinal), "struct header includes imported member struct header");
             Verify.That(shape.Contains(Compact("GeneratedType<::probe::Link>::Trace(value.*(&::probe::Shape::link), visitor);"), StringComparison.Ordinal), "struct traces imported reference struct");
             string aggregate = Compact(File.ReadAllText(layout.ModuleSource("Upper")));
@@ -248,7 +248,7 @@ internal static partial class ModuleMetaTests
             Verify.Equal("rocks::Vector3<float>", Type(bindings, "probe::Vec3Binding").GetProperty("binds").GetString(), "descriptor binds");
             Verify.Equal(Type(bindings, "probe::Vec3Binding").GetProperty("id").GetString(),
                 FieldNodeOf(consumer, "probe::Value", "position").GetProperty("value").GetProperty("type").GetString(), "imported real type resolves to the mirror");
-            string generated = Compact(File.ReadAllText(layout.Generated("Upper", "Public/Upper/Value.generated.h")));
+            string generated = Compact(layout.GeneratedText("Upper", "Public/Upper/Value.generated.h"));
             Verify.That(generated.Contains("#include<Lower/Parent.generated.h>", StringComparison.Ordinal), "mirror generated header include");
             Verify.That(generated.Contains(Compact("NativeTypeKey<::rocks::Vector3<float>>()"), StringComparison.Ordinal), "real type native key");
             Verify.That(generated.Contains(Compact("static_assert(!GeneratedType<::rocks::Vector3<float>>::ContainsStrongReference"), StringComparison.Ordinal),
@@ -327,7 +327,7 @@ internal static partial class ModuleMetaTests
             layout.Write("Upper/Public/Upper/Deep.h", Deep(15));
             ProcessResult accepted = await layout.RunUpperInputsAsync([(layout.Source("Upper/Public/Upper/Deep.h"), "Upper/Deep.h", false)]);
             Verify.Equal(0, accepted.ExitCode, "struct over an imported depth-15 chain: " + accepted.StdErr);
-            Verify.That(Compact(File.ReadAllText(layout.Generated("Upper", "Public/Upper/Deep.generated.h"))).Contains("staticconstexpruint32Depth=16u;", StringComparison.Ordinal),
+            Verify.That(Compact(layout.GeneratedText("Upper", "Public/Upper/Deep.generated.h")).Contains("staticconstexpruint32Depth=16u;", StringComparison.Ordinal),
                 "depth continues through imported structs");
             layout.Write("Upper/Public/Upper/Deep.h", Deep(16));
             await Reject(layout.RunUpperInputsAsync([(layout.Source("Upper/Public/Upper/Deep.h"), "Upper/Deep.h", false)]), "RMC2303", "nesting depth 17");

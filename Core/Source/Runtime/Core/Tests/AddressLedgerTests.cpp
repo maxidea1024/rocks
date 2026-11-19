@@ -5,6 +5,8 @@
 #include <Core/Private/Memory/AddressLedger.h>
 #include <Core/Private/Memory/SystemAllocatorTestAccess.h>
 
+namespace address_ledger_tests_file {
+
 // 할당자 공용 주소 원장과 SystemAllocator의 원장 경로다(Docs/Design/GarbageCollectionScale.ko.md
 // 18.6절).
 namespace {
@@ -313,3 +315,4 @@ TEST(CoreAddressLedgerProbeLengthWhileTombstonesAccumulate) {
         CHECK(ledger.Count() == 0);
     }
 }
+} // namespace address_ledger_tests_file

@@ -5,6 +5,8 @@
 #include <Task/SerialTaskChain.h>
 
 using namespace rocks;
+namespace serial_task_chain_tests_file {
+
 using namespace rocks::platform;
 
 namespace {
@@ -426,3 +428,4 @@ TEST(WorkerScheduler_OrderDependencyAndLaneOptions) {
     CHECK(static_cast<bool>(kept.Value()));
     REQUIRE(scheduler.Shutdown());
 }
+} // namespace serial_task_chain_tests_file

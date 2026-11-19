@@ -22,6 +22,8 @@
 // 한 프로세스에서 실행되므로, 각 시험은 ScopedCodec으로 등록해 REQUIRE로 일찍 끝나도 해제한다.
 // 해제 성공이 곧 사용권 누수가 없다는 확인이다.
 namespace rocks::test {
+namespace compression_codec_tests_file {
+
 namespace {
 
 using namespace compression;
@@ -1211,5 +1213,6 @@ TEST(CompressionCodec_ConcurrentUseAndRegistration) {
     }
     CHECK(TryFindCompressionFormat(StringView("test.flipping")).Error() == ErrorCode::NotFound);
 }
+} // namespace compression_codec_tests_file
 
 } // namespace rocks::test

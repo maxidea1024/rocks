@@ -48,7 +48,7 @@ internal static partial class MetaTests
             Verify.Equal(baseId, Field("probe::Value", "shape").GetProperty("value").GetProperty("type").GetString(), "InstancedStruct base type");
             Verify.Equal(baseId, Field("probe::Value", "shapes").GetProperty("element").GetProperty("type").GetString(),
                 "InstancedStruct element base type");
-            string generated = Compact(File.ReadAllText(probe.Output));
+            string generated = Compact(probe.GeneratedText());
             Verify.Contains("static_assert(::rocks::IsBaseOfV<::probe::Base,::probe::Mid>", generated, "reflected base static_assert");
             Verify.Contains("static_assert(::rocks::IsEmptyV<::probe::Tag<probe::Tagged>>&&!::rocks::IsPolymorphicV<::probe::Tag<probe::Tagged>>",
                 generated, "empty base static_assert");

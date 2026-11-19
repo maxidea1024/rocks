@@ -26,7 +26,7 @@ static_assert(KdfKeyBytes == crypto_kdf_KEYBYTES && KdfContext::Bytes == crypto_
 static_assert(KdfMinDerivedBytes == crypto_kdf_BYTES_MIN &&
               KdfMaxDerivedBytes == crypto_kdf_BYTES_MAX);
 
-bool IsDefined(HkdfAlgorithm algorithm) noexcept {
+bool KdfIsDefined(HkdfAlgorithm algorithm) noexcept {
     return algorithm == HkdfAlgorithm::Sha256 || algorithm == HkdfAlgorithm::Sha512;
 }
 
@@ -76,7 +76,7 @@ void Expand(HkdfAlgorithm algorithm, Span<const uint8> prk, Span<const uint8> in
 Result<void> TryHkdf(HkdfAlgorithm algorithm, Span<const uint8> inputKeyMaterial,
                      Span<const uint8> salt, Span<const uint8> info, Span<uint8> output) noexcept {
     platform::DataIndependentTimingScope dit;
-    if (!IsDefined(algorithm) || output.Size() > MaxOutputBytes(algorithm) ||
+    if (!KdfIsDefined(algorithm) || output.Size() > MaxOutputBytes(algorithm) ||
         Overlaps(output, inputKeyMaterial) || Overlaps(output, salt) || Overlaps(output, info)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -97,7 +97,7 @@ Result<void> TryHkdf(HkdfAlgorithm algorithm, Span<const uint8> inputKeyMaterial
 Result<void> TryHkdfExtract(HkdfAlgorithm algorithm, Span<const uint8> salt,
                             Span<const uint8> inputKeyMaterial, Span<uint8> prk) noexcept {
     platform::DataIndependentTimingScope dit;
-    if (!IsDefined(algorithm) || prk.Size() != PrkBytes(algorithm) || Overlaps(prk, salt) ||
+    if (!KdfIsDefined(algorithm) || prk.Size() != PrkBytes(algorithm) || Overlaps(prk, salt) ||
         Overlaps(prk, inputKeyMaterial)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -110,7 +110,7 @@ Result<void> TryHkdfExtract(HkdfAlgorithm algorithm, Span<const uint8> salt,
 Result<void> TryHkdfExpand(HkdfAlgorithm algorithm, Span<const uint8> prk, Span<const uint8> info,
                            Span<uint8> output) noexcept {
     platform::DataIndependentTimingScope dit;
-    if (!IsDefined(algorithm) || prk.Size() != PrkBytes(algorithm) ||
+    if (!KdfIsDefined(algorithm) || prk.Size() != PrkBytes(algorithm) ||
         output.Size() > MaxOutputBytes(algorithm) || Overlaps(output, prk) ||
         Overlaps(output, info)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);

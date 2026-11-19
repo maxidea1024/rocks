@@ -4,6 +4,8 @@
 // 고정 byte(golden SHA-256과 체크인 v1 byte), 칸 종류·플래그의 모든 조합(빠짐 검사 포함), 많은
 // 패키지·깊은 Hard 사슬·SCC를 담은 큰 매니페스트, 고정 seed 변조.
 using namespace rocks;
+namespace manifest_scale_tests_file {
+
 using namespace rocks::asset_test;
 
 namespace {
@@ -474,3 +476,4 @@ TEST(CookedManifest_FixedSeedMutationFuzz) {
     CHECK(rejected > Iterations / 2);
     CHECK(accepted > 0);
 }
+} // namespace manifest_scale_tests_file

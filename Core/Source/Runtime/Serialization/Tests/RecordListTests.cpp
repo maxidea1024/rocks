@@ -7,6 +7,7 @@
 #include <Platform/Thread.h>
 
 using namespace rocks;
+namespace record_list_tests_file {
 
 // RecordList(WireType::RecordList)의 형식·한도·예산 공유·실패 원자성
 // 시험이다(CoreDataFoundations.ko.md 4절).
@@ -1387,3 +1388,4 @@ TEST(RecordList_OpenItemFieldLimitAndItemBytes) {
           first.Value().Data() < parentBytes.Data() + parentBytes.Size());
     CHECK(list.Value().ItemBytes(2).Error() == ErrorCode::InvalidArgument);
 }
+} // namespace record_list_tests_file

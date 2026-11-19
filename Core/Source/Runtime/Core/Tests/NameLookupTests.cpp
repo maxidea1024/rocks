@@ -5,6 +5,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace name_lookup_tests_file {
 
 // NamePool::TryFind(intern 없는 조회)·NameTextEquals(pool 없는 비교)·SplitNameText(base·번호
 // 분해)의 시험이다(Docs/Design/ReflectionExtensions.ko.md 4절 B9c1).
@@ -785,3 +786,4 @@ TEST(NameTextSplit_FollowsUe58NumberBounds) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace name_lookup_tests_file

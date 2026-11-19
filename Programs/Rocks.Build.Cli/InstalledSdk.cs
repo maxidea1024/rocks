@@ -16,7 +16,7 @@ namespace Rocks.Build.Cli;
 // (3.10절). SDK는 생성 소스 자체는 싣지 않는다(생성 헤더와 라이브러리만).
 public sealed record SdkModule(string Name, string[] Includes, string[] Defines, string[] Dependencies, string[] Libraries,
     string[] SystemLibraries, string[] Frameworks, string? Descriptor, string? IdentityManifest, bool ProvidesBuildInfo,
-    bool ProvidesModuleTable, bool ThirdParty);
+    bool ProvidesModuleTable, bool ThirdParty, string? SharedPchHeader);
 
 // SDK를 만든 엔진 버전이다(Build/Build.version 값 — 그 파일은 SDK에 복사하지 않는다, Docs/Design/ReflectionFoundations.ko.md 8.2절).
 // 게임 빌드는 저장소 파일을 읽지 않고 이 값만 쓴다(BuildInfo 생성 TU·.rocksproject engineVersion 대조). 위치 record는 JSON에서 빠진
@@ -38,7 +38,12 @@ public static class InstalledSdk
     // 8: ReflectionOnlyLibrary 제거. 메타데이터 모듈이 모두 진입점 모듈이 되고 진입 기술이 자기 타입 등록 함수를 싣는다
     // (Docs/Design/ModuleLoader.ko.md 3.10절 — 이전 SDK의 그런 모듈 라이브러리에는 진입점이 없어 게임 모듈 표가 링크되지 않으므로
     // 버전 불일치로 거부한다).
-    internal const int ManifestVersion = 8;
+    // 9: 타입별 생성 헤더가 본문을 정의하지 않고(선언·형질·inline Trace만 — 본문은 SDK 라이브러리에 든 타입별 생성 소스의 object다,
+    // Docs/Design/ReflectionGeneratedSources.ko.md 5절) SdkModule에 SharedPchHeader가 더해졌다(공유 PCH 제공 모듈의 헤더 철자 —
+    // Docs/Design/UnityBuildPch.ko.md 8.4절. 게임 빌드가 SDK 헤더로 공유 PCH를 자기 출력에 직접 만들고, 공유 정의는 Defines에서 다시
+    // 계산한다). 이전 SDK는 생성 헤더가 본문을 inline으로 정의하고 동봉한 MetaCompiler가 타입별 생성 소스·정의 헤더 옵션
+    // (--jobs·--definitions-header)을 모르므로 버전 불일치로 거부한다.
+    internal const int ManifestVersion = 9;
 
     /// <summary>
     /// SDK 타깃에서 도달하는 모듈만 고른다. 규칙 로더는 모든 모듈 규칙을 읽으므로 타깃이 쓰지 않는(빌드되지 않은)
@@ -155,7 +160,7 @@ public static class InstalledSdk
                 packaged.Add(new(module.Name, includes.ToArray(), module.PublicDefines.ToArray(),
                     module.Dependencies.ToArray(), libraries.ToArray(), module.SystemLibraries.ToArray(),
                     module.Frameworks.ToArray(), descriptor, identityManifest, module.ProvidesBuildInfo, module.ProvidesModuleTable,
-                    module.ThirdParty));
+                    module.ThirdParty, module.SharedPchHeader));
             }
             // 고정 버전 외부 라이브러리의 라이선스 원문을 모두 함께 배포한다(BSD 계열은 바이너리 배포 시 고지 의무가 있다).
             // code 라이브러리는 모듈을 담을 때, 데이터 전용 라이브러리(예: Unicode UCD)는 파생물이 들어간 모듈(embeddedIn)을
@@ -195,6 +200,14 @@ public static class InstalledSdk
 
     public static async Task<int> BuildGameAsync(Dictionary<string, string> options, CancellationToken cancellationToken)
     {
+        // 값이 틀린 빌드 방식 옵션은 출력을 만들기 전에 거부한다.
+        foreach (string mode in BuildCommand.BuildModeOptions.Where(mode => mode != BuildCommand.TimingOption))
+        {
+            BuildCommand.Switch(options, mode);
+        }
+
+        BuildCommand.Timing(options);
+
         var sdk = Path.GetFullPath(options["sdk"]);
         var project = Path.GetFullPath(options["project"]);
         var output = Path.GetFullPath(options.GetValueOrDefault("output", Path.Combine(project, "out", BuildCommand.Configuration(options).ToString())));
@@ -333,8 +346,9 @@ public static class InstalledSdk
         }
         // 규칙 모듈을 기술자와 대조하고, 켜지지 않은 플러그인·Editor·플랫폼 미지원 모듈 등을 뺀다.
         var projectModules = moduleSet.Apply(rules.Modules, rules.Target.Modules);
-        // SDK 모듈은 다시 생성하지 않는다. 리플렉션 모듈이면 descriptor·명세를 ImportedMetadata로 넘긴다. 등록 함수 등 생성 소스의 object는
-        // SDK 라이브러리(PrebuiltLibraries)에 들어 있으므로 ReflectionSources는 비어 있다 — 게임 소유 모듈만 자기 생성 소스를 낸다.
+        // SDK 모듈은 다시 생성하지 않는다. 리플렉션 모듈이면 descriptor·명세를 ImportedMetadata로 넘긴다. 타입별 본문·등록 함수 등 생성
+        // 소스의 object는 SDK 라이브러리(PrebuiltLibraries)에 들어 있으므로 ReflectionSources는 비어 있다 — 게임 소유 모듈만 자기 생성
+        // 소스를 낸다.
         var modules = manifest.Modules.Select(module => new NativeModuleInput
         {
             Name = module.Name,
@@ -349,7 +363,8 @@ public static class InstalledSdk
                 : new ImportedMetadata(SafePath(sdk, module.Descriptor), SafePath(sdk, module.IdentityManifest!)),
             ProvidesBuildInfo = module.ProvidesBuildInfo,
             ProvidesModuleTable = module.ProvidesModuleTable,
-            ThirdParty = module.ThirdParty
+            ThirdParty = module.ThirdParty,
+            SharedPchHeader = module.SharedPchHeader
         }).Concat(projectModules).ToArray();
         // 켠 플러그인의 모듈도 빌드한다(UE처럼 타깃이 직접 참조하지 않아도 컴파일된다). 메타데이터 생성도 같은 root 집합이다.
         string[] targets = rules.Target.Modules.Concat(moduleSet.IncludedPluginModules).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
@@ -357,7 +372,8 @@ public static class InstalledSdk
         var declaredInputs = GameInputSnapshot.DeclaredInputs(context, plan);
         var initialDeclared = GameInputSnapshot.Capture(project, output, sdk, declaredInputs);
         var metadata = await MetadataRunner.GenerateAsync(context, toolchain, plan, rules.Target,
-            Path.Combine(sdk, "Tools/Rocks.MetaCompiler/Rocks.MetaCompiler.dll"), cancellationToken, targets);
+            Path.Combine(sdk, "Tools/Rocks.MetaCompiler/Rocks.MetaCompiler.dll"), cancellationToken, targets,
+            jobs: BuildCommand.Jobs(options), verifySources: BuildCommand.VerifyMetadataSources(options));
         if (metadata != 0)
         {
             return 1;
@@ -374,6 +390,11 @@ public static class InstalledSdk
             Targets = targets,
             ContextFingerprint = "rocks-installed-sdk-v1",
             MaxParallelism = BuildCommand.Jobs(options),
+            Unity = BuildCommand.Switch(options, BuildCommand.UnityOption),
+            Pch = BuildCommand.Switch(options, BuildCommand.PchOption),
+            Adaptive = BuildCommand.Switch(options, BuildCommand.AdaptiveOption),
+            Timing = BuildCommand.Timing(options),
+            TimingLabel = rules.Target.Name,
             // 도구 빌드 ID의 sdk: 경로 키 기준이다(SDK 헤더·라이브러리가 설치 위치와 무관한 키를 갖는다).
             SdkDirectory = sdk,
             EngineVersion = engineVersion

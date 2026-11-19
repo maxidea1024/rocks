@@ -12,6 +12,8 @@
 // 로드 분류, Zstd bulk 블록 압축의 메모리 피크, Tags 키 정렬·형식·할당 실패, 종료된 TypeRegistry,
 // 클래스가 아닌 export 타입, 파괴 요청만 받은 import 대상, Prepare 도중 닫히는 TypeRegistry.
 using namespace rocks;
+namespace package_review_tests_file {
+
 using namespace rocks::asset_test;
 
 namespace {
@@ -1243,3 +1245,4 @@ TEST(AssetPackage_TypeRegistryClosesDuringInstantiate) {
         CHECK(atImports > 0);
     }
 }
+} // namespace package_review_tests_file

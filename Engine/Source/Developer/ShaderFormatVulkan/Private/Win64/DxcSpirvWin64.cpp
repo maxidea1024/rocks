@@ -20,7 +20,7 @@ namespace {
 // DXC 인자 수의 상한이다(아래 고정 인자 + 여유).
 constexpr usize MaxArguments = 16;
 
-void Append(String& text, StringView part) noexcept {
+void DxcSpirvWin64Append(String& text, StringView part) noexcept {
     auto appended = text.TryAppend(part);
     (void)appended;
 }
@@ -34,7 +34,7 @@ Result<void> CompileHlslToSpirv(const DxcFunctions& dxc, graphics::ShaderStage s
         reinterpret_cast<DxcCreateInstanceProc>(dxc.address[DxcFunctions::CreateInstance]);
     ComRef<IDxcCompiler3> compiler;
     if (create == nullptr || FAILED(create(CLSID_DxcCompiler, IID_PPV_ARGS(compiler.Out())))) {
-        Append(diagnostics, StringView("DxcCreateInstance(IDxcCompiler3) failed"));
+        DxcSpirvWin64Append(diagnostics, StringView("DxcCreateInstance(IDxcCompiler3) failed"));
         return Result<void>::Failure(ErrorCode::DependencyFailed);
     }
 
@@ -61,14 +61,15 @@ Result<void> CompileHlslToSpirv(const DxcFunctions& dxc, graphics::ShaderStage s
     ComRef<IDxcResult> result;
     if (FAILED(compiler->Compile(&source, arguments, static_cast<UINT32>(count), nullptr,
                                  IID_PPV_ARGS(result.Out())))) {
-        Append(diagnostics, StringView("IDxcCompiler3::Compile failed"));
+        DxcSpirvWin64Append(diagnostics, StringView("IDxcCompiler3::Compile failed"));
         return Result<void>::Failure(ErrorCode::DependencyFailed);
     }
 
     ComRef<IDxcBlobUtf8> errors;
     if (SUCCEEDED(result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(errors.Out()), nullptr)) &&
         errors.Get() != nullptr && errors->GetStringLength() > 0) {
-        Append(diagnostics, StringView(errors->GetStringPointer(), errors->GetStringLength()));
+        DxcSpirvWin64Append(diagnostics,
+                            StringView(errors->GetStringPointer(), errors->GetStringLength()));
     }
 
     HRESULT status = E_FAIL;
@@ -79,7 +80,7 @@ Result<void> CompileHlslToSpirv(const DxcFunctions& dxc, graphics::ShaderStage s
     ComRef<IDxcBlob> object;
     if (FAILED(result->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(object.Out()), nullptr)) ||
         object.Get() == nullptr || object->GetBufferSize() % sizeof(uint32) != 0) {
-        Append(diagnostics, StringView("DXC produced no SPIR-V object"));
+        DxcSpirvWin64Append(diagnostics, StringView("DXC produced no SPIR-V object"));
         return Result<void>::Failure(ErrorCode::DependencyFailed);
     }
 

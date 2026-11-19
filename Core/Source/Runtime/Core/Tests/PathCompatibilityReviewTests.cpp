@@ -3,6 +3,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace path_compatibility_review_tests_file {
 
 // UE 5.6은 축약 뒤 "./"를 모두 지워 "a..//"가 "a./", "a.../x"가 "a..x"가 되었다. UE 5.8은 이
 // 일괄 제거를 없애고 "/."로 시작하는 구성 요소만 보므로, 축약할 "/."·"/.."가 없으면 이름 안의
@@ -92,3 +93,4 @@ TEST(PathCompatibilityRejectsMalformedTextBeforeReturningViews) {
         CHECK(!split && split.Error() == ErrorCode::InvalidArgument);
     }
 }
+} // namespace path_compatibility_review_tests_file

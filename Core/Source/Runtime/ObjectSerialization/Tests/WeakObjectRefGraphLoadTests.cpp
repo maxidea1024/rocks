@@ -6,6 +6,8 @@
 // 형식 규칙(TypeMismatch)을 따르며, weak 간선은 편의 복원의 도달 검사·GC가 따라가지 않고, weak를
 // 담은 struct는 1단계 관찰 대상이 될 수 없다.
 using namespace rocks;
+namespace weak_object_ref_graph_load_tests_file {
+
 using namespace rocks::test::weak;
 
 namespace {
@@ -266,3 +268,4 @@ TEST(WeakObjectRefGraphLoad_ObservedStructsCannotHoldWeakReferences) {
 
     CHECK(types.Shutdown());
 }
+} // namespace weak_object_ref_graph_load_tests_file

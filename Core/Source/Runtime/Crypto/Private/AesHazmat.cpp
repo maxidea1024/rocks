@@ -27,7 +27,7 @@ static_assert(hazmat::AesGcmMaxMessageBytes == detail::AesGcmMaxMessageBytes &&
 static_assert(sizeof(detail::AesGcmStream) <= detail::SecretSlotMaxBytes &&
               sizeof(detail::AesCtrStream) <= detail::SecretSlotMaxBytes);
 
-const detail::AesSchedule& ScheduleOf(const hazmat::AesKey& key) noexcept {
+const detail::AesSchedule& AesHazmatScheduleOf(const hazmat::AesKey& key) noexcept {
     return *static_cast<const detail::AesSchedule*>(detail::KeyAccess::State(key));
 }
 
@@ -54,7 +54,7 @@ bool BadOverlap(Span<const uint8> input, Span<uint8> output) noexcept {
 }
 
 // 블록 수(올림)다.
-uint64 CountBlocks(usize bytes) noexcept {
+uint64 AesHazmatCountBlocks(usize bytes) noexcept {
     return static_cast<uint64>(bytes / detail::AesBlockBytes) +
            (bytes % detail::AesBlockBytes != 0 ? 1 : 0);
 }
@@ -254,7 +254,8 @@ Result<hazmat::AesCtr> hazmat::AesCtr::TryCreate(const AesKey& key,
     detail::AesBlock counter;
     platform::MemoryCopy(counter.bytes, initialCounterBlock.Data(), AesBlockBytes);
     auto* stream = InitializeAt<detail::AesCtrStream>(slot.Value());
-    detail::AesCtrStreamStart(detail::GetAesKernels(), ScheduleOf(key), counter, mapped, *stream);
+    detail::AesCtrStreamStart(detail::GetAesKernels(), AesHazmatScheduleOf(key), counter, mapped,
+                              *stream);
     AesCtr ctr;
     ctr.state_ = slot.Value();
     return Result<AesCtr>::Success(Move(ctr));
@@ -296,12 +297,12 @@ Result<void> hazmat::TryAesCtrXor(const AesKey& key, Span<const uint8> initialCo
 
     detail::AesBlock counter;
     platform::MemoryCopy(counter.bytes, initialCounterBlock.Data(), AesBlockBytes);
-    if (!detail::AesCtrHasCapacity(counter, mapped, false, CountBlocks(input.Size()))) {
+    if (!detail::AesCtrHasCapacity(counter, mapped, false, AesHazmatCountBlocks(input.Size()))) {
         return Result<void>::Failure(ErrorCode::CapacityExceeded);
     }
 
     if (!input.IsEmpty()) {
-        detail::GetAesKernels().ctrXor(ScheduleOf(key), mapped, counter, input.Data(),
+        detail::GetAesKernels().ctrXor(AesHazmatScheduleOf(key), mapped, counter, input.Data(),
                                        output.Data(), input.Size());
     }
 

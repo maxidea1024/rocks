@@ -3,6 +3,8 @@
 #include <Core/Text/String.h>
 
 namespace rocks::test {
+namespace string_code_point_tests_file {
+
 namespace {
 
 bool Is(StringView view, const char* expected) {
@@ -96,5 +98,6 @@ TEST(StringCodePoints_StringForwarding) {
     CHECK(Is(text.TryRightCodePoints(4).Value(), "text"));
     CHECK(Is(text.TryMidCodePoints(1, 1).Value(), "\xea\xb8\x80"));
 }
+} // namespace string_code_point_tests_file
 
 } // namespace rocks::test

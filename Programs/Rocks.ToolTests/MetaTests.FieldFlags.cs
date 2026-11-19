@@ -24,7 +24,7 @@ internal static partial class MetaTests
             Verify.That(Flags("count").SequenceEqual(["DuplicateTransient", "SaveGame"]), "duplicate transient and save game flags");
             Verify.That(Flags("plain").SequenceEqual(["NonTryoutDuplicateTransient"]), "non-Tryout duplicate transient flag");
             Verify.That(Flags("next").SequenceEqual(["Required", "TextExportTransient"]), "text export transient with Required");
-            string generated = Compact(File.ReadAllText(probe.Output));
+            string generated = Compact(probe.GeneratedText());
             Verify.Contains("FieldKind::Value,80u,", generated, "DuplicateTransient | SaveGame bits");
             Verify.Contains("FieldKind::Value,32u,", generated, "NonTryoutDuplicateTransient bit");
             Verify.Contains("FieldKind::ObjectReference,136u,", generated, "Required | TextExportTransient bits");

@@ -5,6 +5,8 @@
 #include <stdio.h>
 
 using namespace rocks;
+namespace file_open_convenience_tests_file {
+
 using namespace rocks::platform;
 
 namespace {
@@ -99,3 +101,4 @@ TEST(PlatformFileConvenienceNullReentryReportsBusy) {
     CHECK(file.Close());
     CHECK(file.Open(system, nullptr, FileOpenMode::ReadExisting).code == FileCode::InvalidArgument);
 }
+} // namespace file_open_convenience_tests_file

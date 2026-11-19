@@ -1,3 +1,4 @@
+using Rocks.Build;
 using Rocks.Build.Rules;
 
 // Engine run state machine, main loop, World execution context and EngineSubsystem. Knows nothing about windows, graphics or gameplay
@@ -7,6 +8,9 @@ using Rocks.Build.Rules;
 public sealed class Engine : EngineModuleRules
 {
     protected override string ModuleName => "Engine";
+
+    // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
+    protected override UnityMode Unity => UnityMode.On;
 
     // ModuleLoader: the engine attaches its type registrar to the module loader (Docs/Design/ModuleLoader.ko.md section 3.10).
     protected override string[] RequiredModules => ["World", "Config", "Task", "ModuleLoader"];

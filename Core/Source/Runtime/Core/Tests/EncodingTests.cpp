@@ -3,6 +3,8 @@
 #include <Core/Encoding/Crc32.h>
 
 namespace rocks::test {
+namespace encoding_tests_file {
+
 namespace {
 
 Span<const uint8> Bytes(const char* text) {
@@ -153,5 +155,6 @@ TEST(Base64_CapacityIsCheckedBeforeWriting) {
     CHECK(tiny[0] == 7 && tiny[1] == 7);
     CHECK(Base64EncodedSize(MaxSize).Error() == ErrorCode::Overflow);
 }
+} // namespace encoding_tests_file
 
 } // namespace rocks::test

@@ -78,6 +78,8 @@ struct GeneratedType<limit_fixture::Pair> {
 
 } // namespace rocks
 
+namespace graph_limit_tests_file {
+
 namespace {
 
 using limit_fixture::ArrayOf;
@@ -749,3 +751,4 @@ TEST(GraphLimit_WorkIsLinearInInput) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace graph_limit_tests_file

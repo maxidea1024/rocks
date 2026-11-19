@@ -3,6 +3,7 @@
 #include <Localization/Text.h>
 
 using namespace rocks;
+namespace text_budget_tests_file {
 
 TEST(TextPositiveWorkBudgetCountsNodesSourceOutputAndCatalogCandidate) {
     SystemAllocator allocator;
@@ -57,3 +58,4 @@ TEST(TextPositiveWorkBudgetBoundsFormatResolution) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace text_budget_tests_file

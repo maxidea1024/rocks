@@ -7,6 +7,8 @@
 #include <Task/ParallelFor.h>
 
 using namespace rocks;
+namespace parallel_for_tests_file {
+
 using namespace rocks::platform;
 
 namespace {
@@ -349,3 +351,4 @@ TEST(ParallelFor_HelperCancelledByShutdownStillCoversRange) {
 
     CHECK(once);
 }
+} // namespace parallel_for_tests_file

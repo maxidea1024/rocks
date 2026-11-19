@@ -12,6 +12,8 @@
 // BinnedAllocator의 계약·소유 판정·slab 수명·실패 경로다(Docs/Design/GarbageCollectionScale.ko.md
 // 18.4·18.5·18.9절).
 using namespace rocks;
+namespace binned_allocator_tests_file {
+
 using rocks::detail::BinnedAllocatorTestAccess;
 using rocks::platform::detail::VirtualMemoryTestAccess;
 
@@ -1340,3 +1342,4 @@ TEST(CoreBinnedCrossThreadAndConcurrentDuplicateReturn) {
     CheckCrossThreadAndConcurrentDuplicateReturn(false);
     CheckCrossThreadAndConcurrentDuplicateReturn(true);
 }
+} // namespace binned_allocator_tests_file

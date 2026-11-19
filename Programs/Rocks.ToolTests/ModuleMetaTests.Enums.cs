@@ -38,7 +38,7 @@ internal static partial class ModuleMetaTests
                 .Single(item => item.GetProperty("name").GetString() == "mode");
             Verify.Equal("Enum", field.GetProperty("value").GetProperty("kind").GetString(), "imported enum field kind");
             Verify.Equal(mode.GetProperty("id").GetString(), field.GetProperty("value").GetProperty("type").GetString(), "imported enum target");
-            string generated = File.ReadAllText(layout.Generated("Upper", "Public/Upper/Value.generated.h"));
+            string generated = layout.GeneratedText("Upper", "Public/Upper/Value.generated.h");
             Verify.Contains("#include <Lower/Parent.generated.h>", generated, "imported enum generated header include");
         });
 
@@ -53,7 +53,7 @@ internal static partial class ModuleMetaTests
             Verify.Equal(0, (await layout.RunLowerAsync()).ExitCode, "lower module");
             ProcessResult upper = await layout.RunUpperInputsAsync([(layout.Source("Upper/Public/Upper/Value.h"), "Upper/Value.h", false)]);
             Verify.Equal(0, upper.ExitCode, "upper module: " + upper.StdErr);
-            string generated = File.ReadAllText(layout.Generated("Upper", "Public/Upper/Value.generated.h"));
+            string generated = layout.GeneratedText("Upper", "Public/Upper/Value.generated.h");
             Verify.Contains("#include <Lower/Parent.generated.h>", generated, "inherited enum generated header include");
             Verify.Contains("NativeTypeKey<::probe::Mode>()", generated, "inherited enum field native key");
         });

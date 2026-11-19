@@ -306,7 +306,9 @@ internal static class BuildConfigurationTests
         // 헤더의 offset 위치에 raw bitcode)로 감싸져 있다.
         static bool IsRawBitcode(byte[] bytes, int offset) => offset >= 0 && offset + 4 <= bytes.Length &&
             bytes[offset] == 0x42 && bytes[offset + 1] == 0x43 && bytes[offset + 2] == 0xc0 && bytes[offset + 3] == 0xde;
-        static bool IsBitcode(string directory) => Directory.EnumerateFiles(directory).All(path =>
+        // object만 본다: 같은 디렉터리(와 변형 하위 디렉터리)에 있는 의존 기록(.deps)은 뺀다.
+        static bool IsBitcode(string directory) => Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
+            .Where(path => !path.EndsWith(DependencyRecord.Extension, StringComparison.Ordinal)).All(path =>
         {
             byte[] bytes = File.ReadAllBytes(path);
             if (IsRawBitcode(bytes, 0))

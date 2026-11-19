@@ -2,6 +2,8 @@
 #include <Platform/Clock.h>
 
 using namespace rocks;
+namespace clock_tests_file {
+
 using namespace rocks::platform;
 
 namespace {
@@ -66,3 +68,4 @@ TEST(PlatformMonotonicElapsedAgreesBetweenTicksAndNanoseconds) {
     CHECK(elapsed >=
           TicksToNanoseconds(innerEnd, frequency) - TicksToNanoseconds(innerStart, frequency));
 }
+} // namespace clock_tests_file

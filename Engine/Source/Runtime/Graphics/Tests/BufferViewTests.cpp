@@ -2,6 +2,8 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace buffer_view_tests_file {
+
 using namespace rocks::graphics;
 
 namespace {
@@ -230,3 +232,4 @@ TEST(DrawBufferSlots_AddSlotAndStructureStride) {
     bound[1].stride = 48;
     CHECK(DrawBufferSlotsSatisfied(slots, bound));
 }
+} // namespace buffer_view_tests_file

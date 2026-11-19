@@ -10,8 +10,11 @@
 // MaxGroupPasses 번 뒤 같은 상태에 한 번 GroupNoConverge, `Quality.json` 비정규 등급 키 거부와
 // 잘못된 값만 건너뛰기, 품질 묶음 층 `Set` 거부.
 using namespace rocks;
+namespace c_var_group_rule_tests_file {
+
 using namespace rocks::config;
 using namespace rocks::test::config;
+} // namespace c_var_group_rule_tests_file
 
 namespace cvar_group_rule_test {
 
@@ -71,6 +74,8 @@ constinit CVarGroup RuleFile =
     cvar::Group("quality.rule.file", 0).Help("File").Level(0, {{RuleFileValue, 10}});
 
 } // namespace cvar_group_rule_test
+
+namespace c_var_group_rule_tests_file {
 
 namespace {
 
@@ -315,3 +320,4 @@ TEST(CVar_GroupQualityFileKeysAndFallback) {
     CHECK(!quality && quality.Error() == ErrorCode::InvalidArgument);
     CHECK(reason == ConfigDiagnosticCode::LayerNotAllowed);
 }
+} // namespace c_var_group_rule_tests_file

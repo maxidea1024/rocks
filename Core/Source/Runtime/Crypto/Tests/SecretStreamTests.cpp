@@ -9,6 +9,8 @@
 #include <string.h>
 
 using namespace rocks;
+namespace secret_stream_tests_file {
+
 using namespace rocks::crypto;
 
 // 메시지 스트림(Crypto/SecretStream.h)의 공개 계약 시험이다(Docs/Design/Crypto.ko.md 9.4·12절).
@@ -393,3 +395,4 @@ TEST(CryptoSecretStreamKeysAndLifetime) {
     CHECK(SecretStreamReader::TryCreate(key, Span<const uint8>(header)).Error() ==
           ErrorCode::StaleHandle);
 }
+} // namespace secret_stream_tests_file

@@ -11,6 +11,8 @@
 #include <string.h>
 
 using namespace rocks;
+namespace segment_stream_negative_tests_file {
+
 using namespace rocks::crypto;
 
 // 세그먼트 스트림 음성 시험이다(Docs/Design/Crypto.ko.md 12절): 모든 세그먼트 경계와 중간에서의
@@ -536,3 +538,4 @@ TEST(CryptoSegmentStreamAesBodyLimit) {
     REQUIRE(over.Value().TryProcess(Span<const uint8>(out, remaining + Tag), Span<uint8>(window)));
     CHECK(over.Value().TryFinish(Span<uint8>(window)).Error() == ErrorCode::AuthenticationFailed);
 }
+} // namespace segment_stream_negative_tests_file

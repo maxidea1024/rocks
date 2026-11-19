@@ -2,6 +2,8 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace vertex_layout_tests_file {
+
 using namespace rocks::graphics;
 
 namespace {
@@ -98,3 +100,4 @@ TEST(VertexLayout_RejectsEveryLimitAndConsistencyViolation) {
 
     CHECK(Rejected(first, nine));
 }
+} // namespace vertex_layout_tests_file

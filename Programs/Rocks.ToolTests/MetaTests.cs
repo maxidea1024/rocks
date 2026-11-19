@@ -19,6 +19,35 @@ internal static partial class MetaTests
     // 공백을 모두 지운 텍스트다(clang-format 줄바꿈과 무관하게 생성 코드 조각을 찾는다).
     private static string Compact(string text) => Regex.Replace(text, @"\s+", "", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(10));
 
+    // 생성 소스에서 타입 하나의 구간이다: 그 타입의 위치 주석("// <헤더>:<줄> <타입>")부터 다음 타입의 위치 주석 앞까지다(필드 주석은
+    // "<타입>::<필드>"라 구간을 끊지 않는다 — Docs/Design/ReflectionGeneratedSources.ko.md 5.4절).
+    private static string SourceSection(string source, string type)
+    {
+        Regex marker = new(@"^// \S+:\d+ (?<symbol>[A-Za-z_][\w:]*)\r?$", RegexOptions.Multiline | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(10));
+        int start = -1;
+        foreach (Match match in marker.Matches(source))
+        {
+            string symbol = match.Groups["symbol"].Value;
+            if (start < 0)
+            {
+                if (symbol == type)
+                {
+                    start = match.Index;
+                }
+
+                continue;
+            }
+
+            if (!symbol.StartsWith(type + "::", StringComparison.Ordinal))
+            {
+                return source[start..match.Index];
+            }
+        }
+
+        Verify.That(start >= 0, "generated source has no site comment for " + type);
+        return source[start..];
+    }
+
     // meta 시험 등록이 함께 쓰는 실행 문맥이다: 시험 묶음, 옵션, MetaCompiler·Clang 실행 환경(formatter 반영),
     // MetaCompiler 실행 파일, Clang 경로.
     private sealed record MetaContext(TestSuite Suite, Options Options, IReadOnlyDictionary<string, string?> Environment,

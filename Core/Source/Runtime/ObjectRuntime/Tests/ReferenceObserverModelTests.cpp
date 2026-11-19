@@ -55,6 +55,7 @@ void model_fixture::EdgeNode::Trace(TraceVisitor& visitor) const noexcept {
     items.Trace(visitor);
     slots.Trace(visitor);
 }
+namespace reference_observer_model_tests_file {
 
 namespace {
 
@@ -761,3 +762,4 @@ TEST(ObjectRegistryModel_ObserverTotalsMatchRecountedEdges) {
     // 대조가 실제 간선을 보았다(빈 표끼리의 비교가 아니다).
     CHECK(verified > 100);
 }
+} // namespace reference_observer_model_tests_file

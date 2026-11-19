@@ -32,15 +32,15 @@ constexpr uint32 MaxEngineVersionPart = 0xFFFF;
 using Field = CookedManifestField;
 
 template <class T>
-Result<T> Corrupt(AssetDiagnostic* failure, Field field, uint64 detail, AssetId asset = {},
-                  AssetId related = {}) noexcept {
+Result<T> ManifestCorrupt(AssetDiagnostic* failure, Field field, uint64 detail, AssetId asset = {},
+                          AssetId related = {}) noexcept {
     return FailAsset<T>(failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument,
                         asset, static_cast<uint32>(field), detail, related);
 }
 
 template <class T>
-Result<T> Resource(AssetDiagnostic* failure, ErrorCode error, uint64 detail = CookedManifestNoEntry,
-                   AssetId asset = {}) noexcept {
+Result<T> ManifestResource(AssetDiagnostic* failure, ErrorCode error,
+                           uint64 detail = CookedManifestNoEntry, AssetId asset = {}) noexcept {
     return FailAsset<T>(failure, AssetDiagnosticCode::None, error, asset,
                         static_cast<uint32>(Field::File), detail);
 }
@@ -77,8 +77,8 @@ bool ByteLess(StringView left, StringView right) noexcept {
 }
 
 // (asset, kind) 순서다.
-bool DependencyLess(const CookedManifestDependency& left,
-                    const CookedManifestDependency& right) noexcept {
+bool ManifestDependencyLess(const CookedManifestDependency& left,
+                            const CookedManifestDependency& right) noexcept {
     if (!(left.asset == right.asset)) {
         return GuidLess(left.asset.value, right.asset.value);
     }
@@ -129,10 +129,10 @@ template <class T>
 Result<T> FieldFailure(AssetDiagnostic* failure, ErrorCode error, Field field, uint64 detail,
                        AssetId asset) noexcept {
     if (error == ErrorCode::InvalidArgument) {
-        return Corrupt<T>(failure, field, detail, asset);
+        return ManifestCorrupt<T>(failure, field, detail, asset);
     }
 
-    return Resource<T>(failure, error, detail, asset);
+    return ManifestResource<T>(failure, error, detail, asset);
 }
 
 Result<void> ValidateBundles(const CookedManifestEntry& entry, uint64 index, Allocator& scratch,
@@ -141,12 +141,12 @@ Result<void> ValidateBundles(const CookedManifestEntry& entry, uint64 index, All
     if (count > CookedManifestMaxBundles ||
         (count != 0 &&
          (entry.flags & static_cast<uint32>(CookedManifestFlags::PrimaryAsset)) == 0)) {
-        return Corrupt<void>(failure, Field::BundleCount, index, entry.asset);
+        return ManifestCorrupt<void>(failure, Field::BundleCount, index, entry.asset);
     }
 
     Array<String> keys(scratch);
     if (auto reserved = keys.TryReserve(count); !reserved) {
-        return Resource<void>(failure, reserved.Error(), index, entry.asset);
+        return ManifestResource<void>(failure, reserved.Error(), index, entry.asset);
     }
 
     for (usize bundle = 0; bundle < count; ++bundle) {
@@ -156,23 +156,23 @@ Result<void> ValidateBundles(const CookedManifestEntry& entry, uint64 index, All
         }
 
         if (bundle > 0 && !ByteLess(entry.bundles[bundle - 1].View(), name)) {
-            return Corrupt<void>(failure, Field::Bundle, index, entry.asset);
+            return ManifestCorrupt<void>(failure, Field::Bundle, index, entry.asset);
         }
 
         StringBuilder<KeyInlineBytes> key(scratch);
         if (auto made = TryMakeNameComponentKey(name, key); !made) {
-            return Resource<void>(failure, made.Error(), index, entry.asset);
+            return ManifestResource<void>(failure, made.Error(), index, entry.asset);
         }
 
         // keys는 bundle 수만큼 예약했다(빈 String 추가는 할당하지 않는다).
         String& copy = *keys.TryEmplaceBack(scratch).Value();
         if (auto copied = copy.TryAppend(key.View()); !copied) {
-            return Resource<void>(failure, copied.Error(), index, entry.asset);
+            return ManifestResource<void>(failure, copied.Error(), index, entry.asset);
         }
 
         for (usize other = 0; other < bundle; ++other) {
             if (keys[other].View() == key.View()) {
-                return Corrupt<void>(failure, Field::Bundle, index, entry.asset);
+                return ManifestCorrupt<void>(failure, Field::Bundle, index, entry.asset);
             }
         }
     }
@@ -180,11 +180,11 @@ Result<void> ValidateBundles(const CookedManifestEntry& entry, uint64 index, All
     return Result<void>::Success();
 }
 
-Result<void> ValidateDependencies(const CookedManifestEntry& entry, uint64 index,
-                                  AssetDiagnostic* failure) noexcept {
+Result<void> ValidateManifestDependencies(const CookedManifestEntry& entry, uint64 index,
+                                          AssetDiagnostic* failure) noexcept {
     const usize count = entry.dependencies.Size();
     if (count > CookedManifestMaxDependencies) {
-        return Corrupt<void>(failure, Field::DependencyCount, index, entry.asset);
+        return ManifestCorrupt<void>(failure, Field::DependencyCount, index, entry.asset);
     }
 
     for (usize position = 0; position < count; ++position) {
@@ -192,8 +192,10 @@ Result<void> ValidateDependencies(const CookedManifestEntry& entry, uint64 index
         const bool runtimeKind = dependency.kind == PackageDependencyKind::Hard ||
                                  dependency.kind == PackageDependencyKind::Soft;
         if (dependency.asset.IsNull() || dependency.asset == entry.asset || !runtimeKind ||
-            (position > 0 && !DependencyLess(entry.dependencies[position - 1], dependency))) {
-            return Corrupt<void>(failure, Field::Dependency, index, entry.asset, dependency.asset);
+            (position > 0 &&
+             !ManifestDependencyLess(entry.dependencies[position - 1], dependency))) {
+            return ManifestCorrupt<void>(failure, Field::Dependency, index, entry.asset,
+                                         dependency.asset);
         }
     }
 
@@ -204,7 +206,7 @@ Result<void> ValidateDependencies(const CookedManifestEntry& entry, uint64 index
 Result<void> ValidateEntry(const CookedManifestEntry& entry, uint64 index, Allocator& scratch,
                            StringBuilderBase& pathKey, AssetDiagnostic* failure) noexcept {
     if (entry.type == TypeId{}) {
-        return Corrupt<void>(failure, Field::TypeId, index, entry.asset);
+        return ManifestCorrupt<void>(failure, Field::TypeId, index, entry.asset);
     }
 
     if (auto path = CheckPathHint(entry.pathHint.View(), scratch, pathKey); !path) {
@@ -212,18 +214,18 @@ Result<void> ValidateEntry(const CookedManifestEntry& entry, uint64 index, Alloc
     }
 
     if (entry.packageBytes < PackageHeaderBytes || entry.packageBytes > PackageMaxFileBytes) {
-        return Corrupt<void>(failure, Field::PackageBytes, index, entry.asset);
+        return ManifestCorrupt<void>(failure, Field::PackageBytes, index, entry.asset);
     }
 
     if ((entry.flags & ~CookedManifestFlagsMask) != 0) {
-        return Corrupt<void>(failure, Field::Flags, index, entry.asset);
+        return ManifestCorrupt<void>(failure, Field::Flags, index, entry.asset);
     }
 
     if (auto bundles = ValidateBundles(entry, index, scratch, failure); !bundles) {
         return bundles;
     }
 
-    return ValidateDependencies(entry, index, failure);
+    return ValidateManifestDependencies(entry, index, failure);
 }
 
 } // namespace
@@ -249,30 +251,30 @@ Result<void> ValidateCookedManifest(const CookedManifest& manifest, Allocator& s
     // String은 유효한 UTF-8만 담으므로(Core String 불변식) UTF-8은 다시 보지 않는다 — byte의
     // UTF-8은 reader의 문자열 읽기가 본다.
     if (profile.IsEmpty() || profile.ByteCount() > PackageMaxStringBytes) {
-        return Corrupt<void>(failure, Field::ProfileId, CookedManifestNoEntry);
+        return ManifestCorrupt<void>(failure, Field::ProfileId, CookedManifestNoEntry);
     }
 
     const usize count = manifest.entries.Size();
     if (count > CookedManifestMaxEntries) {
-        return Corrupt<void>(failure, Field::EntryCount, CookedManifestNoEntry);
+        return ManifestCorrupt<void>(failure, Field::EntryCount, CookedManifestNoEntry);
     }
 
     // 경로 힌트 caseless 키와 그 항목 번호다(정렬해 이웃만 비교한다).
     Array<String> keys(scratch);
     Array<uint32> order(scratch);
     if (auto reserved = keys.TryReserve(count); !reserved) {
-        return Resource<void>(failure, reserved.Error());
+        return ManifestResource<void>(failure, reserved.Error());
     }
 
     if (auto reserved = order.TryReserve(count); !reserved) {
-        return Resource<void>(failure, reserved.Error());
+        return ManifestResource<void>(failure, reserved.Error());
     }
 
     for (usize index = 0; index < count; ++index) {
         const CookedManifestEntry& entry = manifest.entries[index];
         if (entry.asset.IsNull() ||
             (index > 0 && !GuidLess(manifest.entries[index - 1].asset.value, entry.asset.value))) {
-            return Corrupt<void>(failure, Field::AssetId, index, entry.asset);
+            return ManifestCorrupt<void>(failure, Field::AssetId, index, entry.asset);
         }
 
         StringBuilder<KeyInlineBytes> key(scratch);
@@ -283,7 +285,7 @@ Result<void> ValidateCookedManifest(const CookedManifest& manifest, Allocator& s
         // keys는 항목 수만큼 예약했다(빈 String 추가는 할당하지 않는다).
         String& copy = *keys.TryEmplaceBack(scratch).Value();
         if (auto copied = copy.TryAppend(key.View()); !copied) {
-            return Resource<void>(failure, copied.Error(), index, entry.asset);
+            return ManifestResource<void>(failure, copied.Error(), index, entry.asset);
         }
 
         (void)order.TryPushBack(static_cast<uint32>(index));
@@ -296,7 +298,8 @@ Result<void> ValidateCookedManifest(const CookedManifest& manifest, Allocator& s
     for (usize position = 1; position < order.Size(); ++position) {
         if (keys[order[position - 1]].View() == keys[order[position]].View()) {
             const uint32 index = order[position];
-            return Corrupt<void>(failure, Field::PathHint, index, manifest.entries[index].asset);
+            return ManifestCorrupt<void>(failure, Field::PathHint, index,
+                                         manifest.entries[index].asset);
         }
     }
 
@@ -306,8 +309,8 @@ Result<void> ValidateCookedManifest(const CookedManifest& manifest, Allocator& s
         for (const CookedManifestDependency& dependency : entry.dependencies) {
             if (dependency.kind == PackageDependencyKind::Hard &&
                 manifest.Find(dependency.asset) == nullptr) {
-                return Corrupt<void>(failure, Field::Dependency, index, entry.asset,
-                                     dependency.asset);
+                return ManifestCorrupt<void>(failure, Field::Dependency, index, entry.asset,
+                                             dependency.asset);
             }
         }
     }
@@ -369,7 +372,7 @@ Result<void> WriteCookedManifest(Allocator& allocator, const CookedManifest& man
     // CRC32 자리를 같이 써 두고 다 쓴 뒤 채운다(AS 10.1절 1 — 앞의 모든 byte).
     step(writer.WriteU32(0));
     if (error != ErrorCode::None) {
-        return Resource<void>(failure, error);
+        return ManifestResource<void>(failure, error);
     }
 
     out = writer.TakeBytes();
@@ -382,12 +385,12 @@ Result<CookedManifest> ReadCookedManifest(Allocator& allocator, Span<const uint8
                                           AssetDiagnostic* failure) noexcept {
     using Out = CookedManifest;
     if (bytes.Size() < MinFileBytes || bytes.Size() > CookedManifestMaxFileBytes) {
-        return Corrupt<Out>(failure, Field::File, CookedManifestNoEntry);
+        return ManifestCorrupt<Out>(failure, Field::File, CookedManifestNoEntry);
     }
 
     for (usize index = 0; index < MagicBytes; ++index) {
         if (bytes[index] != CookedManifestMagic[index]) {
-            return Corrupt<Out>(failure, Field::Magic, CookedManifestNoEntry);
+            return ManifestCorrupt<Out>(failure, Field::Magic, CookedManifestNoEntry);
         }
     }
 
@@ -399,7 +402,7 @@ Result<CookedManifest> ReadCookedManifest(Allocator& allocator, Span<const uint8
 
     const usize body = bytes.Size() - sizeof(uint32);
     if (Crc32(bytes.Slice(0, body)) != LoadLittleEndian<uint32>(bytes.Data() + body)) {
-        return Corrupt<Out>(failure, Field::Crc, CookedManifestNoEntry);
+        return ManifestCorrupt<Out>(failure, Field::Crc, CookedManifestNoEntry);
     }
 
     ArchiveLimits limits;
@@ -416,16 +419,16 @@ Result<CookedManifest> ReadCookedManifest(Allocator& allocator, Span<const uint8
     auto count = in.ReadU32();
     if (count.Value() > CookedManifestMaxEntries ||
         count.Value() > in.Remaining() / MinEntryBytes) {
-        return Corrupt<Out>(failure, Field::EntryCount, CookedManifestNoEntry);
+        return ManifestCorrupt<Out>(failure, Field::EntryCount, CookedManifestNoEntry);
     }
 
     auto profile = in.ReadStringView();
     if (!profile) {
-        return Corrupt<Out>(failure, Field::ProfileId, CookedManifestNoEntry);
+        return ManifestCorrupt<Out>(failure, Field::ProfileId, CookedManifestNoEntry);
     }
 
     if (auto assigned = manifest.profileId.TryAssign(profile.Value()); !assigned) {
-        return Resource<Out>(failure, assigned.Error());
+        return ManifestResource<Out>(failure, assigned.Error());
     }
 
     auto readDigest = [&](Sha256Digest& digest) noexcept {
@@ -439,16 +442,16 @@ Result<CookedManifest> ReadCookedManifest(Allocator& allocator, Span<const uint8
         return raw.IsOk();
     };
     if (!readDigest(manifest.profileSettings)) {
-        return Corrupt<Out>(failure, Field::ProfileSettings, CookedManifestNoEntry);
+        return ManifestCorrupt<Out>(failure, Field::ProfileSettings, CookedManifestNoEntry);
     }
 
     if (!readDigest(manifest.cookSettings)) {
-        return Corrupt<Out>(failure, Field::CookSettings, CookedManifestNoEntry);
+        return ManifestCorrupt<Out>(failure, Field::CookSettings, CookedManifestNoEntry);
     }
 
     auto cooker = in.ReadU32();
     if (!cooker) {
-        return Corrupt<Out>(failure, Field::CookerVersion, CookedManifestNoEntry);
+        return ManifestCorrupt<Out>(failure, Field::CookerVersion, CookedManifestNoEntry);
     }
 
     manifest.cookerVersion = cooker.Value();
@@ -457,14 +460,14 @@ Result<CookedManifest> ReadCookedManifest(Allocator& allocator, Span<const uint8
     for (uint16* part : parts) {
         auto value = in.ReadU32();
         if (!value || value.Value() > MaxEngineVersionPart) {
-            return Corrupt<Out>(failure, Field::EngineVersion, CookedManifestNoEntry);
+            return ManifestCorrupt<Out>(failure, Field::EngineVersion, CookedManifestNoEntry);
         }
 
         *part = static_cast<uint16>(value.Value());
     }
 
     if (auto reserved = manifest.entries.TryReserve(count.Value()); !reserved) {
-        return Resource<Out>(failure, reserved.Error());
+        return ManifestResource<Out>(failure, reserved.Error());
     }
 
     for (uint32 index = 0; index < count.Value(); ++index) {
@@ -473,82 +476,82 @@ Result<CookedManifest> ReadCookedManifest(Allocator& allocator, Span<const uint8
         CookedManifestEntry& entry = *added.Value();
         auto asset = in.ReadGuid();
         if (!asset) {
-            return Corrupt<Out>(failure, Field::AssetId, index);
+            return ManifestCorrupt<Out>(failure, Field::AssetId, index);
         }
 
         entry.asset = AssetId{asset.Value()};
         auto type = in.ReadGuid();
         if (!type) {
-            return Corrupt<Out>(failure, Field::TypeId, index, entry.asset);
+            return ManifestCorrupt<Out>(failure, Field::TypeId, index, entry.asset);
         }
 
         entry.type = type.Value();
         auto path = in.ReadStringView();
         if (!path) {
-            return Corrupt<Out>(failure, Field::PathHint, index, entry.asset);
+            return ManifestCorrupt<Out>(failure, Field::PathHint, index, entry.asset);
         }
 
         if (auto assigned = entry.pathHint.TryAssign(path.Value()); !assigned) {
-            return Resource<Out>(failure, assigned.Error(), index, entry.asset);
+            return ManifestResource<Out>(failure, assigned.Error(), index, entry.asset);
         }
 
         if (!readDigest(entry.packageSha256)) {
-            return Corrupt<Out>(failure, Field::PackageSha256, index, entry.asset);
+            return ManifestCorrupt<Out>(failure, Field::PackageSha256, index, entry.asset);
         }
 
         auto packageBytes = in.ReadU64();
         if (!packageBytes) {
-            return Corrupt<Out>(failure, Field::PackageBytes, index, entry.asset);
+            return ManifestCorrupt<Out>(failure, Field::PackageBytes, index, entry.asset);
         }
 
         entry.packageBytes = packageBytes.Value();
         auto rawBytes = in.ReadU64();
         if (!rawBytes) {
-            return Corrupt<Out>(failure, Field::BulkRawBytes, index, entry.asset);
+            return ManifestCorrupt<Out>(failure, Field::BulkRawBytes, index, entry.asset);
         }
 
         entry.bulkRawBytes = rawBytes.Value();
         if (!readDigest(entry.cookKey)) {
-            return Corrupt<Out>(failure, Field::CookKey, index, entry.asset);
+            return ManifestCorrupt<Out>(failure, Field::CookKey, index, entry.asset);
         }
 
         auto flags = in.ReadU32();
         if (!flags) {
-            return Corrupt<Out>(failure, Field::Flags, index, entry.asset);
+            return ManifestCorrupt<Out>(failure, Field::Flags, index, entry.asset);
         }
 
         entry.flags = flags.Value();
         auto bundles = in.ReadU32();
         if (!bundles || bundles.Value() > CookedManifestMaxBundles ||
             bundles.Value() > in.Remaining() / MinBundleBytes) {
-            return Corrupt<Out>(failure, Field::BundleCount, index, entry.asset);
+            return ManifestCorrupt<Out>(failure, Field::BundleCount, index, entry.asset);
         }
 
         if (auto reserved = entry.bundles.TryReserve(bundles.Value()); !reserved) {
-            return Resource<Out>(failure, reserved.Error(), index, entry.asset);
+            return ManifestResource<Out>(failure, reserved.Error(), index, entry.asset);
         }
 
         for (uint32 bundle = 0; bundle < bundles.Value(); ++bundle) {
             auto name = in.ReadStringView();
             if (!name) {
-                return Corrupt<Out>(failure, Field::Bundle, index, entry.asset);
+                return ManifestCorrupt<Out>(failure, Field::Bundle, index, entry.asset);
             }
 
             // bundle 수만큼 예약했다(빈 String 추가는 할당하지 않는다).
             String& slot = *entry.bundles.TryEmplaceBack(allocator).Value();
             if (auto assigned = slot.TryAssign(name.Value()); !assigned) {
-                return Resource<Out>(failure, assigned.Error(), index, entry.asset);
+                return ManifestResource<Out>(failure, assigned.Error(), index, entry.asset);
             }
         }
 
         auto dependencies = in.ReadU32();
         if (!dependencies || dependencies.Value() > CookedManifestMaxDependencies ||
             dependencies.Value() > in.Remaining() / DependencyBytes) {
-            return Corrupt<Out>(failure, Field::DependencyCount, index, entry.asset);
+            return ManifestCorrupt<Out>(failure, Field::DependencyCount, index, entry.asset);
         }
 
         if (auto reserved = entry.dependencies.TryReserve(dependencies.Value()); !reserved) {
-            return Resource<Out>(failure, reserved.Error(), index, entry.asset);
+            return ManifestResource<Out>(failure, reserved.Error(), index, entry.asset);
         }
 
         for (uint32 dependency = 0; dependency < dependencies.Value(); ++dependency) {
@@ -561,7 +564,7 @@ Result<CookedManifest> ReadCookedManifest(Allocator& allocator, Span<const uint8
     }
 
     if (!in.AtEnd()) {
-        return Corrupt<Out>(failure, Field::File, CookedManifestNoEntry);
+        return ManifestCorrupt<Out>(failure, Field::File, CookedManifestNoEntry);
     }
 
     if (auto valid = ValidateCookedManifest(manifest, allocator, failure); !valid) {
@@ -608,23 +611,23 @@ Result<void> CheckCookedPackage(const CookedManifest& manifest, const CookedMani
     const AssetId asset = entry.asset;
     // 크기·SHA-256을 먼저 본다(바뀐 파일을 해석한 결과로 판정하지 않는다).
     if (file.Size() != entry.packageBytes) {
-        return Corrupt<void>(failure, Field::PackageBytes, CookedManifestNoEntry, asset);
+        return ManifestCorrupt<void>(failure, Field::PackageBytes, CookedManifestNoEntry, asset);
     }
 
     if (!SameDigest(Sha256::Hash(file), entry.packageSha256)) {
-        return Corrupt<void>(failure, Field::PackageSha256, CookedManifestNoEntry, asset);
+        return ManifestCorrupt<void>(failure, Field::PackageSha256, CookedManifestNoEntry, asset);
     }
 
     if (contents.header.kind != PackageKind::Cooked) {
-        return Corrupt<void>(failure, Field::PackageKind, CookedManifestNoEntry, asset);
+        return ManifestCorrupt<void>(failure, Field::PackageKind, CookedManifestNoEntry, asset);
     }
 
     if (!(contents.header.assetId == asset)) {
-        return Corrupt<void>(failure, Field::AssetId, CookedManifestNoEntry, asset);
+        return ManifestCorrupt<void>(failure, Field::AssetId, CookedManifestNoEntry, asset);
     }
 
     if (contents.exports.IsEmpty() || !(contents.exports[0].type == entry.type)) {
-        return Corrupt<void>(failure, Field::TypeId, CookedManifestNoEntry, asset);
+        return ManifestCorrupt<void>(failure, Field::TypeId, CookedManifestNoEntry, asset);
     }
 
     uint64 rawBytes = 0;
@@ -633,14 +636,14 @@ Result<void> CheckCookedPackage(const CookedManifest& manifest, const CookedMani
     }
 
     if (rawBytes != entry.bulkRawBytes) {
-        return Corrupt<void>(failure, Field::BulkRawBytes, CookedManifestNoEntry, asset);
+        return ManifestCorrupt<void>(failure, Field::BulkRawBytes, CookedManifestNoEntry, asset);
     }
 
     const PackageSummary& summary = contents.summary;
     if (!(summary.profileId.View() == manifest.profileId.View()) ||
         !SameDigest(summary.profileSettings, manifest.profileSettings) ||
         summary.cookerVersion != manifest.cookerVersion) {
-        return Corrupt<void>(failure, Field::PackageProfile, CookedManifestNoEntry, asset);
+        return ManifestCorrupt<void>(failure, Field::PackageProfile, CookedManifestNoEntry, asset);
     }
 
     // 쿠킹 패키지 Dependencies는 Hard·Soft뿐이고 (asset, kind) 정렬이다(reader가 확인했다) —
@@ -653,8 +656,8 @@ Result<void> CheckCookedPackage(const CookedManifest& manifest, const CookedMani
             dependencies[index].kind != entry.dependencies[index].kind) {
             const AssetId related =
                 index < count ? entry.dependencies[index].asset : dependencies[index].asset;
-            return Corrupt<void>(failure, Field::PackageDependencies, CookedManifestNoEntry, asset,
-                                 related);
+            return ManifestCorrupt<void>(failure, Field::PackageDependencies, CookedManifestNoEntry,
+                                         asset, related);
         }
     }
 

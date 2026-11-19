@@ -28,6 +28,8 @@
 // - 손으로 만든 입력: LargeWindowMarker(첫 byte 0x11 = large window 표지 0010001 다음 bit 0),
 //   ReservedWindow(첫 byte 0x91, 예약 값), BadPaddingStream(빈 stream 0x3b의 패딩 bit를 켬).
 namespace rocks::test {
+namespace brotli_tests_file {
+
 namespace {
 
 using namespace compression;
@@ -1469,5 +1471,6 @@ TEST(Brotli_Woff2StyleKnownSizeDecode) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace brotli_tests_file
 
 } // namespace rocks::test

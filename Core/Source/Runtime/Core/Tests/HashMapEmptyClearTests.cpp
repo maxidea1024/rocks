@@ -8,6 +8,7 @@
 // 쌓였을 때만 모든 칸을 비운다(HashMap.h EmptyClearDivisor). 큰 고점 뒤에 0과 1 사이를 오가도
 // 쌍마다 표 전체를 다시 쓰지 않는다(Docs/Design/GarbageCollectionScale.ko.md 18.6절).
 using namespace rocks;
+namespace hash_map_empty_clear_tests_file {
 
 namespace {
 
@@ -237,3 +238,4 @@ TEST(CoreHashSetEmptyingKeepsTombstonesBelowThreshold) {
 
     CHECK(memory.Stats().liveAllocations == 0);
 }
+} // namespace hash_map_empty_clear_tests_file

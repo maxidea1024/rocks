@@ -6,6 +6,8 @@
 // ClassRef 같은 값 무동작, Publish 원자성(변경 표지 Busy·owner Discard·GC·Weak 대상 Discard·할당
 // 실패 주입), staged 대상의 ReadOnly 허용과 struct 값 대상.
 using namespace rocks;
+namespace text_assignment_tests_file {
+
 using namespace rocks::reflection_text;
 using namespace rocks::test::assign;
 using reflection_fixture::AssignHolder;
@@ -702,3 +704,4 @@ TEST(TextAssign_ReferenceStructResetSplitsIntoUnits) {
     REQUIRE(changes.Size() == 1);
     CHECK(changes[0].targetPackage == target.Handle() && changes[0].delta == -4);
 }
+} // namespace text_assignment_tests_file

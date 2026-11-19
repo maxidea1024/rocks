@@ -4,6 +4,7 @@
 #include <string.h>
 
 using namespace rocks;
+namespace error_code_tests_file {
 
 // 모든 열거자가 고유한 진단 이름을 가진다. 새 열거자의 이름 누락은 ErrorCodeName switch의
 // -Wswitch가 먼저 잡는다. 이 시험은 이름의 고유성과 마지막 열거자 다음 값의 "Unknown"을 확인한다(새
@@ -25,3 +26,4 @@ TEST(ErrorCodeNamesAreCompleteAndUnique) {
     CHECK(strcmp(ErrorCodeName(ErrorCode::ScopeClosed), "ScopeClosed") == 0);
     CHECK(strcmp(ErrorCodeName(static_cast<ErrorCode>(last + 1)), "Unknown") == 0);
 }
+} // namespace error_code_tests_file

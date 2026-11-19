@@ -66,7 +66,7 @@ thread_local WorkerState* executingState = nullptr;
 struct SubmitScope;
 thread_local SubmitScope* submittingScope = nullptr;
 
-bool IsTerminal(WorkerTaskState state) noexcept {
+bool WorkerSchedulerIsTerminal(WorkerTaskState state) noexcept {
     return state == WorkerTaskState::Succeeded || state == WorkerTaskState::Failed ||
            state == WorkerTaskState::Cancelled;
 }
@@ -315,7 +315,7 @@ Result<void> WorkerTaskHandle::RequestCancel() const noexcept {
     WorkerState& state = *record_->state;
     {
         platform::LockGuard lock(state.gate);
-        if (!IsTerminal(record_->status.state)) {
+        if (!WorkerSchedulerIsTerminal(record_->status.state)) {
             record_->status.cancellationRequested = true;
         }
     }
@@ -341,7 +341,8 @@ Result<bool> WorkerTaskHandle::TryRevoke() const noexcept {
         // 시작할 수 있다.
         for (uint32 dependency = 0; dependency < record_->dependencyCount; ++dependency) {
             const bool orderOnly = (record_->orderOnlyMask & (uint64{1} << dependency)) != 0;
-            if (orderOnly && !IsTerminal(record_->dependencies[dependency]->status.state)) {
+            if (orderOnly &&
+                !WorkerSchedulerIsTerminal(record_->dependencies[dependency]->status.state)) {
                 return Result<bool>::Success(false);
             }
         }
@@ -386,7 +387,7 @@ Result<platform::WaitResult> WorkerTaskHandle::Wait(uint32 timeoutMs) const noex
     platform::WaitResult result = platform::WaitResult::Signaled;
     {
         platform::LockGuard lock(state.gate);
-        while (!IsTerminal(record_->status.state)) {
+        while (!WorkerSchedulerIsTerminal(record_->status.state)) {
             const uint32 remaining = Remaining(timeoutMs, start);
             if (remaining == 0) {
                 result = platform::WaitResult::TimedOut;
@@ -828,7 +829,7 @@ void WorkerScheduler::RunWorker(void* raw) noexcept {
                             const auto status = record->dependencies[dependency]->status.state;
                             const bool orderOnly =
                                 (record->orderOnlyMask & (uint64{1} << dependency)) != 0;
-                            if (!IsTerminal(status)) {
+                            if (!WorkerSchedulerIsTerminal(status)) {
                                 if (orderOnly) {
                                     orderReady = false;
                                 } else {

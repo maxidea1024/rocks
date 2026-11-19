@@ -10,6 +10,8 @@
 // SoftObjectRef의 이동·복사 의미, 소프트 참조 쓰기의 staged·미등록 callback 검증, OOM·논리 파괴
 // 원자성, 읽기 전용과 값 검사의 순서.
 using namespace rocks;
+namespace asset_value_field_tests_file {
+
 using reflection_fixture::AssetFields;
 using reflection_fixture::Node;
 
@@ -498,3 +500,4 @@ TEST(AssetValueFields_ReadOnlySoftReferencePolicyPrecedesValueChecks) {
     REQUIRE(types.Unregister(registered.Value()));
     CHECK(types.Shutdown());
 }
+} // namespace asset_value_field_tests_file

@@ -74,7 +74,8 @@ try
             "Engine SDK manifest does not name the CoreTypeBindings descriptor and identity manifest");
         // manifest 버전 8: 5는 Build/Build.version 값을 EngineVersion {Major, Minor, Patch}로 담고(그 파일 자체는 SDK에 없다), 6은 모듈 표
         // 표지를 담고(Core가 ProvidesModuleTable, 서드파티 모듈이 ThirdParty — Docs/Design/ModuleLoader.ko.md 3.9절), 8은 리플렉션 전용
-        // 라이브러리 표지를 없앴다(메타데이터 모듈도 진입점 모듈이다 — 3.10절).
+        // 라이브러리 표지를 없앴다(메타데이터 모듈도 진입점 모듈이다 — 3.10절). 9는 타입별 본문이 생성 헤더가 아니라 SDK 라이브러리에 있고
+        // (Docs/Design/ReflectionGeneratedSources.ko.md 5절) 공유 PCH 제공 모듈의 SharedPchHeader를 싣는다(Docs/Design/UnityBuildPch.ko.md 8.4절).
         var sdkModules = engineManifest.RootElement.GetProperty("Modules").EnumerateArray().ToArray();
         // 손으로 쓴 소스가 없던 리플렉션 모듈(CoreTypeBindings)이 모듈 생성 소스(등록 함수 정의)와 진입점 TU를 담은 라이브러리를 갖는다.
         // 표지 칸은 없다.
@@ -87,10 +88,10 @@ try
             !sdkModules.Single(module => module.GetProperty("Name").GetString() == "Core").GetProperty("ThirdParty").GetBoolean(),
             "Engine SDK manifest does not carry the module table markers");
         var sdkEngine = engineManifest.RootElement.GetProperty("EngineVersion");
-        Require(engineManifest.RootElement.GetProperty("Version").GetInt32() == 8 &&
+        Require(engineManifest.RootElement.GetProperty("Version").GetInt32() == 9 &&
             sdkEngine.GetProperty("Major").GetInt32() == engineVersion.Major && sdkEngine.GetProperty("Minor").GetInt32() == engineVersion.Minor &&
             sdkEngine.GetProperty("Patch").GetInt32() == engineVersion.Patch && sdkEngine.EnumerateObject().Count() == 3,
-            "Engine SDK manifest version 8 does not carry the Build/Build.version engine version: " + sdkEngine.GetRawText());
+            "Engine SDK manifest version 9 does not carry the Build/Build.version engine version: " + sdkEngine.GetRawText());
     }
 
     Require(!Directory.GetFiles(sdk, "Build.version", SearchOption.AllDirectories).Any(), "Installed SDK copied Build/Build.version");
@@ -144,8 +145,16 @@ try
     var built = await Game();
     Require(built.ExitCode == 0, "External game build failed: " + built.StdOut + built.StdErr);
     var initial = ReadActionReport();
-    Require(initial.Succeeded && initial.ExecutedActions > 0 && initial.Actions.All(action => action.Module == "SampleGame"),
+    // 게임 빌드는 게임 모듈의 소스만 컴파일한다. SDK가 나른 공유 PCH 헤더(SharedPchHeader — 게임이 닿는 제공 모듈 ObjectRuntime)는 게임
+    // 인자로 게임 출력에 미리 컴파일한다(Docs/Design/UnityBuildPch.ko.md 8.4절). 그 Pch action의 모듈 이름은 제공 모듈이지만 엔진
+    // 소스를 컴파일하는 것이 아니다.
+    Require(initial.Succeeded && initial.ExecutedActions > 0 &&
+        initial.Actions.All(action => action.Module == "SampleGame" || action.Kind == "Pch"),
         "Game build compiled an engine module or failed");
+    Require(initial.Actions.Count(action => action.Kind == "Pch") == 1 && initial.Actions.Single(action => action.Kind == "Pch").Module == "ObjectRuntime" &&
+        initial.Actions.Single(action => action.Kind == "Pch").OutputPath.StartsWith(Path.Combine(game, "out"), StringComparison.OrdinalIgnoreCase),
+        "Game build must precompile the SDK's shared PCH header once in its own output: " +
+        string.Join(", ", initial.Actions.Where(action => action.Kind == "Pch").Select(action => action.Module + " " + action.OutputPath)));
     var run = await ProcessRunner.RunAsync(new(initial.ModuleOutputs["SampleGame"], [], game, toolchain.Environment));
     Require(run.ExitCode == 0, "External game's generated CLASS/PROPERTY runtime failed");
     // 모듈 표(Docs/Design/ModuleLoader.ko.md 3.2절): SDK Core(ProvidesModuleTable)에 닿는 게임 실행 파일은 모듈 표 TU를 가진다. 표는 SDK 모듈의
@@ -159,13 +168,18 @@ try
         "Game module table does not list the SDK modules and the game module:\n" + gameTable);
     // 게임 소유 메타데이터 모듈(실행 파일 SampleGame)은 자기 모듈 생성 소스를 내고 그 실행 파일의 번역 단위로 컴파일한다. SDK 모듈의 생성
     // 소스는 기대하지도 다시 만들지도 않는다(등록 함수의 정의는 SDK 라이브러리에서 링크된다 — 위 실행이 성공했다).
+    // 타입별 생성 소스(GameObject.h의 타입 본문)도 같은 실행 파일의 번역 단위다.
     string gameModuleSource = Path.Combine(output, "Generated/SampleGame/Source/SampleGame.module.generated.cpp");
+    string gameTypeSource = Path.Combine(output, "Generated/SampleGame/Source/Public/GameObject.generated.cpp");
     using (var gameDatabase = JsonDocument.Parse(File.ReadAllText(initial.CompilationDatabasePath)))
     {
-        Require(File.Exists(gameModuleSource) && gameDatabase.RootElement.EnumerateArray().Any(record =>
-                string.Equals(Path.GetFullPath(record.GetProperty("file").GetString()!), Path.GetFullPath(gameModuleSource),
-                    OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)),
-            "Game build did not generate and compile the SampleGame module generated source");
+        foreach (string generatedSource in new[] { gameModuleSource, gameTypeSource })
+        {
+            Require(File.Exists(generatedSource) && gameDatabase.RootElement.EnumerateArray().Any(record =>
+                    string.Equals(Path.GetFullPath(record.GetProperty("file").GetString()!), Path.GetFullPath(generatedSource),
+                        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)),
+                "Game build did not generate and compile the SampleGame generated source " + generatedSource);
+        }
     }
 
     Require(!Directory.Exists(Path.Combine(output, "Generated/CoreTypeBindings")), "Game build generated sources for an imported SDK module");
@@ -677,7 +691,7 @@ try
     var reflectionBuilt = await ReflectionGame();
     Require(reflectionBuilt.ExitCode == 0, "Game importing an SDK descriptor failed: " + reflectionBuilt.StdOut + reflectionBuilt.StdErr);
     var reflectionResult = JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(Path.Combine(reflectionOutput, "action-report.json")))!;
-    Require(reflectionResult.Succeeded && reflectionResult.Actions.All(action => action.Module is "SampleGame" or "GameCore"),
+    Require(reflectionResult.Succeeded && reflectionResult.Actions.All(action => action.Module is "SampleGame" or "GameCore" || action.Kind == "Pch"),
         "Game importing an SDK descriptor compiled an SDK module");
     Require(!Directory.Exists(Path.Combine(reflectionOutput, "Generated/ReflectionTestFixtures")) &&
         !Directory.Exists(Path.Combine(reflectionOutput, "Generated/CoreTypeBindings")),
@@ -689,6 +703,10 @@ try
         Require(File.Exists(Path.Combine(reflectionOutput, "Generated", module, "Source", module + ".module.generated.cpp")),
             $"Game build did not generate the {module} module generated source");
     }
+
+    Require(File.Exists(Path.Combine(reflectionOutput, "Generated/GameCore/Source/Public/GameCore/CoreThing.generated.cpp")) &&
+        File.Exists(Path.Combine(reflectionOutput, "Generated/SampleGame/Source/Public/FixtureChild.generated.cpp")),
+        "Game build did not generate the per-header generated sources");
 
     Require(reflectionResult.ModuleOutputs.ContainsKey("GameCore") &&
         reflectionResult.Actions.Any(action => action.Module == "GameCore" && action.Kind == "Archive" && action.Executed),
@@ -707,6 +725,10 @@ try
     var coreGenerated = Path.Combine(reflectionOutput, "Generated/GameCore/Public/GameCore/CoreThing.generated.h");
     var coreDescriptor = Path.Combine(reflectionOutput, "Metadata/GameCore.rocksmeta.json");
     string coreGeneratedHash = Hashing.Sha256File(coreGenerated);
+    // 필드를 더하면 descriptor와 타입별 생성 소스(스키마 표·등록)가 바뀐다. 타입별 생성 헤더(선언·컴파일 타임 형질)는 그대로일 수 있다
+    // (Docs/Design/ReflectionGeneratedSources.ko.md 5절).
+    var coreGeneratedSource = Path.Combine(reflectionOutput, "Generated/GameCore/Source/Public/GameCore/CoreThing.generated.cpp");
+    string coreGeneratedSourceHash = Hashing.Sha256File(coreGeneratedSource);
     string coreDescriptorHash = Hashing.Sha256File(coreDescriptor);
     File.WriteAllText(coreHeader, coreHeaderText.Replace("rocks::int32 level = 1;", "rocks::int32 level = 1;\n    ROCKS_PROPERTY() rocks::int32 rank = 0;", StringComparison.Ordinal));
     var rankIds = await Ids("add", "--manifest", coreManifest, "--field", "sample::CoreThing::rank");
@@ -715,11 +737,31 @@ try
     var upperFailed = await ReflectionGame();
     Require(upperFailed.ExitCode != 0 && upperFailed.StdErr.Contains("RMC2000", StringComparison.Ordinal),
         "Invalid dependent module metadata was accepted: " + upperFailed.StdErr);
-    Require(Hashing.Sha256File(coreGenerated) == coreGeneratedHash && Hashing.Sha256File(coreDescriptor) == coreDescriptorHash,
+    Require(Hashing.Sha256File(coreGenerated) == coreGeneratedHash && Hashing.Sha256File(coreGeneratedSource) == coreGeneratedSourceHash &&
+        Hashing.Sha256File(coreDescriptor) == coreDescriptorHash,
         "A failed dependent module published its dependency's staged metadata");
     File.WriteAllText(childHeader, childHeaderText);
     Require((await ReflectionGame()).ExitCode == 0, "Game did not recover after the dependent module metadata failure");
-    Require(Hashing.Sha256File(coreGenerated) != coreGeneratedHash, "GameCore metadata change was not published after recovery");
+    Require(Hashing.Sha256File(coreGeneratedSource) != coreGeneratedSourceHash && Hashing.Sha256File(coreDescriptor) != coreDescriptorHash,
+        "GameCore metadata change was not published after recovery");
+
+    // 본문 계약 위반(리플렉션 클래스의 noexcept가 아닌 생성자)은 생성 헤더만 보는 게시 전 검증을 지나 빌드의 생성 소스 compile action에서
+    // 실패한다. Rocks.Build가 컴파일러 출력 뒤에 RMC3000 안내를 붙이고, --verify-metadata-sources on으로 다시 돌리면 메타 단계가 게시
+    // 전에 원본 선언과 함께 거부한다(Docs/Design/ReflectionGeneratedSources.ko.md 7절).
+    File.WriteAllText(childHeader, childHeaderText.Replace("noexcept : CoreThing(allocator)", ": CoreThing(allocator)", StringComparison.Ordinal));
+    var bodyRejected = await ReflectionGame();
+    Require(bodyRejected.ExitCode != 0 &&
+        bodyRejected.StdErr.Contains("note: RMC3000: generated metadata contract rejected by Clang (reflection generated source of module 'SampleGame')", StringComparison.Ordinal) &&
+        bodyRejected.StdErr.Contains("--verify-metadata-sources on", StringComparison.Ordinal) &&
+        bodyRejected.StdErr.Contains("FixtureChild.generated.cpp", StringComparison.Ordinal),
+        "A generated body contract violation did not fail the build with the RMC3000 note: " + bodyRejected.StdOut + bodyRejected.StdErr);
+    var bodyVerified = await Cli("game", "--sdk", reflectionSdk, "--project", reflectionGame, "--configuration", "Debug", "--verify-metadata-sources", "on");
+    Require(bodyVerified.ExitCode != 0 && bodyVerified.StdErr.Contains("error RMC3000", StringComparison.Ordinal) &&
+        bodyVerified.StdErr.Contains("sample::FixtureChild", StringComparison.Ordinal) &&
+        !bodyVerified.StdOut.Contains("Native build:", StringComparison.Ordinal),
+        "--verify-metadata-sources on did not reject the generated body contract violation before the native build: " + bodyVerified.StdOut + bodyVerified.StdErr);
+    File.WriteAllText(childHeader, childHeaderText);
+    Require((await ReflectionGame()).ExitCode == 0, "Game did not recover after the generated body contract failure");
 
     // Metadata에서 뺀 헤더의 생성물은 게시 트랜잭션이 지운다(ID는 은퇴시켜 예약한다). 생성 소스 루트(Source)의 잉여 파일도 같은
     // 트랜잭션이 지운다.
@@ -752,6 +794,19 @@ try
     }
 
     Pass("game-running-evidence-and-completion", timer.Elapsed);
+
+    // 빌드 방식 옵션(--unity·--pch·--adaptive)은 on|off만 받고, 틀린 값은 출력을 건드리기 전에 거부한다. 검증 변형(--unity off)은 같은
+    // 출력에서 다른 object 변형 디렉터리를 쓴다.
+    timer.Restart();
+    var invalidMode = await Cli("game", "--sdk", sdk, "--project", game, "--configuration", "Debug", "--unity", "maybe");
+    Require(invalidMode.ExitCode != 0 && invalidMode.StdErr.Contains("unity must be on or off", StringComparison.Ordinal),
+        "An invalid --unity value was accepted: " + invalidMode.StdErr);
+    var verification = await Cli("game", "--sdk", sdk, "--project", game, "--configuration", "Debug", "--unity", "off", "--adaptive", "off");
+    Require(verification.ExitCode == 0 && verification.StdOut.Contains("unity-batches=0", StringComparison.Ordinal) &&
+        Directory.Exists(Path.Combine(output, "obj/SampleGame/u0p1")) && Directory.Exists(Path.Combine(output, "obj/SampleGame/u1p1")),
+        "The verification variant (--unity off) did not build into its own object directory: " + verification.StdOut + verification.StdErr);
+    Require((await Game()).ExitCode == 0, "Game did not build after the verification variant");
+    Pass("game-build-mode-options-and-verification-variant", timer.Elapsed);
 
     timer.Restart();
     var invalidOutput = await Cli("game", "--sdk", sdk, "--project", game, "--configuration", "Debug", "--output", game);
@@ -852,13 +907,13 @@ try
     Pass("sdk-configuration-mismatch", timer.Elapsed);
 
     // 이전 SDK(manifest 버전 7 — 메타데이터 모듈 라이브러리에 진입점이 없고 모듈마다 ReflectionOnlyLibrary 칸이 있다)는 지금 없는 칸이
-    // 있어도 알 수 없는 칸 오류가 아니라 버전 불일치로 거부하고, 버전 8인데 EngineVersion이 없거나 칸이 빠진 manifest는 다른 값(저장소
+    // 있어도 알 수 없는 칸 오류가 아니라 버전 불일치로 거부하고, 버전 9인데 EngineVersion이 없거나 칸이 빠진 manifest는 다른 값(저장소
     // Build/Build.version 등)으로 대신하지 않고 다시 내보내라고 거부한다.
     timer.Restart();
     var sdkManifestPath = Path.Combine(sdk, "rocks-sdk.json");
     var sdkManifestBytes = File.ReadAllBytes(sdkManifestPath);
     var sdkManifestText = File.ReadAllText(sdkManifestPath);
-    Require(sdkManifestText.Contains("\"Version\": 8,", StringComparison.Ordinal), "SDK manifest is not version 8:\n" + sdkManifestText);
+    Require(sdkManifestText.Contains("\"Version\": 9,", StringComparison.Ordinal), "SDK manifest is not version 9:\n" + sdkManifestText);
     SetReadOnly(sdkManifestPath, false);
     try
     {

@@ -3,6 +3,8 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace pixel_format_tests_file {
+
 using namespace rocks::graphics;
 
 namespace {
@@ -294,3 +296,4 @@ TEST(PixelFormat_CapsFlags) {
     CHECK(HasPixelFormatCaps(caps, PixelFormatCaps::None));
     CHECK((caps & PixelFormatCaps::Filterable) == PixelFormatCaps::Filterable);
 }
+} // namespace pixel_format_tests_file

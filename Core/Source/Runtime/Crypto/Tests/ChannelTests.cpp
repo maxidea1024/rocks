@@ -10,6 +10,8 @@
 #include <string.h>
 
 using namespace rocks;
+namespace channel_tests_file {
+
 using namespace rocks::crypto;
 
 // 보안 채널 부품 시험이다(Docs/Design/SecureChannel.ko.md 3절). 알려진 답의 출처:
@@ -282,9 +284,9 @@ void CheckVector(const NoiseVector& vector) {
     static uint8 message[1024];
     static uint8 payload[1024];
     const HexBytes payload1(vector.payload1);
-    auto first = detail::ChannelFactory::TryWriteMessage(initiator.Value(),
-                                                         HexBytes(vector.initiatorEphemeral).View(),
-                                                         payload1.View(), Span<uint8>(message));
+    auto first = crypto::detail::ChannelFactory::TryWriteMessage(
+        initiator.Value(), HexBytes(vector.initiatorEphemeral).View(), payload1.View(),
+        Span<uint8>(message));
     REQUIRE(first);
     CHECK(Equals(Span<const uint8>(message).Left(first.Value()), vector.message1));
     CHECK(initiator.Value().NextStep() == NoiseStep::ReadMessage);
@@ -295,7 +297,7 @@ void CheckVector(const NoiseVector& vector) {
     CHECK(responder.Value().NextStep() == NoiseStep::WriteMessage);
 
     const HexBytes payload2(vector.payload2);
-    auto second = detail::ChannelFactory::TryWriteMessage(
+    auto second = crypto::detail::ChannelFactory::TryWriteMessage(
         responder.Value(), HexBytes(vector.responderEphemeral).View(), payload2.View(),
         Span<uint8>(message));
     REQUIRE(second);
@@ -323,7 +325,7 @@ void CheckVector(const NoiseVector& vector) {
         DatagramOpener& opener =
             entry.fromInitiator ? server.Value().receive : client.Value().receive;
         if (sealer.NextCounter() != entry.counter) {
-            detail::ChannelTestAccess::SetNextCounter(sealer, entry.counter);
+            crypto::detail::ChannelTestAccess::SetNextCounter(sealer, entry.counter);
         }
 
         const HexBytes header(entry.header);
@@ -385,7 +387,7 @@ ChannelServerKey GenerateServerKey() {
 
 // 고정 키 handshake(transcript A)의 첫 메시지를 message에 쓴다. 실패하면 0이다.
 usize WriteFixedHello(NoiseHandshake& initiator, Span<uint8> message) {
-    auto written = detail::ChannelFactory::TryWriteMessage(
+    auto written = crypto::detail::ChannelFactory::TryWriteMessage(
         initiator, HexBytes(PythonAInitiatorEphemeral).View(), Span<const uint8>(), message);
     return written ? written.Value() : 0;
 }
@@ -521,8 +523,9 @@ TEST(CryptoChannelHandshakeOrderAndMisuse) {
         initiator.Value()
             .TryWriteMessage(Span<const uint8>(message).Left(4), Span<uint8>(message).RightChop(2))
             .Error() == ErrorCode::InvalidArgument);
-    CHECK(detail::ChannelFactory::TryWriteMessage(initiator.Value(), Span<const uint8>(payload, 31),
-                                                  Span<const uint8>(), Span<uint8>(message))
+    CHECK(crypto::detail::ChannelFactory::TryWriteMessage(initiator.Value(),
+                                                          Span<const uint8>(payload, 31),
+                                                          Span<const uint8>(), Span<uint8>(message))
               .Error() == ErrorCode::InvalidArgument);
     CHECK(initiator.Value().TryWriteMessage(Text("abc"), Span<uint8>(message).Left(50)).Error() ==
           ErrorCode::CapacityExceeded);
@@ -599,8 +602,8 @@ TEST(CryptoChannelHandshakeOrderAndMisuse) {
     CHECK(moved.TrySplit());
     NoiseHandshake empty;
     CHECK(empty.TrySplit().Error() == ErrorCode::StaleHandle);
-    CHECK(detail::ChannelFactory::TryWriteMessage(empty, Span<const uint8>(), Span<const uint8>(),
-                                                  Span<uint8>(message))
+    CHECK(crypto::detail::ChannelFactory::TryWriteMessage(empty, Span<const uint8>(),
+                                                          Span<const uint8>(), Span<uint8>(message))
               .Error() == ErrorCode::StaleHandle);
 }
 
@@ -793,7 +796,7 @@ TEST(CryptoChannelDatagramWindow) {
     const auto seal = [&](uint64 counter, Span<uint8> output) {
         uint8 plain[8];
         StoreLittleEndian<uint64>(plain, counter);
-        detail::ChannelTestAccess::SetNextCounter(sealer, counter);
+        crypto::detail::ChannelTestAccess::SetNextCounter(sealer, counter);
         auto used = sealer.TrySeal(headerFor(counter), Span<const uint8>(plain), output);
         return used && used.Value() == counter;
     };
@@ -971,7 +974,7 @@ TEST(CryptoChannelDatagramLimits) {
     CHECK(ConstantTimeEquals(Span<const uint8>(payload).Left(8), Text("in-place")));
 
     // counter 상한: 2^63 − 1은 쓰고 그 뒤는 CapacityExceeded(소진)다.
-    detail::ChannelTestAccess::SetNextCounter(sealer, DatagramCounterLimit - 1);
+    crypto::detail::ChannelTestAccess::SetNextCounter(sealer, DatagramCounterLimit - 1);
     CHECK(!sealer.IsExhausted());
     auto last = sealer.TrySeal(Text("h"), Text("last"), Span<uint8>(sealed));
     REQUIRE(last && last.Value() == DatagramCounterLimit - 1);
@@ -987,7 +990,8 @@ TEST(CryptoChannelDatagramLimits) {
     auto first = client.send.TrySeal(Text("h"), Text("ok"), Span<uint8>(sealed));
     REQUIRE(first && first.Value() == 0);
     DatagramOpener& serverOpener = server.receive;
-    detail::ChannelTestAccess::SetAuthenticationFailures(serverOpener, DatagramFailureLimit - 2);
+    crypto::detail::ChannelTestAccess::SetAuthenticationFailures(serverOpener,
+                                                                 DatagramFailureLimit - 2);
     uint8 forged[18] = {};
     CHECK(serverOpener.TryOpen(5, Text("h"), Span<const uint8>(forged), Span<uint8>(payload))
               .Error() == ErrorCode::AuthenticationFailed);
@@ -1008,3 +1012,4 @@ TEST(CryptoChannelDatagramLimits) {
     CHECK(AllZero(Span<const uint8>(payload)));
     CHECK(serverOpener.AuthenticationFailures() == DatagramFailureLimit);
 }
+} // namespace channel_tests_file

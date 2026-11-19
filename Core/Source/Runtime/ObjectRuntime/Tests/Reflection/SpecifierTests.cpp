@@ -6,6 +6,8 @@
 // B2 지정자가 생성 스키마와 TypeRegistry에 닿는지, NATIVE 멤버 형질이 맞는지
 // 본다(Docs/Design/ReflectionFoundations.ko.md 2절).
 using namespace rocks;
+namespace specifier_tests_file {
+
 using reflection_fixture::Node;
 using reflection_fixture::WorldChild;
 using reflection_fixture::WorldFixture;
@@ -89,3 +91,4 @@ TEST(ReflectionSpecifiers_RegistryAcceptsGeneratedFlags) {
     REQUIRE(types.Unregister(world.Value()));
     CHECK(types.Shutdown());
 }
+} // namespace specifier_tests_file
