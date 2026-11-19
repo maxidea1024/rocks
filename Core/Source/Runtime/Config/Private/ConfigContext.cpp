@@ -39,7 +39,7 @@ ConfigState::ConfigState(Allocator& allocator, ObjectRegistry& objects) noexcept
       directories{String(allocator), String(allocator), String(allocator), String(allocator)},
       projectName(allocator), branches(allocator), sections(allocator), entries(allocator),
       queue(allocator), diagnostics(allocator), regions(allocator), settings(allocator),
-      commands(allocator), pendingCommands(allocator), subscriptions(allocator),
+      commands(allocator), pendingCommands(allocator), dynamicVars(allocator),
       renderSignature(allocator), pendingRestarts(allocator), ignoredBootWrites(allocator),
       reportedUnresolved(allocator), groups(allocator), unmetQualityBudgets(allocator),
       reportedQualityProblems(allocator), reportedPresetProblems(allocator),
@@ -543,6 +543,10 @@ ConfigContext::~ConfigContext() {
         channel.queue.Clear();
         channel.current = SharedPtr<const ConfigSnapshot>();
     }
+
+    // 프로세스 기본 문맥이면 풀고(그 뒤 묶음 없는 쓰기는 NotFound), 기본 문맥을 거쳐 통로를 얻은
+    // 쓰기(닫힌 통로라 ShuttingDown으로 끝난다)가 통로 참조를 놓을 때까지 기다린다(CVar 6.2절).
+    detail::ReleaseProcessDefault(channel);
 
     for (UniquePtr<SectionState>& section : state->sections) {
         if (section->value != nullptr) {
@@ -1168,19 +1172,7 @@ Result<void> ConfigContext::Sync() noexcept {
 
     if (state->queue.IsEmpty() && !state->dirty && !state->pendingCommands.IsEmpty()) {
         // 값은 그대로이고 큐에 든 명령만 실행한다.
-        Array<bool> none(*allocator_);
-        if (auto sized = none.TryResize(state->sections.Size() > state->settings.Size()
-                                            ? state->sections.Size()
-                                            : state->settings.Size());
-            !sized) {
-            return sized;
-        }
-
-        for (bool& flag : none) {
-            flag = false;
-        }
-
-        detail::RunCommandsAndCallbacks(*state, none.View(), none.View());
+        detail::RunPendingCommands(*state);
         NotifySynced(*state, {}, {});
         return Result<void>::Success();
     }
@@ -1344,7 +1336,6 @@ Result<void> ConfigContext::Sync() noexcept {
 
     Array<String> exports(*allocator_);
     Array<bool> sectionChanged(*allocator_);
-    Array<bool> settingChanged(*allocator_);
     for (usize index = 0; index < results.Size(); ++index) {
         String exported(*allocator_);
         if (auto written =
@@ -1360,12 +1351,6 @@ Result<void> ConfigContext::Sync() noexcept {
         }
 
         if (auto pushed = exports.TryPushBack(Move(exported)); !pushed) {
-            return pushed;
-        }
-    }
-
-    for (const UniquePtr<SettingResult>& result : settingResults) {
-        if (auto pushed = settingChanged.TryPushBack(result->changed); !pushed) {
             return pushed;
         }
     }
@@ -1485,9 +1470,8 @@ Result<void> ConfigContext::Sync() noexcept {
     detail::PruneQualityProblems(*state);
     state->queue.Clear();
     state->dirty = false;
-    // 7. 값이 다 바뀐 뒤 명령을 실행하고 변경 콜백을 부른 다음 OnSynced를 부른다(콜백은 새 값을
-    // 본다).
-    detail::RunCommandsAndCallbacks(*state, sectionChanged.View(), settingChanged.View());
+    // 7. 값이 다 바뀐 뒤 명령을 실행하고 OnSynced를 부른다(알림은 새 값을 본다).
+    detail::RunPendingCommands(*state);
     NotifySynced(*state, variableIndexes.View(), changedSettings.View());
     return Result<void>::Success();
 }

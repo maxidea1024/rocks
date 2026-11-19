@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Config/CVar.h>
 #include <Config/ConfigContext.h>
 #include <Core/Diagnostics/FileLogSink.h>
 #include <Core/Diagnostics/LogSystem.h>
@@ -7,55 +8,69 @@
 #include <Core/Memory/UniquePtr.h>
 #include <Crypto/LogFileSealer.h>
 
-// 호스트의 로그 준비다(Docs/Design/LoggingSystem.ko.md 5.1·9.1절, LG9). 설정 시스템의 log.* 콘솔
-// 설정을 등록하고, 그 값으로 LogSystem과 sink(stderr, 선택 파일, 선택 봉인 파일)를 만든다. Core는
-// Config·Crypto 아래 계층이라 이 모듈이 그 위에서 묶는다. 엔진은 LogSystem을 만들거나 설치하지
-// 않는다(호스트가 이 모듈로 만들고 LogInstallScope로 설치한다).
+// 호스트의 로그 준비다(Docs/Design/LoggingSystem.ko.md 5.1·9.1·9.2절, LG9). 설정 시스템의 log.*
+// CVar 핸들을 등록하고(RegisterLogSettings — CVarSystem.ko.md CVR7), 그 값으로 LogSystem과
+// sink(stderr, 선택 파일, 선택 봉인 파일)를 만든다. Core는 Config·Crypto 아래 계층이라 이 모듈이 그
+// 위에서 묶는다. 엔진은 LogSystem을 만들거나 설치하지 않는다(호스트가 이 모듈로 만들고
+// LogInstallScope로 설치한다).
 //
-// 설정(이름 · 종류 · 기본값 · 플래그):
-//   log.mode               string  "default"  시작 뒤 고정  default(호스트 프리셋)·async·sync
-//   log.level              string  "info"     실행 중 변경  trace·debug·info·warning·error·fatal
-//   log.levels             string  ""         실행 중 변경  "Graphics=warning,Engine.World=debug"
-//   log.file.enabled       bool    false      시작 뒤 고정
-//   log.file.directory     string  "Saved/Logs"  시작 뒤 고정
-//   log.file.format        string  "text"     시작 뒤 고정  text·jsonlines
-//   log.file.max_bytes     int64   16777216   시작 뒤 고정  65536–1099511627776
-//   log.file.retention     int32   8          시작 뒤 고정  1–256
-//   log.file.encrypt       bool    false      시작 뒤 고정
-//   log.file.recipient_key string  ""         시작 뒤 고정  X-Wing 공개키 base64(비밀 아님)
-// 레벨 이름과 log.levels의 접두사는 대소문자를 가리지 않는다(log.level의 "Warning"도 설정 단계에서
-// 받는다). 실행 중 변경은 sync 지점(ConfigContext::Sync)에서 Watch가 적용한다.
-// log.level은 늘 값이 있으므로(기본 info) 프리셋의 globalMinimum을 덮어쓴다. 설정 문맥 없이
-// Start하면 프리셋 그대로다.
+// 설정(아래 핸들 — 이름 · 타입 · 기본값):
+//   log.mode               BootCVar<LogHostMode>    default   default(호스트 프리셋)·async·sync
+//   log.level              CVar<LogLevel>           info      trace·debug·info·warning·error·fatal
+//   log.levels             CVar<String>             ""        "Graphics=warning,Engine.World=debug"
+//   log.rate_limits        CVar<String>             ""        "Graphics=20,Engine.World.Tick=100"
+//   log.console.layout     BootCVar<String>         ""        레이아웃 패턴(빈 값은 기본 콘솔
+//   레이아웃) log.file.enabled       BootCVar<bool>           false log.file.directory
+//   BootCVar<String>         "Saved/Logs" log.file.format        BootCVar<LogFileFormat>  text
+//   text·jsonlines log.file.layout        BootCVar<String>         ""        레이아웃
+//   패턴(jsonlines면 쓰이지 않는다) log.file.max_bytes     BootCVar<int64>          16777216
+//   65536–1099511627776 log.file.retention     BootCVar<int32>          8         1–256
+//   log.file.max_age_minutes BootCVar<int32>        0         0–10080(0은 끔)
+//   log.file.compress      BootCVar<bool>           false
+//   log.file.encrypt       BootCVar<bool>           false
+//   log.file.recipient_key BootCVar<String>         ""        X-Wing 공개키 base64(비밀 아님)
+// enum 값은 대소문자를 가리지 않고 받는다(CVar 4.4절 — log.level의 "Warning"도 받는다). 문법이 틀린
+// log.levels·log.rate_limits·레이아웃은 설정 단계에서 Validate가 거부한다(L18). 실행 중
+// 변경(CVar)은 sync 지점(ConfigContext::Sync)에서 Watch가 적용하고, BootCVar는
+// 봉인(CompleteStartup) 뒤 이번 실행 동안 고정이다. log.level은 늘 값이 있으므로(기본 info)
+// 프리셋의 globalMinimum을 덮어쓴다. 설정 문맥 없이 Start하면 프리셋 그대로다.
 //
 // 사용 예(엔진 호스트):
 //   REQUIRE(RegisterLogSettings(context));
-//   ... 설정 파일 층을 넣고 context.Sync();
+//   ... 설정 파일 층을 넣고 context.Sync(); context.CompleteStartup();
 //   LogHost host(allocator);
 //   if (!host.Start(LogSystemConfig::ForEngineHost(), &context, "Sandbox")) { ... }
 //   LogInstallScope installed(host.System());
 //   (void)host.Watch(context);
-//   context.CompleteStartup();          // 그 뒤 log.mode·log.file.*는 바뀌지 않는다
 //   ... 엔진 실행 ...
 //   host.Stop();                        // 설치 범위가 끝난 뒤
 //   if (host.WriterAbandoned()) { 정리 없이 프로세스 종료(_Exit) }
 namespace rocks {
 
-inline constexpr StringView LogModeSetting = "log.mode";
-inline constexpr StringView LogLevelSetting = "log.level";
-inline constexpr StringView LogLevelsSetting = "log.levels";
-inline constexpr StringView LogFileEnabledSetting = "log.file.enabled";
-inline constexpr StringView LogFileDirectorySetting = "log.file.directory";
-inline constexpr StringView LogFileFormatSetting = "log.file.format";
-inline constexpr StringView LogFileMaxBytesSetting = "log.file.max_bytes";
-inline constexpr StringView LogFileRetentionSetting = "log.file.retention";
-inline constexpr StringView LogFileEncryptSetting = "log.file.encrypt";
-inline constexpr StringView LogFileRecipientKeySetting = "log.file.recipient_key";
-inline constexpr StringView LogConsoleLayoutSetting = "log.console.layout";
-inline constexpr StringView LogFileLayoutSetting = "log.file.layout";
-inline constexpr StringView LogRateLimitsSetting = "log.rate_limits";
-inline constexpr StringView LogFileMaxAgeSetting = "log.file.max_age_minutes";
-inline constexpr StringView LogFileCompressSetting = "log.file.compress";
+// log.mode 값이다(호스트 프리셋 그대로, 또는 LogMode::Async·Sync로 덮어쓰기).
+enum class LogHostMode : uint8 {
+    Default,
+    Async,
+    Sync
+};
+
+// log.mode의 이름 표다(CVar enum — Config/CVarEnum.h).
+constexpr Span<const StringView> CVarEnumNames(LogHostMode) noexcept {
+    static constexpr StringView names[] = {"default", "async", "sync"};
+    return names;
+}
+
+// log.level의 이름 표다(LogLevel 값 순서 — trace·debug·info·warning·error·fatal).
+constexpr Span<const StringView> CVarEnumNames(LogLevel) noexcept {
+    static constexpr StringView names[] = {"trace", "debug", "info", "warning", "error", "fatal"};
+    return names;
+}
+
+// log.file.format의 이름 표다.
+constexpr Span<const StringView> CVarEnumNames(LogFileFormat) noexcept {
+    static constexpr StringView names[] = {"text", "jsonlines"};
+    return names;
+}
 
 // log.file.max_age_minutes의 상한(7일)이다.
 inline constexpr int32 MaxLogFileAgeMinutes = 10080;
@@ -69,9 +84,9 @@ inline constexpr usize MaxLogLevelsBytes = 1024;
 // log.rate_limits 문자열의 최대 byte 수다.
 inline constexpr usize MaxLogRateLimitsBytes = 1024;
 
-// log.* 콘솔 설정을 등록한다(모듈 등록 함수에서 명시적으로 — 전역 생성자 없음). 이미 들어온 층
-// 입력은 등록 때 적용된다. 오류: ConfigContext::RegisterConsoleSetting의 오류(이미 등록했으면
-// AlreadyExists).
+// log.* 핸들을 등록한다(모듈 등록 함수에서 명시적으로 — 전역 생성자 없음). 이미 들어온 층 입력은
+// 등록 때 적용된다. 오류: ConfigContext::Register의 오류(같은 이름을 다른 핸들이 쓰면
+// AlreadyExists·TypeMismatch). 같은 문맥에 다시 부르면 성공이다(멱등).
 Result<void> RegisterLogSettings(config::ConfigContext& context) noexcept;
 
 // 레벨 이름(trace·debug·info·warning·error·fatal, 대소문자 무시)을 읽는다. 모르는 이름이면 false다.
@@ -248,6 +263,23 @@ constexpr StringView CheckLogRateLimitsSyntax(StringView text) noexcept {
     return StringView();
 }
 
+// log.* 핸들이다(정의는 LogHost.cpp, 등록은 RegisterLogSettings — 위 표).
+extern BootCVar<LogHostMode> LogModeVar;
+extern CVar<LogLevel> LogLevelVar;
+extern CVar<String> LogLevelsVar;
+extern CVar<String> LogRateLimitsVar;
+extern BootCVar<String> LogConsoleLayoutVar;
+extern BootCVar<bool> LogFileEnabledVar;
+extern BootCVar<String> LogFileDirectoryVar;
+extern BootCVar<LogFileFormat> LogFileFormatVar;
+extern BootCVar<String> LogFileLayoutVar;
+extern BootCVar<int64> LogFileMaxBytesVar;
+extern BootCVar<int32> LogFileRetentionVar;
+extern BootCVar<int32> LogFileMaxAgeVar;
+extern BootCVar<bool> LogFileCompressVar;
+extern BootCVar<bool> LogFileEncryptVar;
+extern BootCVar<String> LogFileRecipientKeyVar;
+
 // 설정으로 만든 LogSystem과 sink 묶음이다. 소유 스레드 하나에서 Start·Watch·Stop을 부른다.
 class LogHost {
 public:
@@ -257,22 +289,26 @@ public:
     LogHost& operator=(const LogHost&) = delete;
 
     // preset(호스트 프리셋 — ForEngineHost·ForTool)에 settings의 log.* 값을 덮어써 LogSystem을
-    // 만들고 시작한다. settings가 null이면 프리셋 그대로 stderr sink만 단다. hostName은 파일 이름
-    // 앞부분이다(FileLogSinkConfig::hostName).
+    // 만들고 시작한다. settings가 null이면 프리셋 그대로 stderr sink만 단다. settings는 봉인
+    // (CompleteStartup) 뒤여야 한다(부팅 값을 읽는다 — settings의 최신 snapshot을 묶어 읽는다).
+    // hostName은 파일 이름 앞부분이다(FileLogSinkConfig::hostName).
     // - 파일 기록을 켰는데 열지 못하면(폴더·권한) 파일 sink 없이 시작하고 Error를 한 번 남긴다.
     // - 암호화를 켰는데 공개키가 없거나 올바르지 않으면 파일 sink를 만들지 않는다(평문으로 내려가지
     //   않는다). Error를 한 번 남긴다. FileSetupError가 그 원인이다.
     // 오류: 이미 시작함 AlreadyExists, 앞 Stop이 출력 스레드를 남겨 둠(WriterAbandoned) Busy,
-    // LogSystem 생성·시작 실패는 그 오류.
+    // settings가 초기화 전·봉인 전 InvalidArgument, LogSystem 생성·시작 실패는 그 오류.
     Result<void> Start(const LogSystemConfig& preset, const config::ConfigContext* settings,
                        StringView hostName) noexcept;
 
-    // log.level·log.levels 변경을 구독한다. 값이 바뀐 sync 지점에서 전역 최소와 카테고리 재정의를
-    // 다시 적용한다. settings는 Stop까지 살아 있어야 한다. 오류: 시작 전 InvalidArgument, 구독
-    // 오류.
+    // log.level·log.levels·log.rate_limits의 실행 중 변경을 따른다: settings의 OnSynced에 알림
+    // 하나를 더하고, Sync마다 그 snapshot에서 값이 바뀐 것(Watcher — 세대 비교, 기준은 Start가 읽은
+    // snapshot이고 Watch가 그 뒤의 변경을 바로 한 번 적용한다)만 다시 적용한다(일시적으로 실패한
+    // 값은 다음 Sync에 다시 시도한다 — 전역 최소·카테고리 재정의·속도 제한). settings는 Stop까지
+    // 살아 있어야 한다. 소유 스레드(게임 lane)에서 부른다. 오류: 시작 전·이미 따르는 중
+    // InvalidArgument, 알림 추가 오류.
     Result<void> Watch(config::ConfigContext& settings) noexcept;
 
-    // 구독을 끝내고 LogSystem을 멈추고 파일을 닫는다. 설치 범위가 끝난 뒤 부른다. 두 번 불러도
+    // 변경 알림을 빼고 LogSystem을 멈추고 파일을 닫는다. 설치 범위가 끝난 뒤 부른다. 두 번 불러도
     // 된다.
     //
     // 멈춘 sink 때문에 LogSystem::Stop이 출력 스레드를 남겨 두면(Stats().writerAbandoned)
@@ -304,10 +340,17 @@ public:
     }
 
 private:
-    static void OnLevelsChanged(void* context, const config::ConfigChange& change) noexcept;
-    void ApplyLevels(const config::ConfigContext& settings) noexcept;
-    void ApplyRateLimits(const config::ConfigContext& settings) noexcept;
-    void PrepareFileSink(const config::ConfigContext& settings, StringView hostName) noexcept;
+    // Start의 본체다. settings면 설정 문맥의 snapshot이 이 스레드에 묶여 있다(핸들로 읽는다).
+    Result<void> StartWith(const LogSystemConfig& preset, bool settings,
+                           StringView hostName) noexcept;
+    // 아래 셋과 PrepareFileSink는 settings의 snapshot이 이 스레드에 묶여 있을 때 부른다(핸들로
+    // 읽는다). 셋의 반환은 일시적 실패(LogSystem Busy) 없이 끝났는지다(false면 다음 sync 지점에
+    // 다시 시도한다 — 용량 같은 지속 실패는 Warning 뒤 true).
+    bool ApplyGlobalLevel() noexcept;
+    bool ApplyLevelOverrides() noexcept;
+    bool ApplyRateLimits() noexcept;
+    void PrepareFileSink(StringView hostName) noexcept;
+    void OnSynced() noexcept;
 
     // Stop이 출력 스레드를 남길 때 LogSystem과 sink를 옮겨 놓고 파괴하지 않는 묶음이다.
     struct AbandonedOutputs;
@@ -321,10 +364,12 @@ private:
     UniquePtr<LogBatchCompressor> compressor_;
     UniquePtr<FileLogSink> file_;
     config::ConfigContext* watched_ = nullptr;
-    // 실행 중 바뀌면 다시 적용하는 설정 수(log.level·log.levels·log.rate_limits)다.
-    static constexpr uint32 WatchedSettingCount = 3;
-    config::ConfigSubscriptionId subscriptions_[WatchedSettingCount]{};
-    uint32 subscriptionCount_ = 0;
+    // watched_의 OnSynced에 더한 알림이다.
+    DelegateHandle synced_{};
+    // 실행 중 값 셋의 마지막으로 적용한 세대다(Start가 읽은 snapshot이 기준이다).
+    cvar::Watcher<LogLevel> levelWatcher_{LogLevelVar};
+    cvar::Watcher<String> levelsWatcher_{LogLevelsVar};
+    cvar::Watcher<String> rateLimitsWatcher_{LogRateLimitsVar};
     // 마지막으로 적용한 log.levels(지울 접두사를 알려고 복사해 둔다)다.
     char appliedLevels_[MaxLogLevelsBytes]{};
     usize appliedLevelsBytes_ = 0;

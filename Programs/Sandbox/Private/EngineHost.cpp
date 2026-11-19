@@ -342,10 +342,13 @@ int RunEngineHost(Allocator& allocator, const EngineHostOptions& options) noexce
         // 개발 빌드는 설정 파일을 감시해 프레임 sync 지점에서 다시 읽는다(출시 규칙이면 Unsupported
         // — 기록하지 않는다).
         (void)settings.StartHotReload();
-        // 7) trace 세션(설정 섹션 Trace)·콘솔 명령·--trace. 세션을 열지 못해도 엔진은 돈다.
+        // 7) trace 세션(trace.* 설정 — 5)에서 고정됐다)·콘솔 명령·--trace. 세션을 열지 못해도
+        // 엔진은 돈다.
         TraceSession trace;
+        auto captureSettings = trace_control::ReadTraceCaptureSettings(settings.Context());
         TraceSessionSettings traceSettings = trace_control::MakeTraceSessionSettings(
-            settings.Context().Get<trace_control::TraceCaptureSettings>(), allocator);
+            captureSettings ? captureSettings.Value() : trace_control::TraceCaptureSettings{},
+            allocator);
         if (auto started = trace.Start(traceSettings); !started) {
             Log::Warning(LogSandboxHost, "Trace capture could not start: {Error}",
                          ErrorCodeName(started.Error()));

@@ -2,19 +2,19 @@
 
 #include <Platform/Thread.h>
 
-// 설정 CF2 콘솔 설정 시험이다(Docs/Design/ConfigSystem.ko.md 5.1절): 등록 전 값(대기 값)의 이관과
-// 그 검사, 플래그별 거부(콘솔 읽기 전용·품질 구성원·개발 전용·사용자 설정·시작 뒤 고정), 설정
-// struct 필드의 콘솔 이름이 같은 값 저장소를 쓰는지, 종류·범위·허용 값, 이름 문법·영역 표, 소유
-// 스레드 밖 호출.
+// 콘솔 설정 시험이다(Docs/Design/ConfigSystem.ko.md 5.1절, CVarSystem.ko.md 5절 — 동적 변수는
+// RegisterDynamic, CVR7): 등록 전 값(대기 값)의 이관과 그 검사, 성질별 거부(콘솔 읽기
+// 전용·품질 묶음 층·치트·사용자 설정·부팅 값), 설정 struct 필드의 콘솔 이름이 같은 값 저장소를
+// 쓰는지, 타입·범위·enum, 이름 문법·영역 표·겹침, snapshot 읽기(ReadDynamic), 소유 스레드 밖 호출.
 using namespace rocks;
 using namespace rocks::config;
 using namespace rocks::test::config;
 
 namespace {
 
-ConsoleSettingDefinition Define(StringView name, ConsoleValueType type, StringView defaultValue,
-                                uint32 flags = 0) noexcept {
-    ConsoleSettingDefinition definition;
+DynamicVarDefinition Define(StringView name, ConsoleValueType type, StringView defaultValue,
+                            uint32 flags = 0) noexcept {
+    DynamicVarDefinition definition;
     definition.name = name;
     definition.help = "test setting";
     definition.type = type;
@@ -23,7 +23,7 @@ ConsoleSettingDefinition Define(StringView name, ConsoleValueType type, StringVi
     return definition;
 }
 
-uint32 Flags(ConsoleSettingFlags flag) noexcept {
+uint32 Flags(cvar::VarFlags flag) noexcept {
     return static_cast<uint32>(flag);
 }
 
@@ -51,33 +51,38 @@ TEST(Config_PendingValuesMoveAtRegistration) {
     auto missing = context.FindConsoleSetting("stream.pool_mb");
     CHECK(!missing && missing.Error() == ErrorCode::NotFound);
 
-    ConsoleSettingDefinition pool = Define("stream.pool_mb", ConsoleValueType::Int32, "512");
+    DynamicVarDefinition pool = Define("stream.pool_mb", ConsoleValueType::Int32, "512");
     pool.hasRange = true;
     pool.minimum = 64;
     pool.maximum = 4096;
-    auto poolId = context.RegisterConsoleSetting(pool);
-    REQUIRE(poolId);
-    CHECK(context.ConsoleValue(poolId.Value()).signedInteger == 1024);
+    auto poolIndex = context.RegisterDynamic(pool);
+    REQUIRE(poolIndex);
+    // 등록은 바로 보인다(새 칸을 더한 snapshot을 게시한다 — 같은 번호 체계의 CVar 칸).
+    CHECK(ValueOf(fixture, "stream.pool_mb").signedInteger == 1024);
+    CHECK(cvar::ReadDynamic<int32>(*context.Acquire(), poolIndex.Value(), 0) == 1024);
 
     context.Diagnostics().Clear();
-    REQUIRE(context.RegisterConsoleSetting(Define("stream.lines", ConsoleValueType::Int32, "3")));
+    REQUIRE(context.RegisterDynamic(Define("stream.lines", ConsoleValueType::Int32, "3")));
     CHECK(ValueOf(fixture, "stream.lines").signedInteger == 3);
     CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::InvalidSetting, 2, 19));
-    ConsoleSettingDefinition cap = Define("stream.cap", ConsoleValueType::Int32, "10");
+    DynamicVarDefinition cap = Define("stream.cap", ConsoleValueType::Int32, "10");
     cap.hasRange = true;
     cap.minimum = 0;
     cap.maximum = 100;
-    REQUIRE(context.RegisterConsoleSetting(cap));
+    REQUIRE(context.RegisterDynamic(cap));
     CHECK(ValueOf(fixture, "stream.cap").signedInteger == 10);
     CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::ValueOutOfRange, 2, 41));
-    REQUIRE(context.RegisterConsoleSetting(Define("stream.late", ConsoleValueType::Int64, "1")));
+    REQUIRE(context.RegisterDynamic(Define("stream.late", ConsoleValueType::Int64, "1")));
     CHECK(ValueOf(fixture, "stream.late").signedInteger == 7);
 
     // 등록 뒤의 값은 Sync에서만 바뀌고, 등록된 이름의 값은 들어올 때 검사한다.
+    const SharedPtr<const ConfigSnapshot> before = context.Acquire();
     REQUIRE(context.AddAssignment(ConfigLayer::Console, "console", "stream.pool_mb", "2048"));
-    CHECK(context.ConsoleValue(poolId.Value()).signedInteger == 1024);
+    CHECK(ValueOf(fixture, "stream.pool_mb").signedInteger == 1024);
     REQUIRE(context.Sync());
-    CHECK(context.ConsoleValue(poolId.Value()).signedInteger == 2048);
+    CHECK(ValueOf(fixture, "stream.pool_mb").signedInteger == 2048);
+    CHECK(cvar::ReadDynamic<int32>(*context.Acquire(), poolIndex.Value(), 0) == 2048);
+    CHECK(cvar::ReadDynamic<int32>(*before, poolIndex.Value(), 0) == 1024);
     context.Diagnostics().Clear();
     auto outside = context.AddAssignment(ConfigLayer::Console, "console", "stream.pool_mb", "1");
     CHECK(!outside && fixture.HasDiagnostic(ConfigDiagnosticCode::ValueOutOfRange));
@@ -91,9 +96,9 @@ TEST(Config_PendingValuesMoveAtRegistration) {
 TEST(Config_ConsoleFlagsRejectLayers) {
     ConfigFixture fixture;
     ConfigContext& context = fixture.Context();
-    REQUIRE(context.RegisterConsoleSetting(Define("render.lock", ConsoleValueType::Bool, "false",
-                                                  Flags(ConsoleSettingFlags::ConsoleReadOnly))));
-    REQUIRE(context.RegisterConsoleSetting(Define("render.bias", ConsoleValueType::Float, "1")));
+    REQUIRE(context.RegisterDynamic(Define("render.lock", ConsoleValueType::Bool, "false",
+                                           Flags(cvar::VarFlags::ConsoleReadOnly))));
+    REQUIRE(context.RegisterDynamic(Define("render.bias", ConsoleValueType::Float, "1")));
     REQUIRE(context.AddLayerText(ConfigLayer::Project, "Render.json", "Render", "project",
                                  R"({"Settings": {"render.lock": true}})"));
     REQUIRE(context.Sync());
@@ -157,16 +162,15 @@ TEST(Config_ConsoleFlagsRejectLayers) {
           pending[0].current == "11");
 }
 
-// 출시 규칙에서 개발 전용 설정은 등록되지만 콘솔에 보이지 않고, 어느 층도 쓸 수 없어 기본값으로
-// 고정된다 (독립 설정·설정 struct 필드 모두). 콘솔 입력 자체도 없다.
+// 출시 규칙에서 치트(개발 전용) 설정은 등록되지만 콘솔에 보이지 않고, 어느 층도 쓸 수 없어
+// 기본값으로 고정된다(동적 변수·설정 struct 필드 모두). 콘솔 입력 자체도 없다.
 TEST(Config_DevelopmentOnlyIsFixedUnderReleaseRules) {
     ConfigContextOptions options;
     options.releaseRules = true;
     ConfigFixture fixture(options);
     ConfigContext& context = fixture.Context();
-    auto debug =
-        context.RegisterConsoleSetting(Define("render.debug_view", ConsoleValueType::Bool, "false",
-                                              Flags(ConsoleSettingFlags::DevelopmentOnly)));
+    auto debug = context.RegisterDynamic(
+        Define("render.debug_view", ConsoleValueType::Bool, "false", Flags(cvar::VarFlags::Cheat)));
     REQUIRE(debug);
     auto hidden = context.FindConsoleSetting("render.debug_view");
     CHECK(!hidden && hidden.Error() == ErrorCode::NotFound);
@@ -179,7 +183,8 @@ TEST(Config_DevelopmentOnlyIsFixedUnderReleaseRules) {
                           R"({"Settings": {"render.graph.debug_draw": true}})"));
     CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::LayerNotAllowed));
     REQUIRE(context.Sync());
-    CHECK(!context.ConsoleValue(debug.Value()).boolean && !fixture.Graph().debugDraw);
+    CHECK(!cvar::ReadDynamic<bool>(*context.Acquire(), debug.Value(), true) &&
+          !fixture.Graph().debugDraw);
     Array<StringView> names(fixture.system);
     REQUIRE(context.CompleteConsoleName("render.", names));
     for (const StringView name : names) {
@@ -221,77 +226,155 @@ TEST(Config_FieldConsoleNamesShareTheValue) {
     CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::InvalidSetting, 1, 41));
 }
 
-// 콘솔 설정 종류(int64·double·String·Name·enum)와 허용 값, 기본값 표기, 이름 문법·영역 표·겹침
-// 거부.
+// 동적 변수의 타입(int64·double·String·Name·enum)과 기본값 표기, enum의 대소문자 무시 입력, 이름
+// 문법·영역 표·성질 비트·범위 모양·겹침 거부(같은 타입 AlreadyExists·다른 타입 TypeMismatch).
 TEST(Config_ConsoleSettingTypesAndRegistration) {
     ConfigFixture fixture;
     ConfigContext& context = fixture.Context();
-    REQUIRE(context.RegisterConsoleSetting(Define("net.max_bytes", ConsoleValueType::Int64, "0")));
-    REQUIRE(
-        context.RegisterConsoleSetting(Define("physics.gravity", ConsoleValueType::Double, "")));
-    const StringView channels[] = {"core", "render"};
-    ConsoleSettingDefinition channel = Define("log.channel", ConsoleValueType::String, "core");
-    channel.allowedValues = channels;
-    REQUIRE(context.RegisterConsoleSetting(channel));
-    ConsoleSettingDefinition folded = Define("log.folded", ConsoleValueType::String, "core");
-    folded.allowedValues = channels;
-    folded.allowedValuesIgnoreCase = true;
-    REQUIRE(context.RegisterConsoleSetting(folded));
-    REQUIRE(context.RegisterConsoleSetting(Define("game.level", ConsoleValueType::Name, "Lobby")));
-    ConsoleSettingDefinition preset = Define("quality.preset", ConsoleValueType::Enum, "");
+    REQUIRE(context.RegisterDynamic(Define("net.max_bytes", ConsoleValueType::Int64, "0")));
+    auto gravity = context.RegisterDynamic(Define("physics.gravity", ConsoleValueType::Double, ""));
+    REQUIRE(gravity);
+    auto channel = context.RegisterDynamic(Define("log.channel", ConsoleValueType::String, "core"));
+    REQUIRE(channel);
+    REQUIRE(context.RegisterDynamic(Define("game.level", ConsoleValueType::Name, "Lobby")));
+    DynamicVarDefinition preset = Define("quality.preset", ConsoleValueType::Enum, "");
     preset.enumType = TypeIdOf<FixtureQuality>();
-    const StringView presets[] = {"Low", "High"};
-    preset.allowedValues = presets;
-    REQUIRE(context.RegisterConsoleSetting(preset));
+    auto presetIndex = context.RegisterDynamic(preset);
+    REQUIRE(presetIndex);
     CHECK(ValueOf(fixture, "physics.gravity").float64 == 0.0);
     CHECK(ValueOf(fixture, "quality.preset").signedInteger == 0);
+    CHECK(cvar::ReadDynamic<String>(*context.Acquire(), channel.Value(), "") == "core");
 
     REQUIRE(context.AddAssignment(ConfigLayer::Session, "cli", "net.max_bytes", "9000000000"));
     REQUIRE(context.AddAssignment(ConfigLayer::Session, "cli", "physics.gravity", "-9.81"));
     REQUIRE(context.AddAssignment(ConfigLayer::Session, "cli", "log.channel", "render"));
-    // 대소문자 무시 허용 값은 입력 표기를 그대로 남긴다.
-    REQUIRE(context.AddAssignment(ConfigLayer::Session, "cli", "log.folded", "Render"));
     REQUIRE(context.AddAssignment(ConfigLayer::Session, "cli", "game.level", "Arena"));
+    // enum 이름은 대소문자를 가리지 않는다(CVar 4.4절 — 닫힌 값 집합은 enum이다).
     REQUIRE(context.AddAssignment(ConfigLayer::Session, "cli", "quality.preset", "high"));
     REQUIRE(context.Sync());
     CHECK(ValueOf(fixture, "net.max_bytes").signedInteger == 9000000000ll);
     CHECK(ValueOf(fixture, "physics.gravity").float64 == -9.81);
     CHECK(ValueOf(fixture, "log.channel").string.View() == "render");
-    CHECK(ValueOf(fixture, "log.folded").string.View() == "Render");
     CHECK(ValueOf(fixture, "quality.preset").signedInteger ==
           static_cast<int64>(FixtureQuality::High));
+    const SharedPtr<const ConfigSnapshot> snapshot = context.Acquire();
+    CHECK(cvar::ReadDynamic<double>(*snapshot, gravity.Value(), 0.0) == -9.81);
+    CHECK(cvar::ReadDynamic<String>(*snapshot, channel.Value(), "") == "render");
+    CHECK(cvar::ReadDynamic<int64>(*snapshot, presetIndex.Value(), 0) ==
+          static_cast<int64>(FixtureQuality::High));
+    CHECK(cvar::ReadDynamic<int32>(*snapshot, cvar::Index{}, 5) == 5);
+    // 칸의 값 종류가 T와 다르면 fallback이다(텍스트 ↔ 수, float ↔ int — 모든 빌드에서 확인한다).
+    // 실행 중 타입으로 등록한 쪽은 DynamicKind로 종류를 묻는다.
+    CHECK(cvar::DynamicKind(*snapshot, gravity.Value()) == ValueKind::Float64);
+    CHECK(cvar::DynamicKind(*snapshot, channel.Value()) == ValueKind::Utf8String);
+    CHECK(cvar::DynamicKind(*snapshot, presetIndex.Value()) == ValueKind::Enum);
+    CHECK(cvar::DynamicKind(*snapshot, cvar::Index{}) == ValueKind::Opaque);
+    CHECK(cvar::ReadDynamic<int32>(*snapshot, channel.Value(), 11) == 11);
+    CHECK(cvar::ReadDynamic<String>(*snapshot, gravity.Value(), "none") == "none");
+    CHECK(cvar::ReadDynamic<rocks::Name>(*snapshot, gravity.Value(), rocks::Name{}) ==
+          rocks::Name{});
+    CHECK(cvar::ReadDynamic<int64>(*snapshot, gravity.Value(), 12) == 12);
+    CHECK(cvar::ReadDynamic<float>(*snapshot, gravity.Value(), 1.5f) == 1.5f);
+    CHECK(cvar::ReadDynamic<double>(*snapshot, presetIndex.Value(), 2.5) == 2.5);
+    CHECK(cvar::ReadDynamic<int32>(*snapshot, presetIndex.Value(), 13) == 13);
     auto level = fixture.names.Acquire(ValueOf(fixture, "game.level").name);
     CHECK(level && level.Value().View() == "Arena");
 
     context.Diagnostics().Clear();
-    CHECK(!context.AddAssignment(ConfigLayer::Session, "cli", "log.channel", "audio"));
-    CHECK(!context.AddAssignment(ConfigLayer::Session, "cli", "log.channel", "Render"));
-    CHECK(!context.AddAssignment(ConfigLayer::Session, "cli", "log.folded", "Audio"));
-    CHECK(!context.AddAssignment(ConfigLayer::Session, "cli", "quality.preset", "Medium"));
+    CHECK(!context.AddAssignment(ConfigLayer::Session, "cli", "quality.preset", "Ultra"));
     CHECK(!context.AddAssignment(ConfigLayer::Session, "cli", "net.max_bytes", "lots"));
-    CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::ValueOutOfRange) &&
-          fixture.HasDiagnostic(ConfigDiagnosticCode::InvalidSetting));
+    CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::InvalidSetting));
 
-    // 등록 거부: 이름 문법, 영역 표, help 없음, 범위 모양, 기본값 표기, 겹침(필드 콘솔 이름 포함).
-    auto rejects = [&](const ConsoleSettingDefinition& definition, ErrorCode code) noexcept {
-        auto registered = context.RegisterConsoleSetting(definition);
+    // 등록 거부: 이름 문법, 영역 표, help 없음, 성질 비트, 범위 모양, 기본값 표기, enum 타입,
+    // 겹침(필드 콘솔 이름·다른 타입·콘솔 명령 포함).
+    auto rejects = [&](const DynamicVarDefinition& definition, ErrorCode code) noexcept {
+        auto registered = context.RegisterDynamic(definition);
         return !registered && registered.Error() == code;
     };
     CHECK(rejects(Define("Render.X", ConsoleValueType::Bool, ""), ErrorCode::InvalidArgument));
     CHECK(rejects(Define("render", ConsoleValueType::Bool, ""), ErrorCode::InvalidArgument));
     CHECK(rejects(Define("weather.rain", ConsoleValueType::Bool, ""), ErrorCode::InvalidArgument));
-    ConsoleSettingDefinition helpless = Define("render.helpless", ConsoleValueType::Bool, "");
+    DynamicVarDefinition helpless = Define("render.helpless", ConsoleValueType::Bool, "");
     helpless.help = {};
     CHECK(rejects(helpless, ErrorCode::InvalidArgument));
-    ConsoleSettingDefinition ranged = Define("render.ranged", ConsoleValueType::Bool, "");
+    DynamicVarDefinition ranged = Define("render.ranged", ConsoleValueType::Bool, "");
     ranged.hasRange = true;
     CHECK(rejects(ranged, ErrorCode::InvalidArgument));
+    DynamicVarDefinition inverted = Define("render.inverted", ConsoleValueType::Int32, "");
+    inverted.hasRange = true;
+    inverted.minimum = 5;
+    inverted.maximum = 1;
+    CHECK(rejects(inverted, ErrorCode::InvalidArgument));
+    // 정수 타입의 범위 끝은 정수이고 그 타입의 표현 범위 안이어야 한다(검사 값과 설명 값이 같다).
+    auto integerRange = [&](ConsoleValueType type, double minimum, double maximum) noexcept {
+        DynamicVarDefinition ranged = Define("render.int_range", type, "0");
+        ranged.hasRange = true;
+        ranged.minimum = minimum;
+        ranged.maximum = maximum;
+        return ranged;
+    };
+    CHECK(rejects(integerRange(ConsoleValueType::Int32, 0.5, 10), ErrorCode::InvalidArgument));
+    CHECK(rejects(integerRange(ConsoleValueType::Int32, 0, 3000000000.0),
+                  ErrorCode::InvalidArgument));
+    CHECK(rejects(integerRange(ConsoleValueType::Int64, 0, 1e19), ErrorCode::InvalidArgument));
+    CHECK(rejects(integerRange(ConsoleValueType::Int64, 0, 9223372036854775807.0),
+                  ErrorCode::InvalidArgument));
+    CHECK(rejects(integerRange(ConsoleValueType::Int64, -1e19, 0), ErrorCode::InvalidArgument));
+    REQUIRE(context.RegisterDynamic(
+        integerRange(ConsoleValueType::Int64, -9223372036854775808.0, 4611686018427387904.0)));
+    CHECK(
+        rejects(Define("render.clamped", ConsoleValueType::Int32, "", Flags(cvar::VarFlags::Clamp)),
+                ErrorCode::InvalidArgument));
+    DynamicVarDefinition bootCheat =
+        Define("render.boot_cheat", ConsoleValueType::Int32, "", Flags(cvar::VarFlags::Cheat));
+    bootCheat.boot = true;
+    CHECK(rejects(bootCheat, ErrorCode::InvalidArgument));
+    CHECK(
+        rejects(Define("render.untyped", ConsoleValueType::Enum, ""), ErrorCode::InvalidArgument));
     CHECK(rejects(Define("render.typo", ConsoleValueType::Int32, "x"), ErrorCode::InvalidArgument));
     CHECK(rejects(Define("render.graph.immediate", ConsoleValueType::Bool, ""),
                   ErrorCode::AlreadyExists));
+    CHECK(rejects(Define("net.max_bytes", ConsoleValueType::Int64, "5"), ErrorCode::AlreadyExists));
+    CHECK(rejects(Define("net.max_bytes", ConsoleValueType::Bool, ""), ErrorCode::TypeMismatch));
+    CHECK(rejects(Define("cvar.find", ConsoleValueType::Bool, ""), ErrorCode::AlreadyExists));
     REQUIRE(context.RegisterConsoleRegion("weather"));
-    REQUIRE(context.RegisterConsoleSetting(Define("weather.rain", ConsoleValueType::Bool, "")));
+    REQUIRE(context.RegisterDynamic(Define("weather.rain", ConsoleValueType::Bool, "")));
     CHECK(context.RegisterConsoleRegion("weather").Error() == ErrorCode::AlreadyExists);
+}
+
+// 부팅 동적 변수는 BootCVar와 같은 규칙이다(CVar 9절): 봉인 뒤 바로 쓰는 층은 BootSealed, 파일 층은
+// 재시작 대기, 봉인 뒤 snapshot은 부팅 블록 값을 읽는다. 봉인 뒤 등록한 부팅 변수도 그 값으로
+// 굳는다.
+TEST(Config_DynamicBootVariables) {
+    ConfigFixture fixture;
+    ConfigContext& context = fixture.Context();
+    DynamicVarDefinition workers = Define("game.dynamic.workers", ConsoleValueType::Int32, "4",
+                                          Flags(cvar::VarFlags::UserSetting));
+    workers.boot = true;
+    auto index = context.RegisterDynamic(workers);
+    REQUIRE(index);
+    REQUIRE(context.AddAssignment(ConfigLayer::Project, "project", "game.dynamic.workers", "6"));
+    REQUIRE(context.AddAssignment(ConfigLayer::Session, "--set", "game.dynamic.late", "9"));
+    REQUIRE(context.Sync());
+    REQUIRE(context.CompleteStartup());
+    CHECK(cvar::ReadDynamic<int32>(*context.Acquire(), index.Value(), 0) == 6);
+
+    context.Diagnostics().Clear();
+    CHECK(!context.AddAssignment(ConfigLayer::Console, "console", "game.dynamic.workers", "8"));
+    CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::BootSealed));
+    REQUIRE(context.AddAssignment(ConfigLayer::Project, "update", "game.dynamic.workers", "7"));
+    REQUIRE(context.Sync());
+    CHECK(cvar::ReadDynamic<int32>(*context.Acquire(), index.Value(), 0) == 6);
+    Array<ConfigPendingRestart> pending(fixture.system);
+    REQUIRE(context.GetPendingRestarts(pending));
+    REQUIRE(pending.Size() == 1);
+    CHECK(pending[0].name == "game.dynamic.workers" && pending[0].pending == "7");
+
+    DynamicVarDefinition late = Define("game.dynamic.late", ConsoleValueType::Int32, "1");
+    late.boot = true;
+    auto lateIndex = context.RegisterDynamic(late);
+    REQUIRE(lateIndex);
+    CHECK(cvar::ReadDynamic<int32>(*context.Acquire(), lateIndex.Value(), 0) == 9);
 }
 
 namespace {

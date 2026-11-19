@@ -190,6 +190,47 @@ struct SyncChanges {
     Span<const TypeId> settings;
 };
 
+// 이름이 실행 중에 정해지는 변수 하나의 정의다(ConfigContext::RegisterDynamic — CVar 5절). Sparks
+// 스크립트·플러그인 데이터처럼 핸들을 정적으로 둘 수 없는 변수에 쓴다. 문맥이 복사하므로 view는
+// 등록 호출 동안만 빌린다.
+//
+// 사용 예:
+//   DynamicVarDefinition pool;
+//   pool.name = "stream.pool_mb";
+//   pool.help = "Texture streaming pool size in MiB";
+//   pool.type = ConsoleValueType::Int32;
+//   pool.defaultValue = "512";
+//   pool.hasRange = true;
+//   pool.minimum = 64;
+//   pool.maximum = 8192;
+//   auto index = config.RegisterDynamic(pool);
+//   ... int32 megabytes = cvar::ReadDynamic<int32>(*config.Acquire(), index.Value(), 512);
+struct DynamicVarDefinition {
+    // 소문자 점 경로(IsConsoleSettingName), 첫 마디는 등록된 영역 이름 공간.
+    StringView name;
+    // 도움말(필수).
+    StringView help;
+    // cvar.find 분류(비어도 된다).
+    StringView category;
+    ConsoleValueType type = ConsoleValueType::Bool;
+    // Enum 타입의 리플렉션 enum ID(TypeRegistry에 등록돼 있어야 한다 — 닫힌 값 집합은 Enum이다).
+    TypeId enumType{};
+    // 코드 기본값의 콘솔 표기(`true`·`512`·`1.5`·`High`). 비어 있으면 그 타입의 0·빈 값·enum 첫
+    // 열거자다. 범위·enum에 맞아야 한다.
+    StringView defaultValue;
+    // 성질 비트(cvar::VarFlags의 Cheat·Replicated·UserSetting·ConsoleReadOnly). 부팅 변수는
+    // UserSetting만 받는다(BootCVar와 같다). 범위는 아래 칸이다.
+    uint32 flags = 0;
+    // 이번 실행 동안 고정인 부팅 변수(BootCVar와 같은 규칙 — CVar 9절)인지다.
+    bool boot = false;
+    // 수 타입(Int32·Int64·Float·Double)의 닫힌 범위다(hasRange일 때). 밖의 값은 거부한다. 끝은
+    // 유한해야 하고, 정수 타입이면 정수이고 그 타입의 표현 범위(int32 [-2^31, 2^31-1], int64
+    // [-2^63, 2^63)) 안이어야 한다.
+    bool hasRange = false;
+    double minimum = 0;
+    double maximum = 0;
+};
+
 // 다른 스레드의 콘솔 입구다(CVar 10.1·15절 — ConfigContext::MakeConsoleInputPort가 만든다). 문맥의
 // 쓰기 통로를 참조 계수로 쥐고, 문맥 상태는 건드리지 않는다(다른 스레드가 들어오는 길은 쓰기 큐
 // 하나다). 복사할 수 있고 문맥보다 오래 살아도 된다. 단 통로는 문맥의 allocator에서 왔으므로
@@ -221,6 +262,24 @@ private:
 
     SharedPtr<detail::WriteChannel> channel_;
 };
+
+namespace detail {
+
+// 프로세스 기본 문맥 경로의 관찰 지점이다(CVar 20절 CVR7 리뷰 반영 — 시험이 묶음 없는 쓰기와 문맥
+// 파괴가 겹치는 순서를 gate로 결정적으로 만든다). acquired는 묶음 없는 쓰기가 기본 문맥의 통로를
+// 얻은 뒤(잠금 밖, 큐에 넣기 전), released는 문맥 파괴가 기본 문맥을 푼 뒤(그 쓰기를 기다리기 전)
+// 부른다. 함수는 null이어도 된다. 소유 스레드에서 쓰기 스레드를 시작하기 전에 정하고, 그 스레드를
+// Join한 뒤 null로 되돌린다(그래서 경쟁이 없다).
+struct DefaultWriteProbe {
+    void (*acquired)(void* context) noexcept = nullptr;
+    void (*released)(void* context) noexcept = nullptr;
+    void* context = nullptr;
+};
+
+// 지금 관찰 지점이다(null이면 부르지 않는다 — 상수 초기화).
+inline constinit DefaultWriteProbe* ActiveDefaultWriteProbe = nullptr;
+
+} // namespace detail
 
 class ConfigContext {
 public:
@@ -403,7 +462,8 @@ public:
     // ---- 콘솔 설정·명령(Docs/Design/ConfigSystem.ko.md 5절 — 설정 CF2) ----
     //
     // 콘솔 설정은 이름 하나에 값 하나다. 설정 struct 필드의 ConsoleName(RegisterSettings가 함께
-    // 등록한다)과 독립 설정(RegisterConsoleSetting)이 한 이름 공간이고 콘솔 명령과도 겹칠 수 없다.
+    // 등록한다)과 CVar(핸들 Register·동적 변수 RegisterDynamic)가 한 이름 공간이고 콘솔 명령과도
+    // 겹칠 수 없다.
     // 값은 층 입력(branch 파일의 `Settings` 섹션, 콘솔 이름 대입)으로 들어오고 Sync에서만 바뀐다.
     // 등록 전에 들어온 이름의 값은 대기 값으로 남았다가 등록 때 넘어간다.
 
@@ -412,25 +472,29 @@ public:
     // WrongThread.
     Result<void> RegisterConsoleRegion(StringView region) noexcept;
 
-    // 독립 콘솔 설정을 등록한다. 이미 들어온 층 입력의 대기 값을 바로 검사·적용한다(거부한 값은
-    // 진단을 남기고 건너뛴다 — 등록은 성공한다). 출시 규칙의 DevelopmentOnly 설정은 등록되지만
-    // 콘솔에 보이지 않고 값은 기본값으로 고정된다.
-    // 오류: 이름 문법·영역 표에 없음·help 비어 있음·모르는 플래그·범위(minimum > maximum, 수가 아닌
-    // 종류의 범위)·enum 아닌 종류의 enumType·기본값 표기 오류 InvalidArgument, Enum 종류의
-    // enumType이 없으면 NotFound, 이름이 이미 있으면 AlreadyExists, 다른 스레드 WrongThread, 할당
-    // 실패.
-    Result<ConsoleSettingId>
-    RegisterConsoleSetting(const ConsoleSettingDefinition& definition) noexcept;
+    // 이름이 실행 중에 정해지는 변수를 등록한다(CVar 5절). 문맥이 정의를 복사해 핸들 정의와 같은
+    // 모양으로 쥐고, 번호는 핸들과 같은 프로세스 카운터에서 받으며 값은 같은 CVar 칸에 든다(층·대기
+    // 값·콘솔·dump·권한이 핸들과 같다). 이미 들어온 층 입력(대기 값)을 바로 검사·적용하고(거부한
+    // 값은 진단을 남기고 건너뛴다) 새 칸을 더한 snapshot을 바로 게시한다(Register와 같다). 번호는
+    // 이 문맥에서만 뜻이 있다. 읽기는 cvar::ReadDynamic(snapshot, 번호, fallback)이고, 게임 lane
+    // 도구는 FindConsoleSetting·ConsoleValue로 이름으로 본다.
+    // 오류: 초기화 전, 이름 문법·영역 표에 없음, 빈 help, 모르는 성질 비트(부팅 변수의 Cheat·
+    // Replicated 포함), 수가 아닌 타입의 범위·minimum > maximum·유한하지 않은 범위·정수 타입의
+    // 정수가 아니거나 표현 범위를 넘는 범위 끝, Enum과 enumType
+    // 불일치, 기본값 거부 InvalidArgument, enumType이 TypeRegistry에 없으면 그 조회 오류, 같은
+    // 이름이 이미 있으면 같은 타입 AlreadyExists·다른 타입 TypeMismatch(콘솔 명령이면
+    // AlreadyExists), 출시 빌드의 Cheat 변수 Unsupported, 다른 스레드 WrongThread, 할당 실패.
+    Result<cvar::Index> RegisterDynamic(const DynamicVarDefinition& definition) noexcept;
 
     // CVar 핸들(`CVar<T>`·`BootCVar<T>` — Config/CVar.h)을 등록한다(Docs/Design/CVarSystem.ko.md
     // 5절, VD1). 모듈 등록 함수에서 그 모듈의 핸들을 모두 넘긴다(Policy `cvar-registration`이
     // 누락을 잡는다). 핸들 번호(Index)는 처음 등록될 때 프로세스 전체에서 한 번 정해진다(문맥이
     // 여럿이어도 같은 핸들은 같은 번호). 이미 들어온 층 입력(대기 값)을 바로 검사·적용한다(거부한
     // 값은 진단을 남기고 건너뛴다 — 등록은 성공한다). 등록한 변수는 독립 콘솔 설정과 같은 이름
-    // 공간·값 저장소에 들고(FindConsoleSetting·ConsoleValue로 보인다), 등록은 바로 보인다: 기존
-    // 칸은 그대로 두고 새 칸만 더한 snapshot을 그 자리에서 게시하고 게임 lane을 다시 묶는다(VD17 —
-    // 등록 직후 같은 프레임에 `Get()`해도 된다. 등록 전에 만든 snapshot에는 칸이 없다). 출시 빌드의
-    // `Cheat()` 변수는 건너뛴다(13.1절 — 번호도 받지 않는다).
+    // 공간·값 저장소에 들고(게임 lane 도구는 FindConsoleSetting·ConsoleValue로 본다), 등록은 바로
+    // 보인다: 기존 칸은 그대로 두고 새 칸만 더한 snapshot을 그 자리에서 게시하고 게임 lane을 다시
+    // 묶는다(VD17 — 등록 직후 같은 프레임에 `Get()`해도 된다. 등록 전에 만든 snapshot에는 칸이
+    // 없다). 출시 빌드의 `Cheat()` 변수는 건너뛴다(13.1절 — 번호도 받지 않는다).
     //
     // 넘긴 핸들을 모두 검사한 뒤에 등록한다(하나라도 거부하면 아무것도 등록하지 않고 진단도 남기지
     // 않는다). 같은 핸들을 다시 넘기면(같은 호출 안 포함) 성공이다(멱등). 프리셋 묶음(CVarGroup)은
@@ -448,7 +512,7 @@ public:
     //
     // 오류: 초기화 전 InvalidArgument, 영역 표에 없는 이름의 첫 마디 InvalidArgument, 호출 스레드
     // 스택 위의 지역 핸들 InvalidArgument(Debug·Development — 핸들은 정적 저장 기간이어야 한다),
-    // 같은 이름을 다른 핸들·독립 설정·설정 struct 필드가 이미 쓰면 같은 타입 AlreadyExists·다른
+    // 같은 이름을 다른 핸들·동적 변수·설정 struct 필드가 이미 쓰면 같은 타입 AlreadyExists·다른
     // 타입 TypeMismatch, 콘솔 명령이 쓰면 AlreadyExists, Name 변수인데 문맥 Registry에 NamePool이
     // 없으면 Unsupported(pool의 오류 — ShuttingDown 등 — 는 그대로), 소유 스레드가 아니면 모든
     // 구성에서 WrongThread, 할당 실패. 호스트는 AlreadyExists·TypeMismatch를 부트 실패로 다룬다.
@@ -518,9 +582,10 @@ public:
     // 지금 네트워크 역할이다(원자 사본 — 어느 스레드에서나 부른다, 초기화 전이면 Standalone).
     NetworkRole GetNetworkRole() const noexcept;
 
-    // 서버가 복제할 값 목록이다(CVar 13.2절): `Replicated()` 변수 중 지금 값이 기본값과 다른 것을
-    // 이름 순서로 out 뒤에 붙인다(값은 콘솔 표기 — view는 다음 Sync·등록까지 유효). 오류: 초기화 전
-    // InvalidArgument, 다른 스레드 WrongThread, 할당 실패.
+    // 서버가 복제할 값 목록이다(CVar 13.2절): `Replicated()` 변수 전부(기본값인 것 포함 —
+    // 클라이언트의 다른 층 값을 서버 값이 이기게 한다)를 이름 순서로 out 뒤에 붙인다(값은 콘솔 표기
+    // — view는 다음 Sync·등록까지 유효). 오류: 초기화 전 InvalidArgument, 다른 스레드 WrongThread,
+    // 할당 실패.
     Result<void> ExportReplicated(Array<ReplicatedValue>& out) const noexcept;
 
     // 서버가 준 복제 목록을 서버 층(태그 `server`)에 넣는다(클라이언트 — 다음 Sync에 적용). 앞
@@ -557,22 +622,15 @@ public:
     // 설정 제외). view는 다음 등록까지 유효하다. 오류: 다른 스레드 WrongThread, 할당 실패.
     Result<void> CompleteConsoleName(StringView prefix, Array<StringView>& out) const noexcept;
 
-    // 콘솔 설정 값이 바뀔 때 부를 콜백을 구독한다(Sync 끝, 구독 순서대로). 오류: 모르는 이름
-    // NotFound, callback 없음 InvalidArgument, 다른 스레드 WrongThread, 할당 실패.
-    Result<ConfigSubscriptionId> Subscribe(StringView name, ConfigChangeCallback callback,
-                                           void* context) noexcept;
-
-    // 설정 struct T의 값(어느 필드든)이 바뀔 때 부를 콜백을 구독한다. 오류: Subscribe와 같다(T를
-    // 등록 하지 않았으면 NotFound).
-    template <SettingsStruct T>
-    Result<ConfigSubscriptionId> SubscribeSettings(ConfigChangeCallback callback,
-                                                   void* context) noexcept {
-        return SubscribeSection(GeneratedType<T>::Id(), callback, context);
-    }
-
-    // 구독을 끝낸다(이번 Sync의 콜백 도중이면 그 콜백 다음부터 부르지 않는다). 오류: 없는 구독
-    // NotFound, 다른 스레드 WrongThread.
-    Result<void> Unsubscribe(ConfigSubscriptionId id) noexcept;
+    // 이 문맥을 프로세스 기본 문맥으로 정한다(CVar 6.2절 — 묶음 없는 스레드의 `Set`·`Clear`·
+    // `ScopedOverride`가 이 문맥의 쓰기 큐에 간다. 읽기 `Get`은 늘 묶음이다). 프로세스에 하나이고,
+    // 문맥이 없어질 때 풀린다. 호스트(HostSettings::Initialize)가 부른다. 같은 문맥이 다시 부르면
+    // 성공이다. 문맥 파괴는 기본 문맥을 거쳐 통로를 얻은 쓰기가 끝날 때까지 기다린다(그 쓰기는
+    // ShuttingDown — 통로의 마지막 해제가 소유 스레드에서 일어난다). 기본 문맥이 없을 때의 묶음
+    // 없는 쓰기는 NotFound다. 기본 문맥을 거친 ScopedOverride는 문맥 allocator보다 먼저 끝나야
+    // 한다(ConsoleInputPort와 같다). 오류: 초기화 전 InvalidArgument, 다른 문맥이 이미 기본
+    // AlreadyExists, 다른 스레드 WrongThread.
+    Result<void> MakeProcessDefault() noexcept;
 
     // 시작이 끝났음을 알리고 부팅 값을 봉인한다(CVar 9절). 부팅 변수(BootCVar)의 지금 값을 불변
     // 부팅 블록으로 굳혀 새 snapshot으로 게시한다(봉인 뒤 snapshot의 부팅 값은 모두 같다 —
@@ -626,8 +684,6 @@ private:
     RegisterHandles(Span<const cvar::detail::VarDefinition* const> definitions) noexcept;
     Result<void> BindCommandTarget(const cvar::detail::VarDefinition& command, void* target,
                                    const void* targetType, const void* expected) noexcept;
-    Result<ConfigSubscriptionId> SubscribeSection(TypeId settings, ConfigChangeCallback callback,
-                                                  void* context) noexcept;
 
     Allocator* allocator_;
     ObjectRegistry* objects_;

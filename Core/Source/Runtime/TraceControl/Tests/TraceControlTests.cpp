@@ -21,7 +21,7 @@ namespace {
 
 TraceScopeName ControlScope{"Test.TraceControl"};
 
-// 설정 fixture에 이 모듈의 타입과 설정 struct를 더한다.
+// 설정 fixture에 이 모듈의 타입·설정 struct·핸들을 더한다.
 void PrepareTraceSettings(ConfigFixture& fixture) noexcept {
     REQUIRE(RegisterTraceControlTypes(fixture.registration));
     REQUIRE(RegisterTraceSettings(fixture.Context()));
@@ -166,7 +166,41 @@ TEST(TraceControl_ConsoleCommandsDriveSession) {
     CHECK(CountScopes(allocator, snapshot, true) == 1);
 }
 
-// 설정 섹션 Trace의 값은 세션 설정으로 옮길 때 음수를 0으로 본다.
+// 세션 값(trace.* 핸들)은 설정 층에서 오고 봉인 뒤에 읽는다(부팅 값). 범위 밖(음수·백분율 100
+// 초과)은 설정 단계에서 거부한다. 스냅샷 제한 시간만 실행 중에 바뀐다(CVar).
+TEST(TraceControl_SessionSettingsFromConfigLayers) {
+    ConfigFixture fixture;
+    PrepareTraceSettings(fixture);
+    config::ConfigContext& settings = fixture.Context();
+    CHECK(ReadTraceCaptureSettings(settings).Error() == ErrorCode::InvalidArgument);
+    REQUIRE(settings.AddAssignment(config::ConfigLayer::Session, "--set", "trace.pool.max_bytes",
+                                   "1048576"));
+    REQUIRE(settings.AddAssignment(config::ConfigLayer::Session, "--set", "trace.writer.period_ms",
+                                   "5"));
+    CHECK(
+        !settings.AddAssignment(config::ConfigLayer::Session, "--set", "trace.recent.bytes", "-1"));
+    CHECK(!settings.AddAssignment(config::ConfigLayer::Session, "--set", "trace.pool.warn_percent",
+                                  "101"));
+    REQUIRE(settings.Sync());
+    REQUIRE(settings.CompleteStartup());
+    auto read = ReadTraceCaptureSettings(settings);
+    REQUIRE(read);
+    CHECK(read.Value().poolMaxBytes == 1048576 && read.Value().writerPeriodMs == 5);
+    CHECK(read.Value().recentBytes == 4 * 1024 * 1024 && read.Value().poolWarningPercent == 80);
+    CHECK(read.Value().snapshotLockTimeoutMs == 1000);
+
+    // 봉인 뒤: 부팅 값의 콘솔 쓰기는 거부하고, 스냅샷 제한 시간은 다음 Sync에 바뀐다.
+    CHECK(!settings.AddAssignment(config::ConfigLayer::Console, "console", "trace.pool.max_bytes",
+                                  "2097152"));
+    REQUIRE(settings.AddAssignment(config::ConfigLayer::Console, "console",
+                                   "trace.snapshot.lock_timeout_ms", "250"));
+    REQUIRE(settings.Sync());
+    auto again = ReadTraceCaptureSettings(settings);
+    REQUIRE(again);
+    CHECK(again.Value().poolMaxBytes == 1048576 && again.Value().snapshotLockTimeoutMs == 250);
+}
+
+// 세션 값은 세션 설정으로 옮길 때 음수를 0으로, 너무 큰 값을 그 칸의 최대값으로 본다.
 TEST(TraceControl_SessionSettingsFromConfig) {
     SystemAllocator allocator;
     TraceCaptureSettings settings;
