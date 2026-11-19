@@ -131,4 +131,17 @@ Result<T> TryDistanceSquared(const Cylinder<T>& cylinder, const Vector3<T>& poin
     return Result<T>::Success(detail::CylinderDistanceSquared(cylinder, point));
 }
 
+// 두 segment의 최근접점이다. 평행·0 길이 segment도 처리하며 인자 순서를 바꾸면 s/t와 점만 바뀌고
+// 거리는 비트 단위로 같다. UE SegmentDistToSegmentSafe의 절대 허용 오차(1e-4) 대신 정확한 0 판정을
+// 쓴다.
+template <typename T>
+Result<SegmentClosestPoints<T>> TryClosestPoints(const Segment<T>& first,
+                                                 const Segment<T>& second) noexcept {
+    if (!first.IsValid() || !second.IsValid()) {
+        return Result<SegmentClosestPoints<T>>::Failure(ErrorCode::InvalidArgument);
+    }
+    return Result<SegmentClosestPoints<T>>::Success(
+        detail::SymmetricClosestSegmentSegment(first, second));
+}
+
 } // namespace rocks
