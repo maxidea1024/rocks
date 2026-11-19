@@ -6,7 +6,9 @@
 #include <Config/ConfigTypes.h>
 #include <Config/ConsoleSettings.h>
 #include <Config/QualityValidation.h>
+#include <Core/Containers/Array.h>
 #include <Core/Delegate.h>
+#include <Core/Lifetime/ModuleLease.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Meta/GeneratedType.h>
 #include <Meta/SettingsSchema.h>
@@ -651,6 +653,19 @@ public:
     // AlreadyExists, 다른 스레드 WrongThread.
     Result<void> MakeProcessDefault() noexcept;
 
+    // 모듈 코드 수명 토큰을 문맥이 맡는다(Docs/Design/ModuleLoader.ko.md 3.10절 MD16). 모듈의
+    // RegisterSettings가 등록한 CVar 핸들·설정 struct·콘솔 명령 정의는 그 모듈의 코드·데이터를
+    // 가리키므로, 설정 등록을 부르는 쪽(HostSettings)이 그 모듈의 lease를 여기에 맡겨 문맥이 사는
+    // 동안 모듈 코드를 붙잡는다. 맡긴 lease는 문맥이 없어질 때 등록을 모두 정리한 뒤 놓는다. 빈
+    // lease(정적 링크 코드)는 맡기지 않아도 된다. 오류: 할당 실패(lease는 놓인다). 소유
+    // 스레드에서만 부른다.
+    Result<void> RetainModule(ModuleLease lease) noexcept;
+
+    // 맡은 모듈 lease 수다(진단·시험용).
+    usize RetainedModuleCount() const noexcept {
+        return moduleLeases_.Size();
+    }
+
     // 시작이 끝났음을 알리고 부팅 값을 봉인한다(CVar 9절). 부팅 변수(BootCVar)의 지금 값을 불변
     // 부팅 블록으로 굳혀 새 snapshot으로 게시한다(봉인 뒤 snapshot의 부팅 값은 모두 같다 —
     // BootCVar::Get이 읽는다). 그 뒤로 부팅 값(StartupOnly·RestartRequired — 콘솔 설정·설정 struct
@@ -707,6 +722,9 @@ private:
     Allocator* allocator_;
     ObjectRegistry* objects_;
     ConfigContextOptions options_;
+    // RetainModule로 맡은 모듈 lease다. state_보다 먼저 선언해 나중에 소멸시킨다(등록을 모두 정리한
+    // 뒤 모듈 코드를 놓는다).
+    Array<ModuleLease> moduleLeases_;
     UniquePtr<detail::ConfigState> state_;
 };
 

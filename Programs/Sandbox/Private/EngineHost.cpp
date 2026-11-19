@@ -5,6 +5,7 @@
 #include <Core/Containers/Array.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/Memory/SystemAllocator.h>
+#include <Core/Module/ModuleEntry.h>
 #include <Core/Text/StringBuilder.h>
 #include <Engine/Engine.h>
 #include <HostConfig/HostSettings.h>
@@ -66,8 +67,10 @@ private:
 
 // 엔진을 World 하나로 frames만큼 돌린다. 실패 원인은 엔진이 한 번 기록한다(호스트는 다시 기록하지
 // 않는다).
-int RunEngine(Allocator& allocator, uint64 frames, config::ConfigContext& settings) noexcept {
+int RunEngine(Allocator& allocator, uint64 frames, config::ConfigContext& settings,
+              ModuleLoader& modules) noexcept {
     EngineConfig config;
+    config.modules = &modules;
     config.maxFrames = frames;
     config.settings = &settings;
     config.fixedFrameDeltaSeconds = HeadlessFrameSeconds;
@@ -298,9 +301,12 @@ bool CheckDeviceTraitsFromCaps(Allocator& allocator) noexcept {
 
 } // namespace
 
-int RunEngineHost(Allocator& allocator, const EngineHostOptions& options) noexcept {
+// 엔진 호스트 본문이다. modules는 이미 모든 모듈을 시작한 프로세스 로더다(RunEngineHost).
+int RunEngineHostWithModules(Allocator& allocator, const EngineHostOptions& options,
+                             ModuleLoader& modules) noexcept {
     char engineDir[4096] = {};
     HostSettingsOptions boot;
+    boot.modules = &modules;
     if (auto found = FindEngineDirectory(Span<char>(engineDir)); found) {
         boot.engineDir = StringView(engineDir, found.Value());
     } else {
@@ -369,7 +375,7 @@ int RunEngineHost(Allocator& allocator, const EngineHostOptions& options) noexce
             }
 
             // 8) 엔진 루프(프레임마다 sync 지점).
-            exitCode = RunEngine(allocator, options.frames, settings.Context());
+            exitCode = RunEngine(allocator, options.frames, settings.Context(), modules);
             // 출력 스레드에 남은 기록이 trace에 닿게 한 뒤 sink를 뺀다(trace 출력이 닫히기 전에).
             if (traceLogAdded) {
                 (void)host.System().Flush(TraceLogFlushTimeoutMilliseconds);
@@ -385,6 +391,51 @@ int RunEngineHost(Allocator& allocator, const EngineHostOptions& options) noexce
         // 멈춘 sink에 걸린 출력 스레드가 남았다. 설정 문맥·전역 소멸자·CRT 종료 처리를 돌리면 그
         // 스레드와 겹칠 수 있으므로 정리 없이 끝낸다(LogHost::Stop 설명).
         _Exit(exitCode);
+    }
+
+    return exitCode;
+}
+
+// 프로세스 모듈 로더를 만들어 모든 모듈을 시작한 뒤 엔진 호스트를 돌리고, 끝나면 모듈을 내린다
+// (Docs/Design/ModuleLoader.ko.md 3.10절 — Launch가 로더를 소유하기 전(ML1)까지 호스트가 대신한다).
+// 로더는 HostSettings(설정 문맥이 모듈 lease를 잡는다)·Engine(타입 등록기)보다 오래 산다. 내린 뒤
+// lease가 남았으면 모듈 코드를 가리키는 등록이 남은 것이므로 로더를 파괴하기 전에 기록한다(파괴의
+// Fatal은 마지막 안전장치다).
+int RunEngineHost(Allocator& allocator, const EngineHostOptions& options) noexcept {
+    // 남은 lease를 진단할 때 이름을 기록할 모듈 수의 상한이다(넘는 모듈은 수만 기록한다).
+    constexpr usize MaxLeaseReportNames = 16;
+    auto created = ModuleLoader::TryCreate(allocator, GeneratedModuleTable());
+    if (!created) {
+        Log::Error(LogSandboxHost, "The module loader could not be created: {Error}",
+                   ErrorCodeName(created.Error()));
+        return 1;
+    }
+
+    UniquePtr<ModuleLoader> modules = Move(created.Value());
+    const ModuleLoadReport started = modules->Load(ROCKS_MODULE_NAME_TEXT);
+    if (!started.IsOk()) {
+        Log::Error(LogSandboxHost, "Module {Module} failed to start ({Code}) at {Stage}: {Message}",
+                   StringView(started.failed), ModuleLoadCodeName(started.code),
+                   StringView(started.stage), StringView(started.message));
+        modules->ShutdownGroup(ModuleGroup::Process);
+        return 1;
+    }
+
+    const int exitCode = RunEngineHostWithModules(allocator, options, *modules);
+    modules->ShutdownGroup(ModuleGroup::Process);
+    StringView holders[MaxLeaseReportNames];
+    const usize leftover = modules->ModulesWithLeases(Span<StringView>(holders));
+    for (usize index = 0; index < leftover && index < MaxLeaseReportNames; ++index) {
+        Log::Error(LogSandboxHost,
+                   "Module {Module} still has code leases after shutdown; a registration that "
+                   "points at its code was not released",
+                   holders[index]);
+    }
+
+    if (leftover > MaxLeaseReportNames) {
+        Log::Error(LogSandboxHost,
+                   "{Count} more modules still have code leases after shutdown (names not listed)",
+                   leftover - MaxLeaseReportNames);
     }
 
     return exitCode;

@@ -40,7 +40,7 @@ internal static class MetadataLayoutTests
         Require(Directory.Exists(a.GeneratedPublic) && a.Descriptor.EndsWith(Path.Combine("Metadata", "A.rocksmeta.json"), StringComparison.Ordinal),
             "generated directory or descriptor path");
         // 모듈 생성 소스는 <out>/Generated/<모듈>/Source/<모듈>.module.generated.cpp이고 손으로 쓴 Sources가 아니라 리플렉션 생성 소스
-        // 목록에 든다(모듈 진입점 판정에서 빠진다). Source는 include 루트가 아니다. Metadata가 없는 모듈은 생성 소스가 없다.
+        // 목록에 든다(진입점의 자기 타입 표지를 정한다). Source는 include 루트가 아니다. Metadata가 없는 모듈은 생성 소스가 없다.
         string moduleSource = fixture.Path("out/Generated/A/Source/A.module.generated.cpp");
         Require(a.GeneratedSource == fixture.Path("out/Generated/A/Source") && a.ModuleSource == moduleSource &&
             updated.ReflectionSources.SequenceEqual([moduleSource]) && updated.Sources.Count == 0,
@@ -48,6 +48,19 @@ internal static class MetadataLayoutTests
         Require(!updated.PublicIncludeDirectories.Concat(updated.PrivateIncludeDirectories).Contains(a.GeneratedSource),
             "the generated source directory must not be an include root");
         Require(plan.Modules.Single(module => module.Name == "B").ReflectionSources.Count == 0, "a module without Metadata got a reflection source");
+        // 모듈 표 제공 모듈에 닿지 않으면 진입점 모듈이 아니므로 진입점 TU가 없다(빌드가 ROCKS_MODULE_NAME을 정의하지 않는다).
+        Require(updated.GeneratedSources.Count == 0, "a metadata module outside the module table got an entry point source");
+        // 모듈 표 제공 모듈에 닿고 손으로 쓴 소스가 없는 메타데이터 모듈은 진입점 TU를 받는다(Docs/Design/ModuleLoader.ko.md 3.10절).
+        // 손으로 쓴 소스가 있는 메타데이터 모듈은 자기 소스에 진입점을 둔다.
+        NativeModuleInput provider = new() { Name = "Core", ProvidesModuleTable = true };
+        NativeModuleInput withSources = fixture.Module("A", ["Shared/Thing.h", "Hidden.h"], dependencies: ["Core"]) with { Sources = [fixture.Path("A/a.cpp")] };
+        MetadataPlan entryPlan = MetadataLayout.Apply(fixture.Context, [fixture.Module("A", ["Shared/Thing.h", "Hidden.h"], dependencies: ["Core"]), provider], ["A"]);
+        NativeGeneratedSource entry = entryPlan.Modules.Single(module => module.Name == "A").GeneratedSources.Single();
+        Require(entry.FileName == "A" + MetadataLayout.ModuleEntrySuffix &&
+            entry.Content.Contains("ROCKS_IMPLEMENT_MODULE(rocks::DefaultModuleImplementation, A)", StringComparison.Ordinal),
+            "a metadata module without hand-written sources did not get its entry point source: " + entry.FileName);
+        Require(MetadataLayout.Apply(fixture.Context, [withSources, provider], ["A"]).Modules.Single(module => module.Name == "A").GeneratedSources.Count == 0,
+            "a metadata module with hand-written sources got a generated entry point");
         Expect("unknown module 'Missing'", () => MetadataLayout.Apply(fixture.Context, [fixture.Module("C", [], dependencies: ["Missing"])], ["C"]));
     }
 
