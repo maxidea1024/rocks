@@ -73,12 +73,14 @@ bool AllowedLoadError(ErrorCode error) noexcept {
 
 } // namespace
 
+// 쿠킹(Zstd bulk·Soft·하위 객체)과 에디터(EditorOnly 필드·EditorOnly bulk·EditorOnly Hard·Build·
+// ImportOwner 의존·읽기 전용 부분집합 경로) 패키지를 각각 4000번 변조한다. reader에는 등록 저장소
+// (types)를 넘겨 타입 버전 축까지 닿게 하고, 거부(읽기·로드)와 받아들임이 모두 일어나는지 본다.
 TEST(AssetPackage_FixedSeedMutationFuzz) {
     AssetEnv env;
     REQUIRE(env.Ready());
     ObjectRegistry& source = *env.source;
     const ObjectAccessContext access = source.OwnerAccess();
-    // 피해 대상: 하위 객체·import·Soft 의존·bulk(Zstd)·값 묶음을 가진 패키지.
     auto dependency = NewPackage(source, access, FixedId(201), PackageKind::Cooked);
     auto package = NewPackage(source, access, FixedId(200), PackageKind::Cooked);
     REQUIRE(dependency && package);
@@ -91,22 +93,34 @@ TEST(AssetPackage_FixedSeedMutationFuzz) {
     TestAsset* pointer = Pointer<TestAsset>(source, asset);
     Array<uint8> pixels(env.allocator);
     FillCompressible(pixels, 3000, 1);
+    Array<uint8> original(env.allocator);
+    FillIncompressible(original, 200, 2);
     TestBulkSource bulk;
     pointer->pixels = bulk.Add(1, pixels.View());
+    pointer->source = bulk.Add(2, original.View());
     pointer->value = 77;
     REQUIRE(pointer->label.TryAssign("fuzz"));
+    REQUIRE(pointer->note.TryAssign("editor only"));
     REQUIRE(pointer->soft.TryAssign(FixedId(202), "Sub"));
     REQUIRE(source.SetReference(access, asset, pointer->hard, target));
+    REQUIRE(source.SetReference(access, asset, pointer->editorRef, target));
     REQUIRE(WithBorrow<TestAsset>(source, asset, [&](TestAsset& owner) {
         return source.AddReference(access, asset, owner.hardList, part).IsOk();
     }));
-    PackageWriteOptions options = CookedOptions();
-    options.bulkSource = &bulk;
-    options.bulkCodec = BulkCodec::Zstd;
-    const Array<uint8> valid = Write(env.allocator, source, package.Value().Handle(), options);
+    PackageWriteOptions cooked = CookedOptions();
+    cooked.bulkSource = &bulk;
+    cooked.bulkCodec = BulkCodec::Zstd;
+    const PackageDependencyEntry extra[] = {
+        {FixedId(203), PackageDependencyKind::Build, TypeId{}, false},
+        {FixedId(204), PackageDependencyKind::ImportOwner, TypeId{}, true}};
+    PackageWriteOptions editor = EditorOptions();
+    editor.bulkSource = &bulk;
+    editor.extraDependencies = extra;
+    const Array<uint8> validCooked = Write(env.allocator, source, package.Value().Handle(), cooked);
+    const Array<uint8> validEditor = Write(env.allocator, source, package.Value().Handle(), editor);
     Array<uint8> dependencyBytes =
         Write(env.allocator, source, dependency.Value().Handle(), CookedOptions());
-    REQUIRE(!valid.IsEmpty() && !dependencyBytes.IsEmpty());
+    REQUIRE(!validCooked.IsEmpty() && !validEditor.IsEmpty() && !dependencyBytes.IsEmpty());
 
     TestResolver resolver;
     RootRef<Object> dependencyRoot;
@@ -120,67 +134,80 @@ TEST(AssetPackage_FixedSeedMutationFuzz) {
     }
 
     const uint32 baseline = env.target->Stats().liveObjects;
-    XorShift random{0x5EEDF00DCAFEull};
-    uint32 readFailures = 0;
-    uint32 loadFailures = 0;
-    uint32 accepted = 0;
-    constexpr uint32 Iterations = 4000;
-    for (uint32 iteration = 0; iteration < Iterations; ++iteration) {
-        Array<uint8> bytes = Copy(env.allocator, valid.View());
-        const uint32 edits = 1 + static_cast<uint32>(random.Next() % 4);
-        for (uint32 edit = 0; edit < edits; ++edit) {
-            const usize at = static_cast<usize>(random.Next() % bytes.Size());
-            bytes[at] = static_cast<uint8>(random.Next());
+    auto fuzz = [&](const Array<uint8>& valid, PackageKind kind, uint64 seed) noexcept {
+        XorShift random{seed};
+        uint32 readFailures = 0;
+        uint32 loadFailures = 0;
+        uint32 accepted = 0;
+        constexpr uint32 Iterations = 4000;
+        for (uint32 iteration = 0; iteration < Iterations; ++iteration) {
+            Array<uint8> bytes = Copy(env.allocator, valid.View());
+            const uint32 edits = 1 + static_cast<uint32>(random.Next() % 4);
+            for (uint32 edit = 0; edit < edits; ++edit) {
+                const usize at = static_cast<usize>(random.Next() % bytes.Size());
+                bytes[at] = static_cast<uint8>(random.Next());
+            }
+
+            // 일부는 잘라 낸다(Stat 크기 불일치·짧은 입력).
+            if (random.Next() % 16 == 0) {
+                (void)bytes.TryResize(static_cast<usize>(random.Next() % bytes.Size()));
+            }
+
+            if (iteration % 2 == 1) {
+                FixAllCrcs(bytes);
+            }
+
+            PackageReadOptions read;
+            read.expectedKind = kind;
+            read.engineVersion = TestEngineVersion;
+            read.types = &env.types;
+            AssetDiagnostic readFailure;
+            auto contents = ReadPackage(env.allocator, bytes.View(), read, &readFailure);
+            if (!contents) {
+                ++readFailures;
+                CHECK(AllowedReadError(contents.Error(), readFailure.code));
+                continue;
+            }
+
+            // bulk raw 합 상한을 작게 둔다(변조된 rawBytes가 큰 할당을 요구하면 자원 한도
+            // CapacityExceeded).
+            PackageLoadOptions loadOptions = LoadOptions(kind);
+            loadOptions.maxBulkRawBytes = 64 * 1024 * 1024;
+            PackageLoadState state(env.allocator, *env.target, env.types, env.target->OwnerAccess(),
+                                   loadOptions);
+            AssetDiagnostic loadFailure;
+            auto prepared = state.Prepare(Move(bytes), &loadFailure);
+            if (prepared) {
+                ConstructionContext transaction(*env.target, env.target->OwnerAccess());
+                PackageLoadState* states[] = {&state};
+                ObjectHandle handles[1];
+                prepared =
+                    InstantiatePackages(transaction, states, &resolver, handles, &loadFailure);
+                // 성공해도 공개하지 않는다(Rollback — Registry가 기준선으로 돌아오는지 본다).
+                transaction.Rollback();
+            }
+
+            if (!prepared) {
+                ++loadFailures;
+                CHECK(AllowedLoadError(prepared.Error()));
+                // 자원 한도(CapacityExceeded)가 아니면 에셋 진단 분류가 붙는다.
+                CHECK(loadFailure.code != AssetDiagnosticCode::None ||
+                      prepared.Error() == ErrorCode::CapacityExceeded);
+                CHECK(loadFailure.error == prepared.Error());
+            } else {
+                ++accepted;
+            }
         }
 
-        // 일부는 잘라 낸다(Stat 크기 불일치·짧은 입력).
-        if (random.Next() % 16 == 0) {
-            (void)bytes.TryResize(static_cast<usize>(random.Next() % bytes.Size()));
-        }
+        // 변조 대부분은 거부되고 받아들인 입력(값 byte만 바뀐 경우)도 객체를 남기지 않는다. 읽기
+        // 거부·로드 거부·받아들임이 모두 일어나야 세 경로를 다 지난 것이다.
+        CHECK(readFailures + loadFailures + accepted == Iterations);
+        CHECK(readFailures > Iterations / 2);
+        CHECK(loadFailures > 0);
+        CHECK(accepted > 0);
+        CHECK(env.target->Stats().liveObjects == baseline);
+    };
 
-        if (iteration % 2 == 1) {
-            FixAllCrcs(bytes);
-        }
-
-        AssetDiagnostic readFailure;
-        auto read = ReadPackage(env.allocator, bytes.View(), PackageReadOptions{}, &readFailure);
-        if (!read) {
-            ++readFailures;
-            CHECK(AllowedReadError(read.Error(), readFailure.code));
-            continue;
-        }
-
-        // bulk raw 합 상한을 작게 둔다(변조된 rawBytes가 큰 할당을 요구하면 자원 한도
-        // CapacityExceeded).
-        PackageLoadOptions loadOptions = LoadOptions(PackageKind::Cooked);
-        loadOptions.maxBulkRawBytes = 64 * 1024 * 1024;
-        PackageLoadState state(env.allocator, *env.target, env.types, env.target->OwnerAccess(),
-                               loadOptions);
-        AssetDiagnostic loadFailure;
-        auto prepared = state.Prepare(Move(bytes), &loadFailure);
-        if (prepared) {
-            ConstructionContext transaction(*env.target, env.target->OwnerAccess());
-            PackageLoadState* states[] = {&state};
-            ObjectHandle handles[1];
-            prepared = InstantiatePackages(transaction, states, &resolver, handles, &loadFailure);
-            // 성공해도 공개하지 않는다(Rollback — Registry가 기준선으로 돌아오는지 아래에서 본다).
-            transaction.Rollback();
-        }
-
-        if (!prepared) {
-            ++loadFailures;
-            CHECK(AllowedLoadError(prepared.Error()));
-            // 자원 한도(CapacityExceeded)가 아니면 에셋 진단 분류가 붙는다.
-            CHECK(loadFailure.code != AssetDiagnosticCode::None ||
-                  prepared.Error() == ErrorCode::CapacityExceeded);
-            CHECK(loadFailure.error == prepared.Error());
-        } else {
-            ++accepted;
-        }
-    }
-
-    // 변조 대부분은 거부되고, 받아들인 입력(값 byte만 바뀐 경우)도 객체를 남기지 않는다.
-    CHECK(readFailures + loadFailures + accepted == Iterations);
-    CHECK(readFailures > Iterations / 2);
-    CHECK(env.target->Stats().liveObjects == baseline);
+    fuzz(validCooked, PackageKind::Cooked, 0x5EEDF00DCAFEull);
+    fuzz(validEditor, PackageKind::Editor, 0xED170A5EEDull);
 }

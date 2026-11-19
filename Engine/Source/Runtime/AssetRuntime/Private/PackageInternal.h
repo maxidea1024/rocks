@@ -2,12 +2,11 @@
 
 #include <AssetRuntime/PackageReader.h>
 #include <Base/Endian.h>
-#include <Core/Text/String.h>
 #include <Core/Text/StringView.h>
-#include <Object/ObjectIdentity.h>
 
 // 패키지 writer·reader·로드가 같이 쓰는 내부 정의다: Summary Record 스키마·필드 ID, 정렬·비교
-// 도우미, Dependencies 합성 규칙(writer와 로드 대조가 같은 함수를 써서 규칙이 갈라지지 않게 한다).
+// 도우미, Dependencies 합성 규칙(writer와 로드 대조가 같은 함수를 써서 규칙이 갈라지지 않게 한다),
+// BulkDataRef 빈 값 규칙.
 namespace rocks::package_detail {
 
 // Summary Record 스키마와 필드 ID다(AS 5.2절 Summary). 값은 포맷의 일부라 바꾸지 않는다.
@@ -75,6 +74,23 @@ struct DependencyUse {
 Result<void> MergeDependencyUses(Allocator& scratch, Span<const DependencyUse> uses, AssetId self,
                                  Array<PackageDependencyEntry>& out) noexcept;
 
+// 빈 BulkDataRef(bulkId 0)는 rawBytes 0·SHA-256 0이어야 한다(AS 5.7절 14 — writer는 저장을,
+// 로드는 Objects 손상으로 거부한다).
+// 호출자는 빈 ref(bulkId 0)에만 부른다.
+inline bool IsMalformedEmptyBulkRef(uint64 rawBytes, const Sha256Digest& sha256) noexcept {
+    if (rawBytes != 0) {
+        return true;
+    }
+
+    for (uint8 value : sha256.bytes) {
+        if (value != 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // (assetId, kind) 정렬 비교다.
 inline bool DependencyLess(const PackageDependencyEntry& left,
                            const PackageDependencyEntry& right) noexcept {
@@ -83,44 +99,6 @@ inline bool DependencyLess(const PackageDependencyEntry& left,
     }
 
     return static_cast<uint32>(left.kind) < static_cast<uint32>(right.kind);
-}
-
-// import i의 객체 경로를 만든다(대표 에셋은 빈 경로).
-inline Result<void> ImportPathOf(Span<const PackageImportEntry> imports, usize position,
-                                 String& out) noexcept {
-    usize depth = 0;
-    for (usize cursor = position;;) {
-        ++depth;
-        if (imports[cursor].outerImportIndex == 0) {
-            break;
-        }
-
-        cursor = imports[cursor].outerImportIndex - 1;
-    }
-
-    out.Clear();
-    for (usize level = depth; level > 0; --level) {
-        usize cursor = position;
-        for (usize step = 1; step < level; ++step) {
-            cursor = imports[cursor].outerImportIndex - 1;
-        }
-
-        if (level != depth && imports[cursor].name.ByteCount() != 0) {
-            if (auto dot = out.TryAppend(StringView(".")); !dot) {
-                return dot;
-            }
-        }
-
-        if (auto appended = out.TryAppend(imports[cursor].name); !appended) {
-            return appended;
-        }
-
-        if (out.ByteCount() > MaxObjectPathBytes) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
-        }
-    }
-
-    return Result<void>::Success();
 }
 
 } // namespace rocks::package_detail

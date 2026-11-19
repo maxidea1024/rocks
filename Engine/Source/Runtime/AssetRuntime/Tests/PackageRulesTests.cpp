@@ -51,17 +51,20 @@ TEST(AssetPackage_MergeDependencyUsesRules) {
         {FixedId(902), true, true, false},
         // 904: soft EditorOnly만 → EditorOnly. 자기·null은 빠진다.
         {FixedId(904), false, true, false},
+        // 905: hard EditorOnly(required) + soft EditorOnly → EditorOnly(required — hard 쪽에서).
+        {FixedId(905), true, true, true},
+        {FixedId(905), false, true, false},
         {self, true, false, true},
         {AssetId{}, false, false, false}};
     Array<PackageDependencyEntry> merged(allocator);
     REQUIRE(package_detail::MergeDependencyUses(allocator, uses, self, merged));
     merged.Sort(package_detail::DependencyLess);
-    const PackageDependencyEntry expected[] = {
-        Entry(901, PackageDependencyKind::EditorOnly, true),
-        Entry(902, PackageDependencyKind::Soft, true),
-        Entry(902, PackageDependencyKind::EditorOnly, false),
-        Entry(903, PackageDependencyKind::Hard, false),
-        Entry(904, PackageDependencyKind::EditorOnly, false)};
+    const PackageDependencyEntry expected[] = {Entry(901, PackageDependencyKind::EditorOnly, true),
+                                               Entry(902, PackageDependencyKind::Soft, true),
+                                               Entry(902, PackageDependencyKind::EditorOnly, false),
+                                               Entry(903, PackageDependencyKind::Hard, false),
+                                               Entry(904, PackageDependencyKind::EditorOnly, false),
+                                               Entry(905, PackageDependencyKind::EditorOnly, true)};
     CHECK(SameEntries(merged.View(), expected));
     // 빈 입력은 빈 결과다.
     Array<PackageDependencyEntry> empty(allocator);
@@ -126,7 +129,7 @@ TEST(AssetPackage_ImportOwnerDependencyIsNotCrossChecked) {
     CHECK(state.Contents().dependencies[1].kind == PackageDependencyKind::ImportOwner);
     CHECK(state.Contents().dependencies[1].required);
     CHECK(!state.IsReadOnly());
-    CHECK(state.ImportPath(0).ByteCount() == 0);
+
     CHECK(state.Stage().Nodes().IsEmpty());
 }
 

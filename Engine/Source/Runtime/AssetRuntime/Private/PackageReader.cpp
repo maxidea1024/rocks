@@ -3,6 +3,8 @@
 #include <AssetRuntime/PackageReader.h>
 #include <Compression/Compression.h>
 #include <Core/Encoding/Crc32.h>
+#include <Core/Text/NameComponent.h>
+#include <Object/ObjectIdentity.h>
 #include <Object/TypeRegistry.h>
 #include <Serialization/Record.h>
 #include <Serialization/RecordList.h>
@@ -129,9 +131,8 @@ Result<void> ReadVersionList(const RecordReader& parent, const FieldView& field,
         Entry entry;
         entry.type = id.Value();
         entry.version = version.Value();
-        if (auto pushed = out.TryPushBack(entry); !pushed) {
-            return pushed;
-        }
+        // 항목 수만큼 위에서 예약했다.
+        (void)out.TryPushBack(entry);
     }
 
     return Result<void>::Success();
@@ -420,12 +421,32 @@ Result<void> ReadImports(Span<const uint8> bytes, PackageContents& contents) noe
     return Result<void>::Success();
 }
 
-// import 표를 검증한다: 에셋 null·자기 에셋 금지, outer import는 자기보다 앞·같은 에셋·이름 있는
-// 항목, outer가 있으면 이름 있음, 타입 0 아님, (assetId, 객체 경로) 엄격 오름차순.
+// import 표를 검증한다(AS 5.1절 유일성, 5.2절 순서, 5.7절 13): 에셋 null·자기 에셋 금지, 타입 0
+// 아님, 이름은 비었거나(outer 0인 대표 에셋 항목) 객체 이름 규칙(ValidateNameComponent — UTF-8 NFC,
+// 1–64 byte, 허용 문자)을 지킨다, outer import는 자기보다 앞·같은 에셋·이름 있는 항목이고 outer가
+// 있으면 이름 있음, 객체 경로(outer 경로 + '.' + 이름)는 MaxObjectPathBytes 이하, 순서는 assetId
+// 오름차순이고 같은 에셋 안은 깊이 우선(outer는 바로 앞 항목이거나 그 outer 사슬의 항목, 또는
+// 0)이며 같은 outer 아래 이름은 byte 엄격 오름차순(중복 없음 — 대표 에셋 항목은 빈 이름이라 그
+// 에셋의 첫 항목)이다. 항목 수에 비례한다(경로를 만들지 않고 길이만 이어 센다).
 Result<uint64> ValidateImports(Allocator& allocator, const PackageContents& contents) noexcept {
     const Array<PackageImportEntry>& imports = contents.imports;
-    String previous(allocator);
-    String current(allocator);
+    // 깊이 우선 경로(import 번호 — 0은 에셋의 대표 에셋 자리, 그 아래 마지막 자식 이름)다.
+    struct PathFrame {
+        uint32 index = 0;
+        StringView lastChild{};
+        bool hasChild = false;
+    };
+
+    Array<PathFrame> path(allocator);
+    Array<uint32> pathBytes(allocator);
+    if (auto reserved = path.TryReserve(imports.Size() + 1); !reserved) {
+        return Result<uint64>::Failure(reserved.Error());
+    }
+
+    if (auto resized = pathBytes.TryResize(imports.Size()); !resized) {
+        return Result<uint64>::Failure(resized.Error());
+    }
+
     for (usize position = 0; position < imports.Size(); ++position) {
         const PackageImportEntry& entry = imports[position];
         if (entry.asset.IsNull() || entry.asset == contents.header.assetId ||
@@ -441,29 +462,47 @@ Result<uint64> ValidateImports(Allocator& allocator, const PackageContents& cont
             }
         }
 
-        if (auto built = ImportPathOf(imports.View(), position, current); !built) {
-            return Result<uint64>::Failure(built.Error() == ErrorCode::OutOfMemory
-                                               ? ErrorCode::OutOfMemory
-                                               : ErrorCode::InvalidArgument);
+        if (entry.name.ByteCount() != 0) {
+            if (auto valid = ValidateNameComponent(entry.name, allocator); !valid) {
+                return Result<uint64>::Failure(valid.Error());
+            }
         }
 
-        if (position > 0) {
-            const PackageImportEntry& before = imports[position - 1];
-            bool ordered = false;
-            if (before.asset.value != entry.asset.value) {
-                ordered = GuidLess(before.asset.value, entry.asset.value);
-            } else {
-                ordered = BytesLess(previous.View(), current.View());
-            }
-
-            if (!ordered) {
+        // 에셋이 바뀌면 더 큰 assetId여야 하고 깊이 우선 경로는 대표 에셋 자리에서 다시 시작한다.
+        if (position == 0 || !(imports[position - 1].asset == entry.asset)) {
+            if (position > 0 && !GuidLess(imports[position - 1].asset.value, entry.asset.value)) {
                 return Result<uint64>::Failure(ErrorCode::InvalidArgument);
             }
+
+            path.Clear();
+            (void)path.TryPushBack(PathFrame{});
         }
 
-        if (auto copied = previous.TryAssign(current.View()); !copied) {
-            return Result<uint64>::Failure(copied.Error());
+        while (!path.IsEmpty() && path[path.Size() - 1].index != entry.outerImportIndex) {
+            (void)path.TryPopBack();
         }
+
+        if (path.IsEmpty()) {
+            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        PathFrame& parent = path[path.Size() - 1];
+        if (parent.hasChild && !BytesLess(parent.lastChild, entry.name)) {
+            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        parent.hasChild = true;
+        parent.lastChild = entry.name;
+        (void)path.TryPushBack(PathFrame{static_cast<uint32>(position + 1), {}, false});
+        // 이름은 64 byte 이하라 길이 합은 넘치지 않는다(경로 상한에서 멈춘다).
+        const usize bytes = entry.outerImportIndex == 0 ? entry.name.ByteCount()
+                                                        : pathBytes[entry.outerImportIndex - 1] +
+                                                              1 + entry.name.ByteCount();
+        if (bytes > MaxObjectPathBytes) {
+            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        pathBytes[position] = static_cast<uint32>(bytes);
     }
 
     return Result<uint64>::Success(0);
@@ -530,8 +569,9 @@ Result<uint64> ValidateDependencies(const PackageContents& contents) noexcept {
             return Result<uint64>::Failure(ErrorCode::InvalidArgument);
         }
 
-        // Hard만 expectedType을 가진다(writer 규칙).
-        if (entry.kind != PackageDependencyKind::Hard && entry.expectedType != TypeId{}) {
+        // Hard만 expectedType을 가지고 Hard는 반드시 가진다(writer 규칙 — 대상 대표 에셋 타입, AS
+        // 5.7절 5·14).
+        if ((entry.kind == PackageDependencyKind::Hard) != (entry.expectedType != TypeId{})) {
             return Result<uint64>::Failure(ErrorCode::InvalidArgument);
         }
 
@@ -612,8 +652,8 @@ Result<uint64> ValidateBulk(const PackageContents& contents) noexcept {
             (entry.flags & ~static_cast<uint32>(BulkEntryFlags::EditorOnly)) != 0 ||
             (contents.header.kind == PackageKind::Cooked && entry.flags != 0) ||
             (entry.codec == BulkCodec::None && entry.storedBytes != entry.rawBytes) ||
-            entry.storedBytes > contents.bulk.Size() - entry.offset ||
-            entry.offset > contents.bulk.Size()) {
+            entry.offset > contents.bulk.Size() ||
+            entry.storedBytes > contents.bulk.Size() - entry.offset) {
             return Result<uint64>::Failure(ErrorCode::InvalidArgument);
         }
 

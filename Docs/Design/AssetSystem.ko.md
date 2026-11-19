@@ -150,7 +150,7 @@ offset size 필드
 - export와 참조 표기:
   - export 집합은 Outer 체인이 이 패키지에 닿는 모든 객체다(Outer 표에서 정한다 — 참조 순회로 정하지 않는다). 저장 불가 객체(클래스가 Transient·Deprecated인 객체와 그 부분 트리)는 `IsUnsaveableObject`로 걸러 빼고, 그 객체를 가리키는 참조는 null + 진단으로 저장한다(graph 저장 정책 Exclude — [리플렉션 B9](ReflectionExtensions.ko.md) 9.2절). 패키지 정책 Registry의 자식 고리가 소속 객체를 붙잡으므로 이 집합은 GC 시점과 무관하다([ObjectFoundations](ObjectFoundations.ko.md) 1.7절). export index는 1부터(0 = 패키지 자신). 저장 순서는 대표 에셋, 이후 Outer 깊이 우선이며 같은 Outer 안은 이름 순(4.2절 정렬)이다. writer가 이 순서를 정해(`CollectInners(DepthFirst)`) graph v2에 넘기고 graph v2의 localId k = export k다. graph v2 노드 표의 outer 0은 Exports outerIndex 0과 같이 패키지(기준 Outer)다(A0-O — ObjectFoundations 5.1절).
   - export 표의 유일성: export 1이 대표 에셋이고 그것만 Primary 표시·빈 이름·outerIndex 0을 가진다. 나머지 export는 outerIndex ≥ 1(자기 index보다 작다)이고 같은 Outer 안에서 이름이 유일하다. 위반은 `CorruptPackage`.
-  - object import 표의 유일성: outerImportIndex가 0이 아니면 자기 index보다 작고 같은 assetId의 항목을 가리켜야 하며, (assetId, 객체 경로)는 중복되지 않는다. 위반은 `CorruptPackage`.
+  - object import 표의 유일성: outerImportIndex가 0이 아니면 자기 index보다 작고 같은 assetId의 이름 있는 항목을 가리켜야 하며, 5.2절 순서(같은 outer 아래 이름 엄격 오름차순)가 (assetId, 객체 경로)의 중복을 막는다. 위반은 `CorruptPackage`.
   - WeakObjectRef 필드는 같은 패키지(그래프) 안 대상만 보존하고 밖 대상은 null + 진단으로 저장한다(weak import 없음 — ReflectionExtensions 5.1절).
   - 패키지 밖 객체로의 참조는 object import다. 다른 패키지에 속하면 import, 어떤 패키지에도 속하지 않으면 저장을 `UnpackagedReference`로 거부한다.
   - Objects 섹션의 참조 값(u32): 0 = null, 1–0x7FFFFFFF = export index, 0x80000000 | i = object import index i(1부터). export 수·import 수를 넘는 값과 0x80000000(i = 0)은 `CorruptPackage`. Exports의 outerIndex도 export index다(0 = 패키지).
@@ -163,7 +163,7 @@ offset size 필드
 |---|---|---|---|---|---|
 | Summary(1) | Record: 타입 스키마 버전 표(TypeId → 버전, TypeId 정렬 — 클래스 행에는 저장 당시 클래스 기본값 레코드 지문 열, A5, RuntimeClassMetadata '클래스 기본값 결정'), 커스텀 버전(Guid → u32), Editor면 savedByEngineVersion(주·부·패치)·compatibleWithEngineVersion(주·부·0, 5.3절 — 쿠킹 패키지에는 없다), Cooked면 프로파일 id·프로파일 출력 설정 SHA-256·쿠커 버전 | Required | 항상 있음 | ○ | ○ |
 | Exports(2) | `{ name(대표는 빈 문자열), typeId, outerIndex, flags(Primary·EditorOnly) }` | Required | 항상 있음 | ○ | ○(EditorOnly 제외) |
-| ObjectImports(3) | `{ assetId, outerImportIndex(0 = 그 패키지의 대표 에셋을 Outer로 하는 경로의 시작), name(빈 이름 = 대표 에셋), typeId }`. 깊은 하위 객체는 outer import를 거쳐 객체 경로를 이룬다(UE import 표와 같은 방식). (assetId, 객체 경로) 순 정렬, 중복 금지 | Required | 생략 | ○ | ○ |
+| ObjectImports(3) | `{ assetId, outerImportIndex(0 = 그 패키지의 대표 에셋을 Outer로 하는 경로의 시작), name(빈 이름 = 대표 에셋), typeId }`. 깊은 하위 객체는 outer import를 거쳐 객체 경로를 이룬다(UE import 표와 같은 방식). 순서: assetId 오름차순, 같은 에셋 안은 깊이 우선(outer는 바로 앞 항목이거나 그 outer 사슬의 항목, 또는 0)이고 같은 outer 아래 이름은 byte 엄격 오름차순(중복 금지 — 대표 에셋 항목은 빈 이름이라 그 에셋의 첫 항목). 이름은 객체 이름 규칙(4.2절 구성 요소)을 따르고 객체 경로는 4 KiB 이하(5.7절 13) | Required | 생략 | ○ | ○ |
 | Dependencies(4) | `{ assetId, kind(Hard·Soft·EditorOnly·Build·ImportOwner), expectedTypeId, required }` (assetId, kind) 정렬·중복 제거. Hard·Soft·EditorOnly는 저장 결과의 외부 참조 목록(A0-O)에서, Build는 저장 전에 호출한 `DependencyDeclarer`(16.2절)가 준 목록에서, ImportOwner는 ImportRecord `ownerAssetId`(자기 자신이 아니면)에서 만든다. 로드 때 Hard·Soft·EditorOnly는 Objects 디코딩 결과와, ImportOwner는 ImportRecord와 대조하며(Build는 대조하지 않음) 불일치는 `CorruptPackage` | Required | 생략 | ○ | ○(EditorOnly·Build·ImportOwner 제외) |
 | Objects(5) | ObjectSerialization graph v2 바이트 | Required | 항상 있음 | ○ | ○ |
 | ImportRecord(6) | Import Metadata(5.4절) | — | 생략(임포트하지 않은 에셋) | ○ | × |
@@ -238,6 +238,19 @@ A1a 구현(`Engine/Source/Runtime/AssetRuntime` — `PackageFormat.h`·`PackageW
 10. **로드 단계 나눔**: `PackageLoadState`(소유 스레드에서 생성 → `Prepare`는 어느 스레드: 헤더·표·섹션 검증, bulk 해제·SHA-256, graph 1단계, 저장 버전·BulkDataRef·Dependencies 대조) → `InstantiatePackages`(소유 스레드, SCC 묶음 한 트랜잭션: Package·노드 생성 → import 해석 → 적용 → Required → id·bulk 설정) → 호출자 Commit. 묶음 밖 import는 `PackageImportResolver`가 찾는다.
 11. **bulk 해제 메모리 상한(설계 메모)**: `DecodePackageBulk`는 BulkIndex의 rawBytes 합만큼 출력 버퍼를 먼저 잡은 뒤 entry마다 풀고 SHA-256을 대조한다. codec None은 stored = raw이고 stored가 파일 안에 있어야 하므로 raw가 파일 크기를 넘지 못한다. Zstd entry는 손상된 rawBytes가 작은 stored로 큰 할당을 요구할 수 있으므로 합의 상한 `PackageLoadOptions::maxBulkRawBytes`(넘으면 `CapacityExceeded` — 자원 한도라 손상이 아니다)가 그 할당을 묶는다. 기본값 16 GiB는 시험·도구용 상한이고, 런타임 로더(A1c)는 매니페스트의 패키지 크기와 11.5절 1번의 임시 버퍼 예산으로 로드 작업마다 이 값을 정한다(예산을 넘는 패키지는 대기 — 같은 절). Zstd frame header의 내용 크기와 rawBytes를 할당 전에 대조하는 검사는 Compression 모듈에 frame 크기 조회 API가 생기면 더한다(지금은 해제 뒤 크기·SHA-256 대조가 잡는다).
 12. **할당 실패 분류**: reader·writer·Prepare·InstantiatePackages의 모든 할당 실패는 `OutOfMemory`이고 진단 코드는 None이다(손상으로 분류하지 않는다 — 다시 시도하면 열릴 수 있다). 처음 구현은 Summary 타입 표와 export 타입 집합의 대조에서 할당 실패를 `CorruptPackage`로 돌려줬고 할당 실패 주입 시험(`AssetPackage_AllocationFailures`)이 잡아 고쳤다.
+13. **import 표 순서·작업량 상한**(빈틈 리뷰 반영): 처음 구현은 import를 (assetId, 전체 객체 경로 byte) 순으로 정렬해 writer가 초안마다 전체 경로 문자열을 만들고(Outer 사슬마다 반복), reader·로드가 import마다 경로를 처음부터 다시 만들었다(깊이² — 깊이 2040 사슬 아래 잎 6만 개면 수억 단계, 경로 문자열 메모리 수백 MiB). 다음으로 바꿨다.
+    - 순서는 5.2절 깊이 우선(같은 outer 아래 이름 byte 순)이다. 경로 byte 순은 '-'(0x2D)가 '.'보다 작아 부분 트리가 끊길 수 있어 한 번 훑기로 검증할 수 없다. 깊이 우선이면 reader가 export 표와 같은 경로 스택으로 항목 수에 비례해 검증하고, 경로 길이는 outer 길이 + 1 + 이름 길이로 이어 센다(문자열을 만들지 않는다).
+    - writer는 외부 참조 대상의 Outer 사슬을 이미 초안이 있는 객체에서 멈추고(객체 → 초안 해시 표), 패키지마다 대표 에셋을 한 번 찾으며, (asset, outer 초안, 이름) 정렬 한 번과 깊이 우선 순회로 순서를 정한다. 옛 bulkId → 새 bulkId도 해시 표다.
+    - 로드(`InstantiatePackages`)는 에셋마다 패키지를 한 번 찾고, outer import 0이면 `ConstructionContext::FindObject(package, 이름)`, 아니면 앞서 푼 outer import 아래 `ConstructionContext::FindChild(outer, 이름)`(ObjectRuntime에 더한 한 단계 조회 — ObjectFoundations 5.4절)로 푼다. `PackageLoadState::ImportPath`는 없앴다.
+    - Prepare 대조(타입 표 하한 탐색, 읽기 전용 부분집합·import ↔ 의존 병합 순회)도 항목 수에 비례한다.
+    - import 이름은 객체 이름 규칙(`ValidateNameComponent`)을 reader가 확인한다(`CorruptPackage`). 처음 구현은 로드의 `FindObject`가 `InvalidArgument`로 거부해 진단 코드가 None(할당 실패 분류)으로 나갔다.
+    - 다른 패키지의 Package 객체 자체를 가리키는 참조는 저장이 `InvalidArgument`로 거부한다(import 대상은 대표 에셋과 그 아래 객체).
+    - 시험 `AssetPackage_ImportScale`이 깊이 2040 사슬 + 잎으로 import 65536개(상한)를 쓰기·읽기·Prepare·Instantiate까지 통과시키고 65537개는 쓰기 `CapacityExceeded`임을 본다.
+14. **값 대조 규칙 보강**(빈틈 리뷰 반영):
+    - Hard 의존은 expectedType이 0이 아니어야 하고(Hard가 아니면 0 — reader), 그 에셋의 대표 에셋 import(빈 이름)가 있으면 그 타입과 같아야 한다(Prepare — 둘 다 `CorruptPackage`). 로드는 대상 패키지 대표 에셋의 실제 타입이 expectedType의 파생인지 보고 아니면 `TypeMismatch`(section Dependencies), 대표 에셋이 없으면 `MissingDependency`다.
+    - 빈 `BulkDataRef`(bulkId 0)는 rawBytes·SHA-256도 0이어야 한다. writer는 저장을 `InvalidArgument`로, 로드는 Objects `CorruptPackage`로 거부한다.
+    - 모든 BulkIndex entry는 어떤 `BulkDataRef`가 가리켜야 한다(아니면 BulkIndex `CorruptPackage`). 에디터 읽기 전용 열기는 모르는 필드 안의 ref를 보지 못하므로 이 검사를 하지 않는다.
+    - 같은 `PackageLoadState`를 `InstantiatePackages`에 다시 넘기면(앞 호출의 성공·실패와 무관) `InvalidArgument`다. 처음 구현은 그래프 Stage의 순서 오류가 `CorruptPackage`로 분류됐다.
 
 ## 6. 에셋 타입·객체 통합·참조
 
@@ -682,11 +695,11 @@ nugget-gc --max-bytes=<n> --unused-days=<n>
 - 클래스 구조: Asset이 아닌 하위 객체(`ComboPart`)와 그 파생(`ComboPartDerived` — 기반 필드 + 파생 필드), 하위 객체에서 같은·다른 패키지 참조.
 - 왕복 축: 쿠킹·에디터 × 홀수·짝수 seed(Optional 있음·없음, bulk None·Zstd, InstancedStruct·Text 세 형태) × 두 클래스, 같은 상태 두 번 쓰기 byte 동일, 로드 → 필드 비교(다른 seed의 기대값과는 달라야 한다) → 재저장 byte 동일.
 
-빠짐 검사 `FixtureAsset_CombinationsCoverPropertyTable`은 왕복 시험이 쓰는 fixture 클래스의 스키마(기반 클래스·struct 멤버 재귀)를 순회해 (값 종류, 자리, EditorOnly 실효) 칸, Required 칸, 검증 hook·참조 struct·Flags enum 자리, 중첩 깊이 3 이상을 모으고 성질 표의 허용 칸과 하나라도 다르면 빠진 칸 이름으로 실패한다(표에 행·열이 생기면 fixture를 고치라는 신호). InstancedStruct 내용 열(Struct만 ○)은 실행 중 값이라 스키마에 없으므로 그 열의 모양(Struct만)과 InstancedStruct 칸의 존재를 확인하고, 실제 내용(`ComboPayload`·hook `ComboChecked`)은 왕복 비교가 본다. 표가 막는 칸은 ToolTests `Meta.EveryRejectedValueKindCellIsRejected`가 C# 표(`ValueKindTable.Rows`)를 순회해 원소 자리 × 종류의 모든 × 칸을 원본 선언으로 만들어 MetaCompiler가 RMC 진단(RMC2xxx, C 배열을 템플릿 원소로 쓰는 칸은 Clang 단계 RMC3000)으로 거부하는지 보고, `Meta.EveryRejectedValueKindCellHasASpelling`이 새 종류 행에 시험 철자가 빠지지 않게 한다(필드·멤버 자리는 Opaque 말고 모두 ○라 거부 칸이 없다).
+빠짐 검사 `FixtureAsset_CombinationsCoverPropertyTable`은 조합 클래스(`Combo*` — 다른 fixture가 칸을 대신 채우지 않게 이것만)의 스키마(기반 클래스·struct 멤버 재귀)를 순회해 (값 종류, 자리, EditorOnly 실효) 칸, Required 칸, 검증 hook·참조 struct·Flags enum 자리, 중첩 깊이 3 이상을 모으고 성질 표의 허용 칸과 하나라도 다르면 빠진 칸 이름으로 실패한다(표에 행·열이 생기면 fixture를 고치라는 신호). InstancedStruct 내용 열(Struct만 ○)은 실행 중 값이라 스키마에 없으므로 그 열의 모양(Struct만)과 InstancedStruct 칸의 존재를 확인하고, 실제 내용(`ComboPayload`·hook `ComboChecked`)은 왕복 비교가 본다. 표가 막는 칸은 ToolTests `Meta.EveryRejectedValueKindCellIsRejected`가 C# 표(`ValueKindTable.Rows`)를 순회해 원소 자리 × 종류의 모든 × 칸을 원본 선언으로 만들고, MetaCompiler 진단의 코드 집합이 칸마다 정한 코드 하나와 같은지 본다(Array 원소 RMC2304, Map 키·값·Set 원소 RMC2305, Optional 내부 RMC2306, 정적 배열 원소 RMC2307, C 배열을 템플릿 원소로 쓰는 칸만 Clang 단계 RMC3000이고 그 사유가 컨테이너의 static_assert). 명세 누락(RMC2100)·입력 오류(RMC1xxx)·엉뚱한 Clang 오류로 거부되면 실패다. 대조 시험 `Meta.EveryValueKindSpellingIsAcceptedWhereAllowed`는 같은 preamble·명세·철자로 표가 ○인 자리(클래스 필드 + 허용 원소 자리)를 모두 선언해 생성에 성공시킨다 — 처음 시험은 probe 명세에 `probe::Tone`·`probe::Holder::cell`이 없고 `Holder`에 Allocator 생성자가 없어 컨테이너 칸이 모두 "기본 생성자 삭제" RMC3000으로 거부되는데도 "error RMC"만 보고 통과했다. `Meta.EveryRejectedValueKindCellHasASpelling`은 새 종류 행에 시험 철자가 빠지지 않게 하고, 표가 쓰는 성질 비트가 모두 원소 자리·필드·멤버·InstancedStruct 내용·자리가 아닌 성질로 분류되는지(새 자리 열이 생기면 실패) 본다. C++ 빠짐 검사도 같은 분류를 static_assert로 건다(필드·멤버 자리는 Opaque 말고 모두 ○라 거부 칸이 없다).
 
 #### 14.1.1 요구 대조표(A1a — 패키지 포맷 v1)
 
-항목마다 그것을 확인하는 시험이다(EngineTests, `Engine/Source/Runtime/AssetRuntime/Tests` — 시험 49개). "범위 밖"은 A1a가 만들지 않는 것(다른 단계가 맡는다), "시험 불가"는 이유를 적은 것이다. 시험이 없는 항목은 0개다.
+항목마다 그것을 확인하는 시험이다(EngineTests, `Engine/Source/Runtime/AssetRuntime/Tests` — 시험 64개, ObjectRuntime `ConstructionFindChild_FindsOneComponentUnderAnyVisibleOuter`, ToolTests meta 셋). "범위 밖"은 A1a가 만들지 않는 것(다른 단계가 맡는다), "시험 불가"는 이유를 적은 것이다. 시험이 없는 항목은 0개다.
 
 | 요구(절) | 항목 | 시험 |
 |---|---|---|
@@ -694,11 +707,11 @@ nugget-gc --max-bytes=<n> --unused-days=<n>
 | | magic 네 byte 각각 | `AssetPackage_HeaderFields`, `AssetPackage_CorruptionAndVersionChecks` |
 | | headerCrc(칸 자체·덮는 범위 0–59) | `AssetPackage_HeaderFields` |
 | | flags(0·둘 다·정의되지 않은 비트, 버전보다 먼저 판정) | `AssetPackage_HeaderFields` |
-| | formatVersion(더 새 것: 쿠킹 UnsupportedVersion·에디터 NewerVersion, 최댓값, 더 옛 것 UnsupportedVersion) | `AssetPackage_HeaderFields` |
+| | formatVersion(더 새 것: 쿠킹 UnsupportedVersion·에디터 NewerVersion, 최댓값, 더 옛 것 UnsupportedVersion — 에디터·쿠킹 0) | `AssetPackage_HeaderFields`, `AssetPackage_HeaderUpperBounds` |
 | | headerBytes ≠ 64 | `AssetPackage_HeaderFields` |
 | | sectionCount(0·33·실제와 다름) | `AssetPackage_HeaderFields` |
-| | sectionTableOffset(헤더 안·8 정렬 아님·64 GiB 초과·실제와 다름) | `AssetPackage_HeaderFields` |
-| | fileBytes(식·Stat 크기·덧붙음·잘림·64 GiB 초과) | `AssetPackage_HeaderFields` |
+| | sectionTableOffset(헤더 안·8 정렬 아님·64 GiB 초과·실제와 다름) | `AssetPackage_HeaderFields`, `AssetPackage_HeaderUpperBounds`(식·Stat이 맞는 64 GiB + 8) |
+| | fileBytes(식·Stat 크기·덧붙음·잘림·64 GiB 초과 — 식·Stat이 맞는 64 GiB + 36 포함), 파일을 모든 길이로 자름(쿠킹·에디터) | `AssetPackage_HeaderFields`, `AssetPackage_HeaderUpperBounds`, `AssetPackage_TruncatedSections` |
 | | assetId(null 거부, 다른 id는 그 id로 읽힘) | `AssetPackage_HeaderFields` |
 | | bulkAlignment(0·2의 거듭제곱 아님·8 미만·65536 초과, 경계 8·65536·기본값) | `AssetPackage_HeaderFields`, `AssetPackage_BulkAlignmentBounds` |
 | | reserved 8 byte 각각 | `AssetPackage_HeaderFields` |
@@ -719,8 +732,10 @@ nugget-gc --max-bytes=<n> --unused-days=<n>
 | | 비-Bulk 섹션 64 MiB(초과 거부·상한 정확히 받음) | `AssetPackage_SectionSizeLimit` |
 | | export 4096(정확히 4096 쓰기·읽기·로드, 4097 쓰기 CapacityExceeded, 표 count 4097 거부) | `AssetPackage_WriterBoundaries`, `AssetPackage_ExportsFields` |
 | | object import 65536(표 count 65537 거부) | `AssetPackage_ObjectImportsFields`. 쓰기 쪽 65537개는 그래프 외부 참조 한도(`ObjectGraphLimits::maxExternalReferences` = 65536, ObjectSerialization 시험)가 먼저 막는다 |
-| | 문자열 4 KiB(export 이름·프로파일 id), 객체 경로 4 KiB(import 경로) | `AssetPackage_ExportsFields`, `AssetPackage_SummaryFields`, `AssetPackage_WriterOptionValidation`, `AssetPackage_ObjectImportsFields` |
-| Summary(5.2·5.7-1) | 스키마 GUID·버전, 필드 수(에디터 4·쿠킹 5), 잘림(모든 길이) | `AssetPackage_SummaryFields`, `AssetPackage_TruncatedSections` |
+| | 문자열 4 KiB(export 이름 4096 받음·4097 거부·프로파일 id), 객체 경로 4 KiB(import 경로 4096 받음·4097 거부) | `AssetPackage_ExportsFields`, `AssetPackage_SummaryFields`, `AssetPackage_WriterOptionValidation`, `AssetPackage_ObjectImportsFields` |
+| | 작업량(깊이 2040 사슬 + 잎, import 65536 쓰기·읽기·Prepare·Instantiate, 65537 쓰기 CapacityExceeded — 5.7-13) | `AssetPackage_ImportScale` |
+| | writer 비-Bulk 섹션 64 MiB 초과(ImportRecord 64 MiB + 1) | `AssetPackage_WriterEdgeRejections` |
+| Summary(5.2·5.7-1) | 스키마 GUID·버전, 필드 수(에디터 4·쿠킹 5), 잘림(모든 길이 — 쿠킹·에디터) | `AssetPackage_SummaryFields`, `AssetPackage_TruncatedSections` |
 | | 버전 표 모양(RecordList·항목 필드 수 1·3·id·version 없음·wire)·정렬·중복 — 타입 표·커스텀 버전 표 각각 | `AssetPackage_SummaryFields` |
 | | 엔진 버전 Record(필드 수·없는 칸·u16 범위·wire)·compatibleWith(패치 0·savedBy 기준선 이하) | `AssetPackage_SummaryFields` |
 | | 프로파일 id(wire·빈 값·4 KiB·UTF-8)·설정 SHA-256(wire·32 byte)·쿠커 버전(wire) | `AssetPackage_SummaryFields` |
@@ -733,46 +748,52 @@ nugget-gc --max-bytes=<n> --unused-days=<n>
 | ObjectImports(5.1·5.2) | count(0·65537·실제와 다름)·잘림(모든 길이)·남는 byte | `AssetPackage_ObjectImportsFields`, `AssetPackage_TruncatedSections` |
 | | 에셋 null·자기 에셋·타입 0 | `AssetPackage_ObjectImportsFields` |
 | | outer import(앞·같은 에셋·이름 있음)·outer 있는 항목의 이름 | `AssetPackage_ObjectImportsFields` |
-| | (assetId, 객체 경로) 엄격 오름차순·깊은 경로 | `AssetPackage_ObjectImportsFields` |
+| | assetId 순·에셋 안 깊이 우선·같은 outer 아래 이름 엄격 오름차순(대표 에셋 항목 첫째, '-' 이름), 깊은 경로 | `AssetPackage_ObjectImportsFields` |
+| | 이름 규칙(제어 문자·비NFC·'.'·공백·첫 문자·예약 이름·65 byte·잘못된 UTF-8 — 읽기·로드 모두 CorruptPackage) | `AssetPackage_ObjectImportsFields`, `AssetPackage_InvalidImportNameIsCorruptOnLoad` |
+| | 깊은 하위 객체만 참조(outer 전용 import, 쿠킹·에디터, 묶음 안·resolver), 중간 객체 타입 다름 TypeMismatch·없음 MissingDependency | `AssetPackage_DeepSubobjectImportOnly`, `AssetPackage_DeepImportResolutionFailures` |
+| | 다른 에셋의 outer 전용 import(의존 없음 ObjectImports 손상), 외부 번호 수 불일치(그래프 Objects 손상) | `AssetPackage_OuterOnlyImportCrossChecks`, `AssetPackage_PrepareCrossChecks` |
 | Dependencies(5.2·5.7-5) | count(0·크기 상한·실제와 다름)·잘림(모든 길이)·남는 byte | `AssetPackage_DependenciesFields`, `AssetPackage_TruncatedSections` |
 | | kind 범위(0·6·최댓값)·flags 정의되지 않은 비트 | `AssetPackage_DependenciesFields` |
 | | 에셋 null·자기, 쿠킹의 EditorOnly·Build·ImportOwner, Hard 밖 expectedType, 정렬·중복 | `AssetPackage_DependenciesFields` |
+| | Hard expectedType(0 거부, 대표 에셋 import 타입과 다름 거부, 로드 대상 대표 에셋이 파생 아님 TypeMismatch·없음 MissingDependency — 5.7-14) | `AssetPackage_OuterOnlyImportCrossChecks`, `AssetPackage_DeepImportResolutionFailures` |
 | | 합성 규칙(Hard·Soft·EditorOnly·required, expectedType = 대표 타입, 자기·null 제외) | `AssetPackage_MergeDependencyUsesRules`, `AssetPackage_CookedRoundTrip`, `AssetPackage_EditorRoundTripKeepsEditorOnly`, `AssetPackage_DiamondDependencies`, `AssetPackage_CompositeGameDataRoundTrip`, `FixtureAsset_CombinationRoundTrip` |
 | | 로드 대조(누락·남음·종류·required, Build·ImportOwner는 대조 안 함(`AssetPackage_ImportOwnerDependencyIsNotCrossChecked`), 읽기 전용 부분집합, import의 Hard·EditorOnly 의존) | `AssetPackage_PrepareCrossChecks`, `AssetPackage_ImportTypeMismatchAndDependencyCrossCheck`, `AssetPackage_WriterRejections` |
 | | 자기 참조는 의존·import 없음 | `AssetPackage_SelfReferencesMakeNoDependency` |
 | Objects(5.1 참조 표기) | graph v2 byte, 참조 값(0·export·import), 노드 저장 버전 = Summary | `AssetPackage_CookedRoundTrip`, `FixtureAsset_CombinationRoundTrip`, `AssetPackage_PrepareCrossChecks`, `AssetPackage_FixedSeedMutationFuzz`(값 표기의 변조는 그래프 1단계 — ObjectSerialization 시험이 칸별로 본다) |
 | ImportRecord·Tags(5.2) | 에디터만, Record envelope, 생략 | `AssetPackage_SectionTableFields`, `AssetPackage_WriterOptionValidation` |
 | Bulk·BulkIndex(5.2·5.7-6) | count·잘림(모든 길이)·남는 byte·codec 범위 | `AssetPackage_BulkIndexFields`, `AssetPackage_TruncatedSections` |
-| | bulkId 연속·offset = 정렬 값·flags·쿠킹 EditorOnly·None의 stored = raw·범위·패딩·entry CRC·끝 = 섹션 크기 | `AssetPackage_BulkIndexFields`, `AssetPackage_CorruptionAndVersionChecks` |
+| | bulkId 연속·offset = 정렬 값·flags·쿠킹 EditorOnly·None의 stored = raw·범위(Zstd entry의 stored, 정렬 값이지만 섹션 밖인 offset)·패딩·entry CRC·끝 = 섹션 크기 | `AssetPackage_BulkIndexFields`, `AssetPackage_CorruptionAndVersionChecks` |
+| | 모든 entry가 어떤 ref에 쓰임(읽기 전용은 제외), 빈 ref의 크기·해시 0(writer InvalidArgument, 로드 Objects 손상 — 5.7-14) | `AssetPackage_BulkValueRules` |
 | | 해제: raw 합 상한·Zstd 실패·크기·SHA-256, 실패 시 출력 길이 복원 | `AssetPackage_DecodeBulk` |
 | | BulkDataRef ↔ BulkIndex(id 범위·크기·SHA-256) | `AssetPackage_PrepareCrossChecks` |
 | | 첫 출현 순 재번호·같은 옛 id = 같은 새 id·재매핑 표·EditorOnly 표시(EditorOnly·일반 위치에 함께 쓰이면 표시 없음 — `AssetPackage_SharedBulkEditorOnlyFlag`)·Zstd 못 줄이면 None·0 byte entry(Bulk 0 byte) | `AssetPackage_DeterministicBytesAndFingerprint`, `FixtureAsset_BulkRoundTrip`, `AssetPackage_EditorRoundTripKeepsEditorOnly`, `AssetPackage_WriterBoundaries` |
-| | bulk 원본 크기·SHA-256 불일치 CorruptPackage, 원본 오류 전파, 같은 옛 id 다른 값 거부 | `AssetPackage_WriterRejections`, `AssetPackage_WriterGraphRejections` |
+| | bulk 원본 크기·SHA-256 불일치 CorruptPackage, 원본 오류 전파, 같은 옛 id 다른 값 거부, EditorOnly 위치에서만 두 번 쓰인 entry의 EditorOnly 표시 | `AssetPackage_WriterRejections`, `AssetPackage_WriterGraphRejections`, `AssetPackage_BulkWriterRules` |
 | 버전 축(5.3) | 컨테이너 | `AssetPackage_HeaderFields` |
 | | 섹션 | `AssetPackage_SectionTableFields` |
 | | 타입(쿠킹 정확히·미등록, 에디터 낮음·높음·미등록) | `AssetPackage_TypeAndCustomVersionAxes` |
 | | 커스텀 버전(쿠킹 전체 일치, 에디터 높음·모름 읽기 전용, 낮음·같음) | `AssetPackage_TypeAndCustomVersionAxes`, `AssetPackage_CorruptionAndVersionChecks` |
-| | 엔진(compatibleWith 더 새 NewerVersion, 쿠킹은 기록 없음) | `AssetPackage_EditorRoundTripKeepsEditorOnly`, `AssetPackage_SummaryFields` |
-| | 쿠킹의 Required 실효 누락 = CorruptPackage, 에디터는 계속 | `AssetPackage_LoadHooksClassifyDiagnostics` |
+| | 엔진(compatibleWith 부·주가 더 새 NewerVersion, 패치는 보지 않음, 더 오래된 패키지 받음, 쿠킹은 기록 없음) | `AssetPackage_EditorRoundTripKeepsEditorOnly`, `AssetPackage_SummaryFields`, `AssetPackage_EngineVersionBoundaries` |
+| | 쿠킹의 Required 실효 누락 = CorruptPackage, 에디터는 계속(hook 분류와 파일 변조 end-to-end) | `AssetPackage_LoadHooksClassifyDiagnostics`, `AssetPackage_RequiredReferenceZeroed` |
 | 저장(5.5) | Objects 먼저 → 물리 순서 → 헤더 patch, 결정적 byte·지문 | `AssetPackage_DeterministicBytesAndFingerprint`, `FixtureAsset_CombinationRoundTrip` |
-| | 쓰기 실패 전파(Append 매 지점·헤더 WriteAt) | `AssetPackage_WriterSinkFailures` |
+| | 쓰기 실패 전파(Append 매 지점·헤더 WriteAt — 에디터, 쿠킹 + Zstd(Bulk 앞 패딩 0 아님), ImportRecord·Tags) | `AssetPackage_WriterSinkFailures` |
 | | 임시 파일·Replace·잠금·외부 변경·재매핑 적용 | 범위 밖(A2 AssetDatabase — 파일 저장) |
-| 옵션(PackageWriteOptions) | 종류·정렬·codec·엔진 버전·프로파일·ImportRecord·Tags·extraDependencies·커스텀 버전 | `AssetPackage_WriterOptionValidation`, `AssetPackage_WriterRejections` |
+| 옵션(PackageWriteOptions) | 종류·정렬·codec·엔진 버전·프로파일·ImportRecord·Tags·extraDependencies·커스텀 버전(정렬·중복, 셋을 정상으로) | `AssetPackage_WriterOptionValidation`, `AssetPackage_WriterRejections`, `AssetPackage_WriterEdgeRejections` |
 | 대표 에셋(4.1·5.1) | 패키지 아님·없음·이름 있음·Asset 아님·저장 불가뿐 | `AssetPackage_WriterRepresentativeRules`, `AssetPackage_WriterRejections` |
-| 저장 그래프(5.1·6.2) | 자기 Package 참조 거부, UnpackagedReference, Required null 거부(종류 × 자리), 저장 불가 객체 제외, weak 밖 대상 null | `AssetPackage_WriterGraphRejections`, `FixtureAsset_CombinationRequired`, `AssetPackage_CookedRoundTrip`, `FixtureAsset_CombinationRoundTrip` |
+| 저장 그래프(5.1·6.2) | 자기 Package 참조 거부, 다른 Package 객체 자체 참조 거부, null id 패키지(쓰기·그 객체 참조) 거부, UnpackagedReference, Required null 거부(종류 × 자리), 저장 불가 객체 제외, weak 밖 대상 null | `AssetPackage_WriterGraphRejections`, `AssetPackage_WriterEdgeRejections`, `FixtureAsset_CombinationRequired`, `AssetPackage_CookedRoundTrip`, `FixtureAsset_CombinationRoundTrip` |
 | 로드(5.7-10·11.2·11.3) | Prepare 한 번, 대표 에셋 타입, 그래프 1단계 분류(할당·스레드 그대로, 미등록·버전 UnsupportedVersion, 그 밖 CorruptPackage) | `AssetPackage_ImportTypeMismatchAndDependencyCrossCheck`, `AssetPackage_PrepareCrossChecks`, `AssetPackage_FixedSeedMutationFuzz`, `FixtureAsset_ValidateHook` |
-| | InstantiatePackages 인자(빈 묶음·크기·null·준비 안 됨·다른 Registry·같은 id) | `AssetPackage_InstantiateArgumentsAndResolver` |
+| | InstantiatePackages 인자(빈 묶음·크기·null·준비 안 됨·다른 Registry·같은 id·이미 넘긴 상태 — 성공 뒤·실패 뒤) | `AssetPackage_InstantiateArgumentsAndResolver`, `AssetPackage_InstantiateTransactionErrors` |
+| | 트랜잭션 오류 분류(다른 스레드 WrongThread·다른 접근 문맥 WrongContext·고정된 ShuttingDown·Busy — 진단 None) | `AssetPackage_InstantiateTransactionErrors` |
 | | import 해석(묶음 안·resolver·NotFound MissingDependency·그 밖 오류·경로 없음·TypeMismatch) | `AssetPackage_InstantiateArgumentsAndResolver`, `AssetPackage_HardCycleLoadsInOneTransaction`, `AssetPackage_ImportTypeMismatchAndDependencyCrossCheck` |
 | | SCC 한 트랜잭션(2노드·3노드 모든 순서·다이아몬드·자기 참조), 실패 전파(부분 공개 없음) | `AssetPackage_HardCycleLoadsInOneTransaction`, `AssetPackage_ThreeNodeCycleLoadsInAnyOrder`, `AssetPackage_DiamondDependencies`, `AssetPackage_SelfReferencesMakeNoDependency`, `AssetPackage_FailurePropagatesThroughBatch` |
 | | 스레드(Prepare 다른 스레드, 쓰기 소유 스레드 — WrongThread) | `AssetPackage_ThreadRules` |
 | | 취소 지점 | 범위 밖(A1c 로더 — `CancelToken`) |
-| Package·Asset(6.1·5.7-7) | id·종류·bulk·대표 assetId 설정, `BulkBytes` 오류(빈 ref·없는 id·다른 크기·같은 크기 다른 SHA-256), `NewPackage` null id·정의되지 않은 종류 | `AssetPackage_CookedRoundTrip`, `AssetPackage_WriterRepresentativeRules`, `AssetPackage_PackageArgumentErrors` |
+| Package·Asset(6.1·5.7-7) | id·종류·bulk·대표 assetId 설정, `BulkBytes` 오류(빈 ref·없는 id·다른 크기·같은 크기 다른 SHA-256), `NewPackage` null id·정의되지 않은 종류·다른 스레드·할당 실패(남는 패키지 없음) | `AssetPackage_CookedRoundTrip`, `AssetPackage_WriterRepresentativeRules`, `AssetPackage_PackageArgumentErrors`, `AssetPackage_NewPackageFailures` |
 | 진단(4.6·5.7-8) | A1a가 내는 코드(CorruptPackage·UnsupportedVersion·NewerVersion·MissingDependency·TypeMismatch·UnpackagedReference), 원래 오류 보존, 이름표 | 위 시험들, `AssetPackage_DiagnosticNames` |
-| 자원 실패 | 할당 실패(쓰기·읽기·Prepare·Registry 객체·bulk 저장소 — 모든 지점, 진단 None) | `AssetPackage_AllocationFailures`, `AssetPackage_RegistryAllocationFailures` |
-| 변조·퍼징 | 고정 seed 4000회(정해진 오류 코드만, 객체 남지 않음) | `AssetPackage_FixedSeedMutationFuzz` |
+| 자원 실패 | 할당 실패(쓰기·읽기·Prepare·Instantiate 상태 allocator·Registry 객체·bulk 저장소 — 모든 지점, 진단 None; 큰 시나리오: outer import 사슬·커스텀 버전 셋·타입 여럿·Soft·묶음 둘·resolver) | `AssetPackage_AllocationFailures`, `AssetPackage_RegistryAllocationFailures`, `AssetPackage_AllocationFailuresLargeScenario` |
+| 변조·퍼징 | 고정 seed 4000회 × 쿠킹·에디터(타입 저장소 넘김, 정해진 오류 코드만, 읽기 거부·로드 거부·받아들임 모두 일어남, 객체 남지 않음) | `AssetPackage_FixedSeedMutationFuzz` |
 | 모든 조합(14.1) | 성질 표 허용 칸 × EditorOnly 실효, Required 칸, hook·참조 struct·Flags enum 자리, 깊이 | `FixtureAsset_CombinationsCoverPropertyTable` |
 | | 허용 칸 왕복(필드 비교·재저장 byte 동일, 쿠킹·에디터, Optional 두 상태, 참조 대상 7종) | `FixtureAsset_CombinationRoundTrip` |
-| | 거부 칸(원소 자리 × 종류의 모든 ×) | ToolTests `Meta.EveryRejectedValueKindCellIsRejected`, `Meta.EveryRejectedValueKindCellHasASpelling` |
+| | 거부 칸(원소 자리 × 종류의 모든 × — 칸마다 정확한 코드), 허용 자리 대조, 자리 열 분류 | ToolTests `Meta.EveryRejectedValueKindCellIsRejected`, `Meta.EveryValueKindSpellingIsAcceptedWhereAllowed`, `Meta.EveryRejectedValueKindCellHasASpelling` |
 
 #### 14.1.2 Coverage(A1a)
 
@@ -798,70 +819,42 @@ pwsh Build/MeasureCoverage.ps1 -Target EngineTests -Filter AssetPackage,FixtureA
 - `uncovered.txt`: 줄·분기 실행 횟수
 - `summary.json`
 
-결과(2026-11-19, AssetRuntime Private·Public 13개 파일, 시험 49개 모두 통과): 줄 95.13%(2305/2423), 분기 93.15%(1373/1474), 함수 100%(113/113).
+결과(2026-11-19 빈틈 리뷰 반영 뒤, AssetRuntime Private·Public 13개 파일, AssetPackage·FixtureAsset 시험 64개 모두 통과): 줄 97.44%(2477/2542), 분기 96.59%(1445/1496), 함수 100%(115/115). 리뷰 전 측정(줄 95.13%, 분기 93.15%, 닿지 않은 분기 쪽 110)에서 시험을 더하고 죽은 분기를 없애(예약 뒤 추가는 할당하지 않는다, 중복 조건 삭제) 닿지 않은 쪽이 51이 됐다(분기 51개, 참·거짓 한쪽씩).
 
 | 파일 | 줄 | 분기 |
 |---|---|---|
-| Package.cpp | 33/42 | 18/22 |
+| Package.cpp | 35/42 | 19/22 |
 | PackageAccess.h | 13/13 | - |
-| PackageInternal.h | 48/52 | 25/28 |
-| PackageLoad.cpp | 333/369 | 188/214 |
-| PackageReader.cpp | 880/894 | 612/635 |
-| PackageWriter.cpp | 913/967 | 501/544 |
+| PackageInternal.h | 34/34 | 18/18 |
+| PackageLoad.cpp | 403/424 | 237/248 |
+| PackageReader.cpp | 905/915 | 629/647 |
+| PackageWriter.cpp | 1002/1028 | 513/530 |
 | Public 7개(AssetDiagnostic.h·BulkData.h·Package.h·PackageFormat.h·PackageLoad.h·PackageReader.h·PackageWriter.h) | 85/86 | 29/31 |
 
-닿지 않은 분기는 다음 묶음뿐이다. 모두 시험 입력이나 실패 주입으로 만들 수 없거나, 다른 층이 먼저 막는 방어선이다. 줄 번호는 `uncovered.txt`에서 확인하며, 새 분기가 이 묶음 밖에서 생기면 시험을 더한다.
+빌드 주의: Rocks.Build는 시험 소스가 상대 경로로 include한 Private 헤더(`Tests/PackageEditing.h` → `../Private/PackageInternal.h`)의 변경으로 그 시험 번역 단위를 다시 컴파일하지 않았다(헤더 의존 추적 — UnityBuildPch UB0 선행 과제). 측정 중 옛 inline 함수의 coverage 기록이 남아 함수 수가 틀렸고, 해당 오브젝트를 지운 뒤 다시 측정했다.
 
-1. **Registry·TypeRegistry 조회의 실패**
-   - 해당 코드:
-     - writer: `GetOuter`·`GetOutermost`·`AcquireType`·`GetName`·`GetObjectPath`·대표 에셋 `FindObject`·`Resolve<Package>`
-     - load: `transaction.AcquireType`·`GetForWrite`, 묶음 안 `FindObject`의 NotFound가 아닌 오류
-     - `NewPackage`: `ConstructionContext::Create`·`GetForWrite`·`Commit`·`TryPin`
-   - 닿지 않는 이유:
-     - 바로 앞 단계가 같은 객체를 같은 소유 스레드에서 이미 검증했다(`CollectInners`·그래프 저장이 생존·타입을 확인했다).
-     - 그래서 이 조회는 실패할 수 없다. Registry 자체의 실패는 ObjectRuntime 시험이 본다.
-   - `NewPackage`는 typed root를 얻지 못하면 Discard해 패키지를 남기지 않게 고쳤다. 이 경로는 위 조회 실패와 같은 이유로 닿지 않는다.
-2. **Archive·Record 형식이 먼저 막는 칸**
-   - `ArchiveReader::Create` 실패: 섹션이 64 MiB 이하라는 것을 표 검증이 먼저 확인한다.
-   - 표 섹션 항목의 앞 칸 읽기 실패: count 상한(섹션 크기 ÷ 항목 크기)이 먼저 막는다. 마지막 칸 읽기 실패는 `AssetPackage_TruncatedSections`가 닿는다.
-   - Record 필드 payload 크기 불일치: wire 종류별 크기를 Record reader가 먼저 검증한다.
-   - fileBytes가 64 GiB를 넘는 경우: fileBytes가 Stat 크기와 같아야 하므로 64 GiB 넘는 파일이 필요하다.
-   - BulkIndex offset이 섹션을 넘는 경우: offset이 앞 entry 끝의 정렬 값과 같아야 하므로 먼저 걸린다.
-3. **그래프 1단계가 먼저 막는 Prepare 대조**
-   - 대표 에셋 타입이 Asset 파생이 아닌 경우·노드 저장 버전 조회 실패: 노드 Record와 타입이 다르면 그래프가 거부한다(`AssetPackage_PrepareCrossChecks`가 이 거부를 확인한다).
-   - 쓰이지 않은 import의 의존 검사·`occurrences == 0`: 그래프가 모든 외부 참조 칸이 쓰이기를 요구한다.
-   - 쿠킹의 읽기 전용 판정: 쿠킹 정책이 모르는 필드·더 새 버전을 진단 대신 실패로 처리한다.
-   - ApplyFields의 TypeMismatch: import 타입 대조(`IsA`)가 먼저 잡는다.
-   - 쿠킹 CheckRequired 실패: writer가 Required null을 거부하므로 저장 byte로 만들 수 없다. hook의 분류는 `AssetPackage_LoadHooksClassifyDiagnostics`가 본다.
-   - 그래프 오류 분류 중 ShuttingDown·WrongThread·WrongContext·Busy 항목: Prepare가 Registry를 쓰지 않으므로 나오지 않는다.
-4. **할당이 일어나지 않는 할당 실패 지점**
-   - `AssetPackage_AllocationFailures`·`AssetPackage_RegistryAllocationFailures`는 실제 할당 시도를 하나씩 모두 실패시킨다.
-   - 그런데 아래 호출은 앞 단계가 남긴 용량 안이라 그 시나리오들에서 할당하지 않는다:
-     - 예약한 배열의 `TryPushBack`
-     - 짧은 문자열의 `TryAppend`
-     - 같은 크기 버퍼의 `TryAssign`
-     - 커스텀 버전 id 배열
-   - Zstd 해제 scratch의 할당 실패와 타입 lease 조회의 OutOfMemory도 이 묶음이다.
-5. **실제로 닿을 수 없는 크기 상한**
-   - bulk entry 수 2³²−1: 메모리에 만들 수 없다.
-   - writer의 비-Bulk 섹션 64 MiB 초과·object import 65537개: 그래프 저장 한도 maxBytes·maxExternalReferences가 먼저 막는다.
-6. **컴파일 시간 상수로 접힌 코드**: `PackageFormat.h`의 `PackageSectionRequiredFlags` switch 밖 `return 0`과 그 분기는 constexpr 호출이 컴파일 시간에 접혀 계측되지 않는다(실행 시간 호출은 `AssetPackage_PackageArgumentErrors`가 모르는 kind로 확인한다).
-7. **단락 평가·고정 순회의 한쪽**
-   - 해당 코드:
-     - `found ||` 누적
-     - `ImportPath`의 범위 밖
-     - writer import 사슬의 앞 항목 탐색(정렬되어 있어 언제나 찾는다)
-     - 첫 export의 `parent.exportIndex != 0`(제외된 부모의 자식은 함께 제외된다)
-     - 같은 Outer 경로 pop 루프
-     - 비교 `same` 누적
-   - 닿지 않는 이유: 입력 불변식상 다른 쪽 값이 나올 수 없다.
+닿지 않은 분기는 다음 묶음뿐이다(위치는 `uncovered.txt`). 이유는 모두 확인한 사실이고, 앞 단계가 막는 경우는 그 앞 단계를 보이는 시험을 적었다. 새 분기가 이 묶음 밖에서 생기면 시험을 더한다.
 
-A1a 상태(2026-11-19): 완료 조건 넷 가운데 세 가지를 갖췄다.
+1. **방금 검증한 객체의 Registry·TypeRegistry 조회 실패**(같은 소유 스레드, 사이에 Registry를 바꾸는 호출 없음 — 이 조회들은 할당하지 않는다. `AssetPackage_AllocationFailures`·`AssetPackage_AllocationFailuresLargeScenario`·`AssetPackage_RegistryAllocationFailures`가 모든 할당 지점을 실패시켜도 닿지 않는 것으로 확인):
+   - writer: 그래프 저장이 생존·타입을 확인한 외부 참조 대상의 `GetOutermost`·`AcquireType`(Admit hook, `ImportBuilder::Add`), `Resolve<Package>` 뒤 `Get`, Admit이 Package 타입임을 확인한 outermost의 `PackageIdOf`, 방금 찾은 대표 에셋의 `AcquireType`, Outer 사슬의 `GetOuter`·`AcquireType`, `CollectInners`가 준 객체의 `GetOuter`·`AcquireType`.
+   - 로드: 방금 `FindObject`·`FindChild`가 찾은 객체의 `AcquireType`과 `IsA` 오류(두 타입 모두 등록되어 있다 — import 타입은 그래프 1단계가 acquire했다), 이 트랜잭션이 만든 Package·대표 에셋의 `GetForWrite`. 대표 에셋 조회(빈 이름)의 NotFound가 아닌 오류 — 빈 이름은 이름 검사·비교 키 할당이 없다(이름 있는 조회의 할당 실패는 결합 문자 이름 `Tix + U+0300`으로 `AssetPackage_AllocationFailuresLargeScenario`가 닿는다).
+   - `NewPackage`: `Create` 뒤 `GetForWrite`·`Commit`·`TryPin`. `AssetPackage_NewPackageFailures`가 allocator의 모든 할당 지점과 다른 스레드를 시험하며, 이 세 단계는 할당하지 않고 스레드·문맥 오류는 `Create`가 먼저 낸다. typed root를 얻지 못할 때의 Discard 경로는 같은 이유로 닿지 않는다.
+2. **그래프 1단계·reader가 먼저 막는 Prepare·Instantiate 대조**:
+   - 노드 저장 버전 조회 실패: Validate가 성공하면 모든 노드에 저장 버전이 있다.
+   - 대표 에셋 타입의 `IsA` 오류: export 타입은 그래프가 acquire했다(타입이 Asset이 아닌 경우 자체는 `AssetPackage_RepresentativeMustBeAsset`이 닿는다).
+   - 쿠킹의 읽기 전용: 쿠킹 정책이 모르는 필드·더 새 버전을 진단 대신 실패로 처리하고 reader의 쿠킹 readOnly는 거짓이다(`AssetPackage_SectionTableFields`·`AssetPackage_TypeAndCustomVersionAxes`가 쿠킹 쪽 거부를 본다).
+   - ApplyFields의 TypeMismatch: import 타입 대조(`IsA`)가 먼저 잡는다(`AssetPackage_DeepImportResolutionFailures`·`AssetPackage_ImportTypeMismatchAndDependencyCrossCheck`).
+3. **Archive·Record 형식이 먼저 막는 칸**(reader): 표 섹션 `ArchiveReader::Create` 실패(섹션 64 MiB 이하는 표 검증이 먼저 확인 — `AssetPackage_SectionSizeLimit`), Dependencies·BulkIndex 항목의 앞 칸 읽기 실패(count 상한 = 섹션 크기 ÷ 항목 크기가 먼저 — 마지막 칸 실패는 `AssetPackage_TruncatedSections`), Record 필드 payload 크기 불일치(wire 종류별 크기를 Record reader가 먼저 검증), 타입 저장소 `Acquire`의 OutOfMemory(조회는 할당하지 않는다).
+4. **물리적으로 만들 수 없는 크기·상수**: bulk entry 2³²−1개(메모리에 만들 수 없다), Zstd 기본 설정 `TryDefault` 실패(상수 설정이라 실패하지 않는다).
+5. **입력 불변식이 정한 한쪽**(writer export 순회): `CollectInners(DepthFirst)`가 준 순서라 경로 pop 루프가 비지 않고 Outer가 언제나 경로에 있다, 제외된 부모의 자식은 함께 제외되므로 `parent.excluded`가 참인 채 타입 검사로 가지 않는다, 첫 export의 `parent.exportIndex`는 0이다. 대표 에셋 타입 표 조회(`RepresentativeType`)는 Hard 의존마다 그 에셋의 import가 있어 언제나 찾는다.
+6. **컴파일 시간 상수·완전한 switch**: `PackageFormat.h`의 `PackageSectionRequiredFlags` switch 밖과 `IsKnownPackageSection`의 한쪽(실행 시간 호출의 모르는 kind는 `AssetPackage_PackageArgumentErrors`), reader 섹션 switch의 열거자 밖(알려진 kind만 들어온다). 진단 out 인자 없는 호출(`FailAsset`의 null 쪽)은 `AssetPackage_HeaderUpperBounds`·`AssetPackage_WriterGraphRejections`가 닿는다.
+
+A1a 상태(2026-11-19): 완료 조건 넷 가운데 세 가지를 갖췄고 빈틈 리뷰(지적 14개)를 반영했다.
 - 요구 대조표(14.1.1): 시험 없는 항목 0
-- 모든 조합 fixture·빠짐 검사·거부 칸 시험(14.1)
+- 모든 조합 fixture·빠짐 검사(조합 클래스만, 자리 열 분류 static_assert)·거부 칸 시험(칸마다 정확한 코드, 허용 자리 대조)(14.1)
 - coverage 측정과 닿지 않은 분기의 이유(14.1.2)
 
-남은 하나는 빠진 시험 관점의 리뷰다. 그 리뷰가 끝나면 A1a는 "구현"이다.
+남은 하나는 빠진 시험 관점의 재리뷰다. 그 리뷰가 끝나면 A1a는 "구현"이다.
 
 ## 15. PNG 디코더 범위
 
