@@ -268,6 +268,12 @@ public sealed record NativeModuleInput
     // SDK 라이브러리에 들어 있다 — ReflectionOnlyLibrary).
     public IReadOnlyList<string> ReflectionSources { get; init; } = [];
 
+    // 리플렉션 생성 소스의 compile action이 실패했을 때 컴파일러 출력 뒤에 붙이는 안내문이다(비어 있으면 붙이지 않는다). 본문 계약 위반
+    // (생성·소멸 noexcept, 접근 권한, 정적 검사)은 메타 단계가 아니라 이 compile action이 잡으므로 사용자가 생성 코드의 오류를 원본
+    // 선언으로 되짚을 길을 알려 준다(Docs/Design/ReflectionGeneratedSources.ko.md 7절). 표시 전용이다 — action key에 넣지 않으므로 문구를
+    // 바꿔도 다시 컴파일하지 않는다. Rocks.Build.Cli의 MetadataLayout이 채운다.
+    public string ReflectionSourceFailureNote { get; init; } = "";
+
     // 설치 SDK 모듈 전용 표지: PrebuiltLibraries가 리플렉션 생성 소스의 object만 담는다(SDK를 만들 때 손으로 쓴 소스와 규칙 생성 소스가
     // 없던 리플렉션 모듈 — CoreTypeBindings 등). 모듈 진입점이 없으므로 ModuleTables.EntryModules가 이 모듈의 미리 빌드한 라이브러리를
     // 모듈 코드로 세지 않는다(소스 빌드에서 ReflectionSources를 세지 않는 것과 같은 판정이 SDK를 거쳐도 유지된다). 자기 소스

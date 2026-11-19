@@ -65,8 +65,10 @@ internal static class Executor
             cancellationToken.ThrowIfCancellationRequested();
             if (process.ExitCode != 0)
             {
+                // 실패 안내문(리플렉션 생성 소스의 RMC3000 안내)은 도구 출력과 명령 정보 뒤에 붙인다.
                 result = Result(action, true, false, process.ExitCode, process.StdOut,
-                    process.StdErr + CommandDiagnostic(action, arguments, quoting, syntax is not null, false));
+                    process.StdErr + CommandDiagnostic(action, arguments, quoting, syntax is not null, false) +
+                    (action.FailureNote is null ? "" : "\n" + action.FailureNote + "\n"));
             }
             else if (stagedOutputs.Any(path => !File.Exists(path)))
             {

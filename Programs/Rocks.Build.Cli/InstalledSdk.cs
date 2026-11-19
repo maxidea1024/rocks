@@ -36,7 +36,10 @@ public static class InstalledSdk
     // 7: SdkModule에 ReflectionOnlyLibrary 추가. 손으로 쓴 소스가 없던 리플렉션 모듈이 모듈 생성 소스 때문에 라이브러리를 갖는다
     // (Docs/Design/ReflectionGeneratedSources.ko.md 6.3절 — 이전 SDK의 모듈 생성 헤더는 등록 함수를 inline으로 정의해 새 도구의 선언과
     // 맞지 않으므로 버전 불일치로 거부한다).
-    internal const int ManifestVersion = 7;
+    // 8: 타입별 생성 헤더가 본문을 정의하지 않는다(선언·형질·inline Trace만 — 본문은 SDK 라이브러리에 든 타입별 생성 소스의 object다,
+    // Docs/Design/ReflectionGeneratedSources.ko.md 5절). 이전 SDK는 생성 헤더가 본문을 inline으로 정의하고 동봉한 MetaCompiler가 타입별
+    // 생성 소스를 내지 않으므로(--jobs도 모른다) 버전 불일치로 거부한다.
+    internal const int ManifestVersion = 8;
 
     /// <summary>
     /// SDK 타깃에서 도달하는 모듈만 고른다. 규칙 로더는 모든 모듈 규칙을 읽으므로 타깃이 쓰지 않는(빌드되지 않은)
@@ -335,8 +338,9 @@ public static class InstalledSdk
         }
         // 규칙 모듈을 기술자와 대조하고, 켜지지 않은 플러그인·Editor·플랫폼 미지원 모듈 등을 뺀다.
         var projectModules = moduleSet.Apply(rules.Modules, rules.Target.Modules);
-        // SDK 모듈은 다시 생성하지 않는다. 리플렉션 모듈이면 descriptor·명세를 ImportedMetadata로 넘긴다. 등록 함수 등 생성 소스의 object는
-        // SDK 라이브러리(PrebuiltLibraries)에 들어 있으므로 ReflectionSources는 비어 있다 — 게임 소유 모듈만 자기 생성 소스를 낸다.
+        // SDK 모듈은 다시 생성하지 않는다. 리플렉션 모듈이면 descriptor·명세를 ImportedMetadata로 넘긴다. 타입별 본문·등록 함수 등 생성
+        // 소스의 object는 SDK 라이브러리(PrebuiltLibraries)에 들어 있으므로 ReflectionSources는 비어 있다 — 게임 소유 모듈만 자기 생성
+        // 소스를 낸다.
         var modules = manifest.Modules.Select(module => new NativeModuleInput
         {
             Name = module.Name,
@@ -360,7 +364,8 @@ public static class InstalledSdk
         var declaredInputs = GameInputSnapshot.DeclaredInputs(context, plan);
         var initialDeclared = GameInputSnapshot.Capture(project, output, sdk, declaredInputs);
         var metadata = await MetadataRunner.GenerateAsync(context, toolchain, plan, rules.Target,
-            Path.Combine(sdk, "Tools/Rocks.MetaCompiler/Rocks.MetaCompiler.dll"), cancellationToken, targets);
+            Path.Combine(sdk, "Tools/Rocks.MetaCompiler/Rocks.MetaCompiler.dll"), cancellationToken, targets,
+            jobs: BuildCommand.Jobs(options), verifySources: BuildCommand.VerifyMetadataSources(options));
         if (metadata != 0)
         {
             return 1;

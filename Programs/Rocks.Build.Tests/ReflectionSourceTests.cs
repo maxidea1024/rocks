@@ -180,6 +180,36 @@ internal static class ReflectionSourceTests
             OutputDirectory = Path.Combine(fixture, "out-" + name),
             Modules = modules.Select(module => module.Name == replacement.Name ? replacement : module).ToArray()
         };
+
+        // 실패 안내문(ReflectionSourceFailureNote): 리플렉션 생성 소스의 compile action이 실패하면 컴파일러 출력 뒤에 붙고, 같은 모듈의 손으로
+        // 쓴 소스가 실패할 때는 붙지 않는다. 표시 전용이라 문구를 바꿔도 action key가 그대로다(다시 컴파일하지 않는다).
+        const string note = "note: RMC3000: fixture note for a failing reflection generated source";
+        string brokenReflection = Write("out/Generated/Engine/Source/Public/Broken.generated.cpp", "#error broken generated body\n");
+        NativeModuleInput engine = modules.Single(module => module.Name == "Engine");
+        NativeBuildResult rejected = await builder.BuildAsync(With(engine with
+        {
+            ReflectionSources = [engineReflection, brokenReflection],
+            ReflectionSourceFailureNote = note
+        }, "note-reflection"));
+        NativeActionResult[] failedActions = rejected.Actions.Where(action => action.Executed && !action.Succeeded).ToArray();
+        Check(!rejected.Succeeded && failedActions.Length == 1 && failedActions[0].Kind == "Compile" && failedActions[0].Module == "Engine" &&
+            failedActions[0].StdErr.Contains("broken generated body", StringComparison.Ordinal) &&
+            failedActions[0].StdErr.TrimEnd().EndsWith(note, StringComparison.Ordinal),
+            "a failing reflection generated source must end its diagnostics with the module's failure note: " + Failure(rejected));
+        string brokenSource = Write("engine/broken.cpp", "#error broken hand-written source\n");
+        NativeBuildResult plain = await builder.BuildAsync(With(engine with
+        {
+            Sources = [engineSource, brokenSource],
+            ReflectionSourceFailureNote = note
+        }, "note-source"));
+        Check(!plain.Succeeded && plain.Actions.Where(action => action.Executed && !action.Succeeded)
+                .All(action => !action.StdErr.Contains(note, StringComparison.Ordinal)),
+            "a failing hand-written source must not carry the reflection source failure note: " + Failure(plain));
+        NativeBuildResult renoted = await builder.BuildAsync(game with
+        {
+            Modules = modules.Select(module => module.Name == "Engine" ? engine with { ReflectionSourceFailureNote = note } : module).ToArray()
+        });
+        Check(renoted.Succeeded && renoted.ExecutedActions == 0, "the failure note is display-only and must not be part of an action key: " + Failure(renoted));
         await Rejects<ArgumentException>(builder, With(fixtures with { ReflectionSources = [Path.ChangeExtension(moduleSource, ".h")] }, "header"),
             "ReflectionSources", "a reflection source that is not a .cpp file");
         await Rejects<ArgumentException>(builder, With(fixtures with { ReflectionSources = [""] }, "empty"), "ReflectionSources", "an empty reflection source path");

@@ -42,9 +42,9 @@ namespace Rocks.Build.Cli
             var options = Parse(args.Skip(1).ToArray());
             var allowed = args[0] switch
             {
-                "game" => new HashSet<string>(["sdk", "project", "target", "configuration", "output", "compiler", "jobs"], StringComparer.Ordinal),
-                "sdk" => new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination"], StringComparer.Ordinal),
-                "build" or "test" => new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "platform", "android-abi", "android-api", "android-ndk", "adb"], StringComparer.Ordinal),
+                "game" => new HashSet<string>(["sdk", "project", "target", "configuration", "output", "compiler", "jobs", MetadataLayout.VerifySourcesOption], StringComparer.Ordinal),
+                "sdk" => new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", MetadataLayout.VerifySourcesOption], StringComparer.Ordinal),
+                "build" or "test" => new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "platform", "android-abi", "android-api", "android-ndk", "adb", MetadataLayout.VerifySourcesOption], StringComparer.Ordinal),
                 // 미리 빌드한 바이너리를 사용자 저장소에 받는다(build·test는 받지 않는다, Docs/Design/ShaderSystem.ko.md 8절 2항).
                 "bootstrap" => new HashSet<string>(["root", "library", "store", "mirror", "offline", "windows-sdk"], StringComparer.Ordinal),
                 _ => throw new ArgumentException($"Unknown command: {args[0]}")
@@ -156,7 +156,7 @@ namespace Rocks.Build.Cli
                 var plan = MetadataLayout.Apply(context, rules.Modules, rules.Target.Modules);
                 var metaStart = System.Diagnostics.Stopwatch.GetTimestamp();
                 var metadata = await MetadataRunner.GenerateAsync(context, toolchain, plan, rules.Target,
-                    HostTool(root, "Rocks.MetaCompiler"), cancellationToken);
+                    HostTool(root, "Rocks.MetaCompiler"), cancellationToken, jobs: Jobs(options), verifySources: VerifyMetadataSources(options));
                 evidence.RecordStep("metadata", ["Rocks.MetaCompiler", targetName], metadata,
                     System.Diagnostics.Stopwatch.GetElapsedTime(metaStart));
                 if (metadata != 0)
@@ -379,9 +379,19 @@ namespace Rocks.Build.Cli
             value > 0 && value <= ProcessRunner.MaximumConcurrentProcesses
                 ? value : throw new ArgumentException($"jobs must be between 1 and {ProcessRunner.MaximumConcurrentProcesses}.");
 
+        // --verify-metadata-sources on|off(기본 off): on이면 MetaCompiler가 게시 전에 생성 소스도 컴파일한다. 본문 계약 위반을 빌드의
+        // compile action 대신 메타 단계가 원본 위치와 함께 알린다(Docs/Design/ReflectionGeneratedSources.ko.md 7절).
+        internal static bool VerifyMetadataSources(Dictionary<string, string> options) =>
+            options.GetValueOrDefault(MetadataLayout.VerifySourcesOption, "off") switch
+            {
+                "on" => true,
+                "off" => false,
+                _ => throw new ArgumentException($"{MetadataLayout.VerifySourcesOption} must be on or off.")
+            };
+
         internal static Dictionary<string, string> Parse(string[] args)
         {
-            var allowed = new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", "sdk", "project", "platform", "android-abi", "android-api", "android-ndk", "adb", "library", "store", "mirror", "offline", "windows-sdk"], StringComparer.Ordinal);
+            var allowed = new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", "sdk", "project", "platform", "android-abi", "android-api", "android-ndk", "adb", "library", "store", "mirror", "offline", MetadataLayout.VerifySourcesOption, "windows-sdk"], StringComparer.Ordinal);
             var values = new Dictionary<string, string>(StringComparer.Ordinal);
             for (var index = 0; index < args.Length; index += 2)
             {

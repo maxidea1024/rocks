@@ -41,7 +41,7 @@ internal static partial class ModuleMetaTests
                     "inherited array field entry (maxElements included) is preserved: " + name);
             }
 
-            string value = Compact(File.ReadAllText(layout.Generated("Upper", "Public/Upper/Value.generated.h")));
+            string value = Compact(layout.GeneratedText("Upper", "Public/Upper/Value.generated.h"));
             foreach ((string expected, string reason) in new[]
             {
                 ("#include<Elements/Items.generated.h>", "element struct header of an inherited import field"),
@@ -70,7 +70,7 @@ internal static partial class ModuleMetaTests
             Verify.That(value.Contains("PathClassField<::probe::Value,::rocks::ValueKind::ObjectReference>(cursor,&::probe::Value::next)", StringComparison.Ordinal),
                 "single reference field has a path thunk");
             Verify.That(!value.Contains("PathStructMember<", StringComparison.Ordinal), "import struct members are not regenerated in the derived module");
-            string parent = Compact(File.ReadAllText(layout.Generated("Lower", "Public/Lower/Parent.generated.h")));
+            string parent = Compact(layout.GeneratedText("Lower", "Public/Lower/Parent.generated.h"));
             foreach ((string expected, string reason) in new[]
             {
                 ("::rocks::detail::PathClassField<::probe::Parent, ::rocks::ValueKind::Struct>(cursor, &::probe::Parent::slots)", "base class path thunk"),
@@ -81,7 +81,7 @@ internal static partial class ModuleMetaTests
                 Verify.That(parent.Contains(Compact(expected), StringComparison.Ordinal), "generated code missing " + reason + ": " + expected);
             }
 
-            string items = Compact(File.ReadAllText(layout.Generated("Elements", "Public/Elements/Items.generated.h")));
+            string items = Compact(layout.GeneratedText("Elements", "Public/Elements/Items.generated.h"));
             Verify.That(items.Contains(Compact("&detail::PathStructMember<::probe::SA, &::probe::SA::target, ValueKind::ObjectReference>)"), StringComparison.Ordinal) &&
                 items.Contains(Compact("&detail::PathStructMember<::probe::Plain, &::probe::Plain::x, ValueKind::UInt16>)"), StringComparison.Ordinal), "element module struct member path thunks");
 

@@ -203,12 +203,15 @@ internal static class CompilerDriver
         await NativeMemberProbe.VerifyAsync(schema.Ordered, options.Inputs.Count, () => ModulePublicHeaders(options),
             extra => ProcessRunner.RunAsync(new(compiler, probeArguments, root, environment, ValidateGeneratedCode(unit + extra), TimeSpan.FromMinutes(2))));
 
-        // 생성물: 입력 헤더마다 생성 헤더 하나, public·private 모듈 생성 헤더(등록 함수 선언), 모듈 생성 소스(등록 함수 정의 — 출력 루트의
-        // Source 아래, include 루트가 아니다), descriptor(Docs/Design/ReflectionGeneratedSources.ko.md 5.5·6.1절).
+        // 생성물: 입력 헤더마다 생성 헤더(선언·형질·inline Trace)와 생성 소스(본문) 한 쌍, public·private 모듈 생성 헤더(등록 함수
+        // 선언), 모듈 생성 소스(등록 함수 정의), descriptor. 생성 소스는 출력 루트의 Source 아래이고 include 루트가 아니다
+        // (Docs/Design/ReflectionGeneratedSources.ko.md 5·6.1절).
         List<(string Path, string Text, GeneratedRoot Root)> outputs = [];
         foreach (ModuleInput input in options.Inputs)
         {
-            outputs.Add((options.OutputPath(input), CppEmitter.Emit(schema, input), input.Private ? GeneratedRoot.Private : GeneratedRoot.Public));
+            (string header, string source) = CppEmitter.Emit(schema, input);
+            outputs.Add((options.OutputPath(input), header, input.Private ? GeneratedRoot.Private : GeneratedRoot.Public));
+            outputs.Add((options.SourcePath(input), source, GeneratedRoot.Source));
         }
 
         if (options.Inputs.Any(input => !input.Private))
@@ -251,9 +254,11 @@ internal static class CompilerDriver
         // 생성 헤더를 하나씩 include하므로 헤더마다 따로 컴파일한다. 생성물은 임시 루트에 두고, include 검색 순서에서
         // 출력 루트(Public·Private)가 있던 자리를 그 임시 루트로 바꾼다 — 소비자와 같은 순서로 풀리고 이전 실행의 낡은
         // 게시본을 보지 않는다. 검색 순서에 출력 루트가 없으면(단독 실행) 맨 앞에 둔다.
-        // 생성 소스(등록 함수 정의)는 여기서 컴파일하지 않는다 — 빌드가 그 모듈의 compile action으로 컴파일해 검증한다(병렬이고 내용
-        // key로 캐시된다, Docs/Design/ReflectionGeneratedSources.ko.md 7절). --verify-sources를 주면 빌드 없이 쓰는 호출자(단독 실행·도구
-        // 시험)를 위해 생성 소스도 같은 인자로 구문 검사한다.
+        // 생성 소스(타입별 본문·등록 함수 정의)는 여기서 컴파일하지 않는다 — 빌드가 그 모듈의 compile action으로 컴파일해 검증한다
+        // (병렬이고 내용 key로 캐시된다, Docs/Design/ReflectionGeneratedSources.ko.md 7절). 그래서 빌드 경로의 게시 전 검증은 생성 헤더의
+        // 선언·형질·inline Trace까지다. --verify-sources를 주면 빌드 없이 쓰는 호출자(단독 실행·--check·도구 시험)를 위해 생성 소스도 같은
+        // 인자로 구문 검사하고, 본문의 계약 위반(생성·소멸 noexcept, 접근 권한, 정적 검사)을 지금까지처럼 RMC3000으로 거부한다.
+        // 검증 컴파일은 생성물마다 독립이므로 --jobs 수만큼 함께 돌린다. 실패는 끝난 순서가 아니라 생성물 순서에서 가장 앞선 것을 알린다.
         string validationRoot = Path.Combine(Path.GetDirectoryName(options.OutputRoot)!, ".rocks-meta-validation-" + Guid.NewGuid().ToString("N"));
         string outputPublic = Path.Combine(options.OutputRoot, "Public");
         string outputPrivate = Path.Combine(options.OutputRoot, "Private");
@@ -283,33 +288,47 @@ internal static class CompilerDriver
 
             Directory.CreateDirectory(Path.Combine(validationRoot, "Public"));
             Directory.CreateDirectory(Path.Combine(validationRoot, "Private"));
+            List<(string Relative, string Source)> validations = [];
             foreach ((string path, byte[] _, GeneratedRoot outputRoot) in formattedOutputs)
             {
-                string relative;
-                string source;
                 if (outputRoot == GeneratedRoot.Source)
                 {
-                    if (!options.VerifySources)
+                    if (options.VerifySources)
                     {
-                        continue;
+                        // 생성 소스는 임시 루트에 둔 파일을 그대로 컴파일한다(include 루트가 아니라 include로 열 수 없다).
+                        string staged = Path.GetRelativePath(options.OutputRoot, path);
+                        validations.Add((staged.Replace('\\', '/'), Path.Combine(validationRoot, staged)));
                     }
 
-                    // 생성 소스는 임시 루트에 둔 파일을 그대로 컴파일한다(include 루트가 아니라 include로 열 수 없다).
-                    relative = Path.GetRelativePath(options.OutputRoot, path).Replace('\\', '/');
-                    source = Path.Combine(validationRoot, Path.GetRelativePath(options.OutputRoot, path));
-                }
-                else
-                {
-                    relative = Path.GetRelativePath(Path.Combine(options.OutputRoot, outputRoot == GeneratedRoot.Private ? "Private" : "Public"), path).Replace('\\', '/');
-                    source = Path.Combine(validationRoot, "check-" + Hashing.Sha256Text(relative)[..16] + ".cpp");
-                    File.WriteAllText(source, $"#include <{relative}>\n", new UTF8Encoding(false, true));
+                    continue;
                 }
 
-                List<string> command = [.. validationArguments, source];
-                ProcessResult validated = await ProcessRunner.RunAsync(new(compiler, command, root, environment, Timeout: TimeSpan.FromMinutes(2)));
-                if (validated.ExitCode != 0 || validated.StdErr.Contains("warning:", StringComparison.OrdinalIgnoreCase))
+                string relative = Path.GetRelativePath(Path.Combine(options.OutputRoot, outputRoot == GeneratedRoot.Private ? "Private" : "Public"), path).Replace('\\', '/');
+                string check = Path.Combine(validationRoot, "check-" + Hashing.Sha256Text(relative)[..16] + ".cpp");
+                File.WriteAllText(check, $"#include <{relative}>\n", new UTF8Encoding(false, true));
+                validations.Add((relative, check));
+            }
+
+            using SemaphoreSlim slots = new(options.VerifyJobs);
+            async Task<ProcessResult> Validate(string source)
+            {
+                await slots.WaitAsync();
+                try
                 {
-                    throw new MetadataException($"generated metadata contract rejected by Clang ({relative}):\n" + validated.StdErr + SourceNotes(schema, validated.StdErr), "RMC3000",
+                    return await ProcessRunner.RunAsync(new(compiler, [.. validationArguments, source], root, environment, Timeout: TimeSpan.FromMinutes(2)));
+                }
+                finally
+                {
+                    slots.Release();
+                }
+            }
+
+            ProcessResult[] validated = await Task.WhenAll(validations.Select(validation => Validate(validation.Source)));
+            for (int index = 0; index < validated.Length; ++index)
+            {
+                if (validated[index].ExitCode != 0 || validated[index].StdErr.Contains("warning:", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new MetadataException($"generated metadata contract rejected by Clang ({validations[index].Relative}):\n" + validated[index].StdErr + SourceNotes(schema, validated[index].StdErr), "RMC3000",
                         "Fix constructor/destructor noexcept, CLASS/PROPERTY access and GENERATED_BODY friendship; every generated typed operation must compile before output is accepted.");
                 }
             }
@@ -344,9 +363,10 @@ internal static class CompilerDriver
 
             HashSet<string> expected = formattedOutputs.Select(output => Path.GetFullPath(output.Path)).ToHashSet(
                 OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+            // 잉여 파일은 경로 순으로 본다(파일 시스템 열거 순서에 따라 알리는 파일이 달라지지 않게 — 생성 헤더가 그 생성 소스보다 먼저다).
             if (Directory.Exists(options.OutputRoot))
             {
-                foreach (string existing in Directory.EnumerateFiles(options.OutputRoot, "*", SearchOption.AllDirectories))
+                foreach (string existing in Directory.EnumerateFiles(options.OutputRoot, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
                 {
                     if (!expected.Contains(Path.GetFullPath(existing)))
                     {

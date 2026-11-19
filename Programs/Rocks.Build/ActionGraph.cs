@@ -3,8 +3,10 @@ namespace Rocks.Build;
 internal sealed record NativeAction(string Id, string Module, string Kind, string Tool,
     IReadOnlyList<string> Arguments, IReadOnlyList<string> Outputs, IReadOnlyList<string> Inputs,
     IReadOnlyList<string> HeaderDirectories, IReadOnlyList<string> DeclaredInputs,
-    IReadOnlyList<string> Dependencies, IReadOnlyList<string> Identity, string? Source = null)
+    IReadOnlyList<string> Dependencies, IReadOnlyList<string> Identity, string? Source = null, string? FailureNote = null)
 {
+    // FailureNote는 이 action의 도구가 실패했을 때 그 출력 뒤에 붙이는 안내문이다(리플렉션 생성 소스의 compile action —
+    // NativeModuleInput.ReflectionSourceFailureNote). 표시 전용이라 Key에 넣지 않는다.
     public string Key(string toolchain, string outputRoot, string root) => Fingerprints.Strings(new[]
     {
         toolchain, Id, Tool, Fingerprints.Paths(Inputs), Fingerprints.Paths(HeaderDirectories, true, outputRoot, root),
@@ -160,6 +162,8 @@ internal static class ActionGraph
             // 리플렉션 생성 소스는 모듈 소스와 같은 인자로 컴파일해 같은 archive·실행 파일에 넣는다(목록만 따로다 —
             // NativeModuleInput.ReflectionSources).
             string[] reflectionSources = module.ReflectionSources.Select(Absolute).ToArray();
+            var reflectionSet = new HashSet<string>(reflectionSources, NativeToolchains.PathComparer);
+            string? reflectionNote = module.ReflectionSourceFailureNote.Length == 0 ? null : module.ReflectionSourceFailureNote;
             string[] sources = module.Sources.Select(Absolute).Concat(reflectionSources).Order(StringComparer.Ordinal).ToArray();
             if (sources.Distinct(NativeToolchains.PathComparer).Count() != sources.Length)
             {
@@ -240,7 +244,8 @@ internal static class ActionGraph
 
                 actions.Add(new(id, module.Name, "Compile", request.Toolchain.CompilerPath, arguments,
                     [objectPath], [source], headers, extraInputs, [],
-                    new[] { request.ContextFingerprint, request.Configuration.ToString(), module.Optimization.ToString() }.Concat(sources).ToArray(), source));
+                    new[] { request.ContextFingerprint, request.Configuration.ToString(), module.Optimization.ToString() }.Concat(sources).ToArray(), source,
+                    FailureNote: reflectionSet.Contains(source) ? reflectionNote : null));
                 objectPaths.Add(objectPath);
                 compileIds.Add(id);
             }

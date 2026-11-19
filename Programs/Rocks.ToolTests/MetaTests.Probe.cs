@@ -36,6 +36,13 @@ internal static partial class MetaTests
         // 마지막으로 생성한 헤더의 생성 경로다(fixture 모드는 fixture 철자).
         public string Output => MetaCompilerArguments.GeneratedPath(temporary.Root, lastInclude);
 
+        // 마지막으로 생성한 헤더의 타입별 생성 소스(본문) 경로다.
+        public string Source => MetaCompilerArguments.GeneratedSourcePath(temporary.Root, lastInclude);
+
+        // 생성 헤더와 그 생성 소스의 글이다(헤더가 먼저다). 선언·형질·inline Trace는 헤더에, 본문(Schema·Ops·Register·정적 검사)은 생성
+        // 소스에 있으므로(Docs/Design/ReflectionGeneratedSources.ko.md 5.1절) 생성 코드의 문구를 보는 시험은 둘을 이어 읽는다.
+        public string GeneratedText() => File.ReadAllText(Output) + File.ReadAllText(Source);
+
         public string Descriptor => MetaCompilerArguments.Descriptor(temporary.Root);
 
         // 모듈 생성 헤더(등록 함수 선언)의 경로다.
@@ -323,13 +330,13 @@ internal static partial class MetaTests
             }
         }
 
-        // 마지막으로 생성한 헤더를 include하는 번역 단위를 소비자와 같은 경고 프로필로 컴파일한다(생성 static_assert probe — 생성
-        // 헤더를 고친 뒤 부른다).
+        // 마지막으로 생성한 헤더와 그 생성 소스를 한 번역 단위로 소비자와 같은 경고 프로필로 컴파일한다(생성 static_assert probe —
+        // 생성 헤더를 고친 뒤 부른다). 정적 검사는 생성 소스의 VerifyGenerated 정의에 있으므로 생성 소스까지 컴파일해야 평가된다.
         public async Task<ProcessResult> CompileGeneratedAsync()
         {
             bool clangCl = Path.GetFileNameWithoutExtension(compiler).Contains("clang-cl", StringComparison.OrdinalIgnoreCase);
             string source = temporary.FilePath("generated-check.cpp");
-            File.WriteAllText(source, $"#include <{lastInclude[..^2]}.generated.h>\n", new UTF8Encoding(false, true));
+            File.WriteAllText(source, $"#include <{lastInclude[..^2]}.generated.h>\n#include \"{Source.Replace('\\', '/')}\"\n", new UTF8Encoding(false, true));
             List<string> arguments = clangCl
                 ? ["/nologo", "/TP", "/utf-8", "/clang:-std=c++23", "/W4", "/WX", "/GR-", "/EHs-c-", "/Zc:__cplusplus", "/Zs", source]
                 : ["-x", "c++", "-std=c++23", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-fno-exceptions", "-fno-rtti", "-fsyntax-only", source];

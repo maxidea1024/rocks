@@ -66,7 +66,7 @@ internal static partial class MetaTests
             Verify.Equal(Type("probe::Holder").GetProperty("id").GetString(), Field("probe::Value", "holder").GetProperty("value").GetProperty("type").GetString(), "class struct field target");
 
             // 생성물은 clang-format을 거치므로 공백을 지운 텍스트로 비교한다(줄바꿈 위치에 기대지 않는다).
-            string generated = Compact(File.ReadAllText(probe.Output));
+            string generated = Compact(probe.GeneratedText());
             foreach ((string expected, string reason) in new[]
             {
                 ("struct GeneratedType<::probe::Leaf>", "struct specialization"),
@@ -114,7 +114,7 @@ internal static partial class MetaTests
                 "ROCKS_CLASS()\nstruct Node : public rocks::Object {\nROCKS_PROPERTY() rocks::ObjectRef<Node> target;\n};\n" +
                 "ROCKS_CLASS()\nstruct Value : public Node {\nROCKS_PROPERTY() rocks::ObjectRef<Box> plain;\n};\n}\n";
             await probe.GenerateAsync(source);
-            string generated = Compact(File.ReadAllText(probe.Output));
+            string generated = Compact(probe.GeneratedText());
             foreach ((string expected, string reason) in new[]
             {
                 ("static void Trace(const ::probe::Box&, TraceVisitor&) noexcept {}", "class without traced fields has an unnamed empty Trace"),
@@ -157,7 +157,7 @@ internal static partial class MetaTests
                 "rocks::Span<const rocks::uint8>) noexcept { return rocks::Result<rocks::Array<rocks::uint8>>::Success(rocks::Array<rocks::uint8>(allocator)); }\n};\n" +
                 "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() Alpha alpha;\n};\n}\n";
             await probe.GenerateAsync(source);
-            string generated = Compact(File.ReadAllText(probe.Output));
+            string generated = Compact(probe.GeneratedText());
             int zeta = generated.IndexOf("structGeneratedType<::probe::Zeta>", StringComparison.Ordinal);
             int alpha = generated.IndexOf("structGeneratedType<::probe::Alpha>", StringComparison.Ordinal);
             Verify.That(zeta >= 0 && alpha > zeta, "NATIVE member struct is emitted before its user");
@@ -173,7 +173,7 @@ internal static partial class MetaTests
         {
             using Probe probe = new(options, actualEnvironment, generator, compiler);
             await probe.GenerateAsync(ChainSource(16));
-            Verify.That(Compact(File.ReadAllText(probe.Output)).Contains(Compact("static constexpr uint32 Depth = 16u;"), StringComparison.Ordinal), "depth 16 is accepted");
+            Verify.That(Compact(probe.GeneratedText()).Contains(Compact("static constexpr uint32 Depth = 16u;"), StringComparison.Ordinal), "depth 16 is accepted");
             await probe.RejectAsync(ChainSource(17), "RMC2303", "nesting depth 17");
         });
         // struct 상속 규칙(리플렉션 B9k)은 MetaTests.StructInheritance.cs가 본다.
@@ -216,7 +216,7 @@ internal static partial class MetaTests
             Verify.Equal(3, Type("probe::Segment").GetProperty("version").GetInt32(), "Version with Atomic");
             Verify.Equal("", Flags("probe::Plain"), "Atomic is not propagated from a member");
             Verify.Equal("", Flags("probe::Value"), "class flags");
-            string generated = Compact(File.ReadAllText(probe.Output));
+            string generated = Compact(probe.GeneratedText());
             foreach ((string expected, string reason) in new[]
             {
                 ("Span<const char>(\"probe::Point\", 12), Guid{}, 16u, Span<const char>(\"Point\", 5)};", "Atomic struct schema flags"),

@@ -88,7 +88,7 @@ internal static partial class MetaTests
             Verify.That(Flags("probe::WorldBundle").SequenceEqual(["ContainsStrongReference", "RequiresWorldOnlyOwner", "ContainsReferenceArray"]),
                 "struct flags are written in a fixed order");
 
-            string generated = Compact(File.ReadAllText(probe.Output));
+            string generated = Compact(probe.GeneratedText());
             foreach ((string expected, string reason) in new[]
             {
                 ("#include <Object/NativeMemberTraits.h>", "struct specializations include the member trait header"),
@@ -142,7 +142,7 @@ internal static partial class MetaTests
             System.Text.Json.JsonElement points = Type("probe::Value").GetProperty("fields")[0];
             Verify.Equal(Type("probe::Vec3Binding").GetProperty("id").GetString(), points.GetProperty("element").GetProperty("type").GetString(),
                 "Binds real type element resolves to the mirror");
-            string generated = Compact(File.ReadAllText(probe.Output));
+            string generated = Compact(probe.GeneratedText());
             Verify.That(generated.Contains(Compact("NativeTypeKey<::rocks::Vector3<float>>()"), StringComparison.Ordinal), "element native key of the real type");
             Verify.That(generated.Contains(Compact("static_assert(!GeneratedType<::rocks::Vector3<float>>::ContainsStrongReference"), StringComparison.Ordinal),
                 "Array<S> element check uses the real type specialization");
@@ -285,7 +285,7 @@ internal static partial class MetaTests
         {
             using Probe probe = new(options, actualEnvironment, generator, compiler);
             await probe.GenerateAsync(ArrayChainSource(16));
-            Verify.That(Compact(File.ReadAllText(probe.Output)).Contains(Compact("static constexpr uint32 Depth = 16u;"), StringComparison.Ordinal), "depth 16 through arrays is accepted");
+            Verify.That(Compact(probe.GeneratedText()).Contains(Compact("static constexpr uint32 Depth = 16u;"), StringComparison.Ordinal), "depth 16 through arrays is accepted");
             await probe.RejectAsync(ArrayChainSource(17), "RMC2303", "nesting depth 17");
         });
         // WorldOnly 소유자 형질의 원소 struct는 WorldOnly가 아닌 클래스에 둘 수 없고(직접·원소 struct를 담은 struct), NATIVE

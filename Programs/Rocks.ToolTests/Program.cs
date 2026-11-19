@@ -146,7 +146,7 @@ internal static class Program
                     throw new ArgumentException("Unknown command: " + args[0]);
             }
 
-            return await suite.RunAsync(options.Json, options.Seed, parallelism);
+            return await suite.RunAsync(options.Json, options.Seed, parallelism, options.Only);
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {

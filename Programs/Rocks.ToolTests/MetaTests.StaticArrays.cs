@@ -62,7 +62,7 @@ internal static partial class MetaTests
                 Verify.Equal(kind, Field("probe::Value", name).GetProperty("element").GetProperty("kind").GetString(), name + " element kind");
             }
 
-            string generated = Compact(File.ReadAllText(probe.Output));
+            string generated = Compact(probe.GeneratedText());
             Verify.Contains("{ValueKind::StaticArray,Guid{}}", generated, "generated static array schema");
             Verify.Contains("{ValueKind::Int32,Guid{}},4u}", generated, "generated element and N");
             Verify.Contains("detail::TraceArrayField(value.*(&::probe::Value::refs),visitor);", generated, "class trace visits reference elements");
@@ -81,7 +81,8 @@ internal static partial class MetaTests
             await probe.GenerateAsync(StaticArrayPreamble + "ROCKS_STRUCT()\nstruct Leaf {\nROCKS_PROPERTY() rocks::int32 x = 0;\n};\n" +
                 "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_NATIVE() Leaf cache[2][3];\n};\n}\n");
             string original = File.ReadAllText(probe.Output);
-            Verify.Contains(Compact("static_assert(!GeneratedType<::probe::Leaf>::ContainsStrongReference"), Compact(original),
+            // 정적 검사는 생성 소스의 VerifyGenerated 정의에 있다(형질은 헤더에 남는다 — 아래에서 헤더의 형질을 고친다).
+            Verify.Contains(Compact("static_assert(!GeneratedType<::probe::Leaf>::ContainsStrongReference"), Compact(File.ReadAllText(probe.Source)),
                 "native array element struct trait check");
             ProcessResult control = await probe.CompileGeneratedAsync();
             Verify.Equal(0, control.ExitCode, "generated header compiles: " + control.StdOut + control.StdErr);

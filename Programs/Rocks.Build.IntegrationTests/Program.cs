@@ -72,9 +72,10 @@ try
         Require(bindingsEntry.GetProperty("Descriptor").GetString() == "Metadata/CoreTypeBindings/CoreTypeBindings.rocksmeta.json" &&
             bindingsEntry.GetProperty("IdentityManifest").GetString() == "Metadata/CoreTypeBindings/CoreTypeBindings.rocksids.json",
             "Engine SDK manifest does not name the CoreTypeBindings descriptor and identity manifest");
-        // manifest 버전 7: 5는 Build/Build.version 값을 EngineVersion {Major, Minor, Patch}로 담고(그 파일 자체는 SDK에 없다), 6은 모듈 표
+        // manifest 버전 8: 5는 Build/Build.version 값을 EngineVersion {Major, Minor, Patch}로 담고(그 파일 자체는 SDK에 없다), 6은 모듈 표
         // 표지를 담고(Core가 ProvidesModuleTable, 서드파티 모듈이 ThirdParty — Docs/Design/ModuleLoader.ko.md 3.9절), 7은 리플렉션 생성
-        // 소스만으로 된 라이브러리의 표지 ReflectionOnlyLibrary를 담는다(Docs/Design/ReflectionGeneratedSources.ko.md 6.3절).
+        // 소스만으로 된 라이브러리의 표지 ReflectionOnlyLibrary를 담는다(Docs/Design/ReflectionGeneratedSources.ko.md 6.3절). 8은 칸이 같고
+        // 생성 헤더의 모양이 다르다(타입별 본문이 헤더가 아니라 SDK 라이브러리에 있다 — 같은 문서 5절).
         var sdkModules = engineManifest.RootElement.GetProperty("Modules").EnumerateArray().ToArray();
         // 손으로 쓴 소스가 없던 리플렉션 모듈(CoreTypeBindings)이 모듈 생성 소스(등록 함수 정의) 때문에 라이브러리를 갖는다. SDK는 그
         // 라이브러리를 싣고 표지를 켠다. 손으로 쓴 소스가 있는 모듈(Core)은 표지가 꺼져 있다.
@@ -88,10 +89,10 @@ try
             !sdkModules.Single(module => module.GetProperty("Name").GetString() == "Core").GetProperty("ThirdParty").GetBoolean(),
             "Engine SDK manifest does not carry the module table markers");
         var sdkEngine = engineManifest.RootElement.GetProperty("EngineVersion");
-        Require(engineManifest.RootElement.GetProperty("Version").GetInt32() == 7 &&
+        Require(engineManifest.RootElement.GetProperty("Version").GetInt32() == 8 &&
             sdkEngine.GetProperty("Major").GetInt32() == engineVersion.Major && sdkEngine.GetProperty("Minor").GetInt32() == engineVersion.Minor &&
             sdkEngine.GetProperty("Patch").GetInt32() == engineVersion.Patch && sdkEngine.EnumerateObject().Count() == 3,
-            "Engine SDK manifest version 7 does not carry the Build/Build.version engine version: " + sdkEngine.GetRawText());
+            "Engine SDK manifest version 8 does not carry the Build/Build.version engine version: " + sdkEngine.GetRawText());
     }
 
     Require(!Directory.GetFiles(sdk, "Build.version", SearchOption.AllDirectories).Any(), "Installed SDK copied Build/Build.version");
@@ -160,13 +161,18 @@ try
         "Game module table does not list the SDK modules and the game module:\n" + gameTable);
     // 게임 소유 메타데이터 모듈(실행 파일 SampleGame)은 자기 모듈 생성 소스를 내고 그 실행 파일의 번역 단위로 컴파일한다. SDK 모듈의 생성
     // 소스는 기대하지도 다시 만들지도 않는다(등록 함수의 정의는 SDK 라이브러리에서 링크된다 — 위 실행이 성공했다).
+    // 타입별 생성 소스(GameObject.h의 타입 본문)도 같은 실행 파일의 번역 단위다.
     string gameModuleSource = Path.Combine(output, "Generated/SampleGame/Source/SampleGame.module.generated.cpp");
+    string gameTypeSource = Path.Combine(output, "Generated/SampleGame/Source/Public/GameObject.generated.cpp");
     using (var gameDatabase = JsonDocument.Parse(File.ReadAllText(initial.CompilationDatabasePath)))
     {
-        Require(File.Exists(gameModuleSource) && gameDatabase.RootElement.EnumerateArray().Any(record =>
-                string.Equals(Path.GetFullPath(record.GetProperty("file").GetString()!), Path.GetFullPath(gameModuleSource),
-                    OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)),
-            "Game build did not generate and compile the SampleGame module generated source");
+        foreach (string generatedSource in new[] { gameModuleSource, gameTypeSource })
+        {
+            Require(File.Exists(generatedSource) && gameDatabase.RootElement.EnumerateArray().Any(record =>
+                    string.Equals(Path.GetFullPath(record.GetProperty("file").GetString()!), Path.GetFullPath(generatedSource),
+                        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)),
+                "Game build did not generate and compile the SampleGame generated source " + generatedSource);
+        }
     }
 
     Require(!Directory.Exists(Path.Combine(output, "Generated/CoreTypeBindings")), "Game build generated sources for an imported SDK module");
@@ -690,6 +696,10 @@ try
             $"Game build did not generate the {module} module generated source");
     }
 
+    Require(File.Exists(Path.Combine(reflectionOutput, "Generated/GameCore/Source/Public/GameCore/CoreThing.generated.cpp")) &&
+        File.Exists(Path.Combine(reflectionOutput, "Generated/SampleGame/Source/Public/FixtureChild.generated.cpp")),
+        "Game build did not generate the per-header generated sources");
+
     Require(reflectionResult.ModuleOutputs.ContainsKey("GameCore") &&
         reflectionResult.Actions.Any(action => action.Module == "GameCore" && action.Kind == "Archive" && action.Executed),
         "A game module with only reflection headers was not built into an archive");
@@ -718,6 +728,24 @@ try
     File.WriteAllText(childHeader, childHeaderText);
     Require((await ReflectionGame()).ExitCode == 0, "Game did not recover after the dependent module metadata failure");
     Require(Hashing.Sha256File(coreGenerated) != coreGeneratedHash, "GameCore metadata change was not published after recovery");
+
+    // 본문 계약 위반(리플렉션 클래스의 noexcept가 아닌 생성자)은 생성 헤더만 보는 게시 전 검증을 지나 빌드의 생성 소스 compile action에서
+    // 실패한다. Rocks.Build가 컴파일러 출력 뒤에 RMC3000 안내를 붙이고, --verify-metadata-sources on으로 다시 돌리면 메타 단계가 게시
+    // 전에 원본 선언과 함께 거부한다(Docs/Design/ReflectionGeneratedSources.ko.md 7절).
+    File.WriteAllText(childHeader, childHeaderText.Replace("noexcept : CoreThing(allocator)", ": CoreThing(allocator)", StringComparison.Ordinal));
+    var bodyRejected = await ReflectionGame();
+    Require(bodyRejected.ExitCode != 0 &&
+        bodyRejected.StdErr.Contains("note: RMC3000: generated metadata contract rejected by Clang (reflection generated source of module 'SampleGame')", StringComparison.Ordinal) &&
+        bodyRejected.StdErr.Contains("--verify-metadata-sources on", StringComparison.Ordinal) &&
+        bodyRejected.StdErr.Contains("FixtureChild.generated.cpp", StringComparison.Ordinal),
+        "A generated body contract violation did not fail the build with the RMC3000 note: " + bodyRejected.StdOut + bodyRejected.StdErr);
+    var bodyVerified = await Cli("game", "--sdk", reflectionSdk, "--project", reflectionGame, "--configuration", "Debug", "--verify-metadata-sources", "on");
+    Require(bodyVerified.ExitCode != 0 && bodyVerified.StdErr.Contains("error RMC3000", StringComparison.Ordinal) &&
+        bodyVerified.StdErr.Contains("sample::FixtureChild", StringComparison.Ordinal) &&
+        !bodyVerified.StdOut.Contains("Native build:", StringComparison.Ordinal),
+        "--verify-metadata-sources on did not reject the generated body contract violation before the native build: " + bodyVerified.StdOut + bodyVerified.StdErr);
+    File.WriteAllText(childHeader, childHeaderText);
+    Require((await ReflectionGame()).ExitCode == 0, "Game did not recover after the generated body contract failure");
 
     // Metadata에서 뺀 헤더의 생성물은 게시 트랜잭션이 지운다(ID는 은퇴시켜 예약한다). 생성 소스 루트(Source)의 잉여 파일도 같은
     // 트랜잭션이 지운다.
@@ -849,21 +877,21 @@ try
         "Incompatible SDK configuration was silently accepted");
     Pass("sdk-configuration-mismatch", timer.Elapsed);
 
-    // 이전 SDK(manifest 버전 6 — 리플렉션 전용 라이브러리 표지 ReflectionOnlyLibrary가 없고 모듈 생성 헤더가 등록 함수를 inline으로
-    // 정의한다)는 버전 불일치로 거부하고, 버전 7인데 EngineVersion이 없거나 칸이 빠진 manifest는 다른 값(저장소 Build/Build.version
-    // 등)으로 대신하지 않고 다시 내보내라고 거부한다.
+    // 이전 SDK(manifest 버전 7 — 타입별 생성 헤더가 본문을 inline으로 정의하고 동봉한 MetaCompiler가 타입별 생성 소스를 내지 않는다)는
+    // 버전 불일치로 거부하고, 버전 8인데 EngineVersion이 없거나 칸이 빠진 manifest는 다른 값(저장소 Build/Build.version 등)으로 대신하지
+    // 않고 다시 내보내라고 거부한다.
     timer.Restart();
     var sdkManifestPath = Path.Combine(sdk, "rocks-sdk.json");
     var sdkManifestBytes = File.ReadAllBytes(sdkManifestPath);
     var sdkManifestText = File.ReadAllText(sdkManifestPath);
-    Require(sdkManifestText.Contains("\"Version\": 7,", StringComparison.Ordinal), "SDK manifest is not version 7:\n" + sdkManifestText);
+    Require(sdkManifestText.Contains("\"Version\": 8,", StringComparison.Ordinal), "SDK manifest is not version 8:\n" + sdkManifestText);
     SetReadOnly(sdkManifestPath, false);
     try
     {
-        File.WriteAllText(sdkManifestPath, sdkManifestText.Replace("\"Version\": 7,", "\"Version\": 6,", StringComparison.Ordinal));
+        File.WriteAllText(sdkManifestPath, sdkManifestText.Replace("\"Version\": 8,", "\"Version\": 7,", StringComparison.Ordinal));
         var previous = await Game();
-        Require(previous.ExitCode != 0 && previous.StdErr.Contains("SDK manifest version mismatch: 6", StringComparison.Ordinal),
-            "A version 6 SDK manifest was not rejected: " + previous.StdErr);
+        Require(previous.ExitCode != 0 && previous.StdErr.Contains("SDK manifest version mismatch: 7", StringComparison.Ordinal),
+            "A version 7 SDK manifest was not rejected: " + previous.StdErr);
         foreach ((string name, Action<System.Text.Json.Nodes.JsonObject> edit) in new (string, Action<System.Text.Json.Nodes.JsonObject>)[]
                  {
                      ("missing EngineVersion", manifestJson => manifestJson.Remove("EngineVersion")),

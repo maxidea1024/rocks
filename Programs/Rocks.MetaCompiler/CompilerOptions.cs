@@ -27,6 +27,15 @@ internal sealed class CompilerOptions
     // 않는다. 단독 실행과 도구 시험이 빌드 없이 생성물 전체를 확인할 때 쓴다(Docs/Design/ReflectionGeneratedSources.ko.md 7절).
     public bool VerifySources { get; init; }
 
+    // 게시 전 검증 컴파일을 함께 돌리는 수다(--jobs). 검증 컴파일은 생성물마다 독립이다. 지정하지 않으면 DefaultVerifyJobs와 프로세서 수
+    // 가운데 작은 값이다. 빌드는 자기 --jobs를 넘기고, MetaCompiler를 여럿 함께 띄우는 도구 시험은 1을 넘긴다.
+    public int VerifyJobs { get; init; } = Math.Min(DefaultVerifyJobs, Environment.ProcessorCount);
+
+    public const int DefaultVerifyJobs = 8;
+
+    // --jobs 상한이다(Rocks.Tooling.Common.ProcessRunner가 한 프로세스에서 함께 띄우는 자식 수 상한과 같다).
+    public const int MaximumVerifyJobs = ProcessRunner.MaximumConcurrentProcesses;
+
     public List<string> Imports { get; } = [];
 
     public List<string> IncludeDirectories { get; } = [];
@@ -43,6 +52,13 @@ internal sealed class CompilerOptions
 
     // 생성 소스의 출력 루트 아래 디렉터리 이름이다. include 루트가 아니다(Docs/Design/ReflectionGeneratedSources.ko.md 6.1절).
     public const string SourceDirectory = "Source";
+
+    // 타입별 생성 소스의 철자다(Source/Public 또는 Source/Private 기준): 원본 철자의 확장자 ".h"를 ".generated.cpp"로 바꾼다. public
+    // 헤더와 private 헤더의 철자가 같을 수 있어 두 디렉터리로 나눈다. Rocks.Build.Cli의 MetadataLayout이 같은 규칙으로 경로를 정한다.
+    public static string SourceSpelling(string include) => include[..^2] + ".generated.cpp";
+
+    public string SourcePath(ModuleInput input) =>
+        Path.Combine(OutputRoot, SourceDirectory, input.Private ? "Private" : "Public", SourceSpelling(input.Include));
 
     // 모듈 생성 소스(등록 함수 정의)의 파일 이름이다(<출력 루트>/Source 바로 아래). Rocks.Build.Cli의 MetadataLayout이 같은 이름으로
     // 모듈의 리플렉션 생성 소스 경로를 정한다.
@@ -95,7 +111,7 @@ internal sealed class CompilerOptions
             int equals = argument.IndexOf('=');
             string key = equals < 0 ? argument : argument[..equals];
             if (key is not ("--module" or "--input" or "--include" or "--private" or "--output-root" or "--descriptor" or "--import" or
-                "--compiler" or "--include-dir" or "--clang-arg" or "--identity-manifest" or "--identity-inventory"))
+                "--compiler" or "--include-dir" or "--clang-arg" or "--identity-manifest" or "--identity-inventory" or "--jobs"))
             {
                 throw new MetadataException($"unknown option {key}", "RMC1000", "Use --module, paired --input/--include, --output-root, --descriptor and documented optional arguments.");
             }
@@ -277,6 +293,15 @@ internal sealed class CompilerOptions
             throw new MetadataException("empty --clang-arg", "RMC1000", "Remove empty compiler arguments.");
         }
 
+        int verifyJobs = Math.Min(DefaultVerifyJobs, Environment.ProcessorCount);
+        if (single.TryGetValue("--jobs", out string? jobsText) &&
+            (!int.TryParse(jobsText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out verifyJobs) ||
+                verifyJobs < 1 || verifyJobs > MaximumVerifyJobs))
+        {
+            throw new MetadataException("invalid --jobs " + jobsText, "RMC1000",
+                $"Pass the number of parallel verification compiles (1 to {MaximumVerifyJobs}).");
+        }
+
         CompilerOptions options = new()
         {
             Module = module,
@@ -287,7 +312,8 @@ internal sealed class CompilerOptions
             IdentityManifest = manifest,
             IdentityInventory = inventory,
             Check = check,
-            VerifySources = verifySources
+            VerifySources = verifySources,
+            VerifyJobs = verifyJobs
         };
         options.Imports.AddRange(imports.Select(Path.GetFullPath));
         options.IncludeDirectories.AddRange(includes);

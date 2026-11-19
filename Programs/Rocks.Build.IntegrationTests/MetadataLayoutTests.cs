@@ -39,12 +39,21 @@ internal static class MetadataLayoutTests
             "generated include directories were not added");
         Require(Directory.Exists(a.GeneratedPublic) && a.Descriptor.EndsWith(Path.Combine("Metadata", "A.rocksmeta.json"), StringComparison.Ordinal),
             "generated directory or descriptor path");
-        // 모듈 생성 소스는 <out>/Generated/<모듈>/Source/<모듈>.module.generated.cpp이고 손으로 쓴 Sources가 아니라 리플렉션 생성 소스
-        // 목록에 든다(모듈 진입점 판정에서 빠진다). Source는 include 루트가 아니다. Metadata가 없는 모듈은 생성 소스가 없다.
+        // 생성 소스는 <out>/Generated/<모듈>/Source 아래다: 리플렉션 헤더마다 타입별 생성 소스(public 헤더는 Public/<철자>.generated.cpp,
+        // private 헤더는 Private/…)와 모듈 생성 소스 <모듈>.module.generated.cpp. 손으로 쓴 Sources가 아니라 리플렉션 생성 소스 목록에
+        // 든다(모듈 진입점 판정에서 빠진다). Source는 include 루트가 아니다. Metadata가 없는 모듈은 생성 소스가 없다.
         string moduleSource = fixture.Path("out/Generated/A/Source/A.module.generated.cpp");
+        string[] typeSources = [fixture.Path("out/Generated/A/Source/Public/Shared/Thing.generated.cpp"), fixture.Path("out/Generated/A/Source/Private/Hidden.generated.cpp")];
         Require(a.GeneratedSource == fixture.Path("out/Generated/A/Source") && a.ModuleSource == moduleSource &&
-            updated.ReflectionSources.SequenceEqual([moduleSource]) && updated.Sources.Count == 0,
-            "the module generated source was not added to the reflection source list: " + string.Join(", ", updated.ReflectionSources));
+            a.Headers.Select(a.TypeSource).SequenceEqual(typeSources) &&
+            updated.ReflectionSources.SequenceEqual([.. typeSources, moduleSource]) && updated.Sources.Count == 0,
+            "the generated sources were not added to the reflection source list: " + string.Join(", ", updated.ReflectionSources));
+        // 생성 소스의 컴파일이 실패하면 붙일 RMC3000 안내문을 모듈에 싣는다(재실행 옵션 이름 포함).
+        Require(updated.ReflectionSourceFailureNote.Contains("RMC3000", StringComparison.Ordinal) &&
+            updated.ReflectionSourceFailureNote.Contains("module 'A'", StringComparison.Ordinal) &&
+            updated.ReflectionSourceFailureNote.Contains("--" + MetadataLayout.VerifySourcesOption + " on", StringComparison.Ordinal) &&
+            plan.Modules.Single(module => module.Name == "B").ReflectionSourceFailureNote.Length == 0,
+            "the reflection source failure note was not set: " + updated.ReflectionSourceFailureNote);
         Require(!updated.PublicIncludeDirectories.Concat(updated.PrivateIncludeDirectories).Contains(a.GeneratedSource),
             "the generated source directory must not be an include root");
         Require(plan.Modules.Single(module => module.Name == "B").ReflectionSources.Count == 0, "a module without Metadata got a reflection source");

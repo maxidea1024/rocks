@@ -147,7 +147,7 @@ internal static partial class MetaTests
                 "\n// #if 0 is only a comment\n/* #include <ignored> */\n" +
                 "class Inner : public rocks::Object { public: Inner() noexcept = default; };\n#endif\n};\n}\n";
             await probe.GenerateAsync(valid);
-            Verify.Contains("probe::Outer::Inner", File.ReadAllText(probe.Output), "nested prefix CLASS");
+            Verify.Contains("probe::Outer::Inner", probe.GeneratedText(), "nested prefix CLASS");
         });
         suite.Add("Meta.PrefixClassNeverBindsAcrossTokensOrPreprocessing", async () =>
         {
@@ -189,7 +189,7 @@ internal static partial class MetaTests
                 "ROCKS_GENERATED_BODY()\n" + "ROCKS_PROPERTY(ReadOnly, Category=\"능력\", DisplayName=\"체력🎮\") rocks::int32 count = 0;\n" +
                 "public: rocks::int32 Read() const noexcept { return count; }\n};\n}\n";
             await probe.GenerateAsync(source);
-            string generated = File.ReadAllText(probe.Output);
+            string generated = probe.GeneratedText();
             Verify.Contains("\"체력🎮\"", generated, "generated display name remains readable UTF-8");
             Verify.Contains("ErrorCode::Unsupported", generated, "ReadOnly public setter policy");
             Verify.Contains("WriteGeneratedStagedField", generated, "ReadOnly staged initialization remains available");
@@ -200,7 +200,7 @@ internal static partial class MetaTests
             string source = Preamble + "ROCKS_CLASS(Abstract)\nclass Value : public rocks::Object { public:\n" +
                 "ROCKS_PROPERTY() rocks::int32 count=0; virtual void Tick() noexcept=0;\n};\n}\n";
             await probe.GenerateAsync(source);
-            Verify.Contains("MakeRuntimeTypeOps<::probe::Value, true>", File.ReadAllText(probe.Output), "abstract generated runtime ops");
+            Verify.Contains("MakeRuntimeTypeOps<::probe::Value, true>", probe.GeneratedText(), "abstract generated runtime ops");
         });
     }
 }

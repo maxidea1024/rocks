@@ -160,6 +160,16 @@ internal static partial class ModuleMetaTests
 
         public string Generated(string module, string relative) => Path.Combine(temporary.Root, "out", module, relative);
 
+        // 타입별 생성 헤더(relative — "Public/<철자>.generated.h" 또는 "Private/…")와 그 생성 소스("Source/Public/<철자>.generated.cpp")의
+        // 글이다(헤더가 먼저다). 선언·형질은 헤더에, 본문(Schema·Ops·Register·정적 검사)은 생성 소스에 있으므로 생성 코드의 문구를 보는
+        // 시험은 둘을 이어 읽는다(Docs/Design/ReflectionGeneratedSources.ko.md 5.1절).
+        public string GeneratedText(string module, string relative) => File.ReadAllText(Generated(module, relative)) +
+            File.ReadAllText(Generated(module, Path.Combine("Source", relative[..^GeneratedHeaderSuffix.Length] + GeneratedSourceSuffix)));
+
+        private const string GeneratedHeaderSuffix = ".generated.h";
+
+        private const string GeneratedSourceSuffix = ".generated.cpp";
+
         // 모듈 생성 소스(등록 함수 정의)의 경로다. 출력 루트의 Source 아래이고 include 루트가 아니다.
         public string ModuleSource(string module) => Generated(module, Path.Combine("Source", module + ".module.generated.cpp"));
 
