@@ -233,6 +233,45 @@ inline Array<uint8> Write(Allocator& allocator, ObjectRegistry& registry, Object
     return sink.Take();
 }
 
+// registry에 로드한 package를 읽은 파일이 기록한 설정(종류·정렬·Zstd 여부·커스텀 버전, 에디터는 저장
+// 엔진 버전·Build·ImportOwner 의존·ImportRecord·Tags, 쿠킹은 프로파일·쿠커 버전)으로 다시 쓴다. bulk는
+// 로드한 Package에서 읽는다. contents는 그 파일의 ReadPackage 결과다(실패하면 빈 배열).
+inline Array<uint8> ResaveAsRead(Allocator& allocator, ObjectRegistry& registry,
+                                 ObjectHandle package, const PackageContents& contents) noexcept {
+    PackageBulkReader bulk(registry, package);
+    PackageWriteOptions options;
+    options.kind = contents.header.kind;
+    options.bulkAlignment = contents.header.bulkAlignment;
+    options.bulkSource = &bulk;
+    for (const PackageBulkEntry& entry : contents.bulkEntries) {
+        if (entry.codec == BulkCodec::Zstd) {
+            options.bulkCodec = BulkCodec::Zstd;
+        }
+    }
+
+    options.customVersions = contents.summary.customVersions.View();
+    Array<PackageDependencyEntry> extra(allocator);
+    if (contents.header.kind == PackageKind::Editor) {
+        options.engineVersion = contents.summary.savedBy;
+        for (const PackageDependencyEntry& entry : contents.dependencies) {
+            if (entry.kind == PackageDependencyKind::Build ||
+                entry.kind == PackageDependencyKind::ImportOwner) {
+                (void)extra.TryPushBack(entry);
+            }
+        }
+
+        options.extraDependencies = extra.View();
+        options.importRecord = contents.importRecord;
+        options.tags = contents.tags;
+    } else {
+        options.profileId = contents.summary.profileId.View();
+        options.profileSettings = contents.summary.profileSettings;
+        options.cookerVersion = contents.summary.cookerVersion;
+    }
+
+    return Write(allocator, registry, package, options);
+}
+
 // bytes 패키지들을 registry에 한 트랜잭션으로 로드한다. roots·handles는 packages 수만큼이다.
 inline Result<void> LoadAll(AssetEnv& env, ObjectRegistry& registry, Span<Array<uint8>> files,
                             PackageKind kind, PackageImportResolver* resolver,

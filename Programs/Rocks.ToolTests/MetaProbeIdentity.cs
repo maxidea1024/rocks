@@ -20,7 +20,7 @@ internal static class MetaProbeIdentity
                 "probe::Point", "probe::Segment", "probe::Plain", "probe::Derived", "probe::Other", "probe::none",
                 "probe::Target", "probe::Slot", "probe::Host", "probe::Flags", "probe::Base", "probe::Mid", "probe::Tagged", "probe::AtomicBase",
                 "probe::AtomicLeaf", "probe::A", "probe::B", "probe::RefBase", "probe::Range", "probe::Hidden", "probe::Child",
-                "probe::Range::Inner", "probe::ModeBinding", "probe::KeeperBinding", "probe::Tone" }
+                "probe::Range::Inner", "probe::ModeBinding", "probe::KeeperBinding", "probe::Tone", "probe::Cell" }
                 .Concat(Enumerable.Range(1, 17).Select(level => $"probe::Chain{level}")))
             {
                 manifest.Register("type", name);
@@ -76,7 +76,7 @@ internal static class MetaProbeIdentity
                 "probe::Range::low", "probe::Range::high", "probe::Range::owner", "probe::Range::Inner::n", "probe::Hidden::range", "probe::Child::extra",
                 "probe::Holder::range", "probe::Holder::plain", "probe::Value::range", "probe::Value::child",
                 "probe::Holder::cell", "probe::Holder::array", "probe::Holder::fixed", "probe::Holder::mapKey", "probe::Holder::mapValue",
-                "probe::Holder::set", "probe::Holder::maybe" }
+                "probe::Holder::set", "probe::Holder::maybe", "probe::Cell::cell" }
                 .Concat(Enumerable.Range(2, 16).Select(level => $"probe::Chain{level}::inner")))
             {
                 manifest.Register("field", name);

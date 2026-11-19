@@ -1,11 +1,14 @@
 #include "AssetFixtureValues.h"
 
+#include <Serialization/Record.h>
+
 // 고정 byte(golden) 시험이다(Docs/Design/AssetSystem.ko.md 5.3절 옛 fixture, 14절). 시험 인코더가
 // writer·reader와 스키마·Guid를 공유하므로 둘을 함께 바꾸거나 Zstd를 올려도 왕복 시험은 통과한다 —
-// 그래서 고정 장면의 출력 SHA-256(에디터·쿠킹 None·쿠킹 Zstd)을 고정하고, 체크인한 v1 byte를 읽어
-// 다시 저장해 같은지 본다. 이 byte는 포맷을 올릴 때 5.3절 "옛 fixture를 읽고 다시 저장" 시험의
-// 씨앗이다. 값이 바뀌면 포맷(또는 의존 라이브러리 출력)이 바뀐 것이다 — 의도한 변경이면 포맷 버전
-// 규칙(5.3절)을 따르고 여기 값을 함께 고친다.
+// 그래서 고정 장면의 출력 SHA-256(풍부한 에디터·쿠킹 None·쿠킹 Zstd)을 고정하고, 체크인한 v1
+// byte(대표 에셋 하나뿐인 B, 모든 선택 섹션을 담은 풍부한 A)를 읽어 다시 저장해 같은지 본다. 이
+// byte는 포맷을 올릴 때 5.3절 "옛 fixture를 읽고 다시 저장" 시험의 씨앗이다. 값이 바뀌면
+// 포맷(또는 의존 라이브러리 출력)이 바뀐 것이다 — 의도한 변경이면 포맷 버전 규칙(5.3절)을 따르고
+// 여기 값을 함께 고친다.
 using namespace rocks;
 using namespace rocks::asset_test;
 
@@ -55,6 +58,56 @@ bool MakeGolden(ObjectRegistry& registry, Golden& golden) noexcept {
            registry.SetReference(access, asset, pointer->editorRef, bAsset).IsOk();
 }
 
+// 풍부한 장면의 커스텀 버전 표(id 오름차순)와 Build 의존이다(DependencyDeclarer가 줄 목록 — 16.2절).
+const PackageCustomVersion GoldenCustomVersions[] = {{Guid{0x601D, 1}, 2}, {Guid{0x601D, 2}, 7}};
+const PackageDependencyEntry GoldenBuildDependencies[] = {
+    {FixedId(1703), PackageDependencyKind::Build, TypeId{}, false}};
+
+// 풍부한 에디터 장면의 ImportRecord·Tags Record byte다(Tags 키 엄격 오름차순).
+struct GoldenRecords {
+    explicit GoldenRecords(Allocator& allocator) noexcept
+        : importRecord(allocator), tags(allocator) {
+    }
+
+    Array<uint8> importRecord;
+    Array<uint8> tags;
+};
+
+bool MakeGoldenRecords(Allocator& allocator, GoldenRecords& records) noexcept {
+    const uint8 importerVersion[4] = {3, 0, 0, 0};
+    const uint8 value[4] = {1, 2, 3, 4};
+    RecordBuilder importRecord(allocator, Guid{0x601D, 0x1EC0}, 1);
+    RecordBuilder tags(allocator, Guid{0x601D, 0x7A65}, 1);
+    if (!importRecord.AddField(Guid{0x601D, 0x11}, WireType::U32, importerVersion) ||
+        !tags.AddField(Guid{1, 1}, WireType::U32, value) ||
+        !tags.AddField(Guid{1, 2}, WireType::U32, value)) {
+        return false;
+    }
+
+    auto builtImport = importRecord.Build();
+    auto builtTags = tags.Build();
+    if (!builtImport || !builtTags) {
+        return false;
+    }
+
+    records.importRecord = Move(builtImport.Value());
+    records.tags = Move(builtTags.Value());
+    return true;
+}
+
+// 풍부한 에디터 옵션이다: import(B 대표 에셋 Hard·EditorOnly Hard)·Zstd 블록 bulk·커스텀 버전·
+// ImportRecord·Tags·Build 의존.
+PackageWriteOptions RichEditorOptions(Golden& golden, const GoldenRecords& records) noexcept {
+    PackageWriteOptions options = EditorOptions();
+    options.bulkSource = &golden.bulk;
+    options.bulkCodec = BulkCodec::Zstd;
+    options.customVersions = GoldenCustomVersions;
+    options.importRecord = records.importRecord.View();
+    options.tags = records.tags.View();
+    options.extraDependencies = GoldenBuildDependencies;
+    return options;
+}
+
 // digest의 소문자 16진 표기다.
 String HexOf(Allocator& allocator, Span<const uint8> bytes) noexcept {
     constexpr char Digits[] = "0123456789abcdef";
@@ -79,13 +132,16 @@ bool SameDigest(Allocator& allocator, Span<const uint8> file, StringView expecte
     return false;
 }
 
-// 고정 장면 출력의 SHA-256이다(에디터, 쿠킹 None, 쿠킹 Zstd).
-constexpr StringView EditorDigest =
-    "007e31da03f055b1af7eab3b6bf2b8445a7763f0167d871e61c7fb21c199538d";
-constexpr StringView CookedDigest =
-    "05ec13ea9fbad4501aa22c2799422b2efb52ed0a5aff577cde2c4ecd64cdb825";
-constexpr StringView CookedZstdDigest =
-    "42a4061541580206e9f279cbb74aaf2dc0da050a332fa2e2ba92e8482913303b";
+// 고정 장면 출력의 SHA-256이다(풍부한 에디터, 쿠킹 None, 쿠킹 Zstd — 쿠킹 둘은 커스텀 버전 포함).
+// 채우기 전(빈 값)에는 실패 문구가 실제 SHA-256을 남긴다 — 그 값으로 채운다.
+constexpr StringView EditorDigest = "";
+constexpr StringView CookedDigest = "";
+constexpr StringView CookedZstdDigest = "";
+
+// 체크인한 풍부한 v1 에디터 패키지 byte다(고정 장면의 A — RichEditorOptions: import·Zstd 블록
+// bulk·커스텀 버전·ImportRecord·Tags·Build 의존, 엔진 1.2.3).
+// 채우기 전(자리 byte 하나)에는 실패 문구가 지금 쓴 byte의 16진을 남긴다 — 그 값으로 채운다.
+constexpr uint8 GoldenRichEditorPackage[] = {0x00};
 
 // 체크인한 v1 에디터 패키지 byte다(고정 장면의 B — 대표 에셋 TestAsset 하나, 기본값, 엔진 1.2.3).
 constexpr uint8 GoldenEditorPackage[] = {
@@ -191,16 +247,19 @@ constexpr uint8 GoldenEditorPackage[] = {
 
 } // namespace
 
-// 고정 장면의 출력 byte가 고정 SHA-256과 같다(에디터·쿠킹 None·쿠킹 Zstd).
+// 고정 장면의 출력 byte가 고정 SHA-256과 같다(풍부한 에디터 — import·Zstd 블록 bulk·커스텀
+// 버전·ImportRecord·Tags·Build 의존, 쿠킹 None·쿠킹 Zstd — import·커스텀 버전).
 TEST(AssetPackage_GoldenBytes) {
     AssetEnv env;
     REQUIRE(env.Ready());
     Golden golden(env.allocator);
     REQUIRE(MakeGolden(*env.source, golden));
-    PackageWriteOptions editor = EditorOptions();
-    editor.bulkSource = &golden.bulk;
+    GoldenRecords records(env.allocator);
+    REQUIRE(MakeGoldenRecords(env.allocator, records));
+    const PackageWriteOptions editor = RichEditorOptions(golden, records);
     PackageWriteOptions cooked = CookedOptions();
     cooked.bulkSource = &golden.bulk;
+    cooked.customVersions = GoldenCustomVersions;
     PackageWriteOptions zstd = cooked;
     zstd.bulkCodec = BulkCodec::Zstd;
     const Array<uint8> editorFile = Write(env.allocator, *env.source, golden.a.Handle(), editor);
@@ -212,7 +271,8 @@ TEST(AssetPackage_GoldenBytes) {
     CHECK(SameDigest(env.allocator, zstdFile.View(), CookedZstdDigest));
 }
 
-// 체크인한 v1 byte를 읽어(에디터 로드) 다시 저장하면 같은 byte다.
+// 체크인한 v1 byte를 읽어(에디터 로드) 다시 저장하면 같은 byte다 — B(대표 에셋 하나)와 풍부한
+// A(B와 한 묶음으로 로드, 읽은 파일이 기록한 설정으로 다시 쓴다).
 TEST(AssetPackage_GoldenV1Resaves) {
     AssetEnv env;
     REQUIRE(env.Ready());
@@ -235,4 +295,45 @@ TEST(AssetPackage_GoldenV1Resaves) {
     CHECK(SameBytes(resaved.View(), stored));
     CHECK(env.target->Discard(env.target->OwnerAccess(), handles[0]));
     roots[0].Reset();
+
+    GoldenRecords records(env.allocator);
+    REQUIRE(MakeGoldenRecords(env.allocator, records));
+    const Array<uint8> richCurrent = Write(env.allocator, *env.source, golden.a.Handle(),
+                                           RichEditorOptions(golden, records));
+    REQUIRE(!richCurrent.IsEmpty());
+    const Span<const uint8> rich(GoldenRichEditorPackage, sizeof(GoldenRichEditorPackage));
+    if (!SameBytes(richCurrent.View(), rich)) {
+        String hex = HexOf(env.allocator, richCurrent.View());
+        test::RecordFailure(hex.CStr(), __FILE__, __LINE__);
+    }
+
+    PackageReadOptions editorRead;
+    editorRead.expectedKind = PackageKind::Editor;
+    auto contents = ReadPackage(env.allocator, rich, editorRead);
+    REQUIRE(contents);
+    // 풍부한 byte는 선택 섹션을 모두 담는다.
+    bool zstd = false;
+    for (const PackageBulkEntry& entry : contents.Value().bulkEntries) {
+        zstd = zstd || entry.codec == BulkCodec::Zstd;
+    }
+
+    bool build = false;
+    for (const PackageDependencyEntry& entry : contents.Value().dependencies) {
+        build = build || entry.kind == PackageDependencyKind::Build;
+    }
+
+    CHECK(!contents.Value().imports.IsEmpty() && zstd && build);
+    CHECK(contents.Value().summary.customVersions.Size() == 2);
+    CHECK(!contents.Value().importRecord.IsEmpty() && !contents.Value().tags.IsEmpty());
+    Array<uint8> both[2] = {Copy(env.allocator, stored), Copy(env.allocator, rich)};
+    RootRef<Object> bothRoots[2];
+    ObjectHandle bothHandles[2];
+    REQUIRE(LoadAll(env, *env.target, both, PackageKind::Editor, nullptr, bothRoots, bothHandles));
+    const Array<uint8> richResaved =
+        ResaveAsRead(env.allocator, *env.target, bothHandles[1], contents.Value());
+    CHECK(SameBytes(richResaved.View(), rich));
+    for (usize index = 0; index < 2; ++index) {
+        CHECK(env.target->Discard(env.target->OwnerAccess(), bothHandles[index]));
+        bothRoots[index].Reset();
+    }
 }
