@@ -344,7 +344,9 @@ Result<VkDescriptorSet> VulkanDevice::AllocateFrameSet(VkDescriptorSetLayout lay
                 {VK_DESCRIPTOR_TYPE_SAMPLER, sets},
                 {VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, sets * 2},
                 {VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, sets},
-                {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, sets * 2}};
+                {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, sets * 2},
+                // compute 쓰기 텍스처 slot(SetWritableTexture, 텍스처 GX2 A부)이다.
+                {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, sets}};
             VkDescriptorPoolCreateInfo info = {};
             info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
             info.maxSets = sets;

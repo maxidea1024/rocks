@@ -1,6 +1,6 @@
 # 셰이더 시스템 설계
 
-기준일: 2026-11-18, 개정 19(초안). 셰이더 원문을 HLSL 하나로 쓰고 오프라인에서 D3D12·D3D11·Vulkan·Metal·OpenGL ES용 코드로 바꾸는 구조와, 그 구현에 앞서 갖춰야 할 **선행 작업**을 정한다. 개정 7은 현재 코드베이스(HEAD `0be1e64`, 2026-11-14)와 다른 설계 문서의 상태를 다시 조사해 선행 작업과 순서를 새로 세웠다(4–6절).
+기준일: 2026-11-19, 개정 20(초안). 셰이더 원문을 HLSL 하나로 쓰고 오프라인에서 D3D12·D3D11·Vulkan·Metal·OpenGL ES용 코드로 바꾸는 구조와, 그 구현에 앞서 갖춰야 할 **선행 작업**을 정한다. 개정 7은 현재 코드베이스(HEAD `0be1e64`, 2026-11-14)와 다른 설계 문서의 상태를 다시 조사해 선행 작업과 순서를 새로 세웠다(4–6절).
 
 UE 근거는 UE 5.8.4(EpicGames/UnrealEngine `release` 브랜치 commit `f45729c0b6f097038e72b52d366a62baeca3275b`)의 원본이다. 2026-11-14 사용자 지시로 기준을 5.6에서 5.8로 올렸고, 개정 6까지의 5.6 근거를 모두 5.8.4로 다시 확인했다(17절). 경로는 `Engine/Source/` 기준이며 `Engine/Shaders`·`Engine/Config`·`Engine/Build`는 그대로 적는다. UE 밖 도구(DXC·SPIRV-Cross·SPIRV-Tools·Vulkan)에 관한 사실은 그 출처를 따로 적는다. 개정 6까지의 조사 문서(UE 5.6 기준)는 [Rocks 셰이더 시스템](https://claude.ai/artifact/U5uNh2EWGvXKQiNYXnuc1Q)이다.
 
@@ -162,6 +162,8 @@ HEAD `0be1e64` 기준이다. 셰이더 시스템이 쓸 기반과 바꿀 대상,
   - K1. TargetProfile에 `graphicsBackends`(복수, 순서 = 런타임 선택 순서)·`shaderFormats`(backend마다 선호 순서가 있는 형식 목록) 필드와 엔진 기본 `MacOS` 프로필을 둔다(12절). 지금 AssetSystem 10절은 "그래픽 backend"를 이름 없는 단일 항목으로 적고 기본 프로필은 Windows·Android뿐이다.
   - K2. 쿠킹 매니페스트 v2에 에셋이 아닌 산출물 항목을 둔다(12절). v1 항목은 AssetId 단위다(AssetSystem 10절).
   - K3. 엔진 내장 셰이더 라이브러리를 프로젝트·너겟·네트워크 없이 제공하는 경로를 둔다. 계획 9.6절이 "에셋 너겟·네트워크·프로젝트 없는 설치에서도 최소 자원을 제공한다"고 요구한다. 라이브러리를 만들 때 쓰는 엔진 컴파일 프로필은 P6a가 정하고(12.1절), A4는 설치물에 라이브러리를 두고 여는 경로만 맡는다(12.3절).
+
+- **텍스처 스트리밍**([텍스처 스트리밍](TextureStreaming.ko.md) 결정 T6, 2026-11-19 확정): 스트리밍 텍스처의 명시 LOD 표본과 정수 `Load`는 셰이더 helper를 거친다. helper는 `textureSize(t, 0)`로 상주 base mip을 계산해 논리 mip을 물리 mip으로 바꾼다(그 문서 5.3절). helper 없이 명시 LOD·`Load`를 쓰는 셰이더가 스트리밍 텍스처 멤버를 읽으면 워커가 진단을 내고, 그 텍스처는 "전체 상주 전용"으로 표시해 비스트리밍으로 돌린다. helper는 셰이더 표준 include에 두며 TS2(mip 전송)와 함께 구현한다.
 
 ### 5.3 셰이더 전용 선행 작업
 
@@ -852,3 +854,4 @@ SH0 진척(2026-11-17, `feature/shader-tools`, Windows 부분 구현):
   - 12.2절: 라이브러리 항목에 런타임 확인 기능 비트(RenderBase 9.2절이 대조), 형식 사실에 기능 등급 자리(머티리얼 시스템 MSR9).
 - 개정 18(2026-11-18): 12.1절 진척 두 항목(런타임 확인 기능 `vertexViewportLayerOutput`, `CommonLimits` 제거)을 SH2 전에 구현했다.
 - 개정 19(2026-11-18): [렌더 기반](RenderBase.ko.md) SX2 반영. 7.2절 2항에 결정 R7 확정(루트 상수 배치는 선언 명시, 128 byte·16 byte 배수, 크기 기준 자동 배치는 버림)과 파이프라인 layout의 크기 선언(Graphics `drawConstantBytes`·`SetDrawConstants`)을 적었다. Graphics 고정 구조체 `DrawConstants`를 없앴으므로 7.2절 5항·6항과 13절의 해당 문구를 고쳤다(13절은 그리기별 상수도 파라미터 구조체 종류 표시로 선언).
+- 개정 20(2026-11-19): 5.2절에 텍스처 스트리밍 결정 T6(명시 LOD·`Load` helper와 진단)의 셰이더 요구를 더했다([텍스처 스트리밍](TextureStreaming.ko.md) 개정 4).

@@ -385,7 +385,8 @@ struct TextureDesc {
     uint32 arraySize = 1;
     PixelFormat format = PixelFormat::RGBA8UnormSrgb;
     TextureUsage usage = TextureUsage::Sampled;
-    // 1–TextureFullMipCount(desc)다. RenderTarget·DepthStencil은 1이어야 한다(Storage는 여럿 가능).
+    // 1–TextureFullMipCount(desc)다. RenderTarget·DepthStencil·Storage도 mip 사슬을 가질 수 있다
+    // (attachment는 ColorAttachment·DepthAttachment::mipLevel로 고른다, MSAA는 1).
     uint32 mipLevels = 1;
     // 이 텍스처를 묶을 때(SetTexture) 셰이더가 읽는 성분 대응이다(view swizzle). 항등이 아니면
     // D3D11은 Unsupported다(view swizzle이 없다). attachment·복사·ReadTexture에는 적용하지 않는다.
@@ -429,7 +430,7 @@ uint64 TextureDataBytes(const TextureDesc& desc) noexcept;
 // - 모르는 차원·용도·형식, 0 크기, 무효 샘플러·swizzle
 // - 3D가 아닌데 depth ≠ 1, 배열 차원이 아닌데 arraySize ≠ 1, depth·arraySize 0
 // - Cube·CubeArray인데 width ≠ height
-// - mipLevels가 0이거나 TextureFullMipCount 초과, RenderTarget·DepthStencil인데 mipLevels ≠ 1
+// - mipLevels가 0이거나 TextureFullMipCount 초과, DepthStencil인데 Texture3D
 // - Storage인데 깊이·다중 plane 형식
 // - sampleCount가 2의 거듭제곱이 아니거나 범위 밖, 2 이상인데 RenderTarget·DepthStencil의
 // Texture2D가
@@ -437,7 +438,6 @@ uint64 TextureDataBytes(const TextureDesc& desc) noexcept;
 // - DepthStencil인데 깊이 형식이 아님
 // - 비교 샘플러(SamplerDesc::comparison)인데 깊이 형식(Depth·DepthStencil)이 아님
 // Unsupported(이 단계의 계약 밖):
-// - RenderTarget·DepthStencil인데 Texture2D가 아님(slice attachment는 텍스처 GX2 C부)
 // - Storage인데 cube·cube 배열
 // - 다중 plane 형식(깊이·스텐실 D24S8·D32S8, 비디오)인데 Texture2D가 아님
 Result<void> ValidateTextureDesc(const TextureDesc& desc) noexcept;
@@ -737,13 +737,14 @@ struct ClearColor {
     float a = 1.0f;
 };
 
-// 패스의 색 attachment 하나다(RenderTarget 텍스처, mip 0). 정수 형식의 clear는 값을 그 형식으로
-// 바꿔 쓴다.
+// 패스의 색 attachment 하나다(RenderTarget 텍스처의 mipLevel·slice 하나). 정수 형식의 clear는 값을
+// 그 형식으로 바꿔 쓴다. slice는 subresource slice(배열 층, cube 면 = cube × 6 + 면)이고 3D는 그
+// mip의 깊이 면 z다(IsAttachmentInRange, 텍스처 GX2 C부).
 //
 // resolveTarget이 null이 아니면 패스 끝(EndFrame)에 이 MSAA attachment를 표본 박스 평균으로 그
-// 텍스처에 resolve한다(결정 R17의 attachment resolve). 대상은 1표본 RenderTarget이고 형식·크기가
-// 같으며 view가 아니고 같은 패스의 다른 attachment·resolve 대상과 겹치지 않아야 한다(위반
-// InvalidArgument). store가 DontCare여도 resolve한다.
+// 텍스처의 resolveMipLevel·resolveSlice에 resolve한다(결정 R17의 attachment resolve). 대상은 1표본
+// RenderTarget이고 형식과 그 mip의 크기가 같으며 view가 아니고 같은 패스의 다른 attachment·resolve
+// 대상과 겹치지 않아야 한다(위반 InvalidArgument). store가 DontCare여도 resolve한다.
 //
 // 사용 예(4x MSAA 색을 그려 1표본으로 resolve):
 //   PassDesc pass;
@@ -756,6 +757,10 @@ struct ColorAttachment {
     StoreAction store = StoreAction::Store;
     ClearColor clear;
     TextureHandle resolveTarget;
+    uint32 mipLevel = 0;
+    uint32 slice = 0;
+    uint32 resolveMipLevel = 0;
+    uint32 resolveSlice = 0;
 };
 
 // 패스의 깊이·스텐실 attachment다(DepthStencil 텍스처). readOnly면 깊이·스텐실을 읽기 전용으로
@@ -770,11 +775,19 @@ struct DepthAttachment {
     StoreAction stencilStore = StoreAction::Store;
     uint8 clearStencil = 0;
     bool readOnly = false;
+    // 붙일 mip과 slice(배열 층·cube 면)다(ColorAttachment와 같은 규칙, 3D 깊이는 없다).
+    uint32 mipLevel = 0;
+    uint32 slice = 0;
 };
 
+// attachment(mipLevel, slice)가 텍스처 안인지다. slice 상한은 3D면 그 mip의 깊이, 아니면 slice
+// 수다.
+bool IsAttachmentInRange(TextureDimension dimension, uint32 depth, uint32 mipLevels, uint32 slices,
+                         uint32 mipLevel, uint32 slice) noexcept;
+
 // 패스 시작 설정이다(Device::BeginPass, GX4). 색 attachment는 앞에서부터 colorCount개를 쓴다. 모든
-// attachment의 크기와 표본 수(TextureDesc::sampleCount)가 같아야 한다. 색도 깊이도 없는 패스는
-// compute·복사 전용이고 그 안의 그리기는 무시된다.
+// attachment의 크기(attachment mip의 크기)와 표본 수(TextureDesc::sampleCount)가 같아야 한다. 색도
+// 깊이도 없는 패스는 compute·복사 전용이고 그 안의 그리기는 무시된다.
 //
 // 사용 예(MRT 2장 + 깊이):
 //   PassDesc pass;

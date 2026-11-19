@@ -57,6 +57,10 @@ struct HostSettingsOptions {
     Result<void> (*registerModuleTypes)(ModuleRegistration&) noexcept = nullptr;
     // 호스트·게임 모듈의 설정 등록(선택)이다. log.*·trace.* 다음, 파일보다 먼저 부른다.
     Result<void> (*registerSettings)(config::ConfigContext&) noexcept = nullptr;
+    // 품질 조합 검증 규칙(선택 — ConfigContext::SetQualityValidation, 기기 특성은 HostSettings의
+    // DeviceTraits)이다. 빌린다: HostSettings보다 오래 살아야 한다.
+    Span<const config::QualityGroupRule> qualityRules{};
+    Span<const config::QualityBudgetRule> qualityBudgets{};
 };
 
 // 이 실행 파일의 플랫폼 이름이다("Windows"·"Mac"·"Android" — 플랫폼 층 폴더 이름).
@@ -109,17 +113,17 @@ public:
     Result<void> ApplyCommandLine(Span<const StringView> arguments) noexcept;
 
     // 5) 큐를 적용하고, 기기 프로필(ApplyDeviceProfile — 명령줄·프로젝트·규칙·플랫폼 기본)을 적용해
-    // 다시 Sync한 뒤 시작을 끝낸다. 프로필 정의 오류는 기록하고 시작은 계속한다. 품질 묶음 펼침과
-    // 조합 검증(Config/QualityValidation.h)은 CVar 묶음(CVR5)이 이 단계에 더한다. 오류:
-    // Sync·CompleteStartup·적용의 호출 오류(기록한다).
+    // 다시 Sync한 뒤 시작을 끝낸다. 프로필 정의 오류는 기록하고 시작은 계속한다. 품질
+    // 묶음(CVarGroup) 펼침과 조합 검증(options.qualityRules — 기기 특성으로 펼칠 등급을 낮춘다)은
+    // 이 Sync들이 한다. 오류: Sync·CompleteStartup·적용의 호출 오류(기록한다).
     Result<void> CompleteStartup() noexcept;
 
     // 기기 특성이다(Initialize가 플랫폼 특성을 채운다). 호스트는 GPU 특성을 더한 뒤
     // ApplyDeviceTraits를 부른다. 전제: Initialize 성공 — 아니면 Fatal.
     config::DeviceTraits& DeviceTraits() noexcept;
 
-    // 지금 기기 특성으로 기기 프로필을 다시 적용한다(다음 Sync에 바뀐다). 오류: 적용의 호출
-    // 오류(기록한다).
+    // 지금 기기 특성으로 기기 프로필을 다시 적용하고 품질 조합 검증도 다시 하게 한다(다음 Sync에
+    // 바뀐다). 오류: 적용의 호출 오류(기록한다).
     Result<void> ApplyDeviceTraits() noexcept;
 
     // 마지막 기기 프로필 선택이다.
@@ -159,6 +163,8 @@ private:
     config::DeviceTraits traits_;
     config::DeviceProfileSelection profile_;
     String profileArgument_;
+    Span<const config::QualityGroupRule> qualityRules_{};
+    Span<const config::QualityBudgetRule> qualityBudgets_{};
     bool namesReady_ = false;
 };
 

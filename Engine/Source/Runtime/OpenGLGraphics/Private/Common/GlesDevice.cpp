@@ -111,6 +111,7 @@ GlesDevice::~GlesDevice() {
         }
 
         gl_.DeleteFramebuffers(1, &passFramebuffer_);
+        gl_.DeleteFramebuffers(1, &resolveFramebuffer_);
         gl_.DeleteProgram(depthReadProgram_);
         gl_.DeleteProgram(stencilReadProgram_);
         gl_.DeleteVertexArrays(1, &readVertexArray_);
@@ -488,6 +489,7 @@ Result<TextureHandle> GlesDevice::CreateTexture(const TextureDesc& desc,
     record.format = desc.format;
     record.swizzle = desc.swizzle;
     record.depthTarget = depthTarget;
+    record.renderTarget = renderTarget;
     record.usage = desc.usage;
     record.viewRange = {0, record.mipLevels, 0, record.slices};
     record.depthStencilTexture = info.kind == PixelFormatKind::DepthStencil;
@@ -542,7 +544,9 @@ Result<TextureHandle> GlesDevice::CreateTexture(const TextureDesc& desc,
 
             offset += static_cast<usize>(TextureMipBytes(desc, level));
         }
-    } else if (renderTarget) {
+    } else if (renderTarget && desc.dimension == TextureDimension::Texture2D) {
+        // 2D 렌더 타깃의 mip 0 framebuffer다(ReadPixels·색 하나 패스). 2D 밖 차원은 패스
+        // framebuffer에 붙인다.
         record.framebuffer = CreateColorFramebuffer(record.texture, record.target);
         if (record.framebuffer == 0) {
             ReleaseTexture(record);

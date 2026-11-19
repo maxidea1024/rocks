@@ -10,20 +10,47 @@ class RenderGraph;
 // pass 렌더 타깃 종류다.
 enum class GraphTargetKind : uint8 {
     None,
-    // 그래프 텍스처(BeginOffscreen)다.
+    // 그래프 텍스처 attachment(색 0–8, 깊이 하나, 장치 BeginPass)다.
     Texture,
     // 스왑체인 백버퍼(BeginFrame, 기록 끝에 present)다. 그래프 밖 출력이므로 그 pass는 부수 효과
     // pass다.
     SwapChain
 };
 
-// Raster pass의 렌더 타깃이다. RG1 장치 계약은 색 타깃 하나와 clear만 받는다(GX4에서 MRT·깊이·
-// load/store·mip·slice로 넓힌다).
+// 색 attachment 하나다(그래프 텍스처의 mipLevel·slice, 규칙은 graphics::ColorAttachment). load
+// Load는 이전 내용을 읽는 것으로도 센다(생산 전 읽기 검사).
+struct GraphColorTarget {
+    GraphTexture texture;
+    GraphLoadAction load = GraphLoadAction::Clear;
+    graphics::ClearColor clear;
+    uint32 mipLevel = 0;
+    uint32 slice = 0;
+};
+
+// 깊이·스텐실 attachment다(규칙은 graphics::DepthAttachment). 접근은 DepthWrite, readOnly면
+// DepthRead다. clearDepth 기본 0은 reverse-Z 먼 평면이다.
+struct GraphDepthTarget {
+    GraphTexture texture;
+    GraphLoadAction depthLoad = GraphLoadAction::Clear;
+    float clearDepth = 0.0f;
+    GraphLoadAction stencilLoad = GraphLoadAction::Clear;
+    uint8 clearStencil = 0;
+    bool readOnly = false;
+    uint32 mipLevel = 0;
+    uint32 slice = 0;
+};
+
+// Raster pass의 렌더 타깃이다. Texture는 색 attachment colorCount개(0–MaxColorTargets)와 깊이
+// attachment 하나(hasDepth)를 장치 BeginPass로 붙이고, SwapChain은 스왑체인 백버퍼에 clear로
+// 그린다(BeginFrame). attachment 전이는 장치가 낸다(RenderBase 8절 RG1 남은 것 A부).
 struct GraphRenderTarget {
     GraphTargetKind kind = GraphTargetKind::None;
-    GraphTexture texture;
+    GraphColorTarget colors[graphics::MaxColorTargets];
+    uint32 colorCount = 0;
+    GraphDepthTarget depth;
+    bool hasDepth = false;
     graphics::SwapChainHandle swapChain;
-    GraphLoadAction load = GraphLoadAction::Clear;
+    // 스왑체인 백버퍼의 clear 색이다.
     graphics::ClearColor clear;
 };
 
@@ -44,7 +71,7 @@ struct GraphRenderTarget {
 // 9.6절).
 //
 // 실패: arena 할당 실패는 기록해 두고 AddPass가 그 오류를 돌려준다(이후 호출은 무시한다). 인자의
-// 정당성(handle·접근 조합·pass 종류)은 AddPass가 검사한다.
+// 정당성(handle·접근 조합·pass 종류·attachment 개수와 범위)은 AddPass가 검사한다.
 //
 // 스레드·수명: 그래프와 같은 스레드(렌더 lane)에서 쓰고 AddPass 뒤 버린다. 그래프보다 오래 살지
 // 않는다.
@@ -64,15 +91,36 @@ public:
                                const graphics::SubresourceRange& range = {},
                                GraphAccessFlags flags = GraphAccessFlags::None) noexcept;
 
+    // texture view(RenderGraph::CreateTextureView)의 범위를 access로 쓴다고 선언한다. 읽기 view는
+    // SRV 접근(SrvGraphics·SrvCompute), 쓰기 view는 UAV 접근만 받는다. 기록 함수는
+    // GraphPassContext::View로 장치 view를 받는다.
+    //
+    // 사용 예(HZB 한 단계: mip k 읽기 + mip k + 1 쓰기, 다른 subresource라 상충 아님):
+    //   accesses.TextureView(mipK, graphics::ResourceAccess::SrvCompute)
+    //       .TextureView(mipK1Write, graphics::ResourceAccess::UavCompute);
+    GraphPassAccesses& TextureView(GraphTextureView view, graphics::ResourceAccess access,
+                                   GraphAccessFlags flags = GraphAccessFlags::None) noexcept;
+
     // 버퍼 전체를 access로 쓴다고 선언한다.
     GraphPassAccesses& Buffer(GraphBuffer buffer, graphics::ResourceAccess access,
                               GraphAccessFlags flags = GraphAccessFlags::None) noexcept;
 
-    // 렌더 타깃(색 하나)을 정한다. 접근은 RenderTarget이며, load가 Load면 이전 내용을 읽는 것으로도
-    // 센다. 다시 부르면 바꾼다.
+    // 색 attachment(mip 0, slice 0)를 하나 덧붙인다. 접근은 RenderTarget이며, load가 Load면 이전
+    // 내용을 읽는 것으로도 센다. 색 attachment가 MaxColorTargets를 넘으면 AddPass가 검증 오류로
+    // 거부한다.
     GraphPassAccesses& RenderTarget(GraphTexture texture,
                                     GraphLoadAction load = GraphLoadAction::Clear,
                                     const graphics::ClearColor& clear = {}) noexcept;
+
+    // 색 attachment(mip·slice 지정)를 하나 덧붙인다(MRT는 부른 순서가 slot 순서다).
+    //
+    // 사용 예(GBuffer 둘 + 깊이):
+    //   accesses.ColorTarget({albedo}).ColorTarget({normal, GraphLoadAction::Clear, {0.5f, 0.5f,
+    //   1, 1}}).DepthTarget({depth});
+    GraphPassAccesses& ColorTarget(const GraphColorTarget& target) noexcept;
+
+    // 깊이 attachment를 정한다(다시 부르면 바꾼다).
+    GraphPassAccesses& DepthTarget(const GraphDepthTarget& target) noexcept;
 
     // 스왑체인 백버퍼를 렌더 타깃으로 정한다(present pass).
     GraphPassAccesses& SwapChainTarget(graphics::SwapChainHandle swapChain,

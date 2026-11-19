@@ -2,6 +2,7 @@
 
 #include <Config/CVarAccess.h>
 #include <Config/CVarBuilder.h>
+#include <Config/CVarGroup.h>
 #include <Config/ConfigContext.h>
 
 // CVar의 공개 헤더다(Docs/Design/CVarSystem.ko.md — CVR1: 핸들·빌더·enum 이름·등록과 번호).
@@ -24,11 +25,13 @@
 //
 //   } // namespace rocks::render
 //
-// UE 대응: CVar<T>는 TAutoConsoleVariable<T>, BootCVar<T>는 ECVF_ReadOnly + 시작 시 값이다(3절 표).
+// UE 대응: CVar<T>는 TAutoConsoleVariable<T>, BootCVar<T>는 ECVF_ReadOnly + 시작 시 값, CVarGroup은
+// scalability group이다(3절 표 — Config/CVarGroup.h).
 namespace rocks {
 
 // 정의 문장을 짧게 하려고 핸들 타입을 rocks 바로 아래에도 둔다(4절).
 using cvar::BootCVar;
 using cvar::CVar;
+using cvar::CVarGroup;
 
 } // namespace rocks

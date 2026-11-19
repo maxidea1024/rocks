@@ -236,8 +236,10 @@ void D3D12Device::StartPass(const PassDesc& pass) noexcept {
     for (uint32 index = 0; index < target_.colorCount; ++index) {
         TextureRecord* color = textures_.Find(target_.colors[index].slot);
         if (color != nullptr) {
+            // attachment의 subresource 하나만 바꾼다(텍스처 GX2 C부).
             TrackTransition(*color, target_.colors[index].slot,
-                            ResolvedSubresourceRange{0, 1, 0, 1},
+                            AttachmentSubresource(color->dimension, target_.colorMips[index],
+                                                  target_.colorSlices[index]),
                             D3D12_RESOURCE_STATE_RENDER_TARGET);
         } else if (index == 0 && target_.resource != nullptr) {
             const D3D12_RESOURCE_BARRIER toTarget = TransitionBarrier(
@@ -248,9 +250,11 @@ void D3D12Device::StartPass(const PassDesc& pass) noexcept {
 
     TextureRecord* depth = textures_.Find(target_.depth.slot);
     if (depth != nullptr) {
-        TrackTransition(*depth, target_.depth.slot, ResolvedSubresourceRange{0, 1, 0, 1},
-                        target_.depthReadOnly ? D3D12_RESOURCE_STATE_DEPTH_READ
-                                              : D3D12_RESOURCE_STATE_DEPTH_WRITE);
+        TrackTransition(
+            *depth, target_.depth.slot,
+            AttachmentSubresource(depth->dimension, target_.depthMip, target_.depthSlice),
+            target_.depthReadOnly ? D3D12_RESOURCE_STATE_DEPTH_READ
+                                  : D3D12_RESOURCE_STATE_DEPTH_WRITE);
     }
 
     list_->OMSetRenderTargets(target_.colorCount, target_.colorCount != 0 ? target_.rtvs : nullptr,
@@ -383,13 +387,19 @@ void D3D12Device::SetTexture(TextureHandle handle) noexcept {
 
         // 명시 전이 없이 셰이더 읽기 상태가 아닌 텍스처를 읽으면 암묵 전이로 메운다(GX5. 렌더
         // 그래프를 거치지 않는 그리기용이다). view는 자기 mip·slice 범위만 본다(텍스처 GX2 A부).
+        // 읽기 상태는 묶인 파이프라인 종류를 따른다: compute는 NON_PIXEL(SrvCompute), 그 밖은
+        // PIXEL(SrvGraphics)이다. 그래서 compute 파이프라인을 먼저 묶어야 그래프가 낸 SrvCompute를
+        // 다시 바꾸지 않는다(RG1 남은 것 B부).
+        const PipelineRecord* pipeline = pipelines_.Find(boundPipeline_);
+        const D3D12_RESOURCE_STATES readState = pipeline != nullptr && pipeline->compute
+                                                    ? D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
+                                                    : D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
         const ResolvedSubresourceRange& range = record->viewRange;
         bool readable = true;
         for (uint32 slice = range.firstSlice;
              owner != nullptr && slice < range.firstSlice + range.sliceCount; ++slice) {
             for (uint32 mip = range.firstMip; mip < range.firstMip + range.mipCount; ++mip) {
-                readable = readable && (owner->current.At(mip, slice) &
-                                        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE) != 0;
+                readable = readable && (owner->current.At(mip, slice) & readState) != 0;
             }
         }
 
@@ -488,8 +498,14 @@ Result<void> D3D12Device::CopyPassTarget(TextureHandle destination) noexcept {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
+    // 패스 대상은 2D mip 0 attachment여야 한다(자원 전체 복사, 텍스처 GX2 C부).
+    const TextureRecord* passTexture = textures_.Find(target_.texture.slot);
+    const bool wholeTarget =
+        passTexture == nullptr ||
+        (passTexture->dimension == TextureDimension::Texture2D && passTexture->mipLevels == 1);
     if (target_.resource == nullptr || !record->renderTarget || record->sampleCount > 1 ||
-        target_.sampleCount > 1 || destination == target_.texture ||
+        target_.sampleCount > 1 || !wholeTarget || record->mipLevels != 1 ||
+        record->dimension != TextureDimension::Texture2D || destination == target_.texture ||
         record->width != target_.width || record->height != target_.height ||
         record->format != target_.format) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -662,14 +678,20 @@ void D3D12Device::ResolveAttachments() noexcept {
             continue;
         }
 
+        // MSAA 원본은 2D mip 1이라 subresource 0이고, 대상은 resolve mip·slice 하나다.
         const ResolvedSubresourceRange whole = {0, 1, 0, 1};
+        const ResolvedSubresourceRange destination = AttachmentSubresource(
+            target->dimension, target_.resolveMips[index], target_.resolveSlices[index]);
         TrackTransition(*source, target_.colors[index].slot, whole,
                         D3D12_RESOURCE_STATE_RESOLVE_SOURCE);
-        TrackTransition(*target, target_.resolves[index].slot, whole,
+        TrackTransition(*target, target_.resolves[index].slot, destination,
                         D3D12_RESOURCE_STATE_RESOLVE_DEST);
-        list_->ResolveSubresource(target->resource.Get(), 0, source->resource.Get(), 0,
-                                  d3d12::MappingOf(source->format).rtv);
-        TrackTransition(*target, target_.resolves[index].slot, whole, ShaderReadStates);
+        list_->ResolveSubresource(target->resource.Get(),
+                                  d3d12::SubresourceIndex(destination.firstMip,
+                                                          destination.firstSlice, 0,
+                                                          target->mipLevels, target->slices),
+                                  source->resource.Get(), 0, d3d12::MappingOf(source->format).rtv);
+        TrackTransition(*target, target_.resolves[index].slot, destination, ShaderReadStates);
     }
 }
 

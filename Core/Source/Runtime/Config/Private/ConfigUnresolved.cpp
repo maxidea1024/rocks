@@ -150,6 +150,11 @@ Result<usize> ConfigContext::ReportUnresolved() noexcept {
         }
     }
 
+    // `Quality.json`의 등록되지 않은 묶음·정의되지 않은 등급·코드 항목이 아닌 이름(CVar 11절).
+    if (auto done = detail::ReportQualityDocuments(*state, reported); !done) {
+        return Result<usize>::Failure(done.Error());
+    }
+
     return Result<usize>::Success(reported);
 }
 

@@ -6,7 +6,8 @@
 
 // CVar 핸들 등록과 번호다(Docs/Design/CVarSystem.ko.md 5절 — CVR1). 핸들은 독립 콘솔 설정과 같은
 // 저장소(ConsoleSettingState)에 들어가 대기 값·층·출처·콘솔 경로를 그대로 쓴다. 번호는 프로세스
-// 전체에서 한 번 정해진다(조각 snapshot의 칸 번호 — CVR2).
+// 전체에서 한 번 정해진다(조각 snapshot의 칸 번호 — CVR2). 프리셋 묶음(CVarGroup — CVR5)은 int32
+// 변수로 같은 길을 가고, 등급 표를 묶음 상태(GroupState)로 더 둔다(펼침은 다음 Sync — 11절).
 namespace rocks::config {
 
 namespace detail {
@@ -260,6 +261,12 @@ Result<void> ConfigContext::RegisterHandles(Span<const VarDefinition* const> def
         return Result<void>::Success();
     }
 
+    // 프리셋 묶음끼리의 규칙(항목 겹침 금지·묶음의 묶음 DAG)이다. 이 거부만 진단을 남긴다(순환
+    // 경로·두 묶음 이름 — CVar 11절).
+    if (auto checked = detail::CheckGroupGraph(*state, added.View()); !checked) {
+        return checked;
+    }
+
     Array<UniquePtr<ConsoleSettingState>> made(*allocator_);
     if (auto reserved = made.TryReserve(added.Size()); !reserved) {
         return reserved;
@@ -278,6 +285,29 @@ Result<void> ConfigContext::RegisterHandles(Span<const VarDefinition* const> def
 
     if (auto reserved = state->settings.TryReserve(state->settings.Size() + made.Size());
         !reserved) {
+        return reserved;
+    }
+
+    // 프리셋 묶음의 등급 표(항목 코드 값의 콘솔 표기)를 만든다.
+    Array<UniquePtr<detail::GroupState>> groups(*allocator_);
+    for (const VarDefinition* definition : added) {
+        if (definition->kind != HandleKind::Group) {
+            continue;
+        }
+
+        UniquePtr<detail::GroupState> group;
+        if (auto created = detail::MakeGroupState(
+                *state, static_cast<const cvar::detail::GroupDefinition&>(*definition), group);
+            !created) {
+            return created;
+        }
+
+        if (auto pushed = groups.TryPushBack(Move(group)); !pushed) {
+            return pushed;
+        }
+    }
+
+    if (auto reserved = state->groups.TryReserve(state->groups.Size() + groups.Size()); !reserved) {
         return reserved;
     }
 
@@ -324,12 +354,25 @@ Result<void> ConfigContext::RegisterHandles(Span<const VarDefinition* const> def
         return published;
     }
 
-    // 4단계: 넣는다(자리를 확보했으므로 실패하지 않는다).
+    // 4단계: 넣는다(자리를 확보했으므로 실패하지 않는다). 묶음은 다음 Sync가 펼친다(값은 sync
+    // 지점에서만 바뀐다 — 항목 변수의 지금 값은 그대로다).
     for (UniquePtr<ConsoleSettingState>& setting : made) {
         if (auto pushed = state->settings.TryPushBack(Move(setting)); !pushed) {
             platform::Fatal("CVar registration lost its reserved capacity");
         }
     }
+
+    for (UniquePtr<detail::GroupState>& group : groups) {
+        if (auto pushed = state->groups.TryPushBack(Move(group)); !pushed) {
+            platform::Fatal("CVar registration lost its reserved capacity");
+        }
+
+        state->dirty = true;
+    }
+
+    // 묶음과 항목 변수가 둘 다 등록된 코드 프리셋 값을 검사한다(진단만 — 등록은 이미 끝났으므로
+    // 진단을 남기지 못해도 등록은 성공이다).
+    static_cast<void>(detail::CheckPresetValues(*state, added.View()));
 
     return Result<void>::Success();
 }

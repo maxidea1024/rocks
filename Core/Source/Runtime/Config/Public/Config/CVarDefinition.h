@@ -33,12 +33,16 @@ struct Index {
     friend constexpr bool operator==(Index left, Index right) noexcept = default;
 };
 
-// 핸들 종류다. CVarGroup(CVR5)·ConsoleCommand(CVR6)는 같은 정의 표에 종류를 더한다.
+// 핸들 종류다. 정의의 공통 머리(VarDefinition)에 있어 ConfigContext::Register가 타입을 지운 정의를
+// 종류대로 다룬다(Group이면 GroupDefinition — Config/CVarGroup.h). ConsoleCommand(CVR6)는 같은 표에
+// 종류를 더한다.
 enum class HandleKind : uint8 {
     // 실행 중 바꿀 수 있는 변수(`CVar<T>`).
     Var,
     // 이번 실행 동안 고정인 변수(`BootCVar<T>` — 9절).
-    Boot
+    Boot,
+    // 프리셋 묶음(`CVarGroup` — 11절). 값은 int32 등급이고 정의는 GroupDefinition이다.
+    Group
 };
 
 // 빌더가 정의에 남기는 성질 비트다(4.2절).
@@ -168,6 +172,19 @@ inline void CVarError_InvalidUtf8() noexcept {
 inline void CVarError_NameDefaultNotAscii() noexcept {
 }
 
+// 프리셋 묶음(11절)의 표지 함수다.
+inline void CVarError_DuplicateLevel() noexcept {
+}
+
+inline void CVarError_DuplicateEntry() noexcept {
+}
+
+inline void CVarError_DefaultLevelUndefined() noexcept {
+}
+
+inline void CVarError_TooManyLevels() noexcept {
+}
+
 // 타입을 지운 값 하나다(검사 함수가 읽고 보정한다). bool은 boolean, 정수·enum은 integer, 실수는
 // real(float도 double로), String·Name은 text다. text는 빌린 view다.
 struct ScalarValue {
@@ -186,7 +203,9 @@ enum class ValueCheck : uint8 {
     // 범위 밖이라 거부한다.
     OutOfRange,
     // `Validate`가 거부했다.
-    ValidationFailed
+    ValidationFailed,
+    // 프리셋 묶음이 정의하지 않은 등급이다(11절 — UndefinedLevel).
+    UndefinedLevel
 };
 
 struct VarDefinition;

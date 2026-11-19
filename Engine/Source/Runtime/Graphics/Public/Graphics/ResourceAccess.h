@@ -212,6 +212,10 @@ ResolveSubresourceRange(const SubresourceRange& range, uint32 mipLevels, uint32 
     return resolved;
 }
 
+// attachment(mipLevel, slice)가 차지하는 상태 추적 subresource다(3D는 mip 전체, slice 0).
+ResolvedSubresourceRange AttachmentSubresource(TextureDimension dimension, uint32 mipLevel,
+                                               uint32 slice) noexcept;
+
 // view의 mip·slice 범위를 원 텍스처(dimension·usage·shape)에 맞춰 정한다(개수 0은 끝까지). 장치와
 // 무관한 규칙이며 backend의 CreateTextureView가 부른다. InvalidArgument: 범위가 텍스처 밖이거나 빔,
 // 3D의 slice 범위가 전체가 아님, cube의 slice 범위가 6면 전체가 아님, cube 배열의 시작·개수가 6의

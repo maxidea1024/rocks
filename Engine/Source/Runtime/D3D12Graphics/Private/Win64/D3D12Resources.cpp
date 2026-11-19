@@ -447,11 +447,7 @@ Result<void> D3D12Device::CreateTextureViews(TextureRecord& record,
             return Fail("render target descriptor heap is full");
         }
         record.rtv = rtv.Value();
-        D3D12_RENDER_TARGET_VIEW_DESC view = {};
-        view.Format = mapping.rtv;
-        view.ViewDimension = record.sampleCount > 1 ? D3D12_RTV_DIMENSION_TEXTURE2DMS
-                                                    : D3D12_RTV_DIMENSION_TEXTURE2D;
-        device_->CreateRenderTargetView(record.resource.Get(), &view, rtvs_.Cpu(record.rtv));
+        WriteRenderTargetView(record, 0, 0, rtvs_.Cpu(record.rtv));
     }
     if (record.depthTarget) {
         auto dsv = dsvs_.Allocate();
@@ -463,14 +459,63 @@ Result<void> D3D12Device::CreateTextureViews(TextureRecord& record,
             return Fail("depth stencil descriptor heap is full");
         }
         record.dsv = dsv.Value();
-        D3D12_DEPTH_STENCIL_VIEW_DESC view = {};
-        view.Format = mapping.dsv;
-        view.ViewDimension = record.sampleCount > 1 ? D3D12_DSV_DIMENSION_TEXTURE2DMS
-                                                    : D3D12_DSV_DIMENSION_TEXTURE2D;
-        device_->CreateDepthStencilView(record.resource.Get(), &view, dsvs_.Cpu(record.dsv));
+        WriteDepthStencilView(record, 0, 0, false, dsvs_.Cpu(record.dsv));
     }
 
     return Result<void>::Success();
+}
+
+// attachment (mip, slice)의 RTV다. 배열·cube·cube 배열은 2D 배열 RTV의 층 하나, 3D는 깊이 면
+// 하나다(텍스처 GX2 C부).
+void D3D12Device::WriteRenderTargetView(const TextureRecord& record, uint32 mipLevel, uint32 slice,
+                                        D3D12_CPU_DESCRIPTOR_HANDLE handle) noexcept {
+    D3D12_RENDER_TARGET_VIEW_DESC view = {};
+    view.Format = d3d12::MappingOf(record.format).rtv;
+    if (record.sampleCount > 1) {
+        view.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DMS;
+    } else if (record.dimension == TextureDimension::Texture3D) {
+        view.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE3D;
+        view.Texture3D.MipSlice = mipLevel;
+        view.Texture3D.FirstWSlice = slice;
+        view.Texture3D.WSize = 1;
+    } else if (record.dimension == TextureDimension::Texture2D) {
+        view.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+        view.Texture2D.MipSlice = mipLevel;
+    } else {
+        view.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
+        view.Texture2DArray.MipSlice = mipLevel;
+        view.Texture2DArray.FirstArraySlice = slice;
+        view.Texture2DArray.ArraySize = 1;
+    }
+
+    device_->CreateRenderTargetView(record.resource.Get(), &view, handle);
+}
+
+void D3D12Device::WriteDepthStencilView(const TextureRecord& record, uint32 mipLevel, uint32 slice,
+                                        bool readOnly,
+                                        D3D12_CPU_DESCRIPTOR_HANDLE handle) noexcept {
+    D3D12_DEPTH_STENCIL_VIEW_DESC view = {};
+    view.Format = d3d12::MappingOf(record.format).dsv;
+    if (record.sampleCount > 1) {
+        view.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DMS;
+    } else if (record.dimension == TextureDimension::Texture2D) {
+        view.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+        view.Texture2D.MipSlice = mipLevel;
+    } else {
+        view.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
+        view.Texture2DArray.MipSlice = mipLevel;
+        view.Texture2DArray.FirstArraySlice = slice;
+        view.Texture2DArray.ArraySize = 1;
+    }
+
+    if (readOnly) {
+        view.Flags = D3D12_DSV_FLAG_READ_ONLY_DEPTH;
+        if (GetPixelFormatInfo(record.format).stencilBits != 0) {
+            view.Flags |= D3D12_DSV_FLAG_READ_ONLY_STENCIL;
+        }
+    }
+
+    device_->CreateDepthStencilView(record.resource.Get(), &view, handle);
 }
 
 // 다 만든 텍스처 기록의 descriptor 칸을 바로 놓는다(잠금 안, 아직 어떤 명령도 참조하지 않을

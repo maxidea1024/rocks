@@ -507,6 +507,11 @@ public:
     // 2D texture SRV를 쓴다. plane은 깊이·스텐실·비디오 plane 선택이다.
     // 패스 끝 MSAA resolve다(EndFrame, 잠금 안).
     void ResolveAttachments() noexcept;
+    // attachment (mip, slice)의 RTV·DSV를 handle 칸에 쓴다(3D RTV의 slice는 깊이 면 z).
+    void WriteRenderTargetView(const TextureRecord& record, uint32 mipLevel, uint32 slice,
+                               D3D12_CPU_DESCRIPTOR_HANDLE handle) noexcept;
+    void WriteDepthStencilView(const TextureRecord& record, uint32 mipLevel, uint32 slice,
+                               bool readOnly, D3D12_CPU_DESCRIPTOR_HANDLE handle) noexcept;
     Result<TextureHandle> CreateWritableTextureView(TextureHandle texture, TextureRecord& source,
                                                     PixelFormat format,
                                                     const ResolvedSubresourceRange& range) noexcept;
@@ -656,6 +661,13 @@ private:
         TextureHandle resolves[MaxColorTargets];
         // attachment 표본 수다(1이면 MSAA가 아니다).
         uint32 sampleCount = 1;
+        // attachment마다 붙인 mip·slice와 resolve 대상의 mip·slice다(텍스처 GX2 C부).
+        uint32 colorMips[MaxColorTargets] = {};
+        uint32 colorSlices[MaxColorTargets] = {};
+        uint32 resolveMips[MaxColorTargets] = {};
+        uint32 resolveSlices[MaxColorTargets] = {};
+        uint32 depthMip = 0;
+        uint32 depthSlice = 0;
     };
 
     // 기록 중 버퍼 자원의 상태다. 버퍼는 제출 끝에 COMMON으로 돌아가므로 기록마다 비우고, 처음 쓰면
@@ -1095,6 +1107,9 @@ private:
     uint32 nullBufferUav_ = 0;
     DescriptorPool cpuUavs_;
     uint32 scratchDsv_ = 0;
+    // 패스마다 attachment RTV를 그 mip·slice로 다시 쓰는 칸이다(RTV는 CPU descriptor라
+    // OMSetRenderTargets가 기록 때 읽는다, 텍스처 GX2 C부).
+    uint32 scratchRtvs_[MaxColorTargets] = {};
     // 기록의 그리기별 상수 값이다(기록 시작 때 0, compute root 상수로도 올린다).
     alignas(16) uint8 constants_[MaxDrawConstantBytes] = {};
     uint32 stencilReference_ = 0;

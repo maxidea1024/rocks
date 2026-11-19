@@ -43,9 +43,9 @@ enum class ConsoleSettingFlags : uint32 {
     // BootValueIgnored다. 설정 struct 필드는 콘솔 이름으로 써도 BootValueIgnored다(Config 8절).
     StartupOnly = 16,
     // 사용자 층이 쓸 수 있다.
-    UserConfig = 32,
-    // 품질 묶음 층이 바꿀 수 있다(UE ECVF_Scalability). 아니면 품질 묶음 층 쓰기를 거부한다.
-    QualityMember = 64
+    UserConfig = 32
+    // 품질 묶음 층(UE ECVF_Scalability)은 플래그가 아니다: 그 층은 프리셋 묶음(CVarGroup — CVar
+    // 11절)의 펼침만 쓰고, 펼침은 묶음 항목인 변수에만 닿는다(구성원 자동 — VD14).
 };
 
 // ConsoleSettingFlags의 알려진 비트 전부다.
@@ -55,8 +55,7 @@ inline constexpr uint32 KnownConsoleSettingFlags =
     static_cast<uint32>(ConsoleSettingFlags::RenderRead) |
     static_cast<uint32>(ConsoleSettingFlags::RestartRequired) |
     static_cast<uint32>(ConsoleSettingFlags::StartupOnly) |
-    static_cast<uint32>(ConsoleSettingFlags::UserConfig) |
-    static_cast<uint32>(ConsoleSettingFlags::QualityMember);
+    static_cast<uint32>(ConsoleSettingFlags::UserConfig);
 
 constexpr bool HasFlag(uint32 flags, ConsoleSettingFlags flag) noexcept {
     return (flags & static_cast<uint32>(flag)) != 0;

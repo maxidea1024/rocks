@@ -122,6 +122,9 @@ struct TextureRecord {
     ChannelSwizzle swizzle;
     // TextureUsage::DepthStencil로 만들었다(초기 데이터 없음).
     bool depthTarget = false;
+    // TextureUsage::RenderTarget으로 만들었다. framebuffer는 2D만 갖는다(2D 밖 차원·다른 mip은
+    // 패스 framebuffer에 붙인다, 텍스처 GX2 C부).
+    bool renderTarget = false;
     // 만든 용도다(view는 원 텍스처의 용도, ResolveTextureViewRange).
     TextureUsage usage = TextureUsage::Sampled;
     // MSAA 표본 수다(TextureDesc::sampleCount). 2 이상이면 target이 TEXTURE_2D_MULTISAMPLE이다.
@@ -406,6 +409,10 @@ private:
     Result<void> Reject(const Diagnostic& message, ErrorCode error) noexcept;
     // 패스 끝 MSAA resolve다(EndFrame).
     void ResolveAttachments() noexcept;
+    // 묶인 framebuffer(target)의 attachment에 텍스처의 (mip, slice)를 붙인다. 2D·MSAA는
+    // FramebufferTexture2D, cube는 면 대상, 2D 배열·cube 배열·3D는 FramebufferTextureLayer다.
+    void AttachTextureLevel(GLenum target, GLenum attachment, const TextureRecord& record,
+                            uint32 mipLevel, uint32 slice) noexcept;
     // SetDrawConstants 거부(묶인 파이프라인 없음, 크기가 선언과 다름)의 InvalidArgument다.
     Result<void> RejectDrawConstantSize(bool pipelineBound, usize bytes,
                                         uint32 drawConstantBytes) noexcept;
@@ -561,6 +568,10 @@ private:
         TextureHandle resolves[MaxColorTargets];
         // attachment 표본 수다(1이면 MSAA가 아니다).
         uint32 sampleCount = 1;
+        // 색 attachment 0의 mip과 resolve 대상의 mip·slice다(텍스처 GX2 C부).
+        uint32 firstColorMip = 0;
+        uint32 resolveMips[MaxColorTargets] = {};
+        uint32 resolveSlices[MaxColorTargets] = {};
     };
     PassTarget pass_;
     TextureHandle white_;
@@ -586,6 +597,8 @@ private:
     uint32 stencilReference_ = 0;
     // MRT·깊이 패스가 attachment를 붙이는 framebuffer다(처음 쓸 때 만든다).
     GLuint passFramebuffer_ = 0;
+    // resolve 대상의 mip·slice를 붙이는 framebuffer다(처음 쓸 때 만든다).
+    GLuint resolveFramebuffer_ = 0;
     // glPolygonOffsetClampEXT다(GL_EXT_polygon_offset_clamp가 없으면 null).
     void (*polygonOffsetClamp_)(GLfloat, GLfloat, GLfloat) = nullptr;
     // 기록의 그리기별 상수 값이다(기록 시작 때 0, 그리기·dispatch 때 program에 올린다).
