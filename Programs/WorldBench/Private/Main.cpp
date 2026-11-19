@@ -6,8 +6,8 @@
 #include <Platform/Clock.h>
 #include <Platform/Memory.h>
 #include <TestSupport/HostFailure.h>
+#include <World/Actor.generated.h>
 #include <World/World.h>
-#include <World/World.module.generated.h>
 #include <stdio.h>
 
 // World 규모 측정 도구다(Docs/Implementation/GcScaleExperiment.ko.md 15절 — 선형 검색 점검).

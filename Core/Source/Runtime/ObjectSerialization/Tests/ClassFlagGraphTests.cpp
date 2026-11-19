@@ -1,3 +1,4 @@
+#include <ReflectionTestFixtures/ClassFlagFixture.generated.h>
 #include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
 #include "MapTestSupport.h"
 

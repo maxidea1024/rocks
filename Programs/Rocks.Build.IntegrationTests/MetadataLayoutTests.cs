@@ -39,6 +39,15 @@ internal static class MetadataLayoutTests
             "generated include directories were not added");
         Require(Directory.Exists(a.GeneratedPublic) && a.Descriptor.EndsWith(Path.Combine("Metadata", "A.rocksmeta.json"), StringComparison.Ordinal),
             "generated directory or descriptor path");
+        // 모듈 생성 소스는 <out>/Generated/<모듈>/Source/<모듈>.module.generated.cpp이고 손으로 쓴 Sources가 아니라 리플렉션 생성 소스
+        // 목록에 든다(모듈 진입점 판정에서 빠진다). Source는 include 루트가 아니다. Metadata가 없는 모듈은 생성 소스가 없다.
+        string moduleSource = fixture.Path("out/Generated/A/Source/A.module.generated.cpp");
+        Require(a.GeneratedSource == fixture.Path("out/Generated/A/Source") && a.ModuleSource == moduleSource &&
+            updated.ReflectionSources.SequenceEqual([moduleSource]) && updated.Sources.Count == 0,
+            "the module generated source was not added to the reflection source list: " + string.Join(", ", updated.ReflectionSources));
+        Require(!updated.PublicIncludeDirectories.Concat(updated.PrivateIncludeDirectories).Contains(a.GeneratedSource),
+            "the generated source directory must not be an include root");
+        Require(plan.Modules.Single(module => module.Name == "B").ReflectionSources.Count == 0, "a module without Metadata got a reflection source");
         Expect("unknown module 'Missing'", () => MetadataLayout.Apply(fixture.Context, [fixture.Module("C", [], dependencies: ["Missing"])], ["C"]));
     }
 

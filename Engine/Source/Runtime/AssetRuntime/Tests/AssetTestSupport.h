@@ -5,7 +5,6 @@
 #include <AssetRuntime/PackageWriter.h>
 #include <AssetTestFixtures/TestAssets.generated.h>
 #include <AssetTestFixtures/TestAssets.h>
-#include <AssetTestFixtures/AssetTestFixtures.module.generated.h>
 #include <Base/Endian.h>
 #include <Core/Encoding/Crc32.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -51,23 +50,10 @@ inline constexpr EngineVersion TestEngineVersion{1, 2, 3};
 // 패키지 정책 에셋 Registry 둘(쓰기·읽기)과 타입 Registry를 가진 환경이다. 수명 순서: Registry →
 // ModuleRegistration → TypeRegistry(멤버 선언 역순 소멸).
 struct AssetEnv {
-    AssetEnv() noexcept : types(allocator), modules(types, allocator), names(allocator) {
-        registered = RegisterAssetRuntimeTypes(modules).IsOk() &&
-                     generated::AssetTestFixtures::RegisterModuleTypes(modules).IsOk() &&
-                     names.Initialize().IsOk();
-        RegistryOptions options;
-        options.names = &names;
-        options.policy.packageNativeType = NativeTypeKey<Package>();
-        options.policy.rejectWorldOnly = true;
-        auto made = UniquePtr<ObjectRegistry>::TryMake(allocator, allocator, types,
-                                                       ContextId{0x4153534554ull, 1}, options);
-        auto other = UniquePtr<ObjectRegistry>::TryMake(allocator, allocator, types,
-                                                        ContextId{0x4153534554ull, 2}, options);
-        if (made && other) {
-            source = Move(made.Value());
-            target = Move(other.Value());
-        }
-    }
+    // AssetRuntime과 fixture 모듈(AssetTestFixtures)의 타입을 등록하고 Registry 둘을 만든다. 등록
+    // 함수는 모듈 생성 헤더에 선언되어 있고 손으로 쓴 헤더는 그 헤더를 include하지 않으므로 정의는
+    // AssetTestSupport.cpp에 있다.
+    AssetEnv() noexcept;
 
     ~AssetEnv() {
         source.Reset();

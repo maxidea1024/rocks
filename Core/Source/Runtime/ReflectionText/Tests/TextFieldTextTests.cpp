@@ -1,5 +1,6 @@
 #include "TextAssignTestSupport.h"
 
+#include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
 #include <ReflectionTestFixtures/TextFieldFixture.generated.h>
 #include <ReflectionText/TextJson.h>
 

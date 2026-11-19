@@ -2,7 +2,7 @@
 
 #include <Core/Memory/SystemAllocator.h>
 #include <Engine/Engine.h>
-#include <World/World.module.generated.h>
+#include <World/Actor.generated.h>
 
 // 엔진이 소유하는 GC scheduler와 전체 수집 요청의 시험이다(GC 설계 17.4절 —
 // Docs/Design/GarbageCollectionScale.ko.md).

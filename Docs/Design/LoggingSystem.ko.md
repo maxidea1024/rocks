@@ -1,6 +1,6 @@
 # 로깅 시스템 설계
 
-기준일: 2026-11-19, 개정 12. 엔진 전반에서 쓰는 **로그**(사람이 읽는 사건 기록)의 호출 API, 카테고리·레벨 필터, 비동기 기록 경로, 출력 형식, 장애 격리, 엔진 적용 범위를 정한다.
+기준일: 2026-11-20, 개정 13. 엔진 전반에서 쓰는 **로그**(사람이 읽는 사건 기록)의 호출 API, 카테고리·레벨 필터, 비동기 기록 경로, 출력 형식, 장애 격리, 엔진 적용 범위를 정한다.
 
 요구는 다음 문서에서 온다.
 - [엔진 구현 계획](EngineImplementationPlan.ko.md) 29.4절(필수 로깅·프로파일러: level/category, UTC+monotonic, rate limit·중복 집계, compile/runtime level, error/fatal 비상 경로, 임계 구간에서 file IO·heap·lock wait 금지)
@@ -290,6 +290,10 @@ LogContextScope stage("Stage", "BeginPlay");
 - **UTC:** 출력 스레드가 (단조, UTC) 기준점 쌍을 묶음마다 다시 맞춰 환산한다. `DateTime::UtcNow`와 `platform::UtcTicks`는 실패하면 Fatal이다. 그래서 PlatformBase에 실패를 돌려주는 `platform::TryUtcTicks`를 추가하고(LG3), 실패하면 UTC를 비운다.
 - 순서: 큐 예약 순번이 전역 순서다. 한 스레드 안의 순서는 항상 보존된다.
 - sink 추가·제거는 명령으로 출력 스레드에 넘긴다. `RemoveSink`는 출력 스레드가 확인한 뒤 반환한다. sink 콜백은 출력 스레드(Manual이면 Pump 스레드)에서만 실행된다. 그래서 생산자는 sink lock을 잡지 않고, 엔진 lock을 쥔 채 로그를 남겨도 교착이 없다.
+- **sink 수명(L28, 개정 13):** sink는 `AddSink`부터 `RemoveSink`가 성공해 반환하거나 그 LogSystem이 파괴될 때까지 살아 있어야 한다. `Stop`만으로는 부족하다(소멸자가 `Stop`을 다시 부르며 sink를 flush한다). 지역 변수면 sink를 LogSystem보다 먼저 선언한다. `RuntimeLogSink`는 등록한 LogSystem 수를 원자 계수로 갖고(`AddSink` 증가, `RemoveSink`·LogSystem 소멸자 감소, 여러 LogSystem 등록 허용, 복사본은 0), 0이 아닌 채 파괴되면 영어 Fatal을 낸다. `IsAdded()`로 확인할 수 있다.
+  - 이유: 파괴된 sink의 lock을 잡는 결과가 플랫폼마다 다르다. macOS는 `pthread_mutex_lock`이 EINVAL을 돌려줘 Fatal로 끝나고(2026-11-20 CI의 `LogSinksDoNotAllocate`), Windows는 조용히 지나가 결함이 숨는다. 파괴 시점에 결정적으로 잡으면 모든 플랫폼에서 같은 자리에서 드러난다.
+  - 버린 대안: (1) 선언 순서만 고치기 — 같은 실수가 다시 들어와도 Windows에서는 보이지 않는다. (2) 시작·정지 기준 계수(`Stop` 뒤 파괴 허용) — 소멸자의 `Stop`이 이미 멈춘 시스템에서는 아무것도 하지 않아 안전하지만, 계약이 상태에 따라 갈려 지키기 어렵고 재시작(`Start`)이 다시 sink를 쓴다. (3) LogSystem 소멸자가 sink를 부르지 않게 하기 — 등록된 sink를 버리면 마지막 flush를 잃는다.
+  - 한계: 출력 스레드를 버린 LogSystem(`writerAbandoned`)은 파괴하지 않으므로 그 sink도 끝까지 살려 둔다(LogHost가 이미 그렇게 한다).
 
 ### 8.5 포화
 
@@ -685,7 +689,7 @@ LG11–LG19의 검증도 같다: Debug 빌드, format, policy, 바뀐 부분 시
   - 끝나면 앞 filter를 부르고 그 결과를 돌려준다(없으면 `EXCEPTION_CONTINUE_SEARCH`).
 - **POSIX:** SIGSEGV·SIGBUS·SIGILL·SIGFPE·SIGABRT에 `sigaction`(`SA_ONSTACK`)으로 설치하고 앞 동작을 보관한다.
   - 엔진 스레드와 주 스레드는 `sigaltstack`을 가진다.
-  - 처리기는 미리 만든 flush 전용 스레드를 `sem_post`(async-signal-safe)로 깨우고, 완료 원자 표시를 단조 시계로 제한 시간까지 확인한다.
+  - 처리기는 미리 만든 flush 전용 스레드를 self-pipe `write`(async-signal-safe, 쓰는 쪽 non-blocking·양쪽 `FD_CLOEXEC`)로 깨우고, 완료 원자 표시를 단조 시계로 제한 시간까지 확인한다.
   - 끝나면 앞 동작을 되돌리고 신호를 다시 낸다.
   - **신호 처리기 안의 flush는 최선 노력이다.** flush 스레드가 쓰는 경로(TryLock·원자 대기)는 async-signal-safe 보장 밖이다. 깨진 스레드가 쥔 lock은 TryLock 실패로 건너뛴다.
 - **flush 전용 스레드**는 `FlushForTermination`을 부르고 완료를 알린다. 깨진 스레드가 출력 스레드 자신이면 큐를 비울 주체가 없으므로 비상 출력만 남긴다.
@@ -815,9 +819,10 @@ LG11–LG19 중 다른 세션 소유 모듈을 고쳐야 하는 곳이다. 그 �
 | L22 | 시간 기준 회전은 벽시계 날짜가 아니라 그 파일 첫 기록 뒤 경과 시간(기록의 단조 시각)으로 판정한다 | 결정됨(2026-11-18, 권장안) |
 | L23 | 압축은 flush 묶음마다 독립 zstd frame(Compression 모듈, `.log.zst`)이다. 암호화와 함께면 압축한 뒤 봉인한다. 닫힌 파일 후처리 압축은 하지 않는다. 무할당을 위해 Compression에 고정 작업 공간 문맥을 요청한다 | 결정됨(2026-11-18, 권장안 — Compression 세션 합의 필요) |
 | L24 | `platform::SetTerminationHook(const char*, usize)`를 두어 Log를 거치지 않는 Fatal도 flush한다. `LogInstallScope`가 처음 걸 때 앞 hook을 기억해 해제 때 되돌리고, 로그 hook은 flush 뒤 앞 hook에 연쇄한다. `FlushForTermination`은 막히는 lock 없이 TryLock·원자 완료 확인·제한 시간 대기만 쓰고, 중복은 `fatalInProgress`로 판정하며, 종료를 부른 스레드(`platform::TerminatingThreadId`)가 출력 스레드 자신이면 기다리지 않고 비상 경로로 알린다. 겹쳐 크래시한 스레드도 같은 제한 시간까지 기다린다. 개정 8의 16절 밖, 새 범위(2026-11-18 사용자 진행 지시·L25 선택으로 확정) | 결정됨(2026-11-18) |
-| L25 | OS 예외·치명 신호에서 로그를 flush한다(A). Windows unhandled exception filter는 미리 만든 flush 전용 스레드에 커널 이벤트로 넘기고(stack overflow 대응, 엔진 스레드는 `SetThreadStackGuarantee`), POSIX는 `sigaltstack`·`sem_post`로 같은 스레드를 깨운다(신호 처리기 쪽은 최선 노력). 앞 처리기로 연쇄한다. 비용은 기록당 0, 프로세스당 대기 스레드 하나, 스레드당 여유 stack 32 KiB, 크래시 때 최대 `fatalFlushTimeoutMilliseconds` | 결정됨(2026-11-18, 사용자 선택 A) |
+| L25 | OS 예외·치명 신호에서 로그를 flush한다(A). Windows unhandled exception filter는 미리 만든 flush 전용 스레드에 커널 이벤트로 넘기고(stack overflow 대응, 엔진 스레드는 `SetThreadStackGuarantee`), POSIX는 `sigaltstack`·self-pipe `write`로 같은 스레드를 깨운다(신호 처리기 쪽은 최선 노력). 이름 없는 POSIX 세마포어(`sem_init`)는 macOS가 지원하지 않아(deprecated, 실행 때 실패) 쓰지 않는다. 앞 처리기로 연쇄한다. 비용은 기록당 0, 프로세스당 대기 스레드 하나, 스레드당 여유 stack 32 KiB, 크래시 때 최대 `fatalFlushTimeoutMilliseconds` | 결정됨(2026-11-18, 사용자 선택 A) |
 | L26 | 로그 보기는 Commandlet `log view`(거르기·여러 파일·평문·zst·봉인)까지 한다. 전문 viewer는 Lens(M3). 개정 8의 16절 밖, 새 범위(2026-11-18 사용자 진행 지시·L25 선택으로 확정) | 결정됨(2026-11-18) |
 | L27 | WorkerScheduler 지연·포화 진단은 단계로 두지 않는다. Engine의 스케줄러 소유와 스케줄러 통계 확장이 선행 조건이다(16절) | 결정됨(2026-11-18, 권장안) |
+| L28 | sink 수명은 `RemoveSink` 성공 또는 LogSystem 파괴까지다(`Stop`만으로는 안 됨). `RuntimeLogSink`가 등록 계수를 갖고 등록된 채 파괴되면 Fatal(8.4절) | 결정됨(2026-11-20, macOS CI 결함에서 — 권장안) |
 
 ## 18. 개정 이력
 
@@ -842,6 +847,7 @@ LG11–LG19 중 다른 세션 소유 모듈을 고쳐야 하는 곳이다. 그 �
 - 개정 7(2026-11-18): LG7 구현 반영 — `CreateD3D12Device`·`Window::Create`에 report 인자(기본 nullptr), `Graphics/GraphicsLog.h` 카테고리와 `ValidationMessageFilter`, 셰이더 실패는 장치 LastError + 호출자 기록, Sandbox는 backend별 실행이라 "건너뛴 backend Warning·모두 실패 Error", OpenGL 기존 로그는 규칙 충족으로 유지.
 - 개정 8(2026-11-18): LG8·LG9 구현 반영 — 설정 이름을 Config 규칙에 맞춰 `log.file.max_bytes`·`log.file.recipient_key`로 바꿨다. `log.mode` 기본값 `default`(호스트 프리셋)를 더했다. 카테고리 재정의는 문자열 `log.levels`이고, 설정 처리는 새 `LogHost` 모듈에 둔다(9.2절). 보관 정리는 파일 이름 모양이 정확히 맞는 것만 센다. Asan·TSan 전체 체인은 저장소 검증 기준 변경으로 생략했다. Templates/Game은 tick·Engine이 없어 엔진 호스트로 다루지 않는다.
 - 개정 9(2026-11-18): 후속 설계 확정 — 16절 항목을 LG11–LG19로 설계했다(14.1절, 결정 L14–L27). 상관 id 스택을 Core로 내리고 trace `log` 채널은 `TraceLogSink`가 쓴다. 레이아웃 설정과 Config 검증 hook, 카테고리별 rate limit, `{@Obj}` 캡처 시점 복사와 생성 필드 방문 함수, Formatter spec 검증 규약, 시간 회전과 묶음별 zstd 압축(압축 뒤 봉인), `platform::Fatal` hook, `log view`를 다룬다. WorkerScheduler 진단은 선행 조건만 적었다. UE 5.8.4 `StructuredLog`·`LogTrace`·`OutputDeviceFile`·`FileHelper`·`OutputDeviceRedirector::Panic`을 확인했다. 다른 세션 조율은 15.1절이다. 리뷰 반영: 상관 id 스택에 확장 칸·관찰자 hook(H1), rate limit 창·수 단일 원자 값(M1), Compression 고정 작업 공간 문맥 요청(M2), 종료 hook `const char*`·막히지 않는 flush(M3), `log.levels` 거부 범위(M5), `{@Obj}` 특수화를 ObjectRuntime으로(M6), 런타임 템플릿 spec 검사 경로·전파 분기 하나·`DedicatedLane` 전파·tick 캡처·LG17 시험 방식·validate reason(Low). L25는 사용자 선택 A로 확정했고, L24·L26은 개정 8의 16절 밖 새 범위로 표시했다.
+- 개정 13(2026-11-20): sink 수명 계약을 `RemoveSink` 성공 또는 LogSystem 파괴까지로 좁히고 등록 계수로 위반을 Fatal로 잡는다(8.4절, L28). macOS CI에서 시험이 sink를 LogSystem보다 나중에 선언해 파괴된 sink를 flush하던 결함(31곳 선언 순서 정정)에서 나왔다. POSIX 크래시 처리기 깨우기를 self-pipe로(14.1.8, L25).
 - 개정 12(2026-11-19): CVar CVR7 반영. 9.2절 표를 핸들 종류(enum·`BootCVar`·`Validate`·`Range`)로, 읽기(봉인 뒤 snapshot)·실행 중 변경(`OnSynced` + `Watcher`, `log.rate_limits` 포함)·적용 실패 진단(카테고리 목록은 닫혀 있지 않아 모르는 접두사는 진단하지 않는다)을 고쳤다. L17·L18을 설정 단계 거부 반영으로, 15.1절 CVR7 행을 반영으로 바꿨다.
 - 개정 11(2026-11-18): LG11–LG15·LG17–LG19 구현 반영(14.2절). LG11–LG13·LG17–LG19 리뷰와 LG14·LG15 리뷰(rocks-95) 반영: spec 키를 호출 지점으로, 정의 쓰기 성공 뒤 표에 넣기, 표가 차면 기록에 싣기, 상관 id 확장 칸 규칙, 종료 순서(Flush → trace sink 제거 → trace 정지), 이름을 `Trace.LogMessageSpec`·`Trace.LogMessage`로. LG16은 GC 세션 병합 뒤로 미뤘다. LG14·LG15 재리뷰 반영: 빈 전파 경로 인라인(분기 하나), spec id 위치는 문자열 해시, 정의 상한 초과 spec 즉시 동봉·동봉 템플릿 상한, 측정 숫자(14.1.4).
 - 개정 10(2026-11-18): CVar 설계 확정(CVarSystem 개정 2, Config 개정 4)에 맞춰 L18을 바꿨다. Config에 validate hook을 더하지 않고, 설정 단계 거부는 CVR7의 CVar `Validate`로 미룬다. LG12는 Config 조율 없이 LogHost 적용 시점 검사로 한다. 15.1절 Config 항목을 CVar CVR7 항목으로 바꿨다.

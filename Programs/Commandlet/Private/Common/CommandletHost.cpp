@@ -150,8 +150,8 @@ int Run(Span<const StringView> args, CommandletOutput output) noexcept {
     // 명령이 로그를 남기지 않으면 출력은 그대로다. 시작하지 못하면 설치 없이 계속한다(Warning
     // 이상은 비상 경로로 stderr에 간다).
     SystemAllocator logAllocator;
-    LogSystem logs(logAllocator, LogSystemConfig::ForTool());
     StderrLogSink stderrSink;
+    LogSystem logs(logAllocator, LogSystemConfig::ForTool());
     const bool logging = logs.AddSink(stderrSink).IsOk() && logs.Start().IsOk();
     const int exitCode = logging ? RunInstalled(logs, args, output) : RunCommands(args, output);
     logs.Stop();

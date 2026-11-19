@@ -1,4 +1,5 @@
 #include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
+#include <ReflectionTestFixtures/StaticArrayFixture.generated.h>
 #include <Object/NativeMemberTraits.h>
 #include <Serialization/RecordList.h>
 #include <Serialization/ValueArray.h>

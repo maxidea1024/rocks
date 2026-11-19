@@ -1,5 +1,6 @@
 #include "AssetCombination.h"
 
+#include <AssetRuntime/Package.generated.h>
 #include <TestSupport/Test.h>
 
 // "지원하는 모든 조합" 시험이다(Docs/Design/AssetSystem.ko.md 14.1절).

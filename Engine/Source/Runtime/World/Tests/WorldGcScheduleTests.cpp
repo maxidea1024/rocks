@@ -5,8 +5,8 @@
 #include <Object/ModuleRegistration.h>
 #include <Object/TypeRegistry.h>
 #include <Task/WorkerScheduler.h>
+#include <World/Actor.generated.h>
 #include <World/World.h>
-#include <World/World.module.generated.h>
 
 // World GC 일정(Docs/Design/GarbageCollectionScale.ko.md 17.3절): 주기 전체 수집, 전체 수집 요청,
 // 회수 예산.
@@ -99,7 +99,7 @@ ObjectBudgetSchedule(uint32 objectsPerFrame = GcBudget::DefaultMaxObjects) noexc
 
 } // namespace
 
-// FullCollection 모드는 파괴가 있어도 간격(World 게임 시간)이 지나기 전에는 수집하지 않는다. 간격이
+// FullCollection 모드는 파괴가 있어도 간격(실제 경과 시간)이 지나기 전에는 수집하지 않는다. 간격이
 // 지난 프레임에 STW 전체 수집을 하고(회수는 미룸), 다음 프레임의 예산 회수가 저장소를 반환한다.
 TEST(WorldGc_FullCollectionModeWaitsForInterval) {
     WorldGcSchedule schedule = ObjectBudgetSchedule();

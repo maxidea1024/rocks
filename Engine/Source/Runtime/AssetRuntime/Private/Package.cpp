@@ -1,6 +1,7 @@
 #include "PackageAccess.h"
 
 #include <AssetRuntime/AssetRuntime.module.generated.h>
+#include <AssetRuntime/BulkData.generated.h>
 #include <AssetRuntime/Package.generated.h>
 #include <Core/Assert.h>
 #include <Object/ConstructionContext.h>

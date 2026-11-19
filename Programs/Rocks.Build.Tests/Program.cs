@@ -118,6 +118,9 @@ try
     await ExecutorCleanupTests.RunAsync(request, root);
     Pass("cleanup failures preserve diagnostics, cancellation, and cache safety");
 
+    await ActionDurationTests.RunAsync(request, root);
+    Pass("action durations are recorded for executed actions, zero for cached ones, and stay out of action keys");
+
     foreach (int invalidJobs in new[] { 0, ProcessRunner.MaximumConcurrentProcesses + 1 })
     {
         string invalidOutput = Path.Combine(root, "invalid-jobs-" + invalidJobs);
@@ -143,6 +146,8 @@ try
 
     var warm = await Build();
     Check(warm.ExecutedActions == 0 && warm.SkippedActions == 4, "No-op must execute zero actions");
+    Check(cold.Actions.All(action => action.DurationMilliseconds >= 0) && warm.Actions.All(action => action.DurationMilliseconds == 0),
+        "Cached actions must report zero duration");
     Pass("no-op output validation");
 
     using var compileCommands = JsonDocument.Parse(File.ReadAllText(cold.CompilationDatabasePath));
@@ -281,6 +286,9 @@ try
 
     await ModuleTableTests.RunAsync(request, root);
     Pass("module table: rows in dependency order without exempt modules, ROCKS_MODULE_NAME, missing entry link error, case collisions, reserved macro");
+
+    await ReflectionSourceTests.RunAsync(request, root);
+    Pass("reflection generated sources: source-less module archive, registration through the declaration, entry point exemption, incremental, validation");
 
     // 빌드 주입 상수(B7): 툴체인 지문·도구 빌드 ID·환경 위생·FP 인자 거부·입력 열거 정리. 하위 묶음마다 PASS를 센다.
     await BuildInfoTests.RunAsync(request, root, Pass);

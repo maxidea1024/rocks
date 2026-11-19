@@ -1,6 +1,6 @@
 # Rocks 물리 어댑터 경계: Jolt 좌표·단위 변환 계약
 
-기준일: 2026-11-17, 개정 0(초안).
+기준일: 2026-11-20, 개정 1(초안). 개정 1: 4절에 에셋 단순 충돌 형상 대응(메시 에셋 스펙 MR5)과 8절 J20·J21을 더했다.
 
 이 문서는 Rocks 물리 모듈이 Jolt Physics와 주고받는 값의 좌표·방향·단위 변환 계약을 정한다. 물리 모듈과 Jolt 연동은 구현되지 않았고, 이 문서도 코드나 의존성을 들이지 않는다. 상태 표기는 **설계**(이 문서가 정한 계약, 코드 없음)와 **검증 항목**(확인하지 못해 착수 전에 확인할 것, 8절의 J·U 번호)이다. Jolt 쪽 사실(좌우수, 기본 up 축, 단위, API 이름과 의미)은 이 개정에서 공개 문서·소스로 확인하지 않았으므로 모두 전제로 적고 검증 항목에 묶는다. 전제가 확인 결과와 다르면 이 문서를 고친 뒤 구현한다.
 
@@ -82,6 +82,19 @@ Rocks의 외적, Hamilton 곱, quaternion 벡터 회전, quaternion → 행렬 �
 - **캡슐·실린더.** UE 캡슐은 로컬 Z축이 캡슐 축이다(`Engine/Classes/PhysicsEngine/SphylElem.h:13`). Rocks 물리 캡슐도 로컬 +Z축이다. Jolt 캡슐·실린더 축(J6)이 +Y이면 기본안 A가 Rocks +Z를 Jolt +Y로 옮기므로 형상 회전이 필요 없다. 아니면 고정 회전으로 감싼다. Rocks cylinder(UE에는 없는 단순 충돌·질의 형상)의 사상, convex radius 정책, 안정성 경고는 [Cylinder 형상 설계](CylinderShape.ko.md) 4절(CY2)을 따른다.
 - **heightfield.** Rocks(UE landscape)의 표본 격자는 XY 평면이고 높이는 +Z다. 기본안 A에서 Rocks X는 Jolt Z, Rocks Y는 Jolt X가 되므로 Jolt 격자가 XZ 평면(J7)이면 표본 배열을 전치해 넘기고 높이는 `CentimetersToMeters`로 바꾼다. 칸마다 나누는 대각선 방향, 표본 색인 순서, 구멍 표시(J7)와 UE landscape 충돌의 대각선 선택(U3)이 맞지 않으면 같은 높이 표본에서 다른 표면이 나온다. 시험 PA07이 이를 고정한다.
 - **convex·compound.** convex 점은 A와 cm → m로 바꾸고, compound 자식의 상대 변환은 이동을 A·(cm → m), 회전을 (A·v, w)로 바꾼다.
+- **에셋 단순 충돌**(메시 에셋 스펙 MR5, 2026-11-20). 정적 메시의 `SimpleCollision`([메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md) 4.6절)은 UE `FKAggregateGeom`과 같은 의미의 값이다. 형상 하나는 compound 자식 하나가 되고, 형상의 `center`·`rotation`(Rotator, 도)은 위 compound 자식 변환 규칙으로 바꾼다.
+
+  | Rocks 형상 | 값의 의미(UE와 같음) | Jolt 형상 |
+  |---|---|---|
+  | `CollisionSphere` | 반경 | 구(반경 cm → m) |
+  | `CollisionBox` | `size`는 축별 **전체** 길이 | 상자(반 크기 = size / 2, cm → m, 축은 A로) |
+  | `CollisionCapsule` | `length`는 원기둥 부분 길이, 축은 로컬 +Z | 캡슐(반높이 = length / 2). 축 처리는 위 "캡슐·실린더" 항목 |
+  | `CollisionTaperedCapsule` | 양 끝 반경 `radius0`·`radius1`, `length` | 테이퍼드 캡슐. 어느 끝이 `radius0`인지와 Jolt 위·아래 반경 대응은 J20 |
+  | `CollisionCylinder` | Rocks 추가 형상 | [Cylinder 형상 설계](CylinderShape.ko.md) 4절(CY2) |
+  | `CollisionConvex` | 점·index(double cm), 자체 transform | convex hull(위 convex 규칙). 쿠킹 때 Jolt 형상으로 직렬화한다 |
+
+  - 형상 공통 필드: `collisionEnabled`는 body·질의 필터, `contributeToMass`가 거짓이면 질량 계산에서 뺀다(Jolt에서 그 자식의 밀도 0 또는 질량 재정의 — J21), `restOffset`의 Jolt 대응은 J21.
+  - `CollisionComplexity`: `ComplexAsSimple`이면 렌더 메시 삼각형(`lodForCollision` LOD, 또는 `complexCollisionMesh`)을 Jolt mesh 형상으로 쓴다. Jolt mesh 형상은 동적 body에 쓸 수 없으므로 정적·kinematic body에만 허용하고, 동적 body면 단순 형상으로 내려가며 진단을 낸다(UE도 complex-as-simple 동적 body를 지원하지 않는다). 삼각형 앞면은 위 "삼각형 메시 앞면" 규칙을 따른다.
 
 ## 5. 이름이 붙은 방향과 부호 규약
 
@@ -128,6 +141,8 @@ Rocks의 외적, Hamilton 곱, quaternion 벡터 회전, quaternion → 행렬 �
 | J17 | `RayCylinder`의 정확성(끝면·모서리·시작점이 안), convex radius가 ray 판정에 주는 영향 | Cylinder 형상 설계 4절 |
 | J18 | cylinder 반높이·반경과 convex radius의 관계(잘림인지 거부인지), 0 근처 동작, 얇은 cylinder 접촉 품질(v5.3.0 이후), convex radius 0 sensor의 침투 깊이 안정성 | Cylinder 형상 설계 4절 |
 | J19 | cylinder 질량·관성 계산식과 단위 변환, 부력(`GetSubmergedVolume`) 근사, 캐릭터(`CharacterVirtual`) 형상으로 쓸 수 있는지 | Cylinder 형상 설계 4절 |
+| J20 | 테이퍼드 캡슐의 위·아래 반경과 축 방향, UE `FKTaperedCapsuleElem`의 `Radius0`·`Radius1`이 어느 끝인지(UE 원본 확인 포함) | 4절 에셋 단순 충돌 |
+| J21 | compound 자식별 질량 제외(UE `bContributeToMass`)와 rest offset(UE `RestOffset`)의 Jolt 대응 | 4절 에셋 단순 충돌 |
 | U1 | UE `AddForce`·`AddImpulse`·`AddTorqueInRadians`·`AddAngularImpulseInRadians`의 실제 단위. 소스 주석에 단위가 없다("Magnitude indicates strength of force" — `Engine/Classes/Components/PrimitiveComponent.h:1753-1759`). 확인 방법(미실행): UE 5.8에서 질량 m body에 매 tick `AddForce(0, 0, 980·m)`를 걸어 중력 −980에서 정지가 유지되면 kg·cm/s², `AddImpulse(0, 0, 100·m)` 뒤 속도 변화가 100 cm/s면 kg·cm/s, 관성 I(kg·cm²)의 주축에 `AddTorqueInRadians` τ를 걸어 각가속도 τ/I면 kg·cm²/s² | 3절 |
 | U2 | UE 에디터의 물리량 표시 단위 | Rocks 에디터 표시 |
 | U3 | UE landscape 충돌의 칸 대각선 선택 | 4절, PA07 |

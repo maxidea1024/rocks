@@ -1,3 +1,5 @@
+#include <CoreTypeBindings/CoreValueTypes.generated.h>
+#include <ReflectionTestFixtures/FieldFlagFixture.generated.h>
 #include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
 #include "MapTestSupport.h"
 

@@ -1,5 +1,6 @@
 #include "PackageEditing.h"
 
+#include <AssetRuntime/Package.generated.h>
 #include <Core/Text/NameComponent.h>
 #include <Platform/Thread.h>
 #include <TestSupport/NFailAllocator.h>

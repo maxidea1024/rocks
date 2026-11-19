@@ -36,17 +36,17 @@
 ### 1.2 생성 위치와 include
 
 - 모듈 M의 생성 헤더는 원본 철자를 그대로 따른다: public 헤더 `ReflectionTestFixtures/ReflectionFixture.h` → `<out>/Generated/<M>/Public/ReflectionTestFixtures/ReflectionFixture.generated.h`, private 헤더는 `.../Private/...`. `<out>/Generated/<M>/Public`을 **M의 public include 디렉터리로**, `.../Private`를 private include 디렉터리로 자동 추가한다(ActionGraph의 public 전파). 사용 철자는 원본 철자의 `.h`를 `.generated.h`로 바꾼 것이다(`#include <ReflectionTestFixtures/ReflectionFixture.generated.h>`). 생성 철자의 유일성은 저절로 보장되지 않으므로(빌드는 public 헤더 철자의 모듈 사이 유일성을 강제하지 않는다) MetadataLayout이 타깃에서 도달하는 모듈의 생성 철자를 대소문자 무시로 비교해 겹치면 RMC2005, 원본 철자나 생성 철자(`.generated.h`·집계 헤더)를 생성 루트보다 앞에서 가리는 파일은 RMC1001로 거부한다.
-- 모듈 집계 헤더 `<M>/<M>.module.generated.h`를 public 생성 루트에 둔다(원본 이름이 `.module.h`·`.generated.h`로 끝나는 헤더는 RMC2005). B1에서는 모듈의 생성 헤더를 모두 include하고 클래스를 base 먼저 등록하는 `RegisterModuleTypes`(3.5절)를 담는다 — B3가 enum·struct 등록을 더한다.
-- 생성 헤더의 본문(스키마·연산 표·등록 함수)을 생성 소스(`.generated.cpp`)로 옮기고 집계 헤더를 선언만 남기는 설계는 [리플렉션 생성 소스](ReflectionGeneratedSources.ko.md)에 있다(설계 확정, 미구현). 구현되면 이 절의 배치와 1.2절의 검증 컴파일 서술을 그 문서에 맞춰 고친다.
+- 모듈 생성 헤더 `<M>/<M>.module.generated.h`를 public 생성 루트에 둔다(원본 이름이 `.module.h`·`.generated.h`로 끝나는 헤더는 RMC2005). 등록 함수 `RegisterModuleTypes`(3.5절 — 클래스를 base 먼저 등록하고 B3가 enum·struct 등록을 더했다)의 **선언만** 담고 `Object/ModuleRegistration.h`만 include한다. private 리플렉션 헤더가 있는 모듈은 private 생성 루트의 `<M>/<M>.private.module.generated.h`가 `RegisterPrivateModuleTypes`를 선언한다. 타입별 생성 헤더와 의존 모듈의 헤더를 include하지 않으므로 `GeneratedType<T>`를 쓰는 코드는 그 타입의 생성 헤더를 직접 include하고, 손으로 쓴 헤더는 모듈 생성 헤더를 include하지 않는다(정책 검사 `module-generated-header-include`).
+- 두 등록 함수의 정의는 모듈 생성 소스 `<out>/Generated/<M>/Source/<M>.module.generated.cpp`에 있다([리플렉션 생성 소스](ReflectionGeneratedSources.ko.md) GS1, 2026-11-19 구현). `Source/`는 include 루트가 아니다. 이 모듈의 모듈 생성 헤더, 의존 모듈의 public 모듈 생성 헤더, 이 모듈의 타입별 생성 헤더(public·private)를 include한다. `MetadataLayout`이 그 경로를 모듈의 리플렉션 생성 소스 목록(`NativeModuleInput.ReflectionSources` — 손으로 쓴 `Sources`와 따로다)에 넣고 액션 그래프가 그 모듈의 번역 단위로 컴파일한다. 그래서 손으로 쓴 소스가 없던 리플렉션 모듈도 정적 라이브러리가 된다. 모듈 진입점(`ROCKS_IMPLEMENT_MODULE`) 판정에는 넣지 않는다. 타입별 생성 헤더의 본문(스키마·연산 표)을 생성 소스로 옮기는 일은 그 문서의 다음 단계다.
 - 생성 디렉터리는 **메타 생성 전에** 만든다(MetaCompiler의 `--include-dir`가 존재를 요구하고, ActionGraph도 없는 include 디렉터리를 거부한다). stage·백업·검증 임시 파일·descriptor는 `<out>/Generated/<M>` **밖**에 둔다(`<out>/Metadata/`·`<out>/.metadata-stage/<tag>/`) — 안에 두면 헤더 검사·증분 스캔·SDK 복사에 걸린다.
 - 규칙마다 손으로 넣던 `out/Generated` private include(FoundationTests·Game·Program.cs)와 Program.cs의 생성 헤더 별도 검사 루프는 지운다(public include의 `*.h`를 도는 기존 헤더 검사가 생성 헤더도 덮는다 — 두 번 등록하면 "Duplicate source"다).
 
 ### 1.3 실행 단위와 순서
 
 - 타깃에서 도달하는 모듈(플러그인 모듈 포함 — native 빌드와 같은 root 집합) 중 Metadata가 있는 모듈을 의존 순서(위상 정렬)로 실행한다. 모듈 하나에 MetaCompiler 실행 한 번이며 입력 헤더 전부를 `#include`하는 합성 번역 단위를 Clang에 준다. 같은 모듈 안 헤더 사이의 base·참조는 이 실행 안에서 풀린다.
-- 명령: `Rocks.MetaCompiler --module M --input <h> --include <철자> [--private]… --output-root <stage>/<M> --descriptor <stage>/M.rocksmeta.json --identity-manifest <명세> --identity-inventory <임시> --import <의존 descriptor>… [--check]`.
+- 명령: `Rocks.MetaCompiler --module M --input <h> --include <철자> [--private]… --output-root <stage>/<M> --descriptor <stage>/M.rocksmeta.json --identity-manifest <명세> --identity-inventory <임시> --import <의존 descriptor>… [--check] [--verify-sources]`.
 - clang 인자는 지금처럼 소유 모듈의 compile 프로필·public+private define/include와 의존 모듈의 public define/include다. 단 **자기 모듈을 포함한 모든 생성 include 루트는 게시본 대신 이번 실행의 stage 루트**로 바꿔 넘긴다(생성 헤더가 같은 모듈·의존 모듈의 생성 헤더를 include하므로 — 4.2절 — 검증 컴파일이 이전 빌드의 낡은 게시본이 아니라 이번 산출물을 봐야 한다).
-- 검증 컴파일은 생성 헤더마다 따로 한다(소비자가 헤더를 하나씩 include하므로). `--check`는 모든 생성 헤더·집계 헤더·descriptor와 남은 잉여 생성 파일까지 본다.
+- 검증 컴파일은 생성 헤더마다(모듈 생성 헤더 포함) 따로 한다(소비자가 헤더를 하나씩 include하므로). 모듈 생성 소스는 게시 전에 컴파일하지 않는다 — 빌드가 그 모듈의 compile action으로 컴파일해 검증한다. 빌드 없이 쓰는 호출자(단독 실행·도구 시험)는 `--verify-sources`로 생성 소스도 게시 전에 같은 인자로 구문 검사하게 한다(실패는 RMC3000). `--check`는 모든 생성 헤더·모듈 생성 헤더·생성 소스·descriptor와 출력 루트(`Public`·`Private`·`Source`)에 남은 잉여 생성 파일까지 본다.
 
 ### 1.4 descriptor(`<M>.rocksmeta.json`)
 
@@ -88,7 +88,7 @@
 
 ### 1.7 게시 트랜잭션
 
-- 모든 모듈의 생성 헤더·집계 헤더·descriptor를 stage에 만든다. 의존 모듈은 stage의 descriptor와 생성 루트를 쓴다(1.3절).
+- 모든 모듈의 생성 헤더·모듈 생성 헤더·생성 소스·descriptor를 stage에 만든다. 의존 모듈은 stage의 descriptor와 생성 루트를 쓴다(1.3절). 게시와 잉여 파일 삭제는 생성 루트 셋(`Public`·`Private`·`Source`)에 똑같이 적용한다.
 - 모든 inventory 검증과 명세 집합 검증이 끝난 뒤 한 번에 게시한다. `MetadataOutputTransaction.Publish`는 명세 스냅샷 **목록**을 받아 각 명세가 실행 동안 바뀌지 않았는지 확인하고, 출력 전부를 백업·교체·실패 시 복구한다. 항목에 **삭제**(이번 실행의 모듈에서 입력이 빠진 헤더의 생성물과 그 모듈 생성 루트의 잉여 파일)를 더하고 삭제도 백업·복구한다. 이번 실행에 없는 모듈의 생성 디렉터리는 지우지 않는다(`--output`을 여러 타깃이 함께 쓸 수 있다 — 그 디렉터리는 include 경로에 들어가지 않으므로 해가 없다). 임시 정리는 stage 디렉터리까지 지운다.
 
 ### 1.8 SDK·게임 템플릿·입력 스냅샷
@@ -224,7 +224,7 @@ struct FieldSchema {
 - **TypeRegistry 종류 구분**: 레코드에 종류(Class·Struct·Enum)를 둔다. 기존 `Acquire(TypeId)`는 **클래스만** 돌려준다(다른 종류는 TypeMismatch — ObjectRegistry·GraphSave·GraphLoad의 기존 호출자는 모두 클래스를 가정한다). struct·enum은 `AcquireValueType(TypeId, TypeKind)`으로 연다. 등록은 `RegisterStruct(const StructSchema&, RuntimeStructOps)`·`RegisterEnum(const EnumSchema&, RuntimeEnumOps)`(`RuntimeEnumOps{nativeType, module}` — B3b 구현).
 - **의존 계수**: 클래스(또는 struct)가 가리키는 enum·struct가 등록 때 이미 있어야 하고(없으면 NotFound), 참조는 lease가 아니라 base와 같은 `dependents` 계수로 표시한다 — 가리키는 레코드 포인터 목록을 등록 단일 할당 안에 두고 `DestroyRecord`에서 각각 줄인다(lease로 쥐면 Shutdown이 영구 Busy가 된다). 의존자가 남은 레코드의 Unregister는 Busy다.
 - **native 타입 대조**: struct 필드의 생성 ops는 정적 타입 `S`의 `NativeTypeKey<S>()`를 싣고, 등록이 그 필드가 가리키는 struct 레코드의 native 키와 같은지 확인한다(schema로 해석한 경로와 정적 thunk가 어긋나 엉뚱한 멤버에 쓰지 않게). enum도 같다.
-- **모듈 등록**(B1에서 구현, 클래스만): 집계 헤더의 `RegisterModuleTypes(ModuleRegistration&, const ModuleLease& = {}) -> Result<void>`가 먼저 `registration.EnterModule(모듈 키)`로 이 registration에 이미 들어온 모듈이면 바로 성공한다(의존 그래프의 여러 경로로 불려도 모듈마다 한 번 — 호출 수가 경로 수만큼 늘지 않는다). 이어서 **리플렉션 타입을 가진 의존 모듈의 `RegisterModuleTypes`를 부르고**(import한 descriptor의 모듈 집계 헤더를 include한다), 자기 모듈의 enum → struct(중첩 의존 위상 순) → class(base 먼저) 순으로 등록한다(B3가 enum·struct를 더한다). 같은 ID·같은 native 키로 이미 등록된 타입은 새로 등록하지 않고 그 타입의 lease를 붙잡는다 — 여러 registration이 같은 의존을 공유해도 한 번만 등록되고, 쓰는 쪽이 남아 있는 동안 그 타입은 해제되지 않는다(다른 native 키면 AlreadyExists). 중간 실패면 이 호출의 기록을 역순으로 되돌린 뒤 오류를 돌려준다. `ModuleRegistration`은 모듈·등록 토큰·lease 기록이며 역순으로 되돌린다(객체나 다른 기록의 lease가 남아 있으면 그 해제는 Busy다).
+- **모듈 등록**(B1에서 구현, 클래스만): 모듈 생성 헤더가 선언하고 모듈 생성 소스가 정의하는(1.2절 — 정의가 프로그램에 하나이므로 함수 안 정적 객체의 주소가 모듈 키다) `RegisterModuleTypes(ModuleRegistration&, const ModuleLease& = {}) -> Result<void>`가 먼저 `registration.EnterModule(모듈 키)`로 이 registration에 이미 들어온 모듈이면 바로 성공한다(의존 그래프의 여러 경로로 불려도 모듈마다 한 번 — 호출 수가 경로 수만큼 늘지 않는다). 이어서 **리플렉션 타입을 가진 의존 모듈의 `RegisterModuleTypes`를 부르고**(모듈 생성 소스가 import한 descriptor의 모듈 생성 헤더를 include한다), 자기 모듈의 enum → struct(중첩 의존 위상 순) → class(base 먼저) 순으로 등록한다(B3가 enum·struct를 더한다). 같은 ID·같은 native 키로 이미 등록된 타입은 새로 등록하지 않고 그 타입의 lease를 붙잡는다 — 여러 registration이 같은 의존을 공유해도 한 번만 등록되고, 쓰는 쪽이 남아 있는 동안 그 타입은 해제되지 않는다(다른 native 키면 AlreadyExists). 중간 실패면 이 호출의 기록을 역순으로 되돌린 뒤 오류를 돌려준다. `ModuleRegistration`은 모듈·등록 토큰·lease 기록이며 역순으로 되돌린다(객체나 다른 기록의 lease가 남아 있으면 그 해제는 Busy다).
 
 ### 3.6 `FieldValue`와 thunk
 
