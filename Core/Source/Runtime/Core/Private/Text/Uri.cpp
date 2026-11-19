@@ -10,12 +10,12 @@ bool IsAlpha(char c) noexcept {
     return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
 }
 
-bool IsDigit(char c) noexcept {
+bool UriIsDigit(char c) noexcept {
     return c >= '0' && c <= '9';
 }
 
-int32 HexValue(char c) noexcept {
-    if (IsDigit(c)) {
+int32 UriHexValue(char c) noexcept {
+    if (UriIsDigit(c)) {
         return c - '0';
     }
     if (c >= 'a' && c <= 'f') {
@@ -28,7 +28,7 @@ int32 HexValue(char c) noexcept {
 }
 
 bool IsUnreserved(char c) noexcept {
-    return IsAlpha(c) || IsDigit(c) || c == '-' || c == '.' || c == '_' || c == '~';
+    return IsAlpha(c) || UriIsDigit(c) || c == '-' || c == '.' || c == '_' || c == '~';
 }
 
 bool IsSubDelimiter(char c) noexcept {
@@ -85,7 +85,7 @@ bool ValidateComponent(const char* data, usize begin, usize end, Component compo
             if (end - index < 3) {
                 return false; // "%"·"%A"처럼 두 자리 16진수가 없다.
             }
-            if (HexValue(data[index + 1]) < 0 || HexValue(data[index + 2]) < 0) {
+            if (UriHexValue(data[index + 1]) < 0 || UriHexValue(data[index + 2]) < 0) {
                 return false;
             }
             index += 3;
@@ -110,7 +110,7 @@ bool ValidateIpv4(const char* data, usize begin, usize end) noexcept {
         }
         const usize start = index;
         uint32 value = 0;
-        while (index < end && IsDigit(data[index]) && index - start < 3) {
+        while (index < end && UriIsDigit(data[index]) && index - start < 3) {
             value = value * 10 + static_cast<uint32>(data[index] - '0');
             ++index;
         }
@@ -127,7 +127,7 @@ bool ValidateIpLiteral(const char* data, usize begin, usize end) noexcept {
     if (begin < end && (data[begin] == 'v' || data[begin] == 'V')) {
         usize index = begin + 1;
         const usize hexStart = index;
-        while (index < end && HexValue(data[index]) >= 0) {
+        while (index < end && UriHexValue(data[index]) >= 0) {
             ++index;
         }
         if (index == hexStart || index >= end || data[index] != '.') {
@@ -175,7 +175,7 @@ bool ValidateIpLiteral(const char* data, usize begin, usize end) noexcept {
             return false;
         }
         for (usize position = index; position < tokenEnd; ++position) {
-            if (HexValue(data[position]) < 0) {
+            if (UriHexValue(data[position]) < 0) {
                 return false;
             }
         }
@@ -244,7 +244,7 @@ bool ParseAuthority(const char* data, usize begin, usize end, UriView& uri) noex
         uri.hasPort = true;
         uint32 value = 0;
         for (usize index = portSeparator + 1; index < end; ++index) {
-            if (!IsDigit(data[index])) {
+            if (!UriIsDigit(data[index])) {
                 return false;
             }
             value = value * 10 + static_cast<uint32>(data[index] - '0');
@@ -263,7 +263,7 @@ bool IsSchemeValid(const char* data, usize length) noexcept {
     }
     for (usize index = 1; index < length; ++index) {
         const char c = data[index];
-        if (!IsAlpha(c) && !IsDigit(c) && c != '+' && c != '-' && c != '.') {
+        if (!IsAlpha(c) && !UriIsDigit(c) && c != '+' && c != '-' && c != '.') {
             return false;
         }
     }
@@ -360,8 +360,8 @@ Result<usize> TryPercentDecode(StringView text, Span<char> output,
     usize decodedSize = 0;
     for (usize index = 0; index < length; ++decodedSize) {
         if (data[index] == '%') {
-            if (length - index < 3 || HexValue(data[index + 1]) < 0 ||
-                HexValue(data[index + 2]) < 0) {
+            if (length - index < 3 || UriHexValue(data[index + 1]) < 0 ||
+                UriHexValue(data[index + 2]) < 0) {
                 return Result<usize>::Failure(ErrorCode::InvalidArgument);
             }
             index += 3;
@@ -377,8 +377,8 @@ Result<usize> TryPercentDecode(StringView text, Span<char> output,
     for (usize index = 0; index < length;) {
         const char c = data[index];
         if (c == '%') {
-            output[written++] =
-                static_cast<char>((HexValue(data[index + 1]) << 4) | HexValue(data[index + 2]));
+            output[written++] = static_cast<char>((UriHexValue(data[index + 1]) << 4) |
+                                                  UriHexValue(data[index + 2]));
             index += 3;
         } else {
             output[written++] = mode == PercentDecodeMode::FormUrlEncoded && c == '+' ? ' ' : c;
@@ -613,7 +613,7 @@ void AppendPercentNormalized(UriWriter& writer, StringView text, bool lowercase)
     for (usize index = 0; index < length;) {
         const char c = data[index];
         if (c == '%' && length - index >= 3) {
-            const int32 value = (HexValue(data[index + 1]) << 4) | HexValue(data[index + 2]);
+            const int32 value = (UriHexValue(data[index + 1]) << 4) | UriHexValue(data[index + 2]);
             const char decoded = static_cast<char>(value);
             if (value < 0x80 && IsUnreserved(decoded)) {
                 writer.Append(lowercase ? ToLowerAscii(decoded) : decoded);
@@ -651,7 +651,7 @@ uint32 DefaultPortOf(StringView scheme) noexcept {
     return 0;
 }
 
-void AppendDecimal(UriWriter& writer, uint32 value) noexcept {
+void UriAppendDecimal(UriWriter& writer, uint32 value) noexcept {
     char digits[10];
     usize count = 0;
     do {
@@ -714,7 +714,7 @@ Result<usize> TryNormalizeUri(StringView text, Span<char> output) noexcept {
                                uri.authority.Data()[uri.authority.ByteCount() - 1] == ':';
         if (uri.hasPort && !emptyPort && !(defaultPort != 0 && uri.port == defaultPort)) {
             writer.Append(':');
-            AppendDecimal(writer, uri.port);
+            UriAppendDecimal(writer, uri.port);
         }
     }
 

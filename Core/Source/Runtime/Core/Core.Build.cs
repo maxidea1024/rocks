@@ -6,6 +6,9 @@ public sealed class Core : CoreModuleRules
 {
     protected override string ModuleName => "Core";
 
+    // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
+    protected override UnityMode Unity => UnityMode.On;
+
     protected override string[] RequiredModules => ["PlatformBase", "DeterministicMath"];
 
     // Provides Core/Build/BuildInfo.h (rocks::build::ToolchainFingerprint and ToolBuildId). For every executable that reaches this module the build
