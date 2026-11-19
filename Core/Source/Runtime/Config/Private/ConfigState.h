@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Config/CVarGroup.h>
 #include <Config/ConfigContext.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/Text/Json.h>
@@ -71,6 +72,9 @@ struct ConfigEntry {
     // 봉인 뒤 바로 쓰는 층(콘솔·코드·범위 임시 변경)으로 들어온 입력이다(Sync가 순번을 매길 때
     // 정한다). 그 뒤에 등록한 부팅 독립 콘솔 설정은 이 입력을 받지 않는다(BootSealed — CVar 9절).
     bool sealedDirectWrite = false;
+    // 프리셋 묶음 펼침이 만든 품질 묶음 층 입력이다(Console 종류 — tag는 묶음 이름, sourceName은
+    // `quality.shadow@2`). Sync가 묶음 해결 때마다 모두 다시 만든다(CVar 10·11절).
+    bool groupExpansion = false;
 };
 
 // 큐 항목이다: 입력 추가 또는 빼기.
@@ -205,6 +209,46 @@ struct PendingRestart {
     String current;
 };
 
+// 프리셋 묶음 항목 하나다(코드 값의 콘솔 표기 — 등록 때 만든다).
+struct GroupItemState {
+    explicit GroupItemState(Allocator& allocator) noexcept : name(allocator), text(allocator) {
+    }
+
+    const cvar::detail::VarDefinition* target = nullptr;
+    // 항목 변수의 콘솔 이름이다.
+    String name;
+    String text;
+};
+
+// 프리셋 묶음 등급 하나의 항목이다.
+struct GroupLevelState {
+    explicit GroupLevelState(Allocator& allocator) noexcept : items(allocator) {
+    }
+
+    int32 level = 0;
+    Array<UniquePtr<GroupItemState>> items;
+};
+
+// 등록한 프리셋 묶음 하나다(CVar 11절). 묶음 변수 자체는 같은 이름의 콘솔 설정(정의 =
+// definition)이다. 마지막 Sync가 펼친 결과(requested·applied·reason·unmet)를 둔다.
+struct GroupState {
+    explicit GroupState(Allocator& allocator) noexcept
+        : name(allocator), levels(allocator), levelValues(allocator), reason(allocator) {
+    }
+
+    const cvar::detail::GroupDefinition* definition = nullptr;
+    String name;
+    // 등급 오름차순.
+    Array<UniquePtr<GroupLevelState>> levels;
+    // 정의된 등급(오름차순 — 조합 검증 규칙의 levels).
+    Array<int32> levelValues;
+    bool expanded = false;
+    int32 requested = 0;
+    int32 applied = 0;
+    String reason;
+    bool unmet = false;
+};
+
 // sync 지점 앞 hook 하나다(ConfigContext::AddSyncHook).
 struct SyncHook {
     ConfigSyncHook hook = nullptr;
@@ -268,6 +312,20 @@ struct ConfigState {
     Array<String> ignoredBootWrites;
     // ReportUnresolved가 이미 보고한 이름이다(문맥마다 이름당 한 번).
     Array<String> reportedUnresolved;
+    // 프리셋 묶음(등록 순서 — CVar 11절)과 조합 검증 입력(SetQualityValidation — 빌린다), 마지막
+    // Sync의 넘친 예산 사유다.
+    Array<UniquePtr<GroupState>> groups;
+    Span<const QualityGroupRule> qualityRules{};
+    Span<const QualityBudgetRule> qualityBudgets{};
+    const DeviceTraits* qualityTraits = nullptr;
+    Array<String> unmetQualityBudgets;
+    // 진단을 이미 낸 `Quality.json` 값 문제(입력 순번·묶음·등급·항목 키) — 같은 것에 한 번만 낸다.
+    // Sync가 살아 있는 입력의 것만 남긴다(PruneQualityProblems).
+    Array<String> reportedQualityProblems;
+    // 진단을 이미 낸 코드 프리셋 값 문제(묶음·등급·항목 키 — 정의에 묶여 있어 늘지 않는다).
+    Array<String> reportedPresetProblems;
+    // 마지막으로 GroupNoConverge를 낸 상태의 서명(요청·펼친 등급 — 같은 상태에 한 번만 낸다).
+    String groupNoConverge;
     // sync 지점 앞 hook(등록 순서).
     Array<SyncHook> syncHooks;
     // Sync마다 한 번 부르는 변경 알림(7.3절).
@@ -581,5 +639,61 @@ Result<void> DrainQueue(ConfigState& state) noexcept;
 // 부른다.
 void RunCommandsAndCallbacks(ConfigState& state, Span<const bool> sectionChanged,
                              Span<const bool> settingChanged) noexcept;
+
+// ---- 프리셋 묶음(CVar 10·11절 — CVarGroups.cpp) ----
+
+// 품질 묶음 층에 직접 쓰려는 입력을 거부한다(그 층은 묶음 펼침만 쓴다 — 진단 LayerNotAllowed,
+// InvalidArgument). layer가 Quality가 아니면 성공이다.
+Result<void> RejectQualityLayerWrite(ConfigState& state, ConfigLayer layer,
+                                     StringView sourceName) noexcept;
+
+// 입력이 `Quality` branch 문서(`Quality.json` — 묶음 → 등급 → 항목 → 값)인지다.
+bool IsQualityDocument(const ConfigState& state, const ConfigEntry& entry) noexcept;
+
+// `Quality.json` 문서의 모양과 층을 검사한다(묶음·항목 이름 문법, 등급 키는 10진 정수, 값은 JSON
+// 값 하나, 파일 층만 — 등록 여부는 보지 않는다: 묶음은 늦게 등록될 수 있다). 반환: true면 문제없음.
+Result<bool> ValidateQualityDocument(ConfigState& state, const ConfigEntry& entry) noexcept;
+
+// 등록할 묶음(added 안의 Group 정의)을 이미 등록한 묶음과 함께 검사한다: 한 변수는 한 묶음의
+// 항목만(두 묶음 이름), 묶음의 묶음은 DAG(자기 참조·순환 경로). 위반이면 Error GroupConflict를
+// 남기고 InvalidArgument다(CVar 11절). 오류: 할당 실패.
+Result<void> CheckGroupGraph(ConfigState& state,
+                             Span<const cvar::detail::VarDefinition* const> added) noexcept;
+
+// 등록한 정의(added — 묶음 또는 항목 변수)가 닿는 코드 프리셋 값을 항목 변수의 규칙으로 검사한다
+// (묶음과 항목이 둘 다 등록된 것만 — (묶음, 등급, 항목)마다 Error 한 번). 새 항목 변수가 있으면
+// 다음 Sync가 다시 펼친다(dirty). 오류: 할당 실패.
+Result<void> CheckPresetValues(ConfigState& state,
+                               Span<const cvar::detail::VarDefinition* const> added) noexcept;
+
+// reportedQualityProblems에서 이미 빠진 입력의 키를 버린다(Sync가 입력 목록을 바꾼 뒤 — 할당 없음).
+void PruneQualityProblems(ConfigState& state) noexcept;
+
+// 묶음 정의의 등록 상태(등급별 항목의 코드 값 표기)를 만든다. 오류: 할당 실패.
+Result<void> MakeGroupState(ConfigState& state, const cvar::detail::GroupDefinition& definition,
+                            UniquePtr<GroupState>& out) noexcept;
+
+// Sync 2단계 묶음 해결이다(CVar 10절): 묶음을 위상 순서(부모 → 자식)로, 묶음마다 그때까지의 펼침을
+// 합친 입력으로 계산한 유효 등급(요청 등급)으로 펼친다(generated). 조합 검증 결과(resolutions —
+// state.groups 순서)가 펼친 등급(expanded)과 다르면 낮춘 등급으로 처음부터 다시 펼친다(앞 차례의
+// 결과는 요청 등급이 같은 묶음에만 — MaxGroupPasses 번, 넘으면 마지막 결과와 같은 상태에 한 번
+// Warning GroupNoConverge). 마지막 펼침을 order(펼침 제외)와 합친 적용 순서가 settingOrder,
+// 그것으로 계산한 콘솔 설정 값이 settingResults다. 묶음 상태는 바꾸지 않는다(CommitGroups가
+// 맞바꾼다). 오류: 할당 실패, 조합 검증의 호출 오류.
+Result<void> ResolveGroups(ConfigState& state, Span<ConfigEntry* const> order,
+                           Span<void* const> sectionValues,
+                           Array<UniquePtr<ConfigEntry>>& generated,
+                           Array<ConfigEntry*>& settingOrder,
+                           Array<UniquePtr<SettingResult>>& settingResults,
+                           QualityResolutionSet& resolutions, Array<int32>& expanded) noexcept;
+
+// ResolveGroups 결과를 묶음 상태에 옮긴다(실패하지 않는다 — 맞바꾸기).
+void CommitGroups(ConfigState& state, QualityResolutionSet& resolutions,
+                  Span<const int32> expanded) noexcept;
+
+// ReportUnresolved의 `Quality.json` 부분이다: 등록되지 않은 묶음(UnresolvedName), 정의되지 않은
+// 등급(UndefinedLevel), 그 등급의 코드 항목이 아닌 이름(InvalidSetting)을 Warning으로 한 번씩
+// 남기고 reported를 올린다. 오류: 할당 실패.
+Result<void> ReportQualityDocuments(ConfigState& state, usize& reported) noexcept;
 
 } // namespace rocks::config::detail

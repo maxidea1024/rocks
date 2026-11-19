@@ -215,7 +215,9 @@ Result<void> CheckWriteTarget(const cvar::detail::VarDefinition& definition,
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
-    if (!IsConfigLayer(options.layer) || options.layer == ConfigLayer::CodeDefault) {
+    // 품질 묶음 층은 묶음 펼침만 쓴다(CVar 11절).
+    if (!IsConfigLayer(options.layer) || options.layer == ConfigLayer::CodeDefault ||
+        options.layer == ConfigLayer::Quality) {
         return Reject(options, ConfigDiagnosticCode::LayerNotAllowed);
     }
 
@@ -269,6 +271,8 @@ Result<void> MakeSet(WriteChannel& channel, const cvar::detail::VarDefinition& d
         return Reject(options, ConfigDiagnosticCode::ValueOutOfRange);
     case cvar::detail::ValueCheck::ValidationFailed:
         return Reject(options, ConfigDiagnosticCode::ValidationFailed);
+    case cvar::detail::ValueCheck::UndefinedLevel:
+        return Reject(options, ConfigDiagnosticCode::UndefinedLevel);
     }
 
     Allocator& allocator = channel.allocator;
@@ -349,7 +353,9 @@ SharedPtr<const ConfigSnapshot> ConfigContext::Acquire() const noexcept {
 
 Result<void> ConfigContext::ClearLayer(ConfigLayer layer) noexcept {
     ConfigState* state = state_.Get();
-    if (state == nullptr || !IsConfigLayer(layer) || layer == ConfigLayer::CodeDefault) {
+    // 품질 묶음 층은 묶음 펼침만 쓰고 지운다(CVar 11절).
+    if (state == nullptr || !IsConfigLayer(layer) || layer == ConfigLayer::CodeDefault ||
+        layer == ConfigLayer::Quality) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

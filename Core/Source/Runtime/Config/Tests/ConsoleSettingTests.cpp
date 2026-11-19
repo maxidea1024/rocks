@@ -83,8 +83,9 @@ TEST(Config_PendingValuesMoveAtRegistration) {
     CHECK(!outside && fixture.HasDiagnostic(ConfigDiagnosticCode::ValueOutOfRange));
 }
 
-// 플래그가 층 쓰기를 거부한다: 콘솔 읽기 전용은 콘솔 층만, 품질 구성원이 아니면 품질 층을(설정
-// struct 필드의 콘솔 이름은 구성원이 아니다), 사용자 설정이 아니면 사용자 층을 거부한다. 시작 뒤
+// 플래그가 층 쓰기를 거부한다: 콘솔 읽기 전용은 콘솔 층만, 사용자 설정이 아니면 사용자 층을
+// 거부한다. 품질 묶음 층은 프리셋 묶음 펼침만 쓰므로 직접 쓰기를 모두 거부한다(LayerNotAllowed —
+// 묶음 동작은 CVarGroupTests.cpp). 시작 뒤
 // 고정은 CompleteStartup 뒤 콘솔 쓰기를 받되 값은 그대로이고 Warning BootValueIgnored를 한 번만
 // 낸다(대기가 아니다). 다른 층은 받는다.
 TEST(Config_ConsoleFlagsRejectLayers) {
@@ -92,25 +93,22 @@ TEST(Config_ConsoleFlagsRejectLayers) {
     ConfigContext& context = fixture.Context();
     REQUIRE(context.RegisterConsoleSetting(Define("render.lock", ConsoleValueType::Bool, "false",
                                                   Flags(ConsoleSettingFlags::ConsoleReadOnly))));
-    REQUIRE(context.RegisterConsoleSetting(Define("quality.shadow_bias", ConsoleValueType::Float,
-                                                  "1", Flags(ConsoleSettingFlags::QualityMember))));
     REQUIRE(context.RegisterConsoleSetting(Define("render.bias", ConsoleValueType::Float, "1")));
     REQUIRE(context.AddLayerText(ConfigLayer::Project, "Render.json", "Render", "project",
                                  R"({"Settings": {"render.lock": true}})"));
-    REQUIRE(context.AddLayerText(ConfigLayer::Quality, "shadow@High", "Render", "quality",
-                                 R"({"Settings": {"quality.shadow_bias": 0.5}})"));
     REQUIRE(context.Sync());
     CHECK(ValueOf(fixture, "render.lock").boolean);
-    CHECK(ValueOf(fixture, "quality.shadow_bias").float32 == 0.5f);
 
     context.Diagnostics().Clear();
     auto locked = context.AddAssignment(ConfigLayer::Console, "console", "render.lock", "false");
     CHECK(!locked && fixture.HasDiagnostic(ConfigDiagnosticCode::ConsoleReadOnly));
     CHECK(fixture.Rejects(ConfigLayer::Quality, "Render", R"({"Settings": {"render.bias": 2.0}})"));
-    CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::NotQualityMember, 1, 30));
-    CHECK(fixture.Rejects(ConfigLayer::Quality, "Render",
-                          R"({"Settings": {"render.graph.immediate": true}})"));
-    CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::NotQualityMember, 1, 41));
+    CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::LayerNotAllowed));
+    context.Diagnostics().Clear();
+    auto assigned = context.AddAssignment(ConfigLayer::Quality, "shadow", "render.bias", "2");
+    CHECK(!assigned && fixture.HasDiagnostic(ConfigDiagnosticCode::LayerNotAllowed));
+    CHECK(context.Unset(ConfigLayer::Quality, "shadow").Error() == ErrorCode::InvalidArgument);
+    CHECK(context.ClearLayer(ConfigLayer::Quality).Error() == ErrorCode::InvalidArgument);
     // 사용자 층: UserConfig 필드(game.input.sensitivity)는 받고 아닌 것은 거부한다.
     REQUIRE(context.AddLayerText(ConfigLayer::User, "Game.json", "Game", "user",
                                  R"({"Settings": {"game.input.sensitivity": 2.5}})"));

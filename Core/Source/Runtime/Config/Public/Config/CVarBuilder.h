@@ -124,6 +124,7 @@ protected:
             CVarError_DefaultOutOfRange();
             break;
         case ValueCheck::ValidationFailed:
+        case ValueCheck::UndefinedLevel:
             CVarError_DefaultFailsValidate();
             break;
         }
