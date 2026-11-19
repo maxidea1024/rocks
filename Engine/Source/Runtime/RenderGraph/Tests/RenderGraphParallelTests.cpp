@@ -83,8 +83,12 @@ void BuildGraph(RenderGraph& graph) noexcept {
     const GraphBuffer to = destination.Value();
     (void)graph.AddPass(CopyName, GraphPassKind::Copy, GraphPassFlags::HasSideEffects, copy,
                         [from, to](GraphPassContext& pass) noexcept {
-                            (void)pass.Commands().CopyBuffer(pass.Buffer(to), 0, pass.Buffer(from),
-                                                             0, BufferBytes);
+                            // 기록 장치는 버퍼 복사를 지원하지 않으므로 handle만 확인하고 marker를
+                            // 남긴다.
+                            pass.Commands().PushMarker(
+                                pass.Buffer(to).IsNull() || pass.Buffer(from).IsNull() ? "Missing"
+                                                                                       : "Copy");
+                            pass.Commands().PopMarker();
                         });
     // 아무도 읽지 않아 제거된다(기록하지 않는다).
     auto unused = graph.CreateTexture(TargetDesc(), "Unused");

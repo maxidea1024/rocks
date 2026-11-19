@@ -435,6 +435,13 @@ bool UsesAttachmentsOf(const GraphState& state, uint32 pass, uint32 rasterPass) 
     const PassRecord& record = state.passes[pass];
     for (uint32 index = record.firstUse; index < record.firstUse + record.useCount; ++index) {
         const SubresourceUse& use = state.uses[index];
+        // 장치가 막는 것은 패스 attachment의 복사다(CopyTexture). SRV·UAV 접근은 backend가 render
+        // pass를 나눠 처리한다.
+        if (!graphics::HasAnyAccess(use.access,
+                                    ResourceAccess::CopySource | ResourceAccess::CopyDestination)) {
+            continue;
+        }
+
         for (uint32 other = owner.firstUse; other < owner.firstUse + owner.useCount; ++other) {
             const SubresourceUse& attached = state.uses[other];
             if (attached.attachment && attached.resource == use.resource &&

@@ -936,10 +936,16 @@ uint32 RunRenderGraphChecks(const char* name, Device& device, sample::Renderer& 
                   "serial and parallel recording give the same pixels");
             const usize center =
                 (static_cast<usize>(TargetSize / 2) * TargetSize + TargetSize / 2) * 4;
-            // 마지막 pass(번호 5)의 색: R 5/6, G 1/6, B 0.
-            Check(parallelOk && parallelPixels[center] >= 205 && parallelPixels[center] <= 220 &&
-                      parallelPixels[center + 2] == 0,
-                  "parallel recording draws the last pass color");
+            // 마지막 pass(번호 5)의 색: R 5/6, G 1/6, B 0(대상 형식이 sRGB면 R·G가 인코딩으로 더
+            // 밝다).
+            const bool lastColor = parallelOk &&
+                                   parallelPixels[center] > parallelPixels[center + 1] &&
+                                   parallelPixels[center] >= 200 && parallelPixels[center + 2] == 0;
+            Check(lastColor, "parallel recording draws the last pass color");
+            if (!lastColor) {
+                printf("    center (%u, %u, %u)\n", parallelPixels[center],
+                       parallelPixels[center + 1], parallelPixels[center + 2]);
+            }
         }
 
         if (started) {

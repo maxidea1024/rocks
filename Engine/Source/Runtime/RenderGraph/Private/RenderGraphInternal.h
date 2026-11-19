@@ -402,7 +402,8 @@ void FormatAccess(graphics::ResourceAccess access, char* out, usize capacity) no
 
 // --- 공용 helper(RenderGraph.cpp) ---
 
-// pass가 Raster pass rasterPass의 attachment subresource에 접근하는지다(그 기록을 닫아야 하는지).
+// pass가 Raster pass rasterPass의 attachment subresource를 복사 원본·대상으로 쓰는지다(그 기록을
+// 닫아야 하는지, 장치 CopyTexture는 패스 attachment를 받지 않는다).
 bool UsesAttachmentsOf(const GraphState& state, uint32 pass, uint32 rasterPass) noexcept;
 
 // 그래프 로그 카테고리다.
