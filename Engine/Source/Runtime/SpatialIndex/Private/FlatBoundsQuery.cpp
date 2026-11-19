@@ -135,9 +135,11 @@ uint32 LaneBits(const uint32* filters, uint32 mask, uint32 lanes) noexcept {
 // 이상).
 //
 // page 전체 분류: 저장 꼭짓점의 n·x는 [−‖n‖₁·R, ‖n‖₁·R]에 있으므로 w′ + ‖n‖₁·R + δ < 0이면 page의
-// 모든 원소가 정답 술어로도 바깥이고(δ가 w′의 double 오차와 정답 술어 오차를 덮는다), w′ − ‖n‖₁·R −
-// 2δ ≥ 0이면 float 판정 S_f ≥ w′ − ‖n‖₁·R − δ ≥ δ라 어떤 원소도 이 평면에서 버리지 않는다(판정
-// 생략과 결과가 같다). w′가 double로 무한대(평면 거리가 double 범위 끝)면 부호로 정한다.
+// 모든 원소가 정답 술어로도 바깥이다(δ가 w′의 double 오차와 정답 술어 오차를 덮는다). 반대로 float
+// 판정 값은 S_f ≥ w′ − ‖n‖₁·R − δ(δ가 float 쪽 오차를 덮는다)이므로 w′ − ‖n‖₁·R ≥ 0이면 이미
+// S_f ≥ −δ라 어떤 원소도 이 평면에서 버리지 않는다. 그래서 AllInside 조건은 δ 하나 없이도 성립하며,
+// 구현의 w′ − ‖n‖₁·R − 2δ ≥ 0은 δ 계산 자체의 반올림까지 덮으려는 여유다(판정 생략과 결과가 같다).
+// w′가 double로 무한대(평면 거리가 double 범위 끝)면 부호로 정한다.
 detail::FlatPagePlane detail::PreparePagePlane(const Plane<double>& plane, const Vec3d& origin,
                                                float radius) noexcept {
     detail::FlatPagePlane out;

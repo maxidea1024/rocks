@@ -500,6 +500,106 @@ TEST(FlatBounds_FB03_DrawDistanceBoundaries) {
     CHECK(desc.Value().minDrawDistance == 0.0f && desc.Value().maxDrawDistance == 1000.0f);
 }
 
+// FB03(c): 원소가 타일 먼 모서리(상대 좌표 약 2·10⁵ cm)에 몰려 page 반경 R이 큰 page에서, 기준점
+// 근처(거리 5–25 cm)의 하한 판정이다. 가장 먼 꼭짓점 거리가 정확히 하한과 같은 원소는 보여야 하고,
+// R에 비례하는 여유 항(17u·R·t, 8u²·R²)이 없으면 이런 원소가 누락된다. 하한 근처 무작위 원소도
+// 정답과 대조한다(초과는 좁힌 초과 띠 안).
+TEST(FlatBounds_FB03_FarCornerPageLowerBound) {
+    SystemAllocator allocator;
+    FlatBoundsConfig config;
+    Harness harness(config, allocator);
+    const Vec3d corner(204790.0, 204790.0, 204790.0);
+    // 피타고라스 세 쌍이라 가장 먼 꼭짓점 거리가 정확한 정수다.
+    const double triples[][3] = {{3, 4, 5}, {5, 12, 13}, {8, 15, 17}, {7, 24, 25}};
+    uint32 exact[4] = {};
+    for (uint32 index = 0; index < 4; ++index) {
+        FlatBoundsDesc desc = SimpleDesc(
+            Box<double>(corner, corner + Vec3d(triples[index][0], triples[index][1], 0.0)));
+        desc.minDrawDistance = static_cast<float>(triples[index][2]);
+        exact[index] = harness.Add(desc);
+        REQUIRE(exact[index] != NumericLimits<uint32>::Max());
+        // 하한이 한 float ULP 크면 정답으로는 보이지 않는다(초과면 띠 안이어야 한다).
+        desc.minDrawDistance = math::NextUp(desc.minDrawDistance);
+        REQUIRE(harness.Add(desc) != NumericLimits<uint32>::Max());
+    }
+    RandomStream random(0xFB03Cu ^ test::CurrentSeed());
+    for (uint32 index = 0; index < 600; ++index) {
+        const Vec3d offset(Uniform(random, -6, 6), Uniform(random, -6, 6), Uniform(random, -6, 6));
+        const Vec3d extent(Uniform(random, 0, 4), Uniform(random, 0, 4), Uniform(random, 0, 4));
+        FlatBoundsDesc desc = SimpleDesc(Box<double>(corner + offset, corner + offset + extent));
+        double farthest = 0.0;
+        for (uint32 axis = 0; axis < 3; ++axis) {
+            const double reach = math::Max(math::Abs(corner[axis] - desc.bounds.min[axis]),
+                                           math::Abs(corner[axis] - desc.bounds.max[axis]));
+            farthest += reach * reach;
+        }
+        // 하한을 가장 먼 거리의 ±10⁻⁶ 상대 범위에 둔다(경계 근처).
+        desc.minDrawDistance =
+            static_cast<float>(math::Sqrt(farthest) * (1.0 + Uniform(random, -1.0e-6, 1.0e-6)));
+        if (index % 3 == 0) {
+            desc.maxDrawDistance = desc.minDrawDistance + static_cast<float>(Uniform(random, 0, 2));
+        }
+        REQUIRE(harness.Add(desc) != NumericLimits<uint32>::Max());
+    }
+    FlatBoundsView view = EverythingView();
+    view.filterMask = 1;
+    view.distanceOrigin = corner;
+    const CompareCounts counts = harness.Check(Span<const FlatBoundsView>(&view, 1));
+    CHECK(counts.misses == 0);
+    CHECK(counts.violations == 0);
+    FlatBoundsReadScope read(harness.Set());
+    auto placement = read.Reader().TryPlacementOf(harness.Model()[exact[0]].handle);
+    REQUIRE(placement);
+    CHECK(placement.Value().pageRadius > 2.0e5f);
+    for (const uint32 index : exact) {
+        CHECK(ReferenceVisible(harness.Model()[index].desc, view));
+    }
+}
+
+// FB03(d): 배율이 매우 커서 float 곱 t = 거리 × 배율이나 t²가 overflow하면 상한은 무제한(+Inf)으로,
+// 하한은 무한대로 넘쳐 보이지 않게 된다. 정답(double)도 같은 결과여야 하고 누락이 없어야 한다. 매우
+// 작은 배율(1e-30)도 함께 본다.
+TEST(FlatBounds_FB03_ScaleOverflowMakesUpperUnlimited) {
+    SystemAllocator allocator;
+    Harness harness(SmallTileConfig(), allocator);
+    const float draws[] = {0.0f, 1.0e-30f, 1.0f, 1.0e10f, 1.0e30f, 1.0e38f};
+    RandomStream random(0xFB03Du ^ test::CurrentSeed());
+    for (uint32 index = 0; index < 400; ++index) {
+        FlatBoundsDesc desc =
+            SimpleDesc(Cube(Vec3d(Uniform(random, -3000, 3000), Uniform(random, -3000, 3000),
+                                  Uniform(random, -3000, 3000)),
+                            Uniform(random, 0, 50)));
+        desc.maxDrawDistance = draws[random.NextUInt32Below(6)];
+        desc.minDrawDistance =
+            random.NextUInt32Below(3) == 0 ? draws[random.NextUInt32Below(6)] : 0.0f;
+        if (desc.maxDrawDistance != 0.0f && desc.minDrawDistance > desc.maxDrawDistance) {
+            desc.minDrawDistance = desc.maxDrawDistance;
+        }
+        REQUIRE(harness.Add(desc) != NumericLimits<uint32>::Max());
+    }
+    const float scales[] = {1.0e30f, NumericLimits<float>::Max(), 1.0e-30f, 1.0e19f};
+    FlatBoundsView views[4];
+    for (uint32 index = 0; index < 4; ++index) {
+        views[index] = EverythingView();
+        views[index].filterMask = 1;
+        views[index].distanceOrigin = Vec3d(100.0, -200.0, 50.0);
+        views[index].distanceScale = scales[index];
+    }
+    const CompareCounts counts = harness.Check(Span<const FlatBoundsView>(views, 4));
+    CHECK(counts.misses == 0);
+    CHECK(counts.violations == 0);
+    // 배율 1e30에서 상한 1e10(배율 적용 1e40, float 범위 밖)인 하한 없는 원소는 모두 보인다.
+    uint32 unlimited = 0;
+    for (usize index = 0; index < harness.Model().Size(); ++index) {
+        const FlatBoundsDesc& desc = harness.Model()[index].desc;
+        if (desc.maxDrawDistance == 1.0e10f && desc.minDrawDistance == 0.0f) {
+            ++unlimited;
+            CHECK(ReferenceVisible(desc, views[0]));
+        }
+    }
+    CHECK(unlimited > 0);
+}
+
 // FB04: 삽입·삭제·같은 타일 갱신·타일 이동·목록 이동과 속성 변경 시퀀스다. FlatBoundsMoves로만 고친
 // 모형 슬롯이 실제 슬롯과 같고(Harness::Check의 TrySlotOf 대조), Validate가 위반 없이 끝난다.
 TEST(FlatBounds_FB04_MutationSequenceReportsMovesAndKeepsInvariants) {
@@ -606,6 +706,120 @@ TEST(FlatBounds_FB04_MutationSequenceReportsMovesAndKeepsInvariants) {
     }));
     CHECK(consistent);
     CHECK(visited == reader.Count());
+}
+
+// FB04(a): 타일 이동·새 타일 추가 도중 할당이 실패하면 확보 단계에서 미리 넣은 HashMap 타일 항목을
+// 지운다(ReserveFor). 첫 시도부터 차례로 실패시켜 모든 할당 지점을 지나고, 실패할 때마다 타일
+// 수·원소 내용·Validate(타일 수와 page 연결의 대조)가 그대로인지 본다.
+TEST(FlatBounds_FB04_FailedTileReservationLeavesNoEmptyTile) {
+    SystemAllocator system;
+    test::NFailAllocator allocator(system);
+    FlatBoundsSet set = MakeSet(SmallTileConfig(), allocator);
+    auto first = set.TryAdd(SimpleDesc(Cube(Vec3d(10, 10, 10), 1)));
+    auto second = set.TryAdd(SimpleDesc(Cube(Vec3d(20, 10, 10), 1)));
+    REQUIRE(first && second);
+    const auto tileCount = [&]() noexcept {
+        FlatBoundsReadScope read(set);
+        auto report = read.Reader().Validate();
+        const bool valid = report && report.Value().IsValid();
+        return valid ? read.Reader().Stats().tileCount : NumericLimits<uint32>::Max();
+    };
+    REQUIRE(tileCount() == 1);
+    // 다른 타일로의 경계 갱신.
+    const Box<double> moved = Cube(Vec3d(5 * 1024.0 + 10.0, 10, 10), 1);
+    uint32 updateFailures = 0;
+    for (uint64 attempt = 1;; ++attempt) {
+        REQUIRE(attempt < 64);
+        allocator.FailOnAttempt(attempt);
+        auto updated = set.TryUpdateBounds(first.Value(), moved);
+        allocator.DisableFailure();
+        if (updated) {
+            CHECK(tileCount() == 2);
+            break;
+        }
+        ++updateFailures;
+        CHECK(updated.Error() == ErrorCode::OutOfMemory);
+        CHECK(tileCount() == 1);
+        FlatBoundsReadScope read(set);
+        auto desc = read.Reader().TryGet(first.Value());
+        CHECK(desc && desc.Value().bounds.min.x == 9.0);
+    }
+    // 새 타일로의 추가.
+    uint32 addFailures = 0;
+    for (uint64 attempt = 1;; ++attempt) {
+        REQUIRE(attempt < 64);
+        allocator.FailOnAttempt(attempt);
+        auto added = set.TryAdd(SimpleDesc(Cube(Vec3d(-9 * 1024.0 + 10.0, 10, 10), 1)));
+        allocator.DisableFailure();
+        if (added) {
+            CHECK(tileCount() == 3);
+            break;
+        }
+        ++addFailures;
+        CHECK(added.Error() == ErrorCode::OutOfMemory);
+        CHECK(tileCount() == 2);
+    }
+    // 새 타일에는 page가 필요하므로 타일 항목을 넣은 뒤의 page 확보 실패가 적어도 한 번 있었다.
+    CHECK(updateFailures > 0);
+    CHECK(addFailures > 0);
+    FlatBoundsReadScope read(set);
+    CHECK(read.Reader().Count() == 3);
+}
+
+// FB04(b): 목록 ↔ page 이동이 돌려주는 FlatBoundsMoves 두 개(자기 자신, 빈자리를 채운 원소)가 실제
+// 슬롯과 같다.
+TEST(FlatBounds_FB04_ListPageMovesReportBothSlots) {
+    SystemAllocator allocator;
+    FlatBoundsSet set = MakeSet(SmallTileConfig(), allocator);
+    FlatBoundsHandle page[3];
+    for (uint32 index = 0; index < 3; ++index) {
+        auto added = set.TryAdd(SimpleDesc(Cube(Vec3d(10.0 + index, 10, 10), 1)));
+        REQUIRE(added);
+        page[index] = added.Value();
+    }
+    FlatBoundsHandle list[2];
+    for (uint32 index = 0; index < 2; ++index) {
+        auto added = set.TryAdd(SimpleDesc(Cube(Vec3d(10.0, 100.0 * index, 10), 3000)));
+        REQUIRE(added);
+        list[index] = added.Value();
+    }
+    const auto slotOf = [&](FlatBoundsHandle handle) noexcept {
+        FlatBoundsReadScope read(set);
+        auto slot = read.Reader().TrySlotOf(handle);
+        return slot ? slot.Value() : NumericLimits<uint32>::Max();
+    };
+    const auto matches = [&](const FlatBoundsMoves& moves) noexcept {
+        bool same = true;
+        for (uint32 index = 0; index < moves.count; ++index) {
+            same = same && slotOf(moves.moves[index].handle) == moves.moves[index].newSlot;
+        }
+        return same;
+    };
+    REQUIRE(!IsFlatBoundsListSlot(slotOf(page[0])) && IsFlatBoundsListSlot(slotOf(list[0])));
+
+    // page → 목록: page[0]은 목록 끝(색인 2)으로, 타일 마지막 원소 page[2]가 page[0]의 자리로 온다.
+    const uint32 pageSlot = slotOf(page[0]);
+    FlatBoundsMoves moves;
+    REQUIRE(set.TryUpdateBounds(page[0], Cube(Vec3d(10, 10, 10), 3000), &moves));
+    CHECK(moves.count == 2);
+    CHECK(moves.moves[0].handle == page[0] && moves.moves[0].newSlot == FlatBoundsListSlotBase + 2);
+    CHECK(moves.moves[1].handle == page[2] && moves.moves[1].newSlot == pageSlot);
+    CHECK(matches(moves));
+
+    // 목록 → page: list[0](목록 색인 0)은 타일 page 끝으로, 목록 끝 원소 page[0]이 색인 0으로 온다.
+    REQUIRE(set.TryUpdateBounds(list[0], Cube(Vec3d(30, 10, 10), 1), &moves));
+    CHECK(moves.count == 2);
+    CHECK(moves.moves[0].handle == list[0] && !IsFlatBoundsListSlot(moves.moves[0].newSlot));
+    CHECK(moves.moves[1].handle == page[0] && moves.moves[1].newSlot == FlatBoundsListSlotBase);
+    CHECK(matches(moves));
+
+    // 타일의 마지막 원소가 목록으로 가면 채울 빈자리가 없어 이동은 자기 자신 하나다.
+    REQUIRE(set.TryUpdateBounds(list[0], Cube(Vec3d(10, 10, 10), 3000), &moves));
+    CHECK(moves.count == 1 && moves.moves[0].handle == list[0]);
+    CHECK(matches(moves));
+    FlatBoundsReadScope read(set);
+    auto report = read.Reader().Validate();
+    CHECK(report && report.Value().IsValid());
 }
 
 // FB05: 출력 계약: 해제 page·꼬리 bit 0, 세대 낡음, out 짧음·겹침·개수 불일치, 뷰 0개, 잘못된 뷰.

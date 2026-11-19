@@ -214,15 +214,18 @@ Result<FlatBoundsValidationReport> FlatBoundsSet::ValidateStructure() const noex
         if (!(target.key == header.key)) {
             return fail(FlatInvariantStoredBounds, page);
         }
-        // 저장 float 경계가 정확한 상대 경계(double 차이)를 바깥에서 포함하고 R 안에 있다.
+        // 저장 float 경계가 정확한 상대 경계를 바깥에서 엄격히 포함한다: min_f < (min − o), max_f >
+        // (max − o)(double 계산값 기준, LooseOctree 불변 조건 7과 같다). double 뺄셈은 최근접
+        // 반올림이라 등호를 허용하면 한 ULP 바깥 보정이 빠진 저장 값도 통과하므로 엄격 부등식으로
+        // 본다(보정이 있으면 저장 값은 반올림 값보다 float 한 ULP 이상 바깥이다). DAZ 환경에서도
+        // 거짓 보고가 없도록 정수 키로 비교한다(FloatBelow·FloatAbove). 그리고 R 안에 있다.
         const Vec3d lower = record.bounds.min - header.origin;
         const Vec3d upper = record.bounds.max - header.origin;
         const float stored[6] = {minX_[slot], minY_[slot], minZ_[slot],
                                  maxX_[slot], maxY_[slot], maxZ_[slot]};
-        // DAZ 환경에서도 거짓 보고가 없도록 정수 키로 비교한다.
-        if (FloatAbove(stored[0], lower.x) || FloatAbove(stored[1], lower.y) ||
-            FloatAbove(stored[2], lower.z) || FloatBelow(stored[3], upper.x) ||
-            FloatBelow(stored[4], upper.y) || FloatBelow(stored[5], upper.z)) {
+        if (!FloatBelow(stored[0], lower.x) || !FloatBelow(stored[1], lower.y) ||
+            !FloatBelow(stored[2], lower.z) || !FloatAbove(stored[3], upper.x) ||
+            !FloatAbove(stored[4], upper.y) || !FloatAbove(stored[5], upper.z)) {
             return fail(FlatInvariantStoredBounds, page);
         }
         for (const float value : stored) {

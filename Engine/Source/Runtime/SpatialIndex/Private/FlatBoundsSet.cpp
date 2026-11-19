@@ -225,14 +225,16 @@ Result<void> FlatBoundsSet::EnsurePageArrays(uint32 pageSlots) noexcept {
         maxX_.Capacity(),    maxY_.Capacity(),      maxZ_.Capacity(),
         drawMin_.Capacity(), drawMax_.Capacity(),   filter_.Capacity(),
         record_.Capacity(),  userValue_.Capacity(), always_.Capacity() * FlatVisibilityBitsPerWord};
-    bool enough = true;
+    usize smallest = capacities[0];
     for (const usize capacity : capacities) {
-        enough = enough && capacity >= required;
+        smallest = capacity < smallest ? capacity : smallest;
     }
-    if (enough) {
+    if (smallest >= required) {
         return Result<void>::Success();
     }
-    usize target = minX_.Capacity() * 2;
+    // 성장 목표는 가장 작은 배열 기준의 두 배다. 한 배열 기준으로 잡으면 앞선 실패로 그 배열만 커진
+    // 뒤 다시 확보할 때마다 목표가 두 배씩 부풀었다(실패 주입 시험에서 발견).
+    usize target = smallest * 2;
     target = target < required ? required : target;
     const usize words = target / FlatVisibilityBitsPerWord;
     // 배열마다 확보한다. 실패하면 앞의 배열만 늘어 있을 수 있다(위의 검사가 모든 배열을 다시 본다).

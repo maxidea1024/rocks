@@ -62,15 +62,29 @@ inline bool ReferenceVisible(const FlatBoundsDesc& desc, const FlatBoundsView& v
 }
 
 // 집합이 보인다고 했지만 정답 술어로는 보이지 않는 원소가 6.2절 초과 띠 안인지다. page 원소만
-// 초과가 있을 수 있다(목록은 정답 술어와 같은 double 판정). 평면: 정답이 바깥이라고 본 평면마다
-// 실제 상자의 가장 안쪽 꼭짓점의 double 부호 거리가 −3δ 이상이어야 한다(float 판정이 S_f ≥ −δ였고
-// float 오차와 저장 경계 보정의 합이 2δ 이하). 거리: 계산 거리²와 정확한 거리²의 차이 16u·(d² +
-// R·d) + 8u²·R²에 여유를 둔 띠 안이어야 한다.
+// 초과가 있을 수 있다(목록은 정답 술어와 같은 double 판정). 띠는 구현의 유도식에서 그대로 얻는다
+// (FlatBoundsQuery.cpp의 PreparePagePlane·거리 여유 주석). 띠를 넓게 잡으면 구현의 여유가 커지는
+// 결함을 숨기므로 유도에 필요한 만큼만 둔다.
+//
+// 평면: float 판정이 바깥이 아니었으면 S_f ≥ −δ다. S_f와 저장 상자 꼭짓점의 정확한 값의 차이(float
+// 변환·내적 반올림·w′의 double 소거)와 시험의 double 부호 거리 계산 오차(정답 술어 반올림)는 δ가
+// 덮는다(그것이 δ의 정의다). 저장 상자는 실제 상자를 축마다 float 두 ULP 이하(바깥 반올림 + 한 ULP
+// 보정, 2·2^-23·|x| = 4u·|x|)만큼 넓혔으므로 꼭짓점 값은 4u·‖n‖₁·R 이하로 크다. 그래서 시험이
+// 계산한 실제 꼭짓점의 부호 거리는 −(2δ + 4u·‖n‖₁·R + 4·FLT_MIN·‖n‖₁) 이상이다(마지막 항은 DAZ에서
+// 비정규 저장 값이 0이 되는 몫).
+//
+// 거리(상한): 보였으면 계산 거리² ≤ T = t·(t·(1 + 32u) + 17u·R) + c이고 t = maxDraw·s의 float 곱과
+// T의 반올림 몇 개를 더해 T ≤ M²(1 + 37u) + 17.1u·R·M + c다. 계산 거리²와 저장 상자 거리²의 차이는
+// 16u·(d² + R·d) + 8u²·R² 이하이고, 실제 상자 거리는 저장 상자 거리보다 넓힘(축마다 4u·R, 거리로
+// 4√3·u·R < 7u·R)만큼 클 수 있다. 정리하면 실제 최근접 거리² ≤ M²(1 + 64u) + 48u·R·M + 64u²·R² +
+// 128·FLT_MIN이다(계수는 위 합을 올림). 하한은 같은 유도의 대칭이다.
 inline bool WithinExcessBand(const FlatBoundsDesc& desc, const FlatBoundsView& view,
                              const FlatBoundsPlacement& placement) noexcept {
     if (placement.inList || (desc.filterMask & view.filterMask) == 0) {
         return false;
     }
+    constexpr double FloatMin = 0x1.0p-126;
+    const double reach = static_cast<double>(placement.pageRadius);
     for (uint32 index = 0; index < view.volume.planeCount; ++index) {
         const Plane<double>& plane = view.volume.planes[index];
         const Vec3d highest(plane.normal.x >= 0.0 ? desc.bounds.max.x : desc.bounds.min.x,
@@ -82,19 +96,22 @@ inline bool WithinExcessBand(const FlatBoundsDesc& desc, const FlatBoundsView& v
         }
         const detail::FlatPagePlane prepared =
             detail::PreparePagePlane(plane, placement.tileOrigin, placement.pageRadius);
-        if (signedDistance < -3.0 * static_cast<double>(prepared.delta)) {
+        const double norm1 =
+            math::Abs(plane.normal.x) + math::Abs(plane.normal.y) + math::Abs(plane.normal.z);
+        const double band = 2.0 * static_cast<double>(prepared.delta) +
+                            4.0 * FloatUnit * norm1 * reach + 4.0 * FloatMin * norm1;
+        if (signedDistance < -band) {
             return false;
         }
     }
-    const double reach = static_cast<double>(placement.pageRadius);
     const double scale = static_cast<double>(view.distanceScale);
-    const double slack = 32.0 * FloatUnit * FloatUnit * reach * reach + 1.0e-30;
+    const double constant = 64.0 * FloatUnit * FloatUnit * reach * reach + 128.0 * FloatMin;
     if (desc.maxDrawDistance > 0.0f) {
         const double limit = static_cast<double>(desc.maxDrawDistance) * scale;
         const auto measured = TryDistanceSquared(desc.bounds, view.distanceOrigin);
         const double nearest = measured ? measured.Value() : 0.0;
-        if (nearest >
-            limit * limit * (1.0 + 96.0 * FloatUnit) + 40.0 * FloatUnit * reach * limit + slack) {
+        if (nearest > limit * limit * (1.0 + 64.0 * FloatUnit) + 48.0 * FloatUnit * reach * limit +
+                          constant) {
             return false;
         }
     }
@@ -107,8 +124,8 @@ inline bool WithinExcessBand(const FlatBoundsDesc& desc, const FlatBoundsView& v
                           math::Abs(view.distanceOrigin[axis] - desc.bounds.max[axis]));
             farthest += reachAxis * reachAxis;
         }
-        if (farthest <
-            limit * limit * (1.0 - 96.0 * FloatUnit) - 40.0 * FloatUnit * reach * limit - slack) {
+        if (farthest < limit * limit * (1.0 - 64.0 * FloatUnit) - 48.0 * FloatUnit * reach * limit -
+                           constant) {
             return false;
         }
     }
