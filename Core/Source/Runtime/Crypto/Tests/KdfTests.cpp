@@ -7,6 +7,8 @@
 #include <string.h>
 
 using namespace rocks;
+namespace kdf_tests_file {
+
 using namespace rocks::crypto;
 
 // 알려진 답의 출처: HKDF는 RFC 5869 시험 사례 1–3(SHA-256)과 같은 입력의 SHA-512를 Python hmac으로
@@ -334,3 +336,4 @@ TEST(CryptoKdfTypedDerivation) {
     CHECK(TryDeriveMacKey(empty, 0, TestContext, static_cast<MacAlgorithm>(9)).Error() ==
           ErrorCode::InvalidArgument);
 }
+} // namespace kdf_tests_file

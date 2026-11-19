@@ -13,6 +13,8 @@
 #include <string.h>
 
 using namespace rocks;
+namespace crypto_fuzz_tests_file {
+
 using namespace rocks::crypto;
 
 // 고정 seed 변형 fuzz다(Docs/Design/Crypto.ko.md 12절 fuzz). coverage 기반 fuzzer(libFuzzer)는 빌드
@@ -724,3 +726,4 @@ TEST(CryptoFuzzDatagramOpen) {
     CHECK(!opener.IsExhausted());
     CHECK(opener.AuthenticationFailures() < 3000);
 }
+} // namespace crypto_fuzz_tests_file

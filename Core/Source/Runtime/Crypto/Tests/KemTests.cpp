@@ -9,6 +9,8 @@
 #include <string.h>
 
 using namespace rocks;
+namespace kem_tests_file {
+
 using namespace rocks::crypto;
 
 // 알려진 답의 출처:
@@ -469,3 +471,4 @@ TEST(CryptoKdfBoundDerivation) {
     CHECK(TryDeriveBoundKdfKey(KdfKey(), 7, TestContext, Span<const Span<const uint8>>()).Error() ==
           ErrorCode::StaleHandle);
 }
+} // namespace kem_tests_file

@@ -7,6 +7,8 @@
 #include <string.h>
 
 using namespace rocks;
+namespace crypto_basics_tests_file {
+
 using namespace rocks::crypto;
 
 namespace {
@@ -278,3 +280,4 @@ TEST(CryptoRandomFillAndUniform) {
         CHECK(face);
     }
 }
+} // namespace crypto_basics_tests_file

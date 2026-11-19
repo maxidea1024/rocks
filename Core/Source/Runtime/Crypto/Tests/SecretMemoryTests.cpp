@@ -8,6 +8,8 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace secret_memory_tests_file {
+
 using namespace rocks::crypto;
 namespace secret = rocks::crypto::detail;
 
@@ -326,3 +328,4 @@ TEST(CryptoSecretAllocatorBacksGrowingArray) {
 
     CHECK(SameUsage(GetSecretMemoryStatus(), before));
 }
+} // namespace secret_memory_tests_file

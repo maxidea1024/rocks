@@ -5,6 +5,8 @@
 #include <string.h>
 
 using namespace rocks;
+namespace password_hash_tests_file {
+
 using namespace rocks::crypto;
 
 // 알려진 답의 출처: libsodium 1.0.22-stable test/default/pwhash_argon2id.c tv()의 4·6번 항목과 .exp
@@ -248,3 +250,4 @@ TEST(CryptoPasswordArgumentContract) {
     REQUIRE(hazmat::TryExportKey(key.Value(), Span<uint8>(exported)));
     CHECK(ConstantTimeEquals(Span<const uint8>(exported), secret.Value().View()));
 }
+} // namespace password_hash_tests_file
