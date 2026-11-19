@@ -141,17 +141,32 @@ Result<ResolvedSubresourceRange> ResolveTextureViewRange(TextureDimension dimens
         return invalid();
     }
 
-    // cube 계열의 쓰기 view는 면 단위 2D 배열이라 면 범위가 자유롭다(D3D·Vulkan에 cube UAV가 없다).
+    // view 차원 조합(UE RHIResources.cpp:298–300과 같다): 3D는 3D끼리, cube 계열 view는 cube 계열
+    // 텍스처만, 쓰기 view는 cube 차원이 없다(D3D·Vulkan에 cube UAV가 없다).
     const bool write = desc.access == ViewAccess::ReadWrite;
-    const bool wholeSlices = range.firstSlice == 0 && range.sliceCount == shape.slices;
-    if ((dimension == TextureDimension::Texture3D ||
-         (dimension == TextureDimension::TextureCube && !write)) &&
-        !wholeSlices) {
+    if (static_cast<uint8>(desc.dimension) > static_cast<uint8>(TextureViewDimension::Texture3D)) {
         return invalid();
     }
 
-    if (dimension == TextureDimension::TextureCubeArray && !write &&
-        (range.firstSlice % CubeFaceCount != 0 || range.sliceCount % CubeFaceCount != 0)) {
+    const TextureDimension view = TextureViewDimensionOf(dimension, desc);
+    const bool texture3D = dimension == TextureDimension::Texture3D;
+    if (texture3D != (view == TextureDimension::Texture3D) ||
+        (IsCubeDimension(view) && (!IsCubeDimension(dimension) || write))) {
+        return invalid();
+    }
+
+    // view 차원의 slice 규칙: 3D는 전체, 2D는 첫 slice 하나, cube는 첫 cube 6면(D3D TEXTURE2D·
+    // TEXTURECUBE view에 시작 필드가 없다), cube 배열은 6의 배수로 시작·개수.
+    const bool wholeSlices = range.firstSlice == 0 && range.sliceCount == shape.slices;
+    const bool sliceRule =
+        view == TextureDimension::Texture3D   ? wholeSlices
+        : view == TextureDimension::Texture2D ? range.firstSlice == 0 && range.sliceCount == 1
+        : view == TextureDimension::TextureCube
+            ? range.firstSlice == 0 && range.sliceCount == CubeFaceCount
+        : view == TextureDimension::TextureCubeArray
+            ? range.firstSlice % CubeFaceCount == 0 && range.sliceCount % CubeFaceCount == 0
+            : true;
+    if (!sliceRule) {
         return invalid();
     }
 
@@ -178,6 +193,31 @@ ResolvedSubresourceRange AttachmentSubresource(TextureDimension dimension, uint3
                                                uint32 slice) noexcept {
     // 3D는 mip 하나가 subresource 하나다(깊이 면은 subresource가 아니다).
     return {mipLevel, 1, dimension == TextureDimension::Texture3D ? 0u : slice, 1};
+}
+
+TextureDimension TextureViewDimensionOf(TextureDimension texture,
+                                        const TextureViewDesc& desc) noexcept {
+    switch (desc.dimension) {
+    case TextureViewDimension::Same:
+        break;
+    case TextureViewDimension::Texture2D:
+        return TextureDimension::Texture2D;
+    case TextureViewDimension::Texture2DArray:
+        return TextureDimension::Texture2DArray;
+    case TextureViewDimension::TextureCube:
+        return TextureDimension::TextureCube;
+    case TextureViewDimension::TextureCubeArray:
+        return TextureDimension::TextureCubeArray;
+    case TextureViewDimension::Texture3D:
+        return TextureDimension::Texture3D;
+    }
+
+    // cube 계열의 쓰기 view는 면 단위 2D 배열이다(텍스처 GX2 나머지 A부).
+    if (desc.access == ViewAccess::ReadWrite && IsCubeDimension(texture)) {
+        return TextureDimension::Texture2DArray;
+    }
+
+    return texture;
 }
 
 uint32 TextureViewBaseMip(const DeviceFeatures& features, const TextureViewDesc& desc) noexcept {

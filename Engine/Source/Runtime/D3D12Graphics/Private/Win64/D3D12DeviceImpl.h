@@ -514,7 +514,8 @@ public:
                                bool readOnly, D3D12_CPU_DESCRIPTOR_HANDLE handle) noexcept;
     Result<TextureHandle> CreateWritableTextureView(TextureHandle texture, TextureRecord& source,
                                                     PixelFormat format,
-                                                    const ResolvedSubresourceRange& range) noexcept;
+                                                    const ResolvedSubresourceRange& range,
+                                                    TextureDimension dimension) noexcept;
     void WriteShaderResourceView(const TextureRecord& record, DXGI_FORMAT format, uint32 plane,
                                  const ChannelSwizzle& swizzle, uint32 slot) noexcept;
 
