@@ -2,18 +2,20 @@
 
 정적 타입 · C 계열 문법 · 레지스터 VM · 비프로그래머 대상의 방어적 설계
 
-**설계 기준일 2026.11.18 · 초안 1.3 · 상태: 설계 제안 / 미구현 · 성능 미측정**
+**설계 기준일 2026.11.20 · 초안 1.4 · 상태: 설계 제안 / 미구현 · 성능 미측정**
 
 이 문서는 [전체 계획](EngineImplementationPlan.ko.md) §23이 요구하는 Rocks 게임플레이 언어 Sparks를 정의한다. 프로그래머가 아닌 사용자도 쓸 수 있도록 Go처럼 단순하게, 실수할 여지가 적게, 메모리·리소스 누수가 생길 수 없는 구조로 설계한다. 기준은 엔진 구현 상태가 아니라 전체 계획 §23과 이 언어가 연결되는 전체 계획 §5·§6·§8·§9·§10·§16·§17·§20·§21·§24·§29의 계약이다. 이 문서의 문법·이름·API는 설계 제안이며 구현·측정 결과가 아니다. 예시의 엔진 API 이름(`AddMovement`, `World.Spawn` 등)은 바인딩 규칙을 보이기 위한 예시이며 실제 이름은 각 모듈의 C++ 선언에서 생성된다. 아직 엔진에 없는 게임 타입(`Character`, `Collider`·`SphereCollider`, `SoundAsset`, `Sequence`, `DataAsset`, `ScriptComponent`, `WidgetController`, `PlaySession`)은 자리표시 이름이며 해당 모듈이 들어올 때 확정한다(§17.2).
 
 초안 1.3은 구현 착수 전 스펙 완비를 위한 개정이다. 엔진 런타임(Actor·World 코드)·Prefab 개정 3·리플렉션 B9·주변 시스템 스펙(로깅·CVar·입력·UI·콘텐츠 서명)과 이름·시점을 맞추고, 사용자 핵심 요구 3가지 — **핫 리로드 필수(§12.4), 오류 방어(§8.4), 선택형 native AOT(§12.5, Unity IL2CPP와 같은 backend 선택)** — 를 규격으로 확정하였다. 미정 값(전달 수 상한·예산·interface·CU9)을 정하고 표준 API(부록 B)를 추가하였다. 구현은 전체 계획의 순서(L0 = Foundation Gate 이후 M3)를 따른다.
 
+초안 1.4(2026.11.20)는 레벨마다 하나인 연결 스크립트(UE Level Blueprint 대응)를 기반 타입 `LevelScript`로 더한 개정이다. 정본은 [레벨 스크립트](LevelScript.ko.md)(결정 LD1–LD20)이고, 이 문서에는 언어 쪽 요지(기반 타입·참조 형태·수명 순서·엔진 Actor 물리 이벤트·편집기 명령·진단 코드)만 두며 결정은 SD46–SD50으로 요약한다.
+
 | 항목 | 내용 |
 |---|---|
-| 기준 문서 | 전체 계획 §23 · [엔진 런타임](EngineRuntime.ko.md)(이하 ER) 2·6–8절과 World 코드 · [Prefab](Prefab.ko.md) 개정 3 · [런타임 클래스 메타데이터](RuntimeClassMetadata.ko.md)(이하 RCM) · [리플렉션 B9](ReflectionExtensions.ko.md)(이하 RX) · [입력 상세안](CoreObjectInputDetailedPlan.ko.md) · [UI 툴킷](UiToolkit.ko.md) CU1–CU9 · [로깅](LoggingSystem.ko.md) · [CVar](CVarSystem.ko.md) · [콘텐츠 서명](ContentSigning.ko.md) · [Clang 생성 Reflection](../Implementation/ReflectionMetadata.ko.md)(구현 상태) |
+| 기준 문서 | 전체 계획 §23 · [엔진 런타임](EngineRuntime.ko.md)(이하 ER) 2·6–8절과 World 코드 · [Prefab](Prefab.ko.md) 개정 3 · [레벨 스크립트](LevelScript.ko.md) 개정 1 · [런타임 클래스 메타데이터](RuntimeClassMetadata.ko.md)(이하 RCM) · [리플렉션 B9](ReflectionExtensions.ko.md)(이하 RX) · [입력 상세안](CoreObjectInputDetailedPlan.ko.md) · [UI 툴킷](UiToolkit.ko.md) CU1–CU9 · [로깅](LoggingSystem.ko.md) · [CVar](CVarSystem.ko.md) · [콘텐츠 서명](ContentSigning.ko.md) · [Clang 생성 Reflection](../Implementation/ReflectionMetadata.ko.md)(구현 상태) |
 | Unity·Verse 비교 기준 | Unity 수명 hook 체계(종류·호출 순서·의미). Verse는 The Book of Verse[R19] 기준이며 언어 설계의 참고 대상이다. Rocks의 Unreal 기준은 UE 5.8(5.8.4, commit `f45729c0b6f0`) |
 | Rocks 상태 | Sparks 언어·VM·컴파일러 미구현. Core C5(`NamePool::TryFind`)는 구현됨 |
-| 식별자 | 도입 단계 L0–L4, Core 변경 C1–C5, 리플렉션 확장 CU9, Gate G1–G6, 결정 SD1–SD45, 진단 코드 S0100–S1199, 부록 A·B, 참고 자료 R1–R31 |
+| 식별자 | 도입 단계 L0–L4, Core 변경 C1–C5, 리플렉션 확장 CU9, Gate G1–G6, 결정 SD1–SD50, 진단 코드 S0100–S1199, 부록 A·B, 참고 자료 R1–R31 |
 
 ## 0. 핵심 결정
 
@@ -275,7 +277,7 @@ class DoorLogic : ScriptComponent {
 
 | 선언 | 의미 | 예 |
 |---|---|---|
-| `class` | 엔진 수명 타입(`ScriptComponent`, Actor·Pawn 파생 `Character`, `WorldService`, `WidgetController`) 또는 `DataAsset`을 상속. 기반 타입이 수명과 문맥 이름을 정한다(§3.4). core에서 기반은 엔진 C++ 타입뿐이고 Sparks 클래스는 상속할 수 없다. full에서는 `open class`로 선언한 Sparks 클래스도 기반이 될 수 있다(SD27) | `class DoorLogic : ScriptComponent { }` |
+| `class` | 엔진 수명 타입(`ScriptComponent`, Actor·Pawn 파생 `Character`, Actor 파생 `LevelScript`, `WorldService`, `WidgetController`) 또는 `DataAsset`을 상속. 기반 타입이 수명과 문맥 이름을 정한다(§3.4). core에서 기반은 엔진 C++ 타입뿐이고 Sparks 클래스는 상속할 수 없다. full에서는 `open class`로 선언한 Sparks 클래스도 기반이 될 수 있다(SD27) | `class DoorLogic : ScriptComponent { }` |
 | `struct` | 값 타입. 상속 없음. 스크립트 데이터는 struct로 표현한다 | `struct HitInfo { var Point: vec3; var Damage: int = 1; }` |
 | `enum` | 열거. 플래그 조합은 `Set<E>` | `enum DamageKind { Physical, Fire, Poison }` |
 | `event` | 클래스 안의 멤버 이벤트, 최상위의 Actor 확장 이벤트·World 이벤트 | `event Died(killer: Actor?);` · `event Actor.Interacted(actor: Actor);` · `event World.GameStarted();` |
@@ -284,7 +286,7 @@ class DoorLogic : ScriptComponent {
 | `interface` (full) | 함수 시그니처만 가진 계약(§10.3 CU9) | `interface Damageable { fn ApplyDamage(amount: int); }` |
 
 - **기본값(zero value):** 초기값이 없는 필드는 `0`, `0.0`, `false`, `""`, `null`, 빈 컨테이너, enum의 첫 case, 벡터 0, `quat`·`mat4`·`Transform`은 단위(UE `FQuat::Identity`·`FTransform::Identity`), `Rotator`는 (0, 0, 0), `Color`는 (0, 0, 0, 0), `Text`는 빈 Text로 시작한다. `Tag`·`InputAction`과 `?` 없는 객체·에셋·`Soft<T>`·`Row<T>` 필드에는 기본값이 없으므로(`Tag?`의 없음이 None Name이기 때문 — §15) `@edit`로 지정하거나 초기값(소유 component 생성식, `Asset(...)`·`Row(...)` 리터럴)을 두어야 하며 지정이 누락되면 쿡 오류다(SD19). 필드 초기값은 클래스 기본값 레코드에 들어가므로, non-null 참조 초기값(`Asset(...)`·`Soft<T>`·`Row(...)`)은 레코드의 참조 의존 수집(대상 정체성 비교, override하지 않은 값의 레코드 참조를 패키지 의존에 포함)이, 소유 component 생성식은 default subobject가 선행 조건이며 둘 다 해당 도입 단계(L2) 전에 갖춘다([RuntimeClassMetadata](RuntimeClassMetadata.ko.md) '클래스 기본값 결정'). 선택 값은 `T?`로 선언한다. 지역 변수는 선언할 때 초기화해야 한다.
-- **`?` 없는 객체 필드:** (a) 소유 component를 생성하는 `let` 필드와 (b) prefab 안의 대상을 가리키는 `@edit` 필드(component·Actor 파생 클래스)에만 허용한다. 그 밖(WorldService·WidgetController·DataAsset의 객체 필드, `@edit` 없는 필드)은 컴파일 오류이며 `T?`를 제시한다.
+- **`?` 없는 객체 필드:** (a) 소유 component를 생성하는 `let` 필드와 (b) prefab 안의 대상을 가리키는 `@edit` 필드(component·Actor 파생 클래스)에만 허용한다. 그 밖(WorldService·WidgetController·DataAsset의 객체 필드, `@edit` 없는 필드, LevelScript의 `@edit` 객체 필드 — LevelScript는 prefab에 들어갈 수 없고 대상이 레벨 Actor라 (b)에 해당하지 않는다)은 컴파일 오류이며 `T?`를 제시한다(LevelScript의 경우는 S0413 — [LevelScript](LevelScript.ko.md) LD7).
 - **struct 필드:** struct의 객체 필드는 `T?`만 허용한다. `?` 없는 에셋·`Soft<T>`·`Row<T>` 필드는 생성할 때 이름 인자로 반드시 지정한다.
 - **필드 쓰기:** class의 Sparks 필드는 자기 instance의 코드(파생 클래스 포함)에서만 쓸 수 있고 다른 객체의 Sparks 필드는 읽기만 가능하다. 엔진 객체의 쓰기 가능한 native 속성(`ScriptWritable`)은 밖에서도 쓸 수 있다. struct 필드는 대입할 수 있는 경로(§4.4)를 통해 어디서나 쓴다.
 - **`let`:** 재대입할 수 없다. 값 타입이면 내부 필드·원소 수정과 변경 메서드 호출도 금지된다. 객체 handle을 담은 `let`은 handle만 고정되며 대상 객체의 속성은 쓸 수 있다(`let PickupRange = ...` 뒤의 `PickupRange.RelativeLocation = ...`). 지역과 필드에 같은 규칙을 적용하며, `let` 필드의 값은 spawn parameter 적용(§4.5)까지 정해진다. `@save let`·`@net let`은 오류다.
@@ -348,7 +350,7 @@ _ = bag.Add(item);                                      // 결과를 버릴 때�
 
 | 기반 타입 | 문맥 이름 |
 |---|---|
-| `ScriptComponent`, `WidgetController`, Actor 파생(`Pawn`·`Character` 등) | `World`·`Session`·`Input`·`Time` |
+| `ScriptComponent`, `WidgetController`, Actor 파생(`Pawn`·`Character`·`LevelScript` 등) | `World`·`Session`·`Input`·`Time` |
 | `WorldService` | `World`·`Session`·`Time` |
 | `DataAsset`, struct `fn`, 최상위 `fn` | 없음 |
 | 서버 RPC 함수 본문(full) | 위에 더해 `Caller: Connection`(호출한 connection) |
@@ -462,7 +464,7 @@ Escape       = "\" ( '"' | "\" | "n" | "t" | "$" | "u{" Hex { Hex } "}" ) ;
 | 내장 타입 | `bool` `int` `float` `string` `vec2` `vec3` `vec4` `quat` `mat4`, `void`(`Result<void>`의 타입 인자 전용) | 식별자로 쓸 수 없다. 타입과 생성·변환 호출로만 쓴다 |
 | prelude | `Log` `Assert` `Math` `Random` `Format` `Parse` `Delay` `NextTick` `NextFixedTick` `All` `Race` `Assets` `CVars` `Settings` `Clock` `Error` | 사용자 선언 이름으로 쓸 수 없다 |
 | prelude 타입 | `Array` `Map` `Set` `Result` `Soft` `Row` `Text` `TagSet` `InputAction` `LoadRequest` `Connection` `PlaySession` `Class` `CVarRef` `Rotator` `Transform` `WorldPosition` `Color` `Hit` | 사용자 선언 이름으로 쓸 수 없다 |
-| 핵심 엔진 타입(언어 버전 1에 고정) | `Actor` `Pawn` `Component` `SceneComponent` `ScriptComponent` `WorldService` `WidgetController` `Widget` `DataAsset` `Collider` `World` | 사용자 선언 이름으로 쓸 수 없다. 그 밖의 `Rocks` 패키지 타입은 이름 하나에 대상 하나 규칙(§3.1)으로만 충돌을 판정한다 |
+| 핵심 엔진 타입(언어 버전 1에 고정) | `Actor` `Pawn` `Component` `SceneComponent` `ScriptComponent` `LevelScript` `WorldService` `WidgetController` `Widget` `DataAsset` `Collider` `World` | 사용자 선언 이름으로 쓸 수 없다. 그 밖의 `Rocks` 패키지 타입은 이름 하나에 대상 하나 규칙(§3.1)으로만 충돌을 판정한다 |
 | 검증 리터럴 | `Tag` `Action` `Asset` `Row` `Loc` `CVar` | 사용자 선언 이름으로 쓸 수 없다 |
 | 문맥 이름 | `World` `Session` `Input` `Time` `Caller` | 사용자 선언 이름으로 쓸 수 없다 |
 | RPC 접두 | `Server` `AllClients` `OwnerClient` | 사용자 선언 이름으로 쓸 수 없다 |
@@ -577,7 +579,7 @@ other.Current = 0;                        // 오류(other: Health): 다른 객�
 ### 4.5 생성과 기본값 순서
 
 - struct와 component는 필드 이름으로 생성한다(`HitInfo(Point: p)`). 지정하지 않은 필드는 기본값을 사용하며 기본값이 없는 필드(§3.2)는 반드시 지정한다.
-- component는 `let` 필드의 초기값으로만 생성한다(실행 중 추가는 full). 필드 초기값은 상수식과 component 생성만 허용하고 클래스 기본값 레코드에 반영한다 — 레코드는 가장 가까운 C++ base의 생성자 결과 위에 컴파일된 초기값을 덮어 합성한다(RCM '클래스 기본값 결정'). component 생성 초기값은 클래스 원형의 default subobject(Prefab PF1)가 선행 조건이며 그때까지 미지원이다. 상수식은 리터럴, 검증 리터럴, enum 값, const 이름, 이들의 산술·비교, 수학 타입·struct 생성, 배열·Map 리터럴, `Math.Radians`·`Math.Degrees`이며 그 밖의 함수 호출과 필드 참조는 포함하지 않는다. 컴파일 시 overflow는 오류다. C++ 생성자 안에서 스크립트 코드를 실행하지 않는다.
+- component는 `let` 필드의 초기값으로만 생성한다(실행 중 추가는 full). 편집기에서 배치한 Actor에 ScriptComponent를 붙이는 것은 스크립트의 생성이 아니라 레벨·배치 데이터 편집이며 core에서도 된다: 직접 배치 Actor는 그 `components`에 추가해 레벨에 저장하고, prefab 배치는 instance override의 노드 추가로 저장한다(Prefab PF4 선행, [LevelScript](LevelScript.ko.md) LD15). 필드 초기값은 상수식과 component 생성만 허용하고 클래스 기본값 레코드에 반영한다 — 레코드는 가장 가까운 C++ base의 생성자 결과 위에 컴파일된 초기값을 덮어 합성한다(RCM '클래스 기본값 결정'). component 생성 초기값은 클래스 원형의 default subobject(Prefab PF1)가 선행 조건이며 그때까지 미지원이다. 상수식은 리터럴, 검증 리터럴, enum 값, const 이름, 이들의 산술·비교, 수학 타입·struct 생성, 배열·Map 리터럴, `Math.Radians`·`Math.Degrees`이며 그 밖의 함수 호출과 필드 참조는 포함하지 않는다. 컴파일 시 overflow는 오류다. C++ 생성자 안에서 스크립트 코드를 실행하지 않는다.
 - 기본값 순서는 전체 계획 §5.3과 Prefab 3.1절을 따른다: native → Sparks 필드 초기값(이 둘의 결과가 클래스 기본값 레코드다) → subobject 기본값 레코드 → prefab·variant → instance override → spawn parameter. 코드의 기본값 변경은 override하지 않은 instance에 반영하고 override한 instance를 편집기에 표시한다.
 - 소유 component 필드에도 안정 ID(SubobjectGuid)를 부여하므로 이름을 바꿔도 prefab override가 유지된다(전체 계획 §5.3).
 
@@ -595,13 +597,14 @@ Unity의 hook 체계(종류·의미)를 따르고 이름은 Rocks 어휘를 사�
 | `on Tick(dt)` · `on FixedTick(dt)` · `on LateTick(dt)` | Update · FixedUpdate · LateUpdate | 가변·고정·LateUpdate tick group | `OnTick` 등 | Tick 문맥: await·생성·자원 획득·로드 불가(§6.2). Start가 완료된 뒤의 첫 해당 tick phase부터 실행. 기본 phase는 Tick = PrePhysics, LateTick = LateUpdate이며 full의 `@tick(Phase:, Interval:, Priority:)`가 엔진 `TickSettings`(phase·`intervalSeconds`·`priority`)에 대응한다. 일시 정지 중에는 실행하지 않는다(엔진 `tickWhenPaused`는 노출하지 않음) |
 | `on Disable()` | OnDisable | Deactivate | `OnDisable` | 활성에서 비활성으로 바뀔 때만 1회. hook 실행 후 엔진이 실행 중인 실행을 취소하고 유지 자원을 해제하며(필드는 `null`) 이벤트 연결을 비활성으로 둔다(항목 유지, SD10) |
 | `on Destroy()` | OnDestroy | EndPlay | `OnDestroy` | Teardown 문맥(§6.2). hook이 반환한 직후 Detach |
-| `on TriggerEnter(other, trigger)` · `TriggerExit` · `on CollisionEnter(other, hit)` · `CollisionExit` | `OnTrigger*` · `OnCollision*` | PostPhysics 물리 이벤트 batch | `OnTriggerEnter` 등 | 자기 Actor의 모든 collider에서 오며 어느 collider인지는 `trigger` 인자로 구분한다. 재진입 판정의 발행자는 `other`다. 값으로 복사한 이벤트를 generation 재검증 후 전달(전체 계획 §16.2) |
+| `on TriggerEnter(other, trigger)` · `TriggerExit` · `on CollisionEnter(other, hit)` · `CollisionExit` | `OnTrigger*` · `OnCollision*` | PostPhysics 물리 이벤트 batch | `OnTriggerEnter` 등 | 자기 Actor의 모든 collider에서 오며 어느 collider인지는 `trigger` 인자로 구분한다. 재진입 판정의 발행자는 `other`다. 값으로 복사한 이벤트를 generation 재검증 후 전달(전체 계획 §16.2). 다른 객체는 같은 통지를 엔진 Actor 이벤트 `TriggerEntered` 등으로 받는다(§5.2). `LevelScript`는 물리 hook을 선언할 수 없다(S0801, LevelScript LD18) |
 | `on Validate()` (full) | OnValidate | EditorConstruct | `OnValidate` | 편집기 전용, 저장되지 않는 미리보기 상태만 변경 |
 
 - 수명·물리 hook은 누적된다. 기반 클래스의 hook이 먼저 실행되고 파생 클래스의 것이 이어서 실행된다. `on 경로.이벤트` handler는 누적되지 않으며 클래스 계층 전체에서 같은 경로를 한 번만 선언한다. 파생 클래스가 동작을 바꾸려면 기반의 handler가 호출하는 `fn`을 `override`한다.
 - 이름 하나짜리 `on X()`는 hook 전용이다.
 - `fn Update()`·`fn Start()`·`fn OnStart()`처럼 hook·`On`+hook·Unity hook 이름의 함수는 오류이며 해당 `on` 형태를 제시한다.
 - C++ 가상 함수에 `On` 접두를 쓰면 오디오·타임라인의 일반 `Start()` 메서드와 충돌하지 않는다(SD9). C++ 수명 가상 함수(`On*`·`OnRegister`·`OnUnregister`)는 binding에 노출하지 않는다.
+- **LevelScript 순서(LevelScript LD8):** 레벨 편입에서 `LevelScript`의 `FinishSpawning`(Awake·Enable)은 그 Level의 모든 배치 Actor(prefab 배치에서 펼친 Actor 포함)가 마친 뒤에 한다. 그래서 LevelScript의 `on Enable`에서 저장 때 활성이던 대상은 이미 활성이다. Start는 엔진 시작 큐 순서대로 같은 프레임에 준비된 활성 배치 Actor 뒤에 시작하며, 꺼진 채 기다리거나 준비가 안 된 Actor의 Start는 기다리지 않는다. Level을 내릴 때(`DestroyLevel`·World 종료)는 LevelScript의 Disable·Destroy가 먼저다. LevelScript는 `RequestDestroy`로 파괴할 수 없다(요청을 무시하고 위치별 1회 보고 — LevelScript LD16).
 - **활성 전환:** 스크립트 단계 안의 활성·비활성 전환 요청은 파괴와 같은 deferred 큐로 처리하여 이벤트 전달이 끝난 뒤, 파괴 적용 전에 요청 순서대로 World `SetEnabled`를 호출한다(SD25). 엔진의 `SetEnabled`는 hook을 동기 실행하므로 Enable·Disable hook은 이 적용 안에서 실행되고, 그때 등록된 emit은 같은 큐로 전달된다. 비활성 instance의 유지 자원 획득 결과는 `null`이다.
 - **엔진이 연 진입:** 스크립트 단계 밖에서 엔진이 hook을 부르는 지점(레벨 로드·셀 스트리밍·복제 spawn의 Awake·Enable, 프레임 시작 처리의 Start, 프레임 끝 정리의 Disable·Destroy, 물리 이벤트 batch)은 VM에 들어갈 때 스크립트 단계 하나를 열고, hook 실행 → 발행 큐 전달 → 적용을 마친 뒤 닫는다. 따라서 SD3의 지연 규칙은 모든 스크립트 실행에 성립한다. 적용 루프(활성 전환·파괴가 다시 낳은 전환·파괴)는 한 단계에서 64회까지 돌고, 넘으면 남은 요청을 다음 단계로 넘기고 보고한다.
 - 이 절과 §2.4·§5.2의 표는 handler 인자 타입을 생략하였다. 선언할 때는 `on Tick(dt: float)`, `on TriggerEnter(other: Actor, trigger: Collider)`처럼 타입을 명시한다.
@@ -611,6 +614,7 @@ Unity의 hook 체계(종류·의미)를 따르고 이름은 Rocks 어휘를 사�
 | 종료 경로 | Disable | Destroy | Detach |
 |---|---|---|---|
 | `RequestDestroy`, 부모 파괴, 셀 unload | 활성이면 실행 | 실행 | Destroy 반환 직후 |
+| 서브 레벨 unload(`DestroyLevel`) | 활성이면 실행 | 실행 | Destroy 반환 직후. 그 Level의 `LevelScript`가 다른 Actor보다 먼저(LevelScript LD8·LD11) |
 | travel | 활성이면 실행 | 실행 | Destroy 반환 직후. 이전 World만 종료하고 Session은 유지 |
 | Tryout Stop, process 종료 | 활성이면 실행 | 실행 | Destroy 반환 직후. 그 뒤 CloseSession(§9.1) |
 | 격리(§8.3: fault, 필수 `@edit` 참조 대상 제거) | 실행하지 않음 | 그 instance가 파괴될 때 실행 | 격리 시점에 실행·유지 자원·연결 해제(값 필드 보존), Destroy 반환 직후 Detach |
@@ -657,6 +661,7 @@ class HealthBar : WidgetController {
 | 입력·UI | `on JumpAction.Triggered()`, `on Widget.Ok.Clicked()` | action 필드와 widget 경로. 사전·WidgetAsset schema와 컴파일 시 대조 | action instance, widget |
 | `World` | `on World.GameStarted()` | World 이벤트(session의 World 이벤트 proxy를 통해 연결) | World |
 | 물리 hook | `on TriggerEnter(other, trigger)` | 자기 Actor collider의 통지(§5.1) | 상대 `other` |
+| Actor 물리 이벤트 | `on GateTrigger.TriggerEntered(other)` | 필드가 가리키는 Actor의 collider 통지. 엔진 `Actor` 이벤트 `TriggerEntered`·`TriggerExited`·`CollisionEntered`·`CollisionExited`(인자는 같은 이름 hook과 같다)이며 같은 물리 batch에서 그 Actor의 hook 다음에 발행한다. hook 이름은 멤버 이름이 될 수 없으므로 과거형이다(LevelScript LD9) | 가리키는 Actor |
 
 - handler 인자는 이벤트 인자 목록의 앞에서부터 필요한 만큼 타입과 함께 선언하며 타입은 정확히 일치해야 한다. 쓰지 않는 앞쪽 인자는 `_`로 쓴다(`on CollisionEnter(_: Actor, hit: Hit)`).
 - 멤버 이벤트는 선언한 클래스 안에서만 `emit`한다. Actor 확장 이벤트(`event Actor.X`)와 World 이벤트(`event World.X`)는 최상위에 선언하며, 대상 타입의 이벤트(native 포함)와 패키지·의존 패키지 전체에서 이름이 유일해야 한다. `on`·`emit`으로 쓰려면 선언 모듈을 직접 import해야 하고(전이되지 않음) 그 사용은 import 사용으로 센다. 확장 이벤트는 (선언 모듈, 이름)의 안정 ID로 식별한다. 발행 형태는 `emit target.Interacted(player)`이며 Actor 파생 클래스는 `emit this.Interacted(player)`로 자기 Actor에 발행한다.
@@ -702,7 +707,7 @@ Sparks 코드는 엔진의 정해진 지점에서 실행되며 이 실행 묶음
 
 ### 5.5 연결의 저장과 해제
 
-- **보관 위치:** 발행자 쪽은 Core `MulticastDelegate`다. 이벤트 필드가 없는 확장 이벤트·native 필드 `Changed`·World 이벤트는 발행자 객체에 지연 할당하는 이벤트 slot 표에 저장하며 그 객체와 함께 해제된다.
+- **보관 위치:** 발행자 쪽은 Core `MulticastDelegate`다. 이벤트 필드가 없는 확장 이벤트·native 필드 `Changed`·World 이벤트·엔진 Actor 물리 이벤트(`TriggerEntered` 등)는 발행자 객체에 지연 할당하는 이벤트 slot 표에 저장하며 그 객체와 함께 해제된다. 구독이 없는 객체에는 slot 표가 없으므로 Actor 물리 이벤트도 구독이 있을 때만 비용이 든다(1M Actor 기준, LevelScript LD9).
 - **항목:** **연결 표**는 session이 소유하는 연결 기록 배열이고 **연결 slot**은 그 원소 번호다. Sparks 연결 항목은 (연결 slot, generation) key와 handler ID만 가지며, 구독 instance의 Detach가 slot의 generation을 올려 key를 무효화한다. delegate thunk는 큐 항목만 기록하며 스크립트 코드는 전달 순회에서만 실행된다(§5.4). revision lease·raw pointer를 보관하지 않는다.
 - **비활성화:** Disable은 항목을 삭제하지 않고 비활성으로 표시하며 Enable이 다시 활성화한다. 항목은 Detach, 격리, 원천 필드 변경(해당 발행자분), 선언이 추가·삭제·변경되는 reload, CloseSession에서 삭제된다.
 - **구독자가 먼저 끝날 때:** 구독자 Detach가 자기 key를 폐기하면 항목은 즉시 호출 대상에서 제외되고, 발행자의 다음 compact에서 제거된다.
@@ -884,6 +889,7 @@ Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function 
 - **형식(SD37):** `경로:줄:열: error S코드: 메시지` 다음에 원문 줄·표시·설명·`fix:` 수정 예를 둔다. 위치가 앞에 있어 VS Code problem matcher와 clang 형식 도구가 그대로 읽는다. 경고는 없으므로 종류는 항상 `error`다. CLI 종료 코드는 성공 0, 컴파일 오류 1, 사용법 오류 2다(AppInfoCommandLine 14.4절).
 - **언어:** 컴파일러·VM·엔진이 내는 진단과 fault 보고는 영어다(실행 중 메시지 영어 규칙). LSP는 locale 옵션으로 지역화된 설명을 덧붙일 수 있으며 코드·위치·수정 예는 바뀌지 않는다. 사용자가 쓰는 `Log` 메시지와 `Assert` 문구의 언어는 사용자 콘텐츠이므로 프로젝트 정책이다.
 - **코드 대역:** S01xx 어휘, S02xx 구문, S03xx 이름 해석, S04xx null·타입, S05xx 숫자·상수식, S06xx 실행 문맥·효과, S07xx 대입·`let`, S08xx 이벤트·수명 hook·재진입, S09xx 유지 자원·로드, S10xx 저장·ID·호환성, S11xx 패키지·reload·backend. 코드는 한 번 발급하면 의미를 바꾸지 않는다. 엔진 공통 진단 코드 등록부(RMC#### 메타 컴파일러, UI validate 코드와 함께)는 CompilerDiagnostics 문서에 둔다(§17.2).
+- **LevelScript 코드(초안 1.4):** S0413 `LevelScript`의 `@edit` 객체 필드에 `?`가 없다(§3.2), S0801 `LevelScript`가 물리 hook을 선언했다, S0802 `LevelScript`가 `let` Collider component 필드를 선언했다. 메시지와 수정 예는 [LevelScript](LevelScript.ko.md) 4.9절에 있다.
 - 진단은 원인 하나를 작성한 코드 그대로 보이고 수정 예를 포함한다. 한 원인에서 파생된 연쇄 오류는 표시하지 않는다.[R23] 수정 예는 이름 규칙(§3.1)을 지키도록 생성한다. 지역 이름은 멤버 이름이 아니라 타입 이름에서 도출한다(`Target: Health?` → `health`). 유사 이름 제시는 Core `EditDistance`와 이름 붙은 문턱 상수를 쓴다.
 - 사전 대조 리터럴(`Tag`·`Action`·`CVar`)이 사전에서 이름이 바뀐 경우 사전의 redirect(`@formerly`와 같은 역할)를 따라 자동 변환하고 빠른 수정으로 소스를 고친다. redirect도 없으면 오류다.
 
@@ -1311,6 +1317,7 @@ class DoorLogic : ScriptComponent {
 
 - 리터럴 자동완성은 컴파일 검증과 같은 사전을 사용한다. Unity 이름(`Update`, `FixedUpdate`, `LateUpdate`, `OnEnable`, `GetComponent`)을 입력하면 Rocks 이름(`Tick`, `FixedTick`, `LateTick`, `Enable`, `Find<T>`)을 제시한다. core 패키지에서는 full 후보를 표시하지 않는다.
 - hover는 타입·단위·문서 주석·native 선언 위치·하드 의존 크기·bundle·이벤트의 발행 측을 표시한다. 빠른 수정: `?` 추가, `?? return`, 누락 import, handler 골격(`@save`·`@net` 필드의 Changed 골격은 `on Enable`에 같은 반영 호출을 함께 생성), 재진입 정책 표시(`@skipWhileBusy`·`@restart`), `Soft`→`try await X.Load()`, `@formerly`, 이름 충돌 시 이름 변경.
+- **편집기 명령 채널(LevelScript LD14):** 편집기(Rocks Studio)는 `sparks-lsp`에 LSP `workspace/executeCommand`(서버 명령 `sparks.levelScript.addReference`·`sparks.levelScript.addEvent`)로 "레벨 스크립트에 참조 추가"·"이벤트 추가"를 요청하고, 서버는 넣을 위치를 정해 `workspace/applyEdit`로 VS Code·Script Editor에 편집을 보낸다(서버는 파일을 직접 쓰지 않는다). 편집기는 새 revision의 컴파일 완료 통지를 받은 뒤 필드 값을 지정한다. "레벨 스크립트 열기"의 생성 경로 `<패키지>/Levels/<레벨 경로 이름>.spark`와 이름 변환 규칙은 [LevelScript](LevelScript.ko.md) 4.8절이다.
 - 도입 단계: L1 진단·의미 강조, L2 자동완성(멤버·hook·attribute·리터럴·경로)·hover·정의 이동·빠른 수정·서식·추론 타입 표시, L3 ID를 유지하는 rename·참조 찾기·VS Code 디버거.
 - **디버거(DAP, L3):** `await`를 넘는 step(같은 실행의 다음 조각으로), 조건 breakpoint(Pure 문맥으로 평가), watch는 고정된 버퍼를 읽음(§9.4), breakpoint 중 저장은 재개 후 첫 reload 경계에 적용(§12.4), Tryout의 여러 process 동시 연결, pause 중 큐 상한(§9.4), 출시 빌드의 오프라인 위치 변환(§8.3·§12.5).
 
@@ -1455,6 +1462,8 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 | Core `Delegate` | C1–C4 | L1 |
 | 게임 타입 자리표시 | `Character`·`Collider`·`SphereCollider`·`SoundAsset`·`Sequence`·`DataAsset`·`ScriptComponent`·`WidgetController`·`PlaySession`의 Rocks 이름 확정(Rocks 고유 이름 원칙) | 해당 모듈 진입 시 |
 | ID 개념 이름 | `SoftEntityId`·영속 Entity Guid·파생 Entity ID를 Actor 계열 이름으로 바꿀지 Prefab과 함께 결정 | Prefab PF 단계 |
+| (초안 1.4) World·물리 | `LevelScript` 타입·`Level.levelScript`·`World::SetLevelScript`, LevelScript 파생 spawn·파괴 거부, 엔진 Actor 물리 이벤트 `TriggerEntered`·`TriggerExited`·`CollisionEntered`·`CollisionExited`([LevelScript](LevelScript.ko.md) 4절) | L2 전(이벤트는 물리 단계) |
+| (초안 1.4) 편집기·언어 서버 | Outliner "레벨 스크립트" 항목, 레벨 스크립트 명령·템플릿(전체 계획 §22.3), `sparks-lsp` 명령 `sparks.levelScript.*`(§13) | 편집기 단계, LSP L2 |
 
 ## 18. 도입 단계
 
@@ -1468,7 +1477,7 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 
 ## 19. 결정 사항
 
-2026.11.12 검토에서 초안의 권고안 10건(SD1–SD10)을 채택하였고, 같은 날 4차 검증에서 도출된 11건(SD11–SD21)을 채택하였다. 2026.11.18 5차 검증(초안 1.3)에서 사용자 요구(핫 리로드 필수·오류 방어·선택형 AOT·`WeakObjectRef` 명칭)와 권장안으로 24건(SD22–SD45)을 확정하였다. SD4는 기본값만 확정하고 target별 값은 마켓 규정 검토 후 정한다. SD3·SD9·SD20은 엔진 수준 결정이며 전체 계획 개정 1.7·1.8의 §5.2·§20.2에 반영되어 있다.
+2026.11.12 검토에서 초안의 권고안 10건(SD1–SD10)을 채택하였고, 같은 날 4차 검증에서 도출된 11건(SD11–SD21)을 채택하였다. 2026.11.18 5차 검증(초안 1.3)에서 사용자 요구(핫 리로드 필수·오류 방어·선택형 AOT·`WeakObjectRef` 명칭)와 권장안으로 24건(SD22–SD45)을 확정하였다. 2026.11.20 레벨 스크립트 설계 확정([LevelScript](LevelScript.ko.md) LD1–LD20, 모두 권장안)에서 언어에 걸리는 결정을 5건(SD46–SD50)으로 요약해 더하였다. SD4는 기본값만 확정하고 target별 값은 마켓 규정 검토 후 정한다. SD3·SD9·SD20은 엔진 수준 결정이며 전체 계획 개정 1.7·1.8의 §5.2·§20.2에 반영되어 있다.
 
 - **SD1. 확장자:** 소스 `.spark`, 컴파일 모듈 `.sparkc`. `.sparkc`는 빌드 출력 폴더에만 생성한다. 초안의 `.sparks`는 언어 이름과 철자가 같아 혼동되므로 사용자 결정(2026-11-12)으로 `.sparkc`로 정정하였다.
 - **SD2. C++ 리플렉션 필드 이름:** 첫 글자를 대문자로 바꾸고 끝의 `_`를 제거하여 노출하며, 그 밖의 `_`가 있으면 `ScriptName`이 필요하다(§10.3). 리플렉션 필드를 C++에서도 PascalCase로 선언하도록 규약을 개정하는 대안은 채택하지 않는다.
@@ -1515,10 +1524,15 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 - **SD43. spawn 중 fault와 hook 안 `try`:** spawn 중 Enable fault도 Awake처럼 spawn 실패이며, Awake·Enable·Start 안의 `try` 실패는 그 hook의 fault다(§5.1·§8.2).
 - **SD44. 노출 이름과 명령 표시:** `Result`를 돌려주는 C++ `TryX`는 Sparks에서 `X`로 노출하고, `@command`를 `@cheat`(CheatSet)와 `@editorButton`으로 나눈다(§10.3).
 - **SD45. 권한 구역:** `@net` 쓰기는 흐름 분석으로 판정한 권한 구역에서만 컴파일되고, 실행 시 권한이 없으면 무시하고 보고한다. 서버에서만 발행하는 Sparks 이벤트는 `@authorityOnly`로 표시한다(§14).
+- **SD46. 기반 타입 LevelScript:** Blueprint 제외를 유지하고, 레벨마다 하나인 연결 스크립트(UE Level Blueprint 대응)를 Actor 파생 기반 타입 `LevelScript`(레벨마다 숨은 Actor 0 또는 1개, 배치 불가)로 둔다. core에 포함하며 핵심 엔진 타입(§3.7)이다. 한 클래스를 여러 레벨이 쓸 수 있고, 프로젝트 공통 기반은 C++ 파생과 설정 `DefaultLevelScriptClass`로 고른다. 노드 시각 편집기는 보류 선택지로만 둔다(LevelScript LD1–LD5·LD13·LD19·LD20).
+- **SD47. LevelScript의 참조:** `@edit` 객체 필드는 `T?`만 허용하고(S0413), 대상은 같은 Level의 배치 Actor와 그 component다. 다른 Level은 저장 거부, 셀 사이는 영속 Entity 참조 전까지 거부(§4.3), prefab 배치가 펼친 Actor는 배치 정체와 노드 경로로 저장한다(Prefab D22). 레벨 사이 연락은 World 이벤트로 하며 이름 문자열 호출은 없다(LevelScript LD6·LD7·LD10·LD17).
+- **SD48. LevelScript의 수명:** 레벨 편입에서 그 Level의 모든 배치 Actor 뒤에 Awake·Enable하고, Start는 같은 프레임에 준비된 활성 배치 Actor 뒤에 시작하되 기다리지 않는다. Level을 내릴 때는 먼저 Disable·Destroy한다. `RequestDestroy`로 파괴할 수 없고 Level 파괴만 파괴한다(§5.1, LevelScript LD8·LD11·LD16).
+- **SD49. Actor 물리 이벤트와 LevelScript의 물리 금지:** 엔진 `Actor`가 `TriggerEntered`·`TriggerExited`·`CollisionEntered`·`CollisionExited` 이벤트를 노출해 다른 객체가 `on X.TriggerEntered(...)`로 받는다. 같은 물리 batch에서 hook 다음에 발행하고 지연 slot 표로 구독이 있을 때만 비용이 든다. 이름은 hook과 겹치지 않게 과거형이다. LevelScript는 물리 hook(S0801)과 Collider component(S0802)를 가질 수 없다(§5.2·§5.5, LevelScript LD9·LD18).
+- **SD50. 편집기 진입:** "레벨 스크립트 열기"·"참조 추가"·"이벤트 추가" 명령과 언어 서버 명령 채널(§13), 생성 경로 `<패키지>/Levels/<레벨 경로 이름>.spark`를 둔다. 배치한 Actor(직접 배치·prefab 배치)에 편집기에서 ScriptComponent를 붙이는 것은 core에서도 되며 실행 중 추가(full)와 다르다(§4.5, LevelScript LD14·LD15).
 
 ## 20. 교차 검증 기록
 
-초안 0.1·0.4·0.5·1.0·1.2는 이 문서의 작업 초안이다.
+초안 0.1·0.4·0.5·1.0·1.2는 이 문서의 작업 초안이다. 초안 1.4의 LevelScript 반영은 [LevelScript](LevelScript.ko.md) 초안 0.1을 리뷰어 1명이 문서 원문·UE 5.8 소스와 대조한 결과(정정 9건 — Prefab 판, 진단 등록처, 배치 불가 표지, GameDirector 이름, 레벨 로드 순서, UE 인용, UE BeginPlay 순서, `Find<T>`, Sparks 이름)를 따른다. 기록은 그 문서 10절에 있다.
 
 ### 20.1 5차 검증(초안 1.2, 스펙 완비)
 
