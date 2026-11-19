@@ -47,7 +47,7 @@ if (destroyRequested) {
 
 기본 설정에서 scope가 없으면 객체 또는 Borrow가 속한 Registry의 문맥을 사용한다. 이 경로는 thread-local scope를 만들거나 task로 전파하지 않는다. 이때 호출자가 실제로 어느 World에서 실행 중인지는 알 수 없어, 다른 World에서 scope 없이 전달받은 포인터의 오용을 구분할 수 없다. 명시적인 `ObjectAccessScope`가 있으면 그 문맥을 우선 적용하며 다른 World의 객체는 `WrongContext`로 거부한다. 다른 스레드는 항상 `WrongThread`다. 이 검사는 호출자 실수를 막기 위한 문맥 검사이며 보안 인증이 아니다.
 
-World·PIE dispatcher가 항상 실행 문맥을 설정하는 구성은 `RegistryOptions::requireLifecycleScope = true`를 지정할 수 있다. 이 경우 Registry에 연결된 객체를 소유 스레드에서 호출할 때 scope가 없으면 `InspectLifecycle`, `TryIsDestroyRequested`, `TryGetType`은 `WrongContext`를 반환하고, `IsDestroyRequested`와 `GetType`은 `WrongContext`를 진단한 뒤 중단한다. 이 옵션은 명시적 `ObjectAccessContext`를 받는 Registry API에 적용되지 않는다. 현재 World dispatch와 task/worker 문맥 자동 전파는 아직 없으므로 엄격 모드 사용자는 진입 경계에서 scope를 설정해야 한다. `ObjectAccessScope`는 비복사·비이동이며 생성한 스레드에서 역순으로 파괴한다. 중첩 scope가 끝나면 이전 문맥을 복원한다.
+World·Tryout dispatcher가 항상 실행 문맥을 설정하는 구성은 `RegistryOptions::requireLifecycleScope = true`를 지정할 수 있다. 이 경우 Registry에 연결된 객체를 소유 스레드에서 호출할 때 scope가 없으면 `InspectLifecycle`, `TryIsDestroyRequested`, `TryGetType`은 `WrongContext`를 반환하고, `IsDestroyRequested`와 `GetType`은 `WrongContext`를 진단한 뒤 중단한다. 이 옵션은 명시적 `ObjectAccessContext`를 받는 Registry API에 적용되지 않는다. 현재 World dispatch와 task/worker 문맥 자동 전파는 아직 없으므로 엄격 모드 사용자는 진입 경계에서 scope를 설정해야 한다. `ObjectAccessScope`는 비복사·비이동이며 생성한 스레드에서 역순으로 파괴한다. 중첩 scope가 끝나면 이전 문맥을 복원한다.
 
 scope 객체의 주소를 범위 밖에 보관하거나 `longjmp` 등으로 소멸자를 건너뛰는 사용은 지원하지 않는다. 생성 스레드가 아닌 곳에서 파괴하거나 역순을 어기면 현재 thread-local 문맥이 손상될 수 있으므로 즉시 Fatal로 중단한다.
 

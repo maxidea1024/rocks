@@ -2,13 +2,13 @@
 
 STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-driven 렌더러
 
-**설계 기준일 2026.11.19 · 개정 1.14 · 상태: 구현 제안 / 성능 미측정**
+**설계 기준일 2026.11.19 · 개정 1.15 · 상태: 구현 제안 / 성능 미측정**
 
 **추가 요구 반영:** Deferred·Forward 정식 지원, 업스케일링, 태깅·컴포넌트·프리팹, Unreal 참고 체계 확대, 컷씬 제작 핵심화, Blueprint 제외·자체 언어 채택, 하이엔드 포스트이펙트 전체 기능군, UBT 계열 자체 빌드 도구·분산 빌드·반복 개발 최적화, 정식 헤드리스 모드, 필수 노드 기반 머티리얼 에디터.
 
 **1.2 교차 검증 결과:** Core/Object, 렌더링·콘텐츠, 빌드·헤드리스 담당 서브에이전트 3개가 개정 1.1을 독립 검토하였다. 중복을 통합한 16건의 계약 누락·모순과 별도 보완 3건을 본문·완료 기준에 반영하였다. 수명 수정안은 담당 외 검토자가 다시 반례를 대조하였다. 첫 작업 Core/Object, Blueprint 제외·커스텀 언어·STL 비사용 Runtime 정책을 유지한다. 33.4절에 검토 근거·조치·남은 실행 검증을 기록한다. 본 문서는 구현 제안이며 엔진 실행·성능 검증 결과가 아니다.
 
-**1.3 추가 요구:** Rocks 자체 명명, Windows/macOS 개발 환경, 5종 RHI, 머티리얼 에디터·템플릿·PIE, 가변/고정 tick·time dilation, texture streaming·내장 리소스, lightmap/probe, 필수 로그·프로파일러·장애 하네스를 반영한다. 수학은 검증된 구현의 어댑터와 SIMD 활용으로 구성하고 자체 알고리즘 재작성은 제외한다. 안정성·정확성, 확장성, 성능 순으로 판단하며 Core/Object가 첫 작업이다. 상세 모듈·API·작업은 별첨 1.1에 연결한다.
+**1.3 추가 요구:** Rocks 자체 명명, Windows/macOS 개발 환경, 5종 RHI, 머티리얼 에디터·템플릿·Tryout, 가변/고정 tick·time dilation, texture streaming·내장 리소스, lightmap/probe, 필수 로그·프로파일러·장애 하네스를 반영한다. 수학은 검증된 구현의 어댑터와 SIMD 활용으로 구성하고 자체 알고리즘 재작성은 제외한다. 안정성·정확성, 확장성, 성능 순으로 판단하며 Core/Object가 첫 작업이다. 상세 모듈·API·작업은 별첨 1.1에 연결한다.
 
 **1.4 UI 방향 전환:** 웹 에디터(WebView2·WKWebView·TypeScript/React)를 채택하지 않고, 게임 UI와 에디터를 Godot 4.x 수준의 단일 UI 툴킷으로 구성한다. Core는 Unreal 체계를 유지한다. 21·22절과 웹 에디터를 전제로 한 문장을 개정하고, 툴킷의 구조·계약·Core 선행 항목·검증 방식은 [UI 툴킷 설계](UiToolkit.ko.md)에 둔다. 33.9절에 개정 범위를 기록한다. 상세안은 1.2로 함께 개정한다. 툴킷 구조는 개정 1.9에서 UE 5.8 두 층 구조로 대체하였다.
 
@@ -29,6 +29,8 @@ STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-d
 **1.13 공간 질의 전략:** 사용자 결정(2026-11-18)으로 공간 질의를 UE 5.8.4와 같은 방식으로 나눈다. 형상 기반 게임플레이 질의(trace·sweep·overlap)는 Jolt scene query를 쓰고, 비충돌 2D 해시 SpatialQueryService는 폐기한다. 이동 primitive–local light 상호작용과 CPU 판정 경로의 그림자 caster 수집은 [공간 인덱스 설계](SpatialIndex.ko.md)의 Loose Octree(primitive 인스턴스와 local light 인스턴스)로 한다. 매 프레임 가시성은 평면 SoA, 정적·대량 instance는 계층 공간 해시를 유지하며, 네트워크 관심·대량 군중용 2D 격자는 필요해질 때 도입한다. 3.1·10.4·31(R21)·33.10·33.18절을 개정한다.
 
 **1.14 텍스처 스트리밍 표본 해상도:** [텍스처 스트리밍](TextureStreaming.ko.md) 결정 T1(2026-11-19 확정)에 따라 9.5절의 desired mip 입력 "render resolution"을 표본 해상도(렌더 폭 × 2^(−텍스처 mip bias))로 바꾼다. temporal upscale에서는 출력 해상도, Native·Spatial에서는 렌더 해상도와 같아진다. 개정 범위는 9.5절이다.
+
+**1.15 에디터 내 실행 이름 Tryout:** 사용자 결정(2026-11-19)으로 UE PIE에 대응하는 Rocks 기능 이름을 Tryout으로 정한다. 이름의 뜻·표기 규칙·변형 이름·버린 후보는 22.6절에 둔다. 이 문서와 Docs/Design의 다른 설계 문서, Docs/Implementation의 개념 표기를 함께 바꾸었다. 코드 식별자(`NonPIEDuplicateTransient`, `TextUse::PieCopy` 등)와 그것을 설명하는 Docs/Implementation 표기는 후속 개명 커밋에서 바꾼다.
 
 ## 1. 목표와 실행 전략
 
@@ -55,11 +57,11 @@ Unreal Core의 개별 기능에 대해 Rocks에서도 가능한지 묻는다면 
 
 ### 직관적인 사용법을 위한 공통 설계 원칙
 
-안정성과 확장성을 유지하면서 일반적인 작업을 호출 의도가 드러나는 짧고 일관된 API로 제공한다. 모듈 내부의 레지스트리, 실행 문맥, 소유권 검사, lease 및 쓰기 장벽은 엔진이 담당한다. 통상적인 객체 타입·생명주기 조회와 변경에 사용자가 매번 내부 레지스트리나 임시 scope를 조합하도록 요구하지 않는다. 실제 호출 경계에서 문맥을 자동 결정할 수 없는 경우에는 임의의 World를 추측하지 않고 미지원 또는 명시적 실패로 처리하는 것이 목표다. 현재 기본 객체 API는 scope가 없으면 소유 Registry를 사용하므로 실제 호출자의 World를 판별하지 못한다. World·PIE dispatcher의 자동 문맥 설정과 엄격 모드 검증이 이 목표의 미완료 조건이다.
+안정성과 확장성을 유지하면서 일반적인 작업을 호출 의도가 드러나는 짧고 일관된 API로 제공한다. 모듈 내부의 레지스트리, 실행 문맥, 소유권 검사, lease 및 쓰기 장벽은 엔진이 담당한다. 통상적인 객체 타입·생명주기 조회와 변경에 사용자가 매번 내부 레지스트리나 임시 scope를 조합하도록 요구하지 않는다. 실제 호출 경계에서 문맥을 자동 결정할 수 없는 경우에는 임의의 World를 추측하지 않고 미지원 또는 명시적 실패로 처리하는 것이 목표다. 현재 기본 객체 API는 scope가 없으면 소유 Registry를 사용하므로 실제 호출자의 World를 판별하지 못한다. World·Tryout dispatcher의 자동 문맥 설정과 엄격 모드 검증이 이 목표의 미완료 조건이다.
 
 예측 가능한 이름과 동작이 드러나는 최소 절차를 우선한다. 겉모양을 위한 추상화, 무분별한 설계 패턴과 타입 분류 접두사를 추가하지 않는다. 내부 Registry·scope를 매번 조합하는 상용구는 기본 경로에서 최소화하되 안전성 검사와 오류 원인은 숨기지 않는다. 공개 API 설계는 문서상의 기능 목록뿐 아니라 사용자가 작성할 대표 코드로 검토한다. 정적 타입 정보와 살아 있는 객체의 실제 타입 정보, 객체 생성·파괴·상태, 컨테이너, 할당기, 에셋, World, 입력의 기본 경로에 대해 필요한 선언·호출·오류 처리·수명 관리 단계를 제시한다. 정적 타입과 동적 타입, 성공 여부와 실제 상태값, 사용자가 소유하는 자원과 빌린 참조는 이름과 반환형에서 구분한다.
 
-복구 가능한 오류는 원인을 잃지 않고 처리 가능한 경로를 제공하고, 간결한 편의 호출의 전제 위반은 조용한 기본값 대신 명확히 진단한다. 간결함을 위해 만료된 객체, 다른 World 또는 해제된 모듈의 접근을 허용하지 않는다. 다중 World·PIE·독립 Registry에서 전역 singleton에 의존하지 않으며, 동적 타입 정보의 등록·모듈 수명은 lease 등으로 보호한다. 구체 API 명칭과 서명은 구현·검증 전 설계 목표다.
+복구 가능한 오류는 원인을 잃지 않고 처리 가능한 경로를 제공하고, 간결한 편의 호출의 전제 위반은 조용한 기본값 대신 명확히 진단한다. 간결함을 위해 만료된 객체, 다른 World 또는 해제된 모듈의 접근을 허용하지 않는다. 다중 World·Tryout·독립 Registry에서 전역 singleton에 의존하지 않으며, 동적 타입 정보의 등록·모듈 수명은 lease 등으로 보호한다. 구체 API 명칭과 서명은 구현·검증 전 설계 목표다.
 
 각 기능의 완료 기준에 실사용 코드의 컴파일·실행 예제, 잘못된 입력과 수명·World·스레드·모듈 종료의 음성 대조, 실패 원인 및 결과 상태 검사를 포함한다. 복잡한 절차를 숨긴 내부 경로도 별도 단위·통합 하네스로 검증한다. 한국어 코드 주석은 사용법과 주의사항을 중심으로 작성하며, 읽기 쉬운 빈 줄과 네 칸 공백·clang-format 규약을 유지한다. 담당 외 서브에이전트가 API 사용 흐름과 안전성·오류 경로를 교차 검증한다.
 
@@ -175,18 +177,18 @@ C ABI는 fixed-width POD·opaque handle·status code·명시 release 함수를 �
 
 ### 2.5 Windows·macOS 개발 환경의 동등 지원
 
-Windows와 macOS는 모두 **정식 개발 플랫폼**이다. 두 OS에 전체 Rocks Studio(UI 툴킷 제작 화면과 3D viewport), 프로젝트 생성, 빌드·메타 컴파일러·셰이더 cook·에셋 너겟·에셋 편집·PIE·테스트·headless를 제공한다. macOS를 Metal runtime 시험 전용으로 한정하지 않는다. Linux의 runtime·DedicatedServer·headless baseline은 별도 지원표로 관리하며, Linux 전체 Studio는 이 요구에서 자동 확정하지 않는다.
+Windows와 macOS는 모두 **정식 개발 플랫폼**이다. 두 OS에 전체 Rocks Studio(UI 툴킷 제작 화면과 3D viewport), 프로젝트 생성, 빌드·메타 컴파일러·셰이더 cook·에셋 너겟·에셋 편집·Tryout·테스트·headless를 제공한다. macOS를 Metal runtime 시험 전용으로 한정하지 않는다. Linux의 runtime·DedicatedServer·headless baseline은 별도 지원표로 관리하며, Linux 전체 Studio는 이 요구에서 자동 확정하지 않는다.
 
 공통 Studio 기능과 데이터 계약은 유지하고 OS 통합부만 교체한다. Studio 화면은 게임 UI와 같은 UI 툴킷으로 구성하며 두 OS가 같은 widget·명령·transaction·selection·undo 스키마를 사용한다. OS별 차이는 PlatformWindow adapter(Windows는 Win32 창·TSF, macOS는 AppKit 창·NSTextInputClient)에 한정하고 플랫폼마다 다른 frontend를 별도로 제작하지 않는다. 툴킷의 구조와 계약은 [UI 툴킷 설계](UiToolkit.ko.md)를 따른다.
 
-3D viewport는 UI 트리 안의 viewport Element이며 해당 OS의 실제 graphics surface에 렌더링한 결과를 합성하여 표시한다. focus·IME·단축키·clipboard·drag/drop·gamepad·고해상도 배율·다중 monitor·window 재배치·PIE input capture를 공통 acceptance로 검증한다. 외부 자동화·원격 도구와의 메시지는 versioned value/handle만 전달하고 raw pointer·native 객체 소유권을 전달하지 않는다. viewport close·PIE 종료 시 session/generation을 검사하여 늦은 요청을 폐기한다. OS UI thread와 Render owner lane의 경계를 유지한다.
+3D viewport는 UI 트리 안의 viewport Element이며 해당 OS의 실제 graphics surface에 렌더링한 결과를 합성하여 표시한다. focus·IME·단축키·clipboard·drag/drop·gamepad·고해상도 배율·다중 monitor·window 재배치·Tryout input capture를 공통 acceptance로 검증한다. 외부 자동화·원격 도구와의 메시지는 versioned value/handle만 전달하고 raw pointer·native 객체 소유권을 전달하지 않는다. viewport close·Tryout 종료 시 session/generation을 검사하여 늦은 요청을 폐기한다. OS UI thread와 Render owner lane의 경계를 유지한다.
 
 | 개발 영역 | Windows·macOS 공통 필수 계약 | 플랫폼별 실행·배포 규약 |
 |---|---|---|
 | Core·Object·Task | 동일 소스의 CPU-only build/test, allocator·handle·GC·shutdown 검증 | 각 OS의 native compiler·sanitizer/진단 도구로 시험하고 미지원 검사를 NOT RUN으로 기록 |
 | Build·MetaCompiler | 같은 manifest/action graph·진단 스키마·증분 무효화 규약 | Windows SDK와 Apple SDK를 독립 toolchain으로 고정; host 실행 파일과 target 산출물 분리 |
 | Asset·Shader·에셋 너겟 | 같은 import/cook API·content identity·원자적 게시·취소·복구 | target compiler worker를 명시 선택; host 간 결과 동등성은 시험한 artifact만 공유 |
-| Studio·PIE | World/Session 분리, material/UI/cutscene/prefab 등 완성된 편집 기능의 양OS 제공 | 창·text service 차이를 PlatformWindow adapter에 한정; macOS Metal viewport와 Windows native RHI 각각 검증 |
+| Studio·Tryout | World/Session 분리, material/UI/cutscene/prefab 등 완성된 편집 기능의 양OS 제공 | 창·text service 차이를 PlatformWindow adapter에 한정; macOS Metal viewport와 Windows native RHI 각각 검증 |
 | Headless·CI | `rocks build`, `rocks cook`, `rocks test` 등 동일 CLI 계약, exit code·JSON·timeout·graceful shutdown | CPU-only는 window/GPU가 없는 환경에서 수행; offscreen GPU suite는 별도 실행 |
 | 배포·디버깅 | version·symbol·crash artifact·지원 manifest 일치 | Windows 서명·설치 검증과 macOS app bundle·서명·notarization 검증을 각각 native CI에서 수행 |
 
@@ -213,7 +215,7 @@ Apple은 Windows용 Metal 제작 도구와 macOS/Windows용 Metal Shader Convert
 | PL01 · C00–Foundation | Windows·macOS native CPU-only Core/Object suite; 실패 주입·잔존 allocation/lease·thread 종료, GPU/window link dependency 0건 |
 | PL02 · M3 도구 | 양OS clean checkout→project→build/meta/cook/test, 공백·Unicode·대소문자 충돌 fixture, cold/warm 에셋 너겟과 취소/재시작 |
 | PL03 · M3/M4 renderer | 5개 backend의 §11.5 기본 profile·Deferred/Forward·offscreen·실장비 검증; SDK/장비 미확보는 미완료 |
-| PL04 · M3/M4 Studio | 양OS UI 툴킷 Studio·viewport, asset 편집/undo·기본 material·PIE·저장/재개·input/IME/DPI·프로세스 실패 복구 |
+| PL04 · M3/M4 Studio | 양OS UI 툴킷 Studio·viewport, asset 편집/undo·기본 material·Tryout·저장/재개·input/IME/DPI·프로세스 실패 복구 |
 | PL05 · 해당 기능 첫 정식 단계 | UI Designer·컷씬 등 후속 편집기의 같은 기능을 양OS에서 검증; Windows만 통과한 결과로 공통 기능 완료 선언 금지 |
 | PL06 · 배포 | 양OS native CI의 CPU/headless/GPU 결과 구분, 서명된 패키지의 깨끗한 장비 실행, symbol 복원·crash 수집·종료 후 자원 누수 0건 |
 
@@ -253,7 +255,7 @@ Apple은 Windows용 Metal 제작 도구와 macOS/Windows용 Metal Shader Convert
 | ScriptRuntime | ObjectRuntime, MetaSchema, Task | Sparks bytecode VM·native binding·이벤트 연결 표·누수 ledger. 스크립트 상태는 GC root를 만들지 않는다. World·Renderer 의존 금지 |
 | Gameplay / WorldIntegration | World, ScriptRuntime 및 필요한 시스템 | component binding·render/physics/audio command 변환 |
 | BuildDriver / BuildAgent | Host Core, manifest·toolchain·artifact store | action DAG·캐시·local/remote executor. Shipping 링크 금지 |
-| EditorBackend | WorldIntegration, Asset 도구, Transaction | 편집 명령·PIE·검증. Runtime이 이 모듈을 참조하지 않음 |
+| EditorBackend | WorldIntegration, Asset 도구, Transaction | 편집 명령·Tryout·검증. Runtime이 이 모듈을 참조하지 않음 |
 | EditorFramework / HostTools | UiFramework, UiWidget, EditorBackend / Clang·DXC·임포터 | 에디터 셸·Inspector·확장점 / 메타 생성·쿠킹. Shipping 링크 금지 |
 
 RenderData, PhysicsData, AudioData는 안정적인 ID와 평범한 데이터 구조만 포함한다. World의 MeshComponent가 Renderer를 직접 소유하는 대신 WorldIntegration이 자원 핸들과 RenderInstanceId를 연결한다. 공유 계약 라이브러리로 상향 의존을 대체하되 모든 모듈이 참조하는 범용 서비스 모음으로 확대하지 않는다.
@@ -504,9 +506,9 @@ BeginDestroy는 정확히 1회 실행하여 추적 edge를 정리하고 render/p
 
 ClassDefaults는 TypeId별 불변 기본값 레코드다(객체가 아니다 — [런타임 클래스 메타데이터 설계](RuntimeClassMetadata.ko.md) '클래스 기본값 결정'). native 생성 → script field 초기값(이 둘의 결과가 레코드다) → prefab/variant → instance override → 명시 spawn parameter 순서를 고정한다. default subobject graph는 레코드 밖이며 prefab과 함께 후속으로 들어온다. default subobject는 stable SubobjectGuid를 가지며 생성 시 반드시 인스턴스별 복제·내부 참조 remap을 수행한다. 가변 component를 모든 instance가 공유하지 않는다. 기본값의 변경 전파는 prefab과 같은 old/new/local 비교를 명시 override 집합과 기준(base) 차이 저장으로 표현한다 — override하지 않은 값은 새 기본값을 따르고 override한 값은 유지된다(prefab이 생기면 기준이 archetype 사슬이 된다). Object 기본값·참조 갱신 개념은 공식 자료로 대조하였다. [S26](https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-object-handling-in-unreal-engine)
 
-ClassDefaults와 TypeInfo는 module revision lease와 함께 유지한다. 기본값은 asset·불변 value만 참조하고 특정 PIE World의 Entity를 강하게 유지하지 않는다. editor 재구성 hook은 side effect가 제한된 C++/자체 언어 함수이며 preview world에서 실행한다. 게임 spawn·IO·RPC를 수행하는 범용 construction graph는 제공하지 않는다.
+ClassDefaults와 TypeInfo는 module revision lease와 함께 유지한다. 기본값은 asset·불변 value만 참조하고 특정 Tryout World의 Entity를 강하게 유지하지 않는다. editor 재구성 hook은 side effect가 제한된 C++/자체 언어 함수이며 preview world에서 실행한다. 게임 spawn·IO·RPC를 수행하는 범용 construction graph는 제공하지 않는다.
 
-ObjectHandle은 프로세스 전역 slot identity다. World 전용 API는 별도 WorldId+WorldEpoch를 요구하여 editor/PIE/여행 전후 객체의 혼용을 거부한다. 명시 RequestDestroy는 강한 참조가 있어도 논리적 유효성을 종료할 수 있다. ObjectRef/RootRef는 메모리 보존과 논리적 생존을 구분하고 Resolve/TryPin은 DestroyRequested 이후 실패한다. 이미 빌린 pointer도 safepoint·yield·frame·비동기 전달을 넘지 못한다. 기존 RootRef 복사/이동은 보존 lease의 전달이며 신규 논리 사용이나 weak 승격이 아니다. 약한 참조 자동 null의 구현은 handle 검사로 대체하며 Unreal의 포인터 갱신 방식을 그대로 가정하지 않는다.
+ObjectHandle은 프로세스 전역 slot identity다. World 전용 API는 별도 WorldId+WorldEpoch를 요구하여 editor/Tryout/여행 전후 객체의 혼용을 거부한다. 명시 RequestDestroy는 강한 참조가 있어도 논리적 유효성을 종료할 수 있다. ObjectRef/RootRef는 메모리 보존과 논리적 생존을 구분하고 Resolve/TryPin은 DestroyRequested 이후 실패한다. 이미 빌린 pointer도 safepoint·yield·frame·비동기 전달을 넘지 못한다. 기존 RootRef 복사/이동은 보존 lease의 전달이며 신규 논리 사용이나 weak 승격이 아니다. 약한 참조 자동 null의 구현은 handle 검사로 대체하며 Unreal의 포인터 갱신 방식을 그대로 가정하지 않는다.
 
 생성자는 backend 등록이나 최종 설정에 의존하는 파생 cache 계산을 수행하지 않는다. 값 복사·참조 remap 뒤 Initialize에서 파생 상태를 계산하고 Register에서 backend에 공개한다. pre-commit Initialize는 Result와 가역 journal을 사용하며 실패 시 미공개 graph를 rollback한다. graph Commit 이후 Register/Activate 실패는 신규 admission 차단·RequestDestroy·teardown/retire로 처리한다. 공개된 객체를 미공개 rollback 경로로 직접 해제하지 않는다.
 
@@ -647,7 +649,7 @@ TypeId·FieldId·RpcId는 선언 이름 hash만으로 결정하지 않는다. �
 
 클래스의 정적 선언 정보를 조회하는 기능에 더해, 등록된 클래스를 런타임 데이터로 참조하고 전달·검사·선택·생성하는 기능을 필수 범위로 둔다. Epic의 공개 [UClass API](https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Runtime/CoreUObject/UClass), [객체 생성 설명](https://dev.epicgames.com/documentation/unreal-engine/creating-objects-in-unreal-engine)과 [TSubclassOf 설명](https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Runtime/CoreUObject/TSubclassOf)은 기능 범위의 비교 기준이다. Rocks의 명명·수명과 구현은 독립적으로 정의하며 Blueprint는 도입하지 않는다.
 
-런타임 클래스 핸들은 정적 생성 schema와 다르게 특정 Registry의 등록 상태, 버전·모듈 코드의 수명을 보유 또는 안전하게 검증해야 한다. 클래스 참조는 타입 제한을 지원하고, 선언된 기반 타입과 실제 등록 타입의 상속·추상 여부·생성 가능성을 검사한다. 객체에 대한 정적·동적 타입 조회, 클래스별 기본값·서브오브젝트, 필드·함수 메타데이터, 에디터 선택, 에셋·직렬화·쿠킹 및 자체 언어 연결을 단계별로 제공한다. World·PIE마다 객체의 소유권을 분리하고 클래스 기본값은 World와 무관한 불변 레코드로 두며 모듈 reload나 Registry 폐쇄 뒤 이전 핸들을 새 클래스로 오인하지 않는다. 필요한 내부 Registry 조합은 기본 사용 경로에 반복 노출하지 않는다.
+런타임 클래스 핸들은 정적 생성 schema와 다르게 특정 Registry의 등록 상태, 버전·모듈 코드의 수명을 보유 또는 안전하게 검증해야 한다. 클래스 참조는 타입 제한을 지원하고, 선언된 기반 타입과 실제 등록 타입의 상속·추상 여부·생성 가능성을 검사한다. 객체에 대한 정적·동적 타입 조회, 클래스별 기본값·서브오브젝트, 필드·함수 메타데이터, 에디터 선택, 에셋·직렬화·쿠킹 및 자체 언어 연결을 단계별로 제공한다. World·Tryout마다 객체의 소유권을 분리하고 클래스 기본값은 World와 무관한 불변 레코드로 두며 모듈 reload나 Registry 폐쇄 뒤 이전 핸들을 새 클래스로 오인하지 않는다. 필요한 내부 Registry 조합은 기본 사용 경로에 반복 노출하지 않는다.
 
 현재 `TypeSchema`, `RuntimeTypeOps`, `TypeRegistry`와 `TypeLease`는 타입 식별·등록·메타데이터·수명 보호의 기초를 제공한다. 등록된 `TypeId`를 이용한 `ObjectRegistry::NewObject<Object>(access, typeId)`는 낮은 수준의 런타임 타입 생성 경로다. 타입 제한 클래스 참조, 클래스 기본값 레코드(UE CDO 대신 불변 레코드 — A5), 반영 함수·에디터 클래스 선택 및 안전한 동적 생성 편의 API까지 구현됐다는 뜻은 아니다. 세부 모델·구현 순서·완료 기준은 [런타임 클래스 메타데이터 설계](RuntimeClassMetadata.ko.md)를 따른다.
 
@@ -732,7 +734,7 @@ Render는 2–3개 in-flight frame slot을 사용하되 slot 재사용은 해당
 
 ### 8.3 가변·고정 tick과 시간 도메인
 
-Rocks는 가변 tick·고정 tick·time dilation·pause/resume·single-step을 기본 기능으로 제공한다. ClockService와 StepPlanner는 Core의 플랫폼 독립 값 계산이며 World/PIE/physics는 상위에서 조립한다. MonotonicClock은 실제 시간, FrameClock은 frame delta, GameClock은 pause/dilation 적용 시간, FixedClock은 정수 tick index와 고정 step, UIClock·network timeout·작업 deadline은 unscaled 시간을 기본으로 한다. 각 timer·animation·sequence·delay는 사용할 clock을 명시한다.
+Rocks는 가변 tick·고정 tick·time dilation·pause/resume·single-step을 기본 기능으로 제공한다. ClockService와 StepPlanner는 Core의 플랫폼 독립 값 계산이며 World/Tryout/physics는 상위에서 조립한다. MonotonicClock은 실제 시간, FrameClock은 frame delta, GameClock은 pause/dilation 적용 시간, FixedClock은 정수 tick index와 고정 step, UIClock·network timeout·작업 deadline은 unscaled 시간을 기본으로 한다. 각 timer·animation·sequence·delay는 사용할 clock을 명시한다.
 
 가변 Update는 frame당 한 번 게임 delta를 받는다. 고정 Update는 scaled accumulator에 realDelta×gameScale을 더하고 고정 h씩 소비한다. time dilation은 기본안에서 h 자체를 바꾸지 않고 고정 step의 실행 빈도를 조절한다. 같은 값을 delta와 accumulator에 중복 적용하지 않는다. 렌더 보간은 이전/현재 고정 snapshot과 accumulator/h를 사용하고 tick 경계를 넘는 mutable pointer를 보관하지 않는다. fixed/variable 두 group 등록은 명시 선택이며 동일 gameplay 동작이 두 번 실행되지 않게 한다.
 
@@ -778,7 +780,7 @@ physics 내부 병렬화와 외부 gameplay mutation을 구분하고, read phase
 | TK05 | 0/1/N worker·순서 교란·취소·World 교체·GC 경계에서 동일 의미 결과·stale commit 0 |
 | TK06 | reader 종료/command commit·DAG cycle·read/write 충돌·shutdown 경합과 trace 확인 |
 
-Core C02/C15에서 clock/step 값을, C17/C26에서 Task·replay fixture를 검증한다. 실제 World/physics/PIE 연결은 M3/M4 필수다. 멀티스레딩의 처리량 향상은 실측하고 정확성·진척·누수 기준을 완화하지 않는다.
+Core C02/C15에서 clock/step 값을, C17/C26에서 Task·replay fixture를 검증한다. 실제 World/physics/Tryout 연결은 M3/M4 필수다. 멀티스레딩의 처리량 향상은 실측하고 정확성·진척·누수 기준을 완화하지 않는다.
 
 ## 9. 에셋 파이프라인·쿠킹·에셋 너겟·비동기 로딩
 
@@ -814,7 +816,7 @@ struct AssetRequest {
     LoadPriority priority;
     ReadyMask required;
     CancelToken cancel;
-    AssetScope* scope;        // PIE·World 수명 범위(Revoke 대상)
+    AssetScope* scope;        // Tryout·World 수명 범위(Revoke 대상)
 };
 
 Result<LoadTicket> RequestAsset(const AssetRequest&);
@@ -832,7 +834,7 @@ LoadTicket은 요청 관심을 나타내며 AssetLease는 실제 resident 수명
 
 LoadTicket의 request interest와 AssetLease의 residency retention을 별도 계수로 관리한다. 성공 lease는 package revision의 resident record·필요 관리 graph root·선언된 ReadyMask와 최소 residency를 release 또는 명시 scope revoke까지 보존한다. 추가 texture mip/page pin은 별도 계약이다. 정상 unload는 request interest와 발급·진행 중 사용의 residency retention이 모두 0일 때만 Resident→Closing으로 전이한다. 상주 단위는 하드 참조 SCC이며 단위 사이 하드 간선 다중도가 retention에 들어가고, 0이 된 단위는 다음 Pump 전까지 되살릴 수 있다(AssetSystem 11.4절). lease 발급·승격·복사 admission과 이 전이는 같은 package gate에서 선형화한다. 발급이 먼저이면 unload가 대기하고 Closing이 먼저이면 새 발급은 실패한다. ticket의 취소·반환은 이미 성공 발급된 lease를 묵시 취소하지 않는다. 공유 asset graph의 논리 파괴 권한은 loader의 이 admission 계약을 거치며 일반 사용자에게 임의 파괴 권한을 주지 않는다.
 
-PIE/World 종료의 명시 scope revoke는 정상 cache eviction과 분리한다. revoke는 해당 scope/generation의 신규 접근·발급·결과 commit을 차단하며 일반 접근에 ScopeClosed를 반환한다. 같은 immutable revision을 사용하는 다른 scope의 lease는 유지한다. 이미 허용된 짧은 접근·callback·추출 snapshot·IO/upload/recording은 이관된 storage/backend lease로 실제 완료까지 보호한다. revoked scope의 retention은 마지막 허용 사용 종료 후 정확히 1회 반환하고, 외부에 남은 revoked token은 상태 조회만 허용하는 tombstone으로 전환한다. token의 뒤늦은 파괴가 retention을 중복 반환하지 않는다. revoke와 성공 completion은 scope admission 결정 후 package gate 순서로 직렬화하며 반대 lock 순서를 금지한다. 취소/revoke 자체를 IO/GPU 완료로 간주하지 않는다. package retire는 다른 사용자와 모든 retention 종료를 다시 확인한다.
+Tryout/World 종료의 명시 scope revoke는 정상 cache eviction과 분리한다. revoke는 해당 scope/generation의 신규 접근·발급·결과 commit을 차단하며 일반 접근에 ScopeClosed를 반환한다. 같은 immutable revision을 사용하는 다른 scope의 lease는 유지한다. 이미 허용된 짧은 접근·callback·추출 snapshot·IO/upload/recording은 이관된 storage/backend lease로 실제 완료까지 보호한다. revoked scope의 retention은 마지막 허용 사용 종료 후 정확히 1회 반환하고, 외부에 남은 revoked token은 상태 조회만 허용하는 tombstone으로 전환한다. token의 뒤늦은 파괴가 retention을 중복 반환하지 않는다. revoke와 성공 completion은 scope admission 결정 후 package gate 순서로 직렬화하며 반대 lock 순서를 금지한다. 취소/revoke 자체를 IO/GPU 완료로 간주하지 않는다. package retire는 다른 사용자와 모든 retention 종료를 다시 확인한다.
 
 Closing 이후 subsystem detach → package RootRef 해제 → 논리 수거/retire → backend 완료 → 물리 회수 순서를 따른다. AssetId가 존재한다는 사실과 resident asset이 존재한다는 사실을 혼동하지 않는다. texture mip, geometry page, audio chunk는 Object 수명과 별도의 streaming residency로 제어한다.
 
@@ -1000,7 +1002,7 @@ UE 5.8.4 소스(commit `f45729c0b6f0`)로 확인한 분담은 다음과 같다. 
 6. **초기 매개변수(제안).** L_min 3,200 cm(32 m), 최상위 1,638,400 cm(16,384 m, 10 level), block 8³ cell, chunk 64 instance로 시작한다. UE의 최소 cell 크기 기본값 4096 cm와 유사한 규모다(2차 출처 [S86](https://indxzero.github.io/ue544cvarwiki)). World Partition cell 한 변은 L_min의 2의 거듭제곱 배로 유지한다(초기 25,600 cm). 장대 spline·landscape는 cook 시 분할하여 상위 level 집중을 방지하고, 최상위 level을 넘는 대상은 평면 SoA 경로에 등록하며 개수 상한 초과를 경고한다. 모든 값은 SI02 측정 후 확정한다.
 7. **정밀도.** bounds는 cell 정수 원점 기준 상대 float로 저장하고 외향 반올림한다. view frustum 평면은 block 원점 기준으로 double에서 이동한 뒤 float로 판정한다. 평면 SoA 경로는 204,800 cm(2,048 m) tile 단위 page에 tile 상대 float bounds를 저장한다. origin epoch가 변경되어도 저장된 bounds를 재계산하지 않는다.
 8. **갱신과 동시성.** 등록·해제는 commit 또는 RenderScene update에서 cell key 순으로 정렬하여 일괄 적용한다. cell 내부는 swap-remove와 append로 갱신하며 entry의 역참조는 포인터가 아닌 index·key로 저장한다(재해시 시 값 주소 무효화). Core `HashMap`은 쓰기 단계에서만 사용한다. const 반복도 내부 반복 깊이를 변경하므로 worker 동시 읽기에 사용하지 않는다. 읽기 phase에는 key 순으로 정렬한 immutable block·cell·chunk 배열을 게시한다. stream-in 시 cell manifest 기준으로 용량을 예약하고 unload 후 compact한다.
-9. **정적 데이터 변경.** cook된 static chunk는 (offset, count) 범위로 연결하며 runtime에 재배열하지 않는다. 파괴·숨김·PIE 편집은 session별 hidden-instance bitmask와 별도 dynamic span으로 처리한다.
+9. **정적 데이터 변경.** cook된 static chunk는 (offset, count) 범위로 연결하며 runtime에 재배열하지 않는다. 파괴·숨김·Tryout 편집은 session별 hidden-instance bitmask와 별도 dynamic span으로 처리한다.
 
 #### 가시성 보수성
 
@@ -1032,7 +1034,7 @@ UE 5.4 runtime hash의 Loose Hierarchical Grid는 actor extent로 streaming cell
 #### 수명·격리
 
 - cell unload 시 cull job·GPU indirect argument가 참조하는 cell 배열은 frame slot lease와 fence 완료 후 해제한다(11.2절).
-- PIE session마다 World·RenderScene 인스턴스를 분리하며, cook된 immutable cell 데이터는 revision lease로 공유한다.
+- Tryout session마다 World·RenderScene 인스턴스를 분리하며, cook된 immutable cell 데이터는 revision lease로 공유한다.
 - level instance의 offset은 최상위 level 한 변의 정수배를 요구하거나 load 시 key를 재계산한다.
 - 공통 해시·평면 판정·Loose Octree 코드는 Renderer에 의존하지 않는 SpatialIndex 모듈(3.1절)에 둔다. 렌더 인스턴스(렌더 해시, 광원 상호작용 옥트리)의 소유·갱신 코드는 Renderer에 둔다. DedicatedServer profile은 렌더 인덱스를 링크하지 않는다.
 
@@ -1050,7 +1052,7 @@ UE 5.4 runtime hash의 Loose Hierarchical Grid는 actor extent로 streaming cell
 | SI04 | CPU 경로: instance 200k, main view·cascade 2, 중급 Android | worker CPU 합계 1.0 ms 이하 |
 | SI05 | cell 변경률(후속 2D 격자 도입 시): 기록 replay에서 중심 배치와 위치 hysteresis 비교 | 변경 30% 이상 감소·질의 비용 증가 10% 이하일 때만 hysteresis 채택. 이동 대상 1만 개 갱신 0.2 ms 이하 |
 | SI06 | 보수성 fuzz: 경계 왕복·음수 좌표·key 한계·원점에서 10⁹ cm(10⁷ m)·NaN·origin epoch·WPO·보간·2단계 HZB | V_ref ⊆ V_submit 위반 0건 |
-| SI07 | WP cell 활성화: instance 100k와 collision, 활성화 중 unload·PIE 2 session | lane당 frame 1 ms 이하, Activated 이전 누락 0건, lease 위반·누수 0건 |
+| SI07 | WP cell 활성화: instance 100k와 collision, 활성화 중 unload·Tryout 2 session | lane당 frame 1 ms 이하, Activated 이전 누락 0건, lease 위반·누수 0건 |
 | SI08 | 충돌 질의 adapter 적합성: frame당 ray 10k·sweep 1k, channel·filter 조합 | filter 판정이 schema oracle과 100% 일치, hit가 허용 오차 내 일치 |
 | SI09 | 게임플레이 질의 결정성: Jolt query 경유, query 전용 body 20k에 반경 overlap 1k | 0.5 ms 이하, worker 0·1·N에서 정렬 후 결과와 순서 동일. 기준 미달이면 해당 용도를 후속 2D 격자로 옮긴다 |
 | SI10 | DedicatedServer link 검사 | 렌더 인덱스(렌더 해시·광원 상호작용 옥트리 인스턴스) 미포함, SpatialIndex·물리 adapter만 포함 |
@@ -1062,7 +1064,7 @@ UE 5.4 runtime hash의 Loose Hierarchical Grid는 actor extent로 streaming cell
 
 ### 11.1 지원 계약
 
-**Deferred와 Forward+를 모두 불투명·반투명·skeletal mesh·조명·그림자를 지원하는 정식 렌더링 경로로 제공한다.** Deferred의 반투명 pass만 Forward로 처리하는 것은 이 요구의 완료가 아니다. 프로젝트 기본값과 개별 ViewDesc에서 경로를 선택한다. 같은 World/session을 보는 복수 view는 서로 다른 경로로 동일 RenderScene snapshot을 사용할 수 있다. EditorWorld와 각 PIE는 별도 논리 RenderScene 또는 SessionId/WorldEpoch별 가시성·가변 proxy 격리를 갖는다.
+**Deferred와 Forward+를 모두 불투명·반투명·skeletal mesh·조명·그림자를 지원하는 정식 렌더링 경로로 제공한다.** Deferred의 반투명 pass만 Forward로 처리하는 것은 이 요구의 완료가 아니다. 프로젝트 기본값과 개별 ViewDesc에서 경로를 선택한다. 같은 World/session을 보는 복수 view는 서로 다른 경로로 동일 RenderScene snapshot을 사용할 수 있다. EditorWorld와 각 Tryout은 별도 논리 RenderScene 또는 SessionId/WorldEpoch별 가시성·가변 proxy 격리를 갖는다.
 
 렌더 경로는 이 둘뿐이며 클러스터 없는 고전 Forward는 두지 않는다(2026-11-16 사용자 결정 "forward+, deferred 로 하자"). 저사양·모바일(OpenGL ES 3.2·Vulkan 1.1)도 Forward+로 그린다. 두 최저 사양 모두 compute와 texture buffer를 보장하므로 light grid 생성 pass를 어디서나 실행할 수 있다. 로컬 광원이 없는 view는 grid 생성을 건너뛰어 고전 Forward와 같은 비용으로 낮춘다. UE 5.8도 모바일 Forward에서 로컬 광원을 클러스터 light grid로 처리한다(`r.Mobile.Forward.EnableLocalLights` 기본 1, `Runtime/Core/Private/HAL/ConsoleManager.cpp:4025–4030`, `Runtime/Renderer/Private/MobileShadingRenderer.cpp:419`). OpenGL ES 3.2는 픽셀 셰이더의 storage buffer를 최소 0개로 보장하므로 GLES 형식은 light grid를 typed buffer(texture buffer)나 텍스처로 읽는다([셰이더 시스템](ShaderSystem.ko.md) 7.2절 4항 모바일 상한).
 
@@ -1162,7 +1164,7 @@ screen-space 합성은 원본 scene radiance와 별도 contribution buffer를 �
 
 혼합 경로와 다중 view에서는 shadow는 light/caster revision·projection·coverage·filter key가 동일한 view family에서만 공유하고 scene data는 공통으로 사용한다. 반면 temporal history와 view-sized render target은 ViewId·경로·크기·sample count·jitter sequence별로 분리한다. 경로 전환은 frame boundary에서 수행하고 PSO 준비가 안 된 경우 이전 경로를 유지하거나 명시적으로 대기 화면을 표시한다.
 
-RenderInstanceId·scene snapshot·shadow/GI cache·temporal view key는 SessionId/WorldEpoch 또는 동등한 전역 고유 domain을 포함한다. ViewId 재사용에는 generation과 history reset이 필요하다. 불변 mesh/texture·pipeline cache·GPU arena의 물리 공유는 가변 scene 공유와 구분한다. PI03/PI05는 EditorWorld와 PIE 2개에 같은 asset·다른 transform/material/light를 배치하고 한 session만 이동/seek/stop하여 타 영상·history·lease가 영향을 받지 않는지 검증한다.
+RenderInstanceId·scene snapshot·shadow/GI cache·temporal view key는 SessionId/WorldEpoch 또는 동등한 전역 고유 domain을 포함한다. ViewId 재사용에는 generation과 history reset이 필요하다. 불변 mesh/texture·pipeline cache·GPU arena의 물리 공유는 가변 scene 공유와 구분한다. PI03/PI05는 EditorWorld와 Tryout 2개에 같은 asset·다른 transform/material/light를 배치하고 한 session만 이동/seek/stop하여 타 영상·history·lease가 영향을 받지 않는지 검증한다.
 
 ### 11.5 최초 그래픽 API 지원 범위
 
@@ -1176,7 +1178,7 @@ RenderInstanceId·scene snapshot·shadow/GI cache·temporal view key는 SessionI
 | Metal | macOS 우선; typed IR→SPIR-V/MSL 변환→Apple offline library | Objective-C++ private adapter·command buffer completion·storage/resource usage |
 | OpenGL | Windows/Linux desktop core 4.5급 후보; IR→SPIR-V→GLSL | context owner lane·GL sync·state cache·필요 memory barrier; SPIR-V 직접 입력은 필수 가정하지 않음 |
 
-버전·feature level 수치는 초기 profile 제안이며 실제 최소 OS/GPU/SDK와 format/limit conformance를 고정한 뒤 승인한다. macOS Metal용 Core/PlatformBase·window surface adapter와 toolchain worker도 최초 backend 범위에 포함한다. macOS는 전체 Studio·build/meta/cook·PIE·test를 포함한 정식 개발 환경이다. Metal runtime만 성공한 상태를 macOS 개발 지원 완료로 판정하지 않는다. D3D11 SM5 target과 context thread 계약, DXC·SPIRV-Cross·Apple precompile 도구를 공식 자료로 확인한다. 변환기가 존재한다는 이유만으로 모든 shader 의미의 동등성을 가정하지 않는다. [S69](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/specifying-compiler-targets), [S70](https://github.com/microsoft/DirectXShaderCompiler), [S71](https://github.com/KhronosGroup/SPIRV-Cross), [S72](https://developer.apple.com/documentation/metal/building-a-shader-library-by-precompiling-source-files), [S73](https://learn.microsoft.com/en-us/windows/win32/direct3d11/overviews-direct3d-11-devices-intro)
+버전·feature level 수치는 초기 profile 제안이며 실제 최소 OS/GPU/SDK와 format/limit conformance를 고정한 뒤 승인한다. macOS Metal용 Core/PlatformBase·window surface adapter와 toolchain worker도 최초 backend 범위에 포함한다. macOS는 전체 Studio·build/meta/cook·Tryout·test를 포함한 정식 개발 환경이다. Metal runtime만 성공한 상태를 macOS 개발 지원 완료로 판정하지 않는다. D3D11 SM5 target과 context thread 계약, DXC·SPIRV-Cross·Apple precompile 도구를 공식 자료로 확인한다. 변환기가 존재한다는 이유만으로 모든 shader 의미의 동등성을 가정하지 않는다. [S69](https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/specifying-compiler-targets), [S70](https://github.com/microsoft/DirectXShaderCompiler), [S71](https://github.com/KhronosGroup/SPIRV-Cross), [S72](https://developer.apple.com/documentation/metal/building-a-shader-library-by-precompiling-source-files), [S73](https://learn.microsoft.com/en-us/windows/win32/direct3d11/overviews-direct3d-11-devices-intro)
 
 기본 공통 profile은 conventional mesh, opaque/masked PBR, depth/shadow/velocity, texture streaming, 기본 post/upscale 입력과 built-in resource를 포함한다. bindless·mesh shader·ray tracing·sparse residency·async compute·timeline은 capability 확장이다. 하위 backend가 고급 경로를 지원하지 않으면 기존 mesh/descriptor·일반 shadow·명시 GI 대체 profile을 사용한다. 모든 기능을 최저 사양으로 제한하거나 동일 고급 기능 지원으로 표시하지 않는다.
 
@@ -1368,7 +1370,7 @@ Core/Object가 첫 작업이라는 순서는 유지한다. M3에서 최소 제�
 | 인스턴스 편집 | parent 상속, parameter 그룹·override/reset, texture/color picker, static variant, runtime dynamic parameter | M4 기본 instance·상속, M5 확장 |
 | 재사용 | typed Material Function·입출력, 함수 탐색·의존 추적·변경 전파, Material Attributes 집합 | M4 함수, M5/M6 layer/blend instance |
 | 진단·비용 | node/pin 위치 오류, generated HLSL, target/path별 compile 결과·instruction/texture/sampler 비용·variant 수 | M3 오류 표시, M4 상세 통계·compile queue |
-| 제작 통합 | asset browser·mesh slot drag/drop, 저장·재열기·source control diff, PIE preview, cooker/에셋 너겟·headless compiler | M3 왕복, M4 반복 제작·자동 회귀 |
+| 제작 통합 | asset browser·mesh slot drag/drop, 저장·재열기·source control diff, Tryout preview, cooker/에셋 너겟·headless compiler | M3 왕복, M4 반복 제작·자동 회귀 |
 
 Unreal의 문서는 live update·node preview·platform stats·generated shader code와 인스턴스 override를 제작 기능으로 구분한다. 자체 구현도 각각의 완료 기준을 둔다. 통계는 compiler가 제공하는 정적 지표와 실제 GPU 측정을 분리하며 instruction 수만으로 frame 성능을 보장하지 않는다. [S61](https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-engine-material-editor-ui), [S62](https://dev.epicgames.com/documentation/en-us/unreal-engine/instanced-materials-in-unreal-engine)
 
@@ -1592,7 +1594,7 @@ collision channel·object type·query filter·trigger·ignore pair·physical mat
 
 **결과 차이의 범위.** Jolt는 `CROSS_PLATFORM_DETERMINISTIC` build에서 x64·ARM64를 포함한 플랫폼 간 결정성을 문서화하고 CI hash로 검사한다(약 8% 비용, Android·iOS hash 미검사). [S82](https://github.com/jrouwe/JoltPhysics/blob/master/Docs/Architecture.md) 이 build의 채택은 비용과 PC04 결과로 정하며, 채택 전과 Android·iOS hash 확인 전에는 플랫폼 간 결정성으로 표기하지 않는다. 결정성 범위를 넓혀도 플랫폼 간 결과 정합의 기본은 서버 권한과 field별 보정(17.2절)이다. UE 5.8 Chaos도 플랫폼 간 결정성을 명시하지 않으며, 오차가 임계값을 넘을 때 보정하고 표시 상태를 보간한다(5.8 소스: `UPhysicsSettings`의 `ResimulationErrorPositionThreshold` — Engine/Classes/PhysicsEngine/PhysicsSettings.h 100행, 표시 보간 `p.RenderInterp.*` — Chaos/Private/Framework/PhysicsProxyBase.cpp 9·12행). [S91](https://dev.epicgames.com/documentation/en-us/unreal-engine/networked-physics-overview?application_version=5.8)
 
-**수명·callback.** process 공유 자원(할당 연결·형상 등록 등)과 World·PIE session마다 분리한 physics system을 둔다. 종료는 진행 중 step 완료 → session physics system 해제 → asset lease 종료 후 공유 형상 해제 → process 공유 자원 해제 순서다(대응 Jolt 객체는 J14). 할당 hook은 Physics tag와 정렬 요구로 Rocks allocator에 연결하고 메모리 부족은 진단 후 fatal로 처리한다. 로그·assert hook은 구조화 로그에 연결하며 assert 실패는 시험 실패로 판정한다. 두 hook에서 lock 획득과 게임 코드 실행을 금지한다.
+**수명·callback.** process 공유 자원(할당 연결·형상 등록 등)과 World·Tryout session마다 분리한 physics system을 둔다. 종료는 진행 중 step 완료 → session physics system 해제 → asset lease 종료 후 공유 형상 해제 → process 공유 자원 해제 순서다(대응 Jolt 객체는 J14). 할당 hook은 Physics tag와 정렬 요구로 Rocks allocator에 연결하고 메모리 부족은 진단 후 fatal로 처리한다. 로그·assert hook은 구조화 로그에 연결하며 assert 실패는 시험 실패로 판정한다. 두 hook에서 lock 획득과 게임 코드 실행을 금지한다.
 
 **좌표·단위.** Rocks 값은 UE 5.8과 같은 cm·kg·초, 왼손 +X 전방·+Y 오른쪽·+Z 위다. adapter는 행렬식 +1 축 사상과 물리량별 단위 함수(Core `UnitConversion.h`)로만 바꾸며, 거울 사상을 쓰지 않는다([물리 어댑터 경계](PhysicsJoltAdapter.ko.md) 2–4절).
 
@@ -1605,7 +1607,7 @@ collision channel·object type·query filter·trigger·ignore pair·physical mat
 | PC03 | 동일 platform 반복성: 같은 binary·command 순서, worker 수 변경 | 상태 hash 일치 |
 | PC04 | 플랫폼 간 차이 계측: 고정 scene 장시간 시뮬레이션, x64 대 ARM64, 플랫폼 간 결정성 build를 켠 것과 끈 것 | 차이 증가 곡선과 hash 일치 여부 기록. 켠 build의 hash가 모든 target에서 일치할 때만 플랫폼 간 결정성으로 표기 |
 | PC05 | cook 결과의 target별 load, version·schema·축 사상·단위 변환 version 불일치 | load 성공과 불일치 거부 100% |
-| PC06 | 수명·job 연결: node pool 포화, PIE 2 session, 종료 중 실행 작업 | 누수 0건, 작업 유실 0건, 종료 정지 0건 |
+| PC06 | 수명·job 연결: node pool 포화, Tryout 2 session, 종료 중 실행 작업 | 누수 0건, 작업 유실 0건, 종료 정지 0건 |
 | PC07 | 큰 월드: region 경계 이동·원점 이동·서버 다중 physics system handoff, double 위치 build와의 비용 비교 | 정밀도 허용 오차 충족, epoch 위반 0건, handoff 중 접촉 누락 0건, double build 비용 기록 |
 | PC08 | 혼합 플랫폼 네트워크: Linux 서버와 Windows·macOS·iOS·Android client, B6 network profile | client별 correction 빈도 기록, ARM64 client의 보정 빈도가 x64 client의 1.5배 이하 |
 | PC09 | 좌표·단위 경계: [물리 어댑터 경계](PhysicsJoltAdapter.ko.md) 9절 PA01–PA10 | 전부 통과 |
@@ -1760,9 +1762,9 @@ World는 tag→actor/component inverted index를 유지하여 FindByTag를 지�
 
 Component는 Entity 소유의 Object이며 TransformComponent만 SceneNodeHandle을 갖는다. render·audio·physics·network component의 backend 본체는 독립 native handle이다. Entity는 `GcArray<ObjectRef<Component>>`로 소유하고 Component의 owner 역참조는 weak를 기본으로 한다. data-only component도 지원하여 모든 component가 transform을 갖지 않게 한다.
 
-**Construct → ApplyDefaults/Fixup → Attach → Initialize → Register → Activate/BeginPlay → Tick → Deactivate/EndPlay → Unregister → Retire**의 순서를 정의한다. BeginPlay/EndPlay는 world session과 별도 event로 기록하여 PIE 재시작·셀 unload·prefab 재적용 중 중복 실행을 방지한다. disabled와 unregistered, editor-only, pending destruction은 서로 다른 상태다.
+**Construct → ApplyDefaults/Fixup → Attach → Initialize → Register → Activate/BeginPlay → Tick → Deactivate/EndPlay → Unregister → Retire**의 순서를 정의한다. BeginPlay/EndPlay는 world session과 별도 event로 기록하여 Tryout 재시작·셀 unload·prefab 재적용 중 중복 실행을 방지한다. disabled와 unregistered, editor-only, pending destruction은 서로 다른 상태다.
 
-수명 hook의 이름은 Unity의 hook 체계(종류·호출 순서·의미)를 따르고 Rocks 어휘를 사용한다(2026-11-12 결정). 단계와 hook의 대응은 Initialize→`Awake`, Activate→`Enable`, BeginPlay→`Start`, 가변·고정·LateUpdate tick→`Tick`·`FixedTick`·`LateTick`, Deactivate→`Disable`, EndPlay→`Destroy`이며, 자기 Entity의 모든 collider의 물리 통지는 `TriggerEnter`·`TriggerExit`·`CollisionEnter`·`CollisionExit`, 편집기 재구성은 `Validate`다. C++ 가상 함수는 `On` 접두를 붙여 오디오·타임라인의 일반 `Start()` 메서드와 충돌하지 않게 하고 Sparks의 `on Start()`와 1:1로 대응한다. 단계 이름(Initialize·BeginPlay 등)은 엔진 내부 단계 이름으로 유지한다. 같은 hook 체계를 WorldService·WidgetController에도 적용한다. spawn 묶음(`World.Spawn` 또는 prefab instantiate 1회가 생성한 객체 graph)의 Awake가 모두 성공하면 graph 순서로 Enable하고, Start는 같은 스크립트 단계의 발행 큐에서 시작한다. Start는 준비 대기만 기다리며 끝나기 전에는 그 객체의 Tick을 시작하지 않는다. Disable은 그 객체의 스크립트 실행 취소·유지 자원 해제·이벤트 연결 비활성화를 수반한다. `RequestDestroy`·부모 파괴·셀 unload·travel·PIE Stop·process 종료에서는 Disable(활성이면)·Destroy hook을 실행한 뒤 Detach하고, fault로 인한 격리와 GC 도달 불가 경로에서는 Disable을 실행하지 않는다(SD20).
+수명 hook의 이름은 Unity의 hook 체계(종류·호출 순서·의미)를 따르고 Rocks 어휘를 사용한다(2026-11-12 결정). 단계와 hook의 대응은 Initialize→`Awake`, Activate→`Enable`, BeginPlay→`Start`, 가변·고정·LateUpdate tick→`Tick`·`FixedTick`·`LateTick`, Deactivate→`Disable`, EndPlay→`Destroy`이며, 자기 Entity의 모든 collider의 물리 통지는 `TriggerEnter`·`TriggerExit`·`CollisionEnter`·`CollisionExit`, 편집기 재구성은 `Validate`다. C++ 가상 함수는 `On` 접두를 붙여 오디오·타임라인의 일반 `Start()` 메서드와 충돌하지 않게 하고 Sparks의 `on Start()`와 1:1로 대응한다. 단계 이름(Initialize·BeginPlay 등)은 엔진 내부 단계 이름으로 유지한다. 같은 hook 체계를 WorldService·WidgetController에도 적용한다. spawn 묶음(`World.Spawn` 또는 prefab instantiate 1회가 생성한 객체 graph)의 Awake가 모두 성공하면 graph 순서로 Enable하고, Start는 같은 스크립트 단계의 발행 큐에서 시작한다. Start는 준비 대기만 기다리며 끝나기 전에는 그 객체의 Tick을 시작하지 않는다. Disable은 그 객체의 스크립트 실행 취소·유지 자원 해제·이벤트 연결 비활성화를 수반한다. `RequestDestroy`·부모 파괴·셀 unload·travel·Tryout Stop·process 종료에서는 Disable(활성이면)·Destroy hook을 실행한 뒤 Detach하고, fault로 인한 격리와 GC 도달 불가 경로에서는 Disable을 실행하지 않는다(SD20).
 
 ~~~cpp
 class Component : public Object {
@@ -1812,13 +1814,13 @@ variant는 base prefab과 patch를 저장한다. nested prefab은 참조 AssetId
 
 editor는 Apply to source, Revert override, Unpack instance, Make variant, Compare revision을 제공한다. Apply는 source asset 편집 transaction과 그 영향 목록을 생성하며 동일 instance를 무제한 연쇄 재적용하지 않는다. instance root와 child의 영속 ID를 유지하여 save game·외부 actor reference·network spawn이 흔들리지 않게 한다. 네트워크는 prefab ID·revision·spawn parameter와 authoritative override를 검증한 뒤 생성한다.
 
-PIE 시작은 편집 graph를 별도 World로 복제하고 prefab/actor ID remap을 유지한다. PIE 중 원본 수정은 명시적인 live patch 범위에서만 반영한다. structural change가 있으면 해당 instance 또는 PIE 재시작으로 처리한다. 변경 propagation·GC·Undo/Redo·save/load·cell unload·replication을 함께 수행하는 통합 테스트를 M5의 필수 gate로 지정한다.
+Tryout 시작은 편집 graph를 별도 World로 복제하고 prefab/actor ID remap을 유지한다. Tryout 중 원본 수정은 명시적인 live patch 범위에서만 반영한다. structural change가 있으면 해당 instance 또는 Tryout 재시작으로 처리한다. 변경 propagation·GC·Undo/Redo·save/load·cell unload·replication을 함께 수행하는 통합 테스트를 M5의 필수 gate로 지정한다.
 
 ### 20.4 게임 프레임워크·입력·스크립팅
 
 GameSession, WorldSession, MatchRules, MatchState, PlayerState, LocalPlayer, PlayerAgent, ControlledEntity/Character, CameraDirector, ScopedService, GameplayEvent, SaveGame을 제공한다. 서버 권한 규칙과 로컬 presentation을 분리하고 특정 Unreal 클래스 계층과 동일한 이름을 갖는 것만으로 기능이 완성되었다고 판정하지 않는다. Ability는 tag 기반 조건·cooldown·cost·effect·prediction key를 중심으로 P2에서 확장한다.
 
-Input은 action/context, key/gamepad/touch, rebinding, dead zone, chord, haptics, focus를 지원한다. editor shortcut·viewport camera·PIE game input의 우선순위를 명시한다. 입력 snapshot은 fixed tick에 timestamp를 포함하며 replay·prediction에서 재사용한다. text 입력과 key binding을 구분하여 IME를 지원한다.
+Input은 action/context, key/gamepad/touch, rebinding, dead zone, chord, haptics, focus를 지원한다. editor shortcut·viewport camera·Tryout game input의 우선순위를 명시한다. 입력 snapshot은 fixed tick에 timestamp를 포함하며 replay·prediction에서 재사용한다. text 입력과 key binding을 구분하여 IME를 지원한다.
 
 게임플레이 스크립팅은 자체 커스텀 언어를 정식 수단으로 채택한다. Blueprint 및 Blueprint 유사 범용 visual scripting은 지원 범위에서 제외한다. 언어·컴파일러·VM·디버거와 Object·GC·RPC·프리팹 연동은 23절의 필수 구현 대상으로 정의한다. 머티리얼·애니메이션·VFX 전용 그래프와 컷씬 타임라인은 선언형 제작 도구이며 게임플레이 스크립팅 언어를 대체하지 않는다.
 
@@ -1872,7 +1874,7 @@ UI animation은 opacity·색·render transform·선택 layout property를 keyfra
 
 ViewModel은 reflected field·typed command·property-changed event를 제공한다. 매 frame 모든 getter를 호출하는 polling을 기본으로 하지 않는다. binding은 stable FieldId/type으로 cook 검증하며 null·collection diff·model 교체·구독 해제·thread dispatch를 처리한다. worker 결과는 Game/UI lane command로 적용한다. MVVM 계열 개념은 공식 자료와 대조하고 자체 언어에 연결한다. [S51](https://dev.epicgames.com/documentation/en-us/unreal-engine/umg-viewmodel-for-unreal-engine)
 
-입력은 UE 5.8과 같은 순서(입력 전처리기 → pointer capture → preview tunnel → bubble → navigation → 미처리 처리)를 따르며 그리기 중 갱신되는 hit-test grid·mouse capture·keyboard/gamepad focus·tab/기하 navigation·modal stack·drag/drop·tooltip·touch를 포함한다(UI 툴킷 설계 3.8–3.10절). LocalPlayer별 focus와 device routing을 분리하고 컷씬/PIE/editor focus를 control layer로 전환한다. 텍스트 입력 Element(`TextInput`)는 IME composition·clipboard·grapheme 단위 cursor/selection·RTL/BiDi·password·validation을 지원한다. UTF-8 byte offset을 사용자 글자 index로 사용하지 않는다.
+입력은 UE 5.8과 같은 순서(입력 전처리기 → pointer capture → preview tunnel → bubble → navigation → 미처리 처리)를 따르며 그리기 중 갱신되는 hit-test grid·mouse capture·keyboard/gamepad focus·tab/기하 navigation·modal stack·drag/drop·tooltip·touch를 포함한다(UI 툴킷 설계 3.8–3.10절). LocalPlayer별 focus와 device routing을 분리하고 컷씬/Tryout/editor focus를 control layer로 전환한다. 텍스트 입력 Element(`TextInput`)는 IME composition·clipboard·grapheme 단위 cursor/selection·RTL/BiDi·password·validation을 지원한다. UTF-8 byte offset을 사용자 글자 index로 사용하지 않는다.
 
 layout/paint invalidation·retainer target·virtual list·batch·clip·atlas budget을 profiler에서 표시한다. UI material은 별도 material domain과 입력 capability를 가진다. screen UI는 upscaling 이후 output 해상도에서, world-space UI는 scene geometry/texture와 hit test 정책으로 처리한다. HDR UI luminance는 OutputSurface 규약에 맞게 합성하고 TAA/DOF/blur에 HUD가 무단 포함되지 않게 한다.
 
@@ -1908,7 +1910,7 @@ transaction은 객체 주소가 아닌 stable ID·FieldId·old/new value·asset 
 
 저장은 임시 파일→fsync/flush 정책→atomic replace→revision publication으로 수행한다. 외부 파일 변경·저장 충돌·프로세스 강제 종료를 감지하고 journal로 복구한다. source control 연동은 checkout/status/diff/asset lock을 adapter로 제공한다. multi-user editing은 단독 transaction·revision 충돌 해결이 안정화된 P3 이후 과제다.
 
-PIE는 별도 World와 입력 context, 별도 network session으로 실행한다. Stop은 task·timer·delegate·audio·physics·render proxy를 정리하고 editor World만 유지한다. 1,000회 play/stop 이후 live object·resident memory·GPU resource count가 안정 구간으로 복귀해야 한다. asset/메타 layout 변경 시 안전하지 않은 live reload는 재시작을 요구한다.
+Tryout은 별도 World와 입력 context, 별도 network session으로 실행한다. Stop은 task·timer·delegate·audio·physics·render proxy를 정리하고 editor World만 유지한다. 1,000회 play/stop 이후 live object·resident memory·GPU resource count가 안정 구간으로 복귀해야 한다. asset/메타 layout 변경 시 안전하지 않은 live reload는 재시작을 요구한다.
 
 ### 22.3 Rocks 제작 템플릿과 사용자 카탈로그
 
@@ -1961,11 +1963,17 @@ manifest는 매개변수·기본값·조건·출력 경로·소유권·capabilit
 
 TT01은 C00이다. M3/M4는 TT02의 준비된 template 유형·TT03/04/06/08의 Copy/Preset·ID/remap·복구·CLI 사례를 요구한다. TT07의 배포 카탈로그 조회는 M3/M4, 사용자 저장/팀 버전 관리와 TT05의 Linked 3-way 갱신은 M5 필수다. 동일 시험 ID 안에서도 case별 required/deferred·owner gate를 기록한다. 계획 개수와 생성·갱신·복구 검증 완료 수를 분리한다.
 
-### 22.6 필수 에디터 내 실행(PIE)
+### 22.6 필수 에디터 내 실행(Tryout)
 
 공유 물리 DeviceHub와 action 소비 scope를 분리한다. Host는 opaque InputConsumerScope를 session·route generation에 연결하고 종료 시 admission을 닫는다. InputCore에는 World/Widget 타입을 도입하지 않는다. AdvanceInput과 QueryAction/CopyActionEvents는 InputReadKey의 scope/generation·user·update domain·clock epoch·tick을 같은 history key로 사용한다. UIRealTime·gameplay fixed/frame·replay 영역의 같은 숫자 tick을 합치지 않는다. route 전환·재시작에는 새 scope generation 또는 clock epoch를 사용하고 기존 key를 재해석하지 않는다. 종료 scope에는 ScopeExpired, 보존 구간 밖에는 HistoryExpired를 반환하며 다른 scope의 최신 결과를 대체 반환하지 않는다. 종료 시 cancel batch의 소비·명시 폐기까지 기록한 뒤 scope를 회수하며, 지연 조회자가 소멸 scope의 terminal event를 받지 못하는 경우에도 expired 오류를 명시한다.
 
-PIE는 Rocks의 필수 기능이다. Core/Object Foundation 이후 M3에 기본 실행, M4에 Play·Pause·Resume·SingleStep·Stop과 복수 session 격리를 완료한다.
+**이름(2026-11-19 사용자 결정):** 편집 World를 복제해 에디터 안에서 게임을 실행하는 기능을 Rocks는 **Tryout**이라 부른다(UE Play In Editor·PIE 대응). 연극에서 정식 개막 전에 실제 무대에 올려 보는 시험 공연이라는 뜻으로, "원본에 남기지 않고 실제로 돌려 본다"는 성격을 나타낸다. 실행 방식 변형은 같은 이름 아래 둔다. 에디터 viewport 안 실행은 Tryout, 플레이어 없이 World만 돌리는 실행은 Tryout · Simulate(UE Simulate In Editor), 별도 process 실행은 Tryout · Standalone(UE Standalone Game), 서버·클라이언트 수는 Tryout 옵션(UE PIE net mode·client 수)이다.
+
+- **표기 규칙:** 항상 한 단어 `Tryout`으로 쓰고 `TryOut`은 쓰지 않는다. 명사로만 쓴다(`TryoutSession`, `IsTryout()`, 리플렉션 플래그 `NonTryoutDuplicateTransient`, 텍스트 용도 `TextUse::TryoutCopy`). Rocks의 실패 가능 함수 접두 `Try`(`TryAdd`, `TryPin` 등)와 섞여 읽히지 않게 하기 위해서다. 한국어 문장에서는 받침 있는 말로 다룬다(Tryout은·을·이·과).
+- **버린 후보:** Playtest(뜻은 바로 보이지만 너무 흔하고 사람을 모아 하는 QA 시험과 겹친다), Play Session(`PlaySession`이 에디터 밖을 포함한 게임 실행 개념으로 이미 쓰인다 — 23절 `Session`), Play Mode(Unity 용어), Ignite·Strike(Rocks·Sparks 계열 이름이지만 뜻이 바로 보이지 않거나 게임 안 용어와 겹친다), Rehearsal(뜻은 가장 맞지만 철자가 어렵다), Dry Run(명령줄 `--dry-run`과 뜻이 겹친다).
+- **UE 이름이 남는 곳:** UE 동작을 설명하는 인용(`RF_NonPIEDuplicateTransient`, `PPF_DuplicateForPIE` 등)과 대응표에는 UE 이름을 그대로 둔다. Docs/Reviews의 과거 검토 기록은 당시 표기를 유지한다.
+
+Tryout은 Rocks의 필수 기능이다. Core/Object Foundation 이후 M3에 기본 실행, M4에 Play·Pause·Resume·SingleStep·Stop과 복수 session 격리를 완료한다.
 
 EditorWorld는 편집 원본, PlaySession은 독립 실행 소유자다. Play는 고정 revision의 graph를 복제하여 `rocks::Object`·`rocks::Entity`·`rocks::Component`의 runtime ID를 발급하고 참조를 remap한다. 원본 stable ID 대응표를 보관하며 가변 객체·script state는 공유하지 않는다. 불변 asset만 revision lease로 공유하고 material instance·animation state·streaming 사용권은 분리한다. 복제 실패는 미공개 graph 전체를 rollback한다.
 
@@ -2057,7 +2065,7 @@ class DoorLogic : ScriptComponent {
 
 **로드.** `try await X.Load()`로 로드하고 결과 값을 보관하는 동안 상주를 유지한다. 진행률은 지역 전용 요청 handle(`X.Load()`, `Assets.LoadAll(list)`)로 조회한다. `Owner.Teleport`는 목적지 prefetch와 commit gate를 내부에서 처리하고(10.2절), `Session.Travel`은 요청을 접수하며 로딩 화면은 엔진이 프로젝트 설정으로 관리한다(10.3절). 9.2절 계약과의 대응은 9.2절에 기록한다.
 
-**소유와 해제.** 소유 범위는 Session·Instance·Execution·ModuleHost의 4개이고, 범위 종료의 일괄 해제는 사용자 코드를 실행하지 않고 할당하지 않으며 멈추지 않는 3개 연산 EndExec·Detach·CloseSession으로만 수행한다. 범위 안의 개별 해제(대입·블록 종료·참조계수 0)도 같은 조건을 지킨다. 이벤트 연결 항목은 session 연결 표의 key와 handler ID만 가지며, 구독자 Detach는 key를 폐기하고 발행자의 Detach·BeginDestroy는 delegate를 비워 연결 기록을 해제한다. 이를 위해 Core `Delegate.h`에 생존 판정 확장 지점(C1), `TryAdd`의 상한 compact(C2), 단일 pass compact(C3), `CompactDead`·`Stats`(C4)를, `NamePool`에 검색 전용 `TryFind`(C5)를 추가한다. 범위가 종료될 때마다 0을 검사하고 NL09(29.6절)로 PIE 종료·장시간 soak·음성 대조·실패 주입을 검증한다.
+**소유와 해제.** 소유 범위는 Session·Instance·Execution·ModuleHost의 4개이고, 범위 종료의 일괄 해제는 사용자 코드를 실행하지 않고 할당하지 않으며 멈추지 않는 3개 연산 EndExec·Detach·CloseSession으로만 수행한다. 범위 안의 개별 해제(대입·블록 종료·참조계수 0)도 같은 조건을 지킨다. 이벤트 연결 항목은 session 연결 표의 key와 handler ID만 가지며, 구독자 Detach는 key를 폐기하고 발행자의 Detach·BeginDestroy는 delegate를 비워 연결 기록을 해제한다. 이를 위해 Core `Delegate.h`에 생존 판정 확장 지점(C1), `TryAdd`의 상한 compact(C2), 단일 pass compact(C3), `CompactDead`·`Stats`(C4)를, `NamePool`에 검색 전용 `TryFind`(C5)를 추가한다. 범위가 종료될 때마다 0을 검사하고 NL09(29.6절)로 Tryout 종료·장시간 soak·음성 대조·실패 주입을 검증한다.
 
 ### 23.4 바인딩·제작 경험·재구성
 
@@ -2065,7 +2073,7 @@ MetaCompiler는 native binding schema를 먼저 생성하고 Sparks 컴파일러
 
 Studio Script Editor와 VS Code 확장은 컴파일러 라이브러리를 공유하는 LSP 언어 서버를 사용하므로 같은 입력에서 CLI와 같은 진단을 얻는다. 자동완성은 멤버·hook·attribute와 태그·action·에셋 경로 리터럴을 포함한다. [S96](https://microsoft.github.io/language-server-protocol/) debugger는 Debug Adapter Protocol로 연결하고 breakpoint·step·call stack·watch·native boundary와 멀티플레이의 process·World를 표시한다. 중단 시 physics/audio/Render와의 pause 정책을 명시하고, pause 중 쌓이는 큐에는 상한과 병합을 적용한다.
 
-reload는 함수 본문 교체부터 지원한다. 실행 중 frame은 이전 code revision을 유지하고 종료 시 반환하며, frame을 새 코드로 자동 이전하지 않고 편집기가 이전 코드로 실행 중인 handler와 재시작 명령을 표시한다. 필드·`on` 선언 변경은 실행 중인 실행 조각이 없는 스크립트 단계 경계에서 FieldId migration과 연결 재구성 후 교체하며 바뀐 필드를 참조하거나 삭제된 handler에 속한 대기 중 실행은 취소하고, `@net`·`@rpc` 배치와 클래스 계층 변경은 PIE를 재시작한다. 데이터가 연결된 ID의 소실은 매 컴파일의 오류이며 `@formerly`로 이전 이름을 표시한다. 변경된 script가 오래된 serialized prefab·save·RPC와 호환되는지 cooker가 검사한다. reload는 code와 함께 TypeInfo·binding table·source map의 revision lease를 유지한다.
+reload는 함수 본문 교체부터 지원한다. 실행 중 frame은 이전 code revision을 유지하고 종료 시 반환하며, frame을 새 코드로 자동 이전하지 않고 편집기가 이전 코드로 실행 중인 handler와 재시작 명령을 표시한다. 필드·`on` 선언 변경은 실행 중인 실행 조각이 없는 스크립트 단계 경계에서 FieldId migration과 연결 재구성 후 교체하며 바뀐 필드를 참조하거나 삭제된 handler에 속한 대기 중 실행은 취소하고, `@net`·`@rpc` 배치와 클래스 계층 변경은 Tryout을 재시작한다. 데이터가 연결된 ID의 소실은 매 컴파일의 오류이며 `@formerly`로 이전 이름을 표시한다. 변경된 script가 오래된 serialized prefab·save·RPC와 호환되는지 cooker가 검사한다. reload는 code와 함께 TypeInfo·binding table·source map의 revision lease를 유지한다.
 
 script error·task cancellation은 이미 외부에 적용한 damage/IO/RPC를 자동 rollback하지 않는다. 원자성이 필요한 편집·능력 판정은 staged command transaction을 commit 전에 검증한다. Verse식 투기 실행·rollback은 엔진 C++ 쪽의 transactional 기반이 마련될 때 재검토한다. conformance corpus는 정상 코드와 잘못된 타입·미초기화·패키지 간 순환 의존·잘못된 bytecode·GC 경합·reload·취소를 포함하고 AST/bytecode fuzzer, C++ oracle fixture, VM·AOT 차등 시험을 사용한다. allocation·native call·이벤트 큐·task 대기 비용을 profiler에 표시하고, 라이브러리 API 문서와 script binding 문서는 같은 TypeInfo에서 생성한다.
 
@@ -2166,7 +2174,7 @@ pre-animated state는 대상 identity+FieldId/control channel별 첫 owner 진�
 
 Restore/KeepFinalState는 채널별 resolver가 처리한다. Keep owner 종료 시 최종 기여와 priority를 pending commit으로 기록하고 마지막 owner가 해제될 때 가장 높은 priority·stable ID의 Keep commit을 base에 반영한다. Keep commit이 없으면 공통 base를 복원한다. 소유 중 gameplay 쓰기는 해당 채널의 UpdateBase API로만 허용하며 resolved output 직접 덮어쓰기는 거부한다. 종료·skip·cancel은 같은 release 경로를 정확히 1회 수행하고 대상 파괴·WorldEpoch 변경 시 stale 상태를 쓰지 않는다. input/camera/physics의 임시 제어권 채널도 같은 owner 집합을 사용하되 AlwaysRestore와 token auto-release로 고정한다. KeepFinalState는 명시 허용한 transform/property 값에만 적용하며 입력 잠금·camera possession·physics mode의 임시 제어권을 잔존시키지 않는다. camera pose 값 유지와 camera 제어권 반환도 서로 다른 정책이다.
 
-A/B 시작 후 A/B 또는 B/A 종료, Restore/Keep 혼합, UpdateBase·skip·cancel·World unload를 검사한다. 동일 prefab/sequence를 2회 중첩하고 rebase·PIE 복제·save/load 후 대상과 event ledger가 구별되는지도 검증한다. camera cut에서는 temporal upscaler·TAA·motion blur history를 reset하고 shot blend에서는 연속 motion을 생성한다.
+A/B 시작 후 A/B 또는 B/A 종료, Restore/Keep 혼합, UpdateBase·skip·cancel·World unload를 검사한다. 동일 prefab/sequence를 2회 중첩하고 rebase·Tryout 복제·save/load 후 대상과 event ledger가 구별되는지도 검증한다. camera cut에서는 temporal upscaler·TAA·motion blur history를 reset하고 shot blend에서는 연속 motion을 생성한다.
 
 SequencePlayer는 필요한 asset bundle·World cell·animation·audio·VFX를 prefetch한다. 필수 항목이 준비되기 전 start를 지연하거나 명시 loading gate를 적용한다. 긴 sequence는 shot look-ahead window로 스트리밍하고 GC root·AssetLease를 필요한 구간만 유지한다. camera teleport·offscreen cast·새 shot 첫 frame에 geometry·shadow·GI가 갑자기 미상주하지 않게 pre-roll budget을 제공한다.
 
@@ -2378,7 +2386,7 @@ macOS도 native linker·symbol/dSYM 생성·app bundle·서명·필요 notarizat
 
 | 변경 유형 | 개발 루프 | 기본 완료 경계 |
 |---|---|---|
-| Script 함수 본문 | dependency compile → verify → compatible code revision 교체 | editor/PIE 유지, 기존 frame lease 보존 |
+| Script 함수 본문 | dependency compile → verify → compatible code revision 교체 | editor/Tryout 유지, 기존 frame lease 보존 |
 | Tag/DataAsset/UI layout·prefab 값 | validate → delta cook/compile → transaction 적용 | 해당 instance/view 갱신 |
 | Shader/material | 영향 permutation만 worker compile → PSO 준비 → atomic 교체 | compile 실패 시 이전 버전 유지 |
 | Texture/mesh/audio | 의존 산출물만 recook → async lease 교체 | dependent preview·resident 자원 갱신 |
@@ -2516,7 +2524,7 @@ ring buffer는 bounded이며 event loss count를 기록한다. profiling 자체�
 | B2 · 기본 3D | 10만 render instance·2,000만 source triangle, 100 light·8 shadow caster | Deferred/Forward 각각 native 1080p 기준 GPU p95 ≤14 ms·p99 ≤16.67 ms 목표 |
 | B3 · Game | 100 animated character·1,000 active rigid body·200 AI·128 voice | CPU critical path p95 ≤12 ms, server 60Hz, audio underrun 0건 목표 |
 | B4 · Streaming | 4×4 km tile world, 30분 이동·반복 teleport·cold/warm cache | RAM/VRAM 상한 유지, active cell 준비 오류 0건, game IO 동기 wait 0건 |
-| B5 · 제작 | 태그·component·nested prefab·script 편집, 1,000회 PIE | 종료 후 resource baseline 복귀, undo/save/reload 결과 정합 |
+| B5 · 제작 | 태그·component·nested prefab·script 편집, 1,000회 Tryout | 종료 후 resource baseline 복귀, undo/save/reload 결과 정합 |
 | B6 · Network | 16 client, RTT 0–200 ms·loss 최대 5%·jitter/reorder | ID alias·권한 위반·세션 간 stale 적용 0건, tick/bandwidth/correction 기록 |
 | B7 · Cinematic/Post | 25절 데모, 26절 효과 scene, 24/30/60 fps·4K capture | A/V ±20 ms 목표, skip 복구 오류 0건, frame 누락·NaN 0건 |
 | B8 · Upscale | 1080p/1440p/4K output, 고정 품질·동적 render scale | 양 경로의 지원 matrix 통과, cut 잔상 0 frame, quality·latency·VRAM 기록 |
@@ -2580,7 +2588,7 @@ Rocks의 우선순위는 안정성·수명 정확성, 확장성, 성능이다. �
 
 모든 allocation/resource에 owner scope·allocator/해제 API·generation·취소·최종 회수 조건을 명시한다. 메모리 ledger는 native heap, managed graph, task/callback, IO/staging, GPU resource/descriptor, plugin metadata, trace buffer, built-in/persistent asset의 별도 회계를 제공한다. raw pointer는 짧은 비소유 접근으로 제한하고 ownership 이전은 실패 시 잔존 소유자까지 정의한다. nonmoving GC는 native/GPU/SDK resource 회수를 자동 보장하지 않으므로 backend lease와 RAII를 연결한다.
 
-Core의 shutdown은 추적 가능한 엔진 소유 allocation의 잔존 0을 목표로 한다. World/PIE stop은 해당 scope owner 0과 명시한 공유 cache/builtin baseline 복귀로 검사한다. 정상 cache·pin은 owner·상한·만료/해제 조건이 있는 allowlist로 분리하며 증가하는 누수를 cache로 재분류하지 않는다. 외부 SDK/driver가 보고하는 메모리와 엔진 ledger의 관찰 범위를 구분하고 미해명 증가도 조사 대상으로 유지한다.
+Core의 shutdown은 추적 가능한 엔진 소유 allocation의 잔존 0을 목표로 한다. World/Tryout stop은 해당 scope owner 0과 명시한 공유 cache/builtin baseline 복귀로 검사한다. 정상 cache·pin은 owner·상한·만료/해제 조건이 있는 allowlist로 분리하며 증가하는 누수를 cache로 재분류하지 않는다. 외부 SDK/driver가 보고하는 메모리와 엔진 ledger의 관찰 범위를 구분하고 미해명 증가도 조사 대상으로 유지한다.
 
 cancel·timeout만으로 외부 callback/GPU 완료를 가정하지 않는다. 회수 불가능한 진행 중 lease는 bounded quarantine과 retained reason으로 표시하고 신규 요청을 제한한다. 안전한 backend 종료/복구 경로로 정리하며 무기한 증가·무제한 retry를 허용하지 않는다. deadlock이나 장치 손실에서 억지로 free하여 수치를 0으로 만드는 구현은 금지한다. 종료 실패·불완전 회수는 실패 결과로 남긴다.
 
@@ -2589,12 +2597,12 @@ cancel·timeout만으로 외부 callback/GPU 완료를 가정하지 않는다. �
 | NL01 | 모든 allocation 단계의 N-fail·부분 생성/등록 rollback: publish·leak·소유권 유실 0 |
 | NL02 | root cycle·weak pin·container 재배치·GC cutoff·retire: 오수거 0, root 제거 후 회수 |
 | NL03 | task/IO/compile/upload 취소·늦은 callback·module unload: terminal 1회·lease 종료 전 free 0 |
-| NL04 | PIE 1,000회·asset/template reload·streaming 왕복·profile 교체: owner/baseline 복귀·증가 기울기 조사 |
+| NL04 | Tryout 1,000회·asset/template reload·streaming 왕복·profile 교체: owner/baseline 복귀·증가 기울기 조사 |
 | NL05 | GPU device loss·backend failure·quota 초과: bounded quarantine·재생성·실패 보고·정상 pool 오반환 0 |
 | NL06 | 정상 shutdown·중간 실패·강제 crash: 정상 ledger 잔존 0, crash의 복구 범위·truncated 상태 명시 |
 | NL07 | 지원 sanitizer·독립 allocator ledger·graph oracle·seed stress: 툴별 관찰 범위/NOT RUN 공개 |
 | NL08 | 최적화 on/off·1/N worker·cache cold/warm: 의미·소유권 동일, 성능 개선 전 정확성 통과 |
-| NL09 | Sparks: PIE Stop 시 스크립트 counter·연결 표·revision lease·이름 pool 기준선 복귀(G1), 2시간 soak에서 30초 구간 최솟값이 연속 10구간 중 8구간 이상 상승하면서 기울기가 예산의 분당 1%를 넘는 counter 없음(G2), 의도적으로 넣은 누수가 Gate를 실패시킴(G3), 모든 획득·await의 실패 주입 후 Detach counter 0(G4) |
+| NL09 | Sparks: Tryout Stop 시 스크립트 counter·연결 표·revision lease·이름 pool 기준선 복귀(G1), 2시간 soak에서 30초 구간 최솟값이 연속 10구간 중 8구간 이상 상승하면서 기울기가 예산의 분당 1%를 넘는 counter 없음(G2), 의도적으로 넣은 누수가 Gate를 실패시킴(G3), 모든 획득·await의 실패 주입 후 Detach counter 0(G4) |
 
 N-fail·rollback·baseline·원인 report는 Core CF02/CF07–CF12에서 시작한다. leak sanitizer 지원 플랫폼에서 상세 검사하고, 미지원 target은 자체 ledger·반복 scope 종료·heap/resource snapshot을 병행한다. 일정 압박으로 correctness gate를 생략하지 않는다. lock-free·allocator cache·parallel GC·async queue 등 최적화는 검증된 기준 경로와 비교 가능한 선택 switch를 갖는다.
 
@@ -2606,7 +2614,7 @@ N-fail·rollback·baseline·원인 report는 Core CF02/CF07–CF12에서 시작�
 
 compile-time ABI/header 검사, property/fuzz, differential oracle, allocation 단계별 failure injection, scheduler interleaving, packaged integration, 실제 GPU/입력/audio target 테스트를 계층화한다. critical invariant는 의도적 결함 주입으로 하네스가 실패를 검출하는지도 확인한다. 예를 들어 barrier 누락·잘못된 generation·중복 callback·streaming 조기 free·한 tick 입력 중복을 넣은 negative control은 반드시 실패해야 한다.
 
-PR gate는 작은 deterministic subset, 야간은 seed·stress·sanitizer·failure matrix, release gate는 지원 OS/API/packaged/PIE 조합을 실행한다. 실패 seed·최소 재현 입력·로그·trace·artifact hash·toolchain·build/source/asset revision을 저장한다. flaky test는 재시도 통과로 숨기지 않고 원인을 수정한다. quarantine한 필수 테스트는 통과 집계에서 제외하며 대체 근거 없이 출시 Gate를 닫지 않는다.
+PR gate는 작은 deterministic subset, 야간은 seed·stress·sanitizer·failure matrix, release gate는 지원 OS/API/packaged/Tryout 조합을 실행한다. 실패 seed·최소 재현 입력·로그·trace·artifact hash·toolchain·build/source/asset revision을 저장한다. flaky test는 재시도 통과로 숨기지 않고 원인을 수정한다. quarantine한 필수 테스트는 통과 집계에서 제외하며 대체 근거 없이 출시 Gate를 닫지 않는다.
 
 | ID | 하네스 자체 검증 |
 |---|---|
@@ -2636,8 +2644,8 @@ line coverage는 누락 후보 탐색 수단이며 안정성 증명이 아니다
 | M0 · 1개월 | 착수 | Core bootstrap·PlatformBase·allocator·Array/Span·assert/trace·CPU runner, 최소 객체 계약 | F0–F2 초기 fixture, GPU/UI/언어 VM 의존 0 |
 | M1 · 2–3개월 | M0 | Core library·thread/task/IO·Registry·handle/reference·manual TypeInfo·Object 생성/파괴 | F1–F4 정확성·stress·no-op baseline |
 | M2 · 4–6개월 | M1 | ClassDefaults/instancing·full GC·barrier API·Archive·Clang 최소 생성기·UI용 리플렉션 계약 CU1–CU9·Core 보강 CB1–CB3·Foundation 통합 | CF01–CF12·B0/B1 정확성 통과, 후속 착수 gate |
-| M3 · 기존 7–9개월 참고 | Foundation Gate | Rocks Build/local cache·asset/에셋 너겟·5종 RHI/RG 기본 개발·Deferred/Forward·texture/builtin·Material MAT0/MAT1·UI 툴킷 UT1–UT4(Studio 기초)·UT5 착수·script L0/L1·spatial upscale | import→edit→save→cook→run, Win/Mac Studio·CPU headless·기본 PIE·UI 기준값 UV1–UV6·UV8·iteration trace |
-| M4 · 기존 10–12개월 참고 | M3 | 5종 RHI 기본 Gate·lightmap/probe·정식 PIE·템플릿·애니메이션·물리/audio/input/AI·게임 UI runtime/Designer·Material MAT2·ScriptComponent·TAAU·기본 nested 컷씬·post, Incredibuild/분산 worker | gameplay+2분 컷씬, 두 렌더 경로·API/TX/BR/PI 전체 기본 profile 및 LT/TT/MT의 단계별 필수 subset·offscreen·UI callback·build adapter |
+| M3 · 기존 7–9개월 참고 | Foundation Gate | Rocks Build/local cache·asset/에셋 너겟·5종 RHI/RG 기본 개발·Deferred/Forward·texture/builtin·Material MAT0/MAT1·UI 툴킷 UT1–UT4(Studio 기초)·UT5 착수·script L0/L1·spatial upscale | import→edit→save→cook→run, Win/Mac Studio·CPU headless·기본 Tryout·UI 기준값 UV1–UV6·UV8·iteration trace |
+| M4 · 기존 10–12개월 참고 | M3 | 5종 RHI 기본 Gate·lightmap/probe·정식 Tryout·템플릿·애니메이션·물리/audio/input/AI·게임 UI runtime/Designer·Material MAT2·ScriptComponent·TAAU·기본 nested 컷씬·post, Incredibuild/분산 worker | gameplay+2분 컷씬, 두 렌더 경로·API/TX/BR/PI 전체 기본 profile 및 LT/TT/MT의 단계별 필수 subset·offscreen·UI callback·build adapter |
 | M5 · 13–16개월 | M4 | replication/subobject·travel·nested prefab·능력 기초·script debugger/async·FSR·UI binding/animation·Material layer MAT3·adaptive probe/scenario·고급 post | B3/B5/B6/B8·I0–I6, GC 병렬/점진 최적화·agent 장애·headless server |
 | M6 · 17–20개월 | M5 | 컷씬/capture·EXR/AOV·HDR/post·DLSS/XeSS·ability/feature·UI 전문 Designer·Material MAT3·기본 고급 재질 | B7·UI/headless GPU 회귀·script reload·feature teardown·link profile |
 | M7 · 21–24개월 | M6 | World Partition·HLOD·대량 AI·rig/retarget·terrain·PCG·audio graph, GPU-driven 정식화 | B4, long traversal·teleport·producer 경험·SoA budget |
@@ -2791,7 +2799,7 @@ RHI·UI 툴킷·언어·전문 빌드 도구의 본격 구현은 Foundation Gate
 | Landscape·spline·foliage·PCG·환경 | edit layer·terrain/collision/nav·stable generated IDs·water/cloud | 필수 M7–M8 |
 | 모델링·DCC·geometry cache | blockout/UV/collision·geometry API·glTF/FBX·선택 USD/Alembic | 필수 기본 도구 M6–M7, 고급 interchange M8+ |
 | Sequencer·camera·take·render jobs | 기본 nested·dialogue·events·skip·AOV/EXR·tile/resume | 필수 M4–M6, mocap·reference path trace 후속 |
-| Editor transaction·source control·PIE | asset diff·journal·conflict·script/UI designer·World 격리 | 필수 M3–M6 |
+| Editor transaction·source control·Tryout | asset diff·journal·conflict·script/UI designer·World 격리 | 필수 M3–M6 |
 | Test·trace·crash·localization·quality | CPU/GPU/audio/script/build timeline·headless matrix·schema/텍스트 | 필수 첫 Core 작업부터 |
 | Multi-user/remote collaboration | revision·transaction을 기반으로 후속 동시 편집 | 후속, 단독 편집/저장 gate 이후 |
 | Mobile·console·XR/stereo·Linux GPU editor | platform/caps·입력·UI·SDK·렌더 profile 확장 | 후속 플랫폼 gate; 기본 Windows/macOS 개발·Linux server 범위와 구분 |
@@ -2855,7 +2863,7 @@ Snowdrop, IW 관련 Call of Duty 기술, RAGE의 공개 개발 자료를 비교�
 | AAA06 · 에셋별 제작 검증·비용 피드백 | [Rockstar, The Sound of GTA V](https://media.gdcvault.com/GDC2014/Presentations/MacGregor_Alastair_The_Sound_of.pdf), GDC 2014, 24쪽: RAGE Audio 제작 도구의 자동 최적화·비용·에셋 시험 | **기존반영+필수 보완, P1/M3부터.** §29 하네스·관측 체계를 `AssetValidationProfile`로 AssetId/revision·target·검사 버전·예산에 연결한다. validator는 각 subsystem의 첫 통합 단계에 제공하고 editor/headless가 공유 | 의도적 불량 fixture 검출, source 수정/worker crash/중복 완료 시험. 추정·offline benchmark·실장비 측정을 구분하고 미실행 target PASS·stale 승인·원본 자동 훼손 0건 |
 | AAA07 · code/data branch 통합 | [Activision, MergeBot](https://research.activision.com/publications/2024/06/mergebot--activision-s-merge-and-resolve-infrastructure), GDC 2024-03-21 발표·2024-06-24 게시: 스튜디오 Perforce 제작 인프라이며 runtime 기능이 아님 | **필수 제작 계약, P2/M5 이후.** Git/Perforce adapter의 격리된 통합 후보에 code/asset/schema diff·conflict·build/cook/test 결과와 작업 이력을 연결한다. 외부 branch 게시·충돌 해결은 명시 정책만 허용 | schema rename·binary conflict·부분 실패·재시도·구버전 산출물 시험. 미검증 후보 게시·중복 적용·무관한 사용자 변경 손상 0건 |
 | AAA08 · 이동 환경 샘플·애니메이션 제작 이력 | [Rockstar, Making the Believable Horses of RDR2](https://gdcvault.com/play/1027113/AI-Summit-Making-the-Believable), GDC 2021: 말 시스템 사례. 공식 PDF 직접 열기는 제한되어 검색 색인의 terrain/feature 추출 구간만 확인; 범용 API는 unknown | **필수 계약 보완, P1/M4; 제작 확장 P2/M6–M7.** `LocomotionContext`는 terrain/nav/physics revision·tick·origin epoch·허용 age와 Ready/Stale/Unavailable을 구분한다. `AnimationFeatureBake`는 clip·extractor·좌표/단위·override provenance를 보존 | nav/shape 미준비·origin 변경·cell unload·재임포트와 늦은 완료를 시험. 필수 조회 실패 시 이동 보류/승인 fallback, 오래된 결과 적용 0건. feature 자동 추정과 수동 annotation을 구분 |
-| AAA09 · 대기·반사·GI의 환경 일관성 | [Rockstar, Creating the Atmospheric World of RDR2](https://advances.realtimerendering.com/s2019/index.htm), SIGGRAPH 2019 공식 초록: main view·reflection·sky irradiance 통합. 전체 PPTX 내부는 미확인 | **필수 계약 보완, P1/M4; 품질 확장 M7–M8.** `EnvironmentState` snapshot에 단위·revision을 부여하고 각 소비자의 허용 age·이전 결과·history reset을 선언한다. 컷씬 override는 priority/blend/scope token을 사용하며 baked scenario와 runtime atmosphere revision을 구분 | weather/capture/PIE 2세션/seek·stop/늦은 GPU 완료 시험. stale 경고·광량 중복 방지·동일 revision 기준 영상, 종료 후 override/GPU lease 0건 |
+| AAA09 · 대기·반사·GI의 환경 일관성 | [Rockstar, Creating the Atmospheric World of RDR2](https://advances.realtimerendering.com/s2019/index.htm), SIGGRAPH 2019 공식 초록: main view·reflection·sky irradiance 통합. 전체 PPTX 내부는 미확인 | **필수 계약 보완, P1/M4; 품질 확장 M7–M8.** `EnvironmentState` snapshot에 단위·revision을 부여하고 각 소비자의 허용 age·이전 결과·history reset을 선언한다. 컷씬 override는 priority/blend/scope token을 사용하며 baked scenario와 runtime atmosphere revision을 구분 | weather/capture/Tryout 2세션/seek·stop/늦은 GPU 완료 시험. stale 경고·광량 중복 방지·동일 revision 기준 영상, 종료 후 override/GPU lease 0건 |
 | AAA10 · 재생 준비 시점과 실패 결과 | [Rockstar, The Sound of GTA V](https://media.gdcvault.com/GDC2014/Presentations/MacGregor_Alastair_The_Sound_of.pdf), GDC 2014, 4·10쪽: RAGE Audio의 예측 가능한 streaming·sample 시점·decode 지연 보상 | **필수 계약 보완, P1/M4부터.** 기존 ReadyMask·sample clock·컷씬 gate에 `PlaybackReadinessRequest`의 sample 구간·clock domain·pre-roll·준비 목표·MissedDeadline/Unavailable/Cancelled를 연결한다. 월드 streaming 적용은 Rocks의 후속 일반화 | 지연/부분 read·decode 실패·seek/stop·장치 변경·완료 재정렬 시험. AudioRT 무대기·무할당, 취소 voice 부활·허위 ready·잔존 request/voice 0건. OS/장치의 hard deadline 성공은 보장하지 않음 |
 
 라이트맵·프로브 제작 과정, RenderGraph, 코드/에셋 지속 검증은 이미 필수 범위에 반영하였다. 추가 시스템 수로 중복 집계하지 않고 §14.10·§11·§29의 acceptance와 연결한다. 근거는 [Infinite Warfare 사전 계산 조명, 2017-08-08](https://research.activision.com/publications/archives/precomputed-lighting-in-call-of-dutyinfinite-warfare), [Activision Task Graph Renderer, 2023-06-05](https://research.activision.com/publications/2023/06/Task-Graph-Renderer-at-Activision), [CoD 자동 테스트, 2018-06-26](https://research.activision.com/publications/archives/automated-testing-in-call-of-duty)이다. 게시일과 원 발표 연도는 구분하며 Activision 공통 발표를 모든 IW 버전의 기능으로 귀속하지 않는다.
@@ -2873,26 +2881,26 @@ Snowdrop, IW 관련 Call of Duty 기술, RAGE의 공개 개발 자료를 비교�
 | 가독성·빈 줄·스페이스 4칸·clang-format | 3.4·상세 4.3·C00/CT01 | 버전 고정 설정·탭 0·포맷 재실행 동일성·리뷰 |
 | Rocks 자체 명명·접두사 비교 | 2.4·Core 상세 4절, C++ namespace·외부 ABI 실험 | public header·C/custom-language glue·symbol 충돌·과거 asset ID |
 | 검증된 수학·자체 API·SIMD | 3절 수학 정책·상세 C15 | MX 시험, 양 ISA·정확성/성능/컴파일 측정·vendor 타입 경계 |
-| Windows/macOS 개발·다중 플랫폼 | 2.5·상세 플랫폼/입력 작업 | 두 OS checkout→build→Studio→PIE→cook→test; native Mac CI |
+| Windows/macOS 개발·다중 플랫폼 | 2.5·상세 플랫폼/입력 작업 | 두 OS checkout→build→Studio→Tryout→cook→test; native Mac CI |
 | 5종 RHI와 Deferred/Forward | 11.5·14.1·M3/M4 | API01–06, actual GPU 영상·지원 manifest |
 | 가변/고정 tick·dilation·멀티스레딩 | 8.3/8.4·Core C15/C17 | TK01–06, pause/step·debt·replay·직렬/병렬 결과 |
 | texture streaming·내장 리소스 | 9.5/9.6·M3/M4 | TX01–08·BR01–05, 실제 memory·resident mip·device 실패 |
 | 노드 기반 머티리얼 에디터 | 14.5–14.9·M3/M4 | MT01–10, compile/preview·instance·function·cook |
 | lightmap·범용 probe | 14.10·M4–M6 | LT01–06, CPU baker·이동 객체·scenario·headless |
 | 템플릿·반복 제작 최소화 | 22.3–22.5·Core C00부터 | TT01–08, 사용자 카탈로그·3-way update·복구·CLI |
-| PIE 필수 | 22.6·M3/M4 | PI01–06, 세션 격리·single-step·1,000회 stop 후 소유권 복귀 |
+| Tryout 필수 | 22.6·M3/M4 | PI01–06, 세션 격리·single-step·1,000회 stop 후 소유권 복귀 |
 | logging·profiler·상태 관찰 | 29.4/29.5·C06/C18/C26 | OB01–06, 기록·분석·viewer와 손실·clock 오차 표시 |
 | 누수 방지·안정성·촘촘한 하네스 | 29.6/29.7·모든 작업 | NL01–08·HT01–06, fault·수명·병렬·negative-control 회귀 |
 | AAA 공개 기술 비교 | 33.6·후속 시스템별 gate | Snowdrop/IW/RAGE 공개 범위·unknown·자체 계약·검증 구별 |
 | Blueprint 제외·커스텀 언어 | 23절·전체 editor/runtime 경계 | gameplay VM conformance; material·UI·cutscene 전문 편집은 유지 |
 
-입력 상세안은 keyboard·mouse·gamepad·hotplug·rebinding·IME·UI/PIE routing·haptics·replay·console provider 경계를 포함한다. 콘솔 실지원은 해당 SDK·개발 장비·실제 인증 시험이 확보된 단계에 판정하며, provider skeleton만으로 완료하지 않는다. 라이선스나 장비가 없는 실행은 NOT RUN으로 남긴다.
+입력 상세안은 keyboard·mouse·gamepad·hotplug·rebinding·IME·UI/Tryout routing·haptics·replay·console provider 경계를 포함한다. 콘솔 실지원은 해당 SDK·개발 장비·실제 인증 시험이 확보된 단계에 판정하며, provider skeleton만으로 완료하지 않는다. 라이선스나 장비가 없는 실행은 NOT RUN으로 남긴다.
 
 위 항목은 계획상의 필수 gate다. 유닛·하네스·영상·성능 시험의 실행 결과는 구현 후 산출하며, 문서 교차 검증과 구분한다.
 
 ### 33.8 개정 1.3 최종 계약 교차 검증
 
-서브에이전트 3개가 Core/Object, 렌더·콘텐츠·수학, 빌드·헤드리스·플랫폼 관점에서 통합본과 상세안·작업 데이터를 대조하였다. CF ID 문제의 중복을 합친 16개 보완 사항을 반영하고 지적 반례를 다시 확인하였다. Resolve context, publication 이후 실패, 최종 GC/drain, Foundation 단계·ID, CPU bake 재질, 논리 mip, GPU device domain, PIE scene 격리, 메모리 포화 진척, host별 build fallback, template TypeId, 입력 통합 조건을 구체화하였다. 별첨 교차 검증 결과에 항목별 반영 위치를 기록한다.
+서브에이전트 3개가 Core/Object, 렌더·콘텐츠·수학, 빌드·헤드리스·플랫폼 관점에서 통합본과 상세안·작업 데이터를 대조하였다. CF ID 문제의 중복을 합친 16개 보완 사항을 반영하고 지적 반례를 다시 확인하였다. Resolve context, publication 이후 실패, 최종 GC/drain, Foundation 단계·ID, CPU bake 재질, 논리 mip, GPU device domain, Tryout scene 격리, 메모리 포화 진척, host별 build fallback, template TypeId, 입력 통합 조건을 구체화하였다. 별첨 교차 검증 결과에 항목별 반영 위치를 기록한다.
 
 이후 담당 영역을 교환한 2차 검토에서 정상 AssetLease의 unload admission, task capture와 완료 observer의 수명 분리, metadata 소유 복사, InputReadKey의 scope/clock 격리, Sync.h의 C02 도입, formatter/config 캐시 입력을 추가 보완하였다. 3차 역방향 검증에서는 queue 포화 시 cleanup 진척과 asset callback의 gate 재진입을 추가 발견하여 승인 시 자원 예약·추가 할당 없는 cleanup·gate 밖 callback·비동기 Stop을 명시하였다. 4차에서 세 담당자가 기존 및 추가 반례의 해결을 확인하였다. 총 24개 보완 사항이며 이번 검토 범위의 미해결 지적은 없다. 전체 구현의 무결함 증명으로 해석하지 않는다.
 
@@ -2988,7 +2996,7 @@ Verse 조사에서 Epic의 "The road to UE6"(2026-06-17)는 게임플레이 프�
 |---|---|
 | 스크립트 단계·전달 단위·연쇄 계수·tick이 정의되지 않아 Changed 횟수와 handler 순서가 구현마다 달라짐 | 스크립트 단계와 프레임 순서, 실행 조각 기준 Changed, 인과 깊이 16, 전달 순회에서 C++·Sparks handler를 연결 순서로 실행(23.2절) |
 | 스크립트가 호출하지 않은 C++ handler의 파괴 요청은 즉시 전이되어 "단계 끝까지 유효" 보장이 성립하지 않음 | 스크립트 단계가 열린 동안의 모든 Game lane 파괴 요청과 활성 전환을 지연(5.2절) |
-| "비활성화"가 Disable·Detach·격리를 함께 가리키고 PIE Stop에서 Destroy hook이 실행되지 않음 | fault 이후 상태를 격리 하나로 정의, 종료 경로별 hook(SD20, 20.2절) |
+| "비활성화"가 Disable·Detach·격리를 함께 가리키고 Tryout Stop에서 Destroy hook이 실행되지 않음 | fault 이후 상태를 격리 하나로 정의, 종료 경로별 hook(SD20, 20.2절) |
 | 기다리는 handler가 이벤트를 조용히 버림 | 재진입 정책 `@skipWhileBusy`·`@restart` 표시 필수(SD11, 23.2절) |
 | 예시가 cm·도로 적혀 있으나 엔진 규약은 미터·라디안(2.2절) | 단위 통일과 `Math.Radians` 상수식(SD18), 예시 수정(23.1절). 개정 1.12에서 엔진 규약이 UE와 같은 cm·도가 되어 번복(33.17절) |
 | 문서 간 불일치: 오버로드 처리, session의 VM globals·root, 순환 import | 2.4·22.6·23.4절 정정 |

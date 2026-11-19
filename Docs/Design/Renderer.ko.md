@@ -153,7 +153,7 @@ RenderNotices 처리(해제 완료) ◀─────────────�
 ```
 
 - **변경 목록.** `SceneChangeList`는 추가(`RenderInstanceDesc`), 제거(ID), 변환 갱신(local-to-world, bounds, 이전 프레임 변환 보존 표시), 재질 교체(section → 머티리얼 `RenderHandle`), 표시 플래그, 광원 추가·제거·갱신을 담는다. 프레임 packet의 가변 길이 목록이므로 프레임 arena에 둔다(RenderBase 5.2절). UE의 "큐 → 프레임 시작 일괄 적용" 구조는 같고, 게임이 만든 C++ 객체를 넘기지 않는 점이 다르다.
-- **ID.** `RenderInstanceId`·`RenderLightId`는 게임 lane이 예약하는 slot+generation이다(RenderBase `RenderHandle`과 같은 방식). 계획 11.4절에 따라 ID domain에 SessionId·WorldEpoch를 넣어 EditorWorld·PIE를 격리한다.
+- **ID.** `RenderInstanceId`·`RenderLightId`는 게임 lane이 예약하는 slot+generation이다(RenderBase `RenderHandle`과 같은 방식). 계획 11.4절에 따라 ID domain에 SessionId·WorldEpoch를 넣어 EditorWorld·Tryout을 격리한다.
 - **`RenderScene`.** 렌더 lane 소유 SoA 표: 변환(현재·이전), world bounds, 메시 `RenderHandle`과 section별 머티리얼, flags(그림자 caster, 정적·이동, velocity 필요, 정적 조명 수신), 정적 조명 데이터 참조, 공간 인덱스 항목(SpatialIndex, 계획 3.1). 적용 순서는 제거 → 추가 → 갱신이고 같은 프레임 안 같은 ID 명령은 목록 순서대로다.
 - **인스턴스 종류.** 가상 함수 proxy 대신 렌더러가 정한 **인스턴스 종류**(정적 메시, skinned 메시, 입자 sprite 등)마다 렌더러 쪽 처리기를 등록한다. 종류별 프레임 데이터(skin pose·입자 버퍼)는 `RenderBlob`으로 넘긴다. 1차 종류는 정적 메시 하나이고(17절 RS0) skinned 메시가 RS12다.
 - **그리기 항목 캐시.** 정적 인스턴스는 추가될 때 pass별 `MeshDrawItem`을 만들어 캐시한다(UE `R/PrimitiveSceneInfo.cpp:583`, 사용 `R/SceneVisibility.cpp:1269–1305`). 재질·메시·셰이더 집합 epoch가 바뀌면 그 항목만 다시 만든다.

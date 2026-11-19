@@ -601,7 +601,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 
 **Rocks 규칙.**
 - **`GraphSharedData`.** 타입마다 값 하나, 그래프 수명이다(프레임 arena). 타입은 정적 등록하고, 등록하지 않은 타입은 컴파일 오류다. 이미 있는 타입을 만들면 검증 오류, 없는 값을 반드시 읽는 조회도 검증 오류이고, 있을 때만 읽는 조회는 null을 돌려준다. 값에는 그 그래프의 handle만 담는다(다른 그래프 handle은 7.3절 검증이 거부한다). 값은 그래프가 파괴될 때 렌더 lane에서 파괴된다(8절 구현 메모의 pass 함수와 같다).
-- **`SceneTextureSet` 전달(개정 16).** 프레임 packet 하나에 `ViewSet`이 여럿일 수 있다(EditorWorld·PIE 등, Renderer 4.2·5.1절). 그래서 렌더러는 packet 전체의 장면 텍스처를 (ViewSet 번호, view 번호)로 찾는 표 하나(`SceneTextureTable`)를 `GraphSharedData`에 둔다. `ViewSet`마다 값을 두면 타입별 값 하나 규칙과 부딪치기 때문이다. view마다 크기가 다를 수 있어 장면 텍스처는 view마다 따로다(Renderer 5.1절). `ViewSet` 단위 값(GPU Scene 자원·공유 그림자)도 같은 방식으로 ViewSet 번호를 키로 한 표에 둔다. pass는 표에서 자기 (ViewSet, view)의 `SceneTextureSet`을 꺼내 공유 자원 구조체(9.6절)를 채운다. 장면 텍스처를 만들기 전에 꺼내면 검증 오류다(생산 전 읽기와 같은 성격).
+- **`SceneTextureSet` 전달(개정 16).** 프레임 packet 하나에 `ViewSet`이 여럿일 수 있다(EditorWorld·Tryout 등, Renderer 4.2·5.1절). 그래서 렌더러는 packet 전체의 장면 텍스처를 (ViewSet 번호, view 번호)로 찾는 표 하나(`SceneTextureTable`)를 `GraphSharedData`에 둔다. `ViewSet`마다 값을 두면 타입별 값 하나 규칙과 부딪치기 때문이다. view마다 크기가 다를 수 있어 장면 텍스처는 view마다 따로다(Renderer 5.1절). `ViewSet` 단위 값(GPU Scene 자원·공유 그림자)도 같은 방식으로 ViewSet 번호를 키로 한 표에 둔다. pass는 표에서 자기 (ViewSet, view)의 `SceneTextureSet`을 꺼내 공유 자원 구조체(9.6절)를 채운다. 장면 텍스처를 만들기 전에 꺼내면 검증 오류다(생산 전 읽기와 같은 성격).
 - **history export·import.** `ViewHistory` 소유자(`DeviceResourceOwner`)가 history 텍스처를 가진다(Renderer 5.1절).
   - 이번 프레임은 이전 history를 `ImportTexture`(처음 상태 SRV)로 읽고, 새 history를 그래프 텍스처로 만들어 `ExportTexture`한다. 같은 텍스처를 한 프레임에 읽고 쓰지 않는다(이중 버퍼, UE TAA와 같다).
   - export는 그래프 실행이 성공했을 때만 소유자에게 넘어간다. 검증 실패로 그래프를 버리면(8절) export가 없고, `ViewHistory`는 그 history를 무효로 표시해 다음 프레임에 reset한다. 이전 프레임의 history를 한 번 더 쓰지 않는다(시간 순서가 어긋난 history를 쓰지 않는다).

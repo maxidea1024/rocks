@@ -527,7 +527,7 @@ Result<Array<uint8>> SaveObjectGraph(Allocator&, ObjectRegistry&, const ObjectAc
 - 마지막에 모든 노드의 생존을 다시 확인한 뒤 결과를 게시한다(v1은 root만 확인).
 - 저장 쪽 값 치환 hook(AS A0-O 행의 "bulkId 재매핑")은 B4가 `FieldCodecHooks::SubstituteStruct`로 이미 구현했다 — graph v2는 그대로 쓴다.
 
-리플렉션 B9 연결: 저장 옵션 `unsaveable`(Exclude 기본 = 패키지 저장, Keep = 스냅샷·undo·PIE 복제)을 더한다. Exclude는 저장 집합의 저장 불가 객체(Transient·Deprecated 클래스와 그 부분 트리)를 InvalidArgument로 거부하고 그 객체를 가리키는 참조를 null + `ExternalReference` 진단(값 3·4)으로 쓴다. Include는 저장 불가 객체를 집합에 넣지 않는다(ReflectionExtensions 9.2절).
+리플렉션 B9 연결: 저장 옵션 `unsaveable`(Exclude 기본 = 패키지 저장, Keep = 스냅샷·undo·Tryout 복제)을 더한다. Exclude는 저장 집합의 저장 불가 객체(Transient·Deprecated 클래스와 그 부분 트리)를 InvalidArgument로 거부하고 그 객체를 가리키는 참조를 null + `ExternalReference` 진단(값 3·4)으로 쓴다. Include는 저장 불가 객체를 집합에 넣지 않는다(ReflectionExtensions 9.2절).
 
 ### 5.3 외부 참조와 번호 재배정 (A0-Oe)
 

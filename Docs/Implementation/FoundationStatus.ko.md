@@ -60,7 +60,7 @@ Core 위 엔진 계층의 렌더 기반 첫 묶음([렌더 기반](../Design/Ren
 
 `Platform/File.h`는 `FileSystem`·`FileHandle` 경계, 물리 Windows/macOS backend와 소유형 `File`을 제공한다. 열기·존재·삭제, read/write, 반복 전송 `ReadExact`·`WriteAll`, seek·size·close와 오류 코드를 포함한다. wrapper는 자체 구현해 주입할 수 있으나 Unreal식 wrapper chain 관리자나 실제 제품 wrapper가 구현됐다는 뜻은 아니다. 단위 테스트는 경로 입력, 짧은 전송·실패, EOF, 잘못된 소유·재진입과 동시성 일부를 다룬다. 디렉터리 생성·삭제·열거, Stat(종류·크기·수정 시각·link 여부), 같은 volume 이동·파일 복사, 재귀 생성·삭제(link 비추적), 기본 경로(`Platform/Path.h` `GetStandardDirectory`)는 Windows에서 구현·검증했다(macOS 미빌드). truncate·mapping·watch, 시각·권한 변경, OS close 오류 강제 주입, macOS 실기기 검증은 후속이다. 비동기 읽기·쓰기는 `Platform/AsyncFile.h`(`AsyncReadFile`·`AsyncWriteFile`·공용 `AsyncIoRequest`, Windows IOCP Native·공용 WorkerPool, macOS는 WorkerPool만이며 미빌드)가 담당한다. `AsyncIoContext`의 완료 게시 보류(`HoldCompletions`·`ResumeCompletions`)로 IO 완료 시점을 호출자가 정해 결정적 시험을 만든다([플랫폼 계층](../Design/PlatformLayer.ko.md) 비동기 파일 절). close 오류는 terminal이며 OS 자원 회수 성공을 보장하지 않는다.
 
-플랫폼의 단조 시계와 WorkerScheduler는 시간 측정 및 작업 실행 기반이다. 게임·엔진의 가변 틱, 고정 틱, 시간 배율, 틱 그룹과 멀티스레드 틱은 아직 구현하지 않았다. Component의 생성·부착·소유·수명 시스템과 프리팹, 에디터·PIE도 미구현이다. `Templates/Game/Foundation`은 현재 Object/CLASS 예제이며 Component 예제는 실제 시스템 구현 이후 추가한다.
+플랫폼의 단조 시계와 WorkerScheduler는 시간 측정 및 작업 실행 기반이다. 게임·엔진의 가변 틱, 고정 틱, 시간 배율, 틱 그룹과 멀티스레드 틱은 아직 구현하지 않았다. Component의 생성·부착·소유·수명 시스템과 프리팹, 에디터·Tryout도 미구현이다. `Templates/Game/Foundation`은 현재 Object/CLASS 예제이며 Component 예제는 실제 시스템 구현 이후 추가한다.
 
 빌드 도구는 .NET 10과 MSBuild로 호스트 도구 및 규칙을 구성하고, `Rocks.Build`가 C++ 컴파일·정적 라이브러리·실행 파일의 의존성과 로컬 증분 판단을 수행한다. 설치 SDK에는 헤더·빌드된 라이브러리·호스트 도구와 호환성 manifest가 포함되며 외부 게임은 별도 경로에서 빌드한다. 현재 SDK 내보내기는 임의 컴파일·링크 옵션이나 외부 사전 빌드 라이브러리가 있는 모듈을 지원하지 않고 명시적으로 거부한다. CMake/Python 파일은 이전 구현의 참고 경로이며 새 빌드·검증의 기준은 .NET 경로다.
 
@@ -185,7 +185,7 @@ CTest에는 실제 컴파일 경고의 오류 처리, 경고 옵션·pragma 강�
 
 교차 검토는 Name·Text 구현/테스트 분리, 플랫폼 수명·동시 제어, 빌드 정책의 독립 재검토로 진행하였다. 중복 Text 인자의 오류 코드 불일치, Windows SDK 매크로와 Yield 이름 충돌, 경고 감사의 플래그 누락·강등 누락을 수정하고 양의 work/depth 경계·catalog 정리 재진입·동시 Join/Wait 시험을 보강하였다. 상세 기록은 `ImplementationRound4.*.ko.md`를 따른다.
 
-네이티브 Thread 생성/Join 실패 강제 주입, TSan, 임의 스케줄 전체 탐색, Linux/콘솔 backend는 미완료다. Null renderer·에디터·PIE의 실제 실행을 이 CPU 헤드리스 fixture 통과와 합산하지 않는다.
+네이티브 Thread 생성/Join 실패 강제 주입, TSan, 임의 스케줄 전체 탐색, Linux/콘솔 backend는 미완료다. Null renderer·에디터·Tryout의 실제 실행을 이 CPU 헤드리스 fixture 통과와 합산하지 않는다.
 
 
 ### Name·Text·플랫폼 확장: 최종 Windows/macOS CI
@@ -200,7 +200,7 @@ CTest에는 실제 컴파일 경고의 오류 처리, 경고 옵션·pragma 강�
 
 세 구성 모두 위 HEAD, dirty=false, sourceStableDuringRun=true, runnerReportCurrent=true다. 보고서 해시도 실제 파일과 일치한다. 입력 116개의 digest `e4b9e381004fda7b8c5252c241783496fe5a14a000a8d6d631ab7e27f57d02ed`는 로컬 최종 빌드·11,000회 반복과 동일하다. warning_policy의 실제 경고 오류 대조군과 공용 OS 경계 감사가 각 호스트에서 실행된 것을 로그로 확인하였다. artifact는 `out/ci-42771207691`에 별도로 보관한다.
 
-이는 CPU Foundation의 native 실행 검증이다. macOS Intel, Linux·콘솔, 전체 worker scheduler·병렬 GC, 에디터·렌더러·UI·PIE 통합은 별도 후속 Gate다. 리뷰 보고서의 ‘당시 미실행’ 문구는 검토 시점의 범위이고 이번 CI 실행 결과와 구분한다.
+이는 CPU Foundation의 native 실행 검증이다. macOS Intel, Linux·콘솔, 전체 worker scheduler·병렬 GC, 에디터·렌더러·UI·Tryout 통합은 별도 후속 Gate다. 리뷰 보고서의 ‘당시 미실행’ 문구는 검토 시점의 범위이고 이번 CI 실행 결과와 구분한다.
 
 ### GC·Reflection·Serialization 확장: 최종 로컬 검증
 
@@ -263,7 +263,7 @@ Windows ASan은 LeakSanitizer가 아니며, 소유권 ledger와 종료 검사를
 
 현재 범위는 Core·Object의 실행 경로와 C#/.NET 기반 빌드·메타 도구의 초기 구현이다. 각 경로의 구현과 검증 결과를 전체 Core 또는 엔진 기능의 완료로 확대하지 않는다.
 
-전체 Foundation에는 자동 일괄 해제 stack·thread cache 등 후속 할당기, 가상 메모리 오류 주입 검증, queue 및 기타 후속 컨테이너, 미완성 경로 유틸·파일 I/O와 플랫폼 검증, atomics/RWLock, root owner 진단, 정밀한 빌드 의존 추적과 메타 unit 자동 발견, 장시간 스트레스·대규모 pause 성능 검증 등이 남아 있다. 수학·기본 충돌 라이브러리는 첫 구현이 들어갔으나 frustum·swept shape·접촉 정보와 macOS·ARM64 실행 검증이 남아 있다([수학 구현](Math.ko.md)). 엔진 틱, Component와 상위 에디터·PIE·입력·렌더러 통합은 별도 후속 작업이다. 전체 C00–C26/Foundation Gate는 미완료이며 초기 선형 탐색과 고정 상한을 제품 성능 충족으로 간주하지 않는다.
+전체 Foundation에는 자동 일괄 해제 stack·thread cache 등 후속 할당기, 가상 메모리 오류 주입 검증, queue 및 기타 후속 컨테이너, 미완성 경로 유틸·파일 I/O와 플랫폼 검증, atomics/RWLock, root owner 진단, 정밀한 빌드 의존 추적과 메타 unit 자동 발견, 장시간 스트레스·대규모 pause 성능 검증 등이 남아 있다. 수학·기본 충돌 라이브러리는 첫 구현이 들어갔으나 frustum·swept shape·접촉 정보와 macOS·ARM64 실행 검증이 남아 있다([수학 구현](Math.ko.md)). 엔진 틱, Component와 상위 에디터·Tryout·입력·렌더러 통합은 별도 후속 작업이다. 전체 C00–C26/Foundation Gate는 미완료이며 초기 선형 탐색과 고정 상한을 제품 성능 충족으로 간주하지 않는다.
 
 ## 2026-11-11 Windows 심볼릭 링크 재검증
 
