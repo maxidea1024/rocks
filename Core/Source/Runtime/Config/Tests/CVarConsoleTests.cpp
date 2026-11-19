@@ -358,17 +358,17 @@ TEST(CVar_ConsoleCommandTargets) {
     CHECK(ConsoleTitle.Get() == "plain" && second.calls == 4);
 }
 
-// NaN·무한대는 모든 입력 경로가 거부한다(범위 없는 CVar·독립 콘솔 설정·설정 struct 필드).
+// NaN·무한대는 모든 입력 경로가 거부한다(범위 없는 CVar·동적 변수·설정 struct 필드).
 TEST(CVar_ConsoleRejectsNonFiniteNumbers) {
     ConfigFixture fixture;
     ConfigContext& context = fixture.Context();
     REQUIRE(context.Register(ConsoleScale));
-    ConsoleSettingDefinition ratio;
+    DynamicVarDefinition ratio;
     ratio.name = "render.console.ratio";
     ratio.help = "Ratio";
     ratio.type = ConsoleValueType::Double;
     ratio.defaultValue = "1";
-    REQUIRE(context.RegisterConsoleSetting(ratio));
+    REQUIRE(context.RegisterDynamic(ratio));
     REQUIRE(context.Sync());
     context.Diagnostics().Clear();
     CHECK(!context.AddAssignment(ConfigLayer::Session, "--set", "render.console.scale", "nan"));

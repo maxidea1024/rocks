@@ -82,6 +82,38 @@ constinit cvar::ConsoleCommand TraceSnapshotCommand =
     cvar::Command<&RunSnapshot>("trace.snapshot")
         .Help("Write the recent trace ring to a file: trace.snapshot Saved/Traces/recent.rtrace");
 
+constinit BootCVar<int64> TracePoolMaxBytesVar =
+    cvar::Boot("trace.pool.max_bytes", int64{64} * 1024 * 1024)
+        .Help("Trace block pool limit in bytes (rounded down to whole pages). Fixed after startup.")
+        .Range(0, NumericLimits<int64>::Max());
+
+constinit BootCVar<int32> TracePoolWarningPercentVar =
+    cvar::Boot("trace.pool.warn_percent", 80)
+        .Help("Trace block pool usage warning in percent (0 turns it off). Fixed after startup.")
+        .Range(0, MaxTracePoolWarningPercent);
+
+constinit BootCVar<int64> TraceRecentBytesVar =
+    cvar::Boot("trace.recent.bytes", int64{4} * 1024 * 1024)
+        .Help("Size of the recent trace record ring in bytes (0 means no ring; trace.snapshot "
+              "writes it). Fixed after startup.")
+        .Range(0, NumericLimits<int64>::Max());
+
+constinit BootCVar<int32> TraceWriterPeriodVar =
+    cvar::Boot("trace.writer.period_ms", 16)
+        .Help("Flush period of the trace writer thread in milliseconds. Fixed after startup.")
+        .Range(0, NumericLimits<int32>::Max());
+
+constinit BootCVar<int32> TraceStatsIntervalVar =
+    cvar::Boot("trace.stats.interval_pumps", 60)
+        .Help("Pumps between capture statistics records of the stats channel. Fixed after "
+              "startup.")
+        .Range(0, NumericLimits<int32>::Max());
+
+constinit CVar<int32> TraceSnapshotLockTimeoutVar =
+    cvar::Var("trace.snapshot.lock_timeout_ms", 1000)
+        .Help("How long trace.snapshot waits for the trace writer lock, in milliseconds.")
+        .Range(0, NumericLimits<int32>::Max());
+
 Result<void> RegisterTraceControlTypes(ModuleRegistration& registration) noexcept {
     return generated::TraceControl::RegisterModuleTypes(registration);
 }
@@ -95,7 +127,27 @@ Result<void> RegisterTraceSettings(config::ConfigContext& config) noexcept {
         return presets;
     }
 
-    return config.RegisterSettings<TraceCaptureSettings>();
+    return config.Register(TracePoolMaxBytesVar, TracePoolWarningPercentVar, TraceRecentBytesVar,
+                           TraceWriterPeriodVar, TraceStatsIntervalVar,
+                           TraceSnapshotLockTimeoutVar);
+}
+
+Result<TraceCaptureSettings>
+ReadTraceCaptureSettings(const config::ConfigContext& config) noexcept {
+    SharedPtr<const config::ConfigSnapshot> snapshot = config.Acquire();
+    if (snapshot.Get() == nullptr || !snapshot->IsSealed()) {
+        return Result<TraceCaptureSettings>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    cvar::SnapshotBinding bound(Move(snapshot));
+    TraceCaptureSettings settings;
+    settings.poolMaxBytes = TracePoolMaxBytesVar.Get();
+    settings.poolWarningPercent = TracePoolWarningPercentVar.Get();
+    settings.recentBytes = TraceRecentBytesVar.Get();
+    settings.writerPeriodMs = TraceWriterPeriodVar.Get();
+    settings.statsIntervalPumps = TraceStatsIntervalVar.Get();
+    settings.snapshotLockTimeoutMs = TraceSnapshotLockTimeoutVar.Get();
+    return Result<TraceCaptureSettings>::Success(settings);
 }
 
 TraceSessionSettings MakeTraceSessionSettings(const TraceCaptureSettings& settings,
@@ -319,8 +371,9 @@ Result<TraceSnapshotInfo> TraceController::WriteSnapshot(StringView path) noexce
         return Result<TraceSnapshotInfo>::Failure(assigned.Error());
     }
 
-    const auto timeout = static_cast<uint32>(ClampUnsigned(
-        config_.Get<TraceCaptureSettings>().snapshotLockTimeoutMs, NumericLimits<uint32>::Max()));
+    // 명령은 Sync 5단계에 게임 lane에서 돈다(이 문맥의 snapshot이 묶여 있다 — CVar 7.1절).
+    const auto timeout = static_cast<uint32>(
+        ClampUnsigned(TraceSnapshotLockTimeoutVar.Get(), NumericLimits<uint32>::Max()));
     auto written = session_.WriteSnapshot(terminated.CStr(), timeout);
     if (!written) {
         const platform::FileStatus status = session_.Stats().lastOutputFileStatus;

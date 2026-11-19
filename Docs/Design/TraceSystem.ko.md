@@ -1,6 +1,6 @@
 # 다중 스레드 trace 설계
 
-기준일: 2026-11-18, 개정 7. 여러 스레드의 CPU 구간·카운터·표지·task 수명·GPU 구간을 하나의 시간축에 기록하는 **trace 수집**(TraceCapture)과, 이를 읽는 **trace 분석**(TraceAnalysis)을 정한다.
+기준일: 2026-11-19, 개정 8. 여러 스레드의 CPU 구간·카운터·표지·task 수명·GPU 구간을 하나의 시간축에 기록하는 **trace 수집**(TraceCapture)과, 이를 읽는 **trace 분석**(TraceAnalysis)을 정한다.
 
 [렌더 기반](RenderBase.ko.md)의 선행 작업 CP5(다중 스레드 CPU 구간 계측·카운터·GPU 상관)이고 RB7(`GpuScope`, RenderBase 13절)의 기반이다. 요구는 다음 문서에서 온다.
 - [엔진 구현 계획](EngineImplementationPlan.ko.md) 29.1절(계측 체계), 29.4절(필수 로깅·프로파일러), 29.5절(OB01–OB06)
@@ -176,8 +176,8 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론)의 현재 기본 경로다. 경�
   - 묶음은 설정 struct `TracePresetSettings`(branch `Engine`, 섹션 `TracePresets`)의 필드다. 필드 하나가 묶음 하나이고 도구 이름이 묶음 이름이다(`default`). 기본 목록은 `Engine/Config/Engine.json`에 있다. 프로젝트는 같은 섹션에 배열 연산(`$append`·`$remove` 등)을 쓴다. 배열 연산은 struct 필드에만 되므로(ConfigSystem 4.2절) 묶음을 Map으로 두지 않았다. 묶음을 더하면 필드와 이름 표 항목을 함께 더한다.
   - 이름 목록은 쉼표로 나눈 채널·묶음 이름이고, 앞의 `-`는 끄기다(`--trace=default,-log`). 묶음 안의 모르는 이름(아직 없는 채널)은 세기만 하고, 직접 적은 모르는 이름은 경고 로그를 한 번 남긴다.
 - **표준 채널(개정 7):** `cpu`·`counter`·`mark`·`span`·`frame`·`context`·`task`·`stats`·`log`(TraceCapture가 세션 Start 때 꺼진 상태로 등록), `gpu`(RenderBase). `log`는 로깅 LG15에서 더했다(6.6절).
-  - 콘솔 명령 인자는 리플렉션 명령행 문법이다: `trace.enable channels=cpu,gpu`, `trace.disable channels=log`, `trace.file path=<경로>`, `trace.stop`(trace.file이 붙인 출력만 뗀다), `trace.snapshot path=<경로>`.
-  - 세션 설정은 설정 struct `TraceCaptureSettings`(섹션 `Trace`)다. 콘솔 이름은 `trace.pool.max_bytes`·`trace.pool.warn_percent`·`trace.recent.bytes`·`trace.writer.period_ms`·`trace.stats.interval_pumps`(재시작 필요)·`trace.snapshot.lock_timeout_ms`다(콘솔 이름 문법이 소문자·밑줄이라 이 문서의 낙타 표기와 다르다). 콘솔 값 종류에 부호 없는 정수가 없어 부호 있는 칸이고, 세션 설정으로 옮길 때 음수는 0이다.
+  - 콘솔 명령은 CVar 명령 핸들이고 인자는 줄의 나머지다(CVarSystem CVR6): `trace.enable cpu,gpu`, `trace.disable log`, `trace.file <경로>`, `trace.stop`(trace.file이 붙인 출력만 뗀다), `trace.snapshot <경로>`.
+  - 세션 설정은 CVar 핸들 `trace.*`다(CVarSystem CVR7 — 개정 8): `trace.pool.max_bytes`·`trace.pool.warn_percent`·`trace.recent.bytes`·`trace.writer.period_ms`·`trace.stats.interval_pumps`는 `BootCVar`(봉인 뒤 이번 실행 고정), `trace.snapshot.lock_timeout_ms`는 `CVar`(실행 중 변경)다. 값은 설정 파일의 `Settings` 섹션·`--set`·콘솔로 넣는다(콘솔 이름 문법이 소문자·밑줄이라 이 문서의 낙타 표기와 다르다). 값은 `Range`로 음수를 거부하고(백분율은 0–100), `ReadTraceCaptureSettings(config)`가 봉인 뒤 snapshot에서 읽어 `TraceCaptureSettings`(리플렉션 없는 값 묶음)를 채운다. 세션 설정으로 옮길 때 너무 큰 값은 그 칸의 최대값이다. 설정 struct `TraceCaptureSettings`(섹션 `Trace`)는 없앴으므로 엔진 층 파일의 `"Trace"` 섹션은 이제 모르는 섹션으로 거부된다(`"Settings": {"trace.pool.max_bytes": …}`로 옮긴다). 채널 묶음 `TracePresets`는 배열 값이라 설정 struct로 남는다.
 
 ## 6. 기록 종류
 
@@ -411,6 +411,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론)의 현재 기본 경로다. 경�
 
 ## 13. 개정 이력
 
+- 개정 8(2026-11-19, CVar 세션): 5절 TraceControl 세션 설정을 CVar 핸들(`trace.*` — CVarSystem CVR7)로, 엔진 층 파일의 `"Trace"` 섹션 거부, 콘솔 명령 인자 표기를 CVR6 명령 핸들(줄의 나머지)로 고쳤다.
 - 개정 7(2026-11-18, 로깅 세션 작성·rocks-95 합의): 상관 id 스택을 Core `CorrelationScope`로 옮기고 trace는 확장 칸·관찰자로 기록을 유지한다(6.4절). 문맥 전파는 task 채널과 무관하게 늘 하고 `DedicatedLane::Post`도 전파한다(7절). 표준 채널 `log`와 `Trace.LogMessageSpec`·`Trace.LogMessage`, 분석 `Logs()`·report `logs`를 더했다(5절·6.6절, 로깅 LG15). 재리뷰 반영: spec id 위치는 문자열 내용 해시, 정의 상한 초과 spec은 바로 동봉, 동봉 템플릿 1024 byte 상한과 잘림 비트 2, 동봉 실패는 sink만 센다(6.6절).
 - 개정 6(2026-11-18): TR5 구현 반영(5절 구현, 8절 구현). 스펙과 다르게 정한 것: 고리의 덩어리에 기록 경계 표시를 두고 경계를 잃은 덩어리는 스냅샷에서 뺀다, 동기 표지를 세션 내부 형 기록(`Trace.SnapshotSync`)으로 둔다, 수집 통계를 표준 채널 `stats`의 기록으로 펌프 수 간격에 낸다(기본 묶음에 넣지 않음), 설정 계층 연결을 새 모듈 `TraceControl`에 둔다, 묶음은 Map이 아니라 설정 struct의 필드다, 콘솔 설정 이름은 밑줄 표기다, `trace.stop`은 세션이 아니라 `trace.file`의 출력만 끝낸다.
 - 개정 5(2026-11-17): RB7 GPU 기록 형 구현 반영(9절). 형 4개와 배치, 변환 식, 기록 스트림, 세션별 정의 재기록, 분석 모델과 report 판 2의 `gpu` 절을 적었다. 스펙과 다르게 정한 것: 구간 하나를 두 tick 기록 하나로, "GPU 시간 없음"을 queue 정의 칸으로, 작업·fence 사건은 뒤로. 채널 설명 문자열은 영어로 바꿨다(로그·추적 메시지 영어 규칙).

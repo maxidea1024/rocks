@@ -174,14 +174,14 @@ TEST(CVar_LateBootRegistrationRejectsSealedDirectWrites) {
     CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::BootSealed));
     CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::LateBound));
 
-    ConsoleSettingDefinition port;
+    DynamicVarDefinition port;
     port.name = "net.boot.port";
     port.help = "Listen port";
     port.type = ConsoleValueType::Int32;
     port.defaultValue = "7777";
-    port.flags = static_cast<uint32>(ConsoleSettingFlags::RestartRequired);
+    port.boot = true;
     context.Diagnostics().Clear();
-    REQUIRE(context.RegisterConsoleSetting(port));
+    REQUIRE(context.RegisterDynamic(port));
     auto portId = context.FindConsoleSetting("net.boot.port");
     REQUIRE(portId);
     CHECK(context.ConsoleValue(portId.Value()).signedInteger == 7777);

@@ -18,12 +18,13 @@
 // 부트 순서(호스트가 이 순서로 부른다):
 //   1) Initialize          모듈 타입(TraceControl + options.registerModuleTypes)과 설정 등록
 //                          (log.*, trace.*·TracePresets, options.registerSettings). 파일보다
-//                          먼저다.
+//                          먼저다. 문맥을 프로세스 기본 문맥으로 정한다(묶음 없는 스레드의
+//                          CVar `Set`이 간다 — CVarSystem 6.2절).
 //   2) LoadFiles           엔진·프로젝트(·플랫폼·사용자) 층 파일(LoadConfigFiles)
 //   3) AddFile             호스트가 받은 추가 파일(예: Sandbox --config, Project 층)
 //   4) ApplyCommandLine    --set=<target>=<value>(Session 층), --device-profile=<이름> 기억
 //   5) CompleteStartup     Sync → 기기 프로필 적용 → Sync → 시작 완료
-//                          (StartupOnly 값 — log.mode·log.file.* 등 — 고정)
+//                          (부팅 값 — BootCVar인 log.mode·log.file.*·trace.pool.* 등 — 고정)
 //   그다음 LogHost 설치 → trace 세션 → 엔진 루프(프레임마다 Sync).
 // 실패는 이 객체가 진단과 함께 한 번 기록한다(LogHost 설치 전이면 비상 경로 stderr). 호출자는 다시
 // 기록하지 않는다.
@@ -38,8 +39,9 @@
 // `<UserData>/<프로젝트 이름>/Config`다(UserDataDirectory — Windows Roaming AppData, macOS Library/
 // Application Support). Sandbox·RocksCommandlet처럼 프로젝트가 없는 도구는 봉인 모드다.
 //
-// 수명: LogHost·TraceController·엔진보다 오래 산다(LogHost::Stop이 구독을 푼다). 스레드: 만든
-// 스레드(게임 스레드)에서만 쓴다.
+// 수명: LogHost·TraceController·엔진보다 오래 산다(LogHost::Stop이 변경 알림을 뺀다). 프로세스에
+// 하나다(문맥이 프로세스 기본 문맥이므로 둘을 함께 살리면 두 번째 Initialize가 AlreadyExists다).
+// 스레드: 만든 스레드(게임 스레드)에서만 쓴다.
 namespace rocks {
 
 struct HostSettingsOptions {
@@ -98,7 +100,8 @@ public:
     HostSettings(const HostSettings&) = delete;
     HostSettings& operator=(const HostSettings&) = delete;
 
-    // 1) 문맥을 만들고 타입·설정을 등록한다. 오류: 등록·초기화의 오류(기록한다).
+    // 1) 문맥을 만들고 타입·설정을 등록하고 프로세스 기본 문맥으로 정한다. 오류: 등록·초기화의
+    // 오류, 다른 문맥이 이미 프로세스 기본이면 AlreadyExists(기록한다).
     Result<void> Initialize(const HostSettingsOptions& options) noexcept;
 
     // 2) 층 파일을 읽는다. 오류: LoadConfigFiles의 오류(진단을 기록한다).

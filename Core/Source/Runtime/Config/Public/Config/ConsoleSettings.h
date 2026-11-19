@@ -8,9 +8,11 @@
 #include <Core/Memory/UniquePtr.h>
 #include <Object/RuntimeTypeOps.h>
 
-// 콘솔 설정·콘솔 명령의 정의다(Docs/Design/ConfigSystem.ko.md 5절 — 설정 CF2, 설정 snapshot은
-// Config/ConfigSnapshot.h). 등록과 조회는 ConfigContext가 한다(ConfigContext.h). UE 대응: 콘솔
-// 설정은 console variable(IConsoleVariable), 콘솔 명령은 console command다.
+// 콘솔 설정의 값 종류·성질·설명과 콘솔 입출력 타입이다(Docs/Design/ConfigSystem.ko.md 5절,
+// CVarSystem.ko.md — 설정 snapshot은 Config/ConfigSnapshot.h). 콘솔 설정은 CVar(핸들·동적 변수 —
+// Config/CVar.h, ConfigContext::RegisterDynamic)와 설정 struct 필드의 ConsoleName이다. 등록과
+// 조회는 ConfigContext가 한다(ConfigContext.h). UE 대응: 콘솔 설정은 console
+// variable(IConsoleVariable), 콘솔 명령은 console command다.
 namespace rocks::config {
 
 // 콘솔 설정 값 종류다(5.1절). 값은 리플렉션 FieldValue로 담는다(ValueKind는 ConsoleValueKind).
@@ -25,37 +27,30 @@ enum class ConsoleValueType : uint8 {
     Enum
 };
 
-// 콘솔 설정 플래그다(5.1절 표).
+// 콘솔 설정의 성질 비트다(ConsoleSettingInfo::flags). CVar는 빌더
+// 성질(cvar::VarFlags)·BootCVar에서, 설정 struct 필드는 필드 지정자에서 온다(CVar 21절 — 정의
+// 입력으로는 쓰지 않는다).
 enum class ConsoleSettingFlags : uint32 {
     None = 0,
-    // 콘솔 층에서 바꿀 수 없다(다른 층은 가능 — UE ECVF_ReadOnly).
+    // 콘솔 층에서 바꿀 수 없다(다른 층은 가능 — UE ECVF_ReadOnly). CVar ConsoleReadOnly().
     ConsoleReadOnly = 1,
-    // 출시 규칙에서는 콘솔에 보이지 않고 값이 코드 기본값으로 고정된다(UE ECVF_Cheat).
+    // 출시 규칙에서는 콘솔에 보이지 않고 값이 코드 기본값으로 고정된다(UE ECVF_Cheat). CVar
+    // Cheat().
     DevelopmentOnly = 2,
-    // 설정 snapshot에 넣는다(UE ECVF_RenderThreadSafe).
+    // 설정 struct 필드의 값을 설정 snapshot의 이름 블록에 넣는다(필드만 — CVar는 모두 칸에 있다).
     RenderRead = 4,
-    // 바뀐 값이 다음 시작 때 효력을 갖는다(시작 뒤에는 지금 값을 유지 — StartupOnly와 같은 규칙,
-    // CompleteStartup 참고).
+    // 설정 struct 필드 RestartRequired 지정자다(StartupOnly와 같은 부팅 값 규칙).
     RestartRequired = 8,
-    // 시작(ConfigContext::CompleteStartup) 뒤에는 이번 실행 값이 바뀌지 않는다(RestartRequired와
-    // 같은 규칙): 독립 콘솔 설정에 바로 쓰는 층(콘솔·코드·범위 임시 변경)의 쓰기는 넣을 때 Error
-    // BootSealed로 거부하고, 파일 층 변경은 재시작 대기, 파생·휘발 층 변경은 Warning
-    // BootValueIgnored다. 설정 struct 필드는 콘솔 이름으로 써도 BootValueIgnored다(Config 8절).
+    // 시작(ConfigContext::CompleteStartup) 뒤에는 이번 실행 값이 바뀌지 않는다(BootCVar, 설정
+    // struct 필드 StartupOnly 지정자): 바로 쓰는 층(콘솔·코드·범위 임시 변경)의 쓰기는 넣을 때
+    // Error BootSealed로 거부하고, 파일 층 변경은 재시작 대기, 파생·휘발 층 변경은 Warning
+    // BootValueIgnored다(CVar 9절).
     StartupOnly = 16,
-    // 사용자 층이 쓸 수 있다.
+    // 사용자 층이 쓸 수 있다. CVar UserSetting().
     UserConfig = 32
     // 품질 묶음 층(UE ECVF_Scalability)은 플래그가 아니다: 그 층은 프리셋 묶음(CVarGroup — CVar
     // 11절)의 펼침만 쓰고, 펼침은 묶음 항목인 변수에만 닿는다(구성원 자동 — VD14).
 };
-
-// ConsoleSettingFlags의 알려진 비트 전부다.
-inline constexpr uint32 KnownConsoleSettingFlags =
-    static_cast<uint32>(ConsoleSettingFlags::ConsoleReadOnly) |
-    static_cast<uint32>(ConsoleSettingFlags::DevelopmentOnly) |
-    static_cast<uint32>(ConsoleSettingFlags::RenderRead) |
-    static_cast<uint32>(ConsoleSettingFlags::RestartRequired) |
-    static_cast<uint32>(ConsoleSettingFlags::StartupOnly) |
-    static_cast<uint32>(ConsoleSettingFlags::UserConfig);
 
 constexpr bool HasFlag(uint32 flags, ConsoleSettingFlags flag) noexcept {
     return (flags & static_cast<uint32>(flag)) != 0;
@@ -69,44 +64,6 @@ ValueKind ConsoleValueKind(ConsoleValueType type) noexcept;
 inline constexpr StringView DefaultConsoleRegions[] = {
     "render", "graph", "stream", "shader", "quality", "net",   "physics", "log",
     "game",   "input", "audio",  "ui",     "cvar",    "cheat", "obj"};
-
-// 독립 콘솔 설정 하나의 정의다(설정 struct 필드가 아닌 것 — 필드는 ConsoleName 지정자로 등록된다).
-// view는 등록 호출 동안만 빌린다(문맥이 복사한다).
-//
-// 사용 예:
-//   ConsoleSettingDefinition pool;
-//   pool.name = "stream.pool_mb";
-//   pool.help = "Texture streaming pool size in MiB";
-//   pool.type = ConsoleValueType::Int32;
-//   pool.defaultValue = "512";
-//   pool.flags = static_cast<uint32>(ConsoleSettingFlags::RenderRead);
-//   pool.hasRange = true;
-//   pool.minimum = 64;
-//   pool.maximum = 8192;
-//   auto id = context.RegisterConsoleSetting(pool);
-struct ConsoleSettingDefinition {
-    // 소문자 점 경로(IsConsoleSettingName), 첫 마디는 등록된 영역 이름 공간.
-    StringView name;
-    // 도움말(필수 — 비어 있으면 InvalidArgument).
-    StringView help;
-    ConsoleValueType type = ConsoleValueType::Bool;
-    // Enum 종류의 리플렉션 enum ID(TypeRegistry에 등록돼 있어야 한다).
-    TypeId enumType{};
-    // 코드 기본값의 콘솔 표기(리플렉션 명령행 단일 값 — `true`·`512`·`1.5`·`High`). 비어 있으면 그
-    // 종류의 0·빈 값·enum 첫 열거자다.
-    StringView defaultValue;
-    // ConsoleSettingFlags 비트.
-    uint32 flags = 0;
-    // 수 종류(Int32·Int64·Float·Double)의 닫힌 범위다(hasRange일 때). 밖의 값은 거부한다.
-    bool hasRange = false;
-    double minimum = 0;
-    double maximum = 0;
-    // String·Name·Enum의 허용 값(콘솔 표기 — Enum은 대소문자 무시)이다. 비어 있으면 모두 허용한다.
-    Span<const StringView> allowedValues{};
-    // String·Name의 허용 값도 ASCII 대소문자를 무시하고 맞춘다(값은 입력 표기 그대로 남는다 —
-    // 읽는 쪽도 대소문자를 무시해야 한다). 예: log.level의 "Warning".
-    bool allowedValuesIgnoreCase = false;
-};
 
 // 콘솔 설정 핸들이다(등록 순번). 문맥 수명 동안 유효하다.
 struct ConsoleSettingId {
@@ -189,23 +146,6 @@ enum class NetworkRole : uint8 {
 struct ReplicatedValue {
     StringView name;
     StringView value;
-};
-
-// 값이 바뀐 설정 하나다(변경 콜백 인자). name은 콘솔 설정 이름이거나 설정 struct의
-// `<Branch>.<Section>`이다. settings는 설정 struct면 그 TypeId, 콘솔 설정이면 0이다. view는 콜백
-// 동안만 유효하다.
-struct ConfigChange {
-    StringView name;
-    TypeId settings{};
-};
-
-// 변경 콜백이다. sync 지점에서 값이 바뀐 대상마다, 구독 순서대로 소유 스레드가 부른다. 콜백 안에서
-// 층 입력·Unset·콘솔 입력은 큐에 들어가 다음 Sync에 적용된다. Sync를 다시 부르면 Busy다.
-using ConfigChangeCallback = void (*)(void* context, const ConfigChange& change) noexcept;
-
-// 구독 핸들이다(Unsubscribe에 쓴다).
-struct ConfigSubscriptionId {
-    uint64 value = 0;
 };
 
 } // namespace rocks::config

@@ -156,6 +156,92 @@ constexpr ScalarValue ScalarOfArg(SetArg<T> value) noexcept {
 
 } // namespace detail
 
+namespace detail {
+
+// T로 읽을 수 있는 칸 종류인지다(enum 칸은 int64로 읽는다 — 기저 정수).
+template <class T>
+constexpr bool IsReadableKind(ValueKind kind) noexcept {
+    if constexpr (IsSameV<T, bool>) {
+        return kind == ValueKind::Bool;
+    } else if constexpr (IsSameV<T, int32>) {
+        return kind == ValueKind::Int32;
+    } else if constexpr (IsSameV<T, int64>) {
+        return kind == ValueKind::Int64 || kind == ValueKind::Enum;
+    } else if constexpr (IsSameV<T, float>) {
+        return kind == ValueKind::Float32;
+    } else if constexpr (IsSameV<T, double>) {
+        return kind == ValueKind::Float64;
+    } else if constexpr (IsSameV<T, String>) {
+        return kind == ValueKind::Utf8String;
+    } else {
+        return kind == ValueKind::Name;
+    }
+}
+
+// snapshot에서 번호 index의 칸을 찾는다(봉인 뒤 snapshot은 부팅 블록 먼저). boot는 부팅 블록
+// 칸인지다. 없으면 null.
+inline const config::CVarSlot* FindDynamicSlot(const config::ConfigSnapshot& snapshot, uint32 index,
+                                               bool& boot) noexcept {
+    boot = false;
+    if (snapshot.IsSealed()) {
+        if (const config::CVarSlot* slot = snapshot.FindBootSlot(index)) {
+            boot = true;
+            return slot;
+        }
+    }
+
+    return snapshot.FindSlot(index);
+}
+
+} // namespace detail
+
+// 동적 변수(ConfigContext::RegisterDynamic — CVar 5절)의 칸 값 종류다(Bool·Int32·Int64·Float32·
+// Float64·Utf8String·Name·Enum). 이 snapshot에 칸이 없으면(등록 전 snapshot·무효 번호) Opaque다.
+// 실행 중 타입으로 등록하는 쪽(Sparks)이 ReadDynamic의 T를 고르는 데 쓴다. 어느 스레드에서나
+// 부른다.
+inline ValueKind DynamicKind(const config::ConfigSnapshot& snapshot, Index index) noexcept {
+    if (!index.IsValid()) {
+        return ValueKind::Opaque;
+    }
+
+    bool boot = false;
+    const config::CVarSlot* slot = detail::FindDynamicSlot(snapshot, index.value, boot);
+    return slot != nullptr ? slot->kind : ValueKind::Opaque;
+}
+
+// 동적 변수(ConfigContext::RegisterDynamic — CVar 5절)의 값을 snapshot에서 읽는다. T는 등록한
+// 타입(bool·int32·int64·float·double·String·Name)이고 enum 변수는 int64로 읽는다(값은 기저 정수).
+// 칸의 값 종류가 T와 다르면(모든 빌드에서 확인한다) fallback이다. String은 snapshot이 살아 있는
+// 동안 유효한 StringView다. 봉인 뒤 snapshot의 부팅 변수는 부팅 블록을 읽는다. 이 snapshot에 칸이
+// 없으면(등록 전 snapshot·무효 번호) fallback이다. 어느 스레드에서나 부른다(snapshot은 불변이다).
+//
+// 사용 예:
+//   auto pool = config.RegisterDynamic(definition);
+//   const int32 megabytes = cvar::ReadDynamic<int32>(*config.Acquire(), pool.Value(), 512);
+template <class T>
+GetResult<T> ReadDynamic(const config::ConfigSnapshot& snapshot, Index index,
+                         GetResult<T> fallback) noexcept {
+    static_assert(IsSameV<T, bool> || IsNumericVarType<T> || IsTextVarType<T>,
+                  "ReadDynamic reads bool, int32, int64, float, double, String or Name (enum "
+                  "variables read as int64)");
+    if (!index.IsValid()) {
+        return fallback;
+    }
+
+    bool boot = false;
+    const config::CVarSlot* slot = detail::FindDynamicSlot(snapshot, index.value, boot);
+    if (slot == nullptr || !detail::IsReadableKind<T>(slot->kind)) {
+        return fallback;
+    }
+
+    if constexpr (IsTextVarType<T>) {
+        return detail::ReadSlot<T>(
+            boot ? &snapshot.BootTextAt(index.value) : &snapshot.TextAt(index.value), *slot);
+    } else {
+        return detail::ReadSlot<T>(nullptr, *slot);
+    }
+}
+
 template <class T>
 class VarBuilder;
 

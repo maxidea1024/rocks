@@ -1,6 +1,6 @@
 # 로깅 시스템 설계
 
-기준일: 2026-11-18, 개정 11. 엔진 전반에서 쓰는 **로그**(사람이 읽는 사건 기록)의 호출 API, 카테고리·레벨 필터, 비동기 기록 경로, 출력 형식, 장애 격리, 엔진 적용 범위를 정한다.
+기준일: 2026-11-19, 개정 12. 엔진 전반에서 쓰는 **로그**(사람이 읽는 사건 기록)의 호출 API, 카테고리·레벨 필터, 비동기 기록 경로, 출력 형식, 장애 격리, 엔진 적용 범위를 정한다.
 
 요구는 다음 문서에서 온다.
 - [엔진 구현 계획](EngineImplementationPlan.ko.md) 29.4절(필수 로깅·프로파일러: level/category, UTC+monotonic, rate limit·중복 집계, compile/runtime level, error/fatal 비상 경로, 임계 구간에서 file IO·heap·lock wait 금지)
@@ -373,31 +373,32 @@ public:
 
 ### 9.2 설정(`LogHost`)
 
-`LogHost` 모듈(`Core/Source/Runtime/LogHost`, 의존 Core·Config·Crypto)이 아래 콘솔 설정을 등록하고(`RegisterLogSettings`, 전역 생성자 없음), 그 값으로 LogSystem과 stderr·파일 sink를 만든다. Core는 Config·Crypto에 의존하지 않는다. 이름은 Config 이름 규칙(소문자 점 경로)을 따른다.
+`LogHost` 모듈(`Core/Source/Runtime/LogHost`, 의존 Core·Config·Crypto)이 아래 CVar 핸들(`LogHost.h`의 `extern` 핸들 — `LogLevelVar` 등, CVarSystem 4절)을 등록하고(`RegisterLogSettings`가 `ConfigContext::Register`, 전역 생성자 없음), 그 값으로 LogSystem과 stderr·파일 sink를 만든다(개정 12 — CVar CVR7). Core는 Config·Crypto에 의존하지 않는다. 이름은 Config 이름 규칙(소문자 점 경로)을 따른다.
 
-| 이름 | 종류 | 기본값 | 허용 값·범위 | 변경 |
+| 이름 | 핸들(타입) | 기본값 | 허용 값·범위·검사 | 변경 |
 |---|---|---|---|---|
-| `log.mode` | string | `default` | `default`(호스트 프리셋)·`async`·`sync` | 시작 뒤 고정 |
-| `log.level` | string | `info` | `trace`·`debug`·`info`·`warning`·`error`·`fatal`(대소문자 무시, 그 밖은 설정 단계에서 거부) | 실행 중, sync 지점 |
-| `log.levels` | string | `""` | `"Graphics=warning,Engine.World=debug"`(접두사·레벨 대소문자 무시) | 실행 중, sync 지점 |
-| `log.file.enabled` | bool | `false` | | 시작 뒤 고정 |
-| `log.file.directory` | string | `Saved/Logs` | | 시작 뒤 고정 |
-| `log.file.format` | string | `text` | `text`·`jsonlines` | 시작 뒤 고정 |
-| `log.file.max_bytes` | int64 | `16777216` | 65536–1099511627776 | 시작 뒤 고정 |
-| `log.file.retention` | int32 | `8` | 1–256 | 시작 뒤 고정 |
-| `log.file.encrypt` | bool | `false` | | 시작 뒤 고정 |
-| `log.file.recipient_key` | string | `""` | X-Wing 공개키 base64(비밀 아님, 개인키 금지) | 시작 뒤 고정 |
-| `log.console.layout` | string | `""`(기본 콘솔 레이아웃) | 레이아웃 패턴(9절) | 시작 뒤 고정 |
-| `log.file.layout` | string | `""`(기본 콘솔 레이아웃) | 레이아웃 패턴. `log.file.format = jsonlines`이면 쓰이지 않는다 | 시작 뒤 고정 |
-| `log.rate_limits` | string | `""` | `"Graphics=20,Engine.World.Tick=100"`(접두사별 초당 기록 수 1–1000000, 접두사 대소문자 무시, 최대 16항목) | 실행 중, sync 지점 |
-| `log.file.max_age_minutes` | int32 | `0`(끔) | 0–10080 | 시작 뒤 고정 |
-| `log.file.compress` | bool | `false` | | 시작 뒤 고정 |
+| `log.mode` | `BootCVar<LogHostMode>`(enum) | `default` | `default`(호스트 프리셋)·`async`·`sync`(대소문자 무시) | 시작 뒤 고정 |
+| `log.level` | `CVar<LogLevel>`(enum) | `info` | `trace`·`debug`·`info`·`warning`·`error`·`fatal`(대소문자 무시, 수 `0`–`5`도 받는다) | 실행 중, sync 지점 |
+| `log.levels` | `CVar<String>` | `""` | `"Graphics=warning,Engine.World=debug"`(접두사·레벨 대소문자 무시), `.Validate(CheckLogLevelsSyntax)` | 실행 중, sync 지점 |
+| `log.file.enabled` | `BootCVar<bool>` | `false` | | 시작 뒤 고정 |
+| `log.file.directory` | `BootCVar<String>` | `Saved/Logs` | | 시작 뒤 고정 |
+| `log.file.format` | `BootCVar<LogFileFormat>`(enum) | `text` | `text`·`jsonlines` | 시작 뒤 고정 |
+| `log.file.max_bytes` | `BootCVar<int64>` | `16777216` | `Range` 65536–1099511627776 | 시작 뒤 고정 |
+| `log.file.retention` | `BootCVar<int32>` | `8` | `Range` 1–256 | 시작 뒤 고정 |
+| `log.file.encrypt` | `BootCVar<bool>` | `false` | | 시작 뒤 고정 |
+| `log.file.recipient_key` | `BootCVar<String>` | `""` | X-Wing 공개키 base64(비밀 아님, 개인키 금지) | 시작 뒤 고정 |
+| `log.console.layout` | `BootCVar<String>` | `""`(기본 콘솔 레이아웃) | 레이아웃 패턴(9절), `.Validate(CheckLogLayoutSyntax)` | 시작 뒤 고정 |
+| `log.file.layout` | `BootCVar<String>` | `""`(기본 콘솔 레이아웃) | 레이아웃 패턴, `.Validate(CheckLogLayoutSyntax)`. `log.file.format = jsonlines`이면 쓰이지 않는다 | 시작 뒤 고정 |
+| `log.rate_limits` | `CVar<String>` | `""` | `"Graphics=20,Engine.World.Tick=100"`(접두사별 초당 기록 수 1–1000000, 접두사 대소문자 무시, 최대 16항목), `.Validate(CheckLogRateLimitsSyntax)` | 실행 중, sync 지점 |
+| `log.file.max_age_minutes` | `BootCVar<int32>` | `0`(끔) | `Range` 0–10080 | 시작 뒤 고정 |
+| `log.file.compress` | `BootCVar<bool>` | `false` | | 시작 뒤 고정 |
 
-- **카테고리별 재정의**는 문자열 하나(`log.levels`, `접두사=레벨` 목록)다. Map 설정은 리플렉션 생성 struct가 필요해 쓰지 않았다. 잘못된 항목은 Warning을 남기고 건너뛴다.
-- **실행 중 변경:** `LogHost::Watch`가 `log.level`·`log.levels`를 구독하고 Config sync 지점에서 다시 적용한다. 다시 적용할 때 앞의 재정의를 지운다. 시작 뒤 고정 항목은 Config `StartupOnly` 플래그와 호스트의 `CompleteStartup`으로 거부된다.
+- **카테고리별 재정의**는 문자열 하나(`log.levels`, `접두사=레벨` 목록)다. Map 설정은 리플렉션 생성 struct가 필요해 쓰지 않았다. 문법이 틀린 값은 설정 단계(층 입력·콘솔·`Set`)에서 `Validate`가 거부한다(L18). 적용 때는 적용 실패(재정의 표 용량·해시 충돌, 속도 제한 표 용량)를 Warning으로 알리고 그 항목을 건너뛴다. 카테고리는 실행 중 등록 표가 없는 상수 객체이므로(6절) 접두사가 "알려진 카테고리"인지는 판정하지 않는다(아직 기록하지 않은 모듈의 접두사도 정당하다).
+- **읽기:** `LogHost::Start(preset, &context, hostName)`은 문맥의 snapshot(`Acquire`)을 묶어 핸들로 읽는다. 시작 뒤 고정 값을 읽으므로 문맥이 봉인(`CompleteStartup`)된 뒤에 부른다(아니면 `InvalidArgument`).
+- **실행 중 변경:** `LogHost::Watch`가 문맥의 `OnSynced`(Sync마다 한 번)에 알림 하나를 더하고, `Watcher`(세대 비교)로 `log.level`·`log.levels`·`log.rate_limits` 중 바뀐 것만 다시 적용한다. 다시 적용할 때 앞의 재정의를 지운다. 시작 뒤 고정 항목은 `BootCVar`이고 봉인 뒤 바로 쓰는 층(콘솔·코드)의 쓰기는 `BootSealed`로 거부된다(CVarSystem 9절).
 - **실패:** 암호화를 켰는데 키가 없거나 틀리면 파일 sink를 만들지 않고 Error를 한 번 남긴다(평문으로 기록하지 않음, L12). 파일 폴더를 열지 못하면 Error를 남기고 파일 없이 계속한다. `LogHost::Start`는 설치 전에 돌기 때문에 이 Error는 설치 전 비상 경로(stderr)로 나간다.
 - **호스트 순서(Sandbox `--engine --config <Engine.json>`, ConfigSystem 5.3·5.4절):** `HostSettings`(HostConfig 모듈)가 문맥을 만든다.
-  - 설정 단계: 등록(`RegisterLogSettings` → `trace.*` → 호스트) → 층 파일 → `--config` → `--set` → Sync → `CompleteStartup`(`log.mode`·`log.file.*` 고정).
+  - 설정 단계: 등록(`RegisterLogSettings` → `trace.*` → 호스트) → 층 파일 → `--config` → `--set` → Sync → `CompleteStartup`(`log.mode`·`log.file.*`·`log.console.layout` 고정).
   - 실행 단계: `LogHost::Start(preset, &context, hostName)` → 설치 → `Watch` → trace 세션 → 엔진 루프(프레임마다 Config Sync가 `log.level`·`log.levels` 변경을 적용).
   - 종료 단계: 엔진 정리 → `LogSystem::Flush` → trace sink(`TraceLogSink`) 제거 → trace 정지 → 설치 해제 → `LogHost::Stop`(`WriterAbandoned()`면 정리 없이 종료). trace sink는 trace 시작 직후 더한다(14.1.5).
   - 크래시 처리기: 엔진 호스트는 시작 때 `platform::InstallCrashHandler()`, 끝에 `RemoveCrashHandler()`(14.1.8). Sandbox `--engine`이 이렇게 한다.
@@ -765,7 +766,7 @@ LG11–LG19 중 다른 세션 소유 모듈을 고쳐야 하는 곳이다. 그 �
 
 | 단계 | 모듈(소유) | 필요한 변경 | 비고 |
 |---|---|---|---|
-| CVR7 | CVar(CVarSystem 세션) | `log.*` 이관 때 `log.levels`·`log.rate_limits`·`log.console.layout`·`log.file.layout`에 `Validate`(문법 오류 설정 단계 거부), `log.level`은 enum 표. 문법 검사는 상수 평가 함수 `constexpr StringView CheckLogLevelsSyntax(StringView)`·`CheckLogRateLimitsSyntax`·`CheckLogLayoutSyntax`(통과면 빈 view, 아니면 영어 리터럴 이유)를 그대로 쓴다(LG12·LG13 구현) | LG12는 Config를 고치지 않는다(L18). 지금 `ConsoleSettingDefinition::allowedValuesIgnoreCase`(LG8·LG9 리뷰)도 CVR7에서 enum 표로 대체 |
+| CVR7 | CVar(CVarSystem 세션) | `log.*` 이관 때 `log.levels`·`log.rate_limits`·`log.console.layout`·`log.file.layout`에 `Validate`(문법 오류 설정 단계 거부), `log.level`은 enum 표. 문법 검사는 상수 평가 함수 `constexpr StringView CheckLogLevelsSyntax(StringView)`·`CheckLogRateLimitsSyntax`·`CheckLogLayoutSyntax`(통과면 빈 view, 아니면 영어 리터럴 이유)를 그대로 쓴다(LG12·LG13 구현) | LG12는 Config를 고치지 않는다(L18). 지금 `ConsoleSettingDefinition::allowedValuesIgnoreCase`(LG8·LG9 리뷰)도 CVR7에서 enum 표로 대체  반영(CVR7, 개정 12 — `allowedValuesIgnoreCase`는 없앴다) |
 | LG14 | TraceCapture·Task(trace 세션) | 상관 id 스택을 Core `CorrelationScope`(확장 칸 `ext[2]`, 관찰자 hook)로 옮기고 `TraceContext*`는 관찰자·래퍼로 바꾼다. TR3 훅(`TraceTasks.cpp`)과 `DedicatedLane::Post`가 trace 채널과 무관하게 상관 id를 전파(비면 분기 하나) | L14–L16 합의 필요. TraceSystem.ko.md 6.4절·7절 개정. 기록 형식 불변, TR2·TR3 시험 무수정 통과 |
 | LG15 | TraceCapture·TraceAnalysis·`trace-report`(trace 세션) | 채널 `log` 등록, `Trace.LogMessageSpec`·`Trace.LogMessage` 형식, 분석·보고 | `TraceLogSink`는 로깅이 쓰고 형식 표는 trace 쪽 문서에 둔다 |
 | LG15 | 엔진 호스트(Sandbox `EngineHost`), HostConfig(rocks-95) | trace 세션 시작 뒤 sink 추가, 정지 전 제거 | `HostSettings`는 설정 문맥만 만들므로 고칠 것이 없다. 새 `log.*` 설정은 LogHost가 등록한다 |
@@ -806,8 +807,8 @@ LG11–LG19 중 다른 세션 소유 모듈을 고쳐야 하는 곳이다. 그 �
 | L14 | 상관 id 스택은 Core가 소유한다(`CorrelationIds` 5×u64 + 상위 계층용 확장 칸 `ext[2]`, `CorrelationScope`, 쌓기·내리기 관찰자 hook). TraceCapture의 `TraceContext*`는 관찰자와 래퍼로 기존 cache·기록을 유지한다. 로그는 생산자에서 맨 위 40 B를 복사한다(비면 0 B, 할당 없음) | 결정됨(2026-11-18, 권장안 — trace 세션 합의 필요) |
 | L15 | 상관 id 전파(task·`DedicatedLane::Post`)는 trace 채널과 무관하게 늘 한다. 스택이 비면 분기 하나다. trace 기록만 채널을 따른다 | 결정됨(2026-11-18, 권장안 — trace 세션 합의 필요) |
 | L16 | trace `log` 채널은 TraceCapture의 `TraceLogSink`가 쓴다. `Trace.LogMessageSpec`(세션·호출 지점(EventId·카테고리·위치)당 1회, 쓰기 성공 뒤 표에 넣음, 표가 차면 기록에 카테고리·템플릿을 실음)과 `Trace.LogMessage`(캡처 tick·생산자 스레드·spec id·상관 id 명시, 렌더된 메시지)다. 기록 머리는 tick을 캡처한다(LG13). 속성은 보내지 않는다 | 결정됨(2026-11-18, 권장안 — trace 세션 합의 필요) |
-| L17 | 레이아웃 설정 `log.console.layout`·`log.file.layout`은 시작 뒤 고정이고, 잘못된 패턴은 지금은 Start에서 Error 1회 + 기본 레이아웃이고, CVR7 이관 뒤 설정 단계에서 거부한다(L18). jsonlines 파일에서 `log.file.layout`은 Warning 후 무시 | 결정됨(2026-11-18, 권장안) |
-| L18 | Config에 검증 hook을 더하지 않는다. 설정 단계 거부는 CVar `Validate`(CVarSystem VD10)로 CVR7 이관 때 한다. 그 전까지 레이아웃 오류는 Start에서 Error 1회 + 기본 레이아웃, `log.levels`·`log.rate_limits` 오류는 적용 시점 Warning 후 건너뜀 | 결정됨(2026-11-18, 권장안 — 개정 10에서 CVar 설계 확정에 맞춰 바꿈) |
+| L17 | 레이아웃 설정 `log.console.layout`·`log.file.layout`은 시작 뒤 고정(`BootCVar`)이고, 잘못된 패턴은 설정 단계에서 `Validate(CheckLogLayoutSyntax)`가 거부한다(CVR7 — 개정 12). Start의 Error 1회 + 기본 레이아웃은 방어로 남는다. jsonlines 파일에서 `log.file.layout`은 Warning 후 무시 | 결정됨(2026-11-18, 권장안 — 개정 12에서 CVR7 반영) |
+| L18 | Config에 검증 hook을 더하지 않는다. 설정 단계 거부는 CVar `Validate`(CVarSystem VD10)로 한다 — CVR7에서 `log.levels`·`log.rate_limits`·두 레이아웃에 걸었다. 적용 시점에는 적용 실패만 Warning으로 알린다 | 결정됨(2026-11-18, 권장안 — 개정 10에서 CVar 설계 확정에 맞춰 바꿈, 개정 12에서 CVR7 반영) |
 | L19 | `{@Obj}`는 캡처 시점에 값을 복사한다. Core는 `LogStructure<T>` 확장점만 두고, 일반 특수화는 ObjectRuntime이 MetaCompiler 생성 필드 방문 함수로 registry·할당 없이 읽는다. 객체 참조는 역참조하지 않는다 | 결정됨(2026-11-18, 권장안 — 리플렉션 세션 합의 필요) |
 | L20 | 사용자 Formatter spec 검증은 선택 멤버 `static constexpr bool IsValidSpec(StringView)`이다. 리터럴 템플릿은 컴파일 타임에, 런타임 템플릿은 로그 캡처 전용 함수 포인터 배열로 검사하고, 없으면 캡처 때 판단한다 | 결정됨(2026-11-18, 권장안) |
 | L21 | 카테고리별 rate limit은 접두사별 1초 창이고, 창 번호(32-bit)와 수(32-bit)를 `Atomic<uint64>` 하나에 묶어 CAS로 바꾼다(창마다 통과 수 정확히 상한). 최대 16칸, Trace–Warning에만 적용, Error·Fatal 제외. 버린 수는 출력 스레드가 1초에 한 번까지 알린다 | 결정됨(2026-11-18, 권장안) |
@@ -841,5 +842,6 @@ LG11–LG19 중 다른 세션 소유 모듈을 고쳐야 하는 곳이다. 그 �
 - 개정 7(2026-11-18): LG7 구현 반영 — `CreateD3D12Device`·`Window::Create`에 report 인자(기본 nullptr), `Graphics/GraphicsLog.h` 카테고리와 `ValidationMessageFilter`, 셰이더 실패는 장치 LastError + 호출자 기록, Sandbox는 backend별 실행이라 "건너뛴 backend Warning·모두 실패 Error", OpenGL 기존 로그는 규칙 충족으로 유지.
 - 개정 8(2026-11-18): LG8·LG9 구현 반영 — 설정 이름을 Config 규칙에 맞춰 `log.file.max_bytes`·`log.file.recipient_key`로 바꿨다. `log.mode` 기본값 `default`(호스트 프리셋)를 더했다. 카테고리 재정의는 문자열 `log.levels`이고, 설정 처리는 새 `LogHost` 모듈에 둔다(9.2절). 보관 정리는 파일 이름 모양이 정확히 맞는 것만 센다. Asan·TSan 전체 체인은 저장소 검증 기준 변경으로 생략했다. Templates/Game은 tick·Engine이 없어 엔진 호스트로 다루지 않는다.
 - 개정 9(2026-11-18): 후속 설계 확정 — 16절 항목을 LG11–LG19로 설계했다(14.1절, 결정 L14–L27). 상관 id 스택을 Core로 내리고 trace `log` 채널은 `TraceLogSink`가 쓴다. 레이아웃 설정과 Config 검증 hook, 카테고리별 rate limit, `{@Obj}` 캡처 시점 복사와 생성 필드 방문 함수, Formatter spec 검증 규약, 시간 회전과 묶음별 zstd 압축(압축 뒤 봉인), `platform::Fatal` hook, `log view`를 다룬다. WorkerScheduler 진단은 선행 조건만 적었다. UE 5.8.4 `StructuredLog`·`LogTrace`·`OutputDeviceFile`·`FileHelper`·`OutputDeviceRedirector::Panic`을 확인했다. 다른 세션 조율은 15.1절이다. 리뷰 반영: 상관 id 스택에 확장 칸·관찰자 hook(H1), rate limit 창·수 단일 원자 값(M1), Compression 고정 작업 공간 문맥 요청(M2), 종료 hook `const char*`·막히지 않는 flush(M3), `log.levels` 거부 범위(M5), `{@Obj}` 특수화를 ObjectRuntime으로(M6), 런타임 템플릿 spec 검사 경로·전파 분기 하나·`DedicatedLane` 전파·tick 캡처·LG17 시험 방식·validate reason(Low). L25는 사용자 선택 A로 확정했고, L24·L26은 개정 8의 16절 밖 새 범위로 표시했다.
+- 개정 12(2026-11-19): CVar CVR7 반영. 9.2절 표를 핸들 종류(enum·`BootCVar`·`Validate`·`Range`)로, 읽기(봉인 뒤 snapshot)·실행 중 변경(`OnSynced` + `Watcher`, `log.rate_limits` 포함)·적용 실패 진단(카테고리 목록은 닫혀 있지 않아 모르는 접두사는 진단하지 않는다)을 고쳤다. L17·L18을 설정 단계 거부 반영으로, 15.1절 CVR7 행을 반영으로 바꿨다.
 - 개정 11(2026-11-18): LG11–LG15·LG17–LG19 구현 반영(14.2절). LG11–LG13·LG17–LG19 리뷰와 LG14·LG15 리뷰(rocks-95) 반영: spec 키를 호출 지점으로, 정의 쓰기 성공 뒤 표에 넣기, 표가 차면 기록에 싣기, 상관 id 확장 칸 규칙, 종료 순서(Flush → trace sink 제거 → trace 정지), 이름을 `Trace.LogMessageSpec`·`Trace.LogMessage`로. LG16은 GC 세션 병합 뒤로 미뤘다. LG14·LG15 재리뷰 반영: 빈 전파 경로 인라인(분기 하나), spec id 위치는 문자열 해시, 정의 상한 초과 spec 즉시 동봉·동봉 템플릿 상한, 측정 숫자(14.1.4).
 - 개정 10(2026-11-18): CVar 설계 확정(CVarSystem 개정 2, Config 개정 4)에 맞춰 L18을 바꿨다. Config에 validate hook을 더하지 않고, 설정 단계 거부는 CVR7의 CVar `Validate`로 미룬다. LG12는 Config 조율 없이 LogHost 적용 시점 검사로 한다. 15.1절 Config 항목을 CVar CVR7 항목으로 바꿨다.

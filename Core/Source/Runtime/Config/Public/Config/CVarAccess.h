@@ -111,6 +111,12 @@ public:
         return true;
     }
 
+    // 본 세대를 잊는다(다음 Changed가 true다). 바뀐 값의 적용이 일시적으로 실패해 다음 sync 지점에
+    // 다시 시도할 때 쓴다.
+    void Reset() noexcept {
+        seen_ = false;
+    }
+
 private:
     const detail::VarDefinition* definition_;
     uint32 generation_ = 0;

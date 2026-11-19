@@ -131,6 +131,11 @@ struct WriteChannel {
     uint8 networkRole = 0;
     // 살아 있는 cvar::SnapshotBinding 수(원자 — 문맥 파괴 때 0이어야 한다).
     uint64 bindings = 0;
+    // 프로세스 기본 문맥을 거쳐 이 통로를 쓰는 중인 묶음 없는 쓰기 수다(mutex가 지킨다 — CVar
+    // 6.2절). 문맥 파괴는 기본 문맥을 푼 뒤 이 수가 0이 될 때까지 defaultIdle로 기다린다(그래서
+    // 통로의 마지막 해제가 소유 스레드에서 일어난다).
+    usize defaultWriters = 0;
+    platform::ConditionVariable defaultIdle;
 };
 
 // 이름 블록이다(snapshot의 RenderRead 이름 값 — 만든 뒤 바뀌지 않는다).
@@ -149,12 +154,12 @@ struct NamedBlock {
     Array<UniquePtr<Entry>> entries;
 };
 
-// 콘솔 설정 하나다(독립 설정 또는 설정 struct 필드). 필드 설정이면 section·field가 그 필드를
-// 가리키고 값·출처는 섹션의 것이다(value는 Sync 때 필드에서 읽은 사본).
+// 콘솔 설정 하나다(CVar — 핸들·동적 변수, 또는 설정 struct 필드). 필드 설정이면 section·field가
+// 그 필드를 가리키고 값·출처는 섹션의 것이다(value는 Sync 때 필드에서 읽은 사본).
 struct ConsoleSettingState {
     explicit ConsoleSettingState(Allocator& allocator) noexcept
-        : name(allocator), help(allocator), allowed(allocator), defaultValue(allocator),
-          value(allocator), text(allocator), sources(allocator) {
+        : name(allocator), help(allocator), defaultValue(allocator), value(allocator),
+          text(allocator), sources(allocator) {
     }
 
     String name;
@@ -167,9 +172,6 @@ struct ConsoleSettingState {
     bool hasRange = false;
     double minimum = 0;
     double maximum = 0;
-    Array<String> allowed;
-    // String·Name 허용 값을 대소문자 무시로 맞춘다(Enum은 늘 무시).
-    bool allowedIgnoreCase = false;
     // 필드 설정: 섹션 번호와 스키마 필드 번호(독립 설정은 IndexNone).
     usize section = IndexNone;
     usize field = IndexNone;
@@ -179,8 +181,9 @@ struct ConsoleSettingState {
     String text;
     // 독립 설정의 출처 스택(입력 순번 — 약한 것부터).
     Array<uint64> sources;
-    // CVar 핸들로 등록한 설정이면 그 핸들의 상수 정의다(범위·보정·Validate 검사와 멱등 등록 판정 —
-    // Docs/Design/CVarSystem.ko.md 5절). 핸들은 정적 저장 기간이라 문맥보다 오래 산다.
+    // CVar면 그 정의다(범위·보정·Validate 검사와 멱등 등록 판정 — Docs/Design/CVarSystem.ko.md
+    // 5절). 핸들 정의는 정적 저장 기간이라 문맥보다 오래 살고, 동적 변수 정의는 문맥이
+    // 소유한다(dynamicVars). 설정 struct 필드는 null이다.
     const cvar::detail::VarDefinition* definition = nullptr;
 };
 
@@ -268,13 +271,18 @@ struct SyncHook {
     void* context = nullptr;
 };
 
-// 변경 구독 하나다(setting 또는 section 하나를 가리킨다).
-struct Subscription {
-    uint64 id = 0;
-    usize setting = IndexNone;
-    usize section = IndexNone;
-    ConfigChangeCallback callback = nullptr;
-    void* context = nullptr;
+// 동적 변수 하나의 정의다(ConfigContext::RegisterDynamic — CVar 5절). definition의 view는 이
+// 객체의 문자열을 가리키므로 객체는 힙에 두고 옮기지 않는다.
+struct DynamicVarState {
+    explicit DynamicVarState(Allocator& allocator) noexcept
+        : name(allocator), help(allocator), category(allocator), defaultText(allocator) {
+    }
+
+    String name;
+    String help;
+    String category;
+    String defaultText;
+    cvar::detail::VarDefinition definition;
 };
 
 struct ConfigState {
@@ -320,8 +328,8 @@ struct ConfigState {
     // 입력을 넣기 전 검사 중이다(ValidateEntry — 봉인 뒤 바로 쓰는 층의 부팅 필드 거부는 이때만
     // 한다. Sync의 다시 합치기는 아니다).
     bool validatingWrite = false;
-    Array<Subscription> subscriptions;
-    uint64 nextSubscription = 1;
+    // 동적 변수 정의(등록 순서 — 문맥이 소유한다).
+    Array<UniquePtr<DynamicVarState>> dynamicVars;
     // 쓰기 통로(문맥과 snapshot들이 공유)와 마지막으로 게시한 snapshot이다.
     SharedPtr<WriteChannel> channel;
     SharedPtr<const ConfigSnapshot> snapshot;
@@ -670,10 +678,28 @@ bool HasQueuedChanges(WriteChannel& channel) noexcept;
 // 순번(sequence)을 여기서 매긴다. 오류: 할당 실패(꺼낸 것은 state.queue에 남는다).
 Result<void> DrainQueue(ConfigState& state) noexcept;
 
-// 맞바꾼 뒤의 일이다: 큐에 든 콘솔 명령을 실행하고, 값이 바뀐 대상의 구독 콜백을 구독 순서대로
-// 부른다.
-void RunCommandsAndCallbacks(ConfigState& state, Span<const bool> sectionChanged,
-                             Span<const bool> settingChanged) noexcept;
+// 맞바꾼 뒤의 일이다: 큐에 든 콘솔 일(명령·표시)을 넣은 순서대로 실행한다(10절 5단계).
+void RunPendingCommands(ConfigState& state) noexcept;
+
+// 쓰기가 갈 통로다(WriteTarget이 채운다). 프로세스 기본 문맥을 거쳤으면(viaDefault) 소멸 때 통로
+// 참조를 먼저 놓고 그 통로의 defaultWriters를 내린다(CVar 6.2절). 쓰기를 마칠 때까지 쥔다.
+struct WriteRoute {
+    WriteRoute() noexcept = default;
+    ~WriteRoute() noexcept;
+    WriteRoute(const WriteRoute&) = delete;
+    WriteRoute& operator=(const WriteRoute&) = delete;
+
+    SharedPtr<WriteChannel> channel;
+    bool viaDefault = false;
+};
+
+// 쓰기가 갈 통로를 route에 채운다: 이 스레드에 묶인 문맥, 없으면 프로세스 기본 문맥(6.2절 — 기본
+// 문맥이면 그 통로의 defaultWriters를 올린다). 둘 다 없으면 route.channel은 null이다.
+void WriteTarget(WriteRoute& route) noexcept;
+
+// 프로세스 기본 문맥이 이 통로면 풀고, 기본 문맥을 거친 쓰기가 모두 끝날 때까지 기다린다(문맥
+// 파괴 — CVar 6.2절). 통로는 이미 닫혀 있어야 한다(겹친 쓰기는 ShuttingDown으로 끝난다).
+void ReleaseProcessDefault(WriteChannel& channel) noexcept;
 
 // ---- 콘솔 입력·명령(CVar 13·15절 — ConsoleInput.cpp) ----
 
