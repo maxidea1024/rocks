@@ -65,6 +65,10 @@ StringView ConfigLayerName(ConfigLayer layer) noexcept;
 inline constexpr StringView DefaultConfigBranches[] = {
     "Engine", "Game", "Input", "Render", "Quality", "DeviceProfiles", "Editor"};
 
+// 프리셋 묶음 값 파일(`Quality.json` — 묶음 → 등급 → 항목 → 값, 6.1절)의 branch 이름이다. 이 branch
+// 문서는 설정 struct 섹션이 아니라 코드가 정의한 묶음 항목의 값만 담는다(CVar 11절).
+inline constexpr StringView QualityBranch = "Quality";
+
 // branch 파일 안에서 콘솔 설정 이름 → 값 섹션의 예약 키다(3.2절 — `"Settings": {"a.b": 1}`).
 // 설정 struct의 Section으로 쓸 수 없다(MetaCompiler RMC2210).
 inline constexpr StringView ConsoleSettingsSection = "Settings";
@@ -141,7 +145,7 @@ enum class ConfigDiagnosticCode : uint8 {
     // 표에 없거나 값이 비어 있는 경로 이름 `{...}`이다(4.3절).
     InvalidPathToken,
     // 이 층이 쓸 수 없는 필드다(사용자 층의 UserConfig 아닌 필드, 출시 규칙의 DevelopmentOnly
-    // 필드).
+    // 필드, 프리셋 묶음 펼침만 쓰는 품질 묶음 층에 직접 쓰기 — CVar 11절).
     LayerNotAllowed,
     // `Settings` 섹션의 콘솔 설정 이름·값 모양이 잘못됐다.
     InvalidSetting,
@@ -149,8 +153,6 @@ enum class ConfigDiagnosticCode : uint8 {
     UnknownTarget,
     // 콘솔 층이 ConsoleReadOnly 콘솔 설정을 쓰려 했다(5.1절).
     ConsoleReadOnly,
-    // 품질 묶음 층이 QualityMember가 아닌 콘솔 설정을 쓰려 했다(5.1절).
-    NotQualityMember,
     // 콘솔 설정 값이 범위·허용 값 밖이다.
     ValueOutOfRange,
     // 정보: 더 강한 출처가 이미 있어 값이 바뀌지 않은 쓰기다(출처 스택에는 남았다 — 3.1절).
@@ -184,7 +186,19 @@ enum class ConfigDiagnosticCode : uint8 {
     UnresolvedName,
     // CVar의 `Validate` 검사 함수가 값을 거부했다(메시지는 검사 함수가 돌려준 이유 —
     // CVar 4.2·12절).
-    ValidationFailed
+    ValidationFailed,
+    // 프리셋 묶음이 정의하지 않은 등급이다(묶음 변수 쓰기, `Quality.json`의 등급 키 — CVar
+    // 11·12절).
+    UndefinedLevel,
+    // 경고: 묶음 펼침이 MaxGroupPasses 번 안에 멈추지 않았다(묶음끼리 서로 바꾸는 순환 — 마지막
+    // 결과를 쓴다, CVar 10절).
+    GroupNoConverge,
+    // 프리셋 묶음 정의끼리 맞지 않는다: 묶음의 묶음 순환·자기 참조(메시지에 순환 경로), 두 묶음이
+    // 같은 변수를 항목으로 가짐(두 묶음 이름) — ConfigContext::Register가 거부한다(CVar 11절).
+    GroupConflict,
+    // 정보: 품질 조합 검증이 묶음의 펼칠 등급을 낮췄거나 가장 낮은 등급도 기기 조건에 맞지 않는다
+    // (메시지는 `quality.shadow@1 (requested 3, lowered: <사유>)` — Config 6.1, CVar 11절).
+    QualityLowered
 };
 
 // 진단 이름(열거자 철자)이다. 정의되지 않은 값이면 빈 view다.
