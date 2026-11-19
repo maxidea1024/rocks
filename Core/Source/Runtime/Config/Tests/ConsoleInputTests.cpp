@@ -1,6 +1,7 @@
 #include "ConfigTestSupport.h"
 
 #include <Config/CVar.h>
+#include <Core/ScopeExit.h>
 #include <Core/Text/StringBuilder.h>
 
 // 콘솔 입력·명령·sync 지점·콜백·설정 snapshot 시험이다(Docs/Design/ConfigSystem.ko.md 5.2·5.3절,
@@ -94,7 +95,7 @@ constinit ConsoleCommand ClashCommand =
 // `<이름>`은 값과 출처, `<이름> ?`는 도움말, `<이름> <값>`은 콘솔 층 쓰기를 큐에 넣는다(다음 Sync에
 // 적용). 거부한 값과 모르는 이름은 출력으로 알린다.
 TEST(Config_ConsoleInputGrammar) {
-    ConfigFixture fixture;
+    ConfigFixture fixture(DevelopmentRules());
     ConfigContext& context = fixture.Context();
     Transcript transcript(fixture.system);
     auto shown = context.ExecuteConsoleLine("render.graph.immediate", transcript.Output());
@@ -156,7 +157,7 @@ TEST(Config_ConsoleInputGrammar) {
 // 멱등이고 다른 이름과 겹치면 AlreadyExists다.
 TEST(Config_ConsoleCommandsRunAtSync) {
     using namespace console_input_test;
-    ConfigFixture fixture;
+    ConfigFixture fixture(DevelopmentRules());
     ConfigContext& context = fixture.Context();
     ReloadLog log;
     int32 flushed = 0;
@@ -165,6 +166,11 @@ TEST(Config_ConsoleCommandsRunAtSync) {
     CHECK(context.Register(ClashCommand).Error() == ErrorCode::AlreadyExists);
     REQUIRE(context.BindCommand(ReloadCommand, log));
     REQUIRE(context.BindCommand(FlushCommand, flushed));
+    // REQUIRE가 실패해 일찍 끝나도 대상을 푼다(묶인 채 문맥을 없애면 Fatal — CVar 19절 시험 정리).
+    auto unbind = MakeScopeExit([&]() noexcept {
+        static_cast<void>(context.UnbindCommand(ReloadCommand, log));
+        static_cast<void>(context.UnbindCommand(FlushCommand, flushed));
+    });
     CHECK(context.BindCommand(ClashCommand, flushed).Error() == ErrorCode::NotFound);
 
     Transcript transcript(fixture.system);
@@ -199,15 +205,13 @@ TEST(Config_ConsoleCommandsRunAtSync) {
     CHECK(overflow && overflow.Value() == ConsoleLineResult::Rejected);
     REQUIRE(context.Sync());
     CHECK(log.calls == 3 && log.count == 5 && log.targetAll);
-    REQUIRE(context.UnbindCommand(ReloadCommand, log));
-    REQUIRE(context.UnbindCommand(FlushCommand, flushed));
 }
 
 // 설정 snapshot은 sync 지점에서 RenderRead 값(콘솔 이름, 이름 없는 필드는
 // `<Branch>.<Section>.<필드>`)으로 만든다. RenderRead 값이 바뀐 Sync만 세대가 오르고, 아니면 같은
 // snapshot을 돌려준다. 프레임이 쥔 이전 snapshot은 바뀌지 않는다.
 TEST(Config_SnapshotGenerationsAndReuse) {
-    ConfigFixture fixture;
+    ConfigFixture fixture(DevelopmentRules());
     ConfigContext& context = fixture.Context();
     SharedPtr<const ConfigSnapshot> first = context.Acquire();
     REQUIRE(first.Get() != nullptr);

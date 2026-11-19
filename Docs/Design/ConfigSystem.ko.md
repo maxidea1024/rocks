@@ -1,6 +1,6 @@
 # 설정 계층과 콘솔 설정 설계
 
-기준일: 2026-11-19, 개정 15(CVar CVR7 — 독립 콘솔 설정의 CVar 이관, 구독 없앰, 프로세스 기본 문맥). 엔진·프로젝트·플랫폼·기기·사용자·세션·콘솔에서 오는 설정 값을 하나의 우선순위로 합치는 **설정 계층**과, 실행 중 이름으로 읽고 바꾸는 **콘솔 설정**(변수·명령)을 정한다.
+기준일: 2026-11-19, 개정 16(시험 fixture의 출시 규칙 명시 — CVar Release 구성 확인). 엔진·프로젝트·플랫폼·기기·사용자·세션·콘솔에서 오는 설정 값을 하나의 우선순위로 합치는 **설정 계층**과, 실행 중 이름으로 읽고 바꾸는 **콘솔 설정**(변수·명령)을 정한다.
 
 [렌더 기반](RenderBase.ko.md)의 선행 작업 CP8(Config 계층)·CP4(콘솔 설정)이며, [엔진 구현 계획](EngineImplementationPlan.ko.md)의 다음 요구를 구현 스펙으로 옮긴다.
 - 24.1절 표의 "Device Profile / Scalability / CVar" 행
@@ -261,6 +261,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 **시험**
 - 설정 문맥 객체를 명시적으로 만든다. 층 목록은 메모리 문자열로 넘길 수 있다.
 - 헤드리스·시험 기본은 봉인 모드다. 사용자 층·환경 변수·자동 기기 선택을 쓰지 않고, 기기 프로필 id와 장치 정보는 인자로 받는다.
+- 출시 규칙(`ConfigContextOptions::releaseRules`)의 기본은 빌드 구성을 따른다(Release 구성이면 출시 규칙 — 콘솔 입력·hot reload `Unsupported`, `DevelopmentOnly` 층 쓰기 거부). 그래서 개발 규칙 동작을 보는 시험은 fixture를 `releaseRules = false`로 명시해 만들고(시험 도우미 `DevelopmentRules`), 출시 규칙 시험은 `releaseRules = true`를 명시한다. 같은 시험이 Debug·Release 모두에서 돈다(CVar 19절, 개정 16).
 - 값은 sync 지점에서만 바뀌므로 시간·경쟁에 기대지 않고 단언할 수 있다.
 - `config-dump` Commandlet은 값과 출처를 결정적 JSON으로 낸다. golden 파일과 비교하는 시험에 쓴다.
 
@@ -312,6 +313,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 
 ## 12. 개정 이력
 
+- 개정 16(2026-11-19): 8절 시험에 출시 규칙 기본값과 fixture의 `releaseRules` 명시 규칙(`DevelopmentRules`)을 적었다(CVar 개정 18 — Release 구성 확인).
 - 개정 15(2026-11-19): CVar CVR7. 5절 머리(CF2 대체 완료), 5.1절 등록(`RegisterDynamic`·enum 닫힌 값 집합)·값 표기(필드 `ConsoleName`은 설정 struct 저장소)·부팅 값 규칙(CF2 플래그 이관 뒤), 5.3절 구독 없앰, 5.4절 등록 내용·프로세스 기본 문맥·종료 순서.
 - 개정 14(2026-11-19): CVar CVR6 리뷰 반영. 5.2절: 다른 스레드 콘솔 입력은 `ConsoleInputPort`(쓰기 통로를 쥔 입구 — 문맥이 없어진 뒤는 `ShuttingDown`), 출력은 참조 계수 `ConsoleSink`, 명령 대상 묶음의 타입 확인·수명(문맥이 묶인 대상보다 오래 산다).
 - 개정 13(2026-11-19): CVar CVR6. 5.2절 명령 정의(`cvar::Command<&Function>`·`BindCommand`, CF2 인자 struct 방식 없앰). 5.1·8절: 설정 struct 필드의 봉인 뒤 바로 쓰는 층 쓰기도 `BootSealed`.
