@@ -7,6 +7,8 @@
 #include <string.h>
 
 using namespace rocks;
+namespace file_tests_file {
+
 using namespace rocks::platform;
 
 namespace {
@@ -333,3 +335,4 @@ TEST(PlatformFileExistsFollowsSymlinkTarget) {
     }
     CHECK(PhysicalFileSystem().Delete(link, static_cast<usize>(count)));
 }
+} // namespace file_tests_file

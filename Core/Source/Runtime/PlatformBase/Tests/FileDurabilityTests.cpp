@@ -8,6 +8,8 @@
 #include <string.h>
 
 using namespace rocks;
+namespace file_durability_tests_file {
+
 using namespace rocks::platform;
 
 // 저장 경로가 쓰는 File::Flush·FileSystem::Replace·SetModifiedTime·FileLock과 Windows 긴 경로를
@@ -329,3 +331,4 @@ TEST(FileDurability_WindowsShortRelativePathWithLongFullPathWorks) {
     REQUIRE(ReadText(file, text, sizeof(text)));
     CHECK(strcmp(text, "relative") == 0);
 }
+} // namespace file_durability_tests_file

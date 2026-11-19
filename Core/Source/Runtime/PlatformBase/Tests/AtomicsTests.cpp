@@ -3,6 +3,8 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace atomics_tests_file {
+
 using namespace rocks::platform;
 
 // Platform/Atomics.h의 단일 스레드 의미(반환값·expected 갱신·감싸기)와 여러 스레드 경합에서 잃는
@@ -127,3 +129,4 @@ TEST(Atomics_ReleaseStorePublishesPriorWrites) {
         REQUIRE(thread.Join() == ThreadStatus::Success);
     }
 }
+} // namespace atomics_tests_file

@@ -3,6 +3,8 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace floating_point_environment_tests_file {
+
 using namespace rocks::platform;
 
 // 결정적 계산 실행(RunWithDeterministicFloatingPoint)이 비정규 수를 0으로 만드는
@@ -141,3 +143,4 @@ TEST(FloatingPointEnvironment_RunNestsAndKeepsStatusFlags) {
 
     CHECK(IsDeterministicFloatingPointEnvironment());
 }
+} // namespace floating_point_environment_tests_file

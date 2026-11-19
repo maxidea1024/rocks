@@ -9,6 +9,8 @@
 #include <Platform/Atomics.h>
 
 using namespace rocks;
+namespace directory_watch_tests_file {
+
 using namespace rocks::platform;
 
 // 실제 OS 파일 시스템에서 DirectoryWatcher의 이식 계약(14절 시나리오 17)을 검사한다. 이벤트
@@ -375,3 +377,4 @@ TEST(DirectoryWatch_QueueCollapsesToOverflowAtLimit) {
     REQUIRE(queue.Front(change));
     CHECK(change.kind == DirectoryChangeKind::Overflow && strcmp(change.path, "sub") == 0);
 }
+} // namespace directory_watch_tests_file

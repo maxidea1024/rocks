@@ -4,6 +4,8 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace virtual_memory_tests_file {
+
 using namespace rocks::platform;
 
 namespace {
@@ -124,3 +126,4 @@ TEST(PlatformVirtualMemoryConcurrentDistinctPages) {
     CHECK(workers[1].passed);
     REQUIRE(region.Release());
 }
+} // namespace virtual_memory_tests_file

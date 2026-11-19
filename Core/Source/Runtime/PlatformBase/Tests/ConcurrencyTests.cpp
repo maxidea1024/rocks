@@ -5,6 +5,8 @@
 #include <Platform/Thread.h>
 
 using namespace rocks;
+namespace concurrency_tests_file {
+
 using namespace rocks::platform;
 
 namespace {
@@ -341,3 +343,4 @@ TEST(PlatformThreadSleepAndYieldKeepMonotonicClockNondecreasing) {
     SleepFor(1);
     CHECK(MonotonicNanoseconds() >= before);
 }
+} // namespace concurrency_tests_file
