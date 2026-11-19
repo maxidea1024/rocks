@@ -663,6 +663,56 @@ Result<ObjectHandle> ObjectRegistry::FindObjectChecked(const ObjectAccessContext
     return Result<ObjectHandle>::Success(current);
 }
 
+Result<ObjectHandle> ObjectRegistry::FindChildChecked(const ObjectAccessContext& access,
+                                                      ObjectHandle outer, StringView name,
+                                                      uint64 transaction) const noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return Result<ObjectHandle>::Failure(valid.Error());
+    }
+
+    // 이름 형식 검사·키 생성(할당)을 잠금 밖에서 하므로 그 앞뒤로 outer를 확인한다.
+    auto checkLocked = [&]() noexcept -> Result<void> {
+        if (auto open = OpenState(closed_, processing_); !open) {
+            return open;
+        }
+
+        auto found = FindVisibleLocked(outer, transaction);
+        return found ? Result<void>::Success() : Result<void>::Failure(found.Error());
+    };
+    {
+        platform::LockGuard lock(gate_);
+        if (auto checked = checkLocked(); !checked) {
+            return Result<ObjectHandle>::Failure(checked.Error());
+        }
+    }
+
+    if (!name.IsEmpty()) {
+        if (auto format = ValidateNameComponent(name, allocator_); !format) {
+            return Result<ObjectHandle>::Failure(format.Error());
+        }
+    }
+
+    StringBuilder<128> key(allocator_);
+    if (auto made = TryMakeNameComponentKey(name, key); !made) {
+        return Result<ObjectHandle>::Failure(made.Error());
+    }
+
+    const uint64 hash = NameKeyHash(outer, key.View());
+    platform::LockGuard lock(gate_);
+    // 키 생성 할당 콜백이 그 사이 Registry를 바꿨을 수 있어 outer를 다시 확인한다.
+    if (auto checked = checkLocked(); !checked) {
+        return Result<ObjectHandle>::Failure(checked.Error());
+    }
+
+    const Slot* child = FindVisibleNamedLocked(outer, hash, key.View(), transaction);
+    if (child == nullptr) {
+        return Result<ObjectHandle>::Failure(ErrorCode::NotFound);
+    }
+
+    return Result<ObjectHandle>::Success(HandleOf(*child));
+}
+
 Result<bool> ObjectRegistry::IsNameTaken(const ObjectAccessContext& access, ObjectHandle outer,
                                          StringView name) const noexcept {
     auto valid = CheckAccess(access);
