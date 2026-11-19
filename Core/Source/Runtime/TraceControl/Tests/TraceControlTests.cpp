@@ -12,6 +12,8 @@
 // 연산, 명령줄 `--trace=`, 콘솔 명령 trace.*. 설정 값은 Sync에서만 바뀌고, 콘솔 명령은 Sync에서
 // 실행된다(시간에 기대지 않는다).
 using namespace rocks;
+namespace trace_control_tests_file {
+
 using namespace rocks::trace_control;
 using rocks::test::config::ConfigFixture;
 using rocks::test::config::DevelopmentRules;
@@ -218,3 +220,4 @@ TEST(TraceControl_SessionSettingsFromConfig) {
     CHECK(session.writerPeriodMs == 5);
     CHECK(session.statsIntervalPumps == 7);
 }
+} // namespace trace_control_tests_file
