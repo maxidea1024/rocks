@@ -54,8 +54,7 @@ int PosixDecommitAdvice() noexcept;
 // - PosixOpenCommit: Apple은 madvise(MADV_FREE_REUSE)로 다시 쓴다고 알리고(통계용 힌트 — 실패는
 //   무시한다), Android는 할 일이 없다.
 // - PosixOpenDecommit: 페이지를 OS에 돌려준다(Apple MADV_FREE_REUSABLE, Android MADV_DONTNEED).
-// 성공 0,
-//   실패 -1과 errno. 실패하면 범위는 그대로다.
+//   성공하면 0, 실패하면 -1과 errno다. 실패하면 범위는 그대로다.
 void PosixOpenCommit(void* address, usize bytes) noexcept;
 int PosixOpenDecommit(void* address, usize bytes) noexcept;
 

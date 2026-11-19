@@ -207,44 +207,41 @@ TEST(CoreSystemAllocatorLedgerFailureDoesNotPublish) {
     CHECK(memory.Stats().liveAllocations == 0);
 }
 
-// 주소 모양별 최악 탐사 길이의 상한이다(지금 hash와 표 크기 규칙에서 잰 값 — 설계 18.6절). 주소가
-// 흩어진 모양(64KB 정렬, 여러 페이지의 같은 offset)은 기본 hash와 같은 수준이고, 한 페이지를 꽉
-// 채운 모양은 제자리가 서로 달라 밀리지 않는다. 이어지는 주소는 페이지 창이 겹치는 곳에서 군집이
-// 길어진다(블록이 작을수록 길다) — 그 길이가 여기 적힌 값을 넘으면 hash나 표의 부하 규칙이 바뀐
-// 것이다.
-constexpr usize ProbeLimitAligned = 32;
-constexpr usize ProbeLimitOnePage = 1;
-constexpr usize ProbeLimitSameOffset = 32;
-constexpr usize ProbeLimitSequential16 = 2048;
-constexpr usize ProbeLimitSequential32 = 2048;
-constexpr usize ProbeLimitSequential64 = 2048;
-constexpr usize ProbeLimitSequential208 = 512;
+// 주소 모양별 최악 탐사 길이의 상한이다(설계 18.6절). 원장은 주소를 통째로 섞는 기본 hash를 쓰므로
+// 주소의 모양(정렬, 이어지는 주소, 블록 간격)이 군집을 만들지 않는다 — 어느 모양이든 탐사 길이가
+// 무작위 표 수준이다. 이 상한을 넘으면 hash가 주소 모양에 묶인 것이다(페이지 번호만 섞는 지역성
+// hash는 이어지는 주소에서 수백–수천 칸이 된다).
+// - ProbeLimitHalfFull: 산 원소만으로 부하율 1/2일 때다.
+// - ProbeLimitNearlyFull: 넣기·지우기가 이어져 삭제 칸이 쌓이는 동안(채움이 칸 수의 3/4에 닿아
+//   표가 정리될 때까지)이다.
+constexpr usize ProbeLimitHalfFull = 64;
+constexpr usize ProbeLimitNearlyFull = 64;
 
-// 주소 모양별로 원장 hash의 군집을 본다(설계 18.6절): 가장 멀리 밀려난 주소를 찾으며 보는 칸 수가
-// 모양마다 정해진 상한 안이다. 주소는 지어낸 값이고 넣는 순서도 정해져 있어 결과가 결정적이다.
+// 주소 모양별로 원장 hash의 군집을 본다: 가장 멀리 밀려난 주소를 찾으며 보는 칸 수가 상한 안이다.
+// 주소는 지어낸 값이고 넣는 순서도 정해져 있어 결과가 결정적이다.
 TEST(CoreAddressLedgerProbeLengthByAddressPattern) {
     struct Pattern {
         const char* name;
         uint32 count;
         uptr stride;
         uptr offset;
-        usize longestProbeLimit;
     };
 
     constexpr uptr Base = uptr{0x14a2f} << 28;
     constexpr uptr SlabBytes = uptr{64} << 10;
     constexpr uptr PageBytes = 4096;
+    constexpr uint32 Many = 65536;
     constexpr Pattern Patterns[] = {
         // 64KB로 정렬된 주소만(큰 할당·slab), 한 페이지를 16 byte 블록 256개로 채움, 여러 페이지의
-        // 같은
-        // offset, 그리고 이어지는 주소(블록 크기 16·32·64·208 byte).
-        {"64KB aligned", 4096, SlabBytes, 0, ProbeLimitAligned},
-        {"one full page", 256, 16, 0, ProbeLimitOnePage},
-        {"same offset in many pages", 4096, PageBytes, 0x40, ProbeLimitSameOffset},
-        {"sequential 16B", 65536, 16, 0, ProbeLimitSequential16},
-        {"sequential 32B", 65536, 32, 0, ProbeLimitSequential32},
-        {"sequential 64B", 65536, 64, 0, ProbeLimitSequential64},
-        {"sequential 208B", 65536, 208, 0, ProbeLimitSequential208},
+        // 같은 offset, 그리고 이어지는 주소(블록 간격 16·32·64·112·208 byte).
+        {"64KB aligned", 4096, SlabBytes, 0},
+        {"one full page", 256, 16, 0},
+        {"same offset in many pages", 4096, PageBytes, 0x40},
+        {"sequential 16B", Many, 16, 0},
+        {"sequential 32B", Many, 32, 0},
+        {"sequential 64B", Many, 64, 0},
+        {"sequential 112B", Many, 112, 0},
+        {"sequential 208B", Many, 208, 0},
     };
 
     for (const Pattern& pattern : Patterns) {
@@ -258,8 +255,8 @@ TEST(CoreAddressLedgerProbeLengthByAddressPattern) {
         CHECK(ledger.Count() == pattern.count);
         const usize longest = ledger.LongestProbe();
         CHECK(longest >= 1);
-        CHECK(longest <= pattern.longestProbeLimit);
-        // 내용은 군집과 무관하게 맞다.
+        CHECK(longest <= ProbeLimitHalfFull);
+        // 내용은 탐사 길이와 무관하게 맞다.
         for (uint32 index = 0; index < pattern.count; ++index) {
             usize bytes = 0;
             REQUIRE(ledger.Remove(FakeAddress(Base + pattern.offset + uptr{index} * pattern.stride),
@@ -269,5 +266,50 @@ TEST(CoreAddressLedgerProbeLengthByAddressPattern) {
 
         CHECK(ledger.Count() == 0);
         CHECK(ledger.LongestProbe() == 0);
+    }
+}
+
+// 표가 가장 찰 때도 같다: 살아 있는 주소 창을 한 칸씩 밀면(가장 오래된 주소를 지우고 다음 주소를
+// 넣는다 — 이어지는 힙의 churn) 삭제 칸이 쌓여 채움이 칸 수의 3/4에 닿고 표가 정리된다. 그 주기
+// 내내 탐사 길이가 상한 안이다.
+TEST(CoreAddressLedgerProbeLengthWhileTombstonesAccumulate) {
+    constexpr uptr Base = uptr{0x2b91c} << 28;
+    constexpr uint32 Live = 65536;
+    // 창을 미는 횟수다. 한 번 밀 때마다 채움(산 원소 + 삭제 칸)이 많아야 한 칸 늘고, 새 주소가 빈
+    // 칸에서 시작할 확률(1/4 이상)만큼은 는다. 칸 수(Live의 두 배)만큼 밀면 채움이 칸 수의 3/4에
+    // 적어도 한 번 닿아 표가 정리된다.
+    constexpr uint32 Slides = 2 * Live;
+    constexpr uint32 SampleEvery = 512;
+    constexpr uptr Strides[] = {16, 64, 208};
+    for (uptr stride : Strides) {
+        UntrackedPlatformAllocator storage;
+        AddressLedger ledger(storage);
+        for (uint32 index = 0; index < Live; ++index) {
+            REQUIRE(ledger.Insert(FakeAddress(Base + uptr{index} * stride), index + 1));
+        }
+
+        usize longest = ledger.LongestProbe();
+        for (uint32 slide = 0; slide < Slides; ++slide) {
+            usize bytes = 0;
+            REQUIRE(ledger.Remove(FakeAddress(Base + uptr{slide} * stride), bytes));
+            REQUIRE(bytes == slide + 1);
+            REQUIRE(
+                ledger.Insert(FakeAddress(Base + uptr{Live + slide} * stride), Live + slide + 1));
+            if (slide % SampleEvery == 0) {
+                const usize sampled = ledger.LongestProbe();
+                longest = sampled > longest ? sampled : longest;
+            }
+        }
+
+        CHECK(ledger.Count() == Live);
+        CHECK(longest >= 1);
+        CHECK(longest <= ProbeLimitNearlyFull);
+        for (uint32 index = Slides; index < Slides + Live; ++index) {
+            usize bytes = 0;
+            REQUIRE(ledger.Remove(FakeAddress(Base + uptr{index} * stride), bytes));
+            REQUIRE(bytes == index + 1);
+        }
+
+        CHECK(ledger.Count() == 0);
     }
 }
