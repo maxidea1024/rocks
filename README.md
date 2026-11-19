@@ -40,6 +40,12 @@ dotnet msbuild Rocks.proj /t:Test /p:Configuration=Debug /p:RocksTarget=Foundati
 
 기본 구성은 Debug이며 Release·ASan과 Core 전용 대상을 선택할 수 있다. CI 설정과 실제 플랫폼별 실행 결과를 구분한다.
 
+## 가이드
+
+- [저장소 구성 — 계층 규칙·규칙 파일·새 모듈 추가·프로젝트 기술자](Docs/Guides/RepositoryLayout.ko.md)
+- [엔진 구동과 렌더링 — 프레임 순서·스레드·렌더 그래프·셰이더·텍스처 스트리밍](Docs/Guides/RenderingGuide.ko.md)
+- [가비지 컬렉션 — 도달성·삼색 마킹·쓰기 장벽·해제 시점·대규모 비용](Docs/Guides/GarbageCollectionGuide.ko.md)
+
 ## 설계와 구현 문서
 
 - [현재 구현 상태·수명 계약·테스트](Docs/Implementation/FoundationStatus.ko.md)
@@ -49,7 +55,6 @@ dotnet msbuild Rocks.proj /t:Test /p:Configuration=Debug /p:RocksTarget=Foundati
 - [Archive·Record·객체 그래프 직렬화](Docs/Implementation/Serialization.ko.md)
 - [WorkerScheduler 수명·종료 계약](Docs/Implementation/WorkerScheduler.ko.md)
 - [렌더 기반 구현 범위와 계약](Docs/Implementation/RenderBase.ko.md)
-- [저장소 구성](Docs/Guides/RepositoryLayout.ko.md)
 - [전체 구현 계획](Docs/Design/EngineImplementationPlan.ko.md)
 - [Core·Object·Input 상세 구현 계획](Docs/Design/CoreObjectInputDetailedPlan.ko.md)
 - [UI 툴킷 설계(게임 UI·에디터)](Docs/Design/UiToolkit.ko.md)
