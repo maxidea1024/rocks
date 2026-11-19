@@ -1,64 +1,86 @@
 #include "ManifestTestSupport.h"
 
 // 쿠킹 매니페스트 v1의 규모·조합·결정성·퍼징 시험이다(Docs/Design/AssetSystem.ko.md 10.1절 A1b):
-// 고정 byte(golden SHA-256과 체크인 v1 byte), 칸 종류·플래그의 모든 조합(빠짐 검사 포함), 많은
-// 패키지·깊은 Hard 사슬·SCC를 담은 큰 매니페스트, 고정 seed 변조.
+// 고정 byte(golden SHA-256과 체크인 v1 byte), 칸 종류·플래그·의존 특성 부분집합·경로 모양의 모든
+// 조합(번호 ↔ 항목 일대일 검사), 많은 패키지·깊은 Hard 사슬·SCC를 담은 큰 매니페스트, 고정 seed
+// 변조.
 using namespace rocks;
 using namespace rocks::asset_test;
 
 namespace {
 
-// 조합 축이다(AS 10.1절 5): PrimaryAsset·bundle 수, 의존 모양, 경로 깊이.
+// 플래그 축은 PrimaryAsset 있음·없음 둘이다 — 플래그가 늘면 조합 축을 넓혀야 한다.
+static_assert(CookedManifestFlagsMask == 1,
+              "Cooked manifest flags changed; extend the combination axes in this test");
+
+// 조합 축이다(AS 10.1절 5): PrimaryAsset·bundle 수, 의존 특성 다섯의 모든 부분집합, 경로 모양.
 enum class BundleShape : uint32 {
     None,
     One,
     Many,
     Count
 };
-enum class DependencyShape : uint32 {
-    None,
-    Hard,
-    Soft,
-    HardAndSoftSameTarget,
-    SoftNotCooked,
-    HardCycle,
-    Count
+
+// 의존 특성(bit)이다. 특성마다 대상이 달라 한 항목에 어떤 부분집합이든 함께 담긴다.
+enum DependencyTrait : uint32 {
+    // Hard → 10(쿠킹됨, 의존 없음).
+    CookedHard = 1u << 0,
+    // Hard → 12, 12도 이 항목을 Hard로(순환).
+    HardCycle = 1u << 1,
+    // Soft → 11(쿠킹됨).
+    CookedSoft = 1u << 2,
+    // Soft → 5(쿠킹하지 않음).
+    UncookedSoft = 1u << 3,
+    // Hard → 13과 Soft → 13(같은 대상).
+    SameTargetHardSoft = 1u << 4,
 };
+
+constexpr uint32 DependencyTraitCount = 5;
+constexpr uint32 DependencySubsets = 1u << DependencyTraitCount;
+
 enum class PathShape : uint32 {
     Shallow,
     Deep,
+    // 비ASCII NFC 구성 요소(/Game/Ä…).
+    NonAscii,
     Count
 };
 
 constexpr uint32 BundleShapes = static_cast<uint32>(BundleShape::Count);
-constexpr uint32 DependencyShapes = static_cast<uint32>(DependencyShape::Count);
 constexpr uint32 PathShapes = static_cast<uint32>(PathShape::Count);
 // PrimaryAsset이 아닌 항목은 bundle이 없다(규칙) — 허용 조합은 (PrimaryAsset × bundle 셋 + 일반 ×
-// bundle 없음) × 의존 × 경로다.
-constexpr uint32 AllowedCombinations = (BundleShapes + 1) * DependencyShapes * PathShapes;
-// 조합 항목의 id는 이 값부터이고, 의존 대상 고정 항목(10·11)은 그보다 앞이다.
+// bundle 없음) × 의존 부분집합 × 경로다.
+constexpr uint32 AllowedCombinations = (BundleShapes + 1) * DependencySubsets * PathShapes;
+// 조합 항목의 id는 이 값부터이고, 의존 대상 고정 항목(10–13)은 그보다 앞이다.
 constexpr uint64 ComboBase = 100;
+// 고정 항목 수다(10 Hard 대상·11 Soft 대상·12 순환 짝·13 같은 대상).
+constexpr usize FixedEntries = 4;
+constexpr uint64 UncookedTarget = 5;
+constexpr uint64 HardTarget = 10;
+constexpr uint64 SoftTarget = 11;
+constexpr uint64 CycleTarget = 12;
+constexpr uint64 SharedTarget = 13;
 
 struct Combination {
     bool primary;
     BundleShape bundles;
-    DependencyShape dependencies;
+    uint32 traits;
     PathShape path;
 };
 
-// index번째 허용 조합이다.
+// index번째 허용 조합이다(경로가 가장 빨리 바뀌고, 그다음 의존 부분집합, 그다음 bundle).
 Combination CombinationAt(uint32 index) noexcept {
     const uint32 path = index % PathShapes;
     index /= PathShapes;
-    const uint32 dependency = index % DependencyShapes;
-    index /= DependencyShapes;
+    const uint32 traits = index % DependencySubsets;
+    index /= DependencySubsets;
     // 0..BundleShapes-1 = PrimaryAsset × bundle 모양, BundleShapes = 일반(bundle 없음).
     const bool primary = index < BundleShapes;
     return Combination{primary, primary ? static_cast<BundleShape>(index) : BundleShape::None,
-                       static_cast<DependencyShape>(dependency), static_cast<PathShape>(path)};
+                       traits, static_cast<PathShape>(path)};
 }
 
-// 조합 하나의 분류 번호다(읽은 항목에서 다시 계산한다 — 빠짐 검사).
+// 읽은 항목에서 조합 번호를 다시 계산한다(CombinationAt의 역 — 빠짐·겹침 검사).
 uint32 ClassOf(const CookedManifest& manifest, const CookedManifestEntry& entry) noexcept {
     const bool primary =
         (entry.flags & static_cast<uint32>(CookedManifestFlags::PrimaryAsset)) != 0;
@@ -69,48 +91,79 @@ uint32 ClassOf(const CookedManifest& manifest, const CookedManifestEntry& entry)
                                              : static_cast<uint32>(BundleShape::Many);
     }
 
-    DependencyShape dependency = DependencyShape::None;
-    const usize count = entry.dependencies.Size();
-    if (count == 2 && entry.dependencies[0].asset == entry.dependencies[1].asset) {
-        dependency = DependencyShape::HardAndSoftSameTarget;
-    } else if (count == 1 && entry.dependencies[0].kind == PackageDependencyKind::Soft) {
-        dependency = manifest.Find(entry.dependencies[0].asset) == nullptr
-                         ? DependencyShape::SoftNotCooked
-                         : DependencyShape::Soft;
-    } else if (count == 1) {
-        // Hard 대상이 자기를 Hard로 가리키면 순환이다.
-        const CookedManifestEntry* target = manifest.Find(entry.dependencies[0].asset);
-        bool cycle = false;
-        for (const CookedManifestDependency& back : target->dependencies) {
-            cycle =
-                cycle || (back.asset == entry.asset && back.kind == PackageDependencyKind::Hard);
-        }
+    uint32 traits = 0;
+    const Array<CookedManifestDependency>& dependencies = entry.dependencies;
+    for (usize index = 0; index < dependencies.Size(); ++index) {
+        const CookedManifestDependency& dependency = dependencies[index];
+        const CookedManifestEntry* target = manifest.Find(dependency.asset);
+        if (index + 1 < dependencies.Size() && dependencies[index + 1].asset == dependency.asset) {
+            traits |= SameTargetHardSoft;
+            ++index;
+        } else if (dependency.kind == PackageDependencyKind::Soft) {
+            traits |= target == nullptr ? UncookedSoft : CookedSoft;
+        } else {
+            // Hard 대상이 자기를 Hard로 가리키면 순환이다.
+            bool cycle = false;
+            for (const CookedManifestDependency& back : target->dependencies) {
+                cycle = cycle ||
+                        (back.asset == entry.asset && back.kind == PackageDependencyKind::Hard);
+            }
 
-        dependency = cycle ? DependencyShape::HardCycle : DependencyShape::Hard;
+            traits |= cycle ? HardCycle : CookedHard;
+        }
     }
 
+    constexpr uint8 FirstNonAsciiByte = 0x80;
     usize slashes = 0;
+    bool ascii = true;
     for (char c : entry.pathHint.View()) {
         slashes += c == '/' ? 1 : 0;
+        ascii = ascii && static_cast<uint8>(c) < FirstNonAsciiByte;
     }
 
-    const uint32 path = slashes > 2 ? static_cast<uint32>(PathShape::Deep)
-                                    : static_cast<uint32>(PathShape::Shallow);
-    return (bundle * DependencyShapes + static_cast<uint32>(dependency)) * PathShapes + path;
+    const PathShape path = !ascii        ? PathShape::NonAscii
+                           : slashes > 2 ? PathShape::Deep
+                                         : PathShape::Shallow;
+    return (bundle * DependencySubsets + traits) * PathShapes + static_cast<uint32>(path);
 }
 
-// 모든 허용 조합을 항목으로 담은 매니페스트다. 순환 조합은 고정 항목 11과 서로 Hard로 가리키지
-// 않도록 자기 짝(고정 항목 12 — 조합 항목을 Hard로 가리킨다)을 둔다.
-bool MakeCombinations(CookedManifest& manifest) noexcept {
-    FillManifestHeader(manifest);
-    // 고정 대상: 10(의존 없음), 11(의존 없음).
-    if (AddEntry(manifest, 10, "Target") == nullptr || AddEntry(manifest, 11, "Other") == nullptr) {
-        return false;
+// 조합 하나의 의존을 (asset, kind) 오름차순으로 더한다(5 < 10 < 11 < 12 < 13).
+bool AddTraits(CookedManifest& manifest, CookedManifestEntry& entry, uint32 traits,
+               uint64 low) noexcept {
+    bool ok = true;
+    if ((traits & UncookedSoft) != 0) {
+        ok = ok && AddDependency(entry, UncookedTarget, PackageDependencyKind::Soft);
     }
 
-    // 순환 짝: 12가 순환 조합 항목들을 Hard로 가리킨다(아래에서 채운다).
-    CookedManifestEntry* cycle = AddEntry(manifest, 12, "Cycle");
-    if (cycle == nullptr) {
+    if ((traits & CookedHard) != 0) {
+        ok = ok && AddDependency(entry, HardTarget, PackageDependencyKind::Hard);
+    }
+
+    if ((traits & CookedSoft) != 0) {
+        ok = ok && AddDependency(entry, SoftTarget, PackageDependencyKind::Soft);
+    }
+
+    if ((traits & HardCycle) != 0) {
+        // 순환 짝(고정 항목 2 = 12)도 이 항목을 Hard로 가리킨다(조합 id 오름차순으로 더해진다).
+        ok = ok && AddDependency(entry, CycleTarget, PackageDependencyKind::Hard) &&
+             AddDependency(manifest.entries[2], low, PackageDependencyKind::Hard);
+    }
+
+    if ((traits & SameTargetHardSoft) != 0) {
+        ok = ok && AddDependency(entry, SharedTarget, PackageDependencyKind::Hard) &&
+             AddDependency(entry, SharedTarget, PackageDependencyKind::Soft);
+    }
+
+    return ok;
+}
+
+// 모든 허용 조합을 항목으로 담은 매니페스트다.
+bool MakeCombinations(CookedManifest& manifest) noexcept {
+    FillManifestHeader(manifest);
+    if (AddEntry(manifest, HardTarget, "Target") == nullptr ||
+        AddEntry(manifest, SoftTarget, "Other") == nullptr ||
+        AddEntry(manifest, CycleTarget, "Cycle") == nullptr ||
+        AddEntry(manifest, SharedTarget, "Shared") == nullptr) {
         return false;
     }
 
@@ -127,9 +180,11 @@ bool MakeCombinations(CookedManifest& manifest) noexcept {
             return false;
         }
 
-        if (combination.path == PathShape::Deep) {
+        if (combination.path != PathShape::Shallow) {
             entry->pathHint.Clear();
-            if (!entry->pathHint.TryAppend("/Game/Deep/A/B/C/").IsOk() ||
+            const StringView prefix =
+                combination.path == PathShape::Deep ? "/Game/Deep/A/B/C/" : "/Game/\xC3\x84rger";
+            if (!entry->pathHint.TryAppend(prefix).IsOk() ||
                 !entry->pathHint.TryAppend(name).IsOk()) {
                 return false;
             }
@@ -145,33 +200,7 @@ bool MakeCombinations(CookedManifest& manifest) noexcept {
             }
         }
 
-        bool ok = true;
-        switch (combination.dependencies) {
-        case DependencyShape::None:
-            break;
-        case DependencyShape::Hard:
-            ok = AddDependency(*entry, 10, PackageDependencyKind::Hard);
-            break;
-        case DependencyShape::Soft:
-            ok = AddDependency(*entry, 11, PackageDependencyKind::Soft);
-            break;
-        case DependencyShape::HardAndSoftSameTarget:
-            ok = AddDependency(*entry, 10, PackageDependencyKind::Hard) &&
-                 AddDependency(*entry, 10, PackageDependencyKind::Soft);
-            break;
-        case DependencyShape::SoftNotCooked:
-            ok = AddDependency(*entry, 5, PackageDependencyKind::Soft);
-            break;
-        case DependencyShape::HardCycle:
-            ok = AddDependency(*entry, 12, PackageDependencyKind::Hard) &&
-                 AddDependency(manifest.entries[2], low, PackageDependencyKind::Hard);
-            break;
-        case DependencyShape::Count:
-            ok = false;
-            break;
-        }
-
-        if (!ok) {
+        if (!AddTraits(manifest, *entry, combination.traits, low)) {
             return false;
         }
     }
@@ -181,11 +210,12 @@ bool MakeCombinations(CookedManifest& manifest) noexcept {
 
 } // namespace
 
-// 조합(AS 10.1절 5): PrimaryAsset·bundle(없음·하나·여럿) × 의존(없음·Hard·Soft·같은 대상 Hard+Soft·
-// 쿠킹하지 않은 Soft·Hard 순환) × 경로 깊이의 모든 허용 조합을 한 매니페스트에 담아 왕복하고, 읽은
-// 결과에서 조합 분류를 다시 세어 빠진 조합이 없음을 본다(축이나 모양이 늘면 AllowedCombinations가
-// 바뀌어 이 시험이 그 칸을 만든다). 금지 조합(일반 항목의 bundle)은 CookedManifest_FieldRules가
-// 본다.
+// 조합(AS 10.1절 5): PrimaryAsset·bundle(없음·하나·여럿) 4 × 의존 특성(쿠킹된 Hard·Hard 순환·쿠킹된
+// Soft·쿠킹하지 않은 Soft·같은 대상 Hard+Soft) 다섯의 부분집합 32 × 경로(얕음·깊음·비ASCII NFC) 3의
+// 모든 허용 조합 384개를 한 매니페스트에 담아 왕복하고, 읽은 항목마다 조합 번호를 다시 계산해
+// 만든 번호와 같음을 본다(번호 ↔ 항목이 일대일 — 빠짐·겹침이 없다). 축이나 모양이 늘면
+// AllowedCombinations가 바뀌어 이 시험이 그 칸을 만들고, 플래그가 늘면 static_assert가 막는다.
+// 금지 조합(일반 항목의 bundle)은 CookedManifest_FieldRules가 본다.
 TEST(CookedManifest_AllCombinations) {
     AssetEnv env;
     REQUIRE(env.Ready());
@@ -197,15 +227,16 @@ TEST(CookedManifest_AllCombinations) {
     REQUIRE(WriteCookedManifest(allocator, manifest, bytes, &failure));
     auto read = ReadCookedManifest(allocator, bytes.View(), &failure);
     REQUIRE(read);
-    REQUIRE(read.Value().entries.Size() == AllowedCombinations + 3);
+    REQUIRE(read.Value().entries.Size() == AllowedCombinations + FixedEntries);
     bool seen[AllowedCombinations] = {};
-    for (usize index = 3; index < read.Value().entries.Size(); ++index) {
-        const uint32 kind = ClassOf(read.Value(), read.Value().entries[index]);
-        REQUIRE(kind < AllowedCombinations);
-        CHECK(!seen[kind]);
-        seen[kind] = true;
+    bool matched = true;
+    for (uint32 index = 0; index < AllowedCombinations; ++index) {
+        const uint32 kind = ClassOf(read.Value(), read.Value().entries[FixedEntries + index]);
+        matched = matched && kind == index && !seen[kind];
+        seen[kind < AllowedCombinations ? kind : 0] = true;
     }
 
+    CHECK(matched);
     for (uint32 kind = 0; kind < AllowedCombinations; ++kind) {
         if (!seen[kind]) {
             test::RecordFailure("manifest combination missing", __FILE__, __LINE__);
