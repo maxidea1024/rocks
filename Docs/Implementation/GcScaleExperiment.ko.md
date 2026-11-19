@@ -1063,8 +1063,8 @@ a1916228(Slot hot·cold 분리)·a43ca91e(1차 리뷰 반영)의 2차 리뷰 지
 
 위 결론의 "없앨 수 없다"는 감소를 그 자리에서 할 때의 말이다. 감소를 미뤄 몰아서 적용하면 대상 줄을 읽는 일을 제거 호출 밖으로 옮겨 미리 읽기로 겹칠 수 있다. 설계는 13.4절(9e475aa1 — 적용 시점·분류 불변 근거·늦는 쪽이 안전한 근거, 5d3c7358 — 기록한 대상이 적용 전에 회수되지 않는 근거와 세대 대조를 Debug Fatal로)이고 구현은 8279ee93이다.
 
-- 구조: 제거(`LedgerEditLocked`의 지운 값, `LedgerClearLocked`)는 (소유자 슬롯, 대상 슬롯, 대상 세대) 12 B를 Registry 기록(4096칸, 첫 클러스터 예약 때 48 KB)에 덧붙인다. 추가는 그대로 바로 센다 — 계수는 실제 이상이라 판단이 모두 보수 쪽이다. 적용(`ApplyLedgerRemovalsLocked`, 8칸 앞 미리 읽기)은 이탈 판정 전, 해체 전, 경계 비율 판정 전, cycle 시작(Begin·Collect), Debug 장부 검증 전, 기록이 찼을 때 한다.
-- 세대가 다른 기록은 정상 API로 닿지 않는다(Marking 중 기록은 cutoff에 적용되고, Sweeping 중 기록의 대상은 그 cycle에 표식됐다). Debug는 Fatal, Release는 소유자 `outCount`만 줄인다.
+- 구조: 제거(`LedgerEditLocked`의 지운 값, `LedgerClearLocked`)는 (소유자 슬롯, 대상 슬롯, 대상 세대) 12 B를 Registry 기록(이 절의 측정 때 4096칸·48 KB — 22.2절에서 256칸·3 KB로)에 덧붙인다. 추가는 그대로 바로 센다 — 계수는 실제 이상이라 판단이 모두 보수 쪽이다. 적용(`ApplyLedgerRemovalsLocked`, 8칸 앞 미리 읽기)은 이탈 판정 전, 해체 전, 경계 비율 판정 전, cycle 시작(Begin·Collect), Debug 장부 검증 전(22.2절에서 뺐다), 기록이 찼을 때 한다.
+- 세대가 다른 기록은 정상 API로 닿지 않는다(Marking 중 기록은 cutoff에 적용되고, Sweeping 중 기록의 대상은 그 cycle에 표식됐다). 이 절의 구현은 Debug Fatal, Release는 소유자 `outCount`만 줄였다(22.2절에서 모든 빌드 Fatal로 바꾸고 상태 검사를 더했다).
 
 측정: 22절과 같은 `--package-profile CROSS --write-rounds 15 --reps 1`, 높은 우선순위로 전(HEAD 341d5eef)·후를 같은 시점 번갈아, 묶음 최소/중앙 ns/op. 첫 측정(`step4/writes-deferred.txt`, 네 round, 부하 비교적 낮음)은 시제품, 둘째(`step4/run4b.txt`, 세 round, 부하 큼)는 커밋한 코드다(Release 경로는 같다).
 
@@ -1075,7 +1075,7 @@ a1916228(Slot hot·cold 분리)·a43ca91e(1차 리뷰 반영)의 2차 리뷰 지
 | 둘째(3 round) | 10% | 364–403 / 412–535 | 294–307 / 317–358 | 277–340 / 307–553 | 260–274 / 275–389 | 중앙 508–663 → 519–557 |
 | 둘째(3 round) | 30% | 371–430 / 421–514 | 283–290 / 299–335 | 241–252 / 266–312 | 256–356 / 278–446 | 중앙 502–631 → 484–532 |
 
-- 켬 제거 중앙이 같은 round에서 39–109ns(대개 70–110ns, 약 20–28%) 줄었다(첫째 352–389 → 275–313). 같은 round 켬·끔 중앙 차이는 약 110–140ns에서 18–62ns(대개 20–30ns)로, 최솟값 차이는 18–49ns로 줄었다. 둘째 측정은 부하로 흔들림이 크지만(끔 중앙 553·446 같은 튀는 값) 켬의 전·후 순서는 모든 round에서 같다.
+- 켬 제거 중앙(같은 round): 첫째 측정은 39–109ns(11–28%, 대개 70–110ns·20–28%) 줄었고(352–389 → 275–313), 둘째 측정(부하 큼)은 86–202ns(21–39%) 줄었다(412–535 → 299–358). 같은 round 켬·끔 중앙 차이는 약 110–140ns에서 18–62ns(대개 20–30ns)로, 최솟값 차이는 18–49ns로 줄었다. 둘째 측정은 부하로 흔들림이 크지만(끔 중앙 553·446 같은 튀는 값) 켬의 전·후 순서는 모든 round에서 같다.
 - 추가는 흔들림 안에서 바뀌지 않았다(추가는 기록을 쓰지 않는다).
 - 남은 차이(대개 20–30ns)는 기록 쓰기·적용 때 대상 줄 미스 가운데 미리 읽기로 다 겹치지 못한 몫과 소유자 소속 비트 읽기다.
 
@@ -1085,7 +1085,7 @@ a1916228(Slot hot·cold 분리)·a43ca91e(1차 리뷰 반영)의 2차 리뷰 지
 |---|---|---|
 | V1 | 이탈 전 적용(`FinishLeaveLocked`) | 클러스터 시험 실행이 결과 줄 없이 멈춤(Fatal), 패키지 soak 4종도 멈춤 |
 | V2 | 적용 때 세대 대조 | 정상 API로 닿지 않는 경로라 대조를 돌리지 않고 Debug Fatal 검사로 막음(설계 13.4절) |
-| V3 | cycle 시작 적용(`AdvanceGcEpochLocked`) | Development world smoke seed 41 tick 77 "Unreachable object survived a stop-the-world collection"(Debug는 통과 — Debug Collect의 장부 검증이 먼저 적용하기 때문으로 본다) |
+| V3 | cycle 시작 적용(`AdvanceGcEpochLocked`) | Development world smoke seed 41 tick 77 "Unreachable object survived a stop-the-world collection"(Debug는 통과 — Debug 장부 검증이 기록을 먼저 적용해 가렸다. 22.2절에서 검증이 적용하지 않게 고쳤다) |
 | V4 | 경계 비율 판정 전 적용(`FlattenBoundaryClustersLocked`) | 새 시험 `BoundaryValveSeesDeferredRemovals`(미적용 감소로 경계 비율을 잘못 보고 해체 — `flattenedClusters == 0`·`clusters == 2` 실패), Debug 패키지 worker soak 멈춤 |
 | V5 | 해체 전 적용(`DissolveClusterLocked`) | 패키지 soak 4종이 결과 줄 없이 멈춤(Fatal). 이때 클러스터 시험은 통과해 시험 빈틈이었으므로 `DeferredRemovalAppliesBeforeDissolve`를 더함 — "Cluster ledger out-count underflow" Fatal로 잡음 |
 
@@ -1093,3 +1093,57 @@ a1916228(Slot hot·cold 분리)·a43ca91e(1차 리뷰 반영)의 2차 리뷰 지
 
 검증: Debug Foundation 전체 2,072개·`--filter Object --repeat 3` 202개×3·`--filter ObjectGcCluster --repeat 5` 23개×5(해체 시험 포함), Debug EngineTests 전체 2,210개·World `--repeat 3`, 클러스터 smoke Debug 6종, Development soak 10종(일반 300K tick 3종·시간 예산 1종·클러스터 world 3종·packages 3종)과 추가 soak 3종(packages seed 52·53(worker), world 5000 tick seed 54(worker)), format·policy 통과. 해체 시험은 Foundation 전체 실행 뒤에 더해 클러스터 묶음 반복으로 확인했다.
 
+### 22.2 4단계 리뷰 반영 (8279ee93 리뷰, 2026-11-19)
+
+리뷰(정확성 결함 없음)의 지적을 반영했다. 설계는 399803e8·96f1ca98(13.4·13.8·13.9절), 구현은 3f1692c3(측정 옵션 c4883680)다.
+
+| 지적 | 반영 |
+|---|---|
+| 설계의 "원소 trace 기반 제거는 바로 한다"가 사실과 다름 | 미루는 제거(배열·`StructRefArray` 원소 제거·비우기, map 대입·지우기)와 바로 하는 제거(이탈 `LeaveTrace`, map 전체 비우기 `ClearMapLedgerLocked`)를 바로잡음 |
+| 13.4·13.9절 비용 문장이 옛 구조 | 제거는 12 B 순차 기록, 기록이 차거나 처음 이탈·해체·Begin·경계 비율 판정이 오면 최대 256칸을 `gate_` 아래 적용, 기록 메모리 Registry마다 3 KB |
+| Release 대체 처리(세대가 다르면 소유자 `outCount`만 줄임) | 모든 빌드 Fatal. 대체 처리는 cutoff 적용을 뺀 상태에서도 Development soak을 조용히 통과시켰다(대조 C3) |
+| 세대가 다 찬 슬롯은 회수 뒤에도 세대가 그대로(Exhausted) | 대상 상태(Alive·DestroyRequested)도 본다. 시험 `DeferredRemovalTargetCheckSeesExhaustedSlot`(maxGeneration 1) |
+| 몰아서 적용하는 동안의 꼬리 지연 | 아래 측정으로 4096 → 256칸 |
+| 시험 보강 4건 | 아래 새 시험 |
+| SwapRemove 시험 설명 위치, 22.1절 비율 | 설명을 제 시험 위로 옮김, 22.1절 수치를 측정별로 나눔 |
+
+반영하면서 하나를 더 고쳤다: Debug 장부 검증이 기록을 먼저 적용해, Release의 적용 경로(cycle 시작)가 Debug 시험에서 가려졌다 — 대조 "cycle 시작에서 기록을 적용 대신 버림"이 처음에는 새 시험 셋을 모두 통과했다(`review4/negctl10.txt`). 검증은 이제 기록을 적용하지 않고 기대 계수에 더해 대조하고, 기록마다 적용과 같은 대상 검사를 한다(설계 13.8절).
+
+**꼬리 지연.** `GcBench --write-latency`(연산마다 시계를 읽는다 — 해상도 100ns, 시계 비용이 연산마다 더해진다), 패키지 1M 사이 30%, 쓰기 50K × 3, 칸 수만 바꾼 빌드를 같은 시점 번갈아 세 round(`review4/caps.txt`):
+
+| 기록 칸 | 제거 p99 | p99.9 | max |
+|---|---|---|---|
+| 256 | 0.7–0.9µs | 8.8–14.6µs | 13.5–24.6µs |
+| 512 | 0.8–1.0µs | 19.8–30.6µs | 27.0–61.4µs |
+| 1024 | 0.8–0.9µs | 10.8–45.4µs | 56.3–97.7µs |
+| 4096 | 0.7–1.2µs | 1.0–1.8µs | 185–331µs |
+
+- 4096칸에서 가장 느린 제거 열두 개(50K ÷ 4096 ≈ 12)가 바로 적용이고 140–350µs였다(`review4/latency-on.txt`). 칸당 약 35–100ns다. p99.9는 256칸에서 적용이 0.1%보다 잦아(1/256) 적용 시간이 그대로 보인다.
+- 최종 구현(256칸) ↔ 4096칸, 사이 10·30%, 세 round(`review4/final-writes.txt`): 제거 max 20.0–62.1µs(한 번 125.9µs) ↔ 279.5–364.2µs, p99 0.8–1.1 ↔ 0.9–1.0µs, p99.9 13.0–17.1 ↔ 1.1–3.1µs.
+- 처리량(쓰기 묶음 15개의 중앙값): (1) 256 ↔ 4096은 제거 중앙 +11–49ns(+2–8%), 최소 +5–29ns였고, (2) 미루기 전(341d5eef) ↔ 4096 ↔ 256 세 갈래(`review4/three-way.txt`)에서는 256 ↔ 4096이 −70 ~ +63ns로 방향이 섞였다. 256의 최소는 여섯 경우 모두 미루기 전보다 낮았다(524–602 ↔ 601–720ns). 이 두 측정은 부하가 커서(제거가 22.1절의 약 2배) 몇 % 아래 차이를 가르지 못한다. 처리량 차이가 있어도 몇 %이고 꼬리는 10배 넘게 줄어 256칸으로 정했다.
+
+**새 시험**(Foundation 클러스터 시험 29개):
+
+- `DeferredRemovalDuringSweepingAppliesAtNextBegin`: Sweeping 중 경계 간선 제거 → Reclaiming(쓰레기 넷으로 지나는 것을 확인)·Idle → 다음 Collect가 적용하고 밖 객체를 회수, 한 번 더 Collect해 적용 뒤 계수를 대조
+- `DeferredRemovalSurvivesCancel`: Marking 중 제거 → 취소 → 다음 Collect가 적용(같은 대조)
+- `DetachedLivesOneMoreCycleAfterMarkingRemoval`: 처리 전 detached의 마지막 안쪽 간선 제거 → 그 cycle은 살고 다음 cycle에 회수(상한)
+- `IdleRemovalAppliesBeforeCollectMarks`: Idle에서 지운 detached의 마지막 안쪽 간선 → 정지형 Collect가 그 cycle에 회수(cycle 시작 적용)
+- `DeferredRemovalTargetCheckSeesExhaustedSlot`: maxGeneration 1에서 Marking 중 제거한 대상이 회수되어 Exhausted가 되는 정상 경로
+- `PackageSubtreeDiscardAppliesDeferredRemovals`: 패키지 부분 트리 Discard의 이탈 루프(경계·안쪽 간선을 지운 직후)
+
+**음성 대조**(`review4/negctl10b.txt`·`negctl10c.txt` — 대조마다 Debug Foundation 시험을 하나씩, C1·C3은 Development 패키지 soak 4종도):
+
+| 대조 | 바꾼 것 | 결과 |
+|---|---|---|
+| C1 | cutoff 적용 제거(V4) | Exhausted·cutoff 시험 "outlived its target" Fatal, Development 패키지 soak 1–2종 멈춤(seed 32, 첫 실행은 seed 44(worker)도) |
+| C2 | C1 + 적용의 상태 검사 제거 | 두 시험 Fatal(Debug 장부 검증의 같은 검사가 잡음) |
+| C10 | C1 + 적용·검증의 상태 검사 모두 제거 | Exhausted 시험 통과 — 세대만으로는 못 잡는 구멍. cutoff 시험은 세대로 Fatal |
+| C3 | C1 + 옛 Release 대체 처리 | Debug는 검증이 Fatal. Development soak 4종은 모두 통과 — 대체 처리가 깨진 불변식을 감췄다 |
+| C4 | cycle 시작에서 기록을 적용 대신 버림 | Sweeping·Cancel 시험 "diverged from a recount", Idle 시험 실패(Collect 뒤에도 detached가 남음). 검증이 적용하던 때는 셋 다 통과했다 |
+| C5 | 취소가 기록을 버림 | Cancel 시험 "diverged from a recount" |
+| C6 | 미루지 않고 바로 감소 | Detached 시험 실패(그 cycle에 회수 — 미룬 감소의 동작을 시험이 고정한다) |
+| C7 | cutoff·cycle 시작 적용 모두 제거 | Detached 시험 실패(다음 cycle에도 남음 — 상한) |
+| C8 | 이탈 전 적용 제거(V1) | 패키지 부분 트리 시험 "Cluster member left with outgoing ledger edges" |
+| C9 | cycle 시작 적용 제거(V3) | Idle 시험 실패, Sweeping·Cancel 시험 "outlived its target" |
+
+검증: Debug Foundation 전체 2,079개·`--filter Object --repeat 3` 209개×3·`--filter ObjectGcCluster --repeat 5` 29개×5, Debug EngineTests 전체 2,216개·World `--repeat 3`, 클러스터 smoke Debug 6종, Development soak 10종(일반 300K tick 3종·시간 예산 1종·클러스터 world 3종·packages 3종)과 추가 soak 3종(packages seed 52·53(worker), world 5000 tick seed 54(worker)), format·policy 통과(`review4/verify.txt`).
