@@ -6,6 +6,7 @@
 #include <Core/Memory/FrameArena.h>
 #include <Platform/Memory.h>
 #include <RenderGraph/RenderGraph.h>
+#include <Task/WorkerScheduler.h>
 #include <stdio.h>
 
 namespace sandbox {
@@ -41,6 +42,36 @@ TraceScopeName CompositeName("SelfTest.Composite");
 TraceScopeName CopyName("SelfTest.Copy");
 TraceScopeName ClearName("SelfTest.Clear");
 TraceScopeName HzbFillName("SelfTest.HzbFill");
+TraceScopeName TintName("SelfTest.Tint");
+TraceScopeName ParallelCopyName("SelfTest.ParallelCopy");
+
+// 병렬 기록 시험(RG3)의 Raster pass 수와 worker 수다.
+constexpr uint32 ParallelPasses = 6;
+constexpr uint32 ParallelWorkers = 3;
+
+// 그리기별 상수 색으로 화면을 채운다(병렬 기록 시험, 샘플 렌더러를 worker에서 함께 쓰지 않으려고
+// 따로 둔다).
+constexpr char TintHlsl[] = "cbuffer DrawConstants : register(b0) { float4 tint; };\n"
+                            "float4 VSMain(uint id : SV_VertexID) : SV_Position {\n"
+                            "    float2 uv = float2((id << 1) & 2, id & 2);\n"
+                            "    return float4(uv * 2.0 - 1.0, 0.5, 1.0);\n"
+                            "}\n"
+                            "float4 PSMain() : SV_Target { return tint; }\n";
+
+constexpr char TintVertexGlsl[] = "#version 320 es\nprecision highp float;\n"
+                                  "void main() {\n"
+                                  "    vec2 uv = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);\n"
+                                  "    gl_Position = vec4(uv * 2.0 - 1.0, 0.5, 1.0);\n"
+                                  "}\n";
+
+constexpr char TintPixelGlsl[] = "#version 320 es\nprecision highp float;\n"
+                                 "uniform highp vec4 pu_h[1];\n"
+                                 "layout(location = 0) out vec4 out_var_SV_Target0;\n"
+                                 "void main() { out_var_SV_Target0 = pu_h[0]; }\n";
+
+struct TintConstants {
+    float values[4] = {};
+};
 TraceScopeName MsaaName("SelfTest.Msaa");
 TraceScopeName ResolveScopeName("SelfTest.ResolveScope");
 TraceScopeName HzbReduceName("SelfTest.HzbReduce");
@@ -608,6 +639,76 @@ bool RunResolveGraph(GraphBench& bench, Allocator& allocator, RenderHandle outpu
     return true;
 }
 
+// RG3 병렬 기록: Raster pass 여섯이 앞 결과를 읽으며(의존 사슬) 각자 색을 그리고, 마지막 Copy
+// pass가 그 결과를 output에 복사한다. scheduler가 있으면 기록 함수를 worker에서 기록하고 소유
+// 스레드가 재생한다. pixels에 output을 읽는다.
+bool RunParallelGraph(GraphBench& bench, PipelineHandle tint, RenderHandle output,
+                      TextureHandle outputTexture, WorkerScheduler* scheduler, Allocator& allocator,
+                      Array<uint8>& pixels, uint32& recorded) noexcept {
+    RenderGraphDesc desc = bench.Desc();
+    desc.scheduler = scheduler;
+    desc.scratch = &allocator;
+    RenderGraph graph(desc);
+    rocks::render::GraphImportOptions outputOptions;
+    outputOptions.finalAccess = ResourceAccess::SrvGraphics;
+    auto target = graph.ImportTexture(output, "Output", outputOptions);
+    if (!target) {
+        return false;
+    }
+
+    GraphTexture previous;
+    bool added = true;
+    for (uint32 index = 0; index < ParallelPasses && added; ++index) {
+        auto texture = graph.CreateTexture(TargetDesc(), "Tinted");
+        if (!texture) {
+            return false;
+        }
+
+        GraphPassAccesses accesses(graph);
+        if (!previous.IsNull()) {
+            accesses.Texture(previous, ResourceAccess::SrvGraphics);
+        }
+
+        accesses.RenderTarget(texture.Value(), GraphLoadAction::Clear, {0, 0, 0, 1});
+        TintConstants constants;
+        constants.values[0] = static_cast<float>(index) / static_cast<float>(ParallelPasses);
+        constants.values[1] = 1.0f - constants.values[0];
+        constants.values[2] = index % 2 == 0 ? 1.0f : 0.0f;
+        constants.values[3] = 1.0f;
+        added =
+            graph
+                .AddPass(TintName, GraphPassKind::Raster, GraphPassFlags::None, accesses,
+                         [tint, constants](GraphPassContext& pass) noexcept {
+                             pass.Commands().SetPipeline(tint);
+                             (void)pass.Commands().SetDrawConstants(DrawConstantBytes(constants));
+                             pass.Commands().Draw(3);
+                         })
+                .IsOk();
+        previous = texture.Value();
+    }
+
+    GraphPassAccesses copy(graph);
+    copy.Texture(previous, ResourceAccess::CopySource)
+        .Texture(target.Value(), ResourceAccess::CopyDestination);
+    const GraphTexture from = previous;
+    const GraphTexture to = target.Value();
+    added =
+        added &&
+        graph
+            .AddPass(ParallelCopyName, GraphPassKind::Copy, GraphPassFlags::HasSideEffects, copy,
+                     [from, to](GraphPassContext& pass) noexcept {
+                         (void)pass.Commands().CopyTexture(pass.Texture(to), pass.Texture(from));
+                     })
+            .IsOk();
+    if (!added || !graph.Execute()) {
+        PrintGraphError(graph);
+        return false;
+    }
+
+    recorded = graph.Stats().parallelPasses;
+    return bench.device->ReadPixels(outputTexture, pixels.View()).IsOk();
+}
+
 uint32 RunRenderGraphChecks(const char* name, Device& device, sample::Renderer& renderer,
                             Allocator& allocator) noexcept {
     failures = 0;
@@ -794,6 +895,66 @@ uint32 RunRenderGraphChecks(const char* name, Device& device, sample::Renderer& 
         Check(ok && device.ReadPixels(outputTexture.Value(), pixels.View()).IsOk() &&
                   CenterIs(pixels, 255, 0, 255),
               "a graph MSAA pass resolves into a texture the next pass composites (magenta)");
+    }
+
+    // RG3 병렬 기록: 같은 그래프를 직렬·병렬로 실행한 출력 픽셀이 같다.
+    if (ok) {
+        PipelineDesc tintDesc;
+        tintDesc.vertex = {StringView(TintHlsl), StringView(TintVertexGlsl)};
+        tintDesc.pixel = {StringView(TintHlsl), StringView(TintPixelGlsl)};
+        tintDesc.colorFormats[0] = TargetDesc().format;
+        tintDesc.drawConstantBytes = sizeof(TintConstants);
+        auto tint = device.CreatePipeline(tintDesc);
+        WorkerScheduler scheduler(allocator);
+        WorkerSchedulerConfig config;
+        config.workerCount = ParallelWorkers;
+        const bool started = scheduler.Start(config).IsOk();
+        Array<uint8> serialPixels(allocator);
+        Array<uint8> parallelPixels(allocator);
+        uint32 serialRecorded = 0;
+        uint32 parallelRecorded = 0;
+        const bool sized = serialPixels.TryResize(pixels.Size()).IsOk() &&
+                           parallelPixels.TryResize(pixels.Size()).IsOk();
+        Check(tint && started && sized, "tint pipeline and worker scheduler");
+        if (tint && started && sized) {
+            auto cleared = arena.Reset();
+            (void)cleared;
+            const bool serialOk =
+                RunParallelGraph(bench, tint.Value(), output.Value(), outputTexture.Value(),
+                                 nullptr, allocator, serialPixels, serialRecorded);
+            cleared = arena.Reset();
+            (void)cleared;
+            const bool parallelOk =
+                RunParallelGraph(bench, tint.Value(), output.Value(), outputTexture.Value(),
+                                 &scheduler, allocator, parallelPixels, parallelRecorded);
+            Check(serialOk && parallelOk && serialRecorded == 0 &&
+                      parallelRecorded == ParallelPasses + 1,
+                  "the same graph runs serially and with parallel recording");
+            Check(serialOk && parallelOk &&
+                      platform::MemoryEquals(serialPixels.Data(), parallelPixels.Data(),
+                                             serialPixels.Size()),
+                  "serial and parallel recording give the same pixels");
+            const usize center =
+                (static_cast<usize>(TargetSize / 2) * TargetSize + TargetSize / 2) * 4;
+            // 마지막 pass(번호 5)의 색: R 5/6, G 1/6, B 0(대상 형식이 sRGB면 R·G가 인코딩으로 더
+            // 밝다).
+            const bool lastColor = parallelOk &&
+                                   parallelPixels[center] > parallelPixels[center + 1] &&
+                                   parallelPixels[center] >= 200 && parallelPixels[center + 2] == 0;
+            Check(lastColor, "parallel recording draws the last pass color");
+            if (!lastColor) {
+                printf("    center (%u, %u, %u)\n", parallelPixels[center],
+                       parallelPixels[center + 1], parallelPixels[center + 2]);
+            }
+        }
+
+        if (started) {
+            (void)scheduler.Shutdown();
+        }
+
+        if (tint) {
+            device.Retire(tint.Value());
+        }
     }
 
     // RG1 남은 것 B부: 그래프 texture view로 낸 HZB(Storage 형식 능력과 compute가 있는 장치).
