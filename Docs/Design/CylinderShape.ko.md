@@ -1,6 +1,6 @@
 # Rocks Cylinder 형상 설계
 
-기준일: 2026-11-19, 개정 3.
+기준일: 2026-11-19, 개정 4.
 
 이 문서는 기본 형상에 cylinder(원기둥)를 더하는 설계다. Core 수학의 형상·판정(CY1)과 물리 어댑터의 충돌·질의 형상(CY2) 두 층을 정한다. 문서 전체가 설계이며 구현된 항목은 없다.
 
@@ -128,6 +128,15 @@ struct Cylinder {
 - 입력 오류: 비유한·음수 반경, 무효 값 생성자 입력.
 - 판정 사이 일관성: 거리 0 ⇔ `ContainsPoint`(반경 0 구 겹침 포함), Raycast `startedInside` ⇔ `ContainsPoint`(시작점), 최근접점이 형상 안.
 
+**판정 사이 일관성 계약(CY1 리뷰 반영).**
+
+- `ContainsPoint` Hit ⇔ `TryDistanceSquared` == 0 ⇔ `Overlap(cylinder, Sphere(p, 0))` Hit ⇔ 그 점에서 시작한 `Raycast`·`SegmentCast`의 `startedInside`. 모두 하나의 포함 식(축 좌표 두 부호 판정 + 수직 거리² ≤ r²)을 쓴다. 포함 식이 밖이면 거리²는 형식 최소 정규값(`NumericLimits<T>::Min()`) 이상으로 올려 0이 되지 않게 한다(실제 거리²가 그보다 작은 점은 결과가 실제보다 크다).
+- radius 0의 포함 판정은 `CastCapsule` 시작 판정과 같은 두 식(선분 거리² ≤ r², 또는 수직 성분 판정 + 축 범위)이다. 그래서 `ContainsPoint(Capsule radius 0)`(선분 거리 식 하나)과는 반올림 경계에서 다를 수 있다.
+- `TryClosestPoint`는 자른 점이 포함 식 밖이면 안쪽 기준점(중심, 중심이 밖이면 start)과의 이분 탐색(상한 64단계, 이름 있는 상수)으로 안으로 판단되는 가장 바깥 점을 돌려준다. radius > 0이면 결과에 대한 `ContainsPoint`가 항상 Hit이다. radius 0은 선분 위 근사점이다.
+- 밖에서 출발했는데 진입 거리가 0으로 언더플로하면 거리 0 접촉(`startedInside` 아님)이다.
+- 접선에 가까운 옆면 진입의 법선은 근사다(normal·direction이 1e−9 … 7e−8 정도 양수일 수 있다).
+- 시험의 정확 산술과 기하 oracle 도우미는 공용 시험 지원(`Core/Source/Developer/TestSupport/Public/TestSupport/ExactArithmetic.h`, `GeometryOracles.h`)으로 옮겼고 기존 Intersection 시험도 이를 쓴다.
+
 **CY1 검증(2026-11-19).** 구현 시험 13개(float·double)에 더해 독립 리뷰가 Python 정확 산술(`Fraction`, 90자리 `Decimal`) 판정기로 대조했다: `TryBounds` 포함 double 30만 + float 20만 cylinder(축 117만 개, 축 성분 1e−6 … 4e−320 비정규, 좌표 1e−3 … 1e9) 위반 0, Raycast 17만 ray(축 평행·접선·끝면 위 시작·maxDistance = 진입 거리) 누락 0, 평면 분류 여유 밖 불일치 0. 판정 사이 일관성 결함(거리 0인데 포함 Miss, 반경 0 시작점, 최근접점의 포함)은 리뷰에서 찾아 고쳤다.
 
 ## 4. 물리 어댑터(CY2)
@@ -189,3 +198,4 @@ struct Cylinder {
 - 개정 1(2026-11-19): 초안.
 - 개정 2(2026-11-19): 교차검증(치명 2, 중요 6, 경미 6) 반영. 경계 반폭과 support를 소거 없는 꼴로 바꾸고 경계 포함을 계산(상대 여유 + 한 ulp 바깥 보정)과 정확 산술 시험으로 보장하게 했다. 퇴화 규칙(radius > 0이면 축 정규화 필수, radius 0은 선분 경로)과 `IsValid`·`TryMake` 일치, 수직 거리 계산 꼴, 광선 구간 교집합 알고리즘과 규칙, 평면·선분 겹침, Capsule 평면·볼록 영역 판정 보강, UE 인용 정정(`FCylinder`, `#if 0` 블록, 보수적 bounds), 물리 계약 조건부 문구와 J18 수정·J19 추가, 결정 1–3 확정.
 - 개정 3(2026-11-19): CY1 구현을 반영했다. `TryBounds`(Result 반환)와 크기 조정·비정규 보정을 포함한 반폭 오차 예산, 끝면 중심 거리 기반 support, 원판 거부가 실제로는 `start == end`와 overflow뿐이라는 점, 판정 사이 일관성 시험, 정확 산술 독립 검증 결과, `Intersection.h` 파일 배치(8절)를 적었다.
+- 개정 4(2026-11-19): CY1 리뷰 반영 결과로 판정 사이 일관성 계약, radius 0 포함 식, 최근접점 안쪽 보정, 언더플로 진입, 접선 법선 근사, 공용 시험 도구 위치를 3.6절에 적었다.
