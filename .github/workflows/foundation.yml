@@ -14,6 +14,8 @@ jobs:
       matrix:
         os: [windows-latest, macos-15]
     runs-on: ${{ matrix.os }}
+    env:
+      ROCKS_MSVC_TOOLSET: ${{ matrix.os == 'windows-latest' && '14.44' || '' }}
     defaults:
       run:
         shell: pwsh
@@ -26,8 +28,9 @@ jobs:
           global-json-file: global.json
       - name: Install verified native formatter
         run: ./Build/InstallFormatter.ps1
-      # windows-latest (windows-2025-vs2026) ships MSVC STL 14.52, which rejects Clang older than 22 (STL1000), next to LLVM 20.
-      # The pinned LLVM goes first on PATH so the build and the MetaCompiler use its clang-cl, lld-link and llvm-lib.
+      # Windows uses the verified toolchain: LLVM 21.1.6 (same as local builds) first on PATH, and the MSVC 14.44 toolset that the
+      # image installs next to 14.52 (ROCKS_MSVC_TOOLSET above). STL 14.52 rejects Clang older than 22 (STL1000), and the
+      # MetaCompiler does not support Clang 22's JSON AST type spellings yet.
       - name: Install verified LLVM (Windows)
         if: runner.os == 'Windows'
         run: ./Build/InstallLlvm.ps1
