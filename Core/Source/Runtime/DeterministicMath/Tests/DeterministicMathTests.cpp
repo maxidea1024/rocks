@@ -8,6 +8,8 @@
 #include <stdio.h>
 
 using namespace rocks;
+namespace deterministic_math_tests_file {
+
 using namespace rocks::deterministic;
 using platform::BitCast;
 
@@ -270,3 +272,4 @@ TEST(DeterministicMath_EnvironmentRunRestoresResultsUnderFlushToZero) {
     CHECK(deterministic == expected);
     CHECK(platform::IsDeterministicFloatingPointEnvironment());
 }
+} // namespace deterministic_math_tests_file
