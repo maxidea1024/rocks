@@ -694,7 +694,10 @@ void D3D12Device::ResolveAttachments() noexcept {
                                     target->mipLevels, target->slices),
             source->resource.Get(), d3d12::SubresourceIndex(0, sourceSlice, 0, 1, source->slices),
             d3d12::MappingOf(source->format).rtv);
-        TrackTransition(*target, target_.resolves[index].slot, destination, ShaderReadStates);
+        // 패스 뒤 상태 계약: 원본은 attachment 상태로 되돌리고 대상은
+        // RESOLVE_DEST(ResolveDestination)로 둔다(RenderBase 8절 RG1 남은 것 설계 2).
+        TrackTransition(*source, target_.colors[index].slot, whole,
+                        D3D12_RESOURCE_STATE_RENDER_TARGET);
     }
 }
 

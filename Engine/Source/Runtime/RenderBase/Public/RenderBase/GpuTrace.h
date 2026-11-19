@@ -107,6 +107,21 @@ public:
 
     GpuTraceStats Stats() const noexcept;
 
+    // GpuScope의 RAII 없는 형태다(렌더 그래프 구간, RenderBase 8절 RG1 남은 것 설계 2). 시작과 끝을
+    // 서로 다른 장치 기록에 쓸 수 있다(같은 queue의 제출 순서라 시간이 맞는다). marker는 쓰지
+    // 않는다(marker는 기록 안에서 짝이 맞아야 하므로 호출자가 기록마다 낸다). 깊이는 BeginSpan마다
+    // 오르고 EndSpan마다 내린다(돌려준 값이 0이어도 EndSpan을 짝으로 부른다). 스레드는 BeginFrame과
+    // 같다.
+    uint64 BeginSpan(graphics::CommandContext& commands, TraceScopeName& name) noexcept;
+    void EndSpan(graphics::CommandContext& commands, uint64 span) noexcept;
+    // 끝 timestamp를 쓸 장치 기록이 없을 때(기록 실패 뒤 정리) span을 무효로 닫는다.
+    void DropSpan(uint64 span) noexcept;
+
+    // 설정 markers다(구간 이름을 debug marker로 남기는지).
+    bool MarkersEnabled() const noexcept {
+        return settings_.markers;
+    }
+
 private:
     friend class GpuScope;
 
