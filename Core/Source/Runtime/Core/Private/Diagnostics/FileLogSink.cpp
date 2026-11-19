@@ -5,6 +5,7 @@
 #include <Core/Diagnostics/FileLogSink.h>
 #include <Core/Text/StringBuilder.h>
 #include <Core/Time/DateTime.h>
+#include <Core/Time/TimeSpan.h>
 #include <Platform/Clock.h>
 #include <Platform/Memory.h>
 
@@ -22,19 +23,27 @@ constexpr StringView LogFileExtension = ".log";
 // 봉인하지 않은 압축 파일의 확장자다(zstd CLI로 풀린다).
 constexpr StringView CompressedLogFileExtension = ".log.zst";
 
+// 파일 이름 시각 "YYYYMMDDTHHMMSSmmmZ"에서 날짜와 시각을 가르는 'T'의 위치다("YYYYMMDD" 뒤).
+constexpr usize LogFileStampDateBytes = 8;
+
+// UTC tick(DateTime) 하나는 100 ns다. UTC를 읽지 못할 때 단조 ns를 tick으로 바꾼다.
+constexpr uint64 NanosecondsPerUtcTick = 100;
+static_assert(TimeSpan::TicksPerSecond * NanosecondsPerUtcTick == 1000000000,
+              "a DateTime tick must be 100 ns");
+
 bool IsDigit(char value) noexcept {
     return value >= '0' && value <= '9';
 }
 
 // "YYYYMMDDTHHMMSSmmmZ"(LogFileStampBytes)인지다.
 bool IsLogFileStamp(StringView text) noexcept {
-    if (text.ByteCount() != LogFileStampBytes || text.Data()[8] != 'T' ||
+    if (text.ByteCount() != LogFileStampBytes || text.Data()[LogFileStampDateBytes] != 'T' ||
         text.Data()[LogFileStampBytes - 1] != 'Z') {
         return false;
     }
 
     for (usize index = 0; index + 1 < LogFileStampBytes; ++index) {
-        if (index != 8 && !IsDigit(text.Data()[index])) {
+        if (index != LogFileStampDateBytes && !IsDigit(text.Data()[index])) {
             return false;
         }
     }
@@ -269,7 +278,7 @@ Result<void> FileLogSink::Open() noexcept {
     // 시작 시각이다. UTC를 읽지 못하면 단조 시각으로 대신한다(이름이 겹치면 번호가 붙는다).
     int64 ticks = 0;
     if (!platform::TryUtcTicks(ticks)) {
-        ticks = static_cast<int64>(platform::MonotonicNanoseconds() / 100);
+        ticks = static_cast<int64>(platform::MonotonicNanoseconds() / NanosecondsPerUtcTick);
     }
 
     const auto now = DateTime::TryFromTicks(ticks);

@@ -9,7 +9,7 @@
 // 트랜잭션의 공개 전 객체와 공개된 객체를 객체 경로로 찾고(SCC import 해석), 다른 트랜잭션의 공개
 // 전 객체는 outermost면 StaleHandle·경로 구성 요소면 NotFound다. 그 밖의 규칙·오류 순서는
 // ObjectRegistry::FindObject와 같고 트랜잭션 상태 규칙을 먼저 본다. 같은 기준의
-// ConstructionContext::AcquireType(Oe — import 대상의 타입 확인)도 본다.
+// ConstructionContext::AcquireType(Oe — import 대상의 타입 확인)과 한 단계 조회 FindChild도 본다.
 using namespace rocks;
 
 namespace {
@@ -295,6 +295,96 @@ TEST(ConstructionAcquireType_SeesLiveAndThisTransactionObjects) {
             REQUIRE(transaction.Commit(publish, held));
             CHECK(TypeError(transaction.AcquireType(staged.Value())) == ErrorCode::InvalidArgument);
             CHECK(TypeError(registry.AcquireType(access, staged.Value())) == ErrorCode::None);
+            held[0].Reset();
+        }
+
+        for (auto& root : roots) {
+            root.Reset();
+        }
+
+        REQUIRE(registry.Collect(access));
+        CHECK(registry.Stats().liveObjects == 0);
+        REQUIRE(registry.Shutdown(access));
+        REQUIRE(types.Shutdown());
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// FindChild(outer, name): FindObject의 구성 요소 한 단계다. outermost가 아닌 outer(공개된 객체·이
+// 트랜잭션의 공개 전 객체) 아래 이름 하나를 대소문자 무시로 찾고, 빈 이름은 대표 자식이다. 다른
+// 트랜잭션의 공개 전 객체는 outer면 StaleHandle, 자식이면 NotFound다. 오류 순서는 트랜잭션 상태 →
+// 접근(WrongThread) → outer(null StaleHandle) → 이름 형식(InvalidArgument) → NotFound다.
+TEST(ConstructionFindChild_FindsOneComponentUnderAnyVisibleOuter) {
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterTypes(types));
+        ObjectRegistry registry(allocator, types, {0x43464f04, 1});
+        const auto access = registry.OwnerAccess();
+        RootRef<Object> roots[3];
+        auto live = NewNode(registry, {}, {}, roots[0]);
+        REQUIRE(live);
+        auto liveAsset = NewNode(registry, live.Value(), {}, roots[1]);
+        REQUIRE(liveAsset);
+        auto shared = NewNode(registry, liveAsset.Value(), "Shared", roots[2]);
+        REQUIRE(shared);
+        {
+            ConstructionContext mismatched(registry, {{0x43464f04, 99}});
+            CHECK(mismatched.FindChild(live.Value(), "").Error() == ErrorCode::WrongContext);
+        }
+
+        {
+            ConstructionContext transaction(registry, access);
+            auto package = transaction.Create<FindNode>(FindNodeType);
+            REQUIRE(package);
+            auto asset = transaction.Create<FindNode>(FindNodeType, package.Value());
+            REQUIRE(asset);
+            auto body = transaction.Create<FindNode>(FindNodeType, asset.Value(), "Body");
+            REQUIRE(body);
+            auto socket = transaction.Create<FindNode>(FindNodeType, body.Value(), "Socket");
+            REQUIRE(socket);
+            auto added = transaction.Create<FindNode>(FindNodeType, shared.Value(), "Added");
+            REQUIRE(added);
+            CHECK(Finds(transaction.FindChild(package.Value(), ""), asset.Value()));
+            CHECK(Finds(transaction.FindChild(body.Value(), "socket"), socket.Value()));
+            CHECK(Finds(transaction.FindChild(liveAsset.Value(), "SHARED"), shared.Value()));
+            CHECK(Finds(transaction.FindChild(shared.Value(), "Added"), added.Value()));
+            CHECK(Finds(transaction.FindChild(live.Value(), ""), liveAsset.Value()));
+            CHECK(transaction.FindChild(body.Value(), "Missing").Error() == ErrorCode::NotFound);
+            CHECK(transaction.FindChild(socket.Value(), "").Error() == ErrorCode::NotFound);
+            CHECK(transaction.FindChild({}, "Body").Error() == ErrorCode::StaleHandle);
+            CHECK(transaction.FindChild(body.Value(), "a.b").Error() == ErrorCode::InvalidArgument);
+            CHECK(transaction.FindChild({}, "a.b").Error() == ErrorCode::StaleHandle);
+            {
+                ConstructionContext other(registry, access);
+                CHECK(other.FindChild(body.Value(), "Socket").Error() == ErrorCode::StaleHandle);
+                CHECK(other.FindChild(shared.Value(), "Added").Error() == ErrorCode::NotFound);
+                CHECK(Finds(other.FindChild(liveAsset.Value(), "Shared"), shared.Value()));
+            }
+
+            struct Foreign {
+                ConstructionContext* transaction;
+                ObjectHandle outer;
+                ErrorCode error = ErrorCode::None;
+            } foreign{&transaction, body.Value()};
+            {
+                platform::Thread thread;
+                auto entry = [](void* context) noexcept {
+                    auto* state = static_cast<Foreign*>(context);
+                    state->error = ErrorOf(state->transaction->FindChild(state->outer, "a.b"));
+                };
+                REQUIRE(thread.Start(entry, &foreign) == platform::ThreadStatus::Success);
+                REQUIRE(thread.Join() == platform::ThreadStatus::Success);
+            }
+
+            CHECK(foreign.error == ErrorCode::WrongThread);
+            const ObjectHandle publish[] = {package.Value()};
+            RootRef<Object> held[1];
+            REQUIRE(transaction.Commit(publish, held));
+            CHECK(transaction.FindChild(body.Value(), "Socket").Error() ==
+                  ErrorCode::InvalidArgument);
+            CHECK(Finds(registry.FindChild(access, body.Value(), "Socket"), socket.Value()));
             held[0].Reset();
         }
 

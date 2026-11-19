@@ -94,6 +94,26 @@ public:
     //   }
     Result<ObjectHandle> FindObject(ObjectHandle outermost, StringView objectPath) noexcept;
 
+    // outer 바로 아래 이름이 name인 객체를 이 트랜잭션의 공개 전 객체와 공개된 객체 모두에서 찾는다
+    // (FindObject의 구성 요소 한 단계 — outer는 outermost가 아니어도 된다). A1 패키지 로드가
+    // import를 앞서 해석한 outer import 아래에서 이름 하나로 풀 때 쓴다(경로 전체를 다시 걷지 않아
+    // import 수에 비례한다). 빈 name은 outer의 대표 자식이다. 보이는 객체·이름 비교 규칙은
+    // FindObject와 같다(다른 트랜잭션의 공개 전 객체는 outer면 StaleHandle, 자식이면 NotFound).
+    // 읽기라 Required 검사 중 표시 동안에도 된다. 소유 스레드 전용이다. 결과 handle의 수명 규칙도
+    // FindObject와 같다.
+    //
+    // 순서와 오류: 트랜잭션 상태(클래스 주석의 규칙) → 접근(WrongThread·WrongContext) → 종료·재진입
+    // (ShuttingDown·Busy) → outer(무효·다른 Registry·다른 트랜잭션의 공개 전 StaleHandle, GC cutoff
+    // white·Retired Destroyed) → 이름 형식(ValidateNameComponent 위반 InvalidArgument, NFC 판정
+    // 할당 실패 OutOfMemory) → 비교 키 할당(OutOfMemory) → 없으면 NotFound.
+    //
+    // 사용 예(import "Gear.Tooth"를 앞서 푼 Gear 아래에서):
+    //   auto tooth = transaction.FindChild(gear, "Tooth");
+    //   if (!tooth) {
+    //       return Result<void>::Failure(tooth.Error());   // NotFound면 MissingDependency
+    //   }
+    Result<ObjectHandle> FindChild(ObjectHandle outer, StringView name) noexcept;
+
     // object의 실제 등록 타입 lease다. 이 트랜잭션의 참조 대상으로 쓸 handle의 타입을 쓰기 전에
     // 확인할 때 쓴다 — 단계형 그래프 복원이 외부 참조 대상(imports — 생존 객체 또는 같은 트랜잭션에
     // 올린 SCC 형제의 객체)을 선언 타입·기대 형식과 대조한다(Docs/Design/ObjectFoundations.ko.md

@@ -1,5 +1,7 @@
 #include "PackageEditing.h"
 
+#include <Core/Text/NameComponent.h>
+
 // 섹션 내용 시험이다(Docs/Design/AssetSystem.ko.md 5.2절 표, 5.3절 타입·커스텀 버전 축, 5.7절
 // 구현에서 정한 점): Summary Record의 모든 필드, Exports·ObjectImports·Dependencies·BulkIndex 고정
 // 배치의 모든 칸과 표 사이 규칙, bulk 해제. 변조마다 섹션을 writer 규칙대로 다시
@@ -354,6 +356,11 @@ TEST(AssetPackage_ExportsFields) {
         const PackageExportEntry longName[] = {rep,
                                                {StringView(name.Data(), name.Size()), part, 1, 0}};
         CHECK(corrupt(longName));
+        // 문자열 상한 정확히(4096 byte)는 Exports 표 규칙을 지난다(이름 규칙 64 byte는 그래프
+        // 1단계가 본다 — 그래서 로드는 Objects 손상이다).
+        const PackageExportEntry boundary[] = {
+            rep, {StringView(name.Data(), PackageMaxStringBytes), part, 1, 0}};
+        CHECK(ReadPackage(allocator, with(boundary, 2).View(), PackageReadOptions{}));
     }
 
     const PackageExportEntry flagBit[] = {{rep.name, rep.type, 0, 1 | 4}, valid2[1]};
@@ -463,6 +470,75 @@ TEST(AssetPackage_ObjectImportsFields) {
     CHECK(corrupt(duplicate));
     PackageReadOptions plain;
     CHECK(ReadPackage(allocator, with(nested, 4).View(), plain));
+    // 깊이 우선(AS 5.2절): Gear 아래 Tooth는 Gear 바로 뒤 부분 트리에 있어야 한다. 경로 byte 순이면
+    // "Gear-x" < "Gear.Tooth"지만 표 순서는 Gear, Gear.Tooth, Gear-x다.
+    const PackageImportEntry dashFirst[] = {
+        {a, 0, "Gear", type}, {a, 0, "Gear-x", type}, {a, 1, "Tooth", type}};
+    const PackageImportEntry dashAfter[] = {
+        {a, 0, "Gear", type}, {a, 1, "Tooth", type}, {a, 0, "Gear-x", type}};
+    CHECK(corrupt(dashFirst));
+    CHECK(ReadPackage(allocator, with(dashAfter, 3).View(), plain));
+    // 대표 에셋 항목(빈 이름)은 그 에셋의 첫 항목이다.
+    const PackageImportEntry representativeLate[] = {{a, 0, "Gear", type}, {a, 0, "", type}};
+    CHECK(corrupt(representativeLate));
+    // 에셋이 바뀌면 깊이 우선 경로가 다시 시작한다(뒤 에셋 항목의 outer는 그 에셋 안).
+    const PackageImportEntry twoAssets[] = {
+        {a, 0, "Gear", type}, {a, 1, "Tooth", type}, {later, 0, "", type}, {later, 0, "A", type}};
+    CHECK(ReadPackage(allocator, with(twoAssets, 4).View(), plain));
+    {
+        // 이름 규칙(ValidateNameComponent, AS 5.7절 13): 제어 문자, 비NFC(e + 결합 acute),
+        // '.'·공백·첫 문자 '_'·예약 장치 이름, 65 byte, 잘못된 UTF-8은 표 손상이다.
+        char tooLong[MaxNameComponentBytes + 1];
+        for (char& value : tooLong) {
+            value = 'x';
+        }
+
+        const StringView badNames[] = {StringView("A\x01"),
+                                       StringView("e\xCC\x81"),
+                                       StringView("A.B"),
+                                       StringView("A B"),
+                                       StringView("_A"),
+                                       StringView("CON"),
+                                       StringView(tooLong, sizeof(tooLong)),
+                                       StringView("\xC3\x28")};
+        for (StringView badName : badNames) {
+            const PackageImportEntry bad[] = {{a, 0, badName, type}};
+            CHECK(corrupt(bad));
+            const PackageImportEntry badInner[] = {{a, 0, "Gear", type}, {a, 1, badName, type}};
+            CHECK(corrupt(badInner));
+        }
+
+        const PackageImportEntry longest[] = {{a, 0, StringView(tooLong, 64), type}};
+        CHECK(ReadPackage(allocator, with(longest, 1).View(), plain));
+    }
+
+    {
+        // 객체 경로 경계(4096 byte 받음, 4097 거부): 64단 사슬, 경로 = 이름 합 + '.' 63개.
+        // 4096 = 63 × 63 + 64 + 63, 4097 = 62 × 63 + 2 × 64 + 63(이름은 모두 64 byte 이하).
+        char names[64][64];
+        for (usize level = 0; level < 64; ++level) {
+            for (usize index = 0; index < 64; ++index) {
+                names[level][index] = static_cast<char>('a' + level % 26);
+            }
+        }
+
+        auto chain = [&](usize longNames) noexcept {
+            Array<PackageImportEntry> rows(allocator);
+            for (usize level = 0; level < 64; ++level) {
+                const usize bytes = level >= 64 - longNames ? 64 : 63;
+                (void)rows.TryPushBack(PackageImportEntry{a, static_cast<uint32>(level),
+                                                          StringView(names[level], bytes), type});
+            }
+
+            return rows;
+        };
+
+        Array<PackageImportEntry> exact = chain(1);
+        Array<PackageImportEntry> over = chain(2);
+        CHECK(ReadPackage(allocator, with(exact.View(), 64).View(), plain));
+        CHECK(reader.Corrupt(with(over.View(), 64), PackageSectionKind::ObjectImports));
+    }
+
     {
         // 객체 경로 상한(4 KiB): 이름 둘의 합이 넘는다(각 이름은 문자열 상한 안).
         Array<char> name(allocator);
@@ -615,10 +691,40 @@ TEST(AssetPackage_BulkIndexFields) {
     CHECK(mutate(0, [](PackageBulkEntry& row) noexcept { row.flags = 2; }));
     CHECK(mutate(0, [](PackageBulkEntry& row) noexcept { row.flags = 1; }));
     CHECK(mutate(0, [](PackageBulkEntry& row) noexcept { row.codec = BulkCodec::None; }));
+    // 범위: Zstd entry(0 — None이면 stored = raw 규칙이 먼저 잡는다)의 stored가 섹션을 넘는다.
+    REQUIRE(entries[0].codec == BulkCodec::Zstd);
     CHECK(mutate(
-        1, [](PackageBulkEntry& row) noexcept { row.storedBytes = NumericLimits<uint64>::Max(); }));
-    CHECK(mutate(
-        1, [](PackageBulkEntry& row) noexcept { row.offset = NumericLimits<uint64>::Max() - 7; }));
+        0, [](PackageBulkEntry& row) noexcept { row.storedBytes = NumericLimits<uint64>::Max(); }));
+    // 범위: offset이 정렬 규칙(앞 끝을 정렬한 값)과 같지만 섹션 밖이다 — 0 byte 마지막 entry가 앞
+    // entry 끝(5)을 정렬한 64에 있는데 섹션은 5 byte다(에디터 bulkAlignment 64).
+    {
+        const uint8 five[5] = {1, 2, 3, 4, 5};
+        PackageBulkEntry rows[2];
+        rows[0].bulkId = 1;
+        rows[0].storedBytes = 5;
+        rows[0].rawBytes = 5;
+        rows[0].crc32 = Crc32(Span<const uint8>(five, 5));
+        rows[0].sha256 = Sha256::Hash(Span<const uint8>(five, 5));
+        rows[1].bulkId = 2;
+        rows[1].offset = AlignUp(5, PackageEditorBulkAlignment);
+        rows[1].crc32 = Crc32(Span<const uint8>());
+        rows[1].sha256 = Sha256::Hash(Span<const uint8>());
+        Array<uint8> index = BulkIndexBytes(allocator, rows, 2);
+        EditablePackage edit(allocator);
+        REQUIRE(edit.Parse(base.editor.View()));
+        REQUIRE(edit.Replace(PackageSectionKind::BulkIndex, index.View()));
+        REQUIRE(edit.Replace(PackageSectionKind::Bulk, Span<const uint8>(five, 5)));
+        CHECK(reader.Corrupt(edit.Build(), PackageSectionKind::BulkIndex, PackageKind::Editor));
+        // 같은 배치에서 섹션을 64 byte(패딩 0)로 채우면 받는다(위 거부가 범위 규칙 때문임을
+        // 보인다).
+        Array<uint8> padded(allocator);
+        REQUIRE(padded.TryAppend(Span<const uint8>(five, 5)));
+        REQUIRE(padded.TryResize(static_cast<usize>(rows[1].offset)));
+        REQUIRE(edit.Replace(PackageSectionKind::Bulk, padded.View()));
+        PackageReadOptions editor;
+        editor.expectedKind = PackageKind::Editor;
+        CHECK(ReadPackage(allocator, edit.Build().View(), editor));
+    }
     CHECK(mutate(0, [](PackageBulkEntry& row) noexcept { row.crc32 ^= 1; }));
     CHECK(mutate(1, [](PackageBulkEntry& row) noexcept { row.storedBytes -= 1; }));
 
@@ -741,5 +847,45 @@ TEST(AssetPackage_TruncatedSections) {
         }
 
         CHECK(failures == original.Size() - 1);
+    }
+
+    // 에디터 Summary(엔진 버전 Record 둘을 담는다)도 모든 길이로 자르면 Summary 손상이다.
+    {
+        EditablePackage edit(allocator);
+        REQUIRE(edit.Parse(base.editor.View()));
+        EditableSection* section = edit.Find(PackageSectionKind::Summary);
+        REQUIRE(section != nullptr);
+        const Array<uint8> original = Copy(allocator, section->bytes.View());
+        uint32 failures = 0;
+        for (usize length = 1; length < original.Size(); ++length) {
+            section->bytes.Clear();
+            REQUIRE(section->bytes.TryAppend(original.View().Slice(0, length)));
+            if (reader.Corrupt(edit.Build(), PackageSectionKind::Summary, PackageKind::Editor)) {
+                ++failures;
+            }
+        }
+
+        CHECK(failures == original.Size() - 1);
+    }
+
+    // 파일 전체를 0부터 원래 길이 − 1까지 모든 길이로 자르면(섹션 재배치 없이) 언제나 손상이다 —
+    // 헤더가 남으면 fileBytes·Stat 크기 불일치, 짧으면 크기 < 64(쿠킹·에디터).
+    const Array<uint8>* files[] = {&base.cooked, &base.editor};
+    const PackageKind kindOf[] = {PackageKind::Cooked, PackageKind::Editor};
+    for (usize which = 0; which < 2; ++which) {
+        const Array<uint8>& file = *files[which];
+        uint32 failures = 0;
+        for (usize length = 0; length < file.Size(); ++length) {
+            PackageReadOptions options;
+            options.expectedKind = kindOf[which];
+            AssetDiagnostic failure;
+            auto read = ReadPackage(allocator, file.View().Slice(0, length), options, &failure);
+            if (!read && failure.code == AssetDiagnosticCode::CorruptPackage &&
+                failure.section == 0) {
+                ++failures;
+            }
+        }
+
+        CHECK(failures == file.Size());
     }
 }

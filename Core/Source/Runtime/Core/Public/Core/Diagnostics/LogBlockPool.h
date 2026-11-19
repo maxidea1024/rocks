@@ -57,6 +57,10 @@ public:
 
 private:
     static constexpr uint64 IndexMask = NumericLimits<uint32>::Max();
+    // head의 위쪽 절반은 ABA를 막는 태그다(아래 절반은 블록 색인).
+    static constexpr uint32 TagShift = 32;
+    static_assert(IndexMask == (uint64{1} << TagShift) - 1,
+                  "the head tag must start right above the block index bits");
 
     // 머리를 다른 데이터와 다른 캐시 라인에 둔다(빌리기·돌려주기 CAS 경합 줄).
     struct alignas(CacheLineSize) Head {

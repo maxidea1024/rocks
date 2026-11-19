@@ -797,6 +797,10 @@ private:
     Result<ObjectHandle> FindObjectChecked(const ObjectAccessContext&, ObjectHandle outermost,
                                            StringView objectPath,
                                            uint64 transaction) const noexcept;
+    // ConstructionContext::FindChild의 본문이다(FindObjectChecked의 구성 요소 한 단계 — outer는
+    // 아무 보이는 객체, 빈 name은 대표 자식).
+    Result<ObjectHandle> FindChildChecked(const ObjectAccessContext&, ObjectHandle outer,
+                                          StringView name, uint64 transaction) const noexcept;
     ErrorCode ShadeLocked(ObjectHandle) noexcept;
     bool IsCutoff(const Slot*) const noexcept;
     bool IsReclaimable(const Slot&) const noexcept;

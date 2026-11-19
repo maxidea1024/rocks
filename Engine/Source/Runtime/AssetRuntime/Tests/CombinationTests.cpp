@@ -33,6 +33,41 @@ constexpr ValueKindProperty Slots[] = {ValueKindProperty::Field,
 
 constexpr usize SlotCount = sizeof(Slots) / sizeof(Slots[0]);
 
+// 자리가 아닌 성질이다(Required·대상 타입·대상 ID·컨테이너·통째 값).
+constexpr ValueKindProperty NonSlots[] = {
+    ValueKindProperty::AcceptsRequired, ValueKindProperty::HasTargetType,
+    ValueKindProperty::RequiresTargetId, ValueKindProperty::Container,
+    ValueKindProperty::WholeFieldValue};
+
+template <usize Count>
+constexpr uint32 BitsOf(const ValueKindProperty (&properties)[Count]) noexcept {
+    uint32 bits = 0;
+    for (ValueKindProperty property : properties) {
+        bits |= static_cast<uint32>(property);
+    }
+
+    return bits;
+}
+
+// 표가 어느 종류에든 쓰는 성질 비트가 모두 Slots 또는 NonSlots로 분류되어 있다. 표에 새 자리(열)가
+// 생기면 여기서 컴파일이 멈춘다 — Slots와 fixture에 그 자리를 더하라는 신호다.
+constexpr bool TableBitsClassified() noexcept {
+    const uint32 known = BitsOf(Slots) | BitsOf(NonSlots);
+    for (uint32 kind = 0; kind < ValueKindCount; ++kind) {
+        if ((ValueKindProperties(static_cast<ValueKind>(kind)) & ~known) != 0) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static_assert((BitsOf(Slots) & BitsOf(NonSlots)) == 0,
+              "a value kind property is both a slot and a non-slot property");
+static_assert(TableBitsClassified(),
+              "the value kind property table uses a property that is neither a slot nor a "
+              "non-slot property; add the new slot to Slots and to the combination fixtures");
+
 const char* SlotName(usize slot) noexcept {
     constexpr const char* Names[SlotCount] = {"Field",       "StructMember",  "ArrayElement",
                                               "StaticArray", "MapKey",        "MapValue",
@@ -178,13 +213,10 @@ bool WalkClass(Coverage& coverage, TypeRegistry& types, TypeId type) noexcept {
     return true;
 }
 
-// 순회 대상이다: 왕복 시험이 실제로 저장·로드하는 fixture 클래스 전부.
-TypeId FixtureClasses[] = {
-    IdOf<ComboAsset>(),       IdOf<ComboEditorAsset>(), IdOf<ComboRequiredAsset>(),
-    IdOf<ComboPart>(),        IdOf<ComboPartDerived>(), IdOf<SimpleAsset>(),
-    IdOf<ValueAsset>(),       IdOf<BulkAsset>(),        IdOf<BaseGameAsset>(),
-    IdOf<DerivedGameAsset>(), IdOf<ValidatedAsset>(),   IdOf<TestAsset>(),
-    IdOf<TestPart>(),         IdOf<TestRequiredAsset>()};
+// 순회 대상이다: 조합 왕복 시험(FixtureAsset_CombinationRoundTrip·CombinationRequired)이
+// 저장·로드하는 조합 클래스만이다. 다른 fixture(TestAsset 등)가 칸을 대신 채우지 않게 한다.
+TypeId FixtureClasses[] = {IdOf<ComboAsset>(), IdOf<ComboEditorAsset>(), IdOf<ComboRequiredAsset>(),
+                           IdOf<ComboPart>(), IdOf<ComboPartDerived>()};
 
 // 빠진 칸 하나를 실패로 남긴다(실패 문구 = 칸 이름).
 void Missing(String& text, const char* what, uint32 kind, usize slot) noexcept {
@@ -250,29 +282,37 @@ TEST(FixtureAsset_CombinationsCoverPropertyTable) {
         }
     }
 
-    // 값 struct가 놓이는 자리마다 검증 hook·Flags enum, 참조 struct가 놓이는 자리마다 참조 struct.
-    const ValueKindProperty structSlots[] = {
-        ValueKindProperty::Field,        ValueKindProperty::StructMember,
-        ValueKindProperty::ArrayElement, ValueKindProperty::StaticArrayElement,
-        ValueKindProperty::MapValue,     ValueKindProperty::OptionalInner};
-    for (ValueKindProperty slot : structSlots) {
-        if (!coverage.validated[SlotIndex(slot)]) {
+    // 값 struct가 놓이는 자리(표의 Struct 행 — InstancedStruct 내용은 아래)마다 검증 hook, 참조
+    // struct가 놓이는 자리마다 참조 struct. 참조 struct는 표 밖 규칙으로 Map 값·Optional 내부에 둘
+    // 수 없다(강한 참조를 담은 struct — ReflectionExtensions 1.3절).
+    uint32 structSlots = 0;
+    uint32 referenceSlots = 0;
+    for (usize slot = 0; slot < SlotCount; ++slot) {
+        if (Slots[slot] == ValueKindProperty::InstancedStructContent ||
+            !HasValueKindProperty(ValueKind::Struct, Slots[slot])) {
+            continue;
+        }
+
+        ++structSlots;
+        if (!coverage.validated[slot]) {
             ++missing;
-            Missing(text, "missing Validate hook", static_cast<uint32>(ValueKind::Struct),
-                    SlotIndex(slot));
+            Missing(text, "missing Validate hook", static_cast<uint32>(ValueKind::Struct), slot);
+        }
+
+        if (Slots[slot] == ValueKindProperty::MapValue ||
+            Slots[slot] == ValueKindProperty::OptionalInner) {
+            continue;
+        }
+
+        ++referenceSlots;
+        if (!coverage.referenceStruct[slot]) {
+            ++missing;
+            Missing(text, "missing reference struct", static_cast<uint32>(ValueKind::Struct), slot);
         }
     }
 
-    const ValueKindProperty referenceSlots[] = {
-        ValueKindProperty::Field, ValueKindProperty::StructMember, ValueKindProperty::ArrayElement,
-        ValueKindProperty::StaticArrayElement};
-    for (ValueKindProperty slot : referenceSlots) {
-        if (!coverage.referenceStruct[SlotIndex(slot)]) {
-            ++missing;
-            Missing(text, "missing reference struct", static_cast<uint32>(ValueKind::Struct),
-                    SlotIndex(slot));
-        }
-    }
+    CHECK(structSlots == 6);
+    CHECK(referenceSlots == 4);
 
     for (usize slot = 0; slot < SlotCount; ++slot) {
         if (Slots[slot] != ValueKindProperty::InstancedStructContent &&
