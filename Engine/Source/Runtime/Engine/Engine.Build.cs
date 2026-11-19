@@ -8,5 +8,6 @@ public sealed class Engine : EngineModuleRules
 {
     protected override string ModuleName => "Engine";
 
-    protected override string[] RequiredModules => ["World", "Config", "Task"];
+    // ModuleLoader: the engine attaches its type registrar to the module loader (Docs/Design/ModuleLoader.ko.md section 3.10).
+    protected override string[] RequiredModules => ["World", "Config", "Task", "ModuleLoader"];
 }

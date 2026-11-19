@@ -131,6 +131,8 @@ Result<void> ModuleLoader::Initialize(ModuleTable table) noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    table_ = table;
+
     // 기록 배열은 여기서 정확한 크기로 한 번만 잡는다. 이후 자라지 않으므로 기록 주소(lease 문맥)가
     // 고정된다.
     usize dependencyTotal = 0;
@@ -200,6 +202,11 @@ ModuleLoader::~ModuleLoader() noexcept {
     // 시작 역순이 곧 안쪽부터다). 자동 종료를 거부한 모듈은 Shutdown 없이 객체만 파괴한다(UE와
     // 같다).
     ShutdownRecords(ModuleGroup::Process);
+    // 자동 종료를 거부해 남은 모듈의 타입 등록도 되돌린다(등록기는 아직 살아 있어야 한다 — 계약).
+    if (registrar_ != nullptr) {
+        UnregisterAllTypes();
+        registrar_ = nullptr;
+    }
 
     // 남은 객체(자동 종료를 거부한 모듈)를 시작 역순으로 파괴한다. 나중에 시작한 모듈이 먼저 시작한
     // 모듈을 쓸 수 있으므로 소멸자도 그 순서를 따른다.
@@ -348,6 +355,14 @@ bool ModuleLoader::StartRecord(usize index, ModuleLoadReport& report) noexcept {
         platform::Fatal("ModuleLoader could not issue a module lease");
     }
 
+    // 타입 등록기가 붙어 있으면 Startup 직전에 이 모듈의 타입을 등록한다(UE도 StartupModule 전에
+    // UObject를 등록한다). 실패하면 Startup·Shutdown을 부르지 않는다.
+    if (!RegisterRecordTypes(index, report)) {
+        record.owned.Reset();
+        AtomicStore<MemoryOrder::Release>(&record.state, ModuleState::Failed);
+        return false;
+    }
+
     // Startup 중에는 로더 스레드의 Find만 이 객체를 본다(state가 Starting이다).
     AtomicStore<MemoryOrder::Release>(&record.object, record.owned.Get());
     Result<void> started = Result<void>::Success();
@@ -357,7 +372,9 @@ bool ModuleLoader::StartRecord(usize index, ModuleLoadReport& report) noexcept {
     }
 
     if (!started) {
-        // 실패한 Startup은 스스로 부분 등록을 되돌렸다(계약). Shutdown은 부르지 않는다.
+        // 실패한 Startup은 스스로 부분 등록을 되돌렸다(계약). Shutdown은 부르지 않는다. 로더가 한
+        // 타입 등록은 로더가 되돌린다.
+        UnregisterRecordTypes(index);
         AtomicStore<MemoryOrder::Release>(&record.object,
                                           static_cast<ModuleImplementation*>(nullptr));
         record.owned.Reset();
@@ -456,6 +473,8 @@ void ModuleLoader::ShutdownRecords(ModuleGroup group) noexcept {
         record.pendingShutdown = false;
         AtomicStore<MemoryOrder::Release>(&record.state, ModuleState::ShuttingDown);
         record.owned->Shutdown();
+        // 모듈 코드가 내려간 뒤 그 모듈의 타입을 되돌린다(3.7절 3단계).
+        UnregisterRecordTypes(next);
         AtomicStore<MemoryOrder::Release>(&record.object,
                                           static_cast<ModuleImplementation*>(nullptr));
         record.owned.Reset();
@@ -501,6 +520,159 @@ usize ModuleLoader::LeaseCount(StringView name) const noexcept {
 
 usize ModuleLoader::ModuleCount() const noexcept {
     return records_.Size();
+}
+
+Result<ModuleLease> ModuleLoader::AcquireLease(StringView name) noexcept {
+    const usize index = IndexOf(name);
+    if (index == IndexNone) {
+        return Result<ModuleLease>::Failure(ErrorCode::NotFound);
+    }
+
+    return ModuleLease::Acquire(&records_[index].leases, &RetainModuleLease, &ReleaseModuleLease);
+}
+
+usize ModuleLoader::ModulesWithLeases(Span<StringView> names) const noexcept {
+    usize count = 0;
+    for (const Record& record : records_) {
+        if (AtomicLoad<MemoryOrder::Acquire>(&record.leases) == 0) {
+            continue;
+        }
+
+        if (count < names.Size()) {
+            names[count] = record.row->name;
+        }
+
+        ++count;
+    }
+
+    return count;
+}
+
+void ModuleLoader::CheckRegistrarCall() const noexcept {
+    // 시작 중인 의존 사슬이나 종료 절차 아래에서 등록기를 바꾸면 모듈마다 등록 여부가 갈린다.
+    if (loadDepth_ != 0 || shutdownInProgress_) {
+        platform::Fatal("ModuleLoader type registrar changed from a module callback");
+    }
+}
+
+ModuleLoadReport ModuleLoader::AttachTypeRegistrar(ModuleTypeRegistrar& registrar) noexcept {
+    ModuleLoadReport report;
+    if (!OnLoaderThread()) {
+        report.code = ModuleLoadCode::WrongThread;
+        WriteReportText(report, report.stage, "AttachTypeRegistrar");
+        WriteReportText(report, report.message,
+                        "A type registrar must be attached on the thread that created the module "
+                        "loader");
+        return report;
+    }
+
+    if (registrar_ != nullptr) {
+        platform::Fatal("ModuleLoader type registrar is already attached");
+    }
+
+    CheckRegistrarCall();
+    registrar_ = &registrar;
+    // 이미 시작한 모듈을 시작 순서(순번 오름차순)로 등록한다. 고르는 동안 할당하지 않도록 순번이
+    // 작은 것부터 하나씩 찾는다(모듈 수가 작다).
+    uint64 floor = 0;
+    while (true) {
+        usize next = IndexNone;
+        for (usize index = 0; index < records_.Size(); ++index) {
+            const Record& record = records_[index];
+            if (record.state == ModuleState::Started && record.startOrder > floor &&
+                (next == IndexNone || record.startOrder < records_[next].startOrder)) {
+                next = index;
+            }
+        }
+
+        if (next == IndexNone) {
+            break;
+        }
+
+        floor = records_[next].startOrder;
+        if (!RegisterRecordTypes(next, report)) {
+            // 이번에 등록한 것을 시작 역순으로 되돌리고 붙이지 않는다.
+            UnregisterAllTypes();
+            registrar_ = nullptr;
+            return report;
+        }
+    }
+
+    return report;
+}
+
+void ModuleLoader::DetachTypeRegistrar() noexcept {
+    if (!OnLoaderThread()) {
+        platform::Fatal("ModuleLoader::DetachTypeRegistrar called off the loader thread");
+    }
+
+    if (registrar_ == nullptr) {
+        return;
+    }
+
+    CheckRegistrarCall();
+    UnregisterAllTypes();
+    registrar_ = nullptr;
+}
+
+bool ModuleLoader::RegisterRecordTypes(usize index, ModuleLoadReport& report) noexcept {
+    Record& record = records_[index];
+    if (registrar_ == nullptr || record.entry->registerTypes == nullptr) {
+        return true;
+    }
+
+    const StringView name = record.row->name;
+    auto lease = ModuleLease::Acquire(&record.leases, &RetainModuleLease, &ReleaseModuleLease);
+    if (!lease) {
+        platform::Fatal("ModuleLoader could not issue a module lease");
+    }
+
+    auto registered = registrar_->Register(name, record.entry->registerTypes, lease.Value());
+    if (!registered) {
+        report.code = ModuleLoadCode::StartupFailed;
+        report.error = registered.Error();
+        WriteReportName(report, report.failed, name);
+        WriteReportText(report, report.stage, "RegisterTypes");
+        WriteReportText(report, report.message,
+                        "Module {} reflection types could not be registered: {}", name,
+                        ErrorCodeName(registered.Error()));
+        return false;
+    }
+
+    record.typesRegistered = true;
+    return true;
+}
+
+void ModuleLoader::UnregisterRecordTypes(usize index) noexcept {
+    Record& record = records_[index];
+    if (!record.typesRegistered) {
+        return;
+    }
+
+    record.typesRegistered = false;
+    registrar_->Unregister(record.row->name);
+}
+
+void ModuleLoader::UnregisterAllTypes() noexcept {
+    // 시작 역순이다. 등록한 모듈은 모두 시작해 있다(Startup 실패는 그 자리에서 되돌렸다).
+    uint64 ceiling = NumericLimits<uint64>::Max();
+    while (true) {
+        usize next = IndexNone;
+        for (usize index = 0; index < records_.Size(); ++index) {
+            const Record& record = records_[index];
+            if (record.typesRegistered && record.startOrder < ceiling &&
+                (next == IndexNone || record.startOrder > records_[next].startOrder)) {
+                next = index;
+            }
+        }
+
+        if (next == IndexNone) {
+            break;
+        }
+
+        ceiling = records_[next].startOrder;
+        UnregisterRecordTypes(next);
+    }
 }
 
 } // namespace rocks

@@ -71,43 +71,6 @@ bool AllowedLoadError(ErrorCode error) noexcept {
     }
 }
 
-// 로드한 패키지를 파일이 기록한 설정(종류·정렬·codec·Summary 값·Build·ImportOwner·ImportRecord·
-// Tags)으로 다시 쓴다. bulk는 로드한 Package가 원본이다.
-Array<uint8> Resave(AssetEnv& env, ObjectHandle package, const PackageContents& contents) noexcept {
-    PackageBulkReader bulk(*env.target, package);
-    PackageWriteOptions options;
-    options.kind = contents.header.kind;
-    options.bulkAlignment = contents.header.bulkAlignment;
-    options.bulkSource = &bulk;
-    for (const PackageBulkEntry& entry : contents.bulkEntries) {
-        if (entry.codec == BulkCodec::Zstd) {
-            options.bulkCodec = BulkCodec::Zstd;
-        }
-    }
-
-    options.customVersions = contents.summary.customVersions.View();
-    Array<PackageDependencyEntry> extra(env.allocator);
-    if (contents.header.kind == PackageKind::Editor) {
-        options.engineVersion = contents.summary.savedBy;
-        for (const PackageDependencyEntry& entry : contents.dependencies) {
-            if (entry.kind == PackageDependencyKind::Build ||
-                entry.kind == PackageDependencyKind::ImportOwner) {
-                (void)extra.TryPushBack(entry);
-            }
-        }
-
-        options.extraDependencies = extra.View();
-        options.importRecord = contents.importRecord;
-        options.tags = contents.tags;
-    } else {
-        options.profileId = contents.summary.profileId.View();
-        options.profileSettings = contents.summary.profileSettings;
-        options.cookerVersion = contents.summary.cookerVersion;
-    }
-
-    return Write(env.allocator, *env.target, package, options);
-}
-
 } // namespace
 
 // 쿠킹(Zstd bulk·Soft·하위 객체)과 에디터(EditorOnly 필드·EditorOnly bulk·EditorOnly Hard·Build·
@@ -234,8 +197,9 @@ TEST(AssetPackage_FixedSeedMutationFuzz) {
                 if (prepared) {
                     if (!state.IsReadOnly()) {
                         ++resaved;
-                        CHECK(SameBytes(Resave(env, handles[0], contents.Value()).View(),
-                                        input.View()));
+                        const Array<uint8> again =
+                            ResaveAsRead(env.allocator, *env.target, handles[0], contents.Value());
+                        CHECK(SameBytes(again.View(), input.View()));
                     }
 
                     CHECK(env.target->Discard(env.target->OwnerAccess(), handles[0]));

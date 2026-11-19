@@ -161,6 +161,14 @@ Result<void> PackageLoadState::Prepare(Array<uint8>&& file, AssetDiagnostic* fai
     contents_ = Move(read.Value());
     const AssetId asset = contents_.header.assetId;
     readOnly_ = contents_.readOnly;
+    // 현재 클래스가 없는 export 타입(미등록·클래스가 아닌 타입 id)은 reader 판정으로 거부한다 —
+    // 객체를 만들 클래스가 없다(AS 5.7절 18). 그래프 1단계의 TypeMismatch는 Record 손상에서도
+    // 나므로 그 분류로 판정하지 않는다.
+    if (contents_.unavailableExportType) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::UnsupportedVersion,
+                               ErrorCode::Unsupported, asset,
+                               static_cast<uint32>(PackageSectionKind::Summary), 0);
+    }
 
     // 그래프 노드 표·import 타입.
     if (!nodes_.TryReserve(contents_.exports.Size()) ||
@@ -179,6 +187,15 @@ Result<void> PackageLoadState::Prepare(Array<uint8>&& file, AssetDiagnostic* fai
 
     for (const PackageImportEntry& entry : contents_.imports) {
         (void)importTypes_.TryPushBack(entry.type);
+    }
+
+    // 대표 에셋 Asset 파생 판정에 쓸 lease다(그래프 뒤 CrossCheck가 판정한다 — 그 사이
+    // TypeRegistry가 닫혀도 이 lease로 판정한다). 조회 실패(Shutdown이 먼저 세운 ShuttingDown 등)는
+    // 그 오류 그대로다(AS 5.3절, 5.7절 19).
+    auto representativeType = types_.Acquire(contents_.exports[0].type);
+    if (!representativeType) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, representativeType.Error(),
+                               asset, static_cast<uint32>(PackageSectionKind::Exports), 1);
     }
 
     // bulk 압축 해제·SHA-256 확인.
@@ -204,7 +221,7 @@ Result<void> PackageLoadState::Prepare(Array<uint8>&& file, AssetDiagnostic* fai
     readOnly_ = readOnly_ || hooks_.sawNewer;
     ROCKS_ASSERT(contents_.header.kind != PackageKind::Cooked || !readOnly_);
 
-    if (auto checked = CrossCheck(failure); !checked) {
+    if (auto checked = CrossCheck(failure, representativeType.Value()); !checked) {
         return checked;
     }
 
@@ -212,7 +229,8 @@ Result<void> PackageLoadState::Prepare(Array<uint8>&& file, AssetDiagnostic* fai
     return Result<void>::Success();
 }
 
-Result<void> PackageLoadState::CrossCheck(AssetDiagnostic* failure) noexcept {
+Result<void> PackageLoadState::CrossCheck(AssetDiagnostic* failure,
+                                          const TypeLease& representativeType) noexcept {
     const AssetId asset = contents_.header.assetId;
     auto corrupt = [&](PackageSectionKind section, uint64 detail) noexcept {
         return FailAsset<void>(failure, AssetDiagnosticCode::CorruptPackage,
@@ -220,11 +238,8 @@ Result<void> PackageLoadState::CrossCheck(AssetDiagnostic* failure) noexcept {
                                detail);
     };
 
-    // export 1(대표 에셋)은 Asset 파생이어야 한다.
-    // export 타입은 그래프 1단계가 acquire했다(등록되어 있다).
-    auto isAsset = types_.IsA(contents_.exports[0].type, GeneratedType<Asset>::Id());
-    ROCKS_ASSERT(isAsset.IsOk());
-    if (!isAsset.Value()) {
+    // export 1(대표 에셋)은 Asset 파생이어야 한다(Prepare가 잡은 lease로 판정한다).
+    if (!representativeType.IsA(GeneratedType<Asset>::Id())) {
         return corrupt(PackageSectionKind::Exports, 1);
     }
 
@@ -419,7 +434,10 @@ Result<void> InstantiatePackages(ConstructionContext& transaction,
                                  Span<PackageLoadState* const> packages,
                                  PackageImportResolver* resolver, Span<ObjectHandle> outPackages,
                                  AssetDiagnostic* failure) noexcept {
-    if (packages.IsEmpty() || outPackages.Size() != packages.Size()) {
+    // 패키지는 패키지 정책 Registry(packageNativeType = Package)에만 로드한다(AS 5.7절 19) — 정책
+    // 없는 Registry는 소속 규칙·강한 Outer 간선이 없어 패키지 객체 그래프를 담지 못한다.
+    if (packages.IsEmpty() || outPackages.Size() != packages.Size() ||
+        transaction.Registry().Policy().packageNativeType != NativeTypeKey<Package>()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -519,12 +537,15 @@ Result<void> InstantiatePackages(ConstructionContext& transaction,
                                                position, entry.asset);
                     }
 
-                    // 방금 찾은 이 트랜잭션의 보이는 객체이고 두 타입 모두 등록되어 있다.
+                    // 타입 조회 실패는 진단 None으로 그대로 돌려주고(조회 계약상 가능한 실패를
+                    // 단언하지 않는다 — AS 5.7절 19), 파생 판정은 그 lease로 한다.
                     auto type = transaction.AcquireType(representative.Value());
-                    ROCKS_ASSERT(type.IsOk());
-                    auto derived = state.types_.IsA(type.Value().Id(), expected);
-                    ROCKS_ASSERT(derived.IsOk());
-                    if (!derived.Value()) {
+                    if (!type) {
+                        return FailAsset<void>(failure, AssetDiagnosticCode::None, type.Error(),
+                                               state.Id(), section, position, entry.asset);
+                    }
+
+                    if (!type.Value().IsA(expected)) {
                         return FailAsset<void>(
                             failure, AssetDiagnosticCode::TypeMismatch, ErrorCode::TypeMismatch,
                             state.Id(), static_cast<uint32>(PackageSectionKind::Dependencies),
@@ -545,12 +566,14 @@ Result<void> InstantiatePackages(ConstructionContext& transaction,
                                        target.Error(), state.Id(), section, position, entry.asset);
             }
 
-            // 방금 찾은 객체이고 import 타입은 그래프 1단계가 acquire했다.
+            // 대표 에셋과 같이 타입 조회 실패는 진단 None으로 그대로 돌려준다(AS 5.7절 19).
             auto type = transaction.AcquireType(target.Value());
-            ROCKS_ASSERT(type.IsOk());
-            auto derived = state.types_.IsA(type.Value().Id(), entry.type);
-            ROCKS_ASSERT(derived.IsOk());
-            if (!derived.Value()) {
+            if (!type) {
+                return FailAsset<void>(failure, AssetDiagnosticCode::None, type.Error(), state.Id(),
+                                       section, position, entry.asset);
+            }
+
+            if (!type.Value().IsA(entry.type)) {
                 return FailAsset<void>(failure, AssetDiagnosticCode::TypeMismatch,
                                        ErrorCode::TypeMismatch, state.Id(), section, position,
                                        entry.asset);

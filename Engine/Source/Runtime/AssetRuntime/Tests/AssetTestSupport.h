@@ -47,6 +47,10 @@ inline AssetId FixedId(uint64 low) noexcept {
 // 에디터 패키지 시험에 쓰는 고정 엔진 버전이다(AS 5.3절 — golden이 버전 올림에 흔들리지 않게).
 inline constexpr EngineVersion TestEngineVersion{1, 2, 3};
 
+// AssetRuntime과 fixture 모듈(AssetTestFixtures)의 타입을 modules에 등록한다(AssetEnv와 따로 만든
+// TypeRegistry가 쓴다 — 정의는 AssetTestSupport.cpp, 모듈 생성 헤더를 거기서만 include한다).
+Result<void> RegisterAssetTestTypes(ModuleRegistration& modules) noexcept;
+
 // 패키지 정책 에셋 Registry 둘(쓰기·읽기)과 타입 Registry를 가진 환경이다. 수명 순서: Registry →
 // ModuleRegistration → TypeRegistry(멤버 선언 역순 소멸).
 struct AssetEnv {
@@ -217,6 +221,46 @@ inline Array<uint8> Write(Allocator& allocator, ObjectRegistry& registry, Object
     }
 
     return sink.Take();
+}
+
+// registry에 로드한 package를 읽은 파일이 기록한 설정(종류·정렬·Zstd 여부·커스텀 버전, 에디터는
+// 저장 엔진 버전·Build·ImportOwner 의존·ImportRecord·Tags, 쿠킹은 프로파일·쿠커 버전)으로 다시
+// 쓴다. bulk는 로드한 Package에서 읽는다. contents는 그 파일의 ReadPackage 결과다(실패하면 빈
+// 배열).
+inline Array<uint8> ResaveAsRead(Allocator& allocator, ObjectRegistry& registry,
+                                 ObjectHandle package, const PackageContents& contents) noexcept {
+    PackageBulkReader bulk(registry, package);
+    PackageWriteOptions options;
+    options.kind = contents.header.kind;
+    options.bulkAlignment = contents.header.bulkAlignment;
+    options.bulkSource = &bulk;
+    for (const PackageBulkEntry& entry : contents.bulkEntries) {
+        if (entry.codec == BulkCodec::Zstd) {
+            options.bulkCodec = BulkCodec::Zstd;
+        }
+    }
+
+    options.customVersions = contents.summary.customVersions.View();
+    Array<PackageDependencyEntry> extra(allocator);
+    if (contents.header.kind == PackageKind::Editor) {
+        options.engineVersion = contents.summary.savedBy;
+        for (const PackageDependencyEntry& entry : contents.dependencies) {
+            if (entry.kind == PackageDependencyKind::Build ||
+                entry.kind == PackageDependencyKind::ImportOwner) {
+                (void)extra.TryPushBack(entry);
+            }
+        }
+
+        options.extraDependencies = extra.View();
+        options.importRecord = contents.importRecord;
+        options.tags = contents.tags;
+    } else {
+        options.profileId = contents.summary.profileId.View();
+        options.profileSettings = contents.summary.profileSettings;
+        options.cookerVersion = contents.summary.cookerVersion;
+    }
+
+    return Write(allocator, registry, package, options);
 }
 
 // bytes 패키지들을 registry에 한 트랜잭션으로 로드한다. roots·handles는 packages 수만큼이다.

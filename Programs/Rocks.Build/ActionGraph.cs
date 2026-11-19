@@ -154,7 +154,10 @@ internal static class ActionGraph
 
             if (entryModules.Contains(module.Name))
             {
-                defines = [.. defines, ModuleTables.ModuleNameMacro + "=" + module.Name];
+                // 자기 타입 표지는 리플렉션 생성 소스(모듈 생성 소스 — RegisterModuleOwnTypes 정의)가 있는지로 정한다
+                // (Docs/Design/ModuleLoader.ko.md 3.10절).
+                defines = [.. defines, ModuleTables.ModuleNameMacro + "=" + module.Name,
+                    ModuleTables.ModuleTypesMacro + "=" + (module.ReflectionSources.Count != 0 ? "1" : "0")];
             }
 
             // 리플렉션 생성 소스는 모듈 소스와 같은 인자로 컴파일해 같은 archive·실행 파일에 넣는다(목록만 따로다 —

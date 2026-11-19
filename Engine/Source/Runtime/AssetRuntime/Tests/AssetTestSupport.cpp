@@ -7,10 +7,16 @@
 // 8절).
 namespace rocks::asset_test {
 
+Result<void> RegisterAssetTestTypes(ModuleRegistration& modules) noexcept {
+    if (auto runtime = RegisterAssetRuntimeTypes(modules); !runtime) {
+        return runtime;
+    }
+
+    return generated::AssetTestFixtures::RegisterModuleTypes(modules);
+}
+
 AssetEnv::AssetEnv() noexcept : types(allocator), modules(types, allocator), names(allocator) {
-    registered = RegisterAssetRuntimeTypes(modules).IsOk() &&
-                 generated::AssetTestFixtures::RegisterModuleTypes(modules).IsOk() &&
-                 names.Initialize().IsOk();
+    registered = RegisterAssetTestTypes(modules).IsOk() && names.Initialize().IsOk();
     RegistryOptions options;
     options.names = &names;
     options.policy.packageNativeType = NativeTypeKey<Package>();

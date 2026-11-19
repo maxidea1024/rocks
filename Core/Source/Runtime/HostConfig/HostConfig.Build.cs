@@ -8,5 +8,6 @@ public sealed class HostConfig : CoreModuleRules
 {
     protected override string ModuleName => "HostConfig";
 
-    protected override string[] RequiredModules => ["LogHost", "TraceControl", "Config"];
+    // ModuleLoader: settings registration walks the module table (Docs/Design/ModuleLoader.ko.md section 3.10).
+    protected override string[] RequiredModules => ["LogHost", "TraceControl", "Config", "ModuleLoader"];
 }
