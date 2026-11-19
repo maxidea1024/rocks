@@ -459,21 +459,27 @@ void VulkanDevice::SetTexture(TextureHandle handle) noexcept {
         }
     }
 
-    // 명시 전이 없이 그래픽 셰이더 읽기 상태가 아닌 텍스처를 읽으면 암묵 전이로 메운다(GX5. 렌더
-    // 그래프를 거치지 않는 그리기용). 그래픽 읽기 비트가 있고 layout이 SHADER_READ_ONLY여야 한다
-    // (descriptor를 그 layout으로 썼다. D3D12는 PIXEL_SHADER_RESOURCE 비트만 본다). 패스 대상
-    // 자신은 attachment라 바꾸지 않는다(샘플링할 수 없다).
+    // 명시 전이 없이 셰이더 읽기 상태가 아닌 텍스처를 읽으면 암묵 전이로 메운다(GX5. 렌더 그래프를
+    // 거치지 않는 그리기용). 묶인 파이프라인 종류의 읽기 비트(compute는 SrvCompute, 그 밖은
+    // SrvGraphics)가 있고 layout이 SHADER_READ_ONLY여야 한다(descriptor를 그 layout으로 썼다.
+    // D3D12도 같은 규칙이다). 그래서 compute 파이프라인을 먼저 묶어야 그래프가 낸 SrvCompute를 다시
+    // 바꾸지 않는다(RG1 남은 것 B부). 패스 대상 자신은 attachment라 바꾸지 않는다(샘플링할 수
+    // 없다).
+    const PipelineRecord* pipeline = pipelines_.Find(boundPipeline_);
+    const ResourceAccess readState = pipeline != nullptr && pipeline->compute
+                                         ? ResourceAccess::SrvCompute
+                                         : ResourceAccess::SrvGraphics;
     bool readable = true;
     for (uint32 layer = range.firstSlice; layer < range.firstSlice + range.sliceCount; ++layer) {
         for (uint32 mip = range.firstMip; mip < range.firstMip + range.mipCount; ++mip) {
             const ResourceAccess state = record->current.At(mip, layer);
-            readable = readable && HasAnyAccess(state, ResourceAccess::SrvGraphics) &&
+            readable = readable && HasAnyAccess(state, readState) &&
                        (state & ~SrvAccessMask) == ResourceAccess::Unknown;
         }
     }
 
     if (!readable && !OverlapsPassAttachment(slot, range)) {
-        TrackTransition(*record, slot, range, ResourceAccess::SrvGraphics, false);
+        TrackTransition(*record, slot, range, readState, false);
         ResumeRenderPass();
     }
 }

@@ -14,6 +14,7 @@
 #include <Platform/Memory.h>
 #include <Platform/PlatformMath.h>
 
+#include "FlatBench.h"
 #include "ParallelBench.h"
 
 #include <stdio.h>
@@ -32,6 +33,9 @@
 //   D     LooseOctree(6.2절 초기 제안값)
 //   D-k1 D-k65_64 D-k5_4 D-k3_2 D-s8 D-s32 D-s64 D-noinplace D-immediate D-boxdouble
 //         9.4절 단계별 효과 변형(기준 D에서 한 요인씩)
+//   F     --profile flat 전용 표시 이름: FlatBoundsSet(FlatBounds.ko.md 10절)과 같은 입력의
+//   A1·A2·D·UE
+//         방식 변형을 함께 잰다(FlatBench.h)
 //
 // 사용:
 //   SpatialIndexBench --group D --out d.json                    기본 사례 전체(8분포 × 10^3–10^5,
@@ -243,6 +247,19 @@ void BuildCases(Options& options) noexcept {
                         options.distCount != 0 ? options.dists[dist]
                                                : static_cast<Distribution>(dist),
                         options.sizeCount != 0 ? options.sizes[size] : 10000);
+            }
+        }
+        return;
+    }
+    if (platform::CStringEquals(options.profile, "flat")) {
+        // FlatBoundsSet 측정(FlatBounds.ko.md 10절): 균일·군집·크기 편차·넓고 희소 × 10^4–10^6.
+        constexpr uint32 FlatSizes[] = {10000u, 100000u, 1000000u};
+        constexpr Distribution FlatDistributions[] = {
+            Distribution::Uniform, Distribution::Clustered, Distribution::SizeVaried,
+            Distribution::WideSparse};
+        for (const uint32 size : FlatSizes) {
+            for (const Distribution distribution : FlatDistributions) {
+                AddCase(options, distribution, size);
             }
         }
         return;
@@ -1085,6 +1102,10 @@ bool ChooseGroup(const char* name, GroupChoice& choice) noexcept {
         choice.kind = GroupKind::C16;
     } else if (platform::CStringEquals(name, "C256")) {
         choice.kind = GroupKind::C256;
+    } else if (platform::CStringEquals(name, "F")) {
+        // flat 프로필의 표시 이름이다. 비교군(FlatBoundsSet·A1·A2·D·UE 방식)은 RunFlatCase가 모두
+        // 만든다.
+        choice.kind = GroupKind::A1;
     } else if (platform::CStringEquals(name, "D") || platform::CStringEquals(name, "Dx")) {
         // Dx는 --looseness·--large-half·--root-level로 바꾼 D 조합의 표시 이름이다.
         choice.kind = GroupKind::D;
@@ -1237,7 +1258,8 @@ int main(int argc, char** argv) {
     if (!Parse(argc, argv, options)) {
         printf(
             "usage: SpatialIndexBench --group <A1|A2|A2s|B|C16|C256|D|D-variant> --out <file.json> "
-            "[--profile full|large|variant] [--counters] [--dists a,b] [--sizes n,m] [--seed N] "
+            "[--profile full|large|variant|combo|parallel|flat] [--counters] [--dists a,b] "
+            "[--sizes n,m] [--seed N] "
             "[--no-scenarios|--scenarios-only]\n");
         return 2;
     }
@@ -1319,6 +1341,10 @@ int main(int argc, char** argv) {
                 sections.lightVariants = false;
                 sections.removeAll = false;
                 sections.framesTenPercentOnly = true;
+            }
+            if (platform::CStringEquals(options.profile, "flat")) {
+                RunFlatCase(input, context.allocator, json);
+                continue;
             }
             if (platform::CStringEquals(options.profile, "parallel")) {
                 if (choice.kind != GroupKind::D) {

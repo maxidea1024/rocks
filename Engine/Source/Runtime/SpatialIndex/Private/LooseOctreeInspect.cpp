@@ -18,27 +18,6 @@ uint32 HistogramBucket(uint32 count) noexcept {
     return bucket;
 }
 
-// float 값의 전순서 키다(−0과 +0은 같고, 비정규 값도 비트대로 구별한다). 부동소수 비교는 DAZ
-// 환경에서 비정규 입력을 0으로 보므로 불변 조건 7을 거짓으로 보고할 수 있어 정수로 비교한다. NaN은
-// 오지 않는다.
-int64 FloatOrderKey(float value) noexcept {
-    const uint32 raw = platform::BitCast<uint32>(value);
-    const int64 magnitude = static_cast<int64>(raw & 0x7fffffffu);
-    return (raw & 0x80000000u) != 0 ? -magnitude : magnitude;
-}
-
-// stored < value(double)인지다. value 이상인 가장 작은 float r에 대해 stored < value ⇔ stored <
-// r이다 (stored와 value 사이에 float가 끼지 않으므로).
-bool FloatBelow(float stored, double value) noexcept {
-    return FloatOrderKey(stored) < FloatOrderKey(math::ToFloatRoundedUp(value));
-}
-
-// stored > value(double)인지다. value 이하인 가장 큰 float r에 대해 stored > value ⇔ stored >
-// r이다.
-bool FloatAbove(float stored, double value) noexcept {
-    return FloatOrderKey(stored) > FloatOrderKey(math::ToFloatRoundedDown(value));
-}
-
 } // namespace
 
 // ---- LooseOctreeReader ----

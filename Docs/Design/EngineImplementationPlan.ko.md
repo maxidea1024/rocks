@@ -971,7 +971,7 @@ AAA01/AAA02의 지속 월드 상태·PCG provenance와 AAA08의 이동 환경 sn
 
 | 소비자 | 구조·소유 | 규약 |
 |---|---|---|
-| 이동 primitive·skeletal mesh·광원·decal·capture·최상위 level 초과 대상의 렌더 판정 | RenderScene의 평면 SoA bounds | view별 병렬 SIMD frustum·거리·LOD 판정. 계층에 등록하지 않으므로 이동에 따른 cell 변경이 없다. CPU 판정 장치의 기본 경로 |
+| 이동 primitive·skeletal mesh·광원·decal·capture·최상위 level 초과 대상의 렌더 판정 | RenderScene의 평면 SoA bounds([평면 경계 판정](FlatBounds.ko.md) `FlatBoundsSet`) | view별 병렬 SIMD frustum·거리·LOD 판정. 계층에 등록하지 않으므로 이동에 따른 cell 변경이 없다. CPU 판정 장치의 기본 경로 |
 | 정적 mesh·instanced·foliage의 렌더 판정 | RenderScene의 계층 공간 해시(HierarchicalSpatialHash) | WP cell 단위로 cook한 cell·chunk를 활성화 시 연결. GPU-driven 장치는 GPU에서, 그 밖의 장치는 worker가 block→cell→chunk 순으로 판정 |
 | 이동 primitive–local light 상호작용(그림자 cache 무효화), CPU 판정 경로의 그림자 caster 수집 | RenderScene의 Loose Octree 두 인스턴스: primitive 옥트리(광원 범위로 질의), local light 옥트리(primitive 범위로 질의) | [공간 인덱스 설계](SpatialIndex.ko.md). 그림자 수집은 노드 묶음 단위로 worker에 분배한다. GPU-driven 경로의 caster 판정은 GPU에서 하며 옥트리를 쓰지 않는다 |
 | 충돌 형상 trace·sweep·overlap·trigger, 형상 기반 게임플레이 질의(지점 주변·team/tag·zone) | 16절 물리 adapter의 Jolt scene query | collision channel·query filter·QueryReadScope(16.3절). 충돌하지 않는 대상은 query 전용 body로 등록한다. 결과는 (거리, stable EntityId)로 정렬해 반환한다. 별도 인덱스 없음 |

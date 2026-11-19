@@ -11,7 +11,7 @@ namespace rocks {
 // 공통 계약
 // - 좌표계는 UE와 같은 왼손 +X 전방, +Y 오른쪽, +Z 위이며 길이는 cm다(MathUtility.h).
 //   T는 float 또는 double이다.
-// - Sphere, Box, Capsule, OrientedBox는 경계를 포함하는 닫힌 solid다. 경계에 닿기만 해도
+// - Sphere, Box, Capsule, Cylinder, OrientedBox는 경계를 포함하는 닫힌 solid다. 경계에 닿기만 해도
 //   포함·겹침이다. Plane, Triangle, Segment는 두께가 없는 점 집합이다.
 // - 필드는 공개되어 있고 값 생성자는 검사하지 않는다. 외부 입력은 TryMake 계열로 검증·정규화하거나
 //   IsValid로 확인한다. 질의 함수는 매 호출마다 IsValid를 확인하여 잘못된 입력을 접촉 결과와
@@ -563,6 +563,83 @@ struct Capsule {
     // 중심축 선분이다.
     constexpr Segment<T> Axis() const noexcept {
         return Segment<T>(start, end);
+    }
+};
+
+// 닫힌 원기둥(cylinder)이다. 축 선분 start–end에 수직인 반지름 radius 원판을 축을 따라 쓸어 만든
+// 점 집합 {p | 0 <= (p - start)·a <= H, |(p - start) - ((p - start)·a)a| <= radius}이며(a는 단위
+// 축, H = |end - start|) 선분 × 원판의 곱집합이다. 평평한 두 끝면과 옆면이 모두 경계이며 경계에
+// 닿기만 해도 포함·겹침이다. Capsule과 같은 {start, end, radius} 표현이고 UE Chaos
+// FCylinder(x1, x2, Radius)와 같다(Docs/Design/CylinderShape.ko.md). 판정은 Intersection.h에 있다.
+//
+// 유효 조건(TryMake와 IsValid가 같은 규칙):
+// - start, end가 유한하고 radius가 유한한 0 이상의 값이다.
+// - radius > 0이면 end - start를 정규화(Vector3::TryNormalize)할 수 있어야 한다. start == end인
+//   원판과 차이가 overflow하는 축은 축 방향이 없으므로 거부한다. TryNormalize는 가장 큰 성분으로
+//   먼저 나누므로 성분이 아주 작은(예: 1e-200) 축도 정규화되어 유효하다.
+// - radius == 0이면 선분(start == end면 점)으로 허용한다. 이때 판정은 축을 정규화하지 않고 Capsule
+//   radius 0과 같은 선분 경로로 계산한다.
+//
+// 기본값은 원점의 점(radius 0)이며 유효하다.
+//
+// 사용 예:
+//   // 높이 3 m, 반지름 50 cm인 기둥.
+//   Result<Cylinder<double>> pillar =
+//       Cylinder<double>::TryMake(Vec3d(0, 0, 0), Vec3d(0, 0, 300), 50.0);
+//   if (pillar && ContainsPoint(pillar.Value(), point) == QueryResult::Hit) { ... }
+template <typename T>
+struct Cylinder {
+    static_assert(math::IsFloatingPointV<T>, "Cylinder supports float and double");
+
+    // 한 끝면의 중심이다.
+    Vector3<T> start;
+    // 다른 끝면의 중심이다.
+    Vector3<T> end;
+    T radius = static_cast<T>(0);
+
+    constexpr Cylinder() noexcept = default;
+
+    // 검사하지 않는 값 생성자다. 규칙을 어긴 값(원판, 음수 반지름 등)은 IsValid가 false이며 모든
+    // 판정이 InvalidInput(값 반환 함수는 InvalidArgument 실패)으로 거부한다.
+    constexpr Cylinder(const Vector3<T>& startValue, const Vector3<T>& endValue,
+                       T radiusValue) noexcept
+        : start(startValue), end(endValue), radius(radiusValue) {
+    }
+
+    // 정밀도 간 명시 변환이다. 검사하지 않으므로 double → float에서 두 끝점이 같은 float로 모이면
+    // (radius > 0일 때) 원판이 되어 IsValid가 false일 수 있다. 외부 입력은 변환 뒤 IsValid로
+    // 확인한다.
+    template <typename U>
+        requires(math::IsFloatingPointV<U> && !IsSameV<U, T>)
+    explicit constexpr Cylinder(const Cylinder<U>& other) noexcept
+        : start(other.start), end(other.end), radius(static_cast<T>(other.radius)) {
+    }
+
+    // 유효 조건을 검사해 만든다. -0 radius는 +0으로 정리한다.
+    // 실패(InvalidArgument): 유한하지 않은 입력, 음수 radius, radius > 0인데 축을 정규화할 수 없음
+    // (start == end인 원판, end - start overflow).
+    static Result<Cylinder> TryMake(const Vector3<T>& startValue, const Vector3<T>& endValue,
+                                    T radiusValue) noexcept {
+        const Cylinder cylinder(startValue, endValue, radiusValue + static_cast<T>(0));
+        if (!cylinder.IsValid()) {
+            return Result<Cylinder>::Failure(ErrorCode::InvalidArgument);
+        }
+        return Result<Cylinder>::Success(cylinder);
+    }
+
+    // 유효 조건(타입 설명)을 모두 만족하면 true다. -0 radius는 0으로 보아 유효하다.
+    bool IsValid() const noexcept {
+        if (!start.IsFinite() || !end.IsFinite() || !detail::IsNonNegativeFinite(radius)) {
+            return false;
+        }
+        return radius == static_cast<T>(0) || static_cast<bool>((end - start).TryNormalize());
+    }
+
+    // 두 끝면 중심의 중점이다. 각 끝을 먼저 절반으로 만들어 큰 유한 좌표에서도 합이 overflow하지
+    // 않는다(Box::Center와 같다).
+    constexpr Vector3<T> Center() const noexcept {
+        const T half = static_cast<T>(0.5);
+        return start * half + end * half;
     }
 };
 

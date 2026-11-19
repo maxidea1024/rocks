@@ -325,6 +325,25 @@ Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& stat
         }
     }
 
+    // 이 pass가 처음 쓰는 view의 장치 view를 만든다(자원 할당 뒤, 그래프 끝에 Retire한다).
+    for (uint32 index = record.firstView; index < record.firstView + record.viewCount; ++index) {
+        ViewRecord& view = state.views[state.passViews[index]];
+        if (!view.device.IsNull()) {
+            continue;
+        }
+
+        const ResourceRecord& resource = state.resources[view.texture];
+        auto created =
+            state.device->CreateTextureView(graphics::TextureHandle{resource.device}, view.desc);
+        if (!created) {
+            return Result<void>::Failure(RecordGraphError(
+                state, created.Error(), false, "pass '{}' could not create a view of '{}' ({})",
+                passName, resource.name, ErrorCodeName(created.Error())));
+        }
+
+        view.device = created.Value().slot;
+    }
+
     // 즉시 실행 모드는 이 pass의 전이를 지금 계산한다(앞을 내다보지 않으므로 합치지 않는다).
     if (state.mode == GraphMode::Immediate) {
         const usize firstChain = state.chains.Size();
@@ -349,9 +368,39 @@ Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& stat
         Result<graphics::CommandContext*> begun =
             Result<graphics::CommandContext*>::Failure(ErrorCode::InvalidArgument);
         if (record.target.kind == GraphTargetKind::Texture) {
-            const ResourceRecord& target = state.resources[record.target.texture.index];
-            begun = state.device->BeginOffscreen(graphics::TextureHandle{target.device},
-                                                 record.target.clear);
+            // attachment는 장치 BeginPass로 붙인다(색 MRT·깊이·load·mip·slice, 전이는 장치가 낸다).
+            const auto loadOf = [](GraphLoadAction load) noexcept {
+                return load == GraphLoadAction::Load       ? graphics::LoadAction::Load
+                       : load == GraphLoadAction::DontCare ? graphics::LoadAction::DontCare
+                                                           : graphics::LoadAction::Clear;
+            };
+            graphics::PassDesc desc;
+            desc.colorCount = record.target.colorCount;
+            for (uint32 index = 0; index < record.target.colorCount; ++index) {
+                const GraphColorTarget& color = record.target.colors[index];
+                graphics::ColorAttachment& attachment = desc.colors[index];
+                attachment.texture =
+                    graphics::TextureHandle{state.resources[color.texture.index].device};
+                attachment.load = loadOf(color.load);
+                attachment.clear = color.clear;
+                attachment.mipLevel = color.mipLevel;
+                attachment.slice = color.slice;
+            }
+
+            if (record.target.hasDepth) {
+                const GraphDepthTarget& depth = record.target.depth;
+                desc.depth.texture =
+                    graphics::TextureHandle{state.resources[depth.texture.index].device};
+                desc.depth.depthLoad = loadOf(depth.depthLoad);
+                desc.depth.clearDepth = depth.clearDepth;
+                desc.depth.stencilLoad = loadOf(depth.stencilLoad);
+                desc.depth.clearStencil = depth.clearStencil;
+                desc.depth.readOnly = depth.readOnly;
+                desc.depth.mipLevel = depth.mipLevel;
+                desc.depth.slice = depth.slice;
+            }
+
+            begun = state.device->BeginPass(desc);
         } else {
             begun = state.device->BeginFrame(record.target.swapChain, record.target.clear);
         }
@@ -369,11 +418,21 @@ Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& stat
             state.traceFrameOpen = true;
         }
     } else if (state.commands == nullptr) {
-        return Result<void>::Failure(RecordGraphError(
-            state, ErrorCode::Unsupported, false,
-            "{} pass '{}' has no open recording; recordings without a render target arrive "
-            "with GX4",
-            record.kind == GraphPassKind::Copy ? "copy" : "compute", passName));
+        // 렌더 타깃이 없는 Compute·Copy pass는 attachment 없는 기록을 연다.
+        auto begun = state.device->BeginPass(graphics::PassDesc{});
+        if (!begun) {
+            return Result<void>::Failure(RecordGraphError(
+                state, begun.Error(), false, "{} pass '{}' could not begin a recording ({})",
+                record.kind == GraphPassKind::Copy ? "copy" : "compute", passName,
+                ErrorCodeName(begun.Error())));
+        }
+
+        state.commands = begun.Value();
+        ++state.stats.recordings;
+        if (state.trace != nullptr && !state.traceFrameOpen) {
+            state.trace->BeginFrame(*state.device, *state.commands, state.frame);
+            state.traceFrameOpen = true;
+        }
     }
 
     IssueTransitions(arena, state, pass);
@@ -412,6 +471,14 @@ Result<void> FinishGraph(FrameArena& arena, GraphState& state, bool success) noe
     auto closed = CloseRecording(state);
     if (outcome && !closed) {
         outcome = Move(closed);
+    }
+
+    // 장치 view를 놓는다(장치 Retire는 마지막 사용 fence 뒤 해제다).
+    for (ViewRecord& view : state.views) {
+        if (!view.device.IsNull()) {
+            state.device->Retire(graphics::TextureHandle{view.device});
+            view.device = {};
+        }
     }
 
     const bool completed = success && outcome.IsOk();

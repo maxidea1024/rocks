@@ -19,4 +19,33 @@ namespace sandbox {
 rocks::uint32 RunTextureViewChecks(const char* name, rocks::graphics::Device& device,
                                    rocks::Allocator& allocator) noexcept;
 
+// HZB 축소 시험 조각이다(이 시험과 렌더 그래프 시험이 함께 쓴다).
+namespace hzb {
+
+// 텍스처 한 변과 mip 수(8, 4, 2, 1), 줄이기 compute의 그룹 한 변(셰이더 numthreads)이다.
+inline constexpr rocks::uint32 Extent = 8;
+inline constexpr rocks::uint32 Mips = 4;
+inline constexpr rocks::uint32 ReduceGroup = 4;
+
+// 줄이기의 그리기별 상수(float4)다. x는 읽기 view의 기준 mip, y는 출력 한 변이다.
+struct LevelConstants {
+    float values[4] = {};
+};
+
+// Storage R32Float Extent×Extent, mip Mips개다.
+rocks::graphics::TextureDesc PyramidDesc() noexcept;
+
+// mip 0을 x + y × 8로 채우는 compute(u0 쓰기 view, 8×8 그룹 하나)다.
+rocks::graphics::ComputePipelineDesc FillPipelineDesc() noexcept;
+
+// t0 읽기 view의 기준 mip에서 2×2 최댓값을 u0 쓰기 view에 쓰는 compute다(LevelConstants).
+rocks::graphics::ComputePipelineDesc ReducePipelineDesc() noexcept;
+
+// pyramid의 모든 mip을 ReadTexture로 읽어 CPU 기댓값과 대조한다. 다른 mip 수를 돌려주고 다른
+// texel을 출력한다. GPU 작업이 끝난 뒤 부른다.
+rocks::uint32 CountMismatchedMips(rocks::graphics::Device& device, rocks::Allocator& allocator,
+                                  rocks::graphics::TextureHandle pyramid) noexcept;
+
+} // namespace hzb
+
 } // namespace sandbox
