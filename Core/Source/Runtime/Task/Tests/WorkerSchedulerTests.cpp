@@ -6,6 +6,8 @@
 #include <Task/WorkerScheduler.h>
 
 using namespace rocks;
+namespace worker_scheduler_tests_file {
+
 using namespace rocks::platform;
 
 namespace {
@@ -954,3 +956,4 @@ TEST(WorkerSchedulerEventMoveAssignAndOutOfMemory) {
     }
     CHECK(system.Stats().liveAllocations == 0);
 }
+} // namespace worker_scheduler_tests_file

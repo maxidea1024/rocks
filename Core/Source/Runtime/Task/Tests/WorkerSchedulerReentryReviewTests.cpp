@@ -3,6 +3,7 @@
 #include <Task/WorkerScheduler.h>
 
 using namespace rocks;
+namespace worker_scheduler_reentry_review_tests_file {
 
 namespace {
 using Body = Function<void(WorkerTaskContext&)>;
@@ -158,3 +159,4 @@ TEST(WorkerSchedulerRejectsOuterShutdownAcrossNestedSchedulerSubmission) {
 TEST(WorkerSchedulerRestoresNestedSubmissionFramesAfterInnerAllocationFailure) {
     RunNestedSubmission(true);
 }
+} // namespace worker_scheduler_reentry_review_tests_file
