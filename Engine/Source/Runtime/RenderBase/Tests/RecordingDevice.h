@@ -55,7 +55,11 @@ public:
         Transition,
         // 분리 전이 begin·end다. value는 짝 번호다(전이마다의 내용은 TransitionLog).
         BeginTransitions,
-        EndTransitions
+        EndTransitions,
+        // 텍스처 view 생성이다. value는 (첫 mip << ViewOpMipShift) | mip 수다.
+        CreateTextureView,
+        // value는 묶은 view의 첫 mip이다(모르는 view면 NumericLimits<uint32>::Max()).
+        SetWritableTexture
     };
 
     // 기록한 전이의 단계다. Full은 Transition, Begin·End는 분리 전이의 두 끝이다.
@@ -79,6 +83,9 @@ public:
 
         bool operator==(const TransitionCall&) const noexcept = default;
     };
+
+    // Op::CreateTextureView 값에서 첫 mip의 bit 위치다.
+    static constexpr uint32 ViewOpMipShift = 16;
 
     // 기록 장치가 추적하는 텍스처 mip 수 상한이다(Graphics 텍스처 mip 상한과 같다).
     static constexpr uint32 MaxTrackedMips = 16;
@@ -199,6 +206,11 @@ public:
     GetTextureSubresources(graphics::TextureHandle texture) const noexcept override;
     Result<graphics::TextureHandle> CreateTexture(const graphics::TextureDesc& desc,
                                                   Span<const uint8> pixels) noexcept override;
+    // 범위·access 규칙만 본다(ResolveTextureViewRange, 차원은 2D·2D 배열로 본다). 형식은 보지
+    // 않는다.
+    Result<graphics::TextureHandle>
+    CreateTextureView(graphics::TextureHandle texture,
+                      const graphics::TextureViewDesc& desc) noexcept override;
     Result<graphics::PipelineHandle>
     CreatePipeline(const graphics::PipelineDesc& desc) noexcept override;
     Result<graphics::CommandContext*>
@@ -267,12 +279,20 @@ private:
         uint64 bytes = 0;
     };
 
-    // subresource(mip × slice)마다 추적한 상태다.
+    // subresource(mip × slice)마다 추적한 상태다. view(CreateTextureView)면 상태 표는 비고 원
+    // 텍스처와 범위를 가진다.
     struct TextureState {
         graphics::SubresourceStates<graphics::ResourceAccess> states;
         // attachment subresource 계산용 차원이다(3D는 mip 하나가 subresource 하나).
         graphics::TextureDimension dimension = graphics::TextureDimension::Texture2D;
+        bool view = false;
+        SlotHandle source;
+        graphics::ResolvedSubresourceRange range;
+        graphics::ViewAccess access = graphics::ViewAccess::Read;
     };
+
+    // view가 묶이는 원 텍스처 범위의 상태가 모두 allowed 가운데 하나인지 본다(아니면 검증 오류).
+    void CheckViewStates(const TextureState& view, graphics::ResourceAccess allowed) noexcept;
 
     // CPU 메모리 staging이다.
     class CpuStaging final : public graphics::StagingSource {

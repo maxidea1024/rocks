@@ -331,6 +331,45 @@ Result<TextureHandle> RecordingDevice::CreateTexture(const TextureDesc& desc,
     return Result<TextureHandle>::Success(TextureHandle{added.Value()});
 }
 
+Result<TextureHandle> RecordingDevice::CreateTextureView(TextureHandle texture,
+                                                         const TextureViewDesc& desc) noexcept {
+    auto owner = ownership_.Check();
+    if (!owner) {
+        return Result<TextureHandle>::Failure(owner.Error());
+    }
+
+    const TextureState* source = textures_.Find(texture.slot);
+    if (source == nullptr || source->view) {
+        return Result<TextureHandle>::Failure(ErrorCode::StaleHandle);
+    }
+
+    TextureSubresources shape;
+    shape.mipLevels = source->states.MipLevels();
+    shape.slices = source->states.Slices();
+    // 기록 장치는 텍스처 용도를 기억하지 않으므로 쓰기 view는 Storage로 본다.
+    const TextureUsage usage =
+        desc.access == ViewAccess::ReadWrite ? TextureUsage::Storage : TextureUsage::Sampled;
+    auto range = ResolveTextureViewRange(source->dimension, usage, shape, desc);
+    if (!range) {
+        return Result<TextureHandle>::Failure(range.Error());
+    }
+
+    TextureState state;
+    state.dimension = source->dimension;
+    state.view = true;
+    state.source = texture.slot;
+    state.range = range.Value();
+    state.access = desc.access;
+    auto added = textures_.TryAdd(Move(state));
+    if (!added) {
+        return Result<TextureHandle>::Failure(added.Error());
+    }
+
+    Record(Op::CreateTextureView, (static_cast<uint64>(range.Value().firstMip) << ViewOpMipShift) |
+                                      range.Value().mipCount);
+    return Result<TextureHandle>::Success(TextureHandle{added.Value()});
+}
+
 Result<PipelineHandle> RecordingDevice::CreatePipeline(const PipelineDesc& desc) noexcept {
     auto owner = ownership_.Check();
     if (!owner) {
@@ -534,7 +573,34 @@ void RecordingDevice::SetWritableBufferView(uint32 slot, BufferViewHandle view) 
 
 void RecordingDevice::SetWritableTexture(uint32 slot, TextureHandle view) noexcept {
     (void)slot;
-    (void)view;
+    const TextureState* state = textures_.Find(view.slot);
+    if (state == nullptr || !state->view || state->access != ViewAccess::ReadWrite) {
+        ++validationErrors_;
+        Record(Op::SetWritableTexture, NumericLimits<uint32>::Max());
+        return;
+    }
+
+    CheckViewStates(*state, UavAccessMask);
+    Record(Op::SetWritableTexture, state->range.firstMip);
+}
+
+void RecordingDevice::CheckViewStates(const TextureState& view, ResourceAccess allowed) noexcept {
+    const TextureState* source = textures_.Find(view.source);
+    if (source == nullptr) {
+        ++validationErrors_;
+        return;
+    }
+
+    for (uint32 slice = view.range.firstSlice;
+         slice < view.range.firstSlice + view.range.sliceCount; ++slice) {
+        for (uint32 mip = view.range.firstMip; mip < view.range.firstMip + view.range.mipCount;
+             ++mip) {
+            if (!HasAnyAccess(source->states.At(mip, slice), allowed)) {
+                ++validationErrors_;
+                return;
+            }
+        }
+    }
 }
 
 void RecordingDevice::DrawIndirect(BufferHandle arguments, uint64 offset) noexcept {
@@ -961,7 +1027,14 @@ void RecordingDevice::SetIndexBuffer(BufferHandle buffer, IndexFormat format,
 
 void RecordingDevice::SetTexture(TextureHandle texture) noexcept {
     const TextureState* state = textures_.Find(texture.slot);
-    if (state != nullptr) {
+    // view는 그 범위만 셰이더 읽기(그래픽·compute) 상태여야 한다.
+    if (state != nullptr && state->view) {
+        if (state->access != ViewAccess::Read) {
+            ++validationErrors_;
+        } else {
+            CheckViewStates(*state, ResourceAccess::SrvGraphics | ResourceAccess::SrvCompute);
+        }
+    } else if (state != nullptr) {
         for (uint32 index = 0; index < state->states.Count(); ++index) {
             if (!HasAnyAccess(state->states[index], ResourceAccess::SrvGraphics)) {
                 ++validationErrors_;

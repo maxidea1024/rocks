@@ -230,6 +230,16 @@ struct PhysicalResource {
     SlotHandle device;
 };
 
+// 그래프 텍스처 view 하나다(CreateTextureView). 장치 view는 처음 쓰는 pass 직전에 만들고 그래프
+// 끝에 Retire한다.
+struct ViewRecord {
+    uint32 texture = GraphIndexNone;
+    graphics::TextureViewDesc desc;
+    // 텍스처에 맞춰 푼 범위다(접근 선언의 subresource 범위).
+    graphics::ResolvedSubresourceRange range;
+    SlotHandle device;
+};
+
 // 버퍼 업로드 하나다(데이터는 프레임 arena에 복사해 둔다).
 struct BufferUpload {
     uint32 resource = GraphIndexNone;
@@ -248,6 +258,9 @@ struct PassRecord {
     // 이 pass의 subresource 접근이다(GraphState::uses의 [firstUse, firstUse + useCount)).
     uint32 firstUse = 0;
     uint32 useCount = 0;
+    // 이 pass가 선언한 view 번호다(GraphState::passViews의 [firstView, firstView + viewCount)).
+    uint32 firstView = 0;
+    uint32 viewCount = 0;
     // 이 pass가 기대는 생산자 pass다(GraphState::producers의 연결 목록 머리).
     uint32 firstProducer = GraphIndexNone;
     // 부수 효과·외부 출력 pass다(culling 뿌리).
@@ -306,6 +319,9 @@ struct GraphState {
     ArenaArray<GraphTransitionRecord> transitions;
     ArenaArray<PhysicalResource> physicals;
     ArenaArray<BufferUpload> bufferUploads;
+    ArenaArray<ViewRecord> views;
+    // pass마다 선언한 view 번호다(PassRecord::firstView).
+    ArenaArray<uint32> passViews;
     // culling DFS 작업 스택이다.
     ArenaArray<uint32> stack;
     // 장치 전이 묶음 임시 공간이다.

@@ -91,6 +91,16 @@ public:
                                const graphics::SubresourceRange& range = {},
                                GraphAccessFlags flags = GraphAccessFlags::None) noexcept;
 
+    // texture view(RenderGraph::CreateTextureView)의 범위를 access로 쓴다고 선언한다. 읽기 view는
+    // SRV 접근(SrvGraphics·SrvCompute), 쓰기 view는 UAV 접근만 받는다. 기록 함수는
+    // GraphPassContext::View로 장치 view를 받는다.
+    //
+    // 사용 예(HZB 한 단계: mip k 읽기 + mip k + 1 쓰기, 다른 subresource라 상충 아님):
+    //   accesses.TextureView(mipK, graphics::ResourceAccess::SrvCompute)
+    //       .TextureView(mipK1Write, graphics::ResourceAccess::UavCompute);
+    GraphPassAccesses& TextureView(GraphTextureView view, graphics::ResourceAccess access,
+                                   GraphAccessFlags flags = GraphAccessFlags::None) noexcept;
+
     // 버퍼 전체를 access로 쓴다고 선언한다.
     GraphPassAccesses& Buffer(GraphBuffer buffer, graphics::ResourceAccess access,
                               GraphAccessFlags flags = GraphAccessFlags::None) noexcept;
