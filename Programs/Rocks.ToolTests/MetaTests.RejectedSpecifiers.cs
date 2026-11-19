@@ -10,12 +10,14 @@ namespace Rocks.ToolTests;
 // - Required: AcceptsRequired가 ×인 모든 종류를 클래스 필드·struct 멤버와 표가 ○인 원소 자리(Array·정적 배열·Map 값·Set) 모두에 — RMC2202.
 //   Optional 필드의 Required는 Optional 행의 필드 칸이다(Required를 받는 참조 종류는 Optional 내부가 될 수 없다). Map 키만 Required를 받는
 //   종류인 Map(SoftObjectRef 키, int32 값) — RMC2202(Required는 Map 값에 걸린다 — 키에는 Required가 없다).
-// - MaxElements: Container가 ×인 모든 종류(클래스 필드·struct 멤버) — RMC2202.
+// - MaxElements: 가변 길이 컨테이너(Array·Map·Set — MaxElementsKinds)가 아닌 모든 종류(클래스 필드·struct 멤버) — RMC2202. Container가
+//   ○여도 길이가 고정이거나 원소가 하나뿐인 Optional·정적 배열은 거부한다(MetaCompiler 진단 "MaxElements applies only to array, map
+//   and set fields").
 // - bitfield(폭 1, 클래스 필드·struct 멤버): 부호 없는 정수(UInt8·16·32·64)가 아닌 종류. C++가 bitfield를 허락하는 정수 계열(bool·부호
 //   있는 정수·enum)은 철자 검사의 RMC2207, 그 밖은 C++ 자체가 거부하는 Clang 단계 RMC3000(사유 "bit-field")이다.
 // 허용 대조(Meta.EverySpecifierIsAcceptedWhereAllowed) — 같은 생성기로 표가 ○인 칸을 만들면 생성에 성공해야 한다(거부 칸의 거부가 그
 // 칸 때문임을 보장한다): AcceptsRequired가 ○인 종류의 Required(클래스 필드·struct 멤버와 표가 ○인 원소 자리 — Map 키·Optional 내부
-// 제외), Container가 ○인 종류의 MaxElements, 부호 없는 정수 bitfield. 표에 Required·Container가 바뀐 행이 생기면 두 시험의 칸이 함께
+// 제외), 가변 길이 컨테이너의 MaxElements, 부호 없는 정수 bitfield. 표에 Required가 바뀐 행이 생기면 두 시험의 칸이 함께
 // 바뀌고, 철자가 없으면 Meta.EveryRejectedValueKindCellHasASpelling이 실패한다.
 internal static partial class MetaTests
 {
@@ -24,6 +26,9 @@ internal static partial class MetaTests
     {
         "Bool", "UInt8", "UInt16", "UInt32", "UInt64", "Int8", "Int16", "Int32", "Int64", "Enum"
     };
+
+    // MaxElements를 받는 종류다(가변 길이 컨테이너 — 리플렉션 필드 상한).
+    private static readonly HashSet<string> MaxElementsKinds = new(StringComparer.Ordinal) { "Array", "Map", "Set" };
 
     // ROCKS_PROPERTY bitfield가 받는 종류다(부호 없는 정수 — 리플렉션 B9m).
     private static readonly HashSet<string> BitfieldKinds = new(StringComparer.Ordinal) { "UInt8", "UInt16", "UInt32", "UInt64" };
@@ -62,7 +67,7 @@ internal static partial class MetaTests
                     cells.Add(($"{row.Name} Required {holder}", "RMC2202", source([FieldMember(spelling) with { Specifiers = "Required" }])));
                 }
 
-                if (!ValueKindTable.Has(row.Name, ValueKindProperty.Container))
+                if (!MaxElementsKinds.Contains(row.Name))
                 {
                     cells.Add(($"{row.Name} MaxElements {holder}", "RMC2202", source([FieldMember(spelling) with { Specifiers = "MaxElements = 4" }])));
                 }
@@ -119,7 +124,7 @@ internal static partial class MetaTests
                     cells.Add(($"{row.Name} Required {holder}", source([FieldMember(spelling) with { Specifiers = "Required" }])));
                 }
 
-                if (ValueKindTable.Has(row.Name, ValueKindProperty.Container))
+                if (MaxElementsKinds.Contains(row.Name))
                 {
                     cells.Add(($"{row.Name} MaxElements {holder}", source([FieldMember(spelling) with { Specifiers = "MaxElements = 4" }])));
                 }

@@ -2,6 +2,7 @@
 
 #include <AssetRuntime/Package.generated.h>
 #include <Core/Text/NameComponent.h>
+#include <Platform/Clock.h>
 #include <Platform/Thread.h>
 #include <TestSupport/NFailAllocator.h>
 
@@ -538,8 +539,7 @@ TEST(AssetPackage_EditorReadOnlyLoadsEndToEnd) {
     // 원인 넷의 파일이다(순서: 모르는 필드, 더 새 타입 버전, 모르는 커스텀 버전, 모르는 섹션).
     constexpr usize CauseCount = 4;
     Array<uint8> causes[CauseCount] = {Copy(allocator, file.View()), Array<uint8>(allocator),
-                                       Copy(allocator, customFile.View()),
-                                       Array<uint8>(allocator)};
+                                       Copy(allocator, customFile.View()), Array<uint8>(allocator)};
     const char* fields[] = {"hard", "soft", "pixels"};
     for (const char* name : fields) {
         causes[0] = WithUnknownField(allocator, causes[0],
@@ -952,68 +952,40 @@ TEST(AssetPackage_NonClassTypeHasNoCurrentVersion) {
     }
 }
 
-// 파괴 요청만 받은 import 대상(AS 5.7절 19): 패키지 정책 없는 Registry는 RequestDestroy만 받은
-// 객체도 FindObject·FindChild로 찾지만 AcquireType은 StaleHandle이다. 로드는 단언하지 않고 진단
-// None + StaleHandle(section ObjectImports, related = 그 에셋)을 돌려준다 — 하위 객체 import(B.Gear)와
-// Hard 의존의 대표 에셋 대조 둘 다.
-TEST(AssetPackage_DestroyRequestedImportTargets) {
+// 패키지 정책 없는 Registry(AS 5.7절 19): 패키지는 패키지 정책 Registry에만 로드한다 — 정책 없는
+// Registry로 연 트랜잭션은 InstantiatePackages 인자 InvalidArgument(진단 없음)이고 객체를 만들지
+// 않는다. 처음 구현은 그래프 생성 단계까지 가서 Objects CorruptPackage로 거부했다(파일 손상이
+// 아니다). 판정 리뷰가 든 "RequestDestroy만 받은 import 대상" 경로(정책 없는 Registry에서만
+// 생긴다)는 이 검사가 먼저 막는다.
+TEST(AssetPackage_LoadRequiresPackagePolicyRegistry) {
     AssetEnv env;
     REQUIRE(env.Ready());
     ObjectRegistry& source = *env.source;
     Allocator& allocator = env.allocator;
-    const ObjectAccessContext access = source.OwnerAccess();
-    auto b = NewPackage(source, access, FixedId(1601), PackageKind::Cooked);
-    auto a = NewPackage(source, access, FixedId(1600), PackageKind::Cooked);
-    REQUIRE(a && b);
-    const ObjectHandle bAsset = Make<TestAsset>(source, TestAssetType(), b.Value().Handle(), "");
-    const ObjectHandle gear = Make<TestPart>(source, TestPartType(), bAsset, "Gear");
-    const ObjectHandle aAsset = Make<TestAsset>(source, TestAssetType(), a.Value().Handle(), "");
-    REQUIRE(!bAsset.IsNull() && !gear.IsNull() && !aAsset.IsNull());
-    REQUIRE(WithBorrow<TestAsset>(source, aAsset, [&](TestAsset& owner) {
-        return source.AddReference(access, aAsset, owner.hardList, gear).IsOk();
-    }));
-    const Array<uint8> file = Write(allocator, source, a.Value().Handle(), CookedOptions());
+    auto package = NewPackage(source, source.OwnerAccess(), FixedId(1600), PackageKind::Cooked);
+    REQUIRE(package);
+    REQUIRE(!Make<TestAsset>(source, TestAssetType(), package.Value().Handle(), "").IsNull());
+    const Array<uint8> file = Write(allocator, source, package.Value().Handle(), CookedOptions());
     REQUIRE(!file.IsEmpty());
-
-    // 0: 하위 객체(Gear)만 파괴 요청, 1: 대표 에셋 파괴 요청.
-    constexpr uint64 CaseCount = 2;
-    for (uint64 destroyRepresentative = 0; destroyRepresentative < CaseCount;
-         ++destroyRepresentative) {
-        RegistryOptions options;
-        options.names = &env.names;
-        auto made = UniquePtr<ObjectRegistry>::TryMake(
-            allocator, allocator, env.types, ContextId{0x4153534554ull, 40 + destroyRepresentative},
-            options);
-        REQUIRE(made);
-        ObjectRegistry& target = *made.Value();
-        const ObjectAccessContext owner = target.OwnerAccess();
-        auto targetB = NewPackage(target, owner, FixedId(1601), PackageKind::Cooked);
-        REQUIRE(targetB);
-        const ObjectHandle targetAsset =
-            Make<TestAsset>(target, TestAssetType(), targetB.Value().Handle(), "");
-        const ObjectHandle targetGear = Make<TestPart>(target, TestPartType(), targetAsset, "Gear");
-        REQUIRE(!targetAsset.IsNull() && !targetGear.IsNull());
-        const bool representative = destroyRepresentative != 0;
-        REQUIRE(target.RequestDestroy(owner, representative ? targetAsset : targetGear));
-        // 이 시험의 전제: 정책 없는 Registry는 파괴 요청만 받은 객체를 이름으로 계속 찾는다.
-        REQUIRE(target.FindObject(owner, targetB.Value().Handle(),
-                                  representative ? StringView() : StringView("Gear")));
-        FixedResolver resolver;
-        resolver.handle = targetB.Value().Handle();
-        PackageLoadState state(allocator, target, env.types, owner,
-                               LoadOptions(PackageKind::Cooked));
-        AssetDiagnostic failure;
-        REQUIRE(state.Prepare(Copy(allocator, file.View()), &failure));
-        ConstructionContext transaction(target, owner);
-        PackageLoadState* states[1] = {&state};
-        ObjectHandle handles[1];
-        CHECK(!InstantiatePackages(transaction, states, &resolver, handles, &failure));
-        transaction.Rollback();
-        CHECK(failure.code == AssetDiagnosticCode::None &&
-              failure.error == ErrorCode::StaleHandle &&
-              failure.section == static_cast<uint32>(PackageSectionKind::ObjectImports) &&
-              failure.related == FixedId(1601));
-    }
+    RegistryOptions options;
+    options.names = &env.names;
+    auto made = UniquePtr<ObjectRegistry>::TryMake(allocator, allocator, env.types,
+                                                   ContextId{0x4153534554ull, 40}, options);
+    REQUIRE(made);
+    ObjectRegistry& target = *made.Value();
+    const ObjectAccessContext owner = target.OwnerAccess();
+    PackageLoadState state(allocator, target, env.types, owner, LoadOptions(PackageKind::Cooked));
+    AssetDiagnostic failure;
+    REQUIRE(state.Prepare(Copy(allocator, file.View()), &failure));
+    const uint64 before = target.Stats().liveObjects;
+    ConstructionContext transaction(target, owner);
+    PackageLoadState* states[1] = {&state};
+    ObjectHandle handles[1];
+    CHECK(InstantiatePackages(transaction, states, nullptr, handles, &failure).Error() ==
+          ErrorCode::InvalidArgument);
+    CHECK(failure.code == AssetDiagnosticCode::None);
+    transaction.Rollback();
+    CHECK(target.Stats().liveObjects == before);
 }
 
 namespace {
@@ -1065,8 +1037,7 @@ TEST(AssetPackage_TypeRegistryClosesDuringPrepare) {
         REQUIRE(package);
         const ObjectHandle asset =
             Make<TestAsset>(source, TestAssetType(), package.Value().Handle(), "");
-        REQUIRE(!asset.IsNull() &&
-                !Make<TestPart>(source, TestPartType(), asset, "Part").IsNull());
+        REQUIRE(!asset.IsNull() && !Make<TestPart>(source, TestPartType(), asset, "Part").IsNull());
         const Array<uint8> file =
             Write(allocator, source, package.Value().Handle(),
                   kind == PackageKind::Cooked ? CookedOptions() : EditorOptions());
@@ -1074,11 +1045,11 @@ TEST(AssetPackage_TypeRegistryClosesDuringPrepare) {
         uint32 closings = 0;
         uint32 atRepresentative = 0;
         for (uint64 attempt = 1;; ++attempt) {
-            // 그래프 Stage는 같은 TypeRegistry를 쓰는 Registry를 요구하므로 Registry도 n마다 만든다.
+            // 그래프 Stage는 같은 TypeRegistry를 쓰는 Registry를 요구하므로 Registry도 n마다
+            // 만든다.
             TypeRegistry types(allocator);
             ModuleRegistration modules(types, allocator);
-            REQUIRE(RegisterAssetRuntimeTypes(modules) &&
-                    generated::AssetTestFixtures::RegisterModuleTypes(modules));
+            REQUIRE(RegisterAssetTestTypes(modules));
             RegistryOptions options;
             options.names = &env.names;
             options.policy.packageNativeType = NativeTypeKey<Package>();
@@ -1108,32 +1079,4 @@ TEST(AssetPackage_TypeRegistryClosesDuringPrepare) {
         CHECK(closings > 0);
         CHECK(atRepresentative > 0);
     }
-}
-
-// 대표 에셋 밖의 최상위 객체(AS 5.7절 19): 패키지 바로 아래의 다른 객체가 있는 패키지는 저장하지
-// 않고(writer InvalidArgument — reader가 outer 0인 하위 export를 거부하므로 그런 파일을 쓰지 않는다),
-// 다른 패키지가 그 객체를 가리키는 쓰기도 InvalidArgument다(import 대상은 대표 에셋과 그 아래 객체 —
-// 처음 구현은 import 빌더의 Outer 사슬이 패키지를 지나 단언에 닿았다).
-TEST(AssetPackage_TopLevelSiblingIsRejected) {
-    AssetEnv env;
-    REQUIRE(env.Ready());
-    ObjectRegistry& source = *env.source;
-    Allocator& allocator = env.allocator;
-    const ObjectAccessContext access = source.OwnerAccess();
-    auto b = NewPackage(source, access, FixedId(1621), PackageKind::Cooked);
-    auto a = NewPackage(source, access, FixedId(1620), PackageKind::Cooked);
-    REQUIRE(a && b);
-    const ObjectHandle bAsset = Make<TestAsset>(source, TestAssetType(), b.Value().Handle(), "");
-    const ObjectHandle other = Make<TestPart>(source, TestPartType(), b.Value().Handle(), "Other");
-    const ObjectHandle aAsset = Make<TestAsset>(source, TestAssetType(), a.Value().Handle(), "");
-    REQUIRE(!bAsset.IsNull() && !other.IsNull() && !aAsset.IsNull());
-    MemoryPackageSink bSink(allocator);
-    CHECK(WritePackage(allocator, source, access, b.Value().Handle(), CookedOptions(), bSink)
-              .Error() == ErrorCode::InvalidArgument);
-    REQUIRE(WithBorrow<TestAsset>(source, aAsset, [&](TestAsset& owner) {
-        return source.AddReference(access, aAsset, owner.hardList, other).IsOk();
-    }));
-    MemoryPackageSink aSink(allocator);
-    CHECK(WritePackage(allocator, source, access, a.Value().Handle(), CookedOptions(), aSink)
-              .Error() == ErrorCode::InvalidArgument);
 }

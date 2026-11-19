@@ -129,8 +129,8 @@ struct PackageContents {
     bool readOnly = false;
     // 에디터 패키지의 Summary 타입 표(= export 타입 집합)에 현재 클래스가 없는 타입(미등록, 또는
     // 클래스가 아닌 타입 id)이 있는지다(readOnly도 참이다). PackageLoadState::Prepare는 이 판정으로
-    // UnsupportedVersion을 낸다(AS 5.7절 18). options.types가 null이면 보지 않으므로 거짓이고, 쿠킹은
-    // 그런 패키지를 UnsupportedVersion으로 거부하므로 언제나 거짓이다.
+    // UnsupportedVersion을 낸다(AS 5.7절 18). options.types가 null이면 보지 않으므로 거짓이고,
+    // 쿠킹은 그런 패키지를 UnsupportedVersion으로 거부하므로 언제나 거짓이다.
     bool unavailableExportType = false;
     // 헤더 + 섹션 표의 SHA-256이다(AS 5.5절 지문).
     PackageFingerprint fingerprint{};

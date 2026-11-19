@@ -197,8 +197,8 @@ TEST(AssetPackage_FixedSeedMutationFuzz) {
                 if (prepared) {
                     if (!state.IsReadOnly()) {
                         ++resaved;
-                        const Array<uint8> again = ResaveAsRead(env.allocator, *env.target,
-                                                                handles[0], contents.Value());
+                        const Array<uint8> again =
+                            ResaveAsRead(env.allocator, *env.target, handles[0], contents.Value());
                         CHECK(SameBytes(again.View(), input.View()));
                     }
 

@@ -191,12 +191,13 @@ protected:
 // resolver(null이면 묶음 밖 import는 MissingDependency), outPackages(크기 = packages, i번째
 // Package handle — 공개 전 객체).
 //
-// 오류: 인자 위반 InvalidArgument(이미 넘긴 상태를 다시 넘긴 경우 포함 — 성공했든 실패했든 상태는
-// 한 번만 쓴다), resolver가 준 handle이 그 에셋의 공개된 Package가 아니면(null·회수됨·Package가
-// 아닌 객체·다른 AssetId) 진단 None + InvalidArgument, 묶음 밖 import 대상 패키지·객체·Hard 의존
+// 오류: 인자 위반 InvalidArgument(이미 넘긴 상태를 다시 넘긴 경우, 패키지 정책(packageNativeType =
+// Package)이 없는 Registry의 트랜잭션 포함 — 상태는 성공했든 실패했든 한 번만 쓴다), resolver가
+// 준 handle이 그 에셋의 공개된 Package가 아니면(null·회수됨·Package가 아닌 객체·다른 AssetId) 진단
+// None + InvalidArgument, 묶음 밖 import 대상 패키지·객체·Hard 의존
 // 대표 에셋이 없으면 MissingDependency / NotFound(related = 그 에셋), 대상 타입이 import 선언
 // 타입의 파생이 아니거나 Hard 의존 대표 에셋 타입이 expectedType의 파생이 아니면 TypeMismatch /
-// TypeMismatch, import 대상의 타입 조회 실패(RequestDestroy만 받은 대상의 StaleHandle 등)와
+// TypeMismatch, import 대상의 타입 조회 실패와
 // 트랜잭션·그래프 단계의 오류(할당·스레드·접근 문맥·종료·재진입)는 진단 None과 그 오류, Required
 // 실효 값 누락(쿠킹)은 CorruptPackage / InvalidArgument다. 객체를 만든 뒤의 실패는 트랜잭션을
 // 그 오류로 고정한다(호출자가 Rollback하거나 소멸자가 되돌린다 — 부분 공개 없음).

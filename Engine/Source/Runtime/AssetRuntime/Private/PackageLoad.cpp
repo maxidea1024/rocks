@@ -434,7 +434,10 @@ Result<void> InstantiatePackages(ConstructionContext& transaction,
                                  Span<PackageLoadState* const> packages,
                                  PackageImportResolver* resolver, Span<ObjectHandle> outPackages,
                                  AssetDiagnostic* failure) noexcept {
-    if (packages.IsEmpty() || outPackages.Size() != packages.Size()) {
+    // 패키지는 패키지 정책 Registry(packageNativeType = Package)에만 로드한다(AS 5.7절 19) — 정책
+    // 없는 Registry는 소속 규칙·강한 Outer 간선이 없어 패키지 객체 그래프를 담지 못한다.
+    if (packages.IsEmpty() || outPackages.Size() != packages.Size() ||
+        transaction.Registry().Policy().packageNativeType != NativeTypeKey<Package>()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -534,9 +537,8 @@ Result<void> InstantiatePackages(ConstructionContext& transaction,
                                                position, entry.asset);
                     }
 
-                    // 찾은 객체라도 타입 조회는 실패할 수 있다(패키지 정책 없는 Registry는
-                    // RequestDestroy만 받은 객체도 찾지만 AcquireType은 StaleHandle — AS 5.7절
-                    // 19). 그 오류는 진단 None으로 그대로 돌려주고, 파생 판정은 그 lease로 한다.
+                    // 타입 조회 실패는 진단 None으로 그대로 돌려주고(조회 계약상 가능한 실패를
+                    // 단언하지 않는다 — AS 5.7절 19), 파생 판정은 그 lease로 한다.
                     auto type = transaction.AcquireType(representative.Value());
                     if (!type) {
                         return FailAsset<void>(failure, AssetDiagnosticCode::None, type.Error(),
@@ -567,8 +569,8 @@ Result<void> InstantiatePackages(ConstructionContext& transaction,
             // 대표 에셋과 같이 타입 조회 실패는 진단 None으로 그대로 돌려준다(AS 5.7절 19).
             auto type = transaction.AcquireType(target.Value());
             if (!type) {
-                return FailAsset<void>(failure, AssetDiagnosticCode::None, type.Error(),
-                                       state.Id(), section, position, entry.asset);
+                return FailAsset<void>(failure, AssetDiagnosticCode::None, type.Error(), state.Id(),
+                                       section, position, entry.asset);
             }
 
             if (!type.Value().IsA(entry.type)) {
