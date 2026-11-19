@@ -14,7 +14,7 @@
 
 UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`)의 UnrealHeaderTool이다. 경로는 `Engine/Source/Programs/Shared/EpicGames.UHT/Exporters/CodeGen/` 기준이다. UE 이름은 대응표와 근거에만 적는다. 측정은 Rocks 툴체인(clang-cl 21.1.6, foundation-debug)으로 했다.
 
-상태: **설계 확정**(결정 GSD1–GSD14, 2026-11-19 사용자 승인 — 권장안, GSD13은 보류). 구현 단계는 GS0–GS5(11절)다. GS1(등록 함수 분리)은 2026-11-19 사용자 결정으로 착수했다. 다른 세션은 GS1 병합까지 전체 빌드·시험 반복을 보류한다.
+상태: **설계 확정**(결정 GSD1–GSD14, 2026-11-19 사용자 승인 — 권장안, GSD13은 보류). 구현 단계는 GS0–GS5(11절)다. GS1(등록 함수 분리)은 2026-11-19 사용자 결정으로 착수했다. 다른 세션은 GS1 병합까지 전체 빌드·시험 반복을 보류한다. GS0(action 소요 시간 기록·기준 측정)과 GS1은 2026-11-20 구현했다(브랜치 `feature/generated-sources`, 측정값은 9절).
 
 ## 1. 현재 상태와 측정
 
@@ -229,10 +229,12 @@ GS0에서 기준을 재고 GS4에서 같은 장비·같은 commit 기반으로 �
 |---|---|---|
 | 모듈의 모든 생성 헤더 include만 하는 TU(ReflectionTestFixtures) | 16.8 s | 원본 헤더만 include한 TU 대비 +1.5 s 이내 |
 | 선언으로 등록 함수를 부르는 TU | (지금은 46 s) | 1 s 이내 |
-| `TextAssignAppendTests.cpp` | 48 s | 5 s 이내 |
-| FoundationTests clean compile의 action 시간 합 | GS0에서 측정 | 절반 이하 |
-| FoundationTests object 디렉터리 크기, link 시간 | GS0에서 측정 | 줄어든다(기록) |
-| ReflectionTestFixtures 메타 생성 시간(검증 포함) | GS0에서 측정 | 줄어든다(기록) |
+| `TextAssignAppendTests.cpp` | 48 s(GS0 재측정 37.2 s). GS1 뒤 2.4 s | 5 s 이내 |
+| FoundationTests clean compile의 action 시간 합 | GS0 1,541 s(386 TU). GS1 뒤 495 s(389 TU), 따로 모듈 생성 소스 7개 54 s(ReflectionTestFixtures 35.8 s) | 절반 이하 |
+| FoundationTests object 디렉터리 크기, link 시간 | GS0 1,899 MB, 4.6 s. GS1 뒤 266 MB(따로 모듈 생성 소스 object 67 MB), 2.4 s | 줄어든다(기록) |
+| ReflectionTestFixtures 메타 생성 시간(검증 포함) | Foundation 타깃 메타 단계 전체(모듈 7개)로 쟀다: GS0 107 s. GS1 뒤 86 s | 줄어든다(기록) |
+
+GS0·GS1 측정 조건(2026-11-20): 같은 장비에서 두 commit을 각각 내보낸 사본으로 clean Foundation Debug 빌드(`--jobs 8`)를 연달아 하고 `action-report.json`의 action별 소요 시간(GSD12)을 더했다. 다른 세션의 빌드가 거의 없는 상태였다(GS1 빌드가 끝날 무렵 다른 빌드가 시작됐다). 가장 느린 action은 GS0에서 집계 헤더로 등록하던 시험 TU들(38–42 s)이었고, GS1 뒤에는 ReflectionTestFixtures 모듈 생성 소스(35.8 s) 하나와 그다음 8.6 s 이하의 TU들이다. Foundation 타깃 전체 빌드(메타 단계 포함)는 389 s에서 255 s가 됐다. descriptor는 두 commit에서 바이트까지 같다.
 
 동작 기준:
 - 전체 시험(Debug)이 통과한다. descriptor와 identity 명세가 변경 전후 바이트까지 같다.
@@ -304,3 +306,4 @@ GSD13 메모: 본문을 한 번만 컴파일하게 하면 중복은 없어지지
 | 개정 | 날짜 | 내용 |
 |---|---|---|
 | 1 | 2026-11-19 | 생성 코드 분리 설계. 측정(1.2절), 멤버별 위치(5.1절), 배치와 빌드 연결(6절), 검증 컴파일 변경(7절), 결정 GSD1–GSD14(GSD13 보류), 단계 GS0–GS5. 등록 함수 분리(GS1)를 먼저 하기로 하고 착수했다(사용자 결정). 모듈 로더 ML2와 조율해 리플렉션 생성 소스를 별도 목록으로 나르고 진입점 판정에서 뺐다 |
+| 1(구현 기록) | 2026-11-20 | GS0·GS1 구현과 측정(9절). 스펙에 없던 것 둘을 구현하며 정했다. 첫째, 설치 SDK가 실어 가는 "리플렉션 생성 소스만으로 된 라이브러리"에 표지 `ReflectionOnlyLibrary`를 붙였다(SDK manifest 7) — 게임 빌드의 모듈 진입점 판정은 미리 빌드한 라이브러리를 코드로 세므로, 표지가 없으면 CoreTypeBindings 같은 모듈이 SDK를 거치며 진입점 모듈이 된다(6.3절의 면제를 SDK에서도 유지). 둘째, MetaCompiler 옵션 `--verify-sources`(빌드 없이 쓰는 단독 실행·도구 시험이 모듈 생성 소스도 게시 전에 구문 검사한다 — 빌드는 넘기지 않는다) |
