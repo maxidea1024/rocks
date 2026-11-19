@@ -40,6 +40,9 @@ constexpr uint32 GcTypeTag = 0x47435459u;      // 'GCTY'
 constexpr uint32 RootListTag = 0x4743524cu;    // 'GCRL'
 constexpr uint32 GcBlockTag = 0x4743424bu;     // 'GCBK'
 
+// 회수 묶음 크기다(ReclaimEligible — 한 번의 잠금으로 떼어 내는 객체 수, GC 설계 17.1절).
+inline constexpr uint32 ReclaimBatchSize = 64;
+
 // GC 사이클 통계 로그 카테고리다(Debug 레벨 — 객체마다 찍지 않는다).
 inline constexpr LogCategory LogObjectGC{"Object.GC"};
 

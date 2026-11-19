@@ -5,6 +5,14 @@
 
 namespace rocks {
 
+namespace {
+
+// 전체 수집 전에 진행 중인 증분 cycle(sweep·회수)을 끝내는 Step 상한이다. 예산 없는 Step 하나가
+// 단계 하나를 끝내므로 몇 번이면 Idle이다 — 넘으면 이번 프레임은 수집하지 않는다.
+constexpr uint32 FullCollectionFinishSteps = 64;
+
+} // namespace
+
 void World::StepGarbageCollection() noexcept {
     // World API 밖에서 파괴된 Actor·Component·Level을 매 프레임 GC step 전에 정리한다. World 객체의
     // 회수는 World 루트·Level 배열·Actor의 components 간선에서 끊긴 뒤에만 일어나고 그 간선을 끊는
@@ -16,7 +24,22 @@ void World::StepGarbageCollection() noexcept {
         FlushDestroys();
     }
 
-    if (!gcPending_) {
+    // 전체 수집이 남긴 회수를 예산만큼 먼저 한다(GC 설계 17.3절). 0이면 남은 것이 없거나 모두
+    // 보유 중이다(보유가 풀린 것은 다음 cycle이 회수한다).
+    if (reclaimPending_) {
+        auto drained = objects_.DrainRetired(Access(), gcSchedule_.reclaimBudget);
+        reclaimPending_ = drained && drained.Value() != 0;
+    }
+
+    secondsSinceFullCollection_ += lastStep_.deltaSeconds;
+    const bool periodic = gcSchedule_.mode == WorldGcMode::FullCollection && gcPending_ &&
+                          secondsSinceFullCollection_ >= gcSchedule_.fullCollectionIntervalSeconds;
+    if (fullCollectionRequested_ || periodic) {
+        (void)RunFullCollection();
+        return;
+    }
+
+    if (!gcPending_ || gcSchedule_.mode != WorldGcMode::Incremental) {
         return;
     }
 
@@ -42,6 +65,48 @@ void World::StepGarbageCollection() noexcept {
         // 이번 cycle 시작 뒤에 파괴된 객체가 있으면 다음 cycle이 필요하다.
         gcPending_ = destroyedDuringCycle_;
     }
+}
+
+bool World::RunFullCollection() noexcept {
+    // 진행 중인 증분 cycle: cutoff 전(Marking)은 취소하고, 그 뒤(sweep·회수)는 끝낸다.
+    if (objects_.CollectionPhase() == GcPhase::Marking) {
+        auto cancelled = objects_.CancelCollection(Access());
+        if (!cancelled) {
+            return false;
+        }
+    }
+
+    for (uint32 step = 0;
+         step < FullCollectionFinishSteps && objects_.CollectionPhase() != GcPhase::Idle; ++step) {
+        auto stepped = objects_.StepCollection(Access(), GcBudget{GcBudget::DefaultMaxObjects, 0},
+                                               gcScheduler_);
+        if (!stepped) {
+            return false;
+        }
+    }
+
+    if (objects_.CollectionPhase() != GcPhase::Idle) {
+        return false;
+    }
+
+    auto collected = objects_.Collect(Access(), gcScheduler_, GcReclaim::Deferred);
+    if (!collected) {
+        // 외부 Borrow 등으로 Busy다. 요청을 남겨 다음 프레임에 다시 시도한다.
+        return false;
+    }
+
+    const GcReport& report = collected.Value();
+    Log::Debug(LogWorld,
+               "World {World} full GC marked {Marked} of {Examined} objects and retired {Retired} "
+               "in {Microseconds} us (reclaim deferred)",
+               Name(), report.marked, report.examined, report.retired,
+               report.durationNanoseconds / 1000);
+    fullCollectionRequested_ = false;
+    gcPending_ = false;
+    destroyedDuringCycle_ = false;
+    secondsSinceFullCollection_ = 0.0;
+    reclaimPending_ = report.retired != 0;
+    return true;
 }
 
 void World::RequestDestroyOwned(ObjectHandle object) noexcept {

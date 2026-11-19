@@ -4,6 +4,7 @@
 #include <Core/Memory/UniquePtr.h>
 #include <Object/ModuleRegistration.h>
 #include <Object/ObjectRegistry.h>
+#include <Task/WorkerScheduler.h>
 #include <World/Subsystem.h>
 #include <World/World.h>
 
@@ -193,6 +194,13 @@ struct EngineConfig {
     // 콘솔 입력·설정 변경은 여기서만 값이 된다). 엔진과 같은 스레드(게임 스레드)가 소유해야 하고
     // 엔진보다 오래 살아야 한다. 층 읽기·`--set`·CompleteStartup은 엔진 초기화 전에 호스트가 한다.
     config::ConfigContext* settings = nullptr;
+    // World GC 표식의 병렬 worker 수다. 엔진이 WorkerScheduler를 만들어 World에
+    // 빌려준다(Docs/Design/ GarbageCollectionScale.ko.md 17.4절). GcWorkersAuto면 논리 프로세서 수
+    // − 1을 MaxAutoGcWorkers로 자른 값이고, 0이면 만들지 않는다(직렬 표식).
+    static constexpr uint32 GcWorkersAuto = NumericLimits<uint32>::Max();
+    // 자동 worker 수의 상한이다(표식 gate를 ×8로 판정 — 실험 21절에서 ×16의 추가 이득이 작다).
+    static constexpr uint32 MaxAutoGcWorkers = 8;
+    uint32 gcWorkers = GcWorkersAuto;
 };
 
 // 새 World 설정이다(WorldDesc에서 엔진이 정하는 실행 문맥을 뺀 것).
@@ -201,7 +209,10 @@ struct WorldCreateDesc {
     TimeStepPolicy timeStep;
     RegistryOptions objects;
     GcBudget gcBudget;
-    // World GC 표식의 병렬 scheduler다(WorldDesc::gcScheduler — 빌림, 없으면 직렬).
+    // World GC 일정이다(WorldDesc::gcSchedule).
+    WorldGcSchedule gcSchedule;
+    // World GC 표식의 병렬 scheduler다(WorldDesc::gcScheduler — 빌림). 없으면 엔진의 GC scheduler를
+    // 쓴다(EngineConfig::gcWorkers가 0이면 직렬).
     WorkerScheduler* gcScheduler = nullptr;
     Span<const WorldSubsystemType> subsystems;
     // 만든 뒤 바로 BeginPlay한다. 에디터·미리보기 World는 false로 둔다.
@@ -321,6 +332,15 @@ public:
         return worlds_.Size();
     }
 
+    // 모든 World에 STW 병렬 전체 수집을 요청한다(World::RequestFullCollection — 레벨 전환·로딩
+    // 화면·메모리 압박을 아는 쪽이 부른다).
+    void RequestFullCollection() noexcept;
+
+    // 엔진이 World에 빌려주는 GC 표식 scheduler다(없으면 nullptr — 직렬). Running 동안 유효하다.
+    WorkerScheduler* GcScheduler() const noexcept {
+        return gcScheduler_.Get();
+    }
+
     // 실행 순서대로 index번째 World다. 범위 밖이면 nullptr이다.
     World* WorldAt(usize index) const noexcept {
         return index < worlds_.Size() ? worlds_[index].world.Get() : nullptr;
@@ -378,6 +398,8 @@ private:
     void NoteWorldTick(WorldContext& context, const Result<void>& ticked) noexcept;
     // 연속 Tick 실패를 끝낸다. 첫 실패 뒤 더 실패한 것이 있으면 한 번 요약한다.
     void EndTickFailureStreak(WorldContext& context) noexcept;
+    // GC scheduler를 끝내고 놓는다(없으면 성공).
+    Result<void> StopGcScheduler() noexcept;
     // 종료 실패를 남은 World·지연 파괴·살아 있는 객체 수와 함께 한 번 기록한다.
     void LogShutdownFailure(const char* stage, ErrorCode error) const noexcept;
 
@@ -387,6 +409,9 @@ private:
     // TypeRegistry 뒤에 선언해 먼저 소멸시킨다(붙잡은 lease를 TypeRegistry::Shutdown 전에 놓는다).
     UniquePtr<ModuleRegistration> modules_;
     UniquePtr<ObjectRegistry> objects_;
+    // GC 표식 scheduler다(17.4절). World보다 먼저 선언해 나중에 소멸시킨다 — Shutdown은 World를
+    // 모두 파괴한 뒤 끝낸다.
+    UniquePtr<WorkerScheduler> gcScheduler_;
     SubsystemCollection<EngineSubsystem, Engine> subsystems_;
     Array<WorldContext> worlds_;
     EngineTime time_;

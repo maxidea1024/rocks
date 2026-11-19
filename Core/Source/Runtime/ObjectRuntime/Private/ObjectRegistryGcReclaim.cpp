@@ -196,7 +196,17 @@ ObjectRegistry::ReclaimWork ObjectRegistry::TakeForReclaimLocked(Slot& slot) noe
 }
 
 void ObjectRegistry::FinishReclaim(ReclaimWork& work) noexcept {
-    // User destructors and allocator callbacks never execute under the registry gate.
+    DestroyReclaimed(work);
+    {
+        platform::LockGuard lock(gate_);
+        ResetReclaimedLocked(work);
+    }
+
+    work.type.Reset();
+}
+
+void ObjectRegistry::DestroyReclaimed(ReclaimWork& work) noexcept {
+    // 사용자 소멸자와 allocator 콜백은 Registry 잠금 밖에서만 부른다.
     work.type.Ops().destroy(work.object);
     auto released = allocator_.Deallocate(work.storage);
     if (!released) {
@@ -204,70 +214,102 @@ void ObjectRegistry::FinishReclaim(ReclaimWork& work) noexcept {
     }
 
     ReleaseRegistryMemory(allocator_, work.record);
-    {
-        platform::LockGuard lock(gate_);
-        Slot& slot = *work.slot;
-        slot.object = nullptr;
-        ColdOf(slot).storage = nullptr;
-        ColdOf(slot).transaction = 0;
-        ColdOf(slot).stableType = {};
-        ColdOf(slot).outer = {};
-        // GC 밀집 자료를 비운다(live는 Retire 때 이미 꺼졌다).
-        HotOf(slot.index) = GcHot{};
-        GcBits& bits = BitsOf(slot.index);
-        bits.leaf &= ~BitOf(slot.index);
-        StoreMark(bits.mark, LoadMark(bits.mark) & ~BitOf(slot.index));
-        StoreMark(bits.clusterSeen, LoadMark(bits.clusterSeen) & ~BitOf(slot.index));
-        if (clustersEnabled_) {
-            ClearClusterSlotLocked(slot.index);
-        }
+}
 
-        ColdOf(slot).outermost = nullptr;
-        ColdOf(slot).parent = nullptr;
-        ColdOf(slot).lastChild = nullptr;
-        ColdOf(slot).pathBytes = 0;
-        ColdOf(slot).discarded = false;
-        // 세대를 0/과거 값으로 순환시키면 오래된 WeakObjectRef가 새 객체를 가리킬 수 있다.
-        // 한도에 도달한 슬롯은 재사용하지 않고 Exhausted로 남긴다.
-        if (slot.generation >= options_.maxGeneration) {
-            slot.SetState(tally_, SlotState::Exhausted);
-        } else {
-            ++slot.generation;
-            slot.SetState(tally_, SlotState::Free);
-            ColdOf(slot).nextInList = freeSlots_;
-            freeSlots_ = &slot;
-        }
+void ObjectRegistry::ResetReclaimedLocked(ReclaimWork& work) noexcept {
+    Slot& slot = *work.slot;
+    slot.object = nullptr;
+    ColdOf(slot).storage = nullptr;
+    ColdOf(slot).transaction = 0;
+    ColdOf(slot).stableType = {};
+    ColdOf(slot).outer = {};
+    // GC 밀집 자료를 비운다(live는 Retire 때 이미 꺼졌다).
+    HotOf(slot.index) = GcHot{};
+    GcBits& bits = BitsOf(slot.index);
+    bits.leaf &= ~BitOf(slot.index);
+    StoreMark(bits.mark, LoadMark(bits.mark) & ~BitOf(slot.index));
+    StoreMark(bits.clusterSeen, LoadMark(bits.clusterSeen) & ~BitOf(slot.index));
+    if (clustersEnabled_) {
+        ClearClusterSlotLocked(slot.index);
     }
 
-    work.type.Reset();
+    ColdOf(slot).outermost = nullptr;
+    ColdOf(slot).parent = nullptr;
+    ColdOf(slot).lastChild = nullptr;
+    ColdOf(slot).pathBytes = 0;
+    ColdOf(slot).discarded = false;
+    // 세대를 0/과거 값으로 순환시키면 오래된 WeakObjectRef가 새 객체를 가리킬 수 있다.
+    // 한도에 도달한 슬롯은 재사용하지 않고 Exhausted로 남긴다.
+    if (slot.generation >= options_.maxGeneration) {
+        slot.SetState(tally_, SlotState::Exhausted);
+    } else {
+        ++slot.generation;
+        slot.SetState(tally_, SlotState::Free);
+        ColdOf(slot).nextInList = freeSlots_;
+        freeSlots_ = &slot;
+    }
 }
 
 uint32 ObjectRegistry::ReclaimEligible(uint32 maximum, uint64 deadline) noexcept {
-    // 회수 사이에 잠금을 풀고 사용자 소멸자를 부른다. 그 사이 소멸자(또는 다른 스레드)가 지연
-    // 슬롯의 보유 계수를 반환하면 그 슬롯이 풀린 목록으로 옮겨져 다음 차례에 회수된다(목록을
-    // 처음부터 다시 걷지 않는다).
+    // 회수는 ReclaimBatchSize개씩 한 번의 잠금으로 떼어 내고, 소멸자·해제는 잠금 밖에서 묶어 부른
+    // 뒤, 슬롯 되돌리기를 다시 한 번의 잠금으로 한다(GC 설계 17.1절 — 객체마다 잠금 둘이던 것을
+    // 묶음마다 둘로). 묶음 사이에 잠금을 풀므로 소멸자(또는 다른 스레드)가 지연 슬롯의 보유 계수를
+    // 반환하면 그 슬롯이 풀린 목록으로 옮겨져 다음 묶음에 회수된다(목록을 처음부터 다시 걷지
+    // 않는다). 시간 한도는 묶음마다 본다 — 떼어 낸 묶음은 끝까지 회수하므로 넘침은 묶음 하나다.
+    ReclaimWork batch[ReclaimBatchSize];
     uint32 reclaimed = 0;
     while (reclaimed < maximum && (deadline == 0 || platform::MonotonicNanoseconds() < deadline)) {
-        ReclaimWork work;
+        const uint32 limit =
+            maximum - reclaimed < ReclaimBatchSize ? maximum - reclaimed : ReclaimBatchSize;
+        uint32 count = 0;
         {
             platform::LockGuard lock(gate_);
-            Slot* selected = NextReclaimableLocked();
-            if (selected == nullptr) {
-                break;
-            }
+            while (count < limit) {
+                Slot* selected = NextReclaimableLocked();
+                if (selected == nullptr) {
+                    break;
+                }
 
-            UnlinkRetiredLocked(*selected);
-            work = TakeForReclaimLocked(*selected);
+                UnlinkRetiredLocked(*selected);
+                batch[count++] = TakeForReclaimLocked(*selected);
+            }
         }
 
-        FinishReclaim(work);
-        ++reclaimed;
+        if (count == 0) {
+            break;
+        }
+
+        for (uint32 index = 0; index < count; ++index) {
+            DestroyReclaimed(batch[index]);
+        }
+
+        {
+            platform::LockGuard lock(gate_);
+            for (uint32 index = 0; index < count; ++index) {
+                ResetReclaimedLocked(batch[index]);
+            }
+        }
+
+        for (uint32 index = 0; index < count; ++index) {
+            batch[index].type.Reset();
+        }
+
+        reclaimed += count;
     }
 
     return reclaimed;
 }
 
 Result<uint32> ObjectRegistry::DrainRetired(const ObjectAccessContext& access) noexcept {
+    return DrainRetired(access, GcBudget{NumericLimits<uint32>::Max(), 0});
+}
+
+Result<uint32> ObjectRegistry::DrainRetired(const ObjectAccessContext& access,
+                                            GcBudget budget) noexcept {
+    if (budget.maxObjects == 0) {
+        return Result<uint32>::Failure(ErrorCode::InvalidArgument);
+    }
+
     auto valid = CheckAccess(access);
     if (!valid) {
         return Result<uint32>::Failure(valid.Error());
@@ -282,7 +324,9 @@ Result<uint32> ObjectRegistry::DrainRetired(const ObjectAccessContext& access) n
         processing_ = true;
     }
 
-    uint32 count = ReclaimEligible();
+    const uint64 deadline =
+        budget.maxNanoseconds == 0 ? 0 : platform::MonotonicNanoseconds() + budget.maxNanoseconds;
+    uint32 count = ReclaimEligible(budget.maxObjects, deadline);
     {
         platform::LockGuard lock(gate_);
         processing_ = false;

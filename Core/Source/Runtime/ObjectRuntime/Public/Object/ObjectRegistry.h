@@ -621,10 +621,15 @@ public:
     // 표식에 참여하고 parallelTraceSafe가 아닌 타입은 소유 스레드만 trace한다). 반환 전에 worker
     // 작업을 모두 회수한다.
     //
-    // 사용 예(레벨 전환 때 STW 병렬 수집):
-    //   auto report = registry.Collect(access, &scheduler);
-    Result<GcReport> Collect(const ObjectAccessContext&,
-                             WorkerScheduler* scheduler = nullptr) noexcept;
+    // reclaim이 Deferred면 표식·분류까지만 하고 회수는 DrainRetired에 맡긴다(보고서 reclaimed 0 —
+    // GC 설계 17.2절).
+    //
+    // 사용 예(레벨 전환 때 STW 병렬 수집, 소멸자는 다음 프레임들에 2ms씩):
+    //   auto report = registry.Collect(access, &scheduler, GcReclaim::Deferred);
+    //   ... 프레임마다: registry.DrainRetired(access, GcBudget{GcBudget::DefaultMaxObjects,
+    //   2000000});
+    Result<GcReport> Collect(const ObjectAccessContext&, WorkerScheduler* scheduler = nullptr,
+                             GcReclaim reclaim = GcReclaim::Immediately) noexcept;
     // Begin/Step은 Borrow=0·활성 생성=0인 소유 스레드 safepoint에서만 진행한다.
     // slice 사이에는 mutator를 재개하며 root/간선/신규 게시가 삽입 장벽을 거친다.
     Result<void> BeginCollection(const ObjectAccessContext&) noexcept;
@@ -642,7 +647,13 @@ public:
     // 않도록 Sweeping/Reclaiming 취소는 Busy다. 마지막 성공 보고서는 바꾸지 않는다.
     Result<void> CancelCollection(const ObjectAccessContext&) noexcept;
     GcPhase CollectionPhase() const noexcept;
+    // 회수할 수 있는 분류된 객체(보유 계수·남은 자식이 없는 Retired)를 모두 회수하고 회수한 수를
+    // 돌려준다. 소유 스레드 safepoint에서 부른다(처리 중이면 Busy).
     Result<uint32> DrainRetired(const ObjectAccessContext&) noexcept;
+    // 예산만큼만 회수한다(maxObjects개 이하, maxNanoseconds가 0이 아니면 그 시간 안 — 회수는 64개
+    // 묶음 단위라 시간은 묶음 하나만큼 넘을 수 있다, GC 설계 17.1절). 0이면 남은 회수 대상이 없거나
+    // 모두 보유 중이다. maxObjects 0은 InvalidArgument다.
+    Result<uint32> DrainRetired(const ObjectAccessContext&, GcBudget budget) noexcept;
     // 영구 창(RegistryOptions::permanentRegion)을 닫는다. 이 뒤에 Commit하는 객체는 일반 객체이고
     // 다시 열 수 없다(이미 닫았거나 창 없이 만든 Registry는 성공 — 무동작). GC·callback 처리 중에는
     // Busy(Commit 검증과 공개 사이에 창 상태가 바뀌지 않게), 종료 시작 뒤에는 ShuttingDown이다.
@@ -1068,8 +1079,12 @@ private:
     // 반환할 것을 넘긴다.
     ReclaimWork TakeForReclaimLocked(Slot&) noexcept;
     // 잠금 밖에서 부른다: work의 객체를 소멸·반환한 뒤 다시 잠가 슬롯을 비우고 빈 슬롯 목록에
-    // 넣는다(세대 한도면 Exhausted로 격리한다).
+    // 넣는다(세대 한도면 Exhausted로 격리한다). 묶음 회수는 아래 둘을 나눠 부른다.
     void FinishReclaim(ReclaimWork&) noexcept;
+    // 잠금 밖: work의 객체 소멸자를 부르고 저장소·이름 기록을 반환한다.
+    void DestroyReclaimed(ReclaimWork&) noexcept;
+    // 잠금 보유: 소멸을 마친 work의 슬롯을 비우고 빈 슬롯 목록에 넣는다(세대 한도면 Exhausted).
+    void ResetReclaimedLocked(ReclaimWork&) noexcept;
 
     // ---- Outer·이름(잠금 보유 상태에서 부른다) ----
     ObjectHandle HandleOf(const Slot&) const noexcept;

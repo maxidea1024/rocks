@@ -19,6 +19,17 @@ enum class GcPhase : uint8 {
     Reclaiming
 };
 
+// 정지형 수집(ObjectRegistry::Collect)이 분류한 객체를 언제 회수하는지다(Docs/Design/
+// GarbageCollectionScale.ko.md 17.2절).
+// - Immediately: 반환 전에 모두 회수한다(소멸자·저장소 반환 포함).
+// - Deferred: 분류만 하고 회수 대상 목록에 남긴다. DrainRetired(access, GcBudget)로 프레임마다
+// 예산만큼
+//   회수한다(STW 병렬 수집 뒤 소멸자를 여러 프레임에 나눌 때).
+enum class GcReclaim : uint8 {
+    Immediately,
+    Deferred
+};
+
 // 증분 수집 slice 하나의 예산이다(Docs/Design/GarbageCollectionScale.ko.md GC-S2). 기본은 시간
 // 한도(1ms)이고 maxObjects는 상한 장치일 뿐이다.
 // - 시간 예산은 soft deadline이다. Trace·소멸자 한 번을 중간에 중단하지 않고, 표식은 객체

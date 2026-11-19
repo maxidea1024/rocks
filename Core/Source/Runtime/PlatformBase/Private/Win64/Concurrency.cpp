@@ -47,6 +47,12 @@ void YieldThread() noexcept {
     SwitchToThread();
 }
 
+uint32 LogicalProcessorCount() noexcept {
+    // 프로세서 그룹(64개 단위)을 모두 센다.
+    const DWORD count = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+    return count == 0 ? 1u : static_cast<uint32>(count);
+}
+
 ThreadStackRange CurrentThreadStackRange() noexcept {
     ULONG_PTR low = 0;
     ULONG_PTR high = 0;
