@@ -1,6 +1,7 @@
 #include "ConfigState.h"
 #include "ConfigText.h"
 
+#include <Core/Text/NumberText.h>
 #include <Core/Text/StringBuilder.h>
 #include <Object/PropertyPath.h>
 #include <Platform/Clock.h>
@@ -16,10 +17,6 @@ using reflection_text::TextCodecOptions;
 using reflection_text::TextDiagnostics;
 using reflection_text::TextScalarType;
 using reflection_text::TextSource;
-
-Span<const char> ToSpan(StringView text) noexcept {
-    return Span<const char>(text.Data(), text.ByteCount());
-}
 
 StringView ToView(Span<const char> text) noexcept {
     return StringView(text.Data(), text.Size());
@@ -37,14 +34,6 @@ bool IsRegionName(StringView text) noexcept {
     }
 
     return !first;
-}
-
-Result<void> Write(ConsoleOutput& output, StringView text) noexcept {
-    if (output.write == nullptr) {
-        return Result<void>::Success();
-    }
-
-    return output.write(output.context, text);
 }
 
 } // namespace
@@ -74,13 +63,7 @@ ValueKind ConsoleValueKind(ConsoleValueType type) noexcept {
 
 namespace detail {
 
-ConfigState::~ConfigState() {
-    for (PendingCommand& pending : pendingCommands) {
-        if (pending.arguments != nullptr) {
-            commands[pending.command]->args.destroy(allocator, pending.arguments);
-        }
-    }
-}
+ConfigState::~ConfigState() = default;
 
 usize ConfigState::FindSetting(StringView name) const noexcept {
     for (usize index = 0; index < settings.Size(); ++index) {
@@ -349,30 +332,6 @@ void StoreScalar(const cvar::detail::ScalarValue& scalar, FieldValue& value) noe
     }
 }
 
-// 출처 스택의 층 이름 목록을 output에 쓴다.
-Result<void> WriteStack(ConfigState& state, Span<const uint64> stack,
-                        ConsoleOutput& output) noexcept {
-    for (const uint64 sequence : stack) {
-        const ConfigEntry* entry = state.FindEntry(sequence);
-        if (entry == nullptr) {
-            continue;
-        }
-
-        StringBuilder<128> line(state.allocator);
-        static_cast<void>(line.TryAppendFormat("  {} {} ({})\n", ConfigLayerName(entry->layer),
-                                               entry->tag.View(), entry->sourceName.View()));
-        if (auto status = line.Status(); !status) {
-            return status;
-        }
-
-        if (auto written = Write(output, line.View()); !written) {
-            return written;
-        }
-    }
-
-    return Result<void>::Success();
-}
-
 } // namespace
 
 Result<void> FormatConsoleValue(ConfigState& state, const ConsoleSettingState& setting,
@@ -389,6 +348,27 @@ Result<StringView> CheckConsoleValue(ConfigState& state, const ConsoleSettingSta
         return Result<StringView>::Success(problem);
     }
 
+    // enum은 수도 받는다(CVar 4.4·15절): ReflectionText enum 표기는 이름만이므로 그 값의 열거자
+    // 이름으로 바꿔 읽는다. 표에 없는 수는 거부한다.
+    if (setting.kind == ValueKind::Enum && setting.enumSchema != nullptr) {
+        if (auto number = TryParseInt64(text); number) {
+            StringView named;
+            for (const EnumeratorSchema& enumerator : setting.enumSchema->values) {
+                if (enumerator.value == number.Value()) {
+                    named = enumerator.toolName.Size() != 0 ? ToView(enumerator.toolName)
+                                                            : ToView(enumerator.name);
+                }
+            }
+
+            if (named.IsEmpty()) {
+                code = ConfigDiagnosticCode::InvalidEnum;
+                return Result<StringView>::Success("the value is not one of the enum values");
+            }
+
+            text = named;
+        }
+    }
+
     // 문자열 값의 경로 이름은 파일 값과 같은 규칙으로 펼치지 않는다(독립 설정은 경로 필드가
     // 아니다).
     TextDiagnostics diagnostics(state.allocator);
@@ -403,6 +383,18 @@ Result<StringView> CheckConsoleValue(ConfigState& state, const ConsoleSettingSta
     code = ConfigDiagnosticCode::InvalidSetting;
     if (!parsed.Value()) {
         return Result<StringView>::Success("the value does not parse as the setting type");
+    }
+
+    // NaN·무한대는 범위·Clamp와 무관하게 늘 거부한다(CVar 4.2절 — CVar 검사 함수와 같은 판정을
+    // 독립 설정·필드·명령 인자에도 건다).
+    if (setting.kind == ValueKind::Float32 || setting.kind == ValueKind::Float64) {
+        constexpr double Largest = NumericLimits<double>::Max();
+        const double number =
+            setting.kind == ValueKind::Float32 ? static_cast<double>(out.float32) : out.float64;
+        if (number != number || number > Largest || number < -Largest) {
+            code = ConfigDiagnosticCode::ValueOutOfRange;
+            return Result<StringView>::Success("the value is not a finite number");
+        }
     }
 
     if (setting.hasRange) {
@@ -424,26 +416,6 @@ Result<StringView> CheckConsoleValue(ConfigState& state, const ConsoleSettingSta
         if (!(number >= setting.minimum && number <= setting.maximum)) {
             code = ConfigDiagnosticCode::ValueOutOfRange;
             return Result<StringView>::Success("the value is outside the setting range");
-        }
-    }
-
-    if (!setting.allowed.IsEmpty()) {
-        String canonical(state.allocator);
-        if (auto formatted = FormatConsoleValue(state, setting, out, canonical); !formatted) {
-            return Result<StringView>::Failure(formatted.Error());
-        }
-
-        bool allowed = false;
-        for (const String& candidate : setting.allowed) {
-            allowed = allowed || (setting.kind == ValueKind::Enum || setting.allowedIgnoreCase
-                                      ? EqualsIgnoringAsciiCase(ToSpan(candidate.View()),
-                                                                ToSpan(canonical.View()))
-                                      : candidate.View() == canonical.View());
-        }
-
-        if (!allowed) {
-            code = ConfigDiagnosticCode::ValueOutOfRange;
-            return Result<StringView>::Success("the value is not one of the allowed values");
         }
     }
 
@@ -859,73 +831,18 @@ Result<void> PrepareNamedBlock(ConfigState& state, Span<const UniquePtr<SettingR
     return Result<void>::Success();
 }
 
-void RunCommandsAndCallbacks(ConfigState& state, Span<const bool> sectionChanged,
-                             Span<const bool> settingChanged) noexcept {
+void RunPendingCommands(ConfigState& state) noexcept {
     state.syncing = true;
-    // 명령은 큐 순서대로 실행한다. 실행 중 콘솔 입력으로 새로 들어온 명령(뒤에 붙는다)은 다음
-    // Sync에 실행한다.
+    // 명령은 큐 순서대로 실행한다(CVar 10절 5단계). 실행 중 콘솔 입력으로 새로 들어온 명령(뒤에
+    // 붙는다)은 다음 Sync에 실행한다.
     const usize count = state.pendingCommands.Size();
     for (usize index = 0; index < count; ++index) {
-        PendingCommand command = state.pendingCommands[index];
-        const ConsoleCommandState& definition = *state.commands[command.command];
-        if (auto executed =
-                definition.execute(definition.context, command.arguments, command.output);
-            !executed) {
-            // 명령 실패는 그 명령의 콘솔 출력과 로그 양쪽에 남긴다.
-            Log::Warning(detail::LogConfig, "Console command {Command} failed ({Error})",
-                         definition.name.View(), ErrorCodeName(executed.Error()));
-            StringBuilder<128> line(state.allocator);
-            static_cast<void>(line.TryAppendFormat("{}: command failed ({})\n",
-                                                   definition.name.View(),
-                                                   ErrorCodeName(executed.Error())));
-            static_cast<void>(Write(command.output, line.View()));
-        }
-
-        if (command.arguments != nullptr) {
-            definition.args.destroy(state.allocator, command.arguments);
-            state.pendingCommands[index].arguments = nullptr;
-        }
+        // 명령이 콘솔 입력을 더 넣을 수 있으므로(배열이 자랄 수 있다) 꺼내서 실행한다.
+        PendingCommand pending = Move(state.pendingCommands[index]);
+        RunPendingCommand(*state.self, state, pending);
     }
 
     static_cast<void>(state.pendingCommands.TryRemoveAt(0, count)); // 줄이기는 할당하지 않는다
-
-    // 콜백은 구독 순서대로 부른다. 콜백 안의 Unsubscribe는 callback을 지워 둔다(아래에서 정리한다).
-    for (usize index = 0; index < state.subscriptions.Size(); ++index) {
-        const Subscription subscription = state.subscriptions[index];
-        if (subscription.callback == nullptr) {
-            continue;
-        }
-
-        const bool changed = subscription.setting != IndexNone
-                                 ? settingChanged[subscription.setting]
-                                 : sectionChanged[subscription.section];
-        if (!changed) {
-            continue;
-        }
-
-        ConfigChange change;
-        StringBuilder<128> name(state.allocator);
-        if (subscription.setting != IndexNone) {
-            change.name = state.settings[subscription.setting]->name.View();
-        } else {
-            const SectionState& section = *state.sections[subscription.section];
-            static_cast<void>(name.TryAppendFormat("{}.{}", state.branches[section.branch].View(),
-                                                   section.section.View()));
-            change.name = name.View();
-            change.settings = section.ops.id;
-        }
-
-        subscription.callback(subscription.context, change);
-    }
-
-    usize kept = 0;
-    for (usize index = 0; index < state.subscriptions.Size(); ++index) {
-        if (state.subscriptions[index].callback != nullptr) {
-            state.subscriptions[kept++] = state.subscriptions[index];
-        }
-    }
-
-    static_cast<void>(state.subscriptions.TryResize(kept)); // 줄이기는 할당하지 않는다
     state.syncing = false;
 }
 
@@ -938,7 +855,6 @@ using detail::ConsoleSettingState;
 using detail::EntryKind;
 using detail::PendingCommand;
 using detail::SectionState;
-using detail::Subscription;
 
 Result<void> ConfigContext::RegisterConsoleRegion(StringView region) noexcept {
     ConfigState* state = state_.Get();
@@ -962,127 +878,6 @@ Result<void> ConfigContext::RegisterConsoleRegion(StringView region) noexcept {
     }
 
     return state->regions.TryPushBack(Move(added));
-}
-
-Result<ConsoleSettingId>
-ConfigContext::RegisterConsoleSetting(const ConsoleSettingDefinition& definition) noexcept {
-    ConfigState* state = state_.Get();
-    if (state == nullptr) {
-        return Result<ConsoleSettingId>::Failure(ErrorCode::InvalidArgument);
-    }
-
-    if (platform::CurrentThreadId() != state->owner) {
-        return Result<ConsoleSettingId>::Failure(ErrorCode::WrongThread);
-    }
-
-    StringView region;
-    StringView rest;
-    bool known = false;
-    if (IsConsoleSettingName(definition.name) &&
-        definition.name.Split(".", region, rest, StringComparison::CaseSensitive)) {
-        for (const String& candidate : state->regions) {
-            known = known || candidate.View() == region;
-        }
-    }
-
-    const ValueKind kind = ConsoleValueKind(definition.type);
-    const bool numeric = kind == ValueKind::Int32 || kind == ValueKind::Int64 ||
-                         kind == ValueKind::Float32 || kind == ValueKind::Float64;
-    const bool textual =
-        kind == ValueKind::Utf8String || kind == ValueKind::Name || kind == ValueKind::Enum;
-    const bool enumType = definition.enumType != TypeId{};
-    if (!known || definition.help.IsEmpty() || kind == ValueKind::Opaque ||
-        (definition.flags & ~KnownConsoleSettingFlags) != 0 ||
-        (definition.hasRange && (!numeric || !(definition.minimum <= definition.maximum))) ||
-        (!definition.allowedValues.IsEmpty() && !textual) ||
-        (enumType != (kind == ValueKind::Enum))) {
-        return Result<ConsoleSettingId>::Failure(ErrorCode::InvalidArgument);
-    }
-
-    if (state->FindSetting(definition.name) != IndexNone ||
-        state->FindCommand(definition.name) != IndexNone) {
-        return Result<ConsoleSettingId>::Failure(ErrorCode::AlreadyExists);
-    }
-
-    auto made = UniquePtr<ConsoleSettingState>::TryMake(*allocator_, *allocator_);
-    if (!made) {
-        return Result<ConsoleSettingId>::Failure(made.Error());
-    }
-
-    ConsoleSettingState& setting = *made.Value();
-    setting.type = definition.type;
-    setting.kind = kind;
-    setting.flags = definition.flags;
-    setting.hasRange = definition.hasRange;
-    setting.minimum = definition.minimum;
-    setting.maximum = definition.maximum;
-    setting.allowedIgnoreCase = definition.allowedValuesIgnoreCase;
-    if (kind == ValueKind::Enum) {
-        auto lease = objects_->Types().AcquireValueType(definition.enumType, TypeKind::Enum);
-        if (!lease) {
-            return Result<ConsoleSettingId>::Failure(lease.Error());
-        }
-
-        setting.enumLease = Move(lease.Value());
-        setting.enumSchema = &setting.enumLease.Enum();
-    }
-
-    Result<void> filled = setting.name.TryAssign(definition.name);
-    if (filled) {
-        filled = setting.help.TryAssign(definition.help);
-    }
-
-    for (usize index = 0; filled && index < definition.allowedValues.Size(); ++index) {
-        String allowed(*allocator_);
-        filled = allowed.TryAssign(definition.allowedValues[index]);
-        if (filled) {
-            filled = setting.allowed.TryPushBack(Move(allowed));
-        }
-    }
-
-    if (!filled) {
-        return Result<ConsoleSettingId>::Failure(filled.Error());
-    }
-
-    // 기본값: 표기가 있으면 그 값(범위·허용 값도 맞아야 한다), 없으면 종류의 0 값.
-    setting.defaultValue.kind = kind;
-    if (setting.enumSchema != nullptr) {
-        setting.defaultValue.type = setting.enumSchema->id;
-        setting.defaultValue.signedInteger = EnumReplacementValue(*setting.enumSchema, 0);
-    }
-
-    if (!definition.defaultValue.IsEmpty()) {
-        ConfigDiagnosticCode code = ConfigDiagnosticCode::InvalidSetting;
-        FieldValue parsed(*allocator_);
-        auto checked = detail::CheckConsoleValue(*state, setting, ConfigLayer::CodeDefault,
-                                                 definition.defaultValue, parsed, code, false);
-        if (!checked) {
-            return Result<ConsoleSettingId>::Failure(checked.Error());
-        }
-
-        if (!checked.Value().IsEmpty()) {
-            return Result<ConsoleSettingId>::Failure(ErrorCode::InvalidArgument);
-        }
-
-        if (auto copied = detail::CopyFieldValue(parsed, setting.defaultValue); !copied) {
-            return Result<ConsoleSettingId>::Failure(copied.Error());
-        }
-    }
-
-    // 이미 들어온 층 입력(대기 값)을 바로 넘긴다. 거부한 값은 진단을 남긴다.
-    if (auto computed = detail::AdoptPendingValues(*state, setting); !computed) {
-        return Result<ConsoleSettingId>::Failure(computed.Error());
-    }
-
-    if (auto pushed = state->settings.TryPushBack(Move(made.Value())); !pushed) {
-        return Result<ConsoleSettingId>::Failure(pushed.Error());
-    }
-
-    // snapshot·콜백 판정이 이 설정을 보도록 다음 Sync가 다시 합친다.
-    state->dirty = true;
-    ConsoleSettingId id;
-    id.index = static_cast<uint32>(state->settings.Size() - 1);
-    return Result<ConsoleSettingId>::Success(id);
 }
 
 Result<ConsoleSettingId> ConfigContext::FindConsoleSetting(StringView name) const noexcept {
@@ -1118,442 +913,6 @@ const FieldValue& ConfigContext::ConsoleValue(ConsoleSettingId id) const noexcep
     }
 
     return state->settings[id.index]->value;
-}
-
-Result<void>
-ConfigContext::RegisterConsoleCommand(const ConsoleCommandDefinition& definition) noexcept {
-    return RegisterConsoleCommandType(definition, nullptr);
-}
-
-Result<void>
-ConfigContext::RegisterConsoleCommandType(const ConsoleCommandDefinition& definition,
-                                          const detail::SettingsTypeOps* arguments) noexcept {
-    ConfigState* state = state_.Get();
-    if (state == nullptr) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
-    }
-
-    if (platform::CurrentThreadId() != state->owner) {
-        return Result<void>::Failure(ErrorCode::WrongThread);
-    }
-
-    StringView region;
-    StringView rest;
-    bool known = false;
-    if (IsConsoleSettingName(definition.name) &&
-        definition.name.Split(".", region, rest, StringComparison::CaseSensitive)) {
-        for (const String& candidate : state->regions) {
-            known = known || candidate.View() == region;
-        }
-    }
-
-    if (!known || definition.help.IsEmpty() || definition.execute == nullptr) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
-    }
-
-    if (state->FindSetting(definition.name) != IndexNone ||
-        state->FindCommand(definition.name) != IndexNone) {
-        return Result<void>::Failure(ErrorCode::AlreadyExists);
-    }
-
-    auto made = UniquePtr<ConsoleCommandState>::TryMake(*allocator_, *allocator_);
-    if (!made) {
-        return Result<void>::Failure(made.Error());
-    }
-
-    ConsoleCommandState& command = *made.Value();
-    command.execute = definition.execute;
-    command.context = definition.context;
-    if (arguments != nullptr) {
-        auto lease = objects_->Types().AcquireValueType(arguments->id, TypeKind::Struct);
-        if (!lease) {
-            return Result<void>::Failure(lease.Error());
-        }
-
-        command.lease = Move(lease.Value());
-        command.args = *arguments;
-    }
-
-    Result<void> filled = command.name.TryAssign(definition.name);
-    if (filled) {
-        filled = command.help.TryAssign(definition.help);
-    }
-
-    if (filled) {
-        filled = state->commands.TryPushBack(Move(made.Value()));
-    }
-
-    return filled;
-}
-
-namespace {
-
-// 콘솔 설정 하나의 값·출처 스택을 출력한다(`<이름>`).
-Result<void> ShowSetting(ConfigState& state, const ConsoleSettingState& setting,
-                         ConsoleOutput& output) noexcept {
-    StringBuilder<128> line(state.allocator);
-    static_cast<void>(line.TryAppendFormat("{} = {}\n", setting.name.View(), setting.text.View()));
-    if (auto status = line.Status(); !status) {
-        return status;
-    }
-
-    if (auto written = Write(output, line.View()); !written) {
-        return written;
-    }
-
-    if (setting.section == IndexNone) {
-        return detail::WriteStack(state, setting.sources.View(), output);
-    }
-
-    const SectionState& section = *state.sections[setting.section];
-    const StringView field =
-        ToView(EffectiveToolName(section.lease.Schema().fields[setting.field]));
-    for (const UniquePtr<detail::SourceStack>& stack : section.sources) {
-        if (stack->path.View() == field) {
-            return detail::WriteStack(state, stack->entries.View(), output);
-        }
-    }
-
-    return Result<void>::Success();
-}
-
-// 도움말을 출력한다(`<이름> ?`).
-Result<void> ShowHelp(ConfigState& state, StringView name, StringView help,
-                      ConsoleOutput& output) noexcept {
-    StringBuilder<128> line(state.allocator);
-    static_cast<void>(line.TryAppendFormat("{}: {}\n", name, help));
-    if (auto status = line.Status(); !status) {
-        return status;
-    }
-
-    return Write(output, line.View());
-}
-
-// 방금 더해진 진단(from부터)을 출력한다.
-Result<void> ShowDiagnostics(ConfigState& state, usize from, ConsoleOutput& output) noexcept {
-    for (usize index = from; index < state.diagnostics.Count(); ++index) {
-        const ConfigDiagnostic item = state.diagnostics.Get(index);
-        StringBuilder<128> line(state.allocator);
-        static_cast<void>(line.TryAppendFormat(
-            "error {} {}: {}\n", ConfigDiagnosticCodeName(item.code), item.path, item.message));
-        if (auto status = line.Status(); !status) {
-            return status;
-        }
-
-        if (auto written = Write(output, line.View()); !written) {
-            return written;
-        }
-    }
-
-    return Result<void>::Success();
-}
-
-} // namespace
-
-Result<ConsoleLineResult> ConfigContext::ExecuteConsoleLine(StringView line,
-                                                            ConsoleOutput output) noexcept {
-    ConfigState* state = state_.Get();
-    if (state == nullptr) {
-        return Result<ConsoleLineResult>::Failure(ErrorCode::InvalidArgument);
-    }
-
-    if (platform::CurrentThreadId() != state->owner) {
-        return Result<ConsoleLineResult>::Failure(ErrorCode::WrongThread);
-    }
-
-    // 출시 빌드에는 콘솔 입력이 없다(UE ALLOW_CONSOLE_IN_SHIPPING 기본 0).
-    if (state->releaseRules) {
-        return Result<ConsoleLineResult>::Failure(ErrorCode::Unsupported);
-    }
-
-    const StringView trimmed = line.TrimAscii();
-    if (trimmed.IsEmpty()) {
-        return Result<ConsoleLineResult>::Failure(ErrorCode::InvalidArgument);
-    }
-
-    StringView name = trimmed;
-    StringView rest;
-    if (StringView left; trimmed.Split(" ", left, rest, StringComparison::CaseSensitive)) {
-        name = left;
-        rest = rest.TrimAscii();
-    }
-
-    auto succeed = [](ConsoleLineResult result) noexcept {
-        return Result<ConsoleLineResult>::Success(result);
-    };
-    auto fail = [](Result<void> result) noexcept {
-        return Result<ConsoleLineResult>::Failure(result.Error());
-    };
-
-    const usize setting = state->FindSetting(name);
-    const bool hidden =
-        setting != IndexNone && state->releaseRules &&
-        HasFlag(state->settings[setting]->flags, ConsoleSettingFlags::DevelopmentOnly);
-    if (setting != IndexNone && !hidden) {
-        const ConsoleSettingState& found = *state->settings[setting];
-        if (rest.IsEmpty()) {
-            auto shown = ShowSetting(*state, found, output);
-            return shown ? succeed(ConsoleLineResult::Shown) : fail(Move(shown));
-        }
-
-        if (rest == "?") {
-            auto shown = ShowHelp(*state, found.name.View(), found.help.View(), output);
-            return shown ? succeed(ConsoleLineResult::Help) : fail(Move(shown));
-        }
-
-        const usize before = state->diagnostics.Count();
-        auto added = AddAssignment(ConfigLayer::Console, "console", name, rest);
-        if (added) {
-            return succeed(ConsoleLineResult::Queued);
-        }
-
-        if (added.Error() != ErrorCode::InvalidArgument) {
-            return fail(Move(added));
-        }
-
-        auto shown = ShowDiagnostics(*state, before, output);
-        return shown ? succeed(ConsoleLineResult::Rejected) : fail(Move(shown));
-    }
-
-    const usize command = state->FindCommand(name);
-    if (command == IndexNone) {
-        StringBuilder<128> message(*allocator_);
-        static_cast<void>(message.TryAppendFormat("unknown console name '{}'\n", name));
-        if (auto status = message.Status(); !status) {
-            return fail(Move(status));
-        }
-
-        auto written = Write(output, message.View());
-        return written ? succeed(ConsoleLineResult::Unknown) : fail(Move(written));
-    }
-
-    const ConsoleCommandState& definition = *state->commands[command];
-    if (rest == "?") {
-        auto shown = ShowHelp(*state, definition.name.View(), definition.help.View(), output);
-        return shown ? succeed(ConsoleLineResult::Help) : fail(Move(shown));
-    }
-
-    // 인자: 공백으로 나눈 `<경로>=<값>`을 인자 struct 기본값 위에 대입한다.
-    void* arguments = nullptr;
-    if (definition.args.create != nullptr) {
-        arguments = definition.args.create(*allocator_);
-        if (arguments == nullptr) {
-            return Result<ConsoleLineResult>::Failure(ErrorCode::OutOfMemory);
-        }
-    }
-
-    auto release = [&]() noexcept {
-        if (arguments != nullptr) {
-            definition.args.destroy(*allocator_, arguments);
-            arguments = nullptr;
-        }
-    };
-    Array<reflection_text::TextAssignment> assignments(*allocator_);
-    StringView remaining = rest;
-    bool malformed = false;
-    while (!remaining.IsEmpty()) {
-        StringView token = remaining;
-        StringView after;
-        if (StringView left; remaining.Split(" ", left, after, StringComparison::CaseSensitive)) {
-            token = left;
-        }
-
-        remaining = after.TrimAscii();
-        reflection_text::TextAssignment assignment;
-        if (!reflection_text::MakeTextAssignment(token, static_cast<uint32>(assignments.Size()),
-                                                 assignment)) {
-            malformed = true;
-            break;
-        }
-
-        if (auto pushed = assignments.TryPushBack(assignment); !pushed) {
-            release();
-            return fail(Move(pushed));
-        }
-    }
-
-    if (malformed || (arguments == nullptr && !assignments.IsEmpty())) {
-        release();
-        auto written = Write(output, arguments == nullptr && !malformed
-                                         ? StringView("this command takes no arguments\n")
-                                         : StringView("arguments are <path>=<value> separated by "
-                                                      "spaces\n"));
-        return written ? succeed(ConsoleLineResult::Rejected) : fail(Move(written));
-    }
-
-    if (!assignments.IsEmpty()) {
-        reflection_text::TextDiagnostics diagnostics(*allocator_);
-        const reflection_text::TextCodecOptions options = state->CodecOptions();
-        auto prepared = reflection_text::PrepareAssignments(
-            reflection_text::AssignmentTarget::Value(*objects_, state->access, definition.lease,
-                                                     arguments, *allocator_),
-            assignments.View(), options, diagnostics);
-        Result<void> published = Result<void>::Success();
-        if (prepared) {
-            auto done = prepared.Value().Publish();
-            if (!done) {
-                published = Result<void>::Failure(done.Error());
-            }
-        }
-
-        if (!prepared || !published) {
-            release();
-            if (!diagnostics.HasErrors()) {
-                return Result<ConsoleLineResult>::Failure(prepared ? published.Error()
-                                                                   : prepared.Error());
-            }
-
-            for (usize index = 0; index < diagnostics.Count(); ++index) {
-                const reflection_text::TextDiagnostic item = diagnostics.Get(index);
-                StringBuilder<128> message(*allocator_);
-                static_cast<void>(message.TryAppendFormat(
-                    "error {} {}: {}\n", reflection_text::TextDiagnosticCodeName(item.code),
-                    item.path, item.message));
-                if (auto written = Write(output, message.View()); !written) {
-                    return fail(Move(written));
-                }
-            }
-
-            return succeed(ConsoleLineResult::Rejected);
-        }
-    }
-
-    PendingCommand pending;
-    pending.command = command;
-    pending.arguments = arguments;
-    pending.output = output;
-    if (auto pushed = state->pendingCommands.TryPushBack(pending); !pushed) {
-        release();
-        return fail(Move(pushed));
-    }
-
-    return succeed(ConsoleLineResult::CommandQueued);
-}
-
-Result<void> ConfigContext::CompleteConsoleName(StringView prefix,
-                                                Array<StringView>& out) const noexcept {
-    const ConfigState* state = state_.Get();
-    if (state == nullptr) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
-    }
-
-    if (platform::CurrentThreadId() != state->owner) {
-        return Result<void>::Failure(ErrorCode::WrongThread);
-    }
-
-    out.Clear();
-    for (const UniquePtr<ConsoleSettingState>& setting : state->settings) {
-        const bool hidden =
-            state->releaseRules && HasFlag(setting->flags, ConsoleSettingFlags::DevelopmentOnly);
-        if (!hidden && setting->name.View().StartsWith(prefix, StringComparison::CaseSensitive)) {
-            if (auto pushed = out.TryPushBack(setting->name.View()); !pushed) {
-                return pushed;
-            }
-        }
-    }
-
-    for (const UniquePtr<ConsoleCommandState>& command : state->commands) {
-        if (command->name.View().StartsWith(prefix, StringComparison::CaseSensitive)) {
-            if (auto pushed = out.TryPushBack(command->name.View()); !pushed) {
-                return pushed;
-            }
-        }
-    }
-
-    out.Sort(
-        [](StringView left, StringView right) noexcept { return detail::LessBytes(left, right); });
-    return Result<void>::Success();
-}
-
-Result<ConfigSubscriptionId>
-ConfigContext::Subscribe(StringView name, ConfigChangeCallback callback, void* context) noexcept {
-    ConfigState* state = state_.Get();
-    if (state == nullptr || callback == nullptr) {
-        return Result<ConfigSubscriptionId>::Failure(ErrorCode::InvalidArgument);
-    }
-
-    if (platform::CurrentThreadId() != state->owner) {
-        return Result<ConfigSubscriptionId>::Failure(ErrorCode::WrongThread);
-    }
-
-    const usize setting = state->FindSetting(name);
-    if (setting == IndexNone) {
-        return Result<ConfigSubscriptionId>::Failure(ErrorCode::NotFound);
-    }
-
-    Subscription subscription;
-    subscription.id = state->nextSubscription++;
-    subscription.setting = setting;
-    subscription.callback = callback;
-    subscription.context = context;
-    if (auto pushed = state->subscriptions.TryPushBack(subscription); !pushed) {
-        return Result<ConfigSubscriptionId>::Failure(pushed.Error());
-    }
-
-    return Result<ConfigSubscriptionId>::Success(ConfigSubscriptionId{subscription.id});
-}
-
-Result<ConfigSubscriptionId> ConfigContext::SubscribeSection(TypeId settings,
-                                                             ConfigChangeCallback callback,
-                                                             void* context) noexcept {
-    ConfigState* state = state_.Get();
-    if (state == nullptr || callback == nullptr) {
-        return Result<ConfigSubscriptionId>::Failure(ErrorCode::InvalidArgument);
-    }
-
-    if (platform::CurrentThreadId() != state->owner) {
-        return Result<ConfigSubscriptionId>::Failure(ErrorCode::WrongThread);
-    }
-
-    usize section = IndexNone;
-    for (usize index = 0; index < state->sections.Size(); ++index) {
-        if (state->sections[index]->ops.id == settings) {
-            section = index;
-        }
-    }
-
-    if (section == IndexNone) {
-        return Result<ConfigSubscriptionId>::Failure(ErrorCode::NotFound);
-    }
-
-    Subscription subscription;
-    subscription.id = state->nextSubscription++;
-    subscription.section = section;
-    subscription.callback = callback;
-    subscription.context = context;
-    if (auto pushed = state->subscriptions.TryPushBack(subscription); !pushed) {
-        return Result<ConfigSubscriptionId>::Failure(pushed.Error());
-    }
-
-    return Result<ConfigSubscriptionId>::Success(ConfigSubscriptionId{subscription.id});
-}
-
-Result<void> ConfigContext::Unsubscribe(ConfigSubscriptionId id) noexcept {
-    ConfigState* state = state_.Get();
-    if (state == nullptr) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
-    }
-
-    if (platform::CurrentThreadId() != state->owner) {
-        return Result<void>::Failure(ErrorCode::WrongThread);
-    }
-
-    for (usize index = 0; index < state->subscriptions.Size(); ++index) {
-        Subscription& subscription = state->subscriptions[index];
-        if (subscription.id != id.value || subscription.callback == nullptr) {
-            continue;
-        }
-
-        // 콜백 도중이면 자리를 지우지 않고 표시만 한다(Sync가 끝에 정리한다).
-        if (state->syncing) {
-            subscription.callback = nullptr;
-            return Result<void>::Success();
-        }
-
-        return state->subscriptions.TryRemoveAt(index);
-    }
-
-    return Result<void>::Failure(ErrorCode::NotFound);
 }
 
 Result<void> ConfigContext::CompleteStartup() noexcept {

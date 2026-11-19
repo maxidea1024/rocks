@@ -3,6 +3,7 @@
 #include <Config/ConfigTypes.h>
 #include <Core/Containers/Array.h>
 #include <Core/Memory/SharedPtr.h>
+#include <Core/Memory/UniquePtr.h>
 #include <Core/Text/Name.h>
 #include <Core/Text/String.h>
 #include <Object/RuntimeTypeOps.h>
@@ -14,8 +15,8 @@
 //   String·Name은 불변 텍스트 블록 참조)과 세대다. Sync는 바뀐 칸이 있는 조각만 새로 만들고
 //   나머지 조각은 이전 snapshot과 참조 계수로 공유한다(copy-on-write). `CVar::Get()`이 이 칸을
 //   읽는다(잠금·할당·문자열 연산 없음).
-// - 이름 블록: 이름(byte 순서)으로 찾는 값이다. CF2 독립 콘솔 설정과 설정 struct 필드 중
-//   RenderRead인 것이다(설정 struct의 렌더 읽기 블록 — Config 5.3절). CVar 핸들은 여기에 없다.
+// - 이름 블록: 이름(byte 순서)으로 찾는 값이다. 설정 struct 필드 중 RenderRead인 것이다(설정
+//   struct의 렌더 읽기 블록 — Config 5.3절). CVar(핸들·동적 변수)는 여기에 없다.
 //
 // UE 대응: 렌더 스레드 사본(IConsoleManager.h의 shadow 값). Rocks는 주소에 쓰는 명령 대신 불변
 // snapshot을 프레임마다 참조로 넘긴다.
@@ -53,6 +54,9 @@ struct CVarSlot {
     uint64 bits = 0;
     // 유효값의 세대다(처음 값이 1, 바뀔 때마다 1 늘어난다). 0이면 이 snapshot에 칸이 없다.
     uint32 generation = 0;
+    // 값 종류다(Bool·Int32·Int64·Float32·Float64·Utf8String·Name·Enum — 동적 변수 읽기가
+    // 확인한다, cvar::ReadDynamic). 칸이 없으면 Opaque다.
+    ValueKind kind = ValueKind::Opaque;
 };
 
 // CVar 값 조각이다(번호 [k·ChunkSlotCount, (k+1)·ChunkSlotCount)의 칸).
@@ -61,6 +65,39 @@ struct CVarChunk {
     // String·Name 칸의 값 블록이다(그 밖의 칸은 비어 있다).
     SharedPtr<const CVarText> texts[ChunkSlotCount];
 };
+
+namespace detail {
+
+// 콘솔 이름 색인의 항목 하나다(CVar 10.1·15절 — 다른 스레드의 콘솔 입력이 이름을 해석하고 권한을
+// 본다). 만든 뒤 바뀌지 않는다.
+struct ConsoleNameEntry {
+    explicit ConsoleNameEntry(Allocator& allocator) noexcept : name(allocator) {
+    }
+
+    String name;
+    // 콘솔 명령이다(아니면 콘솔 설정).
+    bool command = false;
+    // 콘솔 설정 플래그(ConsoleSettingFlags)다.
+    uint32 consoleFlags = 0;
+    // CVar 핸들의 성질 비트(cvar::VarFlags — 핸들이 아니면 0)다.
+    uint32 varFlags = 0;
+    // 설정 struct 필드의 콘솔 이름이다.
+    bool field = false;
+};
+
+// 콘솔 이름 색인이다(등록 뒤 다음 Sync가 게시하는 snapshot부터 새 색인 — 그 전 snapshot은 앞
+// 색인을 공유한다).
+struct ConsoleNameIndex {
+    explicit ConsoleNameIndex(Allocator& allocator) noexcept : entries(allocator) {
+    }
+
+    // 이름이 같은 항목이다(없으면 null).
+    const ConsoleNameEntry* Find(StringView name) const noexcept;
+
+    Array<UniquePtr<ConsoleNameEntry>> entries;
+};
+
+} // namespace detail
 
 class ConfigSnapshot {
 public:
@@ -109,6 +146,13 @@ public:
         return *chunks_.Data()[index / ChunkSlotCount]->texts[index % ChunkSlotCount];
     }
 
+    // ---- 콘솔 이름 색인(10.1절) ----
+
+    // 이 snapshot과 함께 게시된 콘솔 이름 색인이다(다른 스레드의 콘솔 입력이 쓴다 — 없으면 null).
+    const detail::ConsoleNameIndex* ConsoleNames() const noexcept {
+        return names_.Get();
+    }
+
     // ---- 부팅 블록(9절) ----
 
     // 문맥이 봉인(CompleteStartup)된 뒤에 만든 snapshot인지다. 봉인 뒤 snapshot의 부팅 값은 모두
@@ -148,6 +192,8 @@ private:
     // 부팅 블록(봉인 때 굳힌 BootCVar 값 — 봉인 뒤 snapshot이 모두 공유한다).
     Array<SharedPtr<const CVarChunk>> bootChunks_;
     bool sealed_ = false;
+    // 콘솔 이름 색인(등록이 바뀌지 않으면 앞 snapshot과 공유한다).
+    SharedPtr<const detail::ConsoleNameIndex> names_;
     // 이 snapshot을 만든 문맥의 쓰기 통로다(묶음 계수·`CVar::Set`의 대상 — 문맥보다 오래 살 수
     // 있다).
     SharedPtr<detail::WriteChannel> channel_;

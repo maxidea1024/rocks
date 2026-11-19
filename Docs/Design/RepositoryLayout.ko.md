@@ -151,6 +151,9 @@ public sealed class Core : CoreModuleRules
 
 ## 후속
 
+- 타깃 종류 확장(Editor·Client·Server와 `ROCKS_WITH_EDITOR` 계열 매크로), 모듈 의존의 Public·Private 구분, 프로젝트 플러그인 참조의
+  활성 조건(타깃·플랫폼·구성), 모듈 type ServerOnly·ClientOnly: [빌드 타깃 설계](BuildTargets.ko.md). 구현하면 위 기술자 표·모듈
+  type 표·게임 빌드 연동 절을 함께 고친다.
 - 규칙 이름을 `Configure` 전에 알 수 있게 해(UBT처럼 파일·클래스 이름 규약) 빠질 모듈의 규칙을 실행하지 않는다.
 - 엔진 저장소 빌드(`Foundation`·`Engine` 타깃)의 `Engine/Plugins` 연동: 지금은 엔진 플러그인이 없어 게임 빌드만
   기술자를 적용한다. 설치 SDK는 엔진 플러그인을 내보내지 않는다.

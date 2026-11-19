@@ -346,6 +346,11 @@ TEST(AssetPackage_WriterGraphRejections) {
                                     package.Value().Handle(), CookedOptions(), sink, &failure);
         CHECK(!written);
         CHECK(failure.code == AssetDiagnosticCode::UnpackagedReference);
+        // 진단 out 인자 없이도 같은 오류다.
+        MemoryPackageSink bare(env.allocator);
+        CHECK(WritePackage(env.allocator, free, free.OwnerAccess(), package.Value().Handle(),
+                           CookedOptions(), bare)
+                  .Error() == written.Error());
         CHECK(failure.section == static_cast<uint32>(PackageSectionKind::Objects));
     }
 
@@ -389,34 +394,44 @@ TEST(AssetPackage_WriterSinkFailures) {
     TestBulkSource bulk;
     Pointer<TestAsset>(registry, single.asset)->pixels = bulk.Add(1, data.View());
     Pointer<TestPart>(registry, part)->data = bulk.Add(2, data.View().Slice(0, 100));
-    PackageWriteOptions options = EditorOptions();
-    options.bulkSource = &bulk;
-    uint64 failures = 0;
-    for (uint64 attempt = 1;; ++attempt) {
-        FailingSink sink(env.allocator);
-        sink.failAppend = attempt;
-        auto written = WritePackage(env.allocator, registry, registry.OwnerAccess(),
-                                    single.package.Handle(), options, sink);
-        if (sink.appends < attempt) {
-            REQUIRE(written);
-            CHECK(ReadPackage(env.allocator, sink.inner.Bytes(), [] {
+    // 설정 셋: 에디터(bulk 정렬 64), 쿠킹 + Zstd(bulk 정렬 4096 — Bulk 앞 패딩이 0이 아니다),
+    // 에디터 + ImportRecord·Tags 섹션.
+    RecordBuilder record(env.allocator, Guid{0x61, 0x62}, 1);
+    const uint8 value[4] = {1, 2, 3, 4};
+    REQUIRE(record.AddField(Guid{0x63, 0x64}, WireType::U32, value));
+    auto built = record.Build();
+    REQUIRE(built);
+    PackageWriteOptions configurations[3] = {EditorOptions(), CookedOptions(), EditorOptions()};
+    configurations[1].bulkCodec = BulkCodec::Zstd;
+    configurations[2].importRecord = built.Value().View();
+    configurations[2].tags = built.Value().View();
+    for (PackageWriteOptions& options : configurations) {
+        options.bulkSource = &bulk;
+        uint64 failures = 0;
+        for (uint64 attempt = 1;; ++attempt) {
+            FailingSink sink(env.allocator);
+            sink.failAppend = attempt;
+            auto written = WritePackage(env.allocator, registry, registry.OwnerAccess(),
+                                        single.package.Handle(), options, sink);
+            if (sink.appends < attempt) {
+                REQUIRE(written);
                 PackageReadOptions read;
-                read.expectedKind = PackageKind::Editor;
-                return read;
-            }()));
-            break;
+                read.expectedKind = options.kind;
+                CHECK(ReadPackage(env.allocator, sink.inner.Bytes(), read));
+                break;
+            }
+
+            CHECK(!written && written.Error() == ErrorCode::Busy);
+            ++failures;
         }
 
-        CHECK(!written && written.Error() == ErrorCode::Busy);
-        ++failures;
+        CHECK(failures > 5);
+        FailingSink sink(env.allocator);
+        sink.failWriteAt = true;
+        CHECK(WritePackage(env.allocator, registry, registry.OwnerAccess(), single.package.Handle(),
+                           options, sink)
+                  .Error() == ErrorCode::Busy);
     }
-
-    CHECK(failures > 5);
-    FailingSink sink(env.allocator);
-    sink.failWriteAt = true;
-    CHECK(WritePackage(env.allocator, registry, registry.OwnerAccess(), single.package.Handle(),
-                       options, sink)
-              .Error() == ErrorCode::Busy);
 }
 
 // 할당 실패 주입: 쓰기·읽기·Prepare·bulk 해제의 n번째 할당을 실패시키면 OutOfMemory(진단 코드
@@ -594,4 +609,293 @@ TEST(AssetPackage_RegistryAllocationFailures) {
     }
 
     CHECK(failures > 0);
+}
+
+namespace {
+
+// 큰 할당 실패 시나리오다: A(1400) ↔ B(1401) 하드 순환(한 묶음), A가 B의 깊은 하위 객체
+// Gear.Tooth.Tix + U+0300(outer import 사슬 — 결합 문자 이름)·B.Head·자기 Part를 배열로, B 대표
+// 에셋을 Hard로, 없는 에셋을 Soft로 가리키고 bulk 둘·커스텀 버전 셋·타입 여럿(TestAsset·TestPart)을
+// 가진다. D(1404)는 공개된 A·B를 resolver로 찾는 패키지다(A 대표 에셋·B.Gear.Tooth).
+struct Large {
+    explicit Large(Allocator& allocator) noexcept : pixels(allocator), data(allocator) {
+    }
+
+    RootRef<Package> a;
+    RootRef<Package> b;
+    RootRef<Package> d;
+    Array<uint8> pixels;
+    Array<uint8> data;
+    TestBulkSource bulk;
+};
+
+bool MakeLarge(ObjectRegistry& registry, Large& large) noexcept {
+    const ObjectAccessContext access = registry.OwnerAccess();
+    auto a = NewPackage(registry, access, FixedId(1400), PackageKind::Editor);
+    auto b = NewPackage(registry, access, FixedId(1401), PackageKind::Editor);
+    auto d = NewPackage(registry, access, FixedId(1404), PackageKind::Editor);
+    if (!a || !b || !d) {
+        return false;
+    }
+
+    large.a = Move(a.Value());
+    large.b = Move(b.Value());
+    large.d = Move(d.Value());
+    const ObjectHandle aAsset = Make<TestAsset>(registry, TestAssetType(), large.a.Handle(), "");
+    const ObjectHandle bAsset = Make<TestAsset>(registry, TestAssetType(), large.b.Handle(), "");
+    const ObjectHandle dAsset = Make<TestAsset>(registry, TestAssetType(), large.d.Handle(), "");
+    const ObjectHandle part = Make<TestPart>(registry, TestPartType(), aAsset, "Part");
+    const ObjectHandle gear = Make<TestPart>(registry, TestPartType(), bAsset, "Gear");
+    const ObjectHandle tooth = Make<TestPart>(registry, TestPartType(), gear, "Tooth");
+    // 결합 문자 이름(x + U+0300 — 합성형이 없어 NFC다)은 이름 검사의 NFC 판정이 scratch를 쓴다.
+    const ObjectHandle tip = Make<TestPart>(registry, TestPartType(), tooth, "Tix\xCC\x80");
+    const ObjectHandle head = Make<TestPart>(registry, TestPartType(), bAsset, "Head");
+    if (aAsset.IsNull() || bAsset.IsNull() || dAsset.IsNull() || part.IsNull() || tip.IsNull() ||
+        head.IsNull()) {
+        return false;
+    }
+
+    FillCompressible(large.pixels, 2500, 5);
+    FillIncompressible(large.data, 300, 5);
+    TestAsset* asset = Pointer<TestAsset>(registry, aAsset);
+    asset->pixels = large.bulk.Add(1, large.pixels.View());
+    Pointer<TestPart>(registry, part)->data = large.bulk.Add(2, large.data.View());
+    TestAsset* other = Pointer<TestAsset>(registry, bAsset);
+    TestAsset* last = Pointer<TestAsset>(registry, dAsset);
+    return asset->soft.TryAssign(FixedId(1402), "Sub").IsOk() &&
+           registry.SetReference(access, aAsset, asset->hard, bAsset).IsOk() &&
+           registry.SetReference(access, bAsset, other->hard, aAsset).IsOk() &&
+           registry.SetReference(access, dAsset, last->hard, aAsset).IsOk() &&
+           WithBorrow<TestAsset>(
+               registry, aAsset,
+               [&](TestAsset& owner) {
+                   return registry.AddReference(access, aAsset, owner.hardList, tip).IsOk() &&
+                          registry.AddReference(access, aAsset, owner.hardList, head).IsOk() &&
+                          registry.AddReference(access, aAsset, owner.hardList, part).IsOk();
+               }) &&
+           WithBorrow<TestAsset>(registry, dAsset, [&](TestAsset& owner) {
+               return registry.AddReference(access, dAsset, owner.hardList, tooth).IsOk();
+           });
+}
+
+// registry allocator가 failing인 target에 files를 한 묶음으로 공개하는 n번째 할당 실패 sweep이다.
+// resolver가 있으면 묶음 밖 import를 그것으로 찾는다. 실패는 OutOfMemory·진단 None이고 매번 공개한
+// 것을 거둔 뒤 객체가 baseline으로 돌아온다. 실패 횟수를 돌려준다.
+uint32 RegistrySweep(AssetEnv& env, test::NFailAllocator& failing, ObjectRegistry& target,
+                     Span<const Array<uint8>* const> files, const PackageLoadOptions& load,
+                     PackageImportResolver* resolver) noexcept {
+    const uint32 baseline = target.Stats().liveObjects;
+    uint32 failures = 0;
+    for (uint64 attempt = 1;; ++attempt) {
+        failing.DisableFailure();
+        PackageLoadState first(env.allocator, target, env.types, target.OwnerAccess(), load);
+        PackageLoadState second(env.allocator, target, env.types, target.OwnerAccess(), load);
+        PackageLoadState* states[2] = {&first, &second};
+        for (usize index = 0; index < files.Size(); ++index) {
+            if (!states[index]->Prepare(Copy(env.allocator, files[index]->View()))) {
+                test::RecordFailure("prepare failed without failure injection", __FILE__, __LINE__);
+                return failures;
+            }
+        }
+
+        failing.FailOnAttempt(attempt);
+        ObjectHandle handles[2];
+        RootRef<Object> roots[2];
+        AssetDiagnostic failure;
+        Result<void> result = Result<void>::Success();
+        {
+            ConstructionContext transaction(target, target.OwnerAccess());
+            result = InstantiatePackages(
+                transaction, Span<PackageLoadState* const>(states, files.Size()), resolver,
+                Span<ObjectHandle>(handles, files.Size()), &failure);
+            if (result) {
+                result = transaction.Commit(Span<const ObjectHandle>(handles, files.Size()),
+                                            Span<RootRef<Object>>(roots, files.Size()));
+            }
+        }
+
+        const bool triggered = failing.Attempts() >= attempt;
+        failing.DisableFailure();
+        if (!result) {
+            CHECK(result.Error() == ErrorCode::OutOfMemory);
+            CHECK(failure.code == AssetDiagnosticCode::None || failure.error == ErrorCode::None);
+            ++failures;
+        }
+
+        for (usize index = 0; index < files.Size(); ++index) {
+            if (roots[index].IsValid()) {
+                CHECK(target.Discard(target.OwnerAccess(), handles[index]));
+                roots[index].Reset();
+            }
+        }
+
+        CHECK(target.Collect(target.OwnerAccess()));
+        CHECK(target.Stats().liveObjects == baseline);
+        if (!triggered) {
+            CHECK(result.IsOk());
+            break;
+        }
+    }
+
+    return failures;
+}
+
+} // namespace
+
+// 할당 실패 주입(큰 시나리오 — AS 5.7절 12): 쿠킹·에디터마다 A·B 쓰기, A 읽기, A Prepare, 두 상태를
+// 한 묶음으로 올리는 InstantiatePackages(상태 allocator)의 n번째 할당을 실패시키면 OutOfMemory·진단
+// None이고 객체가 남지 않는다. 대상 Registry allocator를 실패시키는 묶음 로드(A·B)와 resolver
+// 로드(공개된 A·B를 찾는 D)도 같다.
+TEST(AssetPackage_AllocationFailuresLargeScenario) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    ObjectRegistry& registry = *env.source;
+    const ObjectAccessContext access = registry.OwnerAccess();
+    Large large(env.allocator);
+    REQUIRE(MakeLarge(registry, large));
+    const PackageCustomVersion customs[] = {{Guid{1, 1}, 1}, {Guid{1, 2}, 3}, {Guid{4, 0}, 2}};
+    const PackageDependencyEntry extra[] = {
+        {FixedId(1403), PackageDependencyKind::Build, TypeId{}, false}};
+    const PackageKind kindValues[] = {PackageKind::Cooked, PackageKind::Editor};
+    test::NFailAllocator failing(env.allocator);
+    ObjectRegistry& target = *env.target;
+    for (PackageKind kind : kindValues) {
+        PackageWriteOptions options =
+            kind == PackageKind::Cooked ? CookedOptions() : EditorOptions();
+        options.bulkSource = &large.bulk;
+        options.bulkCodec = BulkCodec::Zstd;
+        options.customVersions = customs;
+        if (kind == PackageKind::Editor) {
+            options.extraDependencies = extra;
+        }
+
+        Array<uint8> files[2] = {Array<uint8>(env.allocator), Array<uint8>(env.allocator)};
+        const ObjectHandle packages[2] = {large.a.Handle(), large.b.Handle()};
+        for (usize which = 0; which < 2; ++which) {
+            uint32 failures = 0;
+            for (uint64 attempt = 1;; ++attempt) {
+                failing.FailOnAttempt(attempt);
+                MemoryPackageSink sink(env.allocator);
+                AssetDiagnostic failure;
+                auto result = WritePackage(failing, registry, access, packages[which], options,
+                                           sink, &failure);
+                if (failing.Attempts() < attempt) {
+                    REQUIRE(result);
+                    files[which] = sink.Take();
+                    break;
+                }
+
+                CHECK(!result && result.Error() == ErrorCode::OutOfMemory);
+                CHECK(failure.code == AssetDiagnosticCode::None);
+                ++failures;
+            }
+
+            CHECK(failures > 20);
+        }
+
+        PackageReadOptions read;
+        read.expectedKind = kind;
+        read.engineVersion = TestEngineVersion;
+        read.types = &env.types;
+        read.customVersions = customs;
+        uint32 readFailures = 0;
+        for (uint64 attempt = 1;; ++attempt) {
+            failing.FailOnAttempt(attempt);
+            AssetDiagnostic failure;
+            auto result = ReadPackage(failing, files[0].View(), read, &failure);
+            if (failing.Attempts() < attempt) {
+                REQUIRE(result);
+                CHECK(result.Value().imports.Size() == 5);
+                break;
+            }
+
+            CHECK(!result && result.Error() == ErrorCode::OutOfMemory);
+            CHECK(failure.code == AssetDiagnosticCode::None);
+            ++readFailures;
+        }
+
+        CHECK(readFailures > 10);
+        PackageLoadOptions load = LoadOptions(kind);
+        load.read.customVersions = customs;
+        uint32 prepareFailures = 0;
+        for (uint64 attempt = 1;; ++attempt) {
+            failing.FailOnAttempt(attempt);
+            PackageLoadState state(failing, target, env.types, target.OwnerAccess(), load);
+            AssetDiagnostic failure;
+            auto result = state.Prepare(Copy(env.allocator, files[0].View()), &failure);
+            if (failing.Attempts() < attempt) {
+                REQUIRE(result);
+                break;
+            }
+
+            CHECK(!result && result.Error() == ErrorCode::OutOfMemory);
+            CHECK(failure.code == AssetDiagnosticCode::None);
+            ++prepareFailures;
+        }
+
+        CHECK(prepareFailures > 10);
+        // InstantiatePackages(상태 allocator — import 대상 배열 등): 묶음 A·B.
+        uint32 instantiateFailures = 0;
+        for (uint64 attempt = 1;; ++attempt) {
+            failing.DisableFailure();
+            PackageLoadState first(failing, target, env.types, target.OwnerAccess(), load);
+            PackageLoadState second(failing, target, env.types, target.OwnerAccess(), load);
+            REQUIRE(first.Prepare(Copy(env.allocator, files[0].View())));
+            REQUIRE(second.Prepare(Copy(env.allocator, files[1].View())));
+            failing.FailOnAttempt(attempt);
+            ConstructionContext transaction(target, target.OwnerAccess());
+            PackageLoadState* states[2] = {&first, &second};
+            ObjectHandle handles[2];
+            AssetDiagnostic failure;
+            auto result = InstantiatePackages(transaction, states, nullptr, handles, &failure);
+            const bool triggered = failing.Attempts() >= attempt;
+            failing.DisableFailure();
+            transaction.Rollback();
+            CHECK(target.Stats().liveObjects == 0);
+            if (!triggered) {
+                REQUIRE(result);
+                break;
+            }
+
+            CHECK(!result && result.Error() == ErrorCode::OutOfMemory);
+            CHECK(failure.code == AssetDiagnosticCode::None);
+            ++instantiateFailures;
+        }
+
+        CHECK(instantiateFailures > 0);
+    }
+
+    // 대상 Registry allocator.
+    PackageWriteOptions cooked = CookedOptions();
+    cooked.bulkSource = &large.bulk;
+    const Array<uint8> a = Write(env.allocator, registry, large.a.Handle(), cooked);
+    const Array<uint8> b = Write(env.allocator, registry, large.b.Handle(), cooked);
+    const Array<uint8> d = Write(env.allocator, registry, large.d.Handle(), cooked);
+    REQUIRE(!a.IsEmpty() && !b.IsEmpty() && !d.IsEmpty());
+    RegistryOptions registryOptions;
+    registryOptions.names = &env.names;
+    registryOptions.policy.packageNativeType = NativeTypeKey<Package>();
+    registryOptions.policy.rejectWorldOnly = true;
+    auto made = UniquePtr<ObjectRegistry>::TryMake(env.allocator, failing, env.types,
+                                                   ContextId{0x4153534554ull, 12}, registryOptions);
+    REQUIRE(made);
+    ObjectRegistry& failingTarget = *made.Value();
+    const PackageLoadOptions load = LoadOptions(PackageKind::Cooked);
+    const Array<uint8>* pair[2] = {&a, &b};
+    CHECK(RegistrySweep(env, failing, failingTarget, pair, load, nullptr) > 0);
+    // A·B를 실패 없이 공개한 뒤 D를 resolver로 로드한다.
+    failing.DisableFailure();
+    Array<uint8> published[2] = {Copy(env.allocator, a.View()), Copy(env.allocator, b.View())};
+    RootRef<Object> roots[2];
+    ObjectHandle handles[2];
+    REQUIRE(LoadAll(env, failingTarget, published, PackageKind::Cooked, nullptr, roots, handles));
+    TestResolver resolver;
+    resolver.Add(FixedId(1400), handles[0]);
+    resolver.Add(FixedId(1401), handles[1]);
+    const Array<uint8>* last[1] = {&d};
+    CHECK(RegistrySweep(env, failing, failingTarget, last, load, &resolver) > 0);
+    for (usize index = 0; index < 2; ++index) {
+        CHECK(failingTarget.Discard(failingTarget.OwnerAccess(), handles[index]));
+        roots[index].Reset();
+    }
 }

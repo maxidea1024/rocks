@@ -5,6 +5,7 @@
 #include <AssetRuntime/PackageWriter.h>
 #include <Compression/Compression.h>
 #include <Core/Algorithms.h>
+#include <Core/Containers/HashMap.h>
 #include <Core/Encoding/Crc32.h>
 #include <ObjectSerialization/ObjectGraph.h>
 #include <Serialization/RecordList.h>
@@ -45,7 +46,7 @@ public:
     WriterHooks(Allocator& allocator, ObjectRegistry& registry, const ObjectAccessContext& access,
                 ObjectHandle package, AssetId self) noexcept
         : registry_(registry), access_(access), package_(package), self_(self),
-          softUses_(allocator), bulk_(allocator) {
+          softUses_(allocator), bulk_(allocator), bulkIds_(allocator) {
     }
 
     Result<void> CollectSoftReference(const SoftReferenceInfo& info) noexcept override {
@@ -70,25 +71,26 @@ public:
 
         const BulkDataRef& value = *static_cast<const BulkDataRef*>(in);
         if (value.IsEmpty()) {
+            // 빈 값은 크기·해시도 0이어야 한다(로드가 손상으로 거부하는 값을 쓰지 않는다).
+            if (IsMalformedEmptyBulkRef(value.rawBytes, value.sha256)) {
+                return Result<const void*>::Failure(ErrorCode::InvalidArgument);
+            }
+
             return Result<const void*>::Success(in);
         }
 
         const bool editorOnly = (frame.effectiveFlags & EditorOnlyFlag) != 0;
         uint32 newId = 0;
-        for (usize index = 0; index < bulk_.Size(); ++index) {
-            if (bulk_[index].original.bulkId == value.bulkId) {
-                // 같은 옛 id는 같은 새 id다. 크기·해시가 다르면 메모리 상태가 모순이다.
-                if (!(bulk_[index].original == value)) {
-                    return Result<const void*>::Failure(ErrorCode::InvalidArgument);
-                }
-
-                bulk_[index].editorOnly = bulk_[index].editorOnly && editorOnly;
-                newId = static_cast<uint32>(index + 1);
-                break;
+        if (const uint32* known = bulkIds_.Find(value.bulkId)) {
+            // 같은 옛 id는 같은 새 id다. 크기·해시가 다르면 메모리 상태가 모순이다.
+            BulkDraft& draft = bulk_[*known - 1];
+            if (!(draft.original == value)) {
+                return Result<const void*>::Failure(ErrorCode::InvalidArgument);
             }
-        }
 
-        if (newId == 0) {
+            draft.editorOnly = draft.editorOnly && editorOnly;
+            newId = *known;
+        } else {
             if (bulk_.Size() >= NumericLimits<uint32>::Max() - 1) {
                 return Result<const void*>::Failure(ErrorCode::CapacityExceeded);
             }
@@ -98,6 +100,9 @@ public:
             }
 
             newId = static_cast<uint32>(bulk_.Size());
+            if (auto inserted = bulkIds_.Insert(value.bulkId, newId); !inserted) {
+                return Result<const void*>::Failure(inserted.Error());
+            }
         }
 
         substituted_ = value;
@@ -116,6 +121,7 @@ public:
             return Result<ExternalAdmission>::Failure(outermost.Error());
         }
 
+        // 자기 패키지 객체는 import 대상이 아니다.
         if (outermost.Value() == package_) {
             return Result<ExternalAdmission>::Success(ExternalAdmission::Reject);
         }
@@ -127,6 +133,12 @@ public:
 
         if (!type.Value().IsNativeA(NativeTypeKey<Package>())) {
             unpackaged_ = true;
+            return Result<ExternalAdmission>::Success(ExternalAdmission::Reject);
+        }
+
+        // 다른 Package 객체 자체도 import 대상이 아니다(대상은 대표 에셋과 그 아래 객체 — AS 5.7절
+        // 13).
+        if (outermost.Value() == info.target) {
             return Result<ExternalAdmission>::Success(ExternalAdmission::Reject);
         }
 
@@ -152,34 +164,31 @@ private:
     AssetId self_;
     Array<DependencyUse> softUses_;
     Array<BulkDraft> bulk_;
+    // 옛 bulkId → 새 bulkId다(참조 수에 비례하게 — 같은 옛 id를 찾느라 bulk_를 훑지 않는다).
+    HashMap<uint32, uint32> bulkIds_;
     BulkDataRef substituted_{};
     bool unpackaged_ = false;
 };
 
-// import 초안이다(대상 하나 또는 그 Outer 사슬의 한 단계).
+// import 초안이다(외부 참조 대상 하나 또는 그 Outer 사슬의 한 단계 — 객체마다 하나).
 struct ImportDraft {
-    explicit ImportDraft(Allocator& allocator) noexcept : path(allocator), name(allocator) {
+    explicit ImportDraft(Allocator& allocator) noexcept : name(allocator) {
     }
 
     AssetId asset{};
-    String path;
     String name;
     TypeId type{};
+    // Outer 사슬 위 초안 번호(1부터)다. 대표 에셋 바로 아래 객체와 대표 에셋 자신은 0이다(outer
+    // import 0 — AS 5.2절).
+    uint32 parent = 0;
     // 이 항목이 외부 참조 slot이면 그 번호(1부터), Outer 사슬로만 생긴 항목이면 0이다.
     uint32 slot = 0;
 };
 
-bool DraftLess(const ImportDraft& left, const ImportDraft& right) noexcept {
-    if (left.asset.value != right.asset.value) {
-        return GuidLess(left.asset.value, right.asset.value);
-    }
-
-    return BytesLess(left.path.View(), right.path.View());
-}
-
-// 에셋마다 대표 에셋 타입이다(Hard 의존 expectedType).
-struct RepresentativeType {
+// 외부 참조 대상이 속한 패키지다(대표 에셋과 그 타입 — Hard 의존 expectedType).
+struct ImportPackage {
     AssetId asset{};
+    ObjectHandle representative{};
     TypeId type{};
 };
 
@@ -199,133 +208,240 @@ Result<AssetId> PackageIdOf(ObjectRegistry& registry, const ObjectAccessContext&
     return Result<AssetId>::Success(pointer.Value()->Id());
 }
 
-// 외부 참조 대상 하나와 그 Outer 사슬(대표 에셋 아래)을 import 초안으로 더한다.
-Result<void> AddImportDrafts(Allocator& allocator, ObjectRegistry& registry,
-                             const ObjectAccessContext& access, const GraphExternal& external,
-                             uint32 slot, Array<ImportDraft>& drafts,
-                             Array<RepresentativeType>& representatives) noexcept {
-    auto outermost = registry.GetOutermost(access, external.target);
-    if (!outermost) {
-        return Result<void>::Failure(outermost.Error());
+// import 초안 모음이다. 객체마다 초안 하나이고 Outer 사슬은 이미 있는 초안에서 멈추며 패키지
+// 조회는 패키지마다 한 번이다 — 외부 참조 대상과 그 Outer 수에 비례한다(AS 5.7절 13).
+class ImportBuilder {
+public:
+    ImportBuilder(Allocator& allocator, ObjectRegistry& registry,
+                  const ObjectAccessContext& access) noexcept
+        : allocator_(allocator), registry_(registry), access_(access), drafts_(allocator),
+          byObject_(allocator), packages_(allocator), types_(allocator), chain_(allocator) {
     }
 
-    auto asset = PackageIdOf(registry, access, outermost.Value());
-    if (!asset) {
-        return Result<void>::Failure(asset.Error());
-    }
-
-    if (asset.Value().IsNull()) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
-    }
-
-    bool known = false;
-    for (const RepresentativeType& entry : representatives) {
-        known = known || entry.asset == asset.Value();
-    }
-
-    if (!known) {
-        auto representative = registry.FindObject(access, outermost.Value(), StringView());
-        if (!representative) {
-            return Result<void>::Failure(representative.Error());
+    // 외부 참조 slot(1부터)의 대상과 그 Outer 사슬(대표 에셋 아래)을 더한다.
+    //
+    // 오류: 대상 패키지가 null id면 InvalidArgument, 대표 에셋이 없으면 NotFound, Registry 조회의
+    // 오류와 할당 실패는 그대로다.
+    Result<void> Add(const GraphExternal& external, uint32 slot) noexcept {
+        auto outermost = registry_.GetOutermost(access_, external.target);
+        if (!outermost) {
+            return Result<void>::Failure(outermost.Error());
         }
 
-        auto type = registry.AcquireType(access, representative.Value());
-        if (!type) {
-            return Result<void>::Failure(type.Error());
+        auto package = PackageOf(outermost.Value());
+        if (!package) {
+            return Result<void>::Failure(package.Error());
         }
 
-        if (auto pushed =
-                representatives.TryPushBack(RepresentativeType{asset.Value(), type.Value().Id()});
-            !pushed) {
-            return pushed;
-        }
-    }
-
-    // 대상부터 대표 에셋 바로 아래까지(대상이 대표 에셋이면 대상만) 사슬을 걷는다.
-    for (ObjectHandle cursor = external.target;;) {
-        auto outer = registry.GetOuter(access, cursor);
-        if (!outer) {
-            return Result<void>::Failure(outer.Error());
-        }
-
-        const bool isTarget = cursor == external.target;
-        const bool isRepresentative = outer.Value() == outermost.Value();
-        if (isTarget || !isRepresentative) {
-            auto pushed = drafts.TryEmplaceBack(allocator);
-            if (!pushed) {
-                return Result<void>::Failure(pushed.Error());
+        // 대상부터 위로 걷되 이미 초안이 있는 객체나 대표 에셋에서 멈춘다.
+        chain_.Clear();
+        uint32 attach = 0;
+        for (ObjectHandle cursor = external.target;;) {
+            if (const uint32* known = byObject_.Find(cursor)) {
+                attach = *known;
+                break;
             }
 
-            ImportDraft& draft = *pushed.Value();
-            draft.asset = asset.Value();
-            draft.slot = isTarget ? slot : 0;
-            if (auto path = registry.GetObjectPath(access, cursor, draft.path); !path) {
-                return path;
+            if (auto pushed = chain_.TryPushBack(cursor); !pushed) {
+                return pushed;
             }
 
-            if (auto name = registry.GetName(access, cursor, draft.name); !name) {
+            if (cursor == package.Value().representative) {
+                break;
+            }
+
+            auto outer = registry_.GetOuter(access_, cursor);
+            if (!outer) {
+                return Result<void>::Failure(outer.Error());
+            }
+
+            if (outer.Value() == package.Value().representative) {
+                break;
+            }
+
+            cursor = outer.Value();
+        }
+
+        // 위에서부터 초안을 만든다(부모 번호가 먼저 정해진다).
+        for (usize position = chain_.Size(); position > 0; --position) {
+            const ObjectHandle object = chain_[position - 1];
+            auto added = drafts_.TryEmplaceBack(allocator_);
+            if (!added) {
+                return Result<void>::Failure(added.Error());
+            }
+
+            ImportDraft& draft = *added.Value();
+            draft.asset = package.Value().asset;
+            draft.parent = attach;
+            if (auto name = registry_.GetName(access_, object, draft.name); !name) {
                 return name;
             }
 
-            if (isTarget) {
+            if (object == external.target) {
                 draft.type = external.type;
             } else {
-                auto type = registry.AcquireType(access, cursor);
+                auto type = registry_.AcquireType(access_, object);
                 if (!type) {
                     return Result<void>::Failure(type.Error());
                 }
 
                 draft.type = type.Value().Id();
             }
+
+            attach = static_cast<uint32>(drafts_.Size());
+            if (auto inserted = byObject_.Insert(object, attach); !inserted) {
+                return Result<void>::Failure(inserted.Error());
+            }
         }
 
-        if (isRepresentative) {
-            break;
-        }
-
-        cursor = outer.Value();
+        drafts_[attach - 1].slot = slot;
+        return Result<void>::Success();
     }
 
-    return Result<void>::Success();
-}
+    Array<ImportDraft>& Drafts() noexcept {
+        return drafts_;
+    }
 
-// 초안을 (assetId, 경로) 순으로 정렬하고 같은 항목을 합친다.
-void MergeDrafts(Array<ImportDraft>& drafts) noexcept {
-    drafts.Sort(DraftLess);
-    usize unique = 0;
-    for (usize index = 0; index < drafts.Size(); ++index) {
-        if (unique > 0 && drafts[unique - 1].asset == drafts[index].asset &&
-            drafts[unique - 1].path.View() == drafts[index].path.View()) {
-            if (drafts[index].slot != 0) {
-                drafts[unique - 1].slot = drafts[index].slot;
+    // asset의 대표 에셋 타입이다(Add가 본 패키지만 — 없으면 0).
+    TypeId RepresentativeType(AssetId asset) const noexcept {
+        const TypeId* type = types_.Find(asset.value);
+        return type != nullptr ? *type : TypeId{};
+    }
+
+    // ObjectImports 순서(AS 5.2절 — assetId 오름차순, 같은 에셋 안은 깊이 우선이고 같은 outer
+    // 아래는 이름 byte 오름차순)의 초안 번호(0부터)를 order에 채운다. 자식 목록은 (asset, parent,
+    // 이름) 정렬 한 번으로 만든다.
+    Result<void> Order(Array<uint32>& order) noexcept {
+        const usize count = drafts_.Size();
+        Array<uint32> sorted(allocator_);
+        Array<uint32> begin(allocator_);
+        Array<uint32> end(allocator_);
+        struct Frame {
+            uint32 cursor = 0;
+            uint32 end = 0;
+        };
+
+        Array<Frame> stack(allocator_);
+        if (auto resized = sorted.TryResize(count); !resized) {
+            return resized;
+        }
+
+        if (auto resized = begin.TryResize(count + 1); !resized) {
+            return resized;
+        }
+
+        if (auto resized = end.TryResize(count + 1); !resized) {
+            return resized;
+        }
+
+        if (auto reserved = order.TryReserve(count); !reserved) {
+            return reserved;
+        }
+
+        if (auto reserved = stack.TryReserve(count); !reserved) {
+            return reserved;
+        }
+
+        for (usize index = 0; index < count; ++index) {
+            sorted[index] = static_cast<uint32>(index);
+        }
+
+        const Array<ImportDraft>& drafts = drafts_;
+        sorted.Sort([&drafts](uint32 left, uint32 right) noexcept {
+            const ImportDraft& a = drafts[left];
+            const ImportDraft& b = drafts[right];
+            if (a.asset.value != b.asset.value) {
+                return GuidLess(a.asset.value, b.asset.value);
             }
 
-            continue;
+            if (a.parent != b.parent) {
+                return a.parent < b.parent;
+            }
+
+            return BytesLess(a.name.View(), b.name.View());
+        });
+        for (usize position = 0; position < count; ++position) {
+            const uint32 parent = drafts_[sorted[position]].parent;
+            if (parent != 0) {
+                if (end[parent] == 0) {
+                    begin[parent] = static_cast<uint32>(position);
+                }
+
+                end[parent] = static_cast<uint32>(position + 1);
+            }
         }
 
-        if (unique != index) {
-            drafts[unique] = Move(drafts[index]);
+        // 에셋마다 parent 0 항목이 정렬 순서에서 먼저 온다. 각 뿌리에서 깊이 우선으로 내보낸다.
+        for (usize position = 0; position < count; ++position) {
+            const uint32 root = sorted[position];
+            if (drafts_[root].parent != 0) {
+                continue;
+            }
+
+            (void)order.TryPushBack(root);
+            (void)stack.TryPushBack(Frame{begin[root + 1], end[root + 1]});
+            while (!stack.IsEmpty()) {
+                Frame& top = stack[stack.Size() - 1];
+                if (top.cursor >= top.end) {
+                    (void)stack.TryPopBack();
+                    continue;
+                }
+
+                const uint32 child = sorted[top.cursor++];
+                (void)order.TryPushBack(child);
+                (void)stack.TryPushBack(Frame{begin[child + 1], end[child + 1]});
+            }
         }
 
-        ++unique;
+        return Result<void>::Success();
     }
 
-    if (unique < drafts.Size()) {
-        (void)drafts.TryRemoveAt(unique, drafts.Size() - unique);
-    }
-}
-
-// 경로의 마지막 '.' 앞(Outer 경로)이다. '.'가 없으면 빈 view와 false다.
-bool ParentPath(StringView path, StringView& parent) noexcept {
-    for (usize index = path.ByteCount(); index > 0; --index) {
-        if (path.Data()[index - 1] == '.') {
-            parent = StringView(path.Data(), index - 1);
-            return true;
+private:
+    Result<ImportPackage> PackageOf(ObjectHandle outermost) noexcept {
+        if (const ImportPackage* known = packages_.Find(outermost)) {
+            return Result<ImportPackage>::Success(*known);
         }
+
+        auto asset = PackageIdOf(registry_, access_, outermost);
+        if (!asset) {
+            return Result<ImportPackage>::Failure(asset.Error());
+        }
+
+        if (asset.Value().IsNull()) {
+            return Result<ImportPackage>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        auto representative = registry_.FindObject(access_, outermost, StringView());
+        if (!representative) {
+            return Result<ImportPackage>::Failure(representative.Error());
+        }
+
+        auto type = registry_.AcquireType(access_, representative.Value());
+        if (!type) {
+            return Result<ImportPackage>::Failure(type.Error());
+        }
+
+        const ImportPackage package{asset.Value(), representative.Value(), type.Value().Id()};
+        if (auto inserted = packages_.Insert(outermost, package); !inserted) {
+            return Result<ImportPackage>::Failure(inserted.Error());
+        }
+
+        if (auto inserted = types_.InsertOrAssign(package.asset.value, package.type); !inserted) {
+            return Result<ImportPackage>::Failure(inserted.Error());
+        }
+
+        return Result<ImportPackage>::Success(package);
     }
 
-    return false;
-}
+    Allocator& allocator_;
+    ObjectRegistry& registry_;
+    ObjectAccessContext access_;
+    Array<ImportDraft> drafts_;
+    HashMap<ObjectHandle, uint32> byObject_;
+    HashMap<ObjectHandle, ImportPackage> packages_;
+    HashMap<Guid, TypeId> types_;
+    Array<ObjectHandle> chain_;
+};
 
 Result<void> BuildVersionList(Allocator& allocator, Span<const Guid> ids,
                               Span<const uint32> versions, RecordBuilder& parent,
@@ -542,9 +658,8 @@ Result<void> WriteBulk(Allocator& allocator, SectionWriter& out, const PackageWr
 
         PackageBulkEntry entry;
         entry.bulkId = static_cast<uint32>(position + 1);
-        entry.flags = draft.editorOnly && options.kind == PackageKind::Editor
-                          ? static_cast<uint32>(BulkEntryFlags::EditorOnly)
-                          : 0;
+        // 쿠킹은 EditorOnly 필드를 쓰지 않으므로(치환 hook이 불리지 않는다) EditorOnly 초안이 없다.
+        entry.flags = draft.editorOnly ? static_cast<uint32>(BulkEntryFlags::EditorOnly) : 0;
         entry.offset = out.Position() - start;
         entry.storedBytes = stored.Size();
         entry.rawBytes = raw.Value().Size();
@@ -657,6 +772,12 @@ Result<void> MergeDependencyUses(Allocator& scratch, Span<const DependencyUse> u
         return copied;
     }
 
+    // 항목마다 그 종류를 정한 쓰임이 적어도 하나 있으므로 항목 수는 쓰임 수 이하다. 미리 잡아
+    // 아래 추가는 할당하지 않는다.
+    if (auto reserved = out.TryReserve(out.Size() + sorted.Size()); !reserved) {
+        return reserved;
+    }
+
     sorted.Sort([](const DependencyUse& left, const DependencyUse& right) noexcept {
         return GuidLess(left.asset.value, right.asset.value);
     });
@@ -684,33 +805,24 @@ Result<void> MergeDependencyUses(Allocator& scratch, Span<const DependencyUse> u
         bool editorEntry = false;
         bool editorRequired = false;
         if (tally.hard) {
-            if (auto pushed = out.TryPushBack(PackageDependencyEntry{
-                    tally.asset, PackageDependencyKind::Hard, TypeId{}, tally.hardRequired});
-                !pushed) {
-                return pushed;
-            }
+            (void)out.TryPushBack(PackageDependencyEntry{tally.asset, PackageDependencyKind::Hard,
+                                                         TypeId{}, tally.hardRequired});
         } else if (tally.hardEditor) {
             editorEntry = true;
             editorRequired = tally.hardEditorRequired;
         }
 
         if (tally.soft) {
-            if (auto pushed = out.TryPushBack(PackageDependencyEntry{
-                    tally.asset, PackageDependencyKind::Soft, TypeId{}, tally.softRequired});
-                !pushed) {
-                return pushed;
-            }
+            (void)out.TryPushBack(PackageDependencyEntry{tally.asset, PackageDependencyKind::Soft,
+                                                         TypeId{}, tally.softRequired});
         } else if (tally.softEditor) {
             editorEntry = true;
             editorRequired = editorRequired || tally.softEditorRequired;
         }
 
         if (editorEntry) {
-            if (auto pushed = out.TryPushBack(PackageDependencyEntry{
-                    tally.asset, PackageDependencyKind::EditorOnly, TypeId{}, editorRequired});
-                !pushed) {
-                return pushed;
-            }
+            (void)out.TryPushBack(PackageDependencyEntry{
+                tally.asset, PackageDependencyKind::EditorOnly, TypeId{}, editorRequired});
         }
     }
 
@@ -819,17 +931,11 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
             }
 
             frame.exportIndex = static_cast<uint32>(exports.Size());
-            bool known = false;
-            for (const PackageTypeVersion& row : typeVersions) {
-                known = known || row.type == entry.type;
-            }
-
-            if (!known) {
-                if (auto pushed = typeVersions.TryPushBack(
-                        PackageTypeVersion{entry.type, type.Value().Schema().version});
-                    !pushed) {
-                    return Result<Out>::Failure(pushed.Error());
-                }
+            // 타입 표는 export마다 모은 뒤 정렬·중복 제거한다(export 수 × 타입 수로 찾지 않는다).
+            if (auto pushed = typeVersions.TryPushBack(
+                    PackageTypeVersion{entry.type, type.Value().Schema().version});
+                !pushed) {
+                return Result<Out>::Failure(pushed.Error());
             }
         }
 
@@ -847,6 +953,14 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
     typeVersions.Sort([](const PackageTypeVersion& left, const PackageTypeVersion& right) noexcept {
         return GuidLess(left.type, right.type);
     });
+    usize uniqueTypes = 0;
+    for (usize index = 0; index < typeVersions.Size(); ++index) {
+        if (uniqueTypes == 0 || !(typeVersions[uniqueTypes - 1].type == typeVersions[index].type)) {
+            typeVersions[uniqueTypes++] = typeVersions[index];
+        }
+    }
+
+    (void)typeVersions.TryResize(uniqueTypes);
 
     // 2. Objects(graph v2).
     WriterHooks hooks(allocator, registry, access, package, selfId);
@@ -867,54 +981,44 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
         return Result<Out>::Failure(saved.Error());
     }
 
-    // 3. ObjectImports.
+    // 3. ObjectImports(AS 5.2절 순서 — 외부 참조 대상과 그 Outer 사슬, 객체마다 한 항목).
     const Span<const GraphExternal> externals = saved.Value().Externals();
-    Array<ImportDraft> drafts(allocator);
-    Array<RepresentativeType> representatives(allocator);
+    ImportBuilder importBuilder(allocator, registry, access);
     for (usize slot = 0; slot < externals.Size(); ++slot) {
-        if (auto added = AddImportDrafts(allocator, registry, access, externals[slot],
-                                         static_cast<uint32>(slot + 1), drafts, representatives);
+        if (auto added = importBuilder.Add(externals[slot], static_cast<uint32>(slot + 1));
             !added) {
             return Result<Out>::Failure(added.Error());
         }
     }
 
-    MergeDrafts(drafts);
+    const Array<ImportDraft>& drafts = importBuilder.Drafts();
     if (drafts.Size() > PackageMaxObjectImports) {
         return Result<Out>::Failure(ErrorCode::CapacityExceeded);
     }
 
+    // order: import 번호 − 1 → 초안 번호, importOf: 초안 번호 → import 번호(1부터).
+    Array<uint32> order(allocator);
+    Array<uint32> importOf(allocator);
     Array<uint32> indexBySlot(allocator);
-    Array<uint32> outerIndex(allocator);
+    if (auto ordered = importBuilder.Order(order); !ordered) {
+        return Result<Out>::Failure(ordered.Error());
+    }
+
+    if (auto resized = importOf.TryResize(drafts.Size()); !resized) {
+        return Result<Out>::Failure(resized.Error());
+    }
+
     if (auto resized = indexBySlot.TryResize(externals.Size()); !resized) {
         return Result<Out>::Failure(resized.Error());
     }
 
-    if (auto resized = outerIndex.TryResize(drafts.Size()); !resized) {
-        return Result<Out>::Failure(resized.Error());
+    for (usize position = 0; position < order.Size(); ++position) {
+        importOf[order[position]] = static_cast<uint32>(position + 1);
     }
 
     for (usize index = 0; index < drafts.Size(); ++index) {
-        const ImportDraft& draft = drafts[index];
-        if (draft.slot != 0) {
-            indexBySlot[draft.slot - 1] = static_cast<uint32>(index + 1);
-        }
-
-        StringView parent;
-        outerIndex[index] = 0;
-        if (ParentPath(draft.path.View(), parent)) {
-            // 같은 에셋의 앞 항목 중 경로가 parent인 것(정렬되어 있으므로 반드시 앞에 있다).
-            for (usize back = index; back > 0; --back) {
-                if (drafts[back - 1].asset == draft.asset &&
-                    drafts[back - 1].path.View() == parent) {
-                    outerIndex[index] = static_cast<uint32>(back);
-                    break;
-                }
-            }
-
-            if (outerIndex[index] == 0) {
-                return Result<Out>::Failure(ErrorCode::InvalidArgument);
-            }
+        if (drafts[index].slot != 0) {
+            indexBySlot[drafts[index].slot - 1] = importOf[index];
         }
     }
 
@@ -926,28 +1030,20 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
 
     // 4. Dependencies.
     Array<DependencyUse> uses(allocator);
-    for (usize slot = 0; slot < externals.Size(); ++slot) {
-        const ImportDraft* draft = nullptr;
-        for (const ImportDraft& candidate : drafts) {
-            if (candidate.slot == slot + 1) {
-                draft = &candidate;
-                break;
-            }
-        }
+    if (auto reserved = uses.TryReserve(externals.Size() + hooks.SoftUses().Size()); !reserved) {
+        return Result<Out>::Failure(reserved.Error());
+    }
 
+    for (usize slot = 0; slot < externals.Size(); ++slot) {
         DependencyUse use;
-        use.asset = draft->asset;
+        use.asset = drafts[order[indexBySlot[slot] - 1]].asset;
         use.hard = true;
         use.editorOnly = (externals[slot].commonFlags & EditorOnlyFlag) != 0;
         use.required = externals[slot].required;
-        if (auto pushed = uses.TryPushBack(use); !pushed) {
-            return Result<Out>::Failure(pushed.Error());
-        }
+        (void)uses.TryPushBack(use);
     }
 
-    if (auto copied = uses.TryAppend(hooks.SoftUses()); !copied) {
-        return Result<Out>::Failure(copied.Error());
-    }
+    (void)uses.TryAppend(hooks.SoftUses());
 
     Array<PackageDependencyEntry> dependencies(allocator);
     if (auto merged = MergeDependencyUses(allocator, uses.View(), selfId, dependencies); !merged) {
@@ -955,15 +1051,15 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
     }
 
     for (PackageDependencyEntry& entry : dependencies) {
-        if (entry.kind != PackageDependencyKind::Hard) {
-            continue;
+        if (entry.kind == PackageDependencyKind::Hard) {
+            entry.expectedType = importBuilder.RepresentativeType(entry.asset);
         }
+    }
 
-        for (const RepresentativeType& representative : representatives) {
-            if (representative.asset == entry.asset) {
-                entry.expectedType = representative.type;
-            }
-        }
+    if (auto reserved =
+            dependencies.TryReserve(dependencies.Size() + options.extraDependencies.Size());
+        !reserved) {
+        return Result<Out>::Failure(reserved.Error());
     }
 
     for (const PackageDependencyEntry& extra : options.extraDependencies) {
@@ -971,9 +1067,7 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
             return InvalidOption<Out>();
         }
 
-        if (auto pushed = dependencies.TryPushBack(extra); !pushed) {
-            return Result<Out>::Failure(pushed.Error());
-        }
+        (void)dependencies.TryPushBack(extra);
     }
 
     dependencies.Sort(DependencyLess);
@@ -1007,18 +1101,19 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
     ArchiveWriter importsBytes(allocator, SectionLimits());
     if (written && !drafts.IsEmpty()) {
         written = importsBytes.WriteU32(static_cast<uint32>(drafts.Size()));
-        for (usize index = 0; written && index < drafts.Size(); ++index) {
-            written = importsBytes.WriteGuid(drafts[index].asset.value);
+        for (usize position = 0; written && position < order.Size(); ++position) {
+            const ImportDraft& draft = drafts[order[position]];
+            written = importsBytes.WriteGuid(draft.asset.value);
             if (written) {
-                written = importsBytes.WriteU32(outerIndex[index]);
+                written = importsBytes.WriteU32(draft.parent == 0 ? 0 : importOf[draft.parent - 1]);
             }
 
             if (written) {
-                written = importsBytes.WriteString(drafts[index].name.View());
+                written = importsBytes.WriteString(draft.name.View());
             }
 
             if (written) {
-                written = importsBytes.WriteGuid(drafts[index].type);
+                written = importsBytes.WriteGuid(draft.type);
             }
         }
     }
@@ -1053,10 +1148,20 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
     {
         Array<Guid> ids(allocator);
         Array<uint32> versions(allocator);
+        const usize rows = typeVersions.Size() > options.customVersions.Size()
+                               ? typeVersions.Size()
+                               : options.customVersions.Size();
+        if (auto reserved = ids.TryReserve(rows); !reserved) {
+            return Result<Out>::Failure(reserved.Error());
+        }
+
+        if (auto reserved = versions.TryReserve(rows); !reserved) {
+            return Result<Out>::Failure(reserved.Error());
+        }
+
         for (const PackageTypeVersion& row : typeVersions) {
-            if (!ids.TryPushBack(row.type) || !versions.TryPushBack(row.version)) {
-                return Result<Out>::Failure(ErrorCode::OutOfMemory);
-            }
+            (void)ids.TryPushBack(row.type);
+            (void)versions.TryPushBack(row.version);
         }
 
         if (auto list = BuildVersionList(allocator, ids.View(), versions.View(), summary,
@@ -1068,9 +1173,8 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
         ids.Clear();
         versions.Clear();
         for (const PackageCustomVersion& row : options.customVersions) {
-            if (!ids.TryPushBack(row.id) || !versions.TryPushBack(row.version)) {
-                return Result<Out>::Failure(ErrorCode::OutOfMemory);
-            }
+            (void)ids.TryPushBack(row.id);
+            (void)versions.TryPushBack(row.version);
         }
 
         if (auto list = BuildVersionList(allocator, ids.View(), versions.View(), summary,

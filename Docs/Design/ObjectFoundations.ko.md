@@ -639,6 +639,10 @@ public:
     // outermost 아래 객체 경로를 이 트랜잭션의 공개 전 객체와 생존 객체 모두에서 푼다(SCC 안 import
     // 해석 — 같은 트랜잭션에 올린 다른 패키지의 객체). 규칙은 ObjectRegistry::FindObject와 같다.
     Result<ObjectHandle> FindObject(ObjectHandle outermost, StringView objectPath) noexcept;
+    // FindObject의 구성 요소 한 단계다: 보이는 outer(outermost가 아니어도 된다) 바로 아래 이름 하나
+    // (빈 이름은 대표 자식). A1 로드가 import를 앞서 푼 outer import 아래에서 풀어 경로 전체를 다시
+    // 걷지 않는다(import 수에 비례 — AS 5.7절 13).
+    Result<ObjectHandle> FindChild(ObjectHandle outer, StringView name) noexcept;
     // 생존 객체 또는 이 트랜잭션의 공개 전 객체(생성자 실행 뒤)의 실제 타입 lease다(staged 참조
     // 대상 규칙 — 그 밖은 파괴 요청·cutoff 포함 StaleHandle, A0-Oe의 2b imports 확인).
     Result<TypeLease> AcquireType(ObjectHandle object) noexcept;
@@ -705,8 +709,9 @@ if (auto created = stage.CreateObjects(transaction, package.Value()); !created) 
     return created;
 }
 
-// import 해석: 이미 생존한 패키지는 registry.FindObject, 같은 트랜잭션의 SCC 형제는
-// transaction.FindObject로 객체 경로를 handle로 바꾼다
+// import 해석: 패키지는 묶음 안(같은 트랜잭션의 SCC 형제)이거나 resolver가 준 생존 패키지이고,
+// outer import가 0이면 transaction.FindObject(package, 이름), 아니면 앞서 푼 outer import 아래
+// transaction.FindChild(outer, 이름)로 handle을 얻는다
 if (auto applied = stage.ApplyFields(transaction, importHandles); !applied) {
     return applied;
 }

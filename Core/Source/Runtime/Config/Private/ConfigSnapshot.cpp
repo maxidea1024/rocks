@@ -64,9 +64,11 @@ Result<SharedPtr<ConfigSnapshot>> SnapshotAccess::Make(Allocator& allocator) noe
 
 namespace {
 
-// 설정 값(value — 콘솔 설정 종류)을 칸에 쓴다. String·Name은 새 텍스트 블록을 만든다.
+// 설정 값(value — 콘솔 설정 종류)을 칸에 쓴다(값 종류도 적는다). String·Name은 새 텍스트 블록을
+// 만든다.
 Result<void> WriteSlot(Allocator& allocator, const FieldValue& value, CVarSlot& slot,
                        SharedPtr<const CVarText>& text) noexcept {
+    slot.kind = value.kind;
     switch (value.kind) {
     case ValueKind::Bool:
         slot.bits = value.boolean ? 1 : 0;
@@ -198,7 +200,22 @@ Result<void> PublishSnapshot(ConfigState& state, const SharedPtr<const NamedBloc
         return written;
     }
 
+    // 콘솔 이름 색인은 등록이 바뀌었으면 새로 만들고 아니면 이전 것을 공유한다(10.1절).
+    SharedPtr<const ConsoleNameIndex> names;
+    if (state.namesChanged || previous == nullptr) {
+        auto built = BuildConsoleNameIndex(state);
+        if (!built) {
+            return Result<void>::Failure(built.Error());
+        }
+
+        names = Move(built.Value());
+    } else {
+        names = SnapshotAccess::Names(*previous);
+    }
+
     // 여기부터는 실패하지 않는다.
+    SnapshotAccess::Names(snapshot) = Move(names);
+    state.namesChanged = false;
     SharedPtr<const NamedBlock> block;
     if (named != nullptr) {
         block = *named;

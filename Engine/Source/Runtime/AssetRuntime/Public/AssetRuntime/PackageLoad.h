@@ -67,10 +67,13 @@ struct PackageLoadOptions {
 // Prepare가 하는 대조(실패는 CorruptPackage / InvalidArgument):
 // - Objects 노드의 저장 버전 = Summary 타입 표의 버전.
 // - 모든 BulkDataRef(관찰)가 BulkIndex 항목과 같은 rawBytes·SHA-256을 가진다.
+// - 모든 BulkIndex entry가 어떤 BulkDataRef에 쓰인다(읽기 전용 열기는 보지 않는다), 빈
+//   BulkDataRef(bulkId 0)는 rawBytes·SHA-256도 0이다(AS 5.7절 14 — 이것은 Objects 손상).
 // - Dependencies의 Hard·Soft·EditorOnly 항목 = 디코딩 결과(외부 참조 쓰임 + Soft 참조)를
 //   writer와 같은 규칙(MergeDependencyUses)으로 합친 것. 에디터 패키지의 읽기 전용 열기는 "디코딩
-//   결과 ⊆ Dependencies"만 본다(AS 5.3절). 모든 import의 에셋은 Hard 또는 EditorOnly 의존이어야
-//   한다.
+//   결과 ⊆ Dependencies"만 본다(AS 5.3절). 모든 import의 에셋(outer import만 있는 에셋 포함)은
+//   Hard 또는 EditorOnly 의존이어야 하고, Hard 의존 에셋의 대표 에셋 import 타입은 그 의존의
+//   expectedType과 같다.
 //
 // 사용 예(동기 로드 — 시험·도구):
 //   PackageLoadState state(allocator, registry, types, access, options);   // 소유 스레드
@@ -117,9 +120,6 @@ public:
         return contents_;
     }
 
-    // import i(0부터)의 객체 경로다(대표 에셋은 빈 경로). Prepare 뒤에 유효하다.
-    StringView ImportPath(usize index) const noexcept;
-
     // 에디터 패키지를 읽기 전용으로 열었는지다(reader 판정 + 그래프 1단계의 모르는 필드·더 새
     // 버전).
     bool IsReadOnly() const noexcept {
@@ -148,13 +148,17 @@ private:
     PackageContents contents_;
     Array<GraphNodeDesc> nodes_;
     Array<TypeId> importTypes_;
-    Array<String> importPaths_;
+    // import i가 그 에셋의 첫 항목이고 그 에셋이 Hard 의존이면 expectedType, 아니면 0이다
+    // (CrossCheck가 채운다 — InstantiatePackages가 대상 대표 에셋 타입과 대조한다).
+    Array<TypeId> hardTypes_;
     // 압축을 푼 bulk(registry.ObjectAllocator()로 할당 — Package가 이어받는다).
     Array<uint8> bulkBytes_;
     Array<PackageBulkSlot> bulkSlots_;
     bool prepared_ = false;
     bool attempted_ = false;
     bool readOnly_ = false;
+    // InstantiatePackages에 한 번 넘겼는지다(성공·실패 모두 — 다시 넘기면 InvalidArgument).
+    bool instantiated_ = false;
 };
 
 // 이미 공개된 패키지를 AssetId로 찾는다(로더·AssetManager가 구현한다). InstantiatePackages가 같은
@@ -169,18 +173,22 @@ protected:
 };
 
 // Prepare를 마친 패키지 묶음(하드 참조 SCC — AS 11.3절)을 transaction 하나에 만든다: 모든 Package
-// 생성 → 모든 그래프 CreateObjects → import 해석(같은 묶음은 트랜잭션 안 객체, 밖은 resolver) →
-// 모든 ApplyFields → 모든 CheckRequired → id·bulk 설정. 공개(Commit)는 호출자가 한다 — 관찰자
-// Commit 기록의 transaction id를 Commit 전에 읽어 둘 수 있게.
+// 생성 → 모든 그래프 CreateObjects → import 해석(같은 묶음은 트랜잭션 안 객체, 밖은 resolver —
+// 에셋마다 패키지를 한 번 찾고 outer import 아래 이름 하나씩 푼다, import 수에 비례) → 모든
+// ApplyFields → 모든 CheckRequired → id·bulk 설정. 공개(Commit)는 호출자가 한다 — 관찰자 Commit
+// 기록의 transaction id를 Commit 전에 읽어 둘 수 있게.
 //
-// 인자: packages(Prepare 완료, 서로 다른 AssetId), resolver(null이면 묶음 밖 import는
-// MissingDependency), outPackages(크기 = packages, i번째 Package handle — 공개 전 객체).
+// 인자: packages(Prepare 완료, 아직 InstantiatePackages에 넘긴 적 없음, 서로 다른 AssetId),
+// resolver(null이면 묶음 밖 import는 MissingDependency), outPackages(크기 = packages, i번째
+// Package handle — 공개 전 객체).
 //
-// 오류: 인자 위반 InvalidArgument, 묶음 밖 import 대상 패키지·객체가 없으면 MissingDependency /
-// NotFound(related = 그 에셋), 대상 타입이 import 선언 타입의 파생이 아니면 TypeMismatch /
-// TypeMismatch, 그래프 단계의 오류(할당 등)는 그대로, Required 실효 값 누락(쿠킹)은 CorruptPackage
-// / InvalidArgument다. 객체를 만든 뒤의 실패는 트랜잭션을 그 오류로 고정한다(호출자가
-// Rollback하거나 소멸자가 되돌린다 — 부분 공개 없음).
+// 오류: 인자 위반 InvalidArgument(이미 넘긴 상태를 다시 넘긴 경우 포함 — 성공했든 실패했든 상태는
+// 한 번만 쓴다), 묶음 밖 import 대상 패키지·객체·Hard 의존 대표 에셋이 없으면 MissingDependency /
+// NotFound(related = 그 에셋), 대상 타입이 import 선언 타입의 파생이 아니거나 Hard 의존 대표 에셋
+// 타입이 expectedType의 파생이 아니면 TypeMismatch / TypeMismatch, 트랜잭션·그래프 단계의
+// 오류(할당·스레드·접근 문맥·종료·재진입)는 진단 None과 그 오류, Required 실효 값 누락(쿠킹)은
+// CorruptPackage / InvalidArgument다. 객체를 만든 뒤의 실패는 트랜잭션을 그 오류로
+// 고정한다(호출자가 Rollback하거나 소멸자가 되돌린다 — 부분 공개 없음).
 Result<void> InstantiatePackages(ConstructionContext& transaction,
                                  Span<PackageLoadState* const> packages,
                                  PackageImportResolver* resolver, Span<ObjectHandle> outPackages,

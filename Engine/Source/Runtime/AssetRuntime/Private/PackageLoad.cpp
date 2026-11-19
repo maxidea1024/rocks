@@ -102,7 +102,10 @@ Result<void> PackageLoadHooks::ObserveStruct(const FieldCodecFrame& frame, TypeI
 
     const BulkDataRef& ref = *static_cast<const BulkDataRef*>(value);
     if (ref.IsEmpty()) {
-        return Result<void>::Success();
+        // 빈 값의 크기·해시는 0이다(AS 5.7절 14 — writer가 쓰지 않는 값이라 Objects 손상).
+        return IsMalformedEmptyBulkRef(ref.rawBytes, ref.sha256)
+                   ? Result<void>::Failure(ErrorCode::InvalidArgument)
+                   : Result<void>::Success();
     }
 
     return bulkUses.TryPushBack(BulkUse{ref.bulkId, ref.rawBytes, ref.sha256});
@@ -116,16 +119,12 @@ PackageLoadState::PackageLoadState(Allocator& allocator, ObjectRegistry& registr
     : allocator_(allocator), registry_(registry), types_(types), options_(options),
       hooks_(allocator, options.read.expectedKind == PackageKind::Cooked),
       stage_(allocator, registry, types, access, StageOptions(options, hooks_)), file_(allocator),
-      contents_(allocator), nodes_(allocator), importTypes_(allocator), importPaths_(allocator),
+      contents_(allocator), nodes_(allocator), importTypes_(allocator), hardTypes_(allocator),
       bulkBytes_(registry.ObjectAllocator()), bulkSlots_(registry.ObjectAllocator()) {
     options_.read.types = &types;
 }
 
 PackageLoadState::~PackageLoadState() = default;
-
-StringView PackageLoadState::ImportPath(usize index) const noexcept {
-    return index < importPaths_.Size() ? importPaths_[index].View() : StringView();
-}
 
 Result<void> PackageLoadState::Prepare(Array<uint8>&& file, AssetDiagnostic* failure) noexcept {
     if (attempted_) {
@@ -143,10 +142,10 @@ Result<void> PackageLoadState::Prepare(Array<uint8>&& file, AssetDiagnostic* fai
     const AssetId asset = contents_.header.assetId;
     readOnly_ = contents_.readOnly;
 
-    // 그래프 노드 표·import 타입·import 경로.
+    // 그래프 노드 표·import 타입.
     if (!nodes_.TryReserve(contents_.exports.Size()) ||
         !importTypes_.TryReserve(contents_.imports.Size()) ||
-        !importPaths_.TryReserve(contents_.imports.Size())) {
+        !hardTypes_.TryResize(contents_.imports.Size())) {
         return FailAsset<void>(failure, AssetDiagnosticCode::None, ErrorCode::OutOfMemory, asset);
     }
 
@@ -158,16 +157,8 @@ Result<void> PackageLoadState::Prepare(Array<uint8>&& file, AssetDiagnostic* fai
         (void)nodes_.TryPushBack(node);
     }
 
-    for (usize index = 0; index < contents_.imports.Size(); ++index) {
-        (void)importTypes_.TryPushBack(contents_.imports[index].type);
-        auto path = importPaths_.TryEmplaceBack(allocator_);
-        if (!path) {
-            return FailAsset<void>(failure, AssetDiagnosticCode::None, path.Error(), asset);
-        }
-
-        if (auto built = ImportPathOf(contents_.imports.View(), index, *path.Value()); !built) {
-            return FailAsset<void>(failure, AssetDiagnosticCode::None, built.Error(), asset);
-        }
+    for (const PackageImportEntry& entry : contents_.imports) {
+        (void)importTypes_.TryPushBack(entry.type);
     }
 
     // bulk 압축 해제·SHA-256 확인.
@@ -217,27 +208,38 @@ Result<void> PackageLoadState::CrossCheck(AssetDiagnostic* failure) noexcept {
         return corrupt(PackageSectionKind::Exports, 1);
     }
 
-    // 노드 저장 버전 = Summary 타입 표 버전(에디터의 더 새 버전은 읽기 전용으로 이미 통과).
+    // 노드 저장 버전 = Summary 타입 표 버전(에디터의 더 새 버전은 읽기 전용으로 이미 통과). 타입
+    // 표는 TypeId 순이고 export 타입 집합과 같으므로(ReadPackage) 하한 탐색이 그 행을 찾는다.
+    const Array<PackageTypeVersion>& types = contents_.summary.types;
     for (usize node = 0; node < contents_.exports.Size(); ++node) {
         auto stored = stage_.StoredVersion(node);
         if (!stored) {
             return corrupt(PackageSectionKind::Objects, node);
         }
 
-        bool matched = false;
-        for (const PackageTypeVersion& row : contents_.summary.types) {
-            if (row.type == contents_.exports[node].type) {
-                matched = row.version == stored.Value();
-                break;
+        usize low = 0;
+        usize high = types.Size() - 1;
+        while (low < high) {
+            const usize middle = low + (high - low) / 2;
+            if (GuidLess(types[middle].type, contents_.exports[node].type)) {
+                low = middle + 1;
+            } else {
+                high = middle;
             }
         }
 
-        if (!matched) {
+        if (types[low].version != stored.Value()) {
             return corrupt(PackageSectionKind::Summary, node);
         }
     }
 
-    // BulkDataRef ↔ BulkIndex.
+    // BulkDataRef ↔ BulkIndex, 그리고 모든 entry가 어떤 ref에 쓰인다(AS 5.7절 14 — 읽기 전용 열기는
+    // 모르는 필드 안의 ref를 보지 못하므로 쓰임 검사를 하지 않는다).
+    Array<bool> referenced(allocator_);
+    if (auto resized = referenced.TryResize(contents_.bulkEntries.Size()); !resized) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, resized.Error(), asset);
+    }
+
     for (const detail::PackageLoadHooks::BulkUse& use : hooks_.bulkUses) {
         if (use.bulkId > contents_.bulkEntries.Size()) {
             return corrupt(PackageSectionKind::BulkIndex, use.bulkId);
@@ -247,11 +249,23 @@ Result<void> PackageLoadState::CrossCheck(AssetDiagnostic* failure) noexcept {
         if (entry.rawBytes != use.rawBytes || !(entry.sha256 == use.sha256)) {
             return corrupt(PackageSectionKind::BulkIndex, use.bulkId);
         }
+
+        referenced[use.bulkId - 1] = true;
+    }
+
+    for (usize index = 0; !readOnly_ && index < referenced.Size(); ++index) {
+        if (!referenced[index]) {
+            return corrupt(PackageSectionKind::BulkIndex, index + 1);
+        }
     }
 
     // Dependencies ↔ 디코딩 결과(writer와 같은 합성 규칙).
     const Span<const GraphExternalUse> externals = stage_.ExternalUses();
     Array<DependencyUse> uses(allocator_);
+    if (auto reserved = uses.TryReserve(externals.Size() + hooks_.softUses.Size()); !reserved) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, reserved.Error(), asset);
+    }
+
     for (usize index = 0; index < externals.Size(); ++index) {
         if (externals[index].occurrences == 0) {
             continue;
@@ -262,9 +276,7 @@ Result<void> PackageLoadState::CrossCheck(AssetDiagnostic* failure) noexcept {
         use.hard = true;
         use.editorOnly = (externals[index].commonFlags & EditorOnlyFlag) != 0;
         use.required = externals[index].required;
-        if (auto pushed = uses.TryPushBack(use); !pushed) {
-            return FailAsset<void>(failure, AssetDiagnosticCode::None, pushed.Error(), asset);
-        }
+        (void)uses.TryPushBack(use);
     }
 
     for (const detail::PackageLoadHooks::SoftUse& soft : hooks_.softUses) {
@@ -273,9 +285,7 @@ Result<void> PackageLoadState::CrossCheck(AssetDiagnostic* failure) noexcept {
         use.hard = false;
         use.editorOnly = soft.editorOnly;
         use.required = soft.required;
-        if (auto pushed = uses.TryPushBack(use); !pushed) {
-            return FailAsset<void>(failure, AssetDiagnosticCode::None, pushed.Error(), asset);
-        }
+        (void)uses.TryPushBack(use);
     }
 
     Array<PackageDependencyEntry> decoded(allocator_);
@@ -287,14 +297,12 @@ Result<void> PackageLoadState::CrossCheck(AssetDiagnostic* failure) noexcept {
     // 파일의 Hard·Soft·EditorOnly 항목만 비교한다(Build·ImportOwner는 대조하지 않는다 —
     // ImportOwner의 ImportRecord 대조는 A2).
     usize cursor = 0;
-    usize compared = 0;
     for (const PackageDependencyEntry& entry : contents_.dependencies) {
         if (entry.kind == PackageDependencyKind::Build ||
             entry.kind == PackageDependencyKind::ImportOwner) {
             continue;
         }
 
-        ++compared;
         if (readOnly_) {
             continue;
         }
@@ -307,33 +315,60 @@ Result<void> PackageLoadState::CrossCheck(AssetDiagnostic* failure) noexcept {
         ++cursor;
     }
 
+    const Array<PackageDependencyEntry>& dependencies = contents_.dependencies;
     if (readOnly_) {
-        // 읽기 전용: 디코딩 결과 ⊆ Dependencies((asset, kind) 기준).
+        // 읽기 전용: 디코딩 결과 ⊆ Dependencies((asset, kind) 기준 — 둘 다 그 순서로 정렬되어
+        // 있다).
+        usize have = 0;
         for (const PackageDependencyEntry& want : decoded) {
-            bool found = false;
-            for (const PackageDependencyEntry& have : contents_.dependencies) {
-                found = found || (have.asset == want.asset && have.kind == want.kind);
+            while (have < dependencies.Size() && DependencyLess(dependencies[have], want)) {
+                ++have;
             }
 
-            if (!found) {
-                return corrupt(PackageSectionKind::Dependencies, 0);
+            if (have == dependencies.Size() || DependencyLess(want, dependencies[have])) {
+                return corrupt(PackageSectionKind::Dependencies, have);
             }
         }
-    } else if (cursor != decoded.Size() || compared != decoded.Size()) {
+    } else if (cursor != decoded.Size()) {
         return corrupt(PackageSectionKind::Dependencies, cursor);
     }
 
-    // 모든 import 에셋은 Hard 또는 EditorOnly 의존이다.
+    // 모든 import 에셋은 Hard 또는 EditorOnly 의존이다(outer import만 있는 에셋 포함). Hard면 그
+    // 에셋의 대표 에셋 import(빈 이름 — 그 에셋의 첫 항목)의 타입이 expectedType과 같고, 로드는
+    // 대상 대표 에셋의 실제 타입을 expectedType과 대조한다(hardTypes_ — AS 5.7절 14). import와
+    // 의존이 모두 에셋 순이라 함께 한 번 훑는다.
+    usize dependency = 0;
     for (usize index = 0; index < contents_.imports.Size(); ++index) {
+        const PackageImportEntry& entry = contents_.imports[index];
+        hardTypes_[index] = TypeId{};
+        if (index > 0 && contents_.imports[index - 1].asset == entry.asset) {
+            continue;
+        }
+
+        while (dependency < dependencies.Size() &&
+               GuidLess(dependencies[dependency].asset.value, entry.asset.value)) {
+            ++dependency;
+        }
+
         bool found = false;
-        for (const PackageDependencyEntry& have : contents_.dependencies) {
-            found = found || (have.asset == contents_.imports[index].asset &&
-                              (have.kind == PackageDependencyKind::Hard ||
-                               have.kind == PackageDependencyKind::EditorOnly));
+        for (usize scan = dependency;
+             scan < dependencies.Size() && dependencies[scan].asset == entry.asset; ++scan) {
+            const PackageDependencyKind kind = dependencies[scan].kind;
+            if (kind == PackageDependencyKind::Hard) {
+                hardTypes_[index] = dependencies[scan].expectedType;
+                found = true;
+            } else if (kind == PackageDependencyKind::EditorOnly) {
+                found = true;
+            }
         }
 
         if (!found) {
             return corrupt(PackageSectionKind::ObjectImports, index);
+        }
+
+        if (entry.name.ByteCount() == 0 && !(hardTypes_[index] == TypeId{}) &&
+            !(entry.type == hardTypes_[index])) {
+            return corrupt(PackageSectionKind::Dependencies, index);
         }
     }
 
@@ -350,6 +385,7 @@ Result<void> InstantiatePackages(ConstructionContext& transaction,
 
     for (usize index = 0; index < packages.Size(); ++index) {
         if (packages[index] == nullptr || !packages[index]->IsPrepared() ||
+            packages[index]->instantiated_ ||
             &packages[index]->registry_ != &transaction.Registry()) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
@@ -359,6 +395,11 @@ Result<void> InstantiatePackages(ConstructionContext& transaction,
                 return Result<void>::Failure(ErrorCode::InvalidArgument);
             }
         }
+    }
+
+    // 상태마다 한 번이다(성공·실패 모두 — 그래프 Stage는 단계를 다시 하지 않는다).
+    for (PackageLoadState* state : packages) {
+        state->instantiated_ = true;
     }
 
     // allocate-all: Package와 그래프 노드.
@@ -385,54 +426,89 @@ Result<void> InstantiatePackages(ConstructionContext& transaction,
                                    state.Id());
         }
 
+        // import는 에셋 순이고 같은 에셋 안은 outer가 앞에 있다(AS 5.2절): 에셋마다 패키지를 한 번
+        // 찾고, outer import 0은 대표 에셋 아래 이름으로, 아니면 앞서 푼 outer 아래 이름 하나로
+        // 푼다(경로 전체를 다시 걷지 않는다 — AS 5.7절 13).
+        ObjectHandle package{};
         for (usize position = 0; position < imports.Size(); ++position) {
             const PackageImportEntry& entry = imports[position];
-            ObjectHandle package{};
-            for (usize other = 0; other < packages.Size(); ++other) {
-                if (packages[other]->Id() == entry.asset) {
-                    package = outPackages[other];
+            const uint32 section = static_cast<uint32>(PackageSectionKind::ObjectImports);
+            if (position == 0 || !(imports[position - 1].asset == entry.asset)) {
+                package = ObjectHandle{};
+                for (usize other = 0; other < packages.Size(); ++other) {
+                    if (packages[other]->Id() == entry.asset) {
+                        package = outPackages[other];
+                    }
+                }
+
+                if (package.IsNull()) {
+                    auto found = resolver != nullptr
+                                     ? resolver->FindPackage(entry.asset)
+                                     : Result<ObjectHandle>::Failure(ErrorCode::NotFound);
+                    if (!found) {
+                        return FailAsset<void>(failure,
+                                               found.Error() == ErrorCode::NotFound
+                                                   ? AssetDiagnosticCode::MissingDependency
+                                                   : AssetDiagnosticCode::None,
+                                               found.Error(), state.Id(), section, position,
+                                               entry.asset);
+                    }
+
+                    package = found.Value();
+                }
+
+                // Hard 의존이면 대상 대표 에셋의 실제 타입이 저장 때 타입(expectedType)의 파생이다.
+                const TypeId expected = state.hardTypes_[position];
+                if (!(expected == TypeId{})) {
+                    auto representative = transaction.FindObject(package, StringView());
+                    if (!representative) {
+                        return FailAsset<void>(failure,
+                                               representative.Error() == ErrorCode::NotFound
+                                                   ? AssetDiagnosticCode::MissingDependency
+                                                   : AssetDiagnosticCode::None,
+                                               representative.Error(), state.Id(), section,
+                                               position, entry.asset);
+                    }
+
+                    auto type = transaction.AcquireType(representative.Value());
+                    if (!type) {
+                        return FailAsset<void>(failure, AssetDiagnosticCode::None, type.Error(),
+                                               state.Id(), section, position, entry.asset);
+                    }
+
+                    auto derived = state.types_.IsA(type.Value().Id(), expected);
+                    if (!derived || !derived.Value()) {
+                        return FailAsset<void>(
+                            failure, AssetDiagnosticCode::TypeMismatch, ErrorCode::TypeMismatch,
+                            state.Id(), static_cast<uint32>(PackageSectionKind::Dependencies),
+                            position, entry.asset);
+                    }
                 }
             }
 
-            if (package.IsNull()) {
-                auto found = resolver != nullptr
-                                 ? resolver->FindPackage(entry.asset)
-                                 : Result<ObjectHandle>::Failure(ErrorCode::NotFound);
-                if (!found) {
-                    return FailAsset<void>(failure,
-                                           found.Error() == ErrorCode::NotFound
-                                               ? AssetDiagnosticCode::MissingDependency
-                                               : AssetDiagnosticCode::None,
-                                           found.Error(), state.Id(),
-                                           static_cast<uint32>(PackageSectionKind::ObjectImports),
-                                           position, entry.asset);
-                }
-
-                package = found.Value();
-            }
-
-            auto target = transaction.FindObject(package, state.ImportPath(position));
+            auto target =
+                entry.outerImportIndex == 0
+                    ? transaction.FindObject(package, entry.name)
+                    : transaction.FindChild(targets[entry.outerImportIndex - 1], entry.name);
             if (!target) {
-                return FailAsset<void>(
-                    failure,
-                    target.Error() == ErrorCode::NotFound ? AssetDiagnosticCode::MissingDependency
-                                                          : AssetDiagnosticCode::None,
-                    target.Error(), state.Id(),
-                    static_cast<uint32>(PackageSectionKind::ObjectImports), position, entry.asset);
+                return FailAsset<void>(failure,
+                                       target.Error() == ErrorCode::NotFound
+                                           ? AssetDiagnosticCode::MissingDependency
+                                           : AssetDiagnosticCode::None,
+                                       target.Error(), state.Id(), section, position, entry.asset);
             }
 
             auto type = transaction.AcquireType(target.Value());
             if (!type) {
                 return FailAsset<void>(failure, AssetDiagnosticCode::None, type.Error(), state.Id(),
-                                       static_cast<uint32>(PackageSectionKind::ObjectImports),
-                                       position, entry.asset);
+                                       section, position, entry.asset);
             }
 
             auto derived = state.types_.IsA(type.Value().Id(), entry.type);
             if (!derived || !derived.Value()) {
-                return FailAsset<void>(
-                    failure, AssetDiagnosticCode::TypeMismatch, ErrorCode::TypeMismatch, state.Id(),
-                    static_cast<uint32>(PackageSectionKind::ObjectImports), position, entry.asset);
+                return FailAsset<void>(failure, AssetDiagnosticCode::TypeMismatch,
+                                       ErrorCode::TypeMismatch, state.Id(), section, position,
+                                       entry.asset);
             }
 
             (void)targets.TryPushBack(target.Value());

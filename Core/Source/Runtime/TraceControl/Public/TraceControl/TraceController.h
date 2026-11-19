@@ -16,12 +16,17 @@ namespace rocks::trace_control {
 // 모듈 등록 단계에서 부른다. 실패: ModuleRegistration의 오류.
 Result<void> RegisterTraceControlTypes(ModuleRegistration& registration) noexcept;
 
-// 콘솔 영역 `trace`와 설정 struct(TracePresetSettings·TraceCaptureSettings)를 설정 문맥에 등록한다.
-// 파일 층을 읽기 전에 부른다. 실패: ConfigContext::RegisterConsoleRegion·RegisterSettings의 오류.
+// 콘솔 영역 `trace`, 설정 struct TracePresetSettings, 세션 설정 핸들(trace.* — TraceSettings.h)을
+// 설정 문맥에 등록한다. 파일 층을 읽기 전에 부른다. 실패: ConfigContext::RegisterConsoleRegion·
+// RegisterSettings·Register의 오류.
 Result<void> RegisterTraceSettings(config::ConfigContext& config) noexcept;
 
-// 설정 섹션 `Trace`의 값을 세션 설정으로 옮긴다(음수는 0, 너무 큰 값은 그 칸의 최대값). allocator와
-// writer 방식은 호출자가 정한다.
+// 설정 문맥의 최신 snapshot에서 세션 값(trace.* 핸들)을 읽는다. 부팅 값을 읽으므로 config는
+// 봉인(CompleteStartup) 뒤여야 한다. 오류: 초기화 전·봉인 전 InvalidArgument.
+Result<TraceCaptureSettings> ReadTraceCaptureSettings(const config::ConfigContext& config) noexcept;
+
+// 세션 값을 세션 설정으로 옮긴다(음수는 0, 너무 큰 값은 그 칸의 최대값). allocator와 writer 방식은
+// 호출자가 정한다.
 TraceSessionSettings MakeTraceSessionSettings(const TraceCaptureSettings& settings,
                                               Allocator& allocator) noexcept;
 
@@ -42,7 +47,8 @@ struct TraceChannelChange {
 //   RegisterTraceControlTypes(modules);
 //   RegisterTraceSettings(config);
 //   LoadConfigFiles(config, files); config.Sync();
-//   session.Start(MakeTraceSessionSettings(config.Get<TraceCaptureSettings>(), allocator));
+//   config.CompleteStartup();
+//   session.Start(MakeTraceSessionSettings(ReadTraceCaptureSettings(config).Value(), allocator));
 //   TraceController trace(allocator, session, config);
 //   trace.RegisterConsoleCommands();
 //   ... 모듈이 채널 등록 ...
@@ -62,13 +68,15 @@ public:
     TraceController(const TraceController&) = delete;
     TraceController& operator=(const TraceController&) = delete;
 
-    // 콘솔 명령 다섯을 등록한다.
-    //   trace.enable channels=<목록>   채널·묶음 켜기
-    //   trace.disable channels=<목록>  채널·묶음 끄기
-    //   trace.file path=<경로>         파일 출력 시작(이미 있으면 바꾼다)
-    //   trace.stop                     trace.file이 붙인 파일 출력 끝내기
-    //   trace.snapshot path=<경로>     스냅샷 쓰기(최근 기록 고리, 8절)
-    // 실패: RegisterConsoleCommand의 오류(이름 중복 AlreadyExists 등). 한 번만 부른다.
+    // 콘솔 명령 다섯(ConsoleCommand 핸들)을 등록하고 이 제어기에 묶는다(ConfigContext::BindCommand
+    // — CVar 15절). 인자는 줄의 나머지다.
+    //   trace.enable <목록>     채널·묶음 켜기(쉼표로 나눈 이름)
+    //   trace.disable <목록>    채널·묶음 끄기
+    //   trace.file <경로>       파일 출력 시작(이미 있으면 바꾼다)
+    //   trace.stop              trace.file이 붙인 파일 출력 끝내기
+    //   trace.snapshot <경로>   스냅샷 쓰기(최근 기록 고리, 8절)
+    // 제어기가 없어질 때 묶음을 푼다(그 뒤의 명령은 "no trace controller"를 쓴다). 실패:
+    // Register·BindCommand의 오류(이름 중복 AlreadyExists 등). 한 번만 부른다.
     Result<void> RegisterConsoleCommands() noexcept;
 
     // 이름 목록의 채널을 켜거나 끈다(위 "이름 목록"). 실패: 세션이 실행 중이 아니면 WrongContext,
@@ -91,8 +99,6 @@ public:
     Result<TraceSnapshotInfo> WriteSnapshot(StringView path) noexcept;
 
 private:
-    friend struct TraceControllerAccess;
-
     // 이름 하나(채널 또는 묶음)를 적용한다.
     Result<void> ApplyName(StringView name, bool enabled, TraceChannelChange& change) noexcept;
     Result<void> SetChannel(StringView name, bool enabled, bool fromPreset,

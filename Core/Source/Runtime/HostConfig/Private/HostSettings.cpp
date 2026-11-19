@@ -303,6 +303,13 @@ Result<void> HostSettings::Initialize(const HostSettingsOptions& options) noexce
         }
     }
 
+    // 묶음 없는 스레드의 `Set`이 이 문맥에 가게 한다(프로세스 기본 문맥 — CVar 6.2절). 프로세스에
+    // 호스트 문맥은 하나다(이미 다른 문맥이 기본이면 AlreadyExists로 실패한다).
+    if (step) {
+        stage = "process default config context";
+        step = context_->MakeProcessDefault();
+    }
+
     if (step) {
         stage = "settings registration";
         step = RegisterLogSettings(*context_);

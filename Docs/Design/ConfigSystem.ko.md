@@ -1,6 +1,6 @@
 # 설정 계층과 콘솔 설정 설계
 
-기준일: 2026-11-19, 개정 12(품질 묶음 CVarGroup — QualityMember 대체, 6.1절 CVR5 연결·리뷰 반영). 엔진·프로젝트·플랫폼·기기·사용자·세션·콘솔에서 오는 설정 값을 하나의 우선순위로 합치는 **설정 계층**과, 실행 중 이름으로 읽고 바꾸는 **콘솔 설정**(변수·명령)을 정한다.
+기준일: 2026-11-19, 개정 15(CVar CVR7 — 독립 콘솔 설정의 CVar 이관, 구독 없앰, 프로세스 기본 문맥). 엔진·프로젝트·플랫폼·기기·사용자·세션·콘솔에서 오는 설정 값을 하나의 우선순위로 합치는 **설정 계층**과, 실행 중 이름으로 읽고 바꾸는 **콘솔 설정**(변수·명령)을 정한다.
 
 [렌더 기반](RenderBase.ko.md)의 선행 작업 CP8(Config 계층)·CP4(콘솔 설정)이며, [엔진 구현 계획](EngineImplementationPlan.ko.md)의 다음 요구를 구현 스펙으로 옮긴다.
 - 24.1절 표의 "Device Profile / Scalability / CVar" 행
@@ -119,7 +119,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 
 ## 5. 콘솔 설정과 명령
 
-이 절의 상세 스펙은 [CVar·치트 명령 설계](CVarSystem.ko.md)(이하 CVar)다. 이 절에는 Config 쪽에 남는 규칙과 CVar 문서의 위치만 적는다. 지금 구현(CF2 — `ConsoleSettingDefinition`·`RegisterConsoleSetting`·이름 snapshot·변수별 `Subscribe`)은 CVar 단계 CVR1–CVR8에서 바뀌고, 쓰는 곳은 CVR7에서 한꺼번에 옮긴다. 하위 호환 경로는 두지 않는다(CVar 21절). CVR 착수 전까지는 CF2 구현이 현재 동작이다.
+이 절의 상세 스펙은 [CVar·치트 명령 설계](CVarSystem.ko.md)(이하 CVar)다. 이 절에는 Config 쪽에 남는 규칙과 CVar 문서의 위치만 적는다. CF2 구현(`ConsoleSettingDefinition`·`RegisterConsoleSetting`·이름 snapshot·변수별 `Subscribe`)은 CVar 단계 CVR1–CVR7이 대체했고, 쓰는 곳(LogHost·TraceControl·HostConfig)은 CVR7에서 한꺼번에 옮겼다(개정 15). 하위 호환 경로는 두지 않았다(CVar 21절). 지금 독립 콘솔 설정은 모두 CVar(정적 이름은 핸들, 동적 이름은 `RegisterDynamic`)이고, 설정 struct 필드의 `ConsoleName`만 설정 struct 저장소에 남는다.
 
 ### 5.1 콘솔 설정
 
@@ -127,10 +127,10 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - **타입**: bool·int32·int64·float·double·String·Name·enum. enum 이름은 리플렉션 enum의 열거자 이름을 쓰고, 리플렉션 enum이 아니면 ADL `CVarEnumNames` 표를 쓴다(CVar 4.4절).
 - **등록**:
   - 모듈 등록 함수에서 `ConfigContext::Register(핸들…)`로 명시적으로 등록한다. 전역 생성자는 금지다(UE 지침 `IConsoleManager.h:39–58`과 같다). 등록 누락은 Policy `cvar-registration`이 빌드에서 잡는다(CVar 5절, VD1).
-  - 이름이 실행 중에 정해지는 변수(Sparks 스크립트·플러그인 데이터)는 `RegisterDynamic`으로 등록한다.
+  - 이름이 실행 중에 정해지는 변수(Sparks 스크립트·플러그인 데이터)는 `RegisterDynamic(DynamicVarDefinition)`으로 등록한다(핸들과 같은 번호 체계·칸 — CVar 5절). 닫힌 값 집합은 enum 타입이다(CF2의 문자열 허용 값 목록은 없앴다).
   - 등록 전에 층에서 들어온 값은 "대기 값"으로 보관했다가 등록 때 넘긴다. UE `CreatedFromIni`(`Core/Private/Misc/ConfigUtilities.cpp:419–422`)와 같다. `CompleteStartup` 뒤에도 남은 대기 이름은 `ReportUnresolved`가 가까운 이름 제안과 함께 보고한다(CVar 12절).
 - **이름 문법**: 소문자 점 구분 경로다(`[a-z][a-z0-9_]*`를 `.`으로 이은 마디 둘 이상 — D7, CVar VD2). UE식 `r.ShadowDistance`는 쓰지 않는다. 첫 단어는 영역 이름 공간이다. 기본 표는 `render`·`graph`·`stream`·`shader`·`quality`·`net`·`physics`·`log`·`game`·`input`·`audio`·`ui`·`cvar`·`cheat`·`obj`이고 `RegisterConsoleRegion`으로 더한다. 표에 없는 영역은 등록 오류다. CVar(설정 struct 필드의 `ConsoleName` 포함)와 콘솔 명령이 한 이름 공간이다.
-- **값 표기**: 콘솔·`--set`·JSON의 값 해석은 ReflectionText 명령행 단일 값 표기 하나다(CVar 전용 파서는 없다 — CVar 14.1절). 설정 struct 필드의 `ConsoleName`은 `Register`가 같은 번호 체계로 함께 올리고, 그 필드와 값 저장소를 공유한다(출처 스택도 필드 경로의 것). 대기 값은 등록 때 바로 검사·적용하고, 형식·범위·층 허용에 맞지 않는 대기 값은 그 입력의 위치로 진단을 남기고 건너뛴다(등록은 성공한다).
+- **값 표기**: 콘솔·`--set`·JSON의 값 해석은 ReflectionText 명령행 단일 값 표기 하나다(CVar 전용 파서는 없다 — CVar 14.1절). 설정 struct 필드의 `ConsoleName`은 `RegisterSettings`가 콘솔 이름 공간에 함께 올리고, 값은 그 필드의 것이다(출처 스택도 필드 경로의 것 — CVar 칸이 아니라 설정 struct 저장소, CVar 7.2절). 대기 값은 등록 때 바로 검사·적용하고, 형식·범위·층 허용에 맞지 않는 대기 값은 그 입력의 위치로 진단을 남기고 건너뛴다(등록은 성공한다).
 - **값의 JSON 모양**: `Settings` 섹션의 값은 bool·수·문자열이고 종류와 맞아야 한다(bool 변수는 JSON bool, 정수 변수는 정수, 실수 변수는 수, 문자열·Name·enum 변수는 문자열). 맞지 않으면 그 위치의 `InvalidSetting`이다.
 - **성질**: CF2의 플래그는 빌더 메서드와 타입으로 옮긴다(CVar 21절).
 
@@ -145,7 +145,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 | (자동) 프리셋 항목 | 어떤 `CVarGroup`의 항목인 변수만 품질 묶음 층 쓰기를 받는다(품질 묶음 층은 묶음 펼침 전용 — 직접 쓰기는 `LayerNotAllowed`) | `ECVF_Scalability` | (없앴다 — 개정 11) |
 | (자동) snapshot | 모든 CVar가 snapshot에 든다 | `ECVF_RenderThreadSafe` | `RenderRead` |
 
-- **현재 구현(CF2·CF3)의 플래그 동작**(CVR 전까지): 콘솔 읽기 전용은 콘솔 층만 거부한다(`ConsoleReadOnly`). 품질 묶음 층은 CVR5부터 `CVarGroup` 펼침만 쓴다: 그 층에 직접 쓰는 입력은 모두 `LayerNotAllowed`로 거부하고(`QualityMember` 플래그·`NotQualityMember` 진단을 없앴다 — 개정 11), 펼침은 묶음 항목에만 닿는다. 개발 전용은 출시 규칙에서 등록은 되지만 콘솔 조회·자동완성에 보이지 않고 어떤 층도 쓸 수 없어 코드 기본값으로 고정된다. 시작 뒤 고정(`StartupOnly`)과 재시작 필요(`RestartRequired`)는 `CompleteStartup`(봉인) 뒤 같은 "부팅 값" 규칙을 따른다(개정 8·9, CVar 9절): 독립 콘솔 설정(`BootCVar` 포함)에 바로 쓰는 층(콘솔·코드·범위 임시 변경)의 쓰기는 넣을 때 Error `BootSealed`로 거부한다(봉인 뒤 아직 등록되지 않은 이름이라 받은 쓰기는 그 이름을 등록할 때 받지 않고 `BootSealed`를 남긴다). 그 밖의 쓰기는 거부하지 않고 Sync가 지금 값과 그 출처를 유지하며, 새 값의 출처가 파일 층이면 재시작 대기로 기록하고(`GetPendingRestarts`, Note `RestartRequired`), 파생·휘발 층이면 대기 없이 Warning `BootValueIgnored`를 같은 이름·층·출처에 한 번 낸다(8절). CVar의 `BootCVar` + `UserSetting()`(VD15)은 사용자 층 대기를 그대로 쓴다. 파일 층(엔진·프로젝트 hot reload)의 시작 뒤 변경을 대기로 보이는 것은 VD15의 "이번 실행 값은 바뀌지 않고 다음 실행에 그 파일이 적용된다"와 같은 뜻이다. 설정 struct 필드의 `RestartRequired`·`StartupOnly` 지정자는 콘솔 이름으로 써도 `BootValueIgnored` 규칙 그대로 남는다(7절 — 콘솔 직접 쓰기 거부를 걸지는 CVar CVR6 결정 항목).
+- **부팅 값 규칙**(CVR7 뒤): 콘솔 읽기 전용은 콘솔 층만 거부한다. 품질 묶음 층은 `CVarGroup` 펼침만 쓴다: 그 층에 직접 쓰는 입력은 모두 `LayerNotAllowed`로 거부하고, 펼침은 묶음 항목에만 닿는다(개정 11). `Cheat()` 변수는 출시 규칙에서 콘솔 조회·자동완성에 보이지 않고 어떤 층도 쓸 수 없어 코드 기본값으로 고정된다. `BootCVar`(부팅 동적 변수 포함)와 설정 struct 필드의 `StartupOnly`·`RestartRequired` 지정자는 `CompleteStartup`(봉인) 뒤 같은 "부팅 값" 규칙을 따른다(개정 8·9·13, CVar 9절): 바로 쓰는 층(콘솔·코드·범위 임시 변경)의 쓰기는 넣을 때 Error `BootSealed`로 거부한다(봉인 뒤 아직 등록되지 않은 이름이라 받은 쓰기는 그 이름을 등록할 때 받지 않고 `BootSealed`를 남긴다). 그 밖의 쓰기는 거부하지 않고 Sync가 지금 값과 그 출처를 유지하며, 새 값의 출처가 파일 층이면 재시작 대기로 기록하고(`GetPendingRestarts`, Note `RestartRequired`), 파생·휘발 층이면 대기 없이 Warning `BootValueIgnored`를 같은 이름·층·출처에 한 번 낸다(8절). `BootCVar` + `UserSetting()`(VD15)은 사용자 층 대기를 그대로 쓴다. 파일 층(엔진·프로젝트 hot reload)의 시작 뒤 변경을 대기로 보이는 것은 VD15의 "이번 실행 값은 바뀌지 않고 다음 실행에 그 파일이 적용된다"와 같은 뜻이다. CF2 독립 설정의 플래그(`StartupOnly`·`RestartRequired`·`DevelopmentOnly`·`UserConfig`·`ConsoleReadOnly`·`RenderRead`)는 CVR7에서 빌더·`BootCVar`·동적 정의의 `cvar::VarFlags`로 옮겼다. `ConsoleSettingFlags`는 설정 struct 필드의 성질과 설명(`ConsoleSettingInfo`)에만 남는다(CVar 21절 이전 뒤 규칙).
 - 거부 코드와 진단은 CVar 6.2·12·13절이다. 권한(치트·복제·부팅 봉인)은 쓰기를 받을 때 한 번, Sync 적용 때 한 번 검사한다.
 - 출시 쿠킹에서 빼는 값은 설정 struct 필드 `ShippingExcluded`와 `Cheat()` 변수다(8절 쿠킹 허용 목록).
 - 셰이더·쿠킹 결과에 영향을 주는 값은 CVar로 두지 않고 셰이더 형식 정의·TargetProfile에 둔다. 쿠킹 키에 들어가야 하기 때문이다(RenderBase 12절). UE의 셰이더 변경 플래그(`IConsoleManager.h:1488–1496`)는 두지 않는다.
@@ -155,7 +155,8 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - 정의는 `cvar::Command` 빌더 한 문장(`ConsoleCommand` 핸들)이고 `Register`로 올린다. 치트 명령은 함수 리플렉션(UiToolkit CU2) 뒤 `CheatSet` 객체의 `ROCKS_FUNCTION(Cheat)` 함수가 기본형이다(CVar 14.3절, VD12). 실행은 게임 lane의 sync 지점에서 한다.
 - 콘솔 명령은 실행 중 엔진 안의 동작이다. Commandlet(`Core/Public/Core/Commandlet/Commandlet.h:36–57`)은 프로세스 단위 일괄 작업이라 registry를 합치지 않는다. 같은 이름 문법만 공유한다(D9).
 - 콘솔 입력 문법은 CVar 15절 표다: `<이름>`(값·출처), `<이름> ?`(Explain), `<이름> <값>`(콘솔 층 쓰기), `<이름> reset`(콘솔 층 값 지우기), `cvar.find`·`cvar.explain`·`cvar.dump`, `<명령> <인자…>`. 자동완성은 이름 접두로 찾는다.
-- 명령 인자는 명령 함수 매개변수를 ReflectionText 표기로 읽는다(CVar 14.1절). CF2의 인자 struct `<경로>=<값>` 방식은 CVR6에서 바뀐다. 큐에 든 명령은 Sync의 값 적용·snapshot 게시 뒤, `OnSynced` 전에 실행하고 출력은 입력 때 받은 sink로 쓴다.
+- 명령 인자는 명령 함수 매개변수를 ReflectionText 표기로 읽는다(CVar 14.1절 — `cvar::Command<&Function>(name)`, 대상 객체는 `ConfigContext::BindCommand`). CF2의 `ConsoleCommandDefinition`·인자 struct `<경로>=<값>` 방식은 CVR6에서 없앴다(개정 13). 큐에 든 명령은 Sync의 값 적용·snapshot 게시 뒤, `OnSynced` 전에 실행하고 출력은 입력 때 받은 sink로 쓴다.
+- 다른 스레드의 콘솔 입력은 `ConsoleInputPort`로 넣는다(쓰기 통로를 쥔 입구 — 문맥이 없어진 뒤는 `ShuttingDown`, 마지막 입구는 문맥의 allocator보다 먼저 없어진다). 출력 sink는 참조 계수 `ConsoleSink`이고 큐에 든 일의 출력은 게임 lane이 쓴다(입력한 스레드와 동시에 쓰면 sink가 스레드 안전해야 한다). 명령 대상(`BindCommand`)은 타입을 확인하고, 문맥은 묶인 대상보다 오래 살아야 한다(CVar 20절 CVR6 리뷰 반영, 개정 14).
 - 출시 빌드에는 콘솔 입력이 없다(UE `ALLOW_CONSOLE_IN_SHIPPING` 기본 0, `Core/Public/Misc/Build.h:214–215`).
 
 ### 5.3 sync 지점과 설정 snapshot
@@ -167,22 +168,22 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - **읽기**: `Get()`은 스레드에 묶인 snapshot을 잠금·할당·문자열 연산 없이 읽는다(CVar 7.1절, VD7). 게임 lane은 Sync가 게시할 때 다시 묶고, 렌더 lane은 프레임 packet이 든 snapshot을 묶고(RenderBase RB1), worker 작업은 만든 lane의 snapshot 참조를 쥐고 넘겨받는다. 한 프레임 동안 같은 스레드는 같은 snapshot을 본다. 묶음 없는 `Get()`은 Fatal이다.
 - 프레임 packet은 snapshot을 참조한다. snapshot 수명은 마지막 참조가 놓일 때까지다.
 - 렌더 lane은 registry를 읽지 않는다(RenderBase 5.3·12절).
-- **변경 알림**: 변수별 `Watcher`(세대 비교)와 Sync마다 한 번 부르는 `OnSynced`(바뀐 번호 목록과 바뀐 설정 struct 목록)다. CF2의 변수별 `Subscribe` 콜백은 없앤다(CVar 7.3절, VD9). 콜백은 게임 lane에서 문맥 잠금 없이 부르고, 콜백 안의 쓰기는 다음 Sync에 적용되며, 콜백 안에서 `Sync`를 부르면 `Busy`다.
+- **변경 알림**: 변수별 `Watcher`(세대 비교)와 Sync마다 한 번 부르는 `OnSynced`(바뀐 번호 목록과 바뀐 설정 struct 목록)다. CF2의 `Subscribe`(이름)·`SubscribeSettings`·`Unsubscribe`는 CVR7에서 없앴다(CVar 7.3절, VD9 — 개정 15). 콜백은 게임 lane에서 문맥 잠금 없이 부르고, 콜백 안의 쓰기는 다음 Sync에 적용되며, 콜백 안에서 `Sync`를 부르면 `Busy`다.
 - 스레드 안전성(공유 상태별 소유·동기화·수명)은 CVar 10.1절이다.
 
 ### 5.4 엔진 연결(구현 2026-11-18)
 
 - **문맥 하나.** 프로세스의 설정 문맥은 호스트(게임·에디터 main, Sandbox, RocksCommandlet)가 하나만 만든다. Core 모듈 `HostConfig`의 `HostSettings`가 문맥과 그 문맥이 쓰는 타입 등록·모듈 등록·객체 Registry를 소유한다(로그가 엔진보다 먼저 준비돼야 하므로 엔진 Registry와 따로 둔다). 엔진은 `EngineConfig::settings`로 빌려 쓰고 만들거나 파괴하지 않는다.
 - **부트 순서**(`HostSettings`):
-  1. 등록: 모듈 타입(TraceControl + 호스트 콜백) → 설정(`log.*` — LogHost, `trace.*`·`TracePresets`·`Trace` — TraceControl, 호스트 콜백). 파일을 읽기 전이다(모르는 섹션·설정은 오류이기 때문이다).
+  1. 등록: 모듈 타입(TraceControl + 호스트 콜백) → 설정(`log.*` 핸들 — LogHost, `trace.*` 핸들·`TracePresets` 설정 struct — TraceControl, 호스트 콜백). 파일을 읽기 전이다(모르는 섹션·설정은 오류이기 때문이다). 문맥을 만든 뒤 프로세스 기본 문맥으로 정한다(`MakeProcessDefault` — 묶음 없는 스레드의 `Set`이 쓴다, CVar 6.2절, 개정 15).
   2. `LoadConfigFiles`: 엔진·프로젝트(·플랫폼·사용자) 층 파일. 엔진 폴더는 호스트가 정한다. Sandbox·RocksCommandlet은 실행 파일 위쪽에서 `Engine/Config`를 가진 첫 폴더를 찾는다(`FindEngineDirectory`).
   3. 호스트의 추가 파일(Sandbox `--config` — Project 층).
   4. 명령줄 `--set=<target>=<value>`(`AddCommandLineAssignments` — Session 층, 태그 `--set`, 값은 첫 `=` 뒤 전부)와 `--device-profile=<이름>`(기억만 한다).
-  5. Sync → 기기 프로필 적용(`ApplyDeviceProfile` — 6.2절) → Sync → `CompleteStartup`(StartupOnly 값 고정 — `log.mode`·`log.file.*` 등). 프로필 정의 오류는 기록하고 시작은 계속한다. 기기 프로필이 정한 StartupOnly 값도 시작에 들어간다. 품질 묶음 펼침(CVR5)은 이 단계의 기기 프로필 뒤에 들어간다.
+  5. Sync → 기기 프로필 적용(`ApplyDeviceProfile` — 6.2절) → Sync → `CompleteStartup`(부팅 값 고정 — `BootCVar`인 `log.mode`·`log.file.*`·`trace.pool.*` 등). 프로필 정의 오류는 기록하고 시작은 계속한다. 기기 프로필이 정한 StartupOnly 값도 시작에 들어간다. 품질 묶음 펼침(CVR5)은 이 단계의 기기 프로필 뒤에 들어간다.
   6. 그다음 LogHost 설치 → trace 세션·콘솔 명령·`--trace` → 엔진 루프.
 - **설정 오류의 출력.** 1–5단계의 거부는 `HostSettings`가 진단(파일·줄·열·코드·경로·메시지)과 함께 한 번 기록한다. LogHost 설치 전이므로 비상 경로(stderr, Warning 이상)로 나간다. 호출자는 다시 기록하지 않는다.
 - **sync 지점.** 엔진 `RunFrame`은 2단계(시간 갱신) 뒤, 3단계(프레임 시작 — hooks.BeginFrame·Subsystem.OnFrameBegin·client.OnEngineTick) 전에 `Sync`를 부른다. 그래서 프레임 사이 변경은 다음 프레임 시작부터 보이고, 프레임 안에서 넣은 변경은 그 프레임 동안 값을 바꾸지 않는다. Sync 실패는 그 프레임의 첫 오류로 돌려주고 프레임은 계속한다(연속 실패는 첫 번째만 Error 로그).
-- **종료 순서.** 엔진 정리 → trace 세션 정지 → 로그 설치 범위 해제 → `LogHost::Stop`(구독 해제) → 설정 문맥 파괴. 문맥은 LogHost·trace 제어기·엔진보다 오래 산다.
+- **종료 순서.** 엔진 정리 → trace 세션 정지 → 로그 설치 범위 해제 → `LogHost::Stop`(`OnSynced` 알림 해제) → 설정 문맥 파괴. 문맥은 LogHost·trace 제어기·엔진보다 오래 산다.
 - **config-dump.** RocksCommandlet이 같은 부트(1·2·5단계)로 문맥을 만들어 `config-dump`를 등록한다. 엔진 폴더를 못 찾으면 엔진 층 없이 코드 기본값을 낸다.
 - **기기 특성.** `HostSettings::Initialize`가 플랫폼 특성(플랫폼 이름 — 옵션 `platform`, 비면 `HostPlatformName()`, 시스템 메모리)을 채운다. 플랫폼 이름은 문맥의 플랫폼(플랫폼 층 폴더)이기도 하다. 그래픽 장치를 만든 호스트는 `DeviceTraits()`에 GPU 특성(`DeviceCaps` — Sandbox `AppendGraphicsDeviceTraits`)을 더하고 `ApplyDeviceTraits()`로 기기 프로필을 다시 적용한다(다음 Sync, 시작 뒤라 StartupOnly 값은 바뀌지 않는다).
 - **프로젝트 폴더·사용자 층(게임·에디터 실행 파일 — 2026-11-18 결정, 권장안).** 프로젝트 폴더는 실행 파일 폴더부터 위로 올라가며 프로젝트 기술자(`*.rocksproject`)를 가진 첫 폴더이고 프로젝트 이름은 그 기술자 파일 이름이다(`FindProjectDirectory`·`FindProjectFrom` — 여럿이면 이름 byte 순서로 첫 것). 사용자 층은 Standard 모드에서 `<UserData>/<프로젝트 이름>/Config`다(`UserDataDirectory` — Windows Roaming AppData, macOS `~/Library/Application Support`, Android는 등록한 앱 data 폴더). 프로젝트가 없는 도구(Sandbox·RocksCommandlet)는 봉인 모드다. hot reload는 `StartHotReload`(개발 빌드)다.
@@ -247,7 +248,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 
 **실행 중 변경**
 - 재시작이 필요한 값은 "다음 시작 때 적용 예정"으로 기록하고 진단·UI에 보인다.
-  - 구현(CF3, 개정 8에서 StartupOnly도 같은 규칙): `CompleteStartup` 뒤 Sync가 부팅 값(RestartRequired·StartupOnly 필드·콘솔 설정)의 새 합친 값이 지금 값과 다르면 지금 값(과 그 출처 스택)을 유지한다. 새 값의 가장 강한 출처가 **파일 층**(엔진·엔진 플랫폼·프로젝트·프로젝트 플랫폼·사용자 — hot reload 포함, 파일이 지워져 코드 기본값으로 돌아간 경우도)이면 `GetPendingRestarts`에 (이름, 대기 값, 지금 값)으로 남긴다. 다음 실행에도 같은 입력이 다시 들어오기 때문이다. 그 밖의 층(기기 프로필·품질·기능 묶음처럼 시작 뒤 다시 계산되는 파생 층, 세션·콘솔·코드처럼 저장되지 않는 휘발 층)은 대기를 만들지 않고 Warning `BootValueIgnored`("boot value ignored after startup")를 같은 이름·층·출처에 한 번만 낸다(개정 7). 그렇지 않으면 예를 들어 시작 뒤 GPU 특성으로 골라진 기기 프로필이 정한 값은 다음 실행에도 부팅 때는 GPU 특성이 없어 다시 대기가 되는 "영원한 대기"가 되고, 콘솔 값은 저장되지 않는데 "다음 시작에 적용"으로 보인다. 예외로, 봉인 뒤 독립 콘솔 설정(CVar `BootCVar` 포함)의 StartupOnly·RestartRequired 값에 바로 쓰는 층(콘솔·코드·범위 임시 변경)의 쓰기는 넣을 때 Error `BootSealed`로 거부한다(개정 9, CVar 9절 — 부른 쪽이 바로 효력을 기대하므로 결과로 알린다. 파생·휘발 층·파일 층은 아래 규칙 그대로라 기기 프로필 재적용 문제는 다시 생기지 않는다). 설정 struct 필드는 콘솔 이름으로 써도 이 규칙(BootValueIgnored)을 유지한다. 파생·휘발 층에 한해 StartupOnly도 같은 까닭으로 쓰기 단계의 Error 거부 대신 이 규칙을 따른다(개정 8 — 시작 뒤 기기 프로필 재적용이 StartupOnly 값을 정할 때마다 거부 오류가 나던 것을 없앴다. 파일 층의 StartupOnly 변경은 그 파일이 다음 실행에 읽히므로 대기다). 새로 대기가 된 것은 Note `RestartRequired`(CVar VD15 진단 이름)와 Info 로그다. 변경 콜백·snapshot은 바뀌지 않는다. 사용자 층 값이면 저장되어 다음 실행에 적용되고, 되돌리면 대기가 없어진다. UE `ConfigRestartRequired`는 값을 바로 바꾸고 알림만 띄우지만, Rocks는 효력 시점을 문맥이 지킨다(CVar 9절 "세 번째 종류를 두지 않는다"와 같은 뜻).
+  - 구현(CF3, 개정 8에서 StartupOnly도 같은 규칙): `CompleteStartup` 뒤 Sync가 부팅 값(RestartRequired·StartupOnly 필드·콘솔 설정)의 새 합친 값이 지금 값과 다르면 지금 값(과 그 출처 스택)을 유지한다. 새 값의 가장 강한 출처가 **파일 층**(엔진·엔진 플랫폼·프로젝트·프로젝트 플랫폼·사용자 — hot reload 포함, 파일이 지워져 코드 기본값으로 돌아간 경우도)이면 `GetPendingRestarts`에 (이름, 대기 값, 지금 값)으로 남긴다. 다음 실행에도 같은 입력이 다시 들어오기 때문이다. 그 밖의 층(기기 프로필·품질·기능 묶음처럼 시작 뒤 다시 계산되는 파생 층, 세션·콘솔·코드처럼 저장되지 않는 휘발 층)은 대기를 만들지 않고 Warning `BootValueIgnored`("boot value ignored after startup")를 같은 이름·층·출처에 한 번만 낸다(개정 7). 그렇지 않으면 예를 들어 시작 뒤 GPU 특성으로 골라진 기기 프로필이 정한 값은 다음 실행에도 부팅 때는 GPU 특성이 없어 다시 대기가 되는 "영원한 대기"가 되고, 콘솔 값은 저장되지 않는데 "다음 시작에 적용"으로 보인다. 예외로, 봉인 뒤 독립 콘솔 설정(CVar `BootCVar` 포함)의 StartupOnly·RestartRequired 값에 바로 쓰는 층(콘솔·코드·범위 임시 변경)의 쓰기는 넣을 때 Error `BootSealed`로 거부한다(개정 9, CVar 9절 — 부른 쪽이 바로 효력을 기대하므로 결과로 알린다. 파생·휘발 층·파일 층은 아래 규칙 그대로라 기기 프로필 재적용 문제는 다시 생기지 않는다). 설정 struct 필드도 바로 쓰는 층이면 같다(개정 13 — 그 전에는 필드만 이 규칙(BootValueIgnored)을 유지했다). 파생·휘발 층에 한해 StartupOnly도 같은 까닭으로 쓰기 단계의 Error 거부 대신 이 규칙을 따른다(개정 8 — 시작 뒤 기기 프로필 재적용이 StartupOnly 값을 정할 때마다 거부 오류가 나던 것을 없앴다. 파일 층의 StartupOnly 변경은 그 파일이 다음 실행에 읽히므로 대기다). 새로 대기가 된 것은 Note `RestartRequired`(CVar VD15 진단 이름)와 Info 로그다. 변경 콜백·snapshot은 바뀌지 않는다. 사용자 층 값이면 저장되어 다음 실행에 적용되고, 되돌리면 대기가 없어진다. UE `ConfigRestartRequired`는 값을 바로 바꾸고 알림만 띄우지만, Rocks는 효력 시점을 문맥이 지킨다(CVar 9절 "세 번째 종류를 두지 않는다"와 같은 뜻).
 - hot reload는 에디터·개발 빌드에서 `DirectoryWatcher`(`Platform/DirectoryWatch.h:48–93`)로 `Config/`를 감시한다. 바뀐 층만 다시 읽어 출처 스택을 갱신하고, sync 지점에서 적용한다. 출시 빌드는 감시하지 않는다.
   - 구현(CF3, `Config/ConfigReload.h`): `ConfigFileReloader`가 엔진·프로젝트·사용자 `Config/` 폴더를 감시하고 문맥의 sync hook(`ConfigContext::AddSyncHook` — Sync가 큐를 보기 전에 부른다)에서 감시 이벤트를 모아 바뀐 파일만 다시 읽는다. 이벤트는 표시일 뿐이라 값은 그 sync 지점에서만 바뀐다. 파일 하나는 `ReplaceLayerText`(검사에 통과해야 그 앞에 `Unset`을 넣는다 — 잘못 고친 파일은 옛 값을 지우지 않는다)로, 지운 파일은 `Unset`으로, 사용자 파일은 관대한 읽기로 바꾼다. Overflow는 그 루트의 모든 branch 파일을 다시 읽는다. 출시 규칙이면 `Start`가 Unsupported다. `HostSettings::StartHotReload`가 호스트에서 켠다(Sandbox는 LogHost 설치 뒤). CVar 10절의 쓰기 큐가 생기면 hook은 그 큐에 넣는 쪽으로 옮긴다(CVR2).
 
@@ -311,6 +312,9 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 
 ## 12. 개정 이력
 
+- 개정 15(2026-11-19): CVar CVR7. 5절 머리(CF2 대체 완료), 5.1절 등록(`RegisterDynamic`·enum 닫힌 값 집합)·값 표기(필드 `ConsoleName`은 설정 struct 저장소)·부팅 값 규칙(CF2 플래그 이관 뒤), 5.3절 구독 없앰, 5.4절 등록 내용·프로세스 기본 문맥·종료 순서.
+- 개정 14(2026-11-19): CVar CVR6 리뷰 반영. 5.2절: 다른 스레드 콘솔 입력은 `ConsoleInputPort`(쓰기 통로를 쥔 입구 — 문맥이 없어진 뒤는 `ShuttingDown`), 출력은 참조 계수 `ConsoleSink`, 명령 대상 묶음의 타입 확인·수명(문맥이 묶인 대상보다 오래 산다).
+- 개정 13(2026-11-19): CVar CVR6. 5.2절 명령 정의(`cvar::Command<&Function>`·`BindCommand`, CF2 인자 struct 방식 없앰). 5.1·8절: 설정 struct 필드의 봉인 뒤 바로 쓰는 층 쓰기도 `BootSealed`.
 - 개정 12(2026-11-19): CVar CVR5 리뷰 반영. 6.1절: 정의된 등급을 `QualityRequest::levels`로 옮기고 `QualityGroupRule::levels`를 없앴다, `Quality.json` 정규 등급 키·잘못된 값만 건너뛰기.
 - 개정 11(2026-11-19): CVar CVR5. 품질 묶음은 `CVarGroup`(코드 정의)이고 품질 묶음 층은 묶음 펼침 전용이다(`QualityMember`·`NotQualityMember` 없앰 — 5.1절). 6.1절 CVR5 연결(조합 검증 입력·`Quality.json` 모양·파일 층만), 9절 CF4 진척.
 - 개정 10(2026-11-19): CVar CVR4 리뷰 반영. 5.1절 플래그 동작 문장을 개정 9 규칙으로 고쳤다(쓰기 거부 없음 → 바로 쓰는 층은 `BootSealed`, 늦은 등록도 같다). 8절 개정 8 문장을 파생·휘발 층으로 한정했다.

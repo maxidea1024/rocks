@@ -46,15 +46,15 @@ struct UserTree {
     String user;
 };
 
-// 사용자 설정 콘솔 설정(독립)을 등록한다.
+// 사용자 설정 동적 변수를 등록한다.
 void RegisterVolume(ConfigContext& context) noexcept {
-    ConsoleSettingDefinition volume;
+    DynamicVarDefinition volume;
     volume.name = "audio.master.volume";
     volume.help = "Master volume";
     volume.type = ConsoleValueType::Float;
     volume.defaultValue = "1";
-    volume.flags = static_cast<uint32>(ConsoleSettingFlags::UserConfig);
-    REQUIRE(context.RegisterConsoleSetting(volume));
+    volume.flags = static_cast<uint32>(cvar::VarFlags::UserSetting);
+    REQUIRE(context.RegisterDynamic(volume));
 }
 
 bool TextIs(StringView actual, StringView expected) noexcept {
@@ -266,13 +266,13 @@ TEST(Config_RestartRequiredChangeWaitsForNextStart) {
         ConfigFixture fixture(paths.Options());
         ConfigContext& context = fixture.Context();
         REQUIRE(context.RegisterSettings<DisplaySettings>());
-        ConsoleSettingDefinition port;
+        DynamicVarDefinition port;
         port.name = "net.listen.port";
         port.help = "Listen port";
         port.type = ConsoleValueType::Int32;
         port.defaultValue = "7777";
-        port.flags = static_cast<uint32>(ConsoleSettingFlags::RestartRequired);
-        REQUIRE(context.RegisterConsoleSetting(port));
+        port.boot = true;
+        REQUIRE(context.RegisterDynamic(port));
         // 시작 전에는 바로 적용된다.
         REQUIRE(context.AddAssignment(ConfigLayer::Project, "project", "Game.Display.textureBudget",
                                       "768"));
@@ -280,9 +280,15 @@ TEST(Config_RestartRequiredChangeWaitsForNextStart) {
         CHECK(context.Get<DisplaySettings>().textureBudget == 768);
         REQUIRE(context.CompleteStartup());
 
+        // DisplaySettings 값이 바뀐 Sync를 센다(OnSynced의 바뀐 설정 struct 목록 — CVar 7.3절).
         int32 calls = 0;
-        REQUIRE(context.SubscribeSettings<DisplaySettings>(
-            [](void* raw, const ConfigChange&) noexcept { ++*static_cast<int32*>(raw); }, &calls));
+        auto counted =
+            context.OnSynced().TryAddLambda([&calls](const SyncChanges& changes) noexcept {
+                for (const TypeId changed : changes.settings) {
+                    calls += changed == GeneratedType<DisplaySettings>::Id() ? 1 : 0;
+                }
+            });
+        REQUIRE(counted);
         REQUIRE(SetUserValue(context, "Game.Display.textureBudget", "2048"));
         // 봉인 뒤 부팅 독립 콘솔 설정의 콘솔 쓰기는 넣을 때 거부한다(BootSealed — CVar 9절).
         auto console =

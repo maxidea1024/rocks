@@ -1,6 +1,7 @@
 #include <TraceControl/TraceController.h>
 
 #include <Base/NumericLimits.h>
+#include <Config/CVar.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/Text/StringBuilder.h>
 #include <TraceControl/TraceControl.module.generated.h>
@@ -34,15 +35,11 @@ const Array<String>* FindPreset(const TracePresetSettings& settings, StringView 
 
 constexpr StringView TraceArgumentPrefix = "--trace=";
 
-// 콘솔 출력에 한 줄을 쓴다(쓰기 실패는 명령 결과를 바꾸지 않는다).
-void WriteLine(config::ConsoleOutput& output, Allocator& allocator, StringView text) noexcept {
-    if (output.write == nullptr) {
-        return;
-    }
-
-    StringBuilder<128> line(allocator);
+// 콘솔에 한 줄을 쓴다(쓰기 실패는 명령 결과를 바꾸지 않는다).
+void WriteLine(cvar::CommandContext& context, StringView text) noexcept {
+    StringBuilder<128> line(context.GetAllocator());
     if (line.TryAppend(text) && line.TryAppend("\n")) {
-        static_cast<void>(output.write(output.context, line.View()));
+        static_cast<void>(context.Write(line.View()));
     }
 }
 
@@ -56,24 +53,66 @@ uint64 ClampUnsigned(Value value, uint64 maximum) noexcept {
     return unsignedValue < maximum ? unsignedValue : maximum;
 }
 
-// 콘솔 명령 함수들이다. context는 TraceController다.
-Result<void> RunEnable(void* context, const void* arguments,
-                       config::ConsoleOutput& output) noexcept;
-Result<void> RunDisable(void* context, const void* arguments,
-                        config::ConsoleOutput& output) noexcept;
-Result<void> RunFile(void* context, const void* arguments, config::ConsoleOutput& output) noexcept;
-Result<void> RunStop(void* context, const void* arguments, config::ConsoleOutput& output) noexcept;
-Result<void> RunSnapshot(void* context, const void* arguments,
-                         config::ConsoleOutput& output) noexcept;
+// 콘솔 명령 함수들이다(대상은 BindCommand로 묶은 TraceController — CVar 15절).
+Result<void> RunEnable(cvar::CommandContext& context, StringView channels) noexcept;
+Result<void> RunDisable(cvar::CommandContext& context, StringView channels) noexcept;
+Result<void> RunFile(cvar::CommandContext& context, StringView path) noexcept;
+Result<void> RunStop(cvar::CommandContext& context) noexcept;
+Result<void> RunSnapshot(cvar::CommandContext& context, StringView path) noexcept;
 
 } // namespace
 
-// 콘솔 명령이 제어기의 비공개 동작과 문맥을 쓰는 통로다.
-struct TraceControllerAccess {
-    static Allocator& AllocatorOf(TraceController& controller) noexcept {
-        return controller.allocator_;
-    }
-};
+// trace 콘솔 명령이다(인자는 줄의 나머지 — 쉼표로 나눈 채널·묶음 이름, 파일 경로).
+constinit cvar::ConsoleCommand TraceEnableCommand =
+    cvar::Command<&RunEnable>("trace.enable")
+        .Help("Enable trace channels or presets: trace.enable cpu,gpu");
+
+constinit cvar::ConsoleCommand TraceDisableCommand =
+    cvar::Command<&RunDisable>("trace.disable")
+        .Help("Disable trace channels or presets: trace.disable log");
+
+constinit cvar::ConsoleCommand TraceFileCommand =
+    cvar::Command<&RunFile>("trace.file")
+        .Help("Start writing the trace to a file: trace.file Saved/Traces/run.rtrace");
+
+constinit cvar::ConsoleCommand TraceStopCommand =
+    cvar::Command<&RunStop>("trace.stop").Help("Stop the file output started by trace.file");
+
+constinit cvar::ConsoleCommand TraceSnapshotCommand =
+    cvar::Command<&RunSnapshot>("trace.snapshot")
+        .Help("Write the recent trace ring to a file: trace.snapshot Saved/Traces/recent.rtrace");
+
+constinit BootCVar<int64> TracePoolMaxBytesVar =
+    cvar::Boot("trace.pool.max_bytes", int64{64} * 1024 * 1024)
+        .Help("Trace block pool limit in bytes (rounded down to whole pages). Fixed after startup.")
+        .Range(0, NumericLimits<int64>::Max());
+
+constinit BootCVar<int32> TracePoolWarningPercentVar =
+    cvar::Boot("trace.pool.warn_percent", 80)
+        .Help("Trace block pool usage warning in percent (0 turns it off). Fixed after startup.")
+        .Range(0, MaxTracePoolWarningPercent);
+
+constinit BootCVar<int64> TraceRecentBytesVar =
+    cvar::Boot("trace.recent.bytes", int64{4} * 1024 * 1024)
+        .Help("Size of the recent trace record ring in bytes (0 means no ring; trace.snapshot "
+              "writes it). Fixed after startup.")
+        .Range(0, NumericLimits<int64>::Max());
+
+constinit BootCVar<int32> TraceWriterPeriodVar =
+    cvar::Boot("trace.writer.period_ms", 16)
+        .Help("Flush period of the trace writer thread in milliseconds. Fixed after startup.")
+        .Range(0, NumericLimits<int32>::Max());
+
+constinit BootCVar<int32> TraceStatsIntervalVar =
+    cvar::Boot("trace.stats.interval_pumps", 60)
+        .Help("Pumps between capture statistics records of the stats channel. Fixed after "
+              "startup.")
+        .Range(0, NumericLimits<int32>::Max());
+
+constinit CVar<int32> TraceSnapshotLockTimeoutVar =
+    cvar::Var("trace.snapshot.lock_timeout_ms", 1000)
+        .Help("How long trace.snapshot waits for the trace writer lock, in milliseconds.")
+        .Range(0, NumericLimits<int32>::Max());
 
 Result<void> RegisterTraceControlTypes(ModuleRegistration& registration) noexcept {
     return generated::TraceControl::RegisterModuleTypes(registration);
@@ -88,7 +127,27 @@ Result<void> RegisterTraceSettings(config::ConfigContext& config) noexcept {
         return presets;
     }
 
-    return config.RegisterSettings<TraceCaptureSettings>();
+    return config.Register(TracePoolMaxBytesVar, TracePoolWarningPercentVar, TraceRecentBytesVar,
+                           TraceWriterPeriodVar, TraceStatsIntervalVar,
+                           TraceSnapshotLockTimeoutVar);
+}
+
+Result<TraceCaptureSettings>
+ReadTraceCaptureSettings(const config::ConfigContext& config) noexcept {
+    SharedPtr<const config::ConfigSnapshot> snapshot = config.Acquire();
+    if (snapshot.Get() == nullptr || !snapshot->IsSealed()) {
+        return Result<TraceCaptureSettings>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    cvar::SnapshotBinding bound(Move(snapshot));
+    TraceCaptureSettings settings;
+    settings.poolMaxBytes = TracePoolMaxBytesVar.Get();
+    settings.poolWarningPercent = TracePoolWarningPercentVar.Get();
+    settings.recentBytes = TraceRecentBytesVar.Get();
+    settings.writerPeriodMs = TraceWriterPeriodVar.Get();
+    settings.statsIntervalPumps = TraceStatsIntervalVar.Get();
+    settings.snapshotLockTimeoutMs = TraceSnapshotLockTimeoutVar.Get();
+    return Result<TraceCaptureSettings>::Success(settings);
 }
 
 TraceSessionSettings MakeTraceSessionSettings(const TraceCaptureSettings& settings,
@@ -114,57 +173,37 @@ TraceController::TraceController(Allocator& allocator, TraceSession& session,
 }
 
 TraceController::~TraceController() noexcept {
+    // 명령 묶음을 푼다(등록하지 않았으면 NotFound — 무시한다).
+    const cvar::ConsoleCommand* const commands[] = {&TraceEnableCommand, &TraceDisableCommand,
+                                                    &TraceFileCommand, &TraceStopCommand,
+                                                    &TraceSnapshotCommand};
+    for (const cvar::ConsoleCommand* command : commands) {
+        static_cast<void>(config_.UnbindCommand(*command, *this));
+    }
+
     if (file_.value != 0 && session_.IsRunning()) {
         static_cast<void>(session_.DetachOutput(file_));
     }
 }
 
 Result<void> TraceController::RegisterConsoleCommands() noexcept {
-    config::ConsoleCommandDefinition enable;
-    enable.name = "trace.enable";
-    enable.help = "Enable trace channels or presets: trace.enable channels=cpu,gpu";
-    enable.execute = &RunEnable;
-    enable.context = this;
-    if (auto registered = config_.RegisterConsoleCommand<TraceChannelArguments>(enable);
+    if (auto registered =
+            config_.Register(TraceEnableCommand, TraceDisableCommand, TraceFileCommand,
+                             TraceStopCommand, TraceSnapshotCommand);
         !registered) {
         return registered;
     }
 
-    config::ConsoleCommandDefinition disable;
-    disable.name = "trace.disable";
-    disable.help = "Disable trace channels or presets: trace.disable channels=log";
-    disable.execute = &RunDisable;
-    disable.context = this;
-    if (auto registered = config_.RegisterConsoleCommand<TraceChannelArguments>(disable);
-        !registered) {
-        return registered;
+    const cvar::ConsoleCommand* const commands[] = {&TraceEnableCommand, &TraceDisableCommand,
+                                                    &TraceFileCommand, &TraceStopCommand,
+                                                    &TraceSnapshotCommand};
+    for (const cvar::ConsoleCommand* command : commands) {
+        if (auto bound = config_.BindCommand(*command, *this); !bound) {
+            return bound;
+        }
     }
 
-    config::ConsoleCommandDefinition file;
-    file.name = "trace.file";
-    file.help = "Start writing the trace to a file: trace.file path=Saved/Traces/run.rtrace";
-    file.execute = &RunFile;
-    file.context = this;
-    if (auto registered = config_.RegisterConsoleCommand<TracePathArguments>(file); !registered) {
-        return registered;
-    }
-
-    config::ConsoleCommandDefinition stop;
-    stop.name = "trace.stop";
-    stop.help = "Stop the file output started by trace.file";
-    stop.execute = &RunStop;
-    stop.context = this;
-    if (auto registered = config_.RegisterConsoleCommand(stop); !registered) {
-        return registered;
-    }
-
-    config::ConsoleCommandDefinition snapshot;
-    snapshot.name = "trace.snapshot";
-    snapshot.help =
-        "Write the recent trace ring to a file: trace.snapshot path=Saved/Traces/recent.rtrace";
-    snapshot.execute = &RunSnapshot;
-    snapshot.context = this;
-    return config_.RegisterConsoleCommand<TracePathArguments>(snapshot);
+    return Result<void>::Success();
 }
 
 Result<void> TraceController::SetChannel(StringView name, bool enabled, bool fromPreset,
@@ -332,8 +371,9 @@ Result<TraceSnapshotInfo> TraceController::WriteSnapshot(StringView path) noexce
         return Result<TraceSnapshotInfo>::Failure(assigned.Error());
     }
 
-    const auto timeout = static_cast<uint32>(ClampUnsigned(
-        config_.Get<TraceCaptureSettings>().snapshotLockTimeoutMs, NumericLimits<uint32>::Max()));
+    // 명령은 Sync 5단계에 게임 lane에서 돈다(이 문맥의 snapshot이 묶여 있다 — CVar 7.1절).
+    const auto timeout = static_cast<uint32>(
+        ClampUnsigned(TraceSnapshotLockTimeoutVar.Get(), NumericLimits<uint32>::Max()));
     auto written = session_.WriteSnapshot(terminated.CStr(), timeout);
     if (!written) {
         const platform::FileStatus status = session_.Stats().lastOutputFileStatus;
@@ -357,71 +397,82 @@ Result<TraceSnapshotInfo> TraceController::WriteSnapshot(StringView path) noexce
 
 namespace {
 
-Result<void> RunChannels(void* context, const void* arguments, config::ConsoleOutput& output,
+Result<void> RunChannels(cvar::CommandContext& context, StringView channels,
                          bool enabled) noexcept {
-    auto& controller = *static_cast<TraceController*>(context);
-    const auto& args = *static_cast<const TraceChannelArguments*>(arguments);
-    auto change = controller.SetChannels(args.channels.View(), enabled);
+    TraceController* controller = context.Target<TraceController>();
+    if (controller == nullptr) {
+        WriteLine(context, "no trace controller");
+        return Result<void>::Success();
+    }
+
+    auto change = controller->SetChannels(channels.TrimAscii(), enabled);
     if (!change) {
         return Result<void>::Failure(change.Error());
     }
 
-    Allocator& allocator = TraceControllerAccess::AllocatorOf(controller);
-    StringBuilder<128> line(allocator);
+    StringBuilder<128> line(context.GetAllocator());
     static_cast<void>(line.TryAppendFormat("{} channel(s) {}, {} unknown, {} read-only",
                                            change.Value().applied, enabled ? "enabled" : "disabled",
                                            change.Value().unknown, change.Value().readOnly));
-    WriteLine(output, allocator, line.View());
+    WriteLine(context, line.View());
     return Result<void>::Success();
 }
 
-Result<void> RunEnable(void* context, const void* arguments,
-                       config::ConsoleOutput& output) noexcept {
-    return RunChannels(context, arguments, output, true);
+Result<void> RunEnable(cvar::CommandContext& context, StringView channels) noexcept {
+    return RunChannels(context, channels, true);
 }
 
-Result<void> RunDisable(void* context, const void* arguments,
-                        config::ConsoleOutput& output) noexcept {
-    return RunChannels(context, arguments, output, false);
+Result<void> RunDisable(cvar::CommandContext& context, StringView channels) noexcept {
+    return RunChannels(context, channels, false);
 }
 
-Result<void> RunFile(void* context, const void* arguments, config::ConsoleOutput& output) noexcept {
-    auto& controller = *static_cast<TraceController*>(context);
-    const auto& args = *static_cast<const TracePathArguments*>(arguments);
-    if (auto opened = controller.OpenFile(args.path.View()); !opened) {
+Result<void> RunFile(cvar::CommandContext& context, StringView path) noexcept {
+    TraceController* controller = context.Target<TraceController>();
+    if (controller == nullptr) {
+        WriteLine(context, "no trace controller");
+        return Result<void>::Success();
+    }
+
+    if (auto opened = controller->OpenFile(path.TrimAscii()); !opened) {
         return opened;
     }
 
-    WriteLine(output, TraceControllerAccess::AllocatorOf(controller), "Trace file output started");
+    WriteLine(context, "Trace file output started");
     return Result<void>::Success();
 }
 
-Result<void> RunStop(void* context, const void* arguments, config::ConsoleOutput& output) noexcept {
-    (void)arguments;
-    auto& controller = *static_cast<TraceController*>(context);
-    if (auto closed = controller.CloseFile(); !closed) {
+Result<void> RunStop(cvar::CommandContext& context) noexcept {
+    TraceController* controller = context.Target<TraceController>();
+    if (controller == nullptr) {
+        WriteLine(context, "no trace controller");
+        return Result<void>::Success();
+    }
+
+    if (auto closed = controller->CloseFile(); !closed) {
         return closed;
     }
 
-    WriteLine(output, TraceControllerAccess::AllocatorOf(controller), "Trace file output stopped");
+    WriteLine(context, "Trace file output stopped");
     return Result<void>::Success();
 }
 
-Result<void> RunSnapshot(void* context, const void* arguments,
-                         config::ConsoleOutput& output) noexcept {
-    auto& controller = *static_cast<TraceController*>(context);
-    const auto& args = *static_cast<const TracePathArguments*>(arguments);
-    auto written = controller.WriteSnapshot(args.path.View());
+Result<void> RunSnapshot(cvar::CommandContext& context, StringView path) noexcept {
+    TraceController* controller = context.Target<TraceController>();
+    if (controller == nullptr) {
+        WriteLine(context, "no trace controller");
+        return Result<void>::Success();
+    }
+
+    auto written = controller->WriteSnapshot(path.TrimAscii());
     if (!written) {
         return Result<void>::Failure(written.Error());
     }
 
-    Allocator& allocator = TraceControllerAccess::AllocatorOf(controller);
-    StringBuilder<128> line(allocator);
+    StringBuilder<128> line(context.GetAllocator());
     static_cast<void>(line.TryAppendFormat("Trace snapshot written ({} bytes, {})",
                                            written.Value().bytes,
                                            written.Value().complete ? "complete" : "incomplete"));
-    WriteLine(output, allocator, line.View());
+    WriteLine(context, line.View());
     return Result<void>::Success();
 }
 

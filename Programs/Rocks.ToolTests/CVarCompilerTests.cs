@@ -50,6 +50,7 @@ internal static class CVarCompilerTests
             .Help("Shadow quality level");
         BootCVar<String> GraphicsBackend = cvar::Boot("render.backend", "vulkan").Help("Graphics backend");
         CVar<bool> GodMode = cvar::Var("game.god", false).Help("Invulnerable player").Cheat();
+        Result<void> FlushLogs(cvar::CommandContext& context, int32 count, StringView rest) noexcept;
         CVar<int32> Samples = cvar::Var("render.aa.samples", 4).Help("MSAA sample count")
             .Validate([](const int32& value) noexcept -> StringView {
                 return (value & (value - 1)) == 0 ? StringView{} : "must be a power of two";
@@ -111,6 +112,8 @@ internal static class CVarCompilerTests
                 "                           Profile, Style, TierLevel, Shared, Threads, ShadowGroup, OverallGroup);",
                 "}",
                 "int32 LevelOf() noexcept { return ShadowGroup.Get(); }",
+                "constinit ConsoleCommand FlushCommand = cvar::Command<&FlushLogs>(\"log.flush\").Help(\"Flush\").Cheat();",
+                "Result<void> RegisterProbeCommands(config::ConfigContext& config) noexcept { return config.Register(FlushCommand, Samples); }",
                 "cvar::Index IndexOf() noexcept { return ShadowDistance.Index(); }");
 
             (string Name, string Source, string Diagnostic)[] rejected =
@@ -199,8 +202,15 @@ internal static class CVarCompilerTests
                 ("preset_missing_help", "CVarGroup G = cvar::Group(\"quality.g\", 0).Level(0);", "CVarError_MissingHelp"),
                 ("preset_auto_builder", "void F() noexcept { auto builder = cvar::Group(\"quality.g\", 0).Help(\"g\"); (void)builder; }",
                     "deleted"),
+                ("command_missing_help", "ConsoleCommand C = cvar::Command<&FlushLogs>(\"log.x\");", "CVarError_MissingHelp"),
+                ("command_invalid_name", "ConsoleCommand C = cvar::Command<&FlushLogs>(\"Log.X\").Help(\"x\");", "CVarError_InvalidName"),
+                ("command_bad_parameter", ("Result<void> Bad(cvar::CommandContext&, String) noexcept;" +
+                    "ConsoleCommand C = cvar::Command<&Bad>(\"log.x\").Help(\"x\");"),
+                    "Command parameters must be bool, int32, int64, float, double, StringView or a named enum class"),
+                ("command_bad_signature", "void Bad() noexcept; ConsoleCommand C = cvar::Command<&Bad>(\"log.x\").Help(\"x\");",
+                    "Command function must be Result<void> (*)(cvar::CommandContext&, Args...) noexcept"),
                 ("register_non_handle", "Result<void> F(config::ConfigContext& config) noexcept { int32 value = 1; return config.Register(value); }",
-                    "ConfigContext::Register takes CVar, BootCVar or CVarGroup handles (Config/CVar.h)"),
+                    "ConfigContext::Register takes CVar, BootCVar, CVarGroup or ConsoleCommand handles"),
             ];
 
             // 서로 독립인 컴파일이라 함께 돌린다.

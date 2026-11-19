@@ -30,6 +30,9 @@ internal static partial class MetaTests
 
         private string lastInclude = "Probe.h";
 
+        // 마지막 GenerateAsync의 표준 오류다(진단 코드를 정확히 단언하는 시험이 읽는다).
+        public string LastStdErr { get; private set; } = "";
+
         // 마지막으로 생성한 헤더의 생성 경로다(fixture 모드는 fixture 철자).
         public string Output => MetaCompilerArguments.GeneratedPath(temporary.Root, lastInclude);
 
@@ -86,6 +89,7 @@ internal static partial class MetaTests
             }
 
             var result = await ProcessRunner.RunAsync(new(executable, arguments, options.Root, environment, Timeout: ProbeTimeout));
+            LastStdErr = result.StdErr;
             if (expectedCode is null)
             {
                 Verify.Equal(0, result.ExitCode, result.StdErr);

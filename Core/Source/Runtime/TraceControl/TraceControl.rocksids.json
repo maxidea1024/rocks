@@ -6,56 +6,56 @@
       "name": "rocks::trace_control::TraceCaptureSettings::poolMaxBytes",
       "id": "243d26bd199f4fb0a1e3f2fe7ff4d269",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "field",
       "name": "rocks::trace_control::TraceCaptureSettings::poolWarningPercent",
       "id": "5812232de40f47998a87d0468a2aad9f",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "field",
       "name": "rocks::trace_control::TraceCaptureSettings::recentBytes",
       "id": "c607a88deda04632a1f5b0160cc00097",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "field",
       "name": "rocks::trace_control::TraceCaptureSettings::snapshotLockTimeoutMs",
       "id": "2e60791de3fe4b44878b6cece625d21d",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "field",
       "name": "rocks::trace_control::TraceCaptureSettings::statsIntervalPumps",
       "id": "be38ce37657f4c8a810d0c8d923b1057",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "field",
       "name": "rocks::trace_control::TraceCaptureSettings::writerPeriodMs",
       "id": "c0024c73396b4e4a81d1b1c025e0a625",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "field",
       "name": "rocks::trace_control::TraceChannelArguments::channels",
       "id": "6a2fb308e1e541eaa6113484dd505b07",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "field",
       "name": "rocks::trace_control::TracePathArguments::path",
       "id": "ab323a756ecd4f48b97573c40145c089",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "field",
@@ -69,21 +69,21 @@
       "name": "rocks::trace_control::TraceCaptureSettings",
       "id": "919a9740ae5d40c4b45ce6aa9b6ea738",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "type",
       "name": "rocks::trace_control::TraceChannelArguments",
       "id": "b617083faf764a5b9b6540b0aeda8877",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "type",
       "name": "rocks::trace_control::TracePathArguments",
       "id": "8d2e8fcacd3d49efab8f991d8a2b3ba3",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "type",

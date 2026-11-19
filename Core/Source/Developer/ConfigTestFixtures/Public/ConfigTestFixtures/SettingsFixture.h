@@ -131,14 +131,4 @@ struct DisplaySettings {
     ROCKS_PROPERTY() int32 frameCap = 60;
 };
 
-// 콘솔 명령 인자 struct다(`render.reload count=2 target=all`).
-ROCKS_STRUCT()
-struct ReloadArgs {
-    explicit ReloadArgs(Allocator& allocator) noexcept : target(allocator) {
-    }
-
-    ROCKS_PROPERTY() int32 count = 1;
-    ROCKS_PROPERTY() String target;
-};
-
 } // namespace rocks::config_fixture

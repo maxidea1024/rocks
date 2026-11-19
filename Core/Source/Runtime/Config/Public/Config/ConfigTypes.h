@@ -193,6 +193,12 @@ enum class ConfigDiagnosticCode : uint8 {
     // 경고: 묶음 펼침이 MaxGroupPasses 번 안에 멈추지 않았다(묶음끼리 서로 바꾸는 순환 — 마지막
     // 결과를 쓴다, CVar 10절).
     GroupNoConverge,
+    // 치트 허용 상태(`cheat.enabled`)가 꺼져 있어 `Cheat()` 변수의 콘솔 쓰기·치트 명령을 거부했다
+    // (CVar 13.1절 — 받을 때와 Sync 적용 때 판정).
+    CheatsDisabled,
+    // 클라이언트 역할에서 `Replicated()` 변수의 콘솔 쓰기를 거부했다(서버 값을 따른다 —
+    // CVar 13.2절).
+    ReplicatedOnClient,
     // 프리셋 묶음 정의끼리 맞지 않는다: 묶음의 묶음 순환·자기 참조(메시지에 순환 경로), 두 묶음이
     // 같은 변수를 항목으로 가짐(두 묶음 이름) — ConfigContext::Register가 거부한다(CVar 11절).
     GroupConflict,
