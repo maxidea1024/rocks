@@ -148,8 +148,9 @@ Result<PackageHeader> ReadPackageHeader(Span<const uint8> headerBytes, uint64 fi
 //
 // 인자: allocator(결과 배열·문자열), file(패키지 byte 전체 — 결과가 빌린다), options.
 // 오류: ReadPackageHeader의 오류, 섹션 표·섹션 내용 위반은 CorruptPackage / InvalidArgument, 버전
-// 축은 UnsupportedVersion·NewerVersion / Unsupported, 할당 실패는 그 오류(진단 코드 None)다.
-// 실패하면 failure(있으면)에 분류와 섹션·위치를 채운다.
+// 축은 UnsupportedVersion·NewerVersion / Unsupported, 할당 실패와 options.types 조회의 버전 판정
+// 밖 실패(종료된 TypeRegistry의 ShuttingDown 등)는 그 오류(진단 코드 None)다. 실패하면
+// failure(있으면)에 분류와 섹션·위치를 채운다.
 //
 // 사용 예:
 //   PackageReadOptions options;
@@ -166,9 +167,12 @@ Result<PackageContents> ReadPackage(Allocator& allocator, Span<const uint8> file
 // contents의 bulk entry를 모두 풀어 raw byte를 out 끝에 bulkId 순으로 이어 붙이고, entry별 위치를
 // slots에 채운다(rawBytes와 SHA-256 확인). raw 합이 maxRawBytes를 넘으면 CapacityExceeded다.
 //
-// 오류: 압축 해제 실패·크기 불일치·SHA-256 불일치는 CorruptPackage / InvalidArgument(해제기의 원래
-// 오류가 InvalidArgument가 아니어도 InvalidArgument로 알리고 원래 오류는 진단 detail에 남긴다),
-// 할당 실패는 OutOfMemory다. 실패하면 out·slots는 호출 전 길이로 돌아간다.
+// Zstd entry는 블록 컨테이너(RCBK)이며 헤더의 rawSize를 BulkIndex rawBytes와 먼저 대조한다(맞지
+// 않으면 해제하지 않는다).
+//
+// 오류: 컨테이너 형식·Zstd가 아닌 codec·rawSize 불일치·블록 해제 실패·SHA-256 불일치는
+// CorruptPackage / InvalidArgument(진단 detail = bulkId), 할당 실패는 OutOfMemory다. 실패하면
+// out·slots는 호출 전 길이로 돌아간다.
 Result<void> DecodePackageBulk(const PackageContents& contents, Array<uint8>& out,
                                Array<PackageBulkSlot>& slots, uint64 maxRawBytes,
                                AssetDiagnostic* failure = nullptr) noexcept;

@@ -273,9 +273,9 @@ TEST(AssetPackage_PrepareCrossChecks) {
                         PackageSectionKind::Dependencies));
     }
 
-    // 쓰이지 않은 import(그래프가 가리키지 않는 다른 에셋)는 그래프 1단계가 거부한다(모든 외부 참조
-    // 칸이 쓰여야 한다 — Objects 손상). Prepare의 "import 에셋은 Hard·EditorOnly 의존" 검사는
-    // 그래프가 이것을 받아 줄 때의 방어선이다(14.1.2절 닿지 않는 분기).
+    // import 하나를 더하고 Objects header의 외부 번호 수(externalCount)는 그대로 두면 그래프
+    // 1단계가 import 수 불일치로 거부한다(Objects 손상). 외부 번호 수를 맞춘 경우는
+    // AssetPackage_OuterOnlyImportCrossChecks·AssetPackage_UnusedImportIsCorrupt가 본다.
     {
         auto cooked = ReadPackage(allocator, loaded.cooked.View(), PackageReadOptions{});
         REQUIRE(cooked);

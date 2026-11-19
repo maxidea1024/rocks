@@ -74,6 +74,8 @@ struct PackageLoadOptions {
 //   결과 ⊆ Dependencies"만 본다(AS 5.3절). 모든 import의 에셋(outer import만 있는 에셋 포함)은
 //   Hard 또는 EditorOnly 의존이어야 하고, Hard 의존 에셋의 대표 에셋 import 타입은 그 의존의
 //   expectedType과 같다.
+// - 모든 import는 Objects가 가리키거나 뒤 import의 outer다(AS 5.7절 15 — 읽기 전용 열기는 보지
+//   않는다).
 //
 // 사용 예(동기 로드 — 시험·도구):
 //   PackageLoadState state(allocator, registry, types, access, options);   // 소유 스레드
@@ -88,7 +90,10 @@ struct PackageLoadOptions {
 //   auto committed = transaction.Commit(packages, roots);
 //
 // 수명: allocator는 스레드 사이 할당·해제를 지원해야 한다(Prepare가 worker에서 할당한 것을 소유
-// 스레드가 쓰고 해제한다). registry·types는 이 상태보다 오래 살아야 한다. Prepare에 준 file byte는
+// 스레드가 쓰고 해제한다). Prepare는 이 allocator만 쓰고 Registry allocator는 쓰지 않는다(그것은
+// 소유 스레드 전용이다 — InstantiatePackages만 쓴다). 압축을 푼 bulk 저장소는 복사 없이 Package가
+// 이어받으므로 allocator는 이 상태로 만든 Package(Registry)보다 오래 살아야 한다(AS 5.7절 16).
+// registry·types는 이 상태보다 오래 살아야 한다. Prepare에 준 file byte는
 // 이 상태가 소유한다(그래프 1단계가 이름·필드 view를 빌린다). 이동·복사 금지다.
 class PackageLoadState {
 public:
@@ -151,7 +156,7 @@ private:
     // import i가 그 에셋의 첫 항목이고 그 에셋이 Hard 의존이면 expectedType, 아니면 0이다
     // (CrossCheck가 채운다 — InstantiatePackages가 대상 대표 에셋 타입과 대조한다).
     Array<TypeId> hardTypes_;
-    // 압축을 푼 bulk(registry.ObjectAllocator()로 할당 — Package가 이어받는다).
+    // 압축을 푼 bulk(상태 allocator로 할당 — Package가 복사 없이 이어받는다).
     Array<uint8> bulkBytes_;
     Array<PackageBulkSlot> bulkSlots_;
     bool prepared_ = false;
@@ -183,12 +188,13 @@ protected:
 // Package handle — 공개 전 객체).
 //
 // 오류: 인자 위반 InvalidArgument(이미 넘긴 상태를 다시 넘긴 경우 포함 — 성공했든 실패했든 상태는
-// 한 번만 쓴다), 묶음 밖 import 대상 패키지·객체·Hard 의존 대표 에셋이 없으면 MissingDependency /
-// NotFound(related = 그 에셋), 대상 타입이 import 선언 타입의 파생이 아니거나 Hard 의존 대표 에셋
-// 타입이 expectedType의 파생이 아니면 TypeMismatch / TypeMismatch, 트랜잭션·그래프 단계의
-// 오류(할당·스레드·접근 문맥·종료·재진입)는 진단 None과 그 오류, Required 실효 값 누락(쿠킹)은
-// CorruptPackage / InvalidArgument다. 객체를 만든 뒤의 실패는 트랜잭션을 그 오류로
-// 고정한다(호출자가 Rollback하거나 소멸자가 되돌린다 — 부분 공개 없음).
+// 한 번만 쓴다), resolver가 준 handle이 그 에셋의 공개된 Package가 아니면(null·회수됨·Package가
+// 아닌 객체·다른 AssetId) 진단 None + InvalidArgument, 묶음 밖 import 대상 패키지·객체·Hard 의존
+// 대표 에셋이 없으면 MissingDependency / NotFound(related = 그 에셋), 대상 타입이 import 선언
+// 타입의 파생이 아니거나 Hard 의존 대표 에셋 타입이 expectedType의 파생이 아니면 TypeMismatch /
+// TypeMismatch, 트랜잭션·그래프 단계의 오류(할당·스레드·접근 문맥·종료·재진입)는 진단 None과 그
+// 오류, Required 실효 값 누락(쿠킹)은 CorruptPackage / InvalidArgument다. 객체를 만든 뒤의 실패는
+// 트랜잭션을 그 오류로 고정한다(호출자가 Rollback하거나 소멸자가 되돌린다 — 부분 공개 없음).
 Result<void> InstantiatePackages(ConstructionContext& transaction,
                                  Span<PackageLoadState* const> packages,
                                  PackageImportResolver* resolver, Span<ObjectHandle> outPackages,

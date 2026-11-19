@@ -3,8 +3,10 @@
 #include <AssetRuntime/BulkData.generated.h>
 #include <AssetRuntime/Package.h>
 #include <AssetRuntime/PackageWriter.h>
+#include <Compression/CompressedBlocks.h>
 #include <Compression/Compression.h>
 #include <Core/Algorithms.h>
+#include <Core/Assert.h>
 #include <Core/Containers/HashMap.h>
 #include <Core/Encoding/Crc32.h>
 #include <ObjectSerialization/ObjectGraph.h>
@@ -117,9 +119,7 @@ public:
         }
 
         auto outermost = registry_.GetOutermost(access_, info.target);
-        if (!outermost) {
-            return Result<ExternalAdmission>::Failure(outermost.Error());
-        }
+        ROCKS_ASSERT(outermost.IsOk());
 
         // 자기 패키지 객체는 import 대상이 아니다.
         if (outermost.Value() == package_) {
@@ -127,9 +127,7 @@ public:
         }
 
         auto type = registry_.AcquireType(access_, outermost.Value());
-        if (!type) {
-            return Result<ExternalAdmission>::Failure(type.Error());
-        }
+        ROCKS_ASSERT(type.IsOk());
 
         if (!type.Value().IsNativeA(NativeTypeKey<Package>())) {
             unpackaged_ = true;
@@ -201,9 +199,7 @@ Result<AssetId> PackageIdOf(ObjectRegistry& registry, const ObjectAccessContext&
     }
 
     auto pointer = borrow.Value().Get();
-    if (!pointer) {
-        return Result<AssetId>::Failure(pointer.Error());
-    }
+    ROCKS_ASSERT(pointer.IsOk());
 
     return Result<AssetId>::Success(pointer.Value()->Id());
 }
@@ -224,9 +220,7 @@ public:
     // 오류와 할당 실패는 그대로다.
     Result<void> Add(const GraphExternal& external, uint32 slot) noexcept {
         auto outermost = registry_.GetOutermost(access_, external.target);
-        if (!outermost) {
-            return Result<void>::Failure(outermost.Error());
-        }
+        ROCKS_ASSERT(outermost.IsOk());
 
         auto package = PackageOf(outermost.Value());
         if (!package) {
@@ -251,9 +245,7 @@ public:
             }
 
             auto outer = registry_.GetOuter(access_, cursor);
-            if (!outer) {
-                return Result<void>::Failure(outer.Error());
-            }
+            ROCKS_ASSERT(outer.IsOk());
 
             if (outer.Value() == package.Value().representative) {
                 break;
@@ -281,9 +273,7 @@ public:
                 draft.type = external.type;
             } else {
                 auto type = registry_.AcquireType(access_, object);
-                if (!type) {
-                    return Result<void>::Failure(type.Error());
-                }
+                ROCKS_ASSERT(type.IsOk());
 
                 draft.type = type.Value().Id();
             }
@@ -302,10 +292,12 @@ public:
         return drafts_;
     }
 
-    // asset의 대표 에셋 타입이다(Add가 본 패키지만 — 없으면 0).
+    // asset의 대표 에셋 타입이다. Hard 의존은 모두 Add를 거친 외부 참조에서 나오므로 그 패키지의
+    // 타입이 언제나 있다(Add가 보지 않은 asset으로 부르는 것은 호출자 오류다).
     TypeId RepresentativeType(AssetId asset) const noexcept {
         const TypeId* type = types_.Find(asset.value);
-        return type != nullptr ? *type : TypeId{};
+        ROCKS_ASSERT(type != nullptr);
+        return *type;
     }
 
     // ObjectImports 순서(AS 5.2절 — assetId 오름차순, 같은 에셋 안은 깊이 우선이고 같은 outer
@@ -403,9 +395,7 @@ private:
         }
 
         auto asset = PackageIdOf(registry_, access_, outermost);
-        if (!asset) {
-            return Result<ImportPackage>::Failure(asset.Error());
-        }
+        ROCKS_ASSERT(asset.IsOk());
 
         if (asset.Value().IsNull()) {
             return Result<ImportPackage>::Failure(ErrorCode::InvalidArgument);
@@ -417,9 +407,7 @@ private:
         }
 
         auto type = registry_.AcquireType(access_, representative.Value());
-        if (!type) {
-            return Result<ImportPackage>::Failure(type.Error());
-        }
+        ROCKS_ASSERT(type.IsOk());
 
         const ImportPackage package{asset.Value(), representative.Value(), type.Value().Id()};
         if (auto inserted = packages_.Insert(outermost, package); !inserted) {
@@ -500,7 +488,7 @@ Result<void> AddEngineVersion(Allocator& allocator, RecordBuilder& parent, Guid 
 }
 
 // 0 byte를 count개 붙인다.
-Result<void> AppendZeros(PackageSink& sink, uint64 count) noexcept {
+Result<void> AppendZerosTo(PackageSink& sink, uint64 count) noexcept {
     static constexpr uint8 Zeros[512] = {};
     while (count > 0) {
         const uint64 chunk = count < sizeof(Zeros) ? count : sizeof(Zeros);
@@ -524,7 +512,7 @@ public:
 
     Result<void> Begin() noexcept {
         position_ = 0;
-        if (auto zeros = AppendZeros(sink_, PackageHeaderBytes); !zeros) {
+        if (auto zeros = AppendZerosTo(sink_, PackageHeaderBytes); !zeros) {
             return zeros;
         }
 
@@ -534,7 +522,7 @@ public:
 
     Result<void> Pad(uint64 alignment) noexcept {
         const uint64 aligned = AlignUp(position_, alignment);
-        if (auto zeros = AppendZeros(sink_, aligned - position_); !zeros) {
+        if (auto zeros = AppendZerosTo(sink_, aligned - position_); !zeros) {
             return zeros;
         }
 
@@ -574,6 +562,21 @@ public:
         return Append(bytes);
     }
 
+    // 0 byte를 count개 붙인다(나중에 WriteAt으로 채울 자리).
+    Result<void> AppendZeros(uint64 count) noexcept {
+        if (auto zeros = AppendZerosTo(sink_, count); !zeros) {
+            return zeros;
+        }
+
+        position_ += count;
+        return Result<void>::Success();
+    }
+
+    // 이미 쓴 범위 [offset, offset + bytes.Size())를 덮어쓴다.
+    Result<void> WriteAt(uint64 offset, Span<const uint8> bytes) noexcept {
+        return sink_.WriteAt(offset, bytes);
+    }
+
     // 직접 쓴 섹션(Bulk)의 표 항목을 더한다.
     Result<void> AddEntry(const PackageSectionEntry& entry) noexcept {
         return sections_.TryPushBack(entry);
@@ -593,7 +596,10 @@ private:
     uint64 position_ = 0;
 };
 
-// bulk entry를 Bulk 섹션에 쓰고 BulkIndex 항목을 모은다.
+// bulk entry를 Bulk 섹션에 쓰고 BulkIndex 항목을 모은다. Zstd는 entry마다 블록 컨테이너(RCBK —
+// PackageBulkBlockSizeLog2 블록)로 블록 하나씩 압축해 sink에 흘려 쓰고, 인덱스 자리는 비워 뒀다가
+// 끝에 WriteAt으로 채운다 — 압축 메모리는 블록 하나다(AS 5.5절 3, 5.7절 6). 저장 CRC는 인덱스와
+// payload의 CRC를 이어 붙여(Crc32Combine) 만든다.
 Result<void> WriteBulk(Allocator& allocator, SectionWriter& out, const PackageWriteOptions& options,
                        uint32 alignment, Span<const BulkDraft> drafts,
                        Array<PackageBulkEntry>& index, AssetId self,
@@ -611,15 +617,18 @@ Result<void> WriteBulk(Allocator& allocator, SectionWriter& out, const PackageWr
     }
 
     const uint64 start = out.Position();
-    Array<uint8> compressed(allocator);
-    Result<CompressionSettings> settings = Result<CompressionSettings>::Failure(ErrorCode::None);
+    Result<CompressedBlocksSettings> blocks =
+        Result<CompressedBlocksSettings>::Failure(ErrorCode::None);
     if (options.bulkCodec == BulkCodec::Zstd) {
-        settings = CompressionSettings::TryDefault(CompressionFormat::Zstd);
-        if (!settings) {
-            return Result<void>::Failure(settings.Error());
-        }
+        // 기본 Zstd 설정은 상수이고 블록 크기는 범위 안이라 실패하지 않는다.
+        auto settings = CompressionSettings::TryDefault(CompressionFormat::Zstd);
+        ROCKS_ASSERT(settings.IsOk());
+        blocks = CompressedBlocksSettings::TryMake(settings.Value(), PackageBulkBlockSizeLog2);
+        ROCKS_ASSERT(blocks.IsOk());
     }
 
+    Array<uint8> payload(allocator);
+    Array<uint8> container(allocator);
     for (usize position = 0; position < drafts.Size(); ++position) {
         const BulkDraft& draft = drafts[position];
         auto raw = options.bulkSource->ReadBulk(draft.original);
@@ -634,44 +643,80 @@ Result<void> WriteBulk(Allocator& allocator, SectionWriter& out, const PackageWr
                 static_cast<uint32>(PackageSectionKind::Bulk), draft.original.bulkId);
         }
 
-        Span<const uint8> stored = raw.Value();
-        BulkCodec codec = BulkCodec::None;
-        if (options.bulkCodec == BulkCodec::Zstd) {
-            compressed.Clear();
-            auto packed = TryCompressAppend(settings.Value(), raw.Value(), compressed);
-            if (!packed) {
-                return Result<void>::Failure(packed.Error());
-            }
-
-            // 압축이 줄이지 못하면 원본 그대로 둔다(결정적 — 같은 입력이면 같은 선택).
-            if (compressed.Size() < raw.Value().Size()) {
-                stored = compressed.View();
-                codec = BulkCodec::Zstd;
-            }
-        }
-
         if (position > 0) {
             if (auto padded = out.Pad(alignment); !padded) {
                 return padded;
             }
         }
 
+        const Span<const uint8> bytes = raw.Value();
         PackageBulkEntry entry;
         entry.bulkId = static_cast<uint32>(position + 1);
         // 쿠킹은 EditorOnly 필드를 쓰지 않으므로(치환 hook이 불리지 않는다) EditorOnly 초안이 없다.
         entry.flags = draft.editorOnly ? static_cast<uint32>(BulkEntryFlags::EditorOnly) : 0;
         entry.offset = out.Position() - start;
-        entry.storedBytes = stored.Size();
-        entry.rawBytes = raw.Value().Size();
-        entry.codec = codec;
-        entry.crc32 = Crc32(stored);
+        entry.rawBytes = bytes.Size();
         entry.sha256 = draft.original.sha256;
-        if (auto pushed = index.TryPushBack(entry); !pushed) {
-            return pushed;
+        // 0 byte entry는 압축할 것이 없어 언제나 None이다.
+        if (options.bulkCodec == BulkCodec::Zstd && !bytes.IsEmpty()) {
+            auto writer = CompressedBlocksWriter::TryBegin(blocks.Value(), bytes.Size(), allocator);
+            if (!writer) {
+                return Result<void>::Failure(writer.Error());
+            }
+
+            const usize indexBytes = writer.Value().IndexBytes();
+            const uint64 entryStart = out.Position();
+            if (auto reserved = out.AppendZeros(indexBytes); !reserved) {
+                return reserved;
+            }
+
+            constexpr usize blockBytes = usize{1} << PackageBulkBlockSizeLog2;
+            uint32 payloadCrc = 0;
+            uint64 payloadBytes = 0;
+            for (usize offset = 0; offset < bytes.Size(); offset += blockBytes) {
+                const usize length =
+                    bytes.Size() - offset < blockBytes ? bytes.Size() - offset : blockBytes;
+                payload.Clear();
+                if (auto appended =
+                        writer.Value().TryAppendBlock(bytes.Slice(offset, length), payload);
+                    !appended) {
+                    return Result<void>::Failure(appended.Error());
+                }
+
+                payloadCrc = Crc32(payload.View(), payloadCrc);
+                payloadBytes += payload.Size();
+                if (auto written = out.Append(payload.View()); !written) {
+                    return written;
+                }
+            }
+
+            if (auto resized = container.TryResize(indexBytes); !resized) {
+                return resized;
+            }
+
+            // 모든 블록을 넣었고 container는 정확히 IndexBytes다(TryFinishIndex의 실패 조건이
+            // 없다).
+            auto finished = writer.Value().TryFinishIndex(container.View());
+            ROCKS_ASSERT(finished.IsOk());
+
+            if (auto patched = out.WriteAt(entryStart, container.View()); !patched) {
+                return patched;
+            }
+
+            entry.storedBytes = indexBytes + payloadBytes;
+            entry.codec = BulkCodec::Zstd;
+            entry.crc32 = Crc32Combine(Crc32(container.View()), payloadCrc, payloadBytes);
+        } else {
+            entry.storedBytes = bytes.Size();
+            entry.codec = BulkCodec::None;
+            entry.crc32 = Crc32(bytes);
+            if (auto appended = out.Append(bytes); !appended) {
+                return appended;
+            }
         }
 
-        if (auto appended = out.Append(stored); !appended) {
-            return appended;
+        if (auto pushed = index.TryPushBack(entry); !pushed) {
+            return pushed;
         }
     }
 
@@ -684,7 +729,8 @@ Result<void> WriteBulk(Allocator& allocator, SectionWriter& out, const PackageWr
     return out.AddEntry(section);
 }
 
-Result<void> ValidateOptions(const PackageWriteOptions& options, uint32& alignment) noexcept {
+Result<void> ValidateOptions(Allocator& scratch, const PackageWriteOptions& options,
+                             uint32& alignment) noexcept {
     const bool editor = options.kind == PackageKind::Editor;
     if (options.kind != PackageKind::Editor && options.kind != PackageKind::Cooked) {
         return InvalidOption<void>();
@@ -724,9 +770,17 @@ Result<void> ValidateOptions(const PackageWriteOptions& options, uint32& alignme
         }
     }
 
-    if ((!options.importRecord.IsEmpty() && !ReadRecordHeader(options.importRecord)) ||
-        (!options.tags.IsEmpty() && !ReadRecordHeader(options.tags))) {
+    if (!options.importRecord.IsEmpty() && !ReadRecordHeader(options.importRecord)) {
         return InvalidOption<void>();
+    }
+
+    // Tags는 reader와 같은 규칙(키 엄격 오름차순)으로 검사한다 — 로드가 거부할 byte를 쓰지 않는다.
+    if (!options.tags.IsEmpty()) {
+        if (auto valid = ValidateTagsRecord(scratch, options.tags); !valid) {
+            return valid.Error() == ErrorCode::OutOfMemory
+                       ? Result<void>::Failure(ErrorCode::OutOfMemory)
+                       : InvalidOption<void>();
+        }
     }
 
     return Result<void>::Success();
@@ -837,7 +891,7 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
                                         AssetDiagnostic* failure) noexcept {
     using Out = PackageWriteResult;
     uint32 alignment = 0;
-    if (auto valid = ValidateOptions(options, alignment); !valid) {
+    if (auto valid = ValidateOptions(allocator, options, alignment); !valid) {
         return Result<Out>::Failure(valid.Error());
     }
 
@@ -877,23 +931,17 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
     (void)path.TryPushBack(Frame{package, 0, false});
     for (ObjectHandle inner : inners) {
         auto outer = registry.GetOuter(access, inner);
-        if (!outer) {
-            return Result<Out>::Failure(outer.Error());
-        }
+        ROCKS_ASSERT(outer.IsOk());
 
-        while (!path.IsEmpty() && !(path[path.Size() - 1].handle == outer.Value())) {
+        // DepthFirst 순서라 outer는 언제나 경로 위에 있다(맨 아래는 패키지).
+        while (!(path[path.Size() - 1].handle == outer.Value())) {
             (void)path.TryPopBack();
-        }
-
-        if (path.IsEmpty()) {
-            return Result<Out>::Failure(ErrorCode::InvalidArgument);
+            ROCKS_ASSERT(!path.IsEmpty());
         }
 
         const Frame parent = path[path.Size() - 1];
         auto type = registry.AcquireType(access, inner);
-        if (!type) {
-            return Result<Out>::Failure(type.Error());
-        }
+        ROCKS_ASSERT(type.IsOk());
 
         const bool excluded = parent.excluded || IsUnsaveableType(type.Value());
         Frame frame{inner, 0, excluded};
@@ -911,8 +959,11 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
                 return Result<Out>::Failure(got.Error());
             }
 
+            // 첫 export의 부모는 언제나 패키지다: 저장되는 부모는 DepthFirst에서 자식보다 먼저
+            // export되고, 제외된 부모의 자식은 함께 제외된다.
             const bool primary = exports.IsEmpty();
-            if (primary && (name.Value()->ByteCount() != 0 || parent.exportIndex != 0 ||
+            ROCKS_ASSERT(!primary || parent.exportIndex == 0);
+            if (primary && (name.Value()->ByteCount() != 0 ||
                             !type.Value().IsNativeA(NativeTypeKey<Asset>()))) {
                 // export 1은 패키지 바로 아래 빈 이름 Asset(대표 에셋)이어야 한다.
                 return InvalidOption<Out>();
