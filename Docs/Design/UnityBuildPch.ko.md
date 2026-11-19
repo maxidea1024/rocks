@@ -15,7 +15,7 @@
 
 UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`)의 UnrealBuildTool이다. 경로는 `Engine/Source/Programs/UnrealBuildTool/` 기준이다. UE 이름은 대응표와 근거에만 적는다. 레거시와 deprecated 경로는 따르지 않는다(`bChainPCHs`, `IncludeOrderVersion` 호환, BuildSettingsVersion별 분기, Perforce read-only 판별). clang 동작은 Rocks 툴체인(clang-cl·clang++ 21.1.6)으로 실측했다.
 
-상태: **설계 확정**(결정 UD1–UD20, 2026-11-18 사용자 승인 — 권장안). 리뷰어 교차 검증을 반영했다. 구현 단계는 UB0–UB6(15절)이며 착수 시점은 사용자가 정한다.
+상태: **설계 확정**(결정 UD1–UD20, 2026-11-18 사용자 승인 — 권장안). 리뷰어 교차 검증을 반영했다. 구현 단계는 UB0–UB6(15절)이다. 2026-11-20 사용자 결정으로 착수했고, 단계별 전체 빌드·기준 측정 없이 이어서 구현한 뒤 끝에 한 번 검증한다(12절의 반복 측정은 하지 않는다). 구현 상태와 구현하며 정한 점은 개정 이력에 단계마다 적는다.
 
 ## 1. 현재 상태와 문제
 
@@ -473,3 +473,4 @@ UB6에서 묶음 TU와 PCH action의 최대 메모리를 실측해, 동시 실�
 | 개정 | 날짜 | 내용 |
 |---|---|---|
 | 1 | 2026-11-18 | UE 5.8 UBT 조사(유니티·adaptive·PCH·IWYU·증분·측정)를 반영했다. 리뷰어 교차 검증으로 다음을 고쳤다: 묶음 경계 재설계, 루트 기준 include, `-Xclang -fno-pch-timestamp`와 clang 입력 검증의 한계, 강제 include 순서, 변형 key의 경로 제외와 shadow 검사, include 앞 `#define`, 도구 빌드 ID 논리 명령, depfile 2단 key, SDK 게임 공유 PCH, 낡은 산출물 정리, 인용 정정. 결정 UD1–UD20(UD20 보류), 단계 UB0–UB6. 설계 확정(사용자 승인 — 권장안) |
+| 1(구현 기록 UB0) | 2026-11-20 | UB0 구현(`Programs/Rocks.Build`의 `Depfile`·`DependencyRecord`·`BuildInputs`·`FileIdentity`, `NativeAction.Key`, `IncrementalStore` 형식 2). 구현하며 정한 점. (1) 의존 기록은 action의 출력 파일 `<object>.deps`다(머리말 + `<해시> <경로>` 줄). object와 같은 게시 경로를 타므로 "출력과 함께 원자적으로 게시, 실패·취소는 기록 없음"이 따로 구현 없이 성립하고, 기록 파일 자체도 출력 검증(4.3절)을 받는다. (2) 기록의 해시는 빌드의 입력 메모(`BuildInputs` — 빌드 시작 때 읽은 내용, 파일마다 한 번)에서 가져온다. 빌드 중 변경은 기존의 빌드 전후 입력 비교(header 디렉터리 내용 포함)가 잡아 그 실행의 기록을 버리고, header 디렉터리 밖으로 벗어난 include(상대 경로 등)는 빌드 끝에 다시 읽어 대조한다. action마다의 "실행 중 입력 변경" 검사는 그 action의 입력 파일(소스)만 다시 읽는다. (3) compile identity에 전체 소스 목록을 넣은 원래 이유는 README의 "source 옆 local header 보수 추적"이었다 — 소스 디렉터리의 헤더 이름 목록과 의존 기록이 대신하므로 뺐다. (4) 파일 ID는 Windows에서 `GetFileInformationByHandle`의 볼륨 일련번호·파일 색인, 그 밖에서는 `stat`의 장치·inode다(.NET에 API가 없어 libc를 직접 부른다. 얻지 못하면 그 출력은 언제나 다시 해시한다 — 판정은 같고 느릴 뿐이다). (5) compile DB와 BuildInfo manifest의 compile 부분을 이 단계에서 이미 논리 명령(`NativePlan.LogicalCompiles`)으로 바꿨다 — depfile 인자(`-MD -MF`)가 물리 action에만 있어야 도구 빌드 ID와 clangd 입력이 바뀌지 않는다(8.6·8.7절의 나머지는 UB1). (6) 툴체인 소유 판정에는 `OwnedRoots`·`FingerprintPaths`·keyed `INCLUDE`를 쓴다. 확인: `Rocks.Build.Tests` 51묶음 통과(새 `DependencyTests` — 파서 fixture, 헤더 하나 변경 시 그 TU만, shadow header·`__has_include` 반례, 기록 손상·삭제, 소스 추가·삭제, 출력 검증 memo) |

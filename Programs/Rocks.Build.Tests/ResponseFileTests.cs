@@ -246,7 +246,8 @@ internal static class ResponseFileTests
                 string file = spec.Arguments[0][1..];
                 byte[] bytes = File.ReadAllBytes(file);
                 string staged = Path.GetDirectoryName(file)!;
-                string[] expanded = action.ResolveArguments(action.Outputs.Select(output => Path.Combine(staged, Path.GetFileName(output))).ToArray());
+                string[] expanded = action.ResolveArguments(action.Outputs.Select(output => Path.Combine(staged, Path.GetFileName(output))).ToArray(),
+                    Path.Combine(staged, Executor.DepfileName));
                 Check(bytes.AsSpan().SequenceEqual(ResponseFile.Encode(expanded, quoting.Value)), action.Id + " response file is not the expanded arguments");
                 string text = quoting == ResponseFileQuoting.Windows ? Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2) : Encoding.UTF8.GetString(bytes);
                 Check((quoting == ResponseFileQuoting.Windows ? TokenizeWindows(text) : TokenizeGnu(text)).SequenceEqual(expanded, StringComparer.Ordinal),

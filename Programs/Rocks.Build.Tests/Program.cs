@@ -287,6 +287,9 @@ try
     await ModuleTableTests.RunAsync(request, root);
     Pass("module table: rows in dependency order without exempt modules, ROCKS_MODULE_NAME, missing entry link error, case collisions, reserved macro");
 
+    // 정밀 헤더 의존(UB0): depfile 파서, 2단 key, 의존 기록, compile identity, 출력 검증 memo. 하위 묶음마다 PASS를 센다.
+    await DependencyTests.RunAsync(request, root, Pass);
+
     await ReflectionSourceTests.RunAsync(request, root);
     Pass("reflection generated sources: source-less module archive, registration through the declaration, entry point exemption, incremental, validation");
 

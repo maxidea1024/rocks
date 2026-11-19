@@ -37,11 +37,16 @@
 
 ## 입력과 증분 계약
 
-source list/content, 유효 compile/link 옵션, 의존 artifact, public/private header inventory와 내용, 명시 AdditionalInputs, toolchain과 ContextFingerprint를 key에 포함한다. 확장자가 `.h/.hh/.hpp/.hxx/.inl/.inc/.ipp/.tpp`인 header와 source 옆 local header를 보수적으로 추적한다. 다른 확장자의 include/추가 생성 입력은 AdditionalInputs로 선언해야 한다. 실제 depfile 기반 정밀 의존 축소는 후속 작업이다.
+action의 hit는 두 단으로 판정한다([유니티 빌드·PCH](../../Docs/Design/UnityBuildPch.ko.md) 4절, UB0).
 
-repository root를 include해도 `out`과 현재 output의 임시 산출물은 탐색하지 않는다. `out/Generated`처럼 출력 tree 내부를 직접 include root로 선언한 경우 그 root는 별도 입력으로 검사한다. include 디렉터리 inventory(headersOnly 열거)는 점으로 시작하는 하위 디렉터리(`.claude`·`.vs`·`.native-tmp` 등), `.git`(파일 또는 디렉터리)을 가진 중첩 작업 사본, `.native-build.lock`을 가진 Rocks 출력 디렉터리를 깊이와 무관하게 뺀다(열거 루트 자신은 빼지 않는다). 새 optional/shadow header의 생성·삭제도 inventory digest를 바꾸므로 기존 depfile의 positive include만 믿지 않는다.
+1. **선언 입력 key**(`NativeAction.Key`): 이전 실행 결과에 의존하지 않는다. toolchain key, action 인자, 번역 단위 구성(compile identity — 그 action의 소스이고 모듈의 전체 소스 목록이 아니다), 입력 파일 내용(소스, archive·link의 object·라이브러리), 명시 AdditionalInputs 내용, ContextFingerprint, 그리고 include 디렉터리와 소스 디렉터리의 **헤더 이름 목록**(존재 집합 — 내용이 아니다)을 담는다. 이름 목록의 확장자는 `.h/.hh/.hpp/.hxx/.inl/.inc/.ipp/.tpp/.c`다.
+2. **의존 기록 검증**: compile action은 컴파일러에 depfile을 쓰게 하고(clang-cl `/clang:-MD /clang:-MF<파일>`, clang++ `-MD -MF <파일>`) 실행기가 그것을 읽어 의존 기록 `<object>.deps`(컴파일러가 실제로 연 파일과 각 내용의 SHA-256)를 object와 함께 게시한다. 선언 입력 key가 같으면 기록의 모든 파일을 현재 내용과 대조하고, 하나라도 다르거나 없거나 기록이 깨졌으면 다시 실행한다. 실패·취소한 실행은 기록을 남기지 않는다.
 
-cache hit은 key와 모든 출력 파일의 실제 SHA-256이 일치할 때만 인정한다. 입력이나 출력이 없거나 변조되면 재실행한다. compiler 실패 시 기존 출력은 유지하고 임시 산출물을 제거한다. dependency는 모든 출력 게시 이후에만 실행되며, crash 중 부분 교체가 남아도 다음 cache 검증은 그 상태를 성공으로 재사용하지 않는다. 게시 중 일반 파일 오류는 이전 출력을 복구한다.
+그래서 헤더 하나를 고치면 그 헤더를 실제로 연 번역 단위만 다시 컴파일되고, 모듈에 소스를 더하거나 지워도 다른 번역 단위는 그대로다. 툴체인 소유 헤더(`OwnedRoots`, `FingerprintPaths`, keyed 환경 `INCLUDE` 아래)는 의존 기록에 넣지 않는다 — toolchain key가 대신한다. depfile 파서(`Depfile`)는 Make 문법을 따른다(공백 `\ `, 공백 앞 역슬래시 두 배, `\#`, `$$`, 줄 이음, 상대·절대 경로). include로 열지 않는 추가 생성 입력은 지금처럼 AdditionalInputs로 선언한다. 한 빌드 안에서 파일 내용과 디렉터리 이름 목록은 한 번만 읽고(`BuildInputs`), 빌드 중 입력이 바뀌었는지는 빌드 전후 입력 비교(header 디렉터리 내용 포함)와 header 디렉터리 밖 의존 파일의 재확인이 본다.
+
+repository root를 include해도 `out`과 현재 output의 임시 산출물은 탐색하지 않는다. `out/Generated`처럼 출력 tree 내부를 직접 include root로 선언한 경우 그 root는 별도 입력으로 검사한다. include 디렉터리 inventory(headersOnly 열거)는 점으로 시작하는 하위 디렉터리(`.claude`·`.vs`·`.native-tmp` 등), `.git`(파일 또는 디렉터리)을 가진 중첩 작업 사본, `.native-build.lock`을 가진 Rocks 출력 디렉터리를 깊이와 무관하게 뺀다(열거 루트 자신은 빼지 않는다). 새 optional/shadow header의 생성·삭제(`__has_include` 결과 변화 포함)는 헤더 이름 목록을 바꾸므로 의존 기록의 positive include만 믿지 않는다.
+
+cache hit은 key와 모든 출력 파일이 기록과 일치할 때만 인정한다. 출력은 (크기, 수정 시각, 파일 ID)가 모두 기록과 같으면 기록된 SHA-256을 믿고, 하나라도 다르면 내용을 다시 해시해 대조한다(수정 시각만으로 hit를 판정하지 않는다. 파일 ID는 Windows에서 볼륨 일련번호와 파일 색인, 그 밖에서는 장치와 inode이고, 얻지 못하면 언제나 다시 해시한다). 같은 plan의 산출물을 입력으로 받는 action(archive·link)은 그 산출물의 기록 해시를 쓰고 파일을 다시 읽지 않는다. 입력이나 출력이 없거나 변조되면 재실행한다. 기록 파일 `native-cache.json`은 형식 번호를 갖고, 형식이 다르면 전부 miss다. compiler 실패 시 기존 출력은 유지하고 임시 산출물을 제거한다. dependency는 모든 출력 게시 이후에만 실행되며, crash 중 부분 교체가 남아도 다음 cache 검증은 그 상태를 성공으로 재사용하지 않는다. 게시 중 일반 파일 오류는 이전 출력을 복구한다.
 
 `NativeActionResult.DurationMilliseconds`(`action-report.json`의 action마다)는 그 action을 실행한 벽시계 시간(ms)이다. cache 검사 뒤부터 출력 게시·임시 디렉터리 정리까지를 재며 실행 슬롯을 기다린 시간은 넣지 않는다(병렬 action끼리는 겹친다). cache hit이나 선행 action 실패로 실행하지 않은 action은 0이다. 측정값이라 action key·`compile_commands.json`·도구 빌드 ID에는 들어가지 않는다([리플렉션 생성 소스](../../Docs/Design/ReflectionGeneratedSources.ko.md) GSD12 — 모듈별 compile 시간 합과 느린 번역 단위를 여기서 읽는다).
 

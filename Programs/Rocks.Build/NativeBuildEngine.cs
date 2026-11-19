@@ -35,6 +35,8 @@ public sealed class NativeBuildEngine
         var store = new IncrementalStore(request.OutputDirectory);
         string toolchainKey = Fingerprints.Toolchain(request.Toolchain);
         string initialInputs = InputSnapshot(request, plan, prepared.Digests);
+        // 입력 메모는 첫 InputSnapshot이 읽은 값에서 시작한다(같은 파일을 action마다 다시 읽지 않는다 — BuildInputs).
+        var inputs = new BuildInputs(request.RootDirectory, request.OutputDirectory, request.Toolchain, plan, prepared.Digests);
         var tasks = new Dictionary<string, Task<NativeActionResult>>(StringComparer.Ordinal);
         using var slots = new SemaphoreSlim(request.MaxParallelism);
         foreach (var action in plan.Actions)
@@ -55,7 +57,9 @@ public sealed class NativeBuildEngine
             // 되면 안 되므로 완료된 action의 cache entry를 제거한다.
             try
             {
-                stable = toolchainKey == Fingerprints.Toolchain(request.Toolchain) && initialInputs == InputSnapshot(request, plan, null);
+                // 의존 기록에 적은 파일 가운데 InputSnapshot 밖의 것(header 디렉터리 밖으로 벗어난 include)도 다시 읽어 대조한다.
+                stable = toolchainKey == Fingerprints.Toolchain(request.Toolchain) && initialInputs == InputSnapshot(request, plan, null) &&
+                    inputs.ChangedDependencies().Count == 0;
             }
             catch (IOException)
             {
@@ -112,7 +116,7 @@ public sealed class NativeBuildEngine
             await slots.WaitAsync(cancellationToken);
             try
             {
-                return await Executor.RunAsync(request, action, request.OutputDirectory, toolchainKey, store, cancellationToken);
+                return await Executor.RunAsync(request, action, request.OutputDirectory, toolchainKey, store, cancellationToken, inputs: inputs);
             }
             finally
             {

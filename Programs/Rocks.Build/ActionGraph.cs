@@ -1,35 +1,90 @@
 namespace Rocks.Build;
 
+// Inputs는 내용이 key에 들어가는 파일(번역 단위의 소스, archive·link의 object·라이브러리)이고, HeaderDirectories는 헤더 이름 목록이 key에
+// 들어가는 디렉터리(include 디렉터리와 소스 디렉터리)다. DependencyRecord는 이 action의 의존 기록 파일이다(compile action — Outputs의
+// 하나이고, 컴파일러가 연 헤더의 내용은 key가 아니라 이 기록으로 검증한다). Arguments의 {DEPFILE}은 실행 때 임시 depfile 경로가 된다.
 internal sealed record NativeAction(string Id, string Module, string Kind, string Tool,
     IReadOnlyList<string> Arguments, IReadOnlyList<string> Outputs, IReadOnlyList<string> Inputs,
     IReadOnlyList<string> HeaderDirectories, IReadOnlyList<string> DeclaredInputs,
-    IReadOnlyList<string> Dependencies, IReadOnlyList<string> Identity, string? Source = null, string? FailureNote = null)
+    IReadOnlyList<string> Dependencies, IReadOnlyList<string> Identity, string? Source = null, string? FailureNote = null,
+    string? DependencyRecord = null)
 {
-    // FailureNote는 이 action의 도구가 실패했을 때 그 출력 뒤에 붙이는 안내문이다(리플렉션 생성 소스의 compile action —
-    // NativeModuleInput.ReflectionSourceFailureNote). 표시 전용이라 Key에 넣지 않는다.
-    public string Key(string toolchain, string outputRoot, string root) => Fingerprints.Strings(new[]
-    {
-        toolchain, Id, Tool, Fingerprints.Paths(Inputs), Fingerprints.Paths(HeaderDirectories, true, outputRoot, root),
-        Fingerprints.Paths(DeclaredInputs)
-    }.Concat(Identity).Concat(Arguments));
+    // 실행 때 컴파일러가 depfile을 쓸 경로로 바뀌는 인자 자리 표시다(Executor — action 임시 디렉터리 안이라 key에 들지 않는다).
+    public const string DepfilePlaceholder = "{DEPFILE}";
 
-    public string[] ResolveArguments(IReadOnlyList<string> outputs)
+    /// <summary>
+    /// 선언 입력 key다(Docs/Design/UnityBuildPch.ko.md 4.1절 2단 key의 첫 단). 이전 실행 결과에 의존하지 않는다: 툴체인 key, action 인자,
+    /// TU 구성(Identity), 입력 파일 내용, 선언 추가 입력 내용, include·소스 디렉터리의 헤더 이름 목록을 담는다. 헤더 내용은 담지 않는다 —
+    /// 컴파일러가 실제로 연 헤더는 의존 기록(<see cref="DependencyRecord"/>)이 검증한다(IncrementalStore.IsCurrent). FailureNote는 표시
+    /// 전용이라 넣지 않는다.
+    /// </summary>
+    public string Key(string toolchain, BuildInputs inputs)
     {
-        return Arguments.Select(argument =>
+        var tokens = new List<string> { toolchain, Id, Tool };
+        foreach (string input in Inputs)
+        {
+            if (!File.Exists(input))
+            {
+                throw new FileNotFoundException("Declared build input does not exist.", input);
+            }
+
+            tokens.Add(input);
+            tokens.Add(inputs.Content(input));
+        }
+
+        tokens.Add("header-directories");
+        foreach (string directory in HeaderDirectories.Distinct(NativeToolchains.PathComparer))
+        {
+            tokens.Add(directory);
+            tokens.Add(inputs.Listing(directory));
+        }
+
+        tokens.Add("declared-inputs");
+        foreach (string declared in DeclaredInputs.Distinct(NativeToolchains.PathComparer))
+        {
+            tokens.Add(declared);
+            tokens.Add(inputs.Declared(declared));
+        }
+
+        tokens.Add("identity");
+        tokens.AddRange(Identity);
+        tokens.Add("arguments");
+        tokens.AddRange(Arguments);
+        return Fingerprints.Strings(tokens);
+    }
+
+    /// <summary>메모 없이 계산한 선언 입력 key다(action 하나만 보는 시험용 — 빌드는 <see cref="Key(string, BuildInputs)"/>를 쓴다).</summary>
+    public string Key(string toolchain, string outputRoot, string root) => Key(toolchain, new BuildInputs(root, outputRoot, null));
+
+    public string[] ResolveArguments(IReadOnlyList<string> outputs, string? depfile = null) =>
+        Resolve(Arguments, outputs, depfile);
+
+    internal static string[] Resolve(IReadOnlyList<string> arguments, IReadOnlyList<string> outputs, string? depfile = null)
+    {
+        return arguments.Select(argument =>
         {
             for (int index = 0; index < outputs.Count; ++index)
             {
                 argument = argument.Replace($"{{OUTPUT{index}}}", outputs[index], StringComparison.Ordinal);
             }
 
-            return argument;
+            return depfile is null ? argument : argument.Replace(DepfilePlaceholder, depfile, StringComparison.Ordinal);
         }).ToArray();
     }
 }
 
+/// <summary>
+/// 원본 소스 하나의 논리 compile 명령이다(Docs/Design/UnityBuildPch.ko.md 8.6절). compile_commands.json과 BuildInfo manifest는 물리
+/// action이 아니라 이것으로 만든다 — depfile 인자 같은 실행 전용 인자가 없고, 소스 하나에 명령 하나다. Arguments의 {OUTPUT0}은
+/// <see cref="Object"/>다. Action은 이 소스를 실제로 컴파일하는 물리 action의 Id다.
+/// </summary>
+internal sealed record LogicalCompile(string Module, string Source, string Tool, IReadOnlyList<string> Arguments, string Object, string Action);
+
 // Closures: 계획에 든 모듈마다 도달 집합(자기 자신, 그다음 의존 순서)이다. BuildInfo가 실행 파일의 액션을 고를 때 쓴다.
+// LogicalCompiles: 원본 소스마다의 논리 compile 명령이다(계획의 compile action 순서).
 internal sealed record NativePlan(IReadOnlyList<NativeAction> Actions,
-    IReadOnlyDictionary<string, string> ModuleOutputs, IReadOnlyDictionary<string, IReadOnlyList<string>> Closures);
+    IReadOnlyDictionary<string, string> ModuleOutputs, IReadOnlyDictionary<string, IReadOnlyList<string>> Closures,
+    IReadOnlyList<LogicalCompile> LogicalCompiles);
 
 internal static class ActionGraph
 {
@@ -106,6 +161,7 @@ internal static class ActionGraph
 
         string Absolute(string path) => Path.GetFullPath(path, root);
         var actions = new List<NativeAction>();
+        var logicalCompiles = new List<LogicalCompile>();
         var outputs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var terminalActions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var closures = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
@@ -226,26 +282,24 @@ internal static class ActionGraph
                 {
                     arguments.Add((windows ? "/I" : "-I") + include);
                 }
-                // C++ 번역 단위의 인자는 C 지원 이전과 byte 단위로 같아야 한다(action key가 인자를 포함하므로
-                // 바뀌면 모든 증분 빌드가 무효화된다). macOS·Android의 compiler는 clang++ driver라서 C 소스에는
-                // 언어를 명시한다(없으면 C++로 처리하며 -Werror에서 경고가 오류가 된다).
-                if (windows)
-                {
-                    arguments.AddRange(["/c", language == NativeLanguage.C ? "/TC" : "/TP", source, "/Fo{OUTPUT0}"]);
-                }
-                else if (language == NativeLanguage.C)
-                {
-                    arguments.AddRange(["-c", "-x", "c", source, "-o", "{OUTPUT0}"]);
-                }
-                else
-                {
-                    arguments.AddRange(["-c", source, "-o", "{OUTPUT0}"]);
-                }
-
-                actions.Add(new(id, module.Name, "Compile", request.Toolchain.CompilerPath, arguments,
-                    [objectPath], [source], headers, extraInputs, [],
-                    new[] { request.ContextFingerprint, request.Configuration.ToString(), module.Optimization.ToString() }.Concat(sources).ToArray(), source,
-                    FailureNote: reflectionSet.Contains(source) ? reflectionNote : null));
+                // macOS·Android의 compiler는 clang++ driver라서 C 소스에는 언어를 명시한다(없으면 C++로 처리하며 -Werror에서 경고가
+                // 오류가 된다).
+                string[] translationUnit = windows ? ["/c", language == NativeLanguage.C ? "/TC" : "/TP", source, "/Fo{OUTPUT0}"]
+                    : language == NativeLanguage.C ? ["-c", "-x", "c", source, "-o", "{OUTPUT0}"]
+                    : ["-c", source, "-o", "{OUTPUT0}"];
+                // 물리 action은 depfile을 쓰게 한다(의존 기록의 원천 — Docs/Design/UnityBuildPch.ko.md 4.1절). 논리 명령(compile DB·
+                // BuildInfo)에는 넣지 않는다. clang-cl은 -MD·-MF를 /clang:로만 받는다(실측).
+                string[] depfile = windows ? ["/clang:-MD", "/clang:-MF" + NativeAction.DepfilePlaceholder]
+                    : ["-MD", "-MF", NativeAction.DepfilePlaceholder];
+                string recordPath = objectPath + DependencyRecord.Extension;
+                // identity는 이 번역 단위의 구성(단독 TU면 소스 하나)이다. 모듈의 전체 소스 목록은 넣지 않는다 — 소스 하나를 더하거나
+                // 지워도 다른 번역 단위는 다시 컴파일하지 않는다(4.2절. 소스 옆 header가 생기거나 사라지는 변화는 소스 디렉터리의 헤더
+                // 이름 목록이 잡는다).
+                actions.Add(new(id, module.Name, "Compile", request.Toolchain.CompilerPath, [.. arguments, .. depfile, .. translationUnit],
+                    [objectPath, recordPath], [source], headers, extraInputs, [],
+                    [request.ContextFingerprint, request.Configuration.ToString(), module.Optimization.ToString(), source], source,
+                    FailureNote: reflectionSet.Contains(source) ? reflectionNote : null, DependencyRecord: recordPath));
+                logicalCompiles.Add(new(module.Name, source, request.Toolchain.CompilerPath, [.. arguments, .. translationUnit], objectPath, id));
                 objectPaths.Add(objectPath);
                 compileIds.Add(id);
             }
@@ -395,7 +449,7 @@ internal static class ActionGraph
             }
         }
 
-        return new(actions, outputs, closures);
+        return new(actions, outputs, closures, logicalCompiles);
     }
 
     /// <summary>

@@ -28,6 +28,9 @@ internal sealed class FileDigests
 
     public string Raw(string path) => Get(path).Raw;
 
+    // 지금까지 읽은 파일의 (정규 경로, 원본 SHA-256)이다. BuildInputs가 같은 파일을 다시 읽지 않도록 넘긴다.
+    public IEnumerable<KeyValuePair<string, string>> RawEntries() => files.Select(pair => KeyValuePair.Create(pair.Key, pair.Value.Raw));
+
     public string Normalized(string path) => Get(path).Normalized;
 
     public (string Raw, string Normalized) Get(string path)
@@ -427,22 +430,10 @@ internal static class BuildInfoGenerator
         string[] rootStrings = new[] { root, output, request.SdkDirectory }.Where(value => value is not null)
             .Select(value => Path.TrimEndingDirectorySeparator(Path.GetFullPath(value!))).ToArray();
         var blocks = new List<(string Kind, string Order, string Module, string Text)>();
-        foreach (NativeAction action in actions)
+        void AddBlock(string kind, string id, string order, NativeModuleInput module, List<string> arguments)
         {
-            List<string> arguments = action.Arguments.ToList();
-            NativeModuleInput module = modules[action.Module];
-            if (action.Kind == "Compile")
-            {
-                RemoveSubsequence(arguments, module.AdditionalCompileArguments.Count, toolchain.CompileArguments, action.Id);
-            }
-            else if (action.Kind == "Link")
-            {
-                RemoveSubsequence(arguments, 0, toolchain.LinkArguments, action.Id);
-            }
-
             var text = new StringBuilder();
-            string order = action.Kind == "Compile" ? paths.Key(action.Source!) : module.Name;
-            text.Append("action: ").Append(action.Kind).Append(' ').Append(order).Append('\n');
+            text.Append("action: ").Append(kind).Append(' ').Append(order).Append('\n');
             foreach (string argument in arguments)
             {
                 string normalized = NormalizeArgument(argument, paths, objectSources);
@@ -450,7 +441,7 @@ internal static class BuildInfoGenerator
                 {
                     if (ContainsHostPath(normalized, rootString, OperatingSystem.IsWindows()))
                     {
-                        throw new InvalidOperationException($"BuildInfo: {action.Id} argument '{argument}' still contains the host path {rootString} " +
+                        throw new InvalidOperationException($"BuildInfo: {id} argument '{argument}' still contains the host path {rootString} " +
                             "after normalization; add the argument form to the BuildInfo path normalization.");
                     }
                 }
@@ -458,7 +449,29 @@ internal static class BuildInfoGenerator
                 text.Append("arg: ").Append(normalized).Append('\n');
             }
 
-            blocks.Add((action.Kind, order, module.Name, text.ToString()));
+            blocks.Add((kind, order, module.Name, text.ToString()));
+        }
+
+        // compile 부분은 물리 action이 아니라 원본 소스마다의 논리 명령으로 만든다(Docs/Design/UnityBuildPch.ko.md 8.7절 — depfile 같은
+        // 실행 전용 인자가 ID를 바꾸지 않는다). archive·link 부분은 물리 action이다.
+        foreach (LogicalCompile compile in plan.LogicalCompiles.Where(compile => reached.Contains(compile.Module)))
+        {
+            NativeModuleInput module = modules[compile.Module];
+            List<string> arguments = compile.Arguments.ToList();
+            RemoveSubsequence(arguments, module.AdditionalCompileArguments.Count, toolchain.CompileArguments, compile.Action);
+            AddBlock("Compile", compile.Action, paths.Key(compile.Source), module, arguments);
+        }
+
+        foreach (NativeAction action in actions.Where(action => action.Kind != "Compile"))
+        {
+            List<string> arguments = action.Arguments.ToList();
+            NativeModuleInput module = modules[action.Module];
+            if (action.Kind == "Link")
+            {
+                RemoveSubsequence(arguments, 0, toolchain.LinkArguments, action.Id);
+            }
+
+            AddBlock(action.Kind, action.Id, module.Name, module, arguments);
         }
 
         // 입력: 1단계 액션의 Inputs·DeclaredInputs·header 디렉터리 inventory. 액션 출력·<out>/BuildInfo·OwnedRoots 아래는 뺀다.
