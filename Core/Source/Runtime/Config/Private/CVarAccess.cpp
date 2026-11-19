@@ -103,13 +103,39 @@ Result<void> DrainQueue(ConfigState& state) noexcept {
     for (usize index = 0; index < state.queue.Size(); ++index) {
         SharedPtr<QueuedChange>& change = state.queue[index];
         bool keep = true;
-        if (status && change->entry.Get() != nullptr && change->validateAtApply) {
+        // 다른 스레드의 콘솔 입력 한 줄은 쓰기가 아니라 게임 lane이 처리할 일이다(CVar 15절).
+        if (status && !change->line.IsEmpty()) {
+            status = QueueConsoleLine(state, *change);
+            keep = !status;
+        } else if (status && change->entry.Get() != nullptr && change->validateAtApply) {
+            const usize before = state.diagnostics.Count();
             auto valid = ValidateEntry(state, *change->entry);
             if (!valid) {
                 status = Result<void>::Failure(valid.Error());
             } else {
                 keep = valid.Value();
                 change->validateAtApply = false;
+                // 거부한 다른 스레드 콘솔 입력은 그 입력의 sink에 알린다.
+                for (usize at = before; !keep && at < state.diagnostics.Count(); ++at) {
+                    const ConfigDiagnostic item = state.diagnostics.Get(at);
+                    StringBuilder<192> line(state.allocator);
+                    static_cast<void>(line.TryAppendFormat("{} {}\n", item.path, item.message));
+                    if (change->output.write != nullptr && line.Status()) {
+                        static_cast<void>(
+                            change->output.write(change->output.context, line.View()));
+                    }
+                }
+            }
+        }
+
+        // 콘솔 층 쓰기의 권한(치트·복제)은 적용 때 다시 본다(6.2절).
+        if (status && keep && change->entry.Get() != nullptr &&
+            change->entry->layer == ConfigLayer::Console) {
+            auto allowed = RecheckConsolePermission(state, *change);
+            if (!allowed) {
+                status = Result<void>::Failure(allowed.Error());
+            } else {
+                keep = allowed.Value();
             }
         }
 
@@ -257,6 +283,24 @@ Result<void> MakeSet(WriteChannel& channel, const cvar::detail::VarDefinition& d
                            ConsoleFlagsOfDefinition(definition), code, false)
              .IsEmpty()) {
         return Reject(options, code);
+    }
+
+    // 콘솔 층 쓰기의 권한(치트 허용 상태·네트워크 역할)은 이 스레드가 보는 snapshot으로 지금 한 번
+    // 보고, 적용 때 다시 본다(CVar 13절).
+    if (options.layer == ConfigLayer::Console) {
+        SharedPtr<const ConfigSnapshot> current;
+        {
+            platform::LockGuard lock(channel.mutex);
+            current = channel.current;
+        }
+
+        const auto role = static_cast<NetworkRole>(
+            platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&channel.networkRole));
+        if (!CheckConsolePermission(definition.flags, SnapshotCheatsAllowed(current.Get()), role,
+                                    code)
+                 .IsEmpty()) {
+            return Reject(options, code);
+        }
     }
 
     // `Clamp()` 변수는 보정해 받는다. 넣는 값은 원래 값이다(적용 때 다시 보정하고 Clamped를

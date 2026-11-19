@@ -50,23 +50,4 @@ struct TraceCaptureSettings {
     int32 snapshotLockTimeoutMs = 1000;
 };
 
-// 콘솔 명령 `trace.enable`·`trace.disable`의 인자다(`trace.enable channels=cpu,gpu`). 값은 쉼표로
-// 나눈 채널·묶음 이름이다.
-ROCKS_STRUCT()
-struct TraceChannelArguments {
-    explicit TraceChannelArguments(Allocator& allocator) noexcept : channels(allocator) {
-    }
-
-    ROCKS_PROPERTY() String channels;
-};
-
-// 콘솔 명령 `trace.file`·`trace.snapshot`의 인자다(`trace.file path=Saved/Traces/run.rtrace`).
-ROCKS_STRUCT()
-struct TracePathArguments {
-    explicit TracePathArguments(Allocator& allocator) noexcept : path(allocator) {
-    }
-
-    ROCKS_PROPERTY() String path;
-};
-
 } // namespace rocks::trace_control

@@ -147,35 +147,38 @@ struct ConsoleOutput {
     void* context = nullptr;
 };
 
-// 콘솔 명령 실행 함수다. arguments는 인자 struct 값(인자 스키마가 없으면 null)이고 호출 동안만
-// 빌린다. sync 지점(ConfigContext::Sync)에서 소유 스레드가 부른다. 실패는 출력에 알리고 Sync는
-// 계속한다(명령 실패가 설정 적용을 되돌리지 않는다).
-using ConsoleCommandFunction = Result<void> (*)(void* context, const void* arguments,
-                                                ConsoleOutput& output) noexcept;
-
-// 콘솔 명령 정의다(5.2절 — Commandlet registry와 따로, 이름 문법만 공유한다). view는 등록 동안만
-// 빌린다. context는 문맥보다 오래 살아야 한다.
-struct ConsoleCommandDefinition {
-    StringView name;
-    StringView help;
-    ConsoleCommandFunction execute = nullptr;
-    void* context = nullptr;
-};
-
-// 콘솔 입력 한 줄의 처리 결과다(ConfigContext::ExecuteConsoleLine).
+// 콘솔 입력 한 줄의 처리 결과다(ConfigContext::ExecuteConsoleLine — CVar 15절).
 enum class ConsoleLineResult : uint8 {
-    // `<이름>`: 값과 출처 스택을 출력했다.
+    // `<이름>`: 값과 출처 스택을 출력했다(게임 lane).
     Shown,
-    // `<이름> ?`: 도움말을 출력했다.
-    Help,
-    // `<이름> <값>`: 콘솔 층 쓰기를 큐에 넣었다(다음 Sync에 적용).
+    // `<이름> ?`: Explain을 출력했다(게임 lane).
+    Explained,
+    // `<이름> <값>`·`<이름> reset`: 콘솔 층 쓰기·지우기를 큐에 넣었다(다음 Sync에 적용).
     Queued,
-    // `<명령> <인자…>`: 명령을 큐에 넣었다(다음 Sync에 실행).
+    // `<명령> <인자…>`(`cvar.*` 포함), 다른 스레드의 `<이름>`·`<이름> ?`: 큐에 넣었다(다음 Sync의
+    // 5단계에 게임 lane이 실행하고 sink에 쓴다).
     CommandQueued,
-    // 쓰기·인자가 거부됐다(진단을 출력했다 — 아무것도 큐에 넣지 않았다).
+    // 쓰기·인자·권한이 거부됐다(사유를 출력했다 — 아무것도 큐에 넣지 않았다).
     Rejected,
     // 모르는 이름이다.
     Unknown
+};
+
+// 문맥의 네트워크 역할이다(CVar 13.2절 — 권한 판정에만 쓴다. 전송은 넷 모듈의 일이다).
+enum class NetworkRole : uint8 {
+    // 단독 실행(기본).
+    Standalone,
+    // 서버: 복제 변수의 값을 정하고 ExportReplicated로 낸다.
+    Server,
+    // 클라이언트: 복제 변수의 콘솔 쓰기를 거부하고(ReplicatedOnClient) 서버 값(Server 층)을 따른다.
+    Client
+};
+
+// 복제 값 하나다(이름과 콘솔 표기 — ExportReplicated·ImportReplicated 목록 원소). view의 수명은 그
+// 목록을 만든 쪽이 정한다.
+struct ReplicatedValue {
+    StringView name;
+    StringView value;
 };
 
 // 값이 바뀐 설정 하나다(변경 콜백 인자). name은 콘솔 설정 이름이거나 설정 struct의

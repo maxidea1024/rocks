@@ -252,20 +252,22 @@ TEST(CVar_ReportUnresolvedSuggestsNearNames) {
     CHECK(again.Value() == 0 && context.Diagnostics().Count() == 0);
 }
 
-namespace {
+namespace cvar_boot_test {
 
-Result<void> NoOp(void*, const void*, ConsoleOutput&) noexcept {
+Result<void> NoOp(cvar::CommandContext&) noexcept {
     return Result<void>::Success();
 }
 
-} // namespace
+constinit ConsoleCommand BootFlushCommand =
+    cvar::Command<&NoOp>("log.boot.flush").Help("flushes logs");
+
+} // namespace cvar_boot_test
 
 // 콘솔 명령 이름에 넣은 값은 "명령은 값을 받지 않는다"로 알린다(제안 대신).
 TEST(CVar_ReportUnresolvedFlagsValuesForCommands) {
     ConfigFixture fixture;
     ConfigContext& context = fixture.Context();
-    ConsoleCommandDefinition flush{"log.boot.flush", "flushes logs", &NoOp, nullptr};
-    REQUIRE(context.RegisterConsoleCommand(flush));
+    REQUIRE(context.Register(BootFlushCommand));
     REQUIRE(context.AddLayerText(ConfigLayer::Project, "Game.json", "Game", "project",
                                  R"({"Settings": {"log.boot.flush": 1}})"));
     REQUIRE(context.Sync());

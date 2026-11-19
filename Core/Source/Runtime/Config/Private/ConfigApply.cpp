@@ -924,8 +924,9 @@ Result<bool> SectionApplier::FinishPrepared(Result<PreparedAssignments> prepared
             continue;
         }
 
+        ConfigDiagnosticCode code = ConfigDiagnosticCode::LayerNotAllowed;
         const StringView reason = CheckLayerAllowed(
-            state_, entry_.layer, SettingsFlagsOf(section_, path.steps[0].fieldId));
+            state_, entry_.layer, SettingsFlagsOf(section_, path.steps[0].fieldId), code);
         if (reason.IsEmpty()) {
             continue;
         }
@@ -943,9 +944,8 @@ Result<bool> SectionApplier::FinishPrepared(Result<PreparedAssignments> prepared
 
         const JsonPosition at = member.IsValid() ? member.Position() : JsonPosition{0, 0, 0};
         const JsonPosition* where = member.IsValid() ? &at : fallback;
-        if (auto reported =
-                Report(state_, ConfigDiagnosticCode::LayerNotAllowed, ConfigSeverity::Error,
-                       entry_.layer, entry_.sourceName.View(), where, text.View(), reason);
+        if (auto reported = Report(state_, code, ConfigSeverity::Error, entry_.layer,
+                                   entry_.sourceName.View(), where, text.View(), reason);
             !reported) {
             return Result<bool>::Failure(reported.Error());
         }
@@ -1057,9 +1057,11 @@ Result<bool> SectionApplier::ApplyConsoleValue(usize field, StringView text, Jso
     }
 
     ConfigDiagnosticCode code = ConfigDiagnosticCode::LayerNotAllowed;
+    // 넣을 때(validatingWrite)면 봉인 뒤 부팅 필드의 바로 쓰는 층 쓰기를 BootSealed로 거부한다.
     const StringView problem =
         CheckConsoleLayer(state_.releaseRules, entry_.layer,
-                          ConsoleFlagsOfField(SettingsFlagsOf(section_, schema.id)), code, false);
+                          ConsoleFlagsOfField(SettingsFlagsOf(section_, schema.id)), code,
+                          state_.validatingWrite && state_.startupComplete);
     if (!problem.IsEmpty()) {
         if (auto reported = Diagnose(code, position, problem); !reported) {
             return Result<bool>::Failure(reported.Error());

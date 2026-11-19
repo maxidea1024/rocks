@@ -211,7 +211,13 @@ constexpr const char* DumpGolden = R"({
       ]
     }
   ],
-  "settings": []
+  "settings": [
+    {
+      "name": "cheat.enabled",
+      "value": "true",
+      "stack": []
+    }
+  ]
 }
 )";
 

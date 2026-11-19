@@ -108,11 +108,20 @@ Result<void> Report(ConfigState& state, ConfigDiagnosticCode code, ConfigSeverit
     return state.diagnostics.Add(diagnostic);
 }
 
-StringView CheckLayerAllowed(const ConfigState& state, ConfigLayer layer,
-                             uint32 settingsFlags) noexcept {
+StringView CheckLayerAllowed(const ConfigState& state, ConfigLayer layer, uint32 settingsFlags,
+                             ConfigDiagnosticCode& code) noexcept {
+    code = ConfigDiagnosticCode::LayerNotAllowed;
     if (state.releaseRules && HasFlag(settingsFlags, SettingsFieldFlags::DevelopmentOnly) &&
         layer != ConfigLayer::CodeDefault) {
         return "a DevelopmentOnly value keeps its code default under release rules";
+    }
+
+    // 봉인 뒤 부팅 필드에 바로 쓰는 층은 넣을 때 거부한다(독립 설정과 같다 — CVar 9절).
+    if (state.validatingWrite && state.startupComplete && IsDirectWriteLayer(layer) &&
+        (HasFlag(settingsFlags, SettingsFieldFlags::StartupOnly) ||
+         HasFlag(settingsFlags, SettingsFieldFlags::RestartRequired))) {
+        code = ConfigDiagnosticCode::BootSealed;
+        return BootSealedMessage;
     }
 
     if (layer == ConfigLayer::User && !HasFlag(settingsFlags, SettingsFieldFlags::UserConfig)) {
@@ -239,6 +248,10 @@ Result<bool> ValidateConsoleValue(ConfigState& state, const ConfigEntry& entry, 
 // 입력 하나를 검사한다(큐에 넣기 전): Document의 모양(섹션 키·`Settings` 섹션), 닿는 섹션마다 코드
 // 기본값 위 적용, 독립 콘솔 설정 값. 반환: true면 문제없음.
 Result<bool> ValidateEntry(ConfigState& state, const ConfigEntry& entry) noexcept {
+    // 넣기 전 검사 동안만 켠다(봉인 뒤 부팅 필드의 바로 쓰는 층 거부 — CheckLayerAllowed).
+    const bool validating = state.validatingWrite;
+    state.validatingWrite = true;
+    auto restore = MakeScopeExit([&]() noexcept { state.validatingWrite = validating; });
     // `Quality.json`은 설정 struct 섹션이 아니라 묶음 → 등급 → 항목 값이다(CVar 11절).
     if (IsQualityDocument(state, entry)) {
         return ValidateQualityDocument(state, entry);
@@ -612,6 +625,13 @@ Result<void> ConfigContext::Initialize() noexcept {
     options_.userDataDir = {};
     options_.savedDir = {};
     state_ = Move(made.Value());
+    state_->self = this;
+    // 문맥이 스스로 갖는 핸들(치트 허용 상태·`cvar.*` 콘솔 도구 — CVar 13·15절)이다.
+    if (auto registered = detail::RegisterBuiltinConsoleHandles(*this); !registered) {
+        state_ = nullptr;
+        return registered;
+    }
+
     return Result<void>::Success();
 }
 
@@ -715,6 +735,7 @@ Result<void> ConfigContext::RegisterSettingsType(const detail::SettingsTypeOps& 
     }
 
     state->dirty = true;
+    state->namesChanged = true;
     return Result<void>::Success();
 }
 
@@ -1368,7 +1389,8 @@ Result<void> ConfigContext::Sync() noexcept {
         return reserved;
     }
 
-    if (named.Get() != nullptr || !writes.IsEmpty()) {
+    // 등록이 바뀌었으면 값이 그대로여도 게시한다(콘솔 이름 색인 — 다른 스레드의 콘솔 입력).
+    if (named.Get() != nullptr || !writes.IsEmpty() || state->namesChanged) {
         if (auto published = detail::PublishSnapshot(
                 *state, named.Get() != nullptr ? &named : nullptr, writes.View());
             !published) {

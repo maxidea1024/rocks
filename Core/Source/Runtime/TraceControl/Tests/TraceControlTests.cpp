@@ -137,11 +137,11 @@ TEST(TraceControl_ConsoleCommandsDriveSession) {
             REQUIRE(settings.Sync());
         };
 
-        run("trace.enable channels=cpu,counter");
+        run("trace.enable cpu,counter");
         CHECK(TraceCpuChannel.IsEnabled());
         CHECK(TraceCounterChannel.IsEnabled());
         StringBuilder<192> fileCommand(allocator);
-        REQUIRE(fileCommand.TryAppendFormat("trace.file path={}", StringView(file.path)));
+        REQUIRE(fileCommand.TryAppendFormat("trace.file {}", StringView(file.path)));
         run(fileCommand.View());
         {
             CpuScope scope(ControlScope);
@@ -151,10 +151,9 @@ TEST(TraceControl_ConsoleCommandsDriveSession) {
         run("trace.stop");
         CHECK(control.CloseFile().Error() == ErrorCode::NotFound);
         StringBuilder<192> snapshotCommand(allocator);
-        REQUIRE(
-            snapshotCommand.TryAppendFormat("trace.snapshot path={}", StringView(snapshot.path)));
+        REQUIRE(snapshotCommand.TryAppendFormat("trace.snapshot {}", StringView(snapshot.path)));
         run(snapshotCommand.View());
-        run("trace.disable channels=counter");
+        run("trace.disable counter");
         CHECK(!TraceCounterChannel.IsEnabled());
         CHECK(
             console.text.View().Contains("2 channel(s) enabled", StringComparison::CaseSensitive));

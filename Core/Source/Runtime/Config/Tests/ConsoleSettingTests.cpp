@@ -116,13 +116,16 @@ TEST(Config_ConsoleFlagsRejectLayers) {
     CHECK(fixture.Rejects(ConfigLayer::User, "Game",
                           R"({"Settings": {"game.rules.score_limit": 5}})"));
     CHECK(fixture.HasDiagnostic(ConfigDiagnosticCode::LayerNotAllowed, 1, 41));
-    // 시작 뒤 고정: CompleteStartup 전에는 바로 적용된다. 뒤의 콘솔 쓰기는 받지만 값은 그대로이고
-    // 대기도 아니다(콘솔 값은 다음 실행에 오지 않는다). 진단은 같은 이름·출처에 한 번이다.
+    // 시작 뒤 고정: CompleteStartup 전에는 바로 적용된다. 뒤의 콘솔 쓰기는 넣을 때 BootSealed로
+    // 거부한다(설정 struct 필드도 — CVar 20절 CVR6). 휘발 층(세션) 쓰기는 받지만 값은 그대로이고
+    // 대기도 아니다(다음 실행에 오지 않는다). 진단은 같은 이름·출처에 한 번이다.
     REQUIRE(context.AddAssignment(ConfigLayer::Project, "seed", "game.rules.seed", "11"));
     REQUIRE(context.Sync());
     REQUIRE(context.CompleteStartup());
     context.Diagnostics().Clear();
-    REQUIRE(context.AddAssignment(ConfigLayer::Console, "console", "game.rules.seed", "12"));
+    auto console = context.AddAssignment(ConfigLayer::Console, "console", "game.rules.seed", "12");
+    CHECK(!console && fixture.HasDiagnostic(ConfigDiagnosticCode::BootSealed));
+    REQUIRE(context.AddAssignment(ConfigLayer::Session, "--set", "game.rules.seed", "12"));
     REQUIRE(context.Sync());
     REQUIRE(context.AddAssignment(ConfigLayer::Console, "console", "game.rules.title", "late"));
     REQUIRE(context.Sync());
@@ -144,7 +147,7 @@ TEST(Config_ConsoleFlagsRejectLayers) {
     CHECK(pending.IsEmpty());
 
     // 파일 층(프로젝트)에서 온 시작 뒤 변경은 재시작 대기다(RestartRequired와 같은 규칙).
-    REQUIRE(context.Unset(ConfigLayer::Console, "console"));
+    REQUIRE(context.Unset(ConfigLayer::Session, "--set"));
     REQUIRE(context.AddAssignment(ConfigLayer::Project, "seed", "game.rules.seed", "13"));
     REQUIRE(context.Sync());
     CHECK(fixture.Gameplay().seed == 11);

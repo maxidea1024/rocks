@@ -3,6 +3,7 @@
 #include <Config/ConfigTypes.h>
 #include <Core/Containers/Array.h>
 #include <Core/Memory/SharedPtr.h>
+#include <Core/Memory/UniquePtr.h>
 #include <Core/Text/Name.h>
 #include <Core/Text/String.h>
 #include <Object/RuntimeTypeOps.h>
@@ -62,6 +63,39 @@ struct CVarChunk {
     SharedPtr<const CVarText> texts[ChunkSlotCount];
 };
 
+namespace detail {
+
+// 콘솔 이름 색인의 항목 하나다(CVar 10.1·15절 — 다른 스레드의 콘솔 입력이 이름을 해석하고 권한을
+// 본다). 만든 뒤 바뀌지 않는다.
+struct ConsoleNameEntry {
+    explicit ConsoleNameEntry(Allocator& allocator) noexcept : name(allocator) {
+    }
+
+    String name;
+    // 콘솔 명령이다(아니면 콘솔 설정).
+    bool command = false;
+    // 콘솔 설정 플래그(ConsoleSettingFlags)다.
+    uint32 consoleFlags = 0;
+    // CVar 핸들의 성질 비트(cvar::VarFlags — 핸들이 아니면 0)다.
+    uint32 varFlags = 0;
+    // 설정 struct 필드의 콘솔 이름이다.
+    bool field = false;
+};
+
+// 콘솔 이름 색인이다(등록 뒤 다음 Sync가 게시하는 snapshot부터 새 색인 — 그 전 snapshot은 앞
+// 색인을 공유한다).
+struct ConsoleNameIndex {
+    explicit ConsoleNameIndex(Allocator& allocator) noexcept : entries(allocator) {
+    }
+
+    // 이름이 같은 항목이다(없으면 null).
+    const ConsoleNameEntry* Find(StringView name) const noexcept;
+
+    Array<UniquePtr<ConsoleNameEntry>> entries;
+};
+
+} // namespace detail
+
 class ConfigSnapshot {
 public:
     explicit ConfigSnapshot(Allocator& allocator) noexcept;
@@ -109,6 +143,13 @@ public:
         return *chunks_.Data()[index / ChunkSlotCount]->texts[index % ChunkSlotCount];
     }
 
+    // ---- 콘솔 이름 색인(10.1절) ----
+
+    // 이 snapshot과 함께 게시된 콘솔 이름 색인이다(다른 스레드의 콘솔 입력이 쓴다 — 없으면 null).
+    const detail::ConsoleNameIndex* ConsoleNames() const noexcept {
+        return names_.Get();
+    }
+
     // ---- 부팅 블록(9절) ----
 
     // 문맥이 봉인(CompleteStartup)된 뒤에 만든 snapshot인지다. 봉인 뒤 snapshot의 부팅 값은 모두
@@ -148,6 +189,8 @@ private:
     // 부팅 블록(봉인 때 굳힌 BootCVar 값 — 봉인 뒤 snapshot이 모두 공유한다).
     Array<SharedPtr<const CVarChunk>> bootChunks_;
     bool sealed_ = false;
+    // 콘솔 이름 색인(등록이 바뀌지 않으면 앞 snapshot과 공유한다).
+    SharedPtr<const detail::ConsoleNameIndex> names_;
     // 이 snapshot을 만든 문맥의 쓰기 통로다(묶음 계수·`CVar::Set`의 대상 — 문맥보다 오래 살 수
     // 있다).
     SharedPtr<detail::WriteChannel> channel_;
