@@ -1218,7 +1218,8 @@ a1916228(Slot hot·cold 분리)·a43ca91e(1차 리뷰 반영)의 2차 리뷰 지
 
 최종 구현 ↔ 전(`step7/churn2.txt`): 회수 24.2 · 25.5 · 25.7 → 22.3 · 24.1 · 23.3ms(객체당 247–262 → 228–246ns, 같은 round 5–9% 감소).
 
-- 묶음 크기 16·64·256은 차이가 없다. 경합 없는 잠금은 싸고, 남은 몫은 소멸자·저장소 반환·슬롯 되돌리기의 메모리 접근이다. 64는 시간 한도 넘침을 묶음 하나(약 16µs)로 묶는다.
+- 묶음 크기 16·64·256은 차이가 없다. 경합 없는 잠금은 싸고, 남은 몫은 소멸자·저장소 반환·슬롯 되돌리기의 메모리 접근이다. 묶음 64는 같은 round의 묶음 전보다 6–10% 적다(24.2–24.4 ↔ 25.9–27.0ms, 객체당 246.8–249.3 ↔ 264.4–275.1ns).
+- 처음 구현은 시간 한도를 묶음마다 보아 넘침이 소멸자 64개까지였다(아래 24.2절의 30–44µs). 리뷰 반영(24.7절)에서 소멸자 사이마다 보게 고쳤다.
 
 ### 24.2 회수를 미루는 수집과 프레임 예산 회수
 
@@ -1230,7 +1231,8 @@ a1916228(Slot hot·cold 분리)·a43ca91e(1차 리뷰 반영)의 2차 리뷰 지
 | 2 | 100.7ms(90.6 · 10.0) | 16 | 2.044ms |
 | 3 | 93.1ms(82.1 · 10.9) | 13 | 2.039ms |
 
-- 98K 회수(한 번에 하면 약 23ms)가 프레임마다 2ms 안쪽으로 나뉜다. 넘침은 30–44µs로 묶음 하나와 시계·호출 비용 몫이다. 이 측정의 표식은 직렬이다(병렬 ×8이면 1M 표식 약 17ms — 21절).
+- 98K 회수(한 번에 하면 약 23ms)가 프레임마다 2ms 안쪽으로 나뉜다. 이 표는 처음 구현(시간 한도를 묶음마다 봄)이고 넘침 30–44µs는 한도가 지난 뒤 끝까지 회수한 묶음의 나머지다. 이 측정의 표식은 직렬이다(병렬 ×8이면 1M 표식 약 17ms — 21절).
+- 리뷰 반영 뒤(소멸자 사이마다 시간 한도, 최소 진척 — 862538db, 한 번 측정 `review7/churn.txt`): 직렬 Collect의 회수 23.1ms(객체당 235.5ns — 한도 없는 회수는 시계를 읽지 않는다), 미룬 회수는 2ms 예산으로 14프레임, 가장 긴 회수 호출 2.003ms(넘침 3µs — 소멸자 하나와 슬롯 되돌리기).
 
 ### 24.3 World 일정과 엔진 scheduler
 
@@ -1262,3 +1264,29 @@ Debug Foundation 전체 2,527개, Debug EngineTests 전체 2,899개, 클러스�
 
 - 회수 객체당 약 230–250ns는 GC-S6(할당자)에서 줄인다.
 - 메모리 압박 신호를 내는 플랫폼 계층은 아직 없다(엔진 요청 API까지).
+
+### 24.7 7단계 리뷰·메인 세션 검증 반영 (2026-11-19)
+
+리뷰(ce760705..26524906)와 메인 세션의 직접 검증(b9ff1d00)을 반영했다. 설계는 66191386·2b4171ed·b8ea724f(17절), 구현은 862538db·fee35fff다.
+
+| 항목 | 내용 | 반영 | 시험 |
+|---|---|---|---|
+| D1 | 회수가 진척 없이 0을 돌려주면 World가 회수를 멈춤 | 시간 한도는 첫 객체 뒤부터(최소 진척), World는 `HasPendingReclaim` 질의로 매 프레임 판정 | `ObjectGcReclaim_TimeBudgetStopsBetweenDestructorsWithProgress`, 모델 시험(대기가 없으면 0), World 시험은 객체 수 예산으로 결정적 |
+| D2 | 묶음 때문에 시간 넘침이 소멸자 64개까지 | 소멸자 사이마다 한도를 보고 남은 work는 Retired로 되돌림(`ReturnUnreclaimedLocked`) | 같은 시험(소멸자가 시계를 넘기면 호출마다 정확히 하나, 나머지는 회수 대기로 남음) |
+| R1 | Reclaiming 중 요청이 회수를 예산 없이 한 프레임에 | `FinishCollectionDeferringReclaim`(남은 분류만, 회수는 대기) | `ObjectGcReclaim_FinishCollectionDeferringReclaimLeavesRetired`, `WorldGc_RequestDuringReclaimingKeepsReclaimBudgeted` |
+| R2 | 보유로 늦어진 Retired가 보유 해제 뒤 회수되지 않음 | D1의 질의 판정 | `WorldGc_HeldObjectIsReclaimedAfterRelease` |
+| R3 | 주기 간격이 World 게임 시간 | Tick의 실제 경과 시간(UE `FApp::GetDeltaTime`) | `WorldGc_FullCollectionIntervalCountsRealTimeWhilePaused` |
+| R4 | 프로세서 수가 시스템 전체 | 프로세스 affinity(Windows mask와 활성 수의 작은 값, Android `sched_getaffinity` hook, Apple `sysconf`) | POSIX 쪽은 이 기계에서 컴파일되지 않아 CI(`[ci]`)로 확인 |
+| R5 | 요청 분기 시험 부족 | Marking 취소·Reclaiming·Busy 재시도·scheduler 공유 시험, 모델 시험과 GcSoak에 Deferred 수집·예산 회수를 섞음 | `WorldGc_RequestDuringMarkingCancelsAndCollects`·`…BusyFullCollectionRetriesNextFrame`·`…WorldsShareOneScheduler`, `ObjectRegistryModel`·`GcSoak` |
+| R6 | 요청의 스레드 계약 | World·Engine 요청 표지를 atomic으로, Engine은 프레임이 World에 나눠 줌. Initialize·Shutdown·소멸은 같은 스레드(주석·설계) | `Engine_OwnsGcSchedulerAndLendsItToWorlds`(요청이 다음 프레임에 World로) |
+| R7 | gcWorkers 상한·프레임 합산 예산·Tick 안 요청 시점 | 64 초과는 InvalidArgument, 설계 17.3절에 합산 예산·요청 소비 시점 | `Engine_GcWorkersAboveLimitFailsInitialize` |
+| N1 | 회수가 남은 채 다시 수집하면 회수가 멈춤(push된 결함) | D1의 질의 판정으로 해소 | 회귀 시험 `WorldGc_RepeatedRequestKeepsDrainingEarlierReclaim`(5 → 3 → 1 → 0) |
+| N2 | `FinishCollectionDeferringReclaim`에 safepoint 조건 없음 | Borrow·활성 생성이면 Busy(Step과 같음) | `ObjectGcReclaim_FinishCollectionDeferringReclaimNeedsSafepoint`, `WorldGc_RequestDuringSweepingWithBorrowStaysBusy` |
+| N3 | FullCollection이 World 파괴가 있을 때만 발동 | 간격만 본다(UE와 같음), 0 이하는 주기 수집 없음. Incremental의 같은 한계는 설계 17.5절에 기록 | `WorldGc_FullCollectionModeCollectsWithoutWorldDestroys` |
+| N4 | `__builtin_popcountll` | `PlatformMath::PopCount64` | — |
+| N5 | POSIX 분기 미컴파일 | OS hook(`PosixLogicalProcessorCount`)으로 옮기고 head 커밋에 `[ci]` | CI |
+| S1–S8 | 수치·주석·상수·로그 | 17.1절 수치(묶음 64 기준), 3.2절 8번, 버린 대안(17.4절), 주석 줄바꿈·경로, 종료의 cycle 끝내기 상수 공유, Teardown Fatal 문구, Deferred 회수를 `LastGcReport`에 더하고 World가 회수 끝을 한 번 기록 | `LastGcReport().reclaimed` 확인(시간 한도 시험) |
+
+- 모델 시험의 Idle 불변식을 고쳤다: Retired는 회수 대기(`HasPendingReclaim`)가 있을 때만 남고 통계의 `retiredObjects`가 모델과 같다.
+- 검증(바뀐 범위 1회 — 다른 세션의 빌드 작업과 겹치지 않게 넓은 시험은 하지 않았다): Debug Foundation `ObjectRegistryModel` 6·`ObjectGcReclaim` 6·`GcSoak` 6·`ObjectGc` 56·`Gc` 93·`World` 11, Debug EngineTests `World` 79·`Engine` 32·`Tick` 30·`Gc` 110(새 `WorldGc_` 12개·엔진 GC 3개 포함), format·policy 통과(`review7/test2.txt`).
+- 음성 대조는 준비만 했다(`review7/negctl12.py` — 최소 진척 제거, 소멸자 사이 한도 제거, 되돌린 work 미연결, safepoint 조건 제거, 보고서 누적 제거, 옛 표지 판정, 파괴 조건 재도입, 예산 없는 cycle 끝내기, 게임 시간 간격, 취소 분기 제거, Busy 재시도 제거, 엔진 요청 미전달, 간격 0 주기). 빌드 14회가 필요해 다른 세션의 빌드 시간 작업이 병합된 뒤 돌리고 결과를 이 절에 더한다.
