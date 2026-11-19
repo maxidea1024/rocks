@@ -7,8 +7,8 @@
 #include <Platform/Atomics.h>
 #include <Platform/Clock.h>
 #include <Platform/Memory.h>
+#include <Launch/EntryPoint.h>
 #include <Task/WorkerScheduler.h>
-#include <TestSupport/HostFailure.h>
 
 #include <stdio.h>
 
@@ -1829,77 +1829,79 @@ bool ParseNumber(const char* text, uint64 maximum, uint64& value) noexcept {
     return true;
 }
 
-bool Parse(int argc, char** argv, Options& options) noexcept {
-    for (int index = 1; index < argc; ++index) {
-        const bool hasValue = index + 1 < argc;
+bool Parse(Span<const StringView> arguments, Options& options) noexcept {
+    for (usize index = 0; index < arguments.Size(); ++index) {
+        const bool hasValue = index + 1 < arguments.Size();
+        // Launch 인자의 Data()는 NUL로 끝난다.
+        const char* argument = arguments[index].Data();
         uint64 value = 0;
-        if (platform::CStringEquals(argv[index], "--allocators")) {
+        if (platform::CStringEquals(argument, "--allocators")) {
             options.allocators = true;
-        } else if (platform::CStringEquals(argv[index], "--clusters")) {
+        } else if (platform::CStringEquals(argument, "--clusters")) {
             options.clusters = true;
-        } else if (platform::CStringEquals(argv[index], "--packages")) {
+        } else if (platform::CStringEquals(argument, "--packages")) {
             options.packages = true;
-        } else if (platform::CStringEquals(argv[index], "--no-tables")) {
+        } else if (platform::CStringEquals(argument, "--no-tables")) {
             options.noTables = true;
-        } else if (platform::CStringEquals(argv[index], "--clusters-off")) {
+        } else if (platform::CStringEquals(argument, "--clusters-off")) {
             options.packageClustersOff = true;
-        } else if (platform::CStringEquals(argv[index], "--count-work")) {
+        } else if (platform::CStringEquals(argument, "--count-work")) {
             options.countWork = true;
-        } else if (platform::CStringEquals(argv[index], "--mark-only")) {
+        } else if (platform::CStringEquals(argument, "--mark-only")) {
             options.markOnly = true;
-        } else if (platform::CStringEquals(argv[index], "--churn-only")) {
+        } else if (platform::CStringEquals(argument, "--churn-only")) {
             options.churnOnly = true;
-        } else if (platform::CStringEquals(argv[index], "--write-latency")) {
+        } else if (platform::CStringEquals(argument, "--write-latency")) {
             options.writeLatency = true;
-        } else if (platform::CStringEquals(argv[index], "--soak-workers")) {
+        } else if (platform::CStringEquals(argument, "--soak-workers")) {
             options.soakWorkers = true;
-        } else if (platform::CStringEquals(argv[index], "--soak-time-budget")) {
+        } else if (platform::CStringEquals(argument, "--soak-time-budget")) {
             options.soakTimeBudget = true;
-        } else if (!hasValue || !ParseNumber(argv[index + 1], 1ULL << 40, value)) {
+        } else if (!hasValue || !ParseNumber(arguments[index + 1].Data(), 1ULL << 40, value)) {
             return false;
-        } else if (platform::CStringEquals(argv[index], "--objects")) {
+        } else if (platform::CStringEquals(argument, "--objects")) {
             options.objects = static_cast<uint32>(value > 8000000 ? 0 : value);
             ++index;
-        } else if (platform::CStringEquals(argv[index], "--refs")) {
+        } else if (platform::CStringEquals(argument, "--refs")) {
             options.refs = static_cast<uint32>(value > 64 ? 0 : value);
             ++index;
-        } else if (platform::CStringEquals(argv[index], "--leaf")) {
+        } else if (platform::CStringEquals(argument, "--leaf")) {
             options.leafPercent = static_cast<uint32>(value > 100 ? 0 : value);
             ++index;
-        } else if (platform::CStringEquals(argv[index], "--reps")) {
+        } else if (platform::CStringEquals(argument, "--reps")) {
             options.reps = static_cast<uint32>(value > 100000 ? 0 : value);
             ++index;
-        } else if (platform::CStringEquals(argv[index], "--workers")) {
+        } else if (platform::CStringEquals(argument, "--workers")) {
             options.workers = static_cast<uint32>(value > 64 ? 0 : value);
             ++index;
-        } else if (platform::CStringEquals(argv[index], "--soak")) {
+        } else if (platform::CStringEquals(argument, "--soak")) {
             options.soakTicks = value;
             ++index;
-        } else if (platform::CStringEquals(argv[index], "--package-size")) {
+        } else if (platform::CStringEquals(argument, "--package-size")) {
             options.packageSize = static_cast<uint32>(
                 value < MinPackageSize || value > PackageObjects ? DefaultPackageSize : value);
             ++index;
-        } else if (platform::CStringEquals(argv[index], "--incremental-reps")) {
+        } else if (platform::CStringEquals(argument, "--incremental-reps")) {
             options.incrementalReps = static_cast<uint32>(value > 1000 ? 0 : value);
             ++index;
-        } else if (platform::CStringEquals(argv[index], "--write-rounds")) {
+        } else if (platform::CStringEquals(argument, "--write-rounds")) {
             options.writeRounds = static_cast<uint32>(value > 1000 ? 0 : value);
             ++index;
-        } else if (platform::CStringEquals(argv[index], "--package-profile")) {
+        } else if (platform::CStringEquals(argument, "--package-profile")) {
             options.packageProfile = static_cast<uint32>(value > 100 ? 100 : value);
             options.packageProfileSet = true;
             ++index;
-        } else if (platform::CStringEquals(argv[index], "--world-boundary")) {
+        } else if (platform::CStringEquals(argument, "--world-boundary")) {
             options.worldBoundary = static_cast<uint32>(value > 100 ? 100 : value);
             options.worldBoundarySet = true;
             ++index;
-        } else if (platform::CStringEquals(argv[index], "--cluster-soak")) {
+        } else if (platform::CStringEquals(argument, "--cluster-soak")) {
             options.clusterSoakTicks = value;
             ++index;
-        } else if (platform::CStringEquals(argv[index], "--seed")) {
+        } else if (platform::CStringEquals(argument, "--seed")) {
             options.seed = value;
             ++index;
-        } else if (platform::CStringEquals(argv[index], "--soak-objects")) {
+        } else if (platform::CStringEquals(argument, "--soak-objects")) {
             options.soakObjects = static_cast<uint32>(value > 1000000 ? 0 : value);
             ++index;
         } else {
@@ -1975,12 +1977,10 @@ int Run(const Options& options) noexcept {
     return 0;
 }
 
-} // namespace
-
-int main(int argc, char** argv) {
-    rocks::test::PrepareAutomatedTestProcess();
+// 실행 본문이다(Launch 공통 실행 계층이 크래시 수집·명령줄 캡처 뒤 부른다).
+int RunMain(launch::ApplicationContext& context) noexcept {
     Options options;
-    if (!Parse(argc, argv, options)) {
+    if (!Parse(context.Arguments(), options)) {
         printf("usage: GcBench [--objects N] [--refs K] [--leaf P] [--reps R] [--workers W] "
                "[--allocators] [--clusters] [--soak TICKS [--seed S] [--soak-objects N] "
                "[--soak-workers] [--soak-time-budget]] [--cluster-soak TICKS [--packages]] "
@@ -1992,3 +1992,18 @@ int main(int argc, char** argv) {
            options.noTables ? "off" : "on");
     return Run(options);
 }
+
+// 무인 측정 도구다. 실패가 대화상자에서 멈추지 않게 OS·CRT 오류 대화상자를 끈다(전에는
+// TestSupport PrepareAutomatedTestProcess가 했다).
+const launch::ApplicationDescription& Describe() noexcept {
+    static constexpr launch::ApplicationDescription Description{
+        .name = "GcBench",
+        .kind = launch::ApplicationKind::Tool,
+        .settings = {.suppressSystemErrorDialogs = true},
+        .run = &RunMain};
+    return Description;
+}
+
+} // namespace
+
+ROCKS_IMPLEMENT_APPLICATION(Describe)

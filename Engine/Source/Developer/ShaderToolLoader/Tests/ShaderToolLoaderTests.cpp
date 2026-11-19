@@ -26,7 +26,8 @@ using namespace rocks::test;
 //   SHA-256·크기 불일치와 없는 파일을 열지 않음, 현재 디렉터리·PATH의 같은 이름 라이브러리를 쓰지
 //   않음(P10 음성 대조 재사용)을 본다. 시험 라이브러리를 만들 수 없는 플랫폼은 SKIP이다.
 namespace rocks::test {
-bool RegisterProcessProbe(const char* mode, int (*function)(int, char**) noexcept) noexcept;
+bool RegisterProcessProbe(const char* mode,
+                          int (*function)(int, const char* const*) noexcept) noexcept;
 } // namespace rocks::test
 
 namespace {
@@ -516,7 +517,7 @@ uint32 RunOpenProbe(const char* storeRoot, const char* key, const char* name,
 // probe 자식 쪽이다. 마지막 인자가 있으면 PATH 맨 앞에 더한 뒤 대조 항목을 ShaderToolLibrary로
 // 연다. 종료 코드: 열림 0, NotBootstrapped 10, LoadFailed(NotFound) 11, DigestMismatch 12, 그 밖의
 // 실패 13, 준비 실패 14, 열지 못했는데 같은 이름 라이브러리가 프로세스에 올라와 있으면 15다.
-int ShaderToolOpenProbe(int argc, char** argv) noexcept {
+int ShaderToolOpenProbe(int argc, const char* const* argv) noexcept {
     static char storage[16 * 1024];
     const char* arguments[10];
     const usize count = ReadUtf8Arguments(argc, argv, storage, sizeof(storage), arguments, 10);

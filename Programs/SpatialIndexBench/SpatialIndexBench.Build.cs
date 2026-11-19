@@ -12,6 +12,6 @@ public sealed class SpatialIndexBenchProgram : ModuleRules
         Name = "SpatialIndexBench",
         Kind = NativeModuleKind.Executable,
         Sources = context.Sources("Programs/SpatialIndexBench/Private"),
-        Dependencies = ["SpatialIndex", "Task"]
+        Dependencies = ["Launch", "SpatialIndex", "Task"]
     };
 }

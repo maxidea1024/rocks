@@ -4,6 +4,7 @@
 #include <Crypto/AesModes.h>
 #include <Platform/Clock.h>
 #include <Platform/Memory.h>
+#include <Launch/EntryPoint.h>
 
 #include <stdio.h>
 
@@ -68,18 +69,18 @@ bool ParseNumber(const char* text, usize low, usize high, usize& value) {
     return value >= low && value <= high;
 }
 
-bool Parse(int argc, char** argv, Options& options) {
-    for (int index = 1; index < argc; ++index) {
-        const bool hasValue = index + 1 < argc;
+bool Parse(Span<const StringView> arguments, Options& options) {
+    for (usize index = 0; index < arguments.Size(); ++index) {
+        const bool hasValue = index + 1 < arguments.Size();
         usize value = 0;
-        if (platform::CStringEquals(argv[index], "--rounds") && hasValue) {
-            if (!ParseNumber(argv[++index], 1, 100, value)) {
+        if (platform::CStringEquals(arguments[index].Data(), "--rounds") && hasValue) {
+            if (!ParseNumber(arguments[++index].Data(), 1, 100, value)) {
                 return false;
             }
 
             options.rounds = static_cast<uint32>(value);
-        } else if (platform::CStringEquals(argv[index], "--mib") && hasValue) {
-            if (!ParseNumber(argv[++index], 1, 4096, value)) {
+        } else if (platform::CStringEquals(arguments[index].Data(), "--mib") && hasValue) {
+            if (!ParseNumber(arguments[++index].Data(), 1, 4096, value)) {
                 return false;
             }
 
@@ -202,14 +203,23 @@ int Run(const Options& options) {
     return 0;
 }
 
-} // namespace
-
-int main(int argc, char** argv) {
+// 실행 본문이다(Launch 공통 실행 계층이 크래시 수집·명령줄 캡처 뒤 부른다).
+int RunMain(launch::ApplicationContext& context) noexcept {
     Options options;
-    if (!Parse(argc, argv, options)) {
+    if (!Parse(context.Arguments(), options)) {
         printf("usage: CryptoBench [--rounds <1-100>] [--mib <1-4096>]\n");
         return 1;
     }
 
     return Run(options);
 }
+
+const launch::ApplicationDescription& Describe() noexcept {
+    static constexpr launch::ApplicationDescription Description{
+        .name = "CryptoBench", .kind = launch::ApplicationKind::Tool, .run = &RunMain};
+    return Description;
+}
+
+} // namespace
+
+ROCKS_IMPLEMENT_APPLICATION(Describe)

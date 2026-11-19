@@ -281,6 +281,9 @@ try
     SystemLibraryTests.Run(request);
     Pass("system libraries and Apple frameworks: platform link form, propagation, validation");
 
+    WindowsSubsystemTests.Run(request);
+    Pass("Windows subsystem and PDB alternate path link arguments, validation");
+
     await GeneratedSourceTests.RunAsync(request, root);
     Pass("generated sources: written under <out>/GeneratedSources, linked, incremental, name and content validation");
 

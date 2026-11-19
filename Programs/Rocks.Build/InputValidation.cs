@@ -115,6 +115,16 @@ internal static class InputValidation
                 throw new ArgumentException($"Module {module.Name}: unsupported Optimization {module.Optimization}.");
             }
 
+            if (!Enum.IsDefined(module.WindowsSubsystem))
+            {
+                throw new ArgumentException($"Module {module.Name}: unsupported WindowsSubsystem {module.WindowsSubsystem}.");
+            }
+
+            if (module.WindowsSubsystem != WindowsSubsystem.Console && module.Kind != NativeModuleKind.Executable)
+            {
+                throw new ArgumentException($"Module {module.Name}: WindowsSubsystem applies only to executables.");
+            }
+
             string basename = module.Name.Split('.')[0].ToUpperInvariant();
             if (new[] { "CON", "PRN", "AUX", "NUL" }.Contains(basename) ||
                 (basename.Length == 4 && (basename.StartsWith("COM", StringComparison.Ordinal) || basename.StartsWith("LPT", StringComparison.Ordinal)) && basename[3] is >= '1' and <= '9'))

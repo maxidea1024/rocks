@@ -8,11 +8,11 @@
 #include <Core/Text/StringBuilder.h>
 #include <Engine/Engine.h>
 #include <HostConfig/HostSettings.h>
+#include <Launch/Application.h>
+#include <Platform/CrashReporting.h>
 #include <LogHost/LogHost.h>
-#include <Platform/CrashHandler.h>
 #include <Platform/File.h>
 #include <Platform/Process.h>
-#include <Core/Memory/SystemAllocator.h>
 #if SANDBOX_TRACE_ANALYSIS
 #include <TraceAnalysis/TraceModel.h>
 #endif
@@ -21,6 +21,7 @@
 #include <TraceControl/TraceController.h>
 #include <TraceControl/TraceSettings.generated.h>
 #include <stdio.h>
+#include <new>
 #include <stdlib.h>
 
 namespace sandbox {
@@ -45,29 +46,38 @@ constexpr uint32 SelfTestTimeoutMilliseconds = 60000;
 // 자식 stderr를 모으는 버퍼 크기다.
 constexpr usize SelfTestOutputBytes = 64 * 1024;
 
-// 최소 크래시 처리기를 걸고, 건 경우에만 범위가 끝날 때 뗀다(이른 return도 거친다).
-class CrashHandlerScope {
+// 종료 요청 다리다(설계 20절). Ctrl-C·Ctrl-Break·SIGINT·SIGTERM 처리기는 launch::RequestTermination
+// 원자 표시만 남긴다. 게임 스레드가 프레임 첫 단계(PumpEvents)에서 그 표시를 보고
+// Engine::RequestExit를 불러 정상 종료로 잇는다. 프레임마다 원자 읽기 하나다.
+class TerminationRequestBridge final : public EngineLoopHooks {
 public:
-    CrashHandlerScope() noexcept : installed_(platform::InstallCrashHandler()) {
+    explicit TerminationRequestBridge(uint64 requestAtFrame) noexcept
+        : requestAtFrame_(requestAtFrame) {
     }
 
-    ~CrashHandlerScope() noexcept {
-        if (installed_) {
-            platform::RemoveCrashHandler();
+    void PumpEvents(Engine& engine) noexcept override {
+        ++pumped_;
+        if (requestAtFrame_ != 0 && pumped_ == requestAtFrame_) {
+            launch::RequestTermination();
+        }
+
+        if (launch::IsTerminationRequested()) {
+            engine.RequestExit();
         }
     }
 
-    CrashHandlerScope(const CrashHandlerScope&) = delete;
-    CrashHandlerScope& operator=(const CrashHandlerScope&) = delete;
-
 private:
-    bool installed_;
+    uint64 requestAtFrame_;
+    uint64 pumped_ = 0;
 };
 
 // 엔진을 World 하나로 frames만큼 돌린다. 실패 원인은 엔진이 한 번 기록한다(호스트는 다시 기록하지
 // 않는다).
-int RunEngine(Allocator& allocator, uint64 frames, config::ConfigContext& settings) noexcept {
+int RunEngine(Allocator& allocator, uint64 frames, uint64 requestTerminationAtFrame,
+              config::ConfigContext& settings) noexcept {
+    TerminationRequestBridge bridge(requestTerminationAtFrame);
     EngineConfig config;
+    config.hooks = &bridge;
     config.maxFrames = frames;
     config.settings = &settings;
     config.fixedFrameDeltaSeconds = HeadlessFrameSeconds;
@@ -266,6 +276,30 @@ bool CheckConfiguredFileLogging() noexcept {
     return passed;
 }
 
+// 종료 요청 다리: 자식을 프레임 상한 없이(아주 큰 값) 띄우고 2번째 프레임에서 종료 요청 표시를
+// 남기게 한다. 다리가 RequestExit로 이어 "RequestExit" 사유로 정상 종료(0)해야 한다. 순서는 프레임
+// 번호로 정해진다(시간·경쟁과 무관).
+bool CheckTerminationRequestBridge() noexcept {
+    const platform::ProcessArgument arguments[] = {{"--engine", 8},
+                                                   {"--frames", 8},
+                                                   {"1000000", 7},
+                                                   {"--request-termination-at-frame", 30},
+                                                   {"2", 1}};
+    static char errorText[SelfTestOutputBytes];
+    const ChildRun child = RunChild(arguments, errorText, sizeof(errorText));
+    const bool passed =
+        child.exited && child.code == 0 &&
+        child.stderrText.Contains("frames: RequestExit", StringComparison::CaseSensitive) &&
+        child.stderrText.Contains("[Info][Engine] Engine shut down",
+                                  StringComparison::CaseSensitive);
+    if (!passed) {
+        printf("    exit %u, stderr:\n%.*s\n", child.code,
+               static_cast<int>(child.stderrText.ByteCount()), child.stderrText.Data());
+    }
+
+    return passed;
+}
+
 // 장치 능력을 기기 특성으로 옮기면 품질 등급 요구(기기 조건)가 그 값으로 판정된다(설정 CF4 —
 // Config는 Graphics를 모르고 호스트가 특성을 채운다).
 bool CheckDeviceTraitsFromCaps(Allocator& allocator) noexcept {
@@ -298,7 +332,8 @@ bool CheckDeviceTraitsFromCaps(Allocator& allocator) noexcept {
 
 } // namespace
 
-int RunEngineHost(Allocator& allocator, const EngineHostOptions& options) noexcept {
+int RunEngineHost(launch::ApplicationContext& context, const EngineHostOptions& options) noexcept {
+    Allocator& allocator = context.SystemAllocator();
     char engineDir[4096] = {};
     HostSettingsOptions boot;
     if (auto found = FindEngineDirectory(Span<char>(engineDir)); found) {
@@ -311,8 +346,20 @@ int RunEngineHost(Allocator& allocator, const EngineHostOptions& options) noexce
                      ErrorCodeName(found.Error()));
     }
 
-    // 1)–5) 설정 문맥과 시작 설정. 실패는 HostSettings가 진단과 함께 기록했다.
-    HostSettings settings(allocator);
+    // 1)–5) 설정 문맥과 시작 설정. 실패는 HostSettings가 진단과 함께 기록했다. 설정 문맥과
+    // LogHost는 정적 저장소에 만들고 끝에서 직접 파괴한다(멈춘 출력 스레드를 포기했으면 파괴하지
+    // 않고 Launch가 정적 소멸 없이 끝낸다).
+    alignas(HostSettings) static unsigned char settingsStorage[sizeof(HostSettings)];
+    alignas(LogHost) static unsigned char hostStorage[sizeof(LogHost)];
+    HostSettings& settings = *::new (settingsStorage) HostSettings(allocator);
+    struct SettingsScope {
+        HostSettings* settings;
+        ~SettingsScope() noexcept {
+            if (settings != nullptr) {
+                settings->~HostSettings();
+            }
+        }
+    } settingsScope{&settings};
     if (!settings.Initialize(boot)) {
         return 1;
     }
@@ -324,11 +371,17 @@ int RunEngineHost(Allocator& allocator, const EngineHostOptions& options) noexce
         return 2;
     }
 
-    // 6) 로그. log.mode·log.file.* 는 5)에서 고정됐다. 접근 위반·치명 신호 때도 마지막 로그를
-    // flush하도록 최소 크래시 처리기를 둔다(앞 처리기로 연쇄한다). host보다 먼저 만들어 host 소멸
-    // 뒤에 뗀다.
-    CrashHandlerScope crashHandler;
-    LogHost host(allocator);
+    // 6) 로그. log.mode·log.file.* 는 5)에서 고정됐다. 접근 위반·치명 신호 때 마지막 로그는
+    // Launch가 설치한 크래시 수집기의 종료 콜백이 flush한다.
+    LogHost& host = *::new (hostStorage) LogHost(allocator);
+    struct HostScope {
+        LogHost* host;
+        ~HostScope() noexcept {
+            if (host != nullptr) {
+                host->~LogHost();
+            }
+        }
+    } hostScope{&host};
     if (!host.Start(LogSystemConfig::ForEngineHost(), &settings.Context(), "Sandbox")) {
         Log::Error(LogSandboxHost, "The log system could not start");
         return 1;
@@ -364,12 +417,18 @@ int RunEngineHost(Allocator& allocator, const EngineHostOptions& options) noexce
                 (void)control.RegisterConsoleCommands();
                 (void)control.ApplyCommandLine(options.arguments);
                 if (options.traceFile != nullptr) {
-                    (void)control.OpenFile(StringView(options.traceFile));
+                    // 크래시 메타데이터 associatedFiles.traceFile에 남긴다(설계 LC6).
+                    const StringView traceFile(options.traceFile);
+                    if (control.OpenFile(traceFile)) {
+                        (void)platform::SetCrashAnnotation(platform::CrashAnnotation::TraceFile,
+                                                           traceFile.Data(), traceFile.ByteCount());
+                    }
                 }
             }
 
             // 8) 엔진 루프(프레임마다 sync 지점).
-            exitCode = RunEngine(allocator, options.frames, settings.Context());
+            exitCode = RunEngine(allocator, options.frames, options.requestTerminationAtFrame,
+                                 settings.Context());
             // 출력 스레드에 남은 기록이 trace에 닿게 한 뒤 sink를 뺀다(trace 출력이 닫히기 전에).
             if (traceLogAdded) {
                 (void)host.System().Flush(TraceLogFlushTimeoutMilliseconds);
@@ -382,9 +441,12 @@ int RunEngineHost(Allocator& allocator, const EngineHostOptions& options) noexce
 
     host.Stop();
     if (host.WriterAbandoned()) {
-        // 멈춘 sink에 걸린 출력 스레드가 남았다. 설정 문맥·전역 소멸자·CRT 종료 처리를 돌리면 그
-        // 스레드와 겹칠 수 있으므로 정리 없이 끝낸다(LogHost::Stop 설명).
-        _Exit(exitCode);
+        // 멈춘 sink에 걸린 출력 스레드가 남았다. LogHost·설정 문맥·전역 소멸자·CRT 종료 처리를
+        // 돌리면 그 스레드와 겹칠 수 있으므로 파괴하지 않고, Launch가 크래시 수집을 정상 종료로 뗀
+        // 뒤 정적 소멸 없이 끝낸다(LogHost::Stop 설명).
+        hostScope.host = nullptr;
+        settingsScope.settings = nullptr;
+        context.RequestExitWithoutStaticTeardown();
     }
 
     return exitCode;
@@ -433,7 +495,11 @@ uint32 RunEngineHostSelfTest() noexcept {
     const bool traits = CheckDeviceTraitsFromCaps(allocator);
     printf("  [%s] engine host: device caps become config device traits\n",
            traits ? "PASS" : "FAIL");
-    return (passed ? 0u : 1u) + (configured ? 0u : 1u) + (traced ? 0u : 1u) + (traits ? 0u : 1u);
+    const bool terminated = CheckTerminationRequestBridge();
+    printf("  [%s] engine host: a termination request ends the engine run normally\n",
+           terminated ? "PASS" : "FAIL");
+    return (passed ? 0u : 1u) + (configured ? 0u : 1u) + (traced ? 0u : 1u) + (traits ? 0u : 1u) +
+           (terminated ? 0u : 1u);
 }
 
 } // namespace sandbox

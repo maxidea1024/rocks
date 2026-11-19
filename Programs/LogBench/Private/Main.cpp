@@ -7,6 +7,7 @@
 #include <Platform/Clock.h>
 #include <Task/WorkerScheduler.h>
 #include <TraceCapture/TraceTask.h>
+#include <Launch/EntryPoint.h>
 
 #include <stdio.h>
 
@@ -211,14 +212,14 @@ void RunTaskPropagation(uint32 count) {
     RunTaskRoundTrip("task correlated", count);
 }
 
-} // namespace
-
-int main(int argc, char** argv) {
+// 실행 본문이다(Launch 공통 실행 계층이 크래시 수집·명령줄 캡처 뒤 부른다).
+int RunMain(launch::ApplicationContext& context) noexcept {
     uint32 count = DefaultSamples;
-    if (argc == 2) {
+    const Span<const StringView> arguments = context.Arguments();
+    if (arguments.Size() == 1) {
         uint64 value = 0;
-        bool digits = argv[1][0] != '\0';
-        for (const char* digit = argv[1]; *digit != '\0' && digits; ++digit) {
+        bool digits = arguments[0].ByteCount() != 0;
+        for (const char* digit = arguments[0].Data(); *digit != '\0' && digits; ++digit) {
             digits = *digit >= '0' && *digit <= '9' && value <= MaxSamples;
             value = value * 10 + static_cast<uint64>(*digit - '0');
         }
@@ -238,3 +239,13 @@ int main(int argc, char** argv) {
     RunTaskPropagation(count / TaskSampleDivisor);
     return 0;
 }
+
+const launch::ApplicationDescription& Describe() noexcept {
+    static constexpr launch::ApplicationDescription Description{
+        .name = "LogBench", .kind = launch::ApplicationKind::Tool, .run = &RunMain};
+    return Description;
+}
+
+} // namespace
+
+ROCKS_IMPLEMENT_APPLICATION(Describe)

@@ -22,7 +22,8 @@ using namespace rocks::config;
 using namespace rocks::test::config;
 
 namespace rocks::test {
-bool RegisterProcessProbe(const char* mode, int (*function)(int, char**) noexcept) noexcept;
+bool RegisterProcessProbe(const char* mode,
+                          int (*function)(int, const char* const*) noexcept) noexcept;
 } // namespace rocks::test
 
 namespace cvar_thread_test {
@@ -345,7 +346,7 @@ TEST(CVar_ScopedOverrideEndsOnAnotherThread) {
 namespace {
 
 // 사망 시험 자식이다(PrepareFatalTestProcess로 오류 대화상자를 막는다).
-int CVarDeathProbe(int argc, char** argv) noexcept {
+int CVarDeathProbe(int argc, const char* const* argv) noexcept {
     rocks::test::PrepareFatalTestProcess();
     if (argc < 4) {
         return 20;

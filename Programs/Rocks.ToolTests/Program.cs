@@ -61,7 +61,7 @@ internal static class Program
                         .Concat(PolicyChecks.SourceWarnings(root)).Concat(PolicyChecks.OptimizationOverrides(root))
                         .Concat(PolicyChecks.CompilerBuiltins(root)).Concat(PolicyChecks.RawLimitLiterals(root)).Concat(PolicyChecks.InitializerListDeductions(root)).Concat(PolicyChecks.CVarRegistrations(root)).Concat(PolicyChecks.CompileTimeMessages(root)).Concat(PolicyChecks.EnglishSourceLiterals(root)).Concat(PolicyChecks.EnglishBuildFiles(root)).Concat(PolicyChecks.DeterministicMathSources(root)).Concat(PolicyChecks.CrtNumberConversions(root)).Concat(UnicodeTables.Check(root)).Concat(Json5UnicodeTablesGenerator.Check(root)).Concat(MathTables.Check(root)).Concat(NumberTables.Check(root))
                         .Concat(PolicyChecks.PythonFreeMainPath(root)).Concat(PolicyChecks.ThirdParty(root)).Concat(PolicyChecks.DerivedSources(root)).Concat(PolicyChecks.ForeignEngineBoundary(root))
-                        .Concat(PolicyChecks.ShaderToolReferences(root)).ToList();
+                        .Concat(PolicyChecks.ShaderToolReferences(root)).Concat(PolicyChecks.ProcessEntryPoints(root)).ToList();
                     // Release 배제(셰이더 시스템 9절)는 규칙 어셈블리를 평가한다. 알려진 예외는 실패가 아니지만 조용히 넘기지 않고 출력한다.
                     ReleaseExclusionResult release = ReleaseExclusion.Check(root, options.Optional("rules") ?? ReleaseExclusion.DefaultRulesAssembly(root));
                     failures.AddRange(release.Failures);
@@ -144,6 +144,14 @@ internal static class Program
                     return 0;
                 default:
                     throw new ArgumentException("Unknown command: " + args[0]);
+            }
+
+            // --filter <a,b,...>: 이름에 쉼표로 나눈 조각 하나라도 들어 있는 시험만 돈다(반복 중 바뀐 부분만 확인할 때). 아무것도 남지
+            // 않으면 실패다.
+            if (options.Optional("filter") is string filter)
+            {
+                string[] parts = filter.Split(',', StringSplitOptions.RemoveEmptyEntries);
+                suite.Retain(name => parts.Any(part => name.Contains(part, StringComparison.Ordinal)));
             }
 
             return await suite.RunAsync(options.Json, options.Seed, parallelism);

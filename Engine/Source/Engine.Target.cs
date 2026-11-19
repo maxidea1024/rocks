@@ -8,7 +8,8 @@ public sealed class EngineTarget : TargetRules
 
     // CoreTypeBindings: Core value type reflection bindings (Docs/Design/ReflectionFoundations.ko.md section 4.5). It must be in the SDK for game modules
     // to reflect Core value type fields.
-    public override IReadOnlyList<string> Modules => ["ObjectSerialization", "Localization", "CoreTypeBindings"];
+    // Launch: the common entry layer every game executable uses (ROCKS_IMPLEMENT_APPLICATION, crash reporting).
+    public override IReadOnlyList<string> Modules => ["ObjectSerialization", "Localization", "CoreTypeBindings", "Launch"];
 
     public override bool CheckPublicHeaders => true;
 }

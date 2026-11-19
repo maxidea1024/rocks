@@ -295,11 +295,11 @@ try
     CopyTree(Path.Combine(root, "Templates/Game/Foundation"), reflectionGame);
     var reflectionRules = Path.Combine(reflectionGame, "Game.Build.cs");
     var reflectionRulesText = File.ReadAllText(reflectionRules);
-    Require(reflectionRulesText.Contains("Dependencies = [\"ObjectRuntime\"]", StringComparison.Ordinal) &&
+    Require(reflectionRulesText.Contains("Dependencies = [\"ObjectRuntime\", \"Launch\"]", StringComparison.Ordinal) &&
         reflectionRulesText.Contains("Metadata = [\"GameObject.h\"]", StringComparison.Ordinal), "Game template rules changed; update the SDK descriptor fixture");
     // ObjectSerialization: 게임이 GameCore의 배열 필드를 그래프로 저장·복원한다(SDK 모듈로 링크만 한다).
     File.WriteAllText(reflectionRules, reflectionRulesText
-        .Replace("Dependencies = [\"ObjectRuntime\"]", "Dependencies = [\"ObjectRuntime\", \"GameCore\", \"ObjectSerialization\"]", StringComparison.Ordinal)
+        .Replace("Dependencies = [\"ObjectRuntime\", \"Launch\"]", "Dependencies = [\"ObjectRuntime\", \"Launch\", \"GameCore\", \"ObjectSerialization\"]", StringComparison.Ordinal)
         .Replace("Metadata = [\"GameObject.h\"]", "Metadata = [\"GameObject.h\", \"FixtureChild.h\"]", StringComparison.Ordinal));
     var reflectionProject = Path.Combine(reflectionGame, "Game.rocksproject");
     var reflectionProjectText = File.ReadAllText(reflectionProject);

@@ -1,11 +1,11 @@
 #include <Core/Memory/UniquePtr.h>
+#include <Launch/EntryPoint.h>
 #include <Object/ModuleRegistration.h>
 #include <Object/NativeClass.h>
 #include <Object/TypeRegistry.h>
 #include <Platform/Atomics.h>
 #include <Platform/Clock.h>
 #include <Platform/Memory.h>
-#include <TestSupport/HostFailure.h>
 #include <World/Actor.generated.h>
 #include <World/World.h>
 #include <stdio.h>
@@ -315,22 +315,27 @@ int Measure(uint32 actors, bool ticking) noexcept {
     return memory.Allocations() == 0 ? status : 19;
 }
 
-} // namespace
+// 최대 측정 크기 수다(--actors를 이보다 많이 주면 앞의 것만 쓴다).
+constexpr rocks::uint32 MaxSizes = 8;
 
-int main(int argc, char** argv) {
-    rocks::test::PrepareAutomatedTestProcess();
-    rocks::uint32 sizes[8];
+// 실행 본문이다(Launch 공통 실행 계층이 크래시 수집·명령줄 캡처 뒤 부른다).
+int RunMain(rocks::launch::ApplicationContext& context) noexcept {
+    const rocks::Span<const rocks::StringView> arguments = context.Arguments();
+    rocks::uint32 sizes[MaxSizes];
     rocks::uint32 count = 0;
     bool ticking = false;
-    for (int index = 1; index < argc; ++index) {
-        const char* text = argv[index];
+    // Launch 인자의 Data()는 NUL로 끝난다.
+    for (const rocks::StringView argument : arguments) {
+        const char* text = argument.Data();
         ticking = ticking || (text[0] == '-' && text[1] == '-' && text[2] == 't');
     }
 
-    for (int index = 1; index + 1 < argc && count < 8; ++index) {
-        if (argv[index][0] == '-' && argv[index][1] == '-' && argv[index][2] == 'a') {
+    for (rocks::usize index = 0; index + 1 < arguments.Size() && count < MaxSizes; ++index) {
+        const char* text = arguments[index].Data();
+        if (text[0] == '-' && text[1] == '-' && text[2] == 'a') {
             rocks::uint32 value = 0;
-            for (const char* digit = argv[index + 1]; *digit >= '0' && *digit <= '9'; ++digit) {
+            for (const char* digit = arguments[index + 1].Data(); *digit >= '0' && *digit <= '9';
+                 ++digit) {
                 value = value * 10 + static_cast<rocks::uint32>(*digit - '0');
             }
 
@@ -352,3 +357,18 @@ int main(int argc, char** argv) {
 
     return 0;
 }
+
+// 무인 측정 도구다. 실패가 대화상자에서 멈추지 않게 OS·CRT 오류 대화상자를 끈다(전에는
+// TestSupport PrepareAutomatedTestProcess가 했다).
+const rocks::launch::ApplicationDescription& Describe() noexcept {
+    static constexpr rocks::launch::ApplicationDescription Description{
+        .name = "WorldBench",
+        .kind = rocks::launch::ApplicationKind::Tool,
+        .settings = {.suppressSystemErrorDialogs = true},
+        .run = &RunMain};
+    return Description;
+}
+
+} // namespace
+
+ROCKS_IMPLEMENT_APPLICATION(Describe)
