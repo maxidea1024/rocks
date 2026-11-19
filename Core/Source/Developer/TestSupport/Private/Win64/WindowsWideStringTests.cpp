@@ -10,6 +10,8 @@
 // Platform/Win64/WideString.h 시험이다(UTF-8·UTF-16 변환, 할당 판과 고정 버퍼 판). Windows 전용
 // 시험이라 TestSupport/Private/Win64에 둔다.
 using namespace rocks;
+namespace windows_wide_string_tests_file {
+
 using namespace rocks::platform;
 using namespace rocks::platform::windows;
 
@@ -332,3 +334,4 @@ TEST(PlatformWindowsWideStringWriteUtf8MapsErrorsForPublicApis) {
     status = rocks::platform::detail::WriteUtf8(L"", 0, buffer, sizeof(buffer), bytes);
     CHECK(status && bytes == 0 && buffer[0] == '\0');
 }
+} // namespace windows_wide_string_tests_file

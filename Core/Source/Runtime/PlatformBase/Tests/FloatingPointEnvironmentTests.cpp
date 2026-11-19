@@ -51,17 +51,17 @@ struct RunResult {
 };
 
 RunResult RunFrom(uint64 control) noexcept {
-    const uint64 original = detail::ReadFloatingPointControl();
-    detail::WriteFloatingPointControl(control);
+    const uint64 original = platform::detail::ReadFloatingPointControl();
+    platform::detail::WriteFloatingPointControl(control);
     RunResult result;
     result.changed = RunWithDeterministicFloatingPoint(&Observe, &result.inside);
-    result.after = detail::ReadFloatingPointControl();
-    detail::WriteFloatingPointControl(original);
+    result.after = platform::detail::ReadFloatingPointControl();
+    platform::detail::WriteFloatingPointControl(original);
     return result;
 }
 
 uint64 WithoutStatus(uint64 control) noexcept {
-    return control & ~detail::StatusFlagBits();
+    return control & ~platform::detail::StatusFlagBits();
 }
 
 } // namespace
@@ -75,17 +75,18 @@ TEST(FloatingPointEnvironment_DefaultProcessIsDeterministic) {
 }
 
 TEST(FloatingPointEnvironment_RunCorrectsFlushDenormalsAndRounding) {
-    const uint64 original = detail::ReadFloatingPointControl();
+    const uint64 original = platform::detail::ReadFloatingPointControl();
     const double expectedProduct = SubnormalProduct(MinimumNormal, 0.5);
     const double expectedThird = OneThird();
     CHECK(expectedProduct != 0.0);
 
     // 다른 코드가 켜 놓았을 수 있는 설정마다: 실행 안에서는 기대 환경·기본 결과, 실행 뒤에는 원래
     // 설정.
-    const uint64 disturbed[] = {
-        original | detail::FlushToZeroBit(), original | detail::DenormalsAreZeroBit(),
-        original | detail::RoundTowardZeroBits(),
-        original | detail::FlushToZeroBit() | detail::RoundTowardZeroBits()};
+    const uint64 disturbed[] = {original | platform::detail::FlushToZeroBit(),
+                                original | platform::detail::DenormalsAreZeroBit(),
+                                original | platform::detail::RoundTowardZeroBits(),
+                                original | platform::detail::FlushToZeroBit() |
+                                    platform::detail::RoundTowardZeroBits()};
     for (uint64 control : disturbed) {
         CHECK(WithoutStatus(control) != WithoutStatus(original));
         const RunResult result = RunFrom(control);
@@ -102,8 +103,8 @@ TEST(FloatingPointEnvironment_RunRestoresControlChangedInside) {
     // 안에서 누가 FTZ를 켜도 끝나면 호출 전 설정(여기서는 기대 환경)으로 돌아간다.
     const bool changed = RunWithDeterministicFloatingPoint(
         [](void*) noexcept {
-            detail::WriteFloatingPointControl(detail::ReadFloatingPointControl() |
-                                              detail::FlushToZeroBit());
+            platform::detail::WriteFloatingPointControl(
+                platform::detail::ReadFloatingPointControl() | platform::detail::FlushToZeroBit());
         },
         nullptr);
     CHECK(!changed);
@@ -111,13 +112,13 @@ TEST(FloatingPointEnvironment_RunRestoresControlChangedInside) {
 }
 
 TEST(FloatingPointEnvironment_RunNestsAndKeepsStatusFlags) {
-    const uint64 original = detail::ReadFloatingPointControl();
+    const uint64 original = platform::detail::ReadFloatingPointControl();
     // 중첩: 바깥이 환경을 바꾸면 안쪽은 바꿀 것이 없다.
     struct Nested {
         bool innerChanged = true;
         bool innerDeterministic = false;
     } nested;
-    detail::WriteFloatingPointControl(original | detail::FlushToZeroBit());
+    platform::detail::WriteFloatingPointControl(original | platform::detail::FlushToZeroBit());
     const bool outerChanged = RunWithDeterministicFloatingPoint(
         [](void* context) noexcept {
             auto& state = *static_cast<Nested*>(context);
@@ -126,19 +127,22 @@ TEST(FloatingPointEnvironment_RunNestsAndKeepsStatusFlags) {
             state.innerDeterministic = inner.deterministic;
         },
         &nested);
-    const uint64 afterNested = detail::ReadFloatingPointControl();
-    detail::WriteFloatingPointControl(original);
+    const uint64 afterNested = platform::detail::ReadFloatingPointControl();
+    platform::detail::WriteFloatingPointControl(original);
     CHECK(outerChanged && !nested.innerChanged && nested.innerDeterministic);
-    CHECK((afterNested & detail::FlushToZeroBit()) != 0);
+    CHECK((afterNested & platform::detail::FlushToZeroBit()) != 0);
 
     // 상태 플래그(x64 MXCSR bit 0–5): 실행 중 1/3이 켠 부정확(PE) 플래그가 실행 뒤에도 남는다.
     // ARM64는 상태 플래그가 FPSR에 있어 FPCR 복원과 무관하다.
-    if (detail::StatusFlagBits() != 0) {
-        detail::WriteFloatingPointControl(WithoutStatus(original) | detail::FlushToZeroBit());
-        const RunResult result = RunFrom(WithoutStatus(original) | detail::FlushToZeroBit());
-        CHECK((result.after & detail::StatusFlagBits()) != 0);
-        CHECK(WithoutStatus(result.after) == (WithoutStatus(original) | detail::FlushToZeroBit()));
-        detail::WriteFloatingPointControl(original);
+    if (platform::detail::StatusFlagBits() != 0) {
+        platform::detail::WriteFloatingPointControl(WithoutStatus(original) |
+                                                    platform::detail::FlushToZeroBit());
+        const RunResult result =
+            RunFrom(WithoutStatus(original) | platform::detail::FlushToZeroBit());
+        CHECK((result.after & platform::detail::StatusFlagBits()) != 0);
+        CHECK(WithoutStatus(result.after) ==
+              (WithoutStatus(original) | platform::detail::FlushToZeroBit()));
+        platform::detail::WriteFloatingPointControl(original);
     }
 
     CHECK(IsDeterministicFloatingPointEnvironment());
