@@ -7,6 +7,9 @@ public sealed class D3D11Graphics : EngineModuleRules
 {
     protected override string ModuleName => "D3D11Graphics";
 
+    // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
+    protected override UnityMode Unity => UnityMode.On;
+
     protected override string[] RequiredModules => ["Graphics", "DxgiGraphics"];
 
     public override NativeModuleInput Configure(BuildContext context)
