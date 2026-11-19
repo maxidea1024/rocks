@@ -204,7 +204,10 @@ enum class ConfigDiagnosticCode : uint8 {
     GroupConflict,
     // 정보: 품질 조합 검증이 묶음의 펼칠 등급을 낮췄거나 가장 낮은 등급도 기기 조건에 맞지 않는다
     // (메시지는 `quality.shadow@1 (requested 3, lowered: <사유>)` — Config 6.1, CVar 11절).
-    QualityLowered
+    QualityLowered,
+    // 범위 값을 받지 않는 변수(`Replicated()` — `cheat.enabled` 제외, 프리셋 묶음 변수)에 범위
+    // 쓰기를 했다(CVar 8절).
+    ScopeNotAllowed
 };
 
 // 진단 이름(열거자 철자)이다. 정의되지 않은 값이면 빈 view다.

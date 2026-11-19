@@ -638,7 +638,7 @@ Sparks는 엔진 기반 타입의 재정의 가능 함수를 `override fn`으로
 | `FDataTableRowHandle`(테이블 + 행 이름) | Rocks `Row<T>`는 행 이름만 저장한다(RX 1417행). 같은 행 타입의 테이블이 여럿일 때 테이블을 지정하는 형식을 정해야 한다 | DataTable 설계(전체 계획 2101행 부근) |
 | C++ 지역화 리터럴 `LOCTEXT`와 소스 수집 | `Text`·`Catalog`·Sparks `Loc()`는 있다. C++ 리터럴 매크로와 수집 도구는 없다 | Localization 단계 |
 | `AllowPrivateAccess`(69회) | 두지 않는다. Rocks의 스크립트·편집 노출은 지정자(`Edit`·`ScriptWritable` 등)로 정하고, C++ 접근 수준과 무관하다(생성 코드가 private 멤버에 닿는다) | — |
-| `MinimalAPI`·`*_API` export 매크로 | 정적 링크라 지금은 필요 없다. Editor 모듈식 링크를 고르면 필요하다 | [빌드 타깃](BuildTargets.ko.md) BD17 |
+| `MinimalAPI`·`*_API` export 매크로 | Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17). 모듈 API 매크로는 `ROCKS_<MODULE>_API`이고, 리플렉션 타입 정보는 생성 코드가 항상 export하므로 `MinimalAPI` 지정자는 두지 않는다 | [빌드 타깃](BuildTargets.ko.md) 3.8절 BD27·BD28 |
 
 **선행·단계.** (a)–(e)는 CU1과 같이 UT0에서 구현한다. (a)의 편집기 쓰기 경로 거부·저장 검증·원형 적용 제외는 Prefab 구현 단계(PF)와 Inspector(UT4)에서 넣는다. (b)·(c)의 함수 항목과 (f)는 CU2·CU9와 같이 넣는다.
 

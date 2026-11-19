@@ -973,7 +973,8 @@ Result<GraphPass> RenderGraph::AddPassWithAccesses(TraceScopeName& name, GraphPa
             ResourceRecord& resource = state.resources[texture.index];
             const graphics::TextureUsage usage =
                 depth ? graphics::TextureUsage::DepthStencil : graphics::TextureUsage::RenderTarget;
-            if (!resource.imported && resource.textureDesc.usage != usage) {
+            if (!resource.imported &&
+                !graphics::HasTextureUsage(resource.textureDesc.usage, usage)) {
                 return Result<void>::Failure(RecordGraphError(
                     state, ErrorCode::InvalidArgument, true,
                     "pass '{}' attaches '{}', which is not a {} graph texture", passName,

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Base/TypeTraits.h>
+#include <Config/CVar.h>
 #include <Core/Containers/HashMap.h>
 #include <Core/Text/String.h>
 #include <Core/Time/GameClock.h>
@@ -88,6 +89,10 @@ struct WorldDesc {
     // Level이 클러스터 루트이고 SpawnActor·AddComponent로 만든 리플렉션 Actor·Component가 가입한다.
     // 끄는 것은 측정 비교와 객체 단위 표식 순서를 보는 시험용이다.
     bool levelClusters = true;
+    // 설정 문맥이다(선택 — Docs/Design/CVarSystem.ko.md 14.2절). 있으면 Initialize가 Global의 자식
+    // CVar 범위를 만들고 Shutdown이 파괴한다(CVarScope). World와 같은 게임 lane이 소유하고
+    // World보다 오래 살아야 한다.
+    config::ConfigContext* settings = nullptr;
 };
 
 namespace detail {
@@ -212,6 +217,13 @@ public:
 
     StringView Name() const noexcept {
         return name_.View();
+    }
+
+    // 이 World의 CVar 범위다(CVarSystem 8·14.2절 — Initialize가 만들고 Shutdown이 파괴한다). World
+    // 안 객체는 `ShadowDistance.Get(GetWorld().CVarScope())`로 World별 값을 읽는다. 설정 문맥이
+    // 없거나 Initialize 전·Shutdown 뒤면 Global이다.
+    cvar::CVarScopeId CVarScope() const noexcept {
+        return cvarScope_;
     }
 
     // --- Actor ---
@@ -444,6 +456,9 @@ public:
     }
 
 private:
+    // CVar 범위를 파괴한다(Initialize 실패 되돌리기·Shutdown — 범위가 없으면 아무것도 하지 않는다).
+    void ReleaseCVarScope() noexcept;
+
     friend class Actor;
     friend class Component;
 
@@ -618,6 +633,9 @@ private:
     Array<ObjectHandle> destroyComponents_;
     GcBudget gcBudget_;
     WorkerScheduler* gcScheduler_ = nullptr;
+    // 설정 문맥과 그 안의 이 World 범위다(WorldDesc::settings — 없으면 Global).
+    config::ConfigContext* settings_ = nullptr;
+    cvar::CVarScopeId cvarScope_{};
     StepPlan lastStep_;
     WorldState state_ = WorldState::Created;
     uint32 hookDepth_ = 0;

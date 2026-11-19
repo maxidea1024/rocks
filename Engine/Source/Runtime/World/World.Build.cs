@@ -10,7 +10,8 @@ public sealed class World : EngineModuleRules
     protected override string ModuleName => "World";
 
     // CoreTypeBindings: SceneComponent's Transform field imports that module's Binds mirror.
-    protected override string[] RequiredModules => ["ObjectRuntime", "CoreTypeBindings"];
+    // Config: a World owns a CVar scope in the host config context (Docs/Design/CVarSystem.ko.md section 14.2).
+    protected override string[] RequiredModules => ["ObjectRuntime", "CoreTypeBindings", "Config"];
 
     protected override IReadOnlyList<string> Metadata =>
         ["World/Level.h", "World/Actor.h", "World/Component.h", "World/SceneComponent.h"];

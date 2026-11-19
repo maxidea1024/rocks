@@ -574,7 +574,8 @@ const PipelineRecord* GlesDevice::PrepareDispatch() noexcept {
         }
     }
 
-    // 쓰기 텍스처 view는 level 하나를 image unit slot에 묶는다(배열·3D는 layered로 모든 층).
+    // 쓰기 텍스처 view는 level 하나를 image unit slot에 묶는다(배열·cube·3D는 layered로 모든 층,
+    // 층 하나만 고른 view는 그 층).
     for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
         if ((pipeline->writeTextures & (1u << slot)) == 0) {
             continue;
@@ -582,11 +583,14 @@ const PipelineRecord* GlesDevice::PrepareDispatch() noexcept {
 
         const TextureRecord* view = textures_.Find(boundWriteTextures_[slot].slot);
         const GlesTextureFormat* format = FindTextureFormat(view->format);
-        const bool layered = view->dimension == TextureDimension::Texture2DArray ||
-                             view->dimension == TextureDimension::Texture3D;
+        const bool layers = view->dimension == TextureDimension::Texture2DArray ||
+                            view->dimension == TextureDimension::Texture3D ||
+                            IsCubeDimension(view->dimension);
+        const bool layered = layers && view->viewRange.sliceCount == view->slices;
         gl_.BindImageTexture(slot, view->texture, static_cast<GLint>(view->viewRange.firstMip),
-                             layered ? GL_TRUE : GL_FALSE, 0, GL_READ_WRITE,
-                             format->internalFormat);
+                             layered ? GL_TRUE : GL_FALSE,
+                             layered ? 0 : static_cast<GLint>(view->viewRange.firstSlice),
+                             GL_READ_WRITE, format->internalFormat);
     }
 
     return pipeline;

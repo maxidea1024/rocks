@@ -163,22 +163,13 @@ GraphResourcePool::AcquireTexture(const graphics::TextureDesc& desc,
         return Result<Acquired>::Failure(ErrorCode::InvalidArgument);
     }
 
-    switch (desc.usage) {
-    // GPU가 채우는 텍스처(렌더 타깃·깊이·Storage)는 초기 픽셀이 없다.
-    case graphics::TextureUsage::RenderTarget:
-    case graphics::TextureUsage::DepthStencil:
-    case graphics::TextureUsage::Storage:
-        if (!pixels.IsEmpty()) {
-            return Result<Acquired>::Failure(ErrorCode::InvalidArgument);
-        }
-
-        break;
-    case graphics::TextureUsage::Sampled:
+    // GPU가 채우는 텍스처(렌더 타깃·깊이·Storage 비트)는 초기 픽셀이 없다. Sampled만 픽셀을 받는다.
+    if (desc.usage == graphics::TextureUsage::Sampled) {
         if (pixels.IsEmpty() || pixels.Size() != TextureBytes(desc)) {
             return Result<Acquired>::Failure(ErrorCode::InvalidArgument);
         }
-
-        break;
+    } else if (!pixels.IsEmpty()) {
+        return Result<Acquired>::Failure(ErrorCode::InvalidArgument);
     }
 
     Key key;

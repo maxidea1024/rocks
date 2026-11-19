@@ -1,5 +1,6 @@
 #include "ConfigState.h"
 
+#include <Config/CVar.h>
 #include <Config/CVarAccess.h>
 #include <Core/Text/StringBuilder.h>
 #include <Object/ValueText.h>
@@ -140,8 +141,15 @@ Result<void> DrainQueue(ConfigState& state) noexcept {
             }
         }
 
+        // 범위 쓰기는 층 입력 목록에 들지 않는다. 그 자리의 Global 치트 상태만 적어 두고 치트
+        // 판정은 Sync가 범위 값에 큐 순서로 적용할 때 한다(13.1절 — 같은 큐의 앞 `cheat.enabled`
+        // 범위 쓰기를 따라간다).
+        if (change->scope != 0) {
+            change->globalCheats = cheats;
+        }
+
         // 콘솔 층 쓰기의 권한(치트·복제)은 적용 때 큐 순서의 치트 상태로 다시 본다(6.2·13.1절).
-        if (status && keep && change->entry.Get() != nullptr &&
+        if (status && keep && change->scope == 0 && change->entry.Get() != nullptr &&
             change->entry->layer == ConfigLayer::Console) {
             auto allowed = RecheckConsolePermission(state, *change, cheats);
             if (!allowed) {
@@ -163,7 +171,7 @@ Result<void> DrainQueue(ConfigState& state) noexcept {
                 state.startupComplete && IsDirectWriteLayer(change->entry->layer);
         }
 
-        if (status && change->line.IsEmpty()) {
+        if (status && change->line.IsEmpty() && change->scope == 0) {
             status = ApplyQueuedChange(plan, *change);
             if (status && ChangeTouchesCheats(*change)) {
                 auto recomputed = CheatsOfPlan(state, plan.View());
@@ -339,6 +347,17 @@ Result<void> CheckWriteTarget(const cvar::detail::VarDefinition& definition,
         return Reject(options, ConfigDiagnosticCode::LayerNotAllowed);
     }
 
+    // 범위 값을 받지 않는 변수다(8절 — 복제 변수는 서버 값만, 묶음 변수는 Global 펼침만).
+    // 플레이어별 치트 허용(`cheat.enabled`)은 예외다(13.1절).
+    if (!options.scope.IsGlobal()) {
+        const bool replicated =
+            cvar::HasFlag(definition.flags, cvar::VarFlags::Replicated) &&
+            &definition != &cvar::detail::HandleAccess::Definition(cvar::CheatsEnabled);
+        if (replicated || definition.kind == cvar::HandleKind::Group) {
+            return Reject(options, ConfigDiagnosticCode::ScopeNotAllowed);
+        }
+    }
+
     return Result<void>::Success();
 }
 
@@ -351,6 +370,7 @@ Result<void> MakeChange(Allocator& allocator, const cvar::detail::VarDefinition&
     }
 
     change.Value()->layer = options.layer;
+    change.Value()->scope = options.scope.value;
     Result<void> assigned = change.Value()->tag.TryAssign(options.tag);
     if (assigned) {
         assigned = change.Value()->path.TryAssign(definition.name);
@@ -388,7 +408,9 @@ Result<void> MakeSet(WriteChannel& channel, const cvar::detail::VarDefinition& d
 
         const auto role = static_cast<NetworkRole>(
             platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&channel.networkRole));
-        if (!CheckConsolePermission(definition.flags, SnapshotCheatsAllowed(current.Get()), role,
+        // 범위 쓰기는 그 범위의 치트 허용 상태로 본다(13.1절).
+        if (!CheckConsolePermission(definition.flags,
+                                    SnapshotCheatsAllowed(current.Get(), options.scope.value), role,
                                     code)
                  .IsEmpty()) {
             return Reject(options, code);

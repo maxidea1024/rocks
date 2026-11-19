@@ -231,6 +231,26 @@ Result<void> ShowSetting(ConfigState& state, const ConsoleSettingState& setting,
         return written;
     }
 
+    // 범위 값(8절 — Global 유효값보다 강하다): `scope <id> <출처 층> <값> <출처>`.
+    if (setting.definition != nullptr) {
+        const uint32 index =
+            platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&setting.definition->index);
+        for (const UniquePtr<ScopeState>& scope : state.scopes) {
+            for (const UniquePtr<ScopeValue>& value : scope->values) {
+                if (value->index != index) {
+                    continue;
+                }
+
+                if (auto written = WriteLine(state, output, "  scope {} {} {} {}", scope->id,
+                                             ConfigLayerName(value->layer), value->text.View(),
+                                             value->source.View());
+                    !written) {
+                    return written;
+                }
+            }
+        }
+    }
+
     // 출처 스택은 강한 것부터, 마지막이 코드 기본값이다.
     const Span<const uint64> sources = SourcesOf(state, setting);
     String contribution(state.allocator);
@@ -574,10 +594,15 @@ bool CheatsAllowed(const ConfigState& state) noexcept {
     return index == IndexNone || state.settings[index]->value.boolean;
 }
 
-bool SnapshotCheatsAllowed(const ConfigSnapshot* snapshot) noexcept {
+bool SnapshotCheatsAllowed(const ConfigSnapshot* snapshot, uint64 scope) noexcept {
     const cvar::Index index = cvar::CheatsEnabled.Index();
     if (snapshot == nullptr || !index.IsValid()) {
         return true;
+    }
+
+    const CVarText* text = nullptr;
+    if (const CVarSlot* scoped = snapshot->FindScopedSlot(scope, index.value, text)) {
+        return scoped->bits != 0;
     }
 
     const CVarSlot* slot = snapshot->FindSlot(index.value);

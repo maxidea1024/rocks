@@ -287,9 +287,9 @@ Result<BufferViewHandle> D3D12Device::CreateBufferView(BufferHandle handle,
 // 형식·용도 지원은 장치 능력(GetPixelFormatCaps)으로 판정한다(PixelFormat.ko.md 8.3절).
 Result<TextureHandle> D3D12Device::CreateTexture(const TextureDesc& desc,
                                                  Span<const uint8> pixels) noexcept {
-    const bool renderTarget = desc.usage == TextureUsage::RenderTarget;
-    const bool depthTarget = desc.usage == TextureUsage::DepthStencil;
-    const bool storage = desc.usage == TextureUsage::Storage;
+    const bool renderTarget = HasTextureUsage(desc.usage, TextureUsage::RenderTarget);
+    const bool depthTarget = HasTextureUsage(desc.usage, TextureUsage::DepthStencil);
+    const bool storage = HasTextureUsage(desc.usage, TextureUsage::Storage);
     const PixelFormatInfo& info = GetPixelFormatInfo(desc.format);
     // 형식·용도·차원 능력을 먼저 본다(능력 밖은 다른 인자 검사보다 앞서 Unsupported다).
     if (IsValidPixelFormat(desc.format) && IsValidTextureDimension(desc.dimension) &&
@@ -362,13 +362,16 @@ Result<TextureHandle> D3D12Device::CreateTexture(const TextureDesc& desc,
     resource.Format = mapping.resource;
     resource.SampleDesc.Count = desc.sampleCount;
     // 깊이 형식은 늘 DEPTH_STENCIL 플래그로 만든다(typeless 깊이 자원의 DSV·복사 조건).
+    // 렌더 타깃 + Storage는 두 flag를 함께 둔다(용도 비트 묶음, 텍스처 GX2 나머지 A부).
     resource.Flags = D3D12_RESOURCE_FLAG_NONE;
     if (renderTarget) {
-        resource.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+        resource.Flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
     } else if (depth) {
-        resource.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
-    } else if (storage) {
-        resource.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+        resource.Flags |= D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+    }
+
+    if (storage) {
+        resource.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
     }
     const D3D12_HEAP_PROPERTIES heap = HeapProperties(D3D12_HEAP_TYPE_DEFAULT);
     // 최적화 clear 값은 두지 않는다. 패스마다 clear 색이 다르므로 값을 두면 매번 불일치 경고가
@@ -638,7 +641,8 @@ Result<TextureHandle> D3D12Device::CreateTextureView(TextureHandle texture,
         return Result<TextureHandle>::Failure(range.Error());
     }
     if (desc.access == ViewAccess::ReadWrite) {
-        return CreateWritableTextureView(texture, *source, resolved.Value(), range.Value());
+        return CreateWritableTextureView(texture, *source, resolved.Value(), range.Value(),
+                                         TextureViewDimensionOf(source->dimension, desc));
     }
     // sRGB 짝 view는 짝 형식이, plane view는 원 형식이 샘플 가능해야 한다.
     const PixelFormat sampledFormat =
@@ -659,9 +663,10 @@ Result<TextureHandle> D3D12Device::CreateTextureView(TextureHandle texture,
     }
     const PixelFormatPlane& layout = GetPixelFormatInfo(source->format).planes[desc.plane];
     TextureRecord record;
-    // view는 원 자원에 참조를 하나 더 잡는다(원 텍스처를 먼저 Retire해도 자원이 산다).
+    // view는 원 자원에 참조를 하나 더 잡는다(원 텍스처를 먼저 Retire해도 자원이 산다). 차원은 view
+    // 차원이다(SRV ViewDimension, 텍스처 GX2 나머지 B부).
     record.resource = source->resource.Share();
-    record.dimension = source->dimension;
+    record.dimension = TextureViewDimensionOf(source->dimension, desc);
     record.width = MipExtent(source->width, layout.widthShift);
     record.height = MipExtent(source->height, layout.heightShift);
     record.depth = source->depth;
@@ -688,10 +693,11 @@ Result<TextureHandle> D3D12Device::CreateTextureView(TextureHandle texture,
 
 // Storage 텍스처 mip 하나(slice 범위)의 UAV view다(잠금 안, SetWritableTexture로 묶는다). 형식이
 // StorageWrite가 아니면 Unsupported다.
-Result<TextureHandle>
-D3D12Device::CreateWritableTextureView(TextureHandle texture, TextureRecord& source,
-                                       PixelFormat format,
-                                       const ResolvedSubresourceRange& range) noexcept {
+Result<TextureHandle> D3D12Device::CreateWritableTextureView(TextureHandle texture,
+                                                             TextureRecord& source,
+                                                             PixelFormat format,
+                                                             const ResolvedSubresourceRange& range,
+                                                             TextureDimension dimension) noexcept {
     const DXGI_FORMAT uavFormat = d3d12::MappingOf(format).uav;
     if (!HasPixelFormatCaps(FormatCaps(format), PixelFormatCaps::StorageWrite) ||
         uavFormat == DXGI_FORMAT_UNKNOWN) {
@@ -710,14 +716,17 @@ D3D12Device::CreateWritableTextureView(TextureHandle texture, TextureRecord& sou
 
     D3D12_UNORDERED_ACCESS_VIEW_DESC view = {};
     view.Format = uavFormat;
-    switch (source.dimension) {
+    switch (dimension) {
     case TextureDimension::Texture3D:
         view.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
         view.Texture3D.MipSlice = range.firstMip;
         view.Texture3D.FirstWSlice = 0;
         view.Texture3D.WSize = MipExtent(source.depth, range.firstMip);
         break;
+    // cube 계열의 쓰기 view는 면 단위 2D 배열이다(cube UAV가 없다, 텍스처 GX2 나머지 A부).
     case TextureDimension::Texture2DArray:
+    case TextureDimension::TextureCube:
+    case TextureDimension::TextureCubeArray:
         view.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
         view.Texture2DArray.MipSlice = range.firstMip;
         view.Texture2DArray.FirstArraySlice = range.firstSlice;
@@ -733,7 +742,7 @@ D3D12Device::CreateWritableTextureView(TextureHandle texture, TextureRecord& sou
                                        srvs_.Cpu(uav.Value()));
     TextureRecord record;
     record.resource = source.resource.Share();
-    record.dimension = source.dimension;
+    record.dimension = dimension;
     record.width = source.width;
     record.height = source.height;
     record.depth = source.depth;
