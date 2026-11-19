@@ -66,6 +66,12 @@ internal static class CppEmitter
         $"::rocks::Result<void> {RegistrationFunction(privateTypes)}(::rocks::ModuleRegistration& registration, " +
         $"const ::rocks::ModuleLease& module{(declaration ? " = {}" : "")}) noexcept";
 
+    // 이 모듈 자신의 타입만(public 다음 private, 의존 모듈 없이) 등록하는 함수의 서명이다(Docs/Design/ModuleLoader.ko.md 3.10절). 모듈
+    // 로더가 진입 기술의 registerTypes로 부르며 lease는 로더가 발급한 이 모듈의 것이다. 진입점 매크로(ROCKS_IMPLEMENT_MODULE,
+    // ROCKS_MODULE_TYPES=1)가 같은 서명으로 스스로 선언하므로 기본 인자를 두지 않는다.
+    private static string OwnTypesSignature() =>
+        "::rocks::Result<void> RegisterModuleOwnTypes(::rocks::ModuleRegistration& registration, const ::rocks::ModuleLease& module) noexcept";
+
     // 모듈 생성 헤더다(Docs/Design/ReflectionGeneratedSources.ko.md 5.5절). 등록 함수의 선언만 담는다 — 타입별 생성 헤더와 의존 모듈의
     // 헤더를 include하지 않으므로 등록만 하는 번역 단위가 모듈의 모든 생성 코드를 끌어오지 않는다. 정의는 모듈 생성 소스
     // (EmitModuleSource)에 한 번 있다. public 헤더는 RegisterModuleTypes, private 헤더(private 리플렉션 헤더가 있는 모듈만)는
@@ -82,6 +88,9 @@ internal static class CppEmitter
         Line("#include <Object/ModuleRegistration.h>");
         Line($"namespace rocks::generated::{module} {{");
         Line(RegistrationSignature(privateTypes, declaration: true) + ";");
+        // public·private 헤더 모두 같은 선언을 둔다(어느 쪽만 있는 모듈도 있다 — 같은 선언의 반복은 허용된다).
+        Line("// Registers only this module's own types (public, then private) without dependency modules; the module loader calls it.");
+        Line(OwnTypesSignature() + ";");
         Line($"}} // namespace rocks::generated::{module}");
         return output.ToString();
     }
@@ -137,6 +146,7 @@ internal static class CppEmitter
             EmitRegistration(module, schema, hasPublic ? [] : dependencies, privateTypes: true, viaPublic: hasPublic, Line);
         }
 
+        EmitOwnTypesRegistration(schema, Line);
         Line($"}} // namespace rocks::generated::{module}");
         return output.ToString();
     }
@@ -166,6 +176,15 @@ internal static class CppEmitter
             line($"if (auto dependency = ::rocks::generated::{dependency}::RegisterModuleTypes(registration, module); !dependency) return fail(dependency.Error());");
         }
 
+        EmitTypeRegistrations(schema, privateTypes, line);
+        line("(void)fail;");
+        line("return ::rocks::Result<void>::Success();");
+        line("}");
+    }
+
+    // 이 모듈 타입의 등록 줄이다(enum → struct → 클래스 — schema.Ordered 순서). 재귀 등록 함수와 자기 타입 함수가 같은 줄을 쓴다.
+    private static void EmitTypeRegistrations(SchemaModel schema, bool privateTypes, Action<string> line)
+    {
         foreach (ClassModel type in schema.Ordered.Where(type => type.Private == privateTypes))
         {
             if (type.IsEnum)
@@ -183,7 +202,18 @@ internal static class CppEmitter
 
             line($"if (auto added = registration.RegisterIfAbsent(::rocks::GeneratedType<::{type.Name}>::Schema(), ::rocks::GeneratedType<::{type.Name}>::Ops(module)); !added) return fail(added.Error());");
         }
+    }
 
+    // 자기 타입만 등록하는 함수의 정의다(OwnTypesSignature). 모듈 키(EnterModule)·의존 모듈 호출이 없다 — 로더가 의존 모듈을 먼저
+    // 등록하고, 등록기가 모듈마다 따로 둔 ModuleRegistration에 부른다. 실패하면 이 호출이 등록한 것을 되돌린다.
+    private static void EmitOwnTypesRegistration(SchemaModel schema, Action<string> line)
+    {
+        line(OwnTypesSignature() + " {");
+        line("const ::rocks::usize mark = registration.Size();");
+        line("auto fail = [&](::rocks::ErrorCode error) noexcept { static_cast<void>(registration.UnregisterFrom(mark)); return ::rocks::Result<void>::Failure(error); };");
+        line("static_cast<void>(module);");
+        EmitTypeRegistrations(schema, privateTypes: false, line);
+        EmitTypeRegistrations(schema, privateTypes: true, line);
         line("(void)fail;");
         line("return ::rocks::Result<void>::Success();");
         line("}");

@@ -1,4 +1,5 @@
 #include <Config/ConfigContext.h>
+#include <Core/Module/ModuleEntry.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/Diagnostics/LogContext.h>
 #include <Engine/Engine.h>
@@ -169,10 +170,10 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
     }
 
     {
-        // World 리플렉션 타입 -> 게임 리플렉션 모듈(같은 ModuleRegistration) -> native 타입
-        // 순서다. native 파생은 리플렉션 base가 등록된 뒤에만 등록된다.
+        // 모듈 타입(로더의 타입 등록기 — World 등) -> 게임 리플렉션 모듈(엔진 ModuleRegistration)
+        // -> native 타입 순서다. native 파생은 리플렉션 base가 등록된 뒤에만 등록된다.
         InitStageContext stage(InitStage::RegisterTypes);
-        auto registered = RegisterWorldTypes(*modules_);
+        auto registered = AttachModuleTypes();
         if (registered && config_.registerModuleTypes != nullptr) {
             registered = config_.registerModuleTypes(*modules_);
         }
@@ -314,9 +315,10 @@ void Engine::Teardown(uint32 completedSteps, const char* stage) noexcept {
         objects_.Reset();
     }
 
-    // 타입은 Unregister하지 않는다(Shutdown 설명). 붙잡은 lease를 놓은 뒤 TypeRegistry가 등록 기록
-    // (등록 함수가 버린 native 토큰 포함)을 dependent 순서로 반납한다.
+    // 타입은 Unregister하지 않는다(Shutdown 설명). 붙잡은 lease를 놓고 모듈 타입 등록기를 뗀 뒤
+    // TypeRegistry가 등록 기록(등록 함수가 버린 native 토큰 포함)을 dependent 순서로 반납한다.
     modules_.Reset();
+    DetachModuleTypes();
     if (completedSteps >= StepTypes && types_) {
         auto closed = types_->Shutdown();
         if (!closed) {
@@ -328,6 +330,8 @@ void Engine::Teardown(uint32 completedSteps, const char* stage) noexcept {
 
         types_.Reset();
     }
+
+    ReleaseOwnModuleLoader();
 
     initializedSteps_ = 0;
 }
@@ -735,8 +739,10 @@ Result<void> Engine::Shutdown() noexcept {
 
     // World·게임 타입은 Unregister하지 않는다 — 게임이 토큰을 버린 native 파생이 리플렉션 base의
     // dependent로 남아 Unregister가 Busy로 멈춘다. ModuleRegistration 파괴로 붙잡은 lease만 놓고
-    // TypeRegistry::Shutdown이 남은 레코드를 dependent 순서로 반납한다.
+    // TypeRegistry::Shutdown이 남은 레코드를 dependent 순서로 반납한다. 모듈 타입 등록기는 그 전에
+    // 떼어 모듈별 기록을 놓는다(Docs/Design/ModuleLoader.ko.md 3.10절).
     modules_.Reset();
+    DetachModuleTypes();
     if (types_) {
         auto closed = types_->Shutdown();
         if (!closed) {
@@ -747,12 +753,74 @@ Result<void> Engine::Shutdown() noexcept {
         types_.Reset();
     }
 
+    ReleaseOwnModuleLoader();
+
     initializedSteps_ = 0;
     shutdownProgress_ = ShutdownNotStarted;
     state_ = EngineState::Stopped;
 
     Log::Info(LogEngine, "Engine shut down");
     return outcome;
+}
+
+Result<void> Engine::AttachModuleTypes() noexcept {
+    ModuleLoader* loader = config_.modules;
+    if (loader == nullptr) {
+        // ML1 전 대체 경로: 이 실행 파일의 모듈 표로 엔진 자기 로더를 만들어 Engine 모듈(의존
+        // 폐포)을 시작한다(Docs/Design/ModuleLoader.ko.md 3.10절).
+        auto created = ModuleLoader::TryCreate(allocator_, GeneratedModuleTable());
+        if (!created) {
+            return Result<void>::Failure(created.Error());
+        }
+
+        ownModules_ = Move(created.Value());
+        loader = ownModules_.Get();
+        const ModuleLoadReport loaded = loader->Load(ROCKS_MODULE_NAME_TEXT);
+        if (!loaded.IsOk()) {
+            Log::Error(
+                LogEngine, "Engine modules could not start: {Module} failed at {Stage}: {Message}",
+                StringView(loaded.failed), StringView(loaded.stage), StringView(loaded.message));
+            return Result<void>::Failure(
+                loaded.error != ErrorCode::None ? loaded.error : ErrorCode::DependencyFailed);
+        }
+    }
+
+    auto registrations =
+        UniquePtr<ModuleTypeRegistrations>::TryMake(allocator_, *types_, allocator_);
+    if (!registrations) {
+        return Result<void>::Failure(registrations.Error());
+    }
+
+    moduleTypes_ = Move(registrations.Value());
+    const ModuleLoadReport attached = loader->AttachTypeRegistrar(*moduleTypes_);
+    if (!attached.IsOk()) {
+        Log::Error(LogEngine,
+                   "Module reflection types could not be registered: {Module} failed at {Stage}: "
+                   "{Message}",
+                   StringView(attached.failed), StringView(attached.stage),
+                   StringView(attached.message));
+        return Result<void>::Failure(attached.error != ErrorCode::None ? attached.error
+                                                                       : ErrorCode::WrongThread);
+    }
+
+    attachedModules_ = loader;
+    return Result<void>::Success();
+}
+
+void Engine::DetachModuleTypes() noexcept {
+    if (attachedModules_ != nullptr) {
+        attachedModules_->DetachTypeRegistrar();
+        attachedModules_ = nullptr;
+    }
+
+    moduleTypes_.Reset();
+}
+
+void Engine::ReleaseOwnModuleLoader() noexcept {
+    if (ownModules_) {
+        ownModules_->ShutdownGroup(ModuleGroup::Process);
+        ownModules_.Reset();
+    }
 }
 
 Result<void> Engine::StopGcScheduler() noexcept {

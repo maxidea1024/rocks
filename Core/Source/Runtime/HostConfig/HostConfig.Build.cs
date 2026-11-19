@@ -12,5 +12,6 @@ public sealed class HostConfig : CoreModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
-    protected override string[] RequiredModules => ["LogHost", "TraceControl", "Config"];
+    // ModuleLoader: settings registration walks the module table (Docs/Design/ModuleLoader.ko.md section 3.10).
+    protected override string[] RequiredModules => ["LogHost", "TraceControl", "Config", "ModuleLoader"];
 }

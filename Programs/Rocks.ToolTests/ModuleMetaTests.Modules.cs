@@ -90,8 +90,24 @@ internal static partial class ModuleMetaTests
             string compactSource = Compact(source);
             int privateDefinition = compactSource.IndexOf("::rocks::Result<void>RegisterPrivateModuleTypes(", StringComparison.Ordinal);
             Verify.That(privateDefinition > 0, "module source defines the private registration function after the public one:\n" + source);
+            int ownDefinition = compactSource.IndexOf("::rocks::Result<void>RegisterModuleOwnTypes(", StringComparison.Ordinal);
+            Verify.That(ownDefinition > privateDefinition, "module source defines the own-types function last:\n" + source);
             string publicBody = compactSource[..privateDefinition];
-            string privateBody = compactSource[privateDefinition..];
+            string privateBody = compactSource[privateDefinition..ownDefinition];
+            // 모듈 로더가 부르는 자기 타입 함수는 의존 모듈·모듈 키 없이 이 모듈 타입만 public 다음 private 순서로 등록한다
+            // (Docs/Design/ModuleLoader.ko.md 3.10절). 두 모듈 생성 헤더가 같은 선언을 둔다.
+            string ownBody = compactSource[ownDefinition..];
+            int ownValue = ownBody.IndexOf("GeneratedType<::probe::Value>::Schema()", StringComparison.Ordinal);
+            int ownLeaf = ownBody.IndexOf("GeneratedType<::probe::Leaf>::Schema()", StringComparison.Ordinal);
+            int ownDetail = ownBody.IndexOf("GeneratedType<::probe::Detail>::Schema()", StringComparison.Ordinal);
+            Verify.That(ownValue >= 0 && ownLeaf > ownValue && ownDetail > ownLeaf && !ownBody.Contains("EnterModule", StringComparison.Ordinal) &&
+                !ownBody.Contains("::rocks::generated::", StringComparison.Ordinal), "own-types function registers only this module's types in order:\n" + source);
+            foreach (string header in new[] { aggregate, privateAggregate })
+            {
+                Verify.That(Compact(header).Contains(Compact("::rocks::Result<void> RegisterModuleOwnTypes(::rocks::ModuleRegistration& registration, " +
+                    "const ::rocks::ModuleLease& module) noexcept;"), StringComparison.Ordinal), "module header declares RegisterModuleOwnTypes:\n" + header);
+            }
+
             Verify.That(publicBody.Contains("registration.EnterModule(&moduleKey)", StringComparison.Ordinal) &&
                 privateBody.Contains("registration.EnterModule(&moduleKey)", StringComparison.Ordinal) &&
                 compactSource.Split("staticconstexprcharmoduleKey=0;").Length - 1 == 2, "each registration function enters the module once per registration with its own key");

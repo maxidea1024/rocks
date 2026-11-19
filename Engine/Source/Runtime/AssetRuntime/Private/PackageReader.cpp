@@ -1127,6 +1127,9 @@ Result<PackageContents> ReadPackage(Allocator& allocator, Span<const uint8> file
                 }
             } else if (!lease || row.version > current) {
                 contents.readOnly = true;
+                if (!lease) {
+                    contents.unavailableExportType = true;
+                }
             }
         }
     }

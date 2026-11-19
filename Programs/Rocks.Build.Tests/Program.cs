@@ -297,7 +297,7 @@ try
     await PchTests.RunAsync(request, root, Pass);
 
     await ReflectionSourceTests.RunAsync(request, root);
-    Pass("reflection generated sources: source-less module archive, registration through the declaration, entry point exemption, incremental, validation");
+    Pass("reflection generated sources: source-less module archive, registration through the declaration, entry module and module types marker, incremental, validation");
 
     // 빌드 주입 상수(B7): 툴체인 지문·도구 빌드 ID·환경 위생·FP 인자 거부·입력 열거 정리. 하위 묶음마다 PASS를 센다.
     await BuildInfoTests.RunAsync(request, root, Pass);

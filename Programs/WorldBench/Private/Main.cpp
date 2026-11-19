@@ -1,5 +1,7 @@
 #include <Core/Memory/UniquePtr.h>
-#include <Object/ModuleRegistration.h>
+#include <Core/Module/ModuleEntry.h>
+#include <ModuleLoader/ModuleLoader.h>
+#include <Object/ModuleTypeRegistrations.h>
 #include <Object/NativeClass.h>
 #include <Object/TypeRegistry.h>
 #include <Platform/Atomics.h>
@@ -104,11 +106,32 @@ int Measure(uint32 actors, bool ticking) noexcept {
     BenchAllocator memory;
     int status = 0;
     {
-        TypeRegistry types(memory);
-        ModuleRegistration modules(types, memory);
-        if (!RegisterWorldTypes(modules)) {
+        // World 리플렉션 타입은 모듈 로더가 등록한다(Docs/Design/ModuleLoader.ko.md 3.10절): World
+        // 모듈(의존 폐포)을 시작하고 이 레지스트리의 타입 등록기를 붙인다. 등록기는 레지스트리보다
+        // 먼저 떼고(detach), 로더는 레지스트리가 모듈 lease를 놓은 뒤 파괴한다(선언 순서).
+        auto createdModules = ModuleLoader::TryCreate(memory, GeneratedModuleTable());
+        if (!createdModules) {
             return 2;
         }
+
+        UniquePtr<ModuleLoader> modules = Move(createdModules.Value());
+        if (!modules->Load("World").IsOk()) {
+            return 2;
+        }
+
+        TypeRegistry types(memory);
+        ModuleTypeRegistrations registrations(types, memory);
+        if (!modules->AttachTypeRegistrar(registrations).IsOk()) {
+            return 2;
+        }
+
+        struct DetachTypes {
+            ModuleLoader& loader;
+
+            ~DetachTypes() noexcept {
+                loader.DetachTypeRegistrar();
+            }
+        } detach{*modules};
 
         auto token = RegisterNativeClass<BenchActor>(types);
         if (!token) {

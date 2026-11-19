@@ -504,7 +504,11 @@ void NotifySynced(ConfigState& state, Span<const cvar::Index> variables,
 
 ConfigContext::ConfigContext(Allocator& allocator, ObjectRegistry& objects,
                              const ConfigContextOptions& options) noexcept
-    : allocator_(&allocator), objects_(&objects), options_(options) {
+    : allocator_(&allocator), objects_(&objects), options_(options), moduleLeases_(allocator) {
+}
+
+Result<void> ConfigContext::RetainModule(ModuleLease lease) noexcept {
+    return moduleLeases_.TryPushBack(Move(lease));
 }
 
 ConfigContext::~ConfigContext() {

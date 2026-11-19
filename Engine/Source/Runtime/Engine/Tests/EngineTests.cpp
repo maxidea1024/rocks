@@ -303,9 +303,9 @@ TEST(Engine_DuplicateTypeRegistrationFailsInitialization) {
     SystemAllocator allocator;
     {
         EngineConfig config;
-        // World 타입 등록은 멱등이라 다시 불러도 성공한다(같은 ModuleRegistration은 모듈을 다시
-        // 등록하지 않는다). native 타입을 두 번 등록하면 AlreadyExists로 실패하고, 첫 등록 토큰이
-        // 남은 채로 정리된다(Teardown은 Unregister하지 않고 TypeRegistry::Shutdown에 맡긴다).
+        // World 타입 등록은 멱등이라 다시 불러도 성공한다(모듈 로더가 이미 등록한 타입은 건너뛴다).
+        // native 타입을 두 번 등록하면 AlreadyExists로 실패하고, 첫 등록 토큰이 남은 채로
+        // 정리된다(Teardown은 Unregister하지 않고 TypeRegistry::Shutdown에 맡긴다).
         config.registerModuleTypes = [](ModuleRegistration& modules) noexcept {
             Step("modules");
             return RegisterWorldTypes(modules);
@@ -413,12 +413,19 @@ bool Registered(TypeId type) noexcept {
     return orderedEngine != nullptr && orderedEngine->Types().Acquire(type).IsOk();
 }
 
-// 리플렉션 모듈 등록: World 타입은 이미 있고 fixture 모듈은 아직 없다. 같은 ModuleRegistration에
-// World를 다시 등록하면 기록이 늘지 않고(멱등), fixture 모듈 등록도 World를 다시 등록하지 않는다.
+// 리플렉션 모듈 등록: World 타입은 이미 있고(모듈 로더가 World 모듈의 자기 ModuleRegistration에
+// 등록했다 — Docs/Design/ModuleLoader.ko.md 3.10절) fixture 모듈은 아직 없다. 이
+// ModuleRegistration에 World를 다시 등록하면 타입은 이미 있어 건너뛰고 모듈 키 기록만 남는다. 같은
+// ModuleRegistration에 한 번 더 부르면 기록이 늘지 않는다(멱등). fixture 모듈 등록도 World를 다시
+// 등록하지 않는다.
 Result<void> RegisterFixtureModules(ModuleRegistration& modules) noexcept {
     Step("modules");
     CHECK(Registered(ObjectTypeIdOf<Actor>()) && Registered(ObjectTypeIdOf<SceneComponent>()));
     CHECK(!Registered(ObjectTypeIdOf<world_fixture::SaveActor>()));
+    if (auto first = RegisterWorldTypes(modules); !first) {
+        return first;
+    }
+
     const usize records = modules.Size();
     if (auto again = RegisterWorldTypes(modules); !again) {
         return again;
@@ -446,8 +453,8 @@ Result<void> FailAfterNatives(TypeRegistry& types) noexcept {
 
 } // namespace
 
-// 타입 등록 순서는 World 리플렉션 타입 -> registerModuleTypes(같은 ModuleRegistration) ->
-// registerTypes(native, 마지막)이다. 토큰을 버린 native 파생(Actor·SceneComponent 파생)을 등록한
+// 타입 등록 순서는 World 리플렉션 타입(모듈 로더) -> registerModuleTypes(엔진의 ModuleRegistration)
+// -> registerTypes(native, 마지막)이다. 토큰을 버린 native 파생(Actor·SceneComponent 파생)을 등록한
 // 채로 World를 돌리고 종료해도 Engine Shutdown이 성공한다(타입을 Unregister하지 않고
 // ModuleRegistration 파괴 -> TypeRegistry::Shutdown). World 재등록은
 // 멱등이다(RegisterFixtureModules).

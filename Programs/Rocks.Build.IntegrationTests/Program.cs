@@ -73,17 +73,16 @@ try
             bindingsEntry.GetProperty("IdentityManifest").GetString() == "Metadata/CoreTypeBindings/CoreTypeBindings.rocksids.json",
             "Engine SDK manifest does not name the CoreTypeBindings descriptor and identity manifest");
         // manifest 버전 8: 5는 Build/Build.version 값을 EngineVersion {Major, Minor, Patch}로 담고(그 파일 자체는 SDK에 없다), 6은 모듈 표
-        // 표지를 담고(Core가 ProvidesModuleTable, 서드파티 모듈이 ThirdParty — Docs/Design/ModuleLoader.ko.md 3.9절), 7은 리플렉션 생성
-        // 소스만으로 된 라이브러리의 표지 ReflectionOnlyLibrary를 담는다(Docs/Design/ReflectionGeneratedSources.ko.md 6.3절). 8은 칸이 같고
-        // 생성 헤더의 모양이 다르다(타입별 본문이 헤더가 아니라 SDK 라이브러리에 있다 — 같은 문서 5절).
+        // 표지를 담고(Core가 ProvidesModuleTable, 서드파티 모듈이 ThirdParty — Docs/Design/ModuleLoader.ko.md 3.9절), 8은 리플렉션 전용
+        // 라이브러리 표지를 없앴다(메타데이터 모듈도 진입점 모듈이다 — 3.10절). 9는 타입별 본문이 생성 헤더가 아니라 SDK 라이브러리에 있고
+        // (Docs/Design/ReflectionGeneratedSources.ko.md 5절) 공유 PCH 제공 모듈의 SharedPchHeader를 싣는다(Docs/Design/UnityBuildPch.ko.md 8.4절).
         var sdkModules = engineManifest.RootElement.GetProperty("Modules").EnumerateArray().ToArray();
-        // 손으로 쓴 소스가 없던 리플렉션 모듈(CoreTypeBindings)이 모듈 생성 소스(등록 함수 정의) 때문에 라이브러리를 갖는다. SDK는 그
-        // 라이브러리를 싣고 표지를 켠다. 손으로 쓴 소스가 있는 모듈(Core)은 표지가 꺼져 있다.
+        // 손으로 쓴 소스가 없던 리플렉션 모듈(CoreTypeBindings)이 모듈 생성 소스(등록 함수 정의)와 진입점 TU를 담은 라이브러리를 갖는다.
+        // 표지 칸은 없다.
         string bindingsLibrary = bindingsEntry.GetProperty("Libraries").EnumerateArray().Select(item => item.GetString()!).Single();
         Require(bindingsLibrary.StartsWith("Libraries/CoreTypeBindings.", StringComparison.Ordinal) && File.Exists(Path.Combine(sdk, bindingsLibrary)) &&
-            bindingsEntry.GetProperty("ReflectionOnlyLibrary").GetBoolean() &&
-            !sdkModules.Single(module => module.GetProperty("Name").GetString() == "Core").GetProperty("ReflectionOnlyLibrary").GetBoolean(),
-            "Engine SDK does not ship the CoreTypeBindings library with the reflection-only marker: " + bindingsEntry.GetRawText());
+            !bindingsEntry.TryGetProperty("ReflectionOnlyLibrary", out _),
+            "Engine SDK does not ship the CoreTypeBindings library as an ordinary module library: " + bindingsEntry.GetRawText());
         Require(sdkModules.Single(module => module.GetProperty("Name").GetString() == "Core").GetProperty("ProvidesModuleTable").GetBoolean() &&
             sdkModules.Single(module => module.GetProperty("Name").GetString() == "Zstd").GetProperty("ThirdParty").GetBoolean() &&
             !sdkModules.Single(module => module.GetProperty("Name").GetString() == "Core").GetProperty("ThirdParty").GetBoolean(),
@@ -280,14 +279,15 @@ try
             "SDK module without reflection headers exported metadata");
         Require(File.Exists(Path.Combine(reflectionSdk, "Headers/ReflectionTestFixtures/1/ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h")),
             "SDK is missing the fixture module's generated public headers");
-        // 손으로 쓴 소스가 없던 두 리플렉션 모듈이 SDK 라이브러리와 표지를 갖는다(게임이 등록 함수를 선언으로 부르고 여기서 링크한다).
+        // 손으로 쓴 소스가 없던 두 리플렉션 모듈이 SDK 라이브러리를 갖는다(게임이 등록 함수를 선언으로 부르고, 게임 모듈 표가 진입점을
+        // 참조해 여기서 링크한다).
         foreach (var reflected in new[] { fixtureModule, bindingsModule })
         {
             string name = reflected.GetProperty("Name").GetString()!;
             string[] libraries = reflected.GetProperty("Libraries").EnumerateArray().Select(item => item.GetString()!).ToArray();
             Require(libraries.Length == 1 && libraries[0].StartsWith("Libraries/" + name + ".", StringComparison.Ordinal) &&
-                File.Exists(Path.Combine(reflectionSdk, libraries[0])) && reflected.GetProperty("ReflectionOnlyLibrary").GetBoolean(),
-                $"SDK does not ship the {name} library with the reflection-only marker: " + reflected.GetRawText());
+                File.Exists(Path.Combine(reflectionSdk, libraries[0])) && !reflected.TryGetProperty("ReflectionOnlyLibrary", out _),
+                $"SDK does not ship the {name} library: " + reflected.GetRawText());
         }
 
         Require(!Directory.GetFiles(reflectionSdk, "*.generated.cpp", SearchOption.AllDirectories).Any(), "SDK shipped a reflection generated source");
@@ -703,10 +703,12 @@ try
     Require(reflectionResult.ModuleOutputs.ContainsKey("GameCore") &&
         reflectionResult.Actions.Any(action => action.Module == "GameCore" && action.Kind == "Archive" && action.Executed),
         "A game module with only reflection headers was not built into an archive");
+    // 리플렉션 헤더만 가진 모듈도 진입점 모듈이다(Docs/Design/ModuleLoader.ko.md 3.10절): 게임 모듈 GameCore는 빌드가 만든 진입점 TU를
+    // 받고, SDK의 두 메타데이터 모듈은 SDK 라이브러리에 든 진입점으로 모듈 표에 든다.
     string reflectionTable = File.ReadAllText(Path.Combine(reflectionOutput, "GeneratedSources/SampleGame/SampleGame.ModuleTable.cpp"));
-    Require(!reflectionTable.Contains("GameCore", StringComparison.Ordinal) && !reflectionTable.Contains("ReflectionTestFixtures", StringComparison.Ordinal) &&
-        !reflectionTable.Contains("CoreTypeBindings", StringComparison.Ordinal),
-        "Modules with only reflection generated sources must stay exempt from the module entry point:\n" + reflectionTable);
+    Require(File.Exists(Path.Combine(reflectionOutput, "GeneratedSources/GameCore/GameCore.ModuleEntry.cpp")) &&
+        new[] { "GameCore", "ReflectionTestFixtures", "CoreTypeBindings" }.All(name => reflectionTable.Contains("RocksModuleEntry_" + name, StringComparison.Ordinal)),
+        "Modules with only reflection generated sources must be entry modules in the module table:\n" + reflectionTable);
     var reflectionRun = await ProcessRunner.RunAsync(new(reflectionResult.ModuleOutputs["SampleGame"], [], reflectionGame, toolchain.Environment));
     // 19는 주입한 엔진 버전이 SDK manifest의 EngineVersion과 다르다는 뜻이다.
     Require(reflectionRun.ExitCode == 0, $"SDK descriptor import runtime check failed with exit code {reflectionRun.ExitCode}");
@@ -890,9 +892,9 @@ try
         "Incompatible SDK configuration was silently accepted");
     Pass("sdk-configuration-mismatch", timer.Elapsed);
 
-    // 이전 SDK(manifest 버전 7 — 타입별 생성 헤더가 본문을 inline으로 정의하고 동봉한 MetaCompiler가 타입별 생성 소스를 내지 않는다)는
-    // 버전 불일치로 거부하고, 버전 8인데 EngineVersion이 없거나 칸이 빠진 manifest는 다른 값(저장소 Build/Build.version 등)으로 대신하지
-    // 않고 다시 내보내라고 거부한다.
+    // 이전 SDK(manifest 버전 7 — 메타데이터 모듈 라이브러리에 진입점이 없고 모듈마다 ReflectionOnlyLibrary 칸이 있다)는 지금 없는 칸이
+    // 있어도 알 수 없는 칸 오류가 아니라 버전 불일치로 거부하고, 버전 9인데 EngineVersion이 없거나 칸이 빠진 manifest는 다른 값(저장소
+    // Build/Build.version 등)으로 대신하지 않고 다시 내보내라고 거부한다.
     timer.Restart();
     var sdkManifestPath = Path.Combine(sdk, "rocks-sdk.json");
     var sdkManifestBytes = File.ReadAllBytes(sdkManifestPath);
@@ -901,10 +903,18 @@ try
     SetReadOnly(sdkManifestPath, false);
     try
     {
-        File.WriteAllText(sdkManifestPath, sdkManifestText.Replace("\"Version\": 9,", "\"Version\": 8,", StringComparison.Ordinal));
+        var previousManifest = System.Text.Json.Nodes.JsonNode.Parse(sdkManifestText)!.AsObject();
+        previousManifest["Version"] = 7;
+        foreach (System.Text.Json.Nodes.JsonNode? module in previousManifest["Modules"]!.AsArray())
+        {
+            module!["ReflectionOnlyLibrary"] = false;
+        }
+
+        File.WriteAllText(sdkManifestPath, previousManifest.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
         var previous = await Game();
-        Require(previous.ExitCode != 0 && previous.StdErr.Contains("SDK manifest version mismatch: 8", StringComparison.Ordinal),
-            "A version 8 SDK manifest was not rejected: " + previous.StdErr);
+        Require(previous.ExitCode != 0 && previous.StdErr.Contains("SDK manifest version mismatch: 7", StringComparison.Ordinal) &&
+            previous.StdErr.Contains("Re-export the SDK", StringComparison.Ordinal),
+            "A version 7 SDK manifest was not rejected with the version mismatch guidance: " + previous.StdErr);
         foreach ((string name, Action<System.Text.Json.Nodes.JsonObject> edit) in new (string, Action<System.Text.Json.Nodes.JsonObject>)[]
                  {
                      ("missing EngineVersion", manifestJson => manifestJson.Remove("EngineVersion")),

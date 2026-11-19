@@ -37,7 +37,7 @@ public static class ModuleDefinitions
 
     /// <summary>
     /// 모듈 하나의 번역 단위가 받는 정의다: 모듈 public·private 정의, 의존 모듈(의존 순서)의 public 정의, 진입점 모듈이면
-    /// <c>ROCKS_MODULE_NAME=&lt;이름&gt;</c>. 같은 이름에 다른 값이 있으면 <see cref="ArgumentException"/>이다.
+    /// <c>ROCKS_MODULE_NAME=&lt;이름&gt;</c>과 <c>ROCKS_MODULE_TYPES=0|1</c>. 같은 이름에 다른 값이 있으면 <see cref="ArgumentException"/>이다.
     /// </summary>
     public static string[] Of(NativeModuleInput module, IEnumerable<NativeModuleInput> dependencies, bool entryModule)
     {
@@ -51,7 +51,12 @@ public static class ModuleDefinitions
             }
         }
 
-        return entryModule ? [.. defines, ModuleTables.ModuleNameMacro + "=" + module.Name] : defines;
+        // 진입점 모듈은 자기 이름과 자기 타입 표지를 받는다. 표지는 리플렉션 생성 소스(모듈 생성 소스 — RegisterModuleOwnTypes 정의)가
+        // 있는지로 정한다(Docs/Design/ModuleLoader.ko.md 3.10절).
+        return entryModule
+            ? [.. defines, ModuleTables.ModuleNameMacro + "=" + module.Name,
+                ModuleTables.ModuleTypesMacro + "=" + (module.ReflectionSources.Count != 0 ? "1" : "0")]
+            : defines;
     }
 
     /// <summary>모듈 진입점을 갖는 모듈 이름이다(이 모듈들의 번역 단위가 <c>ROCKS_MODULE_NAME</c>을 받는다).</summary>

@@ -263,9 +263,10 @@ public sealed record NativeModuleInput
     // 규칙이 직접 채우지 않는다. 파일은 메타 생성이 게시한 뒤, 액션 그래프를 세우기 전에 있어야 한다. 액션 그래프는 Sources와 같은
     // include·정의·프로필로 컴파일해 모듈의 archive(실행 파일 모듈이면 그 실행 파일)에 넣는다. 그래서 손으로 쓴 소스가 없는 리플렉션
     // 모듈도 정적 라이브러리가 되어 ModuleOutputs에 실린다.
-    // Sources와 따로 두는 이유: 모듈 진입점 판정(ModuleTables.EntryModules)에 넣지 않는다 — 리플렉션 생성 소스만 있는 모듈은 지금처럼
-    // ROCKS_IMPLEMENT_MODULE이 없어도 된다(GSD14, 진입점 모듈로 바꾸는 일은 모듈 로더 ML2). 설치 SDK 모듈은 이 목록이 비어 있다(object가
-    // SDK 라이브러리에 들어 있다 — ReflectionOnlyLibrary).
+    // Sources와 따로 두는 이유: 진입점 모듈의 자기 타입 표지(ROCKS_MODULE_TYPES=1 — 모듈 생성 소스가 RegisterModuleOwnTypes를 정의한다)를
+    // 이 목록으로 정한다(Docs/Design/ModuleLoader.ko.md 3.10절). 모듈 진입점 판정(ModuleTables.EntryModules)에서는 모듈 코드로 센다 —
+    // 손으로 쓴 소스가 없는 메타데이터 모듈은 MetadataLayout이 진입점 TU를 GeneratedSources로 더한다. 설치 SDK 모듈은 이 목록이 비어
+    // 있다(object가 SDK 라이브러리에 들어 있다).
     public IReadOnlyList<string> ReflectionSources { get; init; } = [];
 
     // 리플렉션 생성 소스의 compile action이 실패했을 때 컴파일러 출력 뒤에 붙이는 안내문이다(비어 있으면 붙이지 않는다). 본문 계약 위반
@@ -273,12 +274,6 @@ public sealed record NativeModuleInput
     // 선언으로 되짚을 길을 알려 준다(Docs/Design/ReflectionGeneratedSources.ko.md 7절). 표시 전용이다 — action key에 넣지 않으므로 문구를
     // 바꿔도 다시 컴파일하지 않는다. Rocks.Build.Cli의 MetadataLayout이 채운다.
     public string ReflectionSourceFailureNote { get; init; } = "";
-
-    // 설치 SDK 모듈 전용 표지: PrebuiltLibraries가 리플렉션 생성 소스의 object만 담는다(SDK를 만들 때 손으로 쓴 소스와 규칙 생성 소스가
-    // 없던 리플렉션 모듈 — CoreTypeBindings 등). 모듈 진입점이 없으므로 ModuleTables.EntryModules가 이 모듈의 미리 빌드한 라이브러리를
-    // 모듈 코드로 세지 않는다(소스 빌드에서 ReflectionSources를 세지 않는 것과 같은 판정이 SDK를 거쳐도 유지된다). 자기 소스
-    // (Sources·GeneratedSources·ReflectionSources)가 있는 모듈에 켜면 입력 오류다.
-    public bool ReflectionOnlyLibrary { get; init; }
 
     // 이 모듈이 Core/Build/BuildInfo.h(rocks::build::ToolchainFingerprint·ToolBuildId·CurrentEngineVersion 선언)를 제공한다는 표지다. 이 모듈에
     // 닿는 실행 파일마다 빌드가 정의 TU(<out>/BuildInfo/<실행 파일>.BuildInfo.cpp)를 만들어 그 실행 파일 소스에 더한다

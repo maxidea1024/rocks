@@ -2,6 +2,7 @@
 #include <Config/ConfigLoader.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/StringBuilder.h>
+#include <Core/Module/ModuleEntry.h>
 #include <HostConfig/HostSettings.h>
 #include <LogHost/LogHost.h>
 #include <Platform/Clock.h>
@@ -294,4 +295,83 @@ TEST(HostSettings_ProjectDirectoryAndUserData) {
     CHECK(!user.IsEmpty() && !user.View().Contains("\\", StringComparison::CaseSensitive));
     CHECK(!HostPlatformName().IsEmpty());
 }
+} // namespace host_settings_tests_file
+
+// Config 모듈의 진입점이다(모듈 표 시험이 실제 기기 프로필 설정 등록을 함께 싣는다).
+const rocks::ModuleEntry& RocksModuleEntry_Config() noexcept;
+
+namespace host_settings_test {
+
+constinit CVar<int32> LateModuleValue =
+    cvar::Var("render.late_module.value", 1).Help("Value owned by a module that starts late");
+
+// 아직 시작하지 않은(늦은 단계) 모듈이다. 설정 등록은 수명 객체 없이 static RegisterSettings로
+// 한다.
+class LateSettingsModule final : public DefaultModuleImplementation {
+public:
+    static Result<void> RegisterSettings(config::ConfigContext& context) noexcept {
+        return context.Register(LateModuleValue);
+    }
+};
+
+const ModuleEntry& LateSettingsEntry() noexcept {
+    static constexpr ModuleEntry entry =
+        detail::MakeModuleEntry<LateSettingsModule>("LateSettings");
+    return entry;
+}
+
+constexpr const char* ConfigOnly[] = {"Config"};
+
+constexpr ModuleTableRow LateRows[] = {
+    {"Config", &RocksModuleEntry_Config, nullptr, 0, LoadingPhase::Default},
+    {"LateSettings", &LateSettingsEntry, ConfigOnly, 1, LoadingPhase::PostDefault},
+};
+
+} // namespace host_settings_test
+
+namespace host_settings_tests_file {
+
+// 설정 등록 시점(Docs/Design/ModuleLoader.ko.md 3.5·3.10절 MD22): HostSettings는 설정 파일을 읽기
+// 전에 로더의 모듈 표에 있는 모든 모듈의 RegisterSettings를 부른다. 그래서 아직 시작하지 않은 늦은
+// 단계 모듈의 CVar도 파일 값을 받고 ReportUnresolved가 그 이름을 오타로 알리지 않는다(정말 없는
+// 이름만 센다). 문맥은 설정을 등록한 모듈의 lease를 맡아 문맥이 사는 동안 그 모듈 코드를 붙잡는다.
+TEST(HostSettings_LateModuleSettingsResolveBeforeStartup) {
+    using namespace host_settings_test;
+    EngineTree tree;
+    REQUIRE(tree.ready);
+    char enginePath[256];
+    REQUIRE(tree.Write("Engine/Config/Engine.json",
+                       R"({ "Settings": { "render.late_module.value": 7,
+                                          "render.late_module.typo": 3 } })",
+                       enginePath));
+    SystemAllocator allocator;
+    auto created = ModuleLoader::TryCreate(allocator, ModuleTable(LateRows));
+    REQUIRE(created);
+    UniquePtr<ModuleLoader> modules = Move(created.Value());
+    {
+        HostSettings settings(allocator);
+        HostSettingsOptions options;
+        options.engineDir = tree.EngineDir();
+        options.modules = modules.Get();
+        REQUIRE(settings.Initialize(options));
+        CHECK(!modules->IsStarted("LateSettings"));
+        CHECK(settings.Context().RetainedModuleCount() == 2);
+        CHECK(modules->LeaseCount("LateSettings") == 1);
+        REQUIRE(settings.LoadFiles());
+        // HostSettings::CompleteStartup과 같은 순서를 문맥에 직접 밟아 처음 보고의 수를 본다(보고는
+        // 이름마다 한 번이라 두 번째 호출은 0이다).
+        config::ConfigContext& context = settings.Context();
+        REQUIRE(context.Sync());
+        REQUIRE(context.CompleteStartup());
+        CHECK(LateModuleValue.Get() == 7);
+        auto unresolved = context.ReportUnresolved();
+        REQUIRE(unresolved);
+        CHECK(unresolved.Value() == 1);
+    }
+
+    // 문맥이 없어지면 맡은 lease를 놓는다.
+    CHECK(modules->LeaseCount("LateSettings") == 0);
+    CHECK(modules->LeaseCount("Config") == 0);
+}
+
 } // namespace host_settings_tests_file
