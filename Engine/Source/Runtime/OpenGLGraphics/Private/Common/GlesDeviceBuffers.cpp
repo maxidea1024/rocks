@@ -155,7 +155,8 @@ void GlesDevice::QueryDeviceCaps(bool desktopContext) noexcept {
     // 채널별 TEXTURE_SWIZZLE_R/G/B/A는 ES 3.0 core다. AnisotropicPoint는 LINEAR_MIPMAP_NEAREST에
     // 이방성(GL_EXT_texture_filter_anisotropic, 없으면 배율 1)을 더한다.
     features.textureViewSwizzle = true;
-    // texture view가 없다(ES 3.2 core 밖). 읽기 view는 텍스처 전체를 묶는다(TextureViewBaseMip).
+    // texture view는 ES 3.2 core 밖이다. 확장(GL_OES_texture_view·GL_EXT_texture_view)이 있으면
+    // Initialize가 참으로 바꾼다. 없으면 읽기 view는 텍스처 전체를 묶는다(TextureViewBaseMip).
     features.textureViewRanges = false;
     features.anisotropicPointFilter = true;
     features.srgbPairView = false;
@@ -488,12 +489,15 @@ Result<void> GlesDevice::ReflectBufferSlots(GLuint program, DrawBufferSlots& slo
         // 텍스처 sampler는 PS 텍스처 유닛 0(ps0)만 받는다.
         const bool imageBuffer = type == GL_IMAGE_BUFFER || type == GL_INT_IMAGE_BUFFER ||
                                  type == GL_UNSIGNED_INT_IMAGE_BUFFER;
-        // compute의 텍스처 image(SetWritableTexture, 텍스처 GX2 A부)다.
+        // compute의 텍스처 image(SetWritableTexture, 텍스처 GX2 A부)다. cube 계열 Storage의 layered
+        // 쓰기 view는 imageCube·imageCubeArray다(텍스처 GX2 나머지 A부).
         const bool imageTexture =
             type == GL_IMAGE_2D || type == GL_IMAGE_3D || type == GL_IMAGE_2D_ARRAY ||
-            type == GL_INT_IMAGE_2D || type == GL_INT_IMAGE_3D || type == GL_INT_IMAGE_2D_ARRAY ||
-            type == GL_UNSIGNED_INT_IMAGE_2D || type == GL_UNSIGNED_INT_IMAGE_3D ||
-            type == GL_UNSIGNED_INT_IMAGE_2D_ARRAY;
+            type == GL_IMAGE_CUBE || type == GL_IMAGE_CUBE_MAP_ARRAY || type == GL_INT_IMAGE_2D ||
+            type == GL_INT_IMAGE_3D || type == GL_INT_IMAGE_2D_ARRAY || type == GL_INT_IMAGE_CUBE ||
+            type == GL_INT_IMAGE_CUBE_MAP_ARRAY || type == GL_UNSIGNED_INT_IMAGE_2D ||
+            type == GL_UNSIGNED_INT_IMAGE_3D || type == GL_UNSIGNED_INT_IMAGE_2D_ARRAY ||
+            type == GL_UNSIGNED_INT_IMAGE_CUBE || type == GL_UNSIGNED_INT_IMAGE_CUBE_MAP_ARRAY;
         GLint unit = -1;
         if (imageTexture && writeTextures != nullptr) {
             gl_.GetUniformiv(program, gl_.GetUniformLocation(program, name), &unit);

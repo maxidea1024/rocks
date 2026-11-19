@@ -509,9 +509,9 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
                 .Error());
     }
 
-    const bool renderTarget = desc.usage == TextureUsage::RenderTarget;
-    const bool depthTarget = desc.usage == TextureUsage::DepthStencil;
-    const bool storage = desc.usage == TextureUsage::Storage;
+    const bool renderTarget = HasTextureUsage(desc.usage, TextureUsage::RenderTarget);
+    const bool depthTarget = HasTextureUsage(desc.usage, TextureUsage::DepthStencil);
+    const bool storage = HasTextureUsage(desc.usage, TextureUsage::Storage);
     // 렌더 타깃·깊이·Storage는 초기 픽셀이 없다(업로드하지 않는다).
     const bool attachment = renderTarget || depthTarget || storage;
     const PixelFormatInfo& pixelInfo = GetPixelFormatInfo(desc.format);
@@ -769,6 +769,14 @@ Result<TextureHandle> VulkanDevice::CreateTextureView(TextureHandle texture,
         return UnsupportedFormat<TextureHandle>(resolved.Value());
     }
 
+    // cube 텍스처의 cube 배열 view는 imageCubeArray 기능이 필요하다.
+    if (TextureViewDimensionOf(source->dimension, desc) == TextureDimension::TextureCubeArray &&
+        !caps_.features.textureCubeArray) {
+        auto failed = FailCode("texture view", ErrorCode::Unsupported,
+                               "cube array views need the imageCubeArray feature");
+        return Result<TextureHandle>::Failure(failed.Error());
+    }
+
     auto reserved = ReserveRetireCapacity(1);
     if (!reserved) {
         return Result<TextureHandle>::Failure(reserved.Error());
@@ -777,7 +785,8 @@ Result<TextureHandle> VulkanDevice::CreateTextureView(TextureHandle texture,
     const PixelFormatPlane& layout = GetPixelFormatInfo(source->format).planes[desc.plane];
     TextureRecord record;
     record.image = source->image;
-    record.dimension = source->dimension;
+    // 차원은 view 차원이다(image view type, cube 계열 쓰기 view는 2D 배열, 텍스처 GX2 나머지 B부).
+    record.dimension = TextureViewDimensionOf(source->dimension, desc);
     record.width = MipExtent(source->width, layout.widthShift);
     record.height = MipExtent(source->height, layout.heightShift);
     record.depth = source->depth;

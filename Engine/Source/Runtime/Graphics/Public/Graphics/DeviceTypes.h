@@ -331,22 +331,49 @@ constexpr uint32 IndexFormatSize(IndexFormat format) noexcept {
     return format == IndexFormat::UInt16 ? 2u : 4u;
 }
 
+// 텍스처 용도 비트 묶음이다(UE ETextureCreateFlags의 ShaderResource·RenderTargetable·
+// DepthStencilTargetable·UAV 대응, RenderBase 4.4절 텍스처 GX2 나머지 A부). 받는 조합은 다섯이다:
+// Sampled, RenderTarget, DepthStencil, Storage, RenderTarget | Storage. 그 밖은 InvalidArgument다
+// (ValidateTextureDesc). GPU가 쓰는 텍스처(RenderTarget·DepthStencil·Storage 비트)는 초기 픽셀이
+// 없고 처음 내용은 정해지지 않으며 늘 샘플할 수 있다. 판정은 HasTextureUsage로 비트를 본다.
+//
+// 사용 예(후처리 compute가 쓰는 렌더 타깃):
+//   desc.usage = TextureUsage::RenderTarget | TextureUsage::Storage;
 enum class TextureUsage : uint8 {
-    // 셰이더에서 샘플링한다(초기 픽셀 필요). 형식 능력 Sampled가 필요하고 mip이 2개 이상이면
-    // Mipmaps도 필요하다.
-    Sampled,
-    // 렌더 타깃으로 그리고 ReadPixels로 읽거나 샘플링한다(초기 픽셀 없음, mip 1). 형식 능력
-    // RenderTarget·Sampled가 필요하다.
-    RenderTarget,
-    // 깊이·스텐실 타깃이다(초기 픽셀 없음, mip 1). 형식 능력 DepthStencil이 필요하고, 형식이
-    // Sampled면 깊이 plane을 샘플할 수 있다. 깊이 그리기 경로는 GX2·GX3에서 연다(PixelFormat.ko.md
-    // 개정 3).
-    DepthStencil,
-    // 셰이더가 읽고(SRV) 쓰는(UAV, 쓰기 view) 텍스처다(초기 픽셀 없음, mip 여러 개 가능, 처음
-    // 내용은 정해지지 않는다). 차원은 2D·2D 배열·3D다. 형식 능력 Sampled·StorageWrite가 필요하고
-    // mip이 2개 이상이면 Mipmaps도 필요하다(RenderBase 4.4절 텍스처 GX2 A부, HZB·compute 후처리).
-    Storage
+    None = 0,
+    // 셰이더에서 샘플링만 한다(초기 픽셀 필요, 다른 비트와 묶지 않는다). 형식 능력 Sampled가
+    // 필요하고 mip이 2개 이상이면 Mipmaps도 필요하다.
+    Sampled = 1u << 0,
+    // 색 attachment로 그린다. 형식 능력 RenderTarget·Sampled가 필요하다.
+    RenderTarget = 1u << 1,
+    // 깊이·스텐실 attachment다(다른 비트와 묶지 않는다). 형식 능력 DepthStencil이 필요하고, 형식이
+    // Sampled면 깊이 plane을 샘플할 수 있다. 3D는 없다.
+    DepthStencil = 1u << 2,
+    // 셰이더가 읽고(SRV) 쓰는(UAV, 쓰기 view) 텍스처다. 차원은 2D·2D 배열·3D·cube·cube 배열이고
+    // cube 계열의 쓰기 view는 면 단위 2D 배열이다. 형식 능력 Sampled·StorageWrite가 필요하다
+    // (RenderBase 4.4절 텍스처 GX2 A부, HZB·compute 후처리). MSAA와 묶지 않는다.
+    Storage = 1u << 3
 };
+
+constexpr TextureUsage operator|(TextureUsage left, TextureUsage right) noexcept {
+    return static_cast<TextureUsage>(static_cast<uint8>(left) | static_cast<uint8>(right));
+}
+
+constexpr TextureUsage operator&(TextureUsage left, TextureUsage right) noexcept {
+    return static_cast<TextureUsage>(static_cast<uint8>(left) & static_cast<uint8>(right));
+}
+
+// usage에 flags 비트가 하나라도 있는지다.
+constexpr bool HasTextureUsage(TextureUsage usage, TextureUsage flags) noexcept {
+    return (usage & flags) != TextureUsage::None;
+}
+
+// 받는 용도 조합인지다(위 다섯).
+constexpr bool IsValidTextureUsage(TextureUsage usage) noexcept {
+    return usage == TextureUsage::Sampled || usage == TextureUsage::RenderTarget ||
+           usage == TextureUsage::DepthStencil || usage == TextureUsage::Storage ||
+           usage == (TextureUsage::RenderTarget | TextureUsage::Storage);
+}
 
 // 텍스처 설정이다(AssetSystem A0-G 차원·swizzle·샘플러).
 //
@@ -455,9 +482,20 @@ struct TextureSubresources {
 // 수가 textureArrayLayers를 넘음, textureCubeArray 기능 없이 CubeArray.
 Result<void> CheckTextureLimits(const DeviceCaps& caps, const TextureDesc& desc) noexcept;
 
+// view 차원이다(UE FRHIViewDesc::FTextureSRV::FInitializer::SetDimension 대응, RenderBase 4.4절
+// 텍스처 GX2 나머지 B부). Same은 원 텍스처 차원이다(cube 계열의 쓰기 view는 Texture2DArray).
+enum class TextureViewDimension : uint8 {
+    Same,
+    Texture2D,
+    Texture2DArray,
+    TextureCube,
+    TextureCubeArray,
+    Texture3D
+};
+
 // 텍스처 view 설정이다(Device::CreateTextureView). 원 텍스처의 자원을 공유하고 형식·plane·성분
-// 대응·mip·slice 범위를 골라 읽거나(Read, SetTexture) 쓴다(ReadWrite, SetWritableTexture)
-// (PixelFormat.ko.md 9·10·11절, RenderBase 4.4절 텍스처 GX2 A부). 차원은 원 텍스처와 같다.
+// 대응·mip·slice 범위·차원을 골라 읽거나(Read, SetTexture) 쓴다(ReadWrite, SetWritableTexture)
+// (PixelFormat.ko.md 9·10·11절, RenderBase 4.4절 텍스처 GX2 A부·나머지 B부).
 // - format: Unknown이면 그 plane의 기본 형식이다. 색·압축 형식은 자기 형식이나 sRGB 짝,
 //   깊이·스텐실과 비디오는 plane 형식(PixelFormatInfo::planes)만 받는다.
 // - plane: 단일 plane 형식은 0, 깊이·스텐실은 0(깊이)·1(스텐실, uint으로 읽고 값은 G 채널),
@@ -469,6 +507,15 @@ Result<void> CheckTextureLimits(const DeviceCaps& caps, const TextureDesc& desc)
 //   텍스처 전체를 묶으므로 셰이더는 TextureViewBaseMip을 기준 mip으로 받아 명시 LOD로 읽는다.
 // - access: Read는 SetTexture로 읽는 SRV, ReadWrite는 SetWritableTexture로 쓰는 UAV다(Storage
 //   텍스처만, mip 하나, plane 0, swizzle 항등, 형식 능력 StorageWrite).
+// - dimension: 셰이더 변수 형식과 같은 view 차원이다(TextureViewDimensionOf, 규칙은
+//   ResolveTextureViewRange). 3D는 3D끼리만, cube 계열 view는 cube 계열 텍스처만, 2D view는 첫
+//   slice 하나만(D3D TEXTURE2D view에 첫 층 필드가 없다), cube view는 첫 cube만이다. 쓰기 view는
+//   2D·2D 배열·3D만이다. 범위 view가 없는 장치(OpenGL ES, 확장 없음)는 차원 바꾸기가 Unsupported다.
+//
+// 사용 예(cube의 면을 2D 배열로 읽는다, 셰이더 Texture2DArray의 층 = 면):
+//   TextureViewDesc faces;
+//   faces.dimension = TextureViewDimension::Texture2DArray;
+//   auto view = device.CreateTextureView(cube, faces);
 //
 // 사용 예(NV12의 색차 plane을 RG8로 샘플):
 //   TextureViewDesc chroma;
@@ -495,7 +542,13 @@ struct TextureViewDesc {
     uint32 firstSlice = 0;
     uint32 sliceCount = 0;
     ViewAccess access = ViewAccess::Read;
+    TextureViewDimension dimension = TextureViewDimension::Same;
 };
+
+// view의 실제 차원이다(Same을 원 텍스처 차원으로 푼다. cube 계열의 쓰기 view는 Texture2DArray).
+// 규칙 검사는 하지 않는다(ResolveTextureViewRange).
+TextureDimension TextureViewDimensionOf(TextureDimension texture,
+                                        const TextureViewDesc& desc) noexcept;
 
 // view를 읽는 셰이더가 명시 LOD의 기준으로 쓰는 mip이다(RenderBase 7.5절 view 기준 mip). 범위
 // view를 지원하는 장치(DeviceFeatures::textureViewRanges)는 0, 아니면(텍스처 전체가 묶인다)
