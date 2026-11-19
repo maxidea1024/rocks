@@ -544,6 +544,14 @@ ConfigContext::~ConfigContext() {
         channel.current = SharedPtr<const ConfigSnapshot>();
     }
 
+    // 범위는 소유 객체(World 등)가 문맥보다 먼저 파괴한다(CVar 14.2절 — 남았으면 소유 객체가
+    // 문맥보다 오래 사는 것이다).
+    if (!state->scopes.IsEmpty()) {
+        platform::Fatal(
+            "ConfigContext destroyed while CVar scopes remain; the objects that own them "
+            "(World and its players) must be destroyed first");
+    }
+
     // 프로세스 기본 문맥이면 풀고(그 뒤 묶음 없는 쓰기는 NotFound), 기본 문맥을 거쳐 통로를 얻은
     // 쓰기(닫힌 통로라 ShuttingDown으로 끝난다)가 통로 참조를 놓을 때까지 기다린다(CVar 6.2절).
     detail::ReleaseProcessDefault(channel);
@@ -1175,6 +1183,41 @@ Result<void> ConfigContext::Sync() noexcept {
         return drained;
     }
 
+    // 범위만 바뀐 Sync(범위 생성·파괴, 큐에 범위 쓰기만 있다)는 Global 다시 합치기를 건너뛰고 범위
+    // 상태만 적용·게시한다(CVar 8절).
+    bool globalWrites = false;
+    for (const SharedPtr<QueuedChange>& change : state->queue) {
+        globalWrites = globalWrites || (change->scope == 0 && change->line.IsEmpty());
+    }
+
+    if (!globalWrites && !state->dirty && (state->scopesChanged || !state->queue.IsEmpty())) {
+        Array<SharedPtr<detail::ScopeState>> nextScopes(*allocator_);
+        bool scopesChanged = false;
+        const ConfigDiagnosticsMark mark = state->diagnostics.Mark();
+        Result<void> published = detail::PrepareScopes(*state, nextScopes, scopesChanged);
+        if (published && scopesChanged) {
+            state->publishingScopes = &nextScopes;
+            published = detail::PublishSnapshot(*state, nullptr, {});
+            state->publishingScopes = nullptr;
+        }
+
+        // 적용 진단은 게시가 성공해야 남는다(다시 시도할 때 중복되지 않는다).
+        if (!published) {
+            state->diagnostics.Rewind(mark);
+            return published;
+        }
+
+        if (scopesChanged) {
+            state->scopes = Move(nextScopes);
+            state->scopesChanged = false;
+        }
+
+        state->queue.Clear();
+        detail::RunPendingCommands(*state);
+        NotifySynced(*state, {}, {});
+        return Result<void>::Success();
+    }
+
     if (state->queue.IsEmpty() && !state->dirty && !state->pendingCommands.IsEmpty()) {
         // 값은 그대로이고 큐에 든 명령만 실행한다.
         detail::RunPendingCommands(*state);
@@ -1413,29 +1456,15 @@ Result<void> ConfigContext::Sync() noexcept {
         }
     }
 
-    // 범위 쓰기를 범위 상태의 사본에 큐 순서로 적용한다(CVar 8절 — 게시가 성공하면 맞바꾼다).
-    // 범위 생성·파괴만 있어도 새 범위 표를 게시한다.
-    bool scopeWrites = false;
-    for (const SharedPtr<QueuedChange>& change : state->queue) {
-        scopeWrites = scopeWrites || (change->scope != 0 && change->line.IsEmpty());
-    }
-
-    Array<UniquePtr<detail::ScopeState>> nextScopes(*allocator_);
-    const bool scopesChanged = scopeWrites || state->scopesChanged;
-    if (scopesChanged) {
-        if (auto copied = detail::CopyScopes(*allocator_, state->scopes, nextScopes); !copied) {
-            return copied;
-        }
-
-        for (const SharedPtr<QueuedChange>& change : state->queue) {
-            if (change->scope == 0 || !change->line.IsEmpty()) {
-                continue;
-            }
-
-            if (auto applied = detail::ApplyScopeChange(*state, nextScopes, *change); !applied) {
-                return applied;
-            }
-        }
+    // 범위 쓰기를 범위 상태의 copy-on-write 사본에 큐 순서로 적용한다(CVar 8절 — 게시가 성공하면
+    // 맞바꾼다). 범위 생성·파괴만 있어도 새 범위 표를 게시한다. 적용 진단은 게시가 실패하면
+    // 되돌린다.
+    Array<SharedPtr<detail::ScopeState>> nextScopes(*allocator_);
+    bool scopesChanged = false;
+    const ConfigDiagnosticsMark scopeMark = state->diagnostics.Mark();
+    if (auto prepared = detail::PrepareScopes(*state, nextScopes, scopesChanged); !prepared) {
+        state->diagnostics.Rewind(scopeMark);
+        return prepared;
     }
 
     // 5. 입력 소유권을 새 목록으로 옮길 자리를 먼저 잡고, 바뀐 조각만 새로 만든 snapshot을 게시한다
@@ -1452,6 +1481,7 @@ Result<void> ConfigContext::Sync() noexcept {
                                                  writes.View());
         state->publishingScopes = nullptr;
         if (!published) {
+            state->diagnostics.Rewind(scopeMark);
             return published;
         }
 

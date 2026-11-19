@@ -277,7 +277,8 @@ struct SyncHook {
     void* context = nullptr;
 };
 
-// 범위 값 하나다(CVar 8절 — 변수 번호·값·콘솔 표기·출처 층·출처).
+// 범위 값 하나다(CVar 8절 — 변수 번호·값·콘솔 표기·출처 층·출처). 만든 뒤 바뀌지 않는다(범위의
+// copy-on-write 사본이 참조 계수로 공유한다).
 struct ScopeValue {
     explicit ScopeValue(Allocator& allocator) noexcept
         : value(allocator), text(allocator), source(allocator) {
@@ -290,7 +291,9 @@ struct ScopeValue {
     String source;
 };
 
-// 범위 하나다(게임 lane 상태 — id·부모 id·번호 순서의 범위 값).
+// 범위 하나다(게임 lane 상태 — id·부모 id·번호 순서의 범위 값). Sync는 그 Sync에서 처음 바뀌는
+// 범위만 사본을 만든다(값 배열은 포인터 복사 — copy-on-write, 8절). node는 이 상태로 만든 snapshot
+// 노드의 캐시다(값·부모가 바뀌면 비운다 — 바뀌지 않은 범위는 앞 표의 노드를 그대로 쓴다).
 struct ScopeState {
     explicit ScopeState(Allocator& allocator) noexcept : values(allocator) {
     }
@@ -298,7 +301,8 @@ struct ScopeState {
     uint64 id = 0;
     // 부모 범위 id다(0이면 Global).
     uint64 parent = 0;
-    Array<UniquePtr<ScopeValue>> values;
+    Array<SharedPtr<const ScopeValue>> values;
+    SharedPtr<const ScopeNode> node;
 };
 
 // 동적 변수 하나의 정의다(ConfigContext::RegisterDynamic — CVar 5절). definition의 view는 이
@@ -361,11 +365,11 @@ struct ConfigState {
     // 동적 변수 정의(등록 순서 — 문맥이 소유한다).
     Array<UniquePtr<DynamicVarState>> dynamicVars;
     // 범위(id 순서 — CVar 8절)다. 생성·파괴는 바로 바뀌고 다음 Sync가 게시한다(scopesChanged).
-    Array<UniquePtr<ScopeState>> scopes;
+    Array<SharedPtr<ScopeState>> scopes;
     bool scopesChanged = false;
     // 게시하는 snapshot의 범위 표를 만들 범위 상태다(Sync가 적용한 사본 — null이면 앞 snapshot의
     // 표를 공유한다).
-    const Array<UniquePtr<ScopeState>>* publishingScopes = nullptr;
+    const Array<SharedPtr<ScopeState>>* publishingScopes = nullptr;
     // 쓰기 통로(문맥과 snapshot들이 공유)와 마지막으로 게시한 snapshot이다.
     SharedPtr<WriteChannel> channel;
     SharedPtr<const ConfigSnapshot> snapshot;
@@ -724,27 +728,36 @@ Result<void> DrainQueue(ConfigState& state) noexcept;
 
 // ---- 범위(CVar 8절 — CVarScopes.cpp) ----
 
-// scopes에서 id의 범위다(없으면 null).
-ScopeState* FindScope(const Array<UniquePtr<ScopeState>>& scopes, uint64 id) noexcept;
+// scopes에서 id의 범위 자리다(없으면 IndexNone — id 순서 이진 탐색).
+usize FindScope(const Array<SharedPtr<ScopeState>>& scopes, uint64 id) noexcept;
 
-// 범위 상태를 깊게 복사한다(Sync가 범위 쓰기를 적용할 사본).
-Result<void> CopyScopes(Allocator& allocator, const Array<UniquePtr<ScopeState>>& from,
-                        Array<UniquePtr<ScopeState>>& to) noexcept;
+// 범위 쓰기를 적용할 다음 범위 상태를 만든다(state.scopes의 얕은 사본 — 바뀌는 범위만 적용 때
+// 사본을 만든다). 범위 쓰기가 없고 범위 상태도 바뀌지 않았으면 changed는 false다. 큐의 범위 쓰기를
+// 큐 순서로 적용한다(ApplyScopeChange). 적용 진단은 호출자가 게시 실패 때 되돌린다(8절).
+Result<void> PrepareScopes(ConfigState& state, Array<SharedPtr<ScopeState>>& next,
+                           bool& changed) noexcept;
 
-// 범위 쓰기 하나를 scopes(사본)에 적용한다(큐 순서). 범위가 없거나 이름이 등록되지 않았으면
+// 범위 쓰기 하나를 next에 적용한다(큐 순서). 범위가 없거나 이름이 등록되지 않았으면 진단 없이
 // 버린다. 값은 Global 쓰기와 같은 검사(CheckConsoleValue)이고 거부하면 진단을 남기고 버린다.
-// 출처 층이 콘솔인 Cheat 변수 쓰기는 그 범위의 치트 허용 상태(scopes의 사슬, 없으면
-// change.globalCheats)로 판정한다(13.1절).
-Result<void> ApplyScopeChange(ConfigState& state, Array<UniquePtr<ScopeState>>& scopes,
+// 지우기는 저장된 값의 출처 층보다 약한 층이면 무시한다. 콘솔이 출처인 쓰기·지우기는 콘솔 읽기
+// 전용·치트(Global 실효값 AND 범위 사슬 — change.globalCheats가 Global)를 본다(6.2·13.1절).
+Result<void> ApplyScopeChange(ConfigState& state, Array<SharedPtr<ScopeState>>& next,
                               const QueuedChange& change) noexcept;
 
-// scopes 사슬에서 scope의 치트 허용 상태다(`cheat.enabled` 범위 값, 없으면 global).
-bool ScopeCheatsAllowed(const ConfigState& state, const Array<UniquePtr<ScopeState>>& scopes,
+// 치트 판정이다: global(Global 실효값) AND scopes 사슬에서 처음 만난 `cheat.enabled` 범위 값(없으면
+// true — 범위는 좁히기만 한다, 13.1절).
+bool ScopeCheatsAllowed(const ConfigState& state, const Array<SharedPtr<ScopeState>>& scopes,
                         uint64 scope, bool global) noexcept;
 
-// 범위 상태로 snapshot의 범위 표를 만든다(범위가 없으면 null — ConfigSnapshot.cpp).
+// 범위 상태로 snapshot의 범위 표를 만든다(범위가 없으면 null — ConfigSnapshot.cpp). 노드 캐시가
+// 있는 범위는 그 노드를 그대로 쓰고, 없는 범위만 새 노드를 만들어 캐시에 둔다.
 Result<SharedPtr<const ScopeTable>>
-BuildScopeTable(ConfigState& state, const Array<UniquePtr<ScopeState>>& scopes) noexcept;
+BuildScopeTable(ConfigState& state, const Array<SharedPtr<ScopeState>>& scopes) noexcept;
+
+// 콘솔이 출처인 범위 지우기의 권한(콘솔 읽기 전용·치트 — 받을 때, 13.1절)을 본다. 거부면 이유
+// 코드를 code에 쓰고 false다.
+bool CheckScopeClear(WriteChannel& channel, const cvar::detail::VarDefinition& definition,
+                     const cvar::SetOptions& options, ConfigDiagnosticCode& code) noexcept;
 
 // 맞바꾼 뒤의 일이다: 큐에 든 콘솔 일(명령·표시)을 넣은 순서대로 실행한다(10절 5단계).
 void RunPendingCommands(ConfigState& state) noexcept;

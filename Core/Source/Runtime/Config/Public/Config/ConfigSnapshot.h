@@ -103,9 +103,9 @@ struct ScopeNode {
     Array<ScopeSlot> slots;
 };
 
-// snapshot의 범위 표다(CVar 8·10.1절): 범위를 id 순서로 두고, "범위 값이 하나라도 있는 번호" 비트
-// 집합(scoped — 64개씩 묶은 word)을 함께 둔다. 범위 상태가 바뀐 Sync만 새로 만들고 아니면 앞
-// snapshot의 표를 공유한다. 만든 뒤 바뀌지 않는다.
+// snapshot의 범위 표다(CVar 8·10.1절): 범위 노드를 id 순서로 두고, "범위 값이 하나라도 있는 번호"
+// 비트 집합(scoped — 64개씩 묶은 word)을 함께 둔다. 범위 상태가 바뀐 Sync만 새로 만들고 아니면 앞
+// snapshot의 표를 공유한다. 새 표도 바뀌지 않은 노드는 공유한다. 만든 뒤 바뀌지 않는다.
 struct ScopeTable {
     explicit ScopeTable(Allocator& allocator) noexcept : nodes(allocator), scoped(allocator) {
     }
@@ -116,7 +116,8 @@ struct ScopeTable {
     // 번호 index에 범위 값이 하나라도 있는지다.
     bool HasScoped(uint32 index) const noexcept;
 
-    Array<UniquePtr<ScopeNode>> nodes;
+    // 범위 노드다(참조 계수 — 바뀌지 않은 범위의 노드는 앞 표와 공유한다).
+    Array<SharedPtr<const ScopeNode>> nodes;
     Array<uint64> scoped;
 };
 
