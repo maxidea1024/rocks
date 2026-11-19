@@ -6,8 +6,9 @@ namespace Rocks.Build.Cli;
 /// <summary>
 /// 모듈 소유 메타데이터를 생성한다(Docs/Design/ReflectionFoundations.ko.md 1.3–1.7절). 타깃에서 도달하는 메타데이터
 /// 모듈을 의존 순서로 모듈마다 한 번 MetaCompiler로 실행하고, 모든 모듈의 inventory와 명세 집합을 검증한 뒤 생성
-/// 헤더·descriptor를 한 번에 게시한다. 실행 중 산출물은 stage에 두며 의존 모듈은 stage의 descriptor와 생성
-/// 루트를 본다(이전 빌드의 게시본을 보지 않는다).
+/// 헤더·생성 소스·descriptor를 한 번에 게시한다. 실행 중 산출물은 stage에 두며 의존 모듈은 stage의 descriptor와 생성
+/// 루트를 본다(이전 빌드의 게시본을 보지 않는다). 생성 소스(&lt;stage&gt;/&lt;모듈&gt;/Source)는 include 루트가 아니고 MetaCompiler가
+/// 컴파일하지 않는다 — 게시한 뒤 빌드가 그 모듈의 번역 단위로 컴파일한다(Docs/Design/ReflectionGeneratedSources.ko.md 6–7절).
 /// </summary>
 public static class MetadataRunner
 {
@@ -90,6 +91,7 @@ public static class MetadataRunner
             {
                 Directory.CreateDirectory(Path.Combine(StageRoot(run.Name), "Public"));
                 Directory.CreateDirectory(Path.Combine(StageRoot(run.Name), "Private"));
+                Directory.CreateDirectory(Path.Combine(StageRoot(run.Name), MetadataModule.SourceDirectoryName));
                 manifests.Add((run.Manifest, BoundedFile.Read(run.Manifest, BoundedFile.MaximumIdentityBytes)));
             }
 
@@ -146,6 +148,15 @@ public static class MetadataRunner
                 {
                     commandFailed = true;
                     return generated.ExitCode;
+                }
+
+                // 배치(MetadataLayout)가 모듈의 리플렉션 생성 소스로 넣은 파일을 MetaCompiler가 실제로 냈는지 확인한다. 이름 규칙이
+                // 어긋난 도구 조합이면 여기서 멈춘다(게시 뒤 액션 그래프의 "Source does not exist"보다 원인이 분명하다).
+                string stagedModuleSource = Path.Combine(StageRoot(run.Name), MetadataModule.SourceDirectoryName, MetadataModule.ModuleSourceName(run.Name));
+                if (!File.Exists(stagedModuleSource))
+                {
+                    throw new InvalidOperationException($"Module '{run.Name}': Rocks.MetaCompiler did not produce the module generated source " +
+                        $"'{MetadataModule.ModuleSourceName(run.Name)}'. Rebuild the host tools so that Rocks.Build.Cli and Rocks.MetaCompiler match.");
                 }
             }
 
@@ -217,7 +228,8 @@ public static class MetadataRunner
         var items = new List<(string? Staged, string Final)>();
         foreach (MetadataModule run in runs)
         {
-            foreach ((string staged, string published) in new[] { ("Public", run.GeneratedPublic), ("Private", run.GeneratedPrivate) })
+            foreach ((string staged, string published) in new[] { ("Public", run.GeneratedPublic), ("Private", run.GeneratedPrivate),
+                         (MetadataModule.SourceDirectoryName, run.GeneratedSource) })
             {
                 string source = Path.Combine(stageRoot(run.Name), staged);
                 var produced = new HashSet<string>(StringComparer.Ordinal);

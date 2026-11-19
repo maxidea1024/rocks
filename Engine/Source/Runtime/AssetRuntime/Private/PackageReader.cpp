@@ -1,7 +1,9 @@
 #include "PackageInternal.h"
 
 #include <AssetRuntime/PackageReader.h>
+#include <Compression/CompressedBlocks.h>
 #include <Compression/Compression.h>
+#include <Core/Assert.h>
 #include <Core/Encoding/Crc32.h>
 #include <Core/Text/NameComponent.h>
 #include <Object/ObjectIdentity.h>
@@ -61,6 +63,14 @@ ArchiveLimits TableLimits() noexcept {
     limits.maxOperations = NumericLimits<uint64>::Max();
     limits.maxWork = NumericLimits<uint64>::Max();
     return limits;
+}
+
+// 고정 배치 표 섹션의 reader다. 표 섹션 크기는 섹션 표 검증이 PackageMaxSectionBytes 이하로
+// 확인했으므로 Create의 실패(크기 초과)는 일어나지 않는다.
+ArchiveReader OpenTable(Span<const uint8> bytes) noexcept {
+    auto archive = ArchiveReader::Create(bytes, TableLimits());
+    ROCKS_ASSERT(archive.IsOk());
+    return Move(archive.Value());
 }
 
 RecordLimits SummaryLimits() noexcept {
@@ -220,9 +230,9 @@ Result<void> ReadSummary(Allocator& allocator, Span<const uint8> bytes, PackageK
 
         summary.savedBy = savedBy.Value();
         summary.compatibleWith = compatibleWith.Value();
-        // compatibleWith는 주·부·0이어야 하고 savedBy의 기준선보다 새지 않다(writer 규칙).
-        if (summary.compatibleWith.patchVersion != 0 ||
-            summary.savedBy.CompatibleBaseline() < summary.compatibleWith) {
+        // compatibleWith는 savedBy의 기준선(주·부·0)과 정확히 같다(writer 규칙 — 같은 객체로 풀리는
+        // 다른 byte를 받지 않는다, AS 5.7절 15).
+        if (!(summary.compatibleWith == summary.savedBy.CompatibleBaseline())) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
@@ -283,12 +293,7 @@ Result<T> SectionFailure(AssetDiagnostic* failure, ErrorCode error, AssetId asse
 }
 
 Result<void> ReadExports(Span<const uint8> bytes, PackageContents& contents) noexcept {
-    auto archive = ArchiveReader::Create(bytes, TableLimits());
-    if (!archive) {
-        return Result<void>::Failure(archive.Error());
-    }
-
-    ArchiveReader& in = archive.Value();
+    ArchiveReader in = OpenTable(bytes);
     auto count = in.ReadU32();
     if (!count || count.Value() == 0 || count.Value() > PackageMaxExports) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -382,12 +387,7 @@ Result<uint64> ValidateExports(Allocator& allocator, const PackageContents& cont
 }
 
 Result<void> ReadImports(Span<const uint8> bytes, PackageContents& contents) noexcept {
-    auto archive = ArchiveReader::Create(bytes, TableLimits());
-    if (!archive) {
-        return Result<void>::Failure(archive.Error());
-    }
-
-    ArchiveReader& in = archive.Value();
+    ArchiveReader in = OpenTable(bytes);
     auto count = in.ReadU32();
     if (!count || count.Value() == 0 || count.Value() > PackageMaxObjectImports) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -508,16 +508,21 @@ Result<uint64> ValidateImports(Allocator& allocator, const PackageContents& cont
     return Result<uint64>::Success(0);
 }
 
-Result<void> ReadDependencies(Span<const uint8> bytes, PackageContents& contents) noexcept {
-    auto archive = ArchiveReader::Create(bytes, TableLimits());
-    if (!archive) {
-        return Result<void>::Failure(archive.Error());
-    }
+// Dependencies 항목 하나({assetId Guid, kind u32, expectedType Guid, flags u32})와 BulkIndex 항목
+// 하나({bulkId, flags, offset u64, storedBytes u64, rawBytes u64, codec, crc32, sha256})의 byte다.
+constexpr uint64 DependencyEntryBytes = 2 * sizeof(Guid) + 2 * sizeof(uint32);
+constexpr uint64 BulkIndexEntryBytes =
+    4 * sizeof(uint32) + 3 * sizeof(uint64) + Sha256Digest::Bytes;
+static_assert(DependencyEntryBytes == 40, "Dependencies entry layout changed");
+static_assert(BulkIndexEntryBytes == 72, "BulkIndex entry layout changed");
 
-    ArchiveReader& in = archive.Value();
+Result<void> ReadDependencies(Span<const uint8> bytes, PackageContents& contents) noexcept {
+    ArchiveReader in = OpenTable(bytes);
     auto count = in.ReadU32();
-    // 의존 수는 import 수 + Soft 수라 따로 상한을 두지 않지만 섹션 크기가 묶는다(항목 40 byte).
-    if (!count || count.Value() == 0 || count.Value() > bytes.Size() / 40) {
+    // 섹션 크기 = count 칸 + count × 항목 크기다(고정 배치 — 의존 수는 import 수 + Soft 수라 따로
+    // 상한을 두지 않고 섹션 크기가 묶는다). 크기가 맞으면 아래 칸 읽기는 실패하지 않는다.
+    if (!count || count.Value() == 0 ||
+        bytes.Size() != sizeof(uint32) + uint64{count.Value()} * DependencyEntryBytes) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -530,9 +535,7 @@ Result<void> ReadDependencies(Span<const uint8> bytes, PackageContents& contents
         auto kind = in.ReadU32();
         auto expected = in.ReadGuid();
         auto flags = in.ReadU32();
-        if (!asset || !kind || !expected || !flags) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
-        }
+        ROCKS_ASSERT(asset && kind && expected && flags);
 
         if (kind.Value() < static_cast<uint32>(PackageDependencyKind::Hard) ||
             kind.Value() > static_cast<uint32>(PackageDependencyKind::ImportOwner) ||
@@ -548,9 +551,7 @@ Result<void> ReadDependencies(Span<const uint8> bytes, PackageContents& contents
         (void)contents.dependencies.TryPushBack(entry);
     }
 
-    if (!in.AtEnd()) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
-    }
+    ROCKS_ASSERT(in.AtEnd());
 
     return Result<void>::Success();
 }
@@ -584,15 +585,12 @@ Result<uint64> ValidateDependencies(const PackageContents& contents) noexcept {
 }
 
 Result<void> ReadBulkIndex(Span<const uint8> bytes, PackageContents& contents) noexcept {
-    auto archive = ArchiveReader::Create(bytes, TableLimits());
-    if (!archive) {
-        return Result<void>::Failure(archive.Error());
-    }
-
-    ArchiveReader& in = archive.Value();
+    ArchiveReader in = OpenTable(bytes);
     auto count = in.ReadU32();
-    // 항목 하나가 72 byte다.
-    if (!count || count.Value() == 0 || count.Value() > bytes.Size() / 72) {
+    // 섹션 크기 = count 칸 + count × 항목 크기다(고정 배치). 크기가 맞으면 칸 읽기는 실패하지
+    // 않는다.
+    if (!count || count.Value() == 0 ||
+        bytes.Size() != sizeof(uint32) + uint64{count.Value()} * BulkIndexEntryBytes) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -609,9 +607,7 @@ Result<void> ReadBulkIndex(Span<const uint8> bytes, PackageContents& contents) n
         auto codec = in.ReadU32();
         auto crc = in.ReadU32();
         auto sha = in.ReadRaw(Sha256Digest::Bytes);
-        if (!id || !flags || !offset || !stored || !raw || !codec || !crc || !sha) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
-        }
+        ROCKS_ASSERT(id && flags && offset && stored && raw && codec && crc && sha);
 
         PackageBulkEntry entry;
         entry.bulkId = id.Value();
@@ -632,9 +628,7 @@ Result<void> ReadBulkIndex(Span<const uint8> bytes, PackageContents& contents) n
         (void)contents.bulkEntries.TryPushBack(entry);
     }
 
-    if (!in.AtEnd()) {
-        return Result<void>::Failure(ErrorCode::InvalidArgument);
-    }
+    ROCKS_ASSERT(in.AtEnd());
 
     return Result<void>::Success();
 }
@@ -713,7 +707,78 @@ Result<bool> TypeTableMatchesExports(Allocator& allocator,
     return Result<bool>::Success(true);
 }
 
+// Zstd entry의 저장 byte(블록 컨테이너)를 raw에 푼다. 컨테이너 형식·Zstd가 아닌 codec·사전
+// 컨테이너·rawSize ≠ raw 크기(할당 전에 본다 — 해제 결과 크기가 아니라 헤더로)·블록 해제 실패는
+// InvalidArgument, 할당 실패는 OutOfMemory다.
+// 블록 컨테이너 오류를 bulk 해제 오류로 바꾼다: 할당 실패는 그대로, 나머지(형식·CRC·손상)는
+// 저장 byte가 틀린 것이라 InvalidArgument다.
+Result<void> ContainerFailure(ErrorCode error) noexcept {
+    return Result<void>::Failure(error == ErrorCode::OutOfMemory ? ErrorCode::OutOfMemory
+                                                                 : ErrorCode::InvalidArgument);
+}
+
+Result<void> DecodeBulkContainer(Span<const uint8> stored, Span<uint8> raw,
+                                 Allocator& allocator) noexcept {
+    auto reader = CompressedBlocksReader::TryOpen(stored, allocator);
+    if (!reader) {
+        return ContainerFailure(reader.Error());
+    }
+
+    if (reader.Value().Format() != CompressionFormat::Zstd ||
+        reader.Value().RawSize() != raw.Size()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto context = CompressedBlocksReadContext::TryCreate(reader.Value(), allocator);
+    if (!context) {
+        return Result<void>::Failure(context.Error());
+    }
+
+    if (auto read = reader.Value().TryRead(0, raw, stored, context.Value()); !read) {
+        return ContainerFailure(read.Error());
+    }
+
+    return Result<void>::Success();
+}
+
 } // namespace
+
+namespace package_detail {
+
+Result<void> ValidateTagsRecord(Allocator& scratch, Span<const uint8> bytes) noexcept {
+    auto header = ReadRecordHeader(bytes);
+    if (!header) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    RecordLimits limits;
+    limits.archive = TableLimits();
+    limits.archive.maxValueBytes = static_cast<usize>(PackageMaxSectionBytes);
+    limits.maxFields = NumericLimits<uint32>::Max();
+    auto record =
+        RecordReader::Open(scratch, bytes, header.Value().schema, header.Value().schemaVersion,
+                           header.Value().schemaVersion, limits);
+    if (!record) {
+        return Result<void>::Failure(record.Error() == ErrorCode::OutOfMemory
+                                         ? ErrorCode::OutOfMemory
+                                         : ErrorCode::InvalidArgument);
+    }
+
+    Guid previous{};
+    for (usize index = 0; index < record.Value().FieldCount(); ++index) {
+        auto field = record.Value().Next();
+        ROCKS_ASSERT(field.IsOk());
+        if (index > 0 && !GuidLess(previous, field.Value().id)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        previous = field.Value().id;
+    }
+
+    return Result<void>::Success();
+}
+
+} // namespace package_detail
 
 const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
     switch (code) {
@@ -977,16 +1042,18 @@ Result<PackageContents> ReadPackage(Allocator& allocator, Span<const uint8> file
             contents.objects = bytes;
             break;
         case PackageSectionKind::ImportRecord:
-        case PackageSectionKind::Tags: {
             // 내용 스키마는 A2(AssetDatabase)가 정한다. 여기서는 Record envelope만 확인한다.
             if (auto record = ReadRecordHeader(bytes); !record) {
                 read = Result<void>::Failure(ErrorCode::InvalidArgument);
             }
 
-            (entry.kind == PackageSectionKind::ImportRecord ? contents.importRecord
-                                                            : contents.tags) = bytes;
+            contents.importRecord = bytes;
             break;
-        }
+        case PackageSectionKind::Tags:
+            // 키(필드 ID) 엄격 오름차순(AS 5.2절 — 값 스키마는 A2).
+            read = package_detail::ValidateTagsRecord(allocator, bytes);
+            contents.tags = bytes;
+            break;
 
         case PackageSectionKind::Bulk:
             contents.bulk = bytes;
@@ -1043,8 +1110,11 @@ Result<PackageContents> ReadPackage(Allocator& allocator, Span<const uint8> file
     if (options.types != nullptr) {
         for (usize index = 0; index < contents.summary.types.Size(); ++index) {
             const PackageTypeVersion& row = contents.summary.types[index];
+            // 미등록(NotFound)·클래스가 아닌 타입(TypeMismatch)은 "현재 버전 없음"이다. 그 밖의
+            // 실패(종료된 TypeRegistry의 ShuttingDown, lease 수 Overflow)는 파일 탓이 아니다.
             auto lease = options.types->Acquire(row.type);
-            if (!lease && lease.Error() == ErrorCode::OutOfMemory) {
+            if (!lease && lease.Error() != ErrorCode::NotFound &&
+                lease.Error() != ErrorCode::TypeMismatch) {
                 return Resource<PackageContents>(failure, lease.Error(), asset, 0);
             }
 
@@ -1139,18 +1209,13 @@ Result<void> DecodePackageBulk(const PackageContents& contents, Array<uint8>& ou
             for (usize index = 0; index < raw.Size(); ++index) {
                 raw[index] = stored[index];
             }
-        } else {
-            auto decoded = TryDecompress(CompressionFormat::Zstd, stored, raw, out.GetAllocator());
-            if (!decoded || decoded.Value() != raw.Size()) {
-                restore();
-                if (!decoded && decoded.Error() == ErrorCode::OutOfMemory) {
-                    return Resource<void>(failure, decoded.Error(), asset, section);
-                }
-
-                return FailAsset<void>(
-                    failure, AssetDiagnosticCode::CorruptPackage, ErrorCode::InvalidArgument, asset,
-                    section, decoded ? entry.bulkId : static_cast<uint64>(decoded.Error()));
+        } else if (auto decoded = DecodeBulkContainer(stored, raw, out.GetAllocator()); !decoded) {
+            restore();
+            if (decoded.Error() == ErrorCode::OutOfMemory) {
+                return Resource<void>(failure, decoded.Error(), asset, section);
             }
+
+            return Corrupt<void>(failure, asset, section, entry.bulkId);
         }
 
         if (!(Sha256::Hash(Span<const uint8>(raw.Data(), raw.Size())) == entry.sha256)) {

@@ -2,7 +2,7 @@
 
 STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-driven 렌더러
 
-**설계 기준일 2026.11.19 · 개정 1.15 · 상태: 구현 제안 / 성능 미측정**
+**설계 기준일 2026.11.20 · 개정 1.16 · 상태: 구현 제안 / 성능 미측정**
 
 **추가 요구 반영:** Deferred·Forward 정식 지원, 업스케일링, 태깅·컴포넌트·프리팹, Unreal 참고 체계 확대, 컷씬 제작 핵심화, Blueprint 제외·자체 언어 채택, 하이엔드 포스트이펙트 전체 기능군, UBT 계열 자체 빌드 도구·분산 빌드·반복 개발 최적화, 정식 헤드리스 모드, 필수 노드 기반 머티리얼 에디터.
 
@@ -30,7 +30,9 @@ STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-d
 
 **1.14 텍스처 스트리밍 표본 해상도:** [텍스처 스트리밍](TextureStreaming.ko.md) 결정 T1(2026-11-19 확정)에 따라 9.5절의 desired mip 입력 "render resolution"을 표본 해상도(렌더 폭 × 2^(−텍스처 mip bias))로 바꾼다. temporal upscale에서는 출력 해상도, Native·Spatial에서는 렌더 해상도와 같아진다. 개정 범위는 9.5절이다.
 
-**1.15 에디터 내 실행 이름 Tryout:** 사용자 결정(2026-11-19)으로 UE PIE에 대응하는 Rocks 기능 이름을 Tryout으로 정한다. 이름의 뜻·표기 규칙·변형 이름·버린 후보는 22.6절에 둔다. 이 문서와 Docs/Design의 다른 설계 문서, Docs/Implementation의 개념 표기를 함께 바꾸었다. 코드 식별자(`NonPIEDuplicateTransient`, `TextUse::PieCopy` 등)와 그것을 설명하는 Docs/Implementation 표기는 후속 개명 커밋에서 바꾼다.
+**1.15 에디터 내 실행 이름 Tryout:** 사용자 결정(2026-11-19)으로 UE PIE에 대응하는 Rocks 기능 이름을 Tryout으로 정한다. 이름의 뜻·표기 규칙·변형 이름·버린 후보는 22.6절에 둔다. 이 문서와 Docs/Design의 다른 설계 문서, Docs/Implementation의 개념 표기를 함께 바꾸었다. 이어서 코드 식별자도 바꾸었다: 필드 지정자·`FieldFlags` 값 `NonPIEDuplicateTransient` → `NonTryoutDuplicateTransient`(비트 32는 그대로), 텍스트 용도 `TextUse::PieCopy` → `TextUse::TryoutCopy`, 그것을 설명하는 Docs/Implementation 표기와 게임 템플릿 README. 하위호환 별칭은 두지 않는다. 옛 지정자 이름은 MetaCompiler가 알 수 없는 지정자로 거부한다.
+
+**1.16 레벨 스크립트:** 사용자 결정(2026-11-20, 모든 항목 권장안)으로 Blueprint 제외를 유지하고, UE Level Blueprint에 해당하는 빈 곳을 Sparks 기반 타입 `LevelScript`(레벨마다 숨은 Actor 0 또는 1개, 배치 불가)로 채운다. 노드 기반 시각 편집기는 보류 선택지로만 둔다(만든다면 Sparks 코드로 내보내고 실행은 Sparks). 엔진 Actor가 물리 이벤트 `TriggerEntered`·`TriggerExited`·`CollisionEntered`·`CollisionExited`를 노출하고, 배치한 Actor에 편집기에서 ScriptComponent를 붙일 수 있음을 명시한다. 정본은 [레벨 스크립트](LevelScript.ko.md)(결정 LD1–LD20)다. 개정 범위는 표지·20.2·20.4·20.5·22.1·22.3·23.1·24.1·33.2·33.7·33.19절이다.
 
 ## 1. 목표와 실행 전략
 
@@ -279,7 +281,7 @@ Build/                    Rules  Schemas
 Templates/  Samples/VerticalSlice
 ~~~
 
-Core는 엔진이 아니라 엔진·도구·게임이 함께 쓰는 기반 라이브러리이며 최상위에서 Engine과 분리한다(의존은 Core ← Engine ← 게임·플러그인). 각 모듈 폴더에 `<모듈>.Build.cs`·`Public/`·`Private/`·`Tests/`를 두고, 모듈 단위 테스트는 그 `Tests/`에, 통합·부하·렌더·네트워크 시험은 `Programs/`의 시험 프로그램에 둔다. 실행 프로그램(C++·C#)은 모두 `Programs/`에 둔다. 게임 프로젝트는 `<프로젝트>.rocksproject`, 플러그인은 `<플러그인>.rocksplugin` 기술자를 둔다. 세부 규칙은 [저장소 구성](RepositoryLayout.ko.md)을 따른다.
+Core는 엔진이 아니라 엔진·도구·게임이 함께 쓰는 기반 라이브러리이며 최상위에서 Engine과 분리한다(의존은 Core ← Engine ← 게임·플러그인). 각 모듈 폴더에 `<모듈>.Build.cs`·`Public/`·`Private/`·`Tests/`를 두고, 모듈 단위 테스트는 그 `Tests/`에, 통합·부하·렌더·네트워크 시험은 `Programs/`의 시험 프로그램에 둔다. 실행 프로그램(C++·C#)은 모두 `Programs/`에 둔다. 게임 프로젝트는 `<프로젝트>.rocksproject`, 플러그인은 `<플러그인>.rocksplugin` 기술자를 둔다. 세부 규칙은 [저장소 구성](../Guides/RepositoryLayout.ko.md)을 따른다.
 
 공개 헤더와 Private 구현을 분리한다. 모듈 manifest에 공개/비공개 의존성, Host/Target 구분, 초기화 순서, 버전, 선택 기능을 기록한다. 초기화는 명시적인 BootServices 순서로 수행하고 정적 전역 생성자의 상호 의존을 금지한다. Shutdown은 신규 게임/편집 요청 차단 → 작업 취소 요청 → World 정상 종료(스크립트 Disable·Destroy hook)·자원 detach → teardown 작업과 callback drain → GPU fence·audio epoch·physics step 완료 → root/lease 반환·최종 GC → GC가 생성한 추가 cleanup/backend 작업 drain → owner/retire/queue closure 확인 → scheduler 종료 → type metadata/code lease와 trace writer 종료 → 모듈 역순 종료로 수행한다. teardown 전용 제출은 마지막 drain까지 허용하며 새로운 cleanup이 생기면 완료 집합이 닫힐 때까지 GC/drain을 반복한다. timeout은 실패이며 scheduler를 먼저 종료하거나 강제 free하지 않는다. 렌더 lane은 "GPU fence 완료"부터 "owner/retire/queue closure 확인"까지 살아 있고 그 뒤 Drain·장치 소유권 반납·Join한다. 이 단계는 Engine 종료 hook(`EngineLoopHooks`의 `BeginShutdown`·`CompleteInFlightWork`·`DrainShutdownCleanup`·`VerifyShutdownClosure`·`StopExecutors`)으로 드러낸다([렌더 기반](RenderBase.ko.md) 5.5절, CP6 구현 2026-11-17).
 
@@ -803,7 +805,7 @@ AssetId는 위치와 독립된 128-bit GUID로 부여한다. source asset, impor
 
 runtime reference graph와 cook build-dependency graph를 분리한다. 단순 AssetId 참조는 상대 cooked payload의 완료를 자동 선행 조건으로 만들지 않는다. 실제 산출물 의존이 순환하면 지원 가능한 SCC를 하나의 cook 단위로 축약하고, 정렬된 구성원 source/settings/schema·내부 edge ID·외부 component의 확정 digest로 key를 계산한다. 구성원 output은 component key+local output ID에서 파생하며 서로의 cooked hash를 재귀 정의하지 않는다. 지원하지 않는 순환 변환은 cycle 경로와 함께 거부한다. A↔B·3-node cycle 및 외부 변경 fixture에서 clean/incremental/local/remote 결과를 대조한다.
 
-Importer는 glTF·텍스처·WAV/압축 오디오를 우선하고, FBX와 고급 DCC 연동은 plugin으로 확장한다. 임포트는 별도 worker process에서 수행하여 실패와 긴 컴파일을 격리한다(장시간 실행되는 에디터와 함께 구현한다. 그 전의 명령행 임포트는 원자적 저장으로 기존 에셋을 보존한다 — AssetSystem 17절). StaticMesh cook은 conventional LOD·meshlet·VirtualGeometry page·collision·nav source·GI proxy를 독립 산출물로 생성한다. 하나의 렌더링 메시를 모든 시스템의 직접 입력으로 재사용하지 않는다.
+Importer는 glTF·텍스처·WAV/압축 오디오를 우선하고, FBX와 고급 DCC 연동은 plugin으로 확장한다. 임포트는 별도 worker process에서 수행하여 실패와 긴 컴파일을 격리한다(장시간 실행되는 에디터와 함께 구현한다. 그 전의 명령행 임포트는 원자적 저장으로 기존 에셋을 보존한다 — AssetSystem 17절). StaticMesh cook은 conventional LOD·meshlet·VirtualGeometry page·collision·nav source·GI proxy를 독립 산출물로 생성한다. 하나의 렌더링 메시를 모든 시스템의 직접 입력으로 재사용하지 않는다. 엔진 시험용 UE 콘텐츠는 UE 에디터 플러그인이 추출한 교환 묶음으로 가져온다([Unreal 교환 형식](UnrealExchange.ko.md), 2026-11-20).
 
 ### 9.2 로딩 상태와 취소
 
@@ -1257,7 +1259,7 @@ native 고해상도 기준 영상과 비교하여 SSIM/이미지 차이, edge fl
 
 ### 13.1 GPU-driven 기준 경로
 
-StaticMeshAsset은 positions, packed normals/tangents, UV, material slots, section, bounds, conventional LOD, meshlet, collision, GI proxy를 보관한다. import 때 퇴화 삼각형·잘못된 winding·nonfinite 값·UV 범위를 진단한다. meshoptimizer는 cache·fetch 최적화와 meshlet cook의 후보로 어댑터에 통합한다. [S5](https://github.com/zeux/meshoptimizer)
+StaticMeshAsset은 positions, packed normals/tangents, UV, material slots, section, bounds, conventional LOD, meshlet, collision, GI proxy를 보관한다. import 때 퇴화 삼각형·잘못된 winding·nonfinite 값·UV 범위를 진단한다. meshoptimizer는 cache·fetch 최적화와 meshlet cook의 후보로 어댑터에 통합한다. [S5](https://github.com/zeux/meshoptimizer) 원본 메시 모델·설정·빌드 순서·쿠킹 데이터의 상세는 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md) 3–5절이다.
 
 GPU Scene은 RenderInstanceId별 transform, previous transform, mesh/material handle, bounds, flags를 저장한다. 변경 범위만 upload하고 frame overlap 중 같은 buffer 영역을 덮어쓰지 않는다. material table·descriptor table도 version과 deferred retirement를 적용한다. GPU에는 Object 주소나 ObjectHandle을 직접 전달하지 않는다.
 
@@ -1496,7 +1498,7 @@ LT01–03·LT05–06의 static/basic probe·CPU bake 사례는 M4 필수다. LT0
 
 ## 15. Skeletal Mesh와 Animation
 
-SkeletonAsset은 stable bone ID, parent index, bind/inverse-bind pose, retarget profile을 보관한다. SkeletalMesh는 section별 bone palette·influence 제한·LOD·morph target을 보관하고 같은 skeleton의 공유를 허용한다. import 시 누락 bone·비정규 weight·좌표/scale·음수 determinant를 검사한다. cook 시 skin weight precision과 bone pruning을 LOD별로 결정한다.
+SkeletonAsset은 stable bone ID, parent index, bind/inverse-bind pose, retarget profile을 보관한다. SkeletalMesh는 section별 bone palette·influence 제한·LOD·morph target을 보관하고 같은 skeleton의 공유를 허용한다. import 시 누락 bone·비정규 weight·좌표/scale·음수 determinant를 검사한다. cook 시 skin weight precision과 bone pruning을 LOD별로 결정한다. 본 계층·스켈레톤·스킨 메시·AnimationClip의 자료구조 상세는 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md) 6–7절이다.
 
 AnimationClip은 position·rotation·scale track, curve, notify, root motion을 포함한다. ACL을 압축·복호화 후보로 사용하며 CPU 작업 메모리와 시간·오차를 adapter에서 계측한다. [S9](https://github.com/nfrechette/acl)
 
@@ -1764,7 +1766,7 @@ Component는 Entity 소유의 Object이며 TransformComponent만 SceneNodeHandle
 
 **Construct → ApplyDefaults/Fixup → Attach → Initialize → Register → Activate/BeginPlay → Tick → Deactivate/EndPlay → Unregister → Retire**의 순서를 정의한다. BeginPlay/EndPlay는 world session과 별도 event로 기록하여 Tryout 재시작·셀 unload·prefab 재적용 중 중복 실행을 방지한다. disabled와 unregistered, editor-only, pending destruction은 서로 다른 상태다.
 
-수명 hook의 이름은 Unity의 hook 체계(종류·호출 순서·의미)를 따르고 Rocks 어휘를 사용한다(2026-11-12 결정). 단계와 hook의 대응은 Initialize→`Awake`, Activate→`Enable`, BeginPlay→`Start`, 가변·고정·LateUpdate tick→`Tick`·`FixedTick`·`LateTick`, Deactivate→`Disable`, EndPlay→`Destroy`이며, 자기 Entity의 모든 collider의 물리 통지는 `TriggerEnter`·`TriggerExit`·`CollisionEnter`·`CollisionExit`, 편집기 재구성은 `Validate`다. C++ 가상 함수는 `On` 접두를 붙여 오디오·타임라인의 일반 `Start()` 메서드와 충돌하지 않게 하고 Sparks의 `on Start()`와 1:1로 대응한다. 단계 이름(Initialize·BeginPlay 등)은 엔진 내부 단계 이름으로 유지한다. 같은 hook 체계를 WorldService·WidgetController에도 적용한다. spawn 묶음(`World.Spawn` 또는 prefab instantiate 1회가 생성한 객체 graph)의 Awake가 모두 성공하면 graph 순서로 Enable하고, Start는 같은 스크립트 단계의 발행 큐에서 시작한다. Start는 준비 대기만 기다리며 끝나기 전에는 그 객체의 Tick을 시작하지 않는다. Disable은 그 객체의 스크립트 실행 취소·유지 자원 해제·이벤트 연결 비활성화를 수반한다. `RequestDestroy`·부모 파괴·셀 unload·travel·Tryout Stop·process 종료에서는 Disable(활성이면)·Destroy hook을 실행한 뒤 Detach하고, fault로 인한 격리와 GC 도달 불가 경로에서는 Disable을 실행하지 않는다(SD20).
+수명 hook의 이름은 Unity의 hook 체계(종류·호출 순서·의미)를 따르고 Rocks 어휘를 사용한다(2026-11-12 결정). 단계와 hook의 대응은 Initialize→`Awake`, Activate→`Enable`, BeginPlay→`Start`, 가변·고정·LateUpdate tick→`Tick`·`FixedTick`·`LateTick`, Deactivate→`Disable`, EndPlay→`Destroy`이며, 자기 Entity의 모든 collider의 물리 통지는 `TriggerEnter`·`TriggerExit`·`CollisionEnter`·`CollisionExit`, 편집기 재구성은 `Validate`다. 다른 객체가 이 통지를 받을 때는 Actor(이 절의 Entity)가 노출하는 이벤트 `TriggerEntered`·`TriggerExited`·`CollisionEntered`·`CollisionExited`(인자는 같은 이름 hook과 같다)를 쓴다. 같은 물리 batch에서 hook 다음에 발행하며, Actor마다 delegate 필드를 두지 않고 지연 할당 이벤트 slot 표에 연결을 두어 구독이 있을 때만 비용이 든다(1M Actor 기준). 이름은 hook과 겹치지 않게 과거형이다([레벨 스크립트](LevelScript.ko.md) LD9). C++ 가상 함수는 `On` 접두를 붙여 오디오·타임라인의 일반 `Start()` 메서드와 충돌하지 않게 하고 Sparks의 `on Start()`와 1:1로 대응한다. 단계 이름(Initialize·BeginPlay 등)은 엔진 내부 단계 이름으로 유지한다. 같은 hook 체계를 WorldService·WidgetController에도 적용한다. spawn 묶음(`World.Spawn` 또는 prefab instantiate 1회가 생성한 객체 graph)의 Awake가 모두 성공하면 graph 순서로 Enable하고, Start는 같은 스크립트 단계의 발행 큐에서 시작한다. Start는 준비 대기만 기다리며 끝나기 전에는 그 객체의 Tick을 시작하지 않는다. Disable은 그 객체의 스크립트 실행 취소·유지 자원 해제·이벤트 연결 비활성화를 수반한다. `RequestDestroy`·부모 파괴·셀 unload·서브 레벨 unload·travel·Tryout Stop·process 종료에서는 Disable(활성이면)·Destroy hook을 실행한 뒤 Detach하고(Level을 내릴 때는 그 Level의 `LevelScript`가 먼저 — LevelScript LD8), fault로 인한 격리와 GC 도달 불가 경로에서는 Disable을 실행하지 않는다(SD20).
 
 ~~~cpp
 class Component : public Object {
@@ -1792,6 +1794,8 @@ struct TickSpec {
 tick group은 PrePhysics, PhysicsSync, PostPhysics, AnimationFinalize, LateUpdate를 기본으로 하고 prerequisite DAG의 cycle을 오류로 검출한다. 독립 component의 병렬 tick은 read/write access 선언이 검증된 경우만 허용한다. Object 가변 상태를 다루는 기본 tick은 Game lane에서 수행한다. tick 중 component 추가·삭제·reparent는 deferred command로 commit한다.
 
 singleton-per-entity·required component·mutually exclusive 규칙을 type metadata로 표현한다. editor가 자동 추가하는 종속 component는 transaction에 포함한다. cook은 순환 종속·누락 필수 component를 검사한다. constructor에서 backend world에 즉시 등록하지 않으며 Register가 실패하면 backend의 부분 등록을 해제하고, 이미 Commit된 객체는 5.3절의 RequestDestroy·정상 retire 경로로 정리한다. 미공개 rollback과 구분한다. editor에는 component tree, active state, tick 의존성, native handle 상태를 표시한다.
+
+editor는 배치한 Actor에 ScriptComponent를 바로 붙일 수 있다. 직접 배치한 Actor는 그 component 목록에 추가해 레벨과 함께 저장하고, prefab 배치는 instance override의 노드 추가로 저장한다(Prefab PF4 선행). 이것은 레벨·배치 데이터 편집이므로 Sparks core에서도 되며, 실행 중 스크립트가 component를 추가하는 것(Sparks full 전용)과 구분한다([레벨 스크립트](LevelScript.ko.md) LD15).
 
 ### 20.3 프리팹·중첩·변형·인스턴스 오버라이드
 
@@ -1822,7 +1826,7 @@ GameSession, WorldSession, MatchRules, MatchState, PlayerState, LocalPlayer, Pla
 
 Input은 action/context, key/gamepad/touch, rebinding, dead zone, chord, haptics, focus를 지원한다. editor shortcut·viewport camera·Tryout game input의 우선순위를 명시한다. 입력 snapshot은 fixed tick에 timestamp를 포함하며 replay·prediction에서 재사용한다. text 입력과 key binding을 구분하여 IME를 지원한다.
 
-게임플레이 스크립팅은 자체 커스텀 언어를 정식 수단으로 채택한다. Blueprint 및 Blueprint 유사 범용 visual scripting은 지원 범위에서 제외한다. 언어·컴파일러·VM·디버거와 Object·GC·RPC·프리팹 연동은 23절의 필수 구현 대상으로 정의한다. 머티리얼·애니메이션·VFX 전용 그래프와 컷씬 타임라인은 선언형 제작 도구이며 게임플레이 스크립팅 언어를 대체하지 않는다.
+게임플레이 스크립팅은 자체 커스텀 언어를 정식 수단으로 채택한다. Blueprint 및 Blueprint 유사 범용 visual scripting은 지원 범위에서 제외한다. UE Level Blueprint(레벨마다 하나인 연결 스크립트)에 해당하는 것은 Sparks 기반 타입 `LevelScript`가 맡고, 노드 기반 시각 편집기는 보류 선택지로만 둔다(만든다면 그래프를 Sparks 코드로 내보내고 실행은 Sparks — [레벨 스크립트](LevelScript.ko.md) LD1·LD2). 언어·컴파일러·VM·디버거와 Object·GC·RPC·프리팹 연동은 23절의 필수 구현 대상으로 정의한다. 머티리얼·애니메이션·VFX 전용 그래프와 컷씬 타임라인은 선언형 제작 도구이며 게임플레이 스크립팅 언어를 대체하지 않는다.
 
 ### 20.5 권한별 프레임워크와 프리팹 식별자
 
@@ -1830,7 +1834,7 @@ MatchRules는 서버 전용 규칙·spawn/respawn·match lifecycle, MatchState�
 
 nested prefab의 주소는 PrefabInstanceGuid + 중첩 instance 경로 + NodeGuid + FieldId + ElementGuid다. 같은 NodeGuid를 가진 원본이 여러 번 중첩되어도 충돌하지 않는다. instance EntityGuid는 저장 시 보존하고 새 복제 시 재발급한다. runtime component 추가/제거·class default 갱신·script reload·network subobject 생성은 같은 instancing registry를 사용한다.
 
-Behavior/State tree의 조건·action, ability task·UI binding·sequence event는 자체 언어의 검증된 함수와 typed data를 사용한다. 범용 event/action node로 게임플레이를 작성하는 우회 Blueprint 체계는 도입하지 않는다.
+Behavior/State tree의 조건·action, ability task·UI binding·sequence event는 자체 언어의 검증된 함수와 typed data를 사용한다. 범용 event/action node로 게임플레이를 작성하는 우회 Blueprint 체계는 도입하지 않는다. 레벨 단위 연결(트리거와 문 잇기, 시작 연출)은 `LevelScript`로 하고 레벨 사이 연락은 World 이벤트로 한다(이름 문자열 호출 없음 — [레벨 스크립트](LevelScript.ko.md) LD10).
 
 ## 21. VFX·게임 UI·환경 시스템
 
@@ -1900,6 +1904,8 @@ SetProperty(requestId, worldId, actorGuid, componentGuid,
 
 backend는 thread affinity·권한·field type·range·대상 세대·revision을 검증한다. mouse drag는 preview update를 병합하고 release 시 하나의 undo command로 commit한다. 구조 변경과 저장은 원자적인 transaction boundary를 갖는다. 외부 RPC는 연결 출처와 허용 명령을 검증하고 에디터 화면과 같은 validator를 거친다.
 
+레벨 스크립트 명령("레벨 스크립트 열기"·"레벨 스크립트에 참조 추가"·"이벤트 추가"·"레벨 스크립트 제거")도 이 backend 명령이며 transaction 하나로 기록한다. 소스 편집은 Sparks 언어 서버에 LSP `workspace/executeCommand`로 요청하고 서버가 `workspace/applyEdit`로 편집기에 보낸다. backend는 시간 대기 없이 컴파일 완료 통지(revision)를 받은 뒤 필드 값을 지정한다. LevelScript는 Outliner의 일반 Actor 줄에 보이지 않고 Level마다 "레벨 스크립트" 항목 하나로만 노출된다([레벨 스크립트](LevelScript.ko.md) 4.1·4.8절).
+
 ### 22.2 제작 기능과 transaction
 
 M3는 UI 툴킷 위의 Outliner, Inspector, Asset Browser, 3D viewport, transform gizmo, log, save/load, undo/redo를 제공한다. M4/M5는 component tree·tag picker·prefab hierarchy/override·play/stop·multi-object edit·asset dependency/ref finder를 완료한다. 머티리얼 에디터는 같은 command·selection·transaction 체계 위의 필수 전문 도구다. M3/M4에 14.5–14.9절 MAT0–MAT2를 완료하며 compiler만 구현한 상태를 완료로 인정하지 않는다. Animation, VFX, Audio, Terrain, Sequencer, profiler 전문 편집기도 이 편집 계약으로 확장한다.
@@ -1914,9 +1920,9 @@ Tryout은 별도 World와 입력 context, 별도 network session으로 실행한
 
 ### 22.3 Rocks 제작 템플릿과 사용자 카탈로그
 
-Rocks는 반복적인 파일 생성·설정·콘텐츠 조립을 제작 템플릿으로 자동화한다. 이 절의 템플릿은 C++ template과 구분되는 선언·파일·에셋·설정 묶음이다. 생성 타입은 `rocks::Object`, `rocks::Entity`, `rocks::Component`처럼 명명하고 U/F/A/T/R 타입 접두사를 사용하지 않는다. 게임 동작은 C++와 커스텀 언어로 작성하며 Blueprint를 생성하지 않는다.
+Rocks는 반복적인 파일 생성·설정·콘텐츠 조립을 제작 템플릿으로 자동화한다. 이 절의 템플릿은 C++ template과 구분되는 선언·파일·에셋·설정 묶음이다. 생성 타입은 `rocks::Object`, `rocks::Entity`, `rocks::Component`처럼 명명하고 U/F/A/T/R 타입 접두사를 사용하지 않는다. 게임 동작은 C++와 커스텀 언어로 작성하며 Blueprint를 생성하지 않는다. 레벨 스크립트는 Sparks 파일 `<패키지>/Levels/<레벨 경로 이름>.spark`로 생성한다([레벨 스크립트](LevelScript.ko.md) LD14).
 
-기본 카탈로그는 프로젝트, 런타임·도구 모듈, 테스트 fixture, 컴포넌트, prefab/variant, material, UI widget/화면, 컷씬/shot, input profile, import recipe, build/test/cook preset을 포함한다. 프로젝트에는 모듈·샘플·검증 명령을 함께 제공한다. Required/Optional capability를 선언하며 초기 미지원 플랫폼의 구현을 강제하지 않는다.
+기본 카탈로그는 프로젝트, 런타임·도구 모듈, 테스트 fixture, 컴포넌트, 레벨 스크립트(Copy, 기반 클래스는 프로젝트 설정 `DefaultLevelScriptClass` — LevelScript LD20), prefab/variant, material, UI widget/화면, 컷씬/shot, input profile, import recipe, build/test/cook preset을 포함한다. 프로젝트에는 모듈·샘플·검증 명령을 함께 제공한다. Required/Optional capability를 선언하며 초기 미지원 플랫폼의 구현을 강제하지 않는다.
 
 사용자는 선택한 파일·에셋·설정에서 템플릿을 저장하고 이름·설명·태그·미리보기·매개변수·의존 패키지·호환 엔진/스키마·버전을 등록한다. 유형·프로젝트·태그·capability 검색과 비호환 사유를 제공한다. 개인 로컬·프로젝트·팀 카탈로그를 지원하고 게시·업데이트는 명시 동작으로 수행한다. 출처·digest·이용 범위를 기록하며 오프라인에서도 고정 revision을 조회한다.
 
@@ -2000,7 +2006,7 @@ Stop은 비동기 전이로 일반 작업 차단→World 정상 종료(스크립
 
 ### 23.1 언어 범위와 구현 단계
 
-**게임플레이는 C++와 자체 정적 타입 언어 Sparks로 작성한다. Blueprint, 범용 visual scripting, Lua/C#를 기본 게임플레이 언어로 채택하지 않는다.** 소스는 `.spark`, 컴파일 모듈은 `.sparkc`이며 파일 경로가 import 경로다. 문법·타입·이벤트·수명·로딩·VM의 전체 설계와 결정 SD1–SD21은 [Sparks 언어 설계](SparksLanguage.ko.md)에 두고, 이 절은 엔진과의 계약과 완료 기준을 정의한다.
+**게임플레이는 C++와 자체 정적 타입 언어 Sparks로 작성한다. Blueprint, 범용 visual scripting, Lua/C#를 기본 게임플레이 언어로 채택하지 않는다.** UE Level Blueprint 대응은 Sparks 기반 타입 `LevelScript`이고 노드 시각 편집은 보류 선택지다([레벨 스크립트](LevelScript.ko.md)). 소스는 `.spark`, 컴파일 모듈은 `.sparkc`이며 파일 경로가 import 경로다. 문법·타입·이벤트·수명·로딩·VM의 전체 설계와 결정 SD1–SD21은 [Sparks 언어 설계](SparksLanguage.ko.md)에 두고, 이 절은 엔진과의 계약과 완료 기준을 정의한다.
 
 설계 목표는 프로그래머가 아닌 사용자도 실수할 여지가 적은 언어다. 진단은 경고 없이 오류만 두고 모든 오류에 수정 예를 제시한다. 한 가지 일에는 한 가지 방법만 두며, 실수가 잦은 구조는 lint가 아니라 언어 규칙으로 제거한다. [S93](https://go.dev/doc/faq) 문법은 C 계열이고 수명 hook은 Unity 체계를 따른다(20.2절). Epic이 UE6의 게임플레이 프로그래밍 모델을 Verse로 전환한다고 밝혔으나 [S95](https://www.unrealengine.com/news/the-road-to-ue-6), Sparks는 Verse의 문법을 채택하지 않고 failure context·구조적 동시성·persistable 호환성 검사 등의 의미만 차용한다. [S94](https://verselang.github.io/book/)
 
@@ -2095,6 +2101,7 @@ Unreal에서 참고할 대상은 작업 흐름·데이터 규약·검증 체계�
 | StateTree / EQS / Smart Objects | 상태 평가·공간 query·상호작용 슬롯 예약·AI budget | P2 · M6–M7 |
 | Mass 계열 대량 처리 | NPC/traffic/foliage용 SoA chunk·processor, Entity presentation bridge | P2 · M7 |
 | Data Layers / HLOD / Level Instance | cell layer·prefab level instance·HLOD cook·편집 preview | P2 · M7 |
+| Level Blueprint | Sparks `LevelScript`(레벨마다 숨은 Actor 0/1, `Level.levelScript`, 편집기 명령·템플릿, Actor 물리 이벤트). 노드 시각 편집은 보류 선택지([레벨 스크립트](LevelScript.ko.md)) | P1 · Sparks L2 이후 M4–M5(레벨 패키지·편집기 단계 뒤) |
 | PCG 계열 | seed·typed point/attribute 데이터·생성 규칙·incremental rebuild·bake | P2/P3 · M7–M8 |
 | MetaSounds / Quartz 계열 | typed DSP graph, parameter automation, sample clock 예약 | P2 · M6–M7 |
 | Device Profile / Scalability / CVar | 품질 계층·caps·예산 profile, override 우선순위·재현 설정 | P0부터, P1 완성 M5 |
@@ -2780,7 +2787,7 @@ RHI·UI 툴킷·언어·전문 빌드 도구의 본격 구현은 Foundation Gate
 | Framework·입력·camera·save·travel | MatchRules/State·PlayerState·LocalPlayer·possession·epoch·snapshot | 필수 M4–M6 |
 | Tag·component·prefab·feature plugin | 계층 query·등록/tick·variant/rebase·load/unload token | 필수 M4–M6 |
 | 커스텀 언어(Sparks)·debugger·RPC·reload | static type·verified VM·약한 handle·native binding·LSP 언어 서버 | 필수 Foundation 후 L0–L4 |
-| Blueprint·범용 gameplay visual scripting | UI/AI/sequence 이벤트도 C++/자체 언어로 연결 | 명시 제외 |
+| Blueprint·범용 gameplay visual scripting | UI/AI/sequence 이벤트도 C++/자체 언어로 연결. Level Blueprint 대응은 Sparks `LevelScript`, 노드 시각 편집은 보류 선택지(LevelScript LD1·LD2) | 명시 제외 |
 | Asset Manager·DataAsset/Table·에셋 너겟·virtual assets | primary/bundle·stable schema·source bulk·incremental import/cook | 필수 M3–M6 |
 | Deferred·Forward·RHI/RG·shader·GPU Scene | 두 경로 정식·공통 IR·typed pass/queue/fence·capability | 필수 M3부터 전체 회귀 |
 | 필수 머티리얼 에디터·instance/function/layer | node graph·live preview·typed IR·진단·비동기 compile·에셋 너겟·cook | 필수 MAT0–MAT2 M3/M4, MAT3 M5/M6; 14.5–14.9 MT gate |
@@ -2892,7 +2899,7 @@ Snowdrop, IW 관련 Call of Duty 기술, RAGE의 공개 개발 자료를 비교�
 | logging·profiler·상태 관찰 | 29.4/29.5·C06/C18/C26 | OB01–06, 기록·분석·viewer와 손실·clock 오차 표시 |
 | 누수 방지·안정성·촘촘한 하네스 | 29.6/29.7·모든 작업 | NL01–08·HT01–06, fault·수명·병렬·negative-control 회귀 |
 | AAA 공개 기술 비교 | 33.6·후속 시스템별 gate | Snowdrop/IW/RAGE 공개 범위·unknown·자체 계약·검증 구별 |
-| Blueprint 제외·커스텀 언어 | 23절·전체 editor/runtime 경계 | gameplay VM conformance; material·UI·cutscene 전문 편집은 유지 |
+| Blueprint 제외·커스텀 언어 | 23절·전체 editor/runtime 경계, Level Blueprint 대응은 [LevelScript](LevelScript.ko.md)(노드 시각 편집은 보류 선택지) | gameplay VM conformance; material·UI·cutscene 전문 편집은 유지; LevelScript 시험(LevelScript 8절) |
 
 입력 상세안은 keyboard·mouse·gamepad·hotplug·rebinding·IME·UI/Tryout routing·haptics·replay·console provider 경계를 포함한다. 콘솔 실지원은 해당 SDK·개발 장비·실제 인증 시험이 확보된 단계에 판정하며, provider skeleton만으로 완료하지 않는다. 라이선스나 장비가 없는 실행은 NOT RUN으로 남긴다.
 
@@ -3069,6 +3076,22 @@ Core 수학·World의 코드 전환(C1–C5)과 UE 원본 대조 근거는 [수�
 - [공간 인덱스 설계](SpatialIndex.ko.md)를 개정 2로 올려 결정 필요 1·3을 결정됨으로 바꾸고, 그림자 수집용 노드 묶음 API를 추가했다.
 
 남은 위험은 query 전용 body의 비용과 Jolt 동시 질의 계약이다. 둘 다 Jolt 소스로 확인하지 않았으며 16.4절 검증 항목과 SI09로 판정한다. 개정 범위는 표지·3.1·10.4·31(R21)·33.10·33.18절이다. 본 개정은 문서 계약의 변경이며 구현·측정 결과가 아니다.
+
+### 33.19 개정 1.16의 레벨 스크립트
+
+검토 입력은 "UE에서는 씬 배치와 플레이 시작 이벤트를 모두 Blueprint로 처리하니 Rocks도 BP를 먼저 지원하고 Sparks가 자리 잡으면 빼는 게 낫지 않은가"라는 질문이다. UE에서 BP가 맡는 흐름(Actor BP 배치·이벤트 그래프·변수 편집·GameMode BP·Widget BP)은 Rocks의 prefab·Sparks 클래스·`@edit`·WorldService·WidgetController에 하나씩 대응되고, 레벨 블루프린트만 빈 곳이었다. 초안 0.1을 리뷰어 1명이 문서 원문과 UE 5.8.4 소스로 대조해 정정 9건(Prefab 판, 진단 등록처, 배치 불가 표지, 명칭, 레벨 로드 순서, UE 인용, UE BeginPlay 순서, `Find<T>`, Sparks 이름)을 냈고, 사용자는 모든 결정을 권장안으로 확정했다.
+
+| 항목 | 결정 |
+|---|---|
+| BP | 제외 유지. BP는 두 번째 실행 체계이고 UI 툴킷·에디터가 먼저 있어야 해 임시 수단도 되지 못한다(LD1) |
+| 노드 시각 편집 | 보류 선택지. 만든다면 Sparks 코드로 내보내고 실행은 Sparks(LD2) |
+| 레벨 스크립트 | `LevelScript` — 레벨마다 숨은 Actor 0 또는 1개, `Level.actors`에 저장하고 `Level.levelScript`가 가리킴, 배치 불가(UI 툴킷 `NotPlaceable`), core 포함(LD3–LD5·LD13) |
+| 순서·파괴 | 그 Level의 배치 Actor 뒤에 FinishSpawning, 내릴 때는 먼저 정리, `RequestDestroy` 불가(LD8·LD16 — UE는 순서 보장 없음) |
+| 참조 | `T?`만, 같은 Level만, prefab 배치의 펼친 노드는 (배치 정체 + 노드 경로)(LD6·LD7·LD17 — Prefab D22) |
+| 물리 | 엔진 Actor 물리 이벤트 `TriggerEntered` 등(20.2절), LevelScript의 물리 hook·Collider 금지(LD9·LD18) |
+| 편집기 | 열기·참조 추가·이벤트 추가 명령, 언어 서버 명령 채널, 템플릿(22.1·22.3절), 배치 Actor에 component 추가(20.2절)(LD14·LD15·LD20) |
+
+UE보다 엄격하게 정한 곳은 둘 이상 LevelScript의 저장·cooked 로드 거부와 Level Instance 금지다. 남은 선행은 Sparks 동적 schema 등록, 레벨 패키지 단계, Prefab PF4·PF5, 영속 Entity 참조, 배치 Actor의 네트워크 정체성 규칙이다. 함께 고친 문서는 [Sparks](SparksLanguage.ko.md) 초안 1.4(SD46–SD50, S0413·S0801·S0802), [엔진 런타임](EngineRuntime.ko.md) 4.6·7.2절, [Prefab](Prefab.ko.md) 개정 5(D22), [UI 툴킷](UiToolkit.ko.md) 초안 2.2(UD15 확정), [에셋 시스템](AssetSystem.ko.md) 개정 11(4.6절 진단)이다. 개정 범위는 표지·20.2·20.4·20.5·22.1·22.3·23.1·24.1·33.2·33.7·33.19절이다. 본 개정은 문서 계약의 변경이며 구현·측정 결과가 아니다.
 
 ## 34. 참고 자료와 설계 근거
 

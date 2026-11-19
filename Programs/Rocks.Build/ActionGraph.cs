@@ -111,6 +111,9 @@ internal static class ActionGraph
         // 생성 TU 디렉터리는 header 디렉터리 목록에 넣지 않는다 — 공용 디렉터리의 header 확장자 파일 하나가 모든 실행 파일 TU를
         // 다시 컴파일하게 만들지 않는다(생성 TU의 key는 cpp 내용이다).
         string buildInfo = Path.TrimEndingDirectorySeparator(BuildInfoGenerator.DirectoryOf(output));
+        // 진입점 모듈(모듈 표에 드는 C++ 모듈)은 소스에 ROCKS_MODULE_NAME=<이름>을 받는다(Docs/Design/ModuleLoader.ko.md 3.2절). 진입점 매크로가
+        // 이 값과 매크로 인자를 static_assert로 대조한다. 모듈 표 제공 모듈이 없는 빌드(시험 fixture 등)에서는 아무 모듈도 받지 않는다.
+        HashSet<string> entryModules = ModuleTables.EntryModules(modules);
         foreach (var module in ordered)
         {
             var reachable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -149,7 +152,15 @@ internal static class ActionGraph
                 }
             }
 
-            string[] sources = module.Sources.Select(Absolute).Order(StringComparer.Ordinal).ToArray();
+            if (entryModules.Contains(module.Name))
+            {
+                defines = [.. defines, ModuleTables.ModuleNameMacro + "=" + module.Name];
+            }
+
+            // 리플렉션 생성 소스는 모듈 소스와 같은 인자로 컴파일해 같은 archive·실행 파일에 넣는다(목록만 따로다 —
+            // NativeModuleInput.ReflectionSources).
+            string[] reflectionSources = module.ReflectionSources.Select(Absolute).ToArray();
+            string[] sources = module.Sources.Select(Absolute).Concat(reflectionSources).Order(StringComparer.Ordinal).ToArray();
             if (sources.Distinct(NativeToolchains.PathComparer).Count() != sources.Length)
             {
                 throw new ArgumentException($"Duplicate source in {module.Name}");
@@ -171,7 +182,9 @@ internal static class ActionGraph
                 }
             }
 
-            string[] headers = includes.Concat(sources.Select(value => Path.GetDirectoryName(value)!))
+            // 리플렉션 생성 소스의 디렉터리(<out>/Generated/<M>/Source)도 header 디렉터리가 아니다 — 생성 소스만 있고 include 루트가
+            // 아니다(Docs/Design/ReflectionGeneratedSources.ko.md 6.1절). 생성 소스의 key는 cpp 내용과 include 디렉터리다.
+            string[] headers = includes.Concat(module.Sources.Select(Absolute).Select(value => Path.GetDirectoryName(value)!))
                 .Where(value => !NativeToolchains.PathComparer.Equals(Path.TrimEndingDirectorySeparator(value), buildInfo))
                 .Distinct(NativeToolchains.PathComparer).ToArray();
             string[] extraInputs = module.AdditionalInputs.Concat(dependencies.SelectMany(value => value.AdditionalInputs))
@@ -231,7 +244,8 @@ internal static class ActionGraph
                 objectPaths.Add(objectPath);
                 compileIds.Add(id);
             }
-            // Base/MetaSchema 같은 header-only 모듈은 설정만 전파하고 가짜 빈 archive를 만들지 않는다.
+            // Base/MetaSchema 같은 header-only 모듈은 설정만 전파하고 가짜 빈 archive를 만들지 않는다. 리플렉션 생성 소스만 있는
+            // 모듈은 그 object로 archive를 만든다.
             if (sources.Length == 0)
             {
                 continue;
@@ -366,7 +380,8 @@ internal static class ActionGraph
         var generated = actions.SelectMany(value => value.Outputs).ToHashSet(NativeToolchains.PathComparer);
         foreach (var module in ordered)
         {
-            foreach (string input in module.Sources.Concat(module.AdditionalInputs).Concat(module.PrebuiltLibraries).Select(Absolute))
+            foreach (string input in module.Sources.Concat(module.ReflectionSources).Concat(module.AdditionalInputs)
+                .Concat(module.PrebuiltLibraries).Select(Absolute))
             {
                 if (generated.Contains(input))
                 {

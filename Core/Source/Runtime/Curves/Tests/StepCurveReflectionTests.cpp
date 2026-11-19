@@ -1,4 +1,5 @@
 #include <CurvesTestFixtures/CurveFixture.generated.h>
+#include <Curves/StepCurves.generated.h>
 #include <CurvesTestFixtures/CurvesTestFixtures.module.generated.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/NamePool.h>

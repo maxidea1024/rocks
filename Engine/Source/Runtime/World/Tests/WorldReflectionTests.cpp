@@ -6,7 +6,12 @@
 #include <TestSupport/Test.h>
 #include <World/SceneComponent.h>
 #include <World/World.h>
-#include <World/World.module.generated.h>
+#include <CoreTypeBindings/CoreValueTypes.generated.h>
+#include <World/Actor.generated.h>
+#include <World/Component.generated.h>
+#include <World/Level.generated.h>
+#include <World/SceneComponent.generated.h>
+#include <WorldTestFixtures/SaveFixture.generated.h>
 #include <WorldTestFixtures/WorldTestFixtures.module.generated.h>
 
 // World 타입 리플렉션 시험이다(Docs/Design/ReflectionFoundations.ko.md 9.1절 B8b "시험").

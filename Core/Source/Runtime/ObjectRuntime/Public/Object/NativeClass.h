@@ -100,7 +100,7 @@ struct ReflectedAncestorOf<U, false> {
         requires { GeneratedType<U>::Schema(); },
         "native class base is neither a ROCKS_NATIVE_TYPE class (did it forget the macro?) "
         "nor a reflected ROCKS_CLASS whose generated header is included; include "
-        "<Module/Type.generated.h> or the module aggregate header before RegisterNativeClass");
+        "<Module/Type.generated.h> before RegisterNativeClass");
     using Type = U;
 };
 

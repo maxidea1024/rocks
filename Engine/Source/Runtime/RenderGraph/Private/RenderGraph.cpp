@@ -62,11 +62,11 @@ const char* PassKindName(GraphPassKind kind) noexcept {
     return "unknown";
 }
 
-// pass 종류가 허용하지 않는 접근 비트다(GraphPassKind 주석). 렌더 타깃·깊이 attachment는 렌더 타깃
-// binding으로만 선언한다.
+// pass 종류가 허용하지 않는 접근 비트다(GraphPassKind 주석). 렌더 타깃·깊이 attachment와 resolve
+// 대상은 렌더 타깃 binding으로만 선언한다.
 ResourceAccess ForbiddenAccess(GraphPassKind kind) noexcept {
-    const ResourceAccess attachments =
-        ResourceAccess::RenderTarget | graphics::DepthAccessMask | ResourceAccess::Present;
+    const ResourceAccess attachments = ResourceAccess::RenderTarget | graphics::DepthAccessMask |
+                                       ResourceAccess::Present | ResourceAccess::ResolveDestination;
     switch (kind) {
     case GraphPassKind::Raster:
         return attachments | graphics::UavAccessMask | ResourceAccess::SrvCompute |
@@ -414,6 +414,54 @@ Result<GraphTexture> RenderGraph::CreateTexture(const graphics::TextureDesc& des
 
     return Result<GraphTexture>::Success(
         GraphTexture{static_cast<uint32>(state.resources.Size() - 1), state.serial});
+}
+
+namespace {
+
+void PushScopeRecord(FrameArena& arena, detail::GraphState* state, TraceScopeName& name,
+                     uint32 index, bool hasIndex) noexcept {
+    if (state == nullptr || state->executed) {
+        return;
+    }
+
+    ScopeRecord record;
+    record.name = &name;
+    record.parent = state->currentScope;
+    record.index = index;
+    record.hasIndex = hasIndex;
+    auto pushed = state->scopes.TryPushBack(arena, record);
+    if (!pushed) {
+        RecordGraphError(*state, pushed.Error(), false, "graph scope '{}' could not be recorded",
+                         StringView(name.Name()));
+        return;
+    }
+
+    state->currentScope = static_cast<uint32>(state->scopes.Size() - 1);
+}
+
+} // namespace
+
+void RenderGraph::PushScope(TraceScopeName& name) noexcept {
+    PushScopeRecord(arena_, state_, name, 0, false);
+}
+
+void RenderGraph::PushScope(TraceScopeName& name, uint32 index) noexcept {
+    PushScopeRecord(arena_, state_, name, index, true);
+}
+
+void RenderGraph::PopScope() noexcept {
+    if (state_ == nullptr || state_->executed) {
+        return;
+    }
+
+    GraphState& state = *state_;
+    if (state.currentScope == GraphIndexNone) {
+        RecordGraphError(state, ErrorCode::InvalidArgument, true,
+                         "PopScope has no matching PushScope");
+        return;
+    }
+
+    state.currentScope = state.scopes[state.currentScope].parent;
 }
 
 Result<GraphTextureView>
@@ -826,7 +874,9 @@ Result<GraphPass> RenderGraph::AddPassWithAccesses(TraceScopeName& name, GraphPa
         };
         bool anyForeign = target.hasDepth && foreign(target.depth.texture);
         for (uint32 index = 0; index < target.colorCount; ++index) {
-            anyForeign = anyForeign || foreign(target.colors[index].texture);
+            const GraphColorTarget& color = target.colors[index];
+            anyForeign = anyForeign || foreign(color.texture) ||
+                         (!color.resolveTarget.IsNull() && foreign(color.resolveTarget));
         }
 
         if (anyForeign) {
@@ -1027,6 +1077,43 @@ Result<GraphPass> RenderGraph::AddPassWithAccesses(TraceScopeName& name, GraphPa
             if (!added) {
                 return rollback(added.Error());
             }
+
+            if (color.resolveTarget.IsNull()) {
+                continue;
+            }
+
+            // resolve: 원본은 MSAA, 대상은 1표본이며 3D가 아닌 렌더 타깃이고 같은 대상
+            // subresource로 둘을 resolve하지 않는다. 형식·크기·attachment 겹침은 장치 BeginPass가
+            // 본다.
+            const ResourceRecord& source = state.resources[color.texture.index];
+            const ResourceRecord& destination = state.resources[color.resolveTarget.index];
+            bool duplicate = false;
+            for (uint32 other = 0; other < index; ++other) {
+                const GraphColorTarget& previous = target.colors[other];
+                duplicate =
+                    duplicate || (previous.resolveTarget.index == color.resolveTarget.index &&
+                                  previous.resolveMipLevel == color.resolveMipLevel &&
+                                  previous.resolveSlice == color.resolveSlice);
+            }
+
+            const bool sourceSingle = !source.imported && source.textureDesc.sampleCount < 2;
+            const bool destinationInvalid =
+                !destination.imported &&
+                (destination.textureDesc.sampleCount > 1 ||
+                 destination.textureDesc.dimension == graphics::TextureDimension::Texture3D);
+            if (duplicate || sourceSingle || destinationInvalid) {
+                return rollback(RecordGraphError(
+                    state, ErrorCode::InvalidArgument, true,
+                    "pass '{}' resolves '{}' into '{}', which needs an MSAA source and a distinct "
+                    "single-sample non-3D render target subresource",
+                    passName, source.name, destination.name));
+            }
+
+            auto resolved = attach(color.resolveTarget, color.resolveMipLevel, color.resolveSlice,
+                                   false, ResourceAccess::ResolveDestination, false);
+            if (!resolved) {
+                return rollback(resolved.Error());
+            }
         }
 
         if (target.hasDepth) {
@@ -1067,6 +1154,7 @@ Result<GraphPass> RenderGraph::AddPassWithAccesses(TraceScopeName& name, GraphPa
     pass.useCount = static_cast<uint32>(state.uses.Size() - firstUse);
     pass.firstView = static_cast<uint32>(firstView);
     pass.viewCount = static_cast<uint32>(state.passViews.Size() - firstView);
+    pass.scope = state.currentScope;
     pass.root = HasGraphPassFlag(flags, GraphPassFlags::HasSideEffects) ||
                 target.kind == GraphTargetKind::SwapChain;
     pass.culled = state.mode == GraphMode::Deferred;
@@ -1141,6 +1229,13 @@ Result<void> RenderGraph::Execute() noexcept {
     GraphState& state = *state_;
     if (state.executed) {
         return Result<void>::Failure(ErrorCode::Busy);
+    }
+
+    // 열린 채 남은 구간은 검증 오류다(GraphScope는 Execute 전에 닫힌다).
+    if (state.currentScope != GraphIndexNone) {
+        RecordGraphError(state, ErrorCode::InvalidArgument, true,
+                         "graph scope '{}' is still open at Execute",
+                         StringView(state.scopes[state.currentScope].name->Name()));
     }
 
     state.executed = true;

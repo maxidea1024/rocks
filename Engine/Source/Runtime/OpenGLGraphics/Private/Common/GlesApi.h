@@ -325,6 +325,7 @@ inline constexpr GLenum GL_MAX_CUBE_MAP_TEXTURE_SIZE = 0x851C;
 inline constexpr GLenum GL_MAX_ARRAY_TEXTURE_LAYERS = 0x88FF;
 // --- MSAA 질의(glGetInternalformativ, ES 3.1 core) ---
 inline constexpr GLenum GL_TEXTURE_2D_MULTISAMPLE = 0x9100;
+inline constexpr GLenum GL_TEXTURE_2D_MULTISAMPLE_ARRAY = 0x9102;
 inline constexpr GLenum GL_SAMPLES = 0x80A9;
 inline constexpr GLenum GL_NUM_SAMPLE_COUNTS = 0x9380;
 // --- 버퍼 view(GX2): 버퍼 텍스처(ES 3.2 core)·storage block(ES 3.1 core) ---
@@ -519,6 +520,8 @@ inline constexpr GLenum GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR = 0x824E;
     X(void, BindTexture, (GLenum, GLuint))                                                         \
     X(void, TexStorage2D, (GLenum, GLsizei, GLenum, GLsizei, GLsizei))                             \
     X(void, TexStorage2DMultisample, (GLenum, GLsizei, GLenum, GLsizei, GLsizei, GLboolean))       \
+    X(void, TexStorage3DMultisample,                                                               \
+      (GLenum, GLsizei, GLenum, GLsizei, GLsizei, GLsizei, GLboolean))                             \
     X(void, TexStorage3D, (GLenum, GLsizei, GLenum, GLsizei, GLsizei, GLsizei))                    \
     X(void, TexSubImage3D,                                                                         \
       (GLenum, GLint, GLint, GLint, GLint, GLsizei, GLsizei, GLsizei, GLenum, GLenum,              \

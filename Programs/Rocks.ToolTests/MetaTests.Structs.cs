@@ -97,7 +97,7 @@ internal static partial class MetaTests
                 Position("Holder") < Position("Outer") && Position("Outer") < Position("Value"), "specializations are topologically ordered");
 
             // 집계 등록 순서: enum → struct(순위 순, 같은 순위는 이름 순) → 클래스.
-            string aggregate = Compact(File.ReadAllText(probe.Aggregate));
+            string aggregate = Compact(File.ReadAllText(probe.ModuleSource));
             int Registered(string name) => aggregate.IndexOf($"GeneratedType<::probe::{name}>::Schema()", StringComparison.Ordinal);
             Verify.Contains("RegisterStructIfAbsent", aggregate, "aggregate registers structs");
             Verify.That(Registered("Mode") >= 0 && Registered("Mode") < Registered("Leaf") && Registered("Leaf") < Registered("WorldBits") &&
@@ -164,7 +164,7 @@ internal static partial class MetaTests
             Verify.That(generated.Contains(Compact("static_assert(!GeneratedType<::probe::Zeta>::ContainsStrongReference"), StringComparison.Ordinal), "NATIVE struct member trait static_assert");
             Verify.That(generated.Contains(Compact("ops.migrate = &::probe::Alpha::Migrate;"), StringComparison.Ordinal), "private Migrate is wired");
             Verify.That(!generated.Contains(Compact("ops.migrate = &::probe::Zeta::Migrate;"), StringComparison.Ordinal), "struct without Migrate has no migrate");
-            string aggregate = Compact(File.ReadAllText(probe.Aggregate));
+            string aggregate = Compact(File.ReadAllText(probe.ModuleSource));
             Verify.That(aggregate.IndexOf("GeneratedType<::probe::Zeta>::Schema()", StringComparison.Ordinal) <
                 aggregate.IndexOf("GeneratedType<::probe::Alpha>::Schema()", StringComparison.Ordinal), "aggregate registers the NATIVE member struct first");
         });

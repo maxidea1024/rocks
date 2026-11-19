@@ -85,7 +85,7 @@ internal static partial class ModuleMetaTests
             Verify.That(items.Contains(Compact("&detail::PathStructMember<::probe::SA, &::probe::SA::target, ValueKind::ObjectReference>)"), StringComparison.Ordinal) &&
                 items.Contains(Compact("&detail::PathStructMember<::probe::Plain, &::probe::Plain::x, ValueKind::UInt16>)"), StringComparison.Ordinal), "element module struct member path thunks");
 
-            string aggregate = Compact(File.ReadAllText(layout.Generated("Upper", "Public/Upper/Upper.module.generated.h")));
+            string aggregate = Compact(File.ReadAllText(layout.ModuleSource("Upper")));
             int elementsModule = aggregate.IndexOf("::rocks::generated::Elements::RegisterModuleTypes", StringComparison.Ordinal);
             int lowerModule = aggregate.IndexOf("::rocks::generated::Lower::RegisterModuleTypes", StringComparison.Ordinal);
             int own = aggregate.IndexOf("RegisterIfAbsent(::rocks::GeneratedType<::probe::Value>::Schema()", StringComparison.Ordinal);

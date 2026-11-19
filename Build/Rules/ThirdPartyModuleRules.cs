@@ -63,7 +63,9 @@ public abstract class ThirdPartyModuleRules : ModuleRules
             AdditionalCompileArguments = manifest.CompileArguments,
             Optimization = CodeOptimization.Always,
             LinkTimeOptimization = manifest.LinkTimeOptimization,
-            SanitizerInstrumentation = manifest.SanitizerInstrumentation
+            SanitizerInstrumentation = manifest.SanitizerInstrumentation,
+            // Third-party code has no module lifetime object, so it stays out of the module table (Docs/Design/ModuleLoader.ko.md section 3.1).
+            ThirdParty = true
         };
     }
 

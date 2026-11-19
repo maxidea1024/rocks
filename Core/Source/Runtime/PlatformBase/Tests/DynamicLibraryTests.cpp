@@ -1,3 +1,4 @@
+#include <Base/Compiler.h>
 #include <Platform/Atomics.h>
 #include <Platform/Clock.h>
 #include <Platform/DynamicLibrary.h>
@@ -195,6 +196,25 @@ TEST(DynamicLibraryReportsMissingFileDirectoryAndNonLibrary) {
     REQUIRE(WriteText(text, "this is not a shared library\n"));
     CHECK(library.Open(text).code == FileCode::WrongType);
     CHECK(!library.IsOpen());
+
+    // OS 로더 문구: POSIX dlopen은 숫자 코드가 없으므로 dlerror 문구를 넘긴다. Windows는
+    // nativeError가 원래 코드이고 문구는 비어 있다. 앞 호출의 문구는 다음 호출 시작에 지워진다.
+    DynamicLibraryError error;
+    error.truncated = true;
+    const FileStatus rejected = library.Open(text, strlen(text), &error);
+    CHECK(rejected.code == FileCode::WrongType);
+    CHECK(!error.truncated);
+    if (ROCKS_PLATFORM_WINDOWS) {
+        CHECK(error.text[0] == '\0');
+        CHECK(rejected.nativeError != 0);
+    } else {
+        CHECK(error.text[0] != '\0');
+        CHECK(strlen(error.text) < DynamicLibraryError::MaxTextBytes);
+    }
+
+    CHECK(library.Open("relative.dll", strlen("relative.dll"), &error).code ==
+          FileCode::InvalidArgument);
+    CHECK(error.text[0] == '\0');
 
     // OS 공급 라이브러리에 없는 이름이다.
     CHECK(library.OpenSystem("rocks-no-such-system-library.bin").code == FileCode::NotFound);

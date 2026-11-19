@@ -1358,10 +1358,10 @@ TEST(LogStructureDoesNotAllocateAfterStart) {
         LogSystemConfig config = Config(mode);
         config.queueSlots = 64;
         config.blockCount = 4;
-        LogSystem logs(allocator, config);
         MessageSink sink;
         JsonRecord json;
         JsonLinesLogSink jsonSink(LogTextOutput{&json, JsonRecord::Write, JsonRecord::Flush});
+        LogSystem logs(allocator, config);
         REQUIRE(logs.AddSink(sink).IsOk());
         REQUIRE(logs.AddSink(jsonSink).IsOk());
         REQUIRE(logs.Start().IsOk());
@@ -1387,8 +1387,8 @@ TEST(LogStructureDoesNotAllocateAfterStart) {
 TEST(LogStructureLazyLineWrite) {
     ResetUninstalledDrops();
     SystemAllocator allocator;
-    LogSystem logs(allocator, Config(LogMode::Manual));
     static MessageSink sink;
+    LogSystem logs(allocator, Config(LogMode::Manual));
     sink.bytes = 0;
     REQUIRE(logs.AddSink(sink).IsOk());
     REQUIRE(logs.Start().IsOk());

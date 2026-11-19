@@ -47,7 +47,7 @@ rocks/
 ## 계층 규칙
 
 - 의존 방향은 `Core ← Engine ← 게임·플러그인`이다. Core 모듈은 Engine 모듈을 참조하지 않는다.
-  같은 계층 안에서도 아래 모듈이 위 모듈을 참조하지 않는다([모듈 구조](EngineImplementationPlan.ko.md) 3절).
+  같은 계층 안에서도 아래 모듈이 위 모듈을 참조하지 않는다([모듈 구조](../Design/EngineImplementationPlan.ko.md) 3절).
 - 공개 API는 `Public/`에만 둔다. 다른 모듈은 `#include <Core/...>`처럼 `Public/` 기준 경로로 include한다.
   폴더를 옮겨도 include 문은 바뀌지 않는다.
 - 플랫폼 구현은 `Private/<플랫폼>/`(Win64·Mac·Posix·Apple·Android)에만 둔다. 공용 소스에 OS 헤더와
@@ -58,9 +58,9 @@ rocks/
   둔다(Core는 Engine을 참조하지 않는다). 라이브러리 이름은 두 루트를 통틀어 하나다. 원본 디렉터리는 수정하지 않고
   `ThirdParty.json`(종류·버전·출처·라이선스·파일별 SHA-256·번역 단위·정의·컴파일러 지시문 목록)이 단일 출처다. 종류는
   `code`(C 번역 단위)·`data`(데이터 파일)·`headers`(헤더 전용)·`binary`(미리 빌드한 바이너리)이며, `binary`의 파일은
-  저장소와 `out/`이 아니라 bootstrap 명령이 받는 사용자 단위 내용 주소 저장소에 둔다([셰이더 시스템](ShaderSystem.ko.md) 8절). 정책 검사 `third-party`가 manifest와 원본의 일치를 확인하며, lexical 검사는 manifest가 선언한
+  저장소와 `out/`이 아니라 bootstrap 명령이 받는 사용자 단위 내용 주소 저장소에 둔다([셰이더 시스템](../Design/ShaderSystem.ko.md) 8절). 정책 검사 `third-party`가 manifest와 원본의 일치를 확인하며, lexical 검사는 manifest가 선언한
   원본 디렉터리만 제외한다. 외부 헤더는 소비 모듈의 Private 구현에만 노출한다. 규칙과 절차는
-  [압축 설계](Compression.ko.md) 3절을 따른다.
+  [압축 설계](../Design/Compression.ko.md) 3절을 따른다.
 
 ## 규칙 파일
 
@@ -130,7 +130,7 @@ public sealed class Core : CoreModuleRules
 1. 프로젝트 루트에 `.rocksproject`가 정확히 하나 있어야 한다. 이번 플랫폼이 `targetPlatforms`에 없으면 빌드하지
    않는다. `engineVersion`의 주·부가 설치 SDK manifest의 `EngineVersion`과 다르면(오래된 프로젝트·더 새 프로젝트
    모두) `<경로>: engineVersion X.Y does not match the installed SDK engine A.B.C; set engineVersion to A.B to upgrade
-   the project.`로 멈춘다(패치는 보지 않는다 — [ReflectionFoundations](ReflectionFoundations.ko.md) 8.2절).
+   the project.`로 멈춘다(패치는 보지 않는다 — [ReflectionFoundations](../Design/ReflectionFoundations.ko.md) 8.2절).
 2. `<프로젝트>/Plugins/`의 플러그인을 찾고 위 규칙으로 켤 플러그인을 정한다.
 3. 프로젝트와 모든 플러그인(켜지지 않은 것 포함)의 모듈을 C# 규칙 모듈과 이름으로 대조한다. 규칙은 있는데
    기술자가 선언하지 않은 모듈, 선언은 있는데 규칙이 없는 모듈, 대소문자만 다른 이름, 여러 기술자의 같은 모듈
@@ -152,7 +152,7 @@ public sealed class Core : CoreModuleRules
 ## 후속
 
 - 타깃 종류 확장(Editor·Client·Server와 `ROCKS_WITH_EDITOR` 계열 매크로), 모듈 의존의 Public·Private 구분, 프로젝트 플러그인 참조의
-  활성 조건(타깃·플랫폼·구성), 모듈 type ServerOnly·ClientOnly: [빌드 타깃 설계](BuildTargets.ko.md). 구현하면 위 기술자 표·모듈
+  활성 조건(타깃·플랫폼·구성), 모듈 type ServerOnly·ClientOnly: [빌드 타깃 설계](../Design/BuildTargets.ko.md). 구현하면 위 기술자 표·모듈
   type 표·게임 빌드 연동 절을 함께 고친다.
 - 규칙 이름을 `Configure` 전에 알 수 있게 해(UBT처럼 파일·클래스 이름 규약) 빠질 모듈의 규칙을 실행하지 않는다.
 - 엔진 저장소 빌드(`Foundation`·`Engine` 타깃)의 `Engine/Plugins` 연동: 지금은 엔진 플러그인이 없어 게임 빌드만

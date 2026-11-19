@@ -114,11 +114,17 @@ enum class PackageDependencyKind : uint32 {
     ImportOwner = 5
 };
 
-// bulk entry 저장 codec이다(AS 5.2절 BulkIndex).
+// bulk entry 저장 codec이다(AS 5.2절 BulkIndex). Zstd entry의 저장 byte는 Zstd 블록
+// 컨테이너(RCBK — Compression/CompressedBlocks.h)이고 블록마다 압축이 줄이지 못하면 그 블록은 raw로
+// 담긴다. 0 byte entry는 언제나 None이다.
 enum class BulkCodec : uint32 {
     None = 0,
     Zstd = 1
 };
+
+// writer가 쓰는 Zstd bulk 블록 크기(log2 — 256 KiB)다. 압축 메모리 피크가 블록 하나다(AS 5.5절 3).
+// 블록 크기는 컨테이너 헤더에 기록되므로 reader는 이 값에 기대지 않는다(바꾸면 쿠킹 byte가 바뀐다).
+inline constexpr uint32 PackageBulkBlockSizeLog2 = 18;
 
 // BulkIndex 항목 flags다.
 enum class BulkEntryFlags : uint32 {

@@ -23,6 +23,10 @@ internal sealed class CompilerOptions
 
     public bool Check { get; init; }
 
+    // 생성 소스도 게시 전에 구문 검사 컴파일한다(--verify-sources). 빌드는 생성 소스를 모듈의 compile action으로 컴파일하므로 넘기지
+    // 않는다. 단독 실행과 도구 시험이 빌드 없이 생성물 전체를 확인할 때 쓴다(Docs/Design/ReflectionGeneratedSources.ko.md 7절).
+    public bool VerifySources { get; init; }
+
     public List<string> Imports { get; } = [];
 
     public List<string> IncludeDirectories { get; } = [];
@@ -32,15 +36,25 @@ internal sealed class CompilerOptions
     // 생성 헤더의 철자: 원본 철자의 확장자 ".h"를 ".generated.h"로 바꾼다.
     public static string GeneratedSpelling(string include) => include[..^2] + ".generated.h";
 
-    // 모듈 집계 헤더의 철자다(public 생성 루트 기준). private 타입은 private 집계 헤더가 등록한다.
+    // 모듈 생성 헤더(등록 함수 선언)의 철자다. public 헤더는 public 생성 루트, private 헤더(private 타입의 등록 함수)는 private 생성 루트
+    // 기준이다.
     public static string AggregateSpelling(string module, bool privateTypes) =>
         privateTypes ? $"{module}/{module}.private.module.generated.h" : $"{module}/{module}.module.generated.h";
+
+    // 생성 소스의 출력 루트 아래 디렉터리 이름이다. include 루트가 아니다(Docs/Design/ReflectionGeneratedSources.ko.md 6.1절).
+    public const string SourceDirectory = "Source";
+
+    // 모듈 생성 소스(등록 함수 정의)의 파일 이름이다(<출력 루트>/Source 바로 아래). Rocks.Build.Cli의 MetadataLayout이 같은 이름으로
+    // 모듈의 리플렉션 생성 소스 경로를 정한다.
+    public static string ModuleSourceName(string module) => $"{module}.module.generated.cpp";
 
     public string OutputPath(ModuleInput input) =>
         Path.Combine(OutputRoot, input.Private ? "Private" : "Public", GeneratedSpelling(input.Include));
 
     public string AggregatePath(bool privateTypes) =>
         Path.Combine(OutputRoot, privateTypes ? "Private" : "Public", AggregateSpelling(Module, privateTypes));
+
+    public string ModuleSourcePath => Path.Combine(OutputRoot, SourceDirectory, ModuleSourceName(Module));
 
     public static CompilerOptions Parse(string[] arguments)
     {
@@ -52,6 +66,7 @@ internal sealed class CompilerOptions
         List<string> includes = [];
         List<string> clang = [];
         bool check = false;
+        bool verifySources = false;
         for (int index = 0; index < arguments.Length; ++index)
         {
             string argument = arguments[index];
@@ -63,6 +78,17 @@ internal sealed class CompilerOptions
                 }
 
                 check = true;
+                continue;
+            }
+
+            if (argument == "--verify-sources")
+            {
+                if (verifySources)
+                {
+                    throw new MetadataException("duplicate option --verify-sources", "RMC1000", "Specify --verify-sources only once.");
+                }
+
+                verifySources = true;
                 continue;
             }
 
@@ -197,13 +223,13 @@ internal sealed class CompilerOptions
 
         string? manifest = single.GetValueOrDefault("--identity-manifest");
         string? inventory = single.GetValueOrDefault("--identity-inventory");
-        // 출력 루트의 파일은 모두 생성 헤더다(--check가 잉여 파일로 본다). descriptor·inventory는 그 밖에 둔다.
+        // 출력 루트의 파일은 모두 생성 헤더·생성 소스다(--check가 잉여 파일로 본다). descriptor·inventory는 그 밖에 둔다.
         foreach ((string what, string? path) in new[] { ("descriptor", (string?)descriptor), ("identity inventory", inventory) })
         {
             if (path is not null && DirectoryPath.IsAtOrUnder(CanonicalPath.Resolve(Path.GetFullPath(path)), canonicalRoot))
             {
                 throw new MetadataException($"{what} must be outside the output root: {path}", "RMC1000",
-                    "Keep only generated headers under --output-root; place the descriptor and inventory next to it.");
+                    "Keep only generated headers and sources under --output-root; place the descriptor and inventory next to it.");
             }
         }
 
@@ -260,7 +286,8 @@ internal sealed class CompilerOptions
             Compiler = single.GetValueOrDefault("--compiler"),
             IdentityManifest = manifest,
             IdentityInventory = inventory,
-            Check = check
+            Check = check,
+            VerifySources = verifySources
         };
         options.Imports.AddRange(imports.Select(Path.GetFullPath));
         options.IncludeDirectories.AddRange(includes);

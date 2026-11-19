@@ -218,6 +218,9 @@ public:
     // sink를 등록한다. 등록 뒤 시작하는 묶음부터 받는다. filter는 복사한다.
     // 실패: 중복 AlreadyExists, 용량 초과 CapacityExceeded, 잘못된 레벨 InvalidArgument, sink 콜백
     // 안에서 부르면 Busy.
+    // 수명: sink는 RemoveSink가 성공하거나 이 LogSystem이 파괴될 때까지 살아 있어야 한다.
+    // Stop만으로는 안 된다(소멸자가 다시 flush한다). 지역 변수면 sink를 LogSystem보다 먼저
+    // 선언한다. 등록된 채 파괴되면 sink 소멸자가 Fatal이다(RuntimeLogSink 참고).
     Result<void> AddSink(RuntimeLogSink& sink, LogFilter filter = {}) noexcept;
 
     // sink를 뺀다. 반환되면 그 sink의 콜백은 실행 중이 아니고 다시 불리지 않는다(출력 쪽이 묶음을

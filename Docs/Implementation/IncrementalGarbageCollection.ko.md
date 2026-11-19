@@ -1,6 +1,6 @@
 # 점진·병렬 GC의 구현 계약
 
-처음 읽는 사람을 위한 동작 원리, 삼색 마킹 그림, 설정 및 운영상의 고려 사항은 [가비지 컬렉션 안내](GarbageCollectionGuide.ko.md)를 참고한다.
+처음 읽는 사람을 위한 동작 원리, 삼색 마킹 그림, 설정 및 운영상의 고려 사항은 [가비지 컬렉션 안내](../Guides/GarbageCollectionGuide.ko.md)를 참고한다.
 
 이 단계는 기존 비이동 객체 저장소에 점진 수집과 병렬 표식을 추가한다. 객체 필드를 변경하는 mutator는 Registry 생성 스레드 하나이며, worker 표식은 그 스레드가 GC slice를 실행하는 동안에만 수행한다. 반환 전에 모든 worker를 합류시키므로 필드 변경과 표식의 동시 실행을 허용하는 concurrent GC는 아니다. 기존 `Collect`는 별도의 full STW 구현으로 유지하여 기준 결과를 대조한다.
 

@@ -1,7 +1,13 @@
+#include "WorldInternal.h"
+
+#include <Config/ConfigContext.h>
+#include <Core/Assert.h>
+#include <Core/Diagnostics/Log.h>
 #include <Core/Math/MathUtility.h>
 #include <Platform/Fatal.h>
 #include <World/World.h>
 #include <World/World.module.generated.h>
+#include <World/WorldLog.h>
 
 namespace rocks {
 
@@ -72,7 +78,8 @@ World::World(Allocator& allocator, TypeRegistry& types, const WorldDesc& desc) n
       timeStep_(desc.timeStep), actors_(allocator), actorIndex_(allocator), levels_(allocator),
       levelSlots_(allocator), componentRecords_(allocator), pendingStart_(allocator),
       pendingComponentStart_(allocator), destroyActors_(allocator), destroyComponents_(allocator),
-      gcBudget_(desc.gcBudget), gcScheduler_(desc.gcScheduler), settings_(desc.settings) {
+      gcBudget_(desc.gcBudget), gcScheduler_(desc.gcScheduler), settings_(desc.settings),
+      gcSchedule_(desc.gcSchedule) {
     // 이름은 진단용이다. 복사에 실패하면 빈 이름으로 둔다.
     auto named = name_.TryAssign(desc.name);
     (void)named;
@@ -88,12 +95,23 @@ World::~World() {
 }
 
 void World::ReleaseCVarScope() noexcept {
-    // 범위를 파괴한다(그 범위의 값은 버리고 자식은 Global에 다시 붙는다 — CVarSystem 8절). 설정
-    // 문맥과 같은 게임 lane에서 부르므로 실패는 범위가 이미 없는 경우뿐이다.
-    if (settings_ != nullptr && !cvarScope_.IsGlobal()) {
-        static_cast<void>(settings_->DestroyScope(cvarScope_));
-        cvarScope_ = {};
+    // 범위를 파괴한다(그 범위의 값은 버리고 자식은 Global에 다시 붙는다 — CVarSystem 8절). 실패는
+    // 조용히 버리지 않는다: 다른 스레드에서 World를 끝냈거나(WrongThread) 누가 범위를 먼저
+    // 파괴했다(NotFound — 범위는 World가 소유한다). Warning을 남기고 Debug 빌드에서 assert한다.
+    if (settings_ == nullptr || cvarScope_.IsGlobal()) {
+        return;
     }
+
+    auto destroyed = settings_->DestroyScope(cvarScope_);
+    if (!destroyed) {
+        Log::Warning(LogWorld, "World {World} could not destroy its CVar scope {Scope}: {Error}",
+                     name_.View(), cvarScope_.value, ErrorCodeName(destroyed.Error()));
+        if constexpr (IsDebugBuild) {
+            ROCKS_ASSERT(destroyed.IsOk());
+        }
+    }
+
+    cvarScope_ = {};
 }
 
 bool World::CanMutate() const noexcept {
@@ -311,9 +329,11 @@ Result<void> World::Shutdown() noexcept {
         (void)cancelled;
     }
 
-    for (uint32 attempt = 0; attempt < 64 && objects_.CollectionPhase() != GcPhase::Idle;
+    for (uint32 attempt = 0;
+         attempt < detail::FullCollectionFinishSteps && objects_.CollectionPhase() != GcPhase::Idle;
          ++attempt) {
-        auto stepped = objects_.StepCollection(Access(), GcBudget{1u << 20, 0}, gcScheduler_);
+        auto stepped =
+            objects_.StepCollection(Access(), detail::UnboundedFinishBudget, gcScheduler_);
         if (!stepped) {
             return Result<void>::Failure(stepped.Error());
         }

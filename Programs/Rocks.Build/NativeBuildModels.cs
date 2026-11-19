@@ -258,11 +258,41 @@ public sealed record NativeModuleInput
     // Metadata와 함께 쓸 수 없다.
     public ImportedMetadata? ImportedMetadata { get; init; }
 
+    // 리플렉션 생성 소스(MetaCompiler가 낸 번역 단위)의 경로다(Docs/Design/ReflectionGeneratedSources.ko.md 6.3절). Metadata가 있는 모듈에
+    // Rocks.Build.Cli의 MetadataLayout이 <out>/Generated/<Name>/Source/<Name>.module.generated.cpp(모듈의 타입 등록 함수 정의)를 넣는다.
+    // 규칙이 직접 채우지 않는다. 파일은 메타 생성이 게시한 뒤, 액션 그래프를 세우기 전에 있어야 한다. 액션 그래프는 Sources와 같은
+    // include·정의·프로필로 컴파일해 모듈의 archive(실행 파일 모듈이면 그 실행 파일)에 넣는다. 그래서 손으로 쓴 소스가 없는 리플렉션
+    // 모듈도 정적 라이브러리가 되어 ModuleOutputs에 실린다.
+    // Sources와 따로 두는 이유: 모듈 진입점 판정(ModuleTables.EntryModules)에 넣지 않는다 — 리플렉션 생성 소스만 있는 모듈은 지금처럼
+    // ROCKS_IMPLEMENT_MODULE이 없어도 된다(GSD14, 진입점 모듈로 바꾸는 일은 모듈 로더 ML2). 설치 SDK 모듈은 이 목록이 비어 있다(object가
+    // SDK 라이브러리에 들어 있다 — ReflectionOnlyLibrary).
+    public IReadOnlyList<string> ReflectionSources { get; init; } = [];
+
+    // 설치 SDK 모듈 전용 표지: PrebuiltLibraries가 리플렉션 생성 소스의 object만 담는다(SDK를 만들 때 손으로 쓴 소스와 규칙 생성 소스가
+    // 없던 리플렉션 모듈 — CoreTypeBindings 등). 모듈 진입점이 없으므로 ModuleTables.EntryModules가 이 모듈의 미리 빌드한 라이브러리를
+    // 모듈 코드로 세지 않는다(소스 빌드에서 ReflectionSources를 세지 않는 것과 같은 판정이 SDK를 거쳐도 유지된다). 자기 소스
+    // (Sources·GeneratedSources·ReflectionSources)가 있는 모듈에 켜면 입력 오류다.
+    public bool ReflectionOnlyLibrary { get; init; }
+
     // 이 모듈이 Core/Build/BuildInfo.h(rocks::build::ToolchainFingerprint·ToolBuildId·CurrentEngineVersion 선언)를 제공한다는 표지다. 이 모듈에
     // 닿는 실행 파일마다 빌드가 정의 TU(<out>/BuildInfo/<실행 파일>.BuildInfo.cpp)를 만들어 그 실행 파일 소스에 더한다
     // (Docs/Design/ReflectionFoundations.ko.md 8.1절). 엔진 Core 규칙이 켜고 설치 SDK가 함께 나른다. 이름 "Core"로 판정하지
     // 않으므로 엔진 밖 프로젝트의 같은 이름 모듈은 대상이 아니다.
     public bool ProvidesBuildInfo { get; init; }
+
+    // 이 모듈이 Core/Module/ModuleEntry.h(모듈 진입점 매크로 ROCKS_IMPLEMENT_MODULE과 모듈 표 형식)를 제공한다는 표지다(Docs/Design/ModuleLoader.ko.md
+    // 3.2·3.9절). 이 모듈에 닿는 실행 파일마다 빌드가 모듈 표 TU(<out>/GeneratedSources/<실행 파일>/<실행 파일>.ModuleTable.cpp)를 만들어 그
+    // 실행 파일 소스에 더하고, 이 모듈에 닿는 C++ 모듈(서드파티·header-only 제외)의 소스에 ROCKS_MODULE_NAME=<이름>을 정의한다. 엔진 Core
+    // 규칙이 켜고 설치 SDK가 함께 나른다. 이름 "Core"로 판정하지 않는다.
+    public bool ProvidesModuleTable { get; init; }
+
+    // 서드파티 라이브러리 모듈 표지다(ThirdPartyModuleRules가 켠다). C++ 모듈 코드가 없으므로 모듈 표에 들지 않고 ROCKS_MODULE_NAME을 받지
+    // 않는다(Docs/Design/ModuleLoader.ko.md 3.1절 면제). 설치 SDK가 함께 나른다.
+    public bool ThirdParty { get; init; }
+
+    // 모듈 표 행에 싣는 로딩 단계다(Docs/Design/ModuleLoader.ko.md 3.3절). 기술자 모듈(게임·플러그인)은 기술자의 loadingPhase를
+    // DescriptorModuleSet.Apply가 넣고, 엔진 모듈은 기본 Default다(엔진 모듈 규칙의 단계는 ML1).
+    public Descriptors.LoadingPhase LoadingPhase { get; init; } = Descriptors.LoadingPhase.Default;
 
     // 규칙이 저장소 입력(예: Engine 루트 ThirdParty manifest)에서 만든 생성 번역 단위다(Docs/Design/ShaderSystem.ko.md 9절 도구 표).
     // 빌드가 출력 잠금 아래에서 <out>/GeneratedSources/<모듈>/<FileName>에 내용이 바뀔 때만 쓰고(BuildInfo 생성 TU와 같은 방식) 이
@@ -318,7 +348,13 @@ public sealed record NativeBuildRequest
 }
 
 public sealed record NativeActionResult(string Id, string Module, string Kind, bool Executed,
-    bool Succeeded, int ExitCode, string StdOut, string StdErr, string OutputPath);
+    bool Succeeded, int ExitCode, string StdOut, string StdErr, string OutputPath)
+{
+    // 이 action을 실행하는 데 걸린 벽시계 시간(ms)이다(Docs/Design/ReflectionGeneratedSources.ko.md GSD12). cache 검사 뒤부터 출력 게시와
+    // 임시 디렉터리 정리까지를 잰다(실행 슬롯을 기다린 시간은 빼고, 병렬 action끼리는 겹친다). 실행하지 않은 action(cache hit, 선행 action
+    // 실패)은 0이다. 측정값이라 action key·도구 빌드 ID·compile_commands.json에는 들어가지 않고 action-report.json에만 실린다.
+    public long DurationMilliseconds { get; init; }
+}
 
 public sealed record NativeBuildResult
 {

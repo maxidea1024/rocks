@@ -275,6 +275,9 @@ struct Options {
     // 일반 그래프 시나리오에서 정지형 표식만 잰다(--mark-only — 직렬과 병렬 x8·x16 Collect를 reps번
     // 되풀이해 표식 시간의 최소·중앙·최대를 낸다. 표본 프로파일러를 붙일 때도 쓴다).
     bool markOnly = false;
+    // 일반 그래프 시나리오에서 증분·병렬 측정을 건너뛰고 churn 회수만 잰다(--churn-only — 회수
+    // 경로 비교용).
+    bool churnOnly = false;
     // 패키지 시나리오 하나에서 Collect 반복 전에 간선 쓰기를 이만큼 되풀이해 잰다(--write-rounds —
     // 부하가 있는 기계에서 최솟값을 보려고).
     uint32 writeRounds = 0;
@@ -741,55 +744,57 @@ int RunScenario(const Scenario& scenario, const Options& options) noexcept {
             }
 
             if (!options.markOnly) {
-                if (!RunIncremental(registry, "incremental default budget", GcBudget{}, nullptr,
-                                    memory) ||
-                    !RunIncremental(registry, "incremental time 2ms",
-                                    GcBudget{NumericLimits<uint32>::Max(), 2000000}, nullptr,
-                                    memory) ||
-                    !RunIncremental(registry, "incremental time 0.5ms",
-                                    GcBudget{NumericLimits<uint32>::Max(), 500000}, nullptr,
-                                    memory)) {
-                    return 5;
-                }
-
-                // 병렬 표식(GC-S4): worker 수마다 정지형 Collect(STW 병렬 전체 수집)를 잰다. 소유
-                // 스레드도 참여하므로 참여자는 worker + 1이다.
-                const uint32 workerCounts[] = {2, 4, 8, 16};
-                for (uint32 workers : workerCounts) {
-                    WorkerScheduler parallel(memory);
-                    if (!parallel.Start({workers, 256, 16})) {
-                        printf("scheduler start failed\n");
+                if (!options.churnOnly) {
+                    if (!RunIncremental(registry, "incremental default budget", GcBudget{}, nullptr,
+                                        memory) ||
+                        !RunIncremental(registry, "incremental time 2ms",
+                                        GcBudget{NumericLimits<uint32>::Max(), 2000000}, nullptr,
+                                        memory) ||
+                        !RunIncremental(registry, "incremental time 0.5ms",
+                                        GcBudget{NumericLimits<uint32>::Max(), 500000}, nullptr,
+                                        memory)) {
                         return 5;
                     }
 
-                    reports.Clear();
-                    for (uint32 rep = 0; rep < scenario.reps; ++rep) {
-                        auto collected = registry.Collect(access, &parallel);
-                        if (!collected || !reports.TryPushBack(collected.Value())) {
-                            printf("parallel Collect failed\n");
+                    // 병렬 표식(GC-S4): worker 수마다 정지형 Collect(STW 병렬 전체 수집)를 잰다.
+                    // 소유 스레드도 참여하므로 참여자는 worker + 1이다.
+                    const uint32 workerCounts[] = {2, 4, 8, 16};
+                    for (uint32 workers : workerCounts) {
+                        WorkerScheduler parallel(memory);
+                        if (!parallel.Start({workers, 256, 16})) {
+                            printf("scheduler start failed\n");
+                            return 5;
+                        }
+
+                        reports.Clear();
+                        for (uint32 rep = 0; rep < scenario.reps; ++rep) {
+                            auto collected = registry.Collect(access, &parallel);
+                            if (!collected || !reports.TryPushBack(collected.Value())) {
+                                printf("parallel Collect failed\n");
+                                return 5;
+                            }
+                        }
+
+                        char label[64];
+                        snprintf(label, sizeof(label), "parallel Collect x%u", workers);
+                        PrintPhases(label, MedianOf(reports, memory));
+                        if (!parallel.Shutdown()) {
                             return 5;
                         }
                     }
 
                     char label[64];
-                    snprintf(label, sizeof(label), "parallel Collect x%u", workers);
-                    PrintPhases(label, MedianOf(reports, memory));
-                    if (!parallel.Shutdown()) {
+                    snprintf(label, sizeof(label), "incremental default x%u", options.workers);
+                    if (!RunIncremental(registry, label, GcBudget{}, &scheduler, memory)) {
                         return 5;
                     }
-                }
 
-                char label[64];
-                snprintf(label, sizeof(label), "incremental default x%u", options.workers);
-                if (!RunIncremental(registry, label, GcBudget{}, &scheduler, memory)) {
-                    return 5;
-                }
-
-                snprintf(label, sizeof(label), "incremental time 2ms x%u", options.workers);
-                if (!RunIncremental(registry, label,
-                                    GcBudget{NumericLimits<uint32>::Max(), 2000000}, &scheduler,
-                                    memory)) {
-                    return 5;
+                    snprintf(label, sizeof(label), "incremental time 2ms x%u", options.workers);
+                    if (!RunIncremental(registry, label,
+                                        GcBudget{NumericLimits<uint32>::Max(), 2000000}, &scheduler,
+                                        memory)) {
+                        return 5;
+                    }
                 }
 
                 // churn: 살아 있는 객체의 10%만큼 쓰레기 묶음을 만들고(간선은 산 그래프로)
@@ -827,6 +832,48 @@ int RunScenario(const Scenario& scenario, const Options& options) noexcept {
                        static_cast<double>(MedianOf(reports, memory).reclaim) /
                            static_cast<double>(churn == 0 ? 1 : churn));
                 PrintMemory(memory, survivors.Size(), registry.Stats());
+                // 회수를 미루는 정지형 수집(GcReclaim::Deferred)과 프레임마다 2ms 예산 회수(GC 설계
+                // 17.2절): 같은 churn을 회수하는 데 든 "프레임" 수와 가장 긴 회수 호출이다.
+                if (options.churnOnly) {
+                    Array<ObjectHandle> garbage(memory);
+                    Array<ObjectHandle> garbageNodes(memory);
+                    Array<RootRef<Object>> garbagePins(memory);
+                    if (!builder.CreateGroups(churn, garbage, garbageNodes, garbagePins) ||
+                        !builder.Link(garbageNodes, survivors, scenario.refs)) {
+                        return 6;
+                    }
+
+                    garbagePins.Clear();
+                    auto deferred = registry.Collect(access, nullptr, GcReclaim::Deferred);
+                    if (!deferred) {
+                        return 6;
+                    }
+
+                    constexpr uint64 FrameReclaimNanoseconds = 2000000;
+                    uint32 frames = 0;
+                    uint32 reclaimed = 0;
+                    uint64 longest = 0;
+                    while (registry.HasPendingReclaim()) {
+                        const uint64 frameStarted = platform::MonotonicNanoseconds();
+                        auto drained = registry.DrainRetired(
+                            access, GcBudget{GcBudget::DefaultMaxObjects, FrameReclaimNanoseconds});
+                        const uint64 took = platform::MonotonicNanoseconds() - frameStarted;
+                        if (!drained) {
+                            return 6;
+                        }
+
+                        ++frames;
+                        reclaimed += drained.Value();
+                        longest = took > longest ? took : longest;
+                    }
+
+                    printf("  churn deferred: collect %.3f ms (mark %.3f sweep %.3f), reclaim %u "
+                           "in %u frames of 2 ms budget, longest frame %.3f ms\n",
+                           Milliseconds(deferred.Value().durationNanoseconds),
+                           Milliseconds(deferred.Value().markNanoseconds),
+                           Milliseconds(deferred.Value().sweepNanoseconds), reclaimed, frames,
+                           Milliseconds(longest));
+                }
             }
 
             roots.Clear();
@@ -1800,6 +1847,8 @@ bool Parse(int argc, char** argv, Options& options) noexcept {
             options.countWork = true;
         } else if (platform::CStringEquals(argv[index], "--mark-only")) {
             options.markOnly = true;
+        } else if (platform::CStringEquals(argv[index], "--churn-only")) {
+            options.churnOnly = true;
         } else if (platform::CStringEquals(argv[index], "--write-latency")) {
             options.writeLatency = true;
         } else if (platform::CStringEquals(argv[index], "--soak-workers")) {

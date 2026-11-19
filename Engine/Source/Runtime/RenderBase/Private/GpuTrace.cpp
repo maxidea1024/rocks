@@ -356,6 +356,33 @@ GpuTraceStats GpuTrace::Stats() const noexcept {
     return stats_;
 }
 
+uint64 GpuTrace::BeginSpan(graphics::CommandContext& commands, TraceScopeName& name) noexcept {
+    const uint64 entry = OpenScope(commands, name);
+    ++depth_;
+    return entry;
+}
+
+void GpuTrace::EndSpan(graphics::CommandContext& commands, uint64 span) noexcept {
+    --depth_;
+    if (span != 0) {
+        CloseScope(commands, span);
+    }
+}
+
+void GpuTrace::DropSpan(uint64 span) noexcept {
+    --depth_;
+    if (span == 0) {
+        return;
+    }
+
+    platform::LockGuard lock(gate_);
+    Pending* entry = Find(span);
+    if (entry != nullptr) {
+        entry->closed = true;
+        entry->invalid = true;
+    }
+}
+
 GpuScope::GpuScope(GpuTrace& trace, graphics::CommandContext& commands,
                    TraceScopeName& name) noexcept
     : trace_(trace), commands_(commands) {

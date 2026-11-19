@@ -1,7 +1,9 @@
 #include "PackageAccess.h"
 
 #include <AssetRuntime/AssetRuntime.module.generated.h>
+#include <AssetRuntime/BulkData.generated.h>
 #include <AssetRuntime/Package.generated.h>
+#include <Core/Assert.h>
 #include <Object/ConstructionContext.h>
 
 namespace rocks {
@@ -36,25 +38,20 @@ Result<RootRef<Package>> NewPackage(ObjectRegistry& registry, const ObjectAccess
         return Result<RootRef<Package>>::Failure(created.Error());
     }
 
+    // 방금 만든 이 트랜잭션의 객체다.
     auto package = transaction.GetForWrite<Package>(created.Value());
-    if (!package) {
-        return Result<RootRef<Package>>::Failure(package.Error());
-    }
+    ROCKS_ASSERT(package.IsOk());
 
     detail::PackageAccess::SetIdentity(*package.Value(), id, kind);
     // Commit의 root를 typed root를 얻을 때까지 쥔다(그 사이 GC가 패키지 정책 객체를 Discard 없이
-    // 거두지 않게). typed root를 얻지 못하면 Discard해 패키지를 남기지 않는다.
+    // 거두지 않게). 쥔 root가 있는 공개된 Package의 typed root는 실패하지 않는다.
     auto committed = transaction.Commit();
     if (!committed) {
         return Result<RootRef<Package>>::Failure(committed.Error());
     }
 
     auto typed = registry.TryPin<Package>(access, created.Value());
-    if (!typed) {
-        (void)registry.Discard(access, created.Value());
-        return Result<RootRef<Package>>::Failure(typed.Error());
-    }
-
+    ROCKS_ASSERT(typed.IsOk());
     return typed;
 }
 

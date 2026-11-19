@@ -76,6 +76,14 @@ namespace engine_config_test {
 constinit CVar<int32> WorldViewDistance =
     cvar::Var("render.world_scope.distance", 100).Help("Per-world view distance");
 
+// 초기화가 늘 실패하는 Subsystem이다(World Initialize 실패 경로).
+class FailingSubsystem final : public WorldSubsystem {
+public:
+    Result<void> Initialize(World&) noexcept override {
+        return Result<void>::Failure(ErrorCode::DependencyFailed);
+    }
+};
+
 } // namespace engine_config_test
 
 // World는 엔진 설정 문맥에 자기 CVar 범위를 만들고(Initialize — Global의 자식) Shutdown이 파괴한다
@@ -117,4 +125,35 @@ TEST(Engine_WorldOwnsCVarScope) {
     REQUIRE(engine.Shutdown());
     REQUIRE(settings.Sync());
     CHECK(WorldViewDistance.Get(secondScope) == 100);
+}
+
+// World Initialize가 실패하면(Subsystem 초기화 실패) 만든 CVar 범위를 돌려준다(CVarSystem 14.2절).
+// 범위 id는 프로세스 카운터라 실패한 World의 범위는 앞뒤로 만든 범위 사이의 id다.
+TEST(Engine_FailedWorldInitializeReleasesCVarScope) {
+    ConfigFixture fixture;
+    config::ConfigContext& settings = fixture.Context();
+    SystemAllocator allocator;
+    EngineConfig config;
+    config.settings = &settings;
+    config.fixedFrameDeltaSeconds = 1.0 / 60.0;
+    Engine engine(allocator);
+    REQUIRE(engine.Initialize(config));
+    auto before = settings.CreateScope();
+    REQUIRE(before);
+    const WorldSubsystemType types[] = {
+        MakeSubsystemType<WorldSubsystem, engine_config_test::FailingSubsystem>("Failing")};
+    WorldCreateDesc desc;
+    desc.name = "Failing";
+    desc.subsystems = types;
+    CHECK(!engine.CreateWorld(desc));
+    auto after = settings.CreateScope();
+    REQUIRE(after);
+    CHECK(after.Value().value > before.Value().value + 1);
+    for (uint64 id = before.Value().value + 1; id < after.Value().value; ++id) {
+        CHECK(settings.DestroyScope(cvar::CVarScopeId{id}).Error() == ErrorCode::NotFound);
+    }
+
+    REQUIRE(settings.DestroyScope(before.Value()));
+    REQUIRE(settings.DestroyScope(after.Value()));
+    REQUIRE(engine.Shutdown());
 }

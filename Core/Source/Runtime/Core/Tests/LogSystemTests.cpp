@@ -165,8 +165,8 @@ struct Formatter<Wide> {
 TEST(LogSystemManualPumpRendersAndStamps) {
     ResetUninstalledDrops();
     SystemAllocator allocator;
-    LogSystem logs(allocator, Config(LogMode::Manual));
     LineSink sink;
+    LogSystem logs(allocator, Config(LogMode::Manual));
     REQUIRE(logs.AddSink(sink).IsOk());
     REQUIRE(logs.Start().IsOk());
     CHECK(logs.Start().Error() == ErrorCode::InvalidArgument);
@@ -221,8 +221,8 @@ TEST(LogSystemSyncAndManualProduceIdenticalOutput) {
 TEST(LogSystemAsyncFlushDeliversEverything) {
     ResetUninstalledDrops();
     SystemAllocator allocator;
-    LogSystem logs(allocator, Config(LogMode::Async));
     LineSink sink;
+    LogSystem logs(allocator, Config(LogMode::Async));
     sink.captureWriterName = true;
     REQUIRE(logs.AddSink(sink).IsOk());
     REQUIRE(logs.Start().IsOk());
@@ -245,8 +245,8 @@ TEST(LogSystemAsyncFlushDeliversEverything) {
 TEST(LogSystemAsyncWakeIsNeverLost) {
     ResetUninstalledDrops();
     SystemAllocator allocator;
-    LogSystem logs(allocator, Config(LogMode::Async));
     LineSink sink;
+    LogSystem logs(allocator, Config(LogMode::Async));
     REQUIRE(logs.AddSink(sink).IsOk());
     REQUIRE(logs.Start().IsOk());
     LogInstallScope installed(logs);
@@ -268,8 +268,8 @@ TEST(LogSystemSaturationKeepsWarningReserveAndReportsDrops) {
     SystemAllocator allocator;
     LogSystemConfig config = Config(LogMode::Manual);
     config.queueSlots = 16; // 90%는 14칸
-    LogSystem logs(allocator, config);
     LineSink sink;
+    LogSystem logs(allocator, config);
     REQUIRE(logs.AddSink(sink).IsOk());
     REQUIRE(logs.Start().IsOk());
     LogInstallScope installed(logs);
@@ -308,9 +308,9 @@ TEST(LogSystemSaturationKeepsWarningReserveAndReportsDrops) {
 TEST(LogSystemBlocksFailingSinkAndRetries) {
     ResetUninstalledDrops();
     SystemAllocator allocator;
-    LogSystem logs(allocator, Config(LogMode::Manual));
     LineSink failing;
     LineSink healthy;
+    LogSystem logs(allocator, Config(LogMode::Manual));
     failing.fail = true;
     REQUIRE(logs.AddSink(failing).IsOk());
     REQUIRE(logs.AddSink(healthy).IsOk());
@@ -396,12 +396,68 @@ TEST(LogSystemSinkReentryGoesToEmergencyPath) {
     CHECK(sink.globalSet == ErrorCode::Busy && sink.levelSet == ErrorCode::Busy &&
           sink.levelCleared == ErrorCode::Busy);
     CHECK(logs.Stats().reentered == 1);
+    // sink가 logs를 참조하므로 logs보다 나중에 선언했다. 파괴 전에 등록을 푼다(RuntimeLogSink
+    // 수명).
+    REQUIRE(logs.RemoveSink(sink).IsOk());
+}
+
+// 복사할 수 있는 최소 sink다(RuntimeLogSink 복사가 등록 상태를 옮기지 않는지 본다).
+namespace {
+
+class CopyableSink final : public RuntimeLogSink {
+public:
+    Result<void> Write(const LogEvent&) noexcept override {
+        return Result<void>::Success();
+    }
+};
+
+} // namespace
+
+// sink 수명(설계 L28): 등록은 RemoveSink가 성공하거나 그 LogSystem이 파괴될 때 풀린다. Stop은
+// 등록을 풀지 않는다(소멸자가 다시 flush한다). 여러 LogSystem에 등록하면 모두 풀려야 하고, 복사한
+// sink는 등록되지 않은 상태로 시작한다.
+TEST(LogSystemSinkRegistrationLastsUntilRemoveOrDestruction) {
+    SystemAllocator allocator;
+    LineSink shared;
+    LineSink stopped;
+    CHECK(!shared.IsAdded());
+    {
+        LogSystem first(allocator, Config(LogMode::Manual));
+        LogSystem second(allocator, Config(LogMode::Manual));
+        REQUIRE(first.AddSink(shared).IsOk());
+        CHECK(shared.IsAdded());
+        REQUIRE(second.AddSink(shared).IsOk());
+        REQUIRE(first.RemoveSink(shared).IsOk());
+        CHECK(shared.IsAdded()); // second에 남아 있다
+        CHECK(first.RemoveSink(shared).Error() == ErrorCode::NotFound);
+        CHECK(shared.IsAdded());
+
+        REQUIRE(first.AddSink(stopped).IsOk());
+        CHECK(first.AddSink(stopped).Error() == ErrorCode::AlreadyExists);
+        REQUIRE(first.Start().IsOk());
+        first.Stop();
+        CHECK(stopped.IsAdded()); // Stop은 등록을 풀지 않는다
+
+        // 복사·대입은 등록 상태를 옮기지 않는다.
+        CopyableSink original;
+        REQUIRE(first.AddSink(original).IsOk());
+        CopyableSink copy(original);
+        CHECK(!copy.IsAdded());
+        copy = original;
+        CHECK(!copy.IsAdded());
+        REQUIRE(first.RemoveSink(original).IsOk());
+    }
+
+    // 두 LogSystem의 소멸자가 남은 등록을 풀었다. 이제 sink를 파괴해도 된다.
+    CHECK(!shared.IsAdded());
+    CHECK(!stopped.IsAdded());
 }
 
 TEST(LogSystemSinkRegistrationErrors) {
     SystemAllocator allocator;
-    LogSystem logs(allocator, Config(LogMode::Manual));
     LineSink sinks[MaxLogSinks + 1];
+    LineSink invalid;
+    LogSystem logs(allocator, Config(LogMode::Manual));
     for (usize index = 0; index < MaxLogSinks; ++index) {
         REQUIRE(logs.AddSink(sinks[index]).IsOk());
     }
@@ -409,7 +465,6 @@ TEST(LogSystemSinkRegistrationErrors) {
     CHECK(logs.AddSink(sinks[0]).Error() == ErrorCode::AlreadyExists);
     CHECK(logs.AddSink(sinks[MaxLogSinks]).Error() == ErrorCode::CapacityExceeded);
     CHECK(logs.RemoveSink(sinks[MaxLogSinks]).Error() == ErrorCode::NotFound);
-    LineSink invalid;
     REQUIRE(logs.RemoveSink(sinks[0]).IsOk());
     CHECK(logs.AddSink(invalid, {static_cast<LogLevel>(LogLevelCount), {}}).Error() ==
           ErrorCode::InvalidArgument);
@@ -467,8 +522,8 @@ TEST(LogLazyRunsOnlyWhenEnabled) {
         SystemAllocator allocator;
         LogSystemConfig config = Config(LogMode::Manual);
         config.globalMinimum = LogLevel::Info;
-        LogSystem logs(allocator, config);
         LineSink sink;
+        LogSystem logs(allocator, config);
         REQUIRE(logs.AddSink(sink).IsOk());
         REQUIRE(logs.Start().IsOk());
         LogInstallScope installed(logs);
@@ -505,10 +560,10 @@ TEST(LogInstallNestsAndReportsDropsBeforeInstall) {
     Log::Debug(LogSystemTests, "dropped {Index}", 3);
     const uint32 expectedDrops = LogLevel::Debug >= LogCompiledMinimum ? 3 : 2;
 
-    LogSystem outer(allocator, Config(LogMode::Manual));
-    LogSystem inner(allocator, Config(LogMode::Manual));
     LineSink outerSink;
+    LogSystem outer(allocator, Config(LogMode::Manual));
     LineSink innerSink;
+    LogSystem inner(allocator, Config(LogMode::Manual));
     REQUIRE(outer.AddSink(outerSink).IsOk());
     REQUIRE(inner.AddSink(innerSink).IsOk());
     REQUIRE(outer.Start().IsOk());
@@ -705,8 +760,8 @@ void RemoveGateSink(void* raw) noexcept {
 TEST(LogSystemRemoveSinkWaitsForCallback) {
     ResetUninstalledDrops();
     SystemAllocator allocator;
-    LogSystem logs(allocator, Config(LogMode::Async));
     GateSink sink;
+    LogSystem logs(allocator, Config(LogMode::Async));
     REQUIRE(logs.AddSink(sink).IsOk());
     REQUIRE(logs.Start().IsOk());
     LogInstallScope installed(logs);
@@ -769,9 +824,9 @@ TEST(LogSystemDoesNotAllocateAfterStart) {
         LogSystemConfig config = Config(mode);
         config.queueSlots = 32; // Manual에서 포화 경로도 지난다
         config.blockCount = 4;
-        LogSystem logs(allocator, config);
         LineSink sink;
         FailingSink failing;
+        LogSystem logs(allocator, config);
         REQUIRE(logs.AddSink(sink).IsOk());
         REQUIRE(logs.AddSink(failing).IsOk());
         REQUIRE(logs.Start().IsOk());
@@ -797,8 +852,8 @@ TEST(LogSystemWriterStartFailureFallsBackToEmergencyOutput) {
     SystemAllocator allocator;
     LogSystemConfig config = Config(LogMode::Async);
     config.writerStackBytes = platform::MaxThreadStackBytes + 1;
-    LogSystem logs(allocator, config);
     LineSink sink;
+    LogSystem logs(allocator, config);
     REQUIRE(logs.AddSink(sink).IsOk());
     REQUIRE(logs.Start().IsOk());
     CHECK(logs.Stats().emergencyMode);
@@ -862,8 +917,8 @@ TEST(LogSystemRateLimitPassesExactlyTheLimitPerWindow) {
     ResetUninstalledDrops();
     SystemAllocator allocator;
     SetTestClockSeconds(5);
-    LogSystem logs(allocator, RateLimitConfig());
     LineSink sink;
+    LogSystem logs(allocator, RateLimitConfig());
     REQUIRE(logs.AddSink(sink).IsOk());
     REQUIRE(logs.Start().IsOk());
     REQUIRE(logs.SetRateLimit("Tests", 3).IsOk());
@@ -917,8 +972,8 @@ TEST(LogSystemRateLimitIsExactUnderConcurrentProducers) {
     ResetUninstalledDrops();
     SystemAllocator allocator;
     SetTestClockSeconds(9);
-    LogSystem logs(allocator, RateLimitConfig());
     LineSink sink;
+    LogSystem logs(allocator, RateLimitConfig());
     REQUIRE(logs.AddSink(sink).IsOk());
     REQUIRE(logs.Start().IsOk());
     REQUIRE(logs.SetRateLimit("Tests.System", SharedRateLimit).IsOk());
@@ -983,8 +1038,8 @@ public:
 TEST(LogSystemManualStopDeliversQueuedRecords) {
     ResetUninstalledDrops();
     SystemAllocator allocator;
-    LogSystem logs(allocator, Config(LogMode::Manual));
     LineSink sink;
+    LogSystem logs(allocator, Config(LogMode::Manual));
     REQUIRE(logs.AddSink(sink).IsOk());
     REQUIRE(logs.Start().IsOk());
     {
@@ -1004,8 +1059,8 @@ TEST(LogSystemManualStopDeliversQueuedRecords) {
 TEST(LogSystemFlushWaitsAfterRestart) {
     ResetUninstalledDrops();
     SystemAllocator allocator;
-    LogSystem logs(allocator, Config(LogMode::Async));
     HoldingSink sink;
+    LogSystem logs(allocator, Config(LogMode::Async));
     sink.release.Signal();
     REQUIRE(logs.AddSink(sink).IsOk());
     REQUIRE(logs.Start().IsOk());
@@ -1122,6 +1177,9 @@ TEST(LogSystemStopInsideSinkReturnsAndPumpAfterStopIsEmpty) {
     logs.Stop();
     CHECK(sink.records == 3);
     CHECK(logs.Pump() == 0);
+    // sink가 logs를 참조하므로 logs보다 나중에 선언했다. 파괴 전에 등록을 푼다(RuntimeLogSink
+    // 수명).
+    REQUIRE(logs.RemoveSink(sink).IsOk());
 }
 
 // Sync도 큰 값을 블록에 담아 Manual과 같은 출력을 낸다(준비 버퍼 크기에서 잘리지 않는다).
@@ -1165,8 +1223,8 @@ TEST(LogSystemSyncKeepsLargeValuesLikeManual) {
 TEST(LogWriteRuntimeTemplateChecksFormatterSpec) {
     ResetUninstalledDrops();
     SystemAllocator allocator;
-    LogSystem logs(allocator, Config(LogMode::Manual));
     LineSink sink;
+    LogSystem logs(allocator, Config(LogMode::Manual));
     REQUIRE(logs.AddSink(sink).IsOk());
     REQUIRE(logs.Start().IsOk());
     const DateTime time = DateTime::TryFromDate(2026, 11, 18, 1, 2, 3).Value();
@@ -1189,8 +1247,8 @@ TEST(LogWriteRuntimeTemplateChecksFormatterSpec) {
 TEST(LogSystemRateLimitWindowNeverMovesBackward) {
     ResetUninstalledDrops();
     SystemAllocator allocator;
-    LogSystem logs(allocator, RateLimitConfig());
     LineSink sink;
+    LogSystem logs(allocator, RateLimitConfig());
     REQUIRE(logs.AddSink(sink).IsOk());
     REQUIRE(logs.Start().IsOk());
     REQUIRE(logs.SetRateLimit("Tests", 3).IsOk());

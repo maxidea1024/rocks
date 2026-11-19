@@ -190,6 +190,9 @@ D3D12_RESOURCE_STATES StatesFor(ResourceAccess access) noexcept {
     if (HasAnyAccess(access, ResourceAccess::CopyDestination)) {
         states |= D3D12_RESOURCE_STATE_COPY_DEST;
     }
+    if (HasAnyAccess(access, ResourceAccess::ResolveDestination)) {
+        states |= D3D12_RESOURCE_STATE_RESOLVE_DEST;
+    }
     return states;
 }
 

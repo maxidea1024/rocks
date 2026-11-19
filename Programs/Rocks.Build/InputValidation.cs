@@ -102,6 +102,7 @@ internal static class InputValidation
             }
         }
 
+        ValidateModuleNameCase(request.Modules);
         foreach (var module in request.Modules)
         {
             if (!Enum.IsDefined(module.Kind))
@@ -123,6 +124,7 @@ internal static class InputValidation
 
             bool posix = request.Toolchain.Platform != NativePlatform.Windows;
             GeneratedSources.Validate(module);
+            ValidateReflectionSources(module);
             foreach (string argument in module.AdditionalCompileArguments)
             {
                 ValidateArgument(module.Name, "AdditionalCompileArguments", argument, true, posix);
@@ -165,6 +167,12 @@ internal static class InputValidation
                 {
                     throw new ArgumentException($"Module {module.Name}: define '{define}' is reserved for the build configuration and target.");
                 }
+                // 모듈 이름 매크로는 빌드가 진입점 모듈마다 정의한다(ModuleTables). 규칙이 정의하면 진입점 매크로의 이름 대조가 무의미해진다.
+                if (name == ModuleTables.ModuleNameMacro)
+                {
+                    throw new ArgumentException($"Module {module.Name}: define '{define}' is reserved; the build defines " +
+                        $"{ModuleTables.ModuleNameMacro} for every module that implements a module entry point.");
+                }
                 // 로그 컴파일 하한은 타깃 전체에 하나다(LogCompiledMinimums). 모듈이 바꾸면 Log.h inline 본문이 TU마다 달라져 ODR 위반이다.
                 if (name == LogCompiledMinimums.MacroName)
                 {
@@ -177,6 +185,61 @@ internal static class InputValidation
                 {
                     throw new ArgumentException($"Module {module.Name}: define '{define}' contains an absolute path; " +
                         "declare external files as inputs (include directories, AdditionalInputs, PrebuiltLibraries) instead.");
+                }
+            }
+        }
+    }
+
+    // 리플렉션 생성 소스 목록(NativeModuleInput.ReflectionSources)은 MetaCompiler가 낸 C++ 번역 단위의 경로다. 빈 경로·NUL·.cpp가 아닌
+    // 확장자를 거부한다(C로 컴파일되는 .c나 header가 들어오지 않게). 설치 SDK 표지 ReflectionOnlyLibrary는 미리 빌드한 라이브러리만 가진
+    // 모듈에만 켠다 — 자기 소스가 있는 모듈은 그 소스로 진입점 판정을 받는다.
+    private static void ValidateReflectionSources(NativeModuleInput module)
+    {
+        foreach (string source in module.ReflectionSources)
+        {
+            if (string.IsNullOrWhiteSpace(source) || source.Contains('\0') || !source.EndsWith(".cpp", StringComparison.Ordinal))
+            {
+                throw new ArgumentException($"Module {module.Name}, ReflectionSources: '{source}' must be the path of a generated .cpp translation unit.");
+            }
+        }
+
+        if (module.ReflectionOnlyLibrary &&
+            (module.Sources.Count != 0 || module.GeneratedSources.Count != 0 || module.ReflectionSources.Count != 0 || module.PrebuiltLibraries.Count == 0))
+        {
+            throw new ArgumentException($"Module {module.Name}: ReflectionOnlyLibrary marks an installed SDK module whose prebuilt library holds " +
+                "only reflection generated code; it cannot be combined with the module's own sources and requires PrebuiltLibraries.");
+        }
+    }
+
+    // 모듈 이름은 실행 중 대소문자를 구분해 비교한다(Docs/Design/ModuleLoader.ko.md 3.4절 MD17). 대소문자만 다른 두 모듈은 Windows 파일 이름과
+    // 진입점 기호가 충돌하므로 거부한다. 의존 목록의 철자도 모듈 이름과 정확히 같아야 한다(빌드가 대소문자를 무시해 이어 준 의존이 모듈 표에서
+    // 끊기지 않게). 정확히 같은 이름의 중복과 모르는 의존은 액션 그래프가 알린다.
+    private static void ValidateModuleNameCase(IReadOnlyList<NativeModuleInput> modules)
+    {
+        var byFolded = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (NativeModuleInput module in modules)
+        {
+            if (byFolded.TryGetValue(module.Name, out string? existing))
+            {
+                if (!string.Equals(existing, module.Name, StringComparison.Ordinal))
+                {
+                    throw new ArgumentException($"Module names '{existing}' and '{module.Name}' differ only in case; module names must be unique " +
+                        "ignoring case.");
+                }
+
+                continue;
+            }
+
+            byFolded.Add(module.Name, module.Name);
+        }
+
+        foreach (NativeModuleInput module in modules)
+        {
+            foreach (string dependency in module.Dependencies)
+            {
+                if (byFolded.TryGetValue(dependency, out string? actual) && !string.Equals(actual, dependency, StringComparison.Ordinal))
+                {
+                    throw new ArgumentException($"Module {module.Name}, Dependencies: '{dependency}' differs in case from module '{actual}'.");
                 }
             }
         }

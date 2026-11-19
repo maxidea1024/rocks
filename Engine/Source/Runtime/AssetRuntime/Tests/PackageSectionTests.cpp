@@ -1,5 +1,7 @@
 #include "PackageEditing.h"
 
+#include <Compression/CompressedBlocks.h>
+#include <Compression/Compression.h>
 #include <Core/Text/NameComponent.h>
 
 // 섹션 내용 시험이다(Docs/Design/AssetSystem.ko.md 5.2절 표, 5.3절 타입·커스텀 버전 축, 5.7절
@@ -169,7 +171,7 @@ TEST(AssetPackage_SummaryFields) {
                 WithSection(allocator, file, PackageSectionKind::Summary, summary.View()),
                 PackageSectionKind::Summary, kind));
             // 항목 고장은 커스텀 버전 표(같은 읽기 함수의 다른 인스턴스)에서도 같은 진단이다.
-            if (fault >= SummaryFault::ItemFieldCount && fault <= SummaryFault::ItemVersionWire) {
+            if (fault >= SummaryFault::ItemFieldCount && fault <= SummaryFault::ItemVersionSize) {
                 SummaryInput custom = input;
                 custom.customs = customs;
                 custom.faultCustoms = true;
@@ -756,8 +758,9 @@ TEST(AssetPackage_BulkIndexFields) {
 }
 
 // bulk 해제(DecodePackageBulk — AS 5.2절, 5.7절 6): raw 합 상한(CapacityExceeded, 진단 None), Zstd
-// 해제 실패·크기 불일치·SHA-256 불일치(CorruptPackage, out·slots는 호출 전 길이로), 앞에 내용이
-// 있는 out에 이어 붙이기(slot offset은 이번 호출 기준).
+// 해제 실패·크기 불일치·SHA-256 불일치·Zstd가 아닌 블록 컨테이너·블록 저장 byte
+// 손상(CorruptPackage, out·slots는 호출 전 길이로), 앞에 내용이 있는 out에 이어 붙이기(slot
+// offset은 이번 호출 기준).
 TEST(AssetPackage_DecodeBulk) {
     AssetEnv env;
     REQUIRE(env.Ready());
@@ -806,6 +809,39 @@ TEST(AssetPackage_DecodeBulk) {
     contents.bulkEntries[1].sha256.bytes[0] ^= 1;
     CHECK(expectCorrupt(contents));
     contents.bulkEntries[1].sha256.bytes[0] ^= 1;
+    // 같은 raw의 LZ4 블록 컨테이너(형식은 맞고 codec이 Zstd가 아니다): 해제 전에 거부한다.
+    {
+        auto lz4 = CompressionSettings::TryDefault(CompressionFormat::Lz4);
+        REQUIRE(lz4);
+        auto settings = CompressedBlocksSettings::TryMake(lz4.Value(), PackageBulkBlockSizeLog2);
+        REQUIRE(settings);
+        Array<uint8> container(allocator);
+        REQUIRE(
+            TryCompressBlocksAppend(settings.Value(), base.pixels.View(), container, allocator));
+        const PackageBulkEntry original = contents.bulkEntries[0];
+        const Span<const uint8> originalBulk = contents.bulk;
+        contents.bulk = container.View();
+        contents.bulkEntries[0].offset = 0;
+        // 앞 entry가 먼저 실패하므로 뒤 entry(옛 bulk의 위치)는 보지 않는다.
+        contents.bulkEntries[0].storedBytes = container.Size();
+        CHECK(expectCorrupt(contents));
+        contents.bulk = originalBulk;
+        contents.bulkEntries[0] = original;
+    }
+
+    // 블록 저장 byte 손상(인덱스는 그대로 — 블록 CRC가 해제 전에 잡는다).
+    {
+        auto again = ReadPackage(allocator, file.View(), PackageReadOptions{});
+        REQUIRE(again);
+        PackageContents& fresh = again.Value();
+        const PackageBulkEntry& entry = fresh.bulkEntries[0];
+        const usize last = static_cast<usize>(fresh.bulk.Data() - file.Data()) +
+                           static_cast<usize>(entry.offset + entry.storedBytes) - 1;
+        file[last] ^= 0xFF;
+        CHECK(expectCorrupt(fresh));
+        file[last] ^= 0xFF;
+    }
+
     // 저장 byte 손상(읽은 뒤 바꿈 — CRC는 이미 지났다): Zstd 해제 실패.
     usize row = 0;
     uint64 offset = 0;

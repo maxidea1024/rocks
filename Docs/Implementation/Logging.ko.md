@@ -251,6 +251,7 @@ logs.AddSink(sink, {LogLevel::Warning, LogGraphics});   // Graphics·Graphics.* 
   - `Write(const LogEvent&)`의 문자열은 콜백 동안만 유효하다. 보관하려면 복사한다.
   - 콜백에서 엔진 lock을 잡지 않는다.
   - sink 콜백이 잡는 lock을 쥔 채로 `AddSink`·`RemoveSink`를 부르지 않는다. `RemoveSink`가 반환되면 진행 중인 콜백은 없다.
+  - sink는 `RemoveSink`가 성공하거나 LogSystem이 파괴될 때까지 살려 둔다. `Stop`만으로는 안 된다(소멸자가 다시 flush한다). 지역 변수면 sink를 LogSystem보다 **먼저** 선언한다. 등록된 채 파괴하면 Fatal이다(`IsAdded()`로 확인).
   - Sync 모드에서는 호출 스레드가 sink lock을 잡는다. 그러니 sink 콜백이 잡는 lock 안에서 Sync 로그를 남기지 않는다.
   - 같은 sink가 연속 8번 실패하면 차단되고, 256묶음마다 다시 시도한다.
 

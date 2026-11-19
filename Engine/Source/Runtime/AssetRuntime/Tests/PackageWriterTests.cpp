@@ -563,6 +563,10 @@ TEST(AssetPackage_RegistryAllocationFailures) {
     registryOptions.names = &env.names;
     registryOptions.policy.packageNativeType = NativeTypeKey<Package>();
     registryOptions.policy.rejectWorldOnly = true;
+    // 참조 위치 표(GC 최적화)는 할당이 실패하면 trace 표식으로 대신하고 성공한다(ObjectRegistry
+    // PrepareReferenceLayout). 그 실패는 결과로 나오지 않으므로 표를 끄고 재야 모든 주입이 결과로
+    // 나온다는 판정이 성립한다.
+    registryOptions.referenceTables = false;
     auto made = UniquePtr<ObjectRegistry>::TryMake(env.allocator, failing, env.types,
                                                    ContextId{0x4153534554ull, 7}, registryOptions);
     REQUIRE(made);
@@ -592,6 +596,8 @@ TEST(AssetPackage_RegistryAllocationFailures) {
             break;
         }
 
+        // 주입한 실패는 결과로 나와야 한다(삼키면 실패다).
+        CHECK(!result);
         if (!result) {
             CHECK(result.Error() == ErrorCode::OutOfMemory);
             CHECK(failure.code == AssetDiagnosticCode::None || failure.error == ErrorCode::None);
@@ -716,6 +722,8 @@ uint32 RegistrySweep(AssetEnv& env, test::NFailAllocator& failing, ObjectRegistr
 
         const bool triggered = failing.Attempts() >= attempt;
         failing.DisableFailure();
+        // 주입한 실패는 결과로 나와야 한다(삼키면 실패다).
+        CHECK(!triggered || !result);
         if (!result) {
             CHECK(result.Error() == ErrorCode::OutOfMemory);
             CHECK(failure.code == AssetDiagnosticCode::None || failure.error == ErrorCode::None);
@@ -876,6 +884,10 @@ TEST(AssetPackage_AllocationFailuresLargeScenario) {
     registryOptions.names = &env.names;
     registryOptions.policy.packageNativeType = NativeTypeKey<Package>();
     registryOptions.policy.rejectWorldOnly = true;
+    // 참조 위치 표(GC 최적화)는 할당이 실패하면 trace 표식으로 대신하고 성공한다(ObjectRegistry
+    // PrepareReferenceLayout). 그 실패는 결과로 나오지 않으므로 표를 끄고 재야 모든 주입이 결과로
+    // 나온다는 판정이 성립한다.
+    registryOptions.referenceTables = false;
     auto made = UniquePtr<ObjectRegistry>::TryMake(env.allocator, failing, env.types,
                                                    ContextId{0x4153534554ull, 12}, registryOptions);
     REQUIRE(made);

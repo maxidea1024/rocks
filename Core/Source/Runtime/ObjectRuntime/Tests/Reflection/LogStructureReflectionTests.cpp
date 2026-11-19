@@ -326,8 +326,8 @@ TEST(LogStructureGeneratedStructThroughLogSystem) {
         LogSystemConfig config;
         config.mode = mode;
         config.globalMinimum = LogLevel::Trace;
-        LogSystem logs(allocator, config);
         static MessageSink sink;
+        LogSystem logs(allocator, config);
         sink.bytes = 0;
         REQUIRE(logs.AddSink(sink).IsOk());
         REQUIRE(logs.Start().IsOk());

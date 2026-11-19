@@ -57,7 +57,7 @@ struct ReloadTree {
 TEST(Config_HotReloadAppliesOnlyAtSyncPoint) {
     ReloadTree paths;
     REQUIRE(paths.Make());
-    ConfigFixture fixture(paths.Options());
+    ConfigFixture fixture(DevelopmentRules(paths.Options()));
     ConfigContext& context = fixture.Context();
     REQUIRE(LoadConfigFiles(context, platform::PhysicalFileSystem()));
     REQUIRE(context.Sync());
@@ -90,7 +90,7 @@ TEST(Config_HotReloadAppliesOnlyAtSyncPoint) {
 TEST(Config_HotReloadKeepsValuesOnRejectAndUnsetsRemovedFile) {
     ReloadTree paths;
     REQUIRE(paths.Make());
-    ConfigFixture fixture(paths.Options());
+    ConfigFixture fixture(DevelopmentRules(paths.Options()));
     ConfigContext& context = fixture.Context();
     REQUIRE(LoadConfigFiles(context, platform::PhysicalFileSystem()));
     REQUIRE(context.Sync());
@@ -130,7 +130,7 @@ TEST(Config_HotReloadKeepsValuesOnRejectAndUnsetsRemovedFile) {
 TEST(Config_HotReloadPlatformUserAndOverflow) {
     ReloadTree paths;
     REQUIRE(paths.Make());
-    ConfigFixture fixture(paths.Options());
+    ConfigFixture fixture(DevelopmentRules(paths.Options()));
     ConfigContext& context = fixture.Context();
     REQUIRE(LoadConfigFiles(context, platform::PhysicalFileSystem()));
     REQUIRE(context.Sync());
@@ -189,7 +189,7 @@ TEST(Config_HotReloadIsDevelopmentOnly) {
 TEST(Config_HotReloadWatcherEventReachesSyncPoint) {
     ReloadTree paths;
     REQUIRE(paths.Make());
-    ConfigFixture fixture(paths.Options());
+    ConfigFixture fixture(DevelopmentRules(paths.Options()));
     ConfigContext& context = fixture.Context();
     REQUIRE(LoadConfigFiles(context, platform::PhysicalFileSystem()));
     REQUIRE(context.Sync());

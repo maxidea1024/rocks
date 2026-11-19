@@ -47,8 +47,8 @@ int RunLoggerFailureProbe() noexcept {
     }
 
     SystemAllocator allocator;
-    LogSystem logs(allocator, LogSystemConfig::ForTool());
     StderrLogSink sink;
+    LogSystem logs(allocator, LogSystemConfig::ForTool());
     if (!logs.AddSink(sink) || !logs.Start()) {
         return 3;
     }

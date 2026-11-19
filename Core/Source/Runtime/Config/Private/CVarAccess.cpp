@@ -703,6 +703,16 @@ Result<void> SubmitClear(const VarDefinition& definition, const SetOptions& opti
     }
 
     WriteChannel& channel = *route.channel;
+    // 콘솔이 출처인 범위 지우기는 콘솔 쓰기와 같은 권한을 지금 본다(적용 때 다시 본다 — 6.2절).
+    config::ConfigDiagnosticCode code = config::ConfigDiagnosticCode::LayerNotAllowed;
+    if (!config::detail::CheckScopeClear(channel, definition, options, code)) {
+        if (options.reason != nullptr) {
+            *options.reason = code;
+        }
+
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
     SharedPtr<config::detail::QueuedChange> change;
     if (auto made = config::detail::MakeChange(channel.allocator, definition, options, change);
         !made) {
