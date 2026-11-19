@@ -11,6 +11,8 @@
 // 검증, Prepare의 allocator 스레드 계약, 에디터 읽기 전용 열기의 끝까지 로드, export 이름 규칙의
 // 로드 분류, Zstd bulk 블록 압축의 메모리 피크, Tags 키 정렬·형식·할당 실패, 종료된 TypeRegistry.
 using namespace rocks;
+namespace package_review_tests_file {
+
 using namespace rocks::asset_test;
 
 namespace {
@@ -855,3 +857,4 @@ TEST(AssetPackage_NonClassTypeHasNoCurrentVersion) {
         }
     }
 }
+} // namespace package_review_tests_file

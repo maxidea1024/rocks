@@ -15,6 +15,8 @@
 // - 규모: 깊이 2040 사슬 아래 잎으로 import 65536개(상한)를 쓰기·읽기·Prepare·Instantiate까지
 //   통과하고 65537개는 쓰기 CapacityExceeded다.
 using namespace rocks;
+namespace package_import_tests_file {
+
 using namespace rocks::asset_test;
 
 namespace {
@@ -572,3 +574,4 @@ TEST(AssetPackage_ImportScale) {
                        CookedOptions(), sink)
               .Error() == ErrorCode::CapacityExceeded);
 }
+} // namespace package_import_tests_file

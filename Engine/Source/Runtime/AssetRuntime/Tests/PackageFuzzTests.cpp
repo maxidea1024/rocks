@@ -5,6 +5,8 @@
 // 단언한다. 절반은 변조 뒤 모든 CRC(헤더·섹션 표·비-Bulk 섹션)를 다시 맞춰 CRC 검사 뒤의 내용
 // 검증까지 닿게 한다.
 using namespace rocks;
+namespace package_fuzz_tests_file {
+
 using namespace rocks::asset_test;
 
 namespace {
@@ -269,3 +271,4 @@ TEST(AssetPackage_FixedSeedMutationFuzz) {
     fuzz(validCooked, PackageKind::Cooked, 0x5EEDF00DCAFEull);
     fuzz(validEditor, PackageKind::Editor, 0xED170A5EEDull);
 }
+} // namespace package_fuzz_tests_file

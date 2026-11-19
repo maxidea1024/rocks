@@ -4,6 +4,8 @@
 // (MergeDependencyUses — writer와 로드 대조가 같은 함수), 같은 bulk가 EditorOnly·일반 위치에 함께
 // 쓰일 때의 entry 표시, ImportOwner 의존의 로드(대조하지 않음), Package·NewPackage의 인자 오류.
 using namespace rocks;
+namespace package_rules_tests_file {
+
 using namespace rocks::asset_test;
 using package_detail::DependencyUse;
 
@@ -177,3 +179,4 @@ TEST(AssetPackage_PackageArgumentErrors) {
     CHECK(PackageSectionRequiredFlags(
               static_cast<PackageSectionKind>(PackageKnownSectionKinds + 1)) == 0);
 }
+} // namespace package_rules_tests_file
