@@ -321,7 +321,9 @@ private:
     UniquePtr<LogBatchCompressor> compressor_;
     UniquePtr<FileLogSink> file_;
     config::ConfigContext* watched_ = nullptr;
-    config::ConfigSubscriptionId subscriptions_[3]{};
+    // 실행 중 바뀌면 다시 적용하는 설정 수(log.level·log.levels·log.rate_limits)다.
+    static constexpr uint32 WatchedSettingCount = 3;
+    config::ConfigSubscriptionId subscriptions_[WatchedSettingCount]{};
     uint32 subscriptionCount_ = 0;
     // 마지막으로 적용한 log.levels(지울 접두사를 알려고 복사해 둔다)다.
     char appliedLevels_[MaxLogLevelsBytes]{};

@@ -13,6 +13,20 @@ namespace {
 // 이 모듈이 남기는 진단의 카테고리다("Log" 아래).
 constexpr LogCategory LogHostCategory{"Log.Host"};
 
+// 설정 기본값 문자열이다. FileLogSinkConfig 기본값과 같은지 상수 평가로 확인한다.
+constexpr StringView DefaultMaxBytesText = "16777216";
+constexpr StringView DefaultRetentionText = "8";
+
+constexpr uint64 ParsedDefault(StringView text) noexcept {
+    uint32 value = 0;
+    return detail::ParseLogSettingCount(text, NumericLimits<uint32>::Max(), value) ? value : 0;
+}
+
+static_assert(ParsedDefault(DefaultMaxBytesText) == FileLogSinkConfig::DefaultMaxBytes,
+              "log.file.max_bytes default text must match FileLogSinkConfig::DefaultMaxBytes");
+static_assert(ParsedDefault(DefaultRetentionText) == FileLogSinkConfig::DefaultRetention,
+              "log.file.retention default text must match FileLogSinkConfig::DefaultRetention");
+
 constexpr StringView ModeValues[] = {"default", "async", "sync"};
 constexpr StringView LevelValues[] = {"trace", "debug", "info", "warning", "error", "fatal"};
 constexpr StringView FormatValues[] = {"text", "jsonlines"};
@@ -192,7 +206,7 @@ Result<void> RegisterLogSettings(config::ConfigContext& context) noexcept {
         Define(LogFileMaxBytesSetting,
                "Size limit of one log file in bytes; a new file starts when the next batch would "
                "pass it. Fixed after startup.",
-               ConsoleValueType::Int64, "16777216", startup);
+               ConsoleValueType::Int64, DefaultMaxBytesText, startup);
     maxBytes.hasRange = true;
     maxBytes.minimum = MinLogFileMaxBytes;
     maxBytes.maximum = MaxLogFileMaxBytes;
@@ -215,7 +229,7 @@ Result<void> RegisterLogSettings(config::ConfigContext& context) noexcept {
         Define(LogFileRetentionSetting,
                "Number of this host's log files kept in the folder, including the current one; "
                "the oldest are deleted. Fixed after startup.",
-               ConsoleValueType::Int32, "8", startup);
+               ConsoleValueType::Int32, DefaultRetentionText, startup);
     retention.hasRange = true;
     retention.minimum = 1;
     retention.maximum = MaxLogFileRetention;
@@ -389,7 +403,9 @@ void LogHost::PrepareFileSink(const config::ConfigContext& settings, StringView 
     if (encrypt != nullptr && encrypt->boolean) {
         // 공개키가 없거나 올바르지 않으면 파일을 만들지 않는다(평문으로 내려가지 않는다).
         const StringView text = TextOf(settings, LogFileRecipientKeySetting).TrimAscii();
-        uint8 key[crypto::LogFilePublicKeyBytes + 3];
+        // Base64 해독은 4글자 묶음 단위로 쓰므로 공개키보다 한 묶음 몫(최대 3 byte) 크게 둔다.
+        constexpr usize Base64GroupSlackBytes = 3;
+        uint8 key[crypto::LogFilePublicKeyBytes + Base64GroupSlackBytes];
         auto decoded = text.IsEmpty() ? Result<usize>::Failure(ErrorCode::NotFound)
                                       : crypto::TryFromBase64(text, crypto::Base64Variant::Standard,
                                                               Span<uint8>(key));
@@ -451,6 +467,8 @@ Result<void> LogHost::Watch(config::ConfigContext& settings) noexcept {
     }
 
     const StringView names[] = {LogLevelSetting, LogLevelsSetting, LogRateLimitsSetting};
+    static_assert(sizeof(names) / sizeof(names[0]) == WatchedSettingCount,
+                  "every watched setting needs a subscription slot");
     for (StringView name : names) {
         auto subscribed = settings.Subscribe(name, &LogHost::OnLevelsChanged, this);
         if (!subscribed) {
