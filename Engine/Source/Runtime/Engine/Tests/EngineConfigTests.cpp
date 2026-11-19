@@ -6,6 +6,8 @@
 // 빌려 쓰고, 프레임마다 시작 단계 전에 Sync한다. 그래서 프레임 사이에 넣은 변경은 다음 프레임
 // 시작부터 보이고, 프레임 안에서 넣은 변경은 그 프레임 동안 값을 바꾸지 않는다.
 using namespace rocks;
+namespace engine_config_tests_file {
+
 using rocks::test::config::ConfigFixture;
 
 namespace {
@@ -70,6 +72,7 @@ TEST(Engine_ConfigSyncPointRunsBeforeFrameBegin) {
     CHECK(!client.seen[3]);
     REQUIRE(engine.Shutdown());
 }
+} // namespace engine_config_tests_file
 
 namespace engine_config_test {
 
@@ -85,6 +88,8 @@ public:
 };
 
 } // namespace engine_config_test
+
+namespace engine_config_tests_file {
 
 // World는 엔진 설정 문맥에 자기 CVar 범위를 만들고(Initialize — Global의 자식) Shutdown이 파괴한다
 // (Docs/Design/CVarSystem.ko.md 14.2절). World 범위의 값은 그 World에서만 보이고, 플레이어 같은
@@ -157,3 +162,4 @@ TEST(Engine_FailedWorldInitializeReleasesCVarScope) {
     REQUIRE(settings.DestroyScope(after.Value()));
     REQUIRE(engine.Shutdown());
 }
+} // namespace engine_config_tests_file

@@ -15,6 +15,7 @@
 #include <string.h>
 
 using namespace rocks;
+namespace engine_tests_file {
 
 namespace {
 
@@ -1123,3 +1124,4 @@ TEST(EngineLog_RunReportsFramesAndReasonAndCreateWorldFailureStage) {
     CHECK(strcmp(record->message, "Engine run finished after 3 frames: MaxFrames") == 0);
     CHECK(record->frame == 3);
 }
+} // namespace engine_tests_file
