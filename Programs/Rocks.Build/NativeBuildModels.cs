@@ -404,6 +404,14 @@ public sealed record NativeBuildRequest
     // 작업 파일 집합(정규 절대 경로)이다. null이면 Adaptive에 따라 엔진이 구한다. 시험이 git 없이 집합을 주입할 때 쓴다.
     internal IReadOnlySet<string>? WorkingSet { get; init; }
 
+    // compile·PCH action에 clang -ftime-trace를 붙이고 빌드가 끝나면 집계하는가(명령 옵션 --timing on, Docs/Design/UnityBuildPch.ko.md
+    // 12절). 집계는 <out>/Timing/<TimingLabel>.timing.json(번역 단위별 시간, 헤더별 누적 파싱 시간·템플릿 인스턴스화 상위 목록)이다. 인자가
+    // 달라지므로 켜고 끌 때 번역 단위가 다시 컴파일된다(측정용이다).
+    public bool Timing { get; init; }
+
+    // 집계 파일 이름에 쓰는 이름이다(보통 타깃 이름). null이면 "Build"다.
+    public string? TimingLabel { get; init; }
+
     // 계획만 세우는가(명령 옵션 --plan-only on). true면 생성 TU·묶음 파일·compile_commands.json까지 쓰고 action은 하나도 실행하지 않는다
     // (증분 기록도 건드리지 않는다). clangd 입력이나 묶음 구성을 빌드 없이 얻을 때 쓴다. 결과의 Actions는 비어 있고 PlanOnly가 참이다.
     public bool PlanOnly { get; init; }

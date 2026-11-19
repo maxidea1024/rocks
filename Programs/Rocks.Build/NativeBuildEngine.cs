@@ -126,6 +126,10 @@ public sealed class NativeBuildEngine
         if (succeeded)
         {
             RemoveStaleOutputs(request, plan);
+            if (request.Timing)
+            {
+                TimingReport.Write(request, plan);
+            }
         }
         // 도구 빌드 ID는 link가 성공한(실행했거나 재사용한) 실행 파일만 알린다. 입력이 바뀐 빌드는 어떤 ID도 확정하지 않는다.
         var toolBuildIds = new Dictionary<string, string>(StringComparer.Ordinal);

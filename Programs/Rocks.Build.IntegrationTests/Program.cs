@@ -89,10 +89,10 @@ try
             !sdkModules.Single(module => module.GetProperty("Name").GetString() == "Core").GetProperty("ThirdParty").GetBoolean(),
             "Engine SDK manifest does not carry the module table markers");
         var sdkEngine = engineManifest.RootElement.GetProperty("EngineVersion");
-        Require(engineManifest.RootElement.GetProperty("Version").GetInt32() == 8 &&
+        Require(engineManifest.RootElement.GetProperty("Version").GetInt32() == 9 &&
             sdkEngine.GetProperty("Major").GetInt32() == engineVersion.Major && sdkEngine.GetProperty("Minor").GetInt32() == engineVersion.Minor &&
             sdkEngine.GetProperty("Patch").GetInt32() == engineVersion.Patch && sdkEngine.EnumerateObject().Count() == 3,
-            "Engine SDK manifest version 8 does not carry the Build/Build.version engine version: " + sdkEngine.GetRawText());
+            "Engine SDK manifest version 9 does not carry the Build/Build.version engine version: " + sdkEngine.GetRawText());
     }
 
     Require(!Directory.GetFiles(sdk, "Build.version", SearchOption.AllDirectories).Any(), "Installed SDK copied Build/Build.version");
@@ -897,14 +897,14 @@ try
     var sdkManifestPath = Path.Combine(sdk, "rocks-sdk.json");
     var sdkManifestBytes = File.ReadAllBytes(sdkManifestPath);
     var sdkManifestText = File.ReadAllText(sdkManifestPath);
-    Require(sdkManifestText.Contains("\"Version\": 8,", StringComparison.Ordinal), "SDK manifest is not version 8:\n" + sdkManifestText);
+    Require(sdkManifestText.Contains("\"Version\": 9,", StringComparison.Ordinal), "SDK manifest is not version 9:\n" + sdkManifestText);
     SetReadOnly(sdkManifestPath, false);
     try
     {
-        File.WriteAllText(sdkManifestPath, sdkManifestText.Replace("\"Version\": 8,", "\"Version\": 7,", StringComparison.Ordinal));
+        File.WriteAllText(sdkManifestPath, sdkManifestText.Replace("\"Version\": 9,", "\"Version\": 8,", StringComparison.Ordinal));
         var previous = await Game();
-        Require(previous.ExitCode != 0 && previous.StdErr.Contains("SDK manifest version mismatch: 7", StringComparison.Ordinal),
-            "A version 7 SDK manifest was not rejected: " + previous.StdErr);
+        Require(previous.ExitCode != 0 && previous.StdErr.Contains("SDK manifest version mismatch: 8", StringComparison.Ordinal),
+            "A version 8 SDK manifest was not rejected: " + previous.StdErr);
         foreach ((string name, Action<System.Text.Json.Nodes.JsonObject> edit) in new (string, Action<System.Text.Json.Nodes.JsonObject>)[]
                  {
                      ("missing EngineVersion", manifestJson => manifestJson.Remove("EngineVersion")),

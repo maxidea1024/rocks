@@ -29,6 +29,12 @@ public static class ModuleDefinitions
 
     public static string PathOf(string output, string module) => Path.Combine(output, DirectoryName, module + ".Definitions.h");
 
+    /// <summary>공유 PCH 제공 모듈의 공유 정의 헤더다(그 모듈의 public define과 전파분 — 공유 PCH의 앞부분이다, 8.4절).</summary>
+    public static string SharedPathOf(string output, string provider) => Path.Combine(output, DirectoryName, provider + ".Shared.Definitions.h");
+
+    /// <summary>공유 PCH를 쓰는 소비 모듈의 추가 정의 헤더다(공유 정의에 없는 정의 — PCH 뒤에 강제 include한다).</summary>
+    public static string ExtraPathOf(string output, string module) => Path.Combine(output, DirectoryName, module + ".Extra.Definitions.h");
+
     /// <summary>
     /// 모듈 하나의 번역 단위가 받는 정의다: 모듈 public·private 정의, 의존 모듈(의존 순서)의 public 정의, 진입점 모듈이면
     /// <c>ROCKS_MODULE_NAME=&lt;이름&gt;</c>. 같은 이름에 다른 값이 있으면 <see cref="ArgumentException"/>이다.
@@ -72,8 +78,9 @@ public static class ModuleDefinitions
 /// 변형 디렉터리다. UseArguments는 소비 번역 단위의 물리 인자(PCH 바이너리 사용), LogicalArguments는 논리 명령의 인자(PCH 앞부분·PCH
 /// 헤더·추가 정의 헤더의 강제 include), LogicalFiles는 그 헤더들, ConsumerInputs는 소비 action의 key에 드는 입력이다.
 /// </summary>
+/// Check는 공유 PCH의 사용 검사다(소비 번역 단위를 실행하기 직전에 한 번 계산한다 — 위반이면 오류 문구).
 internal sealed record PchPlan(NativeAction Action, IReadOnlyList<PlannedFile> Files, string Directory, string[] UseArguments,
-    string[] LogicalArguments, string[] LogicalFiles, string[] ConsumerInputs);
+    string[] LogicalArguments, string[] LogicalFiles, string[] ConsumerInputs, Lazy<string?>? Check = null);
 
 /// <summary>
 /// PCH action을 만든다(Docs/Design/UnityBuildPch.ko.md 8절).
@@ -104,7 +111,7 @@ internal static class PchBuild
     public static PchPlan? Plan(NativeBuildRequest request, NativeModuleInput module, IReadOnlyList<NativeModuleInput> dependencies,
         IReadOnlyList<string> includes, IReadOnlyList<string> defines, List<string> common, string? definitionsHeader, string definitionsContent,
         int users, string[] depfile, IReadOnlyList<string> headers, IReadOnlyList<string> extraInputs, Func<string, string> absolute,
-        string output, List<string> notices)
+        string output, List<string> notices, Func<string, IReadOnlyList<string>> closureOf, Func<string, NativeModuleInput> moduleOf)
     {
         if (module.PrivatePchHeader is string spelling)
         {
@@ -124,8 +131,94 @@ internal static class PchBuild
                 headers, extraInputs, output, module.Optimization);
         }
 
-        return null;
+        if (module.PchUsage == PchUsage.PrivateOnly)
+        {
+            return null;
+        }
+
+        // 공유 PCH(8.4절): 이 모듈의 컴파일 환경에 보이는 제공 모듈(자기 자신 포함) 가운데 다른 제공 모듈을 가장 많이 포함하는 것을 고른다
+        // (동률이면 이름 ordinal 순). 제공 모듈은 이 모듈의 의존 closure에 있으므로 이 모듈에 의존하지 않는다.
+        NativeModuleInput[] candidates = dependencies.Append(module).Where(candidate => candidate.SharedPchHeader is not null && !candidate.ThirdParty).ToArray();
+        if (candidates.Length == 0)
+        {
+            return null;
+        }
+
+        var providerNames = candidates.Select(candidate => candidate.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        NativeModuleInput provider = candidates
+            .OrderByDescending(candidate => closureOf(candidate.Name).Count(name => providerNames.Contains(name) &&
+                !string.Equals(name, candidate.Name, StringComparison.OrdinalIgnoreCase)))
+            .ThenBy(candidate => candidate.Name, StringComparer.Ordinal).First();
+        NativeModuleInput[] providerClosure = closureOf(provider.Name).Select(moduleOf).ToArray();
+        // 공유 정의는 제공 모듈의 public define과 그 전파분만 담는다. 소비 모듈의 추가 정의 헤더는 공유 정의에 없는 정의만 담고 PCH 뒤에
+        // 강제 include한다. 같은 이름에 다른 값이 있으면 이 모듈은 공유 PCH를 쓰지 않는다(알림을 남기고 PCH 없이 진행한다).
+        string[] shared = providerClosure.SelectMany(member => member.PublicDefines).Distinct(StringComparer.Ordinal).ToArray();
+        var sharedNames = shared.ToDictionary(define => define.Split('=')[0], StringComparer.Ordinal);
+        foreach (string define in defines)
+        {
+            if (sharedNames.TryGetValue(define.Split('=')[0], out string? other) && other != define)
+            {
+                notices.Add($"Module {module.Name} does not use the shared PCH of {provider.Name}: definition {define} differs from the shared definition {other}.");
+                return null;
+            }
+        }
+
+        string[] extra = defines.Where(define => !sharedNames.ContainsKey(define.Split('=')[0])).ToArray();
+        string headerSpelling = provider.SharedPchHeader!.Replace('\\', '/');
+        string? sharedHeader = provider.PublicIncludeDirectories.Select(absolute).Select(directory => Path.Combine(directory, headerSpelling))
+            .FirstOrDefault(File.Exists);
+        if (sharedHeader is null)
+        {
+            throw new FileNotFoundException($"Module {provider.Name}: SharedPchHeader '{headerSpelling}' was not found in its public include directories.");
+        }
+
+        sharedHeader = Path.GetFullPath(sharedHeader);
+        // PCH는 제공 모듈의 public include closure로 컴파일한다(소비 모듈과 무관하게 같은 action이 된다). 포함 검사: 그 closure가 소비
+        // 모듈의 include 목록에 모두 들어 있어야 한다(의존 전파로 성립하지만 검사로 보장한다).
+        string[] providerIncludes = providerClosure.SelectMany(member => member.PublicIncludeDirectories).Select(absolute)
+            .Distinct(NativeToolchains.PathComparer).ToArray();
+        string[] missing = providerIncludes.Where(directory => !includes.Contains(directory, NativeToolchains.PathComparer)).ToArray();
+        if (missing.Length != 0)
+        {
+            throw new ArgumentException($"Module {module.Name} cannot use the shared PCH of {provider.Name}: its include directories do not contain " +
+                string.Join(", ", missing) + ".");
+        }
+
+        bool windows = request.Toolchain.Platform == NativePlatform.Windows;
+        var files = new List<PlannedFile>();
+        string? sharedDefinitions = null;
+        string sharedContent = "";
+        if (shared.Length != 0)
+        {
+            sharedDefinitions = ModuleDefinitions.SharedPathOf(output, provider.Name);
+            sharedContent = ModuleDefinitions.Content(shared);
+            files.Add(new(sharedDefinitions, sharedContent));
+        }
+
+        string? extraDefinitions = null;
+        if (extra.Length != 0)
+        {
+            extraDefinitions = ModuleDefinitions.ExtraPathOf(output, module.Name);
+            files.Add(new(extraDefinitions, ModuleDefinitions.Content(extra)));
+        }
+
+        List<string> sharedCommon = [.. common.Where(argument => !IsIncludeArgument(argument)),
+            .. providerIncludes.Select(directory => (windows ? "/I" : "-I") + directory)];
+        PchPlan created = Create(request, provider.Name, sharedHeader, headerSpelling, sharedCommon, sharedDefinitions, sharedContent, extraDefinitions,
+            depfile, providerIncludes, [], output, module.Optimization);
+        // 사용 검사(shadow·추가 정의)는 PCH의 의존 기록(PCH 헤더 closure)이 있어야 하므로 소비 번역 단위를 실행하기 직전에 한다. 모듈마다 한
+        // 번만 계산한다.
+        string record = created.Action.DependencyRecord!;
+        string consumer = module.Name;
+        string providerName = provider.Name;
+        string[] consumerIncludes = includes.ToArray();
+        string[] extraNames = extra.Select(define => define.Split('=')[0]).ToArray();
+        var check = new Lazy<string?>(() => SharedPchChecks.Verify(consumer, providerName, record, consumerIncludes, providerIncludes, extraNames));
+        return created with { Files = [.. created.Files, .. files], Check = check };
     }
+
+    private static bool IsIncludeArgument(string argument) =>
+        argument.StartsWith("/I", StringComparison.Ordinal) || argument.StartsWith("-I", StringComparison.Ordinal);
 
     // provider는 PCH 헤더를 제공하는 모듈(모듈 PCH면 자기 자신)이다. prefix는 PCH 앞부분(정의 헤더), extra는 PCH 뒤에 강제 include하는
     // 소비 모듈의 추가 정의 헤더(공유 PCH)다.
@@ -137,8 +230,8 @@ internal static class PchBuild
         string[] Forced(string? file) => file is null ? [] : windows ? ["/FI" + file] : ["-include", file];
         // 변형 key: 경로 인자(include 디렉터리)는 뺀다 — 소비 모듈마다 달라서 넣으면 공유 PCH가 모듈마다 하나가 된다. 포함 관계와
         // shadow는 따로 검사한다(8.4절).
-        string key = Fingerprints.Strings([.. common.Where(argument => !argument.StartsWith("/I", StringComparison.Ordinal) &&
-            !argument.StartsWith("-I", StringComparison.Ordinal)), "prefix", prefixContent, "header", headerSpelling])[..VariantHexLength];
+        string key = Fingerprints.Strings([.. common.Where(argument => !IsIncludeArgument(argument)), "prefix", prefixContent, "header", headerSpelling])
+            [..VariantHexLength];
         string directory = Path.Combine(output, DirectoryName, provider, key);
         string pch = Path.Combine(directory, provider + ".pch");
         string record = pch + DependencyRecord.Extension;
@@ -165,6 +258,13 @@ internal static class PchBuild
             outputs = [pch, record];
             inputs = prefix is null ? [header] : [header, prefix];
             use = ["-include-pch", pch, .. Forced(extra)];
+        }
+
+        if (request.Timing)
+        {
+            // --timing: PCH 생성의 -ftime-trace 결과도 출력으로 받는다(PCH에 든 헤더의 파싱 시간은 여기에만 나온다).
+            arguments.Insert(0, (windows ? "/clang:" : "") + "-ftime-trace={OUTPUT" + outputs.Length.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}");
+            outputs = [.. outputs, pch + TimingReport.TraceExtension];
         }
 
         var action = new NativeAction(id, provider, "Pch", request.Toolchain.CompilerPath, arguments, outputs, inputs, headers, extraInputs, [],
@@ -272,5 +372,250 @@ internal static class AdaptiveUnity
         }
 
         return null;
+    }
+}
+
+/// <summary>
+/// 공유 PCH 사용 검사다(Docs/Design/UnityBuildPch.ko.md 8.4절). PCH의 의존 기록(PCH 헤더 closure)으로 소비 모듈마다 확인한다.
+/// <list type="bullet">
+/// <item>shadow 없음: closure의 헤더가 제공 모듈 include 디렉터리 D에서 철자 S로 찾아진다면, 소비 모듈 include 목록에서 D보다 앞선
+/// 디렉터리에 S가 없어야 한다. 있으면 PCH 없이 컴파일할 때 다른 헤더가 잡힌다.</item>
+/// <item>추가 정의: 소비 모듈의 추가 정의(공유 정의에 없는 정의) 이름이 closure 헤더의 전처리 조건(<c>#if</c>·<c>#ifdef</c>·<c>#ifndef</c>·
+/// <c>#elif</c>·<c>defined()</c>)에 나타나면 안 된다. closure 안 <c>#define</c>의 본문에 그 이름이 있으면 그 매크로 이름도 대상에 더하고
+/// 더 늘지 않을 때까지 반복한다(<c>#define X FOO</c> 뒤 <c>#if X</c> 같은 간접 참조). PCH 안 헤더는 추가 정의를 보지 못한 채
+/// 컴파일되어 있으므로, 검사가 없으면 같은 헤더가 PCH 사용 여부에 따라 다르게 컴파일된다(컴파일러는 알리지 않는다).</item>
+/// </list>
+/// 토큰 단위로 훑고 주석과 문자열은 뺀다. 위반이 있으면 정의 이름·헤더·줄을 담은 오류 문구를, 없으면 null을 돌려준다.
+/// </summary>
+internal static class SharedPchChecks
+{
+    public static string? Verify(string consumer, string provider, string record, IReadOnlyList<string> consumerIncludes,
+        IReadOnlyList<string> providerIncludes, IReadOnlyList<string> extraNames)
+    {
+        IReadOnlyList<DependencyEntry>? closure = DependencyRecord.Read(record);
+        if (closure is null)
+        {
+            return $"Module {consumer}: the dependency record of the shared PCH of {provider} is missing or corrupt ({record}).";
+        }
+
+        var failures = new List<string>();
+        string[] headers = closure.Select(entry => entry.Path).Where(File.Exists).ToArray();
+        foreach (string header in headers)
+        {
+            foreach (string directory in providerIncludes)
+            {
+                if (!Fingerprints.IsUnder(header, directory))
+                {
+                    continue;
+                }
+
+                string spelling = Path.GetRelativePath(directory, header);
+                foreach (string earlier in consumerIncludes)
+                {
+                    if (NativeToolchains.PathComparer.Equals(earlier, directory))
+                    {
+                        break;
+                    }
+
+                    string candidate = Path.Combine(earlier, spelling);
+                    if (File.Exists(candidate) && !NativeToolchains.PathComparer.Equals(Path.GetFullPath(candidate), header))
+                    {
+                        failures.Add($"Module {consumer} cannot use the shared PCH of {provider}: '{spelling.Replace('\\', '/')}' resolves to {candidate} " +
+                            $"before the PCH's {header}. Remove or rename the shadowing header, or set PchUsage = PchUsage.Off for the module.");
+                    }
+                }
+            }
+        }
+
+        if (extraNames.Count != 0)
+        {
+            // 매크로 본문을 거친 간접 참조: 대상 이름 집합을 더 늘지 않을 때까지 넓힌다.
+            var scanned = headers.Select(header => (Header: header, Scan: Scan(File.ReadAllText(header)))).ToArray();
+            var targets = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (string name in extraNames)
+            {
+                targets[name] = name;
+            }
+
+            bool grew = true;
+            while (grew)
+            {
+                grew = false;
+                foreach (var (_, scan) in scanned)
+                {
+                    foreach ((string macro, HashSet<string> body) in scan.Macros)
+                    {
+                        if (targets.ContainsKey(macro))
+                        {
+                            continue;
+                        }
+
+                        string? through = body.FirstOrDefault(targets.ContainsKey);
+                        if (through is not null)
+                        {
+                            targets[macro] = targets[through];
+                            grew = true;
+                        }
+                    }
+                }
+            }
+
+            foreach (var (header, scan) in scanned)
+            {
+                foreach ((string identifier, int line) in scan.Conditions)
+                {
+                    if (targets.TryGetValue(identifier, out string? definition))
+                    {
+                        failures.Add($"Module {consumer} cannot use the shared PCH of {provider}: its definition {definition} is used by a preprocessor " +
+                            $"condition at {header}:{line}" + (identifier == definition ? "" : $" (through macro {identifier})") +
+                            ". The header is already compiled into the PCH without that definition. Make the definition a public define of " +
+                            $"{provider}, remove the header from the PCH header, or set PchUsage = PchUsage.Off for the module.");
+                    }
+                }
+            }
+        }
+
+        return failures.Count == 0 ? null : string.Join("\n", failures.Distinct(StringComparer.Ordinal));
+    }
+
+    // 헤더 하나의 전처리 정보다: #define한 매크로와 그 본문의 식별자, 전처리 조건에 나온 식별자와 줄.
+    private sealed record HeaderScan(List<(string Macro, HashSet<string> Body)> Macros, List<(string Identifier, int Line)> Conditions);
+
+    private static HeaderScan Scan(string text)
+    {
+        var scan = new HeaderScan([], []);
+        int line = 0;
+        bool inBlockComment = false;
+        string pending = "";
+        int pendingLine = 0;
+        foreach (string raw in text.Split('\n'))
+        {
+            ++line;
+            string current = raw.TrimEnd('\r');
+            // 블록 주석을 걷어낸다(줄을 넘는 주석 포함).
+            var visible = new System.Text.StringBuilder();
+            int index = 0;
+            while (index < current.Length)
+            {
+                if (inBlockComment)
+                {
+                    int close = current.IndexOf("*/", index, StringComparison.Ordinal);
+                    if (close < 0)
+                    {
+                        index = current.Length;
+                    }
+                    else
+                    {
+                        inBlockComment = false;
+                        index = close + 2;
+                    }
+                }
+                else if (current[index] == '/' && index + 1 < current.Length && current[index + 1] == '*')
+                {
+                    inBlockComment = true;
+                    index += 2;
+                    visible.Append(' ');
+                }
+                else if (current[index] == '/' && index + 1 < current.Length && current[index + 1] == '/')
+                {
+                    break;
+                }
+                else if (current[index] == '"')
+                {
+                    // 문자열은 건너뛴다(안의 식별자는 매크로 참조가 아니다).
+                    int end = index + 1;
+                    while (end < current.Length && current[end] != '"')
+                    {
+                        end += current[end] == '\\' ? 2 : 1;
+                    }
+
+                    visible.Append("\"\"");
+                    index = Math.Min(end + 1, current.Length);
+                }
+                else
+                {
+                    visible.Append(current[index]);
+                    ++index;
+                }
+            }
+
+            string content = visible.ToString();
+            if (pending.Length == 0)
+            {
+                pendingLine = line;
+            }
+
+            if (content.EndsWith('\\'))
+            {
+                pending += content[..^1] + " ";
+                continue;
+            }
+
+            string logical = (pending + content).Trim();
+            pending = "";
+            if (logical.Length == 0 || logical[0] != '#')
+            {
+                continue;
+            }
+
+            string directive = logical[1..].TrimStart();
+            string[] words = Identifiers(directive);
+            if (words.Length == 0)
+            {
+                continue;
+            }
+
+            if (words[0] == "define" && words.Length >= 2)
+            {
+                // 함수형 매크로의 매개변수 이름도 본문 식별자에 섞이지만, 대상 이름과 같을 때만 넓혀지므로 보수적일 뿐이다.
+                scan.Macros.Add((words[1], words.Skip(2).ToHashSet(StringComparer.Ordinal)));
+            }
+            else if (words[0] is "if" or "ifdef" or "ifndef" or "elif" or "elifdef" or "elifndef")
+            {
+                foreach (string identifier in words.Skip(1))
+                {
+                    if (identifier is not ("defined" or "true" or "false" or "__has_include"))
+                    {
+                        scan.Conditions.Add((identifier, pendingLine));
+                    }
+                }
+            }
+        }
+
+        return scan;
+    }
+
+    private static string[] Identifiers(string text)
+    {
+        var result = new List<string>();
+        int index = 0;
+        while (index < text.Length)
+        {
+            if (char.IsAsciiLetter(text[index]) || text[index] == '_')
+            {
+                int end = index;
+                while (end < text.Length && (char.IsAsciiLetterOrDigit(text[end]) || text[end] == '_'))
+                {
+                    ++end;
+                }
+
+                result.Add(text[index..end]);
+                index = end;
+            }
+            else if (char.IsAsciiDigit(text[index]))
+            {
+                // 숫자 리터럴(접미사 포함)은 식별자가 아니다.
+                while (index < text.Length && (char.IsAsciiLetterOrDigit(text[index]) || text[index] is '.' or '\''))
+                {
+                    ++index;
+                }
+            }
+            else
+            {
+                ++index;
+            }
+        }
+
+        return result.ToArray();
     }
 }

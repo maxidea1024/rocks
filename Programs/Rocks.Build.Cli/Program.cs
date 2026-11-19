@@ -83,10 +83,12 @@ namespace Rocks.Build.Cli
             var root = Path.GetFullPath(options.GetValueOrDefault("root", Directory.GetCurrentDirectory()));
             var configuration = Configuration(options);
             // 값이 틀린 빌드 방식 옵션은 출력을 만들기 전에 거부한다.
-            foreach (string mode in BuildModeOptions)
+            foreach (string mode in BuildModeOptions.Where(mode => mode != TimingOption))
             {
                 Switch(options, mode);
             }
+
+            Timing(options);
 
             var targetName = options.GetValueOrDefault("target", args[0] == "sdk" ? "Engine" : "Foundation");
             // --platform android면 NDK로 교차 빌드한다(--android-abi arm64|x86_64, --android-api, --android-ndk).
@@ -243,6 +245,8 @@ namespace Rocks.Build.Cli
                     Unity = Switch(options, UnityOption),
                     Pch = Switch(options, PchOption),
                     Adaptive = Switch(options, AdaptiveOption),
+                    Timing = Timing(options),
+                    TimingLabel = targetName,
                     PlanOnly = planOnly
                 }, cancellationToken);
                 if (result.PlanOnly)
@@ -410,13 +414,25 @@ namespace Rocks.Build.Cli
         // 끈다(CI). 도구 빌드 ID와 compile_commands.json에는 반영되지 않는다.
         internal const string PlanOnlyOption = "plan-only";
 
+        // --timing on|off(기본 off): compile·PCH action에 -ftime-trace를 붙이고 <out>/Timing/<타깃>.timing.json으로 집계한다
+        // (Docs/Design/UnityBuildPch.ko.md 12절 — 공유 PCH 헤더 구성을 정하는 자료다).
+        internal const string TimingOption = "timing";
+
+        internal static bool Timing(Dictionary<string, string> options) =>
+            options.GetValueOrDefault(TimingOption, "off") switch
+            {
+                "on" => true,
+                "off" => false,
+                _ => throw new ArgumentException($"{TimingOption} must be on or off.")
+            };
+
         internal const string UnityOption = "unity";
 
         internal const string PchOption = "pch";
 
         internal const string AdaptiveOption = "adaptive";
 
-        internal static readonly string[] BuildModeOptions = [UnityOption, PchOption, AdaptiveOption];
+        internal static readonly string[] BuildModeOptions = [UnityOption, PchOption, AdaptiveOption, TimingOption];
 
         internal static bool Switch(Dictionary<string, string> options, string name) =>
             options.GetValueOrDefault(name, "on") switch

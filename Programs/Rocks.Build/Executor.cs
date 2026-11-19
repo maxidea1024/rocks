@@ -21,6 +21,12 @@ internal static class Executor
             return Result(action, false, true, 0, "", "");
         }
 
+        // 실행 전 검사(공유 PCH 사용 검사): 위반이면 도구를 실행하지 않고 실패한다.
+        if (action.PreRun?.Value is string violation)
+        {
+            return Result(action, true, false, -1, "", violation);
+        }
+
         // 소요 시간은 실제로 실행하는 action만 잰다(cache hit은 0 — NativeActionResult.DurationMilliseconds). clock은 시험이 시간을
         // 결정적으로 주입하는 자리이고 기본은 시스템 단조 시계다.
         TimeProvider time = clock ?? TimeProvider.System;

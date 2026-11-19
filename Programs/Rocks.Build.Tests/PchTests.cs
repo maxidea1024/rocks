@@ -24,6 +24,9 @@ internal static class PchTests
 
         await AdaptiveAsync(request, root);
         pass("adaptive unity: porcelain fixtures, working file and paired header separation, incremental scope, tool build ID, real git");
+
+        await SharedPchAsync(request, root);
+        pass("shared PCH: provider selection, shared and extra definitions, variants, shadow and extra-definition checks, timing report");
     }
 
     private static string Fixture(string root, string name) => Directory.CreateDirectory(Path.Combine(root, name)).FullName;
@@ -331,6 +334,112 @@ internal static class PchTests
         {
             Directory.Delete(outside, true);
         }
+    }
+
+    // 공유 PCH(8.4절)와 --timing(12절).
+    private static async Task SharedPchAsync(NativeBuildRequest request, string root)
+    {
+        string fixture = Fixture(root, "shared pch fixture");
+        var write = Writer(fixture);
+        bool windows = request.Toolchain.Platform == NativePlatform.Windows;
+        const string baseHeaderText = "#pragma once\n#ifdef USER_FLAG\n#define BASE_FLAGGED 1\n#endif\n#define BASE_HAS_INDIRECT USER_INDIRECT\n" +
+            "#if BASE_HAS_INDIRECT\n#define BASE_INDIRECT 1\n#endif\ninline int BaseValue() noexcept { return BASE_PUBLIC + 1; }\n";
+        string baseInclude = Path.GetDirectoryName(Path.GetDirectoryName(write("base/include/shared/Base.h", baseHeaderText))!)!;
+        write("base/include/shared/BasePch.h", "#pragma once\n#include <shared/Base.h>\n");
+        string baseSource = write("base/src/base.cpp", "#include <shared/Base.h>\nint BaseSum() noexcept { return BaseValue(); }\n");
+        string upperInclude = Path.GetDirectoryName(Path.GetDirectoryName(write("upper/include/upper/Upper.h",
+            "#pragma once\n#include <shared/Base.h>\ninline int UpperValue() noexcept { return BaseValue() + 10; }\n"))!)!;
+        write("upper/include/upper/UpperPch.h", "#pragma once\n#include <shared/BasePch.h>\n#include <upper/Upper.h>\n");
+        string upperSource = write("upper/src/upper.cpp", "#include <upper/Upper.h>\nint UpperSum() noexcept { return UpperValue(); }\n");
+        string userA = write("users/a.cpp", "#include <upper/Upper.h>\nint UserA() noexcept { return UpperValue() + 100; }\n");
+        string userB = write("users/b.cpp", "#include <upper/Upper.h>\nint UserB() noexcept { return UpperValue() + USER_B_EXTRA; }\n");
+        string main = write("app/main.cpp", "int BaseSum() noexcept;\nint UpperSum() noexcept;\nint UserA() noexcept;\nint UserB() noexcept;\n" +
+            "int main() { return BaseSum() + UpperSum() + UserA() + UserB(); }\n");
+        NativeModuleInput baseModule = new()
+        {
+            Name = "SharedBase", Sources = [baseSource], PublicIncludeDirectories = [baseInclude], PublicDefines = ["BASE_PUBLIC=1"], SharedPchHeader = "shared/BasePch.h"
+        };
+        NativeModuleInput upper = new()
+        {
+            Name = "SharedUpper", Sources = [upperSource], PublicIncludeDirectories = [upperInclude], Dependencies = ["SharedBase"], SharedPchHeader = "upper/UpperPch.h"
+        };
+        NativeModuleInput moduleA = new() { Name = "UserA", Sources = [userA], Dependencies = ["SharedUpper"] };
+        NativeModuleInput moduleB = new() { Name = "UserB", Sources = [userB], Dependencies = ["SharedUpper"], PrivateDefines = ["USER_B_EXTRA=5"] };
+        NativeModuleInput application = new() { Name = "SharedApp", Kind = NativeModuleKind.Executable, Sources = [main], Dependencies = ["UserA", "UserB"] };
+        NativeBuildRequest With(NativeModuleInput a, NativeModuleInput b, string output = "out") => request with
+        {
+            RootDirectory = fixture,
+            OutputDirectory = Path.Combine(fixture, output),
+            Modules = [baseModule, upper, a, b, application],
+            Targets = ["SharedApp"]
+        };
+
+        NativeBuildRequest build = With(moduleA, moduleB);
+        NativePlan plan = ActionGraph.Create(build);
+        NativeAction[] pchActions = plan.Actions.Where(action => action.Kind == "Pch").ToArray();
+        NativeAction Compile(string module) => plan.Actions.Single(action => action.Kind == "Compile" && action.Module == module);
+        // 제공 모듈 선택: 다른 제공 모듈을 가장 많이 포함하는 것(SharedUpper가 SharedBase를 포함한다). 제공 모듈 자신도 자기 공유 PCH를 쓴다.
+        // 같은 인자·같은 앞부분의 소비 모듈은 PCH action 하나를 함께 쓴다.
+        NativeAction upperPch = pchActions.Single(action => action.Module == "SharedUpper");
+        NativeAction basePch = pchActions.Single(action => action.Module == "SharedBase");
+        Check(pchActions.Length == 2 && Compile("SharedBase").Dependencies.Contains(basePch.Id) &&
+            new[] { "SharedUpper", "UserA", "UserB", "SharedApp" }.All(module => Compile(module).Dependencies.Contains(upperPch.Id)),
+            "shared PCH provider selection and sharing: " + string.Join(", ", pchActions.Select(action => action.Id)));
+        // 공유 정의(제공 모듈의 public define과 전파분)가 PCH 앞부분이고, 소비 모듈의 나머지 정의는 PCH 뒤의 추가 정의 헤더다.
+        string sharedDefinitions = ModuleDefinitions.SharedPathOf(build.OutputDirectory, "SharedUpper");
+        string extraDefinitions = ModuleDefinitions.ExtraPathOf(build.OutputDirectory, "UserB");
+        Check(plan.GeneratedFiles.Single(file => file.Path == sharedDefinitions).Content.EndsWith("#define BASE_PUBLIC 1\n", StringComparison.Ordinal) &&
+            plan.GeneratedFiles.Single(file => file.Path == extraDefinitions).Content.EndsWith("#define USER_B_EXTRA 5\n", StringComparison.Ordinal) &&
+            upperPch.Inputs.Contains(sharedDefinitions) && !plan.GeneratedFiles.Any(file => file.Path == ModuleDefinitions.ExtraPathOf(build.OutputDirectory, "UserA")),
+            "shared and extra definitions headers");
+        LogicalCompile logicalB = plan.LogicalCompiles.Single(compile => compile.Module == "UserB");
+        Check(logicalB.ForcedIncludes.Count == 3 && logicalB.ForcedIncludes[0] == sharedDefinitions && logicalB.ForcedIncludes[2] == extraDefinitions &&
+            logicalB.ForcedIncludes[1].EndsWith("UpperPch.h", StringComparison.Ordinal) &&
+            Compile("UserB").Arguments.Contains(windows ? "/FI" + extraDefinitions : extraDefinitions),
+            "forced include order must be [PCH prefix] -> [PCH header] -> [extra definitions]");
+
+        NativeBuildResult built = await Build(build);
+        // BaseValue = 2, UpperValue = 12: BaseSum 2 + UpperSum 12 + UserA 112 + UserB 17 = 143.
+        Check(built.PchActions == 2 && await Runs(build, built, "SharedApp", 143), "shared PCH build and run");
+        Check((await Build(build)).ExecutedActions == 0, "an unchanged shared PCH build must execute zero actions");
+
+        // 경로가 아닌 인자가 다르면 다른 변형이다. 모듈 PCH가 있으면 그것을 쓰고, PrivateOnly는 공유 PCH를 쓰지 않는다.
+        Check(ActionGraph.Create(With(moduleA with { Optimization = CodeOptimization.Always }, moduleB)).Actions.Count(action => action.Kind == "Pch") == 3,
+            "a consumer with different non-path arguments must get its own PCH variant");
+        Check(ActionGraph.Create(With(moduleA with { PchUsage = PchUsage.PrivateOnly }, moduleB)).Actions
+                .Single(action => action.Kind == "Compile" && action.Module == "UserA").Dependencies.Count == 0,
+            "PchUsage.PrivateOnly must not use a shared PCH");
+
+        // 사용 검사: shadow — 소비 모듈의 앞선 include 디렉터리에 PCH closure 헤더와 같은 철자가 있다.
+        string shadowInclude = Path.GetDirectoryName(Path.GetDirectoryName(write("users/private/upper/Upper.h", "#pragma once\ninline int UpperValue() noexcept { return 0; }\n"))!)!;
+        NativeBuildResult shadowed = await new NativeBuildEngine().BuildAsync(With(moduleA, moduleB with { PrivateIncludeDirectories = [shadowInclude] }, "out-shadow"));
+        Check(!shadowed.Succeeded && shadowed.Actions.Any(action => action.Module == "UserB" && !action.Succeeded &&
+                action.StdErr.Contains("before the PCH's", StringComparison.Ordinal) && action.StdErr.Contains("upper/Upper.h", StringComparison.Ordinal)),
+            "a header shadowing a PCH closure header must fail the consumer: " + shadowed.Failure);
+        // 사용 검사: 추가 정의가 closure 헤더의 전처리 조건에 쓰인다(직접, 그리고 매크로 본문을 거친 간접 참조).
+        foreach ((string define, string expected) in new[] { ("USER_FLAG=1", "definition USER_FLAG is used by a preprocessor condition"),
+                     ("USER_INDIRECT=1", "definition USER_INDIRECT is used by a preprocessor condition") })
+        {
+            NativeBuildResult rejected = await new NativeBuildEngine().BuildAsync(
+                With(moduleA, moduleB with { PrivateDefines = ["USER_B_EXTRA=5", define] }, "out-" + define.Split('=')[0]));
+            Check(!rejected.Succeeded && rejected.Actions.Any(action => action.Module == "UserB" && !action.Succeeded &&
+                    action.StdErr.Contains(expected, StringComparison.Ordinal) && action.StdErr.Contains("Base.h:", StringComparison.Ordinal) &&
+                    (define.StartsWith("USER_FLAG", StringComparison.Ordinal) || action.StdErr.Contains("through macro BASE_HAS_INDIRECT", StringComparison.Ordinal))),
+                $"an extra definition ({define}) used by a PCH closure header's preprocessor condition must fail the consumer: " + rejected.Failure);
+        }
+
+        // --timing: -ftime-trace 결과를 집계한다(번역 단위마다 한 항목, 헤더 목록).
+        NativeBuildRequest timed = With(moduleA, moduleB, "out-timing") with { Timing = true, TimingLabel = "Probe" };
+        await Build(timed);
+        string report = Path.Combine(timed.OutputDirectory, "Timing", "Probe.timing.json");
+        using System.Text.Json.JsonDocument timing = System.Text.Json.JsonDocument.Parse(File.ReadAllText(report));
+        // 번역 단위 다섯과 PCH action 둘이다. PCH에 든 헤더의 파싱 시간은 PCH action의 trace에 있다.
+        // 헤더·템플릿 목록은 clang의 기본 trace 세밀도(500 마이크로초)보다 오래 걸린 항목만 담으므로 이 작은 fixture에서는 비어 있을 수 있다.
+        Check(timing.RootElement.GetProperty("translationUnits").GetArrayLength() == 7 &&
+            timing.RootElement.GetProperty("translationUnits").EnumerateArray().All(item => item.GetProperty("microseconds").GetInt64() > 0) &&
+            timing.RootElement.GetProperty("headers").ValueKind == System.Text.Json.JsonValueKind.Array &&
+            timing.RootElement.GetProperty("templates").ValueKind == System.Text.Json.JsonValueKind.Array,
+            "the timing report must list every translation unit and PCH action: " + File.ReadAllText(report));
     }
 
     private static void Check(bool condition, string message)

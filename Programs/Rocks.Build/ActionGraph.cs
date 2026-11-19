@@ -7,8 +7,10 @@ internal sealed record NativeAction(string Id, string Module, string Kind, strin
     IReadOnlyList<string> Arguments, IReadOnlyList<string> Outputs, IReadOnlyList<string> Inputs,
     IReadOnlyList<string> HeaderDirectories, IReadOnlyList<string> DeclaredInputs,
     IReadOnlyList<string> Dependencies, IReadOnlyList<string> Identity, string? Source = null, string? FailureNote = null,
-    string? DependencyRecord = null, IReadOnlyList<string>? Members = null)
+    string? DependencyRecord = null, IReadOnlyList<string>? Members = null, Lazy<string?>? PreRun = null)
 {
+    // PreRun은 실행 직전에 한 번 평가하는 검사다(공유 PCH 사용 검사 — 선행 action의 산출물이 있어야 계산할 수 있다). 오류 문구를 돌려주면
+    // 이 action은 도구를 실행하지 않고 실패한다. cache hit인 action은 평가하지 않는다(입력이 통과한 실행과 같다).
     // Source는 compile action이 컴파일러에 넘기는 파일이다(단독 번역 단위면 그 소스, 묶음이면 묶음 파일). Members는 이 번역 단위를
     // 이루는 원본 소스다(단독이면 null — Source 하나).
     public IReadOnlyList<string> SourceMembers => Members ?? (Source is null ? [] : [Source]);
@@ -413,12 +415,13 @@ internal static class ActionGraph
             if (pchWanted && pchUsers != 0)
             {
                 pch = PchBuild.Plan(request, module, dependencies, includes, defines, Common(NativeLanguage.Cpp), definitionsHeader, definitionsContent,
-                    pchUsers, depfile, headers, extraInputs, Absolute, output, notices);
+                    pchUsers, depfile, headers, extraInputs, Absolute, output, notices, name => closures[name], name => modules[name]);
             }
 
             if (pch is not null)
             {
-                generatedFiles.AddRange(pch.Files);
+                // 공유 정의 헤더와 stub 소스는 같은 PCH를 쓰는 모듈들이 함께 낸다(한 번만 싣는다).
+                generatedFiles.AddRange(pch.Files.Where(file => !generatedFiles.Any(existing => NativeToolchains.PathComparer.Equals(existing.Path, file.Path))));
                 pchDirectories.Add(pch.Directory);
                 if (!actions.Any(action => action.Id == pch.Action.Id))
                 {
@@ -451,11 +454,14 @@ internal static class ActionGraph
                 // 소스 하나를 더하거나 지워도 다른 번역 단위는 다시 컴파일하지 않는다(4.2절. 소스 옆 header가 생기거나 사라지는 변화는
                 // 소스 디렉터리의 헤더 이름 목록이 잡는다).
                 string? note = unit.Members.Any(reflectionSet.Contains) ? reflectionNote : null;
+                // --timing: clang -ftime-trace 결과를 출력으로 받아 빌드 끝에 집계한다(12절).
+                string[] timing = request.Timing ? [(windows ? "/clang:" : "") + "-ftime-trace={OUTPUT2}"] : [];
                 actions.Add(new(id, module.Name, "Compile", request.Toolchain.CompilerPath,
-                    [.. arguments, .. roots, .. forced, .. depfile, .. TranslationUnit(unit.File, language)],
-                    [objectPath, recordPath], unitInputs, headers, extraInputs, usesPch ? [pch!.Action.Id] : [],
+                    [.. arguments, .. roots, .. forced, .. timing, .. depfile, .. TranslationUnit(unit.File, language)],
+                    request.Timing ? [objectPath, recordPath, objectPath + TimingReport.TraceExtension] : [objectPath, recordPath],
+                    unitInputs, headers, extraInputs, usesPch ? [pch!.Action.Id] : [],
                     [request.ContextFingerprint, request.Configuration.ToString(), module.Optimization.ToString(), .. unit.Members], unit.File,
-                    FailureNote: note, DependencyRecord: recordPath, Members: batch ? unit.Members : null));
+                    FailureNote: note, DependencyRecord: recordPath, Members: batch ? unit.Members : null, PreRun: usesPch ? pch!.Check : null));
                 foreach (string member in unit.Members)
                 {
                     // 논리 명령은 묶음과 무관하게 원본 소스 하나의 단독 컴파일이다(8.6절). 출력은 그 소스가 단독 TU일 때의 object 경로다.
