@@ -220,6 +220,116 @@ void RunExitedThreadWork(void* context) noexcept {
     work.cachedAfter = BinnedAllocatorTestAccess::HasCurrentThreadCache(*work.allocator);
 }
 
+// 종료 칸에 걸지 못한 스레드의 일이다: 캐시 없이 등급 잠금 경로로만 간다.
+struct UnhookedThreadWork {
+    BinnedAllocator* allocator = nullptr;
+    BinnedAllocator* other = nullptr;
+    uint32 failures = 0;
+    bool unhookedBefore = true;
+    bool unhookedAfter = false;
+    bool cached = true;
+    bool cachedOther = true;
+    uint32 cacheCount = 1;
+};
+
+constexpr uint32 UnhookedRounds = 3;
+
+void RunUnhookedThreadWork(void* context) noexcept {
+    auto& work = *static_cast<UnhookedThreadWork*>(context);
+    void* blocks[ExitedThreadBlocks]{};
+    work.unhookedBefore = BinnedAllocatorTestAccess::IsCurrentThreadUnhooked();
+    BinnedAllocatorTestAccess::FailNextThreadExitHook();
+    // 첫 호출이 기록을 걸지 못한다. 그 뒤의 호출은 다시 시도하지 않는다(다른 인스턴스도 같다).
+    for (uint32 round = 0; round < UnhookedRounds; ++round) {
+        work.failures += AllocateMany(*work.allocator, SmallRequest, blocks, ExitedThreadBlocks);
+        work.failures += FreeMany(*work.allocator, blocks, ExitedThreadBlocks);
+        work.failures += AllocateMany(*work.other, SmallRequest, blocks, ExitedThreadBlocks);
+        work.failures += FreeMany(*work.other, blocks, ExitedThreadBlocks);
+    }
+
+    work.unhookedAfter = BinnedAllocatorTestAccess::IsCurrentThreadUnhooked();
+    work.cached = BinnedAllocatorTestAccess::HasCurrentThreadCache(*work.allocator);
+    work.cachedOther = BinnedAllocatorTestAccess::HasCurrentThreadCache(*work.other);
+    work.cacheCount = BinnedAllocatorTestAccess::ThreadCacheCount(*work.allocator) +
+                      BinnedAllocatorTestAccess::ThreadCacheCount(*work.other);
+}
+
+// thread_local 포인터를 잃은 스레드의 일이다(스레드가 끝나는 동안 thread_local 저장소가 먼저
+// 해제되는 플랫폼의 상태): 기록은 종료 칸에 살아 있다.
+struct LostPointerWork {
+    BinnedAllocator* allocator = nullptr;
+    BinnedAllocator* other = nullptr;
+    uint32 failures = 0;
+    const void* recordBefore = nullptr;
+    // 지운 직후의 포인터다(null이어야 한다 — 초기값은 null이 아닌 아무 주소다).
+    const void* recordForgotten = &failures;
+    const void* recordAfterFree = nullptr;
+    const void* recordAfterOther = nullptr;
+    uint32 cachesAfter = 0;
+    uint32 otherCachesAfter = 0;
+    uint32 entriesAfter = 0;
+    bool cachedAfter = false;
+};
+
+void RunLostPointerWork(void* context) noexcept {
+    auto& work = *static_cast<LostPointerWork*>(context);
+    void* blocks[ExitedThreadBlocks]{};
+    work.failures += AllocateMany(*work.allocator, SmallRequest, blocks, ExitedThreadBlocks);
+    work.recordBefore = BinnedAllocatorTestAccess::CurrentThreadRecordPointer();
+    BinnedAllocatorTestAccess::ForgetCurrentThreadRecord();
+    work.recordForgotten = BinnedAllocatorTestAccess::CurrentThreadRecordPointer();
+    // 포인터를 잃은 뒤의 첫 호출이 반환이다: 칸의 기록을 다시 가리키고 같은 캐시에 넣는다.
+    work.failures += FreeMany(*work.allocator, blocks, ExitedThreadBlocks);
+    work.recordAfterFree = BinnedAllocatorTestAccess::CurrentThreadRecordPointer();
+    // 다시 잃은 뒤의 첫 호출이 다른 인스턴스의 할당이다: 그 캐시도 같은 기록에 든다.
+    BinnedAllocatorTestAccess::ForgetCurrentThreadRecord();
+    work.failures += AllocateMany(*work.other, SmallRequest, blocks, ExitedThreadBlocks);
+    work.failures += FreeMany(*work.other, blocks, ExitedThreadBlocks);
+    work.recordAfterOther = BinnedAllocatorTestAccess::CurrentThreadRecordPointer();
+    work.cachesAfter = BinnedAllocatorTestAccess::ThreadCacheCount(*work.allocator);
+    work.otherCachesAfter = BinnedAllocatorTestAccess::ThreadCacheCount(*work.other);
+    work.entriesAfter = BinnedAllocatorTestAccess::CurrentThreadRecordEntries();
+    work.cachedAfter = BinnedAllocatorTestAccess::HasCurrentThreadCache(*work.allocator);
+}
+
+// 다른 종료 정리가 allocator를 쓰는 경우다: 이 칸의 정리 함수가 스레드가 끝나는 동안(할당자의 종료
+// hook 앞이든 뒤든) 할당·반환을 한다.
+struct ExitUse {
+    BinnedAllocator* allocator = nullptr;
+    uint32 calls = 0;
+    uint32 failures = 0;
+};
+
+void UseAllocatorAtThreadExit(void* value) noexcept {
+    auto& use = *static_cast<ExitUse*>(value);
+    void* blocks[ExitedThreadBlocks]{};
+    use.failures += AllocateMany(*use.allocator, SmallRequest, blocks, ExitedThreadBlocks);
+    use.failures += FreeMany(*use.allocator, blocks, ExitedThreadBlocks);
+    ++use.calls;
+}
+
+// 프로세스가 시작할 때 만든다(정적 초기화): 할당자의 종료 칸(인스턴스를 처음 만들 때 생긴다)보다
+// 먼저 생겨, 칸을 번호 순서로 도는 플랫폼에서는 이 정리 함수가 할당자의 종료 hook보다 먼저 불린다.
+// macOS에서는 "thread_local 저장소가 해제된 뒤·hook 앞에 allocator를 쓰는" 실제 순서가 된다. 시험의
+// 단언은 순서에 기대지 않는다. 칸은 프로세스 수명 동안 유지한다(OS 칸을 풀지 않는다).
+platform::ThreadExitSlot exitUseSlot(&UseAllocatorAtThreadExit);
+
+struct ExitUseWork {
+    ExitUse* use = nullptr;
+    uint32 failures = 0;
+    bool hadCache = false;
+    bool slotSet = false;
+};
+
+void RunExitUseWork(void* context) noexcept {
+    auto& work = *static_cast<ExitUseWork*>(context);
+    void* blocks[ExitedThreadBlocks]{};
+    work.failures += AllocateMany(*work.use->allocator, SmallRequest, blocks, ExitedThreadBlocks);
+    work.failures += FreeMany(*work.use->allocator, blocks, ExitedThreadBlocks);
+    work.hadCache = BinnedAllocatorTestAccess::HasCurrentThreadCache(*work.use->allocator);
+    work.slotSet = exitUseSlot.Set(work.use);
+}
+
 // 같은 주소를 두 스레드가 함께 반환한다. round마다 주 스레드가 주소를 걸고 번호를 올리면 두
 // worker가 그 번호를 보고 곧바로 반환한다(스레드를 round마다 만들지 않아 두 반환이 가깝게 겹친다).
 constexpr uint32 DuplicateRounds = 4096;
@@ -745,6 +855,117 @@ TEST(CoreBinnedConcurrentDuplicateReturnHasOneWinner) {
         CHECK(allocator.Stats().liveAllocations == 1);
         CHECK(allocator.Stats().totalAllocations == DuplicateRounds + 1);
         REQUIRE(allocator.Deallocate(anchor.Value()));
+        allocator.Trim();
+        CHECK(allocator.Usage().committedBytes == 0);
+    }
+
+    CHECK(system.Stats().liveAllocations == 0);
+}
+
+// 기록을 스레드 종료 칸에 걸지 못한 스레드는 캐시 없이 등급 잠금 경로로 가고 다시 시도하지 않는다
+// (호출마다 기록을 할당했다가 버리지 않는다). 다른 스레드는 영향이 없다.
+TEST(CoreBinnedThreadWithoutExitHookStaysUncached) {
+    SystemAllocator system;
+    {
+        BinnedAllocator allocator(system);
+        BinnedAllocator other(system);
+        UnhookedThreadWork work;
+        work.allocator = &allocator;
+        work.other = &other;
+        platform::Thread thread;
+        StartWorker(thread, RunUnhookedThreadWork, &work);
+        JoinWorker(thread);
+        CHECK(work.failures == 0);
+        CHECK(!work.unhookedBefore);
+        CHECK(work.unhookedAfter);
+        CHECK(!work.cached);
+        CHECK(!work.cachedOther);
+        CHECK(work.cacheCount == 0);
+        constexpr uint64 Total = uint64{UnhookedRounds} * ExitedThreadBlocks;
+        CHECK(allocator.Stats().liveAllocations == 0);
+        CHECK(allocator.Stats().totalAllocations == Total);
+        CHECK(other.Stats().liveAllocations == 0);
+        CHECK(other.Stats().totalAllocations == Total);
+        // 반환이 곧바로 slab으로 갔으므로 그 스레드의 캐시 없이도 Trim이 모두 푼다.
+        allocator.Trim();
+        other.Trim();
+        CHECK(allocator.Usage().committedBytes == 0);
+        CHECK(other.Usage().committedBytes == 0);
+        // 이 스레드는 그대로 캐시를 쓴다.
+        CHECK(!BinnedAllocatorTestAccess::IsCurrentThreadUnhooked());
+        auto block = allocator.Allocate(SmallRequest, 16);
+        REQUIRE(block);
+        CHECK(BinnedAllocatorTestAccess::HasCurrentThreadCache(allocator));
+        REQUIRE(allocator.Deallocate(block.Value()));
+    }
+
+    CHECK(system.Stats().liveAllocations == 0);
+}
+
+// 스레드의 기록은 종료 칸의 값이 기준이다: thread_local 포인터를 잃어도(스레드가 끝나는 동안
+// thread_local 저장소가 먼저 해제되는 플랫폼) 칸의 기록을 다시 찾아 쓰고 새 기록을 만들지 않는다.
+// 스레드가 끝나면 그 기록의 캐시가 모두 돌아온다.
+TEST(CoreBinnedThreadRecordIsFoundAgainFromExitSlot) {
+    SystemAllocator system;
+    {
+        BinnedAllocator allocator(system);
+        BinnedAllocator other(system);
+        LostPointerWork work;
+        work.allocator = &allocator;
+        work.other = &other;
+        platform::Thread thread;
+        StartWorker(thread, RunLostPointerWork, &work);
+        JoinWorker(thread);
+        CHECK(work.failures == 0);
+        CHECK(work.recordBefore != nullptr);
+        CHECK(work.recordForgotten == nullptr);
+        // 기록은 하나다: 두 번 모두 같은 기록을 다시 가리킨다.
+        CHECK(work.recordAfterFree == work.recordBefore);
+        CHECK(work.recordAfterOther == work.recordBefore);
+        CHECK(work.cachesAfter == 1);
+        CHECK(work.otherCachesAfter == 1);
+        CHECK(work.entriesAfter == 2);
+        CHECK(work.cachedAfter);
+        // 종료 hook이 그 기록의 캐시를 모두 돌려줬다.
+        CHECK(BinnedAllocatorTestAccess::ThreadCacheCount(allocator) == 0);
+        CHECK(BinnedAllocatorTestAccess::ThreadCacheCount(other) == 0);
+        CHECK(allocator.Stats().liveAllocations == 0);
+        CHECK(allocator.Stats().totalAllocations == ExitedThreadBlocks);
+        CHECK(other.Stats().liveAllocations == 0);
+        CHECK(other.Stats().totalAllocations == ExitedThreadBlocks);
+        allocator.Trim();
+        other.Trim();
+        CHECK(allocator.Usage().committedBytes == 0);
+        CHECK(other.Usage().committedBytes == 0);
+    }
+
+    CHECK(system.Stats().liveAllocations == 0);
+}
+
+// 다른 스레드 종료 정리(다른 칸의 정리 함수)가 allocator를 써도 된다: 할당자의 종료 hook 앞에
+// 불리면 그 스레드의 캐시를 쓰고, 뒤에 불리면 등급 잠금 경로로 간다(OS가 정하는 순서 — 어느
+// 쪽이든 결과가 같다). 스레드가 끝나면 캐시가 남지 않는다.
+TEST(CoreBinnedAllocatorUsedByAnotherThreadExitCleanup) {
+    REQUIRE(exitUseSlot.IsValid());
+    SystemAllocator system;
+    {
+        BinnedAllocator allocator(system);
+        ExitUse use;
+        use.allocator = &allocator;
+        ExitUseWork work;
+        work.use = &use;
+        platform::Thread thread;
+        StartWorker(thread, RunExitUseWork, &work);
+        JoinWorker(thread);
+        CHECK(work.failures == 0);
+        CHECK(work.hadCache);
+        CHECK(work.slotSet);
+        // Join이 돌아왔으면 두 정리 함수가 모두 끝났다.
+        CHECK(use.calls == 1);
+        CHECK(use.failures == 0);
+        CHECK(BinnedAllocatorTestAccess::ThreadCacheCount(allocator) == 0);
+        CHECK(allocator.Stats().liveAllocations == 0);
+        CHECK(allocator.Stats().totalAllocations == uint64{2} * ExitedThreadBlocks);
         allocator.Trim();
         CHECK(allocator.Usage().committedBytes == 0);
     }

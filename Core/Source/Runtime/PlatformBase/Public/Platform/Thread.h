@@ -160,17 +160,23 @@ inline constexpr uint32 MaxThreadExitSlots = 8;
 //   null로 지워져 있다(callback 안의 Get은 nullptr이다). 값이 null인 스레드에서는 불리지 않는다.
 //   Thread::Join은 이 호출이 끝난 뒤에 돌아온다.
 // - callback은 짧은 정리(잠금, 메모리 반환)만 한다. 스레드 생성·모듈 로드·다른 스레드 대기를 하지
-//   않고, 같은 칸에 다시 Set하지 않는다. trivial한 thread_local 변수는 callback 안에서 읽고 쓸 수
-//   있다.
+//   않고, 같은 칸에 다시 Set하지 않는다.
+// - callback은 인자로 받은 값만 믿는다. trivial한 thread_local 변수는 callback 안에서 읽고 쓸 수
+//   있지만(접근은 된다) 그 스레드가 두었던 값이 남아 있다는 보장은 없다 — macOS는 thread_local
+//   저장소를 먼저 해제해, 읽으면 초기값이다. 스레드별 자원을 thread_local 포인터로도 가리키는
+//   사용자는 칸의 값을 기준으로 삼는다: 포인터가 초기값이면 Get을 먼저 본다(스레드가 끝나는 동안
+//   다른 종료 정리가 그 자원을 쓸 때, 칸에 살아 있는 값을 새 값으로 덮지 않게).
 // - 다른 스레드 종료 정리(thread_local 소멸자, 다른 칸의 callback)와의 순서는 정해져 있지 않다.
 // - 프로세스가 끝날 때는 부르지 않는다: POSIX는 main 반환·exit에서 소멸자를 부르지 않고, Windows는
 //   종료를 부른 스레드에서 callback을 부르지만(다른 스레드는 이미 강제 종료돼 잠금을 쥔 채일 수
 //   있다) 이 구현이 걸러 낸다. 프로세스 수명과 같은 자원은 OS가 거둔다.
 // - OS가 칸을 주지 않거나 MaxThreadExitSlots를 넘으면 IsValid가 거짓이고 Get은 nullptr, Set은
 //   거짓이다.
-// - 스레드: Get·Set은 아무 스레드에서나 부르고 그 스레드의 값을 읽고 쓴다. 생성은 다른 스레드의
-// 생성과
-//   겹쳐도 된다.
+// - fiber에서 쓰지 않는다. Windows의 값은 fiber마다 따로이고(스레드를 fiber로 바꾸면 그 스레드의
+//   값이 그 fiber의 것이 된다) 정리 함수는 fiber를 지우는 스레드에서 불린다. 값을 둔 스레드와 정리
+//   함수가 도는 스레드가 달라지면 "그 스레드에서 불린다"가 깨진다. 엔진은 fiber를 쓰지 않는다.
+// - 스레드: Get·Set은 아무 스레드에서나 부르고 그 스레드의 값을 읽고 쓴다. 생성끼리는 다른
+//   스레드에서 함께 해도 된다.
 class ThreadExitSlot final {
 public:
     using Callback = void (*)(void* value) noexcept;
