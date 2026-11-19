@@ -131,7 +131,8 @@ uint32 LaneBits(const uint32* filters, uint32 mask, uint32 lanes) noexcept {
 // 타일의 꼭짓점 접촉이 누락된다(리뷰 probe: 200만 건 중 222,907건). 셋째 항 4·FLT_MIN·(‖n‖₁ + 1)은
 // FTZ·DAZ 하한이다: 비정규 값이 0이 되는 오차는 FLT_MIN 규모(곱 3개, 합 3개, 저장 경계·n_f
 // 변환)이고 δ 자체가 비정규면 0이 되므로 이 항이 δ를 정규 값으로 묶는다. FMA 사용 여부와 무관하게
-// 성립한다(FMA는 반올림을 줄이기만 한다). δ는 double로 계산한 뒤 float로 위쪽 반올림한다.
+// 성립한다(FMA는 반올림을 줄이기만 한다). δ는 double로 계산한 뒤 float로 옮기며 위쪽으로 넓힌다(δ
+// 이상).
 //
 // page 전체 분류: 저장 꼭짓점의 n·x는 [−‖n‖₁·R, ‖n‖₁·R]에 있으므로 w′ + ‖n‖₁·R + δ < 0이면 page의
 // 모든 원소가 정답 술어로도 바깥이고(δ가 w′의 double 오차와 정답 술어 오차를 덮는다), w′ − ‖n‖₁·R −
@@ -160,7 +161,10 @@ detail::FlatPagePlane detail::PreparePagePlane(const Plane<double>& plane, const
     const double delta = 8.0 * FloatUnit * (norm1 * reach + math::Abs(wPrime)) +
                          12.0 * DoubleUnit * (norm1 * (originInf + reach) + math::Abs(distance)) +
                          4.0 * FloatMinNormal * (norm1 + 1.0);
-    out.delta = math::ToFloatRoundedUp(delta);
+    // float로 옮길 때 위쪽으로 넓힌다: 최근접 변환 f ≥ δ(1 − u)에 (1 + 8u)를 곱하면(float 곱 반올림
+    // 포함) δ(1 − u)²(1 + 8u) > δ다. δ ≥ 8·FLT_MIN이라 정규 값이고 FTZ·DAZ와 무관하다. 비트 연산의
+    // 방향 반올림(ToFloatRoundedUp)보다 싸서 page·뷰·평면마다 부를 수 있다.
+    out.delta = ToFloatSaturating(delta) * (1.0f + 0x1.0p-21f);
     const double spread = norm1 * reach;
     if (wPrime + spread + delta < 0.0) {
         out.relation = FlatPagePlane::Relation::AllOutside;
@@ -347,18 +351,27 @@ Result<void> FlatBoundsSet::QueryViews(Span<const FlatBoundsView> views, Span<Fl
                             const simd::Register4f maxX = simd::Load(maxX_.Data() + slot);
                             const simd::Register4f maxY = simd::Load(maxY_.Data() + slot);
                             const simd::Register4f maxZ = simd::Load(maxZ_.Data() + slot);
-                            for (uint32 plane = 0; plane < planeCount && tested != 0; ++plane) {
-                                const LanePlane& lane = planes[plane];
-                                const simd::Register4f x = lane.useMaxX ? maxX : minX;
-                                const simd::Register4f y = lane.useMaxY ? maxY : minY;
-                                const simd::Register4f z = lane.useMaxZ ? maxZ : minZ;
-                                // ((n_x·x + n_y·y) + n_z·z) + w′ — 반올림 6번(γ₄ 상한 안).
-                                const simd::Register4f s =
-                                    simd::Add(simd::Add(simd::Add(simd::Multiply(lane.nx, x),
-                                                                  simd::Multiply(lane.ny, y)),
-                                                        simd::Multiply(lane.nz, z)),
-                                              lane.w);
-                                tested &= ~simd::MoveMask(simd::CompareLess(s, lane.negativeDelta));
+                            // 평면 4개마다 한 번만 조기 탈출을 본다(UE IntersectBox8Plane과 같은
+                            // 묶음 단위). 평면마다 분기하면 탈출 위치가 묶음마다 달라 분기 예측이
+                            // 자주 빗나간다. 결과는 평면마다 탈출할 때와 같다.
+                            for (uint32 first = 0; first < planeCount && tested != 0; first += 4) {
+                                const uint32 last = first + 4 < planeCount ? first + 4 : planeCount;
+                                uint32 outside = 0;
+                                for (uint32 plane = first; plane < last; ++plane) {
+                                    const LanePlane& lane = planes[plane];
+                                    const simd::Register4f x = lane.useMaxX ? maxX : minX;
+                                    const simd::Register4f y = lane.useMaxY ? maxY : minY;
+                                    const simd::Register4f z = lane.useMaxZ ? maxZ : minZ;
+                                    // ((n_x·x + n_y·y) + n_z·z) + w′ — 반올림 6번(γ₄ 상한 안).
+                                    const simd::Register4f s =
+                                        simd::Add(simd::Add(simd::Add(simd::Multiply(lane.nx, x),
+                                                                      simd::Multiply(lane.ny, y)),
+                                                            simd::Multiply(lane.nz, z)),
+                                                  lane.w);
+                                    outside |=
+                                        simd::MoveMask(simd::CompareLess(s, lane.negativeDelta));
+                                }
+                                tested &= ~outside;
                             }
                             if (tested != 0 && distance) {
                                 const simd::Register4f zero = simd::Zero();
