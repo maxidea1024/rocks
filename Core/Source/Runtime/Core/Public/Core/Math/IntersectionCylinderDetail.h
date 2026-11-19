@@ -49,6 +49,14 @@ constexpr CylinderCoordinates<T> ToCylinderCoordinates(const Cylinder<T>& cylind
                                   offset - axis * fromStart};
 }
 
+// 수직 성분이 반지름 안(|radial|² <= r²)인지다. 점 포함과 cast의 시작점·옆면 판정이 모두 이 식을
+// 써서 같은 점에 대한 판단이 엇갈리지 않는다. r²이나 |radial|²이 overflow하는 반지름·거리(double 약
+// 1e154 이상, 좌표 계약 1e75 밖)에서는 Inf 비교가 되어 결과를 보장하지 않는다.
+template <typename T>
+constexpr bool CylinderRadialInside(const Vector3<T>& radial, T radius) noexcept {
+    return Dot(radial, radial) <= radius * radius;
+}
+
 // 점 포함 식이다. ContainsPoint, cast의 시작점 판정, 거리·최근접점이 모두 이 식을 써서 한 점에
 // 대한 안·밖 판단이 판정마다 엇갈리지 않는다.
 template <typename T>
@@ -56,16 +64,36 @@ constexpr bool CylinderCoordinatesInside(const CylinderCoordinates<T>& coordinat
                                          T radius) noexcept {
     const T zero = static_cast<T>(0);
     return coordinates.fromStart >= zero && coordinates.fromEnd <= zero &&
-           Dot(coordinates.radial, coordinates.radial) <= radius * radius;
+           CylinderRadialInside(coordinates.radial, radius);
+}
+
+// cylinder 점 포함의 공통 식이다(ContainsPoint와 거리·선분 끝점 보정이 함께 쓴다). radius 0은
+// CastCapsule의 시작 접촉 판정(CapsuleCastStartsInside)과 같은 식이라 Raycast의 startedInside와
+// 엇갈리지 않는다.
+template <typename T>
+bool CylinderContainsPoint(const Cylinder<T>& cylinder, const Vector3<T>& point) noexcept {
+    if (!(cylinder.radius > static_cast<T>(0))) {
+        return CapsuleCastStartsInside(point,
+                                       Capsule<T>(cylinder.start, cylinder.end, static_cast<T>(0)));
+    }
+    return CylinderCoordinatesInside(
+        ToCylinderCoordinates(cylinder, CylinderUnitAxis(cylinder), point), cylinder.radius);
 }
 
 // 곱집합의 성분별 투영이다. 축 방향은 끝면 밖으로 나간 거리, 수직 방향은 반지름 밖으로 나간
-// 거리이며 둘의 제곱합이 거리²다(끝면 모서리 영역에서도 정확하다).
+// 거리이며 둘의 제곱합이 거리²다(끝면 모서리 영역에서도 정확하다). 안(CylinderContainsPoint)의 점은
+// 정확히 0이고, 밖의 점은 반올림·underflow로 제곱합이 그보다 작아져도 가장 작은 양의 정규
+// 값(NumericLimits<T>::Min())으로 올려 "거리² == 0 ⇔ 포함"을 지킨다. 그래서 밖의 점에서 실제
+// 거리²가 그 값보다 작으면 결과가 실제보다 크다.
 template <typename T>
 T CylinderDistanceSquared(const Cylinder<T>& cylinder, const Vector3<T>& point) noexcept {
     const T zero = static_cast<T>(0);
     if (!(cylinder.radius > zero)) {
-        return SegmentDistanceSquared(point, cylinder.start, cylinder.end);
+        if (CylinderContainsPoint(cylinder, point)) {
+            return zero;
+        }
+        return math::Max(SegmentDistanceSquared(point, cylinder.start, cylinder.end),
+                         NumericLimits<T>::Min());
     }
 
     const CylinderCoordinates<T> coordinates =
@@ -81,19 +109,32 @@ T CylinderDistanceSquared(const Cylinder<T>& cylinder, const Vector3<T>& point) 
         axialGap = coordinates.fromEnd;
     }
     const T radialGap = math::Max(StableLength(coordinates.radial) - cylinder.radius, zero);
-    return axialGap * axialGap + radialGap * radialGap;
+    return math::Max(axialGap * axialGap + radialGap * radialGap, NumericLimits<T>::Min());
 }
 
+// ClosestOnCylinder의 안쪽 보정 이분 탐색 횟수 상한이다. double 가수 폭(53비트)보다 많아 매개변수
+// 간격이 한 ulp 아래로 줄어들고, float는 간격이 더 줄지 않으면 먼저 끝난다.
+inline constexpr uint32 CylinderClosestPointBisectionSteps = 64;
+
 // 축 성분은 끝면으로, 수직 성분은 반지름으로 자른다. 안의 점은 그 점 자체를 정확히 돌려준다.
+// 잘라 만든 점이 반올림으로 포함 식(CylinderCoordinatesInside)의 밖이 되면, 포함 식이 안으로 보는
+// 내부 기준점(중심, 아니면 start — start는 축 좌표가 정확히 0이라 항상 안)과 그 점 사이를 이분
+// 탐색해 안으로 판단되는 가장 바깥 점을 돌려준다. 기준점에서 경계까지의 선분은 볼록 집합의 내부를
+// 지나므로 결과는 반올림 수준으로 경계 위의 최근접점이며 ContainsPoint는 항상 Hit다. radius 0은
+// 포함 식(CylinderContainsPoint)이 안이면 그 점 자체, 아니면 선분 위 최근접점이며 이 경우
+// 반올림 때문에 ContainsPoint가 Hit가 아닐 수 있다(두께 없는 선분 위 점의 근사).
 template <typename T>
 Vector3<T> ClosestOnCylinder(const Cylinder<T>& cylinder, const Vector3<T>& point) noexcept {
     const T zero = static_cast<T>(0);
     if (!(cylinder.radius > zero)) {
+        if (CylinderContainsPoint(cylinder, point)) {
+            return point;
+        }
         return ClosestOnSegment(point, cylinder.start, cylinder.end);
     }
 
-    const CylinderCoordinates<T> coordinates =
-        ToCylinderCoordinates(cylinder, CylinderUnitAxis(cylinder), point);
+    const Vector3<T> axis = CylinderUnitAxis(cylinder);
+    const CylinderCoordinates<T> coordinates = ToCylinderCoordinates(cylinder, axis, point);
     if (CylinderCoordinatesInside(coordinates, cylinder.radius)) {
         return point;
     }
@@ -102,13 +143,40 @@ Vector3<T> ClosestOnCylinder(const Cylinder<T>& cylinder, const Vector3<T>& poin
     const Vector3<T> radial = radialLength > cylinder.radius
                                   ? coordinates.radial * (cylinder.radius / radialLength)
                                   : coordinates.radial;
+    Vector3<T> candidate = (point - coordinates.radial) + radial;
     if (coordinates.fromStart < zero) {
-        return cylinder.start + radial;
+        candidate = cylinder.start + radial;
+    } else if (coordinates.fromEnd > zero) {
+        candidate = cylinder.end + radial;
     }
-    if (coordinates.fromEnd > zero) {
-        return cylinder.end + radial;
+
+    const auto inside = [&](const Vector3<T>& value) noexcept {
+        return CylinderCoordinatesInside(ToCylinderCoordinates(cylinder, axis, value),
+                                         cylinder.radius);
+    };
+    if (inside(candidate)) {
+        return candidate;
     }
-    return (point - coordinates.radial) + radial;
+
+    const Vector3<T> center = cylinder.Center();
+    const Vector3<T> anchor = inside(center) ? center : cylinder.start;
+    T low = zero;
+    T high = static_cast<T>(1);
+    Vector3<T> best = anchor;
+    for (uint32 step = 0; step < CylinderClosestPointBisectionSteps; ++step) {
+        const T middle = low + (high - low) * static_cast<T>(0.5);
+        if (!(middle > low && middle < high)) {
+            break;
+        }
+        const Vector3<T> probe = Lerp(anchor, candidate, middle);
+        if (inside(probe)) {
+            low = middle;
+            best = probe;
+        } else {
+            high = middle;
+        }
+    }
+    return best;
 }
 
 // 안(경계 포함)의 점에서 가장 가까운 경계 부분의 바깥 normal이다. 끝면과 옆면까지의 여유가 같으면
@@ -129,6 +197,17 @@ Vector3<T> CylinderNearestBoundaryNormal(const Cylinder<T>& cylinder, const Vect
     return coordinates.radial.NormalizedOr(OpposingDirection(delta));
 }
 
+// 진입 경계의 바깥 normal이다. 끝면은 ±축, 옆면은 hit 시각의 수직 성분 방향이다. 옆면 normal은
+// 접선에 가까운 진입에서 반올림으로 진행 방향과 아주 조금 같은 쪽을 향할 수 있다(근사).
+template <typename T>
+Vector3<T> CylinderEntryNormal(bool throughCap, T axialRate, const Vector3<T>& axis,
+                               const Vector3<T>& radialAtHit, const Vector3<T>& delta) noexcept {
+    if (throughCap) {
+        return axialRate > static_cast<T>(0) ? -axis : axis;
+    }
+    return radialAtHit.NormalizedOr(OpposingDirection(delta));
+}
+
 // 구간 교집합 판정이다(Docs/Design/CylinderShape.ko.md 3.5절, CastBox의 slab과 같은 방식).
 // 1. 축 slab: 두 끝면 평면 사이에 있는 t 구간. 축 방향 속도가 정확히 0이면 slab 안일 때만
 //    전체 구간.
@@ -137,23 +216,34 @@ Vector3<T> CylinderNearestBoundaryNormal(const Cylinder<T>& cylinder, const Vect
 //    안일 때만 전체 구간.
 // 3. 진입 = 두 하한 중 큰 것(시작점 쪽 0 포함), 이탈 = min(두 상한, tMax). 진입 <= 이탈이면 Hit.
 // 진입을 정한 경계의 바깥 normal을 쓰며 끝면과 옆면 진입 시각이 같으면(모서리) 끝면 normal이다.
-// 시작점 안·밖은 CylinderCoordinatesInside와 같은 값으로 판단하고, 밖인데 진입 시각이 반올림으로
-// 0이 되면 시작 접촉(CastInside)으로 본다. radius 0은 Capsule radius 0과 같은 선분 경로다.
+// 시작점 안·밖은 CylinderCoordinatesInside와 같은 식(옆면은 CylinderRadialInside)으로 판단하고,
+// 밖인데 진입 시각이 반올림·underflow로 0이 되면 거리 0, 진입 경계 normal, startedInside = false인
+// Hit다(ContainsPoint와 같은 판단). radius 0은 Capsule radius 0과 같은 선분 경로이며 시작 접촉은
+// CapsuleCastStartsInside(radius 0 ContainsPoint와 같은 식)로만 정한다.
 template <typename T>
 CastResult<T> CastCylinder(const Vector3<T>& origin, const Vector3<T>& delta, T tMax,
                            const Cylinder<T>& cylinder) noexcept {
     const T zero = static_cast<T>(0);
     if (!(cylinder.radius > zero)) {
-        return CastCapsule(origin, delta, tMax, Capsule<T>(cylinder.start, cylinder.end, zero));
+        const Capsule<T> segment(cylinder.start, cylinder.end, zero);
+        CastResult<T> cast = CastCapsule(origin, delta, tMax, segment);
+        if (cast.startedInside && !CapsuleCastStartsInside(origin, segment)) {
+            // CastCapsule이 시작 접촉으로 본 점을 포함 식이 밖으로 보면 거리 0 접촉으로 낸다.
+            cast = CastHit(zero, origin, OpposingDirection(delta));
+        }
+        return cast;
     }
 
     const Vector3<T> axis = CylinderUnitAxis(cylinder);
     const CylinderCoordinates<T> at = ToCylinderCoordinates(cylinder, axis, origin);
     const T radiusSquared = cylinder.radius * cylinder.radius;
+    // 옆면 안·밖은 포함 식과 같은 비교로 정하고 2차식에는 그 차이 값을 쓴다. 밖이면 두 값이 서로
+    // 다른 유한값이라 차이는 0보다 크다(IEEE 뺄셈은 서로 다른 유한값에서 0이 되지 않는다).
+    const bool radialOutside = !CylinderRadialInside(at.radial, cylinder.radius);
     const T radialGap = Dot(at.radial, at.radial) - radiusSquared;
     const bool beforeStart = at.fromStart < zero;
     const bool afterEnd = at.fromEnd > zero;
-    if (!beforeStart && !afterEnd && radialGap <= zero) {
+    if (!beforeStart && !afterEnd && !radialOutside) {
         return CastInside(origin);
     }
 
@@ -187,12 +277,12 @@ CastResult<T> CastCylinder(const Vector3<T>& origin, const Vector3<T>& delta, T 
     const Vector3<T> deltaRadial = delta - axis * axialRate;
     const T a = Dot(deltaRadial, deltaRadial);
     if (!(a > zero)) {
-        if (radialGap > zero) {
+        if (radialOutside) {
             return {};
         }
     } else {
         const T b = Dot(at.radial, deltaRadial);
-        if (radialGap > zero && b >= zero) {
+        if (radialOutside && b >= zero) {
             // 무한 원기둥 밖에서 축에서 멀어지거나(또는 수직으로 지나는) 중이다.
             return {};
         }
@@ -200,7 +290,7 @@ CastResult<T> CastCylinder(const Vector3<T>& origin, const Vector3<T>& delta, T 
         const Vector3<T> closest = at.radial - deltaRadial * (b / a);
         T inner = radiusSquared - Dot(closest, closest);
         if (inner < zero) {
-            if (radialGap > zero) {
+            if (radialOutside) {
                 return {};
             }
             // 무한 원기둥 안에서 출발하면 직선은 반드시 원 안을 지난다. 반올림으로 음수가 된 값은
@@ -209,7 +299,7 @@ CastResult<T> CastCylinder(const Vector3<T>& origin, const Vector3<T>& delta, T 
         }
 
         const T root = math::Sqrt(a * inner);
-        if (radialGap > zero) {
+        if (radialOutside) {
             const T sideEnter = radialGap / (-b + root);
             if (!hasEnter || sideEnter > enter) {
                 enter = sideEnter;
@@ -227,15 +317,14 @@ CastResult<T> CastCylinder(const Vector3<T>& origin, const Vector3<T>& delta, T 
         return {};
     }
     if (!(enter > zero)) {
-        return CastInside(origin);
+        return CastHit(zero, origin,
+                       CylinderEntryNormal(enterThroughCap, axialRate, axis, at.radial, delta));
     }
 
     const Vector3<T> point = origin + delta * enter;
-    if (enterThroughCap) {
-        return CastHit(enter, point, axialRate > zero ? -axis : axis);
-    }
     const Vector3<T> radialAtHit = at.radial + deltaRadial * enter;
-    return CastHit(enter, point, radialAtHit.NormalizedOr(OpposingDirection(delta)));
+    return CastHit(enter, point,
+                   CylinderEntryNormal(enterThroughCap, axialRate, axis, radialAtHit, delta));
 }
 
 // TryBounds 반폭에 곱하는 상대 여유의 크기(machine epsilon 배수)다. 반폭 계산(차분·나눗셈·제곱·

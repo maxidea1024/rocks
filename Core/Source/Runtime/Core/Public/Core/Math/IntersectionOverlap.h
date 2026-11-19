@@ -130,8 +130,9 @@ QueryResult Overlap(const Plane<T>& plane, const Cylinder<T>& cylinder) noexcept
 }
 
 // sphere 중심에서 cylinder까지 제곱 거리 <= r_sphere²다. 거리는 축 방향(끝면 밖)과 수직
-// 방향(반지름 밖) 초과분의 제곱합이다(TryDistanceSquared(cylinder)와 같은 식). radius 0 cylinder는
-// Capsule radius 0과 같은 선분 거리다. 접촉 = Hit은 반올림 한계 안에서 성립한다.
+// 방향(반지름 밖) 초과분의 제곱합이다(TryDistanceSquared(cylinder)와 같은 식). 그래서 반지름 0
+// sphere는 ContainsPoint(cylinder, center)와 같은 결과다. radius 0 cylinder는 선분 거리다. 접촉 =
+// Hit은 반올림 한계 안에서 성립한다.
 template <typename T>
 QueryResult Overlap(const Cylinder<T>& cylinder, const Sphere<T>& sphere) noexcept {
     if (!cylinder.IsValid() || !sphere.IsValid()) {

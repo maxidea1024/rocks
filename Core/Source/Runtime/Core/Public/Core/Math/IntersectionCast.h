@@ -113,12 +113,13 @@ RayHit<T> Raycast(const Ray<T>& ray, const OrientedBox<T>& box,
 // cylinder ray 판정이다. 축 slab 구간과 옆면 2차식 구간의 교집합으로 계산한다.
 // - 축과 평행한 ray와 끝면 평면 안을 스치는 ray도 닫힌 집합이므로 Hit다.
 // - 시작점이 안(경계 포함)이면 거리 0, startedInside = true, normal 영벡터다. 시작점 판정은
-//   ContainsPoint와 같은 식이며, 밖으로 판정했는데 진입 거리가 반올림으로 0이 되면 시작 접촉으로
-//   본다.
+//   ContainsPoint와 같은 식이라 startedInside ⇔ ContainsPoint Hit다. 밖에서 출발했는데 진입 거리가
+//   반올림·underflow로 0이 되면 거리 0, 진입 경계 normal, startedInside = false인 Hit다.
 // - normal은 진입한 경계의 바깥 방향이다(끝면은 ±축, 옆면은 축에서 hit point로 향하는 수직
-//   방향). 끝면과 옆면 진입 거리가 같은 모서리는 끝면 normal이다.
+//   방향). 끝면과 옆면 진입 거리가 같은 모서리는 끝면 normal이다. 접선에 가까운 옆면 진입의
+//   normal은 반올림으로 direction과 아주 조금 같은 쪽(내적이 0보다 약간 큼)일 수 있는 근사다.
 // - radius 0(선분)은 Capsule radius 0과 같다: 선분을 정확히 지나는 ray만 Hit이고 normal은
-//   -direction이다.
+//   -direction이다. 시작 접촉은 ContainsPoint(radius 0)와 같은 식으로만 정한다.
 // 접촉 = Hit은 반올림 한계 안에서 성립한다: 축 정규화·내적·2차식 근을 T로 반올림하므로 경계를
 // 정확히 스치는 ray가 어느 쪽으로든 바뀔 수 있다(좌표축과 평행한 축의 끝면·옆면 접선은 정확하다).
 //
@@ -270,8 +271,7 @@ SegmentHit<T> SegmentCast(const Segment<T>& segment, const Cylinder<T>& cylinder
     }
 
     if (!(cylinder.radius > static_cast<T>(0))) {
-        if (detail::SegmentDistanceSquared(segment.end, cylinder.start, cylinder.end) >
-            static_cast<T>(0)) {
+        if (!detail::CylinderContainsPoint(cylinder, segment.end)) {
             return {};
         }
         return detail::ToSegmentHit(

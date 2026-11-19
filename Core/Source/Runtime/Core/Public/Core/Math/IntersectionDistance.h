@@ -110,7 +110,10 @@ Result<T> TryDistanceSquared(const OrientedBox<T>& box, const Vector3<T>& point)
 
 // cylinder 위(경계 포함)의 최근접점이다. 축 성분을 두 끝면 사이로, 축에 수직인 성분을 반지름으로
 // 자른다(곱집합의 성분별 투영이라 끝면 모서리 영역에서도 정확하다). 안(ContainsPoint와 같은 식)의
-// 점은 그 점 자체를 정확히 돌려준다. radius 0은 선분 위 최근접점이다.
+// 점은 그 점 자체를 정확히 돌려준다. 자른 점이 반올림으로 포함 식의 밖이 되면 안쪽 기준점과의 이분
+// 탐색으로 반올림 수준 안쪽의 경계 점을 돌려주므로, radius > 0이면 결과에 대한 ContainsPoint는 항상
+// Hit다. radius 0은 ContainsPoint가 Hit인 점이면 그 점 자체, 아니면 선분 위 최근접점이며 두께가
+// 없어 결과의 ContainsPoint가 반올림으로 Miss일 수 있다(근사).
 // 실패(InvalidArgument): 잘못된 cylinder, 유한하지 않은 point.
 template <typename T>
 Result<Vector3<T>> TryClosestPoint(const Cylinder<T>& cylinder, const Vector3<T>& point) noexcept {
@@ -121,8 +124,10 @@ Result<Vector3<T>> TryClosestPoint(const Cylinder<T>& cylinder, const Vector3<T>
 }
 
 // cylinder까지의 제곱 거리다. 최근접점까지 거리를 다시 재지 않고 축 방향(끝면 밖)과 수직
-// 방향(반지름 밖) 초과분의 제곱합으로 계산한다. 안의 점은 정확히 0이다. radius 0은 선분까지의 제곱
-// 거리다. 실패(InvalidArgument): 잘못된 cylinder, 유한하지 않은 point.
+// 방향(반지름 밖) 초과분의 제곱합으로 계산한다. 결과가 0이면 ContainsPoint가 Hit이고 그 역도
+// 같다: 안의 점은 정확히 0이고, 밖의 점은 반올림·underflow로 0이 되지 않도록 가장 작은 양의 정규
+// 값(NumericLimits<T>::Min())으로 올린다(실제 거리²가 그보다 작은 밖의 점은 결과가 실제보다 크다).
+// radius 0은 선분까지의 제곱 거리다. 실패(InvalidArgument): 잘못된 cylinder, 유한하지 않은 point.
 template <typename T>
 Result<T> TryDistanceSquared(const Cylinder<T>& cylinder, const Vector3<T>& point) noexcept {
     if (!cylinder.IsValid() || !point.IsFinite()) {

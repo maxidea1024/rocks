@@ -187,6 +187,34 @@ CastResult<T> CastTriangle(const Vector3<T>& origin, const Vector3<T>& delta, T 
     return CastHit(t, origin + delta * t, normal);
 }
 
+// CastCapsule의 시작 접촉 판정이다. 선분 거리 판정(SegmentDistanceSquared <= r²)과 수직 성분
+// 판정(축에 수직인 성분의 제곱 - r² <= 0이고 축 범위 안) 중 하나라도 안이면 안이다. 두 식은
+// 반올림이 달라 옆면 위의 점에서 엇갈릴 수 있으므로 둘 다 본다. CastCapsule 아래쪽의 수직 성분
+// 판정과 같은 식이므로 그 판정이 안이면 여기서도 안이다. radius 0 cylinder의 점 포함 판정도 이 식을
+// 써서 Raycast의 startedInside와 ContainsPoint가 엇갈리지 않는다.
+template <typename T>
+bool CapsuleCastStartsInside(const Vector3<T>& origin, const Capsule<T>& capsule) noexcept {
+    const T zero = static_cast<T>(0);
+    const T radiusSquared = capsule.radius * capsule.radius;
+    if (SegmentDistanceSquared(origin, capsule.start, capsule.end) <= radiusSquared) {
+        return true;
+    }
+
+    const Vector3<T> axis = capsule.end - capsule.start;
+    const T axisLengthSquared = Dot(axis, axis);
+    if (!(axisLengthSquared > zero)) {
+        return false;
+    }
+    const Vector3<T> offset = origin - capsule.start;
+    const Vector3<T> offsetPerpendicular = offset - axis * (Dot(offset, axis) / axisLengthSquared);
+    const T startGap = Dot(offsetPerpendicular, offsetPerpendicular) - radiusSquared;
+    if (!(startGap <= zero)) {
+        return false;
+    }
+    const T alongStart = Dot(offset, axis);
+    return alongStart >= zero && alongStart <= axisLengthSquared;
+}
+
 // capsule = 축 구간의 원기둥 옆면 ∪ 양 끝 구. 시작점이 밖이면 첫 진입은 (축 범위 안의 옆면 진입, 두
 // 끝 구의 진입) 중 가장 이른 것이다. 원기둥의 평평한 끝면은 끝 구 안에 있으므로 따로 검사하지
 // 않는다.
@@ -195,7 +223,7 @@ CastResult<T> CastCapsule(const Vector3<T>& origin, const Vector3<T>& delta, T t
                           const Capsule<T>& capsule) noexcept {
     const T zero = static_cast<T>(0);
     const T radiusSquared = capsule.radius * capsule.radius;
-    if (SegmentDistanceSquared(origin, capsule.start, capsule.end) <= radiusSquared) {
+    if (CapsuleCastStartsInside(origin, capsule)) {
         return CastInside(origin);
     }
 
@@ -221,9 +249,9 @@ CastResult<T> CastCapsule(const Vector3<T>& origin, const Vector3<T>& delta, T t
     const T b = Dot(offsetPerpendicular, deltaPerpendicular);
     const T startGap = Dot(offsetPerpendicular, offsetPerpendicular) - radiusSquared;
     if (startGap <= zero) {
-        // 무한 원기둥 안(표면 포함)에서 출발한다. 축 범위 안이면 capsule 안이다. 위의 선분 거리
-        // 판정과 이 수직 성분 판정은 반올림이 달라 옆면 위의 점에서 결과가 엇갈릴 수 있으므로
-        // 여기서도 시작 접촉으로 처리한다. 축 범위 밖이면 끝 구가 첫 진입이다.
+        // 무한 원기둥 안(표면 포함)에서 출발한다. 축 범위 안이면 capsule 안이며 이 경우는
+        // CapsuleCastStartsInside가 이미 시작 접촉으로 돌려준다(같은 식). 축 범위 밖이면 끝 구가 첫
+        // 진입이다.
         const T alongStart = Dot(offset, axis);
         if (alongStart >= zero && alongStart <= axisLengthSquared) {
             return CastInside(origin);

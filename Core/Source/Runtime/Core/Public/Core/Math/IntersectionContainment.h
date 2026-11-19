@@ -50,19 +50,18 @@ QueryResult ContainsPoint(const OrientedBox<T>& box, const Vector3<T>& point) no
 // t = (p - start)·a >= 0, (p - end)·a <= 0(두 끝면 사이)이고 수직 성분 v = (p - start) - t·a가
 // |v|² <= r²이면 Hit다. p == start, p == end는 정확히 Hit다. 접촉 = Hit은 반올림 한계 안에서
 // 성립한다(좌표축과 평행하지 않은 축은 정규화·내적 반올림으로 경계 위 점이 어느 쪽으로든 바뀔 수
-// 있다). radius 0은 선분 위(최근접 거리 정확히 0)일 때만 Hit다(Capsule radius 0과 같다).
+// 있다). Raycast·SegmentCast의 시작점 판정, TryDistanceSquared == 0, Overlap(cylinder, 반지름 0
+// sphere)와 같은 식이라 결과가 엇갈리지 않는다.
+// radius 0(선분)은 선분 위일 때만 Hit이며 Raycast(cylinder)의 시작 접촉 판정과 같은 식을 쓴다:
+// 선분까지의 최근접 거리²가 0이거나, 축에 수직인 성분의 제곱이 0이고 축 범위 안이다(두 식은
+// 반올림이 달라 둘 다 본다). 이 때문에 선분 거리² 하나만 보는 ContainsPoint(Capsule radius 0)와는
+// 반올림 경계에서 다를 수 있다.
 template <typename T>
 QueryResult ContainsPoint(const Cylinder<T>& cylinder, const Vector3<T>& point) noexcept {
     if (!cylinder.IsValid() || !point.IsFinite()) {
         return QueryResult::InvalidInput;
     }
-    if (!(cylinder.radius > static_cast<T>(0))) {
-        return detail::ToQueryResult(detail::SegmentDistanceSquared(
-                                         point, cylinder.start, cylinder.end) <= static_cast<T>(0));
-    }
-    const detail::CylinderCoordinates<T> coordinates =
-        detail::ToCylinderCoordinates(cylinder, detail::CylinderUnitAxis(cylinder), point);
-    return detail::ToQueryResult(detail::CylinderCoordinatesInside(coordinates, cylinder.radius));
+    return detail::ToQueryResult(detail::CylinderContainsPoint(cylinder, point));
 }
 
 // ===== 평면 분류 =====

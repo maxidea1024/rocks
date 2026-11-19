@@ -1,4 +1,7 @@
 #include <Core/Math/Intersection.h>
+#include <Core/Math/RandomStream.h>
+#include <TestSupport/ExactArithmetic.h>
+#include <TestSupport/GeometryOracles.h>
 #include <TestSupport/Test.h>
 #include <Platform/PlatformMath.h>
 
@@ -8,6 +11,16 @@ using namespace rocks;
 // 3.6절). 경계 포함은 표본 점이 아니라 정확 산술(정수) oracle로 판정한다.
 
 namespace {
+
+using test::BigAdd;
+using test::BigCompare;
+using test::BigFromDouble;
+using test::BigMultiply;
+using test::BigSigned;
+using test::BigSignedSubtract;
+using test::BigSquare;
+using test::BigUnsigned;
+using test::OracleHit;
 
 // ---- 공용 도우미 ----
 template <typename T>
@@ -68,23 +81,22 @@ double MinD(double a, double b) noexcept {
     return a < b ? a : b;
 }
 
-// ---- 결정적 난수(xorshift64*, 고정 seed). 여러 호출은 지역 변수로 순서를 고정한다. ----
+// ---- 결정적 난수(Core RandomStream, 고정 seed) ----
+// 시험용 편의 함수만 더한다. 여러 호출은 지역 변수로 순서를 고정한다.
 struct Random {
-    uint64 state;
+    RandomStream stream;
 
-    explicit Random(uint64 seed) noexcept : state(seed) {
+    explicit Random(uint64 seed) noexcept : stream(seed) {
     }
 
-    uint64 Next() noexcept {
-        state ^= state >> 12;
-        state ^= state << 25;
-        state ^= state >> 27;
-        return state * 2685821657736338717ull;
+    // [0, bound) 균등 정수다.
+    uint32 Below(uint32 bound) noexcept {
+        return stream.NextUInt32Below(bound);
     }
 
     // [0, 1)
     double Unit() noexcept {
-        return static_cast<double>(Next() >> 11) * (1.0 / 9007199254740992.0);
+        return stream.NextDouble01();
     }
 
     double Range(double low, double high) noexcept {
@@ -109,9 +121,8 @@ struct Random {
     }
 
     // [-limit, limit] 정수를 2^-fractionBits 단위로 만든 dyadic 값이다.
-    double Dyadic(int64 limit, int fractionBits) noexcept {
-        const int64 span = 2 * limit + 1;
-        const int64 integer = static_cast<int64>(Next() % static_cast<uint64>(span)) - limit;
+    double Dyadic(uint32 limit, int fractionBits) noexcept {
+        const int64 integer = static_cast<int64>(Below(2 * limit + 1)) - static_cast<int64>(limit);
         double scale = 1.0;
         for (int bit = 0; bit < fractionBits; ++bit) {
             scale *= 0.5;
@@ -188,88 +199,27 @@ OracleRange OraclePlaneRange(const OracleCylinder& cylinder, const Vec3d& normal
     return OracleRange{middle - support, middle + support};
 }
 
-// 볼록 함수의 최솟값을 황금분할 탐색으로 찾는다.
-template <typename Function>
-double MinimizeConvex(double low, double high, Function function, double& argument) noexcept {
-    const double ratio = 0.61803398874989484820;
-    double m1 = high - (high - low) * ratio;
-    double m2 = low + (high - low) * ratio;
-    double f1 = function(m1);
-    double f2 = function(m2);
-    for (int iteration = 0; iteration < 90; ++iteration) {
-        if (f1 <= f2) {
-            high = m2;
-            m2 = m1;
-            f2 = f1;
-            m1 = high - (high - low) * ratio;
-            f1 = function(m1);
-        } else {
-            low = m1;
-            m1 = m2;
-            f1 = f2;
-            m2 = low + (high - low) * ratio;
-            f2 = function(m2);
-        }
-    }
-    argument = (low + high) * 0.5;
-    return function(argument);
+OracleHit OracleCylinderRaycast(const OracleCylinder& cylinder, const Vec3d& origin,
+                                const Vec3d& direction, double maxDistance,
+                                double margin) noexcept {
+    return test::OracleRaycast(origin, direction, maxDistance, margin, [&](const Vec3d& point) {
+        return OracleCylinderSdf(cylinder, point);
+    });
 }
 
-struct OracleHit {
-    enum Kind {
-        Miss,
-        Hit,
-        Inside,
-        Ambiguous
-    };
-    Kind kind;
-    double distance;
-};
-
-// SDF 최솟값의 부호로 Hit/Miss를 정하고 첫 근을 이분법으로 찾는다. 경계에서 margin 이내는
-// 판정하지 않는다(Ambiguous).
-OracleHit OracleRaycast(const OracleCylinder& cylinder, const Vec3d& origin, const Vec3d& direction,
-                        double maxDistance, double margin) noexcept {
-    auto along = [&](double t) { return OracleCylinderSdf(cylinder, origin + direction * t); };
-    const double startValue = along(0.0);
-    if (startValue < -margin) {
-        return {OracleHit::Inside, 0.0};
-    }
-    if (startValue <= margin) {
-        return {OracleHit::Ambiguous, 0.0};
-    }
-
-    double nearest = 0.0;
-    const double minimum = MinimizeConvex(0.0, maxDistance, along, nearest);
-    if (minimum > margin) {
-        return {OracleHit::Miss, 0.0};
-    }
-    if (minimum >= -margin) {
-        return {OracleHit::Ambiguous, 0.0};
-    }
-
-    double low = 0.0;
-    double high = nearest;
-    for (int iteration = 0; iteration < 100; ++iteration) {
-        const double middle = (low + high) * 0.5;
-        if (along(middle) > 0.0) {
-            low = middle;
-        } else {
-            high = middle;
-        }
-    }
-    return {OracleHit::Hit, (low + high) * 0.5};
-}
-
-// 무작위 cylinder다. 일부는 좌표축과 평행한 축, 일부는 radius 0이다.
+// 무작위 cylinder다. 일부는 좌표축과 평행한 축, 거의 평행한 축(1e-7 기울기), radius 0이다.
 OracleCylinder RandomCylinder(Random& random, bool allowSegment) noexcept {
     const Vec3d start = random.Point(6.0);
-    const uint64 shape = random.Next() % 8;
+    const uint32 shape = random.Below(8);
     Vec3d axis = random.UnitVector();
     if (shape == 0) {
         axis = Vec3d(0, 0, 1);
     } else if (shape == 1) {
         axis = Vec3d(-1, 0, 0);
+    } else if (shape == 3) {
+        const Vec3d tilt = random.UnitVector() * 1.0e-7;
+        axis = Vec3d(0, 1, 0) + tilt;
+        axis = axis / axis.Length();
     }
     const double length = random.Range(0.1, 8.0);
     double radius = random.Range(0.05, 3.0);
@@ -285,205 +235,7 @@ Cylinder<T> Narrow(const OracleCylinder& cylinder) noexcept {
                        static_cast<T>(cylinder.radius));
 }
 
-// ---- 정확 산술(경계 포함 oracle) ----
-// 부호 없는 큰 정수다(32비트 limb, 낮은 자리부터). 모든 double은 dyadic 유리수이므로 공통
-// 2의 거듭제곱을 곱해 정수로 바꾸면 경계 포함 조건을 반올림 없이 판정할 수 있다.
-constexpr int BigLimbCapacity = 320;
-constexpr int BigLimbBits = 32;
-
-struct BigUnsigned {
-    uint32 limbs[BigLimbCapacity] = {};
-    int count = 0;
-    bool overflow = false;
-};
-
-void Trim(BigUnsigned& value) noexcept {
-    while (value.count > 0 && value.limbs[value.count - 1] == 0) {
-        --value.count;
-    }
-}
-
-BigUnsigned BigFromMantissa(uint64 mantissa, int shift) noexcept {
-    BigUnsigned result;
-    const int limbShift = shift / BigLimbBits;
-    const int bitShift = shift % BigLimbBits;
-    if (limbShift + 3 > BigLimbCapacity) {
-        result.overflow = true;
-        return result;
-    }
-    const uint32 parts[2] = {static_cast<uint32>(mantissa),
-                             static_cast<uint32>(mantissa >> BigLimbBits)};
-    for (int index = 0; index < 2; ++index) {
-        const uint64 moved = static_cast<uint64>(parts[index]) << bitShift;
-        result.limbs[limbShift + index] |= static_cast<uint32>(moved);
-        result.limbs[limbShift + index + 1] |= static_cast<uint32>(moved >> BigLimbBits);
-    }
-    result.count = limbShift + 3;
-    Trim(result);
-    return result;
-}
-
-int BigCompare(const BigUnsigned& left, const BigUnsigned& right) noexcept {
-    if (left.count != right.count) {
-        return left.count < right.count ? -1 : 1;
-    }
-    for (int index = left.count - 1; index >= 0; --index) {
-        if (left.limbs[index] != right.limbs[index]) {
-            return left.limbs[index] < right.limbs[index] ? -1 : 1;
-        }
-    }
-    return 0;
-}
-
-BigUnsigned BigAdd(const BigUnsigned& left, const BigUnsigned& right) noexcept {
-    BigUnsigned result;
-    const int count = (left.count > right.count ? left.count : right.count) + 1;
-    if (left.overflow || right.overflow || count > BigLimbCapacity) {
-        result.overflow = true;
-        return result;
-    }
-    uint64 carry = 0;
-    for (int index = 0; index < count; ++index) {
-        const uint64 sum = (index < left.count ? left.limbs[index] : 0u) +
-                           static_cast<uint64>(index < right.count ? right.limbs[index] : 0u) +
-                           carry;
-        result.limbs[index] = static_cast<uint32>(sum);
-        carry = sum >> BigLimbBits;
-    }
-    result.count = count;
-    Trim(result);
-    return result;
-}
-
-// left >= right를 전제한다.
-BigUnsigned BigSubtract(const BigUnsigned& left, const BigUnsigned& right) noexcept {
-    BigUnsigned result;
-    if (left.overflow || right.overflow) {
-        result.overflow = true;
-        return result;
-    }
-    int64 borrow = 0;
-    for (int index = 0; index < left.count; ++index) {
-        int64 difference = static_cast<int64>(left.limbs[index]) -
-                           (index < right.count ? static_cast<int64>(right.limbs[index]) : 0) -
-                           borrow;
-        borrow = 0;
-        if (difference < 0) {
-            difference += int64{1} << BigLimbBits;
-            borrow = 1;
-        }
-        result.limbs[index] = static_cast<uint32>(difference);
-    }
-    result.count = left.count;
-    Trim(result);
-    return result;
-}
-
-BigUnsigned BigMultiply(const BigUnsigned& left, const BigUnsigned& right) noexcept {
-    BigUnsigned result;
-    if (left.overflow || right.overflow || left.count + right.count > BigLimbCapacity) {
-        result.overflow = true;
-        return result;
-    }
-    for (int i = 0; i < left.count; ++i) {
-        uint64 carry = 0;
-        for (int j = 0; j < right.count; ++j) {
-            const uint64 current =
-                result.limbs[i + j] + static_cast<uint64>(left.limbs[i]) * right.limbs[j] + carry;
-            result.limbs[i + j] = static_cast<uint32>(current);
-            carry = current >> BigLimbBits;
-        }
-        result.limbs[i + right.count] = static_cast<uint32>(carry);
-    }
-    result.count = left.count + right.count;
-    Trim(result);
-    return result;
-}
-
-struct BigSigned {
-    bool negative = false;
-    BigUnsigned magnitude;
-};
-
-BigSigned BigSignedAdd(const BigSigned& left, const BigSigned& right) noexcept {
-    BigSigned result;
-    if (left.negative == right.negative) {
-        result.negative = left.negative;
-        result.magnitude = BigAdd(left.magnitude, right.magnitude);
-        return result;
-    }
-    if (BigCompare(left.magnitude, right.magnitude) >= 0) {
-        result.negative = left.negative;
-        result.magnitude = BigSubtract(left.magnitude, right.magnitude);
-    } else {
-        result.negative = right.negative;
-        result.magnitude = BigSubtract(right.magnitude, left.magnitude);
-    }
-    if (result.magnitude.count == 0) {
-        result.negative = false;
-    }
-    return result;
-}
-
-BigSigned BigSignedSubtract(const BigSigned& left, const BigSigned& right) noexcept {
-    BigSigned negated = right;
-    negated.negative = !right.negative && right.magnitude.count != 0;
-    return BigSignedAdd(left, negated);
-}
-
-// double = ±mantissa · 2^exponent(mantissa 홀수, 0이면 mantissa 0)다.
-constexpr int DoubleFractionBits = 52;
-constexpr int DoubleExponentBias = 1075;
-constexpr int DoubleLowestExponent = -1074;
-constexpr uint64 DoubleExponentFieldMask = (uint64{1} << 11) - 1;
-
-struct DyadicParts {
-    bool negative;
-    uint64 mantissa;
-    int exponent;
-};
-
-DyadicParts Decompose(double value) noexcept {
-    const uint64 raw = platform::BitCast<uint64>(value);
-    const bool negative = (raw >> 63) != 0;
-    const uint64 field = (raw >> DoubleFractionBits) & DoubleExponentFieldMask;
-    uint64 mantissa = raw & ((uint64{1} << DoubleFractionBits) - 1);
-    int exponent = DoubleLowestExponent;
-    if (field != 0) {
-        mantissa |= uint64{1} << DoubleFractionBits;
-        exponent = static_cast<int>(field) - DoubleExponentBias;
-    }
-    if (mantissa == 0) {
-        return DyadicParts{false, 0, 0};
-    }
-    while ((mantissa & 1) == 0) {
-        mantissa >>= 1;
-        ++exponent;
-    }
-    return DyadicParts{negative, mantissa, exponent};
-}
-
-// value · 2^scale(정수여야 한다)이다.
-BigSigned BigFromDouble(double value, int scale) noexcept {
-    const DyadicParts parts = Decompose(value);
-    BigSigned result;
-    if (parts.mantissa == 0) {
-        return result;
-    }
-    result.negative = parts.negative;
-    const int shift = parts.exponent + scale;
-    if (shift < 0) {
-        result.magnitude.overflow = true;
-        return result;
-    }
-    result.magnitude = BigFromMantissa(parts.mantissa, shift);
-    return result;
-}
-
-BigUnsigned BigSquare(const BigSigned& value) noexcept {
-    return BigMultiply(value.magnitude, value.magnitude);
-}
-
+// ---- 정확 산술(경계 포함 oracle, TestSupport/ExactArithmetic.h) ----
 // 정확 산술 판정 결과다. overflow는 시험 도우미의 용량 부족이다(실패로 센다).
 struct ExactBoundsResult {
     bool contains = true;
@@ -497,13 +249,7 @@ ExactBoundsResult ExactBoundsContainCylinder(const Vec3d& start, const Vec3d& en
                                              const Vec3d& low, const Vec3d& high) noexcept {
     const double values[13] = {start.x, start.y, start.z, end.x,  end.y,  end.z, radius,
                                low.x,   low.y,   low.z,   high.x, high.y, high.z};
-    int scale = 0;
-    for (const double value : values) {
-        const DyadicParts parts = Decompose(value);
-        if (parts.mantissa != 0 && -parts.exponent > scale) {
-            scale = -parts.exponent;
-        }
-    }
+    const int scale = test::DyadicScale(values);
 
     const double starts[3] = {start.x, start.y, start.z};
     const double ends[3] = {end.x, end.y, end.z};
@@ -747,8 +493,8 @@ void PropertyBoundsExact() {
     Random random(CylinderSeed);
     for (int iteration = 0; iteration < 1500; ++iteration) {
         // 정수·dyadic 좌표(2^-6 단위)와 반경, 가끔 큰 좌표 오프셋.
-        const int fractionBits = static_cast<int>(random.Next() % 7);
-        const double offsetScale = (random.Next() % 4) == 0 ? 1.0e8 : 0.0;
+        const int fractionBits = static_cast<int>(random.Below(7));
+        const double offsetScale = random.Below(4) == 0 ? 1.0e8 : 0.0;
         const Vec3d offset{random.Dyadic(8, 0) * offsetScale, random.Dyadic(8, 0) * offsetScale,
                            random.Dyadic(8, 0) * offsetScale};
         const Vec3d start{offset.x + random.Dyadic(4096, fractionBits),
@@ -757,7 +503,7 @@ void PropertyBoundsExact() {
         // 축 성분 하나를 아주 작게 만들어 거의 평행한 축도 넣는다.
         Vec3d axis{random.Dyadic(4096, fractionBits), random.Dyadic(4096, fractionBits),
                    random.Dyadic(4096, fractionBits)};
-        const uint64 squash = random.Next() % 5;
+        const uint32 squash = random.Below(5);
         if (squash == 0) {
             axis.y = axis.y * 1.0e-9;
         } else if (squash == 1) {
@@ -1027,8 +773,8 @@ void PropertyRayAndSegment() {
         const Ray<T> ray = made.Value();
         const double maxDistance = random.Range(5.0, 40.0);
         const RayHit<T> hit = Raycast(ray, cylinder, static_cast<T>(maxDistance));
-        const OracleHit expected =
-            OracleRaycast(oracle, Widen(ray.origin), Widen(ray.direction), maxDistance, margin);
+        const OracleHit expected = OracleCylinderRaycast(oracle, Widen(ray.origin),
+                                                         Widen(ray.direction), maxDistance, margin);
         switch (expected.kind) {
         case OracleHit::Miss:
             CHECK(hit.result == QueryResult::Miss);
@@ -1288,6 +1034,204 @@ void PropertyPlaneAndVolume() {
     }
 }
 
+// =================================================================================================
+// 판정 사이의 일관성(리뷰 반영)과 넓은 분포
+// =================================================================================================
+
+// 한 점에 대한 판정들이 같은 안·밖 판단을 내는지 본다: ContainsPoint ⇔ 거리² == 0 ⇔ 반지름 0 sphere
+// 겹침 ⇔ ray·segment의 startedInside. radius > 0이면 최근접점은 항상 ContainsPoint Hit다.
+template <typename T>
+void CheckPointConsistency(const Cylinder<T>& cylinder, const Vector3<T>& point,
+                           const Vector3<T>& direction) {
+    const bool inside = ContainsPoint(cylinder, point) == QueryResult::Hit;
+    const T distanceSquared = TryDistanceSquared(cylinder, point).Value();
+    CHECK((distanceSquared == 0) == inside);
+    CHECK((Overlap(cylinder, Sphere<T>(point, S<T>(0))) == QueryResult::Hit) == inside);
+    CHECK((Overlap(Sphere<T>(point, S<T>(0)), cylinder) == QueryResult::Hit) == inside);
+
+    const Result<Ray<T>> ray = Ray<T>::TryMake(point, direction);
+    if (ray) {
+        const RayHit<T> hit = Raycast(ray.Value(), cylinder);
+        CHECK(hit.startedInside == inside);
+        if (hit.IsHit() && !hit.startedInside) {
+            CHECK(math::Abs(static_cast<double>(Widen(hit.normal).Length()) - 1.0) <= Loose<T>());
+        }
+    }
+    const SegmentHit<T> segmentHit =
+        SegmentCast(Segment<T>(point, point + direction * S<T>(3)), cylinder);
+    CHECK(segmentHit.startedInside == inside);
+
+    const Vector3<T> closest = TryClosestPoint(cylinder, point).Value();
+    if (cylinder.radius > 0) {
+        CHECK(ContainsPoint(cylinder, closest) == QueryResult::Hit);
+    }
+    if (inside) {
+        CHECK(closest == point);
+    }
+}
+
+// 경계 근처 점(최근접점에서 반올림 수준으로 흔든 점, 끝면·옆면·모서리 위 점)을 많이 만들어 일관성을
+// 본다. 큰 좌표(double 1e9 cm, float 1e4 cm)와 좌표축에 평행·거의 평행한 축을 섞는다.
+template <typename T>
+void PropertyJudgementConsistency() {
+    Random random(CylinderSeed ^ 0x44u);
+    const double largeOffset = IsSameV<T, float> ? 1.0e4 : 1.0e9;
+    for (int iteration = 0; iteration < 4000; ++iteration) {
+        OracleCylinder source = RandomCylinder(random, true);
+        const Vec3d offset =
+            random.Below(3) == 0 ? Vec3d(largeOffset, -largeOffset, largeOffset) : Vec3d();
+        source.start = source.start + offset;
+        source.end = source.end + offset;
+        const Cylinder<T> cylinder = Narrow<T>(source);
+        if (!cylinder.IsValid()) {
+            continue;
+        }
+        const OracleCylinder oracle = ToOracle(cylinder);
+        const Vec3d axis = (oracle.end - oracle.start) / (oracle.end - oracle.start).Length();
+        const Vec3d across = Cross(axis, random.UnitVector());
+        const Vec3d radialDirection =
+            across.Length() > 0 ? across / across.Length() : Vec3d(0, 0, 1);
+
+        // 0: 경계 위 표본(옆면·끝면·모서리), 1: 무작위 점, 2: 무작위 점의 최근접점.
+        const uint32 kind = random.Below(3);
+        Vec3d wide;
+        if (kind == 0) {
+            const uint32 feature = random.Below(3);
+            const double along = feature == 0 ? random.Unit() : static_cast<double>(feature - 1);
+            const double radial = feature == 0 ? oracle.radius : oracle.radius * random.Unit();
+            wide = oracle.start + (oracle.end - oracle.start) * along + radialDirection * radial;
+        } else {
+            wide = (oracle.start + oracle.end) * 0.5 + random.Point(8.0);
+        }
+        Vector3<T> point(wide);
+        if (kind == 2) {
+            point = TryClosestPoint(cylinder, point).Value();
+        }
+        const Vector3<T> direction(random.UnitVector());
+        CheckPointConsistency(cylinder, point, direction);
+    }
+}
+
+// 접선 ray와 maxDistance = 정확한 진입 거리. 옆면 접선에 가까운 ray는 진입하면 hit point가 표면
+// 근처이고, 같은 ray를 진입 거리로 자르면 같은 hit, 한 ulp 짧게 자르면 Miss다.
+template <typename T>
+void PropertyTangentAndExactMaxDistance() {
+    Random random(CylinderSeed ^ 0x55u);
+    const double largeOffset = IsSameV<T, float> ? 1.0e4 : 1.0e9;
+    int exactChecks = 0;
+    for (int iteration = 0; iteration < 3000; ++iteration) {
+        OracleCylinder source = RandomCylinder(random, false);
+        const bool far = random.Below(3) == 0;
+        const Vec3d offset = far ? Vec3d(-largeOffset, largeOffset, largeOffset) : Vec3d();
+        source.start = source.start + offset;
+        source.end = source.end + offset;
+        const Cylinder<T> cylinder = Narrow<T>(source);
+        if (!cylinder.IsValid()) {
+            continue;
+        }
+        const OracleCylinder oracle = ToOracle(cylinder);
+        const Vec3d axis = (oracle.end - oracle.start) / (oracle.end - oracle.start).Length();
+        const Vec3d across = Cross(axis, random.UnitVector());
+        if (across.Length() == 0) {
+            continue;
+        }
+        const Vec3d radialDirection = across / across.Length();
+        const Vec3d tangent = Cross(axis, radialDirection);
+        const Vec3d surface = oracle.start + (oracle.end - oracle.start) * random.Unit() +
+                              radialDirection * oracle.radius;
+        // 접선 방향에 축 성분과 아주 작은 안쪽·바깥쪽 기울기를 섞는다.
+        const double tilt = random.Range(-1.0e-6, 1.0e-6);
+        const Vec3d mixed = tangent + axis * random.Range(-0.5, 0.5) + radialDirection * tilt;
+        const Vec3d direction = mixed / mixed.Length();
+        const double back = random.Range(1.0, 10.0);
+        const Result<Ray<T>> made =
+            Ray<T>::TryMake(Vector3<T>(surface - direction * back), Vector3<T>(direction));
+        if (!made) {
+            continue;
+        }
+        const Ray<T> ray = made.Value();
+        const RayHit<T> hit = Raycast(ray, cylinder);
+        CHECK(hit.startedInside == (ContainsPoint(cylinder, ray.origin) == QueryResult::Hit));
+        if (!hit.IsHit() || hit.startedInside) {
+            continue;
+        }
+
+        const double margin = Loose<T>() * 10.0 + 64.0 *
+                                                      static_cast<double>(math::MachineEpsilon<T>) *
+                                                      (far ? largeOffset : 20.0);
+        CHECK(math::Abs(OracleCylinderSdf(oracle, Widen(hit.point))) <= margin);
+        CHECK(math::Abs(Widen(hit.normal).Length() - 1.0) <= Loose<T>());
+        // 접선 진입 normal은 근사다: direction과 같은 쪽이어도 좌표 반올림 / 반지름 정도로 아주
+        // 조금이다.
+        CHECK(Dot(Widen(hit.normal), Widen(ray.direction)) <=
+              margin / static_cast<double>(cylinder.radius));
+
+        if (hit.distance > 0) {
+            const RayHit<T> exact = Raycast(ray, cylinder, hit.distance);
+            CHECK(exact.IsHit() && exact.distance == hit.distance && exact.point == hit.point);
+            CHECK(Raycast(ray, cylinder, math::NextDown(hit.distance)).result == QueryResult::Miss);
+            ++exactChecks;
+        }
+    }
+    CHECK(exactChecks > 500);
+}
+
+// 리뷰 반례 1: 축이 x 방향 1 ulp인 아주 얇은 축, 큰 반경. ContainsPoint가 Miss인데 거리²가 0이던
+// 점이다(포함은 |radial|² <= r², 거리는 |radial| - r로 식이 달랐다).
+void CheckReviewDistanceZeroMatchesContains() {
+    const Vec3d start(0x1.926fbea9853e0p-4, -0x1.2035b6001f1b4p-2, 0x1.1567edf93a928p-2);
+    const Vec3d end(math::NextUp(start.x), start.y, start.z);
+    const Cylinder<double> cylinder(start, end, 0x1.e73cff691c7bbp+20);
+    REQUIRE(cylinder.IsValid());
+    const Vec3d point(0x1.926fbea9853e0p-4, -0x1.dd21c2cd963f2p+20, -0x1.8ae50178a3ed2p+18);
+    CheckPointConsistency(cylinder, point, Vec3d(0, 0, 1));
+}
+
+// 리뷰 반례 2: radius 0(z축 평행 선분) 위의 점에서 출발한 ray가 startedInside인데 ContainsPoint가
+// Miss였다(CastCapsule은 두 식, ContainsPoint는 한 식). radius 0 포함 판정을 CastCapsule 시작
+// 판정과 같은 식으로 맞췄다.
+template <typename T>
+void CheckReviewSegmentStartMatchesContains() {
+    const Cylinder<T> segment(V<T>(-6.04e-4, 5.38e-4, -4.67e-4), V<T>(-6.04e-4, 5.38e-4, 1.20e-3),
+                              S<T>(0));
+    REQUIRE(segment.IsValid());
+    const Vector3<T> origin = V<T>(-6.04e-4, 5.38e-4, 3.67e-4);
+    const Ray<T> ray(origin, V<T>(-0.0, -0.0, -1));
+    REQUIRE(ray.IsValid());
+    const RayHit<T> hit = Raycast(ray, segment);
+    CHECK(hit.startedInside == (ContainsPoint(segment, origin) == QueryResult::Hit));
+    CheckPointConsistency(segment, origin, V<T>(-0.0, -0.0, -1));
+
+    // radius 0 축에 놓인 점들(선분 위 보간점)도 같다.
+    Random random(CylinderSeed ^ 0x66u);
+    for (int iteration = 0; iteration < 2000; ++iteration) {
+        const OracleCylinder source{random.Point(1.0e-2), random.Point(1.0e-2), 0.0};
+        const Cylinder<T> line = Narrow<T>(source);
+        const Vector3<T> on = Lerp(line.start, line.end, static_cast<T>(random.Unit()));
+        CheckPointConsistency(line, on, Vector3<T>(random.UnitVector()));
+    }
+}
+
+// 밖에서 출발했는데 진입 시각이 0으로 underflow하면 startedInside가 아니라 거리 0 접촉이다.
+// 끝면에서 가장 작은 비정규 거리만큼 떨어진 점에서 축 방향 길이 4의 segment를 쏘면 진입 t = dmin /
+// 4가 0이 된다.
+void CheckUnderflowEntryIsSurfaceContact() {
+    const Cylinder<double> upright(Vec3d(0, 0, 0), Vec3d(0, 0, 2), 1.0);
+    const Vec3d origin(0.5, 0, -math::NextUp(0.0));
+    REQUIRE(ContainsPoint(upright, origin) == QueryResult::Miss);
+    const SegmentHit<double> contact =
+        SegmentCast(Segment<double>(origin, origin + Vec3d(0, 0, 4)), upright);
+    REQUIRE(contact.IsHit());
+    CHECK(!contact.startedInside);
+    CHECK(IsPositiveZero(contact.t));
+    CHECK(contact.normal == Vec3d(0, 0, -1));
+    const RayHit<double> hit = Raycast(Ray<double>(origin, Vec3d(0, 0, 1)), upright);
+    REQUIRE(hit.IsHit());
+    CHECK(!hit.startedInside);
+    CHECK(hit.normal == Vec3d(0, 0, -1));
+    CHECK(TryDistanceSquared(upright, origin).Value() > 0);
+}
+
 } // namespace
 
 TEST(CylinderConstructionAndValidity) {
@@ -1379,4 +1323,27 @@ TEST(CylinderAndCapsuleVolumeClassification) {
 TEST(CylinderAndCapsulePropertyPlaneAndVolume) {
     PropertyPlaneAndVolume<float>();
     PropertyPlaneAndVolume<double>();
+}
+
+TEST(CylinderReviewJudgementConsistency) {
+    PropertyJudgementConsistency<float>();
+    PropertyJudgementConsistency<double>();
+}
+
+TEST(CylinderReviewTangentRaysAndExactMaxDistance) {
+    PropertyTangentAndExactMaxDistance<float>();
+    PropertyTangentAndExactMaxDistance<double>();
+}
+
+TEST(CylinderReviewDistanceZeroMatchesContains) {
+    CheckReviewDistanceZeroMatchesContains();
+}
+
+TEST(CylinderReviewSegmentStartMatchesContains) {
+    CheckReviewSegmentStartMatchesContains<float>();
+    CheckReviewSegmentStartMatchesContains<double>();
+}
+
+TEST(CylinderReviewUnderflowEntryIsSurfaceContact) {
+    CheckUnderflowEntryIsSurfaceContact();
 }
