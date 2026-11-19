@@ -14,6 +14,7 @@
 using namespace rocks;
 using namespace rocks::trace_control;
 using rocks::test::config::ConfigFixture;
+using rocks::test::config::DevelopmentRules;
 using rocks::tracetest::MemoryOutput;
 using rocks::tracetest::TempTracePath;
 
@@ -114,7 +115,7 @@ TEST(TraceControl_PresetsExpandFromConfigLayers) {
 // 콘솔 명령 trace.enable·trace.file·trace.stop·trace.snapshot·trace.disable은 Sync에서 실행되어
 // 세션을 바꾼다. 파일과 스냅샷은 분석기로 읽을 수 있다.
 TEST(TraceControl_ConsoleCommandsDriveSession) {
-    ConfigFixture fixture;
+    ConfigFixture fixture(DevelopmentRules());
     PrepareTraceSettings(fixture);
     config::ConfigContext& settings = fixture.Context();
     REQUIRE(settings.Sync());

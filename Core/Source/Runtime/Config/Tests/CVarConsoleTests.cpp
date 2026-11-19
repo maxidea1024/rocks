@@ -1,6 +1,7 @@
 #include "ConfigTestSupport.h"
 
 #include <Config/CVar.h>
+#include <Core/ScopeExit.h>
 #include <Platform/Thread.h>
 
 // CVar CVR6 콘솔 도구 시험이다(Docs/Design/CVarSystem.ko.md 13·15절): 표시(enum `3
@@ -162,7 +163,7 @@ void StripComments(StringView text, String& out) noexcept {
 // `<이름>`은 값(enum `2 (Medium)`)과 출처 스택, `?`는 종류·범위·도움말을 보인다. enum은 수로도
 // 쓴다(표에 없는 수는 거부). 부팅 변수는 `[boot]`, 재시작 대기 값과 품질 묶음 펼침 줄이 붙는다.
 TEST(CVar_ConsoleShowsValuesAndExplain) {
-    ConfigFixture fixture;
+    ConfigFixture fixture(DevelopmentRules());
     ConfigContext& context = fixture.Context();
     REQUIRE(context.Register(ConsoleTierVar, ConsoleDistance, ConsoleWorkers, ConsoleLeaf,
                              ConsoleGroup));
@@ -216,7 +217,7 @@ TEST(CVar_ConsoleShowsValuesAndExplain) {
 
 // cvar.find·cvar.explain·cvar.dump는 명령이다(Sync 5단계에 실행하고 sink에 쓴다).
 TEST(CVar_ConsoleToolCommands) {
-    ConfigFixture fixture;
+    ConfigFixture fixture(DevelopmentRules());
     ConfigContext& context = fixture.Context();
     REQUIRE(context.Register(ConsoleTierVar, ConsoleDistance, ConsoleTitle));
     REQUIRE(context.Sync());
@@ -239,14 +240,49 @@ TEST(CVar_ConsoleToolCommands) {
     CHECK(transcript.Contains("cvar.dump takes no argument or 'overrides'"));
 }
 
-// 치트 허용 상태가 꺼지면 치트 변수의 콘솔 쓰기와 치트 명령을 거부한다(CheatsDisabled). 켜면 다시
-// 받는다. 파일·`--set`은 막지 않는다.
-TEST(CVar_ConsoleCheatPermission) {
-    ConfigFixture fixture;
+namespace {
+
+// 출시 빌드의 치트 계약이다(CVar 13.1·19절 — Release 구성에서 도는 시험): Cheat 핸들·치트 명령의
+// Register는 성공하지만 등록되지 않는다. 이름으로 못 찾고 콘솔에서 모르는 이름이며, Get()은
+// 기본값, Set은 Unsupported, 치트 명령의 BindCommand·UnbindCommand는 성공하는 무동작이고 대상
+// 함수는 불리지 않는다.
+[[maybe_unused]] void CheckReleaseCheatContract(ConfigFixture& fixture) noexcept {
     ConfigContext& context = fixture.Context();
     REQUIRE(context.Register(ConsoleGod, ConsoleSpawn));
     Counter counter;
     REQUIRE(context.BindCommand(ConsoleSpawn, counter));
+    REQUIRE(context.BindCommand(ConsoleSpawn, counter));
+    CHECK(context.FindConsoleSetting("cheat.console.god").Error() == ErrorCode::NotFound);
+    CHECK(ConsoleGod.Set(true).Error() == ErrorCode::Unsupported);
+    Transcript transcript(fixture.system);
+    auto write = Run(context, transcript, "cheat.console.god true");
+    CHECK(write && write.Value() == ConsoleLineResult::Unknown);
+    auto command = Run(context, transcript, "cheat.console.spawn 2");
+    CHECK(command && command.Value() == ConsoleLineResult::Unknown);
+    REQUIRE(context.Sync());
+    CHECK(!ConsoleGod.Get() && counter.calls == 0);
+    REQUIRE(context.UnbindCommand(ConsoleSpawn, counter));
+    REQUIRE(context.UnbindCommand(ConsoleSpawn, counter));
+}
+
+} // namespace
+
+// 치트 허용 상태가 꺼지면 치트 변수의 콘솔 쓰기와 치트 명령을 거부한다(CheatsDisabled). 켜면 다시
+// 받는다. 파일·`--set`은 막지 않는다. 출시 빌드는 치트 계약을 단언한다.
+TEST(CVar_ConsoleCheatPermission) {
+    ConfigFixture fixture(DevelopmentRules());
+    if constexpr (IsReleaseBuild) {
+        CheckReleaseCheatContract(fixture);
+        return;
+    }
+
+    ConfigContext& context = fixture.Context();
+    REQUIRE(context.Register(ConsoleGod, ConsoleSpawn));
+    Counter counter;
+    REQUIRE(context.BindCommand(ConsoleSpawn, counter));
+    // REQUIRE가 실패해 일찍 끝나도 대상을 푼다(묶인 채 문맥을 없애면 Fatal — 19절 시험 정리).
+    auto unbind = MakeScopeExit(
+        [&]() noexcept { static_cast<void>(context.UnbindCommand(ConsoleSpawn, counter)); });
     REQUIRE(context.Sync());
     Transcript transcript(fixture.system);
     REQUIRE(Run(context, transcript, "cheat.console.god true"));
@@ -280,13 +316,17 @@ TEST(CVar_ConsoleCheatPermission) {
     // 치트 허용 상태는 콘솔에서 바꿀 수 없다(게임 규칙의 Code 층을 콘솔이 이기지 않게 — 13.1절).
     auto toggle = Run(context, transcript, "cheat.enabled false");
     CHECK(toggle && toggle.Value() == ConsoleLineResult::Rejected);
-    REQUIRE(context.UnbindCommand(ConsoleSpawn, counter));
 }
 
 // 적용 때 치트 판정은 큐 순서다: 쓰기 뒤에 치트를 끄면 그 쓰기는 받고, 치트를 끈 변경(Code·서버
 // import) 뒤에 놓인 쓰기는 거부한다(콘솔 층 문서 입력도 같다).
 TEST(CVar_ConsoleCheatQueueOrder) {
-    ConfigFixture fixture;
+    ConfigFixture fixture(DevelopmentRules());
+    if constexpr (IsReleaseBuild) {
+        CheckReleaseCheatContract(fixture);
+        return;
+    }
+
     ConfigContext& context = fixture.Context();
     REQUIRE(context.Register(ConsoleGod));
     REQUIRE(context.Sync());
@@ -330,13 +370,22 @@ TEST(CVar_ConsoleCheatQueueOrder) {
 // 명령 대상: 같은 명령에 대상 둘을 차례로 묶으면 뒤의 것이고, 앞 대상의 풀기는 뒤 대상을 풀지
 // 않는다. 풀린 뒤의 실행은 대상이 null이다.
 TEST(CVar_ConsoleCommandTargets) {
-    ConfigFixture fixture;
+    ConfigFixture fixture(DevelopmentRules());
+    if constexpr (IsReleaseBuild) {
+        CheckReleaseCheatContract(fixture);
+        return;
+    }
+
     ConfigContext& context = fixture.Context();
     REQUIRE(context.Register(ConsoleSpawn));
     Counter first;
     Counter second;
     REQUIRE(context.BindCommand(ConsoleSpawn, first));
     REQUIRE(context.BindCommand(ConsoleSpawn, second));
+    auto unbind = MakeScopeExit([&]() noexcept {
+        static_cast<void>(context.UnbindCommand(ConsoleSpawn, first));
+        static_cast<void>(context.UnbindCommand(ConsoleSpawn, second));
+    });
     REQUIRE(context.UnbindCommand(ConsoleSpawn, first));
     Transcript transcript(fixture.system);
     REQUIRE(Run(context, transcript, "cheat.console.spawn 4"));
@@ -360,7 +409,7 @@ TEST(CVar_ConsoleCommandTargets) {
 
 // NaN·무한대는 모든 입력 경로가 거부한다(범위 없는 CVar·동적 변수·설정 struct 필드).
 TEST(CVar_ConsoleRejectsNonFiniteNumbers) {
-    ConfigFixture fixture;
+    ConfigFixture fixture(DevelopmentRules());
     ConfigContext& context = fixture.Context();
     REQUIRE(context.Register(ConsoleScale));
     DynamicVarDefinition ratio;
@@ -385,7 +434,7 @@ TEST(CVar_ConsoleRejectsNonFiniteNumbers) {
 // 바뀌었으면 거부한다. 서버의 ExportReplicated 목록을 클라이언트가 ImportReplicated하면 서버 층
 // 값이 되고, 다음 목록에 없는 값은 빠진다.
 TEST(CVar_ConsoleReplicationRoles) {
-    ConfigFixture server;
+    ConfigFixture server(DevelopmentRules());
     ConfigContext& host = server.Context();
     REQUIRE(host.Register(ConsoleShared, ConsoleOther));
     REQUIRE(host.SetNetworkRole(NetworkRole::Server));
@@ -409,7 +458,7 @@ TEST(CVar_ConsoleReplicationRoles) {
         copies[index] = {names[index].View(), texts[index].View()};
     }
 
-    ConfigFixture client;
+    ConfigFixture client(DevelopmentRules());
     ConfigContext& remote = client.Context();
     REQUIRE(remote.Register(ConsoleShared, ConsoleOther));
     REQUIRE(remote.SetNetworkRole(NetworkRole::Client));
@@ -454,7 +503,7 @@ TEST(CVar_ConsoleExportIncludesDefaults) {
     String texts[3] = {String(strings), String(strings), String(strings)};
     ReplicatedValue copies[3];
     {
-        ConfigFixture server;
+        ConfigFixture server(DevelopmentRules());
         ConfigContext& host = server.Context();
         REQUIRE(host.Register(ConsoleShared, ConsoleOther));
         REQUIRE(host.SetNetworkRole(NetworkRole::Server));
@@ -470,7 +519,7 @@ TEST(CVar_ConsoleExportIncludesDefaults) {
         }
     }
 
-    ConfigFixture client;
+    ConfigFixture client(DevelopmentRules());
     ConfigContext& remote = client.Context();
     REQUIRE(remote.Register(ConsoleShared, ConsoleOther));
     REQUIRE(remote.AddAssignment(ConfigLayer::Session, "--set", "net.console.shared", "7"));
@@ -489,7 +538,7 @@ TEST(CVar_ConsoleDumpRoundTrip) {
     String dumped(allocator);
     String expected(allocator);
     {
-        ConfigFixture fixture;
+        ConfigFixture fixture(DevelopmentRules());
         ConfigContext& context = fixture.Context();
         REQUIRE(context.Register(ConsoleTierVar, ConsoleDistance, ConsoleTitle, ConsoleWorkers,
                                  ConsoleLeaf, ConsoleGroup));
@@ -514,7 +563,7 @@ TEST(CVar_ConsoleDumpRoundTrip) {
         REQUIRE(context.DumpConsoleValues(expected, false));
     }
 
-    ConfigFixture fixture;
+    ConfigFixture fixture(DevelopmentRules());
     ConfigContext& context = fixture.Context();
     REQUIRE(context.Register(ConsoleTierVar, ConsoleDistance, ConsoleTitle, ConsoleWorkers,
                              ConsoleLeaf, ConsoleGroup));
@@ -560,7 +609,7 @@ void SubmitOffThread(void* raw) noexcept {
 // 명령은 다음 Sync 5단계에 게임 lane이 처리한다(출력은 그 입력의 sink). 모르는 이름은 바로, 잘못된
 // 값은 Sync가 꺼낼 때 sink에 알린다. 게임 lane이 아닌 ExecuteConsoleLine은 WrongThread다.
 TEST(CVar_ConsoleInputFromAnotherThread) {
-    ConfigFixture fixture;
+    ConfigFixture fixture(DevelopmentRules());
     ConfigContext& context = fixture.Context();
     REQUIRE(context.Register(ConsoleTierVar, ConsoleLeaf));
     REQUIRE(context.Sync());
@@ -588,7 +637,7 @@ TEST(CVar_ConsoleInputFromAnotherThread) {
 
 // 입구의 권한 판정(치트·콘솔 읽기 전용·봉인)과 치트 명령 도움말, 문맥이 없어진 뒤의 입력.
 TEST(CVar_ConsolePortPermissionsAndShutdown) {
-    ConfigFixture fixture;
+    ConfigFixture fixture(DevelopmentRules());
     ConsoleInputPort port;
     {
         ConfigContext& context = fixture.Context();
@@ -598,9 +647,15 @@ TEST(CVar_ConsolePortPermissionsAndShutdown) {
         REQUIRE(context.CompleteStartup());
         port = context.MakeConsoleInputPort();
         Transcript transcript(fixture.system);
+        // 출시 빌드는 치트 이름이 등록되지 않는다(모르는 이름 — 19절 출시 치트 계약).
         auto cheat = port.Execute("cheat.console.god true", transcript.Output());
-        CHECK(cheat && cheat.Value() == ConsoleLineResult::Rejected &&
-              transcript.Contains("cheat.console.god is a cheat and cheats are disabled"));
+        if constexpr (IsReleaseBuild) {
+            CHECK(cheat && cheat.Value() == ConsoleLineResult::Unknown);
+        } else {
+            CHECK(cheat && cheat.Value() == ConsoleLineResult::Rejected &&
+                  transcript.Contains("cheat.console.god is a cheat and cheats are disabled"));
+        }
+
         auto locked = port.Execute("render.console.locked true", transcript.Output());
         CHECK(locked && locked.Value() == ConsoleLineResult::Rejected &&
               transcript.Contains("render.console.locked is read-only on the console"));
@@ -608,11 +663,17 @@ TEST(CVar_ConsolePortPermissionsAndShutdown) {
         CHECK(sealed && sealed.Value() == ConsoleLineResult::Rejected &&
               transcript.Contains("game.console.workers is a boot variable"));
         auto help = port.Execute("cheat.console.spawn ?", transcript.Output());
-        CHECK(help && help.Value() == ConsoleLineResult::CommandQueued);
         auto run = port.Execute("cheat.console.spawn 1", transcript.Output());
-        CHECK(run && run.Value() == ConsoleLineResult::Rejected);
         REQUIRE(context.Sync());
-        CHECK(transcript.Contains("cheat.console.spawn (command <int32>)"));
+        if constexpr (IsReleaseBuild) {
+            CHECK(help && help.Value() == ConsoleLineResult::Unknown);
+            CHECK(run && run.Value() == ConsoleLineResult::Unknown);
+        } else {
+            CHECK(help && help.Value() == ConsoleLineResult::CommandQueued);
+            CHECK(run && run.Value() == ConsoleLineResult::Rejected);
+            CHECK(transcript.Contains("cheat.console.spawn (command <int32>)"));
+        }
+
         CHECK(context.GetNetworkRole() == NetworkRole::Standalone);
     }
 

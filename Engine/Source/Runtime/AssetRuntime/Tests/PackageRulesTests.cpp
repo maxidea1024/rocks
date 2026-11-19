@@ -106,9 +106,9 @@ TEST(AssetPackage_SharedBulkEditorOnlyFlag) {
     }
 }
 
-// ImportOwner 의존(에디터 패키지 — 다중 출력의 Import 기록 소유자)은 기록되고 로드 대조에서 빠진다
-// (ImportRecord 대조는 A2).
-TEST(AssetPackage_ImportOwnerDependencyIsNotCrossChecked) {
+// ImportOwner 의존(에디터 패키지 — 다중 출력의 Import 기록 소유자)은 기록되고, ImportRecord와의
+// 로드 대조는 A2로 미룬다(ImportRecord 스키마가 A2 — AS 5.7절 17). 지금은 대조하지 않음을 고정한다.
+TEST(AssetPackage_ImportOwnerCrossCheckDeferredToA2) {
     AssetEnv env;
     REQUIRE(env.Ready());
     ObjectRegistry& registry = *env.source;

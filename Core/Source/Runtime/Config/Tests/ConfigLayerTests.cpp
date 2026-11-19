@@ -179,7 +179,7 @@ TEST(Config_StrictKeysReportJsonPositions) {
 // 층 파일은 줄 주석을 받는다(4.1절). 사용자 층은 UserConfig 필드만 쓸 수 있고, 출시 규칙에서는
 // DevelopmentOnly 필드를 어떤 층도 쓸 수 없다(층 허용 진단은 그 멤버 값 위치).
 TEST(Config_CommentsAndLayerPermissions) {
-    ConfigFixture fixture;
+    ConfigFixture fixture(DevelopmentRules());
     ConfigContext& context = fixture.Context();
     REQUIRE(context.AddLayerText(ConfigLayer::Engine, "Render.json", "Render", "engine",
                                  "// 엔진 기본값\n{\n  \"RenderGraph\": { // 그래프\n"
