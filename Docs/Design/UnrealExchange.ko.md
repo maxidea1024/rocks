@@ -1,6 +1,6 @@
 # Unreal 교환 형식과 추출 플러그인 설계
 
-기준일: 2026-11-20, 개정 3(13절 요구를 다른 문서에 반영하고 상태 열을 더함, 태그 키 이름). 개정 2(교차 검증 반영 — 18절). UE 에디터에서 텍스처·정적 메시·스켈레톤·스킨 메시·애니메이션 클립·머티리얼을 꺼내 Rocks 에셋으로 가져오는 경로를 정한다. 경로는 세 부분이다. UE 쪽 추출 플러그인 `RocksExport`, 둘 사이의 교환 형식 **Unreal 교환 묶음**, Rocks 쪽 임포터 플러그인 `UnrealExchange`다.
+기준일: 2026-11-20, 개정 4(UXR5 경계 정책 검사 구현 — 11.1절). 개정 3(13절 요구를 다른 문서에 반영하고 상태 열을 더함, 태그 키 이름). 개정 2(교차 검증 반영 — 18절). UE 에디터에서 텍스처·정적 메시·스켈레톤·스킨 메시·애니메이션 클립·머티리얼을 꺼내 Rocks 에셋으로 가져오는 경로를 정한다. 경로는 세 부분이다. UE 쪽 추출 플러그인 `RocksExport`, 둘 사이의 교환 형식 **Unreal 교환 묶음**, Rocks 쪽 임포터 플러그인 `UnrealExchange`다.
 
 - 배경: 사용자 지시(2026-11-19). 엔진 시험을 위해 UE에서 쓰던 콘텐츠를 Rocks로 가져온다. `.uasset`을 직접 해석하는 방식은 어려움이 많으므로 UE 플러그인이 Rocks가 읽을 수 있는 형태로 추출한다.
 - 받는 쪽 자료구조: 텍스처는 [에셋 시스템](AssetSystem.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절, 메시·스켈레톤·애니메이션은 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md)이 정한다. 이 문서는 추출과 대응만 다룬다.
@@ -344,7 +344,11 @@ Extras/UnrealExport/RocksExport/
   README.md                                     설치(UE 프로젝트 Plugins/에 복사 또는 링크)·사용법
 ```
 
-- `Extras/`는 Rocks 빌드 규칙 glob(Build/Rules/Rocks.Engine.Rules.csproj:13-16), 정책 검사 루트(Programs/Rocks.Tooling.Checks/PolicyChecks.cs:61-64), C# 서식 루트(FormatCheck.cs:26) 어디에도 들지 않는다. Rocks 빌드와 검사는 이 코드를 보지 않는다. 정책 검사에 "`Extras/` 아래에 Rocks 모듈 규칙·서술자가 없다"를 확인하는 항목을 더한다(요구 UXR5).
+- `Extras/`는 Rocks 빌드 규칙 glob(Build/Rules/Rocks.Engine.Rules.csproj:13-16), 정책 검사 루트(Programs/Rocks.Tooling.Checks/PolicyChecks.cs:61-64), C# 서식 루트(FormatCheck.cs:26) 어디에도 들지 않는다. Rocks 빌드와 검사는 이 코드를 보지 않는다.
+- **경계 정책 검사 `foreign-engine-boundary`**(요구 UXR5, 구현 2026-11-20 — `PolicyChecks.ForeignEngineBoundary`). 두 엔진의 빌드 파일이 서로의 자리에 들어가는 실수를 막는다. Rocks 모듈을 `Extras/`에 두면 Rocks 빌드가 조용히 빼먹고, UE 플러그인을 Rocks 규칙 경로에 두면 Rocks 규칙 프로젝트가 UE `ModuleRules`를 컴파일하다 원인이 흐린 오류로 멈추기 때문이다.
+  - `Extras/` 아래: Rocks 서술자(`.rocksproject`·`.rocksplugin`)가 있으면 실패. 규칙 파일(`*.Build.cs`·`*.Target.cs`)이 Rocks 빌드 네임스페이스(`Rocks.Build`)를 참조하면 그 줄에서 실패.
+  - Rocks 규칙 경로(엔진 규칙 프로젝트가 모으는 `Core/Source`·`Engine/Source`·`Engine/Plugins`·`Programs`(C# 도구 `Programs/Rocks.*` 제외)와 템플릿 규칙 프로젝트가 모으는 `Templates`) 아래: UE 서술자(`.uplugin`·`.uproject`)가 있으면 실패. 규칙 파일이 UE 빌드 네임스페이스(`UnrealBuildTool`)를 참조하면 그 줄에서 실패.
+  - 네임스페이스 판정은 주석·문자열을 지운 텍스트로 한다(설명 주석에서 상대 엔진 이름을 언급하는 것은 허용). 서술자 확장자는 대소문자를 무시한다. `Extras/`가 없으면 그쪽 검사는 할 일이 없다.
 - 코드 규약은 UE 코딩 표준(F·U 접두사, UE 컨테이너)을 따른다. 손으로 쓴 주석은 한국어, 로그·진단 메시지는 영어다(Rocks 규약과 같은 언어 경계).
 - 지원 UE 버전은 5.8 하나다. `.uplugin`의 `EngineVersion`을 5.8로 두고, 코드는 `ENGINE_MAJOR_VERSION`·`ENGINE_MINOR_VERSION`이 다르면 `#error`로 멈춘다(메시지 영어).
 - 모듈: `Type: "Editor"`, `LoadingPhase: "Default"`. `Editor` 타입은 `GIsEditor`일 때 로드되고 commandlet도 `GIsEditor`를 켜므로 commandlet에서 로드된다(RT/Projects/Private/ModuleDescriptor.cpp:724-742, RT/Launch/Private/LaunchEngineLoop.cpp:2223). 의존 모듈: UnrealEd, AssetRegistry, ToolMenus, ContentBrowser, MeshDescription, StaticMeshDescription, SkeletalMeshDescription, MeshBuilder, MaterialEditor, MaterialBaking, Json, JsonUtilities.
@@ -412,7 +416,7 @@ float는 9자리, double은 17자리 유효숫자(`%.9g`·`%.17g`)로 쓴다. �
 | UXR2 | 에셋 시스템 7절(AssetIndex)·5.2절 Tags | 임포터가 정하는 태그 키(`UnrealExchange.ObjectPath`·`UnrealExchange.FormerPaths`)를 기록하고 검색할 수 있게 한다 | 반영(AssetSystem 개정 10, 7절 — 임포터 키는 `<임포터 이름>.` 접두) |
 | UXR3 | 에셋 시스템 4.6절 | 10.3절 진단 코드 등록 | 반영(AssetSystem 개정 10, 4.6절) |
 | UXR4 | [머티리얼 시스템](MaterialSystem.ko.md) 5.4·9.2절 | 같은 이름 파라미터 병합·함수 global 파라미터 끌어올리기(8.5절)를 번역 결과가 V8을 통과하는 형태로 받는지 확인. 엔진 내장 "구운 표면" 부모 머티리얼 정의(엔진 콘텐츠 `/Engine` 마운트는 후속이므로 그 전까지 두는 곳 포함) | 반영(MaterialSystem 개정 6, 9.2·11.3절) |
-| UXR5 | 정책 검사(Rocks.Tooling.Checks) | `Extras/` 아래에 Rocks 모듈 규칙·서술자가 없음을 확인 | 문서가 아니라 검사 코드다. UX1에서 `Extras/`를 만들 때 함께 구현 |
+| UXR5 | 정책 검사(Rocks.Tooling.Checks) | `Extras/` 아래에 Rocks 모듈 규칙·서술자가 없음을 확인 | 구현(2026-11-20, 11.1절 `foreign-engine-boundary`) |
 | UXR6 | 에셋 시스템 시험 기반 | 결정적 AssetId 발급기 주입 지점(시험 전용) | 반영(AssetSystem 개정 10, 14.1절) |
 | UXR7 | [빌드 대상](BuildTargets.ko.md) | 첫 엔진 플러그인 `Engine/Plugins/Importers/UnrealExchange`의 서술자·종류(Developer)·Shipping 제외 | 반영(BuildTargets 개정 3, 3.6절) |
 
@@ -460,6 +464,7 @@ ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으�
 - 개정 1(2026-11-20): 초안. 사용자 지시(2026-11-19 "언리얼에 플러그인을 만들어서 rocks가 인식할수 있는 형태로 추출")에 따라 작성했다. 손실 원본 처리는 사용자 결정(2026-11-20 "기본 거부, 옵션으로 허용")을 반영했다.
 - 개정 2(2026-11-20): 교차 검증(설계 반례 리뷰, UE 사실 확인) 반영. 18절.
 - 개정 3(2026-11-20): 13절 요구 UXR1–UXR4·UXR6·UXR7을 대상 문서에 반영했다(AssetSystem 10, MaterialSystem 6, BuildTargets 3). AssetSystem 7절의 임포터 태그 접두 규칙에 맞춰 태그 키를 `UnrealExchange.ObjectPath`·`UnrealExchange.FormerPaths`로 바꿨다. UXR5(정책 검사)는 코드라 UX1에서 한다. 13절에 상태 열을 더했다.
+- 개정 4(2026-11-20): UXR5를 구현했다. 11.1절에 정책 검사 `foreign-engine-boundary`의 규칙(양방향: `Extras/`의 Rocks 서술자·Rocks 규칙 참조, Rocks 규칙 경로의 UE 서술자·UE 규칙 참조)을 적었다.
 
 ## 18. 교차 검증 기록(개정 2)
 
