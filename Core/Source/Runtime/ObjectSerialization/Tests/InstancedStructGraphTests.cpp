@@ -7,6 +7,8 @@
 // 내용의 마이그레이션, 미등록 struct 정책 두 가지, 담을 수 없는 struct의 decode·Emplace 거부, 깊이
 // 합 규칙 (encode·decode), 타입 lease의 Unregister Busy, 관찰 struct 제한.
 using namespace rocks;
+namespace instanced_struct_graph_tests_file {
+
 using namespace rocks::test::instanced;
 
 namespace {
@@ -487,3 +489,4 @@ TEST(InstancedStructGraph_ObservedStructCannotHoldInstancedStruct) {
 
     CHECK(types.Shutdown());
 }
+} // namespace instanced_struct_graph_tests_file

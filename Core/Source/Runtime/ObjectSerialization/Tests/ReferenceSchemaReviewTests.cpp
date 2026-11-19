@@ -4,6 +4,8 @@
 #include <ObjectSerialization/ObjectGraph.h>
 
 using namespace rocks;
+namespace reference_schema_review_tests_file {
+
 using reflection_fixture::Base;
 using reflection_fixture::Node;
 
@@ -252,3 +254,4 @@ TEST(ReferenceWriteKeepsBothDeclaredTypeLeasesUntilCallbackCompletes) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace reference_schema_review_tests_file

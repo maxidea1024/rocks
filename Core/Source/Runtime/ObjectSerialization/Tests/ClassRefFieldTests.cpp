@@ -7,6 +7,8 @@
 // 실패한 쓰기는 값을 바꾸지 않는다. ClassRef::Resolve·TypeRegistry::AcquireDerivedClass와 생성 타입
 // 도구 이름 색인(기본 이름·Name 지정자, 대소문자 무시)을 본다.
 using namespace rocks;
+namespace class_ref_field_tests_file {
+
 using namespace rocks::test::classref;
 
 namespace {
@@ -295,3 +297,4 @@ TEST(ClassRef_ResolveAndGeneratedToolNames) {
 
     CHECK(types.Shutdown());
 }
+} // namespace class_ref_field_tests_file

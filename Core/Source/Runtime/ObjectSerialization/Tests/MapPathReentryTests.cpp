@@ -8,6 +8,8 @@
 // 파괴되면 Destroyed이고 컨테이너(용량·첫 항목 주소 포함)는 그대로다. 비우기의 해제 콜백은 빈
 // 컨테이너를 본다.
 using namespace rocks;
+namespace map_path_reentry_tests_file {
+
 using namespace rocks::test::map;
 
 namespace {
@@ -370,3 +372,6 @@ TEST(MapPathReentry_ClearReleaseSeesEmptyMap) {
     CHECK(world.count == 0 && world.contains[0] == 0);
     End(world, holder);
 }
+} // namespace map_path_reentry_tests_file
+
+#undef LONG_KEY

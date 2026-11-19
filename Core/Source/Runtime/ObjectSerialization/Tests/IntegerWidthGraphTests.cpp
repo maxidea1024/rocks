@@ -17,6 +17,8 @@
 // 객체 공개 없이 거부하고, 직접 넣은 선언되지 않은 enum 값의 저장을 거부하며, 필드·경로 쓰기가 폭을
 // 검사한다.
 using namespace rocks;
+namespace integer_width_graph_tests_file {
+
 using reflection_fixture::ByteOffset;
 using reflection_fixture::CountLimit;
 using reflection_fixture::HugeIndex;
@@ -537,3 +539,4 @@ TEST(IntegerWidthGraph_FieldAndPathWritesCheckWidth) {
 
     CHECK(types.Shutdown());
 }
+} // namespace integer_width_graph_tests_file

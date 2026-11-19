@@ -12,6 +12,8 @@
 // Trace(struct 안 참조로만 닿는 객체가 수집에서 산다), 재저장 byte 동일, 생성 형질·깊이, 타입
 // 마이그레이션 연결(StructLeaf::Migrate).
 using namespace rocks;
+namespace generated_struct_graph_tests_file {
+
 using reflection_fixture::StructHolder;
 using reflection_fixture::StructLeaf;
 using reflection_fixture::StructMiddle;
@@ -392,3 +394,4 @@ TEST(GeneratedStructGraph_OlderStructVersionUsesGeneratedMigrate) {
     CHECK(oldTypes.Shutdown());
     CHECK(newTypes.Shutdown());
 }
+} // namespace generated_struct_graph_tests_file

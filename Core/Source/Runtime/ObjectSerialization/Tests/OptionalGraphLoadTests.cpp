@@ -6,6 +6,8 @@
 // 값·Optional<Name> 담은 struct 거부), Optional<struct> 안 Required의 저장·복원 2c 검사, Optional
 // 내부 종류의 나머지(AssetId·double·uint64·int64) 왕복.
 using namespace rocks;
+namespace optional_graph_load_tests_file {
+
 using namespace rocks::test::optional;
 
 namespace {
@@ -351,3 +353,4 @@ TEST(OptionalGraph_RemainingInnerKindsRoundTrip) {
 
     CHECK(types.Shutdown());
 }
+} // namespace optional_graph_load_tests_file

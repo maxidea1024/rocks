@@ -5,6 +5,8 @@
 // 거부(String·Name 대소문자·None), 키 자리의 값 대체 정책 거부, MaxElements 저장 거부·로드 허용,
 // wire 형식 오류.
 using namespace rocks;
+namespace map_graph_tests_file {
+
 using namespace rocks::test::map;
 
 namespace {
@@ -549,3 +551,4 @@ TEST(MapGraph_DiagnosticPathsUseInsertionIndex) {
 
     CHECK(types.Shutdown());
 }
+} // namespace map_graph_tests_file

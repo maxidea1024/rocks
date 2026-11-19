@@ -8,6 +8,8 @@
 // Name 키의 할당 없는 조회와 삽입 intern, ClassRef·Soft 키, key·모양 오류와 ReadOnly, 할당 실패 시
 // 컨테이너 불변.
 using namespace rocks;
+namespace map_path_tests_file {
+
 using namespace rocks::test::map;
 
 namespace {
@@ -711,3 +713,4 @@ TEST(MapPath_AllocationFailureLeavesContainerUnchanged) {
 
     CHECK(types.Shutdown());
 }
+} // namespace map_path_tests_file

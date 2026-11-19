@@ -7,6 +7,8 @@
 // 기본값, 값 Record 마이그레이션, 관찰 struct 안 Map(관찰 임시 값 채우기·Name 원소 Set·Name 키
 // Map을 담은 struct 거부), 중복 색인 예약의 키 영역 상한, 2단계 할당 실패 rollback.
 using namespace rocks;
+namespace map_graph_load_tests_file {
+
 using namespace rocks::test::map;
 
 namespace {
@@ -466,3 +468,4 @@ TEST(MapField_PathAndFieldValueTreatMapsAsAggregates) {
 
     CHECK(types.Shutdown());
 }
+} // namespace map_graph_load_tests_file

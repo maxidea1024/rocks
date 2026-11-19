@@ -13,6 +13,8 @@
 // 저장·로드되므로 원인이 레이아웃 선언임을 확인한다. 등록·필드·경로·Trace는 ObjectRuntime
 // 시험(NativeReflectedBaseTests)이 본다.
 using namespace rocks;
+namespace native_derived_graph_tests_file {
+
 using reflection_fixture::ArrayOwner;
 using reflection_fixture::WorldChild;
 using reflection_fixture::WorldFixture;
@@ -195,3 +197,4 @@ TEST(NativeReflectedBase_GraphLoadIsUnsupportedWithoutLayout) {
     CHECK(source.Shutdown());
     CHECK(target.Shutdown());
 }
+} // namespace native_derived_graph_tests_file

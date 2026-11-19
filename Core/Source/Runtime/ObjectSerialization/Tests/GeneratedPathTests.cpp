@@ -18,6 +18,8 @@
 // lease로 해석한 경로), 경로로 쓴 객체가 그래프 저장·로드에서 그대로 돌아오고 다시 저장한 byte가
 // 같다. PathFixture로 도구 이름(Name 지정자)과 ReadOnly 전파를 본다.
 using namespace rocks;
+namespace generated_path_tests_file {
+
 using reflection_fixture::ArrayChild;
 using reflection_fixture::ArrayOwner;
 using reflection_fixture::Channels;
@@ -1292,3 +1294,4 @@ TEST(GeneratedPath_ToolNamesAndReadOnlyFields) {
 
     CHECK(types.Shutdown());
 }
+} // namespace generated_path_tests_file

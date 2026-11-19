@@ -9,6 +9,8 @@
 // 게시는 무할당)을 객체 allocator의 명시 hook으로 고정한다: String 원소 쓰기의 할당 콜백에서 같은
 // 객체에 쓰면 Busy이고, 할당 실패는 옛 값을 그대로 둔다(타이밍에 기대지 않는다).
 using namespace rocks;
+namespace static_array_path_tests_file {
+
 using namespace rocks::test::map;
 using reflection_fixture::FixedOwner;
 
@@ -238,3 +240,4 @@ TEST(StaticArrayPath_WriteReentryAndAllocationFailureKeepOldValue) {
         CHECK(value.ints[0] == 0);
     });
 }
+} // namespace static_array_path_tests_file

@@ -8,6 +8,8 @@
 // 준비(Name intern·ClassRef 등록 검사)를 건너뛴다, 순회 중 key 편집 Busy, Name 키 조회의 할당 0,
 // 가득 찬 컨테이너의 모든 할당 실패 지점, 여러 key의 byte 합계 한도, Soft·ClassRef key 텍스트 hook.
 using namespace rocks;
+namespace map_path_edge_tests_file {
+
 using namespace rocks::test::map;
 
 namespace {
@@ -660,3 +662,4 @@ TEST(PropertyPath_KeyTextHookParsesAndFormatsContextKeys) {
 
     CHECK(types.Shutdown());
 }
+} // namespace map_path_edge_tests_file

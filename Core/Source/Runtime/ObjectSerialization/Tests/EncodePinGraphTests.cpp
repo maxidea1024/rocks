@@ -5,6 +5,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace encode_pin_graph_tests_file {
 
 // 그래프 저장의 encode 고정 시험이다(Docs/Design/ReflectionFoundations.ko.md 5.6절 "encode 고정"):
 // SaveObjectGraph는 노드의 필드를 encode하는 동안 노드마다 PinForEncode를 쥔다. 저장 중 콜백이
@@ -242,3 +243,4 @@ TEST(ObjectGraphSaveReleasesPinsOnEveryFailure) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace encode_pin_graph_tests_file

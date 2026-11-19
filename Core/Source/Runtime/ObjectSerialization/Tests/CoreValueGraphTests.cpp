@@ -13,6 +13,8 @@
 // struct(CoreValueBundle)가 다른 모듈의 미러 struct를 멤버로 담는 경로도 거친다. Atomic은 저장
 // 형식을 바꾸지 않으므로 Atomic 미러도 같은 Record다.
 using namespace rocks;
+namespace core_value_graph_tests_file {
+
 using reflection_fixture::CoreValueBundle;
 using reflection_fixture::CoreValueFields;
 
@@ -278,3 +280,4 @@ TEST(CoreValueGraph_EditorOnlyCoreValueFieldIsExcludedAndKeepsDefault) {
 
     CHECK(types.Shutdown());
 }
+} // namespace core_value_graph_tests_file

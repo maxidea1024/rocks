@@ -12,6 +12,8 @@
 // 방문(그 원소로만 닿는 객체가 수집에서 살고 순환 그래프는 root를 놓으면 회수), count ≠ N은
 // InvalidArgument, Required 원소의 null은 저장 거부, NATIVE 형질의 C 배열 특수화.
 using namespace rocks;
+namespace static_array_graph_tests_file {
+
 using namespace rocks::test::map;
 using reflection_fixture::FixedLink;
 using reflection_fixture::FixedMode;
@@ -611,3 +613,4 @@ TEST(StaticArrayGraph_ApplyChargeIgnoresElementSize) {
     CHECK(difference < 256);
     REQUIRE(objects.Shutdown(objects.OwnerAccess()));
 }
+} // namespace static_array_graph_tests_file
