@@ -23,6 +23,10 @@ public static class ModuleTables
     /// 진입점(<c>ROCKS_IMPLEMENT_MODULE</c>)을 가져야 하는 모듈 이름 집합이다(대소문자 무시 비교). 서드파티가 아니고, C++ 코드(소스·생성 소스·
     /// 설치 SDK의 미리 빌드한 라이브러리)가 있으며, 도달 집합에 모듈 표 제공 모듈이 있는 모듈이다. header-only 모듈과 Core 아래 모듈
     /// (PlatformBase 등)은 빠진다(3.1절 면제). 이름을 모르는 의존은 건너뛴다(그 오류는 액션 그래프가 알린다).
+    /// 리플렉션 생성 소스(<see cref="NativeModuleInput.ReflectionSources"/>)는 모듈 코드로 세지 않는다. 손으로 쓴 소스 없이 리플렉션 헤더만
+    /// 가진 모듈(ReflectionTestFixtures·CoreTypeBindings 등)은 생성 소스 때문에 정적 라이브러리가 되어도 진입점 면제다. 그 모듈이 설치
+    /// SDK에 실려 미리 빌드한 라이브러리가 되어도(<see cref="NativeModuleInput.ReflectionOnlyLibrary"/>) 같다
+    /// (Docs/Design/ReflectionGeneratedSources.ko.md 6.3절 GSD14 — 이 모듈들에 진입점을 주는 일은 모듈 로더 ML2가 정한다).
     /// </summary>
     public static HashSet<string> EntryModules(IReadOnlyDictionary<string, NativeModuleInput> modules)
     {
@@ -55,7 +59,8 @@ public static class ModuleTables
         var entries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (NativeModuleInput module in modules.Values)
         {
-            bool hasCode = module.Sources.Count != 0 || module.GeneratedSources.Count != 0 || module.PrebuiltLibraries.Count != 0;
+            bool hasCode = module.Sources.Count != 0 || module.GeneratedSources.Count != 0 ||
+                (module.PrebuiltLibraries.Count != 0 && !module.ReflectionOnlyLibrary);
             if (!module.ThirdParty && hasCode && Reaches(module.Name))
             {
                 entries.Add(module.Name);

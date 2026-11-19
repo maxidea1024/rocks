@@ -14,7 +14,7 @@
 
 UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`)의 UnrealHeaderTool이다. 경로는 `Engine/Source/Programs/Shared/EpicGames.UHT/Exporters/CodeGen/` 기준이다. UE 이름은 대응표와 근거에만 적는다. 측정은 Rocks 툴체인(clang-cl 21.1.6, foundation-debug)으로 했다.
 
-상태: **설계 확정**(결정 GSD1–GSD14, 2026-11-19 사용자 승인 — 권장안, GSD5·GSD13은 보류). 리뷰어 교차 검증을 반영했다(개정 2). 리뷰어가 기존 생성 헤더 35개를 5절 방식으로 나눠 전부 컴파일해 구조가 성립함을 확인했다. 구현 단계는 GS0–GS3(11절)이다. GS1(등록 함수 분리)은 2026-11-19 사용자 결정으로 착수했다. 다른 세션은 GS1 병합까지 전체 빌드·시험 반복을 보류한다.
+상태: **설계 확정**(결정 GSD1–GSD14, 2026-11-19 사용자 승인 — 권장안, GSD5·GSD13은 보류). 리뷰어 교차 검증을 반영했다(개정 2). 리뷰어가 기존 생성 헤더 35개를 5절 방식으로 나눠 전부 컴파일해 구조가 성립함을 확인했다. 구현 단계는 GS0–GS3(11절)이다. GS1(등록 함수 분리)은 2026-11-19 사용자 결정으로 착수했다. 다른 세션은 GS1 병합까지 전체 빌드·시험 반복을 보류한다. GS0(action 소요 시간 기록·기준 측정)과 GS1은 2026-11-20 구현해 engine-runtime에 병합했다(측정값은 9절). 이후 단계의 기준·전후 측정용 빌드는 따로 돌리지 않는다(2026-11-20 사용자 결정) — 숫자는 일반 검증 빌드의 action 소요 시간(GSD12)으로 남긴다.
 
 ## 1. 현재 상태와 측정
 
@@ -253,13 +253,15 @@ GS0에서 기준을 재고 단계마다 같은 장비·같은 방법으로 다�
 
 | 항목 | 기준(1.2절) | 목표 | 단계 |
 |---|---|---|---|
-| 선언으로 등록 함수를 부르는 TU | 46 s(집계 헤더 include + 호출) | 1 s 이내 | GS1 |
-| 집계 헤더로 등록하던 시험 TU | 46–54 s | 기록(시제품 추정 6.5 s 안팎) | GS1 |
+| 선언으로 등록 함수를 부르는 TU | 46 s(집계 헤더 include + 호출) | 1 s 이내(리뷰어 측정 0.4 s) | GS1 |
+| 집계 헤더로 등록하던 시험 TU | 46–54 s(GS0 재측정 37–42 s) | 기록 — GS1 뒤 `TextAssignAppendTests.cpp` 2.4 s, `ArrayGraphTests.cpp` 5.5 s | GS1 |
 | 모듈의 모든 생성 헤더 include만 하는 TU(ReflectionTestFixtures) | 17.6 s | 원본 헤더만 include한 TU 대비 +1.5 s 이내(시제품 +0.5 s) | GS2 |
 | `TextAssignAppendTests.cpp` | 48 s | 5 s 이내(시제품 2.4 s) | GS2 |
-| FoundationTests clean compile의 action 시간 합 | GS0에서 측정 | 절반 이하 | GS2 |
-| FoundationTests object 디렉터리 크기, link 시간 | GS0에서 측정 | 줄어든다(기록) | GS1·GS2 |
-| ReflectionTestFixtures 메타 생성 시간(검증 포함) | GS0에서 측정 | 줄어든다(기록) | GS2 |
+| FoundationTests clean compile의 action 시간 합 | GS0 1,541 s(386 TU). GS1 뒤 495 s(389 TU), 따로 모듈 생성 소스 7개 54 s(ReflectionTestFixtures 35.8 s) | 절반 이하 — GS1에서 달성 | GS1·GS2 |
+| FoundationTests object 디렉터리 크기, link 시간 | GS0 1,899 MB, 4.6 s. GS1 뒤 266 MB(따로 모듈 생성 소스 object 67 MB), 2.4 s | 줄어든다(기록) | GS1·GS2 |
+| ReflectionTestFixtures 메타 생성 시간(검증 포함) | Foundation 타깃 메타 단계 전체(모듈 7개): GS0 107 s, GS1 뒤 86 s | 줄어든다(기록) | GS2 |
+
+GS0·GS1 측정 조건(2026-11-20): 같은 장비에서 두 commit을 각각 내보낸 사본으로 clean Foundation Debug 빌드(`--jobs 8`)를 연달아 하고 `action-report.json`의 action별 소요 시간(GSD12)을 더했다. 다른 세션의 빌드가 거의 없는 상태였다(GS1 빌드가 끝날 무렵 다른 빌드가 시작됐다). 가장 느린 action은 GS0에서 집계 헤더로 등록하던 시험 TU들(38–42 s)이었고, GS1 뒤에는 ReflectionTestFixtures 모듈 생성 소스(35.8 s) 하나와 그다음 8.6 s 이하의 TU들이다. Foundation 타깃 전체 빌드(메타 단계 포함)는 389 s에서 255 s가 됐다. descriptor는 두 commit에서 바이트까지 같다.
 
 동작 기준:
 - 전체 시험(Debug)이 통과한다. descriptor가 변경 전후 바이트까지 같다.
@@ -332,3 +334,4 @@ GS0에서 기준을 재고 단계마다 같은 장비·같은 방법으로 다�
 |---|---|---|
 | 1 | 2026-11-19 | 생성 코드 분리 설계. 측정(1.2절), 멤버별 위치(5.1절), 배치와 빌드 연결(6절), 검증 컴파일 변경(7절), 결정 GSD1–GSD14(GSD13 보류). 등록 함수 분리(GS1)를 먼저 하기로 하고 착수했다(사용자 결정). 모듈 로더 ML2와 조율해 리플렉션 생성 소스를 별도 목록으로 나르고 진입점 판정에서 뺐다 |
 | 2 | 2026-11-19 | 리뷰어 교차 검증 반영. 시제품(기존 생성 헤더 35개를 나눠 컴파일)과 조용한 상태 측정을 1.2절에 더했다. 생성 헤더의 include 줄이기를 보류로 돌리고(GSD5) 런타임 준비 단계를 없앴다 — 이득이 TU당 0.3–0.5초이고 소비 TU 17개가 깨진다. 그래서 타입별 본문 분리(GS2)는 소비 코드를 고치지 않는다. 클래스 `Trace()`도 inline으로 남긴다(native 파생 GC 경로, GSD3). 메타 컴파일러 옵션 `--verify-sources`를 더했다(GSD8, 도구 시험의 거부 보장 유지). 증분 재컴파일 기준을 UB0 뒤로 조건을 달았다. `CopyValueImpl` 이름, 완전한 반환 타입 규칙, private 모듈 생성 헤더, 인용·수치 정정(identity 명세는 생성이 쓰지 않는다, BuildTargets 3.4절, 소스 없는 모듈 6개, 집계 소비 파일 41개). 단계 GS0–GS3 |
+| 2(구현 기록) | 2026-11-20 | GS0·GS1 구현과 측정(9절), engine-runtime 병합. 스펙에 없던 것 둘을 구현하며 정했다. 첫째, 설치 SDK가 실어 가는 "리플렉션 생성 소스만으로 된 라이브러리"에 표지 `ReflectionOnlyLibrary`를 붙였다(SDK manifest 7) — 게임 빌드의 모듈 진입점 판정은 미리 빌드한 라이브러리를 코드로 세므로, 표지가 없으면 CoreTypeBindings 같은 모듈이 SDK를 거치며 진입점 모듈이 된다(6.3절의 면제를 SDK에서도 유지). 둘째, MetaCompiler 옵션 `--verify-sources`(빌드 없이 쓰는 단독 실행·도구 시험이 모듈 생성 소스도 게시 전에 구문 검사한다 — 빌드는 넘기지 않는다) |

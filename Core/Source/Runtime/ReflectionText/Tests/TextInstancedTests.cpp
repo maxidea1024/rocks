@@ -1,6 +1,7 @@
 #include "TextAssignTestSupport.h"
 
 #include <ReflectionTestFixtures/InstancedStructFixture.generated.h>
+#include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
 #include <ReflectionTestFixtures/StructInheritanceFixture.generated.h>
 #include <Core/Text/NamePool.h>
 #include <ReflectionText/TextJson.h>

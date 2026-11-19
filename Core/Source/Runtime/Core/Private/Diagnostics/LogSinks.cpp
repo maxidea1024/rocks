@@ -2,10 +2,24 @@
 #include <Core/Text/Json.h>
 #include <Core/Text/StringBuilder.h>
 #include <Core/Time/DateTime.h>
+#include <Platform/Atomics.h>
+#include <Platform/Fatal.h>
 #include <Platform/Memory.h>
 #include <stdio.h>
 
 namespace rocks {
+
+RuntimeLogSink::~RuntimeLogSink() noexcept {
+    if (platform::AtomicLoad<platform::MemoryOrder::Acquire>(&registrations_) != 0) {
+        platform::Fatal(
+            "A log sink was destroyed while still added to a LogSystem; call RemoveSink "
+            "or destroy the LogSystem first (declare the sink before the LogSystem)");
+    }
+}
+
+bool RuntimeLogSink::IsAdded() const noexcept {
+    return platform::AtomicLoad<platform::MemoryOrder::Acquire>(&registrations_) != 0;
+}
 namespace {
 
 // sink가 받는 event의 기본 검사다(손으로 만든 LogEvent가 줄바꿈 등으로 가짜 줄을 만들지 못하게).

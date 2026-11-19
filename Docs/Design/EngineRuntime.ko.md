@@ -92,8 +92,8 @@ public:
 };
 
 // 엔진 초기화(EngineConfig::registerTypes) 또는 게임 모듈 초기화에서. 리플렉션 base(Actor)의 생성
-// 헤더가 필요하다.
-#include <World/World.module.generated.h>
+// 헤더가 필요하다(모듈 생성 헤더 World.module.generated.h는 등록 함수의 선언만 담는다).
+#include <World/Actor.generated.h>
 rocks::RegisterNativeClass<SpinningActor>(types);
 ```
 

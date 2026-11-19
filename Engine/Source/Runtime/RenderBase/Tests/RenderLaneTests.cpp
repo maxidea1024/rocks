@@ -4,7 +4,8 @@
 #include <Engine/Engine.h>
 #include <Platform/Fatal.h>
 #include <RenderBase/RenderLane.h>
-#include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
+#include <ReflectionTestFixtures/ArrayFixture.generated.h>
+#include <ReflectionTestFixtures/WeakObjectRefFixture.generated.h>
 #include <TestSupport/Test.h>
 
 using namespace rocks;

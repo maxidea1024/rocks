@@ -8,14 +8,26 @@ public sealed record MetadataHeader(string Path, string Include, bool Private);
 
 /// <summary>
 /// 메타데이터를 생성하는 모듈 하나의 배치다. 생성 헤더는 GeneratedPublic·GeneratedPrivate 아래 원본 철자를 따르고,
-/// descriptor는 생성 include 디렉터리 밖(&lt;out&gt;/Metadata)에 둔다.
+/// descriptor는 생성 include 디렉터리 밖(&lt;out&gt;/Metadata)에 둔다. GeneratedSource는 생성 소스 디렉터리
+/// (&lt;out&gt;/Generated/&lt;모듈&gt;/Source — include 루트가 아니다)이고 ModuleSource는 그 아래 모듈 생성 소스(등록 함수 정의)의
+/// 경로다(Docs/Design/ReflectionGeneratedSources.ko.md 6.1절).
 /// </summary>
 public sealed record MetadataModule(string Name, string Manifest, IReadOnlyList<MetadataHeader> Headers,
-    string GeneratedPublic, string GeneratedPrivate, string Descriptor);
+    string GeneratedPublic, string GeneratedPrivate, string GeneratedSource, string Descriptor)
+{
+    /// <summary>생성 소스 디렉터리의 이름이다(생성 루트 &lt;out&gt;/Generated/&lt;모듈&gt; 바로 아래, MetaCompiler 출력 루트의 Source).</summary>
+    public const string SourceDirectoryName = "Source";
+
+    /// <summary>모듈 생성 소스의 파일 이름이다(MetaCompiler의 CompilerOptions.ModuleSourceName과 같다).</summary>
+    public static string ModuleSourceName(string module) => module + ".module.generated.cpp";
+
+    /// <summary>모듈 생성 소스의 절대 경로다. 메타 생성이 게시한 뒤에 있고 이 모듈의 번역 단위로 컴파일된다.</summary>
+    public string ModuleSource => Path.Combine(GeneratedSource, ModuleSourceName(Name));
+}
 
 /// <summary>
-/// 생성 include 디렉터리를 더한 모듈 목록, 메타데이터 생성 모듈 목록, 그리고 Metadata가 없는 도달 모듈의 은퇴 항목만
-/// 남은 명세(ID 예약 — 명세 집합 검증에 넣는다)다.
+/// 생성 include 디렉터리와 리플렉션 생성 소스를 더한 모듈 목록, 메타데이터 생성 모듈 목록, 그리고 Metadata가 없는 도달 모듈의
+/// 은퇴 항목만 남은 명세(ID 예약 — 명세 집합 검증에 넣는다)다.
 /// </summary>
 public sealed record MetadataPlan(IReadOnlyList<NativeModuleInput> Modules, IReadOnlyList<MetadataModule> Generated,
     IReadOnlyList<string> ReservedManifests);
@@ -101,7 +113,12 @@ public static class MetadataLayout
             Directory.CreateDirectory(generatedPublic);
             Directory.CreateDirectory(generatedPrivate);
             string descriptor = Path.Combine(context.OutputDirectory, "Metadata", module.Name + ".rocksmeta.json");
-            generated.Add(new(module.Name, manifest, headers, generatedPublic, generatedPrivate, descriptor));
+            var layout = new MetadataModule(module.Name, manifest, headers, generatedPublic, generatedPrivate,
+                Path.Combine(generatedRoot, MetadataModule.SourceDirectoryName), descriptor);
+            generated.Add(layout);
+            // 모듈 생성 소스(등록 함수 정의)를 이 모듈의 리플렉션 생성 소스로 더한다. 경로는 모듈 이름으로 정해지므로 생성 전에 넣을 수
+            // 있고, 파일은 메타 생성이 게시한 뒤에 있다(액션 그래프가 그때 존재를 확인한다). 손으로 쓴 Sources와 섞지 않는다 — 모듈 진입점
+            // 판정에 들지 않는다(Docs/Design/ReflectionGeneratedSources.ko.md 6.3절).
             updated.Add(module with
             {
                 PublicIncludeDirectories = headers.Any(header => !header.Private)
@@ -109,7 +126,8 @@ public static class MetadataLayout
                     : module.PublicIncludeDirectories,
                 PrivateIncludeDirectories = headers.Any(header => header.Private)
                     ? [.. module.PrivateIncludeDirectories, generatedPrivate]
-                    : module.PrivateIncludeDirectories
+                    : module.PrivateIncludeDirectories,
+                ReflectionSources = [.. module.ReflectionSources, layout.ModuleSource]
             });
         }
 
@@ -358,7 +376,7 @@ public static class MetadataLayout
                     CheckGeneratedShadow(consumer, owner, order, header.Include[..^2] + ".generated.h", header.Private ? owner.GeneratedPrivate : owner.GeneratedPublic);
                 }
 
-                // 집계 헤더도 생성 루트보다 앞선 디렉터리의 같은 철자 파일에 가려지면 안 된다.
+                // 모듈 생성 헤더도 생성 루트보다 앞선 디렉터리의 같은 철자 파일에 가려지면 안 된다.
                 if (owner.Headers.Any(header => !header.Private))
                 {
                     CheckGeneratedShadow(consumer, owner, order, $"{owner.Name}/{owner.Name}.module.generated.h", owner.GeneratedPublic);

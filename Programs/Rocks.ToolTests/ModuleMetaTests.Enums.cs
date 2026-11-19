@@ -23,11 +23,11 @@ internal static partial class ModuleMetaTests
             layout.Manifest("Upper", [], ["probe::Value::mode"]);
             ProcessResult lower = await layout.RunLowerAsync();
             Verify.Equal(0, lower.ExitCode, "lower module: " + lower.StdErr);
-            string lowerAggregate = File.ReadAllText(layout.Generated("Lower", "Public/Lower/Lower.module.generated.h"));
+            string lowerAggregate = File.ReadAllText(layout.ModuleSource("Lower"));
             // 생성물은 clang-format을 거치므로 줄바꿈 위치에 기대지 않고 각 호출의 고유 부분을 찾는다.
             int enumRegistration = lowerAggregate.IndexOf("GeneratedType<::probe::Mode>::Schema()", StringComparison.Ordinal);
             int classRegistration = lowerAggregate.IndexOf("GeneratedType<::probe::Parent>::Schema()", StringComparison.Ordinal);
-            Verify.That(enumRegistration >= 0 && classRegistration > enumRegistration, "aggregate registers enums first:\n" + lowerAggregate);
+            Verify.That(enumRegistration >= 0 && classRegistration > enumRegistration, "module source registers enums first:\n" + lowerAggregate);
             ProcessResult upper = await layout.RunUpperInputsAsync([(layout.Source("Upper/Public/Upper/Value.h"), "Upper/Value.h", false)]);
             Verify.Equal(0, upper.ExitCode, "upper module: " + upper.StdErr);
             using JsonDocument lowerDescriptor = JsonDocument.Parse(File.ReadAllBytes(layout.Descriptor("Lower")));

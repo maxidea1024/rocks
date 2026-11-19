@@ -1,4 +1,9 @@
 #include <Base/TypeTraits.h>
+#include <CoreTypeBindings/CoreTypeBindings.module.generated.h>
+#include <CoreTypeBindings/CoreValueTypes.generated.h>
+#include <ReflectionTestFixtures/ClassRefFixture.generated.h>
+#include <ReflectionTestFixtures/CoreValueFixture.generated.h>
+#include <ReflectionTestFixtures/ReflectionFixture.generated.h>
 #include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Object/NativeClass.h>

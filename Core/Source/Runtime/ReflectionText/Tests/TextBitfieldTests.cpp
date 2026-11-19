@@ -1,6 +1,7 @@
 #include "TextAssignTestSupport.h"
 
 #include <ReflectionTestFixtures/BitfieldFixture.generated.h>
+#include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
 #include <ReflectionText/TextJson.h>
 
 // 리플렉션 B9m bitfield bool의 텍스트·JSON 시험이다(Docs/Design/ReflectionExtensions.ko.md 14절 —

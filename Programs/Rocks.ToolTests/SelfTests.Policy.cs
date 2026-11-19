@@ -13,6 +13,7 @@ internal static partial class SelfTests
     {
         suite.Add("Policy.RepositoryRuntime", () => NoFailures(PolicyChecks.Runtime(options.Root)));
         suite.Add("Policy.RepositoryReflectionAnnotations", () => NoFailures(PolicyChecks.ReflectionAnnotations(options.Root)));
+        suite.Add("Policy.RepositoryModuleGeneratedHeaderIncludes", () => NoFailures(PolicyChecks.ModuleGeneratedHeaderIncludes(options.Root)));
         ThirdPartyPolicyTests.Register(suite, options);
         ThirdPartyKindTests.Register(suite);
         ThirdPartyStoreTests.Register(suite, options);
@@ -512,6 +513,53 @@ internal static partial class SelfTests
             temporary.Write(probe, "#pragma once\n");
             temporary.Write("Core/Source/Runtime/Core/Tests/Probe.cpp", "template class rocks::Array<int>;\n");
             Verify.Equal(1, PolicyChecks.Runtime(temporary.Root).Count, "test source container instantiation escaped audit");
+        });
+        // 손으로 쓴 헤더는 모듈 생성 헤더(*.module.generated.h — 타입 등록 함수의 선언)를 include하지 않는다. 등록은 .cpp가 하고,
+        // 헤더는 쓰는 타입의 생성 헤더만 include한다(Docs/Design/ReflectionGeneratedSources.ko.md 8절 GSD6).
+        suite.Add("Policy.ModuleGeneratedHeaderIncludesRejectHeaders", () =>
+        {
+            using TemporaryDirectory temporary = new();
+            const string module = "Engine/Source/Runtime/Probe";
+            // 통과: 모듈 생성 헤더를 include하는 .cpp(public·private 모듈 헤더), 타입별 생성 헤더만 include하는 헤더, 주석·문자열 안에만
+            // 철자가 있는 헤더, 생성물 이름의 헤더, 다른 확장자의 소스.
+            temporary.Write(module + "/Private/ProbeModule.cpp",
+                "#include <Probe/Probe.module.generated.h>\n#include <Probe/Probe.private.module.generated.h>\nvoid Register() {}\n");
+            temporary.Write(module + "/Tests/ProbeTests.cpp", "#include \"Probe/Probe.module.generated.h\"\nvoid Test() {}\n");
+            temporary.Write(module + "/Public/Probe/Thing.h", "#pragma once\n#include <Probe/Thing.generated.h>\n#include <Object/ModuleRegistration.h>\n");
+            temporary.Write(module + "/Public/Probe/Documented.h",
+                "#pragma once\n// Usage:\n//   #include <Probe/Probe.module.generated.h>\n/*\n#include <Probe/Probe.module.generated.h>\n*/\n" +
+                "inline const char* Spelling() noexcept { return \"#include <Probe/Probe.module.generated.h>\"; }\n");
+            temporary.Write(module + "/Public/Probe/Tables.generated.h", "#pragma once\n#include <Probe/Probe.module.generated.h>\n");
+            temporary.Write("Programs/Tool/Private/Main.mm", "#include <Probe/Probe.module.generated.h>\n");
+            NoFailures(PolicyChecks.ModuleGeneratedHeaderIncludes(temporary.Root));
+
+            // 위반: 모듈의 public·private 헤더, 시험 지원 헤더, 프로그램·템플릿 헤더. 꺾쇠·따옴표 철자, 공백을 둔 지시문, private 모듈
+            // 헤더를 모두 잡고 줄 번호를 보고한다.
+            (string File, string Text, int Line)[] violations =
+            [
+                (module + "/Public/Probe/Public.h", "#pragma once\n#include <Probe/Probe.module.generated.h>\n", 2),
+                (module + "/Private/Detail.h", "#pragma once\n\n#include \"Probe/Probe.private.module.generated.h\"\n", 3),
+                (module + "/Tests/ProbeTestSupport.h", "#pragma once\n// support\n  #  include  <Fixtures/Fixtures.module.generated.h>\n", 3),
+                ("Programs/Tool/Private/Tool.h", "#include <Probe/Probe.module.generated.h>\n", 1),
+                ("Templates/Game/Sample/Source/Game.h", "/* header */ #include <SampleGame/SampleGame.module.generated.h>\n", 1)
+            ];
+            foreach ((string file, string text, int _) in violations)
+            {
+                temporary.Write(file, text);
+            }
+
+            var failures = PolicyChecks.ModuleGeneratedHeaderIncludes(temporary.Root);
+            var actual = failures.Select(failure => (failure.Path, failure.Line, failure.Rule)).ToHashSet();
+            var expected = violations.Select(violation => (violation.File, violation.Line, "module-generated-header-include")).ToHashSet();
+            Verify.That(failures.Count == expected.Count && actual.SetEquals(expected), "module generated header includes: " + string.Join("; ", failures));
+
+            // 고치면 통과한다: 헤더는 타입별 생성 헤더를, 등록은 .cpp가 한다.
+            foreach ((string file, string _, int _) in violations)
+            {
+                temporary.Write(file, "#pragma once\n#include <Probe/Thing.generated.h>\n");
+            }
+
+            NoFailures(PolicyChecks.ModuleGeneratedHeaderIncludes(temporary.Root));
         });
         // MetaCompiler가 보지 않는 리플렉션 필드 annotation — ROCKS_NATIVE_TYPE 클래스 안, 어느 모듈 Metadata에도 없는 파일 — 은
         // attribute로만 남아 GC가 추적하지도 저장하지도 않으므로 거부하고, 읽을 수 없는(리터럴이 아닌) Metadata 목록은 규칙 파일

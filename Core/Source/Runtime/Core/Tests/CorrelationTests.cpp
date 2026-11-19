@@ -244,8 +244,8 @@ TEST(CorrelationCaptureDoesNotAllocate) {
     LogSystemConfig config;
     config.mode = LogMode::Manual;
     config.globalMinimum = LogLevel::Trace;
-    LogSystem logs(allocator, config);
     CountingSink sink;
+    LogSystem logs(allocator, config);
     REQUIRE(logs.AddSink(sink));
     REQUIRE(logs.Start());
     const uint64 before = allocator.allocations;

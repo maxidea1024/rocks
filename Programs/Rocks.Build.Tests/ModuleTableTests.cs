@@ -12,7 +12,8 @@ using Rocks.Tooling.Common;
 internal static class ModuleTableTests
 {
     // 실제 ModuleEntry.h는 Core 컨테이너·할당기를 끌어오므로 표 형식만 같은 최소 헤더를 쓴다. 매크로는 진입 기술 이름만 채운다.
-    private const string EntryHeader = """
+    // ReflectionSourceTests도 같은 표 형식 헤더를 쓴다.
+    internal const string EntryHeader = """
         #pragma once
 
         namespace rocks {

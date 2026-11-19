@@ -5,8 +5,8 @@
 #include <Object/ModuleRegistration.h>
 #include <Object/TypeRegistry.h>
 #include <Task/WorkerScheduler.h>
+#include <World/Actor.generated.h>
 #include <World/World.h>
-#include <World/World.module.generated.h>
 
 // World GC 일정(Docs/Design/GarbageCollectionScale.ko.md 17.3절): 주기 전체 수집, 전체 수집 요청,
 // 회수 예산.

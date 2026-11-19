@@ -5,6 +5,7 @@
 #include <Core/Diagnostics/Log.h>
 #include <Core/Text/StringBuilder.h>
 #include <TraceControl/TraceControl.module.generated.h>
+#include <TraceControl/TraceSettings.generated.h>
 
 namespace rocks::trace_control {
 

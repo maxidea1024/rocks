@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
 #include <ReflectionTestFixtures/TextFixture.generated.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/NamePool.h>
@@ -20,16 +19,10 @@ using reflection_fixture::TextHolder;
 // 모듈 등록·TextHolder lease·Name pool·옵션·진단 모음이다(소멸 순서: lease → 등록 → pool →
 // Registry).
 struct TextSetup {
-    explicit TextSetup(Allocator& allocator) noexcept
-        : types(allocator), registration(types, allocator), names(allocator),
-          diagnostics(allocator) {
-        REQUIRE(generated::ReflectionTestFixtures::RegisterModuleTypes(registration));
-        REQUIRE(names.Initialize());
-        auto acquired = types.Acquire(GeneratedType<TextHolder>::Schema().id);
-        REQUIRE(acquired);
-        holder = Move(acquired.Value());
-        options.names = &names;
-    }
+    // fixture 모듈(ReflectionTestFixtures)의 타입을 등록하고 TextHolder lease를 잡는다. 등록 함수는
+    // 모듈 생성 헤더에 선언되어 있고 손으로 쓴 헤더는 그 헤더를 include하지 않으므로 정의는
+    // TextTestSupport.cpp에 있다.
+    explicit TextSetup(Allocator& allocator) noexcept;
 
     ~TextSetup() noexcept {
         holder = TypeLease{};

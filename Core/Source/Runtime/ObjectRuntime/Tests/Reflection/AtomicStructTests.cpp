@@ -1,4 +1,5 @@
 #include <CoreTypeBindings/CoreTypeBindings.module.generated.h>
+#include <CoreTypeBindings/CoreValueTypes.generated.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Traits.h>
 #include <Object/TypeRegistry.h>

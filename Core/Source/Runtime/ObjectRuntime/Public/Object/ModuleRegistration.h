@@ -5,14 +5,19 @@
 
 namespace rocks {
 
-// 모듈 단위 타입 등록의 기록이다. MetaCompiler가 모듈마다 내는 집계 헤더
-// (<Module>/<Module>.module.generated.h)의 RegisterModuleTypes가 이 객체에 타입을 등록한다.
+// 모듈 단위 타입 등록의 기록이다. MetaCompiler가 모듈마다 내는 등록 함수 RegisterModuleTypes가 이
+// 객체에 타입을 등록한다. 그 함수는 모듈 생성 헤더(<Module>/<Module>.module.generated.h)에 선언만
+// 있고, 정의는 빌드가 그 모듈의 번역 단위로 한 번 컴파일하는 모듈 생성 소스에 있다(부르는 쪽은 그
+// 모듈에 의존해 링크한다). 모듈 생성 헤더는 타입별 생성 헤더를 include하지 않으므로
+// GeneratedType<T>를 쓰는 코드는 <Module/Type.generated.h>를 따로 include하고, 등록은 .cpp에서
+// 한다(손으로 쓴 헤더는 모듈 생성 헤더를 include하지 않는다 —
+// Docs/Design/ReflectionGeneratedSources.ko.md 8절).
 // 의존 모듈의 타입을 먼저 등록하고, 같은 ID·같은 native 타입으로 이미 등록된 타입은 새로 등록하지
 // 않고 그 타입의 lease를 붙잡는다. 그래서 여러 모듈이 같은 의존 모듈을 공유해도 한 번만 등록되고,
 // 공유 타입을 먼저 등록한 쪽이 해제를 시도해도 그 타입을 쓰는 다른 기록이 남아 있으면 Busy로
 // 멈춘다(쓰는 쪽이 타입을 잃지 않는다).
 //
-// 사용 예:
+// 사용 예(.cpp):
 //   #include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
 //   ModuleRegistration registration(types, allocator);
 //   auto registered = generated::ReflectionTestFixtures::RegisterModuleTypes(registration);
