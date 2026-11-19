@@ -4,6 +4,7 @@
 #include <Platform/Memory.h>
 
 using namespace rocks;
+namespace optional_wire_tests_file {
 
 // Optional 값(WireType::Optional = 14)의 형식·present byte 범위·내부 tag 검사·Record 내부·예산
 // 시험이다 (Docs/Design/ReflectionExtensions.ko.md 1.2절 — 리플렉션 B9a3).
@@ -417,3 +418,4 @@ TEST(OptionalWire_ArgumentErrorsKeepPayloadAndWriterRejectsShrunkOutput) {
     out.Clear();
     CHECK(set.Value().End().Error() == ErrorCode::InvalidArgument);
 }
+} // namespace optional_wire_tests_file
