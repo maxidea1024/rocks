@@ -11,8 +11,11 @@
 // 자신), DescribeConsoleSetting.
 // 봉인 전 BootCVar::Get의 Fatal은 CVarThreadTests.cpp의 사망 시험이다.
 using namespace rocks;
+namespace c_var_boot_tests_file {
+
 using namespace rocks::config;
 using namespace rocks::test::config;
+} // namespace c_var_boot_tests_file
 
 namespace cvar_boot_test {
 
@@ -34,6 +37,8 @@ constinit BootCVar<int32> QueuedBoot = cvar::Boot("game.boot.queued", 1).Help("Q
 constinit CVar<float> BootDistance = cvar::Var("render.boot.distance", 100.f).Help("BootDistance");
 
 } // namespace cvar_boot_test
+
+namespace c_var_boot_tests_file {
 
 namespace {
 
@@ -251,6 +256,7 @@ TEST(CVar_ReportUnresolvedSuggestsNearNames) {
     REQUIRE(again);
     CHECK(again.Value() == 0 && context.Diagnostics().Count() == 0);
 }
+} // namespace c_var_boot_tests_file
 
 namespace cvar_boot_test {
 
@@ -262,6 +268,8 @@ constinit ConsoleCommand BootFlushCommand =
     cvar::Command<&NoOp>("log.boot.flush").Help("flushes logs");
 
 } // namespace cvar_boot_test
+
+namespace c_var_boot_tests_file {
 
 // 콘솔 명령 이름에 넣은 값은 "명령은 값을 받지 않는다"로 알린다(제안 대신).
 TEST(CVar_ReportUnresolvedFlagsValuesForCommands) {
@@ -302,3 +310,4 @@ TEST(CVar_TakeDiagnosticsMovesOmittedCount) {
     CHECK(taken.Count() == 1 && taken.Omitted() == 1);
     CHECK(context.Diagnostics().Count() == 0 && context.Diagnostics().Omitted() == 0);
 }
+} // namespace c_var_boot_tests_file

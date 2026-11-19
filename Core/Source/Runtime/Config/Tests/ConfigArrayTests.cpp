@@ -5,6 +5,8 @@
 // 재적용, Set 연산, 원소 비교가 리플렉션 값 동등성(enum 대소문자·실수 표기·struct 멤버
 // 순서·기본값)인지, 잘못된 연산·`$` 위치·컨테이너 안 연산의 줄·열 진단, 경로 이름 펼치기와 오류.
 using namespace rocks;
+namespace config_array_tests_file {
+
 using namespace rocks::config;
 using namespace rocks::test::config;
 
@@ -168,3 +170,4 @@ TEST(Config_PathTokensExpandInStrings) {
                                           "Render.RenderGraph.cacheDir", "{UserDataDir}");
     CHECK(!assigned && fixture.HasDiagnostic(ConfigDiagnosticCode::InvalidPathToken));
 }
+} // namespace config_array_tests_file

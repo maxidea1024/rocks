@@ -8,6 +8,8 @@
 // 우선순위와 순환 진단, 프로필을 바꾸면 옛 값의 Unset, 시작 뒤 GPU 특성으로 골라진 프로필의
 // RestartRequired 값은 대기가 아니다.
 using namespace rocks;
+namespace device_profile_tests_file {
+
 using namespace rocks::config;
 using namespace rocks::test::config;
 
@@ -247,3 +249,4 @@ TEST(Config_DeviceProfileAfterStartupDoesNotQueueRestart) {
         CHECK(ignored == 1);
     }
 }
+} // namespace device_profile_tests_file
