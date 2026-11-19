@@ -360,7 +360,9 @@ void LogHost::PrepareFileSink(StringView hostName) noexcept {
     if (LogFileEncryptVar.Get()) {
         // 공개키가 없거나 올바르지 않으면 파일을 만들지 않는다(평문으로 내려가지 않는다).
         const StringView text = LogFileRecipientKeyVar.Get().TrimAscii();
-        uint8 key[crypto::LogFilePublicKeyBytes + 3];
+        // Base64 해독은 4글자 묶음 단위로 쓰므로 공개키보다 한 묶음 몫(최대 3 byte) 크게 둔다.
+        constexpr usize Base64GroupSlackBytes = 3;
+        uint8 key[crypto::LogFilePublicKeyBytes + Base64GroupSlackBytes];
         auto decoded = text.IsEmpty() ? Result<usize>::Failure(ErrorCode::NotFound)
                                       : crypto::TryFromBase64(text, crypto::Base64Variant::Standard,
                                                               Span<uint8>(key));
