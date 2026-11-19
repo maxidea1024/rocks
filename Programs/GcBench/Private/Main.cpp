@@ -1785,10 +1785,6 @@ int RunAllocatorComparison(const Options& options) noexcept {
             }
         }
 
-        if (!binned.Shutdown()) {
-            return 7;
-        }
-
         const double churned = static_cast<double>(liveObjects / 10) * AllocatorChurnRounds;
         printf("  %-16s build %8.1f ns/object, churn create+link %8.1f ns/object, reclaim %8.1f "
                "ns/object, teardown %8.1f ms (%.1f ns/object)\n",
@@ -1822,10 +1818,6 @@ int RunAllocatorMicro(const Options& options) noexcept {
                 gc_bench::RunAllocatorMicroBench(*choices[kind], AllocatorKindNames[kind]);
             status != 0) {
             return status;
-        }
-
-        if (!binned.Shutdown()) {
-            return 7;
         }
     }
 

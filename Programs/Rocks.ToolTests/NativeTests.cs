@@ -384,14 +384,14 @@ internal static class NativeTests
                 (2, "BinnedAllocator backing returned overflowing address range"),
                 (3, "BinnedAllocator backing returned overlapping storage"),
                 (4, "BinnedAllocator backing returned overlapping storage"),
-                (5, "BinnedAllocator backing returned overlapping storage"),
-                (6, "BinnedAllocator backing returned overlapping storage") })
+                (5, "BinnedAllocator destroyed with live allocations"),
+                (6, "BinnedAllocator destroyed with live allocations") })
             {
                 suite.Add("Native.Fatal.allocator-binned-invalid-" + operation, async () =>
                 {
                     var result = await Run("--negative-control", "allocator-binned-invalid-" + operation);
-                    Verify.That(result.ExitCode != 0, "invalid backing allocation did not fail");
-                    Verify.Contains(diagnostic, result.StdErr, "binned backing fatal diagnostic");
+                    Verify.That(result.ExitCode != 0, "invalid binned allocator usage did not fail");
+                    Verify.Contains(diagnostic, result.StdErr, "binned allocator fatal diagnostic");
                 });
             }
         }
