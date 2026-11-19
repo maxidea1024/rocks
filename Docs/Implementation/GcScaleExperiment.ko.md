@@ -1289,4 +1289,22 @@ Debug Foundation 전체 2,527개, Debug EngineTests 전체 2,899개, 클러스�
 
 - 모델 시험의 Idle 불변식을 고쳤다: Retired는 회수 대기(`HasPendingReclaim`)가 있을 때만 남고 통계의 `retiredObjects`가 모델과 같다.
 - 검증(바뀐 범위 1회 — 다른 세션의 빌드 작업과 겹치지 않게 넓은 시험은 하지 않았다): Debug Foundation `ObjectRegistryModel` 6·`ObjectGcReclaim` 6·`GcSoak` 6·`ObjectGc` 56·`Gc` 93·`World` 11, Debug EngineTests `World` 79·`Engine` 32·`Tick` 30·`Gc` 110(새 `WorldGc_` 12개·엔진 GC 3개 포함), format·policy 통과(`review7/test2.txt`).
-- 음성 대조는 준비만 했다(`review7/negctl12.py` — 최소 진척 제거, 소멸자 사이 한도 제거, 되돌린 work 미연결, safepoint 조건 제거, 보고서 누적 제거, 옛 표지 판정, 파괴 조건 재도입, 예산 없는 cycle 끝내기, 게임 시간 간격, 취소 분기 제거, Busy 재시도 제거, 엔진 요청 미전달, 간격 0 주기). 빌드 14회가 필요해 다른 세션의 빌드 시간 작업이 병합된 뒤 돌리고 결과를 이 절에 더한다.
+- 음성 대조 13종(2026-11-20, 빌드 보류가 풀린 뒤 — 병합 cc96ad60 위에서 대조마다 소스를 바꿔 Debug로 다시 빌드하고 `ObjectGcReclaim`(Foundation) 또는 `WorldGc_`·`Engine_`(EngineTests)를 돌린 뒤 되돌렸다. 동시에 돌리지 않았다). 13종 모두 잡혔고 못 잡은 대조는 없다. 대조 전 기준(같은 병합): Foundation `ObjectRegistryModel` 6·`Gc` 93·`World` 11, EngineTests `World` 79·`Engine` 32·`Tick` 30·`Gc` 110 통과.
+
+| 대조 | 바꾼 것 | 잡은 시험 |
+|---|---|---|
+| K1 | 최소 진척 제거(첫 판정부터 시간 한도) | `ObjectGcReclaim_TimeBudgetStopsBetweenDestructorsWithProgress` |
+| K2 | 소멸자 사이의 시간 한도 제거(묶음마다만) | 같은 시험 |
+| K3 | 되돌린 work를 회수 대기 목록에 다시 넣지 않음 | 같은 시험이 Fatal(`Object registry retired queue lost a slot` — 목록 계수 검사)로 끝남 |
+| K4 | `FinishCollectionDeferringReclaim`의 safepoint 조건 제거(N2) | `ObjectGcReclaim_FinishCollectionDeferringReclaimNeedsSafepoint`, `WorldGc_RequestDuringSweepingWithBorrowStaysBusy` |
+| K5 | 예산 회수를 마지막 보고서에 더하지 않음 | `ObjectGcReclaim_TimeBudgetStopsBetweenDestructorsWithProgress` |
+| K7 | 회수 대기를 옛 표지로 판정(N1·D1·R2 이전 방식) | `WorldGc_HeldObjectIsReclaimedAfterRelease`·`…RepeatedRequestKeepsDrainingEarlierReclaim`·`…RequestDuringReclaimingKeepsReclaimBudgeted`·`…RequestDuringSweepingWithBorrowStaysBusy` |
+| K9 | 주기 수집에 World 파괴 조건을 다시 넣음(N3) | `WorldGc_FullCollectionModeCollectsWithoutWorldDestroys` |
+| K10 | 진행 중인 cycle을 예산 없는 Step으로 끝냄(R1 이전 방식) | `WorldGc_RequestDuringReclaimingKeepsReclaimBudgeted` |
+| K11 | 간격을 World 게임 시간으로 셈(R3 이전 방식) | `WorldGc_FullCollectionIntervalCountsRealTimeWhilePaused` |
+| K12 | Marking 취소 분기 제거 | `WorldGc_RequestDuringMarkingCancelsAndCollects` |
+| K13 | Busy 때 요청을 남기지 않음 | `WorldGc_BusyFullCollectionRetriesNextFrame`, `WorldGc_RequestDuringSweepingWithBorrowStaysBusy` |
+| K14 | 엔진이 요청을 World에 나눠 주지 않음(R6) | `Engine_OwnsGcSchedulerAndLendsItToWorlds` |
+| K15 | 간격 0 이하에도 주기 수집 | `WorldGc_FullCollectionIntervalCountsRealTimeWhilePaused` |
+
+- 대조 스크립트와 실행 기록은 작업 임시 폴더에 있다(`review7/negctl12.py`·`negctl12-run.txt`, K3의 Fatal 문구는 `k3-out.txt`). 이것으로 7단계를 닫는다.
