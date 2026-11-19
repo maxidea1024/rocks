@@ -208,4 +208,69 @@ TEST(CoreSystemAllocatorLedgerFailureDoesNotPublish) {
     REQUIRE(memory.Deallocate(block.Value()));
     CHECK(memory.Stats().liveAllocations == 0);
 }
+
+// 주소 모양별 최악 탐사 길이의 상한이다(지금 hash와 표 크기 규칙에서 잰 값 — 설계 18.6절). 주소가
+// 흩어진 모양(64KB 정렬, 여러 페이지의 같은 offset)은 기본 hash와 같은 수준이고, 한 페이지를 꽉
+// 채운 모양은 제자리가 서로 달라 밀리지 않는다. 이어지는 주소는 페이지 창이 겹치는 곳에서 군집이
+// 길어진다(블록이 작을수록 길다) — 그 길이가 여기 적힌 값을 넘으면 hash나 표의 부하 규칙이 바뀐
+// 것이다.
+constexpr usize ProbeLimitAligned = 32;
+constexpr usize ProbeLimitOnePage = 1;
+constexpr usize ProbeLimitSameOffset = 32;
+constexpr usize ProbeLimitSequential16 = 2048;
+constexpr usize ProbeLimitSequential32 = 2048;
+constexpr usize ProbeLimitSequential64 = 2048;
+constexpr usize ProbeLimitSequential208 = 512;
+
+// 주소 모양별로 원장 hash의 군집을 본다(설계 18.6절): 가장 멀리 밀려난 주소를 찾으며 보는 칸 수가
+// 모양마다 정해진 상한 안이다. 주소는 지어낸 값이고 넣는 순서도 정해져 있어 결과가 결정적이다.
+TEST(CoreAddressLedgerProbeLengthByAddressPattern) {
+    struct Pattern {
+        const char* name;
+        uint32 count;
+        uptr stride;
+        uptr offset;
+        usize longestProbeLimit;
+    };
+
+    constexpr uptr Base = uptr{0x14a2f} << 28;
+    constexpr uptr SlabBytes = uptr{64} << 10;
+    constexpr uptr PageBytes = 4096;
+    constexpr Pattern Patterns[] = {
+        // 64KB로 정렬된 주소만(큰 할당·slab), 한 페이지를 16 byte 블록 256개로 채움, 여러 페이지의
+        // 같은
+        // offset, 그리고 이어지는 주소(블록 크기 16·32·64·208 byte).
+        {"64KB aligned", 4096, SlabBytes, 0, ProbeLimitAligned},
+        {"one full page", 256, 16, 0, ProbeLimitOnePage},
+        {"same offset in many pages", 4096, PageBytes, 0x40, ProbeLimitSameOffset},
+        {"sequential 16B", 65536, 16, 0, ProbeLimitSequential16},
+        {"sequential 32B", 65536, 32, 0, ProbeLimitSequential32},
+        {"sequential 64B", 65536, 64, 0, ProbeLimitSequential64},
+        {"sequential 208B", 65536, 208, 0, ProbeLimitSequential208},
+    };
+
+    for (const Pattern& pattern : Patterns) {
+        UntrackedPlatformAllocator storage;
+        AddressLedger ledger(storage);
+        for (uint32 index = 0; index < pattern.count; ++index) {
+            REQUIRE(ledger.Insert(FakeAddress(Base + pattern.offset + uptr{index} * pattern.stride),
+                                  index + 1));
+        }
+
+        CHECK(ledger.Count() == pattern.count);
+        const usize longest = ledger.LongestProbe();
+        CHECK(longest >= 1);
+        CHECK(longest <= pattern.longestProbeLimit);
+        // 내용은 군집과 무관하게 맞다.
+        for (uint32 index = 0; index < pattern.count; ++index) {
+            usize bytes = 0;
+            REQUIRE(ledger.Remove(FakeAddress(Base + pattern.offset + uptr{index} * pattern.stride),
+                                  bytes));
+            REQUIRE(bytes == index + 1);
+        }
+
+        CHECK(ledger.Count() == 0);
+        CHECK(ledger.LongestProbe() == 0);
+    }
+}
 } // namespace address_ledger_tests_file

@@ -2,6 +2,7 @@
 #include <Core/Memory/BinnedAllocator.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Private/Memory/BinnedAllocatorTestAccess.h>
+#include <PlatformBase/Private/Common/VirtualMemoryTestAccess.h>
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
 #include <Platform/Thread.h>
@@ -14,6 +15,7 @@ using namespace rocks;
 namespace binned_allocator_tests_file {
 
 using rocks::detail::BinnedAllocatorTestAccess;
+using rocks::platform::detail::VirtualMemoryTestAccess;
 
 namespace {
 
@@ -886,8 +888,9 @@ TEST(CoreBinnedExhaustedRangeAndCommitFailureFallBack) {
         BinnedAllocatorConfig config;
         config.reserveBytes = MiB;
         BinnedAllocator allocator(system, config);
-        BinnedAllocatorTestAccess::FailSlabCommitOnAttempt(allocator, 1);
+        VirtualMemoryTestAccess::FailCommitOnCall(1);
         auto fallback = allocator.Allocate(200, 32);
+        VirtualMemoryTestAccess::ClearFaults();
         REQUIRE(fallback);
         CHECK(!InsideRange(allocator, fallback.Value()));
         CHECK(reinterpret_cast<uptr>(fallback.Value()) % 32 == 0);
@@ -907,51 +910,107 @@ TEST(CoreBinnedExhaustedRangeAndCommitFailureFallBack) {
     CHECK(system.Stats().liveAllocations == 0);
 }
 
-// decommit이 거절되면(닫힌 region) slab을 commit한 채 보관해 다시 쓰고, OS 실패면 그 slab을 다시
-// 쓰지 않는다.
-TEST(CoreBinnedDecommitFaultsKeepOrAbandonTheSlab) {
+// commit·decommit 실패는 일시적이다(설계 18.4절, AL2b): commit이 실패한 요청은 큰 경로로 가고 다음
+// 요청이 같은 slab을 다시 얻는다. decommit이 실패한 slab은 commit된 채 보관해 다시 쓰고 다음 Trim이
+// 다시 푼다. 한 번의 실패가 주소 범위를 닫지 않으므로 그 뒤에도 Trim이 메모리를 돌려준다.
+TEST(CoreBinnedCommitAndDecommitFailuresAreTransient) {
     SystemAllocator system;
     {
+        // decommit 실패: 보관 한도가 0이어도 그 slab을 commit된 채 보관한다.
         BinnedAllocatorConfig config;
         config.reserveBytes = MiB;
         config.retainedEmptySlabs = 0;
         BinnedAllocator allocator(system, config);
-        BinnedAllocatorTestAccess::SetSlabDecommitFault(
-            allocator, BinnedAllocatorTestAccess::DecommitFault::Refused);
         auto first = allocator.Allocate(64, 16);
         REQUIRE(first);
+        VirtualMemoryTestAccess::FailDecommitOnCall(1);
         REQUIRE(allocator.Deallocate(first.Value()));
-        // 한도가 0이어도 보관한다(commit된 채다).
         CHECK(allocator.Usage().retainedSlabs == 1);
         CHECK(allocator.Usage().committedBytes == SlabBytes);
         CHECK(BinnedAllocatorTestAccess::SlabTableEntry(allocator, first.Value()) == 0);
-        allocator.Trim();
-        CHECK(allocator.Usage().retainedSlabs == 1);
+        CHECK(allocator.Deallocate(first.Value()).Error() == ErrorCode::NotFound);
+        // 보관한 slab을 그대로 다시 쓴다(내용에 접근할 수 있다).
         auto second = allocator.Allocate(64, 16);
         REQUIRE(second);
         CHECK(second.Value() == first.Value());
         CHECK(allocator.Usage().retainedSlabs == 0);
         FillPattern(second.Value(), 64, 1);
-
-        BinnedAllocatorTestAccess::SetSlabDecommitFault(
-            allocator, BinnedAllocatorTestAccess::DecommitFault::Lost);
         CHECK(CheckPattern(second.Value(), 64, 1));
+        // 다음 decommit은 성공한다.
         REQUIRE(allocator.Deallocate(second.Value()));
         CHECK(allocator.Usage().retainedSlabs == 0);
         CHECK(allocator.Usage().committedBytes == 0);
-        CHECK(BinnedAllocatorTestAccess::SlabTableEntry(allocator, second.Value()) == 0);
-        CHECK(allocator.Deallocate(second.Value()).Error() == ErrorCode::NotFound);
 
-        BinnedAllocatorTestAccess::SetSlabDecommitFault(
-            allocator, BinnedAllocatorTestAccess::DecommitFault::None);
-        // 잃은 slab은 다시 쓰지 않는다: 다음 slab에서 받는다.
-        auto third = allocator.Allocate(64, 16);
-        REQUIRE(third);
-        CHECK((reinterpret_cast<uptr>(third.Value()) & ~(SlabBytes - 1)) !=
-              (reinterpret_cast<uptr>(second.Value()) & ~(SlabBytes - 1)));
-        FillPattern(third.Value(), 64, 2);
-        CHECK(CheckPattern(third.Value(), 64, 2));
-        REQUIRE(allocator.Deallocate(third.Value()));
+        // slab 둘 가운데 하나만 실패하면 Trim이 나머지를 풀고, 다음 Trim이 실패한 것을 다시 푼다.
+        constexpr usize Request = BinnedAllocator::MaxSmallBytes;
+        const uint32 perSlab = BinnedAllocatorTestAccess::ClassCapacity(
+            BinnedAllocatorTestAccess::ClassOf(Request, 16));
+        constexpr uint32 MaxBlocks = 16;
+        REQUIRE(perSlab + 1 <= MaxBlocks);
+        void* blocks[MaxBlocks]{};
+        for (uint32 index = 0; index < perSlab + 1; ++index) {
+            auto result = allocator.Allocate(Request, 16);
+            REQUIRE(result);
+            blocks[index] = result.Value();
+        }
+
+        CHECK(allocator.Usage().committedBytes == 2 * SlabBytes);
+        // 두 slab을 보관소에 두려고, slab이 비는 반환마다 decommit을 실패시킨다.
+        VirtualMemoryTestAccess::FailDecommitOnCall(1);
+        for (uint32 index = 0; index < perSlab; ++index) {
+            REQUIRE(allocator.Deallocate(blocks[index]));
+        }
+
+        VirtualMemoryTestAccess::FailDecommitOnCall(1);
+        REQUIRE(allocator.Deallocate(blocks[perSlab]));
+        CHECK(allocator.Usage().retainedSlabs == 2);
+        CHECK(allocator.Usage().committedBytes == 2 * SlabBytes);
+        VirtualMemoryTestAccess::FailDecommitOnCall(1);
+        allocator.Trim();
+        CHECK(allocator.Usage().retainedSlabs == 1);
+        CHECK(allocator.Usage().committedBytes == SlabBytes);
+        allocator.Trim();
+        VirtualMemoryTestAccess::ClearFaults();
+        CHECK(allocator.Usage().retainedSlabs == 0);
+        CHECK(allocator.Usage().committedBytes == 0);
+        CHECK(allocator.Stats().liveAllocations == 0);
+    }
+
+    {
+        // commit 실패: 그 요청만 큰 경로로 가고, 다음 요청은 같은 slab 번호를 다시 얻는다. 그 뒤의
+        // Trim도 보관분을 돌려준다(실패가 주소 범위를 닫지 않는다).
+        BinnedAllocatorConfig config;
+        config.reserveBytes = MiB;
+        config.retainedEmptySlabs = 4;
+        BinnedAllocator allocator(system, config);
+        auto kept = allocator.Allocate(64, 16);
+        REQUIRE(kept);
+        const uptr firstSlab = reinterpret_cast<uptr>(kept.Value()) & ~(SlabBytes - 1);
+        VirtualMemoryTestAccess::FailCommitOnCall(1);
+        auto fallback = allocator.Allocate(4000, 16);
+        REQUIRE(fallback);
+        CHECK(!InsideRange(allocator, fallback.Value()));
+        CHECK(allocator.Usage().fallbackAllocations == 1);
+        CHECK(allocator.Usage().committedBytes == SlabBytes);
+        auto retried = allocator.Allocate(4000, 16);
+        VirtualMemoryTestAccess::ClearFaults();
+        REQUIRE(retried);
+        CHECK(InsideRange(allocator, retried.Value()));
+        // 실패한 slab 번호(첫 slab의 바로 다음)를 다시 commit해 쓴다.
+        CHECK((reinterpret_cast<uptr>(retried.Value()) & ~(SlabBytes - 1)) ==
+              firstSlab + SlabBytes);
+        CHECK(allocator.Usage().fallbackAllocations == 1);
+        CHECK(allocator.Usage().committedBytes == 2 * SlabBytes);
+        FillPattern(retried.Value(), 4000, 9);
+        CHECK(CheckPattern(retried.Value(), 4000, 9));
+        REQUIRE(allocator.Deallocate(retried.Value()));
+        CHECK(allocator.Usage().retainedSlabs == 1);
+        allocator.Trim();
+        CHECK(allocator.Usage().retainedSlabs == 0);
+        CHECK(allocator.Usage().committedBytes == SlabBytes);
+        REQUIRE(allocator.Deallocate(fallback.Value()));
+        REQUIRE(allocator.Deallocate(kept.Value()));
+        allocator.Trim();
         CHECK(allocator.Usage().committedBytes == 0);
         CHECK(allocator.Stats().liveAllocations == 0);
     }

@@ -135,6 +135,15 @@ int PosixDecommitAdvice() noexcept {
     return MADV_DONTNEED;
 }
 
+// UE 5.8 AndroidPlatformMemory.cpp 646–650·656과 같다: commit은 아무 일도 하지 않고 decommit은
+// MADV_DONTNEED다(다음 접근은 0으로 채운 새 페이지를 받는다).
+void PosixOpenCommit(void*, usize) noexcept {
+}
+
+int PosixOpenDecommit(void* address, usize bytes) noexcept {
+    return madvise(address, bytes, MADV_DONTNEED);
+}
+
 // Linux는 이름을 15 byte(NUL 제외)까지 받고 길면 ERANGE로 거부하므로 UTF-8 문자 경계에서 자른다.
 void PosixSetCurrentThreadName(const char* name) noexcept {
     constexpr usize LinuxNameBytes = 15;
