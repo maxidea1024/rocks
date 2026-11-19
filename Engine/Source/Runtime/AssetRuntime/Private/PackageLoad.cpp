@@ -4,6 +4,7 @@
 #include <AssetRuntime/BulkData.generated.h>
 #include <AssetRuntime/Package.generated.h>
 #include <AssetRuntime/PackageLoad.h>
+#include <Core/Assert.h>
 
 namespace rocks {
 
@@ -53,6 +54,25 @@ Result<T> ClassifyGraphFailure(AssetDiagnostic* failure, ErrorCode error, AssetI
         return FailAsset<T>(failure, AssetDiagnosticCode::CorruptPackage, error, asset,
                             static_cast<uint32>(PackageSectionKind::Objects), 0);
     }
+}
+
+// resolver가 준 handle이 asset의 공개된 Package인지 본다. null·회수된 handle·Package가 아닌
+// 객체·다른 AssetId는 InvalidArgument다.
+Result<void> CheckResolvedPackage(ConstructionContext& transaction, ObjectHandle handle,
+                                  AssetId asset) noexcept {
+    auto borrow = transaction.Registry().Resolve<Package>(transaction.Access(), handle);
+    if (!borrow) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 방금 같은 스레드에서 Resolve한 Borrow라 Get은 실패하지 않는다.
+    auto pointer = borrow.Value().Get();
+    ROCKS_ASSERT(pointer.IsOk());
+    if (!(pointer.Value()->Id() == asset)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return Result<void>::Success();
 }
 
 } // namespace
@@ -120,7 +140,7 @@ PackageLoadState::PackageLoadState(Allocator& allocator, ObjectRegistry& registr
       hooks_(allocator, options.read.expectedKind == PackageKind::Cooked),
       stage_(allocator, registry, types, access, StageOptions(options, hooks_)), file_(allocator),
       contents_(allocator), nodes_(allocator), importTypes_(allocator), hardTypes_(allocator),
-      bulkBytes_(registry.ObjectAllocator()), bulkSlots_(registry.ObjectAllocator()) {
+      bulkBytes_(allocator), bulkSlots_(allocator) {
     options_.read.types = &types;
 }
 
@@ -179,12 +199,10 @@ Result<void> PackageLoadState::Prepare(Array<uint8>&& file, AssetDiagnostic* fai
         return ClassifyGraphFailure<void>(failure, valid.Error(), asset);
     }
 
+    // 쿠킹은 reader가 읽기 전용으로 표시하지 않고(더 새 데이터는 UnsupportedVersion), 그래프
+    // 1단계도 쿠킹 정책이라 모르는 필드·더 새 버전을 진단 대신 실패로 끝낸다.
     readOnly_ = readOnly_ || hooks_.sawNewer;
-    if (contents_.header.kind == PackageKind::Cooked && readOnly_) {
-        return FailAsset<void>(failure, AssetDiagnosticCode::UnsupportedVersion,
-                               ErrorCode::Unsupported, asset,
-                               static_cast<uint32>(PackageSectionKind::Objects), 0);
-    }
+    ROCKS_ASSERT(contents_.header.kind != PackageKind::Cooked || !readOnly_);
 
     if (auto checked = CrossCheck(failure); !checked) {
         return checked;
@@ -203,8 +221,10 @@ Result<void> PackageLoadState::CrossCheck(AssetDiagnostic* failure) noexcept {
     };
 
     // export 1(대표 에셋)은 Asset 파생이어야 한다.
+    // export 타입은 그래프 1단계가 acquire했다(등록되어 있다).
     auto isAsset = types_.IsA(contents_.exports[0].type, GeneratedType<Asset>::Id());
-    if (!isAsset || !isAsset.Value()) {
+    ROCKS_ASSERT(isAsset.IsOk());
+    if (!isAsset.Value()) {
         return corrupt(PackageSectionKind::Exports, 1);
     }
 
@@ -212,10 +232,9 @@ Result<void> PackageLoadState::CrossCheck(AssetDiagnostic* failure) noexcept {
     // 표는 TypeId 순이고 export 타입 집합과 같으므로(ReadPackage) 하한 탐색이 그 행을 찾는다.
     const Array<PackageTypeVersion>& types = contents_.summary.types;
     for (usize node = 0; node < contents_.exports.Size(); ++node) {
+        // Validate가 성공했으면 모든 노드에 저장 버전이 있다.
         auto stored = stage_.StoredVersion(node);
-        if (!stored) {
-            return corrupt(PackageSectionKind::Objects, node);
-        }
+        ROCKS_ASSERT(stored.IsOk());
 
         usize low = 0;
         usize high = types.Size() - 1;
@@ -372,6 +391,27 @@ Result<void> PackageLoadState::CrossCheck(AssetDiagnostic* failure) noexcept {
         }
     }
 
+    // 모든 import는 Objects가 가리키거나 뒤 import의 outer다(AS 5.7절 15 — writer는 쓰이는 대상과
+    // 그 Outer 사슬만 쓴다). 읽기 전용 열기는 모르는 필드 안의 참조를 보지 못하므로 보지 않는다.
+    if (!readOnly_) {
+        Array<bool> outer(allocator_);
+        if (auto resized = outer.TryResize(contents_.imports.Size()); !resized) {
+            return FailAsset<void>(failure, AssetDiagnosticCode::None, resized.Error(), asset);
+        }
+
+        for (const PackageImportEntry& entry : contents_.imports) {
+            if (entry.outerImportIndex != 0) {
+                outer[entry.outerImportIndex - 1] = true;
+            }
+        }
+
+        for (usize index = 0; index < contents_.imports.Size(); ++index) {
+            if (externals[index].occurrences == 0 && !outer[index]) {
+                return corrupt(PackageSectionKind::ObjectImports, index);
+            }
+        }
+    }
+
     return Result<void>::Success();
 }
 
@@ -454,30 +494,37 @@ Result<void> InstantiatePackages(ConstructionContext& transaction,
                                                entry.asset);
                     }
 
+                    // resolver가 준 handle은 이 에셋의 Package여야 한다(다른 에셋·Package가 아닌
+                    // 객체·회수된 handle을 조용히 잇지 않는다 — AS 5.7절 16).
+                    if (auto checked =
+                            CheckResolvedPackage(transaction, found.Value(), entry.asset);
+                        !checked) {
+                        return FailAsset<void>(failure, AssetDiagnosticCode::None, checked.Error(),
+                                               state.Id(), section, position, entry.asset);
+                    }
+
                     package = found.Value();
                 }
 
                 // Hard 의존이면 대상 대표 에셋의 실제 타입이 저장 때 타입(expectedType)의 파생이다.
                 const TypeId expected = state.hardTypes_[position];
                 if (!(expected == TypeId{})) {
+                    // package는 검증한 공개 Package다. 빈 이름 조회는 이름 검사·키 할당이
+                    // 없어 실패는 대표 에셋이 없을 때(NotFound)뿐이다.
                     auto representative = transaction.FindObject(package, StringView());
                     if (!representative) {
-                        return FailAsset<void>(failure,
-                                               representative.Error() == ErrorCode::NotFound
-                                                   ? AssetDiagnosticCode::MissingDependency
-                                                   : AssetDiagnosticCode::None,
+                        ROCKS_ASSERT(representative.Error() == ErrorCode::NotFound);
+                        return FailAsset<void>(failure, AssetDiagnosticCode::MissingDependency,
                                                representative.Error(), state.Id(), section,
                                                position, entry.asset);
                     }
 
+                    // 방금 찾은 이 트랜잭션의 보이는 객체이고 두 타입 모두 등록되어 있다.
                     auto type = transaction.AcquireType(representative.Value());
-                    if (!type) {
-                        return FailAsset<void>(failure, AssetDiagnosticCode::None, type.Error(),
-                                               state.Id(), section, position, entry.asset);
-                    }
-
+                    ROCKS_ASSERT(type.IsOk());
                     auto derived = state.types_.IsA(type.Value().Id(), expected);
-                    if (!derived || !derived.Value()) {
+                    ROCKS_ASSERT(derived.IsOk());
+                    if (!derived.Value()) {
                         return FailAsset<void>(
                             failure, AssetDiagnosticCode::TypeMismatch, ErrorCode::TypeMismatch,
                             state.Id(), static_cast<uint32>(PackageSectionKind::Dependencies),
@@ -498,14 +545,12 @@ Result<void> InstantiatePackages(ConstructionContext& transaction,
                                        target.Error(), state.Id(), section, position, entry.asset);
             }
 
+            // 방금 찾은 객체이고 import 타입은 그래프 1단계가 acquire했다.
             auto type = transaction.AcquireType(target.Value());
-            if (!type) {
-                return FailAsset<void>(failure, AssetDiagnosticCode::None, type.Error(), state.Id(),
-                                       section, position, entry.asset);
-            }
-
+            ROCKS_ASSERT(type.IsOk());
             auto derived = state.types_.IsA(type.Value().Id(), entry.type);
-            if (!derived || !derived.Value()) {
+            ROCKS_ASSERT(derived.IsOk());
+            if (!derived.Value()) {
                 return FailAsset<void>(failure, AssetDiagnosticCode::TypeMismatch,
                                        ErrorCode::TypeMismatch, state.Id(), section, position,
                                        entry.asset);
@@ -535,18 +580,14 @@ Result<void> InstantiatePackages(ConstructionContext& transaction,
     // prepare: Package 정체성·bulk, 대표 에셋 id(Commit 전 — AS 6.1절).
     for (usize index = 0; index < packages.Size(); ++index) {
         PackageLoadState& state = *packages[index];
+        // 이 트랜잭션이 만든 객체다(Required 검사 표시는 CheckRequired가 끝내며 걷었다).
         auto package = transaction.GetForWrite<Package>(outPackages[index]);
-        if (!package) {
-            return FailAsset<void>(failure, AssetDiagnosticCode::None, package.Error(), state.Id());
-        }
+        ROCKS_ASSERT(package.IsOk());
 
         detail::PackageAccess::SetPackage(*package.Value(), state.Id(), state.contents_.header.kind,
                                           Move(state.bulkBytes_), Move(state.bulkSlots_));
         auto representative = transaction.GetForWrite<Asset>(state.stage_.Nodes()[0]);
-        if (!representative) {
-            return FailAsset<void>(failure, AssetDiagnosticCode::None, representative.Error(),
-                                   state.Id());
-        }
+        ROCKS_ASSERT(representative.IsOk());
 
         detail::PackageAccess::SetAssetId(*representative.Value(), state.Id());
     }

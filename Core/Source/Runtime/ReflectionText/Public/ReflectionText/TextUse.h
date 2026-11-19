@@ -8,24 +8,24 @@
 // UE FProperty::ShouldPort(Property.cpp:1153-1182)와 JsonObjectConverter의 기본 SkipFlags를
 // 따른다.
 //
-// | 용도    | 출력 제외                                                   | 입력 제외          |
-// |---------|-------------------------------------------------------------|--------------------|
-// | Edit    | Transient · NonPIEDuplicateTransient                        | Transient          |
-// | Copy    | Transient · NonPIEDuplicateTransient · DuplicateTransient · | 출력과 같다        |
-// |         | TextExportTransient                                         |                    |
-// | PieCopy | Transient · DuplicateTransient · TextExportTransient        | 출력과 같다        |
-// | Report  | Transient                                                   | 입력 불가          |
+// | 용도       | 출력 제외                                                      | 입력 제외   |
+// |------------|----------------------------------------------------------------|-------------|
+// | Edit       | Transient · NonTryoutDuplicateTransient                        | Transient   |
+// | Copy       | Transient · NonTryoutDuplicateTransient · DuplicateTransient · | 출력과 같다 |
+// |            | TextExportTransient                                            |             |
+// | TryoutCopy | Transient · DuplicateTransient · TextExportTransient           | 출력과 같다 |
+// | Report     | Transient                                                      | 입력 불가   |
 //
 // 판정 규칙:
 // - 판정에 넘기는 flags는 그 위치의 유효 플래그다(PropagateFieldFlags — 바깥 struct·배열
 //   필드의 Transient·ReadOnly·EditorOnly가 안쪽으로 전파된다). 나머지 제외 플래그
-//   (DuplicateTransient·NonPIEDuplicateTransient·TextExportTransient)는 전파되지 않으므로,
+//   (DuplicateTransient·NonTryoutDuplicateTransient·TextExportTransient)는 전파되지 않으므로,
 //   codec은 경로·순회의 단계마다 판정하고 제외된 단계의 부분 트리(struct 멤버·원소·Map 값)에
 //   들어가지 않는다. 그래서 제외된 struct 필드는 멤버까지 통째로 빠진다(9.1절 — 포함 필터와
 //   달리 제외는 멤버마다 따로 보지 않는다).
 // - EditorOnly·SaveGame·Required는 텍스트 용도와 무관하다(텍스트 codec은 도구·편집기
 //   문맥에서 쓴다).
-// - Edit 입력은 NonPIEDuplicateTransient·TextExportTransient 필드를 받는다(인스턴스 고유
+// - Edit 입력은 NonTryoutDuplicateTransient·TextExportTransient 필드를 받는다(인스턴스 고유
 //   값도 도구가 고칠 수 있다. UE에서 이 둘의 제외는 텍스트 출력 규칙이고 속성 편집은
 //   ShouldPort를 거치지 않는다).
 //
@@ -43,8 +43,8 @@ enum class TextUse : uint8 {
     Edit,
     // 복사·붙여넣기, 다른 에셋에 값 옮기기(UE PPF_Copy).
     Copy,
-    // PIE 세션의 복사(UE PPF_Copy + PPF_DuplicateForPIE).
-    PieCopy,
+    // Tryout 세션의 복사(UE PPF_Copy + PPF_DuplicateForPIE).
+    TryoutCopy,
     // 검증 보고·asset-info --all 출력 전용이다. 입력에 쓰면 InvalidArgument다.
     Report
 };

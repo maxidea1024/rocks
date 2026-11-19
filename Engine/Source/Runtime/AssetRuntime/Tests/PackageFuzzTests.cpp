@@ -71,6 +71,43 @@ bool AllowedLoadError(ErrorCode error) noexcept {
     }
 }
 
+// 로드한 패키지를 파일이 기록한 설정(종류·정렬·codec·Summary 값·Build·ImportOwner·ImportRecord·
+// Tags)으로 다시 쓴다. bulk는 로드한 Package가 원본이다.
+Array<uint8> Resave(AssetEnv& env, ObjectHandle package, const PackageContents& contents) noexcept {
+    PackageBulkReader bulk(*env.target, package);
+    PackageWriteOptions options;
+    options.kind = contents.header.kind;
+    options.bulkAlignment = contents.header.bulkAlignment;
+    options.bulkSource = &bulk;
+    for (const PackageBulkEntry& entry : contents.bulkEntries) {
+        if (entry.codec == BulkCodec::Zstd) {
+            options.bulkCodec = BulkCodec::Zstd;
+        }
+    }
+
+    options.customVersions = contents.summary.customVersions.View();
+    Array<PackageDependencyEntry> extra(env.allocator);
+    if (contents.header.kind == PackageKind::Editor) {
+        options.engineVersion = contents.summary.savedBy;
+        for (const PackageDependencyEntry& entry : contents.dependencies) {
+            if (entry.kind == PackageDependencyKind::Build ||
+                entry.kind == PackageDependencyKind::ImportOwner) {
+                (void)extra.TryPushBack(entry);
+            }
+        }
+
+        options.extraDependencies = extra.View();
+        options.importRecord = contents.importRecord;
+        options.tags = contents.tags;
+    } else {
+        options.profileId = contents.summary.profileId.View();
+        options.profileSettings = contents.summary.profileSettings;
+        options.cookerVersion = contents.summary.cookerVersion;
+    }
+
+    return Write(env.allocator, *env.target, package, options);
+}
+
 } // namespace
 
 // 쿠킹(Zstd bulk·Soft·하위 객체)과 에디터(EditorOnly 필드·EditorOnly bulk·EditorOnly Hard·Build·
@@ -139,6 +176,7 @@ TEST(AssetPackage_FixedSeedMutationFuzz) {
         uint32 readFailures = 0;
         uint32 loadFailures = 0;
         uint32 accepted = 0;
+        uint32 resaved = 0;
         constexpr uint32 Iterations = 4000;
         for (uint32 iteration = 0; iteration < Iterations; ++iteration) {
             Array<uint8> bytes = Copy(env.allocator, valid.View());
@@ -176,15 +214,34 @@ TEST(AssetPackage_FixedSeedMutationFuzz) {
             PackageLoadState state(env.allocator, *env.target, env.types, env.target->OwnerAccess(),
                                    loadOptions);
             AssetDiagnostic loadFailure;
+            const Array<uint8> input = Copy(env.allocator, bytes.View());
             auto prepared = state.Prepare(Move(bytes), &loadFailure);
             if (prepared) {
-                ConstructionContext transaction(*env.target, env.target->OwnerAccess());
-                PackageLoadState* states[] = {&state};
                 ObjectHandle handles[1];
-                prepared =
-                    InstantiatePackages(transaction, states, &resolver, handles, &loadFailure);
-                // 성공해도 공개하지 않는다(Rollback — Registry가 기준선으로 돌아오는지 본다).
-                transaction.Rollback();
+                RootRef<Object> roots[1];
+                {
+                    ConstructionContext transaction(*env.target, env.target->OwnerAccess());
+                    PackageLoadState* states[] = {&state};
+                    prepared =
+                        InstantiatePackages(transaction, states, &resolver, handles, &loadFailure);
+                    if (prepared) {
+                        prepared = transaction.Commit(handles, roots);
+                    }
+                }
+
+                // 받아들인 입력은 정준이다: 읽기 전용이 아니면 같은 옵션으로 다시 쓴 byte가 입력과
+                // 같다(규칙 구멍 — 같은 객체로 풀리는 다른 byte — 이 있으면 여기서 드러난다).
+                if (prepared) {
+                    if (!state.IsReadOnly()) {
+                        ++resaved;
+                        CHECK(SameBytes(Resave(env, handles[0], contents.Value()).View(),
+                                        input.View()));
+                    }
+
+                    CHECK(env.target->Discard(env.target->OwnerAccess(), handles[0]));
+                    roots[0].Reset();
+                    CHECK(env.target->Collect(env.target->OwnerAccess()));
+                }
             }
 
             if (!prepared) {
@@ -205,6 +262,7 @@ TEST(AssetPackage_FixedSeedMutationFuzz) {
         CHECK(readFailures > Iterations / 2);
         CHECK(loadFailures > 0);
         CHECK(accepted > 0);
+        CHECK(resaved > 0);
         CHECK(env.target->Stats().liveObjects == baseline);
     };
 

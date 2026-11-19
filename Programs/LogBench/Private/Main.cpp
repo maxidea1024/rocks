@@ -99,8 +99,8 @@ void Run(LogMode mode, const char* enabledName, uint32 count) {
     LogSystemConfig config;
     config.mode = mode;
     config.globalMinimum = LogLevel::Info;
-    LogSystem logs(allocator, config);
     NullSink sink;
+    LogSystem logs(allocator, config);
     if (!logs.AddSink(sink) || !logs.Start()) {
         printf("Log system did not start\n");
         return;

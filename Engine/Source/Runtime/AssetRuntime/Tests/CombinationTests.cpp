@@ -1,5 +1,6 @@
 #include "AssetCombination.h"
 
+#include <AssetRuntime/Package.generated.h>
 #include <TestSupport/Test.h>
 
 // "지원하는 모든 조합" 시험이다(Docs/Design/AssetSystem.ko.md 14.1절).
@@ -99,9 +100,32 @@ ValueKindProperty ElementSlot(ValueKind container) noexcept {
     case ValueKind::Optional:
         return ValueKindProperty::OptionalInner;
     default:
+        // 컨테이너가 아닌 종류만 여기 온다. 표에 새 컨테이너 종류가 생기면 그 원소 자리를 위에
+        // 더하라는 신호로 실패한다(조용히 무시하지 않는다).
+        if (ValueKindIsContainer(container)) {
+            test::RecordFailure("container value kind without an element slot", __FILE__, __LINE__);
+        }
+
         return ValueKindProperty::None;
     }
 }
+
+// 클래스 필드·struct 멤버 자리는 Opaque 말고 모든 종류가 ○다(거부 칸이 없다 — 표 밖 축은 원소
+// 자리뿐이다).
+constexpr bool FieldAndMemberAcceptEveryKind() noexcept {
+    for (uint32 kind = 1; kind < ValueKindCount; ++kind) {
+        if (!HasValueKindProperty(static_cast<ValueKind>(kind), ValueKindProperty::Field) ||
+            !HasValueKindProperty(static_cast<ValueKind>(kind), ValueKindProperty::StructMember)) {
+            return false;
+        }
+    }
+
+    return !HasValueKindProperty(ValueKind::Opaque, ValueKindProperty::Field) &&
+           !HasValueKindProperty(ValueKind::Opaque, ValueKindProperty::StructMember);
+}
+
+static_assert(FieldAndMemberAcceptEveryKind(),
+              "every value kind but Opaque must be accepted as a class field and a struct member");
 
 // 순회 결과 표다.
 struct Coverage {
@@ -323,6 +347,13 @@ TEST(FixtureAsset_CombinationsCoverPropertyTable) {
     }
 
     CHECK(coverage.maxStructDepth >= 3);
+    // 클래스 구조 축: 하위 객체 클래스(ComboPart)는 Asset이 아니고 그 파생(ComboPartDerived)이
+    // 있다(기반 필드 + 파생 필드 — 순회가 기반까지 걷는다). bitfield 폭(uint8·16·32)과 참조 대상 표
+    // 7칸은 스키마에 드러나지 않는 값 축이라 왕복 시험(ComboBits·대상 표)이 본다.
+    auto derived = env.types.IsA(IdOf<ComboPartDerived>(), IdOf<ComboPart>());
+    CHECK(derived && derived.Value());
+    auto partIsAsset = env.types.IsA(IdOf<ComboPart>(), GeneratedType<Asset>::Id());
+    CHECK(partIsAsset && !partIsAsset.Value());
     CHECK(missing == 0);
     // InstancedStruct 내용 열: Struct만 ○이고, 그 칸은 InstancedStruct 필드가 실제로 struct를 담아
     // 왕복하는 것으로 덮는다(ComboInstanced — ComboPayload·검증 hook ComboChecked).

@@ -2,7 +2,7 @@
 
 UE 5.8의 두 층 UI 구조(비객체 Element 층 + Object Widget 층)를 Rocks Core 위에 재구현
 
-**설계 기준일 2026.11.19 · 초안 2.1 · 상태: 설계 제안 / 결정 UD1–UD12 확정, UD13–UD17 권장안 · 미구현(UI 코드 없음, 스펙만 존재)**
+**설계 기준일 2026.11.20 · 초안 2.2 · 상태: 설계 제안 / 결정 UD1–UD12·UD15 확정, UD13·UD14·UD16·UD17 권장안 · 미구현(UI 코드 없음, 스펙만 존재)**
 
 Rocks의 게임 UI와 에디터(Rocks Studio)는 하나의 UI 툴킷을 사용한다. 구조는 UE 5.8의 UI 체계를 그대로 따른다. 하위 층은 Object가 아닌 경량 Element로 레이아웃·그리기·입력·focus·텍스트를 처리하고, 상위 층은 `rocks::Object`인 Widget이 Element를 감싸 에셋·리플렉션·GC·자체 언어 바인딩·Designer 편집을 제공한다. 에디터는 Element 층을 직접 사용하고, 게임 UI는 Widget 층으로 작성한다. 기본 스타일과 룩도 최초 구성에서는 UE 5.8의 기본값을 따른다(4.2절).
 
@@ -589,7 +589,7 @@ Sparks `@edit` 필드의 대응 표기(`@edit(Scope: Archetype)` 등)는 [Sparks
 | `AutoExpandCategories`·`AutoCollapseCategories` | 같은 이름, 같은 값 형식 | Inspector 초기 펼침·접힘. 부모 목록과 병합하되, 자식의 펼침 목록에 있는 범주는 상속한 접힘 목록에서 빼고 그 반대도 같다(`UhtClass.cs:1361-1380`) |
 | `PrioritizeCategories` | 같은 이름, 같은 값 형식 | 범주 표시 순서를 앞으로 올린다. 병합하지 않고, 자식 목록이 비었을 때만 부모 목록을 물려받는다(`UhtClass.cs:924-927`) |
 | `HideDropdown` | `HiddenInPicker` | 클래스 선택 목록에서 뺀다(`Abstract`는 이미 빠진다) |
-| `NotPlaceable` | `NotPlaceable` | 레벨 배치 목록에서 뺀다. `WorldOnly` 클래스에만 쓰며 파생에 상속한다(UE와 같다) |
+| `NotPlaceable` | `NotPlaceable` | 레벨 배치 목록에서 뺀다. `WorldOnly` 클래스에만 쓰며 파생에 상속한다(UE와 같다). 레벨 스크립트 `LevelScript`가 쓴다([레벨 스크립트](LevelScript.ko.md) LD3 — Outliner에서 "레벨 스크립트" 항목으로만 보이는 것은 새 지정자가 아니라 편집기 규칙이다). 실행 중 spawn은 막지 않는다 |
 | `AdvancedClassDisplay` | 두지 않는다 | 기반 클래스 필드 전체를 고급 표시로 보내는 거친 수단이다. 필드 단위 고급 표지(CU1)로 충분하다 |
 
 **(f) 스크립트 재정의 함수와 interface 구현 표지(CU2·CU9 보강, UD17).** UE는 C++ 함수를 Blueprint가 재정의하게 하는 두 지정자를 둔다(`EpicGames.UHT/Specifiers/UhtFunctionSpecifiers.cs:60, 88`).
@@ -705,11 +705,13 @@ UiCore·UiFramework는 창·GPU 없이 시험할 수 있으므로 에디터 일�
 | UD12 | 이름 규칙 | **확정(2026.11.16):** (1) 업계 일반 명사(Widget·Geometry·Visibility·Overlay·Splitter·ListView·CompositeFont 등)는 UE 접두만 떼고 그대로 쓴다. (2) UE 고유 합성어·상표성 이름(Slate·UMG·CommonUI·Hittest·Reply·Constraint Canvas·Invalidation Panel·Retainer 등)은 서술형으로 바꾼다. (3) Element 층은 `rocks::ui` 이름공간에서 접두·접미 없이(`ui::Button`·`ui::Window`), Widget 층은 같은 이름의 Element를 감싸는 경우 `Widget` 접미(`ButtonWidget`), 그 밖의 Widget 층 고유 타입은 서술형 이름(`UserWidget`·`NamedSlot`·`Screen`), 에디터는 `rocks::editor`. (4) UI 계층의 매크로는 `ROCKS_UI_` 접두(예: `ROCKS_UI_ELEMENT_DECLARE`)로 UI 소속을 이름에 드러낸다(사용자 지정, 2026.11.16). 일반 리플렉션 매크로(`ROCKS_CLASS`·`ROCKS_PROPERTY`)는 그대로 쓴다 | 두 층 모두 접미로 구분(`ButtonElement`·`ButtonWidget`) | UE의 `S`·`U`·`F` 접두 대신 이름공간과 접미로 구분한다. 게임 UI 작성자는 Widget 이름만 본다 |
 | UD13 | Inspector 노출과 편집 위치 | **권장안(2026.11.19):** 노출은 `Edit`·`DisplayOnly`로 명시(없으면 숨김, UE와 같다). 편집 위치는 값 하나 `EditScope = "Archetype"\|"Instance"`. 문맥은 저장 위치로 정한다(원형·배치 인스턴스·클래스 기본값 보기). 편집기 쓰기 경로에서 거부하고, 저장 검증 `PrefabEditScopeViolation`을 방어선으로 두며, `"Archetype"` 필드는 spawn 인자로 쓸 수 없다. 원형 적용·variant 만들기는 `"Instance"` override를 옮기지 않는다 | 배타 지정자 두 개(`ArchetypeOnly`·`InstanceOnly`), Inspector에서만 막고 저장 검증을 두지 않음 | 7.3절 (a). `DisplayOnly`(표시 전용)와 `ReadOnly`(실행 쓰기 거부)를 분리한다 |
 | UD14 | 도움말 | **권장안(2026.11.19):** 키는 기존 `Help` 하나(명령줄·CVar·`ROCKS_FUNCTION`과 같다). C++는 명시 `Help`만 쓰고 문서 주석은 가져가지 않는다. Sparks는 `///` 문서 주석이 `Help`가 된다. 한도 `MaxHelpBytes`(1024), 엔진 저장소 문구는 영어 | 새 키 `Description`, UE와 같이 C++ 선언 앞 주석 자동 추출 | 7.3절 (b). 소스 주석은 한국어·표시 문구는 영어(D18)이고, 프로그래머용 주석과 편집자용 tooltip은 독자가 다르다 |
-| UD15 | 타입·함수 표시 메타와 타입 단위 편집 메타 | **권장안(2026.11.19):** CLASS·STRUCT·ENUM·FUNCTION에 `DisplayName`·`Category`·`Help`(상속 안 함). CLASS에 `HideCategories`·`ShowCategories`·`AutoExpandCategories`·`AutoCollapseCategories`·`PrioritizeCategories`(부모와 병합)·`HiddenInPicker`·`NotPlaceable`, `ClassGroup`은 `Category`로 대체, `AdvancedClassDisplay`는 두지 않는다 | 타입 도구 이름만 표시 | 7.3절 (c)·(e) |
+| UD15 | 타입·함수 표시 메타와 타입 단위 편집 메타 | **확정(2026.11.20 — 레벨 스크립트가 `NotPlaceable`을 쓰므로 권장안(2026.11.19)대로 확정, [레벨 스크립트](LevelScript.ko.md) LD3):** CLASS·STRUCT·ENUM·FUNCTION에 `DisplayName`·`Category`·`Help`(상속 안 함). CLASS에 `HideCategories`·`ShowCategories`·`AutoExpandCategories`·`AutoCollapseCategories`·`PrioritizeCategories`(부모와 병합)·`HiddenInPicker`·`NotPlaceable`, `ClassGroup`은 `Category`로 대체, `AdvancedClassDisplay`는 두지 않는다 | 타입 도구 이름만 표시 | 7.3절 (c)·(e) |
 | UD16 | 분류 계층 | **권장안(2026.11.19):** `Category`의 `\|`를 계층 구분자로 하고 빈 마디·앞뒤 공백·한도(`MaxCategoryDepth` 8, `MaxCategorySegmentBytes` 64, `MaxCategoryBytes` 256) 초과·대소문자만 다른 경로를 빌드에서 거부, 표시 순서는 첫 등장 순서 | 평문 문자열 | 7.3절 (d). UE 구분자와 같다 |
 | UD17 | 스크립트 재정의 함수 | **권장안(2026.11.19):** `ScriptExtensible` 클래스의 `virtual` 함수에 `ROCKS_FUNCTION(ScriptOverridable)`, 순수 가상은 `Abstract` 클래스에서만(UE ImplementableEvent). 메타 컴파일러가 생성하는 등록하지 않는 스크립트 파생 대리 클래스(`ScriptProxy<X>`, X와 크기·배치 동일)가 dispatch한다. `ROCKS_INTERFACE(NativeOnly)`. 리플렉션 클래스는 데이터 기반 하나 + 데이터 없는 `ROCKS_INTERFACE` 기반 여러 개를 허용하고, `InterfaceImpl`의 `this` 조정 offset과 새 `ObjectCast`로 RTTI 없이 조회 | UE와 같이 `_Implementation` 이름 규칙 + thunk에서 스크립트 탐색 | 7.3절 (f). C++ 호출자는 보통 가상 호출을 쓰고 C++ 파생 재정의도 그대로 동작한다 |
 
 ## 12. 개정 기록과 기존 스펙의 개정 위치
+
+**초안 2.2(2026.11.20):** [레벨 스크립트](LevelScript.ko.md) 확정(LD3)에 맞춰 7.3절 (e) `NotPlaceable` 행에 사용처(`LevelScript`)와 Outliner 숨김이 편집기 규칙이라는 점을 적고, `NotPlaceable`을 포함한 UD15를 권장안대로 확정했다.
 
 **초안 2.1(2026.11.19):** UE 5.8 `Templates` 대조로 7.3절(CU1·CU2·CU9 보강: Inspector 노출과 편집 위치·도움말·타입·함수 표시 메타·분류 계층·타입 단위 편집 메타·스크립트 재정의 함수·남은 공백 목록)과 결정 UD13–UD17을 더했다. 초안 작성 뒤 서브에이전트 3개(빌드 문서 UE 대조, 7.3절 UE·Rocks 대조, Templates 독립 재대조)로 교차 검증하여 설명 키 통일(`Help`), `DisplayOnly`·`ReadOnly` 분리, 노출 명시(`Edit`), 저장 위치 기준 문맥·Designer 문맥, 편집기 쓰기 경로 거부, 중첩 전파 규칙, 편집 메타데이터 블록, 스크립트 재정의 함수 계약을 반영하고 UE 인용 위치를 바로잡았다. 반영본을 서브에이전트 1개로 다시 검증해 대리 클래스의 등록·저장 관계, interface 다중 상속 허용, `category` 실행 소비처, Category 표시 순서(Rocks 고유), `PrioritizeCategories`·펼침/접힘 병합 규칙, 시험 fixture 예외를 반영했다.
 

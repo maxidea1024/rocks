@@ -1,6 +1,6 @@
 # prefab(원형 기반 재사용 객체 묶음) 설계
 
-기준일: 2026-11-19, 개정 4(결정 D1–D21 확정 — 4절, 편집 위치 규칙 반영 — 9절). 개정 1은 사용자 지시("설계문서만 작성해놔")로 쓴 첫 초안이고, 개정 2는 교차검증 1차(치명 1·중요 14·사소 13·추가 2) 결과를 반영했다(9절). 구현하지 않는다. 착수 시점은 고정 구현 순서(리플렉션 B9j–B9m → Curve 데이터 계층 → A0-G → A1–A6 → 화면 마일스톤)를 따르며 이 문서는 그 순서를 바꾸지 않는다.
+기준일: 2026-11-20, 개정 5(결정 D22 추가 — 레벨 저장 참조가 펼친 노드를 가리킬 때, [레벨 스크립트](LevelScript.ko.md) LD17 — 3.6·3.11·4절, LevelScript 비범위 — 1.3절, 9절). 개정 4(2026-11-19)는 결정 D1–D21 확정(4절)과 편집 위치 규칙 반영(9절)이다. 개정 1은 사용자 지시("설계문서만 작성해놔")로 쓴 첫 초안이고, 개정 2는 교차검증 1차(치명 1·중요 14·사소 13·추가 2) 결과를 반영했다(9절). 구현하지 않는다. 착수 시점은 고정 구현 순서(리플렉션 B9j–B9m → Curve 데이터 계층 → A0-G → A1–A6 → 화면 마일스톤)를 따르며 이 문서는 그 순서를 바꾸지 않는다.
 
 근거: [엔진 구현 계획](EngineImplementationPlan.ko.md)(이하 EIP) 5.3절(클래스 기본값·서브오브젝트·공통 instancing)·20.3절(프리팹·중첩·변형·인스턴스 오버라이드)·20.5절(프리팹 식별자), [런타임 클래스 메타데이터](RuntimeClassMetadata.ko.md)(이하 RCM) '클래스 기본값 결정', [리플렉션 B9](ReflectionExtensions.ko.md)(이하 RX), [리플렉션·빌드 보강](ReflectionFoundations.ko.md)(이하 RF), [객체·그래프 보강](ObjectFoundations.ko.md)(이하 OF), [에셋 시스템](AssetSystem.ko.md)(이하 AS), [엔진 런타임](EngineRuntime.ko.md)(이하 ER), [GC 대규모 처리](GarbageCollectionScale.ko.md)(이하 GCS — 13절 클러스터는 개정 2, `experiment/gc-scale` 브랜치 `b293feb`), [Sparks 언어](SparksLanguage.ko.md)(이하 SL), 현재 코드(`Core/Source/Runtime/ObjectRuntime`·`ObjectSerialization`, `Engine/Source/Runtime/World`). UE 대조는 UE 5.8(5.8.4, `Engine/Build/Build.version` 5.8.4) 원본을 파일:행으로 확인했다(2절). 레거시·deprecated 코드는 대조에서 뺐다(2.0절).
 
@@ -48,6 +48,7 @@
 - 세이브게임 형식(EIP 951행) — 파생 ID 규칙(3.4절)만 제공한다.
 - 렌더 instancing으로 굽기(UE Packed Level Actor 대응) — 렌더 instancing 기반이 생긴 뒤의 후속이다(4절 D1, 5.2절 PF9).
 - 별도 Level로 로드하는 묶음(UE Level Instance의 LevelStreaming 동작)과 WorldPartition 셀 편입 — 레벨 패키지·스트리밍 단계와 함께 정한다(4절 D1·D9, EIP 2064행 P2·M7).
+- 레벨 스크립트 — `LevelScript`(레벨마다 숨은 Actor)는 prefab 본문과 Level Instance 안에 둘 수 없다. prefab 저장은 LevelScript 파생 노드를 `PrefabUnsaveableNode`로 거부한다(3.11절). Level Instance(D1 (c))를 도입할 때 다시 본다([레벨 스크립트](LevelScript.ko.md) LD11 — UE는 Level Instance에 LSA를 허용하고 break만 막으므로 Rocks가 더 엄격하다).
 
 ## 2. UE 5.8 조사
 
@@ -285,6 +286,7 @@ Result<PrefabSpawnResult> World::SpawnPrefab(const AssetLease& prefab, const Spa
   - 쓰임: 원형 캐시 키 = (AssetId, `resolvedRevision`). 레벨 배치 기록의 `baseRevision` = 저장 당시 `resolvedRevision`이라서 기준 사슬·중첩·코드 기본값이 바뀌어도 전파가 일어난다(3.7절). cooked 검증 = cooked `PrefabAsset`에 저장한 `resolvedRevision`과 cooked 레벨 배치 기록의 `baseRevision` 대조(다르면 `UnsupportedVersion` — 다시 쿠킹). 쿠커 재계산 = prefab의 cookKey 입력에 기준·중첩 prefab의 cookKey와 타입 지문 목록을 넣어 기준이 바뀌면 그것을 쓰는 prefab과 배치 레벨이 다시 쿠킹된다.
 - **의존**: 원형 본문의 에셋 참조(World 객체의 Soft 참조)는 이 패키지의 Dependencies(Hard)로 기록한다 — "하드 의미는 그 World 데이터를 담는 레벨·prefab 패키지의 Dependencies(Hard)로 표현한다"(AS 6.3절). 기준 prefab과 중첩 prefab도 Hard다. override하지 않은 값의 클래스 레코드 참조도 포함한다(RCM 68행). prefab별 하드 의존 크기 예산은 쿡이 검사한다(SL 7.2절). Hard 의존 덕분에 prefab A가 상주하는 동안 그 기준·중첩 prefab도 상주한다.
 - **레벨 배치 인스턴스.** 레벨에 놓인 인스턴스는 펼친 객체가 아니라 **배치 기록** `PrefabPlacement{instanceGuid, prefab(SoftObjectRef), baseRevision, transform, overrides}`로 저장한다(UE Level Instance가 World 에셋 + 배치 Actor인 구조 — 2.5절, 4절 D3). 배치 기록은 Level의 영속 struct 배열 필드다. 펼친 Actor·Component는 Transient 소유 목록에 있으므로(3.3절 9항) 레벨 저장에 들어가지 않는다. `baseRevision`이 다르면 로드 때 전파(3.7절)를 거친다.
+- **펼친 노드를 가리키는 레벨 참조**(4절 D22): 레벨에 직접 저장하는 Record(직접 배치 Actor·LevelScript와 그 component)의 weak 참조가 같은 Level의 배치 인스턴스가 펼친 노드를 가리키면, 펼친 객체는 Transient 목록에 있어(3.3절 9항) 그 handle을 저장할 수 없다. 레벨 저장은 Record의 그 자리를 null로 쓰고 Level의 영속 struct 배열 `placementNodeReferences`에 `{참조하는 객체(레벨 graph v2 노드 번호), 소유형 PropertyPath, instanceGuid, PrefabNodeAddress}`를 둔다. 로드는 배치를 펼친 뒤(PF5) 주소를 D6 규칙(인스턴스 Guid + 주소 → 추적 인스턴스의 노드 대응표, `World::FindPrefabNode`)으로 해석해 Commit 전 staged 경로 쓰기로 채운다(D17의 사후 쓰기와 같은 방식). 대상 노드가 없으면(배치 override로 삭제, 원형에서 사라짐) null로 두고 `PrefabPlacementReferenceOrphaned`를 낸다. 강한 참조는 지금처럼 graph v2가 집합 밖 참조로 거부한다. 영속 Entity Guid가 생기면 그 표현(D12의 영속 Entity 참조)으로 바꾼다.
 - **실행 중 spawn한 인스턴스**는 저장하지 않는다. 세이브게임은 원형 ID·인스턴스 Guid·spawn/despawn 기록과 SaveGame 필드를 저장한다(EIP 951행 — 세이브게임 계층).
 - **쿠킹**(4절 D8): 쿠커는 variant 사슬과 중첩을 펼친 **평탄화 원형**을 cooked `PrefabAsset`에 저장한다. 펼친 노드가 `MaxPrefabNodes`(graph v2 `maxObjects`)를 넘을 수 있으므로 평탄화 본문은 **부분 그래프 여러 개**(각각 4096 이하 — 원래의 원형 경계를 따라 나누고, 한 원형이 4096을 넘을 수는 없다) + 노드 주소 표 + 그래프 사이 참조 표다. 그래프 사이 참조는 3.3절 6항 규칙(강한 = 같은 트랜잭션 import, weak = 참조 표)을 그대로 쓴다. `base`·`overrides`는 비운다(UE cooked 빠른 경로가 차이 블록을 미리 만드는 것과 같은 목적 — 2.4절). 편집기 해석 결과와 cooked 평탄화 결과는 같은 입력에서 같은 byte여야 한다(PF8 시험). EditorOnly 필드·노드는 뺀다. 레벨 배치 인스턴스의 cooked 형태는 4절 D9.
 - **A1과의 관계**: prefab은 새 섹션을 만들지 않는다. 일반 에셋 패키지이고, 원형 본문은 대표 에셋의 값이다. 패키지 Summary의 타입 표에는 `PrefabAsset`과 함께 **원형 본문이 쓰는 World 타입들**의 (TypeId, 스키마 버전, 클래스 레코드 지문)을 넣는다 — 본문 Record가 그 타입들의 레코드 대비 차이이기 때문이다(RCM 69행 지문 규칙을 본문 타입까지 넓힌다 — 7절). 지문이 다르면 편집기는 진단 뒤 열고 cooked는 `UnsupportedVersion`이다.
@@ -396,7 +398,7 @@ Result<PrefabSpawnResult> World::SpawnPrefab(const AssetLease& prefab, const Spa
 | `PrefabDuplicateNodeGuid` | CorruptPackage | 노드 정보·추가 노드 GUID 중복 |
 | `PrefabNodeTableMismatch` | CorruptPackage | `nodeInfo`와 NodeTable의 길이·순서 불일치 |
 | `PrefabNodeNameConflict` | InvalidArgument(추가)·진단(전파) | 같은 Actor 안 노드 이름 중복 |
-| `PrefabUnsaveableNode` | Unsupported | Transient·Deprecated 클래스, native 파생, Runtime 출처 노드 |
+| `PrefabUnsaveableNode` | Unsupported | Transient·Deprecated 클래스, native 파생, Runtime 출처 노드, LevelScript 파생 클래스(1.3절) |
 | `PrefabExternalReference` | InvalidArgument | 원형 밖 World 객체 참조 저장(3.5절) |
 | `PrefabOverrideOrphaned`·`PrefabOverrideTypeMismatch`·`PrefabOverrideNeedsReview`·`PrefabAddedNodeParentMissing` | 편집기: 진단만, cooked: InvalidArgument | 3.7절 충돌 |
 | `PrefabOverridePathInvalid` | InvalidArgument | 경로 해석 실패, ReadOnly 위반, 소유 컨테이너 대상, 편집 위치 위반(편집기 쓰기 경로 — [UI 툴킷](UiToolkit.ko.md) 7.3절 (a)) |
@@ -405,6 +407,7 @@ Result<PrefabSpawnResult> World::SpawnPrefab(const AssetLease& prefab, const Spa
 | `PrefabTransformShear` | Unsupported | 3.10절 구움 경로 |
 | `PrefabRevisionMismatch` | 편집기: 진단 후 전파, cooked: UnsupportedVersion | 배치 기록의 `baseRevision` 불일치 |
 | `PrefabNodeLookupUntracked` | Unsupported | 추적하지 않는 인스턴스의 노드 조회 |
+| `PrefabPlacementReferenceOrphaned` | 편집기: 진단만(null로 둠), cooked: InvalidArgument | 레벨의 배치 노드 참조(D22)가 가리키는 노드가 펼친 인스턴스에 없다 |
 
 - 진단은 노드 주소·필드 경로를 함께 담는다(경로 표기는 RX 1.6절). 로그 문구는 영어다.
 - 실패 원자성: 원형 해석 실패는 캐시를 만들지 않는다(할당 실패가 아닌 실패는 (AssetId, resolvedRevision)별로 기억한다 — RCM 56행과 같은 방식). spawn 실패는 3.3절 11·12항.
@@ -436,7 +439,7 @@ Result<PrefabSpawnResult> World::SpawnPrefab(const AssetLease& prefab, const Spa
 
 ## 4. 결정 항목
 
-2026-11-17 사용자 확정: 모든 항목을 아래 "추천" 열대로 정한다. D1은 클래스 원형 + prefab 에셋((a)+(b), Level Instance식 별도 Level 로드는 후속 — (a)는 RCM 생성자 계약 개정이 선행), D9는 1차에 배치 기록 유지(UE식 쿡 때 굽기는 후속 최적화)다. 7절 "다른 문서와 맞출 점"은 PF0 착수 때 함께 고친다.
+2026-11-17 사용자 확정: 모든 항목을 아래 "추천" 열대로 정한다. D1은 클래스 원형 + prefab 에셋((a)+(b), Level Instance식 별도 Level 로드는 후속 — (a)는 RCM 생성자 계약 개정이 선행), D9는 1차에 배치 기록 유지(UE식 쿡 때 굽기는 후속 최적화)다. 7절 "다른 문서와 맞출 점"은 PF0 착수 때 함께 고친다. D22는 2026-11-20 [레벨 스크립트](LevelScript.ko.md) 결정(LD17, 권장안)과 함께 확정했다.
 
 | ID | 질문 | 선택지 | 추천 |
 |---|---|---|---|
@@ -461,6 +464,7 @@ Result<PrefabSpawnResult> World::SpawnPrefab(const AssetLease& prefab, const Spa
 | D19 | override 마이그레이션 | (a) 노드별 부분 Record로 묶어 migrate 후 경로로 다시 추출, key 항목은 그 필드가 바뀌면 고아 (b) 버전이 다르면 그 노드 override를 곧바로 고아로 | **(a)**. 부분 Record가 형식상 유효하고 migrate가 Record 단위라 그대로 쓸 수 있다. (b)는 버전 하나 올릴 때마다 모든 레벨의 override를 사람이 다시 손봐야 한다 |
 | D20 | DuplicateTransient 계열 값 | (a) 원형 본문은 보존, spawn 복원이 제외 (b) 원형 저장 때 제외 | **(a)**. UE 템플릿도 값을 보존한다(2.3절). (b)는 다시 편집할 때 값이 사라진다 |
 | D21 | 인스턴스 장부 범위 | (a) 원형별 `PrefabUsage` + Actor별 칸은 늘, 인스턴스 항목·노드 대응표는 추적 인스턴스만(지연 생성) (b) 모든 인스턴스에 인스턴스 항목 | **(a)**. 1M 규모에서 실행 중 spawn의 장부 비용을 Actor당 고정 byte로 묶는다 |
+| D22 | 레벨에 저장하는 참조가 배치 인스턴스의 펼친 노드를 가리킬 때 | (a) Record는 null, Level 배치 노드 참조 표에 (instanceGuid + 노드 주소)로 저장하고 펼친 뒤 D6 규칙으로 해석 (b) 펼친 노드 참조 금지(Unpack 뒤에만 참조) | **(a)**. 펼친 Actor는 Transient 목록(D15)이라 직접 저장할 수 없다. 레벨 스크립트·직접 배치 Actor가 prefab으로 만든 문·트리거를 가리키는 흔한 경우를 Unpack 없이 지원하고, 파생 ID가 결정적이라(D6) 저장량이 주소뿐이다. LevelScript만이 아니라 레벨 저장 참조 일반 규칙이다(3.6절). 영속 Entity Guid가 생기면 그 표현으로 바꾼다 |
 
 ## 5. 선행 조건과 단계 계획
 
@@ -569,7 +573,7 @@ PF1은 A5와 RCM 개정 뒤 언제든 할 수 있고, PF2 이후는 World 단계
 | RX 9.2절 694행·20절 | "A5 클래스 기본값·prefab의 Transient·Within 템플릿 예외를 그 단계에서 다시 정한다" | 원형이 객체가 아니므로 예외가 생기지 않는다. Transient·Deprecated 클래스는 원형 노드 불가. Within은 노드 Outer 검사로 그대로 | 열린 문제를 닫음 |
 | RX 20절 | "Map·Set·정적 배열의 key·원소 단위 차이 저장(A5·prefab)" | prefab override에서 Map·Set은 key 단위, 정적 배열은 통째(D5) | prefab 몫을 닫고 A5 패키지 차이 단위는 A5에 남김 |
 | ER 4.2절·`World.cpp:425` | Actor·Component를 Outer·이름 없이 만든다 | Component Outer = 소유 Actor(subobject·노드 이름), Actor는 1차에 이름 없음(D14) | Component Outer 규칙 추가 |
-| ER 4.6절(Level 행) | `Level.actors`는 Required 영속 필드 | 펼친 Actor는 Transient `spawnedActors`(D15), 배치 기록 필드 추가 | Level 필드 표 개정 |
+| ER 4.6절(Level 행) | `Level.actors`는 Required 영속 필드(2026-11-20에 `levelScript` 추가 — [레벨 스크립트](LevelScript.ko.md) LD4) | 펼친 Actor는 Transient `spawnedActors`(D15), 배치 기록 필드, 배치 노드 참조 표 `placementNodeReferences`(D22) 추가 | Level 필드 표 개정(레벨 저장 검증의 펼친 노드 참조 규칙은 ER 4.6절에 이미 반영) |
 | ER 4.6절(Actor 행) | 영속 필드는 `components`·`rootComponent`·`enabled` | Unpack에 Actor 영속 Entity Guid 필드 필요 | World 단계에서 필드 추가 |
 | ER 4.6절·7.3절 | "영속 상태는 상대 Transform뿐이고 계층은 저장하지 않는다" | 부착 계층 영속이 PF2 선행 | World 단계 결정 21에서 영속으로 정할 때 prefab을 소비자로 명시 |
 | ER 7.3절 | 월드 행렬 = 상대 TRS × 부모 월드 행렬 | 부모 행렬 출처에 인스턴스 앵커 추가(D10) | SceneComponent 계약 개정 |
@@ -607,3 +611,4 @@ PF1은 A5와 RCM 개정 뒤 언제든 할 수 있고, PF2 이후는 World 단계
   - UE 이름 짓기 근거는 리뷰가 든 `MakeUniqueObjectName`이 아니라 `FindFirstFreeName`(ActorConstruction.cpp:1126)으로 확인해 적었다.
 - 개정 3(2026-11-17): 사용자 결정 — D1–D21 모두 추천안으로 확정(4절 머리).
 - 개정 4(2026-11-19): [UI 툴킷](UiToolkit.ko.md) 7.3절 (a) 편집 위치(`EditScope`) 규칙 반영 — 3.7절 Apply to source와 3.13절 Make variant는 `"Instance"` 필드 override를 옮기지 않는다, 3.11절에 편집 위치 위반 원인과 `PrefabEditScopeViolation`을 더했다. 편집 문맥은 저장 위치로 정한다(`PrefabAsset` = 원형, `PrefabPlacement` = 배치 인스턴스).
+- 개정 5(2026-11-20): [레벨 스크립트](LevelScript.ko.md) 확정에 맞춰 D22(레벨에 저장하는 참조가 펼친 노드를 가리킬 때 — LD17)를 더하고 3.6절에 배치 노드 참조 표, 3.11절에 `PrefabPlacementReferenceOrphaned`와 `PrefabUnsaveableNode`의 LevelScript 원인, 1.3절에 LevelScript 비범위(prefab·Level Instance 불가, Level Instance 도입 때 재검토), 7절 Level 행을 고쳤다.

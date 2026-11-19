@@ -53,8 +53,8 @@ int main(int argc, char** argv) {
 
     // 명령줄 도구라 Sync LogSystem과 stderr sink를 설치한다(도구 열기 실패 등 Log 호출).
     rocks::SystemAllocator allocator;
-    rocks::LogSystem logs(allocator, rocks::LogSystemConfig::ForTool());
     rocks::StderrLogSink stderrSink;
+    rocks::LogSystem logs(allocator, rocks::LogSystemConfig::ForTool());
     if (!logs.AddSink(stderrSink) || !logs.Start()) {
         return rocks::spike::RunSpike(options);
     }

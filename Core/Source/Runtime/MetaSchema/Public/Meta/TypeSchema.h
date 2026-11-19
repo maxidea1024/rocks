@@ -54,12 +54,12 @@ inline constexpr uint32 UnsaveableTypeFlags =
 //                뜻이다(비어 있지 않아야 한다는 뜻은 없다). null 거부는 패키지
 //                저장·쿠킹(A1)이고 로드는 진단만 한다.
 // 필드·struct 멤버 플래그다. 16 이상은 리플렉션 B9h1의 필드 플래그다(Docs/Design/
-// ReflectionExtensions.ko.md 9.1절): DuplicateTransient는 복제(에셋·PIE) 저장과 복사 텍스트에서,
-// NonPIEDuplicateTransient는 PIE가 아닌 복제와 텍스트에서, TextExportTransient는 복사 텍스트에서
-// 뺀다(복제·텍스트 호출자가 excludedFlags로 고른다). SaveGame은 세이브게임 저장의 포함 필터
-// (includeFlags — 필드·멤버마다 자기 플래그로 판정)다. Required와 DuplicateTransient·
-// NonPIEDuplicateTransient는 함께 쓸 수 없다(복제본이 늘 null — 등록 InvalidArgument, MetaCompiler
-// RMC2202).
+// ReflectionExtensions.ko.md 9.1절): DuplicateTransient는 복제(에셋·Tryout) 저장과 복사 텍스트에서,
+// NonTryoutDuplicateTransient는 Tryout이 아닌 복제와 텍스트에서, TextExportTransient는 복사
+// 텍스트에서 뺀다(복제·텍스트 호출자가 excludedFlags로 고른다). SaveGame은 세이브게임 저장의 포함
+// 필터 (includeFlags — 필드·멤버마다 자기 플래그로 판정)다. Required와 DuplicateTransient·
+// NonTryoutDuplicateTransient는 함께 쓸 수 없다(복제본이 늘 null — 등록 InvalidArgument,
+// MetaCompiler RMC2202).
 enum class FieldFlags : uint32 {
     None = 0,
     Transient = 1,
@@ -67,7 +67,7 @@ enum class FieldFlags : uint32 {
     EditorOnly = 4,
     Required = 8,
     DuplicateTransient = 16,
-    NonPIEDuplicateTransient = 32,
+    NonTryoutDuplicateTransient = 32,
     SaveGame = 64,
     TextExportTransient = 128
 };

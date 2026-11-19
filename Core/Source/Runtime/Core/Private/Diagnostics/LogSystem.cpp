@@ -226,6 +226,15 @@ LogSystem::~LogSystem() noexcept {
         writerLeaked_ = false;
         ReleaseResources();
     }
+
+    // 더는 sink를 부르지 않는다. 남은 등록을 풀어 sink가 이 뒤에 파괴될 수 있게 한다.
+    for (usize index = 0; index < sinkCount_; ++index) {
+        (void)platform::AtomicFetchSub<MemoryOrder::AcquireRelease>(
+            &sinks_[index].sink->registrations_, 1u);
+        sinks_[index] = SinkSlot{};
+    }
+
+    sinkCount_ = 0;
 }
 
 Result<void> LogSystem::Start() noexcept {
@@ -404,6 +413,7 @@ Result<void> LogSystem::AddSink(RuntimeLogSink& sink, LogFilter filter) noexcept
     sinks_[sinkCount_].sink = &sink;
     sinks_[sinkCount_].filter = filter;
     ++sinkCount_;
+    (void)platform::AtomicFetchAdd<MemoryOrder::AcquireRelease>(&sink.registrations_, 1u);
     return Result<void>::Success();
 }
 
@@ -421,6 +431,7 @@ Result<void> LogSystem::RemoveSink(RuntimeLogSink& sink) noexcept {
             }
 
             sinks_[--sinkCount_] = SinkSlot{};
+            (void)platform::AtomicFetchSub<MemoryOrder::AcquireRelease>(&sink.registrations_, 1u);
             return Result<void>::Success();
         }
     }

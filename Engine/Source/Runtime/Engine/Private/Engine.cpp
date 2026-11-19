@@ -3,6 +3,7 @@
 #include <Core/Diagnostics/LogContext.h>
 #include <Engine/Engine.h>
 #include <Engine/EngineLog.h>
+#include <Platform/Atomics.h>
 #include <Platform/Clock.h>
 #include <Platform/Thread.h>
 
@@ -206,6 +207,10 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
         // 파괴한 뒤 끝낸다.
         InitStageContext stage(InitStage::GcScheduler);
         uint32 workers = config_.gcWorkers;
+        if (workers != EngineConfig::GcWorkersAuto && workers > EngineConfig::MaxGcWorkers) {
+            return fail(InitStage::GcScheduler, ErrorCode::InvalidArgument);
+        }
+
         if (workers == EngineConfig::GcWorkersAuto) {
             const uint32 processors = platform::LogicalProcessorCount();
             workers = processors > 1 ? processors - 1 : 0;
@@ -290,9 +295,9 @@ void Engine::Teardown(uint32 completedSteps, const char* stage) noexcept {
     // 돌려주지 않는 불변식 위반이다.
     if (auto stopped = StopGcScheduler(); !stopped) {
         Log::Fatal(LogEngine,
-                   "Engine {Scheduler} could not shut down after initialization failure at "
+                   "Engine GC scheduler could not shut down after initialization failure at "
                    "{Stage}: {Error}",
-                   "GcScheduler", stage, ErrorCodeName(stopped.Error()));
+                   stage, ErrorCodeName(stopped.Error()));
     }
 
     if (completedSteps >= StepObjects && objects_) {
@@ -553,6 +558,17 @@ Result<void> Engine::RunFrame() noexcept {
         }
     }
 
+    // 다른 스레드가 건 전체 수집 요청을 살아 있는 World에 나눠 준다(GC 설계 17.4절 — World 배열은
+    // 게임 스레드만 돈다).
+    if (platform::AtomicExchange<platform::MemoryOrder::AcquireRelease>(&fullCollectionRequested_,
+                                                                        uint32{0}) != 0) {
+        for (WorldContext& context : worlds_) {
+            if (!context.pendingDestroy && context.world) {
+                context.world->RequestFullCollection();
+            }
+        }
+    }
+
     // 4) World Tick. hook이 World를 추가·파괴 요청해도 index로 다시 읽는다.
     Result<void> outcome = Move(synced);
     const uint64 worldStart = platform::MonotonicNanoseconds();
@@ -754,11 +770,7 @@ Result<void> Engine::StopGcScheduler() noexcept {
 }
 
 void Engine::RequestFullCollection() noexcept {
-    for (WorldContext& context : worlds_) {
-        if (!context.pendingDestroy && context.world) {
-            context.world->RequestFullCollection();
-        }
-    }
+    platform::AtomicStore<platform::MemoryOrder::Release>(&fullCollectionRequested_, uint32{1});
 }
 
 Result<void> Engine::RunShutdownHooksBeforeWorlds() noexcept {

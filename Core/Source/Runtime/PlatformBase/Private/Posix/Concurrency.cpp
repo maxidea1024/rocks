@@ -71,8 +71,7 @@ void YieldThread() noexcept {
 }
 
 uint32 LogicalProcessorCount() noexcept {
-    const long count = sysconf(_SC_NPROCESSORS_ONLN);
-    return count <= 0 ? 1u : static_cast<uint32>(count);
+    return detail::PosixLogicalProcessorCount();
 }
 
 ThreadStackRange CurrentThreadStackRange() noexcept {

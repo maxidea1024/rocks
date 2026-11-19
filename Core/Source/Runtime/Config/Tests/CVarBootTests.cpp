@@ -70,7 +70,7 @@ usize CountCode(ConfigContext& context, ConfigDiagnosticCode code) noexcept {
 // 쓰기는 넣을 때 BootSealed, 파일 층 변경은 재시작 대기(되돌리면 없어진다), 파생 층(기기 프로필)은
 // BootValueIgnored 한 번이다. 이번 실행 값은 바뀌지 않는다.
 TEST(CVar_BootValuesSealIntoASharedBootBlock) {
-    ConfigFixture fixture;
+    ConfigFixture fixture(DevelopmentRules());
     ConfigContext& context = fixture.Context();
     REQUIRE(context.Register(BootWorkers, BootBackend, BootDistance));
     REQUIRE(context.AddLayerText(ConfigLayer::Project, "Game.json", "Game", "project",

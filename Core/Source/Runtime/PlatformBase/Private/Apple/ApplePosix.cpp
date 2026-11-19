@@ -152,4 +152,10 @@ const char* PosixSystemLibraryDirectory() noexcept {
     return "/usr/lib/";
 }
 
+// macOS에는 프로세스 affinity API가 없다. online 수를 쓴다.
+uint32 PosixLogicalProcessorCount() noexcept {
+    const long online = sysconf(_SC_NPROCESSORS_ONLN);
+    return online <= 0 ? 1u : static_cast<uint32>(online);
+}
+
 } // namespace rocks::platform::detail

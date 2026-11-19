@@ -5,7 +5,7 @@
 
 // 리플렉션 B9h1 필드 플래그 시험이다(Docs/Design/ReflectionExtensions.ko.md 9.1절, fixture
 // ReflectionTestFixtures/FieldFlagFixture.h): 생성 스키마의 플래그 비트와 Transform 미러 멤버
-// SaveGame, Required + 복제 제외 플래그 등록 거부, 복제 정책(에셋·PIE)별 저장 집합, includeFlags
+// SaveGame, Required + 복제 제외 플래그 등록 거부, 복제 정책(에셋·Tryout)별 저장 집합, includeFlags
 // 저장·로드 대칭(필드·struct 멤버·원소 멤버마다 자기 플래그, Atomic struct는 통째), Required 실효
 // 값 검사의 포함 필터 밖 필드 제외.
 using namespace rocks;
@@ -101,15 +101,15 @@ ErrorCode LoadAndCheck(Allocator& allocator, TypeRegistry& types, Span<const uin
 
 } // namespace
 
-// 생성 스키마가 지정자마다 비트를 싣고(DuplicateTransient 16·NonPIEDuplicateTransient 32·SaveGame
-// 64·TextExportTransient 128) Transform 미러(비Atomic)의 멤버는 SaveGame이다. 등록은 Required와
-// 복제 제외 플래그의 조합을 InvalidArgument로 거부하고 각 플래그만은 받는다.
+// 생성 스키마가 지정자마다 비트를 싣고(DuplicateTransient 16·NonTryoutDuplicateTransient
+// 32·SaveGame 64·TextExportTransient 128) Transform 미러(비Atomic)의 멤버는 SaveGame이다. 등록은
+// Required와 복제 제외 플래그의 조합을 InvalidArgument로 거부하고 각 플래그만은 받는다.
 TEST(FieldFlagGraph_SchemaCarriesFlagsAndRegistryRejectsRequiredDuplicate) {
     const TypeSchema& schema = TypeOf<FlagHolder>();
     CHECK(SchemaField(schema, "duplicateOnly").flags ==
           static_cast<uint32>(FieldFlags::DuplicateTransient));
     CHECK(SchemaField(schema, "instance").flags ==
-          static_cast<uint32>(FieldFlags::NonPIEDuplicateTransient));
+          static_cast<uint32>(FieldFlags::NonTryoutDuplicateTransient));
     CHECK(SchemaField(schema, "textOnly").flags ==
           static_cast<uint32>(FieldFlags::TextExportTransient));
     CHECK(SchemaField(schema, "score").flags == SaveGameFlag);
@@ -123,7 +123,7 @@ TEST(FieldFlagGraph_SchemaCarriesFlagsAndRegistryRejectsRequiredDuplicate) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);
     const uint32 duplicateFlags[] = {static_cast<uint32>(FieldFlags::DuplicateTransient),
-                                     static_cast<uint32>(FieldFlags::NonPIEDuplicateTransient)};
+                                     static_cast<uint32>(FieldFlags::NonTryoutDuplicateTransient)};
     for (uint32 flag : duplicateFlags) {
         const bool requiredCases[] = {false, true};
         for (bool required : requiredCases) {
@@ -159,9 +159,9 @@ TEST(FieldFlagGraph_SchemaCarriesFlagsAndRegistryRejectsRequiredDuplicate) {
 }
 
 // 복제 정책은 호출자의 excludedFlags로 정한다: 에셋 복제(DuplicateTransient |
-// NonPIEDuplicateTransient)는 두 필드를 빼고, PIE 복제(DuplicateTransient)는 duplicateOnly만 뺀다.
-// 빠진 필드는 복제본에서 기준 값(생성자 값)이고 나머지는 그대로다. TextExportTransient는 그래프
-// 저장과 무관하다(텍스트 codec이 쓴다).
+// NonTryoutDuplicateTransient)는 두 필드를 빼고, Tryout 복제(DuplicateTransient)는 duplicateOnly만
+// 뺀다. 빠진 필드는 복제본에서 기준 값(생성자 값)이고 나머지는 그대로다. TextExportTransient는
+// 그래프 저장과 무관하다(텍스트 codec이 쓴다).
 TEST(FieldFlagGraph_DuplicatePoliciesChooseSavedFields) {
     SystemAllocator allocator;
     FlagFixture fixture(allocator);
@@ -170,9 +170,9 @@ TEST(FieldFlagGraph_DuplicatePoliciesChooseSavedFields) {
         RootRef<FlagHolder> holder = New<FlagHolder>(objects);
         Fill(objects, holder.Handle());
         const uint32 asset = static_cast<uint32>(FieldFlags::DuplicateTransient) |
-                             static_cast<uint32>(FieldFlags::NonPIEDuplicateTransient);
-        const uint32 pie = static_cast<uint32>(FieldFlags::DuplicateTransient);
-        const uint32 policies[] = {asset, pie};
+                             static_cast<uint32>(FieldFlags::NonTryoutDuplicateTransient);
+        const uint32 tryout = static_cast<uint32>(FieldFlags::DuplicateTransient);
+        const uint32 policies[] = {asset, tryout};
         for (uint32 excluded : policies) {
             auto bytes =
                 Save(allocator, objects, holder.Handle(), FieldEncodePolicy{false, excluded});
@@ -182,7 +182,7 @@ TEST(FieldFlagGraph_DuplicatePoliciesChooseSavedFields) {
                                    With<FlagHolder>(
                                        target, handle, [&](FlagHolder& value) noexcept {
                                            CHECK(value.duplicateOnly == 0);
-                                           CHECK(value.instance == (excluded == pie ? 2 : 0));
+                                           CHECK(value.instance == (excluded == tryout ? 2 : 0));
                                            CHECK(value.textOnly == 3 && value.score == 4 &&
                                                  value.plain == 5 && value.slot.dropped == 7);
                                        });
