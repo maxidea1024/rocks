@@ -18,8 +18,8 @@ namespace {
 
 using namespace package_detail;
 
-constexpr uint32 EditorOnlyFlag = static_cast<uint32>(FieldFlags::EditorOnly);
-constexpr uint32 RequiredFlag = static_cast<uint32>(FieldFlags::Required);
+constexpr uint32 PackageWriterEditorOnlyFlag = static_cast<uint32>(FieldFlags::EditorOnly);
+constexpr uint32 PackageWriterRequiredFlag = static_cast<uint32>(FieldFlags::Required);
 
 ArchiveLimits SectionLimits() noexcept {
     ArchiveLimits limits;
@@ -59,8 +59,8 @@ public:
         DependencyUse use;
         use.asset = info.asset;
         use.hard = false;
-        use.editorOnly = (info.effectiveFlags & EditorOnlyFlag) != 0;
-        use.required = (info.effectiveFlags & RequiredFlag) != 0;
+        use.editorOnly = (info.effectiveFlags & PackageWriterEditorOnlyFlag) != 0;
+        use.required = (info.effectiveFlags & PackageWriterRequiredFlag) != 0;
         return softUses_.TryPushBack(use);
     }
 
@@ -81,7 +81,7 @@ public:
             return Result<const void*>::Success(in);
         }
 
-        const bool editorOnly = (frame.effectiveFlags & EditorOnlyFlag) != 0;
+        const bool editorOnly = (frame.effectiveFlags & PackageWriterEditorOnlyFlag) != 0;
         uint32 newId = 0;
         if (const uint32* known = bulkIds_.Find(value.bulkId)) {
             // 같은 옛 id는 같은 새 id다. 크기·해시가 다르면 메모리 상태가 모순이다.
@@ -1018,7 +1018,8 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
     ObjectGraphSaveOptions save;
     save.unsaveable = UnsaveablePolicy::Exclude;
     save.policy.rejectMissingRequired = true;
-    save.policy.excludedFlags = options.kind == PackageKind::Cooked ? EditorOnlyFlag : 0;
+    save.policy.excludedFlags =
+        options.kind == PackageKind::Cooked ? PackageWriterEditorOnlyFlag : 0;
     save.hooks = &hooks;
     save.externals = GraphExternalPolicy::Admit;
     save.writeNodeTable = false;
@@ -1089,7 +1090,7 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
         DependencyUse use;
         use.asset = drafts[order[indexBySlot[slot] - 1]].asset;
         use.hard = true;
-        use.editorOnly = (externals[slot].commonFlags & EditorOnlyFlag) != 0;
+        use.editorOnly = (externals[slot].commonFlags & PackageWriterEditorOnlyFlag) != 0;
         use.required = externals[slot].required;
         (void)uses.TryPushBack(use);
     }
