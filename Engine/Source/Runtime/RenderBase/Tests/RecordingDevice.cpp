@@ -429,8 +429,20 @@ Result<CommandContext*> RecordingDevice::BeginPass(const PassDesc& pass) noexcep
 
     // attachment는 살아 있는 텍스처여야 한다(attachment 없는 패스는 compute·복사 기록이다).
     for (uint32 index = 0; index < pass.colorCount; ++index) {
-        if (!textures_.IsValid(pass.colors[index].texture.slot)) {
+        const TextureHandle resolve = pass.colors[index].resolveTarget;
+        if (!textures_.IsValid(pass.colors[index].texture.slot) ||
+            (!resolve.IsNull() && !textures_.IsValid(resolve.slot))) {
             return Result<CommandContext*>::Failure(ErrorCode::StaleHandle);
+        }
+    }
+
+    // resolve 대상은 패스 끝에 ResolveDestination이 된다(원본은 RenderTarget 그대로).
+    resolveCount_ = 0;
+    for (uint32 index = 0; index < pass.colorCount; ++index) {
+        const ColorAttachment& color = pass.colors[index];
+        if (!color.resolveTarget.IsNull()) {
+            resolves_[resolveCount_++] = {color.resolveTarget.slot, color.resolveMipLevel,
+                                          color.resolveSlice};
         }
     }
 
@@ -473,6 +485,20 @@ Result<GpuFencePoint> RecordingDevice::EndFrame() noexcept {
     }
 
     recording_ = false;
+    for (uint32 index = 0; index < resolveCount_; ++index) {
+        TextureState* state = textures_.Find(resolves_[index].texture);
+        if (state != nullptr) {
+            const ResolvedSubresourceRange used = AttachmentSubresource(
+                state->dimension, resolves_[index].mipLevel, resolves_[index].slice);
+            if (used.firstMip < state->states.MipLevels() &&
+                used.firstSlice < state->states.Slices()) {
+                state->states.At(used.firstMip, used.firstSlice) =
+                    ResourceAccess::ResolveDestination;
+            }
+        }
+    }
+
+    resolveCount_ = 0;
     // 끝나지 않은 분리 전이는 계약 위반이다.
     validationErrors_ += splits_.Close();
     pendingSplits_.Clear();

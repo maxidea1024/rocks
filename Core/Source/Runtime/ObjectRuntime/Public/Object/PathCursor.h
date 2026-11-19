@@ -457,8 +457,11 @@ private:
     usize instancedStep_ = IndexNone;
     TypeLease instancedInput_;
     TypeId instancedRequest_{};
-    // 시작 위치다(InstancedStruct 단계의 담긴 타입 조회가 같은 시작 위치로 하위 연산을 돌린다).
-    const PathTarget* target_;
+    // 시작 위치의 사본이다(InstancedStruct 단계의 담긴 타입 조회가 같은 시작 위치로 하위 연산을
+    // 돌린다). 호출자의 PathTarget 객체를 가리키지 않고 값으로 쥔다 — PathTarget은 값 타입이라
+    // 임시 값(PathTarget::Value(box))으로 넘어올 수 있고, 연산 끝까지 살아야 하는 것은 그것이
+    // 가리키는 트랜잭션·struct 값·상자뿐이다(Object/PathTarget.h).
+    PathTarget target_;
     Borrow<Object> borrow_;
     EncodePin pin_;
     Object* object_ = nullptr;

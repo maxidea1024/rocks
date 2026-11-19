@@ -111,6 +111,9 @@ internal static class ActionGraph
         // 생성 TU 디렉터리는 header 디렉터리 목록에 넣지 않는다 — 공용 디렉터리의 header 확장자 파일 하나가 모든 실행 파일 TU를
         // 다시 컴파일하게 만들지 않는다(생성 TU의 key는 cpp 내용이다).
         string buildInfo = Path.TrimEndingDirectorySeparator(BuildInfoGenerator.DirectoryOf(output));
+        // 진입점 모듈(모듈 표에 드는 C++ 모듈)은 소스에 ROCKS_MODULE_NAME=<이름>을 받는다(Docs/Design/ModuleLoader.ko.md 3.2절). 진입점 매크로가
+        // 이 값과 매크로 인자를 static_assert로 대조한다. 모듈 표 제공 모듈이 없는 빌드(시험 fixture 등)에서는 아무 모듈도 받지 않는다.
+        HashSet<string> entryModules = ModuleTables.EntryModules(modules);
         foreach (var module in ordered)
         {
             var reachable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -147,6 +150,11 @@ internal static class ActionGraph
                 {
                     throw new ArgumentException($"Module {module.Name}: conflicting propagated definition {define.Key} ({string.Join(", ", define)}).");
                 }
+            }
+
+            if (entryModules.Contains(module.Name))
+            {
+                defines = [.. defines, ModuleTables.ModuleNameMacro + "=" + module.Name];
             }
 
             string[] sources = module.Sources.Select(Absolute).Order(StringComparer.Ordinal).ToArray();

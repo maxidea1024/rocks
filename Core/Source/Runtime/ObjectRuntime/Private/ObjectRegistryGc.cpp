@@ -77,6 +77,67 @@ Result<void> ObjectRegistry::BeginCollection(const ObjectAccessContext& access) 
     return Result<void>::Success();
 }
 
+Result<void>
+ObjectRegistry::FinishCollectionDeferringReclaim(const ObjectAccessContext& access) noexcept {
+    auto valid = CheckAccess(access);
+    if (!valid) {
+        return valid;
+    }
+
+    const uint64 started = platform::MonotonicNanoseconds();
+    {
+        platform::LockGuard lock(gate_);
+        if (processing_) {
+            return Result<void>::Failure(ErrorCode::Busy);
+        }
+
+        if (gcPhase_ == GcPhase::Idle) {
+            return Result<void>::Success();
+        }
+
+        if (gcPhase_ == GcPhase::Marking) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        // StepCollection과 같은 safepoint다: Borrow가 걸린 white를 Retire하지 않는다.
+        if (constructions_ || totalBorrows_) {
+            return Result<void>::Failure(ErrorCode::Busy);
+        }
+
+        processing_ = true;
+    }
+
+    // 남은 sweep 분류를 StepCollection처럼 처리 표시 아래 잠금 없이 판정하고 white가 있는 chunk만
+    // 잠가 Retire한다(GC 설계 17.2절). 회수는 하지 않는다.
+    while (gcPhase_ == GcPhase::Sweeping && sweepChunk_ != 0) {
+        const uint32 chunk = --sweepChunk_;
+        const GcBits& bits = BitsOf(chunk * SlotsPerChunk);
+        if ((bits.live & ~(LoadMark(bits.mark) | bits.clustered)) != 0) {
+            platform::LockGuard lock(gate_);
+            cycleGc_.retired += RetireWhiteLocked(chunk);
+        }
+    }
+
+    const uint64 finished = platform::MonotonicNanoseconds();
+    GcReport report;
+    {
+        platform::LockGuard lock(gate_);
+        cycleGc_.sweepNanoseconds += finished - started;
+        cycleGc_.durationNanoseconds += finished - started;
+        gcPhase_ = GcPhase::Idle;
+        lastGc_ = cycleGc_;
+        report = cycleGc_;
+        gcWork_.Clear();
+        gcShade_.Clear();
+        ReleaseGrayBlocks();
+        gcCursor_ = 0;
+        processing_ = false;
+    }
+
+    LogCycle("Incremental GC cycle (reclaim deferred)", report);
+    return Result<void>::Success();
+}
+
 Result<void> ObjectRegistry::CancelCollection(const ObjectAccessContext& access) noexcept {
     auto valid = CheckAccess(access);
     if (!valid) {
@@ -291,7 +352,7 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
 }
 
 Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access,
-                                         WorkerScheduler* scheduler) noexcept {
+                                         WorkerScheduler* scheduler, GcReclaim reclaim) noexcept {
     auto valid = CheckAccess(access);
     if (!valid) {
         return Result<GcReport>::Failure(valid.Error());
@@ -380,7 +441,8 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access,
 
     const uint64 reclaimStarted = platform::MonotonicNanoseconds();
     report.sweepNanoseconds = reclaimStarted - sweepStarted;
-    report.reclaimed = ReclaimEligible();
+    // Deferred는 분류한 객체를 회수 대상 목록에 남긴다(DrainRetired가 예산만큼 회수 — 17.2절).
+    report.reclaimed = reclaim == GcReclaim::Immediately ? ReclaimEligible() : 0;
     const uint64 finished = platform::MonotonicNanoseconds();
     report.reclaimNanoseconds = finished - reclaimStarted;
     report.durationNanoseconds = finished - started;

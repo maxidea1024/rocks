@@ -30,7 +30,7 @@ STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-d
 
 **1.14 텍스처 스트리밍 표본 해상도:** [텍스처 스트리밍](TextureStreaming.ko.md) 결정 T1(2026-11-19 확정)에 따라 9.5절의 desired mip 입력 "render resolution"을 표본 해상도(렌더 폭 × 2^(−텍스처 mip bias))로 바꾼다. temporal upscale에서는 출력 해상도, Native·Spatial에서는 렌더 해상도와 같아진다. 개정 범위는 9.5절이다.
 
-**1.15 에디터 내 실행 이름 Tryout:** 사용자 결정(2026-11-19)으로 UE PIE에 대응하는 Rocks 기능 이름을 Tryout으로 정한다. 이름의 뜻·표기 규칙·변형 이름·버린 후보는 22.6절에 둔다. 이 문서와 Docs/Design의 다른 설계 문서, Docs/Implementation의 개념 표기를 함께 바꾸었다. 코드 식별자(`NonPIEDuplicateTransient`, `TextUse::PieCopy` 등)와 그것을 설명하는 Docs/Implementation 표기는 후속 개명 커밋에서 바꾼다.
+**1.15 에디터 내 실행 이름 Tryout:** 사용자 결정(2026-11-19)으로 UE PIE에 대응하는 Rocks 기능 이름을 Tryout으로 정한다. 이름의 뜻·표기 규칙·변형 이름·버린 후보는 22.6절에 둔다. 이 문서와 Docs/Design의 다른 설계 문서, Docs/Implementation의 개념 표기를 함께 바꾸었다. 이어서 코드 식별자도 바꾸었다: 필드 지정자·`FieldFlags` 값 `NonPIEDuplicateTransient` → `NonTryoutDuplicateTransient`(비트 32는 그대로), 텍스트 용도 `TextUse::PieCopy` → `TextUse::TryoutCopy`, 그것을 설명하는 Docs/Implementation 표기와 게임 템플릿 README. 하위호환 별칭은 두지 않는다. 옛 지정자 이름은 MetaCompiler가 알 수 없는 지정자로 거부한다.
 
 ## 1. 목표와 실행 전략
 
@@ -279,7 +279,7 @@ Build/                    Rules  Schemas
 Templates/  Samples/VerticalSlice
 ~~~
 
-Core는 엔진이 아니라 엔진·도구·게임이 함께 쓰는 기반 라이브러리이며 최상위에서 Engine과 분리한다(의존은 Core ← Engine ← 게임·플러그인). 각 모듈 폴더에 `<모듈>.Build.cs`·`Public/`·`Private/`·`Tests/`를 두고, 모듈 단위 테스트는 그 `Tests/`에, 통합·부하·렌더·네트워크 시험은 `Programs/`의 시험 프로그램에 둔다. 실행 프로그램(C++·C#)은 모두 `Programs/`에 둔다. 게임 프로젝트는 `<프로젝트>.rocksproject`, 플러그인은 `<플러그인>.rocksplugin` 기술자를 둔다. 세부 규칙은 [저장소 구성](RepositoryLayout.ko.md)을 따른다.
+Core는 엔진이 아니라 엔진·도구·게임이 함께 쓰는 기반 라이브러리이며 최상위에서 Engine과 분리한다(의존은 Core ← Engine ← 게임·플러그인). 각 모듈 폴더에 `<모듈>.Build.cs`·`Public/`·`Private/`·`Tests/`를 두고, 모듈 단위 테스트는 그 `Tests/`에, 통합·부하·렌더·네트워크 시험은 `Programs/`의 시험 프로그램에 둔다. 실행 프로그램(C++·C#)은 모두 `Programs/`에 둔다. 게임 프로젝트는 `<프로젝트>.rocksproject`, 플러그인은 `<플러그인>.rocksplugin` 기술자를 둔다. 세부 규칙은 [저장소 구성](../Guides/RepositoryLayout.ko.md)을 따른다.
 
 공개 헤더와 Private 구현을 분리한다. 모듈 manifest에 공개/비공개 의존성, Host/Target 구분, 초기화 순서, 버전, 선택 기능을 기록한다. 초기화는 명시적인 BootServices 순서로 수행하고 정적 전역 생성자의 상호 의존을 금지한다. Shutdown은 신규 게임/편집 요청 차단 → 작업 취소 요청 → World 정상 종료(스크립트 Disable·Destroy hook)·자원 detach → teardown 작업과 callback drain → GPU fence·audio epoch·physics step 완료 → root/lease 반환·최종 GC → GC가 생성한 추가 cleanup/backend 작업 drain → owner/retire/queue closure 확인 → scheduler 종료 → type metadata/code lease와 trace writer 종료 → 모듈 역순 종료로 수행한다. teardown 전용 제출은 마지막 drain까지 허용하며 새로운 cleanup이 생기면 완료 집합이 닫힐 때까지 GC/drain을 반복한다. timeout은 실패이며 scheduler를 먼저 종료하거나 강제 free하지 않는다. 렌더 lane은 "GPU fence 완료"부터 "owner/retire/queue closure 확인"까지 살아 있고 그 뒤 Drain·장치 소유권 반납·Join한다. 이 단계는 Engine 종료 hook(`EngineLoopHooks`의 `BeginShutdown`·`CompleteInFlightWork`·`DrainShutdownCleanup`·`VerifyShutdownClosure`·`StopExecutors`)으로 드러낸다([렌더 기반](RenderBase.ko.md) 5.5절, CP6 구현 2026-11-17).
 
@@ -803,7 +803,7 @@ AssetId는 위치와 독립된 128-bit GUID로 부여한다. source asset, impor
 
 runtime reference graph와 cook build-dependency graph를 분리한다. 단순 AssetId 참조는 상대 cooked payload의 완료를 자동 선행 조건으로 만들지 않는다. 실제 산출물 의존이 순환하면 지원 가능한 SCC를 하나의 cook 단위로 축약하고, 정렬된 구성원 source/settings/schema·내부 edge ID·외부 component의 확정 digest로 key를 계산한다. 구성원 output은 component key+local output ID에서 파생하며 서로의 cooked hash를 재귀 정의하지 않는다. 지원하지 않는 순환 변환은 cycle 경로와 함께 거부한다. A↔B·3-node cycle 및 외부 변경 fixture에서 clean/incremental/local/remote 결과를 대조한다.
 
-Importer는 glTF·텍스처·WAV/압축 오디오를 우선하고, FBX와 고급 DCC 연동은 plugin으로 확장한다. 임포트는 별도 worker process에서 수행하여 실패와 긴 컴파일을 격리한다(장시간 실행되는 에디터와 함께 구현한다. 그 전의 명령행 임포트는 원자적 저장으로 기존 에셋을 보존한다 — AssetSystem 17절). StaticMesh cook은 conventional LOD·meshlet·VirtualGeometry page·collision·nav source·GI proxy를 독립 산출물로 생성한다. 하나의 렌더링 메시를 모든 시스템의 직접 입력으로 재사용하지 않는다.
+Importer는 glTF·텍스처·WAV/압축 오디오를 우선하고, FBX와 고급 DCC 연동은 plugin으로 확장한다. 임포트는 별도 worker process에서 수행하여 실패와 긴 컴파일을 격리한다(장시간 실행되는 에디터와 함께 구현한다. 그 전의 명령행 임포트는 원자적 저장으로 기존 에셋을 보존한다 — AssetSystem 17절). StaticMesh cook은 conventional LOD·meshlet·VirtualGeometry page·collision·nav source·GI proxy를 독립 산출물로 생성한다. 하나의 렌더링 메시를 모든 시스템의 직접 입력으로 재사용하지 않는다. 엔진 시험용 UE 콘텐츠는 UE 에디터 플러그인이 추출한 교환 묶음으로 가져온다([Unreal 교환 형식](UnrealExchange.ko.md), 2026-11-20).
 
 ### 9.2 로딩 상태와 취소
 
@@ -1257,7 +1257,7 @@ native 고해상도 기준 영상과 비교하여 SSIM/이미지 차이, edge fl
 
 ### 13.1 GPU-driven 기준 경로
 
-StaticMeshAsset은 positions, packed normals/tangents, UV, material slots, section, bounds, conventional LOD, meshlet, collision, GI proxy를 보관한다. import 때 퇴화 삼각형·잘못된 winding·nonfinite 값·UV 범위를 진단한다. meshoptimizer는 cache·fetch 최적화와 meshlet cook의 후보로 어댑터에 통합한다. [S5](https://github.com/zeux/meshoptimizer)
+StaticMeshAsset은 positions, packed normals/tangents, UV, material slots, section, bounds, conventional LOD, meshlet, collision, GI proxy를 보관한다. import 때 퇴화 삼각형·잘못된 winding·nonfinite 값·UV 범위를 진단한다. meshoptimizer는 cache·fetch 최적화와 meshlet cook의 후보로 어댑터에 통합한다. [S5](https://github.com/zeux/meshoptimizer) 원본 메시 모델·설정·빌드 순서·쿠킹 데이터의 상세는 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md) 3–5절이다.
 
 GPU Scene은 RenderInstanceId별 transform, previous transform, mesh/material handle, bounds, flags를 저장한다. 변경 범위만 upload하고 frame overlap 중 같은 buffer 영역을 덮어쓰지 않는다. material table·descriptor table도 version과 deferred retirement를 적용한다. GPU에는 Object 주소나 ObjectHandle을 직접 전달하지 않는다.
 
@@ -1496,7 +1496,7 @@ LT01–03·LT05–06의 static/basic probe·CPU bake 사례는 M4 필수다. LT0
 
 ## 15. Skeletal Mesh와 Animation
 
-SkeletonAsset은 stable bone ID, parent index, bind/inverse-bind pose, retarget profile을 보관한다. SkeletalMesh는 section별 bone palette·influence 제한·LOD·morph target을 보관하고 같은 skeleton의 공유를 허용한다. import 시 누락 bone·비정규 weight·좌표/scale·음수 determinant를 검사한다. cook 시 skin weight precision과 bone pruning을 LOD별로 결정한다.
+SkeletonAsset은 stable bone ID, parent index, bind/inverse-bind pose, retarget profile을 보관한다. SkeletalMesh는 section별 bone palette·influence 제한·LOD·morph target을 보관하고 같은 skeleton의 공유를 허용한다. import 시 누락 bone·비정규 weight·좌표/scale·음수 determinant를 검사한다. cook 시 skin weight precision과 bone pruning을 LOD별로 결정한다. 본 계층·스켈레톤·스킨 메시·AnimationClip의 자료구조 상세는 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md) 6–7절이다.
 
 AnimationClip은 position·rotation·scale track, curve, notify, root motion을 포함한다. ACL을 압축·복호화 후보로 사용하며 CPU 작업 메모리와 시간·오차를 adapter에서 계측한다. [S9](https://github.com/nfrechette/acl)
 

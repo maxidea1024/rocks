@@ -96,9 +96,12 @@ FileStatus ClassifyOpenFailure(const char* path) noexcept {
     return {FileCode::SystemError, 0};
 }
 
-FileStatus Load(const char* path, uptr& handle) noexcept {
+// 실패하면 이 스레드의 dlerror 문구를 분류(stat·open)보다 먼저 받아 둔다. 다음 dl* 호출이 문구를
+// 지운다.
+FileStatus Load(const char* path, uptr& handle, DynamicLibraryError* error) noexcept {
     void* library = dlopen(path, OpenFlags);
     if (library == nullptr) {
+        CopyDynamicLibraryErrorText(dlerror(), error);
         return ClassifyOpenFailure(path);
     }
 
@@ -108,7 +111,8 @@ FileStatus Load(const char* path, uptr& handle) noexcept {
 
 } // namespace
 
-FileStatus DynamicLibraryOpenPath(const char* path, usize pathBytes, uptr& handle) noexcept {
+FileStatus DynamicLibraryOpenPath(const char* path, usize pathBytes, uptr& handle,
+                                  DynamicLibraryError* error) noexcept {
     // '/'로 시작하지 않으면 dlopen이 검색 경로(현재 디렉터리 포함)에서 찾으므로 거부한다.
     if (path[0] != '/') {
         return {FileCode::InvalidArgument, 0};
@@ -119,10 +123,11 @@ FileStatus DynamicLibraryOpenPath(const char* path, usize pathBytes, uptr& handl
         return {FileCode::OutOfMemory, 0};
     }
 
-    return Load(native.Value(), handle);
+    return Load(native.Value(), handle, error);
 }
 
-FileStatus DynamicLibraryOpenSystem(const char* name, usize nameBytes, uptr& handle) noexcept {
+FileStatus DynamicLibraryOpenSystem(const char* name, usize nameBytes, uptr& handle,
+                                    DynamicLibraryError* error) noexcept {
     const char* directory = PosixSystemLibraryDirectory();
     OwnedPath native;
     if (!native.Assign(directory, name, nameBytes)) {
@@ -130,12 +135,13 @@ FileStatus DynamicLibraryOpenSystem(const char* name, usize nameBytes, uptr& han
     }
 
     if (directory[0] != '\0') {
-        return Load(native.Value(), handle);
+        return Load(native.Value(), handle, error);
     }
 
     // 이름만으로 찾을 때는 확인할 파일 경로가 없다. 링커가 찾지 못한 것으로 본다.
     void* library = dlopen(native.Value(), OpenFlags);
     if (library == nullptr) {
+        CopyDynamicLibraryErrorText(dlerror(), error);
         return {FileCode::NotFound, 0};
     }
 

@@ -34,14 +34,15 @@ constexpr uint32 KnownFieldFlags =
     static_cast<uint32>(FieldFlags::Transient) | static_cast<uint32>(FieldFlags::ReadOnly) |
     static_cast<uint32>(FieldFlags::EditorOnly) | static_cast<uint32>(FieldFlags::Required) |
     static_cast<uint32>(FieldFlags::DuplicateTransient) |
-    static_cast<uint32>(FieldFlags::NonPIEDuplicateTransient) |
+    static_cast<uint32>(FieldFlags::NonTryoutDuplicateTransient) |
     static_cast<uint32>(FieldFlags::SaveGame) |
     static_cast<uint32>(FieldFlags::TextExportTransient);
 
 // 복제 제외 플래그다. Required와 함께 쓰면 InvalidArgument다(리플렉션 B9h1 — 복제본이 늘 null을
 // 가져 패키지 저장의 rejectMissingRequired가 실패한다).
-constexpr uint32 DuplicateExcludedFlags = static_cast<uint32>(FieldFlags::DuplicateTransient) |
-                                          static_cast<uint32>(FieldFlags::NonPIEDuplicateTransient);
+constexpr uint32 DuplicateExcludedFlags =
+    static_cast<uint32>(FieldFlags::DuplicateTransient) |
+    static_cast<uint32>(FieldFlags::NonTryoutDuplicateTransient);
 
 bool SameBytes(Span<const char> left, Span<const char> right) noexcept {
     if (left.Size() != right.Size()) {

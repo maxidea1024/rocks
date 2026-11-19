@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/fs.h>
+#include <sched.h>
 #include <stdio.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
@@ -184,6 +185,22 @@ void PosixSetCurrentThreadPriority(ThreadPriority priority) noexcept {
 // namespace는 /system 절대 경로 열기를 막을 수 있으므로(Android 7 이후) 이름 그대로 넘긴다.
 const char* PosixSystemLibraryDirectory() noexcept {
     return "";
+}
+
+// affinity(taskset·cgroup cpuset)로 제한된 프로세스가 쓸 수 있는 수다(UE UnixPlatformMisc와 같은
+// 방식). 조회에 실패하면 online 수로 대신한다.
+uint32 PosixLogicalProcessorCount() noexcept {
+    cpu_set_t allowed;
+    CPU_ZERO(&allowed);
+    if (sched_getaffinity(0, sizeof(allowed), &allowed) == 0) {
+        const int count = CPU_COUNT(&allowed);
+        if (count > 0) {
+            return static_cast<uint32>(count);
+        }
+    }
+
+    const long online = sysconf(_SC_NPROCESSORS_ONLN);
+    return online <= 0 ? 1u : static_cast<uint32>(online);
 }
 
 } // namespace rocks::platform::detail

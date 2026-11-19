@@ -13,6 +13,27 @@ struct DynamicSymbol {
 
 class DynamicLibraryLease;
 
+// Open·OpenSystem 실패의 OS 로더 문구다(POSIX dlerror, Docs/Design/ModuleLoader.ko.md MD14).
+// dlopen은 숫자 오류 코드를 주지 않으므로(FileStatus.nativeError는 0) 원인(의존 라이브러리 이름,
+// 다른 아키텍처, 서명 등)은 이 문구로만 알 수 있다. Windows는 nativeError가 원래 OS
+// 코드(ERROR_MOD_NOT_FOUND 등)이고 문구는 비어 있다.
+//
+// 사용 예:
+//   platform::DynamicLibraryError error;
+//   if (auto opened = library.Open(path, pathBytes, &error); !opened) {
+//       // opened.code, opened.nativeError, error.text를 함께 기록한다
+//   }
+struct DynamicLibraryError {
+    // text 칸의 byte 수(NUL 포함)다.
+    static constexpr usize MaxTextBytes = 512;
+
+    // NUL 종료 문구다. OS가 준 byte를 그대로 담으며(경로가 들어 있을 수 있다) 넘치면 UTF-8 문자
+    // 경계에서 자른다. 문구가 없으면 빈 문자열이다.
+    char text[MaxTextBytes]{};
+    // text를 자른 적이 있는지다.
+    bool truncated = false;
+};
+
 // OS 공유 라이브러리(Windows DLL, macOS dylib, Android so) 하나의 소유권이다(UE
 // FPlatformProcess::GetDllHandle·GetDllExport·FreeDllHandle 대응). 셰이더 워커가 도구(DXC·
 // SPIRV-Cross·SPIRV-Tools·FXC)를 절대 경로에서 열고, 렌더러가 OS 공급 라이브러리(Vulkan 로더,
@@ -68,7 +89,8 @@ class DynamicLibraryLease;
 //   불렀다. Busy: lease가 남은 채 Close를 불렀다. Overflow: lease 수가 상한에 닿았다.
 // - OutOfMemory: 상태·경로 사본을 할당하지 못했다.
 // - SystemError: 그 밖의 OS 실패. macOS·Android는 파일이 있고 형식이 맞는데 dlopen이 실패한
-//   경우(의존 라이브러리 없음 포함)이며 nativeError는 0이다(dlerror 문구는 아직 넘기지 않는다).
+//   경우(의존 라이브러리 없음 포함)이며 nativeError는 0이다. 원인은 DynamicLibraryError의 dlerror
+//   문구로 받는다.
 // Windows에서 열기 실패는 OS 오류 대화상자를 띄우지 않는다(호출 스레드의 오류 모드를 잠시
 // SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX로 바꾼다).
 //
@@ -76,7 +98,7 @@ class DynamicLibraryLease;
 // 같은 객체의 다른 메서드와 동시에 부르지 않는다. lease 해제는 어느 스레드에서 언제 해도 되며
 // Close와 겹치면 Close가 Busy이거나 해제가 먼저 끝난 것으로 본다.
 //
-// 후속: dlerror 문구 전달, 심볼 버전(dlvsym), 다른 라이브러리를 거치지 않는 POSIX 심볼 검색(dlsym은
+// 후속: 심볼 버전(dlvsym), 다른 라이브러리를 거치지 않는 POSIX 심볼 검색(dlsym은
 // 의존 라이브러리의 심볼도 찾는다. GetProcAddress는 그 DLL의 export만 찾는다).
 class DynamicLibrary final {
 public:
@@ -93,16 +115,19 @@ public:
 
     // absolutePath(UTF-8, 길이 지정, NUL 종료 불필요)의 라이브러리를 연다. Windows 절대 경로는
     // "X:\"·"X:/"로 시작하는 드라이브 경로나 "\\server\share\" UNC 경로이고, POSIX는 '/'로
-    // 시작한다. 실패하면 닫힌 상태로 남는다. 오류는 클래스 주석을 따른다.
-    FileStatus Open(const char* absolutePath, usize pathBytes) noexcept;
+    // 시작한다. 실패하면 닫힌 상태로 남는다. 오류는 클래스 주석을 따른다. error가 null이 아니면
+    // 호출 시작에 비우고, OS 로더가 거부했을 때 그 문구를 담는다(POSIX dlerror, Windows는 빈 문구).
+    FileStatus Open(const char* absolutePath, usize pathBytes,
+                    DynamicLibraryError* error = nullptr) noexcept;
 
     // NUL 종료 absolutePath를 쓰는 편의 함수다.
     FileStatus Open(const char* absolutePath) noexcept;
 
     // OS가 공급하는 라이브러리를 파일 이름(확장자 포함, UTF-8, 최대 MaxSystemNameBytes)으로 연다
     // (예: "vulkan-1.dll", "xinput1_4.dll", "libvulkan.so"). 검색 위치는 클래스 주석을 따른다.
-    // 실패하면 닫힌 상태로 남는다.
-    FileStatus OpenSystem(const char* name, usize nameBytes) noexcept;
+    // 실패하면 닫힌 상태로 남는다. error는 Open과 같다.
+    FileStatus OpenSystem(const char* name, usize nameBytes,
+                          DynamicLibraryError* error = nullptr) noexcept;
 
     // NUL 종료 name을 쓰는 편의 함수다.
     FileStatus OpenSystem(const char* name) noexcept;

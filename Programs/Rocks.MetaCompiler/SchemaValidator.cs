@@ -664,9 +664,9 @@ internal static partial class SchemaValidator
 
                 // Required와 복제 제외 플래그는 함께 쓸 수 없다(리플렉션 B9h1 — 복제본이 늘 null을 가져 패키지 저장의 rejectMissingRequired가
                 // 실패한다).
-                if (field.Spec.Required && (field.Spec.DuplicateTransient || field.Spec.NonPIEDuplicateTransient))
+                if (field.Spec.Required && (field.Spec.DuplicateTransient || field.Spec.NonTryoutDuplicateTransient))
                 {
-                    throw new MetadataException($"{field.Owner}::{field.Name}: Required cannot be combined with DuplicateTransient or NonPIEDuplicateTransient", "RMC2202",
+                    throw new MetadataException($"{field.Owner}::{field.Name}: Required cannot be combined with DuplicateTransient or NonTryoutDuplicateTransient", "RMC2202",
                         "A duplicate never carries this field, so a Required check on the duplicate would always fail; remove Required or the duplicate-transient specifier.").At(field.Site);
                 }
 

@@ -1,6 +1,6 @@
 # Rocks GC 대규모 처리 보강 설계
 
-기준일: 2026-11-16, 개정 1(초안). 개정 5(2026-11-19): 병렬 marker의 FIFO 미리 읽기 고리와 일반 그래프 표식 gate의 남은 차이(16절), 간선 제거의 장부 감소를 미루는 기록(13.4절 — 리뷰 반영: 기록 256칸(꼬리 지연), 적용 대상 검사를 모든 빌드 Fatal로, 세대에 더해 상태 검사), 5단계 판단: 지정 클러스터를 경계 비율 안전장치 밖에 두는 근거·해체된 패키지를 다시 묶지 않는 근거(13.5절), 장부 고리 칸 16비트 번호안 기각(13.9절). 개정 4(2026-11-18): Registry 규모 점검 반영(14절), 소스 파일 구성(15절), Slot hot·cold 분리(6절 GC-S3 "Slot hot·cold 분리", 4절 gate, 11절 결정 5). 개정 2(2026-11-17): 클러스터·영구 영역 상세 설계(13절), 열린 결정 4 확정, 열린 결정 6 해소, UE 클러스터 사실 정정. 개정 3(2026-11-18): 장부 배치·클러스터 표식 경로를 측정에 맞춰 바꾸고 패키지 클러스터의 경계 비율 안전장치를 더함(13.4·13.5·13.9절).
+기준일: 2026-11-16, 개정 1(초안). 개정 6(2026-11-19): GC-S5 수집 일정과 파괴 예산(17절 — 묶음 회수, 회수를 미루는 STW 수집과 예산 회수, World 수집 일정, 엔진이 소유하는 GC scheduler), 6절 GC-S5·11절 결정 3 갱신. 리뷰 반영(17절): 회수의 최소 진척과 묶음 안 시간 한도, 회수 대기 질의, 회수 없이 cycle 끝내기, 실시간 간격, 프로세스가 쓸 수 있는 프로세서 수, 요청의 스레드 계약, worker 상한. 개정 5(2026-11-19): 병렬 marker의 FIFO 미리 읽기 고리와 일반 그래프 표식 gate의 남은 차이(16절), 간선 제거의 장부 감소를 미루는 기록(13.4절 — 리뷰 반영: 기록 256칸(꼬리 지연), 적용 대상 검사를 모든 빌드 Fatal로, 세대에 더해 상태 검사), 5단계 판단: 지정 클러스터를 경계 비율 안전장치 밖에 두는 근거·해체된 패키지를 다시 묶지 않는 근거(13.5절), 장부 고리 칸 16비트 번호안 기각(13.9절). 개정 4(2026-11-18): Registry 규모 점검 반영(14절), 소스 파일 구성(15절), Slot hot·cold 분리(6절 GC-S3 "Slot hot·cold 분리", 4절 gate, 11절 결정 5). 개정 2(2026-11-17): 클러스터·영구 영역 상세 설계(13절), 열린 결정 4 확정, 열린 결정 6 해소, UE 클러스터 사실 정정. 개정 3(2026-11-18): 장부 배치·클러스터 표식 경로를 측정에 맞춰 바꾸고 패키지 클러스터의 경계 비율 안전장치를 더함(13.4·13.5·13.9절).
 
 **이 문서의 작업은 반드시 해야 하는 작업이다.** 현재 `ObjectRegistry` GC는 AAA급 규모(살아 있는 객체 100만 개 이상)의 게임에서 쓸 수 없는 상태다(2026-11-16 사용자 판단). 이 문서의 GC-S 단계는 선택 최적화가 아니며 성능 미달을 "측정 결과로 관리"하는 대상도 아니다. 단계를 모두 마치고 4절의 성능 gate를 통과해야 GC를 대규모 콘텐츠에 쓸 수 있다고 본다.
 
@@ -41,7 +41,7 @@ UE 소스는 설계 사실의 대조에만 쓰고 코드를 옮기지 않는다.
 
 게임 엔진은 콘텐츠의 규모가 커져도 문제없이 구동되어야 한다. 객체 수를 줄여 GC를 피하는 것은 GC가 약한 엔진에서 사용자가 떠안는 회피책이다. 대표적인 예가 Unity다. Rocks는 이 부담을 사용자에게 넘기지 않는다.
 
-- 객체 수 줄이기는 사용자의 선택적 최적화로만 다룬다. GC 비용을 이유로 사용자 설계를 강제하는 안내를 1차 처방으로 쓰지 않는다. 지금 [GC 안내](../Implementation/GarbageCollectionGuide.ko.md) 7.2절의 "값 배열·덩어리 데이터로 둘 수 있는지 검토"는 GC-S 완료 뒤 고친다(12절).
+- 객체 수 줄이기는 사용자의 선택적 최적화로만 다룬다. GC 비용을 이유로 사용자 설계를 강제하는 안내를 1차 처방으로 쓰지 않는다. 지금 [GC 안내](../Guides/GarbageCollectionGuide.ko.md) 7.2절의 "값 배열·덩어리 데이터로 둘 수 있는지 검토"는 GC-S 완료 뒤 고친다(12절).
 - [계획](EngineImplementationPlan.ko.md) §5.1의 "매 정점·입자·physics body·render instance를 Object로 생성하지 않는다"는 이 원칙과 충돌하지 않는다. 그 항목은 원래 GC 대상이 될 이유가 없는 대량 데이터의 표현 규칙이다. Entity·Component·에셋 객체처럼 정체성과 수명이 필요한 객체는 많아도 된다.
 - 정확성이 먼저다. 오수거를 허용해 시간을 맞추지 않는다(계획 §6.4). 기존 정지형 `Collect`를 결과 대조용 oracle로 유지한다.
 
@@ -70,7 +70,7 @@ UE 소스는 설계 사실의 대조에만 쓰고 코드를 옮기지 않는다.
 5. **루트 수집과 sweep의 전체 Slot 순회.** `BeginCollection`은 루트를 찾으려고 모든 Slot을 훑는다(140–150행). 이 순회는 Step 예산 밖이다. `Collect`의 루트 수집과 sweep도 전체 Slot을 훑는다(507–519, 541–549행).
 6. **병렬 경로의 구조.** 객체 하나마다 `Function`을 할당·제출하고 64개마다 모두 기다린다(355–413행). `World::StepGarbageCollection`은 scheduler를 넘기지 않으므로 게임 경로는 언제나 직렬이다(`Engine/Source/Runtime/World/Private/World.cpp` 1651행).
 7. **객체 수 기준 예산.** 기본 `GcBudget`은 Step당 작업 64개, soft 1ms다(`Public/Object/ObjectRegistryOptions.h` 26–29행). 1M 객체에서는 표식 약 15,600 Step과 sweep 약 16,400 Step이 필요하다. 60fps에서 cycle 하나가 약 9분 걸리고, 그동안 쓰레기가 회수되지 않는다.
-8. **회수와 할당자.** `ReclaimEligible`은 객체마다 잠금을 두 번 잡는다(624–647행). 샘플 프로그램의 `SystemAllocator`는 `Deallocate`에서 살아 있는 할당의 연결 목록을 잠금 아래에서 선형 탐색한다(`Core/Source/Runtime/Core/Private/Memory/SystemAllocator.cpp` 76–78행). `BinnedAllocator`도 전역 잠금과 원장 선형 검색을 쓰며 "성능 보장 없음"이라고 명시한다(`BinnedAllocator.h`).
+8. **회수와 할당자.** `ReclaimEligible`은 객체마다 잠금을 두 번 잡는다(624–647행 — GC-S5에서 묶음으로, 17.1절). 샘플 프로그램의 `SystemAllocator`는 `Deallocate`에서 살아 있는 할당의 연결 목록을 잠금 아래에서 선형 탐색한다(`Core/Source/Runtime/Core/Private/Memory/SystemAllocator.cpp` 76–78행). `BinnedAllocator`도 전역 잠금과 원장 선형 검색을 쓰며 "성능 보장 없음"이라고 명시한다(`BinnedAllocator.h`).
 
 ### 3.3 계획과의 차이
 
@@ -246,6 +246,7 @@ UE가 1M을 감당하는 이유는 세 가지가 함께 작동하기 때문이�
 ### GC-S5 · 수집 일정과 파괴 예산
 
 - STW 병렬 전체 수집을 정식 경로로 둔다. 레벨 전환·로딩 화면, 메모리 압박, 주기 실행(간격은 설정)에서 쓴다. 이 단계를 마치면 [계획](EngineImplementationPlan.ko.md) §6.1의 "점진 marking을 기본 구현으로 채택"은 선택 경로로 바뀐다. 계획 6.6절이 이 변경을 예고한다.
+- (개정 6, 17절) 구현에서 정한 것: STW 병렬 전체 수집과 증분 수집은 둘 다 정식 경로다. World의 기본 일정은 증분이고(병렬 slice로 1M에서 프레임당 약 1ms — 실험 20절), STW 병렬 전체 수집은 요청(레벨 전환·로딩·메모리 압박)과 주기 일정에서 쓴다. 전체 수집의 회수는 프레임마다 시간 예산으로 나눈다.
 - 증분 표식은 선택지로 유지한다. 증분 slice는 직렬 또는 소수 worker로 시작한다. 증분 반복의 work-stealing은 UE도 지원하지 않으므로 필요성을 측정한 뒤 정한다.
 - 회수·파괴(BeginDestroy 대응 hook, 소멸자, 해제)는 시간 예산으로 여러 프레임에 나눈다. 회수는 N개씩 한 번의 잠금으로 떼어 내고 소멸자와 해제는 잠금 밖에서 묶어 처리한다.
 - 완료 기준: 대량 파괴 시나리오에서 프레임당 예산을 지킨다. World 수명 정책과 시험을 새 일정에 맞춘다.
@@ -355,7 +356,7 @@ GC slice는 `processing_` 아래에서 실행되며, 그동안 생성·간선 �
 |---|---|---|
 | 1 | 완료 시한 | 화면 마일스톤 뒤 대규모 콘텐츠 작업 전 / 특정 gate 전 / 사용자가 따로 정함. **결정 필요** |
 | 2 | 표식 단위 | epoch 바이트(1M → 1 MiB, 단순) 또는 bit(128 KiB, `fetch_or`). GC-S0 측정으로 정한다 |
-| 3 | STW 전체 수집 주기 | 시간 간격·메모리 임계·레벨 전환 조합. 기본값은 GC-S5에서 정한다 |
+| 3 | STW 전체 수집 주기 | **정함(개정 6, 17.3절)**: World 기본은 증분 일정, STW 병렬 전체 수집은 요청(`World::RequestFullCollection`·`Engine::RequestFullCollection` — 레벨 전환·로딩·메모리 압박)과 주기 일정(`WorldGcMode::FullCollection`, 간격 기본 60초). 메모리 임계 신호는 플랫폼 계층이 생기면 엔진 요청에 잇는다 |
 | 4 | 영구 객체가 일반 객체를 가리킬 때의 규칙 | **확정(2026-11-17): 금지.** 위반 쓰기·Commit은 `Unsupported`다. 일반 객체를 붙잡아야 하면 RootRef를 쓴다(13.7절) |
 | 5 | Slot 정보 64B 목표의 달성 방법 | 개정 4: hot·cold 분리로 hot 64B 달성(6절 GC-S3). 합계(192B)는 cold 고리 번호화·Outer·identity 레코드 분리로 약 80–100B까지 가능 — 4절 gate를 "hot ≤ 64B"와 별도 합계 목표로 나누기를 제안 |
 | 6 | 배타 소유 하위 객체의 표시 방식(M6) | **해소(개정 2).** 패키지·Level 소속으로 경계를 정하므로 표시가 필요 없다(13.3절) |
@@ -365,7 +366,7 @@ GC slice는 `processing_` 아래에서 실행되며, 그동안 생성·간선 �
 
 - [EngineImplementationPlan](EngineImplementationPlan.ko.md) §6에 6.6절 "대규모 처리 필수 보강"을 두고 이 문서를 가리킨다. 1.1절 F1 행·1.1절의 C28 문장·4.1절의 "C28 이후 측정 기반 최적화안" 문장에 GC-S6 필수를 덧붙이고, §6.1에 6.6절 참조를 단다. 개정 1.10(33.15절)으로 이번에 반영한다.
 - [Core·Object 입력 상세 계획](CoreObjectInputDetailedPlan.ko.md)의 C28은 "선택 R3"으로 남아 있다. 이 표는 `CoreObjectInputTasks.ko.csv`·`CoreObjectInputData.json`과 짝이므로 이번에는 고치지 않는다. GC-S6 착수 때 세 곳을 함께 필수로 바꾼다.
-- [GC 안내](../Implementation/GarbageCollectionGuide.ko.md) 7절과 8절은 GC-S 단계를 마칠 때마다 현재 동작과 수치로 고친다. 7.2절의 객체 수 줄이기 권고는 GC-S 완료 뒤 사용자 선택 최적화로 낮춘다.
+- [GC 안내](../Guides/GarbageCollectionGuide.ko.md) 7절과 8절은 GC-S 단계를 마칠 때마다 현재 동작과 수치로 고친다. 7.2절의 객체 수 줄이기 권고는 GC-S 완료 뒤 사용자 선택 최적화로 낮춘다.
 - [증분 GC 구현 계약](../Implementation/IncrementalGarbageCollection.ko.md)은 GC-S1(잠금), GC-S2(예산), GC-S4(장벽 큐) 때 계약을 고친다.
 
 ## 13. 클러스터와 영구 영역 (GC-S7 상세, 개정 3)
@@ -571,3 +572,59 @@ GC 구현(`Core/Source/Runtime/ObjectRuntime/Private/`)을 기능별 파일로 �
 - 단일 스레드 표식은 기계 부하에 가장 민감하다(같은 실행 파일이 round마다 57.9 ↔ 110.5ms). 부하가 줄어든 round의 최소는 목표 근처지만 여유가 없다. 원인(표본 프로파일, 직렬 표식 표본 기준): 참조 배열 원소 읽기 31%(`VisitStrongEdges` — 4칸 앞에서 미리 읽은 배열이 아직 오지 않음), 큐 앞쪽 미리 읽기 단계의 요구 읽기 29%(본체를 미리 읽으려면 hot을, 배열을 미리 읽으려면 본체를 읽어야 한다), 대상 비트 묶음 검사 23%(`MarkIndex`), 나머지 17%. 객체 하나에 무작위 주소 셋(hot 16 B·본체·배열 버퍼 — 1M에서 각각 16·46·81 MB)이 사슬로 걸려 있어, 미리 읽기 거리를 늘려도 줄 채움 버퍼 수가 동시 미스를 묶는다(16.1 (2)·(3)). 객체당 약 90ns로 DRAM 지연 하나와 비슷하다.
 - 병렬 ×8의 원인: 같은 round의 직렬 최소 ÷ ×8 최소는 고리(정렬 전) 2.81–3.16배, 정렬 뒤 3.8–4.6배(직렬이 부하로 흔들린 한 round는 5.4배)다. 참여자 9로 선형의 약 1/3–1/2이다(앞 개정의 "4.4배"는 다른 조건의 직렬 값으로 나눈 잘못된 비였다). 확인된 원인 하나는 참여자 상태의 false sharing이었다(정렬로 ×8 약 18% 감소). 남은 원인은 객체당 무작위 주소 셋(직렬과 같다)과 표식 비트 묶음 줄(chunk 64칸마다 64 B)을 여러 참여자가 `fetch_or`로 고쳐 다른 참여자의 캐시가 무효화되는 것으로 본다(추정 — 이 기계에서는 성능 계수기를 쓸 수 없어 미스 종류를 직접 세지 못했다).
 - 다음 방안(구현하지 않음, 측정 근거와 함께 남긴다): (1) 표식 비트를 읽기 전용 칸(live·leaf·clustered)과 분리해 쓰기 줄 경합을 줄인다 — 표식 비트 자체는 여전히 공유된다. (2) 그래프 배치: 생성 순서(=슬롯 순서)와 본체·배열 할당 주소를 가깝게(GC-S6 할당자 — size slab이 같은 묶음의 객체를 가까이 둔다). (3) 클러스터 그래프는 이미 두 gate를 충족한다(실험 14.4절 — 7–20ms·×8 3.2–6.5ms). 일반 그래프에서 gate를 지키려면 객체 그래프를 클러스터(Level·패키지)로 묶는 것이 효과가 크다.
+
+## 17. 수집 일정과 파괴 예산 (GC-S5, 7단계, 개정 6, 2026-11-19)
+
+6절 GC-S5의 구현 설계다. 측정은 [실험 결과](../Implementation/GcScaleExperiment.ko.md) 24절이다. 7단계 리뷰(ce760705..26524906)의 지적을 반영했다.
+
+### 17.1 묶음 회수
+
+- 회수(`ReclaimEligible`)는 `ReclaimBatchSize`(64)개씩 한 번의 잠금으로 회수 대상 목록에서 떼어 내고(Reclaiming 상태), 소멸자·저장소 반환·이름 기록 반환을 잠금 밖에서 차례로 부른 뒤, 슬롯 되돌리기(밀집 자료 비우기·세대 올리기·빈 슬롯 목록)를 다시 한 번의 잠금으로 한다. 객체마다 잠금 두 번이던 것이 묶음마다 두 번이 된다.
+- 시간 한도는 소멸자 사이마다 본다. 한도가 지나면 아직 소멸하지 않은 work는 두 번째 잠금에서 Retired(풀린 목록)로 되돌린다(타입 lease·이름 기록을 슬롯에 되돌린다). 그래서 넘침은 묶음이 아니라 소멸자 하나다 — 묶음 전과 같다. 처음 리뷰 전 구현은 묶음마다만 보아 넘침이 소멸자 64개까지였다(리뷰 지적).
+- 최소 진척: 시간 한도는 첫 객체를 회수한 뒤부터 본다. 회수할 수 있는 객체가 있으면 한 번의 호출이 적어도 하나를 회수한다 — 호출 직전에 선점되어 한도가 이미 지났어도 0으로 끝나지 않는다(리뷰 지적: 0을 "남은 것 없음"으로 읽는 쪽이 회수를 멈췄다). 객체 수 한도는 묶음 크기를 줄여 정확히 지킨다.
+- 묶음 안 순서는 전과 같다(소멸자는 떼어 낸 순서). 차이는 앞 객체의 슬롯이 묶음 끝까지 Reclaiming으로 남는 것뿐이다 — 뒤 객체의 소멸자가 앞 객체 handle을 조회해도 전처럼 살아 있지 않은 객체(StaleHandle)다. 묶음 사이에는 잠금을 풀므로, 소멸자(또는 다른 스레드)가 지연 슬롯의 보유 계수를 반환하면 그 슬롯이 풀린 목록으로 옮겨져 다음 묶음에 회수된다.
+- 측정(1M · 간선 4, churn 약 98K, 같은 시점 번갈아 세 round): 묶음 64의 회수는 24.2–24.4ms(객체당 246.8–249.3ns)로 같은 round 묶음 전 25.9–27.0ms보다 6–10% 적다. 묶음 16·256도 차이가 없었다 — 경합 없는 잠금은 싸고, 남은 몫은 소멸자·반환·슬롯 되돌리기의 메모리 접근이다(GC-S6 할당자 몫 포함). 다른 스레드가 `gate_`를 함께 쓸 때(루트 놓기·쓰기) 잠금 횟수가 64분의 1로 주는 것이 더 크다.
+- 버린 대안: 목록 전체를 한 번에 떼어 내기 — 묶음 배열이 객체 수에 비례하고 되돌릴 work가 많아진다. 소멸자를 잠금 안에서 부르기 — 사용자 코드를 잠금 아래서 부르지 않는다는 규칙(7.1절)을 깬다. 묶음마다만 시간 보기(처음 구현) — 넘침이 묶음 크기만큼 커진다.
+
+### 17.2 회수를 미루는 STW 수집과 예산 회수
+
+- `Collect(access, scheduler, GcReclaim::Deferred)`는 표식·sweep 분류까지 하고 회수하지 않는다. 분류된 객체(Retired)는 회수 대상 목록에 남는다(이미 도달 불가이고 조회·간선 대상이 될 수 없다). 반환한 보고서의 `reclaimed`는 0, `retired`는 분류 수다. 이후 `DrainRetired`가 회수한 수와 시간은 마지막 보고서(`LastGcReport`)의 `reclaimed`·`reclaimNanoseconds`에 더한다 — 회수가 끝나면 마지막 보고서가 그 수집의 회수까지 보여 준다(리뷰 지적: 0으로만 남았다). 더하는 규칙: 예산 없는 `DrainRetired`도 더한다. 증분 cycle이 진행 중일 때(slice 사이) 부른 `DrainRetired`는 진행 중인 cycle이 아니라 앞 cycle의 보고서에 더해진다(진행 중인 cycle은 끝날 때 자기 보고서로 바꾼다). `durationNanoseconds`(수집 자체의 시간)는 바꾸지 않는다.
+- `DrainRetired(access, GcBudget)`이 예산(객체 수·시간)만큼 회수하고 회수한 수를 돌려준다(17.1절의 최소 진척·소멸자 하나 넘침). 예산 없는 `DrainRetired(access)`는 전과 같이 모두 회수한다. 남은 회수 대상이 있어도 다음 `Collect`·`BeginCollection`은 할 수 있다(회수 대상 목록은 cycle과 무관하게 남고, 증분 cycle의 Reclaiming 단계·정지형 Collect의 회수가 함께 처리한다).
+- `HasPendingReclaim()`은 회수할 수 있을지 모르는 객체가 남았는지를 O(1)로 답한다(풀린 목록·분류 전 목록이 비지 않았다 — 보유 중이라 지연된 목록은 세지 않는다. 보유가 풀리면 풀린 목록으로 옮겨지므로 다시 참이 된다). 반환값 0 대신 이 질의로 "회수가 남았는가"를 판정한다.
+- `FinishCollectionDeferringReclaim(access)`는 Sweeping·Reclaiming 단계의 증분 cycle을 회수 없이 끝낸다 — 남은 sweep 분류는 모두 하고(분류는 chunk 비트 판정이라 1M에서 약 11ms — 실험 24.1절 churn의 sweep), 분류된 객체는 회수 대상 목록에 남긴 채 Idle로 둔다. Marking이면 InvalidArgument다(취소하거나 진행한다). safepoint 조건은 `StepCollection`과 같다: 처리 중이거나 Borrow·활성 생성 트랜잭션이 있으면 Busy다(Sweeping의 남은 분류가 Borrow가 걸린 white를 Retire하지 않게 — "Begin/Step은 Borrow=0·활성 생성=0 safepoint에서만" 계약, 메인 세션 검증 지적 N2). 전체 수집 요청이 진행 중인 cycle의 회수를 예산 없이 한 프레임에 하지 않게 한다(리뷰 지적 R1).
+- 목적: STW 병렬 전체 수집에서 표식·sweep은 한 프레임에 끝내고(1M ×8 약 17ms + sweep), 소멸자·반환은 프레임마다 시간 예산으로 나눈다(UE `gc.IncrementalGCTimePerFrame` 2ms에 대응 — 5절 표). 1M churn 98K의 회수는 약 24ms라 한 프레임에 넣으면 표식과 합쳐 40ms를 넘는다.
+- 버린 대안: STW 수집을 Begin + 무제한 Step 하나로 흉내 내기 — 증분 경로의 장벽·slice 비용(회색 객체 이월 등)을 치르고, 표식과 회수의 예산을 나눌 수 없다. 반환값 0으로 회수 끝을 판정하기(처음 구현) — 선점·보유 때문에 회수가 남았는데 멈춘다.
+
+### 17.3 World 수집 일정
+
+- `WorldDesc::gcSchedule`(`WorldGcSchedule`)이 정한다.
+  - `mode`: `WorldGcMode::Incremental`(기본) — 지금처럼 World 파괴가 있으면 프레임 끝마다 `gcBudget`만큼 증분 slice를 진행한다. `WorldGcMode::FullCollection` — 마지막 전체 수집 뒤 `fullCollectionIntervalSeconds`(기본 60초 — UE `gc.TimeBetweenPurgingPendingKillObjects` 61.1초에 대응)가 지나면 프레임 끝에 STW 병렬 전체 수집을 한다.
+  - `FullCollection`은 간격만 본다(World 파괴가 있었는지 보지 않는다). UE도 시간만 본다(`Runtime/Engine/Private/UnrealEngine.cpp` 2263–2289: 플레이를 시작한 World가 있으면 `TimeSinceLastPendingKillPurge`를 더하고 간격을 넘으면 수집 — 파괴 여부 조건이 없다). World 파괴 없이 생긴 쓰레기(참조를 지운 일반 객체, 루트 없이 만든 객체)도 다음 주기에 회수된다. 처음 구현은 World 파괴가 있을 때만 주기 수집을 해 그런 쓰레기가 다음 World 파괴나 요청까지 남았다(메인 세션 검증 지적 N3). 간격이 0 이하면 주기 수집을 하지 않는다(요청만 — UE의 `TimeBetweenPurgingPendingKillObjects > 0` 조건과 같다).
+  - 간격은 `Tick`에 넘긴 실제 경과 시간(일시정지·시간 배율과 무관한 unscaled delta)의 합으로 센다. UE도 주기 수집 간격을 `FApp::GetDeltaTime()`으로 센다(`Runtime/Engine/Private/UnrealEngine.cpp` 2265). 처음 구현은 World 고정 스텝의 게임 시간이라 일시정지 중에는 수집이 멈췄다(리뷰 지적 R3).
+  - `reclaimBudget`: 회수 대기가 있을 때 프레임마다 회수에 쓰는 예산이다(기본 시간 2ms).
+- `World::RequestFullCollection()`은 모드와 무관하게 STW 병렬 전체 수집을 요청한다(레벨 전환·로딩 화면·메모리 압박). 요청은 다음 GC 단계(Tick 끝)에서 소비된다 — Tick 밖에서 부르면 다음 Tick 끝, Tick 안(hook)에서 부르면 그 Tick 끝이다. 진행 중인 증분 cycle이 Marking이면 취소하고, Sweeping·Reclaiming이면 `FinishCollectionDeferringReclaim`으로 회수 없이 끝낸 뒤 수집한다. 수집이 Busy(외부 Borrow — 진행 중인 cycle을 끝내는 단계의 Busy 포함)면 요청을 남겨 다음 GC 단계에서 다시 한다. 회수가 남은 채 전체 수집을 다시 해도(메모리 압박으로 요청이 연달아 올 때) 남은 회수는 이어진다 — 회수 대기는 표지가 아니라 질의로 판정한다(처음 구현은 새로 분류된 객체가 0이면 표지를 내려 남은 회수가 멈췄다, 메인 세션 검증 지적 N1).
+- 회수: GC 단계마다 Registry가 Idle이고 `HasPendingReclaim()`이면 다른 GC 진행보다 먼저 `DrainRetired(reclaimBudget)`을 부른다. 반환값이 아니라 질의로 판정하므로, 선점으로 짧게 끝난 프레임이나 보유(BackendLease 등) 때문에 늦어진 객체도 보유가 풀린 뒤의 프레임에 회수된다(리뷰 지적 D1·R2). 증분 cycle이 진행 중이면 그 Reclaiming 단계가 함께 회수하므로 따로 부르지 않는다.
+- 프레임당 GC 비용(전체 수집 뒤): 회수 `reclaimBudget`(기본 2ms) + 증분 일정이면 그 프레임에 새 cycle의 slice 하나(`gcBudget`, 기본 1ms)까지다. 전체 수집을 하는 프레임은 STW 수집(1M ×8 약 17ms + sweep)이 든다.
+- 스레드 계약: `World::RequestFullCollection`은 어느 스레드에서나 부를 수 있다(메모리 압박 신호 등 — 요청 표지는 atomic이고 게임 스레드의 Tick이 소비한다). 그 밖의 World API는 지금처럼 소유(게임) 스레드 전용이다.
+- 기본을 증분으로 둔 근거(측정, 실험 20·21절): 1M에서 병렬 ×8 STW 표식은 약 17ms로 한 프레임(16.7ms)을 넘고, 증분 ×8 기본 예산은 slice 약 1ms × 21번이다. 그래서 프레임마다 도는 일정은 증분이 기본이고, 멈춤을 감출 수 있는 순간(전환·로딩)과 메모리 압박에는 STW 병렬 수집을 쓴다. 주기 일정(UE 방식)은 `FullCollection` 모드로 고른다.
+- 종료(`Shutdown`)는 지금처럼 진행 중인 cycle을 끝내고 전체 수집으로 모두 회수한다(회수를 미루지 않는다). 끝내는 Step 상한과 예산은 전체 수집 요청과 같은 상수(`FullCollectionFinishSteps`·`UnboundedFinishBudget`)다.
+
+### 17.4 엔진이 소유하는 GC scheduler
+
+- `Engine`이 GC 표식용 `WorkerScheduler`를 만든다(초기화 단계 `GcScheduler` — 엔진 Registry 뒤, 서브시스템 앞). worker 수는 `EngineConfig::gcWorkers`이고, 기본(`GcWorkersAuto`)은 `platform::LogicalProcessorCount() − 1`을 8(`MaxAutoGcWorkers`)로 자른 값이다(gate를 ×8로 판정 — 4절, 실험 21절에서 ×16의 추가 이득이 작다). 0이면 만들지 않는다(직렬 표식). `MaxGcWorkers`(64 — `WorkerScheduler`의 상한)를 넘으면 초기화가 InvalidArgument로 실패한다(설정 실수를 조용히 자르지 않는다).
+- `CreateWorld`는 `WorldCreateDesc::gcScheduler`가 없으면 엔진 scheduler를 넘긴다. 여러 World가 한 scheduler를 빌린다 — World Tick은 한 게임 스레드에서 차례로 돌므로 표식 slice가 겹치지 않는다. 엔진은 World를 모두 파괴한 뒤 scheduler를 끝낸다(종료 순서).
+- `Engine::RequestFullCollection()`은 어느 스레드에서나 부를 수 있다. 엔진의 atomic 요청 표지만 세우고, 게임 스레드의 프레임(World Tick 전)이 그것을 소비해 살아 있는 World마다 `RequestFullCollection`을 건다(다른 스레드에서 World 배열을 돌지 않는다 — 리뷰 지적 R6).
+- `Engine`의 `Initialize`·`Shutdown`·소멸은 같은 스레드(게임 스레드)에서 부른다(scheduler·World 수명이 그 스레드의 순서에 기댄다).
+- `platform::LogicalProcessorCount()`(Thread.h)는 이 프로세스가 쓸 수 있는 논리 프로세서 수다. Android(Linux 커널)는 `sched_getaffinity` + `CPU_COUNT`(UE `Runtime/Core/Private/Unix/UnixPlatformMisc.cpp` 729–735와 같은 방식 — cpuset·`taskset`의 제한을 따른다. POSIX 공통 코드는 OS hook `PosixLogicalProcessorCount`를 부르고 구현은 OS별 파일에 둔다), Apple은 `sysconf(_SC_NPROCESSORS_ONLN)`(affinity API가 없다), Windows는 `GetActiveProcessorCount(ALL_PROCESSOR_GROUPS)`와 `GetProcessAffinityMask`의 비트 수 가운데 작은 값이다(64개를 넘는 프로세서 그룹 기계에서는 mask가 한 그룹만 보이므로 그룹 수 쪽으로 기울지 않게 작은 값). 버린 대안: 시스템 전체 수(`sysconf`·`GetActiveProcessorCount`만) — affinity로 제한된 프로세스가 쓸 수 없는 코어 수만큼 worker를 만들어 과다 구독한다(처음 구현, 리뷰 지적 R4).
+- 버린 대안: World마다 scheduler — World 수만큼 worker가 늘어 과다 구독하고, Tick이 차례로 돌아 동시에 쓰지도 않는다. 엔진 범용 작업 scheduler 공유(UE는 GC 병렬 표식에 TaskGraph worker를 쓴다) — 지금 엔진에는 범용 작업 scheduler가 없고, 생기면 GC 표식 slice(수 ms)가 다른 작업을 막지 않도록 우선순위·lane을 정한 뒤 옮긴다. 전용 스레드는 그때까지의 선택이며, 다른 작업 스레드와 합쳐 코어 수를 넘는 과다 구독 위험이 남는다(17.5절).
+
+### 17.5 남은 것과 결정
+
+- 회수 객체당 약 250ns는 소멸자·저장소 반환·슬롯 되돌리기의 메모리 접근이다. 반환 몫은 GC-S6(할당자)에서 줄인다.
+- 메모리 압박 신호를 내는 플랫폼 계층은 아직 없다. 엔진 요청 API(다른 스레드에서 불러도 된다)까지 두었다.
+- 엔진 Registry(영구 영역·GameInstance 등)는 아직 GC 일정이 없다(엔진 Registry 객체가 생기면 같은 일정을 단다).
+- `Incremental` 모드는 World 파괴가 있을 때만 cycle을 시작한다(기존 엔진 런타임 설계). World 파괴 없이 생긴 쓰레기는 다음 World 파괴나 전체 수집 요청까지 남는다 — `FullCollection` 모드는 간격으로 회수한다(17.3절). 후속: 파괴 없이 생긴 쓰레기의 증분 발동 조건(예: 쓰기·생성 수 임계, 최대 간격).
+- 진행 중인 cycle의 sweep 나머지는 전체 수집 요청 프레임에 한꺼번에 한다(R1 결정 — 분류는 chunk 비트 판정이라 회수보다 훨씬 싸다. 회수만 예산으로 나눈다).
+- 보유로 늦어진 회수(R2 결정)는 보유가 풀린 뒤 첫 GC 단계에서 회수한다. 보유가 풀리지 않으면 계속 남는다(보유자의 책임).
+- 주기 간격의 실시간 기준(R3 결정)은 일시정지 중에도 수집을 멈추지 않는다. 일시정지 중 수집을 막아야 하는 앱은 `Incremental` 모드나 요청만 쓴다.
+- GC 전용 scheduler와 다른 작업 스레드의 코어 공유(17.4절)는 엔진 범용 작업 scheduler가 생길 때 정한다.

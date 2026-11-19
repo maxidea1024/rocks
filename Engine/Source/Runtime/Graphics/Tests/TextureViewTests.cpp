@@ -505,9 +505,13 @@ TEST(TextureDesc_SampleCountRules) {
     CHECK(ValidateTextureDesc(desc).Error() == ErrorCode::InvalidArgument);
     desc.usage = TextureUsage::Storage;
     CHECK(ValidateTextureDesc(desc).Error() == ErrorCode::InvalidArgument);
+    // MSAA 2D 배열은 받고(텍스처 GX2 나머지 C부) cube는 거부한다.
     desc.usage = TextureUsage::RenderTarget;
     desc.dimension = TextureDimension::Texture2DArray;
     desc.arraySize = 2;
+    CHECK(ValidateTextureDesc(desc).IsOk());
+    desc.dimension = TextureDimension::TextureCube;
+    desc.arraySize = 1;
     CHECK(ValidateTextureDesc(desc).Error() == ErrorCode::InvalidArgument);
     // 1표본은 Multisample 능력을 요구하지 않는다.
     desc.dimension = TextureDimension::Texture2D;
@@ -547,8 +551,24 @@ TEST(TextureDesc_AttachmentDimensionsAndRanges) {
     desc.dimension = TextureDimension::Texture2DArray;
     desc.depth = 1;
     desc.arraySize = 2;
+    // 다중 plane 깊이 attachment는 2D 배열·cube도 받는다(텍스처 GX2 나머지 C부).
     desc.format = PixelFormat::D24UnormS8Uint;
-    CHECK(ValidateTextureDesc(desc).Error() == ErrorCode::Unsupported);
+    CHECK(ValidateTextureDesc(desc).IsOk());
+    desc.dimension = TextureDimension::TextureCube;
+    desc.arraySize = 1;
+    CHECK(ValidateTextureDesc(desc).IsOk());
+    // 스텐실 plane view는 cube 차원이 없고 2D 배열 view로 읽는다.
+    TextureViewDesc stencil;
+    stencil.plane = 1;
+    CHECK(ResolveTextureViewRange(TextureDimension::TextureCube, TextureUsage::DepthStencil,
+                                  TextureSubresources{1, 6}, stencil)
+              .Error() == ErrorCode::InvalidArgument);
+    stencil.dimension = TextureViewDimension::Texture2DArray;
+    CHECK(ResolveTextureViewRange(TextureDimension::TextureCube, TextureUsage::DepthStencil,
+                                  TextureSubresources{1, 6}, stencil)
+              .IsOk());
+    desc.dimension = TextureDimension::Texture2DArray;
+    desc.arraySize = 2;
     // attachment 범위: mip 수·slice 수, 3D는 그 mip의 깊이다.
     CHECK(IsAttachmentInRange(TextureDimension::Texture2DArray, 1, 2, 3, 1, 2));
     CHECK(!IsAttachmentInRange(TextureDimension::Texture2DArray, 1, 2, 3, 2, 0));

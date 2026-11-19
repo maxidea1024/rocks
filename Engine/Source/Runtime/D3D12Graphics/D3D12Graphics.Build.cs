@@ -15,7 +15,8 @@ public sealed class D3D12Graphics : EngineModuleRules
         return new()
         {
             Name = ModuleName,
-            Sources = context.Sources(windows ? $"{backend}/Win64" : $"{backend}/Unsupported"),
+            // The entry point (Private/<Module>Module.cpp) is built on every platform.
+            Sources = [ModuleEntrySource(context), .. context.Sources(windows ? $"{backend}/Win64" : $"{backend}/Unsupported")],
             PublicIncludeDirectories = [context.PathInRoot($"{ModuleDirectory}/Public")],
             Dependencies = RequiredModules,
             // Shaders are compiled at run time with D3DCompile (d3dcompiler_47, system DLL). Offline DXC cooking comes later.

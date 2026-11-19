@@ -41,6 +41,8 @@ TraceScopeName CompositeName("SelfTest.Composite");
 TraceScopeName CopyName("SelfTest.Copy");
 TraceScopeName ClearName("SelfTest.Clear");
 TraceScopeName HzbFillName("SelfTest.HzbFill");
+TraceScopeName MsaaName("SelfTest.Msaa");
+TraceScopeName ResolveScopeName("SelfTest.ResolveScope");
 TraceScopeName HzbReduceName("SelfTest.HzbReduce");
 
 // 업로드·복사 시험 버퍼 크기다(4 byte 배수).
@@ -556,6 +558,56 @@ bool RunHzbGraph(GraphBench& bench, Allocator& allocator) noexcept {
     return ok;
 }
 
+// RG1 남은 것 설계 2: 그래프 MSAA pass가 마젠타로 clear한 4x 텍스처를 1표본 그래프 텍스처로
+// resolve하고, 다음 pass가 그 대상을 SRV로 읽어 output에 합성한다. 두 pass는 그래프 구간 안이고
+// GpuTrace marker를 켠다(기록마다 marker 짝이 맞아야 검증 계층이 조용하다).
+bool RunResolveGraph(GraphBench& bench, Allocator& allocator, RenderHandle output) noexcept {
+    rocks::render::GpuTraceSettings settings;
+    settings.markers = true;
+    rocks::render::GpuTrace trace(allocator, settings);
+    RenderGraphDesc desc = bench.Desc();
+    desc.trace = &trace;
+    RenderGraph graph(desc);
+    TextureDesc msaaDesc = TargetDesc();
+    msaaDesc.sampleCount = 4;
+    auto target = graph.ImportTexture(output, "Output");
+    auto msaa = graph.CreateTexture(msaaDesc, "Msaa");
+    auto resolved = graph.CreateTexture(TargetDesc(), "Resolved");
+    if (!target || !msaa || !resolved) {
+        PrintGraphError(graph);
+        return false;
+    }
+
+    bool added = false;
+    {
+        rocks::render::GraphScope scope(graph, ResolveScopeName, 1);
+        rocks::render::GraphColorTarget color;
+        color.texture = msaa.Value();
+        color.clear = {1.0f, 0.0f, 1.0f, 1.0f};
+        color.resolveTarget = resolved.Value();
+        GraphPassAccesses msaaAccesses(graph);
+        msaaAccesses.ColorTarget(color);
+        // clear만 한다(샘플 렌더러 파이프라인은 1표본이다).
+        auto msaaPass =
+            graph.AddPass(MsaaName, GraphPassKind::Raster, GraphPassFlags::None, msaaAccesses,
+                          [](GraphPassContext& pass) noexcept { (void)pass; });
+        GraphPassAccesses compositeAccesses(graph);
+        compositeAccesses.Texture(resolved.Value(), ResourceAccess::SrvGraphics)
+            .RenderTarget(target.Value(), GraphLoadAction::Clear, {0, 1, 0, 1});
+        auto compositePass = graph.AddPass(
+            CompositeName, GraphPassKind::Raster, GraphPassFlags::None, compositeAccesses,
+            FullScreen(bench.renderer, {}, resolved.Value(), LinearColor(1, 1, 1, 1)));
+        added = msaaPass && compositePass;
+    }
+
+    if (!added || !graph.Execute()) {
+        PrintGraphError(graph);
+        return false;
+    }
+
+    return true;
+}
+
 uint32 RunRenderGraphChecks(const char* name, Device& device, sample::Renderer& renderer,
                             Allocator& allocator) noexcept {
     failures = 0;
@@ -733,6 +785,16 @@ uint32 RunRenderGraphChecks(const char* name, Device& device, sample::Renderer& 
 
     Check(!ok || platform::MemoryEquals(splitPixels[0], splitPixels[1], 4),
           "split and unsplit transitions give the same pixels");
+
+    // RG1 남은 것 설계 2: 그래프 resolve와 그래프 구간(4x MSAA를 지원하는 장치).
+    if (ok && (device.GetPixelFormatSampleCounts(TargetDesc().format) & SampleCountBit(4)) != 0) {
+        auto cleared = arena.Reset();
+        (void)cleared;
+        ok = RunResolveGraph(bench, allocator, output.Value());
+        Check(ok && device.ReadPixels(outputTexture.Value(), pixels.View()).IsOk() &&
+                  CenterIs(pixels, 255, 0, 255),
+              "a graph MSAA pass resolves into a texture the next pass composites (magenta)");
+    }
 
     // RG1 남은 것 B부: 그래프 texture view로 낸 HZB(Storage 형식 능력과 compute가 있는 장치).
     const TextureDesc hzbDesc = hzb::PyramidDesc();
