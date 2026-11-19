@@ -156,6 +156,7 @@ Result<void> CloseRecording(GraphState& state) noexcept {
     }
 
     state.commands = nullptr;
+    state.recordingPass = GraphIndexNone;
     auto submitted = state.device->EndFrame();
     if (!submitted) {
         return Result<void>::Failure(RecordGraphError(state, submitted.Error(), false,
@@ -419,6 +420,33 @@ void EnterScopes(FrameArena& arena, GraphState& state, uint32 scope) noexcept {
     EnterScopeChain(arena, state, scope);
 }
 
+namespace {
+
+// pass가 지금 장치 기록을 연 Raster pass의 attachment subresource에 접근하는지다.
+bool UsesOpenAttachment(const GraphState& state, uint32 pass) noexcept {
+    return state.recordingPass != GraphIndexNone &&
+           UsesAttachmentsOf(state, pass, state.recordingPass);
+}
+
+} // namespace
+
+bool UsesAttachmentsOf(const GraphState& state, uint32 pass, uint32 rasterPass) noexcept {
+    const PassRecord& owner = state.passes[rasterPass];
+    const PassRecord& record = state.passes[pass];
+    for (uint32 index = record.firstUse; index < record.firstUse + record.useCount; ++index) {
+        const SubresourceUse& use = state.uses[index];
+        for (uint32 other = owner.firstUse; other < owner.firstUse + owner.useCount; ++other) {
+            const SubresourceUse& attached = state.uses[other];
+            if (attached.attachment && attached.resource == use.resource &&
+                attached.subresource == use.subresource) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 Result<void> PreparePass(FrameArena& arena, GraphState& state, uint32 pass) noexcept {
     PassRecord& record = state.passes[pass];
     const char* passName = record.name->Name() != nullptr ? record.name->Name() : "";
@@ -612,6 +640,7 @@ Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& stat
         }
 
         state.commands = begun.Value();
+        state.recordingPass = pass;
         ++state.stats.recordings;
         if (state.trace != nullptr && !state.traceFrameOpen) {
             state.trace->BeginFrame(*state.device, *state.commands, state.frame);
@@ -619,7 +648,17 @@ Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& stat
         }
 
         RestoreScopeMarkers(state);
-    } else if (state.commands == nullptr) {
+    } else if (state.commands != nullptr && UsesOpenAttachment(state, pass)) {
+        // Compute·Copy pass가 열린 기록의 attachment subresource에 접근하면 그 기록을 닫는다(장치는
+        // 패스 attachment의 복사·UAV를 막는다). 아래에서 attachment 없는 기록을 연다.
+        LeaveScopes(state, record.scope);
+        auto closed = CloseRecording(state);
+        if (!closed) {
+            return closed;
+        }
+    }
+
+    if (record.kind != GraphPassKind::Raster && state.commands == nullptr) {
         // 렌더 타깃이 없는 Compute·Copy pass는 attachment 없는 기록을 연다.
         auto begun = state.device->BeginPass(graphics::PassDesc{});
         if (!begun) {

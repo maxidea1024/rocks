@@ -284,6 +284,9 @@ struct PassRecord {
     bool prepared = false;
     // 병렬 기록의 기록 목록이다(직렬이면 null, 실행 때 기록 함수 대신 재생한다).
     GraphCommandList* recorded = nullptr;
+    // 이 pass가 새 장치 기록을 연다(Raster pass, 또는 앞 Raster pass의 attachment에 접근해 그
+    // 기록을 닫는 Compute·Copy pass). Deferred 컴파일이 정한다(분리 전이·재사용 자리의 기록 경계).
+    bool opensRecording = false;
     // 이 pass가 기대는 생산자 pass다(GraphState::producers의 연결 목록 머리).
     uint32 firstProducer = GraphIndexNone;
     // 부수 효과·외부 출력 pass다(culling 뿌리).
@@ -366,6 +369,8 @@ struct GraphState {
     // 실행 상태다.
     graphics::CommandContext* commands = nullptr;
     bool traceFrameOpen = false;
+    // 지금 장치 기록을 연 Raster pass다(attachment 없는 기록·기록 없음이면 None).
+    uint32 recordingPass = GraphIndexNone;
     // Deferred 실행에서 다음에 낼 전이 기록 번호다.
     usize nextTransition = 0;
 
@@ -396,6 +401,9 @@ bool IsTransitionRequired(graphics::ResourceAccess previous, GraphAccessFlags pr
 void FormatAccess(graphics::ResourceAccess access, char* out, usize capacity) noexcept;
 
 // --- 공용 helper(RenderGraph.cpp) ---
+
+// pass가 Raster pass rasterPass의 attachment subresource에 접근하는지다(그 기록을 닫아야 하는지).
+bool UsesAttachmentsOf(const GraphState& state, uint32 pass, uint32 rasterPass) noexcept;
 
 // 그래프 로그 카테고리다.
 inline constexpr LogCategory LogRenderGraph{"RenderGraph"};
