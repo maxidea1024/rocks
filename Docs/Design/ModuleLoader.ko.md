@@ -1,6 +1,6 @@
 # 모듈 로더 설계
 
-기준일: 2026-11-19, 개정 2. 모듈의 수명(시작·종료)과 적재를 맡는 모듈 로더를 정한다. UE 5.8 `IModuleInterface`·`FModuleManager`·로딩 단계(`ELoadingPhase`)에 해당한다.
+기준일: 2026-11-19, 개정 3. 모듈의 수명(시작·종료)과 적재를 맡는 모듈 로더를 정한다. UE 5.8 `IModuleInterface`·`FModuleManager`·로딩 단계(`ELoadingPhase`)에 해당한다.
 
 [빌드 타깃 설계](BuildTargets.ko.md) 3.8절은 Editor 타깃을 UE와 같이 모듈식(`Modular`)으로 링크하기로 정했다(BD17). 그리고 모듈 로더를 별도 스펙으로 넘기며 네 가지 계약을 요구했다(BD30).
 1. 같은 소스가 `Monolithic`·`Modular`에서 같은 순서·결과로 동작한다.
@@ -12,7 +12,7 @@
 
 UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`, commit `f45729c0b6f0`)이고, 경로는 `Engine/Source/` 기준이다. UE 이름은 대응표와 근거에만 적는다. hot reload·Live Coding(코드 다시 불러오기)은 범위 밖이다(9.2절).
 
-상태: **설계 초안**(결정 MD1–MD22, 모두 권장안). 구현 단계는 ML0–ML6(6절)이며 착수 시점은 사용자가 정한다. ML0 구현 중(개정 2에 구현 세부를 적었다). ML0–ML4는 Rocks Studio(BS5) 전에, ML5는 BS4·BS5와 함께 한다. Modular 적재(ML4)는 [빌드 타깃](BuildTargets.ko.md) BS8 뒤다. 초안을 서브에이전트 1개로 교차 검증해 반영했다(10절).
+상태: **설계 초안**(결정 MD1–MD22, 모두 권장안). 구현 단계는 ML0–ML6(6절)이며 착수 시점은 사용자가 정한다. ML0 구현·병합(개정 2에 구현 세부). ML2는 ML1(Launch 병합 대기) 전에 하는 연결을 3.10절(개정 3)에 정했고, 구현은 [리플렉션 생성 소스](ReflectionGeneratedSources.ko.md) GS1 병합 뒤 재개한다(생성 등록 함수가 그 구조 위에 놓인다). ML0–ML4는 Rocks Studio(BS5) 전에, ML5는 BS4·BS5와 함께 한다. Modular 적재(ML4)는 [빌드 타깃](BuildTargets.ko.md) BS8 뒤다. 초안을 서브에이전트 1개로 교차 검증해 반영했다(10절).
 
 ## 1. 현재 상태
 
@@ -106,7 +106,7 @@ ROCKS_IMPLEMENT_MODULE(CurvesModule, Curves)
 ```
 
 - 매크로는 상수 기술 `ModuleEntry`와 그것을 돌려주는 함수 `RocksModuleEntry_<Name>()`을 정의한다.
-  - `ModuleEntry`: `entryVersion`(구조체 ABI 버전), `name`, `create`(수명 객체를 만드는 함수), `registerTypes`·`unregisterTypes`(이 모듈 자신의 타입만 등록·해제하는 생성 함수, 리플렉션이 없으면 null — 3.6절), `registerSettings`(3.1절, 없으면 null).
+  - `ModuleEntry`: `entryVersion`(구조체 ABI 버전), `name`, `create`(수명 객체를 만드는 함수), `registerTypes`(이 모듈 자신의 타입만 등록하는 생성 함수, 리플렉션이 없으면 null — 3.6절. 해제는 모듈별 `ModuleRegistration`이 기록으로 되돌리므로 함수를 따로 두지 않는다 — 개정 3), `registerSettings`(3.1절, 없으면 null).
   - 기술은 상수 초기화다(전역 생성자 없음). 수명 객체는 로더가 시작할 때 `create`로 만든다(UE도 첫 적재 때 만든다).
 - **Monolithic**: 빌드가 실행 파일마다 모듈 표 TU를 만든다. 타깃에 들어간 모든 C++ 모듈의 `RocksModuleEntry_<Name>()`을 의존 순서로 나열하고, 모듈별 의존 이름·로딩 단계(3.3절)를 함께 싣는다. 이 표가 Monolithic의 manifest다. 표가 모든 진입 함수를 직접 참조하므로 정적 라이브러리에서 진입점 object가 빠지지 않고, `ROCKS_IMPLEMENT_MODULE`이 빠진 모듈은 링크 오류가 난다(UE `IMPLEMENT_MODULE_<Name>` 강제 참조와 같은 역할 — `ModuleManager.h:950, 968`).
 - **Modular**: 매크로는 위에 더해 공유 라이브러리마다 하나뿐인 export 진입점 `extern "C" ROCKS_DLLEXPORT const ModuleEntry* RocksModuleEntry()`를 정의한다. UE의 주 경로는 정적 목록 `FModuleInitializerEntry::FindModule`이고 `GetDllExport("InitializeModule")`는 fallback이다(`ModuleManager.cpp:1222-1229`). Rocks는 그 fallback과 같은 방식만 쓴다. 빌드는 모듈 링크에 이 기호를 강제 참조로 넣어(Windows `/INCLUDE`, ELF·Mach-O `-u`) 매크로 누락을 링크 오류로 만든다.
@@ -114,7 +114,7 @@ ROCKS_IMPLEMENT_MODULE(CurvesModule, Curves)
 - 한 모듈에 매크로가 둘이면 링크 오류(같은 기호 중복)다.
 - 시험 실행 파일·도구도 모듈 표를 가진다. 그래서 시험이 모듈 로더를 거쳐 모듈을 시작한다(ML0).
 - **ML0 구현 세부(개정 2)**:
-  - 진입 기술 칸: `entryVersion`(`ModuleEntryVersion`), `name`(NUL 종료 ASCII), `create`(`Result<UniquePtr<ModuleImplementation>> (*)(Allocator&) noexcept` — 로더가 받은 allocator로 만든다. 수명 객체 클래스는 noexcept 기본 생성자가 있어야 한다), `registerTypes`·`unregisterTypes`(ML2까지 null), `registerSettings`.
+  - 진입 기술 칸: `entryVersion`(`ModuleEntryVersion`), `name`(NUL 종료 ASCII), `create`(`Result<UniquePtr<ModuleImplementation>> (*)(Allocator&) noexcept` — 로더가 받은 allocator로 만든다. 수명 객체 클래스는 noexcept 기본 생성자가 있어야 한다), `registerTypes`(ML2에서 채운다 — 3.10절), `registerSettings`. ML2에서 `unregisterTypes`를 빼고 `ModuleEntryVersion`을 2로 올린다(개정 3 결정, 지금 코드는 아직 1이다).
   - 매크로는 이름 인자를 한 번 펼친 뒤 붙인다. 그래서 `ROCKS_IMPLEMENT_MODULE(DefaultModuleImplementation, ROCKS_MODULE_NAME)`도 된다(한 소스를 여러 실행 파일이 컴파일하는 시험 runner용). 비교는 문자열 상수 비교라 철자가 다르면 `static_assert`, `ROCKS_MODULE_NAME`이 없으면(빌드 밖 컴파일) 매크로를 쓰는 곳에서 `static_assert`다. 매크로가 없는 헤더 include는 영향이 없다.
   - 진입점을 가지는 모듈의 이름은 C 식별자(영문자·숫자·`_`, 숫자로 시작하지 않음)여야 한다(기호 이름을 만들기 때문). 빌드가 검사한다.
   - 모듈 표: 빌드가 Core(`ProvidesModuleTable`)에 닿는 실행 파일마다 `<출력>/GeneratedSources/<실행 파일>/<실행 파일>.ModuleTable.cpp`를 만들어 그 실행 파일 소스에 더한다(규칙 생성 TU와 같은 경로, 내용이 같으면 다시 컴파일하지 않음). 행은 `ModuleTableRow{name, entry, dependencies, dependencyCount, phase}`이고 정의 함수는 `rocks::GeneratedModuleTable()`이다. 상수 배열이라 전역 생성자가 없다.
@@ -242,7 +242,7 @@ public:
 
 - UE는 모듈을 적재할 때 `ProcessLoadedObjectsCallback`으로 UObject를 등록한다(`ModuleManager.cpp:1094, 1217`, 구독 `Runtime/CoreUObject/Private/UObject/UObjectBase.cpp:1057-1068`). 로더는 CoreUObject를 모른다.
 - Rocks도 로더가 타입 시스템을 모르게 한다. 로더 모듈은 Core·PlatformBase에만 의존한다(MD3). 타입 등록은 레지스트리를 가진 쪽이 **타입 등록기**로 한다(MD15).
-  - `ModuleTypeRegistrar`는 `Register(module)`·`CanUnregister(module)`·`Unregister(module)` 세 연산을 가진 interface다. 엔진이 `Engine::Initialize`에서 로더에 설정하고 `Engine::Shutdown`에서 뗀다.
+  - `ModuleTypeRegistrar`는 `Register(module)`·`CanUnregister(module)`·`Unregister(module)` 세 연산을 가진 interface다. 엔진이 `Engine::Initialize`에서 로더에 설정하고 `Engine::Shutdown`에서 뗀다. ML2의 형태는 3.10절이다.
   - 엔진은 모듈마다 `ModuleRegistration`을 따로 가진다. 그래서 모듈 하나의 타입만 골라 해제할 수 있다(지금 `ModuleRegistration`은 mark 기반 LIFO 해제다).
   - 등록 함수는 진입 기술의 `registerTypes`다. 메타 컴파일러는 지금의 재귀 집계 함수 외에 **이 모듈 자신의 타입만** 등록하는 함수를 더 낸다. 로더 경로에서는 의존 모듈이 먼저 등록돼 있으므로 재귀가 필요 없고, 재귀가 다른 모듈의 타입을 이 모듈의 lease로 잡는 일도 없다.
 - **등록 시점**:
@@ -304,6 +304,44 @@ public:
   - 빌드 시점에 이미 플러그인 조건을 해석해 게임 Editor 타깃을 만들었으므로, 실행 중 해석 결과와 빌드 결과가 다르면 `Incompatible`이다(게임 manifest에 빌드한 플러그인 목록을 싣고 대조한다).
 - **시험(MD20)**: 시험·도구 실행 파일도 모듈 표를 가지고 로더로 모듈을 시작한다. 시험 `TEST` 정적 등록은 지금 예외를 유지한다. Modular 시험([빌드 타깃](BuildTargets.ko.md) BD31)에서 `TEST` 등록 목록의 머리는 TestSupport 공유 라이브러리에 한 벌만 두고(BD29), 시험 묶음이 들어간 공유 라이브러리는 실행 중 해제하지 않는다.
 
+### 3.10 ML2 연결 — ML1 전(개정 3)
+
+ML1(로딩 단계·묶음 전환·Launch 통합)은 crash-launch 병합을 기다린다. ML2는 그 전에 지금 있는 호스트(Sandbox·Commandlet·시험 runner·WorldBench)로 타입·설정 등록을 로더에 붙인다. 애매한 곳은 UE 5.8을 따랐다.
+
+**재개 조건**: ML2는 [리플렉션 생성 소스](ReflectionGeneratedSources.ko.md)(빌드 시간 개선 1차분 — 등록 함수가 모듈 생성 소스로 가고 모듈 생성 헤더는 선언만 남는다) GS1이 병합된 뒤 재개한다. 두 작업이 같은 생성기·빌드 파일(`CppEmitter`·`MetadataLayout`·`ActionGraph`·`NativeBuildModels`)을 고치므로, 아래 생성 등록 함수 설계는 그 구조에 맞춘 것이다. 착수했던 코드는 되돌렸고 재개 때 이 절대로 다시 구현한다.
+
+**타입 등록 함수(MD15).**
+- 정의 위치([리플렉션 생성 소스](ReflectionGeneratedSources.ko.md) 5.5절·GSD10): 메타 컴파일러가 모듈 생성 소스(`<out>/Generated/<M>/Source/<M>.module.generated.cpp`)에 **이 모듈 자신의 타입만**(public·private 모두) 등록하는 비inline 함수 `rocks::generated::<M>::RegisterModuleOwnTypes(ModuleRegistration&, const ModuleLease&)`를 더 정의하고, 모듈 생성 헤더에는 기존 `RegisterModuleTypes`처럼 선언만 둔다. 실패하면 이 호출이 등록한 것을 되돌린다. 기존 재귀 `RegisterModuleTypes`는 의존 모듈 등록 뒤 이 함수를 부르는 형태가 된다(동작 같음). 재귀 함수는 로더 밖(HostSettings 설정 타입, 시험, 게임 템플릿)에서 계속 쓴다.
+- 진입 기술 연결: 빌드는 진입점 모듈의 소스에 `ROCKS_MODULE_TYPES=0|1`(`Metadata`가 있는 모듈이면 1)을 정의한다(예약 매크로). `ROCKS_IMPLEMENT_MODULE`은 이 값이 1이면 `RegisterModuleOwnTypes`를 **스스로 선언하고** 진입 기술 `registerTypes`에 싣는다. 그래서 모듈 cpp가 모듈 생성 헤더를 include할 필요가 없다(GSD6 — 손으로 쓴 헤더는 그것을 include하지 않는다). 생성 소스가 빠지면 링크 오류다. 빌드 밖 컴파일(정의 없음)은 0이다.
+- 소스 없는 메타데이터 모듈(CoreTypeBindings·시험 fixture 등): GSD7로 정적 라이브러리가 되지만 손으로 쓴 진입점이 없다. 빌드(`MetadataLayout`)가 그런 모듈에만 진입점 생성 TU(`<M>.ModuleEntry.cpp` — `ROCKS_IMPLEMENT_MODULE(rocks::DefaultModuleImplementation, <M>)` 한 줄)를 규칙 생성 소스로 더해 진입점 모듈로 만든다. 그래야 로더가 그 모듈의 타입을 등록할 수 있다.
+- 버린 대안: 모듈 cpp가 모듈 생성 헤더를 include하고 매크로가 함수 유무를 감지하는 안(include를 빠뜨리면 조용히 null이고 GSD6과도 어긋난다), 자기 타입 함수를 집계 헤더의 inline으로 두는 안(초기 안 — 생성 소스 분리와 정면으로 겹친다), 빌드가 별도 TU(`<M>.ModuleTypes.cpp`)에서 집계 헤더의 inline 함수를 감싸는 안(모듈 생성 소스가 생기면 필요 없다).
+- `unregisterTypes`는 두지 않는다. 등록기가 모듈마다 `ModuleRegistration`을 두므로 그 기록의 `Unregister`가 모듈 타입을 되돌린다(UE도 모듈별 해제 함수가 없다).
+
+**등록기와 로더(MD15·MD16).**
+- `ModuleTypeRegistrar`(ModuleLoader 모듈): `Register(name, registerTypes, lease)`·`Unregister(name)`·`CanUnregister(name)`(ML6). 로더는 `registerTypes`가 있는 모듈만 부르고 로더가 발급한 그 모듈의 실제 lease를 넘긴다. 등록 함수는 이 lease를 `RuntimeTypeOps.module`에 넣는다.
+- `ModuleLoader::AttachTypeRegistrar(registrar)`: 이미 시작한 모듈을 시작 순서로 몰아서 등록한다. 실패하면 이번에 등록한 것을 역순으로 되돌리고 붙이지 않으며 report(`StartupFailed`, 단계 `"RegisterTypes"`)를 돌려준다. 붙은 뒤 시작하는 모듈은 `Startup` 직전에 등록하고, `Startup`이 실패하면 되돌린다. 묶음 종료는 각 모듈의 `Shutdown` 뒤 그 모듈의 타입을 되돌린다. `DetachTypeRegistrar`는 남은 등록을 시작 역순으로 되돌린다. 등록기는 한 번에 하나다(동시에 여러 Engine이 같은 로더를 쓰는 참조 수는 ML1).
+- 일반 구현 `ModuleTypeRegistrations`(ObjectRuntime): `TypeRegistry` 하나에 모듈마다 `ModuleRegistration`을 둔다. `Unregister`는 그 기록을 되돌리되, 남은 객체·native 파생 때문에 `Busy`면 기록 객체만 놓고(붙잡은 lease 반환) 남은 레코드는 `TypeRegistry::Shutdown`이 dependent 순서로 반납한다(지금 Engine의 종료 규칙과 같다). 실행 중 해제(ML6)는 `CanUnregister`로 먼저 거른다.
+
+**엔진(MD15).**
+- `EngineConfig::modules`(`ModuleLoader*`)를 더한다. 있으면 `Engine::Initialize`가 엔진 `TypeRegistry`의 `ModuleTypeRegistrations`를 그 로더에 붙이고, `Engine::Shutdown`·초기화 실패 정리가 `TypeRegistry` 종료 전에 뗀다.
+- 없으면(지금의 시험·호스트) Engine이 이 실행 파일의 모듈 표(`GeneratedModuleTable()`)로 자기 로더를 만들고 `Engine` 모듈(의존 폐포 — World 등)을 적재해 같은 방식으로 등록한다. 엔진 종료 때 그 로더를 내린다. ML1에서 Launch가 늘 로더를 넘기면 이 대체 경로를 없앤다. 그래서 `Engine::Initialize`의 `RegisterWorldTypes` 명시 호출이 없어진다.
+- `EngineConfig::registerModuleTypes`(로더 밖 게임 모듈 집계)와 `registerTypes`(native 타입)는 그대로 둔다.
+
+**설정 등록(MD22, Monolithic).**
+- `HostSettingsOptions::modules`(`ModuleLoader*`)를 더한다. `HostSettings::Initialize`는 지금 `RegisterLogSettings`·`RegisterTraceSettings`·`RegisterDeviceProfileSettings`를 부르던 자리에서 모듈 표 순서(의존 순서)로 모든 모듈의 `registerSettings`를 부른다. 그 뒤 `options.registerSettings`(호스트 고유 설정)를 부른다. 로더가 있으면 그 표를 쓰고, 각 모듈의 lease를 `ConfigContext::RetainModule`로 문맥에 맡긴다(문맥 파괴 때 놓는다 — CVar 핸들·설정 struct가 모듈 코드를 가리키는 동안 모듈 코드를 붙잡는다). 로더가 없으면 이 실행 파일의 `GeneratedModuleTable()`을 빈 lease(정적 링크 코드)로 쓴다.
+- LogHost·TraceControl·Config 모듈의 설정 등록을 각 모듈 수명 객체의 `RegisterSettings`로 옮긴다. 공개 함수(`RegisterLogSettings` 등)는 시험이 쓰므로 남기고 호스트 코드는 부르지 않는다.
+- HostSettings 자기 레지스트리의 설정 타입 등록(Config·TraceControl 집계)은 3.6절대로 명시 등록으로 남는다.
+
+**호스트(MD4 대체, ML1까지).**
+- Sandbox 엔진 호스트가 Launch를 대신해 프로세스 로더를 만든다: 이 실행 파일의 모듈 표로 만들고 실행 파일 모듈을 적재(모든 모듈 시작) → HostSettings·Engine에 넘김 → 끝에 `ShutdownGroup(Process)`. 로더는 HostSettings·Engine보다 오래 산다.
+- Commandlet·시험 runner는 로더를 만들지 않는다(대체 경로를 쓴다). WorldBench는 엔진 없이 World 레지스트리를 만들므로 자기 로더와 `ModuleTypeRegistrations`로 등록한다.
+- 남은 lease 진단(MD16): `ModuleLoader::ModulesWithLeases(names)`가 lease가 남은 모듈 이름과 수를 돌려준다. 호스트는 로더를 파괴하기 전에 불러 영어로 기록한다(로더 소멸의 Fatal은 마지막 안전장치로 남는다).
+
+**ML1 뒤로 넘긴 것.**
+- 모듈 `Startup`이 호스트 서비스(TraceSession·ConfigContext·Engine)를 쓰는 등록: 지금은 모든 모듈이 서비스가 생기기 전에 시작하므로(단계 없음) trace 채널·trace 타입 등록(`RegisterGpuTraceTypes` 등)과 그 lease, 콘솔 명령 등록을 `Startup`으로 옮길 수 없다.
+- 엔진 묶음의 참조 수(동시에 여러 Engine)와 등록기의 묶음별 시점(`Engine::Shutdown`의 엔진 묶음 종료).
+- 모듈별 CVar 핸들 단위 lease(지금은 문맥이 모듈 lease를 통째로 잡는다 — 실행 중 해제(ML6) 때 핸들 해제와 함께 정한다).
+
 ## 4. 결정 요약
 
 1. 모든 C++ 모듈은 수명 객체(`ModuleImplementation`)와 진입점 매크로를 가진다. `Startup`은 `Result<void>`를 돌려준다.
@@ -348,7 +386,7 @@ public:
 |---|---|---|
 | ML0 | Core: 수명 객체·진입 기술·진입점 매크로(Monolithic)·모듈 표 형식(개정 2). `ModuleLoader` 모듈: `ModuleStartContext`·`HostServices`(형식 키 매크로)·빌드 생성 모듈 표·의존 순서 시작·상태·`Changed`·report 두 종·묶음 종료·시작 실패 정리. `DynamicLibrary` POSIX `dlerror` 보강. 모든 기존 C++ 모듈에 `ROCKS_IMPLEMENT_MODULE`(대부분 기본 구현). 빌드: 모듈 이름 대소문자 충돌 검사(MD17) | 의존 순서 시작·역순 종료·실패 중단과 역순 정리·`Cycle`·`WrongThread`·`ShuttingDown`·`Failed` 재시도 시험, 매크로 누락·이름 불일치 링크·컴파일 오류 시험, 대소문자 충돌 거부 시험 |
 | ML1 | 로딩 단계와 묶음: 기술자 `PostEngineInit`·`None`, 엔진 모듈 규칙 `LoadingPhase`, 단계 순서 빌드 검사(MD6), 부트 모듈 단계 강제, `StartPhase`의 앞 단계 차례 실행, Launch 통합(crash-launch 병합 뒤), 엔진 호스트의 `PostConfigInit`·호스트 묶음 종료, `Engine::Initialize`·`Shutdown`의 엔진 묶음과 참조 수 | Sandbox 엔진 호스트가 모든 단계를 지나 부트·종료한다. 한 프로세스에서 Engine을 차례로 여러 번 만드는 시험이 엔진 묶음을 매번 시작·종료한다. 단계별 시작·종료 순서 시험 |
-| ML2 | 타입 등록기(MD15)·모듈별 `ModuleRegistration`·모듈 자신의 타입만 등록하는 생성 함수, 실제 `ModuleLease`(MD16)와 생성 등록 함수의 lease 인자, 설정 등록(MD22, Monolithic), 기존 모듈별 등록 래퍼를 `Startup`·`RegisterSettings`로 옮기기, CVar·trace 채널 등록의 lease | 호스트 코드의 모듈별 명시 등록 호출이 HostSettings 설정 타입 외에 0. 늦은 단계 모듈의 CVar가 `ReportUnresolved` 경고 없이 설정 값을 받는 시험. 종료 뒤 남은 lease 진단 시험 |
+| ML2 | 타입 등록기(MD15)·모듈별 `ModuleRegistration`·모듈 자신의 타입만 등록하는 생성 함수, 실제 `ModuleLease`(MD16)와 생성 등록 함수의 lease 인자, 설정 등록(MD22, Monolithic), 기존 모듈별 등록 래퍼를 `Startup`·`RegisterSettings`로 옮기기, CVar·trace 채널 등록의 lease. ML1 전 연결과 ML1 뒤로 넘긴 것은 3.10절(개정 3) | 호스트 코드의 모듈별 명시 등록 호출이 HostSettings 설정 타입 외에 0. 늦은 단계 모듈의 CVar가 `ReportUnresolved` 경고 없이 설정 값을 받는 시험. 종료 뒤 남은 lease 진단 시험 |
 | ML3 | `DynamicModules`(MD11)와 Monolithic 링크 규칙, type·순환 검사 | 실행 중 적재 모듈을 `Load`·`Find<T>(name)`으로 쓰는 시험 |
 | ML4 | Modular 적재 — 선행: [빌드 타깃](BuildTargets.ko.md) BS8. manifest 쓰기·읽기(원자적 쓰기, 모르는 키 거부), `ModuleBuildId` 재사용·SDK manifest, 파일 크기 대조, export 진입점과 강제 참조, `Prepare`, 실행 파일의 부트 모듈 import와 호스트 모듈(MD21), Linux `-soname`, OS 적재·report, `Modular` FoundationTests를 로더로 실행 | `Modular` FoundationTests가 Windows·macOS에서 로더로 모듈을 적재해 통과한다. `buildId` 불일치·크기 불일치·의존 DLL 누락·진입점 없음·모르는 키의 report 시험. 증분 빌드에서 `buildId`가 바뀌지 않는 시험 |
 | ML5 | Rocks Studio 적재 — BS4·BS5와 함께: 프로젝트·플러그인 manifest, 플러그인 조건 해석, 빌드 목록 대조(MD19) | 게임·플러그인 모듈이 있는 프로젝트를 Rocks Studio가 열고 닫는다 |
@@ -410,5 +448,6 @@ public:
 
 | 개정 | 날짜 | 내용 |
 |---|---|---|
+| 3 | 2026-11-19 | ML2 착수. ML1 전의 연결을 3.10절에 정했다: 모듈 생성 소스(리플렉션 생성 소스 5.5절)의 자기 타입 함수 `RegisterModuleOwnTypes`와 `ROCKS_MODULE_TYPES`로 진입 기술 `registerTypes`를 채움(소스 없는 메타데이터 모듈은 빌드 진입점 TU로 진입점 모듈이 됨), `unregisterTypes` 제거(`ModuleEntryVersion` 2), `ModuleTypeRegistrar`·`AttachTypeRegistrar`·`DetachTypeRegistrar`와 일반 구현 `ModuleTypeRegistrations`(ObjectRuntime), `EngineConfig::modules`와 Engine 대체 로더, `HostSettingsOptions::modules`·`ConfigContext::RetainModule`과 모듈 `RegisterSettings`, Sandbox의 프로세스 로더, `ModulesWithLeases` 진단. ML1 뒤로 넘긴 것: 서비스를 쓰는 `Startup` 등록(trace 채널·타입), 엔진 묶음 참조 수, 핸들 단위 CVar lease. 같은 날 리플렉션 생성 소스 작업(rocks-78, GS1)과 생성기·빌드 파일이 겹쳐 착수한 코드를 되돌리고, 생성 등록 함수를 그 구조(모듈 생성 소스 정의·모듈 생성 헤더는 선언만)에 맞춰 고쳐 적었다. 구현은 그 병합 뒤 재개한다 |
 | 2 | 2026-11-19 | ML0 구현 반영. 진입점 계약을 Core(`Core/Module/ModuleImplementation.h`·`ModuleEntry.h`)로 옮겼다(`ModuleLoader`는 Core에 의존하므로 Core와 다른 모든 모듈이 매크로를 쓰려면 Core에 있어야 한다 — 3.1절). Core 아래 모듈(PlatformBase·DeterministicMath) 면제와 실행 파일 모듈 포함(3.1절), 진입 기술 칸 형식·매크로 이름 인자 펼침·식별자 이름 규칙·모듈 표 TU 형식·면제 모듈을 거치는 의존 대체·기술자 단계(3.2절), `TryCreate`·`State`·`LeaseCount`·`Services`, `Changed`를 `MulticastDelegate`로, `StartPhase`는 ML1·`Unload`는 ML6에 공개, 소멸 동작, report 고정 길이 칸(3.4절), 의존 철자 대소문자 검사(3.4절 MD17), `ShutdownGroup`의 안쪽 묶음 포함과 수명 객체 파괴(3.7절), `DynamicLibraryError`(3.5절), 빌드 표지 `ProvidesModuleTable`·`ThirdParty`·`LoadingPhase`와 SDK manifest 6(3.9절)을 적었다. 같은 날 서브에이전트 교차 검증을 반영했다: 종료 중 조회를 UE에 맞춤(모듈은 자기 `Shutdown` 직전에만 `ShuttingDown`), `Load` 진행 중(`Changed` 구독자 포함) `ShutdownGroup` Fatal, `RegisterSettings` 이름 감지를 접근 권한·오버로드와 무관하게(3.1절), 자동 종료 거부 모듈의 소멸 순서를 시작 역순으로, 실패 상태·`ShutdownGroup` 스레드 위반·부트 모듈 목록·ML0 행·1절 표·3.4절 코드 블록의 모순 정정 |
 | 1 | 2026-11-19 | 첫 초안. [빌드 타깃](BuildTargets.ko.md) BD30이 넘긴 모듈 로더를 UE 5.8 `IModuleInterface`·`FModuleManager`·`ELoadingPhase` 기준으로 정했다. 사용자 지시("애매하면 언리얼 방식")에 따라 UE 구조를 따르고, 전역 생성자 금지·`Result` 오류·명시 소유와 부딪히는 곳만 7절에 차이로 적었다. 서브에이전트 1개로 교차 검증해 반영했다: 종료를 프로세스·호스트·엔진 묶음별로(모듈 `Shutdown` 때 로그·설정이 살아 있게), 실행 중 해제의 검사 순서와 lease 역할 분리·지연 해제, 한 프로세스의 여러 Engine(엔진 묶음·참조 수, 앞 단계 차례 실행), 타입 등록 시점과 실패 처리, 설정 등록 시점(바이너리 준비 + `RegisterSettings`), Modular 실행 파일의 부트 모듈 import와 호스트 모듈, `ModuleBuildId` 재사용과 파일 크기 대조, `Find<T>(name)`과 서비스 형식 키, Launch 단계 위치, 모듈 자신의 타입만 등록하는 생성 함수, 부트 모듈 정의, 해제 report, `Failed` 재시도, 종료 중 이벤트 없음, lease 원자 수, Linux `-soname`, Modular 시험 등록, 인용 정정(UE 진입점 주 경로·같은 단계 재호출) |

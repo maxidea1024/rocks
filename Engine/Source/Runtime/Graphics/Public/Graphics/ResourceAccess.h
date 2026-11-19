@@ -48,6 +48,9 @@ enum class ResourceAccess : uint32 {
     DepthWrite = 1u << 11,
     // 복사 대상이다.
     CopyDestination = 1u << 12,
+    // attachment resolve 대상이다(UE ERHIAccess::ResolveDst). resolve가 있는 패스가 끝나면 대상
+    // subresource가 이 상태이고 원본은 RenderTarget 그대로다(RenderBase 8절 RG1 남은 것 설계 2).
+    ResolveDestination = 1u << 14,
 
     // 이전 내용이 필요 없다(내용 버림). 전이의 after로 쓰면 장치는 내용을 보존하지 않아도 된다.
     // transient aliasing(RG5)의 해제 상태다. 지금 backend는 아무것도 하지 않는다.
@@ -88,8 +91,9 @@ inline constexpr ResourceAccess ReadOnlyAccessMask =
 // 읽을 수 있는 모든 비트다(UAV 포함).
 inline constexpr ResourceAccess ReadableAccessMask = ReadOnlyAccessMask | UavAccessMask;
 // 읽기 상태와 함께 켤 수 없는 쓰기 전용 비트다.
-inline constexpr ResourceAccess WriteOnlyExclusiveAccessMask =
-    ResourceAccess::RenderTarget | ResourceAccess::CopyDestination;
+inline constexpr ResourceAccess WriteOnlyExclusiveAccessMask = ResourceAccess::RenderTarget |
+                                                               ResourceAccess::CopyDestination |
+                                                               ResourceAccess::ResolveDestination;
 // 모든 쓰기 전용 비트다.
 inline constexpr ResourceAccess WriteOnlyAccessMask =
     WriteOnlyExclusiveAccessMask | ResourceAccess::DepthWrite;

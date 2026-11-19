@@ -27,7 +27,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`)의 Unre
 | 정의 | 모듈 정의를 명령줄 `/D`·`-D`로 넘긴다(`ActionGraph.cs:200`). AST 생성도 `--clang-arg=/D`로 넘긴다(`Rocks.Build.Cli/MetadataRunner.cs:131`) | 모듈마다 정의가 달라 PCH를 모듈끼리 공유할 수 없다 |
 | 툴체인 | Windows clang-cl+lld-link, macOS clang++, Android NDK clang++. MSVC `cl.exe`는 없다 | clang PCH만 다루면 된다. MSVC의 `/Zm`·PDB 공유 문제가 없다 |
 | 링크 단위 | 정적 라이브러리 + 실행 파일. DLL은 없다 | 모듈 API 매크로(`*_API`)가 없어 공유 PCH의 정의 충돌이 UE보다 적다 |
-| 생성 TU | BuildInfo TU(`<out>/BuildInfo/`)와 규칙 생성 TU(`<out>/GeneratedSources/`). 리플렉션 생성물은 헤더(`.generated.h`)뿐이다 | UE의 `.gen.cpp` 묶기 규칙이 필요 없다 |
+| 생성 TU | BuildInfo TU(`<out>/BuildInfo/`)와 규칙 생성 TU(`<out>/GeneratedSources/`). 리플렉션 생성물은 헤더(`.generated.h`)뿐이다. [리플렉션 생성 소스](ReflectionGeneratedSources.ko.md)가 구현되면 리플렉션 생성 소스(`<out>/Generated/<M>/Source/`)가 생긴다 | 지금은 UE의 `.gen.cpp` 묶기 규칙이 필요 없다. 생성 소스는 충돌 없이 생성하므로(그 문서 GSD9) 자기들끼리 묶을지 UB1에서 정한다 |
 | 도구 빌드 ID | 실행 파일 도달 집합의 compile·archive·link action **물리 인자**로 만든다. 호스트 경로는 정규화하고, 남으면 예외다(`BuildInfo.cs:448, 618–650`) | 유니티 여부, 작업 파일 집합, PCH 여부에 따라 같은 소스의 ID가 바뀌고, 새 인자(`/FI`·`/Fp`·`-MF`)에서 예외가 난다(8.7절) |
 | 소스 규모(2026-11-18) | Core·Engine C++ 729개(런타임 356, 시험 373), 모듈 45개 | 런타임 `.cpp`는 모두 64 KiB 이하다. 평균은 Core 11.7 KiB, ObjectRuntime 15.8 KiB다 |
 | 묶음 충돌 위험 | 586개 파일이 익명 namespace를 쓰고 같은 이름이 많다(Core에서 `struct Case` 15회 등). 시험은 FoundationTests·EngineTests 실행 파일 모듈 하나에 모인다 | 충돌 정리(9절)의 작업량이 크다 |

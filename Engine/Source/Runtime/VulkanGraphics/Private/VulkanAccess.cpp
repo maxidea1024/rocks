@@ -56,7 +56,7 @@ VkImageLayout LayoutFor(ResourceAccess access) noexcept {
         return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     }
 
-    if (access == ResourceAccess::CopyDestination) {
+    if (access == ResourceAccess::CopyDestination || access == ResourceAccess::ResolveDestination) {
         return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     }
 
@@ -113,6 +113,9 @@ StageAccess StageAccessFor(ResourceAccess access) noexcept {
     add(ResourceAccess::DepthWrite, DepthStages,
         VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
     add(ResourceAccess::CopyDestination, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_ACCESS_TRANSFER_WRITE_BIT);
+    // resolve는 render pass 밖 vkCmdResolveImage(transfer 단계)다.
+    add(ResourceAccess::ResolveDestination, VK_PIPELINE_STAGE_TRANSFER_BIT,
         VK_ACCESS_TRANSFER_WRITE_BIT);
     if (result.stage == 0) {
         result.stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;

@@ -19,12 +19,23 @@ enum class GraphTargetKind : uint8 {
 
 // 색 attachment 하나다(그래프 텍스처의 mipLevel·slice, 규칙은 graphics::ColorAttachment). load
 // Load는 이전 내용을 읽는 것으로도 센다(생산 전 읽기 검사).
+//
+// resolveTarget이 있으면 pass 끝에 이 MSAA attachment를 그 1표본 렌더 타깃 그래프 텍스처의
+// (resolveMipLevel, resolveSlice)로 resolve한다(박스 평균, 결정 R17). 대상 subresource는 이 pass의
+// ResolveDestination 접근(생산)이고 전이는 장치가 낸다. 원본 attachment는 pass 뒤에도 RenderTarget
+// 상태다(RenderBase 8절 RG1 남은 것 설계 2).
+//
+// 사용 예:
+//   accesses.ColorTarget({.texture = msaaColor, .resolveTarget = sceneColor});
 struct GraphColorTarget {
     GraphTexture texture;
     GraphLoadAction load = GraphLoadAction::Clear;
     graphics::ClearColor clear;
     uint32 mipLevel = 0;
     uint32 slice = 0;
+    GraphTexture resolveTarget;
+    uint32 resolveMipLevel = 0;
+    uint32 resolveSlice = 0;
 };
 
 // 깊이·스텐실 attachment다(규칙은 graphics::DepthAttachment). 접근은 DepthWrite, readOnly면
