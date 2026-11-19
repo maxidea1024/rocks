@@ -26,6 +26,35 @@ struct BinnedAllocator::TestHooks {
     static void FailLedgerStorageOnAttempt(BinnedAllocator& allocator,
                                            uint64 oneBasedAttempt) noexcept;
 
+    // ---- 스레드 캐시 ----
+
+    // 이 스레드의 다음 캐시 만들기를 실패시킨다(그 호출은 등급 잠금 경로로 가고, 다음 호출이 다시
+    // 만든다).
+    static void FailNextThreadCacheCreation() noexcept;
+    // 호출 스레드의 캐시와 이전 칸의 블록을 모두 slab으로 돌려준다(decommit하지 않는다 — Trim과
+    // 달리 보관소는 그대로다).
+    static void FlushCurrentThreadCache(BinnedAllocator& allocator) noexcept;
+    // 호출 스레드가 이 인스턴스의 캐시를 갖고 있는지다.
+    static bool HasCurrentThreadCache(BinnedAllocator& allocator) noexcept;
+    // 호출 스레드의 종료 정리를 지금 돌린다(스레드가 끝날 때 OS가 부르는 것과 같은 함수 — 캐시를
+    // 모두 돌려주고 그 스레드를 "종료한 스레드"로 표시한다). 그 뒤 이 스레드는 캐시를 다시 만들지
+    // 않으므로 곧 끝날 worker 스레드에서만 부른다. 종료 정리 뒤에 도는 코드(다른 종료 정리)가
+    // allocator를 쓰는 경로를 본다.
+    static void RunCurrentThreadExitHook() noexcept;
+    // 호출 스레드가 "종료한 스레드"로 표시됐는지다.
+    static bool IsCurrentThreadExited() noexcept;
+    // 호출 스레드의 기록에 든 항목(인스턴스 → 캐시) 수다. 파괴된 인스턴스의 항목은 다음 캐시를 만들
+    // 때 버려진다.
+    static uint32 CurrentThreadRecordEntries() noexcept;
+    // 인스턴스에 등록된 스레드 캐시 수다.
+    static uint32 ThreadCacheCount(BinnedAllocator& allocator) noexcept;
+    // sizeClass의 이전 칸 가운데 묶음이 든 칸 수와, 그 가운데 첫 묶음의 블록 수다(없으면 0).
+    // TransferChainLength는 다른 스레드가 이 인스턴스를 쓰지 않을 때만 부른다.
+    static uint32 TransferBundleCount(BinnedAllocator& allocator, uint32 sizeClass) noexcept;
+    static uint32 TransferChainLength(BinnedAllocator& allocator, uint32 sizeClass) noexcept;
+    // 등급의 묶음 한도(블록 수)다.
+    static uint32 BundleBlocks(uint32 sizeClass) noexcept;
+
     // ---- 등급 표 ----
 
     static uint32 ClassCount() noexcept;

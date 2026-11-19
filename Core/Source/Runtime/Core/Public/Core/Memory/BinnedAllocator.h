@@ -24,6 +24,9 @@ struct BinnedAllocatorConfig {
     // 비어서 돌려받은 slab을 commit한 채 보관하는 한도(개수)다. 넘는 slab은 decommit한다. 0이면
     // 비는 즉시 decommit한다.
     uint32 retainedEmptySlabs = 64;
+    // 스레드 캐시를 쓸지다. 거짓이면 모든 작은 요청이 등급 잠금 경로로 간다: 느리지만 반환한 블록이
+    // 곧바로 slab으로 돌아가 slab 수준 동작이 결정적이다(시험·도구용).
+    bool threadCaches = true;
 };
 
 // 주소 범위와 느린 경로의 사용량이다(할당 수·byte는 Stats가 낸다). 한 시점의 snapshot이다.
@@ -124,6 +127,9 @@ private:
     struct TestHooks;
 
     State* state_ = nullptr;
+    // 스레드 캐시 조회에 쓰는 인스턴스 번호다(프로세스에서 재사용하지 않는다 — 같은 주소에 다시
+    // 만든 인스턴스와 구분한다). 0이면 스레드 캐시를 쓰지 않는다.
+    uint64 cacheId_ = 0;
 };
 
 } // namespace rocks

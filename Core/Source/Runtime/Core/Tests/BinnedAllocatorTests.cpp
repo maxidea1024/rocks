@@ -364,10 +364,12 @@ TEST(CoreBinnedBlockBoundaryDivisionIsExact) {
 }
 
 // 0 byte·잘못된 정렬·등급 경계 크기·정렬 올림·큰 경로와 통계다.
-TEST(CoreBinnedSizesAlignmentAndStats) {
+static void CheckSizesAlignmentAndStats(bool threadCaches) {
     SystemAllocator system;
     {
-        BinnedAllocator allocator(system);
+        BinnedAllocatorConfig config;
+        config.threadCaches = threadCaches;
+        BinnedAllocator allocator(system, config);
         CHECK(allocator.ReservedBytes() == BinnedAllocator::DefaultReserveBytes);
         auto empty = allocator.Allocate(0, 8);
         REQUIRE(empty);
@@ -455,12 +457,20 @@ TEST(CoreBinnedSizesAlignmentAndStats) {
     CHECK(system.Stats().liveAllocations == 0);
 }
 
+// 스레드 캐시를 끈 구성(등급 잠금 경로)과 켠 구성에서 같은 계약을 본다.
+TEST(CoreBinnedSizesAlignmentAndStats) {
+    CheckSizesAlignmentAndStats(false);
+    CheckSizesAlignmentAndStats(true);
+}
+
 // 미소유·중간·중복 주소의 반환은 NotFound이고 상태가 그대로다.
-TEST(CoreBinnedOwnershipChecksRejectWithoutStateChange) {
+static void CheckOwnershipChecksRejectWithoutStateChange(bool threadCaches) {
     SystemAllocator system;
     {
-        BinnedAllocator allocator(system);
-        BinnedAllocator other(system);
+        BinnedAllocatorConfig config;
+        config.threadCaches = threadCaches;
+        BinnedAllocator allocator(system, config);
+        BinnedAllocator other(system, config);
         auto small = allocator.Allocate(48, 16);
         auto tiny = allocator.Allocate(16, 16);
         auto large = allocator.Allocate(20000, 16);
@@ -543,13 +553,21 @@ TEST(CoreBinnedOwnershipChecksRejectWithoutStateChange) {
     CHECK(system.Stats().liveAllocations == 0);
 }
 
+// 스레드 캐시를 끈 구성(등급 잠금 경로)과 켠 구성에서 같은 계약을 본다.
+TEST(CoreBinnedOwnershipChecksRejectWithoutStateChange) {
+    CheckOwnershipChecksRejectWithoutStateChange(false);
+    CheckOwnershipChecksRejectWithoutStateChange(true);
+}
+
 // 표지 불변식(18.4절, 검토 F1): 표지가 없는 블록은 사용자에게 나가 있는 블록뿐이다. 내준 적 없는
 // 블록(바로 다음 블록, 아직 뗀 적 없는 블록)의 반환은 NotFound이고, 그 뒤의 할당들이 서로 다른
 // 주소를 받는다. 보관소에서 다시 꺼낸 slab(옛 표지가 남은 slab)에서도 같다.
-TEST(CoreBinnedNeverIssuedBlocksAreNotOwned) {
+static void CheckNeverIssuedBlocksAreNotOwned(bool threadCaches) {
     SystemAllocator system;
     {
-        BinnedAllocator allocator(system);
+        BinnedAllocatorConfig config;
+        config.threadCaches = threadCaches;
+        BinnedAllocator allocator(system, config);
         constexpr usize Request = 96;
         const usize block = BlockBytesOf(Request, 16);
         constexpr uint32 Later = 24;
@@ -584,6 +602,8 @@ TEST(CoreBinnedNeverIssuedBlocksAreNotOwned) {
             // 마지막 블록을 반환하면 slab이 비어 보관소로 간다. 다음 round는 그 slab을 다시 쓴다:
             // 옛 표지가 남아 있어도 다시 내준 블록은 정상으로 반환된다(내줄 때 표지를 지운다).
             REQUIRE(allocator.Deallocate(first.Value()));
+            // 캐시를 켠 구성에서는 반환한 블록이 캐시에 있다(비워야 slab이 돌아간다).
+            BinnedAllocatorTestAccess::FlushCurrentThreadCache(allocator);
             CHECK(allocator.Stats().liveAllocations == 0);
             CHECK(allocator.Usage().retainedSlabs == 1);
             CHECK(BinnedAllocatorTestAccess::SlabTableEntry(allocator, first.Value()) == 0);
@@ -616,6 +636,12 @@ TEST(CoreBinnedNeverIssuedBlocksAreNotOwned) {
     CHECK(system.Stats().liveAllocations == 0);
 }
 
+// 스레드 캐시를 끈 구성(등급 잠금 경로)과 켠 구성에서 같은 계약을 본다.
+TEST(CoreBinnedNeverIssuedBlocksAreNotOwned) {
+    CheckNeverIssuedBlocksAreNotOwned(false);
+    CheckNeverIssuedBlocksAreNotOwned(true);
+}
+
 // 빈 slab은 한도까지 commit한 채 보관하고 넘으면 decommit한다. 풀린 slab은 표가 0이고, Trim이
 // 보관분을 모두 decommit하며, decommit한 slab은 낮은 번호부터 다시 쓴다.
 TEST(CoreBinnedEmptySlabsAreRetainedThenDecommitted) {
@@ -624,6 +650,8 @@ TEST(CoreBinnedEmptySlabsAreRetainedThenDecommitted) {
         BinnedAllocatorConfig config;
         config.reserveBytes = 16 * MiB;
         config.retainedEmptySlabs = 2;
+        // slab 수준 동작(반환 즉시 slab으로)을 보므로 스레드 캐시를 끈다.
+        config.threadCaches = false;
         BinnedAllocator allocator(system, config);
         CHECK(allocator.ReservedBytes() == 16 * MiB);
         constexpr usize Request = BinnedAllocator::MaxSmallBytes;
@@ -692,6 +720,7 @@ TEST(CoreBinnedEmptySlabsAreRetainedThenDecommitted) {
         BinnedAllocatorConfig config;
         config.reserveBytes = MiB;
         config.retainedEmptySlabs = 0;
+        config.threadCaches = false;
         BinnedAllocator allocator(system, config);
         auto block = allocator.Allocate(64, 16);
         REQUIRE(block);
@@ -834,11 +863,12 @@ TEST(CoreBinnedReserveFailureShrinksThenRunsWithoutRange) {
 }
 
 // 예약 범위가 다 차거나 slab commit이 실패한 작은 요청은 실패가 아니라 큰 경로로 간다.
-TEST(CoreBinnedExhaustedRangeAndCommitFailureFallBack) {
+static void CheckExhaustedRangeAndCommitFailureFallBack(bool threadCaches) {
     SystemAllocator system;
     {
         constexpr uint32 Slabs = 2;
         BinnedAllocatorConfig config;
+        config.threadCaches = threadCaches;
         config.reserveBytes = Slabs * SlabBytes;
         BinnedAllocator allocator(system, config);
         REQUIRE(allocator.ReservedBytes() == Slabs * SlabBytes);
@@ -885,6 +915,7 @@ TEST(CoreBinnedExhaustedRangeAndCommitFailureFallBack) {
     {
         BinnedAllocatorConfig config;
         config.reserveBytes = MiB;
+        config.threadCaches = threadCaches;
         BinnedAllocator allocator(system, config);
         VirtualMemoryTestAccess::FailCommitOnCall(1);
         auto fallback = allocator.Allocate(200, 32);
@@ -908,6 +939,12 @@ TEST(CoreBinnedExhaustedRangeAndCommitFailureFallBack) {
     CHECK(system.Stats().liveAllocations == 0);
 }
 
+// 스레드 캐시를 끈 구성(등급 잠금 경로)과 켠 구성에서 같은 계약을 본다.
+TEST(CoreBinnedExhaustedRangeAndCommitFailureFallBack) {
+    CheckExhaustedRangeAndCommitFailureFallBack(false);
+    CheckExhaustedRangeAndCommitFailureFallBack(true);
+}
+
 // commit·decommit 실패는 일시적이다(설계 18.4절, AL2b): commit이 실패한 요청은 큰 경로로 가고 다음
 // 요청이 같은 slab을 다시 얻는다. decommit이 실패한 slab은 commit된 채 보관해 다시 쓰고 다음 Trim이
 // 다시 푼다. 한 번의 실패가 주소 범위를 닫지 않으므로 그 뒤에도 Trim이 메모리를 돌려준다.
@@ -918,6 +955,7 @@ TEST(CoreBinnedCommitAndDecommitFailuresAreTransient) {
         BinnedAllocatorConfig config;
         config.reserveBytes = MiB;
         config.retainedEmptySlabs = 0;
+        config.threadCaches = false;
         BinnedAllocator allocator(system, config);
         auto first = allocator.Allocate(64, 16);
         REQUIRE(first);
@@ -980,6 +1018,7 @@ TEST(CoreBinnedCommitAndDecommitFailuresAreTransient) {
         BinnedAllocatorConfig config;
         config.reserveBytes = MiB;
         config.retainedEmptySlabs = 4;
+        config.threadCaches = false;
         BinnedAllocator allocator(system, config);
         auto kept = allocator.Allocate(64, 16);
         REQUIRE(kept);
@@ -1097,7 +1136,7 @@ TEST(CoreBinnedLargePathFailuresRollBack) {
 
 // 무작위 할당·반환을 그림자 표와 대조한다: 내용 보존(겹침 없음), 통계 일치, 끝에 Trim 뒤 commit된
 // slab 0.
-TEST(CoreBinnedRandomChurnMatchesShadowModel) {
+static void CheckRandomChurnMatchesShadowModel(bool threadCaches) {
     SystemAllocator system;
     SystemAllocator shadowMemory;
     {
@@ -1111,6 +1150,7 @@ TEST(CoreBinnedRandomChurnMatchesShadowModel) {
         BinnedAllocatorConfig config;
         config.reserveBytes = BinnedAllocator::MinReserveBytes;
         config.retainedEmptySlabs = 4;
+        config.threadCaches = threadCaches;
         BinnedAllocator allocator(system, config);
         constexpr uint32 Slots = 3000;
         constexpr uint32 Operations = 120000;
@@ -1186,11 +1226,19 @@ TEST(CoreBinnedRandomChurnMatchesShadowModel) {
     CHECK(shadowMemory.Stats().liveAllocations == 0);
 }
 
+// 스레드 캐시를 끈 구성(등급 잠금 경로)과 켠 구성에서 같은 계약을 본다.
+TEST(CoreBinnedRandomChurnMatchesShadowModel) {
+    CheckRandomChurnMatchesShadowModel(false);
+    CheckRandomChurnMatchesShadowModel(true);
+}
+
 // 여러 스레드가 함께 할당·반환해도 내용이 보존되고 통계가 맞는다.
-TEST(CoreBinnedConcurrentAllocationStress) {
+static void CheckConcurrentAllocationStress(bool threadCaches) {
     SystemAllocator system;
     {
-        BinnedAllocator allocator(system);
+        BinnedAllocatorConfig config;
+        config.threadCaches = threadCaches;
+        BinnedAllocator allocator(system, config);
         constexpr uint32 Workers = 4;
         StartGate gate;
         StressWork work[Workers]{{&allocator, &gate, 1},
@@ -1218,12 +1266,20 @@ TEST(CoreBinnedConcurrentAllocationStress) {
     CHECK(system.Stats().liveAllocations == 0);
 }
 
+// 스레드 캐시를 끈 구성(등급 잠금 경로)과 켠 구성에서 같은 계약을 본다.
+TEST(CoreBinnedConcurrentAllocationStress) {
+    CheckConcurrentAllocationStress(false);
+    CheckConcurrentAllocationStress(true);
+}
+
 // 한 스레드가 할당한 블록을 다른 스레드가 반환한다. 같은 주소를 두 스레드가 함께 반환하면 한쪽만
 // 성공한다.
-TEST(CoreBinnedCrossThreadAndConcurrentDuplicateReturn) {
+static void CheckCrossThreadAndConcurrentDuplicateReturn(bool threadCaches) {
     SystemAllocator system;
     {
-        BinnedAllocator allocator(system);
+        BinnedAllocatorConfig config;
+        config.threadCaches = threadCaches;
+        BinnedAllocator allocator(system, config);
         constexpr usize Count = 512;
         void* addresses[Count]{};
         for (usize index = 0; index < Count; ++index) {
@@ -1277,4 +1333,10 @@ TEST(CoreBinnedCrossThreadAndConcurrentDuplicateReturn) {
     }
 
     CHECK(system.Stats().liveAllocations == 0);
+}
+
+// 스레드 캐시를 끈 구성(등급 잠금 경로)과 켠 구성에서 같은 계약을 본다.
+TEST(CoreBinnedCrossThreadAndConcurrentDuplicateReturn) {
+    CheckCrossThreadAndConcurrentDuplicateReturn(false);
+    CheckCrossThreadAndConcurrentDuplicateReturn(true);
 }
