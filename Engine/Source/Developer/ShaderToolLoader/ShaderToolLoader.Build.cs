@@ -14,6 +14,9 @@ public sealed class ShaderToolLoader : EngineModuleRules
 
     protected override string ModuleName => "ShaderToolLoader";
 
+    // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
+    protected override UnityMode Unity => UnityMode.On;
+
     protected override string[] RequiredModules => ["ShaderToolTable", "PlatformBase", "Core"];
 
     public override NativeModuleInput Configure(BuildContext context)
