@@ -58,14 +58,26 @@ Result<void> PlanResourceReuse(FrameArena& arena, GraphState& state) noexcept {
         }
     }
 
+    // 실행과 같은 규칙으로 기록 경계를 정한다: Raster pass는 새 기록을 열고, 앞 Raster pass의
+    // attachment에 접근하는 Compute·Copy pass는 그 기록을 닫고 attachment 없는 기록을 연다.
+    uint32 recording = GraphIndexNone;
     for (uint32 pass = 0; pass < state.passes.Size(); ++pass) {
-        const PassRecord& record = state.passes[pass];
+        PassRecord& record = state.passes[pass];
         if (record.culled) {
             continue;
         }
 
-        // Raster pass는 새 장치 기록을 연다. 앞 기록의 attachment였던 자리도 이제 받을 수 있다.
+        record.opensRecording = false;
         if (record.kind == GraphPassKind::Raster) {
+            record.opensRecording = true;
+            recording = pass;
+        } else if (recording != GraphIndexNone && UsesAttachmentsOf(state, pass, recording)) {
+            record.opensRecording = true;
+            recording = GraphIndexNone;
+        }
+
+        // 새 장치 기록이 열리면 앞 기록의 attachment였던 자리도 이제 받을 수 있다.
+        if (record.opensRecording) {
             for (PhysicalResource& physical : state.physicals) {
                 physical.waitsForRecording = false;
             }
@@ -261,7 +273,7 @@ uint32 SplitBeginPass(const GraphState& state, const ChainEntry& entry) noexcept
             continue;
         }
 
-        if (record.kind == GraphPassKind::Raster) {
+        if (record.opensRecording) {
             return GraphIndexNone;
         }
 

@@ -1289,4 +1289,60 @@ Debug Foundation 전체 2,527개, Debug EngineTests 전체 2,899개, 클러스�
 
 - 모델 시험의 Idle 불변식을 고쳤다: Retired는 회수 대기(`HasPendingReclaim`)가 있을 때만 남고 통계의 `retiredObjects`가 모델과 같다.
 - 검증(바뀐 범위 1회 — 다른 세션의 빌드 작업과 겹치지 않게 넓은 시험은 하지 않았다): Debug Foundation `ObjectRegistryModel` 6·`ObjectGcReclaim` 6·`GcSoak` 6·`ObjectGc` 56·`Gc` 93·`World` 11, Debug EngineTests `World` 79·`Engine` 32·`Tick` 30·`Gc` 110(새 `WorldGc_` 12개·엔진 GC 3개 포함), format·policy 통과(`review7/test2.txt`).
-- 음성 대조는 준비만 했다(`review7/negctl12.py` — 최소 진척 제거, 소멸자 사이 한도 제거, 되돌린 work 미연결, safepoint 조건 제거, 보고서 누적 제거, 옛 표지 판정, 파괴 조건 재도입, 예산 없는 cycle 끝내기, 게임 시간 간격, 취소 분기 제거, Busy 재시도 제거, 엔진 요청 미전달, 간격 0 주기). 빌드 14회가 필요해 다른 세션의 빌드 시간 작업이 병합된 뒤 돌리고 결과를 이 절에 더한다.
+- 음성 대조 13종(2026-11-20, 빌드 보류가 풀린 뒤 — 병합 cc96ad60 위에서 대조마다 소스를 바꿔 Debug로 다시 빌드하고 `ObjectGcReclaim`(Foundation) 또는 `WorldGc_`·`Engine_`(EngineTests)를 돌린 뒤 되돌렸다. 동시에 돌리지 않았다). 13종 모두 잡혔고 못 잡은 대조는 없다. 대조 전 기준(같은 병합): Foundation `ObjectRegistryModel` 6·`Gc` 93·`World` 11, EngineTests `World` 79·`Engine` 32·`Tick` 30·`Gc` 110 통과.
+
+| 대조 | 바꾼 것 | 잡은 시험 |
+|---|---|---|
+| K1 | 최소 진척 제거(첫 판정부터 시간 한도) | `ObjectGcReclaim_TimeBudgetStopsBetweenDestructorsWithProgress` |
+| K2 | 소멸자 사이의 시간 한도 제거(묶음마다만) | 같은 시험 |
+| K3 | 되돌린 work를 회수 대기 목록에 다시 넣지 않음 | 같은 시험이 Fatal(`Object registry retired queue lost a slot` — 목록 계수 검사)로 끝남 |
+| K4 | `FinishCollectionDeferringReclaim`의 safepoint 조건 제거(N2) | `ObjectGcReclaim_FinishCollectionDeferringReclaimNeedsSafepoint`, `WorldGc_RequestDuringSweepingWithBorrowStaysBusy` |
+| K5 | 예산 회수를 마지막 보고서에 더하지 않음 | `ObjectGcReclaim_TimeBudgetStopsBetweenDestructorsWithProgress` |
+| K7 | 회수 대기를 옛 표지로 판정(N1·D1·R2 이전 방식) | `WorldGc_HeldObjectIsReclaimedAfterRelease`·`…RepeatedRequestKeepsDrainingEarlierReclaim`·`…RequestDuringReclaimingKeepsReclaimBudgeted`·`…RequestDuringSweepingWithBorrowStaysBusy` |
+| K9 | 주기 수집에 World 파괴 조건을 다시 넣음(N3) | `WorldGc_FullCollectionModeCollectsWithoutWorldDestroys` |
+| K10 | 진행 중인 cycle을 예산 없는 Step으로 끝냄(R1 이전 방식) | `WorldGc_RequestDuringReclaimingKeepsReclaimBudgeted` |
+| K11 | 간격을 World 게임 시간으로 셈(R3 이전 방식) | `WorldGc_FullCollectionIntervalCountsRealTimeWhilePaused` |
+| K12 | Marking 취소 분기 제거 | `WorldGc_RequestDuringMarkingCancelsAndCollects` |
+| K13 | Busy 때 요청을 남기지 않음 | `WorldGc_BusyFullCollectionRetriesNextFrame`, `WorldGc_RequestDuringSweepingWithBorrowStaysBusy` |
+| K14 | 엔진이 요청을 World에 나눠 주지 않음(R6) | `Engine_OwnsGcSchedulerAndLendsItToWorlds` |
+| K15 | 간격 0 이하에도 주기 수집 | `WorldGc_FullCollectionIntervalCountsRealTimeWhilePaused` |
+
+- 대조 스크립트와 실행 기록은 작업 임시 폴더에 있다(`review7/negctl12.py`·`negctl12-run.txt`, K3의 Fatal 문구는 `k3-out.txt`). 이것으로 7단계를 닫는다.
+
+## 25. 공용 할당자 (GC-S6, 8단계, 2026-11-20)
+
+설계 18절(개정 7–9)의 구현 기록이다. 단계는 18.9절의 AL0–AL5다. 측정은 Development 빌드, 높은 우선순위, 같은 round 안에서 할당자를 번갈아 3 round 돌린 최솟값이다(부하가 있는 기계라 절대값보다 같은 round의 상대값을 본다).
+
+### 25.1 AL0: 벤치와 바꾸기 전 상태
+
+벤치(`Programs/GcBench`):
+
+- `--allocators [--objects N] [--allocator-kind K]`: 살아 있는 객체 N개(간선 4)를 만들고, 10%를 지우고 다시 만드는 churn을 5번 한 뒤 모두 지운다. 생성+연결, churn의 생성+연결과 회수, 종료 회수를 객체당 ns로 낸다. 할당자는 bump(반환이 무동작인 벤치 전용 — 할당자 몫의 바닥), platform(계수 없는 플랫폼 할당), `SystemAllocator`, `BinnedAllocator` 가운데 고른다. 할당자 몫은 같은 시나리오에서 bump의 시간을 뺀 값이다(설계 18.2절).
+- `--allocator-micro [--allocator-kind K]`(`AllocatorMicroBench.cpp`): 단일 스레드 할당·반환 쌍(16·64·256·1024·8192 B, 1M 쌍), 4096개를 받고 받은 순서대로 돌려주는 묶음(64 B), 한 스레드가 256개씩 할당하고 다른 스레드가 반환하는 인계(mutex·조건 변수 칸 — 2000 round, 같은 스레드에서 한 값과 비교), 1·8 스레드 동시 할당·반환 처리량(스레드마다 500K 쌍, 살아 있는 창 64개, 시작 문으로 함께 출발)이다.
+
+바꾸기 전(`SystemAllocator`: 연결 목록 원장, `BinnedAllocator`: `PoolAllocator` 9개 + 잠금 하나 + 선형 원장) — 작은 벤치:
+
+| 할당자 | 쌍(16–1024 B) | 쌍(8192 B) | 묶음 4096×64 B | 인계: 다른 스레드 / 같은 스레드 | 동시 1 스레드 | 동시 8 스레드 |
+|---|---|---|---|---|---|---|
+| platform | 24.5–25.0 ns | 25.0 ns | 28.7 ns/op | 90.5 / 30.6 ns/쌍(×3.0) | 38.1 M쌍/s | 174.6 M쌍/s(같은 round ×3.9–4.7) |
+| `SystemAllocator` | 66.8–67.6 ns | 67.0 ns | 2,714 ns/op | 290 / 200 ns/쌍 | 8.1 M쌍/s | 2.4 M쌍/s(×0.30) |
+| `BinnedAllocator` | 73.9–77.5 ns | 155.6 ns | 5,382 ns/op | 541 / 444 ns/쌍 | 3.0 M쌍/s | 0.11 M쌍/s(×0.04) |
+
+- 묶음(살아 있는 4096개를 받은 순서대로 반환)에서 선형 원장의 비용이 드러난다: `SystemAllocator` 2.7µs, `BinnedAllocator` 5.4µs(반환마다 목록의 먼 쪽까지 간다). 8 스레드에서는 잠금 하나에 묶여 1 스레드보다 느리다.
+
+객체 생성·회수(객체당 ns, 종료 회수는 괄호 안이 전체 시간):
+
+| 살아 있는 객체 | 할당자 | 생성+연결 | churn 생성+연결 | churn 회수 | 종료 회수 |
+|---|---|---|---|---|---|
+| 20K | bump | 573.5 | 538.6 | 31.7 | 53.2 (1.1 ms) |
+| 20K | platform | 767.1 | 729.8 | 90.4 | 159.3 (3.2 ms) |
+| 20K | `SystemAllocator` | 865.6 | 897.0 | 3,443 | 40,147 (803 ms) |
+| 20K | `BinnedAllocator` | 321,245 | 654,687 | 3,658 | 45,205 (904 ms) |
+| 100K(1회) | `SystemAllocator` | 1,195 | 1,297 | 19,091 | 311,717 (31.2 s) |
+| 200K | bump | 899.5 | 1,034 | 36.9 | 95.5 (19.1 ms) |
+| 200K | platform | 1,217 | 1,188 | 106.8 | 202.9 (40.6 ms) |
+| 1M | bump | 1,202 | 1,224 | 38.8 | 100.3 (100.3 ms) |
+| 1M | platform | 1,412 | 1,334 | 114.1 | 212.2 (212.2 ms) |
+
+- `SystemAllocator`는 살아 있는 수에 비례해 반환이 느려진다(20K → 100K에서 종료 회수가 객체당 7.8배). 1M은 끝나지 않는다(추정 수십 분). `BinnedAllocator`는 생성부터 객체당 0.3 ms라 20K를 넘겨 재지 않았다.
+- 플랫폼 할당의 몫(1M, platform − bump): 생성+연결 210 ns, churn 회수 75 ns, 종료 회수 112 ns/객체다. gate A2(설계 18.8절)는 이 몫의 절반 이하를 본다.

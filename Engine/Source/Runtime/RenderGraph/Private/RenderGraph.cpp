@@ -330,6 +330,10 @@ RenderGraph::RenderGraph(const RenderGraphDesc& desc) noexcept : arena_(RequireA
     state_->frame = desc.frame;
     state_->mode = desc.mode;
     state_->splitEnabled = desc.splitTransitions && desc.mode == GraphMode::Deferred;
+    state_->scheduler = desc.scheduler;
+    state_->scratch = desc.scratch;
+    state_->parallelRecording = desc.parallelRecording && desc.mode == GraphMode::Deferred &&
+                                desc.scheduler != nullptr && desc.scratch != nullptr;
     state_->serial = NextGraphSerial();
 }
 
@@ -1247,6 +1251,11 @@ Result<void> RenderGraph::Execute() noexcept {
         // 업로드는 첫 pass 앞에서 한다(UE SubmitBufferUploads와 같은 자리, 기록이 열리기 전).
         if (outcome) {
             outcome = ExecuteUploads(arena_, state);
+        }
+
+        // 병렬 기록(RG3): 기록 함수를 worker에서 기록 목록에 기록한다(재생은 아래 선언 순서 실행).
+        if (outcome && state.parallelRecording) {
+            outcome = RecordPassesInParallel(*this, arena_, state);
         }
 
         if (outcome) {
