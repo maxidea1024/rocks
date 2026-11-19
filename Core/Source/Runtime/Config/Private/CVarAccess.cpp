@@ -4,6 +4,7 @@
 #include <Core/Text/StringBuilder.h>
 #include <Object/ValueText.h>
 #include <Platform/Clock.h>
+#include <Platform/Thread.h>
 
 // CVar 읽기·쓰기 경로와 쓰기 큐다(Docs/Design/CVarSystem.ko.md 6.2·6.3·7.1·10.1절 — CVR2): 아무
 // 스레드의 쓰기를 받는 큐(통로), Sync가 꺼내 적용 전에 다시 검사하기, snapshot 얻기·묶기, 핸들의
@@ -241,10 +242,45 @@ Result<bool> FormatDefinitionValue(const cvar::detail::VarDefinition& definition
     return Result<bool>::Success(true);
 }
 
-// 이 스레드에 묶인 문맥의 통로다(없으면 null).
-const SharedPtr<WriteChannel>* BoundChannel() noexcept {
+// 프로세스 기본 문맥(CVar 6.2절 — ConfigContext::MakeProcessDefault)의 통로다. 기본 문맥 상태의
+// 통로 SharedPtr를 가리키고, 그 문맥이 없어지기 전에 풀린다(ReleaseProcessDefault). 정하기·풀기와
+// 묶음 없는 쓰기만 잡는 짧은 잠금(원자 깃발 — 상수 초기화, 전역 생성자 없음)이 지킨다.
+uint32 DefaultChannelLock = 0;
+const SharedPtr<WriteChannel>* DefaultChannel = nullptr;
+
+// DefaultChannel 잠금이다(잡는 동안은 포인터 비교·참조 계수 증가뿐이다).
+class DefaultChannelGuard {
+public:
+    DefaultChannelGuard() noexcept {
+        for (;;) {
+            uint32 expected = 0;
+            if (platform::AtomicCompareExchangeStrong<platform::MemoryOrder::Acquire,
+                                                      platform::MemoryOrder::Relaxed>(
+                    &DefaultChannelLock, expected, 1u)) {
+                return;
+            }
+
+            platform::YieldThread();
+        }
+    }
+
+    ~DefaultChannelGuard() noexcept {
+        platform::AtomicStore<platform::MemoryOrder::Release>(&DefaultChannelLock, 0u);
+    }
+
+    DefaultChannelGuard(const DefaultChannelGuard&) = delete;
+    DefaultChannelGuard& operator=(const DefaultChannelGuard&) = delete;
+};
+
+// 쓰기가 갈 통로다: 이 스레드에 묶인 문맥, 없으면 프로세스 기본 문맥(6.2절). 둘 다 없으면 null이다.
+SharedPtr<WriteChannel> WriteTarget() noexcept {
     const ConfigSnapshot* snapshot = CurrentBinding.snapshot;
-    return snapshot != nullptr ? &SnapshotAccess::Channel(*snapshot) : nullptr;
+    if (snapshot != nullptr) {
+        return SnapshotAccess::Channel(*snapshot);
+    }
+
+    DefaultChannelGuard guard;
+    return DefaultChannel != nullptr ? *DefaultChannel : SharedPtr<WriteChannel>();
 }
 
 // 거부 이유를 알린다(SetOptions::reason — 6.2절).
@@ -403,6 +439,13 @@ bool IsLimited(const WriteChannel& channel) noexcept {
 
 } // namespace
 
+void ReleaseProcessDefault(const WriteChannel& channel) noexcept {
+    DefaultChannelGuard guard;
+    if (DefaultChannel != nullptr && DefaultChannel->Get() == &channel) {
+        DefaultChannel = nullptr;
+    }
+}
+
 } // namespace detail
 
 using detail::ConfigState;
@@ -449,6 +492,27 @@ MulticastDelegate<void(const SyncChanges&)>& ConfigContext::OnSynced() noexcept 
     }
 
     return state->onSynced;
+}
+
+Result<void> ConfigContext::MakeProcessDefault() noexcept {
+    detail::ConfigState* state = state_.Get();
+    if (state == nullptr) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (platform::CurrentThreadId() != state->owner) {
+        return Result<void>::Failure(ErrorCode::WrongThread);
+    }
+
+    detail::DefaultChannelGuard guard;
+    if (detail::DefaultChannel != nullptr) {
+        return detail::DefaultChannel == &state->channel
+                   ? Result<void>::Success()
+                   : Result<void>::Failure(ErrorCode::AlreadyExists);
+    }
+
+    detail::DefaultChannel = &state->channel;
+    return Result<void>::Success();
 }
 
 } // namespace rocks::config
@@ -539,20 +603,20 @@ Result<void> SubmitSet(const VarDefinition& definition, ScalarValue value,
         return checked;
     }
 
-    const SharedPtr<WriteChannel>* channel = config::detail::BoundChannel();
-    if (channel == nullptr) {
+    const SharedPtr<WriteChannel> channel = config::detail::WriteTarget();
+    if (channel.Get() == nullptr) {
         return Result<void>::Failure(ErrorCode::NotFound);
     }
 
     SharedPtr<config::detail::QueuedChange> change;
-    if (auto made = config::detail::MakeSet(**channel, definition, value, options, where, change);
+    if (auto made = config::detail::MakeSet(*channel, definition, value, options, where, change);
         !made) {
         return made;
     }
 
     SharedPtr<config::detail::QueuedChange> one[] = {Move(change)};
-    return config::detail::Enqueue(**channel, Span<SharedPtr<config::detail::QueuedChange>>(one),
-                                   config::detail::IsLimited(**channel));
+    return config::detail::Enqueue(*channel, Span<SharedPtr<config::detail::QueuedChange>>(one),
+                                   config::detail::IsLimited(*channel));
 }
 
 Result<void> SubmitClear(const VarDefinition& definition, const SetOptions& options) noexcept {
@@ -560,20 +624,20 @@ Result<void> SubmitClear(const VarDefinition& definition, const SetOptions& opti
         return checked;
     }
 
-    const SharedPtr<WriteChannel>* channel = config::detail::BoundChannel();
-    if (channel == nullptr) {
+    const SharedPtr<WriteChannel> channel = config::detail::WriteTarget();
+    if (channel.Get() == nullptr) {
         return Result<void>::Failure(ErrorCode::NotFound);
     }
 
     SharedPtr<config::detail::QueuedChange> change;
-    if (auto made = config::detail::MakeChange((*channel)->allocator, definition, options, change);
+    if (auto made = config::detail::MakeChange(channel->allocator, definition, options, change);
         !made) {
         return made;
     }
 
     SharedPtr<config::detail::QueuedChange> one[] = {Move(change)};
-    return config::detail::Enqueue(**channel, Span<SharedPtr<config::detail::QueuedChange>>(one),
-                                   config::detail::IsLimited(**channel));
+    return config::detail::Enqueue(*channel, Span<SharedPtr<config::detail::QueuedChange>>(one),
+                                   config::detail::IsLimited(*channel));
 }
 
 StringView MakeScopedTag(char (&tag)[ScopedTagBytes]) noexcept {
@@ -606,14 +670,13 @@ Result<void> BeginScopedOverride(const VarDefinition& definition, const ScalarVa
         return checked;
     }
 
-    const SharedPtr<WriteChannel>* bound = config::detail::BoundChannel();
-    if (bound == nullptr) {
+    // 끝낼 때 넣을 지우기를 지금 만들고 그 자리를 큐에 잡아 둔다(소멸에 실패 경로가 없다). 지우기는
+    // 묶음과 무관하게 이 통로(쓴 문맥)에 간다.
+    SharedPtr<WriteChannel> channel = config::detail::WriteTarget();
+    if (channel.Get() == nullptr) {
         return Result<void>::Failure(ErrorCode::NotFound);
     }
 
-    // 끝낼 때 넣을 지우기를 지금 만들고 그 자리를 큐에 잡아 둔다(소멸에 실패 경로가 없다). 지우기는
-    // 묶음과 무관하게 이 통로(쓴 문맥)에 간다.
-    SharedPtr<WriteChannel> channel = *bound;
     SharedPtr<config::detail::QueuedChange> set;
     SharedPtr<config::detail::QueuedChange> clear;
     if (auto made = config::detail::MakeSet(*channel, definition, value, options, where, set);

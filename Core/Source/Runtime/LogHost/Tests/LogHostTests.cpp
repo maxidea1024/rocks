@@ -21,7 +21,7 @@ namespace {
 
 constexpr LogCategory LogHostTests{"Tests.Host"};
 
-// 타입 등록·Name pool·객체 Registry와 설정 문맥이다(log.* 설정을 등록해 둔다). 소멸 순서: 문맥 →
+// 타입 등록·Name pool·객체 Registry와 설정 문맥이다(log.* 핸들을 등록해 둔다). 소멸 순서: 문맥 →
 // Registry → pool → 타입.
 struct LogSettingsFixture {
     LogSettingsFixture() noexcept
@@ -50,14 +50,39 @@ struct LogSettingsFixture {
         return options;
     }
 
-    // Engine branch의 Settings 섹션으로 값을 넣고 Sync한다.
-    void Apply(StringView settingsJson) noexcept {
+    // Engine branch의 Settings 섹션으로 값을 넣고 Sync한다. 넣기가 거부되면(설정 단계 검사)
+    // false다.
+    bool TryApply(StringView settingsJson) noexcept {
         char storage[4096];
         FixedStringBuilder text{Span<char>(storage)};
         (void)text.TryAppendFormat("{{\"Settings\": {}}}", settingsJson);
-        REQUIRE(context->AddLayerText(config::ConfigLayer::Project, "Log", "Engine", "<memory>",
-                                      text.View()));
-        REQUIRE(context->Sync());
+        const bool added = context
+                               ->AddLayerText(config::ConfigLayer::Project, "Log", "Engine",
+                                              "<memory>", text.View())
+                               .IsOk();
+        CHECK(context->Sync());
+        return added;
+    }
+
+    void Apply(StringView settingsJson) noexcept {
+        REQUIRE(TryApply(settingsJson));
+    }
+
+    // 봉인하고(LogHost는 부팅 값을 읽으므로 봉인 뒤에 시작한다 — 두 번째 봉인은 무동작) 시작한다.
+    Result<void> StartHost(LogHost& host, const LogSystemConfig& preset) noexcept {
+        CHECK(context->CompleteStartup());
+        return host.Start(preset, context.Get(), "Test");
+    }
+
+    // 진단에 code가 있는지다.
+    bool HasDiagnostic(config::ConfigDiagnosticCode code) const noexcept {
+        for (usize index = 0; index < context->Diagnostics().Count(); ++index) {
+            if (context->Diagnostics().Get(index).code == code) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     SystemAllocator system;
@@ -137,7 +162,7 @@ TEST(LogHostAppliesModeAndLevelsFromConfig) {
     fixture.Apply(R"({"log.mode": "sync", "log.level": "warning",
                       "log.levels": "GRAPHICS=Error, engine.world = debug"})");
     LogHost host(fixture.system);
-    REQUIRE(host.Start(LogSystemConfig::ForEngineHost(), fixture.context.Get(), "Test"));
+    REQUIRE(fixture.StartHost(host, LogSystemConfig::ForEngineHost()));
     LogSystem& logs = host.System();
     constexpr LogCategory audio{"Audio"};
     constexpr LogCategory d3d12{"Graphics.D3D12"};
@@ -157,47 +182,52 @@ TEST(LogHostAcceptsLevelNamesInAnyCaseAndRejectsUnknownOnes) {
     fixture.Apply(R"({"log.level": "Warning"})");
     config::ConfigContext& context = *fixture.context;
     context.Diagnostics().Clear();
-    CHECK(!context.AddAssignment(config::ConfigLayer::Console, "console", LogLevelSetting, "loud"));
+    CHECK(!context.AddAssignment(config::ConfigLayer::Console, "console", LogLevelVar.Name(),
+                                 "loud"));
     CHECK(context.Diagnostics().ErrorCount() != 0);
     REQUIRE(context.Sync());
     LogHost host(fixture.system);
-    REQUIRE(host.Start(LogSystemConfig::ForEngineHost(), fixture.context.Get(), "Test"));
+    REQUIRE(fixture.StartHost(host, LogSystemConfig::ForEngineHost()));
     constexpr LogCategory audio{"Audio"};
     CHECK(!host.System().IsEnabled(LogLevel::Info, audio));
     CHECK(host.System().IsEnabled(LogLevel::Warning, audio));
     host.Stop();
 }
 
-// 설정이 없으면 호스트 프리셋 그대로다(log.mode 기본값 default).
+// 설정이 없으면 호스트 프리셋 그대로다(log.mode 기본값 default). 봉인 전 문맥으로는 시작하지
+// 않는다(부팅 값을 읽는다 — InvalidArgument).
 TEST(LogHostKeepsThePresetByDefault) {
     LogSettingsFixture fixture;
     LogHost host(fixture.system);
-    REQUIRE(host.Start(LogSystemConfig::ForTool(), fixture.context.Get(), "Test"));
+    CHECK(host.Start(LogSystemConfig::ForTool(), fixture.context.Get(), "Test").Error() ==
+          ErrorCode::InvalidArgument);
+    REQUIRE(fixture.StartHost(host, LogSystemConfig::ForTool()));
     CHECK(host.System().Mode() == LogMode::Sync);
     host.Stop();
-    REQUIRE(host.Start(LogSystemConfig::ForEngineHost(), fixture.context.Get(), "Test"));
+    REQUIRE(fixture.StartHost(host, LogSystemConfig::ForEngineHost()));
     CHECK(host.System().Mode() == LogMode::Async);
     host.Stop();
 }
 
-// 실행 중 log.level·log.levels 변경은 sync 지점에서 적용되고, 시작 뒤 고정 설정의 콘솔 변경은 넣을
-// 때 거부한다(BootSealed — Docs/Design/CVarSystem.ko.md 9절, ConfigSystem.ko.md 8절).
+// 실행 중 log.level·log.levels 변경은 sync 지점에서 적용되고(Watch — OnSynced + Watcher), 시작 뒤
+// 고정 설정(BootCVar)의 콘솔 변경은 넣을 때 거부한다(BootSealed — Docs/Design/CVarSystem.ko.md
+// 9절). 문법이 틀린 log.levels는 설정 단계에서 거부한다(Validate — L18).
 TEST(LogHostAppliesRuntimeLevelChangesAndRejectsStartupOnlyChanges) {
     LogSettingsFixture fixture;
     fixture.Apply(R"({"log.levels": "Audio=error"})");
     LogHost host(fixture.system);
-    REQUIRE(host.Start(LogSystemConfig::ForEngineHost(), fixture.context.Get(), "Test"));
+    REQUIRE(fixture.StartHost(host, LogSystemConfig::ForEngineHost()));
     REQUIRE(host.Watch(*fixture.context));
-    REQUIRE(fixture.context->CompleteStartup());
+    CHECK(host.Watch(*fixture.context).Error() == ErrorCode::InvalidArgument);
     LogSystem& logs = host.System();
     constexpr LogCategory audio{"Audio"};
     constexpr LogCategory input{"Input"};
     CHECK(!logs.IsEnabled(LogLevel::Warning, audio) && logs.IsEnabled(LogLevel::Info, input));
 
     config::ConfigContext& context = *fixture.context;
-    REQUIRE(
-        context.AddAssignment(config::ConfigLayer::Console, "console", LogLevelSetting, "error"));
-    REQUIRE(context.AddAssignment(config::ConfigLayer::Console, "console", LogLevelsSetting,
+    REQUIRE(context.AddAssignment(config::ConfigLayer::Console, "console", LogLevelVar.Name(),
+                                  "error"));
+    REQUIRE(context.AddAssignment(config::ConfigLayer::Console, "console", LogLevelsVar.Name(),
                                   "input=trace"));
     // sync 지점 전에는 그대로다.
     CHECK(logs.IsEnabled(LogLevel::Info, input));
@@ -207,15 +237,25 @@ TEST(LogHostAppliesRuntimeLevelChangesAndRejectsStartupOnlyChanges) {
     // 앞의 재정의(Audio=error)는 지워져 전역 최소(error)를 따른다.
     CHECK(logs.IsEnabled(LogLevel::Error, audio) && !logs.IsEnabled(LogLevel::Warning, audio));
 
+    // 문법이 틀린 값은 설정 단계에서 거부한다(앞 값이 남는다).
     context.Diagnostics().Clear();
-    CHECK(!context.AddAssignment(config::ConfigLayer::Console, "console", LogModeSetting, "sync"));
-    CHECK(!context.AddAssignment(config::ConfigLayer::Console, "console", LogFileEnabledSetting,
+    CHECK(!context.AddAssignment(config::ConfigLayer::Console, "console", LogLevelsVar.Name(),
+                                 "input"));
+    CHECK(fixture.HasDiagnostic(config::ConfigDiagnosticCode::ValidationFailed));
+    REQUIRE(context.Sync());
+    CHECK(logs.IsEnabled(LogLevel::Trace, input));
+
+    context.Diagnostics().Clear();
+    CHECK(
+        !context.AddAssignment(config::ConfigLayer::Console, "console", LogModeVar.Name(), "sync"));
+    CHECK(!context.AddAssignment(config::ConfigLayer::Console, "console", LogFileEnabledVar.Name(),
                                  "true"));
     REQUIRE(context.Sync());
     CHECK(logs.Mode() == LogMode::Async);
-    auto mode = context.FindConsoleSetting(LogModeSetting);
+    auto mode = context.FindConsoleSetting(LogModeVar.Name());
     REQUIRE(mode);
-    CHECK(context.ConsoleValue(mode.Value()).string.View() != StringView("sync"));
+    CHECK(context.ConsoleValue(mode.Value()).signedInteger ==
+          static_cast<int64>(LogHostMode::Default));
     usize ignored = 0;
     for (usize index = 0; index < context.Diagnostics().Count(); ++index) {
         ignored += context.Diagnostics().Get(index).code == config::ConfigDiagnosticCode::BootSealed
@@ -241,7 +281,7 @@ TEST(LogHostWritesNoFileWhenEncryptionKeyIsMissing) {
             directory.View(), key);
         fixture.Apply(text.View());
         LogHost host(fixture.system);
-        REQUIRE(host.Start(LogSystemConfig::ForEngineHost(), fixture.context.Get(), "Test"));
+        REQUIRE(fixture.StartHost(host, LogSystemConfig::ForEngineHost()));
         CHECK(!host.IsFileLogging());
         CHECK(host.FileSetupError() != ErrorCode::None);
         {
@@ -275,7 +315,7 @@ TEST(LogHostWritesASealedFileThatDecodes) {
     Array<char> path(fixture.system);
     {
         LogHost host(fixture.system);
-        REQUIRE(host.Start(LogSystemConfig::ForEngineHost(), fixture.context.Get(), "Test"));
+        REQUIRE(fixture.StartHost(host, LogSystemConfig::ForEngineHost()));
         REQUIRE(host.IsFileLogging());
         REQUIRE(
             path.TryAppend(Span<const char>(host.FilePath().Data(), host.FilePath().ByteCount())));
@@ -311,7 +351,7 @@ TEST(LogHostWritesAPlainFileFromConfig) {
     Array<char> path(fixture.system);
     {
         LogHost host(fixture.system);
-        REQUIRE(host.Start(LogSystemConfig::ForEngineHost(), fixture.context.Get(), "Test"));
+        REQUIRE(fixture.StartHost(host, LogSystemConfig::ForEngineHost()));
         REQUIRE(host.IsFileLogging());
         REQUIRE(
             path.TryAppend(Span<const char>(host.FilePath().Data(), host.FilePath().ByteCount())));
@@ -352,16 +392,19 @@ uint64 FixedClock() noexcept {
 
 } // namespace
 
-// 설정 log.rate_limits가 LogSystem에 적용되고, 잘못된 항목은 건너뛴다. 같은 내용을 다시 적용하면
-// 창을 초기화하지 않는다.
+// 설정 log.rate_limits가 LogSystem에 적용되고, 문법이 틀린 값은 설정 단계에서 거부한다(Validate —
+// L18). 다른 값만 바뀐 sync 지점은 창을 초기화하지 않는다(바뀐 값만 다시 적용한다).
 TEST(LogHostAppliesRateLimitsFromConfig) {
     LogSettingsFixture fixture;
-    fixture.Apply(R"({"log.mode": "sync", "log.rate_limits": "Tests=2, Broken, Audio=0"})");
+    fixture.context->Diagnostics().Clear();
+    CHECK(!fixture.TryApply(R"({"log.rate_limits": "Tests=2, Broken, Audio=0"})"));
+    CHECK(fixture.HasDiagnostic(config::ConfigDiagnosticCode::ValidationFailed));
+    fixture.Apply(R"({"log.mode": "sync", "log.rate_limits": "Tests=2"})");
     LogSystemConfig preset = LogSystemConfig::ForEngineHost();
     preset.clock = &FixedClock;
     preset.clockFrequency = 1;
     LogHost host(fixture.system);
-    REQUIRE(host.Start(preset, fixture.context.Get(), "Test"));
+    REQUIRE(fixture.StartHost(host, preset));
     REQUIRE(host.Watch(*fixture.context));
     {
         LogInstallScope installed(host.System());
@@ -371,7 +414,7 @@ TEST(LogHostAppliesRateLimitsFromConfig) {
 
         // 다른 설정만 바뀐 sync 지점: rate limit 창은 그대로라 더 통과하지 않는다.
         REQUIRE(fixture.context->AddAssignment(config::ConfigLayer::Console, "console",
-                                               LogLevelsSetting, "Audio=error"));
+                                               LogLevelsVar.Name(), "Audio=error"));
         REQUIRE(fixture.context->Sync());
         Log::Info(LogHostTests, "rate limited {Index}", 5);
     }
@@ -392,20 +435,27 @@ static_assert(CheckLogLevelsSyntax("Graphics=loud") ==
 
 namespace {
 
-// 파일 하나에 레이아웃 설정을 주고 Warning 한 줄을 쓴 뒤 파일 내용을 돌려준다.
-void WriteWithFileLayout(StringView layoutJson, Array<uint8>& file) noexcept {
+// 파일 하나에 레이아웃 설정을 주고 Warning 한 줄을 쓴 뒤 파일 내용을 돌려준다. 레이아웃은 따로
+// 넣고 받아들였는지를 돌려준다(문법이 틀리면 설정 단계에서 거부한다 — 파일은 기본 레이아웃).
+void WriteWithFileLayout(StringView layoutJson, Array<uint8>& file, bool& accepted) noexcept {
     ScratchDirectory directory;
     LogSettingsFixture fixture;
     char settings[512];
     FixedStringBuilder text{Span<char>(settings)};
     (void)text.TryAppendFormat(R"({{"log.mode": "sync", "log.file.enabled": true, )"
-                               R"("log.file.directory": "{}", "log.file.layout": {}}})",
-                               directory.View(), layoutJson);
+                               R"("log.file.directory": "{}"}})",
+                               directory.View());
     fixture.Apply(text.View());
+    char layout[256];
+    FixedStringBuilder layoutText{Span<char>(layout)};
+    (void)layoutText.TryAppendFormat(R"({{"log.file.layout": {}}})", layoutJson);
+    fixture.context->Diagnostics().Clear();
+    accepted = fixture.TryApply(layoutText.View());
+    CHECK(accepted != fixture.HasDiagnostic(config::ConfigDiagnosticCode::ValidationFailed));
     Array<char> path(fixture.system);
     {
         LogHost host(fixture.system);
-        REQUIRE(host.Start(LogSystemConfig::ForEngineHost(), fixture.context.Get(), "Test"));
+        REQUIRE(fixture.StartHost(host, LogSystemConfig::ForEngineHost()));
         REQUIRE(host.IsFileLogging());
         REQUIRE(
             path.TryAppend(Span<const char>(host.FilePath().Data(), host.FilePath().ByteCount())));
@@ -422,14 +472,18 @@ void WriteWithFileLayout(StringView layoutJson, Array<uint8>& file) noexcept {
 
 } // namespace
 
-// log.file.layout이 파일 줄 모양을 바꾸고, 잘못된 패턴이면 엔진은 계속하며 기본 레이아웃을 쓴다.
-TEST(LogHostAppliesFileLayoutAndFallsBackOnInvalidPattern) {
+// log.file.layout이 파일 줄 모양을 바꾸고, 잘못된 패턴은 설정 단계에서 거부되어(ValidationFailed)
+// 파일은 기본 레이아웃을 쓴다.
+TEST(LogHostAppliesFileLayoutAndRejectsInvalidPattern) {
     SystemAllocator allocator;
     Array<uint8> custom(allocator);
-    WriteWithFileLayout(R"("<{Level:u3}|{Category}> {Message}{NewLine}")", custom);
+    bool accepted = false;
+    WriteWithFileLayout(R"("<{Level:u3}|{Category}> {Message}{NewLine}")", custom, accepted);
+    CHECK(accepted);
     CHECK(Contains(custom, "<WRN|Tests.Host> layout value 9\n"));
     Array<uint8> fallback(allocator);
-    WriteWithFileLayout(R"("{Level} {Mesage}")", fallback);
+    WriteWithFileLayout(R"("{Level} {Mesage}")", fallback, accepted);
+    CHECK(!accepted);
     CHECK(Contains(fallback, "[Warning][Tests.Host] layout value 9"));
 }
 
@@ -535,7 +589,7 @@ TEST(LogHostWritesCompressedFiles) {
         Array<char> path(fixture.system);
         {
             LogHost host(fixture.system);
-            REQUIRE(host.Start(LogSystemConfig::ForEngineHost(), fixture.context.Get(), "Test"));
+            REQUIRE(fixture.StartHost(host, LogSystemConfig::ForEngineHost()));
             REQUIRE(host.IsFileLogging());
             REQUIRE(path.TryAppend(
                 Span<const char>(host.FilePath().Data(), host.FilePath().ByteCount())));

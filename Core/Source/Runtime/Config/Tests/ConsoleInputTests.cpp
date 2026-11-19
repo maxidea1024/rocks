@@ -130,13 +130,13 @@ TEST(Config_ConsoleInputGrammar) {
     auto empty = context.ExecuteConsoleLine("   ", transcript.Output());
     CHECK(!empty && empty.Error() == ErrorCode::InvalidArgument);
 
-    // 독립 설정도 같은 문법이다. 출처 스택은 콘솔 층이다.
-    ConsoleSettingDefinition pool;
+    // 동적 변수도 같은 문법이다. 출처 스택은 콘솔 층이다.
+    DynamicVarDefinition pool;
     pool.name = "stream.pool_mb";
     pool.help = "pool size";
     pool.type = ConsoleValueType::Int32;
     pool.defaultValue = "256";
-    REQUIRE(context.RegisterConsoleSetting(pool));
+    REQUIRE(context.RegisterDynamic(pool));
     REQUIRE(context.ExecuteConsoleLine("stream.pool_mb 300", transcript.Output()));
     REQUIRE(context.Sync());
     transcript.text.Clear();
@@ -203,74 +203,6 @@ TEST(Config_ConsoleCommandsRunAtSync) {
     REQUIRE(context.UnbindCommand(FlushCommand, flushed));
 }
 
-namespace {
-
-struct ChangeLog {
-    explicit ChangeLog(Allocator& allocator) noexcept : names(allocator) {
-    }
-
-    String names;
-    ConfigContext* context = nullptr;
-    ErrorCode nestedSync = ErrorCode::None;
-};
-
-void RecordChange(void* context, const ConfigChange& change) noexcept {
-    auto& log = *static_cast<ChangeLog*>(context);
-    static_cast<void>(log.names.TryAppend(change.name));
-    static_cast<void>(log.names.TryAppend(";"));
-    if (log.context != nullptr) {
-        auto nested = log.context->Sync();
-        log.nestedSync = nested ? ErrorCode::None : nested.Error();
-    }
-}
-
-} // namespace
-
-// 콜백은 Sync 끝에 값이 바뀐 대상에만, 구독 순서대로 불린다(Sync 전에는 불리지 않는다). 콜백 안의
-// Sync는 Busy다. 구독을 끝내면 더 부르지 않는다.
-TEST(Config_ChangeCallbacksRunAtSyncInOrder) {
-    ConfigFixture fixture;
-    ConfigContext& context = fixture.Context();
-    ChangeLog log(fixture.system);
-    auto gameplay = context.SubscribeSettings<GameplaySettings>(&RecordChange, &log);
-    REQUIRE(gameplay);
-    auto immediate = context.Subscribe("render.graph.immediate", &RecordChange, &log);
-    REQUIRE(immediate);
-    auto graph = context.SubscribeSettings<GraphSettings>(&RecordChange, &log);
-    REQUIRE(graph);
-    CHECK(context.Subscribe("render.nothing", &RecordChange, &log).Error() == ErrorCode::NotFound);
-
-    REQUIRE(
-        context.AddAssignment(ConfigLayer::Console, "console", "render.graph.immediate", "true"));
-    REQUIRE(context.AddAssignment(ConfigLayer::Session, "cli", "Game.Gameplay.lives", "9"));
-    CHECK(log.names.IsEmpty());
-    REQUIRE(context.Sync());
-    CHECK(log.names.View() == "Game.Gameplay;render.graph.immediate;Render.RenderGraph;");
-
-    // 값이 같으면(같은 값을 다시 쓴다) 콜백이 없다. 바뀐 대상만 부른다.
-    log.names.Clear();
-    REQUIRE(context.AddAssignment(ConfigLayer::Console, "again", "render.graph.immediate", "true"));
-    REQUIRE(
-        context.AddAssignment(ConfigLayer::Session, "cli2", "Render.RenderGraph.maxPasses", "3"));
-    REQUIRE(context.Sync());
-    CHECK(log.names.View() == "Render.RenderGraph;");
-
-    // 콜백 안의 Sync는 Busy다.
-    log.names.Clear();
-    log.context = &context;
-    REQUIRE(context.AddAssignment(ConfigLayer::Session, "cli3", "Game.Gameplay.lives", "8"));
-    REQUIRE(context.Sync());
-    CHECK(log.nestedSync == ErrorCode::Busy);
-    log.context = nullptr;
-
-    REQUIRE(context.Unsubscribe(gameplay.Value()));
-    CHECK(context.Unsubscribe(gameplay.Value()).Error() == ErrorCode::NotFound);
-    log.names.Clear();
-    REQUIRE(context.AddAssignment(ConfigLayer::Session, "cli4", "Game.Gameplay.lives", "7"));
-    REQUIRE(context.Sync());
-    CHECK(log.names.IsEmpty());
-}
-
 // 설정 snapshot은 sync 지점에서 RenderRead 값(콘솔 이름, 이름 없는 필드는
 // `<Branch>.<Section>.<필드>`)으로 만든다. RenderRead 값이 바뀐 Sync만 세대가 오르고, 아니면 같은
 // snapshot을 돌려준다. 프레임이 쥔 이전 snapshot은 바뀌지 않는다.
@@ -312,17 +244,19 @@ TEST(Config_SnapshotGenerationsAndReuse) {
           second->Find("Render.RenderGraph.lodBias")->float32 == 0.5f);
     CHECK(!first->Find("render.graph.immediate")->boolean);
 
-    // 새 RenderRead 독립 설정 등록은 다음 Sync에 snapshot에 들어간다.
-    ConsoleSettingDefinition pool;
+    // 동적 변수 등록은 새 칸을 더한 snapshot을 바로 게시한다(CVar 칸 — 이름 블록이 아니다). 그
+    // 뒤 바뀐 것이 없는 Sync는 같은 snapshot이다.
+    DynamicVarDefinition pool;
     pool.name = "stream.pool_mb";
     pool.help = "pool size";
     pool.type = ConsoleValueType::Int32;
     pool.defaultValue = "256";
-    pool.flags = static_cast<uint32>(ConsoleSettingFlags::RenderRead);
-    REQUIRE(context.RegisterConsoleSetting(pool));
-    REQUIRE(context.Sync());
+    auto index = context.RegisterDynamic(pool);
+    REQUIRE(index);
     SharedPtr<const ConfigSnapshot> third = context.Acquire();
-    CHECK(third->Generation() == 5 && third->Find("stream.pool_mb")->signedInteger == 256);
+    CHECK(third->Generation() == 5 && third->Find("stream.pool_mb") == nullptr);
+    CHECK(cvar::ReadDynamic<int32>(*third, index.Value(), 0) == 256);
+    CHECK(cvar::ReadDynamic<int32>(*second, index.Value(), 7) == 7);
     REQUIRE(context.Sync());
     CHECK(context.Acquire().Get() == third.Get());
 }

@@ -8,38 +8,112 @@
 
 namespace rocks {
 
+// 파일 크기 상한의 범위다(64 KiB – 1 TiB).
+inline constexpr int64 MinLogFileMaxBytes = int64{64} * 1024;
+inline constexpr int64 MaxLogFileMaxBytes = int64{1024} * 1024 * 1024 * 1024;
+
+// log.file.max_bytes·log.file.retention의 기본값이다(FileLogSinkConfig 기본값과 같다).
+inline constexpr int64 DefaultLogFileMaxBytes =
+    static_cast<int64>(FileLogSinkConfig::DefaultMaxBytes);
+inline constexpr int32 DefaultLogFileRetention =
+    static_cast<int32>(FileLogSinkConfig::DefaultRetention);
+
+constinit BootCVar<LogHostMode> LogModeVar =
+    cvar::Boot("log.mode", LogHostMode::Default)
+        .Help("Log recording mode: default (the host preset), async (writer thread; engine hosts) "
+              "or sync (the calling thread renders and writes; tools). Sync on an engine host "
+              "makes the main tick wait for every sink. Fixed after startup.");
+
+constinit CVar<LogLevel> LogLevelVar =
+    cvar::Var("log.level", LogLevel::Info)
+        .Help("Global minimum log level: trace, debug, info, warning, error or fatal. Levels below "
+              "the compiled minimum stay compiled out. Applied at the next config sync.");
+
+constinit CVar<String> LogLevelsVar =
+    cvar::Var("log.levels", "")
+        .Help("Per-category log levels as comma-separated prefix=level pairs, for example "
+              "\"Graphics=warning,Engine.World=debug\". Prefixes match dotted category names "
+              "case-insensitively (longest prefix wins). Applied at the next config sync.")
+        .Validate(CheckLogLevelsSyntax);
+
+constinit CVar<String> LogRateLimitsVar =
+    cvar::Var("log.rate_limits", "")
+        .Help("Per-category rate limits as comma-separated prefix=records-per-second pairs, for "
+              "example \"Graphics=20,Engine.World.Tick=100\" (at most 16 entries, 1 to 1000000 "
+              "each). Trace to Warning records above the limit in a one-second window are dropped "
+              "and counted; Error and Fatal are never limited. Applied at the next config sync.")
+        .Validate(CheckLogRateLimitsSyntax);
+
+constinit BootCVar<String> LogConsoleLayoutVar =
+    cvar::Boot("log.console.layout", "")
+        .Help("Layout pattern of the console (stderr) log, for example \"[{Level:u3}] "
+              "{Message}{NewLine}\". Empty means the default console layout. Fixed after "
+              "startup.")
+        .Validate(CheckLogLayoutSyntax);
+
+constinit BootCVar<bool> LogFileEnabledVar =
+    cvar::Boot("log.file.enabled", false).Help("Write log records to files. Fixed after startup.");
+
+constinit BootCVar<String> LogFileDirectoryVar =
+    cvar::Boot("log.file.directory", "Saved/Logs")
+        .Help("Folder for log files (<host>-<UTC start>.log). Fixed after startup.");
+
+constinit BootCVar<LogFileFormat> LogFileFormatVar =
+    cvar::Boot("log.file.format", LogFileFormat::Text)
+        .Help("Log file contents: text (the file layout) or jsonlines. Fixed after startup.");
+
+constinit BootCVar<String> LogFileLayoutVar =
+    cvar::Boot("log.file.layout", "")
+        .Help("Layout pattern of text log files. Empty means the default console layout. Ignored "
+              "when log.file.format is jsonlines. Fixed after startup.")
+        .Validate(CheckLogLayoutSyntax);
+
+constinit BootCVar<int64> LogFileMaxBytesVar =
+    cvar::Boot("log.file.max_bytes", DefaultLogFileMaxBytes)
+        .Help("Size limit of one log file in bytes; a new file starts when the next batch would "
+              "pass it. Fixed after startup.")
+        .Range(MinLogFileMaxBytes, MaxLogFileMaxBytes);
+
+constinit BootCVar<int32> LogFileRetentionVar =
+    cvar::Boot("log.file.retention", DefaultLogFileRetention)
+        .Help("Number of this host's log files kept in the folder, including the current one; "
+              "the oldest are deleted. Fixed after startup.")
+        .Range(1, static_cast<int32>(MaxLogFileRetention));
+
+constinit BootCVar<int32> LogFileMaxAgeVar =
+    cvar::Boot("log.file.max_age_minutes", 0)
+        .Help("Start a new log file when a batch's first record is this many minutes after the "
+              "file's first record (elapsed monotonic time, not wall-clock days). 0 turns it off. "
+              "Fixed after startup.")
+        .Range(0, MaxLogFileAgeMinutes);
+
+constinit BootCVar<bool> LogFileCompressVar =
+    cvar::Boot("log.file.compress", false)
+        .Help("Compress each flushed batch of the log file as an independent zstd frame "
+              "(*.log.zst, readable with zstd -d; with log.file.encrypt the frames are sealed "
+              "after compression). Fixed after startup.");
+
+constinit BootCVar<bool> LogFileEncryptVar =
+    cvar::Boot("log.file.encrypt", false)
+        .Help("Seal log files to the developer public key (log.file.recipient_key). If the key is "
+              "missing or invalid no log file is written; there is never a plaintext fallback. "
+              "Fixed after startup.");
+
+constinit BootCVar<String> LogFileRecipientKeyVar =
+    cvar::Boot("log.file.recipient_key", "")
+        .Help("Developer X-Wing public key for log.file.encrypt, base64 (RocksCommandlet log "
+              "keygen). It is not a secret. The private key never goes into the repository or "
+              "cooked output. Fixed after startup.");
+
 namespace {
 
 // 이 모듈이 남기는 진단의 카테고리다("Log" 아래).
 constexpr LogCategory LogHostCategory{"Log.Host"};
 
-constexpr StringView ModeValues[] = {"default", "async", "sync"};
-constexpr StringView LevelValues[] = {"trace", "debug", "info", "warning", "error", "fatal"};
-constexpr StringView FormatValues[] = {"text", "jsonlines"};
-
-// 파일 크기 상한의 범위다(64 KiB – 1 TiB).
-constexpr double MinLogFileMaxBytes = 64.0 * 1024;
-constexpr double MaxLogFileMaxBytes = 1024.0 * 1024 * 1024 * 1024;
-
-uint32 Flags(config::ConsoleSettingFlags flag) noexcept {
-    return static_cast<uint32>(flag);
-}
-
-const FieldValue* ValueOf(const config::ConfigContext& settings, StringView name) noexcept {
-    auto id = settings.FindConsoleSetting(name);
-    return id ? &settings.ConsoleValue(id.Value()) : nullptr;
-}
-
-StringView TextOf(const config::ConfigContext& settings, StringView name) noexcept {
-    const FieldValue* value = ValueOf(settings, name);
-    return value != nullptr ? value->string.View() : StringView();
-}
-
-// 레이아웃 설정 하나를 해석한다. 비어 있으면 기본 콘솔 레이아웃이다. 잘못되면 Error를 한 번 남기고
-// 기본 레이아웃으로 계속한다(엔진은 멈추지 않는다, P3). 설정 단계 거부는 CVar 이관(CVR7) 뒤의
-// 일이다.
-LogLayout ResolveLayout(const config::ConfigContext* settings, StringView name) noexcept {
-    const StringView pattern = settings != nullptr ? TextOf(*settings, name) : StringView();
+// 레이아웃 설정 하나를 해석한다(묶인 snapshot의 값). 비어 있으면 기본 콘솔 레이아웃이다. 문법은
+// 설정 단계에서 Validate(CheckLogLayoutSyntax — Parse와 같은 검사)가 거부하므로 여기서 실패하는
+// 일은 없다. 방어로 Error를 한 번 남기고 기본 레이아웃으로 계속한다(엔진은 멈추지 않는다, P3).
+LogLayout ResolveLayout(StringView name, StringView pattern) noexcept {
     if (pattern.IsEmpty()) {
         return LogLayout::DefaultConsole();
     }
@@ -84,18 +158,6 @@ bool SplitEntry(StringView entry, StringView& prefix, LogLevel& level) noexcept 
            TryParseLogLevel(name, level);
 }
 
-config::ConsoleSettingDefinition Define(StringView name, StringView help,
-                                        config::ConsoleValueType type, StringView defaultValue,
-                                        uint32 flags) noexcept {
-    config::ConsoleSettingDefinition definition;
-    definition.name = name;
-    definition.help = help;
-    definition.type = type;
-    definition.defaultValue = defaultValue;
-    definition.flags = flags;
-    return definition;
-}
-
 } // namespace
 
 struct LogHost::AbandonedOutputs {
@@ -131,7 +193,7 @@ private:
 
 bool TryParseLogLevel(StringView text, LogLevel& level) noexcept {
     for (usize index = 0; index < LogLevelCount; ++index) {
-        if (EqualsIgnoringAsciiCase(text, LevelValues[index])) {
+        if (EqualsIgnoringAsciiCase(text, detail::LogLevelSettingNames[index])) {
             level = static_cast<LogLevel>(index);
             return true;
         }
@@ -141,121 +203,11 @@ bool TryParseLogLevel(StringView text, LogLevel& level) noexcept {
 }
 
 Result<void> RegisterLogSettings(config::ConfigContext& context) noexcept {
-    using config::ConsoleSettingFlags;
-    using config::ConsoleValueType;
-    const uint32 startup = Flags(ConsoleSettingFlags::StartupOnly);
-
-    config::ConsoleSettingDefinition mode =
-        Define(LogModeSetting,
-               "Log recording mode: default (the host preset), async (writer thread; engine hosts) "
-               "or sync "
-               "(the calling thread renders and writes; tools). Sync on an engine host makes the "
-               "main tick "
-               "wait for every sink. Fixed after startup.",
-               ConsoleValueType::String, "default", startup);
-    mode.allowedValues = ModeValues;
-    config::ConsoleSettingDefinition level = Define(
-        LogLevelSetting,
-        "Global minimum log level: trace, debug, info, warning, error or fatal. Levels below "
-        "the compiled minimum stay compiled out. Applied at the next config sync.",
-        ConsoleValueType::String, "info", 0);
-    level.allowedValues = LevelValues;
-    // 문서대로 "Warning"도 받는다(TryParseLogLevel과 같이 대소문자 무시). 틀린 이름은 설정 단계에서
-    // 거부된다.
-    level.allowedValuesIgnoreCase = true;
-    const config::ConsoleSettingDefinition levels =
-        Define(LogLevelsSetting,
-               "Per-category log levels as comma-separated prefix=level pairs, for example "
-               "\"Graphics=warning,Engine.World=debug\". Prefixes match dotted category names "
-               "case-insensitively (longest prefix wins). Applied at the next config sync.",
-               ConsoleValueType::String, "", 0);
-    const config::ConsoleSettingDefinition rateLimits = Define(
-        LogRateLimitsSetting,
-        "Per-category rate limits as comma-separated prefix=records-per-second pairs, for "
-        "example \"Graphics=20,Engine.World.Tick=100\" (at most 16 entries, 1 to 1000000 each). "
-        "Trace to Warning records above the limit in a one-second window are dropped and counted; "
-        "Error and Fatal are never limited. Applied at the next config sync.",
-        ConsoleValueType::String, "", 0);
-    const config::ConsoleSettingDefinition enabled =
-        Define(LogFileEnabledSetting, "Write log records to files. Fixed after startup.",
-               ConsoleValueType::Bool, "false", startup);
-    const config::ConsoleSettingDefinition directory =
-        Define(LogFileDirectorySetting,
-               "Folder for log files (<host>-<UTC start>.log). Fixed after startup.",
-               ConsoleValueType::String, "Saved/Logs", startup);
-    config::ConsoleSettingDefinition format =
-        Define(LogFileFormatSetting,
-               "Log file contents: text (the console layout) or jsonlines. Fixed after startup.",
-               ConsoleValueType::String, "text", startup);
-    format.allowedValues = FormatValues;
-    config::ConsoleSettingDefinition maxBytes =
-        Define(LogFileMaxBytesSetting,
-               "Size limit of one log file in bytes; a new file starts when the next batch would "
-               "pass it. Fixed after startup.",
-               ConsoleValueType::Int64, "16777216", startup);
-    maxBytes.hasRange = true;
-    maxBytes.minimum = MinLogFileMaxBytes;
-    maxBytes.maximum = MaxLogFileMaxBytes;
-    config::ConsoleSettingDefinition maxAge = Define(
-        LogFileMaxAgeSetting,
-        "Start a new log file when a batch's first record is this many minutes after the file's "
-        "first record (elapsed monotonic time, not wall-clock days). 0 turns it off. Fixed after "
-        "startup.",
-        ConsoleValueType::Int32, "0", startup);
-    maxAge.hasRange = true;
-    maxAge.minimum = 0;
-    maxAge.maximum = MaxLogFileAgeMinutes;
-    const config::ConsoleSettingDefinition compressFiles = Define(
-        LogFileCompressSetting,
-        "Compress each flushed batch of the log file as an independent zstd frame (*.log.zst, "
-        "readable with zstd -d; with log.file.encrypt the frames are sealed after compression). "
-        "Fixed after startup.",
-        ConsoleValueType::Bool, "false", startup);
-    config::ConsoleSettingDefinition retention =
-        Define(LogFileRetentionSetting,
-               "Number of this host's log files kept in the folder, including the current one; "
-               "the oldest are deleted. Fixed after startup.",
-               ConsoleValueType::Int32, "8", startup);
-    retention.hasRange = true;
-    retention.minimum = 1;
-    retention.maximum = MaxLogFileRetention;
-    const config::ConsoleSettingDefinition encrypt = Define(
-        LogFileEncryptSetting,
-        "Seal log files to the developer public key (log.file.recipient_key). If the key is "
-        "missing or invalid no log file is written; there is never a plaintext fallback. Fixed "
-        "after startup.",
-        ConsoleValueType::Bool, "false", startup);
-    const config::ConsoleSettingDefinition recipient = Define(
-        LogFileRecipientKeySetting,
-        "Developer X-Wing public key for log.file.encrypt, base64 (RocksCommandlet log keygen). "
-        "It is not a secret. The private key never goes into the repository or cooked output. "
-        "Fixed after startup.",
-        ConsoleValueType::String, "", startup);
-    const config::ConsoleSettingDefinition consoleLayout = Define(
-        LogConsoleLayoutSetting,
-        "Layout pattern of the console (stderr) log, for example \"[{Level:u3}] "
-        "{Message}{NewLine}\". "
-        "Empty means the default console layout. An invalid pattern logs an error and falls back "
-        "to the default. Fixed after startup.",
-        ConsoleValueType::String, "", startup);
-    const config::ConsoleSettingDefinition fileLayout = Define(
-        LogFileLayoutSetting,
-        "Layout pattern of text log files. Empty means the default console layout. Ignored when "
-        "log.file.format is jsonlines. An invalid pattern logs an error and falls back to the "
-        "default. Fixed after startup.",
-        ConsoleValueType::String, "", startup);
-    const config::ConsoleSettingDefinition* definitions[] = {
-        &mode,      &level,         &levels,     &rateLimits, &enabled,
-        &directory, &format,        &maxBytes,   &retention,  &encrypt,
-        &recipient, &consoleLayout, &fileLayout, &maxAge,     &compressFiles};
-    for (const config::ConsoleSettingDefinition* definition : definitions) {
-        auto registered = context.RegisterConsoleSetting(*definition);
-        if (!registered) {
-            return Result<void>::Failure(registered.Error());
-        }
-    }
-
-    return Result<void>::Success();
+    return context.Register(LogModeVar, LogLevelVar, LogLevelsVar, LogRateLimitsVar,
+                            LogConsoleLayoutVar, LogFileEnabledVar, LogFileDirectoryVar,
+                            LogFileFormatVar, LogFileLayoutVar, LogFileMaxBytesVar,
+                            LogFileRetentionVar, LogFileMaxAgeVar, LogFileCompressVar,
+                            LogFileEncryptVar, LogFileRecipientKeyVar);
 }
 
 LogHost::LogHost(Allocator& allocator) noexcept : allocator_(allocator) {
@@ -275,24 +227,38 @@ Result<void> LogHost::Start(const LogSystemConfig& preset, const config::ConfigC
         return Result<void>::Failure(ErrorCode::Busy);
     }
 
+    if (settings == nullptr) {
+        return StartWith(preset, false, hostName);
+    }
+
+    // 설정 문맥의 최신 snapshot을 묶어 핸들로 읽는다. 부팅 값을 읽으므로 봉인 뒤여야 한다.
+    SharedPtr<const config::ConfigSnapshot> snapshot = settings->Acquire();
+    if (snapshot.Get() == nullptr || !snapshot->IsSealed()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    cvar::SnapshotBinding bound(Move(snapshot));
+    return StartWith(preset, true, hostName);
+}
+
+Result<void> LogHost::StartWith(const LogSystemConfig& preset, bool settings,
+                                StringView hostName) noexcept {
     LogSystemConfig config = preset;
-    if (settings != nullptr) {
-        const StringView mode = TextOf(*settings, LogModeSetting);
-        if (mode == "async") {
+    if (settings) {
+        const LogHostMode mode = LogModeVar.Get();
+        if (mode == LogHostMode::Async) {
             config.mode = LogMode::Async;
-        } else if (mode == "sync") {
+        } else if (mode == LogHostMode::Sync) {
             config.mode = LogMode::Sync;
         }
 
         // log.level은 늘 값이 있으므로(기본 info) 프리셋의 globalMinimum을 덮어쓴다.
-        LogLevel level = config.globalMinimum;
-        if (TryParseLogLevel(TextOf(*settings, LogLevelSetting), level)) {
-            config.globalMinimum = level;
-        }
+        config.globalMinimum = LogLevelVar.Get();
     }
 
     auto console = UniquePtr<StderrLogSink>::TryMake(
-        allocator_, ResolveLayout(settings, LogConsoleLayoutSetting));
+        allocator_, settings ? ResolveLayout(LogConsoleLayoutVar.Name(), LogConsoleLayoutVar.Get())
+                             : LogLayout::DefaultConsole());
     if (!console) {
         return Result<void>::Failure(console.Error());
     }
@@ -316,8 +282,8 @@ Result<void> LogHost::Start(const LogSystemConfig& preset, const config::ConfigC
         return added;
     }
 
-    if (settings != nullptr) {
-        PrepareFileSink(*settings, hostName);
+    if (settings) {
+        PrepareFileSink(hostName);
     }
 
     if (auto started = logs_->Start(); !started) {
@@ -325,48 +291,40 @@ Result<void> LogHost::Start(const LogSystemConfig& preset, const config::ConfigC
         return started;
     }
 
-    if (settings != nullptr) {
-        ApplyLevels(*settings);
+    if (settings) {
+        ApplyGlobalLevel();
+        ApplyRateLimits();
+        ApplyLevelOverrides();
     }
 
     return Result<void>::Success();
 }
 
-void LogHost::PrepareFileSink(const config::ConfigContext& settings, StringView hostName) noexcept {
-    const FieldValue* enabled = ValueOf(settings, LogFileEnabledSetting);
-    if (enabled == nullptr || !enabled->boolean) {
+void LogHost::PrepareFileSink(StringView hostName) noexcept {
+    if (!LogFileEnabledVar.Get()) {
         return;
     }
 
     FileLogSinkConfig file;
-    file.directory = TextOf(settings, LogFileDirectorySetting);
+    file.directory = LogFileDirectoryVar.Get();
     file.hostName = hostName;
-    file.format = TextOf(settings, LogFileFormatSetting) == "jsonlines" ? LogFileFormat::JsonLines
-                                                                        : LogFileFormat::Text;
+    file.format = LogFileFormatVar.Get();
     if (file.format == LogFileFormat::JsonLines) {
-        if (!TextOf(settings, LogFileLayoutSetting).IsEmpty()) {
+        if (!LogFileLayoutVar.Get().IsEmpty()) {
             Log::Warning(LogHostCategory,
                          "log.file.layout is ignored because log.file.format is jsonlines");
         }
     } else {
-        file.layout = ResolveLayout(&settings, LogFileLayoutSetting);
-    }
-    if (const FieldValue* maxBytes = ValueOf(settings, LogFileMaxBytesSetting)) {
-        file.maxBytes = static_cast<uint64>(maxBytes->signedInteger);
+        file.layout = ResolveLayout(LogFileLayoutVar.Name(), LogFileLayoutVar.Get());
     }
 
-    if (const FieldValue* retention = ValueOf(settings, LogFileRetentionSetting)) {
-        file.retention = static_cast<uint32>(retention->signedInteger);
-    }
-
-    if (const FieldValue* age = ValueOf(settings, LogFileMaxAgeSetting)) {
-        constexpr uint64 NanosecondsPerMinute = 60ull * 1000 * 1000 * 1000;
-        file.maxAgeNanoseconds = static_cast<uint64>(age->signedInteger) * NanosecondsPerMinute;
-    }
+    file.maxBytes = static_cast<uint64>(LogFileMaxBytesVar.Get());
+    file.retention = static_cast<uint32>(LogFileRetentionVar.Get());
+    constexpr uint64 NanosecondsPerMinute = 60ull * 1000 * 1000 * 1000;
+    file.maxAgeNanoseconds = static_cast<uint64>(LogFileMaxAgeVar.Get()) * NanosecondsPerMinute;
 
     // 압축: 묶음마다 독립 zstd frame. 작업 공간은 여기서 한 번 잡는다(Open 뒤 무할당).
-    const FieldValue* compress = ValueOf(settings, LogFileCompressSetting);
-    if (compress != nullptr && compress->boolean) {
+    if (LogFileCompressVar.Get()) {
         auto zstdSettings =
             CompressionSettings::TryMake(CompressionFormat::Zstd, LogFileCompressionLevel);
         auto fixed = zstdSettings ? FixedWorkspaceCompressor::TryCreate(zstdSettings.Value(),
@@ -385,10 +343,9 @@ void LogHost::PrepareFileSink(const config::ConfigContext& settings, StringView 
         }
     }
 
-    const FieldValue* encrypt = ValueOf(settings, LogFileEncryptSetting);
-    if (encrypt != nullptr && encrypt->boolean) {
+    if (LogFileEncryptVar.Get()) {
         // 공개키가 없거나 올바르지 않으면 파일을 만들지 않는다(평문으로 내려가지 않는다).
-        const StringView text = TextOf(settings, LogFileRecipientKeySetting).TrimAscii();
+        const StringView text = LogFileRecipientKeyVar.Get().TrimAscii();
         uint8 key[crypto::LogFilePublicKeyBytes + 3];
         auto decoded = text.IsEmpty() ? Result<usize>::Failure(ErrorCode::NotFound)
                                       : crypto::TryFromBase64(text, crypto::Base64Variant::Standard,
@@ -450,32 +407,30 @@ Result<void> LogHost::Watch(config::ConfigContext& settings) noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    const StringView names[] = {LogLevelSetting, LogLevelsSetting, LogRateLimitsSetting};
-    for (StringView name : names) {
-        auto subscribed = settings.Subscribe(name, &LogHost::OnLevelsChanged, this);
-        if (!subscribed) {
-            for (uint32 index = 0; index < subscriptionCount_; ++index) {
-                (void)settings.Unsubscribe(subscriptions_[index]);
-            }
-
-            subscriptionCount_ = 0;
-            return Result<void>::Failure(subscribed.Error());
-        }
-
-        subscriptions_[subscriptionCount_++] = subscribed.Value();
+    // Start가 적용한 값의 세대를 본 것으로 맞춘다(다음 Sync부터 바뀐 것만 적용한다).
+    const SharedPtr<const config::ConfigSnapshot> snapshot = settings.Acquire();
+    if (snapshot.Get() == nullptr) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    static_cast<void>(levelWatcher_.Changed(*snapshot));
+    static_cast<void>(levelsWatcher_.Changed(*snapshot));
+    static_cast<void>(rateLimitsWatcher_.Changed(*snapshot));
+    auto added = settings.OnSynced().TryAddLambda(
+        [this](const config::SyncChanges&) noexcept { OnSynced(); });
+    if (!added) {
+        return Result<void>::Failure(added.Error());
+    }
+
+    synced_ = added.Value();
     watched_ = &settings;
     return Result<void>::Success();
 }
 
 void LogHost::Stop() noexcept {
     if (watched_ != nullptr) {
-        for (uint32 index = 0; index < subscriptionCount_; ++index) {
-            (void)watched_->Unsubscribe(subscriptions_[index]);
-        }
-
-        subscriptionCount_ = 0;
+        static_cast<void>(watched_->OnSynced().Remove(synced_));
+        synced_ = DelegateHandle{};
         watched_ = nullptr;
     }
 
@@ -526,18 +481,44 @@ StringView LogHost::FilePath() const noexcept {
     return file_ ? file_->CurrentPath() : StringView();
 }
 
-void LogHost::OnLevelsChanged(void* context, const config::ConfigChange&) noexcept {
-    auto& host = *static_cast<LogHost*>(context);
-    if (host.watched_ != nullptr && host.logs_) {
-        host.ApplyLevels(*host.watched_);
+void LogHost::OnSynced() noexcept {
+    if (watched_ == nullptr || !logs_) {
+        return;
+    }
+
+    // 이 문맥의 최신 snapshot에서 바뀐 값만 다시 적용한다(같은 스레드의 다른 문맥 Sync와 섞이지
+    // 않게 명시적으로 묶는다).
+    const SharedPtr<const config::ConfigSnapshot> snapshot = watched_->Acquire();
+    if (snapshot.Get() == nullptr) {
+        return;
+    }
+
+    const bool level = levelWatcher_.Changed(*snapshot);
+    const bool rateLimits = rateLimitsWatcher_.Changed(*snapshot);
+    const bool levels = levelsWatcher_.Changed(*snapshot);
+    cvar::SnapshotBinding bound(snapshot);
+    if (level) {
+        ApplyGlobalLevel();
+    }
+
+    if (rateLimits) {
+        ApplyRateLimits();
+    }
+
+    if (levels) {
+        ApplyLevelOverrides();
     }
 }
 
-void LogHost::ApplyRateLimits(const config::ConfigContext& settings) noexcept {
-    // 내용이 그대로면 아무것도 하지 않는다(다른 설정의 sync 지점에서 창이 초기화되지 않게). 바뀌면
-    // 빠진 접두사만 지우고, 남은 접두사는 상한만 바꾼다(창·수 유지). 잘못된 항목은 Warning 뒤
-    // 건너뛴다(설정 단계 거부는 CVar 이관 CVR7의 Validate가 CheckLogRateLimitsSyntax로 한다).
-    const StringView list = TextOf(settings, LogRateLimitsSetting);
+void LogHost::ApplyGlobalLevel() noexcept {
+    static_cast<void>(logs_->SetGlobalMinimum(LogLevelVar.Get()));
+}
+
+void LogHost::ApplyRateLimits() noexcept {
+    // 내용이 그대로면 아무것도 하지 않는다(창이 초기화되지 않게). 바뀌면 빠진 접두사만 지우고, 남은
+    // 접두사는 상한만 바꾼다(창·수 유지). 문법은 설정 단계에서 Validate(CheckLogRateLimitsSyntax)가
+    // 거부하므로 여기서 남기는 Warning은 적용 실패(표 용량)다. 문법 실패 항목의 Warning은 방어다.
+    const StringView list = LogRateLimitsVar.Get();
     const StringView applied(appliedRateLimits_, appliedRateLimitsBytes_);
     if (list == applied) {
         return;
@@ -594,15 +575,11 @@ void LogHost::ApplyRateLimits(const config::ConfigContext& settings) noexcept {
     });
 }
 
-void LogHost::ApplyLevels(const config::ConfigContext& settings) noexcept {
-    LogLevel level = LogLevel::Info;
-    if (TryParseLogLevel(TextOf(settings, LogLevelSetting), level)) {
-        (void)logs_->SetGlobalMinimum(level);
-    }
-
-    ApplyRateLimits(settings);
-
-    // 앞서 적용한 재정의를 지우고 새 목록을 적용한다.
+void LogHost::ApplyLevelOverrides() noexcept {
+    // 앞서 적용한 재정의를 지우고 새 목록을 적용한다. 문법은 설정 단계에서
+    // Validate(CheckLogLevelsSyntax)가 거부하므로 여기서 남기는 Warning은 적용 실패(재정의 표
+    // 용량·해시 충돌)다. 카테고리 목록은 닫혀 있지 않으므로(상수 객체 — 등록 표가 없다) 모르는
+    // 접두사는 판정하지 않는다.
     ForEachEntry(StringView(appliedLevels_, appliedLevelsBytes_), [&](StringView entry) {
         StringView prefix;
         LogLevel ignored = LogLevel::Info;
@@ -611,7 +588,7 @@ void LogHost::ApplyLevels(const config::ConfigContext& settings) noexcept {
         }
     });
     appliedLevelsBytes_ = 0;
-    const StringView list = TextOf(settings, LogLevelsSetting);
+    const StringView list = LogLevelsVar.Get();
     if (list.ByteCount() > sizeof(appliedLevels_)) {
         Log::Warning(LogHostCategory,
                      "log.levels is longer than {Limit} bytes; per-category levels are not applied",

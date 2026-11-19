@@ -4,10 +4,11 @@
 #include <Platform/Clock.h>
 #include <Platform/Thread.h>
 
-// CVar 핸들 등록과 번호다(Docs/Design/CVarSystem.ko.md 5절 — CVR1). 핸들은 독립 콘솔 설정과 같은
-// 저장소(ConsoleSettingState)에 들어가 대기 값·층·출처·콘솔 경로를 그대로 쓴다. 번호는 프로세스
-// 전체에서 한 번 정해진다(조각 snapshot의 칸 번호 — CVR2). 프리셋 묶음(CVarGroup — CVR5)은 int32
-// 변수로 같은 길을 가고, 등급 표를 묶음 상태(GroupState)로 더 둔다(펼침은 다음 Sync — 11절).
+// CVar 핸들·동적 변수 등록과 번호다(Docs/Design/CVarSystem.ko.md 5절 — CVR1, 동적 변수 CVR7).
+// 핸들은 독립 콘솔 설정과 같은 저장소(ConsoleSettingState)에 들어가 대기 값·층·출처·콘솔 경로를
+// 그대로 쓴다. 번호는 프로세스 전체에서 한 번 정해진다(조각 snapshot의 칸 번호 — CVR2). 프리셋
+// 묶음(CVarGroup — CVR5)은 int32 변수로 같은 길을 가고, 등급 표를 묶음 상태(GroupState)로 더
+// 둔다(펼침은 다음 Sync — 11절).
 namespace rocks::config {
 
 namespace detail {
@@ -189,7 +190,254 @@ Result<void> MakeSetting(ConfigState& state, const VarDefinition& definition,
     return Result<void>::Success();
 }
 
+// 등록을 바로 보이게 게시한다: 새 칸(writes)과 봉인 뒤 부팅 칸(bootWrites)을 더하고, 아직 넣지
+// 않은 새 설정·명령도 그 게시의 콘솔 이름 색인에 든다(VD17).
+Result<void> PublishRegistration(ConfigState& state,
+                                 Span<const UniquePtr<ConsoleSettingState>> settings,
+                                 Span<const UniquePtr<detail::ConsoleCommandState>> commands,
+                                 Span<const detail::SlotWrite> writes,
+                                 Span<const detail::SlotWrite> bootWrites) noexcept {
+    state.namesChanged = true;
+    state.registeringSettings = settings;
+    state.registeringCommands = commands;
+    auto published = detail::PublishSnapshot(state, nullptr, writes, bootWrites);
+    state.registeringSettings = {};
+    state.registeringCommands = {};
+    return published;
+}
+
+// 동적 변수가 받는 성질 비트다(Range·Clamp는 정의의 범위 칸이고 Clamp는 없다).
+constexpr uint32 DynamicVarFlags =
+    static_cast<uint32>(VarFlags::Cheat) | static_cast<uint32>(VarFlags::Replicated) |
+    static_cast<uint32>(VarFlags::UserSetting) | static_cast<uint32>(VarFlags::ConsoleReadOnly);
+
+// 부팅 동적 변수가 받는 성질 비트다(BootVarBuilder와 같다).
+constexpr uint32 DynamicBootFlags = static_cast<uint32>(VarFlags::UserSetting);
+
+// 동적 정의의 규칙(이름·도움말·성질·범위·enum 타입)을 본다.
+bool IsValidDynamic(const ConfigState& state, const DynamicVarDefinition& definition) noexcept {
+    const ValueKind kind = ConsoleValueKind(definition.type);
+    const bool numeric = kind == ValueKind::Int32 || kind == ValueKind::Int64 ||
+                         kind == ValueKind::Float32 || kind == ValueKind::Float64;
+    constexpr double Largest = NumericLimits<double>::Max();
+    const bool finiteRange = definition.minimum >= -Largest && definition.minimum <= Largest &&
+                             definition.maximum >= -Largest && definition.maximum <= Largest;
+    const uint32 allowed = definition.boot ? DynamicBootFlags : DynamicVarFlags;
+    return IsConsoleSettingName(definition.name) && HasKnownRegion(state, definition.name) &&
+           !definition.help.IsEmpty() && kind != ValueKind::Opaque &&
+           (definition.flags & ~allowed) == 0 &&
+           (!definition.hasRange ||
+            (numeric && finiteRange && definition.minimum <= definition.maximum)) &&
+           (definition.enumType != TypeId{}) == (kind == ValueKind::Enum);
+}
+
+// 동적 정의의 사본(이름·도움말·분류·기본값 표기와 그 view를 가진 VarDefinition)을 만든다.
+Result<void> MakeDynamicDefinition(ConfigState& state, const DynamicVarDefinition& source,
+                                   UniquePtr<detail::DynamicVarState>& out) noexcept {
+    auto made = UniquePtr<detail::DynamicVarState>::TryMake(state.allocator, state.allocator);
+    if (!made) {
+        return Result<void>::Failure(made.Error());
+    }
+
+    detail::DynamicVarState& dynamic = *made.Value();
+    Result<void> filled = dynamic.name.TryAssign(source.name);
+    if (filled) {
+        filled = dynamic.help.TryAssign(source.help);
+    }
+
+    if (filled) {
+        filled = dynamic.category.TryAssign(source.category);
+    }
+
+    if (filled) {
+        filled = dynamic.defaultText.TryAssign(source.defaultValue);
+    }
+
+    if (!filled) {
+        return filled;
+    }
+
+    VarDefinition& definition = dynamic.definition;
+    definition.name = dynamic.name.View();
+    definition.help = dynamic.help.View();
+    definition.category = dynamic.category.View();
+    definition.type = source.type;
+    definition.kind = source.boot ? HandleKind::Boot : HandleKind::Var;
+    definition.flags = source.flags;
+    definition.defaultValue.text = dynamic.defaultText.View();
+    if (source.hasRange) {
+        definition.flags |= static_cast<uint32>(VarFlags::HasRange);
+        const bool real =
+            source.type == ConsoleValueType::Float || source.type == ConsoleValueType::Double;
+        if (real) {
+            definition.minimum.real = source.minimum;
+            definition.maximum.real = source.maximum;
+        } else {
+            definition.minimum.integer = static_cast<int64>(source.minimum);
+            definition.maximum.integer = static_cast<int64>(source.maximum);
+        }
+    }
+
+    out = Move(made.Value());
+    return Result<void>::Success();
+}
+
+// 동적 변수의 콘솔 설정 상태(이름·도움말·범위·enum·기본값)를 만든다. 기본값 표기는 그 변수의 규칙에
+// 맞아야 한다(아니면 InvalidArgument).
+Result<void> MakeDynamicSetting(ConfigState& state, ObjectRegistry& objects,
+                                const DynamicVarDefinition& source, const VarDefinition& definition,
+                                UniquePtr<ConsoleSettingState>& out) noexcept {
+    auto made = UniquePtr<ConsoleSettingState>::TryMake(state.allocator, state.allocator);
+    if (!made) {
+        return Result<void>::Failure(made.Error());
+    }
+
+    ConsoleSettingState& setting = *made.Value();
+    setting.definition = &definition;
+    setting.type = source.type;
+    setting.kind = ConsoleValueKind(source.type);
+    setting.flags = detail::ConsoleFlagsOfDefinition(definition);
+    setting.hasRange = source.hasRange;
+    setting.minimum = source.minimum;
+    setting.maximum = source.maximum;
+    if (setting.kind == ValueKind::Enum) {
+        auto lease = objects.Types().AcquireValueType(source.enumType, TypeKind::Enum);
+        if (!lease) {
+            return Result<void>::Failure(lease.Error());
+        }
+
+        setting.enumLease = Move(lease.Value());
+        setting.enumSchema = &setting.enumLease.Enum();
+    }
+
+    Result<void> filled = setting.name.TryAssign(source.name);
+    if (filled) {
+        filled = setting.help.TryAssign(source.help);
+    }
+
+    if (!filled) {
+        return filled;
+    }
+
+    // 기본값: 표기가 있으면 그 값(범위·enum에 맞아야 한다), 없으면 타입의 0 값·enum 첫 열거자.
+    setting.defaultValue.kind = setting.kind;
+    if (setting.enumSchema != nullptr) {
+        setting.defaultValue.type = setting.enumSchema->id;
+        setting.defaultValue.signedInteger = EnumReplacementValue(*setting.enumSchema, 0);
+    }
+
+    if (!source.defaultValue.IsEmpty()) {
+        ConfigDiagnosticCode code = ConfigDiagnosticCode::InvalidSetting;
+        FieldValue parsed(state.allocator);
+        auto checked = detail::CheckConsoleValue(state, setting, ConfigLayer::CodeDefault,
+                                                 source.defaultValue, parsed, code, false);
+        if (!checked) {
+            return Result<void>::Failure(checked.Error());
+        }
+
+        if (!checked.Value().IsEmpty()) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (auto copied = detail::CopyFieldValue(parsed, setting.defaultValue); !copied) {
+            return copied;
+        }
+    }
+
+    out = Move(made.Value());
+    return Result<void>::Success();
+}
+
 } // namespace
+
+Result<cvar::Index>
+ConfigContext::RegisterDynamic(const DynamicVarDefinition& definition) noexcept {
+    ConfigState* state = state_.Get();
+    if (state == nullptr) {
+        return Result<cvar::Index>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (platform::CurrentThreadId() != state->owner) {
+        return Result<cvar::Index>::Failure(ErrorCode::WrongThread);
+    }
+
+    // 출시 빌드의 Cheat 변수는 등록하지 않는다(핸들과 같다 — 13.1절).
+    if constexpr (IsReleaseBuild) {
+        if (cvar::HasFlag(definition.flags, VarFlags::Cheat)) {
+            return Result<cvar::Index>::Failure(ErrorCode::Unsupported);
+        }
+    }
+
+    if (!IsValidDynamic(*state, definition)) {
+        return Result<cvar::Index>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 1단계: 이름 충돌을 보고 정의·상태를 만든다(여기까지는 문맥을 바꾸지 않는다).
+    if (state->FindCommand(definition.name) != IndexNone) {
+        return Result<cvar::Index>::Failure(ErrorCode::AlreadyExists);
+    }
+
+    UniquePtr<detail::DynamicVarState> dynamic;
+    if (auto made = MakeDynamicDefinition(*state, definition, dynamic); !made) {
+        return Result<cvar::Index>::Failure(made.Error());
+    }
+
+    UniquePtr<ConsoleSettingState> setting;
+    if (auto made = MakeDynamicSetting(*state, *objects_, definition, dynamic->definition, setting);
+        !made) {
+        return Result<cvar::Index>::Failure(made.Error());
+    }
+
+    if (const usize existing = state->FindSetting(definition.name); existing != IndexNone) {
+        const ConsoleSettingState& other = *state->settings[existing];
+        const bool same = other.kind == setting->kind && (setting->kind != ValueKind::Enum ||
+                                                          other.enumSchema == setting->enumSchema);
+        return Result<cvar::Index>::Failure(same ? ErrorCode::AlreadyExists
+                                                 : ErrorCode::TypeMismatch);
+    }
+
+    if (auto reserved = state->settings.TryReserve(state->settings.Size() + 1); !reserved) {
+        return Result<cvar::Index>::Failure(reserved.Error());
+    }
+
+    if (auto reserved = state->dynamicVars.TryReserve(state->dynamicVars.Size() + 1); !reserved) {
+        return Result<cvar::Index>::Failure(reserved.Error());
+    }
+
+    // 2단계: 이미 들어온 층 입력(대기 값)을 넘긴다. 실패하면 이번 호출의 진단을 되돌린다.
+    const ConfigDiagnosticsMark mark = state->diagnostics.Mark();
+    if (auto adopted = detail::AdoptPendingValues(*state, *setting); !adopted) {
+        state->diagnostics.Rewind(mark);
+        return Result<cvar::Index>::Failure(adopted.Error());
+    }
+
+    // 3단계: 번호를 주고 새 칸을 더한 snapshot을 바로 게시한다(봉인 뒤의 부팅 변수는 부팅 블록에도
+    // 굳힌다 — 9절).
+    AssignIndex(dynamic->definition);
+    detail::SlotWrite write;
+    write.index = platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&dynamic->definition.index);
+    write.value = &setting->value;
+    const bool sealedBoot = state->startupComplete && definition.boot;
+    const UniquePtr<ConsoleSettingState>* added = &setting;
+    if (auto published =
+            PublishRegistration(*state, Span<const UniquePtr<ConsoleSettingState>>(added, 1), {},
+                                Span<const detail::SlotWrite>(&write, 1),
+                                sealedBoot ? Span<const detail::SlotWrite>(&write, 1)
+                                           : Span<const detail::SlotWrite>());
+        !published) {
+        state->diagnostics.Rewind(mark);
+        return Result<cvar::Index>::Failure(published.Error());
+    }
+
+    // 4단계: 넣는다(자리를 확보했으므로 실패하지 않는다).
+    const cvar::Index index{write.index};
+    if (!state->settings.TryPushBack(Move(setting)) ||
+        !state->dynamicVars.TryPushBack(Move(dynamic))) {
+        platform::Fatal("Dynamic CVar registration lost its reserved capacity");
+    }
+
+    return Result<cvar::Index>::Success(index);
+}
 
 Result<void> ConfigContext::RegisterHandles(Span<const VarDefinition* const> definitions) noexcept {
     ConfigState* state = state_.Get();
@@ -336,13 +584,7 @@ Result<void> ConfigContext::RegisterHandles(Span<const VarDefinition* const> def
     auto publishNames = [&](Span<const UniquePtr<ConsoleSettingState>> settings,
                             Span<const detail::SlotWrite> writes,
                             Span<const detail::SlotWrite> bootWrites) noexcept {
-        state->namesChanged = true;
-        state->registeringSettings = settings;
-        state->registeringCommands = madeCommands.View();
-        auto published = detail::PublishSnapshot(*state, nullptr, writes, bootWrites);
-        state->registeringSettings = {};
-        state->registeringCommands = {};
-        return published;
+        return PublishRegistration(*state, settings, madeCommands.View(), writes, bootWrites);
     };
 
     if (added.IsEmpty()) {

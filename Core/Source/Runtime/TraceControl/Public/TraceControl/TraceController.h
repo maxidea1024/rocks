@@ -16,12 +16,17 @@ namespace rocks::trace_control {
 // 모듈 등록 단계에서 부른다. 실패: ModuleRegistration의 오류.
 Result<void> RegisterTraceControlTypes(ModuleRegistration& registration) noexcept;
 
-// 콘솔 영역 `trace`와 설정 struct(TracePresetSettings·TraceCaptureSettings)를 설정 문맥에 등록한다.
-// 파일 층을 읽기 전에 부른다. 실패: ConfigContext::RegisterConsoleRegion·RegisterSettings의 오류.
+// 콘솔 영역 `trace`, 설정 struct TracePresetSettings, 세션 설정 핸들(trace.* — TraceSettings.h)을
+// 설정 문맥에 등록한다. 파일 층을 읽기 전에 부른다. 실패: ConfigContext::RegisterConsoleRegion·
+// RegisterSettings·Register의 오류.
 Result<void> RegisterTraceSettings(config::ConfigContext& config) noexcept;
 
-// 설정 섹션 `Trace`의 값을 세션 설정으로 옮긴다(음수는 0, 너무 큰 값은 그 칸의 최대값). allocator와
-// writer 방식은 호출자가 정한다.
+// 설정 문맥의 최신 snapshot에서 세션 값(trace.* 핸들)을 읽는다. 부팅 값을 읽으므로 config는
+// 봉인(CompleteStartup) 뒤여야 한다. 오류: 초기화 전·봉인 전 InvalidArgument.
+Result<TraceCaptureSettings> ReadTraceCaptureSettings(const config::ConfigContext& config) noexcept;
+
+// 세션 값을 세션 설정으로 옮긴다(음수는 0, 너무 큰 값은 그 칸의 최대값). allocator와 writer 방식은
+// 호출자가 정한다.
 TraceSessionSettings MakeTraceSessionSettings(const TraceCaptureSettings& settings,
                                               Allocator& allocator) noexcept;
 
@@ -42,7 +47,8 @@ struct TraceChannelChange {
 //   RegisterTraceControlTypes(modules);
 //   RegisterTraceSettings(config);
 //   LoadConfigFiles(config, files); config.Sync();
-//   session.Start(MakeTraceSessionSettings(config.Get<TraceCaptureSettings>(), allocator));
+//   config.CompleteStartup();
+//   session.Start(MakeTraceSessionSettings(ReadTraceCaptureSettings(config).Value(), allocator));
 //   TraceController trace(allocator, session, config);
 //   trace.RegisterConsoleCommands();
 //   ... 모듈이 채널 등록 ...

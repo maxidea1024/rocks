@@ -15,8 +15,8 @@
 //   String·Name은 불변 텍스트 블록 참조)과 세대다. Sync는 바뀐 칸이 있는 조각만 새로 만들고
 //   나머지 조각은 이전 snapshot과 참조 계수로 공유한다(copy-on-write). `CVar::Get()`이 이 칸을
 //   읽는다(잠금·할당·문자열 연산 없음).
-// - 이름 블록: 이름(byte 순서)으로 찾는 값이다. CF2 독립 콘솔 설정과 설정 struct 필드 중
-//   RenderRead인 것이다(설정 struct의 렌더 읽기 블록 — Config 5.3절). CVar 핸들은 여기에 없다.
+// - 이름 블록: 이름(byte 순서)으로 찾는 값이다. 설정 struct 필드 중 RenderRead인 것이다(설정
+//   struct의 렌더 읽기 블록 — Config 5.3절). CVar(핸들·동적 변수)는 여기에 없다.
 //
 // UE 대응: 렌더 스레드 사본(IConsoleManager.h의 shadow 값). Rocks는 주소에 쓰는 명령 대신 불변
 // snapshot을 프레임마다 참조로 넘긴다.
