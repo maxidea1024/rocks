@@ -1,6 +1,6 @@
 # 엔진 런타임·월드·그래픽 최소 경로 설계
 
-기준일: 2026-11-12. 2026-11-18 갱신: 4.5절 위치 교체 제거, 7.2·7.4절 Level 배열·우회 파괴 복구(매 프레임, Level·Component 포함, 근거 정정)·encode 고정 계약·시작 큐, 4.6절 편입의 배열 위치·Component 색인, 7.5절 World 소스 파일 구성, 8절 증분 틱 순서(GC 실험 [16절](../Implementation/GcScaleExperiment.ko.md) 선형 검색 점검). 이 문서는 Core·Object 위에 처음 올리는 엔진 계층의 구조와 계약을 정한다. 범위는 **엔진 틱 → 월드 → Actor/Component → 텍스처 에셋 → D3D12·OpenGL로 화면에 그리기**까지의 수직 경로와, 그 위에 올릴 게임플레이 프레임워크(GameInstance·GameDirector·GameState·Controller·Pawn)의 골격이다. 전체 계획은 [엔진 구현 계획](EngineImplementationPlan.ko.md)을 따르며, 이 문서와 충돌하는 부분은 개정 1.8에서 이 문서 기준으로 바꾼다.
+기준일: 2026-11-12. 2026-11-19 갱신: 7.4절 우회 파괴 복구 비용 측정. 2026-11-18 갱신: 4.5절 위치 교체 제거, 7.2·7.4절 Level 배열·우회 파괴 복구(매 프레임, Level·Component 포함, 근거 정정)·encode 고정 계약·시작 큐, 4.6절 편입의 배열 위치·Component 색인, 7.5절 World 소스 파일 구성, 8절 증분 틱 순서(GC 실험 [16절](../Implementation/GcScaleExperiment.ko.md) 선형 검색 점검). 이 문서는 Core·Object 위에 처음 올리는 엔진 계층의 구조와 계약을 정한다. 범위는 **엔진 틱 → 월드 → Actor/Component → 텍스처 에셋 → D3D12·OpenGL로 화면에 그리기**까지의 수직 경로와, 그 위에 올릴 게임플레이 프레임워크(GameInstance·GameDirector·GameState·Controller·Pawn)의 골격이다. 전체 계획은 [엔진 구현 계획](EngineImplementationPlan.ko.md)을 따르며, 이 문서와 충돌하는 부분은 개정 1.8에서 이 문서 기준으로 바꾼다.
 
 ## 1. 범위와 단계
 
@@ -205,6 +205,7 @@ Uninitialized → Initializing → Running → Stopping → Stopped
   - Component 단독 우회 파괴는 처음 구현에서 복구되지 않았다(리뷰 지적, 시험 `World_BypassedComponentIsRepaired`로 확인 — 소유 Actor 목록·Actor 수에 남고 회수되지 않았다).
   - 복구가 늦어도 안전한 이유: World 객체의 회수는 World 루트(Level 레코드)·Level 배열·Actor의 `components` 간선에서 끊긴 뒤에만 일어나고(DestroyRequested여도 강한 간선이 붙잡으면 회수되지 않는다), 그 간선을 끊는 것은 World 정리뿐이다. 그래서 우회 파괴가 언제 일어나든(Tick 밖, Tick hook·OnDestroy hook 안 포함) 다음 복구 전에 회수되지 않는다. 매 프레임인 이유는 cycle 시작 전에만 보던 처음 방식이 World 쪽 파괴가 없으면 GC가 돌지 않아 우회 파괴된 Actor·Level을 영영 정리하지 않았기 때문이다(2026-11-18 리뷰 반영 시험 `World_BypassedLevelDestroyIsRepaired`가 드러냄 — Level 우회 파괴는 아예 복구하지 않았다). 앞 개정의 "cycle 도중 우회 파괴가 정리 없이 회수된다"는 근거는 틀렸다(리뷰 지적).
   - 처음 구현은 cycle마다 모든 Actor를 `InspectLifecycle`로 조회했다(cycle 시작 프레임 Actor 10K → 100K: 207 → 2,390us, 파괴 요청 목록으로 2–13us).
+  - 비용(2026-11-19, `WorldBench` — GC 실험 23절): 우회 파괴 하나의 복구·정리(Registry `RequestDestroy` 200개 뒤 한 프레임)는 Actor 10K·100K 모두 Actor당 0.30–0.34us(World API `DestroyActor`는 0.42–0.51us)이고, 변화 없는 프레임은 0.3us(목록이 비면 잠금 한 번)다. Actor 수와 무관하다.
   - Level 배열에서 뗄 때(`DetachFromLevel`)는 `RemoveReferenceAtSwap`(4.5절)을 쓴다. 옮겨 오는 끝 Actor도 우회 파괴로 DestroyRequested일 수 있는데, 위치 교체 `SetReferenceAt`은 그 원소를 새로 쓰는 것이라 재검증에서 실패하고 그 실패를 버리면 지운 Actor가 배열에 좀비로 남았다(리뷰 지적). 이 경로의 실패와 Actor 레코드 위치·배열 불일치는 일어날 수 없으므로 Fatal이다. 단 공개 API로 닿는 실패 하나가 있다: Level을 `PinForEncode`로 고정한 채 Tick하면 그 프레임의 Actor 정리에서 떼기가 Busy다. World 계약은 Borrow와 같이 encode 고정도 Tick·Shutdown 전에 반환하는 것이고(World.h 소유·수명 규약), 위반하면 그 계약을 밝히는 메시지로 Fatal이다(떼기 시점의 Busy로만 판정 — 매 프레임 Level을 훑지 않는다). 미뤄 두는 대기 목록은 버렸다: 고정이 풀릴 때 알 길이 없어 매 프레임 다시 시도해야 하고, 그동안 Level 배열과 Actor 레코드가 어긋난 채 남는다. 예외는 Level 객체 자체가 우회 파괴돼(DestroyRequested — Registry가 빌려 주지 않는다) 복구 전인 경우다. 그 배열은 Level과 함께 사라지므로 뗄 것이 없고, 복구의 `DestroyLevel`은 Level 배열 대신 World의 Actor 레코드에서 소속 Actor를 찾는다(이 계약 위반의 복구에서만 Actor 수에 비례).
 
 ### 7.5 소스 파일 구성
