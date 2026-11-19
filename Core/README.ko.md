@@ -2,7 +2,7 @@
 
 엔진이 아니라 엔진·도구·게임이 함께 쓰는 바탕 계층이다. 모듈은 `Source/Runtime/<Module>/`에 있고 각
 폴더에 `<Module>.Build.cs`·`Public/`·`Private/`·`Tests/`가 있다. 전체 저장소 구성은
-[저장소 구성](../Docs/Design/RepositoryLayout.ko.md)을 참고한다.
+[저장소 구성](../Docs/Guides/RepositoryLayout.ko.md)을 참고한다.
 
 | 모듈 | 의존 | 내용 |
 |---|---|---|

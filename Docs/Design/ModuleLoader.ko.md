@@ -23,7 +23,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`, commit 
 | 리플렉션 등록 | 생성 집계 함수 `RegisterModuleTypes(ModuleRegistration&, const ModuleLease& = {})`(`Programs/Rocks.MetaCompiler/CppEmitter.cs:59-133`)를 호스트·래퍼가 명시 호출한다(`HostSettings.cpp:269-344`, `World.cpp:88-91`, `Templates/Game/Foundation/Source/Main.cpp:9-10`). 집계 함수는 import한 의존 모듈을 호출자의 lease로 재귀 등록한다 | 실제 `ModuleLease`를 넘기는 쪽이 없다. 모듈이 언제 등록되는지가 호출자마다 다르다 |
 | 코드 수명 토큰 | `ModuleLease`(retain/release 토큰, 빈 lease는 정적 링크 코드 — `Core/Source/Runtime/Core/Public/Core/Lifetime/ModuleLease.h:7-93`)가 `RuntimeTypeOps.module`에 저장된다 | 발급자가 없다 |
 | 공유 라이브러리 적재 | `platform::DynamicLibrary`(절대 경로만, `FileStatus{code, nativeError}` — `Core/Source/Runtime/PlatformBase/Public/Platform/DynamicLibrary.h:81-175`). 문서가 "엔진 모듈 로더가 아니다"라고 적는다 | POSIX는 `nativeError`가 0이고 `dlerror` 문구를 넘기지 않았다. ML0에서 `DynamicLibraryError`로 문구를 넘기도록 보강했다(3.5절) |
-| 로딩 단계 | 기술자 `LoadingPhase { EarliestPossible, PostConfigInit, PreDefault, Default, PostDefault }`가 있다(`Programs/Rocks.Build/Descriptors.cs:35`). 엔진 모듈(`SourceModuleRules`)에는 단계가 없다 | 빌드가 읽기만 하고 실행 중 반영이 없다([저장소 구성](RepositoryLayout.ko.md) 게임 빌드 연동) |
+| 로딩 단계 | 기술자 `LoadingPhase { EarliestPossible, PostConfigInit, PreDefault, Default, PostDefault }`가 있다(`Programs/Rocks.Build/Descriptors.cs:35`). 엔진 모듈(`SourceModuleRules`)에는 단계가 없다 | 빌드가 읽기만 하고 실행 중 반영이 없다([저장소 구성](../Guides/RepositoryLayout.ko.md) 게임 빌드 연동) |
 | 설정 등록 | CVar·설정 struct는 모듈 등록 함수에서 `ConfigContext::Register`로 올린다([CVar](CVarSystem.ko.md)). HostSettings는 `CompleteStartup` 직후 `ReportUnresolved`로 아무도 등록하지 않은 이름을 경고한다(`Core/Source/Runtime/HostConfig/Private/HostSettings.cpp:549-560`) | 모듈이 늦게 시작해 늦게 등록하면 설정 파일의 그 이름이 모두 오타 경고가 된다 |
 | 빌드 식별 | `ToolchainFingerprint()`·`ToolBuildId()`(`Core/Public/Core/Build/BuildInfo.h`)는 Core가 선언하고 실행 파일마다 만드는 생성 TU가 정의한다 | 공유 라이브러리 사이 호환 식별자로 쓸 수 없다. Modular에서는 Core 공유 라이브러리에 미해결 기호가 생긴다 |
 | 전역 생성자 | 금지가 원칙이다([설정 시스템](ConfigSystem.ko.md) 129행, [CVar](CVarSystem.ko.md) VD1). 예외는 시험 `TEST` 등록뿐이다(`TestSupport/Public/TestSupport/Test.h:13-33`) | UE식 정적 등록(전역 생성자)을 그대로 쓸 수 없다 |
@@ -380,7 +380,7 @@ public:
 구현 때 고칠 문서:
 - crash-launch 설계(`CrashHandlingAndLaunch.ko.md`, 병합 대기): 8.1절에 로더 생성·`Prepare`·`EarliestPossible`(7단계 뒤), 8.2절에 프로세스 묶음 종료(도구 로그 정리 전)를 더한다. 병합 뒤 ML1에서 고친다.
 - [CVar](CVarSystem.ko.md) "모듈 언로드 때 핸들 해제(결정 필요)": MD16·MD22로 답한다(등록은 `RegisterSettings`, 핸들이 모듈 lease를 잡고, 모듈 `Shutdown`이 해제한다).
-- [저장소 구성](RepositoryLayout.ko.md) 게임 빌드 연동: `loadingPhase` 실행 중 반영을 이 문서로 링크한다(ML1).
+- [저장소 구성](../Guides/RepositoryLayout.ko.md) 게임 빌드 연동: `loadingPhase` 실행 중 반영을 이 문서로 링크한다(ML1).
 - [AppInfo·CommandLine](AppInfoCommandLine.ko.md) 11절: `BuildDescription`에 `ModuleBuildId`를 더한다(ML4).
 - [엔진 런타임](EngineRuntime.ko.md) 4.1·6절: `Engine::Initialize`·`Shutdown`의 엔진 묶음 호출과 타입 등록기(ML1·ML2).
 

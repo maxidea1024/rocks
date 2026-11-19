@@ -28,7 +28,7 @@ Templates/   게임 프로젝트 템플릿
 ```
 
 모듈마다 폴더에 `<모듈>.Build.cs`·`Public/`·`Private/`·`Tests/`를 둔다. 자세한 규칙은
-[저장소 구성](Docs/Design/RepositoryLayout.ko.md)을 참고한다.
+[저장소 구성](Docs/Guides/RepositoryLayout.ko.md)을 참고한다.
 
 ## 빌드·검증
 
@@ -49,7 +49,7 @@ dotnet msbuild Rocks.proj /t:Test /p:Configuration=Debug /p:RocksTarget=Foundati
 - [Archive·Record·객체 그래프 직렬화](Docs/Implementation/Serialization.ko.md)
 - [WorkerScheduler 수명·종료 계약](Docs/Implementation/WorkerScheduler.ko.md)
 - [렌더 기반 구현 범위와 계약](Docs/Implementation/RenderBase.ko.md)
-- [저장소 구성](Docs/Design/RepositoryLayout.ko.md)
+- [저장소 구성](Docs/Guides/RepositoryLayout.ko.md)
 - [전체 구현 계획](Docs/Design/EngineImplementationPlan.ko.md)
 - [Core·Object·Input 상세 구현 계획](Docs/Design/CoreObjectInputDetailedPlan.ko.md)
 - [UI 툴킷 설계(게임 UI·에디터)](Docs/Design/UiToolkit.ko.md)

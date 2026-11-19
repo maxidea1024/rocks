@@ -10,7 +10,7 @@
 | 수백만 객체의 한도·메모리·정지 시간 | 7 → 8 → 9 |
 | 회수가 늦거나 GC가 멈춘 것 같을 때 | 6 → 9 → 10 |
 
-세부 구현 계약은 [점진·병렬 GC](IncrementalGarbageCollection.ko.md), 접근 및 수명 규약은 [객체 생명주기](ObjectLifecycle.ko.md)를 참고한다.
+세부 구현 계약은 [점진·병렬 GC](../Implementation/IncrementalGarbageCollection.ko.md), 접근 및 수명 규약은 [객체 생명주기](../Implementation/ObjectLifecycle.ko.md)를 참고한다.
 
 ## 1. 전체 흐름과 기본 용어
 
@@ -657,11 +657,11 @@ if (!world) {
 
 `ObjectRegistry::Stats()`와 `World::Stats()`도 구분한다. 후자는 pending Actor 수 등을 계산하며 Actor 기록을 순회하므로 Release에서도 객체 수에 따른 비용이 든다. `CaptureDiagnostics`는 gate 안에서 전체 슬롯을 검사하고 진단 기록을 복사한다. 수백만 객체의 진단은 저빈도 샘플링과 호출 시간 측정을 병행하고, 매 프레임 전체 캡처로 측정 자체가 병목이 되지 않게 한다.
 
-`Destroy` 요청은 일반 접근을 닫는 논리적 생명주기 전이이며, 즉시 메모리 해제와 같지 않다. 이미 얻은 포인터도 Borrow 반환 이후 사용하면 안 된다. 보유가 누락되거나 오래 지속되는 문제는 GC 조정만으로 해결되지 않는다. 자세한 상태별 계약은 [객체 생명주기와 실행 문맥](ObjectLifecycle.ko.md)을 따른다.
+`Destroy` 요청은 일반 접근을 닫는 논리적 생명주기 전이이며, 즉시 메모리 해제와 같지 않다. 이미 얻은 포인터도 Borrow 반환 이후 사용하면 안 된다. 보유가 누락되거나 오래 지속되는 문제는 GC 조정만으로 해결되지 않는다. 자세한 상태별 계약은 [객체 생명주기와 실행 문맥](../Implementation/ObjectLifecycle.ko.md)을 따른다.
 
 `Shutdown`은 신규 접근을 닫은 뒤 진행 중인 cycle을 완료하고 전체 수집을 시도하므로 오래 걸릴 수 있다. 닫은 뒤 보유권 때문에 `Busy`가 반환되어도 열린 상태로 되돌아가는 것이 아니다. 남은 보유권을 반환한 뒤 재시도하고, 성공 전에 Registry를 파괴하지 않는다.
 
-현재 범위에는 자동 스택 루트 스캔, 다중 mutator와 동시 필드 스캔, 객체 이동·압축, 병렬 sweep, hard real-time 보장이 포함되지 않는다. 테스트 범위와 보다 세밀한 실패·회수 계약은 [구현 계약](IncrementalGarbageCollection.ko.md)의 검증 절을 참고한다.
+현재 범위에는 자동 스택 루트 스캔, 다중 mutator와 동시 필드 스캔, 객체 이동·압축, 병렬 sweep, hard real-time 보장이 포함되지 않는다. 테스트 범위와 보다 세밀한 실패·회수 계약은 [구현 계약](../Implementation/IncrementalGarbageCollection.ko.md)의 검증 절을 참고한다.
 
 ### 구현과 테스트를 직접 확인할 위치
 

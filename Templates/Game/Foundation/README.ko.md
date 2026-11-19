@@ -4,7 +4,7 @@
 
 ## 현재 동작
 
-- `Game.rocksproject`는 프로젝트 기술자다(UE .uproject 대응). 엔진 버전·모듈(`SampleGame`)·대상 플랫폼을 적는다. 형식은 [저장소 구성](../../../Docs/Design/RepositoryLayout.ko.md)의 기술자 절을 따른다.
+- `Game.rocksproject`는 프로젝트 기술자다(UE .uproject 대응). 엔진 버전·모듈(`SampleGame`)·대상 플랫폼을 적는다. 형식은 [저장소 구성](../../../Docs/Guides/RepositoryLayout.ko.md)의 기술자 절을 따른다.
 - `Game.Build.cs`는 `SampleGame` 실행 모듈과 `ObjectRuntime` 의존성을 선언한다.
 - `Game.Target.cs`는 `Game` 타깃이 빌드할 모듈(`SampleGame`)을 고른다. 리플렉션 헤더는 모듈이 소유한다: `Game.Build.cs`의 `Metadata = ["GameObject.h"]`가 메타컴파일러가 처리할 헤더이고, 생성 헤더는 `<GameObject.generated.h>`로 include한다.
 - `SampleGame.rocksids.json`(모듈 이름 + `.rocksids.json`, `ModuleDirectory` = 프로젝트 루트)은 이 모듈의 타입·필드 식별자를 보관한다. 소스의 매크로에는 식별자를 적지 않는다.
