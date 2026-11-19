@@ -1,6 +1,6 @@
 # 렌더러(Renderer) 설계
 
-기준일: 2026-11-18, 개정 9(초안). UE 5.8 Renderer 모듈이 맡는 일 가운데 **렌더 경로**(Forward+·Deferred)와 그 위에 올라가는 그림자·투명·하늘·안개·후처리의 구조, GI 두 축과 PathTracing 모드의 연결점을 Rocks에 세우는 설계 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-20, 개정 10(초안). UE 5.8 Renderer 모듈이 맡는 일 가운데 **렌더 경로**(Forward+·Deferred)와 그 위에 올라가는 그림자·투명·하늘·안개·후처리의 구조, GI 두 축과 PathTracing 모드의 연결점을 Rocks에 세우는 설계 스펙이다. 범위는 다음과 같다.
 - 장면 표현과 게임 → 렌더 전달, view와 가시성
 - 공통 frame graph, Forward+와 Deferred가 갈라지는 곳
 - GBuffer layout, light grid, 조명 평가, 그림자, 투명·하늘·안개, 후처리·업스케일 연결
@@ -854,7 +854,7 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 | RS9 | 고급 shading model(GBufferD), rect light·IES·광원 함수 atlas | RS2·RS3, 머티리얼 MS8(SF3) | 계획 14.2절 고급 직접 조명 검증, 모델별 Deferred 인코딩·Forward 평가 대조 |
 | RS10 | screen-space: SSR·contact shadow, Forward+ 보조 출력, 간접광 합성(F12) | RS2·RS6 | 순환 graph 거부(음성 대조), 두 경로 screen-space 영상 대조 |
 | RS11 | GI·RT 연결점: `IndirectLightingInputs`, `RayScene` 자리, `RenderMode::PathTracing` 골격(누적·리셋·후처리 연결) | RS10, 각 방식 스펙 | 방식 없음 view와 방식 있는 view의 직접광 동일, PathTracing 리셋 조건 시험, 미지원 장치 `Unsupported` |
-| RS12 | skinned 메시: 정점 입력 타입, 현재·이전 pose(velocity), 두 경로·그림자·투명 | RS3·RS6, 애니메이션 skinning(계획 15절) | 계획 15절 "Deferred·Forward·shadow·picking에서 동일 pose", CPU skinning 기준 결과 대조, 계획 12.1절 U1 skinned motion(velocity) 시험 |
+| RS12 | skinned 메시: 정점 입력 타입, 현재·이전 pose(velocity), 두 경로·그림자·투명. 섹션 본 palette 한도를 정해 메시 빌드에 준다, morph 희소 목록 적용(compute 또는 CPU)(MeshAnimationAssets MR2) | RS3·RS6, 애니메이션 skinning(계획 15절), MeshAnimationAssets MA5 | 계획 15절 "Deferred·Forward·shadow·picking에서 동일 pose", CPU skinning 기준 결과 대조, 계획 12.1절 U1 skinned motion(velocity) 시험 |
 
 - 모든 GPU 시험은 검증 계층 오류 0(RenderBase 8절)과 렌더 lane·인라인 모드 결과 동일을 함께 요구한다.
 - 기준 영상은 계획 29.2절대로 장면 manifest·카메라 경로·seed·build hash를 고정한다. Vulkan·GLES가 CI에서 NOT RUN이면 로컬 결과를 기록한다(RenderBase 18.1절과 같다).
@@ -886,7 +886,7 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 | RQ16 | RenderBase 11·14절 | MSAA 색·깊이 resolve 셰이더(깊이·velocity 전경 선택, 계획 11.1절)를 그리기 유틸리티로. **반영(RenderBase 개정 15, 11.2·14절)**: 색 휘도 가중 평균, 깊이 최댓값(전경), 같은 표본의 velocity, coverage 선택 출력. 개정 8: 깊이 늘·velocity는 temporal 때·색 수단(RenderBase 결정 R17), 8.2절 문구 | RS8 |
 | RQ17 | RenderBase 11.1절 내장 자원 팩 | 빈 light grid, 빈 그림자(깊이 1 = 원평면, 9.2절 보통 Z 규약에서 비교 결과 "그림자 없음"), 검은 cube, 기본 BRDF LUT(또는 시작 때 생성). **반영(RenderBase 개정 15, 11.1절)**: BRDF LUT는 시작 때 CPU 생성 128×32 `RG16Float`(RenderBase 결정 R14). 개정 8: 검은 cube array 알파 0(8.3절 capture 알파) | RS1·RS3·RS7 |
 | RQ18 | 머티리얼 시스템 | 14절 계약 전체, 특히 `SurfaceAttributes`·생성 함수(14.1절)·번호표 참조(`RenderData`, 결정 RN5)·pass 셰이더 목록과 경로·`MaterialShaderTraits` 거르기, (pass, 퍼뮤테이션, 형식)별 머티리얼 텍스처 상한 표시(7.4절), Render Path Switch의 깊이 일치 검사(14.3절). 머티리얼 시스템 개정 2가 10.1·10.4절에 반영했다 | MS2(MAT0) |
-| RQ19 | AssetSystem 메시 단계 | 정적 메시: 위치·패킹 법선·tangent·UV, section·머티리얼 slot, bounds, LOD. 이동 물체 velocity를 위한 이전 위치는 렌더러가 변환으로 계산(skinned는 이전 pose를 렌더러에 넘김) | RS0 |
+| RQ19 | AssetSystem 메시 단계 | 정적 메시: 위치·패킹 법선·tangent·UV, section·머티리얼 slot, bounds, LOD. 이동 물체 velocity를 위한 이전 위치는 렌더러가 변환으로 계산(skinned는 이전 pose를 렌더러에 넘김). **명세됨(2026-11-20)**: [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md) 5.3절 `StaticMeshRenderData`(stream 집합은 RenderBase 10.4절 끝 "메시 에셋 요구"), 6.3절 `SkinnedRenderLod`(RS12용 영향·palette·inverse-bind·morph 희소 목록). 구현은 MA2·MA5 | RS0 |
 | RQ20 | WorldIntegration | `SceneChangeList`·`ViewDesc` 생성, teleport·cut 표시, `RenderNotices` 처리 | RS0 |
 | RQ21 | TextureStreaming | 렌더러가 텍스처 사용 기록별 마지막 그린 프레임 번호(4.2절)와 view별 mip bias(11.2절)를 넘기는 형식. TextureStreaming 4.1절 요구를 렌더러 쪽에서 받은 것 | RS0(사용 기록)·RS6(mip bias) |
 | RQ22 | 셰이더 시스템 12.1절(형식 정의 `limits`)·7.2절 4항 | 결정 RN13 개정(2026-11-18 사용자 결정). (1) `sampledTextures`를 형식별로: `D3D12_SM6`·`METAL_SM5` 128 유지, `VULKAN_SM5`는 넓히고 `deviceRequirements`에 `maxPerStageDescriptorSampledImages`·`maxPerStageDescriptorSamplers` 하한을 넣는다(값은 GX1 장치 분포 확인 뒤, RQ11과 같은 방식), `D3D11_SM5`는 16, GLES는 16 유지. (2) 단계당 SRV 텍스처 상한 검사는 프로필 공통 상한(형식들의 최소값)이 아니라 job 형식의 상한으로 하고, 오류에 머티리얼·pass·퍼뮤테이션·형식을 담는다. 원문은 형식마다 바꾸지 않는다. **반영(셰이더 시스템 개정 13)**: (2)와 (1)의 D3D11 16은 7.2절 4항·12.1절에 들어갔다. Vulkan은 개정 14에서 128(장치 요구는 `limits`와 `DeviceCaps` 대조, `maxDescriptorSetSampledImages`·`maxPerStageResources` 합산 포함) | MS2·RS1 |
@@ -977,3 +977,4 @@ Runtime60 GPU 14 ms 배분(계획 29.2절)을 pass 묶음에 대응시킨다.
 - 개정 7(2026-11-18): 18절 요구 RQ7·RQ8·RQ15·RQ16·RQ17(RenderBase 개정 15)과 RQ13·RQ14(셰이더 시스템 개정 16) 반영 상태를 18.1·18.2절에 적었다. RQ14를 반영하면서 MRT 상한을 프로필 공통 상한으로 검사하던 빈틈을 셰이더 시스템에서 고쳤다.
 - 개정 8(2026-11-18): RenderBase 개정 16·셰이더 시스템 개정 17(교차 검증 반영)에 맞췄다. 8.1절 원소 상한과 셀 좌표 clamp, 8.2절 MSAA resolve 범위(결정 R17), 8.3절 반사 capture 알파, 9.2절과 결정 RN10의 point 한 번 그리기를 layer가 아니라 viewport 출력으로 바로잡음, 13.1절 지원표 행, 15.2절 `PrecomputedLighting` 그리기별 바인딩·`ForwardLight` local 광원 수·`Scene`의 `ViewSet` 단위·상수 버퍼 예산, 결정 RN9 재검토 조건, 19.2절 측정 두 건, 18.1절 RQ4·7·8·14–17 행.
 - 개정 9(2026-11-18): Graphics GX1–GX4 구현(98b6e524)을 18절 RQ1·RQ3·RQ4·RQ5에 적었다.
+- 개정 10(2026-11-20): 메시 에셋 스펙(MeshAnimationAssets 개정 2)을 18절 RQ19에 연결했다. RS12에 섹션 본 palette 한도·morph 적용 책임(MR2)을 적었다.

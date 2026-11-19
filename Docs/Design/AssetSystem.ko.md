@@ -1,6 +1,6 @@
 # 에셋 시스템 설계
 
-기준일: 2026-11-18, 개정 9(A0-G 구현 — 1절 A0-G 행에 범위·스펙 차이, 2절 그래픽 행). 개정 8(텍스처 기반 클래스 `StreamableRenderAsset` — 12.1절, 사용자 결정). 개정 7(개정 6 최종 검증 반영: 저장 쪽 값 치환·SCC 키 튜플·Commit 간선 보고·Windows 디렉터리 동기화·PreserveBorder 정의). 원본 파일 임포트부터 쿠킹된 런타임 데이터 로드까지 에셋의 전체 수명주기와 첫 수직 단면(PNG → Texture Asset → 설정 수정·재임포트 → 플랫폼별 쿠킹 → 런타임 로드)을 정한다. [엔진 구현 계획](EngineImplementationPlan.ko.md)의 결정을 따른다: §5.2(Outer·객체 경로), §5.3(instancing), §6.1(참조 종류), §7(직렬화·스키마 변경), §9(에셋 파이프라인·로딩·패키지·재임포트·텍스처 스트리밍), §24.2(PrimaryAsset·bundle). 계획을 바꾸는 곳은 17절에 모으고 계획 문서도 같이 고친다. 에디터 UI 연동은 범위 밖이며(사용자 결정) 서비스 API와 명령행 도구로 같은 기능을 제공한다.
+기준일: 2026-11-20, 개정 10(메시·애니메이션 스펙 [MeshAnimationAssets](MeshAnimationAssets.ko.md) MR9·MR10과 [Unreal 교환 형식](UnrealExchange.ko.md) UXR1–UXR3·UXR6 반영 — 3절 모듈, 4.6절 진단, 7절 임포터 태그, 12.2절 손실 원본 예외, 12.4.5절 메시 LOD 그룹, 14.1절 결정적 ID 발급기, 18절). 개정 9(A0-G 구현 — 1절 A0-G 행에 범위·스펙 차이, 2절 그래픽 행). 개정 8(텍스처 기반 클래스 `StreamableRenderAsset` — 12.1절, 사용자 결정). 개정 7(개정 6 최종 검증 반영: 저장 쪽 값 치환·SCC 키 튜플·Commit 간선 보고·Windows 디렉터리 동기화·PreserveBorder 정의). 원본 파일 임포트부터 쿠킹된 런타임 데이터 로드까지 에셋의 전체 수명주기와 첫 수직 단면(PNG → Texture Asset → 설정 수정·재임포트 → 플랫폼별 쿠킹 → 런타임 로드)을 정한다. [엔진 구현 계획](EngineImplementationPlan.ko.md)의 결정을 따른다: §5.2(Outer·객체 경로), §5.3(instancing), §6.1(참조 종류), §7(직렬화·스키마 변경), §9(에셋 파이프라인·로딩·패키지·재임포트·텍스처 스트리밍), §24.2(PrimaryAsset·bundle). 계획을 바꾸는 곳은 17절에 모으고 계획 문서도 같이 고친다. 에디터 UI 연동은 범위 밖이며(사용자 결정) 서비스 API와 명령행 도구로 같은 기능을 제공한다.
 
 원칙: 기반이 부족하면 우회하지 않고 기반을 보강한다(사용자 지시). 동작하지 않는 기능을 완성처럼 표시하지 않는다. 상태 표기: **구현**(이번 범위에서 동작·시험), **계약**(API·스키마·포맷이 있고 호출하거나 기본값이 아닌 값을 주면 명시 오류 — `Unsupported`·`UnsupportedSetting`·`UnsupportedCapability` — 를 반환), **후속**(이번 범위에 API도 없음).
 
@@ -52,6 +52,8 @@
 | Cooker | AssetCooker | 구현(비압축 형식), 블록 압축 계약 |
 | Runtime Asset Loader | AssetRuntime `AssetLoader` | 구현(CPU ready), `Render` ready 계약 |
 | Asset Manager | AssetRuntime `AssetManager` | 구현(scope·PrimaryAsset·bundle·즉시 해제), 예산 LRU 해제 후속 |
+| 메시·스켈레톤·애니메이션 에셋 | `MeshSource`·`Mesh`·`Animation`(Runtime), `MeshTools`·`AnimationTools`(Developer) | 설계([MeshAnimationAssets](MeshAnimationAssets.ko.md) 8절, MA1–MA7) |
+| 외부 엔진 교환 임포터 | 엔진 플러그인 `UnrealExchange`(Developer) | 설계([Unreal 교환 형식](UnrealExchange.ko.md) 10절, UX1–UX8) |
 
 이름 구분: 에셋 객체가 사는 `ObjectRegistry`는 **에셋 객체 Registry**, 에디터 패키지 인덱스는 **AssetIndex**(UE AssetRegistry 대응), 쿠킹 결과의 런타임 목록은 **쿠킹 매니페스트**(`CookedManifest.rman`, 10절)라 부른다.
 
@@ -63,6 +65,10 @@ AssetCooker → { AssetDatabase, AssetNugget }        AssetDatabase → AssetRun
 Texture(Runtime) → { AssetRuntime, GraphicsTypes }       ImageCore(Developer) → { Core, Compression }
 AssetRuntime → { ObjectSerialization, ObjectRuntime, Serialization, Task, Compression }
 EngineAssets(Runtime, 신규) → { Engine, AssetRuntime }   — AssetManager를 EngineSubsystem으로 붙이는 연결 모듈
+MeshSource(Runtime) → { AssetRuntime }                  Animation(Runtime) → { AssetRuntime, Curves }      (설계, MeshAnimationAssets 8절)
+Mesh(Runtime) → { AssetRuntime, MeshSource, Animation, Material, GraphicsTypes }
+MeshTools(Developer) → { Mesh, MeshSource, AssetCooker, AssetDatabase, AssetNugget }   AnimationTools(Developer) → { Animation, AssetCooker, AssetDatabase, AssetNugget }
+UnrealExchange(플러그인, Developer) → { AssetDatabase, TextureTools, MeshTools, AnimationTools, MaterialCompiler, Material }   (설계, UnrealExchange 10.1절)
 ```
 
 AssetRuntime은 Engine을 모른다. 도구는 Engine을 링크하지 않고 `AssetManager`를 직접 소유한다. 게임은 `EngineAssets`가 AssetManager를 `EngineSubsystem`으로 등록하고 프레임 단계(로드 결과 전달·에셋 객체 Registry GC 한 조각)를 연결한다. World는 AssetRuntime에 의존하지 않는다(6.3절).
@@ -116,6 +122,8 @@ AssetRuntime은 Engine을 모른다. 도구는 Engine을 링크하지 않고 `As
 | `ImporterOutdated`, `InvalidImportOption`, `OrphanedOutput`, `UnknownProperty`(모르는 속성 이름), `UnsupportedSetting`(계약 설정의 기본값이 아닌 값), `InvalidSetting`(모순된 조합·숨김 값), `SrgbIgnored`(경고 — 선형 설정·float 출력의 SRGB), `PreserveBorderWithWrap`(경고) | 임포트·설정 |
 | `CorruptEntry`(에셋 너겟 항목·게시 패키지 파일 손상), `IncompatibleCook`(부분 쿠킹 병합 불가·런타임 프로파일 불일치), `NeverCookReferenced` | 에셋 너겟·쿠킹 |
 | `AliasResolved`, `RootLost`(감시 루트 소실) | 그 밖 |
+| `InvalidMeshData`, `NonFiniteAttribute`, `UvOutOfRange`, `NonNormalizedWeights`, `TooManyInfluences`, `InfluencesTrimmed`, `MaterialSlotFallback`, `NegativeBuildScale`, `UnsupportedCollisionShape`, `SkeletonMismatch`, `UnknownBoneTrack`, `InvalidClipData`, `EventPropertiesDropped` | 메시·애니메이션(설계 — [MeshAnimationAssets](MeshAnimationAssets.ko.md) 11절) |
+| `CorruptBundle`, `UnsupportedBundleVersion`, `UnknownField`, `UnsupportedAsset`, `LossyOriginAccepted`, `UnsupportedSourceLayout`, `GammaMismatch`, `GeneratedLodBaked`, `BakedColorQuantized`, `UnrealPathRenamed`, `UnrealPathTooLong`, `UnrealPathCollision`, `MissingUnrealDependency`, `UntranslatedMaterialNode`, `MaterialBakedFallback`, `ParameterDefaultConflict`, `ParameterResolveMismatch` | Unreal 교환 임포트(설계 — [Unreal 교환 형식](UnrealExchange.ko.md) 10.3절) |
 
 ## 5. 패키지 포맷 v1
 
@@ -289,6 +297,7 @@ World 객체는 에셋 객체 Registry 밖에 있어 `ObjectRef<에셋>`을 걸 
 
 - 패키지 파일이 유일한 진실이다. 헤더·섹션 표·Summary·Exports·ObjectImports·Dependencies·ImportRecord·Tags만 읽는다.
 - 조회: ID·경로 키·타입(상속 포함)·디렉터리·태그, 정방향·역방향 의존(종류별), 별칭.
+- 임포터 태그(Unreal 교환 UXR2, 2026-11-20): Tags 섹션의 키는 타입이 정하는 것 외에 임포터가 정하는 키도 둘 수 있다. 임포터 키는 `<임포터 이름>.` 접두로 타입 키와 겹치지 않게 한다(예: Unreal 교환의 `UnrealExchange.ObjectPath`·`UnrealExchange.FormerPaths` — [Unreal 교환 형식](UnrealExchange.ko.md) 9.2절). AssetIndex는 임포터 키도 같은 방식으로 색인하고 값 일치 조회를 제공한다. 값이 목록인 키(옛 경로 목록)는 원소마다 색인한다.
 - 일관성: 프로세스 로컬 최종 일관 인덱스. 쓰기 결정은 잠금 아래에서 디스크를 다시 확인.
 - 갱신: 자기 명령은 즉시. 외부 변경은 `DirectoryWatcher`(계약은 `Platform/DirectoryWatch.h`): 감시 시작 → 검색 → 쌓인 이벤트 적용. 이벤트 종류를 믿지 않고 경로를 다시 Stat·범위 읽기(레벨 트리거). `Overflow(path)`는 그 하위 트리 재검색, `RootRemoved`는 감시를 닫고 `RootLost` 진단·1초 간격으로 루트 재출현을 확인해 다시 연다. 쓰는 중이라 `CorruptPackage`인 파일은 크기·시각이 두 번 연속 같아질 때까지 최대 10초 기다린 뒤 다시 읽고, 그래도 손상이면 진단으로 남긴다.
 - 캐시: `Intermediate/AssetIndex.cache`(형식·Unicode·스키마 버전 키 — 도구 빌드 ID는 header에 진단용으로만 기록해 엔진을 다시 빌드할 때마다 캐시가 무효화되지 않게, 원자적 기록, 잠금 보유 프로세스만 기록 — 읽기 명령은 캐시를 읽기만). 파일별 헤더+섹션 표 SHA-256과 요약. 시작 시 범위(약 1 KiB)만 읽어 비교, 다르면 그 파일만 다시 읽음. 범위 읽기는 WorkerScheduler 병렬.
@@ -428,6 +437,8 @@ Requested → ResolveManifest(`CookedManifest.rman`, 하드 의존 SCC 계산) �
 
 2026-11-13 사용자 결정: DDS(비압축)·TIFF(무손실)·Radiance HDR·무손실 OpenEXR 디코더를 A5 범위에 넣는다(HDR·EXR은 처음에 "후속"이었다). PCX는 UE가 받지만 쓰이지 않으므로 지원하지 않는다. IES(조명 프로파일)는 텍스처 원본이 아니라 별도 에셋 종류라 조명 단계, UDIM은 가상 텍스처(12.4절 계약)와 함께 다룬다. 블록 압축(BC·ASTC·ETC)은 원본이 아니라 쿠킹 결과 형식이며 텍스처 파이프라인의 압축 단계(화면 마일스톤 뒤, 사용자 결정 순서)에서 인코더와 함께 구현한다.
 
+2026-11-20 사용자 결정(무손실 원칙의 좁은 예외): UE 5.8은 JPEG로 임포트한 텍스처를 기본 설정에서 JPEG 바이트 그대로 원본으로 보관한다. 그래서 [Unreal 교환 형식](UnrealExchange.ko.md)(4.3절)으로 가져오는 텍스처 가운데 원본부터 손실 데이터인 것이 있다. 이런 텍스처는 기본으로 `LossySource` 오류다. 명시 옵션 `--allow-lossy-origin`을 주면 해제한 픽셀을 원본으로 받고, ImportRecord의 `options`에 옵션을, 결과에 `lossyOrigin` 표시를 남기며 `LossyOriginAccepted` 경고를 낸다. 옵션이 `options`에 남으므로 재임포트도 같게 판단한다. 이 예외는 Unreal 교환 경로에만 있고, 파일 원본 임포트(위 표)의 JPEG 거부는 그대로다.
+
 원본별 규칙:
 
 - BMP: 16비트 BI_RGB는 555(최상위 비트 무시), 32비트 BI_RGB는 4번째 byte가 예약값이므로 알파 255로 읽는다. BI_BITFIELDS·BI_ALPHABITFIELDS는 마스크를 따르며, 알파 마스크는 BI_ALPHABITFIELDS 또는 V4·V5 헤더의 알파 마스크가 0이 아닐 때만 쓴다(BI_RGB에서는 V5의 알파 마스크도 무시). 마스크는 연속 비트여야 하고 서로 겹치지 않아야 하며(아니면 `InvalidSource`), 폭 w의 성분은 v × 255 / (2^w − 1)을 round-half-up해 8비트로 만든다(w > 8도 RGBA8로 줄인다). BI_JPEG·BI_PNG는 `UnsupportedSourceFormat`.
@@ -557,6 +568,8 @@ Requested → ResolveManifest(`CookedManifest.rman`, 하드 의존 SCC 계산) �
 
 5.8에서 바뀜: `FTextureLODGroup`에 `MaxLODSize_Low`·`MaxLODSize_Medium`·`MaxLODSize_High`·`MaxLODSize_Epic`(`r.TextureGroup.QualityLevel`·`r.TextureGroup.MaxQualityLevel` 품질 등급별 상한, 가상 텍스처에는 쓰지 않음)이 더해져 멤버가 33개가 되었고(TextureLODSettings.h 76–90), `UTextureLODSettings`에 쿠킹 때 `OptionalMaxLODSize` 대신 품질 등급 상한을 쓰게 하는 `TextureGroupOptionalQualityLevel`이 더해졌다(263–265). 위 표는 5.6의 29개 기준이며 새 멤버는 아직 분류하지 않았다.
 
+**메시 LOD 그룹**(메시 에셋 스펙 MR9, 2026-11-20). 메시도 텍스처처럼 그룹 이름(`lodGroup`)으로 TargetProfile의 기본값을 받는다([MeshAnimationAssets](MeshAnimationAssets.ko.md) 4.7절). TargetProfile에 텍스처 LOD 그룹 표와 나란히 메시 LOD 그룹 표를 둔다. 항목은 UE 5.8 `FStaticMeshLODGroup`(Engine/Public/StaticMeshResources.h:58)의 멤버에 대응한다: 기본 LOD 수(`DefaultNumLODs`), 스트리밍·선택 LOD 수 상한(`DefaultMaxNumStreamedLODs`·`DefaultMaxNumOptionalLODs`), LOD 스트리밍 지원(`bSupportLODStreaming`), 기본 라이트맵 해상도(`DefaultLightMapResolution`), LOD별 기본 축소 설정(`DefaultSettings[]`)과 축소 설정 보정(`SettingsBias`·`BasePercentTrianglesMult`·`BasePercentVerticesMult`). 화면 크기·최소 LOD는 그룹이 아니라 메시 에셋의 플랫폼별 값이다(텍스처와 같은 덮어쓰기 표). 축소 관련 항목은 축소기가 생길 때까지 보존 상태다(MeshAnimationAssets 4.2절).
+
 ### 12.5 빌드 처리와 mip 규칙
 
 적용 순서(한 텍스처의 각 slice·면에 같은 순서):
@@ -673,6 +686,8 @@ nugget-gc --max-bytes=<n> --unused-days=<n>
 29. 저장: 이전 파일의 손상 bulk entry 복사 거부, bulkId 재매핑 후 지연 읽기, 저장 중 편집 시 재연결 생략, 대체 경로(FAT 등)에서 자기 핸들 때문에 실패하지 않음
 
 ### 14.1 시험 fixture 에셋(A1부터)
+
+**결정적 AssetId 발급기**(Unreal 교환 UXR6, 2026-11-20). 임포트 결과의 bytes 결정성을 비교하는 시험(같은 입력을 두 번 임포트)은 무작위 AssetId 때문에 그대로는 비교할 수 없다. ObjectImports가 AssetId 순으로 정렬되므로 ID만 빼고 비교해도 bytes가 다르다. 그래서 AssetDatabase에 시험 전용 AssetId 발급기 주입 지점을 둔다(시드로 정해지는 순서열, 시험 빌드에서만 노출 — 기존 시험 접근 정책과 같은 방식). 제품 경로의 발급은 무작위 v4 그대로다(4.1절).
 
 에셋 시스템 시험은 실제 에셋 타입(A5의 Texture 계열 등)이 생기기 전에도 직렬화·로드 경로를 그대로 타도록 시험 전용 리플렉션 에셋 클래스를 쓴다. 위치는 `Engine/Source/Developer/AssetTestFixtures`(EngineTests 전용 header-only fixture 모듈, identity 명세 `AssetTestFixtures.rocksids.json`), 결정적 값 생성기·필드 비교 함수는 `Engine/Source/Runtime/AssetRuntime/Tests/AssetFixtureValues.h`다. 새 에셋 타입(A5 Texture 등)도 같은 방식으로 "Fill(seed) → 저장 → 다른 Registry에 로드 → Check(seed) 필드 비교 → 다시 저장해 byte 동일"을 붙인다(`FixtureAssetTests.cpp`의 `RunRoundTrip`).
 
@@ -886,6 +901,8 @@ A1a 상태(2026-11-19): 완료 조건 넷 가운데 세 가지를 갖췄고 빈�
 - 반영한 계획 문서 위치: §3.1 모듈 표(AssetRuntime은 에셋 너겟 reader가 아니라 쿠킹 매니페스트 reader), §7.1 예시(`SoftObjectRef<MaterialAsset>`), §9.1 AssetIndex·별칭·worker process, §9.2 `AssetRequest`·수명, §9.4 Virtual Asset 후속·쿠킹 패키지 이름(내용 주소), VFS 후속, A21 위험 항목.
 
 ## 18. 범위 밖과 후속
+
+메시·스켈레톤·스킨 메시·애니메이션 클립 에셋 타입은 [MeshAnimationAssets](MeshAnimationAssets.ko.md)가, UE 콘텐츠를 가져오는 교환 경로는 [Unreal 교환 형식](UnrealExchange.ko.md)이 설계했다(2026-11-20). 두 스펙의 단계(MA·UX)는 이 문서의 A1–A6 뒤이며 착수는 사용자가 정한다.
 
 후속(이번 범위에 API도 없음): 에디터 UI, GPU 업로드·텍스처 mip 스트리밍(계획 §9.5), equirect Cube, Cube 면 경계 연속 mip, 임포트 worker process, Virtual Asset, VFS, 예산 LRU 해제, 실제 다중 출력 임포터(FBX·glTF), UE의 다른 텍스처 계열(렌더 타깃 에셋·IES `TextureLightProfile`·`RuntimeVirtualTexture`·미디어·동적 텍스처), 일반 에셋 사용자 데이터(`AssetUserData`), 쿠킹 결과 패키징(배포 위치 배치).
 
