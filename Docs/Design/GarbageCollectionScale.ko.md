@@ -588,20 +588,21 @@ GC 구현(`Core/Source/Runtime/ObjectRuntime/Private/`)을 기능별 파일로 �
 
 ### 17.2 회수를 미루는 STW 수집과 예산 회수
 
-- `Collect(access, scheduler, GcReclaim::Deferred)`는 표식·sweep 분류까지 하고 회수하지 않는다. 분류된 객체(Retired)는 회수 대상 목록에 남는다(이미 도달 불가이고 조회·간선 대상이 될 수 없다). 반환한 보고서의 `reclaimed`는 0, `retired`는 분류 수다. 이후 `DrainRetired`가 회수한 수와 시간은 마지막 보고서(`LastGcReport`)의 `reclaimed`·`reclaimNanoseconds`에 더한다 — 회수가 끝나면 마지막 보고서가 그 수집의 회수까지 보여 준다(리뷰 지적: 0으로만 남았다).
+- `Collect(access, scheduler, GcReclaim::Deferred)`는 표식·sweep 분류까지 하고 회수하지 않는다. 분류된 객체(Retired)는 회수 대상 목록에 남는다(이미 도달 불가이고 조회·간선 대상이 될 수 없다). 반환한 보고서의 `reclaimed`는 0, `retired`는 분류 수다. 이후 `DrainRetired`가 회수한 수와 시간은 마지막 보고서(`LastGcReport`)의 `reclaimed`·`reclaimNanoseconds`에 더한다 — 회수가 끝나면 마지막 보고서가 그 수집의 회수까지 보여 준다(리뷰 지적: 0으로만 남았다). 더하는 규칙: 예산 없는 `DrainRetired`도 더한다. 증분 cycle이 진행 중일 때(slice 사이) 부른 `DrainRetired`는 진행 중인 cycle이 아니라 앞 cycle의 보고서에 더해진다(진행 중인 cycle은 끝날 때 자기 보고서로 바꾼다). `durationNanoseconds`(수집 자체의 시간)는 바꾸지 않는다.
 - `DrainRetired(access, GcBudget)`이 예산(객체 수·시간)만큼 회수하고 회수한 수를 돌려준다(17.1절의 최소 진척·소멸자 하나 넘침). 예산 없는 `DrainRetired(access)`는 전과 같이 모두 회수한다. 남은 회수 대상이 있어도 다음 `Collect`·`BeginCollection`은 할 수 있다(회수 대상 목록은 cycle과 무관하게 남고, 증분 cycle의 Reclaiming 단계·정지형 Collect의 회수가 함께 처리한다).
 - `HasPendingReclaim()`은 회수할 수 있을지 모르는 객체가 남았는지를 O(1)로 답한다(풀린 목록·분류 전 목록이 비지 않았다 — 보유 중이라 지연된 목록은 세지 않는다. 보유가 풀리면 풀린 목록으로 옮겨지므로 다시 참이 된다). 반환값 0 대신 이 질의로 "회수가 남았는가"를 판정한다.
-- `FinishCollectionDeferringReclaim(access)`는 Sweeping·Reclaiming 단계의 증분 cycle을 회수 없이 끝낸다 — 남은 sweep 분류는 모두 하고(분류는 chunk 비트 판정이라 1M에서 약 11ms — 실험 24.1절 churn의 sweep), 분류된 객체는 회수 대상 목록에 남긴 채 Idle로 둔다. Marking이면 InvalidArgument다(취소하거나 진행한다). 전체 수집 요청이 진행 중인 cycle의 회수를 예산 없이 한 프레임에 하지 않게 한다(리뷰 지적 R1).
+- `FinishCollectionDeferringReclaim(access)`는 Sweeping·Reclaiming 단계의 증분 cycle을 회수 없이 끝낸다 — 남은 sweep 분류는 모두 하고(분류는 chunk 비트 판정이라 1M에서 약 11ms — 실험 24.1절 churn의 sweep), 분류된 객체는 회수 대상 목록에 남긴 채 Idle로 둔다. Marking이면 InvalidArgument다(취소하거나 진행한다). safepoint 조건은 `StepCollection`과 같다: 처리 중이거나 Borrow·활성 생성 트랜잭션이 있으면 Busy다(Sweeping의 남은 분류가 Borrow가 걸린 white를 Retire하지 않게 — "Begin/Step은 Borrow=0·활성 생성=0 safepoint에서만" 계약, 메인 세션 검증 지적 N2). 전체 수집 요청이 진행 중인 cycle의 회수를 예산 없이 한 프레임에 하지 않게 한다(리뷰 지적 R1).
 - 목적: STW 병렬 전체 수집에서 표식·sweep은 한 프레임에 끝내고(1M ×8 약 17ms + sweep), 소멸자·반환은 프레임마다 시간 예산으로 나눈다(UE `gc.IncrementalGCTimePerFrame` 2ms에 대응 — 5절 표). 1M churn 98K의 회수는 약 24ms라 한 프레임에 넣으면 표식과 합쳐 40ms를 넘는다.
 - 버린 대안: STW 수집을 Begin + 무제한 Step 하나로 흉내 내기 — 증분 경로의 장벽·slice 비용(회색 객체 이월 등)을 치르고, 표식과 회수의 예산을 나눌 수 없다. 반환값 0으로 회수 끝을 판정하기(처음 구현) — 선점·보유 때문에 회수가 남았는데 멈춘다.
 
 ### 17.3 World 수집 일정
 
 - `WorldDesc::gcSchedule`(`WorldGcSchedule`)이 정한다.
-  - `mode`: `WorldGcMode::Incremental`(기본) — 지금처럼 World 파괴가 있으면 프레임 끝마다 `gcBudget`만큼 증분 slice를 진행한다. `WorldGcMode::FullCollection` — World 파괴가 있고 마지막 전체 수집 뒤 `fullCollectionIntervalSeconds`(기본 60초 — UE `gc.TimeBetweenPurgingPendingKillObjects` 61.1초에 대응)가 지나면 프레임 끝에 STW 병렬 전체 수집을 한다.
+  - `mode`: `WorldGcMode::Incremental`(기본) — 지금처럼 World 파괴가 있으면 프레임 끝마다 `gcBudget`만큼 증분 slice를 진행한다. `WorldGcMode::FullCollection` — 마지막 전체 수집 뒤 `fullCollectionIntervalSeconds`(기본 60초 — UE `gc.TimeBetweenPurgingPendingKillObjects` 61.1초에 대응)가 지나면 프레임 끝에 STW 병렬 전체 수집을 한다.
+  - `FullCollection`은 간격만 본다(World 파괴가 있었는지 보지 않는다). UE도 시간만 본다(`Runtime/Engine/Private/UnrealEngine.cpp` 2263–2289: 플레이를 시작한 World가 있으면 `TimeSinceLastPendingKillPurge`를 더하고 간격을 넘으면 수집 — 파괴 여부 조건이 없다). World 파괴 없이 생긴 쓰레기(참조를 지운 일반 객체, 루트 없이 만든 객체)도 다음 주기에 회수된다. 처음 구현은 World 파괴가 있을 때만 주기 수집을 해 그런 쓰레기가 다음 World 파괴나 요청까지 남았다(메인 세션 검증 지적 N3). 간격이 0 이하면 주기 수집을 하지 않는다(요청만 — UE의 `TimeBetweenPurgingPendingKillObjects > 0` 조건과 같다).
   - 간격은 `Tick`에 넘긴 실제 경과 시간(일시정지·시간 배율과 무관한 unscaled delta)의 합으로 센다. UE도 주기 수집 간격을 `FApp::GetDeltaTime()`으로 센다(`Runtime/Engine/Private/UnrealEngine.cpp` 2265). 처음 구현은 World 고정 스텝의 게임 시간이라 일시정지 중에는 수집이 멈췄다(리뷰 지적 R3).
   - `reclaimBudget`: 회수 대기가 있을 때 프레임마다 회수에 쓰는 예산이다(기본 시간 2ms).
-- `World::RequestFullCollection()`은 모드와 무관하게 STW 병렬 전체 수집을 요청한다(레벨 전환·로딩 화면·메모리 압박). 요청은 다음 GC 단계(Tick 끝)에서 소비된다 — Tick 밖에서 부르면 다음 Tick 끝, Tick 안(hook)에서 부르면 그 Tick 끝이다. 진행 중인 증분 cycle이 Marking이면 취소하고, Sweeping·Reclaiming이면 `FinishCollectionDeferringReclaim`으로 회수 없이 끝낸 뒤 수집한다. 수집이 Busy(외부 Borrow)면 요청을 남겨 다음 GC 단계에서 다시 한다.
+- `World::RequestFullCollection()`은 모드와 무관하게 STW 병렬 전체 수집을 요청한다(레벨 전환·로딩 화면·메모리 압박). 요청은 다음 GC 단계(Tick 끝)에서 소비된다 — Tick 밖에서 부르면 다음 Tick 끝, Tick 안(hook)에서 부르면 그 Tick 끝이다. 진행 중인 증분 cycle이 Marking이면 취소하고, Sweeping·Reclaiming이면 `FinishCollectionDeferringReclaim`으로 회수 없이 끝낸 뒤 수집한다. 수집이 Busy(외부 Borrow — 진행 중인 cycle을 끝내는 단계의 Busy 포함)면 요청을 남겨 다음 GC 단계에서 다시 한다. 회수가 남은 채 전체 수집을 다시 해도(메모리 압박으로 요청이 연달아 올 때) 남은 회수는 이어진다 — 회수 대기는 표지가 아니라 질의로 판정한다(처음 구현은 새로 분류된 객체가 0이면 표지를 내려 남은 회수가 멈췄다, 메인 세션 검증 지적 N1).
 - 회수: GC 단계마다 Registry가 Idle이고 `HasPendingReclaim()`이면 다른 GC 진행보다 먼저 `DrainRetired(reclaimBudget)`을 부른다. 반환값이 아니라 질의로 판정하므로, 선점으로 짧게 끝난 프레임이나 보유(BackendLease 등) 때문에 늦어진 객체도 보유가 풀린 뒤의 프레임에 회수된다(리뷰 지적 D1·R2). 증분 cycle이 진행 중이면 그 Reclaiming 단계가 함께 회수하므로 따로 부르지 않는다.
 - 프레임당 GC 비용(전체 수집 뒤): 회수 `reclaimBudget`(기본 2ms) + 증분 일정이면 그 프레임에 새 cycle의 slice 하나(`gcBudget`, 기본 1ms)까지다. 전체 수집을 하는 프레임은 STW 수집(1M ×8 약 17ms + sweep)이 든다.
 - 스레드 계약: `World::RequestFullCollection`은 어느 스레드에서나 부를 수 있다(메모리 압박 신호 등 — 요청 표지는 atomic이고 게임 스레드의 Tick이 소비한다). 그 밖의 World API는 지금처럼 소유(게임) 스레드 전용이다.
@@ -622,6 +623,7 @@ GC 구현(`Core/Source/Runtime/ObjectRuntime/Private/`)을 기능별 파일로 �
 - 회수 객체당 약 250ns는 소멸자·저장소 반환·슬롯 되돌리기의 메모리 접근이다. 반환 몫은 GC-S6(할당자)에서 줄인다.
 - 메모리 압박 신호를 내는 플랫폼 계층은 아직 없다. 엔진 요청 API(다른 스레드에서 불러도 된다)까지 두었다.
 - 엔진 Registry(영구 영역·GameInstance 등)는 아직 GC 일정이 없다(엔진 Registry 객체가 생기면 같은 일정을 단다).
+- `Incremental` 모드는 World 파괴가 있을 때만 cycle을 시작한다(기존 엔진 런타임 설계). World 파괴 없이 생긴 쓰레기는 다음 World 파괴나 전체 수집 요청까지 남는다 — `FullCollection` 모드는 간격으로 회수한다(17.3절). 후속: 파괴 없이 생긴 쓰레기의 증분 발동 조건(예: 쓰기·생성 수 임계, 최대 간격).
 - 진행 중인 cycle의 sweep 나머지는 전체 수집 요청 프레임에 한꺼번에 한다(R1 결정 — 분류는 chunk 비트 판정이라 회수보다 훨씬 싸다. 회수만 예산으로 나눈다).
 - 보유로 늦어진 회수(R2 결정)는 보유가 풀린 뒤 첫 GC 단계에서 회수한다. 보유가 풀리지 않으면 계속 남는다(보유자의 책임).
 - 주기 간격의 실시간 기준(R3 결정)은 일시정지 중에도 수집을 멈추지 않는다. 일시정지 중 수집을 막아야 하는 앱은 `Incremental` 모드나 요청만 쓴다.
