@@ -3,6 +3,7 @@
 #include <Localization/Text.h>
 
 using namespace rocks;
+namespace catalog_reentry_tests_file {
 
 namespace {
 class StoreReentryAllocator final : public Allocator {
@@ -67,3 +68,4 @@ TEST(CatalogOldSnapshotCleanupCanReenterAcquireAndPublishOutsideStoreGate) {
     }
     CHECK(backing.Stats().liveAllocations == 0);
 }
+} // namespace catalog_reentry_tests_file

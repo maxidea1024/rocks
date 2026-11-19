@@ -4,6 +4,7 @@
 #include <Localization/Text.h>
 
 using namespace rocks;
+namespace text_tests_file {
 
 namespace {
 constexpr TextId GreetingId{10, 20};
@@ -318,3 +319,4 @@ TEST(TextResolveMaximumDepthBoundaryHasExactGolden) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace text_tests_file
