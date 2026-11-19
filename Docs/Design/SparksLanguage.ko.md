@@ -29,7 +29,7 @@
 | 비동기 로딩 | `try await X.Load()` 하나로 로드하고, 상주는 결과 값을 보관하는 것으로 유지한다. 진행률은 지역 요청 handle로 조회한다. 이동·travel·준비 대기는 엔진이 prefetch와 로딩 화면을 관리한다. |
 | 누수 | 소유 범위를 Session·Instance·Execution·ModuleHost로 고정하고, 범위 종료의 일괄 해제는 실패할 수 없는 3개 연산(EndExec·Detach·CloseSession)으로만 수행한다. 범위 종료마다 0을 검사하고 장시간 세션의 증가 추세를 Gate로 검사한다. |
 | 실행 | 레지스터 VM(Scalar·Ref·Buf bank), bytecode 사전 컴파일(`.sparkc`), 스크립팅 backend 선택(VM 또는 native AOT = typed IR → C++, Unity의 Mono/IL2CPP 선택과 같은 맥락, target·빌드 구성별 옵션, SD31), 런타임 eval(target 정책, 기본 꺼짐), 컴파일러를 공유하는 LSP 언어 서버. |
-| 핫 리로드 | 편집기·개발 빌드에서 저장하면 실행 중인 게임에 반영된다. 함수 본문(L1)부터 필드·`on`·component 구성·클래스 계층·`@net`·`@rpc`(L2–L3)까지 제자리 migration 또는 instance 재생성으로 처리하고, 계획·검증이 끝난 변경만 원자적으로 적용하며 실패하면 이전 revision을 유지한다. PIE 재시작은 엔진 C++ 변경과 패키지 의존 graph 변경에만 남긴다(§12.4, SD28–SD30). |
+| 핫 리로드 | 편집기·개발 빌드에서 저장하면 실행 중인 게임에 반영된다. 함수 본문(L1)부터 필드·`on`·component 구성·클래스 계층·`@net`·`@rpc`(L2–L3)까지 제자리 migration 또는 instance 재생성으로 처리하고, 계획·검증이 끝난 변경만 원자적으로 적용하며 실패하면 이전 revision을 유지한다. Tryout 재시작은 엔진 C++ 변경과 패키지 의존 graph 변경에만 남긴다(§12.4, SD28–SD30). |
 | 오류 방어 | 사용자 코드의 어떤 실수도 process·편집기·다른 instance를 망가뜨리지 않는다. 컴파일 오류는 마지막 성공 revision을 유지하고, 실행 오류는 실행 트리 → instance 순으로 범위를 좁혀 격리하며, 노출 API는 입력 오류로 Fatal하지 않는다(§8.4, SD32). |
 
 ## 1. 요구와 설계 원칙
@@ -612,7 +612,7 @@ Unity의 hook 체계(종류·의미)를 따르고 이름은 Rocks 어휘를 사�
 |---|---|---|---|
 | `RequestDestroy`, 부모 파괴, 셀 unload | 활성이면 실행 | 실행 | Destroy 반환 직후 |
 | travel | 활성이면 실행 | 실행 | Destroy 반환 직후. 이전 World만 종료하고 Session은 유지 |
-| PIE Stop, process 종료 | 활성이면 실행 | 실행 | Destroy 반환 직후. 그 뒤 CloseSession(§9.1) |
+| Tryout Stop, process 종료 | 활성이면 실행 | 실행 | Destroy 반환 직후. 그 뒤 CloseSession(§9.1) |
 | 격리(§8.3: fault, 필수 `@edit` 참조 대상 제거) | 실행하지 않음 | 그 instance가 파괴될 때 실행 | 격리 시점에 실행·유지 자원·연결 해제(값 필드 보존), Destroy 반환 직후 Detach |
 | GC가 도달 불가로 판정 | 실행하지 않음 | 실행하지 않음 | 회수 전 cleanup hook에서 정확히 1회(현재 `Object`에 이 hook이 없으므로 ObjectFoundations·GC 문서의 선행 조건 — §17.2). 스크립트 instance는 World 장부에 편입된 객체에만 붙으므로 이 경로는 안전망이다 |
 
@@ -695,7 +695,7 @@ Sparks 코드는 엔진의 정해진 지점에서 실행되며 이 실행 묶음
 - `emit`은 큐에 등록되고, 지금 실행 중인 조각이 반환하거나 `await`에 도달한 뒤 같은 스크립트 단계 안에서 발행 순서대로 전달된다. `World.Spawn`이 실행하는 Awake·Enable만 호출자의 실행 조각 안에서 중첩 실행되며, 그 밖에는 handler가 다른 handler 도중에 끼어드는 재진입이 없다.
 - **전달 순회:** 큐 처리기는 항목 하나를 꺼내 그 시점에 연결되어 있고 활성인 handler(C++·Sparks)를 연결 순서대로 모두 실행한 뒤 다음 항목으로 넘어간다. 발행 시점의 연결 목록은 따로 보관하지 않는다. 스크립트 단계 안의 native `Broadcast`도 큐 항목으로 기록한다(binding schema에 선언). 연결 순서는 항목이 delegate에 추가된 순서이며 비활성화·재활성화로 바뀌지 않는다. 배열 원천은 번호 순으로 추가한다.
 - **연쇄 상한:** 스크립트 단계를 시작한 실행 조각의 발행은 깊이 1이고 깊이 d인 handler의 발행은 깊이 d+1이다. Start 항목은 새 루트(깊이 1)다. 깊이 17이 될 항목을 등록하려는 조각은 `CascadeLimit` fault가 되고, 같은 루트에서 파생된 미전달 항목만 폐기한다.
-- **전달 수와 큐 상한(SD33):** 스크립트 단계당 전달 **항목** 수 상한 N = 65,536이다(handler 호출 수가 아님). 넘는 항목은 다음 스크립트 단계로 이월한다. 연속 60 단계 동안 같은 루트 생성 위치에서 이월이 생기면 그 위치를 `CascadeLimit` fault로 처리하고 PIE를 일시 정지한다. session 발행 큐 상한은 262,144 항목이다. 스크립트의 `emit`·Changed가 큐를 넘기면 발행한 조각의 `BudgetExceeded` fault이고(조용히 버리지 않는다), 엔진발 항목은 같은 종류를 합치고 넘친 수를 집계한다(§9.4). 값은 프로젝트 설정이며 쿡 시 고정되고 실행 중 바꿀 수 없다.
+- **전달 수와 큐 상한(SD33):** 스크립트 단계당 전달 **항목** 수 상한 N = 65,536이다(handler 호출 수가 아님). 넘는 항목은 다음 스크립트 단계로 이월한다. 연속 60 단계 동안 같은 루트 생성 위치에서 이월이 생기면 그 위치를 `CascadeLimit` fault로 처리하고 Tryout을 일시 정지한다. session 발행 큐 상한은 262,144 항목이다. 스크립트의 `emit`·Changed가 큐를 넘기면 발행한 조각의 `BudgetExceeded` fault이고(조용히 버리지 않는다), 엔진발 항목은 같은 종류를 합치고 넘친 수를 집계한다(§9.4). 값은 프로젝트 설정이며 쿡 시 고정되고 실행 중 바꿀 수 없다.
 - **이월 항목의 재검증:** 이월 항목과 스크립트 단계 밖에서 생긴 이벤트는 전달 직전에 인자 객체의 generation을 재검증한다. `?` 없는 객체 인자가 파괴되었으면 그 항목을 폐기하고 위치별로 보고하며(fault 아님), `T?` 인자는 null로 전달한다.
 - 파괴는 전달이 끝난 뒤 적용하므로 같은 단계 안에서 이벤트 인자로 전달된 객체는 전달 시점에 유효하다. Disable·Destroy 문맥의 `emit`은 컴파일 오류이며, 적용 중 추가로 생긴 비활성화·파괴는 같은 적용 루프 끝에 요청 순서로 처리한다(64회 상한).
 - **일시 정지:** 게임이 일시 정지된 동안에는 입력 batch와 재개 단계(UI 시계 대기만)만 실행하고 Start·Tick 계열·고정 단계는 실행하지 않는다. UI 연출은 `Delay(0.0, Clock.UI)` 반복으로 한다.
@@ -738,7 +738,7 @@ class CutsceneTrigger : ScriptComponent {
 - **정지 지점:** 기본 대기(`Delay`·`NextTick`·`NextFixedTick`·이벤트·로드 요청·`All`·`Race`)의 `await`는 이미 완료된 경우(상주한 에셋의 로드 등)에도 **항상 정지**하고 정해진 재개 단계(§5.4)에서 재개한다. 그래서 `await` 뒤의 실행은 언제나 새 실행 조각이며 "await 이후 `T?`" 규칙(§4.3)과 emit 전달 시점이 입력과 무관하게 같다. async fn 호출의 `await` 자체는 정지 지점이 아니며 그 함수 안의 기본 대기가 정지한다.
 - **재진입(SD11):** `await`가 있는 `on 경로.이벤트` handler와 물리 hook은 재진입 정책을 표시해야 한다. `@skipWhileBusy`는 같은 발행자(§5.2 표)의 이벤트로 시작된 실행이 `await`로 정지해 있을 때 새 이벤트를 버리고 디버거에 횟수를 표시한다. `@restart`는 실행 중인 것을 취소하고 다시 시작한다. 발행자가 다르면 따로 실행된다. 표시가 없으면 오류이며 두 형태를 수정 예로 제시한다. 기다리지 않는 handler와 수명 hook에 표시하면 오류다. 이벤트마다 반드시 처리해야 하는 계산(피해 적용 등)은 기다리지 않는 handler에 둔다.
 - **구조적 동시성:** `All`·`Race`의 인자는 결과가 `void`인 기다릴 수 있는 식(`void` async 호출, `Delay`, `NextTick`, 이벤트)과 지역 변수에 담은 로드 요청 handle만 쓴다(SD41). 값을 돌려주는 async 호출과 `X.Load()`를 직접 인자로 쓰면 결과가 버려지므로 오류이며, 지역 변수에 담는 형태를 수정 예로 제시한다. 인자는 `await` 없이 쓰고 구문상 목록이므로 개수는 소스에 고정된다. 모든 인자를 왼쪽부터 시작한 뒤 판정한다. `Race`는 완료를 처리하는 시점에 즉시 결정하고 나머지를 취소하며, 같은 처리 시점에 여럿이 완료되면 인자 순서로 정한다. 둘 다 결과를 반환하지 않는다. 하위 작업의 fault는 부모 실행의 fault가 되어 형제를 취소한다.[R19]
-- **취소:** 취소는 `await` 지점에서만 일어나고, 실행이 얻은 유지 자원은 엔진이 해제한다. instance 비활성화·파괴, World 종료, PIE Stop, 호환되지 않는 reload, `ReloadExecutions: Cancel`(§12.4)이 취소 원인이다. 실행 수 예산을 넘어 새 실행이 거부되면 fault가 아니라 건너뛰고 디버거에 횟수를 표시한다. `await`는 실행이 끝날 수 있는 지점이므로 `await` 앞뒤로 나누어 쓴 필드 상태는 취소되면 중간 값에 남는다. 되돌림이 필요하면 `on Disable`에서 권한 측이 정리한다.
+- **취소:** 취소는 `await` 지점에서만 일어나고, 실행이 얻은 유지 자원은 엔진이 해제한다. instance 비활성화·파괴, World 종료, Tryout Stop, 호환되지 않는 reload, `ReloadExecutions: Cancel`(§12.4)이 취소 원인이다. 실행 수 예산을 넘어 새 실행이 거부되면 fault가 아니라 건너뛰고 디버거에 횟수를 표시한다. `await`는 실행이 끝날 수 있는 지점이므로 `await` 앞뒤로 나누어 쓴 필드 상태는 취소되면 중간 값에 남는다. 되돌림이 필요하면 `on Disable`에서 권한 측이 정리한다.
 - **시간(SD21):** `Delay(seconds, Clock.Game)`은 pause·배율을 반영하고 `Delay(seconds, Clock.UI)`는 반영하지 않는다(전체 계획 §8.3의 GameClock·UIClock — 현재 엔진은 `GameClock`만 있으며 UI 시계는 ER 후속). 기한은 등록한 프레임의 해당 시계 값 + `seconds`이고, 시계 값이 기한 이상이 된 첫 재개 단계에서 재개한다. `seconds`가 0 이하이면 다음 프레임의 재개 스크립트 단계에 재개하며, `Clock.Game`이면 일시 정지 중에는 재개하지 않는다. `NextTick()`은 다음 프레임의 재개 스크립트 단계까지, `NextFixedTick()`은 다음 고정 tick의 고정 재개까지 기다리며 둘 다 게임이 일시 정지된 동안 재개하지 않는다. 일시 정지 중 SingleStep(전체 계획 §8.3)은 고정 tick 1회를 실행하여 FixedTick과 `NextFixedTick` 대기를 1회 진행하고, 가변 debug delta를 지정하면 Tick과 `NextTick` 대기도 1회 진행한다. `Time.Delta`는 Tick 계열 hook에서는 그 tick의 dt, 그 밖에서는 직전 가변 tick의 GameClock delta다. 일시 정지 중 UI의 다음 프레임 대기는 `Delay(0.0, Clock.UI)`다.
 - **이벤트 대기(SD13):** `await X.Event`는 대기를 등록한 뒤 처음 전달되는 `X.Event`에서 재개하며 값을 반환하지 않는다. 이벤트 인자가 필요하면 `on` handler를 쓴다. 발행자의 파괴가 반영되거나 발행자가 회수되면 대기는 완료되지 않은 채 끝난다. 단독 `await`면 그 실행이 끝나고(취소), `Race`에서는 그 인자를 완료되지 않은 것으로 보아 다른 인자를 기다리며, `All`에서는 전체가 끝난다. 같은 스크립트 단계에서 전달과 파괴가 함께 일어나면 전달이 먼저다.
 - `while`은 async 문맥에서만 쓰며 반복 본문의 모든 경로에 `await` 또는 탈출이 있어야 한다.
@@ -849,7 +849,7 @@ async fn LoadPreviews() {                          // 진행률이 필요할 때
 ### 7.5 서버와 준비 mask
 
 - 준비 mask는 타입이 요구하는 mask와 target capability의 교집합이다. 전용 서버에서 외형 전용 타입(texture·사운드 등)의 로드는 즉시 효과 없는 stub으로 완료되고, 그것을 받는 API는 효과가 없다. 서버 쿡에서 제거된 하드 참조도 같은 stub이다. 따라서 같은 코드가 서버에서 실패해 보상 지급 등이 누락되는 일이 없다.
-- PIE의 서버 session은 서버 capability와 서버 쿡 filter를 적용해 이 경로를 출시 전에 시험한다.
+- Tryout의 서버 session은 서버 capability와 서버 쿡 filter를 적용해 이 경로를 출시 전에 시험한다.
 - 복제 spawn된 소프트 prefab은 클라이언트가 fixup 전에 로드한다. `@net` `Soft<T>` 필드의 `Changed`에서는 명시적으로 로드한다.
 
 ### 7.6 생성·이동·travel·스트리밍
@@ -891,7 +891,7 @@ Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function 
 
 - 조회 실패는 `T?`, 작업 실패는 `Result<T>`다. 결과를 사용하지 않으면 오류다. 직접 처리할 때는 `r.Value`·`r.Error`를 확인한다.
 - `Result<T>`를 반환하는 함수는 성공을 `return 값;`, 실패를 `return Error.NotFound;`처럼 쓴다. `Error`는 엔진이 정한 닫힌 enum이며(case 목록은 부록 B) 사용자 정의 오류 타입은 없다(SD38).
-- `try`는 실패하면 실행을 더 진행하지 않는다. `Result`를 반환하는 함수에서는 실패를 호출자에게 전달한다. 그 밖의 함수와 handler에서는 현재 실행(Execution 트리 전체)을 EndExec로 끝내고 위치별로 1회 진단을 기록한다. `try` 실패는 fault가 아니므로 격리 집계와 PIE 정지에 포함하지 않는다. 예외로 hook이 절반만 실행된 채 남지 않도록 `Awake`·`Enable`·`Start` 안의 `try` 실패는 그 hook의 fault다(SD43).
+- `try`는 실패하면 실행을 더 진행하지 않는다. `Result`를 반환하는 함수에서는 실패를 호출자에게 전달한다. 그 밖의 함수와 handler에서는 현재 실행(Execution 트리 전체)을 EndExec로 끝내고 위치별로 1회 진단을 기록한다. `try` 실패는 fault가 아니므로 격리 집계와 Tryout 정지에 포함하지 않는다. 예외로 hook이 절반만 실행된 채 남지 않도록 `Awake`·`Enable`·`Start` 안의 `try` 실패는 그 hook의 fault다(SD43).
 - 스크립트에 노출하는 API 이름에는 `Try` 접두를 쓰지 않는다. `try` 키워드("실패하면 여기서 끝")와 반대 의미로 읽히기 때문이다. `Result`를 돌려주는 C++ `TryX`는 Sparks에서 자동으로 `X`로 노출한다(§10.3, SD44).
 
 ### 8.3 fault와 발생 위치별 처리
@@ -916,7 +916,7 @@ Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function 
 
 - **격리:** Disable hook을 실행하지 않고 모든 실행을 EndExec하며 유지 자원 해제와 연결 key 폐기를 수행하고 값 필드는 검사용으로 보존한다. admission은 그 instance가 파괴될 때의 Destroy hook 1회만 허용한다. 다시 활성화할 수 없고, 그 instance가 파괴될 때(component는 소유 Actor 파괴, WorldService는 World 종료, WidgetController는 widget 제거) Destroy hook을 실행한 뒤 Detach한다(§5.1 종료 경로 표). 필수 `@edit` 참조 대상이 제거된 component도 같은 방식으로 격리한다(§4.3).
 - **예산:** 엔진이 실행 조각을 시작할 때마다(호출·재개) 명령어 수 예산을 새로 부여하고 그 조각과 조각이 동기 호출한 함수가 공유한다. 예산은 플랫폼 allocator가 아닌 논리 단위(명령어 수, 원소 수 × 원소 크기)로 계산하므로 모든 플랫폼·빌드·재시뮬레이션에서 결과가 같다.
-- **보고:** fault는 (모듈 hash, 함수, 위치, 종류)별로 1회 상세 보고하고 이후 횟수만 집계한다. PIE는 새 fault 위치에서 일시 정지한다. 출시 빌드는 hash·위치를 기록해 오프라인에서 소스 위치로 변환한다.
+- **보고:** fault는 (모듈 hash, 함수, 위치, 종류)별로 1회 상세 보고하고 이후 횟수만 집계한다. Tryout은 새 fault 위치에서 일시 정지한다. 출시 빌드는 hash·위치를 기록해 오프라인에서 소스 위치로 변환한다.
 - 격리는 Sparks 쪽 상태이며 World는 모른다. 스크립트 bridge는 격리된 instance에 대한 엔진의 `SetEnabled(true)`·OnEnable을 무시하고, Tick 중지는 `SetTickEnabled(false)`로 구현하므로 Disable·Enable로 풀리지 않는다. 이 bridge 계약을 ER 7절에 추가한다(§17.2).
 - 개발·출시 빌드와 두 backend(VM·AOT)는 같은 검사를 수행한다. 게임 실행에서 이미 엔진에 요청한 외부 효과는 되돌리지 않는다(전체 계획 §23.4). 편집기 문맥은 §8.4를 따른다.
 
@@ -926,12 +926,12 @@ Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function 
 
 | 경계 | 규칙 |
 |---|---|
-| 컴파일 | 오류가 있으면 실행 중인 게임은 마지막 성공 revision을 유지한다. 오류가 있는 상태로 PIE를 시작하면 마지막 성공 revision으로 실행할지 묻고, 성공 revision이 없으면 그 패키지의 클래스를 데이터 보존 placeholder로 둔다. 쿡은 실패한다 |
+| 컴파일 | 오류가 있으면 실행 중인 게임은 마지막 성공 revision을 유지한다. 오류가 있는 상태로 Tryout을 시작하면 마지막 성공 revision으로 실행할지 묻고, 성공 revision이 없으면 그 패키지의 클래스를 데이터 보존 placeholder로 둔다. 쿡은 실패한다 |
 | 로드 | `.sparkc`가 verifier에서 거부되거나 interface·binding hash가 맞지 않으면 그 모듈의 클래스를 쓰는 prefab은 원래 필드를 보존하는 placeholder component로 로드하고 게임은 계속 실행한다(§15의 placeholder 규칙 확장) |
 | 실행 | fault는 실행 트리 → instance 순으로만 번진다(§8.3). VM 내부 불변식 위반(verifier를 통과한 bytecode의 VM 버그)만 엔진 버그로 크래시 보고하며 사용자 코드 원인은 모두 fault다 |
 | native 경계 | 스크립트에 노출하는 C++ 함수는 호출자 입력(인자·대상 상태)으로 Fatal·`check`·assert하지 않고 `Result`나 `ContractViolation`으로 돌려준다. binding thunk는 schema가 선언한 전제조건(non-null·범위·lane·권한·PendingDestroy 여부)을 호출 전에 모두 검사한다. 노출 함수의 인자 검증에 Fatal을 쓰면 policy 검사로 막는다(binding schema `NoFatalOnInput`, §10.2). Borrow는 thunk 안에서만 얻고 fault로 빠져나갈 때도 RAII로 반환한다 |
 | 권한 | `@net` 필드 쓰기는 권한 구역(§14)에서만 컴파일된다. 실행 시 권한이 없으면 쓰기를 무시하고 위치별 1회 보고한다(fault 아님 — 클라이언트 연출이 멈추지 않게) |
-| 폭주 | 무한 반복은 명령어 예산, 깊은 재귀는 호출 깊이 256과 native stack 검사, 대량 생성은 조각당 1,024·단계당 8,192 Spawn 상한, 이벤트 폭은 전달 수 상한과 연속 이월 검사(§5.4), 로그 폭주는 호출 위치별 초당 10회 상한(초과분은 횟수만 집계)으로 막는다. PIE에서는 같은 생성 위치의 살아 있는 Actor가 100,000을 넘으면 일시 정지하고 보고한다 |
+| 폭주 | 무한 반복은 명령어 예산, 깊은 재귀는 호출 깊이 256과 native stack 검사, 대량 생성은 조각당 1,024·단계당 8,192 Spawn 상한, 이벤트 폭은 전달 수 상한과 연속 이월 검사(§5.4), 로그 폭주는 호출 위치별 초당 10회 상한(초과분은 횟수만 집계)으로 막는다. Tryout에서는 같은 생성 위치의 살아 있는 Actor가 100,000을 넘으면 일시 정지하고 보고한다 |
 | 편집기 | `on Validate` fault는 그 instance의 미리보기를 새 revision까지 끄고 에셋을 바꾸지 않는다. `@editorButton`·`@cheat` 실행의 fault·`try` 실패는 Undo transaction 전체를 취소하므로 에셋이 반쯤 바뀐 채 저장되지 않는다. "외부 효과를 되돌리지 않는다"(§8.3)는 게임 실행에만 적용한다 |
 | 저장 데이터 | 저장 로드는 RPC와 같은 길이·값 검사를 거치고 범위 밖 값은 고쳐 보고한다(§15). 변환할 수 없는 값은 기본값으로 두고 보고하며 로드를 실패시키지 않는다 |
 | 복구 | 개발 빌드에서는 격리된 instance를 그 클래스 모듈의 새 revision으로 재생성하는 편집기 명령을 제공한다(§12.4 instance 재생성 경로). 출시 빌드는 엔진 이벤트 `World.ScriptFaulted(instance, kind)`를 발행하므로 C++·WorldService가 checkpoint 복귀·메뉴 복귀로 softlock을 피할 수 있다 |
@@ -960,7 +960,7 @@ Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function 
 | GC가 도달 불가로 판정 | 회수 전 cleanup hook에서 Detach(hook 없음, 정확히 1회 보장, 전체 계획 §5.2 — 선행 조건 §17.2) |
 | 셀 일괄 unload | Disable·Destroy, 각 Destroy 반환 직후 Detach. 발행자별 compact는 셀 단위 1회 |
 | travel | 이전 World 정상 종료(Disable·Destroy·Detach). Session은 유지 |
-| PIE Stop | World 정상 종료(Disable·Destroy) 후 CloseSession |
+| Tryout Stop | World 정상 종료(Disable·Destroy) 후 CloseSession |
 | reload | 변경된 `on` 선언과 필드만 해제. 대기 중인 이전 revision 실행은 §12.4를 따른다 |
 | process 종료 | 모든 World 정상 종료 → 모든 CloseSession → ModuleHost → TypeRegistry → NamePool Shutdown. 정해진 시간 안에 Busy가 해소되지 않으면 강제 해제하지 않고 NL06 실패로 보고 |
 
@@ -974,7 +974,7 @@ Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function 
 | 실행 | handler 실행 자리 또는 부모 실행 | 반환·fault·취소·Detach |
 | 발행 큐 항목 | Session | 전달, 대상 소멸 시 폐기, CloseSession |
 | 유지 자원 | 담긴 필드 또는 지역 변수 | 대입·`null`·블록 종료·비활성화(Disable hook 반환 후)·격리·EndExec·Detach. backend 완료가 늦으면 유지 자원 slot의 generation을 확인하여 폐기된 slot에 도착한 완료는 버린다 |
-| 일회성 효과 | 엔진 subsystem | 최대 지속 시간 후 스스로 종료. CloseSession(PIE Stop 포함)이 시작되면 재생 중인 것을 즉시 중지하고 이후 호출은 효과 없이 반환 |
+| 일회성 효과 | 엔진 subsystem | 최대 지속 시간 후 스스로 종료. CloseSession(Tryout Stop 포함)이 시작되면 재생 중인 것을 즉시 중지하고 이후 호출은 효과 없이 반환 |
 | 에셋 lease | 결과 값을 보관한 슬롯·생성된 Actor | 참조계수 0, Actor 파괴 |
 | 생성된 Actor | World 또는 부착 부모 | 스크립트 단계 끝 파괴, 부모 파괴, CloseSession. 설계상 상한이 없는 유일한 증가이므로 검출 대상 |
 | code revision | ModuleHost, instance·frame이 lease | 마지막 lease 반환. process 단위 ledger로 검사 |
@@ -1006,7 +1006,7 @@ Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function 
 
 생성 위치별 생성 Actor 수와 모듈별 revision 수는 상한 없이 ledger에 표시한다(revision은 §12.4의 살아 있는 revision 상한 8이 별도로 적용된다).
 - **매 스크립트 단계 디버그 불변식:** 연결 표의 살아 있는 key 수와 항목 수 일치, 발행자별 죽은 항목 ≤ 직전 compact 시점의 살아 있는 항목 + 8(C2), instance별 유지 자원 ≤ 필드 수 + 활성 frame의 지역 수.
-- **G1 · PIE Stop:** CloseSession 직전 연결 표 참조계수 1, CloseSession 후 모든 스크립트 counter 0, revision lease와 이름 pool이 기준선 복귀(전체 계획 §29.6 NL09).
+- **G1 · Tryout Stop:** CloseSession 직전 연결 표 참조계수 1, CloseSession 후 모든 스크립트 counter 0, revision lease와 이름 pool이 기준선 복귀(전체 계획 §29.6 NL09).
 - **G2 · 2시간 soak:** 생성·파괴 반복, 배열 재작성, 5분마다 reload, 10초마다 eval. 30초 구간별 최솟값을 기록하고, 연속 10구간 중 직전 구간보다 큰 구간이 8개 이상이면서 그 10구간의 최소제곱 기울기가 예산의 분당 1%(예산이 없는 counter는 시작 값의 분당 1%)를 넘는 counter가 없어야 한다. 위반 시 생성 위치별 증가량 상위 항목을 보고한다.
 - **G3 · 음성 대조:** key 폐기 생략, C2 비활성, 취소 시 지역 자원 누락, 이름 pool 삽입 등 의도한 누수가 Gate를 실패시키는지 확인한다.
 - **G4 · 실패 행렬:** 모든 획득·`TryAdd`·재연결에서 N번째 실패, 모든 `await`에서 fault·취소를 주입하고 Detach 후 모든 counter 0을 확인한다.
@@ -1159,7 +1159,7 @@ MIN.F64    s1, s4, s5
 
 ### 12.4 핫 리로드
 
-핫 리로드는 필수 기능이다(사용자 요구). 편집기·개발 빌드에서 `.spark`를 저장하면 Rocks Build의 Sparks compile action(SD6)이 다시 컴파일하고, 실행 중인 모든 World(PIE의 모든 process 포함)에 새 revision을 적용한다. 출시 빌드에는 컴파일러가 없으므로 reload가 없다(eval 정책과 별개).
+핫 리로드는 필수 기능이다(사용자 요구). 편집기·개발 빌드에서 `.spark`를 저장하면 Rocks Build의 Sparks compile action(SD6)이 다시 컴파일하고, 실행 중인 모든 World(Tryout의 모든 process 포함)에 새 revision을 적용한다. 출시 빌드에는 컴파일러가 없으므로 reload가 없다(eval 정책과 별개).
 
 **등급.** 변경마다 가장 가벼운 등급으로 처리한다(SD28).
 
@@ -1167,9 +1167,9 @@ MIN.F64    s1, s4, s5
 |---|---|---|---|
 | R1 본문 교체 | 함수·handler 본문 | 새 revision을 게시한다. 이후 시작하는 handler·호출은 새 revision을 쓴다. 대기 중인 실행은 `ReloadExecutions`(아래)를 따른다 | L1 |
 | R2 제자리 migration | Sparks 필드 추가·삭제·형식 변경, `on` 선언 추가·삭제·변경, 필드 기본값, `const`, Tag·Action·CVar 사전, WidgetAsset schema | reload 경계에서 FieldId migration·구독 연결 재구성. 사전·schema 변경은 그것을 쓰는 모듈을 다시 컴파일한 뒤 적용한다 | L2 |
-| R3 instance 재생성 | 클래스 계층(기반 타입) 변경, `let` component 구성 변경(subobject 추가·삭제), struct 배치가 바뀌어 제자리 변환이 불가능한 경우 | 현재 필드 값을 FieldId별로 보관 → 정상 종료 hook(Disable·Destroy)과 Detach → 새 클래스로 재생성(subobject는 Prefab 3.2절 표대로, 삭제된 SubobjectGuid를 가리키던 prefab override는 Prefab 3.7절 고아 보존) → 보관한 값을 spawn parameter 단계에 덮어쓰기 → Awake·Enable. 같은 Actor graph의 재생성은 한 묶음이다. 편집 World(PIE 밖)에 배치된 instance도 같은 경로로 재생성한다(UE reinstancing 대응) | L2 |
-| R4 복제 schema 교체 | `@net` 필드 추가·삭제·형식 변경, `@rpc` 추가·삭제·시그니처 변경 | `@rpc` 추가는 RpcId manifest에 덧붙여 즉시 반영한다. 그 밖에는 클래스의 복제 schema hash를 올리고 모든 PIE process가 같은 프레임 경계에서 새 revision을 적용한다. 삭제·변경된 RpcId의 대기 메시지는 폐기·보고하고, 서버는 해당 클래스 instance의 전체 상태를 late join 경로(§5.3 활성화 전 적용 규칙)로 다시 보내며, 클라이언트는 hash가 맞을 때까지 그 instance의 복제 수신을 보류한다 | L3 |
-| PIE 재시작 | 엔진 C++ 변경, 패키지 의존 graph 변경 | 재시작 안내(자동 재시작하지 않음) | — |
+| R3 instance 재생성 | 클래스 계층(기반 타입) 변경, `let` component 구성 변경(subobject 추가·삭제), struct 배치가 바뀌어 제자리 변환이 불가능한 경우 | 현재 필드 값을 FieldId별로 보관 → 정상 종료 hook(Disable·Destroy)과 Detach → 새 클래스로 재생성(subobject는 Prefab 3.2절 표대로, 삭제된 SubobjectGuid를 가리키던 prefab override는 Prefab 3.7절 고아 보존) → 보관한 값을 spawn parameter 단계에 덮어쓰기 → Awake·Enable. 같은 Actor graph의 재생성은 한 묶음이다. 편집 World(Tryout 밖)에 배치된 instance도 같은 경로로 재생성한다(UE reinstancing 대응) | L2 |
+| R4 복제 schema 교체 | `@net` 필드 추가·삭제·형식 변경, `@rpc` 추가·삭제·시그니처 변경 | `@rpc` 추가는 RpcId manifest에 덧붙여 즉시 반영한다. 그 밖에는 클래스의 복제 schema hash를 올리고 모든 Tryout process가 같은 프레임 경계에서 새 revision을 적용한다. 삭제·변경된 RpcId의 대기 메시지는 폐기·보고하고, 서버는 해당 클래스 instance의 전체 상태를 late join 경로(§5.3 활성화 전 적용 규칙)로 다시 보내며, 클라이언트는 hash가 맞을 때까지 그 instance의 복제 수신을 보류한다 | L3 |
+| Tryout 재시작 | 엔진 C++ 변경, 패키지 의존 graph 변경 | 재시작 안내(자동 재시작하지 않음) | — |
 
 **원자적 적용과 롤백(SD29).**
 
@@ -1187,7 +1187,7 @@ MIN.F64    s1, s4, s5
 - Tick 설정(`@tick`)이 바뀌면 엔진 `TickSettings`를 다시 등록한다(엔진은 OnStart 때 한 번 등록하므로 bridge가 해제·재등록한다).
 - Tick fault로 중지된 Tick은 그 클래스 모듈의 새 revision 게시 때 다시 시작한다. 격리된 instance는 개발 빌드에서 "이 revision으로 재생성" 명령으로 R3 경로를 밟을 수 있다(§8.4).
 
-**대기 중인 실행(SD30).** 실행을 새 코드로 자동 이전하지 않는다(§20.3 #6). 프로젝트 설정 `ReloadExecutions: Keep | Cancel`이 정하며 PIE 기본값은 `Cancel`이다.
+**대기 중인 실행(SD30).** 실행을 새 코드로 자동 이전하지 않는다(§20.3 #6). 프로젝트 설정 `ReloadExecutions: Keep | Cancel`이 정하며 Tryout 기본값은 `Cancel`이다.
 
 - `Keep`: 대기 중인 실행은 이전 revision으로 끝까지 실행하고 그 실행이 하는 호출도 이전 revision 안에서 해석한다(전체 계획 §23.4).
 - `Cancel`: 본문이 바뀐 함수를 실행 스택에 가진 실행을 취소한다. 취소된 Start는 처음부터 다시 실행하고, 이벤트 handler는 다음 이벤트를 기다린다. `while` + `await NextTick()` 반복이 이전 코드로 계속 도는 일을 막는다.
@@ -1213,7 +1213,7 @@ MIN.F64    s1, s4, s5
 | `AotFallbackModules` | module 목록 | 비어 있음 | — |
 
 - 기본값이 모든 target에서 `Vm`인 이유: Rocks VM은 interpreter라 실행 가능한 메모리를 할당하지 않으므로(§12.6) iOS·콘솔에서도 강제할 이유가 없다. 두 backend는 관찰 가능한 결과가 같으므로 선택은 성능·실행 파일 크기·빌드 시간의 trade-off다.
-- 편집기와 PIE는 항상 VM으로 실행한다(핫 리로드). 개발 빌드에서 `Aot`를 고르면 아래 혼합 규칙으로 reload를 유지한다.
+- 편집기와 Tryout은 항상 VM으로 실행한다(핫 리로드). 개발 빌드에서 `Aot`를 고르면 아래 혼합 규칙으로 reload를 유지한다.
 - bytecode(`.sparkc`)는 backend와 무관하게 항상 생성하고, **VM interpreter는 AOT 구성에도 항상 링크한다** — 출시 후 콘텐츠 패치·DLC의 새 스크립트, eval·외부 모듈(항상 VM), 로드 시 hash 불일치 fallback에 필요하다.
 - 파이프라인은 typed IR → C++ 생성 → 플랫폼 toolchain이다(전체 계획 §23.1의 "LLVM 기반 AOT"와 다르므로 §17에 기재).[R8][R9] JIT가 아니므로 iOS·콘솔의 JIT 제한과 무관하다.[R5]
 
@@ -1312,7 +1312,7 @@ class DoorLogic : ScriptComponent {
 - 리터럴 자동완성은 컴파일 검증과 같은 사전을 사용한다. Unity 이름(`Update`, `FixedUpdate`, `LateUpdate`, `OnEnable`, `GetComponent`)을 입력하면 Rocks 이름(`Tick`, `FixedTick`, `LateTick`, `Enable`, `Find<T>`)을 제시한다. core 패키지에서는 full 후보를 표시하지 않는다.
 - hover는 타입·단위·문서 주석·native 선언 위치·하드 의존 크기·bundle·이벤트의 발행 측을 표시한다. 빠른 수정: `?` 추가, `?? return`, 누락 import, handler 골격(`@save`·`@net` 필드의 Changed 골격은 `on Enable`에 같은 반영 호출을 함께 생성), 재진입 정책 표시(`@skipWhileBusy`·`@restart`), `Soft`→`try await X.Load()`, `@formerly`, 이름 충돌 시 이름 변경.
 - 도입 단계: L1 진단·의미 강조, L2 자동완성(멤버·hook·attribute·리터럴·경로)·hover·정의 이동·빠른 수정·서식·추론 타입 표시, L3 ID를 유지하는 rename·참조 찾기·VS Code 디버거.
-- **디버거(DAP, L3):** `await`를 넘는 step(같은 실행의 다음 조각으로), 조건 breakpoint(Pure 문맥으로 평가), watch는 고정된 버퍼를 읽음(§9.4), breakpoint 중 저장은 재개 후 첫 reload 경계에 적용(§12.4), PIE의 여러 process 동시 연결, pause 중 큐 상한(§9.4), 출시 빌드의 오프라인 위치 변환(§8.3·§12.5).
+- **디버거(DAP, L3):** `await`를 넘는 step(같은 실행의 다음 조각으로), 조건 breakpoint(Pure 문맥으로 평가), watch는 고정된 버퍼를 읽음(§9.4), breakpoint 중 저장은 재개 후 첫 reload 경계에 적용(§12.4), Tryout의 여러 process 동시 연결, pause 중 큐 상한(§9.4), 출시 빌드의 오프라인 위치 변환(§8.3·§12.5).
 
 ### 13.1 시험 작성
 
@@ -1423,7 +1423,7 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 | §23.2(§8.3 clock 대응) | Monotonic·Frame·Game·Fixed·UI | `Delay(s, Clock.Game\|Clock.UI)`, `NextTick`(가변 tick, 일시 정지 중 미재개), `NextFixedTick`(Fixed) |
 | §9.2·§10.2·§10.3·§24.2 로딩 | LoadTicket·AssetLease·revoke·travel·bundle | 요청 handle·결과 값 보관, 대기자 분배, Spawn의 prefab lease, 외형 전용 stub, 필드 초기값 에셋은 prefab 의존, 엔진 관리 로딩 화면, Teleport 내부 prefetch |
 | §23.4 native API 선언 | lane·최대 작업·취소 | + 스레드 안전성·결정성·부수 효과·MaySafepoint·권한·자원 정책·파괴 지연·고립 완료 경로 |
-| §29.6 NL03·NL04·NL06 | PIE 1,000회 등 | NL09 신설(G1–G4 Sparks Gate), 무기한 재시도 대신 모듈 사용 중지·실패 보고 |
+| §29.6 NL03·NL04·NL06 | Tryout 1,000회 등 | NL09 신설(G1–G4 Sparks Gate), 무기한 재시도 대신 모듈 사용 중지·실패 보고 |
 | UiToolkit CU2·CU3·CU5·CU8, CU9 신설 | UI 사용처 중심 | 언어 L1 선행. CU3은 `MulticastDelegate` 필드와 `FieldKind::Event`. CU9는 §10.3에서 정의 |
 | 입력 상세안 §22.3 | subscription이 module/script lease 보유, VM reload 시 해제 | 연결 항목은 handler ID만 보유, Disable은 비활성 표시, 선언이 바뀌는 reload에서만 재구성 |
 | Core `Delegate.h`·`NamePool.h`(구현) | 약한 바인딩은 `SharedPtr`만, TryAdd compact 없음 | C1–C4(C5 `TryFind`는 구현됨) |
@@ -1489,7 +1489,7 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 - **SD17. 정수 나눗셈:** `int / int`는 오류다. 몫은 `Math.Div`, 비율은 `float(a) / float(b)`로 쓴다(§3.3). 2차 검증의 "`/`는 항상 `float`"를 대체한다.
 - **SD18. 단위:** 스크립트의 값은 엔진 규약을 따르며 엔진 규약은 UE 5.8과 같다: 길이 cm, 질량 kg, 시간 초, `Rotator`(`Pitch`·`Yaw`·`Roll`) 도, 삼각함수·quaternion 축-각·각속도 라디안(각속도·토크 API는 `…InRadians`·`…InDegrees` 쌍). `Math.Radians(...)`·`Math.Degrees(...)`는 상수식에서 허용한다(§4.2·§4.5). 각도를 받는 native 함수·필드는 이름이나 타입으로 단위를 드러내고 언어 서버가 hover에 표시한다. **2026-11-17 번복:** 처음 결정은 미터·라디안이었고 "한 언어 안에 각도 단위 2개"를 피하려 했으나, 사용자 요구로 엔진 규약이 UE와 같은 cm·도(`Rotator`)·라디안(삼각함수)이 되어 이를 따른다. 두 각도 단위는 UE와 같이 API 이름·타입으로 구분한다.
 - **SD19. 빈 Soft·Row 제거:** `Soft<T>`·`Row<T>`에는 빈 값이 없고 선택 값은 `Soft<T>?`·`Row<T>?`로 쓴다. "없음"은 `null` 하나다(§3.2).
-- **SD20. 종료 경로별 hook:** `RequestDestroy`·부모 파괴·셀 unload·travel·PIE Stop·process 종료는 Disable(활성이면)·Destroy를 실행한 뒤 Detach한다. fault 격리와 GC 도달 불가 경로는 Disable을 실행하지 않는다(§5.1).
+- **SD20. 종료 경로별 hook:** `RequestDestroy`·부모 파괴·셀 unload·travel·Tryout Stop·process 종료는 Disable(활성이면)·Destroy를 실행한 뒤 Detach한다. fault 격리와 GC 도달 불가 경로는 Disable을 실행하지 않는다(§5.1).
 - **SD21. NextTick의 시계:** `NextTick()`은 게임 시계를 따라 일시 정지 중 재개하지 않으며 `Time.Delta`는 GameClock delta다. UI 시계의 다음 프레임 대기는 `Delay(0.0, Clock.UI)`다(§6.1).
 - **SD22. 엔진 이름 정렬:** 게임 객체는 `Actor`(Entity 대체, ER 2절), 조종 대상은 `Pawn`, `Character`는 Pawn 파생 자리표시, 장면 component는 `SceneComponent`다. `WorldService`는 Object 기반 스크립트 공유 상태 타입이며 엔진 쪽 호스트는 `WorldSubsystem`이다. ID 개념(`SoftEntityId` 등)은 Prefab과 함께 결정할 때까지 유지한다.
 - **SD23. 약한 객체 참조 이름:** `WeakObjectRef<T>`를 `WeakObjectRef<T>`로 부른다(사용자 결정). `ObjectRef`·`WeakObjectRef`·`SoftObjectRef`로 가족을 맞추고 Core `WeakPtr`와 구분한다. 문서는 이번에 바꾸고 코드는 §17.2의 후속으로 바꾼다.
@@ -1497,9 +1497,9 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 - **SD25. 파괴·활성 전환의 두 시점:** 스크립트 단계 끝에 World API를 호출하는 적용 시점과, 실제 hook·Detach가 실행되는 프레임 끝 정리를 구분한다. 적용 이후 스크립트는 대상을 null로 읽는다(§4.3).
 - **SD26. 프레임 순서:** Unity hook의 종류·의미를 따르되 프레임 안 순서는 엔진 World tick phase(UE tick group)를 따른다. FixedTick은 Tick 뒤이고 물리 이벤트는 프레임당 1 batch다(§5.4).
 - **SD27. 상속:** core에서 Sparks 클래스는 상속할 수 없고 `override fn`은 엔진 가상 함수에만 쓴다. full의 `open class`·`open fn`만 Sparks 파생과 재정의를 허용한다(§3.2).
-- **SD28. 핫 리로드 등급과 단계:** R1 본문 교체(L1), R2 제자리 migration·R3 instance 재생성(L2), R4 복제 schema 교체(L3). PIE 재시작은 엔진 C++ 변경과 패키지 의존 graph 변경에만 남긴다(§12.4).
+- **SD28. 핫 리로드 등급과 단계:** R1 본문 교체(L1), R2 제자리 migration·R3 instance 재생성(L2), R4 복제 schema 교체(L3). Tryout 재시작은 엔진 C++ 변경과 패키지 의존 graph 변경에만 남긴다(§12.4).
 - **SD29. reload 원자성:** 계획·검증이 모두 끝난 변경만 패키지와 의존 패키지 단위로 한 번에 적용하고, 하나라도 실패하면 이전 revision을 유지한다. instance 단위 실패는 그 instance만 격리한다(§12.4).
-- **SD30. 대기 중인 실행의 reload:** 자동 이전은 하지 않고 `ReloadExecutions: Keep | Cancel`(PIE 기본 `Cancel`)과 모듈별 살아 있는 revision 상한 8을 둔다(§12.4).
+- **SD30. 대기 중인 실행의 reload:** 자동 이전은 하지 않고 `ReloadExecutions: Keep | Cancel`(Tryout 기본 `Cancel`)과 모듈별 살아 있는 revision 상한 8을 둔다(§12.4).
 - **SD31. 스크립팅 backend 선택:** Unity Mono/IL2CPP처럼 target·빌드 구성마다 `Vm`·`Aot`를 고르는 옵션이며 기본은 `Vm`이다(사용자 결정: AOT는 반드시 제공하되 쓸지는 선택). VM은 항상 포함하고 두 backend의 관찰 가능한 결과는 같다. 예산은 bytecode 명령어 기준으로 센다(§12.5).
 - **SD32. 오류 방어 경계:** 컴파일·로드·실행·native 경계·권한·폭주·편집기·저장 데이터·복구·원격 경계를 정하고, 노출 API는 입력 오류로 Fatal하지 않는다(§8.4).
 - **SD33. 전달 수·큐 상한:** 스크립트 단계당 전달 항목 65,536, session 발행 큐 262,144. 스크립트 발행의 초과는 조용히 버리지 않고 `BudgetExceeded`, 엔진발은 합치고 집계한다. 이월 항목은 전달 직전에 재검증한다(§5.4).
@@ -1530,8 +1530,8 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 | 수명·시점 | Start 시점, 파괴·활성 전환 즉시 전이, World tick phase, Component Awake 실패 범위, BeginDestroy hook 부재, 엔진이 연 진입 | SD24·SD25·SD26·SD43, 엔진이 연 진입도 스크립트 단계, cleanup hook 선행 조건 | 4.3·5.1·5.4·17.2 |
 | 내부 모순 | Sparks 클래스 상속, 이월 항목의 파괴된 인자, 필드 초기값 유지 자원, `Race`에서 진 요청, 클라이언트 전용 판정 근거, FunctionId 대상, 증분 컴파일의 효과, 같은 묶음 파괴의 격리, 단위·상수식 잔재 | SD27·SD33 재검증·SD41·SD45, 규칙 정정 | 3·4·5·6·7·12 |
 | 미확정 값 | 전달 수 N·큐 상한, 예산, interface 문법, CU9, conformance, zero value, `await` 정지, 일시 정지, 문맥, `Error` 목록, `Assert` | SD33·SD34, EBNF·CU9 규격, 부록 B, §6.1 정지 지점, §13.1 | 3·5·6·8·9·10·13 |
-| 핫 리로드 | L3로 늦음, PIE 재시작 범위, 재생성 경로, 보존 규칙, 오래 기다리는 실행, 롤백, 편집기 표시, 엔진 쪽 계약(TypeRegistry revision·동적 schema·subobject) | SD28–SD30, §12.4 재작성, G5, §17.2 | 12.4·9.3·18 |
-| 오류 방어 | 클라이언트 `@net` 쓰기, 폭주, 편집기 문맥 fault, 진단 누락, 격리 복구, spawn 중 Enable, native Fatal, 로드 실패·컴파일 오류 상태 PIE, softlock | SD32·SD43·SD45, §8.4 신설 | 8·14 |
+| 핫 리로드 | L3로 늦음, Tryout 재시작 범위, 재생성 경로, 보존 규칙, 오래 기다리는 실행, 롤백, 편집기 표시, 엔진 쪽 계약(TypeRegistry revision·동적 schema·subobject) | SD28–SD30, §12.4 재작성, G5, §17.2 | 12.4·9.3·18 |
+| 오류 방어 | 클라이언트 `@net` 쓰기, 폭주, 편집기 문맥 fault, 진단 누락, 격리 복구, spawn 중 Enable, native Fatal, 로드 실패·컴파일 오류 상태 Tryout, softlock | SD32·SD43·SD45, §8.4 신설 | 8·14 |
 | AOT | 선택 옵션 설정 모델, 동등성 생성 규칙, 혼합·reload·디버거, 빌드·역변환, 실패와 fallback | SD31, §12.5 재작성, G6 | 12.5·9.3·18 |
 | 주변 시스템 | 입력 phase, Log 모델, 진단 형식·등록부, `Loc` 인자, CVar·설정, `@command`, `Try` 접두, 커브·native struct, CU1, UI 수명, 기본값 순서, ElementGuid, 물리 `Hit`·질의, lane 해제 큐, 결정성, trace, 신뢰 경계, 패키지 manifest, 시험 | SD35–SD37·SD44, §10.4 신설, §6.3·§12.8·§13.1 신설 | 3·4·6·9·10·11·12·13·15 |
 
@@ -1551,7 +1551,7 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 | 시간 단위 용어 미정의 | "단계"의 5가지 의미, "전달 단위"·연쇄 16회의 계수·"tick" 미정의, 프레임 안 스크립트 단계 순서 부재, `NextTick` 시계가 절마다 다름 | 용어 분리(프로필·도입 단계·스크립트 단계·수명 단계), 실행 조각 기준 Changed, 인과 깊이 상한, 프레임 단계 순서, SD21 | 1.3·5.3·5.4·6.1 |
 | 이벤트 전달 | C++·Sparks handler 순서, 호출 대상의 확정 시점, 재진입 판정의 "발행자" 미정의, 조용히 버려지는 이벤트 | 한 항목의 연결 전체를 연결 순서로 실행, 전달 시점 기준, 경로별 발행자 표, SD11 | 5.2·5.4·6.1 |
 | Changed | 쓰기 기준과 값 기준의 충돌, 저장 로드 발행 여부의 절 간 충돌, 경로 원천 교체 | 조각 시작·끝 값 비교, Start 전 적용만 미발행(이후 Enable 반환 기준으로 변경), 재연결 시 1회 전달, `Changed` 예약 | 5.3 |
-| 수명·종료 | spawn 묶음·Enable 시점, "비활성화"의 3가지 의미, Detach 시점, Teardown 접근 범위, PIE Stop의 hook 미실행 | Spawn 안 Awake·Enable과 큐의 Start, "격리" 단일 상태, Destroy 반환 직후 Detach, SD12·SD20 | 5.1·6.2·8.3·9.1 |
+| 수명·종료 | spawn 묶음·Enable 시점, "비활성화"의 3가지 의미, Detach 시점, Teardown 접근 범위, Tryout Stop의 hook 미실행 | Spawn 안 Awake·Enable과 큐의 Start, "격리" 단일 상태, Destroy 반환 직후 Detach, SD12·SD20 | 5.1·6.2·8.3·9.1 |
 | 이름 해석 | 가림 금지가 지역 변수에만 적용, 암묵 멤버 미예약, import 별칭 의미, 확장 이벤트 충돌, SD2 변환 충돌, Character의 `Owner` | 이름 하나에 대상 하나, 부록 A, 모듈 별칭, 확장 이벤트 유일성과 안정 ID, 메타 컴파일 오류, 기반 타입별 문맥 이름 | 3.1·3.4·3.7·5.2·10.3 |
 | 타입·값 | await 이후 `T?` 적용 대상, 중첩 optional, `?.` 단락 범위, `== null` 좁히기, `==`·보간 허용 타입, `let` 깊이, 버린 결과, `try` 실패 범위 | 흐름 기준 규칙과 제외 목록, `?` 중첩 금지, 한 단계 단락, 닫힌 허용 목록, 깊은 `let`, Execution 트리 종료, SD13·SD14·SD19 | 3.2·3.3·4.2·4.3·8.2 |
 | 구문·어휘 | `try`·`await` 적용 범위, `<` 판정, FloatLit 미정의로 `0..count` 오토큰화, 문자열 escape, 예약어 목록 부재, 미사용 인자를 피할 수 없음 | `Value` 문법, 계층형 EBNF, 어휘 규칙, `_` 인자, SD16 | 3.3·3.6·3.7 |
@@ -1563,7 +1563,7 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 - **물리 이벤트의 재진입 발행자:** 자기 Actor가 아니라 상대 `other`로 하였다. 자기 Actor로 보면 대기 중 다른 Actor의 Enter가 버려지고 Exit만 전달되어 짝이 깨진다.
 - **`?.`의 단락:** 사슬 전체가 아니라 한 단계만 단락한다. 기존 S0412 규칙으로 판정되며 새 규칙이 필요 없다.
 - **Disable 시 연결:** 항목을 삭제하지 않고 비활성으로 둔다. 활성 전환을 반복해도 handler 순서가 유지된다.
-- **`try` 실패와 PIE 정지:** PIE를 정지하지 않는다. 복구 가능한 실패는 `Result`라는 원칙을 따른다. 단, Start 안의 `try` 실패는 Start fault다(§8.2).
+- **`try` 실패와 Tryout 정지:** Tryout을 정지하지 않는다. 복구 가능한 실패는 `Result`라는 원칙을 따른다. 단, Start 안의 `try` 실패는 Start fault다(§8.2).
 - **같은 필드 2회 쓰기 진단:** 오류로 하자는 제안은 정상 코드(`Hp -= x; if (Hp < 0) { Hp = 0; }`)를 오류로 만들므로 채택하지 않았고 예시 수정으로 대체하였다.
 - **fault 이후 상태:** "중지"와 "격리"로 나누지 않고 "격리" 하나로 하였다. Tick fault의 Tick 중지(§8.3)는 instance 상태가 아니다.
 
@@ -1585,7 +1585,7 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 | 8 | 무기한 재시도·종료 Busy | 수정안 검토 | 재시도 상한 후 격리·실패 보고, 종료 deadline | 9.1·12.7 |
 | 9 | 로딩 대기 중 이벤트 폐기는 Enter/Exit 짝·서버 판정을 깨뜨림 | 로딩 검토 | Start 대기 중에는 Tick 계열만 보류, 이벤트는 정상 전달 | 5.1 |
 | 10 | 생성된 Actor가 prefab lease보다 오래 남음 | 로딩 검토 | Spawn이 prefab 의존 묶음 lease를 Actor에 귀속 | 7.6 |
-| 11 | 전용 서버에서 외형 에셋 로드 실패로 서버·클라이언트 결과 차이 | 로딩 검토 | 준비 mask 교집합과 효과 없는 stub, PIE 서버 session 시험 | 7.5 |
+| 11 | 전용 서버에서 외형 에셋 로드 실패로 서버·클라이언트 결과 차이 | 로딩 검토 | 준비 mask 교집합과 효과 없는 stub, Tryout 서버 session 시험 | 7.5 |
 | 12 | 필드 초기값 하드 참조가 세션 내내 상주 | 로딩 검토 | instantiate하는 prefab·셀의 의존성으로 처리, 하드 의존 예산 쿡 오류 | 7.2 |
 | 13 | 상주 유지 경로 2개(필드 요청·값), `Get`의 cache 의존 | 로딩 검토 | 요청은 지역 전용, 상주는 값 보관 하나, `Get`·`IsLoaded` 제거 | 7.3 |
 | 14 | Teleport 관심 공백, travel 호출 실행 취소, 로딩 화면 미해제 | 로딩 검토 | `Owner.Teleport` 내부 prefetch, `Session.Travel` 접수형·엔진 관리 로딩 화면 | 7.6 |
@@ -1595,7 +1595,7 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 | 18 | EBNF 누락(generic 메서드, BinaryOp·Literal, 복합 대입의 await, `?? Exit`, emit 형태) | 정합성 | 문법 보완 | 3.6 |
 | 19 | 초기 적용 시 Changed 발행 여부 미정, late join 일회성 재생 | 정합성 | 초기·로드·late join은 Changed 없음, Start에서 반영 | 5.3 |
 | 20 | AOT 방식·clock 이름·Start 개명 범위·소유 component 이중 소유가 스펙 개정 목록에 없음 | 정합성 | §17에 추가, 소유 component는 handle·SubobjectGuid | 4.1·4.5·17 |
-| 21 | 사용자 결정: hook은 Unity 체계, 이름은 Rocks 어휘(Tick·FixedTick·LateTick) | 사용자 | hook 표, 일반 `Start()` 메서드와의 충돌은 C++ `On*`로 해소, 종료 hook 후보 `Stop`과 PIE `Stop`의 충돌은 `Destroy` 채택으로 해소 | 5.1 |
+| 21 | 사용자 결정: hook은 Unity 체계, 이름은 Rocks 어휘(Tick·FixedTick·LateTick) | 사용자 | hook 표, 일반 `Start()` 메서드와의 충돌은 C++ `On*`로 해소, 종료 hook 후보 `Stop`과 Tryout `Stop`의 충돌은 `Destroy` 채택으로 해소 | 5.1 |
 | 22 | 사용자 요구: 비동기 로딩 | 사용자 | §7 신설 | 7 |
 
 ### 20.4 1·2차 검증 요약

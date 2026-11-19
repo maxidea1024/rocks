@@ -67,7 +67,7 @@ CatalogSnapshot 생성은 culture·revision과 모든 entry/번역을 깊게 복
 
 CatalogStore는 생성된 snapshot을 Publish하고 reader가 Acquire한다. 기존 snapshot 정리는 gate 밖에서 한다. Close 뒤 새 Publish/Acquire는 ShuttingDown이며 이미 획득한 reader는 계속 사용할 수 있다. store가 파괴되어도 snapshot은 allocator가 살아 있으면 유효하다. store 파괴는 store API 호출이 모두 끝난 후 수행한다.
 
-Publish는 호출자가 정한 게시 순서를 따른다. 비동기 로더의 오래된 요청을 자동으로 판별하지 않는다. 로더·PIE 계층에서 request generation을 검사한 뒤 Publish해야 한다. culture 전환과 같은 culture의 콘텐츠 교체는 동일한 snapshot 게시 경로를 사용한다. UI는 문화와 revision 정책에 따라 layout을 갱신하는 후속 소비자다.
+Publish는 호출자가 정한 게시 순서를 따른다. 비동기 로더의 오래된 요청을 자동으로 판별하지 않는다. 로더·Tryout 계층에서 request generation을 검사한 뒤 Publish해야 한다. culture 전환과 같은 culture의 콘텐츠 교체는 동일한 snapshot 게시 경로를 사용한다. UI는 문화와 revision 정책에 따라 layout을 갱신하는 후속 소비자다.
 
 서로 다른 Text/snapshot 래퍼의 Clone·읽기·Reset을 병행할 수 있지만 동일 래퍼의 이동·Reset·읽기 경합은 호출자가 막는다. 할당기가 실제 호출 스레드를 지원해야 한다. 공유 계수 잠금이 사용자 래퍼 전체의 무제한 동시 변경을 허용하는 것은 아니다.
 

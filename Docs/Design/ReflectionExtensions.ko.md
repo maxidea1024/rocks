@@ -21,7 +21,7 @@
 | enum underlying | uint8·uint16·uint32·int32(RF 3.4절, RMC2401) | UE와 같은 8종 |
 | struct | 상속 금지(RMC2301), 타입 플래그 없음 | 단일 리플렉션 base + 필드 없는 비리플렉션 base, `Atomic` |
 | Core 값 타입 미러 | 15종(`CoreTypeBindings/CoreValueTypes.h`) | 17종(Transform3f·Transform3d 추가), 16종 Atomic |
-| 필드 플래그 | Transient·ReadOnly·EditorOnly·Required | + DuplicateTransient·NonPIEDuplicateTransient·SaveGame·TextExportTransient |
+| 필드 플래그 | Transient·ReadOnly·EditorOnly·Required | + DuplicateTransient·NonTryoutDuplicateTransient·SaveGame·TextExportTransient |
 | 클래스 | Abstract·WorldOnly | + Transient·Deprecated·Within, 타입 도구 이름 |
 | 컨테이너 | Array·ObjectRefArray·StructRefArray | + Core `OrderedMap`·`OrderedSet`, `ObjectRefMap`, 정적 배열 |
 | 경로(B6) | 필드 + 배열 index | + Map key·Set 원소 단계, 대입 묶음(Prepare → Publish) |
@@ -193,7 +193,7 @@ MetaCompiler(C#)와 런타임(C++)의 표 대조: MetaCompiler가 "모든 종류
 | 플래그 | 값 | 대상 | 전파·상속 | 단계 |
 |---|---|---|---|---|
 | FieldFlags::DuplicateTransient | 16 | 필드 | 전파 없음 | B9h |
-| FieldFlags::NonPIEDuplicateTransient | 32 | 필드 | 전파 없음 | B9h |
+| FieldFlags::NonTryoutDuplicateTransient | 32 | 필드 | 전파 없음 | B9h |
 | FieldFlags::SaveGame | 64 | 필드 | 전파 없음(멤버마다 표시) | B9h |
 | FieldFlags::TextExportTransient | 128 | 필드 | 전파 없음 | B9h |
 | (예약) NonTransactional | 256 | 필드 | — | CU4가 의미를 정할 때 |
@@ -238,7 +238,7 @@ struct PropertyPath { Span<const PathStep> steps; Span<const PathKey> keys{}; };
 - **키 위치의 decode 정책**: 값을 바꾸는 정책(미선언 enum `ReportAndDefault`, `unknownClass = ReportAndNull`)은 Map 키·Set 원소에 적용하지 않는다. 키 위치는 늘 거부다. 대체 값이 서로 다른 두 키를 같게 만들어 2단계에서 중복이 생기는 일을 막는다.
 - **allocator**: Optional·InstancedStruct·Text처럼 값이 없던 자리에 새 값을 만들 때는 객체 생성자에 주입되는 registry allocator(RuntimeTypeOps.h:400-420)를 쓴다. 공개 조회 `ObjectRegistry::ObjectAllocator()`·`ConstructionContext::ObjectAllocator()`를 더한다(B9e에서 구현 — 생성 때 받은 allocator 자체를 돌려준다). 수명은 Registry·트랜잭션과 같고, 소유 스레드 계약은 다른 Registry API와 같다(접근자는 상태를 읽지 않으므로 어느 스레드에서나 부르지만, 그 allocator로 객체 값을 만들고 바꾸는 일은 소유 스레드다).
 - **같음**(RCM 63행): 기준과 같은 wire byte 비교다. Map·Set은 삽입 순서까지, Name은 표시 문자열 byte로 비교한다.
-- **저장 불가 객체**: 클래스가 Transient·Deprecated인 객체와 그 부분 트리(Outer 사슬에 그런 객체가 있는 객체)는 패키지 저장(저장 정책 Exclude)에서 빼고, 스냅샷·undo·PIE 복제(Keep)에서는 보존한다(9.2절). 판정 도우미 `IsUnsaveableObject`를 ObjectRuntime에 두고 A1 export 집합 구성과 그래프 저장이 같이 쓴다.
+- **저장 불가 객체**: 클래스가 Transient·Deprecated인 객체와 그 부분 트리(Outer 사슬에 그런 객체가 있는 객체)는 패키지 저장(저장 정책 Exclude)에서 빼고, 스냅샷·undo·Tryout 복제(Keep)에서는 보존한다(9.2절). 판정 도우미 `IsUnsaveableObject`를 ObjectRuntime에 두고 A1 export 집합 구성과 그래프 저장이 같이 쓴다.
 
 ### 1.8 descriptor(`<M>.rocksmeta.json`) 형식 변경
 
@@ -640,27 +640,27 @@ A5 `Downscale` 플랫폼별 값(AS 451행 계약):
 
 | 지정자 | 비트 | 의미 | 쓰는 곳 |
 |---|---|---|---|
-| `DuplicateTransient` | 16 | 복제(에셋 복제·PIE 복제) 저장과 복사 텍스트에서 뺀다 | A2 `asset-duplicate`(AS 97행), PIE, ReflectionText Copy |
-| `NonPIEDuplicateTransient` | 32 | PIE가 아닌 복제와 PIE가 아닌 텍스트 출력에서 뺀다(예: 인스턴스 Guid) | A2, ReflectionText Edit·Copy |
+| `DuplicateTransient` | 16 | 복제(에셋 복제·Tryout 복제) 저장과 복사 텍스트에서 뺀다 | A2 `asset-duplicate`(AS 97행), Tryout, ReflectionText Copy |
+| `NonTryoutDuplicateTransient` | 32 | Tryout이 아닌 복제와 Tryout이 아닌 텍스트 출력에서 뺀다(예: 인스턴스 Guid) | A2, ReflectionText Edit·Copy |
 | `SaveGame` | 64 | 세이브게임 저장은 이 플래그가 있는 필드·멤버만 쓴다 | 세이브게임 계층(후속) |
 | `TextExportTransient` | 128 | 복사 텍스트에서 뺀다 | ReflectionText Copy |
 
-- **복제 저장**: 복제 호출자가 `excludedFlags`를 정한다. 에셋 복제 = DuplicateTransient | NonPIEDuplicateTransient, PIE 복제 = DuplicateTransient. 복제본 로드는 정책 없이 읽는다(빠진 필드 = 기준). 전부 저장(RCM 65행)의 override 집합 기록에서도 이 필드들의 경로를 뺀다.
+- **복제 저장**: 복제 호출자가 `excludedFlags`를 정한다. 에셋 복제 = DuplicateTransient | NonTryoutDuplicateTransient, Tryout 복제 = DuplicateTransient. 복제본 로드는 정책 없이 읽는다(빠진 필드 = 기준). 전부 저장(RCM 65행)의 override 집합 기록에서도 이 필드들의 경로를 뺀다.
 - **포함 필터** `includeFlags`(`FieldEncodePolicy`·`FieldDecodePolicy`, 0이면 끔): 0이 아니면 **필드·struct 멤버마다 자기 플래그**에 이 비트가 없으면 쓰지 않는다(UE처럼 멤버마다 표시 — 사용자 결정 U5, PR:1051-1055와 UT:543). SaveGame struct 필드의 멤버도 각각 SaveGame이어야 쓰인다. 배열 원소·Map 값·Optional 내부·InstancedStruct 내용의 struct 멤버에도 같은 규칙을 쓴다.
   - 예외: Atomic struct 안의 멤버에는 적용하지 않는다(통째). UE에서도 native Serializer 수학 타입은 멤버 플래그를 보지 않고(PR:53-68), immutable 수학 타입은 멤버가 모두 SaveGame이다(NET:2080-2088 등). 비Atomic `TransformBinding`은 멤버에 SaveGame을 단다(3.2절).
   - 로드 쪽 `includeFlags`: 포함 비트가 없는 필드·멤버가 파일에 있으면 InvalidArgument(excludedFlags와 대칭). 2c Required 검사도 포함 비트 밖의 최상위 필드·멤버를 뺀다(검사 문맥의 `IsExcluded`가 includeFlags를 멤버마다 적용한다 — GraphRequired.cpp:28 검사 정책에 includeFlags를 더한다).
   - RF 결정 22·RCM 65행의 "세이브게임은 전부 저장"은 "기준 차이 없이 모든 값"이라는 뜻이다. 필드 범위는 SaveGame이 정한다(21절에서 문구를 더한다).
-- **Required와의 조합**: Required와 DuplicateTransient·NonPIEDuplicateTransient를 함께 쓰면 RMC2202다. 복제본이 늘 null을 가져 패키지 저장(`rejectMissingRequired`)이 실패하기 때문이다.
+- **Required와의 조합**: Required와 DuplicateTransient·NonTryoutDuplicateTransient를 함께 쓰면 RMC2202다. 복제본이 늘 null을 가져 패키지 저장(`rejectMissingRequired`)이 실패하기 때문이다.
 - 2c Required 검사는 로드 정책의 excludedFlags에 든 필드를 지금처럼 뺀다(GraphRequired.cpp:28).
 
 구현(B9h1)에서 정한 점:
 
-- `FieldFlags`에 DuplicateTransient 16·NonPIEDuplicateTransient 32·SaveGame 64·TextExportTransient 128을 더했다(TypeRegistry `KnownFieldFlags`, MetaCompiler 지정자·`FieldModel.Flags`, descriptor `flags`의 같은 이름). 네 플래그는 멤버로 전파하지 않는다(`PropagateFieldFlags`의 상속 집합은 EditorOnly·Transient·ReadOnly 그대로 — 제외된 struct 필드는 멤버까지 통째로 빠지고, 포함 필터는 멤버마다 자기 플래그를 본다).
-- Required + DuplicateTransient·NonPIEDuplicateTransient는 MetaCompiler RMC2202에 더해 TypeRegistry 등록도 InvalidArgument로 거부한다(수동 등록·import descriptor도 같은 규칙 — descriptor 읽기는 RMC1000).
+- `FieldFlags`에 DuplicateTransient 16·NonTryoutDuplicateTransient 32·SaveGame 64·TextExportTransient 128을 더했다(TypeRegistry `KnownFieldFlags`, MetaCompiler 지정자·`FieldModel.Flags`, descriptor `flags`의 같은 이름). 네 플래그는 멤버로 전파하지 않는다(`PropagateFieldFlags`의 상속 집합은 EditorOnly·Transient·ReadOnly 그대로 — 제외된 struct 필드는 멤버까지 통째로 빠지고, 포함 필터는 멤버마다 자기 플래그를 본다).
+- Required + DuplicateTransient·NonTryoutDuplicateTransient는 MetaCompiler RMC2202에 더해 TypeRegistry 등록도 InvalidArgument로 거부한다(수동 등록·import descriptor도 같은 규칙 — descriptor 읽기는 RMC1000).
 - 포함 필터: `FieldEncodePolicy::includeFlags`·`FieldDecodePolicy::includeFlags`(0이면 끔). 판정은 `FieldCodecContext::IsOutsideInclude(includeFlags)` 하나다 — 지금 위치의 자기 플래그(`field.flags`)에 그 비트가 없으면 밖이고, 조상 위치의 struct가 Atomic이면 밖이 아니다. 저장·복원 문맥의 `ExcludesCurrent()`(= 유효 플래그 제외 || 포함 필터 밖)를 직렬화기(GraphSave·GraphRequired 최상위 필드)와 struct codec(EncodeStructRecord·DecodeStructRecord — 배열 원소·Map 값·Optional 내부의 struct 멤버도 같은 길)이 쓴다. 복원 최상위 필드는 위치에 들어가기 전에 같은 규칙(포함 비트가 없으면 InvalidArgument)을 본다(GraphLoad).
 - 2c Required 검사 문맥(`RequiredCheckContext`)의 정책에 로드 정책의 includeFlags를 넘겨 포함 필터 밖의 최상위 필드·멤버를 검사하지 않는다.
 - `TransformBinding`(비Atomic) 멤버 셋에 SaveGame을 달았다. Atomic 미러 16종은 멤버를 표시하지 않는다(통째).
-- 복제·텍스트 호출자 API는 더하지 않았다: 복제는 호출자가 `excludedFlags`를 고르고(A2 `asset-duplicate`·PIE), TextExportTransient·NonPIE 텍스트 제외는 텍스트 codec(B9i)이 쓴다. override 집합 기록의 경로 제외는 A5가 그 기록을 만들 때 같은 판정을 쓴다.
+- 복제·텍스트 호출자 API는 더하지 않았다: 복제는 호출자가 `excludedFlags`를 고르고(A2 `asset-duplicate`·Tryout), TextExportTransient·NonTryout 텍스트 제외는 텍스트 codec(B9i)이 쓴다. override 집합 기록의 경로 제외는 A5가 그 기록을 만들 때 같은 판정을 쓴다.
 - includeFlags 로드는 그래프 복원이라 새 객체를 만든다 — 포함되지 않은 필드는 생성자 값(기준)이다. UE 세이브게임은 보통 기존 객체에 덮어써서 런타임 값을 남긴다. 기존 객체에 덮어쓰는 세이브게임 로드는 세이브게임 계층(후속)이 정한다.
 - 시험: ObjectSerialization `FieldFlagGraph_SchemaCarriesFlagsAndRegistryRejectsRequiredDuplicate`·`FieldFlagGraph_DuplicatePoliciesChooseSavedFields`·`FieldFlagGraph_IncludeFlagsSaveAndLoadPerMember`·`FieldFlagGraph_RequiredCheckSkipsFieldsOutsideInclude`·`FieldFlagGraph_IncludeFlagsReachContainerStructMembers`(Map 값·Optional 내부·정적 배열 원소 — 묶음 리뷰 반영), ToolTests `Meta.FieldFlagSpecifiersReachDescriptorAndSchema`·`Meta.RequiredCannotBeDuplicateTransient`, fixture ReflectionTestFixtures/FieldFlagFixture.h.
 
@@ -679,7 +679,7 @@ UE에서 저장 불가 판정은 패키지 저장(SavePackage)의 규칙이다. 
 ```cpp
 enum class UnsaveablePolicy : uint8 {
     Exclude, // 패키지 저장(A1) — UE SavePackage와 같다. 기본값
-    Keep     // 스냅샷·undo·PIE 복제 — UE 복제와 같다. 저장 불가 객체도 다른 객체처럼 저장한다
+    Keep     // 스냅샷·undo·Tryout 복제 — UE 복제와 같다. 저장 불가 객체도 다른 객체처럼 저장한다
 };
 // ObjectGraphSaveOptions::unsaveable = UnsaveablePolicy::Exclude
 ```
@@ -689,7 +689,7 @@ enum class UnsaveablePolicy : uint8 {
 | Exclude(기본) | InvalidArgument(저장 집합은 호출자가 정한다 — OF 5.1절, 호출자가 미리 거른다) | 강한·weak 모두 외부 정책과 무관하게 null + `ExternalReference` 진단(값 3 = Transient 클래스, 4 = Deprecated 클래스). Required 위치면 null에 Required 규칙(`rejectMissingRequired`) | 집합에 넣지 않고 null + 진단. root(노드 1)가 저장 불가면 InvalidArgument |
 | Keep | 보통 노드로 저장 | 보통 참조 | 보통 대상 |
 
-- 기본값을 Exclude로 둔 이유: 영속 산출물(패키지)이 실수로 저장 불가 객체를 담지 않게 하려는 것이다. 스냅샷·undo·PIE 복제 호출자는 Keep을 명시한다.
+- 기본값을 Exclude로 둔 이유: 영속 산출물(패키지)이 실수로 저장 불가 객체를 담지 않게 하려는 것이다. 스냅샷·undo·Tryout 복제 호출자는 Keep을 명시한다.
 - A1 export 집합 구성은 `CollectInners` 결과를 `IsUnsaveableObject`로 걸러 저장 불가 객체와 그 부분 트리를 뺀다. `CollectInners`(ObjectRegistry 공개 API) 자체는 바꾸지 않는다. UE도 저장 불가 Outer의 inner를 함께 뺀다(SaveContext.cpp:95-110).
 - 로드: Transient·Deprecated 클래스 노드 모두 정상 로드하고 진단(`TransientType`·`DeprecatedType`)을 낸다. UE 로드 경고와 같다(LinkerLoad.cpp:6122-6131 Deprecated(편집기), 6146-6154 Transient(CDO·archetype 제외)). 그래서 클래스를 나중에 Transient로 바꿔도 기존 패키지를 열고 고칠 수 있다. Exclude로 다시 저장하면 그 객체와 그 참조는 빠진다. Keep으로 만든 스냅샷을 복원할 때도 같은 진단이 나며, 받을 hook이 없으면 하지 않는다.
 - 생성: Transient·Deprecated 클래스의 C++ `NewObject`는 막지 않는다(UE도 막지 않는다). ClassRef 쓰기·텍스트 대입·편집기 후보(RCM 5단계)는 Deprecated 클래스를 거부한다. 이미 저장된 ClassRef 값은 그대로 로드(진단)·저장한다(5.2절).
@@ -738,12 +738,12 @@ enum class UnsaveablePolicy : uint8 {
 
 | 용도 | 출력 제외 | 입력 제외 | 쓰는 곳 | UE 대응 |
 |---|---|---|---|---|
-| `Edit` | Transient · NonPIEDuplicateTransient | Transient | `asset-set`·`asset-new` 입력, `asset-info` 기본 출력, 설정 JSON(TargetProfile·CookSettings) | 출력은 `ShouldPort`(Copy·PIE 아님 — PR:1166-1170·1178-1182). 입력은 속성 편집처럼 `ShouldPort`를 거치지 않는다 |
+| `Edit` | Transient · NonTryoutDuplicateTransient | Transient | `asset-set`·`asset-new` 입력, `asset-info` 기본 출력, 설정 JSON(TargetProfile·CookSettings) | 출력은 `ShouldPort`(Copy·Tryout 아님 — PR:1166-1170·1178-1182). 입력은 속성 편집처럼 `ShouldPort`를 거치지 않는다 |
 | `Copy` | Edit 출력 + DuplicateTransient · TextExportTransient | 출력과 같다 | 복사·붙여넣기, 다른 에셋에 값 옮기기 | PPF_Copy(PR:1172-1176) |
-| `PieCopy` | Transient · DuplicateTransient · TextExportTransient | 출력과 같다 | PIE 세션의 복사 | PPF_Copy + PPF_DuplicateForPIE |
+| `TryoutCopy` | Transient · DuplicateTransient · TextExportTransient | 출력과 같다 | Tryout 세션의 복사 | PPF_Copy + PPF_DuplicateForPIE |
 | `Report` | Transient | 입력에 쓰면 InvalidArgument | `asset-info --all`, 검증 보고 JSON | JsonObjectConverter 기본 SkipFlags |
 
-- 입력 제외 필드에 값을 주면 진단 `ExcludedProperty`로 거부한다(엄격 — UE는 경고 후 건너뛴다, PR:1664-1667). Edit 입력은 NonPIEDuplicateTransient·TextExportTransient 필드를 받는다(인스턴스 고유 값도 도구가 고칠 수 있다. UE에서 이 둘의 제외는 텍스트 출력 규칙이다).
+- 입력 제외 필드에 값을 주면 진단 `ExcludedProperty`로 거부한다(엄격 — UE는 경고 후 건너뛴다, PR:1664-1667). Edit 입력은 NonTryoutDuplicateTransient·TextExportTransient 필드를 받는다(인스턴스 고유 값도 도구가 고칠 수 있다. UE에서 이 둘의 제외는 텍스트 출력 규칙이다).
 - ReadOnly 필드: 살아 있는 객체 대상이면 진단 `ReadOnly`, staged 객체(생성 중 — `asset-new`) 대상이면 받는다(ReadOnly는 생성·복원의 staged write를 허용한다 — MS/TypeSchema.h FieldFlags 주석). 살아 있는 객체 대상이라도 값이 지금 값과 같은 ReadOnly 대입은 무동작으로 받고 override 경로에도 넣지 않는다(`asset-info` 출력의 재입력 — 10.4절).
 - 숨김 열거자(`EnumeratorFlags::Hidden`): 입력은 진단 `HiddenEnumerator`로 거부한다(A5가 `InvalidSetting`으로 바꾼다 — AS 435행). 출력은 그대로 쓴다.
 
@@ -759,7 +759,7 @@ enum class UnsaveablePolicy : uint8 {
 
 - 모듈: `Core/Source/Runtime/ReflectionText`(`ReflectionText.Build.cs` — `RequiredModules` ObjectRuntime·Core), 공개 헤더 `<ReflectionText/TextUse.h>`·`TextDiagnostics.h`·`TextCodecOptions.h`, namespace `rocks::reflection_text`. 리플렉션 타입이 없어 `.rocksids.json`은 두지 않는다. 시험은 FoundationTests의 Object 계열 시험 모듈 목록에 넣었다(Foundation·EngineTests가 함께 돈다).
 - 용도 판정 API: `TextOutputExcludedFlags(use)`(위 표), `TextInputExcludedFlags(use) -> Result<uint32>`(Report와 정의되지 않은 값은 InvalidArgument — 입력 진입점이 맨 앞에서 부른다), `IsTextOutputExcluded(use, flags)`, `ClassifyTextInput(use, flags) -> TextFieldInput { Accept, Excluded, ReadOnly }`. 제외가 ReadOnly보다 먼저다(Transient + ReadOnly는 Excluded). ReadOnly 결과의 수용(staged 대상·같은 값 무동작)은 대상과 값을 아는 대입 묶음이 정한다.
-- 판정 입력은 그 위치의 유효 플래그(`PropagateFieldFlags`)다. Transient·ReadOnly는 전파로 멤버에 닿지만 DuplicateTransient·NonPIEDuplicateTransient·TextExportTransient는 전파되지 않으므로(9.1절), codec은 경로·순회의 단계마다 판정하고 제외된 단계의 부분 트리에 들어가지 않는다 — 제외된 struct 필드는 멤버까지 통째로 빠진다(포함 필터처럼 멤버마다 보지 않는다).
+- 판정 입력은 그 위치의 유효 플래그(`PropagateFieldFlags`)다. Transient·ReadOnly는 전파로 멤버에 닿지만 DuplicateTransient·NonTryoutDuplicateTransient·TextExportTransient는 전파되지 않으므로(9.1절), codec은 경로·순회의 단계마다 판정하고 제외된 단계의 부분 트리에 들어가지 않는다 — 제외된 struct 필드는 멤버까지 통째로 빠진다(포함 필터처럼 멤버마다 보지 않는다).
 - EditorOnly·SaveGame·Required는 텍스트 용도와 무관하다(스펙 표에 없는 결정 — 텍스트 codec은 도구·편집기 문맥에서 쓰고, UE `ShouldPort`도 CPF_EditorOnly를 보지 않는다 — Property.cpp:1153-1182).
 - 진단: `TextDiagnosticCode`(10.2절의 11종, `TextDiagnosticCodeName`이 열거자 철자), 위치 `TextSource { kind: None·Assignment·Json; sourceIndex; JsonPosition }`(None은 옵션·묶음 전체 진단), 읽기 view `TextDiagnostic { code, source, path, message }`. 모음 `TextDiagnostics`는 진단 텍스트를 버퍼 하나에 복사하고(view는 다음 Add·Clear까지 유효), 한도까지 저장한 뒤 넘친 진단은 `Omitted()`로만 센다(Add는 성공, 포화 계수). `Full()`이면 codec이 남은 입력 해석을 멈춰도 된다. Add는 텍스트·레코드 버퍼를 먼저 모두 확보해 할당 실패에도 저장한 진단이 바뀌지 않는다. 모든 진단은 오류다(`HasErrors()` — 경고 종류 없음). 묶음이 모음을 가리키므로 복사·이동을 막았다.
 - 한도의 자리: 스펙대로 `TextCodecOptions::maxDiagnostics`에 두고, 모음은 `SetLimit`으로 받는다(codec 진입점이 options 값으로 부른다 — 묶음의 Append도 같은 한도를 쓴다). `DefaultMaxTextDiagnostics`(256)는 TextDiagnostics.h에 둔다(TextCodecOptions.h가 include한다).
@@ -933,7 +933,7 @@ Result<PreparedAssignments> PrepareAssignments(AssignmentTarget, Span<const Text
 - 한계(대입 묶음이 아직 못 하는 일): 원소를 담은 StructRefArray JSON 배열은 진단 Unsupported였다(B9i5가 원소 추가로 풀었다). InstancedStruct·Text는 그 종류를 더하는 B9j·B9l이 JSON 표기를 더한다(`_structType`). Opaque 필드는 export Unsupported·import 진단 Unsupported다. `asset-info`의 `<경로>=<값>` 줄 출력(10.4절)과 A2 표기 시나리오는 B9i4 범위 밖으로 남겼다(A2가 맡는다 — 20절) — 그 왕복은 JSON 경로(export → 같은 객체 import, ReadOnly·Deprecated ClassRef 같은 값 무동작)로 시험했다.
 - 함께 고친 곳: 10.4절 표의 `a[i]={}`(i = 길이면 끝에 기본 원소 추가)가 B9i3c1 구현에서 빠져 있었다(늘 지우고 넣어 i = 길이는 OutOfRange). 값 단위 적용이 원소 수를 읽어 i = 길이면 PathInsertElement만 하도록 고쳤다(JSON의 struct 원소 펼침이 이것을 쓴다).
 - 공용화: 명령행 목록의 키 중복 판정(`KeySet`)·원소 수 검사(`CheckElementCount`)·스키마 범위(`SchemaScope`)·key wire(`AppendValueKeyWire`)를 ReflectionText 내부 공용으로 옮겼다(동작 불변). 대입 묶음 시작은 `BeginAssignments`로 나눠 `PrepareAssignments`와 `ImportJson`이 함께 쓴다.
-- 시험: ReflectionText `TextJson_RoundTripsEveryKindInOrder`(TextHolder 모든 종류 — float 0.1 단정도 표기, uint64·int64 경계, Map·Set 삽입 순서, Flags 배열, null 참조, 같은 객체 재입력, staged 객체 import 뒤 같은 텍스트)·`TextJson_ImportMergesStructsAndReplacesContainers`(struct 병합·컨테이너 교체·Optional null·struct 원소 배열·정적 배열 struct·MergeByKey)·`TextJson_StrictDiagnosticsCarryJsonPositions`(대소문자 중복 키·모르는 키·종류 불일치·ReadOnly·Deprecated 클래스·원소 형식의 line·column과 경로, Deprecated 클래스 같은 값 재입력 무동작)·`TextJson_UseExclusionAndHiddenEnumerators`(Edit·Copy·PieCopy·Report 출력, 입력 제외·Report 입력, 숨김 열거자)·`TextJson_LimitsTargetsAndReadKeys`(깊이·입력 byte·원소 수 한도, struct 값 대상, staged ReadOnly, resolver 참조와 StructRefArray 원소, PathReadKeys 순서·오류).
+- 시험: ReflectionText `TextJson_RoundTripsEveryKindInOrder`(TextHolder 모든 종류 — float 0.1 단정도 표기, uint64·int64 경계, Map·Set 삽입 순서, Flags 배열, null 참조, 같은 객체 재입력, staged 객체 import 뒤 같은 텍스트)·`TextJson_ImportMergesStructsAndReplacesContainers`(struct 병합·컨테이너 교체·Optional null·struct 원소 배열·정적 배열 struct·MergeByKey)·`TextJson_StrictDiagnosticsCarryJsonPositions`(대소문자 중복 키·모르는 키·종류 불일치·ReadOnly·Deprecated 클래스·원소 형식의 line·column과 경로, Deprecated 클래스 같은 값 재입력 무동작)·`TextJson_UseExclusionAndHiddenEnumerators`(Edit·Copy·TryoutCopy·Report 출력, 입력 제외·Report 입력, 숨김 열거자)·`TextJson_LimitsTargetsAndReadKeys`(깊이·입력 byte·원소 수 한도, struct 값 대상, staged ReadOnly, resolver 참조와 StructRefArray 원소, PathReadKeys 순서·오류).
 
 B9i 묶음 리뷰 반영에서 정한 점(B9i3c0–c4·B9i4 리뷰의 중간 5·낮음 6):
 
@@ -1130,7 +1130,7 @@ public:
 
 | 코드 | 판정 | 뜻 |
 |---|---|---|
-| RMC2202(확장) | MetaCompiler | 지정자-종류 불일치에 새 경우를 더한다: Required는 ClassRef와 그 컨테이너·참조 StaticArray·ObjectRefMap 값·Soft·ClassRef 원소 Set까지(WeakObjectRef·Name·Optional·InstancedStruct·Text는 거부), MaxElements는 Map·Set까지(StaticArray는 거부), Required + DuplicateTransient·NonPIEDuplicateTransient 조합 거부. 타입 지정자를 다른 매크로에 쓰면 매크로별 지정자 표에 없으므로 지금의 "모르는 지정자" 오류다 |
+| RMC2202(확장) | MetaCompiler | 지정자-종류 불일치에 새 경우를 더한다: Required는 ClassRef와 그 컨테이너·참조 StaticArray·ObjectRefMap 값·Soft·ClassRef 원소 Set까지(WeakObjectRef·Name·Optional·InstancedStruct·Text는 거부), MaxElements는 Map·Set까지(StaticArray는 거부), Required + DuplicateTransient·NonTryoutDuplicateTransient 조합 거부. 타입 지정자를 다른 매크로에 쓰면 매크로별 지정자 표에 없으므로 지금의 "모르는 지정자" 오류다 |
 | RMC2203(확장) | MetaCompiler | 타입 도구 이름의 형식·대소문자 무시 중복(모듈과 import 범위), `none` 예약 |
 | RMC2207(새) | MetaCompiler | PROPERTY·Binds 미러의 bitfield 규칙 위반과 정수·bool이 아닌 NATIVE bitfield(NATIVE bitfield는 정수·bool 모두 허용 — B9m 구현): 폭 ≠ 1, `bool : 1`, 부호 있는 정수·enum·실수 bitfield, Binds 미러 안 bitfield |
 | RMC2208(새) | MetaCompiler | `Within` 오류: 대상이 리플렉션 클래스가 아님, 부모 Within의 파생이 아님, 철자를 풀 수 없음 |
@@ -1203,9 +1203,9 @@ Core 커밋(B9b1·B9c1·B9f1·B9i1)은 다른 단계와 독립이라 먼저 해�
 
 **B9g**: 원소 종류별 정적 배열 왕복, ObjectRef 정적 배열의 GC·SetReference·순환 그래프, 참조 struct 정적 배열, NATIVE 형질의 배열 강한 참조 검출, count 불일치 InvalidArgument, 다차원·N 범위 RMC2307·Optional 원소 RMC2307(B9e에서 옮김), 경로 삽입 Unsupported, Required 원소, 성질 표 대조(모든 ○ 칸이 실제로 등록·왕복됨 — 뒤 단계마다 행 추가).
 
-**B9h**: 필드 플래그 지정자, 복제 정책(에셋·PIE)별 저장 집합, includeFlags 저장·로드 대칭(멤버마다, Atomic 통째, Transform 멤버), 2c의 includeFlags 밖 필드·멤버 제외, Required + DuplicateTransient RMC2202. 저장 정책 Exclude(저장 집합의 저장 불가 객체 거부, 참조 null + 진단 값 3·4, Required 위치 규칙, Include 제외, root 거부)와 Keep(스냅샷 왕복에 Transient·Deprecated 객체와 그 참조 보존), 부분 트리 저장 불가 판정, Transient·Deprecated 노드의 로드 진단과 Exclude 재저장에서 빠짐(클래스를 나중에 Transient로 바꾼 패키지를 열고 고침), RMC2209, ClassRef 쓰기의 Deprecated 거부, Within 생성 성공·실패·상속·RMC2208, 그래프 안 Outer의 1단계 Within, 기준 Outer의 2a Within, Outer 없는 객체. Deprecated 클래스를 가리키는 ClassRef 값의 로드 진단(`DeprecatedType`)과 재저장 성공(encode 허용 — 5.2절). includeFlags의 Map 값·Optional 내부·StaticArray 원소 struct 멤버 경로, 저장 불가 조상(Outer 사슬) 아래 객체의 참조(Include·Admit), 1단계가 기준 Outer 타입을 읽지 않음, Deprecated ClassRef 같은 값 재기록 허용(묶음 리뷰 반영 — 시험 이름은 9.1·9.2절 "구현에서 정한 점").
+**B9h**: 필드 플래그 지정자, 복제 정책(에셋·Tryout)별 저장 집합, includeFlags 저장·로드 대칭(멤버마다, Atomic 통째, Transform 멤버), 2c의 includeFlags 밖 필드·멤버 제외, Required + DuplicateTransient RMC2202. 저장 정책 Exclude(저장 집합의 저장 불가 객체 거부, 참조 null + 진단 값 3·4, Required 위치 규칙, Include 제외, root 거부)와 Keep(스냅샷 왕복에 Transient·Deprecated 객체와 그 참조 보존), 부분 트리 저장 불가 판정, Transient·Deprecated 노드의 로드 진단과 Exclude 재저장에서 빠짐(클래스를 나중에 Transient로 바꾼 패키지를 열고 고침), RMC2209, ClassRef 쓰기의 Deprecated 거부, Within 생성 성공·실패·상속·RMC2208, 그래프 안 Outer의 1단계 Within, 기준 Outer의 2a Within, Outer 없는 객체. Deprecated 클래스를 가리키는 ClassRef 값의 로드 진단(`DeprecatedType`)과 재저장 성공(encode 허용 — 5.2절). includeFlags의 Map 값·Optional 내부·StaticArray 원소 struct 멤버 경로, 저장 불가 조상(Outer 사슬) 아래 객체의 참조(Include·Admit), 1단계가 기준 Outer 타입을 읽지 않음, Deprecated ClassRef 같은 값 재기록 허용(묶음 리뷰 반영 — 시험 이름은 9.1·9.2절 "구현에서 정한 점").
 
-**B9i**: 종류별 명령행 Format·Parse 왕복(경계값·escape 표·Flags `+`·비유한 실수·Map 첫 `:`), JSON 왕복(모든 종류, Map 순서, float 단정도 표기), 용도별 제외(Edit·Copy·PieCopy·Report의 출력·입력 — Edit 입력의 NonPIEDuplicateTransient·TextExportTransient 허용), 엄격성(모르는 키·대소문자 중복 키·입력 제외 필드·숨김 열거자·ReadOnly), 값이 같은 ReadOnly 대입 무동작(override 경로에 없음), 의미 오류의 JSON 위치, 오류를 모두 모아 보고, resolver 없음·있음(Hard·Weak·Soft 구분, Soft는 로드하지 않음, Append에서도 호출·진단), 대입 묶음(같은 경로 두 번 오류, 앞 대입 위 해석, `Touches`·`Append`, override 경로 정규화 — Atomic·컨테이너, 값 변화 없는 대입 포함, key 안 `=`의 대입 분해), 준비 단위(값·ObjectRef·ObjectRefArray 멤버가 섞인 인라인 struct의 단위별 게시와 장벽·관찰자 기록), Publish 원자성(변경 표지 Busy, **Prepare 뒤 대상 Discard·GC → Publish가 StaleHandle로 실패하고 객체 불변**, 대상 고정이 GC 회수를 막음, 관찰자 예약 실패 주입 시 객체 불변, 할당 실패 주입), staged 객체 대상의 ReadOnly 허용, StructRefArray 원소 지우기·비우기(같은 묶음 안 index 이동과 지운 원소 안 단위 버림, 지운 원소 참조의 관찰자 기록, 배열 변경 Busy·할당 실패 원자성, staged 압축과 같은 트랜잭션의 공개 전 대상), JSON import 의미(struct 병합·컨테이너 교체·mapMerge — MergeByKey는 준비 상태 기준), 통째 값의 같은 값 무동작과 ReadOnly 호출 끝 대조(ReadOnly 목록·항목 목록·정적 배열·Optional·struct 원소 배열·struct Map, Deprecated 클래스 ClassRef 목록·Set·Map — export → 같은 객체 import 왕복), Append 호출 오류 뒤 게시 거부, 같은 경로 검사의 선형 작업량. asset-info 출력 → asset-set 왕복과 A2 표기 시나리오(AS 13절 예 `SourceColorSettings.ColorSpace=sRGB`)는 asset-info 줄 출력을 만드는 A2가 시험한다(20절). ClassRef 텍스트(타입 도구 이름, TypeId 32자 16진·36자 하이픈 입력, 36자 출력, `none` null).
+**B9i**: 종류별 명령행 Format·Parse 왕복(경계값·escape 표·Flags `+`·비유한 실수·Map 첫 `:`), JSON 왕복(모든 종류, Map 순서, float 단정도 표기), 용도별 제외(Edit·Copy·TryoutCopy·Report의 출력·입력 — Edit 입력의 NonTryoutDuplicateTransient·TextExportTransient 허용), 엄격성(모르는 키·대소문자 중복 키·입력 제외 필드·숨김 열거자·ReadOnly), 값이 같은 ReadOnly 대입 무동작(override 경로에 없음), 의미 오류의 JSON 위치, 오류를 모두 모아 보고, resolver 없음·있음(Hard·Weak·Soft 구분, Soft는 로드하지 않음, Append에서도 호출·진단), 대입 묶음(같은 경로 두 번 오류, 앞 대입 위 해석, `Touches`·`Append`, override 경로 정규화 — Atomic·컨테이너, 값 변화 없는 대입 포함, key 안 `=`의 대입 분해), 준비 단위(값·ObjectRef·ObjectRefArray 멤버가 섞인 인라인 struct의 단위별 게시와 장벽·관찰자 기록), Publish 원자성(변경 표지 Busy, **Prepare 뒤 대상 Discard·GC → Publish가 StaleHandle로 실패하고 객체 불변**, 대상 고정이 GC 회수를 막음, 관찰자 예약 실패 주입 시 객체 불변, 할당 실패 주입), staged 객체 대상의 ReadOnly 허용, StructRefArray 원소 지우기·비우기(같은 묶음 안 index 이동과 지운 원소 안 단위 버림, 지운 원소 참조의 관찰자 기록, 배열 변경 Busy·할당 실패 원자성, staged 압축과 같은 트랜잭션의 공개 전 대상), JSON import 의미(struct 병합·컨테이너 교체·mapMerge — MergeByKey는 준비 상태 기준), 통째 값의 같은 값 무동작과 ReadOnly 호출 끝 대조(ReadOnly 목록·항목 목록·정적 배열·Optional·struct 원소 배열·struct Map, Deprecated 클래스 ClassRef 목록·Set·Map — export → 같은 객체 import 왕복), Append 호출 오류 뒤 게시 거부, 같은 경로 검사의 선형 작업량. asset-info 출력 → asset-set 왕복과 A2 표기 시나리오(AS 13절 예 `SourceColorSettings.ColorSpace=sRGB`)는 asset-info 줄 출력을 만드는 A2가 시험한다(20절). ClassRef 텍스트(타입 도구 이름, TypeId 32자 16진·36자 하이픈 입력, 36자 출력, `none` null).
 
 **B9j**: 왕복(비어 있음·값), 원소·Map 값 자리 wire, 마이그레이션, 미등록 타입 정책 2종, 담을 수 없는 struct(참조·Registry 컨테이너·InstancedStruct·Required) 거부, `Emplace`(등록 형질)·`Emplace<S>`(static_assert)가 InstancedStruct를 담은 struct를 거부, 깊이 합 초과가 쓰기·decode에서 InvalidArgument이고 깊은 위치에 C++가 직접 Emplace한 깊이 합 위반은 encode에서 Fatal 없이 InvalidArgument, Map 값 InstancedStruct 왕복, 타입 lease로 Unregister Busy, 경로 형 바꾸기·멤버 쓰기·객체 문맥 경로 해석, 텍스트·JSON `_structType`.
 
@@ -1326,9 +1326,9 @@ Core 커밋(B9b1·B9c1·B9f1·B9i1)은 다른 단계와 독립이라 먼저 해�
 
 | 항목 | UE 5.8 | Rocks | 다른 이유 |
 |---|---|---|---|
-| DuplicateTransient | 저장: PPF_Duplicate면 건너뜀(PR:1070). 텍스트: PPF_Copy면 제외(PR:1172-1176). OM:455, PM:204-207 | 복제 excludedFlags, Copy·PieCopy 제외 | 같다 |
-| NonPIEDuplicateTransient | 저장: 복제이고 PIE가 아니면 건너뜀(PR:1076). 텍스트: PIE가 아니면 늘 제외(PR:1178-1182). OM:481, PM:226-229 | 에셋 복제 제외, Edit·Copy 제외 | 같다 |
-| TextExportTransient | PPF_Copy일 때만 제외(PR:1172-1176), OM:480, PM:211-214 | Copy·PieCopy 제외 | 같다 |
+| DuplicateTransient | 저장: PPF_Duplicate면 건너뜀(PR:1070). 텍스트: PPF_Copy면 제외(PR:1172-1176). OM:455, PM:204-207 | 복제 excludedFlags, Copy·TryoutCopy 제외 | 같다 |
+| NonTryoutDuplicateTransient | 저장: 복제이고 UE PIE가 아니면 건너뜀(PR:1076). 텍스트: UE PIE가 아니면 늘 제외(PR:1178-1182). OM:481, PM:226-229 | 에셋 복제 제외, Edit·Copy 제외 | 같다 |
+| TextExportTransient | PPF_Copy일 때만 제외(PR:1172-1176), OM:480, PM:211-214 | Copy·TryoutCopy 제외 | 같다 |
 | SaveGame | SaveGame 아카이브는 속성마다 SaveGame만(PR:1051-1055), 이진 struct도 멤버마다(UT:543), 전파 집합에 없음(OM:509-513), OM:458, PM:372-375 | 멤버마다 includeFlags, Atomic struct는 통째 | 같다(Atomic 통째는 UE native Serializer 결과와 같다) |
 | 텍스트 입력 | `ShouldPort` 거짓 속성은 경고 후 건너뜀(PR:1664-1667) | ExcludedProperty 오류 | 엄격한 입력 |
 | 필드 Deprecated | 텍스트 출력에서 늘 제외(PR:1161-1164) | 해당 없음(ID retire) | — |
@@ -1339,7 +1339,7 @@ Core 커밋(B9b1·B9c1·B9f1·B9i1)은 다른 단계와 독립이라 먼저 해�
 |---|---|---|---|
 | Transient 저장 | 인스턴스에 RF_Transient 강제(CDO·archetype 제외 — UOG:3739-3743). SavePackage는 RF_Transient로 판정(SaveContext.cpp:124-135, CLASS_Transient 직접 검사는 주석 — 137-139). 저장 불가 객체는 export·import에서 빠지고(PackageHarvester.cpp:754-759) 참조는 null(LinkerSave.cpp:240-250). 디스크에서 읽으면 경고 뒤 로드(CDO·archetype 제외 — LinkerLoad.cpp:6146-6154) | 패키지 저장(Exclude)은 같은 결과(A1이 export에서 거르고 참조 null + 진단), 로드는 진단 뒤 로드 | 그래프 저장 집합은 호출자가 정한다(OF 5.1절) |
 | Deprecated 저장 | 저장 불가(SaveContext.cpp:136-148 — 객체의 클래스로 판정), 그 Outer 아래도 함께(SaveContext.cpp:95-110), 참조 null, 편집기 로드 경고(LinkerLoad.cpp:6122-6131), NewObject 검사 없음, NotPlaceable도 켬(CS:152-155) | 같다(Exclude는 저장 때 뺌, 참조 null + 진단, 로드 진단) | 사용자 결정 U5 |
-| 복제 | `FDuplicateDataWriter`는 객체 플래그 RF_DuplicateTransient·RF_NonPIEDuplicateTransient만 거르고 클래스 플래그는 보지 않는다(DuplicateDataWriter.cpp:69-79). Transient 클래스는 RF_Transient만 받는다(UOG:3740) | 저장 정책 Keep(스냅샷·undo·PIE 복제) | 같다 |
+| 복제 | `FDuplicateDataWriter`는 객체 플래그 RF_DuplicateTransient·RF_NonPIEDuplicateTransient만 거르고 클래스 플래그는 보지 않는다(DuplicateDataWriter.cpp:69-79). Transient 클래스는 RF_Transient만 받는다(UOG:3740) | 저장 정책 Keep(스냅샷·undo·Tryout 복제) | 같다 |
 | Deprecated 클래스 참조 값 | 클래스 참조(UClass 객체)는 저장 불가 판정 대상이 아니라 그대로 저장한다 | ClassRef encode 허용, decode 진단, 쓰기·텍스트·편집기 후보는 거부 | 값 보존은 같다. 새로 고르는 경로만 막는다 |
 | Deprecated 클래스를 쓰는 속성 | 비Deprecated 속성이면 UHT 오류(UhtProperty.cs:2612-2631, UhtObjectPropertyBase.cs:752-756) | RMC2209(필드 retire + migrate) | Rocks에 필드 Deprecated가 없다 |
 | 상속 | CLASS_Inherit에 Transient·Deprecated(OM:292-293, CC:5177) | 같다 | — |
@@ -1398,7 +1398,7 @@ Core 커밋(B9b1·B9c1·B9f1·B9i1)은 다른 단계와 독립이라 먼저 해�
 | 소비 단계 | 쓰는 것 | 하위 단계 | 근거 |
 |---|---|---|---|
 | A1 | 저장 불가 객체(Transient·Deprecated)의 export 제외(`IsUnsaveableObject`)·참조 null(저장 정책 Exclude), 로드 진단 | B9h2 | AS 150·154행, 9.2절 |
-| (CU4·PIE·스냅샷) | 저장 불가 객체 보존(저장 정책 Keep) | B9h2 | 9.2절 |
+| (CU4·Tryout·스냅샷) | 저장 불가 객체 보존(저장 정책 Keep) | B9h2 | 9.2절 |
 | A1 | weak 참조 저장 정책(Admit의 Null) | B9d1 | OF 5.3절 |
 | A1 | decode 정책 선택(`unknownClass`·`unknownStructType`) | B9d2·B9j | RF 결정 9와 같은 자리 |
 | A1 | Tags 키 방식(플래그면 예약 비트 512) | (B9h 비트만) | AS 169행 |
@@ -1435,7 +1435,7 @@ AS 514행 MinMagFilter·MipFilter는 닫힌 값 집합이므로 enum(B3)으로 �
 
 U5 경위(2026-11-15): 개정 지시의 "`uint8 b : 1`만"은 조정자가 선택지 설명에 잘못 쓴 문구였고, 사용자가 고른 기준은 "UE처럼"이다. UHT는 uint8·16·32·64 폭 1 bitfield를 모두 uint8 크기 bool로 받는다(UhtUInt32Property.cs:76-79 등 — 18.13절, 조정자 확인).
 
-U5의 Deprecated 저장 범위: UE의 저장 불가 판정은 패키지 저장 규칙이고 복제는 클래스로 거르지 않으므로(18.9절), "저장 때 뺀다"는 패키지 저장(저장 정책 Exclude)에 적용하고 스냅샷·undo·PIE 복제(Keep)는 보존한다(조정자 결정 2026-11-15).
+U5의 Deprecated 저장 범위: UE의 저장 불가 판정은 패키지 저장 규칙이고 복제는 클래스로 거르지 않으므로(18.9절), "저장 때 뺀다"는 패키지 저장(저장 정책 Exclude)에 적용하고 스냅샷·undo·Tryout 복제(Keep)는 보존한다(조정자 결정 2026-11-15).
 
 **설계 결정(교차검증 반영, 권고안으로 진행)**
 
@@ -1451,7 +1451,7 @@ U5의 Deprecated 저장 범위: UE의 저장 불가 판정은 패키지 저장 �
 10. 경로 key는 wire payload를 담는 `PathKey`, 문자열은 따옴표 없는 schema 해석(1.5절). 진단 경로는 삽입 순번(1.6절).
 11. 정적 배열은 정확히 N, ObjectRef 원소 허용(8절).
 12. 새 필드 플래그는 전파하지 않는다(UE와 같다). 포함 필터는 멤버마다이고 Atomic struct만 통째다(9.1절).
-13. 저장 불가 객체(Transient·Deprecated와 부분 트리)는 저장 옵션 `unsaveable`로 다룬다. Exclude(기본, 패키지 저장)는 저장 집합에서 거부·참조 null + 진단이고 A1이 export에서 거른다. Keep(스냅샷·undo·PIE 복제)은 보존한다. 로드는 Transient·Deprecated 노드 모두 진단 뒤 로드한다(9.2절, 조정자 결정 2026-11-15 — UE 5.8 동작).
+13. 저장 불가 객체(Transient·Deprecated와 부분 트리)는 저장 옵션 `unsaveable`로 다룬다. Exclude(기본, 패키지 저장)는 저장 집합에서 거부·참조 null + 진단이고 A1이 export에서 거른다. Keep(스냅샷·undo·Tryout 복제)은 보존한다. 로드는 Transient·Deprecated 노드 모두 진단 뒤 로드한다(9.2절, 조정자 결정 2026-11-15 — UE 5.8 동작).
 14. Deprecated 클래스를 가리키는 필드는 RMC2209(필드 retire + migrate).
 15. UE `NonTransient` 대응은 두지 않는다. Rocks의 다른 상속 플래그(WorldOnly)도 끄는 지정자가 없고, Transient 클래스는 런타임 도우미 타입이라 저장 가능한 파생 수요가 아직 없다. 필요해지면 형식 변경 없이 지정자로 더할 수 있다.
 16. Within은 `OuterSummary` 타입 칸과 생성 정체성 규칙의 한 단계로 판정하고, 철자는 Binds처럼 Clang으로 푼다(9.2절).
@@ -1481,10 +1481,10 @@ U5의 Deprecated 저장 범위: UE의 저장 불가 판정은 패키지 저장 �
 - "Sparks 저장 가능 대응 ⊆ 성질 표" 대조 시험(Sparks 단계).
 - 타입 도구 이름 공간의 enum: B9d2는 클래스·struct만 넣었다. Sparks가 enum을 타입 이름으로 쓰므로 enum을 같은 이름 공간에 넣을지(넣으면 기존 클래스·struct 이름과 새 충돌이 생긴다)는 Sparks 바인딩 단계(CU8)가 정한다.
 - reparent된 클래스: Base를 바꾼 뒤 옛 ClassRef 값은 Base 파생 위반이라 정책과 무관하게 로드가 실패한다. 고치는 경로(migrate 또는 A1 decode 정책 선택)는 A1이 정한다.
-- 사용 중인 Registry 사이 값 복사 일반 API(Text DeepClone 외 Name 토큰 pool 일치 등)는 PIE 복제 설계와 함께.
+- 사용 중인 Registry 사이 값 복사 일반 API(Text DeepClone 외 Name 토큰 pool 일치 등)는 Tryout 복제 설계와 함께.
 - `asset-info` 출력 재입력의 override 기록: 값이 같아도 override 경로로 기록되어 A5 뒤 기본값 전파가 끊긴다. A5가 기준 차이 출력과 함께 정한다(재입력 시 기준과 같은 값을 기록하지 않는 옵션 등).
 - Sparks 필드·struct 멤버의 SaveGame 표시 주체: SL `@save`(SL 2.4절)는 영속 표시다. 결정 U5(멤버마다 표시)에서 Sparks struct 멤버를 누가 SaveGame으로 표시하는지는 Sparks 단계가 정한다.
-- PIE 복제에서 Transient 클래스 객체의 처리: B9는 Keep(보존)으로 정했다. PIE가 그 객체를 다시 만드는 쪽을 원하면 PIE 복제 설계에서 정한다.
+- Tryout 복제에서 Transient 클래스 객체의 처리: B9는 Keep(보존)으로 정했다. Tryout이 그 객체를 다시 만드는 쪽을 원하면 Tryout 복제 설계에서 정한다.
 - Deprecated 클래스 ClassRef 값의 같은 값 재기록(B9h2 묶음 리뷰): 쓰기는 Deprecated를 거부하지만 지금 값과 같은 값은 받는다(FieldValue 쓰기·생성 live·staged 쓰기는 무동작, 경로 원소·멤버 쓰기는 지금 값과 대조). 텍스트 대입 묶음(B9i)·undo·붙여넣기 재적용도 같은 규칙을 지켜야 한다 — B9i 시험 목록에 적었다. Map 값 경로 쓰기(`PathWrite`)는 지금 값을 보지 않아 Deprecated를 늘 거부한다. B9i는 쓰기 전에 지금 값과 비교해 같으면 쓰지 않는 쪽으로 정했다(B9i 묶음 리뷰 반영 — 단일 값 `m[k]=v`와 Array·Set·Map 통째 목록 모두, 10.2절). undo·붙여넣기(CU4)도 같은 방법을 쓴다.
 - B9i가 남긴 일과 맡을 단계(B9i 묶음 리뷰 반영 2026-11-17):
   - `asset-info`의 `<경로>=<값>` 줄 출력(10.4절)과 그 출력 → `asset-set` 왕복·A2 표기 시나리오(AS 13절 `SourceColorSettings.ColorSpace=sRGB`) 시험 → A2(에셋 명령). 값 표기·경로 표기·대입 묶음·ReadOnly 호출 끝 대조는 B9i에 있다.
@@ -1575,7 +1575,7 @@ U5의 Deprecated 저장 범위: UE의 저장 불가 판정은 패키지 저장 �
 
 | 지적 | 요지 | 처리 |
 |---|---|---|
-| A H1 | 텍스트 복사 출력의 DuplicateTransient·NonPIEDuplicateTransient 제외 누락 | 반영: 용도별 제외(10.1절 표), 18.8절 |
+| A H1 | 텍스트 복사 출력의 DuplicateTransient·NonTryoutDuplicateTransient 제외 누락 | 반영: 용도별 제외(10.1절 표), 18.8절 |
 | A M1 | Rocks Atomic ≠ UE Atomic | 반영: 3.1절 "UE Atomic과의 관계", 공백 분석 정정 기록(21절) |
 | A M2 | Optional UE 저장 서술 오류, JSON null 차이 | 반영: 6절·18.5절 |
 | A M3 | weak 외부 import의 실제 소비자(외부 객체 패키지·쿠킹) | 반영: 18.4절, 20절 열린 문제 |
@@ -1668,11 +1668,11 @@ U5의 Deprecated 저장 범위: UE의 저장 불가 판정은 패키지 저장 �
 | M1 | 준비 사본의 참조 처리(장벽·관찰자·주소 검사 우회) | 반영: 준비 단위 셋(값 부분 트리·단일 참조 위치 간선 변경·Registry 컨테이너 새 버퍼와 간선 차이), 게시 때 간선마다 장벽·관찰자 기록, 키 예약은 간선 목록에서 셈(10.2절) |
 | M2 | Include weak 지연 진단의 경로 보존 | 반영: 지연 항목에 objectIndex·경로 사본(≤ 17단계, 삽입 순번), 메모리를 그래프 바이트·작업량에 청구, 진단은 encode 뒤 기록 순서로(5.1절) |
 | M3 | ClassRef encode의 Deprecated 거부로 재저장 불가 | 반영(조정자 결정): encode는 허용, decode에서 `DeprecatedType` 진단, 쓰기·텍스트·편집기 후보만 거부(5.2절, 18.9절) |
-| M4 | 저장 불가 규칙을 모든 그래프 저장에 강제 | 반영(조정자 결정): 저장 옵션 `unsaveable` = Exclude(기본, 패키지 — UE SavePackage)·Keep(스냅샷·undo·PIE 복제 — UE 복제는 클래스로 거르지 않음, DuplicateDataWriter.cpp:69-79)(9.2절) |
+| M4 | 저장 불가 규칙을 모든 그래프 저장에 강제 | 반영(조정자 결정): 저장 옵션 `unsaveable` = Exclude(기본, 패키지 — UE SavePackage)·Keep(스냅샷·undo·Tryout 복제 — UE 복제는 클래스로 거르지 않음, DuplicateDataWriter.cpp:69-79)(9.2절) |
 | M5 | asset-info → asset-set 왕복과 ReadOnly·override 기록 | 반영: 값이 같은 ReadOnly 대입은 무동작·override 경로 제외, 왕복은 "값 보존"으로 좁힘, 재입력의 override 기록은 A5 열린 문제(10.1·10.4·20절) |
 | M6 | bitfield 결정 문구와 다름 | 조정자 결정으로 원고대로 확정(부호 없는 정수 4종, `bool b : 1` 거부). U5 경위를 20절에 기록 |
 | M7 | Transient 노드 로드 거부는 복구 경로 없음 | 반영(조정자 결정): 로드하고 `TransientType` 진단, Exclude 재저장에서 빠짐(9.2절, 18.9절 — LinkerLoad.cpp:6146-6154) |
-| L1 | Edit 입력의 NonPIEDuplicateTransient 거부 | 반영: 출력·입력 제외를 나눔, Edit 입력은 Transient만 제외(10.1절) |
+| L1 | Edit 입력의 NonTryoutDuplicateTransient 거부 | 반영: 출력·입력 제외를 나눔, Edit 입력은 Transient만 제외(10.1절) |
 | L2 | 2c 제외 문구 "최상위" | 반영: "최상위 필드·멤버"(9.1절) |
 | L3 | 진단 코드 겹침 | 반영: 컨테이너 쪽 위치 규칙 우선, 사례별 코드 하나(15절) |
 | L4 | Admit의 weak Import·slot 캐시 | 반영: slot 캐시 없이 출현마다 질의, Import는 null + 진단, hook 계약에 weak 분기(5.1절) |
