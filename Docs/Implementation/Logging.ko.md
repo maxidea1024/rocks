@@ -80,6 +80,7 @@ inline constexpr LogCategory LogGraphicsD3D12{"Graphics.D3D12"};
 | `{Name}` | 이름 있는 자리. 인자에 순서대로 묶이고, 이름은 속성 키가 된다. 영문자로 시작한다 |
 | `{Name:spec}` | 기존 Rocks 서식 spec(`#x`, `.3f`, `>8` 등) |
 | `{}` · `{0}` | 위치 자리. 속성 키는 `Arg0`, `Arg1`… 이름 자리와 한 템플릿에 섞을 수 없다 |
+| `{@Name}` | 구조체 펼치기 자리. 값의 필드를 복사해 남긴다(아래 "구조체 펼치기"). spec은 쓸 수 없다 |
 | `{{` · `}}` | 중괄호 문자 |
 
 - **컴파일 타임에 검증하는 것**(리터럴 템플릿): 중괄호 짝, 이름·위치 혼용, 자리 수와 인자 수(위치 자리는 모든 인자를 한 번 이상 써야 한다), 위치 번호 범위, 이름 문법, UTF-8, **내장 타입**의 spec, 같은 사용자 타입 인자에 서로 다른 spec. 어기면 영어 이름의 오류 함수(`LogTemplateError_*`)가 진단에 나온다.
@@ -87,6 +88,58 @@ inline constexpr LogCategory LogGraphicsD3D12{"Graphics.D3D12"};
 - **동적 템플릿:** 설정이나 데이터에서 온 문자열은 `Log::Write(level, category, RuntimeTemplate{text}, args...)`로 넘긴다. 검증은 런타임에 하고, 잘못되면 원문에 `[template error: ...]`를 붙여 그대로 기록한다.
 - 인자는 최대 16개(`MaxLogArguments`)다.
 - 사용자 타입은 기존 `Formatter<T>` 특수화로 지원한다. 값은 기록하는 순간 텍스트로 렌더되며, 이 비용은 호출 스레드가 낸다. 내장 타입(정수·실수·bool·포인터·enum·문자열)은 원시 값으로 복사하고 출력 스레드가 렌더한다.
+
+## 구조체 펼치기(`{@Obj}`)
+
+`{@Name}` 자리에 넣은 값은 한 줄 텍스트로 서식하지 않고, 필드 이름과 값을 기록 시점에 복사해 남긴다(Serilog `{@Obj}`, 설계 14.1.6절).
+
+```cpp
+#include <Game/Player.generated.h>
+#include <Object/LogStructure.h>   // 리플렉션 타입의 일반 특수화(직접 include한다)
+
+Log::Info(LogGame, "Spawned {@Player} at {Frame}", player, frame);
+// Spawned Player { name: "Ann", hp: 30, team: Blue, scores: [3, 1, 4, ... 12 items] } at 42
+```
+
+- **리플렉션 타입**(`ROCKS_STRUCT`·`ROCKS_CLASS`): 그 타입의 생성 헤더와 `<Object/LogStructure.h>`를 include하면 바로 쓸 수 있다. 생성 헤더는 이 헤더를 include하지 않는다. `{@Name}`으로 쓰는 번역 단위마다 직접 include한다. Formatter도 가진 리플렉션 타입은 그 타입을 로그에 쓰는 모든 번역 단위에서 include해야 한다. 어떤 곳은 펼치고 어떤 곳은 이 헤더 없이 Formatter로 쓰면 번역 단위마다 판정이 달라진다(ODR 위반, 설계 14.2절). MetaCompiler가 낸 필드 방문 함수(`GeneratedType<T>::VisitFields`)로 멤버를 직접 읽으므로 registry 조회·할당이 없다. 필드 이름은 C++ 멤버 이름, 타입 태그는 타입 도구 이름이다.
+  - enum은 열거자 이름(선언되지 않은 값은 정수)이다.
+  - `Optional`은 값 또는 `null`이다.
+  - 객체 참조(`ObjectRef`·`WeakObjectRef`·`ObjectRefArray` 원소)는 대상을 읽지 않고 handle의 `"registry:slot:generation"`(null이면 `null`)만 담는다. registry는 프로세스 안에서 Registry를 만든 순서대로 1부터 매기는 번호다(주소가 아니다). 같은 실행 순서면 같고, 다른 실행과는 다를 수 있다.
+  - enum 기호는 C++ 열거자 이름(`EightBitData`)이고, 타입 태그는 도구 이름이다.
+  - `Guid`·`AssetId`는 `Formatter` 문자열이다.
+  - `Name`·`Text`·`ClassRef`·`SoftObjectRef`·Digest·Map·Set·InstancedStruct는 `<unsupported>`다.
+- **손으로 쓴 타입**은 `LogStructure<T>`를 특수화한다.
+
+  ```cpp
+  template <> struct rocks::LogStructure<Hit> {
+      static StringView TypeTag() noexcept { return "Hit"; }   // 선택. 없으면 태그 없이 "{ ... }"
+      static void Write(LogStructureWriter& out, const Hit& value) noexcept {
+          out.Write("Damage", value.damage);   // 이름은 문자열 리터럴(정적 저장소)
+          out.Write("Target", value.target);   // LogStructure가 있으면 중첩 객체
+          out.Write("Tags", value.tags);       // Span·Array·C 배열은 배열
+      }
+  };
+  ```
+
+  - `Write`는 호출 스레드에서 기록마다 한 번 불린다. 값만 읽고, 할당·잠금·로그 호출은 하지 않는다.
+  - `out.Write`는 타입으로 고른다. 정수·실수·bool·문자열은 값, `LogStructure`가 있으면 중첩 객체, `Formatter`가 있으면 그 문자열, enum은 정수, 연속 범위는 배열, 나머지는 `<unsupported>`다.
+  - 직접 쓰는 함수(`WriteSigned`·`WriteString`·`WriteSymbol`·`BeginObject`/`EndObject`·`BeginArray`/`EndArray` 등)도 있다. `Begin*`이 false를 돌려주면 내용을 버리는 중이니 만들지 않아도 된다. 짝이 되는 `End*`는 그래도 부른다.
+- **복사 시점:** 값은 기록 호출 안에서 복사된다. 기록한 뒤 원본을 바꾸거나 파괴해도 출력은 기록 때 값이다(Async·Manual도 같다).
+- **상한:**
+  - 깊이 4(`MaxLogStructureDepth`, 맨 위 객체가 1, 배열도 한 단계)
+  - 객체마다 필드 32(`MaxLogStructureFields`)
+  - 배열은 앞 8원소(`MaxLogStructureElements`)와 전체 개수
+  - 넘치면 `{ A: 1, ... }`·`[0, 1, 2, 3, 4, 5, 6, 7, ... 9 items]`처럼 잘림이 보이고, 기록에 `ValueTruncated`가 선다. 공간이 모자라 잘린 값이 있으면 그것을 담은 모든 객체·배열에도 잘림이 보인다.
+  - 슬롯(512 B)에 들어가지 않으면 블록(4 KiB)에 담는다. 블록도 모자라면 남은 필드를 버리고 잘림 표시를 남긴다.
+- **출력:** 텍스트는 `Tag { Name: "Ann", Hp: 30 }`이다. 문자열은 따옴표와 escape, enum 이름은 따옴표 없이 나온다. JSON lines는 `props` 안 중첩 객체 `{"$type": "Player", "name": "Ann", ...}`다. 잘린 객체에는 `"$truncated": true`가 붙고, 원소를 버린 배열은 `{"$count": 20, "$items": [...]}`가 된다. sink는 `LogEvent::properties`의 `Structure` 속성과 `structureNodes`(앞 순서 평탄 배열, `subtreeBegin`·`subtreeCount`·`parent`)로 트리를 읽는다.
+- **컴파일 오류:**
+  - `{@Name:spec}`은 `LogTemplateError_SpecOnStructure`다.
+  - `{@Name}` 인자에 `LogStructure`가 없으면 `LogTemplateError_StructureWithoutLogStructure`다.
+  - `LogStructure`만 있는 타입을 `{Name}`에 쓰면 `LogTemplateError_StructureArgumentWithoutAt`다.
+  - `Formatter`도 `LogStructure`도 없는 타입은 `static_assert`("Log argument type needs a rocks::Formatter<T> or rocks::LogStructure<T> specialization ...")로 거부한다. 리플렉션 타입이면 `<Object/LogStructure.h>` include를 빠뜨린 경우다.
+  - `LogStructure`는 클래스 타입에만 특수화한다. enum·정수에 두면 `static_assert`("rocks::LogStructure<T> is only supported for class types ...")다.
+  - `RuntimeTemplate`은 렌더 때 판정한다. `{@Name}`에 특수화 없는 인자와 `{@Name:spec}`은 `[template error: ...]`를 붙인다. `LogStructure`만 있는 타입을 일반 자리에 쓴 경우는 그 자리만 `<format error>`다(렌더 쪽은 인자 타입을 모른다).
+- **수명:** 캡처는 문자열 포인터만 담는다. 필드 이름 리터럴은 `VisitFields`·`Write`를 인스턴스화한 모듈에 있다. 타입 태그·enum 기호는 `Schema()`를 가진 모듈(생성 코드가 든 모듈)에 있다. 그 어느 모듈이든 내리기 전에 `LogSystem::Flush`로 기록을 비운다.
 
 ## 인자 평가와 Lazy
 
@@ -192,7 +245,7 @@ logs.AddSink(sink, {LogLevel::Warning, LogGraphics});   // Graphics·Graphics.* 
   [2026-11-17T09:30:00.250Z][Warning][World] World Main destroy deferred for 300 frames: external references World=Main Engine/Private/Engine.cpp:262 ProcessDeferred
   ```
 
-- `JsonLinesLogSink`는 한 줄에 객체 하나를 쓴다. 필드는 `t`, `mono`, `lvl`, `cat`, `event`, `tpl`, `msg`, `props`, `ctx`, `src`, `thread`, `frame`, `flags`이다. 숫자와 bool 속성은 JSON 숫자·불리언으로 나간다.
+- `JsonLinesLogSink`는 한 줄에 객체 하나를 쓴다. 필드는 `t`, `mono`, `lvl`, `cat`, `event`, `tpl`, `msg`, `props`, `ctx`, `src`, `thread`, `frame`, `flags`이다. 숫자와 bool 속성은 JSON 숫자·불리언으로 나간다. 구조체 펼치기 값은 `props` 안 중첩 객체다.
 - 소스 경로는 저장소 기준 상대 경로다(빌드가 `-fmacro-prefix-map`을 건다).
 - **sink를 직접 만들 때의 계약:**
   - `Write(const LogEvent&)`의 문자열은 콜백 동안만 유효하다. 보관하려면 복사한다.
@@ -364,6 +417,5 @@ RocksCommandlet log view game.log --key dev.key --correlation request=55
 
 ## 아직 구현되지 않은 것
 
-- 구조체 펼치기(`{@Obj}`): 후속(GC 세션 병합 뒤)
 - 설정 단계 거부(`log.levels`·`log.rate_limits`·레이아웃의 문법 오류): CVar 이관(CVR7)의 `Validate`. 지금은 적용 때 Warning·Error
 - POSIX 크래시 처리기: 코드는 있으나 이 저장소의 Windows 환경에서만 빌드·시험했다

@@ -1,3 +1,4 @@
+#include <Core/Diagnostics/LogStructure.h>
 #include <Core/Diagnostics/RuntimeLogSink.h>
 #include <Core/Text/Json.h>
 #include <Core/Text/StringBuilder.h>
@@ -129,11 +130,119 @@ constexpr usize JsonEscapedBytesPerByte = 6;
 // 숫자·시각 필드를 서식화하는 임시 버퍼 크기다(UTC 시각 문자열과 64-bit 정수가 들어간다).
 constexpr usize FieldScratchBytes = 48;
 
-Result<void> WriteProperty(JsonWriter& json, const LogProperty& property) noexcept {
-    if (auto key = json.Key(property.name); !key) {
-        return key;
+// 펼친 값 노드 트리의 최대 깊이다(맨 위 속성 + 펼친 값 깊이). 손으로 만든 LogEvent가 더 깊으면
+// 쓰지 않는다(재귀 깊이를 묶는다).
+constexpr usize MaxJsonStructureDepth = MaxLogStructureDepth + 1;
+
+Result<void> WriteValue(JsonWriter& json, const LogProperty& property,
+                        Span<const LogProperty> nodes, usize depth) noexcept;
+
+// Structure·Array 노드의 직접 자식을 차례로 부른다. 범위가 structureNodes 밖이거나 자식 하위
+// 트리가 부모 범위를 넘으면 InvalidArgument다(대체 줄로 간다).
+template <typename Visit>
+Result<void> ForEachChild(const LogProperty& node, Span<const LogProperty> nodes,
+                          Visit&& visit) noexcept {
+    const usize begin = node.subtreeBegin;
+    const usize end = begin + node.subtreeCount;
+    if (begin > nodes.Size() || node.subtreeCount > nodes.Size() - begin) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    for (usize index = begin; index < end;) {
+        const LogProperty& child = nodes[index];
+        const usize span = LogPropertySubtreeSpan(child);
+        if (span > end - index) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (auto visited = visit(child); !visited) {
+            return visited;
+        }
+
+        index += span;
+    }
+
+    return Result<void>::Success();
+}
+
+// 펼친 객체는 JSON 객체다: 타입 태그는 "$type", 잘림은 "$truncated": true.
+Result<void> WriteStructure(JsonWriter& json, const LogProperty& property,
+                            Span<const LogProperty> nodes, usize depth) noexcept {
+    Result<void> result = json.BeginObject();
+    if (result && !property.typeTag.IsEmpty()) {
+        result = json.Key("$type");
+        if (result) {
+            result = json.String(property.typeTag);
+        }
+    }
+
+    if (result) {
+        result = ForEachChild(property, nodes, [&](const LogProperty& child) noexcept {
+            if (auto key = json.Key(child.name); !key) {
+                return key;
+            }
+
+            return WriteValue(json, child, nodes, depth + 1);
+        });
+    }
+
+    if (result && property.truncated) {
+        result = json.Key("$truncated");
+        if (result) {
+            result = json.Bool(true);
+        }
+    }
+
+    if (!result) {
+        return result;
+    }
+
+    return json.EndObject();
+}
+
+// 펼친 배열은 JSON 배열이다. 원소를 버렸으면(잘림) 전체 개수를 함께 남기려고
+// {"$count": 전체 원소 수, "$items": [담은 원소]}로 낸다.
+Result<void> WriteArray(JsonWriter& json, const LogProperty& property,
+                        Span<const LogProperty> nodes, usize depth) noexcept {
+    Result<void> result = Result<void>::Success();
+    if (property.truncated) {
+        result = json.BeginObject();
+        if (result) {
+            result = json.Key("$count");
+        }
+
+        if (result) {
+            result = json.UInt64(property.unsignedValue);
+        }
+
+        if (result) {
+            result = json.Key("$items");
+        }
+    }
+
+    if (result) {
+        result = json.BeginArray();
+    }
+
+    if (result) {
+        result = ForEachChild(property, nodes, [&](const LogProperty& child) noexcept {
+            return WriteValue(json, child, nodes, depth + 1);
+        });
+    }
+
+    if (result) {
+        result = json.EndArray();
+    }
+
+    if (result && property.truncated) {
+        result = json.EndObject();
+    }
+
+    return result;
+}
+
+Result<void> WriteValue(JsonWriter& json, const LogProperty& property,
+                        Span<const LogProperty> nodes, usize depth) noexcept {
     switch (property.kind) {
     case LogPropertyKind::Signed:
         return json.Int64(property.signedValue);
@@ -143,11 +252,31 @@ Result<void> WriteProperty(JsonWriter& json, const LogProperty& property) noexce
         return json.Double(property.floatValue);
     case LogPropertyKind::Bool:
         return json.Bool(property.boolValue);
+    case LogPropertyKind::Null:
+        return json.Null();
+    case LogPropertyKind::Structure:
+    case LogPropertyKind::Array:
+        if (depth >= MaxJsonStructureDepth) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        return property.kind == LogPropertyKind::Structure
+                   ? WriteStructure(json, property, nodes, depth)
+                   : WriteArray(json, property, nodes, depth);
     case LogPropertyKind::String:
         break;
     }
 
     return json.String(property.text);
+}
+
+Result<void> WriteProperty(JsonWriter& json, const LogProperty& property,
+                           Span<const LogProperty> nodes) noexcept {
+    if (auto key = json.Key(property.name); !key) {
+        return key;
+    }
+
+    return WriteValue(json, property, nodes, 0);
 }
 
 // 한 줄 전체를 쓴다. 실패하면(버퍼 넘침은 호출자가 Truncated로 본다) 오류를 돌려준다.
@@ -232,7 +361,7 @@ Result<void> WriteRecord(JsonWriter& json, const LogEvent& event) noexcept {
     }
 
     for (usize index = 0; result && index < event.properties.Size(); ++index) {
-        result = WriteProperty(json, event.properties[index]);
+        result = WriteProperty(json, event.properties[index], event.structureNodes);
     }
 
     if (result) {

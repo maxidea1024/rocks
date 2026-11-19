@@ -20,7 +20,7 @@ internal static class MetaProbeIdentity
                 "probe::Point", "probe::Segment", "probe::Plain", "probe::Derived", "probe::Other", "probe::none",
                 "probe::Target", "probe::Slot", "probe::Host", "probe::Flags", "probe::Base", "probe::Mid", "probe::Tagged", "probe::AtomicBase",
                 "probe::AtomicLeaf", "probe::A", "probe::B", "probe::RefBase", "probe::Range", "probe::Hidden", "probe::Child",
-                "probe::Range::Inner", "probe::ModeBinding", "probe::KeeperBinding", "probe::Tone" }
+                "probe::Range::Inner", "probe::ModeBinding", "probe::KeeperBinding", "probe::Tone", "probe::Hollow" }
                 .Concat(Enumerable.Range(1, 17).Select(level => $"probe::Chain{level}")))
             {
                 manifest.Register("type", name);
@@ -55,6 +55,7 @@ internal static class MetaProbeIdentity
                 "probe::Leaf::anything", "probe::Leaf::links", "probe::Value::strong",
                 "probe::Value::kind", "probe::Value::kinds", "probe::Value::self", "probe::Leaf::kind", "probe::Leaf::kinds",
                 "probe::Derived::extra", "probe::Other::value",
+                "probe::Leaf::value", "probe::Leaf::bit", "probe::Base::shared", "probe::Base::secret", "probe::Derived::leaf",
                 "probe::Leaf::weight", "probe::Value::text", "probe::Value::name", "probe::Value::list", "probe::Value::pointer",
                 "probe::Leaf::x", "probe::Leaf::tags", "probe::Value::byMode", "probe::Value::assets", "probe::Value::byRatio",
                 "probe::Value::byObject", "probe::Value::byWeak", "probe::Value::byLeaf", "probe::Value::ratios", "probe::Value::lists",
