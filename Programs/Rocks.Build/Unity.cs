@@ -65,8 +65,8 @@ internal static class UnityBuild
     public const string DirectoryName = "Unity";
 
     /// <summary>
-    /// <see cref="UnityMode.Default"/>인 모듈을 묶는가. 충돌을 정리한 모듈부터 규칙에서 <see cref="UnityMode.On"/>으로 켜고, 정리가 끝난
-    /// 뒤 기본값을 정한다(9.3절, UB6).
+    /// <see cref="UnityMode.Default"/>인 모듈을 묶는가. 기본은 끔이다(UB6 결정, 9.3절): 켠 모듈은 묶음 충돌 정책 검사의 대상이므로,
+    /// 충돌을 정리해 검사를 통과한 모듈만 규칙에서 <see cref="UnityMode.On"/>으로 켠다. 게임 모듈도 같다.
     /// </summary>
     internal const bool DefaultOn = false;
 

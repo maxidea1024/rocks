@@ -36,6 +36,22 @@ UE5.8 Debug·Development·Shipping에 대응한다. 구성마다 `ROCKS_BUILD_DE
 - 후속: ThinLTO 캐시(`/lldltocache`·`--thinlto-cache-dir`)가 없어 Release relink는 backend를 모두 다시 생성한다. 병렬 link 수와 LTO thread 수 조정도 측정 후 정한다.
 - 강제 인라인(UE `FORCEINLINE` 대응)은 쓰지 않는다. 인라인 판단은 Clang 최적화(`-O2`, Release ThinLTO의 모듈 간 인라인)에 맡기고, 정책 검사(`forced-inline`)가 제품 소스의 `always_inline`·`__forceinline`을 거부한다. 성능 문제는 측정한 뒤 알고리즘·데이터 배치·모듈 최적화 설정으로 다룬다.
 
+### 유니티 빌드·PCH
+
+컴파일 시간을 줄이는 세 가지가 기본으로 켜져 있다([설계](../Docs/Design/UnityBuildPch.ko.md), 구현 설명은 [Rocks.Build](../Programs/Rocks.Build/README.ko.md)).
+
+- **유니티 빌드**: 규칙에서 `Unity => UnityMode.On`으로 켠 모듈의 C++ 소스를 묶음 번역 단위로 컴파일한다. 켠 모듈은 정책 검사(`unity-file-local-name` 등)가 묶여도 안전한지 확인한다. 리플렉션 생성 소스는 모든 모듈에서 자기들끼리 묶는다.
+- **PCH**: Core(`Core/CoreSharedPch.h`)와 ObjectRuntime(`Object/ObjectSharedPch.h`)이 공유 PCH를 제공하고, 그 모듈에 닿는 모듈이 자기 인자로 미리 컴파일해 쓴다. 소스와 헤더는 PCH 헤더를 include하지 않는다(빌드가 강제 include한다).
+- **작업 파일 분리**: `git status`가 수정·추가로 알리는 소스는 묶음에서 빼 단독으로 컴파일한다(고치는 파일의 반복 시간을 줄인다).
+
+```text
+dotnet msbuild Rocks.proj /t:Build /p:RocksTarget=Foundation /p:Unity=off /p:Pch=off    # 검증 변형: 소스마다 단독 번역 단위, PCH 없음
+dotnet msbuild Rocks.proj /t:Test /p:RocksTarget=Foundation /p:Adaptive=off             # CI: 작업 파일 분리 끔(작업 트리 상태와 무관한 구성)
+dotnet msbuild Rocks.proj /t:Build /p:RocksTarget=Foundation /p:Timing=on               # -ftime-trace 집계: out/<...>/Timing/Foundation.timing.json
+```
+
+CLI 옵션은 `--unity on|off`, `--pch on|off`, `--adaptive on|off`, `--timing on|off`다. object는 변형마다 다른 디렉터리(`obj/<모듈>/<변형>/`)에 두므로 옵션을 바꿔도 서로의 결과를 덮지 않는다. 묶인 소스는 PCH와 다른 소스의 include에 기대어 컴파일될 수 있으므로, include를 고친 뒤에는 검증 변형으로 한 번 빌드해 본다(CI가 Windows에서 돈다).
+
 ### 모듈 최적화 재정의
 
 모듈 규칙의 `Optimization`으로 구성의 최적화 여부만 바꾼다(UE `ModuleRules.OptimizeCode` 대응). CRT·디버그 정보·구성 매크로·NDEBUG는 구성을 따르므로 같은 실행 파일 안에서 ABI가 섞이지 않는다.

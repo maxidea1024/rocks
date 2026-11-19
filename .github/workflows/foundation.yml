@@ -28,6 +28,11 @@ jobs:
         run: ./Build/InstallFormatter.ps1
       - name: Build and test Foundation through MSBuild
         run: dotnet msbuild Rocks.proj /t:Test /p:Adaptive=off /p:Configuration=Debug /p:RocksTarget=Foundation /v:minimal
+      # Verification variant (Docs/Design/UnityBuildPch.ko.md section 11): every source is its own translation unit and no PCH is used, so a
+      # missing include that unity batches or the PCH would hide fails here. Compiles and links only; the tests ran in the step above.
+      - name: Build Foundation without unity batches and PCH
+        if: runner.os == 'Windows'
+        run: dotnet msbuild Rocks.proj /t:Build /p:Adaptive=off /p:Unity=off /p:Pch=off /p:Configuration=Debug /p:RocksTarget=Foundation /v:minimal
       - name: Verify stable identity merge history
         if: github.event_name == 'pull_request'
         run: ./Build/CheckIdentityMerges.ps1 -MetaCompiler out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll

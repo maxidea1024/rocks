@@ -15,7 +15,7 @@
 
 UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`)의 UnrealBuildTool이다. 경로는 `Engine/Source/Programs/UnrealBuildTool/` 기준이다. UE 이름은 대응표와 근거에만 적는다. 레거시와 deprecated 경로는 따르지 않는다(`bChainPCHs`, `IncludeOrderVersion` 호환, BuildSettingsVersion별 분기, Perforce read-only 판별). clang 동작은 Rocks 툴체인(clang-cl·clang++ 21.1.6)으로 실측했다.
 
-상태: **설계 확정**(결정 UD1–UD20, 2026-11-18 사용자 승인 — 권장안). 리뷰어 교차 검증을 반영했다. 구현 단계는 UB0–UB6(15절)이다. 2026-11-20 사용자 결정으로 착수했고, 단계별 전체 빌드·기준 측정 없이 이어서 구현한 뒤 끝에 한 번 검증한다(12절의 반복 측정은 하지 않는다). 구현 상태와 구현하며 정한 점은 개정 이력에 단계마다 적는다.
+상태: **설계 확정**(결정 UD1–UD20, 2026-11-18 사용자 승인 — 권장안). 리뷰어 교차 검증을 반영했다. 구현 단계는 UB0–UB6(15절)이다. 2026-11-20 사용자 결정으로 착수했고, 단계별 전체 빌드·기준 측정 없이 이어서 구현한 뒤 끝에 한 번 검증한다(12절의 반복 측정은 하지 않는다). 구현 상태와 구현하며 정한 점은 개정 이력에 단계마다 적는다. **UB0–UB6을 구현했다**(2026-11-20). 남은 일은 `unity-profile`과 기준 시나리오 반복 측정(12절), macOS에서 유니티 켜기(9.3절), Engine 공유 PCH와 `Object/Object.h` 계열의 PCH 편입(8.4절)이다.
 
 ## 1. 현재 상태와 문제
 
@@ -412,6 +412,7 @@ README의 "action key·`compile_commands.json`·BuildInfo manifest는 모두 `Na
   - 상한 3단계(256·384·512 KiB)
 - 결과는 모듈별 CPU 시간, 벽시계 시간, 최대 메모리 표로 낸다.
 - 모듈 재정의 값은 이 결과로만 정한다. UE `-Mode=ProfileUnitySizes`에 대응한다.
+- **아직 구현하지 않았다**(UB6, 2026-11-20). 조합 13개를 모듈마다 clean compile하면서 프로세스별 CPU 시간과 최대 메모리를 재려면 실행기의 프로세스 계측과 모듈 단독 실행이 필요한데, 측정용 빌드를 돌리지 않기로 한 이번 작업에서는 결과를 쓸 곳이 없다. 그때까지 `UnityAnchorFiles` 16과 상한 384 KiB를 그대로 쓰고, 모듈 재정의는 두지 않는다.
 
 **기준 시나리오**(계획 27.8)
 - 같은 장비, 같은 commit에서 기존 방식(UB0 전), UB0, UB2(유니티), UB5(PCH)를 각각 측정한다.
@@ -438,6 +439,8 @@ UE 기준은 다음과 같다. UBA 실행기 기본은 action당 1.5 GiB(`Execut
 
 UB6에서 묶음 TU와 PCH action의 최대 메모리를 실측해, 동시 실행 수를 메모리로도 제한할지 정한다(UD20). 제한은 실행 슬롯 수를 결정적으로 계산해야 하며, 실행 중 메모리 관측에 따라 바뀌면 안 된다.
 
+**결정**(UB6, 2026-11-20): 메모리 기반 제한은 두지 않는다. 실행기는 지금처럼 `MaxParallelism`(기본 `min(8, 논리 코어 수)`)만 본다. 최대 메모리는 따로 실측하지 않았고, 끝의 검증 빌드(EngineTests·Foundation Debug, 8 병렬)에서 메모리 부족이 나오는지로 판단한다(결과는 개정 이력). 부족이 나오면 위 방식(결정적 슬롯 수)으로 더한다.
+
 ## 14. 결정 사항
 
 | 번호 | 결정 | 상태 |
@@ -461,7 +464,7 @@ UB6에서 묶음 TU와 PCH action의 최대 메모리를 실측해, 동시 실�
 | UD17 | 도구 빌드 ID의 compile 부분은 논리 명령으로 만들어 유니티·PCH·작업 파일 집합과 무관하게 한다. 새 경로 인자를 정규화한다 | 확정 |
 | UD18 | 첫 include 앞에서 `#define`하는 파일은 자동으로 단독 TU로 빼고 PCH를 끈다 | 확정 |
 | UD19 | PCH 바이트 결정성은 `-Xclang -fno-pch-timestamp`로 확보하고, 낡은 PCH 방지는 Rocks key가 맡는다(clang 입력 검증에 기대지 않는다) | 확정 |
-| UD20 | `-fpch-codegen`·`-fpch-debuginfo`, 메모리 기반 병렬도 제한, C++ modules는 UB6 측정 뒤 별도로 결정한다 | 보류 |
+| UD20 | `-fpch-codegen`·`-fpch-debuginfo`는 쓰지 않는다. 메모리 기반 병렬도 제한은 두지 않는다(13절). C++ modules는 도입하지 않는다 | 확정(2026-11-20, 권장안) |
 
 ## 15. 단계
 
@@ -511,3 +514,4 @@ UB6에서 묶음 TU와 PCH action의 최대 메모리를 실측해, 동시 실�
 | 1(구현 기록 UB4) | 2026-11-20 | UB4 구현(`Programs/Rocks.Build`의 `WorkingSet.cs`·`Pch.cs`, `ActionGraph`의 강제 include·PCH·분리, MetaCompiler `--definitions-header`). 구현하며 정한 점. (1) **정의 헤더**: `<out>/Definitions/<모듈>.Definitions.h`(머리말 + 이름 순 `#define 이름 값`, 값 없는 정의는 1). 모듈 정의(`ROCKS_MODULE_NAME` 포함)가 명령줄에서 빠지고 모든 번역 단위(C 포함)가 강제 include한다. 정의가 없는 모듈은 헤더가 없다. 정의 계산은 `ModuleDefinitions.Of` 하나이고 MetadataRunner도 같은 함수로 같은 파일을 써서 MetaCompiler에 `--definitions-header`로 넘긴다(MetaCompiler는 AST·탐침·검증 컴파일에 강제 include한다). (2) **모듈 PCH**: 규칙 `PrivatePchHeader`(모듈 폴더 기준 경로)·`PchUsage`·`PrivatePchMinTus`·`AdaptivePch`. PCH action의 종류는 `Pch`, 위치는 `<out>/Pch/<모듈>/<변형 key 12자리>/<모듈>.pch`(+ clang-cl stub `.Pch.cpp`·`.Pch.obj`, 의존 기록 `.pch.deps`)다. 변형 key에서 빼는 경로 인자는 include 디렉터리(`/I`·`-I`)다. PCH를 쓰지 않는 번역 단위는 C 소스, 생성 TU(BuildInfo·규칙 생성·모듈 표), 첫 include 앞에서 `#define`하는 파일이다 — 그 판정을 위해 유니티를 끈 모듈의 소스도 PCH를 쓸 수 있으면 훑는다. `UnityExclude`·큰 파일·리플렉션 생성 소스는 PCH를 쓴다. (3) **작업 파일**: `NativeBuildRequest.Adaptive`(라이브러리 기본 false, CLI 기본 on)면 엔진이 계획 전에 `SourceWorkingSet.QueryAsync`(루트의 작업 사본에서 `git status` 한 번)로 집합을 구한다. ProcessRunner가 유한한 제한만 받으므로 받는 최댓값(약 49일)을 넘겨 사실상 제한 없이 기다린다. 짝 헤더의 "모듈 안에서 유일"은 모듈의 public·private include 디렉터리와 소스 디렉터리의 헤더 이름으로 센다. (4) CI는 `-p:Adaptive=off`를 명시한다(`Rocks.proj`에 `Unity`·`Pch`·`Adaptive` 속성). (5) 이 단계에서는 어떤 엔진 모듈에도 `PrivatePchHeader`를 주지 않았다 — PCH 헤더 구성은 UB5의 공유 PCH에서 정한다. 확인: `Rocks.Build.Tests` 58묶음(새 `PchTests` — 정의 헤더, 모듈 PCH 생성·사용·같은 크기 헤더 변경·하한·`--pch off`·제외·유니티 병용·낡은 변형 정리, porcelain fixture·분리 규칙·분리한 파일만 재컴파일·도구 빌드 ID 불변·실제 git), 도구 시험 `Meta.DefinitionsHeaderIsForceIncluded` |
 | 1(구현 기록 UB5) | 2026-11-20 | UB5 구현(`Pch.cs`의 공유 PCH 계획과 `SharedPchChecks`, `TimingReport.cs`, SDK manifest 9). 구현하며 정한 점. (1) **공유 PCH action은 제공 모듈의 public include closure로 컴파일한다**(소비 모듈의 include 목록이 아니다). 그래서 같은 변형 key의 소비 모듈들이 정확히 같은 action 하나를 함께 쓰고, 어느 소비 모듈이 먼저 나오느냐에 따라 PCH가 달라지지 않는다. 포함 검사(그 closure ⊆ 소비 모듈 include 목록)는 계획 때 한다. (2) 제공 모듈 자신도 후보다(모듈 PCH가 없으면 자기 공유 PCH를 쓴다). (3) 공유 정의 헤더는 `<out>/Definitions/<제공 모듈>.Shared.Definitions.h`, 소비 모듈의 추가 정의 헤더는 `<모듈>.Extra.Definitions.h`다. PCH를 쓰지 않는 번역 단위(C 소스 등)는 지금처럼 모듈 정의 헤더 전체를 받는다(같은 매크로 집합이다). (4) **shadow·추가 정의 검사는 소비 번역 단위를 실행하기 직전에 한다**(`NativeAction.PreRun` — PCH의 의존 기록이 PCH 헤더 closure이고 그 기록은 PCH action이 끝나야 있다). 모듈마다 한 번 계산하고, 위반이면 그 모듈의 소비 action이 도구를 실행하지 않고 실패한다(오류 문구에 정의 이름·헤더·줄, 간접 참조면 거친 매크로). cache hit인 action은 검사하지 않는다. shadow 검사의 "철자"는 제공 모듈 include 디렉터리 기준 상대 경로로 본다. (5) SDK manifest는 제공 모듈의 `SharedPchHeader` 철자만 싣는다 — 공유 정의는 이미 실린 public define에서 다시 계산한다(게임 빌드가 자기 인자로 PCH를 만든다). (6) `--timing on`: compile·PCH action에 `-ftime-trace=<출력>`을 붙이고(trace는 action 출력 `<object>.time.json`) 성공한 빌드 끝에 `<out>/Timing/<타깃>.timing.json`(번역 단위·PCH action별 시간, 헤더·템플릿 상위 100)으로 집계한다. clang 기본 세밀도(500 µs)보다 짧은 항목은 trace에 없다. (7) **엔진 모듈에는 아직 `SharedPchHeader`를 주지 않았다.** 헤더 구성은 `--timing` 집계로 정하기로 했는데(8.4·12절), 측정용 빌드를 돌리지 않기로 한 결정(2026-11-20)과 맞물려 이번 작업에서는 기구와 시험만 넣었다. Core·ObjectRuntime·Engine의 공유 PCH 헤더는 `--timing on` 빌드 한 번의 집계를 보고 정한다(남은 일). 확인: `Rocks.Build.Tests` 59묶음(새 공유 PCH 묶음 — 제공 모듈 선택, 공유·추가 정의 헤더와 강제 include 순서, 변형, shadow 위반, 추가 정의 직접·간접 위반, timing 집계) |
 | 1(구현 기록 UB5 후속) | 2026-11-20 | 엔진 모듈에 공유 PCH 제공 모듈을 정했다(사용자 요청 — 제공 모듈이 없으면 공유 PCH 기구가 아무 일도 하지 않는다). Core `Core/CoreSharedPch.h`(26개)와 ObjectRuntime `Object/ObjectSharedPch.h`(Core 목록 + 15개)이고, 고른 방법·기준·목록·넣지 않은 것(`Object/Object.h` 계열, Engine·Graphics 제공 모듈)은 8.4절에 적었다. 의존 기록 대신 include 그래프 정적 분석과 4주 커밋 수를 썼다(이 작업 트리에 UB0 뒤 빌드 출력이 없었다). 함께 고친 것: 공개 헤더 단독 컴파일 검사 모듈은 유니티·PCH를 끈다(10절 — 빠져 있었다), 정책 검사 `pch-header-include`(10절), `Rocks.proj`의 `-p:Timing`. 시험: `Rocks.Build.Tests`의 PCH 묶음이 NDK가 있으면 같은 fixture(정의 헤더·모듈 PCH·공유 PCH)를 clang++로 교차 빌드한다(GNU 드라이버의 `-x c++-header`·`-include-pch` 경로 — macOS도 이 경로다), `--group dependency|unity|pch`로 묶음 하나만 돌릴 수 있다. 확인: PCH 묶음 5개 PASS(NDK 포함), 정책 검사 통과와 `Policy.PchHeaderIncludesAreRejected`, EngineTests·Foundation·Sandbox·Commandlet 계획 생성(변형은 제공 모듈마다 1개), 고친 모듈·시험 디렉터리의 한 TU 문법 검사(공유 PCH 헤더를 강제 include한 논리 명령으로) |
+| 1(구현 기록 UB6) | 2026-11-20 | 기본값과 UD20을 정했다. 반복 측정 없이 권장안으로 정한다는 사용자 결정에 따랐다. (1) **기본값.** CLI `--unity`·`--pch`·`--adaptive`는 모두 on이고 CI는 `--adaptive off`다(11절 그대로). 손으로 쓴 소스의 유니티는 규칙에서 켠 모듈만 묶는다(`UnityBuild.DefaultOn = false`) — 켠 모듈은 묶음 충돌 정책 검사의 대상이므로 정리해 통과한 모듈만 켠다. 지금 켜진 것은 엔진 모듈 40개와 시험 실행 파일이고, 꺼 둔 것은 Sandbox·Commandlet·벤치 프로그램·DeterministicMath다(게임 모듈도 기본은 끔이다). 리플렉션 생성 소스는 기본으로 묶는다(GSD9). `UnityAnchorFiles` 16, `UnityBatchBytes` 384 KiB, `PrivatePchMinTus` 3은 그대로다. (2) **UD20.** `-fpch-codegen`·`-fpch-debuginfo`는 쓰지 않는다 — PCH object를 링크해야 하고 정적 라이브러리 경계와 얽히는데, 엔진 헤더의 파싱·inline 코드 생성 몫이 작아(8.4절 실측) 얻을 것이 적다. 메모리 기반 병렬도 제한은 두지 않는다(13절). C++ modules는 도입하지 않는다. (3) **하지 않은 것.** `unity-profile`(12절 — 계측 기구가 필요하고 결과를 쓸 측정 빌드가 없다)과 기준 시나리오 20회 반복 측정(사용자 결정). 대신 끝의 검증 빌드 한 번의 수치를 이 이력에 적는다. (4) **CI.** Windows에서 검증 변형(`/p:Unity=off /p:Pch=off`) Debug 빌드를 한 번 돈다(UD14 — 링크까지, 시험은 돌리지 않는다). 기본 변형과 같은 출력 디렉터리의 다른 object 변형 경로(`obj/<모듈>/u0p0/`)를 쓰며 모든 모듈을 다시 컴파일한다. (5) **남은 일.** `unity-profile`과 반복 측정, macOS에서 유니티 켜기(CI에서 한 번 확인한 뒤 `RepositoryUnity.VerifiedPlatforms`에 더한다 — 9.3절), Engine 공유 PCH와 `Object/Object.h` 계열의 PCH 편입(8.4절), 작업 파일 분리와 PCH를 켠 채로 I3(private `.cpp` 하나) 반복 시간 측정 |
