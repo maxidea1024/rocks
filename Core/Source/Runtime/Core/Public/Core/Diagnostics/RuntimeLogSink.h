@@ -25,10 +25,28 @@ namespace rocks {
 //   ClearLevel은 Busy다.
 // - 실패를 돌려주면 LogSystem이 센다. 연속 SinkFailureLimit번 실패하면 잠시 막고 다시 시도한다.
 //
-// 수명: 등록부터 RemoveSink(또는 LogSystem::Stop) 반환까지 살아 있어야 한다.
+// 수명: AddSink부터 RemoveSink가 성공해 반환하거나 그 LogSystem이 파괴될 때까지 살아 있어야 한다.
+// Stop만으로는 부족하다(LogSystem 소멸자가 Stop을 다시 부르며 sink를 flush한다). 지역 변수로 둘
+// 때는 sink를 LogSystem보다 먼저 선언한다(나중에 파괴된다). 등록된 채 파괴되면 소멸자가 Fatal로
+// 알린다 (파괴된 sink를 쓰는 것은 플랫폼마다 다르게 드러나 숨기 쉽다 — 설계 L28).
 class RuntimeLogSink {
 public:
-    virtual ~RuntimeLogSink() noexcept = default;
+    RuntimeLogSink() noexcept = default;
+
+    // 복사·이동은 등록 상태를 옮기지 않는다(새 객체는 어디에도 등록되지 않은 상태로 시작한다).
+    RuntimeLogSink(const RuntimeLogSink&) noexcept {
+    }
+
+    RuntimeLogSink& operator=(const RuntimeLogSink&) noexcept {
+        return *this;
+    }
+
+    // 등록된 채(어느 LogSystem에서든 RemoveSink 전, 그 LogSystem 파괴 전) 파괴되면 Fatal이다.
+    virtual ~RuntimeLogSink() noexcept;
+
+    // 이 sink가 지금 한 개 이상의 LogSystem에 등록되어 있는지다. 다른 스레드의 AddSink·RemoveSink와
+    // 겹치면 그 순간의 값이다.
+    bool IsAdded() const noexcept;
 
     // 기록 한 건을 출력한다.
     virtual Result<void> Write(const LogEvent& event) noexcept = 0;
@@ -37,6 +55,12 @@ public:
     virtual Result<void> Flush() noexcept {
         return Result<void>::Success();
     }
+
+private:
+    friend class LogSystem;
+
+    // 이 sink를 등록한 LogSystem 수다(LogSystem이 원자 연산으로만 바꾼다).
+    uint32 registrations_ = 0;
 };
 
 // sink 하나의 기록 필터다. level이 minimum 이상이고 카테고리가 category 접두사 아래면 통과한다.

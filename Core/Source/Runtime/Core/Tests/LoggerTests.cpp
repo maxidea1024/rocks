@@ -172,9 +172,9 @@ void WriteMany(void*) noexcept {
 } // namespace
 
 TEST(LogSystemFanoutFiltersAndOwnedBytes) {
-    SyncLogs setup;
     CaptureSink first;
     CaptureSink second;
+    SyncLogs setup;
     REQUIRE(setup.logs.AddSink(first).IsOk());
     REQUIRE(setup.logs.AddSink(second, {LogLevel::Warning, LogTestsAlpha}).IsOk());
     CHECK(setup.logs.AddSink(first).Error() == ErrorCode::AlreadyExists);
@@ -199,9 +199,9 @@ TEST(LogSystemFanoutFiltersAndOwnedBytes) {
 
 // 한 sink가 실패해도 나머지는 등록 순서대로 받는다. 실패는 통계에 남는다.
 TEST(LogSystemReportsSinkFailureAndKeepsOrder) {
-    SyncLogs setup;
     CaptureSink failing;
     CaptureSink succeeding;
+    SyncLogs setup;
     failing.fail = true;
     uint32 order[2]{};
     uint32 orderCount = 0;
@@ -266,12 +266,12 @@ TEST(TextLogSinkOutputAndFailures) {
 
 // 외부 프로세스가 stderr 원시 byte를 캡처하여 한글과 NUL까지 확인할 수 있는 전용 probe다.
 TEST(RuntimeLoggerStderrOutputProbe) {
-    SyncLogs setup;
     // 시각·위치가 섞이지 않도록 레벨·카테고리·메시지만 쓰는 레이아웃이다(C# 시험이 byte를
     // 비교한다).
     const auto layout = LogLayout::Parse("[{Level}][{Category}] {Message}{NewLine}");
     REQUIRE(layout.IsOk());
     StderrLogSink stderrSink(layout.Value());
+    SyncLogs setup;
     REQUIRE(setup.logs.AddSink(stderrSink).IsOk());
     LogInstallScope installed(setup.logs);
     const char message[] = {static_cast<char>(0xed), static_cast<char>(0x95),
@@ -282,8 +282,8 @@ TEST(RuntimeLoggerStderrOutputProbe) {
 
 // Sync 모드는 여러 스레드의 기록을 sink lock으로 직렬화한다.
 TEST(LogSystemSyncSerializesConcurrentWriters) {
-    SyncLogs setup;
     CaptureSink capture;
+    SyncLogs setup;
     REQUIRE(setup.logs.AddSink(capture).IsOk());
     LogInstallScope installed(setup.logs);
     platform::Thread workers[4];
@@ -443,10 +443,10 @@ TEST(LogCategoryNameValidation) {
 }
 
 TEST(LogSystemFiltersByCategoryPrefix) {
-    SyncLogs setup;
     CaptureSink graphics;
     CaptureSink d3d12;
     CaptureSink forged;
+    SyncLogs setup;
     REQUIRE(setup.logs.AddSink(graphics, {LogLevel::Trace, LogGraphics}).IsOk());
     REQUIRE(setup.logs.AddSink(d3d12, {LogLevel::Trace, LogGraphicsD3D12}).IsOk());
     LogCategoryPrefix forgedAudio;
@@ -540,8 +540,8 @@ TEST(SourceLocationCapturesCaller) {
 }
 
 TEST(LogSystemPassesCallerLocation) {
-    SyncLogs setup;
     CaptureSink capture;
+    SyncLogs setup;
     REQUIRE(setup.logs.AddSink(capture).IsOk());
     LogInstallScope installed(setup.logs);
     Log::Info(LogTests, "where");
@@ -591,8 +591,8 @@ TEST(LogLevelRoundTripsThroughSinkFilterAndBuffer) {
     }
 
     // Log 진입 함수로 남긴 기록도 레벨이 그대로 sink까지 간다(컴파일에 포함된 레벨만).
-    SyncLogs setup;
     CaptureSink capture;
+    SyncLogs setup;
     REQUIRE(setup.logs.AddSink(capture).IsOk());
     LogInstallScope installed(setup.logs);
     if constexpr (LogLevel::Trace >= LogCompiledMinimum) {

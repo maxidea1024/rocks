@@ -718,8 +718,8 @@ TEST(TraceAnalysisReadsLogRecords) {
     LogSystemConfig config;
     config.mode = LogMode::Manual;
     config.globalMinimum = LogLevel::Trace;
-    LogSystem logs(allocator, config);
     TraceLogSink sink;
+    LogSystem logs(allocator, config);
     REQUIRE(logs.AddSink(sink));
     REQUIRE(logs.Start());
     {
