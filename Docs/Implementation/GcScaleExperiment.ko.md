@@ -1510,7 +1510,7 @@ AL2의 주소 범위에서 두 가지를 고쳤다(설계 18.4절 개정 10).
 
 - 스레드별 포인터 칸 하나와, 값이 null이 아닌 스레드가 끝날 때 그 스레드에서 불리는 정리 함수다. Windows는 `FlsAlloc`의 callback, POSIX는 `pthread_key_create`의 소멸자다(UE 5.8 `WindowsPlatformTLS.cpp`의 `FlsAlloc(&OnThreadExit)`와 같은 장치).
 - Windows의 FLS callback은 값만 받으므로 칸마다 다른 trampoline을 건다(상한 `MaxThreadExitSlots` 8). trampoline은 값을 먼저 지우고(UE도 같다 — 남아 있으면 다시 불릴 수 있다), 프로세스 종료 절차 중이면(`RtlDllShutdownInProgress`) 부르지 않는다: 그때 다른 스레드는 이미 강제 종료돼 잠금을 쥔 채일 수 있다. POSIX도 값을 지운 뒤에 부르고 `exit`에서는 부르지 않으므로 계약이 같다.
-- 시험(`ThreadExitSlotTests.cpp` 4개): 값을 둔 스레드가 끝나면 그 스레드에서 한 번 불리고 `Join`이 그 뒤에 돌아오는 것, 값이 스레드마다 따로인 것, 정리 함수 안에서 그 칸은 이미 null이고 그 스레드의 `thread_local`을 읽고 쓸 수 있는 것, 값을 두지 않았거나 null로 되돌린 스레드는 불리지 않는 것, `platform::Thread`가 아닌 OS 스레드(시험 지원 `test::RunOnOsThread` — Windows `CreateThread`, POSIX `pthread_create`)에서도 불리는 것, callback 없는 칸은 값을 받지 않는 것.
+- 시험(`ThreadExitSlotTests.cpp` 4개): 값을 둔 스레드가 끝나면 그 스레드에서 한 번 불리고 `Join`이 그 뒤에 돌아오는 것, 값이 스레드마다 따로인 것, 정리 함수 안에서 그 칸은 이미 null이고 그 스레드의 `thread_local`을 읽고 쓸 수 있는 것(25.6절에서 "접근은 되지만 값이 남아 있다는 보장은 없다"로 좁혔다), 값을 두지 않았거나 null로 되돌린 스레드는 불리지 않는 것, `platform::Thread`가 아닌 OS 스레드(시험 지원 `test::RunOnOsThread` — Windows `CreateThread`, POSIX `pthread_create`)에서도 불리는 것, callback 없는 칸은 값을 받지 않는 것.
 
 `BinnedAllocator`의 스레드 캐시:
 
@@ -1576,3 +1576,43 @@ AL2의 주소 범위에서 두 가지를 고쳤다(설계 18.4절 개정 10).
 
 - Debug `Core` 대상: `ThreadExitSlot` 4개, `CoreBinned` 23개(AL2의 13개 + 캐시 10개), `Thread` 38개 통과. POSIX 쪽(`Posix/Concurrency.cpp`, 시험 지원 `Posix/OsThread.cpp`, 시험, `BinnedAllocator.cpp`)은 NDK `-fsyntax-only` 통과, macOS는 push의 `[ci]`로 돈다.
 - Debug Foundation·EngineTests 빌드 뒤 범위 시험: Foundation `CoreBinned` 23·`ThreadExitSlot` 4·`Thread` 57·`Allocator` 37, EngineTests `CoreBinned` 23·`ThreadExitSlot` 4·`Thread` 60·`Gc` 110 통과. format·policy 통과.
+
+### 25.6 macOS CI: `ThreadExitSlot`의 `thread_local` 계약과 종료 칸 기준 (설계 개정 12, 2026-11-20)
+
+AL3의 macOS CI(run 44636348775)에서 `ThreadExitSlot` 시험 둘이 실패했다: `ThreadExitSlot_CallbackRunsOnceOnTheExitingThread`와 `ThreadExitSlot_CallbackRunsOnRawOsThreads`의 `CHECK(record.seenLocal == LocalMarker)` 한 줄이다(같은 시험의 나머지 단언 — 한 번 불림, 끝나는 스레드에서 불림, 값이 먼저 지워짐 — 과 `CoreBinned` 23개는 통과). 정리 함수 안에서 읽은 `thread_local`이 스레드가 둔 값이 아니라 초기값이었다.
+
+원인과 플랫폼별 순서(확인한 방법을 함께 적는다):
+
+| 플랫폼 | 정리 함수 안의 `thread_local` | 확인 |
+|---|---|---|
+| macOS | 초기값(저장소가 먼저 해제되고, 접근하면 초기 내용으로 다시 생긴다) | CI 결과. 원인은 소스: dyld `libdyld/ThreadLocalVariables.cpp`(이미지의 저장소가 pthread key의 값, 소멸자 `free`, 다음 접근이 다시 만들어 건다), libpthread `src/pthread_tsd.c`(동적 key를 번호 오름차순으로, 값이 남으면 회차를 반복) |
+| Windows | 스레드가 둔 값. 정리 함수가 쓴 값도 뒤의 `thread_local` 소멸자가 읽는다 | 측정(Windows 11 26200, clang-cl `/MDd`·`/MT` 탐침 각 3회): FLS callback → `thread_local` 소멸자 순서. FLS callback은 칸 번호 오름차순으로 한 번씩이고, 차례가 지난 칸에 건 값은 불리지 않는다 |
+| Android | 첫 회차에는 스레드가 둔 값, 둘째 회차부터 초기값일 수 있다 | 소스(기기에서 돌리지 않음): 대상 API 26은 emulated TLS(NDK 29 clang 출력의 `__emutls_get_address`), compiler-rt `emutls.c`가 bionic에서 해제를 한 회차 미룬다. API 29 이상(ELF TLS)은 bionic `pthread_exit`가 key 소멸자 뒤에 TLS를 푼다 |
+
+고친 것:
+
+- 계약(`Thread.h`, 설계 18.4절): "trivial한 `thread_local`은 callback 안에서 읽고 쓸 수 있다"를 "접근은 되지만 그 스레드가 두었던 값이 남아 있다는 보장은 없다. callback은 인자로 받은 값만 믿는다"로 좁혔다. 모든 플랫폼에 같은 한 줄이다. 시험은 접근만 본다(정리 함수 안에서 쓰고 읽으면 쓴 값 — 들어올 때 읽은 값은 적어 두기만 하고 단언하지 않는다).
+- `BinnedAllocator`는 **종료 칸의 값을 기준**으로 삼는다(`State::CurrentRecord`). 전에는 `thread_local` 포인터가 null이면 새 기록을 만들어 칸에 걸었다. macOS에서 `thread_local` 저장소가 해제된 뒤·할당자의 hook 앞에 같은 스레드의 다른 종료 정리가 allocator를 쓰면, 칸에 살아 있던 옛 기록이 덮여 그 캐시들이 hook으로 돌아오지 못한다(인스턴스 파괴 때까지 블록을 쥐고 기록은 샌다). 이제 포인터가 null이면 느린 경로가 칸의 값을 먼저 보고, 있으면 그 기록을 다시 가리킨다. 빠른 경로는 그대로다(칸을 읽는 것은 스레드가 기록을 얻기 전의 호출뿐).
+- 기록을 종료 칸에 걸지 못한 스레드(칸 없음, OS 거부)는 "걸지 못한 스레드" 표지 기록을 가리켜 다시 시도하지 않는다(메인 세션 검토 AL3 — 전에는 호출마다 기록을 할당했다가 해제했다).
+- `ThreadExitSlot` 계약에 fiber 한계를 적었다(Windows의 값은 fiber마다 따로이고 정리 함수는 fiber를 지우는 스레드에서 불린다 — 엔진은 fiber를 쓰지 않는다).
+
+시험(`BinnedAllocatorThreadCacheTests.cpp` 3개 추가 — 13개):
+
+- `CoreBinnedThreadRecordIsFoundAgainFromExitSlot`: 시험 통로로 `thread_local` 포인터만 지운다(macOS의 상태). 지운 뒤의 첫 호출이 반환인 경우와 다른 인스턴스의 할당인 경우 모두 같은 기록을 다시 가리키고(포인터 값이 같다), 인스턴스마다 캐시가 하나, 기록의 항목이 둘이며, 스레드가 끝나면 두 인스턴스의 캐시 수가 0으로 돌아오고 `Trim` 뒤 commit이 0이다.
+- `CoreBinnedAllocatorUsedByAnotherThreadExitCleanup`: 다른 `ThreadExitSlot`의 정리 함수가 스레드가 끝나는 동안 할당·반환을 한다(시험 통로 없이 OS의 실제 종료 순서). 그 칸은 정적 초기화 때 만들어 할당자의 칸보다 번호가 낮다 — 칸을 번호 순서로 도는 플랫폼에서는 이 정리 함수가 할당자의 hook보다 먼저 불려, macOS에서는 위의 덮어쓰기 순서가 그대로 재현된다. 단언은 순서에 기대지 않는다(정리 함수가 한 번 불림, 실패 0, 스레드가 끝난 뒤 캐시 수 0, 누적 할당 수, `Trim` 뒤 commit 0).
+- `CoreBinnedThreadWithoutExitHookStaysUncached`: 종료 칸에 거는 일을 주입으로 실패시킨 스레드는 그 뒤의 호출(두 인스턴스, 3 round)에서 캐시를 만들지 않고 "걸지 못한 스레드" 표지가 서 있다. 반환이 곧바로 slab으로 가 `Trim` 뒤 commit이 0이고, 다른 스레드는 그대로 캐시를 쓴다.
+
+음성 대조 2종 모두 잡혔다(Debug `Core` 대상 `CoreBinned`, 빌드가 끝난 뒤 소스를 바꾸고 되돌림):
+
+| 대조 | 바꾼 것 | 잡은 시험 |
+|---|---|---|
+| N1 | 포인터가 비어 있을 때 종료 칸의 값을 보지 않음 | `…ThreadRecordIsFoundAgainFromExitSlot`(다시 가리킨 기록이 다르다) |
+| N2 | 종료 칸에 걸지 못한 스레드를 표시하지 않음 | `…ThreadWithoutExitHookStaysUncached`(표지가 서지 않는다) |
+
+남는 한계(설계 18.4절에 적었다):
+
+- hook이 지나간 뒤 같은 스레드의 뒤 순번 종료 정리가 allocator를 쓰는 경우, "종료한 스레드" 표지는 `thread_local` 포인터에만 있어 저장소가 다시 해제되면 사라지고 새 기록이 생긴다. POSIX는 소멸자 회차(`PTHREAD_DESTRUCTOR_ITERATIONS`)가 남아 있으면 hook이 다시 정리하고, 넘으면 기록(수십 byte)이 새고 그 캐시는 인스턴스 파괴 때 회수된다. Windows는 표지가 `thread_local` 소멸자가 도는 동안에도 남는다(위 측정).
+- 그 스레드가 allocator를 처음 쓰는 것이 hook의 차례 뒤의 종료 정리인 경우(Windows: 뒤 번호 FLS 칸의 callback, `thread_local` 소멸자)에도 기록이 새고 캐시는 인스턴스 파괴 때 회수된다 — 차례가 지난 칸에 건 값은 불리지 않는다(위 측정).
+- 두 경우 모두 해제된 메모리를 만지지는 않는다(캐시는 인스턴스가 소유한다). 표지만 두는 OS TLS 칸(소멸자 없는 key)을 더하면 첫째 한계는 없어진다 — 지금은 넣지 않았다.
+
+검증: Debug `Core` 대상 `CoreBinned` 26개·`ThreadExitSlot` 4개 통과. NDK `-fsyntax-only`(`BinnedAllocator.cpp`, 두 시험 파일, `Posix/Concurrency.cpp`) 통과, format·policy 통과. macOS는 push의 `[ci]`로 돈다. 이 push 앞에 origin(유니티 빌드·PCH, 1d5f9270)을 병합했다 — 충돌 없음, 새 시험은 파일 namespace(`…_tests_file`) 안에 넣었다.
