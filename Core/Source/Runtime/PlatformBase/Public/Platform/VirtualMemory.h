@@ -47,14 +47,13 @@ struct VirtualMemoryInfo {
 enum class VirtualMemoryAccess : uint8 {
     // 기본. Commit하지 않은 범위와 Decommit한 범위는 접근하면 fault다(guard 페이지로 쓸 수 있다).
     Guarded,
-    // 접근을 열어 둔 예약이다. 큰 주소 범위를 작은 조각으로 commit·decommit하는 할당자가
-    // 쓴다(UE 5.8 FPlatformVirtualMemoryBlock 대응 — Unix·Android·Apple이 예약을 읽기·쓰기 매핑
-    // 하나로 잡는다).
-    // - POSIX: 예약이 읽기·쓰기 매핑 하나이고(물리 메모리는 처음 쓸 때 붙는다), Commit은 보호를
-    // 바꾸지
-    //   않으며, Decommit은 페이지만 OS에 돌려준다. 조각마다 보호가 달라져 매핑(VMA)이 쪼개지는 일이
-    //   없다 — Guarded는 commit한 조각과 아닌 조각이 섞이는 만큼 매핑이 늘고, Linux·Android에는
-    //   프로세스당 매핑 수 한도(vm.max_map_count, 기본 65530)가 있다.
+    // 접근을 열어 둔 예약이다. 큰 주소 범위를 작은 조각으로 commit·decommit하는 할당자가 쓴다
+    // (UE 5.8 FPlatformVirtualMemoryBlock 대응 — Unix·Android·Apple이 예약을 읽기·쓰기 매핑 하나로
+    // 잡는다).
+    // - POSIX: 예약이 읽기·쓰기 매핑 하나다(물리 메모리는 처음 쓸 때 붙는다). Commit은 보호를
+    //   바꾸지 않고 Decommit은 페이지만 OS에 돌려준다. 조각마다 보호가 달라져 매핑(VMA)이
+    //   쪼개지는 일이 없다 — Guarded는 commit한 조각과 아닌 조각이 섞이는 만큼 매핑이 늘고,
+    //   Linux·Android에는 프로세스당 매핑 수 한도(vm.max_map_count, 기본 65530)가 있다.
     //   대신 Commit하지 않았거나 Decommit한 범위의 접근이 fault라는 보장이 없다(읽으면 0이나 옛
     //   내용, 쓰면 페이지가 다시 붙는다). 접근 차단에 기대는 코드(guard 페이지)는 Guarded를 쓴다.
     //   메모리 초과 약정을 끈 시스템(Linux vm.overcommit_memory=2)에서는 예약 크기가 곧 약정이라 큰
@@ -84,9 +83,12 @@ enum class VirtualMemoryAccess : uint8 {
 //
 // 사용 예:
 //   VirtualMemoryRegion region;
-//   if (!region.Reserve(bytes, VirtualMemoryAccess::Open)) { /* 크기를 줄여 다시 시도 */ }
-//   if (!region.Commit(offset, slabBytes)) { /* 이 조각은 쓰지 않는다. 나중에 다시 시도할 수 있다
-//   */ }
+//   if (!region.Reserve(bytes, VirtualMemoryAccess::Open)) {
+//       // 크기를 줄여 다시 시도한다.
+//   }
+//   if (!region.Commit(offset, slabBytes)) {
+//       // 이 조각은 쓰지 않는다. 나중에 다시 시도할 수 있다.
+//   }
 //   ...
 //   (void)region.Decommit(offset, slabBytes);
 class VirtualMemoryRegion final {

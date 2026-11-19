@@ -1,7 +1,6 @@
 #pragma once
 
 #include <Core/Containers/HashMap.h>
-#include <Core/Hash.h>
 #include <Core/Memory/Allocator.h>
 
 // 할당자 내부 공용 구현이다(공개 API 아님 — Docs/Design/GarbageCollectionScale.ko.md 18.6절).
@@ -29,25 +28,12 @@ private:
     uint64 failureAttempt_ = 0;
 };
 
-// 주소 원장의 hash다(Docs/Design/GarbageCollectionScale.ko.md 18.6절). 주소의 4KB 페이지 번호만
-// 섞고 페이지 안 위치(16 byte 단위)는 그대로 더한다. 같은 페이지의 블록은 표의 이웃 256칸에 모이고
-// 페이지끼리는 흩어진다 — 주소가 가까운 블록을 잇달아 넣고 지우는 흐름(객체 생성·GC 회수)이 표의
-// 같은 영역을 다시 써서, 살아 있는 수가 많아도 연산마다 표를 무작위로 찌르지 않는다. 한 페이지의
-// 블록끼리는 제자리가 서로 달라 부딪히지 않고, 다른 페이지의 창과 겹칠 때만 밀린다.
-struct AddressLedgerHash {
-    // 한 창에 모으는 주소 범위(4KB)와 창 안 한 칸의 주소 단위(16 byte)다.
-    static constexpr uint32 PageShift = 12;
-    static constexpr uint32 GranuleShift = 4;
-    static constexpr uptr GranuleMask = (uptr{1} << (PageShift - GranuleShift)) - 1;
-
-    constexpr uint64 operator()(uptr address) const noexcept {
-        return MixHash(address >> PageShift) + ((address >> GranuleShift) & GranuleMask);
-    }
-};
-
 // 살아 있는 할당의 주소 → 크기 원장이다. 주소를 역참조하지 않고 값으로만 찾으므로, 남의 주소나 이미
 // 반환한 주소를 물어도 안전하다. 찾기·넣기·지우기는 상환 O(1)이다(Core HashMap — 지운 칸은 표가
-// 스스로 정리한다). 동기화는 호출자가 한다(한 번에 한 스레드).
+// 스스로 정리한다). hash는 주소를 통째로 섞는 기본 hash다: 주소의 모양(정렬, 이어지는 주소, 블록
+// 간격)이 군집을 만들지 않는다. 페이지 번호만 섞어 지역성을 살리는 hash는 이어지는 주소에서 탐사가
+// 수백–수천 칸이 되어 버렸다(Docs/Design/GarbageCollectionScale.ko.md 18.6절).
+// 동기화는 호출자가 한다(한 번에 한 스레드).
 //
 // 사용 예(할당자의 잠금 안에서):
 //   if (auto inserted = ledger_.Insert(address, bytes); !inserted) { /* 블록을 반환하고 실패 */ }
@@ -75,7 +61,7 @@ public:
     usize LongestProbe() const noexcept;
 
 private:
-    HashMap<uptr, usize, AddressLedgerHash> entries_;
+    HashMap<uptr, usize> entries_;
 };
 
 } // namespace rocks::detail
