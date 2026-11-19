@@ -23,6 +23,9 @@ namespace rocks::cvar {
 // 범위(scope)는 CVR3에서 더한다.
 struct SetOptions {
     config::ConfigLayer layer = config::ConfigLayer::Code;
+    // 범위 값을 쓸 범위다(8절 — Global이면 층 스택에 쓴다). 범위 쓰기는 층 스택에 들지 않고,
+    // layer는 그 값의 출처 층(권한 판정·표시)이다.
+    CVarScopeId scope{};
     StringView tag{};
     config::ConfigDiagnosticCode* reason = nullptr;
 };
@@ -140,6 +143,32 @@ GetResult<T> ReadBound(const VarDefinition& definition) noexcept {
     } else {
         return ReadSlot<T>(nullptr, *slot);
     }
+}
+
+// 이 스레드에 묶인 snapshot에서 범위 scope의 값을 읽는다(7.1·8절): 범위 사슬에서 처음 만난 범위
+// 값, 없으면 ReadBound(Global 유효값)다. 묶음·번호 규칙은 ReadBound와 같다.
+template <class T>
+GetResult<T> ReadBoundScoped(const VarDefinition& definition, CVarScopeId scope) noexcept {
+    if (scope.IsGlobal()) {
+        return ReadBound<T>(definition);
+    }
+
+    if constexpr (IsReleaseBuild) {
+        if (HasFlag(definition.flags, VarFlags::Cheat)) {
+            return FallbackOf<T>(definition);
+        }
+    }
+
+    const config::ConfigSnapshot* snapshot = config::detail::CurrentBinding.snapshot;
+    const uint32 index = platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&definition.index);
+    if (snapshot != nullptr && index != Index::None) {
+        const config::CVarText* text = nullptr;
+        if (const config::CVarSlot* slot = snapshot->FindScopedSlot(scope.value, index, text)) {
+            return ReadSlot<T>(text, *slot);
+        }
+    }
+
+    return ReadBound<T>(definition);
 }
 
 // `Set` 인자의 ScalarValue다.
@@ -318,6 +347,17 @@ public:
     //   const float distance = ShadowDistance.Get();
     GetResult<T> Get() const noexcept {
         return detail::ReadBound<T>(definition_);
+    }
+
+    // 범위 scope의 값이다(7.1·8절 — 범위 사슬을 자식 → 부모로 따라 처음 만난 범위 값, 없으면 Global
+    // 유효값 `Get()`). 묶인 snapshot에 없는 범위(아직 게시되지 않았거나 파괴된 범위, 다른 문맥의
+    // 범위)는 Global 값이다. Global 범위면 `Get()`과 같다. 규칙(묶음·번호·String 수명·출시 빌드의
+    // `Cheat()`)은 `Get()`과 같다.
+    //
+    // 사용 예:
+    //   const float distance = ShadowDistance.Get(world.CVarScope());
+    GetResult<T> Get(CVarScopeId scope) const noexcept {
+        return detail::ReadBoundScoped<T>(definition_, scope);
     }
 
     // 값을 쓴다(6.2절): 범위·Validate·층 권한을 바로 검사해 결과로 알리고(`Clamp()`는 보정한다),

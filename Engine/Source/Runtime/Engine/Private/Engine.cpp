@@ -286,6 +286,8 @@ Result<World*> Engine::CreateWorld(const WorldCreateDesc& desc) noexcept {
     worldDesc.objects = desc.objects;
     worldDesc.gcBudget = desc.gcBudget;
     worldDesc.subsystems = desc.subsystems;
+    // World가 엔진 설정 문맥에 자기 CVar 범위를 만든다(CVarSystem 14.2절).
+    worldDesc.settings = config_.settings;
     auto created = UniquePtr<World>::TryMake(allocator_, allocator_, *types_, worldDesc);
     if (!created) {
         return Result<World*>::Failure(created.Error());

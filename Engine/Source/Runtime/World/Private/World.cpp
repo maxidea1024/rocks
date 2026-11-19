@@ -96,7 +96,7 @@ World::World(Allocator& allocator, TypeRegistry& types, const WorldDesc& desc) n
       name_(allocator), ticks_(allocator), subsystems_(allocator), subsystemTypes_(desc.subsystems),
       timeStep_(desc.timeStep), actors_(allocator), actorIndex_(allocator), levels_(allocator),
       pendingStart_(allocator), pendingComponentStart_(allocator), destroyActors_(allocator),
-      destroyComponents_(allocator), gcBudget_(desc.gcBudget) {
+      destroyComponents_(allocator), gcBudget_(desc.gcBudget), settings_(desc.settings) {
     // 이름은 진단용이다. 복사에 실패하면 빈 이름으로 둔다.
     auto named = name_.TryAssign(desc.name);
     (void)named;
@@ -108,6 +108,15 @@ World::~World() {
         if (!finished) {
             platform::Fatal("World destroyed while objects are still borrowed or rooted outside");
         }
+    }
+}
+
+void World::ReleaseCVarScope() noexcept {
+    // 범위를 파괴한다(그 범위의 값은 버리고 자식은 Global에 다시 붙는다 — CVarSystem 8절). 설정
+    // 문맥과 같은 게임 lane에서 부르므로 실패는 범위가 이미 없는 경우뿐이다.
+    if (settings_ != nullptr && !cvarScope_.IsGlobal()) {
+        static_cast<void>(settings_->DestroyScope(cvarScope_));
+        cvarScope_ = {};
     }
 }
 
@@ -131,9 +140,20 @@ Result<void> World::Initialize() noexcept {
         return policy;
     }
 
+    // 설정 문맥이 있으면 이 World의 CVar 범위를 만든다(Global의 자식 — CVarSystem 14.2절).
+    if (settings_ != nullptr) {
+        auto created = settings_->CreateScope();
+        if (!created) {
+            return Result<void>::Failure(created.Error());
+        }
+
+        cvarScope_ = created.Value();
+    }
+
     ObjectAccessScope scope(Access());
     auto persistent = CreateLevelInternal("Persistent", true);
     if (!persistent) {
+        ReleaseCVarScope();
         return Result<void>::Failure(persistent.Error());
     }
 
@@ -157,6 +177,7 @@ Result<void> World::Initialize() noexcept {
         }
 
         persistentLevel_ = {};
+        ReleaseCVarScope();
         state_ = WorldState::Created;
         return initialized;
     }
@@ -1739,6 +1760,7 @@ Result<void> World::Shutdown() noexcept {
         }
 
         persistentLevel_ = {};
+        ReleaseCVarScope();
     }
 
     // 진행 중인 증분 GC를 끝내거나 취소한 뒤 전체 수집으로 남은 저장소를 회수한다.

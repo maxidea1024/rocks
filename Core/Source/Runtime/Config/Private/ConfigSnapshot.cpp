@@ -20,6 +20,41 @@ ConfigSnapshot::ConfigSnapshot(Allocator& allocator) noexcept
 
 ConfigSnapshot::~ConfigSnapshot() = default;
 
+const CVarSlot* ConfigSnapshot::FindScopedSlot(uint64 scope, uint32 index,
+                                               const CVarText*& text) const noexcept {
+    text = nullptr;
+    const detail::ScopeTable* table = scopes_.Get();
+    if (scope == 0 || table == nullptr || !table->HasScoped(index)) {
+        return nullptr;
+    }
+
+    // 사슬은 부모로만 가고 부모는 늘 표에 있거나 Global이다(파괴한 범위의 자식은 조부모에 다시
+    // 붙는다). 깊이는 범위 수를 넘지 않는다.
+    const detail::ScopeNode* node = table->Find(scope);
+    for (usize depth = 0; node != nullptr && depth <= table->nodes.Size(); ++depth) {
+        usize low = 0;
+        usize high = node->slots.Size();
+        while (low < high) {
+            const usize middle = low + (high - low) / 2;
+            const detail::ScopeSlot& candidate = node->slots[middle];
+            if (candidate.index == index) {
+                text = candidate.text.Get();
+                return &candidate.slot;
+            }
+
+            if (candidate.index < index) {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+
+        node = node->parent != 0 ? table->Find(node->parent) : nullptr;
+    }
+
+    return nullptr;
+}
+
 usize ConfigSnapshot::Count() const noexcept {
     return named_.Get() != nullptr ? named_->entries.Size() : 0;
 }
@@ -57,6 +92,32 @@ const FieldValue* ConfigSnapshot::Find(StringView name) const noexcept {
 }
 
 namespace detail {
+
+const ScopeNode* ScopeTable::Find(uint64 id) const noexcept {
+    usize low = 0;
+    usize high = nodes.Size();
+    while (low < high) {
+        const usize middle = low + (high - low) / 2;
+        const uint64 found = nodes[middle]->id;
+        if (found == id) {
+            return nodes[middle].Get();
+        }
+
+        if (found < id) {
+            low = middle + 1;
+        } else {
+            high = middle;
+        }
+    }
+
+    return nullptr;
+}
+
+bool ScopeTable::HasScoped(uint32 index) const noexcept {
+    constexpr uint32 WordBits = 64;
+    const usize word = index / WordBits;
+    return word < scoped.Size() && (scoped[word] >> (index % WordBits) & 1u) != 0;
+}
 
 Result<SharedPtr<ConfigSnapshot>> SnapshotAccess::Make(Allocator& allocator) noexcept {
     return SharedPtr<ConfigSnapshot>::TryMake(allocator, allocator);
@@ -109,6 +170,65 @@ Result<void> WriteSlot(Allocator& allocator, const FieldValue& value, CVarSlot& 
 }
 
 } // namespace
+
+Result<SharedPtr<const ScopeTable>>
+BuildScopeTable(ConfigState& state, const Array<UniquePtr<ScopeState>>& scopes) noexcept {
+    using Built = Result<SharedPtr<const ScopeTable>>;
+    if (scopes.IsEmpty()) {
+        return Built::Success(SharedPtr<const ScopeTable>());
+    }
+
+    auto made = SharedPtr<ScopeTable>::TryMake(state.allocator, state.allocator);
+    if (!made) {
+        return Built::Failure(made.Error());
+    }
+
+    ScopeTable& table = *made.Value();
+    constexpr uint32 WordBits = 64;
+    for (const UniquePtr<ScopeState>& scope : scopes) {
+        auto node = UniquePtr<ScopeNode>::TryMake(state.allocator, state.allocator);
+        if (!node) {
+            return Built::Failure(node.Error());
+        }
+
+        node.Value()->id = scope->id;
+        node.Value()->parent = scope->parent;
+        if (auto reserved = node.Value()->slots.TryReserve(scope->values.Size()); !reserved) {
+            return Built::Failure(reserved.Error());
+        }
+
+        for (const UniquePtr<ScopeValue>& value : scope->values) {
+            ScopeSlot slot;
+            slot.index = value->index;
+            slot.slot.generation = 1;
+            if (auto written = WriteSlot(state.allocator, value->value, slot.slot, slot.text);
+                !written) {
+                return Built::Failure(written.Error());
+            }
+
+            const usize word = value->index / WordBits;
+            if (word >= table.scoped.Size()) {
+                const usize old = table.scoped.Size();
+                if (auto grown = table.scoped.TryResize(word + 1); !grown) {
+                    return Built::Failure(grown.Error());
+                }
+
+                for (usize fill = old; fill < table.scoped.Size(); ++fill) {
+                    table.scoped[fill] = 0;
+                }
+            }
+
+            table.scoped[word] |= uint64{1} << (value->index % WordBits);
+            static_cast<void>(node.Value()->slots.TryPushBack(Move(slot))); // 예약했다
+        }
+
+        if (auto pushed = table.nodes.TryPushBack(Move(node.Value())); !pushed) {
+            return Built::Failure(pushed.Error());
+        }
+    }
+
+    return Built::Success(SharedPtr<const ScopeTable>(Move(made.Value())));
+}
 
 namespace {
 
@@ -213,7 +333,21 @@ Result<void> PublishSnapshot(ConfigState& state, const SharedPtr<const NamedBloc
         names = SnapshotAccess::Names(*previous);
     }
 
+    // 범위 표는 범위 상태가 바뀐 게시(Sync가 적용한 사본)만 새로 만들고 아니면 공유한다(CVar 8절).
+    SharedPtr<const ScopeTable> scopes;
+    if (state.publishingScopes != nullptr) {
+        auto built = BuildScopeTable(state, *state.publishingScopes);
+        if (!built) {
+            return Result<void>::Failure(built.Error());
+        }
+
+        scopes = Move(built.Value());
+    } else if (previous != nullptr) {
+        scopes = SnapshotAccess::Scopes(*previous);
+    }
+
     // 여기부터는 실패하지 않는다.
+    SnapshotAccess::Scopes(snapshot) = Move(scopes);
     SnapshotAccess::Names(snapshot) = Move(names);
     state.namesChanged = false;
     SharedPtr<const NamedBlock> block;

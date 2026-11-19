@@ -108,6 +108,8 @@ StringView ConfigDiagnosticCodeName(ConfigDiagnosticCode code) noexcept {
         return "GroupConflict";
     case ConfigDiagnosticCode::QualityLowered:
         return "QualityLowered";
+    case ConfigDiagnosticCode::ScopeNotAllowed:
+        return "ScopeNotAllowed";
     }
 
     return {};

@@ -44,5 +44,6 @@ using cvar::BootCVar;
 using cvar::ConsoleCommand;
 using cvar::CVar;
 using cvar::CVarGroup;
+using cvar::CVarScopeId;
 
 } // namespace rocks

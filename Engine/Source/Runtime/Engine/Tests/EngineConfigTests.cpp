@@ -1,3 +1,4 @@
+#include <Config/CVar.h>
 #include <Config/Tests/ConfigTestSupport.h>
 #include <Engine/Engine.h>
 
@@ -68,4 +69,52 @@ TEST(Engine_ConfigSyncPointRunsBeforeFrameBegin) {
     // 2번 프레임 안에서 넣은 끄기는 3번 프레임 시작에 적용됐다(Console 층의 나중 입력이 이긴다).
     CHECK(!client.seen[3]);
     REQUIRE(engine.Shutdown());
+}
+
+namespace engine_config_test {
+
+constinit CVar<int32> WorldViewDistance =
+    cvar::Var("render.world_scope.distance", 100).Help("Per-world view distance");
+
+} // namespace engine_config_test
+
+// World는 엔진 설정 문맥에 자기 CVar 범위를 만들고(Initialize — Global의 자식) Shutdown이 파괴한다
+// (Docs/Design/CVarSystem.ko.md 14.2절). World 범위의 값은 그 World에서만 보이고, 플레이어 같은
+// 자식 범위는 World 범위의 값을 물려받는다. World가 끝나면 범위 값은 버려진다(Global 값).
+TEST(Engine_WorldOwnsCVarScope) {
+    using engine_config_test::WorldViewDistance;
+    ConfigFixture fixture;
+    config::ConfigContext& settings = fixture.Context();
+    REQUIRE(settings.Register(WorldViewDistance));
+    SystemAllocator allocator;
+    EngineConfig config;
+    config.settings = &settings;
+    config.fixedFrameDeltaSeconds = 1.0 / 60.0;
+    Engine engine(allocator);
+    REQUIRE(engine.Initialize(config));
+    WorldCreateDesc desc;
+    desc.name = "First";
+    auto first = engine.CreateWorld(desc);
+    desc.name = "Second";
+    auto second = engine.CreateWorld(desc);
+    REQUIRE(first && second);
+    const cvar::CVarScopeId firstScope = first.Value()->CVarScope();
+    const cvar::CVarScopeId secondScope = second.Value()->CVarScope();
+    CHECK(!firstScope.IsGlobal() && !secondScope.IsGlobal() && firstScope != secondScope);
+    auto player = settings.CreateScope(firstScope);
+    REQUIRE(player);
+    REQUIRE(WorldViewDistance.Set(300, {.scope = firstScope}));
+    REQUIRE(engine.RunFrame());
+    CHECK(WorldViewDistance.Get(firstScope) == 300 && WorldViewDistance.Get(player.Value()) == 300);
+    CHECK(WorldViewDistance.Get(secondScope) == 100 && WorldViewDistance.Get() == 100);
+
+    // World를 끝내면 범위는 파괴되고 자식은 Global에 다시 붙는다(다음 sync 지점부터).
+    REQUIRE(engine.DestroyWorld(first.Value()));
+    REQUIRE(engine.RunFrame());
+    REQUIRE(engine.RunFrame());
+    CHECK(WorldViewDistance.Get(firstScope) == 100 && WorldViewDistance.Get(player.Value()) == 100);
+    REQUIRE(settings.DestroyScope(player.Value()));
+    REQUIRE(engine.Shutdown());
+    REQUIRE(settings.Sync());
+    CHECK(WorldViewDistance.Get(secondScope) == 100);
 }
