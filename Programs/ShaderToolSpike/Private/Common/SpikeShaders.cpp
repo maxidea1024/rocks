@@ -73,6 +73,50 @@ Targets PSMain() {
 }
 )";
 
+// 측정 S13: typed buffer SRV 셋(float4·int4·uint)과 짝 규칙(7.2절 9항)을 지킨 텍스처 하나를 읽는
+// PS, typed buffer SRV를 읽어 typed buffer UAV 둘(rgba8 지정 float4·uint)에 쓰는 CS다. register는
+// 적지 않는다(7.2절 1항).
+constexpr char TypedBufferHlsl[] = R"(
+Buffer<float4> floatValues;
+Buffer<int4> intValues;
+Buffer<uint> uintValues;
+Texture2D albedo;
+SamplerState albedoSampler;
+
+float4 PSMain(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target0 {
+    const uint index = (uint)position.x;
+    return floatValues.Load(index) + float4(intValues[index]) + uintValues[index] +
+           albedo.Sample(albedoSampler, uv);
+}
+
+[[vk::image_format("rgba8")]] RWBuffer<float4> colorOutput;
+RWBuffer<uint> countOutput;
+
+[numthreads(64, 1, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID) {
+    colorOutput[id.x] = floatValues[id.x] + float4(intValues.Load(id.x));
+    countOutput[id.x] = countOutput[id.x] + uintValues[id.x];
+}
+)";
+
+// 측정 S14: VS가 layer(SV_RenderTargetArrayIndex)와 viewport(SV_ViewportArrayIndex)를 함께 낸다
+// (7.2절 7항 vertexViewportLayerOutput은 둘을 함께 연다). point 광원 6면처럼 instance마다 고른다.
+constexpr char LayerViewportHlsl[] = R"(
+struct VSOutput {
+    float4 position : SV_Position;
+    uint layer : SV_RenderTargetArrayIndex;
+    uint viewport : SV_ViewportArrayIndex;
+};
+
+VSOutput VSMain(float3 position : TEXCOORD0, uint instance : SV_InstanceID) {
+    VSOutput output;
+    output.position = float4(position, 1.0);
+    output.layer = instance % 6;
+    output.viewport = instance / 6;
+    return output;
+}
+)";
+
 constexpr char ImageFormatPrefix[] = "\n";
 constexpr char ImageFormatBody[] = R"( RWTexture2D<)";
 constexpr char ImageFormatSuffix[] = R"(> Output;
@@ -91,6 +135,12 @@ const ShaderInput TranscendentalPixel{"Transcendental.ps", TranscendentalHlsl, "
                                       ShaderStage::Pixel};
 const ShaderInput FloatLiteralPixel{"FloatLiteral.ps", FloatLiteralHlsl, "PSMain",
                                     ShaderStage::Pixel};
+
+const ShaderInput TypedBufferPixel{"TypedBuffer.ps", TypedBufferHlsl, "PSMain", ShaderStage::Pixel};
+const ShaderInput TypedBufferCompute{"TypedBuffer.cs", TypedBufferHlsl, "CSMain",
+                                     ShaderStage::Compute};
+const ShaderInput LayerViewportVertex{"LayerViewport.vs", LayerViewportHlsl, "VSMain",
+                                      ShaderStage::Vertex};
 
 const ImageFormatCase ImageFormatCases[] = {
     // 지정이 없으면 DXC가 원소 타입으로 추론한다(float4 → Rgba32f, 7.2절 1항).

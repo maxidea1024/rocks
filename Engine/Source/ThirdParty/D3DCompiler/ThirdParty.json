@@ -23,6 +23,6 @@
   "notes": [
     "FXC (D3DCompile and D3DReflect) uses Redist/D3D/x64/d3dcompiler_47.dll (file version 10.0.22621.2428) of the pinned Windows SDK 10.0.22621.0. The d3dcompiler_47.dll in System32 differs per OS build and is not used (Docs/Design/ShaderSystem.ko.md section 8, item 2; UE also opens its bundled copy by full path).",
     "The Windows SDK is an installer and is not republished. bootstrap verifies the SHA-256 in the installed SDK and copies it to the user store (<file SHA-256>/d3dcompiler_47.dll). If another SDK overwrites the same Redist path and the SHA changes, bootstrap fails and the manifest must be pinned again.",
-    "License: follows the Windows SDK terms (D3D Redist in the list of redistributable files). No files are committed to the repository, so there is no licenses entry. Whether to redistribute it with Runtime executables is decided in measurement S10."
+    "License: Windows SDK license terms, Distributable Code. Redist/D3D/x64/d3dcompiler_47.dll is on the SDK REDIST.TXT list (learn.microsoft.com/legal/windows-sdk/redist, updated 2024-10-21) and may be redistributed unmodified only with Classic Windows (desktop) applications, never with Universal Windows apps, under the license distribution requirements (measurement S10, Docs/Design/ShaderSystem.ko.md section 8, item 2). No files are committed to the repository, so there is no licenses entry. Runtime executables do not ship it (Release exclusion, section 9); developer tool packages may carry it as an application-local copy."
   ]
 }

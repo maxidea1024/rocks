@@ -48,4 +48,13 @@ struct FloatLiteralCase {
 extern const FloatLiteralCase FloatLiteralCases[];
 extern const usize FloatLiteralCaseCount;
 
+// 측정 S13(7.2절 4항 GLES typed buffer, Renderer RQ10): typed buffer SRV(`Buffer<float4>`·
+// `Buffer<int4>`·`Buffer<uint>`)와 짝 있는 Texture2D 하나를 읽는 PS, typed buffer SRV를 읽어 typed
+// buffer UAV(`RWBuffer<float4>` rgba8 지정·`RWBuffer<uint>`)에 쓰는 CS다. 원문은 하나다.
+extern const ShaderInput TypedBufferPixel;
+extern const ShaderInput TypedBufferCompute;
+
+// 측정 S14(7.2절 7항, Renderer RQ14): SV_RenderTargetArrayIndex·SV_ViewportArrayIndex를 내는 VS다.
+extern const ShaderInput LayerViewportVertex;
+
 } // namespace rocks::spike

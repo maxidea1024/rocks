@@ -18,7 +18,8 @@
 //    DXBC(FXC), SPIRV-Cross MSL·ESSL 두 가지·HLSL 5.0(→ FXC).
 // 3. ROCKS_IMAGE_FORMAT: [[vk::image_format]]이 SPIR-V 형식으로 나오는지.
 // 4. 상수 초월 함수 fixture(S3 상수 접기)와 실수 출력 fixture(10절, C locale·쉼표 locale 비교).
-// 5. S2(D3D12 셰이더 모델)·S12(GL 드라이버의 #version 320 es).
+// 5. S13(typed buffer의 ESSL·결합 sampler)·S14(VS layer·viewport 출력의 형식별 수용).
+// 6. S2(D3D12 셰이더 모델)·S12(GL 드라이버의 #version 320 es).
 // 산출물은 manifest.json에 이름·크기·SHA-256으로 남고(결정성 비교용), 측정값은 report.json에
 // 남는다.
 namespace rocks::spike {
@@ -34,6 +35,11 @@ constexpr uint32 HashRounds = 5;
 constexpr usize OutputNameBytes = 96;
 // 쉼표 소수점 locale이다(SPIRV-Cross fixup_radix_point 확인용). Windows UCRT 이름이다.
 constexpr char CommaLocale[] = "de-DE";
+// 측정 S14: VS layer·viewport 출력의 DXIL 셰이더 모델(7.2절 7항, D3D12_SM6 형식)이다.
+constexpr char LayerViewportShaderModel[] = "6_6";
+// SpvCapabilityShaderViewportIndexLayerEXT(SPIR-V 사양 3.31, SPIR-V 1.5 전 확장 capability)다.
+constexpr uint32 ShaderViewportIndexLayerCapability = 5254;
+constexpr char ShaderViewportIndexLayerExtension[] = "SPV_EXT_shader_viewport_index_layer";
 
 double MicrosecondsSince(uint64 start) noexcept {
     return static_cast<double>(platform::MonotonicNanoseconds() - start) /
@@ -125,6 +131,35 @@ void FindLine(StringView text, StringView needle, StringBuilderBase& line) noexc
     line.Append(StringView(text.Data() + begin, end - begin));
 }
 
+// text에서 needle이 든 줄을 모두 report의 열린 객체에 key 배열로 쓴다.
+void ReportLines(Report& report, StringView key, StringView text, StringView needle) noexcept {
+    report.BeginArray(key);
+    const char* data = text.Data();
+    const usize size = text.ByteCount();
+    usize begin = 0;
+    while (begin < size) {
+        usize end = begin;
+        while (end < size && data[end] != '\n') {
+            ++end;
+        }
+
+        const StringView line(data + begin, end - begin);
+        if (line.Find(needle, StringComparison::CaseSensitive) != StringView::NotFound) {
+            report.Element(line);
+        }
+
+        begin = end + 1;
+    }
+
+    report.EndArray();
+}
+
+void ReportRequires(Report& report, const ShaderRequires& shaderRequires) noexcept {
+    report.UInt("requiresFlags", shaderRequires.flags);
+    report.Bool("requiresViewportAndLayerFromAnyShader",
+                shaderRequires.viewportAndLayerFromAnyShader);
+}
+
 class Spike final {
 public:
     explicit Spike(const RunOptions& options) noexcept
@@ -142,6 +177,8 @@ private:
     void RunImageFormats() noexcept;
     void RunTranscendental() noexcept;
     void RunFloatLiterals() noexcept;
+    void RunTypedBuffers() noexcept;
+    void RunLayerViewport() noexcept;
 
     // name.extension 이름으로 산출물을 쓴다. 실패는 필수 검사 실패다.
     void Write(const char* name, const char* extension, Span<const uint8> bytes) noexcept;
@@ -625,6 +662,197 @@ void Spike::RunFloatLiterals() noexcept {
     report_.EndObject();
 }
 
+void Spike::RunTypedBuffers() noexcept {
+    // 측정 S13(7.2절 4항 GLES typed buffer, Renderer RQ10): typed buffer SRV·UAV가 ESSL에서
+    // samplerBuffer 계열·texelFetch, imageBuffer 계열·imageLoad·imageStore로 나오는지, SPIRV-Cross
+    // 결합 sampler 목록에 typed buffer SRV가 들어가는지 본다. MSL 줄은 참고로 남긴다.
+    report_.BeginArray("typedBuffer");
+    const ShaderInput* inputs[] = {&TypedBufferPixel, &TypedBufferCompute};
+    const CrossTarget targets[] = {CrossTarget::EsslPc, CrossTarget::EsslAndroid, CrossTarget::Msl};
+    for (const ShaderInput* input : inputs) {
+        report_.BeginObject();
+        report_.String("name", StringView(input->name));
+        BuildDxil(*input, true);
+        ByteArray spirv(SpikeAllocator());
+        Require(BuildSpirv(*input, true, spirv));
+        report_.BeginArray("spirvCross");
+        for (const CrossTarget target : targets) {
+            if (spirv.Size() == 0) {
+                break;
+            }
+
+            StringBuilder<4096> text(SpikeAllocator());
+            StringBuilder<256> diagnostics(SpikeAllocator());
+            const bool essl = target != CrossTarget::Msl;
+            report_.BeginObject();
+            report_.String("target", StringView(CrossTargetName(target)));
+            const bool ok = CrossCompile(tools_.SpirvCross(), spirv.View(), target, text,
+                                         diagnostics, essl ? &report_ : nullptr);
+            report_.Bool("ok", ok);
+            report_.String("diagnostics", diagnostics.View());
+            if (ok) {
+                char extension[48];
+                snprintf(extension, sizeof(extension), "%s.%s", CrossTargetName(target),
+                         CrossExtension(target));
+                WriteText(input->name, extension, text.View());
+                if (essl) {
+                    ReportLines(report_, "samplerBufferLines", text.View(), "samplerBuffer");
+                    ReportLines(report_, "imageBufferLines", text.View(), "imageBuffer");
+                    ReportLines(report_, "texelFetchLines", text.View(), "texelFetch");
+                    ReportLines(report_, "imageLoadLines", text.View(), "imageLoad");
+                    ReportLines(report_, "imageStoreLines", text.View(), "imageStore");
+                } else {
+                    ReportLines(report_, "textureLines", text.View(), "texture");
+                }
+            }
+
+            report_.EndObject();
+        }
+
+        report_.EndArray();
+        report_.EndObject();
+    }
+
+    report_.EndArray();
+}
+
+void Spike::RunLayerViewport() noexcept {
+    // 측정 S14(7.2절 7항 vertexViewportLayerOutput, Renderer RQ14): VS 출력
+    // SV_RenderTargetArrayIndex·SV_ViewportArrayIndex를 형식마다 받는지 본다. DXIL은 SM 6.6과
+    // 기본 셰이더 모델, SPIR-V는 vulkan1.1의 capability·확장, SPIRV-Cross는 MSL·ESSL·HLSL 5.0,
+    // D3D11_SM5는 FXC vs_5_0(원문과 SPIRV-Cross HLSL 5.0 둘 다)이다. 받지 않는 형식은 측정 결과라
+    // 필수 검사로 두지 않는다(DXIL SM 6.6·SPIR-V만 필수).
+    const ShaderInput& input = LayerViewportVertex;
+    report_.BeginObject("layerViewport");
+    report_.BeginArray("dxil");
+    const char* models[] = {LayerViewportShaderModel, options_.shaderModel};
+    for (usize index = 0; index < 2; ++index) {
+        const char* model = models[index];
+        // --sm 6_6이면 같은 산출물을 두 번 쓰지 않는다.
+        if (index > 0 && strcmp(model, models[0]) == 0) {
+            continue;
+        }
+
+        DxcOutput output;
+        const bool compiled = CompileWithDxc(tools_.Dxc(), input, DxcTarget::Dxil, model, output);
+        report_.BeginObject();
+        report_.String("shaderModel", StringView(model));
+        report_.Bool("ok", compiled);
+        report_.String("diagnostics", output.diagnostics.View());
+        bool ok = compiled;
+        if (compiled) {
+            char extension[32];
+            snprintf(extension, sizeof(extension), "sm%s.dxil", model);
+            Write(input.name, extension, output.code.View());
+            const ContainerDigest digest = ReadContainerDigest(output.code.View());
+            report_.Bool("signed", digest.isSigned);
+            ShaderRequires shaderRequires;
+            const bool read =
+                ReadDxilRequires(tools_.Dxc(), output.reflection.View(), shaderRequires);
+            report_.Bool("requiresRead", read);
+            ReportRequires(report_, shaderRequires);
+            ok = digest.isSigned && read;
+        }
+
+        report_.EndObject();
+        // 첫 항목(SM 6.6)만 필수다.
+        if (index == 0) {
+            Require(ok);
+        }
+    }
+
+    report_.EndArray();
+    ByteArray spirv(SpikeAllocator());
+    Require(BuildSpirv(input, true, spirv));
+    report_.BeginObject("spirvFeatures");
+    SpirvFeatureMatch match;
+    const bool scanned =
+        spirv.Size() > 0 && ReportSpirvFeatures(spirv.View(), ShaderViewportIndexLayerCapability,
+                                                ShaderViewportIndexLayerExtension, report_, match);
+    report_.Bool("scanned", scanned);
+    report_.Bool("shaderViewportIndexLayerCapability", match.capability);
+    report_.Bool("shaderViewportIndexLayerExtension", match.extension);
+    report_.EndObject();
+
+    report_.BeginArray("spirvCross");
+    const CrossTarget targets[] = {CrossTarget::Msl, CrossTarget::EsslPc, CrossTarget::EsslAndroid,
+                                   CrossTarget::Hlsl50};
+    StringBuilder<4096> hlsl50(SpikeAllocator());
+    for (const CrossTarget target : targets) {
+        if (spirv.Size() == 0) {
+            break;
+        }
+
+        StringBuilder<4096> text(SpikeAllocator());
+        StringBuilder<256> diagnostics(SpikeAllocator());
+        report_.BeginObject();
+        report_.String("target", StringView(CrossTargetName(target)));
+        const bool ok = CrossCompile(tools_.SpirvCross(), spirv.View(), target, text, diagnostics);
+        report_.Bool("ok", ok);
+        report_.String("diagnostics", diagnostics.View());
+        if (ok) {
+            char extension[48];
+            snprintf(extension, sizeof(extension), "%s.%s", CrossTargetName(target),
+                     CrossExtension(target));
+            WriteText(input.name, extension, text.View());
+            switch (target) {
+            case CrossTarget::Msl:
+                ReportLines(report_, "layerLines", text.View(), "render_target_array_index");
+                ReportLines(report_, "viewportLines", text.View(), "viewport_array_index");
+                break;
+            case CrossTarget::EsslPc:
+            case CrossTarget::EsslAndroid:
+                ReportLines(report_, "extensionLines", text.View(), "#extension");
+                ReportLines(report_, "layerLines", text.View(), "gl_Layer");
+                ReportLines(report_, "viewportLines", text.View(), "gl_ViewportIndex");
+                break;
+            case CrossTarget::Hlsl50:
+                ReportLines(report_, "layerLines", text.View(), "SV_RenderTargetArrayIndex");
+                ReportLines(report_, "viewportLines", text.View(), "SV_ViewportArrayIndex");
+                hlsl50.Append(text.View());
+                break;
+            }
+        }
+
+        report_.EndObject();
+    }
+
+    report_.EndArray();
+
+    // D3D11_SM5: 원문을 FXC vs_5_0으로, SPIRV-Cross HLSL 5.0 출력도 FXC로(D3D11 대체 경로).
+    report_.BeginArray("fxc");
+    const StringView sources[] = {StringView(input.source), hlsl50.View()};
+    const char* entries[] = {input.entry, "main"};
+    const char* extensions[] = {"dxbc", "hlsl50.dxbc"};
+    for (usize index = 0; index < 2; ++index) {
+        if (sources[index].ByteCount() == 0) {
+            continue;
+        }
+
+        ByteArray code(SpikeAllocator());
+        StringBuilder<256> diagnostics(SpikeAllocator());
+        const bool ok = CompileWithFxc(tools_.Fxc(), sources[index], input.name, entries[index],
+                                       "vs_5_0", code, diagnostics);
+        report_.BeginObject();
+        report_.String("source", index == 0 ? StringView("hlsl") : StringView("spirvCrossHlsl50"));
+        report_.String("profile", StringView("vs_5_0"));
+        report_.Bool("ok", ok);
+        report_.String("diagnostics", diagnostics.View());
+        if (ok) {
+            Write(input.name, extensions[index], code.View());
+            ShaderRequires shaderRequires;
+            report_.Bool("requiresRead",
+                         ReadDxbcRequires(tools_.Fxc(), code.View(), shaderRequires));
+            ReportRequires(report_, shaderRequires);
+        }
+
+        report_.EndObject();
+    }
+
+    report_.EndArray();
+    report_.EndObject();
+}
+
 int Spike::Run() noexcept {
     setlocale(LC_ALL, "C");
     if (!output_.Create()) {
@@ -644,6 +872,8 @@ int Spike::Run() noexcept {
     RunImageFormats();
     RunTranscendental();
     RunFloatLiterals();
+    RunTypedBuffers();
+    RunLayerViewport();
     report_.BeginObject("s2");
     ProbeD3D12ShaderModel(report_);
     report_.EndObject();

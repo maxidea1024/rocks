@@ -45,6 +45,22 @@ bool CompileWithFxc(const shader::FxcFunctions& fxc, StringView source, const ch
                     const char* entry, const char* profile, ByteArray& code,
                     StringBuilderBase& diagnostics) noexcept;
 
+// 셰이더 요구 플래그(GetRequiresFlags, D3D_SHADER_REQUIRES_*)다(측정 S14).
+struct ShaderRequires {
+    uint64 flags = 0;
+    // D3D_SHADER_REQUIRES_VIEWPORT_AND_RT_ARRAY_INDEX_FROM_ANY_SHADER_FEEDING_RASTERIZER: 장치의
+    // VPAndRTArrayIndexFromAnyShaderFeedingRasterizer 기능이 있어야 이 셰이더를 쓴다.
+    bool viewportAndLayerFromAnyShader = false;
+};
+
+// DXC 리플렉션 부분(ID3D12ShaderReflection)의 요구 플래그를 읽는다.
+bool ReadDxilRequires(const shader::DxcFunctions& dxc, Span<const uint8> reflection,
+                      ShaderRequires& result) noexcept;
+
+// FXC DXBC를 D3DReflect(ID3D11ShaderReflection)로 열어 요구 플래그를 읽는다.
+bool ReadDxbcRequires(const shader::FxcFunctions& fxc, Span<const uint8> code,
+                      ShaderRequires& result) noexcept;
+
 // 측정 S2: 하드웨어 어댑터와 WARP마다 D3D12 장치를 만들어 최대 셰이더 모델을 report에 쓴다.
 // Agility SDK를 쓰지 않으므로(D3D12SDKVersion export 없음) OS D3D12 런타임의 값이다.
 void ProbeD3D12ShaderModel(Report& report) noexcept;
@@ -72,7 +88,7 @@ enum class CrossTarget : uint8 {
     EsslAndroid,
     // GLES31_PC: ESSL 320, 둘 다 끔(Windows 미리보기는 클립 공간 보정을 glClipControl로 한다).
     EsslPc,
-    // METAL_SM5: MSL 2.1 macOS.
+    // METAL_SM5: MSL 2.1 macOS, typed buffer는 texture_buffer(texture_buffer_native).
     Msl,
     // D3D11_SM5 대체 경로: HLSL 5.0(이 출력을 FXC로 다시 컴파일한다).
     Hlsl50
@@ -80,10 +96,23 @@ enum class CrossTarget : uint8 {
 
 const char* CrossTargetName(CrossTarget target) noexcept;
 
-// SPIR-V를 SPIRV-Cross로 바꾼다. 결과 원문은 text에 쓴다(앞 내용은 지운다).
+// SPIR-V를 SPIRV-Cross로 바꾼다. 결과 원문은 text에 쓴다(앞 내용은 지운다). combinedSamplers가
+// 있고 ESSL이면 SPIRV-Cross 결합 sampler 목록(결합·image·sampler 변수 이름)을 그 report의 열린
+// 객체에 "combinedSamplers" 배열로 쓴다(측정 S13).
 bool CrossCompile(const shader::SpirvCrossFunctions& cross, Span<const uint8> code,
-                  CrossTarget target, StringBuilderBase& text,
-                  StringBuilderBase& diagnostics) noexcept;
+                  CrossTarget target, StringBuilderBase& text, StringBuilderBase& diagnostics,
+                  Report* combinedSamplers = nullptr) noexcept;
+
+// ReportSpirvFeatures가 찾은 것이다.
+struct SpirvFeatureMatch {
+    bool capability = false;
+    bool extension = false;
+};
+
+// SPIR-V 모듈의 OpCapability 번호와 OpExtension 이름을 report의 열린 객체에 "capabilities"(10진
+// 문자열)·"extensions" 배열로 쓰고, capability·extension이 있는지 match에 남긴다(측정 S14).
+bool ReportSpirvFeatures(Span<const uint8> code, uint32 capability, StringView extension,
+                         Report& report, SpirvFeatureMatch& match) noexcept;
 
 // SPIRV-Reflect로 descriptor binding(set·binding·종류·상수 블록 멤버 오프셋)·push constant·입출력
 // 변수(location·built-in·이름)를 report의 열린 객체에 쓴다.
