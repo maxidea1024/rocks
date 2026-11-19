@@ -262,14 +262,14 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 
 **링크 방식 두 가지(BD17).** 타깃 규칙 속성 `LinkType { Monolithic, Modular }`를 둔다.
 - `Monolithic`: 지금 구조다. 모든 모듈을 정적 라이브러리로 만들어 실행 파일 하나에 링크한다.
-- `Modular`: 모듈마다 공유 라이브러리 하나(Windows `.dll`과 import `.lib`, macOS `.dylib`, Linux `.so`)를 만들고, 실행 파일이 그것을 링크·적재한다.
+- `Modular`: 모듈마다 공유 라이브러리 하나(Windows `.dll`과 import `.lib`, macOS `.dylib`, Linux `.so`)를 만든다. 실행 파일은 부트 모듈(Launch 의존 폐포)만 import하고, 나머지는 모듈 로더가 의존 순서로 적재한다([모듈 로더](ModuleLoader.ko.md) MD21).
 - 기본값은 Editor 타깃이 `Modular`, 나머지가 `Monolithic`이다(UE `TargetRules.cs:2686-2689`). 타깃 규칙이 바꿀 수 있다(UE와 같다). Modular Program 타깃은 export 누락을 Editor 전에 잡는 시험 빌드에 쓴다(BD31).
 - Android는 `Modular`를 거부한다(UE `Platform/Android/UEBuildAndroid.cs:347-351`, iOS `Platform/IOS/UEBuildIOS.cs:993-997`, 검사 `Configuration/Rules/RulesAssembly.cs:856`). iOS가 생기면 같은 규칙이다.
 - 링크 방식은 매크로 `ROCKS_MONOLITHIC`(0·1)로 컴파일에 알린다(UE `IS_MONOLITHIC` — `UEBuildTarget.cs:6345`). BD2 매크로와 같이 타깃 안에서 같은 값을 강제하고, 기본값 없이 `Base/Compiler.h`가 검사한다. 쓰는 곳은 모듈 진입점 매크로(BD30)뿐이다. export 값은 빌드가 모듈 API 매크로로 직접 넣는다(BD27). 타깃 종류 매크로를 두지 않는 규칙(BD3)과는 다른 축이다.
 - 공유 라이브러리 파일 이름은 `<타깃 이름>-<모듈 이름>`이다. 구성이 Development가 아니면 `-<플랫폼>-<구성>`을 붙이고, macOS·Linux는 `lib` 접두를 붙인다(UE `UEBuildTarget.cs:5400, 5473-5508`).
 - **산출물 배치와 링크 옵션**: 엔진 모듈 공유 라이브러리는 실행 파일과 같은 출력 폴더에 둔다. 게임·플러그인 모듈의 위치와 실행 중 탐색은 모듈 로더 스펙(BD30)이 정한다. 빌드 쪽 옵션은 UE와 같다.
   - macOS: 공유 라이브러리의 install name은 `@rpath/<파일 이름>`이고, 실행 파일·라이브러리는 `-rpath @loader_path/`·`-rpath @executable_path/`를 받는다(UE `Platform/Mac/MacToolChain.cs:578-584`).
-  - Linux: `-Wl,-rpath=$ORIGIN`(UE `Platform/Linux/LinuxToolChain.cs:791-793`), 컴파일은 `-fPIC`다(지금은 Android만 붙인다 — `ActionGraph.cs:515-518`). Linux에는 Editor 타깃이 없으므로 `Modular`는 Program 시험 빌드에만 쓴다.
+  - Linux: `-Wl,-rpath=$ORIGIN`(UE `Platform/Linux/LinuxToolChain.cs:791-793`), 공유 라이브러리마다 `-soname`(파일 이름), 컴파일은 `-fPIC`다(지금은 Android만 붙인다 — `ActionGraph.cs:515-518`). Linux에는 Editor 타깃이 없으므로 `Modular`는 Program 시험 빌드에만 쓴다.
   - Windows: import 라이브러리를 링크하고, 실행 파일 폴더의 DLL은 기본 탐색으로 적재된다.
 - `Modular`는 Debug·Development 구성에서만 허용한다. Asan·Coverage 구성과 Release는 `Monolithic`만이다(Editor는 Release로 빌드하지 않는다 — BD20). 필요해지면 다시 본다.
 
@@ -314,7 +314,7 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 
 **모듈 수명과 로더(BD30).**
 - UE는 모듈마다 `IMPLEMENT_MODULE`로 진입점을 둔다(`Runtime/Core/Public/Modules/ModuleManager.h:943-971`). `Monolithic`에서는 정적 초기화로 등록하고, `Modular`에서는 `FModuleManager`가 DLL을 적재한 뒤 진입점을 부른다. 플러그인 모듈은 플러그인 관리자가 로딩 단계별로 적재한다.
-- Rocks에는 모듈 수명 객체와 로더가 아직 없다(리플렉션 등록은 생성 함수 `RegisterModuleTypes`를 명시 호출). 별도 스펙 "모듈 로더"로 정하고 BS5 전에 끝낸다. 이 문서가 그 스펙에 요구하는 계약은 다음과 같다.
+- Rocks에는 모듈 수명 객체와 로더가 아직 없다(리플렉션 등록은 생성 함수 `RegisterModuleTypes`를 명시 호출). 별도 스펙 [모듈 로더](ModuleLoader.ko.md)로 정했다. 그 단계 ML0–ML4는 BS5 전에, ML5는 BS5와 함께 구현한다. 이 문서가 그 스펙에 요구하는 계약은 다음과 같다.
   1. 같은 소스가 `Monolithic`과 `Modular`에서 같은 순서·결과로 동작한다. 모듈 진입점 매크로가 `ROCKS_MONOLITHIC`으로 두 방식을 가린다.
   2. 모듈 적재·시작은 의존 순서, 종료·해제는 그 역순이다. 리플렉션 타입 등록은 모듈 시작에 묶는다.
   3. Rocks Studio는 프로젝트 기술자(`.rocksproject`)와 플러그인 활성 조건(3.6절)을 읽어 게임·플러그인 모듈의 공유 라이브러리를 실행 중에 적재한다.
@@ -371,7 +371,7 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 | BD27 | 빌드가 모듈마다 `ROCKS_<MODULE>_API`를 정의한다. `Monolithic`이면 빈 값, `Modular`이면 자기 모듈은 export·다른 모듈은 import다(UE `<MODULE>_API`). 가시성·rpath 옵션은 UE와 같다. 규칙 파일은 이 매크로를 정의할 수 없고, 다른 모듈의 API 매크로를 붙이면 정책 오류다. 다른 모듈이 상속하는 클래스는 클래스 단위 export가 필요하다(메타 컴파일러 진단) | 권장안 |
 | BD28 | 메타 컴파일러는 모듈마다 생성 `.cpp`(UE `.gen.cpp`)를 내고, 타입 키·타입 정보·등록 함수를 거기 정의해 항상 export한다. `NativeTypeKey`는 그 키 저장소 주소다. UE `MinimalAPI` 지정자는 두지 않는다 | 권장안 |
 | BD29 | 공개 헤더에 쓰기 가능한 정적 저장소(const 아닌 inline 변수·inline/템플릿 함수의 static 지역 변수·헤더 정의 정적 데이터 멤버), `thread_local` 변수, 주소를 식별자로 쓰는 정적 객체를 두지 않는다(정책 `public-header-static-storage`, 링크 방식과 무관하게 검사). 서드파티는 UE와 같이 소비 모듈마다 링크하고, `HasGlobalState` 서드파티만 직접 소비 모듈을 하나로 제한한다 | 권장안 |
-| BD30 | 모듈 수명 객체·로더는 별도 스펙 "모듈 로더"로 정하고 BS5 전에 끝낸다. 요구 계약은 3.8절 네 항목이다. 게임의 Editor 타깃은 설치 SDK의 엔진 모듈 공유 라이브러리를 공유하며 엔진 컴파일 환경을 바꿀 수 없다 | 권장안 |
+| BD30 | 모듈 수명 객체·로더는 별도 스펙 [모듈 로더](ModuleLoader.ko.md)로 정한다(ML0–ML4는 BS5 전, ML5는 BS5와 함께). Modular 실행 파일은 부트 모듈만 import한다(MD21). 요구 계약은 3.8절 네 항목이다. 게임의 Editor 타깃은 설치 SDK의 엔진 모듈 공유 라이브러리를 공유하며 엔진 컴파일 환경을 바꿀 수 없다 | 권장안 |
 | BD31 | Editor보다 먼저 `Modular` Program 시험 빌드(FoundationTests)를 검사 체인에 넣어 export 누락과 공유 상태 위반을 잡는다(Windows·macOS). 대상 모듈의 `Private/`를 받는 시험 묶음(BD22)은 `Modular`에서 그 모듈의 공유 라이브러리에 함께 링크한다(UE도 모듈의 `Private/Tests` 시험을 모듈 바이너리에 컴파일한다 — 예 `Runtime/Core/Private/Tests`). 시험 등록 표는 Core가 한 벌 가진다 | 권장안 |
 
 ## 6. 단계
@@ -388,7 +388,7 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 | BS5 | Editor 타깃 첫 실행 파일 — Rocks Studio 착수 시점. 선행: BS8, 모듈 로더 스펙과 구현(BD30). 설치 SDK Editor 변형(`Modular`), 게임 Editor 타깃의 공유 빌드 환경 검사 | Rocks Studio 실행 파일이 엔진 모듈 공유 라이브러리와 게임·플러그인 모듈을 적재해 부트·종료한다(Windows·macOS) |
 | BS6 | Linux x64 빌드 플랫폼(3.7절 2): `NativePlatform.Linux`, clang++·lld 툴체인 탐색과 fingerprint, 플랫폼 매크로, `Private/Linux/` 규칙, 정책 검사의 플랫폼 폴더 목록, Linux에서 허용 타깃 제한 | Core 모듈과 FoundationTests가 Linux x64에서 빌드·통과(전체 계획 M3 "Core CPU/headless suite") |
 | BS7 | Server 타깃 첫 실행 파일(3.7절 1·3·4) — 네트워크 단계: 게임 템플릿의 Server 타깃 규칙, 그래픽 backend ClientOnly 표시와 비링크 검사, Android Server 타깃 거부, headless 부트·종료 | Windows·macOS·Linux에서 Server 실행 파일이 부트·종료한다(전체 계획 M4 "server service boot/shutdown") |
-| BS8 | 모듈식 링크 기반(3.8절) — 선행: BS0. `LinkType`·`ROCKS_MONOLITHIC`·Android 거부·파일 이름, 모듈 API 매크로 주입과 `ROCKS_DLLEXPORT`·`ROCKS_DLLIMPORT`, 숨김 가시성, 예약 매크로 검사, 가시성·`-fPIC`·rpath·install name, 생성 `.cpp`와 `NativeTypeKey` 교체(BD28), 상속 export 진단과 모듈별 export 수 진단, 기존 모듈의 모듈 사이 API에 매크로 붙이기, 정책 `public-header-static-storage`와 지금 위반 정리, `HasGlobalState` 표시와 단일 소비 검사, `Private/` 시험 묶음의 모듈 내 링크와 `Modular` FoundationTests 검사 체인(BD31) | `Modular` FoundationTests가 Windows·macOS에서 빌드·통과한다. `Monolithic` 빌드 결과(object 인자)는 매크로 값 외에 바뀌지 않는다. 공개 헤더의 `thread_local`·쓰기 가능한 inline 정적 저장소를 정책이 거부한다 |
+| BS8 | 모듈식 링크 기반(3.8절) — 선행: BS0. `LinkType`·`ROCKS_MONOLITHIC`·Android 거부·파일 이름, 모듈 API 매크로 주입과 `ROCKS_DLLEXPORT`·`ROCKS_DLLIMPORT`, 숨김 가시성, 예약 매크로 검사, 가시성·`-fPIC`·rpath·install name, 생성 `.cpp`와 `NativeTypeKey` 교체(BD28), 상속 export 진단과 모듈별 export 수 진단, 기존 모듈의 모듈 사이 API에 매크로 붙이기, 정책 `public-header-static-storage`와 지금 위반 정리, `HasGlobalState` 표시와 단일 소비 검사, `Private/` 시험 묶음의 모듈 내 링크와 `Modular` FoundationTests 검사 체인(BD31), 실행 파일 생성 TU가 정의하던 빌드 정보(`ToolchainFingerprint`·`ToolBuildId`)의 Modular 정의 위치(Core 공유 라이브러리에 미해결 기호가 남지 않게) | `Modular` FoundationTests가 Windows·macOS에서 빌드·통과한다. `Monolithic` 빌드 결과(object 인자)는 매크로 값 외에 바뀌지 않는다. 공개 헤더의 `thread_local`·쓰기 가능한 inline 정적 저장소를 정책이 거부한다 |
 
 순서: BS0 → BS1(UB0 depfile 파서 뒤) → BS3. BS2는 BS0 뒤가 쉽다(규칙 기반 클래스를 한 번에 고친다). BS4는 BS2 뒤다(`targets` 값 검증과 문맥별 해석에 다섯 값 `TargetType`이 필요하다). BS6은 다른 단계와 독립이다. BS7은 BS2·BS6 뒤이고, 렌더·오디오·입력 backend를 서버에서 빼는 범위는 BS7 전에 네트워크 단계 스펙이 정한다.
 
@@ -459,7 +459,7 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 - 플랫폼별 설정 파일(`Config/<Platform>/`): [설정 시스템](ConfigSystem.ko.md)의 플랫폼 층이다.
 - 패키징·스테이징(실행 파일 옆 런타임 파일, UE `RuntimeDependencies`·`AllowedConfigFiles`·`DirectoriesToAlwaysStageAsNonUFS`, Android 패키징 설정): [에셋 시스템](AssetSystem.ko.md) 18절 "범위 밖과 후속"의 Android 패키징 후속과 전체 계획 2430행 부근의 패키징 계획에서 정한다.
 - Server 타깃의 기능 축소 범위: 네트워크 단계 스펙(3.7절).
-- 모듈 수명 객체·로더(UE `IModuleInterface`·`FModuleManager`·플러그인 로딩 단계): 별도 스펙 "모듈 로더"(BD30). 이 문서는 요구 계약만 정한다.
+- 모듈 수명 객체·로더(UE `IModuleInterface`·`FModuleManager`·플러그인 로딩 단계): [모듈 로더](ModuleLoader.ko.md)(BD30). 이 문서는 요구 계약만 정한다.
 - 코드 다시 불러오기(UE Live Coding — Win64 비출시 구성, `TargetRules.cs:1587-1590`): `Modular` 링크가 생긴 뒤 별도 스펙으로 정한다.
 
 ## 10. 개정 이력
@@ -467,4 +467,4 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 | 개정 | 날짜 | 내용 |
 |---|---|---|
 | 1 | 2026-11-19 | 첫 초안. UE 5.8 Templates 대조에서 나온 빌드 공백(타깃 종류, 의존 공개 범위, 플러그인 활성 조건)을 정리했다. 전용 서버 필수 요구(사용자 지시 — 네트워크 구성 뒤, 서버 플랫폼 Windows·macOS·Linux)로 3.7절·BD18·BS6·BS7을 더했다. 서브에이전트 3개(이 문서 UE·Rocks 코드 대조, UI 툴킷 7.3절 대조, Templates 독립 재대조)로 교차 검증해 반영했다: 플러그인 조건 해석을 UE 의미론으로 바꿈(치명), `bCompileAgainstEditor` 인용, 템플릿 사실, 에디터 데이터의 생성 코드·descriptor·로드 계약, UHT식 선언 규칙, 엔진 모듈 type, Release 배제 확장, 매크로 주입 위치, SDK 변형 key와 Program 기본 조합, 플러그인 처리 순서, 의존 소비처 전부, 서드파티 우회 제거, 시험 실행 파일 규칙, UnityBuildPch 제공 모듈 선택, depfile 선행, 9.1 표 보강. 반영본을 서브에이전트 1개로 다시 검증해 반영했다: 대리 클래스·interface 다중 상속(UI 툴킷 7.3절 (f)), 블록 안 허용 선언의 범위(BD6), 어휘 스캔 판정 수단, 에디터 패키지 저장 거부(BD26), `SourceGroups`(BD22), 타깃 종류별 Release 평가 플랫폼, type 사이 의존 규칙(BD25), 7절 표 보강, 인용 행 정정 |
-| 2 | 2026-11-19 | BD17을 사용자 결정("언리얼 방식대로")으로 확정했다. 3.8절 링크 방식을 더했다: `LinkType`(Editor 기본 `Modular`), `ROCKS_MONOLITHIC`, 모듈 API 매크로(BD27), 리플렉션 타입 정보 항상 export(BD28), 공개 헤더 정적 저장소·`thread_local` 금지와 서드파티 단일 소비(BD29), 모듈 로더 별도 스펙과 공유 빌드 환경(BD30), `Modular` 시험 빌드(BD31), 단계 BS8. BD5에 Editor 변형을 더하고 BS5·7절·9절을 고쳤다. 서브에이전트 1개로 교차 검증해 반영했다: 생성 코드가 모두 inline이고 타입 키가 주소라 `Modular`에서 갈라짐(BD28을 생성 `.cpp`로), 비공개 심볼을 쓰는 시험의 `Modular` 링크(BD31), `CompileWithEditor` Program의 SDK 변형 key, 서드파티 다중 소비 현황(UE와 같이 허용하고 전역 상태만 제한), 가시성 옵션을 UE와 같게(`-fvisibility-ms-compat`), rpath·install name·`-fPIC`, 상속 export, export 수 상한, 위반 목록 보강, 인용 행 정정 |
+| 2 | 2026-11-19 | BD17을 사용자 결정("언리얼 방식대로")으로 확정했다. 3.8절 링크 방식을 더했다: `LinkType`(Editor 기본 `Modular`), `ROCKS_MONOLITHIC`, 모듈 API 매크로(BD27), 리플렉션 타입 정보 항상 export(BD28), 공개 헤더 정적 저장소·`thread_local` 금지와 서드파티 단일 소비(BD29), 모듈 로더 별도 스펙과 공유 빌드 환경(BD30), `Modular` 시험 빌드(BD31), 단계 BS8. BD5에 Editor 변형을 더하고 BS5·7절·9절을 고쳤다. 서브에이전트 1개로 교차 검증해 반영했다: 생성 코드가 모두 inline이고 타입 키가 주소라 `Modular`에서 갈라짐(BD28을 생성 `.cpp`로), 비공개 심볼을 쓰는 시험의 `Modular` 링크(BD31), `CompileWithEditor` Program의 SDK 변형 key, 서드파티 다중 소비 현황(UE와 같이 허용하고 전역 상태만 제한), 가시성 옵션을 UE와 같게(`-fvisibility-ms-compat`), rpath·install name·`-fPIC`, 상속 export, export 수 상한, 위반 목록 보강, 인용 행 정정. 같은 날 [모듈 로더](ModuleLoader.ko.md) 개정 1을 쓰며 BD30(단계 관계·실행 파일 import 범위), 3.8절 Linux `-soname`, BS8 빌드 정보 정의 위치를 고쳤다 |
