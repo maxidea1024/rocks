@@ -49,9 +49,9 @@ internal static class InputValidation
             throw new PlatformNotSupportedException($"Toolchain.Platform {request.Toolchain.Platform}: this native host is not supported for that target.");
         }
 
-        if (request.Toolchain.Platform == NativePlatform.Android && request.Configuration == NativeConfiguration.Asan)
+        if (request.Toolchain.Platform == NativePlatform.Android && request.Configuration is NativeConfiguration.Asan or NativeConfiguration.Coverage)
         {
-            throw new ArgumentException("Toolchain.Platform Android: the Asan configuration is not supported yet (use Debug, Development, or Release).");
+            throw new ArgumentException($"Toolchain.Platform Android: the {request.Configuration} configuration is not supported yet (use Debug, Development, or Release).");
         }
         // Release는 ThinLTO bitcode object를 만든다. MSVC lib.exe·link.exe는 bitcode를 읽지 못하고, 다른
         // 버전의 LLVM 도구는 새 bitcode를 읽지 못할 수 있으므로 compiler와 같은 폴더의 llvm-lib·lld-link를

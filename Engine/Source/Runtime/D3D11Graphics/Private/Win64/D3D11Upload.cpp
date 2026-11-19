@@ -48,9 +48,7 @@ Result<void> D3D11Device::UpdateTexture(TextureHandle handle, uint32 mipLevel,
     }
 
     if (record->view || record->renderTarget || record->depthTarget ||
-        mipLevel >= record->mipLevels ||
-        pixels.Size() != PixelFormatImageBytes(record->format, MipExtent(record->width, mipLevel),
-                                               MipExtent(record->height, mipLevel))) {
+        mipLevel >= record->mipLevels || pixels.Size() != MipBytes(*record, mipLevel)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -108,8 +106,7 @@ Result<void> D3D11Device::UploadTextureFromStaging(TextureHandle handle, uint32 
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    const uint64 bytes = PixelFormatImageBytes(record->format, MipExtent(record->width, mipLevel),
-                                               MipExtent(record->height, mipLevel));
+    const uint64 bytes = mipLevel < record->mipLevels ? MipBytes(*record, mipLevel) : 0u;
     if (record->view || record->renderTarget || record->depthTarget ||
         mipLevel >= record->mipLevels || bytes == 0 || offset > memory.Value().size ||
         bytes > memory.Value().size - offset) {
@@ -254,14 +251,24 @@ Result<void> D3D11Device::RecordTextureUpload(const TextureRecord& record, uint3
                                               const uint8* pixels) noexcept {
     const uint32 rowBytes =
         static_cast<uint32>(PixelFormatRowBytes(record.format, MipExtent(record.width, mipLevel)));
-    UploadOp op;
-    op.destination = record.texture.Get();
-    op.subresource = mipLevel;
-    op.source = pixels;
-    op.rowPitch = rowBytes;
-    op.depthPitch =
+    const uint32 image =
         rowBytes * PixelFormatBlockRows(record.format, MipExtent(record.height, mipLevel));
-    return PushUpload(op);
+    // slice마다 subresource 하나다. 3D는 subresource 하나가 모든 깊이 면(depthPitch 간격)이다.
+    const usize sliceBytes = static_cast<usize>(image) * MipDepth(record, mipLevel);
+    for (uint32 slice = 0; slice < record.slices; ++slice) {
+        UploadOp op;
+        op.destination = record.texture.Get();
+        op.subresource = D3D11CalcSubresource(mipLevel, slice, record.mipLevels);
+        op.source = pixels + slice * sliceBytes;
+        op.rowPitch = rowBytes;
+        op.depthPitch = image;
+        auto pushed = PushUpload(op);
+        if (!pushed) {
+            return pushed;
+        }
+    }
+
+    return Result<void>::Success();
 }
 
 Result<void> D3D11Device::RecordAnyUpload(const TextureRecord& record, uint32 mipLevel,
@@ -276,6 +283,22 @@ Result<void> D3D11Device::RecordAnyUpload(const TextureRecord& record, uint32 mi
 
 Result<void> D3D11Device::RecordStagedUpload(const TextureRecord& record, uint32 mipLevel,
                                              const uint8* pixels) noexcept {
+    const uint32 width = MipExtent(record.width, mipLevel);
+    const uint32 height = MipExtent(record.height, mipLevel);
+    const usize image = static_cast<usize>(PixelFormatImageBytes(record.format, width, height));
+    // 깊이·스텐실·비디오는 3D가 아니다(ValidateTextureDesc·형식 능력). slice마다 올린다.
+    for (uint32 slice = 0; slice < record.slices; ++slice) {
+        auto uploaded = RecordStagedSlice(record, mipLevel, slice, pixels + slice * image);
+        if (!uploaded) {
+            return uploaded;
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> D3D11Device::RecordStagedSlice(const TextureRecord& record, uint32 mipLevel,
+                                            uint32 slice, const uint8* pixels) noexcept {
     const uint32 width = MipExtent(record.width, mipLevel);
     const uint32 height = MipExtent(record.height, mipLevel);
     const DeviceLayout layout = DeviceLayoutOf(record.format, width, height);
@@ -311,7 +334,7 @@ Result<void> D3D11Device::RecordStagedUpload(const TextureRecord& record, uint32
     UploadOp op;
     op.kind = UploadOp::Kind::CopyRegion;
     op.destination = record.texture.Get();
-    op.subresource = mipLevel;
+    op.subresource = D3D11CalcSubresource(mipLevel, slice, record.mipLevels);
     op.copySource = staging.Get();
     op.sourceSubresource = 0;
     auto pushed = PushUpload(op);
@@ -341,26 +364,72 @@ Result<void> D3D11Device::ReadTexture(TextureHandle handle, uint32 mipLevel, uin
         return Result<void>::Failure(ErrorCode::Busy);
     }
 
-    const uint32 width = MipExtent(record->width, mipLevel);
-    const uint32 height = MipExtent(record->height, mipLevel);
-    if (record->view || mipLevel >= record->mipLevels ||
-        out.Size() != PixelFormatPlaneImageBytes(record->format, plane, width, height)) {
+    // MSAA는 resolve한 뒤 읽는다(텍스처 GX2 B부).
+    if (record->sampleCount > 1) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    D3D11_TEXTURE2D_DESC stagingDesc = {};
-    stagingDesc.Width = width;
-    stagingDesc.Height = height;
-    stagingDesc.MipLevels = 1;
-    stagingDesc.ArraySize = 1;
-    stagingDesc.Format = MappingOf(record->format).resource;
-    stagingDesc.SampleDesc.Count = 1;
-    stagingDesc.Usage = D3D11_USAGE_STAGING;
-    stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-    ComRef<ID3D11Texture2D> staging;
-    const HRESULT created = device_->CreateTexture2D(&stagingDesc, nullptr, staging.Out());
+    const uint32 width = MipExtent(record->width, mipLevel);
+    const uint32 height = MipExtent(record->height, mipLevel);
+    const uint64 image = PixelFormatPlaneImageBytes(record->format, plane, width, height);
+    const uint32 depthSlices = mipLevel < record->mipLevels ? MipDepth(*record, mipLevel) : 1u;
+    if (record->view || mipLevel >= record->mipLevels || image == 0 ||
+        out.Size() != image * depthSlices * record->slices) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // slice마다 subresource 하나를 읽어 초기 픽셀과 같은 순서로 잇는다.
+    const usize sliceBytes = static_cast<usize>(image * depthSlices);
+    for (uint32 slice = 0; slice < record->slices; ++slice) {
+        auto read = ReadSubresource(*record, mipLevel, slice, plane,
+                                    out.Slice(slice * sliceBytes, sliceBytes));
+        if (!read) {
+            return read;
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+// subresource(mip, slice) 하나의 plane 하나를 staging으로 복사해 읽는다(잠금 안, 소유 스레드).
+// 3D면 그 mip의 모든 깊이 면이다.
+Result<void> D3D11Device::ReadSubresource(const TextureRecord& source, uint32 mipLevel,
+                                          uint32 slice, uint32 plane, Span<uint8> out) noexcept {
+    const TextureRecord* record = &source;
+    const uint32 width = MipExtent(record->width, mipLevel);
+    const uint32 height = MipExtent(record->height, mipLevel);
+    const uint32 depthSlices = MipDepth(*record, mipLevel);
+    ComRef<ID3D11Resource> staging;
+    HRESULT created = S_OK;
+    if (record->dimension == TextureDimension::Texture3D) {
+        D3D11_TEXTURE3D_DESC volumeDesc = {};
+        volumeDesc.Width = width;
+        volumeDesc.Height = height;
+        volumeDesc.Depth = depthSlices;
+        volumeDesc.MipLevels = 1;
+        volumeDesc.Format = MappingOf(record->format).resource;
+        volumeDesc.Usage = D3D11_USAGE_STAGING;
+        volumeDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        ComRef<ID3D11Texture3D> volume;
+        created = device_->CreateTexture3D(&volumeDesc, nullptr, volume.Out());
+        staging.Attach(volume.Detach());
+    } else {
+        D3D11_TEXTURE2D_DESC stagingDesc = {};
+        stagingDesc.Width = width;
+        stagingDesc.Height = height;
+        stagingDesc.MipLevels = 1;
+        stagingDesc.ArraySize = 1;
+        stagingDesc.Format = MappingOf(record->format).resource;
+        stagingDesc.SampleDesc.Count = 1;
+        stagingDesc.Usage = D3D11_USAGE_STAGING;
+        stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        ComRef<ID3D11Texture2D> flat;
+        created = device_->CreateTexture2D(&stagingDesc, nullptr, flat.Out());
+        staging.Attach(flat.Detach());
+    }
+
     if (FAILED(created)) {
-        return Fail("CreateTexture2D (readback staging)", created);
+        return Fail("CreateTexture (readback staging)", created);
     }
 
     auto reserved = ReserveRetireCapacity(1);
@@ -374,7 +443,7 @@ Result<void> D3D11Device::ReadTexture(TextureHandle handle, uint32 mipLevel, uin
     op.destination = staging.Get();
     op.subresource = 0;
     op.copySource = record->texture.Get();
-    op.sourceSubresource = mipLevel;
+    op.sourceSubresource = D3D11CalcSubresource(mipLevel, slice, record->mipLevels);
     auto pushed = PushUpload(op);
     if (!pushed) {
         return pushed;
@@ -395,8 +464,14 @@ Result<void> D3D11Device::ReadTexture(TextureHandle handle, uint32 mipLevel, uin
         if (FAILED(result)) {
             outcome = Fail("ID3D11DeviceContext::Map (texture readback)", result);
         } else {
-            FromDeviceLayout(record->format, plane, width, height,
-                             static_cast<const uint8*>(mapped.pData), mapped.RowPitch, out.Data());
+            const usize planeImage = static_cast<usize>(
+                PixelFormatPlaneImageBytes(record->format, plane, width, height));
+            for (uint32 z = 0; z < depthSlices; ++z) {
+                FromDeviceLayout(record->format, plane, width, height,
+                                 static_cast<const uint8*>(mapped.pData) +
+                                     static_cast<usize>(z) * mapped.DepthPitch,
+                                 mapped.RowPitch, out.Data() + z * planeImage);
+            }
             immediate_->Unmap(staging.Get(), 0);
         }
     }
@@ -488,7 +563,7 @@ Result<void> D3D11Device::ReadPixels(TextureHandle handle, Span<uint8> out) noex
 
     const usize size =
         static_cast<usize>(PixelFormatImageBytes(record->format, record->width, record->height));
-    if (!record->renderTarget || out.Size() != size || recording_) {
+    if (!record->renderTarget || record->sampleCount > 1 || out.Size() != size || recording_) {
         return Result<void>::Failure(recording_ ? ErrorCode::Busy : ErrorCode::InvalidArgument);
     }
 
@@ -556,7 +631,7 @@ Result<ReadbackRequest> D3D11Device::RequestReadbackLocked(TextureHandle target)
         return Result<ReadbackRequest>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (!record->renderTarget) {
+    if (!record->renderTarget || record->sampleCount > 1) {
         return Result<ReadbackRequest>::Failure(ErrorCode::InvalidArgument);
     }
 

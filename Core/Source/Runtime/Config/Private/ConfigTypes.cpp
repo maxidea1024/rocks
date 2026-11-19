@@ -25,10 +25,18 @@ StringView ConfigLayerName(ConfigLayer layer) noexcept {
         return "DeviceProfile";
     case ConfigLayer::User:
         return "User";
+    case ConfigLayer::Hotfix:
+        return "Hotfix";
     case ConfigLayer::Session:
         return "Session";
+    case ConfigLayer::Code:
+        return "Code";
+    case ConfigLayer::Scoped:
+        return "Scoped";
     case ConfigLayer::Console:
         return "Console";
+    case ConfigLayer::Server:
+        return "Server";
     }
 
     return {};
@@ -62,8 +70,6 @@ StringView ConfigDiagnosticCodeName(ConfigDiagnosticCode code) noexcept {
         return "UnknownTarget";
     case ConfigDiagnosticCode::ConsoleReadOnly:
         return "ConsoleReadOnly";
-    case ConfigDiagnosticCode::NotQualityMember:
-        return "NotQualityMember";
     case ConfigDiagnosticCode::ValueOutOfRange:
         return "ValueOutOfRange";
     case ConfigDiagnosticCode::WeakWrite:
@@ -78,38 +84,29 @@ StringView ConfigDiagnosticCodeName(ConfigDiagnosticCode code) noexcept {
         return "BootValueIgnored";
     case ConfigDiagnosticCode::InvalidDeviceProfile:
         return "InvalidDeviceProfile";
+    case ConfigDiagnosticCode::Clamped:
+        return "Clamped";
+    case ConfigDiagnosticCode::InvalidEnum:
+        return "InvalidEnum";
+    case ConfigDiagnosticCode::BootSealed:
+        return "BootSealed";
+    case ConfigDiagnosticCode::LateBound:
+        return "LateBound";
+    case ConfigDiagnosticCode::UnresolvedName:
+        return "UnresolvedName";
+    case ConfigDiagnosticCode::ValidationFailed:
+        return "ValidationFailed";
+    case ConfigDiagnosticCode::UndefinedLevel:
+        return "UndefinedLevel";
+    case ConfigDiagnosticCode::GroupNoConverge:
+        return "GroupNoConverge";
+    case ConfigDiagnosticCode::GroupConflict:
+        return "GroupConflict";
+    case ConfigDiagnosticCode::QualityLowered:
+        return "QualityLowered";
     }
 
     return {};
-}
-
-bool IsConsoleSettingName(StringView name) noexcept {
-    usize segments = 0;
-    bool start = true;
-    for (const char c : name) {
-        if (c == '.') {
-            if (start) {
-                return false;
-            }
-
-            start = true;
-            continue;
-        }
-
-        const bool lower = c >= 'a' && c <= 'z';
-        const bool digit = c >= '0' && c <= '9';
-        if (start ? !lower : !(lower || digit || c == '_')) {
-            return false;
-        }
-
-        if (start) {
-            ++segments;
-        }
-
-        start = false;
-    }
-
-    return !start && segments >= 2;
 }
 
 ConfigDiagnostics::ConfigDiagnostics(Allocator& allocator) noexcept

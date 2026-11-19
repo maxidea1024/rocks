@@ -11,9 +11,9 @@
 // 표기(10.4절 표의 JSON 열): 객체 키는 필드 도구 이름이다. bool true·false / 정수 수(int64·uint64
 // 그대로) / float는 단정도 최단(JsonWriter::Float), double은 배정도 최단, 비유한 값은 문자열
 // "nan"·"inf"·"-inf" / enum 도구 이름 문자열 / Flags enum 이름 배열 ["A","B"](0은 []) / Guid·
-// AssetId·Digest256·String·Name 문자열 / ObjectRef·WeakRef·Soft·ClassRef 문자열(resolver·타입 도구
-// 이름), null은 null / Array·StaticArray·Set 배열 / Map 객체(키는 명령행 키 텍스트, 삽입 순서) /
-// Optional unset은 null / struct 객체.
+// AssetId·Digest256·String·Name 문자열 / ObjectRef·WeakObjectRef·Soft·ClassRef 문자열(resolver·타입
+// 도구 이름), null은 null / Array·StaticArray·Set 배열 / Map 객체(키는 명령행 키 텍스트, 삽입 순서)
+// / Optional unset은 null / struct 객체.
 namespace rocks::reflection_text {
 
 // target의 필드를 JSON 객체 하나로 writer에 쓴다(키 순서는 스키마 필드 순서, Map 항목·Set 원소는

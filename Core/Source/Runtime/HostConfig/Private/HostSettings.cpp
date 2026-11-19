@@ -320,6 +320,13 @@ Result<void> HostSettings::Initialize(const HostSettingsOptions& options) noexce
         step = options.registerSettings(*context_);
     }
 
+    // 품질 조합 검증은 기기 특성(아래에서 채운다)으로 묶음의 펼칠 등급을 낮춘다(CVar 11절).
+    if (step) {
+        qualityRules_ = options.qualityRules;
+        qualityBudgets_ = options.qualityBudgets;
+        step = context_->SetQualityValidation(qualityRules_, qualityBudgets_, &traits_);
+    }
+
     if (step) {
         stage = "device traits";
         // 메모리를 조회할 수 없는 플랫폼은 메모리 등급 없이 돈다(기록만 한다).
@@ -355,6 +362,15 @@ config::DeviceTraits& HostSettings::DeviceTraits() noexcept {
 
 Result<void> HostSettings::ApplyDeviceTraits() noexcept {
     config::ConfigContext& context = Context();
+    // 특성이 바뀌었으므로 다음 Sync가 품질 묶음의 펼칠 등급을 다시 정한다(프로필 적용 결과와
+    // 무관하게 먼저 한다).
+    if (auto validated = context.SetQualityValidation(qualityRules_, qualityBudgets_, &traits_);
+        !validated) {
+        Log::Error(LogHostConfig, "Quality validation could not be updated: {Error}",
+                   ErrorCodeName(validated.Error()));
+        return validated;
+    }
+
     auto applied = config::ApplyDeviceProfile(context, profileArgument_.View(), traits_, profile_);
     if (!applied) {
         Log::Error(LogHostConfig, "Device profile could not be applied: {Error}",
@@ -528,8 +544,17 @@ Result<void> HostSettings::CompleteStartup() noexcept {
     if (!completed) {
         Log::Error(LogHostConfig, "Config startup could not complete: {Error}",
                    ErrorCodeName(completed.Error()));
+        return completed;
     }
 
+    // 시작이 끝났는데 아무도 등록하지 않은 이름의 값은 오타일 수 있다(CVar 12절 — 경고만, 시작은
+    // 계속한다). 보고 자체가 할당 실패로 끝나도 기록만 하고 시작을 이어 간다(봉인은 끝났다).
+    if (auto unresolved = context.ReportUnresolved(); !unresolved) {
+        Log::Error(LogHostConfig, "Unresolved config names could not be reported: {Error}",
+                   ErrorCodeName(unresolved.Error()));
+    }
+
+    ReportWarnings();
     return completed;
 }
 

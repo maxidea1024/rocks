@@ -18,7 +18,7 @@
 
 ## 2. 소유권
 
-`Core/Memory/UniquePtr.h`와 `Core/Memory/SharedPtr.h`는 Rocks 할당기 계약(`Allocator`)을 따른다. 전역 `new`를 쓰지 않고, 할당기는 모든 포인터보다 오래 살아야 하며, 저장소 반환 실패는 누수를 숨기지 않고 Fatal이다. GC 객체 참조(`RootRef`/`WeakRef`)와는 별개이며 Object 시스템 객체에 쓰지 않는다.
+`Core/Memory/UniquePtr.h`와 `Core/Memory/SharedPtr.h`는 Rocks 할당기 계약(`Allocator`)을 따른다. 전역 `new`를 쓰지 않고, 할당기는 모든 포인터보다 오래 살아야 하며, 저장소 반환 실패는 누수를 숨기지 않고 Fatal이다. GC 객체 참조(`RootRef`/`WeakObjectRef`)와는 별개이며 Object 시스템 객체에 쓰지 않는다.
 
 ```cpp
 auto created = rocks::SharedPtr<Texture>::TryMake(allocator, width, height);

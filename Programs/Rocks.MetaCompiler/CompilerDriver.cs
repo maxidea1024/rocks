@@ -122,6 +122,8 @@ internal static class CompilerDriver
             bindsArguments.Add("-");
             await ResolveBindsAsync(declared, options.Module, options.Inputs.Count,
                 extra => ProcessRunner.RunAsync(new(compiler, bindsArguments, root, environment, ValidateGeneratedCode(unit + extra), TimeSpan.FromMinutes(2))));
+            // Binds enum 미러는 실제 enum의 열거자 목록(첫 실행의 AST)과 1:1이어야 한다(RMC2401).
+            parser.VerifyEnumMirrors(declared.Values);
             // 정적 배열 PROPERTY의 원소 형식도 같은 번역 단위에 탐침 변수를 붙인 Clang 실행으로 정규 철자를 얻는다(리플렉션 B9g —
             // StaticArrayProbe). 정적 배열이 없으면 실행하지 않는다.
             List<string> staticArguments = [.. arguments.Take(arguments.Count - 1)];
@@ -425,7 +427,7 @@ internal static class CompilerDriver
         if (found.Native)
         {
             return new MetadataException($"{found.Symbol}: ROCKS_NATIVE member '{found.Spelling}' holds a strong object reference ({found.StrongPath})", "RMC2205",
-                "Native members are not traced; store ObjectRef/RootRef/Object pointers in ROCKS_PROPERTY fields (ObjectRefArray, StructRefArray) or use WeakRef/ObjectHandle.").At(found.Site);
+                "Native members are not traced; store ObjectRef/RootRef/Object pointers in ROCKS_PROPERTY fields (ObjectRefArray, StructRefArray) or use WeakObjectRef/ObjectHandle.").At(found.Site);
         }
 
         // OrderedMap·OrderedSet(리플렉션 B9f2)의 키·값·원소가 강한 참조를 담으면 Map·Set 위치 규칙 RMC2305다(강한 참조 값은

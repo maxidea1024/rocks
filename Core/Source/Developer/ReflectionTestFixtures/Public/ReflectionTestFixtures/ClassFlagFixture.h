@@ -32,7 +32,7 @@ struct ClassFlagHolder final : Object {
     }
 
     ROCKS_PROPERTY() ObjectRef<Object> strong;
-    ROCKS_PROPERTY() WeakRef<Object> weak;
+    ROCKS_PROPERTY() WeakObjectRef<Object> weak;
     ROCKS_PROPERTY(Required) ObjectRef<Object> needed;
     ROCKS_PROPERTY() ClassRef<KindBase> kind;
     ROCKS_PROPERTY() Array<ClassRef<KindBase>> kinds;

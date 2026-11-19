@@ -139,9 +139,9 @@ enum class ValueKind : uint8 {
     Int16, // int16(short), wire I64(범위 검사)
     Name,  // rocks::Name(Core/Text/Name.h — 실행 중 pool 토큰), wire String(표시 문자열 — None은
            // 빈 문자열). 복원은 1단계 수집 → 2a intern(Object/NameField.h)
-    WeakObjectReference, // rocks::WeakRef<T>(Object/ObjectRefs.h — GC가 추적하지 않는다), wire는
-                         // 강한 참조와 같은 문맥 참조 wire(graph v2 U32 — 같은 그래프 안 노드만,
-                         // Docs/Design/ReflectionExtensions.ko.md 5.1절)
+    WeakObjectReference, // rocks::WeakObjectRef<T>(Object/ObjectRefs.h — GC가 추적하지 않는다),
+                         // wire는 강한 참조와 같은 문맥 참조 wire(graph v2 U32 — 같은 그래프 안
+                         // 노드만, Docs/Design/ReflectionExtensions.ko.md 5.1절)
     ClassReference,      // rocks::ClassRef<Base>(Object/ClassRef.h — 클래스 TypeId, 0 = null), wire
                          // Guid. value.type은 Base 클래스 ID(필수)다(같은 문서 5.2절)
     // rocks::Optional<T>(Core/Optional.h — 클래스 필드·struct 멤버만), wire Optional(present byte +

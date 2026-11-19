@@ -2,6 +2,7 @@
 
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
+#include <Platform/Memory.h>
 
 namespace rocks::render::testing {
 
@@ -9,8 +10,9 @@ using namespace rocks::graphics;
 
 RecordingDevice::RecordingDevice(Allocator& allocator) noexcept
     : timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics), buffers_(allocator),
-      textures_(allocator), transitions_(allocator), splits_(allocator), pendingSplits_(allocator),
-      pipelines_(allocator), swapChains_(allocator), retired_(allocator), readbacks_(allocator),
+      allocator_(allocator), textures_(allocator), transitions_(allocator), splits_(allocator),
+      pendingSplits_(allocator), pipelines_(allocator), swapChains_(allocator), retired_(allocator),
+      readbacks_(allocator),
       staging_(allocator, stagingSource_, graphics::DefaultStagingBudgetBytes),
       timestamps_(allocator), timestampPool_(allocator) {
     stagingSource_.allocator = &allocator;
@@ -311,17 +313,60 @@ Result<TextureHandle> RecordingDevice::CreateTexture(const TextureDesc& desc,
 
     (void)pixels;
     TextureState state;
-    state.mipLevels = desc.mipLevels == 0 || desc.mipLevels > MaxTrackedMips ? 1u : desc.mipLevels;
-    for (ResourceAccess& access : state.states) {
-        access = ResourceAccess::SrvGraphics;
+    const uint32 mipLevels =
+        desc.mipLevels == 0 || desc.mipLevels > MaxTrackedMips ? 1u : desc.mipLevels;
+    const uint32 slices = TextureSliceCount(desc) == 0 ? 1u : TextureSliceCount(desc);
+    state.dimension = desc.dimension;
+    auto reset = state.states.Reset(allocator_, mipLevels, slices, ResourceAccess::SrvGraphics);
+    if (!reset) {
+        return Result<TextureHandle>::Failure(reset.Error());
     }
 
-    auto added = textures_.TryAdd(state);
+    auto added = textures_.TryAdd(Move(state));
     if (!added) {
         return Result<TextureHandle>::Failure(added.Error());
     }
 
     Record(Op::CreateTexture, (static_cast<uint64>(desc.width) << 32) | desc.height);
+    return Result<TextureHandle>::Success(TextureHandle{added.Value()});
+}
+
+Result<TextureHandle> RecordingDevice::CreateTextureView(TextureHandle texture,
+                                                         const TextureViewDesc& desc) noexcept {
+    auto owner = ownership_.Check();
+    if (!owner) {
+        return Result<TextureHandle>::Failure(owner.Error());
+    }
+
+    const TextureState* source = textures_.Find(texture.slot);
+    if (source == nullptr || source->view) {
+        return Result<TextureHandle>::Failure(ErrorCode::StaleHandle);
+    }
+
+    TextureSubresources shape;
+    shape.mipLevels = source->states.MipLevels();
+    shape.slices = source->states.Slices();
+    // 기록 장치는 텍스처 용도를 기억하지 않으므로 쓰기 view는 Storage로 본다.
+    const TextureUsage usage =
+        desc.access == ViewAccess::ReadWrite ? TextureUsage::Storage : TextureUsage::Sampled;
+    auto range = ResolveTextureViewRange(source->dimension, usage, shape, desc);
+    if (!range) {
+        return Result<TextureHandle>::Failure(range.Error());
+    }
+
+    TextureState state;
+    state.dimension = source->dimension;
+    state.view = true;
+    state.source = texture.slot;
+    state.range = range.Value();
+    state.access = desc.access;
+    auto added = textures_.TryAdd(Move(state));
+    if (!added) {
+        return Result<TextureHandle>::Failure(added.Error());
+    }
+
+    Record(Op::CreateTextureView, (static_cast<uint64>(range.Value().firstMip) << ViewOpMipShift) |
+                                      range.Value().mipCount);
     return Result<TextureHandle>::Success(TextureHandle{added.Value()});
 }
 
@@ -331,7 +376,11 @@ Result<PipelineHandle> RecordingDevice::CreatePipeline(const PipelineDesc& desc)
         return Result<PipelineHandle>::Failure(owner.Error());
     }
 
-    auto added = pipelines_.TryAdd(uint8{0});
+    if (!graphics::IsValidDrawConstantBytes(desc.drawConstantBytes)) {
+        return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto added = pipelines_.TryAdd(desc.drawConstantBytes);
     if (!added) {
         return Result<PipelineHandle>::Failure(added.Error());
     }
@@ -365,7 +414,6 @@ Result<CommandContext*> RecordingDevice::BeginFrame(SwapChainHandle swapChain,
 
 // 기록 장치는 색 attachment 하나(첫 색)만 기록한다(렌더 그래프 시험 범위).
 Result<CommandContext*> RecordingDevice::BeginPass(const PassDesc& pass) noexcept {
-    const TextureHandle target = pass.colorCount != 0 ? pass.colors[0].texture : TextureHandle{};
     auto owner = ownership_.Check();
     if (!owner) {
         return Result<CommandContext*>::Failure(owner.Error());
@@ -375,13 +423,40 @@ Result<CommandContext*> RecordingDevice::BeginPass(const PassDesc& pass) noexcep
         return Result<CommandContext*>::Failure(ErrorCode::Destroyed);
     }
 
-    if (recording_ || !textures_.IsValid(target.slot)) {
-        return Result<CommandContext*>::Failure(recording_ ? ErrorCode::Busy
-                                                           : ErrorCode::StaleHandle);
+    if (recording_) {
+        return Result<CommandContext*>::Failure(ErrorCode::Busy);
     }
 
-    // attachment 전이다(Device.h Transition 주석).
-    textures_.Find(target.slot)->states[0] = ResourceAccess::RenderTarget;
+    // attachment는 살아 있는 텍스처여야 한다(attachment 없는 패스는 compute·복사 기록이다).
+    for (uint32 index = 0; index < pass.colorCount; ++index) {
+        if (!textures_.IsValid(pass.colors[index].texture.slot)) {
+            return Result<CommandContext*>::Failure(ErrorCode::StaleHandle);
+        }
+    }
+
+    if (!pass.depth.texture.IsNull() && !textures_.IsValid(pass.depth.texture.slot)) {
+        return Result<CommandContext*>::Failure(ErrorCode::StaleHandle);
+    }
+
+    // attachment 전이다(Device.h Transition 주석): 그 mip·slice의 subresource 하나만 바꾼다.
+    const auto attach = [this](TextureHandle texture, uint32 mip, uint32 slice,
+                               ResourceAccess access) noexcept {
+        TextureState* state = textures_.Find(texture.slot);
+        const ResolvedSubresourceRange used = AttachmentSubresource(state->dimension, mip, slice);
+        if (used.firstMip < state->states.MipLevels() && used.firstSlice < state->states.Slices()) {
+            state->states.At(used.firstMip, used.firstSlice) = access;
+        }
+    };
+    for (uint32 index = 0; index < pass.colorCount; ++index) {
+        attach(pass.colors[index].texture, pass.colors[index].mipLevel, pass.colors[index].slice,
+               ResourceAccess::RenderTarget);
+    }
+
+    if (!pass.depth.texture.IsNull()) {
+        attach(pass.depth.texture, pass.depth.mipLevel, pass.depth.slice,
+               pass.depth.readOnly ? ResourceAccess::DepthRead : ResourceAccess::DepthWrite);
+    }
+
     recording_ = true;
     Record(Op::BeginOffscreen);
     return Result<CommandContext*>::Success(this);
@@ -494,6 +569,38 @@ RecordingDevice::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept
 void RecordingDevice::SetWritableBufferView(uint32 slot, BufferViewHandle view) noexcept {
     (void)slot;
     (void)view;
+}
+
+void RecordingDevice::SetWritableTexture(uint32 slot, TextureHandle view) noexcept {
+    (void)slot;
+    const TextureState* state = textures_.Find(view.slot);
+    if (state == nullptr || !state->view || state->access != ViewAccess::ReadWrite) {
+        ++validationErrors_;
+        Record(Op::SetWritableTexture, NumericLimits<uint32>::Max());
+        return;
+    }
+
+    CheckViewStates(*state, UavAccessMask);
+    Record(Op::SetWritableTexture, state->range.firstMip);
+}
+
+void RecordingDevice::CheckViewStates(const TextureState& view, ResourceAccess allowed) noexcept {
+    const TextureState* source = textures_.Find(view.source);
+    if (source == nullptr) {
+        ++validationErrors_;
+        return;
+    }
+
+    for (uint32 slice = view.range.firstSlice;
+         slice < view.range.firstSlice + view.range.sliceCount; ++slice) {
+        for (uint32 mip = view.range.firstMip; mip < view.range.firstMip + view.range.mipCount;
+             ++mip) {
+            if (!HasAnyAccess(source->states.At(mip, slice), allowed)) {
+                ++validationErrors_;
+                return;
+            }
+        }
+    }
 }
 
 void RecordingDevice::DrawIndirect(BufferHandle arguments, uint64 offset) noexcept {
@@ -690,13 +797,25 @@ uint64 RecordingDevice::ValidationErrorCount() const noexcept {
     return validationErrors_;
 }
 
-ResourceAccess RecordingDevice::TextureAccess(TextureHandle texture, uint32 mip) const noexcept {
+Result<graphics::TextureSubresources>
+RecordingDevice::GetTextureSubresources(TextureHandle texture) const noexcept {
     const TextureState* state = textures_.Find(texture.slot);
-    if (state == nullptr || mip >= state->mipLevels) {
+    if (state == nullptr) {
+        return Result<graphics::TextureSubresources>::Failure(ErrorCode::StaleHandle);
+    }
+
+    return Result<graphics::TextureSubresources>::Success(
+        graphics::TextureSubresources{state->states.MipLevels(), state->states.Slices()});
+}
+
+ResourceAccess RecordingDevice::TextureAccess(TextureHandle texture, uint32 mip,
+                                              uint32 slice) const noexcept {
+    const TextureState* state = textures_.Find(texture.slot);
+    if (state == nullptr || mip >= state->states.MipLevels() || slice >= state->states.Slices()) {
         return ResourceAccess::Unknown;
     }
 
-    return state->states[mip];
+    return state->states.At(mip, slice);
 }
 
 ResourceAccess RecordingDevice::BufferAccess(BufferHandle buffer) const noexcept {
@@ -722,7 +841,7 @@ void RecordingDevice::Transition(Span<const ResourceTransition> transitions) noe
 
 namespace {
 
-// 두 전이가 같은 자원의 겹치는 subresource를 가리키는지다.
+// 두 전이가 같은 자원의 겹치는 subresource(mip·slice 모두)를 가리키는지다.
 bool Overlaps(const ResourceTransition& left, const ResourceTransition& right) noexcept {
     if (!left.buffer.IsNull() || !right.buffer.IsNull()) {
         return left.buffer == right.buffer && !left.buffer.IsNull();
@@ -732,9 +851,7 @@ bool Overlaps(const ResourceTransition& left, const ResourceTransition& right) n
         return false;
     }
 
-    const uint64 leftEnd = uint64{left.range.firstMip} + left.range.mipCount;
-    const uint64 rightEnd = uint64{right.range.firstMip} + right.range.mipCount;
-    return left.range.firstMip < rightEnd && right.range.firstMip < leftEnd;
+    return SubresourceRangesOverlap(left.range, right.range);
 }
 
 } // namespace
@@ -849,19 +966,24 @@ void RecordingDevice::ApplyTransitions(Span<const ResourceTransition> transition
             call.index = transition.buffer.slot.index;
         } else {
             TextureState* state = textures_.Find(transition.texture.slot);
-            if (state == nullptr || transition.range.firstMip >= state->mipLevels) {
+            const ResolvedSubresourceRange range =
+                state == nullptr
+                    ? ResolvedSubresourceRange{}
+                    : ResolveSubresourceRange(transition.range, state->states.MipLevels(),
+                                              state->states.Slices());
+            if (range.IsEmpty()) {
                 ++ignoredDraws_;
                 continue;
             }
 
-            const uint32 available = state->mipLevels - transition.range.firstMip;
-            const uint32 count =
-                transition.range.mipCount < available ? transition.range.mipCount : available;
-            for (uint32 mip = transition.range.firstMip; mip < transition.range.firstMip + count;
-                 ++mip) {
-                CheckDeclared(state->states[mip], transition.before);
-                if (transition.after != ResourceAccess::Discard) {
-                    state->states[mip] = transition.after;
+            for (uint32 slice = range.firstSlice; slice < range.firstSlice + range.sliceCount;
+                 ++slice) {
+                for (uint32 mip = range.firstMip; mip < range.firstMip + range.mipCount; ++mip) {
+                    ResourceAccess& tracked = state->states.At(mip, slice);
+                    CheckDeclared(tracked, transition.before);
+                    if (transition.after != ResourceAccess::Discard) {
+                        tracked = transition.after;
+                    }
                 }
             }
 
@@ -882,6 +1004,7 @@ usize RecordingDevice::PendingRetireCount() const noexcept {
 }
 
 void RecordingDevice::SetPipeline(PipelineHandle pipeline) noexcept {
+    boundPipeline_ = pipelines_.IsValid(pipeline.slot) ? pipeline : PipelineHandle{};
     Record(Op::SetPipeline, pipelines_.IsValid(pipeline.slot) ? 1u : 0u);
 }
 
@@ -904,9 +1027,16 @@ void RecordingDevice::SetIndexBuffer(BufferHandle buffer, IndexFormat format,
 
 void RecordingDevice::SetTexture(TextureHandle texture) noexcept {
     const TextureState* state = textures_.Find(texture.slot);
-    if (state != nullptr) {
-        for (uint32 mip = 0; mip < state->mipLevels; ++mip) {
-            if (!HasAnyAccess(state->states[mip], ResourceAccess::SrvGraphics)) {
+    // view는 그 범위만 셰이더 읽기(그래픽·compute) 상태여야 한다.
+    if (state != nullptr && state->view) {
+        if (state->access != ViewAccess::Read) {
+            ++validationErrors_;
+        } else {
+            CheckViewStates(*state, ResourceAccess::SrvGraphics | ResourceAccess::SrvCompute);
+        }
+    } else if (state != nullptr) {
+        for (uint32 index = 0; index < state->states.Count(); ++index) {
+            if (!HasAnyAccess(state->states[index], ResourceAccess::SrvGraphics)) {
                 ++validationErrors_;
                 break;
             }
@@ -916,8 +1046,21 @@ void RecordingDevice::SetTexture(TextureHandle texture) noexcept {
     Record(Op::SetTexture, state != nullptr ? 1u : 0u);
 }
 
-void RecordingDevice::SetConstants(const DrawConstants& constants) noexcept {
-    Record(Op::SetConstants, static_cast<uint64>(constants.color[0] * 255.0f));
+Result<void> RecordingDevice::SetDrawConstants(Span<const uint8> bytes) noexcept {
+    // 실제 장치와 같은 계약이다: 묶인 파이프라인이 있고 크기가 그 선언과 같아야 한다.
+    const uint32* declared = recording_ ? pipelines_.Find(boundPipeline_.slot) : nullptr;
+    if (declared == nullptr || bytes.Size() != *declared) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    float first = 0.0f;
+    if (bytes.Size() >= sizeof(first)) {
+        platform::MemoryCopy(&first, bytes.Data(), sizeof(first));
+    }
+
+    Record(Op::SetDrawConstants,
+           (static_cast<uint64>(bytes.Size()) << 32) | static_cast<uint32>(first * 255.0f));
+    return Result<void>::Success();
 }
 
 void RecordingDevice::Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept {

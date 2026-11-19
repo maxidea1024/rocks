@@ -14,6 +14,7 @@
 #include <Graphics/ResourceAccess.h>
 #include <Graphics/ShaderSourceCompiler.h>
 #include <Graphics/SplitTransitionTracker.h>
+#include <Graphics/SubresourceStates.h>
 #include <Graphics/StagingPool.h>
 #include <Graphics/TimestampRing.h>
 #include <Graphics/UploadRing.h>
@@ -57,7 +58,7 @@ inline constexpr uint32 MaxSplitEventsPerRecord = 64;
 inline constexpr uint32 MaxPipelineBindings = 2 + 2 * MaxDrawBufferViews;
 // framebuffer 하나의 attachment 수 상한이다(색 MaxColorTargets + 깊이 1).
 inline constexpr uint32 MaxPassAttachments = MaxColorTargets + 1;
-// 그리기 상수 push constant 범위의 단계다(모든 파이프라인 layout이 같은 범위를 둬 서로 호환된다).
+// 그리기별 상수 push constant 범위의 단계다(모든 파이프라인 layout이 같은 범위를 둬 서로 호환된다).
 inline constexpr VkShaderStageFlags ConstantStages =
     VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
 inline constexpr uint32 RequestedSwapChainImages = 3;
@@ -66,7 +67,9 @@ inline constexpr uint32 MaxSwapChainImages = 8;
 inline constexpr uint64 UploadAlignment = 16;
 // 정점 버퍼 offset 정렬(속성 성분 크기의 최댓값)이다.
 inline constexpr uint64 VertexOffsetAlignment = 4;
-inline constexpr uint32 ConstantBytes = sizeof(DrawConstants);
+// 그리기별 상수 push constant 범위다. 파이프라인 크기와 무관하게 계약 최대를 둬 모든 layout의
+// 범위가 같다(파이프라인을 바꿔도 descriptor set·상수가 유지된다, RenderBase 4.4절 GX4 SX2 구현).
+inline constexpr uint32 ConstantBytes = MaxDrawConstantBytes;
 // 소멸 때까지 놓지 않을 회수 항목의 fence 값이다.
 inline constexpr uint64 RetainUntilDestructionFence = NumericLimits<uint64>::Max();
 // 한 업로드 묶음 안에서 겹침을 추적하는 버퍼 쓰기 구간 수다(넘치면 barrier를 두고 비운다).
@@ -114,21 +117,37 @@ struct BufferViewRecord {
 struct TextureRecord {
     VkImage image = VK_NULL_HANDLE;
     VkImageView view = VK_NULL_HANDLE;
-    // 깊이·스텐실 attachment용 view(깊이와 스텐실 aspect 모두)다. 기본 view는 깊이 aspect만
-    // 읽으므로 스텐실 plane이 있는 깊이 타깃에만 따로 만든다. 없으면 view를 attachment로 쓴다.
+    // attachment용 view(이미지 전체 aspect, 항등 성분 대응)다. 기본 view는 깊이 aspect만 읽거나
+    // swizzle이 걸려 있을 수 있으므로 스텐실 plane이 있는 깊이 타깃과 성분 대응이 항등이 아닌
+    // 렌더 타깃에만 따로 만든다. 없으면 view를 attachment로 쓴다.
     VkImageView attachmentView = VK_NULL_HANDLE;
     MemoryAllocation memory;
+    TextureDimension dimension = TextureDimension::Texture2D;
     uint32 width = 0;
     uint32 height = 0;
+    // 3D 깊이다(다른 차원은 1).
+    uint32 depth = 1;
     uint32 mipLevels = 1;
+    // subresource slice 수(TextureSliceCount)이며 이미지 array layer 수(3D는 1)와 같다.
+    uint32 slices = 1;
     // view(CreateTextureView)면 view가 읽는 형식, 아니면 텍스처 형식이다.
     PixelFormat format = PixelFormat::Unknown;
     bool renderTarget = false;
     bool depthTarget = false;
+    // 만든 용도다(view는 원 텍스처의 용도, ResolveTextureViewRange).
+    TextureUsage usage = TextureUsage::Sampled;
+    // MSAA 표본 수다(TextureDesc::sampleCount, view는 원 텍스처의 값).
+    uint32 sampleCount = 1;
+    // view가 가리키는 mip·slice 범위다(view가 아니면 전체). 묶기 전이는 이 범위만 바꾼다.
+    ResolvedSubresourceRange viewRange;
+    // 쓰기 view(ViewAccess::ReadWrite)다. SetWritableTexture로만 묶는다(storage image, GENERAL).
+    bool writable = false;
     // 이미지 전체의 aspect다(barrier, TextureFormatInfo::aspect).
     VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
     // 묶을 때 쓰는 샘플러다(장치 수명 동안 산다). view도 원 텍스처의 샘플러를 쓴다.
     VkSampler sampler = VK_NULL_HANDLE;
+    // 샘플러가 깊이 비교 샘플러다(view는 깊이 plane만 읽을 수 있다).
+    bool comparison = false;
     // 다른 텍스처의 이미지를 공유하는 view다. 이미지·메모리는 원 텍스처 기록이 쥐고 상태도 원
     // 기록(source)이 추적한다. 업로드·readback·그리기 대상이 될 수 없다.
     bool isView = false;
@@ -137,15 +156,27 @@ struct TextureRecord {
     // 마지막 view를 놓을 때 함께 놓는다(상태 추적의 주인을 하나로 유지한다).
     uint32 viewCount = 0;
     bool retirePending = false;
-    // mip마다 장치가 추적한 접근 상태다(RenderBase GX5). committed는 제출한 프레임 기록 끝의 상태,
-    // current는 기록 중인 프레임 안의 상태다(기록 중이 아니면 같다). 업로드 기록은 프레임 기록보다
-    // 먼저 실행되므로 committed에서 바꿨다가 되돌린다(상태 중립). layout은 상태에서
-    // 정한다(LayoutFor).
-    ResourceAccess committed[MaxMipLevels] = {};
-    ResourceAccess current[MaxMipLevels] = {};
+    // subresource(mip × layer)마다 장치가 추적한 접근 상태다(RenderBase GX5). committed는 제출한
+    // 프레임 기록 끝의 상태, current는 기록 중인 프레임 안의 상태다(기록 중이 아니면 같다). 업로드
+    // 기록은 프레임 기록보다 먼저 실행되므로 committed에서 바꿨다가 되돌린다(상태 중립). layout은
+    // 상태에서 정한다(LayoutFor). view 기록은 비어 있다(원 기록이 추적한다).
+    SubresourceStates<ResourceAccess> committed;
+    SubresourceStates<ResourceAccess> current;
     // 기록 중인 프레임이 current를 바꿨다(touchedTextures_에 있다).
     bool touched = false;
 };
+
+// mip level의 깊이 면 수다(3D만 1보다 크다).
+inline uint32 MipDepth(const TextureRecord& record, uint32 level) noexcept {
+    return record.dimension == TextureDimension::Texture3D ? MipExtent(record.depth, level) : 1u;
+}
+
+// mip level 하나의 데이터 byte다(모든 layer·깊이 면, TextureMipBytes와 같은 값).
+inline uint64 MipBytes(const TextureRecord& record, uint32 level) noexcept {
+    return PixelFormatImageBytes(record.format, MipExtent(record.width, level),
+                                 MipExtent(record.height, level)) *
+           MipDepth(record, level) * record.slices;
+}
 
 // 파이프라인 descriptor binding 하나가 읽는 것이다(PipelineDesc 고정 배치).
 enum class BindingSource : uint8 {
@@ -156,7 +187,9 @@ enum class BindingSource : uint8 {
     // SetBufferView slot(t1–t4)
     BufferView,
     // SetWritableBufferView slot(compute u0–u3)
-    WritableBufferView
+    WritableBufferView,
+    // SetWritableTexture slot(compute u0–u3의 storage image)
+    WritableTexture
 };
 
 struct PipelineBinding {
@@ -177,6 +210,8 @@ struct PipelineRecord {
     VkDescriptorSetLayout setLayouts[2] = {};
     PipelineBinding bindings[MaxPipelineBindings] = {};
     uint32 bindingCount = 0;
+    // compute가 텍스처(storage image)로 쓰는 쓰기 slot 비트다(SetWritableTexture가 묶여야 한다).
+    uint32 writeTextures = 0;
     // binding이 있는 set 비트다.
     uint32 setMask = 0;
     DrawBufferSlots bufferSlots;
@@ -184,6 +219,8 @@ struct PipelineRecord {
     DrawBufferSlots writeSlots;
     uint32 strides[MaxVertexStreams] = {};
     uint32 streamMask = 0;
+    // 선언한 그리기별 상수 byte 수다(SetDrawConstants 크기 검사, BuildPipelineLayout 대조).
+    uint32 drawConstantBytes = 0;
     bool compute = false;
     // 깊이·스텐실을 쓴다(읽기 전용 깊이 attachment에서 그리기를 거른다).
     bool writesDepthStencil = false;
@@ -202,6 +239,8 @@ struct RenderPassKey {
     VkAttachmentLoadOp stencilLoad = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     VkAttachmentStoreOp stencilStore = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     bool depthReadOnly = false;
+    // 모든 attachment의 표본 수다(render pass 호환 조건).
+    VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
 };
 
 bool SameRenderPassKey(const RenderPassKey& left, const RenderPassKey& right) noexcept;
@@ -213,6 +252,16 @@ struct FramebufferEntry {
     uint32 width = 0;
     uint32 height = 0;
     VkFramebuffer framebuffer = VK_NULL_HANDLE;
+};
+
+// attachment (이미지, mip, layer) 하나의 2D view다(텍스처 GX2 C부). 2D 텍스처의 mip 0은 텍스처의
+// 기본·attachment view를 그대로 쓰고 이 표에 넣지 않는다. 3D는 layer가 깊이 면이다
+// (2D_ARRAY_COMPATIBLE 이미지). 텍스처를 놓을 때 그 view의 framebuffer와 함께 회수한다.
+struct AttachmentViewEntry {
+    VkImage image = VK_NULL_HANDLE;
+    uint32 mipLevel = 0;
+    uint32 layer = 0;
+    VkImageView view = VK_NULL_HANDLE;
 };
 
 // 창 출력 하나다. 패스는 중간 이미지(target)에 그리고 EndFrame이 swapchain 이미지로 blit한다.
@@ -391,6 +440,8 @@ public:
     PixelFormatCaps GetPixelFormatCaps(PixelFormat format) const noexcept override;
     Result<TextureHandle> CreateTextureView(TextureHandle texture,
                                             const TextureViewDesc& desc) noexcept override;
+    Result<TextureSubresources>
+    GetTextureSubresources(TextureHandle texture) const noexcept override;
     Result<void> ReadTexture(TextureHandle texture, uint32 mipLevel, uint32 plane,
                              Span<uint8> out) noexcept override;
     Result<PipelineHandle> CreatePipeline(const PipelineDesc& desc) noexcept override;
@@ -462,7 +513,7 @@ private:
     SplitTransition BeginTransitions(Span<const ResourceTransition> transitions) noexcept override;
     void EndTransitions(SplitTransition split,
                         Span<const ResourceTransition> transitions) noexcept override;
-    void SetConstants(const DrawConstants& constants) noexcept override;
+    Result<void> SetDrawConstants(Span<const uint8> bytes) noexcept override;
     void Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept override;
     void DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept override;
     Result<void> CopyPassTarget(TextureHandle destination) noexcept override;
@@ -471,6 +522,7 @@ private:
     void PopMarker() noexcept override;
     // --- GX3·GX4(VulkanCompute.cpp) ---
     void SetWritableBufferView(uint32 slot, BufferViewHandle view) noexcept override;
+    void SetWritableTexture(uint32 slot, TextureHandle view) noexcept override;
     void DrawIndirect(BufferHandle arguments, uint64 offset) noexcept override;
     void DrawIndexedIndirect(BufferHandle arguments, uint64 offset) noexcept override;
     void Dispatch(uint32 groupCountX, uint32 groupCountY, uint32 groupCountZ) noexcept override;
@@ -504,6 +556,17 @@ private:
         bool depthReadOnly = false;
         RenderPassKey key;
         VkClearValue clears[MaxPassAttachments] = {};
+        // 색 attachment마다 패스 끝에 resolve할 대상이다(ColorAttachment::resolveTarget).
+        TextureHandle resolves[MaxColorTargets];
+        // attachment 표본 수다(1이면 MSAA가 아니다).
+        uint32 sampleCount = 1;
+        // attachment마다 붙인 mip·slice와 resolve 대상의 mip·slice다(텍스처 GX2 C부).
+        uint32 colorMips[MaxColorTargets] = {};
+        uint32 colorSlices[MaxColorTargets] = {};
+        uint32 resolveMips[MaxColorTargets] = {};
+        uint32 resolveSlices[MaxColorTargets] = {};
+        uint32 depthMip = 0;
+        uint32 depthSlice = 0;
     };
 
     struct BoundVertexBuffer {
@@ -573,7 +636,8 @@ private:
     // 형식 표에 있는 형식마다 optimal tiling 기능을 물어 능력을 정한다(장치 생성 때 한 번).
     void QueryFormatCaps() noexcept;
     // format으로 만드는 이미지의 usage·flags다(QueryFormatCaps와 CreateTexture가 같은 값을 쓴다).
-    VkImageUsageFlags ImageUsageFor(PixelFormat format, bool renderTarget) const noexcept;
+    VkImageUsageFlags ImageUsageFor(PixelFormat format, bool renderTarget,
+                                    bool storage = false) const noexcept;
     VkImageCreateFlags ImageFlagsFor(PixelFormat format) const noexcept;
     // 그 usage·flags로 2D 이미지를 만들 수 있는지와 mip 사슬 지원을 묻는다.
     bool ImageSupported(VkFormat format, VkImageUsageFlags usage, VkImageCreateFlags flags,
@@ -622,12 +686,18 @@ private:
     Result<void> MatchVertexInputs(const CompiledShader& vertex,
                                    const VertexLayout& layout) noexcept;
     // 단계들의 리플렉션을 고정 배치(PipelineDesc·ComputePipelineDesc)와 대조하고 set
-    // layout·파이프라인 layout·binding 표를 record에 만든다. compute면 pixel은 null이다. 실패하면
+    // layout·파이프라인 layout·binding 표를 record에 만든다. 단계의 push constant 블록이
+    // record.drawConstantBytes보다 크면 InvalidArgument다. compute면 pixel은 null이다. 실패하면
     // 만든 객체를 파괴한다.
     Result<void> BuildPipelineLayout(const CompiledShader& first, const CompiledShader* pixel,
                                      bool compute, PipelineRecord& record) noexcept;
     void DestroyPipelineLayout(PipelineRecord& record) noexcept;
     Result<void> Reject(const char* message) noexcept;
+    // 패스 끝 MSAA resolve다(EndFrame, render pass를 닫은 뒤, 잠금 안).
+    void ResolveAttachments() noexcept;
+    // SetDrawConstants 거부(묶인 파이프라인 없음, 크기가 선언과 다름)의 InvalidArgument다.
+    Result<void> RejectDrawConstantSize(bool pipelineBound, usize bytes,
+                                        uint32 drawConstantBytes) noexcept;
     Result<VkShaderModule> CreateShaderModule(const CompiledShader& shader) noexcept;
 
     // --- VulkanCommands.cpp ---
@@ -648,6 +718,14 @@ private:
     bool AttachmentsReady() const noexcept;
     // 텍스처가 지금 패스의 attachment인지다.
     bool IsPassAttachment(SlotHandle slot) const noexcept;
+    // range가 지금 패스 attachment의 subresource와 겹치는지다(SetTexture 암묵 전이 판단).
+    bool OverlapsPassAttachment(SlotHandle slot,
+                                const ResolvedSubresourceRange& range) const noexcept;
+    // attachment (mip, slice)의 2D view다(attachmentViews_, 없으면 만든다. 잠금 안).
+    Result<VkImageView> AttachmentViewFor(const TextureRecord& record, uint32 mipLevel,
+                                          uint32 slice) noexcept;
+    // image의 attachment view와 그 framebuffer를 회수 대기로 넘긴다(잠금 안).
+    void RetireAttachmentViews(VkImage image) noexcept;
 
     // --- VulkanCompute.cpp ---
     // 그리기 직전 조건(파이프라인 종류·attachment·stream·view·읽기 전용 깊이)을 보고 descriptor를
@@ -669,13 +747,27 @@ private:
     // --- VulkanAccess.cpp(GX5 명시 접근 상태) ---
     // image mip 구간의 접근 상태 from → to barrier를 buffer에 기록한다. 같은 상태의 읽기는
     // 건너뛰고, uavOrder면 같은 UAV 상태 사이에도 쓰기 순서 barrier를 낸다. 기록했는지를 돌려준다.
+    // layer 구간 [firstLayer, firstLayer + layerCount)도 함께 받는다.
     bool AccessBarrier(VkCommandBuffer buffer, VkImage image, uint32 firstMip, uint32 mipCount,
                        ResourceAccess from, ResourceAccess to, bool uavOrder,
-                       VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT) noexcept;
-    // 기록 중 프레임에서 텍스처 mip [first, first + count)를 after로 바꾼다(잠금 안). barrier가
+                       VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT, uint32 firstLayer = 0,
+                       uint32 layerCount = 1) noexcept;
+    // states의 mip 하나에서 같은 상태가 이어지는 layer 구간마다 from(그 상태) → to barrier를 낸다
+    // (업로드·readback 기록이 mip 하나의 모든 layer를 옮길 때). toResting이면 거꾸로 to → 그
+    // 상태다.
+    void MipLayerBarriers(VkCommandBuffer buffer, const TextureRecord& record,
+                          const SubresourceStates<ResourceAccess>& states, uint32 mipLevel,
+                          ResourceAccess to, bool toResting) noexcept;
+    // 기록 중 프레임에서 텍스처 subresource 범위(mip × layer)를 after로 바꾼다(잠금 안). barrier가
     // 필요하면 열린 render pass를 먼저 닫는다(호출자가 ResumeRenderPass로 다시 연다).
-    void TrackTransition(TextureRecord& record, SlotHandle slot, uint32 first, uint32 count,
-                         ResourceAccess after, bool uavOrder) noexcept;
+    void TrackTransition(TextureRecord& record, SlotHandle slot,
+                         const ResolvedSubresourceRange& range, ResourceAccess after,
+                         bool uavOrder) noexcept;
+    // 범위를 (같은 상태 열의 layer 구간) × (같은 상태의 mip 구간) 직사각형으로 나눠 emit(firstMip,
+    // mipCount, firstLayer, layerCount, from)을 부른다(barrier 수를 줄인다).
+    template <class Emit>
+    void ForEachStateRun(const TextureRecord& record, const ResolvedSubresourceRange& range,
+                         Emit&& emit) noexcept;
     // 프레임 기록을 끝낸다. 제출했으면 current를 committed로, 아니면 committed로 되돌린다.
     void SettleTracking(bool executed) noexcept;
     void SuspendRenderPass() noexcept;
@@ -684,7 +776,7 @@ private:
     // 텍스처 전이 하나를 해석한다: view면 원 텍스처, 범위, usage 검사, before 대조(검증). 무시할
     // 전이(모르는 handle·범위 밖·usage 밖·Discard)면 null이다(무시 계수는 이 함수가 올린다).
     TextureRecord* ResolveTextureTransition(const ResourceTransition& transition, SlotHandle& slot,
-                                            uint32& first, uint32& count) noexcept;
+                                            ResolvedSubresourceRange& range) noexcept;
     // 기록 중 프레임이 상태를 바꾼 텍스처로 표시한다.
     void MarkTouched(TextureRecord& record, SlotHandle slot) noexcept;
     // 지금 기록의 분리 전이 event 하나를 준다(없으면 만든다). 상한이면 null이다.
@@ -813,6 +905,9 @@ private:
     uint32 samplerCount_ = 0;
     Array<RenderPassEntry> renderPasses_;
     Array<FramebufferEntry> framebuffers_;
+    Array<AttachmentViewEntry> attachmentViews_;
+    // 2D_ARRAY_COMPATIBLE로 만든 3D 렌더 타깃 이미지다(barrier layer 수를 REMAINING으로 둔다).
+    Array<VkImage> volumeAttachmentImages_;
     VkDescriptorSetLayout emptySetLayout_ = VK_NULL_HANDLE;
     // 공용 layout(두 set 모두 빈 layout + push constant)이다. 그리기 상수를 올릴 때 쓴다.
     VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
@@ -850,6 +945,8 @@ private:
     TextureHandle boundTexture_;
     BufferViewHandle boundViews_[MaxDrawBufferViews];
     BufferViewHandle boundWriteViews_[MaxDrawBufferViews];
+    // compute 쓰기 slot에 묶인 텍스처 쓰기 view다(버퍼 view와 같은 slot 공간, 하나만 남는다).
+    TextureHandle boundWriteTextures_[MaxDrawBufferViews];
     bool descriptorsDirty_ = true;
     // 프레임 descriptor pool이 바닥난 횟수다(첫 번째만 경고 로그).
     uint64 descriptorExhaustions_ = 0;

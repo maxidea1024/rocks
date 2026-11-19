@@ -79,7 +79,7 @@ internal static partial class MetaTests
         AddRejectGroup(context, "Meta.OptionalInnerTypeRules", [
             Declaration("ROCKS_PROPERTY() rocks::Optional<rocks::Optional<rocks::int32>> nested;").Replace(Preamble, OptionalPreamble, StringComparison.Ordinal),
             Declaration("ROCKS_PROPERTY() rocks::Optional<rocks::Array<rocks::int32>> list;").Replace(Preamble, OptionalPreamble, StringComparison.Ordinal),
-            Declaration("ROCKS_PROPERTY() rocks::Optional<rocks::WeakRef<Value>> target;").Replace(Preamble, OptionalPreamble, StringComparison.Ordinal),
+            Declaration("ROCKS_PROPERTY() rocks::Optional<rocks::WeakObjectRef<Value>> target;").Replace(Preamble, OptionalPreamble, StringComparison.Ordinal),
             Declaration("ROCKS_PROPERTY() rocks::Optional<rocks::SoftObjectRef<>> target;")
                 .Replace(Preamble, "#include <Object/SoftObjectRef.h>\n" + OptionalPreamble, StringComparison.Ordinal),
             Declaration("ROCKS_PROPERTY() rocks::Optional<rocks::ClassRef<Value>> kind;")

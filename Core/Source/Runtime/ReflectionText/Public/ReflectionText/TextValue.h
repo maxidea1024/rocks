@@ -14,9 +14,9 @@
 //   bool on·off·true·false(출력 true·false) / 정수 정규 10진 / 실수 10진·nan·inf·-inf(출력 최단
 //   왕복) / enum 도구 이름(대소문자 무시·접두) / Flags `A+B`(입력 `A|B`도, 0은 빈 값) /
 //   Guid·AssetId 36자 소문자 / Digest256 64자 소문자 / String 그대로 / Name 그대로(NFC 정규화 후
-//   intern, None 출력 `None`) / ObjectRef·WeakRef·Soft resolver(null `none`) / ClassRef 타입 도구
-//   이름·TypeId(null `none`) / Array·StaticArray·Set 쉼표 목록(빈 값 = 빈 컨테이너) / Map `k:v`
-//   쉼표 목록 / Optional 내부 표기(struct 내부는 `{}` — unset은 대입 종류 Unset) / struct
+//   intern, None 출력 `None`) / ObjectRef·WeakObjectRef·Soft resolver(null `none`) / ClassRef 타입
+//   도구 이름·TypeId(null `none`) / Array·StaticArray·Set 쉼표 목록(빈 값 = 빈 컨테이너) / Map
+//   `k:v` 쉼표 목록 / Optional 내부 표기(struct 내부는 `{}` — unset은 대입 종류 Unset) / struct
 //   `{}`(기본값) / InstancedStruct 타입 도구 이름(그 struct 기본 값으로 형 바꾸기 — 멤버는 경로
 //   `<f>.<m>=v`), 비우기 `none`(리플렉션 B9j).
 //

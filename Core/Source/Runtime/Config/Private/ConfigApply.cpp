@@ -148,8 +148,11 @@ private:
     Result<JsonValue> Navigate(JsonValue root, Span<const ChainStep> chain) noexcept;
     Result<JsonValue> ExportValue(void* storage) noexcept;
 
+    // validateHooks가 거짓이면 struct 검증 hook을 부르지 않는다(CanonicalList의 정규화용 import —
+    // 최종 값은 따로 hook을 거친다).
     Result<bool> ImportMapped(void* storage, JsonValue root, const WriteSession* session,
-                              JsonValue original, Array<String>* paths) noexcept;
+                              JsonValue original, Array<String>* paths,
+                              bool validateHooks = true) noexcept;
     Result<bool> FinishPrepared(Result<PreparedAssignments> prepared, TextDiagnostics& diagnostics,
                                 const Array<OffsetOrigin>* map, JsonValue original,
                                 const JsonPosition* fallback, Array<String>* paths) noexcept;
@@ -650,7 +653,9 @@ Result<JsonValue> SectionApplier::CanonicalList(Span<const ChainStep> chain,
         return Result<JsonValue>::Failure(ErrorCode::InvalidArgument);
     }
 
-    auto imported = ImportMapped(scratch, document.Root(), &session, list, nullptr);
+    // 정규 표기만 얻는 중간 import라 hook을 부르지 않는다(연산 목록만으로는 struct 불변식 — 예:
+    // InterpCurve 키 정렬 — 이 성립하지 않을 수 있다. 최종 적용 값이 hook을 거친다).
+    auto imported = ImportMapped(scratch, document.Root(), &session, list, nullptr, false);
     if (!imported) {
         return Result<JsonValue>::Failure(imported.Error());
     }
@@ -832,7 +837,7 @@ Result<void> SectionApplier::WriteOperation(WriteSession& session, JsonValue ope
 // 텍스트를 더한다.
 Result<bool> SectionApplier::ImportMapped(void* storage, JsonValue root,
                                           const WriteSession* session, JsonValue original,
-                                          Array<String>* paths) noexcept {
+                                          Array<String>* paths, bool validateHooks) noexcept {
     Array<OffsetOrigin> map(allocator_);
     if (session != nullptr) {
         usize next = 0;
@@ -854,7 +859,8 @@ Result<bool> SectionApplier::ImportMapped(void* storage, JsonValue root,
     }
 
     TextDiagnostics diagnostics(allocator_);
-    const TextCodecOptions options = state_.CodecOptions();
+    TextCodecOptions options = state_.CodecOptions();
+    options.validateStructHooks = validateHooks;
     const AssignmentTarget target =
         AssignmentTarget::Value(state_.objects, state_.access, section_.lease, storage, allocator_);
     return FinishPrepared(ImportJson(root, target, options, diagnostics), diagnostics,
@@ -1051,8 +1057,9 @@ Result<bool> SectionApplier::ApplyConsoleValue(usize field, StringView text, Jso
     }
 
     ConfigDiagnosticCode code = ConfigDiagnosticCode::LayerNotAllowed;
-    const StringView problem = CheckConsoleLayer(
-        state_, entry_.layer, ConsoleFlagsOfField(SettingsFlagsOf(section_, schema.id)), code);
+    const StringView problem =
+        CheckConsoleLayer(state_.releaseRules, entry_.layer,
+                          ConsoleFlagsOfField(SettingsFlagsOf(section_, schema.id)), code, false);
     if (!problem.IsEmpty()) {
         if (auto reported = Diagnose(code, position, problem); !reported) {
             return Result<bool>::Failure(reported.Error());

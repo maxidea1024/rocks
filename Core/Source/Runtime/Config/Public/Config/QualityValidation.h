@@ -24,8 +24,9 @@
 // UE 대응: Scalability에는 장치 능력 기반 조합 검증이 없다(Rocks 추가). 표기는 CVar 11절의
 // `quality.shadow@1 (requested 3, lowered: <사유>)`다(FormatQualityResolution).
 //
-// 사용 예(CVR5 — 묶음 펼침 전):
-//   const QualityRequest requests[] = {{"quality.shadow", ShadowGroup.Get()}};
+// 사용 예(ConfigContext의 묶음 해결이 펼치기 전에 부른다 — CVar 10절 2단계):
+//   const int32 shadowLevels[] = {0, 1, 2, 3};
+//   const QualityRequest requests[] = {{"quality.shadow", ShadowGroup.Get(), shadowLevels}};
 //   QualityResolutionSet resolved(allocator);
 //   if (ResolveQualityLevels(rules, budgets, requests, &traits, resolved)) {
 //       // resolved.groups[i]->applied 등급의 항목을 Quality 층에 펼친다
@@ -46,12 +47,11 @@ struct QualityLevelRule {
     Span<const QualityCost> costs{};
 };
 
-// 묶음 하나의 검증 규칙이다.
+// 묶음 하나의 검증 규칙이다. 정의된 등급은 규칙이 아니라 요청(QualityRequest::levels — 묶음 정의)에
+// 있다.
 struct QualityGroupRule {
     // 묶음 이름(묶음 변수의 콘솔 이름 — `quality.shadow`).
     StringView group;
-    // 정의된 등급(오름차순, 겹치지 않는다). 낮춤은 이 목록의 바로 아래 등급이다.
-    Span<const int32> levels{};
     // 우선순위다. 예산을 맞출 때 작은 묶음부터 낮춘다.
     int32 priority = 0;
     Span<const QualityLevelRule> rules{};
@@ -66,10 +66,13 @@ struct QualityBudgetRule {
     double fraction = 1.0;
 };
 
-// 묶음 하나의 요청이다(묶음 변수의 지금 값 — 사용자가 고른 등급).
+// 묶음 하나의 요청이다(묶음 변수의 지금 값 — 사용자가 고른 등급 — 과 그 묶음 정의의 등급).
 struct QualityRequest {
     StringView group;
     int32 level = 0;
+    // 정의된 등급(오름차순, 겹치지 않는다 — CVarGroup 정의). 낮춤은 이 목록의 바로 아래 등급이다.
+    // 규칙이 있는 묶음이면 level이 이 안에 있어야 한다.
+    Span<const int32> levels{};
 };
 
 // 묶음 하나의 결과다.
@@ -102,8 +105,8 @@ struct QualityResolutionSet {
 };
 
 // 요청마다 펼칠 등급을 정한다(위 규칙). 규칙이 없는 묶음은 요청 등급 그대로다. out은 먼저 비운다.
-// 오류: 요청 등급이 그 묶음의 정의된 등급이 아니거나 같은 묶음 요청이 둘이면 InvalidArgument, 할당
-// 실패. 실패하면 out은 비어 있다.
+// 오류: 규칙이 있는 묶음의 요청 등급이 그 요청의 levels에 없거나 같은 묶음 요청이 둘이면
+// InvalidArgument, 할당 실패. 실패하면 out은 비어 있다.
 Result<void> ResolveQualityLevels(Span<const QualityGroupRule> groups,
                                   Span<const QualityBudgetRule> budgets,
                                   Span<const QualityRequest> requests, const DeviceTraits* traits,

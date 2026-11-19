@@ -51,7 +51,7 @@ float4 PSMain(VSOutput input) : SV_Target {
 
 // OpenGL ES 3.2 원문(GLSL ES 3.20)이다. SH2 전 런타임 경로이지만 쿠킹된 GLES31_PC 출력과 같은
 // 모양으로 쓴다(ShaderSystem 7.2절 4항): 정점 입력은 ATTRIBUTEn location, 단계 사이 변수는
-// TEXCOORDn location, 그리기 상수는 루트 상수 에뮬레이션 배열 vu_h(DrawConstants의 vec4 5개),
+// TEXCOORDn location, 그리기별 상수는 루트 상수 에뮬레이션 배열 vu_h(ObjectConstants의 vec4 5개),
 // 텍스처는 combined sampler ps0(유닛 0). 행렬은 행 우선 byte를 그대로 받아 mat4(열 우선)로 읽으므로
 // Mᵀ * v = v·M이다(HLSL mul(v, transform)과 같다, 7.2절 6항).
 constexpr char VertexGlsl[] = R"(#version 320 es
@@ -141,6 +141,7 @@ Result<void> Renderer::Initialize(graphics::Device& device,
     pipeline.vertex = {BuiltinShaderHlsl(), BuiltinVertexGlsl()};
     pipeline.pixel = {BuiltinShaderHlsl(), BuiltinPixelGlsl()};
     pipeline.layout = {attributes, streams};
+    pipeline.drawConstantBytes = sizeof(ObjectConstants);
     pipeline.colorFormats[0] = colorFormat;
     pipeline.blend[0] = graphics::AlphaBlend();
     pipeline.raster.cullMode = graphics::CullMode::Back;
@@ -227,9 +228,9 @@ void Renderer::Draw(graphics::CommandContext& context, const RenderView& view,
         }
 
         // 행 벡터 규약(UE LocalToWorld * WorldToClip): 월드 변환 먼저, view·투영 나중. 행 우선
-        // 저장 그대로 올리고 셰이더가 mul(v, transform)으로 쓴다(DrawConstants).
+        // 저장 그대로 올리고 셰이더가 mul(v, transform)으로 쓴다(ObjectConstants).
         const Mat4 clip = item.world * view.viewProjection;
-        graphics::DrawConstants constants;
+        ObjectConstants constants;
         for (uint32 index = 0; index < 16; ++index) {
             constants.transform[index] = clip.m[index];
         }
@@ -237,7 +238,9 @@ void Renderer::Draw(graphics::CommandContext& context, const RenderView& view,
         constants.color[1] = item.color.g;
         constants.color[2] = item.color.b;
         constants.color[3] = item.color.a;
-        context.SetConstants(constants);
+        // 크기는 파이프라인 선언과 같으므로 실패하지 않는다.
+        auto set = context.SetDrawConstants(graphics::DrawConstantBytes(constants));
+        (void)set;
         context.SetTexture(item.texture);
         const bool triangle = item.mesh == MeshKind::Triangle;
         const graphics::VertexBufferBinding binding{triangle ? triangle_ : quad_, 0};

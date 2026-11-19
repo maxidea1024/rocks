@@ -79,6 +79,10 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
 
     private readonly Dictionary<string, RecordInfo> records = new(StringComparer.Ordinal);
 
+    // 번역 단위의 모든 정의된 enum(정규 이름 → 열거자 이름·값, 값을 읽지 못한 열거자는 null)이다. Binds enum 미러의
+    // 1:1 대조(VerifyEnumMirrors)가 쓴다(CurveData CV10 묶음 리뷰 2).
+    private readonly Dictionary<string, List<(string Name, System.Numerics.BigInteger? Value)>> definedEnums = new(StringComparer.Ordinal);
+
     // 강한 객체 참조를 담는 템플릿이다(StructRefArray는 참조 struct 원소의 목록이다 — Docs/Design/ReflectionFoundations.ko.md
     // 5.6절, ObjectRefMap은 키 → 강한 참조 Map이다 — ReflectionExtensions.ko.md 7.4절).
     private static readonly HashSet<string> StrongReferenceTemplates = new(StringComparer.Ordinal)
@@ -86,11 +90,11 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
         "rocks::ObjectRef", "rocks::RootRef", "rocks::ObjectRefArray", "rocks::StructRefArray", "rocks::ObjectRefMap"
     };
 
-    // 대상 객체를 담지도 추적하지도 않는 참조 템플릿이다. 인자 타입을 따라가지 않는다(WeakRef<T>는 T의 필드를 담지 않고,
+    // 대상 객체를 담지도 추적하지도 않는 참조 템플릿이다. 인자 타입을 따라가지 않는다(WeakObjectRef<T>는 T의 필드를 담지 않고,
     // SoftObjectRef<T>는 에셋 ID와 경로만 담는다).
     private static readonly HashSet<string> NonOwningTemplates = new(StringComparer.Ordinal)
     {
-        "rocks::WeakRef",
+        "rocks::WeakObjectRef",
         "rocks::SoftObjectRef"
     };
 
@@ -119,6 +123,12 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                 }
             }
 
+            return;
+        }
+
+        if (kind == "EnumDecl")
+        {
+            IndexEnum(node, scope, name);
             return;
         }
 
@@ -164,6 +174,75 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
         foreach (JsonElement child in Children(node))
         {
             IndexRecords(child, scope);
+        }
+    }
+
+    // 정의된 enum 하나의 열거자 목록을 색인한다(VisitEnum과 같은 값 규칙 — 초기값이 없으면 이전 값 + 1, 초기값은 Clang이
+    // 평가한 ConstantExpr 값이다. 다른 모양이면 그 열거자 값을 null로 둔다). 앞 선언(열거자 없음)은 건너뛴다.
+    private void IndexEnum(JsonElement node, string[] scope, string name)
+    {
+        JsonElement[] constants = Children(node).Where(child => Text(child, "kind") == "EnumConstantDecl").ToArray();
+        if (name.Length == 0 || constants.Length == 0)
+        {
+            return;
+        }
+
+        string qualified = string.Join("::", scope.Append(name));
+        List<(string Name, System.Numerics.BigInteger? Value)> values = [];
+        System.Numerics.BigInteger? next = System.Numerics.BigInteger.Zero;
+        foreach (JsonElement constant in constants)
+        {
+            JsonElement[] initializers = Children(constant).Where(child => !Text(child, "kind").EndsWith("Attr", StringComparison.Ordinal)).ToArray();
+            System.Numerics.BigInteger? value = next;
+            if (initializers.Length != 0)
+            {
+                value = initializers.Length == 1 && Text(initializers[0], "kind") == "ConstantExpr" &&
+                    System.Numerics.BigInteger.TryParse(Text(initializers[0], "value"), System.Globalization.NumberStyles.Integer,
+                        System.Globalization.CultureInfo.InvariantCulture, out System.Numerics.BigInteger parsed)
+                    ? parsed : null;
+            }
+
+            values.Add((Text(constant, "name"), value));
+            next = value + 1;
+        }
+
+        definedEnums.TryAdd(qualified, values);
+    }
+
+    // Binds enum 미러가 실제 enum의 열거자를 이름·값 1:1로 나열하는지 본다(CurveData CV10 묶음 리뷰 2 — 생성 static_assert는
+    // 미러 쪽 열거자만 대조하므로 실제 enum에만 있는 열거자를 놓친다). 어기면 RMC2401이다. ResolveBinds가 정규 철자(Binds)를
+    // 채운 뒤 부른다.
+    public void VerifyEnumMirrors(IEnumerable<ClassModel> declared)
+    {
+        foreach (ClassModel mirror in declared.Where(model => model.IsEnum && model.Binds.Length != 0).OrderBy(model => model.Name, StringComparer.Ordinal))
+        {
+            const string hint = "List every enumerator of the real enum in the mirror with the same name and value (no more, no fewer).";
+            if (!definedEnums.TryGetValue(mirror.Binds, out List<(string Name, System.Numerics.BigInteger? Value)>? real))
+            {
+                throw new MetadataException($"{mirror.Name}: the enumerators of {mirror.Binds} are not visible from the reflected headers, so the mirror cannot list every enumerator",
+                    "RMC2401", hint).At(mirror.BindsSite ?? mirror.Site);
+            }
+
+            List<string> problems = [];
+            foreach ((string name, System.Numerics.BigInteger? value) in real)
+            {
+                EnumeratorModel? listed = mirror.Enumerators.FirstOrDefault(item => item.Name == name);
+                if (listed is null)
+                {
+                    problems.Add($"{name} is missing");
+                }
+                else if (value is null || value.Value != listed.Value)
+                {
+                    problems.Add($"{name} has value {(value is null ? "?" : value.Value.ToString(System.Globalization.CultureInfo.InvariantCulture))} in the real enum");
+                }
+            }
+
+            problems.AddRange(mirror.Enumerators.Where(item => real.All(entry => entry.Name != item.Name)).Select(item => $"{item.Name} is not in the real enum"));
+            if (problems.Count != 0)
+            {
+                throw new MetadataException($"{mirror.Name}: a Binds enum mirror must list every enumerator of {mirror.Binds} with the same name and value ({string.Join(", ", problems)})",
+                    "RMC2401", hint).At(mirror.BindsSite ?? mirror.Site);
+            }
         }
     }
 
@@ -850,7 +929,7 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                         if (StrongReferencePath(nativeType, []) is string path)
                         {
                             throw new MetadataException($"{symbol}: ROCKS_NATIVE member holds a strong object reference ({path})", "RMC2205",
-                                "Native members are not traced; store ObjectRef/RootRef/Object pointers in ROCKS_PROPERTY fields or use WeakRef/ObjectHandle.");
+                                "Native members are not traced; store ObjectRef/RootRef/Object pointers in ROCKS_PROPERTY fields or use WeakObjectRef/ObjectHandle.");
                         }
 
                         if (RequiresWorldOnlyOwnerPath(nativeType, []) is string worldOnlyPath)

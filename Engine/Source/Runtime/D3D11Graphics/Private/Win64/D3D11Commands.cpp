@@ -141,6 +141,7 @@ Result<void> D3D11Device::CreatePipelineStates(const PipelineDesc& desc,
     raster.FillMode = D3D11_FILL_SOLID;
     raster.CullMode = RasterCullMode(desc.raster.cullMode);
     raster.FrontCounterClockwise = TRUE;
+    raster.MultisampleEnable = desc.sampleCount > 1 ? TRUE : FALSE;
     raster.DepthBias = desc.raster.depthBias;
     raster.DepthBiasClamp = desc.raster.depthBiasClamp;
     raster.SlopeScaledDepthBias = desc.raster.depthBiasSlope;
@@ -175,8 +176,8 @@ Result<void> D3D11Device::CreatePipelineStates(const PipelineDesc& desc,
 Result<PipelineHandle>
 D3D11Device::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
     platform::LockGuard lock(gate_);
-    if (desc.shader.hlsl.ByteCount() == 0) {
-        auto failed = Fail("compute pipeline needs HLSL source");
+    if (desc.shader.hlsl.ByteCount() == 0 || !ValidateComputePipelineDesc(desc)) {
+        auto failed = Fail("compute pipeline needs HLSL source and valid drawConstantBytes");
         (void)failed;
         return Result<PipelineHandle>::Failure(ErrorCode::InvalidArgument);
     }
@@ -188,8 +189,9 @@ D3D11Device::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
     }
 
     PipelineRecord record;
-    auto reflected =
-        ReflectBindings(code.Get(), ShaderStage::Compute, record.bufferSlots, &record.writeSlots);
+    record.drawConstantBytes = desc.drawConstantBytes;
+    auto reflected = ReflectBindings(code.Get(), ShaderStage::Compute, desc.drawConstantBytes,
+                                     record.bufferSlots, &record.writeSlots, &record.writeTextures);
     if (!reflected) {
         return Result<PipelineHandle>::Failure(reflected.Error());
     }
@@ -236,34 +238,48 @@ Result<CommandContext*> D3D11Device::BeginPass(const PassDesc& pass) noexcept {
                     "pass has more color attachments than the device supports");
     }
 
-    // attachment 확인: 살아 있는 텍스처, view 아님, 용도, 같은 크기, 중복 없음.
+    // attachment 확인: 살아 있는 텍스처, view 아님, 용도, 같은 크기·표본 수, 중복 없음.
     Target target;
     bool sized = false;
-    const auto check = [&](TextureHandle handle, bool depth) noexcept -> ErrorCode {
+    const auto check = [&](TextureHandle handle, bool depth, uint32 mip,
+                           uint32 slice) noexcept -> ErrorCode {
         const TextureRecord* record = textures_.Find(handle.slot);
         if (record == nullptr) {
             return ErrorCode::StaleHandle;
         }
 
+        // 크기는 attachment mip의 크기다(텍스처 GX2 C부).
         if (record->view || (depth ? !record->depthTarget : !record->renderTarget) ||
-            (sized && (record->width != target.width || record->height != target.height))) {
+            !IsAttachmentInRange(record->dimension, record->depth, record->mipLevels,
+                                 record->slices, mip, slice)) {
             return ErrorCode::InvalidArgument;
         }
 
-        target.width = record->width;
-        target.height = record->height;
+        const uint32 mipWidth = MipExtent(record->width, mip);
+        const uint32 mipHeight = MipExtent(record->height, mip);
+        if (sized && (mipWidth != target.width || mipHeight != target.height ||
+                      record->sampleCount != target.sampleCount)) {
+            return ErrorCode::InvalidArgument;
+        }
+
+        target.width = mipWidth;
+        target.height = mipHeight;
+        target.sampleCount = record->sampleCount;
         sized = true;
         return ErrorCode::None;
     };
     for (uint32 index = 0; index < pass.colorCount; ++index) {
-        const ErrorCode checked = check(pass.colors[index].texture, false);
+        const ErrorCode checked = check(pass.colors[index].texture, false,
+                                        pass.colors[index].mipLevel, pass.colors[index].slice);
         if (checked != ErrorCode::None) {
             return fail(checked, "color attachment is stale, not a render target, a view or of a "
                                  "different size");
         }
 
         for (uint32 other = 0; other < index; ++other) {
-            if (pass.colors[other].texture == pass.colors[index].texture) {
+            if (pass.colors[other].texture == pass.colors[index].texture &&
+                pass.colors[other].mipLevel == pass.colors[index].mipLevel &&
+                pass.colors[other].slice == pass.colors[index].slice) {
                 return fail(ErrorCode::InvalidArgument,
                             "color attachment appears twice in the pass");
             }
@@ -272,11 +288,51 @@ Result<CommandContext*> D3D11Device::BeginPass(const PassDesc& pass) noexcept {
 
     const bool hasDepth = !pass.depth.texture.IsNull();
     if (hasDepth) {
-        const ErrorCode checked = check(pass.depth.texture, true);
+        const ErrorCode checked =
+            check(pass.depth.texture, true, pass.depth.mipLevel, pass.depth.slice);
         if (checked != ErrorCode::None) {
             return fail(checked, "depth attachment is stale, not a depth target, a view or of a "
                                  "different size");
         }
+    }
+
+    // resolve 대상: MSAA attachment의 1표본 RenderTarget, 같은 형식·크기, view 아님, 겹침 없음.
+    for (uint32 index = 0; index < pass.colorCount; ++index) {
+        const TextureHandle resolve = pass.colors[index].resolveTarget;
+        if (resolve.IsNull()) {
+            continue;
+        }
+
+        const TextureRecord* source = textures_.Find(pass.colors[index].texture.slot);
+        const TextureRecord* resolved = textures_.Find(resolve.slot);
+        if (resolved == nullptr) {
+            return Result<CommandContext*>::Failure(ErrorCode::StaleHandle);
+        }
+
+        bool overlaps = resolve == pass.depth.texture;
+        for (uint32 other = 0; other < pass.colorCount; ++other) {
+            overlaps = overlaps || pass.colors[other].texture == resolve ||
+                       (other != index && pass.colors[other].resolveTarget == resolve);
+        }
+
+        // 대상은 그 mip·slice가 원본과 같은 크기다. 3D 대상(깊이 면 resolve)은 받지 않는다.
+        const uint32 resolveMip = pass.colors[index].resolveMipLevel;
+        const uint32 resolveSlice = pass.colors[index].resolveSlice;
+        if (source->sampleCount < 2 || resolved->view || !resolved->renderTarget ||
+            resolved->sampleCount != 1 || resolved->format != source->format ||
+            resolved->dimension == TextureDimension::Texture3D ||
+            !IsAttachmentInRange(resolved->dimension, resolved->depth, resolved->mipLevels,
+                                 resolved->slices, resolveMip, resolveSlice) ||
+            MipExtent(resolved->width, resolveMip) != source->width ||
+            MipExtent(resolved->height, resolveMip) != source->height || overlaps) {
+            return fail(ErrorCode::InvalidArgument,
+                        "resolve target needs an MSAA color attachment and a distinct "
+                        "single-sample render target of the same format and size");
+        }
+
+        target.resolves[index] = resolve;
+        target.resolveMips[index] = resolveMip;
+        target.resolveSlices[index] = resolveSlice;
     }
 
     if (recording_) {
@@ -287,10 +343,17 @@ Result<CommandContext*> D3D11Device::BeginPass(const PassDesc& pass) noexcept {
         return Result<CommandContext*>::Failure(ErrorCode::Destroyed);
     }
 
+    // attachment view는 패스마다 그 mip·slice로 만든다.
     target.colorCount = pass.colorCount;
     for (uint32 index = 0; index < pass.colorCount; ++index) {
         const TextureRecord* record = textures_.Find(pass.colors[index].texture.slot);
-        target.rtvs[index] = record->rtv.Get();
+        const HRESULT created = CreateAttachmentView(*record, pass.colors[index].mipLevel,
+                                                     pass.colors[index].slice, passRtvs_[index]);
+        if (FAILED(created)) {
+            return FailWith<CommandContext*>("CreateRenderTargetView (pass)", created);
+        }
+
+        target.rtvs[index] = passRtvs_[index].Get();
         target.colors[index] = pass.colors[index].texture;
     }
 
@@ -306,7 +369,13 @@ Result<CommandContext*> D3D11Device::BeginPass(const PassDesc& pass) noexcept {
         const TextureRecord* depth = textures_.Find(pass.depth.texture.slot);
         target.depth = pass.depth.texture;
         target.depthReadOnly = pass.depth.readOnly;
-        target.dsv = pass.depth.readOnly ? depth->readOnlyDsv.Get() : depth->dsv.Get();
+        const HRESULT created = CreateAttachmentView(*depth, pass.depth.mipLevel, pass.depth.slice,
+                                                     pass.depth.readOnly, passDsv_);
+        if (FAILED(created)) {
+            return FailWith<CommandContext*>("CreateDepthStencilView (pass)", created);
+        }
+
+        target.dsv = passDsv_.Get();
     }
 
     BeginRecording(target, pass);
@@ -323,6 +392,20 @@ void D3D11Device::SetWritableBufferView(uint32 slot, BufferViewHandle view) noex
     const BufferViewRecord* record = bufferViews_.Find(view.slot);
     const bool writable = record != nullptr && record->access == ViewAccess::ReadWrite;
     boundWriteViews_[slot] = writable ? view : BufferViewHandle{};
+    // 쓰기 slot은 버퍼·텍스처가 같은 번호 공간이다(나중에 묶은 하나만 남는다).
+    boundWriteTextures_[slot] = {};
+}
+
+void D3D11Device::SetWritableTexture(uint32 slot, TextureHandle view) noexcept {
+    platform::LockGuard lock(gate_);
+    if (slot >= MaxDrawBufferViews) {
+        return;
+    }
+
+    const TextureRecord* record = textures_.Find(view.slot);
+    const bool writable = record != nullptr && record->uav;
+    boundWriteTextures_[slot] = writable ? view : TextureHandle{};
+    boundWriteViews_[slot] = {};
 }
 
 bool D3D11Device::PrepareDraw(bool indexed) noexcept {
@@ -352,6 +435,16 @@ bool D3D11Device::PrepareDraw(bool indexed) noexcept {
                                             ? DXGI_FORMAT_R16_UINT
                                             : DXGI_FORMAT_R32_UINT,
                                         static_cast<UINT>(boundIndex_.offset));
+        }
+
+        const TextureRecord* texture = textures_.Find(boundTexture_);
+        if (texture == nullptr) {
+            texture = textures_.Find(white_.slot);
+        }
+
+        if (texture != nullptr) {
+            ID3D11ShaderResourceView* textureView = texture->srv.Get();
+            deferred_->PSSetShaderResources(0, 1, &textureView);
         }
 
         inputsDirty_ = false;
@@ -388,10 +481,35 @@ bool D3D11Device::PrepareDispatch() noexcept {
         return false;
     }
 
-    // 그래픽 단계의 SRV를 먼저 풀어 같은 버퍼를 UAV로 묶을 때의 hazard를 없앤다.
-    ID3D11ShaderResourceView* none[MaxDrawBufferViews] = {};
+    // 텍스처로 쓰는 slot마다 쓰기 텍스처 view가 묶여야 한다.
+    for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
+        if ((pipeline->writeTextures & (1u << slot)) == 0) {
+            continue;
+        }
+
+        const TextureRecord* view = textures_.Find(boundWriteTextures_[slot].slot);
+        if (view == nullptr) {
+            return false;
+        }
+
+        uavs[slot] = view->uav.Get();
+    }
+
+    // 그래픽 단계의 SRV(텍스처 t0 포함)를 먼저 풀어 같은 자원을 UAV로 묶을 때의 hazard를 없앤다.
+    // 다음 그리기가 다시 묶는다(inputsDirty_).
+    ID3D11ShaderResourceView* none[MaxDrawBufferViews + 1] = {};
     deferred_->VSSetShaderResources(1, MaxDrawBufferViews, none);
-    deferred_->PSSetShaderResources(1, MaxDrawBufferViews, none);
+    deferred_->PSSetShaderResources(0, MaxDrawBufferViews + 1, none);
+    const TextureRecord* texture = textures_.Find(boundTexture_);
+    if (texture == nullptr) {
+        texture = textures_.Find(white_.slot);
+    }
+
+    if (texture != nullptr) {
+        ID3D11ShaderResourceView* textureView = texture->srv.Get();
+        deferred_->CSSetShaderResources(0, 1, &textureView);
+        deferred_->CSSetSamplers(0, 1, &texture->sampler);
+    }
     ID3D11ShaderResourceView* reads[MaxDrawBufferViews] = {};
     for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
         const BufferViewRecord* view = bufferViews_.Find(boundViews_[slot].slot);
@@ -406,9 +524,9 @@ bool D3D11Device::PrepareDispatch() noexcept {
 
 void D3D11Device::FinishDispatch() noexcept {
     ID3D11UnorderedAccessView* noUavs[MaxDrawBufferViews] = {};
-    ID3D11ShaderResourceView* noViews[MaxDrawBufferViews] = {};
+    ID3D11ShaderResourceView* noViews[MaxDrawBufferViews + 1] = {};
     deferred_->CSSetUnorderedAccessViews(0, MaxDrawBufferViews, noUavs, nullptr);
-    deferred_->CSSetShaderResources(1, MaxDrawBufferViews, noViews);
+    deferred_->CSSetShaderResources(0, MaxDrawBufferViews + 1, noViews);
 }
 
 ID3D11Buffer* D3D11Device::IndirectArguments(BufferHandle arguments, uint64 offset,
@@ -563,9 +681,12 @@ Result<void> D3D11Device::CopyTexture(TextureHandle destination, TextureHandle s
     const PixelFormatInfo& info = GetPixelFormatInfo(from->format);
     if (destination == source || to->view || from->view || to->width != from->width ||
         to->height != from->height || to->format != from->format || info.planeCount > 1 ||
-        attached(destination) || attached(source)) {
-        auto failed = Fail("texture copy needs two distinct non-view single-plane textures of the "
-                           "same size and format outside the current pass");
+        to->sampleCount > 1 || from->sampleCount > 1 ||
+        to->dimension != TextureDimension::Texture2D ||
+        from->dimension != TextureDimension::Texture2D || attached(destination) ||
+        attached(source)) {
+        auto failed = Fail("texture copy needs two distinct non-view single-plane 2D textures of "
+                           "the same size and format outside the current pass");
         (void)failed;
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }

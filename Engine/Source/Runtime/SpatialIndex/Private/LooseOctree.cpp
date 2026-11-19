@@ -8,9 +8,14 @@ namespace rocks::spatial {
 
 namespace {
 
-// 노드 번호가 OutOfRangeNode·NoNode와 겹치지 않도록 블록 수를 제한한다(가장 큰 노드 번호 1 + 8b +
-// 7이 OutOfRangeNode보다 작다).
-constexpr uint32 MaxNodeBlocks = (detail::OutOfRangeNode - 8) / 8;
+// 노드 번호가 목록 표지(LargeProxyNode·OutOfRangeNode)·NoNode와 겹치지 않도록 블록 수를 제한한다
+// (가장 큰 노드 번호 1 + 8b + 7이 LargeProxyNode보다 작다).
+constexpr uint32 MaxNodeBlocks = (detail::LargeProxyNode - 8) / 8;
+
+double MaxHalfExtent(const Box<double>& bounds) noexcept {
+    const Vec3d half = bounds.HalfExtents();
+    return math::Max(half.x, math::Max(half.y, half.z));
+}
 
 bool IsPowerOfTwo(double value) noexcept {
     if (!math::IsFinite(value) || value <= 0.0) {
@@ -64,6 +69,9 @@ Result<LooseOctree> LooseOctree::TryCreate(const LooseOctreeConfig& config,
         config.pendingLimitFloor == 0) {
         return invalid();
     }
+    if (!math::IsFinite(config.largeProxyHalfExtent) || config.largeProxyHalfExtent < 0.0) {
+        return invalid();
+    }
 
     // 격자 계산의 정확 범위: |anchor| + 2^(maxRootLevel+1) · minCellSize < 2^52 · minCellSize.
     double rootSpan = cell;
@@ -106,7 +114,8 @@ LooseOctree::LooseOctree(const LooseOctreeConfig& config, Allocator& backing,
                          detail::CountingAllocator* counting) noexcept
     : config_(config), backing_(&backing), counting_(counting),
       records_(*counting, config.maxProxyGeneration), searchBlocks_(*counting, MaxNodeBlocks),
-      manageBlocks_(*counting, MaxNodeBlocks), chunks_(*counting), outOfRange_(*counting) {
+      manageBlocks_(*counting, MaxNodeBlocks), chunks_(*counting), outOfRange_(*counting),
+      large_(*counting) {
     mutationEpoch_ = NextMutationEpoch();
     InitializeTables();
     const int64 origin[3] = {initialOrigin_, initialOrigin_, initialOrigin_};
@@ -117,7 +126,7 @@ LooseOctree::LooseOctree(LooseOctree&& other) noexcept
     : config_(other.config_), backing_(other.backing_), counting_(nullptr),
       records_(*other.backing_, other.config_.maxProxyGeneration),
       searchBlocks_(*other.backing_, MaxNodeBlocks), manageBlocks_(*other.backing_, MaxNodeBlocks),
-      chunks_(*other.backing_), outOfRange_(*other.backing_) {
+      chunks_(*other.backing_), outOfRange_(*other.backing_), large_(*other.backing_) {
     other.CheckNoOpenScope("LooseOctree moved while a read scope is open");
     InitializeTables();
     TakeFrom(other);
@@ -161,6 +170,7 @@ void LooseOctree::TakeFrom(LooseOctree& other) noexcept {
     manageBlocks_ = Move(other.manageBlocks_);
     chunks_ = Move(other.chunks_);
     outOfRange_ = Move(other.outOfRange_);
+    large_ = Move(other.large_);
     counting_ = other.counting_;
     rootSearch_ = other.rootSearch_;
     rootManage_ = other.rootManage_;
@@ -196,6 +206,7 @@ void LooseOctree::RebindContainers(Allocator& allocator) noexcept {
     manageBlocks_ = IndexPool<detail::ManageBlock>(allocator, MaxNodeBlocks);
     chunks_ = IndexPool<detail::ElementChunk>(allocator);
     outOfRange_ = Array<detail::OutOfRangeEntry>(allocator);
+    large_ = Array<detail::OutOfRangeEntry>(allocator);
 }
 
 void LooseOctree::ReleaseStorage() noexcept {
@@ -238,26 +249,22 @@ void LooseOctree::NotePeaks() noexcept {
     raise(peaks_.nodeBytes, searchBlocks_.Capacity() * sizeof(detail::SearchBlock) +
                                 manageBlocks_.Capacity() * sizeof(detail::ManageBlock));
     raise(peaks_.outOfRangeBytes, outOfRange_.Capacity() * sizeof(detail::OutOfRangeEntry));
+    raise(peaks_.largeProxyBytes, large_.Capacity() * sizeof(detail::OutOfRangeEntry));
 }
 
 void LooseOctree::CheckNoOpenScope(const char* message) const noexcept {
-    if (platform::AtomicLoad(&readers_) != 0 || platform::AtomicLoad(&writer_) != 0) {
-        platform::Fatal(message);
-    }
+    access_.CheckIdle(message);
 }
 
 // ---- 읽기 범위 ----
 
-SpatialReadScope::SpatialReadScope(const LooseOctree& tree) noexcept : tree_(&tree) {
-    platform::AtomicFetchAdd(&tree.readers_, 1u);
-    if (platform::AtomicLoad(&tree.writer_) != 0) {
-        platform::Fatal("LooseOctree read scope opened during a mutation");
-    }
+// 읽기 범위를 여는 것은 Core 검출기의 읽기 진입이다. 변경 중이면 "read scope opened during a
+// mutation"으로, 범위가 열린 동안 변경이 시작되면 그 변경 쪽 또는 이 범위의 종료가 Fatal을 낸다.
+SpatialReadScope::SpatialReadScope(const LooseOctree& tree) noexcept
+    : tree_(&tree), access_(tree.access_) {
 }
 
-SpatialReadScope::~SpatialReadScope() noexcept {
-    platform::AtomicFetchSub(&tree_->readers_, 1u);
-}
+SpatialReadScope::~SpatialReadScope() noexcept = default;
 
 // ---- 노드 접근·격자 ----
 
@@ -754,7 +761,21 @@ void LooseOctree::NoteOutOfRangeGrowth() noexcept {
     }
 }
 
-void LooseOctree::MoveToOutOfRange(uint32 slot) noexcept {
+Array<detail::OutOfRangeEntry>& LooseOctree::ListOf(uint32 listNode) noexcept {
+    return listNode == detail::LargeProxyNode ? large_ : outOfRange_;
+}
+
+bool LooseOctree::IsLargeProxy(const Box<double>& bounds) const noexcept {
+    return config_.largeProxyHalfExtent > 0.0 &&
+           MaxHalfExtent(bounds) > config_.largeProxyHalfExtent;
+}
+
+bool LooseOctree::StaysLargeProxy(const Box<double>& bounds) const noexcept {
+    return config_.largeProxyHalfExtent > 0.0 &&
+           MaxHalfExtent(bounds) > config_.largeProxyHalfExtent * LooseOctreeLargeProxyExitRatio;
+}
+
+void LooseOctree::MoveToList(uint32 slot, uint32 listNode) noexcept {
     detail::ProxyRecord& record = records_.ElementAt(slot);
     const SlotHandle handle = records_.HandleAt(slot);
     detail::OutOfRangeEntry entry;
@@ -763,24 +784,31 @@ void LooseOctree::MoveToOutOfRange(uint32 slot) noexcept {
     entry.slot = handle.index;
     entry.generation = handle.generation;
     entry.userValue = record.userValue;
+    Array<detail::OutOfRangeEntry>& list = ListOf(listNode);
     // 용량은 호출자가 확보했다.
-    if (!outOfRange_.TryPushBack(entry)) {
-        platform::Fatal("LooseOctree out-of-range list lost its reserved capacity");
+    if (!list.TryPushBack(entry)) {
+        platform::Fatal("LooseOctree list lost its reserved capacity");
     }
-    record.node = detail::OutOfRangeNode;
-    record.chunk = static_cast<uint32>(outOfRange_.Size() - 1);
+    record.node = listNode;
+    record.chunk = static_cast<uint32>(list.Size() - 1);
     record.entry = 0;
-    NoteOutOfRangeGrowth();
+    if (listNode == detail::OutOfRangeNode) {
+        NoteOutOfRangeGrowth();
+    } else {
+        ++counters_.largeProxyInsertions;
+    }
 }
 
-void LooseOctree::RemoveFromOutOfRange(uint32 index) noexcept {
-    if (!outOfRange_.TryRemoveAtSwap(index)) {
-        platform::Fatal("LooseOctree out-of-range index is invalid");
+void LooseOctree::RemoveFromList(uint32 listNode, uint32 index) noexcept {
+    Array<detail::OutOfRangeEntry>& list = ListOf(listNode);
+    if (!list.TryRemoveAtSwap(index)) {
+        platform::Fatal("LooseOctree list index is invalid");
     }
-    if (index < outOfRange_.Size()) {
-        records_.ElementAt(outOfRange_[index].slot).chunk = index;
+    if (index < list.Size()) {
+        records_.ElementAt(list[index].slot).chunk = index;
     }
-    if (outOfRange_.Size() <= config_.outOfRangeWarnCount / 2) {
+    if (listNode == detail::OutOfRangeNode &&
+        outOfRange_.Size() <= config_.outOfRangeWarnCount / 2) {
         outOfRangeWarned_ = false;
     }
 }
@@ -821,10 +849,20 @@ Result<SpatialProxyHandle> LooseOctree::TryAdd(const SpatialProxyDesc& desc) noe
             return Result<SpatialProxyHandle>::Failure(reserved.Error());
         }
     }
-    const Placement placement = PlanPlacement(desc.bounds);
-    auto reserved = ReservePlacement(placement);
-    if (!reserved) {
-        return Result<SpatialProxyHandle>::Failure(reserved.Error());
+    // 큰 객체는 트리와 루트를 건드리지 않고 큰 객체 목록에 넣는다(결정 8).
+    const bool large = IsLargeProxy(desc.bounds);
+    Placement placement;
+    if (large) {
+        auto reserved = large_.TryEnsureCapacity(large_.Size() + 1);
+        if (!reserved) {
+            return Result<SpatialProxyHandle>::Failure(reserved.Error());
+        }
+    } else {
+        placement = PlanPlacement(desc.bounds);
+        auto reserved = ReservePlacement(placement);
+        if (!reserved) {
+            return Result<SpatialProxyHandle>::Failure(reserved.Error());
+        }
     }
 
     detail::ProxyRecord record;
@@ -837,8 +875,10 @@ Result<SpatialProxyHandle> LooseOctree::TryAdd(const SpatialProxyDesc& desc) noe
     }
     const SlotHandle handle = added.Value();
 
-    if (placement.outOfRange) {
-        MoveToOutOfRange(handle.index);
+    if (large) {
+        MoveToList(handle.index, detail::LargeProxyNode);
+    } else if (placement.outOfRange) {
+        MoveToList(handle.index, detail::OutOfRangeNode);
     } else {
         ApplyRootChanges(placement, BoxCenter(desc.bounds));
         InsertIntoTree(detail::RootNode, detail::NoNode, handle.index, true);
@@ -854,8 +894,8 @@ Result<void> LooseOctree::TryRemove(SpatialProxyHandle handle) noexcept {
         return checked;
     }
     const detail::ProxyRecord& record = records_[handle.slot];
-    if (record.node == detail::OutOfRangeNode) {
-        RemoveFromOutOfRange(record.chunk);
+    if (detail::IsListNode(record.node)) {
+        RemoveFromList(record.node, record.chunk);
     } else {
         const uint32 node = record.node;
         RemoveEntry(node, record.chunk, record.entry);
@@ -882,13 +922,43 @@ Result<void> LooseOctree::TryUpdateBounds(SpatialProxyHandle handle,
     const uint32 slot = handle.slot.index;
     const Vec3d center = BoxCenter(bounds);
 
-    // 범위 밖 목록의 프록시는 수용 판정을 다시 해서 한도 안이면 트리에 넣는다.
-    if (records_.ElementAt(slot).node == detail::OutOfRangeNode) {
-        const Placement placement = PlanPlacement(bounds);
-        if (placement.outOfRange) {
+    // 트리 밖 목록의 프록시다. 큰 객체 목록은 이력 비율 위면 남고, 범위 밖 목록의 프록시가 큰
+    // 객체가 되면 큰 객체 목록으로 간다. 그 밖에는 수용 판정을 다시 해서 한도 안이면 트리에, 밖이면
+    // 범위 밖 목록에 둔다.
+    const uint32 listNode = records_.ElementAt(slot).node;
+    if (detail::IsListNode(listNode)) {
+        uint32 target = detail::NoNode;
+        Placement placement;
+        const bool large =
+            listNode == detail::LargeProxyNode ? StaysLargeProxy(bounds) : IsLargeProxy(bounds);
+        if (large) {
+            target = detail::LargeProxyNode;
+        } else {
+            placement = PlanPlacement(bounds);
+            if (placement.outOfRange) {
+                target = detail::OutOfRangeNode;
+            }
+        }
+        if (target == listNode) {
             detail::ProxyRecord& record = records_.ElementAt(slot);
             record.bounds = bounds;
-            outOfRange_[record.chunk].bounds = bounds;
+            ListOf(listNode)[record.chunk].bounds = bounds;
+            if (listNode == detail::LargeProxyNode) {
+                ++counters_.inPlaceUpdates;
+            }
+            return Result<void>::Success();
+        }
+        if (target != detail::NoNode) {
+            // 다른 목록으로 옮긴다.
+            Array<detail::OutOfRangeEntry>& destination = ListOf(target);
+            auto reserved = destination.TryEnsureCapacity(destination.Size() + 1);
+            if (!reserved) {
+                return reserved;
+            }
+            RemoveFromList(listNode, records_.ElementAt(slot).chunk);
+            records_.ElementAt(slot).bounds = bounds;
+            MoveToList(slot, target);
+            ++counters_.reinserts;
             return Result<void>::Success();
         }
         auto reserved = ReservePlacement(placement);
@@ -896,7 +966,7 @@ Result<void> LooseOctree::TryUpdateBounds(SpatialProxyHandle handle,
             return reserved;
         }
         detail::ProxyRecord& record = records_.ElementAt(slot);
-        RemoveFromOutOfRange(record.chunk);
+        RemoveFromList(listNode, record.chunk);
         record.bounds = bounds;
         ApplyRootChanges(placement, center);
         InsertIntoTree(detail::RootNode, detail::NoNode, slot, false);
@@ -906,6 +976,22 @@ Result<void> LooseOctree::TryUpdateBounds(SpatialProxyHandle handle,
     }
 
     const uint32 node = records_.ElementAt(slot).node;
+    if (IsLargeProxy(bounds)) {
+        // 트리의 프록시가 큰 객체가 되었다: 큰 객체 목록으로 옮긴다.
+        auto reserved = large_.TryEnsureCapacity(large_.Size() + 1);
+        if (!reserved) {
+            return reserved;
+        }
+        const detail::ProxyRecord& record = records_.ElementAt(slot);
+        RemoveEntry(node, record.chunk, record.entry);
+        AdjustPath(node, detail::NoNode, false);
+        NoteHeldChange(node);
+        records_.ElementAt(slot).bounds = bounds;
+        MoveToList(slot, detail::LargeProxyNode);
+        ++counters_.reinserts;
+        EnforcePendingLimit();
+        return Result<void>::Success();
+    }
     const detail::ManageNode& manage = Manage(node);
     if (LooseBoundsOf(manage.level, manage.origin).Contains(bounds)) {
         // 제자리 갱신: 지금 노드의 확장 경계 안이면 경계만 고친다(구조 변경 없음).
@@ -928,19 +1014,22 @@ Result<void> LooseOctree::TryUpdateBounds(SpatialProxyHandle handle,
         return Result<void>::Success();
     }
 
-    // 벗어났다: 새 AABB를 포함하는 첫 조상 A를 찾는다. 루트에도 들어가지 않거나 A가 루트인데 중심이
-    // 루트 기본 셀 밖이면 루트 조건(확장 또는 범위 밖 목록)으로 처리한다.
+    // 벗어났다: 확장 경계가 새 AABB를 포함하고 기본 셀이 새 중심을 포함하는 첫 조상 A를 찾는다.
+    // 중심 조건이 있어야 A에서의 하강이 루트에서의 하강(TryAdd)과 같은 노드에 닿는다: 중심이 A의
+    // 기본 셀 안이면 루트에서 A까지의 경로가 배치 규칙의 경로이고, 밖(확장 띠)이면 배치 규칙으로
+    // 고른 어느 자식에도 들어가지 못해 A(내부 노드)에 머물고 유지보수의 하강 재배치로도 내려가지
+    // 않는다. 그런 조상이 없으면 루트 조건(확장 또는 범위 밖 목록)으로 처리한다(루트도 같은 두
+    // 조건이다).
     uint32 ancestor = ParentOf(node);
     while (ancestor != detail::NoNode) {
         const detail::ManageNode& ancestorManage = Manage(ancestor);
-        if (LooseBoundsOf(ancestorManage.level, ancestorManage.origin).Contains(bounds)) {
+        if (LooseBoundsOf(ancestorManage.level, ancestorManage.origin).Contains(bounds) &&
+            CellBoundsOf(ancestorManage.level, ancestorManage.origin).Contains(center)) {
             break;
         }
         ancestor = ParentOf(ancestor);
     }
-    const bool needsRoot = ancestor == detail::NoNode ||
-                           (ancestor == detail::RootNode &&
-                            !CellBoundsOf(rootManage_.level, rootManage_.origin).Contains(center));
+    const bool needsRoot = ancestor == detail::NoNode;
     Placement placement;
     if (needsRoot) {
         placement = PlanPlacement(bounds);
@@ -954,7 +1043,7 @@ Result<void> LooseOctree::TryUpdateBounds(SpatialProxyHandle handle,
             AdjustPath(node, detail::NoNode, false);
             NoteHeldChange(node);
             records_.ElementAt(slot).bounds = bounds;
-            MoveToOutOfRange(slot);
+            MoveToList(slot, detail::OutOfRangeNode);
             ++counters_.reinserts;
             EnforcePendingLimit();
             return Result<void>::Success();
@@ -998,8 +1087,8 @@ Result<void> LooseOctree::TrySetFilter(SpatialProxyHandle handle, uint32 filterM
     }
     detail::ProxyRecord& record = records_[handle.slot];
     record.filter = filterMask;
-    if (record.node == detail::OutOfRangeNode) {
-        outOfRange_[record.chunk].filter = filterMask;
+    if (detail::IsListNode(record.node)) {
+        ListOf(record.node)[record.chunk].filter = filterMask;
     } else {
         chunks_[record.chunk].filter[record.entry] = filterMask;
     }
@@ -1014,8 +1103,8 @@ Result<void> LooseOctree::TrySetUserValue(SpatialProxyHandle handle, uint64 user
     }
     detail::ProxyRecord& record = records_[handle.slot];
     record.userValue = userValue;
-    if (record.node == detail::OutOfRangeNode) {
-        outOfRange_[record.chunk].userValue = userValue;
+    if (detail::IsListNode(record.node)) {
+        ListOf(record.node)[record.chunk].userValue = userValue;
     } else {
         chunks_[record.chunk].userValue[record.entry] = userValue;
     }
@@ -1044,6 +1133,7 @@ void LooseOctree::Clear() noexcept {
     WriterGuard guard(*this);
     records_.Clear();
     outOfRange_.Clear();
+    large_.Clear();
     outOfRangeWarned_ = false;
     FreeAllStructure();
     const int64 origin[3] = {initialOrigin_, initialOrigin_, initialOrigin_};

@@ -157,15 +157,26 @@ struct SubresourceUse {
     uint32 subresource = 0;
     graphics::ResourceAccess access = graphics::ResourceAccess::Unknown;
     GraphAccessFlags flags = GraphAccessFlags::None;
+    // pass attachment다. 그 전이는 장치 BeginPass가 내므로 그래프는 내지 않는다.
+    bool attachment = false;
 };
 
 // 그래프 자원 하나다(텍스처·버퍼).
+struct ResourceRecord;
+
+// 텍스처 subresource(mip, slice)의 번호다(slice × mipLevels + mip, 장치 subresource 순서).
+uint32 SubresourceIndex(const ResourceRecord& resource, uint32 mip, uint32 slice) noexcept;
+
 struct ResourceRecord {
     GraphResourceKind kind = GraphResourceKind::Texture;
     const char* name = "";
     graphics::TextureDesc textureDesc;
     graphics::BufferDesc bufferDesc;
+    // subresource 수(mipLevels × slices)다. 텍스처 subresource 번호는 slice × mipLevels + mip이다
+    // (SubresourceIndex). 버퍼는 1이다.
     uint32 subresources = 1;
+    uint32 mipLevels = 1;
+    uint32 slices = 1;
     bool imported = false;
     bool exported = false;
     // 생산된 적이 있다(import는 처음부터 생산된 것으로 본다).
@@ -197,7 +208,7 @@ struct ResourceRecord {
     bool uploadTarget = false;
     // 어느 Raster pass의 렌더 타깃(attachment)이다.
     bool renderTarget = false;
-    // Sampled 텍스처 업로드의 mip 사슬(MipChainBytes, 프레임 arena)이다.
+    // Sampled 텍스처 업로드의 초기 데이터(TextureDataBytes, 프레임 arena)다.
     uint8* uploadPixels = nullptr;
 };
 
@@ -219,6 +230,16 @@ struct PhysicalResource {
     SlotHandle device;
 };
 
+// 그래프 텍스처 view 하나다(CreateTextureView). 장치 view는 처음 쓰는 pass 직전에 만들고 그래프
+// 끝에 Retire한다.
+struct ViewRecord {
+    uint32 texture = GraphIndexNone;
+    graphics::TextureViewDesc desc;
+    // 텍스처에 맞춰 푼 범위다(접근 선언의 subresource 범위).
+    graphics::ResolvedSubresourceRange range;
+    SlotHandle device;
+};
+
 // 버퍼 업로드 하나다(데이터는 프레임 arena에 복사해 둔다).
 struct BufferUpload {
     uint32 resource = GraphIndexNone;
@@ -237,6 +258,9 @@ struct PassRecord {
     // 이 pass의 subresource 접근이다(GraphState::uses의 [firstUse, firstUse + useCount)).
     uint32 firstUse = 0;
     uint32 useCount = 0;
+    // 이 pass가 선언한 view 번호다(GraphState::passViews의 [firstView, firstView + viewCount)).
+    uint32 firstView = 0;
+    uint32 viewCount = 0;
     // 이 pass가 기대는 생산자 pass다(GraphState::producers의 연결 목록 머리).
     uint32 firstProducer = GraphIndexNone;
     // 부수 효과·외부 출력 pass다(culling 뿌리).
@@ -295,6 +319,9 @@ struct GraphState {
     ArenaArray<GraphTransitionRecord> transitions;
     ArenaArray<PhysicalResource> physicals;
     ArenaArray<BufferUpload> bufferUploads;
+    ArenaArray<ViewRecord> views;
+    // pass마다 선언한 view 번호다(PassRecord::firstView).
+    ArenaArray<uint32> passViews;
     // culling DFS 작업 스택이다.
     ArenaArray<uint32> stack;
     // 장치 전이 묶음 임시 공간이다.

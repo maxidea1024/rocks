@@ -1,5 +1,7 @@
 #include "RenderGraphSelfTest.h"
 
+#include "TextureViewSelfTest.h"
+
 #include <Core/Containers/Array.h>
 #include <Core/Memory/FrameArena.h>
 #include <Platform/Memory.h>
@@ -20,6 +22,7 @@ using rocks::render::GraphPassFlags;
 using rocks::render::GraphPassKind;
 using rocks::render::GraphResourcePool;
 using rocks::render::GraphTexture;
+using rocks::render::GraphTextureView;
 using rocks::render::ReleaseRetiredResource;
 using rocks::render::RenderGraph;
 using rocks::render::RenderGraphDesc;
@@ -37,6 +40,8 @@ TraceScopeName UnusedName("SelfTest.Unused");
 TraceScopeName CompositeName("SelfTest.Composite");
 TraceScopeName CopyName("SelfTest.Copy");
 TraceScopeName ClearName("SelfTest.Clear");
+TraceScopeName HzbFillName("SelfTest.HzbFill");
+TraceScopeName HzbReduceName("SelfTest.HzbReduce");
 
 // 업로드·복사 시험 버퍼 크기다(4 byte 배수).
 constexpr uint32 CopyBytes = 256;
@@ -103,7 +108,7 @@ TextureDesc TargetDesc() noexcept {
     desc.width = TargetSize;
     desc.height = TargetSize;
     desc.usage = TextureUsage::RenderTarget;
-    desc.sampler.filter = Filter::Nearest;
+    desc.sampler.filter = Filter::Point;
     return desc;
 }
 
@@ -423,7 +428,7 @@ bool RunSampledUploadGraph(GraphBench& bench, RenderHandle output, const uint8* 
     desc.width = 1;
     desc.height = 1;
     desc.usage = TextureUsage::Sampled;
-    desc.sampler.filter = Filter::Nearest;
+    desc.sampler.filter = Filter::Point;
     auto lut = graph.CreateTexture(desc, "Uploaded");
     auto target = graph.ImportTexture(output, "Output");
     if (!lut || !target || !graph.UploadTexture(lut.Value(), 0, Span<const uint8>(color, 4))) {
@@ -446,6 +451,111 @@ bool RunSampledUploadGraph(GraphBench& bench, RenderHandle output, const uint8* 
 
 } // namespace
 
+// RG1 남은 것 B부: HZB 축소를 그래프 texture view로 낸다. mip 0을 쓰기 view로 채우고, mip k 읽기
+// view와 mip k + 1 쓰기 view를 가진 Compute pass로 줄인 뒤 export해 모든 mip을 읽는다. 셰이더는
+// view 기준 mip(GraphPassContext::ViewBaseMip)을 상수로 받는다(OpenGL ES는 텍스처 전체가 묶인다).
+bool RunHzbGraph(GraphBench& bench, Allocator& allocator) noexcept {
+    Device& device = *bench.device;
+    auto fill = device.CreateComputePipeline(hzb::FillPipelineDesc());
+    auto reduce = device.CreateComputePipeline(hzb::ReducePipelineDesc());
+    Check(fill && reduce, "HZB compute pipelines");
+    bool ok = fill && reduce;
+    RenderHandle exported;
+    if (ok) {
+        RenderGraph graph(bench.Desc());
+        auto pyramid = graph.CreateTexture(hzb::PyramidDesc(), "Hzb");
+        GraphTextureView reads[hzb::Mips];
+        GraphTextureView writes[hzb::Mips];
+        ok = pyramid.IsOk();
+        for (uint32 mip = 0; ok && mip < hzb::Mips; ++mip) {
+            TextureViewDesc view;
+            view.firstMip = mip;
+            view.mipCount = 1;
+            auto read = graph.CreateTextureView(pyramid.Value(), view);
+            view.access = ViewAccess::ReadWrite;
+            auto write = graph.CreateTextureView(pyramid.Value(), view);
+            ok = read && write;
+            if (ok) {
+                reads[mip] = read.Value();
+                writes[mip] = write.Value();
+            }
+        }
+
+        const PipelineHandle fillPipeline = fill.Value();
+        const PipelineHandle reducePipeline = reduce.Value();
+        if (ok) {
+            GraphPassAccesses accesses(graph);
+            accesses.TextureView(writes[0], ResourceAccess::UavCompute);
+            const GraphTextureView first = writes[0];
+            ok = graph
+                     .AddPass(HzbFillName, GraphPassKind::Compute, GraphPassFlags::None, accesses,
+                              [fillPipeline, first](GraphPassContext& pass) noexcept {
+                                  pass.Commands().SetPipeline(fillPipeline);
+                                  pass.Commands().SetWritableTexture(0, pass.View(first));
+                                  pass.Commands().Dispatch(1, 1);
+                              })
+                     .IsOk();
+        }
+
+        for (uint32 mip = 0; ok && mip + 1 < hzb::Mips; ++mip) {
+            GraphPassAccesses accesses(graph);
+            accesses.TextureView(reads[mip], ResourceAccess::SrvCompute)
+                .TextureView(writes[mip + 1], ResourceAccess::UavCompute);
+            const GraphTextureView read = reads[mip];
+            const GraphTextureView write = writes[mip + 1];
+            const uint32 size = hzb::Extent >> (mip + 1);
+            ok = graph
+                     .AddPass(HzbReduceName, GraphPassKind::Compute, GraphPassFlags::None, accesses,
+                              [reducePipeline, read, write, size](GraphPassContext& pass) noexcept {
+                                  hzb::LevelConstants level;
+                                  level.values[0] = static_cast<float>(pass.ViewBaseMip(read));
+                                  level.values[1] = static_cast<float>(size);
+                                  CommandContext& commands = pass.Commands();
+                                  commands.SetPipeline(reducePipeline);
+                                  commands.SetTexture(pass.View(read));
+                                  commands.SetWritableTexture(0, pass.View(write));
+                                  Check(commands.SetDrawConstants(DrawConstantBytes(level)).IsOk(),
+                                        "HZB reduce draw constants are accepted");
+                                  const uint32 groups =
+                                      (size + hzb::ReduceGroup - 1) / hzb::ReduceGroup;
+                                  commands.Dispatch(groups, groups);
+                              })
+                     .IsOk();
+        }
+
+        auto handle = ok ? graph.ExportTexture(pyramid.Value())
+                         : Result<RenderHandle>::Failure(ErrorCode::InvalidArgument);
+        ok = handle && graph.Execute().IsOk();
+        if (handle) {
+            exported = handle.Value();
+        }
+
+        if (!ok) {
+            PrintGraphError(graph);
+        }
+    }
+
+    Check(ok, "HZB graph executes");
+    auto texture = ok ? bench.handles->Texture(exported)
+                      : Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
+    Check(texture && device.WaitIdle().IsOk() &&
+              hzb::CountMismatchedMips(device, allocator, texture.Value()) == 0,
+          "every mip of the graph-reduced HZB matches the CPU reference");
+    if (!exported.IsNull()) {
+        RetireExport(*bench.handles, device, exported);
+    }
+
+    if (fill) {
+        device.Retire(fill.Value());
+    }
+
+    if (reduce) {
+        device.Retire(reduce.Value());
+    }
+
+    return ok;
+}
+
 uint32 RunRenderGraphChecks(const char* name, Device& device, sample::Renderer& renderer,
                             Allocator& allocator) noexcept {
     failures = 0;
@@ -465,7 +575,7 @@ uint32 RunRenderGraphChecks(const char* name, Device& device, sample::Renderer& 
     TextureDesc redDesc;
     redDesc.width = 1;
     redDesc.height = 1;
-    redDesc.sampler.filter = Filter::Nearest;
+    redDesc.sampler.filter = Filter::Point;
     auto redTexture = device.CreateTexture(redDesc, Span<const uint8>(red, sizeof(red)));
     auto outputTexture = device.CreateTexture(TargetDesc(), {});
     auto output = handles.Reserve(RenderResourceKind::Texture);
@@ -623,6 +733,19 @@ uint32 RunRenderGraphChecks(const char* name, Device& device, sample::Renderer& 
 
     Check(!ok || platform::MemoryEquals(splitPixels[0], splitPixels[1], 4),
           "split and unsplit transitions give the same pixels");
+
+    // RG1 남은 것 B부: 그래프 texture view로 낸 HZB(Storage 형식 능력과 compute가 있는 장치).
+    const TextureDesc hzbDesc = hzb::PyramidDesc();
+    if (ok && device.Caps().features.computeShaders &&
+        HasPixelFormatCaps(device.GetPixelFormatCaps(hzbDesc.format),
+                           RequiredPixelFormatCaps(hzbDesc))) {
+        auto cleared = arena.Reset();
+        (void)cleared;
+        ok = RunHzbGraph(bench, allocator);
+        printf("  %s render graph HZB: view base mip %s\n", name,
+               device.Caps().features.textureViewRanges ? "0 (range views)"
+                                                        : "first mip (whole texture)");
+    }
     printf("  %s render graph split transitions: native %s\n", name,
            device.Caps().features.splitTransitions ? "yes" : "no (lowered at end)");
 

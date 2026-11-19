@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "kind": "data",
+  "name": "UnityOctree",
+  "version": "bbc473571c8a0879024077a928ca658a52ecbd99",
+  "upstreamDirectory": "unityoctree-bbc473571c8a",
+  "source": {
+    "url": "https://github.com/Nition/UnityOctree/archive/bbc473571c8a0879024077a928ca658a52ecbd99.zip",
+    "sha256": "01efa5cb6425cc60fad5ec2cd18ff118cdc4734846312cf94a46db25fb8ee8ad",
+    "verification": "GitHub HTTPS commit archive (2026-11-18, commit bbc473571c8a0879024077a928ca658a52ecbd99 of 2021-06-08, master). There are no releases, so it is pinned to a commit. There is no signature. The commit matches the reference in Docs/Design/SpatialIndex.ko.md."
+  },
+  "licenses": [
+    {
+      "spdx": "BSD-2-Clause",
+      "upstreamExpression": "BSD 2-Clause (LICENCE, Copyright (c) 2014, Nition)",
+      "file": "unityoctree-bbc473571c8a/LICENCE",
+      "binaryNoticeRequired": true
+    }
+  ],
+  "translationUnits": [],
+  "includeDirectories": [],
+  "defines": [],
+  "platformDefines": {},
+  "consumerDefines": [],
+  "adapterHeaders": [],
+  "files": {
+    "LICENCE": "933f2507be5811bdef41e5fcfc22182b95b41d252c445a8367bb8acf692f1345"
+  },
+  "pragmaDirectives": [],
+  "notes": [
+    "Provenance record for benchmark comparison group B (Docs/Design/SpatialIndex.ko.md section 9.1, decision 9). Only LICENCE was extracted byte for byte from the commit archive. No original source file is kept in the repository.",
+    "Programs/SpatialIndexBench/Private/UnityOctreePort.h and UnityOctreePort.cpp re-implement in C++ the behavior and data structures of Scripts/BoundsOctree.cs and Scripts/BoundsOctreeNode.cs at this commit. No source text was copied. Each port file carries the BSD 2-Clause notice and the commit, and its header comment lists every deviation from the original (double instead of float, filter mask, shared allocator instead of GC, C# List rules, added sphere/nearest/count traversals).",
+    "The port is built only into the SpatialIndexBench development executable. It goes into no engine module, test executable or SDK, so it has no embeddedIn. If a binary containing the port is ever distributed, the notice must be reproduced (binaryNoticeRequired)."
+  ]
+}

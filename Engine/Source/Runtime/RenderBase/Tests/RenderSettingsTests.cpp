@@ -99,10 +99,10 @@ TEST(RenderLane_SettingsSnapshotFollowsFramePackets) {
     REQUIRE(lane.Start(config));
 
     // 프레임 1: 세대 1(immediate 꺼짐)을 담는다.
-    SharedPtr<config::ConfigSnapshot> first = settings.Snapshot();
+    SharedPtr<const config::ConfigSnapshot> first = settings.Acquire();
     REQUIRE(first.Get() != nullptr);
     const uint64 firstGeneration = first->Generation();
-    WeakPtr<config::ConfigSnapshot> firstWeak(first);
+    WeakPtr<const config::ConfigSnapshot> firstWeak(first);
     {
         RenderSettingsRef shared = RenderSettingsRef::Share(first);
         CHECK(shared.Get<config::ConfigSnapshot>() == first.Get());
@@ -121,7 +121,7 @@ TEST(RenderLane_SettingsSnapshotFollowsFramePackets) {
                                    "render.graph.immediate", "true"));
     REQUIRE(settings.Sync());
     first = nullptr;
-    SharedPtr<config::ConfigSnapshot> second = settings.Snapshot();
+    SharedPtr<const config::ConfigSnapshot> second = settings.Acquire();
     REQUIRE(second.Get() != nullptr && second->Generation() == firstGeneration + 1);
 
     // 프레임 2: 새 세대를 담는다.
@@ -150,12 +150,12 @@ TEST(RenderLane_SettingsSnapshotFollowsFramePackets) {
 
     // 값을 다시 바꿔 문맥이 새 snapshot을 갖게 하면, 세대 2는 프레임 2 slot만 쥔다. 정지하면 slot에
     // 남은 snapshot을 모두 놓는다.
-    WeakPtr<config::ConfigSnapshot> secondWeak(second);
+    WeakPtr<const config::ConfigSnapshot> secondWeak(second);
     second = nullptr;
     REQUIRE(settings.AddAssignment(config::ConfigLayer::Console, "console",
                                    "render.graph.immediate", "false"));
     REQUIRE(settings.Sync());
-    CHECK(settings.Snapshot()->Generation() == firstGeneration + 2);
+    CHECK(settings.Acquire()->Generation() == firstGeneration + 2);
     CHECK(!secondWeak.IsExpired());
     device.CompleteAll();
     REQUIRE(lane.Shutdown());

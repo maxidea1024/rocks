@@ -71,6 +71,8 @@ Result<GpuFencePoint> D3D12Device::EndFrame() noexcept {
         (void)failed;
     }
 
+    ResolveAttachments();
+
     // 스왑체인 백버퍼만 present 상태로 돌린다. offscreen 대상은 RenderTarget 그대로 둔다(GX5:
     // 다음 사용이 명시 전이나 암묵 전이로 바꾼다).
     if (!presentTarget_.IsNull()) {
@@ -216,8 +218,14 @@ Result<void> D3D12Device::BeginRecording() noexcept {
         view = {};
     }
 
+    for (TextureHandle& view : boundWriteTextures_) {
+        view = {};
+    }
+
+    boundTexture_ = white_.slot;
+
     bufferStates_.Clear();
-    constants_ = DrawConstants{};
+    platform::MemoryZero(constants_, sizeof(constants_));
     stencilReference_ = 0;
     return Result<void>::Success();
 }
@@ -228,7 +236,10 @@ void D3D12Device::StartPass(const PassDesc& pass) noexcept {
     for (uint32 index = 0; index < target_.colorCount; ++index) {
         TextureRecord* color = textures_.Find(target_.colors[index].slot);
         if (color != nullptr) {
-            TrackTransition(*color, target_.colors[index].slot, 0, 1,
+            // attachment의 subresource 하나만 바꾼다(텍스처 GX2 C부).
+            TrackTransition(*color, target_.colors[index].slot,
+                            AttachmentSubresource(color->dimension, target_.colorMips[index],
+                                                  target_.colorSlices[index]),
                             D3D12_RESOURCE_STATE_RENDER_TARGET);
         } else if (index == 0 && target_.resource != nullptr) {
             const D3D12_RESOURCE_BARRIER toTarget = TransitionBarrier(
@@ -239,9 +250,11 @@ void D3D12Device::StartPass(const PassDesc& pass) noexcept {
 
     TextureRecord* depth = textures_.Find(target_.depth.slot);
     if (depth != nullptr) {
-        TrackTransition(*depth, target_.depth.slot, 0, 1,
-                        target_.depthReadOnly ? D3D12_RESOURCE_STATE_DEPTH_READ
-                                              : D3D12_RESOURCE_STATE_DEPTH_WRITE);
+        TrackTransition(
+            *depth, target_.depth.slot,
+            AttachmentSubresource(depth->dimension, target_.depthMip, target_.depthSlice),
+            target_.depthReadOnly ? D3D12_RESOURCE_STATE_DEPTH_READ
+                                  : D3D12_RESOURCE_STATE_DEPTH_WRITE);
     }
 
     list_->OMSetRenderTargets(target_.colorCount, target_.colorCount != 0 ? target_.rtvs : nullptr,
@@ -298,7 +311,7 @@ void D3D12Device::StartPass(const PassDesc& pass) noexcept {
         list_->SetGraphicsRootDescriptorTable(RootBufferViews + slot, srvs_.Gpu(nullBufferSrv_));
     }
 
-    list_->SetGraphicsRoot32BitConstants(RootConstants, ConstantCount, &constants_, 0);
+    list_->SetGraphicsRoot32BitConstants(RootConstants, ConstantCount, constants_, 0);
 }
 
 void D3D12Device::SetPipeline(PipelineHandle handle) noexcept {
@@ -357,7 +370,7 @@ void D3D12Device::SetTexture(TextureHandle handle) noexcept {
     platform::LockGuard lock(gate_);
     TextureRecord* record = textures_.Find(handle.slot);
     SlotHandle slot = handle.slot;
-    if (record == nullptr || !record->hasSrv) {
+    if (record == nullptr || !record->hasSrv || record->writable) {
         record = textures_.Find(white_.slot);
         slot = white_.slot;
     }
@@ -373,26 +386,51 @@ void D3D12Device::SetTexture(TextureHandle handle) noexcept {
         }
 
         // 명시 전이 없이 셰이더 읽기 상태가 아닌 텍스처를 읽으면 암묵 전이로 메운다(GX5. 렌더
-        // 그래프를 거치지 않는 그리기용이다).
+        // 그래프를 거치지 않는 그리기용이다). view는 자기 mip·slice 범위만 본다(텍스처 GX2 A부).
+        // 읽기 상태는 묶인 파이프라인 종류를 따른다: compute는 NON_PIXEL(SrvCompute), 그 밖은
+        // PIXEL(SrvGraphics)이다. 그래서 compute 파이프라인을 먼저 묶어야 그래프가 낸 SrvCompute를
+        // 다시 바꾸지 않는다(RG1 남은 것 B부).
+        const PipelineRecord* pipeline = pipelines_.Find(boundPipeline_);
+        const D3D12_RESOURCE_STATES readState = pipeline != nullptr && pipeline->compute
+                                                    ? D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
+                                                    : D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        const ResolvedSubresourceRange& range = record->viewRange;
         bool readable = true;
-        for (uint32 mip = 0; owner != nullptr && mip < owner->mipLevels; ++mip) {
-            readable =
-                readable && (owner->current[mip] & D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE) != 0;
+        for (uint32 slice = range.firstSlice;
+             owner != nullptr && slice < range.firstSlice + range.sliceCount; ++slice) {
+            for (uint32 mip = range.firstMip; mip < range.firstMip + range.mipCount; ++mip) {
+                readable = readable && (owner->current.At(mip, slice) & readState) != 0;
+            }
         }
 
         if (owner != nullptr && !readable && recording_) {
-            TrackTransition(*owner, ownerSlot, 0, owner->mipLevels, ShaderReadStates);
+            TrackTransition(*owner, ownerSlot, range, ShaderReadStates);
         }
 
+        boundTexture_ = slot;
         list_->SetGraphicsRootDescriptorTable(RootTexture, srvs_.Gpu(record->srv));
         list_->SetGraphicsRootDescriptorTable(RootSampler, samplers_.Gpu(record->sampler));
     }
 }
 
-void D3D12Device::SetConstants(const DrawConstants& constants) noexcept {
+Result<void> D3D12Device::SetDrawConstants(Span<const uint8> bytes) noexcept {
+    platform::LockGuard lock(gate_);
+    const PipelineRecord* pipeline = recording_ ? pipelines_.Find(boundPipeline_) : nullptr;
+    if (pipeline == nullptr || bytes.Size() != pipeline->drawConstantBytes) {
+        return RejectDrawConstantSize(pipeline != nullptr, bytes.Size(),
+                                      pipeline != nullptr ? pipeline->drawConstantBytes : 0u);
+    }
+
+    if (bytes.Size() == 0) {
+        return Result<void>::Success();
+    }
+
+    // 그래픽 root에는 바로 올리고(compute 파이프라인이 묶여 있어도 다음 그리기가 같은 값을 본다),
     // compute는 dispatch 때 같은 값을 compute root 상수로 올린다.
-    constants_ = constants;
-    list_->SetGraphicsRoot32BitConstants(RootConstants, ConstantCount, &constants, 0);
+    platform::MemoryCopy(constants_, bytes.Data(), bytes.Size());
+    list_->SetGraphicsRoot32BitConstants(
+        RootConstants, static_cast<UINT>(bytes.Size() / sizeof(uint32)), constants_, 0);
+    return Result<void>::Success();
 }
 
 void D3D12Device::SetBufferView(uint32 slot, BufferViewHandle handle) noexcept {
@@ -460,7 +498,14 @@ Result<void> D3D12Device::CopyPassTarget(TextureHandle destination) noexcept {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (target_.resource == nullptr || !record->renderTarget || destination == target_.texture ||
+    // 패스 대상은 2D mip 0 attachment여야 한다(자원 전체 복사, 텍스처 GX2 C부).
+    const TextureRecord* passTexture = textures_.Find(target_.texture.slot);
+    const bool wholeTarget =
+        passTexture == nullptr ||
+        (passTexture->dimension == TextureDimension::Texture2D && passTexture->mipLevels == 1);
+    if (target_.resource == nullptr || !record->renderTarget || record->sampleCount > 1 ||
+        target_.sampleCount > 1 || !wholeTarget || record->mipLevels != 1 ||
+        record->dimension != TextureDimension::Texture2D || destination == target_.texture ||
         record->width != target_.width || record->height != target_.height ||
         record->format != target_.format) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -562,7 +607,11 @@ void D3D12Device::TransitionLocked(Span<const ResourceTransition> transitions) n
             record = textures_.Find(slot);
         }
 
-        if (record == nullptr || transition.range.firstMip >= record->mipLevels) {
+        const ResolvedSubresourceRange range =
+            record == nullptr
+                ? ResolvedSubresourceRange{}
+                : ResolveSubresourceRange(transition.range, record->mipLevels, record->slices);
+        if (range.IsEmpty()) {
             ++ignoredDraws_;
             continue;
         }
@@ -572,26 +621,29 @@ void D3D12Device::TransitionLocked(Span<const ResourceTransition> transitions) n
             continue;
         }
 
-        const uint32 first = transition.range.firstMip;
-        const uint32 available = record->mipLevels - first;
-        const uint32 count =
-            transition.range.mipCount < available ? transition.range.mipCount : available;
         if (validation_ && transition.before != ResourceAccess::Unknown &&
             transition.before != ResourceAccess::Discard) {
             const D3D12_RESOURCE_STATES declared = StatesFor(transition.before);
-            for (uint32 mip = first; mip < first + count; ++mip) {
-                if (record->current[mip] != declared) {
-                    ++validationErrors_;
-                    auto failed = Fail("transition before-state differs from the tracked state");
-                    (void)failed;
-                    break;
+            bool matched = true;
+            for (uint32 slice = range.firstSlice;
+                 matched && slice < range.firstSlice + range.sliceCount; ++slice) {
+                for (uint32 mip = range.firstMip; mip < range.firstMip + range.mipCount; ++mip) {
+                    if (record->current.At(mip, slice) != declared) {
+                        matched = false;
+                        break;
+                    }
                 }
+            }
+            if (!matched) {
+                ++validationErrors_;
+                auto failed = Fail("transition before-state differs from the tracked state");
+                (void)failed;
             }
         }
 
         const D3D12_RESOURCE_STATES after = StatesFor(transition.after);
         const bool uav = HasAnyAccess(transition.after, UavAccessMask);
-        TrackTransition(*record, slot, first, count, after, uav);
+        TrackTransition(*record, slot, range, after, uav);
     }
 }
 
@@ -607,45 +659,97 @@ void D3D12Device::LowerBufferTransition(const ResourceTransition& transition) no
     RequireBufferState(record->resource.Get(), StatesFor(transition.after));
 }
 
-// 기록 중 프레임에서 텍스처 mip [first, first + count)를 after로 바꾼다(잠금 안). 바뀌는 mip만
-// barrier를 내고, 모든 mip이 같은 상태에서 바뀌면 한 barrier로 낸다. uavOrder면 이미 같은 UAV
-// 상태인 mip에 UAV barrier를 낸다.
-void D3D12Device::TrackTransition(TextureRecord& record, SlotHandle slot, uint32 first,
-                                  uint32 count, D3D12_RESOURCE_STATES after,
-                                  bool uavOrder) noexcept {
-    bool uniform = first == 0 && count == record.mipLevels;
-    for (uint32 mip = first; mip < first + count && uniform; ++mip) {
-        uniform = record.current[mip] == record.current[first];
+// 기록 중 프레임에서 텍스처 subresource 범위(mip × slice)를 after로 바꾼다(잠금 안). 바뀌는
+// subresource만 barrier를 내고, 전체 범위가 같은 상태에서 바뀌면 한 barrier(ALL_SUBRESOURCES)로
+// 낸다. uavOrder면 이미 같은 UAV 상태인 범위에 UAV barrier를 낸다. barrier는 묶음 칸이 차면 나눠
+// 낸다(배열 slice 수에 상한이 없다).
+// 패스 끝에 MSAA 색 attachment를 resolve 대상에 박스 평균으로 resolve한다(ColorAttachment::
+// resolveTarget, 결정 R17). 원본은 RESOLVE_SOURCE, 대상은 RESOLVE_DEST로 바꿔 resolve하고 대상은
+// 셰이더 읽기 상태로 둔다(잠금 안).
+void D3D12Device::ResolveAttachments() noexcept {
+    for (uint32 index = 0; index < target_.colorCount; ++index) {
+        if (target_.resolves[index].IsNull()) {
+            continue;
+        }
+
+        TextureRecord* source = textures_.Find(target_.colors[index].slot);
+        TextureRecord* target = textures_.Find(target_.resolves[index].slot);
+        if (source == nullptr || target == nullptr) {
+            continue;
+        }
+
+        // MSAA 원본은 2D mip 1이라 subresource 0이고, 대상은 resolve mip·slice 하나다.
+        const ResolvedSubresourceRange whole = {0, 1, 0, 1};
+        const ResolvedSubresourceRange destination = AttachmentSubresource(
+            target->dimension, target_.resolveMips[index], target_.resolveSlices[index]);
+        TrackTransition(*source, target_.colors[index].slot, whole,
+                        D3D12_RESOURCE_STATE_RESOLVE_SOURCE);
+        TrackTransition(*target, target_.resolves[index].slot, destination,
+                        D3D12_RESOURCE_STATE_RESOLVE_DEST);
+        list_->ResolveSubresource(target->resource.Get(),
+                                  d3d12::SubresourceIndex(destination.firstMip,
+                                                          destination.firstSlice, 0,
+                                                          target->mipLevels, target->slices),
+                                  source->resource.Get(), 0, d3d12::MappingOf(source->format).rtv);
+        TrackTransition(*target, target_.resolves[index].slot, destination, ShaderReadStates);
+    }
+}
+
+void D3D12Device::TrackTransition(TextureRecord& record, SlotHandle slot,
+                                  const ResolvedSubresourceRange& range,
+                                  D3D12_RESOURCE_STATES after, bool uavOrder) noexcept {
+    const D3D12_RESOURCE_STATES firstState = record.current.At(range.firstMip, range.firstSlice);
+    bool uniform = range.mipCount == record.mipLevels && range.sliceCount == record.slices;
+    for (uint32 index = 0; index < record.current.Count() && uniform; ++index) {
+        uniform = record.current[index] == firstState;
     }
 
     constexpr uint32 MaxPlanes = 2;
-    D3D12_RESOURCE_BARRIER barriers[MaxMipLevels * MaxPlanes] = {};
+    constexpr uint32 BatchCapacity = 32;
+    D3D12_RESOURCE_BARRIER barriers[BatchCapacity] = {};
     uint32 used = 0;
-    if (uniform && record.current[first] != after) {
-        barriers[used++] = TransitionBarrier(record.resource.Get(), record.current[first], after);
+    bool emitted = false;
+    auto flush = [&]() noexcept {
+        if (used != 0) {
+            list_->ResourceBarrier(used, barriers);
+            used = 0;
+            emitted = true;
+        }
+    };
+    if (uniform) {
+        if (firstState != after) {
+            barriers[used++] = TransitionBarrier(record.resource.Get(), firstState, after);
+        }
     } else {
-        for (uint32 mip = first; mip < first + count; ++mip) {
-            for (uint32 plane = 0; plane < record.devicePlanes && plane < MaxPlanes; ++plane) {
-                if (record.current[mip] != after) {
-                    barriers[used++] =
-                        TransitionSubresource(record.resource.Get(),
-                                              d3d12::SubresourceIndex(mip, plane, record.mipLevels),
-                                              record.current[mip], after);
+        for (uint32 slice = range.firstSlice; slice < range.firstSlice + range.sliceCount;
+             ++slice) {
+            for (uint32 mip = range.firstMip; mip < range.firstMip + range.mipCount; ++mip) {
+                const D3D12_RESOURCE_STATES before = record.current.At(mip, slice);
+                for (uint32 plane = 0; plane < record.devicePlanes && plane < MaxPlanes; ++plane) {
+                    if (before == after) {
+                        continue;
+                    }
+                    if (used == BatchCapacity) {
+                        flush();
+                    }
+                    barriers[used++] = TransitionSubresource(
+                        record.resource.Get(),
+                        d3d12::SubresourceIndex(mip, slice, plane, record.mipLevels, record.slices),
+                        before, after);
                 }
             }
         }
     }
 
-    if (used == 0 && uavOrder) {
+    if (used == 0 && !emitted && uavOrder) {
         barriers[used++] = UavBarrier(record.resource.Get());
     }
 
-    if (used != 0) {
-        list_->ResourceBarrier(used, barriers);
-    }
-
-    for (uint32 mip = first; mip < first + count; ++mip) {
-        record.current[mip] = after;
+    flush();
+    for (uint32 slice = range.firstSlice; slice < range.firstSlice + range.sliceCount; ++slice) {
+        for (uint32 mip = range.firstMip; mip < range.firstMip + range.mipCount; ++mip) {
+            record.current.At(mip, slice) = after;
+        }
     }
 
     if (!record.touched) {
@@ -660,12 +764,10 @@ void D3D12Device::TrackTransition(TextureRecord& record, SlotHandle slot, uint32
 // current를 committed로 되돌린다.
 void D3D12Device::SettleTracking(bool executed) noexcept {
     auto settle = [executed](TextureRecord& record) noexcept {
-        for (uint32 mip = 0; mip < record.mipLevels; ++mip) {
-            if (executed) {
-                record.committed[mip] = record.current[mip];
-            } else {
-                record.current[mip] = record.committed[mip];
-            }
+        if (executed) {
+            record.committed.CopyFrom(record.current);
+        } else {
+            record.current.CopyFrom(record.committed);
         }
 
         record.touched = false;

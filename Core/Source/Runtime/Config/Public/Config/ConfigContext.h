@@ -1,8 +1,11 @@
 #pragma once
 
 #include <Base/Compiler.h>
+#include <Config/CVarDefinition.h>
 #include <Config/ConfigTypes.h>
 #include <Config/ConsoleSettings.h>
+#include <Config/QualityValidation.h>
+#include <Core/Delegate.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Meta/GeneratedType.h>
 #include <Meta/SettingsSchema.h>
@@ -26,10 +29,17 @@
 //   때 펼친다(4.3절).
 // - 사용자 층은 UserConfig 필드만 쓸 수 있다.
 //
-// 스레드: 소유 스레드(만든 스레드 — 게임 lane)에서만 쓴다. 다른 스레드의 호출은 WrongThread다(Get은
-// Fatal). 값은 Sync에서만 바뀌므로 그 사이 Get이 돌려준 참조의 내용은 바뀌지 않는다.
+// 스레드: 소유 스레드(만든 스레드 — 게임 lane)에서 쓴다. 다른 스레드의 호출은 WrongThread다(Get은
+// Fatal). 예외는 Acquire·ClearLayer와 CVar 핸들의 `Set`·`Clear`(쓰기 큐 —
+// Docs/Design/CVarSystem.ko.md 6.2·10.1절)다. 다른 스레드가 snapshot을 쥐기만 해도(마지막 참조를 그
+// 스레드가 놓으면 해제도 그 스레드에서 한다) allocator가 여러 스레드의 동시 호출을 받아야
+// 한다(SystemAllocator 등). 값은 Sync에서만 바뀌므로 그 사이 Get이 돌려준 참조의 내용은 바뀌지
+// 않는다. 소유 스레드는 문맥이 스스로 최신 snapshot에 묶는다(Initialize·Register·Sync — 그 스레드에
+// 명시 묶음이 없을 때). 한 스레드가 여러 문맥의 게임 lane이면 가장 최근에 게시하거나 Sync한 문맥이
+// 묶인다(다른 문맥은 SnapshotBinding 으로 읽는다). 문맥은 소유 스레드에서만 없앤다(아니면 Fatal).
 //
-// 수명: allocator·objects는 문맥보다 오래 살아야 한다. 설정 struct 타입의 모듈(생성 코드)과 그
+// 수명: allocator·objects는 문맥보다 오래 살아야 한다. allocator는 마지막 snapshot 참조와 쓰기
+// 통로(snapshot들이 공유한다)보다도 오래 살아야 한다. 설정 struct 타입의 모듈(생성 코드)과 그
 // TypeRegistry 등록도 문맥보다 오래 살아야 한다(문맥이 TypeLease를 쥔다).
 //
 // 사용 예(시험 — 봉인 모드):
@@ -163,6 +173,22 @@ struct ConfigPendingRestart {
 // 지점에 넣는 데 쓴다.
 using ConfigSyncHook = void (*)(void* context, ConfigContext& config) noexcept;
 
+// 다른 스레드에서 넣은 쓰기(`CVar::Set`·`Clear`·`ClearLayer`)가 한 번의 Sync 전까지 쓰기 큐에 머물
+// 수 있는 수다(넘으면 Busy — 버리지 않는다, Docs/Design/CVarSystem.ko.md 10.1절 표). 소유 스레드의
+// 입력은 이 한도와 무관하다.
+inline constexpr usize MaxQueuedChanges = 65536;
+
+// ReportUnresolved가 제안할 가까운 이름의 최대 편집 거리다(CVar 12절).
+inline constexpr usize MaxSuggestionDistance = 3;
+
+// Sync 한 번의 변경 목록이다(ConfigContext::OnSynced 인자 — CVarSystem.ko.md 7.3절, VD9).
+// variables는 유효값이 바뀐 CVar 핸들 번호(이름 순서), settings는 값이 바뀐 설정 struct(등록
+// 순서)다. 바뀐 것이 없는 Sync도 빈 목록으로 한 번 부른다. view는 콜백 동안만 유효하다.
+struct SyncChanges {
+    Span<const cvar::Index> variables;
+    Span<const TypeId> settings;
+};
+
 class ConfigContext {
 public:
     ConfigContext(Allocator& allocator, ObjectRegistry& objects,
@@ -222,10 +248,13 @@ public:
     // 이름 → 값)다. 섹션은 코드 기본값 위에 적용해 보아 모르는 키·형식·`$` 위치·경로 이름·층 허용을
     // 검사한다(이전 층에 따라 달라지는 배열 연산 결과의 한도는 Sync가 본다).
     // tag는 묶음 이름(같은 층·태그를 Unset으로 한꺼번에 뺀다), sourceName은 진단·출처 표시용이다.
-    // 반환: 진단에 Error가 없으면 성공(Note는 남을 수 있다). 오류: 진단을 남겼으면
+    // 반환: 진단에 Error가 없으면 성공(Note는 남을 수 있다). 소유 스레드의 입력은 쓰기 큐 한도와
+    // 무관하다(Busy가 없다 — 소유자가 스스로 조절한다). 오류: 진단을 남겼으면
     // InvalidArgument(Diagnostics 참조 — 아무것도 큐에 넣지 않는다), layer가 CodeDefault이거나
     // 정의되지 않음 InvalidArgument, 모르는 branch NotFound(진단 UnknownBranch), 다른 스레드
-    // WrongThread, 할당 실패.
+    // WrongThread, 할당 실패. 봉인 뒤 바로 쓰는 층(콘솔·코드·범위 임시 변경)의 입력에 부팅 독립
+    // 콘솔 설정 값이 하나라도 있으면 문서 전체를 거부한다(진단 BootSealed — 같은 입력의 나머지만
+    // 적용하지 않는다).
     Result<void> AddLayerText(ConfigLayer layer, StringView tag, StringView branch,
                               StringView sourceName, StringView text) noexcept;
 
@@ -240,25 +269,30 @@ public:
                                StringView value) noexcept;
 
     // (layer, tag)의 입력을 text 하나로 바꾼다(hot reload — 8절). AddLayerText처럼 검사하고, 받으면
-    // 그 앞에 Unset(layer, tag)를 넣는다(다음 Sync가 옛 입력을 빼고 새 입력을 적용한다). 거부하면
-    // 아무것도 넣지 않는다(옛 입력이 그대로 남는다 — 잘못 고친 파일이 값을 지우지 않는다). 오류:
-    // AddLayerText와 같다.
+    // Unset(layer, tag)과 새 입력을 한꺼번에 큐에 넣는다(다음 Sync가 옛 입력을 빼고 새 입력을
+    // 적용한다 — 다른 스레드의 쓰기가 그 사이에 끼지 않는다). 거부하면 아무것도 넣지 않는다(옛
+    // 입력이 그대로 남는다 — 잘못 고친 파일이 값을 지우지 않는다). 오류: AddLayerText와 같다(Busy
+    // 없음).
     Result<void> ReplaceLayerText(ConfigLayer layer, StringView tag, StringView branch,
                                   StringView sourceName, StringView text) noexcept;
 
     // (layer, tag)의 모든 입력을 다음 Sync에서 뺀다(3.1절 `Unset` — 기능 묶음 해제, 품질 등급 변경,
     // 시험 정리). 큐 순서대로 처리하므로 그보다 먼저 넣은 입력(같은 Sync에 들어갈 것 포함)만 뺀다.
-    // 없는 태그는 무동작이다. 오류: layer 범위 InvalidArgument, 다른 스레드 WrongThread, 할당 실패.
+    // 없는 태그는 무동작이다. 쓰기 큐 한도와 무관하다(Busy 없음). 오류: 초기화 전·layer 범위
+    // InvalidArgument, 다른 스레드 WrongThread, 할당 실패.
     Result<void> Unset(ConfigLayer layer, StringView tag) noexcept;
 
-    // sync 지점이다(5.3절): 큐를 순서대로 적용하고 모든 섹션 값·콘솔 설정 값과 출처 스택을 다시
-    // 합친다. 그 뒤 큐에 든 콘솔 명령을 실행하고, 값이 바뀐 대상의 구독 콜백을 구독 순서대로
-    // 부르고, RenderRead 값이 바뀌었으면 새 설정 snapshot(세대 +1)을 만든다. 콜백 안에서 Sync를
-    // 부르면 Busy다. 새 입력이 더 강한 출처에 가려졌으면 진단 Note WeakWrite를 남긴다. 적용에
-    // 실패한 입력(이전 층에 따라 달라진 배열 연산 결과가 원소 수 한도를 넘는 등)은 그 섹션에서
-    // 건너뛰고 Error 진단을 남긴다(값은 나머지 입력으로 합친다). 큐가 비었으면 아무것도 하지
-    // 않는다. 오류: 다른 스레드 WrongThread, 할당 실패(OutOfMemory — 그때 값은 Sync 전 그대로이고
-    // 큐도 그대로다).
+    // sync 지점이다(Docs/Design/CVarSystem.ko.md 10절 순서): 0) sync hook을 등록 순서대로 부른다
+    // 1) 쓰기 큐를 넣은 순서대로 적용한다(다른 스레드에서 넣은 쓰기는 여기서 다시 검사하고,
+    // 거부되면 진단을 남기고 버린다) 2) 모든 섹션 값·콘솔 설정 값과 출처 스택을 다시 합친다(묶음
+    // 펼침 반복은 CVR5 — 지금은 한 번) 3) 유효값이 바뀐 CVar 칸의 세대를 올린다 4) 바뀐 조각만 새로
+    // 만든 snapshot을 게시하고 게임 lane을 다시 묶는다(바뀐 것이 없으면 같은 snapshot) 5) 큐에 든
+    // 콘솔 명령을 실행하고 값이 바뀐 대상의 구독 콜백(CF2 — CVR7까지)을 부른다 6) OnSynced를
+    // 부른다. 콜백 안에서 Sync를 부르면 Busy다. 새 입력이 더 강한 출처에 가려졌으면 진단 Note
+    // WeakWrite를 남긴다. 적용에 실패한 입력(이전 층에 따라 달라진 배열 연산 결과가 원소 수 한도를
+    // 넘는 등)은 그 섹션에서 건너뛰고 Error 진단을 남긴다(값은 나머지 입력으로 합친다). 오류: 다른
+    // 스레드 WrongThread, 할당 실패(OutOfMemory — 그때 값은 Sync 전 그대로이고 꺼낸 쓰기는 다음
+    // Sync가 이어서 적용한다).
     Result<void> Sync() noexcept;
 
     // 다음 Sync가 적용할 입력이 큐에 있는지다.
@@ -276,6 +310,29 @@ public:
     // WrongThread, 할당 실패.
     Result<void> GetPendingRestarts(Array<ConfigPendingRestart>& out) const noexcept;
 
+    // 품질 조합 검증 입력을 정한다(Config 6.1 — Config/QualityValidation.h). Sync가 프리셋
+    // 묶음(CVarGroup)을 펼치기 전에 묶음 변수의 등급(사용자가 고른 등급)을 이 규칙으로 낮춘 등급을
+    // 펼친다. 묶음 변수 자체는 바꾸지 않는다(장치가 바뀌면 원래 선택이 살아난다 — CVar 11절).
+    // 정의된 등급은 등록된 묶음 정의에서 온다. 등록되지 않은 묶음의 규칙은 건너뛰고
+    // ReportUnresolved가 알린다(정의되지 않은 등급의 규칙도). traits가 null이면 검증하지 않는다.
+    // groups·budgets·traits는 빌린다: 다음 호출이나 문맥 파괴까지 살아 있어야 한다. 다음 Sync가
+    // 묶음을 다시 해결한다. 오류: 초기화 전 InvalidArgument, 다른 스레드 WrongThread.
+    //
+    // 사용 예(호스트 — 규칙은 문맥보다 오래 사는 저장소에 둔다):
+    //   QualityLevelRule shadowRules[] = {{3, epicNeeds, {}}};   // 등급 3은 epicNeeds 기기 조건
+    //   QualityGroupRule rules[] = {{"quality.shadow", 0, shadowRules}};
+    //   REQUIRE(config.SetQualityValidation(rules, {}, &traits));
+    Result<void> SetQualityValidation(Span<const QualityGroupRule> groups,
+                                      Span<const QualityBudgetRule> budgets,
+                                      const DeviceTraits* traits) noexcept;
+
+    // 마지막 Sync가 펼친 묶음별 결과다(등록 순서 — 한 번도 펼치지 않은 묶음은 없다): 요청 등급(묶음
+    // 변수 값), 펼친 등급, 낮춘 사유, 가장 낮은 등급도 맞지 않음, 넘친 예산 사유. 콘솔 Explain의
+    // `quality.shadow@1 (requested 3, lowered: <사유>)`(FormatQualityResolution)가 쓴다(CVR6).
+    // out은 먼저 비운다. 오류: 초기화 전 InvalidArgument, 다른 스레드 WrongThread, 할당 실패(out은
+    // 빈다).
+    Result<void> GetQualityLevels(QualityResolutionSet& out) const noexcept;
+
     // 섹션(branch, section)의 필드 경로(도구 이름 — `Inner.x`, 컨테이너는 그 필드)의 출처 스택을
     // out에 쓴다(약한 것부터 — 마지막이 현재 값의 출처). 경로는 대입이 닿은 override
     // 단위다(컨테이너 필드는 그 필드 경로). 기본값뿐이면 빈 목록이다. 오류: 모르는 섹션 NotFound,
@@ -285,6 +342,30 @@ public:
 
     // 진단 모음이다(AddLayerText·AddAssignment·Sync가 더한다 — 호출자가 Clear로 비운다).
     ConfigDiagnostics& Diagnostics() noexcept;
+
+    // 모은 진단을 out 뒤에 옮겨 담고 문맥의 모음을 비운다(CVar 12절 — 넘친 수도 out에 더한다). 전부
+    // 옮기거나 하나도 옮기지 않는다. 오류: 초기화 전·out이 문맥의 모음 자신이면 InvalidArgument,
+    // 다른 스레드 WrongThread, out의 할당 실패(그때 out과 문맥의 모음 모두 그대로다).
+    Result<void> TakeDiagnostics(ConfigDiagnostics& out) noexcept;
+
+    // 시작 뒤에도 등록되지 않은 콘솔 이름의 값(파일 `Settings`·콘솔 이름 대입의 대기 값)을 이름마다
+    // 한 번 Warning UnresolvedName으로 남긴다(CVar 12절). 편집 거리(Core EditDistance — 대소문자
+    // 구분)가 MaxSuggestionDistance 이하인 등록 이름(콘솔 설정·명령 — 출시 규칙에서 숨긴 것
+    // 제외)이 있으면 가장 가까운 것을 메시지에 `did you mean '<이름>'?`로 붙인다. 콘솔 명령 이름에
+    // 넣은 값도 같은 코드로 "명령은 값을 받지 않는다"고 알린다. 한 문맥에서 이미 보고한 이름은 다시
+    // 보고하지 않는다(여러 번 불러도 된다). 호스트가 CompleteStartup 바로 뒤에 부른다. 반환: 이번에
+    // 새로 보고한 이름 수. 오류: 초기화 전 InvalidArgument, 다른 스레드 WrongThread, 할당 실패(그때
+    // 보고하지 못한 이름은 다음 호출이 다시 본다).
+    //
+    // 사용 예:
+    //   REQUIRE(config.CompleteStartup());
+    //   auto unresolved = config.ReportUnresolved();
+    Result<usize> ReportUnresolved() noexcept;
+
+    // 콘솔 설정 하나의 설명이다(이름·도움말·종류·지금 값·부팅 변수 여부·재시작 대기 값 — 콘솔
+    // Explain·dump가 `[boot]`·`pending restart: <값>`을 보이는 데 쓴다). 오류: 무효 핸들
+    // InvalidArgument, 다른 스레드 WrongThread.
+    Result<ConsoleSettingInfo> DescribeConsoleSetting(ConsoleSettingId id) const noexcept;
 
     // ---- 콘솔 설정·명령(Docs/Design/ConfigSystem.ko.md 5절 — 설정 CF2) ----
     //
@@ -307,6 +388,53 @@ public:
     // 실패.
     Result<ConsoleSettingId>
     RegisterConsoleSetting(const ConsoleSettingDefinition& definition) noexcept;
+
+    // CVar 핸들(`CVar<T>`·`BootCVar<T>` — Config/CVar.h)을 등록한다(Docs/Design/CVarSystem.ko.md
+    // 5절, VD1). 모듈 등록 함수에서 그 모듈의 핸들을 모두 넘긴다(Policy `cvar-registration`이
+    // 누락을 잡는다). 핸들 번호(Index)는 처음 등록될 때 프로세스 전체에서 한 번 정해진다(문맥이
+    // 여럿이어도 같은 핸들은 같은 번호). 이미 들어온 층 입력(대기 값)을 바로 검사·적용한다(거부한
+    // 값은 진단을 남기고 건너뛴다 — 등록은 성공한다). 등록한 변수는 독립 콘솔 설정과 같은 이름
+    // 공간·값 저장소에 들고(FindConsoleSetting·ConsoleValue로 보인다), 등록은 바로 보인다: 기존
+    // 칸은 그대로 두고 새 칸만 더한 snapshot을 그 자리에서 게시하고 게임 lane을 다시 묶는다(VD17 —
+    // 등록 직후 같은 프레임에 `Get()`해도 된다. 등록 전에 만든 snapshot에는 칸이 없다). 출시 빌드의
+    // `Cheat()` 변수는 건너뛴다(13.1절 — 번호도 받지 않는다).
+    //
+    // 넘긴 핸들을 모두 검사한 뒤에 등록한다(하나라도 거부하면 아무것도 등록하지 않고 진단도 남기지
+    // 않는다). 같은 핸들을 다시 넘기면(같은 호출 안 포함) 성공이다(멱등). 프리셋 묶음(CVarGroup)은
+    // int32 등급 변수로 등록되고, 등급 항목은 다음 Sync가 품질 묶음 층에 펼친다(CVar 11절) — 그래서
+    // 묶음 등록 직후 다음 Sync 전까지는 묶음 등급 칸과 항목 값이 어긋나 보인다. 묶음의 묶음
+    // 순환·자기 참조와 같은 변수를 항목으로 가진 두 묶음은 거부한다(InvalidArgument — 이 거부만
+    // Error GroupConflict 진단을 남긴다). 묶음과 항목 변수가 둘 다 등록되면 코드 프리셋 값을 항목
+    // 변수의 규칙으로 검사해 맞지 않는 것마다 Error를 한 번 남긴다(등록은 성공하고 그 항목은 펼치지
+    // 않는다).
+    //
+    // 사용 예:
+    //   Result<void> RegisterRenderVars(ConfigContext& config) noexcept {
+    //       return config.Register(ShadowDistance, ShadowQualityLevel, GraphicsBackend);
+    //   }
+    //
+    // 오류: 초기화 전 InvalidArgument, 영역 표에 없는 이름의 첫 마디 InvalidArgument, 호출 스레드
+    // 스택 위의 지역 핸들 InvalidArgument(Debug·Development — 핸들은 정적 저장 기간이어야 한다),
+    // 같은 이름을 다른 핸들·독립 설정·설정 struct 필드가 이미 쓰면 같은 타입 AlreadyExists·다른
+    // 타입 TypeMismatch, 콘솔 명령이 쓰면 AlreadyExists, Name 변수인데 문맥 Registry에 NamePool이
+    // 없으면 Unsupported(pool의 오류 — ShuttingDown 등 — 는 그대로), 소유 스레드가 아니면 모든
+    // 구성에서 WrongThread, 할당 실패. 호스트는 AlreadyExists·TypeMismatch를 부트 실패로 다룬다.
+    // 스레드: 게임 lane(소유 스레드) 전용이다.
+    template <class... Handles>
+    Result<void> Register(const Handles&... handles) noexcept {
+        static_assert(sizeof...(Handles) != 0, "ConfigContext::Register needs at least one handle");
+        constexpr bool handlesOnly = (cvar::detail::IsHandle<Handles> && ...);
+        static_assert(
+            handlesOnly,
+            "ConfigContext::Register takes CVar, BootCVar or CVarGroup handles (Config/CVar.h)");
+        if constexpr (handlesOnly) {
+            const cvar::detail::VarDefinition* const definitions[] = {
+                &cvar::detail::HandleAccess::Definition(handles)...};
+            return RegisterHandles(Span<const cvar::detail::VarDefinition* const>(definitions));
+        } else {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
 
     // 이름의 콘솔 설정 핸들이다(필드 설정 포함, 출시 규칙에서 숨긴 것 제외). 오류: 없으면 NotFound,
     // 다른 스레드 WrongThread.
@@ -363,17 +491,46 @@ public:
     // NotFound, 다른 스레드 WrongThread.
     Result<void> Unsubscribe(ConfigSubscriptionId id) noexcept;
 
-    // 시작이 끝났음을 알린다. 그 뒤로 부팅 값(StartupOnly·RestartRequired — 콘솔 설정·설정 struct
-    // 필드)은 이번 실행 동안 지금 값을 유지한다: 파일 층(엔진·프로젝트·플랫폼·사용자)에서 온 변경은
-    // 재시작 대기(GetPendingRestarts)로, 그 밖의 층(기기 프로필·품질 같은 파생 층, 세션·콘솔 같은
-    // 휘발 층)에서 온 변경은 Warning BootValueIgnored(같은 이름·층·출처에 한 번)로 남긴다. 쓰기
-    // 자체는 거부하지 않는다. 오류: 다른 스레드 WrongThread.
+    // 시작이 끝났음을 알리고 부팅 값을 봉인한다(CVar 9절). 부팅 변수(BootCVar)의 지금 값을 불변
+    // 부팅 블록으로 굳혀 새 snapshot으로 게시한다(봉인 뒤 snapshot의 부팅 값은 모두 같다 —
+    // BootCVar::Get이 읽는다). 그 뒤로 부팅 값(StartupOnly·RestartRequired — 콘솔 설정·설정 struct
+    // 필드)은 이번 실행 동안 지금 값을 유지한다:
+    // - 독립 콘솔 설정(BootCVar 포함)에 바로 쓰는 층(콘솔·코드·범위 임시 변경)의 쓰기는 넣을 때
+    //   Error BootSealed로 거부한다(이름을 몰라 받은 쓰기는 그 이름을 늦게 등록할 때 받지 않고
+    //   BootSealed를 남긴다).
+    // - 파일 층(엔진·프로젝트·플랫폼·사용자)에서 온 변경은 재시작 대기(GetPendingRestarts)다.
+    // - 그 밖의 층(기기 프로필·품질 같은 파생 층, 세션·서버 같은 휘발 층)과 설정 struct 필드의 콘솔
+    //   쓰기는 Warning BootValueIgnored(같은 이름·층·출처에 한 번)다.
+    // 큐에 남은 쓰기가 있으면(HasPendingChanges) 봉인하지 않고 Busy다 — 먼저 Sync한다. 두 번째
+    // 호출은 아무것도 하지 않고 성공한다. 오류: 초기화 전 InvalidArgument, 남은 쓰기 Busy, 다른
+    // 스레드 WrongThread, 할당 실패(그때는 봉인하지 않는다 — 다시 부를 수 있다).
     Result<void> CompleteStartup() noexcept;
 
-    // 마지막 Sync의 설정 snapshot이다(5.3절 — RenderRead 값의 불변 블록과 세대 번호). 첫 Sync
-    // 전에는 null이다. RenderRead 값이 바뀌지 않은 Sync는 같은 snapshot(같은 세대)을 돌려준다. 렌더
-    // lane은 이 snapshot만 읽는다(문맥은 읽지 않는다). 소유 스레드가 아니면 Fatal.
-    SharedPtr<ConfigSnapshot> Snapshot() const noexcept;
+    // 마지막으로 게시한 설정 snapshot이다(Docs/Design/CVarSystem.ko.md 7.2절 — CVar 칸과 RenderRead
+    // 이름 블록, Config 5.3절). 어느 스레드에서나 부를 수 있다(게시와 함께 짧은 잠금을 잡는다 —
+    // 읽기 경로가 아니다). Initialize가 빈 snapshot을 게시하므로 초기화 뒤에는 null이 아니다(초기화
+    // 전이면 null). 바뀐 것이 없는 Sync는 같은 snapshot(같은 세대)을 남긴다. 렌더 lane·worker는 이
+    // snapshot을 cvar::SnapshotBinding으로 묶어 `CVar::Get()`으로 읽는다.
+    //
+    // 사용 예(다른 스레드):
+    //   cvar::SnapshotBinding bind{config.Acquire()};
+    //   const float distance = ShadowDistance.Get();
+    SharedPtr<const ConfigSnapshot> Acquire() const noexcept;
+
+    // 층 하나의 모든 입력(모든 태그)을 다음 Sync에서 뺀다(6.1절 —
+    // `ClearLayer(ConfigLayer::Hotfix)`로 핫픽스 전체를 되돌린다). 어느 스레드에서나 부를 수
+    // 있다(쓰기 큐에 넣는다). 오류: 초기화 전·CodeDefault·정의되지 않은 층 InvalidArgument, 다른
+    // 스레드에서 불렀는데 큐 한도를 넘으면 Busy, 할당 실패.
+    Result<void> ClearLayer(ConfigLayer layer) noexcept;
+
+    // Sync마다 한 번(값 적용·snapshot 게시·명령 실행 뒤) 부르는 변경 알림이다(7.3절, VD9 — 변수
+    // 하나마다의 콜백은 없다). 게임 lane에서 문맥 잠금 없이 부른다. 콜백 안의 `Set`·층 입력은 다음
+    // Sync에 적용되고, 콜백 안에서 Sync를 부르면 Busy다. 소유 스레드에서만 더하고 뺀다.
+    //
+    // 사용 예:
+    //   auto handle = config.OnSynced().TryAddLambda([](const SyncChanges& changes) noexcept { ...
+    //   });
+    MulticastDelegate<void(const SyncChanges&)>& OnSynced() noexcept;
 
     // 내부 상태다(config-dump·파일 로더 등 모듈 안 구현이 쓴다). 초기화 전이면 null이다.
     detail::ConfigState* State() const noexcept {
@@ -382,6 +539,8 @@ public:
 
 private:
     Result<void> RegisterSettingsType(const detail::SettingsTypeOps& ops) noexcept;
+    Result<void>
+    RegisterHandles(Span<const cvar::detail::VarDefinition* const> definitions) noexcept;
     Result<void> RegisterConsoleCommandType(const ConsoleCommandDefinition& definition,
                                             const detail::SettingsTypeOps* arguments) noexcept;
     Result<ConfigSubscriptionId> SubscribeSection(TypeId settings, ConfigChangeCallback callback,

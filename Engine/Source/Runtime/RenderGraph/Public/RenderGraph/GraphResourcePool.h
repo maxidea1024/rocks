@@ -64,7 +64,7 @@ struct GraphPoolEntry {
 // - 키는 desc다: 텍스처는 크기·형식(PixelFormat)·용도·mip 수와 샘플러, 버퍼는 크기·용도·stride.
 //   샘플러는 지금 장치가 텍스처 desc의 샘플러로 묶으므로 키에 넣는다(결정 R12의 바인딩 때 샘플러
 //   지정이 들어오면 뺀다). desc가 넓어지면(GX2: 차원·array·샘플 수) 키 비교 함수 하나만 고친다.
-// - 풀 byte 합은 PixelFormatInfo 기준 mip 사슬 크기(MipChainBytes, 장치 정렬 제외)의 추정이다.
+// - 풀 byte 합은 PixelFormatInfo 기준 mip 사슬 크기(TextureDataBytes, 장치 정렬 제외)의 추정이다.
 // - 같은 그래프 안의 재사용(수명이 겹치지 않는 같은 desc 자원)은 그래프가 실행 전에 정한다(RG2,
 //   그래프 쪽 계획). 풀은 그래프가 끝날 때 Release한 자원을 다음 그래프에 준다. 단일 graphics
 //   queue에서는 GPU가 제출 순서대로 실행하므로 이전 프레임의 GPU 완료를 기다리지 않고 다시 써도
@@ -101,7 +101,8 @@ public:
     // 쓰지 않는 같은 키의 자원을 주거나 새로 만든다. 반납 대기 가운데 fence가 끝난 것을 먼저
     // 거둔다(CollectReturned).
     // - RenderTarget 텍스처: pixels는 비어 있어야 한다(내용은 GPU가 채운다).
-    // - Sampled 텍스처: pixels는 mip 0부터 빈틈 없는 mip 사슬(MipChainBytes 크기)이며, 새로 만들면
+    // - Sampled 텍스처: pixels는 mip 0부터 빈틈 없는 초기 데이터(TextureDataBytes 크기, TextureDesc
+    // 배치)이며, 새로 만들면
     //   생성 초기 데이터로, 다시 주면 mip마다 장치 UpdateTexture로 그 내용을 채운다(그래프 안
     //   업로드).
     // - 버퍼: 새로 만들면 0으로 채운다. 다시 준 버퍼의 내용은 이전 사용의 것이다.

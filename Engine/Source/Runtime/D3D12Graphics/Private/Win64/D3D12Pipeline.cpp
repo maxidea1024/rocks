@@ -175,11 +175,12 @@ Result<PipelineHandle> D3D12Device::CreatePipeline(const PipelineDesc& desc) noe
     }
 
     DrawBufferSlots bufferSlots;
-    auto vertexBindings =
-        ReflectBindings(vertexCode.Get(), ShaderStage::Vertex, bufferSlots, nullptr);
-    auto pixelBindings =
-        vertexBindings ? ReflectBindings(pixelCode.Get(), ShaderStage::Pixel, bufferSlots, nullptr)
-                       : Move(vertexBindings);
+    auto vertexBindings = ReflectBindings(vertexCode.Get(), ShaderStage::Vertex,
+                                          desc.drawConstantBytes, bufferSlots, nullptr);
+    auto pixelBindings = vertexBindings
+                             ? ReflectBindings(pixelCode.Get(), ShaderStage::Pixel,
+                                               desc.drawConstantBytes, bufferSlots, nullptr)
+                             : Move(vertexBindings);
     if (!pixelBindings) {
         return Result<PipelineHandle>::Failure(pixelBindings.Error());
     }
@@ -247,10 +248,12 @@ Result<PipelineHandle> D3D12Device::CreatePipeline(const PipelineDesc& desc) noe
                          static_cast<UINT>(desc.layout.attributes.Size())};
     state.PrimitiveTopologyType = TopologyTypeOf(desc.topology);
     state.NumRenderTargets = desc.colorTargetCount;
-    state.SampleDesc.Count = 1;
+    state.SampleDesc.Count = desc.sampleCount;
+    state.RasterizerState.MultisampleEnable = desc.sampleCount > 1 ? TRUE : FALSE;
 
     PipelineRecord record;
     record.bufferSlots = bufferSlots;
+    record.drawConstantBytes = desc.drawConstantBytes;
     record.topology = TopologyOf(desc.topology);
     record.writesDepthStencil = PipelineWritesDepthStencil(desc);
     for (usize index = 0; index < desc.layout.streams.Size(); ++index) {
@@ -350,8 +353,10 @@ Result<void> D3D12Device::MatchVertexInputs(ID3DBlob* code, const VertexLayout& 
 // 셰이더 자원이 고정 배치(PipelineDesc·ComputePipelineDesc) 안인지 보고 버퍼 view slot 배치를
 // 더한다. b0 상수, PS t0 텍스처·s0 샘플러, t1–t4 버퍼 SRV, compute의 u0–u3 버퍼 UAV(writeSlots)만
 // 받는다. 두 단계가 같은 slot을 다른 종류로 읽거나 배치 밖 자원이면 InvalidArgument다.
-Result<void> D3D12Device::ReflectBindings(ID3DBlob* code, ShaderStage stage, DrawBufferSlots& slots,
-                                          DrawBufferSlots* writeSlots) noexcept {
+Result<void> D3D12Device::ReflectBindings(ID3DBlob* code, ShaderStage stage,
+                                          uint32 drawConstantBytes, DrawBufferSlots& slots,
+                                          DrawBufferSlots* writeSlots,
+                                          uint32* writeTextures) noexcept {
     ComRef<ID3D12ShaderReflection> reflection;
     D3D12_SHADER_DESC shader = {};
     if (FAILED(D3DReflect(code->GetBufferPointer(), code->GetBufferSize(),
@@ -361,6 +366,8 @@ Result<void> D3D12Device::ReflectBindings(ID3DBlob* code, ShaderStage stage, Dra
     }
 
     const bool pixel = stage == ShaderStage::Pixel;
+    // t0·s0(SetTexture)는 PS와 CS가 읽는다(텍스처 GX2 A부).
+    const bool textureStage = pixel || stage == ShaderStage::Compute;
     for (UINT index = 0; index < shader.BoundResources; ++index) {
         D3D12_SHADER_INPUT_BIND_DESC resource = {};
         if (FAILED(reflection->GetResourceBindingDesc(index, &resource))) {
@@ -378,15 +385,25 @@ Result<void> D3D12Device::ReflectBindings(ID3DBlob* code, ShaderStage stage, Dra
                                                                : PixelShaderType::Float);
         bool fits = false;
         switch (resource.Type) {
-        case D3D_SIT_CBUFFER:
+        case D3D_SIT_CBUFFER: {
             fits = single && resource.BindPoint == 0;
+            // 그리기별 상수 블록은 파이프라인이 선언한 크기 안이어야 한다(작은 것은 허용).
+            ID3D12ShaderReflectionConstantBuffer* block =
+                fits ? reflection->GetConstantBufferByName(resource.Name) : nullptr;
+            D3D12_SHADER_BUFFER_DESC blockDesc = {};
+            if (block != nullptr && SUCCEEDED(block->GetDesc(&blockDesc)) &&
+                blockDesc.Size > drawConstantBytes) {
+                return RejectDrawConstants(stage, blockDesc.Size, drawConstantBytes);
+            }
+
             break;
+        }
         case D3D_SIT_SAMPLER:
-            fits = single && pixel && resource.BindPoint == 0;
+            fits = single && textureStage && resource.BindPoint == 0;
             break;
         case D3D_SIT_TEXTURE:
             if (resource.Dimension != D3D_SRV_DIMENSION_BUFFER) {
-                fits = single && pixel && resource.BindPoint == 0;
+                fits = single && textureStage && resource.BindPoint == 0;
                 break;
             }
 
@@ -405,7 +422,21 @@ Result<void> D3D12Device::ReflectBindings(ID3DBlob* code, ShaderStage stage, Dra
                                   resource.Type == D3D_SIT_STRUCTURED ? resource.NumSamples : 0u);
             break;
         case D3D_SIT_UAV_RWTYPED:
-            fits = single && writeSlot && resource.Dimension == D3D_SRV_DIMENSION_BUFFER &&
+            if (resource.Dimension != D3D_SRV_DIMENSION_BUFFER) {
+                // 텍스처 UAV(RWTexture2D·2DArray·3D)는 SetWritableTexture slot이다.
+                const bool textureDimension =
+                    resource.Dimension == D3D_SRV_DIMENSION_TEXTURE2D ||
+                    resource.Dimension == D3D_SRV_DIMENSION_TEXTURE2DARRAY ||
+                    resource.Dimension == D3D_SRV_DIMENSION_TEXTURE3D;
+                fits = single && writeSlot && writeTextures != nullptr && textureDimension;
+                if (fits) {
+                    *writeTextures |= 1u << resource.BindPoint;
+                }
+
+                break;
+            }
+
+            fits = single && writeSlot &&
                    AddDrawBufferSlot(*writeSlots, resource.BindPoint, BufferViewKind::Typed, type);
             break;
         case D3D_SIT_UAV_RWSTRUCTURED:
@@ -427,13 +458,43 @@ Result<void> D3D12Device::ReflectBindings(ID3DBlob* code, ShaderStage stage, Dra
             message.Text(pixel ? "pixel" : (stage == ShaderStage::Vertex ? "vertex" : "compute"))
                 .Text(" shader resource ")
                 .Text(resource.Name != nullptr ? resource.Name : "?")
-                .Text(" is outside the fixed layout (b0, pixel t0 and s0, buffer views t1-t4, "
-                      "compute buffer UAVs u0-u3; no UAVs in graphics stages)");
+                .Text(" is outside the fixed layout (b0, pixel and compute t0 and s0, buffer "
+                      "views t1-t4, compute buffer or texture UAVs u0-u3; no UAVs in graphics "
+                      "stages)");
             return Reject(message);
         }
     }
 
     return Result<void>::Success();
+}
+
+Result<void> D3D12Device::RejectDrawConstants(ShaderStage stage, uint32 shaderBytes,
+                                              uint32 drawConstantBytes) noexcept {
+    Diagnostic message;
+    message
+        .Text(stage == ShaderStage::Pixel ? "pixel"
+                                          : (stage == ShaderStage::Vertex ? "vertex" : "compute"))
+        .Text(" shader reads ")
+        .Number(shaderBytes)
+        .Text(" bytes of draw constants but the pipeline declares drawConstantBytes ")
+        .Number(drawConstantBytes);
+    return Reject(message);
+}
+
+Result<void> D3D12Device::RejectDrawConstantSize(bool pipelineBound, usize bytes,
+                                                 uint32 drawConstantBytes) noexcept {
+    Diagnostic message;
+    if (!pipelineBound) {
+        message.Text("SetDrawConstants needs a pipeline bound while recording");
+    } else {
+        message.Text("SetDrawConstants got ")
+            .Number(bytes > NumericLimits<uint32>::Max() ? NumericLimits<uint32>::Max()
+                                                         : static_cast<uint32>(bytes))
+            .Text(" bytes but the bound pipeline declares drawConstantBytes ")
+            .Number(drawConstantBytes);
+    }
+
+    return Reject(message);
 }
 
 Result<void> D3D12Device::Reject(const Diagnostic& message) noexcept {
@@ -500,8 +561,8 @@ Result<void> D3D12Device::CreateRootSignature() noexcept {
 Result<void> D3D12Device::Compile(StringView source, const char* entry, const char* target,
                                   ComRef<ID3DBlob>& code) noexcept {
     ComRef<ID3DBlob> errors;
-    // 행렬은 행 우선으로 담는다(DrawConstants 규약, ShaderSystem 7.2절 6항 FXC /Zpr). UE도 같은
-    // 플래그로 컴파일한다(D3DShaderCompiler.cpp:1337–1339).
+    // 행렬은 행 우선으로 담는다(그리기별 상수의 행렬 규약, ShaderSystem 7.2절 6항 FXC /Zpr). UE도
+    // 같은 플래그로 컴파일한다(D3DShaderCompiler.cpp:1337–1339).
     UINT flags = D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_PACK_MATRIX_ROW_MAJOR;
     if (validation_) {
         flags |= D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;

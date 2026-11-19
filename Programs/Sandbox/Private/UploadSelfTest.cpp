@@ -103,7 +103,7 @@ struct Bench {
         TextureDesc desc;
         desc.width = width;
         desc.height = height;
-        desc.sampler.filter = Filter::Nearest;
+        desc.sampler.filter = Filter::Point;
         return device->CreateTexture(desc, data.View());
     }
 

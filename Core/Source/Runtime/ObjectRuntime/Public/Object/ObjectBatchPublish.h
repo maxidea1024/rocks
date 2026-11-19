@@ -51,8 +51,8 @@ bool BatchMapHolds(const void* map, ObjectHandle value) noexcept {
 } // namespace detail
 
 // 새 대상 하나의 재확인이다. target은 non-null이고 nativeType은 기대 타입(NativeTypeKey<T>() —
-// nullptr면 타입을 보지 않는다)이다. Hard(ObjectRef·컨테이너 원소)와 Weak(WeakRef) 새 대상을 모두
-// 넣는다.
+// nullptr면 타입을 보지 않는다)이다. Hard(ObjectRef·컨테이너 원소)와 Weak(WeakObjectRef) 새 대상을
+// 모두 넣는다.
 struct BatchTargetCheck {
     ObjectHandle target{};
     const void* nativeType = nullptr;

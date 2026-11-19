@@ -38,9 +38,9 @@ StringView Text(const char (&text)[Count]) noexcept {
 
 // --- 셰이더 ---
 //
-// 그리기 상수는 float4 다섯 개로 읽는다(DrawConstants: transform[0..3]이 constants[0], color가
-// constants[4]). constants[0].x는 깊이 z, constants[0].y는 정점 모양(0 화면 덮는 삼각형, 1 화면
-// 덮는 띠 사각형, 2 가운데 행 가로선, 3 가운데 점)이다.
+// 그리기별 상수는 float4 다섯 개(80 byte, FillConstants)로 읽는다. constants[0].x는 깊이 z,
+// constants[0].y는 정점 모양(0 화면 덮는 삼각형, 1 화면 덮는 띠 사각형, 2 가운데 행 가로선, 3
+// 가운데 점), constants[4]는 색이다.
 
 constexpr char FillHlsl[] = R"(
 cbuffer DrawConstants : register(b0) { float4 constants[5]; };
@@ -264,6 +264,28 @@ void main() {
 }
 )";
 
+// 그리기별 상수 16 byte(float4 하나, TintConstants)를 PS만 읽어 화면을 그 색으로 채운다.
+constexpr char TintHlsl[] = R"(
+cbuffer DrawConstants : register(b0) { float4 tint; };
+float4 VSMain(uint id : SV_VertexID) : SV_Position {
+    return float4(float2((id << 1) & 2, id & 2) * 2.0 - 1.0, 0.5, 1.0);
+}
+float4 PSMain() : SV_Target { return tint; }
+)";
+
+constexpr char TintVertexGlsl[] = COMMAND_TEST_GLSL_HEAD R"(
+void main() {
+    int id = gl_VertexID;
+    gl_Position = vec4(vec2((id << 1) & 2, id & 2) * 2.0 - 1.0, 0.5, 1.0);
+}
+)";
+
+constexpr char TintPixelGlsl[] = COMMAND_TEST_GLSL_HEAD R"(
+uniform highp vec4 pu_h[1];
+layout(location = 0) out vec4 out_var_SV_Target0;
+void main() { out_var_SV_Target0 = pu_h[0]; }
+)";
+
 #undef COMMAND_TEST_GLSL_HEAD
 
 struct Rgba {
@@ -278,15 +300,32 @@ bool Near(uint8 actual, uint8 expected) noexcept {
     return difference <= ColorTolerance && difference >= -ColorTolerance;
 }
 
-DrawConstants Constants(float z, float mode, float r, float g, float b, float a) noexcept {
-    DrawConstants constants;
-    constants.transform[0] = z;
-    constants.transform[1] = mode;
+// FillHlsl·WriterHlsl의 그리기별 상수다(float4 constants[5]).
+struct FillConstants {
+    float shape[16] = {};
+    float color[4] = {};
+};
+
+// TintHlsl의 그리기별 상수다(float4 tint).
+struct TintConstants {
+    float color[4] = {};
+};
+
+FillConstants Constants(float z, float mode, float r, float g, float b, float a) noexcept {
+    FillConstants constants;
+    constants.shape[0] = z;
+    constants.shape[1] = mode;
     constants.color[0] = r;
     constants.color[1] = g;
     constants.color[2] = b;
     constants.color[3] = a;
     return constants;
+}
+
+// Fill·Writer 셰이더의 그리기별 상수를 올린다. 거부되면 실패로 센다.
+void SetFill(CommandContext& commands, const FillConstants& constants) noexcept {
+    Check(commands.SetDrawConstants(DrawConstantBytes(constants)).IsOk(),
+          "fill draw constants are accepted");
 }
 
 // 화면 덮는 삼각형·띠·선·점 모드다(FillHlsl).
@@ -354,12 +393,15 @@ struct Bench {
     }
 
     Result<PipelineHandle> Fill(PipelineDesc desc = {}) noexcept {
+        desc.drawConstantBytes = sizeof(FillConstants);
         return Pipeline(desc, Text(FillHlsl), Text(FillVertexGlsl), Text(FillPixelGlsl));
     }
 
-    Result<PipelineHandle> Compute(StringView hlsl, StringView glsl) noexcept {
+    Result<PipelineHandle> Compute(StringView hlsl, StringView glsl,
+                                   uint32 drawConstantBytes = 0) noexcept {
         ComputePipelineDesc desc;
         desc.shader = {hlsl, glsl};
+        desc.drawConstantBytes = drawConstantBytes;
         return device.CreateComputePipeline(desc);
     }
 
@@ -397,7 +439,7 @@ bool ReadWords(Device& device, Allocator& allocator, BufferHandle buffer, uint32
 // compute가 구조화·typed UAV에 쓰고 같은 패스의 VS·PS가 SRV로 읽어 그린다(GX5 UAV → SRV 전이).
 void RunComputeWrites(Bench& bench) noexcept {
     Device& device = bench.device;
-    auto writer = bench.Compute(Text(WriterHlsl), Text(WriterGlsl));
+    auto writer = bench.Compute(Text(WriterHlsl), Text(WriterGlsl), sizeof(FillConstants));
     auto reader =
         bench.Pipeline({}, Text(ReaderHlsl), Text(ReaderVertexGlsl), Text(ReaderPixelGlsl));
     auto items = bench.Buffer(
@@ -421,7 +463,7 @@ void RunComputeWrites(Bench& bench) noexcept {
         if (frame) {
             CommandContext& commands = *frame.Value();
             commands.SetPipeline(writer.Value());
-            commands.SetConstants(Constants(0.0f, FullScreen, 0.25f, 0.75f, 0.0f, 1.0f));
+            SetFill(commands, Constants(0.0f, FullScreen, 0.25f, 0.75f, 0.0f, 1.0f));
             commands.SetWritableBufferView(0, itemsWrite.Value());
             commands.SetWritableBufferView(1, codesWrite.Value());
             commands.Dispatch(1);
@@ -505,7 +547,7 @@ void RunIndirect(Bench& bench) noexcept {
             commands.SetWritableBufferView(0, argsWrite.Value());
             commands.Dispatch(1);
             commands.SetPipeline(fill.Value());
-            commands.SetConstants(Constants(0.5f, FullScreen, 1.0f, 0.0f, 0.0f, 1.0f));
+            SetFill(commands, Constants(0.5f, FullScreen, 1.0f, 0.0f, 0.0f, 1.0f));
             commands.DrawIndirect(args.Value(), 0);
             commands.DrawIndirect(plain.Value(), 0);
             commands.DrawIndirect(args.Value(), 40);
@@ -521,7 +563,7 @@ void RunIndirect(Bench& bench) noexcept {
             CommandContext& commands = *frame.Value();
             commands.SetPipeline(fill.Value());
             commands.SetIndexBuffer(index.Value(), IndexFormat::UInt16);
-            commands.SetConstants(Constants(0.5f, FullScreen, 0.0f, 1.0f, 0.0f, 1.0f));
+            SetFill(commands, Constants(0.5f, FullScreen, 0.0f, 1.0f, 0.0f, 1.0f));
             commands.DrawIndexedIndirect(args.Value(), 16);
         }
 
@@ -729,15 +771,15 @@ void RunDepthStencil(Bench& bench) noexcept {
             commands.SetPipeline(pipelineA.Value());
             commands.SetStencilReference(1);
             commands.SetScissor({0, 0, TargetSize / 2, TargetSize});
-            commands.SetConstants(Constants(0.5f, FullScreen, 1.0f, 0.0f, 0.0f, 1.0f));
+            SetFill(commands, Constants(0.5f, FullScreen, 1.0f, 0.0f, 0.0f, 1.0f));
             commands.Draw(3);
             commands.SetScissor({0, 0, TargetSize, TargetSize});
             commands.SetPipeline(pipelineB.Value());
             commands.SetStencilReference(0);
-            commands.SetConstants(Constants(0.25f, FullScreen, 0.0f, 1.0f, 0.0f, 1.0f));
+            SetFill(commands, Constants(0.25f, FullScreen, 0.0f, 1.0f, 0.0f, 1.0f));
             commands.Draw(3);
             commands.SetPipeline(pipelineC.Value());
-            commands.SetConstants(Constants(0.25f, FullScreen, 0.0f, 0.0f, 1.0f, 0.5f));
+            SetFill(commands, Constants(0.25f, FullScreen, 0.0f, 0.0f, 1.0f, 0.5f));
             commands.Draw(3);
         }
 
@@ -755,10 +797,10 @@ void RunDepthStencil(Bench& bench) noexcept {
         if (frame) {
             CommandContext& commands = *frame.Value();
             commands.SetPipeline(pipelineRw.Value());
-            commands.SetConstants(Constants(0.25f, FullScreen, 0.0f, 0.0f, 1.0f, 1.0f));
+            SetFill(commands, Constants(0.25f, FullScreen, 0.0f, 0.0f, 1.0f, 1.0f));
             commands.Draw(3);
             commands.SetPipeline(pipelineRo.Value());
-            commands.SetConstants(Constants(0.25f, FullScreen, 1.0f, 1.0f, 0.0f, 1.0f));
+            SetFill(commands, Constants(0.25f, FullScreen, 1.0f, 1.0f, 0.0f, 1.0f));
             commands.Draw(3);
         }
 
@@ -805,7 +847,7 @@ void RunTopologyAndViewport(Bench& bench) noexcept {
             auto frame = device.BeginOffscreen(bench.target, {});
             if (frame) {
                 frame.Value()->SetPipeline(pipeline);
-                frame.Value()->SetConstants(Constants(0.5f, mode, 1.0f, 1.0f, 1.0f, 1.0f));
+                SetFill(*frame.Value(), Constants(0.5f, mode, 1.0f, 1.0f, 1.0f, 1.0f));
                 frame.Value()->Draw(count);
             }
 
@@ -831,7 +873,7 @@ void RunTopologyAndViewport(Bench& bench) noexcept {
         if (frame) {
             frame.Value()->SetPipeline(fill.Value());
             frame.Value()->SetViewport({0.0f, 0.0f, TargetSize / 2.0f, TargetSize});
-            frame.Value()->SetConstants(Constants(0.5f, FullScreen, 1.0f, 1.0f, 1.0f, 1.0f));
+            SetFill(*frame.Value(), Constants(0.5f, FullScreen, 1.0f, 1.0f, 1.0f, 1.0f));
             frame.Value()->Draw(3);
         }
 
@@ -916,7 +958,7 @@ void RunCopies(Bench& bench) noexcept {
     auto frame = device.BeginOffscreen(bench.target, {});
     if (frame && fill) {
         frame.Value()->SetPipeline(fill.Value());
-        frame.Value()->SetConstants(Constants(0.5f, FullScreen, 0.0f, 0.0f, 1.0f, 1.0f));
+        SetFill(*frame.Value(), Constants(0.5f, FullScreen, 0.0f, 0.0f, 1.0f, 1.0f));
         frame.Value()->Draw(3);
     }
 
@@ -1034,6 +1076,126 @@ void RunCopies(Bench& bench) noexcept {
     if (fill) {
         device.Retire(fill.Value());
     }
+}
+
+// 그리기별 상수(RenderBase 결정 R7, SX2): 크기 규칙·셰이더 대조는 생성 때, 크기 불일치는
+// SetDrawConstants에서 거부한다. 값은 기록마다 0으로 시작하고 SetPipeline으로 바뀌지 않으며, 크기가
+// 다른 파이프라인은 같은 값의 앞부분을 읽는다.
+void RunDrawConstants(Bench& bench) noexcept {
+    Device& device = bench.device;
+    const auto tintPipeline = [&](uint32 bytes) noexcept {
+        PipelineDesc desc;
+        desc.drawConstantBytes = bytes;
+        return bench.Pipeline(desc, Text(TintHlsl), Text(TintVertexGlsl), Text(TintPixelGlsl));
+    };
+    auto tooLarge = tintPipeline(MaxDrawConstantBytes + DrawConstantAlignment);
+    auto unaligned = tintPipeline(DrawConstantAlignment + 8);
+    auto computeTooLarge = bench.Compute(Text(WriterHlsl), Text(WriterGlsl),
+                                         MaxDrawConstantBytes + DrawConstantAlignment);
+    Check(tooLarge.Error() == ErrorCode::InvalidArgument &&
+              unaligned.Error() == ErrorCode::InvalidArgument &&
+              computeTooLarge.Error() == ErrorCode::InvalidArgument,
+          "drawConstantBytes above 128 or not a multiple of 16 is rejected");
+    // 셰이더가 읽는 블록이 선언보다 크면 거부한다(80 byte를 읽는 Fill에 64·0, 16 byte Tint에 0).
+    PipelineDesc fillSmall;
+    fillSmall.drawConstantBytes = 64;
+    auto fillShort =
+        bench.Pipeline(fillSmall, Text(FillHlsl), Text(FillVertexGlsl), Text(FillPixelGlsl));
+    auto fillNone = bench.Pipeline({}, Text(FillHlsl), Text(FillVertexGlsl), Text(FillPixelGlsl));
+    auto tintNone = tintPipeline(0);
+    auto writerShort = bench.Compute(Text(WriterHlsl), Text(WriterGlsl), DrawConstantAlignment);
+    Check(fillShort.Error() == ErrorCode::InvalidArgument &&
+              fillNone.Error() == ErrorCode::InvalidArgument &&
+              tintNone.Error() == ErrorCode::InvalidArgument &&
+              writerShort.Error() == ErrorCode::InvalidArgument &&
+              device.LastError().ByteCount() != 0,
+          "pipelines declaring fewer draw constant bytes than the shader reads are rejected");
+    // 셰이더보다 큰 선언은 받는다.
+    auto tintWide = tintPipeline(MaxDrawConstantBytes);
+    auto tint = tintPipeline(sizeof(TintConstants));
+    auto fill = bench.Fill();
+    // 상수를 읽지 않는 0 byte 파이프라인이다.
+    auto none = bench.Pipeline({}, Text(ReaderHlsl), Text(ReaderVertexGlsl), Text(ReaderPixelGlsl));
+    Check(tintWide && tint && fill && none,
+          "draw constant pipelines of 0, 16, 80 and 128 bytes are created");
+    if (!tintWide || !tint || !fill || !none) {
+        PrintLastError(device);
+        return;
+    }
+
+    const TintConstants red = {{1.0f, 0.0f, 0.0f, 1.0f}};
+    const TintConstants blue = {{0.0f, 0.0f, 1.0f, 1.0f}};
+    // 기록 시작 값은 0이다: 상수를 올리지 않은 Tint가 (0, 0, 0, 0)을 그린다(흰색 clear 위).
+    auto frame = device.BeginOffscreen(bench.target, ClearColor{1.0f, 1.0f, 1.0f, 1.0f});
+    if (frame) {
+        CommandContext& commands = *frame.Value();
+        Check(commands.SetDrawConstants(DrawConstantBytes(red)).Error() ==
+                  ErrorCode::InvalidArgument,
+              "SetDrawConstants without a bound pipeline is rejected");
+        commands.SetPipeline(tint.Value());
+        commands.Draw(3);
+    }
+
+    Check(frame && device.EndFrame() && bench.Read(bench.target) &&
+              bench.PixelIs(4, 4, {0, 0, 0, 0}),
+          "draw constants start as zero in each recording");
+    // 크기가 다른 파이프라인을 한 패스에서 번갈아 그린다(세로 띠: x 0–1 Tint 빨강, 2–4 Fill
+    // 초록, 5–7 Tint를 다시 묶고 올리지 않음 → Fill이 바꾼 앞 16 byte (0.5, 0, 0, 0)을 읽는다).
+    frame = device.BeginOffscreen(bench.target, {});
+    if (frame) {
+        CommandContext& commands = *frame.Value();
+        commands.SetPipeline(none.Value());
+        Check(commands.SetDrawConstants({}).IsOk() &&
+                  commands.SetDrawConstants(DrawConstantBytes(red)).Error() ==
+                      ErrorCode::InvalidArgument,
+              "a 0 byte pipeline takes only empty draw constants");
+        commands.SetPipeline(tint.Value());
+        Check(commands.SetDrawConstants(DrawConstantBytes(red)).IsOk() &&
+                  commands.SetDrawConstants({}).Error() == ErrorCode::InvalidArgument &&
+                  commands.SetDrawConstants(
+                              DrawConstantBytes(Constants(0.5f, FullScreen, 0, 0, 1, 1)))
+                          .Error() == ErrorCode::InvalidArgument,
+              "draw constants of another size than the bound pipeline are rejected");
+        commands.SetScissor({0, 0, 2, TargetSize});
+        commands.Draw(3);
+        commands.SetPipeline(fill.Value());
+        Check(commands.SetDrawConstants(DrawConstantBytes(blue)).Error() ==
+                  ErrorCode::InvalidArgument,
+              "16 byte draw constants are rejected by an 80 byte pipeline");
+        SetFill(commands, Constants(0.5f, FullScreen, 0.0f, 1.0f, 0.0f, 1.0f));
+        commands.SetScissor({2, 0, 3, TargetSize});
+        commands.Draw(3);
+        commands.SetPipeline(tint.Value());
+        commands.SetScissor({5, 0, 3, TargetSize});
+        commands.Draw(3);
+    }
+
+    Check(frame && device.EndFrame() && bench.Read(bench.target) &&
+              bench.PixelIs(1, 4, {255, 0, 0, 255}) && bench.PixelIs(3, 4, {0, 255, 0, 255}) &&
+              bench.PixelIs(6, 4, {128, 0, 0, 0}),
+          "16 and 80 byte pipelines in one pass read the shared draw constants");
+    // 128 byte 선언 파이프라인은 128 byte를 받고, 셰이더는 그 앞 16 byte를 읽는다.
+    frame = device.BeginOffscreen(bench.target, {});
+    if (frame) {
+        CommandContext& commands = *frame.Value();
+        commands.SetPipeline(tintWide.Value());
+        struct WideConstants {
+            float values[MaxDrawConstantBytes / sizeof(float)] = {};
+        } wide;
+        wide.values[2] = 1.0f;
+        wide.values[3] = 1.0f;
+        Check(commands.SetDrawConstants(DrawConstantBytes(wide)).IsOk(),
+              "128 byte draw constants are accepted");
+        commands.Draw(3);
+    }
+
+    Check(frame && device.EndFrame() && bench.Read(bench.target) &&
+              bench.PixelIs(4, 4, {0, 0, 255, 255}),
+          "a 128 byte pipeline reads the front of its draw constants");
+    device.Retire(tintWide.Value());
+    device.Retire(tint.Value());
+    device.Retire(fill.Value());
+    device.Retire(none.Value());
 }
 
 // 능력·규칙 위반은 다른 것으로 바꾸지 않고 명시 실패한다.
@@ -1166,6 +1328,7 @@ uint32 RunCommandChecks(const char* name, Device& device, Allocator& allocator) 
     RunDepthStencil(bench);
     RunTopologyAndViewport(bench);
     RunCopies(bench);
+    RunDrawConstants(bench);
     RunRejections(bench);
     device.Retire(bench.target);
     auto idle = device.WaitIdle();

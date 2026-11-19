@@ -53,7 +53,7 @@ scope 객체의 주소를 범위 밖에 보관하거나 `longjmp` 등으로 소�
 
 `InspectLifecycle`은 한 시점의 스냅샷으로 수명이나 이후 접근을 보장하지 않는다. `Alive`는 당시 논리 접근이 허용된 상태, `DestroyRequested`는 명시적인 파괴 요청으로 접근이 닫힌 상태다. `Unreachable`은 증분 GC cutoff 후 아직 `Retired`로 분류되지 않은 white 객체다. `Retired`는 논리적으로 회수 대상이며 명시 파괴 또는 GC 중 어느 경로인지는 표현하지 않는다. GC cutoff에 걸리면 내부 슬롯이 아직 `DestroyRequested`여도 `Unreachable`로 표시한다. `IsDestroyRequested`는 `Alive`/`DestroyRequested`에서 false/true를 반환하고, 원인을 복원할 수 없는 `Unreachable`/`Retired`에서는 중단한다. 오류 처리용 `TryIsDestroyRequested`는 같은 경우 `Destroyed`를 반환한다.
 
-파괴 요청은 일반 접근을 즉시 차단한다. 이미 보유한 `Borrow`를 포함해 이후 `Get`/새 `Resolve`/`WeakRef::TryPin`은 실패한다. 이미 얻은 객체 포인터는 같은 Borrow가 유지되는 동안 수명 상태 조회와 멱등 `Destroy` 재호출에만 사용할 수 있다. 임의의 객체 필드·게임플레이 메서드는 접근하지 않는다. 원시 포인터를 다시 사용하지 않는 `Borrow::InspectLifecycle()`을 권장한다. Borrow를 반환한 뒤 원시 포인터를 쓰면 C++의 수명 규약 위반이며, 이미 회수된 객체에서는 메서드의 유효성 검사 자체가 정의되지 않는다. Registry는 슬롯 전체의 Borrow 개수만 검사할 수 있으므로 호출자가 실제 그 Borrow를 유지했는지 식별하지 못한다. 다른 Borrow를 이용한 유출 포인터까지 차단한다고 보장하지 않는다.
+파괴 요청은 일반 접근을 즉시 차단한다. 이미 보유한 `Borrow`를 포함해 이후 `Get`/새 `Resolve`/`WeakObjectRef::TryPin`은 실패한다. 이미 얻은 객체 포인터는 같은 Borrow가 유지되는 동안 수명 상태 조회와 멱등 `Destroy` 재호출에만 사용할 수 있다. 임의의 객체 필드·게임플레이 메서드는 접근하지 않는다. 원시 포인터를 다시 사용하지 않는 `Borrow::InspectLifecycle()`을 권장한다. Borrow를 반환한 뒤 원시 포인터를 쓰면 C++의 수명 규약 위반이며, 이미 회수된 객체에서는 메서드의 유효성 검사 자체가 정의되지 않는다. Registry는 슬롯 전체의 Borrow 개수만 검사할 수 있으므로 호출자가 실제 그 Borrow를 유지했는지 식별하지 못한다. 다른 Borrow를 이용한 유출 포인터까지 차단한다고 보장하지 않는다.
 
 기존 root는 회수를 늦추고 기존 borrow는 GC safepoint를 막는다. backend lease는 저장소 회수만 늦추며 논리 접근이나 자식 수명을 보장하지 않는다. 모두 반환한 뒤 GC 또는 `DrainRetired`가 저장소를 회수한다. 회수된 handle은 과거 상태를 영구 보관하지 않고 `StaleHandle`이다. 같은 슬롯 재사용 시 generation이 달라 이전 핸들은 새 객체를 가리키지 않는다.
 
@@ -106,7 +106,7 @@ if (auto committed = transaction.Commit(roots, held); !committed) {
 
 ## Discard
 
-설계는 [객체·그래프 보강](../Design/ObjectFoundations.ko.md) 2절이다(A0-Ob). `ObjectRegistry::Discard(access, handle)`은 handle과 그 자식 고리로 닿는 모든 객체(부분 트리)를 DestroyRequested로 바꾸고 이름 색인·자식 고리에서 바로 뺀다. 이후 `FindChild`·`FindObject`·`CollectInners`·`IsNameTaken`은 그 객체들을 보지 못하므로 같은 이름을 GC 전에 다시 만들 수 있다. `Resolve`·`WeakRef::TryPin`은 Destroyed이고, `GetName`·`GetObjectPath`·`GetOuter`는 GC cutoff white·Retired가 되기 전까지 된다(그 뒤는 Destroyed). 저장소는 남은 RootRef·Borrow·간선이 풀린 뒤 GC가 회수한다. 남은 참조가 Discard된 객체를 붙잡으면 inner → outer로 그 Outer 사슬은 남지만, 형제는 고리에서 빠졌으므로 남지 않는다. 되돌릴 수 없다.
+설계는 [객체·그래프 보강](../Design/ObjectFoundations.ko.md) 2절이다(A0-Ob). `ObjectRegistry::Discard(access, handle)`은 handle과 그 자식 고리로 닿는 모든 객체(부분 트리)를 DestroyRequested로 바꾸고 이름 색인·자식 고리에서 바로 뺀다. 이후 `FindChild`·`FindObject`·`CollectInners`·`IsNameTaken`은 그 객체들을 보지 못하므로 같은 이름을 GC 전에 다시 만들 수 있다. `Resolve`·`WeakObjectRef::TryPin`은 Destroyed이고, `GetName`·`GetObjectPath`·`GetOuter`는 GC cutoff white·Retired가 되기 전까지 된다(그 뒤는 Destroyed). 저장소는 남은 RootRef·Borrow·간선이 풀린 뒤 GC가 회수한다. 남은 참조가 Discard된 객체를 붙잡으면 inner → outer로 그 Outer 사슬은 남지만, 형제는 고리에서 빠졌으므로 남지 않는다. 되돌릴 수 없다.
 
 ```cpp
 // AssetLoader::Pump의 Closing 처리(AS 11.4): 모두 Discard한 뒤에만 RootRef를 놓는다.

@@ -10,6 +10,7 @@
 #include <Graphics/GraphicsLog.h>
 #include <Graphics/ShaderSourceCompiler.h>
 #include <Graphics/SplitTransitionTracker.h>
+#include <Graphics/SubresourceStates.h>
 #include <Graphics/StagingPool.h>
 #include <Graphics/TimestampRing.h>
 #include <Graphics/UploadRing.h>
@@ -60,7 +61,9 @@ constexpr uint32 MaxMipLevels = 16;
 constexpr uint64 TexturePlacementAlignment = D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT;
 // 업로드 ring 안 버퍼 복사 원본 정렬이다.
 constexpr uint64 BufferUploadAlignment = 16;
-constexpr uint32 ConstantCount = sizeof(DrawConstants) / sizeof(uint32);
+// 그리기별 상수 b0의 루트 상수 수다. 파이프라인 크기와 무관하게 계약 최대(32개)를 둬 root
+// signature를 하나로 유지한다(RenderBase 4.4절 GX4 SX2 구현).
+constexpr uint32 ConstantCount = MaxDrawConstantBytes / sizeof(uint32);
 // 스왑체인 하나가 파괴될 때 retire 목록에 넣는 항목 수(스왑체인 + 버퍼마다 하나)다.
 constexpr usize SwapChainRetireEntries = 1 + SwapChainBufferCount;
 // 소멸 때까지 놓지 않을 retire 항목의 fence 값이다. 정상 동작 중의 완료 값은 이 값에 닿지
@@ -69,7 +72,8 @@ constexpr uint64 RetainUntilDestructionFence = NumericLimits<uint64>::Max();
 // dxgidebug.h의 DXGI_DEBUG_DXGI다(dxguid.lib 없이 쓰려고 값을 직접 둔다).
 constexpr GUID DxgiDebugDxgi = {
     0x25cddaa4, 0xb1c6, 0x47e1, {0xac, 0x3e, 0x98, 0x87, 0x5b, 0x5a, 0x2e, 0x2a}};
-static_assert(ConstantCount == 20, "DrawConstants must fit in 20 root constants");
+static_assert(MaxDrawConstantBytes % sizeof(uint32) == 0,
+              "Draw constants must be a whole number of root constants");
 // root signature 매개변수 번호다: 그리기 상수(b0), PS 텍스처(t0)·샘플러(s0) table, 버퍼 view slot
 // table(t1–t4, 단계 모두, PipelineDesc 고정 배치).
 constexpr UINT RootConstants = 0;
@@ -123,7 +127,10 @@ private:
     usize length_ = 0;
 };
 
-D3D12_FILTER SamplerFilter(Filter filter) noexcept;
+// 샘플러 필터다(비교 샘플러면 COMPARISON 계열). AnisotropicPoint는
+// D3D12_FILTER_MIN_MAG_ANISOTROPIC_MIP_POINT다(장치 기능 AnisoFilterWithPointMipSupported가 있을
+// 때만 부른다. 없으면 SamplerFor가 AnisotropicLinear로 바꿔 부른다).
+D3D12_FILTER SamplerFilter(Filter filter, bool comparison) noexcept;
 
 D3D12_TEXTURE_ADDRESS_MODE SamplerAddress(AddressMode mode) noexcept;
 
@@ -175,18 +182,32 @@ struct BufferViewRecord {
 
 struct TextureRecord {
     ComRef<ID3D12Resource> resource;
+    TextureDimension dimension = TextureDimension::Texture2D;
     uint32 width = 0;
     uint32 height = 0;
+    // 3D 깊이다(다른 차원은 1).
+    uint32 depth = 1;
     uint32 mipLevels = 1;
+    // subresource slice 수(TextureSliceCount)이며 D3D12 자원의 배열 크기(3D는 1)와 같다.
+    uint32 slices = 1;
     // view(CreateTextureView)면 view가 읽는 형식, 아니면 텍스처 형식이다.
     PixelFormat format = PixelFormat::Unknown;
     bool renderTarget = false;
     // 깊이·스텐실 타깃(TextureUsage::DepthStencil)이다.
     bool depthTarget = false;
+    // 만든 용도다(view는 원 텍스처의 용도, ResolveTextureViewRange).
+    TextureUsage usage = TextureUsage::Sampled;
+    // MSAA 표본 수다(TextureDesc::sampleCount, view는 원 텍스처의 값).
+    uint32 sampleCount = 1;
     // 다른 텍스처의 자원을 공유하는 view다. 업로드·readback·그리기 대상이 될 수 없다. 자원 상태는
     // 원 텍스처 기록(source)이 추적한다.
     bool view = false;
     SlotHandle source;
+    // view가 가리키는 mip·slice 범위다(view가 아니면 전체). 묶기 전이는 이 범위만 바꾼다.
+    ResolvedSubresourceRange viewRange;
+    // 쓰기 view(ViewAccess::ReadWrite)다. srv 칸에 UAV descriptor가 있고 SetWritableTexture로만
+    // 묶는다(hasSrv 거짓).
+    bool writable = false;
     // 이 텍스처를 가리키는 살아 있는 view 수다. 0이 아니면 Retire는 기록을 남겨 두고(retirePending)
     // 마지막 view가 놓일 때 함께 놓는다(상태 추적의 주인을 하나로 유지한다).
     uint32 viewCount = 0;
@@ -201,14 +222,27 @@ struct TextureRecord {
     uint32 dsv = 0;
     // 샘플러 힙의 칸이다(SamplerFor가 같은 설정끼리 공유한다).
     uint32 sampler = 0;
-    // mip마다 장치가 추적한 상태다(RenderBase GX5). committed는 제출한 프레임 기록 끝의 상태이고,
-    // current는 기록 중인 프레임 안의 상태다(기록 중이 아니면 둘이 같다). 업로드 기록은 프레임
-    // 기록보다 먼저 실행되므로 committed에서 바꿨다가 committed로 되돌려 놓는다(상태 중립).
-    D3D12_RESOURCE_STATES committed[MaxMipLevels] = {};
-    D3D12_RESOURCE_STATES current[MaxMipLevels] = {};
+    // 샘플러가 깊이 비교 샘플러다(view는 깊이 plane만 읽을 수 있다).
+    bool comparison = false;
+    // subresource(mip × slice)마다 장치가 추적한 상태다(RenderBase GX5). committed는 제출한 프레임
+    // 기록 끝의 상태이고, current는 기록 중인 프레임 안의 상태다(기록 중이 아니면 둘이 같다).
+    // 업로드 기록은 프레임 기록보다 먼저 실행되므로 committed에서 바꿨다가 committed로 되돌려
+    // 놓는다(상태 중립). 장치 plane들은 같은 상태를 따른다. view 기록은 비어 있다(원 기록이
+    // 추적한다).
+    SubresourceStates<D3D12_RESOURCE_STATES> committed;
+    SubresourceStates<D3D12_RESOURCE_STATES> current;
     // 기록 중인 프레임이 current를 바꿨다(touchedTextures_에 있다).
     bool touched = false;
 };
+
+// mip level 하나의 데이터 byte다(모든 slice·깊이 면, TextureMipBytes와 같은 값).
+inline uint64 MipBytes(const TextureRecord& record, uint32 level) noexcept {
+    const uint64 image = PixelFormatImageBytes(record.format, MipExtent(record.width, level),
+                                               MipExtent(record.height, level));
+    const uint32 depth =
+        record.dimension == TextureDimension::Texture3D ? MipExtent(record.depth, level) : 1u;
+    return image * depth * record.slices;
+}
 
 struct PipelineRecord {
     ComRef<ID3D12PipelineState> state;
@@ -218,6 +252,10 @@ struct PipelineRecord {
     // VS·PS(compute면 CS)가 읽는 버퍼 view slot과 CS가 쓰는 slot이다(리플렉션).
     DrawBufferSlots bufferSlots;
     DrawBufferSlots writeSlots;
+    // 선언한 그리기별 상수 byte 수다(SetDrawConstants 크기 검사, dispatch 때 올릴 수).
+    uint32 drawConstantBytes = 0;
+    // compute가 텍스처 UAV로 쓰는 쓰기 slot 비트다(SetWritableTexture가 묶여야 한다).
+    uint32 writeTextures = 0;
     // compute 파이프라인이다(Dispatch만 쓴다).
     bool compute = false;
     D3D_PRIMITIVE_TOPOLOGY topology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
@@ -384,6 +422,8 @@ struct ReadbackRecord {
     // 빈틈 없는 행 하나의 바이트와 행 수다(블록 형식은 블록 행).
     uint64 rowBytes = 0;
     uint32 rows = 0;
+    // 2D 이미지 수다(3D mip의 깊이 면, footprint 안에서 RowPitch × rows 간격). 다른 차원은 1이다.
+    uint32 images = 1;
 };
 
 // fence 관찰 스레드가 제출 하나의 완료를 기다리는 경계다. 장치가 제거되면 fence 완료 값이
@@ -458,15 +498,25 @@ public:
     // 기본 SRV(형식이 Sampled일 때, plane 0)·RTV·DSV를 만든다(잠금 안). 실패하면 이미 잡은 칸을
     // 놓는다.
     Result<void> CreateTextureViews(TextureRecord& record, const d3d12::FormatMapping& mapping,
-                                    bool sampled) noexcept;
+                                    bool sampled, const ChannelSwizzle& swizzle) noexcept;
 
     // 다 만든 텍스처 기록의 descriptor 칸을 바로 놓는다(잠금 안, 아직 어떤 명령도 참조하지 않을
     // 때).
     void ReleaseTextureViews(const TextureRecord& record) noexcept;
 
     // 2D texture SRV를 쓴다. plane은 깊이·스텐실·비디오 plane 선택이다.
-    void WriteShaderResourceView(ID3D12Resource* resource, DXGI_FORMAT format, uint32 plane,
-                                 uint32 mipLevels, uint32 slot) noexcept;
+    // 패스 끝 MSAA resolve다(EndFrame, 잠금 안).
+    void ResolveAttachments() noexcept;
+    // attachment (mip, slice)의 RTV·DSV를 handle 칸에 쓴다(3D RTV의 slice는 깊이 면 z).
+    void WriteRenderTargetView(const TextureRecord& record, uint32 mipLevel, uint32 slice,
+                               D3D12_CPU_DESCRIPTOR_HANDLE handle) noexcept;
+    void WriteDepthStencilView(const TextureRecord& record, uint32 mipLevel, uint32 slice,
+                               bool readOnly, D3D12_CPU_DESCRIPTOR_HANDLE handle) noexcept;
+    Result<TextureHandle> CreateWritableTextureView(TextureHandle texture, TextureRecord& source,
+                                                    PixelFormat format,
+                                                    const ResolvedSubresourceRange& range) noexcept;
+    void WriteShaderResourceView(const TextureRecord& record, DXGI_FORMAT format, uint32 plane,
+                                 const ChannelSwizzle& swizzle, uint32 slot) noexcept;
 
     // 기록을 표에 넣고 handle을 돌려준다(잠금 안). 실패하면 descriptor 칸을 놓는다.
     Result<TextureHandle> AddTextureRecord(TextureRecord&& record) noexcept;
@@ -481,6 +531,8 @@ public:
                                             const TextureViewDesc& desc) noexcept override;
 
     // 텍스처 mip·plane 하나를 동기로 읽는다(시험·캡처용). ReadPixels와 같은 경로다.
+    Result<TextureSubresources>
+    GetTextureSubresources(TextureHandle texture) const noexcept override;
     Result<void> ReadTexture(TextureHandle handle, uint32 mipLevel, uint32 plane,
                              Span<uint8> out) noexcept override;
 
@@ -605,6 +657,17 @@ private:
         TextureHandle depth;
         D3D12_CPU_DESCRIPTOR_HANDLE dsv = {};
         bool depthReadOnly = false;
+        // 색 attachment마다 패스 끝에 resolve할 대상이다(ColorAttachment::resolveTarget).
+        TextureHandle resolves[MaxColorTargets];
+        // attachment 표본 수다(1이면 MSAA가 아니다).
+        uint32 sampleCount = 1;
+        // attachment마다 붙인 mip·slice와 resolve 대상의 mip·slice다(텍스처 GX2 C부).
+        uint32 colorMips[MaxColorTargets] = {};
+        uint32 colorSlices[MaxColorTargets] = {};
+        uint32 resolveMips[MaxColorTargets] = {};
+        uint32 resolveSlices[MaxColorTargets] = {};
+        uint32 depthMip = 0;
+        uint32 depthSlice = 0;
     };
 
     // 기록 중 버퍼 자원의 상태다. 버퍼는 제출 끝에 COMMON으로 돌아가므로 기록마다 비우고, 처음 쓰면
@@ -711,9 +774,21 @@ private:
 
     // 셰이더가 선언한 자원이 고정 배치(PipelineDesc) 안인지 보고 버퍼 view slot 배치를 slots에
     // 더한다. b0 상수, PS t0 텍스처·s0 샘플러, t1–t4 버퍼 SRV만 받는다. 두 단계가 같은 slot을 다른
-    // 종류로 읽거나 배치 밖 자원(UAV 포함)이면 InvalidArgument다.
-    Result<void> ReflectBindings(ID3DBlob* code, ShaderStage stage, DrawBufferSlots& slots,
-                                 DrawBufferSlots* writeSlots) noexcept;
+    // 종류로 읽거나 배치 밖 자원(UAV 포함)이거나 b0 cbuffer가 drawConstantBytes보다 크면
+    // InvalidArgument다.
+    // compute의 텍스처 UAV(u0–u3의 RWTexture*) slot은 writeTextures에 더한다.
+    Result<void> ReflectBindings(ID3DBlob* code, ShaderStage stage, uint32 drawConstantBytes,
+                                 DrawBufferSlots& slots, DrawBufferSlots* writeSlots,
+                                 uint32* writeTextures = nullptr) noexcept;
+
+    // 셰이더 단계의 그리기별 상수 블록(shaderBytes)이 파이프라인 선언보다 큰 경우의
+    // InvalidArgument다(LastError에 두 크기).
+    Result<void> RejectDrawConstants(ShaderStage stage, uint32 shaderBytes,
+                                     uint32 drawConstantBytes) noexcept;
+
+    // SetDrawConstants 거부(묶인 파이프라인 없음, 크기가 선언과 다름)의 InvalidArgument다.
+    Result<void> RejectDrawConstantSize(bool pipelineBound, usize bytes,
+                                        uint32 drawConstantBytes) noexcept;
 
     Result<void> Reject(const Diagnostic& message) noexcept;
 
@@ -773,12 +848,13 @@ private:
     // 제출한 상태(committed)에서 복사 대상으로 바꿨다가 되돌린다(업로드 기록은 프레임 기록보다 먼저
     // 실행되므로 상태 중립이어야 한다). 처음 생성(COPY_DEST)이면 복사 뒤 셰이더 읽기 상태로 바꾸고
     // 그것을 추적 상태로 삼는다. 상태는 mip 단위로 추적하고 그 mip의 plane들이 함께 따른다.
-    void CopyTextureFrom(TextureRecord& record, uint32 mipLevel, uint32 subresource,
+    void CopyTextureFrom(TextureRecord& record, uint32 mipLevel, uint32 slice, uint32 subresource,
                          ID3D12Resource* source,
                          const D3D12_PLACED_SUBRESOURCE_FOOTPRINT& footprint,
                          bool restore) noexcept;
 
-    // 빈틈 없는 행의 픽셀(mip firstMip부터 count개, mip 안은 plane 순서)을 장치 행 정렬로 ring에
+    // 빈틈 없는 행의 픽셀(mip firstMip부터 count개, mip 안은 slice·깊이 면 순서, 이미지 안은 plane
+    // 순서 — TextureDesc 초기 픽셀 배치)을 장치 행 정렬로 ring에
     // 옮기고 복사를 기록한다. 블록 압축 형식의 행은 블록 행이다.
     Result<void> RecordTextureUpload(TextureRecord& record, uint32 firstMip, uint32 count,
                                      Span<const uint8> pixels, bool restore) noexcept;
@@ -788,11 +864,12 @@ private:
 
     void AssignPendingUploads(uint64 value) noexcept;
 
-    // 텍스처 mip 하나의 plane 하나를 readback 버퍼로 복사하는 기록을 쌓고 바로 제출한다(잠금 안).
-    // requireRenderTarget이면 RenderTarget 텍스처만 받는다(ReadPixels·RequestReadback 계약).
+    // 텍스처 mip 하나·slice 하나의 plane 하나를 readback 버퍼로 복사하는 기록을 쌓고 바로
+    // 제출한다(잠금 안). 3D면 그 mip의 모든 깊이 면이다. requireRenderTarget이면 RenderTarget
+    // 텍스처만 받는다(ReadPixels·RequestReadback 계약).
     Result<ReadbackRequest> RequestReadbackLocked(TextureHandle target, uint32 mipLevel = 0,
-                                                  uint32 plane = 0,
-                                                  bool requireRenderTarget = true) noexcept;
+                                                  uint32 plane = 0, bool requireRenderTarget = true,
+                                                  uint32 slice = 0) noexcept;
 
     Result<bool> TryReadbackLocked(ReadbackHandle handle, Span<uint8> out) noexcept;
 
@@ -837,13 +914,14 @@ private:
 
     void SetTexture(TextureHandle handle) noexcept override;
 
-    void SetConstants(const DrawConstants& constants) noexcept override;
+    Result<void> SetDrawConstants(Span<const uint8> bytes) noexcept override;
 
     void SetBufferView(uint32 slot, BufferViewHandle handle) noexcept override;
 
     // --- GX3·GX4(D3D12Commands.cpp) ---
 
     void SetWritableBufferView(uint32 slot, BufferViewHandle view) noexcept override;
+    void SetWritableTexture(uint32 slot, TextureHandle view) noexcept override;
 
     void DrawIndirect(BufferHandle arguments, uint64 offset) noexcept override;
 
@@ -908,8 +986,9 @@ private:
     // 기록 중 프레임에서 텍스처 mip [first, first + count)를 after로 바꾼다(잠금 안). 바뀌는 mip만
     // barrier를 내고, 모든 mip이 같은 상태에서 바뀌면 한 barrier로 낸다. uavOrder면 이미 같은 UAV
     // 상태인 mip에 UAV barrier를 낸다.
-    void TrackTransition(TextureRecord& record, SlotHandle slot, uint32 first, uint32 count,
-                         D3D12_RESOURCE_STATES after, bool uavOrder = false) noexcept;
+    void TrackTransition(TextureRecord& record, SlotHandle slot,
+                         const ResolvedSubresourceRange& range, D3D12_RESOURCE_STATES after,
+                         bool uavOrder = false) noexcept;
 
     // 프레임 기록을 끝낸다(잠금 안). 제출했으면 바뀐 상태를 committed로 삼고, 제출하지 못했으면
     // current를 committed로 되돌린다.
@@ -942,6 +1021,8 @@ private:
     DeviceCaps caps_;
     uint32 featureLevel_ = 0;
     uint32 samplerCount_ = 0;
+    // AnisotropicPoint를 AnisotropicLinear로 만든 일을 로그에 남겼다(한 번만).
+    bool anisotropicPointReported_ = false;
     ComRef<IDXGIFactory4> factory_;
     ComRef<ID3D12Device> device_;
     ComRef<ID3D12InfoQueue> infoQueue_;
@@ -1019,11 +1100,18 @@ private:
     // compute 쓰기 slot에 묶인 view와 빈 slot의 null UAV, ReadWrite view의 CPU UAV 칸 pool,
     // 읽기 전용 DSV를 그때그때 쓰는 칸이다(DSV는 OMSetRenderTargets가 기록 때 읽는다).
     BufferViewHandle boundWriteViews_[MaxDrawBufferViews];
+    // compute 쓰기 slot에 묶인 텍스처 쓰기 view다(버퍼 view와 같은 slot 공간, 하나만 남는다).
+    TextureHandle boundWriteTextures_[MaxDrawBufferViews];
+    // SetTexture로 묶은 텍스처 기록이다(compute t0·s0를 dispatch 때 건다).
+    SlotHandle boundTexture_;
     uint32 nullBufferUav_ = 0;
     DescriptorPool cpuUavs_;
     uint32 scratchDsv_ = 0;
-    // 마지막 SetConstants 값이다(compute root 상수로도 올린다).
-    DrawConstants constants_;
+    // 패스마다 attachment RTV를 그 mip·slice로 다시 쓰는 칸이다(RTV는 CPU descriptor라
+    // OMSetRenderTargets가 기록 때 읽는다, 텍스처 GX2 C부).
+    uint32 scratchRtvs_[MaxColorTargets] = {};
+    // 기록의 그리기별 상수 값이다(기록 시작 때 0, compute root 상수로도 올린다).
+    alignas(16) uint8 constants_[MaxDrawConstantBytes] = {};
     uint32 stencilReference_ = 0;
     Array<BufferState> bufferStates_;
     // 기록 중 열린 분리 전이 짝이다.

@@ -23,6 +23,10 @@ int PosixFullSync(int descriptor) noexcept;
 // 현재 스레드의 OS 식별 값이다(Apple pthread_threadid_np, Android gettid).
 uint64 PosixThreadId() noexcept;
 
+// 현재 스레드 스택의 주소 범위 [low, high)를 쓴다(Apple pthread_get_stackaddr_np가 주는 높은 끝과
+// pthread_get_stacksize_np, Android pthread_getattr_np·pthread_attr_getstack). 실패는 Fatal.
+void PosixCurrentThreadStack(uptr& low, uptr& high) noexcept;
+
 // 단조 시계의 원시 tick이다(Apple mach_absolute_time, Android CLOCK_MONOTONIC의 ns). 실패는 Fatal.
 uint64 PosixMonotonicTicks() noexcept;
 

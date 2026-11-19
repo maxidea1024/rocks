@@ -1,9 +1,11 @@
 #pragma once
 
 #include <Base/Types.h>
+#include <GraphicsTypes/CompareFunction.h>
 
 // 파이프라인 고정 기능 상태(RenderBase 4.4절 GX3, Renderer RQ5)와 attachment·간접 인자(GX4, RQ3)의
-// 값 타입이다. backend와 무관하며 각 backend가 자기 API 상태로 옮긴다. 이름은 Rocks 이름이고 UE
+// 값 타입이다. 비교 함수(CompareFunction)는 깊이 비교 샘플러와 함께 쓰므로 GraphicsTypes에 있다.
+// backend와 무관하며 각 backend가 자기 API 상태로 옮긴다. 이름은 Rocks 이름이고 UE
 // 대응은 RenderBase 2절 대응표에 있다.
 namespace rocks::graphics {
 
@@ -18,18 +20,6 @@ enum class PrimitiveTopology : uint8 {
     LineList,
     LineStrip,
     PointList
-};
-
-// 비교 함수다(깊이·스텐실 시험). UE는 reverse-Z라 깊이 시험 기본이 GreaterEqual이다.
-enum class CompareFunction : uint8 {
-    Never,
-    Less,
-    Equal,
-    LessEqual,
-    Greater,
-    NotEqual,
-    GreaterEqual,
-    Always
 };
 
 // 스텐실 값 연산이다. Saturate는 범위 끝에서 멈추고 Wrap은 돈다.

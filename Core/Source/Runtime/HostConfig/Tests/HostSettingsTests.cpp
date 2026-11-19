@@ -1,3 +1,4 @@
+#include <Config/CVar.h>
 #include <Config/ConfigLoader.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/StringBuilder.h>
@@ -12,8 +13,25 @@
 
 // 호스트 설정 부트 시험이다(Docs/Design/ConfigSystem.ko.md 5.3절): 등록 → 엔진 층 파일 → 추가 파일
 // → --set → CompleteStartup 순서와, 시작 뒤 고정 값(log.mode)의 거부, 시작 완료의 기기 프로필 적용,
-// 프로젝트 폴더·사용자 데이터 폴더 찾기.
+// 품질 조합 검증 규칙(HostSettingsOptions::qualityRules)과 ApplyDeviceTraits, 프로젝트 폴더·사용자
+// 데이터 폴더 찾기.
 using namespace rocks;
+
+namespace host_settings_test {
+
+constinit CVar<int32> HostShadowDistance =
+    cvar::Var("render.host.shadow_distance", 1).Help("Shadow distance");
+
+constinit CVarGroup HostShadow = cvar::Group("quality.host.shadow", 1)
+                                     .Help("Shadow scalability")
+                                     .Level(0, {{HostShadowDistance, 10}})
+                                     .Level(1, {{HostShadowDistance, 20}});
+
+Result<void> RegisterHostVars(config::ConfigContext& config) noexcept {
+    return config.Register(HostShadowDistance, HostShadow);
+}
+
+} // namespace host_settings_test
 
 namespace {
 
@@ -182,6 +200,36 @@ TEST(HostSettings_DeviceProfileAppliedAtStartup) {
 
 // 프로젝트 폴더는 시작 폴더부터 위로 올라가며 `*.rocksproject`를 가진 첫 폴더다(여럿이면 이름
 // 순서로 첫 기술자). 사용자 층 뿌리는 OS 사용자 데이터 폴더다.
+// 호스트가 넘긴 품질 규칙은 기기 특성으로 펼칠 등급을 낮추고(묶음 변수는 그대로), 특성을 바꿔
+// ApplyDeviceTraits를 부르면 다음 Sync에 원래 선택이 펼쳐진다(프로필 정의가 없어도).
+TEST(HostSettings_QualityRulesFollowDeviceTraits) {
+    using namespace host_settings_test;
+    EngineTree tree;
+    REQUIRE(tree.ready);
+    SystemAllocator allocator;
+    config::DeviceCondition bigMemory(allocator);
+    REQUIRE(bigMemory.trait.TryAssign(config::DeviceTraitNames::GpuMemoryMiB));
+    bigMemory.atLeast = 8192.0;
+    const config::QualityLevelRule shadowRules[] = {
+        {1, Span<const config::DeviceCondition>(&bigMemory, 1), {}}};
+    const config::QualityGroupRule rules[] = {{"quality.host.shadow", 0, shadowRules}};
+    HostSettings settings(allocator);
+    HostSettingsOptions options;
+    options.engineDir = tree.EngineDir();
+    options.registerSettings = &RegisterHostVars;
+    options.qualityRules = rules;
+    REQUIRE(settings.Initialize(options));
+    REQUIRE(settings.DeviceTraits().SetNumber(config::DeviceTraitNames::GpuMemoryMiB, 4096));
+    REQUIRE(settings.LoadFiles());
+    REQUIRE(settings.CompleteStartup());
+    CHECK(HostShadow.Get() == 1 && HostShadowDistance.Get() == 10);
+
+    REQUIRE(settings.DeviceTraits().SetNumber(config::DeviceTraitNames::GpuMemoryMiB, 16384));
+    REQUIRE(settings.ApplyDeviceTraits());
+    REQUIRE(settings.Context().Sync());
+    CHECK(HostShadow.Get() == 1 && HostShadowDistance.Get() == 20);
+}
+
 TEST(HostSettings_ProjectDirectoryAndUserData) {
     EngineTree tree;
     REQUIRE(tree.ready);

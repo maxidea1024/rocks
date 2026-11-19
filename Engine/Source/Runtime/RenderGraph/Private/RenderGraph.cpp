@@ -33,6 +33,16 @@ FrameArena& RequireArena(const RenderGraphDesc& desc) noexcept {
 
 // 최대 mip 수다(장치 텍스처 한계와 같다, 2^15 크기까지).
 constexpr uint32 MaxGraphTextureMips = 16;
+// 그래프 텍스처 slice 수 상한이다(장치 한도 textureArrayLayers의 D3D 최소값 2048).
+constexpr uint32 MaxGraphTextureSlices = 2048;
+
+} // namespace
+
+uint32 detail::SubresourceIndex(const ResourceRecord& resource, uint32 mip, uint32 slice) noexcept {
+    return slice * resource.mipLevels + mip;
+}
+
+namespace {
 
 // 접근 이름을 담을 임시 버퍼 크기다.
 constexpr usize AccessNameBytes = 160;
@@ -138,6 +148,18 @@ GraphPassAccesses& GraphPassAccesses::Texture(GraphTexture texture, ResourceAcce
     return *this;
 }
 
+GraphPassAccesses& GraphPassAccesses::TextureView(GraphTextureView view, ResourceAccess access,
+                                                  GraphAccessFlags flags) noexcept {
+    GraphResourceAccess entry;
+    entry.kind = GraphResourceKind::Texture;
+    entry.graph = view.graph;
+    entry.access = access;
+    entry.flags = flags;
+    entry.view = view.index;
+    Push(entry);
+    return *this;
+}
+
 GraphPassAccesses& GraphPassAccesses::Buffer(GraphBuffer buffer, ResourceAccess access,
                                              GraphAccessFlags flags) noexcept {
     GraphResourceAccess entry;
@@ -152,11 +174,38 @@ GraphPassAccesses& GraphPassAccesses::Buffer(GraphBuffer buffer, ResourceAccess 
 
 GraphPassAccesses& GraphPassAccesses::RenderTarget(GraphTexture texture, GraphLoadAction load,
                                                    const graphics::ClearColor& clear) noexcept {
-    target_ = {};
+    GraphColorTarget color;
+    color.texture = texture;
+    color.load = load;
+    color.clear = clear;
+    return ColorTarget(color);
+}
+
+GraphPassAccesses& GraphPassAccesses::ColorTarget(const GraphColorTarget& target) noexcept {
+    if (target_.kind == GraphTargetKind::SwapChain) {
+        target_ = {};
+    }
+
     target_.kind = GraphTargetKind::Texture;
-    target_.texture = texture;
-    target_.load = load;
-    target_.clear = clear;
+    // 넘친 색 attachment는 담지 않고 개수만 MaxColorTargets + 1로 남긴다(AddPass가 검증 오류로
+    // 거부한다).
+    if (target_.colorCount >= graphics::MaxColorTargets) {
+        target_.colorCount = graphics::MaxColorTargets + 1;
+        return *this;
+    }
+
+    target_.colors[target_.colorCount++] = target;
+    return *this;
+}
+
+GraphPassAccesses& GraphPassAccesses::DepthTarget(const GraphDepthTarget& target) noexcept {
+    if (target_.kind == GraphTargetKind::SwapChain) {
+        target_ = {};
+    }
+
+    target_.kind = GraphTargetKind::Texture;
+    target_.depth = target;
+    target_.hasDepth = true;
     return *this;
 }
 
@@ -190,6 +239,45 @@ graphics::TextureHandle GraphPassContext::Texture(GraphTexture texture) const no
     }
 
     return {};
+}
+
+namespace {
+
+// pass가 선언한 view의 기록이다(선언하지 않았거나 다른 그래프 handle이면 null).
+const ViewRecord* FindPassView(const GraphState& state, uint32 pass,
+                               GraphTextureView view) noexcept {
+    if (view.graph != state.serial || view.index >= state.views.Size()) {
+        return nullptr;
+    }
+
+    const PassRecord& record = state.passes[pass];
+    for (uint32 index = record.firstView; index < record.firstView + record.viewCount; ++index) {
+        if (state.passViews[index] == view.index) {
+            return &state.views[view.index];
+        }
+    }
+
+    return nullptr;
+}
+
+} // namespace
+
+graphics::TextureHandle GraphPassContext::View(GraphTextureView view) const noexcept {
+    const ViewRecord* record = FindPassView(*graph_.state_, pass_, view);
+    return record != nullptr ? graphics::TextureHandle{record->device} : graphics::TextureHandle{};
+}
+
+uint32 GraphPassContext::ViewBaseMip(GraphTextureView view) const noexcept {
+    const GraphState& state = *graph_.state_;
+    const ViewRecord* record = FindPassView(state, pass_, view);
+    if (record == nullptr) {
+        return 0;
+    }
+
+    // 개수 0(끝까지)을 푼 첫 mip을 기준으로 한다.
+    graphics::TextureViewDesc desc = record->desc;
+    desc.firstMip = record->range.firstMip;
+    return graphics::TextureViewBaseMip(state.device->Caps().features, desc);
 }
 
 graphics::BufferHandle GraphPassContext::Buffer(GraphBuffer buffer) const noexcept {
@@ -246,6 +334,8 @@ RenderGraph::RenderGraph(const RenderGraphDesc& desc) noexcept : arena_(RequireA
 }
 
 RenderGraph::~RenderGraph() noexcept {
+    // 공유 값은 그래프 자원 정리 전에, 렌더 lane에서 만든 역순으로 소멸한다.
+    sharedData_.DestroyAll();
     if (state_ == nullptr) {
         return;
     }
@@ -277,22 +367,28 @@ Result<GraphTexture> RenderGraph::CreateTexture(const graphics::TextureDesc& des
         return Result<GraphTexture>::Failure(ErrorCode::Busy);
     }
 
-    // 렌더 타깃 그래프 텍스처는 GPU가 채우므로 번호표 안의 비압축 형식이어야 한다(블록 압축 형식은
-    // 렌더 타깃이 될 수 없다, PixelFormatInfo). Sampled 그래프 텍스처는 내용을 업로드로만 받으므로
-    // (UploadTexture) 압축 형식도 된다. 장치가 그 형식을 지원하는지는 풀 할당 때 장치 생성이
-    // 판단한다(Unsupported).
+    // GPU가 채우는 그래프 텍스처(렌더 타깃·깊이·Storage)는 번호표 안의 비압축 형식이어야 한다(블록
+    // 압축 형식은 렌더 타깃·UAV가 될 수 없다, PixelFormatInfo). Sampled 그래프 텍스처는 내용을
+    // 업로드로만 받으므로(UploadTexture) 압축 형식도 된다. 장치가 그 형식·차원·표본 수를
+    // 지원하는지는 풀 할당 때 장치 생성이 판단한다(Unsupported).
     const graphics::PixelFormatInfo& format = graphics::GetPixelFormatInfo(desc.format);
-    const bool renderTarget = desc.usage == graphics::TextureUsage::RenderTarget;
     const bool sampled = desc.usage == graphics::TextureUsage::Sampled;
+    // 차원·mip·표본 수 모양은 장치 규칙(ValidateTextureDesc)과 같다(RG1 남은 것 A부: 2D 밖 렌더
+    // 타깃·mip 사슬·깊이·Storage·MSAA).
+    const bool shaped = graphics::ValidateTextureDesc(desc).IsOk();
     if (desc.width == 0 || desc.height == 0 || desc.mipLevels == 0 ||
-        desc.mipLevels > MaxGraphTextureMips || (!renderTarget && !sampled) ||
+        desc.mipLevels > MaxGraphTextureMips || !shaped ||
         !graphics::IsValidPixelFormat(desc.format) ||
-        (renderTarget && format.compression != graphics::PixelCompression::None) ||
-        (sampled && desc.mipLevels > graphics::FullMipCount(desc.width, desc.height))) {
+        (!sampled && format.compression != graphics::PixelCompression::None) ||
+        // 업로드 자리(초기 데이터 byte)가 uint64·usize를 넘치는 Sampled desc는 받지 않는다.
+        (sampled && (graphics::TextureDataBytes(desc) == 0 ||
+                     graphics::TextureDataBytes(desc) > NumericLimits<usize>::Max())) ||
+        graphics::TextureSliceCount(desc) > MaxGraphTextureSlices) {
         return Result<GraphTexture>::Failure(RecordGraphError(
             state, ErrorCode::InvalidArgument, true,
             "texture '{}' has an invalid description (graph textures are uncompressed render "
-            "targets or uploaded sampled textures, format {})",
+            "targets, depth stencils or storage textures, or uploaded sampled textures, format "
+            "{})",
             name != nullptr ? name : "", graphics::PixelFormatName(desc.format)));
     }
 
@@ -300,7 +396,9 @@ Result<GraphTexture> RenderGraph::CreateTexture(const graphics::TextureDesc& des
     record.kind = GraphResourceKind::Texture;
     record.name = name != nullptr ? name : "";
     record.textureDesc = desc;
-    record.subresources = desc.mipLevels;
+    record.mipLevels = desc.mipLevels;
+    record.slices = graphics::TextureSliceCount(desc);
+    record.subresources = record.mipLevels * record.slices;
     record.firstTrack = static_cast<uint32>(state.tracks.Size());
     for (uint32 index = 0; index < record.subresources; ++index) {
         auto pushed = state.tracks.TryPushBack(arena_, SubresourceTrack{});
@@ -316,6 +414,68 @@ Result<GraphTexture> RenderGraph::CreateTexture(const graphics::TextureDesc& des
 
     return Result<GraphTexture>::Success(
         GraphTexture{static_cast<uint32>(state.resources.Size() - 1), state.serial});
+}
+
+Result<GraphTextureView>
+RenderGraph::CreateTextureView(GraphTexture texture,
+                               const graphics::TextureViewDesc& desc) noexcept {
+    if (state_ == nullptr) {
+        return Result<GraphTextureView>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    GraphState& state = *state_;
+    if (state.executed) {
+        return Result<GraphTextureView>::Failure(ErrorCode::Busy);
+    }
+
+    if (texture.graph != state.serial || texture.index >= state.resources.Size() ||
+        state.resources[texture.index].kind != GraphResourceKind::Texture) {
+        return Result<GraphTextureView>::Failure(
+            RecordGraphError(state, ErrorCode::InvalidArgument, true,
+                             "a texture view refers to a texture from another graph"));
+    }
+
+    // 범위·쓰기 view 규칙은 장치 규칙(ResolveTextureViewRange)과 같다. import 텍스처는 차원·용도·
+    // 형식을 모르므로 2D(배열)로 범위만 보고 나머지는 장치 view 생성이 확인한다.
+    const ResourceRecord& resource = state.resources[texture.index];
+    graphics::TextureDimension dimension = resource.textureDesc.dimension;
+    graphics::TextureUsage usage = resource.textureDesc.usage;
+    bool formatMatches = true;
+    if (resource.imported) {
+        dimension = resource.slices > 1 ? graphics::TextureDimension::Texture2DArray
+                                        : graphics::TextureDimension::Texture2D;
+        usage = desc.access == graphics::ViewAccess::ReadWrite ? graphics::TextureUsage::Storage
+                                                               : graphics::TextureUsage::Sampled;
+    } else {
+        formatMatches =
+            graphics::ResolveTextureViewFormat(resource.textureDesc.format, desc).IsOk();
+    }
+
+    graphics::TextureSubresources shape;
+    shape.mipLevels = resource.mipLevels;
+    shape.slices = resource.slices;
+    auto range = graphics::ResolveTextureViewRange(dimension, usage, shape, desc);
+    if (!range || !formatMatches) {
+        return Result<GraphTextureView>::Failure(RecordGraphError(
+            state, ErrorCode::InvalidArgument, true,
+            "texture view of '{}' is invalid (mips {}+{}, slices {}+{}, {} access)", resource.name,
+            desc.firstMip, desc.mipCount, desc.firstSlice, desc.sliceCount,
+            desc.access == graphics::ViewAccess::ReadWrite ? "read-write" : "read"));
+    }
+
+    ViewRecord view;
+    view.texture = texture.index;
+    view.desc = desc;
+    view.range = range.Value();
+    auto pushed = state.views.TryPushBack(arena_, view);
+    if (!pushed) {
+        return Result<GraphTextureView>::Failure(pushed.Error());
+    }
+
+    GraphTextureView handle;
+    handle.index = static_cast<uint32>(state.views.Size() - 1);
+    handle.graph = state.serial;
+    return Result<GraphTextureView>::Success(handle);
 }
 
 Result<GraphBuffer> RenderGraph::CreateBuffer(const graphics::BufferDesc& desc,
@@ -367,10 +527,12 @@ Result<uint32> ImportResource(FrameArena& arena, GraphState& state, GraphResourc
     }
 
     const bool texture = kind == GraphResourceKind::Texture;
-    if (texture && (options.mipLevels == 0 || options.mipLevels > MaxGraphTextureMips)) {
-        return Result<uint32>::Failure(RecordGraphError(state, ErrorCode::InvalidArgument, true,
-                                                        "texture '{}' import has {} mip levels",
-                                                        label, options.mipLevels));
+    if (texture && (options.mipLevels == 0 || options.mipLevels > MaxGraphTextureMips ||
+                    options.slices == 0 || options.slices > MaxGraphTextureSlices)) {
+        return Result<uint32>::Failure(
+            RecordGraphError(state, ErrorCode::InvalidArgument, true,
+                             "texture '{}' import has {} mip levels and {} slices", label,
+                             options.mipLevels, options.slices));
     }
 
     if ((options.initialAccess != ResourceAccess::Unknown &&
@@ -405,7 +567,26 @@ Result<uint32> ImportResource(FrameArena& arena, GraphState& state, GraphResourc
     record.device = lease.Value().device;
     record.initialAccess = options.initialAccess;
     record.finalAccess = options.finalAccess;
-    record.subresources = texture ? options.mipLevels : 1u;
+    // 장치가 텍스처 구성을 알려 주면 선언과 대조한다(다르면 전이가 일부 subresource를 빠뜨리거나
+    // 장치 범위 밖이 된다). 장치가 지원하지 않으면(Unsupported) 선언을 믿는다.
+    if (texture && state.device != nullptr) {
+        auto shape =
+            state.device->GetTextureSubresources(graphics::TextureHandle{lease.Value().device});
+        if (shape && (shape.Value().mipLevels != options.mipLevels ||
+                      shape.Value().slices != options.slices)) {
+            state.handles->ReleaseLease(lease.Value());
+            return Result<uint32>::Failure(RecordGraphError(
+                state, ErrorCode::InvalidArgument, true,
+                "texture '{}' import declares {} mips x {} slices but the device texture has {} x "
+                "{}",
+                label, options.mipLevels, options.slices, shape.Value().mipLevels,
+                shape.Value().slices));
+        }
+    }
+
+    record.mipLevels = texture ? options.mipLevels : 1u;
+    record.slices = texture ? options.slices : 1u;
+    record.subresources = record.mipLevels * record.slices;
     record.firstTrack = static_cast<uint32>(state.tracks.Size());
     SubresourceTrack initial;
     initial.access = options.initialAccess;
@@ -525,7 +706,7 @@ namespace {
 // 한 pass의 subresource 접근 하나를 더한다(같은 subresource의 앞 선언과 합치고 상충을 검사한다).
 Result<void> AddUse(FrameArena& arena, GraphState& state, const char* passName, usize firstUse,
                     uint32 resource, uint32 subresource, ResourceAccess access,
-                    GraphAccessFlags flags) noexcept {
+                    GraphAccessFlags flags, bool attachment = false) noexcept {
     for (usize index = firstUse; index < state.uses.Size(); ++index) {
         SubresourceUse& use = state.uses[index];
         if (use.resource != resource || use.subresource != subresource) {
@@ -546,6 +727,7 @@ Result<void> AddUse(FrameArena& arena, GraphState& state, const char* passName, 
 
         use.access |= access;
         use.flags = CombineFlags(use.flags, flags);
+        use.attachment = use.attachment || attachment;
         return Result<void>::Success();
     }
 
@@ -554,6 +736,7 @@ Result<void> AddUse(FrameArena& arena, GraphState& state, const char* passName, 
     use.subresource = subresource;
     use.access = access;
     use.flags = flags;
+    use.attachment = attachment;
     return state.uses.TryPushBack(arena, use);
 }
 
@@ -629,18 +812,27 @@ Result<GraphPass> RenderGraph::AddPassWithAccesses(TraceScopeName& name, GraphPa
     }
 
     if (target.kind == GraphTargetKind::Texture) {
-        if (target.texture.graph != state.serial ||
-            target.texture.index >= state.resources.Size() ||
-            state.resources[target.texture.index].kind != GraphResourceKind::Texture) {
+        if (target.colorCount > graphics::MaxColorTargets ||
+            (target.colorCount == 0 && !target.hasDepth)) {
+            return reject(RecordGraphError(state, ErrorCode::InvalidArgument, true,
+                                           "pass '{}' has no attachments or more than {} color "
+                                           "attachments",
+                                           passName, graphics::MaxColorTargets));
+        }
+
+        const auto foreign = [&state](GraphTexture texture) noexcept {
+            return texture.graph != state.serial || texture.index >= state.resources.Size() ||
+                   state.resources[texture.index].kind != GraphResourceKind::Texture;
+        };
+        bool anyForeign = target.hasDepth && foreign(target.depth.texture);
+        for (uint32 index = 0; index < target.colorCount; ++index) {
+            anyForeign = anyForeign || foreign(target.colors[index].texture);
+        }
+
+        if (anyForeign) {
             return reject(RecordGraphError(state, ErrorCode::InvalidArgument, true,
                                            "pass '{}' renders to a texture from another graph",
                                            passName));
-        }
-
-        if (target.load == GraphLoadAction::Load) {
-            return reject(RecordGraphError(
-                state, ErrorCode::Unsupported, false,
-                "pass '{}' loads its render target; attachment load arrives with GX4", passName));
         }
     }
 
@@ -651,9 +843,14 @@ Result<GraphPass> RenderGraph::AddPassWithAccesses(TraceScopeName& name, GraphPa
 
     const uint32 passIndex = static_cast<uint32>(state.passes.Size());
     const usize firstUse = state.uses.Size();
-    auto rollback = [&state, firstUse, &reject](ErrorCode code) noexcept {
+    const usize firstView = state.passViews.Size();
+    auto rollback = [&state, firstUse, firstView, &reject](ErrorCode code) noexcept {
         while (state.uses.Size() > firstUse) {
             state.uses.PopBack();
+        }
+
+        while (state.passViews.Size() > firstView) {
+            state.passViews.PopBack();
         }
 
         return reject(code);
@@ -661,7 +858,49 @@ Result<GraphPass> RenderGraph::AddPassWithAccesses(TraceScopeName& name, GraphPa
 
     // 선언한 접근을 subresource 단위로 펼친다.
     const ResourceAccess forbidden = ForbiddenAccess(kind);
-    for (const GraphResourceAccess& access : accesses) {
+    for (const GraphResourceAccess& declared : accesses) {
+        GraphResourceAccess access = declared;
+        // view 선언은 view의 텍스처와 범위로 바꾼다. 읽기 view는 SRV, 쓰기 view는 UAV 접근만이다.
+        if (access.view != GraphIndexNone) {
+            if (access.graph != state.serial || access.view >= state.views.Size()) {
+                return rollback(RecordGraphError(state, ErrorCode::InvalidArgument, true,
+                                                 "pass '{}' declares a texture view from another "
+                                                 "graph",
+                                                 passName));
+            }
+
+            const ViewRecord& view = state.views[access.view];
+            const bool write = view.desc.access == graphics::ViewAccess::ReadWrite;
+            const ResourceAccess allowed =
+                write ? graphics::UavAccessMask
+                      : ResourceAccess::SrvGraphics | ResourceAccess::SrvCompute;
+            if (access.access == ResourceAccess::Unknown ||
+                graphics::HasAnyAccess(access.access, ~allowed)) {
+                char viewAccess[AccessNameBytes];
+                FormatAccess(access.access, viewAccess, sizeof(viewAccess));
+                return rollback(RecordGraphError(
+                    state, ErrorCode::InvalidArgument, true,
+                    "pass '{}' declares access {} through a {} view of '{}'", passName,
+                    StringView(viewAccess), write ? "read-write" : "read",
+                    state.resources[view.texture].name));
+            }
+
+            access.resource = view.texture;
+            access.range = {view.range.firstMip, view.range.mipCount, view.range.firstSlice,
+                            view.range.sliceCount};
+            bool listed = false;
+            for (usize index = firstView; index < state.passViews.Size(); ++index) {
+                listed = listed || state.passViews[index] == access.view;
+            }
+
+            if (!listed) {
+                auto pushed = state.passViews.TryPushBack(arena_, access.view);
+                if (!pushed) {
+                    return rollback(pushed.Error());
+                }
+            }
+        }
+
         if (access.graph != state.serial || access.resource >= state.resources.Size() ||
             state.resources[access.resource].kind != access.kind) {
             return rollback(RecordGraphError(state, ErrorCode::InvalidArgument, true,
@@ -703,46 +942,102 @@ Result<GraphPass> RenderGraph::AddPassWithAccesses(TraceScopeName& name, GraphPa
                                              resource.name));
         }
 
-        uint32 first = 0;
-        uint32 count = 1;
+        graphics::ResolvedSubresourceRange range{0, 1, 0, 1};
         if (access.kind == GraphResourceKind::Texture) {
-            first = access.range.firstMip;
-            if (first >= resource.subresources || access.range.firstSlice != 0 ||
-                access.range.sliceCount == 0 || access.range.mipCount == 0) {
+            range = graphics::ResolveSubresourceRange(access.range, resource.mipLevels,
+                                                      resource.slices);
+            if (range.IsEmpty()) {
                 return rollback(RecordGraphError(state, ErrorCode::InvalidArgument, true,
                                                  "pass '{}' declares an invalid range of '{}'",
                                                  passName, resource.name));
             }
-
-            const uint32 available = resource.subresources - first;
-            count = access.range.mipCount < available ? access.range.mipCount : available;
         }
 
-        for (uint32 subresource = first; subresource < first + count; ++subresource) {
-            auto added = AddUse(arena_, state, passName, firstUse, access.resource, subresource,
-                                access.access, access.flags);
-            if (!added) {
-                return rollback(added.Error());
+        for (uint32 slice = range.firstSlice; slice < range.firstSlice + range.sliceCount;
+             ++slice) {
+            for (uint32 mip = range.firstMip; mip < range.firstMip + range.mipCount; ++mip) {
+                auto added =
+                    AddUse(arena_, state, passName, firstUse, access.resource,
+                           SubresourceIndex(resource, mip, slice), access.access, access.flags);
+                if (!added) {
+                    return rollback(added.Error());
+                }
             }
         }
     }
 
-    // 렌더 타깃 접근이다(attachment).
+    // attachment 접근이다(그 mip·slice의 subresource 하나, 전이는 장치 BeginPass가 낸다).
     if (target.kind == GraphTargetKind::Texture) {
-        const ResourceRecord& resource = state.resources[target.texture.index];
-        if (!resource.imported &&
-            resource.textureDesc.usage != graphics::TextureUsage::RenderTarget) {
-            return rollback(RecordGraphError(state, ErrorCode::InvalidArgument, true,
-                                             "pass '{}' renders to '{}', which is not a render "
-                                             "target graph texture",
-                                             passName, resource.name));
+        const auto attach = [&](GraphTexture texture, uint32 mip, uint32 slice, bool depth,
+                                ResourceAccess access, bool load) noexcept -> Result<void> {
+            ResourceRecord& resource = state.resources[texture.index];
+            const graphics::TextureUsage usage =
+                depth ? graphics::TextureUsage::DepthStencil : graphics::TextureUsage::RenderTarget;
+            if (!resource.imported && resource.textureDesc.usage != usage) {
+                return Result<void>::Failure(RecordGraphError(
+                    state, ErrorCode::InvalidArgument, true,
+                    "pass '{}' attaches '{}', which is not a {} graph texture", passName,
+                    resource.name, depth ? "depth stencil" : "render target"));
+            }
+
+            // 3D는 mip 하나가 subresource 하나다(slice는 깊이 면).
+            const graphics::TextureDimension dimension = resource.imported
+                                                             ? graphics::TextureDimension::Texture2D
+                                                             : resource.textureDesc.dimension;
+            if (!graphics::IsAttachmentInRange(dimension, resource.textureDesc.depth,
+                                               resource.mipLevels, resource.slices, mip, slice)) {
+                return Result<void>::Failure(
+                    RecordGraphError(state, ErrorCode::InvalidArgument, true,
+                                     "pass '{}' attaches mip {} slice {} outside '{}'", passName,
+                                     mip, slice, resource.name));
+            }
+
+            const graphics::ResolvedSubresourceRange used =
+                graphics::AttachmentSubresource(dimension, mip, slice);
+            const uint32 subresource = SubresourceIndex(resource, used.firstMip, used.firstSlice);
+            // load는 이전 내용을 읽는다(생산 전 읽기 검사).
+            const SubresourceTrack& track = state.tracks[resource.firstTrack + subresource];
+            if (load && !resource.imported && track.lastProducer == GraphIndexNone &&
+                !track.uploaded) {
+                return Result<void>::Failure(
+                    RecordGraphError(state, ErrorCode::InvalidArgument, true,
+                                     "pass '{}' loads '{}' mip {} before any pass produced it",
+                                     passName, resource.name, mip));
+            }
+
+            resource.renderTarget = true;
+            return AddUse(arena_, state, passName, firstUse, texture.index, subresource, access,
+                          GraphAccessFlags::None, true);
+        };
+        for (uint32 index = 0; index < target.colorCount; ++index) {
+            const GraphColorTarget& color = target.colors[index];
+            for (uint32 other = 0; other < index; ++other) {
+                const GraphColorTarget& previous = target.colors[other];
+                if (previous.texture.index == color.texture.index &&
+                    previous.mipLevel == color.mipLevel && previous.slice == color.slice) {
+                    return rollback(RecordGraphError(state, ErrorCode::InvalidArgument, true,
+                                                     "pass '{}' attaches '{}' twice", passName,
+                                                     state.resources[color.texture.index].name));
+                }
+            }
+
+            auto added = attach(color.texture, color.mipLevel, color.slice, false,
+                                ResourceAccess::RenderTarget, color.load == GraphLoadAction::Load);
+            if (!added) {
+                return rollback(added.Error());
+            }
         }
 
-        auto added = AddUse(arena_, state, passName, firstUse, target.texture.index, 0,
-                            ResourceAccess::RenderTarget, GraphAccessFlags::None);
-        state.resources[target.texture.index].renderTarget = true;
-        if (!added) {
-            return rollback(added.Error());
+        if (target.hasDepth) {
+            const GraphDepthTarget& depth = target.depth;
+            const bool load = depth.readOnly || depth.depthLoad == GraphLoadAction::Load ||
+                              depth.stencilLoad == GraphLoadAction::Load;
+            auto added = attach(
+                depth.texture, depth.mipLevel, depth.slice, true,
+                depth.readOnly ? ResourceAccess::DepthRead : ResourceAccess::DepthWrite, load);
+            if (!added) {
+                return rollback(added.Error());
+            }
         }
     }
 
@@ -769,6 +1064,8 @@ Result<GraphPass> RenderGraph::AddPassWithAccesses(TraceScopeName& name, GraphPa
     pass.executor = executor;
     pass.firstUse = static_cast<uint32>(firstUse);
     pass.useCount = static_cast<uint32>(state.uses.Size() - firstUse);
+    pass.firstView = static_cast<uint32>(firstView);
+    pass.viewCount = static_cast<uint32>(state.passViews.Size() - firstView);
     pass.root = HasGraphPassFlag(flags, GraphPassFlags::HasSideEffects) ||
                 target.kind == GraphTargetKind::SwapChain;
     pass.culled = state.mode == GraphMode::Deferred;

@@ -153,6 +153,55 @@ inline void MatrixMultiply(const float* a, const float* b, float* output) noexce
     _mm_storeu_ps(output + 12, c3);
 }
 
+// ---- 비교·mask·선택(scalar 기준 구현과 같은 계약) ----
+// cmp*ps는 순서 비교(NaN이면 거짓)이고 mask는 lane마다 모든 bit 1 또는 0이다.
+
+inline Register4f CompareEqual(Register4f a, Register4f b) noexcept {
+    return _mm_cmpeq_ps(a, b);
+}
+
+inline Register4f CompareLess(Register4f a, Register4f b) noexcept {
+    return _mm_cmplt_ps(a, b);
+}
+
+inline Register4f CompareLessEqual(Register4f a, Register4f b) noexcept {
+    return _mm_cmple_ps(a, b);
+}
+
+inline Register4f CompareGreater(Register4f a, Register4f b) noexcept {
+    return _mm_cmpgt_ps(a, b);
+}
+
+inline Register4f CompareGreaterEqual(Register4f a, Register4f b) noexcept {
+    return _mm_cmpge_ps(a, b);
+}
+
+inline Register4f BitAnd(Register4f a, Register4f b) noexcept {
+    return _mm_and_ps(a, b);
+}
+
+inline Register4f BitOr(Register4f a, Register4f b) noexcept {
+    return _mm_or_ps(a, b);
+}
+
+inline Register4f BitXor(Register4f a, Register4f b) noexcept {
+    return _mm_xor_ps(a, b);
+}
+
+// a & ~b다. andnps는 첫 피연산자를 뒤집으므로 인자를 바꿔 넘긴다.
+inline Register4f BitAndNot(Register4f a, Register4f b) noexcept {
+    return _mm_andnot_ps(b, a);
+}
+
+// SSE4.1 blendvps를 쓰지 않는 bit 단위 선택이다(부호 bit만 보는 blendvps와 달리 모든 bit를 쓴다).
+inline Register4f Select(Register4f mask, Register4f a, Register4f b) noexcept {
+    return _mm_or_ps(_mm_and_ps(mask, a), _mm_andnot_ps(mask, b));
+}
+
+inline uint32 MoveMask(Register4f value) noexcept {
+    return static_cast<uint32>(_mm_movemask_ps(value));
+}
+
 } // namespace rocks::platform::sse
 
 #endif

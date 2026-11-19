@@ -1,12 +1,7 @@
 #include "GlesDevice.h"
 
-#include <Base/Compiler.h>
-
 // 프레임 기록·CommandContext·present다(GlesDevice.h).
 namespace rocks::graphics::gles {
-
-static_assert(ROCKS_OFFSET_OF(DrawConstants, color) == 16 * sizeof(float),
-              "DrawConstants must be transform[16] followed by color[4] without padding");
 
 Result<CommandContext*> GlesDevice::BeginFrame(SwapChainHandle handle,
                                                const ClearColor& clear) noexcept {
@@ -49,6 +44,36 @@ Result<CommandContext*> GlesDevice::BeginFrame(SwapChainHandle handle,
     return Result<CommandContext*>::Success(this);
 }
 
+// 패스 끝에 MSAA 색 attachment를 resolve 대상에 glBlitFramebuffer로 resolve한다(ColorAttachment::
+// resolveTarget, 결정 R17). 패스 상태(scissor 등)를 되돌린 뒤 부른다(blit은 scissor를 따른다).
+void GlesDevice::ResolveAttachments() noexcept {
+    for (uint32 index = 0; index < pass_.colorCount; ++index) {
+        const TextureRecord* resolved = textures_.Find(pass_.resolves[index].slot);
+        if (resolved == nullptr) {
+            continue;
+        }
+
+        // 대상의 resolve mip·slice를 resolve framebuffer에 붙인다(텍스처 GX2 C부).
+        if (resolveFramebuffer_ == 0) {
+            gl_.GenFramebuffers(1, &resolveFramebuffer_);
+        }
+
+        const auto width = static_cast<GLint>(pass_.width);
+        const auto height = static_cast<GLint>(pass_.height);
+        gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, pass_.framebuffer);
+        gl_.ReadBuffer(GL_COLOR_ATTACHMENT0 + index);
+        gl_.BindFramebuffer(GL_DRAW_FRAMEBUFFER, resolveFramebuffer_);
+        AttachTextureLevel(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, *resolved,
+                           pass_.resolveMips[index], pass_.resolveSlices[index]);
+        gl_.BlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT,
+                            GL_NEAREST);
+        gl_.FramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
+    }
+
+    gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    gl_.BindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+}
+
 Result<GpuFencePoint> GlesDevice::EndFrame() noexcept {
     auto owner = ownership_.Check();
     if (!owner) {
@@ -67,6 +92,7 @@ Result<GpuFencePoint> GlesDevice::EndFrame() noexcept {
 
     recording_ = false;
     ResetPassState();
+    ResolveAttachments();
     // 패스 framebuffer의 attachment를 뗀다(놓인 텍스처 이름을 붙들지 않는다).
     if (pass_.framebuffer != 0 && pass_.framebuffer == passFramebuffer_) {
         gl_.BindFramebuffer(GL_FRAMEBUFFER, passFramebuffer_);
@@ -137,7 +163,8 @@ Result<void> GlesDevice::ReadPixels(TextureHandle handle, Span<uint8> out) noexc
     }
 
     const usize rowBytes = static_cast<usize>(PixelFormatRowBytes(record->format, record->width));
-    if (record->framebuffer == 0 || out.Size() != rowBytes * record->height || recording_) {
+    if (record->framebuffer == 0 || record->sampleCount > 1 ||
+        out.Size() != rowBytes * record->height || recording_) {
         return Result<void>::Failure(recording_ ? ErrorCode::Busy : ErrorCode::InvalidArgument);
     }
 
@@ -148,7 +175,7 @@ Result<void> GlesDevice::ReadPixels(TextureHandle handle, Span<uint8> out) noexc
     // RenderTarget 저장소의 첫 행이 이미지 위쪽이므로 뒤집지 않고 읽는다. sRGB 형식도 저장된
     // 값(인코딩된 byte)을 그대로 읽는다.
     const TextureRecord copy = *record;
-    return ReadColorLevel(copy, 0, out);
+    return ReadColorLevel(copy, 0, 0, out);
 }
 
 void GlesDevice::StartPass(const PassDesc& pass) noexcept {
@@ -168,9 +195,13 @@ void GlesDevice::StartPass(const PassDesc& pass) noexcept {
         view = {};
     }
 
+    for (TextureHandle& view : boundWriteTextures_) {
+        view = {};
+    }
+
     stencilReference_ = 0;
     constantsDirty_ = true;
-    constants_ = DrawConstants{};
+    platform::MemoryZero(constants_, sizeof(constants_));
     gl_.BindFramebuffer(GL_FRAMEBUFFER, pass_.framebuffer);
     gl_.Viewport(0, 0, static_cast<GLsizei>(pass_.width), static_cast<GLsizei>(pass_.height));
     gl_.DepthRangef(0.0f, 1.0f);
@@ -228,22 +259,35 @@ void GlesDevice::StartPass(const PassDesc& pass) noexcept {
 
 void GlesDevice::BindPassTexture(const TextureRecord& record) noexcept {
     gl_.ActiveTexture(GL_TEXTURE0 + PixelTextureUnit);
-    gl_.BindTexture(GL_TEXTURE_2D, record.texture);
+    gl_.BindTexture(record.target, record.texture);
     gl_.BindSampler(PixelTextureUnit, record.sampler);
     // 깊이·스텐실 텍스처는 읽을 plane이 텍스처 객체 상태(ES 3.1 core)이므로 묶을 때 정한다. 한
     // 그리기에 텍스처 하나만 묶으므로 깊이 view와 스텐실 view가 서로 덮지 않는다.
     // 스텐실 plane은 다른 backend와 같이 값을 G 채널에서 읽는다(성분 대응 (R, R, 0, 1),
-    // PixelFormat.ko.md 10절). 깊이 plane은 항등 대응으로 되돌린다.
+    // PixelFormat.ko.md 10절).
+    const bool stencil = record.depthStencilTexture && record.plane == 1;
     if (record.depthStencilTexture) {
-        const bool stencil = record.plane == 1;
-        gl_.TexParameteri(GL_TEXTURE_2D, GL_DEPTH_STENCIL_TEXTURE_MODE,
+        gl_.TexParameteri(record.target, GL_DEPTH_STENCIL_TEXTURE_MODE,
                           static_cast<GLint>(stencil ? GL_STENCIL_INDEX : GL_DEPTH_COMPONENT));
-        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_G,
-                          static_cast<GLint>(stencil ? GL_RED : GL_GREEN));
-        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_B,
-                          static_cast<GLint>(stencil ? GL_ZERO : GL_BLUE));
-        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A,
-                          static_cast<GLint>(stencil ? GL_ONE : GL_ALPHA));
+    }
+
+    // 성분 대응도 텍스처 객체 상태(view와 원 텍스처가 공유)라 묶을 때마다 정한다. 사용자
+    // swizzle(record.swizzle)을 형식 흉내(A8 = R8 + (0, 0, 0, R))·스텐실 plane 대응 위에 합성해
+    // 채널별 TEXTURE_SWIZZLE_R/G/B/A로 둔다(TEXTURE_SWIZZLE_RGBA는 ES에 없다).
+    ChannelSwizzle inner;
+    const GlesTextureFormat* format = FindTextureFormat(record.format);
+    if (stencil) {
+        inner = {SwizzleSource::Red, SwizzleSource::Red, SwizzleSource::Zero, SwizzleSource::One};
+    } else if (format != nullptr && format->Is(GlesAlphaSwizzle)) {
+        inner = {SwizzleSource::Zero, SwizzleSource::Zero, SwizzleSource::Zero, SwizzleSource::Red};
+    }
+
+    const ChannelSwizzle applied = ComposeSwizzle(record.swizzle, inner);
+    constexpr GLenum Parameters[4] = {GL_TEXTURE_SWIZZLE_R, GL_TEXTURE_SWIZZLE_G,
+                                      GL_TEXTURE_SWIZZLE_B, GL_TEXTURE_SWIZZLE_A};
+    for (uint32 channel = 0; channel < 4; ++channel) {
+        gl_.TexParameteri(record.target, Parameters[channel],
+                          SwizzleParameter(applied.Channel(channel)));
     }
 }
 
@@ -343,7 +387,7 @@ void GlesDevice::SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64 
 
 void GlesDevice::SetTexture(TextureHandle handle) noexcept {
     const TextureRecord* record = textures_.Find(handle.slot);
-    if (record == nullptr) {
+    if (record == nullptr || record->writable) {
         record = textures_.Find(white_.slot);
     }
 
@@ -352,9 +396,19 @@ void GlesDevice::SetTexture(TextureHandle handle) noexcept {
     }
 }
 
-void GlesDevice::SetConstants(const DrawConstants& constants) noexcept {
-    constants_ = constants;
-    constantsDirty_ = true;
+Result<void> GlesDevice::SetDrawConstants(Span<const uint8> bytes) noexcept {
+    const PipelineRecord* pipeline = recording_ ? pipelines_.Find(boundPipeline_.slot) : nullptr;
+    if (pipeline == nullptr || bytes.Size() != pipeline->drawConstantBytes) {
+        return RejectDrawConstantSize(pipeline != nullptr, bytes.Size(),
+                                      pipeline != nullptr ? pipeline->drawConstantBytes : 0u);
+    }
+
+    if (bytes.Size() != 0) {
+        platform::MemoryCopy(constants_, bytes.Data(), bytes.Size());
+        constantsDirty_ = true;
+    }
+
+    return Result<void>::Success();
 }
 
 void GlesDevice::ApplyVertexBuffer(uint32 stream) noexcept {
@@ -404,20 +458,20 @@ void GlesDevice::ApplyConstants(const PipelineRecord& pipeline) noexcept {
         return;
     }
 
-    // DrawConstants 80 byte를 vec4 5개로 그대로 올린다(루트 상수 에뮬레이션, ShaderSystem 7.2절
-    // 4항). transform은 행 우선 바이트 그대로이며 셰이더가 mat4(vu_h[0..3])로 읽어(열 우선 → Mᵀ)
-    // Mᵀ * v = v·M으로 쓴다. 전치하지 않는다(7.2절 6항).
-    const auto* vectors = reinterpret_cast<const GLfloat*>(&constants_);
+    // 그리기별 상수 byte를 단계 배열의 active vec4 수만큼 그대로 올린다(루트 상수 에뮬레이션,
+    // ShaderSystem 7.2절 4항). 행렬은 행 우선 바이트 그대로이며 셰이더가 mat4(vu_h[0..3])로 읽어
+    // (열 우선 → Mᵀ) Mᵀ * v = v·M으로 쓴다. 전치하지 않는다(7.2절 6항).
+    const auto* vectors = reinterpret_cast<const GLfloat*>(constants_);
     if (pipeline.vertexConstants >= 0) {
-        gl_.Uniform4fv(pipeline.vertexConstants, RootConstantVectors, vectors);
+        gl_.Uniform4fv(pipeline.vertexConstants, pipeline.vertexConstantVectors, vectors);
     }
 
     if (pipeline.pixelConstants >= 0) {
-        gl_.Uniform4fv(pipeline.pixelConstants, RootConstantVectors, vectors);
+        gl_.Uniform4fv(pipeline.pixelConstants, pipeline.pixelConstantVectors, vectors);
     }
 
     if (pipeline.computeConstants >= 0) {
-        gl_.Uniform4fv(pipeline.computeConstants, RootConstantVectors, vectors);
+        gl_.Uniform4fv(pipeline.computeConstants, pipeline.computeConstantVectors, vectors);
     }
 
     constantsDirty_ = false;
@@ -462,7 +516,13 @@ Result<void> GlesDevice::CopyPassTarget(TextureHandle destination) noexcept {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (pass_.colorCount == 0 || record->framebuffer == 0 || destination == pass_.texture ||
+    // 패스 대상은 2D mip 0 attachment여야 한다(텍스처 GX2 C부).
+    const TextureRecord* passTexture = textures_.Find(pass_.texture.slot);
+    // 창 패스(pass_.texture가 null)는 중간 2D 텍스처다.
+    const bool wholeTarget =
+        passTexture == nullptr || (passTexture->framebuffer != 0 && pass_.firstColorMip == 0);
+    if (pass_.colorCount == 0 || record->framebuffer == 0 || record->sampleCount > 1 ||
+        pass_.sampleCount > 1 || !wholeTarget || destination == pass_.texture ||
         record->width != pass_.width || record->height != pass_.height ||
         record->format != pass_.format) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);

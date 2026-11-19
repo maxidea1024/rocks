@@ -206,7 +206,7 @@ public:
     //       return Result<void>::Failure(decoded.Error());
     //   }
     //
-    //   out.reference = decoded.Value();   // 2단계면 handle로 WeakRef<T>를 만든다
+    //   out.reference = decoded.Value();   // 2단계면 handle로 WeakObjectRef<T>를 만든다
     virtual Result<DecodedReference>
     ReadWeakReference(ArchiveReader& reader, const ReferenceExpectation& expectation) noexcept {
         (void)reader;

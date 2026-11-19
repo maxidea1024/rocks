@@ -171,7 +171,7 @@ bool SameRenderPassKey(const RenderPassKey& left, const RenderPassKey& right) no
     if (left.colorCount != right.colorCount || left.depth != right.depth ||
         left.depthLoad != right.depthLoad || left.depthStore != right.depthStore ||
         left.stencilLoad != right.stencilLoad || left.stencilStore != right.stencilStore ||
-        left.depthReadOnly != right.depthReadOnly) {
+        left.depthReadOnly != right.depthReadOnly || left.samples != right.samples) {
         return false;
     }
 
@@ -199,7 +199,7 @@ Result<void> VulkanDevice::CreatePipelineLayout() noexcept {
         return Fail("vkCreateDescriptorSetLayout", result);
     }
 
-    // 그리기 상수는 push constant다(ShaderSystem 7.2절 2항, 80 byte ≤ 최소 보장 128 byte).
+    // 그리기별 상수는 push constant다(ShaderSystem 7.2절 2항, 계약 최대 128 byte = 최소 보장).
     const VkDescriptorSetLayout layouts[] = {emptySetLayout_, emptySetLayout_};
     VkPushConstantRange constants = {};
     constants.stageFlags = ConstantStages;
@@ -253,7 +253,7 @@ Result<VkRenderPass> VulkanDevice::RenderPassFor(const RenderPassKey& key) noexc
     for (uint32 index = 0; index < key.colorCount; ++index) {
         VkAttachmentDescription& attachment = attachments[index];
         attachment.format = key.colors[index];
-        attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        attachment.samples = key.samples;
         attachment.loadOp = key.colorLoad[index];
         attachment.storeOp = key.colorStore[index];
         attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
@@ -271,7 +271,7 @@ Result<VkRenderPass> VulkanDevice::RenderPassFor(const RenderPassKey& key) noexc
     if (hasDepth) {
         VkAttachmentDescription& attachment = attachments[key.colorCount];
         attachment.format = key.depth;
-        attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        attachment.samples = key.samples;
         attachment.loadOp = key.depthLoad;
         attachment.storeOp = key.depthStore;
         attachment.stencilLoadOp = key.stencilLoad;
@@ -333,6 +333,22 @@ Result<void> VulkanDevice::Reject(const char* message) noexcept {
     return Result<void>::Failure(ErrorCode::InvalidArgument);
 }
 
+Result<void> VulkanDevice::RejectDrawConstantSize(bool pipelineBound, usize bytes,
+                                                  uint32 drawConstantBytes) noexcept {
+    Diagnostic message;
+    if (!pipelineBound) {
+        message.Text("SetDrawConstants needs a pipeline bound while recording");
+    } else {
+        message.Text("SetDrawConstants got ")
+            .Number(bytes > NumericLimits<uint32>::Max() ? NumericLimits<uint32>::Max()
+                                                         : static_cast<uint32>(bytes))
+            .Text(" bytes but the bound pipeline declares drawConstantBytes ")
+            .Number(drawConstantBytes);
+    }
+
+    return Reject(message.CStr());
+}
+
 // 컴파일 훅의 정점 입력 리플렉션을 배치와 대조한다(RenderBase 10.4절 셰이더 입력 대조, D3D12와
 // 같은 규칙과 진단 문구).
 Result<void> VulkanDevice::MatchVertexInputs(const CompiledShader& vertex,
@@ -382,25 +398,42 @@ namespace {
 // 이미지와 s0 샘플러, 단계 모두의 t1–t4 버퍼 SRV(typed·구조화·raw), compute의 u0–u3 버퍼 UAV만
 // 받는다. 그 밖 (상수 버퍼, 다른 register, space, 그래픽 단계의 쓰기 자원)이면 거짓이다.
 bool MapBinding(const ShaderBinding& binding, ShaderStage stage, PipelineBinding& out,
-                DrawBufferSlots& slots, DrawBufferSlots& writeSlots) noexcept {
+                DrawBufferSlots& slots, DrawBufferSlots& writeSlots,
+                uint32& writeTextures) noexcept {
     if (binding.sourceSpace != 0 || (binding.writable && stage != ShaderStage::Compute)) {
         return false;
     }
 
     out.binding = binding.binding;
     out.set = binding.set;
-    const bool pixel = stage == ShaderStage::Pixel;
+    // t0·s0(SetTexture)는 PS와 CS가 읽는다(텍스처 GX2 A부).
+    const bool textureStage = stage == ShaderStage::Pixel || stage == ShaderStage::Compute;
     if (binding.shape == ShaderResourceShape::Image &&
         binding.kind == ShaderBindingKind::SampledImage) {
         out.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
         out.source = BindingSource::Texture;
-        return pixel && binding.sourceRegister == 0;
+        return textureStage && binding.sourceRegister == 0;
     }
 
     if (binding.shape == ShaderResourceShape::Sampler) {
         out.type = VK_DESCRIPTOR_TYPE_SAMPLER;
         out.source = BindingSource::Sampler;
-        return pixel && binding.sourceRegister == 0;
+        return textureStage && binding.sourceRegister == 0;
+    }
+
+    // compute 쓰기 slot의 storage image(RWTexture*)는 SetWritableTexture slot이다.
+    if (binding.shape == ShaderResourceShape::Image &&
+        binding.kind == ShaderBindingKind::StorageImage) {
+        out.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        out.source = BindingSource::WritableTexture;
+        out.slot = binding.sourceRegister;
+        if (!binding.writable || binding.sourceRegister >= MaxDrawBufferViews ||
+            (writeSlots.usedMask & (1u << binding.sourceRegister)) != 0) {
+            return false;
+        }
+
+        writeTextures |= 1u << binding.sourceRegister;
+        return true;
     }
 
     // 쓰기 자원은 register u(slot), 읽기는 t(slot + 1)이다.
@@ -435,9 +468,19 @@ bool MapBinding(const ShaderBinding& binding, ShaderStage stage, PipelineBinding
 Result<void> VulkanDevice::BuildPipelineLayout(const CompiledShader& first,
                                                const CompiledShader* pixel, bool compute,
                                                PipelineRecord& record) noexcept {
-    if (first.rootConstantBytes > ConstantBytes ||
-        (pixel != nullptr && pixel->rootConstantBytes > ConstantBytes)) {
-        return Reject("draw constants block is larger than DrawConstants (80 bytes)");
+    // 그리기별 상수 블록은 파이프라인이 선언한 크기 안이어야 한다(작은 것은 허용).
+    const CompiledShader* stages[2] = {&first, pixel};
+    for (uint32 stage = 0; stage < 2; ++stage) {
+        if (stages[stage] != nullptr &&
+            stages[stage]->rootConstantBytes > record.drawConstantBytes) {
+            Diagnostic message;
+            message.Text(compute ? "compute" : (stage == 0 ? "vertex" : "pixel"))
+                .Text(" shader reads ")
+                .Number(stages[stage]->rootConstantBytes)
+                .Text(" bytes of draw constants but the pipeline declares drawConstantBytes ")
+                .Number(record.drawConstantBytes);
+            return Reject(message.CStr());
+        }
     }
 
     // set = 단계다: VS(compute면 CS) 0, PS 1(ShaderSystem 7.2절).
@@ -452,7 +495,8 @@ Result<void> VulkanDevice::BuildPipelineLayout(const CompiledShader& first,
         for (const ShaderBinding& binding : shaders[stage]->bindings) {
             PipelineBinding mapped;
             if (binding.set != stage || record.bindingCount == MaxPipelineBindings ||
-                !MapBinding(binding, shaderStage, mapped, record.bufferSlots, record.writeSlots)) {
+                !MapBinding(binding, shaderStage, mapped, record.bufferSlots, record.writeSlots,
+                            record.writeTextures)) {
                 Diagnostic message;
                 message.Text(compute ? "compute" : (stage == 0 ? "vertex" : "pixel"))
                     .Text(" shader resource at register ")
@@ -558,6 +602,7 @@ Result<PipelineHandle> VulkanDevice::CreatePipeline(const PipelineDesc& desc) no
     // 호환 render pass 열쇠다(형식만 맞으면 load·store·layout이 다른 패스에서도 쓸 수 있다).
     RenderPassKey passKey;
     passKey.colorCount = desc.colorTargetCount;
+    passKey.samples = static_cast<VkSampleCountFlagBits>(desc.sampleCount);
     for (uint32 index = 0; index < desc.colorTargetCount; ++index) {
         const PixelFormat format = desc.colorFormats[index];
         const PixelFormatCaps required =
@@ -655,6 +700,7 @@ Result<PipelineHandle> VulkanDevice::CreatePipeline(const PipelineDesc& desc) no
     }
 
     PipelineRecord record;
+    record.drawConstantBytes = desc.drawConstantBytes;
     auto layout = BuildPipelineLayout(vertex, &pixel, false, record);
     if (!layout) {
         return Result<PipelineHandle>::Failure(layout.Error());
@@ -724,7 +770,7 @@ Result<PipelineHandle> VulkanDevice::CreatePipeline(const PipelineDesc& desc) no
     raster.lineWidth = 1.0f;
     VkPipelineMultisampleStateCreateInfo multisample = {};
     multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    multisample.rasterizationSamples = static_cast<VkSampleCountFlagBits>(desc.sampleCount);
     multisample.alphaToCoverageEnable = desc.alphaToCoverage ? VK_TRUE : VK_FALSE;
     const DepthStencilState& state = desc.depthStencil;
     VkPipelineDepthStencilStateCreateInfo depth = {};

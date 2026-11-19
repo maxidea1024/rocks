@@ -23,8 +23,8 @@ constexpr VkAccessFlags BufferAccess =
 Result<PipelineHandle>
 VulkanDevice::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
     platform::LockGuard lock(gate_);
-    if (desc.shader.hlsl.ByteCount() == 0) {
-        auto failed = Reject("compute pipeline needs HLSL source");
+    if (desc.shader.hlsl.ByteCount() == 0 || !ValidateComputePipelineDesc(desc)) {
+        auto failed = Reject("compute pipeline needs HLSL source and valid drawConstantBytes");
         return Result<PipelineHandle>::Failure(failed.Error());
     }
 
@@ -50,6 +50,7 @@ VulkanDevice::CreateComputePipeline(const ComputePipelineDesc& desc) noexcept {
 
     PipelineRecord record;
     record.compute = true;
+    record.drawConstantBytes = desc.drawConstantBytes;
     auto layout = BuildPipelineLayout(shader, nullptr, true, record);
     if (!layout) {
         return Result<PipelineHandle>::Failure(layout.Error());
@@ -97,6 +98,21 @@ void VulkanDevice::SetWritableBufferView(uint32 slot, BufferViewHandle view) noe
     const BufferViewRecord* record = bufferViews_.Find(view.slot);
     const bool writable = record != nullptr && record->access == ViewAccess::ReadWrite;
     boundWriteViews_[slot] = writable ? view : BufferViewHandle{};
+    // 쓰기 slot은 버퍼·텍스처가 같은 번호 공간이다(나중에 묶은 하나만 남는다).
+    boundWriteTextures_[slot] = {};
+    descriptorsDirty_ = true;
+}
+
+void VulkanDevice::SetWritableTexture(uint32 slot, TextureHandle view) noexcept {
+    platform::LockGuard lock(gate_);
+    if (slot >= MaxDrawBufferViews) {
+        return;
+    }
+
+    const TextureRecord* record = textures_.Find(view.slot);
+    const bool writable = record != nullptr && record->writable;
+    boundWriteTextures_[slot] = writable ? view : TextureHandle{};
+    boundWriteViews_[slot] = {};
     descriptorsDirty_ = true;
 }
 
@@ -123,6 +139,21 @@ bool VulkanDevice::PrepareDispatch() noexcept {
     if (!recording_ || pipeline == nullptr || !pipeline->compute ||
         !PrepareDescriptors(VK_PIPELINE_BIND_POINT_COMPUTE)) {
         return false;
+    }
+
+    // 쓰는 텍스처 view의 범위를 UAV(GENERAL)로 맞춘다. 같은 상태가 이어지면 UAV 순서 barrier로 앞
+    // dispatch의 쓰기를 기다린다.
+    for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
+        if ((pipeline->writeTextures & (1u << slot)) == 0) {
+            continue;
+        }
+
+        const TextureRecord* view = textures_.Find(boundWriteTextures_[slot].slot);
+        TextureRecord* owner = view != nullptr ? textures_.Find(view->source) : nullptr;
+        if (owner != nullptr) {
+            TrackTransition(*owner, view->source, view->viewRange, ResourceAccess::UavCompute,
+                            true);
+        }
     }
 
     // dispatch는 render pass 밖에서만 기록할 수 있다. 뒤 그리기를 위해 LOAD로 다시 연다.
@@ -302,17 +333,20 @@ Result<void> VulkanDevice::CopyTexture(TextureHandle destination, TextureHandle 
     const PixelFormatInfo& info = GetPixelFormatInfo(from->format);
     if (destination == source || to->isView || from->isView || to->width != from->width ||
         to->height != from->height || to->format != from->format || info.planeCount > 1 ||
-        IsPassAttachment(destination.slot) || IsPassAttachment(source.slot)) {
+        to->sampleCount > 1 || from->sampleCount > 1 ||
+        to->dimension != TextureDimension::Texture2D ||
+        from->dimension != TextureDimension::Texture2D || IsPassAttachment(destination.slot) ||
+        IsPassAttachment(source.slot)) {
         return FailCode("CopyTexture", ErrorCode::InvalidArgument,
-                        "texture copy needs two distinct non-view single-plane textures of the "
+                        "texture copy needs two distinct non-view single-plane 2D textures of the "
                         "same size and format outside the current pass");
     }
 
     // 두 텍스처의 mip 0을 복사 상태로 바꾼다(TrackTransition이 render pass를 닫는다). 상태는 복사
     // 상태로 남는다(GX5: 다음 사용이 명시 전이나 암묵 전이로 바꾼다).
     SuspendRenderPass();
-    TrackTransition(*from, source.slot, 0, 1, ResourceAccess::CopySource, false);
-    TrackTransition(*to, destination.slot, 0, 1, ResourceAccess::CopyDestination, false);
+    TrackTransition(*from, source.slot, {0, 1, 0, 1}, ResourceAccess::CopySource, false);
+    TrackTransition(*to, destination.slot, {0, 1, 0, 1}, ResourceAccess::CopyDestination, false);
     VkImageCopy region = {};
     region.srcSubresource = {from->aspect, 0, 0, 1};
     region.dstSubresource = {to->aspect, 0, 0, 1};

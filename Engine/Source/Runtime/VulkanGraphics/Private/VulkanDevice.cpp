@@ -108,6 +108,7 @@ VulkanDevice::VulkanDevice(Allocator& allocator) noexcept
       buffers_(allocator), textures_(allocator), pipelines_(allocator), swapChains_(allocator),
       readbacks_(allocator), bufferViews_(allocator), orphanBuffers_(allocator),
       retired_(allocator), renderPasses_(allocator), framebuffers_(allocator),
+      attachmentViews_(allocator), volumeAttachmentImages_(allocator),
       timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics), touchedTextures_(allocator),
       splits_(allocator), pendingSplits_(allocator), splitImageBarriers_(allocator),
       splitMemoryBarriers_(allocator), acquireSemaphores_(allocator), orphanSemaphores_(allocator),
@@ -172,6 +173,11 @@ VulkanDevice::~VulkanDevice() {
         }
 
         framebuffers_.Clear();
+        for (AttachmentViewEntry& entry : attachmentViews_) {
+            functions_.vkDestroyImageView(device_, entry.view, nullptr);
+        }
+
+        attachmentViews_.Clear();
         for (TextureRecord& record : textures_) {
             functions_.vkDestroyImageView(device_, record.view, nullptr);
             if (record.attachmentView != VK_NULL_HANDLE) {

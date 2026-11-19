@@ -34,12 +34,17 @@ bool SameBlend(const ColorTargetBlend& left, const ColorTargetBlend& right) noex
 
 } // namespace
 
+bool IsValidDrawConstantBytes(uint32 bytes) noexcept {
+    return bytes <= MaxDrawConstantBytes && bytes % DrawConstantAlignment == 0;
+}
+
 Result<void> ValidatePipelineDesc(const PipelineDesc& desc) noexcept {
     const auto invalid = []() noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     };
-    if (desc.colorTargetCount > MaxColorTargets || desc.topology > PrimitiveTopology::PointList ||
-        desc.raster.cullMode > CullMode::Front) {
+    if (!IsValidDrawConstantBytes(desc.drawConstantBytes) ||
+        !IsValidSampleCount(desc.sampleCount) || desc.colorTargetCount > MaxColorTargets ||
+        desc.topology > PrimitiveTopology::PointList || desc.raster.cullMode > CullMode::Front) {
         return invalid();
     }
 
@@ -62,6 +67,14 @@ Result<void> ValidatePipelineDesc(const PipelineDesc& desc) noexcept {
         state.depthCompare > CompareFunction::Always || !ValidStencilFace(state.front) ||
         !ValidStencilFace(state.back)) {
         return invalid();
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> ValidateComputePipelineDesc(const ComputePipelineDesc& desc) noexcept {
+    if (!IsValidDrawConstantBytes(desc.drawConstantBytes)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     return Result<void>::Success();

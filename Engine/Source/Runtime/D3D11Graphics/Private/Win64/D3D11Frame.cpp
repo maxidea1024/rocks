@@ -64,6 +64,12 @@ void D3D11Device::BeginRecording(const Target& target, const PassDesc& pass) noe
         view = {};
     }
 
+    for (TextureHandle& view : boundWriteTextures_) {
+        view = {};
+    }
+
+    boundTexture_ = white_.slot;
+
     stencilReference_ = 0;
     inputsDirty_ = false;
     ID3D11DeviceContext* context = deferred_.Get();
@@ -120,8 +126,9 @@ void D3D11Device::BeginRecording(const Target& target, const PassDesc& pass) noe
     }
 
     // deferred context의 동적 버퍼 내용은 그 기록 안에서 DISCARD로 쓰기 전까지 정해지지 않는다.
-    const DrawConstants identity;
-    WriteConstants(identity);
+    // 그리기별 상수는 기록마다 0으로 시작한다(CommandContext::SetDrawConstants).
+    platform::MemoryZero(constantValues_, sizeof(constantValues_));
+    WriteConstants();
 }
 
 Result<GpuFencePoint> D3D11Device::EndFrame() noexcept {
@@ -139,6 +146,20 @@ Result<GpuFencePoint> D3D11Device::EndFrame() noexcept {
     const usize unended = splits_.Close();
     if (validation_) {
         validationErrors_ += unended;
+    }
+
+    // 패스 끝 MSAA resolve다(ColorAttachment::resolveTarget, 박스 평균, 결정 R17).
+    for (uint32 index = 0; index < target_.colorCount; ++index) {
+        const TextureRecord* source = textures_.Find(target_.colors[index].slot);
+        const TextureRecord* resolved = textures_.Find(target_.resolves[index].slot);
+        if (source != nullptr && resolved != nullptr) {
+            // 대상은 resolve mip·slice의 subresource다(텍스처 GX2 C부).
+            deferred_->ResolveSubresource(resolved->texture.Get(),
+                                          D3D11CalcSubresource(target_.resolveMips[index],
+                                                               target_.resolveSlices[index],
+                                                               resolved->mipLevels),
+                                          source->texture.Get(), 0, MappingOf(source->format).rtv);
+        }
     }
 
     CloseMarkers();
@@ -272,25 +293,40 @@ void D3D11Device::SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64
 void D3D11Device::SetTexture(TextureHandle handle) noexcept {
     platform::LockGuard lock(gate_);
     const TextureRecord* record = textures_.Find(handle.slot);
+    SlotHandle slot = handle.slot;
     if (record == nullptr || !record->srv) {
         record = textures_.Find(white_.slot);
+        slot = white_.slot;
     }
 
     if (record != nullptr) {
+        // compute는 dispatch 때 같은 텍스처를 CS t0·s0에 건다.
+        boundTexture_ = slot;
         ID3D11ShaderResourceView* view = record->srv.Get();
         deferred_->PSSetShaderResources(0, 1, &view);
         deferred_->PSSetSamplers(0, 1, &record->sampler);
     }
 }
 
-void D3D11Device::SetConstants(const DrawConstants& constants) noexcept {
-    // 기록 context는 소유 스레드만 쓰므로 장치 잠금이 필요 없다(D3D12 루트 상수와 같다).
-    WriteConstants(constants);
+Result<void> D3D11Device::SetDrawConstants(Span<const uint8> bytes) noexcept {
+    platform::LockGuard lock(gate_);
+    const PipelineRecord* pipeline = recording_ ? pipelines_.Find(boundPipeline_) : nullptr;
+    if (pipeline == nullptr || bytes.Size() != pipeline->drawConstantBytes) {
+        return RejectDrawConstantSize(pipeline != nullptr, bytes.Size(),
+                                      pipeline != nullptr ? pipeline->drawConstantBytes : 0u);
+    }
+
+    if (bytes.Size() != 0) {
+        platform::MemoryCopy(constantValues_, bytes.Data(), bytes.Size());
+        WriteConstants();
+    }
+
+    return Result<void>::Success();
 }
 
-// 그리기 상수 버퍼를 갈아 끼운다(UE uniform buffer와 같은 WRITE_DISCARD). 앞 그리기는 앞 내용을
-// 그대로 본다.
-void D3D11Device::WriteConstants(const DrawConstants& constants) noexcept {
+// 그리기별 상수 버퍼를 사본 전체로 갈아 끼운다(UE uniform buffer와 같은 WRITE_DISCARD). 앞
+// 그리기는 앞 내용을 그대로 본다.
+void D3D11Device::WriteConstants() noexcept {
     D3D11_MAPPED_SUBRESOURCE mapped = {};
     const HRESULT result = deferred_->Map(constants_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
     if (FAILED(result)) {
@@ -298,7 +334,7 @@ void D3D11Device::WriteConstants(const DrawConstants& constants) noexcept {
         return;
     }
 
-    platform::MemoryCopy(mapped.pData, &constants, sizeof(constants));
+    platform::MemoryCopy(mapped.pData, constantValues_, sizeof(constantValues_));
     deferred_->Unmap(constants_.Get(), 0);
 }
 
@@ -365,7 +401,14 @@ Result<void> D3D11Device::CopyPassTarget(TextureHandle destination) noexcept {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    if (target_.resource == nullptr || !record->renderTarget || destination == target_.texture ||
+    // 패스 대상은 2D mip 0 attachment여야 한다(자원 전체 복사, 텍스처 GX2 C부).
+    const TextureRecord* passTexture = textures_.Find(target_.texture.slot);
+    const bool wholeTarget =
+        passTexture == nullptr ||
+        (passTexture->dimension == TextureDimension::Texture2D && passTexture->mipLevels == 1);
+    if (target_.resource == nullptr || !record->renderTarget || record->sampleCount > 1 ||
+        target_.sampleCount > 1 || !wholeTarget || record->mipLevels != 1 ||
+        record->dimension != TextureDimension::Texture2D || destination == target_.texture ||
         record->width != target_.width || record->height != target_.height ||
         record->format != target_.format) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);

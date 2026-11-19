@@ -172,7 +172,7 @@ void CreateChecker(render::RenderLaneContext& context, CheckerUpload& upload) no
     graphics::TextureDesc desc;
     desc.width = 2;
     desc.height = 2;
-    desc.sampler.filter = graphics::Filter::Nearest;
+    desc.sampler.filter = graphics::Filter::Point;
     desc.sampler.addressU = graphics::AddressMode::Clamp;
     desc.sampler.addressV = graphics::AddressMode::Clamp;
     auto created = context.Device().CreateTexture(desc, upload.pixels.View());

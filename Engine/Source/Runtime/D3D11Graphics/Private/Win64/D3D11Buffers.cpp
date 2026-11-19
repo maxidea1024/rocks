@@ -193,9 +193,12 @@ void D3D11Device::Retire(BufferViewHandle handle) noexcept {
 }
 
 // b0 상수, PS t0 텍스처·s0 샘플러, t1–t4 버퍼 SRV만 받는다(PipelineDesc 고정 배치). 두 단계가 같은
-// slot을 다른 종류로 읽거나 배치 밖 자원(UAV 포함)이면 InvalidArgument다.
-Result<void> D3D11Device::ReflectBindings(ID3DBlob* code, ShaderStage stage, DrawBufferSlots& slots,
-                                          DrawBufferSlots* writeSlots) noexcept {
+// slot을 다른 종류로 읽거나 배치 밖 자원(UAV 포함)이거나 b0 cbuffer가 drawConstantBytes보다 크면
+// InvalidArgument다.
+Result<void> D3D11Device::ReflectBindings(ID3DBlob* code, ShaderStage stage,
+                                          uint32 drawConstantBytes, DrawBufferSlots& slots,
+                                          DrawBufferSlots* writeSlots,
+                                          uint32* writeTextures) noexcept {
     ComRef<ID3D11ShaderReflection> reflection;
     HRESULT result =
         D3DReflect(code->GetBufferPointer(), code->GetBufferSize(), IID_PPV_ARGS(reflection.Out()));
@@ -217,6 +220,8 @@ Result<void> D3D11Device::ReflectBindings(ID3DBlob* code, ShaderStage stage, Dra
         }
 
         const bool pixel = stage == ShaderStage::Pixel;
+        // t0·s0(SetTexture)는 PS와 CS가 읽는다(텍스처 GX2 A부).
+        const bool textureStage = pixel || stage == ShaderStage::Compute;
         const bool single = resource.BindCount == 1;
         const uint32 slot = resource.BindPoint - 1;
         const bool viewSlot = resource.BindPoint >= 1 && slot < MaxDrawBufferViews;
@@ -227,15 +232,32 @@ Result<void> D3D11Device::ReflectBindings(ID3DBlob* code, ShaderStage stage, Dra
                                                           : PixelShaderType::Float;
         bool fits = false;
         switch (resource.Type) {
-        case D3D_SIT_CBUFFER:
+        case D3D_SIT_CBUFFER: {
             fits = single && resource.BindPoint == 0;
+            // 그리기별 상수 블록은 파이프라인이 선언한 크기 안이어야 한다(작은 것은 허용).
+            ID3D11ShaderReflectionConstantBuffer* block =
+                fits ? reflection->GetConstantBufferByName(resource.Name) : nullptr;
+            D3D11_SHADER_BUFFER_DESC blockDesc = {};
+            if (block != nullptr && SUCCEEDED(block->GetDesc(&blockDesc)) &&
+                blockDesc.Size > drawConstantBytes) {
+                Diagnostic message;
+                message
+                    .Text(pixel ? "pixel" : (stage == ShaderStage::Vertex ? "vertex" : "compute"))
+                    .Text(" shader reads ")
+                    .Number(blockDesc.Size)
+                    .Text(" bytes of draw constants but the pipeline declares drawConstantBytes ")
+                    .Number(drawConstantBytes);
+                return Reject(message);
+            }
+
             break;
+        }
         case D3D_SIT_SAMPLER:
-            fits = single && pixel && resource.BindPoint == 0;
+            fits = single && textureStage && resource.BindPoint == 0;
             break;
         case D3D_SIT_TEXTURE:
             if (resource.Dimension != D3D_SRV_DIMENSION_BUFFER) {
-                fits = single && pixel && resource.BindPoint == 0;
+                fits = single && textureStage && resource.BindPoint == 0;
             } else {
                 fits = single && viewSlot &&
                        AddDrawBufferSlot(slots, slot, BufferViewKind::Typed, type);
@@ -254,7 +276,20 @@ Result<void> D3D11Device::ReflectBindings(ID3DBlob* code, ShaderStage stage, Dra
                                   resource.Type == D3D_SIT_STRUCTURED ? resource.NumSamples : 0u);
             break;
         case D3D_SIT_UAV_RWTYPED:
-            fits = single && writeSlot && resource.Dimension == D3D_SRV_DIMENSION_BUFFER &&
+            if (resource.Dimension != D3D_SRV_DIMENSION_BUFFER) {
+                // 텍스처 UAV(RWTexture2D·2DArray·3D)는 SetWritableTexture slot이다.
+                fits = single && writeSlot && writeTextures != nullptr &&
+                       (resource.Dimension == D3D_SRV_DIMENSION_TEXTURE2D ||
+                        resource.Dimension == D3D_SRV_DIMENSION_TEXTURE2DARRAY ||
+                        resource.Dimension == D3D_SRV_DIMENSION_TEXTURE3D);
+                if (fits) {
+                    *writeTextures |= 1u << resource.BindPoint;
+                }
+
+                break;
+            }
+
+            fits = single && writeSlot &&
                    AddDrawBufferSlot(*writeSlots, resource.BindPoint, BufferViewKind::Typed, type);
             break;
         case D3D_SIT_UAV_RWSTRUCTURED:
@@ -276,8 +311,9 @@ Result<void> D3D11Device::ReflectBindings(ID3DBlob* code, ShaderStage stage, Dra
             message.Text(pixel ? "pixel" : (stage == ShaderStage::Vertex ? "vertex" : "compute"))
                 .Text(" shader resource ")
                 .Text(resource.Name != nullptr ? resource.Name : "?")
-                .Text(" is outside the fixed layout (b0, pixel t0 and s0, buffer views t1-t4, "
-                      "compute buffer UAVs u0-u3; no UAVs in graphics stages)");
+                .Text(" is outside the fixed layout (b0, pixel and compute t0 and s0, buffer "
+                      "views t1-t4, compute buffer or texture UAVs u0-u3; no UAVs in graphics "
+                      "stages)");
             return Reject(message);
         }
     }

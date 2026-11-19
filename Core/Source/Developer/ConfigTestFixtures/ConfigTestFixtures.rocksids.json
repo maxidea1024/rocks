@@ -10,6 +10,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::config_fixture::CurveSettings::curve",
+      "id": "c4d2b35fdc3f44238e1ac0b5ecf03a92",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::config_fixture::DisplaySettings::frameCap",
       "id": "96a3b58a21e04e51815b798b143505bd",
       "aliases": [],
@@ -243,6 +250,13 @@
       "kind": "type",
       "name": "rocks::config_fixture::BlobSettings",
       "id": "3ae497ae5d26415291f2a6db47ec0e90",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::config_fixture::CurveSettings",
+      "id": "aed29e0562b048fcb9f13b1b3cd5fd20",
       "aliases": [],
       "retired": false
     },

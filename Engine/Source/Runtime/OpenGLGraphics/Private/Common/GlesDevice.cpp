@@ -111,6 +111,7 @@ GlesDevice::~GlesDevice() {
         }
 
         gl_.DeleteFramebuffers(1, &passFramebuffer_);
+        gl_.DeleteFramebuffers(1, &resolveFramebuffer_);
         gl_.DeleteProgram(depthReadProgram_);
         gl_.DeleteProgram(stencilReadProgram_);
         gl_.DeleteVertexArrays(1, &readVertexArray_);
@@ -410,11 +411,11 @@ Result<TextureHandle> GlesDevice::CreateTexture(const TextureDesc& desc,
     // 대신하지 않고 Unsupported다(PixelFormat.ko.md 8.3절). 다른 인자 검사보다 먼저 한다.
     const bool renderTarget = desc.usage == TextureUsage::RenderTarget;
     const bool depthTarget = desc.usage == TextureUsage::DepthStencil;
-    const bool attachment = renderTarget || depthTarget;
+    // 렌더 타깃·깊이·Storage는 초기 픽셀이 없다(업로드하지 않는다).
+    const bool attachment = renderTarget || depthTarget || desc.usage == TextureUsage::Storage;
     const GlesTextureFormat* format = FindTextureFormat(desc.format);
-    if (IsValidPixelFormat(desc.format) &&
-        !HasPixelFormatCaps(GetPixelFormatCaps(desc.format),
-                            RequiredPixelFormatCaps(desc.usage, desc.mipLevels))) {
+    if (IsValidPixelFormat(desc.format) && IsValidTextureDimension(desc.dimension) &&
+        !HasPixelFormatCaps(GetPixelFormatCaps(desc.format), RequiredPixelFormatCaps(desc))) {
         Diagnostic message;
         message.Text("pixel format ")
             .Text(PixelFormatName(desc.format))
@@ -425,20 +426,26 @@ Result<TextureHandle> GlesDevice::CreateTexture(const TextureDesc& desc,
         return Result<TextureHandle>::Failure(rejected.Error());
     }
 
-    const PixelFormatInfo& info = GetPixelFormatInfo(desc.format);
-    const uint64 size = MipChainBytes(desc.format, desc.width, desc.height, 1, desc.mipLevels);
-    // BC는 최상위 크기가 블록 배수여야 한다(PixelFormatInfo::topLevelBlockAligned, D3D와 같은
-    // 계약).
-    const bool aligned = !info.topLevelBlockAligned ||
-                         (desc.width % info.blockWidth == 0 && desc.height % info.blockHeight == 0);
-    if (format == nullptr || desc.width > MaxTextureExtent || desc.height > MaxTextureExtent ||
-        size == 0 || !aligned || desc.mipLevels > MaxMipLevels ||
-        !IsValidSamplerDesc(desc.sampler) ||
-        (attachment ? (pixels.Size() != 0 || desc.mipLevels != 1) : pixels.Size() != size)) {
-        return Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
+    auto valid = ValidateTextureDesc(desc);
+    if (!valid) {
+        return Result<TextureHandle>::Failure(valid.Error());
     }
 
-    if (desc.width > maxTextureExtent_ || desc.height > maxTextureExtent_) {
+    if (desc.sampleCount > 1 &&
+        (GetPixelFormatSampleCounts(desc.format) & SampleCountBit(desc.sampleCount)) == 0) {
+        Diagnostic message;
+        message.Text("MSAA sample count ")
+            .Number(desc.sampleCount)
+            .Text(" for ")
+            .Text(PixelFormatName(desc.format))
+            .Text(" is not supported by this OpenGL ES device");
+        auto rejected = Reject(message, ErrorCode::Unsupported);
+        return Result<TextureHandle>::Failure(rejected.Error());
+    }
+
+    // 장치 한도를 크기 계산보다 먼저 본다(한도 안의 desc는 데이터 byte가 넘치지 않는다).
+    if (desc.width > maxTextureExtent_ || desc.height > maxTextureExtent_ ||
+        !CheckTextureLimits(caps_, desc)) {
         Diagnostic message;
         message.Text("texture format ")
             .Text(PixelFormatName(desc.format))
@@ -452,33 +459,79 @@ Result<TextureHandle> GlesDevice::CreateTexture(const TextureDesc& desc,
         return Result<TextureHandle>::Failure(rejected.Error());
     }
 
+    const PixelFormatInfo& info = GetPixelFormatInfo(desc.format);
+    const uint64 size = TextureDataBytes(desc);
+    // BC는 최상위 크기가 블록 배수여야 한다(PixelFormatInfo::topLevelBlockAligned, D3D와 같은
+    // 계약).
+    const bool aligned = !info.topLevelBlockAligned ||
+                         (desc.width % info.blockWidth == 0 && desc.height % info.blockHeight == 0);
+    if (format == nullptr || desc.width > MaxTextureExtent || desc.height > MaxTextureExtent ||
+        size == 0 || !aligned || desc.mipLevels > MaxMipLevels ||
+        (attachment ? pixels.Size() != 0 : pixels.Size() != size)) {
+        return Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
     if (!MakeCurrentForResources()) {
         return FailWith<TextureHandle>("cannot make the OpenGL context current");
     }
 
     TextureRecord record;
+    record.dimension = desc.dimension;
+    // MSAA는 TEXTURE_2D_MULTISAMPLE(ES 3.1 core)이다.
+    record.target =
+        desc.sampleCount > 1 ? GL_TEXTURE_2D_MULTISAMPLE : TextureTarget(desc.dimension);
+    record.sampleCount = desc.sampleCount;
     record.width = desc.width;
     record.height = desc.height;
+    record.depth = desc.depth;
     record.mipLevels = desc.mipLevels;
+    record.slices = TextureSliceCount(desc);
     record.format = desc.format;
+    record.swizzle = desc.swizzle;
     record.depthTarget = depthTarget;
+    record.renderTarget = renderTarget;
+    record.usage = desc.usage;
+    record.viewRange = {0, record.mipLevels, 0, record.slices};
     record.depthStencilTexture = info.kind == PixelFormatKind::DepthStencil;
     record.samplerDesc = desc.sampler;
     gl_.GenTextures(1, &record.texture);
     gl_.ActiveTexture(GL_TEXTURE0 + UploadTextureUnit);
-    gl_.BindTexture(GL_TEXTURE_2D, record.texture);
-    gl_.TexStorage2D(GL_TEXTURE_2D, static_cast<GLsizei>(desc.mipLevels), format->internalFormat,
-                     static_cast<GLsizei>(desc.width), static_cast<GLsizei>(desc.height));
-    if (format->Is(GlesAlphaSwizzle)) {
-        // A8: R8 저장소를 (0, 0, 0, R)로 읽는다(텍스처 객체 상태, ES 3.0 core).
-        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R, static_cast<GLint>(GL_ZERO));
-        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_G, static_cast<GLint>(GL_ZERO));
-        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_B, static_cast<GLint>(GL_ZERO));
-        gl_.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, static_cast<GLint>(GL_RED));
+    gl_.BindTexture(record.target, record.texture);
+    // 2D·cube는 TexStorage2D(cube는 6면을 한 번에), 2D 배열·cube 배열·3D는 TexStorage3D다(cube
+    // 배열의 깊이는 layer 수 = cube × 6, ES 3.2 8.18절).
+    const auto levels = static_cast<GLsizei>(desc.mipLevels);
+    if (record.target == GL_TEXTURE_2D_MULTISAMPLE) {
+        // 표본 위치는 고정이다(fixedsamplelocations, D3D 표준 배치와 같은 결정성).
+        gl_.TexStorage2DMultisample(record.target, static_cast<GLsizei>(desc.sampleCount),
+                                    format->internalFormat, static_cast<GLsizei>(desc.width),
+                                    static_cast<GLsizei>(desc.height), GL_TRUE);
+    } else if (record.target == GL_TEXTURE_2D || record.target == GL_TEXTURE_CUBE_MAP) {
+        gl_.TexStorage2D(record.target, levels, format->internalFormat,
+                         static_cast<GLsizei>(desc.width), static_cast<GLsizei>(desc.height));
+    } else {
+        const uint32 layers =
+            desc.dimension == TextureDimension::Texture3D ? desc.depth : record.slices;
+        gl_.TexStorage3D(record.target, levels, format->internalFormat,
+                         static_cast<GLsizei>(desc.width), static_cast<GLsizei>(desc.height),
+                         static_cast<GLsizei>(layers));
     }
 
+    if (format->Is(GlesAlphaSwizzle)) {
+        // A8: R8 저장소를 (0, 0, 0, R)로 읽는다(텍스처 객체 상태, ES 3.0 core). 묶을 때 사용자
+        // swizzle과 합성해 다시 정한다(BindPassTexture).
+        gl_.TexParameteri(record.target, GL_TEXTURE_SWIZZLE_R, static_cast<GLint>(GL_ZERO));
+        gl_.TexParameteri(record.target, GL_TEXTURE_SWIZZLE_G, static_cast<GLint>(GL_ZERO));
+        gl_.TexParameteri(record.target, GL_TEXTURE_SWIZZLE_B, static_cast<GLint>(GL_ZERO));
+        gl_.TexParameteri(record.target, GL_TEXTURE_SWIZZLE_A, static_cast<GLint>(GL_RED));
+    }
+
+    // 깊이 형식의 비교 샘플러는 선형 필터를 받는다(ES 3.2 8.17절: 깊이 텍스처의 선형 필터 불완전
+    // 조건은 TEXTURE_COMPARE_MODE가 NONE일 때만이다).
+    const bool depthFormat =
+        info.kind == PixelFormatKind::Depth || info.kind == PixelFormatKind::DepthStencil;
     record.sampler = CreateSampler(desc.sampler, HasPixelFormatCaps(GetPixelFormatCaps(desc.format),
-                                                                    PixelFormatCaps::Filterable));
+                                                                    PixelFormatCaps::Filterable) ||
+                                                     (desc.sampler.comparison && depthFormat));
     if (!attachment) {
         // 첫 행을 v = 0에 둔다. UV (0,0)이 이미지 좌상단이 되어 D3D12와 결과가 같다.
         usize offset = 0;
@@ -489,11 +542,12 @@ Result<TextureHandle> GlesDevice::CreateTexture(const TextureDesc& desc,
                 return Result<TextureHandle>::Failure(uploaded.Error());
             }
 
-            offset += static_cast<usize>(PixelFormatImageBytes(
-                desc.format, MipExtent(desc.width, level), MipExtent(desc.height, level)));
+            offset += static_cast<usize>(TextureMipBytes(desc, level));
         }
-    } else if (renderTarget) {
-        record.framebuffer = CreateColorFramebuffer(record.texture);
+    } else if (renderTarget && desc.dimension == TextureDimension::Texture2D) {
+        // 2D 렌더 타깃의 mip 0 framebuffer다(ReadPixels·색 하나 패스). 2D 밖 차원은 패스
+        // framebuffer에 붙인다.
+        record.framebuffer = CreateColorFramebuffer(record.texture, record.target);
         if (record.framebuffer == 0) {
             ReleaseTexture(record);
             return FailWith<TextureHandle>("render target framebuffer is incomplete");
@@ -528,9 +582,38 @@ Result<TextureHandle> GlesDevice::CreateTextureView(TextureHandle texture,
         return Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
-    auto resolved = ResolveTextureViewFormat(source->format, desc);
+    auto resolved = ResolveTextureViewFormat(source->format, desc, source->samplerDesc.comparison);
     if (!resolved) {
         return Result<TextureHandle>::Failure(resolved.Error());
+    }
+
+    auto range = ResolveTextureViewRange(source->dimension, source->usage,
+                                         {source->mipLevels, source->slices}, desc);
+    if (!range) {
+        return Result<TextureHandle>::Failure(range.Error());
+    }
+
+    // texture view가 없어 읽기 view는 텍스처 전체를 묶는다(mip은 셰이더가 TextureViewBaseMip으로
+    // 고른다). slice 범위를 고를 수단은 없으므로 일부 slice view는 Unsupported다. 쓰기 view는
+    // level 하나를 묶고, 배열은 layered(모든 층)로만 묶는다(셰이더 image2DArray의 층 번호가 view
+    // 기준이 되도록).
+    const bool writable = desc.access == ViewAccess::ReadWrite;
+    if (range.Value().sliceCount != source->slices) {
+        Diagnostic message;
+        message.Text("texture view over part of the slices is not supported by OpenGL ES (no "
+                     "texture views in ES core)");
+        auto rejected = Reject(message, ErrorCode::Unsupported);
+        return Result<TextureHandle>::Failure(rejected.Error());
+    }
+
+    if (writable &&
+        !HasPixelFormatCaps(GetPixelFormatCaps(resolved.Value()), PixelFormatCaps::StorageWrite)) {
+        Diagnostic message;
+        message.Text("pixel format ")
+            .Text(PixelFormatName(resolved.Value()))
+            .Text(" as a storage image is not supported by this OpenGL ES device");
+        auto rejected = Reject(message, ErrorCode::Unsupported);
+        return Result<TextureHandle>::Failure(rejected.Error());
     }
 
     const PixelFormatKind kind = GetPixelFormatInfo(source->format).kind;
@@ -553,18 +636,28 @@ Result<TextureHandle> GlesDevice::CreateTextureView(TextureHandle texture,
 
     TextureRecord record;
     record.texture = source->texture;
+    record.dimension = source->dimension;
+    record.target = source->target;
     record.width = source->width;
     record.height = source->height;
+    record.depth = source->depth;
     record.mipLevels = source->mipLevels;
+    record.slices = source->slices;
     record.format = resolved.Value();
+    record.swizzle = desc.swizzle;
     record.plane = desc.plane;
     record.depthStencilTexture = source->depthStencilTexture;
     record.samplerDesc = source->samplerDesc;
+    record.usage = source->usage;
+    record.sampleCount = source->sampleCount;
+    record.viewRange = range.Value();
+    record.writable = writable;
     record.isView = true;
     record.source = texture.slot;
     record.sampler =
         CreateSampler(record.samplerDesc, HasPixelFormatCaps(GetPixelFormatCaps(source->format),
-                                                             PixelFormatCaps::Filterable));
+                                                             PixelFormatCaps::Filterable) ||
+                                              (record.samplerDesc.comparison && depth));
     auto added = textures_.TryAdd(record);
     if (!added) {
         gl_.DeleteSamplers(1, &record.sampler);
@@ -676,17 +769,17 @@ Result<PipelineHandle> GlesDevice::CreatePipeline(const PipelineDesc& desc) noex
         return Result<PipelineHandle>::Failure(ErrorCode::DependencyFailed);
     }
 
+    // 루트 상수 에뮬레이션 배열 위치·크기는 링크 때 한 번 찾는다(ShaderSystem 7.2절 4항).
+    record.drawConstantBytes = desc.drawConstantBytes;
     auto matched = MatchVertexInputs(record.program, desc.layout);
     auto reflected =
         matched ? ReflectBufferSlots(record.program, record.bufferSlots, nullptr) : Move(matched);
-    if (!reflected) {
+    auto constants = reflected ? ReflectRootConstants(record.program, record) : Move(reflected);
+    if (!constants) {
         gl_.DeleteProgram(record.program);
-        return Result<PipelineHandle>::Failure(reflected.Error());
+        return Result<PipelineHandle>::Failure(constants.Error());
     }
 
-    // 루트 상수 에뮬레이션 배열 위치는 링크 때 한 번 찾는다(ShaderSystem 7.2절 4항).
-    record.vertexConstants = gl_.GetUniformLocation(record.program, VertexRootConstantsName);
-    record.pixelConstants = gl_.GetUniformLocation(record.program, PixelRootConstantsName);
     switch (desc.topology) {
     case PrimitiveTopology::TriangleStrip:
         record.topology = GL_TRIANGLE_STRIP;
@@ -970,6 +1063,21 @@ Result<void> GlesDevice::Reject(const Diagnostic& message, ErrorCode error) noex
     return Result<void>::Failure(error);
 }
 
+Result<void> GlesDevice::RejectDrawConstantSize(bool pipelineBound, usize bytes,
+                                                uint32 drawConstantBytes) noexcept {
+    Diagnostic message;
+    if (!pipelineBound) {
+        message.Text("SetDrawConstants needs a pipeline bound while recording");
+    } else {
+        message.Text("SetDrawConstants got ")
+            .Number(bytes)
+            .Text(" bytes but the bound pipeline declares drawConstantBytes ")
+            .Number(drawConstantBytes);
+    }
+
+    return Reject(message, ErrorCode::InvalidArgument);
+}
+
 bool GlesDevice::MakeCurrentForResources() noexcept {
     if (platform_->IsCurrent()) {
         return true;
@@ -1118,12 +1226,12 @@ bool GlesDevice::CreateBackBuffer(SwapChainRecord& record, uint32 width, uint32 
     return true;
 }
 
-GLuint GlesDevice::CreateColorFramebuffer(GLuint texture) noexcept {
+GLuint GlesDevice::CreateColorFramebuffer(GLuint texture, GLenum target) noexcept {
     // 기록 중인 패스의 그리기 framebuffer를 건드리지 않도록 읽기 binding에서 만든다.
     GLuint framebuffer = 0;
     gl_.GenFramebuffers(1, &framebuffer);
     gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
-    gl_.FramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
+    gl_.FramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, target, texture, 0);
     const GLenum status = gl_.CheckFramebufferStatus(GL_READ_FRAMEBUFFER);
     gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, 0);
     if (status != GL_FRAMEBUFFER_COMPLETE) {
@@ -1144,16 +1252,25 @@ GLuint GlesDevice::CreateSampler(const SamplerDesc& desc, bool filterable) noexc
     // 선형 필터를 받지 않는 형식(정수·깊이·필터 확장 없는 32-bit float)에 선형 필터를 걸면 ES에서
     // 불완전 텍스처가 되어 texelFetch도 0을 읽는다. 그 형식은 최근접 필터로 둔다(Filterable 능력이
     // 없음을 공개한 형식이다).
-    const Filter filter = filterable ? desc.filter : Filter::Nearest;
+    const Filter filter = filterable ? desc.filter : Filter::Point;
     gl_.SamplerParameteri(sampler, GL_TEXTURE_MIN_FILTER, MinFilter(filter));
     gl_.SamplerParameteri(sampler, GL_TEXTURE_MAG_FILTER, MagFilter(filter));
     gl_.SamplerParameteri(sampler, GL_TEXTURE_WRAP_S, WrapMode(desc.addressU));
     gl_.SamplerParameteri(sampler, GL_TEXTURE_WRAP_T, WrapMode(desc.addressV));
+    gl_.SamplerParameteri(sampler, GL_TEXTURE_WRAP_R, WrapMode(desc.addressW));
+    // 비교 샘플러다. GL 비교 함수(NEVER = 0x0200 …)는 CompareFunction과 같은 순서다.
+    gl_.SamplerParameteri(
+        sampler, GL_TEXTURE_COMPARE_MODE,
+        static_cast<GLint>(desc.comparison ? GL_COMPARE_REF_TO_TEXTURE : GL_NONE));
+    if (desc.comparison) {
+        gl_.SamplerParameteri(sampler, GL_TEXTURE_COMPARE_FUNC,
+                              static_cast<GLint>(GL_NEVER + static_cast<GLenum>(desc.compare)));
+    }
     // border 색은 ES 3.2 core(GL_OES_texture_border_clamp 흡수)다.
     float border[4];
     BorderColorValue(desc.borderColor, border);
     gl_.SamplerParameterfv(sampler, GL_TEXTURE_BORDER_COLOR, border);
-    if (filter == Filter::Anisotropic && features_.anisotropic) {
+    if (IsAnisotropicFilter(filter) && features_.anisotropic) {
         const float requested = static_cast<float>(desc.maxAnisotropy);
         gl_.SamplerParameterf(sampler, GL_TEXTURE_MAX_ANISOTROPY,
                               requested < features_.maxAnisotropy ? requested
@@ -1165,19 +1282,66 @@ GLuint GlesDevice::CreateSampler(const SamplerDesc& desc, bool filterable) noexc
 
 Result<void> GlesDevice::UploadMip(const TextureRecord& record, uint32 level,
                                    const uint8* pixels) noexcept {
+    gl_.ActiveTexture(GL_TEXTURE0 + UploadTextureUnit);
+    gl_.BindTexture(record.target, record.texture);
+    gl_.PixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    // cube는 면마다 TEXTURE_CUBE_MAP_POSITIVE_X + 면 대상으로 올린다(면 순서는 Rocks·UE·D3D와
+    // 같다). 다른 차원은 대상 하나에 그 mip의 모든 layer·깊이 면을 한 번에 올린다.
+    if (record.target == GL_TEXTURE_CUBE_MAP) {
+        const usize face = static_cast<usize>(PixelFormatImageBytes(
+            record.format, MipExtent(record.width, level), MipExtent(record.height, level)));
+        for (uint32 index = 0; index < CubeFaceCount; ++index) {
+            auto uploaded = UploadImages(record, GL_TEXTURE_CUBE_MAP_POSITIVE_X + index, level, 0,
+                                         1, pixels + index * face);
+            if (!uploaded) {
+                return uploaded;
+            }
+        }
+
+        return Result<void>::Success();
+    }
+
+    const uint32 images = record.dimension == TextureDimension::Texture3D
+                              ? MipExtent(record.depth, level)
+                              : record.slices;
+    return UploadImages(record, record.target, level, 0, images, pixels);
+}
+
+Result<void> GlesDevice::UploadImages(const TextureRecord& record, GLenum target, uint32 level,
+                                      uint32 firstLayer, uint32 images,
+                                      const uint8* pixels) noexcept {
     const GlesTextureFormat* format = FindTextureFormat(record.format);
     const uint32 width = MipExtent(record.width, level);
     const uint32 height = MipExtent(record.height, level);
     const auto glWidth = static_cast<GLsizei>(width);
     const auto glHeight = static_cast<GLsizei>(height);
-    gl_.ActiveTexture(GL_TEXTURE0 + UploadTextureUnit);
-    gl_.BindTexture(GL_TEXTURE_2D, record.texture);
-    gl_.PixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    // 2D 대상(TEXTURE_2D·cube 면)은 TexSubImage2D, layer 대상(2D 배열·cube 배열·3D)은
+    // TexSubImage3D(깊이 = 이미지 수)다.
+    const bool layered = target == GL_TEXTURE_2D_ARRAY || target == GL_TEXTURE_3D ||
+                         target == GL_TEXTURE_CUBE_MAP_ARRAY;
+    auto upload = [&](GLenum external, GLenum type, const void* data) noexcept {
+        if (layered) {
+            gl_.TexSubImage3D(target, static_cast<GLint>(level), 0, 0,
+                              static_cast<GLint>(firstLayer), glWidth, glHeight,
+                              static_cast<GLsizei>(images), external, type, data);
+        } else {
+            gl_.TexSubImage2D(target, static_cast<GLint>(level), 0, 0, glWidth, glHeight, external,
+                              type, data);
+        }
+    };
     if (format->Is(GlesCompressed)) {
-        const uint64 bytes = PixelFormatImageBytes(record.format, width, height);
-        gl_.CompressedTexSubImage2D(GL_TEXTURE_2D, static_cast<GLint>(level), 0, 0, glWidth,
-                                    glHeight, format->internalFormat, static_cast<GLsizei>(bytes),
-                                    pixels);
+        const uint64 bytes = PixelFormatImageBytes(record.format, width, height) * images;
+        if (layered) {
+            gl_.CompressedTexSubImage3D(target, static_cast<GLint>(level), 0, 0,
+                                        static_cast<GLint>(firstLayer), glWidth, glHeight,
+                                        static_cast<GLsizei>(images), format->internalFormat,
+                                        static_cast<GLsizei>(bytes), pixels);
+        } else {
+            gl_.CompressedTexSubImage2D(target, static_cast<GLint>(level), 0, 0, glWidth, glHeight,
+                                        format->internalFormat, static_cast<GLsizei>(bytes),
+                                        pixels);
+        }
+
         return Result<void>::Success();
     }
 
@@ -1187,12 +1351,13 @@ Result<void> GlesDevice::UploadMip(const TextureRecord& record, uint32 level,
     const PixelFormat depthLayout = record.format;
     if (depthLayout != PixelFormat::D24Unorm && depthLayout != PixelFormat::D24UnormS8Uint &&
         depthLayout != PixelFormat::D32FloatS8Uint) {
-        gl_.TexSubImage2D(GL_TEXTURE_2D, static_cast<GLint>(level), 0, 0, glWidth, glHeight,
-                          format->externalFormat, format->externalType, pixels);
+        upload(format->externalFormat, format->externalType, pixels);
         return Result<void>::Success();
     }
 
-    const usize texels = static_cast<usize>(width) * height;
+    // 묶는 깊이 형식은 2D다(다중 plane D24S8·D32S8은 2D만이고, D24Unorm은 이미지마다 같은 변환을
+    // 이어서 한다).
+    const usize texels = static_cast<usize>(width) * height * images;
     const usize texelBytes = depthLayout == PixelFormat::D32FloatS8Uint ? 8 : 4;
     Array<uint8> packed(*stagingSource_.allocator);
     if (!packed.TryResize(texels * texelBytes)) {
@@ -1218,8 +1383,7 @@ Result<void> GlesDevice::UploadMip(const TextureRecord& record, uint32 level,
         }
     }
 
-    gl_.TexSubImage2D(GL_TEXTURE_2D, static_cast<GLint>(level), 0, 0, glWidth, glHeight,
-                      format->externalFormat, format->externalType, packed.Data());
+    upload(format->externalFormat, format->externalType, packed.Data());
     return Result<void>::Success();
 }
 
@@ -1310,6 +1474,17 @@ void GlesDevice::StoreLog(GLuint object, bool shader) noexcept {
     // 13절).
     auto assigned = lastError_.TryAssign(StringView(log, static_cast<usize>(written)));
     (void)assigned;
+}
+
+Result<TextureSubresources>
+GlesDevice::GetTextureSubresources(TextureHandle texture) const noexcept {
+    const TextureRecord* record = textures_.Find(texture.slot);
+    if (record == nullptr) {
+        return Result<TextureSubresources>::Failure(ErrorCode::StaleHandle);
+    }
+
+    return Result<TextureSubresources>::Success(
+        TextureSubresources{record->mipLevels, record->slices});
 }
 
 } // namespace rocks::graphics::gles

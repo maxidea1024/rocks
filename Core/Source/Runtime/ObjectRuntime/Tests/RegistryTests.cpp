@@ -123,7 +123,7 @@ TEST(ObjectRegistryQuarantinesGenerationExhaustion) {
         auto first = registry.NewObject<IdentityProbe>(access, IdentityType);
         REQUIRE(first.IsOk());
         const ObjectHandle old = first.Value().Handle();
-        WeakRef<IdentityProbe> weak(old);
+        WeakObjectRef<IdentityProbe> weak(old);
         first.Value().Reset();
         REQUIRE(registry.Collect(access).IsOk());
 

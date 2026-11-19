@@ -157,6 +157,22 @@ struct DeviceFeatures {
     bool multiDrawIndirect = false;
     // cube array 텍스처(Vulkan imageCubeArray, D3D·OpenGL ES 3.2 늘 참).
     bool textureCubeArray = false;
+    // 텍스처 view swizzle(TextureDesc·TextureViewDesc::swizzle, AssetSystem A0-G)이다. D3D12
+    // Shader4ComponentMapping, Vulkan VkComponentMapping, OpenGL ES TEXTURE_SWIZZLE_R/G/B/A는 늘
+    // 참이고 D3D11은 view swizzle이 없어 거짓이다(항등이 아닌 swizzle은 Unsupported).
+    bool textureViewSwizzle = false;
+    // 텍스처 view의 mip·slice 범위(TextureViewDesc::firstMip 등)를 셰이더 읽기 view에 반영한다.
+    // D3D12·D3D11·Vulkan은 참이다. OpenGL ES는 texture view가 없어(ES 3.2 core 밖) 거짓이고 Read
+    // view는 텍스처 전체를 묶는다: 셰이더는 TextureViewBaseMip을 기준 mip으로 받아 명시 LOD로
+    // 읽는다(RenderBase 7.5절). 쓰기 view(level 하나)는 모든 장치에서 범위를 따른다.
+    bool textureViewRanges = false;
+    // 이방성 + 최근접 mip 필터(Filter::AnisotropicPoint)다. D3D12는 OPTIONS19
+    // AnisoFilterWithPointMipSupported(D3D12_FILTER_MIN_MAG_ANISOTROPIC_MIP_POINT)일 때다. Vulkan·
+    // OpenGL ES는 늘 참이다(mipmapMode NEAREST·LINEAR_MIPMAP_NEAREST에 이방성 배율을 더하며, 배율은
+    // 다른 이방성 필터처럼 장치 한도 samplerAnisotropy로 줄인다). D3D11은 대응 필터가 없어
+    // 거짓이다. 거짓이면 그 필터는 UE와 같이 AnisotropicLinear로 만든다(사용자 결정 2026-11-18,
+    // backend가 처음 한 번 Debug 로그를 남긴다). 쿠킹 프로필은 UE 기본값을 그대로 쓴다.
+    bool anisotropicPointFilter = false;
     // sRGB 짝 형식 view(PixelFormat.ko.md 9절). OpenGL ES는 형식을 재해석하는 view가 없어 거짓이다.
     bool srgbPairView = false;
     // VS·PS가 storage 자원에 쓸 수 있다(Vulkan vertexPipelineStoresAndAtomics·

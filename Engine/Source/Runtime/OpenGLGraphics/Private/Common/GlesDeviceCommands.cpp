@@ -219,9 +219,9 @@ Result<PipelineHandle> GlesDevice::CreateComputePipeline(const ComputePipelineDe
         return Result<PipelineHandle>::Failure(owner.Error());
     }
 
-    if (desc.shader.glsl.ByteCount() == 0) {
+    if (desc.shader.glsl.ByteCount() == 0 || !ValidateComputePipelineDesc(desc)) {
         Diagnostic message;
-        message.Text("compute pipeline needs GLSL ES source");
+        message.Text("compute pipeline needs GLSL ES source and valid drawConstantBytes");
         auto rejected = Reject(message, ErrorCode::InvalidArgument);
         return Result<PipelineHandle>::Failure(rejected.Error());
     }
@@ -249,13 +249,15 @@ Result<PipelineHandle> GlesDevice::CreateComputePipeline(const ComputePipelineDe
         return Result<PipelineHandle>::Failure(ErrorCode::DependencyFailed);
     }
 
-    auto reflected = ReflectBufferSlots(record.program, record.bufferSlots, &record.writeSlots);
-    if (!reflected) {
+    record.drawConstantBytes = desc.drawConstantBytes;
+    auto reflected = ReflectBufferSlots(record.program, record.bufferSlots, &record.writeSlots,
+                                        &record.writeTextures);
+    auto constants = reflected ? ReflectRootConstants(record.program, record) : Move(reflected);
+    if (!constants) {
         gl_.DeleteProgram(record.program);
-        return Result<PipelineHandle>::Failure(reflected.Error());
+        return Result<PipelineHandle>::Failure(constants.Error());
     }
 
-    record.computeConstants = gl_.GetUniformLocation(record.program, ComputeRootConstantsName);
     auto added = pipelines_.TryAdd(record);
     if (!added) {
         gl_.DeleteProgram(record.program);
@@ -291,31 +293,45 @@ Result<CommandContext*> GlesDevice::BeginPass(const PassDesc& pass) noexcept {
     // 같은 크기, 중복 없음.
     PassTarget target;
     bool sized = false;
-    const auto check = [&](TextureHandle handle, bool depth) noexcept -> ErrorCode {
+    const auto check = [&](TextureHandle handle, bool depth, uint32 mip,
+                           uint32 slice) noexcept -> ErrorCode {
         const TextureRecord* record = textures_.Find(handle.slot);
         if (record == nullptr) {
             return ErrorCode::StaleHandle;
         }
 
-        if (record->isView || (depth ? !record->depthTarget : record->framebuffer == 0) ||
-            (sized && (record->width != target.width || record->height != target.height))) {
+        // 크기는 attachment mip의 크기다(텍스처 GX2 C부).
+        if (record->isView || (depth ? !record->depthTarget : !record->renderTarget) ||
+            !IsAttachmentInRange(record->dimension, record->depth, record->mipLevels,
+                                 record->slices, mip, slice)) {
             return ErrorCode::InvalidArgument;
         }
 
-        target.width = record->width;
-        target.height = record->height;
+        const uint32 mipWidth = MipExtent(record->width, mip);
+        const uint32 mipHeight = MipExtent(record->height, mip);
+        if (sized && (mipWidth != target.width || mipHeight != target.height ||
+                      record->sampleCount != target.sampleCount)) {
+            return ErrorCode::InvalidArgument;
+        }
+
+        target.width = mipWidth;
+        target.height = mipHeight;
+        target.sampleCount = record->sampleCount;
         sized = true;
         return ErrorCode::None;
     };
     for (uint32 index = 0; index < pass.colorCount; ++index) {
-        const ErrorCode checked = check(pass.colors[index].texture, false);
+        const ErrorCode checked = check(pass.colors[index].texture, false,
+                                        pass.colors[index].mipLevel, pass.colors[index].slice);
         if (checked != ErrorCode::None) {
             return fail(checked, "color attachment is stale, not a render target, a view or of a "
                                  "different size");
         }
 
         for (uint32 other = 0; other < index; ++other) {
-            if (pass.colors[other].texture == pass.colors[index].texture) {
+            if (pass.colors[other].texture == pass.colors[index].texture &&
+                pass.colors[other].mipLevel == pass.colors[index].mipLevel &&
+                pass.colors[other].slice == pass.colors[index].slice) {
                 return fail(ErrorCode::InvalidArgument,
                             "color attachment appears twice in the pass");
             }
@@ -324,11 +340,51 @@ Result<CommandContext*> GlesDevice::BeginPass(const PassDesc& pass) noexcept {
 
     const bool hasDepth = !pass.depth.texture.IsNull();
     if (hasDepth) {
-        const ErrorCode checked = check(pass.depth.texture, true);
+        const ErrorCode checked =
+            check(pass.depth.texture, true, pass.depth.mipLevel, pass.depth.slice);
         if (checked != ErrorCode::None) {
             return fail(checked, "depth attachment is stale, not a depth target, a view or of a "
                                  "different size");
         }
+    }
+
+    // resolve 대상: MSAA attachment의 1표본 RenderTarget, 같은 형식·크기, view 아님, 겹침 없음.
+    for (uint32 index = 0; index < pass.colorCount; ++index) {
+        const TextureHandle resolve = pass.colors[index].resolveTarget;
+        if (resolve.IsNull()) {
+            continue;
+        }
+
+        const TextureRecord* source = textures_.Find(pass.colors[index].texture.slot);
+        const TextureRecord* resolved = textures_.Find(resolve.slot);
+        if (resolved == nullptr) {
+            return Result<CommandContext*>::Failure(ErrorCode::StaleHandle);
+        }
+
+        bool overlaps = resolve == pass.depth.texture;
+        for (uint32 other = 0; other < pass.colorCount; ++other) {
+            overlaps = overlaps || pass.colors[other].texture == resolve ||
+                       (other != index && pass.colors[other].resolveTarget == resolve);
+        }
+
+        // 대상은 그 mip·slice가 원본과 같은 크기다. 3D 대상(깊이 면 resolve)은 받지 않는다.
+        const uint32 resolveMip = pass.colors[index].resolveMipLevel;
+        const uint32 resolveSlice = pass.colors[index].resolveSlice;
+        if (source->sampleCount < 2 || resolved->isView || !resolved->renderTarget ||
+            resolved->sampleCount != 1 || resolved->format != source->format ||
+            resolved->dimension == TextureDimension::Texture3D ||
+            !IsAttachmentInRange(resolved->dimension, resolved->depth, resolved->mipLevels,
+                                 resolved->slices, resolveMip, resolveSlice) ||
+            MipExtent(resolved->width, resolveMip) != source->width ||
+            MipExtent(resolved->height, resolveMip) != source->height || overlaps) {
+            return fail(ErrorCode::InvalidArgument,
+                        "resolve target needs an MSAA color attachment and a distinct "
+                        "single-sample render target of the same format and size");
+        }
+
+        target.resolves[index] = resolve;
+        target.resolveMips[index] = resolveMip;
+        target.resolveSlices[index] = resolveSlice;
     }
 
     if (recording_) {
@@ -356,8 +412,12 @@ Result<CommandContext*> GlesDevice::BeginPass(const PassDesc& pass) noexcept {
 
     target.depth = pass.depth.texture;
     target.depthReadOnly = hasDepth && pass.depth.readOnly;
-    if (pass.colorCount == 1 && !hasDepth) {
-        // 색 하나는 텍스처의 framebuffer를 그대로 쓴다.
+    target.firstColorMip = pass.colorCount != 0 ? pass.colors[0].mipLevel : 0u;
+    const TextureRecord* single =
+        pass.colorCount == 1 ? textures_.Find(pass.colors[0].texture.slot) : nullptr;
+    if (single != nullptr && !hasDepth && single->framebuffer != 0 &&
+        pass.colors[0].mipLevel == 0) {
+        // 색 하나(2D mip 0)는 텍스처의 framebuffer를 그대로 쓴다.
         target.framebuffer = textures_.Find(pass.colors[0].texture.slot)->framebuffer;
     } else {
         // 그 밖은 장치의 패스 framebuffer에 attachment를 붙인다(EndFrame이 뗀다).
@@ -370,8 +430,13 @@ Result<CommandContext*> GlesDevice::BeginPass(const PassDesc& pass) noexcept {
         for (uint32 index = 0; index < MaxColorTargets; ++index) {
             const TextureRecord* color =
                 index < pass.colorCount ? textures_.Find(pass.colors[index].texture.slot) : nullptr;
-            gl_.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + index, GL_TEXTURE_2D,
-                                     color != nullptr ? color->texture : 0u, 0);
+            if (color != nullptr) {
+                AttachTextureLevel(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + index, *color,
+                                   pass.colors[index].mipLevel, pass.colors[index].slice);
+            } else {
+                gl_.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + index,
+                                         GL_TEXTURE_2D, 0u, 0);
+            }
             drawBuffers[index] = index < pass.colorCount ? GL_COLOR_ATTACHMENT0 + index : GL_NONE;
         }
 
@@ -379,9 +444,9 @@ Result<CommandContext*> GlesDevice::BeginPass(const PassDesc& pass) noexcept {
         const bool stencil = depth != nullptr && GetPixelFormatInfo(depth->format).stencilBits != 0;
         gl_.FramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
         if (depth != nullptr) {
-            gl_.FramebufferTexture2D(GL_FRAMEBUFFER,
-                                     stencil ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT,
-                                     GL_TEXTURE_2D, depth->texture, 0);
+            AttachTextureLevel(GL_FRAMEBUFFER,
+                               stencil ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT, *depth,
+                               pass.depth.mipLevel, pass.depth.slice);
         }
 
         gl_.DrawBuffers(pass.colorCount != 0 ? static_cast<GLsizei>(pass.colorCount) : 1,
@@ -404,6 +469,23 @@ Result<CommandContext*> GlesDevice::BeginPass(const PassDesc& pass) noexcept {
     return Result<CommandContext*>::Success(this);
 }
 
+void GlesDevice::AttachTextureLevel(GLenum target, GLenum attachment, const TextureRecord& record,
+                                    uint32 mipLevel, uint32 slice) noexcept {
+    if (record.target == GL_TEXTURE_2D || record.target == GL_TEXTURE_2D_MULTISAMPLE ||
+        record.target == GL_TEXTURE_CUBE_MAP) {
+        const GLenum face = record.target == GL_TEXTURE_CUBE_MAP
+                                ? GL_TEXTURE_CUBE_MAP_POSITIVE_X + slice
+                                : record.target;
+        gl_.FramebufferTexture2D(target, attachment, face, record.texture,
+                                 static_cast<GLint>(mipLevel));
+        return;
+    }
+
+    // 2D 배열·cube 배열(layer = cube × 6 + 면)·3D(깊이 면)다(ES 3.2 9.2.8절).
+    gl_.FramebufferTextureLayer(target, attachment, record.texture, static_cast<GLint>(mipLevel),
+                                static_cast<GLint>(slice));
+}
+
 void GlesDevice::SetWritableBufferView(uint32 slot, BufferViewHandle view) noexcept {
     if (!recording_ || slot >= MaxDrawBufferViews) {
         return;
@@ -412,6 +494,19 @@ void GlesDevice::SetWritableBufferView(uint32 slot, BufferViewHandle view) noexc
     const BufferViewRecord* record = bufferViews_.Find(view.slot);
     const bool writable = record != nullptr && record->access == ViewAccess::ReadWrite;
     boundWriteViews_[slot] = writable ? view : BufferViewHandle{};
+    // 쓰기 slot은 버퍼·텍스처가 같은 번호 공간이다(나중에 묶은 하나만 남는다).
+    boundWriteTextures_[slot] = {};
+}
+
+void GlesDevice::SetWritableTexture(uint32 slot, TextureHandle view) noexcept {
+    if (!recording_ || slot >= MaxDrawBufferViews) {
+        return;
+    }
+
+    const TextureRecord* record = textures_.Find(view.slot);
+    const bool writable = record != nullptr && record->writable;
+    boundWriteTextures_[slot] = writable ? view : TextureHandle{};
+    boundWriteViews_[slot] = {};
 }
 
 const PipelineRecord* GlesDevice::PrepareDraw(bool indexed) noexcept {
@@ -452,6 +547,14 @@ const PipelineRecord* GlesDevice::PrepareDispatch() noexcept {
         return nullptr;
     }
 
+    // 텍스처로 쓰는 slot마다 쓰기 텍스처 view가 묶여야 한다.
+    for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
+        if ((pipeline->writeTextures & (1u << slot)) != 0 &&
+            textures_.Find(boundWriteTextures_[slot].slot) == nullptr) {
+            return nullptr;
+        }
+    }
+
     ApplyConstants(*pipeline);
     ApplyBufferViews(*pipeline);
     for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
@@ -469,6 +572,21 @@ const PipelineRecord* GlesDevice::PrepareDispatch() noexcept {
                                 view->buffer, static_cast<GLintptr>(view->offset),
                                 static_cast<GLsizeiptr>(view->size));
         }
+    }
+
+    // 쓰기 텍스처 view는 level 하나를 image unit slot에 묶는다(배열·3D는 layered로 모든 층).
+    for (uint32 slot = 0; slot < MaxDrawBufferViews; ++slot) {
+        if ((pipeline->writeTextures & (1u << slot)) == 0) {
+            continue;
+        }
+
+        const TextureRecord* view = textures_.Find(boundWriteTextures_[slot].slot);
+        const GlesTextureFormat* format = FindTextureFormat(view->format);
+        const bool layered = view->dimension == TextureDimension::Texture2DArray ||
+                             view->dimension == TextureDimension::Texture3D;
+        gl_.BindImageTexture(slot, view->texture, static_cast<GLint>(view->viewRange.firstMip),
+                             layered ? GL_TRUE : GL_FALSE, 0, GL_READ_WRITE,
+                             format->internalFormat);
     }
 
     return pipeline;
@@ -639,10 +757,13 @@ Result<void> GlesDevice::CopyTexture(TextureHandle destination, TextureHandle so
     const PixelFormatInfo& info = GetPixelFormatInfo(from->format);
     if (destination == source || to->isView || from->isView || to->width != from->width ||
         to->height != from->height || to->format != from->format || info.planeCount > 1 ||
-        attached(destination) || attached(source)) {
+        to->sampleCount > 1 || from->sampleCount > 1 ||
+        to->dimension != TextureDimension::Texture2D ||
+        from->dimension != TextureDimension::Texture2D || attached(destination) ||
+        attached(source)) {
         Diagnostic message;
-        message.Text("texture copy needs two distinct non-view single-plane textures of the same "
-                     "size and format outside the current pass");
+        message.Text("texture copy needs two distinct non-view single-plane 2D textures of the "
+                     "same size and format outside the current pass");
         return Reject(message, ErrorCode::InvalidArgument);
     }
 

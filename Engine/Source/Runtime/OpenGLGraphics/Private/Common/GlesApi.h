@@ -211,6 +211,17 @@ inline constexpr GLbitfield GL_MAP_READ_BIT = 0x0001;
 
 // --- 텍스처·샘플러 ---
 inline constexpr GLenum GL_TEXTURE_2D = 0x0DE1;
+// 차원별 대상이다(ES 3.0 core: 3D·2D 배열·cube, ES 3.2 core: cube 배열).
+inline constexpr GLenum GL_TEXTURE_3D = 0x806F;
+inline constexpr GLenum GL_TEXTURE_2D_ARRAY = 0x8C1A;
+inline constexpr GLenum GL_TEXTURE_CUBE_MAP = 0x8513;
+inline constexpr GLenum GL_TEXTURE_CUBE_MAP_POSITIVE_X = 0x8515;
+inline constexpr GLenum GL_TEXTURE_CUBE_MAP_ARRAY = 0x9009;
+inline constexpr GLenum GL_TEXTURE_WRAP_R = 0x8072;
+// 깊이 비교 샘플러다(ES 3.0 core).
+inline constexpr GLenum GL_TEXTURE_COMPARE_MODE = 0x884C;
+inline constexpr GLenum GL_TEXTURE_COMPARE_FUNC = 0x884D;
+inline constexpr GLenum GL_COMPARE_REF_TO_TEXTURE = 0x884E;
 inline constexpr GLenum GL_TEXTURE0 = 0x84C0;
 inline constexpr GLenum GL_NEAREST = 0x2600;
 inline constexpr GLenum GL_LINEAR = 0x2601;
@@ -413,6 +424,15 @@ inline constexpr GLenum GL_READ_WRITE = 0x88BA;
 // 모든 memory barrier bit다(GL 헤더의 0xFFFFFFFF).
 inline constexpr GLbitfield GL_ALL_BARRIER_BITS = NumericLimits<GLbitfield>::Max();
 inline constexpr GLenum GL_IMAGE_BUFFER = 0x9051;
+inline constexpr GLenum GL_IMAGE_2D = 0x904D;
+inline constexpr GLenum GL_IMAGE_3D = 0x904E;
+inline constexpr GLenum GL_IMAGE_2D_ARRAY = 0x9053;
+inline constexpr GLenum GL_INT_IMAGE_2D = 0x9058;
+inline constexpr GLenum GL_INT_IMAGE_3D = 0x9059;
+inline constexpr GLenum GL_INT_IMAGE_2D_ARRAY = 0x905E;
+inline constexpr GLenum GL_UNSIGNED_INT_IMAGE_2D = 0x9063;
+inline constexpr GLenum GL_UNSIGNED_INT_IMAGE_3D = 0x9064;
+inline constexpr GLenum GL_UNSIGNED_INT_IMAGE_2D_ARRAY = 0x9069;
 inline constexpr GLenum GL_INT_IMAGE_BUFFER = 0x905C;
 inline constexpr GLenum GL_UNSIGNED_INT_IMAGE_BUFFER = 0x9067;
 // --- debug(KHR_debug, ES 3.2 core) ---
@@ -492,6 +512,14 @@ inline constexpr GLenum GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR = 0x824E;
     X(void, ActiveTexture, (GLenum))                                                               \
     X(void, BindTexture, (GLenum, GLuint))                                                         \
     X(void, TexStorage2D, (GLenum, GLsizei, GLenum, GLsizei, GLsizei))                             \
+    X(void, TexStorage2DMultisample, (GLenum, GLsizei, GLenum, GLsizei, GLsizei, GLboolean))       \
+    X(void, TexStorage3D, (GLenum, GLsizei, GLenum, GLsizei, GLsizei, GLsizei))                    \
+    X(void, TexSubImage3D,                                                                         \
+      (GLenum, GLint, GLint, GLint, GLint, GLsizei, GLsizei, GLsizei, GLenum, GLenum,              \
+       const void*))                                                                               \
+    X(void, CompressedTexSubImage3D,                                                               \
+      (GLenum, GLint, GLint, GLint, GLint, GLsizei, GLsizei, GLsizei, GLenum, GLsizei,             \
+       const void*))                                                                               \
     X(void, TexSubImage2D,                                                                         \
       (GLenum, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, const void*))                \
     X(void, CompressedTexSubImage2D,                                                               \
@@ -507,6 +535,7 @@ inline constexpr GLenum GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR = 0x824E;
     X(void, DeleteFramebuffers, (GLsizei, const GLuint*))                                          \
     X(void, BindFramebuffer, (GLenum, GLuint))                                                     \
     X(void, FramebufferTexture2D, (GLenum, GLenum, GLenum, GLuint, GLint))                         \
+    X(void, FramebufferTextureLayer, (GLenum, GLenum, GLuint, GLint, GLint))                       \
     X(void, Enablei, (GLenum, GLuint))                                                             \
     X(void, Disablei, (GLenum, GLuint))                                                            \
     X(void, BlendFuncSeparatei, (GLuint, GLenum, GLenum, GLenum, GLenum))                          \

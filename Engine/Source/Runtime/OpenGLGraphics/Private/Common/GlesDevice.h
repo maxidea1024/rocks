@@ -40,14 +40,15 @@ inline constexpr char RawWritableStorageBlockPrefix[] = "type_RWByteAddressBuffe
 // typed는 image unit n이다(ComputePipelineDesc 고정 배치).
 inline constexpr GLuint WritableStorageBindingBase = MaxDrawBufferViews;
 
-// 그리기 상수(DrawConstants)를 담는 루트 상수 에뮬레이션 배열의 이름과 vec4 수다(ShaderSystem
-// 7.2절 4항: `<단계>u_<타입>`, UE `$Globals`의 pu_h 자리).
+// 그리기별 상수를 담는 루트 상수 에뮬레이션 배열(uniform highp vec4 <이름>[N])의 이름과 vec4 한
+// 칸의 byte 수다(ShaderSystem 7.2절 4항: `<단계>u_<타입>`, UE `$Globals`의 pu_h 자리). N은 셰이더가
+// 정하며 N × 16이 파이프라인의 drawConstantBytes 이하여야 한다.
 inline constexpr char VertexRootConstantsName[] = "vu_h";
 inline constexpr char PixelRootConstantsName[] = "pu_h";
 inline constexpr char ComputeRootConstantsName[] = "cu_h";
-inline constexpr GLsizei RootConstantVectors = sizeof(DrawConstants) / (4 * sizeof(float));
-static_assert(sizeof(DrawConstants) == RootConstantVectors * 4 * sizeof(float),
-              "DrawConstants must be a whole number of vec4 slots");
+inline constexpr uint32 RootConstantVectorBytes = 4 * sizeof(GLfloat);
+static_assert(MaxDrawConstantBytes % RootConstantVectorBytes == 0,
+              "Draw constants must be a whole number of vec4 slots");
 
 // 로그 카테고리다(LoggingSystem 13절: 장치 생성·present 실패·장치 손실, 검증 계층 메시지).
 inline constexpr LogCategory LogGraphicsOpenGL{"Graphics.OpenGL"};
@@ -104,12 +105,35 @@ struct TextureRecord {
     GLuint sampler = 0;
     // RenderTarget이면 색 attachment 하나의 framebuffer다.
     GLuint framebuffer = 0;
+    // 차원과 그 GL 대상(TEXTURE_2D·2D_ARRAY·3D·CUBE_MAP·CUBE_MAP_ARRAY)이다.
+    TextureDimension dimension = TextureDimension::Texture2D;
+    GLenum target = GL_TEXTURE_2D;
     uint32 width = 0;
     uint32 height = 0;
+    // 3D 깊이다(다른 차원은 1).
+    uint32 depth = 1;
     uint32 mipLevels = 1;
+    // subresource slice 수(TextureSliceCount)다. 2D 배열·cube 배열은 GL layer 수, cube는 면 6이다.
+    uint32 slices = 1;
     PixelFormat format = PixelFormat::Unknown;
+    // 묶을 때 셰이더가 읽는 성분 대응이다(TextureDesc·TextureViewDesc::swizzle). 성분 대응은 GL
+    // 텍스처 객체 상태라 view와 원 텍스처가 공유하므로, 묶을 때마다 형식 흉내(A8)·스텐실 plane
+    // 대응과 합성해 TEXTURE_SWIZZLE_R/G/B/A로 다시 정한다(BindPassTexture).
+    ChannelSwizzle swizzle;
     // TextureUsage::DepthStencil로 만들었다(초기 데이터 없음).
     bool depthTarget = false;
+    // TextureUsage::RenderTarget으로 만들었다. framebuffer는 2D만 갖는다(2D 밖 차원·다른 mip은
+    // 패스 framebuffer에 붙인다, 텍스처 GX2 C부).
+    bool renderTarget = false;
+    // 만든 용도다(view는 원 텍스처의 용도, ResolveTextureViewRange).
+    TextureUsage usage = TextureUsage::Sampled;
+    // MSAA 표본 수다(TextureDesc::sampleCount). 2 이상이면 target이 TEXTURE_2D_MULTISAMPLE이다.
+    uint32 sampleCount = 1;
+    // view의 mip·slice 범위다(view가 아니면 전체). texture view가 없어 읽기 view는 텍스처 전체를
+    // 묶고(셰이더가 TextureViewBaseMip을 쓴다), 쓰기 view는 이 범위의 level을 image로 묶는다.
+    ResolvedSubresourceRange viewRange;
+    // 쓰기 view(ViewAccess::ReadWrite)다. SetWritableTexture로만 묶는다(glBindImageTexture).
+    bool writable = false;
     // 깊이·스텐실 텍스처를 묶을 때 읽는 plane이다(GL_DEPTH_STENCIL_TEXTURE_MODE, 1이면 스텐실).
     // 이 값은 텍스처 객체 상태라 묶을 때마다 다시 정한다.
     uint32 plane = 0;
@@ -129,13 +153,27 @@ struct TextureRecord {
     bool retirePending = false;
 };
 
+// mip level 하나의 데이터 byte다(모든 slice·깊이 면, TextureMipBytes와 같은 값).
+inline uint64 MipBytes(const TextureRecord& record, uint32 level) noexcept {
+    const uint32 depth =
+        record.dimension == TextureDimension::Texture3D ? MipExtent(record.depth, level) : 1u;
+    return PixelFormatImageBytes(record.format, MipExtent(record.width, level),
+                                 MipExtent(record.height, level)) *
+           depth * record.slices;
+}
+
 struct PipelineRecord {
     GLuint program = 0;
     GLuint vertexArray = 0;
-    // 루트 상수 에뮬레이션 배열 위치다(셰이더가 쓰지 않으면 -1).
+    // 루트 상수 에뮬레이션 배열 위치(셰이더가 쓰지 않으면 -1)와 active vec4 수다.
     GLint vertexConstants = -1;
     GLint pixelConstants = -1;
     GLint computeConstants = -1;
+    GLsizei vertexConstantVectors = 0;
+    GLsizei pixelConstantVectors = 0;
+    GLsizei computeConstantVectors = 0;
+    // 선언한 그리기별 상수 byte 수다(SetDrawConstants 크기 검사).
+    uint32 drawConstantBytes = 0;
     // stream별 stride와 배치가 선언한 stream mask다.
     uint32 strides[MaxVertexStreams] = {};
     uint32 streamMask = 0;
@@ -153,6 +191,8 @@ struct PipelineRecord {
     // VS·PS(compute면 CS)가 읽는 버퍼 view slot과 CS가 쓰는 slot이다(program introspection).
     DrawBufferSlots bufferSlots;
     DrawBufferSlots writeSlots;
+    // compute가 텍스처 image로 쓰는 쓰기 slot 비트다(SetWritableTexture가 묶여야 한다).
+    uint32 writeTextures = 0;
 };
 
 struct SwapChainRecord {
@@ -250,6 +290,8 @@ public:
     PixelFormatCaps GetPixelFormatCaps(PixelFormat format) const noexcept override;
     Result<TextureHandle> CreateTextureView(TextureHandle texture,
                                             const TextureViewDesc& desc) noexcept override;
+    Result<TextureSubresources>
+    GetTextureSubresources(TextureHandle texture) const noexcept override;
     Result<void> ReadTexture(TextureHandle texture, uint32 mipLevel, uint32 plane,
                              Span<uint8> out) noexcept override;
     Result<CommandContext*> BeginFrame(SwapChainHandle handle,
@@ -306,7 +348,7 @@ private:
     void SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64 offset) noexcept override;
     void SetTexture(TextureHandle handle) noexcept override;
     void SetBufferView(uint32 slot, BufferViewHandle view) noexcept override;
-    void SetConstants(const DrawConstants& constants) noexcept override;
+    Result<void> SetDrawConstants(Span<const uint8> bytes) noexcept override;
     void Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept override;
     void DrawIndexed(uint32 indexCount, uint32 instanceCount, uint32 firstIndex) noexcept override;
     Result<void> CopyPassTarget(TextureHandle destination) noexcept override;
@@ -320,6 +362,7 @@ private:
     void PopMarker() noexcept override;
     // --- GX3·GX4(GlesDeviceCommands.cpp) ---
     void SetWritableBufferView(uint32 slot, BufferViewHandle view) noexcept override;
+    void SetWritableTexture(uint32 slot, TextureHandle view) noexcept override;
     void DrawIndirect(BufferHandle arguments, uint64 offset) noexcept override;
     void DrawIndexedIndirect(BufferHandle arguments, uint64 offset) noexcept override;
     void Dispatch(uint32 groupCountX, uint32 groupCountY, uint32 groupCountZ) noexcept override;
@@ -364,6 +407,15 @@ private:
 
     // message를 LastError에 두고 error로 실패한다.
     Result<void> Reject(const Diagnostic& message, ErrorCode error) noexcept;
+    // 패스 끝 MSAA resolve다(EndFrame).
+    void ResolveAttachments() noexcept;
+    // 묶인 framebuffer(target)의 attachment에 텍스처의 (mip, slice)를 붙인다. 2D·MSAA는
+    // FramebufferTexture2D, cube는 면 대상, 2D 배열·cube 배열·3D는 FramebufferTextureLayer다.
+    void AttachTextureLevel(GLenum target, GLenum attachment, const TextureRecord& record,
+                            uint32 mipLevel, uint32 slice) noexcept;
+    // SetDrawConstants 거부(묶인 파이프라인 없음, 크기가 선언과 다름)의 InvalidArgument다.
+    Result<void> RejectDrawConstantSize(bool pipelineBound, usize bytes,
+                                        uint32 drawConstantBytes) noexcept;
 
     // 자원 생성·파괴는 어느 표면에 붙어 있든 이 context면 된다. 붙어 있지 않을 때만 장치 표면에
     // 붙인다.
@@ -386,18 +438,24 @@ private:
     bool CreateBackBuffer(SwapChainRecord& record, uint32 width, uint32 height) noexcept;
 
     // 색 attachment 하나의 framebuffer를 만든다. 완전하지 않으면 0이다.
-    GLuint CreateColorFramebuffer(GLuint texture) noexcept;
+    GLuint CreateColorFramebuffer(GLuint texture, GLenum target = GL_TEXTURE_2D) noexcept;
 
     // 텍스처 하나의 샘플러 객체를 만든다. filterable이 false면(정수·깊이 형식) 최근접 필터다.
+    // filterable은 형식이 선형 필터를 받는지다(비교 샘플러의 깊이 형식은 선형 필터를 받는다).
     GLuint CreateSampler(const SamplerDesc& desc, bool filterable) noexcept;
 
     // texture mip 하나를 올린다(업로드 유닛에서 묶는다). 원본은 Rocks 배치(mip 안 plane 순서)다.
     // 깊이·스텐실은 plane을 GL 외부 배치로 엮는 임시 버퍼가 필요하다(할당 실패면 OutOfMemory).
+    // mip 하나(모든 slice·깊이 면, TextureDesc 초기 픽셀 배치)를 올린다.
     Result<void> UploadMip(const TextureRecord& record, uint32 level, const uint8* pixels) noexcept;
+    // 2D 이미지 images개(같은 크기)를 GL 외부 배치로 바꿔(깊이 형식 묶기) 대상 하나에 올린다.
+    Result<void> UploadImages(const TextureRecord& record, GLenum target, uint32 level,
+                              uint32 firstLayer, uint32 images, const uint8* pixels) noexcept;
 
     // mip 하나를 색 attachment로 읽어 Rocks 배치로 out에 둔다(ReadTexture·ReadPixels·readback의
     // 공통 경로). 읽기 조합은 구현 선택 조합이 업로드 배치와 같으면 그것, 아니면 표준 조합이다.
-    Result<void> ReadColorLevel(const TextureRecord& record, uint32 mipLevel,
+    // layer는 배열 layer·cube 면(cube 배열은 cube × 6 + 면)·3D 깊이 면이다.
+    Result<void> ReadColorLevel(const TextureRecord& record, uint32 mipLevel, uint32 layer,
                                 Span<uint8> out) noexcept;
     // 깊이·스텐실 plane 하나를 셰이더로 R32F·R32UI 대상에 옮겨 읽는다(ES는 깊이·스텐실을
     // glReadPixels로 읽지 못한다).
@@ -421,8 +479,15 @@ private:
     // 밖 storage block)이면 InvalidArgument다. GL introspection은 storage block의 readonly 여부를
     // 알려 주지 않으므로 그래픽 단계의 binding 0–3 storage block 쓰기는 거부하지 못한다(셰이더는
     // readonly로 선언해야 하고, 쿠킹 경로는 SPIR-V 리플렉션이 거른다).
+    // compute의 image2D·image2DArray·image3D(SetWritableTexture slot = image unit)는
+    // writeTextures에 더한다.
     Result<void> ReflectBufferSlots(GLuint program, DrawBufferSlots& slots,
-                                    DrawBufferSlots* writeSlots) noexcept;
+                                    DrawBufferSlots* writeSlots,
+                                    uint32* writeTextures = nullptr) noexcept;
+    // 링크한 프로그램의 루트 상수 에뮬레이션 배열(vu_h·pu_h·cu_h) 위치와 active vec4 수를 record에
+    // 채운다. vec4 배열이 아니거나 active 크기 × 16이 record.drawConstantBytes보다 크면
+    // InvalidArgument다.
+    Result<void> ReflectRootConstants(GLuint program, PipelineRecord& record) noexcept;
     bool BufferViewsBound(const PipelineRecord& pipeline) const noexcept;
     // 파이프라인이 읽는 slot의 view를 유닛·binding에 묶는다(그리기 직전).
     void ApplyBufferViews(const PipelineRecord& pipeline) noexcept;
@@ -499,6 +564,14 @@ private:
         TextureHandle colors[MaxColorTargets];
         TextureHandle depth;
         bool depthReadOnly = false;
+        // 색 attachment마다 패스 끝에 resolve할 대상이다(ColorAttachment::resolveTarget).
+        TextureHandle resolves[MaxColorTargets];
+        // attachment 표본 수다(1이면 MSAA가 아니다).
+        uint32 sampleCount = 1;
+        // 색 attachment 0의 mip과 resolve 대상의 mip·slice다(텍스처 GX2 C부).
+        uint32 firstColorMip = 0;
+        uint32 resolveMips[MaxColorTargets] = {};
+        uint32 resolveSlices[MaxColorTargets] = {};
     };
     PassTarget pass_;
     TextureHandle white_;
@@ -519,12 +592,17 @@ private:
     BufferViewHandle boundViews_[MaxDrawBufferViews];
     // compute 쓰기 slot에 묶인 view와 스텐실 기준 값이다(GX4).
     BufferViewHandle boundWriteViews_[MaxDrawBufferViews];
+    // compute 쓰기 slot에 묶인 텍스처 쓰기 view다(버퍼 view와 같은 slot 공간, 하나만 남는다).
+    TextureHandle boundWriteTextures_[MaxDrawBufferViews];
     uint32 stencilReference_ = 0;
     // MRT·깊이 패스가 attachment를 붙이는 framebuffer다(처음 쓸 때 만든다).
     GLuint passFramebuffer_ = 0;
+    // resolve 대상의 mip·slice를 붙이는 framebuffer다(처음 쓸 때 만든다).
+    GLuint resolveFramebuffer_ = 0;
     // glPolygonOffsetClampEXT다(GL_EXT_polygon_offset_clamp가 없으면 null).
     void (*polygonOffsetClamp_)(GLfloat, GLfloat, GLfloat) = nullptr;
-    DrawConstants constants_;
+    // 기록의 그리기별 상수 값이다(기록 시작 때 0, 그리기·dispatch 때 program에 올린다).
+    alignas(16) uint8 constants_[MaxDrawConstantBytes] = {};
     uint64 ignoredDraws_ = 0;
     uint64 validationErrors_ = 0;
     // 마지막으로 제출한 fence 값이다.

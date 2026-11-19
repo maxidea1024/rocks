@@ -122,6 +122,90 @@ void VulkanDevice::RetireFramebuffers(VkImageView view) noexcept {
     }
 }
 
+Result<VkImageView> VulkanDevice::AttachmentViewFor(const TextureRecord& record, uint32 mipLevel,
+                                                    uint32 slice) noexcept {
+    // mip 하나인 2D 텍스처는 기존 view다(attachment view가 따로 있으면 그것). framebuffer
+    // attachment view는 mip 하나여야 한다(VUID-VkFramebufferCreateInfo-pAttachments-00883).
+    if (record.dimension == TextureDimension::Texture2D && record.mipLevels == 1) {
+        return Result<VkImageView>::Success(
+            record.attachmentView != VK_NULL_HANDLE ? record.attachmentView : record.view);
+    }
+
+    for (const AttachmentViewEntry& entry : attachmentViews_) {
+        if (entry.image == record.image && entry.mipLevel == mipLevel && entry.layer == slice) {
+            return Result<VkImageView>::Success(entry.view);
+        }
+    }
+
+    auto reserved = attachmentViews_.TryReserve(attachmentViews_.Size() + 1);
+    if (!reserved) {
+        return Result<VkImageView>::Failure(reserved.Error());
+    }
+
+    // 성분 대응은 항등, aspect는 이미지 전체(깊이·스텐실)다.
+    VkImageViewCreateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    info.image = record.image;
+    info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    info.format = TextureFormat(record.format).format;
+    info.subresourceRange = {record.aspect, mipLevel, 1, slice, 1};
+    AttachmentViewEntry entry;
+    entry.image = record.image;
+    entry.mipLevel = mipLevel;
+    entry.layer = slice;
+    const VkResult result = functions_.vkCreateImageView(device_, &info, nullptr, &entry.view);
+    if (result != VK_SUCCESS) {
+        return Result<VkImageView>::Failure(
+            FailWith<VkImageView>("vkCreateImageView (attachment slice)", result).Error());
+    }
+
+    auto pushed = attachmentViews_.TryPushBack(entry);
+    (void)pushed;
+    return Result<VkImageView>::Success(entry.view);
+}
+
+void VulkanDevice::RetireAttachmentViews(VkImage image) noexcept {
+    usize index = 0;
+    while (index < attachmentViews_.Size()) {
+        if (attachmentViews_[index].image != image) {
+            ++index;
+            continue;
+        }
+
+        RetireFramebuffers(attachmentViews_[index].view);
+        Retired retired;
+        retired.view = attachmentViews_[index].view;
+        RetireEntry(Move(retired));
+        auto removed = attachmentViews_.TryRemoveAtSwap(index);
+        (void)removed;
+    }
+}
+
+bool VulkanDevice::OverlapsPassAttachment(SlotHandle slot,
+                                          const ResolvedSubresourceRange& range) const noexcept {
+    const auto overlaps = [&](SlotHandle attachment, uint32 mip, uint32 slice) noexcept {
+        if (attachment != slot) {
+            return false;
+        }
+
+        const TextureRecord* record = textures_.Find(slot);
+        const ResolvedSubresourceRange used = AttachmentSubresource(
+            record != nullptr ? record->dimension : TextureDimension::Texture2D, mip, slice);
+        return used.firstMip >= range.firstMip && used.firstMip < range.firstMip + range.mipCount &&
+               used.firstSlice >= range.firstSlice &&
+               used.firstSlice < range.firstSlice + range.sliceCount;
+    };
+    for (uint32 index = 0; index < target_.colorCount; ++index) {
+        if (overlaps(target_.colors[index].slot, target_.colorMips[index],
+                     target_.colorSlices[index])) {
+            return true;
+        }
+    }
+
+    return !target_.depth.IsNull() &&
+           overlaps(target_.depth.slot, target_.depthMip, target_.depthSlice);
+}
+
 bool VulkanDevice::IsPassAttachment(SlotHandle slot) const noexcept {
     for (uint32 index = 0; index < target_.colorCount; ++index) {
         if (target_.colors[index].slot == slot) {
@@ -135,7 +219,13 @@ bool VulkanDevice::IsPassAttachment(SlotHandle slot) const noexcept {
 bool VulkanDevice::AttachmentsReady() const noexcept {
     for (uint32 index = 0; index < target_.colorCount; ++index) {
         const TextureRecord* color = textures_.Find(target_.colors[index].slot);
-        if (color != nullptr && color->current[0] != ResourceAccess::RenderTarget) {
+        if (color == nullptr) {
+            continue;
+        }
+
+        const ResolvedSubresourceRange used = AttachmentSubresource(
+            color->dimension, target_.colorMips[index], target_.colorSlices[index]);
+        if (color->current.At(used.firstMip, used.firstSlice) != ResourceAccess::RenderTarget) {
             return false;
         }
     }
@@ -143,7 +233,13 @@ bool VulkanDevice::AttachmentsReady() const noexcept {
     const TextureRecord* depth = textures_.Find(target_.depth.slot);
     const ResourceAccess expected =
         target_.depthReadOnly ? ResourceAccess::DepthRead : ResourceAccess::DepthWrite;
-    return depth == nullptr || depth->current[0] == expected;
+    if (depth == nullptr) {
+        return true;
+    }
+
+    const ResolvedSubresourceRange used =
+        AttachmentSubresource(depth->dimension, target_.depthMip, target_.depthSlice);
+    return depth->current.At(used.firstMip, used.firstSlice) == expected;
 }
 
 void VulkanDevice::BeginRenderPass(bool resume) noexcept {
@@ -187,18 +283,22 @@ void VulkanDevice::StartPass() noexcept {
         Barrier(frame_, target_.image, target_.restLayout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                 0, VK_REMAINING_MIP_LEVELS, VK_PIPELINE_STAGE_TRANSFER_BIT);
     } else {
+        // attachment의 subresource 하나만 바꾼다(텍스처 GX2 C부).
         for (uint32 index = 0; index < target_.colorCount; ++index) {
             TextureRecord* color = textures_.Find(target_.colors[index].slot);
-            TrackTransition(*color, target_.colors[index].slot, 0, 1, ResourceAccess::RenderTarget,
-                            false);
+            TrackTransition(*color, target_.colors[index].slot,
+                            AttachmentSubresource(color->dimension, target_.colorMips[index],
+                                                  target_.colorSlices[index]),
+                            ResourceAccess::RenderTarget, false);
         }
 
         TextureRecord* depth = textures_.Find(target_.depth.slot);
         if (depth != nullptr) {
-            TrackTransition(*depth, target_.depth.slot, 0, 1,
-                            target_.depthReadOnly ? ResourceAccess::DepthRead
-                                                  : ResourceAccess::DepthWrite,
-                            false);
+            TrackTransition(
+                *depth, target_.depth.slot,
+                AttachmentSubresource(depth->dimension, target_.depthMip, target_.depthSlice),
+                target_.depthReadOnly ? ResourceAccess::DepthRead : ResourceAccess::DepthWrite,
+                false);
         }
     }
 
@@ -220,9 +320,9 @@ void VulkanDevice::StartPass() noexcept {
     }
 
     functions_.vkCmdSetStencilReference(frame_, VK_STENCIL_FACE_FRONT_AND_BACK, 0);
-    const DrawConstants identity;
-    functions_.vkCmdPushConstants(frame_, pipelineLayout_, ConstantStages, 0, ConstantBytes,
-                                  &identity);
+    // 그리기별 상수는 기록마다 0으로 시작한다(CommandContext::SetDrawConstants).
+    const uint8 zeros[ConstantBytes] = {};
+    functions_.vkCmdPushConstants(frame_, pipelineLayout_, ConstantStages, 0, ConstantBytes, zeros);
 }
 
 Result<CommandContext*> VulkanDevice::BeginPass(const PassDesc& pass) noexcept {
@@ -246,34 +346,48 @@ Result<CommandContext*> VulkanDevice::BeginPass(const PassDesc& pass) noexcept {
                     "pass has more color attachments than the device supports");
     }
 
-    // attachment 확인: 살아 있는 텍스처, view 아님, 용도, 같은 크기, 중복 없음.
+    // attachment 확인: 살아 있는 텍스처, view 아님, 용도, 같은 크기·표본 수, 중복 없음.
     Target target;
     bool sized = false;
-    const auto check = [&](TextureHandle handle, bool depth) noexcept -> ErrorCode {
+    const auto check = [&](TextureHandle handle, bool depth, uint32 mip,
+                           uint32 slice) noexcept -> ErrorCode {
         const TextureRecord* record = textures_.Find(handle.slot);
         if (record == nullptr) {
             return ErrorCode::StaleHandle;
         }
 
+        // 크기는 attachment mip의 크기다(텍스처 GX2 C부).
         if (record->isView || (depth ? !record->depthTarget : !record->renderTarget) ||
-            (sized && (record->width != target.width || record->height != target.height))) {
+            !IsAttachmentInRange(record->dimension, record->depth, record->mipLevels,
+                                 record->slices, mip, slice)) {
             return ErrorCode::InvalidArgument;
         }
 
-        target.width = record->width;
-        target.height = record->height;
+        const uint32 mipWidth = MipExtent(record->width, mip);
+        const uint32 mipHeight = MipExtent(record->height, mip);
+        if (sized && (mipWidth != target.width || mipHeight != target.height ||
+                      record->sampleCount != target.sampleCount)) {
+            return ErrorCode::InvalidArgument;
+        }
+
+        target.width = mipWidth;
+        target.height = mipHeight;
+        target.sampleCount = record->sampleCount;
         sized = true;
         return ErrorCode::None;
     };
     for (uint32 index = 0; index < pass.colorCount; ++index) {
-        const ErrorCode checked = check(pass.colors[index].texture, false);
+        const ErrorCode checked = check(pass.colors[index].texture, false,
+                                        pass.colors[index].mipLevel, pass.colors[index].slice);
         if (checked != ErrorCode::None) {
             return fail(checked, "color attachment is stale, not a render target, a view or of a "
                                  "different size");
         }
 
         for (uint32 other = 0; other < index; ++other) {
-            if (pass.colors[other].texture == pass.colors[index].texture) {
+            if (pass.colors[other].texture == pass.colors[index].texture &&
+                pass.colors[other].mipLevel == pass.colors[index].mipLevel &&
+                pass.colors[other].slice == pass.colors[index].slice) {
                 return fail(ErrorCode::InvalidArgument,
                             "color attachment appears twice in the pass");
             }
@@ -282,11 +396,51 @@ Result<CommandContext*> VulkanDevice::BeginPass(const PassDesc& pass) noexcept {
 
     const bool hasDepth = !pass.depth.texture.IsNull();
     if (hasDepth) {
-        const ErrorCode checked = check(pass.depth.texture, true);
+        const ErrorCode checked =
+            check(pass.depth.texture, true, pass.depth.mipLevel, pass.depth.slice);
         if (checked != ErrorCode::None) {
             return fail(checked, "depth attachment is stale, not a depth target, a view or of a "
                                  "different size");
         }
+    }
+
+    // resolve 대상: MSAA attachment의 1표본 RenderTarget, 같은 형식·크기, view 아님, 겹침 없음.
+    for (uint32 index = 0; index < pass.colorCount; ++index) {
+        const TextureHandle resolve = pass.colors[index].resolveTarget;
+        if (resolve.IsNull()) {
+            continue;
+        }
+
+        const TextureRecord* source = textures_.Find(pass.colors[index].texture.slot);
+        const TextureRecord* resolved = textures_.Find(resolve.slot);
+        if (resolved == nullptr) {
+            return Result<CommandContext*>::Failure(ErrorCode::StaleHandle);
+        }
+
+        bool overlaps = resolve == pass.depth.texture;
+        for (uint32 other = 0; other < pass.colorCount; ++other) {
+            overlaps = overlaps || pass.colors[other].texture == resolve ||
+                       (other != index && pass.colors[other].resolveTarget == resolve);
+        }
+
+        // 대상은 그 mip·slice가 원본과 같은 크기다. 3D 대상(깊이 면 resolve)은 받지 않는다.
+        const uint32 resolveMip = pass.colors[index].resolveMipLevel;
+        const uint32 resolveSlice = pass.colors[index].resolveSlice;
+        if (source->sampleCount < 2 || resolved->isView || !resolved->renderTarget ||
+            resolved->sampleCount != 1 || resolved->format != source->format ||
+            resolved->dimension == TextureDimension::Texture3D ||
+            !IsAttachmentInRange(resolved->dimension, resolved->depth, resolved->mipLevels,
+                                 resolved->slices, resolveMip, resolveSlice) ||
+            MipExtent(resolved->width, resolveMip) != source->width ||
+            MipExtent(resolved->height, resolveMip) != source->height || overlaps) {
+            return fail(ErrorCode::InvalidArgument,
+                        "resolve target needs an MSAA color attachment and a distinct "
+                        "single-sample render target of the same format and size");
+        }
+
+        target.resolves[index] = resolve;
+        target.resolveMips[index] = resolveMip;
+        target.resolveSlices[index] = resolveSlice;
     }
 
     if (recording_) {
@@ -301,6 +455,7 @@ Result<CommandContext*> VulkanDevice::BeginPass(const PassDesc& pass) noexcept {
     VkImageView views[MaxPassAttachments] = {};
     target.colorCount = pass.colorCount;
     target.key.colorCount = pass.colorCount;
+    target.key.samples = static_cast<VkSampleCountFlagBits>(target.sampleCount);
     for (uint32 index = 0; index < pass.colorCount; ++index) {
         const ColorAttachment& color = pass.colors[index];
         const TextureRecord* record = textures_.Find(color.texture.slot);
@@ -309,7 +464,14 @@ Result<CommandContext*> VulkanDevice::BeginPass(const PassDesc& pass) noexcept {
         target.key.colorLoad[index] = LoadOf(color.load);
         target.key.colorStore[index] = StoreOf(color.store);
         target.clears[index].color = ClearValueOf(record->format, color.clear);
-        views[index] = record->view;
+        target.colorMips[index] = color.mipLevel;
+        target.colorSlices[index] = color.slice;
+        auto view = AttachmentViewFor(*record, color.mipLevel, color.slice);
+        if (!view) {
+            return Result<CommandContext*>::Failure(view.Error());
+        }
+
+        views[index] = view.Value();
         if (index == 0) {
             target.image = record->image;
             target.viewFormat = target.key.colors[0];
@@ -336,8 +498,14 @@ Result<CommandContext*> VulkanDevice::BeginPass(const PassDesc& pass) noexcept {
         target.key.stencilStore =
             stencil ? StoreOf(depth.stencilStore) : VK_ATTACHMENT_STORE_OP_DONT_CARE;
         target.clears[pass.colorCount].depthStencil = {depth.clearDepth, depth.clearStencil};
-        views[pass.colorCount] =
-            record->attachmentView != VK_NULL_HANDLE ? record->attachmentView : record->view;
+        target.depthMip = depth.mipLevel;
+        target.depthSlice = depth.slice;
+        auto view = AttachmentViewFor(*record, depth.mipLevel, depth.slice);
+        if (!view) {
+            return Result<CommandContext*>::Failure(view.Error());
+        }
+
+        views[pass.colorCount] = view.Value();
     }
 
     const uint32 viewCount = pass.colorCount + (hasDepth ? 1u : 0u);
