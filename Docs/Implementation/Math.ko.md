@@ -127,7 +127,7 @@ UE와 의도적으로 다른 점(오류·정확도 정책, 요구 3절 "규약�
 
 ## 2.1 기본 도형과 충돌 판정
 
-`Shapes.h`는 `Plane`, `Ray`, `Segment`, `Sphere`, `Box`(AABB), `Triangle`, `Capsule`, `Cylinder`, `OrientedBox`를 float/double 템플릿으로 제공하고, `Intersection.h`는 순수 함수 판정을 제공한다. `Cylinder`는 설계 [Cylinder 형상](../Design/CylinderShape.ko.md) CY1의 구현이다(2026-11-19).
+`Shapes.h`는 `Plane`, `Ray`, `Segment`, `Sphere`, `Box`(AABB), `Triangle`, `Capsule`, `Cylinder`, `OrientedBox`를 float/double 템플릿으로 제공하고, `Intersection.h`는 순수 함수 판정을 모은 묶음 헤더다(2026-11-19 기능별 분리, 동작 불변 이동). 결과 형식과 공통 계약은 `IntersectionTypes.h`, 내부 구현은 `IntersectionDetail.h`(공통: cast 결과·점–box/segment/삼각형·segment 쌍·평면/볼록 영역 분류 보조·OBB 분리축)·`IntersectionCastDetail.h`(shape별 cast)·`IntersectionCylinderDetail.h`(cylinder 축 좌표·cast·경계 여유 상수·평면 support), 공개 판정은 `IntersectionCast.h`(Raycast·SegmentCast)·`IntersectionContainment.h`(ContainsPoint·ClassifyPlaneSide·ClassifyContainment)·`IntersectionOverlap.h`(Overlap)·`IntersectionDistance.h`(최근접점·거리)·`ShapeBounds.h`(TryBounds)에 있다. 기존 포함부는 `Intersection.h` 하나로 그대로 쓴다. `Cylinder`는 설계 [Cylinder 형상](../Design/CylinderShape.ko.md) CY1의 구현이다(2026-11-19).
 
 | 분류 | 함수 | 지원 조합 |
 |---|---|---|
