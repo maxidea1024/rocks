@@ -145,8 +145,16 @@ try
     var built = await Game();
     Require(built.ExitCode == 0, "External game build failed: " + built.StdOut + built.StdErr);
     var initial = ReadActionReport();
-    Require(initial.Succeeded && initial.ExecutedActions > 0 && initial.Actions.All(action => action.Module == "SampleGame"),
+    // 게임 빌드는 게임 모듈의 소스만 컴파일한다. SDK가 나른 공유 PCH 헤더(SharedPchHeader — 게임이 닿는 제공 모듈 ObjectRuntime)는 게임
+    // 인자로 게임 출력에 미리 컴파일한다(Docs/Design/UnityBuildPch.ko.md 8.4절). 그 Pch action의 모듈 이름은 제공 모듈이지만 엔진
+    // 소스를 컴파일하는 것이 아니다.
+    Require(initial.Succeeded && initial.ExecutedActions > 0 &&
+        initial.Actions.All(action => action.Module == "SampleGame" || action.Kind == "Pch"),
         "Game build compiled an engine module or failed");
+    Require(initial.Actions.Count(action => action.Kind == "Pch") == 1 && initial.Actions.Single(action => action.Kind == "Pch").Module == "ObjectRuntime" &&
+        initial.Actions.Single(action => action.Kind == "Pch").OutputPath.StartsWith(Path.Combine(game, "out"), StringComparison.OrdinalIgnoreCase),
+        "Game build must precompile the SDK's shared PCH header once in its own output: " +
+        string.Join(", ", initial.Actions.Where(action => action.Kind == "Pch").Select(action => action.Module + " " + action.OutputPath)));
     var run = await ProcessRunner.RunAsync(new(initial.ModuleOutputs["SampleGame"], [], game, toolchain.Environment));
     Require(run.ExitCode == 0, "External game's generated CLASS/PROPERTY runtime failed");
     // 모듈 표(Docs/Design/ModuleLoader.ko.md 3.2절): SDK Core(ProvidesModuleTable)에 닿는 게임 실행 파일은 모듈 표 TU를 가진다. 표는 SDK 모듈의
@@ -683,7 +691,7 @@ try
     var reflectionBuilt = await ReflectionGame();
     Require(reflectionBuilt.ExitCode == 0, "Game importing an SDK descriptor failed: " + reflectionBuilt.StdOut + reflectionBuilt.StdErr);
     var reflectionResult = JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(Path.Combine(reflectionOutput, "action-report.json")))!;
-    Require(reflectionResult.Succeeded && reflectionResult.Actions.All(action => action.Module is "SampleGame" or "GameCore"),
+    Require(reflectionResult.Succeeded && reflectionResult.Actions.All(action => action.Module is "SampleGame" or "GameCore" || action.Kind == "Pch"),
         "Game importing an SDK descriptor compiled an SDK module");
     Require(!Directory.Exists(Path.Combine(reflectionOutput, "Generated/ReflectionTestFixtures")) &&
         !Directory.Exists(Path.Combine(reflectionOutput, "Generated/CoreTypeBindings")),
@@ -717,6 +725,10 @@ try
     var coreGenerated = Path.Combine(reflectionOutput, "Generated/GameCore/Public/GameCore/CoreThing.generated.h");
     var coreDescriptor = Path.Combine(reflectionOutput, "Metadata/GameCore.rocksmeta.json");
     string coreGeneratedHash = Hashing.Sha256File(coreGenerated);
+    // 필드를 더하면 descriptor와 타입별 생성 소스(스키마 표·등록)가 바뀐다. 타입별 생성 헤더(선언·컴파일 타임 형질)는 그대로일 수 있다
+    // (Docs/Design/ReflectionGeneratedSources.ko.md 5절).
+    var coreGeneratedSource = Path.Combine(reflectionOutput, "Generated/GameCore/Source/Public/GameCore/CoreThing.generated.cpp");
+    string coreGeneratedSourceHash = Hashing.Sha256File(coreGeneratedSource);
     string coreDescriptorHash = Hashing.Sha256File(coreDescriptor);
     File.WriteAllText(coreHeader, coreHeaderText.Replace("rocks::int32 level = 1;", "rocks::int32 level = 1;\n    ROCKS_PROPERTY() rocks::int32 rank = 0;", StringComparison.Ordinal));
     var rankIds = await Ids("add", "--manifest", coreManifest, "--field", "sample::CoreThing::rank");
@@ -725,11 +737,13 @@ try
     var upperFailed = await ReflectionGame();
     Require(upperFailed.ExitCode != 0 && upperFailed.StdErr.Contains("RMC2000", StringComparison.Ordinal),
         "Invalid dependent module metadata was accepted: " + upperFailed.StdErr);
-    Require(Hashing.Sha256File(coreGenerated) == coreGeneratedHash && Hashing.Sha256File(coreDescriptor) == coreDescriptorHash,
+    Require(Hashing.Sha256File(coreGenerated) == coreGeneratedHash && Hashing.Sha256File(coreGeneratedSource) == coreGeneratedSourceHash &&
+        Hashing.Sha256File(coreDescriptor) == coreDescriptorHash,
         "A failed dependent module published its dependency's staged metadata");
     File.WriteAllText(childHeader, childHeaderText);
     Require((await ReflectionGame()).ExitCode == 0, "Game did not recover after the dependent module metadata failure");
-    Require(Hashing.Sha256File(coreGenerated) != coreGeneratedHash, "GameCore metadata change was not published after recovery");
+    Require(Hashing.Sha256File(coreGeneratedSource) != coreGeneratedSourceHash && Hashing.Sha256File(coreDescriptor) != coreDescriptorHash,
+        "GameCore metadata change was not published after recovery");
 
     // 본문 계약 위반(리플렉션 클래스의 noexcept가 아닌 생성자)은 생성 헤더만 보는 게시 전 검증을 지나 빌드의 생성 소스 compile action에서
     // 실패한다. Rocks.Build가 컴파일러 출력 뒤에 RMC3000 안내를 붙이고, --verify-metadata-sources on으로 다시 돌리면 메타 단계가 게시

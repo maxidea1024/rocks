@@ -413,11 +413,19 @@ internal static class PchTests
             "int main() { return BaseSum() + UpperSum() + UserA() + UserB(); }\n");
         NativeModuleInput baseModule = new()
         {
-            Name = "SharedBase", Sources = [baseSource], PublicIncludeDirectories = [baseInclude], PublicDefines = ["BASE_PUBLIC=1"], SharedPchHeader = "shared/BasePch.h"
+            Name = "SharedBase",
+            Sources = [baseSource],
+            PublicIncludeDirectories = [baseInclude],
+            PublicDefines = ["BASE_PUBLIC=1"],
+            SharedPchHeader = "shared/BasePch.h"
         };
         NativeModuleInput upper = new()
         {
-            Name = "SharedUpper", Sources = [upperSource], PublicIncludeDirectories = [upperInclude], Dependencies = ["SharedBase"], SharedPchHeader = "upper/UpperPch.h"
+            Name = "SharedUpper",
+            Sources = [upperSource],
+            PublicIncludeDirectories = [upperInclude],
+            Dependencies = ["SharedBase"],
+            SharedPchHeader = "upper/UpperPch.h"
         };
         NativeModuleInput moduleA = new() { Name = "UserA", Sources = [userA], Dependencies = ["SharedUpper"] };
         NativeModuleInput moduleB = new() { Name = "UserB", Sources = [userB], Dependencies = ["SharedUpper"], PrivateDefines = ["USER_B_EXTRA=5"] };

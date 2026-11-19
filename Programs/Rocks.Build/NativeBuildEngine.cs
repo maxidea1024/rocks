@@ -55,6 +55,7 @@ public sealed class NativeBuildEngine
         {
             AtomicFile.WriteIfChanged(file.Path, new System.Text.UTF8Encoding(false).GetBytes(file.Content));
         }
+
         string compilationDatabase = CompilationDatabase.Write(request.OutputDirectory, request.RootDirectory, plan);
         if (request.PlanOnly)
         {
