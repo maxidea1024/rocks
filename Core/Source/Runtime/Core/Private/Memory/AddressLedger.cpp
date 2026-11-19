@@ -70,4 +70,8 @@ usize AddressLedger::Count() const noexcept {
     return entries_.Count();
 }
 
+usize AddressLedger::LongestProbe() const noexcept {
+    return entries_.LongestProbe();
+}
+
 } // namespace rocks::detail
