@@ -99,7 +99,7 @@ enum class GraphExternalPolicy : uint8 {
 //                   강한·weak 참조는 외부 정책과 무관하게 null로 쓰고 ExternalReference 진단(value
 //                   3 = Transient 클래스, 4 = Deprecated 클래스)을 남긴다(Required 위치면 null에
 //                   Required 규칙 — rejectMissingRequired). Include도 그 대상을 집합에 넣지 않는다.
-//   Keep           — 스냅샷·undo·PIE 복제(UE 복제와 같다): 저장 불가 객체도 보통 노드·대상이다.
+//   Keep           — 스냅샷·undo·Tryout 복제(UE 복제와 같다): 저장 불가 객체도 보통 노드·대상이다.
 //
 // 사용 예(스냅샷):
 //   ObjectGraphSaveOptions options;

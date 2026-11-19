@@ -229,7 +229,7 @@ internal static class ModuleDescriptor
 
             // 필드 플래그(리플렉션 B9h1)는 비트 순서로 적는다.
             foreach ((bool set, string flag) in new[] { (field.Spec.DuplicateTransient, "DuplicateTransient"),
-                (field.Spec.NonPIEDuplicateTransient, "NonPIEDuplicateTransient"), (field.Spec.SaveGame, "SaveGame"),
+                (field.Spec.NonTryoutDuplicateTransient, "NonTryoutDuplicateTransient"), (field.Spec.SaveGame, "SaveGame"),
                 (field.Spec.TextExportTransient, "TextExportTransient") })
             {
                 if (set)
@@ -628,7 +628,7 @@ internal static class ModuleDescriptor
 
                 string[] fieldFlags = field.GetProperty("flags").EnumerateArray().Select(flag => flag.GetString() ?? "").ToArray();
                 if (fieldFlags.Any(flag => flag is not ("Transient" or "ReadOnly" or "EditorOnly" or "Required" or "DuplicateTransient" or
-                        "NonPIEDuplicateTransient" or "SaveGame" or "TextExportTransient")) ||
+                        "NonTryoutDuplicateTransient" or "SaveGame" or "TextExportTransient")) ||
                     fieldFlags.Distinct(StringComparer.Ordinal).Count() != fieldFlags.Length)
                 {
                     throw Invalid("unknown or duplicate field flag");
@@ -643,9 +643,9 @@ internal static class ModuleDescriptor
 
                 // Required와 복제 제외 플래그의 조합은 원본 선언의 RMC2202와 같이 거부한다(리플렉션 B9h1).
                 if (fieldFlags.Contains("Required", StringComparer.Ordinal) &&
-                    (fieldFlags.Contains("DuplicateTransient", StringComparer.Ordinal) || fieldFlags.Contains("NonPIEDuplicateTransient", StringComparer.Ordinal)))
+                    (fieldFlags.Contains("DuplicateTransient", StringComparer.Ordinal) || fieldFlags.Contains("NonTryoutDuplicateTransient", StringComparer.Ordinal)))
                 {
-                    throw Invalid("Required combined with DuplicateTransient or NonPIEDuplicateTransient");
+                    throw Invalid("Required combined with DuplicateTransient or NonTryoutDuplicateTransient");
                 }
 
                 string? referenceId = null;
@@ -681,7 +681,7 @@ internal static class ModuleDescriptor
                         EditorOnly = fieldFlags.Contains("EditorOnly"),
                         Required = fieldFlags.Contains("Required"),
                         DuplicateTransient = fieldFlags.Contains("DuplicateTransient"),
-                        NonPIEDuplicateTransient = fieldFlags.Contains("NonPIEDuplicateTransient"),
+                        NonTryoutDuplicateTransient = fieldFlags.Contains("NonTryoutDuplicateTransient"),
                         SaveGame = fieldFlags.Contains("SaveGame"),
                         TextExportTransient = fieldFlags.Contains("TextExportTransient"),
                         ToolName = toolName == fieldName ? "" : toolName,
