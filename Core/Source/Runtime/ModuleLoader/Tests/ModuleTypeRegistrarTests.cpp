@@ -177,6 +177,8 @@ UniquePtr<ModuleLoader> MakeLoader(Allocator& allocator) noexcept {
 
 } // namespace module_types_test
 
+namespace module_type_registrar_tests_file {
+
 using namespace module_types_test;
 
 // 등록기를 붙이면 이미 시작한 모듈의 타입을 시작 순서로 몰아서 등록하고, 붙은 뒤 시작하는 모듈은
@@ -299,3 +301,4 @@ TEST(ModuleLoaderDiagnosesLeasesLeftAfterShutdown) {
     // start 둘, preunload 둘, shutdown 둘이다(등록기가 없어 타입 기록은 없다).
     CHECK(journal.count == 6);
 }
+} // namespace module_type_registrar_tests_file
