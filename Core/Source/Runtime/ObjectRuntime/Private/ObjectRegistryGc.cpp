@@ -291,7 +291,7 @@ Result<GcProgress> ObjectRegistry::StepCollection(const ObjectAccessContext& acc
 }
 
 Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access,
-                                         WorkerScheduler* scheduler) noexcept {
+                                         WorkerScheduler* scheduler, GcReclaim reclaim) noexcept {
     auto valid = CheckAccess(access);
     if (!valid) {
         return Result<GcReport>::Failure(valid.Error());
@@ -380,7 +380,8 @@ Result<GcReport> ObjectRegistry::Collect(const ObjectAccessContext& access,
 
     const uint64 reclaimStarted = platform::MonotonicNanoseconds();
     report.sweepNanoseconds = reclaimStarted - sweepStarted;
-    report.reclaimed = ReclaimEligible();
+    // Deferred는 분류한 객체를 회수 대상 목록에 남긴다(DrainRetired가 예산만큼 회수 — 17.2절).
+    report.reclaimed = reclaim == GcReclaim::Immediately ? ReclaimEligible() : 0;
     const uint64 finished = platform::MonotonicNanoseconds();
     report.reclaimNanoseconds = finished - reclaimStarted;
     report.durationNanoseconds = finished - started;

@@ -61,6 +61,37 @@ using WorldSubsystemType = SubsystemType<WorldSubsystem>;
 //   auto spinner = RegisterNativeClass<Spinner>(types);  // World.module.generated.h를 include한 TU
 Result<void> RegisterWorldTypes(ModuleRegistration& registration) noexcept;
 
+// World GC 일정 방식이다(Docs/Design/GarbageCollectionScale.ko.md 17.3절).
+// - Incremental: World 파괴가 있으면 프레임 끝마다 WorldDesc::gcBudget만큼 증분 slice를 진행한다.
+// - FullCollection: World 파괴가 있고 마지막 전체 수집 뒤
+// WorldGcSchedule::fullCollectionIntervalSeconds
+//   (World 게임 시간)가 지나면 프레임 끝에 STW 병렬 전체 수집을 한다(UE의 주기 수집 방식).
+enum class WorldGcMode : uint8 {
+    Incremental,
+    FullCollection
+};
+
+// World GC 일정이다. 어느 방식이든 World::RequestFullCollection은 다음 프레임 끝에 STW 병렬 전체
+// 수집을 하고, 전체 수집의 회수(소멸자·저장소 반환)는 다음 프레임들에 reclaimBudget씩 나눈다.
+//
+// 사용 예(주기 수집, 간격 30초):
+//   WorldDesc desc;
+//   desc.gcSchedule.mode = WorldGcMode::FullCollection;
+//   desc.gcSchedule.fullCollectionIntervalSeconds = 30.0;
+struct WorldGcSchedule {
+    // FullCollection 간격 기본값이다(UE gc.TimeBetweenPurgingPendingKillObjects 61.1초에 대응).
+    static constexpr double DefaultFullCollectionIntervalSeconds = 60.0;
+    // 전체 수집 뒤 프레임마다의 회수 시간 기본값이다(UE gc.IncrementalGCTimePerFrame 2ms에 대응).
+    static constexpr uint64 DefaultReclaimNanoseconds = 2000000;
+
+    WorldGcMode mode = WorldGcMode::Incremental;
+    // FullCollection에서 전체 수집 사이의 최소 World 게임 시간(초)이다. 0이면 파괴가 있은 다음
+    // 프레임마다 수집한다.
+    double fullCollectionIntervalSeconds = DefaultFullCollectionIntervalSeconds;
+    // 전체 수집 뒤 프레임마다 회수에 쓰는 예산이다(ObjectRegistry::DrainRetired).
+    GcBudget reclaimBudget{GcBudget::DefaultMaxObjects, DefaultReclaimNanoseconds};
+};
+
 // Actor Spawn 옵션이다.
 struct SpawnParams {
     // 소속 Level이다. null이면 영구 Level이다. 파괴 대기 중인 Level이면 Spawn이 Destroyed로
@@ -76,8 +107,10 @@ struct WorldDesc {
     ContextId context;
     TimeStepPolicy timeStep;
     RegistryOptions objects;
-    // 프레임 끝 증분 GC 한 번의 예산이다.
+    // 프레임 끝 증분 GC 한 번의 예산이다(WorldGcMode::Incremental).
     GcBudget gcBudget;
+    // GC 일정(증분·주기 전체 수집, 전체 수집 뒤 회수 예산)이다.
+    WorldGcSchedule gcSchedule;
     // 주면 World의 GC 표식(프레임 끝 증분 slice와 종료 수집)을 이 scheduler로 병렬로
     // 한다(Docs/Design/ GarbageCollectionScale.ko.md GC-S4 — ObjectRegistry::StepCollection의
     // scheduler 규칙). 빌림이며 시작된 scheduler여야 하고 World보다 오래 살아야 한다. World를 그
@@ -210,6 +243,23 @@ public:
     // Success). Tick·hook 안이면 Busy. 외부가 Borrow·RootRef를 보유해 회수할 수 없으면 그 오류이며
     // TearingDown에 머문다(반환 후 다시 호출).
     Result<void> Shutdown() noexcept;
+
+    // 다음 프레임 끝(Tick의 GC 단계)에 STW 병렬 전체 수집을 한다(일정 방식과 무관 — 레벨 전환·로딩
+    // 화면·메모리 압박). 증분 cycle이 Marking이면 취소하고, sweep·회수 중이면 끝낸 뒤 수집한다.
+    // 회수는 다음 프레임들에 gcSchedule.reclaimBudget씩 나눈다. 외부가 Borrow를 보유해 수집할 수
+    // 없으면 다음 프레임에 다시 시도한다.
+    //
+    // 사용 예(레벨을 내린 뒤):
+    //   world.DestroyLevel(level);
+    //   world.RequestFullCollection();
+    void RequestFullCollection() noexcept {
+        fullCollectionRequested_ = true;
+    }
+
+    // GC 표식에 쓰는 병렬 scheduler다(WorldDesc::gcScheduler — 없으면 nullptr, 직렬).
+    WorkerScheduler* GcScheduler() const noexcept {
+        return gcScheduler_;
+    }
 
     WorldState State() const noexcept {
         return state_;
@@ -587,6 +637,9 @@ private:
                              bool ownerDestroyed) noexcept;
     void DestroyActorNow(ObjectHandle actor) noexcept;
     void StepGarbageCollection() noexcept;
+    // STW 병렬 전체 수집(회수는 미룸)을 한다. 진행 중인 증분 cycle을 먼저 끝내거나 취소한다.
+    // 수집하지 못했으면(Busy) 거짓이다.
+    bool RunFullCollection() noexcept;
     // World가 소유한 객체의 RequestDestroy다. 결과를 확인한다(클러스터 이탈이 실패하면 고아 소속이
     // 남는다 — 13.3절). 이미 파괴됐거나 종료 중이면 무시하고, 그 밖의 실패는 불변식 위반으로
     // Fatal이다.
@@ -642,6 +695,12 @@ private:
     bool inTick_ = false;
     bool gcPending_ = false;
     bool destroyedDuringCycle_ = false;
+    WorldGcSchedule gcSchedule_;
+    // 마지막 전체 수집 뒤 World 게임 시간(초)이다(FullCollection 간격).
+    double secondsSinceFullCollection_ = 0.0;
+    bool fullCollectionRequested_ = false;
+    // 전체 수집이 남긴 회수가 있다(프레임마다 DrainRetired).
+    bool reclaimPending_ = false;
     uint32 componentCount_ = 0;
     uint64 spawnedTotal_ = 0;
     uint64 destroyedTotal_ = 0;

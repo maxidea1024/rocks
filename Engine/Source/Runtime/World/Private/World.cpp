@@ -72,7 +72,8 @@ World::World(Allocator& allocator, TypeRegistry& types, const WorldDesc& desc) n
       timeStep_(desc.timeStep), actors_(allocator), actorIndex_(allocator), levels_(allocator),
       levelSlots_(allocator), componentRecords_(allocator), pendingStart_(allocator),
       pendingComponentStart_(allocator), destroyActors_(allocator), destroyComponents_(allocator),
-      gcBudget_(desc.gcBudget), gcScheduler_(desc.gcScheduler), settings_(desc.settings) {
+      gcBudget_(desc.gcBudget), gcScheduler_(desc.gcScheduler), settings_(desc.settings),
+      gcSchedule_(desc.gcSchedule) {
     // 이름은 진단용이다. 복사에 실패하면 빈 이름으로 둔다.
     auto named = name_.TryAssign(desc.name);
     (void)named;
