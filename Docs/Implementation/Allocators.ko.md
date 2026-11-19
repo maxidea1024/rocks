@@ -6,11 +6,11 @@
 
 | 구현 | 주요 용도 | 수명·동시성 기준 |
 |---|---|---|
-| `SystemAllocator` | OS 정렬 할당을 이용하는 기준 구현 | 할당·반환·통계는 동기화한다. 미반환 할당이 있으면 파괴 시 Fatal이다. |
+| `SystemAllocator` | OS 정렬 할당을 이용하는 기준 구현 | 할당·반환·통계는 동기화한다(잠금 하나). 살아 있는 할당은 주소 hash 원장에 적어 반환 조회가 상환 O(1)이다. 미반환 할당이 있으면 파괴 시 Fatal이다. |
 | `ArenaAllocator` | 수명이 비슷한 임시 작업의 청크 재사용 | 생성한 스레드 전용이다. 개별 반환은 논리적 반환이며 공간은 `Reset()` 후 재사용한다. |
 | `StackAllocator` | 역순 반환이 확실한 단일 스레드 작업 | 생성 스레드 전용이며 표시는 일괄 해제가 아닌 반환 경계 확인에 사용한다. |
 | `PoolAllocator` | 크기·정렬이 정해진 블록의 반복 재사용 | 일반 호출을 동기화한다. 상위 할당기의 스레드 제약은 그대로 적용된다. |
-| `BinnedAllocator` | 크기별 pool과 상위 할당기를 조합하는 범용 저장소 | 변경 호출을 직렬화한다. 원장 검색과 잠금 비용을 측정해야 한다. |
+| `BinnedAllocator` | 범용 할당기: 작은 요청은 예약한 주소 범위의 64KB slab에서 크기 등급별 블록으로, 큰 요청은 상위 할당기로 | 모든 호출을 여러 스레드에서 동시에 부를 수 있다(등급별 잠금). 미반환 할당이 있으면 파괴 시 Fatal이다. |
 | `BudgetAllocator` | 상위 할당기로부터 얻는 payload의 사용량 제한 | 일반 변경 호출을 직렬화한다. 통계는 게시 완료된 상태의 스냅샷이다. |
 | `DebugAllocator` | 인접 guard와 제한된 quarantine을 이용한 메모리 손상 진단 | 일반 호출을 동기화한다. 검사는 호출 시점에 수행하며 payload 접근은 별도 동기화가 필요하다. |
 | `ExternalAllocator` | 외부 backend callback을 공통 인터페이스에 연결 | callback을 잠금 밖에서 병렬 호출한다. 실제 공급자와 모듈 수명은 별도 연결이 필요하다. |
@@ -120,11 +120,25 @@ Pool 자체의 호출은 동기화되지만, 상위 `Allocate`·`Deallocate`는 
 
 ## BinnedAllocator
 
-`BinnedAllocator(backing)`는 정렬 16 이하인 요청을 16·32·64·128·256·512·1024·2048·4096바이트의 고정 pool 중 작은 적합 구간으로 보낸다. 더 큰 크기 또는 정렬은 backing에 직접 요청한다. 정확한 반환 주소와 객체 수명 관리는 호출자의 책임이다. `Trim()`·`Shutdown()`은 미반환 할당이 있으면 `Busy`이며, 성공한 `Shutdown()`은 재호출해도 성공한다. 종료 후 비영 할당·비null 반환·`Trim()`은 `ShuttingDown`이다. 인자 검증과 0바이트·null 처리는 종료 검사보다 먼저 이뤄진다.
+`BinnedAllocator(backing, config)`는 범용 할당기다(설계와 근거는 `Docs/Design/GarbageCollectionScale.ko.md` 18절, UE `FMallocBinned3` 대응). 작은 요청(8192바이트 이하, 정렬 64 이하)은 인스턴스가 예약한 주소 범위 안의 64KB slab에서 크기 등급별 블록으로 내주고, 그보다 큰 요청은 backing으로 넘긴다.
 
-변경 호출은 직렬화되며 backing callback은 호출 스레드의 잠금 안에서 실행된다. backing은 그 스레드에서 사용할 수 있어야 하고 재진입·다른 스레드의 동일 할당기 대기·역순 잠금으로 교착을 만들면 안 된다. 같은 스레드 재진입은 `Result`에서 `Busy`, `Stats()`·파괴에서 Fatal이다. backing의 일반 반환 실패 시 기존 소유 기록과 할당을 보존한다. 미반환 할당을 남기고 파괴하거나 pool 소유 저장소 반환이 거부되면 Fatal이다.
+```cpp
+rocks::SystemAllocator system;
+rocks::BinnedAllocator memory(system);
+auto block = memory.Allocate(48, 16);
+if (block) {
+    (void)memory.Deallocate(block.Value());
+}
+```
 
-사용자 할당과 상위 청크·직접 할당 저장소를 각각 원장으로 관리한다. 두 원장은 별도 플랫폼 할당을 사용하므로 backing 예산에 기록 비용이 포함되지 않으며, 원장 할당 실패를 독립적으로 주입하는 테스트 경로는 아직 없다. 반환된 범위와 이 allocator가 보유한 저장소·원장 사이의 중첩 등 잘못된 상위 결과는 Fatal로 진단한다. 다른 고객의 저장소와 중첩되지 않도록 보장하는 것은 backing의 책임이며, 모든 외부 저장소에 대한 전역 중첩 검사는 아니다. pool과 원장의 잠금 및 선형 검색, 크기 구간의 내부 낭비를 고려해야 하며 처리량·단편화는 아직 측정하지 않았다. thread cache나 UE5 binned allocator와의 동등성은 제공한다고 주장하지 않는다.
+- 크기 등급은 32개다: 16–128은 16 단계, 그 위는 2배 구간마다 넷(160·192·224·256, …, 8192)이다. 블록은 16바이트 이상으로 정렬되고, 정렬 32·64는 블록 크기가 그 배수인 등급으로 올린다. 128을 넘는 요청의 등급 올림 낭비는 블록의 20% 이하다.
+- 주소 범위: 생성 때 `config.reserveBytes`(0이면 Windows·Mac 16 GiB, Android 4 GiB)를 예약만 하고 slab을 쓸 때 commit한다. OS가 예약을 거부해도 생성은 실패하지 않는다. 절반씩 줄여 64 MiB까지 다시 시도하고(설정이 그보다 작으면 그 값 한 번만), 끝내 못 하면 모든 요청이 backing으로 간다. 실제 크기는 `ReservedBytes()`다. 범위가 다 찼거나 slab commit이 실패한 작은 요청도 backing으로 간다(`Usage().fallbackAllocations` — 0이 아니면 예약 크기를 늘릴지 본다).
+- 빈 slab은 `config.retainedEmptySlabs`개(기본 64 = 4 MiB)까지 commit한 채 보관하고 넘으면 decommit한다. `Trim()`은 보관분을 모두 decommit한다. 살아 있는 할당이 있어도 부를 수 있고 값을 돌려주지 않는다.
+- 반환의 소유 판정: 미소유·중복·중간 주소의 `Deallocate`는 `NotFound`이고 상태를 바꾸지 않는다. 예약 범위 밖 주소, 쓰지 않는 slab의 주소, 블록 경계가 아닌 주소는 그 주소를 읽지 않고 판정한다. 쓰는 slab의 블록 경계는 slab 머리의 "뗀 블록 수"와 블록 안 반환 표지(둘째 word = 주소 XOR 인스턴스 비밀값)를 읽어 판정한다. 한계: 살아 있는 블록의 offset 8에 사용자가 그 블록의 표지 값(최상위 비트가 선 64비트 값)을 써 두면 정상 반환이 `NotFound`가 된다(2^-63). 잘못된 반환이 그 slab의 decommit·재사용과 같은 순간에 겹치면 검출이 보장되지 않는다(설계 18.4절 한계 2).
+- 통계: `Stats()`의 `liveBytes`는 요청 크기가 아니라 내준 블록 크기의 합이다(반환 때 요청 크기를 알 수 없다 — 큰 할당은 요청 크기 그대로다). `Usage()`는 예약 크기, commit한 slab 바이트, 보관 중인 빈 slab 수, 살아 있는 큰 할당 수, backing으로 간 작은 요청의 누적 수를 낸다.
+- backing: 이 객체와 모든 할당보다 오래 살고 어느 스레드에서나 부를 수 있어야 한다. backing 호출은 잠금 밖에서 한다(backing이 같은 allocator를 다시 불러도 된다 — 전의 재진입 `Busy` 규칙은 없다). 성공과 함께 null·정렬이 틀린 주소·주소 넘침·예약 범위와 겹치는 주소·이미 내준 주소를 돌려주면 Fatal이다. 큰 블록끼리의 부분 겹침은 검사하지 않는다(backing의 책임이다). backing이 큰 블록의 반환을 거부하면 그 오류를 돌려주고 할당은 살아 있는 채로 남는다.
+- 스레드: 모든 메서드를 여러 스레드에서 동시에 부를 수 있다. 파괴는 모든 호출이 끝난 뒤에 하고, 반환하지 않은 할당이 남아 있으면 Fatal이다. `Shutdown()`은 없다(수명은 객체 파괴로 끝난다).
+- 큰 할당의 주소 원장과 내부 상태는 플랫폼 할당을 쓰므로 backing의 예산에 들지 않는다. 원장 늘리기 실패(`OutOfMemory`)와 예약·commit·decommit 실패는 시험 접근(`Core/Private/Memory/BinnedAllocatorTestAccess.h`)으로 주입한다.
 
 ## 플랫폼 가상 메모리
 
