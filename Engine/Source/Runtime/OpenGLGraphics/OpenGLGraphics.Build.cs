@@ -20,7 +20,9 @@ public sealed class OpenGLGraphics : EngineModuleRules
         return new()
         {
             Name = ModuleName,
-            Unity = UnityFor(context),
+            // The unity batch of this module is verified on Windows only (the Android sources are built by no target whose compile
+            // database the development host can produce yet).
+            Unity = context.Platform == NativePlatform.Windows ? UnityFor(context) : UnityMode.Off,
             UnityExclude = UnityExclude(context),
             // The entry point (Private/OpenGLGraphicsModule.cpp) is built on every platform.
             Sources =

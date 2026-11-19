@@ -14,7 +14,7 @@
 namespace rocks::platform {
 namespace {
 
-VirtualMemoryResult Success() noexcept {
+VirtualMemoryResult VirtualMemoryLocalSuccess() noexcept {
     return {VirtualMemoryCode::Success, 0};
 }
 VirtualMemoryResult OsFailure() noexcept {
@@ -30,7 +30,7 @@ VirtualMemoryResult QueryVirtualMemoryInfo(VirtualMemoryInfo& info) noexcept {
         return OsFailure();
     }
     info = {static_cast<usize>(pageSize), static_cast<usize>(pageSize)};
-    return Success();
+    return VirtualMemoryLocalSuccess();
 }
 
 VirtualMemoryResult QueryPhysicalMemory(uint64& totalBytes) noexcept {
@@ -52,7 +52,7 @@ VirtualMemoryResult QueryPhysicalMemory(uint64& totalBytes) noexcept {
 
     totalBytes = static_cast<uint64>(pages) * static_cast<uint64>(pageSize);
 #endif
-    return Success();
+    return VirtualMemoryLocalSuccess();
 }
 
 namespace detail {
@@ -71,14 +71,14 @@ VirtualMemoryResult ReserveVirtualMemory(usize bytes, void*& address) noexcept {
         return {VirtualMemoryCode::UnsupportedAddress, 0};
     }
     address = result;
-    return Success();
+    return VirtualMemoryLocalSuccess();
 }
 
 VirtualMemoryResult CommitVirtualMemory(void* address, usize bytes) noexcept {
     if (mprotect(address, bytes, PROT_READ | PROT_WRITE) != 0) {
         return OsFailure();
     }
-    return Success();
+    return VirtualMemoryLocalSuccess();
 }
 
 VirtualMemoryResult DecommitVirtualMemory(void* address, usize bytes) noexcept {
@@ -90,14 +90,14 @@ VirtualMemoryResult DecommitVirtualMemory(void* address, usize bytes) noexcept {
     if (madvise(address, bytes, detail::PosixDecommitAdvice()) != 0) {
         return OsFailure();
     }
-    return Success();
+    return VirtualMemoryLocalSuccess();
 }
 
 VirtualMemoryResult ReleaseVirtualMemory(void* address, usize bytes) noexcept {
     if (munmap(address, bytes) != 0) {
         return OsFailure();
     }
-    return Success();
+    return VirtualMemoryLocalSuccess();
 }
 
 } // namespace detail

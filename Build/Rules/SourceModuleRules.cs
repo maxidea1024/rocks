@@ -134,8 +134,10 @@ public static class RepositoryUnity
     /// on these platforms. On the others the hand-written sources stay standalone translation units until a build on that platform
     /// verifies the batches (platform-specific sources and platform-conditional code are not compiled on other hosts). Reflection
     /// generated sources are batched on every platform regardless of this list.
+    /// Windows and Android (NDK cross build) are verified on the development host. macOS is not listed: there is no local macOS
+    /// toolchain, so add it after a macOS build compiles every module's sources as one translation unit.
     /// </summary>
-    public static readonly IReadOnlyList<NativePlatform> VerifiedPlatforms = [NativePlatform.Windows];
+    public static readonly IReadOnlyList<NativePlatform> VerifiedPlatforms = [NativePlatform.Windows, NativePlatform.Android];
 
     /// <summary>The Unity setting to use for a build context: On is kept only on verified platforms.</summary>
     public static UnityMode Effective(UnityMode requested, BuildContext context) =>
