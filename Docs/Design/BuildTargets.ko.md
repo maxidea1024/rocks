@@ -22,7 +22,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`, commit 
 |---|---|---|
 | 타깃 종류 | `TargetType { Game, Program }`(`BuildRules.cs:43`) | 에디터(Rocks Studio — [UI 툴킷](UiToolkit.ko.md) 6절)와 전용 서버를 전제한 설계가 있는데 받을 타깃이 없다 |
 | 에디터 전용 코드·데이터 | `EditorOnly`는 쿠킹 저장·로드 정책(`FieldEncodePolicy::excludedFlags`)의 데이터 플래그이고 "항상 컴파일된다"([리플렉션 기반](ReflectionFoundations.ko.md) 134행) | 게임 빌드에서도 필드가 메모리 배치에 남는다. 에디터 전용 함수·코드를 컴파일에서 뺄 수단이 없다 |
-| 모듈 type | 기술자 `type`(Runtime·Developer·Editor)은 게임·플러그인 모듈에만 있고 `Editor`는 "에디터 타깃이 아직 없음"으로 항상 뺀다([저장소 구성](RepositoryLayout.ko.md) 게임 빌드 연동). 엔진 모듈은 `SourceModuleRules.Group` 폴더뿐이다 | 엔진 모듈을 서버·클라이언트 전용으로 표시할 수 없다 |
+| 모듈 type | 기술자 `type`(Runtime·Developer·Editor)은 게임·플러그인 모듈에만 있고 `Editor`는 "에디터 타깃이 아직 없음"으로 항상 뺀다([저장소 구성](../Guides/RepositoryLayout.ko.md) 게임 빌드 연동). 엔진 모듈은 `SourceModuleRules.Group` 폴더뿐이다 | 엔진 모듈을 서버·클라이언트 전용으로 표시할 수 없다 |
 | Release 배제 정책 | `ReleaseExclusion.cs:90`이 `Type == Game` 타깃만 검사한다 | Client·Server 타깃이 생기면 빠진다 |
 | 의존 | `NativeModuleInput.Dependencies` 하나(`NativeBuildModels.cs:216`), 규칙 기반 클래스는 `RequiredModules` 하나 | `ActionGraph.cs:138-143`이 도달 집합 **전체**의 public include·public define을 넘긴다. 모든 의존이 사실상 Public이라 include가 새어 나간다. [전체 계획](EngineImplementationPlan.ko.md) 282행은 "공개/비공개 의존성" 기록을 요구한다 |
 | 서드파티 우회 | `ThirdPartyModuleRules`는 public include를 비우고, 소비자가 `ConsumerIncludeDirectories`·`ConsumerDefines`를 private으로 받는다(`Build/Rules/ThirdPartyModuleRules.cs:18-21, 76-90`, `FoundationTests.Build.cs:85-88`) | private 의존이 없어서 생긴 우회다 |
@@ -189,7 +189,7 @@ type 값은 `{ Runtime, Developer, Editor, ServerOnly, ClientOnly }`다(BD4). �
 - 한 모듈을 두 목록에 같이 적으면 오류다.
 - 공개 헤더가 쓰지 않는 공개 의존은 진단한다. 판정은 공개 헤더 검사의 depfile로 한다.
 
-**서드파티 모듈(BD21)**: private 의존이 생기면 UE 방식으로 바꾼다. 서드파티 모듈은 자기 include·define을 public으로 내고, 소비 모듈은 `PrivateDependencies`로 쓴다. `ConsumerIncludeDirectories`·`ConsumerDefines` 우회는 없앤다(BS3). "엔진 공개 헤더는 서드파티 헤더를 include하지 않는다"([저장소 구성](RepositoryLayout.ko.md) "외부 헤더는 소비 모듈의 Private 구현에만 노출") 규칙은 공개 헤더 검사(BD9)가 자동으로 잡는다.
+**서드파티 모듈(BD21)**: private 의존이 생기면 UE 방식으로 바꾼다. 서드파티 모듈은 자기 include·define을 public으로 내고, 소비 모듈은 `PrivateDependencies`로 쓴다. `ConsumerIncludeDirectories`·`ConsumerDefines` 우회는 없앤다(BS3). "엔진 공개 헤더는 서드파티 헤더를 include하지 않는다"([저장소 구성](../Guides/RepositoryLayout.ko.md) "외부 헤더는 소비 모듈의 Private 구현에만 노출") 규칙은 공개 헤더 검사(BD9)가 자동으로 잡는다.
 
 **시험 실행 파일(BD22)**: 시험 모듈(`FoundationTests`·`EngineTests`)의 각 `<Module>/Tests/` 소스는 시험 대상 모듈의 컴파일 환경 전체(비공개 의존 포함)와 그 모듈의 `Private/` 폴더를 받는다. 지금 `NativeModuleInput.Sources`는 문자열 목록이라(`NativeBuildModels.cs:206`) 소스마다 환경을 줄 수 없으므로 `NativeModuleInput`에 **소스 묶음** `SourceGroups`를 더한다. 묶음은 (소스 목록, 추가 비공개 의존, 추가 private include 디렉터리)이고, 묶음의 소스는 모듈 컴파일 환경에 묶음의 추가분을 더한 환경으로 컴파일한다. 시험 규칙은 대상 모듈마다 묶음 하나를 만든다(추가 비공개 의존 = 대상 모듈과 그 두 의존 목록, 추가 include = 대상 모듈 `Private/`). 지금 시험 실행 파일이 상위 모듈만 나열하고 하위 의존 전파에 기대며(`FoundationTests.Build.cs`의 "lower dependencies propagate"), `Core/Source/Runtime` 루트 include로 비공개 헤더를 여는 것(83–85행)을 이 규칙으로 바꾼다. BD11의 소유 모듈 판정은 묶음 환경을 쓴다. 정적 라이브러리로 나누지 않으므로 시험 등록(정적 초기화)이 링커에 의해 빠지는 문제가 없다. [유니티 빌드·PCH](UnityBuildPch.ko.md)의 묶음 TU는 소스 묶음 경계를 넘지 않는다(환경이 다른 소스를 한 TU로 묶을 수 없다).
 
@@ -249,7 +249,7 @@ Rocks 게임은 네트워크가 구성되면 전용 서버로 돌 수 있어야 
 2. **Linux x64 빌드 플랫폼(BD18).** `NativePlatform`에 `Linux`를 더한다.
    - `BuildContext.PlatformDirectory`는 `Linux`, 플랫폼 매크로는 `ROCKS_PLATFORM_LINUX`다.
    - 툴체인은 clang++ + lld다(Windows clang-cl·macOS clang++·Android NDK clang과 같은 clang 계열).
-   - 플랫폼 구현은 `Private/Posix/`(공용)와 `Private/Linux/`(Linux 전용)에 둔다([저장소 구성](RepositoryLayout.ko.md) 계층 규칙에 Linux를 더한다).
+   - 플랫폼 구현은 `Private/Posix/`(공용)와 `Private/Linux/`(Linux 전용)에 둔다([저장소 구성](../Guides/RepositoryLayout.ko.md) 계층 규칙에 Linux를 더한다).
    - 지원 범위는 [전체 계획](EngineImplementationPlan.ko.md) 130행대로 서버·기반 시험이다. Linux에서는 Server·Program 타깃만 빌드하고, 다른 타깃은 빌드 규칙이 이유와 함께 거부한다.
 3. **렌더 없는 실행.** Server 타깃 실행 파일은 항상 `--headless`와 같은 실행 성격이다(창·그래픽 장치를 만들지 않는다). 빌드 쪽 계약은 "Server 타깃은 그래픽 backend 모듈을 링크하지 않는다"이다. 그래픽 backend 모듈을 type `ClientOnly`로 두어 3.3절 검사가 막는다. 오디오·입력 backend를 어떻게 할지, 외형 에셋을 stub으로 로드하는 규칙([Sparks](SparksLanguage.ko.md) 851행 준비 mask)과 어떻게 맞출지는 네트워크 단계 스펙에서 정한다.
 4. **서버 플랫폼은 Windows·macOS·Linux다.** 세 플랫폼 모두 Server 타깃을 빌드·실행한다(UE도 Win64·Mac·Linux 서버를 빌드한다). Android·iOS는 클라이언트 전용이라 Server 타깃을 거부한다. 운영 서버의 주 플랫폼은 Linux x64다.
@@ -314,7 +314,7 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 
 **모듈 수명과 로더(BD30).**
 - UE는 모듈마다 `IMPLEMENT_MODULE`로 진입점을 둔다(`Runtime/Core/Public/Modules/ModuleManager.h:943-971`). `Monolithic`에서는 정적 초기화로 등록하고, `Modular`에서는 `FModuleManager`가 DLL을 적재한 뒤 진입점을 부른다. 플러그인 모듈은 플러그인 관리자가 로딩 단계별로 적재한다.
-- Rocks에는 모듈 수명 객체와 로더가 아직 없다(리플렉션 등록은 생성 함수 `RegisterModuleTypes`를 명시 호출). 별도 스펙 [모듈 로더](ModuleLoader.ko.md)로 정했다. 그 단계 ML0–ML4는 BS5 전에, ML5는 BS5와 함께 구현한다. 이 문서가 그 스펙에 요구하는 계약은 다음과 같다.
+- 모듈 수명 객체·진입점 매크로(Core)와 Monolithic 로더(`ModuleLoader` 모듈)는 [모듈 로더](ModuleLoader.ko.md) ML0으로 구현했다. 리플렉션 등록은 아직 생성 함수 `RegisterModuleTypes`를 명시 호출하고(로더 연결은 ML2), Modular 적재는 ML4다. 별도 스펙 [모듈 로더](ModuleLoader.ko.md)로 정했다. 그 단계 ML0–ML4는 BS5 전에, ML5는 BS5와 함께 구현한다. 이 문서가 그 스펙에 요구하는 계약은 다음과 같다.
   1. 같은 소스가 `Monolithic`과 `Modular`에서 같은 순서·결과로 동작한다. 모듈 진입점 매크로가 `ROCKS_MONOLITHIC`으로 두 방식을 가린다.
   2. 모듈 적재·시작은 의존 순서, 종료·해제는 그 역순이다. 리플렉션 타입 등록은 모듈 시작에 묶는다.
   3. Rocks Studio는 프로젝트 기술자(`.rocksproject`)와 플러그인 활성 조건(3.6절)을 읽어 게임·플러그인 모듈의 공유 라이브러리를 실행 중에 적재한다.
@@ -418,7 +418,7 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 ## 8. 다른 문서 개정
 
 이번 개정에서 함께 고친 문서:
-- [저장소 구성](RepositoryLayout.ko.md): "후속"에 이 문서 링크를 더했다. 기술자 표·모듈 type 표·게임 빌드 연동·플랫폼 폴더 목록(Linux)은 BS2·BS4·BS6 구현 때 고친다.
+- [저장소 구성](../Guides/RepositoryLayout.ko.md): "후속"에 이 문서 링크를 더했다. 기술자 표·모듈 type 표·게임 빌드 연동·플랫폼 폴더 목록(Linux)은 BS2·BS4·BS6 구현 때 고친다.
 - [리플렉션 기반](ReflectionFoundations.ko.md) 134행 `EditorOnly`: BD6의 선언 규칙으로 바뀐다는 주석을 달았다.
 - [유니티 빌드·PCH](UnityBuildPch.ko.md) 8.4절 248행: 제공 모듈 후보를 "컴파일 환경에 보이는 제공 모듈"로 고쳤다.
 - [셰이더 시스템](ShaderSystem.ko.md) 9절: Release 배제 대상을 Game·Client·Server로 고쳤다.

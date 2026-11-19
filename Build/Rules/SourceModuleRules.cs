@@ -44,6 +44,16 @@ public abstract class SourceModuleRules : ModuleRules
     protected string ModuleDirectory => $"{Layer}/Source/{Group}/{ModuleName}";
 
     /// <summary>
+    /// Absolute path of the module entry point source <c>Private/&lt;ModuleName&gt;Module.cpp</c>, which holds the module's
+    /// <c>ROCKS_IMPLEMENT_MODULE</c> (Docs/Design/ModuleLoader.ko.md section 3.2). Rules that compile only platform subdirectories of
+    /// Private/ add it so that the entry point is built on every platform:
+    /// <code>
+    /// Sources = [ModuleEntrySource(context), .. context.Sources($"{ModuleDirectory}/Private/Win64")],
+    /// </code>
+    /// </summary>
+    protected string ModuleEntrySource(BuildContext context) => context.PathInRoot($"{ModuleDirectory}/Private/{ModuleName}Module.cpp");
+
+    /// <summary>
     /// Include spellings of reflection metadata headers (ROCKS_CLASS declarations), relative to Public/ or Private/. When not empty,
     /// the module folder must contain the identity manifest <c>&lt;ModuleName&gt;.rocksids.json</c>. Example:
     /// <code>

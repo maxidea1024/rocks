@@ -22,8 +22,9 @@ public sealed class VulkanGraphics : EngineModuleRules
             NativePlatform.Android => "Android",
             _ => null
         };
+        // Private/*.cpp holds the entry point (VulkanGraphicsModule.cpp), so the Unsupported variant adds it explicitly.
         IReadOnlyList<string> sources = platform is null
-            ? context.Sources($"{backend}/Unsupported")
+            ? [ModuleEntrySource(context), .. context.Sources($"{backend}/Unsupported")]
             : [.. Directory.GetFiles(context.PathInRoot(backend), "*.cpp").Order(StringComparer.Ordinal),
                 .. context.Sources($"{backend}/{platform}")];
         return base.Configure(context) with

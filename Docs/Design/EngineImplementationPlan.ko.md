@@ -279,7 +279,7 @@ Build/                    Rules  Schemas
 Templates/  Samples/VerticalSlice
 ~~~
 
-Core는 엔진이 아니라 엔진·도구·게임이 함께 쓰는 기반 라이브러리이며 최상위에서 Engine과 분리한다(의존은 Core ← Engine ← 게임·플러그인). 각 모듈 폴더에 `<모듈>.Build.cs`·`Public/`·`Private/`·`Tests/`를 두고, 모듈 단위 테스트는 그 `Tests/`에, 통합·부하·렌더·네트워크 시험은 `Programs/`의 시험 프로그램에 둔다. 실행 프로그램(C++·C#)은 모두 `Programs/`에 둔다. 게임 프로젝트는 `<프로젝트>.rocksproject`, 플러그인은 `<플러그인>.rocksplugin` 기술자를 둔다. 세부 규칙은 [저장소 구성](RepositoryLayout.ko.md)을 따른다.
+Core는 엔진이 아니라 엔진·도구·게임이 함께 쓰는 기반 라이브러리이며 최상위에서 Engine과 분리한다(의존은 Core ← Engine ← 게임·플러그인). 각 모듈 폴더에 `<모듈>.Build.cs`·`Public/`·`Private/`·`Tests/`를 두고, 모듈 단위 테스트는 그 `Tests/`에, 통합·부하·렌더·네트워크 시험은 `Programs/`의 시험 프로그램에 둔다. 실행 프로그램(C++·C#)은 모두 `Programs/`에 둔다. 게임 프로젝트는 `<프로젝트>.rocksproject`, 플러그인은 `<플러그인>.rocksplugin` 기술자를 둔다. 세부 규칙은 [저장소 구성](../Guides/RepositoryLayout.ko.md)을 따른다.
 
 공개 헤더와 Private 구현을 분리한다. 모듈 manifest에 공개/비공개 의존성, Host/Target 구분, 초기화 순서, 버전, 선택 기능을 기록한다. 초기화는 명시적인 BootServices 순서로 수행하고 정적 전역 생성자의 상호 의존을 금지한다. Shutdown은 신규 게임/편집 요청 차단 → 작업 취소 요청 → World 정상 종료(스크립트 Disable·Destroy hook)·자원 detach → teardown 작업과 callback drain → GPU fence·audio epoch·physics step 완료 → root/lease 반환·최종 GC → GC가 생성한 추가 cleanup/backend 작업 drain → owner/retire/queue closure 확인 → scheduler 종료 → type metadata/code lease와 trace writer 종료 → 모듈 역순 종료로 수행한다. teardown 전용 제출은 마지막 drain까지 허용하며 새로운 cleanup이 생기면 완료 집합이 닫힐 때까지 GC/drain을 반복한다. timeout은 실패이며 scheduler를 먼저 종료하거나 강제 free하지 않는다. 렌더 lane은 "GPU fence 완료"부터 "owner/retire/queue closure 확인"까지 살아 있고 그 뒤 Drain·장치 소유권 반납·Join한다. 이 단계는 Engine 종료 hook(`EngineLoopHooks`의 `BeginShutdown`·`CompleteInFlightWork`·`DrainShutdownCleanup`·`VerifyShutdownClosure`·`StopExecutors`)으로 드러낸다([렌더 기반](RenderBase.ko.md) 5.5절, CP6 구현 2026-11-17).
 
