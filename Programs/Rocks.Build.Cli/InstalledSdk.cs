@@ -390,6 +390,7 @@ public static class InstalledSdk
             MaxParallelism = BuildCommand.Jobs(options),
             Unity = BuildCommand.Switch(options, BuildCommand.UnityOption),
             Pch = BuildCommand.Switch(options, BuildCommand.PchOption),
+            Adaptive = BuildCommand.Switch(options, BuildCommand.AdaptiveOption),
             // 도구 빌드 ID의 sdk: 경로 키 기준이다(SDK 헤더·라이브러리가 설치 위치와 무관한 키를 갖는다).
             SdkDirectory = sdk,
             EngineVersion = engineVersion

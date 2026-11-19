@@ -56,6 +56,9 @@ internal static partial class MetaTests
         // 입력 헤더 옆(include 루트 바로 아래)에 헤더를 둔다 — MetaCompiler 탐침이 모듈 public 헤더로 더한다.
         public void WriteHeader(string name, string text) => temporary.Write(name, text);
 
+        // 임시 디렉터리(include 루트) 아래 파일의 경로다.
+        public string HeaderPath(string name) => temporary.FilePath(name);
+
         public async Task GenerateAsync(string? source = null, bool fixture = false, IReadOnlyList<string>? extra = null,
             string? expectedCode = null, string? reason = null)
         {

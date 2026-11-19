@@ -61,6 +61,25 @@ public abstract class SourceModuleRules : ModuleRules
     /// </summary>
     protected virtual IReadOnlyList<string> UnityExclude(BuildContext context) => [];
 
+    /// <summary>
+    /// Module PCH header relative to the module folder, or null (Docs/Design/UnityBuildPch.ko.md section 8.1). The build precompiles it and
+    /// force-includes it into every C++ translation unit of the module; sources never include it themselves and must compile without it
+    /// (--pch off). Example:
+    /// <code>
+    /// protected override string? PrivatePchHeader => "Private/CorePch.h";
+    /// </code>
+    /// </summary>
+    protected virtual string? PrivatePchHeader => null;
+
+    /// <summary>
+    /// Shared PCH header of this module, spelled relative to Public/, or null (section 8.4). Modules without their own PCH that reach this
+    /// module precompile the header with their own arguments and use it. Example:
+    /// <code>
+    /// protected override string? SharedPchHeader => "Core/CoreSharedPch.h";
+    /// </code>
+    /// </summary>
+    protected virtual string? SharedPchHeader => null;
+
     /// <summary>The Unity setting to put into NativeModuleInput.Unity for this build context. Rules that build their own NativeModuleInput use it.</summary>
     protected UnityMode UnityFor(BuildContext context) => RepositoryUnity.Effective(Unity, context);
 
@@ -111,6 +130,8 @@ public abstract class SourceModuleRules : ModuleRules
             Optimization = Optimization,
             Unity = UnityFor(context),
             UnityExclude = UnityExclude(context),
+            PrivatePchHeader = PrivatePchHeader is null ? null : context.PathInRoot($"{ModuleDirectory}/{PrivatePchHeader}"),
+            SharedPchHeader = SharedPchHeader,
             Metadata = Metadata,
             ModuleDirectory = ModuleDirectory
         }

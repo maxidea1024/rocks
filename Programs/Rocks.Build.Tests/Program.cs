@@ -293,6 +293,9 @@ try
     // 유니티 묶기(UB1): 구성 결정성, include 앞 #define 판정, 실제 빌드(__FILE__·제외·논리 명령·변형 디렉터리·정리), 리플렉션 생성 소스 묶기.
     await UnityTests.RunAsync(request, root, Pass);
 
+    // 정의 헤더·모듈 PCH·작업 파일 분리(UB4). 하위 묶음마다 PASS를 센다.
+    await PchTests.RunAsync(request, root, Pass);
+
     await ReflectionSourceTests.RunAsync(request, root);
     Pass("reflection generated sources: source-less module archive, registration through the declaration, entry point exemption, incremental, validation");
 

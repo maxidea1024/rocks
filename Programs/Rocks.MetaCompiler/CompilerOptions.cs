@@ -36,6 +36,11 @@ internal sealed class CompilerOptions
     // --jobs 상한이다(Rocks.Tooling.Common.ProcessRunner가 한 프로세스에서 함께 띄우는 자식 수 상한과 같다).
     public const int MaximumVerifyJobs = ProcessRunner.MaximumConcurrentProcesses;
 
+    // 모듈 정의 헤더다(--definitions-header, Docs/Design/UnityBuildPch.ko.md 8.2절). 빌드가 모듈 정의(전파된 public define과 모듈
+    // define)를 명령줄 /D 대신 생성 헤더에 쓰고 native compile이 그 헤더를 강제 include한다. AST 생성과 검증 컴파일도 같은 파일을 강제
+    // include해 정의가 갈라지지 않는다. 없으면 강제 include하지 않는다.
+    public string? DefinitionsHeader { get; init; }
+
     public List<string> Imports { get; } = [];
 
     public List<string> IncludeDirectories { get; } = [];
@@ -111,7 +116,7 @@ internal sealed class CompilerOptions
             int equals = argument.IndexOf('=');
             string key = equals < 0 ? argument : argument[..equals];
             if (key is not ("--module" or "--input" or "--include" or "--private" or "--output-root" or "--descriptor" or "--import" or
-                "--compiler" or "--include-dir" or "--clang-arg" or "--identity-manifest" or "--identity-inventory" or "--jobs"))
+                "--compiler" or "--include-dir" or "--clang-arg" or "--identity-manifest" or "--identity-inventory" or "--jobs" or "--definitions-header"))
             {
                 throw new MetadataException($"unknown option {key}", "RMC1000", "Use --module, paired --input/--include, --output-root, --descriptor and documented optional arguments.");
             }
@@ -302,8 +307,20 @@ internal sealed class CompilerOptions
                 $"Pass the number of parallel verification compiles (1 to {MaximumVerifyJobs}).");
         }
 
+        string? definitionsHeader = null;
+        if (single.TryGetValue("--definitions-header", out string? definitionsText))
+        {
+            definitionsHeader = Path.GetFullPath(definitionsText);
+            if (!File.Exists(definitionsHeader))
+            {
+                throw new MetadataException("definitions header not found: " + definitionsHeader, "RMC1000",
+                    "Pass the module definitions header written by the build (<out>/Definitions/<Module>.Definitions.h).");
+            }
+        }
+
         CompilerOptions options = new()
         {
+            DefinitionsHeader = definitionsHeader,
             Module = module,
             Inputs = pairs,
             OutputRoot = outputRoot,

@@ -141,8 +141,12 @@ internal static class ReflectionSourceTests
                 !arguments.Any(argument => argument.Contains(ModuleTables.ModuleNameMacro, StringComparison.Ordinal)),
                 "the generated source must compile with the module's own and dependency includes and without ROCKS_MODULE_NAME");
             JsonElement engineRecord = records.Single(item => NativeToolchains.PathComparer.Equals(item.GetProperty("file").GetString(), engineReflection));
-            Check(engineRecord.GetProperty("arguments").EnumerateArray().Any(item => item.GetString()!.EndsWith(ModuleTables.ModuleNameMacro + "=Engine", StringComparison.Ordinal)),
-                "the generated source of a module with hand-written sources must receive that module's defines");
+            // 모듈 정의(ROCKS_MODULE_NAME 포함)는 명령줄이 아니라 강제 include하는 정의 헤더로 간다(Docs/Design/UnityBuildPch.ko.md 8.2절).
+            string engineDefinitions = ModuleDefinitions.PathOf(output, "Engine");
+            Check(engineRecord.GetProperty("arguments").EnumerateArray().Any(item => item.GetString()!.EndsWith(engineDefinitions, StringComparison.Ordinal)) &&
+                File.ReadAllText(engineDefinitions).Contains("#define " + ModuleTables.ModuleNameMacro + " Engine\n", StringComparison.Ordinal) &&
+                !File.Exists(ModuleDefinitions.PathOf(output, "Fixtures")),
+                "the generated source of a module with hand-written sources must receive that module's definitions header");
         }
 
         if (request.Toolchain.Platform != NativePlatform.Android)

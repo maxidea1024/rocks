@@ -27,13 +27,13 @@ jobs:
       - name: Install verified native formatter
         run: ./Build/InstallFormatter.ps1
       - name: Build and test Foundation through MSBuild
-        run: dotnet msbuild Rocks.proj /t:Test /p:Configuration=Debug /p:RocksTarget=Foundation /v:minimal
+        run: dotnet msbuild Rocks.proj /t:Test /p:Adaptive=off /p:Configuration=Debug /p:RocksTarget=Foundation /v:minimal
       - name: Verify stable identity merge history
         if: github.event_name == 'pull_request'
         run: ./Build/CheckIdentityMerges.ps1 -MetaCompiler out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll
       - name: Build and test headless commandlet
         run: |
-          dotnet msbuild Rocks.proj /t:Build /p:Configuration=Debug /p:RocksTarget=Commandlet /p:NativeOutput=out/ci-commandlet /v:minimal
+          dotnet msbuild Rocks.proj /t:Build /p:Adaptive=off /p:Configuration=Debug /p:RocksTarget=Commandlet /p:NativeOutput=out/ci-commandlet /v:minimal
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $executable = if ($IsWindows) { 'out/ci-commandlet/bin/RocksCommandlet.exe' } else { 'out/ci-commandlet/bin/RocksCommandlet' }
           dotnet run --project Programs/Rocks.Commandlet.Tests -- --executable $executable
@@ -46,9 +46,9 @@ jobs:
       - name: Verify installed SDK and external game
         run: dotnet run --project Programs/Rocks.Build.IntegrationTests -- --root .
       - name: AddressSanitizer
-        run: dotnet msbuild Rocks.proj /t:Test /p:Configuration=Asan /p:RocksTarget=Foundation /v:minimal
+        run: dotnet msbuild Rocks.proj /t:Test /p:Adaptive=off /p:Configuration=Asan /p:RocksTarget=Foundation /v:minimal
       - name: Release with ThinLTO
-        run: dotnet msbuild Rocks.proj /t:Test /p:Configuration=Release /p:RocksTarget=Foundation /v:minimal
+        run: dotnet msbuild Rocks.proj /t:Test /p:Adaptive=off /p:Configuration=Release /p:RocksTarget=Foundation /v:minimal
       - name: Preserve reports
         if: always()
         uses: actions/upload-artifact@v7

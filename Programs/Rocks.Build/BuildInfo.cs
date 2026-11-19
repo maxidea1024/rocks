@@ -327,6 +327,12 @@ internal static class BuildInfoGenerator
 
         var digests = new FileDigests();
         NativePlan plan = ActionGraph.Create(request);
+        // 정의 헤더는 manifest의 입력(내용 해시)이다. 읽기 전에 쓴다 — 엔진도 최종 계획의 생성 파일을 다시 쓰고, 같으면 건드리지 않는다.
+        foreach (PlannedFile file in plan.GeneratedFiles)
+        {
+            AtomicFile.WriteIfChanged(file.Path, new UTF8Encoding(false).GetBytes(file.Content));
+        }
+
         var modules = request.Modules.ToDictionary(module => module.Name, StringComparer.OrdinalIgnoreCase);
         // 소스가 없는 실행 파일은 대상이 아니다(생성 TU만으로 main 없는 link를 시도하지 않는다 — 지금은 ActionGraph가 먼저 거부한다).
         string[] targets = plan.Closures
@@ -525,9 +531,14 @@ internal static class BuildInfoGenerator
         }
 
         // compile action의 입력은 원본 소스다(묶음 파일은 구성에 따라 바뀌는 생성물이라 넣지 않는다 — 위 논리 명령과 같은 이유다).
+        // 강제 include하는 생성 헤더(정의 헤더)와 PCH 헤더도 입력이다(8.7절 — 내용 해시).
         foreach (LogicalCompile compile in plan.LogicalCompiles.Where(compile => reached.Contains(compile.Module)))
         {
             Add(compile.Source);
+            foreach (string forced in compile.ForcedIncludes)
+            {
+                Add(forced);
+            }
         }
 
         foreach (NativeAction action in actions)
@@ -669,7 +680,7 @@ internal static class BuildInfoGenerator
             return paths.Key(argument);
         }
 
-        foreach (string prefix in new[] { "/I", "-I", "/WHOLEARCHIVE:" })
+        foreach (string prefix in new[] { "/I", "-I", "/FI", "/WHOLEARCHIVE:" })
         {
             if (argument.Length > prefix.Length && argument.StartsWith(prefix, StringComparison.Ordinal) &&
                 Path.IsPathFullyQualified(argument[prefix.Length..]))

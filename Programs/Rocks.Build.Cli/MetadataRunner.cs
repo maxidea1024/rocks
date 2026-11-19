@@ -65,6 +65,7 @@ public static class MetadataRunner
         }
 
         var metadata = plan.Generated.ToDictionary(module => module.Name, StringComparer.OrdinalIgnoreCase);
+        HashSet<string> entryModules = ModuleDefinitions.EntryModules(plan.Modules);
         List<MetadataModule> runs = order.Where(metadata.ContainsKey).Select(name => metadata[name]).ToList();
         List<NativeModuleInput> imported = order.Select(name => byName[name]).Where(module => module.ImportedMetadata is not null).ToList();
         if (runs.Count == 0)
@@ -135,9 +136,14 @@ public static class MetadataRunner
                     arguments.Add("--clang-arg=" + argument);
                 }
 
-                foreach (string define in owner.PublicDefines.Concat(owner.PrivateDefines).Concat(dependencies.SelectMany(module => module.PublicDefines)).Distinct())
+                // 모듈 정의는 native compile과 같은 정의 헤더로 넘긴다(Docs/Design/UnityBuildPch.ko.md 8.2절 — AST와 compile의 정의가
+                // 갈라지지 않는다). 헤더는 여기서 쓰고, 빌드가 같은 내용을 다시 계산해 그대로 둔다.
+                string[] defines = ModuleDefinitions.Of(owner, dependencies, entryModules.Contains(owner.Name));
+                if (defines.Length != 0)
                 {
-                    arguments.Add("--clang-arg=" + (toolchain.Platform == NativePlatform.Windows ? "/D" : "-D") + define);
+                    string definitions = ModuleDefinitions.PathOf(context.OutputDirectory, owner.Name);
+                    AtomicFile.WriteIfChanged(definitions, new System.Text.UTF8Encoding(false).GetBytes(ModuleDefinitions.Content(defines)));
+                    arguments.AddRange(["--definitions-header", definitions]);
                 }
 
                 foreach (string directory in MetadataLayout.IncludeOrder(owner, byName))

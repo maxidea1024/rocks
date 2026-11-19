@@ -30,6 +30,16 @@ public sealed class NativeBuildEngine
         // 계획 두 단계(Docs/Design/ReflectionFoundations.ko.md 8.1절): BuildInfo 정의 TU를 만들어 실행 파일 소스에 더한 뒤 액션
         // 그래프를 세운다. 첫 InputSnapshot은 Prepare가 읽은 값의 메모로 만들어 마지막 비교가 Prepare 읽기부터 빌드 끝까지를
         // 덮는다(ActionGraph.Create는 파일 내용을 읽지 않으므로 메모에 없는 파일은 그 뒤 여기서 처음 읽는다).
+        // 작업 파일 집합(Docs/Design/UnityBuildPch.ko.md 7.1절)은 계획을 세우기 전에 한 번 구한다. git이 끝날 때까지 기다리고 실패는
+        // 빌드 오류다(시간으로 포기해 빈 집합으로 진행하면 같은 입력에서 다른 묶음 구성이 나온다).
+        if (request.Unity && request.Adaptive && request.WorkingSet is null)
+        {
+            request = request with
+            {
+                WorkingSet = await SourceWorkingSet.QueryAsync(request.RootDirectory, request.Toolchain.Environment, cancellationToken)
+            };
+        }
+
         var prepared = BuildInfoGenerator.Prepare(request);
         request = prepared.Request;
         var plan = prepared.Plan ?? ActionGraph.Create(request);
@@ -39,7 +49,34 @@ public sealed class NativeBuildEngine
         {
             AtomicFile.WriteIfChanged(batch.File, new System.Text.UTF8Encoding(false).GetBytes(batch.Content));
         }
+
+        // 정의 헤더와 PCH stub 소스도 action의 입력이다(8.2·8.5절).
+        foreach (PlannedFile file in plan.GeneratedFiles)
+        {
+            AtomicFile.WriteIfChanged(file.Path, new System.Text.UTF8Encoding(false).GetBytes(file.Content));
+        }
         string compilationDatabase = CompilationDatabase.Write(request.OutputDirectory, request.RootDirectory, plan);
+        if (request.PlanOnly)
+        {
+            // 계획만: 생성 TU·묶음 파일·compile DB는 위에서 썼다. action과 증분 기록은 건드리지 않는다.
+            return new NativeBuildResult
+            {
+                Succeeded = true,
+                ExecutedActions = 0,
+                SkippedActions = 0,
+                ModuleOutputs = plan.ModuleOutputs,
+                Actions = [],
+                CompilationDatabasePath = compilationDatabase,
+                UnityDefineExcluded = plan.UnityDefineExcluded,
+                UnityBatches = plan.UnityBatches.Count,
+                PchActions = plan.Actions.Count(action => action.Kind == "Pch"),
+                AdaptiveSeparated = plan.AdaptiveSeparated,
+                Notices = plan.Notices,
+                PlanOnly = true,
+                ToolchainFingerprint = prepared.ToolchainFingerprint
+            };
+        }
+
         var store = new IncrementalStore(request.OutputDirectory);
         string toolchainKey = Fingerprints.Toolchain(request.Toolchain);
         string initialInputs = InputSnapshot(request, plan, prepared.Digests);
@@ -111,6 +148,9 @@ public sealed class NativeBuildEngine
             CompilationDatabasePath = compilationDatabase,
             UnityDefineExcluded = plan.UnityDefineExcluded,
             UnityBatches = plan.UnityBatches.Count,
+            PchActions = plan.Actions.Count(action => action.Kind == "Pch"),
+            AdaptiveSeparated = plan.AdaptiveSeparated,
+            Notices = plan.Notices,
             Failure = !stable ? "Source/toolchain inputs changed during the build." :
                 results.FirstOrDefault(value => !value.Succeeded)?.StdErr,
             ToolchainFingerprint = prepared.ToolchainFingerprint,
@@ -170,6 +210,33 @@ public sealed class NativeBuildEngine
             if (request.Unity)
             {
                 Remove(UnityBuild.DirectoryOf(request.OutputDirectory, module), batches, SearchOption.AllDirectories);
+            }
+        }
+
+        // PCH를 켠 빌드는 이번 계획이 쓰지 않은 PCH 변형 디렉터리(<out>/Pch/<제공 모듈>/<변형>)를 지운다(8.4절 — 인자가 바뀌어 낡은
+        // 변형이 수십–수백 MB씩 남지 않게). PCH를 끈 빌드는 지우지 않는다.
+        if (request.Pch)
+        {
+            var used = plan.PchDirectories.ToHashSet(NativeToolchains.PathComparer);
+            string pchRoot = Path.Combine(request.OutputDirectory, PchBuild.DirectoryName);
+            foreach (string provider in Directory.Exists(pchRoot) ? Directory.GetDirectories(pchRoot) : [])
+            {
+                foreach (string variant in Directory.GetDirectories(provider))
+                {
+                    if (used.Contains(variant))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        Directory.Delete(variant, true);
+                    }
+                    catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                    {
+                        Console.Error.WriteLine($"Build outputs: warning: cannot delete the stale PCH variant {variant}: {error.Message}");
+                    }
+                }
             }
         }
 

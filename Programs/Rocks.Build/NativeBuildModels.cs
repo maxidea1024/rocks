@@ -319,6 +319,26 @@ public sealed record NativeModuleInput
     // (Docs/Design/ReflectionGeneratedSources.ko.md GSD9). 손으로 쓴 소스의 Unity 설정과 따로이고, 요청이 유니티를 끄면 묶지 않는다.
     public bool ReflectionUnity { get; init; } = true;
 
+    // 모듈 PCH 헤더의 경로다(Docs/Design/UnityBuildPch.ko.md 8.1절 — 루트 기준 또는 절대 경로). 있으면 이 모듈의 C++ 번역 단위가 이 헤더를
+    // 미리 컴파일한 PCH를 쓴다. 소스는 이 헤더를 include하지 않는다 — 빌드가 강제 include하고, PCH 없이도(--pch off) 컴파일되어야 한다.
+    // PCH를 쓸 번역 단위가 PrivatePchMinTus보다 적으면 만들지 않는다.
+    public string? PrivatePchHeader { get; init; }
+
+    // PCH 사용 방식이다(8.1절). 외부 라이브러리 모듈은 설정과 무관하게 쓰지 않는다.
+    public PchUsage PchUsage { get; init; } = PchUsage.Auto;
+
+    // 모듈 PCH를 만드는 번역 단위 수의 하한이다(묶음 + 단독, PCH를 쓰지 않는 번역 단위 제외). 이보다 적으면 PCH를 만드는 비용이
+    // 절약분보다 크다.
+    public int PrivatePchMinTus { get; init; } = PchBuild.DefaultMinimumTranslationUnits;
+
+    // 공유 PCH 헤더의 철자다(이 모듈의 public include 디렉터리 기준, 8.4절). 있으면 이 모듈이 공유 PCH를 제공한다: 모듈 PCH가 없는
+    // 소비 모듈이 자기 인자로 이 헤더의 PCH를 만들어 쓴다(변형마다 하나). 헤더는 이 모듈과 그 의존 모듈의 public 헤더만 include해야
+    // 한다.
+    public string? SharedPchHeader { get; init; }
+
+    // 작업 파일 분리(7.2절)로 묶음에서 빠진 번역 단위도 PCH를 쓰는가(기본 참).
+    public bool AdaptivePch { get; init; } = true;
+
     // 규칙이 저장소 입력(예: Engine 루트 ThirdParty manifest)에서 만든 생성 번역 단위다(Docs/Design/ShaderSystem.ko.md 9절 도구 표).
     // 빌드가 출력 잠금 아래에서 <out>/GeneratedSources/<모듈>/<FileName>에 내용이 바뀔 때만 쓰고(BuildInfo 생성 TU와 같은 방식) 이
     // 모듈 소스로 컴파일한다. 내용은 호스트 경로를 담지 않아야 한다(도구 빌드 ID가 호스트 무관이다). 규칙은 이 목록을 매 실행 다시
@@ -376,6 +396,18 @@ public sealed record NativeBuildRequest
     // PCH를 쓰는가(명령 옵션 --pch on|off). Unity와 같이 object 변형 디렉터리 이름에 반영된다.
     public bool Pch { get; init; } = true;
 
+    // 작업 파일 분리를 쓰는가(명령 옵션 --adaptive on|off, 7절). true면 엔진이 git으로 작업 파일 집합을 구해(SourceWorkingSet) 그
+    // 소스를 유니티 묶음에서 빼 단독 번역 단위로 돌린다. 라이브러리 기본은 false이고 명령줄 도구의 기본은 on이다(CI는 off를 명시한다).
+    // 도구 빌드 ID와 compile_commands.json에는 반영되지 않는다.
+    public bool Adaptive { get; init; }
+
+    // 작업 파일 집합(정규 절대 경로)이다. null이면 Adaptive에 따라 엔진이 구한다. 시험이 git 없이 집합을 주입할 때 쓴다.
+    internal IReadOnlySet<string>? WorkingSet { get; init; }
+
+    // 계획만 세우는가(명령 옵션 --plan-only on). true면 생성 TU·묶음 파일·compile_commands.json까지 쓰고 action은 하나도 실행하지 않는다
+    // (증분 기록도 건드리지 않는다). clangd 입력이나 묶음 구성을 빌드 없이 얻을 때 쓴다. 결과의 Actions는 비어 있고 PlanOnly가 참이다.
+    public bool PlanOnly { get; init; }
+
     // response file 사용 방식이다(NativeCommandLine). 기본 Auto이며 시험만 Always·Never로 경로를 강제한다. key에 들어가지 않는다.
     internal ResponseFileMode ResponseFiles { get; init; } = ResponseFileMode.Auto;
 }
@@ -409,6 +441,18 @@ public sealed record NativeBuildResult
 
     // 이 빌드의 묶음 번역 단위 수다.
     public int UnityBatches { get; init; }
+
+    // 이 빌드의 PCH action 수다(모듈 PCH와 공유 PCH 변형).
+    public int PchActions { get; init; }
+
+    // 작업 파일 분리로 묶음에서 빠진 소스 수다.
+    public int AdaptiveSeparated { get; init; }
+
+    // 빌드가 남기는 알림이다(공유 PCH를 쓰지 못한 이유 등). 실패가 아니다.
+    public IReadOnlyList<string> Notices { get; init; } = [];
+
+    // 계획만 세운 결과인가(NativeBuildRequest.PlanOnly). 참이면 아무 action도 실행하지 않았고 산출물은 확인되지 않았다.
+    public bool PlanOnly { get; init; }
 
     public string? Failure { get; init; }
 

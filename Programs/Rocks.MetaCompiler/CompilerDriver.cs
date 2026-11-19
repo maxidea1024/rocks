@@ -54,6 +54,9 @@ internal static class CompilerDriver
         }
 
         await ValidateCompilerArgumentsAsync(options.ClangArguments, clangCl, root, environment);
+        // 모듈 정의 헤더는 모든 Clang 실행(AST·탐침·검증 컴파일)에 강제 include한다 — native compile과 같은 파일이다.
+        List<string> clangArguments = [.. options.ClangArguments,
+            .. options.DefinitionsHeader is null ? [] : clangCl ? new[] { "/FI" + options.DefinitionsHeader } : ["-include", options.DefinitionsHeader]];
         foreach (ModuleInput input in options.Inputs)
         {
             ValidateIncludeBinding(input.Path, input.Include, includes);
@@ -79,7 +82,7 @@ internal static class CompilerDriver
         List<string> validationArguments = arguments.Where(argument => argument is not ("/clang:-Xclang" or "/clang:-ast-dump=json" or "-Xclang" or "-ast-dump=json")).ToList();
         List<string> probeArguments = [.. arguments];
         AddIncludes(arguments, includes);
-        arguments.AddRange(options.ClangArguments);
+        arguments.AddRange(clangArguments);
         arguments.Add("-");
         // 모듈의 리플렉션 헤더 전부를 한 번역 단위로 읽는다(같은 모듈 안 헤더 사이의 base·참조가 풀린다).
         string unit = string.Concat(options.Inputs.Select(input => $"#include \"{input.Path.Replace('\\', '/')}\"\n"));
@@ -197,7 +200,7 @@ internal static class CompilerDriver
         StringComparer probePathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
         string[] ownOutputRoots = [Path.Combine(options.OutputRoot, "Public"), Path.Combine(options.OutputRoot, "Private")];
         AddIncludes(probeArguments, includes.Where(directory => !ownOutputRoots.Contains(Path.TrimEndingDirectorySeparator(directory), probePathComparer)));
-        probeArguments.AddRange(options.ClangArguments);
+        probeArguments.AddRange(clangArguments);
         probeArguments.AddRange(clangCl ? ["/w", "/clang:-Xclang", "/clang:-ast-dump-filter=rocksProbe_"] : ["-w", "-Xclang", "-ast-dump-filter=rocksProbe_"]);
         probeArguments.Add("-");
         await NativeMemberProbe.VerifyAsync(schema.Ordered, options.Inputs.Count, () => ModulePublicHeaders(options),
@@ -275,7 +278,7 @@ internal static class CompilerDriver
         }
 
         AddIncludes(validationArguments, validationIncludes);
-        validationArguments.AddRange(options.ClangArguments);
+        validationArguments.AddRange(clangArguments);
         try
         {
             foreach ((string path, byte[] bytes, GeneratedRoot _) in formattedOutputs)

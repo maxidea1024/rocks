@@ -63,6 +63,16 @@ cache hit은 key와 모든 출력 파일이 기록과 일치할 때만 인정한
 - `compile_commands.json`은 원본 소스마다 논리 명령 하나이고(`output`은 그 소스가 단독 TU일 때의 object 경로다 — 묶인 소스의 그 파일은 없다), 도구 빌드 ID는 유니티 켬·끔과 묶음 구성에 따라 바뀌지 않는다(archive·link의 object는 원본 소스 키 목록으로 적는다).
 - 명령 옵션: `--unity on|off`, `--pch on|off`, `--adaptive on|off`(기본 on). 켠 모듈은 묶음 충돌 정책 검사(`Rocks.ToolTests policy` — 파일 지역 이름, 파일 범위 using, `.cpp` 매크로, pragma 균형)의 대상이다. `Rocks.ToolTests unity-audit`는 설정과 무관하게 모든 엔진 모듈의 충돌을 센다.
 
+## 정의 헤더·PCH·작업 파일 분리
+
+[유니티 빌드·PCH](../../Docs/Design/UnityBuildPch.ko.md) 7·8절(UB4).
+
+- 정의 헤더: 모듈 정의(전파된 public define, 모듈 public/private define, 진입점 모듈의 `ROCKS_MODULE_NAME`)는 명령줄 `/D`가 아니라 `<out>/Definitions/<모듈>.Definitions.h`로 가고 번역 단위마다 강제 include된다(`/FI`·`-include`). 구성·플랫폼·타깃 매크로는 명령줄에 남는다. 리플렉션 AST 생성도 같은 파일을 쓴다(MetaCompiler `--definitions-header`).
+- 모듈 PCH: 규칙 `PrivatePchHeader`가 있으면 그 헤더를 미리 컴파일해(`Pch` action — `<out>/Pch/<모듈>/<변형>/`) 모듈의 C++ 번역 단위가 쓴다. 소스는 PCH 헤더를 include하지 않는다(빌드가 강제 include한다). 강제 include 순서는 [정의 헤더] → [PCH 헤더]다. C 소스, 생성 TU, 첫 `#include` 앞에서 `#define`하는 파일은 PCH를 쓰지 않는다. PCH를 쓸 번역 단위가 `PrivatePchMinTus`(기본 3)보다 적으면 만들지 않는다. 낡은 PCH는 action key(2단 key + 소비자가 PCH의 기록 해시를 입력으로 가짐)가 막는다 — clang의 입력 검증에 기대지 않는다(`-Xclang -fno-pch-timestamp`).
+- 작업 파일 분리(`--adaptive on`, 기본): 빌드마다 `git status --porcelain`으로 작업 파일을 구해, 그 소스(와 짝 헤더가 작업 파일인 소스)를 유니티 묶음에서 빼 단독 번역 단위로 돌린다. 편집 중인 파일을 고치면 그 파일만 다시 컴파일된다. git이 실패하면 빌드 오류이고 작업 사본이 아니면 분리하지 않는다. CI는 `--adaptive off`다.
+- `compile_commands.json`의 논리 명령은 PCH 바이너리 대신 정의 헤더와 PCH 헤더를 같은 순서로 강제 include하고, 도구 빌드 ID는 PCH·작업 파일 집합과 무관하다(정의 헤더와 PCH 헤더는 내용 해시로 입력에 든다).
+- `--plan-only on`(build 전용): 메타 생성과 계획까지만 하고 `compile_commands.json`·묶음 파일·정의 헤더를 쓴 뒤 끝낸다(아무것도 컴파일하지 않는다).
+
 ## 긴 명령줄(response file)
 
 Windows는 프로세스 명령줄을 CreateProcessW 한계(끝 NUL 포함 UTF-16 32,767자) 안에 넣어야 한다. 깊은 경로의 작업 사본에서는 object가 많은 link·archive(실측: 루트 127자에서 FoundationTests link 약 39,000자, PublicHeaderChecks archive 약 35,000자 — 루트 13자에서도 약 18,000자)와 include가 많은 compile이 이를 넘어 `파일 이름이나 확장명이 너무 깁니다`로 시작조차 못 했다. Executor는 펼친 인자로 만든 명령이 호스트 한계를 넘으면(`NativeCommandLine.ExceedsHostLimit` — Windows는 .NET이 실제로 만드는 명령줄 길이 + NUL이 32,767 초과, `.cmd`·`.bat` wrapper 도구는 cmd.exe 한계 8,191자에서 cmd.exe 몫 512자를 남긴 7,679 초과, POSIX는 인자 영역이 128 KiB 초과) 인자 전체를 action 임시 디렉터리의 `arguments+.rsp`에 쓰고 도구를 `@<파일>` 인자 하나로 실행한다. 한계 안의 명령은 지금처럼 그대로 넘긴다(macOS는 CI에서만 확인하므로 실제로 필요할 때만 경로가 바뀐다).
