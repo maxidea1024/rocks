@@ -15,6 +15,8 @@
 #include <string.h>
 
 using namespace rocks;
+namespace key_ring_tests_file {
+
 using namespace rocks::crypto;
 
 // KeyRing·공급자(Crypto/KeyRing.h)의 계약 시험이다(Docs/Design/Crypto.ko.md 10.3절).
@@ -517,3 +519,4 @@ TEST(CryptoKeyRingKeyBlobProvider) {
     CHECK(blobs.TryRemoveBlob(tamperedId).Error() == ErrorCode::NotFound);
     ring.SetProvider({});
 }
+} // namespace key_ring_tests_file

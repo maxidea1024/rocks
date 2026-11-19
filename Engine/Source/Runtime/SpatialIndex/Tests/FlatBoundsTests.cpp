@@ -9,6 +9,8 @@
 #include <TestSupport/NFailAllocator.h>
 
 using namespace rocks;
+namespace flat_bounds_tests_file {
+
 using namespace rocks::spatial;
 using namespace rocks::spatial::flattest;
 
@@ -1137,3 +1139,4 @@ TEST(FlatBounds_FB09_FlushToZeroKeepsConservative) {
     CHECK(total.misses == 0);
     CHECK(total.violations == 0);
 }
+} // namespace flat_bounds_tests_file

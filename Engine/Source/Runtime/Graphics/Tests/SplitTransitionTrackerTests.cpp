@@ -4,6 +4,8 @@
 
 // 분리 전이 짝 표 시험이다(Graphics/SplitTransitionTracker.h, RenderBase 8절 RG2).
 using namespace rocks;
+namespace split_transition_tracker_tests_file {
+
 using namespace rocks::graphics;
 
 TEST(SplitTransitionTracker_MatchesPairsAndCountsUnended) {
@@ -44,3 +46,4 @@ TEST(SplitTransitionTracker_MatchesPairsAndCountsUnended) {
     CHECK(tracker.OpenCount() == 0);
     CHECK(tracker.Close() == 0);
 }
+} // namespace split_transition_tracker_tests_file

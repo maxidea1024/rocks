@@ -4,6 +4,8 @@
 #include <string.h>
 
 using namespace rocks;
+namespace input_state_tests_file {
+
 using namespace rocks::input;
 
 namespace {
@@ -189,3 +191,4 @@ TEST(Input_DeadZoneRejectsOutOfRangeValues) {
     Frame(state, {InputEvent::Gamepad(0, pad)});
     CHECK(Near(state.GamepadAxisValue(0, GamepadAxis::LeftX), 0.05f));
 }
+} // namespace input_state_tests_file

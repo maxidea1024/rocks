@@ -6,6 +6,8 @@
 // 객체(staged는 이 트랜잭션의 객체도)이고 기대 타입의 파생인지 보고(null 허용), 실패한 쓰기는 값을
 // 바꾸지 않으며, 읽기는 대상이 죽은 뒤에도 저장된 handle을 돌려준다(weak는 GC 간선이 아니다).
 using namespace rocks;
+namespace weak_object_ref_field_tests_file {
+
 using namespace rocks::test::weak;
 
 namespace {
@@ -185,3 +187,4 @@ TEST(WeakObjectRefField_StagedWritesAcceptTransactionObjects) {
 
     CHECK(types.Shutdown());
 }
+} // namespace weak_object_ref_field_tests_file

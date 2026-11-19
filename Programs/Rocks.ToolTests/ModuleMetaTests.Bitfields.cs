@@ -30,7 +30,7 @@ internal static partial class ModuleMetaTests
 
             ProcessResult upper = await layout.RunUpperAsync(withLeaf: false);
             Verify.Equal(0, upper.ExitCode, "Upper module: " + upper.StdErr);
-            string value = Compact(File.ReadAllText(layout.Generated("Upper", "Public/Upper/Value.generated.h")));
+            string value = Compact(layout.GeneratedText("Upper", "Public/Upper/Value.generated.h"));
             Verify.That(value.Contains(Compact("detail::BitfieldFieldOps<::probe::Value, &GeneratedType<::probe::Parent>::Get_flag, " +
                 "&GeneratedType<::probe::Parent>::Set_flag, false>("), StringComparison.Ordinal), "inherited bitfield uses the base accessors");
             Verify.That(value.Contains("#include<Lower/Parent.generated.h>", StringComparison.Ordinal), "base generated header is included");

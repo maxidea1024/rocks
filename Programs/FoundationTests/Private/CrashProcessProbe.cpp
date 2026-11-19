@@ -275,7 +275,7 @@ int RunLogFatal() noexcept {
     Log::Fatal(LogCrashReportingProbe, "crash probe log fatal {Value}", 7);
 }
 
-bool ModeIs(const char* mode, const char* name) noexcept {
+bool CrashModeIs(const char* mode, const char* name) noexcept {
     return strcmp(mode, name) == 0;
 }
 
@@ -325,7 +325,8 @@ char missingHelper[platform::CrashReportingOptions::MaxHelperExecutableBytes + 1
 bool configureFailed = false;
 
 bool IsJobMode(const char* mode) noexcept {
-    return ModeIs(mode, "job-kill-on-close") || ModeIs(mode, "job-kill-on-close-breakaway");
+    return CrashModeIs(mode, "job-kill-on-close") ||
+           CrashModeIs(mode, "job-kill-on-close-breakaway");
 }
 
 } // namespace
@@ -333,31 +334,33 @@ bool IsJobMode(const char* mode) noexcept {
 void ConfigureCrashProbe(const char* mode, const char* directory,
                          launch::ApplicationSettings& settings) noexcept {
     // 수집기 미설치 Fatal과 폴더 없는 호출은 수집하지 않는다(본문이 결과를 낸다).
-    if (ModeIs(mode, "off-fatal") || directory == nullptr) {
+    if (CrashModeIs(mode, "off-fatal") || directory == nullptr) {
         settings.crashReporting = launch::CrashReportingMode::Off;
         return;
     }
 
     settings.crashDirectory = directory;
     settings.crashCallbackBudgetMilliseconds =
-        ModeIs(mode, "concurrent") ? ConcurrentCallbackBudgetMilliseconds : 0u;
+        CrashModeIs(mode, "concurrent") ? ConcurrentCallbackBudgetMilliseconds : 0u;
     settings.concurrentCrashGraceMilliseconds = ProbeConcurrentGraceMilliseconds;
     settings.inProcessDumpTimeoutMilliseconds = ProbeDumpTimeoutMilliseconds;
     settings.crashCaptureTimeoutMilliseconds = ProbeCaptureTimeoutMilliseconds;
-    settings.dumpDetail = ModeIs(mode, "detailed-dump") ? platform::CrashDumpDetail::Detailed
-                                                        : platform::CrashDumpDetail::Standard;
+    settings.dumpDetail = CrashModeIs(mode, "detailed-dump") ? platform::CrashDumpDetail::Detailed
+                                                             : platform::CrashDumpDetail::Standard;
     settings.captureHeapCorruption =
-        ModeIs(mode, "heap-corruption") || ModeIs(mode, "process-heap-corruption");
+        CrashModeIs(mode, "heap-corruption") || CrashModeIs(mode, "process-heap-corruption");
     settings.crashReporting = launch::CrashReportingMode::Full;
-    if (ModeIs(mode, "inprocess-access-violation") || ModeIs(mode, "files-blocked-inprocess") ||
-        ModeIs(mode, "dump-blocked-inprocess") || ModeIs(mode, "inprocess-platform-fatal")) {
+    if (CrashModeIs(mode, "inprocess-access-violation") ||
+        CrashModeIs(mode, "files-blocked-inprocess") ||
+        CrashModeIs(mode, "dump-blocked-inprocess") ||
+        CrashModeIs(mode, "inprocess-platform-fatal")) {
         settings.crashReporting = launch::CrashReportingMode::InProcess;
-    } else if (ModeIs(mode, "helper-start-failure")) {
+    } else if (CrashModeIs(mode, "helper-start-failure")) {
         FixedStringBuilder path{Span<char>(missingHelper)};
         configureFailed =
             !path.TryAppendFormat("{}/missing-crash-helper.exe", directory) || path.Truncated();
         settings.crashHelperPath = configureFailed ? nullptr : missingHelper;
-    } else if (ModeIs(mode, "full-dump-deadline")) {
+    } else if (CrashModeIs(mode, "full-dump-deadline")) {
         settings.dumpDetail = platform::CrashDumpDetail::Full;
         settings.helperDumpDeadlineMilliseconds = ProbeTinyDumpDeadlineMilliseconds;
     }
@@ -366,13 +369,13 @@ void ConfigureCrashProbe(const char* mode, const char* directory,
     // 프로세스가 끝나면 job이 닫혀 job 안 프로세스가 끝난다. breakaway를 막은 job은 도우미가 job
     // 안에 남고, 허락한 job은 도우미만 빠져나가고 VA clone은 job에 남을 수 있다(부모는 어느 쪽이든
     // 기본 덤프가 끝날 때까지 기다려야 한다).
-    if (IsJobMode(mode) && !EnterKillOnCloseJob(ModeIs(mode, "job-kill-on-close-breakaway"))) {
+    if (IsJobMode(mode) && !EnterKillOnCloseJob(CrashModeIs(mode, "job-kill-on-close-breakaway"))) {
         configureFailed = true;
     }
 }
 
 int RunCrashProbe(const char* mode, const char* directory) noexcept {
-    if (ModeIs(mode, "off-fatal")) {
+    if (CrashModeIs(mode, "off-fatal")) {
         // 수집기 미설치: 비상 출력 뒤 바로 끝난다(콜백·파일 없음).
         AnnounceThread("main");
         platform::Fatal("crash probe: fatal without crash reporting");
@@ -391,13 +394,14 @@ int RunCrashProbe(const char* mode, const char* directory) noexcept {
     }
 
     AnnounceThread("main");
-    if (ModeIs(mode, "main-access-violation") || ModeIs(mode, "detailed-dump") ||
-        ModeIs(mode, "inprocess-access-violation") || ModeIs(mode, "helper-start-failure") ||
-        ModeIs(mode, "helper-capture-timeout") || ModeIs(mode, "helper-exit-during-capture") ||
-        ModeIs(mode, "helper-gate-parent-first") || IsJobMode(mode)) {
+    if (CrashModeIs(mode, "main-access-violation") || CrashModeIs(mode, "detailed-dump") ||
+        CrashModeIs(mode, "inprocess-access-violation") ||
+        CrashModeIs(mode, "helper-start-failure") || CrashModeIs(mode, "helper-capture-timeout") ||
+        CrashModeIs(mode, "helper-exit-during-capture") ||
+        CrashModeIs(mode, "helper-gate-parent-first") || IsJobMode(mode)) {
         // 도우미 시험은 C#이 고장 난 도우미를 환경 변수로 고른다.
         FaultAccess();
-    } else if (ModeIs(mode, "job-after-helper")) {
+    } else if (CrashModeIs(mode, "job-after-helper")) {
         // 도우미를 띄운 뒤 부모만 breakaway 허용 KILL_ON_JOB_CLOSE job에 들어간다(harness가 띄운 뒤
         // job에 넣는 경우). 도우미는 job 밖이고 VA clone은 job 안이다. 부모는 크래시 때 job 여부를
         // 다시 읽어 기본 덤프까지 기다려야 한다.
@@ -406,84 +410,85 @@ int RunCrashProbe(const char* mode, const char* directory) noexcept {
         }
 
         FaultAccess();
-    } else if (ModeIs(mode, "helper-exited-early")) {
+    } else if (CrashModeIs(mode, "helper-exited-early")) {
         // 도우미가 먼저 끝난 것을 확인한 뒤 실패한다(순서는 프로세스 종료 대기로 정한다).
         if (!WaitForProcessExit(platform::CrashHelperProcessId(), HelperExitWaitMilliseconds)) {
             return SetupFailed;
         }
 
         FaultAccess();
-    } else if (ModeIs(mode, "full-dump-deadline")) {
+    } else if (CrashModeIs(mode, "full-dump-deadline")) {
         return RunLargeMemoryFault();
-    } else if (ModeIs(mode, "files-blocked") || ModeIs(mode, "files-blocked-inprocess") ||
-               ModeIs(mode, "dump-blocked") || ModeIs(mode, "dump-blocked-inprocess")) {
-        if (!BlockCrashFiles(ModeIs(mode, "dump-blocked") ||
-                             ModeIs(mode, "dump-blocked-inprocess"))) {
+    } else if (CrashModeIs(mode, "files-blocked") || CrashModeIs(mode, "files-blocked-inprocess") ||
+               CrashModeIs(mode, "dump-blocked") || CrashModeIs(mode, "dump-blocked-inprocess")) {
+        if (!BlockCrashFiles(CrashModeIs(mode, "dump-blocked") ||
+                             CrashModeIs(mode, "dump-blocked-inprocess"))) {
             return SetupFailed;
         }
 
         FaultAccess();
-    } else if (ModeIs(mode, "process-heap-corruption")) {
+    } else if (CrashModeIs(mode, "process-heap-corruption")) {
         return CorruptProcessHeap() ? DidNotCrash : UnknownMode;
-    } else if (ModeIs(mode, "fastfail")) {
+    } else if (CrashModeIs(mode, "fastfail")) {
         return FailFast() ? DidNotCrash : UnknownMode;
-    } else if (ModeIs(mode, "control-c-exit")) {
+    } else if (CrashModeIs(mode, "control-c-exit")) {
         return ExitWithControlCStatus() ? DidNotCrash : UnknownMode;
-    } else if (ModeIs(mode, "exit-7")) {
+    } else if (CrashModeIs(mode, "exit-7")) {
         // 정상 종료(정리 없이 바로)다. 도우미는 기록하지 않는다.
         _Exit(ProbeExitCode);
-    } else if (ModeIs(mode, "normal-exit")) {
+    } else if (CrashModeIs(mode, "normal-exit")) {
         // 정상 종료: Launch가 수집기를 떼며 도우미에 Shutdown을 알리고 끝낸다(도우미가 남지
         // 않는다).
         return 0;
-    } else if (ModeIs(mode, "wait-for-kill")) {
+    } else if (CrashModeIs(mode, "wait-for-kill")) {
         // 시험이 도우미 pid 줄을 본 뒤 이 프로세스를 kill한다.
         return AwaitCrash();
-    } else if (ModeIs(mode, "main-stack-overflow")) {
+    } else if (CrashModeIs(mode, "main-stack-overflow")) {
         (void)OverflowStack(0);
-    } else if (ModeIs(mode, "thread-access-violation")) {
+    } else if (CrashModeIs(mode, "thread-access-violation")) {
         return RunInPlatformThread(&ThreadFault);
-    } else if (ModeIs(mode, "thread-stack-overflow")) {
+    } else if (CrashModeIs(mode, "thread-stack-overflow")) {
         return RunInPlatformThread(&ThreadOverflow);
-    } else if (ModeIs(mode, "unmanaged-thread-access-violation")) {
+    } else if (CrashModeIs(mode, "unmanaged-thread-access-violation")) {
         return RunInUnmanagedThread(&ThreadFault);
-    } else if (ModeIs(mode, "platform-fatal") || ModeIs(mode, "inprocess-platform-fatal")) {
+    } else if (CrashModeIs(mode, "platform-fatal") ||
+               CrashModeIs(mode, "inprocess-platform-fatal")) {
         FatalFromProbe();
-    } else if (ModeIs(mode, "assert")) {
+    } else if (CrashModeIs(mode, "assert")) {
         ROCKS_ASSERT(nullTarget != nullptr);
-    } else if (ModeIs(mode, "log-fatal")) {
+    } else if (CrashModeIs(mode, "log-fatal")) {
         return RunLogFatal();
-    } else if (ModeIs(mode, "writer-fault")) {
+    } else if (CrashModeIs(mode, "writer-fault")) {
         return RunWriterFault();
-    } else if (ModeIs(mode, "concurrent")) {
+    } else if (CrashModeIs(mode, "concurrent")) {
         return RunConcurrent();
-    } else if (ModeIs(mode, "callback-fault")) {
+    } else if (CrashModeIs(mode, "callback-fault")) {
         probeState.action = CallbackAction::Fault;
         FaultAccess();
-    } else if (ModeIs(mode, "callback-fatal")) {
+    } else if (CrashModeIs(mode, "callback-fatal")) {
         probeState.action = CallbackAction::Fatal;
         FaultAccess();
-    } else if (ModeIs(mode, "abort-main")) {
+    } else if (CrashModeIs(mode, "abort-main")) {
         AbortFromProbe();
-    } else if (ModeIs(mode, "abort-unmanaged-thread")) {
+    } else if (CrashModeIs(mode, "abort-unmanaged-thread")) {
         return RunInUnmanagedThread(&ThreadAbort);
-    } else if (ModeIs(mode, "callback-abort")) {
+    } else if (CrashModeIs(mode, "callback-abort")) {
         // 처리 스레드가 콜백 안에서 abort해도 SIGABRT 처리기는 반환하지 않는다(종료 코드 3이
         // 아니다). 남은 콜백만 포기하고 파일 단계를 이어 간다.
         probeState.action = CallbackAction::Abort;
         AbortFromProbe();
-    } else if (ModeIs(mode, "invalid-parameter")) {
+    } else if (CrashModeIs(mode, "invalid-parameter")) {
         return PassInvalidParameter() ? DidNotCrash : UnknownMode;
-    } else if (ModeIs(mode, "user-exception")) {
+    } else if (CrashModeIs(mode, "user-exception")) {
         return RaiseUserException() ? DidNotCrash : UnknownMode;
-    } else if (ModeIs(mode, "purecall")) {
+    } else if (CrashModeIs(mode, "purecall")) {
         return CallPureVirtual() ? DidNotCrash : UnknownMode;
-    } else if (ModeIs(mode, "asan-uaf")) {
+    } else if (CrashModeIs(mode, "asan-uaf")) {
         // Asan 구성: ASan이 use-after-free를 보고한 뒤 death callback이 공통 보고(reason
         // Sanitizer)를 한다. 다른 구성은 읽기가 그대로 성공한다(DidNotCrash).
         (void)RunAsanNegativeControl();
         return DidNotCrash;
-    } else if (ModeIs(mode, "heap-corruption")) {
+    } else if (CrashModeIs(mode, "heap-corruption")) {
         return CorruptHeap() ? DidNotCrash : UnknownMode;
     } else {
         return UnknownMode;

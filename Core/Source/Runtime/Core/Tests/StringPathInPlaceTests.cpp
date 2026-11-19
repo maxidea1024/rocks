@@ -5,6 +5,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace string_path_in_place_tests_file {
 
 TEST(StringPathNoOpPreservesAddressCapacityAndAvoidsAllocation) {
     SystemAllocator system;
@@ -117,3 +118,4 @@ TEST(StringPathGrowthFailurePreservesSelfAliasedInput) {
     }
     CHECK(system.Stats().liveAllocations == 0);
 }
+} // namespace string_path_in_place_tests_file

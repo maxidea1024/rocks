@@ -8,7 +8,7 @@ namespace rocks {
 
 namespace {
 
-TangentCurveKey MakeKey(float time, float value) noexcept {
+TangentCurveKey TangentCurveMakeKey(float time, float value) noexcept {
     TangentCurveKey key;
     key.time = time;
     key.value = value;
@@ -104,12 +104,13 @@ void TangentCurve::AutoSetTangents(float tension) noexcept {
 }
 
 Result<usize> TangentCurve::TryAddKey(float time, float value, bool unwindRotation) noexcept {
-    return curves_detail::AddKey(keys_, MakeKey(time, value), unwindRotation);
+    return curves_detail::AddKey(keys_, TangentCurveMakeKey(time, value), unwindRotation);
 }
 
 Result<usize> TangentCurve::TryUpdateOrAddKey(float time, float value, bool unwindRotation,
                                               float tolerance) noexcept {
-    return curves_detail::UpdateOrAddKey(keys_, MakeKey(time, value), unwindRotation, tolerance);
+    return curves_detail::UpdateOrAddKey(keys_, TangentCurveMakeKey(time, value), unwindRotation,
+                                         tolerance);
 }
 
 Result<void> TangentCurve::TryRemoveKey(usize index) noexcept {
@@ -205,7 +206,7 @@ Result<void> TangentCurve::TryShiftKeyTimes(Span<const usize> indices, float del
 Result<void> TangentCurve::TryBake(float interval, float first, float last) noexcept {
     return curves_detail::Bake(
         keys_, interval, first, last, [this](float time) noexcept { return Evaluate(time); },
-        MakeKey);
+        TangentCurveMakeKey);
 }
 
 Result<void> TangentCurve::TryBake(float interval) noexcept {

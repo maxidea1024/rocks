@@ -116,6 +116,7 @@ void container_fixture::Holder::Trace(TraceVisitor& visitor) const noexcept {
     items.Trace(visitor);
     slots.Trace(visitor);
 }
+namespace registry_container_tests_file {
 
 namespace {
 
@@ -1998,3 +1999,4 @@ TEST(StructRefArray_ElementReferencesFollowIncrementalGcRules) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace registry_container_tests_file

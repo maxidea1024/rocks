@@ -6,6 +6,7 @@
 #include <Platform/PlatformMath.h>
 
 using namespace rocks;
+namespace intersection_tests_file {
 
 namespace {
 
@@ -2201,3 +2202,4 @@ TEST(IntersectionSphereContainmentOfBox) {
 TEST(IntersectionContainmentIsMonotoneUnderBoxGrowth) {
     CheckContainmentMonotonicity();
 }
+} // namespace intersection_tests_file

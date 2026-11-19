@@ -9,6 +9,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace ordered_map_key_and_cost_tests_file {
 
 namespace {
 
@@ -414,3 +415,4 @@ TEST(OrderedMap_FindOrAddWithLooksUpOnce) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace ordered_map_key_and_cost_tests_file

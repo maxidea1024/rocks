@@ -11,6 +11,7 @@
 #include <new>
 
 using namespace rocks;
+namespace object_lifecycle_api_tests_file {
 
 namespace {
 
@@ -121,9 +122,12 @@ bool FinishCollection(ObjectRegistry& registry, const ObjectAccessContext& acces
 
 } // namespace
 
+} // namespace object_lifecycle_api_tests_file
+
 namespace rocks::test {
 
 void RegisterObjectScopeNegativeControl(int (*function)(bool) noexcept) noexcept;
+namespace object_lifecycle_api_tests_file {
 
 // 이 함수는 오직 외부 watchdog이 감시하는 별도 child에서 호출한다. 정상 실행이면 Fatal이다.
 static void DestroyScopeOnForeignThread(void* raw) noexcept {
@@ -159,7 +163,11 @@ struct ScopeNegativeRegistration {
 ScopeNegativeRegistration scopeNegativeRegistration;
 } // namespace
 
+} // namespace object_lifecycle_api_tests_file
+
 } // namespace rocks::test
+
+namespace object_lifecycle_api_tests_file {
 
 TEST(ObjectLifecycleAccessDestroyLeasesAndGeneration) {
     SystemAllocator allocator;
@@ -583,3 +591,4 @@ TEST(ObjectLifecycleParallelTraceRejectsForeignThreadBeforeReentry) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace object_lifecycle_api_tests_file

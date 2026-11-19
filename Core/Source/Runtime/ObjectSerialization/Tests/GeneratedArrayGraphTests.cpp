@@ -14,6 +14,8 @@
 // 원소로만 닿는 객체가 수집에서 산다), Required 참조 배열의 null 원소, MaxElements 지정과 경계,
 // 원소 한도의 생성자 전 실패.
 using namespace rocks;
+namespace generated_array_graph_tests_file {
+
 using reflection_fixture::ArrayBundle;
 using reflection_fixture::ArrayChild;
 using reflection_fixture::ArrayOwner;
@@ -621,3 +623,4 @@ TEST(GeneratedArrayGraph_ElementLimitFailsBeforeConstructors) {
 
     CHECK(types.Shutdown());
 }
+} // namespace generated_array_graph_tests_file

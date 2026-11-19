@@ -7,6 +7,8 @@
 // 원자성(배열 변경 Busy· owner Discard·할당 실패 주입), staged 대상의 원소 지우기와 같은 트랜잭션의
 // 공개 전 대상.
 using namespace rocks;
+namespace text_assign_element_tests_file {
+
 using namespace rocks::reflection_text;
 using namespace rocks::test::assign;
 using reflection_fixture::AssignHolder;
@@ -279,3 +281,4 @@ TEST(TextAssign_StagedElementRemovalAndPendingTargets) {
     CHECK(fixture.diagnostics.Get(0).code == TextDiagnosticCode::InvalidValue);
     transaction.Rollback();
 }
+} // namespace text_assign_element_tests_file

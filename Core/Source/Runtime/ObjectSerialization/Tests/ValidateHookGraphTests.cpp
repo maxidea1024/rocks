@@ -11,6 +11,8 @@
 // 내용· StructRefArray 원소 멤버·base hook)에서 거부하면 복원 전체가 InvalidArgument이고 대상
 // Registry에 아무것도 게시되지 않는다. 중첩은 안쪽 hook이 먼저다.
 using namespace rocks;
+namespace validate_hook_graph_tests_file {
+
 using reflection_fixture::CurrentValidateLog;
 using reflection_fixture::ValidDerived;
 using reflection_fixture::ValidHolder;
@@ -240,3 +242,4 @@ TEST(ValidateHookGraph_RejectedLoadPublishesNothing) {
         REQUIRE(target.Shutdown(target.OwnerAccess()));
     }
 }
+} // namespace validate_hook_graph_tests_file

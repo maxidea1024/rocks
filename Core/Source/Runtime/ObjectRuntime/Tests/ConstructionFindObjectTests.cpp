@@ -11,6 +11,7 @@
 // ObjectRegistry::FindObject와 같고 트랜잭션 상태 규칙을 먼저 본다. 같은 기준의
 // ConstructionContext::AcquireType(Oe — import 대상의 타입 확인)과 한 단계 조회 FindChild도 본다.
 using namespace rocks;
+namespace construction_find_object_tests_file {
 
 namespace {
 
@@ -400,3 +401,4 @@ TEST(ConstructionFindChild_FindsOneComponentUnderAnyVisibleOuter) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace construction_find_object_tests_file

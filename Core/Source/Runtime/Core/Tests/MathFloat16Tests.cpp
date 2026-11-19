@@ -5,6 +5,8 @@
 #include <Platform/PlatformMath.h>
 
 namespace rocks::test {
+namespace math_float16_tests_file {
+
 namespace {
 
 using platform::GenericPlatformMath;
@@ -125,5 +127,6 @@ TEST(Float16_NaNPayloadAndQuietBit) {
     CHECK(GenericPlatformMath::HalfToFloat(0x03ffu) == 6.0975551605224609375e-5f);
     CHECK(GenericPlatformMath::HalfToFloat(0x3555u) == 0.333251953125f);
 }
+} // namespace math_float16_tests_file
 
 } // namespace rocks::test

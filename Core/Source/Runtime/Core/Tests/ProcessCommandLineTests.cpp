@@ -8,6 +8,7 @@
 #include <string.h>
 
 using namespace rocks;
+namespace process_command_line_tests_file {
 
 // ProcessCommandLine의 채우기 규칙(UTF-16·UTF-8 변환, 상한, 플랫폼 진입점 형태)을 지역 저장소로
 // 검사한다. 실제 진입점(wmain·wWinMain·main)에서 한글·이모지·따옴표·빈 인자가 오는지는 시험 실행
@@ -156,3 +157,5 @@ TEST(ProcessCommandLine_CapturesOnce) {
     CHECK(ProcessCommandLine::Get().Arguments().Size() == before.Size());
     CHECK(ProcessCommandLine::Get().ExecutablePath().Data() == executable.Data());
 }
+
+} // namespace process_command_line_tests_file

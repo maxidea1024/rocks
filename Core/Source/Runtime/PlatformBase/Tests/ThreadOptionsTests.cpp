@@ -4,6 +4,8 @@
 #include <Platform/Thread.h>
 
 using namespace rocks;
+namespace thread_options_tests_file {
+
 using namespace rocks::platform;
 
 namespace {
@@ -145,3 +147,4 @@ TEST(Thread_OptionsStackAndPriorityApply) {
         CHECK(ran);
     }
 }
+} // namespace thread_options_tests_file

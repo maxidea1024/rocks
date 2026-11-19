@@ -7,6 +7,8 @@
 // cutoff, 순회 중 Busy, staged AssignMapReferences(규칙·Commit 검증·Marking shade). 재진입·실패
 // 주입·관찰자는 ObjectRefMapReentryTests.cpp다.
 using namespace rocks;
+namespace object_ref_map_tests_file {
+
 using namespace refmap_fixture;
 
 namespace {
@@ -498,3 +500,4 @@ TEST(ConstructionContext_AssignMapReferencesShadesAliveTargetsDuringMarking) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace object_ref_map_tests_file

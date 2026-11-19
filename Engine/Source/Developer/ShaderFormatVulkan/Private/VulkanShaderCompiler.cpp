@@ -9,7 +9,7 @@ namespace rocks::shader {
 
 namespace {
 
-void Append(String& text, StringView part) noexcept {
+void VulkanShaderCompilerAppend(String& text, StringView part) noexcept {
     auto appended = text.TryAppend(part);
     (void)appended;
 }
@@ -156,7 +156,7 @@ private:
 constexpr uint32 MaxReflectedItems = 64;
 
 Result<void> ReflectFailure(String& diagnostics, StringView message) noexcept {
-    Append(diagnostics, message);
+    VulkanShaderCompilerAppend(diagnostics, message);
     return Result<void>::Failure(ErrorCode::DependencyFailed);
 }
 
@@ -308,9 +308,10 @@ Result<void> Validate(const SpirvToolsFunctions& tools, Span<const uint32> code,
     spv_diagnostic diagnostic = nullptr;
     const spv_result_t result = validate(context, options, &binary, &diagnostic);
     if (result != SPV_SUCCESS) {
-        Append(diagnostics, StringView("spirv-val rejected the rewritten SPIR-V: "));
+        VulkanShaderCompilerAppend(diagnostics,
+                                   StringView("spirv-val rejected the rewritten SPIR-V: "));
         if (diagnostic != nullptr && diagnostic->error != nullptr) {
-            Append(diagnostics, StringView(diagnostic->error));
+            VulkanShaderCompilerAppend(diagnostics, StringView(diagnostic->error));
         }
     }
 
@@ -368,9 +369,9 @@ Result<void> OpenTool(const char* name, const char* root, usize rootBytes,
         return Result<void>::Success();
     }
 
-    Append(diagnostics, StringView(name));
-    Append(diagnostics, StringView(": "));
-    Append(diagnostics, StringView(ShaderToolLoadMessage(status.code)));
+    VulkanShaderCompilerAppend(diagnostics, StringView(name));
+    VulkanShaderCompilerAppend(diagnostics, StringView(": "));
+    VulkanShaderCompilerAppend(diagnostics, StringView(ShaderToolLoadMessage(status.code)));
     return Result<void>::Failure(LoadError(status.code));
 }
 
@@ -387,7 +388,8 @@ Result<UniquePtr<VulkanShaderCompiler>> VulkanShaderCompiler::Create(Allocator& 
     char root[MaxShaderToolPathBytes];
     usize rootBytes = 0;
     if (!GetShaderToolStoreRoot(root, sizeof(root), rootBytes)) {
-        Append(diagnostics, StringView("shader tool store is not available on this host"));
+        VulkanShaderCompilerAppend(diagnostics,
+                                   StringView("shader tool store is not available on this host"));
         return Created::Failure(ErrorCode::Unsupported);
     }
 

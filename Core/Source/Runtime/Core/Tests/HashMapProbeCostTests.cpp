@@ -6,6 +6,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace hash_map_probe_cost_tests_file {
 
 namespace {
 
@@ -301,3 +302,4 @@ TEST(CoreHashMapFindOrAddWithLooksUpOnce) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace hash_map_probe_cost_tests_file

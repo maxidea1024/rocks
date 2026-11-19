@@ -10,6 +10,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace hash_collections_tests_file {
 
 namespace {
 
@@ -630,6 +631,7 @@ TEST(CoreHashCollectionsTraversalRejectsStructuralChanges) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace hash_collections_tests_file
 
 namespace rocks::test {
 
@@ -670,6 +672,8 @@ int RunHashTraversalNegativeControl(bool useSet, uint32 operation) noexcept {
 }
 
 } // namespace rocks::test
+
+namespace hash_collections_tests_file {
 
 namespace {
 
@@ -965,3 +969,4 @@ TEST(CoreHashMapAllowsSameCopyableKeyAndValueLvalue) {
     CHECK(allocator.Stats().liveAllocations == 0);
     CHECK(allocator.Stats().liveBytes == 0);
 }
+} // namespace hash_collections_tests_file

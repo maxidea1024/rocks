@@ -10,6 +10,8 @@
 // 오류 분류·재호출, Required 참조 누락(쿠킹 손상·에디터 계속), bulk 값 규칙(빈 ref·쓰이지 않는
 // entry·EditorOnly 위치만의 공유·원본 크기 불일치), 커스텀 버전 여럿.
 using namespace rocks;
+namespace package_gap_tests_file {
+
 using namespace rocks::asset_test;
 
 namespace {
@@ -625,3 +627,4 @@ TEST(AssetPackage_BulkWriterRules) {
     CHECK(failure.code == AssetDiagnosticCode::CorruptPackage &&
           failure.section == static_cast<uint32>(PackageSectionKind::Bulk) && failure.detail == 4);
 }
+} // namespace package_gap_tests_file

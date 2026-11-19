@@ -2,6 +2,8 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace math_vertex_packing_tests_file {
+
 using namespace rocks::math;
 
 TEST(VertexPacking_NormalizedBoundariesClampAndNaN) {
@@ -97,3 +99,4 @@ TEST(VertexPacking_HalfBoundaries) {
 
     CHECK(mismatches == 0);
 }
+} // namespace math_vertex_packing_tests_file

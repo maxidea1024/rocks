@@ -1,3 +1,4 @@
+using Rocks.Build;
 using Rocks.Build.Rules;
 
 // Long-running GC smoke simulator (tooling only, Docs/Design/GarbageCollectionScale.ko.md section 9). A deterministic
@@ -9,6 +10,9 @@ public sealed class GcSoak : CoreModuleRules
     protected override string Group => "Developer";
 
     protected override string ModuleName => "GcSoak";
+
+    // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
+    protected override UnityMode Unity => UnityMode.On;
 
     protected override string[] RequiredModules => ["ObjectRuntime"];
 }

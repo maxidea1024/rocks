@@ -18,6 +18,8 @@
 // 만들어 golden report와 byte 단위로 비교하고, 실제 세션 capture로 결정성과 손상 입력(OB03)을
 // 확인한다.
 using namespace rocks;
+namespace trace_analysis_tests_file {
+
 using namespace rocks::tracetest;
 
 namespace {
@@ -775,10 +777,13 @@ TEST(TraceAnalysisReadsLogRecords) {
           View(report).Contains("\"Warning\":1", StringComparison::CaseSensitive));
     CHECK(View(report).Contains("warned 7", StringComparison::CaseSensitive));
 }
+} // namespace trace_analysis_tests_file
 
 namespace rocks::test {
 uint64 OperatorNewCalls() noexcept;
 } // namespace rocks::test
+
+namespace trace_analysis_tests_file {
 
 namespace {
 
@@ -1066,3 +1071,4 @@ TEST(TraceContextRecordsMatchPublicCorrelationScope) {
 
     CHECK(found);
 }
+} // namespace trace_analysis_tests_file

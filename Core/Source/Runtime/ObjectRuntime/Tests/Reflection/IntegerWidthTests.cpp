@@ -10,6 +10,7 @@
 // 경계값(uint64는 int64 최댓값까지, Flags uint64는 비트 62까지). 그래프 왕복·범위 밖 I64 거부·경로
 // 쓰기는 ObjectSerialization의 IntegerWidthGraphTests가 생성 fixture로 본다.
 using namespace rocks;
+namespace integer_width_tests_file {
 
 namespace {
 
@@ -261,3 +262,4 @@ TEST(IntegerWidth_RegisterEnumAcceptsEightUnderlyingKinds) {
     CHECK(!IsDeclaredEnumValue(bits, 256 + 1));
     CHECK(types.Shutdown());
 }
+} // namespace integer_width_tests_file

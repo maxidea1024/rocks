@@ -15,6 +15,8 @@
 // 하나(빈 문자열 = 빈 배열)이고, 원소는 지금처럼 경로 `payload[i]=v`다. 잘못된 Base64는
 // InvalidValue, 필드 MaxElements를 넘는 길이는 OutOfRange, JSON 숫자 배열은 InvalidValue다.
 using namespace rocks;
+namespace text_bytes_tests_file {
+
 using namespace rocks::reflection_text;
 using reflection_fixture::BytesHolder;
 
@@ -322,3 +324,4 @@ TEST(TextBytes_LengthIsCheckedBeforeDecoding) {
     CHECK(registration.Unregister());
     CHECK(types.Shutdown());
 }
+} // namespace text_bytes_tests_file

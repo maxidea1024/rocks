@@ -14,6 +14,7 @@
 // 기록·2단계 토큰 소비 — 2단계는 내용을 다시 보지 않는다)와 관찰 자리 방어. 그래프 왕복·2a
 // intern·경로 쓰기는 ObjectSerialization의 NameGraphTests가 생성 fixture로 본다.
 using namespace rocks;
+namespace name_field_tests_file {
 
 namespace {
 
@@ -517,3 +518,4 @@ TEST(NameField_CodecRejectsNameInObservationPositions) {
 
     CHECK(context.recorded.IsEmpty() && observed.IsEmpty());
 }
+} // namespace name_field_tests_file

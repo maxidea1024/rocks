@@ -6,6 +6,8 @@
 #include <Platform/Atomics.h>
 
 using namespace rocks;
+namespace async_file_tests_file {
+
 using namespace rocks::platform;
 
 // 실제 OS 파일로 비동기 읽기 계약을 검사한다. 지원하는 모든 backend(Windows: Native와 WorkerPool,
@@ -672,3 +674,4 @@ TEST(AsyncFile_WriteDestructorsWaitForInFlightWrites) {
         CHECK(WaitForCallbacks(log, 2));
     });
 }
+} // namespace async_file_tests_file

@@ -139,6 +139,8 @@ bool InsideUeBitRange(const Segment& segment) noexcept {
 
 } // namespace key_curve_golden
 
+namespace math_key_curve_golden_tests_file {
+
 using namespace key_curve_golden;
 
 TEST(KeyCurveGolden_SegmentMatchesUeFormulasBitExactly) {
@@ -604,5 +606,6 @@ TEST(KeyCurveGolden_AutoTangentMatchesUe) {
 
     CHECK(mismatches == 0);
 }
+} // namespace math_key_curve_golden_tests_file
 
 } // namespace rocks::test

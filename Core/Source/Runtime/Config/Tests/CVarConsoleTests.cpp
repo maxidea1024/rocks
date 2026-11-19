@@ -11,8 +11,11 @@
 // 왕복(세션 층으로 다시 읽으면 같은 유효값), 다른 스레드의 콘솔 입력(snapshot 이름 색인 — 쓰기
 // 큐·Sync 5단계).
 using namespace rocks;
+namespace c_var_console_tests_file {
+
 using namespace rocks::config;
 using namespace rocks::test::config;
+} // namespace c_var_console_tests_file
 
 namespace cvar_console_test {
 
@@ -76,6 +79,8 @@ constinit ConsoleCommand ConsoleSpawn =
     cvar::Command<&Spawn>("cheat.console.spawn").Help("Spawn things").Cheat();
 
 } // namespace cvar_console_test
+
+namespace c_var_console_tests_file {
 
 namespace {
 
@@ -686,3 +691,4 @@ TEST(CVar_ConsolePortPermissionsAndShutdown) {
     CHECK(empty.Execute("x.y", SharedPtr<ConsoleSink>()).Error() == ErrorCode::ShuttingDown);
     port = ConsoleInputPort();
 }
+} // namespace c_var_console_tests_file

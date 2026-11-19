@@ -4,6 +4,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace bit_array_growth_tests_file {
 
 TEST(BitArrayRepeatedSmallAddsUseGeometricGrowth) {
     SystemAllocator allocator;
@@ -89,3 +90,4 @@ TEST(BitArrayMaximumRepresentableCapacityFailsBeforeArithmeticOverflow) {
     }
     CHECK(system.Stats().liveAllocations == 0);
 }
+} // namespace bit_array_growth_tests_file

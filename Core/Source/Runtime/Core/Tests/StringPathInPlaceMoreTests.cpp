@@ -4,6 +4,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace string_path_in_place_more_tests_file {
 
 TEST(StringPathInPlaceUtf8AliasesStayValid) {
     SystemAllocator system;
@@ -124,3 +125,4 @@ TEST(StringPathInPlaceInvalidSuffixPreservesAllState) {
     }
     CHECK(system.Stats().liveAllocations == 0);
 }
+} // namespace string_path_in_place_more_tests_file

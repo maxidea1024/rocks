@@ -22,6 +22,8 @@
 // (D21 — 칸 정합·키 시간)이 graph decode·JSON import·경로 쓰기에서 어기는 값을 거부하고 값이
 // 그대로인지.
 using namespace rocks;
+namespace packed_tangent_curve_reflection_tests_file {
+
 using namespace rocks::reflection_text;
 using curves_fixture::PackedCurveHolder;
 
@@ -395,3 +397,4 @@ TEST(PackedCurveReflection_PathWritesValidate) {
         CHECK(PackedTangentCurve::Validate(value.packed));
     });
 }
+} // namespace packed_tangent_curve_reflection_tests_file

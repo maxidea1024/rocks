@@ -10,6 +10,8 @@
 #include <string.h>
 
 using namespace rocks;
+namespace crash_reporting_tests_file {
+
 using namespace rocks::platform;
 
 // 크래시 수집기의 프로세스 안 계약(등록·해제·보호 호출 통과·capability·설치 인자 검사·연관 파일
@@ -176,24 +178,27 @@ TEST(CrashReporting_AnnotationSlotsRoundTrip) {
     REQUIRE(SetCrashAnnotation(CrashAnnotation::Custom1, path, sizeof(path) - 1));
     char text[MaxCrashAnnotationBytes];
     usize bytes = 0;
-    REQUIRE(detail::ReadCrashAnnotation(CrashAnnotation::Custom1, text, sizeof(text), bytes));
+    REQUIRE(
+        platform::detail::ReadCrashAnnotation(CrashAnnotation::Custom1, text, sizeof(text), bytes));
     CHECK(bytes == sizeof(path) - 1);
     CHECK(memcmp(text, path, bytes) == 0);
     char large[MaxCrashAnnotationBytes + 1] = {};
     CHECK(!SetCrashAnnotation(CrashAnnotation::Custom1, large, sizeof(large)));
     CHECK(!SetCrashAnnotation(CrashAnnotation::Count, path, 1));
     CHECK(!SetCrashAnnotation(CrashAnnotation::Custom1, nullptr, 1));
-    REQUIRE(detail::ReadCrashAnnotation(CrashAnnotation::Custom1, text, sizeof(text), bytes));
+    REQUIRE(
+        platform::detail::ReadCrashAnnotation(CrashAnnotation::Custom1, text, sizeof(text), bytes));
     CHECK(bytes == sizeof(path) - 1);
     REQUIRE(SetCrashAnnotation(CrashAnnotation::Custom1, nullptr, 0));
-    REQUIRE(detail::ReadCrashAnnotation(CrashAnnotation::Custom1, text, sizeof(text), bytes));
+    REQUIRE(
+        platform::detail::ReadCrashAnnotation(CrashAnnotation::Custom1, text, sizeof(text), bytes));
     CHECK(bytes == 0);
 }
 
 // JSON 쓰기는 따옴표·역슬래시·제어 문자를 escape하고 잘못된 UTF-8을 U+FFFD로 바꾼다.
 TEST(CrashReporting_JsonWriterEscapesText) {
     char buffer[256];
-    detail::CrashJsonWriter json(buffer, sizeof(buffer), 16);
+    platform::detail::CrashJsonWriter json(buffer, sizeof(buffer), 16);
     json.BeginObject();
     json.Key("text");
     json.String("a\"b\\c\n\x01\xC3\xA9\xFF");
@@ -218,7 +223,7 @@ TEST(CrashReporting_JsonWriterEscapesText) {
 // 문자열이 남은 자리를 넘으면 글자 경계에서 잘라 닫고 Truncated가 참이다. 결과는 닫힌 JSON이다.
 TEST(CrashReporting_JsonWriterTruncatesStringsButStaysClosed) {
     char buffer[32];
-    detail::CrashJsonWriter json(buffer, sizeof(buffer), 8);
+    platform::detail::CrashJsonWriter json(buffer, sizeof(buffer), 8);
     json.BeginObject();
     json.Key("t");
     // "가"(3 byte) 여덟 개다.
@@ -241,13 +246,13 @@ TEST(CrashReporting_FormatsUtcTicks) {
     constexpr int64 TicksPerSecond = 10000000;
     const int64 ticks = UnixEpochTicks + int64{1794993342} * TicksPerSecond;
     char text[32];
-    CHECK(detail::FormatUtcTicks(ticks, false, text, sizeof(text)) == 20);
+    CHECK(platform::detail::FormatUtcTicks(ticks, false, text, sizeof(text)) == 20);
     CHECK(strcmp(text, "2026-11-18T09:15:42Z") == 0);
-    CHECK(detail::FormatUtcTicks(ticks, true, text, sizeof(text)) == 16);
+    CHECK(platform::detail::FormatUtcTicks(ticks, true, text, sizeof(text)) == 16);
     CHECK(strcmp(text, "20261118T091542Z") == 0);
     // 윤년 2월 29일.
     const int64 leap = UnixEpochTicks + int64{1709164800} * TicksPerSecond;
-    (void)detail::FormatUtcTicks(leap, false, text, sizeof(text));
+    (void)platform::detail::FormatUtcTicks(leap, false, text, sizeof(text));
     CHECK(strcmp(text, "2024-02-29T00:00:00Z") == 0);
 }
 
@@ -284,11 +289,11 @@ bool IsClosedJson(const char* text) noexcept {
     return depth == 0 && !inString;
 }
 
-detail::CrashRecordSnapshot& ProbeRecord() noexcept {
-    static detail::CrashRecordSnapshot record;
-    record = detail::CrashRecordSnapshot{};
+platform::detail::CrashRecordSnapshot& ProbeRecord() noexcept {
+    static platform::detail::CrashRecordSnapshot record;
+    record = platform::detail::CrashRecordSnapshot{};
     memcpy(record.program, "Probe", sizeof("Probe"));
-    memcpy(record.crashId, "00112233445566778899AABBCCDDEEFF", detail::CrashIdTextBytes);
+    memcpy(record.crashId, "00112233445566778899AABBCCDDEEFF", platform::detail::CrashIdTextBytes);
     record.reason = static_cast<uint8>(TerminationReason::Fatal);
     record.phase = static_cast<uint8>(RunPhase::Running);
     return record;
@@ -299,20 +304,21 @@ detail::CrashRecordSnapshot& ProbeRecord() noexcept {
 // 메시지(잘못된 UTF-8 2047 byte)와 연관 파일 5칸(역슬래시 512 byte)이 칸 상한을 넘으면 그 칸만
 // 잘리고, 뒤의 고정 칸·불완전 사유(metadataTruncated)는 남으며 문서는 닫힌다.
 TEST(CrashReporting_MetadataTruncationKeepsFixedFieldsAndReason) {
-    detail::CrashRecordSnapshot& record = ProbeRecord();
-    memset(record.message, 0xFF, detail::MaxCrashMessageBytes - 1);
-    record.message[detail::MaxCrashMessageBytes - 1] = '\0';
-    record.messageBytes = static_cast<uint32>(detail::MaxCrashMessageBytes - 1);
-    for (usize slot = 0; slot < detail::CrashAnnotationCount; ++slot) {
+    platform::detail::CrashRecordSnapshot& record = ProbeRecord();
+    memset(record.message, 0xFF, platform::detail::MaxCrashMessageBytes - 1);
+    record.message[platform::detail::MaxCrashMessageBytes - 1] = '\0';
+    record.messageBytes = static_cast<uint32>(platform::detail::MaxCrashMessageBytes - 1);
+    for (usize slot = 0; slot < platform::detail::CrashAnnotationCount; ++slot) {
         memset(record.annotations[slot], '\\', MaxCrashAnnotationBytes);
         record.annotationBytes[slot] = static_cast<uint32>(MaxCrashAnnotationBytes);
     }
 
-    detail::CrashMetadataInput input;
+    platform::detail::CrashMetadataInput input;
     input.final = true;
     input.dump = {"Written", "Helper", "Standard", "Minidump.dmp", 0, nullptr};
-    static char buffer[detail::CrashMetadataBytes];
-    const usize length = detail::FormatCrashMetadata(buffer, sizeof(buffer), record, input);
+    static char buffer[platform::detail::CrashMetadataBytes];
+    const usize length =
+        platform::detail::FormatCrashMetadata(buffer, sizeof(buffer), record, input);
     REQUIRE(length > 0);
     REQUIRE(length < sizeof(buffer));
     CHECK(IsClosedJson(buffer));
@@ -326,13 +332,14 @@ TEST(CrashReporting_MetadataTruncationKeepsFixedFieldsAndReason) {
 
 // 같은 입력을 작은 버퍼에 쓰면 가변 칸이 reserve 앞에서 잘리지만 문서는 닫히고 사유가 남는다.
 TEST(CrashReporting_MetadataTruncationInSmallBufferStaysClosed) {
-    detail::CrashRecordSnapshot& record = ProbeRecord();
+    platform::detail::CrashRecordSnapshot& record = ProbeRecord();
     memset(record.message, 'm', 1000);
     record.messageBytes = 1000;
-    detail::CrashMetadataInput input;
+    platform::detail::CrashMetadataInput input;
     input.final = true;
     static char buffer[6 * 1024];
-    const usize length = detail::FormatCrashMetadata(buffer, sizeof(buffer), record, input);
+    const usize length =
+        platform::detail::FormatCrashMetadata(buffer, sizeof(buffer), record, input);
     REQUIRE(length > 0);
     CHECK(IsClosedJson(buffer));
     CHECK(strstr(buffer, "\"incompleteReasons\"") != nullptr);
@@ -340,12 +347,12 @@ TEST(CrashReporting_MetadataTruncationInSmallBufferStaysClosed) {
 
 // 덤프가 실패·취소·건너뜀이면 불완전(dumpNotWritten)이다. dbghelp를 열지 못한 경우가 이 값이다.
 TEST(CrashReporting_FailedDumpIsIncomplete) {
-    detail::CrashRecordSnapshot& record = ProbeRecord();
-    detail::CrashMetadataInput input;
+    platform::detail::CrashRecordSnapshot& record = ProbeRecord();
+    platform::detail::CrashMetadataInput input;
     input.final = true;
     input.dump = {"Failed", nullptr, nullptr, nullptr, 126, "dbghelp.dll unavailable"};
-    static char buffer[detail::CrashMetadataBytes];
-    (void)detail::FormatCrashMetadata(buffer, sizeof(buffer), record, input);
+    static char buffer[platform::detail::CrashMetadataBytes];
+    (void)platform::detail::FormatCrashMetadata(buffer, sizeof(buffer), record, input);
     CHECK(IsClosedJson(buffer));
     CHECK(strstr(buffer, "\"dumpNotWritten\"") != nullptr);
     CHECK(strstr(buffer, "\"complete\":false") != nullptr);
@@ -404,9 +411,9 @@ uint8* BuildPeImage() noexcept {
 // 올바른 이미지에서 GUID(레지스트리 형식)·age·PDB 파일 이름(경로 제외)·TimeDateStamp·크기를 읽는다.
 TEST(CrashReporting_ParsesPeCodeView) {
     const uint8* image = BuildPeImage();
-    CHECK(detail::PeImageSize(image, 4096) == PeImageBytes);
-    detail::PeCodeView codeView;
-    REQUIRE(detail::ParsePeCodeView(image, PeImageBytes, codeView));
+    CHECK(platform::detail::PeImageSize(image, 4096) == PeImageBytes);
+    platform::detail::PeCodeView codeView;
+    REQUIRE(platform::detail::ParsePeCodeView(image, PeImageBytes, codeView));
     REQUIRE(codeView.hasCodeView);
     CHECK(strcmp(codeView.guid, "13121110-1514-1716-1819-1A1B1C1D1E1F") == 0);
     CHECK(codeView.age == 3);
@@ -418,31 +425,31 @@ TEST(CrashReporting_ParsesPeCodeView) {
 
 // 머리·디렉터리·레코드가 이미지 밖을 가리키거나 형식이 틀리면 거부한다(범위 밖을 읽지 않는다).
 TEST(CrashReporting_RejectsDamagedPeImages) {
-    detail::PeCodeView codeView;
+    platform::detail::PeCodeView codeView;
     uint8* image = BuildPeImage();
     Put32(image, 0x3C, 0x7FFFFFF0);
-    CHECK(!detail::ParsePeCodeView(image, PeImageBytes, codeView));
-    CHECK(detail::PeImageSize(image, 4096) == 0);
+    CHECK(!platform::detail::ParsePeCodeView(image, PeImageBytes, codeView));
+    CHECK(platform::detail::PeImageSize(image, 4096) == 0);
     image = BuildPeImage();
     Put16(image, PeOptional, 0x010B);
-    CHECK(!detail::ParsePeCodeView(image, PeImageBytes, codeView));
+    CHECK(!platform::detail::ParsePeCodeView(image, PeImageBytes, codeView));
     image = BuildPeImage();
     Put32(image, PeOptional + 108, 6);
-    CHECK(!detail::ParsePeCodeView(image, PeImageBytes, codeView));
+    CHECK(!platform::detail::ParsePeCodeView(image, PeImageBytes, codeView));
     image = BuildPeImage();
     Put32(image, PeOptional + 56, static_cast<uint32>(PeImageBytes * 2));
-    CHECK(!detail::ParsePeCodeView(image, PeImageBytes, codeView));
+    CHECK(!platform::detail::ParsePeCodeView(image, PeImageBytes, codeView));
     image = BuildPeImage();
     Put32(image, PeOptional + 112 + 6 * 8, static_cast<uint32>(PeImageBytes - 8));
-    CHECK(!detail::ParsePeCodeView(image, PeImageBytes, codeView));
+    CHECK(!platform::detail::ParsePeCodeView(image, PeImageBytes, codeView));
     image = BuildPeImage();
     Put32(image, PeDebugDirectory + 20, static_cast<uint32>(PeImageBytes - 16));
-    CHECK(!detail::ParsePeCodeView(image, PeImageBytes, codeView));
+    CHECK(!platform::detail::ParsePeCodeView(image, PeImageBytes, codeView));
     image = BuildPeImage();
     Put32(image, PeDebugDirectory + 16, 0xFFFFFFF0u);
-    CHECK(!detail::ParsePeCodeView(image, PeImageBytes, codeView));
-    CHECK(!detail::ParsePeCodeView(image, 32, codeView));
-    CHECK(!detail::ParsePeCodeView(nullptr, PeImageBytes, codeView));
+    CHECK(!platform::detail::ParsePeCodeView(image, PeImageBytes, codeView));
+    CHECK(!platform::detail::ParsePeCodeView(image, 32, codeView));
+    CHECK(!platform::detail::ParsePeCodeView(nullptr, PeImageBytes, codeView));
 }
 
 // 다른 코드가 처리되지 않은 예외 filter를 바꾸면 교환 확인이 false이고 그 filter를 그대로 둔다.
@@ -489,7 +496,7 @@ const char* StageName(uint32 index) noexcept {
 constexpr uint32 StageRegistrationThreads = 4;
 
 struct StageRegistration {
-    detail::RunStageNameTable* table = nullptr;
+    platform::detail::RunStageNameTable* table = nullptr;
     // 모든 스레드가 준비를 알린 뒤 한꺼번에 연다.
     ManualResetEvent* start = nullptr;
     ManualResetEvent ready;
@@ -512,7 +519,7 @@ void RegisterStageNames(void* context) noexcept {
 
 // 표가 차면 새 이름은 0(이름 없음)이고 이미 쓴 칸은 그대로다. 같은 포인터는 같은 칸이다.
 TEST(CrashReporting_RunStageNameTableStopsWhenFull) {
-    detail::RunStageNameTable table;
+    platform::detail::RunStageNameTable table;
     CHECK(table.Register(nullptr) == 0);
     for (uint32 index = 0; index < MaxRunStageNames; ++index) {
         CHECK(table.Register(StageName(index)) == index + 1);
@@ -535,7 +542,7 @@ TEST(CrashReporting_RunStageNameTableStopsWhenFull) {
 // 순서로 엇갈려도 이름마다 모든 스레드가 같은 칸을 받고, 칸은 정확히 MaxRunStageNames개 쓰이며,
 // 칸마다 이름이 하나다(덮어쓰거나 중복 칸을 만들지 않는다).
 TEST(CrashReporting_RunStageNameTableConcurrentRegistration) {
-    detail::RunStageNameTable table;
+    platform::detail::RunStageNameTable table;
     ManualResetEvent start;
     StageRegistration work[StageRegistrationThreads];
     Thread threads[StageRegistrationThreads];
@@ -594,3 +601,5 @@ TEST(CrashReporting_TestRunnerIsInstalledByLaunch) {
     CHECK(InstallCrashReporting(second) == CrashReportingStatus::AlreadyInstalled);
     CHECK(IsCrashReportingInstalled());
 }
+
+} // namespace crash_reporting_tests_file

@@ -18,8 +18,11 @@
 // - 사망 시험(자식 프로세스): 게임 lane의 등록 안 된 핸들 Get, 묶음 없는 Get, 묶음이 남은 채 문맥
 // 파괴.
 using namespace rocks;
+namespace c_var_thread_tests_file {
+
 using namespace rocks::config;
 using namespace rocks::test::config;
+} // namespace c_var_thread_tests_file
 
 namespace rocks::test {
 bool RegisterProcessProbe(const char* mode,
@@ -42,6 +45,8 @@ constinit CVar<int32> Orphan = cvar::Var("game.pair.orphan", 1).Help("Never regi
 constinit BootCVar<int32> BootProbe = cvar::Boot("game.pair.boot", 1).Help("Read before sealing");
 
 } // namespace cvar_thread_test
+
+namespace c_var_thread_tests_file {
 
 namespace {
 
@@ -670,3 +675,4 @@ TEST(CVar_MisuseIsFatal) {
         }
     }
 }
+} // namespace c_var_thread_tests_file

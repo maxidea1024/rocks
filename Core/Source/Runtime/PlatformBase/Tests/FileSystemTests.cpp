@@ -8,6 +8,8 @@
 #include <Platform/Atomics.h>
 
 using namespace rocks;
+namespace file_system_tests_file {
+
 using namespace rocks::platform;
 
 // 실제 OS 파일 시스템으로 디렉터리·Stat·열거·Copy/Move·재귀 helper·기본 경로를 검사한다.
@@ -508,3 +510,4 @@ TEST(FileSystem_WrapperDefaultsAreUnsupported) {
     CHECK(MakeDirectoryTree(minimal, "x/y", 3).code == FileCode::Unsupported);
     CHECK(DeleteDirectoryTree(minimal, "x", 1).code == FileCode::Unsupported);
 }
+} // namespace file_system_tests_file

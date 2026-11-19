@@ -10,6 +10,8 @@
 #include <string.h>
 
 using namespace rocks;
+namespace aead_tests_file {
+
 using namespace rocks::crypto;
 
 // 알려진 답의 출처:
@@ -1523,3 +1525,4 @@ TEST(CryptoAeadSequenceDerive) {
                                                 AeadAlgorithm::XChaCha20Poly1305)
               .Error() == ErrorCode::StaleHandle);
 }
+} // namespace aead_tests_file

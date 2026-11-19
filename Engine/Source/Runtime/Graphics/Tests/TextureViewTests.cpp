@@ -5,6 +5,8 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace texture_view_tests_file {
+
 using namespace rocks::graphics;
 
 TEST(TextureView_ResolvesSingleAndSrgbPairFormats) {
@@ -650,3 +652,4 @@ TEST(TextureView_DimensionRules) {
     CHECK(TextureViewDimensionOf(TextureDimension::TextureCube, write) ==
           TextureDimension::TextureCube);
 }
+} // namespace texture_view_tests_file

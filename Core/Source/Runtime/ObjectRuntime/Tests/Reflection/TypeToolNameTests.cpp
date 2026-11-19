@@ -9,6 +9,7 @@
 // 조회와 해제 뒤 재사용·색인 성장, ClassReference 필드의 등록 규칙(Base ID 필수, Base는 의존으로
 // 붙잡지 않는다 — 자기 자신·나중 클래스를 Base로 둘 수 있다).
 using namespace rocks;
+namespace type_tool_name_tests_file {
 
 namespace {
 
@@ -260,3 +261,4 @@ TEST(TypeToolName_ClassReferenceFieldRegistration) {
     REQUIRE(types.Unregister(arrayHolder.Value()));
     CHECK(types.Shutdown());
 }
+} // namespace type_tool_name_tests_file

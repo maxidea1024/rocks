@@ -9,6 +9,7 @@
 // 배열을 거친 깊이 17, 계산 형질(containsReferenceArray 포함), StructRefArray 원소 컨테이너 거부,
 // WorldOnly 원소, 접근기를 가진 배열 거부, FieldWriteOperation Unsupported, 상속 maxElements 대조.
 using namespace rocks;
+namespace array_registry_tests_file {
 
 namespace {
 
@@ -563,3 +564,4 @@ TEST(ArrayRegistry_StructElementTargetsAndTransientMembers) {
 
     CHECK(types.Shutdown());
 }
+} // namespace array_registry_tests_file

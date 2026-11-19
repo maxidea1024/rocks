@@ -7,6 +7,8 @@
 #include <string.h>
 
 using namespace rocks;
+namespace process_entry_tests_file {
+
 using namespace rocks::platform;
 
 // 진입점 인자 변환과 종료 요청 판정(첫 요청은 처리기, 두 번째부터 OS 기본 동작)을 검사한다. 실제
@@ -29,21 +31,26 @@ void OtherRequest() noexcept {
 // 처리기 칸은 하나다.
 TEST(ProcessEntry_TerminationRequestDispatch) {
     handlerCalls = 0;
-    CHECK(detail::DispatchTerminationRequest() == detail::TerminationRequestOutcome::PassToSystem);
-    REQUIRE(detail::AcquireTerminationRequestHandler(&CountRequest));
-    CHECK(!detail::AcquireTerminationRequestHandler(&OtherRequest));
-    CHECK(!detail::AcquireTerminationRequestHandler(nullptr));
-    CHECK(detail::DispatchTerminationRequest() == detail::TerminationRequestOutcome::Handled);
+    CHECK(platform::detail::DispatchTerminationRequest() ==
+          platform::detail::TerminationRequestOutcome::PassToSystem);
+    REQUIRE(platform::detail::AcquireTerminationRequestHandler(&CountRequest));
+    CHECK(!platform::detail::AcquireTerminationRequestHandler(&OtherRequest));
+    CHECK(!platform::detail::AcquireTerminationRequestHandler(nullptr));
+    CHECK(platform::detail::DispatchTerminationRequest() ==
+          platform::detail::TerminationRequestOutcome::Handled);
     CHECK(handlerCalls == 1);
-    CHECK(detail::DispatchTerminationRequest() == detail::TerminationRequestOutcome::PassToSystem);
+    CHECK(platform::detail::DispatchTerminationRequest() ==
+          platform::detail::TerminationRequestOutcome::PassToSystem);
     CHECK(handlerCalls == 1);
-    detail::ReleaseTerminationRequestHandler();
-    CHECK(detail::DispatchTerminationRequest() == detail::TerminationRequestOutcome::PassToSystem);
+    platform::detail::ReleaseTerminationRequestHandler();
+    CHECK(platform::detail::DispatchTerminationRequest() ==
+          platform::detail::TerminationRequestOutcome::PassToSystem);
     // 다시 걸면 요청 수가 처음부터다.
-    REQUIRE(detail::AcquireTerminationRequestHandler(&CountRequest));
-    CHECK(detail::DispatchTerminationRequest() == detail::TerminationRequestOutcome::Handled);
+    REQUIRE(platform::detail::AcquireTerminationRequestHandler(&CountRequest));
+    CHECK(platform::detail::DispatchTerminationRequest() ==
+          platform::detail::TerminationRequestOutcome::Handled);
     CHECK(handlerCalls == 2);
-    detail::ReleaseTerminationRequestHandler();
+    platform::detail::ReleaseTerminationRequestHandler();
 }
 
 // OS 처리기 등록·해제는 두 번 걸 수 없고, 뗀 뒤에는 다시 걸 수 있다(요청은 보내지 않는다).
@@ -95,3 +102,5 @@ TEST(ProcessEntry_ConvertEntryArgument) {
         CHECK(!GetWindowedEntryArguments(argc, argv));
     }
 }
+
+} // namespace process_entry_tests_file

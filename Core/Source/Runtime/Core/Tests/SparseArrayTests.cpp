@@ -5,6 +5,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace sparse_array_tests_file {
 
 namespace {
 
@@ -538,3 +539,4 @@ TEST(SparseArray_RandomizedOracle) {
         }
     }
 }
+} // namespace sparse_array_tests_file

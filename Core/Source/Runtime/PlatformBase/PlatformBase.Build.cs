@@ -7,6 +7,9 @@ public sealed class PlatformBase : CoreModuleRules
 {
     protected override string ModuleName => "PlatformBase";
 
+    // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
+    protected override UnityMode Unity => UnityMode.On;
+
     protected override string[] RequiredModules => ["Base"];
 
     public override NativeModuleInput Configure(BuildContext context)
@@ -15,6 +18,8 @@ public sealed class PlatformBase : CoreModuleRules
         return new()
         {
             Name = ModuleName,
+            Unity = UnityFor(context),
+            UnityExclude = UnityExclude(context),
             Sources = context.Platform switch
             {
                 NativePlatform.MacOS => context.Sources($"{backend}/Mac", $"{backend}/Apple", $"{backend}/Posix",

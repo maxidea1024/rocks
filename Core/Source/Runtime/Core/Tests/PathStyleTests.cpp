@@ -3,6 +3,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace path_style_tests_file {
 
 TEST(PathUnsupportedStyleFailsClosed) {
     SystemAllocator allocator;
@@ -24,3 +25,4 @@ TEST(PathUnsupportedStyleFailsClosed) {
     auto unknownRoot = Path::Root("a", unknown);
     CHECK(!unknownRoot && unknownRoot.Error() == ErrorCode::InvalidArgument);
 }
+} // namespace path_style_tests_file

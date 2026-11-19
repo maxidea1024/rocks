@@ -12,7 +12,7 @@ namespace detail {
 
 namespace {
 
-StringView ToView(Span<const char> text) noexcept {
+StringView ConfigRuntimeChangesToView(Span<const char> text) noexcept {
     return StringView(text.Data(), text.Size());
 }
 
@@ -290,8 +290,8 @@ Result<void> HoldBootSections(ConfigState& state, Span<ConfigEntry* const> order
             }
 
             const usize schemaIndex = section.lease.FieldIndex(field.field);
-            const StringView tool =
-                ToView(EffectiveToolName(section.lease.Schema().fields[schemaIndex]));
+            const StringView tool = ConfigRuntimeChangesToView(
+                EffectiveToolName(section.lease.Schema().fields[schemaIndex]));
             const JsonValue before = live.Root().Find(tool);
             const JsonValue after = next.Root().Find(tool);
             if (!before.IsValid() || !after.IsValid() || JsonEquals(before, after)) {

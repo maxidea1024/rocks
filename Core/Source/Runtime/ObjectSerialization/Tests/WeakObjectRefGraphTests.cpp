@@ -7,6 +7,8 @@
 // 처리하며, 죽은 대상은 진단 없이 null로 쓰고 산 대상의 형식 위반은 거부함을 본다. 복원·GC·도달
 // 검사는 WeakObjectRefGraphLoadTests.cpp, 쓰기 검증은 WeakObjectRefFieldTests.cpp다.
 using namespace rocks;
+namespace weak_object_ref_graph_tests_file {
+
 using namespace rocks::test::weak;
 
 namespace {
@@ -602,3 +604,4 @@ TEST(WeakObjectRefGraph_DeadTargetsEncodeNullAndTypeMismatchFails) {
 
     CHECK(types.Shutdown());
 }
+} // namespace weak_object_ref_graph_tests_file

@@ -5,6 +5,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace name_token_review_tests_file {
 
 namespace {
 
@@ -213,3 +214,4 @@ TEST(NameForcedCollisionsWithConcurrentDifferentComparisonNames) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace name_token_review_tests_file

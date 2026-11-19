@@ -55,7 +55,7 @@ internal static partial class MetaTests
             Verify.Equal("ObjectReference", Field("probe::Bundle", "byName").GetProperty("fieldKind").GetString(), "struct member object reference map");
             Verify.That(Type("probe::Bundle").GetProperty("flags").EnumerateArray().Any(flag => flag.GetString() == "ContainsReferenceArray"),
                 "struct holding an ObjectRefMap is a registry container holder");
-            string generated = Compact(File.ReadAllText(probe.Output));
+            string generated = Compact(probe.GeneratedText());
             Verify.Contains("FieldKind::ObjectReference", generated, "generated field kind");
             Verify.Contains("detail::TraceMapField(value.*(&::probe::Value::bySlot),visitor);", generated, "generated class trace visits the map");
             Verify.Contains("detail::TraceMapField(value.*(&::probe::Bundle::byName),visitor);", generated, "generated struct trace visits the map");

@@ -1289,4 +1289,290 @@ Debug Foundation 전체 2,527개, Debug EngineTests 전체 2,899개, 클러스�
 
 - 모델 시험의 Idle 불변식을 고쳤다: Retired는 회수 대기(`HasPendingReclaim`)가 있을 때만 남고 통계의 `retiredObjects`가 모델과 같다.
 - 검증(바뀐 범위 1회 — 다른 세션의 빌드 작업과 겹치지 않게 넓은 시험은 하지 않았다): Debug Foundation `ObjectRegistryModel` 6·`ObjectGcReclaim` 6·`GcSoak` 6·`ObjectGc` 56·`Gc` 93·`World` 11, Debug EngineTests `World` 79·`Engine` 32·`Tick` 30·`Gc` 110(새 `WorldGc_` 12개·엔진 GC 3개 포함), format·policy 통과(`review7/test2.txt`).
-- 음성 대조는 준비만 했다(`review7/negctl12.py` — 최소 진척 제거, 소멸자 사이 한도 제거, 되돌린 work 미연결, safepoint 조건 제거, 보고서 누적 제거, 옛 표지 판정, 파괴 조건 재도입, 예산 없는 cycle 끝내기, 게임 시간 간격, 취소 분기 제거, Busy 재시도 제거, 엔진 요청 미전달, 간격 0 주기). 빌드 14회가 필요해 다른 세션의 빌드 시간 작업이 병합된 뒤 돌리고 결과를 이 절에 더한다.
+- 음성 대조 13종(2026-11-20, 빌드 보류가 풀린 뒤 — 병합 cc96ad60 위에서 대조마다 소스를 바꿔 Debug로 다시 빌드하고 `ObjectGcReclaim`(Foundation) 또는 `WorldGc_`·`Engine_`(EngineTests)를 돌린 뒤 되돌렸다. 동시에 돌리지 않았다). 13종 모두 잡혔고 못 잡은 대조는 없다. 대조 전 기준(같은 병합): Foundation `ObjectRegistryModel` 6·`Gc` 93·`World` 11, EngineTests `World` 79·`Engine` 32·`Tick` 30·`Gc` 110 통과.
+
+| 대조 | 바꾼 것 | 잡은 시험 |
+|---|---|---|
+| K1 | 최소 진척 제거(첫 판정부터 시간 한도) | `ObjectGcReclaim_TimeBudgetStopsBetweenDestructorsWithProgress` |
+| K2 | 소멸자 사이의 시간 한도 제거(묶음마다만) | 같은 시험 |
+| K3 | 되돌린 work를 회수 대기 목록에 다시 넣지 않음 | 같은 시험이 Fatal(`Object registry retired queue lost a slot` — 목록 계수 검사)로 끝남 |
+| K4 | `FinishCollectionDeferringReclaim`의 safepoint 조건 제거(N2) | `ObjectGcReclaim_FinishCollectionDeferringReclaimNeedsSafepoint`, `WorldGc_RequestDuringSweepingWithBorrowStaysBusy` |
+| K5 | 예산 회수를 마지막 보고서에 더하지 않음 | `ObjectGcReclaim_TimeBudgetStopsBetweenDestructorsWithProgress` |
+| K7 | 회수 대기를 옛 표지로 판정(N1·D1·R2 이전 방식) | `WorldGc_HeldObjectIsReclaimedAfterRelease`·`…RepeatedRequestKeepsDrainingEarlierReclaim`·`…RequestDuringReclaimingKeepsReclaimBudgeted`·`…RequestDuringSweepingWithBorrowStaysBusy` |
+| K9 | 주기 수집에 World 파괴 조건을 다시 넣음(N3) | `WorldGc_FullCollectionModeCollectsWithoutWorldDestroys` |
+| K10 | 진행 중인 cycle을 예산 없는 Step으로 끝냄(R1 이전 방식) | `WorldGc_RequestDuringReclaimingKeepsReclaimBudgeted` |
+| K11 | 간격을 World 게임 시간으로 셈(R3 이전 방식) | `WorldGc_FullCollectionIntervalCountsRealTimeWhilePaused` |
+| K12 | Marking 취소 분기 제거 | `WorldGc_RequestDuringMarkingCancelsAndCollects` |
+| K13 | Busy 때 요청을 남기지 않음 | `WorldGc_BusyFullCollectionRetriesNextFrame`, `WorldGc_RequestDuringSweepingWithBorrowStaysBusy` |
+| K14 | 엔진이 요청을 World에 나눠 주지 않음(R6) | `Engine_OwnsGcSchedulerAndLendsItToWorlds` |
+| K15 | 간격 0 이하에도 주기 수집 | `WorldGc_FullCollectionIntervalCountsRealTimeWhilePaused` |
+
+- 대조 스크립트와 실행 기록은 작업 임시 폴더에 있다(`review7/negctl12.py`·`negctl12-run.txt`, K3의 Fatal 문구는 `k3-out.txt`). 이것으로 7단계를 닫는다.
+
+## 25. 공용 할당자 (GC-S6, 8단계, 2026-11-20)
+
+설계 18절(개정 7–9)의 구현 기록이다. 단계는 18.9절의 AL0–AL5다. 측정은 Development 빌드, 높은 우선순위, 같은 round 안에서 할당자를 번갈아 3 round 돌린 최솟값이다(부하가 있는 기계라 절대값보다 같은 round의 상대값을 본다).
+
+### 25.1 AL0: 벤치와 바꾸기 전 상태
+
+벤치(`Programs/GcBench`):
+
+- `--allocators [--objects N] [--allocator-kind K]`: 살아 있는 객체 N개(간선 4)를 만들고, 10%를 지우고 다시 만드는 churn을 5번 한 뒤 모두 지운다. 생성+연결, churn의 생성+연결과 회수, 종료 회수를 객체당 ns로 낸다. 할당자는 bump(반환이 무동작인 벤치 전용 — 할당자 몫의 바닥), platform(계수 없는 플랫폼 할당), `SystemAllocator`, `BinnedAllocator` 가운데 고른다. 할당자 몫은 같은 시나리오에서 bump의 시간을 뺀 값이다(설계 18.2절).
+- `--allocator-micro [--allocator-kind K]`(`AllocatorMicroBench.cpp`): 단일 스레드 할당·반환 쌍(16·64·256·1024·8192 B, 1M 쌍), 4096개를 받고 받은 순서대로 돌려주는 묶음(64 B), 한 스레드가 256개씩 할당하고 다른 스레드가 반환하는 인계(mutex·조건 변수 칸 — 2000 round, 같은 스레드에서 한 값과 비교), 1·8 스레드 동시 할당·반환 처리량(스레드마다 500K 쌍, 살아 있는 창 64개, 시작 문으로 함께 출발)이다.
+
+바꾸기 전(`SystemAllocator`: 연결 목록 원장, `BinnedAllocator`: `PoolAllocator` 9개 + 잠금 하나 + 선형 원장) — 작은 벤치:
+
+| 할당자 | 쌍(16–1024 B) | 쌍(8192 B) | 묶음 4096×64 B | 인계: 다른 스레드 / 같은 스레드 | 동시 1 스레드 | 동시 8 스레드 |
+|---|---|---|---|---|---|---|
+| platform | 24.5–25.0 ns | 25.0 ns | 28.7 ns/op | 90.5 / 30.6 ns/쌍(×3.0) | 38.1 M쌍/s | 174.6 M쌍/s(같은 round ×3.9–4.7) |
+| `SystemAllocator` | 66.8–67.6 ns | 67.0 ns | 2,714 ns/op | 290 / 200 ns/쌍 | 8.1 M쌍/s | 2.4 M쌍/s(×0.30) |
+| `BinnedAllocator` | 73.9–77.5 ns | 155.6 ns | 5,382 ns/op | 541 / 444 ns/쌍 | 3.0 M쌍/s | 0.11 M쌍/s(×0.04) |
+
+- 묶음(살아 있는 4096개를 받은 순서대로 반환)에서 선형 원장의 비용이 드러난다: `SystemAllocator` 2.7µs, `BinnedAllocator` 5.4µs(반환마다 목록의 먼 쪽까지 간다). 8 스레드에서는 잠금 하나에 묶여 1 스레드보다 느리다.
+
+객체 생성·회수(객체당 ns, 종료 회수는 괄호 안이 전체 시간):
+
+| 살아 있는 객체 | 할당자 | 생성+연결 | churn 생성+연결 | churn 회수 | 종료 회수 |
+|---|---|---|---|---|---|
+| 20K | bump | 573.5 | 538.6 | 31.7 | 53.2 (1.1 ms) |
+| 20K | platform | 767.1 | 729.8 | 90.4 | 159.3 (3.2 ms) |
+| 20K | `SystemAllocator` | 865.6 | 897.0 | 3,443 | 40,147 (803 ms) |
+| 20K | `BinnedAllocator` | 321,245 | 654,687 | 3,658 | 45,205 (904 ms) |
+| 100K(1회) | `SystemAllocator` | 1,195 | 1,297 | 19,091 | 311,717 (31.2 s) |
+| 200K | bump | 899.5 | 1,034 | 36.9 | 95.5 (19.1 ms) |
+| 200K | platform | 1,217 | 1,188 | 106.8 | 202.9 (40.6 ms) |
+| 1M | bump | 1,202 | 1,224 | 38.8 | 100.3 (100.3 ms) |
+| 1M | platform | 1,412 | 1,334 | 114.1 | 212.2 (212.2 ms) |
+
+- `SystemAllocator`는 살아 있는 수에 비례해 반환이 느려진다(20K → 100K에서 종료 회수가 객체당 7.8배). 1M은 끝나지 않는다(추정 수십 분). `BinnedAllocator`는 생성부터 객체당 0.3 ms라 20K를 넘겨 재지 않았다.
+- 플랫폼 할당의 몫(1M, platform − bump): 생성+연결 210 ns, churn 회수 75 ns, 종료 회수 112 ns/객체다. gate A2(설계 18.8절)는 이 몫의 절반 이하를 본다.
+
+### 25.2 AL1: 주소 원장과 `SystemAllocator`
+
+- `detail::AddressLedger`(`Core/Private/Memory/AddressLedger.h`): 주소 → 크기 원장이다. Core `HashMap<uptr, usize>`를 추적 없는 플랫폼 allocator(`detail::UntrackedPlatformAllocator`) 위에 둔다. 넣기(null·중복은 `InvalidArgument`), 지우기(크기를 돌려줌), 개수뿐이다.
+- `SystemAllocator`: 살아 있는 할당의 연결 목록을 이 원장으로 바꿨다. 할당마다의 원장 레코드 OS 할당이 없어지고(OS 할당 둘 → 하나) 반환 조회가 상환 O(1)이다. 원장 타입은 구현 파일에만 두고 공개 헤더에는 크기·정렬을 static_assert한 저장소만 둔다(헤더가 `HashMap`을 끌어오지 않는다). 원장 넣기가 실패하면(표 늘리기) 블록을 OS에 돌려주고 `OutOfMemory`다.
+
+측정(25.1절과 같은 방법, 3 round 최솟값):
+
+| 항목 | 전 | 후 | platform(같은 round) |
+|---|---|---|---|
+| 쌍(16–8192 B) | 66.8–67.6 ns | 54.2–64.0 ns | 24.6–25.4 ns |
+| 묶음 4096×64 B | 2,714 ns/op | 48.0 ns/op | 29.3 ns/op |
+| 인계: 다른 스레드 / 같은 스레드 | 290 / 200 ns/쌍 | 156.7 / 75.6 ns/쌍 | 90.8 / 30.7 ns/쌍 |
+| 동시 1 / 8 스레드 | 8.1 / 2.4 M쌍/s | 17.8 / 4.9 M쌍/s | 37.5 / 152.6 M쌍/s |
+
+| 살아 있는 객체 | 할당자 | 생성+연결 | churn 생성+연결 | churn 회수 | 종료 회수 |
+|---|---|---|---|---|---|
+| 20K | `SystemAllocator` 전 → 후 | 865.6 → 1,009 | 897.0 → 836.8 | 3,443 → 159.5 | 40,147 → 213.6 (803 → 4.3 ms) |
+| 20K | platform | 794.4 | 775.0 | 93.8 | 167.4 |
+| 200K | `SystemAllocator` 후 | 1,654 | 1,489 | 288.3 | 346.5 (69.3 ms) |
+| 200K | platform | 1,244 | 1,237 | 105.6 | 204.5 |
+| 1M | `SystemAllocator` 후 | 1,917 | 1,900 | 346.4 | 397.2 (397 ms) |
+| 1M | platform | 1,472 | 1,379 | 107.3 | 224.2 |
+| 1M | bump | 1,208 | 1,250 | 40.9 | 101.3 |
+
+- gate A1: 1M이 끝난다(전에는 100K 종료 회수가 31 s였고 1M은 끝나지 않았다). 플랫폼 할당 대비 생성+연결 1.30배, churn 생성 1.38배, 종료 회수 1.77배로 2배 안이다. **churn 회수는 3.2배(346 대 107 ns)로 2배를 넘는다.**
+- 회수가 넘는 까닭: 반환마다 원장을 주소로 찾는다. 표가 작을 때(묶음 벤치 — 살아 있는 4096개) 원장과 잠금의 몫은 연산당 19 ns(48.0 − 29.3)뿐이다. 1M에서 늘어나는 것은 표(칸 32 B × 2M칸 = 64 MB)를 무작위로 찌르는 캐시·TLB 미스다. 미소유 주소를 읽지 않고 소유를 판정한다는 계약(블록 앞 머리를 두지 않는다)에서 오는 비용이라, 설계 18.6절이 버린 대안(칸 16 B 전용 표)으로 바꿔도 반환마다의 미스 하나는 남는다(표가 32 MB로 줄 뿐이다). 그래서 원장은 `HashMap` 그대로 두고 A1의 회수 목표를 측정값으로 고쳤다(설계 18.8절). `SystemAllocator`는 기준 구현이고 빠른 경로는 `BinnedAllocator`다.
+- 8 스레드 처리량은 잠금 하나라 1 스레드보다 낮다(×0.28 — 전과 같은 구조, 절대값은 2배).
+- 발견: `HashMap::Erase`는 원소가 0개가 되면 모든 칸을 비운다(`ClearSlots` — 용량에 비례). 살아 있는 수가 큰 고점을 찍은 뒤 0과 1 사이를 오가면 0이 될 때마다 표 전체를 다시 쓴다(1M 고점이면 64 MB). 지금 쓰임(시험·벤치의 `SystemAllocator`, `BinnedAllocator`의 큰 할당)에서는 0으로 돌아오는 일이 드물어 그대로 두고 한계로 적는다(설계 18.6절). 고치는 자리는 원장이 아니라 `HashMap`이다(묘비가 용량의 일정 비율을 넘을 때만 비우면 상환 O(1)).
+
+시험과 음성 대조(Debug Foundation, 대조마다 다시 빌드):
+
+- `CoreAddressLedger*` 3개(넣기·지우기·중복·null, 무작위 넣기·지우기 20만 번을 모델과 대조, 표 늘리기 실패 뒤 내용 보존), `CoreSystemAllocator*` 2개(살아 있는 20만 개의 반환과 통계·원장 일치, 원장 넣기 실패가 게시되지 않음).
+- 대조 5종 모두 잡혔다: 반환 때 원장에서 지우지 않음(L1 — 세 원장 시험 실패, `SystemAllocator` 시험은 중복 해제로 접근 위반), 중복 주소 넣기를 성공으로 넘김(L2), 원장 넣기 실패를 무시하고 게시(L3 — CHECK 실패 뒤 "destroyed with live allocations" Fatal), null 주소 넣기를 받음(L4), 없는 주소의 지우기가 크기를 덮어씀(L5).
+- 잡을 시험이 없는 대조: `SystemAllocator`가 원장 넣기 실패 때 블록을 OS에 돌려주지 않음 — 플랫폼 할당에는 계수가 없어 관찰할 수 없다. 같은 경로의 `BinnedAllocator` 큰 할당은 상위 allocator의 계수로 본다(AL2).
+- `SystemAllocator`가 거의 모든 시험의 기본 할당자라 전체를 한 번 돌렸다: Debug Foundation 2,550개, Debug EngineTests 2,953개 통과.
+
+#### AL1b: `HashMap`의 0개 비우기 규칙과 원장의 지역성 hash (메인 세션 검토, 2026-11-20)
+
+(원장의 지역성 hash는 이 절 끝의 판정으로 되돌렸다. 아래의 측정과 군집 수치는 그 근거로 남긴다.)
+
+AL1의 두 한계("0개가 되면 표 전체를 비움", "churn 회수 3.2배")를 한계로 두지 않고 고쳤다(설계 18.6절).
+
+`HashMap::Erase`의 비우기 규칙:
+
+- 전: 원소가 0개가 되면 삭제 칸이 하나뿐이어도 모든 칸을 비웠다(용량에 비례). 후: 삭제 칸이 칸 수의 1/4(`EmptyClearDivisor`) 이상일 때만 비우고, 그 밖에는 그대로 두어 삽입의 정리에 맡긴다. `EraseIf`·`Clear`는 어차피 모든 칸을 보므로 전처럼 비운다. `HashSet`은 `HashMap` 위라 같이 바뀐다. 빈 Map에도 삭제 칸이 남을 수 있다(`DeletedSlotCount()` — 칸 수의 1/4 미만).
+- 진단값을 더했다: `HashMap::LongestProbe()`, `HashSet::SlotCount()`·`DeletedSlotCount()`.
+- 시험(`HashMapEmptyClearTests.cpp` 4개): 1,000개 고점까지 넣고 모두 지운 뒤(이때는 문턱을 넘어 비운다) 넣기·지우기 쌍 1,031번 — 삭제 칸이 쌍마다 하나씩 늘다가 512(2,048칸의 1/4)에서 0이 되고, 그 사이 조회(있는 키, 빈 칸·삭제 칸에서 시작하는 없는 키)·순회·다시 넣기(삭제 칸 재사용)·대량 삽입이 맞다. 삭제 칸이 적을 때는 0개가 돼도 비우지 않고, 빈 Map의 `ShrinkSlack`·`Compact`는 저장소를 돌려주며, 8칸 표의 문턱은 2다. `EraseIf`·`Clear` 뒤에는 삭제 칸이 없다. `HashSet`도 같다.
+
+원장의 지역성 hash(`detail::AddressLedgerHash` — 페이지 번호만 섞고 페이지 안 위치를 더함). 같은 round에서 번갈아 3회, 최솟값(객체당 ns):
+
+| 살아 있는 객체 | hash | 생성+연결 | churn 생성+연결 | churn 회수 | 종료 회수 |
+|---|---|---|---|---|---|
+| 200K | 기본 | 1,555 | 1,467 | 276.6 | 340.6 |
+| 200K | 지역성 | 1,482 | 1,393 | 185.2 | 247.6 |
+| 1M | 기본 | 1,856 | 1,805 | 330.4 | 379.2 |
+| 1M | 지역성 | 1,731 | 1,596 | 213.7 | 277.0 |
+| 1M | platform | 1,412 | 1,359 | 109.8 | 222.8 |
+
+- 1M에서 churn 회수 −35%, 종료 회수 −27%, churn 생성 −12%, 생성 −7%. 플랫폼 대비 생성 1.23배·churn 회수 1.95배·종료 1.24배로 gate A1의 처음 제안(모두 2배)을 채운다(회수는 여유가 거의 없다). 20K와 작은 벤치(쌍 55 ns, 묶음 47–50 ns/op, 8 스레드 5 M쌍/s)는 차이가 없다 — 표가 캐시에 들 때는 hash의 지역성이 할 일이 없다.
+- 창 너비 비교(다른 round — 기계에 부하가 걸려 절대값이 크다, 1M churn 회수 3회 범위): 256칸(채택) 330–333, 512칸 343–350, 1,024칸 427–439, 기본 hash 589–618 ns. 종료 회수도 같은 순서다(403–441, 480–486, 558–576, 706–729 ns).
+- 군집(대가): 최악 탐사 길이(65,536개, 부하율 1/2, 실제 `HashMap`): 64KB 정렬 주소 17칸, 한 페이지를 꽉 채운 256개 1칸, 여러 페이지의 같은 offset 17칸, 이어지는 주소 16 B 간격 1,765 · 32 B 1,416 · 64 B 1,080 · 208 B 217칸. 시험 `CoreAddressLedgerProbeLengthByAddressPattern`이 상한(32·1·32·2,048·2,048·2,048·512)으로 고정한다. 선형 탐사를 흉내 낸 평균(작업 임시 폴더 `al1b/simulate.py`)은 64 B 간격에서 부하율 0.25·0.375·0.5에 1.8·3.6·12칸이고 기본 hash는 1.2–1.5칸이다. 간격이 좁을수록 길다(16 B: 26–89칸).
+
+음성 대조(Debug `Core` 대상 `CoreFoundationTests`, 대조마다 다시 빌드):
+
+| 대조 | 바꾼 것 | 잡은 시험 |
+|---|---|---|
+| H1 | 0개가 되면 무조건 비움(고치기 전 동작) | `CoreHashMapEmptyingKeepsTombstonesBelowThreshold`, `CoreHashMapEmptyWithFewTombstonesIsNotCleared`, `CoreHashSetEmptyingKeepsTombstonesBelowThreshold` |
+| H2 | 0개가 돼도 비우지 않음 | 같은 셋(고점 뒤와 문턱에서 0이어야 한다) |
+| H3 | 문턱에 닿아도 비우지 않음(이상 → 초과) | 같은 셋 |
+| H4 | `LongestProbe`가 제자리 원소를 0으로 셈 | `CoreAddressLedgerProbeLengthByAddressPattern` |
+| G1 | 원장 hash가 페이지 안 위치를 더하지 않음 | 같은 시험(한 페이지의 256개가 한 칸에서 시작해 상한 1을 넘는다) |
+| G2 | 원장 hash가 주소 전체를 섞음(기본 hash) | 같은 시험(꽉 찬 페이지의 탐사가 1을 넘는다) |
+
+- 공용 컨테이너를 바꿨으므로 전체를 한 번 돌렸다(AL2b와 묶어서): Debug Foundation 2,570개, Debug EngineTests 2,976개 통과. 기존 `HashMap`·`HashSet` 시험(Core 대상 `Hash` 67개)도 그대로 통과한다 — 빈 컨테이너에 삭제 칸이 없다고 가정한 시험은 없었다.
+
+#### AL1c: 원장 hash 판정 — 기본 hash로 되돌림 (메인 세션 판정, 2026-11-20, 설계 개정 11)
+
+- 판정: 지역성 hash를 버리고 원장을 기본 hash(주소를 통째로 섞음)로 되돌렸다. 위에 적은 군집은 부하율 1/2 하나인데, `HashMap`은 삭제 칸까지 3/4이 차고 채움이 오르면 군집이 절벽으로 커진다. 선형 탐사를 흉내 낸 값(칸 수 2^20, 이어지는 주소 — 밀린 칸 수의 평균 / 삽입이 본 칸 수의 평균): 16 B 간격은 채움 0.5·0.625·0.74에서 130/308 · 202/543 · 342/1,546칸, 64 B 간격은 11/60 · 26/169 · 54/201칸, 208 B 간격은 0.8/4.6 · 2.9/14 · 9.4/95칸이고 기본 hash는 0.74에서 1.4/7.6칸이다(전체 표는 설계 18.6절). 잰 벤치(1M, 채움 0.48, 객체 간격 100 B대)는 가장 좋은 구석이었다.
+- 쓰임: 1M 작은 객체의 경로는 `BinnedAllocator`(작은 블록에 원장이 없다)이고 원장에는 큰 블록과 샘플·시험의 `SystemAllocator` 직접 사용이 들어가므로, 지역성 hash의 이득이 걸리는 제품 경로가 없다.
+- gate A1은 "생성+연결·종료 회수 2배 이내, churn 회수 3.5배 이내"로 확정했다(확정값 1.30배·1.77배·3.0–3.2배 — 위 표의 "기본" 행과 25.2절 처음의 표). 벤치는 다시 재지 않았다.
+- 군집 시험의 방향을 바꿨다: 기본 hash에서 주소 모양 8종(64KB 정렬, 꽉 찬 한 페이지, 여러 페이지의 같은 offset, 이어지는 주소 16·32·64·112·208 B)의 최장 탐사가 10–45칸이고, 살아 있는 주소 창 65,536개를 131,072번 밀며 삭제 칸을 쌓는 주기 내내(채움이 3/4에 닿아 표가 정리되는 주기를 지난다) 33–39칸이다. 상한은 둘 다 64칸이다(`CoreAddressLedgerProbeLengthByAddressPattern`·`…WhileTombstonesAccumulate`). `HashMap::LongestProbe`·`AddressLedger::LongestProbe`는 남겼다.
+- 음성 대조 G3(원장에 지역성 hash를 넣음): 두 군집 시험이 잡는다. AL1b의 G1·G2는 이 대조로 바뀌었다(방향이 반대다).
+- 주석 줄바꿈이 깨진 곳을 고쳤다(`VirtualMemory.h`의 Open 설명과 사용 예, `PosixPlatform.h`, `AddressLedgerTests.cpp`).
+- 검증(범위 시험만): Debug `Core` 대상에서 `CoreAddressLedger` 5개·`CoreSystemAllocator` 2개·`CoreBinned`(큰 경로 포함)·`PlatformVirtualMemory` 5개 통과, format·policy 통과.
+
+### 25.3 AL2: `BinnedAllocator` 다시 만들기 1 (주소 범위·slab·등급·소유 판정·큰 할당)
+
+같은 클래스 이름으로 다시 만들었다(설계 18.4절). 이 단계는 스레드 캐시 없이 등급 잠금 경로만이다(캐시는 AL3 — 이 경로는 캐시를 얻지 못한 스레드의 경로로 남는다).
+
+- 주소 범위: 생성 때 `VirtualMemoryRegion`으로 예약만 하고(기본 16 GiB, Android 4 GiB) 64KB slab을 쓸 때 commit한다. slab 번호별 1 byte 표(등급 + 1, 0은 쓰지 않는 slab)와 decommit한 slab의 비트맵을 생성 때 받는다. 예약이 거부되면 절반씩 줄여 64 MiB까지 다시 시도하고, 끝내 못 하면 예약 없이 연다(모든 요청이 큰 경로).
+- 등급 32개(16–128은 16 단계, 그 위는 2배 구간마다 넷)와 크기 → 등급 표(정렬 16 이하·32·64 세 벌, `(bytes + 15) >> 4` 색인), 등급별 역수 상수로 블록 경계를 나눗셈 없이 판정한다.
+- 반환의 소유 판정 다섯 단계: 범위 → slab 표 → 블록 경계(여기까지 주소를 읽지 않는다) → slab 머리의 뗀 블록 수 → 블록 안 반환 표지(주소 XOR 인스턴스 비밀값, 최상위 비트를 세운 비밀값). 표지는 slab에서 뗄 때와 반환할 때 세우고 사용자에게 내주는 순간에만 지운다.
+- 빈 slab은 한도(기본 64)까지 commit한 채 보관하고 넘으면 decommit한다. decommit한 slab은 낮은 번호부터 다시 쓴다. `Trim`은 보관분을 모두 decommit한다.
+- 큰 할당(8192 초과, 정렬 64 초과, 범위가 없거나 다 찼거나 commit에 실패한 작은 요청)은 상위 allocator로 넘기고 AL1의 `AddressLedger`에 적는다. 상위 호출은 잠금 밖이다.
+- 공개 API: `BinnedAllocatorConfig`(예약 크기, 보관 한도), `Stats()`(`liveBytes`는 블록 크기의 합), `Usage()`(예약·commit·보관·큰 할당·큰 경로로 간 작은 요청), `ReservedBytes()`, `Trim()`(값 없음). `Shutdown()`과 재진입 `Busy` 규칙은 없앴다. 시험 통로는 `BinnedAllocatorTestAccess.h`(Tests/ 소스만)이고 진입점 선언은 `BinnedAllocatorTestHooks.h`, 구현은 `BinnedAllocator.cpp`다(정책 `test-access-include`).
+
+시험(Debug Foundation `CoreBinned` 13개):
+
+- 등급 표가 설계와 같은지(크기 32개, slab당 블록 수, 요청 1–8192의 등급이 맞는 가장 작은 등급, 128 초과의 올림 낭비 20% 이하, 정렬 32·64의 올림)와, 역수 상수 나눗셈이 모든 등급·모든 8 byte offset에서 실제 나눗셈과 같은지.
+- 0 byte·잘못된 정렬·경계 크기·정렬 올림·큰 경로·통계, 미소유(스택·다른 인스턴스·쓰지 않는 slab)·중간·중복 주소가 `NotFound`이고 상태가 그대로인지.
+- 표지 불변식(F1): 내준 적 없는 블록(바로 다음 블록, 먼 블록)의 반환이 `NotFound`이고 뒤의 할당들이 서로 다른 주소인지, 보관소에서 다시 꺼낸 slab(옛 표지가 남은 slab)과 다른 등급이 다시 쓰는 slab에서도 같은지.
+- 빈 slab의 보관·decommit·`Trim`·낮은 번호부터 다시 쓰기, 풀린 slab의 표가 0인지.
+- 예약 실패(F4): 주입으로 축소 재시도(4배 → 2배 → 하한)와 "예약 없음"(모든 요청이 큰 경로, 통계·계약 그대로), slab 표 할당 실패, 하한보다 작은 설정은 한 번만 시도. 큰 경로로 간 작은 요청이 정렬 16 이상을 지키는지(요청한 정렬만 딱 지키는 상위 allocator로 확인).
+- 범위 소진(slab 둘짜리 범위)과 slab commit 실패가 큰 경로로 가는지, decommit 거절(보관해 다시 씀)·OS 실패(그 slab을 다시 쓰지 않음).
+- 큰 경로의 실패: 상위 allocator 실패, 원장 늘리기 실패(상위 블록을 돌려줌 — 상위 계수로 확인), 상위의 반환 거부(할당이 살아 남음), 상위 호출 안의 재진입.
+- 무작위 12만 번 할당·반환을 그림자 표와 대조(내용 보존, 통계 일치, 끝에 `Trim` 뒤 commit된 slab 0), 4 스레드 동시 할당·반환, 다른 스레드의 반환, 같은 주소의 동시 반환은 한쪽만 성공(시작 문으로 함께 출발).
+- Fatal 대조 프로그램(`allocator-binned-invalid-0..6`): 상위가 null·정렬 틀린 주소·주소 넘침·살아 있는 주소·예약 범위 안 주소를 돌려줌, 작은 블록·큰 블록을 남긴 파괴 — 일곱 모두 기대한 문구로 끝난다.
+
+음성 대조 15종 모두 잡혔다(Debug Foundation `CoreBinned`, 대조마다 소스를 바꿔 다시 빌드하고 되돌림):
+
+| 대조 | 바꾼 것 | 잡은 시험 |
+|---|---|---|
+| B1 | 뗀 블록 수 검사 생략(4단계) | `…NeverIssuedBlocksAreNotOwned`, `…EmptySlabsAreRetainedThenDecommitted` |
+| B2 | 반환 표지를 할당 때 지우지 않음 | `…ConcurrentAllocationStress`(다시 받은 블록의 반환 실패) 뒤 남은 할당 Fatal |
+| B3 | 반환 표지 검사 생략(5단계) | `…CrossThreadAndConcurrentDuplicateReturn`(둘 다 성공) 뒤 Fatal |
+| B4 | slab을 풀 때 표를 0으로 돌리지 않음 | `…DecommitFaultsKeepOrAbandonTheSlab`, `…EmptySlabs…`, `…NeverIssued…`(표 값 직접 확인) |
+| B5 | 예약 실패 때 축소하지 않음 | `…ReserveFailureShrinksThenRunsWithoutRange` |
+| B6 | 등급 올림에서 정렬 배수 검사 생략 | `…ClassTableMatchesDesign` |
+| B7 | 블록 경계 검사 생략(가운데 주소를 내림) | `…BlockBoundaryDivisionIsExact`, `…NeverIssued…` |
+| B8 | 원장 넣기 실패 때 블록을 상위에 돌려주지 않음 | `…LargePathFailuresRollBack`(상위 allocator의 계수) — AL1에서 관찰할 수 없던 경로 |
+| B9 | 상위가 반환을 거부해도 기록을 되돌리지 않음 | `…LargePathFailuresRollBack` |
+| B10 | 범위 소진을 실패로 돌려줌 | `…ExhaustedRangeAndCommitFailureFallBack` |
+| B11 | 잃은 slab을 decommit한 slab으로 다시 씀 | `…DecommitFaultsKeepOrAbandonTheSlab` |
+| B12 | 보관 한도를 보지 않음 | `…DecommitFaults…`, `…EmptySlabs…`, `…RandomChurnMatchesShadowModel` |
+| B13 | decommit한 slab을 낮은 번호부터 쓰지 않음 | `…EmptySlabsAreRetainedThenDecommitted` |
+| B14 | 큰 경로로 간 작은 요청의 정렬을 올리지 않음 | `…ReserveFailureShrinksThenRunsWithoutRange`(요청한 정렬만 딱 지키는 상위 allocator) |
+| B15 | 큰 블록의 중복 반환을 원장에서 걸러내지 않음 | 프로세스가 Fatal로 끝남(종료 코드 3 — 원장에 남은 옛 주소 때문에 상위가 다시 준 주소가 겹침으로 판정되거나 기록 되돌리기가 실패) |
+
+- 처음 실행에서 B2는 대조 자체가 빌드되지 않았고(쓰지 않는 상수 경고) B5는 패턴이 소스와 달라 건너뛰어, 둘을 고쳐 다시 돌렸다.
+- 측정은 스레드 캐시(AL3) 뒤에 한다(이 단계의 작은 블록 경로는 등급 잠금 하나를 지난다).
+
+### 25.4 AL2b: 주소 범위의 commit 방식 (메인 세션 검토, 2026-11-20)
+
+AL2의 주소 범위에서 두 가지를 고쳤다(설계 18.4절 개정 10).
+
+- 접근을 열어 둔 예약: `VirtualMemoryRegion::Reserve(bytes, VirtualMemoryAccess::Open)`을 더하고 `BinnedAllocator`가 그 종류로 예약한다. POSIX의 기본 종류(`Guarded`)는 slab마다 `mprotect`로 보호를 바꿔 매핑(VMA)이 쪼개지고 Linux·Android의 매핑 수 한도(`vm.max_map_count` 65530)에 닿는다. `Open`은 UE 5.8과 같이 예약이 읽기·쓰기 매핑 하나(`MAP_NORESERVE`)이고 commit은 보호를 바꾸지 않으며(Apple은 `MADV_FREE_REUSE` 힌트) decommit은 `madvise`만 한다(Android `MADV_DONTNEED`, Apple `MADV_FREE_REUSABLE`). Windows는 두 종류가 같다. `SecretArena`는 guard 페이지 때문에 기본 종류 그대로다(파일을 바꾸지 않았다).
+- commit·decommit 실패가 영역을 닫지 않는다: 전에는 한 번 실패하면 `VirtualMemoryRegion`이 Poisoned가 되어 그 뒤로 새 slab을 얻지 못하고 `Trim`도 메모리를 돌려주지 못했다. 지금은 commit이 실패한 요청만 큰 경로로 가고 다음 요청이 같은 slab 번호를 다시 얻으며, decommit이 실패한 slab은 commit된 채 보관해 다시 쓰고 다음 `Trim`이 다시 푼다. Poisoned는 `Release` 실패에만 남는다. AL2의 "상태를 알 수 없어 다시 쓰지 않는 slab"(Lost)은 없어졌다.
+- 실패 주입을 `VirtualMemoryRegion`의 시험 통로 하나로 모았다(`VirtualMemoryTestAccess::FailCommitOnCall`·`FailDecommitOnCall` — 이 스레드의 n번째 호출을 OS를 부르지 않고 실패시킨다). `BinnedAllocator`의 자체 주입(`FailSlabCommitOnAttempt`·`SetSlabDecommitFault`)은 없앴다 — 실패가 실제 영역을 지나야 "닫히지 않음"을 시험이 본다.
+
+시험:
+
+- `VirtualMemoryTests`: 접근을 열어 둔 예약의 수명(예약 → commit → 쓰기 → 가운데 decommit → 다시 commit → Release, 64 MiB를 예약하고 끝 조각만 commit, 같은 객체를 다른 종류로 다시 예약), commit 실패 뒤 같은 범위의 decommit·재commit과 다른 범위의 commit(두 종류 모두, 인자 검사에서 걸린 호출은 주입 차례를 쓰지 않음), decommit 실패 뒤 내용 유지(`Open`·Windows)와 재commit·재decommit.
+- `CoreBinnedCommitAndDecommitFailuresAreTransient`(AL2의 `…DecommitFaultsKeepOrAbandonTheSlab`을 바꿈): decommit 실패한 slab을 보관해 다시 쓰는 것, slab 둘 가운데 하나만 실패하면 `Trim`이 나머지를 풀고 다음 `Trim`이 실패한 것을 다시 푸는 것, commit 실패한 요청은 큰 경로로 가고 다음 요청이 같은 slab 번호를 얻는 것, 그 뒤의 `Trim`이 보관분을 돌려주는 것. `…ExhaustedRangeAndCommitFailureFallBack`의 commit 실패는 영역 통로로 주입한다.
+
+음성 대조 5종 모두 잡혔다(Debug `Core` 대상, `PlatformVirtualMemory`·`CoreBinned`):
+
+| 대조 | 바꾼 것 | 잡은 시험 |
+|---|---|---|
+| V1 | commit·decommit 실패가 영역을 닫음(고치기 전 계약) | `PlatformVirtualMemoryCommitFailureIsTransient`, `…DecommitFailureKeepsRegionOpen`, `CoreBinnedCommitAndDecommitFailuresAreTransient`, `…ExhaustedRangeAndCommitFailureFallBack` |
+| V2 | decommit이 실패한 slab을 decommit된 것으로 침 | `CoreBinnedCommitAndDecommitFailuresAreTransient` |
+| V3 | commit이 실패한 slab 번호를 건너뜀 | 같은 시험(다음 요청이 같은 slab 번호를 얻어야 한다) |
+| V4 | `Trim`이 decommit 실패에서 멈추고 나머지를 버림 | 같은 시험 |
+| V5 | 주입 차례가 인자 검사에서 걸린 호출도 셈 | `PlatformVirtualMemoryCommitFailureIsTransient` |
+
+- 이 기계(Windows)에서 볼 수 없는 것: POSIX에서 매핑이 쪼개지지 않는다는 것 자체(Windows는 두 예약 종류가 같다). POSIX 쪽 변경(`Posix/VirtualMemory.cpp`, `Android/AndroidPosix.cpp`, 공통 구현, `BinnedAllocator.cpp`, 시험)은 NDK `-fsyntax-only`로 확인했고, macOS는 push의 `[ci]`로 새 종류의 시험(`PlatformVirtualMemoryOpenReservationLifecycle` — 접근을 열어 둔 예약에서 쓰기)이 돈다.
+- 검증(AL1b와 묶어 한 번): Debug Foundation 2,570개, Debug EngineTests 2,976개 통과. Fatal 대조 프로그램(`allocator-binned-invalid-0..6`) 문구 그대로. format·policy 통과.
+
+### 25.5 AL3: 스레드 캐시·이전 칸·스레드 종료 정리
+
+`platform::ThreadExitSlot`(PlatformBase):
+
+- 스레드별 포인터 칸 하나와, 값이 null이 아닌 스레드가 끝날 때 그 스레드에서 불리는 정리 함수다. Windows는 `FlsAlloc`의 callback, POSIX는 `pthread_key_create`의 소멸자다(UE 5.8 `WindowsPlatformTLS.cpp`의 `FlsAlloc(&OnThreadExit)`와 같은 장치).
+- Windows의 FLS callback은 값만 받으므로 칸마다 다른 trampoline을 건다(상한 `MaxThreadExitSlots` 8). trampoline은 값을 먼저 지우고(UE도 같다 — 남아 있으면 다시 불릴 수 있다), 프로세스 종료 절차 중이면(`RtlDllShutdownInProgress`) 부르지 않는다: 그때 다른 스레드는 이미 강제 종료돼 잠금을 쥔 채일 수 있다. POSIX도 값을 지운 뒤에 부르고 `exit`에서는 부르지 않으므로 계약이 같다.
+- 시험(`ThreadExitSlotTests.cpp` 4개): 값을 둔 스레드가 끝나면 그 스레드에서 한 번 불리고 `Join`이 그 뒤에 돌아오는 것, 값이 스레드마다 따로인 것, 정리 함수 안에서 그 칸은 이미 null이고 그 스레드의 `thread_local`을 읽고 쓸 수 있는 것, 값을 두지 않았거나 null로 되돌린 스레드는 불리지 않는 것, `platform::Thread`가 아닌 OS 스레드(시험 지원 `test::RunOnOsThread` — Windows `CreateThread`, POSIX `pthread_create`)에서도 불리는 것, callback 없는 칸은 값을 받지 않는 것.
+
+`BinnedAllocator`의 스레드 캐시:
+
+- 스레드마다·인스턴스마다 등급별 묶음 둘(부분·가득). 묶음 한도는 64개 또는 64KB 가운데 작은 쪽이다(8192 등급은 8개). 할당은 부분 묶음 → 가득 묶음 → 이전 칸 → 등급 잠금 아래 slab(한 묶음을 뗀다) 순서, 반환은 부분 묶음 → 가득 묶음과 교체 → 밀려난 가득 묶음은 이전 칸(등급마다 8칸, 비교 교환) → 칸이 없으면 slab이다. 이전 칸에는 가득 찬 묶음만 간다(개수를 블록에 적지 않는다).
+- 캐시 경로의 반환은 잠금 없이 slab 머리의 뗀 블록 수(acquire)와 블록 안 표지를 보고, 표지를 비교 교환으로 세운다(같은 블록의 동시 반환은 한쪽만 성공). 묶음으로 뗄 때 표지를 세운 뒤에 뗀 블록 수를 게시한다.
+- 스레드 쪽: `thread_local` 포인터가 그 스레드의 기록(인스턴스 번호 → 캐시)을 가리키고 "마지막에 쓴 인스턴스" 한 칸을 먼저 본다. 인스턴스 번호는 프로세스에서 재사용하지 않는다. 기록은 `ThreadExitSlot`에 걸려 스레드가 끝날 때 캐시를 인스턴스로 돌려주고(가득 묶음은 이전 칸 먼저, 부분 묶음은 slab으로), 계수를 인스턴스 합계로 옮긴다. 종료 정리가 지나간 스레드는 "종료한 스레드"로 표시돼 캐시를 다시 만들지 않는다.
+- 인스턴스 등록부(잠금·살아 있는 인스턴스 목록·다음 번호·종료 칸)는 처음 쓸 때 만들고 파괴하지 않는다. 인스턴스 파괴는 등록부에서 번호를 지우고 남은 캐시(다른 스레드 것 포함)를 모두 비워 해제한 뒤, 이전 칸을 비우고 "쓰는 slab이 없음"을 확인한다(어긋나면 Fatal `slab accounting diverged`).
+- `BinnedAllocatorConfig::threadCaches`(기본 켬)를 끄면 모든 작은 요청이 등급 잠금 경로다. 캐시를 만들지 못한 호출과 종료한 스레드도 이 경로를 쓴다.
+- `Trim`은 호출 스레드의 캐시와 이전 칸을 slab으로 돌려준 뒤 빈 slab을 decommit한다(다른 스레드의 캐시는 건드리지 않는다). `Stats`는 캐시의 계수와 인스턴스 합계를 더한다.
+
+시험:
+
+- AL2의 `CoreBinned` 시험 가운데 계약 시험 7개를 캐시 끔·켬 두 구성으로 돌린다(slab 수준 동작을 보는 시험은 캐시를 끈다).
+- `BinnedAllocatorThreadCacheTests.cpp` 10개: 묶음 단위 refill(떼었지만 내준 적 없는 블록과 뗀 적 없는 블록 127개가 모두 `NotFound`), 이전 칸에는 가득 찬 묶음만(세 등급 — 12 묶음을 반환하면 캐시 2·이전 칸 8·slab 2, 묶음 길이 = 등급 한도, 다시 할당하면 이전 칸을 slab보다 먼저), 부분 묶음은 스레드 종료·`Trim` 때 slab으로(F7), 스레드가 끝나면 캐시와 계수가 인스턴스로 돌아가고 남긴 블록은 다른 스레드가 반환, `Trim`은 다른 스레드의 캐시를 건드리지 않음, OS 스레드의 캐시도 돌아감, 인스턴스가 스레드보다 먼저 파괴돼도 되고 같은 주소에 다시 만든 인스턴스와 섞이지 않으며 죽은 인스턴스의 기록 항목은 다음 캐시를 만들 때 버려짐, 캐시 만들기 실패는 등급 잠금 경로로, 종료 정리가 지나간 스레드는 등급 잠금 경로로, 한 스레드가 할당하고 다른 스레드가 반환(명시 인계 40 round × 96개), 같은 주소의 동시 반환 4,096 round × 2 구성에서 round마다 정확히 한쪽만 성공.
+- 스레드 시험의 순서는 모두 명시 gate(단계 번호, 시작 문, 인계 칸)와 `Join`으로 만든다. sleep이나 시간 대기는 없다.
+
+음성 대조 14종 모두 잡혔다(Debug `Core` 대상 `CoreBinned`·`ThreadExitSlot`, 대조마다 다시 빌드):
+
+| 대조 | 바꾼 것 | 잡은 시험 |
+|---|---|---|
+| C1 | 묶음으로 뗀 블록에 표지를 세우지 않음(F1) | `CoreBinnedCacheRefillsByBundle`(내준 적 없는 블록의 반환이 성공) |
+| C2 | 스레드 종료 때 부분 묶음을 이전 칸에 넣음(F7) | `…PartialBundlesReturnToSlabsAtThreadExitAndTrim` |
+| C3 | 인스턴스 파괴가 등록부에서 번호를 지우지 않음 | 프로세스가 Fatal로 끝남(종료 코드 3) |
+| C4 | 이전 칸 넣기가 찬 칸을 덮어씀(비교 교환 대신 대입) | commit된 slab이 남음(`committedBytes == 0` 실패) 뒤 Fatal |
+| C5 | 스레드 종료 hook이 캐시를 비우지 않음 | 여덟 시험(`…ThreadExitReturnsCacheAndKeepsLiveBlocks`·`…RawOsThreadCacheIsReturned` 등) |
+| C6 | 반환 표지를 비교 교환 대신 대입으로 세움 | 시험이 멈춤 — 같은 블록이 두 캐시에 들어 목록이 고리가 된다(실행기가 끊음. 지금 실행기는 300 s 제한 시간으로 끊는다) |
+| C7 | `Trim`이 이전 칸을 비우지 않음 | 아홉 시험(`Trim` 뒤 commit된 slab이 남음) |
+| C8 | 할당의 빠른 경로가 인스턴스 번호를 보지 않고 마지막 캐시를 씀 | `…CacheCreationFailureUsesLockedPath` 뒤 Fatal(다른 인스턴스의 캐시에서 받음) |
+| C9 | 파괴가 이전 칸을 비우지 않음 | Fatal `slab accounting diverged`(파괴의 자체 검사) |
+| C10 | 끝난 스레드의 계수를 인스턴스로 옮기지 않음 | `…ConcurrentAllocationStress`(누적 할당 수) 뒤 Fatal |
+| C11 | 이전 칸이 찼을 때 밀려난 가득 묶음을 버림 | `…TransferSlotsHoldOnlyFullBundles`(`Trim` 뒤 slab이 남음) 뒤 Fatal |
+| C12 | 종료 hook이 스레드를 "종료한 스레드"로 표시하지 않음 | 접근 위반으로 끝남(`…ExitedThreadUsesLockedPath` — 해제한 기록을 다시 봄) |
+| C13 | 캐시 경로의 반환이 뗀 블록 수를 보지 않음(4단계) | `…CacheRefillsByBundle`, `…CacheCreationFailureUsesLockedPath` |
+| C14 | 캐시를 만들 때 죽은 인스턴스의 항목을 버리지 않음 | `…InstanceDestroyedBeforeItsThreadsExit`(기록 항목 수) |
+
+측정(25.1절과 같은 방법, 3 round 최솟값). 작은 벤치:
+
+| 할당자 | 쌍(16–8192 B) | 묶음 4096×64 B | 인계: 다른 스레드 / 같은 스레드 | 동시 1 스레드 | 동시 8 스레드 |
+|---|---|---|---|---|---|
+| platform | 24.7–25.3 ns | 28.2 ns/op | 92.1 / 30.5 ns/쌍(×3.0) | 38.1 M쌍/s | 160.7 M쌍/s(×4.0–4.2) |
+| `BinnedAllocator` 전(25.1절) | 73.9–155.6 ns | 5,382 ns/op | 541 / 444 ns/쌍 | 3.0 M쌍/s | 0.11 M쌍/s(×0.04) |
+| `BinnedAllocator` 후 | 9.0–9.2 ns | 7.0 ns/op | 21.6 / 11.1 ns/쌍(×1.95) | 103.8 M쌍/s | 462.9 M쌍/s(×4.2–4.6) |
+
+객체 생성·회수(객체당 ns):
+
+| 살아 있는 객체 | 할당자 | 생성+연결 | churn 생성+연결 | churn 회수 | 종료 회수 |
+|---|---|---|---|---|---|
+| 20K | bump | 565.9 | 572.6 | 32.0 | 55.1 |
+| 20K | platform | 747.0 | 669.7 | 89.5 | 153.2 |
+| 20K | `BinnedAllocator` | 627.6 | 510.4 | 51.8 | 77.4 |
+| 200K | bump | 856.8 | 1,043 | 36.6 | 93.5 |
+| 200K | platform | 1,151 | 1,154 | 103.0 | 199.8 |
+| 200K | `BinnedAllocator` | 975.7 | 988.8 | 60.2 | 131.2 |
+| 1M | bump | 1,187 | 1,239 | 39.0 | 100.7 |
+| 1M | platform | 1,422 | 1,349 | 109.5 | 214.2 |
+| 1M | `BinnedAllocator` | 1,265 | 1,232 | 76.6 | 140.9 |
+
+- 1M이 끝난다(전에는 생성부터 객체당 0.3 ms라 20K를 넘기지 못했다). 모든 항목에서 플랫폼 할당보다 빠르다.
+- 할당자 몫(bump를 뺀 값, 1M): 생성 78 ns(플랫폼 235의 33%), churn 생성은 bump와 같은 수준(−8 — 반환한 블록을 다시 써서 새 메모리만 쓰는 bump보다 캐시에 유리하다. 플랫폼 110), churn 회수 37.6 ns(플랫폼 70.5의 53%), 종료 회수 40.2 ns(플랫폼 113.5의 35%).
+- gate(설계 18.8절 제안) 대비: A3 쌍 9.1 ns(목표 40 이하), A4 다른 스레드 반환이 같은 스레드의 1.95배(목표 3배 이내), A5 8 스레드가 1 스레드의 4.2–4.6배(목표 4배 이상)는 채운다. A2는 "플랫폼 이하"는 채우고 "몫이 플랫폼의 절반 이하"는 생성·종료가 채우며 churn 회수가 53%로 조금 넘는다 — 반환마다의 표지 비교 교환(잠금 접두 명령) 몫을 AL5에서 따로 재서 gate를 확정한다. A6(메모리)·A7(GC churn 회수 시나리오)은 AL5에서 잰다.
+
+검증:
+
+- Debug `Core` 대상: `ThreadExitSlot` 4개, `CoreBinned` 23개(AL2의 13개 + 캐시 10개), `Thread` 38개 통과. POSIX 쪽(`Posix/Concurrency.cpp`, 시험 지원 `Posix/OsThread.cpp`, 시험, `BinnedAllocator.cpp`)은 NDK `-fsyntax-only` 통과, macOS는 push의 `[ci]`로 돈다.
+- Debug Foundation·EngineTests 빌드 뒤 범위 시험: Foundation `CoreBinned` 23·`ThreadExitSlot` 4·`Thread` 57·`Allocator` 37, EngineTests `CoreBinned` 23·`ThreadExitSlot` 4·`Thread` 60·`Gc` 110 통과. format·policy 통과.

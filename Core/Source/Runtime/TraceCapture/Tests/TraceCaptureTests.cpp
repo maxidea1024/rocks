@@ -6,6 +6,8 @@
 #include <stdio.h>
 
 using namespace rocks;
+namespace trace_capture_tests_file {
+
 using namespace rocks::tracetest;
 
 namespace {
@@ -485,3 +487,4 @@ TEST(TraceDisabledChannelCostIsMeasured) {
            EnabledIterations);
     session.Stop();
 }
+} // namespace trace_capture_tests_file

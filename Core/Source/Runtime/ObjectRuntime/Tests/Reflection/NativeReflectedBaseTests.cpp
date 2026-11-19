@@ -21,6 +21,8 @@
 // 시험(NativeDerivedGraphTests)이, 잘못된 Trace 선언의 컴파일 거부는 ToolTests meta 컴파일 probe가
 // 본다.
 using namespace rocks;
+namespace native_reflected_base_tests_file {
+
 using reflection_fixture::AbstractBase;
 using reflection_fixture::AbstractByPolicy;
 using reflection_fixture::Base;
@@ -873,3 +875,4 @@ TEST(NativeClass_PrivateAndProtectedTraceAreVisited) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace native_reflected_base_tests_file

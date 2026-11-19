@@ -63,8 +63,13 @@ internal static class Program
                         .Concat(PolicyChecks.PythonFreeMainPath(root)).Concat(PolicyChecks.ThirdParty(root)).Concat(PolicyChecks.DerivedSources(root)).Concat(PolicyChecks.ForeignEngineBoundary(root))
                         .Concat(PolicyChecks.ShaderToolReferences(root)).Concat(PolicyChecks.ProcessEntryPoints(root)).ToList();
                     // Release 배제(셰이더 시스템 9절)는 규칙 어셈블리를 평가한다. 알려진 예외는 실패가 아니지만 조용히 넘기지 않고 출력한다.
-                    ReleaseExclusionResult release = ReleaseExclusion.Check(root, options.Optional("rules") ?? ReleaseExclusion.DefaultRulesAssembly(root));
+                    string rulesAssembly = options.Optional("rules") ?? ReleaseExclusion.DefaultRulesAssembly(root);
+                    ReleaseExclusionResult release = ReleaseExclusion.Check(root, rulesAssembly);
                     failures.AddRange(release.Failures);
+                    // 유니티 묶음 충돌(Docs/Design/UnityBuildPch.ko.md 9.2절)도 규칙 어셈블리를 평가해 유니티를 켠 모듈만 본다.
+                    failures.AddRange(PolicyChecks.UnityCollisions(root, rulesAssembly));
+                    // PCH 헤더는 빌드가 강제 include한다 — 소스와 헤더가 직접 include하지 않는다(같은 문서 8.1·10절).
+                    failures.AddRange(PolicyChecks.PchHeaderIncludes(root, rulesAssembly));
                     foreach (string notice in release.Notices)
                     {
                         Console.WriteLine("note: " + notice);
@@ -81,6 +86,18 @@ internal static class Program
                     }
 
                     return failures.Count == 0 ? 0 : 1;
+                case "unity-audit":
+                    // 유니티 묶음 충돌을 모듈의 Unity 설정과 무관하게 모든 엔진 모듈(외부 라이브러리 제외)에 대해 센다
+                    // (Docs/Design/UnityBuildPch.ko.md 9.3절 — 어느 모듈을 정리해 켤 수 있는지 본다). 검사가 아니라 조사라서 종료 코드는 0이다.
+                    var audit = PolicyChecks.UnityCollisions(root, options.Optional("rules") ?? ReleaseExclusion.DefaultRulesAssembly(root),
+                        module => !module.ThirdParty);
+                    foreach (var failure in audit)
+                    {
+                        Console.WriteLine(failure);
+                    }
+
+                    Console.WriteLine($"{audit.Count} unity collision(s)");
+                    return 0;
                 case "third-party":
                     // 외부 라이브러리 업그레이드: manifest의 files·pragmaDirectives를 원본에서 다시 계산한다.
                     // 기본은 차이만 보고(종료 코드 1), --write면 고친다. 새 지시문은 3.6 규칙으로 검토한다.
@@ -147,14 +164,14 @@ internal static class Program
             }
 
             // --filter <a,b,...>: 이름에 쉼표로 나눈 조각 하나라도 들어 있는 시험만 돈다(반복 중 바뀐 부분만 확인할 때). 아무것도 남지
-            // 않으면 실패다.
+            // 않으면 실패다. --only는 정확한 이름 목록이다(TestSuite.RunAsync).
             if (options.Optional("filter") is string filter)
             {
                 string[] parts = filter.Split(',', StringSplitOptions.RemoveEmptyEntries);
                 suite.Retain(name => parts.Any(part => name.Contains(part, StringComparison.Ordinal)));
             }
 
-            return await suite.RunAsync(options.Json, options.Seed, parallelism);
+            return await suite.RunAsync(options.Json, options.Seed, parallelism, options.Only);
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {

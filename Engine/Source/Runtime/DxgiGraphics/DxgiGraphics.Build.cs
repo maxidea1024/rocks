@@ -7,6 +7,9 @@ public sealed class DxgiGraphics : EngineModuleRules
 {
     protected override string ModuleName => "DxgiGraphics";
 
+    // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
+    protected override UnityMode Unity => UnityMode.On;
+
     protected override string[] RequiredModules => ["Core"];
 
     public override NativeModuleInput Configure(BuildContext context)
@@ -16,6 +19,8 @@ public sealed class DxgiGraphics : EngineModuleRules
         return new()
         {
             Name = ModuleName,
+            Unity = UnityFor(context),
+            UnityExclude = UnityExclude(context),
             Sources = windows ? context.Sources($"{sources}/Common", $"{sources}/Win64") : context.Sources($"{sources}/Common"),
             PublicIncludeDirectories = [context.PathInRoot($"{ModuleDirectory}/Public")],
             Dependencies = RequiredModules,

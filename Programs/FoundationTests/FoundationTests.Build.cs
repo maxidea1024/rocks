@@ -33,6 +33,44 @@ public abstract class TestsModule : ModuleRules
     // Private includes (adapter approach) and must produce zero warnings under the engine warning rules (Docs/Design/ShaderSystem.ko.md section 8).
     private static readonly string[] EngineThirdPartyHeaders = ["VulkanHeaders", "SpirvReflect", "SpirvCross", "SpirvTools"];
 
+    // Unity build (Docs/Design/UnityBuildPch.ko.md section 9.3). Test sources keep their file-local helpers and TEST bodies in a namespace
+    // unique to the file (<file>_file), so helpers with the same name in two sources never meet in one batch. The sources below stay standalone
+    // translation units: their helpers are used from another namespace of the same file (specializations of rocks templates for test types,
+    // host service macros, probes called from the runner), so they cannot be enclosed mechanically.
+    private static readonly string[] UnityStandaloneSources =
+    [
+        "Core/Source/Runtime/Base/Tests/BaseTests.cpp",
+        "Core/Source/Runtime/Config/Tests/ConsoleInputTests.cpp",
+        "Core/Source/Runtime/Core/Tests/BinnedAllocatorFailureControls.cpp",
+        "Core/Source/Runtime/Core/Tests/LogSystemTests.cpp",
+        "Core/Source/Runtime/Core/Tests/LogTemplateLocationProbe.cpp",
+        "Core/Source/Runtime/Core/Tests/LogTemplateTests.cpp",
+        "Core/Source/Runtime/Core/Tests/MemoryAllocatorEdgeTests.cpp",
+        "Core/Source/Runtime/Core/Tests/OperatorNewCounter.cpp",
+        "Core/Source/Runtime/Core/Tests/StackAllocatorTests.cpp",
+        "Core/Source/Runtime/Core/Tests/StringFormatTests.cpp",
+        "Core/Source/Runtime/ModuleLoader/Tests/ModuleLoaderFailureControls.cpp",
+        "Core/Source/Runtime/ModuleLoader/Tests/ModuleLoaderTests.cpp",
+        "Core/Source/Runtime/ObjectRuntime/Tests/DestroyRequestedFailureTests.cpp",
+        "Core/Source/Runtime/ObjectRuntime/Tests/ObjectDiscardTests.cpp",
+        "Core/Source/Runtime/ObjectRuntime/Tests/Reflection/PropertyPathTests.cpp",
+        "Core/Source/Runtime/ObjectRuntime/Tests/Reflection/RequiredCheckContextTests.cpp",
+        "Core/Source/Runtime/ObjectRuntime/Tests/TypeConvenienceTests.cpp",
+        "Core/Source/Runtime/ObjectSerialization/Tests/ArrayGraphTests.cpp",
+        "Core/Source/Runtime/ObjectSerialization/Tests/StructGraphTests.cpp",
+        "Core/Source/Runtime/PlatformBase/Tests/FileFailureControls.cpp",
+        "Core/Source/Runtime/PlatformBase/Tests/ProcessProbe.cpp",
+        "Engine/Source/Runtime/RenderBase/Tests/GpuTraceTests.cpp",
+        "Engine/Source/Runtime/RenderBase/Tests/RenderLaneTests.cpp",
+        "Engine/Source/Runtime/RenderBase/Tests/RenderSettingsTests.cpp",
+        "Engine/Source/Runtime/RenderGraph/Tests/RenderGraphLifecycleTests.cpp",
+        "Engine/Source/Runtime/RenderGraph/Tests/RenderGraphReuseTests.cpp",
+        "Engine/Source/Runtime/RenderGraph/Tests/RenderGraphSharedDataTests.cpp",
+        "Engine/Source/Runtime/World/Tests/WorldReflectionTests.cpp",
+        "Programs/FoundationTests/Private/LoggerProcessProbe.cpp",
+        "Programs/FoundationTests/Private/NumberCorpus.cpp",
+    ];
+
     protected abstract TestLayer Layer { get; }
 
     protected abstract string ExecutableName { get; }
@@ -83,6 +121,8 @@ public abstract class TestsModule : ModuleRules
             Name = ExecutableName,
             Kind = NativeModuleKind.Executable,
             Sources = sources,
+            Unity = RepositoryUnity.Effective(UnityMode.On, context),
+            UnityExclude = UnityStandaloneSources.Select(context.PathInRoot).ToArray(),
             // Core/Source/Runtime (and Engine/Source/Runtime for the engine layer): tests include module Private headers with the
             // <Module/Private/...> spelling. The repository root is not included (so headers of gitignored outputs, user directories and
             // nested working copies do not enter the include inventory).

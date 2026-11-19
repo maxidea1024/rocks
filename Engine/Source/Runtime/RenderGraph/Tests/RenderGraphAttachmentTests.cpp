@@ -6,6 +6,8 @@
 // MRT·깊이·mip·slice attachment, attachment load의 생산 전 읽기 검사, 렌더 타깃 없는
 // Compute·Copy pass의 기록, 깊이·Storage·MSAA 그래프 텍스처와 풀 키.
 using namespace rocks;
+namespace render_graph_attachment_tests_file {
+
 using namespace rocks::render;
 using namespace rocks::render::testing;
 using graphics::ResourceAccess;
@@ -224,3 +226,4 @@ TEST(RenderGraph_PoolCreatesDepthStorageAndMsaaTextures) {
     CHECK(bench.pool.Stats().created == 5);
     CHECK(bench.device.ValidationErrorCount() == 0);
 }
+} // namespace render_graph_attachment_tests_file

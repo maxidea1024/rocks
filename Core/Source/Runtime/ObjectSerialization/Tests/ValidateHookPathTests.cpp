@@ -16,6 +16,8 @@
 // 직접 놓는 PathPrepareAttach는 Unsupported(InsideValidatedStruct)다. hook과 무관한 경로는 지금
 // 그대로다.
 using namespace rocks;
+namespace validate_hook_path_tests_file {
+
 using reflection_fixture::CurrentValidateLog;
 using reflection_fixture::ValidHolder;
 using reflection_fixture::ValidRange;
@@ -672,3 +674,4 @@ TEST(ValidateHookPath_PreparedElementsWriteAfterValidateIsRevalidated) {
     REQUIRE(PathWrite(fixture.objects, fixture.access, start.Value(), low.View(), nine));
     CHECK(ErrorOf(stage.PreparePublish()) == ErrorCode::InvalidArgument);
 }
+} // namespace validate_hook_path_tests_file

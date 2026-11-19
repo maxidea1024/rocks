@@ -4,6 +4,7 @@
 #include <Localization/Text.h>
 
 using namespace rocks;
+namespace catalog_tests_file {
 
 TEST(CatalogOwnsInputsAndRetainedSnapshotOutlivesStoreAndPublishSources) {
     SystemAllocator allocator;
@@ -137,3 +138,4 @@ TEST(CatalogPreservesEmptyAndEmbeddedNullTranslations) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace catalog_tests_file

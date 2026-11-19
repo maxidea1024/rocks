@@ -106,6 +106,17 @@ int PosixDecommitAdvice() noexcept {
     return MADV_FREE;
 }
 
+// UE 5.8 ApplePlatformMemory.cpp 784·791과 같다: decommit은 MADV_FREE_REUSABLE(페이지를 재사용
+// 가능으로 표시해 사용량 통계에서 빼고 OS가 거둘 수 있게 한다), commit은 MADV_FREE_REUSE(다시
+// 쓴다고 알린다).
+void PosixOpenCommit(void* address, usize bytes) noexcept {
+    static_cast<void>(madvise(address, bytes, MADV_FREE_REUSE));
+}
+
+int PosixOpenDecommit(void* address, usize bytes) noexcept {
+    return madvise(address, bytes, MADV_FREE_REUSABLE);
+}
+
 // Apple의 pthread_setname_np는 현재 스레드에만 붙이며 한도는 63 byte다(MaxThreadNameBytes와 같다).
 void PosixSetCurrentThreadName(const char* name) noexcept {
     static_cast<void>(pthread_setname_np(name));

@@ -10,6 +10,7 @@
 #include <Core/Text/StringView.h>
 #include <ModuleLoader/HostServices.h>
 #include <ModuleLoader/ModuleReport.h>
+#include <ModuleLoader/ModuleTypeRegistrar.h>
 
 namespace rocks {
 
@@ -101,7 +102,8 @@ public:
     // 아직 시작해 있는 모듈을 안쪽 묶음부터 종료 절차로 내린 뒤 모든 수명 객체를 파괴한다.
     // SupportsAutomaticShutdown() == false 모듈은 Shutdown 없이 객체만 파괴한다(UE와 같다). 로더
     // 스레드에서 파괴한다. 발급한 lease가 남아 있으면 Fatal이다(lease 해제가 파괴된 기록을 쓰지
-    // 않게).
+    // 않게). 호스트는 파괴 전에 ModulesWithLeases로 남은 lease를 진단해 기록한다. 타입 등록기가
+    // 붙어 있으면 그 등록을 되돌리고 뗀다(등록기는 그때까지 살아 있어야 한다).
     ~ModuleLoader() noexcept;
 
     ModuleLoader(const ModuleLoader&) = delete;
@@ -152,6 +154,41 @@ public:
     // 표의 모듈 수다.
     usize ModuleCount() const noexcept;
 
+    // 생성 때 받은 모듈 표다(의존 순서). 설정 등록(HostSettings, 3.10절)이 모든 모듈의
+    // registerSettings를 이 순서로 부른다.
+    ModuleTable Table() const noexcept {
+        return table_;
+    }
+
+    // name 모듈의 코드 수명 토큰을 하나 더 발급한다(3.6절 MD16). 모듈 코드·데이터를 가리키는 등록을
+    // 잡는 쪽(설정 문맥 등)이 쓴다. 어느 스레드에서든 부를 수 있다. 표에 없으면 NotFound다. 로더가
+    // 파괴되기 전에 놓아야 한다.
+    Result<ModuleLease> AcquireLease(StringView name) noexcept;
+
+    // lease가 남은 모듈의 이름을 names에 앞에서부터 담고(넘치면 버린다) 그런 모듈의 수를 돌려준다
+    // (3.10절 남은 lease 진단). 종료 뒤 0이 아니면 모듈 코드를 가리키는 등록이 남았다는 뜻이다.
+    // 이름은 정적 수명이다(모듈 표).
+    usize ModulesWithLeases(Span<StringView> names) const noexcept;
+
+    // 타입 등록기를 붙이고 이미 시작한 모듈의 타입을 시작 순서로 몰아서 등록한다(3.6·3.10절 MD15).
+    // 붙은 뒤 시작하는 모듈은 Startup 직전에 등록하고(실패하면 StartupFailed, 단계
+    // "RegisterTypes"), Startup이 실패하면 되돌린다. 묶음 종료는 각 모듈의 Shutdown 뒤 그 모듈
+    // 타입을 되돌린다. 몰아서 등록하다 실패하면 이번에 등록한 것을 시작 역순으로 되돌리고 붙이지
+    // 않은 채 report(StartupFailed, failed에 그 모듈, error에 등록기 오류)를 돌려준다. 로더
+    // 스레드가 아니면 WrongThread report다. 이미 붙어 있거나, Load 진행 중이거나, 묶음 종료 콜백
+    // 안에서 부르면 Fatal이다(등록기는 한 번에 하나 — 여러 Engine의 참조 수는 ML1). registrar는 뗄
+    // 때까지 살아 있어야 한다.
+    ModuleLoadReport AttachTypeRegistrar(ModuleTypeRegistrar& registrar) noexcept;
+
+    // 남은 타입 등록을 시작 역순으로 되돌리고 등록기를 뗀다. 붙어 있지 않으면 할 일이 없다. 로더
+    // 스레드가 아니거나, Load 진행 중이거나, 묶음 종료 콜백 안에서 부르면 Fatal이다.
+    void DetachTypeRegistrar() noexcept;
+
+    // 붙어 있는 타입 등록기다. 없으면 null이다.
+    ModuleTypeRegistrar* TypeRegistrar() const noexcept {
+        return registrar_;
+    }
+
     // 호스트 서비스 표다(3.1절). 로더 스레드에서만 쓴다.
     HostServices& Services() noexcept {
         return services_;
@@ -184,6 +221,8 @@ private:
         uint64 startOrder = 0;
         // 진행 중인 묶음 종료가 이 모듈의 PreUnload를 불렀고 Shutdown이 남았다.
         bool pendingShutdown = false;
+        // 붙은 타입 등록기에 이 모듈의 타입을 등록했다.
+        bool typesRegistered = false;
         // 살아 있는 lease 수다.
         usize leases = 0;
     };
@@ -193,9 +232,15 @@ private:
     Result<void> Initialize(ModuleTable table) noexcept;
     bool StartRecord(usize index, ModuleLoadReport& report) noexcept;
     void ShutdownRecords(ModuleGroup group) noexcept;
+    bool RegisterRecordTypes(usize index, ModuleLoadReport& report) noexcept;
+    void UnregisterRecordTypes(usize index) noexcept;
+    void UnregisterAllTypes() noexcept;
+    void CheckRegistrarCall() const noexcept;
 
     Allocator* allocator_;
     HostServices services_;
+    ModuleTable table_;
+    ModuleTypeRegistrar* registrar_ = nullptr;
     Array<Record> records_;
     // 모든 행의 의존 색인을 이어 둔 배열이다. 행마다 [dependencyStart, dependencyStart + count)다.
     Array<usize> dependencies_;

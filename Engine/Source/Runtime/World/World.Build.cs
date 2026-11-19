@@ -1,3 +1,4 @@
+using Rocks.Build;
 using Rocks.Build.Rules;
 
 // World, Actor, Component, SceneComponent, TickScheduler and WorldSubsystem. Does not reference Engine, Graphics or window
@@ -9,6 +10,9 @@ using Rocks.Build.Rules;
 public sealed class World : EngineModuleRules
 {
     protected override string ModuleName => "World";
+
+    // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
+    protected override UnityMode Unity => UnityMode.On;
 
     // CoreTypeBindings: SceneComponent's Transform field imports that module's Binds mirror.
     // Config: a World owns a CVar scope in the host config context (Docs/Design/CVarSystem.ko.md section 14.2).

@@ -7,6 +7,8 @@
 #include <Object/TypeRegistry.h>
 #include <Task/WorkerScheduler.h>
 
+namespace gc_parallel_tests_file {
+
 // 병렬 표식(GC-S4) 시험이다(Docs/Design/GarbageCollectionScale.ko.md 6절 GC-S4, 9절).
 // - worker 1·2·N개의 정지형·증분 병렬 표식이 seed 고정 무작위 그래프에서 독립 oracle(시험 안의
 // BFS)과
@@ -491,3 +493,4 @@ TEST(ObjectGcParallel_DebugCatchesStaleHandleInStrongEdge) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace gc_parallel_tests_file

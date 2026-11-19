@@ -5,6 +5,7 @@
 #include <Localization/Text.h>
 
 using namespace rocks;
+namespace name_text_integration_tests_file {
 
 TEST(NameTextIdentitySurvivesLanguageSwitchAndReadersKeepTheirSnapshot) {
     SystemAllocator allocator;
@@ -118,3 +119,4 @@ TEST(NameTextRepeatedHeadlessSessionTeardownLeavesNoOwners) {
         CHECK(allocator.Stats().liveBytes == 0);
     }
 }
+} // namespace name_text_integration_tests_file

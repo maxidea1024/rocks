@@ -8,6 +8,8 @@
 #include <string.h>
 
 using namespace rocks;
+namespace key_blob_tests_file {
+
 using namespace rocks::crypto;
 
 // 알려진 답의 출처: Key·Password 방식 KdfKey blob을 Python에서 따로 조립했다(BLAKE2b 파생은
@@ -777,18 +779,18 @@ TEST(CryptoLabelsAndTypeTags) {
     }
 
     // 타입 파생 tag는 모두 다르다.
-    detail::KdfTypeTag tags[32];
+    crypto::detail::KdfTypeTag tags[32];
     usize tagCount = 0;
-    tags[tagCount++] = detail::KdfKeyTypeTag;
-    tags[tagCount++] = detail::KdfBoundTypeTag;
+    tags[tagCount++] = crypto::detail::KdfKeyTypeTag;
+    tags[tagCount++] = crypto::detail::KdfBoundTypeTag;
     for (uint8 algorithm = 1; algorithm <= 4; ++algorithm) {
-        tags[tagCount++] = detail::MacKeyTypeTag(algorithm);
+        tags[tagCount++] = crypto::detail::MacKeyTypeTag(algorithm);
     }
 
     for (uint8 algorithm = 1; algorithm <= 6; ++algorithm) {
-        tags[tagCount++] = detail::AeadKeyTypeTag(algorithm);
-        tags[tagCount++] = detail::AeadSequenceKeyTypeTag(algorithm);
-        tags[tagCount++] = detail::AeadSequenceIvTypeTag(algorithm);
+        tags[tagCount++] = crypto::detail::AeadKeyTypeTag(algorithm);
+        tags[tagCount++] = crypto::detail::AeadSequenceKeyTypeTag(algorithm);
+        tags[tagCount++] = crypto::detail::AeadSequenceIvTypeTag(algorithm);
     }
 
     for (usize i = 0; i < tagCount; ++i) {
@@ -804,3 +806,4 @@ TEST(CryptoLabelsAndTypeTags) {
     CHECK(!first.Value().IsNil() && !(first.Value() == second.Value()));
     CHECK(KeyId().IsNil());
 }
+} // namespace key_blob_tests_file

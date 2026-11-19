@@ -14,7 +14,7 @@
 
 UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`)의 UnrealHeaderTool이다. 경로는 `Engine/Source/Programs/Shared/EpicGames.UHT/Exporters/CodeGen/` 기준이다. UE 이름은 대응표와 근거에만 적는다. 측정은 Rocks 툴체인(clang-cl 21.1.6, foundation-debug)으로 했다.
 
-상태: **설계 확정**(결정 GSD1–GSD14, 2026-11-19 사용자 승인 — 권장안, GSD5·GSD13은 보류). 리뷰어 교차 검증을 반영했다(개정 2). 리뷰어가 기존 생성 헤더 35개를 5절 방식으로 나눠 전부 컴파일해 구조가 성립함을 확인했다. 구현 단계는 GS0–GS3(11절)이다. GS1(등록 함수 분리)은 2026-11-19 사용자 결정으로 착수했다. 다른 세션은 GS1 병합까지 전체 빌드·시험 반복을 보류한다. GS0(action 소요 시간 기록·기준 측정)과 GS1은 2026-11-20 구현해 engine-runtime에 병합했다(측정값은 9절). 이후 단계의 기준·전후 측정용 빌드는 따로 돌리지 않는다(2026-11-20 사용자 결정) — 숫자는 일반 검증 빌드의 action 소요 시간(GSD12)으로 남긴다.
+상태: **설계 확정**(결정 GSD1–GSD14, 2026-11-19 사용자 승인 — 권장안, GSD5·GSD13은 보류). 리뷰어 교차 검증을 반영했다(개정 2). 리뷰어가 기존 생성 헤더 35개를 5절 방식으로 나눠 전부 컴파일해 구조가 성립함을 확인했다. 구현 단계는 GS0–GS3(11절)이다. GS1(등록 함수 분리)은 2026-11-19 사용자 결정으로 착수했다. 다른 세션은 GS1 병합까지 전체 빌드·시험 반복을 보류한다. GS0(action 소요 시간 기록·기준 측정)과 GS1은 2026-11-20 구현해 engine-runtime에 병합했다(측정값은 9절). GS2(타입별 본문 분리)도 2026-11-20 구현했다(구현하며 정한 점은 개정 이력). 이후 단계의 기준·전후 측정용 빌드는 따로 돌리지 않는다(2026-11-20 사용자 결정) — 숫자는 일반 검증 빌드의 action 소요 시간(GSD12)으로 남긴다.
 
 ## 1. 현재 상태와 측정
 
@@ -185,7 +185,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`)의 Unre
 ### 5.5 모듈 생성 헤더와 소스
 
 - 모듈 생성 헤더는 지금처럼 둘이다. public 쪽(`<M>/<M>.module.generated.h`)은 `RegisterModuleTypes(ModuleRegistration&, const ModuleLease& = {})`, private 쪽(`<M>/<M>.private.module.generated.h`, private 리플렉션 헤더가 있는 모듈만)은 `RegisterPrivateModuleTypes`의 선언만 담는다. include는 `Object/ModuleRegistration.h`뿐이다(이 헤더만 include한 TU는 0.4–0.6초다 — 1.2절).
-- 모듈 생성 소스는 모듈마다 하나다. 이 모듈의 타입별 생성 헤더(public·private)와 의존 모듈의 public 모듈 생성 헤더를 include하고 두 등록 함수를 정의한다. 등록 순서(의존 모듈 먼저, enum → struct → 클래스, 클래스는 base 먼저), private 함수가 public 함수를 먼저 부르는 것, 실패 시 되돌리기는 지금과 같다.
+- 모듈 생성 소스는 모듈마다 하나다. 이 모듈의 타입별 생성 헤더(public·private)와 의존 모듈의 public 모듈 생성 헤더를 include하고 등록 함수 세 개를 정의한다(`RegisterModuleTypes`·`RegisterPrivateModuleTypes` 가운데 있는 것과, 모듈 로더가 부르는 자기 타입 함수 `RegisterModuleOwnTypes` — [모듈 로더](ModuleLoader.ko.md) 3.10절). 등록 순서(의존 모듈 먼저, enum → struct → 클래스, 클래스는 base 먼저), private 함수가 public 함수를 먼저 부르는 것, 실패 시 되돌리기는 지금과 같다.
 - 모듈 키는 등록 함수 정의 안의 정적 객체다. 정의가 하나이므로 주소도 하나다.
 - ML2가 더할 "자기 타입만 등록하는 함수"도 이 헤더에 선언하고 이 소스에 정의한다.
 - BS8은 헤더의 선언에 모듈 API 매크로를 붙인다. 생성기는 헤더 밖 멤버의 선언과 등록 함수 선언을 한 함수로 내도록 만들어, BS8이 그 자리에 접두만 더하면 되게 한다.
@@ -215,10 +215,10 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`)의 Unre
 ### 6.3 Rocks.Build
 
 - `MetadataLayout`이 모듈의 `Metadata` 목록에서 생성 소스 경로를 정해 그 모듈의 **리플렉션 생성 소스 목록**(`NativeModuleInput`의 새 필드)에 더한다. 손으로 쓴 `Sources`와 섞지 않는다. 경로는 생성 전에 정해지므로 계획 단계에서 더할 수 있다. 파일은 메타 생성이 끝난 뒤, 액션 그래프를 세우기 전에 존재한다.
-- 목록을 따로 두는 이유는 셋이다. 모듈 진입점 판정을 바꾸지 않기 위해서다(아래). 컴파일 실패에 RMC3000 안내를 붙일 대상을 알아야 한다(7절). 유니티에서 생성 소스끼리만 묶을 수 있어야 한다(GSD9).
+- 목록을 따로 두는 이유는 셋이다. 모듈 진입점 판정을 바꾸지 않기 위해서다(아래 — ML2 뒤로는 진입점 판정이 이 목록도 세고, 이 목록은 진입점의 자기 타입 표지 `ROCKS_MODULE_TYPES`를 정한다). 컴파일 실패에 RMC3000 안내를 붙일 대상을 알아야 한다(7절). 유니티에서 생성 소스끼리만 묶을 수 있어야 한다(GSD9).
 - 액션 그래프는 이 목록을 `Sources`와 같은 compile action으로 만든다. 모듈의 public·private include와 정의를 그대로 받는다. key는 내용이므로 생성 결과가 같으면 다시 컴파일하지 않는다.
 - `.cpp`가 없던 리플렉션 모듈은 정적 라이브러리가 되어 archive와 `ModuleOutputs` 항목이 생긴다. 실행 파일 모듈이 `Metadata`를 가지면 그 실행 파일의 소스로 컴파일한다.
-- 모듈 진입점: 모듈 로더는 코드가 있는 모듈에 진입점(`ROCKS_IMPLEMENT_MODULE`)을 요구한다(`Programs/Rocks.Build/ModuleTables.cs`의 `hasCode`). 리플렉션 생성 소스는 이 판정에 넣지 않는다. 그래서 소스 없던 리플렉션 모듈은 라이브러리가 되어도 지금처럼 진입점 면제다. 이 모듈들을 진입점 모듈로 바꾸는 일은 ML2가 정한다.
+- 모듈 진입점: 모듈 로더는 코드가 있는 모듈에 진입점(`ROCKS_IMPLEMENT_MODULE`)을 요구한다(`Programs/Rocks.Build/ModuleTables.cs`의 `hasCode`). 리플렉션 생성 소스는 이 판정에 넣지 않는다. 그래서 소스 없던 리플렉션 모듈은 라이브러리가 되어도 지금처럼 진입점 면제다. 이 모듈들을 진입점 모듈로 바꾸는 일은 ML2가 정한다. → ML2(2026-11-20)가 바꿨다: 진입점 판정이 리플렉션 생성 소스를 세고, 손으로 쓴 소스가 없는 메타데이터 모듈은 빌드 생성 진입점 TU를 받으며, 설치 SDK 표지 `ReflectionOnlyLibrary`는 없어졌다(SDK manifest 8 — [모듈 로더](ModuleLoader.ko.md) 3.10절 "GS1 위 세부").
 - 도구 빌드 ID: 생성 소스는 다른 소스와 같이 action 입력이다. 생성 내용에 호스트 경로를 넣지 않는 지금 규칙이 생성 소스에도 적용된다.
 - `compile_commands.json`에 생성 소스 항목이 들어간다. 정책 감사는 생성 헤더와 같은 규칙으로 생성 소스를 건너뛴다.
 - 설치 SDK는 생성 헤더만 싣는다. `Source/`는 public include 루트 밖이라 실리지 않고, 생성 소스의 object는 `ModuleOutputs`의 라이브러리로 실린다(`Programs/Rocks.Build.Cli/InstalledSdk.cs:102–116`). `ImportedMetadata`(descriptor·identity 명세)는 그대로다. 소스가 없던 리플렉션 모듈이 SDK에 들어가면 이제 라이브러리도 함께 실린다.
@@ -283,12 +283,12 @@ GS0·GS1 측정 조건(2026-11-20): 같은 장비에서 두 commit을 각각 내
 | GSD6 | 모듈 생성 헤더는 등록 함수 선언만 담는다. 소비자는 쓰는 타입의 생성 헤더를 직접 include하고, 손으로 쓴 헤더는 모듈 생성 헤더를 include하지 않는다 | 확정 |
 | GSD7 | 생성 소스는 `<out>/Generated/<M>/Source/` 아래에 둔다. 소스 없던 리플렉션 모듈은 정적 라이브러리가 된다 | 확정 |
 | GSD8 | 빌드 경로의 게시 전 검증은 생성 헤더만 한다. 본문은 빌드의 compile action이 검증하고, 실패하면 RMC3000 안내를 붙인다. 메타 컴파일러 옵션 `--verify-sources`는 생성 소스까지 게시 전에 검증한다(단독 실행·`--check`·도구 시험) | 확정 |
-| GSD9 | 생성 소스는 파일 지역 이름·매크로 없이 낸다. 유니티로 묶을지는 UnityBuildPch UB1에서 정한다 | 확정 |
+| GSD9 | 생성 소스는 파일 지역 이름·매크로 없이 낸다. 유니티에서는 생성 소스끼리 묶는다(손으로 쓴 소스와 섞지 않는다, 기본 켬 — 2026-11-20 UnityBuildPch UB1에서 결정, 모듈 규칙 `ReflectionUnity = false`로 끈다) | 확정 |
 | GSD10 | 링크 방식과 무관하게 같은 구조다(BD28). 모듈 API 매크로와 `NativeTypeKey` 교체는 BS8, 자기 타입만 등록하는 함수는 ML2가 모듈 생성 소스에 더한다 | 확정 |
 | GSD11 | 설치 SDK는 생성 헤더만 싣는다 | 확정 |
 | GSD12 | action마다 소요 시간을 `action-report.json`에 기록한다(측정 기반) | 확정 |
 | GSD13 | 생성 코드의 양을 줄이는 일(필드마다 thunk를 만드는 대신 값 종류와 offset으로 도는 공용 codec)은 별도 과제로 둔다(12절) | 보류 |
-| GSD14 | 등록 함수 분리(GS1)를 타입별 본문 분리(GS2)보다 먼저 한다. 리플렉션 생성 소스는 `Sources`와 다른 목록으로 나르고 모듈 진입점 판정에 넣지 않는다(진입점 모듈로 바꾸는 일은 ML2) | 확정 |
+| GSD14 | 등록 함수 분리(GS1)를 타입별 본문 분리(GS2)보다 먼저 한다. 리플렉션 생성 소스는 `Sources`와 다른 목록으로 나르고 모듈 진입점 판정에 넣지 않는다(진입점 모듈로 바꾸는 일은 ML2). → 진입점 판정 면제는 ML2(2026-11-20)가 거뒀다(개정 이력 3) | 확정 |
 
 ## 11. 단계
 
@@ -335,3 +335,7 @@ GS0·GS1 측정 조건(2026-11-20): 같은 장비에서 두 commit을 각각 내
 | 1 | 2026-11-19 | 생성 코드 분리 설계. 측정(1.2절), 멤버별 위치(5.1절), 배치와 빌드 연결(6절), 검증 컴파일 변경(7절), 결정 GSD1–GSD14(GSD13 보류). 등록 함수 분리(GS1)를 먼저 하기로 하고 착수했다(사용자 결정). 모듈 로더 ML2와 조율해 리플렉션 생성 소스를 별도 목록으로 나르고 진입점 판정에서 뺐다 |
 | 2 | 2026-11-19 | 리뷰어 교차 검증 반영. 시제품(기존 생성 헤더 35개를 나눠 컴파일)과 조용한 상태 측정을 1.2절에 더했다. 생성 헤더의 include 줄이기를 보류로 돌리고(GSD5) 런타임 준비 단계를 없앴다 — 이득이 TU당 0.3–0.5초이고 소비 TU 17개가 깨진다. 그래서 타입별 본문 분리(GS2)는 소비 코드를 고치지 않는다. 클래스 `Trace()`도 inline으로 남긴다(native 파생 GC 경로, GSD3). 메타 컴파일러 옵션 `--verify-sources`를 더했다(GSD8, 도구 시험의 거부 보장 유지). 증분 재컴파일 기준을 UB0 뒤로 조건을 달았다. `CopyValueImpl` 이름, 완전한 반환 타입 규칙, private 모듈 생성 헤더, 인용·수치 정정(identity 명세는 생성이 쓰지 않는다, BuildTargets 3.4절, 소스 없는 모듈 6개, 집계 소비 파일 41개). 단계 GS0–GS3 |
 | 2(구현 기록) | 2026-11-20 | GS0·GS1 구현과 측정(9절), engine-runtime 병합. 스펙에 없던 것 둘을 구현하며 정했다. 첫째, 설치 SDK가 실어 가는 "리플렉션 생성 소스만으로 된 라이브러리"에 표지 `ReflectionOnlyLibrary`를 붙였다(SDK manifest 7) — 게임 빌드의 모듈 진입점 판정은 미리 빌드한 라이브러리를 코드로 세므로, 표지가 없으면 CoreTypeBindings 같은 모듈이 SDK를 거치며 진입점 모듈이 된다(6.3절의 면제를 SDK에서도 유지). 둘째, MetaCompiler 옵션 `--verify-sources`(빌드 없이 쓰는 단독 실행·도구 시험이 모듈 생성 소스도 게시 전에 구문 검사한다 — 빌드는 넘기지 않는다) |
+| 2(구현 기록 2) | 2026-11-20 | GS2 구현. 타입별 생성 헤더는 선언·형질·`Id()`·enum `IsDeclared()`·inline `Trace()`만 남기고 본문을 `Source/Public|Private/<철자>.generated.cpp`로 옮겼다(5.1–5.4절 그대로, include 목록 불변, 소비 코드 수정 없음). 구현하며 정한 점 넷. 첫째, 안내문의 "다시 돌리는 명령"(7절)은 MetaCompiler 인자 전체가 아니라 빌드 명령 옵션 `--verify-metadata-sources on`(build·test·sdk·game)으로 했다 — MetaCompiler 인자는 stage 경로를 담아 빌드 뒤에는 그대로 다시 돌릴 수 없고, 옵션은 같은 명령에 덧붙이면 메타 단계가 `--verify-sources`로 게시 전에 원본 위치와 함께 거부한다. 안내문은 `NativeModuleInput.ReflectionSourceFailureNote`(표시 전용, action key 밖)로 싣고 리플렉션 생성 소스의 compile action 실패에만 붙는다. 둘째, 게시 전 검증 컴파일을 생성 헤더까지 포함해 병렬로 돌린다(MetaCompiler `--jobs`, 빌드가 자기 `--jobs`를 넘긴다, 실패 보고는 생성물 순서에서 가장 앞선 것) — 7절은 `--verify-sources`의 생성 소스만 병렬이라고 적었으나 헤더 검증도 생성물마다 독립이다. 셋째, 설치 SDK manifest를 8로 올렸다(칸은 같다) — 이전 SDK의 생성 헤더는 본문을 inline으로 정의하고 동봉 MetaCompiler가 타입별 생성 소스를 내지 않아 새 빌드 도구와 맞지 않는다. 넷째, 도구 시험은 생성 코드의 문구를 헤더+생성 소스에서 읽고(본문을 고쳐 컴파일 실패를 보는 시험은 생성 소스를 고친다), 생성 static_assert probe는 생성 소스까지 한 번역 단위로 컴파일한다. 전체 빌드·시험과 GC 벤치마크는 단계별로 돌리지 않고 UB 단계까지 끝낸 뒤 한 번 검증한다(2026-11-20 사용자 결정) |
+| 3(사실 정정) | 2026-11-20 | 모듈 로더 ML2 반영([모듈 로더](ModuleLoader.ko.md) 3.10절 "GS1 위 세부"). 진입점 판정이 리플렉션 생성 소스를 세게 되어 GSD14의 진입점 면제를 거뒀고, 손으로 쓴 소스가 없는 메타데이터 모듈은 빌드가 만든 진입점 TU를 받는다. 개정 2(구현 기록)의 설치 SDK 표지 `ReflectionOnlyLibrary`는 없앴고 SDK manifest는 8이다. 모듈 생성 소스는 자기 타입 함수 `RegisterModuleOwnTypes`도 정의한다(5.5절 등록 함수 세 개) |
+| 3(병합 기록) | 2026-11-20 | 모듈 로더 ML2(engine-runtime f5b448c8)와 GS2·유니티 PCH 작업을 병합했다. 설치 SDK manifest 8은 ML2의 `ReflectionOnlyLibrary` 제거가 가졌고, GS2(타입별 본문이 SDK 라이브러리에 있음)와 공유 PCH 헤더 칸은 함께 9다("2(구현 기록 2)"의 "manifest 8"은 병합 전 번호다). 모듈 정의가 정의 헤더로 가므로([유니티 빌드·PCH](UnityBuildPch.ko.md) 8.2절) ML2의 `ROCKS_MODULE_TYPES`도 `ROCKS_MODULE_NAME`과 함께 정의 헤더에 들어가고, AST 생성과 native compile이 같은 헤더를 받는다. ML2가 모듈 생성 소스 끝에 더한 `RegisterModuleOwnTypes`는 그대로다 |
+| 3(검증 기록) | 2026-11-20 | GS2의 첫 전체 빌드와 시험을 유니티·PCH 작업 끝의 검증에서 함께 돌렸다([유니티 빌드·PCH](UnityBuildPch.ko.md) 개정 이력 "검증 기록"). Foundation·EngineTests Debug 빌드와 시험(2,549개·2,954개), 도구 시험 meta 246건, 통합 시험(설치 SDK 게임, Release ThinLTO SDK·게임 포함) 통과, 무변경 재빌드 0 action. 통합 시험 한 곳이 GS2에 맞지 않아 고쳤다 — 필드를 더해도 타입별 생성 헤더는 그대로이므로 게시 여부를 생성 소스와 descriptor로 확인한다. 수치(Foundation Debug clean build, 유니티·PCH를 끈 검증 변형이라 생성 소스 분리의 몫만 보인다): compile 시간 합 5,799.5 s → 752.8 s(1,278 → 1,337 action), 시험 실행 파일 3,970.6 s(386 TU) → 262.1 s(390 TU), 공개 헤더 단독 컴파일 검사 693.6 s → 151.0 s, 리플렉션 fixture 모듈의 생성 소스 26 TU 58.2 s. native 단계 벽시계는 776.5 s → 103.3 s다(장비 부하가 달라 거친 비교다) |

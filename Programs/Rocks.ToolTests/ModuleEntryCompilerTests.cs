@@ -79,7 +79,7 @@ internal static class ModuleEntryCompilerTests
             string[] includeDirectories = Directory.GetDirectories(Path.Combine(options.Root, "Core", "Source", "Runtime"))
                 .Select(module => Path.Combine(module, "Public")).Where(Directory.Exists).Order(StringComparer.Ordinal).ToArray();
 
-            async Task<ProcessResult> Compile(string name, string? moduleName, string body)
+            async Task<ProcessResult> Compile(string name, string? moduleName, string body, bool moduleTypes = false)
             {
                 temporary.Write(name + ".cpp", Prelude + body + "\n");
                 string source = temporary.FilePath(name + ".cpp");
@@ -94,6 +94,11 @@ internal static class ModuleEntryCompilerTests
                 if (moduleName is not null)
                 {
                     arguments.Add((clangCl ? "/D" : "-D") + "ROCKS_MODULE_NAME=" + moduleName);
+                }
+
+                if (moduleTypes)
+                {
+                    arguments.Add((clangCl ? "/D" : "-D") + "ROCKS_MODULE_TYPES=1");
                 }
 
                 arguments.AddRange(options.ClangArguments);
@@ -135,6 +140,18 @@ internal static class ModuleEntryCompilerTests
                     "ROCKS_IMPLEMENT_MODULE class must derive from rocks::ModuleImplementation"),
             ];
 
+            // 자기 타입 표지(ROCKS_MODULE_TYPES=1, Docs/Design/ModuleLoader.ko.md 3.10절): 매크로가 스스로 선언한 RegisterModuleOwnTypes가
+            // 메타 컴파일러의 모듈 생성 헤더 선언·모듈 생성 소스 정의와 같은 서명이고 진입 기술의 registerTypes 칸에 맞는다.
+            const string ownTypesSignature =
+                "::rocks::Result<void> RegisterModuleOwnTypes(::rocks::ModuleRegistration& registration, const ::rocks::ModuleLease& module) noexcept";
+            Task<ProcessResult> moduleTypes = Compile("module_types", "Curves",
+                $"namespace rocks::generated::Curves {{ {ownTypesSignature}; }}\n" +
+                "ROCKS_IMPLEMENT_MODULE(rocks::DefaultModuleImplementation, Curves)\n" +
+                $"namespace rocks::generated::Curves {{ {ownTypesSignature} {{ static_cast<void>(registration); static_cast<void>(module); " +
+                "return ::rocks::Result<void>::Success(); } }\n" +
+                "static_assert(rocks::detail::MakeModuleEntry<rocks::DefaultModuleImplementation>(\"Curves\", &rocks::generated::Curves::RegisterModuleOwnTypes)" +
+                ".registerTypes != nullptr);", moduleTypes: true);
+
             // 서로 독립인 컴파일이라 함께 돌린다.
             Task<ProcessResult>[] controls = accepted.Select(item => Compile(item.Name, item.Module, item.Source)).ToArray();
             Task<ProcessResult>[] failures = rejected.Select(item => Compile(item.Name, item.Module, item.Source)).ToArray();
@@ -143,6 +160,9 @@ internal static class ModuleEntryCompilerTests
                 ProcessResult result = await controls[index];
                 Verify.Equal(0, result.ExitCode, accepted[index].Name + " must compile: " + result.StdOut + result.StdErr);
             }
+
+            ProcessResult typesResult = await moduleTypes;
+            Verify.Equal(0, typesResult.ExitCode, "module_types must compile: " + typesResult.StdOut + typesResult.StdErr);
 
             for (int index = 0; index < rejected.Length; ++index)
             {

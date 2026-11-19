@@ -10,7 +10,7 @@ namespace rocks::graphics::vulkan {
 namespace {
 
 constexpr uint32 MaxTimeDomains = 8;
-constexpr uint32 MaxQueueFamilies = 32;
+constexpr uint32 VulkanTimingMaxQueueFamilies = 32;
 constexpr double NanosecondsPerSecond = 1e9;
 constexpr uint32 FullTimestampBits = 64;
 
@@ -49,10 +49,11 @@ TimestampReadState VulkanDevice::ReadTimestampQueries(uint32 first, uint32 count
 }
 
 void VulkanDevice::InitializeTimestamps(uint32 queueFamily) noexcept {
-    VkQueueFamilyProperties families[MaxQueueFamilies];
+    VkQueueFamilyProperties families[VulkanTimingMaxQueueFamilies];
     uint32 familyCount = 0;
     functions_.vkGetPhysicalDeviceQueueFamilyProperties(physical_, &familyCount, nullptr);
-    familyCount = familyCount < MaxQueueFamilies ? familyCount : MaxQueueFamilies;
+    familyCount =
+        familyCount < VulkanTimingMaxQueueFamilies ? familyCount : VulkanTimingMaxQueueFamilies;
     functions_.vkGetPhysicalDeviceQueueFamilyProperties(physical_, &familyCount, families);
     const float period = properties_.limits.timestampPeriod;
     if (queueFamily >= familyCount || families[queueFamily].timestampValidBits == 0 ||

@@ -9,6 +9,8 @@
 #include <Platform/Atomics.h>
 
 using namespace rocks;
+namespace directory_watch_tests_file {
+
 using namespace rocks::platform;
 
 // 실제 OS 파일 시스템에서 DirectoryWatcher의 이식 계약(14절 시나리오 17)을 검사한다. 이벤트
@@ -343,7 +345,7 @@ TEST(DirectoryWatch_ReportsRootRemoval) {
 }
 
 TEST(DirectoryWatch_QueueCollapsesToOverflowAtLimit) {
-    detail::WatchEventQueue queue;
+    platform::detail::WatchEventQueue queue;
     char path[200];
     usize pushed = 0;
     // 상한(4 MiB)을 넘을 때까지 넣으면 앞선 이벤트를 모두 버리고 루트 Overflow 하나만 남긴다.
@@ -375,3 +377,4 @@ TEST(DirectoryWatch_QueueCollapsesToOverflowAtLimit) {
     REQUIRE(queue.Front(change));
     CHECK(change.kind == DirectoryChangeKind::Overflow && strcmp(change.path, "sub") == 0);
 }
+} // namespace directory_watch_tests_file

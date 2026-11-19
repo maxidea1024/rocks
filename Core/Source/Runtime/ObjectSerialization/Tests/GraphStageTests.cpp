@@ -8,6 +8,8 @@
 // 한 트랜잭션의 그래프 둘과 ConstructionContext::FindObject, 호출자 prepare(Transient 필드)와
 // rollback, 할당 실패. 상태 기계·스레드·트랜잭션 고정은 GraphStageStateTests.cpp가 본다.
 using namespace rocks;
+namespace graph_stage_tests_file {
+
 using namespace rocks::test::stage;
 
 // 노드 표 출처: NodeTable이 없는 그래프는 호출자 노드 설명(A1 Exports 모의)으로 복원한다.
@@ -833,3 +835,4 @@ TEST(GraphStage_EveryAllocationFailureRestoresState) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace graph_stage_tests_file

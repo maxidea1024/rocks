@@ -8,6 +8,8 @@
 // 입력을 바꾼다, 거부된 내용은 옛 값을 둔다, 지운 파일은 값을 뺀다, 플랫폼 폴더·사용자 파일·루트
 // 전체 다시 읽기, 무시하는 경로, 출시 규칙의 거부, 실제 감시기 이벤트가 sync 지점에 닿는다.
 using namespace rocks;
+namespace config_reload_tests_file {
+
 using namespace rocks::config;
 using namespace rocks::test::config;
 
@@ -212,3 +214,4 @@ TEST(Config_HotReloadWatcherEventReachesSyncPoint) {
 
     CHECK(applied);
 }
+} // namespace config_reload_tests_file

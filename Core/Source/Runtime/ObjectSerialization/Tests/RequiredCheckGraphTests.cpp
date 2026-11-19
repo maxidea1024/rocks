@@ -199,6 +199,7 @@ void required_graph_fixture::Subject::Trace(TraceVisitor& visitor) const noexcep
     GeneratedType<Pin>::Trace(pin, visitor);
     visitor.Visit(editorLink);
 }
+namespace required_check_graph_tests_file {
 
 namespace {
 
@@ -1018,3 +1019,4 @@ TEST(RequiredCheckGraph_ManualTablesNeedReadStaged) {
     CHECK(stagedTypes.Shutdown());
     CHECK(bareTypes.Shutdown());
 }
+} // namespace required_check_graph_tests_file

@@ -37,7 +37,7 @@ namespace {
 constexpr int CrashSignals[] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT, SIGTRAP};
 constexpr usize CrashSignalCount = sizeof(CrashSignals) / sizeof(CrashSignals[0]);
 constexpr usize SignalMessageBytes = 32;
-constexpr uint64 NanosecondsPerSecond = 1000000000;
+constexpr uint64 CrashNanosecondsPerSecond = 1000000000;
 constexpr usize AlternateStackAlignment = 16;
 constexpr char WakeByte = 1;
 constexpr usize PathBytes = 4096;
@@ -299,7 +299,7 @@ void WriteReportFiles() noexcept {
 uint64 SignalSafeNow() noexcept {
     timespec now{};
     clock_gettime(CLOCK_MONOTONIC, &now);
-    return static_cast<uint64>(now.tv_sec) * NanosecondsPerSecond +
+    return static_cast<uint64>(now.tv_sec) * CrashNanosecondsPerSecond +
            static_cast<uint64>(now.tv_nsec);
 }
 

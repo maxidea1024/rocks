@@ -13,6 +13,7 @@
 // 성장·축소)의 계약 시험이다. BitArray의 word 경로는 BitArrayWordTests.cpp에 있다.
 
 using namespace rocks;
+namespace container_optimization_tests_file {
 
 namespace {
 
@@ -526,3 +527,4 @@ TEST(ContainerOptimizationShrinkSlackForMapsAndSparseArray) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace container_optimization_tests_file

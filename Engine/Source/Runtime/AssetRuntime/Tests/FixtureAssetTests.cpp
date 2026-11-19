@@ -4,6 +4,8 @@
 // 대표 에셋을 쿠킹·에디터로 저장 → 다른 Registry에 로드 → 필드 단위 비교 → 로드한 상태를 다시
 // 저장해 byte 동일.
 using namespace rocks;
+namespace fixture_asset_tests_file {
+
 using namespace rocks::asset_test;
 
 namespace {
@@ -216,3 +218,4 @@ TEST(FixtureAsset_BulkRoundTrip) {
         }
     }
 }
+} // namespace fixture_asset_tests_file

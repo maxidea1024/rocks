@@ -26,7 +26,7 @@ internal static partial class MetaTests
                 "ROCKS_STRUCT(Settings(Section = \"Empty\", Branch = \"Game\"))\nstruct Box {\nROCKS_PROPERTY() rocks::int32 count = 0;\n};\n" +
                 "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() rocks::int32 count = 0;\n};\n}\n";
             await probe.GenerateAsync(source);
-            string generated = Compact(File.ReadAllText(probe.Output));
+            string generated = Compact(probe.GeneratedText());
             foreach ((string expected, string reason) in new[]
             {
                 ("#include <Meta/SettingsSchema.h>", "settings schema include"),

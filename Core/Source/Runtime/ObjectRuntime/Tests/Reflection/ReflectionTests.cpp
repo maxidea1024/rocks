@@ -5,6 +5,8 @@
 #include <Platform/Thread.h>
 
 using namespace rocks;
+namespace reflection_tests_file {
+
 using reflection_fixture::Base;
 using reflection_fixture::Node;
 
@@ -471,3 +473,4 @@ TEST(ReflectionRegistryAllocationFailureDoesNotPinBaseAndCanRetry) {
     }
     CHECK(backing.Stats().liveAllocations == 0);
 }
+} // namespace reflection_tests_file

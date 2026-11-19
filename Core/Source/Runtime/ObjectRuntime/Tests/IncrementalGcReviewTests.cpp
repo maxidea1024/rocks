@@ -4,6 +4,8 @@
 #include <Task/WorkerScheduler.h>
 
 using namespace rocks;
+namespace incremental_gc_review_tests_file {
+
 using namespace rocks::platform;
 
 namespace {
@@ -150,3 +152,4 @@ TEST(ObjectIncrementalGcRejectsOwnSchedulerBeforeSubmittingStackBackedMarkers) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace incremental_gc_review_tests_file

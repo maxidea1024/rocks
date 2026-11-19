@@ -6,6 +6,8 @@
 #include <Platform/Atomics.h>
 
 namespace rocks::test {
+namespace shared_ptr_tests_file {
+
 namespace {
 
 struct Counted {
@@ -513,5 +515,6 @@ TEST(SharedRef_ConvertsToBaseSharedPtr) {
     }
     CHECK(DerivedFromPlain::destroyed == 1 && allocator.Stats().liveAllocations == 0);
 }
+} // namespace shared_ptr_tests_file
 
 } // namespace rocks::test

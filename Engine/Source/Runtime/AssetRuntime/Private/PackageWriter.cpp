@@ -18,8 +18,8 @@ namespace {
 
 using namespace package_detail;
 
-constexpr uint32 EditorOnlyFlag = static_cast<uint32>(FieldFlags::EditorOnly);
-constexpr uint32 RequiredFlag = static_cast<uint32>(FieldFlags::Required);
+constexpr uint32 PackageWriterEditorOnlyFlag = static_cast<uint32>(FieldFlags::EditorOnly);
+constexpr uint32 PackageWriterRequiredFlag = static_cast<uint32>(FieldFlags::Required);
 
 ArchiveLimits SectionLimits() noexcept {
     ArchiveLimits limits;
@@ -59,8 +59,8 @@ public:
         DependencyUse use;
         use.asset = info.asset;
         use.hard = false;
-        use.editorOnly = (info.effectiveFlags & EditorOnlyFlag) != 0;
-        use.required = (info.effectiveFlags & RequiredFlag) != 0;
+        use.editorOnly = (info.effectiveFlags & PackageWriterEditorOnlyFlag) != 0;
+        use.required = (info.effectiveFlags & PackageWriterRequiredFlag) != 0;
         return softUses_.TryPushBack(use);
     }
 
@@ -81,7 +81,7 @@ public:
             return Result<const void*>::Success(in);
         }
 
-        const bool editorOnly = (frame.effectiveFlags & EditorOnlyFlag) != 0;
+        const bool editorOnly = (frame.effectiveFlags & PackageWriterEditorOnlyFlag) != 0;
         uint32 newId = 0;
         if (const uint32* known = bulkIds_.Find(value.bulkId)) {
             // 같은 옛 id는 같은 새 id다. 크기·해시가 다르면 메모리 상태가 모순이다.
@@ -118,6 +118,9 @@ public:
             return Result<ExternalAdmission>::Success(ExternalAdmission::Null);
         }
 
+        // 대상과 그 조상(outermost 포함)은 그래프 저장이 Exclude 정책에서 WriteUnsaveable로 생존·
+        // 타입을 먼저 확인했다(같은 소유 스레드, 그 사이 Registry 변경 없음 — AS 5.7절 19). 그래서
+        // 아래 조회 단언은 걸리지 않는다.
         auto outermost = registry_.GetOutermost(access_, info.target);
         ROCKS_ASSERT(outermost.IsOk());
 
@@ -214,7 +217,10 @@ public:
           byObject_(allocator), packages_(allocator), types_(allocator), chain_(allocator) {
     }
 
-    // 외부 참조 slot(1부터)의 대상과 그 Outer 사슬(대표 에셋 아래)을 더한다.
+    // 외부 참조 slot(1부터)의 대상과 그 Outer 사슬(대표 에셋 아래)을 더한다. 대상과 그 조상은
+    // 그래프 저장이 Exclude 정책에서 WriteUnsaveable로 생존·타입을 먼저 확인했으므로(같은 소유
+    // 스레드, 그 사이 Registry 변경 없음) 이 함수와 PackageOf의 조회 단언은 걸리지 않는다(AS 5.7절
+    // 19).
     //
     // 오류: 대상 패키지가 null id면 InvalidArgument, 대표 에셋이 없으면 NotFound, Registry 조회의
     // 오류와 할당 실패는 그대로다.
@@ -250,6 +256,10 @@ public:
             if (outer.Value() == package.Value().representative) {
                 break;
             }
+
+            // 대표 에셋이 있는 패키지는 이름 있는 자식을 가질 수 없으므로(정체성 규칙 8) 사슬은
+            // 패키지에 닿기 전에 대표 에셋을 지난다.
+            ROCKS_ASSERT(!(outer.Value() == outermost.Value()));
 
             cursor = outer.Value();
         }
@@ -969,6 +979,11 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
                 return InvalidOption<Out>();
             }
 
+            // 다른 export는 대표 에셋 아래다: 대표 자식이 있는 Outer(패키지)는 이름 있는 자식을
+            // 가질 수 없다(정체성 규칙 8 — ObjectFoundations 1.5절). reader도 outer 0인 하위
+            // export를 거부한다.
+            ROCKS_ASSERT(primary || parent.exportIndex != 0);
+
             if (auto pushed = exports.TryPushBack(inner); !pushed) {
                 return Result<Out>::Failure(pushed.Error());
             }
@@ -1018,7 +1033,8 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
     ObjectGraphSaveOptions save;
     save.unsaveable = UnsaveablePolicy::Exclude;
     save.policy.rejectMissingRequired = true;
-    save.policy.excludedFlags = options.kind == PackageKind::Cooked ? EditorOnlyFlag : 0;
+    save.policy.excludedFlags =
+        options.kind == PackageKind::Cooked ? PackageWriterEditorOnlyFlag : 0;
     save.hooks = &hooks;
     save.externals = GraphExternalPolicy::Admit;
     save.writeNodeTable = false;
@@ -1089,7 +1105,7 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
         DependencyUse use;
         use.asset = drafts[order[indexBySlot[slot] - 1]].asset;
         use.hard = true;
-        use.editorOnly = (externals[slot].commonFlags & EditorOnlyFlag) != 0;
+        use.editorOnly = (externals[slot].commonFlags & PackageWriterEditorOnlyFlag) != 0;
         use.required = externals[slot].required;
         (void)uses.TryPushBack(use);
     }

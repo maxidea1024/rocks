@@ -4,6 +4,8 @@
 // 본다(Docs/Design/AssetSystem.ko.md 5.1절 검증 순서 1–4, 5.3절 버전 축, 14절 12). 변조마다 CRC를
 // 다시 맞춰 CRC가 아니라 그 필드의 규칙에 걸리게 한다.
 using namespace rocks;
+namespace package_header_tests_file {
+
 using namespace rocks::asset_test;
 
 namespace {
@@ -530,3 +532,4 @@ TEST(AssetPackage_SectionSizeLimit) {
 
     CHECK(expect.Opens(edit.Build(), PackageKind::Editor, true));
 }
+} // namespace package_header_tests_file

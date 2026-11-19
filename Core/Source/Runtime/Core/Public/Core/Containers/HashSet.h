@@ -157,6 +157,16 @@ public:
         return map_.Capacity();
     }
 
+    // 탐사 부하를 들여다보는 진단용 값이다(HashMap::SlotCount·DeletedSlotCount와 같다). 원소가
+    // 0개인 Set에도 삭제 칸이 남아 있을 수 있다(HashMap::Erase의 문턱 규칙).
+    usize SlotCount() const noexcept {
+        return map_.SlotCount();
+    }
+
+    usize DeletedSlotCount() const noexcept {
+        return map_.DeletedSlotCount();
+    }
+
     bool IsEmpty() const noexcept {
         return map_.IsEmpty();
     }

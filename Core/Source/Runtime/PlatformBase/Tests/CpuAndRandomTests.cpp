@@ -8,6 +8,7 @@
 #include <Platform/PlatformMath.h>
 
 using namespace rocks;
+namespace cpu_and_random_tests_file {
 
 TEST(Platform_CpuFeaturesAreConsistent) {
     const platform::CpuFeatures& features = platform::QueryCpuFeatures();
@@ -89,3 +90,4 @@ TEST(Platform_SecureRandomFillsBuffers) {
 
     CHECK(ones > sizeof(large) * 8 * 4 / 10 && ones < sizeof(large) * 8 * 6 / 10);
 }
+} // namespace cpu_and_random_tests_file

@@ -14,7 +14,7 @@
 namespace rocks::platform {
 namespace {
 
-VirtualMemoryResult Success() noexcept {
+VirtualMemoryResult VirtualMemoryLocalSuccess() noexcept {
     return {VirtualMemoryCode::Success, 0};
 }
 VirtualMemoryResult OsFailure() noexcept {
@@ -30,7 +30,7 @@ VirtualMemoryResult QueryVirtualMemoryInfo(VirtualMemoryInfo& info) noexcept {
         return OsFailure();
     }
     info = {static_cast<usize>(pageSize), static_cast<usize>(pageSize)};
-    return Success();
+    return VirtualMemoryLocalSuccess();
 }
 
 VirtualMemoryResult QueryPhysicalMemory(uint64& totalBytes) noexcept {
@@ -52,13 +52,20 @@ VirtualMemoryResult QueryPhysicalMemory(uint64& totalBytes) noexcept {
 
     totalBytes = static_cast<uint64>(pages) * static_cast<uint64>(pageSize);
 #endif
-    return Success();
+    return VirtualMemoryLocalSuccess();
 }
 
 namespace detail {
 
-VirtualMemoryResult ReserveVirtualMemory(usize bytes, void*& address) noexcept {
-    void* result = mmap(nullptr, bytes, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+VirtualMemoryResult ReserveVirtualMemory(usize bytes, VirtualMemoryAccess access,
+                                         void*& address) noexcept {
+    // Open은 읽기·쓰기 매핑 하나로 잡는다(UE 5.8 UnixPlatformMemory.cpp
+    // 635·AndroidPlatformMemory.cpp 618·ApplePlatformMemory.cpp 753과 같다). 물리 메모리는 처음 쓸
+    // 때 붙고, MAP_NORESERVE로 swap 약정을 미룬다. 뒤의 Commit·Decommit이 보호를 바꾸지 않아 매핑이
+    // 쪼개지지 않는다.
+    const bool open = access == VirtualMemoryAccess::Open;
+    void* result = mmap(nullptr, bytes, open ? PROT_READ | PROT_WRITE : PROT_NONE,
+                        MAP_PRIVATE | MAP_ANON | (open ? MAP_NORESERVE : 0), -1, 0);
     if (result == MAP_FAILED) {
         return OsFailure();
     }
@@ -71,33 +78,50 @@ VirtualMemoryResult ReserveVirtualMemory(usize bytes, void*& address) noexcept {
         return {VirtualMemoryCode::UnsupportedAddress, 0};
     }
     address = result;
-    return Success();
+    return VirtualMemoryLocalSuccess();
 }
 
-VirtualMemoryResult CommitVirtualMemory(void* address, usize bytes) noexcept {
+VirtualMemoryResult CommitVirtualMemory(void* address, usize bytes,
+                                        VirtualMemoryAccess access) noexcept {
+    if (access == VirtualMemoryAccess::Open) {
+        // 접근은 이미 열려 있다. OS별 힌트만 준다(Apple은 다시 쓴다고 알림, 그 밖은 할 일이 없다).
+        detail::PosixOpenCommit(address, bytes);
+        return Success();
+    }
+
     if (mprotect(address, bytes, PROT_READ | PROT_WRITE) != 0) {
         return OsFailure();
     }
-    return Success();
+    return VirtualMemoryLocalSuccess();
 }
 
-VirtualMemoryResult DecommitVirtualMemory(void* address, usize bytes) noexcept {
+VirtualMemoryResult DecommitVirtualMemory(void* address, usize bytes,
+                                          VirtualMemoryAccess access) noexcept {
+    if (access == VirtualMemoryAccess::Open) {
+        // 보호는 그대로 두고 페이지만 돌려준다. 실패하면 범위는 그대로다(접근·내용 유지).
+        if (detail::PosixOpenDecommit(address, bytes) != 0) {
+            return OsFailure();
+        }
+
+        return Success();
+    }
+
     if (mprotect(address, bytes, PROT_NONE) != 0) {
         return OsFailure();
     }
-    // 반환 힌트다(OS별 값은 PosixDecommitAdvice). 실패하면 이미 접근이 차단되었으므로 상위 영역을
-    // 격리한다.
+    // 반환 힌트다(OS별 값은 PosixDecommitAdvice). 실패하면 접근은 이미 막혔고 페이지만 돌아가지
+    // 않은 것이다 — 호출자는 이 범위를 commit되지 않은 것으로 다룬다(VirtualMemory.h).
     if (madvise(address, bytes, detail::PosixDecommitAdvice()) != 0) {
         return OsFailure();
     }
-    return Success();
+    return VirtualMemoryLocalSuccess();
 }
 
 VirtualMemoryResult ReleaseVirtualMemory(void* address, usize bytes) noexcept {
     if (munmap(address, bytes) != 0) {
         return OsFailure();
     }
-    return Success();
+    return VirtualMemoryLocalSuccess();
 }
 
 } // namespace detail

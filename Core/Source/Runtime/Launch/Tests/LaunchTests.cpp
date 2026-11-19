@@ -10,6 +10,8 @@
 #include <string.h>
 
 using namespace rocks;
+namespace launch_tests_file {
+
 using namespace rocks::launch;
 
 // Launch 시작 단계 실행기(순서·역순 정리·실패 처리)와 빌드 식별 조각을 검사한다. 진입점·크래시
@@ -204,3 +206,5 @@ TEST(Launch_TerminationRequestFlag) {
     launch::detail::ClearTerminationRequest();
     CHECK(!IsTerminationRequested());
 }
+
+} // namespace launch_tests_file

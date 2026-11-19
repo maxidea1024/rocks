@@ -5,6 +5,7 @@
 #include <string.h>
 
 using namespace rocks;
+namespace archive_tests_file {
 
 namespace {
 
@@ -398,3 +399,4 @@ TEST(ArchiveZeroDynamicLimitAllowsFixedPrimitivesAndEmptyValues) {
     CHECK(string.Value().IsEmpty());
     CHECK(reader.Value().AtEnd());
 }
+} // namespace archive_tests_file

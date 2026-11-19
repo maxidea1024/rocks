@@ -10,6 +10,8 @@
 // Platform/Win64/WideString.h 시험이다(UTF-8·UTF-16 변환, 할당 판과 고정 버퍼 판). Windows 전용
 // 시험이라 TestSupport/Private/Win64에 둔다.
 using namespace rocks;
+namespace windows_wide_string_tests_file {
+
 using namespace rocks::platform;
 using namespace rocks::platform::windows;
 
@@ -102,8 +104,8 @@ TEST(PlatformWindowsWideStringRejectsInvalidUtf8) {
 
     // 잘릴 앞부분이 유효해도 입력 전체를 검사한다.
     const char tail[] = "abcdef\xFF";
-    wchar_t small[4] = {};
-    CHECK(IsRejected(ConvertUtf8ToWide(tail, strlen(tail), small, 4, TextFit::Truncate).status));
+    wchar_t tiny[4] = {};
+    CHECK(IsRejected(ConvertUtf8ToWide(tail, strlen(tail), tiny, 4, TextFit::Truncate).status));
 
     // null text에 길이가 있으면 인자 오류다.
     WideString wide;
@@ -311,11 +313,11 @@ TEST(PlatformWindowsWideStringWriteUtf8MapsErrorsForPublicApis) {
     CHECK(status && bytes == 4 && memcmp(buffer, "a\xEA\xB0\x80", 5) == 0);
 
     // 칸 부족은 Overflow이고 bytes에 필요한 길이(NUL 제외)를 둔다. capacity 0도 같다.
-    char small[4] = {'x'};
+    char tiny[4] = {'x'};
     bytes = 99;
-    status = rocks::platform::detail::WriteUtf8(source, 2, small, sizeof(small), bytes);
+    status = rocks::platform::detail::WriteUtf8(source, 2, tiny, sizeof(tiny), bytes);
     CHECK(status.code == FileCode::Overflow && status.nativeError == 0 && bytes == 4 &&
-          small[0] == '\0');
+          tiny[0] == '\0');
     bytes = 99;
     status = rocks::platform::detail::WriteUtf8(source, 2, nullptr, 0, bytes);
     CHECK(status.code == FileCode::Overflow && bytes == 4);
@@ -332,3 +334,4 @@ TEST(PlatformWindowsWideStringWriteUtf8MapsErrorsForPublicApis) {
     status = rocks::platform::detail::WriteUtf8(L"", 0, buffer, sizeof(buffer), bytes);
     CHECK(status && bytes == 0 && buffer[0] == '\0');
 }
+} // namespace windows_wide_string_tests_file

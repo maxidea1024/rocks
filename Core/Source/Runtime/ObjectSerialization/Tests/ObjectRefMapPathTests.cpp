@@ -13,6 +13,8 @@
 // handle)·조회·원소 수·비우기, 대상 타입 검사, MaxElements, InsertKey 거부, Name·enum 키(인라인
 // struct 안 ObjectRefMap 포함), 경로로 넣은 값이 대상을 살리는지, 순회·encode 고정 중 쓰기 Busy.
 using namespace rocks;
+namespace object_ref_map_path_tests_file {
+
 using reflection_fixture::RefMapDerived;
 using reflection_fixture::RefMapHolder;
 using reflection_fixture::RefMapOther;
@@ -287,3 +289,4 @@ TEST(ObjectRefMapPath_IterationAndEncodePinMakeWritesBusy) {
     CHECK(names.Shutdown());
     CHECK(types.Shutdown());
 }
+} // namespace object_ref_map_path_tests_file

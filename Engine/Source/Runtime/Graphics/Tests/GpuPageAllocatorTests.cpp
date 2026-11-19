@@ -3,6 +3,8 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace gpu_page_allocator_tests_file {
+
 using namespace rocks::graphics;
 
 TEST(GpuPageAllocator_AlignsAndReservesPadding) {
@@ -68,3 +70,4 @@ TEST(GpuPageAllocator_FreeMergesNeighboursBackToOneRange) {
     REQUIRE(whole);
     CHECK(whole.Value().offset == 0);
 }
+} // namespace gpu_page_allocator_tests_file

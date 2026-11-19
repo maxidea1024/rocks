@@ -7,6 +7,8 @@
 // 전용·품질 묶음 층·치트·사용자 설정·부팅 값), 설정 struct 필드의 콘솔 이름이 같은 값 저장소를
 // 쓰는지, 타입·범위·enum, 이름 문법·영역 표·겹침, snapshot 읽기(ReadDynamic), 소유 스레드 밖 호출.
 using namespace rocks;
+namespace console_setting_tests_file {
+
 using namespace rocks::config;
 using namespace rocks::test::config;
 
@@ -441,3 +443,4 @@ TEST(Config_ForeignThreadCallsAreRejected) {
     CHECK(call.added == ErrorCode::WrongThread && call.synced == ErrorCode::WrongThread);
     CHECK(!fixture.Context().HasPendingChanges() && !fixture.Graph().immediate);
 }
+} // namespace console_setting_tests_file

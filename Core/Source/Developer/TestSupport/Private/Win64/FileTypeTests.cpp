@@ -2,6 +2,8 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace file_type_tests_file {
+
 using namespace rocks::platform::detail;
 
 namespace {
@@ -43,3 +45,4 @@ TEST(PlatformFileWindowsUnknownTypeDistinguishesSuccessAndFailure) {
     result = QueryFileType(nullptr, operations);
     CHECK(result.type == 1 && result.error == 0 && phase == 2);
 }
+} // namespace file_type_tests_file

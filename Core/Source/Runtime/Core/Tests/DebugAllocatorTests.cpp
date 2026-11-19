@@ -7,6 +7,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace debug_allocator_tests_file {
 
 namespace {
 
@@ -362,6 +363,7 @@ TEST(CoreDebugAllocatorDetectsReentryAndSupportsConcurrentCallers) {
     }
     CHECK(system.Stats().liveAllocations == 0);
 }
+} // namespace debug_allocator_tests_file
 
 namespace rocks::test {
 

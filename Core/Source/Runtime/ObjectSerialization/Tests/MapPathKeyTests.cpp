@@ -6,6 +6,8 @@
 // PropertyPathBuffer 복사의 key 재배치, SamePropertyPath의 key 비교(wire byte, Name은 Core Name
 // 규칙).
 using namespace rocks;
+namespace map_path_key_tests_file {
+
 using namespace rocks::test::map;
 
 namespace {
@@ -415,3 +417,4 @@ TEST(PropertyPath_SamePropertyPathComparesKeys) {
     const PathStep none[] = {{field, 3, PathSelector::None}};
     CHECK(!IsCanonicalPathStep(none[0]));
 }
+} // namespace map_path_key_tests_file

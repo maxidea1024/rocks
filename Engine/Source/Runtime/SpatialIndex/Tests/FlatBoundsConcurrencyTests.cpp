@@ -10,8 +10,11 @@
 #include <string.h>
 
 using namespace rocks;
+namespace flat_bounds_concurrency_tests_file {
+
 using namespace rocks::spatial;
 using namespace rocks::spatial::flattest;
+} // namespace flat_bounds_concurrency_tests_file
 
 // FB08: 읽기·변경 단계가 겹치면 platform::Fatal인지 자식 프로세스에서 확인하고(Docs/Design/
 // FlatBounds.ko.md 8절), 여러 스레드의 동시 질의가 단독 질의와 같은지 본다. 자식은 이 실행 파일을
@@ -21,6 +24,8 @@ namespace rocks::test {
 bool RegisterProcessProbe(const char* mode,
                           int (*function)(int, const char* const*) noexcept) noexcept;
 } // namespace rocks::test
+
+namespace flat_bounds_concurrency_tests_file {
 
 namespace {
 
@@ -237,3 +242,4 @@ TEST(FlatBounds_FB08_ConcurrentQueriesMatchSequential) {
     CHECK(mismatches == 0);
     REQUIRE(scheduler.Shutdown(WorkerShutdownMode::Drain));
 }
+} // namespace flat_bounds_concurrency_tests_file

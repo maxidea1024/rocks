@@ -8,6 +8,8 @@
 // 전파(묶음 하나의 실패는 묶음 전체를 공개하지 않음), 복합 에셋(GameDataAsset — 하위 객체 여러 개·
 // 다른 에셋 Hard 배열·Soft·weak·커브·bulk), 스레드 규칙(Prepare는 다른 스레드, 쓰기는 소유 스레드).
 using namespace rocks;
+namespace package_graph_tests_file {
+
 using namespace rocks::asset_test;
 
 namespace {
@@ -555,3 +557,4 @@ TEST(AssetPackage_ThreadRules) {
 
     CHECK(write.error == ErrorCode::WrongThread);
 }
+} // namespace package_graph_tests_file

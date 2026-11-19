@@ -17,6 +17,8 @@
 #include <string.h>
 
 using namespace rocks;
+namespace segment_stream_tests_file {
+
 using namespace rocks::crypto;
 
 // 세그먼트 스트림(Crypto/SegmentStream.h)의 형식·공개 계약 시험이다(Docs/Design/Crypto.ko.md 9.5·
@@ -841,3 +843,4 @@ TEST(CryptoSegmentStreamWithCompression) {
     CHECK(decompress.Value().TryFinish());
     CHECK(Same(restored.View(), input.View()));
 }
+} // namespace segment_stream_tests_file

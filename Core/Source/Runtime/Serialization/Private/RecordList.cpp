@@ -10,26 +10,26 @@
 namespace rocks {
 namespace {
 
-constexpr uint8 Magic[] = {'R', 'O', 'C', 'K', 'S', 'R', 'E', 'C'};
-constexpr usize RecordHeaderBytes = detail::RecordHeaderBytes;
+constexpr uint8 RecordListMagic[] = {'R', 'O', 'C', 'K', 'S', 'R', 'E', 'C'};
+constexpr usize RecordListHeaderBytes = detail::RecordHeaderBytes;
 constexpr usize LengthBytes = detail::LengthPrefixBytes;
 constexpr usize CountBytes = 4;
-constexpr usize MinimumItemBytes = LengthBytes + RecordHeaderBytes; // 52
+constexpr usize MinimumItemBytes = LengthBytes + RecordListHeaderBytes; // 52
 
 // 항목 envelope: magic과 길이 일관성(44 + payloadBytes == 크기). schema·필드는 RecordReader가 본다.
 bool IsRecordEnvelope(Span<const uint8> record) noexcept {
-    if (record.Size() < RecordHeaderBytes) {
+    if (record.Size() < RecordListHeaderBytes) {
         return false;
     }
 
-    for (usize index = 0; index < sizeof(Magic); ++index) {
-        if (record.Data()[index] != Magic[index]) {
+    for (usize index = 0; index < sizeof(RecordListMagic); ++index) {
+        if (record.Data()[index] != RecordListMagic[index]) {
             return false;
         }
     }
 
     const uint64 payloadBytes = LoadLittleEndian<uint64>(record.Data() + 36);
-    return payloadBytes == static_cast<uint64>(record.Size() - RecordHeaderBytes);
+    return payloadBytes == static_cast<uint64>(record.Size() - RecordListHeaderBytes);
 }
 
 } // namespace
@@ -275,7 +275,7 @@ RecordListReader::OpenShared(Allocator& allocator, Span<const uint8> payload, Gu
             return Result<RecordListReader>::Failure(ErrorCode::CapacityExceeded);
         }
 
-        if (length.Value() < RecordHeaderBytes || length.Value() > archive.Remaining()) {
+        if (length.Value() < RecordListHeaderBytes || length.Value() > archive.Remaining()) {
             return Result<RecordListReader>::Failure(ErrorCode::InvalidArgument);
         }
 

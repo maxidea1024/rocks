@@ -27,7 +27,7 @@ namespace {
 constexpr usize DhBytes = 32;
 constexpr usize HashBytes = 32;
 constexpr usize CipherKeyBytes = 32;
-constexpr usize NonceBytes = 12;
+constexpr usize ChannelHandshakeNonceBytes = 12;
 constexpr usize NoiseTagBytes = 16;
 
 static_assert(ChannelKeyBytes == crypto_scalarmult_BYTES &&
@@ -35,7 +35,7 @@ static_assert(ChannelKeyBytes == crypto_scalarmult_BYTES &&
 static_assert(HashBytes == crypto_hash_sha256_BYTES && HashBytes == ChannelHashBytes);
 static_assert(CipherKeyBytes == crypto_aead_chacha20poly1305_ietf_KEYBYTES &&
               CipherKeyBytes == crypto_kdf_hkdf_sha256_KEYBYTES);
-static_assert(NonceBytes == crypto_aead_chacha20poly1305_ietf_NPUBBYTES);
+static_assert(ChannelHandshakeNonceBytes == crypto_aead_chacha20poly1305_ietf_NPUBBYTES);
 static_assert(NoiseTagBytes == crypto_aead_chacha20poly1305_ietf_ABYTES);
 static_assert(NoiseMessageOverheadBytes == DhBytes + NoiseTagBytes);
 
@@ -120,7 +120,8 @@ bool Dh(NoiseState& state, const uint8* secret, const uint8* publicKey) noexcept
 }
 
 // ChaChaPoly nonce = 0^32 ‖ LE64(n)이다(Noise 12.3절).
-void MakeNonce(uint64 counter, uint8 (&nonce)[NonceBytes]) noexcept {
+void ChannelHandshakeMakeNonce(uint64 counter,
+                               uint8 (&nonce)[ChannelHandshakeNonceBytes]) noexcept {
     platform::MemoryZero(nonce, 4);
     StoreLittleEndian<uint64>(nonce + 4, counter);
 }
@@ -128,8 +129,8 @@ void MakeNonce(uint64 counter, uint8 (&nonce)[NonceBytes]) noexcept {
 // c = ENCRYPT(k, n++, h, plaintext)를 ciphertext(plaintext + 16 byte)에 쓰고 MixHash(c)다.
 void EncryptAndHash(NoiseState& state, Span<const uint8> plaintext,
                     Span<uint8> ciphertext) noexcept {
-    uint8 nonce[NonceBytes];
-    MakeNonce(state.nonce, nonce);
+    uint8 nonce[ChannelHandshakeNonceBytes];
+    ChannelHandshakeMakeNonce(state.nonce, nonce);
     unsigned long long written = 0;
     detail::RequireSodium(crypto_aead_chacha20poly1305_ietf_encrypt(
                               ciphertext.Data(), &written, detail::InputPointer(plaintext),
@@ -144,8 +145,8 @@ void EncryptAndHash(NoiseState& state, Span<const uint8> plaintext,
 // 바꾸지 않는다(호출자가 handshake를 버린다).
 bool DecryptAndHash(NoiseState& state, Span<const uint8> ciphertext,
                     Span<uint8> plaintext) noexcept {
-    uint8 nonce[NonceBytes];
-    MakeNonce(state.nonce, nonce);
+    uint8 nonce[ChannelHandshakeNonceBytes];
+    ChannelHandshakeMakeNonce(state.nonce, nonce);
     uint8 scratch = 0;
     unsigned long long written = 0;
     if (crypto_aead_chacha20poly1305_ietf_decrypt(

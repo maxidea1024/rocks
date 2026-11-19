@@ -1,5 +1,6 @@
 #include <Platform/CrashReporting.h>
 #include <Platform/Thread.h>
+#include <Platform/Atomics.h>
 #include <Platform/Fatal.h>
 #include "../Common/ThreadInternal.h"
 #include "PosixPlatform.h"
@@ -106,6 +107,41 @@ usize CopyCurrentThreadName(char* buffer, usize capacity) noexcept {
     }
 
     return length;
+}
+
+namespace {
+
+uint32 exitSlotCount = 0;
+
+} // namespace
+
+ThreadExitSlot::ThreadExitSlot(Callback callback) noexcept {
+    static_assert(sizeof(pthread_key_t) <= sizeof(native_), "pthread_key_t does not fit the slot");
+    if (callback == nullptr) {
+        return;
+    }
+
+    // Windows 구현과 같은 상한을 지킨다(플랫폼마다 다르게 동작하지 않게).
+    if (AtomicFetchAdd<MemoryOrder::AcquireRelease>(&exitSlotCount, 1) >= MaxThreadExitSlots) {
+        return;
+    }
+
+    // 소멸자는 값을 null로 지운 뒤에 불리고, main 반환·exit에서는 불리지 않는다.
+    pthread_key_t key{};
+    if (pthread_key_create(&key, callback) != 0) {
+        return;
+    }
+
+    native_ = static_cast<uint64>(key);
+    valid_ = true;
+}
+
+void* ThreadExitSlot::Get() const noexcept {
+    return valid_ ? pthread_getspecific(static_cast<pthread_key_t>(native_)) : nullptr;
+}
+
+bool ThreadExitSlot::Set(void* value) noexcept {
+    return valid_ && pthread_setspecific(static_cast<pthread_key_t>(native_), value) == 0;
 }
 
 namespace detail {

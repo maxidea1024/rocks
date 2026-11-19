@@ -8,6 +8,7 @@
 // formatVersion·flags·개수·길이·NodeTable·Record schema·참조 값 경계·남는 byte. 모든 거부는 생성자
 // 전이고 객체를 남기지 않는다.
 using namespace rocks;
+namespace graph_format_tests_file {
 
 namespace {
 
@@ -365,3 +366,4 @@ TEST(GraphFormat_SavedBytesFollowTheSpecification) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace graph_format_tests_file

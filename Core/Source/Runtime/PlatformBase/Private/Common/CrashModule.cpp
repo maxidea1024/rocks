@@ -34,10 +34,10 @@ constexpr usize GuidData1Bytes = 4;
 constexpr usize GuidData2Bytes = 2;
 constexpr usize GuidTailBytes = 8;
 constexpr usize GuidClockBytes = 2;
-constexpr uint32 BitsPerByte = 8;
-constexpr uint32 BitsPerHexDigit = 4;
-constexpr uint8 HexDigitMask = 0xF;
-constexpr char HexDigits[] = "0123456789ABCDEF";
+constexpr uint32 ModuleBitsPerByte = 8;
+constexpr uint32 ModuleBitsPerHexDigit = 4;
+constexpr uint8 ModuleHexDigitMask = 0xF;
+constexpr char ModuleHexDigits[] = "0123456789ABCDEF";
 
 // offset부터 bytes가 available 안인가다(더하기 넘침 없이).
 bool InRange(usize available, uint64 offset, uint64 bytes) noexcept {
@@ -47,7 +47,7 @@ bool InRange(usize available, uint64 offset, uint64 bytes) noexcept {
 uint32 ReadLittle(const uint8* data, usize bytes) noexcept {
     uint32 value = 0;
     for (usize index = 0; index < bytes; ++index) {
-        value |= uint32{data[index]} << (index * BitsPerByte);
+        value |= uint32{data[index]} << (index * ModuleBitsPerByte);
     }
 
     return value;
@@ -57,8 +57,8 @@ void FormatGuid(const uint8* guid, char (&text)[PeGuidTextBytes]) noexcept {
     // 레지스트리 형식이다. Data1·Data2·Data3은 little-endian 정수다.
     usize length = 0;
     const auto putByte = [&](uint8 value) noexcept {
-        text[length++] = HexDigits[value >> BitsPerHexDigit];
-        text[length++] = HexDigits[value & HexDigitMask];
+        text[length++] = ModuleHexDigits[value >> ModuleBitsPerHexDigit];
+        text[length++] = ModuleHexDigits[value & ModuleHexDigitMask];
     };
     for (usize index = GuidData1Bytes; index-- > 0;) {
         putByte(guid[index]);

@@ -8,6 +8,8 @@
 // Busy, 등록 때의 base 검사, 그래프 왕복(오프셋이 0이 아닌 base 하위 객체 포함), base 멤버 경로
 // 쓰기, InstancedStruct<Base>의 파생 수용과 무관한 struct 거부(Emplace·형 바꾸기·decode).
 using namespace rocks;
+namespace struct_inheritance_tests_file {
+
 using namespace rocks::test::instanced;
 using reflection_fixture::InheritAtomicBase;
 using reflection_fixture::InheritAtomicLeaf;
@@ -443,3 +445,4 @@ TEST(StructInheritance_DeepCopyKeepsBaseMembers) {
 
     CHECK(types.Shutdown());
 }
+} // namespace struct_inheritance_tests_file

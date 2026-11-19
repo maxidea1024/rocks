@@ -3,6 +3,7 @@
 #include <Platform/Memory.h>
 
 using namespace rocks;
+namespace random_stream_tests_file {
 
 // 사전 조건 위반(NextUInt32Below(0), NextInt32InRange에서 minimum > maximum, NextFloatInRange의
 // 비유한 입력·빈 구간)은 platform::Fatal로 프로세스를 종료한다. 같은 프로세스 안에서는 검증할 수
@@ -531,3 +532,4 @@ TEST(RandomStreamFloatInRangeRandomIntervalsStayHalfOpen) {
     }
     CHECK(checkedIntervals > 40000u);
 }
+} // namespace random_stream_tests_file

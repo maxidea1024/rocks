@@ -10,6 +10,8 @@
 // 플랫폼 부모 사슬(약한 것부터), 봉인 모드의 사용자 층 제외, 진단을 남긴 파일이 있어도 나머지를
 // 읽기, config-dump golden과 Commandlet 실행.
 using namespace rocks;
+namespace config_file_tests_file {
+
 using namespace rocks::config;
 using namespace rocks::platform;
 using namespace rocks::test::config;
@@ -290,3 +292,4 @@ TEST(Config_CommandLineAssignments) {
     REQUIRE(context.Sync());
     CHECK(fixture.Graph().maxPasses == 9);
 }
+} // namespace config_file_tests_file

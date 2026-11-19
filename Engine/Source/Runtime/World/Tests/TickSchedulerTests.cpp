@@ -4,6 +4,7 @@
 #include <World/TickScheduler.h>
 
 using namespace rocks;
+namespace tick_scheduler_tests_file {
 
 namespace {
 
@@ -368,3 +369,4 @@ TEST(Tick_CycleCheckSurvivesMarkEpochWrap) {
     CHECK(scheduler.AddPrerequisite(first.Value(), third.Value()).Error() ==
           ErrorCode::CycleDetected);
 }
+} // namespace tick_scheduler_tests_file

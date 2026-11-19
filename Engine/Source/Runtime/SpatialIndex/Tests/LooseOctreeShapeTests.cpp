@@ -6,6 +6,8 @@
 #include <Platform/Thread.h>
 
 using namespace rocks;
+namespace loose_octree_shape_tests_file {
+
 using namespace rocks::spatial;
 using namespace rocks::spatial::oracle;
 
@@ -742,3 +744,4 @@ TEST(LooseOctree_LO13_NearestTieAndRejectedDistances) {
     REQUIRE(boundary);
     CHECK(boundary.Value().found && boundary.Value().distance == 100.0);
 }
+} // namespace loose_octree_shape_tests_file

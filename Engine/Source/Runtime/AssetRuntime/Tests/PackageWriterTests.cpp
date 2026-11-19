@@ -8,6 +8,8 @@
 // 참조· 패키지에 속하지 않은 객체 — UnpackagedReference), bulk 원본 오류, 출력(sink) 실패 전파,
 // 할당 실패 주입(쓰기·읽기·Prepare·Instantiate의 모든 할당 지점).
 using namespace rocks;
+namespace package_writer_tests_file {
+
 using namespace rocks::asset_test;
 
 namespace {
@@ -538,8 +540,9 @@ TEST(AssetPackage_AllocationFailures) {
     }
 }
 
-// Registry 할당 실패(객체·Package·bulk 저장소): 대상 Registry의 allocator를 n번째에서 실패시키면
-// Prepare 또는 InstantiatePackages가 OutOfMemory로 끝나고(진단 None) 객체가 남지 않는다.
+// Registry 할당 실패(객체·Package): 대상 Registry의 allocator를 n번째에서 실패시키면
+// InstantiatePackages가 OutOfMemory로 끝나고(진단 None) 객체가 남지 않는다. bulk 저장소는 Prepare의
+// 상태 allocator로 잡고 Package가 이어받으므로(AS 5.7절 16) Registry allocator 실패와 무관하다.
 TEST(AssetPackage_RegistryAllocationFailures) {
     AssetEnv env;
     REQUIRE(env.Ready());
@@ -911,3 +914,4 @@ TEST(AssetPackage_AllocationFailuresLargeScenario) {
         roots[index].Reset();
     }
 }
+} // namespace package_writer_tests_file

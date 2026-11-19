@@ -9,6 +9,7 @@
 #include <Platform/Memory.h>
 
 using namespace rocks;
+namespace wire_mutation_tests_file {
 
 // wire 14–18을 섞은 Record 트리의 손상 입력 시험이다: 모든 byte를 바꾼 입력을 끝까지 읽어도 정해진
 // 오류 코드로만 끝나고(경계 밖 읽기·넘침이 없다 — Asan 체인이 확인한다) 예산 한도 안에 머문다. 중첩
@@ -560,3 +561,4 @@ TEST(WireFormats_NestedRecordContentIsChargedOnce) {
     auto read = value.Value().ReadBytes();
     CHECK(read && read.Value().Size() == Bytes);
 }
+} // namespace wire_mutation_tests_file

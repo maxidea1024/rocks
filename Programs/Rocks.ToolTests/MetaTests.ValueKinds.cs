@@ -47,7 +47,7 @@ internal static partial class MetaTests
             Verify.Equal("Required", Field("next").GetProperty("flags")[0].GetString(), "Required flag");
             Verify.Equal("other", Field("other").GetProperty("toolName").GetString(), "Name equal to the field name is the default");
             Verify.Equal(3, value.GetProperty("fields").GetArrayLength(), "NATIVE members are not schema fields");
-            string generated = File.ReadAllText(probe.Output);
+            string generated = probe.GeneratedText();
             Verify.Contains("IsNativeStrongReference", generated, "NATIVE strong reference static_assert");
             Verify.Contains("::probe::Value::lease", generated, "NATIVE member static_assert target");
             Verify.That(!generated.Contains("RequiresWorldOnlyOwner<", StringComparison.Ordinal), "WorldOnly owner needs no RMC2206 static_assert");
@@ -79,7 +79,7 @@ internal static partial class MetaTests
                 .Single(item => item.GetProperty("name").GetString() == "mode");
             Verify.Equal("Enum", field.GetProperty("value").GetProperty("kind").GetString(), "enum field kind");
             Verify.Equal(mode.GetProperty("id").GetString(), field.GetProperty("value").GetProperty("type").GetString(), "enum field target");
-            string generated = File.ReadAllText(probe.Output);
+            string generated = probe.GeneratedText();
             Verify.Contains("struct GeneratedType<::probe::Mode>", generated, "enum specialization");
             Verify.Contains("static constexpr bool IsDeclared", generated, "constexpr validator");
             Verify.Contains("NativeTypeKey<::probe::Mode>()", generated, "enum field native key");
@@ -164,7 +164,7 @@ internal static partial class MetaTests
                 Verify.Equal(underlying, Type(name).GetProperty("underlying").GetString(), name + " underlying");
             }
 
-            string generated = File.ReadAllText(probe.Output);
+            string generated = probe.GeneratedText();
             Verify.Contains("-2147483648ll", generated, "int32 minimum literal");
             Verify.Contains("static_assert(static_cast<int64>(::probe::Mode::D) == 42ll", generated, "value static_assert");
             string compact = Compact(generated);
@@ -208,7 +208,7 @@ internal static partial class MetaTests
             Verify.Equal("Int16", Field("probe::Leaf", "narrow").GetProperty("value").GetProperty("kind").GetString(), "short struct member");
             Verify.Equal("Int8", Field("probe::Value", "tinies").GetProperty("element").GetProperty("kind").GetString(), "int8 array element");
             Verify.Equal("Int16", Field("probe::Value", "narrows").GetProperty("element").GetProperty("kind").GetString(), "int16 array element");
-            string generated = Compact(File.ReadAllText(probe.Output));
+            string generated = Compact(probe.GeneratedText());
             Verify.Contains("PathStructMember<::probe::Leaf,&::probe::Leaf::tiny,ValueKind::Int8>", generated, "int8 member path thunk");
             Verify.Contains("{ValueKind::Int16,Guid{}},65536u}", generated, "int16 array element schema");
             ProcessResult compiled = await probe.CompileGeneratedAsync();
@@ -234,7 +234,7 @@ internal static partial class MetaTests
             Verify.Equal("Name", Field("probe::Leaf", "socket").GetProperty("value").GetProperty("kind").GetString(), "Name struct member");
             Verify.Equal("Name", Field("probe::Value", "names").GetProperty("element").GetProperty("kind").GetString(), "Name array element");
             Verify.Equal("Name", Field("probe::Leaf", "aliases").GetProperty("element").GetProperty("kind").GetString(), "Name member array element");
-            string generated = Compact(File.ReadAllText(probe.Output));
+            string generated = Compact(probe.GeneratedText());
             Verify.Contains("PathStructMember<::probe::Leaf,&::probe::Leaf::socket,ValueKind::Name>", generated, "Name member path thunk");
             Verify.Contains("{ValueKind::Name,Guid{}},65536u}", generated, "Name array element schema");
             ProcessResult compiled = await probe.CompileGeneratedAsync();
@@ -281,7 +281,7 @@ internal static partial class MetaTests
             Verify.Equal("WeakObjectReference", Field("probe::Leaf", "links").GetProperty("element").GetProperty("kind").GetString(), "weak member array element");
             Verify.That(!Type("probe::Leaf").GetProperty("flags").EnumerateArray().Any(flag => flag.GetString() == "ContainsStrongReference"),
                 "weak members do not make a reference struct");
-            string generated = Compact(File.ReadAllText(probe.Output));
+            string generated = Compact(probe.GeneratedText());
             Verify.Contains("PathStructMember<::probe::Leaf,&::probe::Leaf::anything,ValueKind::WeakObjectReference>", generated, "weak member path thunk");
             // 스키마의 GC 간선은 강한 참조 strong 하나뿐이고(weak 필드·배열은 FieldKind::Value), 생성 Trace는 strong만 방문한다.
             Verify.Equal(1, Regex.Count(generated, "FieldKind::ObjectReference", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(10)),

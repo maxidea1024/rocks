@@ -8,6 +8,8 @@
 // 층과 같은 값·세션 층 값은 쓰지 않는다, 값이 없어진 branch의 옛 파일은 지운다), 오래된 사용자
 // 파일의 관대한 읽기(모르는 키는 Warning 후 버린다), 재시작 필요 값의 대기와 다음 시작 적용.
 using namespace rocks;
+namespace user_config_tests_file {
+
 using namespace rocks::config;
 using namespace rocks::test::config;
 
@@ -364,3 +366,4 @@ TEST(Config_RestartRequiredChangeWaitsForNextStart) {
     REQUIRE(context.GetPendingRestarts(pending));
     CHECK(pending.IsEmpty());
 }
+} // namespace user_config_tests_file

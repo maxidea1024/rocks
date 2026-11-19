@@ -8,6 +8,7 @@
 #include <Platform/Thread.h>
 
 using namespace rocks;
+namespace bounded_mpsc_queue_tests_file {
 
 namespace {
 
@@ -269,3 +270,4 @@ TEST(LogBlockPoolConcurrentBorrowIsExclusive) {
     LogBlock none;
     CHECK(!pool.TryBorrow(none));
 }
+} // namespace bounded_mpsc_queue_tests_file

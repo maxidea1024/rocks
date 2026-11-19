@@ -4,6 +4,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace string_path_operator_tests_file {
 
 TEST(StringPathOperatorsPreserveUnrealAppendRules) {
     struct Case {
@@ -140,3 +141,4 @@ TEST(StringPathOperatorsPropagateErrorsAndEveryAllocationFailure) {
     }
     CHECK(system.Stats().liveAllocations == 0);
 }
+} // namespace string_path_operator_tests_file

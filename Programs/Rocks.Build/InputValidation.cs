@@ -177,11 +177,12 @@ internal static class InputValidation
                 {
                     throw new ArgumentException($"Module {module.Name}: define '{define}' is reserved for the build configuration and target.");
                 }
-                // 모듈 이름 매크로는 빌드가 진입점 모듈마다 정의한다(ModuleTables). 규칙이 정의하면 진입점 매크로의 이름 대조가 무의미해진다.
-                if (name == ModuleTables.ModuleNameMacro)
+                // 모듈 이름·자기 타입 표지 매크로는 빌드가 진입점 모듈마다 정의한다(ModuleTables). 규칙이 정의하면 진입점 매크로의 이름
+                // 대조가 무의미해지거나 진입 기술이 없는 타입 등록 함수를 가리킨다.
+                if (name == ModuleTables.ModuleNameMacro || name == ModuleTables.ModuleTypesMacro)
                 {
                     throw new ArgumentException($"Module {module.Name}: define '{define}' is reserved; the build defines " +
-                        $"{ModuleTables.ModuleNameMacro} for every module that implements a module entry point.");
+                        $"{name} for every module that implements a module entry point.");
                 }
                 // 로그 컴파일 하한은 타깃 전체에 하나다(LogCompiledMinimums). 모듈이 바꾸면 Log.h inline 본문이 TU마다 달라져 ODR 위반이다.
                 if (name == LogCompiledMinimums.MacroName)
@@ -201,8 +202,7 @@ internal static class InputValidation
     }
 
     // 리플렉션 생성 소스 목록(NativeModuleInput.ReflectionSources)은 MetaCompiler가 낸 C++ 번역 단위의 경로다. 빈 경로·NUL·.cpp가 아닌
-    // 확장자를 거부한다(C로 컴파일되는 .c나 header가 들어오지 않게). 설치 SDK 표지 ReflectionOnlyLibrary는 미리 빌드한 라이브러리만 가진
-    // 모듈에만 켠다 — 자기 소스가 있는 모듈은 그 소스로 진입점 판정을 받는다.
+    // 확장자를 거부한다(C로 컴파일되는 .c나 header가 들어오지 않게).
     private static void ValidateReflectionSources(NativeModuleInput module)
     {
         foreach (string source in module.ReflectionSources)
@@ -211,13 +211,6 @@ internal static class InputValidation
             {
                 throw new ArgumentException($"Module {module.Name}, ReflectionSources: '{source}' must be the path of a generated .cpp translation unit.");
             }
-        }
-
-        if (module.ReflectionOnlyLibrary &&
-            (module.Sources.Count != 0 || module.GeneratedSources.Count != 0 || module.ReflectionSources.Count != 0 || module.PrebuiltLibraries.Count == 0))
-        {
-            throw new ArgumentException($"Module {module.Name}: ReflectionOnlyLibrary marks an installed SDK module whose prebuilt library holds " +
-                "only reflection generated code; it cannot be combined with the module's own sources and requires PrebuiltLibraries.");
         }
     }
 

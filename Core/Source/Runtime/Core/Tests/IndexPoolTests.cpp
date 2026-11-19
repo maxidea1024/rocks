@@ -5,6 +5,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace index_pool_tests_file {
 
 namespace {
 
@@ -175,3 +176,4 @@ TEST(IndexPool_RandomizedOracle) {
         CHECK(pool.IsLive(index) == live[index]);
     }
 }
+} // namespace index_pool_tests_file

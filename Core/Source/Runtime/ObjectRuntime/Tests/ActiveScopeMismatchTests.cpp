@@ -5,6 +5,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace active_scope_mismatch_tests_file {
 
 namespace {
 constexpr TypeId ContextFixtureType{0x6175746f636f6e74ull, 1};
@@ -83,3 +84,4 @@ TEST(ActiveObjectScopeRejectsCrossWorldBorrowWithoutChangingLifetime) {
     CHECK(allocator.Stats().liveAllocations == 0);
     CHECK(allocator.Stats().liveBytes == 0);
 }
+} // namespace active_scope_mismatch_tests_file

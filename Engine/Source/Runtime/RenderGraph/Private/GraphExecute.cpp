@@ -1,5 +1,8 @@
 #include "RenderGraphInternal.h"
 
+#include "GraphCommandList.h"
+
+#include <Task/ParallelFor.h>
 #include <TraceCapture/TraceMark.h>
 
 // 그래프 실행이다: 그래프 시작 업로드, 첫 사용 pass 직전 할당(같은 그래프 안 재사용 자리 또는 풀),
@@ -153,6 +156,7 @@ Result<void> CloseRecording(GraphState& state) noexcept {
     }
 
     state.commands = nullptr;
+    state.recordingPass = GraphIndexNone;
     auto submitted = state.device->EndFrame();
     if (!submitted) {
         return Result<void>::Failure(RecordGraphError(state, submitted.Error(), false,
@@ -314,6 +318,12 @@ class GraphExecutionAccess {
 public:
     static void Run(RenderGraph& graph, GraphPassExecutor& executor,
                     graphics::CommandContext& commands, uint32 pass) noexcept;
+    // 병렬 기록: 기록 함수를 기록 목록에 기록한다(worker, CPU 구간만).
+    static void Record(RenderGraph& graph, GraphPassExecutor& executor, GraphCommandList& list,
+                       uint32 pass) noexcept;
+    // 기록 목록을 장치 기록에 재생한다(소유 스레드, Run과 같은 GPU 구간 위치).
+    static Result<void> Replay(RenderGraph& graph, const GraphCommandList& list,
+                               graphics::CommandContext& commands, uint32 pass) noexcept;
 };
 
 } // namespace rocks::render
@@ -410,11 +420,48 @@ void EnterScopes(FrameArena& arena, GraphState& state, uint32 scope) noexcept {
     EnterScopeChain(arena, state, scope);
 }
 
-Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& state,
-                         uint32 pass) noexcept {
+namespace {
+
+// pass가 지금 장치 기록을 연 Raster pass의 attachment subresource에 접근하는지다.
+bool UsesOpenAttachment(const GraphState& state, uint32 pass) noexcept {
+    return state.recordingPass != GraphIndexNone &&
+           UsesAttachmentsOf(state, pass, state.recordingPass);
+}
+
+} // namespace
+
+bool UsesAttachmentsOf(const GraphState& state, uint32 pass, uint32 rasterPass) noexcept {
+    const PassRecord& owner = state.passes[rasterPass];
+    const PassRecord& record = state.passes[pass];
+    for (uint32 index = record.firstUse; index < record.firstUse + record.useCount; ++index) {
+        const SubresourceUse& use = state.uses[index];
+        // 장치가 막는 것은 패스 attachment의 복사다(CopyTexture). SRV·UAV 접근은 backend가 render
+        // pass를 나눠 처리한다.
+        if (!graphics::HasAnyAccess(use.access,
+                                    ResourceAccess::CopySource | ResourceAccess::CopyDestination)) {
+            continue;
+        }
+
+        for (uint32 other = owner.firstUse; other < owner.firstUse + owner.useCount; ++other) {
+            const SubresourceUse& attached = state.uses[other];
+            if (attached.attachment && attached.resource == use.resource &&
+                attached.subresource == use.subresource) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+Result<void> PreparePass(FrameArena& arena, GraphState& state, uint32 pass) noexcept {
     PassRecord& record = state.passes[pass];
     const char* passName = record.name->Name() != nullptr ? record.name->Name() : "";
+    if (record.prepared) {
+        return Result<void>::Success();
+    }
 
+    record.prepared = true;
     // 첫 사용 pass 직전에 받는다(두 모드가 같은 지점이다. Deferred의 업로드 대상은 그래프 시작에
     // 이미 받았다).
     for (uint32 index = record.firstUse; index < record.firstUse + record.useCount; ++index) {
@@ -453,6 +500,75 @@ Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& stat
         }
 
         view.device = created.Value().slot;
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> RecordPassesInParallel(RenderGraph& graph, FrameArena& arena,
+                                    GraphState& state) noexcept {
+    ArenaArray<uint32> order;
+    for (uint32 pass = 0; pass < state.passes.Size(); ++pass) {
+        if (!state.passes[pass].culled) {
+            auto pushed = order.TryPushBack(arena, pass);
+            if (!pushed) {
+                return pushed;
+            }
+        }
+    }
+
+    if (order.Size() < 2) {
+        return Result<void>::Success();
+    }
+
+    // 소유 스레드가 선언 순서로 자원 할당·장치 view 생성을 모두 마친다(기록 함수가 보는 장치
+    // handle이 정해진다).
+    for (const uint32 pass : order) {
+        auto prepared = PreparePass(arena, state, pass);
+        if (!prepared) {
+            return prepared;
+        }
+    }
+
+    // pass마다 기록 목록 하나다. ParallelFor가 돌아오면 모든 기록이 끝났다(명시 join).
+    auto recorded = ParallelFor(*state.scheduler, *state.scratch, order.Size(),
+                                [&](usize begin, usize end) noexcept -> ErrorCode {
+                                    for (usize index = begin; index < end; ++index) {
+                                        const uint32 pass = order[index];
+                                        PassRecord& record = state.passes[pass];
+                                        auto list = arena.TryNew<GraphCommandList>(arena);
+                                        if (!list) {
+                                            return list.Error();
+                                        }
+
+                                        GraphExecutionAccess::Record(graph, *record.executor,
+                                                                     *list.Value(), pass);
+                                        if (list.Value()->RecordError() != ErrorCode::None) {
+                                            return list.Value()->RecordError();
+                                        }
+
+                                        record.recorded = list.Value();
+                                    }
+
+                                    return ErrorCode::None;
+                                });
+    if (!recorded) {
+        return Result<void>::Failure(RecordGraphError(state, recorded.Error(), false,
+                                                      "parallel pass recording failed ({})",
+                                                      ErrorCodeName(recorded.Error())));
+    }
+
+    state.stats.parallelPasses = static_cast<uint32>(order.Size());
+    return Result<void>::Success();
+}
+
+Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& state,
+                         uint32 pass) noexcept {
+    PassRecord& record = state.passes[pass];
+    const char* passName = record.name->Name() != nullptr ? record.name->Name() : "";
+    auto prepared = PreparePass(arena, state, pass);
+    if (!prepared) {
+        return prepared;
     }
 
     // 즉시 실행 모드는 이 pass의 전이를 지금 계산한다(앞을 내다보지 않으므로 합치지 않는다).
@@ -531,6 +647,7 @@ Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& stat
         }
 
         state.commands = begun.Value();
+        state.recordingPass = pass;
         ++state.stats.recordings;
         if (state.trace != nullptr && !state.traceFrameOpen) {
             state.trace->BeginFrame(*state.device, *state.commands, state.frame);
@@ -538,7 +655,17 @@ Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& stat
         }
 
         RestoreScopeMarkers(state);
-    } else if (state.commands == nullptr) {
+    } else if (state.commands != nullptr && UsesOpenAttachment(state, pass)) {
+        // Compute·Copy pass가 열린 기록의 attachment subresource에 접근하면 그 기록을 닫는다(장치는
+        // 패스 attachment의 복사·UAV를 막는다). 아래에서 attachment 없는 기록을 연다.
+        LeaveScopes(state, record.scope);
+        auto closed = CloseRecording(state);
+        if (!closed) {
+            return closed;
+        }
+    }
+
+    if (record.kind != GraphPassKind::Raster && state.commands == nullptr) {
         // 렌더 타깃이 없는 Compute·Copy pass는 attachment 없는 기록을 연다.
         auto begun = state.device->BeginPass(graphics::PassDesc{});
         if (!begun) {
@@ -562,7 +689,19 @@ Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& stat
     LeaveScopes(state, record.scope);
     EnterScopes(arena, state, record.scope);
     IssueTransitions(arena, state, pass);
-    GraphExecutionAccess::Run(graph, *record.executor, *state.commands, pass);
+    if (record.recorded != nullptr) {
+        // 병렬 기록: 기록 함수 위치에 기록 목록을 재생한다(장치 호출 열이 직렬과 같다).
+        auto replayed =
+            GraphExecutionAccess::Replay(graph, *record.recorded, *state.commands, pass);
+        if (!replayed) {
+            return Result<void>::Failure(RecordGraphError(
+                state, replayed.Error(), false, "pass '{}' recorded commands failed on replay ({})",
+                passName, ErrorCodeName(replayed.Error())));
+        }
+    } else {
+        GraphExecutionAccess::Run(graph, *record.executor, *state.commands, pass);
+    }
+
     IssueSplitBegins(arena, state, pass);
     record.executed = true;
     ++state.stats.executedPasses;
@@ -674,6 +813,26 @@ void GraphExecutionAccess::Run(RenderGraph& graph, GraphPassExecutor& executor,
     }
 
     executor.Execute(context);
+}
+
+void GraphExecutionAccess::Record(RenderGraph& graph, GraphPassExecutor& executor,
+                                  GraphCommandList& list, uint32 pass) noexcept {
+    GraphState& state = *graph.state_;
+    GraphPassContext context(graph, list, pass);
+    CpuScope cpu(*state.passes[pass].name);
+    executor.Execute(context);
+}
+
+Result<void> GraphExecutionAccess::Replay(RenderGraph& graph, const GraphCommandList& list,
+                                          graphics::CommandContext& commands,
+                                          uint32 pass) noexcept {
+    GraphState& state = *graph.state_;
+    if (state.trace != nullptr) {
+        GpuScope gpu(*state.trace, commands, *state.passes[pass].name);
+        return list.Replay(commands);
+    }
+
+    return list.Replay(commands);
 }
 
 } // namespace rocks::render

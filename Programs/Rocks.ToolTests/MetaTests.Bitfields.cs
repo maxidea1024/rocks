@@ -33,12 +33,14 @@ internal static partial class MetaTests
             }
 
             Verify.That(!Field("probe::Flags", "plain").GetProperty("bitfield").GetBoolean(), "a plain member is not a bitfield");
-            string generated = Compact(File.ReadAllText(probe.Output));
+            string generated = Compact(probe.GeneratedText());
             foreach ((string expected, string reason) in new[]
             {
                 ("#include <Object/GeneratedBitfieldAccess.h>", "bitfield function table header"),
-                ("static bool Get_on(const ::probe::Flags& value) noexcept { return value.on != 0; }", "struct getter"),
-                ("static void Set_hidden(::probe::Value& value, bool bit) noexcept", "private class setter"),
+                ("static bool Get_on(const ::probe::Flags& value) noexcept;", "struct getter declaration"),
+                ("bool GeneratedType<::probe::Flags>::Get_on(const ::probe::Flags& value) noexcept { return value.on != 0; }", "struct getter"),
+                ("static void Set_hidden(::probe::Value& value, bool bit) noexcept;", "private class setter declaration"),
+                ("void GeneratedType<::probe::Value>::Set_hidden(::probe::Value& value, bool bit) noexcept {", "private class setter"),
                 ("detail::BitfieldStructFieldOps<::probe::Flags, &GeneratedType<::probe::Flags>::Get_on, &GeneratedType<::probe::Flags>::Set_on>(", "struct member ops"),
                 ("detail::BitfieldFieldOps<::probe::Value, &GeneratedType<::probe::Value>::Get_visible, &GeneratedType<::probe::Value>::Set_visible, false>(", "class field ops"),
                 ("detail::BitfieldFieldOps<::probe::Value, &GeneratedType<::probe::Value>::Get_locked, &GeneratedType<::probe::Value>::Set_locked, true>(", "ReadOnly class field ops"),

@@ -15,6 +15,7 @@
 
 // zstd 사전 학습(Docs/Design/Compression.ko.md 11.6절) 시험이다.
 namespace rocks::test {
+namespace compression_dictionary_training_tests_file {
 
 using namespace dictionary_test;
 
@@ -496,5 +497,6 @@ TEST(CompressionDictionaryTraining_ConcurrentCallsMatchSequential) {
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace compression_dictionary_training_tests_file
 
 } // namespace rocks::test

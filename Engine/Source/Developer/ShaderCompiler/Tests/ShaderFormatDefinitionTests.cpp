@@ -7,6 +7,8 @@
 #include <string.h>
 
 using namespace rocks;
+namespace shader_format_definition_tests_file {
+
 using namespace rocks::shader;
 
 // 셰이더 형식 정의·엔진 컴파일 프로필(Docs/Design/ShaderSystem.ko.md 12.1절, P6a)의 저장소 파일과
@@ -450,3 +452,4 @@ TEST(ShaderFormat_DefinitionDigestFollowsFileBytes) {
     CHECK(profile.sha256 == Sha256::Hash(ReadConfig("Engine-MacOS").View()));
     CHECK(profile.formats[0].sha256 == Sha256::Hash(ReadConfig("METAL_SM5").View()));
 }
+} // namespace shader_format_definition_tests_file

@@ -7,6 +7,7 @@
 // 플래그로 전파된 읽기 전용, 실제 대상 enum 스키마 기준 판정, 원소 모드와 ValidateArrayLength,
 // PropagateFieldFlags·EnumReplacementValue의 규칙.
 using namespace rocks;
+namespace field_write_validation_tests_file {
 
 namespace {
 
@@ -223,3 +224,4 @@ TEST(FieldWriteValidation_ContentRulesUseTheActualEnum) {
     binding.readOnly = true;
     CHECK(detail::ValidateFieldWrite(binding, target, orphan).Error() == ErrorCode::Unsupported);
 }
+} // namespace field_write_validation_tests_file

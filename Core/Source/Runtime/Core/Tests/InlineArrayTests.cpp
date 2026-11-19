@@ -2,6 +2,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace inline_array_tests_file {
 
 namespace {
 
@@ -110,3 +111,4 @@ TEST(InlineArray_ConstructsAndDestroysEachElementOnce) {
     }
     CHECK(Counted::live == 0);
 }
+} // namespace inline_array_tests_file

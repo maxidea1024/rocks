@@ -50,7 +50,7 @@ FileStatus FileSystem::Copy(const char*, usize, const char*, usize, bool) noexce
 
 namespace {
 
-bool IsSeparator(char c) noexcept {
+bool FileTreeIsSeparator(char c) noexcept {
     return c == '/' || (HostPathStyle() == PathStyle::Windows && c == '\\');
 }
 
@@ -61,11 +61,11 @@ bool IsAsciiLetter(char c) noexcept {
 // 만들 수 없는 앞부분(루트·드라이브·UNC 서버와 공유 이름)의 길이다.
 usize RootLength(const char* path, usize bytes) noexcept {
     if (HostPathStyle() == PathStyle::Windows) {
-        if (bytes >= 2 && IsSeparator(path[0]) && IsSeparator(path[1])) {
+        if (bytes >= 2 && FileTreeIsSeparator(path[0]) && FileTreeIsSeparator(path[1])) {
             // \\server\share\ 까지 건너뛴다.
             usize index = 2;
             for (int part = 0; part < 2; ++part) {
-                while (index < bytes && !IsSeparator(path[index])) {
+                while (index < bytes && !FileTreeIsSeparator(path[index])) {
                     ++index;
                 }
                 if (index < bytes) {
@@ -75,10 +75,10 @@ usize RootLength(const char* path, usize bytes) noexcept {
             return index;
         }
         if (bytes >= 2 && IsAsciiLetter(path[0]) && path[1] == ':') {
-            return bytes >= 3 && IsSeparator(path[2]) ? 3 : 2;
+            return bytes >= 3 && FileTreeIsSeparator(path[2]) ? 3 : 2;
         }
     }
-    return bytes >= 1 && IsSeparator(path[0]) ? 1 : 0;
+    return bytes >= 1 && FileTreeIsSeparator(path[0]) ? 1 : 0;
 }
 
 // 이미 있는 항목이 디렉터리인지 확인한다.
@@ -162,7 +162,8 @@ char* JoinChild(const char* path, usize bytes, const char* name, usize nameBytes
     // 드라이브 루트("C:\\name")가 된다. 구분자 없이 붙인다("C:name").
     const bool driveRelative = HostPathStyle() == PathStyle::Windows && bytes == 2 &&
                                IsAsciiLetter(path[0]) && path[1] == ':';
-    const bool needSeparator = bytes != 0 && !IsSeparator(path[bytes - 1]) && !driveRelative;
+    const bool needSeparator =
+        bytes != 0 && !FileTreeIsSeparator(path[bytes - 1]) && !driveRelative;
     if (nameBytes > MaxSize - bytes - 2) {
         return nullptr;
     }
@@ -231,7 +232,7 @@ FileStatus MakeDirectoryTree(FileSystem& system, const char* path, usize pathByt
     }
     usize end = pathBytes;
     const usize root = RootLength(path, pathBytes);
-    while (end > root && IsSeparator(path[end - 1])) {
+    while (end > root && FileTreeIsSeparator(path[end - 1])) {
         --end;
     }
     if (end <= root) {
@@ -239,10 +240,10 @@ FileStatus MakeDirectoryTree(FileSystem& system, const char* path, usize pathByt
         return RequireDirectory(system, path, pathBytes);
     }
     for (usize index = root; index <= end; ++index) {
-        if (index != end && !IsSeparator(path[index])) {
+        if (index != end && !FileTreeIsSeparator(path[index])) {
             continue;
         }
-        if (index == root || IsSeparator(path[index - 1])) {
+        if (index == root || FileTreeIsSeparator(path[index - 1])) {
             continue; // 연속 구분자
         }
         auto made = system.MakeDirectory(path, index);
@@ -265,13 +266,13 @@ FileStatus DeleteDirectoryTree(FileSystem& system, const char* path, usize pathB
     }
     // 끝 구분자가 있으면 OS가 link를 따라가 해석하므로("link/") 루트가 아닌 한 떼어낸다.
     const usize root = RootLength(path, pathBytes);
-    while (pathBytes > root && pathBytes > 1 && IsSeparator(path[pathBytes - 1])) {
+    while (pathBytes > root && pathBytes > 1 && FileTreeIsSeparator(path[pathBytes - 1])) {
         --pathBytes;
     }
     // 마지막 구성 요소가 "."·".."이면 거부한다. POSIX는 "link/."·"link/.."를 link 대상(또는 그
     // 부모) 기준으로 해석하고 Windows는 문자열로 정규화하므로, 지울 대상이 플랫폼마다 달라진다.
     usize nameStart = pathBytes;
-    while (nameStart > root && !IsSeparator(path[nameStart - 1])) {
+    while (nameStart > root && !FileTreeIsSeparator(path[nameStart - 1])) {
         --nameStart;
     }
     const usize nameBytes = pathBytes - nameStart;

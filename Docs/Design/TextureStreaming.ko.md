@@ -1,6 +1,6 @@
 # 텍스처 스트리밍 설계
 
-기준일: 2026-11-20, 개정 6. [엔진 구현 계획](EngineImplementationPlan.ko.md) 9.5절 "필수 Texture Streaming"을 구현 스펙으로 정한다. 계획 9.5절은 요구와 수용 시험(TX01–TX08)을 정하고, 이 문서는 구조·계산식·실행 단계·Graphics 요구·단계를 정한다. 사용자 분담 결정(2026-11-16 "이것도 니가해")에 따라 렌더 세션이 맡는다. 압축·색 보정은 에셋 세션 몫이다.
+기준일: 2026-11-20, 개정 7. [엔진 구현 계획](EngineImplementationPlan.ko.md) 9.5절 "필수 Texture Streaming"을 구현 스펙으로 정한다. 계획 9.5절은 요구와 수용 시험(TX01–TX08)을 정하고, 이 문서는 구조·계산식·실행 단계·Graphics 요구·단계를 정한다. 사용자 분담 결정(2026-11-16 "이것도 니가해")에 따라 렌더 세션이 맡는다. 압축·색 보정은 에셋 세션 몫이다.
 
 UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275b`, 로컬 클론)의 현재 기본 경로다. 경로는 `Engine/Source/Runtime/` 기준이며 다음 약어를 쓴다.
 - `ES/` = `Engine/Private/Streaming/`
@@ -66,7 +66,7 @@ UE가 하위 호환으로 남긴 옛 지표 경로와 deprecated 경로는 보�
 - 숨은 것은 크기 × 0.5로 한 mip 낮춘다. Terrain·강제 상주·LooksLowRes는 낮추지 않는다(`ES/StreamingTexture.cpp:364–372`).
 
 **허용 범위.**
-- 최대 = 쿠킹 mip 수 − 런타임 bias. 쿠킹은 cinematic mip을 남겨 두고, 시네마틱이 아니면 런타임 bias로 다시 뺀다(`EP/TextureDerivedData.cpp:1342`, `ES/StreamingTexture.cpp:187–193`).
+- 최대 = 쿠킹 mip 수 − 런타임 bias. 쿠킹은 LOD bias를 계산할 때 cinematic mip 수를 0으로 넣으므로 쿠킹 결과의 상위 mip이 곧 cinematic mip이다. 시네마틱이 아니면 런타임 bias로 `NumCinematicMipLevels`만큼 뺀다(`EP/TextureDerivedData.cpp:2969`, `EP/TextureLODSettings.cpp:262–275`, `ES/StreamingTexture.cpp:187–193`).
 - 최소 = 상주 꼬리 mip 수와 그룹 스트리밍 mip 수에서 정한 값(`ES/StreamingTexture.cpp:223–246`).
   - 상주 꼬리 = max(1, 형식 mip tail, 최소 상주 수 7). 블록 압축은 4×4 규칙을 따른다(`Developer/TextureFormat/Public/Interfaces/ITextureFormat.h:157–189`, `Engine/Config/BaseEngine.ini:2037`).
 - 비스트리밍: NeverStream, UI 그룹, mip 1개, 2의 거듭제곱 아님, NoMipmaps, Cube(`EP/Texture.cpp:1833–1890`).
@@ -168,7 +168,9 @@ UE가 하위 호환으로 남긴 옛 지표 경로와 deprecated 경로는 보�
 
 **최대.** `maxMips` = 쿠킹 mip 수 − 런타임 bias(설정 전역 bias + 예산 bias + 비시네마틱 감산)이다.
 - 쿠킹 때 정한 LOD bias·최대 크기는 이미 잘렸으므로 다시 더하지 않는다.
-- 시네마틱 mip: 쿠킹은 min(`NumCinematicMipLevels`, 쿠킹 LOD bias)개를 남겨 둔다. 시네마틱 pin이 아닐 때 런타임 bias로 그만큼 뺀다(UE와 같다. AssetSystem 12.5절 개정, 12절).
+- 시네마틱 mip: 쿠킹 편향에 시네마틱 mip을 넣지 않는다. 쿠킹 결과의 상위 mip이 시네마틱 mip이다. 시네마틱 pin이 아닐 때 런타임 bias로 `NumCinematicMipLevels`만큼 뺀다(UE와 같다, AssetSystem 개정 12의 12.5.1절).
+  - 예: 원본 1024, 쿠킹 LOD bias 2, `NumCinematicMipLevels` 1이면 쿠킹 상위 mip은 256이고, 평소 최대는 128, 시네마틱 pin일 때 256이다.
+  - 버린 안: "min(`NumCinematicMipLevels`, 쿠킹 LOD bias)개를 남겨 둔다"(개정 4–6). 같은 예에서 512·256·512가 되어 UE와 달라서 버렸다.
 
 **최소.** `minMips` = max(상주 꼬리 mip 수(메타), 그룹 스트리밍 mip 수에서 정한 하한)이다.
 
@@ -192,7 +194,7 @@ UE가 하위 호환으로 남긴 옛 지표 경로와 deprecated 경로는 보�
 | `LODGroup` | 그룹 표 조회. 그룹 의미: Skybox 강제 상주, UI 비스트리밍, Terrain 축소 제외, Lightmap·Shadowmap 크기 계수, Character 계열 높은 우선순위 |
 | `NeverStream` | 비스트리밍 |
 | 전역 강제 상주 | 영구 pin(4.6절) |
-| `NumCinematicMipLevels` | 시네마틱 pin일 때만 남겨 둔 mip을 허용(4.3절) |
+| `NumCinematicMipLevels` | 시네마틱 pin이 아닐 때 쿠킹 상위 mip에서 이만큼 뺀다(4.3절) |
 | `MipGenSettings`(NoMipmaps)·크기 | 비스트리밍 판정 |
 | `MipLoadOptions` | Default·AllMips는 일반 스트리밍. OnlyFirstMip은 비스트리밍 단일 mip(UE와 같다, AssetSystem 12.4.1절과 일치) |
 | `VirtualTextureStreaming` | 이 체계 대상에서 제외(가상 텍스처는 후속) |
@@ -435,7 +437,7 @@ Rocks 규칙:
 | RenderBase | 4.4절 GX1·GX4·GX5·GX7·GX8 | 6절 요구를 더한다 | GX 구현 때 함께(TS2) |
 | RenderBase | 6.5절 상주 꼬리 기본값, 메타 hash | 4.3절 값으로 확정(T8), 덩어리 hash를 메타에 넣는다 | 반영됨(6.5절에 기본값 7·덩어리 hash가 이미 있다) |
 | RenderBase | 5.2절 완료 통지 | 보임 신호(T3)와 전송 완료 통지 | 반영(렌더 기반 개정 25) |
-| AssetSystem | A5 플랫폼 데이터 메타, 12.5절 LOD bias | 덩어리 hash, 상주 꼬리 계산 규칙(4.3절), 시네마틱 mip을 남겨 두는 쿠킹 규칙(4.3절), 메시 UV 밀도(메시 에셋 단계) | 에셋 세션에 전달(A5 착수 전 반영). 메시 UV 밀도는 메시 에셋 스펙에 반영(MeshAnimationAssets 4.3절 `MeshUvDensity`, 2026-11-20) |
+| AssetSystem | A5 플랫폼 데이터 메타, 12.5절 LOD bias | 덩어리 hash, 상주 꼬리 계산 규칙(4.3절), 시네마틱 mip을 쿠킹 편향에 넣지 않는 규칙(4.3절), 메시 UV 밀도(메시 에셋 단계) | 반영(AssetSystem 개정 12, 12.1절 `TexturePlatformData`·12.5.1절, 2026-11-20). 메시 UV 밀도는 메시 에셋 스펙에 반영(MeshAnimationAssets 4.3절 `MeshUvDensity`, 2026-11-20) |
 | ShaderSystem | 셰이더 helper | 스트리밍 텍스처의 명시 LOD·Load 변환 helper와 진단(T6) | 반영(셰이더 시스템 개정 20, 5.2절) |
 
 ## 13. 개정 이력
@@ -479,4 +481,5 @@ Rocks 규칙:
 - 개정 3(2026-11-17): 9절에 실행 중 스트리밍 상태의 위치를 적었다. 자산 객체에는 표 handle만 두고, 상주 mip 수·전송·요청 세대·갱신 대기·통지는 이 모듈의 표에 둔다(AssetSystem 개정 8의 `StreamableRenderAsset` 도입에 맞춤).
 - 개정 4(2026-11-19): 11절 결정 T1–T8을 권장안대로 확정했다(T9는 보류). 12절 다른 문서 개정에 상태 열을 두고 계획 9.5절(표본 해상도, 개정 1.14)·렌더 기반 5.2절(보임 신호·전송 완료 통지)·셰이더 시스템 5.2절(명시 LOD·`Load` helper와 진단)을 반영했다. 렌더 기반 6.5절은 이미 반영돼 있었고, AssetSystem A5 메타 요구는 에셋 세션에 전달한다.
 - 개정 5(2026-11-20): 메시 에셋 스펙(MeshAnimationAssets 개정 2)의 요구 MR3을 11절 T9에 적었다(메시 LOD를 스트리밍 단위로, 정할 것 세 가지, MA2 전에 정함). 12절 AssetSystem 행의 메시 UV 밀도를 메시 스펙 4.3절로 연결했다.
+- 개정 7(2026-11-20): 4.3절 시네마틱 mip 규칙을 UE 5.8과 맞췄다. 쿠킹 편향에 시네마틱 mip을 넣지 않고(쿠킹 상위 mip이 시네마틱 mip), 시네마틱 pin이 아닐 때 런타임 bias로 `NumCinematicMipLevels`만큼 뺀다. 에셋 세션이 AssetSystem 개정 12에 A5 요구를 반영하면서 지적했다. 12절 AssetSystem 행을 반영 완료로 바꿨다.
 - 개정 6(2026-11-20): T9를 권장안으로 확정했다(사용자 지시 "MA2 전 결정 사항들도 권장안대로"). 4.9절 메시 LOD(UE 5.8 근거, 같은 상주 계획·LOD 덩어리·상주 LOD·요청 LOD·예산 공유와 메시 전용 풀 설정·LOD별 버퍼 전송), 10절 TS5를 더했다.

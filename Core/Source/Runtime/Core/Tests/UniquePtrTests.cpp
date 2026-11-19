@@ -5,6 +5,8 @@
 #include <Core/Memory/UniquePtr.h>
 
 namespace rocks::test {
+namespace unique_ptr_tests_file {
+
 namespace {
 
 struct Base {
@@ -204,5 +206,6 @@ TEST(UniquePtr_CustomDeleters) {
     }
     CHECK(calls == 1);
 }
+} // namespace unique_ptr_tests_file
 
 } // namespace rocks::test

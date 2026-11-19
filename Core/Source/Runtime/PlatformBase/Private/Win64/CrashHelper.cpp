@@ -43,7 +43,7 @@ constexpr usize HandleCount = 7;
 constexpr usize CommandLineUnits = CrashFolderUnits + 512;
 constexpr usize MaxDecimalDigits = 20;
 constexpr usize AttributeListBytes = 256;
-constexpr uint64 DecimalBase = 10;
+constexpr uint64 HelperDecimalBase = 10;
 constexpr int HelperExitSuccess = 0;
 constexpr int HelperExitBadArguments = 2;
 constexpr int HelperExitBadBlock = 3;
@@ -167,7 +167,7 @@ void CopyWide(wchar_t* destination, const wchar_t* source) noexcept {
     destination[length] = L'\0';
 }
 
-bool AppendWide(usize& length, const wchar_t* text) noexcept {
+bool HelperAppendWide(usize& length, const wchar_t* text) noexcept {
     for (usize index = 0; text[index] != L'\0'; ++index) {
         if (length + 1 >= CommandLineUnits) {
             return false;
@@ -184,8 +184,8 @@ bool AppendNumber(usize& length, uint64 value) noexcept {
     wchar_t digits[MaxDecimalDigits + 1];
     usize count = 0;
     do {
-        digits[count++] = static_cast<wchar_t>(L'0' + value % DecimalBase);
-        value /= DecimalBase;
+        digits[count++] = static_cast<wchar_t>(L'0' + value % HelperDecimalBase);
+        value /= HelperDecimalBase;
     } while (value != 0);
 
     wchar_t text[MaxDecimalDigits + 1];
@@ -194,7 +194,7 @@ bool AppendNumber(usize& length, uint64 value) noexcept {
     }
 
     text[count] = L'\0';
-    return AppendWide(length, L" ") && AppendWide(length, text);
+    return HelperAppendWide(length, L" ") && HelperAppendWide(length, text);
 }
 
 bool ParseNumber(const char* text, uint64& value) noexcept {
@@ -208,13 +208,13 @@ bool ParseNumber(const char* text, uint64& value) noexcept {
             return false;
         }
 
-        value = value * DecimalBase + static_cast<uint64>(text[index] - '0');
+        value = value * HelperDecimalBase + static_cast<uint64>(text[index] - '0');
     }
 
     return true;
 }
 
-bool TextEquals(const char* left, const char* right) noexcept {
+bool HelperTextEquals(const char* left, const char* right) noexcept {
     usize index = 0;
     for (; left[index] != '\0' && left[index] == right[index]; ++index) {
     }
@@ -341,14 +341,14 @@ DWORD LaunchHelper() noexcept {
     const HANDLE handles[HandleCount] = {section,          parentForHelper, requestEvent,
                                          captureDoneEvent, parentDoneEvent, standardDumpEvent,
                                          shutdownEvent};
-    if (!AppendWide(length, L"\"") || !AppendWide(length, helperPath) ||
-        !AppendWide(length, L"\" ")) {
+    if (!HelperAppendWide(length, L"\"") || !HelperAppendWide(length, helperPath) ||
+        !HelperAppendWide(length, L"\" ")) {
         return ERROR_FILENAME_EXCED_RANGE;
     }
 
     for (usize index = 0; CrashHelperArgument[index] != '\0'; ++index) {
         const wchar_t text[2] = {static_cast<wchar_t>(CrashHelperArgument[index]), L'\0'};
-        (void)AppendWide(length, text);
+        (void)HelperAppendWide(length, text);
     }
 
     (void)AppendNumber(length, CrashHelperProtocolVersion);
@@ -421,7 +421,7 @@ DWORD LaunchHelper() noexcept {
     return error;
 }
 
-void WriteText(const char* text) noexcept {
+void HelperWriteText(const char* text) noexcept {
     usize length = 0;
     while (text[length] != '\0') {
         ++length;
@@ -981,11 +981,11 @@ void FinishCrashHelperReport() noexcept {
 
     switch (AtomicLoad<MemoryOrder::Acquire>(&block->folderSlot)) {
     case FolderPrimary:
-        WriteText("Rocks crash report: ");
+        HelperWriteText("Rocks crash report: ");
         WriteDiagnosticLine(CrashPrimaryFolderText());
         break;
     case FolderFallback:
-        WriteText("Rocks crash report: ");
+        HelperWriteText("Rocks crash report: ");
         WriteDiagnosticLine(CrashFallbackFolderText());
         break;
     case FolderNone:
@@ -1024,7 +1024,7 @@ uint32 CrashHelperProcessId() noexcept {
 
 bool RunCrashHelperIfRequested(int argc, char** argv, int& exitCode) noexcept {
     if (argc < 2 || argv == nullptr || argv[1] == nullptr ||
-        !detail::TextEquals(argv[1], detail::CrashHelperArgument)) {
+        !detail::HelperTextEquals(argv[1], detail::CrashHelperArgument)) {
         return false;
     }
 

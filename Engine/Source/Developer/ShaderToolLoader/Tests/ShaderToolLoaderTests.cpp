@@ -15,9 +15,12 @@
 #include <string.h>
 
 using namespace rocks;
+namespace shader_tool_loader_tests_file {
+
 using namespace rocks::platform;
 using namespace rocks::shader;
 using namespace rocks::test;
+} // namespace shader_tool_loader_tests_file
 
 // 셰이더 도구 열기(ShaderToolLoader, Docs/Design/ShaderSystem.ko.md 9절 완료 기준)를 검사한다.
 // - 실제 저장소: bootstrap한 사용자 저장소만으로 네 도구를 열고 함수 표를 실제로 부른다. 저장소가
@@ -29,6 +32,8 @@ namespace rocks::test {
 bool RegisterProcessProbe(const char* mode,
                           int (*function)(int, const char* const*) noexcept) noexcept;
 } // namespace rocks::test
+
+namespace shader_tool_loader_tests_file {
 
 namespace {
 
@@ -626,3 +631,4 @@ TEST(ShaderToolLoader_IgnoresWorkingDirectoryAndPath) {
     REQUIRE(WriteFixture(besideA, nullptr));
     CHECK(RunOpenProbe(store.path, key, nameA, digestA, sizeA, elsewhere.path, nullptr) == 0);
 }
+} // namespace shader_tool_loader_tests_file

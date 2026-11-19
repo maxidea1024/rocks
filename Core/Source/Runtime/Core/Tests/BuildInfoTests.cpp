@@ -2,6 +2,7 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace build_info_tests_file {
 
 // 빌드가 이 시험 실행 파일에 주입한 두 값이 비어 있지 않고 서로 다르며, 부를 때마다 같아야 한다.
 TEST(BuildInfo_InjectedValuesAreDistinctAndStable) {
@@ -52,3 +53,4 @@ TEST(BuildInfo_InjectedEngineVersionIsAVersion) {
     CHECK(parts[1] == version.minorVersion);
     CHECK(parts[2] == version.patchVersion);
 }
+} // namespace build_info_tests_file

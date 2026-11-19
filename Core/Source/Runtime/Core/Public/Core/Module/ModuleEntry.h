@@ -61,7 +61,9 @@ constexpr const char* LoadingPhaseName(LoadingPhase phase) noexcept {
 }
 
 // ModuleEntry 구조체의 ABI 버전이다. 칸을 바꾸면 올린다. 로더는 다른 버전의 진입 기술을 거부한다.
-inline constexpr uint32 ModuleEntryVersion = 1;
+// 2: unregisterTypes를 뺐다(모듈별 ModuleRegistration이 되돌린다 —
+// Docs/Design/ModuleLoader.ko.md 3.10절).
+inline constexpr uint32 ModuleEntryVersion = 2;
 
 // 모듈 하나의 상수 진입 기술이다. ROCKS_IMPLEMENT_MODULE이 모듈 cpp에 상수로 정의한다(정적 수명,
 // 읽기 전용). 직접 만들지 않는다.
@@ -70,11 +72,13 @@ struct ModuleEntry {
     // 호출자(로더)가 소유한다.
     using CreateFunction =
         Result<UniquePtr<ModuleImplementation>> (*)(Allocator& allocator) noexcept;
-    // 이 모듈 자신의 리플렉션 타입만 등록·해제하는 생성 함수다(3.6절, ML2에서 채운다. 그때까지
-    // null).
+    // 이 모듈 자신의 리플렉션 타입만 registration에 등록하는 생성 함수다(빌드 생성 TU의
+    // rocks::generated::<Name>::RegisterModuleOwnTypes, 3.10절). lease는 로더가 발급한 이 모듈의
+    // 코드 수명 토큰이며 등록한 타입의 RuntimeTypeOps.module에 들어간다. 실패하면 이 호출이 등록한
+    // 것을 되돌린다. 의존 모듈의 타입은 등록하지 않는다(로더가 의존 모듈을 먼저 등록한다). 해제는
+    // registration의 Unregister다. 리플렉션 메타데이터가 없는 모듈은 null이다.
     using RegisterTypesFunction = Result<void> (*)(ModuleRegistration& registration,
                                                    const ModuleLease& lease) noexcept;
-    using UnregisterTypesFunction = void (*)(ModuleRegistration& registration) noexcept;
     // 수명 객체 클래스의 static RegisterSettings다(3.1절). 없으면 null이다.
     using RegisterSettingsFunction = Result<void> (*)(config::ConfigContext& context) noexcept;
 
@@ -83,7 +87,6 @@ struct ModuleEntry {
     const char* name = nullptr;
     CreateFunction create = nullptr;
     RegisterTypesFunction registerTypes = nullptr;
-    UnregisterTypesFunction unregisterTypes = nullptr;
     RegisterSettingsFunction registerSettings = nullptr;
 };
 
@@ -183,7 +186,9 @@ consteval ModuleEntry::RegisterSettingsFunction ModuleSettingsRegistration() noe
 }
 
 template <class Class>
-consteval ModuleEntry MakeModuleEntry(const char* name) noexcept {
+consteval ModuleEntry
+MakeModuleEntry(const char* name,
+                ModuleEntry::RegisterTypesFunction registerTypes = nullptr) noexcept {
     static_assert(IsBaseOfV<ModuleImplementation, Class>,
                   "ROCKS_IMPLEMENT_MODULE class must derive from rocks::ModuleImplementation");
     static_assert(IsNothrowDefaultConstructibleV<Class>,
@@ -191,6 +196,7 @@ consteval ModuleEntry MakeModuleEntry(const char* name) noexcept {
     ModuleEntry entry;
     entry.name = name;
     entry.create = &CreateModuleImplementation<Class>;
+    entry.registerTypes = registerTypes;
     entry.registerSettings = ModuleSettingsRegistration<Class>();
     return entry;
 }
@@ -222,6 +228,29 @@ constexpr bool ModuleNamesEqual(const char* left, const char* right) noexcept {
 // 컴파일해 정의가 없으면 "ROCKS_MODULE_NAME" 그대로다.
 #define ROCKS_MODULE_NAME_TEXT ROCKS_MODULE_STRINGIZE(ROCKS_MODULE_NAME)
 
+// 빌드가 진입점 모듈의 소스마다 정의하는 값이다(ROCKS_MODULE_TYPES=1이면 그 모듈에 리플렉션
+// 메타데이터가 있고, 메타 컴파일러가 낸 모듈 생성 소스 <Name>.module.generated.cpp가
+// RegisterModuleOwnTypes를 정의한다 — Docs/Design/ModuleLoader.ko.md 3.10절). 빌드 밖 컴파일은
+// 0이다.
+#ifndef ROCKS_MODULE_TYPES
+#define ROCKS_MODULE_TYPES 0
+#endif
+
+#define ROCKS_MODULE_SELECT_EXPANDED(prefix, flag) prefix##flag
+#define ROCKS_MODULE_SELECT(prefix, flag) ROCKS_MODULE_SELECT_EXPANDED(prefix, flag)
+
+// 타입 등록 함수의 선언(ROCKS_MODULE_TYPES=1)이나 아무것도 아님(0)으로 펼쳐진다.
+#define ROCKS_MODULE_TYPES_DECLARATION_0(Name)
+#define ROCKS_MODULE_TYPES_DECLARATION_1(Name)                                                     \
+    namespace rocks::generated::Name {                                                             \
+    ::rocks::Result<void> RegisterModuleOwnTypes(::rocks::ModuleRegistration& registration,        \
+                                                 const ::rocks::ModuleLease& module) noexcept;     \
+    }
+
+// 진입 기술 registerTypes 칸의 값이다.
+#define ROCKS_MODULE_TYPES_FUNCTION_0(Name) nullptr
+#define ROCKS_MODULE_TYPES_FUNCTION_1(Name) &::rocks::generated::Name::RegisterModuleOwnTypes
+
 // 모듈 진입점을 정의한다(UE IMPLEMENT_MODULE 대응). 모듈의 cpp 하나에 전역 namespace에서 한 번
 // 쓴다. Class는 ModuleImplementation 파생 클래스(noexcept 기본 생성자), Name은 빌드의 모듈
 // 이름이다.
@@ -236,6 +265,9 @@ constexpr bool ModuleNamesEqual(const char* left, const char* right) noexcept {
 //   쓴다.
 // - 한 모듈에 두 번 쓰면 같은 기호가 겹쳐 링크 오류다. 빠뜨리면 모듈 표가 그 함수를 찾지 못해 링크
 //   오류다.
+// - 리플렉션 메타데이터가 있는 모듈(빌드가 ROCKS_MODULE_TYPES=1로 알린다)은 모듈 생성 소스의
+//   RegisterModuleOwnTypes를 진입 기술 registerTypes에 싣는다. 손으로 쓴 소스가 없는 메타데이터
+//   모듈은 빌드 생성 TU <Name>.ModuleEntry.cpp가 이 매크로를 쓴다.
 // - Modular의 export 진입점 RocksModuleEntry()는 ML4에서 이 매크로에 더한다.
 #define ROCKS_IMPLEMENT_MODULE(Class, Name) ROCKS_IMPLEMENT_MODULE_EXPANDED(Class, Name)
 
@@ -246,9 +278,11 @@ constexpr bool ModuleNamesEqual(const char* left, const char* right) noexcept {
     static_assert(::rocks::detail::ModuleNamesEqual(#Name, ROCKS_MODULE_NAME_TEXT),                \
                   "ROCKS_IMPLEMENT_MODULE name does not match the module being built "             \
                   "(ROCKS_MODULE_NAME)");                                                          \
-    const ::rocks::ModuleEntry& RocksModuleEntry_##Name() noexcept;                                \
+    ROCKS_MODULE_SELECT(ROCKS_MODULE_TYPES_DECLARATION_, ROCKS_MODULE_TYPES)(Name)                 \
+        const ::rocks::ModuleEntry&                                                                \
+        RocksModuleEntry_##Name() noexcept;                                                        \
     const ::rocks::ModuleEntry& RocksModuleEntry_##Name() noexcept {                               \
-        static constexpr ::rocks::ModuleEntry entry =                                              \
-            ::rocks::detail::MakeModuleEntry<Class>(#Name);                                        \
+        static constexpr ::rocks::ModuleEntry entry = ::rocks::detail::MakeModuleEntry<Class>(     \
+            #Name, ROCKS_MODULE_SELECT(ROCKS_MODULE_TYPES_FUNCTION_, ROCKS_MODULE_TYPES)(Name));   \
         return entry;                                                                              \
     }
