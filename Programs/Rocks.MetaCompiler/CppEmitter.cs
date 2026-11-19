@@ -281,6 +281,27 @@ internal static class CppEmitter
                 Line("}");
             }
 
+            // 클래스 생성 참조 위치 함수다(M3, Docs/Design/GarbageCollectionScale.ko.md 3.4절). Trace와 같은 필드를 같은 순서로
+            // 돌며 강한 간선 칸(ObjectRef·ObjectRefArray)의 위치를 알린다. Registry가 타입마다 첫 객체에서 표를 만들고 GC marker가
+            // trace 대신 표로 handle을 읽는다. 표로 나타낼 수 없는 필드(StructRefArray·ObjectRefMap·참조 struct)는 Unsupported로
+            // 그 타입을 trace에 남긴다(오버로드는 실제 C++ 타입이 고른다).
+            if (traced.Length == 0)
+            {
+                Line($"static void ReferenceLayout(const {native}&, detail::ReferenceLayoutBuilder&) noexcept {{}}");
+            }
+            else
+            {
+                Line($"static void ReferenceLayout(const {native}& value, detail::ReferenceLayoutBuilder& layout) noexcept {{");
+                // struct 필드만 있으면 value를 쓰지 않는다(LayoutStructField는 형질만 본다).
+                Line("(void)value;");
+                foreach (FieldModel field in traced)
+                {
+                    Line(LayoutStatement(schema, field, "value", $"::{field.Owner}"));
+                }
+
+                Line("}");
+            }
+
             Line("static RuntimeTypeOps Ops(ModuleLease module = {}) noexcept {");
             Line($"auto ops = MakeRuntimeTypeOps<{native}, {(type.Abstract ? "true" : "false")}>(Move(module));");
             if (type.Fields.Count != 0)
@@ -362,7 +383,14 @@ internal static class CppEmitter
 
             Line("ops.completeFieldLayout = true;");
             Line("ops.parallelTraceSafe = true;");
+            // 방문할 필드가 없는 클래스는 잎 타입이다(GC marker가 trace를 부르지 않는다 — Docs/Design/GarbageCollectionScale.ko.md M2).
+            if (traced.Length == 0)
+            {
+                Line("ops.hasStrongReferences = false;");
+            }
+
             Line($"ops.trace = +[](const Object& object, TraceVisitor& visitor) noexcept {{ Trace(static_cast<const {native}&>(object), visitor); }};");
+            Line($"ops.referenceLayout = +[](const Object& object, detail::ReferenceLayoutBuilder& layout) noexcept {{ ReferenceLayout(static_cast<const {native}&>(object), layout); }};");
             Line("return ops;");
             Line("}");
             Line("static Result<TypeRegistrationToken> Register(TypeRegistry& registry, ModuleLease module = {}) noexcept {");
@@ -443,6 +471,26 @@ internal static class CppEmitter
         return field.IsStruct
             ? $"GeneratedType<::{schema.Find(field.Reference!).NativeName}>::Trace({member}, visitor);"
             : $"visitor.Visit({member});";
+    }
+
+    // 참조 위치 함수(M3)의 필드 한 줄이다. TraceStatement와 같은 필드·같은 순서이고, ObjectRef는 칸을 알리고(ReportLayout) 배열·
+    // Map은 LayoutArrayField·LayoutMapField 오버로드가, struct는 LayoutStructField가 고른다.
+    private static string LayoutStatement(SchemaModel schema, FieldModel field, string owner, string ownerType)
+    {
+        string member = $"{owner}.*(&{ownerType}::{field.Name})";
+        if (field.IsArray || field.IsStaticArray)
+        {
+            return $"detail::LayoutArrayField({member}, layout);";
+        }
+
+        if (field.IsMap)
+        {
+            return $"detail::LayoutMapField({member}, layout);";
+        }
+
+        return field.IsStruct
+            ? $"detail::LayoutStructField<::{schema.Find(field.Reference!).NativeName}>(layout);"
+            : $"({member}).ReportLayout(layout);";
     }
 
     // struct 원소 배열 필드(상속 포함)의 원소 struct 형질을 컨테이너와 대조한다(Docs/Design/ReflectionFoundations.ko.md

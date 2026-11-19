@@ -151,6 +151,26 @@ Result<TypeLease> ConstructionContext::AcquireType(ObjectHandle object) noexcept
     return registry_.AcquireTypeChecked(access_, object, transaction_);
 }
 
+Result<void> ConstructionContext::SetClusterRoot(ObjectHandle object) noexcept {
+    if (auto state = CheckOpen(); !state) {
+        return state;
+    }
+
+    return registry_.DesignateCluster(access_, transaction_, object, ObjectHandle{});
+}
+
+Result<void> ConstructionContext::JoinCluster(ObjectHandle object, ObjectHandle root) noexcept {
+    if (auto state = CheckOpen(); !state) {
+        return state;
+    }
+
+    if (root.IsNull()) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    return registry_.DesignateCluster(access_, transaction_, object, root);
+}
+
 Result<ObjectHandle> ConstructionContext::CreateImpl(TypeId type, const void* nativeType,
                                                      ObjectHandle outer, StringView name) noexcept {
     if (auto state = CheckOpen(); !state) {

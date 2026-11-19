@@ -42,7 +42,7 @@ TickScheduler::TickScheduler(Allocator& allocator) noexcept
       order_{Array<TickHandle>(allocator), Array<TickHandle>(allocator),
              Array<TickHandle>(allocator), Array<TickHandle>(allocator),
              Array<TickHandle>(allocator)},
-      scratch_(allocator), localIndex_(allocator), indegree_(allocator),
+      pendingRemoved_(allocator), scratch_(allocator), localIndex_(allocator), indegree_(allocator),
       dependentOffsets_(allocator), dependents_(allocator), heap_(allocator), marks_(allocator),
       stack_(allocator) {
 }
@@ -58,13 +58,32 @@ Result<TickHandle> TickScheduler::Register(const TickRegistration& registration)
         return Result<TickHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // 실행 중 해제가 할당하지 않도록 미룬 해제 목록의 용량을 등록 수만큼 확보한다.
+    auto reserved = pendingRemoved_.TryEnsureCapacity(entries_.Size() + 1);
+    if (!reserved) {
+        return Result<TickHandle>::Failure(reserved.Error());
+    }
+
     auto added = entries_.TryEmplace(allocator_, registration, nextSequence_);
     if (!added) {
         return Result<TickHandle>::Failure(added.Error());
     }
 
     ++nextSequence_;
-    dirty_[phase] = true;
+    // 새 항목은 등록 순서가 가장 늦고 선행이 없다. priority가 순서 배열의 최댓값 이상이면
+    // 재구성해도 맨 끝에 오므로 끝에 붙인다(실행 중에는 배열을 바꾸지 않는다 — 다음 경계의 재구성).
+    Array<TickHandle>& order = order_[phase];
+    if (!running_ && !dirty_[phase] &&
+        (order.IsEmpty() || registration.priority >= maxPriority_[phase]) &&
+        order.TryPushBack(TickHandle{added.Value()})) {
+        entries_.Find(added.Value())->orderPosition = static_cast<uint32>(order.Size() - 1);
+        maxPriority_[phase] = order.Size() == 1 || registration.priority > maxPriority_[phase]
+                                  ? registration.priority
+                                  : maxPriority_[phase];
+    } else {
+        dirty_[phase] = true;
+    }
+
     return Result<TickHandle>::Success(TickHandle{added.Value()});
 }
 
@@ -75,19 +94,25 @@ Result<void> TickScheduler::Unregister(TickHandle handle) noexcept {
     }
 
     if (running_) {
-        // 실행 중에는 저장소를 옮기지 않도록 표시만 하고 단계 경계에서 지운다(할당 없음).
+        // 실행 중에는 저장소를 옮기지 않도록 표시만 하고 단계 경계에서 지운다(할당 없음 — 용량은
+        // 등록 때 확보했다).
         entry->removed = true;
         ++pendingRemovals_;
+        auto queued = pendingRemoved_.TryPushBack(handle);
+        (void)queued;
         return Result<void>::Success();
     }
 
     const uint32 phase = static_cast<uint32>(entry->registration.phase);
+    const bool ordered = entry->orderPosition != NoOrder;
+    const bool reorder = ReleaseDependencies(*entry);
     auto removed = entries_.TryRemove(handle.slot);
     if (!removed) {
         return removed;
     }
 
-    dirty_[phase] = true;
+    NoteRemovedLocked(phase, ordered);
+    dirty_[phase] = dirty_[phase] || reorder;
     return Result<void>::Success();
 }
 
@@ -108,13 +133,26 @@ Result<void> TickScheduler::SetEnabled(TickHandle handle, bool enabled) noexcept
 }
 
 Result<bool> TickScheduler::Reaches(TickHandle from, TickHandle to) noexcept {
+    // 늘어난 칸은 0(방문 안 함)이다. 번호가 한 바퀴 돌 때만 전체를 비운다.
+    const usize previous = marks_.Size();
     auto resized = marks_.TryResize(entries_.SlotCount());
     if (!resized) {
         return Result<bool>::Failure(resized.Error());
     }
-    for (uint8& mark : marks_) {
-        mark = 0;
+
+    for (usize at = previous; at < marks_.Size(); ++at) {
+        marks_[at] = 0;
     }
+
+    if (++markEpoch_ == 0) {
+        for (uint32& mark : marks_) {
+            mark = 0;
+        }
+
+        markEpoch_ = 1;
+    }
+
+    const uint32 epoch = markEpoch_;
 
     stack_.Clear();
     auto pushed = stack_.TryPushBack(from);
@@ -130,13 +168,13 @@ Result<bool> TickScheduler::Reaches(TickHandle from, TickHandle to) noexcept {
             return Result<bool>::Success(true);
         }
         const Entry* entry = entries_.Find(current.slot);
-        if (entry == nullptr || entry->removed || marks_[current.slot.index] != 0) {
+        if (entry == nullptr || entry->removed || marks_[current.slot.index] == epoch) {
             continue;
         }
-        marks_[current.slot.index] = 1;
+        marks_[current.slot.index] = epoch;
         for (const TickHandle& prerequisite : entry->prerequisites) {
             const Entry* before = entries_.Find(prerequisite.slot);
-            if (before == nullptr || before->removed || marks_[prerequisite.slot.index] != 0) {
+            if (before == nullptr || before->removed || marks_[prerequisite.slot.index] == epoch) {
                 continue;
             }
             auto next = stack_.TryPushBack(prerequisite);
@@ -182,7 +220,17 @@ Result<void> TickScheduler::AddPrerequisite(TickHandle dependent,
         return added;
     }
 
-    dirty_[static_cast<uint32>(after->registration.phase)] = true;
+    before = entries_.Find(prerequisite.slot);
+    ++before->dependents;
+
+    // 지금 순서에서 이미 선행이 앞이면 새 간선은 순서를 바꾸지 않는다(재구성해도 같은 순서 — 이
+    // 간선이 막는 선택은 원래 순서에서도 일어나지 않았다).
+    const uint32 phase = static_cast<uint32>(after->registration.phase);
+    if (dirty_[phase] || before->orderPosition == NoOrder || after->orderPosition == NoOrder ||
+        before->orderPosition >= after->orderPosition) {
+        dirty_[phase] = true;
+    }
+
     return Result<void>::Success();
 }
 
@@ -199,6 +247,12 @@ Result<void> TickScheduler::RemovePrerequisite(TickHandle dependent,
             if (!removed) {
                 return removed;
             }
+
+            if (Entry* before = entries_.Find(prerequisite.slot);
+                before != nullptr && before->dependents != 0) {
+                --before->dependents;
+            }
+
             dirty_[static_cast<uint32>(after->registration.phase)] = true;
             return Result<void>::Success();
         }
@@ -221,17 +275,49 @@ void TickScheduler::ApplyPendingRemovals() noexcept {
         return;
     }
 
-    // SlotArray는 순회 중 현재 원소 삭제를 허용한다.
-    for (auto iterator = entries_.begin(); iterator != entries_.end(); ++iterator) {
-        if (!iterator->removed) {
+    // 미룬 해제만 지운다(전체 항목을 훑지 않는다).
+    for (const TickHandle& handle : pendingRemoved_) {
+        const Entry* entry = entries_.Find(handle.slot);
+        if (entry == nullptr) {
             continue;
         }
-        dirty_[static_cast<uint32>(iterator->registration.phase)] = true;
-        auto removed = entries_.TryRemove(iterator.Handle());
+
+        const uint32 phase = static_cast<uint32>(entry->registration.phase);
+        const bool ordered = entry->orderPosition != NoOrder;
+        const bool reorder = ReleaseDependencies(*entry);
+        auto removed = entries_.TryRemove(handle.slot);
         (void)removed;
+        NoteRemovedLocked(phase, ordered);
+        dirty_[phase] = dirty_[phase] || reorder;
     }
 
+    pendingRemoved_.Clear();
     pendingRemovals_ = 0;
+}
+
+bool TickScheduler::ReleaseDependencies(const Entry& entry) noexcept {
+    // 이 항목이 선행으로 둔 항목의 의존 계수를 내린다(해제된 의존은 순서를 바꾸지 않는다 — 의존하던
+    // 쪽이 사라질 뿐이다). 이 항목에 의존하던 항목이 있으면 그쪽 순서가 풀린다.
+    for (const TickHandle& prerequisite : entry.prerequisites) {
+        Entry* before = entries_.Find(prerequisite.slot);
+        if (before != nullptr && before->dependents != 0) {
+            --before->dependents;
+        }
+    }
+
+    return entry.dependents != 0;
+}
+
+void TickScheduler::NoteRemovedLocked(uint32 phase, bool ordered) noexcept {
+    // 해제는 남은 항목의 순서를 바꾸지 않는다. 순서 배열에 남은 handle은 실행이 건너뛰고(세대가
+    // 다르다), 그런 칸이 배열의 절반을 넘으면 다시 만든다.
+    if (!ordered) {
+        return;
+    }
+
+    if (++staleInOrder_[phase] * 2 > order_[phase].Size()) {
+        dirty_[phase] = true;
+    }
 }
 
 bool TickScheduler::Before(uint32 left, uint32 right) const noexcept {
@@ -394,6 +480,17 @@ Result<void> TickScheduler::RebuildOrder(uint32 phase) noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
+    int32 maxPriority = 0;
+    for (usize position = 0; position < count; ++position) {
+        Entry& entry = *entries_.Find(order[position].slot);
+        entry.orderPosition = static_cast<uint32>(position);
+        maxPriority = position == 0 || entry.registration.priority > maxPriority
+                          ? entry.registration.priority
+                          : maxPriority;
+    }
+
+    maxPriority_[phase] = maxPriority;
+    staleInOrder_[phase] = 0;
     dirty_[phase] = false;
     return Result<void>::Success();
 }

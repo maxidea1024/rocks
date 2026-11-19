@@ -25,18 +25,18 @@ ObjectHandle ObjectRegistry::PackageOfLocked(ObjectHandle target) const noexcept
     if (slot == nullptr ||
         !(slot->state == SlotState::Reserved || slot->state == SlotState::Alive ||
           slot->state == SlotState::DestroyRequested) ||
-        slot->outermost == nullptr) {
+        ColdOf(*slot).outermost == nullptr) {
         platform::Fatal("Observed reference target lost its package");
     }
 
-    return HandleOf(*slot->outermost);
+    return HandleOf(*ColdOf(*slot).outermost);
 }
 
 bool ObjectRegistry::ObservesOwnerLocked(const Slot& owner) const noexcept {
     // 패키지 객체(Outer 없음)가 소유한 간선과 DestroyRequested 소유자의 제거·비우기(Discard가 이미
     // 반납했다)는 기록하지 않는다.
     return options_.referenceObserver != nullptr && owner.state == SlotState::Alive &&
-           !owner.outer.IsNull();
+           !ColdOf(owner).outer.IsNull();
 }
 
 ObjectRegistry::EdgePlan ObjectRegistry::PlanEditLocked(const Slot& owner, ObjectHandle removed,
@@ -46,7 +46,7 @@ ObjectRegistry::EdgePlan ObjectRegistry::PlanEditLocked(const Slot& owner, Objec
         return plan;
     }
 
-    const ObjectHandle package = HandleOf(*owner.outermost);
+    const ObjectHandle package = HandleOf(*ColdOf(owner).outermost);
     const bool hasRemoved = !removed.IsNull();
     const bool hasAdded = !added.IsNull();
     const ObjectHandle removedPackage = hasRemoved ? PackageOfLocked(removed) : ObjectHandle{};
@@ -149,30 +149,55 @@ void ObjectRegistry::TallyEdge(void* pointer, ObjectHandle handle) noexcept {
     }
 }
 
-Result<void> ObjectRegistry::TallyStructBlocks(const detail::StructElementOps& element,
-                                               void* const* blocks, uint32 count,
-                                               ObjectHandle ownerPackage,
-                                               EdgeTally& tally) noexcept {
+Result<void> ObjectRegistry::TallyHandles(const ObjectHandle* handles, usize count,
+                                          ObjectHandle ownerPackage, EdgeTally& tally) noexcept {
+    MarkState state{this, nullptr};
+    state.tally = &tally;
+    state.ownerPackage = ownerPackage;
+    state.delta = -1;
+    for (usize index = 0; index < count && state.error == ErrorCode::None; ++index) {
+        TallyEdge(&state, handles[index]);
+    }
+
+    return state.error == ErrorCode::None ? Result<void>::Success()
+                                          : Result<void>::Failure(state.error);
+}
+
+Result<void> ObjectRegistry::CollectStructEdges(const detail::StructElementOps& element,
+                                                void* const* blocks, uint32 count,
+                                                Array<ObjectHandle>& out) noexcept {
     // 떼어 낼 원소만 trace한다(소유자 Trace는 부르지 않는다). trace 칸은 원소 표에 없으므로 등록
-    // struct의 실행 정보로 얻는다(StructRefArray.h — 생성 헤더 없는 곳의 인스턴스화 문제).
+    // struct의 실행 정보로 얻는다(StructRefArray.h — 생성 헤더 없는 곳의 인스턴스화 문제). 관찰자
+    // 집계와 클러스터 장부가 이 결과를 같이 쓴다(원소마다 trace 한 번 — 13.4절: 소속 소유자의
+    // 원소를 지울 때도 원소 Trace가 반드시 있어야 한다).
     auto lease = types_.AcquireStructByNative(element.nativeType);
     if (!lease) {
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
+    struct Collected {
+        Array<ObjectHandle>* out;
+        ErrorCode error;
+    };
+
+    Collected collected{&out, ErrorCode::None};
+    auto visit = [](void* pointer, ObjectHandle handle) noexcept {
+        auto& state = *static_cast<Collected*>(pointer);
+        if (!handle.IsNull() && state.error == ErrorCode::None) {
+            if (auto pushed = state.out->TryPushBack(handle); !pushed) {
+                state.error = pushed.Error();
+            }
+        }
+    };
     const auto trace = lease.Value().StructOps().trace;
-    MarkState state{this, nullptr};
-    state.tally = &tally;
-    state.ownerPackage = ownerPackage;
-    state.delta = -1;
-    TraceVisitor visitor(&state, &ObjectRegistry::TallyEdge);
-    for (uint32 index = 0; trace != nullptr && index < count && state.error == ErrorCode::None;
+    TraceVisitor visitor(&collected, +visit);
+    for (uint32 index = 0; trace != nullptr && index < count && collected.error == ErrorCode::None;
          ++index) {
         trace(blocks[index], visitor);
     }
 
-    return state.error == ErrorCode::None ? Result<void>::Success()
-                                          : Result<void>::Failure(state.error);
+    return collected.error == ErrorCode::None ? Result<void>::Success()
+                                              : Result<void>::Failure(collected.error);
 }
 
 Result<void> ObjectRegistry::EndProcessing(Result<void> result) noexcept {
@@ -190,16 +215,16 @@ Result<void> ObjectRegistry::Discard(const ObjectAccessContext& access,
 
     // 부분 트리 전위 순회의 다음 노드다(스택 없이 부모 포인터로 되돌아 오른다). 고리로 닿는 객체만
     // 부분 트리다 — 이미 Discard·Retire된 객체는 고리에서 빠져 있다.
-    auto next = [](const Slot* node, const Slot* root) noexcept -> Slot* {
-        if (node->firstChild != nullptr) {
-            return node->firstChild;
+    auto next = [this](const Slot* node, const Slot* root) noexcept -> Slot* {
+        if (ColdOf(*node).firstChild != nullptr) {
+            return ColdOf(*node).firstChild;
         }
 
-        while (node != root && node->nextSibling == nullptr) {
-            node = node->parent;
+        while (node != root && ColdOf(*node).nextSibling == nullptr) {
+            node = ColdOf(*node).parent;
         }
 
-        return node == root ? nullptr : node->nextSibling;
+        return node == root ? nullptr : ColdOf(*node).nextSibling;
     };
     Slot* root = nullptr;
     usize count = 0;
@@ -216,7 +241,7 @@ Result<void> ObjectRegistry::Discard(const ObjectAccessContext& access,
         }
 
         // 이미 Discard된 객체는 무동작이다(cutoff·Retire 뒤에도 — RequestDestroy 재요청과 같다).
-        if (root->discarded) {
+        if (ColdOf(*root).discarded) {
             return Result<void>::Success();
         }
 
@@ -230,6 +255,11 @@ Result<void> ObjectRegistry::Discard(const ObjectAccessContext& access,
         for (const Slot* node = root; node != nullptr; node = next(node, root)) {
             if (node->state == SlotState::Reserved) {
                 return Result<void>::Failure(ErrorCode::Busy);
+            }
+
+            // 영구 객체는 Shutdown 때만 해체한다(13.7절).
+            if (IsPermanentLocked(node->index)) {
+                return Result<void>::Failure(ErrorCode::Unsupported);
             }
 
             ++count;
@@ -270,7 +300,7 @@ Result<void> ObjectRegistry::Discard(const ObjectAccessContext& access,
                 platform::LockGuard lock(gate_);
                 observe = ObservesOwnerLocked(node);
                 if (observe) {
-                    state.ownerPackage = HandleOf(*node.outermost);
+                    state.ownerPackage = HandleOf(*ColdOf(node).outermost);
                 }
             }
 
@@ -289,24 +319,67 @@ Result<void> ObjectRegistry::Discard(const ObjectAccessContext& access,
     }
 
     // (3) 한 잠금 안에서 상태·색인·고리·관찰자 기록을 바꾼다. 부분 트리 안의 순서는 의미가 없다.
-    platform::LockGuard lock(gate_);
-    processing_ = false;
-    if (options_.referenceObserver != nullptr &&
-        MissingKeysLocked(tally, ReferenceChangeCause::Discard, 0) > ObserverFreeLocked()) {
-        return Result<void>::Failure(ErrorCode::Busy);
-    }
-
-    for (Slot* node : nodes) {
-        if (node->state == SlotState::Alive) {
-            node->SetState(tally_, SlotState::DestroyRequested);
+    bool leaves = false;
+    {
+        platform::LockGuard lock(gate_);
+        processing_ = false;
+        if (options_.referenceObserver != nullptr &&
+            MissingKeysLocked(tally, ReferenceChangeCause::Discard, 0) > ObserverFreeLocked()) {
+            return Result<void>::Failure(ErrorCode::Busy);
         }
 
-        node->discarded = true;
-        DetachIdentityLocked(*node);
+        for (Slot* node : nodes) {
+            if (node->state == SlotState::Alive) {
+                node->SetState(tally_, SlotState::DestroyRequested);
+                LinkDestroyRequestLocked(*node);
+            }
+
+            ColdOf(*node).discarded = true;
+            DetachIdentityLocked(*node);
+        }
+
+        if (options_.referenceObserver != nullptr) {
+            ApplyTallyLocked(tally, ReferenceChangeCause::Discard, 0);
+        }
+
+        // 클러스터(13.2·13.4절): 부분 트리의 루트는 클러스터를 해체하고, 남은 소속은 하나씩
+        // 이탈한다(순서와 무관하게 결과가 같다). 이탈 Trace는 잠금 밖에서 하므로 처리 표시를 다시
+        // 세운다(공개된 변경은 이미 끝났다 — 이 뒤로는 실패하지 않는다).
+        if (clustersEnabled_) {
+            for (Slot* node : nodes) {
+                if (IsClusterMemberLocked(*node)) {
+                    const uint32 id = ClusterStateOf(node->index) & ClusterIdMask;
+                    if (clusters_[id].root == node->index) {
+                        DissolveClusterLocked(id);
+                    }
+                }
+            }
+
+            for (Slot* node : nodes) {
+                leaves = leaves || IsClusterMemberLocked(*node);
+            }
+
+            processing_ = leaves;
+        }
     }
 
-    if (options_.referenceObserver != nullptr) {
-        ApplyTallyLocked(tally, ReferenceChangeCause::Discard, 0);
+    if (leaves) {
+        for (Slot* node : nodes) {
+            bool member = false;
+            {
+                platform::LockGuard lock(gate_);
+                member = IsClusterMemberLocked(*node);
+            }
+
+            if (member) {
+                LeaveTrace(*node);
+                platform::LockGuard lock(gate_);
+                FinishLeaveLocked(*node);
+            }
+        }
+
+        platform::LockGuard lock(gate_);
+        processing_ = false;
     }
 
     return Result<void>::Success();

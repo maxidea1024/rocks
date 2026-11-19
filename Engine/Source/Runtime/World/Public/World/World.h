@@ -22,6 +22,7 @@ class ConfigContext;
 
 namespace rocks {
 
+class ConstructionContext;
 class World;
 
 // World 수명과 같이하는 Subsystem의 기반이다(SubsystemCollection 참고).
@@ -83,8 +84,17 @@ struct WorldDesc {
     RegistryOptions objects;
     // 프레임 끝 증분 GC 한 번의 예산이다.
     GcBudget gcBudget;
+    // 주면 World의 GC 표식(프레임 끝 증분 slice와 종료 수집)을 이 scheduler로 병렬로
+    // 한다(Docs/Design/ GarbageCollectionScale.ko.md GC-S4 — ObjectRegistry::StepCollection의
+    // scheduler 규칙). 빌림이며 시작된 scheduler여야 하고 World보다 오래 살아야 한다. World를 그
+    // worker 스레드에서 tick하지 않는다. 없으면 직렬 표식이다.
+    WorkerScheduler* gcScheduler = nullptr;
     // 초기화할 WorldSubsystem 종류다. 배열은 Initialize가 끝날 때까지 살아 있어야 한다.
     Span<const WorldSubsystemType> subsystems;
+    // Level마다 GC 클러스터를 만든다(기본 — Docs/Design/GarbageCollectionScale.ko.md 13.3절).
+    // Level이 클러스터 루트이고 SpawnActor·AddComponent로 만든 리플렉션 Actor·Component가 가입한다.
+    // 끄는 것은 측정 비교와 객체 단위 표식 순서를 보는 시험용이다.
+    bool levelClusters = true;
     // 설정 문맥이다(선택 — Docs/Design/CVarSystem.ko.md 14.2절). 있으면 Initialize가 Global의 자식
     // CVar 범위를 만들고 Shutdown이 파괴한다(CVarScope). World와 같은 게임 lane이 소유하고
     // World보다 오래 살아야 한다(범위가 남은 채 문맥을 파괴하면 문맥이 Fatal로 잡는다).
@@ -155,8 +165,10 @@ inline constexpr bool IsSpanV<Span<R>> = true;
 // 소유·수명 규약:
 // - 외부 코드는 Actor·Component·Level의 ObjectHandle을 보관하고 필요할 때 With로 접근한다.
 // RootRef를
-//   따로 잡지 않는다(정리 후에도 저장소가 남는다). Resolve로 받은 Borrow는 Tick·Shutdown 전에
-//   반환한다(Borrow가 남으면 GC가 미뤄지고 Shutdown이 Busy다. WorldStats::externalBorrows 참고).
+//   따로 잡지 않는다(정리 후에도 저장소가 남는다). Resolve로 받은 Borrow와 PinForEncode 고정은
+//   Tick·Shutdown 전에 반환한다(Borrow가 남으면 GC가 미뤄지고 Shutdown이 Busy다 —
+//   WorldStats::externalBorrows. 고정한 Level에서 그 프레임에 Actor를 정리하면 Level 배열을 고칠 수
+//   없어 Fatal이다).
 // - 파괴 요청(DestroyActor·DestroyComponent·DestroyLevel)은 즉시 메모리를 해제하지 않는다. 대상은
 //   곧바로 Tick에서 빠지고, 프레임 끝(4단계)에서 hook과 함께 정리된다. 같은 대상의 중복 요청은
 //   성공이다.
@@ -458,16 +470,42 @@ private:
 
     // World가 관리하는 Actor 수명 기록이다. Actor 저장소는 Level이, Component는 Actor가 소유한다.
     struct ActorRecord {
+        explicit ActorRecord(Allocator& allocator) noexcept : components(allocator) {
+        }
+
         ObjectHandle handle;
         ObjectHandle level;
+        // AddComponent로 붙인 Component handle이다(Actor의 components_와 같은 순서). Actor가 World
+        // API 밖에서 파괴되어 Borrow로 목록을 읽을 수 없어도 Component를 빠짐없이 정리하려고 따로
+        // 둔다(Docs/Design/GarbageCollectionScale.ko.md 13.3절 — 고아 소속 방지).
+        Array<ObjectHandle> components;
         ActorState state = ActorState::Constructed;
+        // Level 클러스터의 소속이다(Component도 같은 클러스터에 넣는다).
+        bool clustered = false;
         bool awake = false;
         bool enabledApplied = false;
         // FinishSpawning 진행 중(재진입 방지)과 활성 전환 중(재진입 hook의 중간 상태 노출
         // 방지)이다.
         bool finishing = false;
         bool transitioning = false;
+        // 꺼진 채 시작 큐에서 빠졌다(활성화가 다시 넣는다).
+        bool startDeferred = false;
+        // Level의 actors_ 배열에서의 위치다(파괴가 끝 원소와 바꿔 O(1)로 뗀다 — Level 배열 순서는
+        // 정하지 않는다).
+        uint32 levelPosition = 0;
         TickHandle ticks[detail::TickHookCount];
+    };
+
+    // World가 만든 Component의 레코드다(componentRecords_). Component 객체가 World API 밖에서
+    // 파괴되면 객체를 읽을 수 없으므로 정리에 필요한 것을 World 쪽에 둔다.
+    struct ComponentRecord {
+        ObjectHandle component;
+        ObjectHandle actor;
+        // Component의 ticks_ 사본이다(등록 때 맞춘다). 이미 해제된 handle이 남아도 해제는 세대로
+        // 거부되므로 안전하다.
+        TickHandle ticks[detail::TickHookCount];
+        // 우회 파괴 정리가 파괴 큐에 넣었다(Tick 실행과 복구가 같은 Component를 두 번 넣지 않게).
+        bool bypassQueued = false;
     };
 
     // Level 루트다. World가 보유하는 유일한 객체 루트다.
@@ -476,6 +514,8 @@ private:
         ObjectHandle handle;
         uint32 actorCount = 0;
         bool pendingDestroy = false;
+        // Level이 클러스터 루트다(Level 타입이 완전한 필드 배치일 때 — GC-S7).
+        bool clustered = false;
     };
 
     // hook 실행 깊이를 세는 범위다. 깊이가 0이 아니면 Initialize·BeginPlay·Tick·Shutdown은 Busy다.
@@ -553,6 +593,25 @@ private:
                              bool ownerDestroyed) noexcept;
     void DestroyActorNow(ObjectHandle actor) noexcept;
     void StepGarbageCollection() noexcept;
+    // World가 소유한 객체의 RequestDestroy다. 결과를 확인한다(클러스터 이탈이 실패하면 고아 소속이
+    // 남는다 — 13.3절). 이미 파괴됐거나 종료 중이면 무시하고, 그 밖의 실패는 불변식 위반으로
+    // Fatal이다.
+    void RequestDestroyOwned(ObjectHandle object) noexcept;
+    // 우회 파괴된 Component를 파괴 큐에 한 번만 넣는다(Component 색인에 없거나 이미 넣었으면
+    // 거짓).
+    bool QueueBypassedComponent(ObjectHandle component) noexcept;
+    // Component를 색인에서 빼고 사본 Tick 등록을 해제한다(World 정리가 회수 요청 직전에 부른다).
+    void ForgetComponent(ObjectHandle component) noexcept;
+    // World API 밖에서 파괴(RequestDestroy·Object::Destroy)된 Actor·Component·Level을 찾아 World
+    // 파괴로 돌린다(Actor는 DestroyActor, Component는 파괴 큐, Level은 DestroyLevel — 영구 Level은
+    // Fatal). 하나라도 있으면 참.
+    bool RepairBypassedObjects() noexcept;
+    // Actor를 Level의 actors_에서 O(1)로 뗀다(끝 원소와 바꾼다).
+    void DetachFromLevel(ObjectHandle level, const ActorRecord& record) noexcept;
+    // RepairBypassedObjects가 파괴 요청 목록을 한 번에 꺼내는 수다.
+    static constexpr usize RepairBatch = 64;
+    // 새 객체의 타입이 클러스터 소속 조건(완전한 필드 배치)을 맞추는지다.
+    static bool JoinsCluster(ConstructionContext& transaction, ObjectHandle object) noexcept;
     bool CanMutate() const noexcept;
 
     Allocator& allocator_;
@@ -567,12 +626,19 @@ private:
     SlotArray<ActorRecord> actors_;
     HashMap<uint32, SlotHandle> actorIndex_;
     Array<LevelRecord> levels_;
+    // Level 객체의 슬롯 번호 집합이다(값은 쓰지 않는다). 파괴 요청 목록에서 Level을 Level 수에
+    // 비례하는 훑기 없이 가려낸다(RepairBypassedObjects).
+    HashMap<uint32, uint32> levelSlots_;
+    // Component 색인이다(슬롯 번호 → ComponentRecord). AddComponent가 넣고 World 정리가 회수 요청
+    // 직전에 뺀다. 우회 파괴로 Borrow를 얻을 수 없는 Component의 소유 Actor·Tick 등록을 찾는다.
+    HashMap<uint32, ComponentRecord> componentRecords_;
     ObjectHandle persistentLevel_;
     Array<ObjectHandle> pendingStart_;
     Array<ObjectHandle> pendingComponentStart_;
     Array<ObjectHandle> destroyActors_;
     Array<ObjectHandle> destroyComponents_;
     GcBudget gcBudget_;
+    WorkerScheduler* gcScheduler_ = nullptr;
     // 설정 문맥과 그 안의 이 World 범위다(WorldDesc::settings — 없으면 Global).
     config::ConfigContext* settings_ = nullptr;
     cvar::CVarScopeId cvarScope_{};
@@ -588,7 +654,7 @@ private:
     uint64 phaseNanoseconds_[TickPhaseCount] = {};
     uint64 tickNanoseconds_ = 0;
     uint32 skippedTicks_ = 0;
-    uint32 repairedTicks_ = 0;
+    uint32 repairedBypasses_ = 0;
 };
 
 } // namespace rocks

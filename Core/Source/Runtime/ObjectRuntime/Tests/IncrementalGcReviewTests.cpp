@@ -57,20 +57,6 @@ public:
     ManualResetEvent rejected;
 };
 
-struct ReleaseContext {
-    FailSecondRecord* fault;
-    TraceGate* trace;
-};
-
-void ReleaseAcceptedTraceAfterNextSubmissionFails(void* raw) noexcept {
-    auto& context = *static_cast<ReleaseContext*>(raw);
-    if (context.fault->rejected.Wait(10000) != WaitResult::Signaled ||
-        context.trace->entered.Wait(10000) != WaitResult::Signaled) {
-        Fatal("GC partial submission failure was not reached");
-    }
-    context.trace->release.Signal();
-}
-
 Result<TypeRegistrationToken> RegisterReviewType(TypeRegistry& types) noexcept {
     auto ops = MakeRuntimeTypeOps<ReviewNode>();
     ops.parallelTraceSafe = true;
@@ -78,10 +64,12 @@ Result<TypeRegistrationToken> RegisterReviewType(TypeRegistry& types) noexcept {
 }
 } // namespace
 
+// 병렬 표식(GC-S4)은 worker 수만큼 task를 한 번 제출한다. 두 번째 제출이 실패하면 이미 받아들여진
+// task를 모두 회수한 뒤(그 task의 stack 표식 상태가 반환 뒤에 쓰이지 않는다) 오류를 돌려주고
+// cycle을 버린다.
 TEST(ObjectIncrementalGcDrainsAcceptedMarkerBeforeReturningLaterSubmissionFailure) {
     SystemAllocator allocator;
     {
-        TraceGate trace;
         FailSecondRecord fault(allocator);
         WorkerScheduler scheduler(fault);
         REQUIRE(scheduler.Start({2, 8, 4}));
@@ -99,33 +87,26 @@ TEST(ObjectIncrementalGcDrainsAcceptedMarkerBeforeReturningLaterSubmissionFailur
             REQUIRE(pointer);
             REQUIRE(registry.SetReference(access, first.Value().Handle(), pointer.Value()->child,
                                           second.Value().Handle()));
-            pointer.Value()->test = &trace;
         }
         REQUIRE(registry.BeginCollection(access));
-        ReleaseContext context{&fault, &trace};
-        Thread releaser;
-        REQUIRE(releaser.Start(ReleaseAcceptedTraceAfterNextSubmissionFails, &context) ==
-                ThreadStatus::Success);
         fault.armed = true;
         auto failed = registry.StepCollection(access, {8, 0}, &scheduler);
-        // 두 번째 Submit 실패를 관측해도 첫 Trace의 visitor/stack 문맥은 완료까지 유효해야 한다.
-        CHECK(trace.finished.Wait(0) == WaitResult::Signaled);
+        CHECK(fault.rejected.Wait(0) == WaitResult::Signaled);
+        // 받아들여진 task는 반환 전에 끝났다.
+        CHECK(scheduler.Stats().inFlight == 0);
         CHECK(!failed && failed.Error() == ErrorCode::OutOfMemory);
         CHECK(registry.CollectionPhase() == GcPhase::Idle);
         CHECK(registry.Stats().liveObjects == 2);
         CHECK(registry.Stats().retiredObjects == 0);
-        if (releaser.WaitForCompletion(10000) != WaitResult::Signaled ||
-            releaser.Join() != ThreadStatus::Success) {
-            Fatal("GC partial submission release fixture did not finish");
+        // 버린 cycle 뒤의 새 병렬 수집은 끝까지 간다.
+        REQUIRE(registry.BeginCollection(access));
+        for (uint32 guard = 0; guard < 8 && registry.CollectionPhase() != GcPhase::Idle; ++guard) {
+            REQUIRE(registry.StepCollection(access, {8, 0}, &scheduler));
         }
+
+        CHECK(registry.CollectionPhase() == GcPhase::Idle);
+        CHECK(registry.Stats().liveObjects == 2);
         REQUIRE(scheduler.Shutdown());
-        {
-            auto borrow = registry.Resolve<ReviewNode>(access, first.Value().Handle());
-            REQUIRE(borrow);
-            auto pointer = borrow.Value().Get();
-            REQUIRE(pointer);
-            pointer.Value()->test = nullptr;
-        }
         first.Value().Reset();
         second.Value().Reset();
         REQUIRE(registry.Shutdown(access));

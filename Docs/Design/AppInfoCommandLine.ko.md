@@ -122,7 +122,7 @@ UE는 별도 모듈 `BuildSettings`가 UBT 정의 매크로(`Runtime/BuildSettin
 
 | 멤버 | 의미 | 쓰는 곳·시점 | 읽는 스레드 | Rocks 현황 | Rocks 처리 |
 |---|---|---|---|---|---|
-| `IsGame` (`APP` 176) | 게임처럼 동작 중(에디터의 PIE 포함) | `GIsEditor`·`GIsPlayInEditorWorld`. PIE 전환 때 게임 스레드가 바꾼다. 주석이 "worker에서 믿을 수 없다"고 적는다(`APP` 169) | 게임 스레드 | 없음 | AppInfo에 두지 않는다. 에디터·PIE 구분은 World 종류가 맡는다 |
+| `IsGame` (`APP` 176) | 게임처럼 동작 중(에디터의 Tryout 포함) | `GIsEditor`·`GIsPlayInEditorWorld`. Tryout 전환 때 게임 스레드가 바꾼다. 주석이 "worker에서 믿을 수 없다"고 적는다(`APP` 169) | 게임 스레드 | 없음 | AppInfo에 두지 않는다. 에디터·Tryout 구분은 World 종류가 맡는다 |
 | `CanEverRender` (`APP` 400) | 렌더링할 수 있는 프로세스 | `UE_SERVER`, commandlet, `-nullrhi`를 처음 한 번 읽는다 | 아무 스레드(Runtime 91개 파일) | 없음. 헤드리스 실행은 Sandbox `--engine`의 고정 delta(`Programs/Sandbox/Private/EngineHost.cpp:27,42`)뿐이고 Null graphics backend가 없다(`Engine/Source/Runtime/Graphics/Public/Graphics/DeviceTypes.h:19–25`) | `RunTraits::headless`(10절) |
 | `CanEverRenderOrProduceRenderData` (`APP` 419) | 렌더하거나 렌더 데이터를 만든다(쿠커) | 계산 | 아무 스레드 | 없음 | 두지 않는다. 쿠커는 Program 대상이고 렌더 데이터 생성 여부는 쿠커가 안다 |
 | `CanEverRenderAudio` (`APP` 431), `IsAudioMuted` (`APP` 453) | 소리 장치를 쓸지 / 마지막 출력만 끌지 | `-nosound`·`-enablesound`·`-muteaudio`, benchmark·서버·commandlet | 오디오 스레드·게임 스레드 | 오디오 모듈 없음 | 이름만 예약한다(`--no-sound`·`--mute-audio`). 오디오 모듈 설계 때 연다 |

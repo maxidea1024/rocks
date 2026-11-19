@@ -25,7 +25,7 @@ RootRef 생성·복제, SetReference, Registry 컨테이너 쓰기(ObjectRefArra
 
 Marking 중 공개하는 newborn은 모든 staged 객체를 grey로 넣어 자체 Trace가 실행되도록 한다. 검게만 표시하고 스캔을 생략하지 않는다. 생성 전에 전체 슬롯 수에 맞는 큐 용량을 확보하여 잠금 안의 shade가 할당하지 않도록 한다. 현재 cycle의 Marking 중에는 객체를 회수·슬롯 재사용하지 않는다.
 
-Marking 큐가 비었음을 확인하고 Sweeping으로의 전환은 gate 안에서 원자적으로 수행한다. 아직 slot cursor가 방문하지 않은 흰 객체도 cutoff 검사로 접근을 거부한다. Sweeping 중 태어난 객체는 현재 epoch로 표식하고 cutoff 대상에 연결하지 못하게 하므로 이번 cycle에 보존된다.
+Marking 큐가 비었음을 확인하고 Sweeping으로의 전환은 gate 안에서 원자적으로 수행한다. 큐가 빈 것을 slice 예산 안에서 본 slice가 cutoff를 게시하고 그 slice는 분류 없이 끝난다(sweep 단위가 chunk라 작은 그래프도 cutoff 뒤 미분류 white 구간을 한 번은 거친다). 아직 slot cursor가 방문하지 않은 흰 객체도 cutoff 검사로 접근을 거부한다. Sweeping 중 태어난 객체는 현재 epoch로 표식하고 cutoff 대상에 연결하지 못하게 하므로 이번 cycle에 보존된다.
 
 inner → outer는 언제나 강한 간선이다([객체·그래프 보강](../Design/ObjectFoundations.ko.md) 1.5절). 타입 Trace가 아니라 Registry가 객체를 trace하는 모든 곳(full Collect, Step의 순차·병렬 trace, Commit의 staged 검증)에서 Trace 뒤에 그 객체의 Outer를 방문한다. Outer는 공개 전에 정해져 바뀌지 않으므로 worker가 `gate_` 없이 읽어도 경합이 없다. Marking 중 공개한 newborn의 trace가 Outer를 표식하고, Sweeping 중에는 cutoff white Outer 아래 생성이 StaleHandle이며 Commit 검증이 Outer도 대상처럼 검사한다. 정책 없는 Registry에서 outer는 inner를 살리지 않는다. Retire(sweep·rollback)는 같은 잠금 안에서 그 객체를 이름 색인과 부모의 자식 고리에서 뗀다. 고리는 해체하지 않는다: white 부모의 자식은 모두 white라 같은 sweep에서 스스로 떨어지므로, 부모가 먼저 Retire되어도 자식이 남은 동안(`firstChild != nullptr`)은 회수하지 않는다(sweep 사이의 `DrainRetired` 회수 포함 — rollback은 생성 저널의 슬롯만 회수하므로 white 부모에 닿지 않는다). 회수가 이름 기록을 잠금 밖에서 반환한다.
 
@@ -37,15 +37,19 @@ Trace 오류나 작업 제출 실패는 수락한 모든 worker를 정리한 후
 
 `StepCollection`에 `WorkerScheduler`를 주면 `RuntimeTypeOps::parallelTraceSafe=true`인 타입만 worker에 제출한다. 기본값은 false이며, 생성 메타데이터의 순수 참조 방문은 true다. 사용자 Trace는 thread-safe 선언뿐 아니라 공유 상태 접근과 callback 계약을 실제로 지켜야 한다. 선언하지 않은 타입의 Trace는 소유 스레드에서 수행한다.
 
-최대 64개 표식 작업을 한 배치로 제출하고 수락한 handle을 모두 기다린다. 수동 Trace와 병렬 배치를 혼합할 때 이전 배치를 먼저 완료한다. marker는 Registry gate 아래에서 mark epoch·큐·오류 상태를 갱신한다. scheduler allocator는 worker에서 capture를 해제할 수 있는 thread-safe allocator여야 한다.
+scheduler를 주면 병렬 표식이다([GC 대규모 처리 보강](../Design/GarbageCollectionScale.ko.md) GC-S4). slice(또는 `Collect(access, scheduler)`)마다 worker 수만큼 task를 한 번 제출하고 소유 스레드도 참여자로 함께 돈다. 참여자마다 512칸 블록으로 된 지역 큐를 두고, 블록이 차고 공유 풀이 참여자 수보다 적거나 idle 참여자가 있으면 블록을 공유 풀(잠금 하나)에 내놓는다. 표식은 mark 비트의 `fetch_or`(relaxed, 먼저 일반 읽기)이고 이긴 참여자만 큐에 넣는다. 잎은 표식만 하고 Outer 사슬을 따라간다. `parallelTraceSafe`가 아닌 수동 Trace 타입은 worker가 소유 스레드 큐로 넘기고 소유 스레드만 trace한다(worker는 idle 전에 그 블록을 넘긴다). 모든 참여자가 idle이고 공유 풀·소유 스레드 큐가 비면 끝이다. 객체 수·시간 예산은 참여자마다 객체 64개(예산이 더 작으면 그 수)마다 공유 계수로 보고 넘으면 모두 멈춰 남은 회색 객체를 다음 slice로 넘긴다(표식 큐에 다시 담는다). Trace 오류·task 제출 실패는 멈춤을 걸고 받아들여진 task를 모두 회수한 뒤 cycle을 버린다. 장벽(삽입 장벽·새 루트·Marking 중 출생)은 장벽 큐(`gcShade_`)에만 넣고 slice 시작에 표식 큐로 옮긴다. cutoff는 표식이 끝나고 장벽 큐가 빈 slice만 게시한다. allocator는 여러 스레드의 동시 할당·반환을 지원해야 한다(큐 블록·capture 정리). worker가 없는 scheduler는 소유 스레드 혼자 표식한다. `World`는 `WorldDesc::gcScheduler`(엔진은 `WorldCreateDesc::gcScheduler`)를 받으면 프레임 끝 slice와 종료 수집에 넘긴다.
+
+직렬 marker(`Collect`, scheduler 없는 `StepCollection`)는 gate를 잡지 않는다([GC 대규모 처리 보강](../Design/GarbageCollectionScale.ko.md) GC-S1). 근거는 처리 표시다: slice 동안 생성·간선 변경·장벽·Discard·RootRef 복제는 Busy이고, 다른 스레드의 `ReleaseRoot`·`ReleaseBackend`·`ReleaseEncodePin`은 gate 아래에서 roots·보유 계수와 회수 목록 고리만 바꾼다(marker가 읽고 쓰는 generation·state·mark·object·type·outer·자식 고리는 건드리지 않는다). `mark`는 relaxed atomic으로 접근한다. Trace는 배치 visitor(`TraceVisitor`의 FlushFn 방식)로 간선을 모은 뒤 대상 Slot을 미리 읽고 방문 순서대로 표식하며, 작업 큐 16·8칸 앞의 Slot과 객체 본체를 미리 읽는다. 시계는 객체 128개마다 본다. `GcConcurrencyTests.cpp`가 slice 안 cross-thread 반환을 명시 hand-off로 고정한다.
+
+GC 밀집 자료(GC-S3): marker는 Slot을 읽지 않는다. 슬롯 4096개마다 GC 페이지 하나에 16 B hot 레코드(object·Outer 슬롯 번호·GC 타입 번호)와 chunk마다 비트 묶음(live·mark·leaf)을 둔다. 페이지는 이동하지 않고 표만 생성의 처리 표시 아래에서 두 배로 늘린다. 작업 큐는 슬롯 번호(uint32)다. live 비트는 Commit이 켜고 Retire가 끄며, mark 비트는 Begin·Collect가 chunk마다 word 하나씩 지운다. 간선의 세대·상태 검사는 Debug만 한다(강한 간선은 언제나 살아 있다는 불변식). Release·Development는 domain·슬롯 범위·live 비트만 본다. 루트 목록(roots 0 ↔ 1 전이에서 gate 아래 갱신, 용량은 슬롯 수 이상)으로 Begin·Collect의 루트 표식은 O(루트 수)다. slice 중 다른 스레드의 `ReleaseRoot`도 목록에서 즉시 뺀다(목록은 Begin·Collect의 잠금 구간만 읽고, 이미 표식된 객체는 이번 cycle에 남는다). sweep은 chunk마다 `live & ~mark`를 잠금 없이 계산하고 white가 있는 chunk만 잠가 낮은 번호부터 Retire한다(슬롯 순서 유지). 잎 타입(`RuntimeTypeOps::hasStrongReferences == false`)은 표식만 하고 큐에 넣지 않으며 Outer 사슬을 바로 따라간다(M2). 패키지 정책 Registry는 자식 고리를 따라야 하므로 잎 처리를 하지 않고, 자식 고리는 cold Slot에서 읽는다. Debug는 Commit 검증에서 잎 타입이 간선을 방문하면 Fatal이다. `GcDenseDataTests.cpp`가 잎의 Outer 사슬 보존과 루트 목록을 본다. scheduler allocator는 worker에서 capture를 해제할 수 있는 thread-safe allocator여야 한다.
 
 같은 scheduler worker 안에서 Step을 호출하면 작업을 제출하기 전에 WrongThread다. 부분 제출 뒤 OOM, scheduler 종료 또는 취소가 발생해도 이미 제출한 marker가 끝나기 전 함수의 stack 상태를 파괴하지 않는다. 이는 별도 event 제어 회귀로 검증한다.
 
 ## 예산과 진단
 
-`GcBudget.maxObjects`는 Trace, 슬롯 분류, 실제 저장소 회수의 처리량을 합산한다. 0은 InvalidArgument다. 기본값은 64이며 `maxNanoseconds` 기본값은 1,000,000ns다. 시간값 0은 시간 제한만 끈다.
+`GcBudget.maxObjects`는 Trace한 객체, 분류한 slot chunk(64칸), 실제 저장소 회수의 처리량을 합산한다(GC-S2 — sweep 단위는 chunk). 0은 InvalidArgument다. 기본은 시간 예산이다: `maxNanoseconds` 기본값 1,000,000ns, `maxObjects` 기본값 `GcBudget::DefaultMaxObjects`(2^20)는 상한 장치다. 시간값 0은 시간 제한만 끈다.
 
-이 시간 예산은 **soft deadline**이다. 사용자 Trace·소멸자, 잠금 대기, worker 배치 완료를 중간에 중단하지 않는다. Begin의 루트·슬롯 스캔(한 잠금 구간에서 전체 슬롯)도 최악 시간 상한을 보장하지 않는다. 회수와 완료 여부 검사는 회수 대상 목록만 보고 지연된 슬롯은 다시 걷지 않지만(아래), 회수 한 개의 비용은 사용자 소멸자에 달렸다. pause percentile 벤치마크는 후속 과제다. `maxObjects=1`만으로 프레임 시간 상한을 보장한다고 해석하지 않는다.
+이 시간 예산은 **soft deadline**이다. 사용자 Trace·소멸자, 잠금 대기, worker 배치 완료를 중간에 중단하지 않는다. Begin(한 잠금 구간에서 루트 목록과 chunk마다 표식 word 하나)도 예산 밖이며 최악 시간 상한을 보장하지 않는다. 회수와 완료 여부 검사는 회수 대상 목록만 보고 지연된 슬롯은 다시 걷지 않지만(아래), 회수 한 개의 비용은 사용자 소멸자에 달렸다. Step 시간 분포는 `Programs/GcBench`가 잰다([실험 결과](GcScaleExperiment.ko.md)). `maxObjects=1`만으로 프레임 시간 상한을 보장한다고 해석하지 않는다.
 
 미분류 회수 대상 중 회수할 수 없는 슬롯을 지연 목록으로 옮기는 횟수는 `maxObjects`에 산입되지 않는다. Step 종료 시 완료 여부 검사도 예산 소진 뒤 미분류 목록을 진행할 수 있다. `DrainRetired`는 Step 예산 없이 회수하므로 지연에 민감한 경로에서 별도 측정이 필요하다.
 
@@ -53,7 +57,7 @@ Trace 오류나 작업 제출 실패는 수락한 모든 worker를 정리한 후
 
 ## 저장소와 회수 목록
 
-객체 슬롯은 64개 단위 chunk에 있고 chunk는 Registry 소멸 전까지 이동·반환하지 않는다(`Slot*`가 안정하다). handle → 슬롯은 chunk 포인터 표(chunk 번호 = 슬롯 번호 / 64)로 O(1)이다. 표는 가득 찰 때 두 배(상한은 maxSlots를 담는 chunk 수)를 잠금 밖에서 받아 잠금 안에서 바꾼다. 다른 스레드의 RootRef·Borrow·BackendLease·EncodePin 반환은 잠금 안에서 슬롯을 찾으므로 표 교체와 겹치지 않고, 처리 표시 아래 잠금 없이 찾는 trace 구간(소유 스레드의 Collect·Step·Commit 검증과 병렬 trace worker 스레드)에는 표가 바뀌지 않는다(교체는 생성의 처리 표시 아래에서만 한다). 옛 표는 반환하지 않고 Registry 소멸 때까지 사슬로 보관한다. 옛 표까지의 합은 최종 chunk 표 크기에 비례한다(상한에서 성장이 잘리므로 항상 최종 표의 두 배 이하인 것은 아니다). 앞으로 처리 표시 구간 밖에서 잠금 없이 찾는 경로가 생겨도(A0-Ob 관찰자의 대상 패키지 조회는 잠금 안이다) 교체와 겹친 조회가 해제된 표를 읽지 않는다(옛 표의 칸은 그 표에 있던 chunk를 그대로 가리킨다).
+객체 슬롯은 64개 단위 chunk에 있고(기본 상한 `RegistryOptions::maxSlots` 2,097,152) chunk는 Registry 소멸 전까지 이동·반환하지 않는다(`Slot*`가 안정하다). handle → 슬롯은 chunk 포인터 표(chunk 번호 = 슬롯 번호 / 64)로 O(1)이다. 표는 가득 찰 때 두 배(상한은 maxSlots를 담는 chunk 수)를 잠금 밖에서 받아 잠금 안에서 바꾼다. 다른 스레드의 RootRef·Borrow·BackendLease·EncodePin 반환은 잠금 안에서 슬롯을 찾으므로 표 교체와 겹치지 않고, 처리 표시 아래 잠금 없이 찾는 trace 구간(소유 스레드의 Collect·Step·Commit 검증과 병렬 trace worker 스레드)에는 표가 바뀌지 않는다(교체는 생성의 처리 표시 아래에서만 한다). 옛 표는 반환하지 않고 Registry 소멸 때까지 사슬로 보관한다. 옛 표까지의 합은 최종 chunk 표 크기에 비례한다(상한에서 성장이 잘리므로 항상 최종 표의 두 배 이하인 것은 아니다). 앞으로 처리 표시 구간 밖에서 잠금 없이 찾는 경로가 생겨도(A0-Ob 관찰자의 대상 패키지 조회는 잠금 안이다) 교체와 겹친 조회가 해제된 표를 읽지 않는다(옛 표의 칸은 그 표에 있던 chunk를 그대로 가리킨다).
 
 - 빈 슬롯: 회수된 슬롯을 잇는 목록에서 꺼낸다(LIFO — 가장 최근에 회수한 슬롯부터, 새 chunk는 낮은 번호부터). 생성 한 번이 보는 슬롯은 하나다. 세대 한도에 닿은 슬롯은 목록에 넣지 않고 Exhausted로 격리한다.
 - 회수 대상: Retired 슬롯은 이중 연결 목록 셋 중 하나에 있다. sweep(전체·증분)이 Retire 순서로 분류 전 목록 끝에 붙이고, 회수는 풀린 목록 맨 앞을 먼저 꺼낸 뒤 분류 전 목록을 앞에서부터 분류한다 — 회수 가능하면 회수하고, BackendLease·EncodePin·남은 자식으로 지금 회수할 수 없으면 지연 목록으로 옮긴다. 지연 슬롯은 다시 걷지 않는다: 보유 계수 반환(다른 스레드나 회수 중 소멸자가 BackendLease를 놓는 등)이나 마지막 자식 분리로 회수 가능해지는 순간 지연 목록에서 풀린 목록 끝으로 O(1)에 옮긴다. 그래서 슬롯마다 분류는 한 번이고 회수 한 개당 분할 상환 O(1)이며, 지연 슬롯 수는 회수 호출·slice의 비용에 들지 않는다(Debug `Stats`가 지연 목록에 회수 가능한 슬롯이 없음을 대조한다).
@@ -61,7 +65,7 @@ Trace 오류나 작업 제출 실패는 수락한 모든 worker를 정리한 후
 - 통계: 상태별 슬롯 수와 보유 계수 합을 상태 전이·계수 변경마다 갱신하므로 `Stats`는 슬롯을 훑지 않는다(Debug는 호출마다 전체를 다시 세어 대조하고, 다르면 Fatal). full `Collect`의 검사 수(examined)도 이 합이다.
 - 순회 순서: 루트 표식·sweep·진단 캡처는 새 chunk부터 옛 chunk로, chunk 안은 낮은 번호부터다. 그래서 전체 Collect의 회수 순서도 이 순서다.
 
-남은 전체 슬롯 비용은 GC 자체(루트 스캔·sweep — 증분 sweep은 slice 예산 안), mark epoch 순환 때의 표식 초기화, `CaptureDiagnostics`의 기록, Debug `Stats` 대조다. 대표 자식 생성과 `DescribeOuter`의 이름 있는 Inner 판정은 Sweeping 중 고리 앞쪽에 남은 cutoff white 자식 수만큼 걷는다(sweep이 진행하며 줄어든다). 이름 색인 rehash는 표 성장 때 잠금 안에서 표 크기만큼 옮긴다(분할 상환 O(1)).
+남은 전체 슬롯 비용은 GC의 표식 비트 지우기와 sweep 후보 판정(둘 다 chunk마다 word 하나 — 증분 sweep은 slice 예산 안), `CaptureDiagnostics`의 기록, Debug `Stats` 대조다. 대표 자식 생성과 `DescribeOuter`의 이름 있는 Inner 판정은 Sweeping 중 고리 앞쪽에 남은 cutoff white 자식 수만큼 걷는다(sweep이 진행하며 줄어든다). 이름 색인 rehash는 표 성장 때 잠금 안에서 표 크기만큼 옮긴다(분할 상환 O(1)).
 
 ## 검증과 남은 범위
 

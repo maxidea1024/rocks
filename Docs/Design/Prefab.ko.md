@@ -59,7 +59,7 @@
 
 - **archetype 찾기.** `UObject::GetArchetypeFromRequiredInfo`(CUO/Public/UObject/Object.h:1457, 구현 CUO/Private/UObject/UObjectArchetype.cpp). CDO의 archetype은 부모 클래스 CDO다(`GetArchetypeForCDO`, UObjectArchetype.cpp:88-92, Class.cpp:6398-6402). 일반 객체는 Outer의 archetype을 재귀로 구한 뒤(:104·123) 그 아래에서 **같은 Class·같은 FName** 객체를 찾는다(`FindObjectWithOuter(ArchetypeToSearch, Class, Name)`, :127). 없고 `RF_InheritableComponentTemplate`이면 BP 부모 체인을 찾고(:132-146), 그 밖에는 `UClass::FindArchetype`(:149), 끝까지 없으면 클래스 CDO다(:173-186). 즉 **템플릿과 인스턴스는 "Outer의 archetype 아래 같은 이름"으로 대응한다.** cooked·게임 빌드는 이 결과를 캐시한다(`UE_CACHE_ARCHETYPE (1 && !WITH_EDITORONLY_DATA)`, :19·235-271).
 - **템플릿으로 생성.** `FStaticConstructObjectParameters::Template` — "property values from this object will be copied … If nullptr, the class default object is used"(CUO/Public/UObject/UObjectGlobals.h:1820-1824). 같은 구조체에 `bCopyTransientsFromClassDefaults`(:1815)·`bAssumeTemplateIsArchetype`(:1818)·`InstanceGraph`(:1827). 생성은 `FObjectInitializer(Result, Params)`로 클래스 생성자를 부르고(CUO/Private/UObject/UObjectGlobals.cpp:4851), 이 initializer가 `ObjectArchetype = Params.Template`, `bShouldInitializePropsFromArchetype = true`를 둔다(:3926-3940).
-- **값 복사.** `FObjectInitializer::PostConstructInit`이 archetype(없으면 CDO)에서 `InitProperties`로 속성을 복사하고(:4233-4244), `InitSubobjectProperties`(:4247), 조건이 맞으면 `InstanceSubobjects`(:4279-4300)를 부른다. `InitProperties`(:4450-4579)는 instanced 하위 객체를 담은 Transient·DuplicateTransient·NonPIEDuplicateTransient 속성을 복사에서 뺀다(:4501-4532·4543-4570).
+- **값 복사.** `FObjectInitializer::PostConstructInit`이 archetype(없으면 CDO)에서 `InitProperties`로 속성을 복사하고(:4233-4244), `InitSubobjectProperties`(:4247), 조건이 맞으면 `InstanceSubobjects`(:4279-4300)를 부른다. `InitProperties`(:4450-4579)는 instanced 하위 객체를 담은 Transient·DuplicateTransient·NonTryoutDuplicateTransient 속성을 복사에서 뺀다(:4501-4532·4543-4570).
 - **default subobject.** `CreateDefaultSubobject`는 **생성자 안에서** 하위 객체를 만든다. 이름이 필수이고(:5847), 소유자의 템플릿이 CDO가 아니면 `ObjectArchetype->GetDefaultSubobjectByName(이름)`을 하위 객체 템플릿으로 쓴다(:5891-5900). 이름 주석은 "this will be the same for all instances of this class"다(UObjectGlobals.h:1381). 파생 클래스는 `SetDefaultSubobjectClass`·`DoNotCreateDefaultSubobject`로 상속 subobject의 클래스를 바꾸거나 없앤다(UObjectGlobals.h:1459-1485). Rocks는 생성자가 다른 객체를 만들 수 없으므로(RCM 59행) 이 구조를 선언형으로 옮긴다(3.2절).
 - **생성 출처.** 컴포넌트는 `EComponentCreationMethod`(Native·SimpleConstructionScript·UserConstructionScript·Instance — ENG/Public/ComponentInstanceDataCache.h:25-35)를 `UActorComponent::CreationMethod`(ENG/Classes/Components/ActorComponent.h:431)에 기록해 어디서 만들어졌는지 구분한다.
 
@@ -75,7 +75,7 @@
 - **`FObjectInstancingGraph`**(CUO/Public/UObject/Class.h:5094-5350): `SourceRoot`·`DestinationRoot`(:5306-5322), `SourceToDestinationMap`(:5341)·`DestinationToSourceMap`(:5346). `GetInstancedSubobject`(CUO/Private/UObject/CoreNative.cpp:212-423)는 원형 하위 객체가 맵에 없으면 Outer의 대응 객체를 먼저 확보하고 **같은 FName**으로 `StaticConstructObject_Internal(Template = 원형 하위 객체, InstanceGraph = this)`를 부른다(:282-301·360-374).
 - **내부 참조 재연결.** `FObjectPropertyBase::InstanceSubobjects`가 object 속성 값을 `InstancePropertyValue` 결과로 바꾼다(CUO/Private/UObject/PropertyBaseObject.cpp:73-94). 호출은 `UStruct::InstanceSubobjectTemplates`의 참조 링크 순회다(Class.cpp:2703-2729).
 - **복제.** `StaticDuplicateObjectEx`(UObjectGlobals.cpp:2935-3205)는 루트를 `Template = Source->GetArchetype()`로 만들고(:3001-3004) `FDuplicateDataWriter`로 쓴 뒤 읽는다. default subobject는 이름으로 미리 대응한다(`GetDefaultSubobjectByName(Src->GetFName())`, :2840-2864). `DuplicationSeed`(UObjectGlobals.h:224)는 "복제하지 않을 객체" 대응이다.
-- **제외 플래그.** `FDuplicateDataWriter::operator<<(UObject*&)`는 `RF_DuplicateTransient` 객체와 PIE가 아닐 때의 `RF_NonPIEDuplicateTransient` 객체를 null로 쓴다(CUO/Private/Serialization/DuplicateDataWriter.cpp:69-86, 직접 확인). 속성 플래그 `CPF_DuplicateTransient`·`CPF_NonPIEDuplicateTransient`는 `PPF_Duplicate`일 때 `ShouldSerializeValue`가 뺀다(Property.cpp:1069-1079). **템플릿 객체 자신은 그 값을 그대로 보존한다** — 제외는 복제·인스턴싱 때만 일어난다.
+- **제외 플래그.** `FDuplicateDataWriter::operator<<(UObject*&)`는 `RF_DuplicateTransient` 객체와 UE PIE가 아닐 때의 `RF_NonPIEDuplicateTransient` 객체를 null로 쓴다(CUO/Private/Serialization/DuplicateDataWriter.cpp:69-86, 직접 확인). 속성 플래그 `CPF_DuplicateTransient`·`CPF_NonPIEDuplicateTransient`는 `PPF_Duplicate`일 때 `ShouldSerializeValue`가 뺀다(Property.cpp:1069-1079). **템플릿 객체 자신은 그 값을 그대로 보존한다** — 제외는 복제·인스턴싱 때만 일어난다.
 - **이름 충돌.** 템플릿에서 컴포넌트를 만들 때 이름이 없으면 `FindFirstFreeName(this, Template->GetFName())`으로 빈 이름을 찾는다(ENG/Private/ActorConstruction.cpp:1126, 직접 확인). 이름은 Outer 안에서만 유일하면 되고 정체성이 아니다.
 
 ### 2.4 Blueprint 컴포넌트 트리(SCS·ICH)
@@ -197,7 +197,7 @@ Unity는 소스가 공개되지 않아 직렬화 YAML의 공개 필드 이름 �
    - 다른 부분 그래프의 노드(중첩 원형 사이, cooked 분할 그래프 사이 — 3.6절): 강한 참조는 graph v2 외부 참조로 쓰고 2b의 `imports`에 **같은 트랜잭션 객체**를 넘긴다(OF 5.4절이 허용한다). weak 참조는 graph v2에 weak import가 없으므로(RX 5.1절) Record에는 null로 쓰고 원형의 **그래프 사이 참조 표** `{부분 그래프, 노드, 필드 경로, 대상 노드 주소}`에 둔다. 모든 부분 그래프의 2b가 끝난 뒤 이 표를 staged 경로 쓰기로 적용한다(4절 D17).
    - override 값 안의 노드 참조: 노드 주소(3.5절)이며 인스턴스 대응표 `PrefabInstanceMap`(노드 주소 → handle, spawn 동안만 존재 — 3.9절)으로 바꾼다. 삭제된 노드를 가리키는 참조는 null이 되고 진단을 낸다.
    - 원형 밖 World 객체 참조는 둘 수 없다(3.5절, 4절 D12).
-7. **제외 플래그**: 원형 본문은 편집 World 객체의 저장 가능한 값을 **모두** 보존한다(DuplicateTransient·NonPIEDuplicateTransient 포함 — 다시 편집할 때 값이 사라지지 않게. UE 템플릿과 같다, 2.3절). spawn 복원은 decode 정책 `excludedFlags = DuplicateTransient | NonPIEDuplicateTransient`로 그 필드를 건너뛰어 생성자 값으로 둔다(에셋 복제 정책과 같다 — RX 9.1절, 4절 D20). 지금 decode 정책이 Record에 있는 제외 필드를 건너뛰는지 거부하는지는 PF2에서 확인하고, 거부라면 "건너뛰기" 갈래를 더한다(5.1절). Transient 필드는 원래 저장되지 않는다. 클래스가 Transient·Deprecated인 객체(저장 불가 객체 — RX 9.2절)는 원형 노드가 될 수 없다(prefab 저장이 거부·진단). UE의 "CDO·archetype은 Transient 예외"(RX 694행)는 원형이 객체가 아닌 Rocks에서 생기지 않는다.
+7. **제외 플래그**: 원형 본문은 편집 World 객체의 저장 가능한 값을 **모두** 보존한다(DuplicateTransient·NonTryoutDuplicateTransient 포함 — 다시 편집할 때 값이 사라지지 않게. UE 템플릿과 같다, 2.3절). spawn 복원은 decode 정책 `excludedFlags = DuplicateTransient | NonTryoutDuplicateTransient`로 그 필드를 건너뛰어 생성자 값으로 둔다(에셋 복제 정책과 같다 — RX 9.1절, 4절 D20). 지금 decode 정책이 Record에 있는 제외 필드를 건너뛰는지 거부하는지는 PF2에서 확인하고, 거부라면 "건너뛰기" 갈래를 더한다(5.1절). Transient 필드는 원래 저장되지 않는다. 클래스가 Transient·Deprecated인 객체(저장 불가 객체 — RX 9.2절)는 원형 노드가 될 수 없다(prefab 저장이 거부·진단). UE의 "CDO·archetype은 Transient 예외"(RX 694행)는 원형이 객체가 아닌 Rocks에서 생기지 않는다.
 8. **Validate**: 실효 값 Required(OF 4절), 부착 계층 순환, Transform 유효성(유한·단위 quaternion — ER 4.6절 레벨 편입 5항), 소유 컨테이너 일관성.
 9. **소유 목록**(4절 D15): prefab에서 펼친 Actor는 Level의 영속 목록 `actors`가 아니라 Transient 소유 목록 `spawnedActors`(`ROCKS_PROPERTY(Transient) ObjectRefArray<Actor>`)에 넣는다. `actors`는 Required 영속 필드라(ER 4.6절) 펼친 Actor가 들어 있으면 레벨 저장에서 그 Actor를 빼는 순간 집합 밖 강한 참조가 되어 graph v2 Reject로 실패한다(OF 5.3절). Transient 목록은 저장되지 않고 GC 소유 간선 역할만 한다(생성 Trace가 Transient 참조 필드를 방문해야 한다 — 5.1절에서 확인). 레벨에 직접 배치한 Actor만 `actors`에 남는다.
 10. **생성 출처 표시**: 객체마다 NATIVE 생성 출처를 둔다 — `ClassSubobject`·`PrefabNode`·`InstanceAdded`(인스턴스 override로 추가한 노드)·`Runtime`(hook·게임 코드의 `SpawnActor`·`AddComponent`). UE `CreationMethod`와 같은 목적이다(2.1절). 원형 본문과 레벨 저장은 Runtime 출처를 넣지 않는다. 편집 World에서는 게임 hook을 실행하지 않으므로(3.13절, 4절 D18) Runtime 출처가 생기지 않는 것이 정상이고, 이 표시는 그 계약의 방어선이다.
@@ -227,7 +227,7 @@ Result<PrefabSpawnResult> World::SpawnPrefab(const AssetLease& prefab, const Spa
 |---|---|---|
 | `SubobjectGuid` | MetaCompiler가 subobject 선언마다 `.rocksids.json`에 발급 | 클래스 subobject의 정체성, 파생 클래스 덮기 키(UE ICH `AssociatedGuid` 대응) |
 | `NodeGuid` | prefab 편집기가 노드를 만들 때 무작위 발급, 원형 수명 동안 불변(이름 변경·이동과 무관) | 원형 노드의 정체성, override 대상 |
-| `PrefabInstanceGuid` | 인스턴스 생성 때 발급, 저장 시 보존, 복제(편집기 복사·PIE가 아닌 복제) 때 재발급 | 인스턴스 정체성 |
+| `PrefabInstanceGuid` | 인스턴스 생성 때 발급, 저장 시 보존, 복제(편집기 복사·Tryout이 아닌 복제) 때 재발급 | 인스턴스 정체성 |
 | `PrefabNodeAddress` | `{중첩 인스턴스 경로: NodeGuid 목록, 노드: NodeGuid}` | override 대상, 바인딩(EIP 2111행) |
 | 파생 Entity ID | `DeriveGuid(PrefabInstanceGuid, 주소)` — 결정적 | 세이브게임·외부 참조·네트워크 |
 
@@ -299,7 +299,7 @@ Result<PrefabSpawnResult> World::SpawnPrefab(const AssetLease& prefab, const Spa
 - 로드: 배치 기록의 `baseRevision` ≠ 현재 `resolvedRevision`이면 전파 후 spawn하고, 편집기는 레벨을 dirty로 표시한다.
 - 편집기에서 원형 저장: 열린 World의 그 원형을 쓰는 추적 인스턴스(중첩·variant 포함 — 인스턴스 장부의 원형별 목록, 3.9절)를 모두 갱신한다.
 - `RebasePrefabInstance(PrefabInstanceId, resolvedRevision)`(EIP 20.3절)로 명시 호출.
-- 실행 중(PIE·게임)에는 원형이 바뀌지 않는다. PIE 중 원본 수정은 명시 live patch 범위에서만이다(EIP 20.3절).
+- 실행 중(Tryout·게임)에는 원형이 바뀌지 않는다. Tryout 중 원본 수정은 명시 live patch 범위에서만이다(EIP 20.3절).
 
 **어떻게**(4절 D7):
 
@@ -421,7 +421,7 @@ Result<PrefabSpawnResult> World::SpawnPrefab(const AssetLease& prefab, const Spa
 | 전파(편집기) | Game, 편집 transaction 안 | 3.7절 |
 
 - **수명**: `PrefabArchetype`은 불변 공유 값이고 TypeLease만 쥔다(3.9절). 에셋 lease는 `PrefabUsage`가 쥐고 원형의 마지막 Actor가 사라질 때 반납한다. `PrefabSpawnResult`는 lease를 쥐지 않는 값이다.
-- **World 종료·PIE**: World 종료 시 `PrefabUsage`의 lease를 모두 반납한다. PIE 시작은 편집 World를 복제하며 인스턴스 Guid·배치 기록·추적 인스턴스 장부를 유지한다(PIE 복제 — DuplicateTransient만 제외, RX 9.1절). 늦게 끝난 비동기 로드는 종료된 World에 spawn하지 않는다(RCM 45행).
+- **World 종료·Tryout**: World 종료 시 `PrefabUsage`의 lease를 모두 반납한다. Tryout 시작은 편집 World를 복제하며 인스턴스 Guid·배치 기록·추적 인스턴스 장부를 유지한다(Tryout 복제 — DuplicateTransient만 제외, RX 9.1절). 늦게 끝난 비동기 로드는 종료된 World에 spawn하지 않는다(RCM 45행).
 - **모듈 reload**: 본문 타입의 revision이 바뀌면 `resolvedRevision`이 바뀌므로 옛 캐시 항목은 더 쓰이지 않고 Discard 통지나 다음 정리에서 버린다.
 
 ### 3.13 편집기·네트워크와의 접점(자리)
@@ -457,7 +457,7 @@ Result<PrefabSpawnResult> World::SpawnPrefab(const AssetLease& prefab, const Spa
 | D15 | 펼친 Actor의 소유 목록 | (a) Level에 Transient 소유 목록 `spawnedActors`를 따로 둔다 (b) `actors`에 두고 레벨 저장이 prefab 소속 Actor를 원소째 빼는 저장 정책을 더한다 | **(a)**. 영속 목록과 저장 집합이 어긋나지 않는다. (b)는 graph v2에 "집합 밖 소유 원소를 지우는" 새 정책이 필요하다 |
 | D16 | Map·Set key 단위 추출 위치 | (a) prefab 기록기가 옛 값/새 값을 key로 비교 (b) RX 10.2절 `OverridePaths`를 key 단위로 바꿈 | **(a)**. RX를 쓰는 A5 패키지 차이는 통째가 맞으므로 RX를 바꾸지 않는다 |
 | D17 | 부분 그래프 사이 참조 | (a) 강한 = 같은 트랜잭션 import, weak = 그래프 사이 참조 표 + 사후 경로 쓰기 (b) graph v2에 같은 트랜잭션 weak import를 더한다 | **(a)**. graph v2 형식을 바꾸지 않는다. weak 사후 쓰기는 Commit 전 staged 쓰기라 원자성이 유지된다 |
-| D18 | 편집 World의 hook | (a) 등록과 `Validate`만, 게임 hook 없음 (b) PIE처럼 모든 hook 실행 | **(a)**. UE 편집기 World도 BeginPlay를 하지 않는다. hook이 만든 객체가 원형·레벨에 섞이지 않는다 |
+| D18 | 편집 World의 hook | (a) 등록과 `Validate`만, 게임 hook 없음 (b) Tryout처럼 모든 hook 실행 | **(a)**. UE 편집기 World도 BeginPlay를 하지 않는다. hook이 만든 객체가 원형·레벨에 섞이지 않는다 |
 | D19 | override 마이그레이션 | (a) 노드별 부분 Record로 묶어 migrate 후 경로로 다시 추출, key 항목은 그 필드가 바뀌면 고아 (b) 버전이 다르면 그 노드 override를 곧바로 고아로 | **(a)**. 부분 Record가 형식상 유효하고 migrate가 Record 단위라 그대로 쓸 수 있다. (b)는 버전 하나 올릴 때마다 모든 레벨의 override를 사람이 다시 손봐야 한다 |
 | D20 | DuplicateTransient 계열 값 | (a) 원형 본문은 보존, spawn 복원이 제외 (b) 원형 저장 때 제외 | **(a)**. UE 템플릿도 값을 보존한다(2.3절). (b)는 다시 편집할 때 값이 사라진다 |
 | D21 | 인스턴스 장부 범위 | (a) 원형별 `PrefabUsage` + Actor별 칸은 늘, 인스턴스 항목·노드 대응표는 추적 인스턴스만(지연 생성) (b) 모든 인스턴스에 인스턴스 항목 | **(a)**. 1M 규모에서 실행 중 spawn의 장부 비용을 Actor당 고정 byte로 묶는다 |

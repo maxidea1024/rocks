@@ -139,6 +139,36 @@ public:
     //   }
     Result<TypeLease> AcquireType(ObjectHandle object) noexcept;
 
+    // ---- 클러스터 지정(엔진 계층 전용 — World·AssetManager, Docs/Design/
+    // GarbageCollectionScale.ko.md 13.3절) ----
+    // 클러스터는 루트 객체 하나와 소속 객체 집합이다. 루트가 살면 소속이 모두 산다(루트 → 소속 암묵
+    // 강한 간선)고 GC 표식은 소속 사이 간선을 따라가지 않는다. 가입은 이 트랜잭션의 Commit 때만
+    // 하고 되돌릴 수 없다. 소속 객체는 RequestDestroy·Discard 때 빠지고(이탈), 루트의
+    // RequestDestroy· Discard는 클러스터를 해체한다. 클러스터를 켠
+    // Registry(RegistryOptions::clusters)만 받고 그 밖은 Unsupported다. 지정은 Commit 전까지 이
+    // 트랜잭션에만 보이고 Rollback이 지운다.
+    //
+    // 공통 순서와 오류: 트랜잭션 상태 → 접근(WrongThread·WrongContext) → 종료·재진입(ShuttingDown·
+    // Busy) → 클러스터를 끈 Registry Unsupported → object가 이 트랜잭션의 공개 전 객체(생성자 실행
+    // 뒤)가 아니면 StaleHandle → 이미 지정했으면 InvalidArgument.
+
+    // object를 새 클러스터의 루트로 지정한다. object 타입이 완전한 필드 배치
+    // (RuntimeTypeOps::completeFieldLayout)가 아니면 Unsupported다.
+    //
+    // 사용 예(World가 Level을 만들 때):
+    //   auto level = transaction.Create<Level>(LevelType);
+    //   if (auto rooted = transaction.SetClusterRoot(level.Value()); !rooted) { return rooted; }
+    Result<void> SetClusterRoot(ObjectHandle object) noexcept;
+
+    // object를 root의 클러스터에 넣는다. root는 이 트랜잭션에서 SetClusterRoot로 지정한 객체이거나
+    // 해체되지 않은 클러스터의 생존(Alive) 루트여야 한다(아니면 StaleHandle — Commit 때 다시 본다).
+    // object 타입이 완전한 필드 배치가 아니면 가입하지 않고 성공한다(클러스터 밖 일반 객체로 남는다
+    // — 정확성은 같고 최적화만 받지 못한다).
+    //
+    // 사용 예(SpawnActor):
+    //   if (auto joined = transaction.JoinCluster(actor, level); !joined) { return joined; }
+    Result<void> JoinCluster(ObjectHandle object, ObjectHandle root) noexcept;
+
     ObjectRegistry& Registry() const noexcept {
         return registry_;
     }

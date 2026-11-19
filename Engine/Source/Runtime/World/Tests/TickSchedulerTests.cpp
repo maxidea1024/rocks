@@ -1,5 +1,6 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/Test.h>
+#include <World/Private/TickSchedulerTestAccess.h>
 #include <World/TickScheduler.h>
 
 using namespace rocks;
@@ -244,4 +245,126 @@ TEST(Tick_ClosedSchedulerRejectsRegistrationButAllowsUnregister) {
     CHECK(scheduler.Register(Make(2)).Error() == ErrorCode::ShuttingDown);
     CHECK(scheduler.Unregister(handle.Value()).IsOk());
     CHECK(scheduler.Stats().registered == 0);
+}
+
+TEST(Tick_RegistrationAtOrAboveMaxPriorityAppendsWithoutRebuild) {
+    SystemAllocator allocator;
+    TickScheduler scheduler(allocator);
+    RecordingExecutor executor(scheduler);
+    REQUIRE(scheduler.Register(Make(1, TickPhase::PrePhysics, 0)));
+    REQUIRE(scheduler.Register(Make(2, TickPhase::PrePhysics, 3)));
+    REQUIRE(scheduler.RunPhase(TickPhase::PrePhysics, Frame(), executor));
+    REQUIRE(scheduler.Stats().pendingChanges == 0);
+
+    // 최댓값과 같거나 큰 priority는 재구성해도 맨 끝이므로 끝에 붙고 재구성을 예약하지 않는다.
+    REQUIRE(scheduler.Register(Make(3, TickPhase::PrePhysics, 3)));
+    CHECK(scheduler.Stats().pendingChanges == 0);
+    REQUIRE(scheduler.Register(Make(4, TickPhase::PrePhysics, 7)));
+    CHECK(scheduler.Stats().pendingChanges == 0);
+    executor.Reset();
+    REQUIRE(scheduler.RunPhase(TickPhase::PrePhysics, Frame(), executor));
+    REQUIRE(executor.count == 4);
+    CHECK(executor.order[0] == 1 && executor.order[1] == 2 && executor.order[2] == 3 &&
+          executor.order[3] == 4);
+
+    // 최댓값보다 작으면 중간에 들어가야 하므로 재구성한다.
+    REQUIRE(scheduler.Register(Make(5, TickPhase::PrePhysics, 1)));
+    CHECK(scheduler.Stats().pendingChanges == 1);
+    executor.Reset();
+    REQUIRE(scheduler.RunPhase(TickPhase::PrePhysics, Frame(), executor));
+    REQUIRE(executor.count == 5);
+    CHECK(executor.order[0] == 1 && executor.order[1] == 5 && executor.order[2] == 2 &&
+          executor.order[3] == 3 && executor.order[4] == 4);
+    CHECK(scheduler.Stats().pendingChanges == 0);
+
+    // 재구성을 기다리는 단계에서는 끝에 붙이지 않는다(재구성이 함께 정한다).
+    REQUIRE(scheduler.Register(Make(6, TickPhase::PrePhysics, -1)));
+    REQUIRE(scheduler.Register(Make(7, TickPhase::PrePhysics, 9)));
+    CHECK(scheduler.Stats().pendingChanges == 1);
+    executor.Reset();
+    REQUIRE(scheduler.RunPhase(TickPhase::PrePhysics, Frame(), executor));
+    REQUIRE(executor.count == 7);
+    CHECK(executor.order[0] == 6 && executor.order[1] == 1 && executor.order[6] == 7);
+}
+
+TEST(Tick_PrerequisiteAlreadyHonouredSkipsRebuild) {
+    SystemAllocator allocator;
+    TickScheduler scheduler(allocator);
+    RecordingExecutor executor(scheduler);
+    auto first = scheduler.Register(Make(1));
+    auto second = scheduler.Register(Make(2));
+    auto third = scheduler.Register(Make(3));
+    REQUIRE(first && second && third);
+    REQUIRE(scheduler.RunPhase(TickPhase::PrePhysics, Frame(), executor));
+    REQUIRE(scheduler.Stats().pendingChanges == 0);
+
+    // 지금 순서에서 이미 선행이 앞이면 재구성하지 않는다.
+    REQUIRE(scheduler.AddPrerequisite(third.Value(), first.Value()));
+    CHECK(scheduler.Stats().pendingChanges == 0);
+    executor.Reset();
+    REQUIRE(scheduler.RunPhase(TickPhase::PrePhysics, Frame(), executor));
+    REQUIRE(executor.count == 3);
+    CHECK(executor.order[0] == 1 && executor.order[1] == 2 && executor.order[2] == 3);
+
+    // 선행이 뒤에 있으면 재구성한다.
+    REQUIRE(scheduler.AddPrerequisite(first.Value(), second.Value()));
+    CHECK(scheduler.Stats().pendingChanges == 1);
+    executor.Reset();
+    REQUIRE(scheduler.RunPhase(TickPhase::PrePhysics, Frame(), executor));
+    REQUIRE(executor.count == 3);
+    CHECK(executor.order[0] == 2 && executor.order[1] == 1 && executor.order[2] == 3);
+}
+
+TEST(Tick_DeferredRemovalOfPrerequisiteRebuildsOrder) {
+    SystemAllocator allocator;
+    TickScheduler scheduler(allocator);
+    RecordingExecutor executor(scheduler);
+    // 3번(priority -5)은 1번(priority 10)에 묶여 2번(priority 0)과 1번 뒤에 실행된다.
+    auto pinned = scheduler.Register(Make(1, TickPhase::PrePhysics, 10));
+    auto middle = scheduler.Register(Make(2, TickPhase::PrePhysics, 0));
+    auto bound = scheduler.Register(Make(3, TickPhase::PrePhysics, -5));
+    REQUIRE(pinned && middle && bound);
+    REQUIRE(scheduler.AddPrerequisite(bound.Value(), pinned.Value()));
+    REQUIRE(scheduler.RunPhase(TickPhase::PrePhysics, Frame(), executor));
+    REQUIRE(executor.count == 3);
+    CHECK(executor.order[0] == 2 && executor.order[1] == 1 && executor.order[2] == 3);
+
+    // 실행 중에 선행(1번)을 해제한다. 단계 경계의 미룬 해제가 의존을 풀었으니 순서를 다시 만들어야
+    // 3번이 priority대로 맨 앞에 온다(남은 순서 배열을 그대로 쓰면 2번, 3번 순서로 남는다).
+    executor.Reset();
+    executor.unregisterOnRun = 2;
+    executor.victim = pinned.Value();
+    REQUIRE(scheduler.RunPhase(TickPhase::PrePhysics, Frame(), executor));
+    REQUIRE(executor.count == 2);
+    CHECK(executor.order[0] == 2 && executor.order[1] == 3);
+    CHECK(!scheduler.IsRegistered(pinned.Value()));
+    CHECK(scheduler.Stats().pendingChanges == 1);
+
+    executor.Reset();
+    REQUIRE(scheduler.RunPhase(TickPhase::PrePhysics, Frame(), executor));
+    REQUIRE(executor.count == 2);
+    CHECK(executor.order[0] == 3 && executor.order[1] == 2);
+}
+
+TEST(Tick_CycleCheckSurvivesMarkEpochWrap) {
+    SystemAllocator allocator;
+    TickScheduler scheduler(allocator);
+    auto first = scheduler.Register(Make(1));
+    auto second = scheduler.Register(Make(2));
+    auto third = scheduler.Register(Make(3));
+    REQUIRE(first && second && third);
+    // 이 추가의 탐색이 1번 칸에 방문 번호 1을 남긴다.
+    REQUIRE(detail::TickSchedulerTestAccess::MarkEpoch(scheduler) == 0);
+    REQUIRE(scheduler.AddPrerequisite(second.Value(), first.Value()));
+    REQUIRE(detail::TickSchedulerTestAccess::MarkEpoch(scheduler) == 1);
+
+    // 번호가 한 바퀴 돌면 방문 표시를 비우고 1부터 다시 쓴다. 비우지 않으면 1번 칸의 옛 표시가 새
+    // 번호와 같아 2번 -> 1번 경로를 놓치고 사이클을 받아들인다.
+    detail::TickSchedulerTestAccess::SetMarkEpoch(scheduler, NumericLimits<uint32>::Max());
+    CHECK(scheduler.AddPrerequisite(first.Value(), second.Value()).Error() ==
+          ErrorCode::CycleDetected);
+    CHECK(detail::TickSchedulerTestAccess::MarkEpoch(scheduler) == 1);
+    CHECK(scheduler.AddPrerequisite(third.Value(), second.Value()));
+    CHECK(scheduler.AddPrerequisite(first.Value(), third.Value()).Error() ==
+          ErrorCode::CycleDetected);
 }
