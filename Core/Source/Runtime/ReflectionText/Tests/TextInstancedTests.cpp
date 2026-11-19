@@ -12,6 +12,8 @@
 // 자리, 거부 진단(모르는 타입·ReadOnly·깊이 합·빈 값의 멤버), JSON `_structType` export·import
 // 왕복.
 using namespace rocks;
+namespace text_instanced_tests_file {
+
 using namespace rocks::reflection_text;
 using namespace rocks::test::assign;
 using reflection_fixture::InheritHolder;
@@ -354,3 +356,4 @@ TEST(TextInstanced_DerivedUnitKeepsBaseNativeMembers) {
     CHECK(value.Value()->leaf.nativeCount == 7u);
     CHECK(value.Value()->leaf.note.View() == "kept");
 }
+} // namespace text_instanced_tests_file

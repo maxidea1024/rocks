@@ -14,6 +14,8 @@
 // 진단 InvalidStructValue와 InvalidArgument로 아무것도 게시하지 않는다(다른 단위도). StructRefArray
 // 추가 원소의 hook 멤버도 본다. 같은 값의 무동작 대입은 hook을 부르지 않는다.
 using namespace rocks;
+namespace text_validate_hook_tests_file {
+
 using namespace rocks::reflection_text;
 using reflection_fixture::CurrentValidateLog;
 using reflection_fixture::ValidHolder;
@@ -239,3 +241,4 @@ TEST(TextValidateHook_ValueAndStagedTargets) {
     CHECK(!prepared.Value().Publish());
     CHECK(fixture.OnlyStructDiagnostic("box"));
 }
+} // namespace text_validate_hook_tests_file
