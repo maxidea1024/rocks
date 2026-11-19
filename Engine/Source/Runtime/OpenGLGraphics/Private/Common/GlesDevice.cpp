@@ -493,9 +493,11 @@ Result<TextureHandle> GlesDevice::CreateTexture(const TextureDesc& desc,
 
     TextureRecord record;
     record.dimension = desc.dimension;
-    // MSAA는 TEXTURE_2D_MULTISAMPLE(ES 3.1 core)이다.
-    record.target =
-        desc.sampleCount > 1 ? GL_TEXTURE_2D_MULTISAMPLE : TextureTarget(desc.dimension);
+    // MSAA는 TEXTURE_2D_MULTISAMPLE(ES 3.1 core)·TEXTURE_2D_MULTISAMPLE_ARRAY(ES 3.2 core)이다.
+    const bool msaaArray = desc.dimension == TextureDimension::Texture2DArray;
+    record.target = desc.sampleCount <= 1 ? TextureTarget(desc.dimension)
+                    : msaaArray           ? GL_TEXTURE_2D_MULTISAMPLE_ARRAY
+                                          : GL_TEXTURE_2D_MULTISAMPLE;
     record.sampleCount = desc.sampleCount;
     record.width = desc.width;
     record.height = desc.height;
@@ -521,6 +523,11 @@ Result<TextureHandle> GlesDevice::CreateTexture(const TextureDesc& desc,
         gl_.TexStorage2DMultisample(record.target, static_cast<GLsizei>(desc.sampleCount),
                                     format->internalFormat, static_cast<GLsizei>(desc.width),
                                     static_cast<GLsizei>(desc.height), GL_TRUE);
+    } else if (record.target == GL_TEXTURE_2D_MULTISAMPLE_ARRAY) {
+        gl_.TexStorage3DMultisample(record.target, static_cast<GLsizei>(desc.sampleCount),
+                                    format->internalFormat, static_cast<GLsizei>(desc.width),
+                                    static_cast<GLsizei>(desc.height),
+                                    static_cast<GLsizei>(record.slices), GL_TRUE);
     } else if (record.target == GL_TEXTURE_2D || record.target == GL_TEXTURE_CUBE_MAP) {
         gl_.TexStorage2D(record.target, levels, format->internalFormat,
                          static_cast<GLsizei>(desc.width), static_cast<GLsizei>(desc.height));

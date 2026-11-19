@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Object/ReferenceLayout.h>
 #include <Core/Result.h>
 #include <Object/Object.h>
 #include <Object/ObjectAccessContext.h>
@@ -186,6 +187,12 @@ public:
 
     ObjectHandle Handle() const noexcept {
         return handle_;
+    }
+
+    // 참조 위치 표(M3 — Object/ReferenceLayout.h)에 이 필드의 handle 칸을 알린다. 생성 코드의
+    // 참조 위치 함수가 부른다.
+    void ReportLayout(detail::ReferenceLayoutBuilder& layout) const noexcept {
+        layout.Single(&handle_);
     }
 
 private:

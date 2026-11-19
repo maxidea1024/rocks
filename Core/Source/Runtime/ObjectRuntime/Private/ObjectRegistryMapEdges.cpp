@@ -54,6 +54,10 @@ Result<void> ObjectRegistry::SetMapEdge(const ObjectAccessContext& access, Objec
             revision = edit.Revision();
             if (!target.IsNull()) {
                 auto targetChecked = CheckTargetLocked(target, 0, nativeType);
+                if (targetChecked) {
+                    targetChecked = CheckPermanentEdgeLocked(*FindSlot(owner), target);
+                }
+
                 if (!targetChecked) {
                     return targetChecked;
                 }
@@ -86,6 +90,8 @@ Result<void> ObjectRegistry::SetMapEdge(const ObjectAccessContext& access, Objec
                 } else {
                     edit.CommitInsert(target);
                 }
+
+                LedgerEditLocked(*FindSlot(owner), previous, target);
 
                 ApplyPlanLocked(plan);
                 if (write) {
@@ -168,6 +174,7 @@ Result<void> ObjectRegistry::EraseMapEdge(const ObjectAccessContext& access, Obj
                 // 삽입 장벽 GC에서 간선 삭제는 장벽이 필요 없다. 키는 edit가 넘겨받아 잠금을 푼 뒤
                 // 반환한다.
                 const ObjectHandle erased = *slot;
+                LedgerEditLocked(*FindSlot(owner), erased, ObjectHandle{});
                 edit.Erase();
                 ApplyPlanLocked(plan);
                 if (removed) {
@@ -188,6 +195,19 @@ Result<void> ObjectRegistry::EraseMapEdge(const ObjectAccessContext& access, Obj
             return reserved;
         }
     }
+}
+
+void ObjectRegistry::ClearMapLedgerLocked(const Slot& owner,
+                                          detail::ObjectRefMapEdit& edit) noexcept {
+    if (!IsClusterMemberLocked(owner)) {
+        return;
+    }
+
+    // 컨테이너 자체의 값 순회다(사용자 코드가 아니다) — 잠금 안에서 부른다.
+    MarkState state{this, nullptr};
+    state.ledgerOwner = owner.index;
+    TraceVisitor visitor(&state, &ObjectRegistry::LedgerRemoveVisited);
+    edit.VisitValues(visitor);
 }
 
 Result<void> ObjectRegistry::ClearMapEdges(const ObjectAccessContext& access, ObjectHandle owner,
@@ -216,6 +236,8 @@ Result<void> ObjectRegistry::ClearMapEdges(const ObjectAccessContext& access, Ob
 
         const Slot& source = *FindSlot(owner);
         if (!ObservesOwnerLocked(source) || edit.Count() == 0) {
+            // 클러스터 장부는 관찰 대상이 아니어도 지워지는 값을 모두 센다(13.4절).
+            ClearMapLedgerLocked(source, edit);
             edit.Detach();
             return Result<void>::Success();
         }
@@ -223,7 +245,7 @@ Result<void> ObjectRegistry::ClearMapEdges(const ObjectAccessContext& access, Ob
         // 다중 간선 지점(Docs/Design/ObjectFoundations.ko.md 3절): 처리 표시 아래 잠금 밖에서 떼어
         // 낼 값의 쌍을 합친 뒤 예약하고, 한 잠금 안에서 비우고 기록한다. 처리 표시 동안 다른 변경은
         // Busy라 컨테이너·owner를 다시 검증할 필요가 없다.
-        package = HandleOf(*source.outermost);
+        package = HandleOf(*ColdOf(source).outermost);
         processing_ = true;
     }
 
@@ -248,6 +270,7 @@ Result<void> ObjectRegistry::ClearMapEdges(const ObjectAccessContext& access, Ob
         return Result<void>::Failure(ErrorCode::Busy);
     }
 
+    ClearMapLedgerLocked(*FindSlot(owner), edit);
     edit.Detach();
     ApplyTallyLocked(tally, ReferenceChangeCause::Edit, 0);
     return Result<void>::Success();

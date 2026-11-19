@@ -19,18 +19,29 @@ enum class GcPhase : uint8 {
     Reclaiming
 };
 
-// 시간 예산은 soft deadline이다. Trace/소멸자 한 번을 중간에 중단하지 않는다.
-// Begin의 root scan·잠금 획득·회수 후보 탐색도 hard deadline으로 제한하지 않는다.
-// maxObjects는 trace·slot 분류·실제 회수의 합이며 0은 잘못된 설정이다.
-// maxNanoseconds=0은 시간 한도를 끄되 객체 작업량 한도는 유지한다.
+// 증분 수집 slice 하나의 예산이다(Docs/Design/GarbageCollectionScale.ko.md GC-S2). 기본은 시간
+// 한도(1ms)이고 maxObjects는 상한 장치일 뿐이다.
+// - 시간 예산은 soft deadline이다. Trace·소멸자 한 번을 중간에 중단하지 않고, 표식은 객체
+//   128개마다·sweep은 chunk(64칸)마다·회수는 객체마다 시계를 본다. Begin의 root scan·잠금 획득·회수
+//   후보 탐색도 hard deadline으로 제한하지 않는다.
+// - maxObjects는 작업 단위의 합이다: trace한 객체 하나, 분류한 slot chunk(64칸) 하나, 회수한 객체
+//   하나가 각각 1이다. 0은 잘못된 설정(InvalidArgument)이다.
+// - maxNanoseconds=0은 시간 한도를 끄되 작업량 한도는 유지한다(시험의 결정적 진행).
+//
+// 사용 예(프레임마다 2ms):
+//   registry.StepCollection(access, GcBudget{GcBudget::DefaultMaxObjects, 2000000});
 struct GcBudget {
-    uint32 maxObjects = 64;
+    static constexpr uint32 DefaultMaxObjects = 1u << 20;
+
+    uint32 maxObjects = DefaultMaxObjects;
     uint64 maxNanoseconds = 1000000;
 };
 
 // 한도는 생성 시 고정한다. maxGeneration을 낮추면 슬롯 고갈 회귀 시험을 할 수 있다.
 struct RegistryOptions {
-    uint32 maxSlots = 1048576;
+    // 슬롯 수 상한이다. 기본값은 UE MaxUObjects 기본과 같은 2M이다(Docs/Design/
+    // GarbageCollectionScale.ko.md 4절). 슬롯 저장소는 쓰는 만큼만 chunk·GC 페이지 단위로 늘어난다.
+    uint32 maxSlots = 2097152;
     uint32 maxGeneration = NumericLimits<uint32>::Max();
     // 기본값은 scope 없는 객체 자체 호출에 Registry의 문맥을 사용한다. World/PIE dispatcher가
     // 실행 문맥을 설정하는 구성은 true로 하여 무인자 생명주기·타입 조회 API의 scope 누락을
@@ -55,6 +66,40 @@ struct RegistryOptions {
     // 토큰의 쓰기·저장·복원 Unsupported). 쓰기는 토큰 domain이 이 pool인지 보고(다르면
     // WrongContext) 그래프 복원 2a가 이 pool로 intern한다(ReflectionExtensions.ko.md 4·4.1절).
     NamePool* names = nullptr;
+    // 클러스터 기능을 켠다(Docs/Design/GarbageCollectionScale.ko.md 13절). 켜면 슬롯마다 클러스터
+    // 장부 칸(28 B)을 GC 페이지와 함께 두고, 엔진 계층(World)이 생성 트랜잭션에서 클러스터 루트를
+    // 지정하고 가입시킬 수 있다(ConstructionContext::SetClusterRoot·JoinCluster). 루트가 살면 소속
+    // 객체가 모두 살고(루트 → 소속 암묵 강한 간선), 표식은 소속 사이 간선을 따라가지 않는다. 켜면
+    // maxSlots는 ClusterSlotLimit 이하여야 한다(아니면 Registry 생성이 Fatal).
+    bool clusters = false;
+    // 패키지 정책 Registry에서 패키지마다 클러스터를 자동으로 만든다(기본 — 13.3절). 패키지 객체가
+    // 루트이고 outermost가 그 패키지인 객체가 생성 Commit 때 가입하며, 부분 트리 Discard가 이탈,
+    // 패키지 Discard가 해체다. clusters와 관계없이 켜진다. 끄는 것은 측정 비교용이다.
+    bool packageClusters = true;
+    // 영구 창을 연 채 Registry를 만든다(Docs/Design/GarbageCollectionScale.ko.md 13.7절). 켜면
+    // ObjectRegistry::ClosePermanentRegion 전까지 Commit되는 객체가 모두 영구 영역(언제나 표식된
+    // 특수 클러스터)에 들어가 표식·sweep 비용이 없다. 영구 객체는 완전한 필드 배치 타입이어야 하고
+    // (아니면 Commit이 Unsupported), 강한 간선 대상(outer 포함)은 영구 객체뿐이며(어기는 쓰기·
+    // Commit은 Unsupported), RequestDestroy·Discard도 Unsupported다. Shutdown 때만 해체한다.
+    // 패키지 정책과 함께 켜면 Registry 생성이 Fatal이다(자식 고리가 간선이라 창을 닫은 뒤 만든
+    // 자식이 영구 → 일반 간선이 된다). Engine Registry가 서브시스템 초기화 동안만 연다.
+    bool permanentRegion = false;
+    // 참조 위치 표(M3)를 쓴다(기본). 끄면 모든 타입을 trace로 표식한다(측정 비교용).
+    bool referenceTables = true;
+    // 정지형 직렬 Collect의 작업 계수(GcReport::work)를 센다(측정용 — 간선마다 분기와 읽기가 는다).
+    bool countGcWork = false;
+    // Debug에서 Begin·Collect마다 클러스터 장부(소속·inCount·outCount·경계·detached 목록)를
+    // 처음부터 다시 계산해 비교하고, 어긋나면 Fatal로 멈춘다(비용이 커서 soak·시험만 켠다).
+    // Release·Development에서는 무시한다.
+    bool verifyClusterLedger = false;
+    // verifyClusterLedger와 함께 켜면 같은 검증에서 소속 불변식도 본다: SetClusterRoot로 지정한
+    // 클러스터의 루트가 아닌 소속은 같은 클러스터 소속 객체에서 오는 간선이 하나 이상이어야
+    // 한다(13.8절 — 소유 간선이 모두 클러스터 안인 World Level이 켠다). 어기면 Fatal(고아
+    // 소속)이다.
+    bool verifyClusterOwnership = false;
+    // 클러스터를 켠 Registry의 슬롯 수 상한이다(작업 큐 항목의 클러스터 표지 비트와 장부 칸의 상태
+    // 비트를 남긴다).
+    static constexpr uint32 ClusterSlotLimit = 1u << 29;
 };
 
 struct ObjectStats {
@@ -75,21 +120,73 @@ struct ObjectStats {
     // 누계다. 언제나 0이어야 한다(AssetManager가 Discard 없이 패키지 RootRef를 놓은 버그). 종료
     // (Shutdown 시작) 뒤의 회수는 세지 않는다.
     uint32 retiredWithoutDiscard = 0;
+    // 살아 있는 클러스터 수와 그 소속 객체 수의 합이다(클러스터를 켠 Registry만 0이 아니다).
+    uint32 clusters = 0;
+    uint32 clusterMembers = 0;
 };
 
 // 성공한 한 cycle의 결과다. 시간은 실제 collector slice의 합(ns)이며 mutator 시간은 제외한다.
+// phase별 시간은 durationNanoseconds의 내역이다: begin은 Begin(작업 큐 예약·epoch·루트 수집,
+// Collect는 같은 구간), mark는 표식, sweep은 white 판정과 Retire, reclaim은 소멸자·해제를 포함한
+// 회수다. 증분 수집은 slice마다 그 phase에 쓴 시간을 더한다(잠금 대기와 slice 진입·종료 처리는 어느
+// phase에도 넣지 않으므로 넷의 합은 durationNanoseconds 이하다). GC 벤치(Programs/GcBench)와 진단이
+// 쓴다.
+// 직렬 표식의 작업 계수다(RegistryOptions::countGcWork를 켠 Registry의 정지형 직렬 Collect만 센다
+// — 클러스터 표식 비용을 나눠 보는 측정용). edges는 trace가 방문한 null 아닌 간선, clusteredEdges는
+// 그중 대상이 클러스터 소속인 간선, sameClusterEdges는 그중 trace하는 소유자와 같은 클러스터 소속인
+// 간선이다. boundaryPushes는 클러스터 처리가 넣은 경계 소속 항목, detachedMarks는 처리가 표식한
+// detached 수, clusterProcessNanoseconds는 클러스터 처리(경계 고리·detached 목록 순회) 시간의
+// 합이다.
+struct GcWorkCounters {
+    uint64 tracedObjects = 0;
+    uint64 edges = 0;
+    uint64 clusteredEdges = 0;
+    uint64 sameClusterEdges = 0;
+    uint64 clusterItems = 0;
+    uint64 boundaryPushes = 0;
+    uint64 detachedMarks = 0;
+    uint64 clusterProcessNanoseconds = 0;
+};
+
 struct GcReport {
     uint32 examined = 0;
     uint32 marked = 0;
     uint32 retired = 0;
     uint32 reclaimed = 0;
     uint64 durationNanoseconds = 0;
+    uint64 beginNanoseconds = 0;
+    uint64 markNanoseconds = 0;
+    uint64 sweepNanoseconds = 0;
+    uint64 reclaimNanoseconds = 0;
+    // 경계 비율 안전장치로 이 cycle 끝에 해체한 패키지 클러스터 수다(그 패키지의 객체는 이후 일반
+    // 객체로 표식된다 — Docs/Implementation/GcScaleExperiment.ko.md 14절).
+    uint32 flattenedClusters = 0;
+    GcWorkCounters work;
+};
+
+// StepCollection slice 하나의 시간 내역(ns)이다. 증분 수집의 Step 시간이 예산을 넘는 원인을 나눠 볼
+// 때 쓴다(Programs/GcBench). 값은 이 slice 하나의 것이고 누적하지 않는다.
+// - setup: 표식 전 준비(장벽 큐 옮기기, 병렬이면 씨앗 블록 묶기와 task 제출)
+// - marking: 표식(병렬이면 소유 스레드가 참여 루프에서 나올 때까지)
+// - drain: 병렬 표식에서 소유 스레드가 나온 뒤 worker task를 모두 회수할 때까지
+// - requeue: 병렬 표식에서 남은 회색 객체를 다음 slice로 넘기기
+// - sweep·reclaim: 분류와 회수
+// grayCarried는 다음 slice로 넘긴 회색 객체 수다.
+struct GcSliceTimes {
+    uint64 setup = 0;
+    uint64 marking = 0;
+    uint64 drain = 0;
+    uint64 requeue = 0;
+    uint64 sweep = 0;
+    uint64 reclaim = 0;
+    uint32 grayCarried = 0;
 };
 
 struct GcProgress {
     GcPhase phase = GcPhase::Idle;
     uint32 processed = 0;
     GcReport report;
+    GcSliceTimes slice;
 
     bool IsComplete() const noexcept {
         return phase == GcPhase::Idle;

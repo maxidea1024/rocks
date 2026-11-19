@@ -724,6 +724,10 @@ TEST(TraceAnalysisReadsLogRecords) {
     REQUIRE(logs.Start());
     {
         LogInstallScope installed(logs);
+        // 앞선 시험이 설치 밖에서 버린 낮은 레벨 기록이 있으면 설치가 그 수를 알리는 기록 하나를
+        // 남긴다(Core/Diagnostics/Log.h). 세는 구간 전에 비운다(채널이 꺼져 있어 trace에 남지
+        // 않는다).
+        (void)logs.Pump();
         Log::Info(LogAnalysisTests, "before channel {Value}", 0);
         CHECK(logs.Pump() == 1);
         REQUIRE(session.SetChannelEnabled(TraceLogChannel, true));

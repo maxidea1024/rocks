@@ -40,7 +40,16 @@ Result<void> ObjectRegistry::InsertArrayEdge(const ObjectAccessContext& access, 
         return CheckContainerOwnerLocked(owner, &storage, sizeof(storage), 0, false);
     };
     auto targetLocked = [&]() noexcept -> Result<void> {
-        return target.IsNull() ? Result<void>::Success() : CheckTargetLocked(target, 0, nativeType);
+        if (target.IsNull()) {
+            return Result<void>::Success();
+        }
+
+        auto checked = CheckTargetLocked(target, 0, nativeType);
+        if (!checked) {
+            return checked;
+        }
+
+        return CheckPermanentEdgeLocked(*FindSlot(owner), target);
     };
     // position에 target을 넣어 게시한다(잠금 보유, 검증 뒤). buffer는 size + 1을 담는 버퍼(기존
     // 또는 새 것)이고, 새 버퍼로 바꾸면 잠금 밖에서 반환할 옛 버퍼를 돌려준다. shade 실패면
@@ -75,6 +84,7 @@ Result<void> ObjectRegistry::InsertArrayEdge(const ObjectAccessContext& access, 
 
         storage.data[position] = target;
         ++storage.size;
+        LedgerEditLocked(*FindSlot(owner), ObjectHandle{}, target);
         return Result<ObjectHandle*>::Success(previous);
     };
 
@@ -228,6 +238,10 @@ Result<void> ObjectRegistry::ReplaceArrayEdge(const ObjectAccessContext& access,
 
             if (!target.IsNull()) {
                 auto targetChecked = CheckTargetLocked(target, 0, nativeType);
+                if (targetChecked) {
+                    targetChecked = CheckPermanentEdgeLocked(*FindSlot(owner), target);
+                }
+
                 if (!targetChecked) {
                     return targetChecked;
                 }
@@ -236,6 +250,7 @@ Result<void> ObjectRegistry::ReplaceArrayEdge(const ObjectAccessContext& access,
             const EdgePlan plan = PlanEditLocked(*FindSlot(owner), storage.data[index], target);
             const usize missing = plan.count != 0 ? MissingKeysLocked(plan) : 0;
             if (missing <= ObserverFreeLocked()) {
+                const ObjectHandle previous = storage.data[index];
                 if (target.IsNull()) {
                     storage.data[index] = ObjectHandle{};
                 } else {
@@ -246,6 +261,8 @@ Result<void> ObjectRegistry::ReplaceArrayEdge(const ObjectAccessContext& access,
 
                     storage.data[index] = target;
                 }
+
+                LedgerEditLocked(*FindSlot(owner), previous, target);
 
                 ApplyPlanLocked(plan);
                 return Result<void>::Success();
@@ -266,7 +283,8 @@ Result<void> ObjectRegistry::ReplaceArrayEdge(const ObjectAccessContext& access,
 
 Result<void> ObjectRegistry::RemoveArrayEdge(const ObjectAccessContext& access, ObjectHandle owner,
                                              detail::ObjectRefArrayStorage& storage, usize index,
-                                             ObjectHandle target, bool byHandle) noexcept {
+                                             ObjectHandle target, bool byHandle,
+                                             bool swap) noexcept {
     auto valid = CheckAccess(access);
     if (!valid) {
         return valid;
@@ -319,8 +337,15 @@ Result<void> ObjectRegistry::RemoveArrayEdge(const ObjectAccessContext& access, 
             if (missing <= ObserverFreeLocked()) {
                 // 삽입 장벽 GC에서 간선 삭제는 장벽이 필요 없다. 지운 대상은 다른 경로로 도달하지
                 // 않으면 회수된다.
-                for (usize at = position + 1; at < storage.size; ++at) {
-                    storage.data[at - 1] = storage.data[at];
+                LedgerEditLocked(*FindSlot(owner), storage.data[position], ObjectHandle{});
+                if (swap) {
+                    // 끝 원소를 옮긴다. 같은 소유자의 간선이 그대로라 장부·관찰자·장벽 일이 없다
+                    // (표식은 slice 안에서만 배열을 읽고 그동안 변경은 Busy다).
+                    storage.data[position] = storage.data[storage.size - 1];
+                } else {
+                    for (usize at = position + 1; at < storage.size; ++at) {
+                        storage.data[at - 1] = storage.data[at];
+                    }
                 }
 
                 --storage.size;
@@ -362,6 +387,8 @@ Result<void> ObjectRegistry::ClearArrayEdges(const ObjectAccessContext& access, 
 
         const Slot& source = *FindSlot(owner);
         if (!ObservesOwnerLocked(source) || storage.size == 0) {
+            // 클러스터 장부는 관찰 대상이 아니어도 지워지는 값을 모두 센다(13.4절).
+            LedgerClearLocked(source, storage.data, storage.size);
             storage.size = 0;
             return Result<void>::Success();
         }
@@ -369,7 +396,7 @@ Result<void> ObjectRegistry::ClearArrayEdges(const ObjectAccessContext& access, 
         // 다중 간선 지점(Docs/Design/ObjectFoundations.ko.md 3절): 처리 표시 아래 잠금 밖에서
         // 떼어 낼 값의 쌍을 합친 뒤 예약하고, 한 잠금 안에서 비우고 기록한다. 처리 표시 동안 다른
         // 변경은 Busy라 배열·owner를 다시 검증할 필요가 없다.
-        package = HandleOf(*source.outermost);
+        package = HandleOf(*ColdOf(source).outermost);
         processing_ = true;
     }
 
@@ -397,6 +424,7 @@ Result<void> ObjectRegistry::ClearArrayEdges(const ObjectAccessContext& access, 
         return Result<void>::Failure(ErrorCode::Busy);
     }
 
+    LedgerClearLocked(*FindSlot(owner), storage.data, storage.size);
     storage.size = 0;
     ApplyTallyLocked(tally, ReferenceChangeCause::Edit, 0);
     return Result<void>::Success();

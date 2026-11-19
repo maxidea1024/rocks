@@ -1,6 +1,6 @@
 # 엔진 런타임·월드·그래픽 최소 경로 설계
 
-기준일: 2026-11-12. 이 문서는 Core·Object 위에 처음 올리는 엔진 계층의 구조와 계약을 정한다. 범위는 **엔진 틱 → 월드 → Actor/Component → 텍스처 에셋 → D3D12·OpenGL로 화면에 그리기**까지의 수직 경로와, 그 위에 올릴 게임플레이 프레임워크(GameInstance·GameDirector·GameState·Controller·Pawn)의 골격이다. 전체 계획은 [엔진 구현 계획](EngineImplementationPlan.ko.md)을 따르며, 이 문서와 충돌하는 부분은 개정 1.8에서 이 문서 기준으로 바꾼다.
+기준일: 2026-11-12. 2026-11-19 갱신: 7.4절 우회 파괴 복구 비용 측정. 2026-11-18 갱신: 4.5절 위치 교체 제거, 7.2·7.4절 Level 배열·우회 파괴 복구(매 프레임, Level·Component 포함, 근거 정정)·encode 고정 계약·시작 큐, 4.6절 편입의 배열 위치·Component 색인, 7.5절 World 소스 파일 구성, 8절 증분 틱 순서(GC 실험 [16절](../Implementation/GcScaleExperiment.ko.md) 선형 검색 점검). 이 문서는 Core·Object 위에 처음 올리는 엔진 계층의 구조와 계약을 정한다. 범위는 **엔진 틱 → 월드 → Actor/Component → 텍스처 에셋 → D3D12·OpenGL로 화면에 그리기**까지의 수직 경로와, 그 위에 올릴 게임플레이 프레임워크(GameInstance·GameDirector·GameState·Controller·Pawn)의 골격이다. 전체 계획은 [엔진 구현 계획](EngineImplementationPlan.ko.md)을 따르며, 이 문서와 충돌하는 부분은 개정 1.8에서 이 문서 기준으로 바꾼다.
 
 ## 1. 범위와 단계
 
@@ -118,6 +118,11 @@ registry.RemoveReference(access, actor, actorPointer->components_, component);
 
 - 원소 버퍼는 소유 객체의 allocator(Registry allocator)에서 할당하고, 확장은 Registry 잠금 밖에서 한다. 원소를 바꾸는 쪽은 소유 스레드뿐이고 GC trace는 slice 안에서만 원소를 읽으므로, 확장과 trace가 겹치지 않는다.
 - 배열 객체는 소유자 저장소 안에 직접 있어야 한다(`SetReference`의 필드 위치 검사와 같은 규칙). 추가는 게시된 생존 소유자만 받고, 정리용 제거는 파괴 요청된 소유자에서도 허용한다.
+- 끝 원소와 바꿔 떼기 `RemoveReferenceAtSwap(access, owner, array, index)`: index 원소를 지우고 끝 원소를 그 자리로 옮긴다(순서를 지키지 않는다 — O(1), 앞에서 찾거나 뒤를 당기지 않는다). 계약:
+  - 지운 원소는 `RemoveReferenceAt`과 같은 규칙이다(장부·관찰자 기록, 삭제 간선은 삽입 장벽이 필요 없다).
+  - 옮기는 원소는 같은 소유자·같은 컨테이너에 이미 있는 간선이다. 대상의 생존·cutoff·세대를 다시 묻지 않는다 — 대상이 DestroyRequested(World API 밖 파괴)이거나 cutoff white여도 실패하지 않는다. 간선 다중도가 그대로라 장부·관찰자 기록도 없다.
+  - owner 규칙은 `RemoveReferenceAt`과 같다(Alive 또는 정리 중인 DestroyRequested, Borrow 보유, 컨테이너가 owner 저장소 안). index ≥ Size()는 InvalidArgument다. 할당하지 않는다(관찰자 Registry는 지운 원소 하나의 예약 — 공통 규칙).
+  - 배경: 처음 구현(1913624)은 `SetReferenceAt(index, 끝 원소)` + 끝 `RemoveReferenceAt`이었는데, `SetReferenceAt`은 대상 검증을 거쳐 끝 원소가 DestroyRequested면 StaleHandle로 실패했고 실패를 버려 지울 Actor가 Level 배열에 좀비로 남았다(리뷰 지적). 같은 컨테이너 안 이동은 대상 검증 대상이 아니다.
 - World가 만든 목록에는 null이 없지만 로드된 목록에는 null 원소가 올 수 있다(`Required`는 로드에서 진단만 한다). 그래서 World의 Component 목록 순회(FindComponent·FinishSpawning·활성화·시작·DestroyActor 등)는 null을 끝 표지로 쓰지 않고 원소 수 기준으로 돌며 null을 건너뛴다.
 
 ### 4.6 리플렉션과 레벨 편입(A0-B B8b)
@@ -136,7 +141,7 @@ registry.RemoveReference(access, actor, actorPointer->components_, component);
 - **부착 계층은 NATIVE**다(parent는 다른 Actor의 Component에 붙을 수 있어 강한 참조로 두면 좀비와 그래프 끌어오기가 생긴다 — UE는 Outer·레벨 패키지·garbage elimination으로 푼다). 추적하지 않는 참조 `WeakObjectRef<T>`가 생긴 뒤 레벨·prefab 저장 전에 영속한다. 리플렉션 B9가 `WeakObjectRef<T>` PROPERTY(같은 그래프 안 대상만 보존)를 가능하게 하며, 부착 계층을 리플렉션으로 옮길지는 World 단계가 정한다([리플렉션 B9](ReflectionExtensions.ko.md) 5.1절).
 - **Level 그래프 저장은 구조 시험용이다**: graph v2 편의 API `SaveObjectGraph(root)`로 Level 루트를 저장할 수 있다(A0-Od1부터 — [ObjectFoundations](ObjectFoundations.ko.md) 5.2절, 그 전에는 graph v1)(그래프의 모든 타입이 생성 타입일 때 — native 파생 Actor·Component가 하나라도 있으면 Unsupported, Actor별 저장 제외는 레벨 패키지 단계). 부착 계층은 저장되지 않는다(root는 저장된다). 저장 안전 지점은 Tick 밖·파괴 대기 정리(FlushDestroys) 뒤다 — 정리 전에는 파괴 대기 Actor가 `actors`에 남아 함께 저장된다.
 - **장부 밖 객체**: World API(SpawnActor·AddComponent·CreateLevel) 밖에서 만든 Actor·Component(그래프 로드, World registry에 직접 `NewObject`)는 `World*`가 없고 World에 수명 기록이 없다. 그 객체의 계층·World API는 Fatal 대신 `InvalidArgument`다(`SetRootComponent`·`Destroy`·`AttachTo`(그 객체를 부모로 쓰는 경우 포함)·`Detach`, `World::DestroyComponent`). 수명 기록이 필요한 World API(`DestroyActor`·`AddComponent`·`GetComponents`)는 `StaleHandle`이다. 상대 Transform 설정과 월드 행렬 계산은 부모가 없으므로 된다. `GetWorld()`는 참조를 돌려주므로 여전히 Fatal이며 `HasWorld()`로 먼저 확인한다.
-- **레벨 편입 계약(레벨 패키지 단계 — 자리)**: 로드한 Level 그래프를 World에 넣는 단계는 (1) Actor마다 `ActorRecord`를 만들고 Level 레코드의 Actor 수를 맞추며, (2) Level·Actor·Component의 `World*`·Actor의 소속 Level·Component의 소유 Actor를 `actors`·`components` 포함 관계에서 연결하고, (3) 부착 계층이 영속된 뒤에는 parent에서 children을 다시 만들며, (4) `actors`·`components`의 null 원소를 정리하고 root가 `components` 밖이면 비우며, (5) `relativeTransform`을 `SetRelativeTransform`과 같은 규칙(유한·단위 quaternion)으로 검증한 뒤, (6) World 수명 단계(FinishSpawning과 같은 hook 순서)로 진행한다. 이 단계 전의 로드 객체는 별도 ObjectRegistry(같은 TypeRegistry)에 두고 World registry에 넣지 않는다.
+- **레벨 편입 계약(레벨 패키지 단계 — 자리)**: 로드한 Level 그래프를 World에 넣는 단계는 (1) Actor마다 `ActorRecord`를 만들고 Level 레코드의 Actor 수를 맞추며 Actor의 `actors` 배열 위치를 레코드(`levelPosition` — 7.4절 바꿔 떼기의 근거)에 기록하고(아래 (4)의 null 정리·압축 뒤 다시 매긴다), Component마다 World의 Component 색인(소유 Actor·Tick handle — 7.4절 우회 파괴 복구)에 넣으며, (2) Level·Actor·Component의 `World*`·Actor의 소속 Level·Component의 소유 Actor를 `actors`·`components` 포함 관계에서 연결하고, (3) 부착 계층이 영속된 뒤에는 parent에서 children을 다시 만들며, (4) `actors`·`components`의 null 원소를 정리하고 root가 `components` 밖이면 비우며, (5) `relativeTransform`을 `SetRelativeTransform`과 같은 규칙(유한·단위 quaternion)으로 검증한 뒤, (6) World 수명 단계(FinishSpawning과 같은 hook 순서)로 진행한다. 이 단계 전의 로드 객체는 별도 ObjectRegistry(같은 TypeRegistry)에 두고 World registry에 넣지 않는다.
 - **World registry의 외부 생성 거부(정책 자리)**: World registry에 World API 밖에서 World 타입을 만드는 것(직접 `NewObject`·그래프 로드)은 계약 위반이다. 지금은 위 장부 밖 규칙으로 Fatal 없이 거부만 하고, A0-O의 에셋 Registry 정책(WorldOnly 타입의 에셋 Registry 생성 거부)의 거울로 World registry가 WorldOnly 타입의 외부 생성 경로를 막는 검사를 둘 자리를 남긴다. 그 검사는 `RegistryPolicy::worldOnlyCreationKey`(World API만 가진 키를 함께 줄 때만 WorldOnly 타입 생성 허용)로 넣는다([ObjectFoundations](ObjectFoundations.ko.md) 1.3절 후속 자리).
 
 ## 5. 시간
@@ -182,6 +187,9 @@ Uninitialized → Initializing → Running → Stopping → Stopped
 | (레코드 제거) | `OnDestroy`·Component 해제·`RequestDestroy`·루트 반환 | 프레임의 안전 지점 |
 
 - 활성(`enabled`)은 상태와 별개 플래그이며 `OnEnable`/`OnDisable`을 부른다.
+- Level의 `actors_`(`Level::Actors()`)는 순서를 보장하지 않는다. Actor 레코드가 배열 위치를 기억하고, 파괴는 `RemoveReferenceAtSwap`으로 끝 원소와 바꿔 O(1)로 뗀 뒤 옮긴 Actor의 위치를 고친다. 위치와 배열이 어긋나면 Fatal이다(실패를 버리지 않는다). 측정(실험 16절): Actor 하나의 파괴가 Actor 10K → 100K에서 5.0 → 43.7us이던 것이 0.5–1.0us로 같다.
+- 꺼진(`enabled`가 거짓) 채 시작을 기다리는 Actor는 시작 큐에서 빼고 `startDeferred`로 표시한다. 활성화(`EnableActor`)가 표시를 보고 큐에 다시 넣는다(hook 안 활성화 포함 — 큐 용량은 Spawn에서 Actor마다 확보했다). 프레임마다 꺼진 Actor를 다시 훑지 않는다. 시작 순서는 다시 넣은 순서다.
+- `DestroyLevel`은 그 Level의 `actors_`만 훑는다(World 전체 Actor가 아니라 — 작은 Level 파괴 21 → 716us이던 것이 1.3–1.5us).
 - `SpawnActor`는 `SpawnActorDeferred` + `FinishSpawning`이다. 같은 프레임에 FinishSpawning한 Actor들의 `OnAwake`가 모두 끝난 뒤에 `OnStart`를 시작한다.
 - 의존성 준비(`IsReadyToStart`)는 매 프레임 확인하며 기다리느라 게임 스레드를 막지 않는다. 비동기 에셋 로딩은 이 지점에 연결한다.
 - `OnAwake`가 실패하면 그 Actor는 즉시 파괴 경로로 들어가고 `FinishSpawning`이 오류를 반환한다.
@@ -196,12 +204,43 @@ Uninitialized → Initializing → Running → Stopping → Stopped
 - Tick 순회 중 파괴·Tick 등록 변경·Component 제거는 큐에 넣는다. 안전 지점은 **각 phase 경계**(Tick 등록 변경 반영)와 **World Tick 끝**(파괴 완료)이다.
 - 같은 객체의 중복 파괴 요청은 성공으로 처리하고 한 번만 실행한다. 큐에 남은 핸들이 이미 무효이면 건너뛴다.
 - World Tick 끝에 제한된 예산으로 증분 GC를 진행해 파괴된 객체 저장소를 회수한다.
+- World API 밖에서 파괴(`RequestDestroy`·`Object::Destroy`)된 Actor·Component·Level은 **매 프레임 GC step 전**(World Tick 끝, 파괴 정리 뒤 — `RepairBypassedObjects`)에 Registry의 파괴 요청 목록(`ObjectRegistry::TakeDestroyRequests` — 지난 호출 뒤 DestroyRequested가 된 객체, GC 설계 14절)에서 찾아 World 파괴로 돌린다. Actor는 `DestroyActor`, Component는 파괴 큐(정리 단계가 소유 Actor 목록·Tick 등록에서 뗀다), Level은 `DestroyLevel`(소속 Actor 전부 정리 후 회수)이다. 영구 Level의 우회 파괴는 복구할 수 없는 계약 위반이라 Fatal이다(World API로도 파괴할 수 없고 Spawn 기본 대상이다). 목록의 객체가 World 레코드·색인에 없거나 이미 PendingDestroy면(World가 요청한 파괴) 건너뛴다. 가려내기는 모두 색인으로 한다: Actor는 Actor 레코드 색인, Level은 슬롯 번호 집합(`levelSlots_`), Component는 Component 색인(`componentRecords_` — 슬롯 번호 → Component handle·소유 Actor·Tick handle 사본, AddComponent가 넣고 World 정리가 회수 요청 직전에 뺀다). Component 색인은 정리 단계가 우회 파괴된 Component(Borrow로 읽을 수 없다)의 소유 Actor와 Tick 등록을 찾는 데도 쓴다 — 처음 구현은 그때 모든 Actor를 Borrow로 훑었다(Actor 수 × Borrow). 비용은 그 사이 파괴 수에 비례하고(Actor 수가 아니다) 목록이 비면 잠금 한 번이다. 복구한 수는 `WorldStats::repairedBypasses`다.
+  - Component 단독 우회 파괴는 처음 구현에서 복구되지 않았다(리뷰 지적, 시험 `World_BypassedComponentIsRepaired`로 확인 — 소유 Actor 목록·Actor 수에 남고 회수되지 않았다).
+  - 복구가 늦어도 안전한 이유: World 객체의 회수는 World 루트(Level 레코드)·Level 배열·Actor의 `components` 간선에서 끊긴 뒤에만 일어나고(DestroyRequested여도 강한 간선이 붙잡으면 회수되지 않는다), 그 간선을 끊는 것은 World 정리뿐이다. 그래서 우회 파괴가 언제 일어나든(Tick 밖, Tick hook·OnDestroy hook 안 포함) 다음 복구 전에 회수되지 않는다. 매 프레임인 이유는 cycle 시작 전에만 보던 처음 방식이 World 쪽 파괴가 없으면 GC가 돌지 않아 우회 파괴된 Actor·Level을 영영 정리하지 않았기 때문이다(2026-11-18 리뷰 반영 시험 `World_BypassedLevelDestroyIsRepaired`가 드러냄 — Level 우회 파괴는 아예 복구하지 않았다). 앞 개정의 "cycle 도중 우회 파괴가 정리 없이 회수된다"는 근거는 틀렸다(리뷰 지적).
+  - 처음 구현은 cycle마다 모든 Actor를 `InspectLifecycle`로 조회했다(cycle 시작 프레임 Actor 10K → 100K: 207 → 2,390us, 파괴 요청 목록으로 2–13us).
+  - 비용(2026-11-19, `WorldBench` — GC 실험 23절): 우회 파괴 하나의 복구·정리(Registry `RequestDestroy` 200개 뒤 한 프레임)는 Actor 10K·100K 모두 Actor당 0.30–0.34us(World API `DestroyActor`는 0.42–0.51us)이고, 변화 없는 프레임은 0.3us(목록이 비면 잠금 한 번)다. Actor 수와 무관하다.
+  - Level 배열에서 뗄 때(`DetachFromLevel`)는 `RemoveReferenceAtSwap`(4.5절)을 쓴다. 옮겨 오는 끝 Actor도 우회 파괴로 DestroyRequested일 수 있는데, 위치 교체 `SetReferenceAt`은 그 원소를 새로 쓰는 것이라 재검증에서 실패하고 그 실패를 버리면 지운 Actor가 배열에 좀비로 남았다(리뷰 지적). 이 경로의 실패와 Actor 레코드 위치·배열 불일치는 일어날 수 없으므로 Fatal이다. 단 공개 API로 닿는 실패 하나가 있다: Level을 `PinForEncode`로 고정한 채 Tick하면 그 프레임의 Actor 정리에서 떼기가 Busy다. World 계약은 Borrow와 같이 encode 고정도 Tick·Shutdown 전에 반환하는 것이고(World.h 소유·수명 규약), 위반하면 그 계약을 밝히는 메시지로 Fatal이다(떼기 시점의 Busy로만 판정 — 매 프레임 Level을 훑지 않는다). 미뤄 두는 대기 목록은 버렸다: 고정이 풀릴 때 알 길이 없어 매 프레임 다시 시도해야 하고, 그동안 Level 배열과 Actor 레코드가 어긋난 채 남는다. 예외는 Level 객체 자체가 우회 파괴돼(DestroyRequested — Registry가 빌려 주지 않는다) 복구 전인 경우다. 그 배열은 Level과 함께 사라지므로 뗄 것이 없고, 복구의 `DestroyLevel`은 Level 배열 대신 World의 Actor 레코드에서 소속 Actor를 찾는다(이 계약 위반의 복구에서만 Actor 수에 비례).
+
+### 7.5 소스 파일 구성
+
+`World` 클래스 하나의 정의를 기능별 파일로 나눈다(`Engine/Source/Runtime/World/Private/`, 2026-11-18 — 한 파일 약 2,000줄을 동작 불변 이동으로 나눔). 공개 선언은 `World/World.h` 하나이고, 파일 사이 공용 helper가 필요하면 `Private/` 내부 헤더에 둔다(지금은 없다).
+
+| 파일 | 담당 | 새 기능을 넣는 곳 |
+|---|---|---|
+| `World.cpp` | 생성·소멸, `Initialize`·`BeginPlay`·`Shutdown`(Subsystem 초기화·종료 포함), 상태 이름·Tick 설정 검사·타입 등록, 레코드 조회(`FindActorRecord`·`Get*`·`HasActor`), `Stats` | World 수명 단계, 조회 API, 통계 |
+| `WorldLevels.cpp` | Level 생성·파괴·회수(`CreateLevel`·`DestroyLevel`·`ReleaseLevel`·`FinishLevelDestroys`), Level 배열에서 떼기(`DetachFromLevel` — 바꿔 떼기) | Level 스트리밍·Level 단위 기능 |
+| `WorldActors.cpp` | Actor Spawn(`SpawnActorDeferred`·`FinishSpawning`), `DestroyActor` 요청, 클러스터 가입 조건(`JoinsCluster`) | Actor 생성 방식·Spawn 인자 |
+| `WorldComponents.cpp` | Component 추가·진행(`AddComponent`·`AdvanceComponent`)·`DestroyComponent` 요청 | Component 종류별 등록 |
+| `WorldActivation.cpp` | 활성·Tick 활성 전환(`SetActorEnabled`·`EnableActor` 등, 시작 큐 재등록) | 활성 정책 |
+| `WorldStarts.cpp` | 시작 큐와 `OnStart` 처리(`ProcessStarts`·`StartComponent`) | 시작 순서·준비 조건 |
+| `WorldTicks.cpp` | Tick 등록·해제(`RegisterTicks` 등)와 프레임 실행(`ExecuteTick`·`Tick`) | 프레임 단계·Tick 연동 |
+| `WorldDestroys.cpp` | 안전 지점의 파괴 정리(`FlushDestroys`·`DestroyActorNow`·`DestroyComponentNow`·root 비우기) | 파괴 hook·정리 순서 |
+| `WorldGarbageCollection.cpp` | GC step(`StepGarbageCollection`), 소유 객체 파괴 요청, 우회 파괴 복구(`RepairBypassedObjects`·Component 색인) | GC 일정·Registry 연동 |
+
+- 파일은 수백 줄 안쪽을 유지한다. 한 파일이 천 줄 가까이 커지면 기능 경계로 다시 나눈다(나눔은 동작 불변 이동 커밋).
+- `TickScheduler.cpp`(약 590줄)는 한 클래스의 한 기능이라 나누지 않는다.
 
 ## 8. Tick Scheduler
 
 - 등록 기반이다. 등록 단위는 `(대상 핸들, 종류, hook, phase, priority, interval, pause 정책)`이며 `TickHandle`(slot+generation)로 식별한다.
 - 단계 순서(열거 순서 = 실행 순서)는 `PrePhysics → Physics(고정 스텝 수만큼) → PostPhysics → LateUpdate → PreRender`다. LateUpdate(카메라 추적 등 후처리)가 PreRender(렌더 추출 준비)보다 먼저 와야 같은 프레임 렌더에 반영된다.
 - phase마다 밀집 배열을 두고, 등록 집합이 바뀐 phase만 다시 정렬한다. 정렬은 (priority, 등록 순서) 최소 힙을 쓰는 위상 정렬이다. 선행 의존으로 묶이지 않은 항목끼리는 항상 (priority, 등록 순서)를 따른다. 순회 중에는 할당하지 않는다(실행 중 해제도 표시만 하고 단계 경계에서 지운다).
+- 순서 배열은 흔한 변경에서 다시 만들지 않고 고친다(2026-11-18 — 재구성이 모든 틱에 비례해 틱 Actor 하나를 만든 프레임마다 Actor 10K에서 1.6ms, 100K에서 22ms가 더 들었다). 결과 순서는 처음부터 재구성한 순서와 같다:
+  - 새 등록은 선행이 없고 등록 순서가 가장 늦다. priority가 그 단계 순서 배열의 최댓값 이상이면 재구성해도 맨 끝이므로 끝에 붙인다. 실행 중에는 배열을 바꾸지 않는다(다음 경계의 재구성).
+  - 해제는 남은 항목의 순서를 바꾸지 않으므로 순서 배열에 남겨 실행이 건너뛴다(세대가 다른 handle). 남은 칸이 배열의 절반을 넘거나, 해제한 항목을 선행으로 둔 항목이 있으면(항목마다 `dependents` 계수) 재구성한다 — 풀린 의존이 순서를 바꾸기 때문이다.
+  - 선행 추가는 지금 순서에서 이미 선행이 앞이면 재구성하지 않는다(그 간선이 막는 선택은 원래 순서에서도 일어나지 않았다). 선행 제거는 재구성한다.
+  - 사이클 검사(`Reaches`)는 호출 번호 표시로 방문한 칸만 본다(호출마다 표시 배열을 비우지 않는다 — 번호가 한 바퀴 돌 때만 비운다). 실행 중 미룬 해제는 목록으로 지운다(전 항목을 훑지 않는다 — 목록 용량은 등록 때 확보).
+  - 한계: priority가 최댓값보다 낮은 등록과 선행 제거는 지금처럼 단계 전체를 다시 만든다.
 - 선행 의존은 같은 phase 안에서만 허용한다. 사이클은 `AddPrerequisite` 호출 시점에 방문 표시 탐색(선형 시간)으로 검출해 거부한다. 다른 phase 간 순서는 phase 순서로 보장된다.
 - Component Tick은 같은 hook의 소유 Actor Tick 뒤에 오도록 World가 선행 의존을 자동으로 건다(UE의 기본 순서와 같다).
 - interval은 대상별 누적으로 판정하고 상대 허용오차(1e-9)로 합산 오차를 흡수한다. 남은 누적은 다음 주기로 이월해 평균 주기를 interval에 맞추되 한 번에 여러 주기를 따라잡지 않는다. delta는 마지막 실행 이후 흐른 시간이다.
@@ -367,6 +406,7 @@ RenderGraph·Deferred/Forward 경로·깊이 버퍼·MSAA·멀티 큐·bindless�
 
 - `Engine` 타깃의 헤드리스 테스트: GameClock, Engine 상태 기계·실패 복구, World·Actor·Component 수명 순서, Tick phase·priority·interval·pause·지연 변경, 복수 World 격리, 지연 파괴, BMP 파싱, 에셋 파일 왕복, AssetManager 참조 계수.
 - World 리플렉션(B8b — `WorldReflectionTests`·`WorldTests`·`EngineTests`): 네 타입의 WorldOnly·필드 형태와 멱등 등록, native 파생의 base 상속, GC(Spawn 생존·제거 회수·native 파생의 Component 생존·Marking 중 AddComponent의 newborn shade·Marking 중 참조 쓰기의 삽입 장벽·root 참조 방문과 파괴 시 비우기·우회 파괴 수리), Level 그래프 저장 → 별도 Registry 로드 → 필드·간선·root·소프트 참조 → 재저장 byte 동일(NATIVE 기본값, 계층 비저장), native 파생이 든 Level 저장 Unsupported, 장부 밖 객체 API 거부, null 원소 순회, 경로 읽기와 World 필드 쓰기 거부·fixture 쓰기와 옛 값, Engine 등록 순서와 native 파생을 둔 Shutdown·초기화 실패 정리.
+- 규모 경로(2026-11-18 — 실험 16절): 같은 Level에서 끝 원소를 포함한 여러 Actor의 World API 밖 파괴, 우회 파괴와 `DestroyActor`가 같은 프레임에 겹치는 경우(둘 다 `Level::Actors()`에 남지 않고 회수된다), `RemoveReferenceAtSwap`(끝 원소가 DestroyRequested여도 성공, 장부·관찰자), `TakeDestroyRequests`(꺼낸 뒤 비고, 회수된 요청은 빠지고, 묶음이 작으면 나눠 꺼낸다), Level 우회 파괴(GC idle 중·cycle 도중 — 소속 Actor 전부 정리·회수), Component 단독 우회 파괴(틱 있음·없음), Tick hook·OnDestroy hook 안의 우회 파괴, Level encode 고정 위반의 Fatal 메시지(판정 함수), hook 안에서 활성화된 꺼진 Actor의 시작, TickScheduler의 끝에 붙이기·이미 지켜지는 선행 추가의 재구성 생략·의존받는 항목의 미룬 해제·도달 검사 번호 한 바퀴(모듈 Private의 `TickSchedulerTestAccess.h` — 시험 실행 파일은 엔진 계층에도 `Engine/Source/Runtime`을 include 경로로 둬 `<Module/Private/...>`로 읽는다). 각 시험은 고친 지점마다 음성 대조(옛 구현·잘못된 조건을 넣으면 실패)로 확인한다.
 - GPU 시험은 별도 실행(`Sandbox --self-test`): D3D12(WARP 허용)와 OpenGL에서 offscreen 또는 backbuffer readback으로 삼각형·텍스처 픽셀을 확인한다. GPU 없는 CI에서는 실행하지 않고 NOT RUN으로 보고한다.
 - 각 단계는 Debug·ASan 테스트와 `clang-format` 검사를 통과한 상태로 커밋한다.
 

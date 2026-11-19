@@ -22,7 +22,7 @@ public static partial class PolicyChecks
         ["Core/Source/Runtime/Base/Public/Base/TypeTraits.h"] = Pattern(
             "\\b__c11_atomic_load\\b"),
         ["Core/Source/Runtime/PlatformBase/Public/Platform/Memory.h"] = Pattern(
-            "\\b__builtin_(?:memcpy|memmove|memset|memcmp|strlen|strcmp|bit_cast|launder|addressof)\\b"),
+            "\\b__builtin_(?:memcpy|memmove|memset|memcmp|strlen|strcmp|bit_cast|launder|addressof|prefetch)\\b"),
         ["Core/Source/Runtime/PlatformBase/Public/Platform/Atomics.h"] = Pattern(
             "\\b__atomic_[A-Za-z0-9_]*|\\b__ATOMIC_[A-Z_]+\\b"),
         // 호출 위치(파일·함수·줄)는 SourceLocation::Current의 기본 인자로만 쓴다. 기본 인자가 호출 지점에서
@@ -40,7 +40,7 @@ public static partial class PolicyChecks
     /// 컴파일러 builtin(<c>__builtin_*</c>, <c>__atomic_*</c>, <c>__sync_*</c>, <c>__ATOMIC_*</c>)은 계열별 지정 헤더만
     /// 직접 쓴다. 나머지 소스(테스트 포함)는 그 헤더의 함수를 쓴다(rule id compiler-builtin).
     /// <list type="bullet">
-    /// <item>byte 범위·C 문자열·객체 표현(memcpy·strlen·bit_cast·launder·addressof): Platform/Memory.h</item>
+    /// <item>byte 범위·C 문자열·객체 표현·캐시 힌트(memcpy·strlen·bit_cast·launder·addressof·prefetch): Platform/Memory.h</item>
     /// <item>원자 연산·메모리 순서: Platform/Atomics.h</item>
     /// <item>overflow 검사 산술: Base/Checked.h. byte 순서: Base/Endian.h</item>
     /// <item>중단점·도달 불가·offsetof: Base/Compiler.h</item>

@@ -38,7 +38,8 @@ public:
     explicit Level(Allocator& allocator) noexcept : actors_(allocator), name_(allocator) {
     }
 
-    // 소속 Actor handle 목록(Spawn 순서)이다. 이 Level의 Borrow 범위에서만 쓰며 Spawn·정리 후 다시
+    // 소속 Actor handle 목록이다. 순서는 정하지 않는다(파괴가 끝 원소와 바꿔 뗀다 — Docs/Design/
+    // EngineRuntime.ko.md 7.2절). 이 Level의 Borrow 범위에서만 쓰며 Spawn·정리 후 다시
     // 얻는다.
     Span<const ObjectHandle> Actors() const noexcept {
         return actors_.View();

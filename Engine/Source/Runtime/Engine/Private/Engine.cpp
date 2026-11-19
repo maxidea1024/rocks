@@ -33,13 +33,14 @@ enum class InitStage : uint8 {
     RegisterTypes,
     ObjectRegistry,
     Subsystems,
+    PermanentRegion,
     ClientStart,
     Count
 };
 
 constexpr const char* InitStageNames[] = {
-    "TypeRegistry",   "ModuleRegistration", "RegisterTypes",
-    "ObjectRegistry", "Subsystems",         "ClientStart",
+    "TypeRegistry", "ModuleRegistration", "RegisterTypes", "ObjectRegistry",
+    "Subsystems",   "PermanentRegion",    "ClientStart",
 };
 
 static_assert(sizeof(InitStageNames) / sizeof(InitStageNames[0]) ==
@@ -68,6 +69,14 @@ void KeepFirst(Result<void>& outcome, const char*& failedStage, Result<void>&& s
         outcome = Move(step);
         failedStage = stage;
     }
+}
+
+// 엔진 Registry는 서브시스템 초기화 동안 영구 창을 연다(Docs/Design/GarbageCollectionScale.ko.md
+// 13.7절).
+RegistryOptions EngineRegistryOptions() noexcept {
+    RegistryOptions options;
+    options.permanentRegion = true;
+    return options;
 }
 
 } // namespace
@@ -178,8 +187,10 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
 
     {
         InitStageContext stage(InitStage::ObjectRegistry);
-        auto objects =
-            UniquePtr<ObjectRegistry>::TryMake(allocator_, allocator_, *types_, config_.context);
+        // 서브시스템 초기화 동안 만든 객체는 영구 영역에 둔다(GC 표식·sweep 비용 없음 — GC 설계
+        // 13.7절, Docs/Design/GarbageCollectionScale.ko.md). 초기화 뒤 닫는다.
+        auto objects = UniquePtr<ObjectRegistry>::TryMake(allocator_, allocator_, *types_,
+                                                          config_.context, EngineRegistryOptions());
         if (!objects) {
             return fail(InitStage::ObjectRegistry, objects.Error());
         }
@@ -201,6 +212,14 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
         }
 
         initializedSteps_ = StepSubsystems;
+    }
+
+    {
+        // 영구 창은 서브시스템 초기화까지만 연다(13.7절). 닫지 못하면 초기화가 실패한다.
+        InitStageContext stage(InitStage::PermanentRegion);
+        if (auto closed = objects_->ClosePermanentRegion(objects_->OwnerAccess()); !closed) {
+            return fail(InitStage::PermanentRegion, closed.Error());
+        }
     }
 
     {
@@ -285,6 +304,7 @@ Result<World*> Engine::CreateWorld(const WorldCreateDesc& desc) noexcept {
     worldDesc.timeStep = desc.timeStep;
     worldDesc.objects = desc.objects;
     worldDesc.gcBudget = desc.gcBudget;
+    worldDesc.gcScheduler = desc.gcScheduler;
     worldDesc.subsystems = desc.subsystems;
     // World가 엔진 설정 문맥에 자기 CVar 범위를 만든다(CVarSystem 14.2절).
     worldDesc.settings = config_.settings;

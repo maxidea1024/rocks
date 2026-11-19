@@ -3,6 +3,7 @@
 #include <Object/NativeClass.h>
 #include <Object/NativeMemberTraits.h>
 #include <Object/ObjectRegistry.h>
+#include <ObjectRuntime/Private/ObjectRegistryAccess.h>
 #include <TestSupport/Test.h>
 #include <Platform/Fatal.h>
 #include <Platform/Thread.h>
@@ -66,6 +67,31 @@ public:
     ObjectRef<Item> single;
     ObjectRefArray<Item> items;
     StructRefArray<MaterialSlot> slots;
+};
+
+// 가상 함수가 있는 소유자다. Object는 가상 함수가 없어 이 타입의 Object 기반은 저장소 시작이
+// 아니다(vfptr 뒤) — 소유자 범위 검사가 hot의 object에서 저장소 시작을 바르게 유도하는지 본다.
+// 컨테이너를 마지막 멤버로 둬 저장소 끝 경계를 쓴다.
+class VirtualHolder : public Object {
+    ROCKS_NATIVE_TYPE(VirtualHolder, Object, 0x3b5d7f9e1c2a4b6dull, 0x5e4d3c2b1a0f9e8dull)
+
+public:
+    explicit VirtualHolder(Allocator& allocator) noexcept : items(allocator) {
+    }
+
+    virtual ~VirtualHolder() noexcept = default;
+
+    virtual uint32 Kind() const noexcept {
+        return 7;
+    }
+
+    void Trace(TraceVisitor& visitor) const noexcept {
+        visitor.Visit(single);
+        items.Trace(visitor);
+    }
+
+    ObjectRef<Item> single;
+    ObjectRefArray<Item> items;
 };
 
 } // namespace container_fixture
@@ -169,7 +195,8 @@ public:
 bool RegisterAll(TypeRegistry& types) noexcept {
     return RegisterNativeClass<Item>(types).IsOk() &&
            RegisterNativeClass<OtherItem>(types).IsOk() &&
-           RegisterNativeClass<Holder>(types).IsOk();
+           RegisterNativeClass<Holder>(types).IsOk() &&
+           RegisterNativeClass<VirtualHolder>(types).IsOk();
 }
 
 template <class T>
@@ -440,6 +467,153 @@ TEST(ObjectRefArray_InsertAndSetAtValidateLikeAdd) {
                 objects.SetReferenceAt(access, owner, pointer->items, 0, ObjectHandle{}).Error() ==
                 ErrorCode::StaleHandle);
             CHECK(objects.ClearReferences(access, owner, pointer->items));
+        }
+
+        holder.Value().Reset();
+        REQUIRE(objects.Collect(access));
+        CHECK(objects.Stats().liveObjects == 0);
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// RemoveReferenceAtSwap(EngineRuntime 4.5절): 지운 자리에 끝 원소를 옮긴다. 옮기는 원소는 같은
+// 소유자의 기존 간선이라 다시 검증하지 않으므로 끝 원소가 DestroyRequested여도 성공한다(위치
+// 교체 SetReferenceAt은 그 원소를 새로 쓰는 것이라 StaleHandle로 거부한다). 범위·owner 규칙은
+// RemoveReferenceAt과 같다.
+// 소유자 범위 검사는 hot의 object와 타입의 기반 위치(TypeLease::ObjectOffset)로 저장소 시작을
+// 얻는다(GC 설계 hot·cold 표). 기반이 저장소 시작이 아닌 타입(가상 함수)에서도 첫·마지막 멤버
+// 쓰기를 받고, 첫 생성이 기반 위치를 기록한다.
+TEST(ObjectRegistry_OwnerRangeUsesObjectBaseOffset) {
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterAll(types));
+        auto lease = types.Acquire(NativeTypeIdOf<VirtualHolder>());
+        auto plain = types.Acquire(NativeTypeIdOf<Holder>());
+        REQUIRE(lease && plain);
+        CHECK(lease.Value().ObjectOffset() == TypeLease::NoObjectOffset);
+        ObjectRegistry objects(allocator, types, {0x4352, 10});
+        const auto access = objects.OwnerAccess();
+        auto owner = objects.NewObject<VirtualHolder>(access, NativeTypeIdOf<VirtualHolder>());
+        auto holder = objects.NewObject<Holder>(access, NativeTypeIdOf<Holder>());
+        auto target = objects.NewObject<Item>(access, NativeTypeIdOf<Item>());
+        REQUIRE(owner && holder && target);
+        const ObjectHandle handle = owner.Value().Handle();
+        {
+            auto borrowed = objects.Resolve<VirtualHolder>(access, handle);
+            REQUIRE(borrowed);
+            VirtualHolder* pointer = Get(borrowed.Value());
+            REQUIRE(pointer != nullptr);
+            // 기록된 기반 위치는 실제 객체의 파생 → Object 변환 거리와 같다(이 ABI에서 vfptr 크기).
+            const uptr derived = reinterpret_cast<uptr>(pointer);
+            const uptr base = reinterpret_cast<uptr>(static_cast<Object*>(pointer));
+            CHECK(lease.Value().ObjectOffset() == base - derived);
+            CHECK(lease.Value().ObjectOffset() != 0);
+            CHECK(plain.Value().ObjectOffset() == 0);
+            // 유도한 저장소 시작은 생성이 cold에 기록한 실제 시작과 같다(기반이 시작이 아닌 타입과
+            // 시작인 타입 모두).
+            CHECK(detail::ObjectRegistryAccess::DerivedStorageStart(objects, handle) ==
+                  detail::ObjectRegistryAccess::RecordedStorageStart(objects, handle));
+            const ObjectHandle plainHandle = holder.Value().Handle();
+            CHECK(detail::ObjectRegistryAccess::DerivedStorageStart(objects, plainHandle) ==
+                  detail::ObjectRegistryAccess::RecordedStorageStart(objects, plainHandle));
+            CHECK(pointer->Kind() == 7);
+            REQUIRE(objects.SetReference(access, handle, pointer->single, target.Value().Handle()));
+            REQUIRE(objects.AddReference(access, handle, pointer->items, target.Value().Handle()));
+            REQUIRE(objects.AddReference(access, handle, pointer->items, ObjectHandle{}));
+            REQUIRE(
+                objects.SetReferenceAt(access, handle, pointer->items, 1, target.Value().Handle()));
+            REQUIRE(objects.RemoveReferenceAt(access, handle, pointer->items, 0));
+            CHECK(pointer->items.Size() == 1);
+            ObjectRefArray<Item> local(allocator);
+            CHECK(objects.AddReference(access, handle, local, target.Value().Handle()).Error() ==
+                  ErrorCode::InvalidArgument);
+            REQUIRE(objects.ClearReferences(access, handle, pointer->items));
+        }
+
+        target.Value().Reset();
+        holder.Value().Reset();
+        owner.Value().Reset();
+        REQUIRE(objects.Collect(access));
+        CHECK(objects.Stats().liveObjects == 0);
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+TEST(ObjectRefArray_RemoveAtSwapMovesLastWithoutRevalidating) {
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterAll(types));
+        ObjectRegistry objects(allocator, types, {0x4352, 9});
+        const auto access = objects.OwnerAccess();
+        auto holder = objects.NewObject<Holder>(access, NativeTypeIdOf<Holder>());
+        REQUIRE(holder);
+        const ObjectHandle owner = holder.Value().Handle();
+        ObjectHandle items[5];
+        for (ObjectHandle& item : items) {
+            item = Unrooted(objects);
+            REQUIRE(!item.IsNull());
+        }
+
+        Holder* pointer = nullptr;
+        {
+            auto borrowed = objects.Resolve<Holder>(access, owner);
+            REQUIRE(borrowed);
+            pointer = Get(borrowed.Value());
+            REQUIRE(pointer != nullptr);
+            for (const ObjectHandle& item : items) {
+                REQUIRE(objects.AddReference(access, owner, pointer->items, item));
+            }
+
+            // 끝 원소(4번)를 World 밖에서 파괴한 것처럼 파괴 요청한다.
+            REQUIRE(objects.RequestDestroy(access, items[4]));
+            CHECK(objects.SetReferenceAt(access, owner, pointer->items, 0, items[4]).Error() ==
+                  ErrorCode::StaleHandle);
+            REQUIRE(objects.RemoveReferenceAtSwap(access, owner, pointer->items, 0));
+            REQUIRE(pointer->items.Size() == 4);
+            CHECK(pointer->items[0] == items[4] && pointer->items[1] == items[1] &&
+                  pointer->items[2] == items[2] && pointer->items[3] == items[3]);
+            // 끝 원소 자신을 지우면 옮길 원소가 없다.
+            REQUIRE(objects.RemoveReferenceAtSwap(access, owner, pointer->items, 3));
+            REQUIRE(pointer->items.Size() == 3);
+            CHECK(pointer->items[0] == items[4] && pointer->items[1] == items[1] &&
+                  pointer->items[2] == items[2]);
+            // 범위 밖·owner 밖 배열은 InvalidArgument다.
+            CHECK(objects.RemoveReferenceAtSwap(access, owner, pointer->items, 3).Error() ==
+                  ErrorCode::InvalidArgument);
+            ObjectRefArray<Item> local(allocator);
+            CHECK(objects.RemoveReferenceAtSwap(access, owner, local, 0).Error() ==
+                  ErrorCode::InvalidArgument);
+            // encode 고정 중인 owner는 Busy다(World는 이 Busy를 "고정을 Tick 전에 반환" 계약
+            // 위반으로 Fatal한다 — WorldInternal.h LevelDetachFailureMessage).
+            {
+                auto pin = objects.PinForEncode(access, owner);
+                REQUIRE(pin);
+                CHECK(objects.RemoveReferenceAtSwap(access, owner, pointer->items, 0).Error() ==
+                      ErrorCode::Busy);
+                CHECK(pointer->items.Size() == 3);
+            }
+        }
+
+        // Borrow 없는 owner는 InvalidArgument다.
+        CHECK(objects.RemoveReferenceAtSwap(access, owner, pointer->items, 0).Error() ==
+              ErrorCode::InvalidArgument);
+        // 지운 대상(0번·3번)과 파괴 요청 대상(4번 — 아직 배열에 있어도)은 회수되고 남은 원소는
+        // 산다.
+        REQUIRE(objects.Collect(access));
+        CHECK(!IsAlive(objects, items[0]) && !IsAlive(objects, items[3]));
+        CHECK(!IsAlive(objects, items[4]));
+        CHECK(IsAlive(objects, items[1]) && IsAlive(objects, items[2]));
+        {
+            // 파괴 요청된 owner의 정리도 바꿔 떼기를 쓸 수 있다.
+            auto borrowed = objects.Resolve<Holder>(access, owner);
+            REQUIRE(borrowed);
+            REQUIRE(objects.RequestDestroy(access, owner));
+            REQUIRE(objects.RemoveReferenceAtSwap(access, owner, pointer->items, 0));
+            CHECK(pointer->items.Size() == 2);
         }
 
         holder.Value().Reset();
@@ -913,9 +1087,11 @@ TEST(ConstructionContext_AssignReferencesShadesAliveTargetsBetweenSlices) {
         REQUIRE(RegisterAll(types));
         ObjectRegistry objects(allocator, types, {0x4352, 9});
         const auto access = objects.OwnerAccess();
-        RootRef<Item> padding[3];
-        for (RootRef<Item>& root : padding) {
-            auto created = objects.NewObject<Item>(access, NativeTypeIdOf<Item>());
+        // padding은 trace되는(잎이 아닌) 타입이라 slice마다 하나씩 처리되어 Marking이 남는다(잎
+        // 타입 Item은 표식만 하고 큐에 넣지 않는다 — GC M2).
+        RootRef<Holder> padding[3];
+        for (RootRef<Holder>& root : padding) {
+            auto created = objects.NewObject<Holder>(access, NativeTypeIdOf<Holder>());
             REQUIRE(created);
             root = Move(created.Value());
         }
@@ -951,7 +1127,7 @@ TEST(ConstructionContext_AssignReferencesShadesAliveTargetsBetweenSlices) {
         REQUIRE(objects.Collect(access));
         CHECK(!IsAlive(objects, white));
         root.Reset();
-        for (RootRef<Item>& padded : padding) {
+        for (RootRef<Holder>& padded : padding) {
             padded.Reset();
         }
 

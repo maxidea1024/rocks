@@ -834,4 +834,48 @@ void TraceArrayField(const E (&array)[N], TraceVisitor& visitor) noexcept {
     }
 }
 
+// 생성 참조 위치 함수(M3 — Object/ReferenceLayout.h)가 모든 배열 필드에 부르는 오버로드 집합이다
+// (TraceArrayField와 같은 규칙 — 실제 C++ 타입이 호출을 고른다). Array<E>는 강한 참조가 없고,
+// ObjectRefArray는 저장소 칸을 알리며, StructRefArray는 표로 나타낼 수 없어 trace로 남긴다. 정적
+// 배열은 ObjectRef 원소마다 칸을 알리고, 참조 struct 원소면 trace로 남긴다.
+template <class E>
+void LayoutArrayField(const Array<E>&, ReferenceLayoutBuilder&) noexcept {
+}
+
+template <class T>
+void LayoutArrayField(const ObjectRefArray<T>& array, ReferenceLayoutBuilder& layout) noexcept {
+    array.ReportLayout(layout);
+}
+
+template <class S>
+void LayoutArrayField(const StructRefArray<S>&, ReferenceLayoutBuilder& layout) noexcept {
+    layout.Unsupported();
+}
+
+template <class E, usize N>
+void LayoutArrayField(const E (&array)[N], ReferenceLayoutBuilder& layout) noexcept {
+    if constexpr (ObjectReferenceField<E>::Supported) {
+        for (const E& element : array) {
+            element.ReportLayout(layout);
+        }
+    } else if constexpr (ReflectedStructField<E>::Supported) {
+        if constexpr (GeneratedType<E>::ContainsStrongReference) {
+            layout.Unsupported();
+        }
+    } else {
+        (void)array;
+        (void)layout;
+    }
+}
+
+// struct 필드는 참조 struct면 trace로 남긴다(struct 안 칸은 표로 나타내지 않는다).
+template <class S>
+void LayoutStructField(ReferenceLayoutBuilder& layout) noexcept {
+    if constexpr (GeneratedType<S>::ContainsStrongReference) {
+        layout.Unsupported();
+    } else {
+        (void)layout;
+    }
+}
+
 } // namespace rocks::detail

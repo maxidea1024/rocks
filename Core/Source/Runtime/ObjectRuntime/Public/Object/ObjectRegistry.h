@@ -348,6 +348,18 @@ public:
     Result<void> RemoveReferenceAt(const ObjectAccessContext& access, ObjectHandle owner,
                                    ObjectRefArray<T>& array, usize index) noexcept;
 
+    // index 원소를 지우고 끝 원소를 그 자리로 옮긴다(순서를 지키지 않는다 — O(1)). 지운 원소의
+    // 규칙(장부·관찰자 기록·오류)은 RemoveReferenceAt과 같다. 옮기는 원소는 같은 배열에 이미 있는
+    // 간선이라 대상의 생존·cutoff·세대를 다시 묻지 않는다(대상이 DestroyRequested여도 성공한다 —
+    // SetReferenceAt으로 옮기면 대상 검증이 실패한다). 순서가 의미 없는 큰 목록의 제거에 쓴다
+    // (Docs/Design/EngineRuntime.ko.md 4.5절).
+    //
+    // 사용 예(World가 Level의 Actor 배열에서 위치를 기억해 뗀다):
+    //   registry.RemoveReferenceAtSwap(access, level, levelPointer->actors_, position);
+    template <class T>
+    Result<void> RemoveReferenceAtSwap(const ObjectAccessContext& access, ObjectHandle owner,
+                                       ObjectRefArray<T>& array, usize index) noexcept;
+
     // target과 같은 첫 원소를 지운다(null이면 첫 null 원소). 없으면 NotFound다. 관찰자 Registry의
     // 예약 뒤 재검증에서 그 원소가 사라졌으면 Busy다.
     template <class T>
@@ -561,6 +573,26 @@ public:
     Result<ObjectLifecycle> InspectLifecycle(const ObjectAccessContext&,
                                              ObjectHandle) const noexcept;
 
+    // 지난 호출 뒤 DestroyRequested가 된 객체(RequestDestroy·Object::Destroy·Discard)를 out에 꺼내
+    // 그 수를 돌려준다(out이 차면 남은 것은 다음 호출이 꺼낸다 — 0이 나올 때까지 부른다). 그 사이
+    // 회수된 객체는 빠진다. 소유 계층(World)이 자기 API 밖의 파괴를 객체 수에 비례하는 훑기 없이
+    // 찾으려고 쓴다. 순서는 정하지 않는다. 할당하지 않는다. 접근 규칙과 오류는 InspectLifecycle과
+    // 같다.
+    //
+    // 사용 예:
+    //   ObjectHandle batch[64];
+    //   for (;;) {
+    //       auto taken = registry.TakeDestroyRequests(access, batch);
+    //       if (!taken || taken.Value() == 0) break;
+    //       for (usize at = 0; at < taken.Value(); ++at) { /* batch[at] 처리 */ }
+    //   }
+    Result<usize> TakeDestroyRequests(const ObjectAccessContext&, Span<ObjectHandle> out) noexcept;
+
+    // 객체가 지금 클러스터 소속인지다(진단·시험용 — 장기 smoke가 경계 비율 안전장치의 해체를 모델에
+    // 맞춘다). 클러스터를 켜지 않은 Registry는 언제나 false다. handle·접근 규칙과 오류는
+    // InspectLifecycle과 같다(cutoff white는 false). 결과는 반환 후에도 바뀔 수 있다.
+    Result<bool> InspectClusterMembership(const ObjectAccessContext&, ObjectHandle) const noexcept;
+
     // handle이 이 Registry가 발급한 것인지다(domain 비교만 — 생존·세대·접근 문맥은 보지 않는다).
     // 조회 API는 다른 Registry의 handle을 회수된 handle과 같은 StaleHandle로 알리므로, 둘을
     // 구별해야 하는 쪽이 먼저 부른다 — weak 참조(WeakObjectRef PROPERTY)는 죽은 대상이면 null로
@@ -585,13 +617,25 @@ public:
     Result<TypeLease> AcquireRegisteredType(const ObjectAccessContext&, TypeId) noexcept;
     // 소유 스레드 full STW 수집. Borrow/생성 트랜잭션/재진입 중에는 Busy다.
     // 작업 큐 할당이나 Trace 간선 검증 실패 시 부분 표식으로 sweep하지 않는다.
-    Result<GcReport> Collect(const ObjectAccessContext&) noexcept;
+    // scheduler를 주면 표식을 병렬로 한다(StepCollection의 scheduler 규칙과 같다 — 소유 스레드도
+    // 표식에 참여하고 parallelTraceSafe가 아닌 타입은 소유 스레드만 trace한다). 반환 전에 worker
+    // 작업을 모두 회수한다.
+    //
+    // 사용 예(레벨 전환 때 STW 병렬 수집):
+    //   auto report = registry.Collect(access, &scheduler);
+    Result<GcReport> Collect(const ObjectAccessContext&,
+                             WorkerScheduler* scheduler = nullptr) noexcept;
     // Begin/Step은 Borrow=0·활성 생성=0인 소유 스레드 safepoint에서만 진행한다.
     // slice 사이에는 mutator를 재개하며 root/간선/신규 게시가 삽입 장벽을 거친다.
     Result<void> BeginCollection(const ObjectAccessContext&) noexcept;
-    // scheduler를 지정하면 parallelTraceSafe 타입만 worker에서 추적한다. 미선언 타입은 owner에서
-    // 실행한다. allocator는 worker의 capture 정리를 지원해야 한다. 각 slice는 worker를 모두 drain한
-    // 뒤 반환하므로 mutator와 field scan을 동시에 실행하지 않는다.
+    // scheduler를 지정하면 표식을 병렬로 한다(GC-S4, Docs/Design/GarbageCollectionScale.ko.md):
+    // worker 수만큼 task를 한 번 제출하고 소유 스레드도 참여한다. 참여자마다 지역 큐(512칸 블록)를
+    // 두고 남는 블록을 공유 풀에 내놓아 나눈다. 표식은 atomic fetch_or로 이긴 쪽만 큐에 넣는다.
+    // parallelTraceSafe가 아닌 수동 Trace 타입은 소유 스레드 큐로 모아 이 스레드에서 trace한다.
+    // 예산(객체 수·시간)이 다하면 남은 회색 객체를 다음 slice로 넘긴다. allocator는 여러 스레드의
+    // 동시 할당·반환을 지원해야 한다(worker의 큐 블록·capture 정리). 각 slice는 worker를 모두
+    // 회수한 뒤 반환하므로 mutator와 field scan을 동시에 실행하지 않는다. scheduler worker
+    // 스레드에서 부르면 WrongThread다.
     Result<GcProgress> StepCollection(const ObjectAccessContext&, GcBudget = {},
                                       WorkerScheduler* scheduler = nullptr) noexcept;
     // 아직 cutoff를 게시하지 않은 Marking만 취소한다. cutoff 이후 중단으로 죽은 간선을 부활시키지
@@ -599,6 +643,13 @@ public:
     Result<void> CancelCollection(const ObjectAccessContext&) noexcept;
     GcPhase CollectionPhase() const noexcept;
     Result<uint32> DrainRetired(const ObjectAccessContext&) noexcept;
+    // 영구 창(RegistryOptions::permanentRegion)을 닫는다. 이 뒤에 Commit하는 객체는 일반 객체이고
+    // 다시 열 수 없다(이미 닫았거나 창 없이 만든 Registry는 성공 — 무동작). GC·callback 처리 중에는
+    // Busy(Commit 검증과 공개 사이에 창 상태가 바뀌지 않게), 종료 시작 뒤에는 ShuttingDown이다.
+    //
+    // 사용 예(Engine이 서브시스템 초기화 뒤):
+    //   if (auto closed = objects.ClosePermanentRegion(access); !closed) { return closed; }
+    Result<void> ClosePermanentRegion(const ObjectAccessContext&) noexcept;
     // 신규 객체/루트/접근권을 닫은 후 회수를 시도한다. Busy면 보유권을 반환하고 재시도한다.
     // 접근 검증/재진입 거부는 닫기 전에 반환한다. 닫은 뒤의 회수 실패는 닫힌 상태를 유지한다.
     // 보유권이 남은 동안 Registry를 먼저 파괴해서는 안 된다.
@@ -628,6 +679,7 @@ private:
     friend class PreparedStructElements;
 
     struct Slot;
+    struct SlotCold;
     struct Chunk;
     struct MarkState;
     struct NameRecord;
@@ -637,6 +689,16 @@ private:
     struct ChunkTable;
     struct EdgeTally;
     struct EdgePlan;
+    struct GcHot;
+    struct GcBits;
+    struct GcPage;
+    struct GcType;
+    struct GcBlock;
+    struct ParallelMark;
+    struct MarkParticipant;
+    struct ClusterCell;
+    struct ClusterChunk;
+    struct ClusterRecord;
 
     // Retired 슬롯이 든 회수 대상 목록이다. 슬롯은 셋 중 하나에만 있다(Retired가 아니면 어디에도
     // 없다).
@@ -653,7 +715,47 @@ private:
         Slot* tail = nullptr;
     };
 
-    static void MarkEdge(void*, ObjectHandle) noexcept;
+    // 표식(Private/ObjectRegistryGcMark.cpp). MarkBatch는 직렬 marker의 배치 visitor 콜백이다(잠금
+    // 없음 — 처리 표시 아래 단일 marker, Docs/Design/GarbageCollectionScale.ko.md 7.1절).
+    // MarkHandles가 본문이다. 병렬 marker는 ParallelMark(ObjectRegistryGcParallel.cpp)다.
+    static void MarkBatch(void*, const ObjectHandle*, uint32) noexcept;
+    void MarkHandles(MarkState&, const ObjectHandle*, uint32) noexcept;
+    // 간선 handle이 이 Registry의 슬롯 범위 안인지 본다(Release 검사). Debug는 세대·상태까지 보아
+    // "강한 간선은 언제나 살아 있는 객체를 가리킨다"를 확인한다.
+    bool IsMarkableEdge(ObjectHandle handle, uint64 slots) const noexcept;
+    // 슬롯 index를 표식한다(잠금 없이 또는 gate_ 아래). 살아 있지 않으면 StaleHandle이다. 잎 타입은
+    // 큐에 넣지 않고 Outer 사슬을 바로 따라간다(M2). work는 모든 슬롯을 담을 용량을 미리 확보했다.
+    ErrorCode MarkIndex(uint32 index, Array<uint32>& work, uint32& marked) noexcept;
+    // index 객체 하나를 trace한다(Trace 간선 → Outer → 패키지 정책이면 자식 고리).
+    void TraceIndex(uint32 index, MarkState& state, TraceVisitor& visitor) noexcept;
+    // 객체의 강한 간선을 visitor에 넘긴다(참조 위치 표가 있으면 표로, 없으면 trace로 — M3). Debug는
+    // 표와 trace의 간선 순서를 대조한다.
+    void VisitStrongEdges(const GcType& type, const Object& object,
+                          TraceVisitor& visitor) const noexcept;
+    // 큐에서 몇 칸 앞 객체의 배열 버퍼를 미리 읽는다(참조 위치 표의 배열 칸만).
+    void PrefetchArrays(uint32 index) const noexcept;
+    // 잠금 밖·처리 표시 아래: 새 객체로 그 타입의 참조 위치 표를 정한다(첫 객체에서 한 번).
+    void PrepareReferenceLayout(uint16 type, const Object& object) noexcept;
+    // 작업 큐 work를 cursor부터 trace한다(최대 maxObjects개, deadline이 0이 아니면 그때까지 —
+    // 시계는 일정 개수마다 본다). 잠금 없이 처리 표시 아래에서 부른다. 반환은 trace한 객체 수이고
+    // 오류는 state.error다.
+    uint32 MarkSerial(Array<uint32>& work, usize& cursor, MarkState& state, uint32 maxObjects,
+                      uint64 deadline) noexcept;
+    // 병렬 표식이다(GC-S4). work[cursor..)를 씨앗으로 쓰고 work를 비운 뒤, 예산이 다해 남은 회색
+    // 객체를 work에 다시 담는다(cursor는 0). 반환은 trace한 객체 수이고 오류는 state.error다.
+    // 끝까지 표식했으면 completed가 참이다.
+    // carried가 있으면 그 블록 목록(앞 slice가 남긴 회색 객체)도 씨앗으로 쓰고, 예산이 다해 남은
+    // 회색 객체를 work에 펴지 않고 블록째 carried에 남긴다(slice마다 회색 객체 전체를 복사하지
+    // 않는다 — GC-S4 보정). times가 있으면 준비·표식·회수·넘기기 시간과 넘긴 회색 객체 수를 적는다.
+    uint32 MarkParallel(Array<uint32>& work, usize& cursor, MarkState& state, uint32 maxObjects,
+                        uint64 deadline, WorkerScheduler& scheduler, bool& completed,
+                        GcBlock** carried = nullptr, GcSliceTimes* times = nullptr) noexcept;
+    // 남은 회색 블록(gcGrayBlocks_)을 표식 큐 뒤로 펴거나(직렬 slice) 재사용 목록으로
+    // 돌린다(취소·오류· cycle 끝).
+    void FlattenGrayBlocks() noexcept;
+    void ReleaseGrayBlocks() noexcept;
+    // 장벽 큐(gcShade_)를 표식 큐(gcWork_) 뒤로 옮긴다(slice 시작).
+    void DrainShadeQueue() noexcept;
     static void ValidateStagedEdge(void*, ObjectHandle) noexcept;
     // 떼어 낼 간선의 패키지 쌍을 집계한다(MarkState의 tally·ownerPackage·delta — 대상 패키지 조회는
     // 간선마다 잠금, 집계 삽입은 잠금 밖).
@@ -661,8 +763,132 @@ private:
     // Registry가 직접 방문하는 간선이다: inner → outer, 패키지 정책이면 outer → inner(자식 고리의
     // 모든 자식). gate_를 쥐지 않고 부른다(처리 표시 아래라 Outer·고리가 바뀌지 않는다).
     void VisitIdentityEdges(const Slot&, TraceVisitor&) const noexcept;
-    Slot* FindSlot(ObjectHandle) const noexcept;
-    Slot* SlotAt(uint32) const noexcept;
+    // 정의는 ObjectRuntime/Private/ObjectRegistryInternal.h(inline — 구현 파일만 부른다).
+    inline Slot* FindSlot(ObjectHandle) const noexcept;
+    inline Slot* SlotAt(uint32) const noexcept;
+    // 슬롯의 cold 레코드(이름·고리·회수 목록·생성 트랜잭션·Outer)다.
+    inline SlotCold& ColdOf(const Slot&) const noexcept;
+    // 생성된 객체(object가 있는 슬롯)의 저장소 시작 주소다. hot의 object와 타입의 기반 위치
+    // (TypeLease::ObjectOffset)에서 유도한다 — 소유자 범위 검사가 cold를 읽지 않게 한다.
+    static inline uptr StorageStartOf(const Slot&) noexcept;
+    // GC 밀집 자료(GC-S3, 정의는 ObjectRegistryInternal.h). 슬롯 index의 페이지·hot 레코드·비트
+    // 묶음과 그 묶음 안의 비트다. index는 chunk가 있는 슬롯이어야 한다.
+    inline GcPage& PageOf(uint32) const noexcept;
+    inline GcHot& HotOf(uint32) const noexcept;
+    inline GcBits& BitsOf(uint32) const noexcept;
+    // 클러스터 장부 칸(계수·고리)과 장부 상태다(클러스터를 켠 Registry만 — 정의는
+    // ObjectRegistryInternal.h).
+    inline ClusterCell& CellOf(uint32) const noexcept;
+    inline uint32& ClusterStateOf(uint32) const noexcept;
+    // 장부 inCount(Slot 안 — 공개 전 가입 지정이면 루트 슬롯)다.
+    inline uint32& ClusterInCountOf(uint32) const noexcept;
+    // chunk 클러스터 표와, 소속 슬롯의 클러스터 번호다(표에 있으면 표, 섞인 chunk면 장부 상태).
+    inline ClusterChunk& ClusterChunkOf(uint32) const noexcept;
+    inline uint32 MemberClusterOf(uint32) const noexcept;
+    // 잠금 보유: slot의 장부(상태·계수·고리)를 비운다.
+    void ClearClusterSlotLocked(uint32 slot) noexcept;
+
+    // ---- 클러스터(GC-S7, Docs/Design/GarbageCollectionScale.ko.md 13절 — Private/
+    // ObjectRegistryClusters.cpp) ----
+    // ConstructionContext::SetClusterRoot·JoinCluster의 본문이다. root가 null이면 object를 새
+    // 클러스터 루트로 지정한다.
+    Result<void> DesignateCluster(const ObjectAccessContext&, uint64 transaction,
+                                  ObjectHandle object, ObjectHandle root) noexcept;
+    // 잠금 보유: id 클러스터가 이번 cycle에 표식됐는지다(영구 영역은 언제나 참).
+    bool IsClusterMarkedLocked(uint32 id) const noexcept;
+    // 잠금 보유: owner(소속 객체)의 간선 하나를 장부에 더하거나 뺀다(13.4절 간선 분류).
+    void LedgerEdgeLocked(uint32 owner, uint32 target, bool add) noexcept;
+    // 잠금 보유: 단일 간선 지점의 장부 갱신이다(owner가 소속이 아니면 아무것도 하지 않는다).
+    void LedgerEditLocked(const Slot& owner, ObjectHandle removed, ObjectHandle added) noexcept;
+    // 간선 제거의 장부 감소를 미뤄 기록한다(GC 설계 13.4절 — 대상 줄을 건드리지 않는다). 기록이
+    // 차면 먼저 적용한다.
+    void DeferLedgerRemovalLocked(uint32 owner, ObjectHandle target) noexcept;
+    // 미룬 장부 감소를 모두 적용한다. 장부 계수로 판단하거나 클러스터 상태를 바꾸기 전(이탈·해체·
+    // 경계 비율 판정·Begin·Collect)에 부른다. Debug 장부 검증은 적용하지 않고 기대 계수에 더한다.
+    void ApplyLedgerRemovalsLocked() noexcept;
+    // 클러스터 밖 대상으로 가던 간선 하나를 소유자 outCount에서 뺀다(경계 고리 출입 포함).
+    void LedgerOutsideRemoveLocked(uint32 owner) noexcept;
+    // 잠금 보유: 비우기 지점에서 떼어 낼 값 count개를 장부에서 뺀다(owner가 소속이 아니면 무동작).
+    void LedgerClearLocked(const Slot& owner, const ObjectHandle* values, usize count) noexcept;
+    // owner가 클러스터 소속인지다(잠금 보유, 클러스터를 끈 Registry는 거짓).
+    bool IsClusterMemberLocked(const Slot& owner) const noexcept;
+    // TraceVisitor 콜백(잠금 보유 상태의 호출자가 쓴다): MarkState::ledgerOwner의 간선을 장부에서
+    // 뺀다.
+    static void LedgerRemoveVisited(void*, ObjectHandle) noexcept;
+    // TraceVisitor 콜백(잠금 밖): 간선마다 잠가 MarkState::ledgerOwner의 몫을 장부에서 뺀다(이탈).
+    static void LeaveVisited(void*, ObjectHandle) noexcept;
+    // 잠금 밖·처리 표시 아래: 이탈할 소속 객체 slot이 장부에 남긴 몫(Trace 간선과 outer)을 뺀다.
+    void LeaveTrace(Slot&) noexcept;
+    // 잠금 보유: LeaveTrace 뒤 slot을 클러스터에서 뺀다(inCount가 남으면 detached, 아니면 없음).
+    // Marking이고 클러스터가 표식됐으면 slot을 shade하고, Sweeping이면 mark를 켠다.
+    void FinishLeaveLocked(Slot&) noexcept;
+    // 잠금 보유: 클러스터를 해체한다(13.6절 Marking·Sweeping 규칙 포함).
+    void DissolveClusterLocked(uint32 id) noexcept;
+    // 잠금 보유: 표식되지 않은 클러스터를 모두 해체한다(cutoff·Collect sweep 직전).
+    void DissolveUnmarkedClustersLocked() noexcept;
+    // 잠금 보유: 경계 비율이 registry_detail::ClusterFlattenBoundaryPercent를 넘는 패키지
+    // 클러스터를 해체하고 그 수를 돌려준다(경계 비율 안전장치 — cutoff, Collect sweep 뒤). 남은
+    // 클러스터는 모두 표식된 상태여야 한다.
+    uint32 FlattenBoundaryClustersLocked() noexcept;
+    // 경계 비율 안전장치의 문턱을 넘는 레코드인지다(패키지 클러스터만).
+    bool ExceedsFlattenThreshold(const ClusterRecord& record) const noexcept;
+    // 잠금 보유: 안전장치로 클러스터를 해체한 패키지(살아 있는 루트가 소속이 아니다)인지 본다. 그
+    // 패키지의 새 객체는 클러스터에 가입하지 않는다.
+    bool IsFlattenedPackageLocked(const Slot& package) const noexcept;
+    // 잠금 보유: slot이 영구 영역 소속인지다.
+    bool IsPermanentLocked(uint32 slot) const noexcept;
+    // 잠금 보유: 영구 소속 owner의 새 간선 target이 영구 객체가 아니면 Unsupported다(13.7절).
+    Result<void> CheckPermanentEdgeLocked(const Slot& owner, ObjectHandle target) const noexcept;
+    // 잠금 보유: 표식 epoch를 하나 올린다(Begin·Collect — 한 바퀴 돌면 레코드 epoch를 비운다).
+    void AdvanceGcEpochLocked() noexcept;
+    // 잠금 보유: epoch가 한 바퀴 돌았을 때 레코드 epoch를 비운다.
+    void WrapGcEpochLocked() noexcept;
+    // 잠금 보유: 모든 클러스터를 해체한다(Shutdown).
+    void DissolveAllClustersLocked() noexcept;
+    // 잠금 보유: Marking 중 해체해 큐 항목이 남았을 수 있던 레코드를 빈 목록으로 돌린다(큐가 빈
+    // 뒤).
+    void ReleaseDissolvedClustersLocked() noexcept;
+    // 잠금 보유: 새 클러스터 레코드를 받아 root를 첫 소속으로 넣는다(빈 레코드가 있어야 한다).
+    uint32 CreateClusterLocked(uint32 root, bool designated) noexcept;
+    // 잠금 보유: slot을 id 클러스터 소속으로 넣는다(장부 칸은 비어 있어야 한다).
+    void JoinClusterLocked(uint32 id, uint32 slot) noexcept;
+    // 잠금 보유: slot의 chunk 클러스터 표 칸을 id로 맞춘다(others는 같은 chunk의 다른 소속 비트).
+    void SetChunkClusterLocked(uint32 slot, uint32 id, uint64 others) noexcept;
+    // 잠금 보유: 표식 비트와 클러스터 표식을 본 소속 비트를 모두 지운다(Begin·Collect).
+    void ClearMarksLocked() noexcept;
+    // 잠금 밖·처리 표시 아래: 빈 클러스터 레코드가 count개 이상이 되게 표를 키운다(Marking이면 작업
+    // 큐도).
+    Result<void> ReserveClusters(uint32 count) noexcept;
+    // 작업 큐 상한(슬롯 수 slots + 클러스터 레코드 수)이다.
+    uint64 GcQueueBound(uint64 slots) const noexcept;
+    // 잠금 밖·처리 표시 아래: 작업 큐와 장벽 큐를 needed칸 이상으로 키운다(두 배씩, 상한 limit).
+    Result<void> ReserveGcQueues(uint64 needed, uint64 limit) noexcept;
+    // 잠금 보유: 장부 칸 slot을 head 목록(boundary면 경계 고리, 아니면 소속·detached 고리) 앞에
+    // 넣거나 뺀다.
+    void LinkCellLocked(uint32& head, uint32 slot, bool boundary) noexcept;
+    void UnlinkCellLocked(uint32& head, uint32 slot, bool boundary) noexcept;
+    // 잠금 보유: root 슬롯에 가입할 수 있는지다(transaction에서 루트로 지정한 공개 전 객체, 또는
+    // 해체되지 않은 클러스터의 생존 루트).
+    bool IsJoinableRootLocked(uint32 root, uint64 transaction) const noexcept;
+    // 클러스터 표식(직렬): id 클러스터를 표식하고 처음이면 큐에 넣는다.
+    ErrorCode MarkCluster(uint32 id, Array<uint32>& work, uint32& marked) noexcept;
+    // 클러스터 처리(직렬): 경계 소속을 큐에 넣고 detached를 표식한 뒤 처리 epoch를 단다.
+    void ProcessCluster(uint32 id, MarkState&) noexcept;
+    // Debug 장부 검증(RegistryOptions::verifyClusterLedger): 잠금 밖·처리 표시 아래에서 다시 계산해
+    // 비교하고 어긋나면 Fatal이다. 할당 실패는 그 오류다(검증을 건너뛰지 않는다).
+    Result<void> VerifyClusterLedger() noexcept;
+    // 잠금 보유: 슬롯을 루트 목록에 넣고 뺀다(roots 0 ↔ 1 전이에서 부른다).
+    void AddRootListLocked(Slot&) noexcept;
+    void RemoveRootListLocked(Slot&) noexcept;
+    // 잠금 밖·처리 표시 아래: ops의 GC 타입 표 번호를 찾거나 새로 단다(0은 없음). 표가 가득하면
+    // CapacityExceeded, 할당 실패는 그 오류다.
+    Result<uint16> AcquireGcType(const RuntimeTypeOps& ops) noexcept;
+    // 잠금 밖·처리 표시 아래: 슬롯 수 slots를 담을 GC 페이지·루트 목록을 준비한다. 새 페이지·표·
+    // 목록은 잠금 안에서 게시해야 하므로 넘겨받은 칸에 담아 돌려준다(GrowGcLocked).
+    struct GcGrowth;
+    Result<void> PrepareGcGrowth(uint64 slots, GcGrowth& growth) noexcept;
+    void GrowGcLocked(GcGrowth& growth) noexcept;
+    void ReleaseGcGrowth(GcGrowth& growth) noexcept;
     Result<void> CheckAccess(const ObjectAccessContext&) const noexcept;
     Result<void> CheckLive(Slot*, const void*) const noexcept;
     Result<ObjectAccessContext> ScopedAccess() const noexcept;
@@ -670,6 +896,10 @@ private:
                                            bool requireBorrow) const noexcept;
     Result<void> RequestDestroyChecked(const ObjectAccessContext&, ObjectHandle, const Object*,
                                        bool requireBorrow) noexcept;
+    // 잠금 보유: RequestDestroyChecked의 검사와 상태 전이다. 클러스터 소속(루트 아님)이면 처리
+    // 표시를 세우고 leaving에 슬롯을 돌려준다(호출자가 잠금 밖에서 이탈 trace를 한다).
+    Result<void> RequestDestroyLocked(ObjectHandle, const Object*, bool requireBorrow,
+                                      Slot*& leaving) noexcept;
     Result<ObjectLifecycle> InspectSelf(ObjectHandle, const Object*) const noexcept;
     Result<void> DestroySelf(ObjectHandle, const Object*) noexcept;
     Result<TypeLease> AcquireTypeSelf(ObjectHandle, const Object*) noexcept;
@@ -691,9 +921,10 @@ private:
     Result<void> ReplaceArrayEdge(const ObjectAccessContext&, ObjectHandle,
                                   detail::ObjectRefArrayStorage&, usize index, ObjectHandle,
                                   const void*) noexcept;
+    // swap이면 지운 자리에 끝 원소를 옮긴다(RemoveReferenceAtSwap), 아니면 뒤를 당긴다.
     Result<void> RemoveArrayEdge(const ObjectAccessContext&, ObjectHandle,
-                                 detail::ObjectRefArrayStorage&, usize, ObjectHandle,
-                                 bool byHandle) noexcept;
+                                 detail::ObjectRefArrayStorage&, usize, ObjectHandle, bool byHandle,
+                                 bool swap = false) noexcept;
     Result<void> ClearArrayEdges(const ObjectAccessContext&, ObjectHandle,
                                  detail::ObjectRefArrayStorage&) noexcept;
     Result<void> AssignArrayEdges(const ObjectAccessContext&, ObjectHandle,
@@ -708,6 +939,8 @@ private:
                               ObjectHandle* removed) noexcept;
     Result<void> ClearMapEdges(const ObjectAccessContext&, ObjectHandle,
                                detail::ObjectRefMapEdit&) noexcept;
+    // 잠금 보유: 비울 map의 값을 클러스터 장부에서 뺀다(owner가 소속이 아니면 무동작).
+    void ClearMapLedgerLocked(const Slot& owner, detail::ObjectRefMapEdit&) noexcept;
     Result<void> AssignMapEdges(const ObjectAccessContext&, ObjectHandle, detail::ObjectRefMapEdit&,
                                 Span<const ObjectHandle>, uint64 transaction,
                                 const void* nativeType) noexcept;
@@ -818,8 +1051,14 @@ private:
     // 잠금 보유: Alive·DestroyRequested 슬롯을 Retired로 바꾸고 이름 색인·부모 고리에서 떼어 분류
     // 전 목록 끝에 붙인다(sweep).
     void RetireLocked(Slot&) noexcept;
+    // 잠금 보유: chunk의 white 후보(GC 비트 묶음의 live & ~mark)를 낮은 번호부터 Retire하고 그 수를
+    // 돌려준다(sweep).
+    uint32 RetireWhiteLocked(uint32 chunk) noexcept;
     // 잠금 보유: 어느 목록에도 없는 Retired 슬롯을 queue 목록 끝에 붙인다.
     void LinkRetiredLocked(Slot&, RetiredQueue) noexcept;
+    // 잠금 보유: DestroyRequested가 된 slot을 파괴 요청 목록에 넣는다 / 뺀다.
+    void LinkDestroyRequestLocked(Slot&) noexcept;
+    void UnlinkDestroyRequestLocked(Slot&) noexcept;
     // 잠금 보유: 슬롯을 지금 든 회수 대상 목록에서 뗀다.
     void UnlinkRetiredLocked(Slot&) noexcept;
     // 잠금 보유: 지연 목록의 슬롯이 회수 가능해졌으면(보유 계수 반환·마지막 자식이 떨어짐) 풀린
@@ -881,10 +1120,14 @@ private:
     void ApplyTallyLocked(const EdgeTally&, ReferenceChangeCause, uint64) noexcept;
     // 잠금 밖·처리 표시 아래: tally의 새 키 공간을 관찰자에 예약한다(모자랄 때만).
     Result<void> ReserveTally(const EdgeTally&, ReferenceChangeCause, uint64) noexcept;
-    // 잠금 밖·처리 표시 아래: StructRefArray 원소 블록들을 등록 struct trace로 훑어 (ownerPackage,
-    // 대상 패키지, -1)을 tally에 합친다. 원소 struct 조회 실패는 Unsupported다.
-    Result<void> TallyStructBlocks(const detail::StructElementOps&, void* const* blocks,
-                                   uint32 count, ObjectHandle ownerPackage, EdgeTally&) noexcept;
+    // 잠금 밖·처리 표시 아래: 떼어 낼 간선 handles의 (ownerPackage, 대상 패키지, -1)을 tally에
+    // 합친다.
+    Result<void> TallyHandles(const ObjectHandle* handles, usize count, ObjectHandle ownerPackage,
+                              EdgeTally&) noexcept;
+    // 잠금 밖·처리 표시 아래: StructRefArray 원소 블록들을 등록 struct trace로 훑어 null이 아닌
+    // 간선을 out에 모은다(클러스터 장부). 원소 struct 조회 실패는 Unsupported다.
+    Result<void> CollectStructEdges(const detail::StructElementOps&, void* const* blocks,
+                                    uint32 count, Array<ObjectHandle>& out) noexcept;
     // 처리 표시를 내리고 result를 돌려준다.
     Result<void> EndProcessing(Result<void> result) noexcept;
 
@@ -938,6 +1181,28 @@ private:
     uint32 chunkCount_ = 0;
     uint32 chunkCapacity_ = 0;
     ChunkTable* chunkTables_ = nullptr; // 지금 표(옛 표는 그 previous 사슬)
+    // GC 밀집 자료(GC-S3): GcPageSlots개 슬롯마다 페이지 하나(hot 레코드와 live·mark·leaf 비트)다.
+    // 페이지는 이동하지 않고 표만 두 배로 키운다(생성의 처리 표시 아래 — marker와 겹치지 않는다).
+    GcPage** gcPages_ = nullptr;
+    uint32 gcPageCount_ = 0;
+    uint32 gcPageCapacity_ = 0;
+    // GC 타입 표(hot 레코드의 타입 번호 → trace·병렬 안전·잎). 0번은 비어 있다. 생성의 처리 표시
+    // 아래에서만 자란다.
+    GcType* gcTypes_ = nullptr;
+    uint32 gcTypeCount_ = 0;
+    uint32 gcTypeCapacity_ = 0;
+    // 타입 키(RuntimeTypeOps 주소) → gcTypes_ 번호의 개방 주소 색인이다(0이면 빈 칸, 용량은 2의
+    // 거듭제곱이고 gcTypeCapacity_의 두 배). 생성마다 타입 표를 처음부터 훑지 않게 한다.
+    uint16* gcTypeIndex_ = nullptr;
+    uint32 gcTypeIndexCapacity_ = 0;
+    // 루트(roots > 0) 슬롯 번호 목록이다. Begin·Collect가 O(루트 수)로 루트를 표식한다. 용량은
+    // 언제나 슬롯 수 이상이라 gate_ 아래 추가가 할당하지 않는다(다른 스레드의 ReleaseRoot도 gate_
+    // 아래에서 즉시 뺀다 — 목록은 Begin·Collect의 잠금 구간만 읽는다).
+    uint32* rootList_ = nullptr;
+    uint32 rootCount_ = 0;
+    // 파괴 요청 목록 머리다(Slot::destroyListed — TakeDestroyRequests).
+    Slot* destroyRequests_ = nullptr;
+    uint32 rootCapacity_ = 0;
     // 빈(Free) 슬롯 목록이다. 가장 최근에 회수한 슬롯부터 재사용한다(새 chunk는 낮은 번호부터).
     Slot* freeSlots_ = nullptr;
     // 회수 대상 목록(RetiredQueue): sweep이 분류 전 목록 끝에 붙이고, 회수가 분류하며 지연 목록으로
@@ -955,16 +1220,50 @@ private:
     uint32 totalBorrows_ = 0;
     uint32 constructions_ = 0;
     uint64 nextTransaction_ = 1;
-    uint64 markEpoch_ = 0;
     GcReport lastGc_;
-    Array<ObjectHandle> gcWork_;
+    // 표식 작업 큐(슬롯 번호)와 장벽 큐다. 장벽(삽입 장벽·새 루트·Marking 중 출생)은 slice 사이에
+    // gcShade_에만 넣고 slice 시작에 gcWork_로 옮긴다(병렬 marker의 지역 큐와 섞이지 않는다). 둘 다
+    // 슬롯 수만큼 용량을 미리 확보한다.
+    Array<uint32> gcWork_;
+    Array<uint32> gcShade_;
+    // 병렬 표식의 512칸 큐 블록 재사용 목록이다(Registry 소멸 때 반환한다).
+    GcBlock* gcFreeBlocks_ = nullptr;
+    // 병렬 slice가 예산을 다해 남긴 회색 객체 블록이다(다음 slice의 씨앗).
+    GcBlock* gcGrayBlocks_ = nullptr;
+    // 앞 병렬 slice에서 표식이 멈춘 뒤 든 꼬리 시간(worker 회수·회색 넘기기, ns)이다. 다음 병렬
+    // slice가 그만큼 표식을 일찍 멈춰 slice 전체가 시간 예산 안에 들게 한다.
+    uint64 gcParallelTail_ = 0;
+    // 클러스터(GC-S7): 켰는지, 레코드 표(번호로 색인 — 처리 표시 아래에서만 자란다), 빈 레코드
+    // 목록과 수, Marking 중 해체해 큐가 빌 때까지 재사용하지 않는 레코드 목록, 표식 epoch다(Begin·
+    // Collect마다 하나씩 오른다).
+    bool clustersEnabled_ = false;
+    // 미룬 장부 감소 기록(DeferLedgerRemovalLocked)이다. 첫 클러스터 예약 때 받는다.
+    struct LedgerRemoval {
+        uint32 owner;
+        uint32 target;
+        uint32 targetGeneration;
+    };
+    LedgerRemoval* ledgerRemovals_ = nullptr;
+    uint32 ledgerRemovalCount_ = 0;
+    ClusterRecord* clusters_ = nullptr;
+    // 클러스터 표식 epoch다(레코드 번호로 색인, 레코드와 같은 용량 — marker가 간선마다 읽으므로
+    // 레코드에서 떼어 작고 연속되게 둔다. 영구 영역은 언제나 지금 epoch다).
+    uint32* clusterEpochs_ = nullptr;
+    uint32 clusterCapacity_ = 0;
+    uint32 clusterUsed_ = 0;
+    uint32 clusterFree_ = NumericLimits<uint32>::Max();
+    uint32 clusterFreeCount_ = 0;
+    uint32 clusterDissolved_ = NumericLimits<uint32>::Max();
+    uint32 gcEpoch_ = 0;
+    // 영구 영역(13.7절): 창이 열렸는지와 영구 클러스터 번호(첫 영구 Commit에서 만든다)다.
+    bool permanentOpen_ = false;
+    uint32 permanentCluster_ = NumericLimits<uint32>::Max();
     usize gcCursor_ = 0;
     GcPhase gcPhase_ = GcPhase::Idle;
     GcReport cycleGc_;
-    // 증분 sweep 위치: 남은 chunk 수(다음은 sweepChunk_ - 1번 chunk — 새 chunk부터 옛 chunk로)와
-    // 그 chunk 안 슬롯 위치다. 0이면 끝났다.
+    // 증분 sweep 위치: 남은 chunk 수다(다음은 sweepChunk_ - 1번 chunk — 새 chunk부터 옛 chunk로,
+    // chunk 하나를 한 번에 분류한다). 0이면 끝났다.
     uint32 sweepChunk_ = 0;
-    uint32 sweepOffset_ = 0;
     // 이름 색인: 개방 주소 표(2의 거듭제곱 크기, (live + tombstone) ≤ 1/2). 표 할당·반환은 잠금 밖.
     NameEntry* names_ = nullptr;
     uint32 nameCapacity_ = 0;

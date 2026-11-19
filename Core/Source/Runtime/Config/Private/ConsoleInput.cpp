@@ -235,8 +235,8 @@ Result<void> ShowSetting(ConfigState& state, const ConsoleSettingState& setting,
     if (setting.definition != nullptr) {
         const uint32 index =
             platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&setting.definition->index);
-        for (const UniquePtr<ScopeState>& scope : state.scopes) {
-            for (const UniquePtr<ScopeValue>& value : scope->values) {
+        for (const SharedPtr<ScopeState>& scope : state.scopes) {
+            for (const SharedPtr<const ScopeValue>& value : scope->values) {
                 if (value->index != index) {
                     continue;
                 }
@@ -600,13 +600,12 @@ bool SnapshotCheatsAllowed(const ConfigSnapshot* snapshot, uint64 scope) noexcep
         return true;
     }
 
-    const CVarText* text = nullptr;
-    if (const CVarSlot* scoped = snapshot->FindScopedSlot(scope, index.value, text)) {
-        return scoped->bits != 0;
-    }
-
+    // Global 실효값 AND 범위 사슬 값이다(범위는 치트를 좁히기만 한다 — 13.1절).
     const CVarSlot* slot = snapshot->FindSlot(index.value);
-    return slot == nullptr || slot->bits != 0;
+    const bool global = slot == nullptr || slot->bits != 0;
+    const CVarText* text = nullptr;
+    const CVarSlot* scoped = snapshot->FindScopedSlot(scope, index.value, text);
+    return global && (scoped == nullptr || scoped->bits != 0);
 }
 
 Result<SharedPtr<const ConsoleNameIndex>> BuildConsoleNameIndex(ConfigState& state) noexcept {
