@@ -8,6 +8,8 @@
 #include <World/Actor.generated.h>
 #include <World/World.h>
 
+namespace world_gc_schedule_tests_file {
+
 // World GC 일정(Docs/Design/GarbageCollectionScale.ko.md 17.3절): 주기 전체 수집, 전체 수집 요청,
 // 회수 예산.
 namespace {
@@ -456,3 +458,4 @@ TEST(WorldGc_FullCollectionIntervalCountsRealTimeWhilePaused) {
     REQUIRE(idle.Tick());
     CHECK(!idle.Exists(kept[0]));
 }
+} // namespace world_gc_schedule_tests_file

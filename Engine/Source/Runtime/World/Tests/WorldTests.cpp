@@ -13,6 +13,7 @@
 #include <string.h>
 
 using namespace rocks;
+namespace world_tests_file {
 
 namespace {
 
@@ -1647,3 +1648,4 @@ TEST(World_BypassedRootComponentDestroyClearsRoot) {
     CHECK(world.Resolve<SceneComponent>(scene.Value()).Error() == ErrorCode::StaleHandle);
     REQUIRE(world.Shutdown());
 }
+} // namespace world_tests_file
