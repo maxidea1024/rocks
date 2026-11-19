@@ -4,6 +4,8 @@
 
 // RG1 완료 기준 (a)–(d)의 기록 backend 시험이다(Docs/Design/RenderBase.ko.md 8절).
 using namespace rocks;
+namespace render_graph_tests_file {
+
 using namespace rocks::render;
 using namespace rocks::render::testing;
 using graphics::ResourceAccess;
@@ -615,3 +617,4 @@ TEST(RenderGraph_ImportRejectsSubresourceMismatch) {
     auto right = graph.ImportTexture(reserved.Value(), "Layers", options);
     CHECK(right.IsOk());
 }
+} // namespace render_graph_tests_file
