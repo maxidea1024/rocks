@@ -273,6 +273,8 @@ Result<void> World::Tick(double realDeltaSeconds) noexcept {
     ObjectAccessScope scope(Access());
     HookScope hooks(*this);
     lastStep_ = plan.Value();
+    // GC 주기 간격은 실제 경과 시간으로 센다(일시정지·시간 배율과 무관 — GC 설계 17.3절).
+    lastRealDeltaSeconds_ = realDeltaSeconds;
     ticks_.BeginFrame();
     skippedTicks_ = 0;
     for (uint64& value : phaseNanoseconds_) {

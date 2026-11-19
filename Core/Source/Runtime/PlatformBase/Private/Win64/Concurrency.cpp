@@ -1,6 +1,7 @@
 #include <Platform/CrashHandler.h>
 #include <Platform/Thread.h>
 #include <Platform/Fatal.h>
+#include <Platform/PlatformMath.h>
 #include "../Common/ThreadInternal.h"
 #include "WindowsString.h"
 #include <Windows.h>
@@ -48,8 +49,18 @@ void YieldThread() noexcept {
 }
 
 uint32 LogicalProcessorCount() noexcept {
-    // 프로세서 그룹(64개 단위)을 모두 센다.
-    const DWORD count = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+    // 프로세서 그룹(64개 단위)을 모두 센 수와 이 프로세스의 affinity mask 비트 수 가운데 작은
+    // 값이다. mask는 프로세스가 속한 그룹 하나만 보이므로, 여러 그룹 기계에서도 과다 구독하지 않는
+    // 쪽(작은 값)을 고른다.
+    DWORD count = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+    DWORD_PTR processMask = 0;
+    DWORD_PTR systemMask = 0;
+    if (GetProcessAffinityMask(GetCurrentProcess(), &processMask, &systemMask) != 0 &&
+        processMask != 0) {
+        const DWORD allowed = static_cast<DWORD>(PlatformMath::PopCount64(processMask));
+        count = allowed < count || count == 0 ? allowed : count;
+    }
+
     return count == 0 ? 1u : static_cast<uint32>(count);
 }
 

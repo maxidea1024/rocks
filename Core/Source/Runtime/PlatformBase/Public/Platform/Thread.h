@@ -98,8 +98,10 @@ void SleepFor(uint32 milliseconds) noexcept;
 // MaxThreadNameBytes + 1 byte buffer면 Thread::Start로 붙인 이름을 모두 받는다. 진단·시험용이다.
 usize CopyCurrentThreadName(char* buffer, usize capacity) noexcept;
 void YieldThread() noexcept;
-// 이 프로세스가 쓸 수 있는 논리 프로세서 수다(1 이상). 작업 스레드 수의 기본값을 정할 때 쓴다(예:
-// 엔진 GC 표식 scheduler의 worker 수). OS가 알려 주지 않으면 1이다.
+// 이 프로세스가 쓸 수 있는 논리 프로세서 수다(1 이상 — affinity·컨테이너 제한을 따른다). 작업
+// 스레드 수의 기본값을 정할 때 쓴다(예: 엔진 GC 표식 scheduler의 worker 수). OS가 알려 주지 않으면
+// 1이다. Android는 sched_getaffinity, Apple은 sysconf, Windows는 활성 프로세서 수와 프로세스
+// affinity mask 비트 수 가운데 작은 값이다(Docs/Design/GarbageCollectionScale.ko.md 17.4절).
 //
 // 사용 예:
 //   const uint32 workers = platform::LogicalProcessorCount() - 1; // 호출 스레드 몫을 뺀다

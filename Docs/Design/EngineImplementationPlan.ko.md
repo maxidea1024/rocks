@@ -30,7 +30,7 @@ STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-d
 
 **1.14 텍스처 스트리밍 표본 해상도:** [텍스처 스트리밍](TextureStreaming.ko.md) 결정 T1(2026-11-19 확정)에 따라 9.5절의 desired mip 입력 "render resolution"을 표본 해상도(렌더 폭 × 2^(−텍스처 mip bias))로 바꾼다. temporal upscale에서는 출력 해상도, Native·Spatial에서는 렌더 해상도와 같아진다. 개정 범위는 9.5절이다.
 
-**1.15 에디터 내 실행 이름 Tryout:** 사용자 결정(2026-11-19)으로 UE PIE에 대응하는 Rocks 기능 이름을 Tryout으로 정한다. 이름의 뜻·표기 규칙·변형 이름·버린 후보는 22.6절에 둔다. 이 문서와 Docs/Design의 다른 설계 문서, Docs/Implementation의 개념 표기를 함께 바꾸었다. 코드 식별자(`NonPIEDuplicateTransient`, `TextUse::PieCopy` 등)와 그것을 설명하는 Docs/Implementation 표기는 후속 개명 커밋에서 바꾼다.
+**1.15 에디터 내 실행 이름 Tryout:** 사용자 결정(2026-11-19)으로 UE PIE에 대응하는 Rocks 기능 이름을 Tryout으로 정한다. 이름의 뜻·표기 규칙·변형 이름·버린 후보는 22.6절에 둔다. 이 문서와 Docs/Design의 다른 설계 문서, Docs/Implementation의 개념 표기를 함께 바꾸었다. 이어서 코드 식별자도 바꾸었다: 필드 지정자·`FieldFlags` 값 `NonPIEDuplicateTransient` → `NonTryoutDuplicateTransient`(비트 32는 그대로), 텍스트 용도 `TextUse::PieCopy` → `TextUse::TryoutCopy`, 그것을 설명하는 Docs/Implementation 표기와 게임 템플릿 README. 하위호환 별칭은 두지 않는다. 옛 지정자 이름은 MetaCompiler가 알 수 없는 지정자로 거부한다.
 
 ## 1. 목표와 실행 전략
 

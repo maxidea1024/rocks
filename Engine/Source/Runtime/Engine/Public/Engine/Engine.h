@@ -194,12 +194,15 @@ struct EngineConfig {
     // 콘솔 입력·설정 변경은 여기서만 값이 된다). 엔진과 같은 스레드(게임 스레드)가 소유해야 하고
     // 엔진보다 오래 살아야 한다. 층 읽기·`--set`·CompleteStartup은 엔진 초기화 전에 호스트가 한다.
     config::ConfigContext* settings = nullptr;
-    // World GC 표식의 병렬 worker 수다. 엔진이 WorkerScheduler를 만들어 World에
-    // 빌려준다(Docs/Design/ GarbageCollectionScale.ko.md 17.4절). GcWorkersAuto면 논리 프로세서 수
-    // − 1을 MaxAutoGcWorkers로 자른 값이고, 0이면 만들지 않는다(직렬 표식).
+    // World GC 표식의 병렬 worker 수다. 엔진이 WorkerScheduler를 만들어 World에 빌려준다(GC 설계
+    // 17.4절, Docs/Design/GarbageCollectionScale.ko.md). GcWorkersAuto면 이 프로세스가 쓸 수 있는
+    // 논리 프로세서 수 − 1을 MaxAutoGcWorkers로 자른 값이고, 0이면 만들지 않는다(직렬 표식).
+    // MaxGcWorkers를 넘으면 Initialize가 InvalidArgument로 실패한다.
     static constexpr uint32 GcWorkersAuto = NumericLimits<uint32>::Max();
     // 자동 worker 수의 상한이다(표식 gate를 ×8로 판정 — 실험 21절에서 ×16의 추가 이득이 작다).
     static constexpr uint32 MaxAutoGcWorkers = 8;
+    // 지정할 수 있는 worker 수의 상한이다(WorkerScheduler의 상한).
+    static constexpr uint32 MaxGcWorkers = 64;
     uint32 gcWorkers = GcWorkersAuto;
 };
 
@@ -277,7 +280,8 @@ struct EngineStats {
 // 호스트는 반환된 오류를 다시 기록하지 않는다. 호출 순서 오류(InvalidArgument·Busy)는 기록하지
 // 않는다.
 //
-// 스레드: 생성한 게임 스레드에서만 사용한다.
+// 스레드: 생성한 게임 스레드에서만 사용한다(Initialize·Shutdown·소멸도 같은 스레드 — GC scheduler와
+// World 수명이 그 스레드의 순서에 기댄다). 예외는 RequestFullCollection이다(어느 스레드에서나).
 class Engine {
 public:
     explicit Engine(Allocator& allocator) noexcept;
@@ -333,7 +337,8 @@ public:
     }
 
     // 모든 World에 STW 병렬 전체 수집을 요청한다(World::RequestFullCollection — 레벨 전환·로딩
-    // 화면·메모리 압박을 아는 쪽이 부른다).
+    // 화면·메모리 압박을 아는 쪽이 부른다). 어느 스레드에서나 부를 수 있다: 엔진의 atomic 요청
+    // 표지만 세우고, 게임 스레드의 다음 프레임이 World Tick 전에 살아 있는 World마다 요청을 건다.
     void RequestFullCollection() noexcept;
 
     // 엔진이 World에 빌려주는 GC 표식 scheduler다(없으면 nullptr — 직렬). Running 동안 유효하다.
@@ -423,6 +428,8 @@ private:
     uint32 initializedSteps_ = 0;
     // 종료 hook 단계의 진행 정도다(재시도 때 같은 hook을 다시 부르지 않는다).
     uint32 shutdownProgress_ = 0;
+    // 전체 수집 요청 표지다(0·1, platform atomic — 다른 스레드가 세우고 프레임이 소비한다).
+    uint32 fullCollectionRequested_ = 0;
     bool inFrame_ = false;
     bool exitRequested_ = false;
     // maxFrames에 닿아 스스로 종료를 요청했는지다(Run 종료 사유).
