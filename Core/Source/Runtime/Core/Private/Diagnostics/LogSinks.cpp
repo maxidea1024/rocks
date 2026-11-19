@@ -123,6 +123,12 @@ constexpr FlagName FlagNames[] = {
 // 대체 줄에 남길 메시지 byte 수의 여유분이다(다른 필드·이스케이프 자리).
 constexpr usize FallbackReserveBytes = 1024;
 
+// 메시지 byte 하나가 JSON 문자열에서 차지할 수 있는 최대 byte 수다(제어 문자 "\u00XX").
+constexpr usize JsonEscapedBytesPerByte = 6;
+
+// 숫자·시각 필드를 서식화하는 임시 버퍼 크기다(UTC 시각 문자열과 64-bit 정수가 들어간다).
+constexpr usize FieldScratchBytes = 48;
+
 Result<void> WriteProperty(JsonWriter& json, const LogProperty& property) noexcept {
     if (auto key = json.Key(property.name); !key) {
         return key;
@@ -146,7 +152,7 @@ Result<void> WriteProperty(JsonWriter& json, const LogProperty& property) noexce
 
 // 한 줄 전체를 쓴다. 실패하면(버퍼 넘침은 호출자가 Truncated로 본다) 오류를 돌려준다.
 Result<void> WriteRecord(JsonWriter& json, const LogEvent& event) noexcept {
-    char scratch[48];
+    char scratch[FieldScratchBytes];
     Result<void> result = json.BeginObject();
     if (result) {
         result = json.Key("t");
@@ -371,7 +377,9 @@ Result<void> WriteRecord(JsonWriter& json, const LogEvent& event) noexcept {
 
 // 버퍼를 넘은 기록의 대체 줄이다. 메시지를 버퍼에 들어가게 잘라 필수 필드만 쓴다.
 Result<void> WriteFallbackRecord(JsonWriter& json, const LogEvent& event, usize capacity) noexcept {
-    const usize room = capacity > FallbackReserveBytes ? (capacity - FallbackReserveBytes) / 6 : 0;
+    const usize room = capacity > FallbackReserveBytes
+                           ? (capacity - FallbackReserveBytes) / JsonEscapedBytesPerByte
+                           : 0;
     Result<void> result = json.BeginObject();
     if (result) {
         result = json.Key("mono");

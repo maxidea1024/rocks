@@ -84,8 +84,8 @@ bool LogBlockPool::TryBorrow(LogBlock& block) noexcept {
         // next[index]는 다른 스레드가 이 블록을 빌렸다 돌려주며 바꿀 수 있다. 그 경우 태그가 바뀌어
         // 아래 CAS가 실패하므로 읽은 값이 낡아도 쓰이지 않는다.
         const uint32 following = platform::AtomicLoad<MemoryOrder::Relaxed>(&next_[index]);
-        const uint64 tag = (head >> 32) + 1;
-        const uint64 replacement = (tag << 32) | following;
+        const uint64 tag = (head >> TagShift) + 1;
+        const uint64 replacement = (tag << TagShift) | following;
         if (platform::AtomicCompareExchangeWeak<MemoryOrder::Acquire, MemoryOrder::Acquire>(
                 &head_.value, head, replacement)) {
             (void)platform::AtomicFetchSub<MemoryOrder::Relaxed>(&available_, uint64{1});
@@ -114,8 +114,8 @@ void LogBlockPool::Release(uint32 index) noexcept {
     for (;;) {
         platform::AtomicStore<MemoryOrder::Relaxed>(&next_[index],
                                                     static_cast<uint32>(head & IndexMask));
-        const uint64 tag = (head >> 32) + 1;
-        const uint64 replacement = (tag << 32) | index;
+        const uint64 tag = (head >> TagShift) + 1;
+        const uint64 replacement = (tag << TagShift) | index;
         // release: 이 블록에 쓴 내용과 next[index]를 다음에 빌리는 쪽(acquire)이 본다.
         if (platform::AtomicCompareExchangeWeak<MemoryOrder::Release, MemoryOrder::Relaxed>(
                 &head_.value, head, replacement)) {
